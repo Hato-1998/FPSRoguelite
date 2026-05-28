@@ -45,16 +45,17 @@ Server-Side Rewind, Motion Matching, Bhop/Wall-run)을 **그대로 가져오면 
 - **파티 공유 경험치 풀** — 누가 줍든 하나의 통에 누적, 모두 같은 하단 XP바 UI 공유
 - 공유 풀 임계 도달 시:
   1. **전원 동시 레벨업**
-  2. **전체 게임 프리즈** (TimeDilation≈0 + RunPhase 게이팅)
+  2. **게임플레이 프리즈** — `RunPhase.LevelUpPause`(Replicated) 상태로 적 이동·스폰·공격·무기 발사·픽업 흡수를 게이트. **전역 `TimeDilation=0`에 의존하지 않음** (타이머·AbilityTask·RPC·이펙트 부작용 회피). UI·네트워크 RPC·카드 timeout은 정상 tick 유지
   3. **각 플레이어 개별 3카드 선택** (본인 화면 오버레이)
-  4. **선택 안 한 플레이어를 전원 대기**
+  4. **선택 안 한 플레이어를 전원 대기** (사용자 확정 기본값)
   5. 전원 완료 시 재개
 - 다중 레벨업(XP 폭증) 시 순차 처리
+- **카드 선택 = 무조건 전원 대기** (사용자 확정 2026-05-28). 타임아웃·자동선택 **미도입** — 모든 플레이어가 선택 완료할 때까지 프리즈 유지
 
 ## 3. 카드 시스템 (확정)
 
 - 데이터 방식: **DataAsset + GameplayEffect(GE)** — 스탯 하드코딩 금지
-- 새 스탯 추가 = Attribute 1 + GE 1 + DataAsset 1 (코드 변경 0)
+- 카드 확장 비용 (정정): **기존 Attribute 범위 내 새 카드 = GE + DataAsset 추가 (코드 변경 0)**. **완전히 새로운 Attribute = C++ AttributeSet 확장 + GE + DataAsset (코드 변경 필요)**. → AttributeSet 설계 시 스탯 축을 넉넉히 미리 확보할 것
 - `UCardDataAsset`: `Scope`(Character / ThisWeapon / AllWeapons), `Rarity`, `AppliedEffect`(GE), `Weight`
 - **등급 4단계** (Common/Rare/Epic/Legendary) — Luck/RarityBonus 스탯이 추첨 가중치에 작용
 - **무기별 전용 카드**: 무기 보유 시 해당 무기 카드가 레벨업 카드 풀에 동적 합류 (Gunfire Reborn식)
@@ -187,3 +188,35 @@ Source/FPSRoguelite/Public/
 - 글로벌 스탯(Luck, GlobalCrit, CritMult, RarityBonus, MoveSpeed, MaxHealth, HealthRegen, PickupRadius, XPGain) → Character ASC AttributeSet
 - 무기별 스탯 → WeaponInstance 스탯 블록 (ASC 아님)
 - 하단 무기바 HUD: 가시성을 HUD State(GMS/Tag)에 바인딩 → ADS/카드UI/미션UI 시 숨김
+
+---
+
+## 15. 성능 / 네트워크 예산 (⚠️ P2 착수 전 수치 확정·검증 — 최우선 보완)
+
+> 이 프로젝트의 최대 리스크는 Hero Shooter 과설계가 아니라, **적 500마리 협동의 성능/복제 예산이 미수치화된 점**이다. 아래는 잠정값이며 P2에서 Unreal Insights + NetProfiler로 검증·조정한다.
+
+| 항목 | 잠정 목표 | 비고 |
+|---|---|---|
+| 최대 활성 적 수(서버) | 하드캡 500, 통상 200~350 | 풀 고갈 시 스폰 보류 |
+| 클라이언트별 관련(relevant) 적 | 상한 ~150 | relevancy cull |
+| 적 NetCullDistance | 잠정 ~40m (조정 대상) | 화면 밖 컬링 |
+| 적 NetUpdateFrequency | 위협도별 S0 30Hz / S1 10Hz / S2 5Hz / S3 2Hz | Significance 연동 |
+| 적 Dormancy | 원거리·비활성 DORMANT, 접근 시 wake | |
+| 적 복제 상태 | Transform(위치/Yaw)만 최소 복제, 체력=서버 권위 | 히트/사망 코스메틱은 GameplayMessage/Cue (복제 액터 상태 아님) |
+| XP/픽업 | 개수 cap + 인접 병합, 자석=클라 코스메틱·서버 권위 수령 | |
+| 복제 발사체 액터 | 실제 발사체(바주카/유탄)만 ≤64 동시 | 히트스캔/연사=비복제 코스메틱 |
+| 적 공격 판정 | 서버 배치 처리(거리 체크 배치) | |
+
+**리플리케이션 도구 평가 순서**: Push Model(기본) → 부하 시 **Replication Graph**(spatial grid relevancy, 검증된 도구) → 그래도 부족 시 Iris(Beta) 평가. **Iris를 1순위로 두지 않음** (RepGraph가 다수 액터·연결별 relevancy 병목에 더 직접적).
+
+## 16. 보강 설계 노트 (AI 리뷰 반영, 2026-05-28)
+
+- **16-1 Significance 티어**: 플러그인 enable≠최적화. 적/VFX/SFX/anim tick/mesh/healthbar를 단계별 다운.
+  - S0 근접 위협: full update / S1 근거리: 저빈도 / S2 중거리 군집: anim·VFX 축소 / S3 원거리: coarse movement·no cosmetic. **AI update budget에도 연동.**
+- **16-2 Flow-Field 적 타겟**: P2는 **고정맵 grid + 단일 목표점 field(가장 가까운 플레이어) + local separation steering**으로 시작. 타겟 규칙(가까운/위협도/파티중심/미션목표)은 데이터로 전환 가능하게. 동적 장애물은 비용 대비 나중에.
+- **16-3 Weapon Modifier 상세(P4 확정 대상)**: 적용 순서 / 중첩 가부 / 충돌 해결 / 서버 권위 적용 위치 / 클라 예측 범위 / 런 종료 시 소멸 / UI 표시 / 훅 호출 순서(`PreFire→ModifyShotCount→ModifyChargeTime→OnProjectileSpawn→OnHitActor→PostFire`). ⚠️ **성능**: `OnHitActor`가 500마리 타격 시 과도한 virtual dispatch/heap alloc 금지 → 훅은 경량(데이터 기반·히트당 무할당).
+- **16-4 메타 저장 정책**: SaveData 버전 필드+마이그레이션, 슬롯명 규칙, Steam Cloud 대상, 저장 실패 처리, 해금 데이터 삭제/리네임 fallback, 런중 vs 로비 저장 구분. **`UGameInstanceSubsystem` SaveManager 경유**(UI/Actor가 SaveGame 직접 접근 금지).
+- **16-5 난이도 압박 수단(이속 불변 유지)**: 스폰 밀도↑ / 원거리 적 비율↑ / 특수 적 패턴 / 미션 목표 압박 / 보스 phase pressure.
+- **16-6 CommonUI 셋업(P1 후반~P3)**: 프로젝트 ViewportClient(CommonUI), InputData·Back/Click ActionData·ControllerData, Activatable Widget Stack 레이어(Game/GameMenu/Menu/Modal). 카드선택 UI는 RunPhase/서버 상태와 결합(단순 위젯 표시 아님).
+- **16-7 Build.cs 의존성**: Phase별 실제 사용 시점에 추가(CommonUI/CommonInput/StateTreeModule/GameplayStateTreeModule/SignificanceManager, 필요 시 ReplicationGraph). 미사용 모듈 선등록 지양.
+- **16-8 테스트 런 길이**: 정식 30분 유지하되, TimeGateSchedule DataAsset로 **데모/테스트용 10~12분 스케줄**을 데이터 교체만으로 운용.
