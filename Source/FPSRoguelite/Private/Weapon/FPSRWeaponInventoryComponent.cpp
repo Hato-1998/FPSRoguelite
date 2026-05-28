@@ -7,7 +7,7 @@
 #include "AbilitySystemComponent.h"
 #include "AbilitySystemGlobals.h"
 #include "Abilities/GameplayAbility.h"
-#include "Abilities/GameplayAbilitySpec.h"
+#include "GameplayAbilitySpec.h"
 #include "Net/UnrealNetwork.h"
 #include "Net/Core/PushModel/PushModel.h"
 

@@ -4,6 +4,8 @@
 #include "Core/FPSRPlayerState.h"
 #include "Core/FPSRLogChannels.h"
 #include "AbilitySystem/FPSRAbilitySystemComponent.h"
+#include "Weapon/FPSRWeaponInventoryComponent.h"
+#include "Weapon/FPSRWeaponDataAsset.h"
 
 #include "Camera/CameraComponent.h"
 #include "Components/CapsuleComponent.h"
@@ -13,7 +15,6 @@
 
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
-#include "InputMappingContext.h"
 #include "InputAction.h"
 #include "InputActionValue.h"
 #include "UObject/ConstructorHelpers.h"
@@ -40,44 +41,61 @@ AFPSRCharacter::AFPSRCharacter()
 	FirstPersonCamera->SetRelativeLocation(FVector(0.0f, 0.0f, 64.0f));
 	FirstPersonCamera->bUsePawnControlRotation = true;
 
-	// First-person arms: owner-only. Mesh asset assigned later (hero content).
 	FirstPersonArms = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("FirstPersonArms"));
 	FirstPersonArms->SetupAttachment(FirstPersonCamera);
 	FirstPersonArms->SetOnlyOwnerSee(true);
 	FirstPersonArms->bCastDynamicShadow = false;
 	FirstPersonArms->CastShadow = false;
 
-	// Third-person body (inherited Mesh): hidden from the owner, visible to others.
 	if (USkeletalMeshComponent* BodyMesh = GetMesh())
 	{
 		BodyMesh->SetOwnerNoSee(true);
 	}
 
-	// Load default input actions generated under /Game/Input (see Scripts/gen_input_assets.py).
-	// The mapping context itself is owned and added by AFPSRPlayerController.
+	WeaponInventory = CreateDefaultSubobject<UFPSRWeaponInventoryComponent>(TEXT("WeaponInventory"));
+
+	// Input actions generated under /Game/Input. The IMC is added by AFPSRPlayerController.
 	static ConstructorHelpers::FObjectFinder<UInputAction> MoveFwdFinder(TEXT("/Game/Input/IA_MoveForward.IA_MoveForward"));
 	if (MoveFwdFinder.Succeeded()) { MoveForwardAction = MoveFwdFinder.Object; }
-
 	static ConstructorHelpers::FObjectFinder<UInputAction> MoveRightFinder(TEXT("/Game/Input/IA_MoveRight.IA_MoveRight"));
 	if (MoveRightFinder.Succeeded()) { MoveRightAction = MoveRightFinder.Object; }
-
 	static ConstructorHelpers::FObjectFinder<UInputAction> LookFinder(TEXT("/Game/Input/IA_Look.IA_Look"));
 	if (LookFinder.Succeeded()) { LookAction = LookFinder.Object; }
-
 	static ConstructorHelpers::FObjectFinder<UInputAction> JumpFinder(TEXT("/Game/Input/IA_Jump.IA_Jump"));
 	if (JumpFinder.Succeeded()) { JumpAction = JumpFinder.Object; }
-
 	static ConstructorHelpers::FObjectFinder<UInputAction> FireFinder(TEXT("/Game/Input/IA_Fire.IA_Fire"));
 	if (FireFinder.Succeeded()) { FireAction = FireFinder.Object; }
+	static ConstructorHelpers::FObjectFinder<UInputAction> Slot1Finder(TEXT("/Game/Input/IA_EquipSlot1.IA_EquipSlot1"));
+	if (Slot1Finder.Succeeded()) { EquipSlot1Action = Slot1Finder.Object; }
+	static ConstructorHelpers::FObjectFinder<UInputAction> Slot2Finder(TEXT("/Game/Input/IA_EquipSlot2.IA_EquipSlot2"));
+	if (Slot2Finder.Succeeded()) { EquipSlot2Action = Slot2Finder.Object; }
+	static ConstructorHelpers::FObjectFinder<UInputAction> Slot3Finder(TEXT("/Game/Input/IA_EquipSlot3.IA_EquipSlot3"));
+	if (Slot3Finder.Succeeded()) { EquipSlot3Action = Slot3Finder.Object; }
 
-	static ConstructorHelpers::FObjectFinder<UInputAction> SwitchFinder(TEXT("/Game/Input/IA_SwitchWeapon.IA_SwitchWeapon"));
-	if (SwitchFinder.Succeeded()) { SwitchWeaponAction = SwitchFinder.Object; }
+	// Default weapons (created by the user under /Game/Weapons at test time). Null until then.
+	static ConstructorHelpers::FObjectFinder<UFPSRWeaponDataAsset> RifleFinder(TEXT("/Game/Weapons/DA_Weapon_Rifle.DA_Weapon_Rifle"));
+	if (RifleFinder.Succeeded()) { DefaultPrimaryWeapon = RifleFinder.Object; }
+	static ConstructorHelpers::FObjectFinder<UFPSRWeaponDataAsset> KnifeFinder(TEXT("/Game/Weapons/DA_Weapon_Knife.DA_Weapon_Knife"));
+	if (KnifeFinder.Succeeded()) { DefaultSecondaryWeapon = KnifeFinder.Object; }
 }
 
 void AFPSRCharacter::PossessedBy(AController* NewController)
 {
 	Super::PossessedBy(NewController);
 	InitAbilitySystem();
+
+	// Server: grant starting weapons (AddWeapon auto-equips the first).
+	if (HasAuthority() && WeaponInventory)
+	{
+		if (DefaultPrimaryWeapon)
+		{
+			WeaponInventory->AddWeapon(DefaultPrimaryWeapon);
+		}
+		if (DefaultSecondaryWeapon)
+		{
+			WeaponInventory->AddWeapon(DefaultSecondaryWeapon);
+		}
+	}
 }
 
 void AFPSRCharacter::OnRep_PlayerState()
@@ -105,8 +123,6 @@ void AFPSRCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompo
 {
 	Super::SetupPlayerInputComponent(PlayerInputComponent);
 
-	// The default mapping context is added by AFPSRPlayerController::SetupInputComponent.
-	// Here we only bind action handlers.
 	UEnhancedInputComponent* EIC = Cast<UEnhancedInputComponent>(PlayerInputComponent);
 	if (!EIC)
 	{
@@ -114,26 +130,20 @@ void AFPSRCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompo
 		return;
 	}
 
-	UE_LOG(LogFPSR, Warning, TEXT("[Input] Binding actions (MoveFwd=%d MoveRight=%d Look=%d Jump=%d)"),
-		MoveForwardAction != nullptr, MoveRightAction != nullptr, LookAction != nullptr, JumpAction != nullptr);
+	UE_LOG(LogFPSR, Verbose, TEXT("[Input] Binding character actions"));
 
-	if (MoveForwardAction)
-	{
-		EIC->BindAction(MoveForwardAction, ETriggerEvent::Triggered, this, &AFPSRCharacter::Input_MoveForward);
-	}
-	if (MoveRightAction)
-	{
-		EIC->BindAction(MoveRightAction, ETriggerEvent::Triggered, this, &AFPSRCharacter::Input_MoveRight);
-	}
-	if (LookAction)
-	{
-		EIC->BindAction(LookAction, ETriggerEvent::Triggered, this, &AFPSRCharacter::Input_Look);
-	}
+	if (MoveForwardAction) { EIC->BindAction(MoveForwardAction, ETriggerEvent::Triggered, this, &AFPSRCharacter::Input_MoveForward); }
+	if (MoveRightAction)   { EIC->BindAction(MoveRightAction, ETriggerEvent::Triggered, this, &AFPSRCharacter::Input_MoveRight); }
+	if (LookAction)        { EIC->BindAction(LookAction, ETriggerEvent::Triggered, this, &AFPSRCharacter::Input_Look); }
 	if (JumpAction)
 	{
 		EIC->BindAction(JumpAction, ETriggerEvent::Started, this, &ACharacter::Jump);
 		EIC->BindAction(JumpAction, ETriggerEvent::Completed, this, &ACharacter::StopJumping);
 	}
+	if (FireAction)       { EIC->BindAction(FireAction, ETriggerEvent::Started, this, &AFPSRCharacter::Input_Fire); }
+	if (EquipSlot1Action) { EIC->BindAction(EquipSlot1Action, ETriggerEvent::Started, this, &AFPSRCharacter::Input_EquipSlot1); }
+	if (EquipSlot2Action) { EIC->BindAction(EquipSlot2Action, ETriggerEvent::Started, this, &AFPSRCharacter::Input_EquipSlot2); }
+	if (EquipSlot3Action) { EIC->BindAction(EquipSlot3Action, ETriggerEvent::Started, this, &AFPSRCharacter::Input_EquipSlot3); }
 }
 
 void AFPSRCharacter::Input_MoveForward(const FInputActionValue& Value)
@@ -159,6 +169,32 @@ void AFPSRCharacter::Input_Look(const FInputActionValue& Value)
 	const FVector2D LookAxis = Value.Get<FVector2D>();
 	AddControllerYawInput(LookAxis.X);
 	AddControllerPitchInput(-LookAxis.Y);
+}
+
+void AFPSRCharacter::Input_Fire(const FInputActionValue& Value)
+{
+	if (AbilitySystemComponent && WeaponInventory)
+	{
+		if (UFPSRWeaponDataAsset* Weapon = WeaponInventory->GetCurrentWeapon())
+		{
+			if (Weapon->FireAbility)
+			{
+				AbilitySystemComponent->TryActivateAbilityByClass(Weapon->FireAbility);
+			}
+		}
+	}
+}
+
+void AFPSRCharacter::Input_EquipSlot1(const FInputActionValue& Value) { ServerEquipSlot(0); }
+void AFPSRCharacter::Input_EquipSlot2(const FInputActionValue& Value) { ServerEquipSlot(1); }
+void AFPSRCharacter::Input_EquipSlot3(const FInputActionValue& Value) { ServerEquipSlot(2); }
+
+void AFPSRCharacter::ServerEquipSlot_Implementation(int32 SlotIndex)
+{
+	if (WeaponInventory)
+	{
+		WeaponInventory->EquipSlot(SlotIndex);
+	}
 }
 
 UAbilitySystemComponent* AFPSRCharacter::GetAbilitySystemComponent() const

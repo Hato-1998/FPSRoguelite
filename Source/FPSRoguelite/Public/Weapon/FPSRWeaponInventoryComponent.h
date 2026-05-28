@@ -3,7 +3,7 @@
 #pragma once
 
 #include "Components/ActorComponent.h"
-#include "Abilities/GameplayAbilitySpecHandle.h"
+#include "GameplayAbilitySpecHandle.h"
 #include "FPSRWeaponInventoryComponent.generated.h"
 
 class UFPSRWeaponDataAsset;

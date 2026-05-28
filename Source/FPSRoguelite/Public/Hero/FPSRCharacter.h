@@ -10,11 +10,12 @@ class UAbilitySystemComponent;
 class UFPSRAbilitySystemComponent;
 class UCameraComponent;
 class USkeletalMeshComponent;
-class UInputMappingContext;
 class UInputAction;
+class UFPSRWeaponInventoryComponent;
+class UFPSRWeaponDataAsset;
 struct FInputActionValue;
 
-/** Base player character: first-person camera + Separated-Arms meshes + Enhanced Input. ASC lives on PlayerState. */
+/** Base player character: first-person camera + Separated-Arms meshes + Enhanced Input + weapon inventory. ASC lives on PlayerState. */
 UCLASS()
 class FPSROGUELITE_API AFPSRCharacter : public ACharacter, public IAbilitySystemInterface
 {
@@ -32,13 +33,20 @@ public:
 	//~End IAbilitySystemInterface
 
 protected:
-	/** Caches the PlayerState ASC and initializes actor info (server in PossessedBy, client in OnRep_PlayerState). */
 	void InitAbilitySystem();
 
 	// Enhanced Input handlers
 	void Input_MoveForward(const FInputActionValue& Value);
 	void Input_MoveRight(const FInputActionValue& Value);
 	void Input_Look(const FInputActionValue& Value);
+	void Input_Fire(const FInputActionValue& Value);
+	void Input_EquipSlot1(const FInputActionValue& Value);
+	void Input_EquipSlot2(const FInputActionValue& Value);
+	void Input_EquipSlot3(const FInputActionValue& Value);
+
+	/** Server: equip a weapon slot (input is client-side; equip is server-authoritative). */
+	UFUNCTION(Server, Reliable)
+	void ServerEquipSlot(int32 SlotIndex);
 
 	UPROPERTY()
 	TObjectPtr<UFPSRAbilitySystemComponent> AbilitySystemComponent;
@@ -49,6 +57,16 @@ protected:
 	/** First-person arms, visible to the owning client only. */
 	UPROPERTY(VisibleAnywhere, Category = "FPSR|Mesh")
 	TObjectPtr<USkeletalMeshComponent> FirstPersonArms;
+
+	UPROPERTY(VisibleAnywhere, Category = "FPSR|Weapon")
+	TObjectPtr<UFPSRWeaponInventoryComponent> WeaponInventory;
+
+	/** Starting weapons granted on possession (slot order). Set via ConstructorHelpers (P1) / HeroDataAsset (later). */
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Weapon")
+	TObjectPtr<UFPSRWeaponDataAsset> DefaultPrimaryWeapon;
+
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Weapon")
+	TObjectPtr<UFPSRWeaponDataAsset> DefaultSecondaryWeapon;
 
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Input")
 	TObjectPtr<UInputAction> MoveForwardAction;
@@ -66,5 +84,11 @@ protected:
 	TObjectPtr<UInputAction> FireAction;
 
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Input")
-	TObjectPtr<UInputAction> SwitchWeaponAction;
+	TObjectPtr<UInputAction> EquipSlot1Action;
+
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Input")
+	TObjectPtr<UInputAction> EquipSlot2Action;
+
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Input")
+	TObjectPtr<UInputAction> EquipSlot3Action;
 };
