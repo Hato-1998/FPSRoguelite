@@ -69,7 +69,9 @@ try:
     ia_look = make_ia("IA_Look", VT_AXIS2)
     ia_jump = make_ia("IA_Jump", VT_BOOL)
     ia_fire = make_ia("IA_Fire", VT_BOOL)
-    ia_switch = make_ia("IA_SwitchWeapon", VT_AXIS1)
+    ia_slot1 = make_ia("IA_EquipSlot1", VT_BOOL)
+    ia_slot2 = make_ia("IA_EquipSlot2", VT_BOOL)
+    ia_slot3 = make_ia("IA_EquipSlot3", VT_BOOL)
 
     imc_path = OUT + "/IMC_Default"
     if eal.does_asset_exist(imc_path):
@@ -78,6 +80,11 @@ try:
     if imc is None:
         raise Exception("create_asset returned None for IMC_Default")
 
+    # NOTE (UE 5.7): set_editor_property("mappings", ...) does NOT persist to the IMC asset
+    # (5.7 restructured how IMC mappings are stored). IMC key mappings are therefore configured
+    # MANUALLY in the editor. The list below only documents the intended mappings:
+    #   IA_MoveForward: W, S(Negate) | IA_MoveRight: D, A(Negate) | IA_Look: Mouse XY 2D-Axis
+    #   IA_Jump: Space | IA_Fire: LMB | IA_EquipSlot1/2/3: keys 1 / 2 / 3
     mappings = [
         mk_map(ia_fwd, "W"),
         mk_map(ia_fwd, "S", [unreal.InputModifierNegate()]),
@@ -86,7 +93,9 @@ try:
         mk_map(ia_look, "Mouse2D"),
         mk_map(ia_jump, "SpaceBar"),
         mk_map(ia_fire, "LeftMouseButton"),
-        mk_map(ia_switch, "MouseWheelAxis"),
+        mk_map(ia_slot1, "One"),
+        mk_map(ia_slot2, "Two"),
+        mk_map(ia_slot3, "Three"),
     ]
     imc.set_editor_property("mappings", mappings)
     eal.save_loaded_asset(imc)

@@ -51,9 +51,6 @@ protected:
 	TObjectPtr<USkeletalMeshComponent> FirstPersonArms;
 
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Input")
-	TObjectPtr<UInputMappingContext> DefaultMappingContext;
-
-	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Input")
 	TObjectPtr<UInputAction> MoveForwardAction;
 
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Input")

@@ -5,7 +5,9 @@
 #include "GameFramework/PlayerController.h"
 #include "FPSRPlayerController.generated.h"
 
-/** Base player controller. EnhancedInput binding is added in a later P1 step. */
+class UInputMappingContext;
+
+/** Base player controller. Adds the default Enhanced Input mapping context for the local player. */
 UCLASS()
 class FPSROGUELITE_API AFPSRPlayerController : public APlayerController
 {
@@ -13,4 +15,10 @@ class FPSROGUELITE_API AFPSRPlayerController : public APlayerController
 
 public:
 	AFPSRPlayerController();
+
+protected:
+	virtual void SetupInputComponent() override;
+
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Input")
+	TObjectPtr<UInputMappingContext> DefaultMappingContext;
 };

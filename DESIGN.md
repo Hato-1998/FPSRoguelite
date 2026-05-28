@@ -68,6 +68,7 @@ Server-Side Rewind, Motion Matching, Bhop/Wall-run)을 **그대로 가져오면 
 - **무기별 스탯 = WeaponInstance 스탯 블록(리플리케이트 struct)**, 캐릭터 ASC와 분리
   - 무기 스탯 예: Damage, FireRate, ReloadTime, MagSize, BulletScale, ProjectileSpeed, Pierce, Spread, Range, AOERadius, ChargeTime, PelletCount
 - **ADS**: 무기 DA에 `bHasADS`+FOV (스나이퍼/차징=정밀, 연사/샷건=약함, 근접=없음)
+- **무기 교체 입력**: 숫자키 **1/2/3** 직접 슬롯 선택 (`IA_EquipSlot1/2/3`, 마우스휠 미사용)
 
 ### 4-1. 무기 모디파이어 = 게임의 핵심 재미 (확정)
 

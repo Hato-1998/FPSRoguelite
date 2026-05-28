@@ -2,6 +2,7 @@
 
 #include "Hero/FPSRCharacter.h"
 #include "Core/FPSRPlayerState.h"
+#include "Core/FPSRLogChannels.h"
 #include "AbilitySystem/FPSRAbilitySystemComponent.h"
 
 #include "Camera/CameraComponent.h"
@@ -52,10 +53,8 @@ AFPSRCharacter::AFPSRCharacter()
 		BodyMesh->SetOwnerNoSee(true);
 	}
 
-	// Load default input assets generated under /Game/Input (see Scripts/gen_input_assets.py).
-	static ConstructorHelpers::FObjectFinder<UInputMappingContext> IMCFinder(TEXT("/Game/Input/IMC_Default.IMC_Default"));
-	if (IMCFinder.Succeeded()) { DefaultMappingContext = IMCFinder.Object; }
-
+	// Load default input actions generated under /Game/Input (see Scripts/gen_input_assets.py).
+	// The mapping context itself is owned and added by AFPSRPlayerController.
 	static ConstructorHelpers::FObjectFinder<UInputAction> MoveFwdFinder(TEXT("/Game/Input/IA_MoveForward.IA_MoveForward"));
 	if (MoveFwdFinder.Succeeded()) { MoveForwardAction = MoveFwdFinder.Object; }
 
@@ -106,38 +105,34 @@ void AFPSRCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompo
 {
 	Super::SetupPlayerInputComponent(PlayerInputComponent);
 
-	// Add the default mapping context for the locally controlled player.
-	if (APlayerController* PC = Cast<APlayerController>(GetController()))
+	// The default mapping context is added by AFPSRPlayerController::SetupInputComponent.
+	// Here we only bind action handlers.
+	UEnhancedInputComponent* EIC = Cast<UEnhancedInputComponent>(PlayerInputComponent);
+	if (!EIC)
 	{
-		if (UEnhancedInputLocalPlayerSubsystem* Subsystem =
-			ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(PC->GetLocalPlayer()))
-		{
-			if (DefaultMappingContext)
-			{
-				Subsystem->AddMappingContext(DefaultMappingContext, 0);
-			}
-		}
+		UE_LOG(LogFPSR, Error, TEXT("[Input] PlayerInputComponent is not a UEnhancedInputComponent"));
+		return;
 	}
 
-	if (UEnhancedInputComponent* EIC = Cast<UEnhancedInputComponent>(PlayerInputComponent))
+	UE_LOG(LogFPSR, Warning, TEXT("[Input] Binding actions (MoveFwd=%d MoveRight=%d Look=%d Jump=%d)"),
+		MoveForwardAction != nullptr, MoveRightAction != nullptr, LookAction != nullptr, JumpAction != nullptr);
+
+	if (MoveForwardAction)
 	{
-		if (MoveForwardAction)
-		{
-			EIC->BindAction(MoveForwardAction, ETriggerEvent::Triggered, this, &AFPSRCharacter::Input_MoveForward);
-		}
-		if (MoveRightAction)
-		{
-			EIC->BindAction(MoveRightAction, ETriggerEvent::Triggered, this, &AFPSRCharacter::Input_MoveRight);
-		}
-		if (LookAction)
-		{
-			EIC->BindAction(LookAction, ETriggerEvent::Triggered, this, &AFPSRCharacter::Input_Look);
-		}
-		if (JumpAction)
-		{
-			EIC->BindAction(JumpAction, ETriggerEvent::Started, this, &ACharacter::Jump);
-			EIC->BindAction(JumpAction, ETriggerEvent::Completed, this, &ACharacter::StopJumping);
-		}
+		EIC->BindAction(MoveForwardAction, ETriggerEvent::Triggered, this, &AFPSRCharacter::Input_MoveForward);
+	}
+	if (MoveRightAction)
+	{
+		EIC->BindAction(MoveRightAction, ETriggerEvent::Triggered, this, &AFPSRCharacter::Input_MoveRight);
+	}
+	if (LookAction)
+	{
+		EIC->BindAction(LookAction, ETriggerEvent::Triggered, this, &AFPSRCharacter::Input_Look);
+	}
+	if (JumpAction)
+	{
+		EIC->BindAction(JumpAction, ETriggerEvent::Started, this, &ACharacter::Jump);
+		EIC->BindAction(JumpAction, ETriggerEvent::Completed, this, &ACharacter::StopJumping);
 	}
 }
 
