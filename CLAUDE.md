@@ -2,16 +2,12 @@
 
 > **작업 시작 전 반드시 `DESIGN.md`를 먼저 읽을 것.** 그것이 확정 설계의 단일 진실 공급원이다.
 
-## 현재 진행 현황 (Resume Point — 새 세션은 여기부터 / 2026-05-28)
+## 진행 핸드오프 규칙 (필수 — 다른 세션/AI 인수인계)
 
-> 상세 진행은 `git log --oneline` 참조. 설계는 `DESIGN.md` §13(로드맵)·§14(폴더).
-
-- **완료(커밋됨)**: P0 스캐폴드 / P1-0 코어(GameMode·PC·PS·Character) / P1-1 GAS 글로벌 속성(HealthSet·CombatSet) / P1-2 EnhancedInput(IMC는 PlayerController에서 추가, **이동·시점·점프 PIE 검증 완료**) / P1-3 1인칭 카메라+Separated Arms
-- **진행 중(WIP, 빌드 전)**: **P1-4 무기 기반** — `Source/FPSRoguelite/*/Weapon/`(WeaponTypes·WeaponDataAsset·WeaponInventoryComponent). 서버권위+PushModel, 장착 시 발사 GA 부여
-- **다음 순서**: P1-5 발사 GA(`UFPSRGameplayAbility`+`GA_WeaponFire_Hitscan`, 히트스캔+디버그라인) → Character에 인벤토리 부착 + **IA_Fire/IA_EquipSlot1~3** 입력 배선(서버 RPC) → P1-6 근접 GA → P1-7 적(`AFPSREnemyBase`+`UEnemyHealthComponent`+추격+디버그스폰)·**데미지 브릿지**(플레이어 GAS 계산→적 HealthComponent.ApplyDamage) → **헤드리스 자체검증 → 1회 빌드 → 사용자 PIE 1회 테스트**
-- **빌드 방법**: 에디터 닫고 `Build.bat FPSRogueliteEditor Win64 Development -Project=...`. 새 UCLASS 다수면 Live Coding 불가→풀빌드
-- **확정 사항**: 무기 교체=숫자키 **1/2/3**(IA_EquipSlot1~3) / 사격장 맵=사용자가 `L_Sandbox`(File→New Level→Basic+PlayerStart) / **UE5.7 IMC 매핑은 Python `set_editor_property` 미반영 → 에디터 수동**(IA 생성은 Python OK) / 카드선택=전원대기 / 입력 진단 `[Input]` 로그는 P1-4 빌드 때 다운그레이드 예정
-- **MCP 미사용**: unreal MCP는 인증 실패(Aura 프로젝트 전용). UBT 빌드 + 헤드리스 자동화로 검증
+- **작업 시작 전 `PROGRESS.md`를 먼저 읽어** 현재 진행 상황을 파악한다 (라이브 진행 문서).
+- 큰 작업은 의미 있는 단계를 끝낼 때마다, 그리고 **세션 중단 전 반드시 `PROGRESS.md`를 갱신**(완료/진행중/다음순서/빌드·검증법/확정사항)하고 커밋한다.
+- 커밋 메시지에 단계와 검증 결과를 명확히 남긴다. 상세 이력은 `git log --oneline`.
+- 설계 변경은 `DESIGN.md`를 먼저 갱신한다.
 
 ## ⛔ 장르 편향 방지 (가장 중요)
 
