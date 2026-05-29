@@ -2,22 +2,23 @@
 
 > 다른 세션/다른 AI가 **즉시 이어받기** 위한 단일 진행 현황 문서.
 > **작업 단계를 끝낼 때마다, 그리고 중단 전 반드시 이 파일을 갱신하고 커밋한다.**
-> 확정 설계는 `DESIGN.md`, 상세 이력은 `git log --oneline`.
+> 확정 설계·기획·코드구조·규칙은 `Game.MD`(SSOT), 상세 이력은 `git log --oneline`.
 
-**최종 갱신: 2026-05-28**
+**최종 갱신: 2026-05-30**
 
 ## 한 줄 요약
-P1 전투 슬라이스 + **P1.5-A 사격코어(FullAuto/반동/확산)** 코드 완료·빌드 통과. **하드코딩 경로 제거(BP 참조 패턴) 리팩터 완료.** → **사용자가 BP 3종 생성 후 full-auto PIE 테스트 대기**, 이후 P1.5-B.
+P1 전투 슬라이스 + **P1.5-A 사격코어(FullAuto/반동/확산)** 코드 완료·빌드 통과. **하드코딩 경로 제거(BP 참조 패턴) 리팩터 완료.** **문서 통합 완료(Game.MD = SSOT).** → **사용자가 BP 3종 생성 후 full-auto PIE 테스트 대기**, 이후 P1.5-B.
 
-## 🔴 새 세션 우선 작업 (사용자 요청 — 2026-05-29)
+## 🔴 새 세션 우선 작업
 
-> 사용자가 컨텍스트 한도로 새 세션 이전. 새 세션은 아래부터.
-
-**1) `Game.MD` 작성 + 문서 통합 (미작성, 최우선)** — 프로젝트 전체를 한 문서로 + 문서 구조 정리:
-   - **통합 방침(사용자 확정 2026-05-29)**: `Game.MD`를 단일 SSOT 본문으로 만들고 **`DESIGN.md` 내용을 전부 흡수 후 DESIGN.md 제거**(또는 "Game.MD로 이전됨" stub). `CLAUDE.md`/`AGENTS.md`는 **각 10줄 이내 포인터로 축소**("작업 전 Game.MD·PROGRESS.md 읽기" + 절대 금지 3줄: 장르편향/프로덕션방식/핸드오프). `PROGRESS.md`는 **분리 유지**(휘발성 진행현황). → AI가 읽는 본문 = Game.MD + PROGRESS.md 2개.
-   - `Game.MD` 내용: 기획/게임디자인(장르·루프·XP/레벨업·카드·무기·모디파이어·적·미션·보스·메타), 프로그래밍 구조(모듈·폴더·클래스맵·GAS·네트워크·컴포넌트), 작업 방식/규칙(프로덕션 원칙·핸드오프·모델정책·빌드/검증법·MCP 미사용), 현재 구현 상태(P0~P1.5-A), 성능/네트워크 예산, 방향성/로드맵, 디버그·플레이스홀더 인벤토리
-   - 작성 전 `DESIGN.md`·`PROGRESS.md`·`CLAUDE.md`·`AGENTS.md`·`git log --oneline`·`Source/` 전수 파악. ⚠️ 대형 문서라 신선한 컨텍스트에서 수행(이전 세션이 한도 임박으로 이월)
-**2) 리뷰 루프 시스템** — 사용자+다른 AI가 `Game.MD`를 읽고 추가/수정점을 **`GameConfirm.MD`**(다른 AI가 작성, **우리는 만들지 말 것**)에 정리 → 이후 세션이 `GameConfirm.MD`를 불러와 현재 프로젝트와 비교 → (a) 타당한 추가/보완은 문서 갱신 + 작업계획 반영, (b) 사용자 판단·고려·결정 필요한 것은 사용자에게 정리 보고
+**1) `Game.MD` 작성 + 문서 통합 — ✅ 완료 (2026-05-30)**
+   - `Game.MD`를 단일 SSOT 본문으로 작성(기획·설계·기술스택·코드구조·규칙·구현현황·로드맵·디버그인벤토리).
+   - `DESIGN.md`·`AI_DESIGN_HANDOFF.md` → 내용 흡수 후 **stub**("Game.MD로 이전됨").
+   - `CLAUDE.md`·`AGENTS.md` → **포인터 축소**(Game.MD·PROGRESS.md 읽기 + 절대금지 3원칙).
+   - `PROGRESS.md` 분리 유지. → **AI가 읽는 본문 = Game.MD + PROGRESS.md 2개.**
+**2) 리뷰 루프 1회차 — ✅ 완료 (2026-05-30)** — `GameConfirm.md`(외부 AI 작성) 9개 변경안 검토 → 전부 장르 방향성 부합·안티편향 위반 없음 확인 → **Game.MD에 반영 + 로드맵 재구성 완료**. 사용자 결정 2건 반영: ① 초반 페이싱=오프닝 카드 시드, ② 미션 모디파이어 해금을 정비시간 카드로 선택.
+   - **반영 요약**: 프리즈 폐지→레벨업 스택+정비시간(§2-2) / 무한 예비탄약(§2-4-2) / 무기 버림·교체 없음(§2-4) / 아군 오사 10%+호스트 토글(§2-10) / 적 이속 ±10% 편차·원거리 투사체 규격·공격토큰(§2-6) / 수동부활 DBNO·충돌무시 대시(§2-13) / 게임필·위협 인디케이터(§2-14). 로드맵 P1.5~P7 재구성(§7-3).
+   - **다음 리뷰 회차**: 새 `GameConfirm.md`가 오면 동일 절차로 비교·반영.
 
 **in-flight(병행/이후):** P1.5-A 빌드 완료 → 사용자 BP 3종 셋업(아래 '사용자 대기 작업') → full-auto PIE 테스트 → P1.5-B(탄약/재장전/ADS)
 **git:** 최신 커밋 `0ab8c07`. 사용자 콘텐츠(L_Sandbox 맵, DA_Weapon_Rifle/Knife @ `Content/Weapons/DataTable/`)는 디스크 존재·**미커밋**(untracked)
@@ -44,9 +45,9 @@ P1 전투 슬라이스 + **P1.5-A 사격코어(FullAuto/반동/확산)** 코드 
 
 ## 다음 단계
 - **PIE 테스트 통과 → P1 완료**
-- **(신규) P1.5 사격 메커니즘 / 슈팅 감각** — DESIGN §4-2. 데이터 드리븐: FullAuto hold-to-fire 루프, 반동(상하/좌우)+패턴, 확산/블룸, 탄약/재장전, ADS. **타이밍 사용자 결정 대기(P2 전 vs P4)**
-- **P2**: SpawnDirector + Flow-Field + Pooling + Significance (적 300+ 안정). DESIGN §13·§15
-- (P2에서) 적 이동을 Flow-Field+배치로 교체, 풀링 도입, 데미지/체력 numbers 튜닝
+- **P1.5-B 사격/이동 감각** — Game.MD §2-4-2. **MagSize+재장전(예비 탄약 무한)** + ADS. (GameConfirm 반영: ReserveAmmo 삭제로 범위 축소)
+- **P2**: SpawnDirector + Flow-Field + Pooling + Significance (적 300+ 안정) + **적 이속 ±10% 편차** + **적 근접 데미지·공격토큰 baseline** + **충돌무시 대시**. Game.MD §5·§7-3
+- **P3**: 공유XP + **레벨업 스택(프리즈 폐지)** + **정비시간 RunPhase** + **오프닝 카드 시드** + Card UI + 동적풀 + Rarity + 리롤 (정비시간 트리거는 P3 디버그→P4 미션 연동)
 
 ## 빌드 / 검증 방법
 - 빌드(에디터 닫고): `"D:\UnrealEngine\UE_5.7\Engine\Build\BatchFiles\Build.bat" FPSRogueliteEditor Win64 Development -Project="E:\Git_Project\FPSRoguelite\FPSRoguelite.uproject" -WaitMutex`
@@ -56,7 +57,7 @@ P1 전투 슬라이스 + **P1.5-A 사격코어(FullAuto/반동/확산)** 코드 
 ## 확정 사항 / 주의점
 - 무기 교체 = 숫자키 **1/2/3** (`IA_EquipSlot1~3`) / 사격=좌클릭(클릭당 1발; full-auto 연사 cadence는 후속)
 - **UE5.7 IMC 매핑은 Python `set_editor_property` 미반영 → 에디터 수동** (IA 에셋 생성은 Python OK)
-- 카드선택 = 전원 대기(타임아웃 없음)
+- 카드선택 = **정비시간(Breather)에 무제한 대기** — 교전 중 프리즈 폐지, 미션 클리어 안전구간 소비 + 오프닝 시드 1~2장(Game.MD §2-2)
 - 잔여 로그: PlayerController `[Input] Added DefaultMappingContext`(Warning, 1회성) — 다음 빌드 때 Verbose로 다운그레이드
 - CommonUI `LogUIActionRouter` 에러 → P3에서 `CommonGameViewportClient` 설정 시 해결(현재 무해)
 - **MCP(unreal) 인증 실패로 미사용** → UBT 빌드 + 헤드리스 자동화로 검증
