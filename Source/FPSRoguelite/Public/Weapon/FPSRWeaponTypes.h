@@ -18,6 +18,15 @@ enum class EFPSRWeaponArchetype : uint8
 	Shotgun
 };
 
+/** Trigger behavior for the weapon fire component. */
+UENUM(BlueprintType)
+enum class EFPSRFireMode : uint8
+{
+	Single,
+	Burst,
+	FullAuto
+};
+
 /** Per-weapon stats. In P1 these come straight from the weapon DataAsset (no per-instance modifiers yet). */
 USTRUCT(BlueprintType)
 struct FPSROGUELITE_API FFPSRWeaponStatBlock
@@ -27,18 +36,45 @@ struct FPSROGUELITE_API FFPSRWeaponStatBlock
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon")
 	float Damage = 10.0f;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon")
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Fire")
+	EFPSRFireMode FireMode = EFPSRFireMode::FullAuto;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Fire")
 	float FireRate = 8.0f; // shots per second
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Fire")
+	int32 BurstCount = 3;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon")
 	float Range = 10000.0f;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon")
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Ammo")
 	int32 MagSize = 30;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon")
-	float SpreadDegrees = 1.0f;
+	// --- Spread / bloom ---
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Spread")
+	float SpreadDegrees = 1.0f; // base half-angle
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon")
-	float MeleeRadius = 175.0f; // used by melee archetype
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Spread")
+	float BloomPerShot = 0.3f; // added spread per shot
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Spread")
+	float MaxBloom = 4.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Spread")
+	float BloomRecoveryRate = 6.0f; // degrees per second
+
+	// --- Recoil (camera kick, degrees) ---
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Recoil")
+	float RecoilVertical = 1.0f; // up kick per shot
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Recoil")
+	float RecoilHorizontal = 0.3f; // random +/- side kick per shot
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Recoil")
+	float RecoilRecoveryRate = 10.0f; // degrees per second recovered when not firing
+
+	// --- Melee ---
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Melee")
+	float MeleeRadius = 175.0f;
 };

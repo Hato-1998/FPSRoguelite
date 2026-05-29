@@ -12,10 +12,11 @@ class UCameraComponent;
 class USkeletalMeshComponent;
 class UInputAction;
 class UFPSRWeaponInventoryComponent;
+class UFPSRWeaponFireComponent;
 class UFPSRWeaponDataAsset;
 struct FInputActionValue;
 
-/** Base player character: first-person camera + Separated-Arms meshes + Enhanced Input + weapon inventory. ASC lives on PlayerState. */
+/** Base player character: first-person camera + Separated-Arms meshes + Enhanced Input + weapon inventory/firing. ASC lives on PlayerState. */
 UCLASS()
 class FPSROGUELITE_API AFPSRCharacter : public ACharacter, public IAbilitySystemInterface
 {
@@ -40,6 +41,7 @@ protected:
 	void Input_MoveRight(const FInputActionValue& Value);
 	void Input_Look(const FInputActionValue& Value);
 	void Input_Fire(const FInputActionValue& Value);
+	void Input_FireReleased(const FInputActionValue& Value);
 	void Input_EquipSlot1(const FInputActionValue& Value);
 	void Input_EquipSlot2(const FInputActionValue& Value);
 	void Input_EquipSlot3(const FInputActionValue& Value);
@@ -60,6 +62,9 @@ protected:
 
 	UPROPERTY(VisibleAnywhere, Category = "FPSR|Weapon")
 	TObjectPtr<UFPSRWeaponInventoryComponent> WeaponInventory;
+
+	UPROPERTY(VisibleAnywhere, Category = "FPSR|Weapon")
+	TObjectPtr<UFPSRWeaponFireComponent> WeaponFire;
 
 	/** Starting weapons granted on possession (slot order). Set via ConstructorHelpers (P1) / HeroDataAsset (later). */
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Weapon")

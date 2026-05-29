@@ -5,6 +5,7 @@
 #include "Core/FPSRLogChannels.h"
 #include "AbilitySystem/FPSRAbilitySystemComponent.h"
 #include "Weapon/FPSRWeaponInventoryComponent.h"
+#include "Weapon/FPSRWeaponFireComponent.h"
 #include "Weapon/FPSRWeaponDataAsset.h"
 
 #include "Camera/CameraComponent.h"
@@ -25,7 +26,6 @@ AFPSRCharacter::AFPSRCharacter()
 
 	GetCapsuleComponent()->InitCapsuleSize(34.0f, 88.0f);
 
-	// FPS rotation: body yaws with controller, pitch handled by camera only.
 	bUseControllerRotationYaw = true;
 	bUseControllerRotationPitch = false;
 	bUseControllerRotationRoll = false;
@@ -53,6 +53,7 @@ AFPSRCharacter::AFPSRCharacter()
 	}
 
 	WeaponInventory = CreateDefaultSubobject<UFPSRWeaponInventoryComponent>(TEXT("WeaponInventory"));
+	WeaponFire = CreateDefaultSubobject<UFPSRWeaponFireComponent>(TEXT("WeaponFire"));
 
 	// Input actions generated under /Game/Input. The IMC is added by AFPSRPlayerController.
 	static ConstructorHelpers::FObjectFinder<UInputAction> MoveFwdFinder(TEXT("/Game/Input/IA_MoveForward.IA_MoveForward"));
@@ -84,7 +85,6 @@ void AFPSRCharacter::PossessedBy(AController* NewController)
 	Super::PossessedBy(NewController);
 	InitAbilitySystem();
 
-	// Server: grant starting weapons (AddWeapon auto-equips the first).
 	if (HasAuthority() && WeaponInventory)
 	{
 		if (DefaultPrimaryWeapon)
@@ -140,7 +140,11 @@ void AFPSRCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompo
 		EIC->BindAction(JumpAction, ETriggerEvent::Started, this, &ACharacter::Jump);
 		EIC->BindAction(JumpAction, ETriggerEvent::Completed, this, &ACharacter::StopJumping);
 	}
-	if (FireAction)       { EIC->BindAction(FireAction, ETriggerEvent::Started, this, &AFPSRCharacter::Input_Fire); }
+	if (FireAction)
+	{
+		EIC->BindAction(FireAction, ETriggerEvent::Started, this, &AFPSRCharacter::Input_Fire);
+		EIC->BindAction(FireAction, ETriggerEvent::Completed, this, &AFPSRCharacter::Input_FireReleased);
+	}
 	if (EquipSlot1Action) { EIC->BindAction(EquipSlot1Action, ETriggerEvent::Started, this, &AFPSRCharacter::Input_EquipSlot1); }
 	if (EquipSlot2Action) { EIC->BindAction(EquipSlot2Action, ETriggerEvent::Started, this, &AFPSRCharacter::Input_EquipSlot2); }
 	if (EquipSlot3Action) { EIC->BindAction(EquipSlot3Action, ETriggerEvent::Started, this, &AFPSRCharacter::Input_EquipSlot3); }
@@ -173,15 +177,17 @@ void AFPSRCharacter::Input_Look(const FInputActionValue& Value)
 
 void AFPSRCharacter::Input_Fire(const FInputActionValue& Value)
 {
-	if (AbilitySystemComponent && WeaponInventory)
+	if (WeaponFire)
 	{
-		if (UFPSRWeaponDataAsset* Weapon = WeaponInventory->GetCurrentWeapon())
-		{
-			if (Weapon->FireAbility)
-			{
-				AbilitySystemComponent->TryActivateAbilityByClass(Weapon->FireAbility);
-			}
-		}
+		WeaponFire->StartFiring();
+	}
+}
+
+void AFPSRCharacter::Input_FireReleased(const FInputActionValue& Value)
+{
+	if (WeaponFire)
+	{
+		WeaponFire->StopFiring();
 	}
 }
 

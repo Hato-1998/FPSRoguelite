@@ -4,6 +4,7 @@
 #include "AbilitySystem/Attributes/FPSRCombatSet.h"
 #include "Weapon/FPSRWeaponInventoryComponent.h"
 #include "Weapon/FPSRWeaponDataAsset.h"
+#include "Weapon/FPSRWeaponFireComponent.h"
 #include "Enemy/FPSREnemyHealthComponent.h"
 #include "Core/FPSRLogChannels.h"
 
@@ -41,21 +42,33 @@ void UFPSRGA_WeaponFire_Hitscan::ActivateAbility(
 	// Resolve weapon stats from the equipped weapon (fallback to defaults).
 	float Damage = 10.0f;
 	float Range = 10000.0f;
+	float SpreadDegrees = 1.0f;
 	if (UFPSRWeaponInventoryComponent* Inventory = Avatar->FindComponentByClass<UFPSRWeaponInventoryComponent>())
 	{
 		if (UFPSRWeaponDataAsset* Weapon = Inventory->GetCurrentWeapon())
 		{
 			Damage = Weapon->BaseStats.Damage;
 			Range = Weapon->BaseStats.Range;
+			SpreadDegrees = Weapon->BaseStats.SpreadDegrees;
 		}
 	}
 
-	// Trace from the player view point.
+	// Add bloom from sustained fire.
+	if (UFPSRWeaponFireComponent* FireComp = Avatar->FindComponentByClass<UFPSRWeaponFireComponent>())
+	{
+		SpreadDegrees += FireComp->GetCurrentBloom();
+	}
+
+	// Trace from the player view point, randomized within the spread cone.
 	FVector ViewLocation;
 	FRotator ViewRotation;
 	Controller->GetPlayerViewPoint(ViewLocation, ViewRotation);
 	const FVector Start = ViewLocation;
-	const FVector End = Start + ViewRotation.Vector() * Range;
+	const FVector BaseDir = ViewRotation.Vector();
+	const FVector ShotDir = (SpreadDegrees > 0.0f)
+		? FMath::VRandCone(BaseDir, FMath::DegreesToRadians(SpreadDegrees))
+		: BaseDir;
+	const FVector End = Start + ShotDir * Range;
 
 	FHitResult Hit;
 	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(FPSRWeaponFire), false, Avatar);
