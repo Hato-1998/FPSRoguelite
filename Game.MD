@@ -319,6 +319,7 @@ Source/FPSRoguelite/
 - 큰 작업은 단계 완료 시점과 **세션 중단 전 반드시 `PROGRESS.md`를 갱신**(완료/진행중/다음순서/빌드·검증법/확정사항)하고 커밋
 - 커밋 메시지에 단계·검증 결과를 명확히. 상세 이력은 `git log --oneline`
 - 설계 변경은 **이 문서(Game.MD)를 먼저 갱신**
+- **각 P 단계는 전용 `phase/` 브랜치에서 작업**(§6-7). 세션 중단 전 `PROGRESS.md`에 **현재 활성 브랜치명**을 명시
 
 ### 6-5. 모델 / 작업 흐름 정책 (전역 HotL 준수)
 - 새 작업은 **플랜 우선**. HIGH_RISK(파일 생성/수정/삭제, 빌드, 커밋)는 승인 후 실행
@@ -333,6 +334,23 @@ Source/FPSRoguelite/
 - 새 UCLASS 다수면 Live Coding 불가 → 풀빌드(에디터 닫아야 함). 입력 IA 생성은 `Scripts/gen_input_assets.py`
 - **MCP(unreal) 인증 실패로 미사용** → UBT 빌드 + 헤드리스 자동화로 검증
 - **Codex 코드리뷰 게이트**: 단계 완료·커밋 직전 `Scripts/codex-review.ps1` 실행 → 외부 AI(Codex gpt-5.5)가 Game.MD 원칙 기준으로 diff 리뷰. 기본 `-Base main`(브랜치 diff) / `-Uncommitted`(작업트리). 비대화(approval never; Windows codex review는 workspace-write 샌드박스 → 신뢰 로컬 리포 전용). 결과 `Docs/reviews/`(gitignore). 호출·판독은 Opus가 직접
+
+### 6-7. 브랜치 전략 (Phase 단위 워크플로)
+로드맵(§7-3)의 각 **P 단계**는 `main`에 직접 커밋하지 않고 **전용 브랜치에서 작업 → 검증 통과 후 `main`에 머지**한다. (도입 2026-05-30. 이전 main 히스토리는 소급 적용하지 않음.)
+
+- **브랜치명**: `phase/<단계소문자>-<핵심키워드>` (예: `phase/p2-spawndirector`, `phase/p1.5-b-ammo-reload`)
+- **머지**: `--no-ff` 머지 커밋(phase 경계가 main 히스토리에 보이도록)
+- **원격**: phase 브랜치도 `origin`에 push(백업/리뷰 협업)
+
+라이프사이클:
+1. **분기** — `git checkout main` → `git checkout -b phase/<단계>-<키워드>` → `git push -u origin phase/<단계>-<키워드>`
+2. **작업** — 해당 phase 구현·문서를 이 브랜치에서만 커밋(구현=Haiku 위임 / 검증=Opus 직접, §6-5)
+3. **검증(머지 전 필수)** — 빌드(§6-6) → 헤드리스 스모크 → `Scripts/codex-review.ps1 -Base main`(브랜치 diff 리뷰). 검증 없이 머지 금지(§6-3)
+4. **핸드오프** — phase 완료/세션 중단 전 `PROGRESS.md` 갱신·커밋(활성 브랜치명 명시, §6-4)
+5. **머지** — `git checkout main` → `git merge --no-ff phase/<단계>-<키워드> -m "merge(phase): <단계> <요약> — 검증 통과"` → `git push origin main`
+6. **정리** — `git push origin --delete phase/<단계>-<키워드>` + `git branch -d phase/<단계>-<키워드>`
+
+> 전역 `claude/` 브랜치 클린업 정책과 prefix(`phase/`)로 분리되어 충돌 없음.
 
 ---
 

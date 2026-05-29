@@ -22,7 +22,9 @@ P1 전투 슬라이스 + **P1.5-A 사격코어(FullAuto/반동/확산)** 코드 
    - **코드 리뷰 게이트(신규)**: `Scripts/codex-review.ps1` → Codex(gpt-5.5) 비대화 diff 리뷰(read-only). 결과 `Docs/reviews/`(gitignore). 상세 Game.MD §6-6 / §10.
 
 **in-flight(병행/이후):** P1.5-A 빌드 완료 → 사용자 BP 3종 셋업(아래 '사용자 대기 작업') → full-auto PIE 테스트 → P1.5-B(탄약/재장전/ADS)
-**git:** 최신 커밋 `0ab8c07`. 사용자 콘텐츠(L_Sandbox 맵, DA_Weapon_Rifle/Knife @ `Content/Weapons/DataTable/`)는 디스크 존재·**미커밋**(untracked)
+**git:** 사용자 콘텐츠(L_Sandbox 맵, DA_Weapon_Rifle/Knife @ `Content/Weapons/DataTable/`)는 디스크 존재·**미커밋**(untracked)
+- **브랜치 워크플로 도입(2026-05-30, Game.MD §6-7)**: 각 P 단계는 `main`→`phase/<단계>-<키워드>` 분기 → 검증 후 `--no-ff` 머지. phase 브랜치도 origin push.
+- **현재 활성 브랜치 = `phase/p1.5-b-ammo-reload`** (P1.5-B 작업용, main에서 분기). P1.5-B 코드 착수는 PIE 테스트 통과 후.
 
 ## 완료 (커밋·빌드 검증됨)
 - **P0** 스캐폴드 / **P1-0** 코어 / **P1-1** GAS 글로벌 속성 / **P1-2** EnhancedInput(이동·시점·점프 PIE 확인) / **P1-3** 1인칭 카메라+Separated Arms
