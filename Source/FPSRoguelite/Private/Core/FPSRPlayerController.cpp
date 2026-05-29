@@ -5,16 +5,10 @@
 #include "EnhancedInputSubsystems.h"
 #include "Engine/LocalPlayer.h"
 #include "InputMappingContext.h"
-#include "UObject/ConstructorHelpers.h"
 #include "Core/FPSRLogChannels.h"
 
 AFPSRPlayerController::AFPSRPlayerController()
 {
-	static ConstructorHelpers::FObjectFinder<UInputMappingContext> IMCFinder(TEXT("/Game/Input/IMC_Default.IMC_Default"));
-	if (IMCFinder.Succeeded())
-	{
-		DefaultMappingContext = IMCFinder.Object;
-	}
 }
 
 void AFPSRPlayerController::SetupInputComponent()
@@ -36,10 +30,10 @@ void AFPSRPlayerController::SetupInputComponent()
 
 	if (!DefaultMappingContext)
 	{
-		UE_LOG(LogFPSR, Error, TEXT("[Input] DefaultMappingContext is NULL (IMC_Default asset failed to load)"));
+		UE_LOG(LogFPSR, Error, TEXT("[Input] DefaultMappingContext is NULL (assign it in BP_FPSRPlayerController)"));
 		return;
 	}
 
 	Subsystem->AddMappingContext(DefaultMappingContext, 0);
-	UE_LOG(LogFPSR, Warning, TEXT("[Input] Added DefaultMappingContext to local player subsystem"));
+	UE_LOG(LogFPSR, Verbose, TEXT("[Input] Added DefaultMappingContext to local player subsystem"));
 }
