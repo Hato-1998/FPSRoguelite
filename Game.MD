@@ -332,6 +332,7 @@ Source/FPSRoguelite/
   `UnrealEditor-Cmd.exe <uproject> -unattended -nopause -nullrhi -nosplash -nosound -ExecCmds="Automation RunTests FPSRoguelite.Smoke.ModuleLoads" -TestExit="Automation Test Queue Empty" -abslog=...`
 - 새 UCLASS 다수면 Live Coding 불가 → 풀빌드(에디터 닫아야 함). 입력 IA 생성은 `Scripts/gen_input_assets.py`
 - **MCP(unreal) 인증 실패로 미사용** → UBT 빌드 + 헤드리스 자동화로 검증
+- **Codex 코드리뷰 게이트**: 단계 완료·커밋 직전 `Scripts/codex-review.ps1` 실행 → 외부 AI(Codex gpt-5.5)가 Game.MD 원칙 기준으로 diff 리뷰. 기본 `-Base main`(브랜치 diff) / `-Uncommitted`(작업트리). 비대화(approval never; Windows codex review는 workspace-write 샌드박스 → 신뢰 로컬 리포 전용). 결과 `Docs/reviews/`(gitignore). 호출·판독은 Opus가 직접
 
 ---
 
@@ -401,3 +402,4 @@ PROGRESS.md '사용자 대기 작업' 참조. 요약: **BP 3종 생성 + 참조 
 ## 10. 리뷰 루프 (외부 AI 협업)
 - 사용자 + 다른 AI가 이 문서를 읽고 추가/수정점을 **`GameConfirm.MD`**(다른 AI 작성, **우리는 만들지 않음**)에 정리
 - 이후 세션이 `GameConfirm.MD`를 불러와 현재 프로젝트와 비교 → (a) 타당한 추가/보완은 문서 갱신 + 작업계획 반영, (b) 사용자 판단·결정 필요한 것은 사용자에게 정리 보고
+- **코드 리뷰(Codex CLI)**: 문서 리뷰와 별개로, 구현 검증 단계에서 `Scripts/codex-review.ps1`로 Codex(gpt-5.5)에 diff 코드리뷰를 받는다(§6-6). 지적은 Opus가 판독해 수정 여부 결정. **분리 원칙: 문서 제안=`GameConfirm.MD`(외부 AI 작성) / 코드 리뷰=`Docs/reviews/`(Codex 산출).**
