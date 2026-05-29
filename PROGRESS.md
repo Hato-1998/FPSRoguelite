@@ -21,12 +21,13 @@
 ## ⏳ PIE 테스트 대기 (사용자 확인 필요 항목)
 - 좌클릭 사격 → 노란 디버그 라인 + 적 처치 / 근접(칼 장착) → 청색 구체 + 처치 / 1·2 무기 전환 / `FPSR.SpawnEnemies 5` 적 스폰·추격
 
-## 사용자 대기 작업 (PIE 테스트 전 필요)
-1. **`L_Sandbox` 맵**: File→New Level→Basic, PlayerStart 배치, 기본맵 설정(또는 그 맵에서 Play)
-2. **무기 DataAsset 2개** (`/Game/Weapons/`, 우클릭→Miscellaneous→Data Asset→`FPSRWeaponDataAsset`):
-   - `DA_Weapon_Rifle`: Archetype=FullAuto, BaseStats.Damage 예 12, **FireAbility=GA_WeaponFire_Hitscan**
-   - `DA_Weapon_Knife`: Archetype=Melee, BaseStats.Damage 예 30, MeleeRadius 175, **FireAbility=GA_WeaponMelee**
-   - 생성하면 Character 생성자 에러(Failed to find DA_Weapon_*) 사라지고 기본무기 지급됨
+## 사용자 대기 작업 (PIE 테스트 전)
+- ✅ L_Sandbox 맵 / 무기 DataAsset 2개(현재 `Weapons/DataTable/`) — 생성됨
+- **BP 3종 생성 + 참조 할당** (프로덕션 BP 참조 패턴 — C++ 경로 하드코딩 제거됨):
+  - `BP_FPSRGameMode` (**반드시 `/Game/Core/`**, 부모 `FPSRGameMode`): DefaultPawnClass=`BP_FPSRCharacter`, PlayerControllerClass=`BP_FPSRPlayerController`
+  - `BP_FPSRCharacter` (부모 `FPSRCharacter`): IA 8개 + DefaultPrimary/SecondaryWeapon(DA_Weapon_Rifle/Knife) 할당
+  - `BP_FPSRPlayerController` (부모 `FPSRPlayerController`): DefaultMappingContext=`IMC_Default`
+  - 무기 DataAsset은 위치 무관(BP 하드참조). FireMode: Rifle=FullAuto / Knife=Single·무반동
 
 ## 다음 단계
 - **PIE 테스트 통과 → P1 완료**
@@ -47,3 +48,5 @@
 - CommonUI `LogUIActionRouter` 에러 → P3에서 `CommonGameViewportClient` 설정 시 해결(현재 무해)
 - **MCP(unreal) 인증 실패로 미사용** → UBT 빌드 + 헤드리스 자동화로 검증
 - 모델 정책: 구현=Haiku 위임 / 검증(빌드·diff·스모크)=메인(Opus) 직접
+- **프로덕션 방식 원칙**(CLAUDE.md/AGENTS.md): 콘텐츠는 BP/DataAsset/config 바인딩, C++ 경로 하드코딩 금지. 디버그 스캐폴딩은 검증용·전환대상
+- 디버그/플레이스홀더(프로덕션 전환 대상): 발사/근접 DrawDebug, `FPSR.SpawnEnemies` 콘솔, 적 큐브 메시, FP팔/3P 메시 미할당, 적 추격=단순 스티어링(P2 Flow-Field 교체)
