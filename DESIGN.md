@@ -79,6 +79,26 @@ Server-Side Rewind, Motion Matching, Bhop/Wall-run)을 **그대로 가져오면 
   - 각 무기 DA가 `AvailableModifiers`(약 4종) 정의 → 미션 클리어 시 1종 해금
 - **GA 교체 방식 금지** (조합 폭발), **거대 태그 분기 금지** (유지보수 지옥)
 
+### 4-2. 사격 메커니즘 / 슈팅 감각 (데이터 드리븐 — 구현 예정, FPS 핵심)
+
+> 슈팅 감각은 FPS의 핵심. 모든 값은 `FFPSRWeaponStatBlock`(또는 분리된 `FWeaponFireProfile`)에 두어 **무기별·카드별로 조정 가능**하게 한다.
+
+- **발사 모드** `EFireMode`: Single / Burst(N발) / FullAuto
+- **연사속도** FireRate (RPM/shots-per-sec) — FullAuto는 hold 시 이 주기로 반복 발사
+- **반동(Recoil)**: 발당 VerticalKick(상하)·HorizontalKick(좌우), 회복 속도/곡선
+- **반동 패턴(Recoil Pattern)**: 샷 인덱스별 정형 스프레이 패턴 (UCurveVector 또는 오프셋 배열) — 좌우/상하
+- **확산(Spread/Bloom)**: 기본 확산각 + 발당 블룸 증가 + 최대 블룸 + 회복. 트레이스를 확산 콘 내 랜덤화
+- **탄약**: MagSize / ReserveAmmo / ReloadTime / 재장전 어빌리티(R), 빈 탄창 시 발사 차단
+- **ADS(조준)**: 우클릭, FOV/확산/반동 배율 (무기별 `bHasADS`)
+- (선택) 거리 데미지 감쇠
+
+**구현 항목**:
+- **FullAuto hold-to-fire 루프** — Fire 입력을 hold로 받고 FireRate로 게이트. (현재는 클릭당 1발=Started 라서 미동작 → 이 패스에서 구현)
+- 반동/확산/탄약/재장전/ADS를 발사 GA(또는 `WeaponFireComponent`)에 통합, **서버 권위 + 클라 예측**
+- 절차적 반동/스웨이(스프링)는 Tier3 / P4 "게임필"과 연계
+
+**권장 시점**: **P1.5**(전투 슬라이스 직후, P2 전) 또는 P4. 슈팅 감각 튜닝 반복이 많아 일찍 확립 권장.
+
 ## 5. 시작 캐릭터 (확정)
 
 - 3종: **연사총 / 점사총 / 근접칼**

@@ -29,7 +29,9 @@
    - 생성하면 Character 생성자 에러(Failed to find DA_Weapon_*) 사라지고 기본무기 지급됨
 
 ## 다음 단계
-- **PIE 테스트 통과 → P1 완료 → P2**: SpawnDirector + Flow-Field + Pooling + Significance (적 300+ 안정). DESIGN §13·§15.
+- **PIE 테스트 통과 → P1 완료**
+- **(신규) P1.5 사격 메커니즘 / 슈팅 감각** — DESIGN §4-2. 데이터 드리븐: FullAuto hold-to-fire 루프, 반동(상하/좌우)+패턴, 확산/블룸, 탄약/재장전, ADS. **타이밍 사용자 결정 대기(P2 전 vs P4)**
+- **P2**: SpawnDirector + Flow-Field + Pooling + Significance (적 300+ 안정). DESIGN §13·§15
 - (P2에서) 적 이동을 Flow-Field+배치로 교체, 풀링 도입, 데미지/체력 numbers 튜닝
 
 ## 빌드 / 검증 방법
