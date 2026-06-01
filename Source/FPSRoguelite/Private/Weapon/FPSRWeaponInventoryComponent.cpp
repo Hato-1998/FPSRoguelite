@@ -89,6 +89,9 @@ void UFPSRWeaponInventoryComponent::EquipSlot(int32 SlotIndex)
 	MARK_PROPERTY_DIRTY_FROM_NAME(UFPSRWeaponInventoryComponent, CurrentSlotIndex, this);
 	RefreshEquippedAbility();
 
+	// Fresh weapon: clear the previous slot's fire-rate gate so the first shot isn't blocked by it.
+	ServerNextAllowedFireTime = 0.0f;
+
 	// Re-equipping a weapon whose reload was cancelled mid-switch resumes the reload ONLY if its
 	// magazine is empty. If ammo remains, the reload stays cancelled (player keeps the partial mag).
 	if (PendingReloadSlot == CurrentSlotIndex)
@@ -202,4 +205,31 @@ void UFPSRWeaponInventoryComponent::FinishReload()
 	}
 	bReloading = false;
 	MARK_PROPERTY_DIRTY_FROM_NAME(UFPSRWeaponInventoryComponent, bReloading, this);
+}
+
+bool UFPSRWeaponInventoryComponent::ServerTryConsumeFireInterval(float MinInterval)
+{
+	// Client prediction path: never block locally; the server is authoritative.
+	if (!GetOwner() || !GetOwner()->HasAuthority())
+	{
+		return true;
+	}
+
+	const UWorld* World = GetWorld();
+	if (!World)
+	{
+		return true;
+	}
+
+	const float Now = World->GetTimeSeconds();
+	// Jitter tolerance: allow a shot slightly early so network timing variance never blocks legitimate fire.
+	// This gate rejects grossly-too-fast activation (anti-abuse), not exact cadence.
+	const float Tolerance = MinInterval * 0.25f;
+	if (Now + Tolerance < ServerNextAllowedFireTime)
+	{
+		return false;
+	}
+
+	ServerNextAllowedFireTime = Now + MinInterval;
+	return true;
 }

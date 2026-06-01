@@ -100,6 +100,7 @@ APawn* AFPSREnemyBase::FindNearestPlayer() const
 	return Best;
 }
 
+#if !UE_BUILD_SHIPPING
 // ---- Debug: spawn test enemies around the local player ----
 static FAutoConsoleCommandWithWorldAndArgs GFPSRSpawnEnemiesCmd(
 	TEXT("FPSR.SpawnEnemies"),
@@ -129,3 +130,4 @@ static FAutoConsoleCommandWithWorldAndArgs GFPSRSpawnEnemiesCmd(
 			World->SpawnActor<AFPSREnemyBase>(AFPSREnemyBase::StaticClass(), Center + Offset, FRotator::ZeroRotator, SpawnParams);
 		}
 	}));
+#endif // !UE_BUILD_SHIPPING

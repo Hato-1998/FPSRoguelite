@@ -310,6 +310,7 @@ void UFPSRWeaponFireComponent::TickComponent(float DeltaTime, ELevelTick TickTyp
 #endif
 }
 
+#if !UE_BUILD_SHIPPING
 // ---- Debug: preview the current weapon's recoil spray pattern in front of the local player ----
 static FAutoConsoleCommandWithWorldAndArgs GFPSRRecoilPreviewCmd(
 	TEXT("FPSR.RecoilPreview"),
@@ -379,3 +380,4 @@ static FAutoConsoleCommandWithWorldAndArgs GFPSRRecoilPreviewCmd(
 			CumPitch += Delta.Y * Stats.ADSVerticalScale;
 		}
 	}));
+#endif // !UE_BUILD_SHIPPING

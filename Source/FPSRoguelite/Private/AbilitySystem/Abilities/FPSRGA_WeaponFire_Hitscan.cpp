@@ -52,13 +52,22 @@ void UFPSRGA_WeaponFire_Hitscan::ActivateAbility(
 		SpreadDegrees = Weapon->BaseStats.SpreadDegrees;
 	}
 
-	// Server-authoritative ammo gate + consumption. Empty mag / reloading blocks the shot.
+	// Server-authoritative gates: empty mag / reloading / fire-rate. Then consume ammo.
 	if (Avatar->HasAuthority() && Inventory)
 	{
 		if (Inventory->IsReloading() || Inventory->GetCurrentAmmo() <= 0)
 		{
 			EndAbility(Handle, ActorInfo, ActivationInfo, true, true);
 			return;
+		}
+		if (Weapon)
+		{
+			const float MinInterval = 1.0f / FMath::Max(Weapon->BaseStats.FireRate, 0.01f);
+			if (!Inventory->ServerTryConsumeFireInterval(MinInterval))
+			{
+				EndAbility(Handle, ActorInfo, ActivationInfo, true, true);
+				return;
+			}
 		}
 		Inventory->ConsumeAmmo(1);
 	}

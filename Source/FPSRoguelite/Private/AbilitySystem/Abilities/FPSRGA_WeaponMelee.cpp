@@ -42,12 +42,15 @@ void UFPSRGA_WeaponMelee::ActivateAbility(
 
 	float Damage = 15.0f;
 	float MeleeRadius = 175.0f;
-	if (UFPSRWeaponInventoryComponent* Inventory = Avatar->FindComponentByClass<UFPSRWeaponInventoryComponent>())
+	float MeleeAttackDelay = 0.0f;
+	UFPSRWeaponInventoryComponent* Inventory = Avatar->FindComponentByClass<UFPSRWeaponInventoryComponent>();
+	if (Inventory)
 	{
 		if (UFPSRWeaponDataAsset* Weapon = Inventory->GetCurrentWeapon())
 		{
 			Damage = Weapon->BaseStats.Damage;
 			MeleeRadius = Weapon->BaseStats.MeleeRadius;
+			MeleeAttackDelay = Weapon->BaseStats.MeleeAttackDelay;
 		}
 	}
 
@@ -62,6 +65,13 @@ void UFPSRGA_WeaponMelee::ActivateAbility(
 
 	if (Avatar->HasAuthority())
 	{
+		// Server-authoritative melee cooldown gate (mirrors the local FireComponent delay).
+		if (Inventory && MeleeAttackDelay > 0.0f && !Inventory->ServerTryConsumeFireInterval(MeleeAttackDelay))
+		{
+			EndAbility(Handle, ActorInfo, ActivationInfo, true, true);
+			return;
+		}
+
 		float FinalDamage = Damage;
 		if (UAbilitySystemComponent* ASC = GetAbilitySystemComponentFromActorInfo())
 		{
