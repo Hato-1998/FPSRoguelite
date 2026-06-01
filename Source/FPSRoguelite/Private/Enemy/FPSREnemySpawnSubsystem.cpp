@@ -155,8 +155,9 @@ void UFPSREnemySpawnSubsystem::ReleaseEnemy(AFPSREnemyBase* Enemy)
 	DormantPool.Add(Enemy);
 }
 
-// ---- Console Commands ----
+// ---- Console Commands (debug; excluded from shipping) ----
 
+#if !UE_BUILD_SHIPPING
 static FAutoConsoleCommandWithWorldAndArgs GFPSRSpawnEnemiesCmd(
 	TEXT("FPSR.SpawnEnemies"),
 	TEXT("Burst-spawn N test enemies via the pool around the local player. Usage: FPSR.SpawnEnemies [count]"),
@@ -226,3 +227,4 @@ static FAutoConsoleCommandWithWorldAndArgs GFPSREnemyTargetCmd(
 
 		Sub->SetTargetAliveCount(Target);
 	}));
+#endif // !UE_BUILD_SHIPPING

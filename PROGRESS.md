@@ -62,6 +62,11 @@ naive chase Tick → Flow-Field 경로(고정맵 grid + separation) 교체 + Sig
    - **반동 ADS의존 재설계(레퍼런스 Apex AR/R99)**: 힙=수직 약(`HipVerticalScale`)+수평 랜덤 강(`HipHorizontalRandom`)→산탄 / ADS=수직 강(`ADSVerticalScale`)+랜덤 약(`ADSHorizontalRandom`)→학습가능 climbing 패턴. 산포 주동력=확산(힙 넓게/ADS `ADSSpreadMultiplier` 좁게). 기존 `RecoilHorizontalVariance`·`ADSRecoilMultiplier` 제거. `FPSR.RecoilPreview`는 ADS climb 표시. **수평 반동도 수직처럼 보간(`PendingRiseYaw`)해 즉발 jitter(화면 흔들림) 제거** (2026-06-01).
    - **사용자 작업**: `IA_ADS`(Bool) 생성→IMC 우클릭 매핑→`BP_FPSRCharacter` `ADSAction` 할당. `DA_Weapon_Rifle` `bHasADS=true`+반동/확산 튜닝(`FPSR.RecoilPreview`로 확인). `DA_Weapon_Knife` `bHasADS=false`.
 
+**6) P1 코드리뷰 하드닝 — ✅ 코드 완료 (2026-06-01, 빌드+스모크 통과)** — 외부 리뷰(`Docs/reviews/phase1-code-validation-2026-06-01.md`)를 독립 검증 후 **이 프로젝트(협동 PvE·리슨서버)에 필요한 항목만** 반영. 브랜치 `phase/p1-review-hardening`.
+   - **#5 디버그 콘솔 shipping 가드**(§6-2/§8 명시 요구): `FPSR.RecoilPreview`(FireComponent)·`FPSR.SpawnEnemies`(EnemyBase)를 `#if !UE_BUILD_SHIPPING`로 래핑.
+   - **#1/#2 서버 발사/근접 cadence 검증**(§2-10 "P1부터 서버 권위"): `UFPSRWeaponInventoryComponent::ServerTryConsumeFireInterval(MinInterval)`(서버 전용 `ServerNextAllowedFireTime`, 지터 허용 0.25×, 장착 시 리셋). Hitscan GA=`1/FireRate` 게이트, Melee GA=`MeleeAttackDelay` 게이트(둘 다 ammo/reload 체크 뒤·소비 전). 클라(예측)는 항상 통과.
+   - **보류(독립 검증상 현 단계 불필요)**: #3 서버 bloom 상태 괴리·#4 산포 RNG 클라/서버 독립 → **P5**(협동 2-client 구축·검증 시; 데미지는 이미 서버 단일권위). #7 AttributeSet clamp → **P3**(현재 속성 수정 GE=0개, 카드 도입 시 본격화). #6 적 tick/이동/복제 비용 → **P2**(진행 중).
+
 **in-flight(병행/이후):** 사용자 BP 3종 생성 완료(BP_FPSRGameMode/BP_FPSRPlayer/BP_FPSRPC) → IA_Reload/IA_ADS 셋업 + DataAsset 튜닝 → PIE 확인 → P1 마무리·머지
 **git:** 사용자 콘텐츠(L_Sandbox 맵, DA_Weapon_Rifle/Knife @ `Content/Weapons/DataTable/`)는 디스크 존재·**미커밋**(untracked)
 - **브랜치 워크플로 도입(2026-05-30, Game.MD §6-7)**: 각 P 단계는 `main`→`phase/<단계>-<키워드>` 분기 → 검증 후 `--no-ff` 머지. phase 브랜치도 origin push.
