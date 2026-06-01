@@ -45,10 +45,15 @@ protected:
 	/** True when the equipped weapon has ammo and is not reloading. */
 	bool CanFire() const;
 
+	/** Owner-client: if the mag is empty while the player wants to fire, request a reload (once). */
+	void MaybeAutoReload();
+
 	bool bWantsToFire = false;
 	float TimeSinceLastShot = 0.0f;
 	int32 BurstShotsRemaining = 0;
 	float CurrentBloom = 0.0f;
+
+	bool bReloadRequestPending = false; // guards against spamming the reload RPC each tick
 
 	// --- Recoil state (local feel only) ---
 	float RecoilDebtPitch = 0.0f;       // up-kick owed for downward recovery (raw input units)

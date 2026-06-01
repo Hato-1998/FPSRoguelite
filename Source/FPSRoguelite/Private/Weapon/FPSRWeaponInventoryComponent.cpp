@@ -76,17 +76,25 @@ void UFPSRWeaponInventoryComponent::EquipSlot(int32 SlotIndex)
 		return;
 	}
 
-	// Switching weapons cancels any in-progress reload.
+	// Switching weapons cancels any in-progress reload, remembering the slot so it resumes on re-equip.
 	if (bReloading)
 	{
 		GetWorld()->GetTimerManager().ClearTimer(ReloadTimerHandle);
 		bReloading = false;
 		MARK_PROPERTY_DIRTY_FROM_NAME(UFPSRWeaponInventoryComponent, bReloading, this);
+		PendingReloadSlot = CurrentSlotIndex;
 	}
 
 	CurrentSlotIndex = SlotIndex;
 	MARK_PROPERTY_DIRTY_FROM_NAME(UFPSRWeaponInventoryComponent, CurrentSlotIndex, this);
 	RefreshEquippedAbility();
+
+	// Re-equipping a weapon whose reload was cancelled mid-switch restarts its reload.
+	if (PendingReloadSlot == CurrentSlotIndex)
+	{
+		PendingReloadSlot = INDEX_NONE;
+		StartReload();
+	}
 
 	UE_LOG(LogFPSR, Verbose, TEXT("[Weapon] Equipped slot %d"), SlotIndex);
 }

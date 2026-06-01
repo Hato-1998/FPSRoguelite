@@ -32,7 +32,9 @@ P1 전투 슬라이스 + **P1.5-A 사격코어** + **반동 오버홀** + **P1.5
 **4) P1.5-B (1/2) 탄약/재장전 — ✅ 코드 완료 (2026-06-01, 빌드+스모크 통과)** — 탄창(MagSize)+재장전(R, 서버 타이머), **예비탄 무한**(재장전=항상 풀충전). Game.MD §2-4-2.
    - **탄약 상태=서버권위**: `UFPSRWeaponInventoryComponent`에 `SlotAmmo[]`/`bReloading`(Push Model 복제), `AddWeapon` 시 MagSize 초기화, 무기 전환 시 재장전 취소. 신규 스탯 `ReloadTime`(기본 1.5).
    - **소비=발사 GA 서버 경로**: `GA_WeaponFire_Hitscan`에서 빈탄창/재장전 중 발사 차단 + 서버 `ConsumeAmmo(1)`.
-   - **게이팅=오너 클라**: `FireComponent.CanFire()`(복제값 기반)로 빈탄창/재장전 중 발사 차단(자동 재장전 없음, R 수동). 디버그 화면 탄약 표시(`#if ENABLE_DRAW_DEBUG`, HUD는 P3).
+   - **게이팅=오너 클라**: `FireComponent.CanFire()`(복제값 기반)로 빈탄창/재장전 중 발사 차단. 디버그 화면 탄약 표시(`#if ENABLE_DRAW_DEBUG`, HUD는 P3).
+   - **자동 재장전(2026-06-01 추가)**: 연사 중 탄 소진 시 오너 클라가 `RequestReload`→`ServerReload` 1회 요청(`bReloadRequestPending` 가드), 완료 후 계속 누르면 자동 재발사. R 수동도 유지.
+   - **재장착 재리로드(2026-06-01 추가)**: 리로드 중 무기 전환 시 취소 + 떠난 슬롯 기억(`PendingReloadSlot`) → 그 무기 재장착 시 리로드 자동 재시작.
    - **입력**: `IA_Reload`(R)→`ServerReload` RPC→`StartReload`. **C++ 슬롯/바인딩만 구현, 에셋은 사용자 직접.**
    - **사용자 작업**: `IA_Reload`(Bool) 생성 → IMC_Default에 R 매핑(수동) → `BP_FPSRCharacter`의 `ReloadAction` 할당. (`DA_Weapon_Rifle` ReloadTime 1.5/MagSize 30 확인)
 
@@ -52,7 +54,7 @@ P1 전투 슬라이스 + **P1.5-A 사격코어** + **반동 오버홀** + **P1.5
 
 ## ⏳ PIE 테스트 대기 (사용자 확인 필요 항목)
 - 좌클릭 사격 → 노란 디버그 라인 + 적 처치 / 근접(칼 장착) → 청색 구체 + 처치 / 1·2 무기 전환 / `FPSR.SpawnEnemies 5` 적 스폰·추격
-- **탄약/재장전**(IA_Reload 셋업 후): 연사로 탄창 소진 → 발사 멈춤(화면 `Ammo: 0/30`) / R → 1.5초 후 30 복구·재발사 / 재장전 중 발사 차단 / 재장전 중 무기전환 시 취소
+- **탄약/재장전**(IA_Reload 셋업 후): R → 1.5초 후 30 복구·재발사 / 재장전 중 발사 차단 / **연사로 탄 소진 시 자동 재장전→완료 후 자동 재발사**(누르고 있을 때) / **재장전 중 무기전환 시 취소 + 그 무기 재장착 시 자동 재리로드**
 - **반동**: 연사 중 마우스 내려 보정 → 종료 후 화면 강제 하강 없음 / 풀오토는 손 떼도 자동 복구 안 함 / `FPSR.RecoilPreview 30` 패턴 표시
 
 ## 사용자 대기 작업 (PIE 테스트 전)

@@ -78,4 +78,7 @@ protected:
 
 	/** Server-only reload timer. */
 	FTimerHandle ReloadTimerHandle;
+
+	/** Server-only: slot whose reload was cancelled by a weapon switch; re-reloads when re-equipped. */
+	int32 PendingReloadSlot = INDEX_NONE;
 };

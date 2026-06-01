@@ -33,6 +33,9 @@ public:
 	virtual UAbilitySystemComponent* GetAbilitySystemComponent() const override;
 	//~End IAbilitySystemInterface
 
+	/** Owner-client: request a server-authoritative reload (used by auto-reload when the mag empties). */
+	void RequestReload();
+
 protected:
 	void InitAbilitySystem();
 

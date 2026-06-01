@@ -202,6 +202,11 @@ void AFPSRCharacter::ServerReload_Implementation()
 	}
 }
 
+void AFPSRCharacter::RequestReload()
+{
+	ServerReload();
+}
+
 UAbilitySystemComponent* AFPSRCharacter::GetAbilitySystemComponent() const
 {
 	return AbilitySystemComponent;

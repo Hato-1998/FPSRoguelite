@@ -4,6 +4,7 @@
 #include "Weapon/FPSRWeaponInventoryComponent.h"
 #include "Weapon/FPSRWeaponDataAsset.h"
 #include "Weapon/FPSRWeaponTypes.h"
+#include "Hero/FPSRCharacter.h"
 
 #include "AbilitySystemComponent.h"
 #include "Engine/Engine.h"
@@ -44,6 +45,31 @@ bool UFPSRWeaponFireComponent::CanFire() const
 {
 	UFPSRWeaponInventoryComponent* Inv = GetInventory();
 	return Inv && !Inv->IsReloading() && Inv->GetCurrentAmmo() > 0;
+}
+
+void UFPSRWeaponFireComponent::MaybeAutoReload()
+{
+	UFPSRWeaponInventoryComponent* Inv = GetInventory();
+	if (!Inv)
+	{
+		return;
+	}
+	// Has ammo or already reloading: clear the guard and do nothing.
+	if (Inv->GetCurrentAmmo() > 0 || Inv->IsReloading())
+	{
+		bReloadRequestPending = false;
+		return;
+	}
+	// Empty and not reloading: request a reload once, only while trying to fire.
+	if (!bWantsToFire || Inv->GetCurrentMagSize() <= 0 || bReloadRequestPending)
+	{
+		return;
+	}
+	if (AFPSRCharacter* Char = Cast<AFPSRCharacter>(GetOwner()))
+	{
+		Char->RequestReload();
+		bReloadRequestPending = true;
+	}
 }
 
 void UFPSRWeaponFireComponent::StartFiring()
@@ -176,6 +202,9 @@ void UFPSRWeaponFireComponent::TickComponent(float DeltaTime, ELevelTick TickTyp
 			++Safety;
 		}
 	}
+
+	// Auto-reload when the magazine empties while the player is still firing.
+	MaybeAutoReload();
 
 	// --- Recoil pitch handling (smoothed rise + debt-aware recovery + player compensation) ---
 	// 1) Smoothly apply any pending up-kick (snappy rise), accumulating recovery debt.
