@@ -7,6 +7,7 @@
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/Pawn.h"
+#include "CollisionQueryParams.h"
 #include "TimerManager.h"
 #include "HAL/IConsoleManager.h"
 
@@ -279,6 +280,30 @@ FVector UFPSREnemySpawnSubsystem::ComputeSpawnLocation() const
 	return Center + FVector(FMath::Cos(Angle) * Radius, FMath::Sin(Angle) * Radius, 100.0f);
 }
 
+FVector UFPSREnemySpawnSubsystem::SnapToGround(const FVector& Location) const
+{
+	const UWorld* World = GetWorld();
+	if (!World)
+	{
+		return Location;
+	}
+
+	const FVector TraceStart(Location.X, Location.Y, Location.Z + SpawnGroundTraceUp);
+	const FVector TraceEnd(Location.X, Location.Y, Location.Z - SpawnGroundTraceDown);
+
+	// Trace ONLY against static world geometry so other enemy capsules (ECC_Pawn) are never mistaken for floor.
+	FCollisionObjectQueryParams ObjectParams;
+	ObjectParams.AddObjectTypesToQuery(ECC_WorldStatic);
+	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(FPSREnemySpawnGround), false);
+
+	FHitResult Hit;
+	if (World->LineTraceSingleByObjectType(Hit, TraceStart, TraceEnd, ObjectParams, QueryParams))
+	{
+		return FVector(Location.X, Location.Y, Hit.ImpactPoint.Z + SpawnGroundHalfHeight);
+	}
+	return Location; // no floor found (e.g. off-map): keep the original candidate
+}
+
 AFPSREnemyBase* UFPSREnemySpawnSubsystem::AcquireEnemy(const FVector& Location)
 {
 	UWorld* World = GetWorld();
@@ -286,6 +311,8 @@ AFPSREnemyBase* UFPSREnemySpawnSubsystem::AcquireEnemy(const FVector& Location)
 	{
 		return nullptr;
 	}
+
+	const FVector SpawnLocation = SnapToGround(Location);
 
 	AFPSREnemyBase* Enemy = nullptr;
 
@@ -306,7 +333,7 @@ AFPSREnemyBase* UFPSREnemySpawnSubsystem::AcquireEnemy(const FVector& Location)
 		// Spawn a new enemy.
 		FActorSpawnParameters SpawnParams;
 		SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-		Enemy = World->SpawnActor<AFPSREnemyBase>(AFPSREnemyBase::StaticClass(), Location, FRotator::ZeroRotator, SpawnParams);
+		Enemy = World->SpawnActor<AFPSREnemyBase>(AFPSREnemyBase::StaticClass(), SpawnLocation, FRotator::ZeroRotator, SpawnParams);
 		if (Enemy == nullptr)
 		{
 			return nullptr;
@@ -315,7 +342,7 @@ AFPSREnemyBase* UFPSREnemySpawnSubsystem::AcquireEnemy(const FVector& Location)
 	}
 
 	// Activate and add to active set.
-	Enemy->Activate(Location);
+	Enemy->Activate(SpawnLocation);
 	ActiveEnemies.Add(Enemy);
 	return Enemy;
 }

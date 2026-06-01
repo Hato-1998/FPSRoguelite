@@ -15,6 +15,7 @@
 ### ✅ P2-B2 코드 완료 (2026-06-01, 빌드+스모크 통과) — Flow-Field 그리드 + separation
 - **신규 `UFPSRFlowFieldSubsystem`(UWorldSubsystem, 서버권위)**: 고정맵 2D 그리드(`CellSize=200`, `HalfExtent=10000`→100×100, 원점 중심), 타이머(`FlowUpdateInterval=0.2s`)로 **다중소스 BFS**(생존 플레이어=소스, 4-연결) 적분필드 → 8-이웃 최급강하로 셀별 흐름방향. `SampleFlowDirection(Loc)` O(1)(범위밖/미준비=Zero→호출측 직접방향 폴백). 장애물 없으면 ≈ 최근접 플레이어 방향이지만 적별 탐색을 그리드 1회로 분할상환 + 장애물 토대.
 - **이동 통합(서브시스템)**: `TickServerMovement`가 타겟→**이동방향** 파라미터로 변경. 패스마다 균일 그리드 공간해시(셀=`SeparationRadius=120`) 구축 → 적별 flow방향 + **separation**(3×3 이웃 반발, 거리 감쇠, `SeparationStrength=1.5`) 합성. 정지거리 내에선 flow 0(플레이어에 스택 방지, separation만으로 분산). ±10% 속도편차(P2-A)와 합쳐 유기적 스웜.
+- **스폰 지면 보정(버그픽스)**: `AcquireEnemy`가 `SnapToGround`로 후보 XY 아래 **WorldStatic 라인트레이스**(Pawn 무시) → 바닥+캡슐반고(90)에 생성. 점프 중 공중 스폰 해소(디렉터·버스트 공통). **알려진 한계(보류)**: 적은 CMC 없이 XY 수동 이동이라 **중력/지형추적 없음** → 경사·낙하 미대응. NavMesh/이동 정교화는 후속(§5-2).
 
 ### ✅ P2-B1 코드 완료 (2026-06-01, 빌드+스모크 통과) — 중앙 배치 이동 + Significance 거리 LOD
 per-actor naive chase Tick 폐지 → `UFPSREnemySpawnSubsystem`이 `FTickableGameObject`로 배치 이동 구동(서버권위). 리뷰 #6(적 tick/이동 비용) 해소.
