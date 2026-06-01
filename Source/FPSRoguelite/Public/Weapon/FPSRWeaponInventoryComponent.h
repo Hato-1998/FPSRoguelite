@@ -47,6 +47,11 @@ public:
 	/** Server: begin a timed reload of the current slot (no-op if already reloading or full). */
 	void StartReload();
 
+	/** Server: returns true if the current weapon's fire interval has elapsed since the last shot, then stamps
+	 *  the next-allowed time. A jitter tolerance keeps legitimate fire from being blocked — this is anti-abuse,
+	 *  not exact cadence. On non-authority (client prediction) it always returns true (the server is authoritative). */
+	bool ServerTryConsumeFireInterval(float MinInterval);
+
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 protected:
@@ -81,4 +86,7 @@ protected:
 
 	/** Server-only: slot whose reload was cancelled by a weapon switch; re-reloads when re-equipped. */
 	int32 PendingReloadSlot = INDEX_NONE;
+
+	/** Server-only: earliest world time (seconds) the next shot is allowed for the current slot. Reset on equip. */
+	float ServerNextAllowedFireTime = 0.0f;
 };
