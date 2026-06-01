@@ -7,10 +7,15 @@
 **최종 갱신: 2026-06-01**
 
 ## 한 줄 요약
-**P1+P1.5 + P1 리뷰 하드닝(main) + P2-A·B1·B2·C1 코드 완료**(풀링/디렉터/이속편차 + 배치이동/LOD + Flow-Field/separation + 적 근접데미지/공격토큰/플레이어 clamp). 빌드+스모크 통과. **PIE 확인 대기**. → **다음: P2-C2**(충돌무시 대시).
+**P1+P1.5 + P1 리뷰 하드닝(main) + P2 전체(A·B1·B2·C1·C2) 코드 완료**. 빌드+스모크 통과. **PIE 확인 + phase→main 머지 대기**.
 
-## ▶▶ 새 세션 우선 작업 = PIE 확인 → P2-C2(대시) 착수
+## ▶▶ 새 세션 우선 작업 = P2 통합 PIE 확인 → phase/p2-enemy-mass → main `--no-ff` 머지(§6-7)
 **브랜치**: `phase/p2-enemy-mass` (활성, main의 P1 하드닝 머지 반영됨). 구현=Haiku 위임 / 검증=Opus.
+**사용자 작업(대시 입력)**: `IA_Dash`(Bool) 에셋 생성 + IMC_Default 매핑 + `BP_FPSRCharacter` `DashAction` 할당(기존 IA_Reload/ADS 패턴).
+
+### ✅ P2-C2 코드 완료 (2026-06-01, 빌드+스모크 통과) — 충돌무시 대시 (§2-13)
+- `AFPSRCharacter`: `IA_Dash`→`Input_Dash`(이동입력 방향, 없으면 정면) → `ServerDash(Dir)` RPC(서버권위, ServerReload 패턴).
+- `ServerDash`: 쿨다운 게이트(`DashCooldown=2.0`) → 캡슐 `ECC_Pawn` 응답=`Ignore`(적·아군 통과) + `LaunchCharacter(Dir*DashSpeed=2000, bXY=true,bZ=false)`(공중대시 가능) → `DashDuration=0.2s` 타이머로 `EndDash`(응답 `Block` 복원). 튜닝값 EditDefaultsOnly.
 
 ### ✅ P2-C1 코드 완료 (2026-06-01, 빌드+스모크 통과) — 적 근접 데미지 + 공격토큰 + 플레이어 피해/clamp
 - **적 근접(contact) 공격**: `AFPSREnemyBase`에 `AttackRange=150/AttackDamage=8/AttackInterval=1.0`(EditDefaultsOnly) + `LastAttackTime` + `CanAttack/NotifyAttacked`. 배치 패스(`TickEnemyMovement`)에서 사거리 내 + 쿨다운 경과 + **공격토큰** 여유 시 데미지.

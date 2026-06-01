@@ -57,6 +57,7 @@ protected:
 	void Input_Reload(const FInputActionValue& Value);
 	void Input_ADSPressed(const FInputActionValue& Value);
 	void Input_ADSReleased(const FInputActionValue& Value);
+	void Input_Dash(const FInputActionValue& Value);
 
 	/** Server: equip a weapon slot (input is client-side; equip is server-authoritative). */
 	UFUNCTION(Server, Reliable)
@@ -69,6 +70,10 @@ protected:
 	/** Server: sync aim-down-sights state so the fire GA applies ADS spread server-side. */
 	UFUNCTION(Server, Reliable)
 	void ServerSetAiming(bool bNewAiming);
+
+	/** Server: perform a collision-ignoring dash in DashDirection (input is client-side; dash is server-authoritative). */
+	UFUNCTION(Server, Reliable)
+	void ServerDash(FVector DashDirection);
 
 	UPROPERTY()
 	TObjectPtr<UFPSRAbilitySystemComponent> AbilitySystemComponent;
@@ -122,4 +127,25 @@ protected:
 
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Input")
 	TObjectPtr<UInputAction> ADSAction;
+
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Input")
+	TObjectPtr<UInputAction> DashAction;
+
+	/** Server: end the dash window — restore Pawn collision blocking. */
+	void EndDash();
+
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Dash")
+	float DashSpeed = 2000.0f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Dash")
+	float DashDuration = 0.2f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Dash")
+	float DashCooldown = 2.0f;
+
+	/** Server-only: world time of last dash (init far in the past so the first dash is allowed). */
+	float LastDashTime = -1000.0f;
+
+	/** Server-only: timer to end the dash collision-ignore window. */
+	FTimerHandle DashEndTimerHandle;
 };

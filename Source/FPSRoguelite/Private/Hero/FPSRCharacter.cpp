@@ -15,6 +15,8 @@
 #include "Components/SkeletalMeshComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/PlayerController.h"
+#include "TimerManager.h"
+#include "Engine/World.h"
 
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
@@ -145,6 +147,10 @@ void AFPSRCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompo
 		EIC->BindAction(ADSAction, ETriggerEvent::Started, this, &AFPSRCharacter::Input_ADSPressed);
 		EIC->BindAction(ADSAction, ETriggerEvent::Completed, this, &AFPSRCharacter::Input_ADSReleased);
 	}
+	if (DashAction)
+	{
+		EIC->BindAction(DashAction, ETriggerEvent::Started, this, &AFPSRCharacter::Input_Dash);
+	}
 }
 
 void AFPSRCharacter::Input_MoveForward(const FInputActionValue& Value)
@@ -217,6 +223,18 @@ void AFPSRCharacter::Input_ADSReleased(const FInputActionValue& Value)
 	ServerSetAiming(false);
 }
 
+void AFPSRCharacter::Input_Dash(const FInputActionValue& Value)
+{
+	FVector Direction = GetLastMovementInputVector();
+	Direction.Z = 0.0f;
+	if (Direction.IsNearlyZero())
+	{
+		Direction = GetActorForwardVector();
+		Direction.Z = 0.0f;
+	}
+	ServerDash(Direction.GetSafeNormal());
+}
+
 void AFPSRCharacter::ServerEquipSlot_Implementation(int32 SlotIndex)
 {
 	if (WeaponInventory)
@@ -241,6 +259,56 @@ void AFPSRCharacter::ServerSetAiming_Implementation(bool bNewAiming)
 	}
 }
 
+void AFPSRCharacter::ServerDash_Implementation(FVector DashDirection)
+{
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
+	// Cooldown gate (server-authoritative).
+	const float Now = World->GetTimeSeconds();
+	if ((Now - LastDashTime) < DashCooldown)
+	{
+		return;
+	}
+
+	FVector Direction = DashDirection;
+	Direction.Z = 0.0f;
+	if (Direction.IsNearlyZero())
+	{
+		Direction = GetActorForwardVector();
+		Direction.Z = 0.0f;
+	}
+	Direction = Direction.GetSafeNormal();
+	if (Direction.IsNearlyZero())
+	{
+		return;
+	}
+
+	LastDashTime = Now;
+
+	// Ignore other pawns (enemies + allies) for the dash window so the player can pass through a surround.
+	if (UCapsuleComponent* Capsule = GetCapsuleComponent())
+	{
+		Capsule->SetCollisionResponseToChannel(ECC_Pawn, ECR_Ignore);
+	}
+
+	// Launch along the dash direction (keep current vertical velocity so air dashes feel natural).
+	LaunchCharacter(Direction * DashSpeed, true, false);
+
+	// End the collision-ignore window after DashDuration.
+	World->GetTimerManager().SetTimer(DashEndTimerHandle, this, &AFPSRCharacter::EndDash, FMath::Max(0.01f, DashDuration), false);
+}
+
+void AFPSRCharacter::EndDash()
+{
+	if (UCapsuleComponent* Capsule = GetCapsuleComponent())
+	{
+		Capsule->SetCollisionResponseToChannel(ECC_Pawn, ECR_Block);
+	}
+}
 
 void AFPSRCharacter::ApplyContactDamage(float DamageAmount, AActor* DamageInstigator)
 {
