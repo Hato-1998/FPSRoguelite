@@ -50,6 +50,20 @@ void UFPSREnemyHealthComponent::ApplyDamage(float DamageAmount, AActor* DamageIn
 	}
 }
 
+void UFPSREnemyHealthComponent::ResetForReuse()
+{
+	if (!GetOwner() || !GetOwner()->HasAuthority())
+	{
+		return;
+	}
+
+	Health = MaxHealth;
+	MARK_PROPERTY_DIRTY_FROM_NAME(UFPSREnemyHealthComponent, Health, this);
+
+	bDead = false;
+	MARK_PROPERTY_DIRTY_FROM_NAME(UFPSREnemyHealthComponent, bDead, this);
+}
+
 void UFPSREnemyHealthComponent::OnRep_Health()
 {
 	// Client cosmetic hook (health bar / hit flash later).

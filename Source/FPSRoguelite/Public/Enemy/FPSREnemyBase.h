@@ -21,6 +21,12 @@ public:
 
 	virtual void Tick(float DeltaSeconds) override;
 
+	/** Server: reactivate a pooled enemy at Location (unhide, enable collision/tick, reset health, randomize move speed). */
+	void Activate(const FVector& Location);
+
+	/** Server: deactivate and return to dormant pool state (hide, disable collision/tick, net dormant). */
+	void Deactivate();
+
 protected:
 	virtual void BeginPlay() override;
 
@@ -43,4 +49,8 @@ protected:
 
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Enemy")
 	float StopDistance = 120.0f;
+
+	/** Per-instance move speed (MoveSpeed * random ±10% on Activate). Game.MD §2-6. */
+	UPROPERTY(Transient)
+	float CurrentMoveSpeed = MoveSpeed;
 };
