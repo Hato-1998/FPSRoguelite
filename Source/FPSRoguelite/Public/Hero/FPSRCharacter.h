@@ -152,4 +152,12 @@ protected:
 
 	/** Server-only: timer to end the dash collision-ignore window. */
 	FTimerHandle DashEndTimerHandle;
+
+	/** Invulnerability window (seconds) after taking contact damage; further hits within it are ignored.
+	 *  Prevents a swarm from melting the player in one frame. Balance-tunable. */
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Combat")
+	float DamageInvulnerabilityDuration = 0.25f;
+
+	/** Server-only: world time of the last accepted contact hit (i-frame gate). */
+	float LastDamagedTime = -1000.0f;
 };

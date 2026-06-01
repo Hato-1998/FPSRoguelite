@@ -46,6 +46,7 @@
 - **적 근접(contact) 공격**: `AFPSREnemyBase`에 `AttackRange=150/AttackDamage=8/AttackInterval=1.0`(EditDefaultsOnly) + `LastAttackTime` + `CanAttack/NotifyAttacked`. 배치 패스(`TickEnemyMovement`)에서 사거리 내 + 쿨다운 경과 + **공격토큰** 여유 시 데미지.
 - **공격토큰**(§2-6/§5): 플레이어당 패스당 공격 허용 적 수 상한 `AttackTokenLimit=10`(`AttackersThisPass[]`). 수백 마리 동시타격 방지.
 - **플레이어 피해=서버권위+clamp**: 적→`AFPSRCharacter::ApplyContactDamage`→`ASC->ApplyModToAttribute(Health, -dmg)`(엔진 확인: base값 수정·서버가드). `UFPSRHealthSet` `PreAttributeChange`/`PreAttributeBaseChange` clamp(Health 0~Max, MaxHealth≥1, 리뷰 #7 선반영) + `PostAttributeChange`에서 Health 0 도달 시 `OnOutOfHealth` 1회 브로드캐스트 → `AFPSRCharacter::HandleOutOfHealth`(현재 로그만; **완전 DBNO/리스폰=P5**).
+- **i-frame(피격 무적, 2026-06-01 추가)**: 피격 수용 후 `DamageInvulnerabilityDuration=0.25s`(EditDefaultsOnly, 밸런스 튜닝) 동안 추가 `ApplyContactDamage` 무시(`LastDamagedTime` 게이트, 서버권위·플레이어당). 스웜 동시타격 한 프레임 멜팅 방지(공격토큰과 별개 2차 방어). ※ 물리 충돌 자체는 유지(피해만 무시) — 물리 통과까지 원하면 후속.
 
 **⏳ C1 PIE 확인**: `FPSR.EnemyTarget 50` + 적에게 둘러싸이면 **체력 감소**(서버), 다수에 둘러싸여도 토큰으로 동시 피해 제한, 0 도달 시 로그(`[Player] ... reached 0 health`). 체력은 0~Max clamp.
 - **디버그 표시(2026-06-01)**: 로컬 플레이어 화면에 `HP: x / y`(녹색) / 사망 시 `DEAD (HP 0/y)`(적색) — Ammo 표시처럼 `AFPSRCharacter::Tick`에서 `GEngine->AddOnScreenDebugMessage`, **`#if ENABLE_DRAW_DEBUG` 게이트(틱 자체도 디버그 빌드에서만 활성**, 쉬핑 오버헤드 0). HUD는 P3 전환 대상(§8).
