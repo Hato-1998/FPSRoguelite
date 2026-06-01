@@ -9,7 +9,21 @@
 ## 한 줄 요약
 **P1 + P1.5 완료** (전투 슬라이스 + 사격코어 + 탄약/재장전 + ADS + 반동 ADS의존/보간). 빌드+스모크+사용자 PIE/튜닝 통과. `phase/p1.5-b-ammo-reload` → `main` `--no-ff` 머지. → **다음: P2** (SpawnDirector/Flow-Field/Pooling + 대시).
 
-## 🔴 새 세션 우선 작업
+## ▶▶ 새 세션 우선 작업 = P2-A (적 대량화 기반)
+**브랜치**: main에서 `phase/p2-enemy-mass` 분기(이미 생성됨, main 최신으로 rebase/merge 후 사용). 구현=Haiku 위임 / 검증=Opus.
+**목표**: Object Pooling + SpawnDirector + 이속 ±10% 편차 → 적 300+ 스폰/재활용 토대. (Flow-Field·Significance=P2-B, 근접데미지·공격토큰·대시=P2-C.)
+
+**설계 요약**:
+1. **신규 `UFPSREnemySpawnSubsystem`(UWorldSubsystem, 서버권위)** — `Public/Enemy/` + `Private/Enemy/`:
+   - 풀 `TArray<TObjectPtr<AFPSREnemyBase>>`: 휴면 액터 재사용, 없으면 `SpawnActor`. `AcquireEnemy(Loc)`/`ReleaseEnemy(e)`/`GetAliveCount()`.
+   - 디렉터: 타이머(`SpawnInterval~0.1s`)로 `Alive<TargetAliveCount`이면 플레이어 주변 링(`SpawnRadius~1500`)에 Acquire. 권위 가드 `GetNetMode()!=NM_Client`.
+   - 적 클래스 = `AFPSREnemyBase::StaticClass()`(cube placeholder; 데이터드리븐 로스터는 후속).
+2. **`AFPSREnemyBase`**: `Activate(Loc)`(Hidden=false/Collision=on/Tick=on + `HealthComponent->ResetForReuse()` + `CurrentMoveSpeed=MoveSpeed*FRandRange(0.9,1.1)`) / `Deactivate()`(역). `HandleDeath`→`Destroy()` 대신 `ReleaseEnemy(this)`. Tick의 `MoveSpeed`→`CurrentMoveSpeed`.
+3. **`UFPSREnemyHealthComponent::ResetForReuse()`**: `Health=MaxHealth; bDead=false` + 복제 더티.
+4. **콘솔**: `FPSR.SpawnEnemies [N]`=버스트 Acquire(호환), 신규 `FPSR.EnemyTarget [N]`=디렉터 목표수 지속(0=중단).
+**검증**: 빌드+스모크 / PIE: `FPSR.EnemyTarget 100`→~100 유지·처치 시 풀 재활용(`obj list class=FPSREnemyBase` 안정)·이속 편차로 분산 / `EnemyTarget 0` 중단. (상세 플랜: `~/.claude/plans/curried-painting-quill.md`)
+
+## 🔴 이전 완료 이력 (P1/P1.5)
 
 **1) `Game.MD` 작성 + 문서 통합 — ✅ 완료 (2026-05-30)**
    - `Game.MD`를 단일 SSOT 본문으로 작성(기획·설계·기술스택·코드구조·규칙·구현현황·로드맵·디버그인벤토리).
