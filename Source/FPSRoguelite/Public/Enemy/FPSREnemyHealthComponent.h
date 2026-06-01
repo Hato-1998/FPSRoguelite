@@ -19,6 +19,9 @@ public:
 	/** Server: apply damage and handle death. */
 	void ApplyDamage(float DamageAmount, AActor* DamageInstigator);
 
+	/** Server: reset health/dead flag for pooled reuse. */
+	void ResetForReuse();
+
 	UFUNCTION(BlueprintPure, Category = "FPSR|Enemy")
 	float GetHealth() const { return Health; }
 

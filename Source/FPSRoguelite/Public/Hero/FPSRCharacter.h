@@ -29,6 +29,10 @@ public:
 	virtual void OnRep_PlayerState() override;
 	virtual void SetupPlayerInputComponent(UInputComponent* PlayerInputComponent) override;
 
+#if ENABLE_DRAW_DEBUG
+	virtual void Tick(float DeltaSeconds) override;
+#endif
+
 	//~IAbilitySystemInterface
 	virtual UAbilitySystemComponent* GetAbilitySystemComponent() const override;
 	//~End IAbilitySystemInterface
@@ -36,8 +40,14 @@ public:
 	/** Owner-client: request a server-authoritative reload (used by auto-reload when the mag empties). */
 	void RequestReload();
 
+	/** Server: apply contact damage from an enemy to this character's Health (clamped via HealthSet). */
+	void ApplyContactDamage(float DamageAmount, AActor* DamageInstigator);
+
 protected:
 	void InitAbilitySystem();
+
+	/** Bound to the health set's OnOutOfHealth (server). Placeholder: logs; full DBNO/respawn is P5. */
+	void HandleOutOfHealth();
 
 	// Enhanced Input handlers
 	void Input_MoveForward(const FInputActionValue& Value);
@@ -51,6 +61,7 @@ protected:
 	void Input_Reload(const FInputActionValue& Value);
 	void Input_ADSPressed(const FInputActionValue& Value);
 	void Input_ADSReleased(const FInputActionValue& Value);
+	void Input_Dash(const FInputActionValue& Value);
 
 	/** Server: equip a weapon slot (input is client-side; equip is server-authoritative). */
 	UFUNCTION(Server, Reliable)
@@ -63,6 +74,10 @@ protected:
 	/** Server: sync aim-down-sights state so the fire GA applies ADS spread server-side. */
 	UFUNCTION(Server, Reliable)
 	void ServerSetAiming(bool bNewAiming);
+
+	/** Server: perform a collision-ignoring dash in DashDirection (input is client-side; dash is server-authoritative). */
+	UFUNCTION(Server, Reliable)
+	void ServerDash(FVector DashDirection);
 
 	UPROPERTY()
 	TObjectPtr<UFPSRAbilitySystemComponent> AbilitySystemComponent;
@@ -116,4 +131,25 @@ protected:
 
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Input")
 	TObjectPtr<UInputAction> ADSAction;
+
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Input")
+	TObjectPtr<UInputAction> DashAction;
+
+	/** Server: end the dash window — restore Pawn collision blocking. */
+	void EndDash();
+
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Dash")
+	float DashSpeed = 2000.0f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Dash")
+	float DashDuration = 0.2f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Dash")
+	float DashCooldown = 2.0f;
+
+	/** Server-only: world time of last dash (init far in the past so the first dash is allowed). */
+	float LastDashTime = -1000.0f;
+
+	/** Server-only: timer to end the dash collision-ignore window. */
+	FTimerHandle DashEndTimerHandle;
 };

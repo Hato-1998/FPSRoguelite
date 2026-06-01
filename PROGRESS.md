@@ -7,21 +7,50 @@
 **최종 갱신: 2026-06-01**
 
 ## 한 줄 요약
-**P1 + P1.5 완료** (전투 슬라이스 + 사격코어 + 탄약/재장전 + ADS + 반동 ADS의존/보간). 빌드+스모크+사용자 PIE/튜닝 통과. `phase/p1.5-b-ammo-reload` → `main` `--no-ff` 머지. → **다음: P2** (SpawnDirector/Flow-Field/Pooling + 대시).
+**P1+P1.5 + P1 리뷰 하드닝(main) + P2 전체(A·B1·B2·C1·C2) 코드 완료**. 빌드+스모크 통과. **PIE 확인 + phase→main 머지 대기**.
 
-## ▶▶ 새 세션 우선 작업 = P2-A (적 대량화 기반)
-**브랜치**: main에서 `phase/p2-enemy-mass` 분기(이미 생성됨, main 최신으로 rebase/merge 후 사용). 구현=Haiku 위임 / 검증=Opus.
-**목표**: Object Pooling + SpawnDirector + 이속 ±10% 편차 → 적 300+ 스폰/재활용 토대. (Flow-Field·Significance=P2-B, 근접데미지·공격토큰·대시=P2-C.)
+## ▶▶ 새 세션 우선 작업 = P2 통합 PIE 확인 → phase/p2-enemy-mass → main `--no-ff` 머지(§6-7)
+**브랜치**: `phase/p2-enemy-mass` (활성, main의 P1 하드닝 머지 반영됨). 구현=Haiku 위임 / 검증=Opus.
+**사용자 작업(대시 입력)**: `IA_Dash`(Bool) 에셋 생성 + IMC_Default 매핑 + `BP_FPSRCharacter` `DashAction` 할당(기존 IA_Reload/ADS 패턴).
 
-**설계 요약**:
-1. **신규 `UFPSREnemySpawnSubsystem`(UWorldSubsystem, 서버권위)** — `Public/Enemy/` + `Private/Enemy/`:
-   - 풀 `TArray<TObjectPtr<AFPSREnemyBase>>`: 휴면 액터 재사용, 없으면 `SpawnActor`. `AcquireEnemy(Loc)`/`ReleaseEnemy(e)`/`GetAliveCount()`.
-   - 디렉터: 타이머(`SpawnInterval~0.1s`)로 `Alive<TargetAliveCount`이면 플레이어 주변 링(`SpawnRadius~1500`)에 Acquire. 권위 가드 `GetNetMode()!=NM_Client`.
-   - 적 클래스 = `AFPSREnemyBase::StaticClass()`(cube placeholder; 데이터드리븐 로스터는 후속).
-2. **`AFPSREnemyBase`**: `Activate(Loc)`(Hidden=false/Collision=on/Tick=on + `HealthComponent->ResetForReuse()` + `CurrentMoveSpeed=MoveSpeed*FRandRange(0.9,1.1)`) / `Deactivate()`(역). `HandleDeath`→`Destroy()` 대신 `ReleaseEnemy(this)`. Tick의 `MoveSpeed`→`CurrentMoveSpeed`.
-3. **`UFPSREnemyHealthComponent::ResetForReuse()`**: `Health=MaxHealth; bDead=false` + 복제 더티.
-4. **콘솔**: `FPSR.SpawnEnemies [N]`=버스트 Acquire(호환), 신규 `FPSR.EnemyTarget [N]`=디렉터 목표수 지속(0=중단).
-**검증**: 빌드+스모크 / PIE: `FPSR.EnemyTarget 100`→~100 유지·처치 시 풀 재활용(`obj list class=FPSREnemyBase` 안정)·이속 편차로 분산 / `EnemyTarget 0` 중단. (상세 플랜: `~/.claude/plans/curried-painting-quill.md`)
+### ✅ P2-C2 코드 완료 (2026-06-01, 빌드+스모크 통과) — 충돌무시 대시 (§2-13)
+- `AFPSRCharacter`: `IA_Dash`→`Input_Dash`(이동입력 방향, 없으면 정면) → `ServerDash(Dir)` RPC(서버권위, ServerReload 패턴).
+- `ServerDash`: 쿨다운 게이트(`DashCooldown=2.0`) → 캡슐 `ECC_Pawn` 응답=`Ignore`(적·아군 통과) + `LaunchCharacter(Dir*DashSpeed=2000, bXY=true,bZ=false)`(공중대시 가능) → `DashDuration=0.2s` 타이머로 `EndDash`(응답 `Block` 복원). 튜닝값 EditDefaultsOnly.
+
+### ✅ P2-C1 코드 완료 (2026-06-01, 빌드+스모크 통과) — 적 근접 데미지 + 공격토큰 + 플레이어 피해/clamp
+- **적 근접(contact) 공격**: `AFPSREnemyBase`에 `AttackRange=150/AttackDamage=8/AttackInterval=1.0`(EditDefaultsOnly) + `LastAttackTime` + `CanAttack/NotifyAttacked`. 배치 패스(`TickEnemyMovement`)에서 사거리 내 + 쿨다운 경과 + **공격토큰** 여유 시 데미지.
+- **공격토큰**(§2-6/§5): 플레이어당 패스당 공격 허용 적 수 상한 `AttackTokenLimit=10`(`AttackersThisPass[]`). 수백 마리 동시타격 방지.
+- **플레이어 피해=서버권위+clamp**: 적→`AFPSRCharacter::ApplyContactDamage`→`ASC->ApplyModToAttribute(Health, -dmg)`(엔진 확인: base값 수정·서버가드). `UFPSRHealthSet` `PreAttributeChange`/`PreAttributeBaseChange` clamp(Health 0~Max, MaxHealth≥1, 리뷰 #7 선반영) + `PostAttributeChange`에서 Health 0 도달 시 `OnOutOfHealth` 1회 브로드캐스트 → `AFPSRCharacter::HandleOutOfHealth`(현재 로그만; **완전 DBNO/리스폰=P5**).
+
+**⏳ C1 PIE 확인**: `FPSR.EnemyTarget 50` + 적에게 둘러싸이면 **체력 감소**(서버), 다수에 둘러싸여도 토큰으로 동시 피해 제한, 0 도달 시 로그(`[Player] ... reached 0 health`). 체력은 0~Max clamp.
+- **디버그 표시(2026-06-01)**: 로컬 플레이어 화면에 `HP: x / y`(녹색) / 사망 시 `DEAD (HP 0/y)`(적색) — Ammo 표시처럼 `AFPSRCharacter::Tick`에서 `GEngine->AddOnScreenDebugMessage`, **`#if ENABLE_DRAW_DEBUG` 게이트(틱 자체도 디버그 빌드에서만 활성**, 쉬핑 오버헤드 0). HUD는 P3 전환 대상(§8).
+
+### ✅ P2-B2 코드 완료 (2026-06-01, 빌드+스모크 통과) — Flow-Field 그리드 + separation
+- **신규 `UFPSRFlowFieldSubsystem`(UWorldSubsystem, 서버권위)**: 고정맵 2D 그리드(`CellSize=200`, `HalfExtent=10000`→100×100, 원점 중심), 타이머(`FlowUpdateInterval=0.2s`)로 **다중소스 BFS**(생존 플레이어=소스, 4-연결) 적분필드 → 8-이웃 최급강하로 셀별 흐름방향. `SampleFlowDirection(Loc)` O(1)(범위밖/미준비=Zero→호출측 직접방향 폴백). 장애물 없으면 ≈ 최근접 플레이어 방향이지만 적별 탐색을 그리드 1회로 분할상환 + 장애물 토대.
+- **이동 통합(서브시스템)**: `TickServerMovement`가 타겟→**이동방향** 파라미터로 변경. 패스마다 균일 그리드 공간해시(셀=`SeparationRadius=120`) 구축 → 적별 flow방향 + **separation**(3×3 이웃 반발, 거리 감쇠, `SeparationStrength=1.5`) 합성. 정지거리 내에선 flow 0(플레이어에 스택 방지, separation만으로 분산). ±10% 속도편차(P2-A)와 합쳐 유기적 스웜.
+- **스폰 지면 보정(버그픽스)**: `AcquireEnemy`가 `SnapToGround`로 후보 XY 아래 **WorldStatic 라인트레이스**(Pawn 무시) → 바닥+캡슐반고(90)에 생성. 점프 중 공중 스폰 해소(디렉터·버스트 공통). **알려진 한계(보류)**: 적은 CMC 없이 XY 수동 이동이라 **중력/지형추적 없음** → 경사·낙하 미대응. NavMesh/이동 정교화는 후속(§5-2).
+
+### ✅ P2-B1 코드 완료 (2026-06-01, 빌드+스모크 통과) — 중앙 배치 이동 + Significance 거리 LOD
+per-actor naive chase Tick 폐지 → `UFPSREnemySpawnSubsystem`이 `FTickableGameObject`로 배치 이동 구동(서버권위). 리뷰 #6(적 tick/이동 비용) 해소.
+- **`AFPSREnemyBase`**: `PrimaryActorTick.bCanEverTick=false`, `Tick`/`FindNearestPlayer` 제거 → 신규 `TickServerMovement(Target, ScaledDelta)`(서버 가드 + 기존 chase 수식). Activate/Deactivate의 `SetActorTickEnabled` 제거(ActiveEnemies 멤버십이 갱신 게이트).
+- **서브시스템(FTickableGameObject)**: `Tick`→`TickEnemyMovement`. 플레이어 위치 1회 캐시 → 적별 최근접(2D) → **거리 티어 LOD**: S0(<1500) stride1/30Hz, S1(<3500) stride2/10Hz, S2(<6000) stride4/5Hz, S3 stride8/2Hz(§5 표). `SetNetUpdateFrequency`(UE5.7 API) 티어별 적용 + `(frame+UniqueID)%stride`로 throttle 분산 + `DeltaTime*stride` 보정 이동. (엔진 `UTickableWorldSubsystem` 관용구 참조.)
+
+**⏳ B1 PIE 확인**: `FPSR.EnemyTarget 200`→근거리 적 부드럽게 추격, 원거리 적은 갱신 throttle(끊겨 보여도 정상), 처치/재활용 정상. 300+에서 hitch 감소.
+
+### ✅ P2-A 코드 완료 (2026-06-01, 빌드+스모크 통과) — 적 대량화 기반
+Object Pooling + SpawnDirector + 개체별 이속 ±10% 편차. (Flow-Field·Significance=P2-B, 근접데미지·공격토큰·대시=P2-C.)
+- **신규 `UFPSREnemySpawnSubsystem`(UWorldSubsystem, 서버권위)** — `Public/Enemy/` + `Private/Enemy/`:
+  - 풀=**free-list 분리**: `DormantPool`(휴면 재사용) + `ActiveEnemies`(TSet) → Acquire/Release/AliveCount **O(1)**. `AcquireEnemy(Loc)`/`ReleaseEnemy(e)`/`GetAliveCount()`/`SetTargetAliveCount(N)`.
+  - 디렉터: `OnWorldBeginPlay`에서 반복 타이머(`SpawnInterval=0.1s`) 시작 → `Alive<Target`이면 플레이어 주변 링(`Inner 1200~Outer 1500`)에 Acquire. **하드캡 `MaxActiveEnemies=500`**(Game.MD §5) + **버스트당 `MaxSpawnPerTick=10`**(히치 방지). 권위 가드 `GetNetMode()!=NM_Client`, `ShouldCreateSubsystem`=게임월드만.
+  - 적 클래스 = `AFPSREnemyBase::StaticClass()`(cube placeholder; 데이터드리븐 로스터는 후속).
+- **`AFPSREnemyBase`**: `Activate(Loc)`(Hidden=false/Collision=on/Tick=on/`FlushNetDormancy` + `HealthComponent->ResetForReuse()` + `CurrentMoveSpeed=MoveSpeed*FRandRange(0.9,1.1)`) / `Deactivate()`(역 + `SetNetDormancy(DORM_DormantAll)` → 휴면 적 복제비용 절감, §5 선반영). `HandleDeath`→`Destroy()` 대신 서브시스템 `ReleaseEnemy(this)`(폴백 Destroy). Tick `MoveSpeed`→`CurrentMoveSpeed`.
+- **`UFPSREnemyHealthComponent::ResetForReuse()`**: 서버 가드 + `Health=MaxHealth; bDead=false` + Push Model 복제 더티.
+- **콘솔(서브시스템 cpp로 집약)**: `FPSR.SpawnEnemies [N]`=버스트 Acquire(호환), 신규 `FPSR.EnemyTarget [N]`=디렉터 목표수 지속(0=중단).
+
+**⏳ PIE 확인 대기**: `FPSR.EnemyTarget 100`→~100 유지·처치 시 풀 재활용(`obj list class=FPSREnemyBase` 안정)·이속 편차로 분산 / `EnemyTarget 0` 중단 / `FPSR.SpawnEnemies 20` 버스트. (상세 플랜: `~/.claude/plans/curried-painting-quill.md`)
+
+### ▶ 다음: P2-C2 (충돌무시 대시, §2-13)
+C1(적 근접데미지+공격토큰+플레이어 clamp) 완료. C2 = 입력 `IA_Dash`→로컬→`ServerDash` RPC(서버권위) → 짧은 런치 + 대시 창 동안 캡슐 `ECC_Pawn` 응답=Ignore(적·아군 통과) + 쿨다운 타임스탬프. **사용자 작업**: `IA_Dash`(Bool) 생성+IMC 매핑+`BP_FPSRCharacter` `DashAction` 할당. C2 후 **phase/p2-enemy-mass → main `--no-ff` 머지**(§6-7). 후속: NavMesh/동적장애물, 데이터드리븐 적 로스터, 사망/스폰 FX, SignificanceManager 플러그인 평가, 데미지 GE(실행계산)=P3/P4.
 
 ## 🔴 이전 완료 이력 (P1/P1.5)
 

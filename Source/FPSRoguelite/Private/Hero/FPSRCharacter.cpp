@@ -4,6 +4,8 @@
 #include "Core/FPSRPlayerState.h"
 #include "Core/FPSRLogChannels.h"
 #include "AbilitySystem/FPSRAbilitySystemComponent.h"
+#include "AbilitySystem/Attributes/FPSRHealthSet.h"
+#include "AbilitySystemComponent.h"
 #include "Weapon/FPSRWeaponInventoryComponent.h"
 #include "Weapon/FPSRWeaponFireComponent.h"
 #include "Weapon/FPSRWeaponDataAsset.h"
@@ -13,6 +15,9 @@
 #include "Components/SkeletalMeshComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/PlayerController.h"
+#include "TimerManager.h"
+#include "Engine/World.h"
+#include "Engine/Engine.h"
 
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
@@ -21,7 +26,11 @@
 
 AFPSRCharacter::AFPSRCharacter()
 {
+#if ENABLE_DRAW_DEBUG
+	PrimaryActorTick.bCanEverTick = true; // debug-only: on-screen health readout (replaced by HUD in P3)
+#else
 	PrimaryActorTick.bCanEverTick = false;
+#endif
 
 	GetCapsuleComponent()->InitCapsuleSize(34.0f, 88.0f);
 
@@ -59,6 +68,28 @@ AFPSRCharacter::AFPSRCharacter()
 	// content paths in C++.
 }
 
+#if ENABLE_DRAW_DEBUG
+void AFPSRCharacter::Tick(float DeltaSeconds)
+{
+	Super::Tick(DeltaSeconds);
+
+	// Debug scaffolding (replaced by HUD in P3): on-screen health / dead readout for the local player.
+	if (GEngine && IsLocallyControlled())
+	{
+		if (UAbilitySystemComponent* ASC = GetAbilitySystemComponent())
+		{
+			const float Health = ASC->GetNumericAttribute(UFPSRHealthSet::GetHealthAttribute());
+			const float MaxHealth = ASC->GetNumericAttribute(UFPSRHealthSet::GetMaxHealthAttribute());
+			const bool bDead = Health <= 0.0f;
+			const FString Msg = bDead
+				? FString::Printf(TEXT("DEAD  (HP 0 / %.0f)"), MaxHealth)
+				: FString::Printf(TEXT("HP: %.0f / %.0f"), Health, MaxHealth);
+			GEngine->AddOnScreenDebugMessage((uint64)(UPTRINT)this, 0.0f, bDead ? FColor::Red : FColor::Green, Msg);
+		}
+	}
+}
+#endif
+
 void AFPSRCharacter::PossessedBy(AController* NewController)
 {
 	Super::PossessedBy(NewController);
@@ -95,6 +126,18 @@ void AFPSRCharacter::InitAbilitySystem()
 	if (AbilitySystemComponent)
 	{
 		AbilitySystemComponent->InitAbilityActorInfo(PS, this);
+
+		// Bind health out-of-health callback (server-only).
+		if (HasAuthority())
+		{
+			if (const UFPSRHealthSet* HealthSet = AbilitySystemComponent->GetSet<UFPSRHealthSet>())
+			{
+				if (!HealthSet->OnOutOfHealth.IsBoundToObject(this))
+				{
+					HealthSet->OnOutOfHealth.AddUObject(this, &AFPSRCharacter::HandleOutOfHealth);
+				}
+			}
+		}
 	}
 }
 
@@ -130,6 +173,10 @@ void AFPSRCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompo
 	{
 		EIC->BindAction(ADSAction, ETriggerEvent::Started, this, &AFPSRCharacter::Input_ADSPressed);
 		EIC->BindAction(ADSAction, ETriggerEvent::Completed, this, &AFPSRCharacter::Input_ADSReleased);
+	}
+	if (DashAction)
+	{
+		EIC->BindAction(DashAction, ETriggerEvent::Started, this, &AFPSRCharacter::Input_Dash);
 	}
 }
 
@@ -203,6 +250,18 @@ void AFPSRCharacter::Input_ADSReleased(const FInputActionValue& Value)
 	ServerSetAiming(false);
 }
 
+void AFPSRCharacter::Input_Dash(const FInputActionValue& Value)
+{
+	FVector Direction = GetLastMovementInputVector();
+	Direction.Z = 0.0f;
+	if (Direction.IsNearlyZero())
+	{
+		Direction = GetActorForwardVector();
+		Direction.Z = 0.0f;
+	}
+	ServerDash(Direction.GetSafeNormal());
+}
+
 void AFPSRCharacter::ServerEquipSlot_Implementation(int32 SlotIndex)
 {
 	if (WeaponInventory)
@@ -225,6 +284,75 @@ void AFPSRCharacter::ServerSetAiming_Implementation(bool bNewAiming)
 	{
 		WeaponFire->SetAiming(bNewAiming);
 	}
+}
+
+void AFPSRCharacter::ServerDash_Implementation(FVector DashDirection)
+{
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
+	// Cooldown gate (server-authoritative).
+	const float Now = World->GetTimeSeconds();
+	if ((Now - LastDashTime) < DashCooldown)
+	{
+		return;
+	}
+
+	FVector Direction = DashDirection;
+	Direction.Z = 0.0f;
+	if (Direction.IsNearlyZero())
+	{
+		Direction = GetActorForwardVector();
+		Direction.Z = 0.0f;
+	}
+	Direction = Direction.GetSafeNormal();
+	if (Direction.IsNearlyZero())
+	{
+		return;
+	}
+
+	LastDashTime = Now;
+
+	// Ignore other pawns (enemies + allies) for the dash window so the player can pass through a surround.
+	if (UCapsuleComponent* Capsule = GetCapsuleComponent())
+	{
+		Capsule->SetCollisionResponseToChannel(ECC_Pawn, ECR_Ignore);
+	}
+
+	// Launch along the dash direction (keep current vertical velocity so air dashes feel natural).
+	LaunchCharacter(Direction * DashSpeed, true, false);
+
+	// End the collision-ignore window after DashDuration.
+	World->GetTimerManager().SetTimer(DashEndTimerHandle, this, &AFPSRCharacter::EndDash, FMath::Max(0.01f, DashDuration), false);
+}
+
+void AFPSRCharacter::EndDash()
+{
+	if (UCapsuleComponent* Capsule = GetCapsuleComponent())
+	{
+		Capsule->SetCollisionResponseToChannel(ECC_Pawn, ECR_Block);
+	}
+}
+
+void AFPSRCharacter::ApplyContactDamage(float DamageAmount, AActor* DamageInstigator)
+{
+	if (!HasAuthority() || DamageAmount <= 0.0f)
+	{
+		return;
+	}
+	if (UAbilitySystemComponent* ASC = GetAbilitySystemComponent())
+	{
+		ASC->ApplyModToAttribute(UFPSRHealthSet::GetHealthAttribute(), EGameplayModOp::Additive, -DamageAmount);
+	}
+}
+
+void AFPSRCharacter::HandleOutOfHealth()
+{
+	// Placeholder: full Down-But-Not-Out / revive / respawn is P5 (Game.MD §2-13). Log for now.
+	UE_LOG(LogFPSR, Warning, TEXT("[Player] %s reached 0 health (DBNO/respawn handling is P5)."), *GetNameSafe(this));
 }
 
 void AFPSRCharacter::RequestReload()
