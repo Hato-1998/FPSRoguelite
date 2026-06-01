@@ -7,7 +7,7 @@
 **최종 갱신: 2026-06-01**
 
 ## 한 줄 요약
-P1 전투 슬라이스 + **P1.5-A 사격코어** + **반동(ADS 의존 재설계)** + **P1.5-B 탄약/재장전 + ADS(우클릭 FOV·확산·반동)** 코드 완료·빌드+스모크 통과. **사용자 BP 3종 생성 완료.** → 사용자 `IA_Reload`·`IA_ADS` 셋업 + DataAsset 튜닝 + PIE 확인 후 **P1 마무리 → phase 브랜치 머지**.
+**P1 + P1.5 완료** (전투 슬라이스 + 사격코어 + 탄약/재장전 + ADS + 반동 ADS의존/보간). 빌드+스모크+사용자 PIE/튜닝 통과. `phase/p1.5-b-ammo-reload` → `main` `--no-ff` 머지. → **다음: P2** (SpawnDirector/Flow-Field/Pooling + 대시).
 
 ## 🔴 새 세션 우선 작업
 
@@ -74,9 +74,8 @@ P1 전투 슬라이스 + **P1.5-A 사격코어** + **반동(ADS 의존 재설계
   - 무기 DataAsset은 위치 무관(BP 하드참조). FireMode: Rifle=FullAuto / Knife=Single·무반동
 
 ## 다음 단계
-- **PIE 테스트 통과 → P1 완료**
-- **P1.5-B 사격/이동 감각** — Game.MD §2-4-2. **MagSize+재장전(예비 탄약 무한)** + ADS. (GameConfirm 반영: ReserveAmmo 삭제로 범위 축소)
-- **P2**: SpawnDirector + Flow-Field + Pooling + Significance (적 300+ 안정) + **적 이속 ±10% 편차** + **적 근접 데미지·공격토큰 baseline** + **충돌무시 대시**. Game.MD §5·§7-3
+- ✅ **P1 + P1.5(A 사격코어 / B 탄약·재장전·ADS·반동) 완료** — 사용자 PIE 확인 + DataAsset 튜닝 완료 (2026-06-01). `phase/p1.5-b-ammo-reload` → `main` `--no-ff` 머지.
+- **▶ 다음: P2** — SpawnDirector + Flow-Field + Pooling + Significance (적 300+ 안정) + **적 이속 ±10% 편차** + **적 근접 데미지·공격토큰 baseline** + **충돌무시 대시**. Game.MD §5·§7-3. → main에서 `phase/p2-<키워드>` 분기로 시작.
 - **P3**: 공유XP + **레벨업 스택(프리즈 폐지)** + **정비시간 RunPhase** + **오프닝 카드 시드** + Card UI + 동적풀 + Rarity + 리롤 (정비시간 트리거는 P3 디버그→P4 미션 연동)
 
 ## 빌드 / 검증 방법
