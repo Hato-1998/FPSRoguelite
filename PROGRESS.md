@@ -7,10 +7,18 @@
 **최종 갱신: 2026-06-01**
 
 ## 한 줄 요약
-**P1+P1.5 + 하드닝 + P2 전체 → main 머지 완료**(`24422ac`). **P3 착수**: P3-A(런 상태) 코드 완료. 빌드+스모크 통과. → 다음 P3-B(XP 픽업+자석).
+**P2 전체 → main 머지 완료**(+대시 사용자콘텐츠 `4715138`). **P3-A·B 코드 완료**(런 상태 + XP픽업/자석). 빌드+스모크 통과. → 다음 P3-C(카드 데이터/로직).
 
-## ▶▶ 새 세션 우선 작업 = P3-A PIE 확인 → P3-B 착수
+## ▶▶ 새 세션 우선 작업 = P3-A/B PIE 확인 → P3-C 착수
 **브랜치**: `phase/p3-progression` (활성, main에서 분기·origin push). 구현=Haiku 위임 / 검증=Opus.
+
+### ✅ P3-B 코드 완료 (2026-06-01, 빌드+스모크 통과) — XP 픽업 + 자석
+- **신규 `AFPSRXPPickup`(`Pickup/`)**: 적 사망 드롭 경량 XP 오브(placeholder 스피어 메시). 서버 권위 Tick — 최근접 플레이어로 자석 이동, `CollectRadius` 접촉 시 `GameState->AddSharedXP` 후 `Destroy`.
+- **신규 `UFPSRPickupSubsystem`**: `SpawnXPPickup(Loc, XP)` — lazy-prune + **활성 cap `MaxActivePickups=150`**(§5) 초과 시 오브 없이 XP 직접 가산. `UPROPERTY(Transient) TArray<TObjectPtr>` GC-safe.
+- **적 사망 훅**: `AFPSREnemyBase::HandleDeath`가 풀 반환 전 `SpawnXPPickup(위치, XPReward=5)`.
+- **후속**: 자석 배칭/픽업 풀링, 클라 코스메틱+서버수령 분리, 인접 병합, PickupRadius 어트리뷰트 연동(§5).
+
+**⏳ P3-B PIE 확인**: 적 처치 → XP 오브 드롭 → 다가가면 빨려와 흡수 → 화면 readout `XP x/y` 증가, 누적 시 레벨업·Stack 증가.
 
 ### ✅ P3-A 코드 완료 (2026-06-01, 빌드+스모크 통과) — 런 진행 상태(GameState 호스팅)
 - **`AFPSRGameState`에 복제 런 상태**(Push Model, 서버권위, Game.MD §4-1 갱신: WorldSubsystem 복제불가 → GameState 호스팅): `SharedXP`/`PartyLevel`/`PendingLevelUps`(레벨업 스택)/`RunPhase`(Combat/Breather). `AddSharedXP`(레벨업 누적·프리즈 없음 §2-2)/`SetRunPhase`/`ConsumePendingLevelUp`(P3-D 카드선택용) + XP 임계 placeholder(`XPBaseRequired=100`+`(Lv-1)*XPPerLevel=50`, UCurveFloat는 후속 §2-8).

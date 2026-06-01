@@ -402,6 +402,7 @@ PROGRESS.md '사용자 대기 작업' 참조. 요약: **BP 3종 생성 + 참조 
 | 발사/근접 DrawDebug 라인·구체 | 검증용 시각화 | `#if !UE_BUILD_SHIPPING` 게이트 / VFX 교체 |
 | `FPSR.SpawnEnemies [N]` 콘솔 커맨드 | 적 스폰 테스트 | P2 SpawnDirector로 대체, shipping 제외 |
 | 적 큐브 placeholder 메시 | 엔진 기본 큐브 | 실제 적 메시 + 인스턴싱/VAT |
+| XP 픽업 placeholder 스피어(`AFPSRXPPickup`, ConstructorHelpers) | 엔진 기본 스피어 | 실제 XP 오브 VFX + 풀링/배칭(P3-B 후속) |
 | FP팔/3P 바디 메시 미할당 | 빈 SkeletalMesh | HeroDataAsset 메시 바인딩 |
 | 적 추격 = 단순 스티어링 | 최근접 추격 | P2 Flow-Field + separation + 배치 교체 |
 | PlayerController `[Input] Added DefaultMappingContext` Warning | 1회성 로그 | 다음 빌드 시 Verbose 다운그레이드 |
