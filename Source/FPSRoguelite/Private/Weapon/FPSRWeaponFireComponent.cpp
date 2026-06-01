@@ -125,13 +125,21 @@ void UFPSRWeaponFireComponent::FireOneShot()
 		return;
 	}
 
-	// Block firing on empty magazine or during reload (no auto-reload; player presses R).
-	if (Inventory->IsReloading() || Inventory->GetCurrentAmmo() <= 0)
+	const bool bMelee = (Weapon->Archetype == EFPSRWeaponArchetype::Melee);
+
+	// Ranged: block on empty magazine or during reload. Melee uses no ammo.
+	if (!bMelee && (Inventory->IsReloading() || Inventory->GetCurrentAmmo() <= 0))
 	{
 		return;
 	}
 
 	const FFPSRWeaponStatBlock& Stats = Weapon->BaseStats;
+
+	// Melee: enforce the configurable attack-rate cooldown (also rate-limits rapid clicks).
+	if (bMelee && (GetWorld()->GetTimeSeconds() - LastMeleeTime) < Stats.MeleeAttackDelay)
+	{
+		return;
+	}
 
 	// Activate the weapon's fire ability (trace + damage; predicted + server-authoritative).
 	if (Weapon->FireAbility)
@@ -142,22 +150,30 @@ void UFPSRWeaponFireComponent::FireOneShot()
 		}
 	}
 
-	// Camera recoil (local feel only). Vertical is applied smoothly in Tick via PendingRisePitch;
-	// horizontal follows a deterministic pattern + small random variance (Apex-style, not pure jitter).
-	const FVector2D ShotDelta = ComputeShotRecoilDelta(Stats, ShotsFiredThisSpray);
-	if (ShotDelta.Y != 0.0f)
+	if (bMelee)
 	{
-		PendingRisePitch += ShotDelta.Y;
+		// Melee has no camera recoil / bloom; just stamp the attack time.
+		LastMeleeTime = GetWorld()->GetTimeSeconds();
 	}
-	if (Stats.RecoilHorizontal != 0.0f)
+	else
 	{
-		const float Variance = FMath::FRandRange(-1.0f, 1.0f) * Stats.RecoilHorizontal * Stats.RecoilHorizontalVariance;
-		OwnerPawn->AddControllerYawInput(ShotDelta.X + Variance);
-	}
-	++ShotsFiredThisSpray;
+		// Camera recoil (local feel only). Vertical is applied smoothly in Tick via PendingRisePitch;
+		// horizontal follows a deterministic pattern + small random variance (Apex-style, not pure jitter).
+		const FVector2D ShotDelta = ComputeShotRecoilDelta(Stats, ShotsFiredThisSpray);
+		if (ShotDelta.Y != 0.0f)
+		{
+			PendingRisePitch += ShotDelta.Y;
+		}
+		if (Stats.RecoilHorizontal != 0.0f)
+		{
+			const float Variance = FMath::FRandRange(-1.0f, 1.0f) * Stats.RecoilHorizontal * Stats.RecoilHorizontalVariance;
+			OwnerPawn->AddControllerYawInput(ShotDelta.X + Variance);
+		}
+		++ShotsFiredThisSpray;
 
-	// Bloom grows with each shot.
-	CurrentBloom = FMath::Min(CurrentBloom + Stats.BloomPerShot, Stats.MaxBloom);
+		// Bloom grows with each shot.
+		CurrentBloom = FMath::Min(CurrentBloom + Stats.BloomPerShot, Stats.MaxBloom);
+	}
 }
 
 void UFPSRWeaponFireComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
@@ -203,6 +219,12 @@ void UFPSRWeaponFireComponent::TickComponent(float DeltaTime, ELevelTick TickTyp
 		}
 	}
 
+	// Melee: repeat attacks while the button is held; FireOneShot self-gates on MeleeAttackDelay.
+	if (bWantsToFire && Weapon->Archetype == EFPSRWeaponArchetype::Melee)
+	{
+		FireOneShot();
+	}
+
 	// Auto-reload when the magazine empties while the player is still firing.
 	MaybeAutoReload();
 
@@ -246,8 +268,8 @@ void UFPSRWeaponFireComponent::TickComponent(float DeltaTime, ELevelTick TickTyp
 	}
 
 #if ENABLE_DRAW_DEBUG
-	// Debug scaffolding (replaced by HUD in P3): show ammo for the local player.
-	if (GEngine)
+	// Debug scaffolding (replaced by HUD in P3): show ammo for the local player (ammo weapons only).
+	if (GEngine && Weapon->Archetype != EFPSRWeaponArchetype::Melee && Stats.MagSize > 0)
 	{
 		const int32 Ammo = Inventory->GetCurrentAmmo();
 		const int32 Mag = Inventory->GetCurrentMagSize();

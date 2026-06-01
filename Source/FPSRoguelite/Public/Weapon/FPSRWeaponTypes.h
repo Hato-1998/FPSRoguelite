@@ -103,4 +103,7 @@ struct FPSROGUELITE_API FFPSRWeaponStatBlock
 	// --- Melee ---
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Melee")
 	float MeleeRadius = 175.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Melee")
+	float MeleeAttackDelay = 0.5f; // seconds between melee attacks (also rate-limits rapid clicks)
 };

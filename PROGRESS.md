@@ -34,7 +34,8 @@ P1 전투 슬라이스 + **P1.5-A 사격코어** + **반동 오버홀** + **P1.5
    - **소비=발사 GA 서버 경로**: `GA_WeaponFire_Hitscan`에서 빈탄창/재장전 중 발사 차단 + 서버 `ConsumeAmmo(1)`.
    - **게이팅=오너 클라**: `FireComponent.CanFire()`(복제값 기반)로 빈탄창/재장전 중 발사 차단. 디버그 화면 탄약 표시(`#if ENABLE_DRAW_DEBUG`, HUD는 P3).
    - **자동 재장전(2026-06-01 추가)**: 연사 중 탄 소진 시 오너 클라가 `RequestReload`→`ServerReload` 1회 요청(`bReloadRequestPending` 가드), 완료 후 계속 누르면 자동 재발사. R 수동도 유지.
-   - **재장착 재리로드(2026-06-01 추가)**: 리로드 중 무기 전환 시 취소 + 떠난 슬롯 기억(`PendingReloadSlot`) → 그 무기 재장착 시 리로드 자동 재시작.
+   - **재장착 재리로드(2026-06-01 추가, 규칙 수정)**: 리로드 중 무기 전환 시 취소 + 떠난 슬롯 기억(`PendingReloadSlot`) → 재장착 시 **탄약 0일 때만** 리로드 재개. 탄약 남아있으면 취소 유지(부분 탄창 유지).
+   - **근접무기 처리(2026-06-01 추가)**: Archetype==Melee 기준 — **화면 반동 없음**(recoil/bloom 스킵) + **탄약 개념/디버그 표시 없음**(히트스캔만 소비) + 신규 스탯 `MeleeAttackDelay`(공격 간 딜레이, 누르고 있으면 그 간격으로 반복·빠른 클릭도 제한). **사용자 확인 필요: DA_Weapon_Knife Archetype = Melee.**
    - **입력**: `IA_Reload`(R)→`ServerReload` RPC→`StartReload`. **C++ 슬롯/바인딩만 구현, 에셋은 사용자 직접.**
    - **사용자 작업**: `IA_Reload`(Bool) 생성 → IMC_Default에 R 매핑(수동) → `BP_FPSRCharacter`의 `ReloadAction` 할당. (`DA_Weapon_Rifle` ReloadTime 1.5/MagSize 30 확인)
 

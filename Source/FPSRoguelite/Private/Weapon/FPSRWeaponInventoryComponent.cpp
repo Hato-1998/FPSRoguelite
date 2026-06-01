@@ -89,11 +89,15 @@ void UFPSRWeaponInventoryComponent::EquipSlot(int32 SlotIndex)
 	MARK_PROPERTY_DIRTY_FROM_NAME(UFPSRWeaponInventoryComponent, CurrentSlotIndex, this);
 	RefreshEquippedAbility();
 
-	// Re-equipping a weapon whose reload was cancelled mid-switch restarts its reload.
+	// Re-equipping a weapon whose reload was cancelled mid-switch resumes the reload ONLY if its
+	// magazine is empty. If ammo remains, the reload stays cancelled (player keeps the partial mag).
 	if (PendingReloadSlot == CurrentSlotIndex)
 	{
 		PendingReloadSlot = INDEX_NONE;
-		StartReload();
+		if (SlotAmmo.IsValidIndex(CurrentSlotIndex) && SlotAmmo[CurrentSlotIndex] <= 0)
+		{
+			StartReload();
+		}
 	}
 
 	UE_LOG(LogFPSR, Verbose, TEXT("[Weapon] Equipped slot %d"), SlotIndex);

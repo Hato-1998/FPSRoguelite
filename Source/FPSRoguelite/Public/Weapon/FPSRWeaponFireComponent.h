@@ -54,6 +54,7 @@ protected:
 	float CurrentBloom = 0.0f;
 
 	bool bReloadRequestPending = false; // guards against spamming the reload RPC each tick
+	float LastMeleeTime = -1000.0f; // world time of last melee attack (melee attack-rate cooldown)
 
 	// --- Recoil state (local feel only) ---
 	float RecoilDebtPitch = 0.0f;       // up-kick owed for downward recovery (raw input units)
