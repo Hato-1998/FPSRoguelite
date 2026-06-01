@@ -125,6 +125,12 @@ void AFPSRCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompo
 	if (EquipSlot1Action) { EIC->BindAction(EquipSlot1Action, ETriggerEvent::Started, this, &AFPSRCharacter::Input_EquipSlot1); }
 	if (EquipSlot2Action) { EIC->BindAction(EquipSlot2Action, ETriggerEvent::Started, this, &AFPSRCharacter::Input_EquipSlot2); }
 	if (EquipSlot3Action) { EIC->BindAction(EquipSlot3Action, ETriggerEvent::Started, this, &AFPSRCharacter::Input_EquipSlot3); }
+	if (ReloadAction) { EIC->BindAction(ReloadAction, ETriggerEvent::Started, this, &AFPSRCharacter::Input_Reload); }
+	if (ADSAction)
+	{
+		EIC->BindAction(ADSAction, ETriggerEvent::Started, this, &AFPSRCharacter::Input_ADSPressed);
+		EIC->BindAction(ADSAction, ETriggerEvent::Completed, this, &AFPSRCharacter::Input_ADSReleased);
+	}
 }
 
 void AFPSRCharacter::Input_MoveForward(const FInputActionValue& Value)
@@ -149,7 +155,15 @@ void AFPSRCharacter::Input_Look(const FInputActionValue& Value)
 {
 	const FVector2D LookAxis = Value.Get<FVector2D>();
 	AddControllerYawInput(LookAxis.X);
-	AddControllerPitchInput(-LookAxis.Y);
+
+	const float PitchInput = -LookAxis.Y; // negative = up, positive = down (matches AddControllerPitchInput)
+	AddControllerPitchInput(PitchInput);
+
+	// Forward downward input so manual recoil compensation cancels pending auto-recovery (no overshoot).
+	if (WeaponFire && PitchInput > 0.0f)
+	{
+		WeaponFire->NotifyPlayerPitchCompensation(PitchInput);
+	}
 }
 
 void AFPSRCharacter::Input_Fire(const FInputActionValue& Value)
@@ -172,12 +186,50 @@ void AFPSRCharacter::Input_EquipSlot1(const FInputActionValue& Value) { ServerEq
 void AFPSRCharacter::Input_EquipSlot2(const FInputActionValue& Value) { ServerEquipSlot(1); }
 void AFPSRCharacter::Input_EquipSlot3(const FInputActionValue& Value) { ServerEquipSlot(2); }
 
+void AFPSRCharacter::Input_Reload(const FInputActionValue& Value)
+{
+	ServerReload();
+}
+
+void AFPSRCharacter::Input_ADSPressed(const FInputActionValue& Value)
+{
+	if (WeaponFire) { WeaponFire->SetAiming(true); }
+	ServerSetAiming(true);
+}
+
+void AFPSRCharacter::Input_ADSReleased(const FInputActionValue& Value)
+{
+	if (WeaponFire) { WeaponFire->SetAiming(false); }
+	ServerSetAiming(false);
+}
+
 void AFPSRCharacter::ServerEquipSlot_Implementation(int32 SlotIndex)
 {
 	if (WeaponInventory)
 	{
 		WeaponInventory->EquipSlot(SlotIndex);
 	}
+}
+
+void AFPSRCharacter::ServerReload_Implementation()
+{
+	if (WeaponInventory)
+	{
+		WeaponInventory->StartReload();
+	}
+}
+
+void AFPSRCharacter::ServerSetAiming_Implementation(bool bNewAiming)
+{
+	if (WeaponFire)
+	{
+		WeaponFire->SetAiming(bNewAiming);
+	}
+}
+
+void AFPSRCharacter::RequestReload()
+{
+	ServerReload();
 }
 
 UAbilitySystemComponent* AFPSRCharacter::GetAbilitySystemComponent() const
