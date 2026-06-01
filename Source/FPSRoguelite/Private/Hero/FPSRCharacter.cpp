@@ -4,6 +4,8 @@
 #include "Core/FPSRPlayerState.h"
 #include "Core/FPSRLogChannels.h"
 #include "AbilitySystem/FPSRAbilitySystemComponent.h"
+#include "AbilitySystem/Attributes/FPSRHealthSet.h"
+#include "AbilitySystemComponent.h"
 #include "Weapon/FPSRWeaponInventoryComponent.h"
 #include "Weapon/FPSRWeaponFireComponent.h"
 #include "Weapon/FPSRWeaponDataAsset.h"
@@ -95,6 +97,18 @@ void AFPSRCharacter::InitAbilitySystem()
 	if (AbilitySystemComponent)
 	{
 		AbilitySystemComponent->InitAbilityActorInfo(PS, this);
+
+		// Bind health out-of-health callback (server-only).
+		if (HasAuthority())
+		{
+			if (const UFPSRHealthSet* HealthSet = AbilitySystemComponent->GetSet<UFPSRHealthSet>())
+			{
+				if (!HealthSet->OnOutOfHealth.IsBoundToObject(this))
+				{
+					HealthSet->OnOutOfHealth.AddUObject(this, &AFPSRCharacter::HandleOutOfHealth);
+				}
+			}
+		}
 	}
 }
 
@@ -225,6 +239,25 @@ void AFPSRCharacter::ServerSetAiming_Implementation(bool bNewAiming)
 	{
 		WeaponFire->SetAiming(bNewAiming);
 	}
+}
+
+
+void AFPSRCharacter::ApplyContactDamage(float DamageAmount, AActor* DamageInstigator)
+{
+	if (!HasAuthority() || DamageAmount <= 0.0f)
+	{
+		return;
+	}
+	if (UAbilitySystemComponent* ASC = GetAbilitySystemComponent())
+	{
+		ASC->ApplyModToAttribute(UFPSRHealthSet::GetHealthAttribute(), EGameplayModOp::Additive, -DamageAmount);
+	}
+}
+
+void AFPSRCharacter::HandleOutOfHealth()
+{
+	// Placeholder: full Down-But-Not-Out / revive / respawn is P5 (Game.MD §2-13). Log for now.
+	UE_LOG(LogFPSR, Warning, TEXT("[Player] %s reached 0 health (DBNO/respawn handling is P5)."), *GetNameSafe(this));
 }
 
 void AFPSRCharacter::RequestReload()

@@ -3,6 +3,7 @@
 #include "Enemy/FPSREnemySpawnSubsystem.h"
 #include "Enemy/FPSREnemyBase.h"
 #include "Enemy/FPSRFlowFieldSubsystem.h"
+#include "Hero/FPSRCharacter.h"
 #include "Core/FPSRLogChannels.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
@@ -104,22 +105,30 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 
 	++MovementFrameCounter;
 
-	// Cache alive player pawn locations once for this pass.
+	// Cache alive player pawn locations and pawns once for this pass.
+	TArray<APawn*, TInlineAllocator<4>> PlayerPawns;
 	TArray<FVector, TInlineAllocator<4>> PlayerLocations;
 	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
 	{
-		if (const APlayerController* PC = It->Get())
+		if (APlayerController* PC = It->Get())
 		{
-			if (const APawn* PlayerPawn = PC->GetPawn())
+			if (APawn* PlayerPawn = PC->GetPawn())
 			{
+				PlayerPawns.Add(PlayerPawn);
 				PlayerLocations.Add(PlayerPawn->GetActorLocation());
 			}
 		}
 	}
-	if (PlayerLocations.Num() == 0)
+	if (PlayerPawns.Num() == 0)
 	{
 		return;
 	}
+
+	// Per-player attacker counters for this pass (attack token gating).
+	TArray<int32, TInlineAllocator<4>> AttackersThisPass;
+	AttackersThisPass.Init(0, PlayerPawns.Num());
+
+	const float Now = World->GetTimeSeconds();
 
 	const UFPSRFlowFieldSubsystem* FlowField = World->GetSubsystem<UFPSRFlowFieldSubsystem>();
 
@@ -151,16 +160,17 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 
 		// Nearest player (2D).
 		float BestDistSq = TNumericLimits<float>::Max();
-		FVector BestPlayerLocation = PlayerLocations[0];
-		for (const FVector& PlayerLocation : PlayerLocations)
+		int32 BestPlayerIndex = 0;
+		for (int32 p = 0; p < PlayerLocations.Num(); ++p)
 		{
-			const float DistSq = FVector::DistSquaredXY(PlayerLocation, EnemyLocation);
+			const float DistSq = FVector::DistSquaredXY(PlayerLocations[p], EnemyLocation);
 			if (DistSq < BestDistSq)
 			{
 				BestDistSq = DistSq;
-				BestPlayerLocation = PlayerLocation;
+				BestPlayerIndex = p;
 			}
 		}
+		const FVector BestPlayerLocation = PlayerLocations[BestPlayerIndex];
 
 		// Distance LOD tier -> update stride + net update frequency (Game.MD §5).
 		int32 UpdateStride;
@@ -171,6 +181,20 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 		else                                   { UpdateStride = 8; NetFreq = 2.0f;  }
 
 		Enemy->SetNetUpdateFrequency(NetFreq);
+
+		// Contact attack: in range + cooldown elapsed + the target player's attack-token budget allows.
+		const float AttackRange = Enemy->GetAttackRange();
+		if (BestDistSq <= (AttackRange * AttackRange)
+			&& Enemy->CanAttack(Now)
+			&& AttackersThisPass[BestPlayerIndex] < AttackTokenLimit)
+		{
+			if (AFPSRCharacter* TargetChar = Cast<AFPSRCharacter>(PlayerPawns[BestPlayerIndex]))
+			{
+				TargetChar->ApplyContactDamage(Enemy->GetAttackDamage(), Enemy);
+				Enemy->NotifyAttacked(Now);
+				++AttackersThisPass[BestPlayerIndex];
+			}
+		}
 
 		// Spread throttled updates across frames by the enemy's stable id.
 		if (((MovementFrameCounter + static_cast<int32>(Enemy->GetUniqueID())) % UpdateStride) != 0)
@@ -198,6 +222,7 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 		Enemy->TickServerMovement(MoveDir, DeltaTime * UpdateStride);
 	}
 }
+
 
 FVector UFPSREnemySpawnSubsystem::ComputeSeparation(int32 AgentIndex, const TArray<FVector>& Locations, const TMap<FIntPoint, TArray<int32>>& SpatialHash) const
 {

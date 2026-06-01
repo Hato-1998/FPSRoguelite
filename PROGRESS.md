@@ -7,10 +7,17 @@
 **최종 갱신: 2026-06-01**
 
 ## 한 줄 요약
-**P1+P1.5 완료 + P1 리뷰 하드닝(main 머지) + P2-A·B1·B2 코드 완료**(풀링/디렉터/이속편차 + 중앙배치이동/LOD + Flow-Field/separation). 빌드+스모크 통과. **PIE 확인 대기**. → **다음: P2-C**(근접 데미지 + 공격토큰 + 충돌무시 대시).
+**P1+P1.5 + P1 리뷰 하드닝(main) + P2-A·B1·B2·C1 코드 완료**(풀링/디렉터/이속편차 + 배치이동/LOD + Flow-Field/separation + 적 근접데미지/공격토큰/플레이어 clamp). 빌드+스모크 통과. **PIE 확인 대기**. → **다음: P2-C2**(충돌무시 대시).
 
-## ▶▶ 새 세션 우선 작업 = P2-A/B PIE 확인 → P2-C 착수
+## ▶▶ 새 세션 우선 작업 = PIE 확인 → P2-C2(대시) 착수
 **브랜치**: `phase/p2-enemy-mass` (활성, main의 P1 하드닝 머지 반영됨). 구현=Haiku 위임 / 검증=Opus.
+
+### ✅ P2-C1 코드 완료 (2026-06-01, 빌드+스모크 통과) — 적 근접 데미지 + 공격토큰 + 플레이어 피해/clamp
+- **적 근접(contact) 공격**: `AFPSREnemyBase`에 `AttackRange=150/AttackDamage=8/AttackInterval=1.0`(EditDefaultsOnly) + `LastAttackTime` + `CanAttack/NotifyAttacked`. 배치 패스(`TickEnemyMovement`)에서 사거리 내 + 쿨다운 경과 + **공격토큰** 여유 시 데미지.
+- **공격토큰**(§2-6/§5): 플레이어당 패스당 공격 허용 적 수 상한 `AttackTokenLimit=10`(`AttackersThisPass[]`). 수백 마리 동시타격 방지.
+- **플레이어 피해=서버권위+clamp**: 적→`AFPSRCharacter::ApplyContactDamage`→`ASC->ApplyModToAttribute(Health, -dmg)`(엔진 확인: base값 수정·서버가드). `UFPSRHealthSet` `PreAttributeChange`/`PreAttributeBaseChange` clamp(Health 0~Max, MaxHealth≥1, 리뷰 #7 선반영) + `PostAttributeChange`에서 Health 0 도달 시 `OnOutOfHealth` 1회 브로드캐스트 → `AFPSRCharacter::HandleOutOfHealth`(현재 로그만; **완전 DBNO/리스폰=P5**).
+
+**⏳ C1 PIE 확인**: `FPSR.EnemyTarget 50` + 적에게 둘러싸이면 **체력 감소**(서버), 다수에 둘러싸여도 토큰으로 동시 피해 제한, 0 도달 시 로그(`[Player] ... reached 0 health`). 체력은 0~Max clamp.
 
 ### ✅ P2-B2 코드 완료 (2026-06-01, 빌드+스모크 통과) — Flow-Field 그리드 + separation
 - **신규 `UFPSRFlowFieldSubsystem`(UWorldSubsystem, 서버권위)**: 고정맵 2D 그리드(`CellSize=200`, `HalfExtent=10000`→100×100, 원점 중심), 타이머(`FlowUpdateInterval=0.2s`)로 **다중소스 BFS**(생존 플레이어=소스, 4-연결) 적분필드 → 8-이웃 최급강하로 셀별 흐름방향. `SampleFlowDirection(Loc)` O(1)(범위밖/미준비=Zero→호출측 직접방향 폴백). 장애물 없으면 ≈ 최근접 플레이어 방향이지만 적별 탐색을 그리드 1회로 분할상환 + 장애물 토대.
@@ -36,8 +43,8 @@ Object Pooling + SpawnDirector + 개체별 이속 ±10% 편차. (Flow-Field·Sig
 
 **⏳ PIE 확인 대기**: `FPSR.EnemyTarget 100`→~100 유지·처치 시 풀 재활용(`obj list class=FPSREnemyBase` 안정)·이속 편차로 분산 / `EnemyTarget 0` 중단 / `FPSR.SpawnEnemies 20` 버스트. (상세 플랜: `~/.claude/plans/curried-painting-quill.md`)
 
-### ▶ 다음: P2-C (근접 데미지 + 공격토큰 + 충돌무시 대시)
-P2-A/B 완료(풀+디렉터+LOD+Flow-Field+separation). P2-C = 적 근접 데미지(서버, HealthComponent→플레이어) + **공격토큰**(플레이어당 동시 공격자 상한, §2-6/§5) + **충돌무시 대시**(회피기, §2-13). 후속: NavMesh/동적 장애물(Flow-Field 셀 blocked), 데이터드리븐 적 로스터, 사망/스폰 FX, SignificanceManager 플러그인 평가.
+### ▶ 다음: P2-C2 (충돌무시 대시, §2-13)
+C1(적 근접데미지+공격토큰+플레이어 clamp) 완료. C2 = 입력 `IA_Dash`→로컬→`ServerDash` RPC(서버권위) → 짧은 런치 + 대시 창 동안 캡슐 `ECC_Pawn` 응답=Ignore(적·아군 통과) + 쿨다운 타임스탬프. **사용자 작업**: `IA_Dash`(Bool) 생성+IMC 매핑+`BP_FPSRCharacter` `DashAction` 할당. C2 후 **phase/p2-enemy-mass → main `--no-ff` 머지**(§6-7). 후속: NavMesh/동적장애물, 데이터드리븐 적 로스터, 사망/스폰 FX, SignificanceManager 플러그인 평가, 데미지 GE(실행계산)=P3/P4.
 
 ## 🔴 이전 완료 이력 (P1/P1.5)
 

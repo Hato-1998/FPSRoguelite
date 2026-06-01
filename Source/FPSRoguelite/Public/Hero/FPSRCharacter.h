@@ -36,8 +36,14 @@ public:
 	/** Owner-client: request a server-authoritative reload (used by auto-reload when the mag empties). */
 	void RequestReload();
 
+	/** Server: apply contact damage from an enemy to this character's Health (clamped via HealthSet). */
+	void ApplyContactDamage(float DamageAmount, AActor* DamageInstigator);
+
 protected:
 	void InitAbilitySystem();
+
+	/** Bound to the health set's OnOutOfHealth (server). Placeholder: logs; full DBNO/respawn is P5. */
+	void HandleOutOfHealth();
 
 	// Enhanced Input handlers
 	void Input_MoveForward(const FInputActionValue& Value);

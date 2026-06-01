@@ -73,6 +73,9 @@ private:
 	static constexpr float SeparationRadius = 120.0f;   // cm
 	static constexpr float SeparationStrength = 1.5f;   // weight of separation vs the unit flow direction
 
+	/** Max enemies allowed to deal contact damage to a single player per pass (attack token, Game.MD §2-6/§5). */
+	static constexpr int32 AttackTokenLimit = 10;
+
 	// Spawn ground-snap trace (decouples spawn Z from the player's jump height). Half-height matches
 	// AFPSREnemyBase's capsule (InitCapsuleSize(40, 90)).
 	static constexpr float SpawnGroundTraceUp = 500.0f;     // cm above the candidate to start the down-trace
