@@ -10,7 +10,15 @@
 **P2 전체 → main 머지 완료**(+대시 사용자콘텐츠 `4715138`). **P3-A·B 코드 완료**(런 상태 + XP픽업/자석). 빌드+스모크 통과. → 다음 P3-C(카드 데이터/로직).
 
 ## ▶▶ 새 세션 우선 작업 = P3-A/B PIE 확인 → P3-C 착수
-**브랜치**: `phase/p3-progression` (활성, main에서 분기·origin push). 구현=Haiku 위임 / 검증=Opus.
+**브랜치**: `phase/p3-progression` (활성, main에서 분기·origin push, 작업트리 클린·동기화). 구현=Haiku 위임 / 검증=Opus.
+
+### 🧭 핸드오프 요약 (이 줄부터 읽으면 즉시 이어받기 가능)
+- **현재 위치**: P3(진행 시스템) 진행 중. 분해 = **P3-A✅ → P3-B✅ → P3-C(다음) → P3-D**.
+- **다음 작업 = P3-C (카드 데이터/로직, 새 작업이므로 플랜 우선)**: `UCardDataAsset`(Scope=Character/ThisWeapon/AllWeapons, Rarity 4단계, AppliedEffect=GE, Weight) + 카드풀 + **Rarity 가중 추첨**(Luck/RarityBonus) + **리롤 3회**(RunRerollCharges, 서버 차감) + 카드 적용=플레이어 ASC에 GE. 서버 권위. (Game.MD §2-3) → 이후 **P3-D**(CommonUI 뷰포트 설정 + 정비시간 3카드 선택 위젯 + 오프닝 시드 1~2장 + 공유 XP바 HUD).
+- **⏳ 미확인 PIE(사용자)**: P2 전체(스웜 분산/풀 재활용/LOD/근접피해/대시) + P3-A/B(`FPSR.AddXP`·`FPSR.SetPhase`·XP 오브 흡수). 각 단계 ⏳ 항목 참조. **코드는 빌드+스모크 통과 상태**.
+- **🧹 housekeeping(미처리)**: 머지 완료된 원격 브랜치 `phase/p1-review-hardening`, 오래된 `phase/p1.5-b-ammo-reload` 삭제 보류(사용자 확인 시 정리).
+- **규칙(메모리 저장됨)**: Phase 종료 시 해당 Phase 사용자 콘텐츠(에셋/BP/IMC) 동반 커밋 여부를 사용자에게 물을 것.
+- **빌드/검증**: §6-6 (`Build.bat FPSRogueliteEditor ... -WaitMutex` / 헤드리스 스모크 `FPSRoguelite.Smoke.ModuleLoads`). 구현=Haiku 위임, 검증=Opus 직접(§6-5).
 
 ### ✅ P3-B 코드 완료 (2026-06-01, 빌드+스모크 통과) — XP 픽업 + 자석
 - **신규 `AFPSRXPPickup`(`Pickup/`)**: 적 사망 드롭 경량 XP 오브(placeholder 스피어 메시). 서버 권위 Tick — 최근접 플레이어로 자석 이동, `CollectRadius` 접촉 시 `GameState->AddSharedXP` 후 `Destroy`.
@@ -27,8 +35,8 @@
 
 **⏳ P3-A PIE 확인**: `FPSR.AddXP 120`→레벨업·Stack 증가(화면 readout) / `FPSR.SetPhase breather`→적 스폰 정지·피해 없음 / `combat`→재개. (정비시간 카드 소비 UI는 P3-D.)
 
-### 사용자 대기(P2): 대시 입력
-`IA_Dash`(Bool) 에셋 생성 + IMC_Default 매핑 + `BP_FPSRCharacter` `DashAction` 할당(기존 IA_Reload/ADS 패턴).
+### ✅ P2 대시 사용자 콘텐츠 — 커밋 완료 (2026-06-01)
+`IA_Dash` + `IMC_Default`(매핑) + `BP_FPSRPlayer`(DashAction 할당) → main `4715138` 커밋·LFS 푸시 + p3 브랜치 머지. PIE 대시 정상 작동 사용자 확인됨.
 
 ### ✅ P2-C2 코드 완료 (2026-06-01, 빌드+스모크 통과) — 충돌무시 대시 (§2-13)
 - `AFPSRCharacter`: `IA_Dash`→`Input_Dash`(이동입력 방향, 없으면 정면) → `ServerDash(Dir)` RPC(서버권위, ServerReload 패턴).
