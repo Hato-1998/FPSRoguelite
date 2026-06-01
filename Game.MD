@@ -215,7 +215,7 @@ Source/FPSRoguelite/Public/
 ├── Card/             CardDataAsset(Scope), CardPool, DrawSystem, Reroll
 ├── Enemy/            경량 풀액터, HealthComponent, AttackType, FlowField, ScalingProfile
 ├── Boss/             ABossBase, BossDefinition, StateTree
-├── Run/              RunManagerSubsystem(공유XP/레벨/스택/정비시간 RunPhase), SpawnDirector, TimeGateDirector
+├── Run/              SpawnDirector, TimeGateDirector  ※ 공유XP/레벨/레벨업스택/RunPhase = **복제 필요 → `AFPSRGameState` 호스팅**(Push Model, 서버 권위). WorldSubsystem은 복제 불가라 런 상태는 GameState에 둔다(P3-A 확정 2026-06-01). 무거운 서버 로직이 생기면 RunManager 서브시스템을 facade로 추가 검토.
 ├── Pickup/           범용 PickupActor + PickupDefinition(자석)
 ├── MetaProgression/  SaveGame, UpgradeTree, Subsystem
 ├── Performance/      ActorPool, SignificanceConfig, 인스턴싱

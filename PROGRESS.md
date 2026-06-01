@@ -7,11 +7,20 @@
 **최종 갱신: 2026-06-01**
 
 ## 한 줄 요약
-**P1+P1.5 + P1 리뷰 하드닝(main) + P2 전체(A·B1·B2·C1·C2) 코드 완료**. 빌드+스모크 통과. **PIE 확인 + phase→main 머지 대기**.
+**P1+P1.5 + 하드닝 + P2 전체 → main 머지 완료**(`24422ac`). **P3 착수**: P3-A(런 상태) 코드 완료. 빌드+스모크 통과. → 다음 P3-B(XP 픽업+자석).
 
-## ▶▶ 새 세션 우선 작업 = P2 통합 PIE 확인 → phase/p2-enemy-mass → main `--no-ff` 머지(§6-7)
-**브랜치**: `phase/p2-enemy-mass` (활성, main의 P1 하드닝 머지 반영됨). 구현=Haiku 위임 / 검증=Opus.
-**사용자 작업(대시 입력)**: `IA_Dash`(Bool) 에셋 생성 + IMC_Default 매핑 + `BP_FPSRCharacter` `DashAction` 할당(기존 IA_Reload/ADS 패턴).
+## ▶▶ 새 세션 우선 작업 = P3-A PIE 확인 → P3-B 착수
+**브랜치**: `phase/p3-progression` (활성, main에서 분기·origin push). 구현=Haiku 위임 / 검증=Opus.
+
+### ✅ P3-A 코드 완료 (2026-06-01, 빌드+스모크 통과) — 런 진행 상태(GameState 호스팅)
+- **`AFPSRGameState`에 복제 런 상태**(Push Model, 서버권위, Game.MD §4-1 갱신: WorldSubsystem 복제불가 → GameState 호스팅): `SharedXP`/`PartyLevel`/`PendingLevelUps`(레벨업 스택)/`RunPhase`(Combat/Breather). `AddSharedXP`(레벨업 누적·프리즈 없음 §2-2)/`SetRunPhase`/`ConsumePendingLevelUp`(P3-D 카드선택용) + XP 임계 placeholder(`XPBaseRequired=100`+`(Lv-1)*XPPerLevel=50`, UCurveFloat는 후속 §2-8).
+- **SpawnDirector 게이팅**: `TickDirector`가 `Breather`면 스폰 정지(§2-2), `TickEnemyMovement` 공격도 `bCombatPhase` 게이트(안전구간 무피해). 이동은 유지.
+- **디버그**: 콘솔 `FPSR.AddXP [N]`/`FPSR.SetPhase [combat|breather]`(#if !UE_BUILD_SHIPPING) + 캐릭터 화면 readout `Lv n XP x/y Stack s [Phase]`(ENABLE_DRAW_DEBUG).
+
+**⏳ P3-A PIE 확인**: `FPSR.AddXP 120`→레벨업·Stack 증가(화면 readout) / `FPSR.SetPhase breather`→적 스폰 정지·피해 없음 / `combat`→재개. (정비시간 카드 소비 UI는 P3-D.)
+
+### 사용자 대기(P2): 대시 입력
+`IA_Dash`(Bool) 에셋 생성 + IMC_Default 매핑 + `BP_FPSRCharacter` `DashAction` 할당(기존 IA_Reload/ADS 패턴).
 
 ### ✅ P2-C2 코드 완료 (2026-06-01, 빌드+스모크 통과) — 충돌무시 대시 (§2-13)
 - `AFPSRCharacter`: `IA_Dash`→`Input_Dash`(이동입력 방향, 없으면 정면) → `ServerDash(Dir)` RPC(서버권위, ServerReload 패턴).
