@@ -41,7 +41,7 @@ P1 전투 슬라이스 + **P1.5-A 사격코어** + **반동(ADS 의존 재설계
 
 **5) P1.5-B (2/2) ADS + 반동 ADS의존 재설계 — ✅ 코드 완료 (2026-06-01, 빌드+스모크 통과)**
    - **ADS(우클릭 hold)**: FOV 줌(`FireComponent`가 카메라 캐시·`FInterpTo`) + 확산 배율(GA, 서버 포함) + 입력 로컬+`ServerSetAiming` RPC. 무기별 `bHasADS`(근접/무ADS=false). 신규 스탯 `ADSFieldOfView/ADSSpreadMultiplier/ADSInterpSpeed`.
-   - **반동 ADS의존 재설계(레퍼런스 Apex AR/R99)**: 힙=수직 약(`HipVerticalScale`)+수평 랜덤 강(`HipHorizontalRandom`)→산탄 / ADS=수직 강(`ADSVerticalScale`)+랜덤 약(`ADSHorizontalRandom`)→학습가능 climbing 패턴. 산포 주동력=확산(힙 넓게/ADS `ADSSpreadMultiplier` 좁게). 기존 `RecoilHorizontalVariance`·`ADSRecoilMultiplier` 제거. `FPSR.RecoilPreview`는 ADS climb 표시.
+   - **반동 ADS의존 재설계(레퍼런스 Apex AR/R99)**: 힙=수직 약(`HipVerticalScale`)+수평 랜덤 강(`HipHorizontalRandom`)→산탄 / ADS=수직 강(`ADSVerticalScale`)+랜덤 약(`ADSHorizontalRandom`)→학습가능 climbing 패턴. 산포 주동력=확산(힙 넓게/ADS `ADSSpreadMultiplier` 좁게). 기존 `RecoilHorizontalVariance`·`ADSRecoilMultiplier` 제거. `FPSR.RecoilPreview`는 ADS climb 표시. **수평 반동도 수직처럼 보간(`PendingRiseYaw`)해 즉발 jitter(화면 흔들림) 제거** (2026-06-01).
    - **사용자 작업**: `IA_ADS`(Bool) 생성→IMC 우클릭 매핑→`BP_FPSRCharacter` `ADSAction` 할당. `DA_Weapon_Rifle` `bHasADS=true`+반동/확산 튜닝(`FPSR.RecoilPreview`로 확인). `DA_Weapon_Knife` `bHasADS=false`.
 
 **in-flight(병행/이후):** 사용자 BP 3종 생성 완료(BP_FPSRGameMode/BP_FPSRPlayer/BP_FPSRPC) → IA_Reload/IA_ADS 셋업 + DataAsset 튜닝 → PIE 확인 → P1 마무리·머지

@@ -173,7 +173,7 @@ void UFPSRWeaponFireComponent::FireOneShot()
 		if (Stats.RecoilHorizontal != 0.0f)
 		{
 			const float Variance = FMath::FRandRange(-1.0f, 1.0f) * Stats.RecoilHorizontal * HRandom;
-			OwnerPawn->AddControllerYawInput(ShotDelta.X + Variance); // deterministic pattern + scaled random
+			PendingRiseYaw += ShotDelta.X + Variance; // smoothed in Tick (was instant) to avoid jitter
 		}
 		++ShotsFiredThisSpray;
 
@@ -257,6 +257,14 @@ void UFPSRWeaponFireComponent::TickComponent(float DeltaTime, ELevelTick TickTyp
 		OwnerPawn->AddControllerPitchInput(-Apply); // negative = up
 		PendingRisePitch -= Apply;
 		RecoilDebtPitch += Apply;
+	}
+
+	// 1b) Smoothly apply pending horizontal recoil (signed; no debt — horizontal is not auto-recovered).
+	if (PendingRiseYaw != 0.0f)
+	{
+		const float ApplyYaw = FMath::Sign(PendingRiseYaw) * FMath::Min(Stats.RecoilRiseRate * DeltaTime, FMath::Abs(PendingRiseYaw));
+		OwnerPawn->AddControllerYawInput(ApplyYaw);
+		PendingRiseYaw -= ApplyYaw;
 	}
 
 	// 2) Player's manual downward compensation pays down the debt (it already moved the camera in

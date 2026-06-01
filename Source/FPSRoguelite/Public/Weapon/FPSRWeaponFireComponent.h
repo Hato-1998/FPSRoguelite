@@ -70,6 +70,7 @@ protected:
 	// --- Recoil state (local feel only) ---
 	float RecoilDebtPitch = 0.0f;       // up-kick owed for downward recovery (raw input units)
 	float PendingRisePitch = 0.0f;      // not-yet-applied up-kick, smoothed in over time
+	float PendingRiseYaw = 0.0f;        // not-yet-applied horizontal recoil, smoothed in over time (no recovery)
 	float PlayerPitchCompensation = 0.0f; // player's downward look input this frame, consumes debt
 	int32 ShotsFiredThisSpray = 0;      // shot index within current trigger hold (horizontal pattern)
 };
