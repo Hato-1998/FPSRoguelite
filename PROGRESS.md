@@ -7,18 +7,29 @@
 **최종 갱신: 2026-06-01**
 
 ## 한 줄 요약
-**P2 전체 → main 머지 완료**(+대시 사용자콘텐츠 `4715138`). **P3-A·B 코드 완료**(런 상태 + XP픽업/자석). 빌드+스모크 통과. → 다음 P3-C(카드 데이터/로직).
+**P2 전체 → main 머지 완료**(+대시 사용자콘텐츠 `4715138`). **P3-A·B·C 코드 완료**(런 상태 + XP픽업/자석 + 카드 데이터/로직). 빌드+스모크+Codex 통과. → 다음 P3-D(카드 UI/오프닝시드/공유XP바 HUD).
 
-## ▶▶ 새 세션 우선 작업 = P3-A/B PIE 확인 → P3-C 착수
-**브랜치**: `phase/p3-progression` (활성, main에서 분기·origin push, 작업트리 클린·동기화). 구현=Haiku 위임 / 검증=Opus.
+## ▶▶ 새 세션 우선 작업 = P3-A/B/C PIE 확인 → P3-D 착수
+**브랜치**: `phase/p3-progression` (활성, main에서 분기·origin push). 구현=Haiku 위임 / 검증=Opus.
 
 ### 🧭 핸드오프 요약 (이 줄부터 읽으면 즉시 이어받기 가능)
-- **현재 위치**: P3(진행 시스템) 진행 중. 분해 = **P3-A✅ → P3-B✅ → P3-C(다음) → P3-D**.
-- **다음 작업 = P3-C (카드 데이터/로직, 새 작업이므로 플랜 우선)**: `UCardDataAsset`(Scope=Character/ThisWeapon/AllWeapons, Rarity 4단계, AppliedEffect=GE, Weight) + 카드풀 + **Rarity 가중 추첨**(Luck/RarityBonus) + **리롤 3회**(RunRerollCharges, 서버 차감) + 카드 적용=플레이어 ASC에 GE. 서버 권위. (Game.MD §2-3) → 이후 **P3-D**(CommonUI 뷰포트 설정 + 정비시간 3카드 선택 위젯 + 오프닝 시드 1~2장 + 공유 XP바 HUD).
+- **현재 위치**: P3(진행 시스템) 진행 중. 분해 = **P3-A✅ → P3-B✅ → P3-C✅ → P3-D(다음)**.
+- **다음 작업 = P3-D (카드 UI, 새 작업이므로 플랜 우선)**: CommonUI 뷰포트/입력 설정(`CommonGameViewportClient` — §8 LogUIActionRouter 해결) + **정비시간 3카드 선택 위젯**(레벨업 스택 연속 소비, 본인 화면 오버레이) + **오프닝 시드 1~2장**(런 시작, `ApplyCard(..., bConsumeLevelUp=false)`) + **공유 XP바 HUD**(GameState `SharedXP/PartyLevel/PendingLevelUps` 바인딩) + 리롤 버튼(PlayerState `RunRerollCharges`). **배선**: 클라 위젯 → PlayerController Server RPC → `UFPSRCardSubsystem::DrawCards/ApplyCard/TryReroll`. (Game.MD §2-2/§2-3)
+- **P3-C가 P3-D에 노출한 서버 API**: `World->GetSubsystem<UFPSRCardSubsystem>()` → `DrawCards(PC, N, Exclude)`(Character scope만·가중추첨) / `ApplyCard(PC, Card, bConsumeLevelUp)`(레벨업 게이트, 오프닝시드=false) / `TryReroll(PC)`(PlayerState 차감). 풀 주입=`BP_FPSRGameMode.CardPool`.
 - **⏳ 미확인 PIE(사용자)**: P2 전체(스웜 분산/풀 재활용/LOD/근접피해/대시) + P3-A/B(`FPSR.AddXP`·`FPSR.SetPhase`·XP 오브 흡수). 각 단계 ⏳ 항목 참조. **코드는 빌드+스모크 통과 상태**.
 - **🧹 housekeeping(미처리)**: 머지 완료된 원격 브랜치 `phase/p1-review-hardening`, 오래된 `phase/p1.5-b-ammo-reload` 삭제 보류(사용자 확인 시 정리).
 - **규칙(메모리 저장됨)**: Phase 종료 시 해당 Phase 사용자 콘텐츠(에셋/BP/IMC) 동반 커밋 여부를 사용자에게 물을 것.
 - **빌드/검증**: §6-6 (`Build.bat FPSRogueliteEditor ... -WaitMutex` / 헤드리스 스모크 `FPSRoguelite.Smoke.ModuleLoads`). 구현=Haiku 위임, 검증=Opus 직접(§6-5).
+
+### ✅ P3-C 코드 완료 (2026-06-01, 빌드+스모크+Codex 통과) — 카드 데이터/로직
+- **신규 `Card/`**: `FPSRCardTypes.h`(`ECardScope` Character/ThisWeapon/AllWeapons, `ECardRarity` Common/Rare/Epic/Legendary) + `UFPSRCardDataAsset`(DisplayName/Description/Scope/Rarity/`AppliedEffect`=GE/Weight, 스탯 하드코딩 없음 §2-3) + `UFPSRCardPoolDataAsset`(Cards[] + 등급별 기본가중치 4종 + Luck/RarityBonus 스케일).
+- **신규 `UFPSRCardSubsystem`(UWorldSubsystem, 서버권위)**: `DrawCards`(풀+보유무기 `WeaponCards` 후보 → **Rarity 가중 비복원 추첨**, 유효가중치=`RarityBase×Weight×(1+RarityBonus·scale+Luck·scale)×등급tier`) / `ApplyCard(PC,Card,bConsumeLevelUp=true)`(Character scope GE→플레이어 ASC) / `TryReroll`. 풀 주입=`AFPSRGameMode::BeginPlay`→`SetActivePool(CardPool)`(BP 할당, 경로 하드코딩 없음).
+- **리롤=플레이어별**(사용자 확정): `AFPSRPlayerState`에 `RunRerollCharges`(기본 3, Push Model 복제, 서버 BeginPlay 초기화) + `ConsumeRerollCharge/ResetRerollCharges/SetRerollCharges`.
+- **신규 글로벌 속성**: `UFPSRCombatSet`에 `Luck`/`RarityBonus`(기본 0, 기존 GlobalCrit 패턴 미러) — 추첨 가중·향후 카드/메타 타깃(§4-1).
+- **Codex 리뷰 반영(2건 P2)**: ① **레벨업 게이트** — `ApplyCard`가 `bConsumeLevelUp` 시 `PendingLevelUps>0` 선검사 후 GE 적용·소비를 원자적으로(무료 지급 방지), 오프닝시드는 `false`로 게이트 우회(§2-2). ② **무기 카드 거부** — ThisWeapon/AllWeapons는 추첨에서 제외 + `ApplyCard` 거부(선택 낭비 방지), 무기스탯 적용은 P4.
+- **디버그 콘솔**(`#if !UE_BUILD_SHIPPING`): `FPSR.DrawCards [N]` / `FPSR.ApplyCard [index]` / `FPSR.Reroll [N]` / `FPSR.RerollCharges [N]`.
+
+**⏳ P3-C PIE 확인(사용자 콘텐츠 필요)**: 샘플 카드 DA들 + `DA_CardPool`(+GE 에셋) 생성 → `BP_FPSRGameMode.CardPool` 할당 → `FPSR.AddXP 120`(레벨업 큐)→`FPSR.DrawCards 3`(로그에 3장)→`FPSR.ApplyCard 0`(applied, GE 적용)→레벨업 큐 없으면 rejected. `FPSR.RerollCharges 3`→`FPSR.Reroll`→차감·재추첨.
 
 ### ✅ P3-B 코드 완료 (2026-06-01, 빌드+스모크 통과) — XP 픽업 + 자석
 - **신규 `AFPSRXPPickup`(`Pickup/`)**: 적 사망 드롭 경량 XP 오브(placeholder 스피어 메시). 서버 권위 Tick — 최근접 플레이어로 자석 이동, `CollectRadius` 접촉 시 `GameState->AddSharedXP` 후 `Destroy`.

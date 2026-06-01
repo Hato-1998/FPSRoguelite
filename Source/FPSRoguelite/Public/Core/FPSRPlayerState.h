@@ -28,6 +28,25 @@ public:
 	UFPSRHealthSet* GetHealthSet() const { return HealthSet; }
 	UFPSRCombatSet* GetCombatSet() const { return CombatSet; }
 
+	UFUNCTION(BlueprintPure, Category = "FPSR|Run")
+	int32 GetRunRerollCharges() const { return RunRerollCharges; }
+
+	/** Server: consume one reroll charge. Returns true if successful. */
+	bool ConsumeRerollCharge();
+
+	/** Server: reset reroll charges to default. */
+	void ResetRerollCharges();
+
+	/** Server: set reroll charges to a specific value. */
+	void SetRerollCharges(int32 NewCharges);
+
+	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
+	virtual void BeginPlay() override;
+
+protected:
+	UFUNCTION()
+	void OnRep_RunRerollCharges();
+
 private:
 	UPROPERTY(VisibleAnywhere, Category = "FPSR|Abilities")
 	TObjectPtr<UFPSRAbilitySystemComponent> AbilitySystemComponent;
@@ -37,4 +56,10 @@ private:
 
 	UPROPERTY()
 	TObjectPtr<UFPSRCombatSet> CombatSet;
+
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Run")
+	int32 DefaultRerollCharges = 3;
+
+	UPROPERTY(ReplicatedUsing = OnRep_RunRerollCharges)
+	int32 RunRerollCharges = 3;
 };
