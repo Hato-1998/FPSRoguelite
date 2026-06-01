@@ -149,7 +149,15 @@ void AFPSRCharacter::Input_Look(const FInputActionValue& Value)
 {
 	const FVector2D LookAxis = Value.Get<FVector2D>();
 	AddControllerYawInput(LookAxis.X);
-	AddControllerPitchInput(-LookAxis.Y);
+
+	const float PitchInput = -LookAxis.Y; // negative = up, positive = down (matches AddControllerPitchInput)
+	AddControllerPitchInput(PitchInput);
+
+	// Forward downward input so manual recoil compensation cancels pending auto-recovery (no overshoot).
+	if (WeaponFire && PitchInput > 0.0f)
+	{
+		WeaponFire->NotifyPlayerPitchCompensation(PitchInput);
+	}
 }
 
 void AFPSRCharacter::Input_Fire(const FInputActionValue& Value)

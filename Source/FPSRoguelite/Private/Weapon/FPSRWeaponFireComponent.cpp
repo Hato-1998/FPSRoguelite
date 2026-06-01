@@ -8,10 +8,30 @@
 #include "AbilitySystemComponent.h"
 #include "AbilitySystemGlobals.h"
 #include "GameFramework/Pawn.h"
+#include "HAL/IConsoleManager.h"
+#include "DrawDebugHelpers.h"
+#include "GameFramework/PlayerController.h"
+#include "Camera/PlayerCameraManager.h"
 
 UFPSRWeaponFireComponent::UFPSRWeaponFireComponent()
 {
 	PrimaryComponentTick.bCanEverTick = true;
+}
+
+FVector2D UFPSRWeaponFireComponent::ComputeShotRecoilDelta(const FFPSRWeaponStatBlock& Stats, int32 ShotIndex)
+{
+	// Deterministic pattern (no random variance): Pitch = up-kick, Yaw = gentle horizontal drift.
+	const float Pitch = Stats.RecoilVertical;
+	const float Yaw = FMath::Sin(ShotIndex * Stats.RecoilHorizontalPatternFreq) * Stats.RecoilHorizontal;
+	return FVector2D(Yaw, Pitch);
+}
+
+void UFPSRWeaponFireComponent::NotifyPlayerPitchCompensation(float DownAmount)
+{
+	if (DownAmount > 0.0f)
+	{
+		PlayerPitchCompensation += DownAmount;
+	}
 }
 
 UFPSRWeaponInventoryComponent* UFPSRWeaponFireComponent::GetInventory() const
@@ -36,6 +56,7 @@ void UFPSRWeaponFireComponent::StartFiring()
 
 	bWantsToFire = true;
 	TimeSinceLastShot = 0.0f;
+	ShotsFiredThisSpray = 0;
 
 	if (Weapon->BaseStats.FireMode == EFPSRFireMode::Burst)
 	{
@@ -53,6 +74,7 @@ void UFPSRWeaponFireComponent::StartFiring()
 void UFPSRWeaponFireComponent::StopFiring()
 {
 	bWantsToFire = false;
+	ShotsFiredThisSpray = 0;
 }
 
 void UFPSRWeaponFireComponent::FireOneShot()
@@ -81,16 +103,19 @@ void UFPSRWeaponFireComponent::FireOneShot()
 		}
 	}
 
-	// Camera recoil (local feel only).
-	if (Stats.RecoilVertical != 0.0f)
+	// Camera recoil (local feel only). Vertical is applied smoothly in Tick via PendingRisePitch;
+	// horizontal follows a deterministic pattern + small random variance (Apex-style, not pure jitter).
+	const FVector2D ShotDelta = ComputeShotRecoilDelta(Stats, ShotsFiredThisSpray);
+	if (ShotDelta.Y != 0.0f)
 	{
-		OwnerPawn->AddControllerPitchInput(-Stats.RecoilVertical);
-		AccumulatedRecoilPitch += Stats.RecoilVertical;
+		PendingRisePitch += ShotDelta.Y;
 	}
 	if (Stats.RecoilHorizontal != 0.0f)
 	{
-		OwnerPawn->AddControllerYawInput(FMath::FRandRange(-Stats.RecoilHorizontal, Stats.RecoilHorizontal));
+		const float Variance = FMath::FRandRange(-1.0f, 1.0f) * Stats.RecoilHorizontal * Stats.RecoilHorizontalVariance;
+		OwnerPawn->AddControllerYawInput(ShotDelta.X + Variance);
 	}
+	++ShotsFiredThisSpray;
 
 	// Bloom grows with each shot.
 	CurrentBloom = FMath::Min(CurrentBloom + Stats.BloomPerShot, Stats.MaxBloom);
@@ -139,12 +164,37 @@ void UFPSRWeaponFireComponent::TickComponent(float DeltaTime, ELevelTick TickTyp
 		}
 	}
 
-	// Recoil recovery when not actively firing (returns the view toward pre-spray).
-	if (!bWantsToFire && AccumulatedRecoilPitch > 0.0f)
+	// --- Recoil pitch handling (smoothed rise + debt-aware recovery + player compensation) ---
+	// 1) Smoothly apply any pending up-kick (snappy rise), accumulating recovery debt.
+	if (PendingRisePitch > 0.0f)
 	{
-		const float Recover = FMath::Min(Stats.RecoilRecoveryRate * DeltaTime, AccumulatedRecoilPitch);
-		OwnerPawn->AddControllerPitchInput(Recover);
-		AccumulatedRecoilPitch -= Recover;
+		const float Apply = FMath::Min(Stats.RecoilRiseRate * DeltaTime, PendingRisePitch);
+		OwnerPawn->AddControllerPitchInput(-Apply); // negative = up
+		PendingRisePitch -= Apply;
+		RecoilDebtPitch += Apply;
+	}
+
+	// 2) Player's manual downward compensation pays down the debt (it already moved the camera in
+	//    Input_Look) so auto-recovery does not stack on top of it and overshoot below the aim point.
+	if (PlayerPitchCompensation > 0.0f && RecoilDebtPitch > 0.0f)
+	{
+		const float Consumed = FMath::Min(PlayerPitchCompensation, RecoilDebtPitch);
+		RecoilDebtPitch -= Consumed;
+	}
+	PlayerPitchCompensation = 0.0f;
+
+	// 3) Auto-recover the remaining (un-compensated) debt downward when not firing.
+	//    Gated per weapon: Always = on, Never = off, Auto = on only for single-shot weapons
+	//    (snipers/railguns). Rapid-fire (FullAuto/Burst) does NOT auto-recover — the player pulls
+	//    the view back down manually, which feels right for sustained sprays.
+	const bool bAutoRecover =
+		(Stats.RecoilRecovery == ERecoilRecovery::Always) ||
+		(Stats.RecoilRecovery == ERecoilRecovery::Auto && Stats.FireMode == EFPSRFireMode::Single);
+	if (bAutoRecover && !bWantsToFire && RecoilDebtPitch > 0.0f)
+	{
+		const float Recover = FMath::Min(Stats.RecoilRecoveryRate * DeltaTime, RecoilDebtPitch);
+		OwnerPawn->AddControllerPitchInput(Recover); // positive = down
+		RecoilDebtPitch -= Recover;
 	}
 
 	// Bloom recovery.
@@ -153,3 +203,73 @@ void UFPSRWeaponFireComponent::TickComponent(float DeltaTime, ELevelTick TickTyp
 		CurrentBloom = FMath::Max(0.0f, CurrentBloom - Stats.BloomRecoveryRate * DeltaTime);
 	}
 }
+
+// ---- Debug: preview the current weapon's recoil spray pattern in front of the local player ----
+static FAutoConsoleCommandWithWorldAndArgs GFPSRRecoilPreviewCmd(
+	TEXT("FPSR.RecoilPreview"),
+	TEXT("Draw the equipped weapon's recoil spray pattern (deterministic, no variance) in front of the local player. Usage: FPSR.RecoilPreview [shots]"),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic([](const TArray<FString>& Args, UWorld* World)
+	{
+		if (!World)
+		{
+			return;
+		}
+
+		int32 Shots = 30;
+		if (Args.Num() > 0)
+		{
+			Shots = FMath::Clamp(FCString::Atoi(*Args[0]), 1, 200);
+		}
+
+		APlayerController* PC = World->GetFirstPlayerController();
+		APawn* Player = PC ? PC->GetPawn() : nullptr;
+		if (!Player)
+		{
+			return;
+		}
+
+		UFPSRWeaponFireComponent* FireComp = Player->FindComponentByClass<UFPSRWeaponFireComponent>();
+		UFPSRWeaponInventoryComponent* Inv = FireComp ? FireComp->GetInventory() : nullptr;
+		UFPSRWeaponDataAsset* Weapon = Inv ? Inv->GetCurrentWeapon() : nullptr;
+		if (!Weapon)
+		{
+			return;
+		}
+
+		const FFPSRWeaponStatBlock& Stats = Weapon->BaseStats;
+
+		// Camera basis.
+		FVector CamLoc = Player->GetActorLocation();
+		FRotator CamRot = Player->GetControlRotation();
+		if (PC && PC->PlayerCameraManager)
+		{
+			CamLoc = PC->PlayerCameraManager->GetCameraLocation();
+			CamRot = PC->PlayerCameraManager->GetCameraRotation();
+		}
+
+		const float Dist = 1000.0f;
+		float CumYaw = 0.0f;
+		float CumPitch = 0.0f;
+		FVector PrevPoint = FVector::ZeroVector;
+		bool bHasPrev = false;
+
+		for (int32 i = 0; i < Shots; ++i)
+		{
+			// Project cumulative recoil angles onto a plane Dist units ahead of the camera.
+			// Up-kick raises the aim, so it lands HIGHER on the wall -> add pitch.
+			const FRotator ShotRot(CamRot.Pitch + CumPitch, CamRot.Yaw + CumYaw, 0.0f);
+			const FVector Point = CamLoc + ShotRot.Vector() * Dist;
+
+			DrawDebugPoint(World, Point, 8.0f, FColor::Yellow, false, 6.0f, 0);
+			if (bHasPrev)
+			{
+				DrawDebugLine(World, PrevPoint, Point, FColor::Red, false, 6.0f, 0, 1.5f);
+			}
+			PrevPoint = Point;
+			bHasPrev = true;
+
+			const FVector2D Delta = UFPSRWeaponFireComponent::ComputeShotRecoilDelta(Stats, i);
+			CumYaw += Delta.X;
+			CumPitch += Delta.Y;
+		}
+	}));

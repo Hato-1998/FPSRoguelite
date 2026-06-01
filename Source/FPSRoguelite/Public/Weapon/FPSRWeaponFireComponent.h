@@ -25,15 +25,31 @@ public:
 	UFUNCTION(BlueprintPure, Category = "FPSR|Weapon")
 	float GetCurrentBloom() const { return CurrentBloom; }
 
+	/** Called from the owner's look input: forwards the player's downward pitch input (raw units, >=0)
+	 *  so manual recoil compensation cancels pending auto-recovery instead of stacking with it. */
+	void NotifyPlayerPitchCompensation(float DownAmount);
+
+	/** Shared deterministic per-shot recoil delta (degrees) used by BOTH runtime firing and the
+	 *  FPSR.RecoilPreview debug tool, so the preview always matches real behavior.
+	 *  Returns {Yaw, Pitch} in degrees: Pitch = up-kick magnitude, Yaw = horizontal pattern (no random variance). */
+	static FVector2D ComputeShotRecoilDelta(const struct FFPSRWeaponStatBlock& Stats, int32 ShotIndex);
+
+	/** Returns the equipped weapon's inventory component (needed by debug tools). */
+	UFPSRWeaponInventoryComponent* GetInventory() const;
+
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 protected:
 	void FireOneShot();
-	UFPSRWeaponInventoryComponent* GetInventory() const;
 
 	bool bWantsToFire = false;
 	float TimeSinceLastShot = 0.0f;
 	int32 BurstShotsRemaining = 0;
 	float CurrentBloom = 0.0f;
-	float AccumulatedRecoilPitch = 0.0f;
+
+	// --- Recoil state (local feel only) ---
+	float RecoilDebtPitch = 0.0f;       // up-kick owed for downward recovery (raw input units)
+	float PendingRisePitch = 0.0f;      // not-yet-applied up-kick, smoothed in over time
+	float PlayerPitchCompensation = 0.0f; // player's downward look input this frame, consumes debt
+	int32 ShotsFiredThisSpray = 0;      // shot index within current trigger hold (horizontal pattern)
 };

@@ -4,10 +4,10 @@
 > **작업 단계를 끝낼 때마다, 그리고 중단 전 반드시 이 파일을 갱신하고 커밋한다.**
 > 확정 설계·기획·코드구조·규칙은 `Game.MD`(SSOT), 상세 이력은 `git log --oneline`.
 
-**최종 갱신: 2026-05-30**
+**최종 갱신: 2026-06-01**
 
 ## 한 줄 요약
-P1 전투 슬라이스 + **P1.5-A 사격코어(FullAuto/반동/확산)** 코드 완료·빌드 통과. **하드코딩 경로 제거(BP 참조 패턴) 리팩터 완료.** **문서 통합 완료(Game.MD = SSOT).** → **사용자가 BP 3종 생성 후 full-auto PIE 테스트 대기**, 이후 P1.5-B.
+P1 전투 슬라이스 + **P1.5-A 사격코어** + **반동 오버홀(오버슈트 버그 수정·부드러운 상승·수평 패턴·회복 토글)** 코드 완료·빌드+스모크 통과. **사용자 BP 3종 생성 완료.** → 사용자 PIE 확인 + DataAsset 강도 튜닝(선택) 후 **P1.5-B(탄약/재장전/ADS)** 착수.
 
 ## 🔴 새 세션 우선 작업
 
@@ -21,7 +21,15 @@ P1 전투 슬라이스 + **P1.5-A 사격코어(FullAuto/반동/확산)** 코드 
    - **다음 리뷰 회차**: 새 `GameConfirm.md`가 오면 동일 절차로 비교·반영.
    - **코드 리뷰 게이트(신규)**: `Scripts/codex-review.ps1` → Codex(gpt-5.5) 비대화 diff 리뷰(read-only). 결과 `Docs/reviews/`(gitignore). 상세 Game.MD §6-6 / §10.
 
-**in-flight(병행/이후):** P1.5-A 빌드 완료 → 사용자 BP 3종 셋업(아래 '사용자 대기 작업') → full-auto PIE 테스트 → P1.5-B(탄약/재장전/ADS)
+**3) 반동 오버홀 — ✅ 코드 완료 (2026-06-01, 빌드+스모크 통과)** — 최신 FPS(Apex/COD/CS2) 조사 후 재설계. `UFPSRWeaponFireComponent`:
+   - **오버슈트 버그 수정**: 누적반동을 "복구 빚(`RecoilDebtPitch`)" 모델로 전환 + 플레이어 하향 입력이 빚을 상쇄(`NotifyPlayerPitchCompensation`, `Input_Look` 훅) → 연사 중 수동 보정 시 종료 후 조준점 아래로 강제 하강 없음.
+   - **부드러운 상승**: 발사당 즉발 스냅 → `RecoilRiseRate` 보간(snappy rise).
+   - **수평 패턴화**: 순수 랜덤 → 발사인덱스 sin 패턴 + 소량 variance(`RecoilHorizontalPatternFreq`/`RecoilHorizontalVariance`).
+   - **회복 토글 `ERecoilRecovery`(Auto/Always/Never, 기본 Auto)**: Auto=단발(Single)만 자동복구·연사/점사는 회복없음(직접 내림). Always/Never=무기 해금용 오버라이드. → 기존 DA_Weapon_Rifle(FullAuto)은 자동으로 회복없음(설정 불필요).
+   - **디버그 툴 `FPSR.RecoilPreview [발수]`**: 카메라 앞에 스프레이 패턴 점/선 표시. 런타임과 동일한 `ComputeShotRecoilDelta` 사용(일치 보장).
+   - **사용자 작업(선택)**: DA_Weapon_Rifle 강도 완화 — `RecoilVertical 1.0→0.45`, `RecoilHorizontal 0.3→0.12` 권장(에디터에서, `FPSR.RecoilPreview`로 확인하며).
+
+**in-flight(병행/이후):** 사용자 BP 3종 생성 완료(BP_FPSRGameMode/BP_FPSRPlayer/BP_FPSRPC) → PIE 확인 → P1.5-B(탄약/재장전/ADS)
 **git:** 사용자 콘텐츠(L_Sandbox 맵, DA_Weapon_Rifle/Knife @ `Content/Weapons/DataTable/`)는 디스크 존재·**미커밋**(untracked)
 - **브랜치 워크플로 도입(2026-05-30, Game.MD §6-7)**: 각 P 단계는 `main`→`phase/<단계>-<키워드>` 분기 → 검증 후 `--no-ff` 머지. phase 브랜치도 origin push.
 - **현재 활성 브랜치 = `phase/p1.5-b-ammo-reload`** (P1.5-B 작업용, main에서 분기). P1.5-B 코드 착수는 PIE 테스트 통과 후.
@@ -66,4 +74,4 @@ P1 전투 슬라이스 + **P1.5-A 사격코어(FullAuto/반동/확산)** 코드 
 - **MCP(unreal) 인증 실패로 미사용** → UBT 빌드 + 헤드리스 자동화로 검증
 - 모델 정책: 구현=Haiku 위임 / 검증(빌드·diff·스모크)=메인(Opus) 직접
 - **프로덕션 방식 원칙**(CLAUDE.md/AGENTS.md): 콘텐츠는 BP/DataAsset/config 바인딩, C++ 경로 하드코딩 금지. 디버그 스캐폴딩은 검증용·전환대상
-- 디버그/플레이스홀더(프로덕션 전환 대상): 발사/근접 DrawDebug, `FPSR.SpawnEnemies` 콘솔, 적 큐브 메시, FP팔/3P 메시 미할당, 적 추격=단순 스티어링(P2 Flow-Field 교체)
+- 디버그/플레이스홀더(프로덕션 전환 대상): 발사/근접 DrawDebug, `FPSR.SpawnEnemies` 콘솔, `FPSR.RecoilPreview` 콘솔(반동 패턴 시각화), 적 큐브 메시, FP팔/3P 메시 미할당, 적 추격=단순 스티어링(P2 Flow-Field 교체)
