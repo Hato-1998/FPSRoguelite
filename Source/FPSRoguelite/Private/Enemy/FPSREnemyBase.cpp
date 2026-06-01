@@ -83,19 +83,19 @@ void AFPSREnemyBase::Deactivate()
 	SetNetDormancy(DORM_DormantAll);
 }
 
-void AFPSREnemyBase::TickServerMovement(const FVector& TargetLocation, float ScaledDeltaSeconds)
+void AFPSREnemyBase::TickServerMovement(const FVector& MoveDirection, float ScaledDeltaSeconds)
 {
 	if (!HasAuthority() || (HealthComponent && HealthComponent->IsDead()))
 	{
 		return;
 	}
 
-	FVector ToTarget = TargetLocation - GetActorLocation();
-	ToTarget.Z = 0.0f;
-	if (ToTarget.SizeSquared() > StopDistance * StopDistance)
+	FVector Dir = MoveDirection;
+	Dir.Z = 0.0f;
+	if (Dir.SizeSquared() > KINDA_SMALL_NUMBER)
 	{
-		const FVector Dir = ToTarget.GetSafeNormal();
-		AddActorWorldOffset(Dir * CurrentMoveSpeed * ScaledDeltaSeconds, true);
-		SetActorRotation(Dir.Rotation());
+		const FVector Normalized = Dir.GetSafeNormal();
+		AddActorWorldOffset(Normalized * CurrentMoveSpeed * ScaledDeltaSeconds, true);
+		SetActorRotation(Normalized.Rotation());
 	}
 }

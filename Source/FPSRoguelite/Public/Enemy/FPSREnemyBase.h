@@ -25,10 +25,14 @@ public:
 	/** Server: deactivate and return to dormant pool state (hide, disable collision, net dormant). */
 	void Deactivate();
 
-	/** Server: advance toward TargetLocation using CurrentMoveSpeed * ScaledDeltaSeconds. Driven by the
-	 *  enemy movement subsystem's batched pass (per-actor Tick is disabled). ScaledDeltaSeconds is the real
-	 *  delta multiplied by this enemy's LOD update stride so throttled enemies still cover the right distance. */
-	void TickServerMovement(const FVector& TargetLocation, float ScaledDeltaSeconds);
+	/** Server: move along MoveDirection (XY world dir; magnitude ignored, normalized internally) at
+	 *  CurrentMoveSpeed * ScaledDeltaSeconds. No-op if MoveDirection is ~zero. Driven by the enemy
+	 *  movement subsystem's batched pass (flow-field + separation). ScaledDeltaSeconds is the real delta
+	 *  times this enemy's LOD stride so throttled enemies still cover the right distance. */
+	void TickServerMovement(const FVector& MoveDirection, float ScaledDeltaSeconds);
+
+	/** Distance at which the enemy stops advancing toward a player (used by the movement subsystem). */
+	float GetStopDistance() const { return StopDistance; }
 
 protected:
 	virtual void BeginPlay() override;

@@ -47,6 +47,9 @@ private:
 	/** Batched server movement pass with distance LOD (replaces per-actor enemy Tick). */
 	void TickEnemyMovement(float DeltaTime);
 
+	/** Sum a repulsion vector from nearby enemies (anti-clumping), using the per-pass spatial hash. */
+	FVector ComputeSeparation(int32 AgentIndex, const TArray<FVector>& Locations, const TMap<FIntPoint, TArray<int32>>& SpatialHash) const;
+
 	/** Check if this subsystem has server authority. */
 	bool HasServerAuthority() const;
 
@@ -60,6 +63,11 @@ private:
 	static constexpr float TierS0RadiusSq = 1500.0f * 1500.0f; // S0: full update
 	static constexpr float TierS1RadiusSq = 3500.0f * 3500.0f; // S1
 	static constexpr float TierS2RadiusSq = 6000.0f * 6000.0f; // S2 (beyond = S3)
+
+	// Separation (anti-clumping) tuning. Cell size for the spatial hash == SeparationRadius so a 3x3
+	// neighbor scan covers the full radius.
+	static constexpr float SeparationRadius = 120.0f;   // cm
+	static constexpr float SeparationStrength = 1.5f;   // weight of separation vs the unit flow direction
 
 	/** Pool of dormant (hidden, disabled) enemies ready for reuse. */
 	UPROPERTY(Transient)

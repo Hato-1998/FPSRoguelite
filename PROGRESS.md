@@ -7,10 +7,14 @@
 **최종 갱신: 2026-06-01**
 
 ## 한 줄 요약
-**P1+P1.5 완료 + P1 리뷰 하드닝(main 머지) + P2-A·P2-B1 코드 완료**(풀링/디렉터/이속편차 + 중앙배치이동/Significance LOD). 빌드+스모크 통과. **PIE 확인 대기**. → **다음: P2-B2**(Flow-Field 그리드 + separation).
+**P1+P1.5 완료 + P1 리뷰 하드닝(main 머지) + P2-A·B1·B2 코드 완료**(풀링/디렉터/이속편차 + 중앙배치이동/LOD + Flow-Field/separation). 빌드+스모크 통과. **PIE 확인 대기**. → **다음: P2-C**(근접 데미지 + 공격토큰 + 충돌무시 대시).
 
-## ▶▶ 새 세션 우선 작업 = P2-A/B1 PIE 확인 → P2-B2 착수
+## ▶▶ 새 세션 우선 작업 = P2-A/B PIE 확인 → P2-C 착수
 **브랜치**: `phase/p2-enemy-mass` (활성, main의 P1 하드닝 머지 반영됨). 구현=Haiku 위임 / 검증=Opus.
+
+### ✅ P2-B2 코드 완료 (2026-06-01, 빌드+스모크 통과) — Flow-Field 그리드 + separation
+- **신규 `UFPSRFlowFieldSubsystem`(UWorldSubsystem, 서버권위)**: 고정맵 2D 그리드(`CellSize=200`, `HalfExtent=10000`→100×100, 원점 중심), 타이머(`FlowUpdateInterval=0.2s`)로 **다중소스 BFS**(생존 플레이어=소스, 4-연결) 적분필드 → 8-이웃 최급강하로 셀별 흐름방향. `SampleFlowDirection(Loc)` O(1)(범위밖/미준비=Zero→호출측 직접방향 폴백). 장애물 없으면 ≈ 최근접 플레이어 방향이지만 적별 탐색을 그리드 1회로 분할상환 + 장애물 토대.
+- **이동 통합(서브시스템)**: `TickServerMovement`가 타겟→**이동방향** 파라미터로 변경. 패스마다 균일 그리드 공간해시(셀=`SeparationRadius=120`) 구축 → 적별 flow방향 + **separation**(3×3 이웃 반발, 거리 감쇠, `SeparationStrength=1.5`) 합성. 정지거리 내에선 flow 0(플레이어에 스택 방지, separation만으로 분산). ±10% 속도편차(P2-A)와 합쳐 유기적 스웜.
 
 ### ✅ P2-B1 코드 완료 (2026-06-01, 빌드+스모크 통과) — 중앙 배치 이동 + Significance 거리 LOD
 per-actor naive chase Tick 폐지 → `UFPSREnemySpawnSubsystem`이 `FTickableGameObject`로 배치 이동 구동(서버권위). 리뷰 #6(적 tick/이동 비용) 해소.
@@ -31,8 +35,8 @@ Object Pooling + SpawnDirector + 개체별 이속 ±10% 편차. (Flow-Field·Sig
 
 **⏳ PIE 확인 대기**: `FPSR.EnemyTarget 100`→~100 유지·처치 시 풀 재활용(`obj list class=FPSREnemyBase` 안정)·이속 편차로 분산 / `EnemyTarget 0` 중단 / `FPSR.SpawnEnemies 20` 버스트. (상세 플랜: `~/.claude/plans/curried-painting-quill.md`)
 
-### ▶ 다음: P2-B2 (Flow-Field 그리드 + separation)
-B1에서 배치이동+거리LOD 완료. B2 = `UFPSRFlowFieldSubsystem`(고정맵 2D 그리드 + 다중소스 BFS, 적이 셀 방향 O(1) 샘플) + 균일 그리드 공간해시 기반 separation → 유기적 스웜·장애물 토대. 현재 타겟팅은 직접 최근접(B1) → B2에서 그리드 샘플로 교체. 이후 **P2-C**(근접 데미지 + 공격토큰 + 충돌무시 대시).
+### ▶ 다음: P2-C (근접 데미지 + 공격토큰 + 충돌무시 대시)
+P2-A/B 완료(풀+디렉터+LOD+Flow-Field+separation). P2-C = 적 근접 데미지(서버, HealthComponent→플레이어) + **공격토큰**(플레이어당 동시 공격자 상한, §2-6/§5) + **충돌무시 대시**(회피기, §2-13). 후속: NavMesh/동적 장애물(Flow-Field 셀 blocked), 데이터드리븐 적 로스터, 사망/스폰 FX, SignificanceManager 플러그인 평가.
 
 ## 🔴 이전 완료 이력 (P1/P1.5)
 

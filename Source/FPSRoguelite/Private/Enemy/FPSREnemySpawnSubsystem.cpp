@@ -2,6 +2,7 @@
 
 #include "Enemy/FPSREnemySpawnSubsystem.h"
 #include "Enemy/FPSREnemyBase.h"
+#include "Enemy/FPSRFlowFieldSubsystem.h"
 #include "Core/FPSRLogChannels.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
@@ -119,6 +120,14 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 		return;
 	}
 
+	const UFPSRFlowFieldSubsystem* FlowField = World->GetSubsystem<UFPSRFlowFieldSubsystem>();
+
+	// Build the per-pass agent arrays + uniform-grid spatial hash (all valid active enemies) for separation.
+	TArray<AFPSREnemyBase*> Agents;
+	TArray<FVector> Locations;
+	Agents.Reserve(ActiveEnemies.Num());
+	Locations.Reserve(ActiveEnemies.Num());
+	TMap<FIntPoint, TArray<int32>> SpatialHash;
 	for (const TObjectPtr<AFPSREnemyBase>& EnemyPtr : ActiveEnemies)
 	{
 		AFPSREnemyBase* Enemy = EnemyPtr.Get();
@@ -126,8 +135,18 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 		{
 			continue;
 		}
+		const int32 Index = Agents.Add(Enemy);
+		const FVector Loc = Enemy->GetActorLocation();
+		Locations.Add(Loc);
 
-		const FVector EnemyLocation = Enemy->GetActorLocation();
+		const FIntPoint Key(FMath::FloorToInt(Loc.X / SeparationRadius), FMath::FloorToInt(Loc.Y / SeparationRadius));
+		SpatialHash.FindOrAdd(Key).Add(Index);
+	}
+
+	for (int32 i = 0; i < Agents.Num(); ++i)
+	{
+		AFPSREnemyBase* Enemy = Agents[i];
+		const FVector EnemyLocation = Locations[i];
 
 		// Nearest player (2D).
 		float BestDistSq = TNumericLimits<float>::Max();
@@ -150,16 +169,69 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 		else if (BestDistSq <= TierS2RadiusSq) { UpdateStride = 4; NetFreq = 5.0f;  }
 		else                                   { UpdateStride = 8; NetFreq = 2.0f;  }
 
-		// Apply per-tier net update frequency (UE 5.7 API).
 		Enemy->SetNetUpdateFrequency(NetFreq);
 
-		// Spread throttled updates across frames by the enemy's stable id, then move with a stride-scaled delta.
+		// Spread throttled updates across frames by the enemy's stable id.
 		if (((MovementFrameCounter + static_cast<int32>(Enemy->GetUniqueID())) % UpdateStride) != 0)
 		{
 			continue;
 		}
-		Enemy->TickServerMovement(BestPlayerLocation, DeltaTime * UpdateStride);
+
+		// Flow-field direction toward players (fall back to direct-to-nearest if the field isn't ready).
+		FVector FlowDir = FlowField ? FlowField->SampleFlowDirection(EnemyLocation) : FVector::ZeroVector;
+		if (FlowDir.IsNearlyZero())
+		{
+			FlowDir = (BestPlayerLocation - EnemyLocation);
+			FlowDir.Z = 0.0f;
+			FlowDir = FlowDir.GetSafeNormal();
+		}
+
+		// Stop advancing toward the player within StopDistance (still separate to avoid stacking on them).
+		const float StopDistSq = FMath::Square(Enemy->GetStopDistance());
+		const FVector Desired = (BestDistSq > StopDistSq) ? FlowDir : FVector::ZeroVector;
+
+		// Combine flow + separation; TickServerMovement normalizes and moves at CurrentMoveSpeed.
+		FVector MoveDir = Desired + ComputeSeparation(i, Locations, SpatialHash) * SeparationStrength;
+		MoveDir.Z = 0.0f;
+
+		Enemy->TickServerMovement(MoveDir, DeltaTime * UpdateStride);
 	}
+}
+
+FVector UFPSREnemySpawnSubsystem::ComputeSeparation(int32 AgentIndex, const TArray<FVector>& Locations, const TMap<FIntPoint, TArray<int32>>& SpatialHash) const
+{
+	const FVector Origin = Locations[AgentIndex];
+	const int32 CX = FMath::FloorToInt(Origin.X / SeparationRadius);
+	const int32 CY = FMath::FloorToInt(Origin.Y / SeparationRadius);
+	const float RadiusSq = SeparationRadius * SeparationRadius;
+
+	FVector Separation = FVector::ZeroVector;
+	for (int32 dx = -1; dx <= 1; ++dx)
+	{
+		for (int32 dy = -1; dy <= 1; ++dy)
+		{
+			const FIntPoint Key(CX + dx, CY + dy);
+			if (const TArray<int32>* Cell = SpatialHash.Find(Key))
+			{
+				for (int32 OtherIndex : *Cell)
+				{
+					if (OtherIndex == AgentIndex)
+					{
+						continue;
+					}
+					FVector Diff = Origin - Locations[OtherIndex];
+					Diff.Z = 0.0f;
+					const float DistSq = Diff.SizeSquared();
+					if (DistSq > KINDA_SMALL_NUMBER && DistSq < RadiusSq)
+					{
+						const float Dist = FMath::Sqrt(DistSq);
+						Separation += (Diff / Dist) * (1.0f - Dist / SeparationRadius); // stronger when closer
+					}
+				}
+			}
+		}
+	}
+	return Separation;
 }
 
 void UFPSREnemySpawnSubsystem::TickDirector()
