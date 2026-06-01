@@ -6,6 +6,7 @@
 #include "Weapon/FPSRWeaponTypes.h"
 
 #include "AbilitySystemComponent.h"
+#include "Engine/Engine.h"
 #include "AbilitySystemGlobals.h"
 #include "GameFramework/Pawn.h"
 #include "HAL/IConsoleManager.h"
@@ -37,6 +38,12 @@ void UFPSRWeaponFireComponent::NotifyPlayerPitchCompensation(float DownAmount)
 UFPSRWeaponInventoryComponent* UFPSRWeaponFireComponent::GetInventory() const
 {
 	return GetOwner() ? GetOwner()->FindComponentByClass<UFPSRWeaponInventoryComponent>() : nullptr;
+}
+
+bool UFPSRWeaponFireComponent::CanFire() const
+{
+	UFPSRWeaponInventoryComponent* Inv = GetInventory();
+	return Inv && !Inv->IsReloading() && Inv->GetCurrentAmmo() > 0;
 }
 
 void UFPSRWeaponFireComponent::StartFiring()
@@ -92,6 +99,12 @@ void UFPSRWeaponFireComponent::FireOneShot()
 		return;
 	}
 
+	// Block firing on empty magazine or during reload (no auto-reload; player presses R).
+	if (Inventory->IsReloading() || Inventory->GetCurrentAmmo() <= 0)
+	{
+		return;
+	}
+
 	const FFPSRWeaponStatBlock& Stats = Weapon->BaseStats;
 
 	// Activate the weapon's fire ability (trace + damage; predicted + server-authoritative).
@@ -141,8 +154,8 @@ void UFPSRWeaponFireComponent::TickComponent(float DeltaTime, ELevelTick TickTyp
 	const FFPSRWeaponStatBlock& Stats = Weapon->BaseStats;
 	const float Interval = 1.0f / FMath::Max(Stats.FireRate, 0.01f);
 
-	const bool bAutoFiring = (bWantsToFire && Stats.FireMode == EFPSRFireMode::FullAuto);
-	const bool bBurstFiring = (Stats.FireMode == EFPSRFireMode::Burst && BurstShotsRemaining > 0);
+	const bool bAutoFiring = (bWantsToFire && Stats.FireMode == EFPSRFireMode::FullAuto && CanFire());
+	const bool bBurstFiring = (Stats.FireMode == EFPSRFireMode::Burst && BurstShotsRemaining > 0 && CanFire());
 
 	if (bAutoFiring || bBurstFiring)
 	{
@@ -202,6 +215,19 @@ void UFPSRWeaponFireComponent::TickComponent(float DeltaTime, ELevelTick TickTyp
 	{
 		CurrentBloom = FMath::Max(0.0f, CurrentBloom - Stats.BloomRecoveryRate * DeltaTime);
 	}
+
+#if ENABLE_DRAW_DEBUG
+	// Debug scaffolding (replaced by HUD in P3): show ammo for the local player.
+	if (GEngine)
+	{
+		const int32 Ammo = Inventory->GetCurrentAmmo();
+		const int32 Mag = Inventory->GetCurrentMagSize();
+		const FString Msg = Inventory->IsReloading()
+			? FString::Printf(TEXT("Reloading...  Ammo: %d/%d"), Ammo, Mag)
+			: FString::Printf(TEXT("Ammo: %d/%d"), Ammo, Mag);
+		GEngine->AddOnScreenDebugMessage((uint64)(UPTRINT)this, 0.0f, FColor::Cyan, Msg);
+	}
+#endif
 }
 
 // ---- Debug: preview the current weapon's recoil spray pattern in front of the local player ----

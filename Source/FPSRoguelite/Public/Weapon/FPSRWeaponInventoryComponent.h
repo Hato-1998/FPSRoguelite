@@ -32,11 +32,29 @@ public:
 	UFUNCTION(BlueprintPure, Category = "FPSR|Weapon")
 	int32 GetCurrentSlotIndex() const { return CurrentSlotIndex; }
 
+	UFUNCTION(BlueprintPure, Category = "FPSR|Weapon")
+	int32 GetCurrentAmmo() const;
+
+	UFUNCTION(BlueprintPure, Category = "FPSR|Weapon")
+	int32 GetCurrentMagSize() const;
+
+	UFUNCTION(BlueprintPure, Category = "FPSR|Weapon")
+	bool IsReloading() const { return bReloading; }
+
+	/** Server: consume ammo from the current slot. Returns false if insufficient. */
+	bool ConsumeAmmo(int32 Amount = 1);
+
+	/** Server: begin a timed reload of the current slot (no-op if already reloading or full). */
+	void StartReload();
+
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 protected:
 	UFUNCTION()
 	void OnRep_CurrentSlotIndex();
+
+	/** Server timer callback: refill current slot to MagSize. */
+	void FinishReload();
 
 	UAbilitySystemComponent* GetOwnerASC() const;
 
@@ -51,4 +69,13 @@ protected:
 
 	/** Server-only handle to the currently granted fire ability. */
 	FGameplayAbilitySpecHandle GrantedFireAbilityHandle;
+
+	UPROPERTY(Replicated)
+	TArray<int32> SlotAmmo;
+
+	UPROPERTY(Replicated)
+	bool bReloading = false;
+
+	/** Server-only reload timer. */
+	FTimerHandle ReloadTimerHandle;
 };

@@ -45,10 +45,15 @@ protected:
 	void Input_EquipSlot1(const FInputActionValue& Value);
 	void Input_EquipSlot2(const FInputActionValue& Value);
 	void Input_EquipSlot3(const FInputActionValue& Value);
+	void Input_Reload(const FInputActionValue& Value);
 
 	/** Server: equip a weapon slot (input is client-side; equip is server-authoritative). */
 	UFUNCTION(Server, Reliable)
 	void ServerEquipSlot(int32 SlotIndex);
+
+	/** Server: begin reload (input is client-side; reload is server-authoritative). */
+	UFUNCTION(Server, Reliable)
+	void ServerReload();
 
 	UPROPERTY()
 	TObjectPtr<UFPSRAbilitySystemComponent> AbilitySystemComponent;
@@ -96,4 +101,7 @@ protected:
 
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Input")
 	TObjectPtr<UInputAction> EquipSlot3Action;
+
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Input")
+	TObjectPtr<UInputAction> ReloadAction;
 };

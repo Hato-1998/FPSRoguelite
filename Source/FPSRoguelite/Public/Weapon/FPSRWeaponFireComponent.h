@@ -42,6 +42,9 @@ public:
 protected:
 	void FireOneShot();
 
+	/** True when the equipped weapon has ammo and is not reloading. */
+	bool CanFire() const;
+
 	bool bWantsToFire = false;
 	float TimeSinceLastShot = 0.0f;
 	int32 BurstShotsRemaining = 0;

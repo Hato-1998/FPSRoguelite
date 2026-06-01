@@ -125,6 +125,7 @@ void AFPSRCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompo
 	if (EquipSlot1Action) { EIC->BindAction(EquipSlot1Action, ETriggerEvent::Started, this, &AFPSRCharacter::Input_EquipSlot1); }
 	if (EquipSlot2Action) { EIC->BindAction(EquipSlot2Action, ETriggerEvent::Started, this, &AFPSRCharacter::Input_EquipSlot2); }
 	if (EquipSlot3Action) { EIC->BindAction(EquipSlot3Action, ETriggerEvent::Started, this, &AFPSRCharacter::Input_EquipSlot3); }
+	if (ReloadAction) { EIC->BindAction(ReloadAction, ETriggerEvent::Started, this, &AFPSRCharacter::Input_Reload); }
 }
 
 void AFPSRCharacter::Input_MoveForward(const FInputActionValue& Value)
@@ -180,11 +181,24 @@ void AFPSRCharacter::Input_EquipSlot1(const FInputActionValue& Value) { ServerEq
 void AFPSRCharacter::Input_EquipSlot2(const FInputActionValue& Value) { ServerEquipSlot(1); }
 void AFPSRCharacter::Input_EquipSlot3(const FInputActionValue& Value) { ServerEquipSlot(2); }
 
+void AFPSRCharacter::Input_Reload(const FInputActionValue& Value)
+{
+	ServerReload();
+}
+
 void AFPSRCharacter::ServerEquipSlot_Implementation(int32 SlotIndex)
 {
 	if (WeaponInventory)
 	{
 		WeaponInventory->EquipSlot(SlotIndex);
+	}
+}
+
+void AFPSRCharacter::ServerReload_Implementation()
+{
+	if (WeaponInventory)
+	{
+		WeaponInventory->StartReload();
 	}
 }
 

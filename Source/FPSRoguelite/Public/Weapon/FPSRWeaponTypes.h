@@ -62,6 +62,9 @@ struct FPSROGUELITE_API FFPSRWeaponStatBlock
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Ammo")
 	int32 MagSize = 30;
 
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Ammo")
+	float ReloadTime = 1.5f; // seconds; reserve ammo is infinite (always refills to MagSize)
+
 	// --- Spread / bloom ---
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Spread")
 	float SpreadDegrees = 1.0f; // base half-angle

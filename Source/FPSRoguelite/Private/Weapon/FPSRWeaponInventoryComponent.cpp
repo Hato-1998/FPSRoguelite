@@ -5,6 +5,8 @@
 #include "Core/FPSRLogChannels.h"
 
 #include "AbilitySystemComponent.h"
+#include "Engine/World.h"
+#include "TimerManager.h"
 #include "AbilitySystemGlobals.h"
 #include "Abilities/GameplayAbility.h"
 #include "GameplayAbilitySpec.h"
@@ -16,6 +18,7 @@ UFPSRWeaponInventoryComponent::UFPSRWeaponInventoryComponent()
 	PrimaryComponentTick.bCanEverTick = false;
 	SetIsReplicatedByDefault(true);
 	WeaponSlots.SetNum(MaxSlots);
+	SlotAmmo.SetNum(MaxSlots);
 }
 
 void UFPSRWeaponInventoryComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
@@ -26,6 +29,8 @@ void UFPSRWeaponInventoryComponent::GetLifetimeReplicatedProps(TArray<FLifetimeP
 	Params.bIsPushBased = true;
 	DOREPLIFETIME_WITH_PARAMS_FAST(UFPSRWeaponInventoryComponent, WeaponSlots, Params);
 	DOREPLIFETIME_WITH_PARAMS_FAST(UFPSRWeaponInventoryComponent, CurrentSlotIndex, Params);
+	DOREPLIFETIME_WITH_PARAMS_FAST(UFPSRWeaponInventoryComponent, SlotAmmo, Params);
+	DOREPLIFETIME_WITH_PARAMS_FAST(UFPSRWeaponInventoryComponent, bReloading, Params);
 }
 
 UAbilitySystemComponent* UFPSRWeaponInventoryComponent::GetOwnerASC() const
@@ -50,6 +55,9 @@ int32 UFPSRWeaponInventoryComponent::AddWeapon(UFPSRWeaponDataAsset* WeaponData)
 	WeaponSlots[FreeSlot] = WeaponData;
 	MARK_PROPERTY_DIRTY_FROM_NAME(UFPSRWeaponInventoryComponent, WeaponSlots, this);
 
+	SlotAmmo[FreeSlot] = WeaponData->BaseStats.MagSize;
+	MARK_PROPERTY_DIRTY_FROM_NAME(UFPSRWeaponInventoryComponent, SlotAmmo, this);
+
 	if (CurrentSlotIndex == INDEX_NONE)
 	{
 		EquipSlot(FreeSlot);
@@ -66,6 +74,14 @@ void UFPSRWeaponInventoryComponent::EquipSlot(int32 SlotIndex)
 	if (!WeaponSlots.IsValidIndex(SlotIndex) || WeaponSlots[SlotIndex] == nullptr)
 	{
 		return;
+	}
+
+	// Switching weapons cancels any in-progress reload.
+	if (bReloading)
+	{
+		GetWorld()->GetTimerManager().ClearTimer(ReloadTimerHandle);
+		bReloading = false;
+		MARK_PROPERTY_DIRTY_FROM_NAME(UFPSRWeaponInventoryComponent, bReloading, this);
 	}
 
 	CurrentSlotIndex = SlotIndex;
@@ -109,4 +125,69 @@ UFPSRWeaponDataAsset* UFPSRWeaponInventoryComponent::GetCurrentWeapon() const
 void UFPSRWeaponInventoryComponent::OnRep_CurrentSlotIndex()
 {
 	// Cosmetic hook for clients (weapon visual swap added later).
+}
+
+int32 UFPSRWeaponInventoryComponent::GetCurrentAmmo() const
+{
+	return SlotAmmo.IsValidIndex(CurrentSlotIndex) ? SlotAmmo[CurrentSlotIndex] : 0;
+}
+
+int32 UFPSRWeaponInventoryComponent::GetCurrentMagSize() const
+{
+	const UFPSRWeaponDataAsset* Weapon = GetCurrentWeapon();
+	return Weapon ? Weapon->BaseStats.MagSize : 0;
+}
+
+bool UFPSRWeaponInventoryComponent::ConsumeAmmo(int32 Amount)
+{
+	if (!GetOwner() || !GetOwner()->HasAuthority())
+	{
+		return false;
+	}
+	if (!SlotAmmo.IsValidIndex(CurrentSlotIndex) || SlotAmmo[CurrentSlotIndex] < Amount)
+	{
+		return false;
+	}
+	SlotAmmo[CurrentSlotIndex] -= Amount;
+	MARK_PROPERTY_DIRTY_FROM_NAME(UFPSRWeaponInventoryComponent, SlotAmmo, this);
+	return true;
+}
+
+void UFPSRWeaponInventoryComponent::StartReload()
+{
+	if (!GetOwner() || !GetOwner()->HasAuthority() || bReloading)
+	{
+		return;
+	}
+	const UFPSRWeaponDataAsset* Weapon = GetCurrentWeapon();
+	if (!Weapon || !SlotAmmo.IsValidIndex(CurrentSlotIndex))
+	{
+		return;
+	}
+	if (SlotAmmo[CurrentSlotIndex] >= Weapon->BaseStats.MagSize)
+	{
+		return; // already full
+	}
+
+	bReloading = true;
+	MARK_PROPERTY_DIRTY_FROM_NAME(UFPSRWeaponInventoryComponent, bReloading, this);
+	GetWorld()->GetTimerManager().SetTimer(
+		ReloadTimerHandle, this, &UFPSRWeaponInventoryComponent::FinishReload,
+		FMath::Max(0.01f, Weapon->BaseStats.ReloadTime), false);
+}
+
+void UFPSRWeaponInventoryComponent::FinishReload()
+{
+	if (!GetOwner() || !GetOwner()->HasAuthority())
+	{
+		return;
+	}
+	const UFPSRWeaponDataAsset* Weapon = GetCurrentWeapon();
+	if (Weapon && SlotAmmo.IsValidIndex(CurrentSlotIndex))
+	{
+		SlotAmmo[CurrentSlotIndex] = Weapon->BaseStats.MagSize; // infinite reserve: always full
+		MARK_PROPERTY_DIRTY_FROM_NAME(UFPSRWeaponInventoryComponent, SlotAmmo, this);
+	}
+	bReloading = false;
+	MARK_PROPERTY_DIRTY_FROM_NAME(UFPSRWeaponInventoryComponent, bReloading, this);
 }
