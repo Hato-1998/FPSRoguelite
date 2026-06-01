@@ -6,6 +6,7 @@
 #include "FPSRWeaponFireComponent.generated.h"
 
 class UFPSRWeaponInventoryComponent;
+class UCameraComponent;
 
 /** Owning-client component that drives fire cadence (fire rate / fire mode), camera recoil, and spread bloom.
  *  Each shot activates the equipped weapon's fire ability (trace + server-authoritative damage). */
@@ -24,6 +25,12 @@ public:
 	/** Extra spread (degrees) from sustained fire; read by the fire ability when tracing. */
 	UFUNCTION(BlueprintPure, Category = "FPSR|Weapon")
 	float GetCurrentBloom() const { return CurrentBloom; }
+
+	/** Owner-client + server (via RPC): set aim-down-sights state (FOV/recoil local, spread read by fire GA). */
+	void SetAiming(bool bNewAiming) { bIsAiming = bNewAiming; }
+
+	UFUNCTION(BlueprintPure, Category = "FPSR|Weapon")
+	bool IsAiming() const { return bIsAiming; }
 
 	/** Called from the owner's look input: forwards the player's downward pitch input (raw units, >=0)
 	 *  so manual recoil compensation cancels pending auto-recovery instead of stacking with it. */
@@ -55,6 +62,10 @@ protected:
 
 	bool bReloadRequestPending = false; // guards against spamming the reload RPC each tick
 	float LastMeleeTime = -1000.0f; // world time of last melee attack (melee attack-rate cooldown)
+
+	bool bIsAiming = false;
+	TObjectPtr<UCameraComponent> CachedCamera; // resolved lazily for ADS FOV
+	float DefaultFOV = 0.0f;                    // captured from the camera on first resolve
 
 	// --- Recoil state (local feel only) ---
 	float RecoilDebtPitch = 0.0f;       // up-kick owed for downward recovery (raw input units)

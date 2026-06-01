@@ -49,6 +49,8 @@ protected:
 	void Input_EquipSlot2(const FInputActionValue& Value);
 	void Input_EquipSlot3(const FInputActionValue& Value);
 	void Input_Reload(const FInputActionValue& Value);
+	void Input_ADSPressed(const FInputActionValue& Value);
+	void Input_ADSReleased(const FInputActionValue& Value);
 
 	/** Server: equip a weapon slot (input is client-side; equip is server-authoritative). */
 	UFUNCTION(Server, Reliable)
@@ -57,6 +59,10 @@ protected:
 	/** Server: begin reload (input is client-side; reload is server-authoritative). */
 	UFUNCTION(Server, Reliable)
 	void ServerReload();
+
+	/** Server: sync aim-down-sights state so the fire GA applies ADS spread server-side. */
+	UFUNCTION(Server, Reliable)
+	void ServerSetAiming(bool bNewAiming);
 
 	UPROPERTY()
 	TObjectPtr<UFPSRAbilitySystemComponent> AbilitySystemComponent;
@@ -107,4 +113,7 @@ protected:
 
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Input")
 	TObjectPtr<UInputAction> ReloadAction;
+
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Input")
+	TObjectPtr<UInputAction> ADSAction;
 };

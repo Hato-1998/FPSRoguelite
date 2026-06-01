@@ -7,7 +7,7 @@
 **최종 갱신: 2026-06-01**
 
 ## 한 줄 요약
-P1 전투 슬라이스 + **P1.5-A 사격코어** + **반동 오버홀** + **P1.5-B(1/2) 탄약/재장전(R, 서버 타이머)** 코드 완료·빌드+스모크 통과. **사용자 BP 3종 생성 완료.** → 사용자 `IA_Reload` 셋업 + PIE 확인 후 **P1.5-B(2/2) ADS** 착수.
+P1 전투 슬라이스 + **P1.5-A 사격코어** + **반동(ADS 의존 재설계)** + **P1.5-B 탄약/재장전 + ADS(우클릭 FOV·확산·반동)** 코드 완료·빌드+스모크 통과. **사용자 BP 3종 생성 완료.** → 사용자 `IA_Reload`·`IA_ADS` 셋업 + DataAsset 튜닝 + PIE 확인 후 **P1 마무리 → phase 브랜치 머지**.
 
 ## 🔴 새 세션 우선 작업
 
@@ -39,7 +39,12 @@ P1 전투 슬라이스 + **P1.5-A 사격코어** + **반동 오버홀** + **P1.5
    - **입력**: `IA_Reload`(R)→`ServerReload` RPC→`StartReload`. **C++ 슬롯/바인딩만 구현, 에셋은 사용자 직접.**
    - **사용자 작업**: `IA_Reload`(Bool) 생성 → IMC_Default에 R 매핑(수동) → `BP_FPSRCharacter`의 `ReloadAction` 할당. (`DA_Weapon_Rifle` ReloadTime 1.5/MagSize 30 확인)
 
-**in-flight(병행/이후):** 사용자 BP 3종 생성 완료(BP_FPSRGameMode/BP_FPSRPlayer/BP_FPSRPC) → IA_Reload 셋업 → PIE 확인 → P1.5-B(2/2) ADS
+**5) P1.5-B (2/2) ADS + 반동 ADS의존 재설계 — ✅ 코드 완료 (2026-06-01, 빌드+스모크 통과)**
+   - **ADS(우클릭 hold)**: FOV 줌(`FireComponent`가 카메라 캐시·`FInterpTo`) + 확산 배율(GA, 서버 포함) + 입력 로컬+`ServerSetAiming` RPC. 무기별 `bHasADS`(근접/무ADS=false). 신규 스탯 `ADSFieldOfView/ADSSpreadMultiplier/ADSInterpSpeed`.
+   - **반동 ADS의존 재설계(레퍼런스 Apex AR/R99)**: 힙=수직 약(`HipVerticalScale`)+수평 랜덤 강(`HipHorizontalRandom`)→산탄 / ADS=수직 강(`ADSVerticalScale`)+랜덤 약(`ADSHorizontalRandom`)→학습가능 climbing 패턴. 산포 주동력=확산(힙 넓게/ADS `ADSSpreadMultiplier` 좁게). 기존 `RecoilHorizontalVariance`·`ADSRecoilMultiplier` 제거. `FPSR.RecoilPreview`는 ADS climb 표시.
+   - **사용자 작업**: `IA_ADS`(Bool) 생성→IMC 우클릭 매핑→`BP_FPSRCharacter` `ADSAction` 할당. `DA_Weapon_Rifle` `bHasADS=true`+반동/확산 튜닝(`FPSR.RecoilPreview`로 확인). `DA_Weapon_Knife` `bHasADS=false`.
+
+**in-flight(병행/이후):** 사용자 BP 3종 생성 완료(BP_FPSRGameMode/BP_FPSRPlayer/BP_FPSRPC) → IA_Reload/IA_ADS 셋업 + DataAsset 튜닝 → PIE 확인 → P1 마무리·머지
 **git:** 사용자 콘텐츠(L_Sandbox 맵, DA_Weapon_Rifle/Knife @ `Content/Weapons/DataTable/`)는 디스크 존재·**미커밋**(untracked)
 - **브랜치 워크플로 도입(2026-05-30, Game.MD §6-7)**: 각 P 단계는 `main`→`phase/<단계>-<키워드>` 분기 → 검증 후 `--no-ff` 머지. phase 브랜치도 origin push.
 - **현재 활성 브랜치 = `phase/p1.5-b-ammo-reload`** (P1.5-B 작업용, main에서 분기). P1.5-B 코드 착수는 PIE 테스트 통과 후.
@@ -57,6 +62,8 @@ P1 전투 슬라이스 + **P1.5-A 사격코어** + **반동 오버홀** + **P1.5
 - 좌클릭 사격 → 노란 디버그 라인 + 적 처치 / 근접(칼 장착) → 청색 구체 + 처치 / 1·2 무기 전환 / `FPSR.SpawnEnemies 5` 적 스폰·추격
 - **탄약/재장전**(IA_Reload 셋업 후): R → 1.5초 후 30 복구·재발사 / 재장전 중 발사 차단 / **연사로 탄 소진 시 자동 재장전→완료 후 자동 재발사**(누르고 있을 때) / **재장전 중 무기전환 시 취소 + 그 무기 재장착 시 자동 재리로드**
 - **반동**: 연사 중 마우스 내려 보정 → 종료 후 화면 강제 하강 없음 / 풀오토는 손 떼도 자동 복구 안 함 / `FPSR.RecoilPreview 30` 패턴 표시
+- **ADS**(IA_ADS 셋업 후): 라이플 우클릭 → FOV 줌(부드럽게)·떼면 복귀 / 나이프는 변화 없음
+- **반동 ADS의존**: 힙파이어=탄착 산탄형·화면 안 올라감 / ADS=위로 climbing 라인(흩어짐 적음)
 
 ## 사용자 대기 작업 (PIE 테스트 전)
 - ✅ L_Sandbox 맵 / 무기 DataAsset 2개(현재 `Weapons/DataTable/`) — 생성됨

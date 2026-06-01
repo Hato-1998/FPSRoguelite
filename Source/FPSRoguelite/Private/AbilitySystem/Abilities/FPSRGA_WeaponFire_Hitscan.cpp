@@ -44,14 +44,12 @@ void UFPSRGA_WeaponFire_Hitscan::ActivateAbility(
 	float Range = 10000.0f;
 	float SpreadDegrees = 1.0f;
 	UFPSRWeaponInventoryComponent* Inventory = Avatar->FindComponentByClass<UFPSRWeaponInventoryComponent>();
-	if (Inventory)
+	UFPSRWeaponDataAsset* Weapon = Inventory ? Inventory->GetCurrentWeapon() : nullptr;
+	if (Weapon)
 	{
-		if (UFPSRWeaponDataAsset* Weapon = Inventory->GetCurrentWeapon())
-		{
-			Damage = Weapon->BaseStats.Damage;
-			Range = Weapon->BaseStats.Range;
-			SpreadDegrees = Weapon->BaseStats.SpreadDegrees;
-		}
+		Damage = Weapon->BaseStats.Damage;
+		Range = Weapon->BaseStats.Range;
+		SpreadDegrees = Weapon->BaseStats.SpreadDegrees;
 	}
 
 	// Server-authoritative ammo gate + consumption. Empty mag / reloading blocks the shot.
@@ -65,10 +63,14 @@ void UFPSRGA_WeaponFire_Hitscan::ActivateAbility(
 		Inventory->ConsumeAmmo(1);
 	}
 
-	// Add bloom from sustained fire.
+	// Add bloom from sustained fire, then tighten spread while aiming down sights.
 	if (UFPSRWeaponFireComponent* FireComp = Avatar->FindComponentByClass<UFPSRWeaponFireComponent>())
 	{
 		SpreadDegrees += FireComp->GetCurrentBloom();
+		if (FireComp->IsAiming() && Weapon && Weapon->BaseStats.bHasADS)
+		{
+			SpreadDegrees *= Weapon->BaseStats.ADSSpreadMultiplier;
+		}
 	}
 
 	// Trace from the player view point, randomized within the spread cone.

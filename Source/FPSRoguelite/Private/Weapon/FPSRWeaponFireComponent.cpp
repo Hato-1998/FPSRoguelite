@@ -14,6 +14,7 @@
 #include "DrawDebugHelpers.h"
 #include "GameFramework/PlayerController.h"
 #include "Camera/PlayerCameraManager.h"
+#include "Camera/CameraComponent.h"
 
 UFPSRWeaponFireComponent::UFPSRWeaponFireComponent()
 {
@@ -157,17 +158,22 @@ void UFPSRWeaponFireComponent::FireOneShot()
 	}
 	else
 	{
-		// Camera recoil (local feel only). Vertical is applied smoothly in Tick via PendingRisePitch;
-		// horizontal follows a deterministic pattern + small random variance (Apex-style, not pure jitter).
+		// Camera recoil (local feel only), ADS-dependent:
+		//  - Hip-fire: weak vertical climb + strong horizontal randomness (scattered, screen stays low).
+		//  - ADS: strong vertical climb + low randomness so the deterministic pattern shows (learnable line).
+		const bool bADS = bIsAiming && Stats.bHasADS;
+		const float VScale = bADS ? Stats.ADSVerticalScale : Stats.HipVerticalScale;
+		const float HRandom = bADS ? Stats.ADSHorizontalRandom : Stats.HipHorizontalRandom;
+
 		const FVector2D ShotDelta = ComputeShotRecoilDelta(Stats, ShotsFiredThisSpray);
 		if (ShotDelta.Y != 0.0f)
 		{
-			PendingRisePitch += ShotDelta.Y;
+			PendingRisePitch += ShotDelta.Y * VScale;
 		}
 		if (Stats.RecoilHorizontal != 0.0f)
 		{
-			const float Variance = FMath::FRandRange(-1.0f, 1.0f) * Stats.RecoilHorizontal * Stats.RecoilHorizontalVariance;
-			OwnerPawn->AddControllerYawInput(ShotDelta.X + Variance);
+			const float Variance = FMath::FRandRange(-1.0f, 1.0f) * Stats.RecoilHorizontal * HRandom;
+			OwnerPawn->AddControllerYawInput(ShotDelta.X + Variance); // deterministic pattern + scaled random
 		}
 		++ShotsFiredThisSpray;
 
@@ -227,6 +233,21 @@ void UFPSRWeaponFireComponent::TickComponent(float DeltaTime, ELevelTick TickTyp
 
 	// Auto-reload when the magazine empties while the player is still firing.
 	MaybeAutoReload();
+
+	// ADS: smoothly interpolate camera FOV toward the aim target (owner-local feel).
+	if (!CachedCamera)
+	{
+		CachedCamera = OwnerPawn->FindComponentByClass<UCameraComponent>();
+		if (CachedCamera)
+		{
+			DefaultFOV = CachedCamera->FieldOfView;
+		}
+	}
+	if (CachedCamera)
+	{
+		const float TargetFOV = (bIsAiming && Stats.bHasADS) ? Stats.ADSFieldOfView : DefaultFOV;
+		CachedCamera->FieldOfView = FMath::FInterpTo(CachedCamera->FieldOfView, TargetFOV, DeltaTime, FMath::Max(0.01f, Stats.ADSInterpSpeed));
+	}
 
 	// --- Recoil pitch handling (smoothed rise + debt-aware recovery + player compensation) ---
 	// 1) Smoothly apply any pending up-kick (snappy rise), accumulating recovery debt.
@@ -347,6 +368,6 @@ static FAutoConsoleCommandWithWorldAndArgs GFPSRRecoilPreviewCmd(
 
 			const FVector2D Delta = UFPSRWeaponFireComponent::ComputeShotRecoilDelta(Stats, i);
 			CumYaw += Delta.X;
-			CumPitch += Delta.Y;
+			CumPitch += Delta.Y * Stats.ADSVerticalScale;
 		}
 	}));

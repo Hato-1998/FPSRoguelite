@@ -98,7 +98,16 @@ struct FPSROGUELITE_API FFPSRWeaponStatBlock
 	float RecoilHorizontalPatternFreq = 0.6f; // horizontal pattern frequency (radians per shot)
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Recoil")
-	float RecoilHorizontalVariance = 0.25f; // random horizontal variation as a fraction of RecoilHorizontal (0..1)
+	float HipVerticalScale = 0.4f; // hip-fire vertical climb scale (weak; RecoilVertical * this)
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Recoil")
+	float ADSVerticalScale = 1.0f; // ADS vertical climb scale (strong)
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Recoil")
+	float HipHorizontalRandom = 0.9f; // hip-fire horizontal random fraction (high = scattered)
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Recoil")
+	float ADSHorizontalRandom = 0.15f; // ADS horizontal random fraction (low = pattern shows)
 
 	// --- Melee ---
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Melee")
@@ -106,4 +115,17 @@ struct FPSROGUELITE_API FFPSRWeaponStatBlock
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Melee")
 	float MeleeAttackDelay = 0.5f; // seconds between melee attacks (also rate-limits rapid clicks)
+
+	// --- ADS (aim down sights) ---
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|ADS")
+	bool bHasADS = false; // melee / no-ADS weapons leave this false
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|ADS")
+	float ADSFieldOfView = 55.0f; // zoomed FOV while aiming (default camera ~90)
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|ADS")
+	float ADSSpreadMultiplier = 0.4f; // spread scale while aiming (lower = tighter)
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|ADS")
+	float ADSInterpSpeed = 14.0f; // FOV interpolation speed
 };
