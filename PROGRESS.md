@@ -7,10 +7,17 @@
 **최종 갱신: 2026-06-01**
 
 ## 한 줄 요약
-**P1 + P1.5 완료 + P2-A 코드 완료**(적 풀링/SpawnDirector/이속±10%편차). 빌드+스모크 통과. **PIE 확인 대기**. → **다음: P2-B**(Flow-Field + Significance LOD).
+**P1+P1.5 완료 + P1 리뷰 하드닝(main 머지) + P2-A·P2-B1 코드 완료**(풀링/디렉터/이속편차 + 중앙배치이동/Significance LOD). 빌드+스모크 통과. **PIE 확인 대기**. → **다음: P2-B2**(Flow-Field 그리드 + separation).
 
-## ▶▶ 새 세션 우선 작업 = P2-A PIE 확인 → P2-B 착수
-**브랜치**: `phase/p2-enemy-mass` (활성). 구현=Haiku 위임 / 검증=Opus.
+## ▶▶ 새 세션 우선 작업 = P2-A/B1 PIE 확인 → P2-B2 착수
+**브랜치**: `phase/p2-enemy-mass` (활성, main의 P1 하드닝 머지 반영됨). 구현=Haiku 위임 / 검증=Opus.
+
+### ✅ P2-B1 코드 완료 (2026-06-01, 빌드+스모크 통과) — 중앙 배치 이동 + Significance 거리 LOD
+per-actor naive chase Tick 폐지 → `UFPSREnemySpawnSubsystem`이 `FTickableGameObject`로 배치 이동 구동(서버권위). 리뷰 #6(적 tick/이동 비용) 해소.
+- **`AFPSREnemyBase`**: `PrimaryActorTick.bCanEverTick=false`, `Tick`/`FindNearestPlayer` 제거 → 신규 `TickServerMovement(Target, ScaledDelta)`(서버 가드 + 기존 chase 수식). Activate/Deactivate의 `SetActorTickEnabled` 제거(ActiveEnemies 멤버십이 갱신 게이트).
+- **서브시스템(FTickableGameObject)**: `Tick`→`TickEnemyMovement`. 플레이어 위치 1회 캐시 → 적별 최근접(2D) → **거리 티어 LOD**: S0(<1500) stride1/30Hz, S1(<3500) stride2/10Hz, S2(<6000) stride4/5Hz, S3 stride8/2Hz(§5 표). `SetNetUpdateFrequency`(UE5.7 API) 티어별 적용 + `(frame+UniqueID)%stride`로 throttle 분산 + `DeltaTime*stride` 보정 이동. (엔진 `UTickableWorldSubsystem` 관용구 참조.)
+
+**⏳ B1 PIE 확인**: `FPSR.EnemyTarget 200`→근거리 적 부드럽게 추격, 원거리 적은 갱신 throttle(끊겨 보여도 정상), 처치/재활용 정상. 300+에서 hitch 감소.
 
 ### ✅ P2-A 코드 완료 (2026-06-01, 빌드+스모크 통과) — 적 대량화 기반
 Object Pooling + SpawnDirector + 개체별 이속 ±10% 편차. (Flow-Field·Significance=P2-B, 근접데미지·공격토큰·대시=P2-C.)
@@ -24,8 +31,8 @@ Object Pooling + SpawnDirector + 개체별 이속 ±10% 편차. (Flow-Field·Sig
 
 **⏳ PIE 확인 대기**: `FPSR.EnemyTarget 100`→~100 유지·처치 시 풀 재활용(`obj list class=FPSREnemyBase` 안정)·이속 편차로 분산 / `EnemyTarget 0` 중단 / `FPSR.SpawnEnemies 20` 버스트. (상세 플랜: `~/.claude/plans/curried-painting-quill.md`)
 
-### ▶ 다음: P2-B (Flow-Field + Significance)
-naive chase Tick → Flow-Field 경로(고정맵 grid + separation) 교체 + Significance 티어(틱/복제 LOD, §5-1) → 적 300+ 틱 성능 안정. 이후 **P2-C**(근접 데미지 + 공격토큰 + 충돌무시 대시).
+### ▶ 다음: P2-B2 (Flow-Field 그리드 + separation)
+B1에서 배치이동+거리LOD 완료. B2 = `UFPSRFlowFieldSubsystem`(고정맵 2D 그리드 + 다중소스 BFS, 적이 셀 방향 O(1) 샘플) + 균일 그리드 공간해시 기반 separation → 유기적 스웜·장애물 토대. 현재 타겟팅은 직접 최근접(B1) → B2에서 그리드 샘플로 교체. 이후 **P2-C**(근접 데미지 + 공격토큰 + 충돌무시 대시).
 
 ## 🔴 이전 완료 이력 (P1/P1.5)
 

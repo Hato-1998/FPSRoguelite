@@ -9,12 +9,11 @@
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
-#include "GameFramework/PlayerController.h"
 #include "UObject/ConstructorHelpers.h"
 
 AFPSREnemyBase::AFPSREnemyBase()
 {
-	PrimaryActorTick.bCanEverTick = true;
+	PrimaryActorTick.bCanEverTick = false;
 	bReplicates = true;
 	SetReplicateMovement(true);
 
@@ -49,28 +48,6 @@ void AFPSREnemyBase::BeginPlay()
 	}
 }
 
-void AFPSREnemyBase::Tick(float DeltaSeconds)
-{
-	Super::Tick(DeltaSeconds);
-
-	if (!HasAuthority() || (HealthComponent && HealthComponent->IsDead()))
-	{
-		return;
-	}
-
-	if (const APawn* Target = FindNearestPlayer())
-	{
-		FVector ToTarget = Target->GetActorLocation() - GetActorLocation();
-		ToTarget.Z = 0.0f;
-		if (ToTarget.SizeSquared() > StopDistance * StopDistance)
-		{
-			const FVector Dir = ToTarget.GetSafeNormal();
-			AddActorWorldOffset(Dir * CurrentMoveSpeed * DeltaSeconds, true);
-			SetActorRotation(Dir.Rotation());
-		}
-	}
-}
-
 void AFPSREnemyBase::HandleDeath(AActor* DeadActor, AActor* Killer)
 {
 	if (UWorld* World = GetWorld())
@@ -89,7 +66,6 @@ void AFPSREnemyBase::Activate(const FVector& Location)
 	SetActorLocation(Location);
 	SetActorHiddenInGame(false);
 	SetActorEnableCollision(true);
-	SetActorTickEnabled(true);
 	FlushNetDormancy();
 
 	if (HealthComponent)
@@ -104,29 +80,22 @@ void AFPSREnemyBase::Deactivate()
 {
 	SetActorHiddenInGame(true);
 	SetActorEnableCollision(false);
-	SetActorTickEnabled(false);
 	SetNetDormancy(DORM_DormantAll);
 }
 
-APawn* AFPSREnemyBase::FindNearestPlayer() const
+void AFPSREnemyBase::TickServerMovement(const FVector& TargetLocation, float ScaledDeltaSeconds)
 {
-	APawn* Best = nullptr;
-	float BestDistSq = TNumericLimits<float>::Max();
-
-	for (FConstPlayerControllerIterator It = GetWorld()->GetPlayerControllerIterator(); It; ++It)
+	if (!HasAuthority() || (HealthComponent && HealthComponent->IsDead()))
 	{
-		if (APlayerController* PC = It->Get())
-		{
-			if (APawn* PlayerPawn = PC->GetPawn())
-			{
-				const float DistSq = FVector::DistSquared(PlayerPawn->GetActorLocation(), GetActorLocation());
-				if (DistSq < BestDistSq)
-				{
-					BestDistSq = DistSq;
-					Best = PlayerPawn;
-				}
-			}
-		}
+		return;
 	}
-	return Best;
+
+	FVector ToTarget = TargetLocation - GetActorLocation();
+	ToTarget.Z = 0.0f;
+	if (ToTarget.SizeSquared() > StopDistance * StopDistance)
+	{
+		const FVector Dir = ToTarget.GetSafeNormal();
+		AddActorWorldOffset(Dir * CurrentMoveSpeed * ScaledDeltaSeconds, true);
+		SetActorRotation(Dir.Rotation());
+	}
 }

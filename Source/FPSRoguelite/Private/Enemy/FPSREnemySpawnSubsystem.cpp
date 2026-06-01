@@ -5,8 +5,38 @@
 #include "Core/FPSRLogChannels.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
+#include "GameFramework/Pawn.h"
 #include "TimerManager.h"
 #include "HAL/IConsoleManager.h"
+
+// FTickableGameObject implementation
+
+void UFPSREnemySpawnSubsystem::Tick(float DeltaTime)
+{
+	TickEnemyMovement(DeltaTime);
+}
+
+TStatId UFPSREnemySpawnSubsystem::GetStatId() const
+{
+	RETURN_QUICK_DECLARE_CYCLE_STAT(UFPSREnemySpawnSubsystem, STATGROUP_Tickables);
+}
+
+ETickableTickType UFPSREnemySpawnSubsystem::GetTickableTickType() const
+{
+	// Never tick the CDO/template.
+	return IsTemplate() ? ETickableTickType::Never : ETickableTickType::Conditional;
+}
+
+bool UFPSREnemySpawnSubsystem::IsTickable() const
+{
+	const UWorld* World = GetWorld();
+	return World != nullptr && World->IsGameWorld();
+}
+
+UWorld* UFPSREnemySpawnSubsystem::GetTickableGameObjectWorld() const
+{
+	return GetWorld();
+}
 
 bool UFPSREnemySpawnSubsystem::ShouldCreateSubsystem(UObject* Outer) const
 {
@@ -55,6 +85,81 @@ bool UFPSREnemySpawnSubsystem::HasServerAuthority() const
 void UFPSREnemySpawnSubsystem::SetTargetAliveCount(int32 InTarget)
 {
 	TargetAliveCount = FMath::Clamp(InTarget, 0, MaxActiveEnemies);
+}
+
+void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
+{
+	if (!HasServerAuthority())
+	{
+		return; // movement is server-authoritative; clients receive replicated transforms.
+	}
+
+	UWorld* World = GetWorld();
+	if (!World || ActiveEnemies.Num() == 0)
+	{
+		return;
+	}
+
+	++MovementFrameCounter;
+
+	// Cache alive player pawn locations once for this pass.
+	TArray<FVector, TInlineAllocator<4>> PlayerLocations;
+	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+	{
+		if (const APlayerController* PC = It->Get())
+		{
+			if (const APawn* PlayerPawn = PC->GetPawn())
+			{
+				PlayerLocations.Add(PlayerPawn->GetActorLocation());
+			}
+		}
+	}
+	if (PlayerLocations.Num() == 0)
+	{
+		return;
+	}
+
+	for (const TObjectPtr<AFPSREnemyBase>& EnemyPtr : ActiveEnemies)
+	{
+		AFPSREnemyBase* Enemy = EnemyPtr.Get();
+		if (!IsValid(Enemy))
+		{
+			continue;
+		}
+
+		const FVector EnemyLocation = Enemy->GetActorLocation();
+
+		// Nearest player (2D).
+		float BestDistSq = TNumericLimits<float>::Max();
+		FVector BestPlayerLocation = PlayerLocations[0];
+		for (const FVector& PlayerLocation : PlayerLocations)
+		{
+			const float DistSq = FVector::DistSquaredXY(PlayerLocation, EnemyLocation);
+			if (DistSq < BestDistSq)
+			{
+				BestDistSq = DistSq;
+				BestPlayerLocation = PlayerLocation;
+			}
+		}
+
+		// Distance LOD tier -> update stride + net update frequency (Game.MD §5).
+		int32 UpdateStride;
+		float NetFreq;
+		if (BestDistSq <= TierS0RadiusSq)      { UpdateStride = 1; NetFreq = 30.0f; }
+		else if (BestDistSq <= TierS1RadiusSq) { UpdateStride = 2; NetFreq = 10.0f; }
+		else if (BestDistSq <= TierS2RadiusSq) { UpdateStride = 4; NetFreq = 5.0f;  }
+		else                                   { UpdateStride = 8; NetFreq = 2.0f;  }
+
+		// Apply per-tier net update frequency (UE 5.7 API).
+		Enemy->SetNetUpdateFrequency(NetFreq);
+
+		// Spread throttled updates across frames by the enemy's stable id, then move with a stride-scaled delta.
+		if (((MovementFrameCounter + static_cast<int32>(Enemy->GetUniqueID())) % UpdateStride) != 0)
+		{
+			continue;
+		}
+		Enemy->TickServerMovement(BestPlayerLocation, DeltaTime * UpdateStride);
+	}
 }
 
 void UFPSREnemySpawnSubsystem::TickDirector()

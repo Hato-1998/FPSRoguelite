@@ -19,21 +19,22 @@ class FPSROGUELITE_API AFPSREnemyBase : public APawn
 public:
 	AFPSREnemyBase();
 
-	virtual void Tick(float DeltaSeconds) override;
-
-	/** Server: reactivate a pooled enemy at Location (unhide, enable collision/tick, reset health, randomize move speed). */
+	/** Server: reactivate a pooled enemy at Location (unhide, enable collision, reset health, randomize move speed). */
 	void Activate(const FVector& Location);
 
-	/** Server: deactivate and return to dormant pool state (hide, disable collision/tick, net dormant). */
+	/** Server: deactivate and return to dormant pool state (hide, disable collision, net dormant). */
 	void Deactivate();
+
+	/** Server: advance toward TargetLocation using CurrentMoveSpeed * ScaledDeltaSeconds. Driven by the
+	 *  enemy movement subsystem's batched pass (per-actor Tick is disabled). ScaledDeltaSeconds is the real
+	 *  delta multiplied by this enemy's LOD update stride so throttled enemies still cover the right distance. */
+	void TickServerMovement(const FVector& TargetLocation, float ScaledDeltaSeconds);
 
 protected:
 	virtual void BeginPlay() override;
 
 	UFUNCTION()
 	void HandleDeath(AActor* DeadActor, AActor* Killer);
-
-	APawn* FindNearestPlayer() const;
 
 	UPROPERTY(VisibleAnywhere, Category = "FPSR|Enemy")
 	TObjectPtr<UCapsuleComponent> Capsule;
