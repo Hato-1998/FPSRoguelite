@@ -29,6 +29,10 @@ public:
 	virtual void OnRep_PlayerState() override;
 	virtual void SetupPlayerInputComponent(UInputComponent* PlayerInputComponent) override;
 
+#if ENABLE_DRAW_DEBUG
+	virtual void Tick(float DeltaSeconds) override;
+#endif
+
 	//~IAbilitySystemInterface
 	virtual UAbilitySystemComponent* GetAbilitySystemComponent() const override;
 	//~End IAbilitySystemInterface

@@ -17,6 +17,7 @@
 #include "GameFramework/PlayerController.h"
 #include "TimerManager.h"
 #include "Engine/World.h"
+#include "Engine/Engine.h"
 
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
@@ -25,7 +26,11 @@
 
 AFPSRCharacter::AFPSRCharacter()
 {
+#if ENABLE_DRAW_DEBUG
+	PrimaryActorTick.bCanEverTick = true; // debug-only: on-screen health readout (replaced by HUD in P3)
+#else
 	PrimaryActorTick.bCanEverTick = false;
+#endif
 
 	GetCapsuleComponent()->InitCapsuleSize(34.0f, 88.0f);
 
@@ -62,6 +67,28 @@ AFPSRCharacter::AFPSRCharacter()
 	// Blueprint subclass (BP_FPSRCharacter / BP_FPSRPlayerController) — no hardcoded
 	// content paths in C++.
 }
+
+#if ENABLE_DRAW_DEBUG
+void AFPSRCharacter::Tick(float DeltaSeconds)
+{
+	Super::Tick(DeltaSeconds);
+
+	// Debug scaffolding (replaced by HUD in P3): on-screen health / dead readout for the local player.
+	if (GEngine && IsLocallyControlled())
+	{
+		if (UAbilitySystemComponent* ASC = GetAbilitySystemComponent())
+		{
+			const float Health = ASC->GetNumericAttribute(UFPSRHealthSet::GetHealthAttribute());
+			const float MaxHealth = ASC->GetNumericAttribute(UFPSRHealthSet::GetMaxHealthAttribute());
+			const bool bDead = Health <= 0.0f;
+			const FString Msg = bDead
+				? FString::Printf(TEXT("DEAD  (HP 0 / %.0f)"), MaxHealth)
+				: FString::Printf(TEXT("HP: %.0f / %.0f"), Health, MaxHealth);
+			GEngine->AddOnScreenDebugMessage((uint64)(UPTRINT)this, 0.0f, bDead ? FColor::Red : FColor::Green, Msg);
+		}
+	}
+}
+#endif
 
 void AFPSRCharacter::PossessedBy(AController* NewController)
 {

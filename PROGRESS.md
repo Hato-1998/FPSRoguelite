@@ -23,6 +23,7 @@
 - **플레이어 피해=서버권위+clamp**: 적→`AFPSRCharacter::ApplyContactDamage`→`ASC->ApplyModToAttribute(Health, -dmg)`(엔진 확인: base값 수정·서버가드). `UFPSRHealthSet` `PreAttributeChange`/`PreAttributeBaseChange` clamp(Health 0~Max, MaxHealth≥1, 리뷰 #7 선반영) + `PostAttributeChange`에서 Health 0 도달 시 `OnOutOfHealth` 1회 브로드캐스트 → `AFPSRCharacter::HandleOutOfHealth`(현재 로그만; **완전 DBNO/리스폰=P5**).
 
 **⏳ C1 PIE 확인**: `FPSR.EnemyTarget 50` + 적에게 둘러싸이면 **체력 감소**(서버), 다수에 둘러싸여도 토큰으로 동시 피해 제한, 0 도달 시 로그(`[Player] ... reached 0 health`). 체력은 0~Max clamp.
+- **디버그 표시(2026-06-01)**: 로컬 플레이어 화면에 `HP: x / y`(녹색) / 사망 시 `DEAD (HP 0/y)`(적색) — Ammo 표시처럼 `AFPSRCharacter::Tick`에서 `GEngine->AddOnScreenDebugMessage`, **`#if ENABLE_DRAW_DEBUG` 게이트(틱 자체도 디버그 빌드에서만 활성**, 쉬핑 오버헤드 0). HUD는 P3 전환 대상(§8).
 
 ### ✅ P2-B2 코드 완료 (2026-06-01, 빌드+스모크 통과) — Flow-Field 그리드 + separation
 - **신규 `UFPSRFlowFieldSubsystem`(UWorldSubsystem, 서버권위)**: 고정맵 2D 그리드(`CellSize=200`, `HalfExtent=10000`→100×100, 원점 중심), 타이머(`FlowUpdateInterval=0.2s`)로 **다중소스 BFS**(생존 플레이어=소스, 4-연결) 적분필드 → 8-이웃 최급강하로 셀별 흐름방향. `SampleFlowDirection(Loc)` O(1)(범위밖/미준비=Zero→호출측 직접방향 폴백). 장애물 없으면 ≈ 최근접 플레이어 방향이지만 적별 탐색을 그리드 1회로 분할상환 + 장애물 토대.
