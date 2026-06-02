@@ -5,6 +5,7 @@
 #include "Enemy/FPSRFlowFieldSubsystem.h"
 #include "Hero/FPSRCharacter.h"
 #include "Core/FPSRLogChannels.h"
+#include "Core/FPSRGameState.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/Pawn.h"
@@ -130,6 +131,9 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 
 	const float Now = World->GetTimeSeconds();
 
+	const AFPSRGameState* GameState = World->GetGameState<AFPSRGameState>();
+	const bool bCombatPhase = (GameState == nullptr) || GameState->IsCombatPhase();
+
 	const UFPSRFlowFieldSubsystem* FlowField = World->GetSubsystem<UFPSRFlowFieldSubsystem>();
 
 	// Build the per-pass agent arrays + uniform-grid spatial hash (all valid active enemies) for separation.
@@ -184,7 +188,8 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 
 		// Contact attack: in range + cooldown elapsed + the target player's attack-token budget allows.
 		const float AttackRange = Enemy->GetAttackRange();
-		if (BestDistSq <= (AttackRange * AttackRange)
+		if (bCombatPhase
+			&& BestDistSq <= (AttackRange * AttackRange)
 			&& Enemy->CanAttack(Now)
 			&& AttackersThisPass[BestPlayerIndex] < AttackTokenLimit)
 		{
@@ -265,6 +270,12 @@ void UFPSREnemySpawnSubsystem::TickDirector()
 	if (!HasServerAuthority())
 	{
 		return;
+	}
+
+	const AFPSRGameState* GameState = GetWorld() ? GetWorld()->GetGameState<AFPSRGameState>() : nullptr;
+	if (GameState && !GameState->IsCombatPhase())
+	{
+		return; // Breather (safe zone): spawning stops (Game.MD §2-2).
 	}
 
 	int32 SpawnedThisTick = 0;

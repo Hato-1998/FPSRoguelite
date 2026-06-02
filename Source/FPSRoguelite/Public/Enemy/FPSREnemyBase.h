@@ -76,6 +76,9 @@ protected:
 	/** Server-only: world time of last attack (init far in the past so the first attack is allowed). */
 	float LastAttackTime = -1000.0f;
 
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Enemy")
+	int32 XPReward = 5;
+
 	/** Per-instance move speed (MoveSpeed * random ±10% on Activate). Game.MD §2-6. */
 	UPROPERTY(Transient)
 	float CurrentMoveSpeed = MoveSpeed;

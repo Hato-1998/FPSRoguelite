@@ -153,6 +153,19 @@ int32 UFPSRWeaponInventoryComponent::GetCurrentMagSize() const
 	return Weapon ? Weapon->BaseStats.MagSize : 0;
 }
 
+TArray<UFPSRWeaponDataAsset*> UFPSRWeaponInventoryComponent::GetOwnedWeapons() const
+{
+	TArray<UFPSRWeaponDataAsset*> Result;
+	for (const TObjectPtr<UFPSRWeaponDataAsset>& Weapon : WeaponSlots)
+	{
+		if (Weapon)
+		{
+			Result.Add(Weapon.Get());
+		}
+	}
+	return Result;
+}
+
 bool UFPSRWeaponInventoryComponent::ConsumeAmmo(int32 Amount)
 {
 	if (!GetOwner() || !GetOwner()->HasAuthority())

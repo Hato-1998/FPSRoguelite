@@ -5,6 +5,8 @@
 #include "GameFramework/GameModeBase.h"
 #include "FPSRGameMode.generated.h"
 
+class UFPSRCardPoolDataAsset;
+
 /** Default game mode wiring the project's GameState, PlayerController, PlayerState and Character. */
 UCLASS()
 class FPSROGUELITE_API AFPSRGameMode : public AGameModeBase
@@ -13,4 +15,10 @@ class FPSROGUELITE_API AFPSRGameMode : public AGameModeBase
 
 public:
 	AFPSRGameMode();
+
+	virtual void BeginPlay() override;
+
+protected:
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Cards")
+	TObjectPtr<UFPSRCardPoolDataAsset> CardPool;
 };

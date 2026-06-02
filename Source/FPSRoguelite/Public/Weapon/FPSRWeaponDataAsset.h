@@ -7,6 +7,7 @@
 #include "FPSRWeaponDataAsset.generated.h"
 
 class UGameplayAbility;
+class UFPSRCardDataAsset;
 
 /** Data-driven weapon definition. */
 UCLASS(BlueprintType)
@@ -27,4 +28,7 @@ public:
 	/** Ability granted while this weapon is equipped (activated by the Fire input). */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon")
 	TSubclassOf<UGameplayAbility> FireAbility;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Cards")
+	TArray<TObjectPtr<UFPSRCardDataAsset>> WeaponCards;
 };

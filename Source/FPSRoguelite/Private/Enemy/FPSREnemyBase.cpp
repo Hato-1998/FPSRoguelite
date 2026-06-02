@@ -3,6 +3,7 @@
 #include "Enemy/FPSREnemyBase.h"
 #include "Enemy/FPSREnemyHealthComponent.h"
 #include "Enemy/FPSREnemySpawnSubsystem.h"
+#include "Pickup/FPSRPickupSubsystem.h"
 #include "Core/FPSRLogChannels.h"
 
 #include "Components/CapsuleComponent.h"
@@ -52,6 +53,11 @@ void AFPSREnemyBase::HandleDeath(AActor* DeadActor, AActor* Killer)
 {
 	if (UWorld* World = GetWorld())
 	{
+		if (UFPSRPickupSubsystem* Pickups = World->GetSubsystem<UFPSRPickupSubsystem>())
+		{
+			Pickups->SpawnXPPickup(GetActorLocation(), XPReward);
+		}
+
 		if (UFPSREnemySpawnSubsystem* Sub = World->GetSubsystem<UFPSREnemySpawnSubsystem>())
 		{
 			Sub->ReleaseEnemy(this);

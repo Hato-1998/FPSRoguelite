@@ -68,4 +68,19 @@ void UFPSRHealthSet::PostAttributeChange(const FGameplayAttribute& Attribute, fl
 			bOutOfHealthBroadcast = false;
 		}
 	}
+	else if (Attribute == GetMaxHealthAttribute())
+	{
+		// A MaxHealth increase (e.g. a card) also heals current Health by the same amount, so picking a
+		// +MaxHealth upgrade feels immediately impactful. SetHealth re-clamps to the new max. Decreases are
+		// left to the Health clamp (current health is capped to max on its next change).
+		// Authority-only: the server heals and Health replicates to clients. A replicated MaxHealth change
+		// also fires PostAttributeChange on clients (for active/infinite GEs), so guarding here prevents the
+		// client from double-applying the heal on top of the already-replicated Health.
+		const float Delta = NewValue - OldValue;
+		const UAbilitySystemComponent* ASC = GetOwningAbilitySystemComponent();
+		if (Delta > 0.0f && ASC && ASC->IsOwnerActorAuthoritative())
+		{
+			SetHealth(GetHealth() + Delta);
+		}
+	}
 }

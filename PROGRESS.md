@@ -7,11 +7,55 @@
 **최종 갱신: 2026-06-01**
 
 ## 한 줄 요약
-**P1+P1.5 + P1 리뷰 하드닝(main) + P2 전체(A·B1·B2·C1·C2) 코드 완료**. 빌드+스모크 통과. **PIE 확인 + phase→main 머지 대기**.
+**P2 + P3-A·B·C(코드+카드 콘텐츠) → main 머지 완료**(이 머지 커밋). 빌드+스모크+Codex+PIE 통과. → 다음 **P3-D**(카드 UI/오프닝시드/공유XP바 HUD), main에서 새 브랜치 분기.
 
-## ▶▶ 새 세션 우선 작업 = P2 통합 PIE 확인 → phase/p2-enemy-mass → main `--no-ff` 머지(§6-7)
-**브랜치**: `phase/p2-enemy-mass` (활성, main의 P1 하드닝 머지 반영됨). 구현=Haiku 위임 / 검증=Opus.
-**사용자 작업(대시 입력)**: `IA_Dash`(Bool) 에셋 생성 + IMC_Default 매핑 + `BP_FPSRCharacter` `DashAction` 할당(기존 IA_Reload/ADS 패턴).
+## ▶▶ 새 세션 우선 작업 = P3-D 착수 (새 작업이므로 플랜 우선)
+**브랜치**: `phase/p3-progression`은 main 머지 후 삭제됨. **P3-D는 `main`에서 새 `phase/p3d-cardui` 분기**. 구현=Haiku 위임 / 검증=Opus.
+
+### 🧭 핸드오프 요약 (이 줄부터 읽으면 즉시 이어받기 가능)
+- **현재 위치**: P3(진행 시스템). 분해 = **P3-A✅ → P3-B✅ → P3-C✅(main 머지) → P3-D(다음)**.
+- **다음 작업 = P3-D (카드 UI, 새 작업이므로 플랜 우선)**: CommonUI 뷰포트/입력 설정(`CommonGameViewportClient` — §8 LogUIActionRouter 해결) + **정비시간 3카드 선택 위젯**(레벨업 스택 연속 소비, 본인 화면 오버레이) + **오프닝 시드 1~2장**(런 시작, `ApplyCard(..., bConsumeLevelUp=false)`) + **공유 XP바 HUD**(GameState `SharedXP/PartyLevel/PendingLevelUps` 바인딩) + 리롤 버튼(PlayerState `RunRerollCharges`). **배선**: 클라 위젯 → PlayerController Server RPC → `UFPSRCardSubsystem::DrawCards/ApplyCard/TryReroll`. (Game.MD §2-2/§2-3)
+- **P3-C가 P3-D에 노출한 서버 API**: `World->GetSubsystem<UFPSRCardSubsystem>()` → `DrawCards(PC, N, Exclude)`(Character scope만·가중추첨) / `ApplyCard(PC, Card, bConsumeLevelUp)`(레벨업 게이트, 오프닝시드=false) / `TryReroll(PC)`(PlayerState 차감). 풀 주입=`BP_FPSRGameMode.CardPool`.
+- **⏳ 미확인 PIE(사용자)**: P2 전체(스웜 분산/풀 재활용/LOD/근접피해/대시) + P3-A/B(`FPSR.AddXP`·`FPSR.SetPhase`·XP 오브 흡수). 각 단계 ⏳ 항목 참조. **코드는 빌드+스모크 통과 상태**.
+- **🧹 housekeeping(미처리)**: 머지 완료된 원격 브랜치 `phase/p1-review-hardening`, 오래된 `phase/p1.5-b-ammo-reload` 삭제 보류(사용자 확인 시 정리).
+- **규칙(메모리 저장됨)**: Phase 종료 시 해당 Phase 사용자 콘텐츠(에셋/BP/IMC) 동반 커밋 여부를 사용자에게 물을 것.
+- **빌드/검증**: §6-6 (`Build.bat FPSRogueliteEditor ... -WaitMutex` / 헤드리스 스모크 `FPSRoguelite.Smoke.ModuleLoads`). 구현=Haiku 위임, 검증=Opus 직접(§6-5).
+
+### ✅ P3-C 코드 완료 (2026-06-01, 빌드+스모크+Codex 통과) — 카드 데이터/로직
+- **신규 `Card/`**: `FPSRCardTypes.h`(`ECardScope` Character/ThisWeapon/AllWeapons, `ECardRarity` Common/Rare/Epic/Legendary) + `UFPSRCardDataAsset`(DisplayName/Description/Scope/Rarity/`AppliedEffect`=GE/Weight, 스탯 하드코딩 없음 §2-3) + `UFPSRCardPoolDataAsset`(Cards[] + 등급별 기본가중치 4종 + Luck/RarityBonus 스케일).
+- **신규 `UFPSRCardSubsystem`(UWorldSubsystem, 서버권위)**: `DrawCards`(풀+보유무기 `WeaponCards` 후보 → **Rarity 가중 비복원 추첨**, 유효가중치=`RarityBase×Weight×(1+RarityBonus·scale+Luck·scale)×등급tier`) / `ApplyCard(PC,Card,bConsumeLevelUp=true)`(Character scope GE→플레이어 ASC) / `TryReroll`. 풀 주입=`AFPSRGameMode::BeginPlay`→`SetActivePool(CardPool)`(BP 할당, 경로 하드코딩 없음).
+- **리롤=플레이어별**(사용자 확정): `AFPSRPlayerState`에 `RunRerollCharges`(기본 3, Push Model 복제, 서버 BeginPlay 초기화) + `ConsumeRerollCharge/ResetRerollCharges/SetRerollCharges`.
+- **신규 글로벌 속성**: `UFPSRCombatSet`에 `Luck`/`RarityBonus`(기본 0, 기존 GlobalCrit 패턴 미러) — 추첨 가중·향후 카드/메타 타깃(§4-1).
+- **Codex 리뷰 반영(2건 P2)**: ① **레벨업 게이트** — `ApplyCard`가 `bConsumeLevelUp` 시 `PendingLevelUps>0` 선검사 후 GE 적용·소비를 원자적으로(무료 지급 방지), 오프닝시드는 `false`로 게이트 우회(§2-2). ② **무기 카드 거부** — ThisWeapon/AllWeapons는 추첨에서 제외 + `ApplyCard` 거부(선택 낭비 방지), 무기스탯 적용은 P4.
+- **디버그 콘솔**(`#if !UE_BUILD_SHIPPING`): `FPSR.DrawCards [N]` / `FPSR.ApplyCard [index]` / `FPSR.Reroll [N]` / `FPSR.RerollCharges [N]`.
+- **보강(2026-06-02, 빌드+스모크+Codex 통과)**:
+  - ① **카드별 `Magnitude`(SetByCaller, 태그 `SetByCaller.CardMagnitude`)** — GE 1개를 다른 값으로 재사용(고정 GE 호환).
+  - ② **`CardFamily`(GameplayTag) 디듀프** — 같은 family(미설정 시 AppliedEffect GE 클래스)는 한 추첨에 1장만 제안.
+  - ③ **등급별 수치 테이블 리팩터(사용자 확정)**: 카드의 단일 `Rarity`/`Magnitude` → **`TArray<FFPSRCardRarityTier{Rarity,Magnitude}> RarityTiers`**. **"모든 등급에서 나오는 카드 = 1 에셋"**(등급당 1티어, 추첨이 등급 굴림). `DrawCards`는 (카드×티어) 평탄화 후 가중추첨, 반환=**`TArray<FFPSRCardDraw{Card,Rarity,Magnitude}>`**, `ApplyCard(PC, FFPSRCardDraw, bConsumeLevelUp)`. ⚠️ **기존 카드 .uasset은 RarityTiers 재작성 필요**(Rarity/Magnitude 필드 제거됨).
+  - ④ **데이터 검증**: `UFPSRCardDataAsset::IsDataValid`(WITH_EDITOR, RarityTiers 빔=에러/AppliedEffect 없음=경고) + 런타임 빈 티어 경고 로그(무음 실패 방지, Codex 지적 반영).
+  - ⑤ **`RarityBonus` 폐지 → `Luck` 단일 축으로 통합(사용자 확정)**: 둘이 추첨에서 중복이라 `Luck` 하나로 단순화. `UFPSRCombatSet`의 RarityBonus 속성·`UFPSRCardPoolDataAsset.RarityBonusScale` 제거, `GetEffectiveWeight`는 Luck만(`1+Luck·LuckScale·등급tier`). Luck=광역 행운(향후 드랍품질·희귀스폰 등도 담당). Game.MD §4-1/§2-3 갱신. ⚠️ **RarityBonus를 타깃한 GE 에셋이 있으면 다른 속성으로 변경 필요**. (PickupRadius/XPGain은 사용자 결정에 따라 **나중에** 추가.)
+  - Game.MD §2-3 + 가이드(`Docs/P3-C_UserContent_Guide.md`) RarityTiers 모델·Luck 단일축으로 갱신.
+  - ⑥ **최대체력 증가 = 즉시 회복(사용자 요청)**: `UFPSRHealthSet::PostAttributeChange`에서 MaxHealth 증가분만큼 현재 Health 가산(**서버 권위 게이트** `IsOwnerActorAuthoritative` — Codex 지적 반영: 클라 복제 재적용 방지). 새 최대치로 clamp. GE 대신 코드 방식 채택(Instant GE modifier 순서 클램프 함정 회피 + 모든 MaxHealth 증가에 일관). Game.MD §2-13 기록.
+
+**⏳ P3-C PIE 확인(사용자 콘텐츠 필요)**: 샘플 카드 DA들 + `DA_CardPool`(+GE 에셋) 생성 → `BP_FPSRGameMode.CardPool` 할당 → `FPSR.AddXP 120`(레벨업 큐)→`FPSR.DrawCards 3`(로그에 3장)→`FPSR.ApplyCard 0`(applied, GE 적용)→레벨업 큐 없으면 rejected. `FPSR.RerollCharges 3`→`FPSR.Reroll`→차감·재추첨.
+
+### ✅ P3-B 코드 완료 (2026-06-01, 빌드+스모크 통과) — XP 픽업 + 자석
+- **신규 `AFPSRXPPickup`(`Pickup/`)**: 적 사망 드롭 경량 XP 오브(placeholder 스피어 메시). 서버 권위 Tick — 최근접 플레이어로 자석 이동, `CollectRadius` 접촉 시 `GameState->AddSharedXP` 후 `Destroy`.
+- **신규 `UFPSRPickupSubsystem`**: `SpawnXPPickup(Loc, XP)` — lazy-prune + **활성 cap `MaxActivePickups=150`**(§5) 초과 시 오브 없이 XP 직접 가산. `UPROPERTY(Transient) TArray<TObjectPtr>` GC-safe.
+- **적 사망 훅**: `AFPSREnemyBase::HandleDeath`가 풀 반환 전 `SpawnXPPickup(위치, XPReward=5)`.
+- **후속**: 자석 배칭/픽업 풀링, 클라 코스메틱+서버수령 분리, 인접 병합, PickupRadius 어트리뷰트 연동(§5).
+
+**⏳ P3-B PIE 확인**: 적 처치 → XP 오브 드롭 → 다가가면 빨려와 흡수 → 화면 readout `XP x/y` 증가, 누적 시 레벨업·Stack 증가.
+
+### ✅ P3-A 코드 완료 (2026-06-01, 빌드+스모크 통과) — 런 진행 상태(GameState 호스팅)
+- **`AFPSRGameState`에 복제 런 상태**(Push Model, 서버권위, Game.MD §4-1 갱신: WorldSubsystem 복제불가 → GameState 호스팅): `SharedXP`/`PartyLevel`/`PendingLevelUps`(레벨업 스택)/`RunPhase`(Combat/Breather). `AddSharedXP`(레벨업 누적·프리즈 없음 §2-2)/`SetRunPhase`/`ConsumePendingLevelUp`(P3-D 카드선택용) + XP 임계 placeholder(`XPBaseRequired=100`+`(Lv-1)*XPPerLevel=50`, UCurveFloat는 후속 §2-8).
+- **SpawnDirector 게이팅**: `TickDirector`가 `Breather`면 스폰 정지(§2-2), `TickEnemyMovement` 공격도 `bCombatPhase` 게이트(안전구간 무피해). 이동은 유지.
+- **디버그**: 콘솔 `FPSR.AddXP [N]`/`FPSR.SetPhase [combat|breather]`(#if !UE_BUILD_SHIPPING) + 캐릭터 화면 readout `Lv n XP x/y Stack s [Phase]`(ENABLE_DRAW_DEBUG).
+
+**⏳ P3-A PIE 확인**: `FPSR.AddXP 120`→레벨업·Stack 증가(화면 readout) / `FPSR.SetPhase breather`→적 스폰 정지·피해 없음 / `combat`→재개. (정비시간 카드 소비 UI는 P3-D.)
+
+### ✅ P2 대시 사용자 콘텐츠 — 커밋 완료 (2026-06-01)
+`IA_Dash` + `IMC_Default`(매핑) + `BP_FPSRPlayer`(DashAction 할당) → main `4715138` 커밋·LFS 푸시 + p3 브랜치 머지. PIE 대시 정상 작동 사용자 확인됨.
 
 ### ✅ P2-C2 코드 완료 (2026-06-01, 빌드+스모크 통과) — 충돌무시 대시 (§2-13)
 - `AFPSRCharacter`: `IA_Dash`→`Input_Dash`(이동입력 방향, 없으면 정면) → `ServerDash(Dir)` RPC(서버권위, ServerReload 패턴).
@@ -21,6 +65,7 @@
 - **적 근접(contact) 공격**: `AFPSREnemyBase`에 `AttackRange=150/AttackDamage=8/AttackInterval=1.0`(EditDefaultsOnly) + `LastAttackTime` + `CanAttack/NotifyAttacked`. 배치 패스(`TickEnemyMovement`)에서 사거리 내 + 쿨다운 경과 + **공격토큰** 여유 시 데미지.
 - **공격토큰**(§2-6/§5): 플레이어당 패스당 공격 허용 적 수 상한 `AttackTokenLimit=10`(`AttackersThisPass[]`). 수백 마리 동시타격 방지.
 - **플레이어 피해=서버권위+clamp**: 적→`AFPSRCharacter::ApplyContactDamage`→`ASC->ApplyModToAttribute(Health, -dmg)`(엔진 확인: base값 수정·서버가드). `UFPSRHealthSet` `PreAttributeChange`/`PreAttributeBaseChange` clamp(Health 0~Max, MaxHealth≥1, 리뷰 #7 선반영) + `PostAttributeChange`에서 Health 0 도달 시 `OnOutOfHealth` 1회 브로드캐스트 → `AFPSRCharacter::HandleOutOfHealth`(현재 로그만; **완전 DBNO/리스폰=P5**).
+- **i-frame(피격 무적, 2026-06-01 추가)**: 피격 수용 후 `DamageInvulnerabilityDuration=0.25s`(EditDefaultsOnly, 밸런스 튜닝) 동안 추가 `ApplyContactDamage` 무시(`LastDamagedTime` 게이트, 서버권위·플레이어당). 스웜 동시타격 한 프레임 멜팅 방지(공격토큰과 별개 2차 방어). ※ 물리 충돌 자체는 유지(피해만 무시) — 물리 통과까지 원하면 후속.
 
 **⏳ C1 PIE 확인**: `FPSR.EnemyTarget 50` + 적에게 둘러싸이면 **체력 감소**(서버), 다수에 둘러싸여도 토큰으로 동시 피해 제한, 0 도달 시 로그(`[Player] ... reached 0 health`). 체력은 0~Max clamp.
 - **디버그 표시(2026-06-01)**: 로컬 플레이어 화면에 `HP: x / y`(녹색) / 사망 시 `DEAD (HP 0/y)`(적색) — Ammo 표시처럼 `AFPSRCharacter::Tick`에서 `GEngine->AddOnScreenDebugMessage`, **`#if ENABLE_DRAW_DEBUG` 게이트(틱 자체도 디버그 빌드에서만 활성**, 쉬핑 오버헤드 0). HUD는 P3 전환 대상(§8).

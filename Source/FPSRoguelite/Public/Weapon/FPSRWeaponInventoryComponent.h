@@ -30,6 +30,9 @@ public:
 	UFPSRWeaponDataAsset* GetCurrentWeapon() const;
 
 	UFUNCTION(BlueprintPure, Category = "FPSR|Weapon")
+	TArray<UFPSRWeaponDataAsset*> GetOwnedWeapons() const;
+
+	UFUNCTION(BlueprintPure, Category = "FPSR|Weapon")
 	int32 GetCurrentSlotIndex() const { return CurrentSlotIndex; }
 
 	UFUNCTION(BlueprintPure, Category = "FPSR|Weapon")

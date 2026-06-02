@@ -3,6 +3,7 @@
 #include "Hero/FPSRCharacter.h"
 #include "Core/FPSRPlayerState.h"
 #include "Core/FPSRLogChannels.h"
+#include "Core/FPSRGameState.h"
 #include "AbilitySystem/FPSRAbilitySystemComponent.h"
 #include "AbilitySystem/Attributes/FPSRHealthSet.h"
 #include "AbilitySystemComponent.h"
@@ -85,6 +86,14 @@ void AFPSRCharacter::Tick(float DeltaSeconds)
 				? FString::Printf(TEXT("DEAD  (HP 0 / %.0f)"), MaxHealth)
 				: FString::Printf(TEXT("HP: %.0f / %.0f"), Health, MaxHealth);
 			GEngine->AddOnScreenDebugMessage((uint64)(UPTRINT)this, 0.0f, bDead ? FColor::Red : FColor::Green, Msg);
+		}
+
+		if (const AFPSRGameState* RunState = GetWorld() ? GetWorld()->GetGameState<AFPSRGameState>() : nullptr)
+		{
+			const FString RunMsg = FString::Printf(TEXT("Lv %d   XP %d / %d   Stack %d   [%s]"),
+				RunState->GetPartyLevel(), RunState->GetSharedXP(), RunState->GetRequiredXPForNextLevel(),
+				RunState->GetPendingLevelUps(), RunState->IsCombatPhase() ? TEXT("Combat") : TEXT("Breather"));
+			GEngine->AddOnScreenDebugMessage((uint64)(UPTRINT)this + 1, 0.0f, FColor::Cyan, RunMsg);
 		}
 	}
 }
@@ -343,6 +352,17 @@ void AFPSRCharacter::ApplyContactDamage(float DamageAmount, AActor* DamageInstig
 	{
 		return;
 	}
+
+	// Invulnerability frames: ignore further hits within DamageInvulnerabilityDuration of the last
+	// accepted hit, so a swarm can't stack damage in a single window (per-player, server-authoritative).
+	const UWorld* World = GetWorld();
+	const float Now = World ? World->GetTimeSeconds() : 0.0f;
+	if ((Now - LastDamagedTime) < DamageInvulnerabilityDuration)
+	{
+		return;
+	}
+	LastDamagedTime = Now;
+
 	if (UAbilitySystemComponent* ASC = GetAbilitySystemComponent())
 	{
 		ASC->ApplyModToAttribute(UFPSRHealthSet::GetHealthAttribute(), EGameplayModOp::Additive, -DamageAmount);
