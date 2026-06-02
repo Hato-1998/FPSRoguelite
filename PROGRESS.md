@@ -28,6 +28,7 @@
 - **신규 글로벌 속성**: `UFPSRCombatSet`에 `Luck`/`RarityBonus`(기본 0, 기존 GlobalCrit 패턴 미러) — 추첨 가중·향후 카드/메타 타깃(§4-1).
 - **Codex 리뷰 반영(2건 P2)**: ① **레벨업 게이트** — `ApplyCard`가 `bConsumeLevelUp` 시 `PendingLevelUps>0` 선검사 후 GE 적용·소비를 원자적으로(무료 지급 방지), 오프닝시드는 `false`로 게이트 우회(§2-2). ② **무기 카드 거부** — ThisWeapon/AllWeapons는 추첨에서 제외 + `ApplyCard` 거부(선택 낭비 방지), 무기스탯 적용은 P4.
 - **디버그 콘솔**(`#if !UE_BUILD_SHIPPING`): `FPSR.DrawCards [N]` / `FPSR.ApplyCard [index]` / `FPSR.Reroll [N]` / `FPSR.RerollCharges [N]`.
+- **보강(2026-06-02, 빌드+스모크+Codex 통과)**: ① **카드별 `Magnitude`(SetByCaller, 태그 `SetByCaller.CardMagnitude`)** — GE 1개를 등급별 다른 값으로 재사용(고정 GE 호환). ② **`CardFamily`(GameplayTag) 디듀프** — 같은 family(미설정 시 AppliedEffect GE 클래스)는 한 추첨에 1장만 제안. Game.MD §2-3 갱신 + 가이드(`Docs/P3-C_UserContent_Guide.md`) 방식 A/B 반영.
 
 **⏳ P3-C PIE 확인(사용자 콘텐츠 필요)**: 샘플 카드 DA들 + `DA_CardPool`(+GE 에셋) 생성 → `BP_FPSRGameMode.CardPool` 할당 → `FPSR.AddXP 120`(레벨업 큐)→`FPSR.DrawCards 3`(로그에 3장)→`FPSR.ApplyCard 0`(applied, GE 적용)→레벨업 큐 없으면 rejected. `FPSR.RerollCharges 3`→`FPSR.Reroll`→차감·재추첨.
 

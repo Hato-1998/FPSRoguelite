@@ -12,10 +12,33 @@
 #include "Weapon/FPSRWeaponDataAsset.h"
 #include "AbilitySystemComponent.h"
 #include "GameplayEffect.h"
+#include "GameplayTagContainer.h"
 #include "GameFramework/Controller.h"
 #include "GameFramework/Pawn.h"
 #include "Engine/World.h"
 #include "HAL/IConsoleManager.h"
+
+namespace
+{
+	/** Family key used to keep same-family cards mutually exclusive in a single draw.
+	 *  Prefers the explicit CardFamily tag; falls back to the AppliedEffect GE class. */
+	FName GetCardFamilyKey(const UFPSRCardDataAsset* Card)
+	{
+		if (!Card)
+		{
+			return NAME_None;
+		}
+		if (Card->CardFamily.IsValid())
+		{
+			return Card->CardFamily.GetTagName();
+		}
+		if (Card->AppliedEffect)
+		{
+			return Card->AppliedEffect->GetFName();
+		}
+		return NAME_None;
+	}
+}
 
 bool UFPSRCardSubsystem::ShouldCreateSubsystem(UObject* Outer) const
 {
@@ -104,8 +127,22 @@ TArray<UFPSRCardDataAsset*> UFPSRCardSubsystem::DrawCards(AController* ForPlayer
 
 		if (Candidates.IsValidIndex(SelectedIndex))
 		{
-			Result.Add(Candidates[SelectedIndex]);
+			UFPSRCardDataAsset* Selected = Candidates[SelectedIndex];
+			Result.Add(Selected);
 			Candidates.RemoveAt(SelectedIndex);
+
+			// Same-family cards are mutually exclusive within one draw — remove the rest of the family.
+			const FName FamilyKey = GetCardFamilyKey(Selected);
+			if (FamilyKey != NAME_None)
+			{
+				for (int32 k = Candidates.Num() - 1; k >= 0; --k)
+				{
+					if (GetCardFamilyKey(Candidates[k]) == FamilyKey)
+					{
+						Candidates.RemoveAt(k);
+					}
+				}
+			}
 		}
 	}
 
@@ -165,6 +202,10 @@ bool UFPSRCardSubsystem::ApplyCard(AController* ForPlayer, UFPSRCardDataAsset* C
 		FGameplayEffectSpecHandle Spec = ASC->MakeOutgoingSpec(Card->AppliedEffect, 1.0f, Ctx);
 		if (Spec.IsValid())
 		{
+			// Inject the card's per-card magnitude for GEs whose modifier uses SetByCaller
+			// (tag SetByCaller.CardMagnitude). Harmless for fixed-magnitude GEs that don't reference it.
+			static const FGameplayTag CardMagnitudeTag = FGameplayTag::RequestGameplayTag(FName("SetByCaller.CardMagnitude"));
+			Spec.Data->SetSetByCallerMagnitude(CardMagnitudeTag, Card->Magnitude);
 			ASC->ApplyGameplayEffectSpecToSelf(*Spec.Data.Get());
 		}
 	}

@@ -4,6 +4,7 @@
 
 #include "Engine/DataAsset.h"
 #include "Card/FPSRCardTypes.h"
+#include "GameplayTagContainer.h"
 #include "FPSRCardDataAsset.generated.h"
 
 class UGameplayEffect;
@@ -32,4 +33,16 @@ public:
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Card")
 	float Weight = 1.0f;
+
+	/** Per-card SetByCaller magnitude injected into AppliedEffect. Author the GE's modifier as
+	 *  "Set By Caller" with tag SetByCaller.CardMagnitude so one GE can be reused at different
+	 *  values per rarity (e.g. MaxHealth +15 Common vs +100 Legendary). Ignored by fixed-magnitude
+	 *  GEs that do not reference the tag. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Card")
+	float Magnitude = 0.0f;
+
+	/** Cards sharing a family are mutually exclusive within a single draw (only one is ever offered).
+	 *  If unset (None), the AppliedEffect GE class is used as the family key instead. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Card")
+	FGameplayTag CardFamily;
 };
