@@ -53,7 +53,7 @@ bool UFPSRCardSubsystem::ShouldCreateSubsystem(UObject* Outer) const
 	return false;
 }
 
-TArray<UFPSRCardDataAsset*> UFPSRCardSubsystem::DrawCards(AController* ForPlayer, int32 Count, const TArray<UFPSRCardDataAsset*>& Exclude)
+TArray<FFPSRCardDraw> UFPSRCardSubsystem::DrawCards(AController* ForPlayer, int32 Count, const TArray<UFPSRCardDataAsset*>& Exclude)
 {
 	UWorld* World = GetWorld();
 	if (!World || World->GetNetMode() == NM_Client)
@@ -67,23 +67,13 @@ TArray<UFPSRCardDataAsset*> UFPSRCardSubsystem::DrawCards(AController* ForPlayer
 		return {};
 	}
 
-	TArray<UFPSRCardDataAsset*> Result;
-	TArray<UFPSRCardDataAsset*> Candidates;
-	GatherCandidatePool(ForPlayer, Candidates);
+	TArray<UFPSRCardDataAsset*> Cards;
+	GatherCandidatePool(ForPlayer, Cards);
 
-	// Remove nulls, excluded cards, and not-yet-applicable weapon-scope cards (P4) so they are never offered.
-	for (int32 i = Candidates.Num() - 1; i >= 0; --i)
-	{
-		if (!Candidates[i] || Candidates[i]->Scope != ECardScope::Character || Exclude.Contains(Candidates[i]))
-		{
-			Candidates.RemoveAt(i);
-		}
-	}
-
-	// Get player luck and rarity bonus from CombatSet.
+	// Player luck / rarity bonus shift the draw toward higher rarities.
 	float Luck = 0.0f;
 	float RarityBonus = 0.0f;
-	if (AFPSRPlayerState* PS = ForPlayer->GetPlayerState<AFPSRPlayerState>())
+	if (AFPSRPlayerState* PS = ForPlayer ? ForPlayer->GetPlayerState<AFPSRPlayerState>() : nullptr)
 	{
 		if (UFPSRCombatSet* CombatSet = PS->GetCombatSet())
 		{
@@ -92,32 +82,59 @@ TArray<UFPSRCardDataAsset*> UFPSRCardSubsystem::DrawCards(AController* ForPlayer
 		}
 	}
 
-	// Weighted sampling without replacement.
+	// Flatten each Character-scope card into one weighted offer per rarity tier. Weapon-scope cards (P4)
+	// and excluded cards are skipped so they are never offered.
+	TArray<FFPSRCardDraw> Candidates;
+	TArray<float> CandidateWeights;
+	for (UFPSRCardDataAsset* Card : Cards)
+	{
+		if (!Card || Card->Scope != ECardScope::Character || Exclude.Contains(Card))
+		{
+			continue;
+		}
+		if (Card->RarityTiers.Num() == 0)
+		{
+			// Not silent: a misconfigured card with no tiers is logged rather than vanishing from the draw.
+			UE_LOG(LogFPSR, Warning, TEXT("[Card] '%s' has no RarityTiers — skipped (configure at least one tier)."), *Card->GetName());
+			continue;
+		}
+		for (const FFPSRCardRarityTier& Tier : Card->RarityTiers)
+		{
+			const float Weight = GetEffectiveWeight(Card, Tier.Rarity, Luck, RarityBonus);
+			if (Weight <= 0.0f)
+			{
+				continue;
+			}
+			FFPSRCardDraw Offer;
+			Offer.Card = Card;
+			Offer.Rarity = Tier.Rarity;
+			Offer.Magnitude = Tier.Magnitude;
+			Candidates.Add(Offer);
+			CandidateWeights.Add(Weight);
+		}
+	}
+
+	// Weighted sampling without replacement. Once an offer is picked, every remaining offer of the same card
+	// (all its tiers) and same family is removed, so a card never appears twice and families stay exclusive.
+	TArray<FFPSRCardDraw> Result;
 	for (int32 i = 0; i < Count && Candidates.Num() > 0; ++i)
 	{
 		float TotalWeight = 0.0f;
-		TArray<float> Weights;
-		Weights.Reserve(Candidates.Num());
-
-		for (const UFPSRCardDataAsset* Card : Candidates)
+		for (const float W : CandidateWeights)
 		{
-			float Weight = GetEffectiveWeight(Card, Luck, RarityBonus);
-			Weights.Add(Weight);
-			TotalWeight += Weight;
+			TotalWeight += W;
 		}
-
 		if (TotalWeight <= 0.0f)
 		{
 			break;
 		}
 
-		float Pick = FMath::FRandRange(0.0f, TotalWeight);
+		const float Pick = FMath::FRandRange(0.0f, TotalWeight);
 		float Cumulative = 0.0f;
 		int32 SelectedIndex = 0;
-
-		for (int32 j = 0; j < Weights.Num(); ++j)
+		for (int32 j = 0; j < CandidateWeights.Num(); ++j)
 		{
-			Cumulative += Weights[j];
+			Cumulative += CandidateWeights[j];
 			if (Pick <= Cumulative)
 			{
 				SelectedIndex = j;
@@ -125,23 +142,23 @@ TArray<UFPSRCardDataAsset*> UFPSRCardSubsystem::DrawCards(AController* ForPlayer
 			}
 		}
 
-		if (Candidates.IsValidIndex(SelectedIndex))
+		if (!Candidates.IsValidIndex(SelectedIndex))
 		{
-			UFPSRCardDataAsset* Selected = Candidates[SelectedIndex];
-			Result.Add(Selected);
-			Candidates.RemoveAt(SelectedIndex);
+			break;
+		}
 
-			// Same-family cards are mutually exclusive within one draw — remove the rest of the family.
-			const FName FamilyKey = GetCardFamilyKey(Selected);
-			if (FamilyKey != NAME_None)
+		const FFPSRCardDraw Selected = Candidates[SelectedIndex];
+		Result.Add(Selected);
+
+		const FName FamilyKey = GetCardFamilyKey(Selected.Card);
+		for (int32 k = Candidates.Num() - 1; k >= 0; --k)
+		{
+			const bool bSameCard = (Candidates[k].Card == Selected.Card);
+			const bool bSameFamily = (FamilyKey != NAME_None) && (GetCardFamilyKey(Candidates[k].Card) == FamilyKey);
+			if (bSameCard || bSameFamily)
 			{
-				for (int32 k = Candidates.Num() - 1; k >= 0; --k)
-				{
-					if (GetCardFamilyKey(Candidates[k]) == FamilyKey)
-					{
-						Candidates.RemoveAt(k);
-					}
-				}
+				Candidates.RemoveAt(k);
+				CandidateWeights.RemoveAt(k);
 			}
 		}
 	}
@@ -149,7 +166,7 @@ TArray<UFPSRCardDataAsset*> UFPSRCardSubsystem::DrawCards(AController* ForPlayer
 	return Result;
 }
 
-bool UFPSRCardSubsystem::ApplyCard(AController* ForPlayer, UFPSRCardDataAsset* Card, bool bConsumeLevelUp)
+bool UFPSRCardSubsystem::ApplyCard(AController* ForPlayer, const FFPSRCardDraw& Draw, bool bConsumeLevelUp)
 {
 	UWorld* World = GetWorld();
 	if (!World || World->GetNetMode() == NM_Client)
@@ -157,6 +174,7 @@ bool UFPSRCardSubsystem::ApplyCard(AController* ForPlayer, UFPSRCardDataAsset* C
 		return false;
 	}
 
+	UFPSRCardDataAsset* Card = Draw.Card;
 	if (!Card || !ForPlayer)
 	{
 		return false;
@@ -194,7 +212,7 @@ bool UFPSRCardSubsystem::ApplyCard(AController* ForPlayer, UFPSRCardDataAsset* C
 		}
 	}
 
-	// Apply the card's GameplayEffect to the player ASC (Character scope).
+	// Apply the card's GameplayEffect to the player ASC (Character scope), injecting the rolled tier magnitude.
 	if (Card->AppliedEffect)
 	{
 		FGameplayEffectContextHandle Ctx = ASC->MakeEffectContext();
@@ -202,10 +220,9 @@ bool UFPSRCardSubsystem::ApplyCard(AController* ForPlayer, UFPSRCardDataAsset* C
 		FGameplayEffectSpecHandle Spec = ASC->MakeOutgoingSpec(Card->AppliedEffect, 1.0f, Ctx);
 		if (Spec.IsValid())
 		{
-			// Inject the card's per-card magnitude for GEs whose modifier uses SetByCaller
-			// (tag SetByCaller.CardMagnitude). Harmless for fixed-magnitude GEs that don't reference it.
+			// For GEs whose modifier uses SetByCaller (tag SetByCaller.CardMagnitude). Harmless for fixed GEs.
 			static const FGameplayTag CardMagnitudeTag = FGameplayTag::RequestGameplayTag(FName("SetByCaller.CardMagnitude"));
-			Spec.Data->SetSetByCallerMagnitude(CardMagnitudeTag, Card->Magnitude);
+			Spec.Data->SetSetByCallerMagnitude(CardMagnitudeTag, Draw.Magnitude);
 			ASC->ApplyGameplayEffectSpecToSelf(*Spec.Data.Get());
 		}
 	}
@@ -226,7 +243,7 @@ bool UFPSRCardSubsystem::TryReroll(AController* ForPlayer)
 		return false;
 	}
 
-	AFPSRPlayerState* PS = ForPlayer->GetPlayerState<AFPSRPlayerState>();
+	AFPSRPlayerState* PS = ForPlayer ? ForPlayer->GetPlayerState<AFPSRPlayerState>() : nullptr;
 	if (!PS)
 	{
 		return false;
@@ -235,21 +252,21 @@ bool UFPSRCardSubsystem::TryReroll(AController* ForPlayer)
 	return PS->ConsumeRerollCharge();
 }
 
-float UFPSRCardSubsystem::GetEffectiveWeight(const UFPSRCardDataAsset* Card, float Luck, float RarityBonus) const
+float UFPSRCardSubsystem::GetEffectiveWeight(const UFPSRCardDataAsset* Card, ECardRarity Rarity, float Luck, float RarityBonus) const
 {
 	if (!Card || !ActivePool)
 	{
 		return 0.0f;
 	}
 
-	float RarityBase = ActivePool->GetRarityBaseWeight(Card->Rarity);
+	const float RarityBase = ActivePool->GetRarityBaseWeight(Rarity);
 
-	// Map rarity to a tier index for luck scaling.
-	int32 RarityTier = static_cast<int32>(Card->Rarity);
+	// Higher rarity tiers are boosted by luck / rarity bonus (tier index Common=0 .. Legendary=3).
+	const int32 RarityTier = static_cast<int32>(Rarity);
 	float LuckBoost = 1.0f + (RarityBonus * ActivePool->RarityBonusScale + Luck * ActivePool->LuckScale) * static_cast<float>(RarityTier);
 	LuckBoost = FMath::Max(LuckBoost, 0.0f);
 
-	float FinalWeight = Card->Weight * RarityBase * LuckBoost;
+	const float FinalWeight = Card->Weight * RarityBase * LuckBoost;
 	return FMath::Max(FinalWeight, 0.0f);
 }
 
@@ -269,8 +286,8 @@ void UFPSRCardSubsystem::GatherCandidatePool(AController* ForPlayer, TArray<UFPS
 		}
 	}
 
-	// Add cards from player's equipped weapons.
-	APawn* PlayerPawn = ForPlayer->GetPawn();
+	// Add cards from the player's owned weapons (dynamic pool join, §2-4).
+	APawn* PlayerPawn = ForPlayer ? ForPlayer->GetPawn() : nullptr;
 	if (!PlayerPawn)
 	{
 		return;
@@ -302,16 +319,43 @@ void UFPSRCardSubsystem::GatherCandidatePool(AController* ForPlayer, TArray<UFPS
 #if !UE_BUILD_SHIPPING
 namespace
 {
-	TArray<TWeakObjectPtr<UFPSRCardDataAsset>> GLastDraw;
+	/** GC-safe cache of the most recent debug draw (weak card ref + rolled rarity/magnitude). */
+	struct FDebugCardOffer
+	{
+		TWeakObjectPtr<UFPSRCardDataAsset> Card;
+		ECardRarity Rarity = ECardRarity::Common;
+		float Magnitude = 0.0f;
+	};
+	TArray<FDebugCardOffer> GLastDraw;
 
 	APlayerController* GetLocalPC(UWorld* World)
 	{
 		return World ? World->GetFirstPlayerController() : nullptr;
 	}
 
+	void LogAndCacheDraw(const TArray<FFPSRCardDraw>& Draws)
+	{
+		GLastDraw.Reset();
+		for (int32 i = 0; i < Draws.Num(); ++i)
+		{
+			if (!Draws[i].Card)
+			{
+				continue;
+			}
+			FDebugCardOffer Offer;
+			Offer.Card = Draws[i].Card;
+			Offer.Rarity = Draws[i].Rarity;
+			Offer.Magnitude = Draws[i].Magnitude;
+			GLastDraw.Add(Offer);
+
+			const FString RarityStr = StaticEnum<ECardRarity>()->GetNameStringByValue((int64)Draws[i].Rarity);
+			UE_LOG(LogFPSR, Log, TEXT("[Card] [%d] %s (%s, mag %.2f)"), i, *Draws[i].Card->GetName(), *RarityStr, Draws[i].Magnitude);
+		}
+	}
+
 	FAutoConsoleCommandWithWorldAndArgs GCmd_DrawCards(
 		TEXT("FPSR.DrawCards"),
-		TEXT("Draw N cards for the local player (debug). Usage: FPSR.DrawCards [N]"),
+		TEXT("Draw N card offers for the local player (debug). Usage: FPSR.DrawCards [N]"),
 		FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& Args, UWorld* World)
 		{
 			if (!World)
@@ -321,7 +365,6 @@ namespace
 
 			UFPSRCardSubsystem* CardSubsystem = World->GetSubsystem<UFPSRCardSubsystem>();
 			APlayerController* PC = GetLocalPC(World);
-
 			if (!CardSubsystem || !PC)
 			{
 				UE_LOG(LogFPSR, Warning, TEXT("[Card] DrawCards: subsystem or player controller not found"));
@@ -334,24 +377,12 @@ namespace
 				DrawCount = FCString::Atoi(*Args[0]);
 			}
 
-			GLastDraw.Reset();
-			TArray<UFPSRCardDataAsset*> DrawnCards = CardSubsystem->DrawCards(PC, DrawCount);
-
-			for (int32 i = 0; i < DrawnCards.Num(); ++i)
-			{
-				UFPSRCardDataAsset* Card = DrawnCards[i];
-				if (Card)
-				{
-					GLastDraw.Add(Card);
-					FString RarityStr = StaticEnum<ECardRarity>()->GetNameStringByValue((int64)Card->Rarity);
-					UE_LOG(LogFPSR, Log, TEXT("[Card] [%d] %s (%s)"), i, *Card->GetName(), *RarityStr);
-				}
-			}
+			LogAndCacheDraw(CardSubsystem->DrawCards(PC, DrawCount));
 		}));
 
 	FAutoConsoleCommandWithWorldAndArgs GCmd_ApplyCard(
 		TEXT("FPSR.ApplyCard"),
-		TEXT("Apply a card from the last draw (debug). Usage: FPSR.ApplyCard [index]"),
+		TEXT("Apply a card offer from the last draw (debug). Usage: FPSR.ApplyCard [index]"),
 		FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& Args, UWorld* World)
 		{
 			if (!World)
@@ -372,7 +403,7 @@ namespace
 				Index = FCString::Atoi(*Args[0]);
 			}
 
-			if (!GLastDraw.IsValidIndex(Index) || !GLastDraw[Index].IsValid())
+			if (!GLastDraw.IsValidIndex(Index) || !GLastDraw[Index].Card.IsValid())
 			{
 				UE_LOG(LogFPSR, Warning, TEXT("[Card] ApplyCard: invalid index %d"), Index);
 				return;
@@ -381,7 +412,11 @@ namespace
 			UFPSRCardSubsystem* CardSubsystem = World->GetSubsystem<UFPSRCardSubsystem>();
 			if (CardSubsystem)
 			{
-				const bool bApplied = CardSubsystem->ApplyCard(PC, GLastDraw[Index].Get());
+				FFPSRCardDraw Draw;
+				Draw.Card = GLastDraw[Index].Card.Get();
+				Draw.Rarity = GLastDraw[Index].Rarity;
+				Draw.Magnitude = GLastDraw[Index].Magnitude;
+				const bool bApplied = CardSubsystem->ApplyCard(PC, Draw);
 				UE_LOG(LogFPSR, Log, TEXT("[Card] ApplyCard index %d -> %s (needs a pending level-up; FPSR.AddXP to queue one)"),
 					Index, bApplied ? TEXT("applied") : TEXT("rejected"));
 			}
@@ -399,7 +434,6 @@ namespace
 
 			UFPSRCardSubsystem* CardSubsystem = World->GetSubsystem<UFPSRCardSubsystem>();
 			APlayerController* PC = GetLocalPC(World);
-
 			if (!CardSubsystem || !PC)
 			{
 				UE_LOG(LogFPSR, Warning, TEXT("[Card] Reroll: subsystem or player controller not found"));
@@ -418,19 +452,7 @@ namespace
 				DrawCount = FCString::Atoi(*Args[0]);
 			}
 
-			GLastDraw.Reset();
-			TArray<UFPSRCardDataAsset*> DrawnCards = CardSubsystem->DrawCards(PC, DrawCount);
-
-			for (int32 i = 0; i < DrawnCards.Num(); ++i)
-			{
-				UFPSRCardDataAsset* Card = DrawnCards[i];
-				if (Card)
-				{
-					GLastDraw.Add(Card);
-					FString RarityStr = StaticEnum<ECardRarity>()->GetNameStringByValue((int64)Card->Rarity);
-					UE_LOG(LogFPSR, Log, TEXT("[Card] [%d] %s (%s)"), i, *Card->GetName(), *RarityStr);
-				}
-			}
+			LogAndCacheDraw(CardSubsystem->DrawCards(PC, DrawCount));
 		}));
 
 	FAutoConsoleCommandWithWorldAndArgs GCmd_RerollCharges(
@@ -467,4 +489,4 @@ namespace
 			UE_LOG(LogFPSR, Log, TEXT("[Card] RerollCharges set to %d"), NewCharges);
 		}));
 }
-#endif
+#endif // !UE_BUILD_SHIPPING

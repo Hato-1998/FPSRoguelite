@@ -79,9 +79,11 @@
   - **기존 Attribute 범위 내 새 카드 = GE + DataAsset 추가 (코드 변경 0)**
   - **완전히 새로운 Attribute = C++ AttributeSet 확장 + GE + DataAsset (코드 변경 필요)**
   - → AttributeSet 설계 시 스탯 축을 넉넉히 미리 확보할 것
-- `UCardDataAsset`: `Scope`(Character / ThisWeapon / AllWeapons), `Rarity`, `AppliedEffect`(GE), `Weight`, **`Magnitude`**, **`CardFamily`**
-  - **`Magnitude`(SetByCaller)**: GE 모디파이어를 `SetByCaller`(태그 `SetByCaller.CardMagnitude`)로 작성하면 **GE 1개를 등급별 다른 값으로 재사용**(예: MaxHealth +15 Common vs +100 Legendary). `ApplyCard`가 카드별 `Magnitude`를 주입. 고정 수치 GE(SetByCaller 미사용)에는 무해(무시) — 두 방식 혼용 가능 (P3-C 확정 2026-06-02)
-  - **`CardFamily`(GameplayTag, 선택)**: 같은 family 카드는 **한 번의 추첨에 1장만 제안**(상호배타). 미설정 시 `AppliedEffect` GE 클래스를 family 키로 사용 → 단일 GE 방식이면 family 태그 없이도 자동 그룹핑 (P3-C 확정 2026-06-02)
+- `UCardDataAsset`: `Scope`(Character / ThisWeapon / AllWeapons), `AppliedEffect`(GE), `Weight`, **`RarityTiers[]`**, **`CardFamily`** (P3-C 확정 2026-06-02)
+  - **`RarityTiers[]`(`FFPSRCardRarityTier`{Rarity, Magnitude})**: 카드 1개가 **여러 등급에서 각기 다른 수치로** 등장. 추첨이 등급을 굴려(등급 기본가중치×Luck/RarityBonus) 해당 티어의 `Magnitude`를 적용. **"모든 등급에서 나오는 카드 = 1 에셋"**(등급당 1티어). 1티어만 두면 단일 등급 카드. → 등급별 별도 에셋 불필요(콘텐츠 폭증 방지)
+  - **수치 주입=`SetByCaller`**: GE 모디파이어를 `SetByCaller`(태그 `SetByCaller.CardMagnitude`)로 작성 → `ApplyCard`가 굴린 티어의 `Magnitude`를 주입. 고정 수치 GE(SetByCaller 미사용)에도 무해(무시)
+  - **`CardFamily`(GameplayTag, 선택)**: 같은 family 카드는 **한 추첨에 1장만 제안**(상호배타). 미설정 시 `AppliedEffect` GE 클래스를 family 키로 사용 → 단일 GE 방식이면 자동 그룹핑(같은 카드의 다른 티어도 한 번에 1개만)
+  - **데이터 검증**: `UFPSRCardDataAsset::IsDataValid`(WITH_EDITOR) — RarityTiers 비면 에러(추첨 누락 방지), AppliedEffect 없으면 경고. 런타임에도 빈 티어 카드는 경고 로그(무음 실패 금지)
 - **등급 4단계** (Common/Rare/Epic/Legendary) — Luck/RarityBonus 스탯이 추첨 가중치에 작용
 - **무기별 전용 카드**: 무기 보유 시 해당 무기 카드가 레벨업 카드 풀에 동적 합류 (Gunfire Reborn식)
 - **리롤**: 캐릭터 메타로 해금, **게임당 3회 제한** (`RunRerollCharges`, 서버 권위 차감)
