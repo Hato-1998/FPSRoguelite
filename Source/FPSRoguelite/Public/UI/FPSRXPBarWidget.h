@@ -19,6 +19,11 @@ protected:
 	virtual void NativeConstruct() override;
 	virtual void NativeDestruct() override;
 
+	/** HUD layer = game-playing state: capture mouse for look, hide cursor, route input to the game.
+	 *  As the persistent Game-layer widget, this also restores game input when a modal above it (e.g. the
+	 *  card-select widget's Menu config) is dismissed. (P4: a dedicated HUD-layout widget can own this.) */
+	virtual TOptional<FUIInputConfig> GetDesiredInputConfig() const override;
+
 	UFUNCTION()
 	void HandleRunStateChanged();
 

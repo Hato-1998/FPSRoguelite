@@ -6,6 +6,8 @@
 #include "Core/FPSRGameState.h"
 #include "Core/FPSRPlayerState.h"
 #include "Engine/World.h"
+#include "Input/UIActionBindingHandle.h"
+#include "CommonInputModeTypes.h"
 
 void UFPSRXPBarWidget::NativeConstruct()
 {
@@ -47,6 +49,11 @@ void UFPSRXPBarWidget::NativeDestruct()
 	}
 
 	Super::NativeDestruct();
+}
+
+TOptional<FUIInputConfig> UFPSRXPBarWidget::GetDesiredInputConfig() const
+{
+	return FUIInputConfig(ECommonInputMode::Game, EMouseCaptureMode::CapturePermanently);
 }
 
 void UFPSRXPBarWidget::HandleRunStateChanged()

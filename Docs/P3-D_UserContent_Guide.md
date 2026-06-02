@@ -68,6 +68,10 @@ Content/UI/
 > 팔레트에서 `WBP_CardEntry`를 끌어다 놓고 이름을 `CardEntry_0/1/2`로 바꾼다(타입이 `UFPSRCardEntryWidget`라 BindWidget이 인식).
 > 카드가 2장만 발급되면 3번째(`CardEntry_2`)는 C++가 자동으로 숨긴다(Collapsed).
 > 모달 배경(어둡게)·정렬은 자유. **입력/포커스/리롤 클릭 핸들러는 C++가 처리** — BP 작업 불필요.
+>
+> **📍 위치(정중앙)**: 위젯은 Modal 레이어 스택에 푸시되며 **스택이 자식을 화면 전체로 늘린다**. 즉 위치는 **이 WBP 안에서** 정한다.
+> 가장 수정하기 쉬운 방법 → **루트를 `Canvas Panel`로** 두고, 카드 묶음(Horizontal Box 등)을 선택해 **Anchor 프리셋 = Center(중앙)** + Alignment `(0.5, 0.5)`, Position `(0,0)`. 디자이너에서 드래그로 미세조정 가능.
+> (Overlay 루트도 가능: 카드 박스 슬롯의 HAlign=Center / VAlign=Center.)
 
 ---
 
@@ -84,6 +88,9 @@ Content/UI/
 
 > 전부 선택이지만 검증하려면 3개 다 넣는 걸 권장. **값 갱신은 C++가 이벤트(OnRep 델리게이트)로 처리** — BP 바인딩 함수 불필요.
 > 표시 형식(예: "Lv 3", "XP 40/150", "Stack 2")은 텍스트 블록 자체 스타일로. C++는 숫자만 SetText 한다.
+>
+> **📍 위치(화면 맨 아래)**: XP바는 Game 레이어 스택에 푸시되며 **스택이 자식을 화면 전체로 늘린다** → 위치는 이 WBP 안에서 정한다.
+> 가장 쉬운 방법 → **루트를 `Canvas Panel`로** 두고, XP바 묶음을 선택해 **Anchor 프리셋 = Bottom(아래 가로 stretch)** 으로 하고 Offset(아래 여백)만 조정. 또는 **루트를 `Vertical Box`로** 두고 **Vertical Alignment = Bottom**. 디자이너에서 바로 보며 조정 가능.
 
 ---
 
