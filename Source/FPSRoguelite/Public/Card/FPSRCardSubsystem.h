@@ -12,7 +12,7 @@ class AController;
 
 /** Server-authoritative card draw and application logic (P3-C).
  *  Cards define per-rarity magnitude tiers; the draw rolls a rarity (weighted by rarity base weight + player
- *  Luck/RarityBonus) and returns offers carrying the rolled rarity + magnitude. Selection applies a GE to the ASC. */
+ *  Luck) and returns offers carrying the rolled rarity + magnitude. Selection applies a GE to the ASC. */
 UCLASS()
 class FPSROGUELITE_API UFPSRCardSubsystem : public UWorldSubsystem
 {
@@ -41,8 +41,8 @@ public:
 	bool TryReroll(AController* ForPlayer);
 
 protected:
-	/** Effective draw weight of a card at a specific rarity, given player luck and rarity bonus. */
-	float GetEffectiveWeight(const UFPSRCardDataAsset* Card, ECardRarity Rarity, float Luck, float RarityBonus) const;
+	/** Effective draw weight of a card at a specific rarity, given player luck. */
+	float GetEffectiveWeight(const UFPSRCardDataAsset* Card, ECardRarity Rarity, float Luck) const;
 
 	/** Gather all candidate cards from the pool and player's owned weapons. */
 	void GatherCandidatePool(AController* ForPlayer, TArray<UFPSRCardDataAsset*>& OutCandidates) const;

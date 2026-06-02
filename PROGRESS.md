@@ -33,7 +33,8 @@
   - ② **`CardFamily`(GameplayTag) 디듀프** — 같은 family(미설정 시 AppliedEffect GE 클래스)는 한 추첨에 1장만 제안.
   - ③ **등급별 수치 테이블 리팩터(사용자 확정)**: 카드의 단일 `Rarity`/`Magnitude` → **`TArray<FFPSRCardRarityTier{Rarity,Magnitude}> RarityTiers`**. **"모든 등급에서 나오는 카드 = 1 에셋"**(등급당 1티어, 추첨이 등급 굴림). `DrawCards`는 (카드×티어) 평탄화 후 가중추첨, 반환=**`TArray<FFPSRCardDraw{Card,Rarity,Magnitude}>`**, `ApplyCard(PC, FFPSRCardDraw, bConsumeLevelUp)`. ⚠️ **기존 카드 .uasset은 RarityTiers 재작성 필요**(Rarity/Magnitude 필드 제거됨).
   - ④ **데이터 검증**: `UFPSRCardDataAsset::IsDataValid`(WITH_EDITOR, RarityTiers 빔=에러/AppliedEffect 없음=경고) + 런타임 빈 티어 경고 로그(무음 실패 방지, Codex 지적 반영).
-  - Game.MD §2-3 + 가이드(`Docs/P3-C_UserContent_Guide.md`) RarityTiers 모델로 갱신.
+  - ⑤ **`RarityBonus` 폐지 → `Luck` 단일 축으로 통합(사용자 확정)**: 둘이 추첨에서 중복이라 `Luck` 하나로 단순화. `UFPSRCombatSet`의 RarityBonus 속성·`UFPSRCardPoolDataAsset.RarityBonusScale` 제거, `GetEffectiveWeight`는 Luck만(`1+Luck·LuckScale·등급tier`). Luck=광역 행운(향후 드랍품질·희귀스폰 등도 담당). Game.MD §4-1/§2-3 갱신. ⚠️ **RarityBonus를 타깃한 GE 에셋이 있으면 다른 속성으로 변경 필요**. (PickupRadius/XPGain은 사용자 결정에 따라 **나중에** 추가.)
+  - Game.MD §2-3 + 가이드(`Docs/P3-C_UserContent_Guide.md`) RarityTiers 모델·Luck 단일축으로 갱신.
 
 **⏳ P3-C PIE 확인(사용자 콘텐츠 필요)**: 샘플 카드 DA들 + `DA_CardPool`(+GE 에셋) 생성 → `BP_FPSRGameMode.CardPool` 할당 → `FPSR.AddXP 120`(레벨업 큐)→`FPSR.DrawCards 3`(로그에 3장)→`FPSR.ApplyCard 0`(applied, GE 적용)→레벨업 큐 없으면 rejected. `FPSR.RerollCharges 3`→`FPSR.Reroll`→차감·재추첨.
 

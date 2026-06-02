@@ -19,7 +19,6 @@ public:
 	ATTRIBUTE_ACCESSORS_BASIC(UFPSRCombatSet, GlobalCritMultiplier)
 	ATTRIBUTE_ACCESSORS_BASIC(UFPSRCombatSet, GlobalDamageMultiplier)
 	ATTRIBUTE_ACCESSORS_BASIC(UFPSRCombatSet, Luck)
-	ATTRIBUTE_ACCESSORS_BASIC(UFPSRCombatSet, RarityBonus)
 
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
@@ -36,9 +35,6 @@ protected:
 	UFUNCTION()
 	void OnRep_Luck(const FGameplayAttributeData& OldValue);
 
-	UFUNCTION()
-	void OnRep_RarityBonus(const FGameplayAttributeData& OldValue);
-
 private:
 	UPROPERTY(BlueprintReadOnly, Category = "Combat", ReplicatedUsing = OnRep_GlobalCritChance, meta = (AllowPrivateAccess = true))
 	FGameplayAttributeData GlobalCritChance;
@@ -51,7 +47,4 @@ private:
 
 	UPROPERTY(BlueprintReadOnly, Category = "Combat", ReplicatedUsing = OnRep_Luck, meta = (AllowPrivateAccess = true))
 	FGameplayAttributeData Luck;
-
-	UPROPERTY(BlueprintReadOnly, Category = "Combat", ReplicatedUsing = OnRep_RarityBonus, meta = (AllowPrivateAccess = true))
-	FGameplayAttributeData RarityBonus;
 };

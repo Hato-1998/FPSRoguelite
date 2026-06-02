@@ -70,15 +70,13 @@ TArray<FFPSRCardDraw> UFPSRCardSubsystem::DrawCards(AController* ForPlayer, int3
 	TArray<UFPSRCardDataAsset*> Cards;
 	GatherCandidatePool(ForPlayer, Cards);
 
-	// Player luck / rarity bonus shift the draw toward higher rarities.
+	// Player luck shifts the draw toward higher rarities.
 	float Luck = 0.0f;
-	float RarityBonus = 0.0f;
 	if (AFPSRPlayerState* PS = ForPlayer ? ForPlayer->GetPlayerState<AFPSRPlayerState>() : nullptr)
 	{
 		if (UFPSRCombatSet* CombatSet = PS->GetCombatSet())
 		{
 			Luck = CombatSet->GetLuck();
-			RarityBonus = CombatSet->GetRarityBonus();
 		}
 	}
 
@@ -100,7 +98,7 @@ TArray<FFPSRCardDraw> UFPSRCardSubsystem::DrawCards(AController* ForPlayer, int3
 		}
 		for (const FFPSRCardRarityTier& Tier : Card->RarityTiers)
 		{
-			const float Weight = GetEffectiveWeight(Card, Tier.Rarity, Luck, RarityBonus);
+			const float Weight = GetEffectiveWeight(Card, Tier.Rarity, Luck);
 			if (Weight <= 0.0f)
 			{
 				continue;
@@ -252,7 +250,7 @@ bool UFPSRCardSubsystem::TryReroll(AController* ForPlayer)
 	return PS->ConsumeRerollCharge();
 }
 
-float UFPSRCardSubsystem::GetEffectiveWeight(const UFPSRCardDataAsset* Card, ECardRarity Rarity, float Luck, float RarityBonus) const
+float UFPSRCardSubsystem::GetEffectiveWeight(const UFPSRCardDataAsset* Card, ECardRarity Rarity, float Luck) const
 {
 	if (!Card || !ActivePool)
 	{
@@ -261,9 +259,9 @@ float UFPSRCardSubsystem::GetEffectiveWeight(const UFPSRCardDataAsset* Card, ECa
 
 	const float RarityBase = ActivePool->GetRarityBaseWeight(Rarity);
 
-	// Higher rarity tiers are boosted by luck / rarity bonus (tier index Common=0 .. Legendary=3).
+	// Higher rarity tiers are boosted by player Luck (tier index Common=0 .. Legendary=3).
 	const int32 RarityTier = static_cast<int32>(Rarity);
-	float LuckBoost = 1.0f + (RarityBonus * ActivePool->RarityBonusScale + Luck * ActivePool->LuckScale) * static_cast<float>(RarityTier);
+	float LuckBoost = 1.0f + (Luck * ActivePool->LuckScale) * static_cast<float>(RarityTier);
 	LuckBoost = FMath::Max(LuckBoost, 0.0f);
 
 	const float FinalWeight = Card->Weight * RarityBase * LuckBoost;

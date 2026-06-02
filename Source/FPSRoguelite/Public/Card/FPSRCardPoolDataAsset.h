@@ -30,9 +30,7 @@ public:
 	UPROPERTY(EditDefaultsOnly, Category = "Card Pool|Rarity Weights")
 	float LegendaryWeight = 0.05f;
 
-	UPROPERTY(EditDefaultsOnly, Category = "Card Pool|Luck")
-	float RarityBonusScale = 1.0f;
-
+	/** How strongly the player's Luck attribute biases draws toward higher rarities. */
 	UPROPERTY(EditDefaultsOnly, Category = "Card Pool|Luck")
 	float LuckScale = 0.1f;
 

@@ -80,11 +80,11 @@
   - **완전히 새로운 Attribute = C++ AttributeSet 확장 + GE + DataAsset (코드 변경 필요)**
   - → AttributeSet 설계 시 스탯 축을 넉넉히 미리 확보할 것
 - `UCardDataAsset`: `Scope`(Character / ThisWeapon / AllWeapons), `AppliedEffect`(GE), `Weight`, **`RarityTiers[]`**, **`CardFamily`** (P3-C 확정 2026-06-02)
-  - **`RarityTiers[]`(`FFPSRCardRarityTier`{Rarity, Magnitude})**: 카드 1개가 **여러 등급에서 각기 다른 수치로** 등장. 추첨이 등급을 굴려(등급 기본가중치×Luck/RarityBonus) 해당 티어의 `Magnitude`를 적용. **"모든 등급에서 나오는 카드 = 1 에셋"**(등급당 1티어). 1티어만 두면 단일 등급 카드. → 등급별 별도 에셋 불필요(콘텐츠 폭증 방지)
+  - **`RarityTiers[]`(`FFPSRCardRarityTier`{Rarity, Magnitude})**: 카드 1개가 **여러 등급에서 각기 다른 수치로** 등장. 추첨이 등급을 굴려(등급 기본가중치×Luck) 해당 티어의 `Magnitude`를 적용. **"모든 등급에서 나오는 카드 = 1 에셋"**(등급당 1티어). 1티어만 두면 단일 등급 카드. → 등급별 별도 에셋 불필요(콘텐츠 폭증 방지)
   - **수치 주입=`SetByCaller`**: GE 모디파이어를 `SetByCaller`(태그 `SetByCaller.CardMagnitude`)로 작성 → `ApplyCard`가 굴린 티어의 `Magnitude`를 주입. 고정 수치 GE(SetByCaller 미사용)에도 무해(무시)
   - **`CardFamily`(GameplayTag, 선택)**: 같은 family 카드는 **한 추첨에 1장만 제안**(상호배타). 미설정 시 `AppliedEffect` GE 클래스를 family 키로 사용 → 단일 GE 방식이면 자동 그룹핑(같은 카드의 다른 티어도 한 번에 1개만)
   - **데이터 검증**: `UFPSRCardDataAsset::IsDataValid`(WITH_EDITOR) — RarityTiers 비면 에러(추첨 누락 방지), AppliedEffect 없으면 경고. 런타임에도 빈 티어 카드는 경고 로그(무음 실패 금지)
-- **등급 4단계** (Common/Rare/Epic/Legendary) — Luck/RarityBonus 스탯이 추첨 가중치에 작용
+- **등급 4단계** (Common/Rare/Epic/Legendary) — **Luck** 스탯이 추첨 가중치(상위 등급 확률)에 작용. (※ RarityBonus는 Luck으로 통합·폐지 — 2026-06-02. 광역 행운 1개 축으로 단순화; 향후 드랍품질·희귀스폰 등도 Luck이 담당)
 - **무기별 전용 카드**: 무기 보유 시 해당 무기 카드가 레벨업 카드 풀에 동적 합류 (Gunfire Reborn식)
 - **리롤**: 캐릭터 메타로 해금, **게임당 3회 제한** (`RunRerollCharges`, 서버 권위 차감)
 - **카드 소비 시점**(§2-2): 오프닝 시드(런 시작 1~2장) + 정비시간(레벨업 스택 소비 + 미션 보상 무기 모디파이어 카드). **교전 중 카드 선택 없음**
@@ -226,7 +226,8 @@ Source/FPSRoguelite/Public/
 ├── Messages/         GMS Payload structs
 └── UI/               HUD(공유XP바/하단 무기바), CardSelect, MissionUI, MetaUI
 ```
-- 글로벌 스탯(Luck, GlobalCrit, CritMult, RarityBonus, MoveSpeed, MaxHealth, HealthRegen, PickupRadius, XPGain) → Character ASC AttributeSet
+- 글로벌 스탯(Luck, GlobalCrit, CritMult, MoveSpeed, MaxHealth, HealthRegen, PickupRadius, XPGain) → Character ASC AttributeSet
+  - ※ Luck = 광역 행운(카드 등급 가중 + 향후 드랍품질·희귀스폰 등). RarityBonus는 Luck으로 통합·폐지(2026-06-02). PickupRadius·XPGain·MoveSpeed·HealthRegen은 미구현(필요 단계에서 추가)
 - 무기별 스탯 → WeaponInstance 스탯 블록 (ASC 아님)
 - 하단 무기바 HUD: 가시성을 HUD State(GMS/Tag)에 바인딩 → ADS/카드UI/미션UI 시 숨김
 
