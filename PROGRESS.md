@@ -21,6 +21,58 @@
 - **규칙(메모리 저장됨)**: Phase 종료 시 해당 Phase 사용자 콘텐츠(에셋/BP/IMC) 동반 커밋 여부를 사용자에게 물을 것.
 - **빌드/검증**: §6-6 (`Build.bat FPSRogueliteEditor ... -WaitMutex` / 헤드리스 스모크 `FPSRoguelite.Smoke.ModuleLoads`). 구현=Haiku 위임, 검증=Opus 직접(§6-5).
 
+---
+
+## 📋 P3-D 정식 플랜 (다음 세션 착수 — 카드 UI / 공유 XP바 / 오프닝 시드)
+
+> **새 작업이므로 착수 시 플랜모드 재확인 후 진행**(아래는 확정 설계). **분기: `git checkout main` → `git checkout -b phase/p3d-cardui` → origin push**(§6-7). 구현=Haiku 위임 / 검증=Opus 직접(빌드+스모크+Codex). HIGH_RISK는 승인 후.
+
+### 확정 설계 결정 (사용자, 2026-06-02)
+1. **트리거 = 디버그**: 미션은 P4 → P3-D는 `FPSR.SetPhase breather` + `FPSR.AddXP`(레벨업 큐)로 카드 UI 검증. (+신규 `FPSR.OpeningSeed`로 오프닝 시드 테스트)
+2. **비주얼 = 플레이스홀더**(레이아웃·바인딩만, 스타일링 최소)
+3. **오프닝 시드 = 2장**(런 시작 시 2회 선택, `ApplyCard(..., bConsumeLevelUp=false)`)
+4. **풀 CommonUI 스택**(Activatable Widget Stack 레이어: Game / GameMenu / Menu / Modal)
+
+### 산출물 (C++ 베이스 = Haiku, 콘텐츠 WBP = 사용자)
+**A. CommonUI 인프라 (토대)**
+- `FPSRoguelite.Build.cs`에 `CommonUI`, `CommonInput` 모듈 추가
+- `UFPSRGameViewportClient : UCommonGameViewportClient` + `DefaultEngine.ini`의 `[/Script/EngineSettings.GameMapsSettings]`/`GameViewportClientClassName` 지정 → §8 `LogUIActionRouter` 에러 해소
+- **PrimaryGameLayout 경량 재구현**(CommonGame 플러그인 없음 §3): `UFPSRPrimaryGameLayout : UCommonUserWidget` — 4개 named `UCommonActivatableWidgetStack`(Game/GameMenu/Menu/Modal), 레이어 태그로 등록. PlayerController(로컬) BeginPlay에서 뷰포트에 push + 레이어별 push/pop API. (Lyra `PrimaryGameLayout` 패턴 참조, UIManagerSubsystem/GameUIPolicy까지는 불필요 — 단일 레이아웃 직접 push)
+- 신규 GameplayTag: `UI.Layer.Game/GameMenu/Menu/Modal` (DefaultGameplayTags.ini)
+- CommonUI 입력 데이터(`UCommonUIInputData`: Back/Confirm 액션) — 사용자 콘텐츠 + 프로젝트 설정
+
+**B. 공유 XP바 HUD (Game 레이어, 상시)**
+- `UFPSRHUDWidget`/`UFPSRXPBarWidget : UCommonUserWidget` — GameState `SharedXP`/`PartyLevel`/`PendingLevelUps` 바인딩(OnRep 또는 폴링). `Lv n / XP x/y / Stack s` 표시(플레이스홀더 ProgressBar+Text). 로컬 PlayerController가 Game 레이어에 push
+
+**C. 카드 선택 위젯 (Modal 레이어)**
+- `UFPSRCardSelectWidget : UCommonActivatableWidget`(3카드 오버레이) + `UFPSRCardEntryWidget`(카드 1장: 이름/등급/설명/Magnitude 텍스트 + 선택 버튼) + 리롤 버튼
+- 표시 데이터 = `FFPSRCardDraw[]`(이름/등급/수치). 선택=인덱스
+
+**D. 배선 / 네트워크 (서버 권위)**
+- `AFPSRPlayerController`에 RPC: `ServerRequestCardOffer`(서버: 서브시스템 `DrawCards` → **서버가 현재 offer를 PC/PlayerState에 캐시**) → `ClientPresentCards(const TArray<FFPSRCardDraw>&)`(오너 클라에 전달) / `ServerSelectCard(int32 Index)`(캐시된 offer에서 인덱스 검증 후 `ApplyCard`) / `ServerRerollOffer`(`TryReroll` 성공 시 재추첨→`ClientPresentCards`)
+- ⚠️ **보안 리팩터**: 현재 `ApplyCard(PC, FFPSRCardDraw, bConsumeLevelUp)`는 임의 draw를 받음 → P3-D에서 **서버가 발급한 offer 캐시(per-PC)에서 인덱스로 선택**하도록 게이트(클라가 임의 카드/수치 적용 못 하게). offer 캐시 + 검증 경로 추가
+
+**E. 흐름**
+- **오프닝 시드**: 런 시작(또는 `FPSR.OpeningSeed`) → 서버가 플레이어별 2회 offer 발급 → 위젯 2연속 선택(`bConsumeLevelUp=false`)
+- **정비시간**: `RunPhase==Breather && PendingLevelUps>0` → offer 발급·선택 1회당 `ApplyCard(bConsumeLevelUp=true)`로 레벨업 1 소비 → 스택 0까지 반복. 리롤 가능
+
+### 작업 순서(권장)
+1. CommonUI 모듈+ViewportClient+레이어 태그(A) → 빌드 통과 + LogUIActionRouter 사라짐 확인
+2. PrimaryGameLayout + XP바 HUD(B) → PIE에서 XP바 표시·`FPSR.AddXP`로 갱신
+3. 카드 선택 위젯 + PC RPC 배선 + offer 캐시/검증(C·D)
+4. 오프닝 시드 2장 + 정비시간 흐름(E) + `FPSR.OpeningSeed` 디버그
+5. 사용자 WBP 콘텐츠 작성 → PIE 검증 → Codex → `--no-ff` main 머지
+
+### 사용자 콘텐츠 (P3-D)
+- `WBP_PrimaryGameLayout`/`WBP_XPBar`/`WBP_CardSelect`/`WBP_CardEntry`(C++ 베이스 상속), CommonUI InputData 에셋, DefaultEngine.ini ViewportClient 설정
+- 카드 콘텐츠는 P3-C 것 재사용(`Content/Cards/Character/`)
+
+### 검증/메모
+- 빌드 + 헤드리스 스모크 + Codex(§6-6). UI는 PIE 수동 확인(헤드리스로 위젯 렌더 검증 불가 → 사용자 PIE)
+- **P4 메모**: 무기 카드 아키텍처(무기별 부착 vs 중앙 weapon 풀) 확정 + ThisWeapon/AllWeapons 적용 + 무기 모디파이어 Fragment
+
+---
+
 ### ✅ P3-C 코드 완료 (2026-06-01, 빌드+스모크+Codex 통과) — 카드 데이터/로직
 - **신규 `Card/`**: `FPSRCardTypes.h`(`ECardScope` Character/ThisWeapon/AllWeapons, `ECardRarity` Common/Rare/Epic/Legendary) + `UFPSRCardDataAsset`(DisplayName/Description/Scope/Rarity/`AppliedEffect`=GE/Weight, 스탯 하드코딩 없음 §2-3) + `UFPSRCardPoolDataAsset`(Cards[] + 등급별 기본가중치 4종 + Luck/RarityBonus 스케일).
 - **신규 `UFPSRCardSubsystem`(UWorldSubsystem, 서버권위)**: `DrawCards`(풀+보유무기 `WeaponCards` 후보 → **Rarity 가중 비복원 추첨**, 유효가중치=`RarityBase×Weight×(1+RarityBonus·scale+Luck·scale)×등급tier`) / `ApplyCard(PC,Card,bConsumeLevelUp=true)`(Character scope GE→플레이어 ASC) / `TryReroll`. 풀 주입=`AFPSRGameMode::BeginPlay`→`SetActivePool(CardPool)`(BP 할당, 경로 하드코딩 없음).
