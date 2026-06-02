@@ -35,6 +35,7 @@
   - ④ **데이터 검증**: `UFPSRCardDataAsset::IsDataValid`(WITH_EDITOR, RarityTiers 빔=에러/AppliedEffect 없음=경고) + 런타임 빈 티어 경고 로그(무음 실패 방지, Codex 지적 반영).
   - ⑤ **`RarityBonus` 폐지 → `Luck` 단일 축으로 통합(사용자 확정)**: 둘이 추첨에서 중복이라 `Luck` 하나로 단순화. `UFPSRCombatSet`의 RarityBonus 속성·`UFPSRCardPoolDataAsset.RarityBonusScale` 제거, `GetEffectiveWeight`는 Luck만(`1+Luck·LuckScale·등급tier`). Luck=광역 행운(향후 드랍품질·희귀스폰 등도 담당). Game.MD §4-1/§2-3 갱신. ⚠️ **RarityBonus를 타깃한 GE 에셋이 있으면 다른 속성으로 변경 필요**. (PickupRadius/XPGain은 사용자 결정에 따라 **나중에** 추가.)
   - Game.MD §2-3 + 가이드(`Docs/P3-C_UserContent_Guide.md`) RarityTiers 모델·Luck 단일축으로 갱신.
+  - ⑥ **최대체력 증가 = 즉시 회복(사용자 요청)**: `UFPSRHealthSet::PostAttributeChange`에서 MaxHealth 증가분만큼 현재 Health 가산(**서버 권위 게이트** `IsOwnerActorAuthoritative` — Codex 지적 반영: 클라 복제 재적용 방지). 새 최대치로 clamp. GE 대신 코드 방식 채택(Instant GE modifier 순서 클램프 함정 회피 + 모든 MaxHealth 증가에 일관). Game.MD §2-13 기록.
 
 **⏳ P3-C PIE 확인(사용자 콘텐츠 필요)**: 샘플 카드 DA들 + `DA_CardPool`(+GE 에셋) 생성 → `BP_FPSRGameMode.CardPool` 할당 → `FPSR.AddXP 120`(레벨업 큐)→`FPSR.DrawCards 3`(로그에 3장)→`FPSR.ApplyCard 0`(applied, GE 적용)→레벨업 큐 없으면 rejected. `FPSR.RerollCharges 3`→`FPSR.Reroll`→차감·재추첨.
 
