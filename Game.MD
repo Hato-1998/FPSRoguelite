@@ -65,9 +65,10 @@
 - XP는 몬스터 사망 시 **드롭 아이템(범용 Pickup)** → 근접 시 자석 흡수 줍기
 - **파티 공유 경험치 풀** — 누가 줍든 하나의 통에 누적, 모두 같은 하단 XP바 UI 공유
 - **교전 중 프리즈 폐지.** 공유 풀 임계 도달 시 레벨업은 **백그라운드에서 정상 처리되고 카드 UI는 뜨지 않으며, '레벨업 스택'으로 누적**된다 (다중 레벨업 = 스택 누적).
+- **레벨업 스택 = 플레이어별 보류 픽(확정 2026-06-02, P3-D)**: `SharedXP`/`PartyLevel`은 파티 공유(서버 권위, `AFPSRGameState`)지만, **파티가 1레벨 오를 때마다 그 시점 연결된 모든 플레이어에게 카드 픽이 1개씩 부여**된다. 각 플레이어는 **본인의 보류 픽을 본인 화면에서 독립적으로 소비**(`AFPSRPlayerState::CardPicksPending`, Replicated). 한 플레이어의 선택이 다른 플레이어의 픽을 소모하지 않는다(공유 카운터 단일 감소 방식은 솔로 전용이라 폐지). 늦게 합류한 플레이어는 합류 후 발생한 레벨업부터 픽을 받는다.
 - **오프닝 카드 시드**: 런 시작 시 **1~2장을 즉시 선택**해 초반 빌드를 시드한다 (첫 정비시간 전 무력감 방지 — 사용자 확정 2026-05-30).
 - **정비시간(Breather Time)** — 미션 클리어(§2-8) 시 **모든 몬스터 스폰이 정지**되는 안전 구간(`RunPhase.Breather`, Replicated). 이때:
-  1. 누적된 **레벨업 스택을 연속 소비** → 각 플레이어 개별 3카드 선택(본인 화면 오버레이)
+  1. 누적된 **레벨업 스택(=본인 보류 픽)을 연속 소비** → 각 플레이어가 본인 픽 수만큼 개별 3카드 선택(본인 화면 오버레이, 플레이어별 독립)
   2. **미션 클리어 보상 = 무기 기능 해금/변경(모디파이어) 카드**도 이 정비시간에 선택(§2-4-1, 사용자 확정 2026-05-30)
   3. **대기 시간 무제한** — 치열한 전투 후 휴식·다음 빌드/전략 논의를 겸하는 완전한 휴식 구간(Breather)
 - `RunPhase`는 전역 `TimeDilation=0`에 의존하지 않고 **스폰·적 활동을 상태로 게이트**(타이머·AbilityTask·RPC·이펙트 부작용 회피). 정비시간 중 UI·네트워크 RPC는 정상 tick 유지
@@ -220,7 +221,7 @@ Source/FPSRoguelite/Public/
 ├── Card/             CardDataAsset(Scope), CardPool, DrawSystem, Reroll
 ├── Enemy/            경량 풀액터, HealthComponent, AttackType, FlowField, ScalingProfile
 ├── Boss/             ABossBase, BossDefinition, StateTree
-├── Run/              SpawnDirector, TimeGateDirector  ※ 공유XP/레벨/레벨업스택/RunPhase = **복제 필요 → `AFPSRGameState` 호스팅**(Push Model, 서버 권위). WorldSubsystem은 복제 불가라 런 상태는 GameState에 둔다(P3-A 확정 2026-06-01). 무거운 서버 로직이 생기면 RunManager 서브시스템을 facade로 추가 검토.
+├── Run/              SpawnDirector, TimeGateDirector  ※ 공유XP/레벨/RunPhase = **복제 필요 → `AFPSRGameState` 호스팅**(Push Model, 서버 권위). WorldSubsystem은 복제 불가라 런 상태는 GameState에 둔다(P3-A 확정 2026-06-01). **레벨업 보류 픽은 플레이어별이라 `AFPSRPlayerState::CardPicksPending`에 둔다**(§2-2, P3-D 확정 2026-06-02). 무거운 서버 로직이 생기면 RunManager 서브시스템을 facade로 추가 검토.
 ├── Pickup/           범용 PickupActor + PickupDefinition(자석)
 ├── MetaProgression/  SaveGame, UpgradeTree, Subsystem
 ├── Performance/      ActorPool, SignificanceConfig, 인스턴싱

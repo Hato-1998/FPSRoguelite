@@ -3,11 +3,20 @@
 #pragma once
 
 #include "GameFramework/PlayerController.h"
+#include "Card/FPSRCardTypes.h"
 #include "FPSRPlayerController.generated.h"
 
 class UInputMappingContext;
+class UFPSRPrimaryGameLayout;
+class UFPSRCardSelectWidget;
+class UCommonActivatableWidget;
 
-/** Base player controller. Adds the default Enhanced Input mapping context for the local player. */
+/** Base player controller. Adds the default Enhanced Input mapping context for the local player and
+ *  drives the card-selection UI flow over server-authoritative RPCs.
+ *
+ *  Security: the server caches the offer it issued (per-PC) and applies only from that cache by index —
+ *  the client sends an index, never a card/magnitude. The consume mode (level-up vs opening seed) is
+ *  also server state, not a client-supplied flag. */
 UCLASS()
 class FPSROGUELITE_API AFPSRPlayerController : public APlayerController
 {
@@ -16,9 +25,79 @@ class FPSROGUELITE_API AFPSRPlayerController : public APlayerController
 public:
 	AFPSRPlayerController();
 
+	virtual void BeginPlay() override;
+
+	/** Server-only (NOT an RPC): begin an opening-seed sequence of Count picks (applied without
+	 *  consuming the level-up stack). Initiated by trusted server logic / authority-holding debug only —
+	 *  deliberately not client-callable so a client cannot grant itself free non-consuming offers. */
+	void BeginOpeningSeed(int32 Count);
+
+	/** Server-only (NOT an RPC): draw + cache an offer for this player and present it. The consume mode
+	 *  is server state, never a client-supplied argument (server authority over progression). */
+	void RequestCardOffer(bool bConsumeLevelUp);
+
+	/** Server-only: whether an offer is currently cached/presented (don't replace a mid-selection offer). */
+	bool HasActiveOffer() const { return CachedOffer.Num() > 0; }
+
+	/** Client (owner): present the server-issued offer (tagged with its OfferId) in the card-select modal. */
+	UFUNCTION(Client, Reliable)
+	void ClientPresentCards(int32 OfferId, const TArray<FFPSRCardDraw>& Offer);
+
+	/** Server RPC (client intent): apply the cached offer entry at Index. OfferId must match the current
+	 *  server offer (stale/duplicate selections from spam/double-click are ignored). Applies only from the
+	 *  server's cached offer with the server-stored consume mode. */
+	UFUNCTION(Server, Reliable)
+	void ServerSelectCard(int32 Index, int32 OfferId);
+
+	/** Server RPC (client intent): consume a reroll charge and redraw the current offer (same mode). */
+	UFUNCTION(Server, Reliable)
+	void ServerRerollOffer();
+
+	/** Client (owner): remove the card-select modal. */
+	UFUNCTION(Client, Reliable)
+	void ClientDismissCardUI();
+
+	/** Server: the owner client could not present the offer (no layout/widget class) — release the cached
+	 *  offer so the player isn't stranded with a pending pick and no UI (it can be re-presented later). */
+	UFUNCTION(Server, Reliable)
+	void ServerAbandonOffer();
+
 protected:
 	virtual void SetupInputComponent() override;
 
+	/** Create the local-player layout root on demand (idempotent). Returns true if it now exists. */
+	bool EnsurePrimaryLayout();
+
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Input")
 	TObjectPtr<UInputMappingContext> DefaultMappingContext;
+
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|UI")
+	TSubclassOf<UFPSRPrimaryGameLayout> PrimaryLayoutClass;
+
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|UI")
+	TSubclassOf<UCommonActivatableWidget> XPBarWidgetClass;
+
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|UI")
+	TSubclassOf<UFPSRCardSelectWidget> CardSelectWidgetClass;
+
+private:
+	/** Local-player layout root (created in BeginPlay). */
+	UPROPERTY(Transient)
+	TObjectPtr<UFPSRPrimaryGameLayout> PrimaryLayout;
+
+	/** Currently shown card-select modal instance (owner client). */
+	UPROPERTY(Transient)
+	TObjectPtr<UFPSRCardSelectWidget> ActiveCardWidget;
+
+	/** Server-only: the offer last issued to this player; selection applies from here by index. */
+	TArray<FFPSRCardDraw> CachedOffer;
+
+	/** Server-only: whether the cached offer's selection consumes a level-up pick. */
+	bool bOfferConsumesLevelUp = false;
+
+	/** Server-only: remaining opening-seed picks to present. */
+	int32 PendingOpeningSeeds = 0;
+
+	/** Server-only: monotonic id of the current offer; selections must echo it (anti double-apply). */
+	int32 CurrentOfferId = 0;
 };

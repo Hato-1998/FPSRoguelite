@@ -1,6 +1,8 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Core/FPSRGameState.h"
+#include "Core/FPSRPlayerState.h"
+#include "Core/FPSRPlayerController.h"
 #include "Net/UnrealNetwork.h"
 #include "Net/Core/PushModel/PushModel.h"
 #include "Engine/World.h"
@@ -19,7 +21,6 @@ void AFPSRGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLi
 	Params.bIsPushBased = true;
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRGameState, SharedXP, Params);
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRGameState, PartyLevel, Params);
-	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRGameState, PendingLevelUps, Params);
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRGameState, RunPhase, Params);
 }
 
@@ -36,16 +37,39 @@ void AFPSRGameState::AddSharedXP(int32 Amount)
 	}
 
 	SharedXP += Amount;
+	int32 LevelsGained = 0;
 	while (SharedXP >= GetRequiredXP(PartyLevel))
 	{
 		SharedXP -= GetRequiredXP(PartyLevel);
 		++PartyLevel;
-		++PendingLevelUps;
+		++LevelsGained;
 	}
 
 	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRGameState, SharedXP, this);
 	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRGameState, PartyLevel, this);
-	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRGameState, PendingLevelUps, this);
+
+	// Grant each connected player one pending card pick per level gained.
+	if (LevelsGained > 0)
+	{
+		for (APlayerState* PS : PlayerArray)
+		{
+			if (AFPSRPlayerState* FPS = Cast<AFPSRPlayerState>(PS))
+			{
+				for (int32 i = 0; i < LevelsGained; ++i)
+				{
+					FPS->AddCardPick();
+				}
+			}
+		}
+
+		// If picks are granted while already in the breather, present them now (don't wait for a re-entry).
+		if (RunPhase == ERunPhase::Breather)
+		{
+			PresentPendingLevelUpOffers();
+		}
+	}
+
+	OnRunStateChanged.Broadcast();
 }
 
 void AFPSRGameState::SetRunPhase(ERunPhase NewPhase)
@@ -56,21 +80,41 @@ void AFPSRGameState::SetRunPhase(ERunPhase NewPhase)
 	}
 	RunPhase = NewPhase;
 	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRGameState, RunPhase, this);
+	OnRunStateChanged.Broadcast();
+
+	// Entering the breather: present a level-up card offer to every player with pending picks (§2-2).
+	if (NewPhase == ERunPhase::Breather)
+	{
+		PresentPendingLevelUpOffers();
+	}
 }
 
-void AFPSRGameState::ConsumePendingLevelUp()
+void AFPSRGameState::PresentPendingLevelUpOffers()
 {
-	if (!HasAuthority() || PendingLevelUps <= 0)
+	if (!HasAuthority())
 	{
 		return;
 	}
-	--PendingLevelUps;
-	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRGameState, PendingLevelUps, this);
+
+	for (APlayerState* PS : PlayerArray)
+	{
+		AFPSRPlayerState* FPS = Cast<AFPSRPlayerState>(PS);
+		if (!FPS || FPS->GetCardPicksPending() <= 0)
+		{
+			continue;
+		}
+
+		AFPSRPlayerController* PC = Cast<AFPSRPlayerController>(FPS->GetOwningController());
+		if (PC && !PC->HasActiveOffer())
+		{
+			PC->RequestCardOffer(true);
+		}
+	}
 }
 
 void AFPSRGameState::OnRep_RunState()
 {
-	// Cosmetic hook for clients (HUD binds in P3-D).
+	OnRunStateChanged.Broadcast();
 }
 
 #if !UE_BUILD_SHIPPING

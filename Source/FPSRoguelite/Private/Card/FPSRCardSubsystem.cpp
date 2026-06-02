@@ -3,7 +3,6 @@
 #include "Card/FPSRCardSubsystem.h"
 #include "Card/FPSRCardDataAsset.h"
 #include "Card/FPSRCardPoolDataAsset.h"
-#include "Core/FPSRGameState.h"
 #include "Core/FPSRPlayerState.h"
 #include "Core/FPSRLogChannels.h"
 #include "AbilitySystem/FPSRAbilitySystemComponent.h"
@@ -198,13 +197,12 @@ bool UFPSRCardSubsystem::ApplyCard(AController* ForPlayer, const FFPSRCardDraw& 
 		return false;
 	}
 
-	// When this apply represents a breather level-up selection, require a queued level-up and consume it
+	// When this apply represents a breather level-up selection, require a pending pick from this player and consume it
 	// atomically — gate before applying the effect so a stale/duplicate path can't grant cards for free.
 	// Opening-seed selections (§2-2) pass bConsumeLevelUp=false and skip this gate.
-	AFPSRGameState* GS = World->GetGameState<AFPSRGameState>();
 	if (bConsumeLevelUp)
 	{
-		if (!GS || GS->GetPendingLevelUps() <= 0)
+		if (PS->GetCardPicksPending() <= 0)
 		{
 			return false;
 		}
@@ -225,9 +223,9 @@ bool UFPSRCardSubsystem::ApplyCard(AController* ForPlayer, const FFPSRCardDraw& 
 		}
 	}
 
-	if (bConsumeLevelUp && GS)
+	if (bConsumeLevelUp)
 	{
-		GS->ConsumePendingLevelUp();
+		PS->ConsumeCardPick();
 	}
 
 	return true;
