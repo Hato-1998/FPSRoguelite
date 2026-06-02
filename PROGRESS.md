@@ -7,13 +7,13 @@
 **최종 갱신: 2026-06-01**
 
 ## 한 줄 요약
-**P2 전체 → main 머지 완료**(+대시 사용자콘텐츠 `4715138`). **P3-A·B·C 코드 완료**(런 상태 + XP픽업/자석 + 카드 데이터/로직). 빌드+스모크+Codex 통과. → 다음 P3-D(카드 UI/오프닝시드/공유XP바 HUD).
+**P2 + P3-A·B·C(코드+카드 콘텐츠) → main 머지 완료**(이 머지 커밋). 빌드+스모크+Codex+PIE 통과. → 다음 **P3-D**(카드 UI/오프닝시드/공유XP바 HUD), main에서 새 브랜치 분기.
 
-## ▶▶ 새 세션 우선 작업 = P3-A/B/C PIE 확인 → P3-D 착수
-**브랜치**: `phase/p3-progression` (활성, main에서 분기·origin push). 구현=Haiku 위임 / 검증=Opus.
+## ▶▶ 새 세션 우선 작업 = P3-D 착수 (새 작업이므로 플랜 우선)
+**브랜치**: `phase/p3-progression`은 main 머지 후 삭제됨. **P3-D는 `main`에서 새 `phase/p3d-cardui` 분기**. 구현=Haiku 위임 / 검증=Opus.
 
 ### 🧭 핸드오프 요약 (이 줄부터 읽으면 즉시 이어받기 가능)
-- **현재 위치**: P3(진행 시스템) 진행 중. 분해 = **P3-A✅ → P3-B✅ → P3-C✅ → P3-D(다음)**.
+- **현재 위치**: P3(진행 시스템). 분해 = **P3-A✅ → P3-B✅ → P3-C✅(main 머지) → P3-D(다음)**.
 - **다음 작업 = P3-D (카드 UI, 새 작업이므로 플랜 우선)**: CommonUI 뷰포트/입력 설정(`CommonGameViewportClient` — §8 LogUIActionRouter 해결) + **정비시간 3카드 선택 위젯**(레벨업 스택 연속 소비, 본인 화면 오버레이) + **오프닝 시드 1~2장**(런 시작, `ApplyCard(..., bConsumeLevelUp=false)`) + **공유 XP바 HUD**(GameState `SharedXP/PartyLevel/PendingLevelUps` 바인딩) + 리롤 버튼(PlayerState `RunRerollCharges`). **배선**: 클라 위젯 → PlayerController Server RPC → `UFPSRCardSubsystem::DrawCards/ApplyCard/TryReroll`. (Game.MD §2-2/§2-3)
 - **P3-C가 P3-D에 노출한 서버 API**: `World->GetSubsystem<UFPSRCardSubsystem>()` → `DrawCards(PC, N, Exclude)`(Character scope만·가중추첨) / `ApplyCard(PC, Card, bConsumeLevelUp)`(레벨업 게이트, 오프닝시드=false) / `TryReroll(PC)`(PlayerState 차감). 풀 주입=`BP_FPSRGameMode.CardPool`.
 - **⏳ 미확인 PIE(사용자)**: P2 전체(스웜 분산/풀 재활용/LOD/근접피해/대시) + P3-A/B(`FPSR.AddXP`·`FPSR.SetPhase`·XP 오브 흡수). 각 단계 ⏳ 항목 참조. **코드는 빌드+스모크 통과 상태**.
