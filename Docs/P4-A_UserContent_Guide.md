@@ -68,19 +68,22 @@
 - **선택 규칙**: 미션 출현 시 디렉터가 `SpawnPointTag` 매칭 + 활성 + 거리 통과 포인트 중 **Weight 가중 랜덤**. 매칭 포인트가 하나도 없으면 첫 플레이어 위치 폴백(미배치 맵도 동작).
 - HoldZone은 스폰포인트 위치 기준 `ZoneRadius` 반경에 존 형성 → 포인트는 **개활지**에 두는 것을 권장.
 
-## 3. 라운드 스케줄 DA — `DA_RunSchedule` (`UFPSRRunScheduleDataAsset`)
-- **에셋 생성**: Data Asset > `FPSRRunScheduleDataAsset`
-- `Rounds` 배열 (⚠️ **테스트용 압축값** — 프로덕션은 5/10/15분):
+## 3. 런 스케줄 DA — `DA_RunSchedule` (`UFPSRRunScheduleDataAsset`) — ⚠️ 재설계됨(라운드 폐지)
+> 이전 `Rounds[]` 구조는 제거됐습니다. 기존 `DA_RunSchedule`이 있으면 아래 새 필드로 다시 설정하세요(라운드제 → 시간 기반).
+- **에셋 생성/수정**: Data Asset > `FPSRRunScheduleDataAsset`
+- **필드**:
+  - **`MissionEvents`** 배열 — 각: `TriggerTime`(초, 미션 출현 시각), `Mission`(DA). ⚠️ **테스트 압축값**(프로덕션 300/600/900s = 5/10/15분):
 
-| # | Duration(초) | TargetAliveCount | Mission | bBossRound |
-|---|---|---|---|---|
-| 0 | 120 | 50  | DA_Mission_HoldZone | ☐ |
-| 1 | 120 | 80  | DA_Mission_HoldZone | ☐ |
-| 2 | 60  | 120 | DA_Mission_HoldZone | ☐ |
-| 3 | 0   | 0   | (none)              | ☑ (보스 게이트) |
+    | TriggerTime(초) | Mission |
+    |---|---|
+    | 60  | DA_Mission_HoldZone |
+    | 120 | DA_Mission_HoldZone |
+    | 180 | DA_Mission_HoldZone |
 
-- Mission은 라운드 내 **랜덤 시각(Duration의 10~80%)에 1회** 자동 출현. 라운드마다 같은 DA를 써도 되고 라운드별로 다른 미션 DA를 둬도 됨.
-- Rounds를 비워두면 C++ 폴백 스케줄(120/120/60→보스, 미션 없음)로 동작.
+  - **`BossTime`** = **300**(초) — 이 시각에 보스 출현(이후 미션·타이머 없음). 프로덕션 ~1200(20분).
+  - **`BaseAliveCount`**(기본 40) / **`AliveCountPerMinute`**(기본 30) / **`MaxAliveCount`**(기본 250) — 시간경과 스폰 강도 스케일링.
+- 미션은 **해당 TriggerTime 도달 시 1회** 출현, **선택적**. **클리어하면 즉시 전역 프리즈**되어 보상 카드 선택 후 재개.
+- 스케줄 미할당 시 C++ 폴백(미션 없음, 보스 300s, 기본 스폰 스케일)로 동작.
 
 ## 3.5 적 BP — `BP_Enemy` (XP·메시·스탯 설정) ⭐
 적 XP(및 메시/스탯)는 **적 BP에서 설정**한다. 현재 스폰 적 클래스는 GameMode에서 지정하며, 미지정 시 C++ `AFPSREnemyBase`(엔진 큐브 플레이스홀더, XPReward 5)로 폴백한다.
@@ -96,34 +99,32 @@
 - `FPSR|Enemy` > **`EnemyClass` = `BP_Enemy`**(§3.5) 할당 → 적 XP/메시 적용. (미지정 시 큐브 플레이스홀더·XP 5)
 - (CardPool은 기존 P3 연결 유지)
 
-## 5. PIE 검증 시나리오
-런 시작 시 **자동**으로:
-1. **오프닝 시드 2장** 자동 출현(클라 UI 준비되면 서버가 발급) → 2회 선택
-2. **Combat 스폰 자동 시작**(라운드 TargetAliveCount만큼) — 더 이상 `FPSR.SpawnEnemies` 불필요
-3. 라운드 내 랜덤 시각에 **미션(초록 존) 출현** → 존 안에서 30초 버티면 클리어(보상 적립 로그)
-4. 라운드 시간 경과 → **Breather 진입**(스폰 정지 + 잔여 적 즉시 정리) + 레벨업 카드 선택
-5. **전원 픽 소비 완료 시 자동으로 다음 라운드** 재개
-6. 마지막 라운드 → **보스 게이트 로그**(보스 실물은 P6 스텁)
+## 5. PIE 검증 시나리오 (재설계 — 레벨업 전역 프리즈)
+1. **런 시작 = 오프닝 시드 2장**(전원 동결 상태) → 2장 선택하면 동결 해제 → 전투 시작
+2. **Combat 스폰 자동**(시간경과 스케일링) — `FPSR.SpawnEnemies` 불필요
+3. 적 처치로 **XP 누적 → 레벨업 시 즉시 전역 프리즈**(적·플레이어 정지) → 카드 선택 → 전원 완료 시 재개. (`FPSR.AddXP`로 빠른 트리거)
+4. `MissionEvents` 시각 도달 → **미션(존) 출현** → 클리어하면 **즉시 프리즈** → 모디파이어 보상 카드 선택 → 재개. (보상 실적용은 P4-B, weapon-scope는 선택만)
+5. **BossTime 도달 → 보스 진입**(미션·타이머 중단, 스폰 정리) — 보스 실물은 P6 스텁. 보스 중에도 레벨업하면 프리즈.
 
-### 라운드 타이머 / 런 상태 HUD (데이터 준비됨, WBP 바인딩은 P4-D)
-런 상태는 `AFPSRGameState`에 복제되어 있어 HUD 위젯에서 바로 바인딩 가능(스타일된 위젯 제작은 P4-D):
-- `GetRoundTimeRemaining()` — 현재 라운드 남은 초(Combat 외 0)
-- `GetCurrentRound()` / `GetRunClockSeconds()`(총 경과) / `GetRunPhase()` / `GetBankedMissionRewards()`
-- 빠른 확인은 `FPSR.RunDebug 1` 오버레이(`remain=Xs` 표시). 정식 타이머 위젯은 P4-D에서 이 getter들을 바인딩.
+### 런 상태 HUD (데이터 복제됨, WBP 바인딩은 P4-D)
+`AFPSRGameState` getter를 HUD 위젯에 바인딩(스타일 위젯은 P4-D):
+- `GetRunClockSeconds()`(생존 경과) / `GetRunPhase()`(Combat/Boss) / **`IsRunPaused()`**(프리즈 중) / `GetPartyLevel()` / `GetSharedXP()` / `GetRequiredXPForNextLevel()`
+- `AFPSRPlayerState::GetCardPicksPending()` / `GetMissionRewardPicksPending()` (본인 보류 픽)
+- 빠른 확인: `FPSR.RunDebug 1` 오버레이(t/boss/alive/mission) + 캐릭터 디버그(Lv/XP/Picks/[Combat|Boss FROZEN]).
 
 ### 테스트 편의 콘솔(빠른 반복, shipping 제외)
-- `FPSR.RunTimeScale 10` — 런 경과 10배속(5분 런을 30초에)
-- `FPSR.SkipToBoss` — 보스 라운드로 점프
-- `FPSR.NextRound` — 현재 라운드 강제 종료 → Breather
-- `FPSR.MissionTrigger` / `FPSR.MissionClear` — 미션 즉시 발동 / 강제 클리어
+- `FPSR.AddXP [n]` — 공유 XP 직접 가산 → **레벨업 전역 프리즈 트리거**(핵심 테스트)
+- `FPSR.RunTimeScale 10` — 런클럭 10배속(미션/보스 타이밍 빠르게)
+- `FPSR.SkipToBoss` — 즉시 보스 진입
+- `FPSR.MissionTrigger` / `FPSR.MissionClear` — 다음 미션 즉시 발동 / 활성 미션 강제 클리어(보상 프리즈)
+- `FPSR.Pause [0|1]` — 전역 프리즈 수동 토글
 - `FPSR.KillAllEnemies` — 활성 적 전부 정리
-- `FPSR.RunDebug 1` — 화면에 R#/Phase/경과·잔여/미션/적수/배속 오버레이
-- `FPSR.AddXP [n]` — 공유 XP 직접 가산(레벨업 흐름 테스트)
+- `FPSR.RunDebug 1` — 화면에 t/boss/alive/mission/배속 오버레이
 
 ## 6. 레벨링 / XP (프로덕션 공식)
 - 레벨 요구 XP = `XPBaseRequired + (PartyLevel-1) × XPPerLevel` (기본 100 + (L-1)×50). 둘 다 GameState `EditDefaultsOnly`.
-- 적 처치 시 `AFPSREnemyBase::XPReward`(기본 5) 만큼 XP 드롭 → 자석 회수 → 공유 풀 누적. **적 XP는 개체/DataAsset별로 에디터에서 튜닝**.
-- XP바가 점진적으로 차오르고, 풀이 요구치 도달 시 레벨업(카드 픽 부여). (1킬=1레벨 테스트값은 제거됨)
+- 적 처치 시 `AFPSREnemyBase::XPReward`(기본 5) 만큼 XP 드롭 → 자석 회수 → 공유 풀 누적. **적 XP는 BP_Enemy에서 튜닝**(§3.5).
+- 풀이 요구치 도달 시 **즉시 전역 프리즈**(적·플레이어 정지) → 전원 카드 선택 → 재개.
 
 ## 7. ⚠️ 임시 테스트값 (프로덕션 전환 시 원복)
-- **라운드 시간 2/2/1분**(프로덕션 5/10/15분) — 스케줄 DA에서 조정. 전환 시점에 별도 보고 예정(메모리 `p4a-temp-test-values`).
+- **미션 시각 60/120/180s · 보스 300s(5분)** — 프로덕션 300/600/900s·보스 1200s(20분). 스케줄 DA에서 조정. 전환 시 별도 보고(메모리 `p4a-temp-test-values`).
