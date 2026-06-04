@@ -98,6 +98,12 @@ protected:
 	 *  Called on breather entry and when picks are granted while already in the breather (§2-2). */
 	void PresentPendingLevelUpOffers();
 
+	/** Server: schedule PresentPendingLevelUpOffers for the next frame instead of running it synchronously.
+	 *  Card widgets are CommonUI ActivatableWidgets; creating/activating them inside the call site that
+	 *  changed the phase (a director timer tick, an RPC, or AddXP) can crash the input/activation stack, so
+	 *  we defer widget creation to a clean frame boundary. Idempotent (won't double-schedule). */
+	void SchedulePresentLevelUpOffers();
+
 	/** XP required to advance from level 1; each level adds XPPerLevel (linear curve placeholder —
 	 *  a UCurveFloat data-driven curve is a follow-up, Game.MD §2-8). Editor-tunable. */
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Run")
@@ -127,4 +133,10 @@ protected:
 
 	UPROPERTY(ReplicatedUsing = OnRep_RunState)
 	float RoundTimeRemaining = 0.0f;
+
+	/** Guard so a burst of phase/XP changes in one frame only schedules one deferred presentation. */
+	bool bLevelUpPresentScheduled = false;
+
+	/** Server-only timer for the deferred level-up offer presentation. */
+	FTimerHandle LevelUpPresentTimerHandle;
 };
