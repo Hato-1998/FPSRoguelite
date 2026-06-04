@@ -19,14 +19,13 @@
 2. **머티리얼 설정**(좌측 Details, 노드 선택 해제 상태):
    - **Material Domain = `Deferred Decal`**
    - **Decal Blend Mode = `Translucent`** (Domain을 Deferred Decal로 바꾸면 Blend Mode 항목이 Decal Blend Mode로 바뀜)
-3. **원형 마스크 노드**(중심에서의 거리로 원을 만든다):
-   - `TextureCoordinate` 추가
-   - `Constant2Vector` = **(0.5, 0.5)**
-   - `Subtract` : A=TextureCoordinate, B=Constant2Vector  → UV를 중심 기준 -0.5~0.5로
-   - `Distance`(또는 `VectorLength`) : 위 Subtract 결과 → **Dist**(중심 0, 가장자리 0.5)
-   - `Constant` = **0.5** → `Subtract`(A=0.5, B=Dist) → 원 안은 +, 밖은 −
-   - `Multiply` ×**40** (가장자리 선명도) → `Saturate` → **Alpha**(원 안 1, 밖 0)
-   - **Alpha → 머티리얼 `Opacity`**
+3. **원형 마스크 노드**(중심에서의 거리로 원을 만든다). ※ 아래 `Dist`/`Alpha`는 **노드 이름이 아니라 중간값 라벨**(설명용):
+   - **방법 A(노드 적음, 권장)**: `TextureCoordinate` + `Constant2Vector(0.5,0.5)` → **`Distance`**(A=TexCoord, B=Const2) → 결과 = `Dist`(중심 0, 가장자리 0.5). `Distance`는 입력 2개짜리(두 점 사이 거리).
+   - **방법 B**: `TextureCoordinate` − `Constant2Vector(0.5,0.5)` 를 `Subtract`로 빼고 → **`VectorLength`**(입력 1개, 벡터 길이) → `Dist`. (Distance = VectorLength(A−B)와 동일)
+   - 이어서: `Constant` = **0.5** → `Subtract`(A=0.5, **B=Dist**) → 원 안은 +, 밖은 −
+   - `Multiply` ×**40** (가장자리 선명도) → `Saturate` → `Alpha`(원 안 1, 밖 0)
+   - **이 Saturate 출력 → 머티리얼 `Opacity`**
+   - ⚠️ 흔한 실수: 거리(길이) 노드를 빼먹으면 위 `Subtract`/`VectorLength` 출력이 어디에도 안 연결됨. `Subtract(0.5, Dist)`의 **B 입력에 반드시 거리값**을 꽂을 것(기본 1.0이 아니라).
 4. **파란 색**:
    - `Constant3Vector` = **(0.05, 0.3, 1.0)** (파랑) → (선택)`Multiply` ×**3**(발광 강조) → **`Emissive Color`**
    - (원하면 같은 색을 `Base Color`에도 연결)
