@@ -47,6 +47,8 @@ private:
 	FFPSRRoundDef GetRoundDef(int32 Index) const;
 	int32 GetNumRounds() const;
 	FVector ComputeMissionLocation() const;
+	/** True if at least one player controller currently possesses a pawn (run start gate). */
+	bool HasAnyPlayerPawn() const;
 	AFPSRGameState* GetGS() const;
 	UFPSREnemySpawnSubsystem* GetSpawnSub() const;
 
@@ -69,6 +71,8 @@ private:
 	float TimeScale = 1.0f;
 	bool bRunActive = false;
 	bool bRunDebug = false;
+	/** Set when StartRun is called before any player pawn exists; round 0 begins once one appears. */
+	bool bAwaitingFirstPlayer = false;
 
 	FTimerHandle DirectorTimerHandle;
 

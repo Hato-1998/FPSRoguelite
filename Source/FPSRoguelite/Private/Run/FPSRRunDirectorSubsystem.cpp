@@ -42,7 +42,18 @@ void UFPSRRunDirectorSubsystem::StartRun()
 	bRunActive = true;
 	TotalElapsed = 0.0f;
 
-	BeginRound(0);
+	// Don't begin round 0 (which sets a positive spawn target) until a player pawn exists — otherwise the
+	// spawn director would populate enemies around world origin (ComputeSpawnLocation falls back to origin
+	// with no player). The director timer polls for the first pawn and begins the run then.
+	if (HasAnyPlayerPawn())
+	{
+		BeginRound(0);
+	}
+	else
+	{
+		bAwaitingFirstPlayer = true;
+		UE_LOG(LogFPSR, Log, TEXT("[Run] StartRun deferred — waiting for first player pawn"));
+	}
 
 	UWorld* World = GetWorld();
 	if (World)
@@ -137,6 +148,17 @@ void UFPSRRunDirectorSubsystem::DirectorTick()
 		return;
 	}
 
+	// Deferred start: hold until the first player pawn appears, then begin round 0.
+	if (bAwaitingFirstPlayer)
+	{
+		if (HasAnyPlayerPawn())
+		{
+			bAwaitingFirstPlayer = false;
+			BeginRound(0);
+		}
+		return;
+	}
+
 	const ERunPhase Phase = GS->GetRunPhase();
 
 	if (Phase == ERunPhase::Combat)
@@ -203,6 +225,9 @@ void UFPSRRunDirectorSubsystem::EndRound()
 	if (SpawnSub)
 	{
 		SpawnSub->SetTargetAliveCount(0);
+		// Clear the remaining swarm so the breather is a genuine safe zone (Game.MD §2-2) — setting the
+		// target to 0 alone leaves already-spawned enemies active (the spawn director never shrinks).
+		SpawnSub->ReleaseAllEnemies();
 	}
 
 	UE_LOG(LogFPSR, Log, TEXT("[Run] Round %d ended, entering breather"), CurrentRoundIndex);
@@ -324,6 +349,7 @@ void UFPSRRunDirectorSubsystem::EnterBoss()
 	if (SpawnSub)
 	{
 		SpawnSub->SetTargetAliveCount(0);
+		SpawnSub->ReleaseAllEnemies();
 	}
 
 	UE_LOG(LogFPSR, Log, TEXT("[Run] Boss gate reached (boss actor is a P6 stub) — run timeline halted"));
@@ -349,6 +375,27 @@ FVector UFPSRRunDirectorSubsystem::ComputeMissionLocation() const
 	}
 
 	return FVector::ZeroVector;
+}
+
+bool UFPSRRunDirectorSubsystem::HasAnyPlayerPawn() const
+{
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return false;
+	}
+
+	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+	{
+		if (const APlayerController* PC = It->Get())
+		{
+			if (PC->GetPawn() != nullptr)
+			{
+				return true;
+			}
+		}
+	}
+	return false;
 }
 
 AFPSRGameState* UFPSRRunDirectorSubsystem::GetGS() const
