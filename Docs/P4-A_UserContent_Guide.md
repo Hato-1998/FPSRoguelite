@@ -14,10 +14,26 @@
 ### 1.1 시각용 존 데칼 추가 (바닥에 반경만큼 칠하기)
 판정은 서버 거리체크라 비주얼이 없어도 동작하지만(개발 중엔 `ENABLE_DRAW_DEBUG` 디버그 실린더로만 보임), **플레이어에게 존을 바닥에 원형으로 표시**하려면 BP에 **데칼 컴포넌트**를 붙인다(불규칙 바닥에도 잘 깔리고 시야를 안 가림).
 
-**A. 데칼 머티리얼 준비** (Deferred Decal 도메인)
-- 머티리얼 신규 생성 → 디테일에서 **Material Domain = `Deferred Decal`**, **Blend Mode = `Translucent`**.
-- 원형 마스크: `TextureCoordinate`(0~1) → 중심(0.5,0.5)에서의 반경으로 원/링 마스크 생성(예: UV를 -0.5 offset 후 `VectorLength` → `1-saturate(dist*2)` 또는 링이면 안팎 반경 차) → **Opacity**에 연결, 색은 **Emissive Color**에 상수(예 청록). 원형 텍스처가 있으면 그 알파를 Opacity로 써도 됨.
-- (머티리얼 인스턴스로 색/두께/반경 마스크를 파라미터화하면 미션별 색 재사용 편함.)
+**A. 간단 파란 원형 데칼 머티리얼 만들기** (텍스처 불필요, 노드만)
+1. **생성**: Content Browser > Add > Material → `M_HoldZoneDecal`. 더블클릭해 열기.
+2. **머티리얼 설정**(좌측 Details, 노드 선택 해제 상태):
+   - **Material Domain = `Deferred Decal`**
+   - **Decal Blend Mode = `Translucent`** (Domain을 Deferred Decal로 바꾸면 Blend Mode 항목이 Decal Blend Mode로 바뀜)
+3. **원형 마스크 노드**(중심에서의 거리로 원을 만든다):
+   - `TextureCoordinate` 추가
+   - `Constant2Vector` = **(0.5, 0.5)**
+   - `Subtract` : A=TextureCoordinate, B=Constant2Vector  → UV를 중심 기준 -0.5~0.5로
+   - `Distance`(또는 `VectorLength`) : 위 Subtract 결과 → **Dist**(중심 0, 가장자리 0.5)
+   - `Constant` = **0.5** → `Subtract`(A=0.5, B=Dist) → 원 안은 +, 밖은 −
+   - `Multiply` ×**40** (가장자리 선명도) → `Saturate` → **Alpha**(원 안 1, 밖 0)
+   - **Alpha → 머티리얼 `Opacity`**
+4. **파란 색**:
+   - `Constant3Vector` = **(0.05, 0.3, 1.0)** (파랑) → (선택)`Multiply` ×**3**(발광 강조) → **`Emissive Color`**
+   - (원하면 같은 색을 `Base Color`에도 연결)
+5. **저장**. → §1.1-B에서 BP Decal 컴포넌트의 Decal Material로 지정.
+
+- **링(테두리)만** 원하면 3번 Alpha를 `Saturate((0.5−Dist)×40) × Saturate((Dist−0.42)×40)`로(0.42~0.5 반경 사이만 칠해짐).
+- **색 재사용**: `Constant3Vector`를 우클릭 > Convert to Parameter(`ZoneColor`)로 바꾸면 Material Instance에서 미션별 색만 바꿔 재사용.
 
 **B. BP에 데칼 컴포넌트 배치**
 - `BP_Mission_HoldZone` 컴포넌트 탭 → **Root**(`USceneComponent`) 하위에 **Decal** 컴포넌트 추가.
