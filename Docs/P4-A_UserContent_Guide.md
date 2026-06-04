@@ -82,8 +82,18 @@
 - Mission은 라운드 내 **랜덤 시각(Duration의 10~80%)에 1회** 자동 출현. 라운드마다 같은 DA를 써도 되고 라운드별로 다른 미션 DA를 둬도 됨.
 - Rounds를 비워두면 C++ 폴백 스케줄(120/120/60→보스, 미션 없음)로 동작.
 
+## 3.5 적 BP — `BP_Enemy` (XP·메시·스탯 설정) ⭐
+적 XP(및 메시/스탯)는 **적 BP에서 설정**한다. 현재 스폰 적 클래스는 GameMode에서 지정하며, 미지정 시 C++ `AFPSREnemyBase`(엔진 큐브 플레이스홀더, XPReward 5)로 폴백한다.
+- **BP 생성**: Add > Blueprint Class > 부모 **`FPSREnemyBase`** → `BP_Enemy`.
+- **디테일 설정**:
+  - `XPReward`(FPSR|Enemy): 이 적 처치 시 드롭하는 XP. **여기서 원하는 값으로 튜닝**(기본 5).
+  - (후속) 메시/머티리얼·이동속도·공격력 등도 이 BP에서. 현재 메시는 C++ 큐브 플레이스홀더(§Game.MD 8).
+- **GameMode에 연결**(§4): `BP_FPSRGameMode` > `FPSR|Enemy` > **`EnemyClass` = `BP_Enemy`**.
+- ※ 적 종류를 여러 개 두거나 시간 스케일링(HP/공격력 커브)은 P4-C/후속. P4-A는 단일 적 클래스 지정까지.
+
 ## 4. GameMode BP 연결
 - `BP_FPSRGameMode` 디테일 > `FPSR|Run` > **`RunSchedule` = `DA_RunSchedule`** 할당.
+- `FPSR|Enemy` > **`EnemyClass` = `BP_Enemy`**(§3.5) 할당 → 적 XP/메시 적용. (미지정 시 큐브 플레이스홀더·XP 5)
 - (CardPool은 기존 P3 연결 유지)
 
 ## 5. PIE 검증 시나리오

@@ -4,6 +4,7 @@
 
 #include "Subsystems/WorldSubsystem.h"
 #include "Tickable.h"
+#include "Templates/SubclassOf.h"
 #include "FPSREnemySpawnSubsystem.generated.h"
 
 class AFPSREnemyBase;
@@ -39,6 +40,10 @@ public:
 
 	/** Get the current number of alive enemies. */
 	int32 GetAliveCount() const { return ActiveEnemies.Num(); }
+
+	/** Set the actor class to spawn for swarm enemies (designer-configured BP child of AFPSREnemyBase).
+	 *  Falls back to AFPSREnemyBase if unset. Set this from trusted server config (e.g. GameMode). */
+	void SetEnemyClass(TSubclassOf<AFPSREnemyBase> InClass) { EnemyClass = InClass; }
 
 	/** Set the target alive count (director will spawn/release to maintain this). */
 	void SetTargetAliveCount(int32 InTarget);
@@ -84,6 +89,10 @@ private:
 	static constexpr float SpawnGroundTraceUp = 500.0f;     // cm above the candidate to start the down-trace
 	static constexpr float SpawnGroundTraceDown = 10000.0f; // cm below the candidate to end the down-trace
 	static constexpr float SpawnGroundHalfHeight = 90.0f;   // cm; capsule half-height -> feet on floor
+
+	/** Designer-configured enemy class to spawn (BP child of AFPSREnemyBase). Null = spawn AFPSREnemyBase. */
+	UPROPERTY()
+	TSubclassOf<AFPSREnemyBase> EnemyClass;
 
 	/** Pool of dormant (hidden, disabled) enemies ready for reuse. */
 	UPROPERTY(Transient)

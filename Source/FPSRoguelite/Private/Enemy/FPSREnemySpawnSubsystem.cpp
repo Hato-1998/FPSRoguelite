@@ -366,10 +366,11 @@ AFPSREnemyBase* UFPSREnemySpawnSubsystem::AcquireEnemy(const FVector& Location)
 			return nullptr;
 		}
 
-		// Spawn a new enemy.
+		// Spawn a new enemy of the configured class (designer BP child), falling back to the C++ base.
 		FActorSpawnParameters SpawnParams;
 		SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-		Enemy = World->SpawnActor<AFPSREnemyBase>(AFPSREnemyBase::StaticClass(), SpawnLocation, FRotator::ZeroRotator, SpawnParams);
+		UClass* ClassToSpawn = EnemyClass ? EnemyClass.Get() : AFPSREnemyBase::StaticClass();
+		Enemy = World->SpawnActor<AFPSREnemyBase>(ClassToSpawn, SpawnLocation, FRotator::ZeroRotator, SpawnParams);
 		if (Enemy == nullptr)
 		{
 			return nullptr;
