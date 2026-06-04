@@ -140,7 +140,7 @@ void AFPSRPlayerController::ClientPresentCards_Implementation(int32 OfferId, con
 	if (!EnsurePrimaryLayout() || !CardSelectWidgetClass)
 	{
 		UE_LOG(LogFPSR, Warning, TEXT("[UI] Cannot present card offer (PrimaryLayout/CardSelectWidgetClass missing) — abandoning offer"));
-		ServerAbandonOffer();
+		ServerAbandonOffer(OfferId);
 		return;
 	}
 
@@ -151,10 +151,16 @@ void AFPSRPlayerController::ClientPresentCards_Implementation(int32 OfferId, con
 		ActiveCardWidget = Cast<UFPSRCardSelectWidget>(Pushed);
 	}
 
-	if (ActiveCardWidget)
+	// Push can fail if the Modal layer stack isn't registered (e.g. wrong BindWidget name in WBP). Don't
+	// leave the server's offer stranded behind HasActiveOffer() — release it so it can be re-presented.
+	if (!ActiveCardWidget)
 	{
-		ActiveCardWidget->SetCardOffers(OfferId, Offer);
+		UE_LOG(LogFPSR, Warning, TEXT("[UI] Modal layer push failed (check WBP_PrimaryGameLayout 'Layer_Modal' stack) — abandoning offer"));
+		ServerAbandonOffer(OfferId);
+		return;
 	}
+
+	ActiveCardWidget->SetCardOffers(OfferId, Offer);
 }
 
 void AFPSRPlayerController::ServerSelectCard_Implementation(int32 Index, int32 OfferId)
@@ -251,8 +257,15 @@ void AFPSRPlayerController::ClientDismissCardUI_Implementation()
 	ActiveCardWidget = nullptr;
 }
 
-void AFPSRPlayerController::ServerAbandonOffer_Implementation()
+void AFPSRPlayerController::ServerAbandonOffer_Implementation(int32 OfferId)
 {
+	// Only the offer the server actually sent can be abandoned (stale/forged ids ignored), so a client
+	// can't discard an unfavorable offer for free outside the present-failure path.
+	if (OfferId != CurrentOfferId)
+	{
+		return;
+	}
+
 	// Release the cached offer (and any opening-seed run) so PresentPendingLevelUpOffers can retry later.
 	CachedOffer.Reset();
 	PendingOpeningSeeds = 0;

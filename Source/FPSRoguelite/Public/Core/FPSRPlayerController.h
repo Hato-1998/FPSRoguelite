@@ -57,10 +57,11 @@ public:
 	UFUNCTION(Client, Reliable)
 	void ClientDismissCardUI();
 
-	/** Server: the owner client could not present the offer (no layout/widget class) — release the cached
-	 *  offer so the player isn't stranded with a pending pick and no UI (it can be re-presented later). */
+	/** Server: the owner client could not present the offer (no layout/widget class/modal layer) — release
+	 *  the cached offer so the player isn't stranded with a pending pick and no UI (re-presentable later).
+	 *  OfferId must match the current offer (prevents a client discarding an unfavorable offer for free). */
 	UFUNCTION(Server, Reliable)
-	void ServerAbandonOffer();
+	void ServerAbandonOffer(int32 OfferId);
 
 protected:
 	virtual void SetupInputComponent() override;
