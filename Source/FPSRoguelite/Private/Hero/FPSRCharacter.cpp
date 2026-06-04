@@ -90,9 +90,11 @@ void AFPSRCharacter::Tick(float DeltaSeconds)
 
 		if (const AFPSRGameState* RunState = GetWorld() ? GetWorld()->GetGameState<AFPSRGameState>() : nullptr)
 		{
+			AFPSRPlayerState* PS = GetPlayerState<AFPSRPlayerState>();
+			const int32 CardPicks = PS ? PS->GetCardPicksPending() : 0;
 			const FString RunMsg = FString::Printf(TEXT("Lv %d   XP %d / %d   Stack %d   [%s]"),
 				RunState->GetPartyLevel(), RunState->GetSharedXP(), RunState->GetRequiredXPForNextLevel(),
-				RunState->GetPendingLevelUps(), RunState->IsCombatPhase() ? TEXT("Combat") : TEXT("Breather"));
+				CardPicks, RunState->IsCombatPhase() ? TEXT("Combat") : TEXT("Breather"));
 			GEngine->AddOnScreenDebugMessage((uint64)(UPTRINT)this + 1, 0.0f, FColor::Cyan, RunMsg);
 		}
 	}

@@ -41,6 +41,7 @@ void AFPSRPlayerState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Out
 	FDoRepLifetimeParams Params;
 	Params.bIsPushBased = true;
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRPlayerState, RunRerollCharges, Params);
+	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRPlayerState, CardPicksPending, Params);
 }
 
 bool AFPSRPlayerState::ConsumeRerollCharge()
@@ -54,6 +55,7 @@ bool AFPSRPlayerState::ConsumeRerollCharge()
 	{
 		--RunRerollCharges;
 		MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRPlayerState, RunRerollCharges, this);
+		OnRerollChargesChanged.Broadcast();
 		return true;
 	}
 
@@ -69,6 +71,7 @@ void AFPSRPlayerState::ResetRerollCharges()
 
 	RunRerollCharges = DefaultRerollCharges;
 	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRPlayerState, RunRerollCharges, this);
+	OnRerollChargesChanged.Broadcast();
 }
 
 void AFPSRPlayerState::SetRerollCharges(int32 NewCharges)
@@ -80,9 +83,40 @@ void AFPSRPlayerState::SetRerollCharges(int32 NewCharges)
 
 	RunRerollCharges = FMath::Max(NewCharges, 0);
 	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRPlayerState, RunRerollCharges, this);
+	OnRerollChargesChanged.Broadcast();
 }
 
 void AFPSRPlayerState::OnRep_RunRerollCharges()
 {
-	// Cosmetic hook — HUD binds in P3-D.
+	OnRerollChargesChanged.Broadcast();
+}
+
+void AFPSRPlayerState::AddCardPick()
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+
+	++CardPicksPending;
+	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRPlayerState, CardPicksPending, this);
+	OnCardPicksChanged.Broadcast();
+}
+
+bool AFPSRPlayerState::ConsumeCardPick()
+{
+	if (!HasAuthority() || CardPicksPending <= 0)
+	{
+		return false;
+	}
+
+	--CardPicksPending;
+	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRPlayerState, CardPicksPending, this);
+	OnCardPicksChanged.Broadcast();
+	return true;
+}
+
+void AFPSRPlayerState::OnRep_CardPicksPending()
+{
+	OnCardPicksChanged.Broadcast();
 }

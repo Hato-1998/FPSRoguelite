@@ -11,6 +11,9 @@ class UFPSRHealthSet;
 class UFPSRCombatSet;
 class UAbilitySystemComponent;
 
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnCardPicksChanged);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnRerollChargesChanged);
+
 /** PlayerState owns the AbilitySystemComponent and global attribute sets (co-op / revive friendly). */
 UCLASS()
 class FPSROGUELITE_API AFPSRPlayerState : public APlayerState, public IAbilitySystemInterface
@@ -31,6 +34,9 @@ public:
 	UFUNCTION(BlueprintPure, Category = "FPSR|Run")
 	int32 GetRunRerollCharges() const { return RunRerollCharges; }
 
+	UPROPERTY(BlueprintAssignable, Category = "FPSR|Run")
+	FOnRerollChargesChanged OnRerollChargesChanged;
+
 	/** Server: consume one reroll charge. Returns true if successful. */
 	bool ConsumeRerollCharge();
 
@@ -40,12 +46,27 @@ public:
 	/** Server: set reroll charges to a specific value. */
 	void SetRerollCharges(int32 NewCharges);
 
+	UFUNCTION(BlueprintPure, Category = "FPSR|Run")
+	int32 GetCardPicksPending() const { return CardPicksPending; }
+
+	/** Server: add one pending card pick (granted when party levels up). */
+	void AddCardPick();
+
+	/** Server: consume one pending card pick. Returns true if successful. */
+	bool ConsumeCardPick();
+
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 	virtual void BeginPlay() override;
+
+	UPROPERTY(BlueprintAssignable, Category = "FPSR|Run")
+	FOnCardPicksChanged OnCardPicksChanged;
 
 protected:
 	UFUNCTION()
 	void OnRep_RunRerollCharges();
+
+	UFUNCTION()
+	void OnRep_CardPicksPending();
 
 private:
 	UPROPERTY(VisibleAnywhere, Category = "FPSR|Abilities")
@@ -62,4 +83,7 @@ private:
 
 	UPROPERTY(ReplicatedUsing = OnRep_RunRerollCharges)
 	int32 RunRerollCharges = 3;
+
+	UPROPERTY(ReplicatedUsing = OnRep_CardPicksPending)
+	int32 CardPicksPending = 0;
 };

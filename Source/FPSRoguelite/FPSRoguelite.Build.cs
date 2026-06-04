@@ -19,7 +19,10 @@ public class FPSRoguelite : ModuleRules
 			"GameplayTags",
 			"GameplayTasks",
 			"ModularGameplay",
-			"NetCore"
+			"NetCore",
+			"CommonUI",
+			"CommonInput",
+			"UMG"
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[]
