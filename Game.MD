@@ -54,10 +54,12 @@
 
 ### 2-1. 핵심 게임 루프
 ```
-로비 (메타 강화) → 30분 런 → 보스 처치/클리어 → 재화 획득 → 로비
+로비 (메타 강화) → 라운드제 런(프로덕션 20분) → 마지막 라운드 후 보스 처치/클리어 → 재화 획득 → 로비
 ```
 - **고정 맵 / 고정 구조** (절차적 생성 PCG 사용 안 함)
-- 런 시간 기본 **30분** (마지막 시간대 보스로 종료)
+- **런 구조 = 라운드제 (확정 2026-06-04, P4-A)**: 런은 **라운드 경계**로 분절된다. 각 라운드 종료 시 스폰이 멈추고 **Breather(정비시간)에서 카드 선택**(§2-2), 이후 다음 라운드 시작. **마지막 라운드 종료 = 보스 출현**, 보스전부터는 **시간 무제한**, **보스 처치 = 런 클리어**.
+  - **프로덕션 기본**: 총 **20분**, 라운드 경계 **5/10/15분**(20분=보스). (기존 30분·단일보스 표기를 20분 라운드제로 정정)
+  - **라운드 길이는 데이터 드리븐**(`UFPSRRunScheduleDataAsset`, 전부 에디터 설정값) → 데모/테스트용 압축 스케줄(예: 2/2/1분→보스, 총 5분)을 데이터 교체만으로 운용
 - 시간 경과 → 몬스터 수·종류·HP·공격력 증가 (**시간 스케일링상 이동속도 불변**; 단 스폰 시 개체별 ±10% 이속 편차는 허용 — §2-6)
 - **1~4인 협동** (리슨서버 P2P)
 
@@ -67,10 +69,11 @@
 - **교전 중 프리즈 폐지.** 공유 풀 임계 도달 시 레벨업은 **백그라운드에서 정상 처리되고 카드 UI는 뜨지 않으며, '레벨업 스택'으로 누적**된다 (다중 레벨업 = 스택 누적).
 - **레벨업 스택 = 플레이어별 보류 픽(확정 2026-06-02, P3-D)**: `SharedXP`/`PartyLevel`은 파티 공유(서버 권위, `AFPSRGameState`)지만, **파티가 1레벨 오를 때마다 그 시점 연결된 모든 플레이어에게 카드 픽이 1개씩 부여**된다. 각 플레이어는 **본인의 보류 픽을 본인 화면에서 독립적으로 소비**(`AFPSRPlayerState::CardPicksPending`, Replicated). 한 플레이어의 선택이 다른 플레이어의 픽을 소모하지 않는다(공유 카운터 단일 감소 방식은 솔로 전용이라 폐지). 늦게 합류한 플레이어는 합류 후 발생한 레벨업부터 픽을 받는다.
 - **오프닝 카드 시드**: 런 시작 시 **1~2장을 즉시 선택**해 초반 빌드를 시드한다 (첫 정비시간 전 무력감 방지 — 사용자 확정 2026-05-30).
-- **정비시간(Breather Time)** — 미션 클리어(§2-8) 시 **모든 몬스터 스폰이 정지**되는 안전 구간(`RunPhase.Breather`, Replicated). 이때:
+- **정비시간(Breather Time)** — **라운드 종료 시**(§2-1 라운드제, **정정 2026-06-04**: 기존 "미션 클리어 시"에서 변경) **모든 몬스터 스폰이 정지**되는 안전 구간(`RunPhase.Breather`, Replicated). 이때:
   1. 누적된 **레벨업 스택(=본인 보류 픽)을 연속 소비** → 각 플레이어가 본인 픽 수만큼 개별 3카드 선택(본인 화면 오버레이, 플레이어별 독립)
-  2. **미션 클리어 보상 = 무기 기능 해금/변경(모디파이어) 카드**도 이 정비시간에 선택(§2-4-1, 사용자 확정 2026-05-30)
+  2. **그 라운드에 미션을 클리어했다면**(§2-8) **미션 보상 = 무기 기능 해금/변경(모디파이어) 카드**도 이 정비시간에 선택(§2-4-1). 미션 미클리어 시 보상 없음(전투만 진행)
   3. **대기 시간 무제한** — 치열한 전투 후 휴식·다음 빌드/전략 논의를 겸하는 완전한 휴식 구간(Breather)
+  4. **재개 = 픽 소비 완료 시 자동**(확정 2026-06-04, P4-A): 연결된 전원이 본인 보류 픽을 모두 소비하면 디렉터가 자동으로 Combat 재개 + 다음 라운드 시작. (별도 "준비완료" 입력 없이 픽 완료가 곧 준비 신호)
 - `RunPhase`는 전역 `TimeDilation=0`에 의존하지 않고 **스폰·적 활동을 상태로 게이트**(타이머·AbilityTask·RPC·이펙트 부작용 회피). 정비시간 중 UI·네트워크 RPC는 정상 tick 유지
 - ⚠️ 무제한 대기는 **안전 구간에서만** 발생(교전 중 프리즈 없음)하므로 기존 협동 템포 리스크는 해소됨. AFK 시 정비시간이 길어지는 점은 감수(선택 완료/대기 상태표시는 P3 UX)
 
@@ -142,13 +145,20 @@
 
 ### 2-7. 보스
 - **Base 구조**: `ABossBase` + `UBossDefinitionDataAsset` + StateTree (소수라 GAS/StateTree OK)
-- 현재 30분 단일 보스·2페이즈. TimeGate 스케줄에 행 추가로 **다중 보스 확장**
+- **출현 = 마지막 라운드 종료 시**(프로덕션 20분, §2-1). 보스전부터 시간 무제한, 처치 = 클리어. 2페이즈. 라운드 스케줄에 보스 라운드 행 추가로 **다중 보스 확장**
+- 구현 상태: 보스 실물은 P6. P4-A는 보스 게이트(`ERunPhase::Boss` 전환 + 훅)만 스텁
 
-### 2-8. 시간 게이트 / 미션
-- `UTimeGateScheduleDataAsset` = `FTimeGateEvent[]` 행 기반 (기본 30분, **행 추가로 이벤트 확장**)
-- 5/10/20/30분 등에 **전원 협동 미션** → 클리어 시 무기 모디파이어 해금
-- 난이도 곡선은 `UCurveFloat`로 분리
-- **테스트 런 길이**: 정식 30분 유지하되, TimeGateSchedule DataAsset로 **데모/테스트용 10~12분 스케줄**을 데이터 교체만으로 운용
+### 2-8. 라운드 스케줄 / 미션 (개편 2026-06-04, P4-A)
+- **라운드 스케줄 = `UFPSRRunScheduleDataAsset`** = `FFPSRRoundDef[]` 행 기반(각 행: `Duration`·`TargetAliveCount`·`Mission`·`bBossRound`, **전부 에디터 설정값**). 프로덕션 5/10/15분 라운드 + 보스 라운드. **행 추가로 라운드/보스 확장**
+- **라운드 디렉터 = `UFPSRRunDirectorSubsystem`**(서버 권위): Combat 경과시간 누적(Breather 동안 정지) → 라운드 종료 시 `BeginBreather`, 픽 소비 완료 시 자동 재개·다음 라운드(§2-2)
+- **미션 = 라운드와 별개로 병행**(확정 2026-06-04):
+  - **라운드당 정확히 1개**, 라운드 내 **랜덤 시각에 1회** 출현(동시 다중 미션 없음)
+  - **선택적** — 클리어 안 해도 라운드는 정상 진행. **클리어 시에만** 무기 모디파이어 **보상 카드가 적립** → **다음 라운드 종료 Breather의 카드 선택에 합류**(§2-2)
+  - **확장형 프레임워크**: `AFPSRMissionActor`(서버권위 리플리케이트 Actor 베이스) 서브클래스 + `UFPSRMissionDataAsset`(메타+로직클래스+보상카드). 디렉터가 라운드별 미션을 스폰·생명주기 관리
+  - **미션 카탈로그**(기획, 프레임워크로 수용): 좁은구역 N초 버티기 / 이동 구역 점령 / 도망치는 고체력 몹 처치 / 점프맵 오브 획득 / 피격 없이 구체 N초 소지 / 시야 극제한 버티기 / 전원 제자리 정지 등. 각 미션 종류 = `AFPSRMission_*` 서브클래스(필요 인프라는 서브클래스+콘텐츠로 격리, 코어 불변)
+- 난이도 곡선은 `UCurveFloat`로 분리(후속)
+- **구현 상태(P4-A)**: 라운드 디렉터 + 미션 프레임워크 + 레퍼런스 미션 1종(`AFPSRMission_HoldZone`) + 오프닝시드 자동. 미션 보상 카드의 Breather 선택·적용(weapon-scope `ApplyCard`)은 P4-B. 나머지 6종 미션·보스 실물은 후속
+- **테스트 런 길이**: 라운드 스케줄 DataAsset 교체만으로 압축(예: 2/2/1분→보스, 총 5분). ⚠️ 압축값·테스트 XP는 임시(프로덕션 전환 시 원복)
 
 ### 2-9. 카메라 / 메시
 - **Separated Arms**: 본인 = FP팔(`OnlyOwnerSee`) + 무기 / 타인 = 3P 캐릭터(`OwnerNoSee`)
@@ -221,7 +231,7 @@ Source/FPSRoguelite/Public/
 ├── Card/             CardDataAsset(Scope), CardPool, DrawSystem, Reroll
 ├── Enemy/            경량 풀액터, HealthComponent, AttackType, FlowField, ScalingProfile
 ├── Boss/             ABossBase, BossDefinition, StateTree
-├── Run/              SpawnDirector, TimeGateDirector  ※ 공유XP/레벨/RunPhase = **복제 필요 → `AFPSRGameState` 호스팅**(Push Model, 서버 권위). WorldSubsystem은 복제 불가라 런 상태는 GameState에 둔다(P3-A 확정 2026-06-01). **레벨업 보류 픽은 플레이어별이라 `AFPSRPlayerState::CardPicksPending`에 둔다**(§2-2, P3-D 확정 2026-06-02). 무거운 서버 로직이 생기면 RunManager 서브시스템을 facade로 추가 검토.
+├── Run/              SpawnDirector, **RunDirector(`UFPSRRunDirectorSubsystem`=라운드 타임라인/스폰강도/Breather/미션 스케줄, 서버 전용)**, RunSchedule(`UFPSRRunScheduleDataAsset`), **Mission/**(`AFPSRMissionActor` 베이스+`UFPSRMissionDataAsset`+서브클래스, P4-A)  ※ 공유XP/레벨/RunPhase/라운드 = **복제 필요 → `AFPSRGameState` 호스팅**(Push Model, 서버 권위). WorldSubsystem은 복제 불가라 런 상태는 GameState에 둔다(P3-A 확정 2026-06-01). **레벨업 보류 픽은 플레이어별이라 `AFPSRPlayerState::CardPicksPending`에 둔다**(§2-2, P3-D 확정 2026-06-02). 무거운 서버 로직이 생기면 RunManager 서브시스템을 facade로 추가 검토.
 ├── Pickup/           범용 PickupActor + PickupDefinition(자석)
 ├── MetaProgression/  SaveGame, UpgradeTree, Subsystem
 ├── Performance/      ActorPool, SignificanceConfig, 인스턴싱
@@ -391,7 +401,7 @@ PROGRESS.md '사용자 대기 작업' 참조. 요약: **BP 3종 생성 + 참조 
 | **P1.5** | — | 사격/이동 감각 (A: 연사/반동/확산 ✅, B: **MagSize+재장전(예비 무한)**/ADS) |
 | P2 | 3주 | SpawnDirector + Flow-Field + Pooling + Significance (적 300+ 안정) + **적 이속 ±10% 편차** + **적 근접 데미지·공격토큰 baseline** + **충돌무시 대시** |
 | P3 | 4주 | 공유XP + 파티레벨 + **레벨업 스택(프리즈 폐지)** + **정비시간 RunPhase** + **오프닝 카드 시드** + Card UI + 동적 카드풀 + Rarity + 리롤 |
-| P4 | 4주 | Weapon Modifier Fragment + 무기 7종 + TimeGate 미션(클리어=**정비시간 진입**·모디파이어 카드) + **원거리 적 규격·공격토큰 확장** + **게임필**(히트마커·핑·위협 인디케이터·사각지대 오디오) |
+| P4 | 4주 | **P4-A** 라운드 스케줄+디렉터 + 확장형 미션 프레임워크(**라운드 종료=정비시간**, 미션 클리어=모디파이어 카드 **적립**)+레퍼런스 미션 1종+오프닝시드 자동 / **P4-B** Weapon Modifier Fragment+weapon-scope 카드+미션 보상 적용 / **P4-C** 무기 7종 / **P4-D** 게임필(히트마커·핑·위협 인디케이터·사각 오디오)+PickupRadius/XPGain. (+원거리 적 규격·공격토큰 확장) |
 | P5 | 3주 | 4인 협동 + 세션(Steam) + Iris 평가 + NetProfiler + **아군 오사(10%+호스트 토글)** + **수동 부활(DBNO)** |
 | P6 | 2주 | 메타 프로그레션 + 보스 + 클리어 플로우 |
 | P7 | 2주 | CommonUI 폴리시 + **오디오/이펙트(게임필) 폴리시** + Insights + README + 빌드 |
