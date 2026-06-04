@@ -91,14 +91,14 @@ protected:
 	 *  Called on breather entry and when picks are granted while already in the breather (§2-2). */
 	void PresentPendingLevelUpOffers();
 
-	/** XP curve placeholder (UCurveFloat data-driven curve is a follow-up, Game.MD §2-8). */
+	/** XP required to advance from level 1; each level adds XPPerLevel (linear curve placeholder —
+	 *  a UCurveFloat data-driven curve is a follow-up, Game.MD §2-8). Editor-tunable. */
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Run")
 	int32 XPBaseRequired = 100;
 
-	// TEST VALUE (P4-A): 0 = flat XPBaseRequired per level so 1 kill (XP 100) ≈ 1 level for fast card-flow testing.
-	// PRODUCTION: restore a real curve (e.g. 50, or UCurveFloat). See memory p4a-temp-test-values.
+	/** Per-level increase to the XP requirement: GetRequiredXP(L) = XPBaseRequired + (L-1)*XPPerLevel. */
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Run")
-	int32 XPPerLevel = 0;
+	int32 XPPerLevel = 50;
 
 	UPROPERTY(ReplicatedUsing = OnRep_RunState)
 	int32 SharedXP = 0;

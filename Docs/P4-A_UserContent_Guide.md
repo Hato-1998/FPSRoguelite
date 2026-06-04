@@ -102,8 +102,12 @@
 - `FPSR.MissionTrigger` / `FPSR.MissionClear` — 미션 즉시 발동 / 강제 클리어
 - `FPSR.KillAllEnemies` — 활성 적 전부 정리
 - `FPSR.RunDebug 1` — 화면에 R#/Phase/경과·잔여/미션/적수/배속 오버레이
-- (기존 `FPSR.AddXP`, 1킬=1레벨 테스트값이라 적 1마리=카드 1픽)
+- `FPSR.AddXP [n]` — 공유 XP 직접 가산(레벨업 흐름 테스트)
 
-## 6. ⚠️ 임시 테스트값 (프로덕션 전환 시 원복)
-- 라운드 2/2/1분(프로덕션 5/10/15분) · 적 `XPReward=100` · 레벨당 요구 100(`XPPerLevel=0`, 1킬=1레벨)
-- 전환 시점에 별도 보고 예정(메모리 `p4a-temp-test-values`).
+## 6. 레벨링 / XP (프로덕션 공식)
+- 레벨 요구 XP = `XPBaseRequired + (PartyLevel-1) × XPPerLevel` (기본 100 + (L-1)×50). 둘 다 GameState `EditDefaultsOnly`.
+- 적 처치 시 `AFPSREnemyBase::XPReward`(기본 5) 만큼 XP 드롭 → 자석 회수 → 공유 풀 누적. **적 XP는 개체/DataAsset별로 에디터에서 튜닝**.
+- XP바가 점진적으로 차오르고, 풀이 요구치 도달 시 레벨업(카드 픽 부여). (1킬=1레벨 테스트값은 제거됨)
+
+## 7. ⚠️ 임시 테스트값 (프로덕션 전환 시 원복)
+- **라운드 시간 2/2/1분**(프로덕션 5/10/15분) — 스케줄 DA에서 조정. 전환 시점에 별도 보고 예정(메모리 `p4a-temp-test-values`).
