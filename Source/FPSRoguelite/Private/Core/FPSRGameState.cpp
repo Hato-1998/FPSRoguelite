@@ -6,7 +6,6 @@
 #include "Net/UnrealNetwork.h"
 #include "Net/Core/PushModel/PushModel.h"
 #include "Engine/World.h"
-#include "TimerManager.h"
 #include "HAL/IConsoleManager.h"
 #include "Core/FPSRLogChannels.h"
 
@@ -67,10 +66,10 @@ void AFPSRGameState::AddSharedXP(int32 Amount)
 			}
 		}
 
-		// If picks are granted while already in the breather, present them (deferred to a clean frame).
+		// If picks are granted while already in the breather, present them now (don't wait for a re-entry).
 		if (RunPhase == ERunPhase::Breather)
 		{
-			SchedulePresentLevelUpOffers();
+			PresentPendingLevelUpOffers();
 		}
 	}
 
@@ -88,11 +87,9 @@ void AFPSRGameState::SetRunPhase(ERunPhase NewPhase)
 	OnRunStateChanged.Broadcast();
 
 	// Entering the breather: present a level-up card offer to every player with pending picks (§2-2).
-	// Deferred to next frame — see SchedulePresentLevelUpOffers (avoids creating CommonUI widgets inside
-	// the director timer tick / phase-change call site, which can crash the activation/input stack).
 	if (NewPhase == ERunPhase::Breather)
 	{
-		SchedulePresentLevelUpOffers();
+		PresentPendingLevelUpOffers();
 	}
 }
 
@@ -117,29 +114,6 @@ void AFPSRGameState::PresentPendingLevelUpOffers()
 			PC->RequestCardOffer(true);
 		}
 	}
-}
-
-void AFPSRGameState::SchedulePresentLevelUpOffers()
-{
-	if (!HasAuthority() || bLevelUpPresentScheduled)
-	{
-		return;
-	}
-
-	UWorld* World = GetWorld();
-	if (!World)
-	{
-		// No world to schedule on — fall back to immediate (best effort).
-		PresentPendingLevelUpOffers();
-		return;
-	}
-
-	bLevelUpPresentScheduled = true;
-	World->GetTimerManager().SetTimerForNextTick(FTimerDelegate::CreateWeakLambda(this, [this]()
-	{
-		bLevelUpPresentScheduled = false;
-		PresentPendingLevelUpOffers();
-	}));
 }
 
 void AFPSRGameState::SetCurrentRound(int32 NewRound)

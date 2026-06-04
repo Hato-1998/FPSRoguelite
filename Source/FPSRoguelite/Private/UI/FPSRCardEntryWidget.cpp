@@ -6,10 +6,12 @@
 #include "Components/Button.h"
 #include "Core/FPSRLogChannels.h"
 
-void UFPSRCardEntryWidget::NativeConstruct()
+void UFPSRCardEntryWidget::NativeOnInitialized()
 {
-	Super::NativeConstruct();
+	Super::NativeOnInitialized();
 
+	// One-time binding. NativeConstruct runs again whenever the activatable stack re-shows a pooled widget,
+	// which would re-AddDynamic the same (this, OnSelectButtonPressed) pair and trip the duplicate ensure.
 	if (SelectButton)
 	{
 		SelectButton->OnClicked.AddDynamic(this, &UFPSRCardEntryWidget::OnSelectButtonPressed);
