@@ -49,9 +49,10 @@ public:
 	UFUNCTION(Server, Reliable)
 	void ServerSelectCard(int32 Index, int32 OfferId);
 
-	/** Server RPC (client intent): consume a reroll charge and redraw the current offer (same mode). */
+	/** Server RPC (client intent): consume a reroll charge and redraw the current offer (same mode).
+	 *  OfferId must match the shown offer (a stale reroll from a previous offer is ignored). */
 	UFUNCTION(Server, Reliable)
-	void ServerRerollOffer();
+	void ServerRerollOffer(int32 OfferId);
 
 	/** Client (owner): remove the card-select modal. */
 	UFUNCTION(Client, Reliable)

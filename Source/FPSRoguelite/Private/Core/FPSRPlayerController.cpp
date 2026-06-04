@@ -217,8 +217,14 @@ void AFPSRPlayerController::ServerSelectCard_Implementation(int32 Index, int32 O
 	ClientDismissCardUI();
 }
 
-void AFPSRPlayerController::ServerRerollOffer_Implementation()
+void AFPSRPlayerController::ServerRerollOffer_Implementation(int32 OfferId)
 {
+	// Ignore a stale reroll from a previous offer (queued/double-click after the next offer was issued).
+	if (OfferId != CurrentOfferId)
+	{
+		return;
+	}
+
 	// Reroll only applies to an actively presented offer — never a free redraw outside the flow.
 	if (CachedOffer.Num() == 0)
 	{

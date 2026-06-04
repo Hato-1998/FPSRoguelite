@@ -93,6 +93,6 @@ void UFPSRCardSelectWidget::OnRerollPressed()
 {
 	if (AFPSRPlayerController* PC = GetOwningPlayer<AFPSRPlayerController>())
 	{
-		PC->ServerRerollOffer();
+		PC->ServerRerollOffer(ShownOfferId);
 	}
 }
