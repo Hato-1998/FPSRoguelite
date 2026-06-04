@@ -25,6 +25,7 @@ void AFPSRGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLi
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRGameState, CurrentRound, Params);
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRGameState, BankedMissionRewards, Params);
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRGameState, RunClockSeconds, Params);
+	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRGameState, RoundTimeRemaining, Params);
 }
 
 int32 AFPSRGameState::GetRequiredXP(int32 Level) const
@@ -161,6 +162,34 @@ void AFPSRGameState::SetRunClockSeconds(float Seconds)
 	}
 	RunClockSeconds = Seconds;
 	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRGameState, RunClockSeconds, this);
+}
+
+void AFPSRGameState::SetRoundTimeRemaining(float Seconds)
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+	const bool bClearing = (Seconds <= 0.0f); // round end / breather / boss → must read 0 (getter contract)
+	if (bClearing)
+	{
+		// Force the clear through the low-frequency tolerance, but skip a redundant dirty if already 0.
+		if (RoundTimeRemaining == 0.0f)
+		{
+			return;
+		}
+		RoundTimeRemaining = 0.0f;
+	}
+	else
+	{
+		// Low-frequency UI mirror: only dirty on a meaningful change (~0.25s) to avoid per-tick replication churn.
+		if (FMath::IsNearlyEqual(RoundTimeRemaining, Seconds, 0.25f))
+		{
+			return;
+		}
+		RoundTimeRemaining = Seconds;
+	}
+	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRGameState, RoundTimeRemaining, this);
 }
 
 void AFPSRGameState::OnRep_RunState()

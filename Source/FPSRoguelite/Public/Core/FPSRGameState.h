@@ -49,6 +49,10 @@ public:
 	UFUNCTION(BlueprintPure, Category = "FPSR|Run")
 	float GetRunClockSeconds() const { return RunClockSeconds; }
 
+	/** Seconds remaining in the current round (0 outside Combat). Bind this in the HUD for a round timer. */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Run")
+	float GetRoundTimeRemaining() const { return RoundTimeRemaining; }
+
 	/** XP required to advance FROM the given level to the next. */
 	UFUNCTION(BlueprintPure, Category = "FPSR|Run")
 	int32 GetRequiredXP(int32 Level) const;
@@ -77,6 +81,9 @@ public:
 
 	/** Server: update the replicated run clock (low-frequency UI mirror). */
 	void SetRunClockSeconds(float Seconds);
+
+	/** Server: update the replicated round-remaining seconds (low-frequency UI mirror; 0 outside Combat). */
+	void SetRoundTimeRemaining(float Seconds);
 
 	UPROPERTY(BlueprintAssignable, Category = "FPSR|Run")
 	FOnRunStateChanged OnRunStateChanged;
@@ -117,4 +124,7 @@ protected:
 
 	UPROPERTY(ReplicatedUsing = OnRep_RunState)
 	float RunClockSeconds = 0.0f;
+
+	UPROPERTY(ReplicatedUsing = OnRep_RunState)
+	float RoundTimeRemaining = 0.0f;
 };

@@ -105,6 +105,12 @@
 5. **전원 픽 소비 완료 시 자동으로 다음 라운드** 재개
 6. 마지막 라운드 → **보스 게이트 로그**(보스 실물은 P6 스텁)
 
+### 라운드 타이머 / 런 상태 HUD (데이터 준비됨, WBP 바인딩은 P4-D)
+런 상태는 `AFPSRGameState`에 복제되어 있어 HUD 위젯에서 바로 바인딩 가능(스타일된 위젯 제작은 P4-D):
+- `GetRoundTimeRemaining()` — 현재 라운드 남은 초(Combat 외 0)
+- `GetCurrentRound()` / `GetRunClockSeconds()`(총 경과) / `GetRunPhase()` / `GetBankedMissionRewards()`
+- 빠른 확인은 `FPSR.RunDebug 1` 오버레이(`remain=Xs` 표시). 정식 타이머 위젯은 P4-D에서 이 getter들을 바인딩.
+
 ### 테스트 편의 콘솔(빠른 반복, shipping 제외)
 - `FPSR.RunTimeScale 10` — 런 경과 10배속(5분 런을 30초에)
 - `FPSR.SkipToBoss` — 보스 라운드로 점프

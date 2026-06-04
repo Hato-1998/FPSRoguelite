@@ -236,6 +236,8 @@ void UFPSRRunDirectorSubsystem::DirectorTick()
 		ElapsedInRound += Dt;
 		TotalElapsed += Dt;
 		GS->SetRunClockSeconds(TotalElapsed);
+		// Replicate round-remaining for the HUD timer (0 if this round has no duration, e.g. boss).
+		GS->SetRoundTimeRemaining(RoundDuration > 0.0f ? FMath::Max(0.0f, RoundDuration - ElapsedInRound) : 0.0f);
 
 		// Check if mission should spawn
 		if (!bMissionSpawned && MissionTriggerTime >= 0.0f && ElapsedInRound >= MissionTriggerTime)
@@ -272,8 +274,10 @@ void UFPSRRunDirectorSubsystem::DirectorTick()
 			0.0f,
 			FColor::Cyan,
 			FString::Printf(
-				TEXT("[Run] R%d %s elapsed=%.1f/%.0f total=%.1f mission=%s alive=%d xScale=%.1f"),
-				CurrentRoundIndex, PhaseStr, ElapsedInRound, RoundDuration, TotalElapsed,
+				TEXT("[Run] R%d %s remain=%.0fs (%.0f/%.0f) total=%.0f mission=%s alive=%d xScale=%.1f"),
+				CurrentRoundIndex, PhaseStr,
+				(RoundDuration > 0.0f ? FMath::Max(0.0f, RoundDuration - ElapsedInRound) : 0.0f),
+				ElapsedInRound, RoundDuration, TotalElapsed,
 				MissionStr, AliveCount, TimeScale
 			)
 		);
@@ -288,6 +292,7 @@ void UFPSRRunDirectorSubsystem::EndRound()
 	if (GS)
 	{
 		GS->BeginBreather();
+		GS->SetRoundTimeRemaining(0.0f); // no round timer during the breather
 	}
 
 	UFPSREnemySpawnSubsystem* SpawnSub = GetSpawnSub();
@@ -413,6 +418,7 @@ void UFPSRRunDirectorSubsystem::EnterBoss()
 	if (GS)
 	{
 		GS->SetRunPhase(ERunPhase::Boss);
+		GS->SetRoundTimeRemaining(0.0f); // boss phase has no round timer
 	}
 
 	UFPSREnemySpawnSubsystem* SpawnSub = GetSpawnSub();
