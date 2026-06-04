@@ -34,6 +34,9 @@ public:
 	/** Release an enemy back to the dormant pool. */
 	void ReleaseEnemy(AFPSREnemyBase* Enemy);
 
+	/** Release every active enemy back to the dormant pool (server). Used by mission/debug flows. */
+	void ReleaseAllEnemies();
+
 	/** Get the current number of alive enemies. */
 	int32 GetAliveCount() const { return ActiveEnemies.Num(); }
 

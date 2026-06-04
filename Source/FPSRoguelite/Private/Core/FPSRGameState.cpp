@@ -22,6 +22,9 @@ void AFPSRGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLi
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRGameState, SharedXP, Params);
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRGameState, PartyLevel, Params);
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRGameState, RunPhase, Params);
+	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRGameState, CurrentRound, Params);
+	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRGameState, BankedMissionRewards, Params);
+	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRGameState, RunClockSeconds, Params);
 }
 
 int32 AFPSRGameState::GetRequiredXP(int32 Level) const
@@ -110,6 +113,54 @@ void AFPSRGameState::PresentPendingLevelUpOffers()
 			PC->RequestCardOffer(true);
 		}
 	}
+}
+
+void AFPSRGameState::SetCurrentRound(int32 NewRound)
+{
+	if (!HasAuthority() || CurrentRound == NewRound)
+	{
+		return;
+	}
+	CurrentRound = NewRound;
+	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRGameState, CurrentRound, this);
+	OnRunStateChanged.Broadcast();
+}
+
+void AFPSRGameState::AddBankedMissionReward(int32 Count)
+{
+	if (!HasAuthority() || Count <= 0)
+	{
+		return;
+	}
+	BankedMissionRewards += Count;
+	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRGameState, BankedMissionRewards, this);
+	OnRunStateChanged.Broadcast();
+}
+
+void AFPSRGameState::ResetBankedMissionRewards()
+{
+	if (!HasAuthority() || BankedMissionRewards == 0)
+	{
+		return;
+	}
+	BankedMissionRewards = 0;
+	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRGameState, BankedMissionRewards, this);
+	OnRunStateChanged.Broadcast();
+}
+
+void AFPSRGameState::SetRunClockSeconds(float Seconds)
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+	// Low-frequency UI mirror: only dirty on a meaningful change to avoid per-tick replication churn.
+	if (FMath::IsNearlyEqual(RunClockSeconds, Seconds, 0.25f))
+	{
+		return;
+	}
+	RunClockSeconds = Seconds;
+	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRGameState, RunClockSeconds, this);
 }
 
 void AFPSRGameState::OnRep_RunState()

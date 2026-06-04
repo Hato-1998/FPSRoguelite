@@ -395,6 +395,29 @@ void UFPSREnemySpawnSubsystem::ReleaseEnemy(AFPSREnemyBase* Enemy)
 	DormantPool.Add(Enemy);
 }
 
+void UFPSREnemySpawnSubsystem::ReleaseAllEnemies()
+{
+	if (!HasServerAuthority())
+	{
+		return;
+	}
+
+	// Copy out first: ReleaseEnemy mutates ActiveEnemies, so we can't iterate it directly.
+	TArray<AFPSREnemyBase*> ToRelease;
+	ToRelease.Reserve(ActiveEnemies.Num());
+	for (const TObjectPtr<AFPSREnemyBase>& EnemyPtr : ActiveEnemies)
+	{
+		if (AFPSREnemyBase* Enemy = EnemyPtr.Get())
+		{
+			ToRelease.Add(Enemy);
+		}
+	}
+	for (AFPSREnemyBase* Enemy : ToRelease)
+	{
+		ReleaseEnemy(Enemy);
+	}
+}
+
 // ---- Console Commands (debug; excluded from shipping) ----
 
 #if !UE_BUILD_SHIPPING

@@ -32,6 +32,12 @@ public:
 	 *  deliberately not client-callable so a client cannot grant itself free non-consuming offers. */
 	void BeginOpeningSeed(int32 Count);
 
+	/** Client intent: notify the server that this player's local UI is ready, so the server can issue the
+	 *  one-time run-start opening seed (§2-2). The COUNT is fixed server-side (BeginOpeningSeed(2)); the
+	 *  client cannot choose it, and the server processes this at most once per player (re-sends ignored). */
+	UFUNCTION(Server, Reliable)
+	void ServerNotifyClientReady();
+
 	/** Server-only (NOT an RPC): draw + cache an offer for this player and present it. The consume mode
 	 *  is server state, never a client-supplied argument (server authority over progression). */
 	void RequestCardOffer(bool bConsumeLevelUp);
@@ -102,4 +108,7 @@ private:
 
 	/** Server-only: monotonic id of the current offer; selections must echo it (anti double-apply). */
 	int32 CurrentOfferId = 0;
+
+	/** Server-only: the run-start opening seed has been issued for this player (one-time guard). */
+	bool bOpeningSeedIssued = false;
 };

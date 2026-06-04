@@ -76,8 +76,10 @@ protected:
 	/** Server-only: world time of last attack (init far in the past so the first attack is allowed). */
 	float LastAttackTime = -1000.0f;
 
+	// TEST VALUE (P4-A): 100 so each kill ≈ 1 party level (with flat 100 XP/level) for fast card-flow testing.
+	// PRODUCTION: restore ~5. See memory p4a-temp-test-values.
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Enemy")
-	int32 XPReward = 5;
+	int32 XPReward = 100;
 
 	/** Per-instance move speed (MoveSpeed * random ±10% on Activate). Game.MD §2-6. */
 	UPROPERTY(Transient)

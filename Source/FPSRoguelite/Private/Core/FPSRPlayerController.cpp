@@ -27,7 +27,20 @@ void AFPSRPlayerController::BeginPlay()
 	if (IsLocalController())
 	{
 		EnsurePrimaryLayout();
+		// Tell the server the local UI is up so it can issue the run-start opening seed. If the layout
+		// wasn't ready, ClientPresentCards lazily rebuilds it; the offer flow's abandon/retry covers the rest.
+		ServerNotifyClientReady();
 	}
+}
+
+void AFPSRPlayerController::ServerNotifyClientReady_Implementation()
+{
+	if (!HasAuthority() || bOpeningSeedIssued)
+	{
+		return;
+	}
+	bOpeningSeedIssued = true;
+	BeginOpeningSeed(2);
 }
 
 bool AFPSRPlayerController::EnsurePrimaryLayout()
