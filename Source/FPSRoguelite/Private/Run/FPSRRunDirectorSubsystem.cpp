@@ -116,6 +116,7 @@ void UFPSRRunDirectorSubsystem::BeginRound(int32 Index)
 
 	RoundDuration = Def.Duration;
 	ElapsedInRound = 0.0f;
+	NextRoundLogElapsed = 30.0f;
 	bMissionSpawned = false;
 	bMissionClearedThisRound = false;
 
@@ -238,6 +239,14 @@ void UFPSRRunDirectorSubsystem::DirectorTick()
 		GS->SetRunClockSeconds(TotalElapsed);
 		// Replicate round-remaining for the HUD timer (0 if this round has no duration, e.g. boss).
 		GS->SetRoundTimeRemaining(RoundDuration > 0.0f ? FMath::Max(0.0f, RoundDuration - ElapsedInRound) : 0.0f);
+
+		// Periodic round-progress log (every 30s of round time). while-loop so a high TimeScale can't skip one.
+		while (RoundDuration > 0.0f && ElapsedInRound >= NextRoundLogElapsed && NextRoundLogElapsed < RoundDuration)
+		{
+			UE_LOG(LogFPSR, Log, TEXT("[Run] Round %d: %.0fs remaining (%.0f/%.0f)"),
+				CurrentRoundIndex, FMath::Max(0.0f, RoundDuration - ElapsedInRound), ElapsedInRound, RoundDuration);
+			NextRoundLogElapsed += 30.0f;
+		}
 
 		// Check if mission should spawn
 		if (!bMissionSpawned && MissionTriggerTime >= 0.0f && ElapsedInRound >= MissionTriggerTime)

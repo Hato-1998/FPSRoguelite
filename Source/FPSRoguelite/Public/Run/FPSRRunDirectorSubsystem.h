@@ -72,6 +72,8 @@ private:
 	float RoundDuration = 0.0f;
 	float TotalElapsed = 0.0f;
 	float MissionTriggerTime = -1.0f;
+	/** Next in-round elapsed threshold (seconds) at which to log remaining time (every 30s). */
+	float NextRoundLogElapsed = 30.0f;
 	bool bMissionSpawned = false;
 	bool bMissionClearedThisRound = false;
 	float TimeScale = 1.0f;
