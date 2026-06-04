@@ -19,6 +19,19 @@
   - `MissionClass` = `BP_Mission_HoldZone`
   - `TimeLimit`: 0 = 무제한, 또는 예 60(초) — 초과 시 실패 처리
   - `RewardCard`: 무기 모디파이어 보상 카드(weapon-scope). **P4-A는 클리어 시 카운트만 적립**(실제 보상 선택·적용은 P4-B). 테스트로 적립 동작만 보려면 비워둬도 됨(null이면 카드 참조 없이 카운트만 증가)
+  - `SpawnPointTag`: 이 미션이 스폰될 수 있는 **미션 스폰포인트 태그**(§2.5). **비우면** 배치된 아무 포인트나 사용(없으면 플레이어 위치 폴백). 미션-지형 적합성을 강제하려면 태그 지정(예 `Mission.Spawn.HoldZone`).
+
+## 2.5 미션 스폰포인트 배치 — `AFPSRMissionSpawnPoint`
+미션이 **맵의 디자이너 지정 지점**에 스폰되도록(현재 폴백은 플레이어 위치) 레벨에 스폰포인트를 배치한다.
+- **게임플레이 태그 생성**(에디터 Project Settings > GameplayTags 또는 `DefaultGameplayTags.ini`): 예 `Mission.Spawn.HoldZone`, `Mission.Spawn.Platforming` 등 미션 유형별로.
+- **레벨에 배치**: Place Actors에서 `FPSR Mission Spawn Point`(또는 클래스 `FPSRMissionSpawnPoint`)를 맵의 원하는 지점에 드래그. 에디터에서 하늘색 화살표로 위치+방향 표시(화살표 방향 = 미션 스폰 회전).
+- **디테일 설정**:
+  - `MissionTag`: 이 지점이 호스팅할 미션 유형(예 `Mission.Spawn.HoldZone`). 미션 DA의 `SpawnPointTag`와 매칭(같거나 자식 태그)되면 선택 후보.
+  - `Weight`: 후보가 여럿일 때 가중 랜덤 비중(0 이하면 제외).
+  - `MinPlayerDistance`(cm): >0이면 가장 가까운 플레이어가 이 거리 이상일 때만 후보(플레이어 근처 스폰 방지). 모든 매칭 포인트가 거리 미달이면 **가장 먼 매칭 포인트** 선택(플레이어 위에 스폰 안 함).
+  - `bEnabled`: 끄면 삭제 없이 선택 제외.
+- **선택 규칙**: 미션 출현 시 디렉터가 `SpawnPointTag` 매칭 + 활성 + 거리 통과 포인트 중 **Weight 가중 랜덤**. 매칭 포인트가 하나도 없으면 첫 플레이어 위치 폴백(미배치 맵도 동작).
+- HoldZone은 스폰포인트 위치 기준 `ZoneRadius` 반경에 존 형성 → 포인트는 **개활지**에 두는 것을 권장.
 
 ## 3. 라운드 스케줄 DA — `DA_RunSchedule` (`UFPSRRunScheduleDataAsset`)
 - **에셋 생성**: Data Asset > `FPSRRunScheduleDataAsset`

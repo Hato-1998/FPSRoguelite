@@ -4,6 +4,7 @@
 #include "Run/FPSRRunScheduleDataAsset.h"
 #include "Run/Mission/FPSRMissionActor.h"
 #include "Run/Mission/FPSRMissionDataAsset.h"
+#include "Run/Mission/FPSRMissionSpawnPoint.h"
 #include "Core/FPSRGameState.h"
 #include "Core/FPSRPlayerState.h"
 #include "Enemy/FPSREnemySpawnSubsystem.h"
@@ -15,6 +16,7 @@
 #include "TimerManager.h"
 #include "HAL/IConsoleManager.h"
 #include "Engine/Engine.h"
+#include "EngineUtils.h"
 
 bool UFPSRRunDirectorSubsystem::HasServerAuthority() const
 {
@@ -286,10 +288,11 @@ void UFPSRRunDirectorSubsystem::SpawnRoundMission()
 	FActorSpawnParameters SpawnParams;
 	SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 
+	const FTransform SpawnXform = SelectMissionSpawnTransform(Def.Mission);
 	ActiveMission = World->SpawnActor<AFPSRMissionActor>(
 		Cls,
-		ComputeMissionLocation(),
-		FRotator::ZeroRotator,
+		SpawnXform.GetLocation(),
+		SpawnXform.Rotator(),
 		SpawnParams
 	);
 
@@ -355,26 +358,112 @@ void UFPSRRunDirectorSubsystem::EnterBoss()
 	UE_LOG(LogFPSR, Log, TEXT("[Run] Boss gate reached (boss actor is a P6 stub) — run timeline halted"));
 }
 
-FVector UFPSRRunDirectorSubsystem::ComputeMissionLocation() const
+FTransform UFPSRRunDirectorSubsystem::SelectMissionSpawnTransform(const UFPSRMissionDataAsset* Mission) const
 {
 	UWorld* World = GetWorld();
 	if (!World)
 	{
-		return FVector::ZeroVector;
+		return FTransform::Identity;
 	}
 
+	const FGameplayTag RequiredTag = Mission ? Mission->SpawnPointTag : FGameplayTag();
+
+	// Gather current player locations once (used for the optional MinPlayerDistance filter and fallback).
+	TArray<FVector> PlayerLocations;
 	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
 	{
 		if (APlayerController* PC = It->Get())
 		{
 			if (APawn* PlayerPawn = PC->GetPawn())
 			{
-				return PlayerPawn->GetActorLocation();
+				PlayerLocations.Add(PlayerPawn->GetActorLocation());
 			}
 		}
 	}
 
-	return FVector::ZeroVector;
+	// Collect tag-matched, enabled, positively-weighted points (before the distance filter), recording each
+	// point's distance to the nearest player so we can apply MinPlayerDistance and still fall back sensibly.
+	struct FCandidate
+	{
+		AFPSRMissionSpawnPoint* Point;
+		float Weight;
+		float NearestPlayerDistSq;
+	};
+	TArray<FCandidate> TagMatched;
+	for (TActorIterator<AFPSRMissionSpawnPoint> It(World); It; ++It)
+	{
+		AFPSRMissionSpawnPoint* Point = *It;
+		if (!Point || !Point->IsEnabled() || Point->GetWeight() <= 0.0f)
+		{
+			continue;
+		}
+		// Empty mission tag accepts any point; otherwise the point's tag must match (be / be a child of) it.
+		if (RequiredTag.IsValid() && !Point->GetMissionTag().MatchesTag(RequiredTag))
+		{
+			continue;
+		}
+		float NearestSq = TNumericLimits<float>::Max();
+		for (const FVector& PL : PlayerLocations)
+		{
+			NearestSq = FMath::Min(NearestSq, FVector::DistSquared(Point->GetActorLocation(), PL));
+		}
+		TagMatched.Add({ Point, Point->GetWeight(), NearestSq });
+	}
+
+	// Prefer points that satisfy MinPlayerDistance (weighted-random among them).
+	TArray<const FCandidate*> FarEnough;
+	float TotalWeight = 0.0f;
+	for (const FCandidate& C : TagMatched)
+	{
+		const float MinDist = C.Point->GetMinPlayerDistance();
+		const bool bFarEnough = (MinDist <= 0.0f) || PlayerLocations.Num() == 0 || C.NearestPlayerDistSq >= FMath::Square(MinDist);
+		if (bFarEnough)
+		{
+			FarEnough.Add(&C);
+			TotalWeight += C.Weight;
+		}
+	}
+
+	if (FarEnough.Num() > 0 && TotalWeight > 0.0f)
+	{
+		const float Pick = FMath::FRandRange(0.0f, TotalWeight);
+		float Cumulative = 0.0f;
+		for (const FCandidate* C : FarEnough)
+		{
+			Cumulative += C->Weight;
+			if (Pick <= Cumulative)
+			{
+				return C->Point->GetActorTransform();
+			}
+		}
+		return FarEnough.Last()->Point->GetActorTransform();
+	}
+
+	// Tag-matched points exist but all are within MinPlayerDistance — honor the distance intent as best we
+	// can by choosing the farthest matching point, rather than spawning the objective on top of a player.
+	if (TagMatched.Num() > 0)
+	{
+		const FCandidate* Farthest = &TagMatched[0];
+		for (const FCandidate& C : TagMatched)
+		{
+			if (C.NearestPlayerDistSq > Farthest->NearestPlayerDistSq)
+			{
+				Farthest = &C;
+			}
+		}
+		UE_LOG(LogFPSR, Warning, TEXT("[Run] All mission spawn points within MinPlayerDistance — using farthest matching point"));
+		return Farthest->Point->GetActorTransform();
+	}
+
+	// No tag-matched points at all (unmapped level / wrong tag) — fall back to the first player so the run still works.
+	UE_LOG(LogFPSR, Warning, TEXT("[Run] No matching mission spawn point (tag=%s) — using player location fallback"),
+		*RequiredTag.ToString());
+	if (PlayerLocations.Num() > 0)
+	{
+		return FTransform(FRotator::ZeroRotator, PlayerLocations[0]);
+	}
+
+	return FTransform::Identity;
 }
 
 bool UFPSRRunDirectorSubsystem::HasAnyPlayerPawn() const

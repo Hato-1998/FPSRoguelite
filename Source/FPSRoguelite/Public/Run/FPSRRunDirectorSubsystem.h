@@ -46,7 +46,9 @@ private:
 	void DestroyActiveMission();
 	FFPSRRoundDef GetRoundDef(int32 Index) const;
 	int32 GetNumRounds() const;
-	FVector ComputeMissionLocation() const;
+	/** Pick where a round's mission spawns: weighted-random among designer-placed, tag-matched, enabled
+	 *  AFPSRMissionSpawnPoints. Falls back to a player location when no matching point exists. */
+	FTransform SelectMissionSpawnTransform(const UFPSRMissionDataAsset* Mission) const;
 	/** True if at least one player controller currently possesses a pawn (run start gate). */
 	bool HasAnyPlayerPawn() const;
 	AFPSRGameState* GetGS() const;
