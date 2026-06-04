@@ -37,6 +37,10 @@ public:
 private:
 	bool HasServerAuthority() const;
 	void DirectorTick();
+	/** Enter the pre-combat hold: spawns stay off until every player finishes their opening-seed picks (§2-2). */
+	void BeginOpeningHold();
+	/** True if every connected player has completed its opening seed. bOutAnyStarted = at least one started. */
+	bool AreOpeningSeedsComplete(bool& bOutAnyStarted) const;
 	void BeginRound(int32 Index);
 	void EndRound();
 	void TryResumeFromBreather();
@@ -76,7 +80,16 @@ private:
 	/** Set when StartRun is called before any player pawn exists; round 0 begins once one appears. */
 	bool bAwaitingFirstPlayer = false;
 
+	/** Pre-combat hold: true while waiting for players to finish opening-seed picks before round 0 spawns (§2-2). */
+	bool bAwaitingOpeningSeed = false;
+	float OpeningHoldElapsed = 0.0f;
+
 	FTimerHandle DirectorTimerHandle;
 
 	static constexpr float DirectorInterval = 0.25f;
+	/** Safety: force combat to start if no player has even begun an opening seed within this many seconds
+	 *  (e.g. a client whose UI never reports ready), so the run can never hard-lock at the pre-combat hold. */
+	static constexpr float OpeningHoldNoStartTimeout = 30.0f;
+	/** Safety: force combat after this long even if some player never finishes (hung/AFK client). */
+	static constexpr float OpeningHoldMaxTimeout = 180.0f;
 };

@@ -45,6 +45,13 @@ public:
 	/** Server-only: whether an offer is currently cached/presented (don't replace a mid-selection offer). */
 	bool HasActiveOffer() const { return CachedOffer.Num() > 0; }
 
+	/** Server-only: whether this player's run-start opening seed has been issued (started). */
+	bool HasStartedOpeningSeed() const { return bOpeningSeedIssued; }
+
+	/** Server-only: whether this player's opening-seed selection is finished (all picks made, or
+	 *  none required / released). The run director holds combat spawning until every player is complete. */
+	bool IsOpeningSeedComplete() const { return bOpeningSeedComplete; }
+
 	/** Client (owner): present the server-issued offer (tagged with its OfferId) in the card-select modal. */
 	UFUNCTION(Client, Reliable)
 	void ClientPresentCards(int32 OfferId, const TArray<FFPSRCardDraw>& Offer);
@@ -111,4 +118,8 @@ private:
 
 	/** Server-only: the run-start opening seed has been issued for this player (one-time guard). */
 	bool bOpeningSeedIssued = false;
+
+	/** Server-only: this player's opening-seed selection is finished (all picks made, or released/none).
+	 *  Drives the run director's pre-combat hold so spawns don't start mid-selection (§2-2). */
+	bool bOpeningSeedComplete = false;
 };

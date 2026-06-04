@@ -7,6 +7,7 @@
 #include "Run/Mission/FPSRMissionSpawnPoint.h"
 #include "Core/FPSRGameState.h"
 #include "Core/FPSRPlayerState.h"
+#include "Core/FPSRPlayerController.h"
 #include "Enemy/FPSREnemySpawnSubsystem.h"
 #include "Core/FPSRLogChannels.h"
 #include "Engine/World.h"
@@ -49,7 +50,7 @@ void UFPSRRunDirectorSubsystem::StartRun()
 	// with no player). The director timer polls for the first pawn and begins the run then.
 	if (HasAnyPlayerPawn())
 	{
-		BeginRound(0);
+		BeginOpeningHold();
 	}
 	else
 	{
@@ -137,6 +138,48 @@ void UFPSRRunDirectorSubsystem::BeginRound(int32 Index)
 		Index, RoundDuration, Def.TargetAliveCount, MissionTriggerTime);
 }
 
+void UFPSRRunDirectorSubsystem::BeginOpeningHold()
+{
+	// No round/spawn target is set yet, so no enemies spawn while we hold. The director tick polls for
+	// opening-seed completion and then begins round 0 (which sets the Combat phase + spawn target).
+	bAwaitingOpeningSeed = true;
+	OpeningHoldElapsed = 0.0f;
+	UE_LOG(LogFPSR, Log, TEXT("[Run] Pre-combat hold — waiting for opening-seed selection before spawning"));
+}
+
+bool UFPSRRunDirectorSubsystem::AreOpeningSeedsComplete(bool& bOutAnyStarted) const
+{
+	bOutAnyStarted = false;
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return false;
+	}
+
+	bool bAnyPlayer = false;
+	bool bAllComplete = true;
+	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+	{
+		AFPSRPlayerController* PC = Cast<AFPSRPlayerController>(It->Get());
+		if (!PC)
+		{
+			continue;
+		}
+		bAnyPlayer = true;
+		if (PC->HasStartedOpeningSeed())
+		{
+			bOutAnyStarted = true;
+		}
+		if (!PC->IsOpeningSeedComplete())
+		{
+			bAllComplete = false;
+		}
+	}
+
+	// With no players we can't be "complete" — keep holding (the hold is only entered once a pawn exists).
+	return bAnyPlayer && bAllComplete;
+}
+
 void UFPSRRunDirectorSubsystem::DirectorTick()
 {
 	if (!HasServerAuthority() || !bRunActive)
@@ -150,12 +193,36 @@ void UFPSRRunDirectorSubsystem::DirectorTick()
 		return;
 	}
 
-	// Deferred start: hold until the first player pawn appears, then begin round 0.
+	// Deferred start: hold until the first player pawn appears, then enter the opening-seed hold.
 	if (bAwaitingFirstPlayer)
 	{
 		if (HasAnyPlayerPawn())
 		{
 			bAwaitingFirstPlayer = false;
+			BeginOpeningHold();
+		}
+		return;
+	}
+
+	// Pre-combat hold: keep spawns off until every player has finished its opening-seed picks (§2-2), so the
+	// run doesn't start spawning monsters while players are still choosing their opening cards.
+	if (bAwaitingOpeningSeed)
+	{
+		OpeningHoldElapsed += DirectorInterval; // real seconds (ignore TimeScale for the pre-game hold)
+		bool bAnyStarted = false;
+		const bool bAllComplete = AreOpeningSeedsComplete(bAnyStarted);
+		const float Timeout = bAnyStarted ? OpeningHoldMaxTimeout : OpeningHoldNoStartTimeout;
+		if (bAnyStarted && bAllComplete)
+		{
+			bAwaitingOpeningSeed = false;
+			UE_LOG(LogFPSR, Log, TEXT("[Run] Opening seed complete — starting combat"));
+			BeginRound(0);
+		}
+		else if (OpeningHoldElapsed >= Timeout)
+		{
+			bAwaitingOpeningSeed = false;
+			UE_LOG(LogFPSR, Warning, TEXT("[Run] Opening-seed hold timed out (%.0fs, anyStarted=%d) — starting combat anyway"),
+				OpeningHoldElapsed, bAnyStarted ? 1 : 0);
 			BeginRound(0);
 		}
 		return;

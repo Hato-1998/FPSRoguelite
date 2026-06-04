@@ -106,10 +106,17 @@ void AFPSRPlayerController::BeginOpeningSeed(int32 Count)
 		return;
 	}
 
+	bOpeningSeedIssued = true;
 	PendingOpeningSeeds = FMath::Max(0, Count);
 	if (PendingOpeningSeeds > 0)
 	{
+		bOpeningSeedComplete = false;
 		RequestCardOffer(false);
+	}
+	else
+	{
+		// Nothing to pick — immediately complete so the director's pre-combat hold doesn't wait on this player.
+		bOpeningSeedComplete = true;
 	}
 }
 
@@ -133,6 +140,12 @@ void AFPSRPlayerController::RequestCardOffer(bool bConsumeLevelUp)
 	if (CachedOffer.Num() == 0)
 	{
 		UE_LOG(LogFPSR, Warning, TEXT("[Card] DrawCards returned empty offer (check CardPool)"));
+		// An opening-seed offer that can't be drawn (empty pool) must not stall the director's pre-combat
+		// hold forever — mark this player's opening seed complete so combat can begin.
+		if (!bConsumeLevelUp)
+		{
+			bOpeningSeedComplete = true;
+		}
 		ClientDismissCardUI();
 		return;
 	}
@@ -213,6 +226,8 @@ void AFPSRPlayerController::ServerSelectCard_Implementation(int32 Index, int32 O
 			RequestCardOffer(false);
 			return;
 		}
+		// Opening seed fully consumed — release the director's pre-combat hold for this player.
+		bOpeningSeedComplete = true;
 	}
 	else
 	{
@@ -259,6 +274,12 @@ void AFPSRPlayerController::ServerRerollOffer_Implementation(int32 OfferId)
 	CachedOffer = Sub->DrawCards(this);
 	if (CachedOffer.Num() == 0)
 	{
+		// A rerolled opening-seed offer that comes back empty (exhausted/misconfigured pool) must release the
+		// director's pre-combat hold for this player, same as the initial-draw empty path in RequestCardOffer.
+		if (!bOfferConsumesLevelUp)
+		{
+			bOpeningSeedComplete = true;
+		}
 		ClientDismissCardUI();
 		return;
 	}
@@ -283,6 +304,13 @@ void AFPSRPlayerController::ServerAbandonOffer_Implementation(int32 OfferId)
 	if (OfferId != CurrentOfferId)
 	{
 		return;
+	}
+
+	// If this was an opening-seed offer being abandoned (e.g. UI couldn't present it), mark the opening seed
+	// complete so the director's pre-combat hold doesn't wait forever on a player who can't be offered cards.
+	if (!bOfferConsumesLevelUp)
+	{
+		bOpeningSeedComplete = true;
 	}
 
 	// Release the cached offer (and any opening-seed run) so PresentPendingLevelUpOffers can retry later.
