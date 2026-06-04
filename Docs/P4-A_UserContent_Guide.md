@@ -11,16 +11,26 @@
 - 디테일에서 조정(에디터 노출): `ZoneRadius`(기본 400, 단위 cm 반경), `RequiredHoldSeconds`(기본 30)
 - ※ MissionClass에 C++ 클래스(`FPSRMission_HoldZone`)를 직접 지정해도 동작하지만(기본값 400/30), 수치 튜닝 + 아래 시각 메시를 위해 BP 권장.
 
-### 1.1 시각용 존 메시 추가 (플레이어가 존을 보이게)
-판정은 서버 거리체크라 메시가 없어도 동작하지만(개발 중엔 `ENABLE_DRAW_DEBUG` 디버그 실린더로만 보임), **플레이어에게 존을 보여주려면** BP에 코스메틱 메시를 붙인다.
-- **컴포넌트 추가**: `BP_Mission_HoldZone` 컴포넌트 탭에서 **Root**(`USceneComponent`) 하위에 **Static Mesh** 컴포넌트 추가.
-  - **메시**: `/Engine/BasicShapes/Cylinder`(바닥 원판형) 또는 원하는 링/데칼 메시.
-  - **스케일**: 기본 실린더는 지름 100cm(반경 50cm). `ZoneRadius=400`(반경 400cm=지름 800cm)에 맞추려면 **X/Y 스케일 = 8.0**. 높이(Z)는 바닥 표시면 낮게(예 0.05~0.2).
-  - ⚠️ **반경 동기화 수동**: `ZoneRadius`를 바꾸면 메시 스케일도 `ZoneRadius/50` 으로 다시 맞춰야 시각과 판정이 일치(판정은 항상 `ZoneRadius` 사용).
-- **충돌 끄기**: 메시 디테일 > Collision Presets = **NoCollision**(코스메틱이라 이동·사격을 막으면 안 됨).
-- **반투명 머티리얼**(권장): 안이 비치도록 반투명/발광 머티리얼 적용(플레이어가 존 안 적을 보게). 단색 불투명도 무방.
-- **위치**: 메시 위치는 Root 기준 (0,0,0) 유지 — 미션은 스폰포인트 위치(§2.5)에 스폰되고 존 중심=액터 원점.
-- (선택) 진행도 연동 비주얼(채워지는 링 등)은 P4-D UI/머티리얼 폴리시에서. P4-A는 정적 메시로 충분.
+### 1.1 시각용 존 데칼 추가 (바닥에 반경만큼 칠하기)
+판정은 서버 거리체크라 비주얼이 없어도 동작하지만(개발 중엔 `ENABLE_DRAW_DEBUG` 디버그 실린더로만 보임), **플레이어에게 존을 바닥에 원형으로 표시**하려면 BP에 **데칼 컴포넌트**를 붙인다(불규칙 바닥에도 잘 깔리고 시야를 안 가림).
+
+**A. 데칼 머티리얼 준비** (Deferred Decal 도메인)
+- 머티리얼 신규 생성 → 디테일에서 **Material Domain = `Deferred Decal`**, **Blend Mode = `Translucent`**.
+- 원형 마스크: `TextureCoordinate`(0~1) → 중심(0.5,0.5)에서의 반경으로 원/링 마스크 생성(예: UV를 -0.5 offset 후 `VectorLength` → `1-saturate(dist*2)` 또는 링이면 안팎 반경 차) → **Opacity**에 연결, 색은 **Emissive Color**에 상수(예 청록). 원형 텍스처가 있으면 그 알파를 Opacity로 써도 됨.
+- (머티리얼 인스턴스로 색/두께/반경 마스크를 파라미터화하면 미션별 색 재사용 편함.)
+
+**B. BP에 데칼 컴포넌트 배치**
+- `BP_Mission_HoldZone` 컴포넌트 탭 → **Root**(`USceneComponent`) 하위에 **Decal** 컴포넌트 추가.
+- **Decal Material** = 위 A 머티리얼(또는 그 인스턴스).
+- **Relative Rotation**: **Pitch = -90** → 데칼이 **바닥으로 투영**(데칼은 로컬 -X 방향으로 투사).
+- **Decal Size**(반-크기, half-extent) 디테일:
+  - **Y = Z = `ZoneRadius`** → 칠해지는 원 지름 = 2×ZoneRadius = 판정 지름과 일치(기본 400 → Y=Z=400).
+  - **X(투영 깊이)** = 256~512 정도(바닥까지 닿게; 너무 크면 벽·천장까지 칠해지니 적당히).
+- **위치**: Decal 위치는 Root 기준 (0,0,0) 유지 — 존 중심=액터 원점(스폰포인트 위치, §2.5).
+
+⚠️ **반경 동기화 수동**: `ZoneRadius`를 바꾸면 **Decal Size의 Y/Z도 같은 값**으로 맞춰야 시각=판정 일치(판정은 항상 `ZoneRadius` 사용).
+
+- (선택) 진행도 연동(채워지는 링/색 변화)은 데칼 머티리얼 파라미터를 `GetMissionProgress()`에 바인딩해 표현 가능 — 폴리시는 P4-D. P4-A는 정적 원형 데칼로 충분.
 
 ## 2. 미션 DA — `DA_Mission_HoldZone` (`UFPSRMissionDataAsset`)
 - **에셋 생성**: Miscellaneous > Data Asset > `FPSRMissionDataAsset`
