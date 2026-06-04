@@ -11,7 +11,7 @@
 
 ## ▶▶ 새 세션 우선 작업 = P4-A 마무리 (콘텐츠 + PIE + 머지)
 - **현재 활성 브랜치**: `phase/p4a-runflow-missions` (main 미머지). 구현=Haiku 위임 / 검증=Opus 직접(빌드+스모크+Codex). HIGH_RISK는 승인 후.
-- **P4-A 코드 완료**: 라운드제 런(데이터 드리븐), `UFPSRRunDirectorSubsystem`(라운드 타임라인·스폰강도·라운드종료 Breather·픽 소비완료 자동재개·라운드당 1미션 랜덤시각·보스 게이트 스텁), 확장형 미션 프레임워크(`AFPSRMissionActor`+`UFPSRMissionDataAsset`+레퍼런스 `AFPSRMission_HoldZone`), `UFPSRRunScheduleDataAsset`, 오프닝시드 자동(`ServerNotifyClientReady` RPC), `ERunPhase::Boss`/`CurrentRound`/`BankedMissionRewards`/`RunClockSeconds`, 디버그 7종. Game.MD §2-1/2-2/2-7/2-8 라운드제로 갱신.
+- **P4-A 코드 완료**: 라운드제 런(데이터 드리븐), `UFPSRRunDirectorSubsystem`(라운드 타임라인·스폰강도·라운드종료 Breather·픽 소비완료 자동재개·라운드당 1미션 랜덤시각·보스 게이트 스텁), 확장형 미션 프레임워크(`AFPSRMissionActor`+`UFPSRMissionDataAsset`+레퍼런스 `AFPSRMission_HoldZone`), **디자이너 배치 미션 스폰포인트**(`AFPSRMissionSpawnPoint`: 태그매칭+가중랜덤+MinPlayerDistance, 미배치 시 플레이어 폴백), `UFPSRRunScheduleDataAsset`, 오프닝시드 자동(`ServerNotifyClientReady` RPC), `ERunPhase::Boss`/`CurrentRound`/`BankedMissionRewards`/`RunClockSeconds`, 디버그 7종. Game.MD §2-1/2-2/2-7/2-8 라운드제로 갱신.
 - **다음 단계**: ① **사용자 콘텐츠** — [`Docs/P4-A_UserContent_Guide.md`](Docs/P4-A_UserContent_Guide.md) 따라 `DA_RunSchedule`/`DA_Mission_HoldZone`/`BP_Mission_HoldZone` 생성 + `BP_FPSRGameMode`에 `RunSchedule` 할당. ② **PIE 검증**(오프닝시드→스폰→미션→Breather카드→자동재개→보스게이트). ③ 통과 시 `--no-ff` main 머지(§6-7) + 브랜치 정리.
 - **⚠️ 임시 테스트값(프로덕션 전환 시 노티·원복)**: 라운드 2/2/1분(프로덕션 5/10/15분), 적 `XPReward=100`, `XPPerLevel=0`(1킬=1레벨). 메모리 `p4a-temp-test-values`.
 - **P4 잔여(이월)**: **P4-B** 무기 모디파이어 Fragment + `ApplyCard` weapon-scope 활성(현재 reject) + 미션 보상 카드 Breather 선택·적용(P3-D 오퍼 모드 enum 일반화) + 나머지 6종 미션. **P4-C** 무기 7종. **P4-D** 게임필(히트마커/핑/위협 인디케이터/사각 오디오) + PickupRadius/XPGain.
