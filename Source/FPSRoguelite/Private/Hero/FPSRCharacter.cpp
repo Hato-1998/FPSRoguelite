@@ -92,9 +92,11 @@ void AFPSRCharacter::Tick(float DeltaSeconds)
 		{
 			AFPSRPlayerState* PS = GetPlayerState<AFPSRPlayerState>();
 			const int32 CardPicks = PS ? PS->GetCardPicksPending() : 0;
-			const FString RunMsg = FString::Printf(TEXT("Lv %d   XP %d / %d   Stack %d   [%s]"),
+			const int32 RewardPicks = PS ? PS->GetMissionRewardPicksPending() : 0;
+			const FString RunMsg = FString::Printf(TEXT("Lv %d   XP %d / %d   Picks %d (+%d rwd)   [%s%s]"),
 				RunState->GetPartyLevel(), RunState->GetSharedXP(), RunState->GetRequiredXPForNextLevel(),
-				CardPicks, RunState->IsCombatPhase() ? TEXT("Combat") : TEXT("Breather"));
+				CardPicks, RewardPicks, RunState->IsCombatPhase() ? TEXT("Combat") : TEXT("Boss"),
+				RunState->IsRunPaused() ? TEXT(" FROZEN") : TEXT(""));
 			GEngine->AddOnScreenDebugMessage((uint64)(UPTRINT)this + 1, 0.0f, FColor::Cyan, RunMsg);
 		}
 	}
@@ -191,8 +193,19 @@ void AFPSRCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompo
 	}
 }
 
+bool AFPSRCharacter::IsRunFrozen() const
+{
+	const AFPSRGameState* GS = GetWorld() ? GetWorld()->GetGameState<AFPSRGameState>() : nullptr;
+	return GS && GS->IsRunPaused();
+}
+
 void AFPSRCharacter::Input_MoveForward(const FInputActionValue& Value)
 {
+	if (IsRunFrozen())
+	{
+		GetCharacterMovement()->StopMovementImmediately(); // kill residual slide during the freeze
+		return;
+	}
 	const float AxisValue = Value.Get<float>();
 	if (Controller && AxisValue != 0.0f)
 	{
@@ -202,6 +215,11 @@ void AFPSRCharacter::Input_MoveForward(const FInputActionValue& Value)
 
 void AFPSRCharacter::Input_MoveRight(const FInputActionValue& Value)
 {
+	if (IsRunFrozen())
+	{
+		GetCharacterMovement()->StopMovementImmediately();
+		return;
+	}
 	const float AxisValue = Value.Get<float>();
 	if (Controller && AxisValue != 0.0f)
 	{
@@ -211,6 +229,10 @@ void AFPSRCharacter::Input_MoveRight(const FInputActionValue& Value)
 
 void AFPSRCharacter::Input_Look(const FInputActionValue& Value)
 {
+	if (IsRunFrozen())
+	{
+		return; // camera frozen during card selection (mouse goes to the card UI in Menu input mode)
+	}
 	const FVector2D LookAxis = Value.Get<FVector2D>();
 	AddControllerYawInput(LookAxis.X);
 
@@ -226,6 +248,10 @@ void AFPSRCharacter::Input_Look(const FInputActionValue& Value)
 
 void AFPSRCharacter::Input_Fire(const FInputActionValue& Value)
 {
+	if (IsRunFrozen())
+	{
+		return; // no firing during the card-selection freeze
+	}
 	if (WeaponFire)
 	{
 		WeaponFire->StartFiring();
@@ -263,6 +289,10 @@ void AFPSRCharacter::Input_ADSReleased(const FInputActionValue& Value)
 
 void AFPSRCharacter::Input_Dash(const FInputActionValue& Value)
 {
+	if (IsRunFrozen())
+	{
+		return; // no dashing during the card-selection freeze
+	}
 	FVector Direction = GetLastMovementInputVector();
 	Direction.Z = 0.0f;
 	if (Direction.IsNearlyZero())

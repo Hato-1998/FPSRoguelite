@@ -31,11 +31,18 @@ public:
 	 *  (server authority only). Each offer carries the rolled rarity and the magnitude to apply. */
 	TArray<FFPSRCardDraw> DrawCards(AController* ForPlayer, int32 Count = 3, const TArray<UFPSRCardDataAsset*>& Exclude = TArray<UFPSRCardDataAsset*>());
 
-	/** Apply a drawn card offer to the given player (server authority only). Returns true if applied.
-	 *  bConsumeLevelUp=true (breather level-up selection) requires & consumes a queued level-up;
-	 *  false (opening seed, §2-2) applies without touching the level-up stack.
-	 *  Only Character-scope cards apply — weapon-scope (ThisWeapon/AllWeapons) is rejected until P4. */
-	bool ApplyCard(AController* ForPlayer, const FFPSRCardDraw& Draw, bool bConsumeLevelUp = true);
+	/** Apply a selected card offer to the given player (server authority only). Returns true if the selection
+	 *  was accepted (so the offer flow can advance / unfreeze). Consume behavior depends on OfferType:
+	 *   - OpeningSeed: applies, consumes nothing.
+	 *   - LevelUp: requires & consumes a level-up pick (CardPicksPending).
+	 *   - MissionReward: requires & consumes a mission-reward pick (MissionRewardPicksPending).
+	 *  Character-scope cards apply their GE now; weapon-scope (modifier) cards are accepted/consumed but their
+	 *  effect application lands in P4-B (logged no-op here) so the freeze can never soft-lock. */
+	bool ApplyCard(AController* ForPlayer, const FFPSRCardDraw& Draw, EFPSROfferType OfferType);
+
+	/** Build a single card draw from one card (used for mission-reward offers), rolling a rarity tier by
+	 *  the player's luck. Returns an offer with a null Card if the card has no tiers. */
+	FFPSRCardDraw BuildSingleDraw(UFPSRCardDataAsset* Card, AController* ForPlayer) const;
 
 	/** Try to consume a reroll charge from the player. Returns true if successful. */
 	bool TryReroll(AController* ForPlayer);

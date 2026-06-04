@@ -5,15 +5,14 @@
 #include "Run/Mission/FPSRMissionActor.h"
 #include "Run/Mission/FPSRMissionDataAsset.h"
 #include "Run/Mission/FPSRMissionSpawnPoint.h"
+#include "Card/FPSRCardDataAsset.h"
 #include "Core/FPSRGameState.h"
-#include "Core/FPSRPlayerState.h"
 #include "Core/FPSRPlayerController.h"
 #include "Enemy/FPSREnemySpawnSubsystem.h"
 #include "Core/FPSRLogChannels.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/Pawn.h"
-#include "GameFramework/PlayerState.h"
 #include "TimerManager.h"
 #include "HAL/IConsoleManager.h"
 #include "Engine/Engine.h"
@@ -32,25 +31,21 @@ void UFPSRRunDirectorSubsystem::StartRun()
 		return;
 	}
 
-	// Build fallback rounds if needed
-	if (!ActiveSchedule || ActiveSchedule->Rounds.Num() == 0)
-	{
-		FallbackRounds.Empty();
-		FallbackRounds.Add(FFPSRRoundDef{ 120.0f, 50, nullptr, false });
-		FallbackRounds.Add(FFPSRRoundDef{ 120.0f, 80, nullptr, false });
-		FallbackRounds.Add(FFPSRRoundDef{ 60.0f, 120, nullptr, false });
-		FallbackRounds.Add(FFPSRRoundDef{ 0.0f, 0, nullptr, true });
-	}
-
 	bRunActive = true;
-	TotalElapsed = 0.0f;
+	RunClock = 0.0f;
+	bBossStarted = false;
+	NextRunLogTime = 30.0f;
 
-	// Don't begin round 0 (which sets a positive spawn target) until a player pawn exists — otherwise the
-	// spawn director would populate enemies around world origin (ComputeSpawnLocation falls back to origin
-	// with no player). The director timer polls for the first pawn and begins the run then.
+	// Size the per-event fired flags to the active schedule (no missions without a schedule asset).
+	const int32 NumEvents = ActiveSchedule ? ActiveSchedule->MissionEvents.Num() : 0;
+	MissionEventFired.Init(false, NumEvents);
+
+	// Spawning begins once a player pawn exists (avoids origin spawns) AND the opening-seed freeze has engaged
+	// (so enemies can't spawn before the run-start card selection). We don't set a spawn target yet.
 	if (HasAnyPlayerPawn())
 	{
-		BeginOpeningHold();
+		bWaitingForOpeningSeed = true;
+		OpeningWaitElapsed = 0.0f;
 	}
 	else
 	{
@@ -58,127 +53,33 @@ void UFPSRRunDirectorSubsystem::StartRun()
 		UE_LOG(LogFPSR, Log, TEXT("[Run] StartRun deferred — waiting for first player pawn"));
 	}
 
-	UWorld* World = GetWorld();
-	if (World)
+	if (UWorld* World = GetWorld())
 	{
 		World->GetTimerManager().SetTimer(
-			DirectorTimerHandle,
-			this,
-			&UFPSRRunDirectorSubsystem::DirectorTick,
-			DirectorInterval,
-			true
-		);
+			DirectorTimerHandle, this, &UFPSRRunDirectorSubsystem::DirectorTick, DirectorInterval, true);
 	}
 }
 
-int32 UFPSRRunDirectorSubsystem::GetNumRounds() const
+float UFPSRRunDirectorSubsystem::GetBossTime() const
 {
-	if (ActiveSchedule && ActiveSchedule->Rounds.Num() > 0)
-	{
-		return ActiveSchedule->Rounds.Num();
-	}
-	return FallbackRounds.Num();
+	return ActiveSchedule ? ActiveSchedule->BossTime : FallbackBossTime;
 }
 
-FFPSRRoundDef UFPSRRunDirectorSubsystem::GetRoundDef(int32 Index) const
+int32 UFPSRRunDirectorSubsystem::ComputeTargetAliveCount() const
 {
-	if (ActiveSchedule && ActiveSchedule->Rounds.IsValidIndex(Index))
-	{
-		return ActiveSchedule->Rounds[Index];
-	}
-	if (FallbackRounds.IsValidIndex(Index))
-	{
-		return FallbackRounds[Index];
-	}
-	// Out of range: return a boss round (safe fallback)
-	return FFPSRRoundDef{ 0.0f, 0, nullptr, true };
+	const int32 Base = ActiveSchedule ? ActiveSchedule->BaseAliveCount : FallbackBaseAliveCount;
+	const float PerMin = ActiveSchedule ? ActiveSchedule->AliveCountPerMinute : FallbackAliveCountPerMinute;
+	const int32 MaxCount = ActiveSchedule ? ActiveSchedule->MaxAliveCount : FallbackMaxAliveCount;
+	const int32 Scaled = Base + FMath::FloorToInt(PerMin * (RunClock / 60.0f));
+	return FMath::Clamp(Scaled, 0, MaxCount);
 }
 
-void UFPSRRunDirectorSubsystem::BeginRound(int32 Index)
+void UFPSRRunDirectorSubsystem::UpdateSpawnIntensity()
 {
-	CurrentRoundIndex = Index;
-
-	AFPSRGameState* GS = GetGS();
-	if (GS)
+	if (UFPSREnemySpawnSubsystem* SpawnSub = GetSpawnSub())
 	{
-		GS->SetCurrentRound(Index);
+		SpawnSub->SetTargetAliveCount(ComputeTargetAliveCount());
 	}
-
-	DestroyActiveMission();
-
-	const FFPSRRoundDef Def = GetRoundDef(Index);
-
-	if (Def.bBossRound)
-	{
-		EnterBoss();
-		return;
-	}
-
-	RoundDuration = Def.Duration;
-	ElapsedInRound = 0.0f;
-	NextRoundLogElapsed = 30.0f;
-	bMissionSpawned = false;
-	bMissionClearedThisRound = false;
-
-	MissionTriggerTime = (Def.Mission != nullptr)
-		? FMath::FRandRange(Def.Duration * 0.1f, Def.Duration * 0.8f)
-		: -1.0f;
-
-	if (GS)
-	{
-		GS->SetRunPhase(ERunPhase::Combat);
-	}
-
-	UFPSREnemySpawnSubsystem* SpawnSub = GetSpawnSub();
-	if (SpawnSub)
-	{
-		SpawnSub->SetTargetAliveCount(Def.TargetAliveCount);
-	}
-
-	UE_LOG(LogFPSR, Log, TEXT("[Run] Round %d begin (dur=%.0f target=%d missionTime=%.0f)"),
-		Index, RoundDuration, Def.TargetAliveCount, MissionTriggerTime);
-}
-
-void UFPSRRunDirectorSubsystem::BeginOpeningHold()
-{
-	// No round/spawn target is set yet, so no enemies spawn while we hold. The director tick polls for
-	// opening-seed completion and then begins round 0 (which sets the Combat phase + spawn target).
-	bAwaitingOpeningSeed = true;
-	OpeningHoldElapsed = 0.0f;
-	UE_LOG(LogFPSR, Log, TEXT("[Run] Pre-combat hold — waiting for opening-seed selection before spawning"));
-}
-
-bool UFPSRRunDirectorSubsystem::AreOpeningSeedsComplete(bool& bOutAnyStarted) const
-{
-	bOutAnyStarted = false;
-	UWorld* World = GetWorld();
-	if (!World)
-	{
-		return false;
-	}
-
-	bool bAnyPlayer = false;
-	bool bAllComplete = true;
-	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
-	{
-		AFPSRPlayerController* PC = Cast<AFPSRPlayerController>(It->Get());
-		if (!PC)
-		{
-			continue;
-		}
-		bAnyPlayer = true;
-		if (PC->HasStartedOpeningSeed())
-		{
-			bOutAnyStarted = true;
-		}
-		if (!PC->IsOpeningSeedComplete())
-		{
-			bAllComplete = false;
-		}
-	}
-
-	// With no players we can't be "complete" — keep holding (the hold is only entered once a pawn exists).
-	return bAnyPlayer && bAllComplete;
 }
 
 void UFPSRRunDirectorSubsystem::DirectorTick()
@@ -194,169 +95,135 @@ void UFPSRRunDirectorSubsystem::DirectorTick()
 		return;
 	}
 
-	// Deferred start: hold until the first player pawn appears, then enter the opening-seed hold.
+	// Deferred start: hold until the first player pawn appears, then wait for the opening-seed freeze.
 	if (bAwaitingFirstPlayer)
 	{
 		if (HasAnyPlayerPawn())
 		{
 			bAwaitingFirstPlayer = false;
-			BeginOpeningHold();
+			bWaitingForOpeningSeed = true;
+			OpeningWaitElapsed = 0.0f;
 		}
 		return;
 	}
 
-	// Pre-combat hold: keep spawns off until every player has finished its opening-seed picks (§2-2), so the
-	// run doesn't start spawning monsters while players are still choosing their opening cards.
-	if (bAwaitingOpeningSeed)
+	// Pre-combat hold: keep the spawn target at 0 until the opening-seed freeze engages (then the freeze gate
+	// holds spawning) — or until a short timeout if no opening seed ever comes (anti-deadlock).
+	if (bWaitingForOpeningSeed)
 	{
-		OpeningHoldElapsed += DirectorInterval; // real seconds (ignore TimeScale for the pre-game hold)
-		bool bAnyStarted = false;
-		const bool bAllComplete = AreOpeningSeedsComplete(bAnyStarted);
-		const float Timeout = bAnyStarted ? OpeningHoldMaxTimeout : OpeningHoldNoStartTimeout;
-		if (bAnyStarted && bAllComplete)
+		OpeningWaitElapsed += DirectorInterval;
+		// Proceed once every present player's opening seed has at least been issued (covers a fast pick that
+		// freezes+unfreezes between ticks), or after a short timeout if no opening seed ever comes.
+		const bool bTimedOut = OpeningWaitElapsed >= OpeningSeedWaitTimeout;
+		if (AllPlayersOpeningSeedIssued() || bTimedOut)
 		{
-			bAwaitingOpeningSeed = false;
-			UE_LOG(LogFPSR, Log, TEXT("[Run] Opening seed complete — starting combat"));
-			BeginRound(0);
-		}
-		else if (OpeningHoldElapsed >= Timeout)
-		{
-			bAwaitingOpeningSeed = false;
-			UE_LOG(LogFPSR, Warning, TEXT("[Run] Opening-seed hold timed out (%.0fs, anyStarted=%d) — starting combat anyway"),
-				OpeningHoldElapsed, bAnyStarted ? 1 : 0);
-			BeginRound(0);
+			bWaitingForOpeningSeed = false;
+			if (bTimedOut)
+			{
+				UE_LOG(LogFPSR, Warning, TEXT("[Run] Opening-seed hold timed out — starting combat"));
+			}
+			// If the freeze is still up (mid-selection), the pause gate holds spawning; otherwise start now.
+			if (!GS->IsRunPaused())
+			{
+				UpdateSpawnIntensity();
+			}
 		}
 		return;
 	}
 
-	const ERunPhase Phase = GS->GetRunPhase();
-
-	if (Phase == ERunPhase::Combat)
+	// Global freeze (card selection): the whole timeline halts (Game.MD §2-2).
+	if (GS->IsRunPaused())
 	{
-		const float Dt = DirectorInterval * TimeScale;
-		ElapsedInRound += Dt;
-		TotalElapsed += Dt;
-		GS->SetRunClockSeconds(TotalElapsed);
-		// Replicate round-remaining for the HUD timer (0 if this round has no duration, e.g. boss).
-		GS->SetRoundTimeRemaining(RoundDuration > 0.0f ? FMath::Max(0.0f, RoundDuration - ElapsedInRound) : 0.0f);
-
-		// Periodic round-progress log (every 30s of round time). while-loop so a high TimeScale can't skip one.
-		while (RoundDuration > 0.0f && ElapsedInRound >= NextRoundLogElapsed && NextRoundLogElapsed < RoundDuration)
-		{
-			UE_LOG(LogFPSR, Log, TEXT("[Run] Round %d: %.0fs remaining (%.0f/%.0f)"),
-				CurrentRoundIndex, FMath::Max(0.0f, RoundDuration - ElapsedInRound), ElapsedInRound, RoundDuration);
-			NextRoundLogElapsed += 30.0f;
-		}
-
-		// Check if mission should spawn
-		if (!bMissionSpawned && MissionTriggerTime >= 0.0f && ElapsedInRound >= MissionTriggerTime)
-		{
-			SpawnRoundMission();
-		}
-
-		// Check if round is complete
-		if (RoundDuration > 0.0f && ElapsedInRound >= RoundDuration)
-		{
-			EndRound();
-		}
+		return;
 	}
-	else if (Phase == ERunPhase::Breather)
+
+	// Boss phase: timeline halted (no clock, no missions, no scaling).
+	if (GS->GetRunPhase() == ERunPhase::Boss)
 	{
-		TryResumeFromBreather();
+		return;
 	}
-	// Boss phase: nothing (timeline halted)
 
-	// Debug output
+	// --- Combat: advance the run clock, scale spawns, fire scheduled missions, trigger the boss. ---
+	RunClock += DirectorInterval * TimeScale;
+	GS->SetRunClockSeconds(RunClock);
+
+	UpdateSpawnIntensity();
+
+	// Boss supersedes missions: check it BEFORE spawning a due mission so a mission at/near BossTime (or a
+	// TimeScale jump past both) can't spawn a mission that EnterBoss immediately destroys (reward lost).
+	if (RunClock >= GetBossTime())
+	{
+		EnterBoss();
+		return;
+	}
+
+	TrySpawnDueMission();
+
+	// Periodic progress log (every 30s of run time). while-loop so a high TimeScale can't skip one.
+	while (RunClock >= NextRunLogTime && NextRunLogTime < GetBossTime())
+	{
+		UE_LOG(LogFPSR, Log, TEXT("[Run] t=%.0fs / boss %.0fs (target alive=%d, mission=%s)"),
+			RunClock, GetBossTime(), ComputeTargetAliveCount(), ActiveMission ? TEXT("active") : TEXT("-"));
+		NextRunLogTime += 30.0f;
+	}
+
 	if (bRunDebug && GEngine)
 	{
 		UFPSREnemySpawnSubsystem* SpawnSub = GetSpawnSub();
-		int32 AliveCount = SpawnSub ? SpawnSub->GetAliveCount() : 0;
-		const TCHAR* PhaseStr = (Phase == ERunPhase::Combat) ? TEXT("Combat")
-							  : (Phase == ERunPhase::Breather) ? TEXT("Breather")
-							  : TEXT("Boss");
-		const TCHAR* MissionStr = (ActiveMission != nullptr) ? TEXT("active")
-							   : (bMissionClearedThisRound) ? TEXT("cleared")
-							   : TEXT("-");
-
-		GEngine->AddOnScreenDebugMessage(
-			(uint64)this,
-			0.0f,
-			FColor::Cyan,
-			FString::Printf(
-				TEXT("[Run] R%d %s remain=%.0fs (%.0f/%.0f) total=%.0f mission=%s alive=%d xScale=%.1f"),
-				CurrentRoundIndex, PhaseStr,
-				(RoundDuration > 0.0f ? FMath::Max(0.0f, RoundDuration - ElapsedInRound) : 0.0f),
-				ElapsedInRound, RoundDuration, TotalElapsed,
-				MissionStr, AliveCount, TimeScale
-			)
-		);
+		const int32 AliveCount = SpawnSub ? SpawnSub->GetAliveCount() : 0;
+		GEngine->AddOnScreenDebugMessage((uint64)this, 0.0f, FColor::Cyan, FString::Printf(
+			TEXT("[Run] Combat t=%.0f/boss%.0f alive=%d/%d mission=%s xScale=%.1f"),
+			RunClock, GetBossTime(), AliveCount, ComputeTargetAliveCount(),
+			ActiveMission ? TEXT("active") : TEXT("-"), TimeScale));
 	}
 }
 
-void UFPSRRunDirectorSubsystem::EndRound()
+void UFPSRRunDirectorSubsystem::TrySpawnDueMission()
 {
-	DestroyActiveMission();
-
-	AFPSRGameState* GS = GetGS();
-	if (GS)
+	if (ActiveMission || !ActiveSchedule)
 	{
-		GS->BeginBreather();
-		GS->SetRoundTimeRemaining(0.0f); // no round timer during the breather
+		return; // one mission at a time; no schedule = no missions
 	}
 
-	UFPSREnemySpawnSubsystem* SpawnSub = GetSpawnSub();
-	if (SpawnSub)
+	for (int32 i = 0; i < ActiveSchedule->MissionEvents.Num(); ++i)
 	{
-		SpawnSub->SetTargetAliveCount(0);
-		// Clear the remaining swarm so the breather is a genuine safe zone (Game.MD §2-2) — setting the
-		// target to 0 alone leaves already-spawned enemies active (the spawn director never shrinks).
-		SpawnSub->ReleaseAllEnemies();
-	}
-
-	UE_LOG(LogFPSR, Log, TEXT("[Run] Round %d ended, entering breather"), CurrentRoundIndex);
-}
-
-void UFPSRRunDirectorSubsystem::TryResumeFromBreather()
-{
-	AFPSRGameState* GS = GetGS();
-	if (!GS)
-	{
-		return;
-	}
-
-	// Check if any player still has pending card picks
-	for (APlayerState* PS : GS->PlayerArray)
-	{
-		if (AFPSRPlayerState* FPSRPS = Cast<AFPSRPlayerState>(PS))
+		if (MissionEventFired.IsValidIndex(i) && MissionEventFired[i])
 		{
-			if (FPSRPS->GetCardPicksPending() > 0)
+			continue;
+		}
+		const FFPSRMissionEvent& Event = ActiveSchedule->MissionEvents[i];
+		// Skip events scheduled at/after the boss — they'd be destroyed by the boss transition anyway.
+		if (Event.TriggerTime >= GetBossTime())
+		{
+			if (MissionEventFired.IsValidIndex(i)) { MissionEventFired[i] = true; }
+			continue;
+		}
+		if (RunClock >= Event.TriggerTime)
+		{
+			if (MissionEventFired.IsValidIndex(i))
 			{
-				// Someone is still picking; wait
-				return;
+				MissionEventFired[i] = true;
 			}
+			if (Event.Mission)
+			{
+				SpawnMission(Event.Mission);
+			}
+			return; // fire one per tick
 		}
 	}
-
-	// All picks consumed; resume to next round
-	BeginRound(CurrentRoundIndex + 1);
 }
 
-void UFPSRRunDirectorSubsystem::SpawnRoundMission()
+void UFPSRRunDirectorSubsystem::SpawnMission(UFPSRMissionDataAsset* MissionData)
 {
-	bMissionSpawned = true;
-
-	const FFPSRRoundDef Def = GetRoundDef(CurrentRoundIndex);
-
-	if (!Def.Mission)
+	if (!MissionData)
 	{
-		UE_LOG(LogFPSR, Warning, TEXT("[Run] Round %d mission slot is null"), CurrentRoundIndex);
 		return;
 	}
 
-	TSubclassOf<AFPSRMissionActor> Cls = Def.Mission->MissionClass;
+	TSubclassOf<AFPSRMissionActor> Cls = MissionData->MissionClass;
 	if (!Cls)
 	{
-		UE_LOG(LogFPSR, Warning, TEXT("[Run] Mission %s has no MissionClass"), *Def.Mission->GetName());
+		UE_LOG(LogFPSR, Warning, TEXT("[Run] Mission %s has no MissionClass"), *MissionData->GetName());
 		return;
 	}
 
@@ -369,14 +236,8 @@ void UFPSRRunDirectorSubsystem::SpawnRoundMission()
 	FActorSpawnParameters SpawnParams;
 	SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 
-	const FTransform SpawnXform = SelectMissionSpawnTransform(Def.Mission);
-	ActiveMission = World->SpawnActor<AFPSRMissionActor>(
-		Cls,
-		SpawnXform.GetLocation(),
-		SpawnXform.Rotator(),
-		SpawnParams
-	);
-
+	const FTransform SpawnXform = SelectMissionSpawnTransform(MissionData);
+	ActiveMission = World->SpawnActor<AFPSRMissionActor>(Cls, SpawnXform.GetLocation(), SpawnXform.Rotator(), SpawnParams);
 	if (!ActiveMission)
 	{
 		UE_LOG(LogFPSR, Warning, TEXT("[Run] Failed to spawn mission actor from class %s"), *Cls->GetName());
@@ -384,24 +245,42 @@ void UFPSRRunDirectorSubsystem::SpawnRoundMission()
 	}
 
 	ActiveMission->OnMissionEndedNative.AddUObject(this, &UFPSRRunDirectorSubsystem::OnMissionEnded);
-	ActiveMission->ServerActivate(Def.Mission);
+	ActiveMission->ServerActivate(MissionData);
 
-	UE_LOG(LogFPSR, Log, TEXT("[Run] Mission spawned: %s"), *Def.Mission->GetName());
+	UE_LOG(LogFPSR, Log, TEXT("[Run] Mission spawned: %s (t=%.0fs)"), *MissionData->GetName(), RunClock);
 }
 
 void UFPSRRunDirectorSubsystem::OnMissionEnded(AFPSRMissionActor* Mission, bool bSuccess)
 {
 	if (bSuccess)
 	{
-		bMissionClearedThisRound = true;
-
-		AFPSRGameState* GS = GetGS();
-		if (GS)
+		// Mission cleared: grant every player a mission-reward pick and freeze the run for selection (§2-8).
+		UFPSRCardDataAsset* RewardCard = nullptr;
+		if (Mission)
 		{
-			GS->AddBankedMissionReward(1);
+			if (const UFPSRMissionDataAsset* Data = Mission->GetMissionData())
+			{
+				RewardCard = Data->RewardCard;
+			}
 		}
 
-		UE_LOG(LogFPSR, Log, TEXT("[Run] Mission cleared — reward banked"));
+		if (UWorld* World = GetWorld())
+		{
+			for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+			{
+				if (AFPSRPlayerController* PC = Cast<AFPSRPlayerController>(It->Get()))
+				{
+					PC->GrantMissionReward(RewardCard);
+				}
+			}
+		}
+
+		if (AFPSRGameState* GS = GetGS())
+		{
+			GS->RefreshPauseState(); // freeze + present the reward offers (no-op if RewardCard was null)
+		}
+
+		UE_LOG(LogFPSR, Log, TEXT("[Run] Mission cleared — reward granted, run frozen for selection"));
 	}
 	else
 	{
@@ -423,21 +302,26 @@ void UFPSRRunDirectorSubsystem::DestroyActiveMission()
 
 void UFPSRRunDirectorSubsystem::EnterBoss()
 {
-	AFPSRGameState* GS = GetGS();
-	if (GS)
+	if (bBossStarted)
+	{
+		return;
+	}
+	bBossStarted = true;
+
+	DestroyActiveMission();
+
+	if (AFPSRGameState* GS = GetGS())
 	{
 		GS->SetRunPhase(ERunPhase::Boss);
-		GS->SetRoundTimeRemaining(0.0f); // boss phase has no round timer
 	}
 
-	UFPSREnemySpawnSubsystem* SpawnSub = GetSpawnSub();
-	if (SpawnSub)
+	if (UFPSREnemySpawnSubsystem* SpawnSub = GetSpawnSub())
 	{
 		SpawnSub->SetTargetAliveCount(0);
-		SpawnSub->ReleaseAllEnemies();
+		SpawnSub->ReleaseAllEnemies(); // clear the swarm for the boss arena (boss-specific spawns are P6)
 	}
 
-	UE_LOG(LogFPSR, Log, TEXT("[Run] Boss gate reached (boss actor is a P6 stub) — run timeline halted"));
+	UE_LOG(LogFPSR, Log, TEXT("[Run] Boss gate reached at t=%.0fs (boss actor is a P6 stub) — timeline halted"), RunClock);
 }
 
 FTransform UFPSRRunDirectorSubsystem::SelectMissionSpawnTransform(const UFPSRMissionDataAsset* Mission) const
@@ -521,8 +405,8 @@ FTransform UFPSRRunDirectorSubsystem::SelectMissionSpawnTransform(const UFPSRMis
 		return FarEnough.Last()->Point->GetActorTransform();
 	}
 
-	// Tag-matched points exist but all are within MinPlayerDistance — honor the distance intent as best we
-	// can by choosing the farthest matching point, rather than spawning the objective on top of a player.
+	// Tag-matched points exist but all are within MinPlayerDistance — choose the farthest matching point
+	// rather than spawning the objective on top of a player.
 	if (TagMatched.Num() > 0)
 	{
 		const FCandidate* Farthest = &TagMatched[0];
@@ -537,7 +421,7 @@ FTransform UFPSRRunDirectorSubsystem::SelectMissionSpawnTransform(const UFPSRMis
 		return Farthest->Point->GetActorTransform();
 	}
 
-	// No tag-matched points at all (unmapped level / wrong tag) — fall back to the first player so the run still works.
+	// No tag-matched points at all (unmapped level / wrong tag) — fall back to the first player.
 	UE_LOG(LogFPSR, Warning, TEXT("[Run] No matching mission spawn point (tag=%s) — using player location fallback"),
 		*RequiredTag.ToString());
 	if (PlayerLocations.Num() > 0)
@@ -569,6 +453,29 @@ bool UFPSRRunDirectorSubsystem::HasAnyPlayerPawn() const
 	return false;
 }
 
+bool UFPSRRunDirectorSubsystem::AllPlayersOpeningSeedIssued() const
+{
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return false;
+	}
+
+	bool bAnyPlayer = false;
+	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+	{
+		if (const AFPSRPlayerController* PC = Cast<AFPSRPlayerController>(It->Get()))
+		{
+			bAnyPlayer = true;
+			if (!PC->HasStartedOpeningSeed())
+			{
+				return false;
+			}
+		}
+	}
+	return bAnyPlayer;
+}
+
 AFPSRGameState* UFPSRRunDirectorSubsystem::GetGS() const
 {
 	UWorld* World = GetWorld();
@@ -581,31 +488,29 @@ UFPSREnemySpawnSubsystem* UFPSRRunDirectorSubsystem::GetSpawnSub() const
 	return World ? World->GetSubsystem<UFPSREnemySpawnSubsystem>() : nullptr;
 }
 
-void UFPSRRunDirectorSubsystem::DebugForceEndRound()
-{
-	if (!HasServerAuthority())
-	{
-		return;
-	}
-
-	AFPSRGameState* GS = GetGS();
-	if (GS && GS->GetRunPhase() == ERunPhase::Combat)
-	{
-		EndRound();
-	}
-}
-
 void UFPSRRunDirectorSubsystem::DebugTriggerMission()
 {
-	if (!HasServerAuthority())
+	if (!HasServerAuthority() || ActiveMission || !ActiveSchedule)
 	{
 		return;
 	}
 
-	AFPSRGameState* GS = GetGS();
-	if (GS && GS->GetRunPhase() == ERunPhase::Combat && !bMissionSpawned)
+	// Spawn the next not-yet-fired mission immediately (ignoring its trigger time).
+	for (int32 i = 0; i < ActiveSchedule->MissionEvents.Num(); ++i)
 	{
-		SpawnRoundMission();
+		if (MissionEventFired.IsValidIndex(i) && MissionEventFired[i])
+		{
+			continue;
+		}
+		if (MissionEventFired.IsValidIndex(i))
+		{
+			MissionEventFired[i] = true;
+		}
+		if (ActiveSchedule->MissionEvents[i].Mission)
+		{
+			SpawnMission(ActiveSchedule->MissionEvents[i].Mission);
+		}
+		return;
 	}
 }
 
@@ -619,170 +524,78 @@ void UFPSRRunDirectorSubsystem::DebugClearMission()
 
 void UFPSRRunDirectorSubsystem::DebugSkipToBoss()
 {
-	if (!HasServerAuthority())
+	if (HasServerAuthority())
 	{
-		return;
+		EnterBoss();
 	}
-
-	int32 NumRounds = GetNumRounds();
-	for (int32 i = 0; i < NumRounds; ++i)
-	{
-		if (GetRoundDef(i).bBossRound)
-		{
-			BeginRound(i);
-			return;
-		}
-	}
-
-	// No boss round found; go directly to boss
-	EnterBoss();
 }
 
 // ---- Console Commands (debug; excluded from shipping) ----
 
 #if !UE_BUILD_SHIPPING
-static FAutoConsoleCommandWithWorldAndArgs GFPSRNextRoundCmd(
-	TEXT("FPSR.NextRound"),
-	TEXT("Force end the current round and transition to breather."),
-	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic([](const TArray<FString>& Args, UWorld* World)
-	{
-		if (!World)
-		{
-			return;
-		}
-
-		UFPSRRunDirectorSubsystem* Dir = World->GetSubsystem<UFPSRRunDirectorSubsystem>();
-		if (!Dir)
-		{
-			return;
-		}
-
-		Dir->DebugForceEndRound();
-	}));
-
 static FAutoConsoleCommandWithWorldAndArgs GFPSRMissionTriggerCmd(
 	TEXT("FPSR.MissionTrigger"),
-	TEXT("Spawn the mission for the current round if one is defined."),
+	TEXT("Spawn the next scheduled mission immediately (debug)."),
 	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic([](const TArray<FString>& Args, UWorld* World)
 	{
-		if (!World)
+		if (UFPSRRunDirectorSubsystem* Dir = World ? World->GetSubsystem<UFPSRRunDirectorSubsystem>() : nullptr)
 		{
-			return;
+			Dir->DebugTriggerMission();
 		}
-
-		UFPSRRunDirectorSubsystem* Dir = World->GetSubsystem<UFPSRRunDirectorSubsystem>();
-		if (!Dir)
-		{
-			return;
-		}
-
-		Dir->DebugTriggerMission();
 	}));
 
 static FAutoConsoleCommandWithWorldAndArgs GFPSRMissionClearCmd(
 	TEXT("FPSR.MissionClear"),
-	TEXT("Mark the active mission as completed."),
+	TEXT("Mark the active mission as completed (debug)."),
 	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic([](const TArray<FString>& Args, UWorld* World)
 	{
-		if (!World)
+		if (UFPSRRunDirectorSubsystem* Dir = World ? World->GetSubsystem<UFPSRRunDirectorSubsystem>() : nullptr)
 		{
-			return;
+			Dir->DebugClearMission();
 		}
-
-		UFPSRRunDirectorSubsystem* Dir = World->GetSubsystem<UFPSRRunDirectorSubsystem>();
-		if (!Dir)
-		{
-			return;
-		}
-
-		Dir->DebugClearMission();
 	}));
 
 static FAutoConsoleCommandWithWorldAndArgs GFPSRSkipToBossCmd(
 	TEXT("FPSR.SkipToBoss"),
-	TEXT("Skip to the boss round."),
+	TEXT("Skip directly to the boss (debug)."),
 	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic([](const TArray<FString>& Args, UWorld* World)
 	{
-		if (!World)
+		if (UFPSRRunDirectorSubsystem* Dir = World ? World->GetSubsystem<UFPSRRunDirectorSubsystem>() : nullptr)
 		{
-			return;
+			Dir->DebugSkipToBoss();
 		}
-
-		UFPSRRunDirectorSubsystem* Dir = World->GetSubsystem<UFPSRRunDirectorSubsystem>();
-		if (!Dir)
-		{
-			return;
-		}
-
-		Dir->DebugSkipToBoss();
 	}));
 
 static FAutoConsoleCommandWithWorldAndArgs GFPSRRunTimeScaleCmd(
 	TEXT("FPSR.RunTimeScale"),
-	TEXT("Set run time scale (1.0 = normal, 2.0 = 2x speed). Usage: FPSR.RunTimeScale [scale]"),
+	TEXT("Set the run-clock time scale (1=normal, 10=10x). Usage: FPSR.RunTimeScale [scale]"),
 	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic([](const TArray<FString>& Args, UWorld* World)
 	{
-		if (!World)
+		if (UFPSRRunDirectorSubsystem* Dir = World ? World->GetSubsystem<UFPSRRunDirectorSubsystem>() : nullptr)
 		{
-			return;
+			Dir->SetTimeScale(Args.Num() > 0 ? FCString::Atof(*Args[0]) : 1.0f);
 		}
-
-		UFPSRRunDirectorSubsystem* Dir = World->GetSubsystem<UFPSRRunDirectorSubsystem>();
-		if (!Dir)
-		{
-			return;
-		}
-
-		float Scale = 1.0f;
-		if (Args.Num() > 0)
-		{
-			Scale = FCString::Atof(*Args[0]);
-		}
-
-		Dir->SetTimeScale(Scale);
-	}));
-
-static FAutoConsoleCommandWithWorldAndArgs GFPSRKillAllEnemiesCmd(
-	TEXT("FPSR.KillAllEnemies"),
-	TEXT("Release all active enemies back to the pool."),
-	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic([](const TArray<FString>& Args, UWorld* World)
-	{
-		if (!World)
-		{
-			return;
-		}
-
-		UFPSREnemySpawnSubsystem* Sub = World->GetSubsystem<UFPSREnemySpawnSubsystem>();
-		if (!Sub)
-		{
-			return;
-		}
-
-		Sub->ReleaseAllEnemies();
 	}));
 
 static FAutoConsoleCommandWithWorldAndArgs GFPSRRunDebugCmd(
 	TEXT("FPSR.RunDebug"),
-	TEXT("Toggle run debug output. Usage: FPSR.RunDebug [0|1]"),
+	TEXT("Toggle the on-screen run debug overlay. Usage: FPSR.RunDebug [0|1]"),
 	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic([](const TArray<FString>& Args, UWorld* World)
 	{
-		if (!World)
+		if (UFPSRRunDirectorSubsystem* Dir = World ? World->GetSubsystem<UFPSRRunDirectorSubsystem>() : nullptr)
 		{
-			return;
+			Dir->SetRunDebug(Args.Num() > 0 ? (FCString::Atoi(*Args[0]) != 0) : true);
 		}
+	}));
 
-		UFPSRRunDirectorSubsystem* Dir = World->GetSubsystem<UFPSRRunDirectorSubsystem>();
-		if (!Dir)
+static FAutoConsoleCommandWithWorldAndArgs GFPSRKillAllEnemiesCmd(
+	TEXT("FPSR.KillAllEnemies"),
+	TEXT("Release all active enemies back to the pool (debug)."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic([](const TArray<FString>& Args, UWorld* World)
+	{
+		if (UFPSREnemySpawnSubsystem* Sub = World ? World->GetSubsystem<UFPSREnemySpawnSubsystem>() : nullptr)
 		{
-			return;
+			Sub->ReleaseAllEnemies();
 		}
-
-		bool bEnable = true;
-		if (Args.Num() > 0)
-		{
-			bEnable = FCString::Atoi(*Args[0]) != 0;
-		}
-
-		Dir->SetRunDebug(bEnable);
 	}));
 #endif // !UE_BUILD_SHIPPING

@@ -11,23 +11,23 @@ class UFPSRMissionDataAsset;
 class AFPSRGameState;
 class UFPSREnemySpawnSubsystem;
 
-/** Server-authoritative run progression director.
- *  Manages round timeline, mission spawning, and phase transitions (Combat -> Breather -> Boss).
- *  Uses a fallback schedule if none is provided. */
+/** Server-authoritative run director (redesign 2026-06-04, Game.MD §2-8).
+ *  No rounds — the run is continuous. The director advances a run clock (paused during the global card-
+ *  selection freeze and after the boss), scales spawn intensity over time, spawns time-scheduled missions,
+ *  and triggers the boss at BossTime. Mission clears grant a reward pick + freeze (handled via GameState). */
 UCLASS()
 class FPSROGUELITE_API UFPSRRunDirectorSubsystem : public UWorldSubsystem
 {
 	GENERATED_BODY()
 
 public:
-	/** Set the run schedule (must be called before StartRun). */
+	/** Set the run schedule (must be called before StartRun). Null = built-in fallback (test) values. */
 	void SetActiveSchedule(UFPSRRunScheduleDataAsset* InSchedule) { ActiveSchedule = InSchedule; }
 
-	/** Start the run: begin round 0 and activate the director timer loop. */
+	/** Start the run: reset the clock and activate the director timer loop. */
 	void StartRun();
 
 	// Debug/testing entry points
-	void DebugForceEndRound();
 	void DebugTriggerMission();
 	void DebugClearMission();
 	void DebugSkipToBoss();
@@ -37,24 +37,24 @@ public:
 private:
 	bool HasServerAuthority() const;
 	void DirectorTick();
-	/** Enter the pre-combat hold: spawns stay off until every player finishes their opening-seed picks (§2-2). */
-	void BeginOpeningHold();
-	/** True if every connected player has completed its opening seed. bOutAnyStarted = at least one started. */
-	bool AreOpeningSeedsComplete(bool& bOutAnyStarted) const;
-	void BeginRound(int32 Index);
-	void EndRound();
-	void TryResumeFromBreather();
-	void SpawnRoundMission();
+	void UpdateSpawnIntensity();
+	void TrySpawnDueMission();
+	void SpawnMission(UFPSRMissionDataAsset* MissionData);
 	void OnMissionEnded(AFPSRMissionActor* Mission, bool bSuccess);
 	void EnterBoss();
 	void DestroyActiveMission();
-	FFPSRRoundDef GetRoundDef(int32 Index) const;
-	int32 GetNumRounds() const;
-	/** Pick where a round's mission spawns: weighted-random among designer-placed, tag-matched, enabled
-	 *  AFPSRMissionSpawnPoints. Falls back to a player location when no matching point exists. */
+
+	/** Time-scaled target alive enemy count from the schedule (or fallback) at the current run clock. */
+	int32 ComputeTargetAliveCount() const;
+	float GetBossTime() const;
+
+	/** Pick where a mission spawns: weighted-random among designer-placed, tag-matched, enabled spawn points
+	 *  (falls back to a player location when none exist). */
 	FTransform SelectMissionSpawnTransform(const UFPSRMissionDataAsset* Mission) const;
 	/** True if at least one player controller currently possesses a pawn (run start gate). */
 	bool HasAnyPlayerPawn() const;
+	/** True if every present FPSR player controller has had its opening seed issued (pre-combat hold gate). */
+	bool AllPlayersOpeningSeedIssued() const;
 	AFPSRGameState* GetGS() const;
 	UFPSREnemySpawnSubsystem* GetSpawnSub() const;
 
@@ -62,36 +62,35 @@ private:
 	UPROPERTY()
 	TObjectPtr<UFPSRRunScheduleDataAsset> ActiveSchedule;
 
-	TArray<FFPSRRoundDef> FallbackRounds;
-
 	UPROPERTY()
 	TObjectPtr<AFPSRMissionActor> ActiveMission;
 
-	int32 CurrentRoundIndex = 0;
-	float ElapsedInRound = 0.0f;
-	float RoundDuration = 0.0f;
-	float TotalElapsed = 0.0f;
-	float MissionTriggerTime = -1.0f;
-	/** Next in-round elapsed threshold (seconds) at which to log remaining time (every 30s). */
-	float NextRoundLogElapsed = 30.0f;
-	bool bMissionSpawned = false;
-	bool bMissionClearedThisRound = false;
+	/** Per-mission-event "already fired" flags (sized to the schedule's MissionEvents at StartRun). */
+	TArray<bool> MissionEventFired;
+
+	float RunClock = 0.0f;
 	float TimeScale = 1.0f;
 	bool bRunActive = false;
 	bool bRunDebug = false;
-	/** Set when StartRun is called before any player pawn exists; round 0 begins once one appears. */
+	bool bBossStarted = false;
+	/** Set when StartRun is called before any player pawn exists; spawning begins once one appears. */
 	bool bAwaitingFirstPlayer = false;
-
-	/** Pre-combat hold: true while waiting for players to finish opening-seed picks before round 0 spawns (§2-2). */
-	bool bAwaitingOpeningSeed = false;
-	float OpeningHoldElapsed = 0.0f;
+	/** Set after a pawn appears until the opening-seed freeze engages — holds spawning so enemies can't
+	 *  appear before the run-start card selection (the freeze then gates spawning on its own). */
+	bool bWaitingForOpeningSeed = false;
+	float OpeningWaitElapsed = 0.0f;
+	/** Next run-clock threshold (seconds) at which to log progress (every 30s of run time). */
+	float NextRunLogTime = 30.0f;
 
 	FTimerHandle DirectorTimerHandle;
 
 	static constexpr float DirectorInterval = 0.25f;
-	/** Safety: force combat to start if no player has even begun an opening seed within this many seconds
-	 *  (e.g. a client whose UI never reports ready), so the run can never hard-lock at the pre-combat hold. */
-	static constexpr float OpeningHoldNoStartTimeout = 30.0f;
-	/** Safety: force combat after this long even if some player never finishes (hung/AFK client). */
-	static constexpr float OpeningHoldMaxTimeout = 180.0f;
+	/** Max seconds to hold spawning waiting for the opening-seed freeze before proceeding anyway (anti-deadlock). */
+	static constexpr float OpeningSeedWaitTimeout = 5.0f;
+
+	// Fallback (test) schedule values when no schedule asset is assigned (no missions without content).
+	static constexpr float FallbackBossTime = 300.0f;
+	static constexpr int32 FallbackBaseAliveCount = 40;
+	static constexpr float FallbackAliveCountPerMinute = 30.0f;
+	static constexpr int32 FallbackMaxAliveCount = 250;
 };

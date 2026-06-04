@@ -163,7 +163,7 @@ TArray<FFPSRCardDraw> UFPSRCardSubsystem::DrawCards(AController* ForPlayer, int3
 	return Result;
 }
 
-bool UFPSRCardSubsystem::ApplyCard(AController* ForPlayer, const FFPSRCardDraw& Draw, bool bConsumeLevelUp)
+bool UFPSRCardSubsystem::ApplyCard(AController* ForPlayer, const FFPSRCardDraw& Draw, EFPSROfferType OfferType)
 {
 	UWorld* World = GetWorld();
 	if (!World || World->GetNetMode() == NM_Client)
@@ -174,14 +174,6 @@ bool UFPSRCardSubsystem::ApplyCard(AController* ForPlayer, const FFPSRCardDraw& 
 	UFPSRCardDataAsset* Card = Draw.Card;
 	if (!Card || !ForPlayer)
 	{
-		return false;
-	}
-
-	// Weapon-scope cards modify weapon stats, which is not implemented until P4. Reject without
-	// spending the player's selection so a weapon card can never be wasted on a no-op.
-	if (Card->Scope != ECardScope::Character)
-	{
-		UE_LOG(LogFPSR, Warning, TEXT("[Card] Rejected weapon-scope card '%s' — weapon-modifier application is P4"), *Card->GetName());
 		return false;
 	}
 
@@ -197,38 +189,97 @@ bool UFPSRCardSubsystem::ApplyCard(AController* ForPlayer, const FFPSRCardDraw& 
 		return false;
 	}
 
-	// When this apply represents a breather level-up selection, require a pending pick from this player and consume it
-	// atomically — gate before applying the effect so a stale/duplicate path can't grant cards for free.
-	// Opening-seed selections (§2-2) pass bConsumeLevelUp=false and skip this gate.
-	if (bConsumeLevelUp)
+	// Gate by offer type: require the matching pending pick BEFORE applying so a stale/duplicate path can't
+	// grant a card for free. Opening-seed applies without consuming anything.
+	if (OfferType == EFPSROfferType::LevelUp && PS->GetCardPicksPending() <= 0)
 	{
-		if (PS->GetCardPicksPending() <= 0)
-		{
-			return false;
-		}
+		return false;
+	}
+	if (OfferType == EFPSROfferType::MissionReward && PS->GetMissionRewardPicksPending() <= 0)
+	{
+		return false;
 	}
 
-	// Apply the card's GameplayEffect to the player ASC (Character scope), injecting the rolled tier magnitude.
-	if (Card->AppliedEffect)
+	// Apply the card's GameplayEffect. Character-scope applies now; weapon-scope (modifier) cards are
+	// accepted/consumed but their effect lands in P4-B — applying nothing here keeps the freeze from
+	// soft-locking on a reward the player can't yet apply.
+	if (Card->Scope == ECardScope::Character)
 	{
-		FGameplayEffectContextHandle Ctx = ASC->MakeEffectContext();
-		Ctx.AddSourceObject(this);
-		FGameplayEffectSpecHandle Spec = ASC->MakeOutgoingSpec(Card->AppliedEffect, 1.0f, Ctx);
-		if (Spec.IsValid())
+		if (Card->AppliedEffect)
 		{
-			// For GEs whose modifier uses SetByCaller (tag SetByCaller.CardMagnitude). Harmless for fixed GEs.
-			static const FGameplayTag CardMagnitudeTag = FGameplayTag::RequestGameplayTag(FName("SetByCaller.CardMagnitude"));
-			Spec.Data->SetSetByCallerMagnitude(CardMagnitudeTag, Draw.Magnitude);
-			ASC->ApplyGameplayEffectSpecToSelf(*Spec.Data.Get());
+			FGameplayEffectContextHandle Ctx = ASC->MakeEffectContext();
+			Ctx.AddSourceObject(this);
+			FGameplayEffectSpecHandle Spec = ASC->MakeOutgoingSpec(Card->AppliedEffect, 1.0f, Ctx);
+			if (Spec.IsValid())
+			{
+				// For GEs whose modifier uses SetByCaller (tag SetByCaller.CardMagnitude). Harmless for fixed GEs.
+				static const FGameplayTag CardMagnitudeTag = FGameplayTag::RequestGameplayTag(FName("SetByCaller.CardMagnitude"));
+				Spec.Data->SetSetByCallerMagnitude(CardMagnitudeTag, Draw.Magnitude);
+				ASC->ApplyGameplayEffectSpecToSelf(*Spec.Data.Get());
+			}
 		}
 	}
+	else
+	{
+		UE_LOG(LogFPSR, Log, TEXT("[Card] Weapon-scope card '%s' selected — effect application is P4-B (selection accepted)"), *Card->GetName());
+	}
 
-	if (bConsumeLevelUp)
+	// Consume the matching pick.
+	if (OfferType == EFPSROfferType::LevelUp)
 	{
 		PS->ConsumeCardPick();
 	}
+	else if (OfferType == EFPSROfferType::MissionReward)
+	{
+		PS->ConsumeMissionRewardPick();
+	}
 
 	return true;
+}
+
+FFPSRCardDraw UFPSRCardSubsystem::BuildSingleDraw(UFPSRCardDataAsset* Card, AController* ForPlayer) const
+{
+	FFPSRCardDraw Draw;
+	if (!Card || Card->RarityTiers.Num() == 0)
+	{
+		return Draw;
+	}
+
+	float Luck = 0.0f;
+	if (AFPSRPlayerState* PS = ForPlayer ? ForPlayer->GetPlayerState<AFPSRPlayerState>() : nullptr)
+	{
+		if (UFPSRCombatSet* CombatSet = PS->GetCombatSet())
+		{
+			Luck = CombatSet->GetLuck();
+		}
+	}
+
+	// Weighted pick among the card's tiers by effective weight (rarity base * luck), like DrawCards.
+	float TotalWeight = 0.0f;
+	for (const FFPSRCardRarityTier& Tier : Card->RarityTiers)
+	{
+		TotalWeight += GetEffectiveWeight(Card, Tier.Rarity, Luck);
+	}
+	const FFPSRCardRarityTier* Chosen = &Card->RarityTiers[0];
+	if (TotalWeight > 0.0f)
+	{
+		const float Pick = FMath::FRandRange(0.0f, TotalWeight);
+		float Cumulative = 0.0f;
+		for (const FFPSRCardRarityTier& Tier : Card->RarityTiers)
+		{
+			Cumulative += GetEffectiveWeight(Card, Tier.Rarity, Luck);
+			if (Pick <= Cumulative)
+			{
+				Chosen = &Tier;
+				break;
+			}
+		}
+	}
+
+	Draw.Card = Card;
+	Draw.Rarity = Chosen->Rarity;
+	Draw.Magnitude = Chosen->Magnitude;
+	return Draw;
 }
 
 bool UFPSRCardSubsystem::TryReroll(AController* ForPlayer)
@@ -412,8 +463,9 @@ namespace
 				Draw.Card = GLastDraw[Index].Card.Get();
 				Draw.Rarity = GLastDraw[Index].Rarity;
 				Draw.Magnitude = GLastDraw[Index].Magnitude;
-				const bool bApplied = CardSubsystem->ApplyCard(PC, Draw);
-				UE_LOG(LogFPSR, Log, TEXT("[Card] ApplyCard index %d -> %s (needs a pending level-up; FPSR.AddXP to queue one)"),
+				// Debug apply as an opening-seed pick (no pending level-up required).
+				const bool bApplied = CardSubsystem->ApplyCard(PC, Draw, EFPSROfferType::OpeningSeed);
+				UE_LOG(LogFPSR, Log, TEXT("[Card] ApplyCard index %d -> %s"),
 					Index, bApplied ? TEXT("applied") : TEXT("rejected"));
 			}
 		}));

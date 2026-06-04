@@ -132,7 +132,12 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 	const float Now = World->GetTimeSeconds();
 
 	const AFPSRGameState* GameState = World->GetGameState<AFPSRGameState>();
-	const bool bCombatPhase = (GameState == nullptr) || GameState->IsCombatPhase();
+	// Global freeze (card selection): enemies are frozen in place — skip the whole movement+attack pass.
+	// (Enemies move/attack during both Combat and Boss; only spawning is Combat-only.)
+	if (GameState && GameState->IsRunPaused())
+	{
+		return;
+	}
 
 	const UFPSRFlowFieldSubsystem* FlowField = World->GetSubsystem<UFPSRFlowFieldSubsystem>();
 
@@ -188,8 +193,7 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 
 		// Contact attack: in range + cooldown elapsed + the target player's attack-token budget allows.
 		const float AttackRange = Enemy->GetAttackRange();
-		if (bCombatPhase
-			&& BestDistSq <= (AttackRange * AttackRange)
+		if (BestDistSq <= (AttackRange * AttackRange)
 			&& Enemy->CanAttack(Now)
 			&& AttackersThisPass[BestPlayerIndex] < AttackTokenLimit)
 		{
@@ -273,9 +277,9 @@ void UFPSREnemySpawnSubsystem::TickDirector()
 	}
 
 	const AFPSRGameState* GameState = GetWorld() ? GetWorld()->GetGameState<AFPSRGameState>() : nullptr;
-	if (GameState && !GameState->IsCombatPhase())
+	if (GameState && (!GameState->IsCombatPhase() || GameState->IsRunPaused()))
 	{
-		return; // Breather (safe zone): spawning stops (Game.MD §2-2).
+		return; // Spawning only during Combat and only while not frozen for card selection (Game.MD §2-2).
 	}
 
 	int32 SpawnedThisTick = 0;

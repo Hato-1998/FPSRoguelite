@@ -15,6 +15,15 @@ enum class ECardScope : uint8
 	AllWeapons  UMETA(DisplayName = "All Weapons")
 };
 
+/** What a presented card offer represents — drives the draw pool and the consume/gate behavior. */
+UENUM(BlueprintType)
+enum class EFPSROfferType : uint8
+{
+	OpeningSeed  UMETA(DisplayName = "Opening Seed"),  // run-start seed; applies without consuming a pick
+	LevelUp      UMETA(DisplayName = "Level Up"),      // consumes a level-up pick (CardPicksPending)
+	MissionReward UMETA(DisplayName = "Mission Reward") // consumes a mission-reward pick; weapon-modifier card
+};
+
 UENUM(BlueprintType)
 enum class ECardRarity : uint8
 {

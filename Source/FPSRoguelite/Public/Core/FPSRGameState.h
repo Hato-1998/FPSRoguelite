@@ -5,19 +5,20 @@
 #include "GameFramework/GameStateBase.h"
 #include "FPSRGameState.generated.h"
 
+/** Macro run phase. Combat = normal run / mission window; Boss = final boss (no timer, no missions).
+ *  Global freeze during card selection is the separate bRunPaused flag, independent of the phase. */
 UENUM(BlueprintType)
 enum class ERunPhase : uint8
 {
-	Combat   UMETA(DisplayName = "Combat"),
-	Breather UMETA(DisplayName = "Breather"),
-	Boss     UMETA(DisplayName = "Boss")
+	Combat UMETA(DisplayName = "Combat"),
+	Boss   UMETA(DisplayName = "Boss")
 };
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnRunStateChanged);
 
-/** Server-authoritative run progression state (shared XP, party level, run phase).
- *  Level-up picks are per-player on AFPSRPlayerState::CardPicksPending (Game.MD §2-2).
- *  Replicated via Push Model. Phase controls enemy spawning/attacks. */
+/** Server-authoritative run progression state (shared XP, party level, run phase, global freeze).
+ *  Redesign 2026-06-04 (Game.MD §2-2): on level-up (or mission clear) the run globally freezes — enemies
+ *  and players stop — until every player finishes their card picks. Replicated via Push Model. */
 UCLASS()
 class FPSROGUELITE_API AFPSRGameState : public AGameStateBase
 {
@@ -37,21 +38,14 @@ public:
 
 	bool IsCombatPhase() const { return RunPhase == ERunPhase::Combat; }
 
-	/** Current round index (0-based). Driven by the run director (server). */
+	/** Global freeze flag: true while any player is selecting cards (opening seed / level-up / mission
+	 *  reward). When true, enemies and players are frozen (gameplay-state gate, not TimeDilation). */
 	UFUNCTION(BlueprintPure, Category = "FPSR|Run")
-	int32 GetCurrentRound() const { return CurrentRound; }
+	bool IsRunPaused() const { return bRunPaused; }
 
-	/** Banked (cleared) mission rewards awaiting selection in the next breather (Game.MD §2-8; P4-A counts only). */
-	UFUNCTION(BlueprintPure, Category = "FPSR|Run")
-	int32 GetBankedMissionRewards() const { return BankedMissionRewards; }
-
-	/** Replicated run clock (combat-elapsed seconds, low-frequency mirror for UI). */
+	/** Replicated run clock (survival seconds; pauses during freeze and after boss, low-frequency UI mirror). */
 	UFUNCTION(BlueprintPure, Category = "FPSR|Run")
 	float GetRunClockSeconds() const { return RunClockSeconds; }
-
-	/** Seconds remaining in the current round (0 outside Combat). Bind this in the HUD for a round timer. */
-	UFUNCTION(BlueprintPure, Category = "FPSR|Run")
-	float GetRoundTimeRemaining() const { return RoundTimeRemaining; }
 
 	/** XP required to advance FROM the given level to the next. */
 	UFUNCTION(BlueprintPure, Category = "FPSR|Run")
@@ -61,29 +55,22 @@ public:
 	UFUNCTION(BlueprintPure, Category = "FPSR|Run")
 	int32 GetRequiredXPForNextLevel() const { return GetRequiredXP(PartyLevel); }
 
-	/** Server: add shared XP and process any level-ups (grants per-player card picks; no freeze, Game.MD §2-2). */
+	/** Server: add shared XP and process level-ups. Grants per-player picks and freezes the run for
+	 *  selection (Game.MD §2-2). */
 	void AddSharedXP(int32 Amount);
 
-	/** Server: set the run phase (Combat / Breather / Boss). */
+	/** Server: set the macro run phase (Combat / Boss). */
 	void SetRunPhase(ERunPhase NewPhase);
 
-	/** Server: enter the breather (= SetRunPhase(Breather), which presents pending level-up offers). */
-	void BeginBreather() { SetRunPhase(ERunPhase::Breather); }
+	/** Server: set the global freeze flag directly (normally driven by RefreshPauseState). */
+	void SetRunPaused(bool bPaused);
 
-	/** Server: set the current round index (run director). */
-	void SetCurrentRound(int32 NewRound);
-
-	/** Server: bank cleared mission rewards (presented in the next breather; P4-A increments the count only). */
-	void AddBankedMissionReward(int32 Count = 1);
-
-	/** Server: clear banked mission rewards (consumed at breather; P4-B). */
-	void ResetBankedMissionRewards();
+	/** Server: recompute the freeze state from outstanding player selections and (re)present needed offers.
+	 *  Paused iff any connected player still has a pending pick or an active offer; unpauses when all done. */
+	void RefreshPauseState();
 
 	/** Server: update the replicated run clock (low-frequency UI mirror). */
 	void SetRunClockSeconds(float Seconds);
-
-	/** Server: update the replicated round-remaining seconds (low-frequency UI mirror; 0 outside Combat). */
-	void SetRoundTimeRemaining(float Seconds);
 
 	UPROPERTY(BlueprintAssignable, Category = "FPSR|Run")
 	FOnRunStateChanged OnRunStateChanged;
@@ -93,10 +80,6 @@ public:
 protected:
 	UFUNCTION()
 	void OnRep_RunState();
-
-	/** Server: present a level-up card offer to every player who has pending picks and no active offer.
-	 *  Called on breather entry and when picks are granted while already in the breather (§2-2). */
-	void PresentPendingLevelUpOffers();
 
 	/** XP required to advance from level 1; each level adds XPPerLevel (linear curve placeholder —
 	 *  a UCurveFloat data-driven curve is a follow-up, Game.MD §2-8). Editor-tunable. */
@@ -117,14 +100,8 @@ protected:
 	ERunPhase RunPhase = ERunPhase::Combat;
 
 	UPROPERTY(ReplicatedUsing = OnRep_RunState)
-	int32 CurrentRound = 0;
-
-	UPROPERTY(ReplicatedUsing = OnRep_RunState)
-	int32 BankedMissionRewards = 0;
+	bool bRunPaused = false;
 
 	UPROPERTY(ReplicatedUsing = OnRep_RunState)
 	float RunClockSeconds = 0.0f;
-
-	UPROPERTY(ReplicatedUsing = OnRep_RunState)
-	float RoundTimeRemaining = 0.0f;
 };

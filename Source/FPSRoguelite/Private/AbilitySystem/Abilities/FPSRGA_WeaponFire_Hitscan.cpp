@@ -6,6 +6,7 @@
 #include "Weapon/FPSRWeaponDataAsset.h"
 #include "Weapon/FPSRWeaponFireComponent.h"
 #include "Enemy/FPSREnemyHealthComponent.h"
+#include "Core/FPSRGameState.h"
 #include "Core/FPSRLogChannels.h"
 
 #include "AbilitySystemComponent.h"
@@ -37,6 +38,16 @@ void UFPSRGA_WeaponFire_Hitscan::ActivateAbility(
 	{
 		EndAbility(Handle, ActorInfo, ActivationInfo, true, true);
 		return;
+	}
+
+	// No firing while the run is frozen for card selection (Game.MD §2-2).
+	if (const AFPSRGameState* RunState = World->GetGameState<AFPSRGameState>())
+	{
+		if (RunState->IsRunPaused())
+		{
+			EndAbility(Handle, ActorInfo, ActivationInfo, true, true);
+			return;
+		}
 	}
 
 	// Resolve weapon stats from the equipped weapon (fallback to defaults).

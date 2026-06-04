@@ -46,6 +46,9 @@ public:
 protected:
 	void InitAbilitySystem();
 
+	/** True while the run is globally frozen for card selection (Game.MD §2-2) — gates player input. */
+	bool IsRunFrozen() const;
+
 	/** Bound to the health set's OnOutOfHealth (server). Placeholder: logs; full DBNO/respawn is P5. */
 	void HandleOutOfHealth();
 
