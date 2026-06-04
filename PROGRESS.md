@@ -4,15 +4,17 @@
 > **작업 단계를 끝낼 때마다, 그리고 중단 전 반드시 이 파일을 갱신하고 커밋한다.**
 > 확정 설계·기획·코드구조·규칙은 `Game.MD`(SSOT), **완료 작업 상세는 `git log --oneline`**. 여기엔 *무엇을 했는지*만 요약한다.
 
-**최종 갱신: 2026-06-02**
+**최종 갱신: 2026-06-04**
 
 ## 한 줄 요약
-**P0~P3-D → main 머지 완료**. P3-D(카드 UI/공유XP바/오프닝시드 + 협동 레벨업 모델 전환) 코드+WBP 콘텐츠 PIE 검증·빌드·스모크·Codex 통과. → 다음 **P4**(무기 모디파이어 Fragment + 무기 7종 + TimeGate 미션/정비시간 진입 + 게임필).
+**P0~P3-D → main 머지 완료**. **P4-A(라운드 디렉터 + 확장형 미션 프레임워크 + 오프닝시드 자동 + 런상태 확장) 코드 완료** — 브랜치 `phase/p4a-runflow-missions`에서 빌드+헤드리스 스모크+Codex(교정 포함) 통과. → 다음 **사용자 콘텐츠(DA/BP) 작성 + PIE 검증 → `--no-ff` main 머지**, 이후 **P4-B**(무기 모디파이어 Fragment + weapon-scope 카드 + 미션 보상 적용).
 
-## ▶▶ 새 세션 우선 작업 = P4 착수 (새 작업 → 플랜 우선)
-- **브랜치**: `main`만 존재. **P4는 `main`에서 새 `phase/p4-...` 분기**(§6-7). 구현=Haiku 위임 / 검증=Opus 직접(빌드+스모크+Codex). HIGH_RISK는 승인 후.
-- **P3-D가 P4에 노출한 카드 UI 흐름**: 서버권위 `AFPSRPlayerController` — `BeginOpeningSeed(Count)`/`RequestCardOffer(bConsumeLevelUp)`(서버 전용, 클라RPC 아님) → `ClientPresentCards(OfferId, Offer)` → 클라 인텐트 `ServerSelectCard(Index, OfferId)`/`ServerRerollOffer(OfferId)`/`ServerAbandonOffer(OfferId)`(전부 offer nonce 검증). 레벨업 픽=플레이어별 `AFPSRPlayerState::CardPicksPending`. breather 진입/AddXP 시 `AFPSRGameState::PresentPendingLevelUpOffers()` 자동 발급.
-- **P4 우선 작업(Codex/설계 이월)**: ① **오프닝 시드 런 시작 자동 트리거**(현재 디버그 `FPSR.OpeningSeed`만 — PostLogin/런 초기화에서 `BeginOpeningSeed` 호출). ② **TimeGate 미션 클리어 → 정비시간 진입** 연결(현재 `FPSR.SetPhase breather` 디버그). ③ 무기 모디파이어 Fragment + 무기 7종 + ThisWeapon/AllWeapons 카드 스코프 활성(현재 `ApplyCard`가 weapon-scope reject). ④ 게임필(히트마커/핑/위협 인디케이터). ⑤ PickupRadius/XPGain 속성 추가.
+## ▶▶ 새 세션 우선 작업 = P4-A 마무리 (콘텐츠 + PIE + 머지)
+- **현재 활성 브랜치**: `phase/p4a-runflow-missions` (main 미머지). 구현=Haiku 위임 / 검증=Opus 직접(빌드+스모크+Codex). HIGH_RISK는 승인 후.
+- **P4-A 코드 완료**: 라운드제 런(데이터 드리븐), `UFPSRRunDirectorSubsystem`(라운드 타임라인·스폰강도·라운드종료 Breather·픽 소비완료 자동재개·라운드당 1미션 랜덤시각·보스 게이트 스텁), 확장형 미션 프레임워크(`AFPSRMissionActor`+`UFPSRMissionDataAsset`+레퍼런스 `AFPSRMission_HoldZone`), `UFPSRRunScheduleDataAsset`, 오프닝시드 자동(`ServerNotifyClientReady` RPC), `ERunPhase::Boss`/`CurrentRound`/`BankedMissionRewards`/`RunClockSeconds`, 디버그 7종. Game.MD §2-1/2-2/2-7/2-8 라운드제로 갱신.
+- **다음 단계**: ① **사용자 콘텐츠** — [`Docs/P4-A_UserContent_Guide.md`](Docs/P4-A_UserContent_Guide.md) 따라 `DA_RunSchedule`/`DA_Mission_HoldZone`/`BP_Mission_HoldZone` 생성 + `BP_FPSRGameMode`에 `RunSchedule` 할당. ② **PIE 검증**(오프닝시드→스폰→미션→Breather카드→자동재개→보스게이트). ③ 통과 시 `--no-ff` main 머지(§6-7) + 브랜치 정리.
+- **⚠️ 임시 테스트값(프로덕션 전환 시 노티·원복)**: 라운드 2/2/1분(프로덕션 5/10/15분), 적 `XPReward=100`, `XPPerLevel=0`(1킬=1레벨). 메모리 `p4a-temp-test-values`.
+- **P4 잔여(이월)**: **P4-B** 무기 모디파이어 Fragment + `ApplyCard` weapon-scope 활성(현재 reject) + 미션 보상 카드 Breather 선택·적용(P3-D 오퍼 모드 enum 일반화) + 나머지 6종 미션. **P4-C** 무기 7종. **P4-D** 게임필(히트마커/핑/위협 인디케이터/사각 오디오) + PickupRadius/XPGain.
 - **P4 백로그 — 디자이너 배치 스폰 포인트**: 현재 스폰은 첫 플레이어 주변 링 랜덤([`UFPSREnemySpawnSubsystem::ComputeSpawnLocation`](Source/FPSRoguelite/Private/Enemy/FPSREnemySpawnSubsystem.cpp:292)). → **맵에 배치한 고정 스폰 포인트 중 "전 플레이어 비가시 & 최소거리 이상"인 곳을 가중 랜덤 선택**으로 전환(랜덤 위치 X, 디자이너 지정 지점). 구현: 경량 액터 `AFPSREnemySpawnPoint`(Weight/Zone/MinPlayerDistance 데이터) → `OnWorldBeginPlay`에서 `TActorIterator`로 캐시 → 디렉터 틱마다 플레이어 카메라/위치 캐시 후 시야각(dot>cosHalfFOV)+거리 게이트로 후보 필터 → Weight×거리가중치 가중 랜덤. 후보 없으면 링 랜덤 폴백(미배치 맵도 동작). Zone은 TimeGate(§2-8)와 연동해 시간대별 스폰 구역 전환 가능. (서버 권위, 고정맵 §1 부합)
 - **빌드/검증**: §6-6 (`Build.bat FPSRogueliteEditor ... -WaitMutex` / 스모크 `FPSRoguelite.Smoke.ModuleLoads` / `Scripts/codex-review.ps1 -Base main`).
 
