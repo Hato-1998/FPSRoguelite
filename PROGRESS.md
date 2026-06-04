@@ -7,19 +7,13 @@
 **최종 갱신: 2026-06-02**
 
 ## 한 줄 요약
-**P0~P2 + P3-A·B·C → main 머지 완료. P3-D(카드 UI/공유XP바/오프닝시드) C++ 베이스 완료 = `phase/p3d-cardui` 브랜치**(빌드+스모크+Codex 7라운드 통과). → **사용자 WBP 콘텐츠 작성 + PIE 검증 후 `--no-ff` main 머지** 대기.
+**P0~P3-D → main 머지 완료**. P3-D(카드 UI/공유XP바/오프닝시드 + 협동 레벨업 모델 전환) 코드+WBP 콘텐츠 PIE 검증·빌드·스모크·Codex 통과. → 다음 **P4**(무기 모디파이어 Fragment + 무기 7종 + TimeGate 미션/정비시간 진입 + 게임필).
 
-## ▶▶ 새 세션 우선 작업 = P3-D 사용자 콘텐츠(WBP) + PIE 검증 → main 머지
-- **현재 활성 브랜치**: `phase/p3d-cardui`(origin push됨). C++/config/Game.MD 커밋 완료. UI는 헤드리스 검증 불가 → **사용자 PIE 필수**.
-- **사용자 작성 WBP**(C++ 베이스 상속):
-  - `WBP_PrimaryGameLayout`(부모 `FPSRPrimaryGameLayout`): named `UCommonActivatableWidgetStack` 4개 = **`Layer_Game`/`Layer_GameMenu`/`Layer_Menu`/`Layer_Modal`**(BindWidget 이름 정확히)
-  - `WBP_XPBar`(부모 `FPSRXPBarWidget`): `XPBar`(ProgressBar)/`LevelText`/`StackText`(BindWidgetOptional)
-  - `WBP_CardSelect`(부모 `FPSRCardSelectWidget`): `CardEntry_0/1/2`(WBP_CardEntry, BindWidget)/`RerollButton`(opt)/`RerollChargesText`(opt)
-  - `WBP_CardEntry`(부모 `FPSRCardEntryWidget`): `SelectButton`(BindWidget)/`CardNameText`/`RarityText`/`DescriptionText`/`MagnitudeText`(opt)
-- **BP_FPSRPlayerController 할당**: `PrimaryLayoutClass=WBP_PrimaryGameLayout` / `XPBarWidgetClass=WBP_XPBar` / `CardSelectWidgetClass=WBP_CardSelect`. (WBP_CardSelect 내부 `CardEntryClass` 불필요 — 엔트리는 BindWidget 고정 3개)
-- **PIE 검증 시나리오**: ① XP바 표시·`FPSR.AddXP`로 Lv/XP/Stack 갱신 ② `FPSR.SetPhase breather`→픽 보유 시 카드 자동 발급 ③ 카드 3장 선택/리롤 ④ `FPSR.OpeningSeed`로 2연속 선택 ⑤ (가능하면 2-client로 플레이어별 픽 독립 확인). 빌드 시 `DefaultEngine.ini` ViewportClient로 `LogUIActionRouter` 에러 소멸 확인.
-- **빌드/검증**: §6-6 (`Build.bat FPSRogueliteEditor ... -WaitMutex` / 스모크 `FPSRoguelite.Smoke.ModuleLoads` / `Scripts/codex-review.ps1 -Uncommitted`).
-- **P4 이월(Codex 라운드7 — P3-D 스코프 외)**: 오프닝 시드의 런 시작 자동 트리거(현재 디버그 `FPSR.OpeningSeed`만; 미션/런플로우=P4). 카드 UI 표시 실패(설정 오류)는 `ServerAbandonOffer`로 해제만(재시도 안 함 — 정상 설정에선 발생 안 함).
+## ▶▶ 새 세션 우선 작업 = P4 착수 (새 작업 → 플랜 우선)
+- **브랜치**: `main`만 존재. **P4는 `main`에서 새 `phase/p4-...` 분기**(§6-7). 구현=Haiku 위임 / 검증=Opus 직접(빌드+스모크+Codex). HIGH_RISK는 승인 후.
+- **P3-D가 P4에 노출한 카드 UI 흐름**: 서버권위 `AFPSRPlayerController` — `BeginOpeningSeed(Count)`/`RequestCardOffer(bConsumeLevelUp)`(서버 전용, 클라RPC 아님) → `ClientPresentCards(OfferId, Offer)` → 클라 인텐트 `ServerSelectCard(Index, OfferId)`/`ServerRerollOffer(OfferId)`/`ServerAbandonOffer(OfferId)`(전부 offer nonce 검증). 레벨업 픽=플레이어별 `AFPSRPlayerState::CardPicksPending`. breather 진입/AddXP 시 `AFPSRGameState::PresentPendingLevelUpOffers()` 자동 발급.
+- **P4 우선 작업(Codex/설계 이월)**: ① **오프닝 시드 런 시작 자동 트리거**(현재 디버그 `FPSR.OpeningSeed`만 — PostLogin/런 초기화에서 `BeginOpeningSeed` 호출). ② **TimeGate 미션 클리어 → 정비시간 진입** 연결(현재 `FPSR.SetPhase breather` 디버그). ③ 무기 모디파이어 Fragment + 무기 7종 + ThisWeapon/AllWeapons 카드 스코프 활성(현재 `ApplyCard`가 weapon-scope reject). ④ 게임필(히트마커/핑/위협 인디케이터). ⑤ PickupRadius/XPGain 속성 추가.
+- **빌드/검증**: §6-6 (`Build.bat FPSRogueliteEditor ... -WaitMutex` / 스모크 `FPSRoguelite.Smoke.ModuleLoads` / `Scripts/codex-review.ps1 -Base main`).
 
 ---
 
@@ -75,7 +69,7 @@
 
 ## ✅ 완료 이력 (요약 — 상세는 `git log` / Game.MD)
 
-- **P3-D (C++ 베이스, `phase/p3d-cardui`, WBP+PIE 대기)** 카드 UI/공유XP바/오프닝시드 — CommonUI 인프라(`CommonUI`/`CommonInput`/`UMG` 모듈, `UFPSRGameViewportClient`, `DefaultEngine.ini` ViewportClient, 경량 `UFPSRPrimaryGameLayout`=4 레이어 스택) + `UFPSRXPBarWidget`(OnRep 델리게이트 이벤트기반, 폴링 없음) + `UFPSRCardSelectWidget`/`UFPSRCardEntryWidget` + PC RPC 배선(서버 캐시+인덱스+offer nonce 검증, 클라는 인텐트만). **설계 변경: 레벨업 스택=공유 카운터 → 플레이어별 `AFPSRPlayerState::CardPicksPending`**(4인 협동 정합, Game.MD §2-2). breather 진입/AddXP 시 서버 자동 발급. 디버그 `FPSR.OpeningSeed`/`FPSR.RequestCards`(권한 보유 시). Codex 7라운드로 보안(클라 임의카드/무한리드로/리롤악용)·정합(nonce/지연바인딩/데드락) 하드닝. 빌드+스모크 통과.
+- **P3-D (main 머지)** 카드 UI/공유XP바/오프닝시드 — CommonUI 인프라(`CommonUI`/`CommonInput`/`UMG` 모듈, `UFPSRGameViewportClient`, `DefaultEngine.ini` ViewportClient, 경량 `UFPSRPrimaryGameLayout`=4 레이어 스택) + `UFPSRXPBarWidget`(OnRep 델리게이트 이벤트기반, 폴링 없음) + `UFPSRCardSelectWidget`/`UFPSRCardEntryWidget` + PC RPC 배선(서버 캐시+인덱스+offer nonce 검증, 클라는 인텐트만). **설계 변경: 레벨업 스택=공유 카운터 → 플레이어별 `AFPSRPlayerState::CardPicksPending`**(4인 협동 정합, Game.MD §2-2). breather 진입/AddXP 시 서버 자동 발급. 디버그 `FPSR.OpeningSeed`/`FPSR.RequestCards`(권한 보유 시). Codex 7라운드로 보안(클라 임의카드/무한리드로/리롤악용)·정합(nonce/지연바인딩/데드락) 하드닝. 빌드+스모크 통과.
 - **P3-C** 카드 시스템(main 머지) — `UFPSRCardDataAsset`(`RarityTiers` 등급별 수치) + `UFPSRCardPoolDataAsset` + `UFPSRCardSubsystem`(등급 가중 비복원 추첨/`CardFamily` 디듀프/`ApplyCard` 레벨업 게이트/`TryReroll`). 리롤=PlayerState(플레이어별 3). `Luck` 단일 행운축(RarityBonus 폐지). 수치=`SetByCaller`(태그 `SetByCaller.CardMagnitude`). `IsDataValid` 검증. 최대체력 증가=현재체력 동반증가(서버권위). Character 카드 콘텐츠 5종+풀+GE(`Content/Cards/Character/`). PIE 확인됨. (Game.MD §2-3)
 - **P3-B** XP 픽업+자석 — `AFPSRXPPickup`(서버 자석 이동·수령) + `UFPSRPickupSubsystem`(cap 150, 초과 시 XP 직접가산). 적 사망 시 드롭.
 - **P3-A** 런 상태(GameState 호스팅) — `AFPSRGameState`에 `SharedXP/PartyLevel/PendingLevelUps/RunPhase`(Push Model). 레벨업=스택 누적(프리즈 없음 §2-2). Breather 시 스폰·공격 게이팅.
