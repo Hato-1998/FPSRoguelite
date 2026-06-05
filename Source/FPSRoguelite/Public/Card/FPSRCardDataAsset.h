@@ -4,6 +4,7 @@
 
 #include "Engine/DataAsset.h"
 #include "Card/FPSRCardTypes.h"
+#include "Weapon/FPSRWeaponTypes.h"
 #include "GameplayTagContainer.h"
 #include "FPSRCardDataAsset.generated.h"
 
@@ -43,6 +44,15 @@ public:
 	 *  If unset (None), the AppliedEffect GE class is used as the family key instead. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Card")
 	FGameplayTag CardFamily;
+
+	/** Weapon-scope only (ThisWeapon / AllWeapons): which weapon stat this card modifies. Ignored for
+	 *  Character scope (those use AppliedEffect). The tier Magnitude is the modifier Value. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Card|Weapon")
+	EFPSRWeaponStat WeaponStat = EFPSRWeaponStat::FireRate;
+
+	/** Weapon-scope only: how the modifier combines (additive flat vs percent multiply). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Card|Weapon")
+	EFPSRWeaponModOp WeaponStatOp = EFPSRWeaponModOp::PercentMultiply;
 
 #if WITH_EDITOR
 	/** Editor validation: a card with no RarityTiers is never offered (errors); no AppliedEffect applies nothing (warns). */

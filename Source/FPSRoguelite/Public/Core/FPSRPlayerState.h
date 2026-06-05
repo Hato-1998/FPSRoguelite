@@ -4,6 +4,7 @@
 
 #include "GameFramework/PlayerState.h"
 #include "AbilitySystemInterface.h"
+#include "Weapon/FPSRWeaponTypes.h"
 #include "FPSRPlayerState.generated.h"
 
 class UFPSRAbilitySystemComponent;
@@ -65,6 +66,14 @@ public:
 	/** Server: consume one pending mission-reward pick. Returns true if successful. */
 	bool ConsumeMissionRewardPick();
 
+	/** AllWeapons-scope stat modifiers (apply to every owned weapon). Lives on the PlayerState so it is
+	 *  character-wide and survives pawn respawn, consistent with the run state (CardPicksPending). */
+	const FFPSRWeaponModContainer& GetAllWeaponsMods() const { return AllWeaponsMods; }
+
+	/** Server: append an AllWeapons stat modifier (from an AllWeapons-scope card). Marks the owning pawn's
+	 *  weapon instances' resolved-stat caches dirty. */
+	void AddAllWeaponsModifier(const FFPSRWeaponStatMod& Mod);
+
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 	virtual void BeginPlay() override;
 
@@ -77,6 +86,9 @@ protected:
 
 	UFUNCTION()
 	void OnRep_CardPicksPending();
+
+	UFUNCTION()
+	void OnRep_AllWeaponsMods();
 
 private:
 	UPROPERTY(VisibleAnywhere, Category = "FPSR|Abilities")
@@ -99,4 +111,7 @@ private:
 
 	UPROPERTY(ReplicatedUsing = OnRep_CardPicksPending)
 	int32 MissionRewardPicksPending = 0;
+
+	UPROPERTY(ReplicatedUsing = OnRep_AllWeaponsMods)
+	FFPSRWeaponModContainer AllWeaponsMods;
 };

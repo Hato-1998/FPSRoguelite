@@ -64,6 +64,10 @@ AFPSRCharacter::AFPSRCharacter()
 	WeaponInventory = CreateDefaultSubobject<UFPSRWeaponInventoryComponent>(TEXT("WeaponInventory"));
 	WeaponFire = CreateDefaultSubobject<UFPSRWeaponFireComponent>(TEXT("WeaponFire"));
 
+	// Required so the inventory component's registered weapon-instance subobjects replicate (engine: the
+	// owning actor must also opt into the registered subobject list, not just the component).
+	bReplicateUsingRegisteredSubObjectList = true;
+
 	// Input actions, default weapons, and the mapping context are assigned in the
 	// Blueprint subclass (BP_FPSRCharacter / BP_FPSRPlayerController) — no hardcoded
 	// content paths in C++.
@@ -305,6 +309,12 @@ void AFPSRCharacter::Input_Dash(const FInputActionValue& Value)
 
 void AFPSRCharacter::ServerEquipSlot_Implementation(int32 SlotIndex)
 {
+	// No weapon switching during the card-selection freeze: the run is globally stopped, and locking the
+	// equipped slot keeps a ThisWeapon-scope card's target deterministic (it can't be swapped mid-offer).
+	if (IsRunFrozen())
+	{
+		return;
+	}
 	if (WeaponInventory)
 	{
 		WeaponInventory->EquipSlot(SlotIndex);

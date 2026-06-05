@@ -71,10 +71,27 @@ void UFPSRCardEntryWidget::UpdateDisplay()
 		DescriptionText->SetText(CardAsset->Description);
 	}
 
-	// Display magnitude
+	// Display magnitude. Weapon-scope percent modifiers show as a signed percentage ("+25%", "-25%");
+	// flat values show as an integer when whole, otherwise with up to 2 decimals — never truncating a
+	// fractional magnitude (e.g. +0.25 / +0.05) down to a misleading "+0".
 	if (MagnitudeText)
 	{
-		const FString MagStr = FString::Printf(TEXT("+%.0f"), CachedDraw.Magnitude);
+		const float Mag = CachedDraw.Magnitude;
+		const bool bWeaponScope = (CardAsset->Scope == ECardScope::ThisWeapon || CardAsset->Scope == ECardScope::AllWeapons);
+
+		FString MagStr;
+		if (bWeaponScope && CardAsset->WeaponStatOp == EFPSRWeaponModOp::PercentMultiply)
+		{
+			MagStr = FString::Printf(TEXT("%+d%%"), FMath::RoundToInt(Mag * 100.0f));
+		}
+		else if (FMath::IsNearlyEqual(Mag, FMath::RoundToFloat(Mag)))
+		{
+			MagStr = FString::Printf(TEXT("%+d"), FMath::RoundToInt(Mag));
+		}
+		else
+		{
+			MagStr = FString::Printf(TEXT("%+.2f"), Mag);
+		}
 		MagnitudeText->SetText(FText::FromString(MagStr));
 	}
 }

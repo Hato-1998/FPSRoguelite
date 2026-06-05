@@ -8,6 +8,7 @@
 #include "AbilitySystem/FPSRAbilitySystemComponent.h"
 #include "AbilitySystem/Attributes/FPSRCombatSet.h"
 #include "Weapon/FPSRWeaponInventoryComponent.h"
+#include "Weapon/FPSRWeaponInstance.h"
 #include "Weapon/FPSRWeaponDataAsset.h"
 #include "AbilitySystemComponent.h"
 #include "GameplayEffect.h"
@@ -79,13 +80,29 @@ TArray<FFPSRCardDraw> UFPSRCardSubsystem::DrawCards(AController* ForPlayer, int3
 		}
 	}
 
-	// Flatten each Character-scope card into one weighted offer per rarity tier. Weapon-scope cards (P4)
-	// and excluded cards are skipped so they are never offered.
+	// Weapon-scope (ThisWeapon/AllWeapons) stat cards join the level-up pool only once the player owns a
+	// weapon to apply them to (Game.MD §2-4-1). Character-scope cards are always eligible.
+	bool bHasWeapon = false;
+	if (APawn* Pawn = ForPlayer ? ForPlayer->GetPawn() : nullptr)
+	{
+		if (UFPSRWeaponInventoryComponent* Inv = Pawn->FindComponentByClass<UFPSRWeaponInventoryComponent>())
+		{
+			bHasWeapon = Inv->GetOwnedWeapons().Num() > 0;
+		}
+	}
+
+	// Flatten each eligible card into one weighted offer per rarity tier. Excluded cards, and weapon-scope
+	// cards while the player owns no weapon, are skipped so they are never offered.
 	TArray<FFPSRCardDraw> Candidates;
 	TArray<float> CandidateWeights;
 	for (UFPSRCardDataAsset* Card : Cards)
 	{
-		if (!Card || Card->Scope != ECardScope::Character || Exclude.Contains(Card))
+		if (!Card || Exclude.Contains(Card))
+		{
+			continue;
+		}
+		const bool bWeaponScope = (Card->Scope == ECardScope::ThisWeapon || Card->Scope == ECardScope::AllWeapons);
+		if (bWeaponScope && !bHasWeapon)
 		{
 			continue;
 		}
@@ -200,9 +217,8 @@ bool UFPSRCardSubsystem::ApplyCard(AController* ForPlayer, const FFPSRCardDraw& 
 		return false;
 	}
 
-	// Apply the card's GameplayEffect. Character-scope applies now; weapon-scope (modifier) cards are
-	// accepted/consumed but their effect lands in P4-B — applying nothing here keeps the freeze from
-	// soft-locking on a reward the player can't yet apply.
+	// Apply the card's effect. Character-scope applies a GameplayEffect to the ASC; weapon-scope cards apply
+	// a stat modifier to the weapon instance(s) (weapon stats live outside the ASC, §2-4-1).
 	if (Card->Scope == ECardScope::Character)
 	{
 		if (Card->AppliedEffect)
@@ -219,9 +235,32 @@ bool UFPSRCardSubsystem::ApplyCard(AController* ForPlayer, const FFPSRCardDraw& 
 			}
 		}
 	}
-	else
+	else // ThisWeapon / AllWeapons
 	{
-		UE_LOG(LogFPSR, Log, TEXT("[Card] Weapon-scope card '%s' selected — effect application is P4-B (selection accepted)"), *Card->GetName());
+		APawn* Pawn = ForPlayer->GetPawn();
+		UFPSRWeaponInventoryComponent* Inventory = Pawn ? Pawn->FindComponentByClass<UFPSRWeaponInventoryComponent>() : nullptr;
+		if (!Inventory)
+		{
+			// No weapon system on this pawn — reject so the pick is NOT consumed (offer stays up).
+			return false;
+		}
+
+		const FFPSRWeaponStatMod Mod{ Card->WeaponStat, Card->WeaponStatOp, Draw.Magnitude };
+		if (Card->Scope == ECardScope::ThisWeapon)
+		{
+			// ThisWeapon = the currently equipped weapon by design (§2-4-1: "현재 무기 1정"). Level-up
+			// weapon-stat cards are general-pool cards, so "current weapon" is the intended target.
+			UFPSRWeaponInstance* Instance = Inventory->GetCurrentInstance();
+			if (!Instance)
+			{
+				return false;
+			}
+			Instance->AddModifier(Mod);
+		}
+		else // AllWeapons
+		{
+			PS->AddAllWeaponsModifier(Mod);
+		}
 	}
 
 	// Consume the matching pick.
@@ -355,7 +394,12 @@ void UFPSRCardSubsystem::GatherCandidatePool(AController* ForPlayer, TArray<UFPS
 		}
 		for (UFPSRCardDataAsset* Card : Weapon->WeaponCards)
 		{
-			if (Card && !OutCandidates.Contains(Card))
+			// Only Character-scope cards contributed by a specific weapon join the level-up candidate pool.
+			// Weapon-scope (ThisWeapon/AllWeapons) modifier cards tied to a particular weapon are delivered via
+			// the MissionReward path (P4-B-2) where the target weapon is known — preventing weapon B's card from
+			// being applied to whichever weapon happens to be equipped. General weapon-stat cards (mag/firerate/
+			// recoil) live in ActivePool->Cards instead, where ThisWeapon correctly means "current weapon".
+			if (Card && Card->Scope == ECardScope::Character && !OutCandidates.Contains(Card))
 			{
 				OutCandidates.Add(Card);
 			}

@@ -3,6 +3,7 @@
 #include "AbilitySystem/Abilities/FPSRGA_WeaponFire_Hitscan.h"
 #include "AbilitySystem/Attributes/FPSRCombatSet.h"
 #include "Weapon/FPSRWeaponInventoryComponent.h"
+#include "Weapon/FPSRWeaponInstance.h"
 #include "Weapon/FPSRWeaponDataAsset.h"
 #include "Weapon/FPSRWeaponFireComponent.h"
 #include "Enemy/FPSREnemyHealthComponent.h"
@@ -50,17 +51,18 @@ void UFPSRGA_WeaponFire_Hitscan::ActivateAbility(
 		}
 	}
 
-	// Resolve weapon stats from the equipped weapon (fallback to defaults).
+	// Resolve weapon stats from the equipped weapon instance (base stats × accumulated modifiers; fallback to defaults).
 	float Damage = 10.0f;
 	float Range = 10000.0f;
 	float SpreadDegrees = 1.0f;
 	UFPSRWeaponInventoryComponent* Inventory = Avatar->FindComponentByClass<UFPSRWeaponInventoryComponent>();
-	UFPSRWeaponDataAsset* Weapon = Inventory ? Inventory->GetCurrentWeapon() : nullptr;
-	if (Weapon)
+	UFPSRWeaponInstance* Instance = Inventory ? Inventory->GetCurrentInstance() : nullptr;
+	const FFPSRWeaponStatBlock* Stats = Instance ? &Instance->GetResolvedStats() : nullptr;
+	if (Stats)
 	{
-		Damage = Weapon->BaseStats.Damage;
-		Range = Weapon->BaseStats.Range;
-		SpreadDegrees = Weapon->BaseStats.SpreadDegrees;
+		Damage = Stats->Damage;
+		Range = Stats->Range;
+		SpreadDegrees = Stats->SpreadDegrees;
 	}
 
 	// Server-authoritative gates: empty mag / reloading / fire-rate. Then consume ammo.
@@ -71,9 +73,9 @@ void UFPSRGA_WeaponFire_Hitscan::ActivateAbility(
 			EndAbility(Handle, ActorInfo, ActivationInfo, true, true);
 			return;
 		}
-		if (Weapon)
+		if (Stats)
 		{
-			const float MinInterval = 1.0f / FMath::Max(Weapon->BaseStats.FireRate, 0.01f);
+			const float MinInterval = 1.0f / FMath::Max(Stats->FireRate, 0.01f);
 			if (!Inventory->ServerTryConsumeFireInterval(MinInterval))
 			{
 				EndAbility(Handle, ActorInfo, ActivationInfo, true, true);
@@ -87,9 +89,9 @@ void UFPSRGA_WeaponFire_Hitscan::ActivateAbility(
 	if (UFPSRWeaponFireComponent* FireComp = Avatar->FindComponentByClass<UFPSRWeaponFireComponent>())
 	{
 		SpreadDegrees += FireComp->GetCurrentBloom();
-		if (FireComp->IsAiming() && Weapon && Weapon->BaseStats.bHasADS)
+		if (FireComp->IsAiming() && Stats && Stats->bHasADS)
 		{
-			SpreadDegrees *= Weapon->BaseStats.ADSSpreadMultiplier;
+			SpreadDegrees *= Stats->ADSSpreadMultiplier;
 		}
 	}
 
