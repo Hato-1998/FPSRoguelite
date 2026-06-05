@@ -55,6 +55,16 @@ public:
 	/** Server: consume one pending card pick. Returns true if successful. */
 	bool ConsumeCardPick();
 
+	/** Pending mission-reward picks (granted on mission clear; selected at the freeze, Game.MD §2-8). */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Run")
+	int32 GetMissionRewardPicksPending() const { return MissionRewardPicksPending; }
+
+	/** Server: add one pending mission-reward pick. */
+	void AddMissionRewardPick();
+
+	/** Server: consume one pending mission-reward pick. Returns true if successful. */
+	bool ConsumeMissionRewardPick();
+
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 	virtual void BeginPlay() override;
 
@@ -86,4 +96,7 @@ private:
 
 	UPROPERTY(ReplicatedUsing = OnRep_CardPicksPending)
 	int32 CardPicksPending = 0;
+
+	UPROPERTY(ReplicatedUsing = OnRep_CardPicksPending)
+	int32 MissionRewardPicksPending = 0;
 };

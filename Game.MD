@@ -54,25 +54,24 @@
 
 ### 2-1. 핵심 게임 루프
 ```
-로비 (메타 강화) → 30분 런 → 보스 처치/클리어 → 재화 획득 → 로비
+로비 (메타 강화) → 런(생존 + 레벨업 프리즈 + 시간대별 미션) → 마지막 보스 처치/클리어 → 재화 획득 → 로비
 ```
 - **고정 맵 / 고정 구조** (절차적 생성 PCG 사용 안 함)
-- 런 시간 기본 **30분** (마지막 시간대 보스로 종료)
+- **런 구조 = 생존형 (확정 2026-06-04, P4-A 재설계)**: 라운드제 **폐지**. 런은 끊김 없이 진행되며, **레벨업 시에만 게임이 전역 프리즈**되어 카드를 고른다(§2-2). 시간이 지나면 **미션이 시간대별로 독립 출현**(§2-8)하고, **마지막에 보스 출현 → 이후 시간 무제한·미션 없음, 보스만 처치 = 런 클리어**.
+  - **프로덕션 기본**: 보스까지 약 **20분**, 미션 시각·보스 시각은 데이터 드리븐(`UFPSRRunScheduleDataAsset`, 에디터 설정값). 데모/테스트용 압축 스케줄(예: 미션 60/120/180s·보스 300s)을 데이터 교체만으로 운용.
 - 시간 경과 → 몬스터 수·종류·HP·공격력 증가 (**시간 스케일링상 이동속도 불변**; 단 스폰 시 개체별 ±10% 이속 편차는 허용 — §2-6)
 - **1~4인 협동** (리슨서버 P2P)
 
-### 2-2. XP / 레벨업 / 카드 소비 흐름 (개편 2026-05-30)
+### 2-2. XP / 레벨업 / 카드 소비 흐름 (재설계 2026-06-04 — 레벨업 전역 프리즈)
 - XP는 몬스터 사망 시 **드롭 아이템(범용 Pickup)** → 근접 시 자석 흡수 줍기
 - **파티 공유 경험치 풀** — 누가 줍든 하나의 통에 누적, 모두 같은 하단 XP바 UI 공유
-- **교전 중 프리즈 폐지.** 공유 풀 임계 도달 시 레벨업은 **백그라운드에서 정상 처리되고 카드 UI는 뜨지 않으며, '레벨업 스택'으로 누적**된다 (다중 레벨업 = 스택 누적).
-- **레벨업 스택 = 플레이어별 보류 픽(확정 2026-06-02, P3-D)**: `SharedXP`/`PartyLevel`은 파티 공유(서버 권위, `AFPSRGameState`)지만, **파티가 1레벨 오를 때마다 그 시점 연결된 모든 플레이어에게 카드 픽이 1개씩 부여**된다. 각 플레이어는 **본인의 보류 픽을 본인 화면에서 독립적으로 소비**(`AFPSRPlayerState::CardPicksPending`, Replicated). 한 플레이어의 선택이 다른 플레이어의 픽을 소모하지 않는다(공유 카운터 단일 감소 방식은 솔로 전용이라 폐지). 늦게 합류한 플레이어는 합류 후 발생한 레벨업부터 픽을 받는다.
-- **오프닝 카드 시드**: 런 시작 시 **1~2장을 즉시 선택**해 초반 빌드를 시드한다 (첫 정비시간 전 무력감 방지 — 사용자 확정 2026-05-30).
-- **정비시간(Breather Time)** — 미션 클리어(§2-8) 시 **모든 몬스터 스폰이 정지**되는 안전 구간(`RunPhase.Breather`, Replicated). 이때:
-  1. 누적된 **레벨업 스택(=본인 보류 픽)을 연속 소비** → 각 플레이어가 본인 픽 수만큼 개별 3카드 선택(본인 화면 오버레이, 플레이어별 독립)
-  2. **미션 클리어 보상 = 무기 기능 해금/변경(모디파이어) 카드**도 이 정비시간에 선택(§2-4-1, 사용자 확정 2026-05-30)
-  3. **대기 시간 무제한** — 치열한 전투 후 휴식·다음 빌드/전략 논의를 겸하는 완전한 휴식 구간(Breather)
-- `RunPhase`는 전역 `TimeDilation=0`에 의존하지 않고 **스폰·적 활동을 상태로 게이트**(타이머·AbilityTask·RPC·이펙트 부작용 회피). 정비시간 중 UI·네트워크 RPC는 정상 tick 유지
-- ⚠️ 무제한 대기는 **안전 구간에서만** 발생(교전 중 프리즈 없음)하므로 기존 협동 템포 리스크는 해소됨. AFK 시 정비시간이 길어지는 점은 감수(선택 완료/대기 상태표시는 P3 UX)
+- **레벨업 시 전역 프리즈 (확정 2026-06-04, "예전 방식" 복귀 — 기존 "교전 중 프리즈 폐지"를 되돌림)**: 공유 풀이 레벨업 임계 도달 시 **그 즉시 게임이 전역 프리즈**된다 — **적·플레이어 모두 정지**(적은 제자리 동결, 스폰 정지, 플레이어 이동·발사 차단). 연결된 **전원이 본인 카드를 모두 고르면 재개**된다.
+  - 프리즈는 전역 `bRunPaused`(서버 권위, `AFPSRGameState`, Replicated)로 표현. **전역 `TimeDilation=0` 미사용** → 스폰·적 이동/공격·플레이어 입력을 **상태로 게이트**(타이머·AbilityTask·RPC·이펙트 부작용 회피). UI·RPC는 프리즈 중 정상 tick.
+- **레벨업 스택 = 플레이어별 보류 픽**: `SharedXP`/`PartyLevel`은 파티 공유지만, **파티가 1레벨 오를 때마다 연결된 모든 플레이어에게 카드 픽 1개 부여**(`AFPSRPlayerState::CardPicksPending`, Replicated). 다중 레벨업 = 픽 누적 → 프리즈 동안 본인 픽 수만큼 연속 선택(플레이어별 독립, 한 명의 선택이 남의 픽을 소모하지 않음). 늦게 합류한 플레이어는 합류 후 레벨업부터 픽 부여.
+- **재개 = 전원 보류 픽 0**(서버 `RefreshPauseState`): 모든 연결 플레이어의 보류 픽(레벨업+미션보상)이 0이 되면 `bRunPaused=false` → 즉시 재개. (별도 준비 입력 없음. AFK 시 전원이 길게 멈추는 점은 감수 — 상태표시는 P7 UX)
+- **오프닝 카드 시드**: 런 시작 시 **2장을 즉시 선택**(초반 빌드 시드). 이것도 동일 프리즈 모델(시작 시 프리즈 → 선택 → 재개).
+- **미션 보상 프리즈**: 시간대별 미션(§2-8)을 **클리어하면 즉시 프리즈**되어 **무기 모디파이어 보상 카드**(§2-4-1)를 전원이 선택 → 재개. (레벨업 프리즈와 동일 메커니즘, 다른 카드 풀)
+- **보스전 중에도 프리즈 동작**: 보스 등장 후 시간제한·미션은 없지만, XP 획득으로 레벨업하면 동일하게 전역 프리즈 후 카드 선택(`bRunPaused`는 페이즈와 독립).
 
 ### 2-3. 카드 시스템
 - 데이터 방식: **DataAsset + GameplayEffect(GE)** — 스탯 하드코딩 금지
@@ -88,7 +87,7 @@
 - **등급 4단계** (Common/Rare/Epic/Legendary) — **Luck** 스탯이 추첨 가중치(상위 등급 확률)에 작용. (※ RarityBonus는 Luck으로 통합·폐지 — 2026-06-02. 광역 행운 1개 축으로 단순화; 향후 드랍품질·희귀스폰 등도 Luck이 담당)
 - **무기별 전용 카드**: 무기 보유 시 해당 무기 카드가 레벨업 카드 풀에 동적 합류 (Gunfire Reborn식)
 - **리롤**: 캐릭터 메타로 해금, **게임당 3회 제한** (`RunRerollCharges`, 서버 권위 차감)
-- **카드 소비 시점**(§2-2): 오프닝 시드(런 시작 1~2장) + 정비시간(레벨업 스택 소비 + 미션 보상 무기 모디파이어 카드). **교전 중 카드 선택 없음**
+- **카드 소비 시점**(§2-2): 오프닝 시드(런 시작 2장) + **레벨업 전역 프리즈**(레벨업 스택 소비) + **미션 클리어 프리즈**(무기 모디파이어 보상). 모두 게임이 멈춘 프리즈 중 선택
 
 ### 2-4. 무기 시스템
 - 최대 **3개 동시 보유** (기본 1 + 추가 2). 5렙/20렙 등에 무기 카드 등장
@@ -104,7 +103,7 @@
 - 적용 방식: **Weapon Behavior Fragment (합성형 훅) + 누적 가능**
   - `UWeaponInstance.ActiveModifiers[]`에 누적, 서로 상호작용 (예: 2연발+관통)
   - `GA_WeaponFire`(아키타입별 베이스)에 훅: `PreFire → ModifyShotCount → ModifyChargeTime → OnProjectileSpawn → OnHitActor → PostFire`
-  - 각 무기 DA가 `AvailableModifiers`(약 4종) 정의 → **미션 클리어 시 정비시간에 모디파이어 해금/변경 카드로 1종 선택**(§2-2, 사용자 확정 2026-05-30)
+  - 각 무기 DA가 `AvailableModifiers`(약 4종) 정의 → **미션 클리어 시 즉시 프리즈(§2-2)에 모디파이어 해금/변경 카드로 1종 선택**
 - **GA 교체 방식 금지**(조합 폭발), **거대 태그 분기 금지**(유지보수 지옥)
 - ⚠️ **성능**: `OnHitActor`가 500마리 타격 시 과도한 virtual dispatch/heap alloc 금지 → 훅은 경량(데이터 기반·히트당 무할당)
 - **P4 확정 대상 상세**: 적용 순서 / 중첩 가부 / 충돌 해결 / 서버 권위 적용 위치 / 클라 예측 범위 / 런 종료 시 소멸 / UI 표시 / 훅 호출 순서. Fragment를 UObject 상속 asset vs Instanced UObject vs 순수 DataAsset+runtime struct 중 무엇으로 둘지 결정 필요
@@ -142,13 +141,20 @@
 
 ### 2-7. 보스
 - **Base 구조**: `ABossBase` + `UBossDefinitionDataAsset` + StateTree (소수라 GAS/StateTree OK)
-- 현재 30분 단일 보스·2페이즈. TimeGate 스케줄에 행 추가로 **다중 보스 확장**
+- **출현 = `BossTime` 도달 시**(프로덕션 ~20분, 스케줄 DA, §2-1·§2-8). 보스전부터 **시간 무제한·미션 없음**, 처치 = 클리어. 2페이즈. 스케줄에 보스 시각·정의 추가로 확장. (단 보스 중에도 레벨업 프리즈는 동작 §2-2)
+- 구현 상태: 보스 실물은 P6. P4-A는 보스 게이트(`ERunPhase::Boss` 전환 + 훅)만 스텁
 
-### 2-8. 시간 게이트 / 미션
-- `UTimeGateScheduleDataAsset` = `FTimeGateEvent[]` 행 기반 (기본 30분, **행 추가로 이벤트 확장**)
-- 5/10/20/30분 등에 **전원 협동 미션** → 클리어 시 무기 모디파이어 해금
-- 난이도 곡선은 `UCurveFloat`로 분리
-- **테스트 런 길이**: 정식 30분 유지하되, TimeGateSchedule DataAsset로 **데모/테스트용 10~12분 스케줄**을 데이터 교체만으로 운용
+### 2-8. 런 스케줄 / 미션 (재설계 2026-06-04, P4-A — 시간 기반)
+- **런 스케줄 = `UFPSRRunScheduleDataAsset`**(서버 권위, **전부 에디터 설정값**): **시간 기반 미션 이벤트** `TArray<FFPSRMissionEvent>{ float TriggerTime, UFPSRMissionDataAsset* Mission }` + `float BossTime` + 스폰 강도 스케일링(시간경과 `UCurveFloat` 또는 base+rate). 라운드 개념 없음.
+- **런 디렉터 = `UFPSRRunDirectorSubsystem`**(서버 권위): 런클럭 누적(프리즈·보스 중 정지) → 미션 이벤트 시각 도달 시 미션 스폰, `BossTime` 도달 시 보스 진입. 스폰 강도를 시간에 따라 구동.
+- **미션 = 시간대별 독립 출현**(확정 2026-06-04):
+  - 스케줄의 각 이벤트 시각에 **1개** 출현, **선택적**(미클리어 무방). 이전 미션 종료 후 다음(동시 다중 없음).
+  - **클리어 시 즉시 전역 프리즈**(§2-2) → 무기 모디파이어 **보상 카드를 전원 선택** → 재개.
+  - **확장형 프레임워크**: `AFPSRMissionActor`(서버권위 리플리케이트 Actor 베이스) 서브클래스 + `UFPSRMissionDataAsset`(메타+로직클래스+보상카드) + **디자이너 배치 `AFPSRMissionSpawnPoint`**(태그매칭+가중랜덤). 디렉터가 스폰·생명주기 관리.
+  - **미션 카탈로그**(기획, 프레임워크로 수용): 좁은구역 N초 버티기 / 이동 구역 점령 / 도망치는 고체력 몹 처치 / 점프맵 오브 획득 / 피격 없이 구체 N초 소지 / 시야 극제한 버티기 / 전원 제자리 정지 등. 각 종류 = `AFPSRMission_*` 서브클래스(필요 인프라는 서브클래스+콘텐츠로 격리, 코어 불변).
+- 난이도 곡선은 `UCurveFloat`로 분리(후속)
+- **구현 상태(P4-A)**: 디렉터(시간 미션+보스타임) + 미션 프레임워크 + 레퍼런스 미션 1종(`AFPSRMission_HoldZone`) + 스폰포인트 + 레벨업/미션보상 전역 프리즈 + 오프닝시드. 미션 보상의 **무기 모디파이어 실적용(weapon-scope `ApplyCard`)은 P4-B**(P4-A는 프리즈+선택 흐름까지). 나머지 6종 미션·보스 실물은 후속.
+- **테스트 스케줄**: DataAsset 교체로 압축(예: 미션 60/120/180s·보스 300s). ⚠️ 압축값은 임시(프로덕션 전환 시 원복).
 
 ### 2-9. 카메라 / 메시
 - **Separated Arms**: 본인 = FP팔(`OnlyOwnerSee`) + 무기 / 타인 = 3P 캐릭터(`OwnerNoSee`)
@@ -221,7 +227,7 @@ Source/FPSRoguelite/Public/
 ├── Card/             CardDataAsset(Scope), CardPool, DrawSystem, Reroll
 ├── Enemy/            경량 풀액터, HealthComponent, AttackType, FlowField, ScalingProfile
 ├── Boss/             ABossBase, BossDefinition, StateTree
-├── Run/              SpawnDirector, TimeGateDirector  ※ 공유XP/레벨/RunPhase = **복제 필요 → `AFPSRGameState` 호스팅**(Push Model, 서버 권위). WorldSubsystem은 복제 불가라 런 상태는 GameState에 둔다(P3-A 확정 2026-06-01). **레벨업 보류 픽은 플레이어별이라 `AFPSRPlayerState::CardPicksPending`에 둔다**(§2-2, P3-D 확정 2026-06-02). 무거운 서버 로직이 생기면 RunManager 서브시스템을 facade로 추가 검토.
+├── Run/              SpawnDirector, **RunDirector(`UFPSRRunDirectorSubsystem`=런클럭/스폰강도/시간 미션 스케줄/보스타임, 서버 전용)**, RunSchedule(`UFPSRRunScheduleDataAsset`), **Mission/**(`AFPSRMissionActor` 베이스+`UFPSRMissionDataAsset`+`AFPSRMissionSpawnPoint`+서브클래스, P4-A)  ※ 공유XP/레벨/RunPhase/**bRunPaused** = **복제 필요 → `AFPSRGameState` 호스팅**(Push Model, 서버 권위). WorldSubsystem은 복제 불가라 런 상태는 GameState에 둔다(P3-A 확정 2026-06-01). **레벨업 보류 픽은 플레이어별이라 `AFPSRPlayerState::CardPicksPending`(+미션보상 `MissionRewardPicksPending`)에 둔다**(§2-2). 레벨업/미션클리어 시 `bRunPaused`로 전역 프리즈(§2-2, 재설계 2026-06-04).
 ├── Pickup/           범용 PickupActor + PickupDefinition(자석)
 ├── MetaProgression/  SaveGame, UpgradeTree, Subsystem
 ├── Performance/      ActorPool, SignificanceConfig, 인스턴싱
@@ -391,7 +397,7 @@ PROGRESS.md '사용자 대기 작업' 참조. 요약: **BP 3종 생성 + 참조 
 | **P1.5** | — | 사격/이동 감각 (A: 연사/반동/확산 ✅, B: **MagSize+재장전(예비 무한)**/ADS) |
 | P2 | 3주 | SpawnDirector + Flow-Field + Pooling + Significance (적 300+ 안정) + **적 이속 ±10% 편차** + **적 근접 데미지·공격토큰 baseline** + **충돌무시 대시** |
 | P3 | 4주 | 공유XP + 파티레벨 + **레벨업 스택(프리즈 폐지)** + **정비시간 RunPhase** + **오프닝 카드 시드** + Card UI + 동적 카드풀 + Rarity + 리롤 |
-| P4 | 4주 | Weapon Modifier Fragment + 무기 7종 + TimeGate 미션(클리어=**정비시간 진입**·모디파이어 카드) + **원거리 적 규격·공격토큰 확장** + **게임필**(히트마커·핑·위협 인디케이터·사각지대 오디오) |
+| P4 | 4주 | **P4-A**(재설계) 런 디렉터(시간 미션 스케줄+보스타임) + 확장형 미션 프레임워크+스폰포인트 + **레벨업/미션클리어 전역 프리즈**(라운드제 폐지)+레퍼런스 미션 1종+오프닝시드 / **P4-B** Weapon Modifier Fragment+weapon-scope 카드+미션 보상 실적용 / **P4-C** 무기 7종 / **P4-D** 게임필(히트마커·핑·위협 인디케이터·사각 오디오)+PickupRadius/XPGain+HUD위젯. (+원거리 적 규격·공격토큰 확장) |
 | P5 | 3주 | 4인 협동 + 세션(Steam) + Iris 평가 + NetProfiler + **아군 오사(10%+호스트 토글)** + **수동 부활(DBNO)** |
 | P6 | 2주 | 메타 프로그레션 + 보스 + 클리어 플로우 |
 | P7 | 2주 | CommonUI 폴리시 + **오디오/이펙트(게임필) 폴리시** + Insights + README + 빌드 |
@@ -420,7 +426,7 @@ PROGRESS.md '사용자 대기 작업' 참조. 요약: **BP 3종 생성 + 참조 
 ## 9. 확정 사항 / 주의점 (빠른 참조)
 - 무기 교체 = 숫자키 **1/2/3**(`IA_EquipSlot1~3`) / 사격 = 좌클릭
 - **UE5.7 IMC 매핑은 Python `set_editor_property` 미반영 → 에디터 수동**(IA 에셋 생성은 Python OK)
-- 카드선택 = **정비시간(Breather)에 무제한 대기** — 교전 중 프리즈 폐지, 미션 클리어 시 안전 구간에서 소비(§2-2). 오프닝 시드 1~2장은 런 시작 시
+- 카드선택 = **레벨업/미션클리어 시 전역 프리즈**(적·플레이어 정지)에 전원 선택 → 재개(§2-2). 오프닝 시드 2장은 런 시작 시. (라운드제·정비시간 폐지 2026-06-04)
 - git: 사용자 콘텐츠(L_Sandbox 맵, DA_Weapon_Rifle/Knife @ `Content/Weapons/DataTable/`)는 디스크 존재·**미커밋**(untracked)
 
 ---

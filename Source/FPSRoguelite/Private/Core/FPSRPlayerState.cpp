@@ -42,6 +42,7 @@ void AFPSRPlayerState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Out
 	Params.bIsPushBased = true;
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRPlayerState, RunRerollCharges, Params);
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRPlayerState, CardPicksPending, Params);
+	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRPlayerState, MissionRewardPicksPending, Params);
 }
 
 bool AFPSRPlayerState::ConsumeRerollCharge()
@@ -112,6 +113,31 @@ bool AFPSRPlayerState::ConsumeCardPick()
 
 	--CardPicksPending;
 	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRPlayerState, CardPicksPending, this);
+	OnCardPicksChanged.Broadcast();
+	return true;
+}
+
+void AFPSRPlayerState::AddMissionRewardPick()
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+
+	++MissionRewardPicksPending;
+	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRPlayerState, MissionRewardPicksPending, this);
+	OnCardPicksChanged.Broadcast();
+}
+
+bool AFPSRPlayerState::ConsumeMissionRewardPick()
+{
+	if (!HasAuthority() || MissionRewardPicksPending <= 0)
+	{
+		return false;
+	}
+
+	--MissionRewardPicksPending;
+	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRPlayerState, MissionRewardPicksPending, this);
 	OnCardPicksChanged.Broadcast();
 	return true;
 }

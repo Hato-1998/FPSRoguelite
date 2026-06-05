@@ -12,7 +12,9 @@
 #include "CommonActivatableWidget.h"
 #include "Core/FPSRLogChannels.h"
 #include "Core/FPSRPlayerState.h"
+#include "Core/FPSRGameState.h"
 #include "Card/FPSRCardSubsystem.h"
+#include "Card/FPSRCardDataAsset.h"
 #include "UI/FPSRPrimaryGameLayout.h"
 #include "UI/FPSRCardSelectWidget.h"
 
@@ -27,7 +29,19 @@ void AFPSRPlayerController::BeginPlay()
 	if (IsLocalController())
 	{
 		EnsurePrimaryLayout();
+		// Tell the server the local UI is up so it can issue the run-start opening seed. If the layout
+		// wasn't ready, ClientPresentCards lazily rebuilds it; the offer flow's abandon/retry covers the rest.
+		ServerNotifyClientReady();
 	}
+}
+
+void AFPSRPlayerController::ServerNotifyClientReady_Implementation()
+{
+	if (!HasAuthority() || bOpeningSeedIssued)
+	{
+		return;
+	}
+	BeginOpeningSeed(2);
 }
 
 bool AFPSRPlayerController::EnsurePrimaryLayout()
@@ -93,14 +107,81 @@ void AFPSRPlayerController::BeginOpeningSeed(int32 Count)
 		return;
 	}
 
+	bOpeningSeedIssued = true;
 	PendingOpeningSeeds = FMath::Max(0, Count);
-	if (PendingOpeningSeeds > 0)
+	// Freezes the run and presents the first opening card (if any) via RefreshPauseState.
+	NotifyPauseStateDirty();
+}
+
+void AFPSRPlayerController::GrantMissionReward(UFPSRCardDataAsset* RewardCard)
+{
+	if (!HasAuthority() || !RewardCard)
 	{
-		RequestCardOffer(false);
+		return;
+	}
+
+	if (AFPSRPlayerState* PS = GetPlayerState<AFPSRPlayerState>())
+	{
+		PS->AddMissionRewardPick();
+		PendingMissionRewardCards.Add(RewardCard);
 	}
 }
 
-void AFPSRPlayerController::RequestCardOffer(bool bConsumeLevelUp)
+bool AFPSRPlayerController::HasPendingSelection() const
+{
+	if (CachedOffer.Num() > 0 || PendingOpeningSeeds > 0)
+	{
+		return true;
+	}
+	if (const AFPSRPlayerState* PS = GetPlayerState<AFPSRPlayerState>())
+	{
+		return PS->GetMissionRewardPicksPending() > 0 || PS->GetCardPicksPending() > 0;
+	}
+	return false;
+}
+
+void AFPSRPlayerController::PresentNextOfferIfNeeded()
+{
+	if (!HasAuthority() || CachedOffer.Num() > 0)
+	{
+		return; // an offer is already shown; don't replace a mid-selection offer
+	}
+
+	if (PendingOpeningSeeds > 0)
+	{
+		RequestCardOffer(EFPSROfferType::OpeningSeed);
+		return;
+	}
+
+	const AFPSRPlayerState* PS = GetPlayerState<AFPSRPlayerState>();
+	if (PS && PS->GetMissionRewardPicksPending() > 0)
+	{
+		RequestCardOffer(EFPSROfferType::MissionReward);
+		return;
+	}
+	if (PS && PS->GetCardPicksPending() > 0)
+	{
+		RequestCardOffer(EFPSROfferType::LevelUp);
+		return;
+	}
+
+	// Nothing left for this player — make sure no modal lingers.
+	ClientDismissCardUI();
+}
+
+void AFPSRPlayerController::NotifyPauseStateDirty()
+{
+	if (AFPSRGameState* GS = GetWorld() ? GetWorld()->GetGameState<AFPSRGameState>() : nullptr)
+	{
+		GS->RefreshPauseState();
+	}
+	else
+	{
+		PresentNextOfferIfNeeded();
+	}
+}
+
+void AFPSRPlayerController::RequestCardOffer(EFPSROfferType OfferType)
 {
 	if (!HasAuthority())
 	{
@@ -114,13 +195,43 @@ void AFPSRPlayerController::RequestCardOffer(bool bConsumeLevelUp)
 		return;
 	}
 
-	CachedOffer = Sub->DrawCards(this);
-	bOfferConsumesLevelUp = bConsumeLevelUp;
+	CurrentOfferType = OfferType;
+
+	if (OfferType == EFPSROfferType::MissionReward)
+	{
+		// Single-card offer from the front of the reward queue.
+		UFPSRCardDataAsset* RewardCard = (PendingMissionRewardCards.Num() > 0) ? PendingMissionRewardCards[0].Get() : nullptr;
+		const FFPSRCardDraw Draw = Sub->BuildSingleDraw(RewardCard, this);
+		CachedOffer.Reset();
+		if (Draw.Card)
+		{
+			CachedOffer.Add(Draw);
+		}
+	}
+	else
+	{
+		CachedOffer = Sub->DrawCards(this);
+	}
 
 	if (CachedOffer.Num() == 0)
 	{
-		UE_LOG(LogFPSR, Warning, TEXT("[Card] DrawCards returned empty offer (check CardPool)"));
+		UE_LOG(LogFPSR, Warning, TEXT("[Card] Empty offer for type %d (check pool/reward card)"), (int32)OfferType);
+		// Can't present this selection — release it so the global freeze doesn't hard-lock on this player.
+		if (OfferType == EFPSROfferType::OpeningSeed)
+		{
+			PendingOpeningSeeds = 0;
+		}
+		else if (OfferType == EFPSROfferType::MissionReward)
+		{
+			if (PendingMissionRewardCards.Num() > 0) { PendingMissionRewardCards.RemoveAt(0); }
+			if (AFPSRPlayerState* PS = GetPlayerState<AFPSRPlayerState>()) { PS->ConsumeMissionRewardPick(); }
+		}
+		else if (AFPSRPlayerState* PS = GetPlayerState<AFPSRPlayerState>())
+		{
+			PS->ConsumeCardPick();
+		}
 		ClientDismissCardUI();
+		NotifyPauseStateDirty();
 		return;
 	}
 
@@ -178,43 +289,27 @@ void AFPSRPlayerController::ServerSelectCard_Implementation(int32 Index, int32 O
 	}
 
 	UFPSRCardSubsystem* Sub = GetWorld() ? GetWorld()->GetSubsystem<UFPSRCardSubsystem>() : nullptr;
-	const bool bApplied = Sub && Sub->ApplyCard(this, CachedOffer[Index], bOfferConsumesLevelUp);
+	const bool bApplied = Sub && Sub->ApplyCard(this, CachedOffer[Index], CurrentOfferType);
 	if (!bApplied)
 	{
 		// Application rejected (e.g. no pending pick) — leave the offer up; do not advance or redraw.
 		return;
 	}
 
+	// Per-type bookkeeping (the level-up / mission-reward pick was consumed inside ApplyCard).
+	if (CurrentOfferType == EFPSROfferType::OpeningSeed)
+	{
+		if (PendingOpeningSeeds > 0) { --PendingOpeningSeeds; }
+	}
+	else if (CurrentOfferType == EFPSROfferType::MissionReward)
+	{
+		if (PendingMissionRewardCards.Num() > 0) { PendingMissionRewardCards.RemoveAt(0); }
+	}
+
 	CachedOffer.Reset();
 
-	// Re-issue the next offer if more picks remain, otherwise dismiss the modal.
-	if (!bOfferConsumesLevelUp)
-	{
-		// Opening seed: present the next seed pick until the count is exhausted.
-		if (PendingOpeningSeeds > 0)
-		{
-			--PendingOpeningSeeds;
-		}
-		if (PendingOpeningSeeds > 0)
-		{
-			RequestCardOffer(false);
-			return;
-		}
-	}
-	else
-	{
-		// Breather level-up: keep presenting while this player has pending picks.
-		if (AFPSRPlayerState* PS = GetPlayerState<AFPSRPlayerState>())
-		{
-			if (PS->GetCardPicksPending() > 0)
-			{
-				RequestCardOffer(true);
-				return;
-			}
-		}
-	}
-
-	ClientDismissCardUI();
+	// Re-present this player's next pick (if any) and recompute the global freeze (unpause when all done).
+	NotifyPauseStateDirty();
 }
 
 void AFPSRPlayerController::ServerRerollOffer_Implementation(int32 OfferId)
@@ -227,6 +322,12 @@ void AFPSRPlayerController::ServerRerollOffer_Implementation(int32 OfferId)
 
 	// Reroll only applies to an actively presented offer — never a free redraw outside the flow.
 	if (CachedOffer.Num() == 0)
+	{
+		return;
+	}
+
+	// Mission-reward offers are a single fixed card — not rerollable.
+	if (CurrentOfferType == EFPSROfferType::MissionReward)
 	{
 		return;
 	}
@@ -247,6 +348,7 @@ void AFPSRPlayerController::ServerRerollOffer_Implementation(int32 OfferId)
 	if (CachedOffer.Num() == 0)
 	{
 		ClientDismissCardUI();
+		NotifyPauseStateDirty();
 		return;
 	}
 
@@ -272,9 +374,19 @@ void AFPSRPlayerController::ServerAbandonOffer_Implementation(int32 OfferId)
 		return;
 	}
 
-	// Release the cached offer (and any opening-seed run) so PresentPendingLevelUpOffers can retry later.
+	// Present failure (broken WBP) — release this player's outstanding picks so the GLOBAL freeze can't
+	// hard-lock everyone behind a UI that can't show. Loud log: this is a content-setup error, not normal.
+	UE_LOG(LogFPSR, Error, TEXT("[UI] Card offer abandoned — releasing this player's pending picks (check WBP setup)"));
 	CachedOffer.Reset();
 	PendingOpeningSeeds = 0;
+	PendingMissionRewardCards.Reset();
+	if (AFPSRPlayerState* PS = GetPlayerState<AFPSRPlayerState>())
+	{
+		while (PS->ConsumeCardPick()) {}
+		while (PS->ConsumeMissionRewardPick()) {}
+	}
+
+	NotifyPauseStateDirty();
 }
 
 #if !UE_BUILD_SHIPPING
@@ -302,18 +414,6 @@ namespace
 				Count = FMath::Max(1, FCString::Atoi(*Args[0]));
 			}
 			PC->BeginOpeningSeed(Count);
-		}));
-
-	FAutoConsoleCommandWithWorldAndArgs GCmd_RequestCards(
-		TEXT("FPSR.RequestCards"),
-		TEXT("Request a breather level-up card offer (debug, authority/host only; consumes a pending pick on selection)."),
-		FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& Args, UWorld* World)
-		{
-			AFPSRPlayerController* PC = GetLocalFPSRController(World);
-			if (PC && PC->HasAuthority())
-			{
-				PC->RequestCardOffer(true);
-			}
 		}));
 }
 

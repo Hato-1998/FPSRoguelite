@@ -76,6 +76,7 @@ protected:
 	/** Server-only: world time of last attack (init far in the past so the first attack is allowed). */
 	float LastAttackTime = -1000.0f;
 
+	/** XP dropped on death (editor-tunable per enemy type / DataAsset). Balance value. */
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Enemy")
 	int32 XPReward = 5;
 

@@ -5,18 +5,20 @@
 #include "GameFramework/GameStateBase.h"
 #include "FPSRGameState.generated.h"
 
+/** Macro run phase. Combat = normal run / mission window; Boss = final boss (no timer, no missions).
+ *  Global freeze during card selection is the separate bRunPaused flag, independent of the phase. */
 UENUM(BlueprintType)
 enum class ERunPhase : uint8
 {
-	Combat   UMETA(DisplayName = "Combat"),
-	Breather UMETA(DisplayName = "Breather")
+	Combat UMETA(DisplayName = "Combat"),
+	Boss   UMETA(DisplayName = "Boss")
 };
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnRunStateChanged);
 
-/** Server-authoritative run progression state (shared XP, party level, run phase).
- *  Level-up picks are per-player on AFPSRPlayerState::CardPicksPending (Game.MD §2-2).
- *  Replicated via Push Model. Phase controls enemy spawning/attacks. */
+/** Server-authoritative run progression state (shared XP, party level, run phase, global freeze).
+ *  Redesign 2026-06-04 (Game.MD §2-2): on level-up (or mission clear) the run globally freezes — enemies
+ *  and players stop — until every player finishes their card picks. Replicated via Push Model. */
 UCLASS()
 class FPSROGUELITE_API AFPSRGameState : public AGameStateBase
 {
@@ -36,6 +38,15 @@ public:
 
 	bool IsCombatPhase() const { return RunPhase == ERunPhase::Combat; }
 
+	/** Global freeze flag: true while any player is selecting cards (opening seed / level-up / mission
+	 *  reward). When true, enemies and players are frozen (gameplay-state gate, not TimeDilation). */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Run")
+	bool IsRunPaused() const { return bRunPaused; }
+
+	/** Replicated run clock (survival seconds; pauses during freeze and after boss, low-frequency UI mirror). */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Run")
+	float GetRunClockSeconds() const { return RunClockSeconds; }
+
 	/** XP required to advance FROM the given level to the next. */
 	UFUNCTION(BlueprintPure, Category = "FPSR|Run")
 	int32 GetRequiredXP(int32 Level) const;
@@ -44,11 +55,22 @@ public:
 	UFUNCTION(BlueprintPure, Category = "FPSR|Run")
 	int32 GetRequiredXPForNextLevel() const { return GetRequiredXP(PartyLevel); }
 
-	/** Server: add shared XP and process any level-ups (grants per-player card picks; no freeze, Game.MD §2-2). */
+	/** Server: add shared XP and process level-ups. Grants per-player picks and freezes the run for
+	 *  selection (Game.MD §2-2). */
 	void AddSharedXP(int32 Amount);
 
-	/** Server: set the run phase (Combat <-> Breather). */
+	/** Server: set the macro run phase (Combat / Boss). */
 	void SetRunPhase(ERunPhase NewPhase);
+
+	/** Server: set the global freeze flag directly (normally driven by RefreshPauseState). */
+	void SetRunPaused(bool bPaused);
+
+	/** Server: recompute the freeze state from outstanding player selections and (re)present needed offers.
+	 *  Paused iff any connected player still has a pending pick or an active offer; unpauses when all done. */
+	void RefreshPauseState();
+
+	/** Server: update the replicated run clock (low-frequency UI mirror). */
+	void SetRunClockSeconds(float Seconds);
 
 	UPROPERTY(BlueprintAssignable, Category = "FPSR|Run")
 	FOnRunStateChanged OnRunStateChanged;
@@ -59,14 +81,12 @@ protected:
 	UFUNCTION()
 	void OnRep_RunState();
 
-	/** Server: present a level-up card offer to every player who has pending picks and no active offer.
-	 *  Called on breather entry and when picks are granted while already in the breather (§2-2). */
-	void PresentPendingLevelUpOffers();
-
-	/** XP curve placeholder (UCurveFloat data-driven curve is a follow-up, Game.MD §2-8). */
+	/** XP required to advance from level 1; each level adds XPPerLevel (linear curve placeholder —
+	 *  a UCurveFloat data-driven curve is a follow-up, Game.MD §2-8). Editor-tunable. */
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Run")
 	int32 XPBaseRequired = 100;
 
+	/** Per-level increase to the XP requirement: GetRequiredXP(L) = XPBaseRequired + (L-1)*XPPerLevel. */
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Run")
 	int32 XPPerLevel = 50;
 
@@ -78,4 +98,10 @@ protected:
 
 	UPROPERTY(ReplicatedUsing = OnRep_RunState)
 	ERunPhase RunPhase = ERunPhase::Combat;
+
+	UPROPERTY(ReplicatedUsing = OnRep_RunState)
+	bool bRunPaused = false;
+
+	UPROPERTY(ReplicatedUsing = OnRep_RunState)
+	float RunClockSeconds = 0.0f;
 };

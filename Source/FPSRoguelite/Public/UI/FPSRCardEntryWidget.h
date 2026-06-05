@@ -27,7 +27,9 @@ public:
 	FOnCardEntrySelected OnCardSelected;
 
 protected:
-	virtual void NativeConstruct() override;
+	/** Bind the select button here (runs once per instance) — NOT NativeConstruct, which the CommonUI
+	 *  activatable stack calls every time a pooled/reused widget is shown, causing a duplicate AddDynamic. */
+	virtual void NativeOnInitialized() override;
 
 	/** Called when select button is pressed. */
 	UFUNCTION()
