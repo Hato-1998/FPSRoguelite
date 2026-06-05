@@ -2,6 +2,7 @@
 
 #include "Weapon/FPSRWeaponFireComponent.h"
 #include "Weapon/FPSRWeaponInventoryComponent.h"
+#include "Weapon/FPSRWeaponInstance.h"
 #include "Weapon/FPSRWeaponDataAsset.h"
 #include "Weapon/FPSRWeaponTypes.h"
 #include "Hero/FPSRCharacter.h"
@@ -82,8 +83,8 @@ void UFPSRWeaponFireComponent::StartFiring()
 	}
 
 	UFPSRWeaponInventoryComponent* Inventory = GetInventory();
-	UFPSRWeaponDataAsset* Weapon = Inventory ? Inventory->GetCurrentWeapon() : nullptr;
-	if (!Weapon)
+	UFPSRWeaponInstance* Instance = Inventory ? Inventory->GetCurrentInstance() : nullptr;
+	if (!Instance)
 	{
 		return;
 	}
@@ -92,14 +93,15 @@ void UFPSRWeaponFireComponent::StartFiring()
 	TimeSinceLastShot = 0.0f;
 	ShotsFiredThisSpray = 0;
 
-	if (Weapon->BaseStats.FireMode == EFPSRFireMode::Burst)
+	const FFPSRWeaponStatBlock& Stats = Instance->GetResolvedStats();
+	if (Stats.FireMode == EFPSRFireMode::Burst)
 	{
-		BurstShotsRemaining = FMath::Max(1, Weapon->BaseStats.BurstCount);
+		BurstShotsRemaining = FMath::Max(1, Stats.BurstCount);
 	}
 
 	// Immediate first shot on press.
 	FireOneShot();
-	if (Weapon->BaseStats.FireMode == EFPSRFireMode::Burst && BurstShotsRemaining > 0)
+	if (Stats.FireMode == EFPSRFireMode::Burst && BurstShotsRemaining > 0)
 	{
 		--BurstShotsRemaining;
 	}
@@ -120,7 +122,8 @@ void UFPSRWeaponFireComponent::FireOneShot()
 	}
 
 	UFPSRWeaponInventoryComponent* Inventory = GetInventory();
-	UFPSRWeaponDataAsset* Weapon = Inventory ? Inventory->GetCurrentWeapon() : nullptr;
+	UFPSRWeaponInstance* Instance = Inventory ? Inventory->GetCurrentInstance() : nullptr;
+	UFPSRWeaponDataAsset* Weapon = Instance ? Instance->GetSource() : nullptr;
 	if (!Weapon)
 	{
 		return;
@@ -134,7 +137,7 @@ void UFPSRWeaponFireComponent::FireOneShot()
 		return;
 	}
 
-	const FFPSRWeaponStatBlock& Stats = Weapon->BaseStats;
+	const FFPSRWeaponStatBlock& Stats = Instance->GetResolvedStats();
 
 	// Melee: enforce the configurable attack-rate cooldown (also rate-limits rapid clicks).
 	if (bMelee && (GetWorld()->GetTimeSeconds() - LastMeleeTime) < Stats.MeleeAttackDelay)
@@ -193,13 +196,14 @@ void UFPSRWeaponFireComponent::TickComponent(float DeltaTime, ELevelTick TickTyp
 	}
 
 	UFPSRWeaponInventoryComponent* Inventory = GetInventory();
-	UFPSRWeaponDataAsset* Weapon = Inventory ? Inventory->GetCurrentWeapon() : nullptr;
+	UFPSRWeaponInstance* Instance = Inventory ? Inventory->GetCurrentInstance() : nullptr;
+	UFPSRWeaponDataAsset* Weapon = Instance ? Instance->GetSource() : nullptr;
 	if (!Weapon)
 	{
 		return;
 	}
 
-	const FFPSRWeaponStatBlock& Stats = Weapon->BaseStats;
+	const FFPSRWeaponStatBlock& Stats = Instance->GetResolvedStats();
 	const float Interval = 1.0f / FMath::Max(Stats.FireRate, 0.01f);
 
 	const bool bAutoFiring = (bWantsToFire && Stats.FireMode == EFPSRFireMode::FullAuto && CanFire());
@@ -337,13 +341,13 @@ static FAutoConsoleCommandWithWorldAndArgs GFPSRRecoilPreviewCmd(
 
 		UFPSRWeaponFireComponent* FireComp = Player->FindComponentByClass<UFPSRWeaponFireComponent>();
 		UFPSRWeaponInventoryComponent* Inv = FireComp ? FireComp->GetInventory() : nullptr;
-		UFPSRWeaponDataAsset* Weapon = Inv ? Inv->GetCurrentWeapon() : nullptr;
-		if (!Weapon)
+		UFPSRWeaponInstance* Instance = Inv ? Inv->GetCurrentInstance() : nullptr;
+		if (!Instance)
 		{
 			return;
 		}
 
-		const FFPSRWeaponStatBlock& Stats = Weapon->BaseStats;
+		const FFPSRWeaponStatBlock& Stats = Instance->GetResolvedStats();
 
 		// Camera basis.
 		FVector CamLoc = Player->GetActorLocation();
@@ -379,5 +383,37 @@ static FAutoConsoleCommandWithWorldAndArgs GFPSRRecoilPreviewCmd(
 			CumYaw += Delta.X;
 			CumPitch += Delta.Y * Stats.ADSVerticalScale;
 		}
+	}));
+
+// ---- Debug: dump the equipped weapon's base vs resolved stats (verifies weapon-stat modifier cards) ----
+static FAutoConsoleCommandWithWorld GFPSRDumpWeaponStatsCmd(
+	TEXT("FPSR.DumpWeaponStats"),
+	TEXT("Log the local player's current weapon: base stats vs resolved (after modifiers)."),
+	FConsoleCommandWithWorldDelegate::CreateStatic([](UWorld* World)
+	{
+		if (!World)
+		{
+			return;
+		}
+		APlayerController* PC = World->GetFirstPlayerController();
+		APawn* Player = PC ? PC->GetPawn() : nullptr;
+		UFPSRWeaponInventoryComponent* Inv = Player ? Player->FindComponentByClass<UFPSRWeaponInventoryComponent>() : nullptr;
+		UFPSRWeaponInstance* Instance = Inv ? Inv->GetCurrentInstance() : nullptr;
+		UFPSRWeaponDataAsset* Weapon = Instance ? Instance->GetSource() : nullptr;
+		if (!Weapon)
+		{
+			UE_LOG(LogFPSR, Warning, TEXT("[Weapon] DumpWeaponStats: no equipped weapon"));
+			return;
+		}
+
+		const FFPSRWeaponStatBlock& Base = Weapon->BaseStats;
+		const FFPSRWeaponStatBlock& Res = Instance->GetResolvedStats();
+		UE_LOG(LogFPSR, Log, TEXT("[Weapon] %s | MagSize %d->%d | FireRate %.2f->%.2f | RecoilV %.2f->%.2f | Damage %.1f->%.1f | Ammo %d/%d"),
+			*Weapon->GetName(),
+			Base.MagSize, Res.MagSize,
+			Base.FireRate, Res.FireRate,
+			Base.RecoilVertical, Res.RecoilVertical,
+			Base.Damage, Res.Damage,
+			Inv->GetCurrentAmmo(), Res.MagSize);
 	}));
 #endif // !UE_BUILD_SHIPPING

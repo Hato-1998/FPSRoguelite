@@ -4,6 +4,8 @@
 #include "AbilitySystem/FPSRAbilitySystemComponent.h"
 #include "AbilitySystem/Attributes/FPSRHealthSet.h"
 #include "AbilitySystem/Attributes/FPSRCombatSet.h"
+#include "Weapon/FPSRWeaponInventoryComponent.h"
+#include "GameFramework/Pawn.h"
 #include "Net/UnrealNetwork.h"
 #include "Net/Core/PushModel/PushModel.h"
 
@@ -43,6 +45,7 @@ void AFPSRPlayerState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Out
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRPlayerState, RunRerollCharges, Params);
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRPlayerState, CardPicksPending, Params);
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRPlayerState, MissionRewardPicksPending, Params);
+	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRPlayerState, AllWeaponsMods, Params);
 }
 
 bool AFPSRPlayerState::ConsumeRerollCharge()
@@ -145,4 +148,37 @@ bool AFPSRPlayerState::ConsumeMissionRewardPick()
 void AFPSRPlayerState::OnRep_CardPicksPending()
 {
 	OnCardPicksChanged.Broadcast();
+}
+
+void AFPSRPlayerState::AddAllWeaponsModifier(const FFPSRWeaponStatMod& Mod)
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+
+	AllWeaponsMods.Mods.Add(Mod);
+	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRPlayerState, AllWeaponsMods, this);
+
+	// AllWeapons affects every owned weapon: invalidate all instance caches on the owning pawn (server).
+	if (APawn* Pawn = GetPawn())
+	{
+		if (UFPSRWeaponInventoryComponent* Inv = Pawn->FindComponentByClass<UFPSRWeaponInventoryComponent>())
+		{
+			Inv->MarkAllInstancesResolvedDirty();
+		}
+	}
+}
+
+void AFPSRPlayerState::OnRep_AllWeaponsMods()
+{
+	// Client: a new AllWeapons modifier replicated — invalidate every instance's resolved-stat cache so the
+	// next read recomputes with the updated stack.
+	if (APawn* Pawn = GetPawn())
+	{
+		if (UFPSRWeaponInventoryComponent* Inv = Pawn->FindComponentByClass<UFPSRWeaponInventoryComponent>())
+		{
+			Inv->MarkAllInstancesResolvedDirty();
+		}
+	}
 }

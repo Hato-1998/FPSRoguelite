@@ -4,14 +4,17 @@
 > **작업 단계를 끝낼 때마다, 그리고 중단 전 반드시 이 파일을 갱신하고 커밋한다.**
 > 확정 설계·기획·코드구조·규칙은 `Game.MD`(SSOT), **완료 작업 상세는 `git log --oneline`**. 여기엔 *무엇을 했는지*만 요약한다.
 
-**최종 갱신: 2026-06-04**
+**최종 갱신: 2026-06-05**
 
 ## 한 줄 요약
-**P0~P4-A → main 머지 완료**. **P4-A(재설계: 라운드제 폐지 → 레벨업 전역 프리즈 + 시간 미션 + 보스)** 코드+콘텐츠 PIE 검증·빌드·스모크·Codex 통과 후 `--no-ff` main 머지(2026-06-04). **레벨업 시 즉시 전역 프리즈(적·플레이어 정지)→전원 카드 선택→재개**. → 다음 **P4-B**(무기 모디파이어 Fragment + weapon-scope `ApplyCard` 실적용 + 미션 보상 카드 실효 + 나머지 6종 미션).
+**P0~P4-A → main 머지 완료**. **P4-B-1(무기 스탯 모디파이어 기반)** = `phase/p4b1-weapon-statmod` 브랜치에 **구현+빌드+스모크+Codex 통과**(2026-06-05), **PIE 검증·콘텐츠·머지 대기**. 런타임 컨테이너 `UFPSRWeaponInstance`(UObject 복제 서브오브젝트) 신설, 스탯 해석(베이스×누적 모디파이어)을 발사/탄약 경로 배선, `ApplyCard` weapon-scope 실적용, 무기 스탯 카드 레벨업 풀 합류. → 다음 **P4-B-2**(행동 Fragment) → **P4-B-3**(미션 6종).
 
-## ▶▶ 새 세션 우선 작업 = P4-B 착수 (무기 모디파이어 Fragment)
-- **브랜치**: `main`만 존재. **P4-B는 `main`에서 새 `phase/p4b-...` 분기**(§6-7). 구현=Haiku 위임 / 검증=Opus 직접(빌드+스모크+Codex). HIGH_RISK는 승인 후.
-- **P4-A가 P4-B에 노출한 것**: ① **오퍼 일반화 완료** — `EFPSROfferType::MissionReward`로 미션 클리어 시 보상 카드가 이미 제시·선택·소비됨. **단 `UFPSRCardSubsystem::ApplyCard`가 weapon-scope(ThisWeapon/AllWeapons) 카드는 수락·소비하되 GE를 적용 안 함**(주석 "P4-B"). → P4-B에서 **무기 모디파이어 Fragment 시스템 + weapon-scope 실적용**을 채우면 미션 보상/무기 카드가 실효. ② 전역 프리즈(`bRunPaused`)·런 디렉터·미션 프레임워크는 P4-A 완비. ③ `UWeaponInstance`(런타임 모디파이어 컨테이너) 부재 — 현재 슬롯은 `UFPSRWeaponDataAsset` 직접 보관(§Game.MD §2-4-1: 신설 필요).
+## ▶▶ 새 세션 우선 작업 = P4-B-1 마무리(PIE+콘텐츠+머지) → P4-B-2 착수 (행동 Fragment)
+- **브랜치**: `phase/p4b1-weapon-statmod`(P4-B-1 구현 커밋됨, **PIE+콘텐츠+`--no-ff` 머지 대기**). 이후 P4-B-2는 `main` 머지 후 새 `phase/p4b2-...` 분기(§6-7).
+- **P4-B-1 구현 완료(브랜치)**: `UFPSRWeaponInstance`(Source DA+ThisWeapon `Modifiers`+탄약/리로드+해석 캐시, 복제 서브오브젝트, Push Model) / 인벤토리 `Slots[]` 인스턴스화(탄약·리로드 인스턴스로 이동) / `AFPSRCharacter`·컴포넌트 `bReplicateUsingRegisteredSubObjectList=true` / `AFPSRPlayerState::AllWeaponsMods`(캐릭터 광역, 리스폰 생존) / 발사 3곳(FireComp·Hitscan·Melee)+탄약 `GetResolvedStats()` 배선 / `ApplyCard` ThisWeapon→인스턴스, AllWeapons→PlayerState / `UFPSRCardDataAsset.WeaponStat/WeaponStatOp` / DrawCards weapon-scope 합류(무기 보유 시) / 디버그 `FPSR.DumpWeaponStats`.
+  - **설계 경계 결정(Codex 하드닝)**: ① **레벨업 weapon-scope 카드 = 범용 풀(ActivePool->Cards)만**, ThisWeapon=현재 장착 무기(Game.MD §2-4-1 ①). **무기별 `WeaponCards`의 weapon-scope 항목은 레벨업에 미합류** → 무기 특정 모디파이어는 **P4-B-2 MissionReward 경로**(AvailableModifiers). ② **프리즈 중 `ServerEquipSlot` 차단**(서버 권위) → ThisWeapon 타깃 결정성(선택 중 슬롯 스왑 방지). ③ Codex가 "무기별 카드 미도달" 재지적했으나 이는 설계상 P4-B-2 영역이며 P4-B-1 이전에도 미추첨이었음(회귀 아님).
+  - **⚠️ PIE 검증 필요(헤드리스 불가)**: 복제 서브오브젝트(클라에 인스턴스/모디파이어/탄약 전파) + 카드 적용 후 발사 체감. 시나리오: 무기 장착 → `FPSR.AddXP`로 레벨업 프리즈 → weapon-scope 카드 출현 → ThisWeapon 연사↑/탄창↑/반동↓ 선택 → `FPSR.DumpWeaponStats`로 base→resolved 변화 + 발사 체감 / AllWeapons 전 슬롯 반영.
+  - **콘텐츠(사용자)**: 무기 스탯 카드 DA(탄창/연사/반동 × ThisWeapon[큰값]/AllWeapons[작은값] ≈6종, `Scope`+`WeaponStat`+`WeaponStatOp`+`RarityTiers` 매그니튜드) → 레벨업 카드 풀(`UFPSRCardPoolDataAsset.Cards`)에 추가.
 - **P4-B 범위**(Game.MD §2-4-1): **① 스탯 모디파이어 카드(확정 2026-06-04)** — 탄창용량↑/연사속도↑/반동↓ 등 `FFPSRWeaponStatBlock` 수치 조정 카드. **두 스코프 같은 효과 다른 수치**: `AllWeapons`(전체, 수치 작게) / `ThisWeapon`(단일, 큰 수치). 레벨업 카드 풀(무기 보유 시 합류). 무기 스탯은 ASC 밖이라 **GE가 아닌 `UWeaponInstance` 모디파이어로 적용** → `ApplyCard` weapon-scope 분기. **② 행동 Fragment** — Behavior Fragment(합성형 훅 PreFire/ModifyShotCount/OnHitActor…) + `UWeaponInstance.ActiveModifiers[]` + 발사 GA 훅 + 무기 DA `AvailableModifiers`(미션 보상). **스탯 해석 = StatBlock 베이스 × 누적(ThisWeapon+AllWeapons)**. + 나머지 6종 미션(이동점령/도망몹/점프맵/오브소지/시야제한/전원정지).
   - **아키텍처 결정(P4-B 플랜에서)**: `UWeaponInstance`를 무엇으로(UObject/struct)·인벤토리 슬롯 전환 / AllWeapons 모디파이어를 캐릭터(PlayerState)에 두고 무기가 합산할지 vs 각 WeaponInstance에 복제할지 / 무기 스탯 해석 캐싱 / 복제 범위 / 발사 GA가 해석된 스탯을 읽는 경로.
 - **⚠️ 임시 테스트값(프로덕션 전환 시 노티·원복)**: 스케줄 DA(`DA_RunSchedule`)의 미션 60/120/180s·보스 300s → 프로덕션 5/10/15분·보스 20분. 메모리 `p4a-temp-test-values`. (XP는 프로덕션 공식)

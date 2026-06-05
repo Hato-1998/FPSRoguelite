@@ -3,6 +3,7 @@
 #include "AbilitySystem/Abilities/FPSRGA_WeaponMelee.h"
 #include "AbilitySystem/Attributes/FPSRCombatSet.h"
 #include "Weapon/FPSRWeaponInventoryComponent.h"
+#include "Weapon/FPSRWeaponInstance.h"
 #include "Weapon/FPSRWeaponDataAsset.h"
 #include "Enemy/FPSREnemyHealthComponent.h"
 #include "Core/FPSRLogChannels.h"
@@ -46,11 +47,12 @@ void UFPSRGA_WeaponMelee::ActivateAbility(
 	UFPSRWeaponInventoryComponent* Inventory = Avatar->FindComponentByClass<UFPSRWeaponInventoryComponent>();
 	if (Inventory)
 	{
-		if (UFPSRWeaponDataAsset* Weapon = Inventory->GetCurrentWeapon())
+		if (UFPSRWeaponInstance* Instance = Inventory->GetCurrentInstance())
 		{
-			Damage = Weapon->BaseStats.Damage;
-			MeleeRadius = Weapon->BaseStats.MeleeRadius;
-			MeleeAttackDelay = Weapon->BaseStats.MeleeAttackDelay;
+			const FFPSRWeaponStatBlock& Stats = Instance->GetResolvedStats();
+			Damage = Stats.Damage;
+			MeleeRadius = Stats.MeleeRadius;
+			MeleeAttackDelay = Stats.MeleeAttackDelay;
 		}
 	}
 

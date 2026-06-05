@@ -17,9 +17,11 @@ EDataValidationResult UFPSRCardDataAsset::IsDataValid(FDataValidationContext& Co
 		Result = EDataValidationResult::Invalid;
 	}
 
-	if (!AppliedEffect)
+	// Character-scope cards apply via AppliedEffect; weapon-scope cards apply via WeaponStat (no GE), so a
+	// missing AppliedEffect is only a problem for Character scope.
+	if (Scope == ECardScope::Character && !AppliedEffect)
 	{
-		Context.AddWarning(LOCTEXT("NoAppliedEffect", "Card has no AppliedEffect — selecting it will apply nothing."));
+		Context.AddWarning(LOCTEXT("NoAppliedEffect", "Character-scope card has no AppliedEffect — selecting it will apply nothing."));
 	}
 
 	return Result;

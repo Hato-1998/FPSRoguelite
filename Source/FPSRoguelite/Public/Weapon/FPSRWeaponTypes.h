@@ -129,3 +129,54 @@ struct FPSROGUELITE_API FFPSRWeaponStatBlock
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|ADS")
 	float ADSInterpSpeed = 14.0f; // FOV interpolation speed
 };
+
+/** Stat axis a weapon modifier targets. Maps 1:1 to an FFPSRWeaponStatBlock field (compile-checked switch in
+ *  the resolver). P4-B-1 card pool uses MagSize / FireRate / RecoilVertical; extend by adding a case in
+ *  UFPSRWeaponInstance::RecomputeResolved. */
+UENUM(BlueprintType)
+enum class EFPSRWeaponStat : uint8
+{
+	MagSize        UMETA(DisplayName = "Magazine Size"),
+	FireRate       UMETA(DisplayName = "Fire Rate"),
+	RecoilVertical UMETA(DisplayName = "Recoil (Vertical)"),
+	Damage         UMETA(DisplayName = "Damage"),
+	SpreadDegrees  UMETA(DisplayName = "Spread"),
+	ReloadTime     UMETA(DisplayName = "Reload Time")
+};
+
+/** How a modifier combines with the base stat. Resolution per axis = (base + Σadditive) × (1 + Σpercent). */
+UENUM(BlueprintType)
+enum class EFPSRWeaponModOp : uint8
+{
+	Additive        UMETA(DisplayName = "Additive"),         // flat add (e.g. +10 MagSize)
+	PercentMultiply UMETA(DisplayName = "Percent Multiply")  // fractional (e.g. +0.10 = ×1.10; -0.15 = ×0.85)
+};
+
+/** One numeric weapon-stat modifier (from a stat-modifier card). Accumulated on a UFPSRWeaponInstance
+ *  (ThisWeapon scope) or on the PlayerState (AllWeapons scope). */
+USTRUCT(BlueprintType)
+struct FFPSRWeaponStatMod
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadOnly, Category = "Weapon|Mod")
+	EFPSRWeaponStat Stat = EFPSRWeaponStat::FireRate;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Weapon|Mod")
+	EFPSRWeaponModOp Op = EFPSRWeaponModOp::PercentMultiply;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Weapon|Mod")
+	float Value = 0.0f;
+};
+
+/** A replicated stack of weapon-stat modifiers. Shared shape for ThisWeapon (per-instance) and
+ *  AllWeapons (per-PlayerState) scopes. Modifier count is small; a plain array suffices (FastArraySerializer
+ *  delta replication is a future upgrade if counts grow). */
+USTRUCT(BlueprintType)
+struct FFPSRWeaponModContainer
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadOnly, Category = "Weapon|Mod")
+	TArray<FFPSRWeaponStatMod> Mods;
+};

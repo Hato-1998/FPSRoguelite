@@ -7,6 +7,7 @@
 #include "FPSRWeaponInventoryComponent.generated.h"
 
 class UFPSRWeaponDataAsset;
+class UFPSRWeaponInstance;
 class UAbilitySystemComponent;
 
 /** Server-authoritative 3-slot weapon inventory. Grants the equipped weapon's fire ability. */
@@ -29,8 +30,15 @@ public:
 	UFUNCTION(BlueprintPure, Category = "FPSR|Weapon")
 	UFPSRWeaponDataAsset* GetCurrentWeapon() const;
 
+	/** Runtime instance of the currently equipped weapon (holds modifiers / resolved stats / ammo). */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Weapon")
+	UFPSRWeaponInstance* GetCurrentInstance() const;
+
 	UFUNCTION(BlueprintPure, Category = "FPSR|Weapon")
 	TArray<UFPSRWeaponDataAsset*> GetOwnedWeapons() const;
+
+	/** Invalidate every weapon instance's resolved-stat cache (e.g. after an AllWeapons modifier changes). */
+	void MarkAllInstancesResolvedDirty();
 
 	UFUNCTION(BlueprintPure, Category = "FPSR|Weapon")
 	int32 GetCurrentSlotIndex() const { return CurrentSlotIndex; }
@@ -42,7 +50,7 @@ public:
 	int32 GetCurrentMagSize() const;
 
 	UFUNCTION(BlueprintPure, Category = "FPSR|Weapon")
-	bool IsReloading() const { return bReloading; }
+	bool IsReloading() const;
 
 	/** Server: consume ammo from the current slot. Returns false if insufficient. */
 	bool ConsumeAmmo(int32 Amount = 1);
@@ -69,20 +77,15 @@ protected:
 	/** Server: clears the previous fire ability and grants the current weapon's fire ability. */
 	void RefreshEquippedAbility();
 
+	/** One runtime instance per slot (nullptr = empty). Replicated as registered subobjects. */
 	UPROPERTY(Replicated)
-	TArray<TObjectPtr<UFPSRWeaponDataAsset>> WeaponSlots;
+	TArray<TObjectPtr<UFPSRWeaponInstance>> Slots;
 
 	UPROPERTY(ReplicatedUsing = OnRep_CurrentSlotIndex)
 	int32 CurrentSlotIndex = -1;
 
 	/** Server-only handle to the currently granted fire ability. */
 	FGameplayAbilitySpecHandle GrantedFireAbilityHandle;
-
-	UPROPERTY(Replicated)
-	TArray<int32> SlotAmmo;
-
-	UPROPERTY(Replicated)
-	bool bReloading = false;
 
 	/** Server-only reload timer. */
 	FTimerHandle ReloadTimerHandle;

@@ -2,6 +2,7 @@
 
 #include "Weapon/FPSRWeaponInventoryComponent.h"
 #include "Weapon/FPSRWeaponDataAsset.h"
+#include "Weapon/FPSRWeaponInstance.h"
 #include "Core/FPSRLogChannels.h"
 
 #include "AbilitySystemComponent.h"
@@ -17,8 +18,10 @@ UFPSRWeaponInventoryComponent::UFPSRWeaponInventoryComponent()
 {
 	PrimaryComponentTick.bCanEverTick = false;
 	SetIsReplicatedByDefault(true);
-	WeaponSlots.SetNum(MaxSlots);
-	SlotAmmo.SetNum(MaxSlots);
+	// Replicate the per-slot UFPSRWeaponInstance subobjects via the registered list. The owning actor
+	// (AFPSRCharacter) must also enable bReplicateUsingRegisteredSubObjectList (engine requirement).
+	bReplicateUsingRegisteredSubObjectList = true;
+	Slots.SetNum(MaxSlots);
 }
 
 void UFPSRWeaponInventoryComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
@@ -27,10 +30,8 @@ void UFPSRWeaponInventoryComponent::GetLifetimeReplicatedProps(TArray<FLifetimeP
 
 	FDoRepLifetimeParams Params;
 	Params.bIsPushBased = true;
-	DOREPLIFETIME_WITH_PARAMS_FAST(UFPSRWeaponInventoryComponent, WeaponSlots, Params);
+	DOREPLIFETIME_WITH_PARAMS_FAST(UFPSRWeaponInventoryComponent, Slots, Params);
 	DOREPLIFETIME_WITH_PARAMS_FAST(UFPSRWeaponInventoryComponent, CurrentSlotIndex, Params);
-	DOREPLIFETIME_WITH_PARAMS_FAST(UFPSRWeaponInventoryComponent, SlotAmmo, Params);
-	DOREPLIFETIME_WITH_PARAMS_FAST(UFPSRWeaponInventoryComponent, bReloading, Params);
 }
 
 UAbilitySystemComponent* UFPSRWeaponInventoryComponent::GetOwnerASC() const
@@ -45,18 +46,21 @@ int32 UFPSRWeaponInventoryComponent::AddWeapon(UFPSRWeaponDataAsset* WeaponData)
 		return INDEX_NONE;
 	}
 
-	const int32 FreeSlot = WeaponSlots.IndexOfByPredicate(
-		[](const TObjectPtr<UFPSRWeaponDataAsset>& W) { return W == nullptr; });
+	const int32 FreeSlot = Slots.IndexOfByPredicate(
+		[](const TObjectPtr<UFPSRWeaponInstance>& W) { return W == nullptr; });
 	if (FreeSlot == INDEX_NONE)
 	{
 		return INDEX_NONE;
 	}
 
-	WeaponSlots[FreeSlot] = WeaponData;
-	MARK_PROPERTY_DIRTY_FROM_NAME(UFPSRWeaponInventoryComponent, WeaponSlots, this);
+	UFPSRWeaponInstance* Instance = NewObject<UFPSRWeaponInstance>(this);
+	Instance->InitializeWithSource(WeaponData);
+	// Start with a full magazine (resolved MagSize; no modifiers yet at pickup = base).
+	Instance->SetCurrentAmmo(Instance->GetResolvedStats().MagSize);
+	AddReplicatedSubObject(Instance);
 
-	SlotAmmo[FreeSlot] = WeaponData->BaseStats.MagSize;
-	MARK_PROPERTY_DIRTY_FROM_NAME(UFPSRWeaponInventoryComponent, SlotAmmo, this);
+	Slots[FreeSlot] = Instance;
+	MARK_PROPERTY_DIRTY_FROM_NAME(UFPSRWeaponInventoryComponent, Slots, this);
 
 	if (CurrentSlotIndex == INDEX_NONE)
 	{
@@ -71,18 +75,20 @@ void UFPSRWeaponInventoryComponent::EquipSlot(int32 SlotIndex)
 	{
 		return;
 	}
-	if (!WeaponSlots.IsValidIndex(SlotIndex) || WeaponSlots[SlotIndex] == nullptr)
+	if (!Slots.IsValidIndex(SlotIndex) || Slots[SlotIndex] == nullptr)
 	{
 		return;
 	}
 
 	// Switching weapons cancels any in-progress reload, remembering the slot so it resumes on re-equip.
-	if (bReloading)
+	if (UFPSRWeaponInstance* Current = GetCurrentInstance())
 	{
-		GetWorld()->GetTimerManager().ClearTimer(ReloadTimerHandle);
-		bReloading = false;
-		MARK_PROPERTY_DIRTY_FROM_NAME(UFPSRWeaponInventoryComponent, bReloading, this);
-		PendingReloadSlot = CurrentSlotIndex;
+		if (Current->IsReloading())
+		{
+			GetWorld()->GetTimerManager().ClearTimer(ReloadTimerHandle);
+			Current->SetReloading(false);
+			PendingReloadSlot = CurrentSlotIndex;
+		}
 	}
 
 	CurrentSlotIndex = SlotIndex;
@@ -97,9 +103,12 @@ void UFPSRWeaponInventoryComponent::EquipSlot(int32 SlotIndex)
 	if (PendingReloadSlot == CurrentSlotIndex)
 	{
 		PendingReloadSlot = INDEX_NONE;
-		if (SlotAmmo.IsValidIndex(CurrentSlotIndex) && SlotAmmo[CurrentSlotIndex] <= 0)
+		if (UFPSRWeaponInstance* Current = GetCurrentInstance())
 		{
-			StartReload();
+			if (Current->GetCurrentAmmo() <= 0)
+			{
+				StartReload();
+			}
 		}
 	}
 
@@ -132,9 +141,15 @@ void UFPSRWeaponInventoryComponent::RefreshEquippedAbility()
 	}
 }
 
+UFPSRWeaponInstance* UFPSRWeaponInventoryComponent::GetCurrentInstance() const
+{
+	return Slots.IsValidIndex(CurrentSlotIndex) ? Slots[CurrentSlotIndex].Get() : nullptr;
+}
+
 UFPSRWeaponDataAsset* UFPSRWeaponInventoryComponent::GetCurrentWeapon() const
 {
-	return WeaponSlots.IsValidIndex(CurrentSlotIndex) ? WeaponSlots[CurrentSlotIndex].Get() : nullptr;
+	UFPSRWeaponInstance* Instance = GetCurrentInstance();
+	return Instance ? Instance->GetSource() : nullptr;
 }
 
 void UFPSRWeaponInventoryComponent::OnRep_CurrentSlotIndex()
@@ -144,26 +159,44 @@ void UFPSRWeaponInventoryComponent::OnRep_CurrentSlotIndex()
 
 int32 UFPSRWeaponInventoryComponent::GetCurrentAmmo() const
 {
-	return SlotAmmo.IsValidIndex(CurrentSlotIndex) ? SlotAmmo[CurrentSlotIndex] : 0;
+	UFPSRWeaponInstance* Instance = GetCurrentInstance();
+	return Instance ? Instance->GetCurrentAmmo() : 0;
 }
 
 int32 UFPSRWeaponInventoryComponent::GetCurrentMagSize() const
 {
-	const UFPSRWeaponDataAsset* Weapon = GetCurrentWeapon();
-	return Weapon ? Weapon->BaseStats.MagSize : 0;
+	UFPSRWeaponInstance* Instance = GetCurrentInstance();
+	return Instance ? Instance->GetResolvedStats().MagSize : 0;
+}
+
+bool UFPSRWeaponInventoryComponent::IsReloading() const
+{
+	UFPSRWeaponInstance* Instance = GetCurrentInstance();
+	return Instance ? Instance->IsReloading() : false;
 }
 
 TArray<UFPSRWeaponDataAsset*> UFPSRWeaponInventoryComponent::GetOwnedWeapons() const
 {
 	TArray<UFPSRWeaponDataAsset*> Result;
-	for (const TObjectPtr<UFPSRWeaponDataAsset>& Weapon : WeaponSlots)
+	for (const TObjectPtr<UFPSRWeaponInstance>& Instance : Slots)
 	{
-		if (Weapon)
+		if (Instance && Instance->GetSource())
 		{
-			Result.Add(Weapon.Get());
+			Result.Add(Instance->GetSource());
 		}
 	}
 	return Result;
+}
+
+void UFPSRWeaponInventoryComponent::MarkAllInstancesResolvedDirty()
+{
+	for (const TObjectPtr<UFPSRWeaponInstance>& Instance : Slots)
+	{
+		if (Instance)
+		{
+			Instance->MarkResolvedDirty();
+		}
+	}
 }
 
 bool UFPSRWeaponInventoryComponent::ConsumeAmmo(int32 Amount)
@@ -172,36 +205,36 @@ bool UFPSRWeaponInventoryComponent::ConsumeAmmo(int32 Amount)
 	{
 		return false;
 	}
-	if (!SlotAmmo.IsValidIndex(CurrentSlotIndex) || SlotAmmo[CurrentSlotIndex] < Amount)
+	UFPSRWeaponInstance* Instance = GetCurrentInstance();
+	if (!Instance || Instance->GetCurrentAmmo() < Amount)
 	{
 		return false;
 	}
-	SlotAmmo[CurrentSlotIndex] -= Amount;
-	MARK_PROPERTY_DIRTY_FROM_NAME(UFPSRWeaponInventoryComponent, SlotAmmo, this);
+	Instance->SetCurrentAmmo(Instance->GetCurrentAmmo() - Amount);
 	return true;
 }
 
 void UFPSRWeaponInventoryComponent::StartReload()
 {
-	if (!GetOwner() || !GetOwner()->HasAuthority() || bReloading)
+	if (!GetOwner() || !GetOwner()->HasAuthority())
 	{
 		return;
 	}
-	const UFPSRWeaponDataAsset* Weapon = GetCurrentWeapon();
-	if (!Weapon || !SlotAmmo.IsValidIndex(CurrentSlotIndex))
+	UFPSRWeaponInstance* Instance = GetCurrentInstance();
+	if (!Instance || Instance->IsReloading())
 	{
 		return;
 	}
-	if (SlotAmmo[CurrentSlotIndex] >= Weapon->BaseStats.MagSize)
+	const FFPSRWeaponStatBlock& Stats = Instance->GetResolvedStats();
+	if (Instance->GetCurrentAmmo() >= Stats.MagSize)
 	{
 		return; // already full
 	}
 
-	bReloading = true;
-	MARK_PROPERTY_DIRTY_FROM_NAME(UFPSRWeaponInventoryComponent, bReloading, this);
+	Instance->SetReloading(true);
 	GetWorld()->GetTimerManager().SetTimer(
 		ReloadTimerHandle, this, &UFPSRWeaponInventoryComponent::FinishReload,
-		FMath::Max(0.01f, Weapon->BaseStats.ReloadTime), false);
+		FMath::Max(0.01f, Stats.ReloadTime), false);
 }
 
 void UFPSRWeaponInventoryComponent::FinishReload()
@@ -210,14 +243,11 @@ void UFPSRWeaponInventoryComponent::FinishReload()
 	{
 		return;
 	}
-	const UFPSRWeaponDataAsset* Weapon = GetCurrentWeapon();
-	if (Weapon && SlotAmmo.IsValidIndex(CurrentSlotIndex))
+	if (UFPSRWeaponInstance* Instance = GetCurrentInstance())
 	{
-		SlotAmmo[CurrentSlotIndex] = Weapon->BaseStats.MagSize; // infinite reserve: always full
-		MARK_PROPERTY_DIRTY_FROM_NAME(UFPSRWeaponInventoryComponent, SlotAmmo, this);
+		Instance->SetCurrentAmmo(Instance->GetResolvedStats().MagSize); // infinite reserve: always full
+		Instance->SetReloading(false);
 	}
-	bReloading = false;
-	MARK_PROPERTY_DIRTY_FROM_NAME(UFPSRWeaponInventoryComponent, bReloading, this);
 }
 
 bool UFPSRWeaponInventoryComponent::ServerTryConsumeFireInterval(float MinInterval)
