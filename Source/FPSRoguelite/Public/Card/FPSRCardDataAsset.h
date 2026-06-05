@@ -9,6 +9,7 @@
 #include "FPSRCardDataAsset.generated.h"
 
 class UGameplayEffect;
+class UFPSRWeaponFragment;
 
 /** Data-driven card definition (ability modifier, stat buff, or weapon enhancement). */
 UCLASS(BlueprintType)
@@ -53,6 +54,11 @@ public:
 	/** Weapon-scope only: how the modifier combines (additive flat vs percent multiply). */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Card|Weapon")
 	EFPSRWeaponModOp WeaponStatOp = EFPSRWeaponModOp::PercentMultiply;
+
+	/** ThisWeapon-scope behavior fragment (P4-B-2). When set, selecting this card grants the fragment to the
+	 *  current weapon instead of applying a stat modifier. Authored as this weapon's AvailableModifiers reward. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Card|Weapon")
+	TObjectPtr<UFPSRWeaponFragment> GrantedFragment = nullptr;
 
 #if WITH_EDITOR
 	/** Editor validation: a card with no RarityTiers is never offered (errors); no AppliedEffect applies nothing (warns). */

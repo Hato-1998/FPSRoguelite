@@ -2,6 +2,7 @@
 
 #include "Weapon/FPSRWeaponInstance.h"
 #include "Weapon/FPSRWeaponDataAsset.h"
+#include "Weapon/FPSRWeaponFragment.h"
 #include "Weapon/FPSRWeaponInventoryComponent.h"
 #include "Core/FPSRPlayerState.h"
 
@@ -17,6 +18,7 @@ void UFPSRWeaponInstance::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& 
 	Params.bIsPushBased = true;
 	DOREPLIFETIME_WITH_PARAMS_FAST(UFPSRWeaponInstance, Source, Params);
 	DOREPLIFETIME_WITH_PARAMS_FAST(UFPSRWeaponInstance, Modifiers, Params);
+	DOREPLIFETIME_WITH_PARAMS_FAST(UFPSRWeaponInstance, ActiveFragments, Params);
 	DOREPLIFETIME_WITH_PARAMS_FAST(UFPSRWeaponInstance, CurrentAmmo, Params);
 	DOREPLIFETIME_WITH_PARAMS_FAST(UFPSRWeaponInstance, bReloading, Params);
 }
@@ -33,6 +35,21 @@ void UFPSRWeaponInstance::AddModifier(const FFPSRWeaponStatMod& Mod)
 	Modifiers.Mods.Add(Mod);
 	MARK_PROPERTY_DIRTY_FROM_NAME(UFPSRWeaponInstance, Modifiers, this);
 	MarkResolvedDirty();
+}
+
+bool UFPSRWeaponInstance::HasFragment(const UFPSRWeaponFragment* Fragment) const
+{
+	return Fragment != nullptr && ActiveFragments.Contains(Fragment);
+}
+
+void UFPSRWeaponInstance::AddFragment(UFPSRWeaponFragment* Fragment)
+{
+	if (!Fragment || HasFragment(Fragment))
+	{
+		return;
+	}
+	ActiveFragments.Add(Fragment);
+	MARK_PROPERTY_DIRTY_FROM_NAME(UFPSRWeaponInstance, ActiveFragments, this);
 }
 
 void UFPSRWeaponInstance::SetCurrentAmmo(int32 NewAmmo)

@@ -44,6 +44,10 @@ public:
 	 *  the player's luck. Returns an offer with a null Card if the card has no tiers. */
 	FFPSRCardDraw BuildSingleDraw(UFPSRCardDataAsset* Card, AController* ForPlayer) const;
 
+	/** Build a mission-reward offer (up to Count) from the player's equipped weapon's AvailableModifiers —
+	 *  fragment cards not already owned by the weapon instance (Game.MD §2-4-1 ②). Server authority only. */
+	TArray<FFPSRCardDraw> DrawWeaponModifierOffer(AController* ForPlayer, int32 Count);
+
 	/** Try to consume a reroll charge from the player. Returns true if successful. */
 	bool TryReroll(AController* ForPlayer);
 

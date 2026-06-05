@@ -115,15 +115,20 @@ void AFPSRPlayerController::BeginOpeningSeed(int32 Count)
 
 void AFPSRPlayerController::GrantMissionReward(UFPSRCardDataAsset* RewardCard)
 {
-	if (!HasAuthority() || !RewardCard)
+	if (!HasAuthority())
 	{
 		return;
 	}
 
+	// Mission clear always grants a reward pick. The default reward is a choice from the equipped weapon's
+	// AvailableModifiers (resolved at offer time); a non-null RewardCard is an optional per-mission override.
 	if (AFPSRPlayerState* PS = GetPlayerState<AFPSRPlayerState>())
 	{
 		PS->AddMissionRewardPick();
-		PendingMissionRewardCards.Add(RewardCard);
+		if (RewardCard)
+		{
+			PendingMissionRewardCards.Add(RewardCard);
+		}
 	}
 }
 
@@ -199,13 +204,20 @@ void AFPSRPlayerController::RequestCardOffer(EFPSROfferType OfferType)
 
 	if (OfferType == EFPSROfferType::MissionReward)
 	{
-		// Single-card offer from the front of the reward queue.
-		UFPSRCardDataAsset* RewardCard = (PendingMissionRewardCards.Num() > 0) ? PendingMissionRewardCards[0].Get() : nullptr;
-		const FFPSRCardDraw Draw = Sub->BuildSingleDraw(RewardCard, this);
 		CachedOffer.Reset();
-		if (Draw.Card)
+		if (PendingMissionRewardCards.Num() > 0)
 		{
-			CachedOffer.Add(Draw);
+			// Per-mission override: single designer-specified reward card from the front of the queue.
+			const FFPSRCardDraw Draw = Sub->BuildSingleDraw(PendingMissionRewardCards[0].Get(), this);
+			if (Draw.Card)
+			{
+				CachedOffer.Add(Draw);
+			}
+		}
+		else
+		{
+			// Default: a choice from the equipped weapon's AvailableModifiers (unowned behavior fragments).
+			CachedOffer = Sub->DrawWeaponModifierOffer(this, 3);
 		}
 	}
 	else
@@ -414,6 +426,24 @@ namespace
 				Count = FMath::Max(1, FCString::Atoi(*Args[0]));
 			}
 			PC->BeginOpeningSeed(Count);
+		}));
+
+	FAutoConsoleCommandWithWorld GCmd_GrantMissionRewardPick(
+		TEXT("FPSR.GrantMissionRewardPick"),
+		TEXT("Grant the local player a mission-reward pick (debug, authority/host only) — freezes the run and "
+		     "offers a behavior-fragment choice from the equipped weapon's AvailableModifiers."),
+		FConsoleCommandWithWorldDelegate::CreateLambda([](UWorld* World)
+		{
+			AFPSRPlayerController* PC = GetLocalFPSRController(World);
+			if (!PC || !PC->HasAuthority())
+			{
+				return;
+			}
+			PC->GrantMissionReward(nullptr); // null = default weapon-modifier choice (no override card)
+			if (AFPSRGameState* GS = World ? World->GetGameState<AFPSRGameState>() : nullptr)
+			{
+				GS->RefreshPauseState(); // freeze + present the reward offer
+			}
 		}));
 }
 

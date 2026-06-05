@@ -9,6 +9,7 @@
 #include "AbilitySystem/Attributes/FPSRCombatSet.h"
 #include "Weapon/FPSRWeaponInventoryComponent.h"
 #include "Weapon/FPSRWeaponInstance.h"
+#include "Weapon/FPSRWeaponFragment.h"
 #include "Weapon/FPSRWeaponDataAsset.h"
 #include "AbilitySystemComponent.h"
 #include "GameplayEffect.h"
@@ -255,7 +256,15 @@ bool UFPSRCardSubsystem::ApplyCard(AController* ForPlayer, const FFPSRCardDraw& 
 			{
 				return false;
 			}
-			Instance->AddModifier(Mod);
+			if (Card->GrantedFragment)
+			{
+				// Behavior-fragment card (mission reward): attach the fragment to the current weapon.
+				Instance->AddFragment(Card->GrantedFragment);
+			}
+			else
+			{
+				Instance->AddModifier(Mod);
+			}
 		}
 		else // AllWeapons
 		{
@@ -319,6 +328,54 @@ FFPSRCardDraw UFPSRCardSubsystem::BuildSingleDraw(UFPSRCardDataAsset* Card, ACon
 	Draw.Rarity = Chosen->Rarity;
 	Draw.Magnitude = Chosen->Magnitude;
 	return Draw;
+}
+
+TArray<FFPSRCardDraw> UFPSRCardSubsystem::DrawWeaponModifierOffer(AController* ForPlayer, int32 Count)
+{
+	TArray<FFPSRCardDraw> Result;
+
+	UWorld* World = GetWorld();
+	if (!World || World->GetNetMode() == NM_Client || Count <= 0)
+	{
+		return Result;
+	}
+
+	APawn* Pawn = ForPlayer ? ForPlayer->GetPawn() : nullptr;
+	UFPSRWeaponInventoryComponent* Inv = Pawn ? Pawn->FindComponentByClass<UFPSRWeaponInventoryComponent>() : nullptr;
+	UFPSRWeaponInstance* Instance = Inv ? Inv->GetCurrentInstance() : nullptr;
+	UFPSRWeaponDataAsset* Weapon = Instance ? Instance->GetSource() : nullptr;
+	if (!Weapon)
+	{
+		return Result;
+	}
+
+	// Candidate fragment cards = this weapon's AvailableModifiers the instance does not already own.
+	TArray<UFPSRCardDataAsset*> Candidates;
+	for (const TObjectPtr<UFPSRCardDataAsset>& Card : Weapon->AvailableModifiers)
+	{
+		if (Card && Card->Scope == ECardScope::ThisWeapon && Card->GrantedFragment
+			&& !Instance->HasFragment(Card->GrantedFragment) && !Candidates.Contains(Card))
+		{
+			Candidates.Add(Card);
+		}
+	}
+
+	// Shuffle (Fisher–Yates) so the offered subset varies, then take up to Count.
+	for (int32 i = Candidates.Num() - 1; i > 0; --i)
+	{
+		Candidates.Swap(i, FMath::RandRange(0, i));
+	}
+
+	const int32 Take = FMath::Min(Count, Candidates.Num());
+	for (int32 i = 0; i < Take; ++i)
+	{
+		const FFPSRCardDraw Draw = BuildSingleDraw(Candidates[i], ForPlayer);
+		if (Draw.Card)
+		{
+			Result.Add(Draw);
+		}
+	}
+	return Result;
 }
 
 bool UFPSRCardSubsystem::TryReroll(AController* ForPlayer)
