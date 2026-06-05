@@ -254,6 +254,15 @@ void UFPSRWeaponFireComponent::TickComponent(float DeltaTime, ELevelTick TickTyp
 	}
 
 	// --- Recoil pitch handling (smoothed rise + debt-aware recovery + player compensation) ---
+	// A spray interrupted by an empty magazine / reload must stop kicking the instant rounds stop leaving the
+	// gun: discard any queued (not-yet-applied) recoil rise. Otherwise the smoothed-rise backlog keeps climbing
+	// the view during the reload with no shot firing — especially noticeable once fire rate is boosted.
+	if (!CanFire())
+	{
+		PendingRisePitch = 0.0f;
+		PendingRiseYaw = 0.0f;
+	}
+
 	// 1) Smoothly apply any pending up-kick (snappy rise), accumulating recovery debt.
 	if (PendingRisePitch > 0.0f)
 	{
