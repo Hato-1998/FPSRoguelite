@@ -84,8 +84,13 @@
   - **수치 주입=`SetByCaller`**: GE 모디파이어를 `SetByCaller`(태그 `SetByCaller.CardMagnitude`)로 작성 → `ApplyCard`가 굴린 티어의 `Magnitude`를 주입. 고정 수치 GE(SetByCaller 미사용)에도 무해(무시)
   - **`CardFamily`(GameplayTag, 선택)**: 같은 family 카드는 **한 추첨에 1장만 제안**(상호배타). 미설정 시 `AppliedEffect` GE 클래스를 family 키로 사용 → 단일 GE 방식이면 자동 그룹핑(같은 카드의 다른 티어도 한 번에 1개만)
   - **데이터 검증**: `UFPSRCardDataAsset::IsDataValid`(WITH_EDITOR) — RarityTiers 비면 에러(추첨 누락 방지), AppliedEffect 없으면 경고. 런타임에도 빈 티어 카드는 경고 로그(무음 실패 금지)
+- **`Scope` 의미 (확정 2026-06-04)**:
+  - **`Character`** — 캐릭터 ASC 글로벌 속성(MaxHealth/Luck/이속/Crit 등). Character-scope GE를 ASC에 적용(현재 구현).
+  - **`AllWeapons`** — **들고 있는 모든 무기**에 적용되는 무기 스탯/모디파이어("캐릭터 종속" 느낌). 수치 **작게**.
+  - **`ThisWeapon`** — **현재(대상) 무기 1정**에만 적용. **같은 효과를 더 큰 수치**로(집중 강화).
+  - → 같은 효과(예: 연사속도↑)를 **AllWeapons(소·전체)** 와 **ThisWeapon(대·단일)** 두 카드로 제공 = "넓고 얕게 vs 좁고 깊게" 빌드 선택. (구현은 무기 모디파이어 시스템 §2-4-1, P4-B)
 - **등급 4단계** (Common/Rare/Epic/Legendary) — **Luck** 스탯이 추첨 가중치(상위 등급 확률)에 작용. (※ RarityBonus는 Luck으로 통합·폐지 — 2026-06-02. 광역 행운 1개 축으로 단순화; 향후 드랍품질·희귀스폰 등도 Luck이 담당)
-- **무기별 전용 카드**: 무기 보유 시 해당 무기 카드가 레벨업 카드 풀에 동적 합류 (Gunfire Reborn식)
+- **무기별 전용 카드**: 무기 보유 시 해당 무기 카드(ThisWeapon)가 레벨업 카드 풀에 동적 합류 (Gunfire Reborn식)
 - **리롤**: 캐릭터 메타로 해금, **게임당 3회 제한** (`RunRerollCharges`, 서버 권위 차감)
 - **카드 소비 시점**(§2-2): 오프닝 시드(런 시작 2장) + **레벨업 전역 프리즈**(레벨업 스택 소비) + **미션 클리어 프리즈**(무기 모디파이어 보상). 모두 게임이 멈춘 프리즈 중 선택
 
@@ -99,6 +104,14 @@
 - **무기 교체 입력**: 숫자키 **1/2/3** 직접 슬롯 선택 (`IA_EquipSlot1/2/3`, 마우스휠 미사용)
 
 #### 2-4-1. 무기 모디파이어 = 게임의 핵심 재미
+무기 모디파이어 = **① 스탯 모디파이어(수치 조정)** + **② 행동 Fragment(동작 변경)** 두 종류. 둘 다 런타임 `UWeaponInstance`(무기별 모디파이어 컨테이너, P4-B 신설)에 누적되며, 스탯 해석 = `FFPSRWeaponStatBlock` 베이스 × 누적 모디파이어(ThisWeapon + 캐릭터의 AllWeapons).
+
+**① 스탯 모디파이어 카드 (확정 2026-06-04 — 레벨업 카드 풀)**
+- 예: **탄창 용량↑ / 연사 속도↑ / 반동↓** (그 외 데미지/확산/재장전속도 등 `FFPSRWeaponStatBlock` 축 확장 가능).
+- **두 스코프, 같은 효과 다른 수치**(§2-3): **`AllWeapons`**(들고 있는 모든 무기, 수치 **작게**) vs **`ThisWeapon`**(현재 무기 1정, **큰 수치**). 둘 다 레벨업 프리즈(§2-2) 카드 풀에 합류(무기 보유 시).
+- 데이터: 카드 `Scope`로 적용 범위, `RarityTiers[].Magnitude`로 수치(SetByCaller 동일 패턴). 무기 스탯 모디파이어는 GE가 아닌 **WeaponInstance 모디파이어로 적용**(무기 스탯은 ASC 밖이므로) — `ApplyCard`에서 weapon-scope 분기로 처리(P4-B).
+
+**② 행동 Fragment (미션 보상 = 동작 근본 변경)**
 - 미션 보상으로 무기 동작을 **근본 변경** (2연발, 차징 무효, 아군 힐 빔 등)
 - 적용 방식: **Weapon Behavior Fragment (합성형 훅) + 누적 가능**
   - `UWeaponInstance.ActiveModifiers[]`에 누적, 서로 상호작용 (예: 2연발+관통)
