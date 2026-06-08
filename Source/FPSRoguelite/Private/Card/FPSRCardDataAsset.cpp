@@ -24,6 +24,12 @@ EDataValidationResult UFPSRCardDataAsset::IsDataValid(FDataValidationContext& Co
 		Context.AddWarning(LOCTEXT("NoAppliedEffect", "Character-scope card has no AppliedEffect — selecting it will apply nothing."));
 	}
 
+	// Behavior fragments (GrantedFragment) apply only to the single current weapon (ThisWeapon scope).
+	if (GrantedFragment && Scope != ECardScope::ThisWeapon)
+	{
+		Context.AddWarning(LOCTEXT("FragmentScope", "GrantedFragment is set but Scope is not ThisWeapon — fragments only apply to the current weapon (set Scope = ThisWeapon)."));
+	}
+
 	return Result;
 }
 

@@ -9,6 +9,7 @@
 #include "AbilitySystem/Attributes/FPSRCombatSet.h"
 #include "Weapon/FPSRWeaponInventoryComponent.h"
 #include "Weapon/FPSRWeaponInstance.h"
+#include "Weapon/FPSRWeaponFragment.h"
 #include "Weapon/FPSRWeaponDataAsset.h"
 #include "AbilitySystemComponent.h"
 #include "GameplayEffect.h"
@@ -32,7 +33,10 @@ namespace
 		{
 			return Card->CardFamily.GetTagName();
 		}
-		if (Card->AppliedEffect)
+		// AppliedEffect is only meaningful (and only applied) for Character-scope cards, so use it as the family
+		// fallback only there. Weapon-scope cards never apply a GE — a stale AppliedEffect (e.g. left over on a
+		// Character asset copied/retargeted to a weapon scope) must not group them into an unrelated GE family.
+		if (Card->Scope == ECardScope::Character && Card->AppliedEffect)
 		{
 			return Card->AppliedEffect->GetFName();
 		}
@@ -255,7 +259,15 @@ bool UFPSRCardSubsystem::ApplyCard(AController* ForPlayer, const FFPSRCardDraw& 
 			{
 				return false;
 			}
-			Instance->AddModifier(Mod);
+			if (Card->GrantedFragment)
+			{
+				// Behavior-fragment card (mission reward): attach the fragment to the current weapon.
+				Instance->AddFragment(Card->GrantedFragment);
+			}
+			else
+			{
+				Instance->AddModifier(Mod);
+			}
 		}
 		else // AllWeapons
 		{
@@ -319,6 +331,57 @@ FFPSRCardDraw UFPSRCardSubsystem::BuildSingleDraw(UFPSRCardDataAsset* Card, ACon
 	Draw.Rarity = Chosen->Rarity;
 	Draw.Magnitude = Chosen->Magnitude;
 	return Draw;
+}
+
+TArray<FFPSRCardDraw> UFPSRCardSubsystem::DrawWeaponModifierOffer(AController* ForPlayer, int32 Count)
+{
+	TArray<FFPSRCardDraw> Result;
+
+	UWorld* World = GetWorld();
+	if (!World || World->GetNetMode() == NM_Client || Count <= 0)
+	{
+		return Result;
+	}
+
+	APawn* Pawn = ForPlayer ? ForPlayer->GetPawn() : nullptr;
+	UFPSRWeaponInventoryComponent* Inv = Pawn ? Pawn->FindComponentByClass<UFPSRWeaponInventoryComponent>() : nullptr;
+	UFPSRWeaponInstance* Instance = Inv ? Inv->GetCurrentInstance() : nullptr;
+	UFPSRWeaponDataAsset* Weapon = Instance ? Instance->GetSource() : nullptr;
+	if (!Weapon)
+	{
+		return Result;
+	}
+
+	// Candidate fragment cards = this weapon's AvailableModifiers the instance does not already own.
+	TArray<UFPSRCardDataAsset*> Candidates;
+	for (const TObjectPtr<UFPSRCardDataAsset>& Card : Weapon->AvailableModifiers)
+	{
+		// Offer a fragment card while the weapon still has room to stack it (StackCount < MaxStacks), so a
+		// stackable fragment (e.g. MultiShot MaxStacks=2) keeps appearing until fully stacked.
+		if (Card && Card->Scope == ECardScope::ThisWeapon && Card->GrantedFragment
+			&& Instance->GetFragmentStackCount(Card->GrantedFragment) < FMath::Max(Card->GrantedFragment->MaxStacks, 1)
+			&& !Candidates.Contains(Card))
+		{
+			Candidates.Add(Card);
+		}
+	}
+
+	// Shuffle (Fisher–Yates) so the offered subset varies, then take up to Count.
+	for (int32 i = Candidates.Num() - 1; i > 0; --i)
+	{
+		Candidates.Swap(i, FMath::RandRange(0, i));
+	}
+
+	const int32 Take = FMath::Min(Count, Candidates.Num());
+	for (int32 i = 0; i < Take; ++i)
+	{
+		const FFPSRCardDraw Draw = BuildSingleDraw(Candidates[i], ForPlayer);
+		if (Draw.Card)
+		{
+			Result.Add(Draw);
+		}
+	}
+	return Result;
 }
 
 bool UFPSRCardSubsystem::TryReroll(AController* ForPlayer)

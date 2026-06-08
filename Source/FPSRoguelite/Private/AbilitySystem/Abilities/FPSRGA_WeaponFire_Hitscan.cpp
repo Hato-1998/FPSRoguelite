@@ -4,6 +4,7 @@
 #include "AbilitySystem/Attributes/FPSRCombatSet.h"
 #include "Weapon/FPSRWeaponInventoryComponent.h"
 #include "Weapon/FPSRWeaponInstance.h"
+#include "Weapon/FPSRWeaponFragment.h"
 #include "Weapon/FPSRWeaponDataAsset.h"
 #include "Weapon/FPSRWeaponFireComponent.h"
 #include "Enemy/FPSREnemyHealthComponent.h"
@@ -65,7 +66,8 @@ void UFPSRGA_WeaponFire_Hitscan::ActivateAbility(
 		SpreadDegrees = Stats->SpreadDegrees;
 	}
 
-	// Server-authoritative gates: empty mag / reloading / fire-rate. Then consume ammo.
+	// Server-authoritative gates: empty mag / reloading / fire-rate. Ammo is consumed later, once the fragment
+	// hooks have determined the pellet count (multishot debits one magazine round per pellet, §2-4-1).
 	if (Avatar->HasAuthority() && Inventory)
 	{
 		if (Inventory->IsReloading() || Inventory->GetCurrentAmmo() <= 0)
@@ -82,7 +84,6 @@ void UFPSRGA_WeaponFire_Hitscan::ActivateAbility(
 				return;
 			}
 		}
-		Inventory->ConsumeAmmo(1);
 	}
 
 	// Add bloom from sustained fire, then tighten spread while aiming down sights.
@@ -95,56 +96,117 @@ void UFPSRGA_WeaponFire_Hitscan::ActivateAbility(
 		}
 	}
 
-	// Trace from the player view point, randomized within the spread cone.
+	// Behavior fragments (P4-B-2): build the per-activation context and let fragments adjust the shot count
+	// (multishot / shotgun spread). Hooks are stateless and run a handful of times — no per-hit allocation.
+	FFPSRFireContext FireCtx;
+	FireCtx.Avatar = Avatar;
+	FireCtx.Controller = Controller;
+	FireCtx.World = World;
+	FireCtx.Instance = Instance;
+	FireCtx.ShotCount = 1;
+	FireCtx.bAuthority = Avatar->HasAuthority();
+
+	const TArray<TObjectPtr<UFPSRWeaponFragment>>* Fragments = Instance ? &Instance->GetActiveFragments() : nullptr;
+	if (Fragments)
+	{
+		for (const TObjectPtr<UFPSRWeaponFragment>& Frag : *Fragments)
+		{
+			if (Frag) { Frag->PreFire(FireCtx); }
+		}
+		for (const TObjectPtr<UFPSRWeaponFragment>& Frag : *Fragments)
+		{
+			if (Frag) { Frag->ModifyShotCount(FireCtx); }
+		}
+	}
+	int32 NumShots = FMath::Clamp(FireCtx.ShotCount, 1, 32);
+	// Multishot debits one magazine round per pellet (Game.MD §2-4-1). Clamp the pellet count to the rounds
+	// actually loaded — CurrentAmmo is replicated, so the server and the owning client clamp to the same
+	// pre-fire value — then the server deducts exactly that many. The empty-mag gate above guarantees at least
+	// one round remains, so at least one pellet always fires.
+	if (Inventory)
+	{
+		NumShots = FMath::Min(NumShots, FMath::Max(Inventory->GetCurrentAmmo(), 1));
+		if (Avatar->HasAuthority())
+		{
+			Inventory->ConsumeAmmo(NumShots);
+		}
+	}
+
+	// Crit/damage multipliers from the ASC are fetched once; crit is rolled per pellet so multishot pellets
+	// can crit independently.
+	float DamageMultiplier = 1.0f;
+	float CritChance = 0.0f;
+	float CritMultiplier = 1.0f;
+	if (UAbilitySystemComponent* ASC = GetAbilitySystemComponentFromActorInfo())
+	{
+		CritChance = ASC->GetNumericAttribute(UFPSRCombatSet::GetGlobalCritChanceAttribute());
+		CritMultiplier = ASC->GetNumericAttribute(UFPSRCombatSet::GetGlobalCritMultiplierAttribute());
+		DamageMultiplier = ASC->GetNumericAttribute(UFPSRCombatSet::GetGlobalDamageMultiplierAttribute());
+	}
+
+	// Trace from the player view point; each pellet is randomized within the spread cone.
 	FVector ViewLocation;
 	FRotator ViewRotation;
 	Controller->GetPlayerViewPoint(ViewLocation, ViewRotation);
 	const FVector Start = ViewLocation;
 	const FVector BaseDir = ViewRotation.Vector();
-	const FVector ShotDir = (SpreadDegrees > 0.0f)
-		? FMath::VRandCone(BaseDir, FMath::DegreesToRadians(SpreadDegrees))
-		: BaseDir;
-	const FVector End = Start + ShotDir * Range;
 
-	FHitResult Hit;
-	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(FPSRWeaponFire), false, Avatar);
-	const bool bHit = World->LineTraceSingleByChannel(Hit, Start, End, ECC_Visibility, QueryParams);
+	for (int32 ShotIndex = 0; ShotIndex < NumShots; ++ShotIndex)
+	{
+		const FVector ShotDir = (SpreadDegrees > 0.0f)
+			? FMath::VRandCone(BaseDir, FMath::DegreesToRadians(SpreadDegrees))
+			: BaseDir;
+		const FVector End = Start + ShotDir * Range;
+
+		FHitResult Hit;
+		FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(FPSRWeaponFire), false, Avatar);
+		const bool bHit = World->LineTraceSingleByChannel(Hit, Start, End, ECC_Visibility, QueryParams);
 
 #if ENABLE_DRAW_DEBUG
-	const FVector DebugEnd = bHit ? Hit.ImpactPoint : End;
-	DrawDebugLine(World, Start, DebugEnd, FColor::Yellow, false, 0.5f, 0, 1.0f);
-	if (bHit)
-	{
-		DrawDebugPoint(World, Hit.ImpactPoint, 10.0f, FColor::Red, false, 0.5f);
-	}
+		const FVector DebugEnd = bHit ? Hit.ImpactPoint : End;
+		DrawDebugLine(World, Start, DebugEnd, FColor::Yellow, false, 0.5f, 0, 1.0f);
+		if (bHit)
+		{
+			DrawDebugPoint(World, Hit.ImpactPoint, 10.0f, FColor::Red, false, 0.5f);
+		}
 #endif
 
-	// Server-authoritative damage application.
-	if (bHit && Avatar->HasAuthority())
-	{
-		float FinalDamage = Damage;
-		if (UAbilitySystemComponent* ASC = GetAbilitySystemComponentFromActorInfo())
+		// Server-authoritative damage application.
+		if (bHit && FireCtx.bAuthority)
 		{
-			const float CritChance = ASC->GetNumericAttribute(UFPSRCombatSet::GetGlobalCritChanceAttribute());
-			const float CritMultiplier = ASC->GetNumericAttribute(UFPSRCombatSet::GetGlobalCritMultiplierAttribute());
-			const float DamageMultiplier = ASC->GetNumericAttribute(UFPSRCombatSet::GetGlobalDamageMultiplierAttribute());
-
-			FinalDamage *= DamageMultiplier;
-			if (FMath::FRand() < CritChance)
+			float FinalDamage = Damage * DamageMultiplier;
+			if (CritChance > 0.0f && FMath::FRand() < CritChance)
 			{
 				FinalDamage *= CritMultiplier;
 			}
-		}
 
-		if (AActor* HitActor = Hit.GetActor())
-		{
-			if (UFPSREnemyHealthComponent* HealthComp = HitActor->FindComponentByClass<UFPSREnemyHealthComponent>())
+			if (AActor* HitActor = Hit.GetActor())
 			{
-				HealthComp->ApplyDamage(FinalDamage, Avatar);
+				// Per-hit behavior hooks (e.g. bonus/leech) can adjust the damage before it lands.
+				if (Fragments)
+				{
+					for (const TObjectPtr<UFPSRWeaponFragment>& Frag : *Fragments)
+					{
+						if (Frag) { Frag->OnHitActor(FireCtx, HitActor, FinalDamage); }
+					}
+				}
+				if (UFPSREnemyHealthComponent* HealthComp = HitActor->FindComponentByClass<UFPSREnemyHealthComponent>())
+				{
+					HealthComp->ApplyDamage(FinalDamage, Avatar);
+				}
 			}
-		}
 
-		UE_LOG(LogFPSR, Verbose, TEXT("[Fire] hit=%s dmg=%.1f"), *GetNameSafe(Hit.GetActor()), FinalDamage);
+			UE_LOG(LogFPSR, Verbose, TEXT("[Fire] hit=%s dmg=%.1f"), *GetNameSafe(Hit.GetActor()), FinalDamage);
+		}
+	}
+
+	// Post-fire hooks (after all pellets resolved).
+	if (Fragments)
+	{
+		for (const TObjectPtr<UFPSRWeaponFragment>& Frag : *Fragments)
+		{
+			if (Frag) { Frag->PostFire(FireCtx); }
+		}
 	}
 
 	EndAbility(Handle, ActorInfo, ActivationInfo, true, false);

@@ -277,7 +277,7 @@ void UFPSRRunDirectorSubsystem::OnMissionEnded(AFPSRMissionActor* Mission, bool 
 
 		if (AFPSRGameState* GS = GetGS())
 		{
-			GS->RefreshPauseState(); // freeze + present the reward offers (no-op if RewardCard was null)
+			GS->RefreshPauseState(); // freeze + present the reward offers (weapon-modifier choice when no override card)
 		}
 
 		UE_LOG(LogFPSR, Log, TEXT("[Run] Mission cleared — reward granted, run frozen for selection"));

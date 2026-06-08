@@ -7,6 +7,7 @@
 #include "FPSRWeaponInstance.generated.h"
 
 class UFPSRWeaponDataAsset;
+class UFPSRWeaponFragment;
 class AFPSRPlayerState;
 
 /**
@@ -38,6 +39,18 @@ public:
 
 	/** Server: append a ThisWeapon stat modifier (from a ThisWeapon-scope card). */
 	void AddModifier(const FFPSRWeaponStatMod& Mod);
+
+	// --- Behavior fragments (P4-B-2): data-driven hooks that change firing behavior ---
+	const TArray<TObjectPtr<UFPSRWeaponFragment>>& GetActiveFragments() const { return ActiveFragments; }
+
+	/** True if this fragment asset is already active on the weapon (identity = asset pointer). */
+	bool HasFragment(const UFPSRWeaponFragment* Fragment) const;
+
+	/** Number of copies (stacks) of this fragment currently active on the weapon. */
+	int32 GetFragmentStackCount(const UFPSRWeaponFragment* Fragment) const;
+
+	/** Server: add a behavior fragment (stack-limited to the fragment's MaxStacks). No effect on resolved stats. */
+	void AddFragment(UFPSRWeaponFragment* Fragment);
 
 	/** Invalidate the resolved-stat cache (call when AllWeapons mods change). */
 	void MarkResolvedDirty() { bResolvedDirty = true; }
@@ -72,6 +85,10 @@ protected:
 	/** ThisWeapon-scope accumulated modifiers. */
 	UPROPERTY(ReplicatedUsing = OnRep_Modifiers)
 	FFPSRWeaponModContainer Modifiers;
+
+	/** Accumulated behavior fragments (references to shared, stateless fragment assets). */
+	UPROPERTY(Replicated)
+	TArray<TObjectPtr<UFPSRWeaponFragment>> ActiveFragments;
 
 	UPROPERTY(Replicated)
 	int32 CurrentAmmo = 0;

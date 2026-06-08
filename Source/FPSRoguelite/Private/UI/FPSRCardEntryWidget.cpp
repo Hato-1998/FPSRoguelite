@@ -52,16 +52,29 @@ void UFPSRCardEntryWidget::UpdateDisplay()
 		CardNameText->SetText(CardAsset->DisplayName);
 	}
 
-	// Display rarity
+	// Behavior-fragment cards have no meaningful rarity or numeric magnitude: show a category label in the
+	// rarity slot and leave the magnitude slot blank. Match the application path — ApplyCard only honors
+	// GrantedFragment in the ThisWeapon branch, so a stale fragment on a non-ThisWeapon card is not a fragment
+	// here either (no misclassifying a stat card as a modifier / blanking its magnitude).
+	const bool bIsFragment = (CardAsset->Scope == ECardScope::ThisWeapon && CardAsset->GrantedFragment != nullptr);
+
+	// Display rarity — or, for fragment cards, the category label.
 	if (RarityText)
 	{
-		switch (CachedDraw.Rarity)
+		if (bIsFragment)
 		{
-			case ECardRarity::Common: RarityText->SetText(FText::FromString(TEXT("Common"))); break;
-			case ECardRarity::Rare: RarityText->SetText(FText::FromString(TEXT("Rare"))); break;
-			case ECardRarity::Epic: RarityText->SetText(FText::FromString(TEXT("Epic"))); break;
-			case ECardRarity::Legendary: RarityText->SetText(FText::FromString(TEXT("Legendary"))); break;
-			default: RarityText->SetText(FText::FromString(TEXT("?"))); break;
+			RarityText->SetText(FragmentCategoryText);
+		}
+		else
+		{
+			switch (CachedDraw.Rarity)
+			{
+				case ECardRarity::Common: RarityText->SetText(FText::FromString(TEXT("Common"))); break;
+				case ECardRarity::Rare: RarityText->SetText(FText::FromString(TEXT("Rare"))); break;
+				case ECardRarity::Epic: RarityText->SetText(FText::FromString(TEXT("Epic"))); break;
+				case ECardRarity::Legendary: RarityText->SetText(FText::FromString(TEXT("Legendary"))); break;
+				default: RarityText->SetText(FText::FromString(TEXT("?"))); break;
+			}
 		}
 	}
 
@@ -76,6 +89,13 @@ void UFPSRCardEntryWidget::UpdateDisplay()
 	// fractional magnitude (e.g. +0.25 / +0.05) down to a misleading "+0".
 	if (MagnitudeText)
 	{
+		if (bIsFragment)
+		{
+			// Fragments unlock behavior, not a numeric magnitude — blank the value slot (no misleading "+0%").
+			MagnitudeText->SetText(FText::GetEmpty());
+			return;
+		}
+
 		const float Mag = CachedDraw.Magnitude;
 		const bool bWeaponScope = (CardAsset->Scope == ECardScope::ThisWeapon || CardAsset->Scope == ECardScope::AllWeapons);
 
