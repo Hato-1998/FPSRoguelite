@@ -488,10 +488,24 @@ UFPSREnemySpawnSubsystem* UFPSRRunDirectorSubsystem::GetSpawnSub() const
 	return World ? World->GetSubsystem<UFPSREnemySpawnSubsystem>() : nullptr;
 }
 
-void UFPSRRunDirectorSubsystem::DebugTriggerMission()
+void UFPSRRunDirectorSubsystem::DebugTriggerMission(int32 MissionIndex)
 {
 	if (!HasServerAuthority() || ActiveMission || !ActiveSchedule)
 	{
+		return;
+	}
+
+	// Explicit index: spawn that scheduled mission directly (debug — test each mission type in isolation).
+	if (MissionIndex >= 0)
+	{
+		if (ActiveSchedule->MissionEvents.IsValidIndex(MissionIndex) && ActiveSchedule->MissionEvents[MissionIndex].Mission)
+		{
+			if (MissionEventFired.IsValidIndex(MissionIndex))
+			{
+				MissionEventFired[MissionIndex] = true;
+			}
+			SpawnMission(ActiveSchedule->MissionEvents[MissionIndex].Mission);
+		}
 		return;
 	}
 
@@ -535,12 +549,13 @@ void UFPSRRunDirectorSubsystem::DebugSkipToBoss()
 #if !UE_BUILD_SHIPPING
 static FAutoConsoleCommandWithWorldAndArgs GFPSRMissionTriggerCmd(
 	TEXT("FPSR.MissionTrigger"),
-	TEXT("Spawn the next scheduled mission immediately (debug)."),
+	TEXT("Spawn a scheduled mission immediately (debug). Usage: FPSR.MissionTrigger [index]  (no index = next unfired)."),
 	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic([](const TArray<FString>& Args, UWorld* World)
 	{
 		if (UFPSRRunDirectorSubsystem* Dir = World ? World->GetSubsystem<UFPSRRunDirectorSubsystem>() : nullptr)
 		{
-			Dir->DebugTriggerMission();
+			const int32 Index = Args.Num() > 0 ? FCString::Atoi(*Args[0]) : -1;
+			Dir->DebugTriggerMission(Index);
 		}
 	}));
 

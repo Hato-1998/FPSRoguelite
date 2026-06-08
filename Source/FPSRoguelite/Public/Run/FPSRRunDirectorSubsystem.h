@@ -28,7 +28,7 @@ public:
 	void StartRun();
 
 	// Debug/testing entry points
-	void DebugTriggerMission();
+	void DebugTriggerMission(int32 MissionIndex = -1);
 	void DebugClearMission();
 	void DebugSkipToBoss();
 	void SetTimeScale(float InScale) { TimeScale = FMath::Max(0.0f, InScale); }
