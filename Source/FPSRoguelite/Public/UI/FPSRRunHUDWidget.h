@@ -6,10 +6,10 @@
 #include "Core/FPSRGameState.h"
 #include "FPSRRunHUDWidget.generated.h"
 
-/** Passive run-state HUD base (Game layer). Exposes replicated run state (GameState) + the local player's
- *  pending picks (PlayerState) to WBP via BlueprintPure getters, and fires OnRunStateUpdated whenever they
- *  change. Event-driven: binds GameState OnRunStateChanged + local PlayerState OnCardPicksChanged, no polling.
- *  Read-only mirror — input routing stays with the Game-layer widget (UFPSRXPBarWidget). (Game.MD §2-2/§2-14). */
+/** Passive run-state HUD base (Game layer). Exposes replicated run state (GameState) to WBP via BlueprintPure
+ *  getters and fires OnRunStateUpdated whenever it changes. Event-driven: binds GameState OnRunStateChanged,
+ *  no polling. Read-only mirror — input routing stays with the Game-layer widget. (Game.MD §2-2/§2-14).
+ *  Pending card picks are NOT surfaced here: level-up immediately opens the card modal, so a count is redundant. */
 UCLASS()
 class FPSROGUELITE_API UFPSRRunHUDWidget : public UCommonUserWidget
 {
@@ -22,18 +22,7 @@ protected:
 	UFUNCTION()
 	void HandleRunStateChanged();
 
-	UFUNCTION()
-	void HandleCardPicksChanged();
-
-	/** Lazily bind the owning PlayerState's pick delegate once it replicates (remote-client timing). */
-	void EnsurePlayerStateBound();
-
-	/** Retry the PlayerState bind on a timer until it succeeds — covers the case where the HUD constructs
-	 *  before the owning PlayerState replicates AND the run is already paused (so no OnRunStateChanged fires
-	 *  to drive the retry). On success: refresh once and stop the timer. */
-	void RetryPlayerStateBind();
-
-	/** WBP refresh hook: fired on construct and whenever run state / local pending picks change. */
+	/** WBP refresh hook: fired on construct and whenever run state changes. */
 	UFUNCTION(BlueprintImplementableEvent, Category = "FPSR|HUD")
 	void OnRunStateUpdated();
 
@@ -63,18 +52,4 @@ protected:
 	/** Shared XP progress toward the next party level, 0..1. */
 	UFUNCTION(BlueprintPure, Category = "FPSR|HUD")
 	float GetXPProgress01() const;
-
-	/** Local player's pending level-up card picks. */
-	UFUNCTION(BlueprintPure, Category = "FPSR|HUD")
-	int32 GetLocalCardPicksPending() const;
-
-	/** Local player's pending mission-reward card picks. */
-	UFUNCTION(BlueprintPure, Category = "FPSR|HUD")
-	int32 GetLocalMissionRewardPicksPending() const;
-
-private:
-	bool bPlayerStateBound = false;
-
-	/** Looping retry timer for the late-replicating PlayerState bind (cleared on bind success / destruct). */
-	FTimerHandle PlayerStateBindRetryHandle;
 };
