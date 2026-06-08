@@ -140,6 +140,10 @@ void AFPSRGameState::SetRunClockSeconds(float Seconds)
 	}
 	RunClockSeconds = Seconds;
 	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRGameState, RunClockSeconds, this);
+
+	// Authority gets no OnRep_RunState, so notify HUD widgets locally on the host (clients refresh via
+	// replication). Authority-only path + the 0.25s dead-band above keep this to a low UI cadence.
+	OnRunStateChanged.Broadcast();
 }
 
 void AFPSRGameState::OnRep_RunState()

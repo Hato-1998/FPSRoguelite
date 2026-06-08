@@ -47,6 +47,7 @@ void UFPSRXPBarWidget::NativeDestruct()
 	{
 		PS->OnCardPicksChanged.RemoveDynamic(this, &UFPSRXPBarWidget::HandleCardPicksChanged);
 	}
+	bPlayerStateBound = false; // re-add must rebind (NativeConstruct skips when already bound)
 
 	Super::NativeDestruct();
 }
