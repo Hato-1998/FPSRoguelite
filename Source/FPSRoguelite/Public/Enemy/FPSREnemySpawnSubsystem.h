@@ -5,9 +5,11 @@
 #include "Subsystems/WorldSubsystem.h"
 #include "Tickable.h"
 #include "Templates/SubclassOf.h"
+#include "GameplayTagContainer.h"
 #include "FPSREnemySpawnSubsystem.generated.h"
 
 class AFPSREnemyBase;
+class AFPSREnemySpawnPoint;
 
 /** Lightweight server-authoritative object pool + spawn director for swarm enemies (P2-A).
  *  Pooling reuses dormant actors; director keeps ~TargetAliveCount alive around players.
@@ -48,9 +50,21 @@ public:
 	/** Set the target alive count (director will spawn/release to maintain this). */
 	void SetTargetAliveCount(int32 InTarget);
 
+	/** Set the active spawn zone (empty = all points eligible). Only points whose ZoneTag is, or is a child of,
+	 *  this tag are eligible while set — lets the director switch spawn regions by time/phase (Game.MD §2-8). */
+	void SetActiveSpawnZone(FGameplayTag Zone) { ActiveSpawnZone = Zone; }
+
 private:
 	/** Director tick: spawn/release enemies to maintain TargetAliveCount. */
 	void TickDirector();
+
+	/** Cache designer-placed AFPSREnemySpawnPoint actors once at world begin (server). */
+	void CacheSpawnPoints();
+
+	/** Pick a designer spawn point that no player can currently see (FOV gate) and that satisfies its
+	 *  MinPlayerDistance + active-zone filter, by Weight × distance falloff. Returns false when none qualify
+	 *  (or none are placed), so the caller falls back to the ring pattern. */
+	bool TrySelectSpawnPoint(FVector& OutLocation) const;
 
 	/** Batched server movement pass with distance LOD (replaces per-actor enemy Tick). */
 	void TickEnemyMovement(float DeltaTime);
@@ -125,4 +139,21 @@ private:
 
 	/** Outer radius for ring spawn pattern. */
 	float SpawnRadiusOuter = 1500.0f;
+
+	// --- Designer spawn points (Game.MD §2-8 / P4 backlog) ---
+
+	/** Half-angle (deg) of each player's "visible" cone; a point inside any player's cone is excluded so
+	 *  enemies appear out of view (behind/beside). Horizontal (XY) test. */
+	static constexpr float SpawnPointVisibilityHalfAngleDeg = 70.0f;
+
+	/** Distance falloff for point weighting: weight *= 1/(1 + nearestPlayerDist / this). Favors points near the
+	 *  fight without hard-excluding far ones. */
+	static constexpr float SpawnPointFalloffDistance = 2500.0f; // cm
+
+	/** Designer-placed spawn anchors, cached once at world begin (server). May contain entries to null-check. */
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<AFPSREnemySpawnPoint>> SpawnPoints;
+
+	/** Active spawn-zone filter (invalid/empty = all points eligible). Set by the director (TimeGate, §2-8). */
+	FGameplayTag ActiveSpawnZone;
 };
