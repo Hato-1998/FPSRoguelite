@@ -119,7 +119,12 @@
   - 각 무기 DA가 `AvailableModifiers`(약 4종) 정의 → **미션 클리어 시 즉시 프리즈(§2-2)에 모디파이어 해금/변경 카드로 1종 선택**
 - **GA 교체 방식 금지**(조합 폭발), **거대 태그 분기 금지**(유지보수 지옥)
 - ⚠️ **성능**: `OnHitActor`가 500마리 타격 시 과도한 virtual dispatch/heap alloc 금지 → 훅은 경량(데이터 기반·히트당 무할당)
-- **P4 확정 대상 상세**: 적용 순서 / 중첩 가부 / 충돌 해결 / 서버 권위 적용 위치 / 클라 예측 범위 / 런 종료 시 소멸 / UI 표시 / 훅 호출 순서. Fragment를 UObject 상속 asset vs Instanced UObject vs 순수 DataAsset+runtime struct 중 무엇으로 둘지 결정 필요
+- **구현 확정 (P4-B-2, 2026-06-08)**:
+  - **Fragment = 무상태 `UFPSRWeaponFragment : UPrimaryDataAsset`** — 동작은 C++ 서브클래스(virtual 훅), 수치는 authored DataAsset. (Instanced/runtime-struct 대신 공유 무상태 asset → 복제·메모리 비용 최소). 레퍼런스: `UFPSRFragment_MultiShot{ExtraShots}`(ModifyShotCount), `UFPSRFragment_OnHitBonusDamage{BonusDamage}`(OnHitActor).
+  - **누적·중첩**: `UFPSRWeaponInstance.ActiveFragments[]`(복제 참조)에 누적. **`UFPSRWeaponFragment.MaxStacks`**(기본 1)만큼 같은 fragment 중복 누적 → 훅이 스택마다 적용(예: MultiShot 2스택=+2발). 미션보상 오퍼는 `StackCount < MaxStacks`인 동안 계속 제시(서버 권위 dedup).
+  - **MultiShot 탄약**: 멀티샷은 **발사 펠릿 수만큼 탄창 소모**(`ConsumeAmmo(NumShots)`), 잔량 부족 시 **잔량까지 클램프 후 발사**(최소 1발 보장). NumShots는 fragment 훅 계산 후 소모.
+  - **미션보상 카드 UI**(`UFPSRCardEntryWidget`): fragment 카드(=`Scope==ThisWeapon && GrantedFragment`)는 등급 대신 **카테고리 라벨**(위젯 기본값 `FragmentCategoryText`, WBP override) 표시 + **수치 슬롯 빈칸**(behavior 해금이라 magnitude 무의미).
+  - 적용 위치=서버 권위(`ApplyCard` ThisWeapon 분기 `AddFragment`), 클라 예측=GA `ModifyShotCount` 루프(복제된 ActiveFragments로 N샷 예측). 런 종료 소멸=WeaponInstance 수명. **후속**: ModifyChargeTime/OnProjectileSpawn 훅(차징/투사체 아키타입), Melee fragment, fragment 제거/교체.
 
 #### 2-4-2. 사격 메커니즘 / 슈팅 감각 (데이터 드리븐, FPS 핵심)
 > 슈팅 감각은 FPS의 핵심. 모든 값은 `FFPSRWeaponStatBlock`(또는 분리된 `FWeaponFireProfile`)에 두어 **무기별·카드별 조정 가능**하게.

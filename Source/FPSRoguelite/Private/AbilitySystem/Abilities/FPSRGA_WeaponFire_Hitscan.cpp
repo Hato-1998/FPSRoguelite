@@ -66,7 +66,8 @@ void UFPSRGA_WeaponFire_Hitscan::ActivateAbility(
 		SpreadDegrees = Stats->SpreadDegrees;
 	}
 
-	// Server-authoritative gates: empty mag / reloading / fire-rate. Then consume ammo.
+	// Server-authoritative gates: empty mag / reloading / fire-rate. Ammo is consumed later, once the fragment
+	// hooks have determined the pellet count (multishot debits one magazine round per pellet, §2-4-1).
 	if (Avatar->HasAuthority() && Inventory)
 	{
 		if (Inventory->IsReloading() || Inventory->GetCurrentAmmo() <= 0)
@@ -83,7 +84,6 @@ void UFPSRGA_WeaponFire_Hitscan::ActivateAbility(
 				return;
 			}
 		}
-		Inventory->ConsumeAmmo(1);
 	}
 
 	// Add bloom from sustained fire, then tighten spread while aiming down sights.
@@ -118,7 +118,19 @@ void UFPSRGA_WeaponFire_Hitscan::ActivateAbility(
 			if (Frag) { Frag->ModifyShotCount(FireCtx); }
 		}
 	}
-	const int32 NumShots = FMath::Clamp(FireCtx.ShotCount, 1, 32);
+	int32 NumShots = FMath::Clamp(FireCtx.ShotCount, 1, 32);
+	// Multishot debits one magazine round per pellet (Game.MD §2-4-1). Clamp the pellet count to the rounds
+	// actually loaded — CurrentAmmo is replicated, so the server and the owning client clamp to the same
+	// pre-fire value — then the server deducts exactly that many. The empty-mag gate above guarantees at least
+	// one round remains, so at least one pellet always fires.
+	if (Inventory)
+	{
+		NumShots = FMath::Min(NumShots, FMath::Max(Inventory->GetCurrentAmmo(), 1));
+		if (Avatar->HasAuthority())
+		{
+			Inventory->ConsumeAmmo(NumShots);
+		}
+	}
 
 	// Crit/damage multipliers from the ASC are fetched once; crit is rolled per pellet so multishot pellets
 	// can crit independently.

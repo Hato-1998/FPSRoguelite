@@ -42,9 +42,28 @@ bool UFPSRWeaponInstance::HasFragment(const UFPSRWeaponFragment* Fragment) const
 	return Fragment != nullptr && ActiveFragments.Contains(Fragment);
 }
 
+int32 UFPSRWeaponInstance::GetFragmentStackCount(const UFPSRWeaponFragment* Fragment) const
+{
+	if (!Fragment)
+	{
+		return 0;
+	}
+	int32 Count = 0;
+	for (const TObjectPtr<UFPSRWeaponFragment>& Active : ActiveFragments)
+	{
+		if (Active == Fragment)
+		{
+			++Count;
+		}
+	}
+	return Count;
+}
+
 void UFPSRWeaponInstance::AddFragment(UFPSRWeaponFragment* Fragment)
 {
-	if (!Fragment || HasFragment(Fragment))
+	// Stackable up to the fragment's MaxStacks: each accepted pick appends another copy, so the per-element
+	// fire hooks (e.g. MultiShot's ModifyShotCount) apply once per stack. Server-authoritative.
+	if (!Fragment || GetFragmentStackCount(Fragment) >= FMath::Max(Fragment->MaxStacks, 1))
 	{
 		return;
 	}

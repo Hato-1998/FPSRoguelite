@@ -27,7 +27,7 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Card")
 	ECardScope Scope = ECardScope::Character;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Card")
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Card", meta = (EditConditionHides, EditCondition = "Scope == ECardScope::Character"))
 	TSubclassOf<UGameplayEffect> AppliedEffect;
 
 	/** Overall draw-weight multiplier for this card (applied within each rarity it offers). */
@@ -48,16 +48,16 @@ public:
 
 	/** Weapon-scope only (ThisWeapon / AllWeapons): which weapon stat this card modifies. Ignored for
 	 *  Character scope (those use AppliedEffect). The tier Magnitude is the modifier Value. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Card|Weapon")
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Card|Weapon", meta = (EditConditionHides, EditCondition = "Scope == ECardScope::AllWeapons || (Scope == ECardScope::ThisWeapon && GrantedFragment == nullptr)"))
 	EFPSRWeaponStat WeaponStat = EFPSRWeaponStat::FireRate;
 
 	/** Weapon-scope only: how the modifier combines (additive flat vs percent multiply). */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Card|Weapon")
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Card|Weapon", meta = (EditConditionHides, EditCondition = "Scope == ECardScope::AllWeapons || (Scope == ECardScope::ThisWeapon && GrantedFragment == nullptr)"))
 	EFPSRWeaponModOp WeaponStatOp = EFPSRWeaponModOp::PercentMultiply;
 
 	/** ThisWeapon-scope behavior fragment (P4-B-2). When set, selecting this card grants the fragment to the
 	 *  current weapon instead of applying a stat modifier. Authored as this weapon's AvailableModifiers reward. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Card|Weapon")
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Card|Weapon", meta = (EditConditionHides, EditCondition = "Scope == ECardScope::ThisWeapon"))
 	TObjectPtr<UFPSRWeaponFragment> GrantedFragment = nullptr;
 
 #if WITH_EDITOR

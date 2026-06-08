@@ -26,6 +26,11 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "FPSR|Card")
 	FOnCardEntrySelected OnCardSelected;
 
+	/** Label shown in the rarity slot for behavior-fragment cards (which have no meaningful rarity).
+	 *  Designer-overridable per WBP. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "FPSR|Card")
+	FText FragmentCategoryText = NSLOCTEXT("FPSRCardEntry", "FragmentCategory", "Weapon Modifier");
+
 protected:
 	/** Bind the select button here (runs once per instance) — NOT NativeConstruct, which the CommonUI
 	 *  activatable stack calls every time a pooled/reused widget is shown, causing a duplicate AddDynamic. */

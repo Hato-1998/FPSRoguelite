@@ -46,7 +46,10 @@ public:
 	/** True if this fragment asset is already active on the weapon (identity = asset pointer). */
 	bool HasFragment(const UFPSRWeaponFragment* Fragment) const;
 
-	/** Server: add a behavior fragment (deduped). No effect on resolved stats. */
+	/** Number of copies (stacks) of this fragment currently active on the weapon. */
+	int32 GetFragmentStackCount(const UFPSRWeaponFragment* Fragment) const;
+
+	/** Server: add a behavior fragment (stack-limited to the fragment's MaxStacks). No effect on resolved stats. */
 	void AddFragment(UFPSRWeaponFragment* Fragment);
 
 	/** Invalidate the resolved-stat cache (call when AllWeapons mods change). */

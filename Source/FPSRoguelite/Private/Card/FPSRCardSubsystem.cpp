@@ -33,7 +33,10 @@ namespace
 		{
 			return Card->CardFamily.GetTagName();
 		}
-		if (Card->AppliedEffect)
+		// AppliedEffect is only meaningful (and only applied) for Character-scope cards, so use it as the family
+		// fallback only there. Weapon-scope cards never apply a GE — a stale AppliedEffect (e.g. left over on a
+		// Character asset copied/retargeted to a weapon scope) must not group them into an unrelated GE family.
+		if (Card->Scope == ECardScope::Character && Card->AppliedEffect)
 		{
 			return Card->AppliedEffect->GetFName();
 		}
@@ -353,8 +356,11 @@ TArray<FFPSRCardDraw> UFPSRCardSubsystem::DrawWeaponModifierOffer(AController* F
 	TArray<UFPSRCardDataAsset*> Candidates;
 	for (const TObjectPtr<UFPSRCardDataAsset>& Card : Weapon->AvailableModifiers)
 	{
+		// Offer a fragment card while the weapon still has room to stack it (StackCount < MaxStacks), so a
+		// stackable fragment (e.g. MultiShot MaxStacks=2) keeps appearing until fully stacked.
 		if (Card && Card->Scope == ECardScope::ThisWeapon && Card->GrantedFragment
-			&& !Instance->HasFragment(Card->GrantedFragment) && !Candidates.Contains(Card))
+			&& Instance->GetFragmentStackCount(Card->GrantedFragment) < FMath::Max(Card->GrantedFragment->MaxStacks, 1)
+			&& !Candidates.Contains(Card))
 		{
 			Candidates.Add(Card);
 		}

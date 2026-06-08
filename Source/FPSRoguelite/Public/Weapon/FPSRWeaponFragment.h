@@ -51,6 +51,12 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Fragment")
 	FGameplayTag FragmentTag;
 
+	/** How many times this fragment can be stacked on one weapon. Each stack re-applies the hooks (e.g.
+	 *  MultiShot's ExtraShots adds per stack), and the mission-reward offer keeps presenting the card until
+	 *  the weapon holds MaxStacks copies. 1 = single pick (default). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Fragment", meta = (ClampMin = "1"))
+	int32 MaxStacks = 1;
+
 	/** Hook surface (default no-ops). Only the hitscan-relevant hooks are defined here; charge/projectile
 	 *  hooks (ModifyChargeTime/OnProjectileSpawn) are added when those archetypes arrive. */
 	virtual void PreFire(FFPSRFireContext& Context) const {}
