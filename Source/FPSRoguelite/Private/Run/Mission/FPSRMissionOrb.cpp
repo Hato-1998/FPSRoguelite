@@ -10,6 +10,9 @@
 AFPSRMissionOrb::AFPSRMissionOrb()
 {
 	bReplicates = true;
+	// Carry missions move the orb server-side every tick (it follows the carrier); replicate movement so clients
+	// see the objective at the right place. Harmless for static collect-orbs (they never move).
+	SetReplicateMovement(true);
 	PrimaryActorTick.bCanEverTick = true;
 
 	Sphere = CreateDefaultSubobject<USphereComponent>(TEXT("Sphere"));
