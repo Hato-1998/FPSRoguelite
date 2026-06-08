@@ -171,7 +171,13 @@
   - **확장형 프레임워크**: `AFPSRMissionActor`(서버권위 리플리케이트 Actor 베이스) 서브클래스 + `UFPSRMissionDataAsset`(메타+로직클래스+보상카드) + **디자이너 배치 `AFPSRMissionSpawnPoint`**(태그매칭+가중랜덤). 디렉터가 스폰·생명주기 관리.
   - **미션 카탈로그**(기획, 프레임워크로 수용): 좁은구역 N초 버티기 / 이동 구역 점령 / 도망치는 고체력 몹 처치 / 점프맵 오브 획득 / 피격 없이 구체 N초 소지 / 시야 극제한 버티기 / 전원 제자리 정지 등. 각 종류 = `AFPSRMission_*` 서브클래스(필요 인프라는 서브클래스+콘텐츠로 격리, 코어 불변).
 - 난이도 곡선은 `UCurveFloat`로 분리(후속)
-- **구현 상태(P4-A)**: 디렉터(시간 미션+보스타임) + 미션 프레임워크 + 레퍼런스 미션 1종(`AFPSRMission_HoldZone`) + 스폰포인트 + 레벨업/미션보상 전역 프리즈 + 오프닝시드. 미션 보상의 **무기 모디파이어 실적용(weapon-scope `ApplyCard`)은 P4-B**(P4-A는 프리즈+선택 흐름까지). 나머지 6종 미션·보스 실물은 후속.
+- **구현 상태(P4-A)**: 디렉터(시간 미션+보스타임) + 미션 프레임워크 + 레퍼런스 미션 1종(`AFPSRMission_HoldZone`) + 스폰포인트 + 레벨업/미션보상 전역 프리즈 + 오프닝시드. 미션 보상의 **무기 모디파이어 실적용(weapon-scope `ApplyCard`)은 P4-B**(P4-A는 프리즈+선택 흐름까지).
+- **구현 상태(P4-B-3, 2026-06-08)**: 미션 종류 5종 추가(코드, 콘텐츠+PIE 대기 — 각 자체완결로 레벨 배치 없이 `FPSR.MissionTrigger [index]`로 테스트 가능):
+  - `AFPSRMission_StandStill`(전원 정지 N초), `AFPSRMission_MovingZone`(웨이포인트 이동 점령), `AFPSRMission_CollectOrbs`(자체 스폰 오브 N개 수집), `AFPSRMission_CarryNoHit`(오브 소지 무피격 N초 — 캐리어 Health 폴링), `AFPSRMission_DefeatFleeing`(독립 고체력 도망 타깃 `AFPSRMissionFleeTarget` 처치).
+  - 공유 인프라: `AFPSRMissionOrb`(서버 오버랩 수령·이동 복제 액터). 스폰 액터 정리는 **`EndPlay`**(직접 파괴 시 고아 방지).
+  - **베이스 강화**: `AFPSRMissionActor::Tick`이 `bRunPaused`(카드 프리즈) 중 미션 진행/시간제한 게이트(§2-2 정합, 전 미션 일괄). 디버그 `FPSR.MissionTrigger [index]`.
+  - **미완(P4-B-3 잔여)**: `AFPSRMission_LimitedVision`(시야 극제한) — 공유 `AFPSRCharacter`에 복제 시야상태+카메라 PP 필요(비주얼=디자인 선택), 설계 확인 후 진행.
+- **보스 실물**은 후속(P6).
 - **테스트 스케줄**: DataAsset 교체로 압축(예: 미션 60/120/180s·보스 300s). ⚠️ 압축값은 임시(프로덕션 전환 시 원복).
 
 ### 2-9. 카메라 / 메시

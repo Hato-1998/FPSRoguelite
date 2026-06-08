@@ -9,8 +9,12 @@
 ## 한 줄 요약
 **P0~P4-A + P4-B-1 + P4-B-2 → main 머지 완료**. **P4-B-2(무기 행동 Fragment 시스템)** 머지 완료(2026-06-08): 합성형 발사 훅(`UFPSRWeaponFragment` 무상태 UPrimaryDataAsset) + 미션 클리어 시 장착 무기 `AvailableModifiers`에서 Fragment 카드 택1. **마무리 세션 추가**: Fragment 카드 작성 EditCondition 가드, 미션보상 카드 UI(등급→카테고리 라벨·수치 빈칸), **MultiShot 펠릿당 탄약 소모**, **Fragment `MaxStacks` 중첩**(MultiShot 2스택=3발). 빌드+스모크+Codex(다회, 클린)+PIE 통과. → 다음 **P4-B-3**(미션 6종).
 
-## ▶▶ 새 세션 우선 작업 = P4-B-3 (미션 6종) / P4-C / P4-D
-- **P4-B-2 완료·main 머지됨(2026-06-08)** — 무기 행동 Fragment 전체(상세는 아래 완료 이력 + `git log`). 다음 후보: **P4-B-3**(나머지 6종 미션), **P4-C**(무기 7종), **P4-D**(게임필 히트마커/핑/위협인디케이터/사각오디오 + PickupRadius/XPGain + 런상태 HUD 위젯). 새 작업이므로 **플랜 우선**, `phase/` 브랜치 분기(§6-7).
+## ▶▶ 새 세션 우선 작업 = P4-B-3 마무리 (브랜치 `phase/p4b3-missions`)
+- **P4-B-3 진행 중(브랜치 `phase/p4b3-missions`, 미푸시·미머지)** — 미션 5종 코드 완료·검증(빌드+스모크+Codex 클린, 다회 하드닝):
+  - 배치 A `20c9a31`: `StandStill`+`MovingZone`+베이스 프리즈 게이트. 배치 B `3e47ea4`: `CollectOrbs`+`CarryNoHit`+`AFPSRMissionOrb`+`FPSR.MissionTrigger [index]`. 배치 C(1/2) `7800678`: `DefeatFleeing`+`AFPSRMissionFleeTarget`+오브/타깃 `EndPlay` 정리. 오브 이동복제 `9a021f8`.
+  - **⚠️ 다음(머지 전 필수)**: ① **콘텐츠**(사용자, 한 번에) — 미션별 BP 서브클래스(튜닝 디폴트: StandStill `RequiredStillSeconds`, MovingZone `RelativeWaypoints` 등) + `UFPSRMissionDataAsset`(MissionClass=BP) + `DA_RunSchedule` MissionEvents 등록 + (선택)스폰포인트/오브·타깃 BP 메시·고체력 MaxHealth. ② **PIE 검증**(`FPSR.MissionTrigger [index]`로 각 미션 → 진행/완료/보상프리즈, 프리즈 중 미진행 확인, `FPSR.MissionClear`). ③ `--no-ff` main 머지(§6-7).
+  - **⚠️ P4-B-3 잔여(코드 미완)**: `AFPSRMission_LimitedVision`(시야 극제한) — 공유 `AFPSRCharacter`에 복제 시야상태+카메라 PP(비네트/안개/머티리얼=디자인 선택) 필요. **사용자 복귀 후 설계 확인하고 진행**(배치 C 2/2).
+- **다음 후보(P4-B-3 머지 후)**: **P4-C**(무기 7종), **P4-D**(게임필+HUD 위젯). 새 작업은 플랜 우선.
 - **Fragment 후속(미완)**: `ModifyChargeTime`/`OnProjectileSpawn` 훅(차징/투사체 아키타입 도입 시), Melee fragment, fragment 제거/교체 UI. 무기별 `AvailableModifiers` 콘텐츠 확장(현재 Rifle만 MultiShot/BonusDamage 등록).
 - **⚠️ 임시 테스트값(프로덕션 전환 시 노티·원복)**: 스케줄 DA(`DA_RunSchedule`)의 미션 60/120/180s·보스 300s → 프로덕션 5/10/15분·보스 20분. 메모리 `p4a-temp-test-values`. (XP는 프로덕션 공식)
 - **P4 잔여(이월)**: **P4-B-2**(브랜치, 콘텐츠+PIE+머지 대기). **P4-B-3** 나머지 6종 미션. **P4-C** 무기 7종. **P4-D** 게임필(히트마커/핑/위협 인디케이터/사각 오디오) + PickupRadius/XPGain + **런상태 HUD 위젯**(데이터 복제됨: `GetRunClockSeconds`/`GetRunPhase`/`IsRunPaused`/`GetPartyLevel`/`GetCardPicksPending`/`GetMissionRewardPicksPending` → WBP 바인딩).
