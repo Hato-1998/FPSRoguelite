@@ -17,6 +17,8 @@
 #include "Card/FPSRCardDataAsset.h"
 #include "UI/FPSRPrimaryGameLayout.h"
 #include "UI/FPSRCardSelectWidget.h"
+#include "Hero/FPSRPlayerFeedbackComponent.h"
+#include "GameFramework/Pawn.h"
 
 AFPSRPlayerController::AFPSRPlayerController()
 {
@@ -375,6 +377,17 @@ void AFPSRPlayerController::ClientDismissCardUI_Implementation()
 		PrimaryLayout->RemoveWidgetFromLayer(ActiveCardWidget);
 	}
 	ActiveCardWidget = nullptr;
+}
+
+void AFPSRPlayerController::ClientNotifyHitMarker_Implementation(EFPSRHitMarkerType MarkerType)
+{
+	if (APawn* ControlledPawn = GetPawn())
+	{
+		if (UFPSRPlayerFeedbackComponent* Feedback = ControlledPawn->FindComponentByClass<UFPSRPlayerFeedbackComponent>())
+		{
+			Feedback->NotifyHitConfirmed(MarkerType);
+		}
+	}
 }
 
 void AFPSRPlayerController::ServerAbandonOffer_Implementation(int32 OfferId)

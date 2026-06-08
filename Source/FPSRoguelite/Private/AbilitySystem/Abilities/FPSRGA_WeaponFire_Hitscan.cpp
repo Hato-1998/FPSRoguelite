@@ -9,6 +9,7 @@
 #include "Weapon/FPSRWeaponFireComponent.h"
 #include "Enemy/FPSREnemyHealthComponent.h"
 #include "Core/FPSRGameState.h"
+#include "Core/FPSRPlayerController.h"
 #include "Core/FPSRLogChannels.h"
 
 #include "AbilitySystemComponent.h"
@@ -151,6 +152,14 @@ void UFPSRGA_WeaponFire_Hitscan::ActivateAbility(
 	const FVector Start = ViewLocation;
 	const FVector BaseDir = ViewRotation.Vector();
 
+	// Hit-marker feedback aggregated across pellets so a multishot fires at most one pulse per activation
+	// (Game.MD §2-14). All markers are server-authoritative: with random spread the client and server traces
+	// can diverge, so a client-predicted "Hit" could be a false positive / miss vs the authoritative damage.
+	// The server confirms the strongest outcome to the owning client (Game.MD §6-2 server authority).
+	bool bServerHit = false;
+	bool bServerCrit = false;
+	bool bServerKill = false;
+
 	for (int32 ShotIndex = 0; ShotIndex < NumShots; ++ShotIndex)
 	{
 		const FVector ShotDir = (SpreadDegrees > 0.0f)
@@ -171,32 +180,53 @@ void UFPSRGA_WeaponFire_Hitscan::ActivateAbility(
 		}
 #endif
 
-		// Server-authoritative damage application.
-		if (bHit && FireCtx.bAuthority)
+		AActor* HitActor = bHit ? Hit.GetActor() : nullptr;
+		if (HitActor == nullptr)
+		{
+			continue;
+		}
+
+		UFPSREnemyHealthComponent* HealthComp = HitActor->FindComponentByClass<UFPSREnemyHealthComponent>();
+
+		// Server-authoritative damage application + hit/crit/kill confirmation.
+		if (FireCtx.bAuthority)
 		{
 			float FinalDamage = Damage * DamageMultiplier;
+			bool bCrit = false;
 			if (CritChance > 0.0f && FMath::FRand() < CritChance)
 			{
 				FinalDamage *= CritMultiplier;
+				bCrit = true;
 			}
 
-			if (AActor* HitActor = Hit.GetActor())
+			// Per-hit behavior hooks (e.g. bonus/leech) can adjust the damage before it lands.
+			if (Fragments)
 			{
-				// Per-hit behavior hooks (e.g. bonus/leech) can adjust the damage before it lands.
-				if (Fragments)
+				for (const TObjectPtr<UFPSRWeaponFragment>& Frag : *Fragments)
 				{
-					for (const TObjectPtr<UFPSRWeaponFragment>& Frag : *Fragments)
-					{
-						if (Frag) { Frag->OnHitActor(FireCtx, HitActor, FinalDamage); }
-					}
-				}
-				if (UFPSREnemyHealthComponent* HealthComp = HitActor->FindComponentByClass<UFPSREnemyHealthComponent>())
-				{
-					HealthComp->ApplyDamage(FinalDamage, Avatar);
+					if (Frag) { Frag->OnHitActor(FireCtx, HitActor, FinalDamage); }
 				}
 			}
+			if (HealthComp)
+			{
+				HealthComp->ApplyDamage(FinalDamage, Avatar);
+				bServerHit = true;
+				if (HealthComp->IsDead()) { bServerKill = true; }
+				else if (bCrit) { bServerCrit = true; }
+			}
 
-			UE_LOG(LogFPSR, Verbose, TEXT("[Fire] hit=%s dmg=%.1f"), *GetNameSafe(Hit.GetActor()), FinalDamage);
+			UE_LOG(LogFPSR, Verbose, TEXT("[Fire] hit=%s dmg=%.1f"), *GetNameSafe(HitActor), FinalDamage);
+		}
+	}
+
+	// Server delivers one marker per activation to the owning client — strongest outcome (Kill > Crit > Hit).
+	if (FireCtx.bAuthority && bServerHit)
+	{
+		if (AFPSRPlayerController* OwnerPC = Cast<AFPSRPlayerController>(Controller))
+		{
+			const EFPSRHitMarkerType MarkerType = bServerKill ? EFPSRHitMarkerType::Kill
+				: (bServerCrit ? EFPSRHitMarkerType::Crit : EFPSRHitMarkerType::Hit);
+			OwnerPC->ClientNotifyHitMarker(MarkerType);
 		}
 	}
 

@@ -4,6 +4,7 @@
 
 #include "GameFramework/PlayerController.h"
 #include "Card/FPSRCardTypes.h"
+#include "Hero/FPSRFeedbackTypes.h"
 #include "FPSRPlayerController.generated.h"
 
 class UInputMappingContext;
@@ -72,6 +73,12 @@ public:
 	/** Client (owner): remove the card-select modal. */
 	UFUNCTION(Client, Reliable)
 	void ClientDismissCardUI();
+
+	/** Client (owner): server-confirmed hit marker (Hit / Crit / Kill) — forwards to the local pawn's feedback
+	 *  component. Unreliable: cosmetic, high-frequency during sustained fire, and safe to drop under packet loss
+	 *  (must not back up the reliable channel ahead of gameplay RPCs). (Game.MD §2-14) */
+	UFUNCTION(Client, Unreliable)
+	void ClientNotifyHitMarker(EFPSRHitMarkerType MarkerType);
 
 	/** Server: the owner client could not present the offer (no layout/widget class/modal layer) — release
 	 *  this player's outstanding picks so the global freeze can't hard-lock on a broken UI. OfferId must
