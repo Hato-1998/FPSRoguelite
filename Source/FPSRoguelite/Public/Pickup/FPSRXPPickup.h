@@ -24,8 +24,11 @@ public:
 protected:
 	virtual void Tick(float DeltaSeconds) override;
 
-	/** Find the nearest player pawn (2D), or nullptr if none. */
-	APawn* FindNearestPlayer() const;
+	/** Read the given player's CombatSet PickupRadius multiplier (>=0.01), or 1.0 if unavailable. */
+	float GetCollectorPickupRadiusMult(class APawn* Pawn) const;
+
+	/** Read the given player's CombatSet XPGain multiplier (>=0), or 1.0 if unavailable. */
+	float GetCollectorXPGainMult(class APawn* Pawn) const;
 
 	UPROPERTY(VisibleAnywhere, Category = "FPSR|Pickup")
 	TObjectPtr<UStaticMeshComponent> Mesh;

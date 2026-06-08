@@ -3,6 +3,9 @@
 #include "Pickup/FPSRXPPickup.h"
 #include "Core/FPSRGameState.h"
 
+#include "AbilitySystem/Attributes/FPSRCombatSet.h"
+#include "AbilitySystemComponent.h"
+#include "AbilitySystemInterface.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
@@ -36,63 +39,118 @@ void AFPSRXPPickup::Tick(float DeltaSeconds)
 		return; // collection/magnetism is server-authoritative; clients receive the replicated transform.
 	}
 
-	APawn* NearestPlayer = FindNearestPlayer();
-	if (NearestPlayer == nullptr)
+	const UWorld* World = GetWorld();
+	if (World == nullptr)
 	{
 		return;
 	}
 
 	const FVector PickupLocation = GetActorLocation();
-	const FVector PlayerLocation = NearestPlayer->GetActorLocation();
-	const float DistSq = FVector::DistSquaredXY(PlayerLocation, PickupLocation);
+	const float CollectRadiusSq = CollectRadius * CollectRadius;
 
-	if (DistSq <= (CollectRadius * CollectRadius))
+	// Single pass over players. Collection target = nearest player within the (unscaled) CollectRadius.
+	// Magnet target = the player with the strongest claim, ranked by distance relative to their OWN
+	// effective radius (DistSq / EffRadiusSq). This lets a far player with an upgraded PickupRadius out-pull
+	// a closer default-radius player, so the attribute stays meaningful in co-op (Codex P2).
+	APawn* CollectPlayer = nullptr;
+	float CollectBestDistSq = TNumericLimits<float>::Max();
+	APawn* MagnetPlayer = nullptr;
+	FVector MagnetPlayerLocation = FVector::ZeroVector;
+	float MagnetBestRatio = TNumericLimits<float>::Max();
+
+	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
 	{
-		if (UWorld* World = GetWorld())
+		const APlayerController* PC = It->Get();
+		APawn* PlayerPawn = PC ? PC->GetPawn() : nullptr;
+		if (PlayerPawn == nullptr)
 		{
-			if (AFPSRGameState* GameState = World->GetGameState<AFPSRGameState>())
+			continue;
+		}
+
+		const FVector PlayerLocation = PlayerPawn->GetActorLocation();
+		const float DistSq = FVector::DistSquaredXY(PlayerLocation, PickupLocation);
+
+		if (DistSq <= CollectRadiusSq && DistSq < CollectBestDistSq)
+		{
+			CollectBestDistSq = DistSq;
+			CollectPlayer = PlayerPawn;
+		}
+
+		const float EffMagnetRadius = MagnetRadius * GetCollectorPickupRadiusMult(PlayerPawn);
+		const float EffMagnetRadiusSq = EffMagnetRadius * EffMagnetRadius;
+		if (EffMagnetRadiusSq > KINDA_SMALL_NUMBER && DistSq <= EffMagnetRadiusSq)
+		{
+			const float Ratio = DistSq / EffMagnetRadiusSq; // 0 = on the player, 1 = at the radius edge
+			if (Ratio < MagnetBestRatio)
 			{
-				GameState->AddSharedXP(XPValue);
+				MagnetBestRatio = Ratio;
+				MagnetPlayer = PlayerPawn;
+				MagnetPlayerLocation = PlayerLocation;
 			}
+		}
+	}
+
+	if (CollectPlayer != nullptr)
+	{
+		if (AFPSRGameState* GameState = World->GetGameState<AFPSRGameState>())
+		{
+			const float XPMult = GetCollectorXPGainMult(CollectPlayer);
+			const int32 EffectiveXP = FMath::Max(1, FMath::RoundToInt(XPValue * XPMult));
+			GameState->AddSharedXP(EffectiveXP);
 		}
 		Destroy();
 		return;
 	}
 
-	if (DistSq <= (MagnetRadius * MagnetRadius))
+	if (MagnetPlayer != nullptr)
 	{
-		const FVector ToPlayer = (PlayerLocation - PickupLocation).GetSafeNormal();
+		const FVector ToPlayer = (MagnetPlayerLocation - PickupLocation).GetSafeNormal();
 		AddActorWorldOffset(ToPlayer * MagnetSpeed * DeltaSeconds, true);
 	}
 }
 
-APawn* AFPSRXPPickup::FindNearestPlayer() const
+float AFPSRXPPickup::GetCollectorPickupRadiusMult(class APawn* Pawn) const
 {
-	const UWorld* World = GetWorld();
-	if (World == nullptr)
+	if (Pawn == nullptr)
 	{
-		return nullptr;
+		return 1.0f;
 	}
 
-	const FVector PickupLocation = GetActorLocation();
-	APawn* BestPawn = nullptr;
-	float BestDistSq = TNumericLimits<float>::Max();
-
-	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+	IAbilitySystemInterface* ASI = Cast<IAbilitySystemInterface>(Pawn);
+	UAbilitySystemComponent* ASC = ASI ? ASI->GetAbilitySystemComponent() : nullptr;
+	if (ASC == nullptr)
 	{
-		if (const APlayerController* PC = It->Get())
-		{
-			if (APawn* PlayerPawn = PC->GetPawn())
-			{
-				const float DistSq = FVector::DistSquaredXY(PlayerPawn->GetActorLocation(), PickupLocation);
-				if (DistSq < BestDistSq)
-				{
-					BestDistSq = DistSq;
-					BestPawn = PlayerPawn;
-				}
-			}
-		}
+		return 1.0f;
 	}
 
-	return BestPawn;
+	const UFPSRCombatSet* CombatSet = ASC->GetSet<UFPSRCombatSet>();
+	if (CombatSet == nullptr)
+	{
+		return 1.0f;
+	}
+
+	return FMath::Max(0.01f, CombatSet->GetPickupRadius());
+}
+
+float AFPSRXPPickup::GetCollectorXPGainMult(class APawn* Pawn) const
+{
+	if (Pawn == nullptr)
+	{
+		return 1.0f;
+	}
+
+	IAbilitySystemInterface* ASI = Cast<IAbilitySystemInterface>(Pawn);
+	UAbilitySystemComponent* ASC = ASI ? ASI->GetAbilitySystemComponent() : nullptr;
+	if (ASC == nullptr)
+	{
+		return 1.0f;
+	}
+
+	const UFPSRCombatSet* CombatSet = ASC->GetSet<UFPSRCombatSet>();
+	if (CombatSet == nullptr)
+	{
+		return 1.0f;
+	}
+
+	return FMath::Max(0.0f, CombatSet->GetXPGain());
 }
