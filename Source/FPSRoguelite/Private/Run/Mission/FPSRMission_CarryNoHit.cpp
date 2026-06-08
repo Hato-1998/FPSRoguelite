@@ -107,12 +107,16 @@ float AFPSRMission_CarryNoHit::GetPawnHealth(APawn* Pawn) const
 	return -1.0f;
 }
 
-void AFPSRMission_CarryNoHit::OnMissionEnded(bool bSuccess)
+void AFPSRMission_CarryNoHit::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
-	if (Orb)
+	// Clean up the spawned orb on ANY teardown (not just mission-ended), so a direct mission destruction
+	// (e.g. DestroyActiveMission on boss entry) does not orphan it. Server owns the orb.
+	if (HasAuthority() && Orb)
 	{
 		Orb->OnCollectedNative.RemoveAll(this);
 		Orb->Destroy();
 		Orb = nullptr;
 	}
+
+	Super::EndPlay(EndPlayReason);
 }

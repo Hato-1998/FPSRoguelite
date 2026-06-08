@@ -28,7 +28,7 @@ public:
 
 protected:
 	virtual void OnMissionActivated() override;
-	virtual void OnMissionEnded(bool bSuccess) override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 private:
 	void HandleOrbCollected(AFPSRMissionOrb* Orb, APawn* Collector);

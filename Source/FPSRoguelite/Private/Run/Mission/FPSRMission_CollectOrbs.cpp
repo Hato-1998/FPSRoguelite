@@ -64,15 +64,22 @@ void AFPSRMission_CollectOrbs::HandleOrbCollected(AFPSRMissionOrb* Orb, APawn* C
 	}
 }
 
-void AFPSRMission_CollectOrbs::OnMissionEnded(bool bSuccess)
+void AFPSRMission_CollectOrbs::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
-	for (AFPSRMissionOrb* Orb : SpawnedOrbs)
+	// Clean up spawned orbs on ANY teardown (completion, fail, or a direct DestroyActiveMission — e.g. on boss
+	// entry), not just the mission-ended path, so orbs never orphan with a dangling delegate. Server owns them.
+	if (HasAuthority())
 	{
-		if (Orb)
+		for (AFPSRMissionOrb* Orb : SpawnedOrbs)
 		{
-			Orb->OnCollectedNative.RemoveAll(this);
-			Orb->Destroy();
+			if (Orb)
+			{
+				Orb->OnCollectedNative.RemoveAll(this);
+				Orb->Destroy();
+			}
 		}
+		SpawnedOrbs.Reset();
 	}
-	SpawnedOrbs.Reset();
+
+	Super::EndPlay(EndPlayReason);
 }

@@ -31,7 +31,7 @@ public:
 protected:
 	virtual void OnMissionActivated() override;
 	virtual void OnMissionTickServer(float DeltaSeconds) override;
-	virtual void OnMissionEnded(bool bSuccess) override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 private:
 	void HandleOrbCollected(AFPSRMissionOrb* InOrb, APawn* Collector);
