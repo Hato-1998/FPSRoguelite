@@ -1,9 +1,11 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Enemy/FPSRFlowFieldSubsystem.h"
+#include "Core/FPSRLogChannels.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/Pawn.h"
+#include "CollisionShape.h"
 #include "TimerManager.h"
 #include "Containers/Queue.h"
 
@@ -35,13 +37,51 @@ void UFPSRFlowFieldSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 	GridOrigin = FVector(-HalfExtent, -HalfExtent, 0.0f);
 	DistField.Init(MAX_int32, GridDim * GridDim);
 	FlowField.Init(FVector2D::ZeroVector, GridDim * GridDim);
+	BlockedField.Init(false, GridDim * GridDim);
 
 	if (HasServerAuthority())
 	{
+		BuildObstacleMask(); // once: fixed map; BFS then routes around blocked cells
+
 		InWorld.GetTimerManager().SetTimer(
 			RecomputeTimerHandle, this, &UFPSRFlowFieldSubsystem::RecomputeField,
 			FlowUpdateInterval, true);
 	}
+}
+
+void UFPSRFlowFieldSubsystem::BuildObstacleMask()
+{
+	UWorld* World = GetWorld();
+	if (!World || GridDim <= 0)
+	{
+		return;
+	}
+
+	FCollisionObjectQueryParams ObjParams;
+	ObjParams.AddObjectTypesToQuery(ECC_WorldStatic);
+	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(FPSRFlowObstacle), false);
+	// Full-cell half-extent (no inter-cell gap) so a thin wall on a cell boundary is still caught (Codex P2).
+	const FCollisionShape Box = FCollisionShape::MakeBox(
+		FVector(CellSize * 0.5f, CellSize * 0.5f, ObstacleProbeHalfHeight));
+
+	int32 BlockedCount = 0;
+	for (int32 CY = 0; CY < GridDim; ++CY)
+	{
+		for (int32 CX = 0; CX < GridDim; ++CX)
+		{
+			const FVector Center(
+				GridOrigin.X + (CX + 0.5f) * CellSize,
+				GridOrigin.Y + (CY + 0.5f) * CellSize,
+				GridOrigin.Z + ObstacleProbeZ);
+			if (World->OverlapAnyTestByObjectType(Center, FQuat::Identity, ObjParams, Box, QueryParams))
+			{
+				BlockedField[CY * GridDim + CX] = true;
+				++BlockedCount;
+			}
+		}
+	}
+
+	UE_LOG(LogFPSR, Log, TEXT("[FlowField] Obstacle mask: %d/%d cells blocked."), BlockedCount, GridDim * GridDim);
 }
 
 void UFPSRFlowFieldSubsystem::Deinitialize()
@@ -51,6 +91,63 @@ void UFPSRFlowFieldSubsystem::Deinitialize()
 		World->GetTimerManager().ClearTimer(RecomputeTimerHandle);
 	}
 	Super::Deinitialize();
+}
+
+int32 UFPSRFlowFieldSubsystem::FindNearestOpenCell(int32 FromCell, const FVector& PlayerLocation) const
+{
+	if (FromCell == INDEX_NONE || GridDim <= 0)
+	{
+		return INDEX_NONE;
+	}
+	const UWorld* World = GetWorld();
+	const int32 CX = FromCell % GridDim;
+	const int32 CY = FromCell / GridDim;
+
+	FCollisionObjectQueryParams ObjParams;
+	ObjParams.AddObjectTypesToQuery(ECC_WorldStatic);
+	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(FPSRFlowSourceLOS), false);
+
+	int32 Fallback = INDEX_NONE; // nearest open cell regardless of line-of-sight
+	for (int32 R = 1; R <= SourceSearchRadius; ++R)
+	{
+		for (int32 dy = -R; dy <= R; ++dy)
+		{
+			for (int32 dx = -R; dx <= R; ++dx)
+			{
+				if (FMath::Max(FMath::Abs(dx), FMath::Abs(dy)) != R)
+				{
+					continue; // only the outer ring at radius R (nearest-first)
+				}
+				const int32 NX = CX + dx;
+				const int32 NY = CY + dy;
+				if (NX < 0 || NX >= GridDim || NY < 0 || NY >= GridDim)
+				{
+					continue;
+				}
+				const int32 NIdx = NY * GridDim + NX;
+				if (BlockedField[NIdx])
+				{
+					continue;
+				}
+				if (Fallback == INDEX_NONE)
+				{
+					Fallback = NIdx;
+				}
+				// Prefer a cell the player can actually see (no static wall between) — keeps the snapped source
+				// on the player's side of the obstacle. First LOS-clear cell (nearest-first) wins.
+				const FVector CellCenter(
+					GridOrigin.X + (NX + 0.5f) * CellSize,
+					GridOrigin.Y + (NY + 0.5f) * CellSize,
+					PlayerLocation.Z);
+				if (World == nullptr ||
+					!World->LineTraceTestByObjectType(PlayerLocation, CellCenter, ObjParams, QueryParams))
+				{
+					return NIdx;
+				}
+			}
+		}
+	}
+	return Fallback;
 }
 
 int32 UFPSRFlowFieldSubsystem::WorldToCellIndex(const FVector& WorldLocation) const
@@ -96,7 +193,13 @@ void UFPSRFlowFieldSubsystem::RecomputeField()
 		{
 			if (const APawn* PlayerPawn = PC->GetPawn())
 			{
-				const int32 Cell = WorldToCellIndex(PlayerPawn->GetActorLocation());
+				int32 Cell = WorldToCellIndex(PlayerPawn->GetActorLocation());
+					// If the player's coarse cell is blocked (standing next to geometry), seed from the nearest
+					// open cell instead — otherwise the BFS expands from a wall cell across the obstacle.
+					if (Cell != INDEX_NONE && BlockedField[Cell])
+					{
+						Cell = FindNearestOpenCell(Cell, PlayerPawn->GetActorLocation());
+					}
 				if (Cell != INDEX_NONE && DistField[Cell] != 0)
 				{
 					DistField[Cell] = 0;
@@ -131,6 +234,10 @@ void UFPSRFlowFieldSubsystem::RecomputeField()
 				continue;
 			}
 			const int32 NIdx = NY * GridDim + NX;
+			if (BlockedField[NIdx])
+			{
+				continue; // never propagate flow through static obstacles (walls/buildings)
+			}
 			if (DistField[NIdx] > CurDist + 1)
 			{
 				DistField[NIdx] = CurDist + 1;
@@ -147,12 +254,10 @@ void UFPSRFlowFieldSubsystem::RecomputeField()
 		for (int32 CX = 0; CX < GridDim; ++CX)
 		{
 			const int32 Idx = CY * GridDim + CX;
-			if (DistField[Idx] == MAX_int32)
-			{
-				FlowField[Idx] = FVector2D::ZeroVector; // unreachable
-				continue;
-			}
 
+			// Compute steepest descent for EVERY cell, including blocked / unreachable ones (DistField == MAX):
+			// an enemy standing in a partially-obstructed coarse cell still gets an escape direction toward the
+			// nearest reachable open neighbor instead of zero flow (which would jam it against geometry). Codex.
 			int32 BestDist = DistField[Idx];
 			int32 BestNX = -1;
 			int32 BestNY = -1;
@@ -165,6 +270,20 @@ void UFPSRFlowFieldSubsystem::RecomputeField()
 					continue;
 				}
 				const int32 NIdx = NY * GridDim + NX;
+				// Don't skip blocked neighbors outright: unreachable ones already have MAX distance (never
+				// chosen below), while a blocked cell with a finite distance is a player SOURCE we must still be
+				// able to point at (a player standing next to geometry, Codex P2). Corner-clearance is enough.
+				// Corner-clearance: take a diagonal (N >= 4) only if BOTH orthogonal cells are open, so the
+				// swept enemy capsule can't clip a blocked corner and jam (Codex P2).
+				if (N >= 4)
+				{
+					const int32 OrthoA = CY * GridDim + NX; // (NX, CY)
+					const int32 OrthoB = NY * GridDim + CX; // (CX, NY)
+					if (BlockedField[OrthoA] || BlockedField[OrthoB])
+					{
+						continue;
+					}
+				}
 				if (DistField[NIdx] < BestDist)
 				{
 					BestDist = DistField[NIdx];
