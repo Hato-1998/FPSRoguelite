@@ -9,6 +9,23 @@
 ## 한 줄 요약
 **P0~P4-A + P4-B-1 + P4-B-2 → main 머지 완료**. **P4-D(게임필) → `phase/p4d-gamefeel` 코드+콘텐츠 완료, main 머지(2026-06-09)**: PickupRadius/XPGain 어트리뷰트+카드, 런상태 HUD(`UFPSRRunHUDWidget`)+Game레이어 컨테이너(`UFPSRGameHUDWidget`), 로컬 피드백(`UFPSRPlayerFeedbackComponent`)=히트마커(서버권위)+피격방향(CoD식)+원거리타겟 사전경고(다수소스). 근접 시각 위협은 설계상 제외→사운드 이전. 빌드+스모크+Codex(다회 하드닝)+2-client PIE 통과. (P4-B-2: 무기 행동 Fragment, 2026-06-08 머지.) → 다음 **P4-B-3 머지**(미션) / **스폰포인트 머지**(`phase/p4-enemyspawnpoints`) / **P4-C**(무기 7종).
 
+## ▶▶ 미머지 브랜치 3개 (각 검증 완료, 콘텐츠+PIE 후 `--no-ff` main 머지 대기)
+> 셋 다 독립(서로/메인 충돌 무관 예상). 머지 순서·시점은 사용자 판단. 각 빌드+스모크+Codex(클린) 통과.
+
+- **`phase/p4b3-missions`** — 미션 5종(콘텐츠+PIE 대기, 상세 아래 P4-B-3 절). `AFPSRMission_LimitedVision`은 비주얼 디자인 결정 보류.
+
+- **`phase/p4d-gamefeel`** (main 분기, 3커밋, 코드 검증 완료) — P4-D 코드 조각:
+  - `7e243db` **PickupRadius/XPGain 어트리뷰트**(`UFPSRCombatSet` 승수, 기본 1.0) + XP 픽업 배선(수령자 XPGain로 XP·PickupRadius로 자석반경 스케일, 자석 대상=플레이어별 유효반경 대비 거리비 최소 → 협동 정합).
+  - `5f686ab` **런상태 HUD 위젯 베이스** `UFPSRRunHUDWidget : UCommonUserWidget`(BlueprintPure 게터 RunClock mm:ss/Phase/Paused/Level/XP/Progress/Picks + `OnRunStateUpdated` BIE, 이벤트기반). 부수: 호스트 클럭 `SetRunClockSeconds` authority 브로드캐스트, `bPlayerStateBound` 재추가 리셋(RunHUD+XPBar), 늦은 PlayerState 복제 대비 재바인딩 타이머.
+  - `47ff81e` **히트마커+위협 인디케이터 감지** `UFPSRPlayerFeedbackComponent`(로컬·비복제, AFPSRCharacter 부착) + `FPSRFeedbackTypes`(EFPSRHitMarkerType, FFPSRThreatDir). 마커=서버권위(히트스캔/근접 GA → `AFPSRPlayerController::ClientNotifyHitMarker` Unreliable, 활성화당 Kill>Crit>Hit 1회). 위협=로컬 스로틀 스캔(시야 밖 생존 적의 화면 엣지 방향). WBP가 `OnHitMarker`/`OnThreatsUpdated` 바인딩.
+  - **⚠️ 콘텐츠 TODO(사용자)**: ① PickupRadius/XPGain용 Character-scope 카드 DA+GE(SetByCaller)+카드풀. ② `WBP_RunHUD`(베이스 상속, 텍스트/바 바인딩·OnRunStateUpdated 구현) + Game 레이어 push(또는 XPBar와 합성). ③ WBP 히트마커 위젯(Hit/Crit/Kill 비주얼) + 화면 엣지 위협 위젯(AngleDeg→엣지 위치, Severity01→강도). 튜닝값(ThreatRadius/ViewHalfAngle/ScanInterval/MaxThreats)은 BP 디폴트 조정. PlayerFeedback 컴포넌트는 C++ 생성이라 BP_FPSRCharacter에 자동 존재. ④ PIE: 처치 마커/등 뒤 위협/HUD 런클럭·페이즈·프리즈 확인.
+  - **후속(코드 미완)**: 히트마커 클라 예측(확산 시드 동기화 시), 사각 오디오(§2-14), 핑 사운드. GameplayMessageSubsystem 승격(피드백 다소비자 생기면).
+
+- **`phase/p4-enemyspawnpoints`** (main 분기, 1커밋 `79bdfe0`, 코드 검증 완료) — 디자이너 배치 적 스폰포인트:
+  - `AFPSREnemySpawnPoint`(Weight/ZoneTag/MinPlayerDistance/bEnabled) + `UFPSREnemySpawnSubsystem` 비가시(전 플레이어 FOV 밖)+거리+활성존 가중랜덤 선택, 후보 0/미배치 시 링 폴백. `SetActiveSpawnZone` 훅(§2-8 TimeGate 후속).
+  - **⚠️ 콘텐츠 TODO(사용자)**: ① L_Sandbox에 스폰포인트 인스턴스 배치(Weight/ZoneTag/MinPlayerDistance). ② (선택)Zone 태그 `DefaultGameplayTags.ini` + 디렉터 `SetActiveSpawnZone` 연동(후속). ③ PIE: 배치 시 비가시 지점 스폰·미배치 시 링 폴백 확인.
+  - **메모**: 머지 시 Game.MD §2-8(스폰포인트 구현상태)·§2-11(PickupRadius/XPGain)·§2-14(히트마커/위협 구현상태) 구현상태 줄 갱신 + 위 백로그 항목 정리.
+
 ## ▶▶ 새 세션 우선 작업 = P4-B-3 (미션 6종) / P4-C / P4-D
 - **P4-B-2 완료·main 머지됨(2026-06-08)** — 무기 행동 Fragment 전체(상세는 아래 완료 이력 + `git log`). 다음 후보: **P4-B-3**(나머지 6종 미션), **P4-C**(무기 7종), **P4-D**(게임필 히트마커/핑/위협인디케이터/사각오디오 + PickupRadius/XPGain + 런상태 HUD 위젯). 새 작업이므로 **플랜 우선**, `phase/` 브랜치 분기(§6-7).
 - **Fragment 후속(미완)**: `ModifyChargeTime`/`OnProjectileSpawn` 훅(차징/투사체 아키타입 도입 시), Melee fragment, fragment 제거/교체 UI. 무기별 `AvailableModifiers` 콘텐츠 확장(현재 Rifle만 MultiShot/BonusDamage 등록).

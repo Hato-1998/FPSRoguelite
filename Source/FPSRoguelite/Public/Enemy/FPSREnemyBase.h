@@ -46,6 +46,11 @@ public:
 protected:
 	virtual void BeginPlay() override;
 
+	/** Server: ground-follow + gravity each movement update — a single down-trace snaps the enemy to the floor
+	 *  (slopes/steps within GroundSnapTolerance) or lets it fall under gravity off a ledge / after a high spawn,
+	 *  so enemies never float and rooftop-spawned enemies drop down before chasing. */
+	void ApplyGravity(float ScaledDeltaSeconds);
+
 	UFUNCTION()
 	void HandleDeath(AActor* DeadActor, AActor* Killer);
 
@@ -83,4 +88,33 @@ protected:
 	/** Per-instance move speed (MoveSpeed * random ±10% on Activate). Game.MD §2-6. */
 	UPROPERTY(Transient)
 	float CurrentMoveSpeed = MoveSpeed;
+
+	/** Gravity acceleration (cm/s^2) applied while airborne (fall off ledges / land after a high spawn). */
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Enemy|Movement")
+	float GravityAccel = 1800.0f;
+
+	/** If the floor is within this of the feet (up or down), snap to it (slopes/steps); beyond it (a real drop),
+	 *  fall under gravity. */
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Enemy|Movement")
+	float GroundSnapTolerance = 60.0f;
+
+	/** Short down-trace length for the ground check. Falling is incremental (re-traced each airborne update),
+	 *  so this only needs to reach a bit past the feet — keeps the per-enemy scene query cheap at swarm scale. */
+	static constexpr float GroundProbeDistance = 700.0f; // cm
+
+	/** Seconds a GROUNDED enemy skips the ground trace before re-checking (amortizes the cost across the swarm;
+	 *  airborne enemies trace every update). Bounds ledge-walk-off detection lag. */
+	static constexpr float GroundRecheckInterval = 0.15f;
+
+	/** Server-only vertical velocity for gravity/falling (reset to 0 on landing / while grounded). */
+	UPROPERTY(Transient)
+	float VerticalVelocity = 0.0f;
+
+	/** Server-only: true while resting on the floor (gates the amortized ground re-check). */
+	UPROPERTY(Transient)
+	bool bGrounded = false;
+
+	/** Server-only: countdown until the next ground re-check while grounded. */
+	UPROPERTY(Transient)
+	float GroundRecheckTimer = 0.0f;
 };
