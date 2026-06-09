@@ -56,6 +56,12 @@ struct FPSROGUELITE_API FFPSRWeaponStatBlock
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Fire")
 	int32 BurstCount = 3;
 
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Fire")
+	int32 PelletCount = 1; // pellets fired per round in one spread cone (shotgun); 1 = single bullet, costs 1 ammo regardless
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Fire")
+	int32 MaxPenetration = 1; // max enemies a single pellet passes through (sniper pierce); 1 = stops at first enemy
+
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon")
 	float Range = 10000.0f;
 
