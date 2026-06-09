@@ -31,8 +31,10 @@ public:
 	virtual bool IsTickable() const override;
 	virtual UWorld* GetTickableGameObjectWorld() const override;
 
-	/** Acquire an enemy from the pool or spawn a new one at the given location. */
-	AFPSREnemyBase* AcquireEnemy(const FVector& Location);
+	/** Acquire an enemy from the pool or spawn a new one at the given location.
+	 *  bSnapToGround=true traces down to the static floor (procedural/ring spawns). Pass false for an
+	 *  authoritative designer-placed point whose Z must be preserved exactly (Game.MD §1 fixed-map placement). */
+	AFPSREnemyBase* AcquireEnemy(const FVector& Location, bool bSnapToGround = true);
 
 	/** Release an enemy back to the dormant pool. */
 	void ReleaseEnemy(AFPSREnemyBase* Enemy);
@@ -75,8 +77,10 @@ private:
 	/** Check if this subsystem has server authority. */
 	bool HasServerAuthority() const;
 
-	/** Compute a random spawn location around the nearest player. */
-	FVector ComputeSpawnLocation() const;
+	/** Compute a spawn location: a designer spawn point if one qualifies, else a random ring point around the
+	 *  nearest player. Sets bOutSnapToGround=false for an authoritative designer point (preserve its Z), true for
+	 *  the ring fallback (needs floor-snapping). */
+	FVector ComputeSpawnLocation(bool& bOutSnapToGround) const;
 
 	/** Trace down to the static floor under Location and return a ground-snapped spawn point (feet on
 	 *  the floor). Decouples spawn Z from the player's jump height. Falls back to Location if no floor hit. */

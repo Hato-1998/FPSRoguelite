@@ -310,7 +310,9 @@ void UFPSREnemySpawnSubsystem::TickDirector()
 	int32 SpawnedThisTick = 0;
 	while (ActiveEnemies.Num() < TargetAliveCount && ActiveEnemies.Num() < MaxActiveEnemies && SpawnedThisTick < MaxSpawnPerTick)
 	{
-		if (AcquireEnemy(ComputeSpawnLocation()) == nullptr)
+		bool bSnapToGround = true;
+		const FVector SpawnAt = ComputeSpawnLocation(bSnapToGround);
+		if (AcquireEnemy(SpawnAt, bSnapToGround) == nullptr)
 		{
 			break;
 		}
@@ -318,15 +320,21 @@ void UFPSREnemySpawnSubsystem::TickDirector()
 	}
 }
 
-FVector UFPSREnemySpawnSubsystem::ComputeSpawnLocation() const
+FVector UFPSREnemySpawnSubsystem::ComputeSpawnLocation(bool& bOutSnapToGround) const
 {
 	// Prefer a designer-placed spawn point that is out of every player's view (Game.MD §2-8 / P4 backlog);
 	// fall back to the ring pattern when none are placed or none currently qualify (unplaced maps still work).
 	FVector PointLocation;
 	if (TrySelectSpawnPoint(PointLocation))
 	{
+		// Designer point is authoritative: keep its exact Z so an indoor/under-roof placement is not re-snapped
+		// up onto the ceiling/roof by the downward ground trace (Codex review 2026-06-09).
+		bOutSnapToGround = false;
 		return PointLocation;
 	}
+
+	// Ring fallback is procedural (arbitrary Z above the player) and must be snapped to the floor.
+	bOutSnapToGround = true;
 
 	FVector Center = FVector::ZeroVector;
 
@@ -505,7 +513,7 @@ FVector UFPSREnemySpawnSubsystem::SnapToGround(const FVector& Location) const
 	return Location; // no floor found (e.g. off-map): keep the original candidate
 }
 
-AFPSREnemyBase* UFPSREnemySpawnSubsystem::AcquireEnemy(const FVector& Location)
+AFPSREnemyBase* UFPSREnemySpawnSubsystem::AcquireEnemy(const FVector& Location, bool bSnapToGround)
 {
 	UWorld* World = GetWorld();
 	if (!World || !HasServerAuthority())
@@ -513,7 +521,7 @@ AFPSREnemyBase* UFPSREnemySpawnSubsystem::AcquireEnemy(const FVector& Location)
 		return nullptr;
 	}
 
-	const FVector SpawnLocation = SnapToGround(Location);
+	const FVector SpawnLocation = bSnapToGround ? SnapToGround(Location) : Location;
 
 	AFPSREnemyBase* Enemy = nullptr;
 
