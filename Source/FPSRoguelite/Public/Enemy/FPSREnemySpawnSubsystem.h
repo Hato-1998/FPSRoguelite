@@ -102,6 +102,15 @@ private:
 	/** Max enemies allowed to deal contact damage to a single player per pass (attack token, Game.MD §2-6/§5). */
 	static constexpr int32 AttackTokenLimit = 10;
 
+	/** Max vertical (Z) gap for a contact attack to land — stops an airborne/rooftop or falling enemy from
+	 *  damaging a player through a floor when only horizontal (XY) distance is in range (Codex review 2026-06-09). */
+	static constexpr float AttackVerticalRange = 150.0f; // cm (covers capsule heights + a small step)
+
+	/** Z below which a fallen enemy (pit / no static floor under it) is recycled to the pool so the endless-fall
+	 *  path can't pin a director alive-count/hard-cap slot forever (Codex review 2026-06-09). Far below any
+	 *  playable floor on the fixed map (§1). */
+	static constexpr float WorldKillZ = -10000.0f; // cm
+
 	// Spawn ground-snap trace (decouples spawn Z from the player's jump height). Half-height matches
 	// AFPSREnemyBase's capsule (InitCapsuleSize(40, 90)).
 	static constexpr float SpawnGroundTraceUp = 500.0f;     // cm above the candidate to start the down-trace
@@ -153,6 +162,10 @@ private:
 	/** Distance falloff for point weighting: weight *= 1/(1 + nearestPlayerDist / this). Favors points near the
 	 *  fight without hard-excluding far ones. */
 	static constexpr float SpawnPointFalloffDistance = 2500.0f; // cm
+
+	/** XY jitter radius applied to a selected designer anchor so repeated same-tick selections of the same point
+	 *  don't stack overlapping capsules at an identical transform (Codex review 2026-06-09). Z is preserved. */
+	static constexpr float SpawnPointJitterRadius = 60.0f; // cm
 
 	/** Designer-placed spawn anchors, cached once at world begin (server). May contain entries to null-check. */
 	UPROPERTY(Transient)

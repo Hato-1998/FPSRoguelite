@@ -216,9 +216,12 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 
 		Enemy->SetNetUpdateFrequency(NetFreq);
 
-		// Contact attack: in range + cooldown elapsed + the target player's attack-token budget allows.
+		// Contact attack: in horizontal range + within a vertical gap (no through-floor hits) + cooldown elapsed
+		// + the target player's attack-token budget allows. The XY nearest test ignores Z, so gate Z explicitly.
 		const float AttackRange = Enemy->GetAttackRange();
+		const float AttackVertGap = FMath::Abs(EnemyLocation.Z - BestPlayerLocation.Z);
 		if (BestDistSq <= (AttackRange * AttackRange)
+			&& AttackVertGap <= AttackVerticalRange
 			&& Enemy->CanAttack(Now)
 			&& AttackersThisPass[BestPlayerIndex] < AttackTokenLimit)
 		{
@@ -254,6 +257,15 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 		MoveDir.Z = 0.0f;
 
 		Enemy->TickServerMovement(MoveDir, DeltaTime * UpdateStride);
+
+		// Recycle an enemy that has fallen out of the playable world (walked into a pit / no static floor under
+		// it) so the endless-fall path can't pin a director slot forever. Safe here: Agents/Locations/SpatialHash
+		// are snapshots; ReleaseEnemy only mutates ActiveEnemies/DormantPool and this enemy isn't touched again
+		// this pass.
+		if (Enemy->GetActorLocation().Z < WorldKillZ)
+		{
+			ReleaseEnemy(Enemy);
+		}
 	}
 }
 
@@ -474,18 +486,28 @@ bool UFPSREnemySpawnSubsystem::TrySelectSpawnPoint(FVector& OutLocation) const
 		return false;
 	}
 
+	// Small XY jitter around the chosen anchor so selecting the same point several times in one tick (e.g. only
+	// one point qualifies) doesn't spawn overlapping capsules at an identical transform that can't separate
+	// (zero-distance pairs are ignored by ComputeSeparation). Z is kept (designer-authoritative, no ground snap).
+	auto JitterXY = [](const FVector& Anchor) -> FVector
+	{
+		const float Ang = FMath::FRandRange(0.0f, 2.0f * PI);
+		const float R = FMath::FRandRange(0.0f, SpawnPointJitterRadius);
+		return Anchor + FVector(FMath::Cos(Ang) * R, FMath::Sin(Ang) * R, 0.0f);
+	};
+
 	// Weighted-random draw: first cumulative weight >= roll.
 	const float Roll = FMath::FRandRange(0.0f, WeightTotal);
 	for (int32 i = 0; i < Candidates.Num(); ++i)
 	{
 		if (Roll <= CumulativeWeights[i])
 		{
-			OutLocation = Candidates[i]->GetActorLocation();
+			OutLocation = JitterXY(Candidates[i]->GetActorLocation());
 			return true;
 		}
 	}
 
-	OutLocation = Candidates.Last()->GetActorLocation(); // float-rounding guard
+	OutLocation = JitterXY(Candidates.Last()->GetActorLocation()); // float-rounding guard
 	return true;
 }
 
