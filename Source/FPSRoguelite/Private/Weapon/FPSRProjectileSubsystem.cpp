@@ -72,14 +72,22 @@ AFPSRProjectile* UFPSRProjectileSubsystem::AcquireProjectile(
 		}
 	}
 
-	// Try to reuse from dormant pool (skip any stale nulls). A1 keeps a single pool of the AFPSRProjectile
-	// base regardless of requested subclass; per-class pooling is a future optimization (TODO).
+	// Reuse a dormant projectile of the SAME class as requested (so a later request never gets a different
+	// subclass's mesh/components/overridden behavior). Drop any stale nulls encountered. Pool is small (<=64),
+	// so the linear scan is cheap. Order is irrelevant, so RemoveAtSwap.
 	AFPSRProjectile* Projectile = nullptr;
-	while (DormantPool.Num() > 0)
+	for (int32 i = DormantPool.Num() - 1; i >= 0; --i)
 	{
-		Projectile = DormantPool.Pop();
-		if (Projectile)
+		AFPSRProjectile* Candidate = DormantPool[i];
+		if (!Candidate)
 		{
+			DormantPool.RemoveAtSwap(i);
+			continue;
+		}
+		if (Candidate->GetClass() == ClassToSpawn)
+		{
+			Projectile = Candidate;
+			DormantPool.RemoveAtSwap(i);
 			break;
 		}
 	}

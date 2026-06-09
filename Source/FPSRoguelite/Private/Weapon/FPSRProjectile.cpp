@@ -108,7 +108,10 @@ void AFPSRProjectile::Activate(const FVector& Location, const FFPSRProjectilePar
 		CollisionSphere->SetGenerateOverlapEvents(true);
 	}
 
-	FlushNetDormancy();
+	// Keep the projectile continuously awake while flying so its movement replicates to clients for the whole
+	// flight. A pooled reuse comes back from DORM_DormantAll; FlushNetDormancy only forces a single update, so
+	// a moving projectile would stop replicating shortly after — DORM_Awake holds it relevant until release.
+	SetNetDormancy(DORM_Awake);
 	bActive = true;
 	Launch(InParams, Direction);
 }
@@ -204,13 +207,20 @@ void AFPSRProjectile::HandleImpact(const FVector& ImpactPoint)
 		return;
 	}
 
-	// AOE radial damage: overlap every pawn in range and damage the hostile ones once each (the instigator
-	// is ignored by the query and by IsHostileTarget/TryDamageActor).
-	if (Params.ExplosionRadius > 0.0f)
+	// AOE radial damage — server-authoritative only. A cosmetic-predicted round must never apply damage, even
+	// when it detonates against terrain (OnSphereHit -> HandleImpact bypasses the overlap-path mode gate).
+	if (Params.Mode == EFPSRProjectileMode::ServerAuthoritative && Params.ExplosionRadius > 0.0f)
 	{
 		if (UWorld* World = GetWorld())
 		{
 			const FCollisionShape Sphere = FCollisionShape::MakeSphere(Params.ExplosionRadius);
+
+			// Query pawns by OBJECT TYPE, not the Pawn trace channel: a target that has set its Pawn-channel
+			// response to Ignore (e.g. a player mid-dash, AFPSRCharacter::ServerDash) is still found here.
+			// Object-type queries match on what an actor IS, not how it responds, so the blast can't be dodged
+			// by a transient channel-response change.
+			FCollisionObjectQueryParams ObjectParams;
+			ObjectParams.AddObjectTypesToQuery(ECC_Pawn);
 			FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(ProjectileAOE), false, this);
 			if (Params.InstigatorActor)
 			{
@@ -218,7 +228,7 @@ void AFPSRProjectile::HandleImpact(const FVector& ImpactPoint)
 			}
 
 			TArray<FOverlapResult> Overlaps;
-			World->OverlapMultiByChannel(Overlaps, ImpactPoint, FQuat::Identity, ECC_Pawn, Sphere, QueryParams);
+			World->OverlapMultiByObjectType(Overlaps, ImpactPoint, FQuat::Identity, ObjectParams, Sphere, QueryParams);
 
 			TArray<AActor*> Damaged;
 			for (const FOverlapResult& Overlap : Overlaps)
