@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Hero/FPSRCharacter.h"
+#include "Core/FPSRPlayerController.h"
 #include "Core/FPSRPlayerState.h"
 #include "Core/FPSRLogChannels.h"
 #include "Core/FPSRGameState.h"
@@ -10,6 +11,7 @@
 #include "Weapon/FPSRWeaponInventoryComponent.h"
 #include "Weapon/FPSRWeaponFireComponent.h"
 #include "Weapon/FPSRWeaponDataAsset.h"
+#include "Hero/FPSRPlayerFeedbackComponent.h"
 
 #include "Camera/CameraComponent.h"
 #include "Components/CapsuleComponent.h"
@@ -63,6 +65,7 @@ AFPSRCharacter::AFPSRCharacter()
 
 	WeaponInventory = CreateDefaultSubobject<UFPSRWeaponInventoryComponent>(TEXT("WeaponInventory"));
 	WeaponFire = CreateDefaultSubobject<UFPSRWeaponFireComponent>(TEXT("WeaponFire"));
+	PlayerFeedback = CreateDefaultSubobject<UFPSRPlayerFeedbackComponent>(TEXT("PlayerFeedback"));
 
 	// Required so the inventory component's registered weapon-instance subobjects replicate (engine: the
 	// owning actor must also opt into the registered subobject list, not just the component).
@@ -408,6 +411,16 @@ void AFPSRCharacter::ApplyContactDamage(float DamageAmount, AActor* DamageInstig
 	if (UAbilitySystemComponent* ASC = GetAbilitySystemComponent())
 	{
 		ASC->ApplyModToAttribute(UFPSRHealthSet::GetHealthAttribute(), EGameplayModOp::Additive, -DamageAmount);
+	}
+
+	// Tell the owning client which direction the hit came from (CoD-style damage indicator, §2-14). Cosmetic,
+	// owner-only, unreliable; the client converts the instigator location to a camera-relative angle.
+	if (DamageInstigator)
+	{
+		if (AFPSRPlayerController* PC = Cast<AFPSRPlayerController>(GetController()))
+		{
+			PC->ClientNotifyDamageFrom(DamageInstigator->GetActorLocation());
+		}
 	}
 }
 

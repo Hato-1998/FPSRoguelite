@@ -6,6 +6,7 @@
 #include "Weapon/FPSRWeaponInstance.h"
 #include "Weapon/FPSRWeaponDataAsset.h"
 #include "Enemy/FPSREnemyHealthComponent.h"
+#include "Core/FPSRPlayerController.h"
 #include "Core/FPSRLogChannels.h"
 
 #include "AbilitySystemComponent.h"
@@ -75,6 +76,7 @@ void UFPSRGA_WeaponMelee::ActivateAbility(
 		}
 
 		float FinalDamage = Damage;
+		bool bSwingCrit = false;
 		if (UAbilitySystemComponent* ASC = GetAbilitySystemComponentFromActorInfo())
 		{
 			const float CritChance = ASC->GetNumericAttribute(UFPSRCombatSet::GetGlobalCritChanceAttribute());
@@ -85,6 +87,7 @@ void UFPSRGA_WeaponMelee::ActivateAbility(
 			if (FMath::FRand() < CritChance)
 			{
 				FinalDamage *= CritMultiplier;
+				bSwingCrit = true;
 			}
 		}
 
@@ -94,6 +97,8 @@ void UFPSRGA_WeaponMelee::ActivateAbility(
 			Overlaps, Center, FQuat::Identity, ECC_Pawn,
 			FCollisionShape::MakeSphere(MeleeRadius), QueryParams);
 
+		bool bAnyHit = false;
+		bool bAnyKill = false;
 		if (bAny)
 		{
 			for (const FOverlapResult& Overlap : Overlaps)
@@ -106,7 +111,21 @@ void UFPSRGA_WeaponMelee::ActivateAbility(
 				if (UFPSREnemyHealthComponent* HealthComp = HitActor->FindComponentByClass<UFPSREnemyHealthComponent>())
 				{
 					HealthComp->ApplyDamage(FinalDamage, Avatar);
+					bAnyHit = true;
+					if (HealthComp->IsDead()) { bAnyKill = true; }
 				}
+			}
+		}
+
+		// Melee has no client prediction (server-only overlap), so all markers come from the server here.
+		// One pulse per swing, strongest outcome (Kill > Crit > Hit). (Game.MD §2-14)
+		if (bAnyHit)
+		{
+			if (AFPSRPlayerController* OwnerPC = Cast<AFPSRPlayerController>(Controller))
+			{
+				const EFPSRHitMarkerType MarkerType = bAnyKill ? EFPSRHitMarkerType::Kill
+					: (bSwingCrit ? EFPSRHitMarkerType::Crit : EFPSRHitMarkerType::Hit);
+				OwnerPC->ClientNotifyHitMarker(MarkerType);
 			}
 		}
 	}

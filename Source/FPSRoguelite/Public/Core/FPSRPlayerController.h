@@ -4,12 +4,14 @@
 
 #include "GameFramework/PlayerController.h"
 #include "Card/FPSRCardTypes.h"
+#include "Hero/FPSRFeedbackTypes.h"
 #include "FPSRPlayerController.generated.h"
 
 class UInputMappingContext;
 class UFPSRPrimaryGameLayout;
 class UFPSRCardSelectWidget;
 class UCommonActivatableWidget;
+class UFPSRGameHUDWidget;
 class UFPSRCardDataAsset;
 
 /** Base player controller. Adds the default Enhanced Input mapping context for the local player and
@@ -73,6 +75,23 @@ public:
 	UFUNCTION(Client, Reliable)
 	void ClientDismissCardUI();
 
+	/** Client (owner): server-confirmed hit marker (Hit / Crit / Kill) — forwards to the local pawn's feedback
+	 *  component. Unreliable: cosmetic, high-frequency during sustained fire, and safe to drop under packet loss
+	 *  (must not back up the reliable channel ahead of gameplay RPCs). (Game.MD §2-14) */
+	UFUNCTION(Client, Unreliable)
+	void ClientNotifyHitMarker(EFPSRHitMarkerType MarkerType);
+
+	/** Client (owner): incoming damage came from InstigatorLocation — forwards to the local feedback component,
+	 *  which converts it to a camera-relative angle for the damage-direction indicator. Unreliable cosmetic. */
+	UFUNCTION(Client, Unreliable)
+	void ClientNotifyDamageFrom(FVector InstigatorLocation);
+
+	/** Client (owner): ranged enemy SourceId began/ended targeting this player from SourceLocation (§2-6
+	 *  pre-warning) — forwards to the local feedback component (multi-source, keyed by SourceId). Reliable: a
+	 *  low-frequency on/off state where a dropped "off" would leave a warning stuck on screen. */
+	UFUNCTION(Client, Reliable)
+	void ClientNotifyRangedTarget(int32 SourceId, FVector SourceLocation, bool bActive);
+
 	/** Server: the owner client could not present the offer (no layout/widget class/modal layer) — release
 	 *  this player's outstanding picks so the global freeze can't hard-lock on a broken UI. OfferId must
 	 *  match the current offer (prevents a client discarding an unfavorable offer for free). */
@@ -94,8 +113,9 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|UI")
 	TSubclassOf<UFPSRPrimaryGameLayout> PrimaryLayoutClass;
 
+	/** Game-layer HUD container pushed for the local player (holds run-state HUD, hit marker, indicators). */
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|UI")
-	TSubclassOf<UCommonActivatableWidget> XPBarWidgetClass;
+	TSubclassOf<UFPSRGameHUDWidget> GameHUDWidgetClass;
 
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|UI")
 	TSubclassOf<UFPSRCardSelectWidget> CardSelectWidgetClass;
