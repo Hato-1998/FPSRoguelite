@@ -14,10 +14,9 @@ class AFPSRProjectile;
  *  Manages acquisition, release, and the global-freeze suspension of pooled projectiles.
  *
  *  SCOPE: this pool owns SERVER-AUTHORITATIVE replicated projectiles only (the ≤64 cap is a replication
- *  concern). Cosmetic-predicted projectiles (EFPSRProjectileMode::CosmeticPredicted) are transient,
- *  client-local visuals spawned by the firing ability inside the GAS prediction window (A3) — they are not
- *  pooled here and do not count against the cap. The projectile base honors that mode (it applies no damage);
- *  wiring the client-local predicted spawn is A3's responsibility. */
+ *  concern, Game.MD §5). Client-side prediction (Game.MD §2-10) is the firing ability's job (A3): the
+ *  projectile base uses deterministic movement, so A3 can spawn a client-local cosmetic copy that follows the
+ *  same trajectory while damage stays server-authoritative here. A1 does not ship that predicted spawn path. */
 UCLASS()
 class FPSROGUELITE_API UFPSRProjectileSubsystem : public UWorldSubsystem, public FTickableGameObject
 {

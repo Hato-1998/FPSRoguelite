@@ -12,13 +12,6 @@ enum class EFPSRProjectileTeam : uint8
 	Enemy
 };
 
-UENUM(BlueprintType)
-enum class EFPSRProjectileMode : uint8
-{
-	ServerAuthoritative,
-	CosmeticPredicted
-};
-
 USTRUCT(BlueprintType)
 struct FPSROGUELITE_API FFPSRProjectileParams
 {
@@ -51,10 +44,6 @@ struct FPSROGUELITE_API FFPSRProjectileParams
 	/** Team affiliation (determines damage targets). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Projectile")
 	EFPSRProjectileTeam Team = EFPSRProjectileTeam::Player;
-
-	/** Replication mode (ServerAuthoritative = server damage gate; CosmeticPredicted = cosmetic prediction). */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Projectile")
-	EFPSRProjectileMode Mode = EFPSRProjectileMode::ServerAuthoritative;
 
 	/** The actor that fired this projectile (never damaged by its own projectile). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Projectile")

@@ -175,8 +175,11 @@ void AFPSRProjectile::OnSphereOverlap(UPrimitiveComponent* OverlappedComp, AActo
 	int32 OtherBodyIndex, bool bFromSweep, const FHitResult& Sweep)
 {
 	// Server-authoritative damage only; guard re-entrancy (a released projectile must not act again) and the
-	// global run freeze (no damage during card-selection, Game.MD §2-2).
-	if (!bActive || !HasAuthority() || IsRunFrozen() || Params.Mode != EFPSRProjectileMode::ServerAuthoritative)
+	// global run freeze (no damage during card-selection, Game.MD §2-2). NOTE: an overlap on the exact
+	// freeze-transition frame (before the subsystem suspends movement) is intentionally dropped here — a
+	// 1-frame, single-missed-hit edge with no deferred-overlap handling (world hits, which can stick the round,
+	// are deferred via HandleImpact on resume; overlaps don't stop the round, so the cost isn't justified).
+	if (!bActive || !HasAuthority() || IsRunFrozen())
 	{
 		return;
 	}
@@ -222,9 +225,8 @@ void AFPSRProjectile::HandleImpact(const FVector& ImpactPoint)
 		return;
 	}
 
-	// AOE radial damage — server-authoritative only. A cosmetic-predicted round must never apply damage, even
-	// when it detonates against terrain (OnSphereHit -> HandleImpact bypasses the overlap-path mode gate).
-	if (Params.Mode == EFPSRProjectileMode::ServerAuthoritative && Params.ExplosionRadius > 0.0f)
+	// AOE radial damage (server-authoritative; HasAuthority checked above).
+	if (Params.ExplosionRadius > 0.0f)
 	{
 		if (UWorld* World = GetWorld())
 		{
@@ -310,22 +312,16 @@ bool AFPSRProjectile::TryDamageActor(AActor* Target)
 
 void AFPSRProjectile::ReleaseToPool()
 {
-	// Cosmetic-predicted projectiles are client-local and never tracked by the server pool (see subsystem
-	// SCOPE) — destroy them directly. The pool's ReleaseProjectile would no-op on an untracked actor, leaving
-	// the cosmetic visual alive forever.
-	if (Params.Mode != EFPSRProjectileMode::CosmeticPredicted)
+	if (UWorld* World = GetWorld())
 	{
-		if (UWorld* World = GetWorld())
+		if (UFPSRProjectileSubsystem* Subsystem = World->GetSubsystem<UFPSRProjectileSubsystem>())
 		{
-			if (UFPSRProjectileSubsystem* Subsystem = World->GetSubsystem<UFPSRProjectileSubsystem>())
-			{
-				Subsystem->ReleaseProjectile(this);
-				return;
-			}
+			Subsystem->ReleaseProjectile(this);
+			return;
 		}
 	}
 
-	// Cosmetic projectile, or no subsystem available: deactivate and destroy.
+	// No subsystem available: deactivate and destroy.
 	Deactivate();
 	Destroy();
 }

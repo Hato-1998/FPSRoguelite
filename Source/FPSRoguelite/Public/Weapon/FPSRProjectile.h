@@ -10,7 +10,10 @@ class USphereComponent;
 class UProjectileMovementComponent;
 class UStaticMeshComponent;
 
-/** Server-authoritative projectile with pooling support. Spawns via UFPSRProjectileSubsystem. */
+/** Server-authoritative projectile with pooling support. Spawns via UFPSRProjectileSubsystem.
+ *  Movement is deterministic (UProjectileMovementComponent), so the design is client-prediction-ready
+ *  (Game.MD §2-10): A3's firing ability can spawn a client-local cosmetic copy following the same trajectory.
+ *  Damage is always applied on the server. */
 UCLASS()
 class FPSROGUELITE_API AFPSRProjectile : public AActor
 {
