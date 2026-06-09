@@ -17,6 +17,9 @@
 #include "Card/FPSRCardDataAsset.h"
 #include "UI/FPSRPrimaryGameLayout.h"
 #include "UI/FPSRCardSelectWidget.h"
+#include "UI/FPSRGameHUDWidget.h"
+#include "Hero/FPSRPlayerFeedbackComponent.h"
+#include "GameFramework/Pawn.h"
 
 AFPSRPlayerController::AFPSRPlayerController()
 {
@@ -65,9 +68,9 @@ bool AFPSRPlayerController::EnsurePrimaryLayout()
 
 	PrimaryLayout->AddToViewport();
 
-	if (XPBarWidgetClass)
+	if (GameHUDWidgetClass)
 	{
-		PrimaryLayout->PushWidgetToLayer(FGameplayTag::RequestGameplayTag(FName("UI.Layer.Game")), XPBarWidgetClass);
+		PrimaryLayout->PushWidgetToLayer(FGameplayTag::RequestGameplayTag(FName("UI.Layer.Game")), GameHUDWidgetClass);
 	}
 
 	return true;
@@ -375,6 +378,39 @@ void AFPSRPlayerController::ClientDismissCardUI_Implementation()
 		PrimaryLayout->RemoveWidgetFromLayer(ActiveCardWidget);
 	}
 	ActiveCardWidget = nullptr;
+}
+
+void AFPSRPlayerController::ClientNotifyHitMarker_Implementation(EFPSRHitMarkerType MarkerType)
+{
+	if (APawn* ControlledPawn = GetPawn())
+	{
+		if (UFPSRPlayerFeedbackComponent* Feedback = ControlledPawn->FindComponentByClass<UFPSRPlayerFeedbackComponent>())
+		{
+			Feedback->NotifyHitConfirmed(MarkerType);
+		}
+	}
+}
+
+void AFPSRPlayerController::ClientNotifyDamageFrom_Implementation(FVector InstigatorLocation)
+{
+	if (APawn* ControlledPawn = GetPawn())
+	{
+		if (UFPSRPlayerFeedbackComponent* Feedback = ControlledPawn->FindComponentByClass<UFPSRPlayerFeedbackComponent>())
+		{
+			Feedback->ReceiveDamageFromWorld(InstigatorLocation);
+		}
+	}
+}
+
+void AFPSRPlayerController::ClientNotifyRangedTarget_Implementation(int32 SourceId, FVector SourceLocation, bool bActive)
+{
+	if (APawn* ControlledPawn = GetPawn())
+	{
+		if (UFPSRPlayerFeedbackComponent* Feedback = ControlledPawn->FindComponentByClass<UFPSRPlayerFeedbackComponent>())
+		{
+			Feedback->ReceiveRangedTarget(SourceId, SourceLocation, bActive);
+		}
+	}
 }
 
 void AFPSRPlayerController::ServerAbandonOffer_Implementation(int32 OfferId)
