@@ -7,24 +7,17 @@
 **최종 갱신: 2026-06-09**
 
 ## 한 줄 요약
-**P0~P4-A + P4-B-1 + P4-B-2 → main 머지 완료**. **P4-D(게임필) → `phase/p4d-gamefeel` 코드+콘텐츠 완료, main 머지(2026-06-09)**: PickupRadius/XPGain 어트리뷰트+카드, 런상태 HUD(`UFPSRRunHUDWidget`)+Game레이어 컨테이너(`UFPSRGameHUDWidget`), 로컬 피드백(`UFPSRPlayerFeedbackComponent`)=히트마커(서버권위)+피격방향(CoD식)+원거리타겟 사전경고(다수소스). 근접 시각 위협은 설계상 제외→사운드 이전. 빌드+스모크+Codex(다회 하드닝)+2-client PIE 통과. (P4-B-2: 무기 행동 Fragment, 2026-06-08 머지.) → 다음 **P4-B-3 머지**(미션) / **스폰포인트 머지**(`phase/p4-enemyspawnpoints`) / **P4-C**(무기 7종).
+**P0~P4-A + P4-B-1/2 + P4-D(게임필) → main 머지 완료**. **스폰포인트 코드 → main 머지(2026-06-09, `phase/p4-enemyspawnpoints` 코드분, Codex 5R 하드닝)**: 디자이너 배치 `AFPSREnemySpawnPoint`(비가시+거리 가중랜덤, 링 폴백) + 플로우필드 장애물 회피 + 적 중력/지면추종(+KillZ 회수·접촉 수직게이트·동일위치 분리 근본수정). **콘텐츠 배치(L_Sandbox)는 PIE 미검증이라 제외 → 브랜치 잔류(사용자 PIE 후 별도 머지)**. → 미머지 잔여 = **`phase/p4b3-missions`**(미션 콘텐츠+PIE) + **`phase/p4-enemyspawnpoints`**(콘텐츠 배치만). **다음 = 아래 '코드 선행 백로그' 순서대로(세션 단위)**, 권장 시작 = A1 투사체 코어.
 
-## ▶▶ 미머지 브랜치 3개 (각 검증 완료, 콘텐츠+PIE 후 `--no-ff` main 머지 대기)
-> 셋 다 독립(서로/메인 충돌 무관 예상). 머지 순서·시점은 사용자 판단. 각 빌드+스모크+Codex(클린) 통과.
+## ▶▶ 미머지 브랜치 (콘텐츠 PIE 대기) — `phase/p4d-gamefeel`은 2026-06-09 머지됨
+> 코드는 main에 있고, 남은 건 사용자 콘텐츠+PIE. 머지 순서·시점은 사용자 판단.
 
 - **`phase/p4b3-missions`** — 미션 5종(콘텐츠+PIE 대기, 상세 아래 P4-B-3 절). `AFPSRMission_LimitedVision`은 비주얼 디자인 결정 보류.
 
-- **`phase/p4d-gamefeel`** (main 분기, 3커밋, 코드 검증 완료) — P4-D 코드 조각:
-  - `7e243db` **PickupRadius/XPGain 어트리뷰트**(`UFPSRCombatSet` 승수, 기본 1.0) + XP 픽업 배선(수령자 XPGain로 XP·PickupRadius로 자석반경 스케일, 자석 대상=플레이어별 유효반경 대비 거리비 최소 → 협동 정합).
-  - `5f686ab` **런상태 HUD 위젯 베이스** `UFPSRRunHUDWidget : UCommonUserWidget`(BlueprintPure 게터 RunClock mm:ss/Phase/Paused/Level/XP/Progress/Picks + `OnRunStateUpdated` BIE, 이벤트기반). 부수: 호스트 클럭 `SetRunClockSeconds` authority 브로드캐스트, `bPlayerStateBound` 재추가 리셋(RunHUD+XPBar), 늦은 PlayerState 복제 대비 재바인딩 타이머.
-  - `47ff81e` **히트마커+위협 인디케이터 감지** `UFPSRPlayerFeedbackComponent`(로컬·비복제, AFPSRCharacter 부착) + `FPSRFeedbackTypes`(EFPSRHitMarkerType, FFPSRThreatDir). 마커=서버권위(히트스캔/근접 GA → `AFPSRPlayerController::ClientNotifyHitMarker` Unreliable, 활성화당 Kill>Crit>Hit 1회). 위협=로컬 스로틀 스캔(시야 밖 생존 적의 화면 엣지 방향). WBP가 `OnHitMarker`/`OnThreatsUpdated` 바인딩.
-  - **⚠️ 콘텐츠 TODO(사용자)**: ① PickupRadius/XPGain용 Character-scope 카드 DA+GE(SetByCaller)+카드풀. ② `WBP_RunHUD`(베이스 상속, 텍스트/바 바인딩·OnRunStateUpdated 구현) + Game 레이어 push(또는 XPBar와 합성). ③ WBP 히트마커 위젯(Hit/Crit/Kill 비주얼) + 화면 엣지 위협 위젯(AngleDeg→엣지 위치, Severity01→강도). 튜닝값(ThreatRadius/ViewHalfAngle/ScanInterval/MaxThreats)은 BP 디폴트 조정. PlayerFeedback 컴포넌트는 C++ 생성이라 BP_FPSRCharacter에 자동 존재. ④ PIE: 처치 마커/등 뒤 위협/HUD 런클럭·페이즈·프리즈 확인.
-  - **후속(코드 미완)**: 히트마커 클라 예측(확산 시드 동기화 시), 사각 오디오(§2-14), 핑 사운드. GameplayMessageSubsystem 승격(피드백 다소비자 생기면).
-
-- **`phase/p4-enemyspawnpoints`** (main 분기, 1커밋 `79bdfe0`, 코드 검증 완료) — 디자이너 배치 적 스폰포인트:
-  - `AFPSREnemySpawnPoint`(Weight/ZoneTag/MinPlayerDistance/bEnabled) + `UFPSREnemySpawnSubsystem` 비가시(전 플레이어 FOV 밖)+거리+활성존 가중랜덤 선택, 후보 0/미배치 시 링 폴백. `SetActiveSpawnZone` 훅(§2-8 TimeGate 후속).
-  - **⚠️ 콘텐츠 TODO(사용자)**: ① L_Sandbox에 스폰포인트 인스턴스 배치(Weight/ZoneTag/MinPlayerDistance). ② (선택)Zone 태그 `DefaultGameplayTags.ini` + 디렉터 `SetActiveSpawnZone` 연동(후속). ③ PIE: 배치 시 비가시 지점 스폰·미배치 시 링 폴백 확인.
-  - **메모**: 머지 시 Game.MD §2-8(스폰포인트 구현상태)·§2-11(PickupRadius/XPGain)·§2-14(히트마커/위협 구현상태) 구현상태 줄 갱신 + 위 백로그 항목 정리.
+- **`phase/p4-enemyspawnpoints`** — **코드분은 main 머지됨(2026-06-09)**. 브랜치에 **콘텐츠 배치 커밋(`d3a68c6`, PIE 미검증)만 잔류**:
+  - 머지된 코드: `AFPSREnemySpawnPoint`(Weight/ZoneTag/MinPlayerDistance/bEnabled) + `UFPSREnemySpawnSubsystem` 비가시+거리 가중랜덤(링 폴백) + 플로우필드 장애물 회피 + 적 중력/지면추종. Codex 5R 하드닝(디자이너Z 보존/KillZ 회수/접촉 수직게이트/동일위치 분리 근본수정/지터 제거).
+  - **⚠️ 콘텐츠 TODO(사용자)**: ① L_Sandbox 스폰포인트 인스턴스 배치(Weight/ZoneTag/MinPlayerDistance) — `d3a68c6`에 1차 배치 있음. ② PIE: 비가시 지점 스폰·미배치 링 폴백·계단/높이 주행 확인. ③ PIE OK 시 `git checkout main && git merge --no-ff phase/p4-enemyspawnpoints`로 콘텐츠 머지(코드는 이미 main이라 충돌 없음, 콘텐츠만 추가).
+  - **후속(C1 백로그)**: 플로우필드 셀 클리어런스(좁은 통로 과차단) + 멀티레벨/높이 인지 — PIE 의존, `phase/p2-flowfield-height`.
 
 ## ▶▶ 새 세션 우선 작업 = P4-B-3 (미션 6종) / P4-C / P4-D
 - **P4-B-2 완료·main 머지됨(2026-06-08)** — 무기 행동 Fragment 전체(상세는 아래 완료 이력 + `git log`). 다음 후보: **P4-B-3**(나머지 6종 미션), **P4-C**(무기 7종), **P4-D**(게임필 히트마커/핑/위협인디케이터/사각오디오 + PickupRadius/XPGain + 런상태 HUD 위젯). 새 작업이므로 **플랜 우선**, `phase/` 브랜치 분기(§6-7).
@@ -32,9 +25,38 @@
 - **⚠️ 임시 테스트값(프로덕션 전환 시 노티·원복)**: 스케줄 DA(`DA_RunSchedule`)의 미션 60/120/180s·보스 300s → 프로덕션 5/10/15분·보스 20분. 메모리 `p4a-temp-test-values`. (XP는 프로덕션 공식)
 - **P4-D 완료(main 머지 2026-06-09, `phase/p4d-gamefeel`)** — 게임필. 상세는 완료 이력. **후속(이월)**: ① **히트마커 최종 연출 재확인**(크로스헤어/발사체 작업 후). ② **원거리 타겟 사전경고 생산자**(원거리 적 AI 구현 시 `ClientNotifyRangedTarget` 호출 배선; 현재 디버그 `FPSR.TestRangedWarn`만). ③ 핑/Gibs/사각 오디오(§2-14). ④ 근접 사각지대 인지=사운드(오디오 단계).
 - **P4 잔여(이월)**: **P4-B-3**(브랜치 `phase/p4b3-missions`, 미션 5종 콘텐츠+PIE+머지 대기) + 나머지 미션. **스폰포인트**(브랜치 `phase/p4-enemyspawnpoints`, 코드 완료·배치+PIE+머지 대기). **P4-C** 무기 7종.
-- **이월(P2 플로우필드 후속) — 적 수직 이동/계단**: 적 이동은 **NavMesh 아님**(Game.MD §1·§5-2, 에이전트별 NavMesh 금지). 현 플로우필드(BFS grid+separation)가 계단/높이를 잘 못 타면 **플로우필드를 높이 인지(3D/멀티레벨 샘플링)하게 개선**할 것. NavMeshBoundsVolume 도입 금지. 후순위(P4-A 무관).
-- **P4 백로그 — 디자이너 배치 스폰 포인트**: 현재 스폰은 첫 플레이어 주변 링 랜덤([`UFPSREnemySpawnSubsystem::ComputeSpawnLocation`](Source/FPSRoguelite/Private/Enemy/FPSREnemySpawnSubsystem.cpp:292)). → **맵에 배치한 고정 스폰 포인트 중 "전 플레이어 비가시 & 최소거리 이상"인 곳을 가중 랜덤 선택**으로 전환(랜덤 위치 X, 디자이너 지정 지점). 구현: 경량 액터 `AFPSREnemySpawnPoint`(Weight/Zone/MinPlayerDistance 데이터) → `OnWorldBeginPlay`에서 `TActorIterator`로 캐시 → 디렉터 틱마다 플레이어 카메라/위치 캐시 후 시야각(dot>cosHalfFOV)+거리 게이트로 후보 필터 → Weight×거리가중치 가중 랜덤. 후보 없으면 링 랜덤 폴백(미배치 맵도 동작). Zone은 TimeGate(§2-8)와 연동해 시간대별 스폰 구역 전환 가능. (서버 권위, 고정맵 §1 부합)
+- **디자이너 배치 스폰 포인트 = 완료(코드 main 머지 2026-06-09)**. 콘텐츠 배치+PIE만 잔류(위 미머지 절). 후속 플로우필드 품질은 아래 백로그 C1.
 - **빌드/검증**: §6-6 (`Build.bat FPSRogueliteEditor ... -WaitMutex` / 스모크 `FPSRoguelite.Smoke.ModuleLoads` / `Scripts/codex-review.ps1 -Base main`).
+
+---
+
+## 🧱 코드 선행 백로그 (세션 단위 큐 — 콘텐츠 없이 미리 작업, 2026-06-09 수립)
+> 남은 로드맵 전체에서 **콘텐츠(메시/VFX/DA/BP/사운드) 없이 미리 만들 수 있는 C++ 베이스**만 뽑은 큐. 각 유닛 = 전용 `phase/` 브랜치 · 플랜 우선 · Haiku 구현/Opus 검증 · 빌드+스모크+Codex 게이트 · **콘텐츠 보류분은 만들지 말 것**. 하나 완료 시 머지 후 사용자 호출 → 다음 유닛은 새 세션.
+> **권장 순서**: A1(투사체 코어)이 A3·B1의 공유 의존 → 먼저. 6~12는 순서 자유.
+
+| 순서 | 유닛 | 브랜치 | 코드 산출물 | 콘텐츠 보류 | 의존 |
+|---|---|---|---|---|---|
+| 1 | A1 투사체 코어 | `phase/p4c-projectile-core` | `AFPSRProjectile`(클라예측+서버검증, 풀링, ≤64 복제캡 §5/§2-10) | 메시/VFX | — |
+| 2 | A2 Hitscan 3종 | `phase/p4c-hitscan` | Burst/Sniper/Shotgun 발사 GA + `FireMode.Burst` 처리 | 무기 DA/BP | — |
+| 3 | A3 AOE+ChargeLaser | `phase/p4c-aoe-charge` | 투사체 발사 GA + 차징 AbilityTask + Fragment 훅 `OnProjectileSpawn`/`ModifyChargeTime` | 무기 DA/BP | 1 |
+| 4 | B1 원거리 적 AI | `phase/p4-ranged-enemy` | 원거리 아키타입(투사체+차징경고+공격토큰) + P4-D `ClientNotifyRangedTarget` 생산자 배선 | 적/투사체 VFX | 1 |
+| 5 | A4 Fragment 마무리 | `phase/p4b-fragment-finish` | Melee fragment + 제거/교체 서버 로직 | 교체 UI | 3 |
+| 6 | C1 플로우필드 높이/클리어런스 | `phase/p2-flowfield-height` | 멀티레벨 BFS 샘플링(계단/높이) + 셀 클리어런스 인지 프로브(좁은 통로 과차단 해소) | — | — |
+| 7 | C2 GMS 재구현 | `phase/infra-gms` | GameplayMessageSubsystem + Payload struct | — | — |
+| 8 | D1 아군 오사(FF) | `phase/p5-friendly-fire` | 데미지 브릿지 팀체크+10%+호스트토글 | — | — |
+| 9 | D2 수동 부활 DBNO | `phase/p5-dbno` | Alive/DBNO/Dead 상태기계 + 근접 부활게이지 | 다운 anim/UI | — |
+| 10 | D3 메타 SaveGame | `phase/p6-savegame` | `URogueliteSaveGame` + SaveManager 서브시스템 | 업그레이드 트리 | — |
+| 11 | D4 보스 스캐폴드 | `phase/p6-boss-scaffold` | `ABossBase`+BossDefinition+StateTree 골격(P4-A 게이트 연결) | 실제 보스 | — |
+| 12 | D5 세션 스캐폴드(선택) | `phase/p5-session` | 세션 서브시스템 골격 | Steam/EOS 설정 | — |
+
+**새 세션 유도 가이드 (복붙)** — 각 유닛 시작 시:
+```
+Game.MD + PROGRESS.md 먼저 읽어. PROGRESS '코드 선행 백로그'의 유닛 [번호]를 진행한다.
+- 브랜치: phase/<표의 브랜치명> 분기 (§6-7)
+- 플랜 우선 → 승인 후 Haiku 구현 / Opus 검증(빌드+스모크+Codex)
+- 콘텐츠 보류분(메시/VFX/DA/BP/사운드)은 만들지 말고 C++ 베이스만 완성
+- 완료 시: 이 백로그에서 해당 유닛 줄 제거 + 완료이력 추가, 머지 후 호출 대기
+```
 
 ---
 
@@ -90,6 +112,7 @@
 
 ## ✅ 완료 이력 (요약 — 상세는 `git log` / Game.MD)
 
+- **적 스폰포인트 코드 (main 머지, 2026-06-09, `phase/p4-enemyspawnpoints` 코드분)** — ① **디자이너 배치 스폰포인트** `AFPSREnemySpawnPoint`(Weight/ZoneTag/MinPlayerDistance/bEnabled) + `UFPSREnemySpawnSubsystem` 전 플레이어 비가시(FOV)+거리 가중랜덤 선택(후보 0 시 링 폴백, 미배치 맵 동작), 디자이너 지점 ground-snap 생략(권위 Z 보존), `SetActiveSpawnZone` 훅(TimeGate 후속). ② **플로우필드 장애물 마스크/BFS 라우팅 + 적 중력/지면추종**(`AFPSREnemyBase`, 경사/계단 보정). **Codex 5R 하드닝**: 디자이너 Z 보존(실내 천장 스냅 방지)→월드 밖 추락 KillZ 회수(슬롯 누수)→접촉 데미지 수직 게이트(바닥 관통)→동일 스폰지점 중첩을 **분리(separation) 동일위치 결정적 골든앵글 푸시**로 근본 해소(지터 전량 제거, 스폰 위치 비이동, 맵 비의존)→최종 클린. 빌드+스모크 통과. **콘텐츠 배치(L_Sandbox, `d3a68c6`)는 제외=브랜치 잔류, 사용자 PIE 후 머지**. **후속(C1)**: 플로우필드 셀 클리어런스(좁은 통로 과차단)+멀티레벨 높이 인지. (Game.MD §5-2)
 - **P4-D (main 머지, 2026-06-09)** 게임필/피드백 — ① **PickupRadius/XPGain** 어트리뷰트(`UFPSRCombatSet` 승수, 기본 1.0)+XP 픽업 배선(자석 대상=플레이어별 유효반경 거리비 최소, 협동 정합)+카드 2종(Instant·Add·SetByCaller). ② **런상태 HUD** `UFPSRRunHUDWidget : UCommonUserWidget`(BlueprintPure 게터+`OnRunStateUpdated` BIE, 이벤트기반; 픽 카운팅은 레벨업=즉시카드선택이라 제거)+**Game레이어 컨테이너** `UFPSRGameHUDWidget : UCommonActivatableWidget`(입력설정 소유; XPBar 위젯/클래스 폐지·RunHUD로 일원화). ③ **로컬 피드백** `UFPSRPlayerFeedbackComponent`(비복제·이벤트형)+PC Client RPC: **히트마커**(서버권위 Hit/Crit/Kill, 활성화당 1회, Unreliable), **피격 방향**(CoD식 `ApplyContactDamage`→오너클라 카메라기준 각도), **원거리 타겟 사전경고**(다수소스 id별 TMap·각도배열·추적Tick·Reliable; 생산자=원거리 적 AI 후속, 디버그 `FPSR.TestDamageDir`/`FPSR.TestRangedWarn`). **설계 정제**: 근접/사각지대 *시각* 위협 제외→사운드 이전. Codex 다회 하드닝(협동 자석/호스트 클럭/늦은복제 바인딩/확산발산→서버권위/제어상실 클리어/Unreliable·Reliable/다수소스/전방선언). 콘텐츠: 카드 GE·DA 2종+CardPool, WBP GameHUD/RunHUD/HitMarker/ThreatIndicator, BP_FPSRPC 배선. 빌드+스모크+Codex+2-client PIE 통과. **후속**: 히트마커 최종 연출(크로스헤어/발사체 후), 원거리경고 생산자 배선, 핑/Gibs/사각오디오. (Game.MD §2-11/§2-14)
 - **P4-B-2 (main 머지, 2026-06-08)** 무기 행동 Fragment — 합성형 발사 훅. `UFPSRWeaponFragment : UPrimaryDataAsset`(무상태, 동작=C++ 서브클래스 virtual 훅 `PreFire/ModifyShotCount/OnHitActor/PostFire`, 수치=DataAsset) + 레퍼런스 2종(`UFPSRFragment_MultiShot{ExtraShots}`, `UFPSRFragment_OnHitBonusDamage{BonusDamage}`). `FFPSRFireContext`(plain struct) / `UFPSRWeaponInstance.ActiveFragments[]`(복제 참조)+`AddFragment`(MaxStacks 스택제한)/`GetFragmentStackCount`/`HasFragment` / `GA_WeaponFire_Hitscan` 훅 배선(PreFire→ModifyShotCount=NumShots 루프→히트당 OnHitActor→PostFire) / `UFPSRCardDataAsset.GrantedFragment`(ThisWeapon→AddFragment) / `UFPSRWeaponDataAsset.AvailableModifiers[]` / `DrawWeaponModifierOffer`(스택 여유분 셔플) + ApplyCard fragment 분기 / 디버그 `FPSR.GrantMissionRewardPick`. **마무리 세션(2026-06-08)**: ① 카드 작성 EditCondition 가드(Scope별 무관 필드 숨김) + `GetCardFamilyKey` Character-scope 게이트(stale GE 패밀리 누수 차단). ② 미션보상 카드 UI(`UFPSRCardEntryWidget`): fragment는 등급 대신 카테고리 라벨(`FragmentCategoryText`, WBP override)+수치 빈칸. ③ **MultiShot 펠릿당 탄약 소모**(잔량 클램프, 최소 1발). ④ Fragment **`MaxStacks` 중첩**(중복 누적, 훅 스택마다 적용 — MultiShot 2스택=3발). 콘텐츠: Fragment DA 2종+Fragment 카드 2종+카드 `Card/`이동+Rifle AvailableModifiers+CardPool. 빌드+스모크+Codex(다회 하드닝, 최종 클린)+PIE 통과. (Game.MD §2-4-1 ②)
 - **P4-B-1 (main 머지)** 무기 스탯 모디파이어 기반 — 런타임 컨테이너 `UFPSRWeaponInstance`(UObject 등록형 복제 서브오브젝트: Source DA + ThisWeapon `Modifiers` + 탄약/리로드 + 해석 스탯 lazy 캐시, Push Model) 신설. 인벤토리 `Slots[]` 인스턴스화(탄약·리로드 병렬배열 → 인스턴스 응집), `AFPSRCharacter`·인벤토리 컴포넌트 `bReplicateUsingRegisteredSubObjectList=true`. 스탯 해석 = `BaseStats × 누적(ThisWeapon[인스턴스] + AllWeapons[`AFPSRPlayerState::AllWeaponsMods`, 리스폰 생존])`, 발사 3곳(FireComp·Hitscan·Melee)+탄약 `GetResolvedStats()` 배선. `ApplyCard` weapon-scope 실적용(ThisWeapon→인스턴스, AllWeapons→PlayerState, 무기 없으면 거부), `UFPSRCardDataAsset.WeaponStat/WeaponStatOp`+IsDataValid, DrawCards 범용풀 weapon-scope 합류(무기 보유 시), 프리즈 중 `ServerEquipSlot` 차단(ThisWeapon 타깃 결정성). 디버그 `FPSR.DumpWeaponStats`. 카드 magnitude 표시 `+%.0f`→퍼센트/소수 수정. 재장전 중 반동 큐 지속 버그 수정(`!CanFire()` 플러시). 콘텐츠: 무기 스탯 카드 6종(연사/탄창/반동×ThisWeapon/AllWeapons)+풀. 빌드+스모크+Codex 3R+PIE 통과. (Game.MD §2-4-1 ①)
