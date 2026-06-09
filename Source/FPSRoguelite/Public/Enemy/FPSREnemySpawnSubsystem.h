@@ -163,10 +163,6 @@ private:
 	 *  fight without hard-excluding far ones. */
 	static constexpr float SpawnPointFalloffDistance = 2500.0f; // cm
 
-	/** XY jitter radius applied to a selected designer anchor so repeated same-tick selections of the same point
-	 *  don't stack overlapping capsules at an identical transform (Codex review 2026-06-09). Z is preserved. */
-	static constexpr float SpawnPointJitterRadius = 60.0f; // cm
-
 	/** Designer-placed spawn anchors, cached once at world begin (server). May contain entries to null-check. */
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<AFPSREnemySpawnPoint>> SpawnPoints;

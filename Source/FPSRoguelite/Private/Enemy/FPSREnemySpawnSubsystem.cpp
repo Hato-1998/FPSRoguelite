@@ -12,7 +12,6 @@
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/Pawn.h"
 #include "CollisionQueryParams.h"
-#include "CollisionShape.h"
 #include "TimerManager.h"
 #include "HAL/IConsoleManager.h"
 
@@ -295,10 +294,23 @@ FVector UFPSREnemySpawnSubsystem::ComputeSeparation(int32 AgentIndex, const TArr
 					FVector Diff = Origin - Locations[OtherIndex];
 					Diff.Z = 0.0f;
 					const float DistSq = Diff.SizeSquared();
-					if (DistSq > KINDA_SMALL_NUMBER && DistSq < RadiusSq)
+					if (DistSq >= RadiusSq)
+					{
+						continue; // outside the separation radius
+					}
+					if (DistSq > KINDA_SMALL_NUMBER)
 					{
 						const float Dist = FMath::Sqrt(DistSq);
 						Separation += (Diff / Dist) * (1.0f - Dist / SeparationRadius); // stronger when closer
+					}
+					else
+					{
+						// Exactly co-located (e.g. two enemies spawned on the same designer point in one tick): a
+						// zero vector has no direction, so push this agent along a deterministic golden-angle heading
+						// unique to its index. Co-located agents fan out instead of staying stuck — fixes the stacking
+						// at its source so spawn locations never have to be jittered into unsafe geometry (Codex 2026-06-09).
+						const float Heading = static_cast<float>(AgentIndex) * 2.39996323f; // golden angle (radians)
+						Separation += FVector(FMath::Cos(Heading), FMath::Sin(Heading), 0.0f);
 					}
 				}
 			}
@@ -487,41 +499,21 @@ bool UFPSREnemySpawnSubsystem::TrySelectSpawnPoint(FVector& OutLocation) const
 		return false;
 	}
 
-	// Small XY jitter around the chosen anchor so selecting the same point several times in one tick (e.g. only
-	// one point qualifies) doesn't spawn overlapping capsules at an identical transform that can't separate
-	// (zero-distance pairs are ignored by ComputeSeparation). Z is kept (designer-authoritative, no ground snap).
-	// Each sample is rejected if a capsule there would overlap static geometry — don't shove the enemy into a
-	// wall/ledge; fall back to the designer-validated anchor when every sample is blocked (Codex review 2026-06-09).
-	auto JitterXY = [World](const FVector& Anchor) -> FVector
-	{
-		const FCollisionShape CapsuleShape = FCollisionShape::MakeCapsule(40.0f, 90.0f); // matches AFPSREnemyBase
-		FCollisionObjectQueryParams ObjParams;
-		ObjParams.AddObjectTypesToQuery(ECC_WorldStatic);
-		for (int32 Attempt = 0; Attempt < 4; ++Attempt)
-		{
-			const float Ang = FMath::FRandRange(0.0f, 2.0f * PI);
-			const float Rad = FMath::FRandRange(0.0f, SpawnPointJitterRadius);
-			const FVector Jittered = Anchor + FVector(FMath::Cos(Ang) * Rad, FMath::Sin(Ang) * Rad, 0.0f);
-			if (!World->OverlapAnyTestByObjectType(Jittered, FQuat::Identity, ObjParams, CapsuleShape))
-			{
-				return Jittered;
-			}
-		}
-		return Anchor; // every sample blocked (point boxed in) — keep the validated anchor
-	};
-
-	// Weighted-random draw: first cumulative weight >= roll.
+	// Weighted-random draw: first cumulative weight >= roll. The exact designer anchor is used (no jitter): it is
+	// the validated, authoritative spawn transform (§1 fixed map). If the same point is picked more than once in a
+	// tick, the co-located enemies are pushed apart at the source by ComputeSeparation's coincident handling rather
+	// than by moving the spawn into possibly-unsafe wall/ledge geometry.
 	const float Roll = FMath::FRandRange(0.0f, WeightTotal);
 	for (int32 i = 0; i < Candidates.Num(); ++i)
 	{
 		if (Roll <= CumulativeWeights[i])
 		{
-			OutLocation = JitterXY(Candidates[i]->GetActorLocation());
+			OutLocation = Candidates[i]->GetActorLocation();
 			return true;
 		}
 	}
 
-	OutLocation = JitterXY(Candidates.Last()->GetActorLocation()); // float-rounding guard
+	OutLocation = Candidates.Last()->GetActorLocation(); // float-rounding guard
 	return true;
 }
 
