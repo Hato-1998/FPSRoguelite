@@ -11,6 +11,7 @@ class UInputMappingContext;
 class UFPSRPrimaryGameLayout;
 class UFPSRCardSelectWidget;
 class UCommonActivatableWidget;
+class UFPSRGameHUDWidget;
 class UFPSRCardDataAsset;
 
 /** Base player controller. Adds the default Enhanced Input mapping context for the local player and
@@ -112,8 +113,9 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|UI")
 	TSubclassOf<UFPSRPrimaryGameLayout> PrimaryLayoutClass;
 
+	/** Game-layer HUD container pushed for the local player (holds run-state HUD, hit marker, indicators). */
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|UI")
-	TSubclassOf<UCommonActivatableWidget> XPBarWidgetClass;
+	TSubclassOf<UFPSRGameHUDWidget> GameHUDWidgetClass;
 
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|UI")
 	TSubclassOf<UFPSRCardSelectWidget> CardSelectWidgetClass;

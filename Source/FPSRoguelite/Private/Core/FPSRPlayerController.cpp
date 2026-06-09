@@ -17,6 +17,7 @@
 #include "Card/FPSRCardDataAsset.h"
 #include "UI/FPSRPrimaryGameLayout.h"
 #include "UI/FPSRCardSelectWidget.h"
+#include "UI/FPSRGameHUDWidget.h"
 #include "Hero/FPSRPlayerFeedbackComponent.h"
 #include "GameFramework/Pawn.h"
 
@@ -67,9 +68,9 @@ bool AFPSRPlayerController::EnsurePrimaryLayout()
 
 	PrimaryLayout->AddToViewport();
 
-	if (XPBarWidgetClass)
+	if (GameHUDWidgetClass)
 	{
-		PrimaryLayout->PushWidgetToLayer(FGameplayTag::RequestGameplayTag(FName("UI.Layer.Game")), XPBarWidgetClass);
+		PrimaryLayout->PushWidgetToLayer(FGameplayTag::RequestGameplayTag(FName("UI.Layer.Game")), GameHUDWidgetClass);
 	}
 
 	return true;
