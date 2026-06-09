@@ -99,9 +99,19 @@ void AFPSRProjectile::Activate(const FVector& Location, const FFPSRProjectilePar
 {
 	SetActorLocation(Location);
 	SetActorHiddenInGame(false);
-	SetActorEnableCollision(true);
 
-	// Re-apply collision responses (mirror enemy Activate pattern)
+	// Establish the FULL launch state (bActive, Params, movement, lifetime) BEFORE enabling collision. Enabling
+	// collision runs UpdateOverlaps, which fires begin-overlap SYNCHRONOUSLY for a pawn the projectile spawns
+	// inside (point-blank / reuse). If bActive were still false or Params stale, OnSphereOverlap would drop that
+	// initial overlap and the shot would pass through (no later begin-overlap fires for an already-overlapping
+	// actor). Keep the projectile continuously awake so its movement replicates for the whole flight — a pooled
+	// reuse returns from DORM_DormantAll and FlushNetDormancy would only force one update. (Codex 2026-06-09.)
+	bActive = true;
+	SetNetDormancy(DORM_Awake);
+	Launch(InParams, Direction);
+
+	// Enable collision last — a pawn already overlapping the muzzle now triggers OnSphereOverlap with valid state.
+	SetActorEnableCollision(true);
 	if (CollisionSphere)
 	{
 		CollisionSphere->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
@@ -111,13 +121,6 @@ void AFPSRProjectile::Activate(const FVector& Location, const FFPSRProjectilePar
 		CollisionSphere->SetCollisionResponseToChannel(ECC_Pawn, ECR_Overlap);
 		CollisionSphere->SetGenerateOverlapEvents(true);
 	}
-
-	// Keep the projectile continuously awake while flying so its movement replicates to clients for the whole
-	// flight. A pooled reuse comes back from DORM_DormantAll; FlushNetDormancy only forces a single update, so
-	// a moving projectile would stop replicating shortly after — DORM_Awake holds it relevant until release.
-	SetNetDormancy(DORM_Awake);
-	bActive = true;
-	Launch(InParams, Direction);
 }
 
 void AFPSRProjectile::Deactivate()

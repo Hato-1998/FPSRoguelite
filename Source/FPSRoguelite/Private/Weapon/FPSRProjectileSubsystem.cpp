@@ -157,12 +157,14 @@ AFPSRProjectile* UFPSRProjectileSubsystem::AcquireProjectile(
 		}
 	}
 
-	// Activate and add to active list
-	Projectile->Activate(Location, InParams, Direction);
+	// Track BEFORE activating: enabling collision inside Activate can fire a synchronous point-blank overlap
+	// that detonates and calls ReleaseToPool -> ReleaseProjectile(this). Adding first keeps that release
+	// consistent (it finds and removes the entry) rather than orphaning a still-active projectile.
 	ActiveProjectiles.Add(Projectile);
+	Projectile->Activate(Location, InParams, Direction);
 
-	// If acquired while the run is already frozen, suspend it immediately (the Tick transition has already
-	// fired, so it wouldn't otherwise be paused until the next freeze cycle).
+	// If acquired while the run is already frozen, suspend immediately (the Tick transition already fired, so it
+	// wouldn't otherwise be paused until the next freeze cycle). No-op if Activate already released it.
 	if (bProjectilesPaused)
 	{
 		Projectile->SetSimulationPaused(true);
