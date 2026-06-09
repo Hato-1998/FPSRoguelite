@@ -30,7 +30,11 @@ void UFPSRProjectileSubsystem::Tick(float DeltaTime)
 	}
 	bProjectilesPaused = bPaused;
 
-	for (const TObjectPtr<AFPSRProjectile>& ProjectilePtr : ActiveProjectiles)
+	// Iterate a snapshot: SetSimulationPaused(false) can resolve a deferred freeze-frame impact, which releases
+	// the projectile and mutates ActiveProjectiles mid-loop (range-for over the live array would be invalidated
+	// and could skip another projectile, leaving it permanently paused).
+	const TArray<TObjectPtr<AFPSRProjectile>> Snapshot = ActiveProjectiles;
+	for (const TObjectPtr<AFPSRProjectile>& ProjectilePtr : Snapshot)
 	{
 		AFPSRProjectile* Projectile = ProjectilePtr.Get();
 		if (IsValid(Projectile))

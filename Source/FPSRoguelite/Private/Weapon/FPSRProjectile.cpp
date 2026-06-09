@@ -82,14 +82,17 @@ void AFPSRProjectile::Launch(const FFPSRProjectileParams& InParams, const FVecto
 		}
 	}
 
-	// Start lifetime timer
+	// Start lifetime timer. Clamp to a small positive minimum: SetTimer with rate <= 0 CLEARS the timer instead
+	// of scheduling it, so a content-authored Lifetime <= 0 would leave the projectile flying forever (and with
+	// InitialLifeSpan = 0 it never auto-destroys), pinning a pool/cap slot until eviction.
 	if (UWorld* World = GetWorld())
 	{
+		constexpr float MinLifetimeSeconds = 0.05f;
 		World->GetTimerManager().SetTimer(
 			LifetimeTimer,
 			this,
 			&AFPSRProjectile::OnLifetimeExpired,
-			Params.Lifetime,
+			FMath::Max(Params.Lifetime, MinLifetimeSeconds),
 			false
 		);
 	}
