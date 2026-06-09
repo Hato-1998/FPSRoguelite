@@ -111,6 +111,13 @@ AFPSRProjectile* UFPSRProjectileSubsystem::AcquireProjectile(
 	// Determine the class to spawn
 	UClass* ClassToSpawn = ProjectileClass ? ProjectileClass.Get() : AFPSRProjectile::StaticClass();
 
+	// Normalize the mode: this pool is authoritative by definition (the ≤64 cap is a replication concern). A
+	// mistaken CosmeticPredicted request must not enter the replicated pool — its release path destroys the
+	// actor directly and would desync the active/cap accounting. Cosmetic prediction is the firing ability's
+	// client-local job (see the SCOPE note on this class).
+	FFPSRProjectileParams Params = InParams;
+	Params.Mode = EFPSRProjectileMode::ServerAuthoritative;
+
 	// Drop stale entries first — a projectile destroyed outside the pool leaves an invalid entry (a pending-kill
 	// actor stays non-null until GC, so a plain null check misses it). IsValid catches both null and
 	// pending-kill. Without this, the cap loop below could spin on an unremovable entry or pool a dead actor.
@@ -162,7 +169,7 @@ AFPSRProjectile* UFPSRProjectileSubsystem::AcquireProjectile(
 	// that detonates and calls ReleaseToPool -> ReleaseProjectile(this). Adding first keeps that release
 	// consistent (it finds and removes the entry) rather than orphaning a still-active projectile.
 	ActiveProjectiles.Add(Projectile);
-	Projectile->Activate(Location, InParams, Direction);
+	Projectile->Activate(Location, Params, Direction);
 
 	// If acquired while the run is already frozen, suspend immediately (the Tick transition already fired, so it
 	// wouldn't otherwise be paused until the next freeze cycle). No-op if Activate already released it.

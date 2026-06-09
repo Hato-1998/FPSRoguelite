@@ -104,11 +104,6 @@ protected:
 	/** True while the projectile's simulation is suspended for the run freeze (avoids redundant pause/resume). */
 	bool bSimulationPaused = false;
 
-	/** Velocity captured at pause time, restored on resume. A world hit during the freeze frame can call
-	 *  UProjectileMovementComponent::StopSimulating (zeroing Velocity + clearing UpdatedComponent), so resume
-	 *  re-applies this instead of leaving the round permanently stopped. */
-	FVector PausedVelocity = FVector::ZeroVector;
-
 	/** Lifetime timer handle. */
 	FTimerHandle LifetimeTimer;
 };

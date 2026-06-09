@@ -338,11 +338,10 @@ void AFPSRProjectile::SetSimulationPaused(bool bPaused)
 	UWorld* World = GetWorld();
 	if (bPaused)
 	{
-		// Remember the in-flight velocity, then stop the movement component and hold the lifetime timer so the
-		// projectile neither moves nor expires during the freeze.
+		// Stop the movement component (Velocity is preserved on the component across Deactivate/Activate) and
+		// hold the lifetime timer, so the projectile neither moves nor expires during the freeze.
 		if (ProjectileMovement)
 		{
-			PausedVelocity = ProjectileMovement->Velocity;
 			ProjectileMovement->Deactivate();
 		}
 		if (World)
@@ -352,18 +351,22 @@ void AFPSRProjectile::SetSimulationPaused(bool bPaused)
 	}
 	else
 	{
-		if (ProjectileMovement)
-		{
-			// Restore the updated component and velocity: a world hit during the freeze frame may have called
-			// StopSimulating (cleared UpdatedComponent + zeroed Velocity), which Activate() alone wouldn't undo —
-			// the round would resume permanently stopped. The deferred impact re-fires on the next move.
-			ProjectileMovement->SetUpdatedComponent(CollisionSphere);
-			ProjectileMovement->Velocity = PausedVelocity;
-			ProjectileMovement->Activate();
-		}
 		if (World)
 		{
 			World->GetTimerManager().UnPauseTimer(LifetimeTimer);
+		}
+		if (ProjectileMovement)
+		{
+			// If a world hit landed on the freeze-transition frame, UProjectileMovementComponent::StopSimulating
+			// cleared UpdatedComponent (its tell-tale) but the impact was deferred by the IsRunFrozen gate.
+			// Resolve that deferred impact now (the round is resting against the surface) instead of leaving it
+			// permanently stopped. Otherwise just resume — Deactivate preserved the velocity.
+			if (ProjectileMovement->UpdatedComponent == nullptr && HasAuthority())
+			{
+				HandleImpact(GetActorLocation());
+				return;
+			}
+			ProjectileMovement->Activate();
 		}
 	}
 }
