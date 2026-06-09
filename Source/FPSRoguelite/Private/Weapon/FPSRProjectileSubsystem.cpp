@@ -110,17 +110,15 @@ AFPSRProjectile* UFPSRProjectileSubsystem::AcquireProjectile(
 	// Determine the class to spawn
 	UClass* ClassToSpawn = ProjectileClass ? ProjectileClass.Get() : AFPSRProjectile::StaticClass();
 
-	// Enforce cap: release oldest active projectiles until we're under the limit
-	while (ActiveProjectiles.Num() >= MaxReplicatedProjectiles)
+	// Drop any stale null entries first — a projectile destroyed outside the pool (e.g. a gravity round falling
+	// below KillZ -> FellOutOfWorld) leaves a null TObjectPtr in the array. Without this, the cap loop below
+	// would call ReleaseProjectile(nullptr) forever (it removes nothing), hanging the server.
+	ActiveProjectiles.RemoveAll([](const TObjectPtr<AFPSRProjectile>& P) { return P == nullptr; });
+
+	// Enforce cap: release the oldest active projectiles (FIFO) until we're under the limit.
+	while (ActiveProjectiles.Num() >= MaxReplicatedProjectiles && ActiveProjectiles.Num() > 0)
 	{
-		if (ActiveProjectiles.Num() > 0)
-		{
-			ReleaseProjectile(ActiveProjectiles[0]);
-		}
-		else
-		{
-			break;
-		}
+		ReleaseProjectile(ActiveProjectiles[0]);
 	}
 
 	// Reuse a dormant projectile of the SAME class as requested (so a later request never gets a different

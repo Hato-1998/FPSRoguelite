@@ -60,6 +60,9 @@ void AFPSRProjectile::Launch(const FFPSRProjectileParams& InParams, const FVecto
 
 	if (ProjectileMovement)
 	{
+		// Restore the updated component: a prior world hit calls UProjectileMovementComponent::StopSimulating(),
+		// which clears UpdatedComponent (and zeroes Velocity). Without this, a pooled reuse would sit stationary.
+		ProjectileMovement->SetUpdatedComponent(CollisionSphere);
 		ProjectileMovement->ProjectileGravityScale = Params.GravityScale;
 		ProjectileMovement->InitialSpeed = Params.InitialSpeed;
 		ProjectileMovement->MaxSpeed = Params.InitialSpeed;
@@ -120,6 +123,9 @@ void AFPSRProjectile::Activate(const FVector& Location, const FFPSRProjectilePar
 void AFPSRProjectile::Deactivate()
 {
 	bActive = false;
+	// Reset the freeze flag so a recycled projectile starts unpaused; otherwise a projectile force-released
+	// mid-freeze would keep bSimulationPaused=true and the next reuse's pause/resume logic would no-op.
+	bSimulationPaused = false;
 
 	// Clear lifetime timer
 	if (UWorld* World = GetWorld())
