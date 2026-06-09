@@ -60,7 +60,13 @@ void UFPSRFlowFieldSubsystem::BuildObstacleMask()
 	FCollisionObjectQueryParams ObjParams;
 	ObjParams.AddObjectTypesToQuery(ECC_WorldStatic);
 	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(FPSRFlowObstacle), false);
-	// Full-cell half-extent (no inter-cell gap) so a thin wall on a cell boundary is still caught (Codex P2).
+	// Full-cell half-extent (no inter-cell gap) so a thin wall on a cell boundary is still caught.
+	// ⚠️ Known tradeoff (Codex 2026-06-09, deferred to the flow-field hardening unit C1 / Game.MD §5-2):
+	// full-cell probing also marks BOTH cells adjacent to a boundary wall as blocked, so corridors/doorways
+	// narrower than ~2 cells can become unreachable even though a capsule fits. The correct fix is
+	// clearance-aware probing (agent-footprint box / passage detection), but that depends on the real map's
+	// corridor widths & wall thickness and must be validated in PIE — so it is intentionally NOT flipped blind
+	// here (a prior round chose full-cell to catch thin boundary walls; this is the opposing pull).
 	const FCollisionShape Box = FCollisionShape::MakeBox(
 		FVector(CellSize * 0.5f, CellSize * 0.5f, ObstacleProbeHalfHeight));
 

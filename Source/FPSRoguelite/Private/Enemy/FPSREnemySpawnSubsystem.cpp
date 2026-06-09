@@ -12,6 +12,7 @@
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/Pawn.h"
 #include "CollisionQueryParams.h"
+#include "CollisionShape.h"
 #include "TimerManager.h"
 #include "HAL/IConsoleManager.h"
 
@@ -489,11 +490,24 @@ bool UFPSREnemySpawnSubsystem::TrySelectSpawnPoint(FVector& OutLocation) const
 	// Small XY jitter around the chosen anchor so selecting the same point several times in one tick (e.g. only
 	// one point qualifies) doesn't spawn overlapping capsules at an identical transform that can't separate
 	// (zero-distance pairs are ignored by ComputeSeparation). Z is kept (designer-authoritative, no ground snap).
-	auto JitterXY = [](const FVector& Anchor) -> FVector
+	// Each sample is rejected if a capsule there would overlap static geometry — don't shove the enemy into a
+	// wall/ledge; fall back to the designer-validated anchor when every sample is blocked (Codex review 2026-06-09).
+	auto JitterXY = [World](const FVector& Anchor) -> FVector
 	{
-		const float Ang = FMath::FRandRange(0.0f, 2.0f * PI);
-		const float R = FMath::FRandRange(0.0f, SpawnPointJitterRadius);
-		return Anchor + FVector(FMath::Cos(Ang) * R, FMath::Sin(Ang) * R, 0.0f);
+		const FCollisionShape CapsuleShape = FCollisionShape::MakeCapsule(40.0f, 90.0f); // matches AFPSREnemyBase
+		FCollisionObjectQueryParams ObjParams;
+		ObjParams.AddObjectTypesToQuery(ECC_WorldStatic);
+		for (int32 Attempt = 0; Attempt < 4; ++Attempt)
+		{
+			const float Ang = FMath::FRandRange(0.0f, 2.0f * PI);
+			const float Rad = FMath::FRandRange(0.0f, SpawnPointJitterRadius);
+			const FVector Jittered = Anchor + FVector(FMath::Cos(Ang) * Rad, FMath::Sin(Ang) * Rad, 0.0f);
+			if (!World->OverlapAnyTestByObjectType(Jittered, FQuat::Identity, ObjParams, CapsuleShape))
+			{
+				return Jittered;
+			}
+		}
+		return Anchor; // every sample blocked (point boxed in) — keep the validated anchor
 	};
 
 	// Weighted-random draw: first cumulative weight >= roll.
