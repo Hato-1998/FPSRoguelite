@@ -32,7 +32,8 @@ void UFPSRProjectileSubsystem::Tick(float DeltaTime)
 
 	for (const TObjectPtr<AFPSRProjectile>& ProjectilePtr : ActiveProjectiles)
 	{
-		if (AFPSRProjectile* Projectile = ProjectilePtr.Get())
+		AFPSRProjectile* Projectile = ProjectilePtr.Get();
+		if (IsValid(Projectile))
 		{
 			Projectile->SetSimulationPaused(bPaused);
 		}
@@ -110,10 +111,10 @@ AFPSRProjectile* UFPSRProjectileSubsystem::AcquireProjectile(
 	// Determine the class to spawn
 	UClass* ClassToSpawn = ProjectileClass ? ProjectileClass.Get() : AFPSRProjectile::StaticClass();
 
-	// Drop any stale null entries first — a projectile destroyed outside the pool (e.g. a gravity round falling
-	// below KillZ -> FellOutOfWorld) leaves a null TObjectPtr in the array. Without this, the cap loop below
-	// would call ReleaseProjectile(nullptr) forever (it removes nothing), hanging the server.
-	ActiveProjectiles.RemoveAll([](const TObjectPtr<AFPSRProjectile>& P) { return P == nullptr; });
+	// Drop stale entries first — a projectile destroyed outside the pool leaves an invalid entry (a pending-kill
+	// actor stays non-null until GC, so a plain null check misses it). IsValid catches both null and
+	// pending-kill. Without this, the cap loop below could spin on an unremovable entry or pool a dead actor.
+	ActiveProjectiles.RemoveAll([](const TObjectPtr<AFPSRProjectile>& P) { return !IsValid(P); });
 
 	// Enforce cap: release the oldest active projectiles (FIFO) until we're under the limit.
 	while (ActiveProjectiles.Num() >= MaxReplicatedProjectiles && ActiveProjectiles.Num() > 0)
@@ -128,7 +129,7 @@ AFPSRProjectile* UFPSRProjectileSubsystem::AcquireProjectile(
 	for (int32 i = DormantPool.Num() - 1; i >= 0; --i)
 	{
 		AFPSRProjectile* Candidate = DormantPool[i];
-		if (!Candidate)
+		if (!IsValid(Candidate)) // drop null or pending-kill (destroyed) entries
 		{
 			DormantPool.RemoveAtSwap(i);
 			continue;
@@ -188,8 +189,13 @@ void UFPSRProjectileSubsystem::ReleaseProjectile(AFPSRProjectile* Projectile)
 		return;
 	}
 
-	Projectile->Deactivate();
-	DormantPool.AddUnique(Projectile);
+	// Only pool a still-valid actor — a pending-kill projectile (destroyed outside the pool) is removed from the
+	// active list but must not be deactivated/reused.
+	if (IsValid(Projectile))
+	{
+		Projectile->Deactivate();
+		DormantPool.AddUnique(Projectile);
+	}
 }
 
 void UFPSRProjectileSubsystem::ReleaseAllProjectiles()

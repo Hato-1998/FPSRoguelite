@@ -40,6 +40,11 @@ public:
 protected:
 	virtual void BeginPlay() override;
 
+	/** A gravity round can fall below KillZ; recycle it to the pool instead of letting the engine destroy it, so
+	 *  the pool's active/cap accounting stays consistent and the actor is reused (mirrors the enemy KillZ recycle,
+	 *  Game.MD §5-2). */
+	virtual void FellOutOfWorld(const class UDamageType& DmgType) override;
+
 	/** Hit detection: world collision blocks the projectile. */
 	UFUNCTION()
 	void OnSphereHit(UPrimitiveComponent* HitComp, AActor* OtherActor, UPrimitiveComponent* OtherComp,
@@ -98,6 +103,11 @@ protected:
 
 	/** True while the projectile's simulation is suspended for the run freeze (avoids redundant pause/resume). */
 	bool bSimulationPaused = false;
+
+	/** Velocity captured at pause time, restored on resume. A world hit during the freeze frame can call
+	 *  UProjectileMovementComponent::StopSimulating (zeroing Velocity + clearing UpdatedComponent), so resume
+	 *  re-applies this instead of leaving the round permanently stopped. */
+	FVector PausedVelocity = FVector::ZeroVector;
 
 	/** Lifetime timer handle. */
 	FTimerHandle LifetimeTimer;

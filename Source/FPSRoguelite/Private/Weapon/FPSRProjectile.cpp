@@ -338,10 +338,11 @@ void AFPSRProjectile::SetSimulationPaused(bool bPaused)
 	UWorld* World = GetWorld();
 	if (bPaused)
 	{
-		// Stop the movement component (Velocity is preserved on the component) and hold the lifetime timer so
-		// the projectile neither moves nor expires during the freeze.
+		// Remember the in-flight velocity, then stop the movement component and hold the lifetime timer so the
+		// projectile neither moves nor expires during the freeze.
 		if (ProjectileMovement)
 		{
+			PausedVelocity = ProjectileMovement->Velocity;
 			ProjectileMovement->Deactivate();
 		}
 		if (World)
@@ -353,7 +354,12 @@ void AFPSRProjectile::SetSimulationPaused(bool bPaused)
 	{
 		if (ProjectileMovement)
 		{
-			ProjectileMovement->Activate(); // resumes with the preserved Velocity
+			// Restore the updated component and velocity: a world hit during the freeze frame may have called
+			// StopSimulating (cleared UpdatedComponent + zeroed Velocity), which Activate() alone wouldn't undo —
+			// the round would resume permanently stopped. The deferred impact re-fires on the next move.
+			ProjectileMovement->SetUpdatedComponent(CollisionSphere);
+			ProjectileMovement->Velocity = PausedVelocity;
+			ProjectileMovement->Activate();
 		}
 		if (World)
 		{
@@ -367,4 +373,16 @@ bool AFPSRProjectile::IsRunFrozen() const
 	const UWorld* World = GetWorld();
 	const AFPSRGameState* GameState = World ? World->GetGameState<AFPSRGameState>() : nullptr;
 	return GameState && GameState->IsRunPaused();
+}
+
+void AFPSRProjectile::FellOutOfWorld(const UDamageType& DmgType)
+{
+	// Recycle to the pool rather than letting the engine destroy the actor (which would leave a pending-kill
+	// entry in the pool's accounting until GC). If we can't pool it, fall back to the default destroy.
+	if (bActive)
+	{
+		ReleaseToPool();
+		return;
+	}
+	Super::FellOutOfWorld(DmgType);
 }
