@@ -304,16 +304,22 @@ bool AFPSRProjectile::TryDamageActor(AActor* Target)
 
 void AFPSRProjectile::ReleaseToPool()
 {
-	if (UWorld* World = GetWorld())
+	// Cosmetic-predicted projectiles are client-local and never tracked by the server pool (see subsystem
+	// SCOPE) — destroy them directly. The pool's ReleaseProjectile would no-op on an untracked actor, leaving
+	// the cosmetic visual alive forever.
+	if (Params.Mode != EFPSRProjectileMode::CosmeticPredicted)
 	{
-		if (UFPSRProjectileSubsystem* Subsystem = World->GetSubsystem<UFPSRProjectileSubsystem>())
+		if (UWorld* World = GetWorld())
 		{
-			Subsystem->ReleaseProjectile(this);
-			return;
+			if (UFPSRProjectileSubsystem* Subsystem = World->GetSubsystem<UFPSRProjectileSubsystem>())
+			{
+				Subsystem->ReleaseProjectile(this);
+				return;
+			}
 		}
 	}
 
-	// Fallback: deactivate and destroy if no subsystem
+	// Cosmetic projectile, or no subsystem available: deactivate and destroy.
 	Deactivate();
 	Destroy();
 }
