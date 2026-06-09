@@ -4,6 +4,7 @@
 #include "Weapon/FPSRProjectileSubsystem.h"
 #include "Enemy/FPSREnemyHealthComponent.h"
 #include "Hero/FPSRCharacter.h"
+#include "Core/FPSRGameState.h"
 #include "Core/FPSRLogChannels.h"
 
 #include "Components/SphereComponent.h"
@@ -149,7 +150,7 @@ void AFPSRProjectile::Deactivate()
 void AFPSRProjectile::OnSphereHit(UPrimitiveComponent* HitComp, AActor* OtherActor, UPrimitiveComponent* OtherComp,
 	FVector NormalImpulse, const FHitResult& Hit)
 {
-	if (!bActive || !HasAuthority())
+	if (!bActive || !HasAuthority() || IsRunFrozen())
 	{
 		return;
 	}
@@ -161,8 +162,9 @@ void AFPSRProjectile::OnSphereHit(UPrimitiveComponent* HitComp, AActor* OtherAct
 void AFPSRProjectile::OnSphereOverlap(UPrimitiveComponent* OverlappedComp, AActor* OtherActor, UPrimitiveComponent* OtherComp,
 	int32 OtherBodyIndex, bool bFromSweep, const FHitResult& Sweep)
 {
-	// Server-authoritative damage only; guard re-entrancy (a released projectile must not act again).
-	if (!bActive || !HasAuthority() || Params.Mode != EFPSRProjectileMode::ServerAuthoritative)
+	// Server-authoritative damage only; guard re-entrancy (a released projectile must not act again) and the
+	// global run freeze (no damage during card-selection, Game.MD §2-2).
+	if (!bActive || !HasAuthority() || IsRunFrozen() || Params.Mode != EFPSRProjectileMode::ServerAuthoritative)
 	{
 		return;
 	}
@@ -202,7 +204,8 @@ void AFPSRProjectile::OnLifetimeExpired()
 
 void AFPSRProjectile::HandleImpact(const FVector& ImpactPoint)
 {
-	if (!bActive || !HasAuthority())
+	// No impacts during the global run freeze — preserve state (don't damage and don't release).
+	if (!bActive || !HasAuthority() || IsRunFrozen())
 	{
 		return;
 	}
@@ -307,4 +310,46 @@ void AFPSRProjectile::ReleaseToPool()
 	// Fallback: deactivate and destroy if no subsystem
 	Deactivate();
 	Destroy();
+}
+
+void AFPSRProjectile::SetSimulationPaused(bool bPaused)
+{
+	if (bPaused == bSimulationPaused || !bActive)
+	{
+		return;
+	}
+	bSimulationPaused = bPaused;
+
+	UWorld* World = GetWorld();
+	if (bPaused)
+	{
+		// Stop the movement component (Velocity is preserved on the component) and hold the lifetime timer so
+		// the projectile neither moves nor expires during the freeze.
+		if (ProjectileMovement)
+		{
+			ProjectileMovement->Deactivate();
+		}
+		if (World)
+		{
+			World->GetTimerManager().PauseTimer(LifetimeTimer);
+		}
+	}
+	else
+	{
+		if (ProjectileMovement)
+		{
+			ProjectileMovement->Activate(); // resumes with the preserved Velocity
+		}
+		if (World)
+		{
+			World->GetTimerManager().UnPauseTimer(LifetimeTimer);
+		}
+	}
+}
+
+bool AFPSRProjectile::IsRunFrozen() const
+{
+	const UWorld* World = GetWorld();
+	const AFPSRGameState* GameState = World ? World->GetGameState<AFPSRGameState>() : nullptr;
+	return GameState && GameState->IsRunPaused();
 }

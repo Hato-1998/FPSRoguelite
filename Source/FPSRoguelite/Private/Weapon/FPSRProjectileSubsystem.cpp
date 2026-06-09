@@ -2,12 +2,63 @@
 
 #include "Weapon/FPSRProjectileSubsystem.h"
 #include "Weapon/FPSRProjectile.h"
+#include "Core/FPSRGameState.h"
 #include "Core/FPSRLogChannels.h"
 
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/Pawn.h"
 #include "HAL/IConsoleManager.h"
+
+// FTickableGameObject — drives the global-freeze suspension of active projectiles (server-authoritative).
+
+void UFPSRProjectileSubsystem::Tick(float DeltaTime)
+{
+	if (!HasServerAuthority())
+	{
+		return; // freeze is applied on the server; clients follow via replicated movement.
+	}
+
+	const UWorld* World = GetWorld();
+	const AFPSRGameState* GameState = World ? World->GetGameState<AFPSRGameState>() : nullptr;
+	const bool bPaused = GameState && GameState->IsRunPaused();
+
+	// Only act on the pause/resume transition (Game.MD §2-2): suspend/resume every active projectile once.
+	if (bPaused == bProjectilesPaused)
+	{
+		return;
+	}
+	bProjectilesPaused = bPaused;
+
+	for (const TObjectPtr<AFPSRProjectile>& ProjectilePtr : ActiveProjectiles)
+	{
+		if (AFPSRProjectile* Projectile = ProjectilePtr.Get())
+		{
+			Projectile->SetSimulationPaused(bPaused);
+		}
+	}
+}
+
+TStatId UFPSRProjectileSubsystem::GetStatId() const
+{
+	RETURN_QUICK_DECLARE_CYCLE_STAT(UFPSRProjectileSubsystem, STATGROUP_Tickables);
+}
+
+ETickableTickType UFPSRProjectileSubsystem::GetTickableTickType() const
+{
+	return IsTemplate() ? ETickableTickType::Never : ETickableTickType::Conditional;
+}
+
+bool UFPSRProjectileSubsystem::IsTickable() const
+{
+	const UWorld* World = GetWorld();
+	return World != nullptr && World->IsGameWorld();
+}
+
+UWorld* UFPSRProjectileSubsystem::GetTickableGameObjectWorld() const
+{
+	return GetWorld();
+}
 
 bool UFPSRProjectileSubsystem::ShouldCreateSubsystem(UObject* Outer) const
 {
@@ -111,6 +162,13 @@ AFPSRProjectile* UFPSRProjectileSubsystem::AcquireProjectile(
 	// Activate and add to active list
 	Projectile->Activate(Location, InParams, Direction);
 	ActiveProjectiles.Add(Projectile);
+
+	// If acquired while the run is already frozen, suspend it immediately (the Tick transition has already
+	// fired, so it wouldn't otherwise be paused until the next freeze cycle).
+	if (bProjectilesPaused)
+	{
+		Projectile->SetSimulationPaused(true);
+	}
 
 	return Projectile;
 }

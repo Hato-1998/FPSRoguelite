@@ -30,6 +30,13 @@ public:
 	/** Pooling deactivate: Stop movement, hide, disable collision, dormancy prep. */
 	void Deactivate();
 
+	/** Server: suspend/resume the in-flight simulation for the global run freeze (card selection, Game.MD §2-2).
+	 *  Paused = stop the movement component (velocity preserved) + pause the lifetime timer, so a flying
+	 *  projectile holds in place and doesn't expire during the freeze; resume restores both. Driven by
+	 *  UFPSRProjectileSubsystem on the pause transition. Clients follow via replicated movement (their PMC
+	 *  never simulates), so this is server-side only. */
+	void SetSimulationPaused(bool bPaused);
+
 protected:
 	virtual void BeginPlay() override;
 
@@ -61,6 +68,10 @@ protected:
 	/** Release this projectile back to the pool. */
 	void ReleaseToPool();
 
+	/** True while the run is globally frozen for card selection (Game.MD §2-2). Impacts are gated on this so a
+	 *  projectile never lands damage during the freeze. */
+	bool IsRunFrozen() const;
+
 	/** Collision sphere (root component). */
 	UPROPERTY()
 	TObjectPtr<USphereComponent> CollisionSphere;
@@ -84,6 +95,9 @@ protected:
 	 *  event (e.g. a world hit and a pawn overlap in the same movement sweep) can't release this projectile
 	 *  to the pool twice. */
 	bool bActive = false;
+
+	/** True while the projectile's simulation is suspended for the run freeze (avoids redundant pause/resume). */
+	bool bSimulationPaused = false;
 
 	/** Lifetime timer handle. */
 	FTimerHandle LifetimeTimer;
