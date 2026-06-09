@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Hero/FPSRCharacter.h"
+#include "Core/FPSRPlayerController.h"
 #include "Core/FPSRPlayerState.h"
 #include "Core/FPSRLogChannels.h"
 #include "Core/FPSRGameState.h"
@@ -410,6 +411,16 @@ void AFPSRCharacter::ApplyContactDamage(float DamageAmount, AActor* DamageInstig
 	if (UAbilitySystemComponent* ASC = GetAbilitySystemComponent())
 	{
 		ASC->ApplyModToAttribute(UFPSRHealthSet::GetHealthAttribute(), EGameplayModOp::Additive, -DamageAmount);
+	}
+
+	// Tell the owning client which direction the hit came from (CoD-style damage indicator, §2-14). Cosmetic,
+	// owner-only, unreliable; the client converts the instigator location to a camera-relative angle.
+	if (DamageInstigator)
+	{
+		if (AFPSRPlayerController* PC = Cast<AFPSRPlayerController>(GetController()))
+		{
+			PC->ClientNotifyDamageFrom(DamageInstigator->GetActorLocation());
+		}
 	}
 }
 

@@ -390,6 +390,28 @@ void AFPSRPlayerController::ClientNotifyHitMarker_Implementation(EFPSRHitMarkerT
 	}
 }
 
+void AFPSRPlayerController::ClientNotifyDamageFrom_Implementation(FVector InstigatorLocation)
+{
+	if (APawn* ControlledPawn = GetPawn())
+	{
+		if (UFPSRPlayerFeedbackComponent* Feedback = ControlledPawn->FindComponentByClass<UFPSRPlayerFeedbackComponent>())
+		{
+			Feedback->ReceiveDamageFromWorld(InstigatorLocation);
+		}
+	}
+}
+
+void AFPSRPlayerController::ClientNotifyRangedTarget_Implementation(int32 SourceId, FVector SourceLocation, bool bActive)
+{
+	if (APawn* ControlledPawn = GetPawn())
+	{
+		if (UFPSRPlayerFeedbackComponent* Feedback = ControlledPawn->FindComponentByClass<UFPSRPlayerFeedbackComponent>())
+		{
+			Feedback->ReceiveRangedTarget(SourceId, SourceLocation, bActive);
+		}
+	}
+}
+
 void AFPSRPlayerController::ServerAbandonOffer_Implementation(int32 OfferId)
 {
 	// Only the offer the server actually sent can be abandoned (stale/forged ids ignored), so a client

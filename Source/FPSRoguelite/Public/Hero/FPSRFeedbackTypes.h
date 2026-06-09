@@ -14,18 +14,3 @@ enum class EFPSRHitMarkerType : uint8
 	Crit UMETA(DisplayName = "Crit"),
 	Kill UMETA(DisplayName = "Kill")
 };
-
-/** One out-of-view enemy direction for the screen-edge threat indicator (Game.MD §2-14). Local/cosmetic. */
-USTRUCT(BlueprintType)
-struct FFPSRThreatDir
-{
-	GENERATED_BODY()
-
-	/** Signed yaw of the threat relative to the camera forward, degrees (-180..180; negative = left). */
-	UPROPERTY(BlueprintReadOnly, Category = "FPSR|Feedback")
-	float AngleDeg = 0.0f;
-
-	/** Proximity weight 0..1 (1 = at the player, 0 = at the threat radius edge). */
-	UPROPERTY(BlueprintReadOnly, Category = "FPSR|Feedback")
-	float Severity01 = 0.0f;
-};

@@ -7,22 +7,21 @@
 #include "FPSRPlayerFeedbackComponent.generated.h"
 
 class APawn;
-class AController;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnFPSRHitMarker, EFPSRHitMarkerType, MarkerType);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnFPSRThreatsUpdated, const TArray<FFPSRThreatDir>&, Threats);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnFPSRDamageDirection, float, AngleDeg);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnFPSRRangedTargetWarning, const TArray<float>&, AngleDegs);
 
-/** Local-only player feedback (Game.MD §2-14): hit markers + screen-edge threat indicator detection.
- *  Purely cosmetic and client-local — NOT replicated. The WBP HUD binds OnHitMarker / OnThreatsUpdated.
+/** Local-only player feedback (Game.MD §2-14): purely event-driven, NOT replicated, no tick.
+ *  - Hit marker ("I hit an enemy"): crosshair confirm from the weapon GA / server confirm.
+ *  - Damage direction ("I got hit"): the server (ApplyContactDamage) sends the instigator's world location to
+ *    the owning client via the PlayerController; this computes the camera-relative angle and broadcasts it.
+ *  - Ranged target warning ("a ranged enemy is aiming at me", §2-6 pre-warning): producer = ranged enemy AI
+ *    (follow-up); a debug command (FPSR.TestRangedWarn) drives it until then.
  *
- *  Hit markers: weapon GAs call NotifyHitConfirmed() — the local trace fires an immediate "Hit" on the owning
- *  client (client-predicted), while the server delivers Crit/Kill upgrades via the owning PlayerController.
- *  Threats: a throttled scan (locally-controlled pawn only) finds alive enemies inside ThreatRadius but OUTSIDE
- *  the view cone (blind spots — behind/side) and reports their screen-edge directions.
- *
- *  First-principles: single-consumer (the local HUD), local, cosmetic → a pawn component + delegates is the
- *  minimal correct structure (no replication, no message bus). GameplayMessageSubsystem (§3) is the upgrade
- *  path if feedback gains multiple independent consumers. */
+ *  First-principles: single-consumer local HUD, local, cosmetic → a pawn component + delegates is the minimal
+ *  correct structure (no replication, no message bus). GameplayMessageSubsystem (§3) is the upgrade path if
+ *  feedback gains multiple independent consumers. */
 UCLASS(ClassGroup = (FPSR), meta = (BlueprintSpawnableComponent))
 class FPSROGUELITE_API UFPSRPlayerFeedbackComponent : public UActorComponent
 {
@@ -31,60 +30,49 @@ class FPSROGUELITE_API UFPSRPlayerFeedbackComponent : public UActorComponent
 public:
 	UFPSRPlayerFeedbackComponent();
 
+	/** Ticks ONLY while a ranged-target warning is active — recomputes the camera-relative angle each frame so
+	 *  the warning indicator tracks as the player turns / the source moves. Idle otherwise (event-driven). */
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-	/** Local feedback: broadcast a hit-marker pulse. Called by the weapon GAs (local trace = Hit) and by the
-	 *  owning PlayerController's server-confirm RPC (Crit / Kill). No-op off the local view. */
+	/** Broadcast a hit-marker pulse (weapon GA local trace = Hit; PlayerController server confirm = Crit/Kill). */
 	UFUNCTION(BlueprintCallable, Category = "FPSR|Feedback")
 	void NotifyHitConfirmed(EFPSRHitMarkerType MarkerType);
 
-	/** Latest out-of-view threats from the most recent scan (also pushed via OnThreatsUpdated). */
-	UFUNCTION(BlueprintPure, Category = "FPSR|Feedback")
-	const TArray<FFPSRThreatDir>& GetActiveThreats() const { return ActiveThreats; }
+	/** Local: incoming damage came from InstigatorWorldLocation — broadcast its camera-relative angle. Called by
+	 *  the owning PlayerController's ClientNotifyDamageFrom RPC (and the debug command). */
+	void ReceiveDamageFromWorld(const FVector& InstigatorWorldLocation);
+
+	/** Local: ranged enemy SourceId at SourceWorldLocation began (bActive) / ended (!bActive) targeting this
+	 *  player (§2-6 pre-warning). Tracks multiple concurrent sources keyed by SourceId; a moving source is
+	 *  re-sent by the producer with an updated location. Called by ClientNotifyRangedTarget (and the debug cmd). */
+	void ReceiveRangedTarget(int32 SourceId, const FVector& SourceWorldLocation, bool bActive);
 
 	UPROPERTY(BlueprintAssignable, Category = "FPSR|Feedback")
 	FOnFPSRHitMarker OnHitMarker;
 
+	/** "I got hit from this direction" — AngleDeg = signed yaw vs camera forward (0 = ahead, + = right, - = left). */
 	UPROPERTY(BlueprintAssignable, Category = "FPSR|Feedback")
-	FOnFPSRThreatsUpdated OnThreatsUpdated;
+	FOnFPSRDamageDirection OnDamageDirection;
+
+	/** "Ranged enemies are targeting me" — one camera-relative angle per active source (empty = none). Re-fired
+	 *  every frame while any warning is active so the indicators track the player turning / sources moving. */
+	UPROPERTY(BlueprintAssignable, Category = "FPSR|Feedback")
+	FOnFPSRRangedTargetWarning OnRangedTargetWarning;
 
 protected:
-	virtual void BeginPlay() override;
-
-	/** True only when the owner is a pawn currently controlled by THIS machine's local player (the only place
-	 *  threat scanning / hit markers are meaningful). False on the dedicated server and for remote proxies. */
+	/** True only when the owner is a pawn controlled by THIS machine's local player. */
 	bool IsLocalView() const;
 
-	/** Re-evaluate tick gating when possession changes — possession (and client controller replication) can
-	 *  arrive after BeginPlay, so the local-view tick can't be latched at BeginPlay time. */
-	UFUNCTION()
-	void HandleControllerChanged(APawn* InPawn, AController* OldController, AController* NewController);
+	/** Signed yaw (deg, -180..180; 0 = ahead, + = right, - = left) of WorldLocation vs the camera forward.
+	 *  Returns false if there is no local view to measure against. */
+	bool ComputeCameraRelativeAngle(const FVector& WorldLocation, float& OutAngleDeg) const;
 
-	/** Throttled scan: collect alive, visible enemies inside ThreatRadius but outside the view cone. */
-	void ScanThreats();
-
-	/** Stop scanning and clear any shown threats (broadcasts an empty set) — used when the local view is lost
-	 *  (unpossess / becomes a remote proxy) so a bound HUD can't keep stale indicators on screen. */
-	void DisableAndClearThreats();
-
-	/** Radius (cm) within which an out-of-view enemy counts as a threat. */
-	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Feedback", meta = (ClampMin = "1.0"))
-	float ThreatRadius = 1500.0f;
-
-	/** Half-angle (deg) of the forward "safe" cone; enemies outside it (blind spots) are flagged as threats. */
-	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Feedback", meta = (ClampMin = "1.0", ClampMax = "179.0"))
-	float ThreatViewHalfAngleDeg = 60.0f;
-
-	/** Max threats reported per scan (strongest by proximity), bounding UI churn. */
-	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Feedback", meta = (ClampMin = "1"))
-	int32 MaxThreats = 8;
-
-	/** Seconds between threat scans (throttle — the indicator is coarse screen-edge markers). */
-	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Feedback", meta = (ClampMin = "0.02"))
-	float ThreatScanInterval = 0.12f;
+	/** Recompute every active source's camera-relative angle and broadcast OnRangedTargetWarning (empty = none). */
+	void BroadcastRangedWarnings();
 
 private:
-	/** Latest scan result (sorted by Severity01 desc, capped to MaxThreats). */
-	UPROPERTY(Transient)
-	TArray<FFPSRThreatDir> ActiveThreats;
+	/** Active ranged-target sources keyed by a producer-supplied id (e.g. the enemy's unique id). The tick
+	 *  recomputes each one's camera-relative angle so all warnings track the player turning / the sources moving
+	 *  (the producer re-sends a source with an updated location to move it). */
+	TMap<int32, FVector> ActiveRangedSources;
 };
