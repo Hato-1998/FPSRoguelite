@@ -239,23 +239,29 @@ void UFPSRGA_WeaponFire_Hitscan::ActivateAbility(
 			}
 			else
 			{
-				// Pierce path: sniper — pass through multiple enemies but still stop at world geometry.
-				// Obstruction distance queries BOTH static and dynamic world objects (e.g. movable doors / cover)
-				// so pierced shots respect the same blockers as the non-pierce visibility trace, while pawns
-				// (ECC_Pawn) are intentionally excluded so enemies do not absorb the obstruction trace.
-				FHitResult WallHit;
-				FCollisionObjectQueryParams WorldObjParams;
-				WorldObjParams.AddObjectTypesToQuery(ECC_WorldStatic);
-				WorldObjParams.AddObjectTypesToQuery(ECC_WorldDynamic);
+				// Pierce path: sniper — pass through enemies but stop at world geometry that blocks the weapon
+				// (Visibility) channel. Gather the pawns on the line first, then run a single Visibility trace
+				// that ignores those pawns: the wall cutoff then matches exactly what blocks a normal hitscan
+				// shot (movable cover/doors that block Visibility included), while query-only dynamics that
+				// ignore Visibility — e.g. in-flight AFPSRProjectile collision spheres — do NOT count as walls.
 				FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(FPSRWeaponFire), false, Avatar);
-				const bool bWall = World->LineTraceSingleByObjectType(WallHit, Start, End, WorldObjParams, QueryParams);
-				const float WallDist = bWall ? WallHit.Distance : Range;
 
-				// Find all enemies along the line.
+				// Find all pawns along the line (enemies are pierced; non-enemy pawns are skipped below).
 				TArray<FHitResult> PawnHits;
 				FCollisionObjectQueryParams PawnObjParams;
 				PawnObjParams.AddObjectTypesToQuery(ECC_Pawn);
 				World->LineTraceMultiByObjectType(PawnHits, Start, End, PawnObjParams, QueryParams);
+
+				// Wall = first Visibility-blocking geometry, ignoring the pawns (which also block Visibility)
+				// so an enemy never masquerades as the wall and shortens the pierce.
+				FCollisionQueryParams WallParams(SCENE_QUERY_STAT(FPSRWeaponFireWall), false, Avatar);
+				for (const FHitResult& PawnHit : PawnHits)
+				{
+					if (AActor* PawnActor = PawnHit.GetActor()) { WallParams.AddIgnoredActor(PawnActor); }
+				}
+				FHitResult WallHit;
+				const bool bWall = World->LineTraceSingleByChannel(WallHit, Start, End, ECC_Visibility, WallParams);
+				const float WallDist = bWall ? WallHit.Distance : Range;
 
 #if ENABLE_DRAW_DEBUG
 				DrawDebugLine(World, Start, Start + PelletDir * FMath::Min(WallDist, Range), FColor::Yellow, false, 0.5f, 0, 1.0f);
