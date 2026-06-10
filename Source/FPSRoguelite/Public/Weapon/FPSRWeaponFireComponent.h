@@ -41,6 +41,11 @@ public:
 	/** Clear the charge state after the fire ability consumes it (prevents a single charge firing twice). */
 	void ResetCharge();
 
+	/** Equip boundary (called from the inventory's server EquipSlot + client OnRep_CurrentSlotIndex): clears any
+	 *  in-progress charge and imposes a minimum post-swap fire cooldown before the next shot, so a rapid weapon
+	 *  swap can't bypass fire cadence and the local recoil prediction stays in sync with the server. */
+	void OnWeaponEquipped(float EquipCooldown);
+
 	/** Extra spread (degrees) from sustained fire; read by the fire ability when tracing. */
 	UFUNCTION(BlueprintPure, Category = "FPSR|Weapon")
 	float GetCurrentBloom() const { return CurrentBloom; }
@@ -86,6 +91,7 @@ protected:
 
 	bool bReloadRequestPending = false; // guards against spamming the reload RPC each tick
 	float LastMeleeTime = -1000.0f; // world time of last melee attack (melee attack-rate cooldown)
+	float NextFireReadyTime = 0.0f; // world time the next ranged shot is allowed (per-weapon cadence + post-swap cooldown); gates the immediate press shot's recoil. Mirrors the server's ServerNextAllowedFireTime.
 
 	bool bIsAiming = false;
 	TObjectPtr<UCameraComponent> CachedCamera; // resolved lazily for ADS FOV

@@ -42,4 +42,10 @@ public:
 	 *  mission-clear reward (Game.MD §2-4-1 ②). One is chosen at the mission-reward freeze. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Cards")
 	TArray<TObjectPtr<UFPSRCardDataAsset>> AvailableModifiers;
+
+#if WITH_EDITOR
+	/** Editor validation: missing FireAbility never fires (error); archetype/stat mismatches (AOE without an
+	 *  AOERadius, ChargeLaser with ChargeTime 0, ranged with MagSize 0) silently misbehave at runtime (warn). */
+	virtual EDataValidationResult IsDataValid(class FDataValidationContext& Context) const override;
+#endif
 };

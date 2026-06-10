@@ -6,6 +6,7 @@
 #include "Weapon/FPSRWeaponInstance.h"
 #include "Weapon/FPSRWeaponDataAsset.h"
 #include "Enemy/FPSREnemyHealthComponent.h"
+#include "Core/FPSRGameState.h"
 #include "Core/FPSRPlayerController.h"
 #include "Core/FPSRLogChannels.h"
 
@@ -40,6 +41,18 @@ void UFPSRGA_WeaponMelee::ActivateAbility(
 	{
 		EndAbility(Handle, ActorInfo, ActivationInfo, true, true);
 		return;
+	}
+
+	// No attacking while the run is frozen for card selection (Game.MD §2-2) — mirrors the hitscan / projectile /
+	// charge-laser fire abilities. Without this, holding the melee button into a freeze keeps the FireComponent
+	// tick re-activating this ability and applying damage while the run is supposed to be globally stopped.
+	if (const AFPSRGameState* RunState = World->GetGameState<AFPSRGameState>())
+	{
+		if (RunState->IsRunPaused())
+		{
+			EndAbility(Handle, ActorInfo, ActivationInfo, true, true);
+			return;
+		}
 	}
 
 	float Damage = 15.0f;
