@@ -50,5 +50,11 @@
 
 ---
 
+## 후속 (계획) — 카드 UI에 소속 무기 표시
+무기에 귀속되는 카드(ThisWeapon 스탯 + fragment)는 카드 선택 UI에 **그 무기의 아이콘 + 이름**을 표시해 "어느 무기 강화인지" 보이게 한다(Game.MD §2-4-1).
+- 데이터는 이미 준비됨: `FFPSRCardDraw.TargetWeapon`(서버가 추첨 시 세팅).
+- 필요한 후속 작업: ① `UFPSRWeaponDataAsset`에 `Icon` 필드 신설(이름=기존 `DisplayName`) + 무기 아이콘 콘텐츠. ② `UFPSRCardEntryWidget`이 `TargetWeapon` 바인딩 → 아이콘/이름 슬롯(없으면=캐릭터/AllWeapons 카드 → 숨김).
+- → **별도 후속 코드 유닛**(이번 추첨 변경엔 불포함). 무기 콘텐츠 작업 시 아이콘도 같이 준비하면 좋음.
+
 ## 머지
 콘텐츠 재배치 + PIE 통과 후 → 코드 `phase/p4-card-weapon-pools`를 Codex `-Base main` 게이트 후 `--no-ff` main 머지. (콘텐츠 동반 커밋 여부는 그때 결정.)
