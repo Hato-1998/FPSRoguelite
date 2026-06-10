@@ -102,6 +102,11 @@ protected:
 	 *  so this only needs to reach a bit past the feet — keeps the per-enemy scene query cheap at swarm scale. */
 	static constexpr float GroundProbeDistance = 700.0f; // cm
 
+	/** Tiny gap kept between the capsule bottom and the floor when grounded. Resting flush makes the horizontal
+	 *  swept move start-penetrating the floor (capsule contact offset), which UE rejects → the enemy can't move
+	 *  at all. A small clearance keeps the sweep free. (Same reason CharacterMovement keeps a floor distance.) */
+	static constexpr float GroundRestClearance = 5.0f; // cm
+
 	/** Seconds a GROUNDED enemy skips the ground trace before re-checking (amortizes the cost across the swarm;
 	 *  airborne enemies trace every update). Bounds ledge-walk-off detection lag. */
 	static constexpr float GroundRecheckInterval = 0.15f;

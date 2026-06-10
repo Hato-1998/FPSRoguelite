@@ -23,6 +23,10 @@ AFPSREnemyBase::AFPSREnemyBase()
 	Capsule->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 	Capsule->SetCollisionObjectType(ECC_Pawn);
 	Capsule->SetCollisionResponseToAllChannels(ECR_Block);
+	// Ignore OTHER enemies (also ECC_Pawn): the swarm overlaps and spreads via soft separation steering instead
+	// of mutual physics blocking, which would gridlock a dense crowd and stack co-spawned enemies (Game.MD §1/§5).
+	// Walls (WorldStatic), the rifle trace (Visibility) and the player (ECC_FPSRPlayerPawn) stay blocked.
+	Capsule->SetCollisionResponseToChannel(ECC_Pawn, ECR_Ignore);
 	SetRootComponent(Capsule);
 
 	Mesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("Mesh"));
@@ -146,7 +150,7 @@ void AFPSREnemyBase::ApplyGravity(float ScaledDeltaSeconds)
 
 	if (World->LineTraceSingleByObjectType(Hit, TraceStart, TraceEnd, ObjParams, QueryParams))
 	{
-		const float TargetZ = Hit.ImpactPoint.Z + HalfHeight; // capsule center resting on the floor
+		const float TargetZ = Hit.ImpactPoint.Z + HalfHeight + GroundRestClearance; // rest just above the floor (not flush — see GroundRestClearance)
 		const float Diff = Loc.Z - TargetZ;
 
 		// Snap only within tolerance in EITHER direction (a surface far above is a ledge to route around, not

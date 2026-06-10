@@ -12,6 +12,7 @@
 #include "Weapon/FPSRWeaponFireComponent.h"
 #include "Weapon/FPSRWeaponDataAsset.h"
 #include "Hero/FPSRPlayerFeedbackComponent.h"
+#include "FPSRCollisionChannels.h"
 
 #include "Camera/CameraComponent.h"
 #include "Components/CapsuleComponent.h"
@@ -36,6 +37,9 @@ AFPSRCharacter::AFPSRCharacter()
 #endif
 
 	GetCapsuleComponent()->InitCapsuleSize(34.0f, 88.0f);
+	// Player uses a distinct object channel so enemies can block the player while ignoring EACH OTHER (the swarm
+	// overlaps and spreads via soft separation instead of expensive mutual physics blocking — Game.MD §1/§5).
+	GetCapsuleComponent()->SetCollisionObjectType(ECC_FPSRPlayerPawn);
 
 	bUseControllerRotationYaw = true;
 	bUseControllerRotationPitch = false;
