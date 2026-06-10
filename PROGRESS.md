@@ -4,9 +4,16 @@
 > **작업 단계를 끝낼 때마다, 그리고 중단 전 반드시 이 파일을 갱신하고 커밋한다.**
 > 확정 설계·기획·코드구조·규칙은 `Game.md`(**SSOT 허브** → 도메인별 `Docs/SSOT/*.md`, 작업별 라우팅은 허브 §0-1), **완료 작업 상세는 `git log --oneline`**. 여기엔 *무엇을 했는지*만 요약한다.
 
-**최종 갱신: 2026-06-10**
+**최종 갱신: 2026-06-11**
 
-## 🎨 콘텐츠 작업 핸드오프 (다음 세션 = 콘텐츠 세팅) — **`Docs/P4-C_UserContent_Guide.md` 먼저 읽기**
+## 🚩 다음 세션 = P5 친선사격(FF) 구현 — **`Docs/P5-FriendlyFire_Plan.md` 먼저 읽기**
+> **브랜치 `phase/p5-friendly-fire` 분기 완료(2026-06-11), 코드 0줄(플랜 문서만)**. D1 백로그(아군 오사)를 통째로 당겨오는 작업: 플레이어 무기 데미지를 **적/자기/아군** 통합 판정으로 전환. **확정값**: 아군=FF ON일 때 50%, **FF 토글=전체 범위**(직접탄/히트스캔/근접/폭발 전부), 자기=폭발만 항상 풀(자폭), 카드 2종(NoSelfDamage·ExplosiveRounds[히트스캔 소형 AOE]). **서버권위 데미지/팀판정 → Opus 직접 구현/검증**(Haiku 금지, 메모리 `haiku-delegation-security-wiring`). 구현 순서·파일단위 설계·재개 프롬프트는 **`Docs/P5-FriendlyFire_Plan.md`**.
+> ⚠️ 이 브랜치는 `fix/weapon-fire-freeze-hardening`(미머지)에서 분기 — 투사체 크릿/폭발 코드 의존. 머지 순서: fix → p5-friendly-fire.
+
+## 🎨 콘텐츠 작업 핸드오프 (무기 DA 작성) — **`Docs/P4-C_WeaponContent_SpecSheet.md`**
+> **무기 콘텐츠 커밋 완료(2026-06-11, `1557b8c`, 바주카까지)**: BP_Bullet + DA Sniper(투사체 탄환)/Shotgun/Bazooka/BurstRifle + BP_FPSRPlayer 슬롯 + 반동값. **남은 DA = Grenade/ChargeLaser + Knife=Melee 확인**. Bazooka는 P5 FF 작업과 직결(자폭/아군). 스펙시트대로 계속.
+
+## 🎨 (참고) P4-C 콘텐츠 가이드 — **`Docs/P4-C_UserContent_Guide.md`**
 > 새 세션에서 "콘텐츠 작업 세팅" 시작점. P4-C 무기 6종(Burst/Sniper/Shotgun/Bazooka/Grenade/ChargeLaser)의 **코드 완료**, 남은 건 콘텐츠(무기 DA + 투사체 BP). **무기=순수 DataAsset**(무기 BP 불필요), AOE만 투사체 actor BP(`BP_Rocket`/`BP_Grenade`) 필요.
 > **진행(가이드 §0)**: ~~① `phase/p4c-hitscan`(A2) → main 머지~~ ✅(2026-06-10) ~~② `phase/p4c-aoe-charge`(A3) → main 머지(reconcile)~~ ✅(2026-06-10, `FFPSRWeaponStatBlock` 자동병합·PROGRESS 통합·Codex 교정). **→ 지금 = ③ main에서 6종 무기 DA + `BP_Rocket`/`BP_Grenade` 작성 → ④ `BP_FPSRPlayer` Default 슬롯으로 PIE 검증.** 코드는 모두 main에 있어 에디터에 무기 스탯 필드(PelletCount/AOERadius/ChargeTime 등)·GA 클래스가 노출됨. **따라하기 시트 = [Docs/P4-C_WeaponContent_SpecSheet.md](Docs/P4-C_WeaponContent_SpecSheet.md)**(필드 단위 확정값·경로·PIE 체크포인트).
 > **시각/오디오**(메시·VFX·사운드)는 전량 신규지만 기능 검증엔 불필요. 단 **투사체 폭발 VFX·레이저 빔·차징 게이지 HUD는 후속 코드 배선 필요**(콘텐츠만으론 불가, 가이드 §4). 미션 콘텐츠(`phase/p4b3-missions`)·임시값 원복은 가이드 §5.
