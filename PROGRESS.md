@@ -8,7 +8,7 @@
 
 ## 🎨 콘텐츠 작업 핸드오프 (다음 세션 = 콘텐츠 세팅) — **`Docs/P4-C_UserContent_Guide.md` 먼저 읽기**
 > 새 세션에서 "콘텐츠 작업 세팅" 시작점. P4-C 무기 6종(Burst/Sniper/Shotgun/Bazooka/Grenade/ChargeLaser)의 **코드 완료**, 남은 건 콘텐츠(무기 DA + 투사체 BP). **무기=순수 DataAsset**(무기 BP 불필요), AOE만 투사체 actor BP(`BP_Rocket`/`BP_Grenade`) 필요.
-> **진행(가이드 §0)**: ~~① `phase/p4c-hitscan`(A2) → main 머지~~ ✅(2026-06-10) ~~② `phase/p4c-aoe-charge`(A3) → main 머지(reconcile)~~ ✅(2026-06-10, `FFPSRWeaponStatBlock` 자동병합·PROGRESS 통합·Codex 교정). **→ 지금 = ③ main에서 6종 무기 DA + `BP_Rocket`/`BP_Grenade` 작성(가이드 §1~§2) → ④ `BP_FPSRPlayer` Default 슬롯으로 PIE 검증(가이드 §3).** 코드는 모두 main에 있어 에디터에 무기 스탯 필드(PelletCount/AOERadius/ChargeTime 등)·GA 클래스가 노출됨.
+> **진행(가이드 §0)**: ~~① `phase/p4c-hitscan`(A2) → main 머지~~ ✅(2026-06-10) ~~② `phase/p4c-aoe-charge`(A3) → main 머지(reconcile)~~ ✅(2026-06-10, `FFPSRWeaponStatBlock` 자동병합·PROGRESS 통합·Codex 교정). **→ 지금 = ③ main에서 6종 무기 DA + `BP_Rocket`/`BP_Grenade` 작성 → ④ `BP_FPSRPlayer` Default 슬롯으로 PIE 검증.** 코드는 모두 main에 있어 에디터에 무기 스탯 필드(PelletCount/AOERadius/ChargeTime 등)·GA 클래스가 노출됨. **따라하기 시트 = [Docs/P4-C_WeaponContent_SpecSheet.md](Docs/P4-C_WeaponContent_SpecSheet.md)**(필드 단위 확정값·경로·PIE 체크포인트).
 > **시각/오디오**(메시·VFX·사운드)는 전량 신규지만 기능 검증엔 불필요. 단 **투사체 폭발 VFX·레이저 빔·차징 게이지 HUD는 후속 코드 배선 필요**(콘텐츠만으론 불가, 가이드 §4). 미션 콘텐츠(`phase/p4b3-missions`)·임시값 원복은 가이드 §5.
 
 ## 한 줄 요약
