@@ -8,6 +8,7 @@
 
 class UGameplayAbility;
 class UFPSRCardDataAsset;
+class AFPSRProjectile;
 
 /** Data-driven weapon definition. */
 UCLASS(BlueprintType)
@@ -28,6 +29,10 @@ public:
 	/** Ability granted while this weapon is equipped (activated by the Fire input). */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon")
 	TSubclassOf<UGameplayAbility> FireAbility;
+
+	/** Projectile actor class (AOE archetypes). Content assigns a BP with mesh/VFX; null falls back to AFPSRProjectile base. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Projectile")
+	TSubclassOf<AFPSRProjectile> ProjectileClass;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Cards")
 	TArray<TObjectPtr<UFPSRCardDataAsset>> WeaponCards;

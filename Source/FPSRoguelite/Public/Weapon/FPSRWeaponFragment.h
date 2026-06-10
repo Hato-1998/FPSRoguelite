@@ -11,6 +11,7 @@ class AActor;
 class AController;
 class UWorld;
 class UFPSRWeaponInstance;
+struct FFPSRProjectileParams;
 
 /**
  * Transient per-activation firing context passed to weapon behavior-fragment hooks. Plain struct (not a
@@ -57,12 +58,15 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Fragment", meta = (ClampMin = "1"))
 	int32 MaxStacks = 1;
 
-	/** Hook surface (default no-ops). Only the hitscan-relevant hooks are defined here; charge/projectile
-	 *  hooks (ModifyChargeTime/OnProjectileSpawn) are added when those archetypes arrive. */
+	/** Hook surface (default no-ops). ModifyChargeTime (ChargeLaser charge-up) is added with that archetype (A3b);
+	 *  OnProjectileSpawn lets fragments mutate AOE projectile params before spawn. */
 	virtual void PreFire(FFPSRFireContext& Context) const {}
 	virtual void ModifyShotCount(FFPSRFireContext& Context) const {}
 	virtual void OnHitActor(const FFPSRFireContext& Context, AActor* HitActor, float& DamageInOut) const {}
 	virtual void PostFire(const FFPSRFireContext& Context) const {}
+
+	/** Projectile-spawn hook (AOE archetypes): mutate the projectile spawn params before it is acquired. */
+	virtual void OnProjectileSpawn(const FFPSRFireContext& Context, FFPSRProjectileParams& ParamsInOut) const {}
 };
 
 /** Reference fragment: fires extra shots/pellets per activation (e.g. 2-round multishot, shotgun spread). */
