@@ -7,7 +7,7 @@
 **최종 갱신: 2026-06-11**
 
 ## 🚩 다음 세션 = P5 친선사격(FF) 구현 — **`Docs/P5-FriendlyFire_Plan.md` 먼저 읽기**
-> **브랜치 `phase/p5-friendly-fire` 분기 완료(2026-06-11), 코드 0줄(플랜 문서만)**. D1 백로그(아군 오사)를 통째로 당겨오는 작업: 플레이어 무기 데미지를 **적/자기/아군** 통합 판정으로 전환. **확정값**: 아군=FF ON일 때 50%, **FF 토글=전체 범위**(직접탄/히트스캔/근접/폭발 전부), 자기=폭발만 항상 풀(자폭), 카드 2종(NoSelfDamage·ExplosiveRounds[히트스캔 소형 AOE]). **서버권위 데미지/팀판정 → Opus 직접 구현/검증**(Haiku 금지, 메모리 `haiku-delegation-security-wiring`). 구현 순서·파일단위 설계·재개 프롬프트는 **`Docs/P5-FriendlyFire_Plan.md`**.
+> **브랜치 `phase/p5-friendly-fire` 분기 완료(2026-06-11), 코드 0줄(플랜 문서만)**. D1 백로그(아군 오사)를 통째로 당겨오는 작업: 플레이어 무기 데미지를 **적/자기/아군** 통합 판정으로 전환. **확정값**: 아군=FF ON일 때 50%, **FF 토글=전체 범위**(직접탄/히트스캔/근접/폭발 전부), 자기=폭발만 항상 풀(자폭), 카드 2종(NoSelfDamage·ExplosiveRounds[히트스캔 소형 AOE]), **폭발 넉백**(데미지와 독립 — FF/자폭 off여도 작동, 죽은 폰 제외; 로켓점프·아군 런칭, 적 폭발도 동일 유틸). **서버권위 데미지/팀판정 → Opus 직접 구현/검증**(Haiku 금지, 메모리 `haiku-delegation-security-wiring`). 구현 순서·파일단위 설계·재개 프롬프트는 **`Docs/P5-FriendlyFire_Plan.md`**.
 > ⚠️ 이 브랜치는 `fix/weapon-fire-freeze-hardening`(미머지)에서 분기 — 투사체 크릿/폭발 코드 의존. 머지 순서: fix → p5-friendly-fire.
 
 ## 🎨 콘텐츠 작업 핸드오프 (무기 DA 작성) — **`Docs/P4-C_WeaponContent_SpecSheet.md`**

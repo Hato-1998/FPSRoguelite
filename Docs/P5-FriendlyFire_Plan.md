@@ -15,6 +15,7 @@
 - **FF 토글 범위 = 전체**(직접 탄/히트스캔/근접/폭발 전부 아군피해) — 즉 D1 풀 구현
 - **카드 A**: 자기 데미지 제거(폭발 자폭 무효화)
 - **카드 B**: 라이플 등 히트스캔에 **소형 AOE(폭발탄)** 부여
+- **폭발 넉백(2026-06-11 추가)**: 폭발은 반경 내 대상을 **밀쳐낸다**(라디얼). **데미지와 독립** — FF OFF(아군 무피해)·NoSelfDamage(자폭 무피해)여도 **넉백은 그대로 적용**(아군 런칭, 로켓점프). **단 그 폭발 데미지로 죽은 객체는 넉백 제외**(생존자만). 적 폭발 공격(B1/보스 후속)도 동일 유틸 재사용해 플레이어를 밀쳐냄.
 
 ---
 
@@ -47,8 +48,15 @@ namespace FPSRCombat
 
     // 라디얼 폭발: 반경 내 폰 오버랩 → ResolveDamage/ApplyDamage 일괄, 크릿 롤(per-target),
     // 적 명중 시에만 발사자 PC에 히트마커 1회(강한 결과). bAllowSelf=자폭 허용 여부.
+    // 넉백(KnockbackStrength>0): 데미지와 독립 — 반경 내 모든 폰을 밀쳐냄(FF/자폭 무피해여도 적용),
+    // 단 이 폭발로 죽은 폰은 제외(생존자만). §2-7 참조.
     void ApplyExplosion(UWorld* World, const FVector& Center, float Radius, float Damage,
-                        float CritChance, float CritMultiplier, AActor* Instigator, bool bAllowSelf);
+                        float CritChance, float CritMultiplier, AActor* Instigator, bool bAllowSelf,
+                        float KnockbackStrength);
+
+    // 넉백 디스패치: 플레이어→LaunchCharacter(가산, 로켓점프), 적→AFPSREnemyBase::ApplyKnockback.
+    // Velocity = 라디얼방향(Center→대상) × 거리감쇠 magnitude. §2-7.
+    void ApplyKnockback(AActor* Target, const FVector& Velocity);
 }
 ```
 
@@ -60,6 +68,11 @@ namespace FPSRCombat
 
 **ApplyExplosion = 현행 `AFPSRProjectile::HandleImpact`의 AOE 인라인 로직 + 방금 추가한 크릿/히트마커를 추출**해 여기로 통합. (`OverlapMultiByObjectType(ECC_Pawn)`, instigator를 더 이상 ignore하지 않음 — 자기/아군 판정을 ResolveDamage가 함.)
 
+**ApplyExplosion per-target 순서** (반경 내 폰마다, dedup):
+1. `dmg = ResolveDamage(...)` (0일 수 있음) → `dmg>0`이면 `result = ApplyDamage(...)` (크릿 베이크된 dmg).
+2. **넉백**: `KnockbackStrength>0 && !result.bKilled` → `ApplyKnockback(target, dir×mag)`. **`dmg==0`이어도(FF off 아군·자폭 off 자기) 넉백은 적용** — `bKilled`만 제외. (데미지 미적용 = `result` 기본값 `bKilled=false` → 넉백 O.)
+3. 히트마커: `result.bWasEnemy`일 때만 집계 → 폭발당 1회.
+
 ### 2-2. FF 호스트 토글 — `AFPSRGameState` (`Core/FPSRGameState.{h,cpp}`)
 - `UPROPERTY(ReplicatedUsing=OnRep_RunState 또는 별도)` `bool bFriendlyFireEnabled = false;` (호스트 설정, 복제)
 - `static constexpr float FriendlyFireDamageScale = 0.5f;` (또는 EditDefaultsOnly 튜닝값)
@@ -67,9 +80,11 @@ namespace FPSRCombat
 - `SetFriendlyFireEnabled(bool)` (서버, 호스트 설정 진입점) + 디버그 `FPSR.SetFriendlyFire 0/1`
 - 복제 패턴은 `bRunPaused`와 동일(`DOREPLIFETIME_WITH_PARAMS_FAST` + Push Model). UI 호스트 토글은 후속(지금 디버그 cmd로 검증).
 
-### 2-3. 자기데미지 플래그
+### 2-3. 자기데미지 플래그 + 넉백 스탯
 - `FFPSRFireContext`(`Weapon/FPSRWeaponFragment.h`)에 `bool bSuppressSelfDamage = false;` 추가.
-- `FFPSRProjectileParams`(`Weapon/FPSRProjectileTypes.h`)에 `bool bSelfDamage = true;` 추가.
+- `FFPSRProjectileParams`(`Weapon/FPSRProjectileTypes.h`)에 `bool bSelfDamage = true;` + `float KnockbackStrength = 0.0f;` 추가.
+- `FFPSRWeaponStatBlock`(`Weapon/FPSRWeaponTypes.h`)에 `float KnockbackStrength = 0.0f;` 추가(AOE 아키타입 EditConditionHides; 0=넉백 없음). 바주카/유탄 콘텐츠가 값 지정.
+- Projectile GA가 `Params.KnockbackStrength = Stats.KnockbackStrength` 베이크. ExplosiveRounds fragment는 자체 KnockbackStrength 보유.
 - **직접탄/히트스캔/근접**: `bAllowSelf=false`로 ResolveDamage 호출(자기 명중 시 0).
 - **AOE 투사체**: Projectile GA가 `Params.bSelfDamage = !FireCtx.bSuppressSelfDamage`로 베이크 → `HandleImpact`가 `ApplyExplosion(..., bAllowSelf=Params.bSelfDamage)`.
 - **히트스캔 폭발탄**: ExplosiveRounds fragment의 폭발이 `bAllowSelf = !Context.bSuppressSelfDamage`.
@@ -89,21 +104,35 @@ namespace FPSRCombat
 ### 2-6. 카드 B — 폭발탄(히트스캔 → 소형 AOE)
 - 신규 훅: `UFPSRWeaponFragment`에 `virtual void OnImpact(const FFPSRFireContext& Context, const FVector& ImpactPoint, bool bAllowSelf) const {}`
 - Hitscan GA: 명중 지점마다(단일트레이스 `Hit.ImpactPoint`, 관통은 각 PawnHit 지점 또는 벽 지점) fragment `OnImpact` 호출.
-- `UFPSRFragment_ExplosiveRounds{ float AOERadius=150, float AOEDamage=20 }`: `OnImpact`에서 `FPSRCombat::ApplyExplosion(World, ImpactPoint, AOERadius, AOEDamage, 0,1, Avatar, bAllowSelf)`.
+- `UFPSRFragment_ExplosiveRounds{ float AOERadius=150, float AOEDamage=20, float KnockbackStrength=0 }`: `OnImpact`에서 `FPSRCombat::ApplyExplosion(World, ImpactPoint, AOERadius, AOEDamage, 0,1, Avatar, bAllowSelf, KnockbackStrength)`.
 - 콘텐츠: 카드 DA(ThisWeapon, GrantedFragment=ExplosiveRounds). Rifle `AvailableModifiers`에 등록.
+
+### 2-7. 폭발 넉백 (데미지와 독립)
+> 핵심: 넉백은 데미지 규칙(FF/자폭)과 **무관**하게 반경 내 전 폰에 적용. **이 폭발로 죽은 폰만 제외**(생존자만). 로켓점프·아군 런칭의 토대. 적 폭발(Team=Enemy)도 동일 유틸로 플레이어를 밀침.
+
+- **방향/세기**: `Dir = (TargetLocation - Center).GetSafeNormal()`(라디얼). `Mag = KnockbackStrength × (1 - Dist/Radius)`(선형 감쇠, clamp ≥0). 발밑 폭발(Center가 캡슐 아래) → Dir이 위쪽 → **로켓점프**. 약간의 상방 바이어스(예 Dir.Z += 0.3 후 정규화)로 "팝업" 느낌 옵션.
+- **적용 디스패치** `ApplyKnockback(Target, Velocity)`:
+  - **플레이어**(`AFPSRCharacter`) → `CharacterMovement->Launch(Velocity)` 또는 `LaunchCharacter(Velocity, false, false)`(가산 — 점프 속도와 합쳐 로켓점프). 서버권위 적용 후 복제(클라 부드럽게). `KnockbackStrength`는 속도(cm/s) 단위(예 800~1500).
+  - **적**(`AFPSREnemyBase`) → 신규 `void ApplyKnockback(FVector Velocity)`: 경량 폰이라 물리 미사용 → **감쇠 넉백 속도 멤버**(`FVector KnockbackVel`)를 두고 매 틱 이동에 가산 후 ~0.3~0.5s에 0으로 감쇠. 넉백 중 플로우필드 스티어링 일시 약화/억제, 기존 `ApplyGravity`/지면추종과 합산(발사 후 중력으로 낙하·착지). KillZ 회수 로직이 멀리 날아간 적도 처리하는지 확인.
+- **죽은 객체 제외**: `ApplyExplosion`에서 `result.bKilled`면 넉백 스킵(죽은 적 래그돌/디스폰과 충돌 방지). `dmg==0`(무피해)은 `bKilled=false`라 넉백 O.
+- **성능**: 군중(수백) 폭발 시 다수 적 넉백 = 속도 가산뿐이라 저비용. 단 넉백 중 스티어링 억제 플래그가 군중 정지(P2) 회귀 안 일으키게 주의.
+- **콘텐츠**: 바주카/유탄 DA `KnockbackStrength` 지정(예 바주카 1200, 유탄 900). 자폭 로켓점프 세기 = 자기에게도 동일 라디얼(발밑 사격).
 
 ---
 
 ## 3. 구현 순서 (권장)
 
 1. **GameState FF 토글**(2-2) + `FPSR.SetFriendlyFire` 디버그 → 빌드 통과.
-2. **FPSRCombatStatics 헬퍼**(2-1): ResolveDamage/ApplyDamage/ApplyExplosion. `AFPSRProjectile::HandleImpact`에서 AOE 로직 추출 이전.
-3. **Projectile 치환**(2-4 일부): HandleImpact→ApplyExplosion, 단일타격→ResolveDamage. `bSelfDamage` 베이크(2-3).
-4. **Hitscan/ChargeLaser/Melee GA 치환**(2-4). 히트마커=적 명중만.
-5. **FireContext.bSuppressSelfDamage + NoSelfDamage 카드**(2-3,2-5).
-6. **OnImpact 훅 + ExplosiveRounds 카드 + Hitscan 배선**(2-6).
-7. **콘텐츠(사용자)**: 카드 DA 2종 + 풀/AvailableModifiers 등록.
-8. 각 단계 빌드+스모크. 최종 **2-client PIE**(FF on/off, 자폭, 아군 50%, 카드 2종).
+2. **FPSRCombatStatics 헬퍼**(2-1): ResolveDamage/ApplyDamage. `AFPSRProjectile::HandleImpact`에서 AOE 로직 추출 이전.
+3. **넉백 토대**(2-7): `KnockbackStrength` 스탯/파라미터(2-3), `ApplyKnockback` 디스패처(플레이어=Launch), 적 `AFPSREnemyBase::ApplyKnockback`(감쇠 속도). `ApplyExplosion`에 넉백 통합(死 제외).
+4. **Projectile 치환**(2-4 일부): HandleImpact→ApplyExplosion(넉백 포함), 단일타격→ResolveDamage. `bSelfDamage`/`KnockbackStrength` 베이크.
+5. **Hitscan/ChargeLaser/Melee GA 치환**(2-4). 히트마커=적 명중만.
+6. **FireContext.bSuppressSelfDamage + NoSelfDamage 카드**(2-3,2-5).
+7. **OnImpact 훅 + ExplosiveRounds 카드 + Hitscan 배선**(2-6).
+8. **콘텐츠(사용자)**: 카드 DA 2종 + 풀/AvailableModifiers 등록 + 바주카/유탄 `KnockbackStrength`.
+9. 각 단계 빌드+스모크. 최종 **2-client PIE**.
+
+> 넉백 분리 옵션: 데미지 통합(FF)이 크니, **3번 넉백 토대를 먼저 PIE로 검증**(로켓점프/아군 런칭)하고 데미지 치환을 이어가도 됨. 넉백은 데미지 규칙과 독립이라 부분 검증 가능.
 
 ---
 
@@ -113,8 +142,13 @@ namespace FPSRCombat
 - **PIE(데미지=서버권위라 2-client 필수)**:
   - FF OFF: 아군 무피해(폭발/탄/근접/레이저), 적 정상.
   - FF ON: 아군 50% 피해(전 경로). 자기 폭발=풀 데미지(자폭).
-  - NoSelfDamage 카드: 자폭 0, 적/아군은 그대로.
+  - NoSelfDamage 카드: 자폭 데미지 0 **이지만 자기 넉백은 유지**(로켓점프 가능).
   - ExplosiveRounds 카드: 라이플 탄착 소폭발(적/아군[FF]/자기[bAllowSelf] 규칙 동일).
+- **넉백(데미지 독립)**:
+  - 발밑 바주카 + 점프 → **로켓점프**(자기 런칭). NoSelfDamage·FF 무관하게 작동.
+  - 아군 발밑/근처 바주카 → **아군 날아감**(FF OFF여도, 무피해 + 넉백).
+  - 적 군중 폭발 → 생존 적 밀려남, **죽은 적은 안 밀림**(래그돌/디스폰).
+  - 거리 감쇠(중심 가까울수록 강함), 군중 폭발 시 프레임/스티어링 정지 회귀 없음.
 - 회귀: 적만 쏠 때 데미지/크릿/히트마커 현행과 동일.
 
 ---
@@ -126,6 +160,9 @@ namespace FPSRCombat
 - **플레이어 캡슐 Visibility**: 히트스캔 단일트레이스가 아군을 맞히려면 플레이어 캡슐이 `ECC_Visibility` 블록이어야. 아니면 Pawn 멀티트레이스로 보강(스나이퍼 관통 경로 참고).
 - **점블랭크 자기 오버랩**: 투사체 스폰 즉시 자기 캡슐 오버랩 → 자폭 의도와 무관한 즉발 폭발 방지(기존 머즐 클램프/초기 오버랩 가드 점검).
 - **FFScale 위치**: GameState 상수 0.5 vs EditDefaultsOnly. 자폭 배수(현 1.0)도 별도 상수화 여지.
+- **적 넉백 vs 이동 시스템**: `AFPSREnemyBase`는 커스텀 이동(플로우필드+수동 `ApplyGravity`/지면추종). 넉백 속도를 어디서 합산·감쇠할지(이동 틱 진입부), 넉백 중 스티어링 억제 강도, 멀리 날아간 적의 지면 재포착/KillZ 회수 확인 = 이 작업의 가장 무거운 부분. **플레이어 넉백(Launch)은 쉬움 → 먼저, 적 넉백은 후속 분리 가능**.
+- **Launch 가산 vs 오버라이드**: 로켓점프엔 가산(점프 속도 보존). `LaunchCharacter(V, false, false)` 또는 `CharacterMovement->Velocity += V`. 상방 바이어스 세기(팝업감) 튜닝.
+- **넉백 세기 단위**: 속도(cm/s) 권장(Launch 직결). 임펄스/질량 모델은 과설계 — 경량 적엔 속도가 단순.
 
 ---
 
@@ -138,4 +175,5 @@ Game.md + PROGRESS.md + Docs/P5-FriendlyFire_Plan.md 먼저 읽어.
 - 단계마다 빌드+헤드리스 스모크. 최종 2-client PIE(FF on/off·자폭·아군50%·카드2종)는 사용자.
 - 콘텐츠(카드 DA 2종)는 사용자 작성 — 코드 베이스만 완성.
 - 확정값: 아군 50%, FF 전체범위, 자기 항상 풀, NoSelfDamage/ExplosiveRounds 카드.
+- 폭발 넉백(§2-7): 데미지와 독립(FF/자폭 off여도 작동), 죽은 폰만 제외. 로켓점프/아군 런칭. 플레이어=Launch(쉬움)·적=감쇠속도(이동시스템 통합, 무거움).
 ```
