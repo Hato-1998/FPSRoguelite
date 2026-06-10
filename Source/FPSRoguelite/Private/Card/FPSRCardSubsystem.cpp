@@ -72,7 +72,8 @@ TArray<FFPSRCardDraw> UFPSRCardSubsystem::DrawCards(AController* ForPlayer, int3
 	}
 
 	TArray<UFPSRCardDataAsset*> Cards;
-	GatherCandidatePool(ForPlayer, Cards);
+	TArray<UFPSRWeaponDataAsset*> SourceWeapons; // index-aligned with Cards: the weapon that contributed each
+	GatherCandidatePool(ForPlayer, Cards, SourceWeapons);
 
 	// Player luck shifts the draw toward higher rarities.
 	float Luck = 0.0f;
@@ -99,8 +100,10 @@ TArray<FFPSRCardDraw> UFPSRCardSubsystem::DrawCards(AController* ForPlayer, int3
 	// cards while the player owns no weapon, are skipped so they are never offered.
 	TArray<FFPSRCardDraw> Candidates;
 	TArray<float> CandidateWeights;
-	for (UFPSRCardDataAsset* Card : Cards)
+	for (int32 CardIdx = 0; CardIdx < Cards.Num(); ++CardIdx)
 	{
+		UFPSRCardDataAsset* Card = Cards[CardIdx];
+		UFPSRWeaponDataAsset* SourceWeapon = SourceWeapons.IsValidIndex(CardIdx) ? SourceWeapons[CardIdx] : nullptr;
 		if (!Card || Exclude.Contains(Card))
 		{
 			continue;
@@ -127,6 +130,7 @@ TArray<FFPSRCardDraw> UFPSRCardSubsystem::DrawCards(AController* ForPlayer, int3
 			Offer.Card = Card;
 			Offer.Rarity = Tier.Rarity;
 			Offer.Magnitude = Tier.Magnitude;
+			Offer.TargetWeapon = SourceWeapon; // ThisWeapon card → its source weapon; central/character → null
 			Candidates.Add(Offer);
 			CandidateWeights.Add(Weight);
 		}
@@ -252,16 +256,20 @@ bool UFPSRCardSubsystem::ApplyCard(AController* ForPlayer, const FFPSRCardDraw& 
 		const FFPSRWeaponStatMod Mod{ Card->WeaponStat, Card->WeaponStatOp, Draw.Magnitude };
 		if (Card->Scope == ECardScope::ThisWeapon)
 		{
-			// ThisWeapon = the currently equipped weapon by design (§2-4-1: "현재 무기 1정"). Level-up
-			// weapon-stat cards are general-pool cards, so "current weapon" is the intended target.
-			UFPSRWeaponInstance* Instance = Inventory->GetCurrentInstance();
+			// Apply to the weapon that contributed this offer (Draw.TargetWeapon), resolved to the player's
+			// owned instance — so the card lands on its source weapon even if another is equipped. This also
+			// gates anti-cheat: the offer was server-built from owned weapons, and an unowned TargetWeapon
+			// resolves to null and is rejected. Legacy offers with no target fall back to the equipped weapon.
+			UFPSRWeaponInstance* Instance = Draw.TargetWeapon
+				? Inventory->GetInstanceForWeapon(Draw.TargetWeapon)
+				: Inventory->GetCurrentInstance();
 			if (!Instance)
 			{
 				return false;
 			}
 			if (Card->GrantedFragment)
 			{
-				// Behavior-fragment card (mission reward): attach the fragment to the current weapon.
+				// Behavior-fragment card (mission reward): attach the fragment to the target weapon.
 				Instance->AddFragment(Card->GrantedFragment);
 			}
 			else
@@ -345,39 +353,54 @@ TArray<FFPSRCardDraw> UFPSRCardSubsystem::DrawWeaponModifierOffer(AController* F
 
 	APawn* Pawn = ForPlayer ? ForPlayer->GetPawn() : nullptr;
 	UFPSRWeaponInventoryComponent* Inv = Pawn ? Pawn->FindComponentByClass<UFPSRWeaponInventoryComponent>() : nullptr;
-	UFPSRWeaponInstance* Instance = Inv ? Inv->GetCurrentInstance() : nullptr;
-	UFPSRWeaponDataAsset* Weapon = Instance ? Instance->GetSource() : nullptr;
-	if (!Weapon)
+	if (!Inv)
 	{
 		return Result;
 	}
 
-	// Candidate fragment cards = this weapon's AvailableModifiers the instance does not already own.
+	// Candidate fragment cards = every OWNED weapon's AvailableModifiers that the weapon's own instance still has
+	// room to stack. Each candidate is tagged with its source weapon so the fragment applies to that weapon (not
+	// whatever is equipped). A stackable fragment (e.g. MultiShot MaxStacks=2) keeps appearing until full.
 	TArray<UFPSRCardDataAsset*> Candidates;
-	for (const TObjectPtr<UFPSRCardDataAsset>& Card : Weapon->AvailableModifiers)
+	TArray<UFPSRWeaponDataAsset*> CandidateWeapons; // index-aligned with Candidates
+	for (UFPSRWeaponDataAsset* Weapon : Inv->GetOwnedWeapons())
 	{
-		// Offer a fragment card while the weapon still has room to stack it (StackCount < MaxStacks), so a
-		// stackable fragment (e.g. MultiShot MaxStacks=2) keeps appearing until fully stacked.
-		if (Card && Card->Scope == ECardScope::ThisWeapon && Card->GrantedFragment
-			&& Instance->GetFragmentStackCount(Card->GrantedFragment) < FMath::Max(Card->GrantedFragment->MaxStacks, 1)
-			&& !Candidates.Contains(Card))
+		if (!Weapon)
 		{
-			Candidates.Add(Card);
+			continue;
+		}
+		UFPSRWeaponInstance* Instance = Inv->GetInstanceForWeapon(Weapon);
+		if (!Instance)
+		{
+			continue;
+		}
+		for (const TObjectPtr<UFPSRCardDataAsset>& Card : Weapon->AvailableModifiers)
+		{
+			if (Card && Card->Scope == ECardScope::ThisWeapon && Card->GrantedFragment
+				&& Instance->GetFragmentStackCount(Card->GrantedFragment) < FMath::Max(Card->GrantedFragment->MaxStacks, 1))
+			{
+				// Same card asset on two weapons yields two candidates (distinct target weapons).
+				Candidates.Add(Card.Get());
+				CandidateWeapons.Add(Weapon);
+			}
 		}
 	}
 
-	// Shuffle (Fisher–Yates) so the offered subset varies, then take up to Count.
+	// Shuffle (Fisher–Yates, parallel arrays) so the offered subset varies, then take up to Count.
 	for (int32 i = Candidates.Num() - 1; i > 0; --i)
 	{
-		Candidates.Swap(i, FMath::RandRange(0, i));
+		const int32 j = FMath::RandRange(0, i);
+		Candidates.Swap(i, j);
+		CandidateWeapons.Swap(i, j);
 	}
 
 	const int32 Take = FMath::Min(Count, Candidates.Num());
 	for (int32 i = 0; i < Take; ++i)
 	{
-		const FFPSRCardDraw Draw = BuildSingleDraw(Candidates[i], ForPlayer);
+		FFPSRCardDraw Draw = BuildSingleDraw(Candidates[i], ForPlayer);
 		if (Draw.Card)
 		{
+			Draw.TargetWeapon = CandidateWeapons[i]; // fragment applies to its source weapon
 			Result.Add(Draw);
 		}
 	}
@@ -419,23 +442,30 @@ float UFPSRCardSubsystem::GetEffectiveWeight(const UFPSRCardDataAsset* Card, ECa
 	return FMath::Max(FinalWeight, 0.0f);
 }
 
-void UFPSRCardSubsystem::GatherCandidatePool(AController* ForPlayer, TArray<UFPSRCardDataAsset*>& OutCandidates) const
+void UFPSRCardSubsystem::GatherCandidatePool(AController* ForPlayer, TArray<UFPSRCardDataAsset*>& OutCandidates, TArray<UFPSRWeaponDataAsset*>& OutSourceWeapons) const
 {
+	OutCandidates.Reset();
+	OutSourceWeapons.Reset();
 	if (!ActivePool)
 	{
 		return;
 	}
 
-	OutCandidates.Reset();
+	// Central pool = character + all-weapons cards. These have no source weapon (TargetWeapon stays null):
+	// character cards apply to the ASC, all-weapons cards apply to the PlayerState (every weapon).
 	for (const TObjectPtr<UFPSRCardDataAsset>& Card : ActivePool->Cards)
 	{
 		if (Card)
 		{
 			OutCandidates.Add(Card.Get());
+			OutSourceWeapons.Add(nullptr);
 		}
 	}
 
-	// Add cards from the player's owned weapons (dynamic pool join, §2-4).
+	// Each OWNED weapon contributes its own WeaponCards (dynamic pool join, §2-4). A weapon-scope (ThisWeapon)
+	// card from weapon W targets W specifically — so it applies to that weapon even when another is equipped, and
+	// a weapon (e.g. melee) never offers stat cards it can't use. Character-scope cards a weapon carries apply to
+	// the player (no target). The same card asset shared by two weapons yields two offers (one per target weapon).
 	APawn* PlayerPawn = ForPlayer ? ForPlayer->GetPawn() : nullptr;
 	if (!PlayerPawn)
 	{
@@ -457,14 +487,27 @@ void UFPSRCardSubsystem::GatherCandidatePool(AController* ForPlayer, TArray<UFPS
 		}
 		for (UFPSRCardDataAsset* Card : Weapon->WeaponCards)
 		{
-			// Only Character-scope cards contributed by a specific weapon join the level-up candidate pool.
-			// Weapon-scope (ThisWeapon/AllWeapons) modifier cards tied to a particular weapon are delivered via
-			// the MissionReward path (P4-B-2) where the target weapon is known — preventing weapon B's card from
-			// being applied to whichever weapon happens to be equipped. General weapon-stat cards (mag/firerate/
-			// recoil) live in ActivePool->Cards instead, where ThisWeapon correctly means "current weapon".
-			if (Card && Card->Scope == ECardScope::Character && !OutCandidates.Contains(Card))
+			if (!Card)
+			{
+				continue;
+			}
+			// ThisWeapon card → target this weapon. Character/AllWeapons card carried by a weapon → no target.
+			UFPSRWeaponDataAsset* Target = (Card->Scope == ECardScope::ThisWeapon) ? Weapon : nullptr;
+
+			// De-dup on (card, target): the same card may legitimately appear for different target weapons.
+			bool bAlready = false;
+			for (int32 i = 0; i < OutCandidates.Num(); ++i)
+			{
+				if (OutCandidates[i] == Card && OutSourceWeapons[i] == Target)
+				{
+					bAlready = true;
+					break;
+				}
+			}
+			if (!bAlready)
 			{
 				OutCandidates.Add(Card);
+				OutSourceWeapons.Add(Target);
 			}
 		}
 	}

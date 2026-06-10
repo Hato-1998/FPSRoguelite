@@ -207,6 +207,22 @@ TArray<UFPSRWeaponDataAsset*> UFPSRWeaponInventoryComponent::GetOwnedWeapons() c
 	return Result;
 }
 
+UFPSRWeaponInstance* UFPSRWeaponInventoryComponent::GetInstanceForWeapon(const UFPSRWeaponDataAsset* Weapon) const
+{
+	if (!Weapon)
+	{
+		return nullptr;
+	}
+	for (const TObjectPtr<UFPSRWeaponInstance>& Instance : Slots)
+	{
+		if (Instance && Instance->GetSource() == Weapon)
+		{
+			return Instance.Get();
+		}
+	}
+	return nullptr;
+}
+
 void UFPSRWeaponInventoryComponent::MarkAllInstancesResolvedDirty()
 {
 	for (const TObjectPtr<UFPSRWeaponInstance>& Instance : Slots)
