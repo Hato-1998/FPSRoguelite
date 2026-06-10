@@ -134,6 +134,29 @@ struct FPSROGUELITE_API FFPSRWeaponStatBlock
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|ADS")
 	float ADSInterpSpeed = 14.0f; // FOV interpolation speed
+
+	// --- Projectile (AOE archetypes; spawned by the projectile fire ability) ---
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Projectile")
+	float ProjectileSpeed = 3000.0f; // initial velocity (cm/s)
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Projectile")
+	float ProjectileGravityScale = 0.0f; // 0 = straight (rocket); >0 = arc (grenade)
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Projectile")
+	float AOERadius = 0.0f; // >0 = radial explosion on impact; 0 = single-target
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Projectile")
+	float ProjectileLifetime = 5.0f; // seconds before auto-release
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Projectile")
+	int32 ProjectilePierce = 0; // extra pawns a single-hit projectile passes through (ignored if AOE)
+
+	// --- Charge (ChargeLaser archetype; charge alpha scales damage) ---
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Charge")
+	float ChargeTime = 0.0f; // seconds of hold to reach full charge; 0 = not a charge weapon
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Charge")
+	float ChargeFullDamageMultiplier = 3.0f; // damage multiplier at full charge (alpha lerps 1.0 -> this)
 };
 
 /** Stat axis a weapon modifier targets. Maps 1:1 to an FFPSRWeaponStatBlock field (compile-checked switch in

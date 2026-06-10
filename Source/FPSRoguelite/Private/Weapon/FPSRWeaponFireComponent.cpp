@@ -94,6 +94,20 @@ void UFPSRWeaponFireComponent::StartFiring()
 	ShotsFiredThisSpray = 0;
 
 	const FFPSRWeaponStatBlock& Stats = Instance->GetResolvedStats();
+
+	// ChargeLaser: hold to charge, fire on release (StopFiring) — no immediate shot. Stamp the local charge
+	// start time for the owning client's feel; the server stamps its own via ServerBeginCharge so the charge
+	// alpha is measured server-authoritatively (a client can't claim a longer charge than the server saw).
+	if (UFPSRWeaponDataAsset* Weapon = Instance->GetSource())
+	{
+		if (Weapon->Archetype == EFPSRWeaponArchetype::ChargeLaser)
+		{
+			bChargingLaser = true;
+			ChargeStartWorldTime = GetWorld()->GetTimeSeconds();
+			return;
+		}
+	}
+
 	if (Stats.FireMode == EFPSRFireMode::Burst)
 	{
 		BurstShotsRemaining = FMath::Max(1, Stats.BurstCount);
@@ -111,6 +125,74 @@ void UFPSRWeaponFireComponent::StopFiring()
 {
 	bWantsToFire = false;
 	ShotsFiredThisSpray = 0;
+
+	// ChargeLaser: releasing the trigger fires the charged beam. The authoritative activation is driven by the
+	// owning client's ServerReleaseChargeLaser RPC (ordered after ServerStartChargeLaser on the Character
+	// channel, so the server's charge-start stamp is always set first). Here we only run the LOCAL cosmetic
+	// prediction, and only on a non-authority client — on the listen-server host the release RPC already
+	// activates the (LocalOnly) ability once, so activating here too would fire the host's beam twice.
+	if (bChargingLaser)
+	{
+		bChargingLaser = false;
+		APawn* OwnerPawn = Cast<APawn>(GetOwner());
+		UFPSRWeaponInventoryComponent* Inventory = GetInventory();
+		UFPSRWeaponInstance* Instance = Inventory ? Inventory->GetCurrentInstance() : nullptr;
+		UFPSRWeaponDataAsset* Weapon = Instance ? Instance->GetSource() : nullptr;
+		const bool bStillChargeLaser = OwnerPawn && Weapon
+			&& Weapon->Archetype == EFPSRWeaponArchetype::ChargeLaser && Weapon->FireAbility;
+		if (bStillChargeLaser && !OwnerPawn->HasAuthority())
+		{
+			if (UAbilitySystemComponent* ASC = UAbilitySystemGlobals::GetAbilitySystemComponentFromActor(OwnerPawn))
+			{
+				ASC->TryActivateAbilityByClass(Weapon->FireAbility);
+			}
+		}
+		else if (!bStillChargeLaser)
+		{
+			// Mid-charge weapon swap (or no charge weapon): drop the stale local charge.
+			ResetCharge();
+		}
+	}
+}
+
+void UFPSRWeaponFireComponent::ServerReleaseCharge()
+{
+	APawn* OwnerPawn = Cast<APawn>(GetOwner());
+	UFPSRWeaponInventoryComponent* Inventory = GetInventory();
+	UFPSRWeaponInstance* Instance = Inventory ? Inventory->GetCurrentInstance() : nullptr;
+	UFPSRWeaponDataAsset* Weapon = Instance ? Instance->GetSource() : nullptr;
+	// Server-authoritative charged-beam activation, driven by the owning client's ordered release RPC. The
+	// LocalOnly ability runs here with authority, applies damage, and consumes the charge. A release whose
+	// weapon is no longer a ChargeLaser just drops the server charge stamp so it can never boost a later shot.
+	if (OwnerPawn && Weapon && Weapon->Archetype == EFPSRWeaponArchetype::ChargeLaser && Weapon->FireAbility)
+	{
+		if (UAbilitySystemComponent* ASC = UAbilitySystemGlobals::GetAbilitySystemComponentFromActor(OwnerPawn))
+		{
+			ASC->TryActivateAbilityByClass(Weapon->FireAbility);
+		}
+	}
+	else
+	{
+		ResetCharge();
+	}
+}
+
+void UFPSRWeaponFireComponent::ServerBeginCharge()
+{
+	UFPSRWeaponInventoryComponent* Inventory = GetInventory();
+	UFPSRWeaponInstance* Instance = Inventory ? Inventory->GetCurrentInstance() : nullptr;
+	UFPSRWeaponDataAsset* Weapon = Instance ? Instance->GetSource() : nullptr;
+	// Only a ChargeLaser can begin a charge — ignore a spoofed RPC for any other equipped weapon.
+	if (Weapon && Weapon->Archetype == EFPSRWeaponArchetype::ChargeLaser)
+	{
+		ChargeStartWorldTime = GetWorld()->GetTimeSeconds();
+	}
+}
+
+void UFPSRWeaponFireComponent::ResetCharge()
+{
+	bChargingLaser = false;
+	ChargeStartWorldTime = -1.0f;
 }
 
 void UFPSRWeaponFireComponent::FireOneShot()

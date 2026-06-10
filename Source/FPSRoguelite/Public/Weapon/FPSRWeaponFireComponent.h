@@ -22,6 +22,25 @@ public:
 	void StartFiring();
 	void StopFiring();
 
+	// --- ChargeLaser (hold-to-charge, release-to-fire; server-authoritative charge measurement) ---
+	/** True while a ChargeLaser is charging on this machine (set by StartFiring on the local client). */
+	bool IsChargingLaser() const { return bChargingLaser; }
+
+	/** World time the current charge began on THIS machine (-1 = not charging). The ChargeLaser fire ability
+	 *  reads this to compute the charge alpha against its own clock (client = local feel, server = authoritative). */
+	float GetChargeStartWorldTime() const { return ChargeStartWorldTime; }
+
+	/** Server: stamp the charge start time (called from the owning client's ServerStartChargeLaser RPC). Only
+	 *  stamps when the equipped weapon is actually a ChargeLaser, so a spoofed RPC for another weapon is ignored. */
+	void ServerBeginCharge();
+
+	/** Server: activate the charged beam authoritatively (called from the owning client's ServerReleaseChargeLaser
+	 *  RPC, ordered after ServerStartChargeLaser). Reads the server-stamped charge and consumes it. */
+	void ServerReleaseCharge();
+
+	/** Clear the charge state after the fire ability consumes it (prevents a single charge firing twice). */
+	void ResetCharge();
+
 	/** Extra spread (degrees) from sustained fire; read by the fire ability when tracing. */
 	UFUNCTION(BlueprintPure, Category = "FPSR|Weapon")
 	float GetCurrentBloom() const { return CurrentBloom; }
@@ -59,6 +78,11 @@ protected:
 	float TimeSinceLastShot = 0.0f;
 	int32 BurstShotsRemaining = 0;
 	float CurrentBloom = 0.0f;
+
+	// ChargeLaser charge state. ChargeStartWorldTime is stamped locally (StartFiring) and on the server
+	// (ServerBeginCharge); the fire ability computes alpha against it and calls ResetCharge to consume it.
+	bool bChargingLaser = false;
+	float ChargeStartWorldTime = -1.0f;
 
 	bool bReloadRequestPending = false; // guards against spamming the reload RPC each tick
 	float LastMeleeTime = -1000.0f; // world time of last melee attack (melee attack-rate cooldown)
