@@ -3,7 +3,7 @@
   FPSRoguelite 코드 검증용 Codex(gpt-5.5) 비대화형 리뷰 래퍼.
 .DESCRIPTION
   Claude 검증 단계의 최종 게이트. 비대화(approval=never)로 자동 실행한다.
-  프로젝트 원칙은 리포의 AGENTS.md(핵심 3원칙) + Game.MD/PROGRESS.md를 Codex가 자동 로드해 적용한다.
+  프로젝트 원칙은 리포의 AGENTS.md(핵심 3원칙) + Game.md/PROGRESS.md를 Codex가 자동 로드해 적용한다.
   결과는 stdout 출력 + Docs/reviews/ 에 타임스탬프 md(UTF-8) 저장(gitignore됨).
   주의:
     - codex review 는 scope 플래그(--base/--uncommitted/--commit)와 커스텀 프롬프트를 동시에 쓸 수 없다.
