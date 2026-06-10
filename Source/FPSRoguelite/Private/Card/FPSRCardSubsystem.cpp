@@ -522,6 +522,7 @@ namespace
 		TWeakObjectPtr<UFPSRCardDataAsset> Card;
 		ECardRarity Rarity = ECardRarity::Common;
 		float Magnitude = 0.0f;
+		TWeakObjectPtr<UFPSRWeaponDataAsset> TargetWeapon; // preserve so FPSR.ApplyCard hits the right weapon
 	};
 	TArray<FDebugCardOffer> GLastDraw;
 
@@ -543,6 +544,7 @@ namespace
 			Offer.Card = Draws[i].Card;
 			Offer.Rarity = Draws[i].Rarity;
 			Offer.Magnitude = Draws[i].Magnitude;
+			Offer.TargetWeapon = Draws[i].TargetWeapon;
 			GLastDraw.Add(Offer);
 
 			const FString RarityStr = StaticEnum<ECardRarity>()->GetNameStringByValue((int64)Draws[i].Rarity);
@@ -613,6 +615,7 @@ namespace
 				Draw.Card = GLastDraw[Index].Card.Get();
 				Draw.Rarity = GLastDraw[Index].Rarity;
 				Draw.Magnitude = GLastDraw[Index].Magnitude;
+				Draw.TargetWeapon = GLastDraw[Index].TargetWeapon.Get();
 				// Debug apply as an opening-seed pick (no pending level-up required).
 				const bool bApplied = CardSubsystem->ApplyCard(PC, Draw, EFPSROfferType::OpeningSeed);
 				UE_LOG(LogFPSR, Log, TEXT("[Card] ApplyCard index %d -> %s"),
