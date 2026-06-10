@@ -57,6 +57,8 @@ void UFPSRGA_WeaponFire_Hitscan::ActivateAbility(
 	float Damage = 10.0f;
 	float Range = 10000.0f;
 	float SpreadDegrees = 1.0f;
+	int32 PelletCount = 1;
+	int32 MaxPenetration = 1;
 	UFPSRWeaponInventoryComponent* Inventory = Avatar->FindComponentByClass<UFPSRWeaponInventoryComponent>();
 	UFPSRWeaponInstance* Instance = Inventory ? Inventory->GetCurrentInstance() : nullptr;
 	const FFPSRWeaponStatBlock* Stats = Instance ? &Instance->GetResolvedStats() : nullptr;
@@ -65,10 +67,12 @@ void UFPSRGA_WeaponFire_Hitscan::ActivateAbility(
 		Damage = Stats->Damage;
 		Range = Stats->Range;
 		SpreadDegrees = Stats->SpreadDegrees;
+		PelletCount = FMath::Clamp(Stats->PelletCount, 1, 32); // upper-bound authored data to cap traces/activation
+		MaxPenetration = FMath::Max(1, Stats->MaxPenetration);
 	}
 
 	// Server-authoritative gates: empty mag / reloading / fire-rate. Ammo is consumed later, once the fragment
-	// hooks have determined the pellet count (multishot debits one magazine round per pellet, §2-4-1).
+	// hooks have determined the round count (each round costs one magazine round; a round fires PelletCount pellets, §2-4-1).
 	if (Avatar->HasAuthority() && Inventory)
 	{
 		if (Inventory->IsReloading() || Inventory->GetCurrentAmmo() <= 0)
@@ -119,22 +123,23 @@ void UFPSRGA_WeaponFire_Hitscan::ActivateAbility(
 			if (Frag) { Frag->ModifyShotCount(FireCtx); }
 		}
 	}
-	int32 NumShots = FMath::Clamp(FireCtx.ShotCount, 1, 32);
-	// Multishot debits one magazine round per pellet (Game.MD §2-4-1). Clamp the pellet count to the rounds
-	// actually loaded — CurrentAmmo is replicated, so the server and the owning client clamp to the same
-	// pre-fire value — then the server deducts exactly that many. The empty-mag gate above guarantees at least
-	// one round remains, so at least one pellet always fires.
+	int32 NumRounds = FMath::Clamp(FireCtx.ShotCount, 1, 32);
+	// One trigger pull may fire multiple rounds via multishot; each round costs one magazine round.
+	// A round fires PelletCount pellets. Clamp the round count to the rounds actually loaded —
+	// CurrentAmmo is replicated, so the server and the owning client clamp to the same pre-fire value —
+	// then the server deducts exactly that many. The empty-mag gate above guarantees at least one round
+	// remains, so at least one round always fires.
 	if (Inventory)
 	{
-		NumShots = FMath::Min(NumShots, FMath::Max(Inventory->GetCurrentAmmo(), 1));
+		NumRounds = FMath::Min(NumRounds, FMath::Max(Inventory->GetCurrentAmmo(), 1));
 		if (Avatar->HasAuthority())
 		{
-			Inventory->ConsumeAmmo(NumShots);
+			Inventory->ConsumeAmmo(NumRounds);
 		}
 	}
 
-	// Crit/damage multipliers from the ASC are fetched once; crit is rolled per pellet so multishot pellets
-	// can crit independently.
+	// Crit/damage multipliers from the ASC are fetched once; crit is rolled per hit so each pellet / pierced
+	// enemy can crit independently.
 	float DamageMultiplier = 1.0f;
 	float CritChance = 0.0f;
 	float CritMultiplier = 1.0f;
@@ -160,35 +165,20 @@ void UFPSRGA_WeaponFire_Hitscan::ActivateAbility(
 	bool bServerCrit = false;
 	bool bServerKill = false;
 
-	for (int32 ShotIndex = 0; ShotIndex < NumShots; ++ShotIndex)
+	// Lambda to apply damage to a single hit actor (factors out logic for both single-trace and pierce paths).
+	auto ApplyDamageToActor = [&](AActor* HitActor) -> void
 	{
-		const FVector ShotDir = (SpreadDegrees > 0.0f)
-			? FMath::VRandCone(BaseDir, FMath::DegreesToRadians(SpreadDegrees))
-			: BaseDir;
-		const FVector End = Start + ShotDir * Range;
-
-		FHitResult Hit;
-		FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(FPSRWeaponFire), false, Avatar);
-		const bool bHit = World->LineTraceSingleByChannel(Hit, Start, End, ECC_Visibility, QueryParams);
-
-#if ENABLE_DRAW_DEBUG
-		const FVector DebugEnd = bHit ? Hit.ImpactPoint : End;
-		DrawDebugLine(World, Start, DebugEnd, FColor::Yellow, false, 0.5f, 0, 1.0f);
-		if (bHit)
+		if (!HitActor)
 		{
-			DrawDebugPoint(World, Hit.ImpactPoint, 10.0f, FColor::Red, false, 0.5f);
-		}
-#endif
-
-		AActor* HitActor = bHit ? Hit.GetActor() : nullptr;
-		if (HitActor == nullptr)
-		{
-			continue;
+			return;
 		}
 
 		UFPSREnemyHealthComponent* HealthComp = HitActor->FindComponentByClass<UFPSREnemyHealthComponent>();
+		if (!HealthComp)
+		{
+			return;
+		}
 
-		// Server-authoritative damage application + hit/crit/kill confirmation.
 		if (FireCtx.bAuthority)
 		{
 			float FinalDamage = Damage * DamageMultiplier;
@@ -207,15 +197,105 @@ void UFPSRGA_WeaponFire_Hitscan::ActivateAbility(
 					if (Frag) { Frag->OnHitActor(FireCtx, HitActor, FinalDamage); }
 				}
 			}
-			if (HealthComp)
-			{
-				HealthComp->ApplyDamage(FinalDamage, Avatar);
-				bServerHit = true;
-				if (HealthComp->IsDead()) { bServerKill = true; }
-				else if (bCrit) { bServerCrit = true; }
-			}
+
+			HealthComp->ApplyDamage(FinalDamage, Avatar);
+			bServerHit = true;
+			if (HealthComp->IsDead()) { bServerKill = true; }
+			else if (bCrit) { bServerCrit = true; }
 
 			UE_LOG(LogFPSR, Verbose, TEXT("[Fire] hit=%s dmg=%.1f"), *GetNameSafe(HitActor), FinalDamage);
+		}
+	};
+
+	// Nested loop: outer over rounds (each costs 1 ammo), inner over pellets per round.
+	for (int32 Round = 0; Round < NumRounds; ++Round)
+	{
+		for (int32 Pellet = 0; Pellet < PelletCount; ++Pellet)
+		{
+			const FVector PelletDir = (SpreadDegrees > 0.0f)
+				? FMath::VRandCone(BaseDir, FMath::DegreesToRadians(SpreadDegrees))
+				: BaseDir;
+			const FVector End = Start + PelletDir * Range;
+
+			// Branch on penetration: single-trace for low penetration, multi-trace for piercing.
+			if (MaxPenetration <= 1)
+			{
+				// Single-trace path: rifle, shotgun, burst — stops at first enemy.
+				FHitResult Hit;
+				FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(FPSRWeaponFire), false, Avatar);
+				const bool bHit = World->LineTraceSingleByChannel(Hit, Start, End, ECC_Visibility, QueryParams);
+
+#if ENABLE_DRAW_DEBUG
+				const FVector DebugEnd = bHit ? Hit.ImpactPoint : End;
+				DrawDebugLine(World, Start, DebugEnd, FColor::Yellow, false, 0.5f, 0, 1.0f);
+				if (bHit)
+				{
+					DrawDebugPoint(World, Hit.ImpactPoint, 10.0f, FColor::Red, false, 0.5f);
+				}
+#endif
+
+				AActor* HitActor = bHit ? Hit.GetActor() : nullptr;
+				ApplyDamageToActor(HitActor);
+			}
+			else
+			{
+				// Pierce path: sniper — pass through enemies but stop at world geometry that blocks the weapon
+				// (Visibility) channel. Gather the pawns on the line first, then run a single Visibility trace
+				// that ignores those pawns: the wall cutoff then matches exactly what blocks a normal hitscan
+				// shot (movable cover/doors that block Visibility included), while query-only dynamics that
+				// ignore Visibility — e.g. in-flight AFPSRProjectile collision spheres — do NOT count as walls.
+				FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(FPSRWeaponFire), false, Avatar);
+
+				// Find all pawns along the line (enemies are pierced; non-enemy pawns are skipped below).
+				TArray<FHitResult> PawnHits;
+				FCollisionObjectQueryParams PawnObjParams;
+				PawnObjParams.AddObjectTypesToQuery(ECC_Pawn);
+				World->LineTraceMultiByObjectType(PawnHits, Start, End, PawnObjParams, QueryParams);
+
+				// Wall = first Visibility-blocking geometry, ignoring the pawns (which also block Visibility)
+				// so an enemy never masquerades as the wall and shortens the pierce.
+				FCollisionQueryParams WallParams(SCENE_QUERY_STAT(FPSRWeaponFireWall), false, Avatar);
+				for (const FHitResult& PawnHit : PawnHits)
+				{
+					if (AActor* PawnActor = PawnHit.GetActor()) { WallParams.AddIgnoredActor(PawnActor); }
+				}
+				FHitResult WallHit;
+				const bool bWall = World->LineTraceSingleByChannel(WallHit, Start, End, ECC_Visibility, WallParams);
+				const float WallDist = bWall ? WallHit.Distance : Range;
+
+#if ENABLE_DRAW_DEBUG
+				DrawDebugLine(World, Start, Start + PelletDir * FMath::Min(WallDist, Range), FColor::Yellow, false, 0.5f, 0, 1.0f);
+#endif
+
+				// Apply damage to up to MaxPenetration enemies (skipping those behind the wall).
+				int32 PenetrationCount = 0;
+				for (const FHitResult& PawnHit : PawnHits)
+				{
+					if (PawnHit.Distance > WallDist)
+					{
+						continue; // Behind the wall.
+					}
+
+					AActor* HitActor = PawnHit.GetActor();
+					if (!HitActor)
+					{
+						continue;
+					}
+
+					UFPSREnemyHealthComponent* HealthComp = HitActor->FindComponentByClass<UFPSREnemyHealthComponent>();
+					if (!HealthComp)
+					{
+						continue;
+					}
+
+					ApplyDamageToActor(HitActor);
+					++PenetrationCount;
+					if (PenetrationCount >= MaxPenetration)
+					{
+						break;
+					}
+				}
+			}
 		}
 	}
 
