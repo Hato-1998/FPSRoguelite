@@ -144,6 +144,13 @@ struct FPSROGUELITE_API FFPSRWeaponStatBlock
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Projectile")
 	int32 ProjectilePierce = 0; // extra pawns a single-hit projectile passes through (ignored if AOE)
+
+	// --- Charge (ChargeLaser archetype; charge alpha scales damage) ---
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Charge")
+	float ChargeTime = 0.0f; // seconds of hold to reach full charge; 0 = not a charge weapon
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Charge")
+	float ChargeFullDamageMultiplier = 3.0f; // damage multiplier at full charge (alpha lerps 1.0 -> this)
 };
 
 /** Stat axis a weapon modifier targets. Maps 1:1 to an FFPSRWeaponStatBlock field (compile-checked switch in

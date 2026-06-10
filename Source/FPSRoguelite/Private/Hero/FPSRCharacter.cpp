@@ -262,6 +262,12 @@ void AFPSRCharacter::Input_Fire(const FInputActionValue& Value)
 	if (WeaponFire)
 	{
 		WeaponFire->StartFiring();
+		// ChargeLaser: tell the server to start measuring the charge (anti-cheat alpha). Mirrors the ADS
+		// pattern (local state + server RPC). Other archetypes fire via the GA's own activation replication.
+		if (WeaponFire->IsChargingLaser())
+		{
+			ServerStartChargeLaser();
+		}
 	}
 }
 
@@ -337,6 +343,19 @@ void AFPSRCharacter::ServerSetAiming_Implementation(bool bNewAiming)
 	if (WeaponFire)
 	{
 		WeaponFire->SetAiming(bNewAiming);
+	}
+}
+
+void AFPSRCharacter::ServerStartChargeLaser_Implementation()
+{
+	// No charging during the card-selection freeze (mirrors the other server input gates).
+	if (IsRunFrozen())
+	{
+		return;
+	}
+	if (WeaponFire)
+	{
+		WeaponFire->ServerBeginCharge();
 	}
 }
 

@@ -94,6 +94,20 @@ void UFPSRWeaponFireComponent::StartFiring()
 	ShotsFiredThisSpray = 0;
 
 	const FFPSRWeaponStatBlock& Stats = Instance->GetResolvedStats();
+
+	// ChargeLaser: hold to charge, fire on release (StopFiring) — no immediate shot. Stamp the local charge
+	// start time for the owning client's feel; the server stamps its own via ServerBeginCharge so the charge
+	// alpha is measured server-authoritatively (a client can't claim a longer charge than the server saw).
+	if (UFPSRWeaponDataAsset* Weapon = Instance->GetSource())
+	{
+		if (Weapon->Archetype == EFPSRWeaponArchetype::ChargeLaser)
+		{
+			bChargingLaser = true;
+			ChargeStartWorldTime = GetWorld()->GetTimeSeconds();
+			return;
+		}
+	}
+
 	if (Stats.FireMode == EFPSRFireMode::Burst)
 	{
 		BurstShotsRemaining = FMath::Max(1, Stats.BurstCount);
@@ -111,6 +125,49 @@ void UFPSRWeaponFireComponent::StopFiring()
 {
 	bWantsToFire = false;
 	ShotsFiredThisSpray = 0;
+
+	// ChargeLaser: releasing the trigger fires the charged beam. Activating the fire ability runs it locally
+	// (predicted) and on the server (GAS replicates the activation); the ability reads the charge start time and
+	// calls ResetCharge to consume it. Leave ChargeStartWorldTime intact here so the ability can still read it.
+	if (bChargingLaser)
+	{
+		bChargingLaser = false;
+		APawn* OwnerPawn = Cast<APawn>(GetOwner());
+		UFPSRWeaponInventoryComponent* Inventory = GetInventory();
+		UFPSRWeaponInstance* Instance = Inventory ? Inventory->GetCurrentInstance() : nullptr;
+		UFPSRWeaponDataAsset* Weapon = Instance ? Instance->GetSource() : nullptr;
+		// Only fire the charged beam if the equipped weapon is STILL a ChargeLaser — a mid-charge weapon swap
+		// must not fire the newly-equipped weapon. Otherwise drop the stale charge.
+		if (OwnerPawn && Weapon && Weapon->Archetype == EFPSRWeaponArchetype::ChargeLaser && Weapon->FireAbility)
+		{
+			if (UAbilitySystemComponent* ASC = UAbilitySystemGlobals::GetAbilitySystemComponentFromActor(OwnerPawn))
+			{
+				ASC->TryActivateAbilityByClass(Weapon->FireAbility);
+			}
+		}
+		else
+		{
+			ResetCharge();
+		}
+	}
+}
+
+void UFPSRWeaponFireComponent::ServerBeginCharge()
+{
+	UFPSRWeaponInventoryComponent* Inventory = GetInventory();
+	UFPSRWeaponInstance* Instance = Inventory ? Inventory->GetCurrentInstance() : nullptr;
+	UFPSRWeaponDataAsset* Weapon = Instance ? Instance->GetSource() : nullptr;
+	// Only a ChargeLaser can begin a charge — ignore a spoofed RPC for any other equipped weapon.
+	if (Weapon && Weapon->Archetype == EFPSRWeaponArchetype::ChargeLaser)
+	{
+		ChargeStartWorldTime = GetWorld()->GetTimeSeconds();
+	}
+}
+
+void UFPSRWeaponFireComponent::ResetCharge()
+{
+	bChargingLaser = false;
+	ChargeStartWorldTime = -1.0f;
 }
 
 void UFPSRWeaponFireComponent::FireOneShot()
