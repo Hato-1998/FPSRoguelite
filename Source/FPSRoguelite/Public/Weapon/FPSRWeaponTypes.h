@@ -155,6 +155,9 @@ struct FPSROGUELITE_API FFPSRWeaponStatBlock
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Projectile", meta = (EditConditionHides, EditCondition = "Archetype == EFPSRWeaponArchetype::AOE || Archetype == EFPSRWeaponArchetype::Sniper"))
 	int32 ProjectilePierce = 0; // extra pawns a single-hit projectile passes through (ignored if AOE)
 
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Projectile", meta = (EditConditionHides, EditCondition = "Archetype == EFPSRWeaponArchetype::AOE"))
+	float KnockbackStrength = 0.0f; // AOE radial knockback impulse (cm/s) baked into the projectile; 0 = none
+
 	// --- Charge (ChargeLaser archetype; charge alpha scales damage) ---
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Charge", meta = (EditConditionHides, EditCondition = "Archetype == EFPSRWeaponArchetype::ChargeLaser"))
 	float ChargeTime = 0.0f; // seconds of hold to reach full charge; 0 = not a charge weapon

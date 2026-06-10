@@ -6,9 +6,22 @@
 
 **최종 갱신: 2026-06-11**
 
-## 🚩 다음 세션 = P5 친선사격(FF) 구현 — **`Docs/P5-FriendlyFire_Plan.md` 먼저 읽기**
-> **브랜치 `phase/p5-friendly-fire` 분기 완료(2026-06-11), 코드 0줄(플랜 문서만)**. D1 백로그(아군 오사)를 통째로 당겨오는 작업: 플레이어 무기 데미지를 **적/자기/아군** 통합 판정으로 전환. **확정값**: 아군=FF ON일 때 50%, **FF 토글=전체 범위**(직접탄/히트스캔/근접/폭발 전부), 자기=폭발만 항상 풀(자폭), 카드 2종(NoSelfDamage·ExplosiveRounds[히트스캔 소형 AOE]), **폭발 넉백**(데미지와 독립 — FF/자폭 off여도 작동, 죽은 폰 제외; 로켓점프·아군 런칭, 적 폭발도 동일 유틸). **서버권위 데미지/팀판정 → Opus 직접 구현/검증**(Haiku 금지, 메모리 `haiku-delegation-security-wiring`). 구현 순서·파일단위 설계·재개 프롬프트는 **`Docs/P5-FriendlyFire_Plan.md`**.
-> ⚠️ 이 브랜치는 `fix/weapon-fire-freeze-hardening`(미머지)에서 분기 — 투사체 크릿/폭발 코드 의존. 머지 순서: fix → p5-friendly-fire.
+## 🚩 P5 친선사격(FF) — **코드 베이스 완료(2026-06-11), 남은 건 콘텐츠(카드 DA) + 2-client PIE**
+> **브랜치 `phase/p5-friendly-fire`. 플랜 §3 ①~⑦ 코드 구현·빌드·헤드리스 스모크 통과(2026-06-11).** 플레이어 무기 데미지를 **적/자기/아군** 통합 판정으로 전환 완료. **확정값**: 아군=FF ON일 때 50%, FF=전체 범위(히트스캔/투사체/근접/차지빔/폭발), 자기=폭발만 풀(자폭), 폭발 넉백=데미지 독립(죽은 폰만 제외).
+> **구현된 것(코드)**:
+> - **통합 헬퍼 신규** `Combat/FPSRCombatStatics.{h,cpp}` — `ResolveDamage`(적/자기/아군+FF배수)·`ApplyDamage`(적HealthComp/플레이어GAS 브릿지, `FDamageResult`)·`ApplyExplosion`(라디얼 오버랩+크릿+히트마커+넉백, 자폭/넉백독립)·`ApplyKnockback`(플레이어=가산 LaunchCharacter / 적=감쇠속도)·`NotifyHitMarker`·`AddDamageablePawnObjectTypes`(★ECC_Pawn+ECC_FPSRPlayerPawn 둘 다).
+> - **GameState** `bFriendlyFireEnabled`(복제, bRunPaused 패턴)+게터+`SetFriendlyFireEnabled`+`FPSR.SetFriendlyFire 0/1` 디버그. `FriendlyFireDamageScale=0.5`(EditDefaultsOnly).
+> - **타입**: `FFPSRProjectileParams`+`bSelfDamage`/`KnockbackStrength`, `FFPSRFireContext`+`bSuppressSelfDamage`, `FFPSRWeaponStatBlock`+`KnockbackStrength`(AOE EditConditionHides).
+> - **데미지 경로 5곳 치환**: Hitscan(단일/관통 **통합** pawn-gather 양채널+OnImpact 훅)·ChargeLaser·Melee·Projectile(직격→ResolveDamage, AOE→ApplyExplosion 위임, Team=Enemy 경로 보존)·Projectile GA(bSelfDamage/KnockbackStrength 베이크).
+> - **적 넉백** `AFPSREnemyBase::ApplyKnockback`(수평=감쇠 KnockbackVelocityXY, 수직=VerticalVelocity 통합; ApplyGravity 상승 가드; 넉백 중 스티어링 억제; Activate 리셋). KillZ 회수는 **기존 스폰서브시스템 WorldKillZ 패스가 이미 처리**(신규 코드 불필요).
+> - **카드 2종(C++ 프래그먼트)**: `UFPSRFragment_NoSelfDamage`(PreFire→bSuppressSelfDamage)·`UFPSRFragment_ExplosiveRounds`(OnImpact→소형 ApplyExplosion). `FPSRWeaponFragment.cpp` 신규.
+> **★핵심 발견**: 플레이어 캡슐=별도 오브젝트채널 `ECC_FPSRPlayerPawn`(ECC_Pawn 아님) → AOE/관통/근접/차지빔의 ECC_Pawn 전용 쿼리는 플레이어를 못 잡음. 모든 경로를 **양채널 오브젝트쿼리**로 전환해야 FF 성립(헬퍼 `AddDamageablePawnObjectTypes`로 통일). 히트스캔 단일트레이스도 Visibility 의존 대신 pawn-gather로 통합.
+> **재검증 교정(편향 배제 자체 리뷰)**: ① 적 KillZ → 기존 인프라 재사용(중복 FellOutOfWorld 제거) ② 친선 직격에 적 히트마커 오발화 → `TryDamageActor`에 `bWasEnemy` 추가해 적 명중만 마커.
+> **남은 작업**:
+> - **사용자 콘텐츠**: 카드 DA 2종(NoSelfDamage/ExplosiveRounds, Scope=ThisWeapon) 작성 + 무기 `AvailableModifiers` 등록(NoSelfDamage→Bazooka/Grenade, ExplosiveRounds→Rifle) + 바주카/유탄 `KnockbackStrength` 지정(예 바주카 1200/유탄 900).
+> - **사용자 2-client PIE**(서버권위라 필수): FF on/off·자폭·아군50%·카드2종·로켓점프·아군런칭·죽은적 넉백제외(플랜 §4).
+> **알려진 폴리시 후속(버그 아님)**: ① ExplosiveRounds 적 직격 시 히트마커 2회(직격+스플래시) ② 플레이어 넉백=서버 LaunchCharacter 권위적이나 오너클라 스무딩은 후속.
+> ⚠️ 머지 순서: `fix/weapon-fire-freeze-hardening`(미머지) → p5-friendly-fire. 머지 시점 Codex 일괄 리뷰(메모리 `codex-review-gate`).
 
 ## 🎨 콘텐츠 작업 핸드오프 (무기 DA 작성) — **`Docs/P4-C_WeaponContent_SpecSheet.md`**
 > **무기 콘텐츠 커밋 완료(2026-06-11, `1557b8c`, 바주카까지)**: BP_Bullet + DA Sniper(투사체 탄환)/Shotgun/Bazooka/BurstRifle + BP_FPSRPlayer 슬롯 + 반동값. **남은 DA = Grenade/ChargeLaser + Knife=Melee 확인**. Bazooka는 P5 FF 작업과 직결(자폭/아군). 스펙시트대로 계속.

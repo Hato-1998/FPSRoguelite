@@ -50,6 +50,16 @@ struct FPSROGUELITE_API FFPSRProjectileParams
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Projectile")
 	int32 Pierce = 0;
 
+	/** AOE only: whether the explosion damages the instigator (self/auto-damage). The NoSelfDamage card clears
+	 *  this. Knockback is independent — a self-no-damage explosion still launches the instigator (rocket jump). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Projectile")
+	bool bSelfDamage = true;
+
+	/** AOE only: radial knockback impulse magnitude (cm/s) applied to survivors in range. 0 = no knockback.
+	 *  Independent of damage (applies even at 0 friendly/self damage); the freshly-killed are excluded. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Projectile")
+	float KnockbackStrength = 0.0f;
+
 	/** Team affiliation (determines damage targets). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Projectile")
 	EFPSRProjectileTeam Team = EFPSRProjectileTeam::Player;

@@ -5,6 +5,7 @@
 #include "Weapon/FPSRWeaponInventoryComponent.h"
 #include "Weapon/FPSRWeaponInstance.h"
 #include "Weapon/FPSRWeaponDataAsset.h"
+#include "Combat/FPSRCombatStatics.h"
 #include "Enemy/FPSREnemyHealthComponent.h"
 #include "Core/FPSRGameState.h"
 #include "Core/FPSRPlayerController.h"
@@ -104,28 +105,41 @@ void UFPSRGA_WeaponMelee::ActivateAbility(
 			}
 		}
 
+		// Overlap by OBJECT TYPE for BOTH pawn channels (enemies + players) so a melee swing can hit a friendly
+		// (friendly fire) — an ECC_Pawn-only channel overlap would miss players (distinct object channel).
 		TArray<FOverlapResult> Overlaps;
 		FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(FPSRWeaponMelee), false, Avatar);
-		const bool bAny = World->OverlapMultiByChannel(
-			Overlaps, Center, FQuat::Identity, ECC_Pawn,
+		FCollisionObjectQueryParams ObjParams;
+		FPSRCombat::AddDamageablePawnObjectTypes(ObjParams);
+		const bool bAny = World->OverlapMultiByObjectType(
+			Overlaps, Center, FQuat::Identity, ObjParams,
 			FCollisionShape::MakeSphere(MeleeRadius), QueryParams);
 
 		bool bAnyHit = false;
 		bool bAnyKill = false;
 		if (bAny)
 		{
+			TSet<AActor*> Processed;
 			for (const FOverlapResult& Overlap : Overlaps)
 			{
 				AActor* HitActor = Overlap.GetActor();
-				if (!HitActor || HitActor == Avatar)
+				if (!HitActor || HitActor == Avatar || Processed.Contains(HitActor))
 				{
 					continue;
 				}
-				if (UFPSREnemyHealthComponent* HealthComp = HitActor->FindComponentByClass<UFPSREnemyHealthComponent>())
+				Processed.Add(HitActor);
+
+				// Melee never self-damages (bAllowSelf=false); ResolveDamage applies the enemy/friendly rules.
+				const float Resolved = FPSRCombat::ResolveDamage(Avatar, HitActor, FinalDamage, /*bAllowSelf*/ false, World);
+				if (Resolved <= 0.0f)
 				{
-					HealthComp->ApplyDamage(FinalDamage, Avatar);
+					continue;
+				}
+				const FPSRCombat::FDamageResult Result = FPSRCombat::ApplyDamage(HitActor, Resolved, Avatar);
+				if (Result.bWasEnemy && Result.bApplied)
+				{
 					bAnyHit = true;
-					if (HealthComp->IsDead()) { bAnyKill = true; }
+					if (Result.bKilled) { bAnyKill = true; }
 				}
 			}
 		}

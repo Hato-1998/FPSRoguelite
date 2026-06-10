@@ -30,6 +30,10 @@ struct FFPSRFireContext
 
 	/** True on the server (authority) — hooks that mutate game state must gate on this. */
 	bool bAuthority = false;
+
+	/** Set by the NoSelfDamage card (PreFire): suppress instigator self-damage on this activation's explosions.
+	 *  Knockback stays on (rocket jump without self-harm). Baked into projectile bSelfDamage / hitscan-AOE bAllowSelf. */
+	bool bSuppressSelfDamage = false;
 };
 
 /**
@@ -70,6 +74,11 @@ public:
 
 	/** Charge-time hook (ChargeLaser): adjust the seconds-to-full-charge before the charge alpha is computed. */
 	virtual void ModifyChargeTime(const FFPSRFireContext& Context, float& ChargeTimeInOut) const {}
+
+	/** Hitscan impact hook (server-only): called at each terminal impact point of a hitscan pellet so a fragment
+	 *  can spawn an effect at the hit — e.g. ExplosiveRounds turns a rifle hit into a small AOE. bAllowSelf passes
+	 *  through the NoSelfDamage suppression so a spawned explosion respects it. */
+	virtual void OnImpact(const FFPSRFireContext& Context, const FVector& ImpactPoint, bool bAllowSelf) const {}
 };
 
 /** Reference fragment: fires extra shots/pellets per activation (e.g. 2-round multishot, shotgun spread). */
@@ -102,4 +111,41 @@ public:
 	{
 		DamageInOut += BonusDamage;
 	}
+};
+
+/** Card A — NoSelfDamage: suppress the instigator's self-damage from explosions for this weapon (the auto-damage
+ *  of self-fired AOE / explosive rounds is nullified). Knockback is unaffected, so rocket-jumping still works. */
+UCLASS()
+class FPSROGUELITE_API UFPSRFragment_NoSelfDamage : public UFPSRWeaponFragment
+{
+	GENERATED_BODY()
+
+public:
+	virtual void PreFire(FFPSRFireContext& Context) const override
+	{
+		Context.bSuppressSelfDamage = true;
+	}
+};
+
+/** Card B — ExplosiveRounds: turns each hitscan impact into a small radial explosion (rifle → splash). Damage and
+ *  knockback follow the same self/friendly rules as any explosion (the spawned blast is server-authoritative). */
+UCLASS()
+class FPSROGUELITE_API UFPSRFragment_ExplosiveRounds : public UFPSRWeaponFragment
+{
+	GENERATED_BODY()
+
+public:
+	/** Radius of the per-impact explosion (cm). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Fragment", meta = (ClampMin = "0"))
+	float AOERadius = 150.0f;
+
+	/** Damage dealt at the center of each per-impact explosion (before self/friendly resolution). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Fragment", meta = (ClampMin = "0"))
+	float AOEDamage = 20.0f;
+
+	/** Radial knockback impulse of the per-impact explosion (cm/s); 0 = none. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Fragment", meta = (ClampMin = "0"))
+	float KnockbackStrength = 0.0f;
+
+	virtual void OnImpact(const FFPSRFireContext& Context, const FVector& ImpactPoint, bool bAllowSelf) const override;
 };

@@ -71,8 +71,9 @@ protected:
 	bool IsHostileTarget(AActor* Target) const;
 
 	/** Try to apply (crit-rolled) damage to an actor. Server-only. Returns true if a damage path applied, and
-	 *  outputs whether the hit critted and whether it killed the target (for hit-marker feedback). */
-	bool TryDamageActor(AActor* Target, bool& bOutCrit, bool& bOutKill);
+	 *  outputs whether the hit critted, whether it killed the target, and whether the target was an ENEMY (a
+	 *  friendly-fire hit on another player must NOT raise the firing player's hit-marker). */
+	bool TryDamageActor(AActor* Target, bool& bOutCrit, bool& bOutKill, bool& bOutWasEnemy);
 
 	/** Server: notify the instigating player's controller of a hit-marker (Player-team projectiles only — enemy
 	 *  projectiles have no HUD owner). Strongest outcome wins: Kill > Crit > Hit (Game.MD §2-14). */

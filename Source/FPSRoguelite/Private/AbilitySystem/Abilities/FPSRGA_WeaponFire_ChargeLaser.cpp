@@ -6,6 +6,7 @@
 #include "Weapon/FPSRWeaponInstance.h"
 #include "Weapon/FPSRWeaponFragment.h"
 #include "Weapon/FPSRWeaponFireComponent.h"
+#include "Combat/FPSRCombatStatics.h"
 #include "Enemy/FPSREnemyHealthComponent.h"
 #include "Core/FPSRGameState.h"
 #include "Core/FPSRPlayerController.h"
@@ -169,40 +170,42 @@ void UFPSRGA_WeaponFire_ChargeLaser::ActivateAbility(
 	bool bServerCrit = false;
 	bool bServerKill = false;
 
-	// Apply charge-scaled damage to one enemy (server-authoritative); shared across all pierced targets.
+	// Apply charge-scaled damage to one target (server-authoritative); shared across all pierced targets. The beam
+	// pierces everything, so a friendly while FF is off simply resolves to 0 and the beam continues.
 	auto ApplyDamageToActor = [&](AActor* HitActor) -> void
 	{
-		if (!HitActor)
+		if (!HitActor || !FireCtx.bAuthority)
 		{
 			return;
 		}
-		UFPSREnemyHealthComponent* HealthComp = HitActor->FindComponentByClass<UFPSREnemyHealthComponent>();
-		if (!HealthComp)
+		float FinalDamage = Damage * ChargeDamageScale * DamageMultiplier;
+		bool bCrit = false;
+		if (CritChance > 0.0f && FMath::FRand() < CritChance)
+		{
+			FinalDamage *= CritMultiplier;
+			bCrit = true;
+		}
+
+		// Per-hit behavior hooks (e.g. bonus/leech) can adjust the damage before it lands.
+		if (Fragments)
+		{
+			for (const TObjectPtr<UFPSRWeaponFragment>& Frag : *Fragments)
+			{
+				if (Frag) { Frag->OnHitActor(FireCtx, HitActor, FinalDamage); }
+			}
+		}
+
+		// Beam never self-damages (bAllowSelf=false); ResolveDamage applies the enemy/friendly rules.
+		const float Resolved = FPSRCombat::ResolveDamage(Avatar, HitActor, FinalDamage, /*bAllowSelf*/ false, World);
+		if (Resolved <= 0.0f)
 		{
 			return;
 		}
-		if (FireCtx.bAuthority)
+		const FPSRCombat::FDamageResult Result = FPSRCombat::ApplyDamage(HitActor, Resolved, Avatar);
+		if (Result.bWasEnemy && Result.bApplied)
 		{
-			float FinalDamage = Damage * ChargeDamageScale * DamageMultiplier;
-			bool bCrit = false;
-			if (CritChance > 0.0f && FMath::FRand() < CritChance)
-			{
-				FinalDamage *= CritMultiplier;
-				bCrit = true;
-			}
-
-			// Per-hit behavior hooks (e.g. bonus/leech) can adjust the damage before it lands.
-			if (Fragments)
-			{
-				for (const TObjectPtr<UFPSRWeaponFragment>& Frag : *Fragments)
-				{
-					if (Frag) { Frag->OnHitActor(FireCtx, HitActor, FinalDamage); }
-				}
-			}
-
-			HealthComp->ApplyDamage(FinalDamage, Avatar);
 			bServerHit = true;
-			if (HealthComp->IsDead()) { bServerKill = true; }
+			if (Result.bKilled) { bServerKill = true; }
 			else if (bCrit) { bServerCrit = true; }
 		}
 	};
@@ -216,7 +219,7 @@ void UFPSRGA_WeaponFire_ChargeLaser::ActivateAbility(
 
 	TArray<FHitResult> PawnHits;
 	FCollisionObjectQueryParams PawnObjParams;
-	PawnObjParams.AddObjectTypesToQuery(ECC_Pawn);
+	FPSRCombat::AddDamageablePawnObjectTypes(PawnObjParams); // enemies + players (friendly fire through the beam)
 	World->LineTraceMultiByObjectType(PawnHits, Start, End, PawnObjParams, QueryParams);
 
 	FCollisionQueryParams WallParams(SCENE_QUERY_STAT(FPSRChargeLaserWall), false, Avatar);

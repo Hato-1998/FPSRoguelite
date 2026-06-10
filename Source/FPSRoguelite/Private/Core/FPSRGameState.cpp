@@ -24,6 +24,7 @@ void AFPSRGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLi
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRGameState, RunPhase, Params);
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRGameState, bRunPaused, Params);
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRGameState, RunClockSeconds, Params);
+	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRGameState, bFriendlyFireEnabled, Params);
 }
 
 int32 AFPSRGameState::GetRequiredXP(int32 Level) const
@@ -93,6 +94,19 @@ void AFPSRGameState::SetRunPaused(bool bPaused)
 	OnRunStateChanged.Broadcast();
 
 	UE_LOG(LogFPSR, Log, TEXT("[Run] %s"), bPaused ? TEXT("FREEZE (card selection)") : TEXT("RESUME"));
+}
+
+void AFPSRGameState::SetFriendlyFireEnabled(bool bEnabled)
+{
+	if (!HasAuthority() || bFriendlyFireEnabled == bEnabled)
+	{
+		return;
+	}
+	bFriendlyFireEnabled = bEnabled;
+	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRGameState, bFriendlyFireEnabled, this);
+	OnRunStateChanged.Broadcast();
+
+	UE_LOG(LogFPSR, Log, TEXT("[Run] Friendly fire %s"), bEnabled ? TEXT("ON") : TEXT("OFF"));
 }
 
 void AFPSRGameState::RefreshPauseState()
@@ -197,6 +211,28 @@ namespace
 				bPaused = FCString::Atoi(*Args[0]) != 0;
 			}
 			GS->SetRunPaused(bPaused);
+		}));
+
+	FAutoConsoleCommandWithWorldAndArgs GCmd_SetFriendlyFire(
+		TEXT("FPSR.SetFriendlyFire"),
+		TEXT("Toggle friendly fire for the run (debug). Usage: FPSR.SetFriendlyFire [0|1]"),
+		FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& Args, UWorld* World)
+		{
+			if (!World)
+			{
+				return;
+			}
+			AFPSRGameState* GS = World->GetGameState<AFPSRGameState>();
+			if (!GS)
+			{
+				return;
+			}
+			bool bEnabled = !GS->IsFriendlyFireEnabled();
+			if (Args.Num() > 0)
+			{
+				bEnabled = FCString::Atoi(*Args[0]) != 0;
+			}
+			GS->SetFriendlyFireEnabled(bEnabled);
 		}));
 }
 

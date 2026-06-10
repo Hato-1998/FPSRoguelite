@@ -43,6 +43,11 @@ public:
 	/** Server: stamp the time of an attack (called by the movement/attack subsystem). */
 	void NotifyAttacked(float Now) { LastAttackTime = Now; }
 
+	/** Server: add a knockback impulse (cm/s, from an explosion). The horizontal part decays over KnockbackDecayTime
+	 *  while applied each movement tick; the vertical part feeds the gravity integrator so the enemy arcs up and
+	 *  falls back. Lightweight (velocity add, no physics) — cheap at swarm scale. */
+	void ApplyKnockback(const FVector& Velocity);
+
 protected:
 	virtual void BeginPlay() override;
 
@@ -122,4 +127,12 @@ protected:
 	/** Server-only: countdown until the next ground re-check while grounded. */
 	UPROPERTY(Transient)
 	float GroundRecheckTimer = 0.0f;
+
+	/** Server-only horizontal knockback velocity (cm/s), decayed each tick. Vertical knockback lives in
+	 *  VerticalVelocity (integrated by ApplyGravity). */
+	UPROPERTY(Transient)
+	FVector KnockbackVelocityXY = FVector::ZeroVector;
+
+	/** Time constant (s) for the exponential decay of horizontal knockback (~0.25s feels like a shove, not a slide). */
+	static constexpr float KnockbackDecayTime = 0.18f;
 };

@@ -60,6 +60,7 @@ void UFPSRGA_WeaponFire_Projectile::ActivateAbility(
 	float Lifetime = 5.0f;
 	float SpreadDegrees = 0.0f;
 	int32 ProjectilePierce = 0;
+	float KnockbackStrength = 0.0f;
 	UFPSRWeaponInventoryComponent* Inventory = Avatar->FindComponentByClass<UFPSRWeaponInventoryComponent>();
 	UFPSRWeaponInstance* Instance = Inventory ? Inventory->GetCurrentInstance() : nullptr;
 	const FFPSRWeaponStatBlock* Stats = Instance ? &Instance->GetResolvedStats() : nullptr;
@@ -72,6 +73,7 @@ void UFPSRGA_WeaponFire_Projectile::ActivateAbility(
 		Lifetime = Stats->ProjectileLifetime;
 		ProjectilePierce = FMath::Max(0, Stats->ProjectilePierce);
 		SpreadDegrees = Stats->SpreadDegrees;
+		KnockbackStrength = FMath::Max(0.0f, Stats->KnockbackStrength);
 	}
 
 	// Server-authoritative gates: empty mag / reloading / fire-rate. Ammo is consumed after the fragment hooks
@@ -171,6 +173,10 @@ void UFPSRGA_WeaponFire_Projectile::ActivateAbility(
 				Params.Lifetime = Lifetime;
 				Params.ExplosionRadius = AOERadius;
 				Params.Pierce = ProjectilePierce;
+				Params.KnockbackStrength = KnockbackStrength;
+				// Self-damage on unless the NoSelfDamage card suppressed it (PreFire). Knockback is independent —
+				// a self-no-damage rocket still launches the instigator (rocket jump).
+				Params.bSelfDamage = !FireCtx.bSuppressSelfDamage;
 				Params.Team = EFPSRProjectileTeam::Player;
 				Params.InstigatorActor = Avatar;
 
