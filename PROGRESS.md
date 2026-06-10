@@ -4,7 +4,12 @@
 > **작업 단계를 끝낼 때마다, 그리고 중단 전 반드시 이 파일을 갱신하고 커밋한다.**
 > 확정 설계·기획·코드구조·규칙은 `Game.MD`(SSOT), **완료 작업 상세는 `git log --oneline`**. 여기엔 *무엇을 했는지*만 요약한다.
 
-**최종 갱신: 2026-06-09**
+**최종 갱신: 2026-06-10**
+
+## 🎨 콘텐츠 작업 핸드오프 (다음 세션 = 콘텐츠 세팅) — **`Docs/P4-C_UserContent_Guide.md` 먼저 읽기**
+> 새 세션에서 "콘텐츠 작업 세팅" 시작점. P4-C 무기 6종(Burst/Sniper/Shotgun/Bazooka/Grenade/ChargeLaser)의 **코드 완료**, 남은 건 콘텐츠(무기 DA + 투사체 BP). **무기=순수 DataAsset**(무기 BP 불필요), AOE만 투사체 actor BP(`BP_Rocket`/`BP_Grenade`) 필요.
+> **권장 순서(가이드 §0)**: ① `phase/p4c-hitscan`(A2) → main 머지 ② `phase/p4c-aoe-charge`(A3) → main 머지(Codex `-Base main` + PROGRESS/`FFPSRWeaponStatBlock` reconcile) ③ main에서 6종 무기 DA + BP_Rocket/Grenade 작성 ④ `BP_FPSRPlayer` Default 슬롯으로 PIE 검증.
+> **시각/오디오**(메시·VFX·사운드)는 전량 신규지만 기능 검증엔 불필요. 단 **투사체 폭발 VFX·레이저 빔·차징 게이지 HUD는 후속 코드 배선 필요**(콘텐츠만으론 불가, 가이드 §4). 미션 콘텐츠(`phase/p4b3-missions`)·임시값 원복은 가이드 §5.
 
 ## 한 줄 요약
 **P0~P4-A + P4-B-1/2 + P4-D(게임필) → main 머지 완료**. **스폰포인트 코드 → main 머지(2026-06-09, `phase/p4-enemyspawnpoints` 코드분, Codex 5R 하드닝)**: 디자이너 배치 `AFPSREnemySpawnPoint`(비가시+거리 가중랜덤, 링 폴백) + 플로우필드 장애물 회피 + 적 중력/지면추종(+KillZ 회수·접촉 수직게이트·동일위치 분리 근본수정). **콘텐츠 배치(L_Sandbox)는 PIE 미검증이라 제외 → 브랜치 잔류(사용자 PIE 후 별도 머지)**. → 미머지 잔여 = **`phase/p4b3-missions`**(미션 콘텐츠+PIE) + **`phase/p4-enemyspawnpoints`**(콘텐츠 배치만). **다음 = 아래 '코드 선행 백로그' 순서대로(세션 단위)**. **A1 투사체 코어 완료·main 머지(2026-06-09, Codex 클린)**. **A2 Hitscan 3종 완료·코드 커밋(`phase/p4c-hitscan`, 머지 대기)**. **A3 AOE+ChargeLaser 완료·코드 커밋(2026-06-10, `phase/p4c-aoe-charge`, 머지 대기)**: A3a AOE 투사체 발사 GA + A3b ChargeLaser(서버권위 차징 관통 빔). → 권장 다음 = **B1 원거리 적 AI**(A1 의존 충족) 또는 A4 Fragment 마무리(A3 의존 충족). **검증 정책**: Codex=머지 시점 일괄, Opus=유닛 세밀.
