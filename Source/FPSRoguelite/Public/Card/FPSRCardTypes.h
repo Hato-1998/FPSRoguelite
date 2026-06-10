@@ -6,6 +6,7 @@
 #include "FPSRCardTypes.generated.h"
 
 class UFPSRCardDataAsset;
+class UFPSRWeaponDataAsset;
 
 UENUM(BlueprintType)
 enum class ECardScope : uint8
@@ -62,4 +63,10 @@ struct FFPSRCardDraw
 
 	UPROPERTY(BlueprintReadOnly, Category = "Card")
 	float Magnitude = 0.0f;
+
+	/** Weapon this offer applies to (the weapon whose pool contributed the card). null = character / all-weapons
+	 *  target. Set server-side at draw time so weapon-scope cards apply to their SOURCE weapon — owned but not
+	 *  necessarily equipped — instead of whatever is currently held. */
+	UPROPERTY(BlueprintReadOnly, Category = "Card")
+	TObjectPtr<UFPSRWeaponDataAsset> TargetWeapon = nullptr;
 };

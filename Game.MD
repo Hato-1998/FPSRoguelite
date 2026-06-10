@@ -124,6 +124,7 @@
   - **누적·중첩**: `UFPSRWeaponInstance.ActiveFragments[]`(복제 참조)에 누적. **`UFPSRWeaponFragment.MaxStacks`**(기본 1)만큼 같은 fragment 중복 누적 → 훅이 스택마다 적용(예: MultiShot 2스택=+2발). 미션보상 오퍼는 `StackCount < MaxStacks`인 동안 계속 제시(서버 권위 dedup).
   - **MultiShot 탄약**: 멀티샷은 **발사 펠릿 수만큼 탄창 소모**(`ConsumeAmmo(NumShots)`), 잔량 부족 시 **잔량까지 클램프 후 발사**(최소 1발 보장). NumShots는 fragment 훅 계산 후 소모.
   - **미션보상 카드 UI**(`UFPSRCardEntryWidget`): fragment 카드(=`Scope==ThisWeapon && GrantedFragment`)는 등급 대신 **카테고리 라벨**(위젯 기본값 `FragmentCategoryText`, WBP override) 표시 + **수치 슬롯 빈칸**(behavior 해금이라 magnitude 무의미).
+  - **무기 귀속 표시 (계획, P4 card-weapon-pools 후속 UI)**: 무기에 귀속되는 카드(ThisWeapon 스탯 카드 + 무기 fragment)는 카드 선택 UI에 **소속 무기 아이콘 + 이름**을 표시한다(어느 무기 강화인지 식별). 데이터 출처 = `FFPSRCardDraw.TargetWeapon`(이미 추첨 시 서버가 세팅, P4 card-weapon-pools). 필요: ① `UFPSRWeaponDataAsset`에 **`Icon`(UTexture2D/소프트참조) 필드 신설**(콘텐츠 채움), 이름은 기존 `DisplayName`. ② `UFPSRCardEntryWidget`이 `TargetWeapon` 게터 바인딩 → 아이콘/이름 슬롯 노출(`TargetWeapon==null`=캐릭터/AllWeapons 카드면 숨김). **코드(추첨)는 완료, UI 배선 + Icon 필드 + 무기 아이콘 콘텐츠 = 후속 유닛.**
   - 적용 위치=서버 권위(`ApplyCard` ThisWeapon 분기 `AddFragment`), 클라 예측=GA `ModifyShotCount` 루프(복제된 ActiveFragments로 N샷 예측). 런 종료 소멸=WeaponInstance 수명. **후속**: ModifyChargeTime/OnProjectileSpawn 훅(차징/투사체 아키타입), Melee fragment, fragment 제거/교체.
 
 #### 2-4-2. 사격 메커니즘 / 슈팅 감각 (데이터 드리븐, FPS 핵심)

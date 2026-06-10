@@ -37,6 +37,10 @@ public:
 	UFUNCTION(BlueprintPure, Category = "FPSR|Weapon")
 	TArray<UFPSRWeaponDataAsset*> GetOwnedWeapons() const;
 
+	/** Owned weapon instance whose source DataAsset matches Weapon (any slot, equipped or not). null if not owned.
+	 *  Lets weapon-scope cards apply to their source weapon rather than the currently equipped one. */
+	UFPSRWeaponInstance* GetInstanceForWeapon(const UFPSRWeaponDataAsset* Weapon) const;
+
 	/** Invalidate every weapon instance's resolved-stat cache (e.g. after an AllWeapons modifier changes). */
 	void MarkAllInstancesResolvedDirty();
 
