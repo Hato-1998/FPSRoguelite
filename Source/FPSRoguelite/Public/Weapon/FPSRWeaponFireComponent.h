@@ -34,6 +34,10 @@ public:
 	 *  stamps when the equipped weapon is actually a ChargeLaser, so a spoofed RPC for another weapon is ignored. */
 	void ServerBeginCharge();
 
+	/** Server: activate the charged beam authoritatively (called from the owning client's ServerReleaseChargeLaser
+	 *  RPC, ordered after ServerStartChargeLaser). Reads the server-stamped charge and consumes it. */
+	void ServerReleaseCharge();
+
 	/** Clear the charge state after the fire ability consumes it (prevents a single charge firing twice). */
 	void ResetCharge();
 

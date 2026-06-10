@@ -275,7 +275,16 @@ void AFPSRCharacter::Input_FireReleased(const FInputActionValue& Value)
 {
 	if (WeaponFire)
 	{
+		// Capture the charge state before StopFiring clears it: if this release ends a ChargeLaser charge, the
+		// authoritative beam is activated by the server via this ordered Character-channel RPC (paired with the
+		// ServerStartChargeLaser sent on press), not by GAS client→server activation, so begin always precedes
+		// release on the server and there is no cross-channel race.
+		const bool bWasChargingLaser = WeaponFire->IsChargingLaser();
 		WeaponFire->StopFiring();
+		if (bWasChargingLaser)
+		{
+			ServerReleaseChargeLaser();
+		}
 	}
 }
 
@@ -356,6 +365,17 @@ void AFPSRCharacter::ServerStartChargeLaser_Implementation()
 	if (WeaponFire)
 	{
 		WeaponFire->ServerBeginCharge();
+	}
+}
+
+void AFPSRCharacter::ServerReleaseChargeLaser_Implementation()
+{
+	// Ordered after ServerStartChargeLaser on the Character channel, so the server's charge-start stamp is
+	// already set. Activate the charged beam server-authoritatively. (A release arriving during the freeze still
+	// activates: the ability itself gates on the freeze and drops the charge, mirroring the other fire paths.)
+	if (WeaponFire)
+	{
+		WeaponFire->ServerReleaseCharge();
 	}
 }
 

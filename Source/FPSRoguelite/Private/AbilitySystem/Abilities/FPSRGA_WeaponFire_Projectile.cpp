@@ -176,7 +176,18 @@ void UFPSRGA_WeaponFire_Projectile::ActivateAbility(
 					}
 				}
 
-				ProjSub->AcquireProjectile(ProjClass, Start + Dir * MuzzleOffset, Dir, Params);
+				// Clamp the muzzle-offset spawn to the near side of any wall between the camera and the muzzle:
+				// without this, firing point-blank into thin cover spawns the projectile past the wall and lets
+				// it damage enemies through it. Trace the weapon (Visibility) channel from the viewpoint.
+				FVector SpawnLocation = Start + Dir * MuzzleOffset;
+				FHitResult MuzzleHit;
+				FCollisionQueryParams MuzzleParams(SCENE_QUERY_STAT(FPSRProjectileMuzzle), false, Avatar);
+				if (World->LineTraceSingleByChannel(MuzzleHit, Start, SpawnLocation, ECC_Visibility, MuzzleParams))
+				{
+					SpawnLocation = MuzzleHit.Location; // spawn flush against the wall, on the near side
+				}
+
+				ProjSub->AcquireProjectile(ProjClass, SpawnLocation, Dir, Params);
 			}
 		}
 	}

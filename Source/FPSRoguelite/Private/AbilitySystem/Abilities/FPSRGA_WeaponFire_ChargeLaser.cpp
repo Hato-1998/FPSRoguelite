@@ -19,6 +19,11 @@
 
 UFPSRGA_WeaponFire_ChargeLaser::UFPSRGA_WeaponFire_ChargeLaser()
 {
+	// Charge release is driven by two ordered Character-channel RPCs (ServerStartChargeLaser then
+	// ServerReleaseChargeLaser), not by GAS client→server activation. LocalOnly keeps the client activation
+	// purely cosmetic (no auto server activation) so the server can't run the beam ahead of the charge-start
+	// stamp on a different channel — the server activates this ability itself from the release RPC.
+	NetExecutionPolicy = EGameplayAbilityNetExecutionPolicy::LocalOnly;
 }
 
 void UFPSRGA_WeaponFire_ChargeLaser::ActivateAbility(
@@ -202,21 +207,26 @@ void UFPSRGA_WeaponFire_ChargeLaser::ActivateAbility(
 		}
 	};
 
-	// Piercing beam: stop the beam at the first world blocker (static or dynamic), but pass through every enemy
-	// pawn up to that point. Pawns are queried by object type so they do not absorb the wall-distance trace.
+	// Piercing beam: pass through every enemy pawn but stop at the first geometry that blocks the weapon
+	// (Visibility) channel. Gather the pawns first, then run a single Visibility trace that ignores them so the
+	// wall cutoff matches exactly what blocks a normal hitscan shot (movable cover/doors that block Visibility
+	// included), while query-only dynamics that ignore Visibility — e.g. in-flight AFPSRProjectile collision
+	// spheres — do NOT truncate the beam.
 	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(FPSRChargeLaser), false, Avatar);
-
-	FHitResult WallHit;
-	FCollisionObjectQueryParams WorldObjParams;
-	WorldObjParams.AddObjectTypesToQuery(ECC_WorldStatic);
-	WorldObjParams.AddObjectTypesToQuery(ECC_WorldDynamic);
-	const bool bWall = World->LineTraceSingleByObjectType(WallHit, Start, End, WorldObjParams, QueryParams);
-	const float WallDist = bWall ? WallHit.Distance : Range;
 
 	TArray<FHitResult> PawnHits;
 	FCollisionObjectQueryParams PawnObjParams;
 	PawnObjParams.AddObjectTypesToQuery(ECC_Pawn);
 	World->LineTraceMultiByObjectType(PawnHits, Start, End, PawnObjParams, QueryParams);
+
+	FCollisionQueryParams WallParams(SCENE_QUERY_STAT(FPSRChargeLaserWall), false, Avatar);
+	for (const FHitResult& PawnHit : PawnHits)
+	{
+		if (AActor* PawnActor = PawnHit.GetActor()) { WallParams.AddIgnoredActor(PawnActor); }
+	}
+	FHitResult WallHit;
+	const bool bWall = World->LineTraceSingleByChannel(WallHit, Start, End, ECC_Visibility, WallParams);
+	const float WallDist = bWall ? WallHit.Distance : Range;
 
 #if ENABLE_DRAW_DEBUG
 	DrawDebugLine(World, Start, Start + BaseDir * FMath::Min(WallDist, Range), FColor::Cyan, false, 0.5f, 0, 2.0f);

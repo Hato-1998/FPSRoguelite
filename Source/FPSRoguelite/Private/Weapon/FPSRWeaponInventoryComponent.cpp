@@ -3,6 +3,7 @@
 #include "Weapon/FPSRWeaponInventoryComponent.h"
 #include "Weapon/FPSRWeaponDataAsset.h"
 #include "Weapon/FPSRWeaponInstance.h"
+#include "Weapon/FPSRWeaponFireComponent.h"
 #include "Core/FPSRLogChannels.h"
 
 #include "AbilitySystemComponent.h"
@@ -95,6 +96,16 @@ void UFPSRWeaponInventoryComponent::EquipSlot(int32 SlotIndex)
 	MARK_PROPERTY_DIRTY_FROM_NAME(UFPSRWeaponInventoryComponent, CurrentSlotIndex, this);
 	RefreshEquippedAbility();
 
+	// Switching weapons cancels any in-progress ChargeLaser charge (server side): a banked charge must not
+	// survive an equip and fire later as a free full-charge beam on re-equip.
+	if (AActor* Owner = GetOwner())
+	{
+		if (UFPSRWeaponFireComponent* FireComp = Owner->FindComponentByClass<UFPSRWeaponFireComponent>())
+		{
+			FireComp->ResetCharge();
+		}
+	}
+
 	// Fresh weapon: clear the previous slot's fire-rate gate so the first shot isn't blocked by it.
 	ServerNextAllowedFireTime = 0.0f;
 
@@ -154,7 +165,15 @@ UFPSRWeaponDataAsset* UFPSRWeaponInventoryComponent::GetCurrentWeapon() const
 
 void UFPSRWeaponInventoryComponent::OnRep_CurrentSlotIndex()
 {
-	// Cosmetic hook for clients (weapon visual swap added later).
+	// Cosmetic hook for clients (weapon visual swap added later). Also cancel any local ChargeLaser charge so a
+	// charge started before this swap can't be released into the newly-equipped weapon (mirrors the server gate).
+	if (AActor* Owner = GetOwner())
+	{
+		if (UFPSRWeaponFireComponent* FireComp = Owner->FindComponentByClass<UFPSRWeaponFireComponent>())
+		{
+			FireComp->ResetCharge();
+		}
+	}
 }
 
 int32 UFPSRWeaponInventoryComponent::GetCurrentAmmo() const
