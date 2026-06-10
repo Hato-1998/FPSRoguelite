@@ -38,22 +38,36 @@
 | BaseStats.bHasADS | true |
 | BaseStats.ADSSpreadMultiplier | 0.6 |
 
-### 1-2. `DA_Weapon_Sniper` (단발 관통)
+### 1-2. `DA_Weapon_Sniper` (단발 관통 **탄환/투사체** — 리드샷)
+> 2026-06-11 변경: 스나이퍼 = **travel-time 탄환**(투사체)으로 전환 → 움직이는 적은 **리드샷** 필요. 히트스캔 아님. 투사체 임팩트 크릿+히트마커 코드 완료. **MaxPenetration(히트스캔용)이 아니라 `ProjectilePierce`로 관통**.
 | 필드 | 값 |
 |---|---|
 | DisplayName | "Sniper" |
 | Archetype | **Sniper** |
-| FireAbility | **FPSRGA_WeaponFire_Hitscan** |
+| FireAbility | **FPSRGA_WeaponFire_Projectile** (히트스캔 아님!) |
+| **ProjectileClass** | **BP_Bullet** (§2) |
 | BaseStats.FireMode | **Single** |
 | BaseStats.Damage | 120 |
 | BaseStats.FireRate | 1.2 |
-| BaseStats.**MaxPenetration** | **3** (일렬 적 3마리 관통; 1=첫 적 정지) |
+| BaseStats.**AOERadius** | **0** (단일타격 탄환; >0이면 폭발) |
+| BaseStats.**ProjectileSpeed** | **12000** (리드 체감용 — 빠르되 즉발 아님; PIE 튜닝) |
+| BaseStats.ProjectileGravityScale | **0** (직선 탄도) |
+| BaseStats.**ProjectilePierce** | **2** (관통 적 수; 0=첫 적 정지) |
+| BaseStats.ProjectileLifetime | 3 |
 | BaseStats.Range | 15000 |
 | BaseStats.RecoilRecovery | **Auto** (단발 자동복구) |
 | BaseStats.MagSize | 5 |
 | BaseStats.ReloadTime | 2.5 |
 | BaseStats.bHasADS | true |
 | BaseStats.ADSFieldOfView | 30 (정밀 줌) |
+| **— 반동 스타일(2026-06-11 지정: 묵직한 스코프 킥) —** | |
+| BaseStats.**RecoilVertical** | **5.0** (강한 상방 킥/발) |
+| BaseStats.RecoilHorizontal | 0.5 |
+| BaseStats.**ADSVerticalScale** | **1.0** (스코프 시 풀 킥) |
+| BaseStats.HipVerticalScale | 1.0 |
+| BaseStats.ADSHorizontalRandom | 0.1 (정밀, 좌우 거의 없음) |
+| BaseStats.RecoilRiseRate | 40 (날카로운 킥) |
+| BaseStats.RecoilRecoveryRate | 5 (천천히 무겁게 복귀) |
 
 ### 1-3. `DA_Weapon_Shotgun` (산탄)
 | 필드 | 값 |
@@ -64,10 +78,19 @@
 | BaseStats.FireMode | Single (또는 FullAuto) |
 | BaseStats.**PelletCount** | **8** (1탄약당 8펠릿) |
 | BaseStats.Damage | 10 (펠릿당; 근접 합산 큼) |
-| BaseStats.SpreadDegrees | 8 (산탄 퍼짐) |
+| BaseStats.**SpreadDegrees** | **8** (산탄 원 = 크로스헤어 원 크기) |
+| BaseStats.**BloomPerShot** | **0** (원 크기 고정 — 블룸 성장 없음) |
 | BaseStats.Range | 3000 (짧게) |
 | BaseStats.MagSize | 6 |
 | BaseStats.FireRate | 1.5 |
+| **— 반동 스타일(2026-06-11 지정: 강한 펀치 킥) —** | |
+| BaseStats.**RecoilVertical** | **3.5** (강한 상방 펀치/발) |
+| BaseStats.RecoilHorizontal | 0.8 |
+| BaseStats.**HipVerticalScale** | **1.0** (힙 사격 풀 킥 — 기본 0.4는 너무 약함) |
+| BaseStats.HipHorizontalRandom | 0.6 |
+| BaseStats.RecoilRiseRate | 35 (빠른 펀치) |
+| BaseStats.RecoilRecovery | **Auto** (단발 자동 스냅백) |
+| BaseStats.RecoilRecoveryRate | 7 |
 
 ### 1-4. `DA_Weapon_Bazooka` (AOE 로켓)
 | 필드 | 값 |
@@ -81,6 +104,8 @@
 | BaseStats.**AOERadius** | **400** (>0=폭발 반경; 0이면 단일타격) |
 | BaseStats.ProjectileSpeed | 3000 (직선 로켓) |
 | BaseStats.ProjectileGravityScale | **0** (직선) |
+| BaseStats.**SpreadDegrees** | **4** (로켓 랜덤 산포 원 = 크로스헤어 원; 0이면 정확히 직선) |
+| BaseStats.**BloomPerShot** | **0** (원 크기 고정) |
 | BaseStats.ProjectileLifetime | 5 |
 | BaseStats.MagSize | 4 |
 | BaseStats.ReloadTime | 2.0 |
@@ -119,15 +144,16 @@
 
 ---
 
-## 2. 투사체 actor BP (AOE 전용)
+## 2. 투사체 actor BP (AOE + 탄환)
 
-`BP_Rocket`, `BP_Grenade` 둘 다:
+`BP_Rocket`, `BP_Grenade`, **`BP_Bullet`** 모두:
 1. `Content/Weapons/Projectiles/`에서 우클릭 > Blueprint Class > **부모 = `FPSRProjectile`** (C++).
-2. (선택) `MeshComp`에 메시 지정 — 없으면 엔진 기본 Sphere/Cylinder(작게)로도 기능 OK. **임팩트/폭발 VFX·사운드는 C++ 훅 없음 → 후속**(현재 데미지만, 시각 없음). 기능 검증엔 불필요.
-3. (선택) 콜리전 구 반경 조정(기본 16cm).
-4. §1-4/1-5 DA의 `ProjectileClass`에 각각 지정.
+2. (선택) `MeshComp`에 메시 지정 — 없으면 엔진 기본 Sphere/Cylinder(작게)로도 기능 OK. **임팩트/폭발 VFX·사운드는 C++ 훅 없음 → 후속**(현재 데미지만, 시각 없음). 기능 검증엔 불필요. **탄환은 얇고 작게**(가는 실린더/작은 구), 트레이서 트레일은 BP에 직접 붙이면 됨.
+3. (선택) 콜리전 구 반경 조정(기본 16cm; 탄환은 더 작게 권장).
+4. §1-2/1-4/1-5 DA의 `ProjectileClass`에 각각 지정(Bullet→Sniper, Rocket→Bazooka, Grenade→Grenade).
 
-> 로켓/유탄의 직선 vs 포물선 차이는 BP가 아니라 **DA의 `ProjectileGravityScale`**(0 vs 1.0)로 결정됨. BP는 동일 부모로 충분.
+> 직선/포물선/탄환 차이는 BP가 아니라 **DA 스탯**(`ProjectileGravityScale` 0 vs 1.0, `AOERadius` 0 vs >0, `ProjectileSpeed`)로 결정됨. BP는 동일 부모로 충분.
+> **투사체 크릿·히트마커 = 코드 완료**(2026-06-11): 임팩트 시 서버가 크릿 롤 + 발사 플레이어에 히트마커(Kill>Crit>Hit). 탄환=관통마다, AOE=폭발당 1회. 로켓/유탄도 자동 적용.
 
 ---
 
@@ -137,7 +163,7 @@
 
 **확인 포인트:**
 - **BurstRifle**: 1클릭 = 3발 점사.
-- **Sniper**: 단발·고데미지·**일렬 적 3마리 관통**·ADS 줌. (벽 뒤 적은 안 맞음 — Visibility 벽판정 교정 반영됨)
+- **Sniper(탄환/투사체)**: 단발·고데미지·**탄환이 날아감(travel time)** → **움직이는 적은 리드샷 필요**. 일렬 적 `ProjectilePierce`(2)마리 관통, 벽에서 정지. ADS 줌. **명중 시 히트마커 표시**(크릿/킬 포함). 빠른 적엔 앞을 조준.
 - **Shotgun**: 1발 = 8펠릿 산탄.
 - **Bazooka**: 직선 로켓 비행 → 폭발 반경(400) 내 다수 적 데미지. **근접 벽에 쏘면 벽면에서 폭발**(관통 안 됨 — 머즐 클램프 교정 반영).
 - **Grenade**: 포물선 낙하 → 폭발(300).
@@ -151,6 +177,7 @@
 - 투사체 **임팩트/폭발 VFX·사운드** 훅(`AFPSRProjectile::HandleImpact` 콜백).
 - ChargeLaser **빔 Niagara** + **차징 게이지 HUD**(alpha 게터/이벤트 배선).
 - 무기별 `AvailableModifiers` 미션보상 fragment 카드 확장(현재 MultiShot/BonusDamage만).
+- **동적 스프레드 크로스헤어(원 레티클)** — 샷건·바주카 등 산포 무기의 크로스헤어에 현재 스프레드 크기만큼 원을 그림. **발사(원 안 랜덤)는 이미 구현됨**(`SpreadDegrees`+`VRandCone`); 신규는 **시각 표시만**. ① 코드: `UFPSRWeaponFireComponent`에 유효 스프레드 게터 노출(`GetCurrentSpreadDegrees()` = 해석 SpreadDegrees + 블룸, ADS 배수 반영; 기존 `GetCurrentBloom` 옆). ② 콘텐츠: WBP 크로스헤어에 원 이미지/머티리얼, 반지름 = `tan(SpreadDegrees)×화면상수`로 스케일. `BloomPerShot=0`이면 고정 원, >0이면 사격 중 확대. 전 산포 무기 범용(샷건 전용 아님). → 별도 HUD 유닛(가이드 §4 차징 게이지 HUD와 함께 묶을 수 있음).
 
 ---
 

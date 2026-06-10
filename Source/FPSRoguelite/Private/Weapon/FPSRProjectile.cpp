@@ -5,6 +5,7 @@
 #include "Enemy/FPSREnemyHealthComponent.h"
 #include "Hero/FPSRCharacter.h"
 #include "Core/FPSRGameState.h"
+#include "Core/FPSRPlayerController.h"
 #include "Core/FPSRLogChannels.h"
 
 #include "Components/SphereComponent.h"
@@ -200,7 +201,12 @@ void AFPSRProjectile::OnSphereOverlap(UPrimitiveComponent* OverlappedComp, AActo
 	}
 
 	// Single-target (optionally piercing): apply the direct hit, then stop once pierce is exhausted.
-	TryDamageActor(OtherActor);
+	bool bCrit = false;
+	bool bKill = false;
+	if (TryDamageActor(OtherActor, bCrit, bKill))
+	{
+		NotifyInstigatorHitMarker(bCrit, bKill); // per-impact marker (a piercing bullet hits targets over time)
+	}
 	--PierceRemaining;
 	if (PierceRemaining < 0)
 	{
@@ -248,13 +254,25 @@ void AFPSRProjectile::HandleImpact(const FVector& ImpactPoint)
 			World->OverlapMultiByObjectType(Overlaps, ImpactPoint, FQuat::Identity, ObjectParams, Sphere, QueryParams);
 
 			TArray<AActor*> Damaged;
+			bool bAnyHit = false;
+			bool bAnyCrit = false;
+			bool bAnyKill = false;
 			for (const FOverlapResult& Overlap : Overlaps)
 			{
 				AActor* Target = Overlap.GetActor();
-				if (Target && !Damaged.Contains(Target) && TryDamageActor(Target))
+				bool bCrit = false;
+				bool bKill = false;
+				if (Target && !Damaged.Contains(Target) && TryDamageActor(Target, bCrit, bKill))
 				{
 					Damaged.Add(Target);
+					bAnyHit = true;
+					bAnyCrit |= bCrit;
+					bAnyKill |= bKill;
 				}
+			}
+			if (bAnyHit)
+			{
+				NotifyInstigatorHitMarker(bAnyCrit, bAnyKill); // one marker per explosion (strongest outcome)
 			}
 		}
 	}
@@ -283,18 +301,30 @@ bool AFPSRProjectile::IsHostileTarget(AActor* Target) const
 	return false;
 }
 
-bool AFPSRProjectile::TryDamageActor(AActor* Target)
+bool AFPSRProjectile::TryDamageActor(AActor* Target, bool& bOutCrit, bool& bOutKill)
 {
+	bOutCrit = false;
+	bOutKill = false;
 	if (!HasAuthority() || !IsHostileTarget(Target))
 	{
 		return false;
+	}
+
+	// Roll crit per impact using the chance/multiplier baked from the instigator's ASC at spawn (mirrors the
+	// hitscan ability's per-hit crit; enemy projectiles carry CritChance 0 so they never crit).
+	float FinalDamage = Params.Damage;
+	if (Params.CritChance > 0.0f && FMath::FRand() < Params.CritChance)
+	{
+		FinalDamage *= Params.CritMultiplier;
+		bOutCrit = true;
 	}
 
 	if (Params.Team == EFPSRProjectileTeam::Player)
 	{
 		if (UFPSREnemyHealthComponent* HealthComp = Target->FindComponentByClass<UFPSREnemyHealthComponent>())
 		{
-			HealthComp->ApplyDamage(Params.Damage, Params.InstigatorActor);
+			HealthComp->ApplyDamage(FinalDamage, Params.InstigatorActor);
+			bOutKill = HealthComp->IsDead();
 			return true;
 		}
 	}
@@ -302,12 +332,29 @@ bool AFPSRProjectile::TryDamageActor(AActor* Target)
 	{
 		if (AFPSRCharacter* Character = Cast<AFPSRCharacter>(Target))
 		{
-			Character->ApplyContactDamage(Params.Damage, Params.InstigatorActor);
+			Character->ApplyContactDamage(FinalDamage, Params.InstigatorActor);
 			return true;
 		}
 	}
 
 	return false;
+}
+
+void AFPSRProjectile::NotifyInstigatorHitMarker(bool bCrit, bool bKill) const
+{
+	// Hit-markers belong to the firing player's HUD; enemy-team projectiles have no HUD owner.
+	if (!HasAuthority() || Params.Team != EFPSRProjectileTeam::Player || !Params.InstigatorActor)
+	{
+		return;
+	}
+	const APawn* InstigatorPawn = Cast<APawn>(Params.InstigatorActor);
+	AController* InstigatorController = InstigatorPawn ? InstigatorPawn->GetController() : nullptr;
+	if (AFPSRPlayerController* OwnerPC = Cast<AFPSRPlayerController>(InstigatorController))
+	{
+		const EFPSRHitMarkerType MarkerType = bKill ? EFPSRHitMarkerType::Kill
+			: (bCrit ? EFPSRHitMarkerType::Crit : EFPSRHitMarkerType::Hit);
+		OwnerPC->ClientNotifyHitMarker(MarkerType);
+	}
 }
 
 void AFPSRProjectile::ReleaseToPool()

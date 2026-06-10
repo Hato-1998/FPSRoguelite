@@ -364,13 +364,17 @@ void UFPSRWeaponFireComponent::TickComponent(float DeltaTime, ELevelTick TickTyp
 	}
 
 	// --- Recoil pitch handling (smoothed rise + debt-aware recovery + player compensation) ---
-	// A spray interrupted by an empty magazine / reload must stop kicking the instant rounds stop leaving the
-	// gun: discard any queued (not-yet-applied) recoil rise. Otherwise the smoothed-rise backlog keeps climbing
-	// the view during the reload with no shot firing — especially noticeable once fire rate is boosted.
-	if (!CanFire())
+	// During a reload, TRIM a large smoothed-rise backlog (from boosted rapid fire) so the view doesn't keep
+	// climbing through the reload — but KEEP up to a single shot's worth so the round that EMPTIED the magazine
+	// still kicks. Zeroing the queue here erased the last shot's recoil entirely: emptying the mag triggers an
+	// auto-reload within a frame of that shot, so IsReloading flips true before the smoothed rise (applied over
+	// ~RecoilVertical/RecoilRiseRate seconds) has played out — worst on a high-recoil single-shot sniper.
+	if (Inventory->IsReloading())
 	{
-		PendingRisePitch = 0.0f;
-		PendingRiseYaw = 0.0f;
+		const float MaxRise = Stats.RecoilVertical * FMath::Max(Stats.HipVerticalScale, Stats.ADSVerticalScale);
+		PendingRisePitch = FMath::Min(PendingRisePitch, FMath::Max(0.0f, MaxRise));
+		const float MaxYaw = FMath::Abs(Stats.RecoilHorizontal) * 2.0f; // one shot incl. random-variance headroom
+		PendingRiseYaw = FMath::Clamp(PendingRiseYaw, -MaxYaw, MaxYaw);
 	}
 
 	// 1) Smoothly apply any pending up-kick (snappy rise), accumulating recovery debt.

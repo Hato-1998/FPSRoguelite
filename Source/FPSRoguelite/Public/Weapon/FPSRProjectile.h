@@ -70,8 +70,13 @@ protected:
 	 *  so a round never explodes on a friendly pass-through. */
 	bool IsHostileTarget(AActor* Target) const;
 
-	/** Try to apply damage to an actor (returns true if a damage path applied). Server-only. */
-	bool TryDamageActor(AActor* Target);
+	/** Try to apply (crit-rolled) damage to an actor. Server-only. Returns true if a damage path applied, and
+	 *  outputs whether the hit critted and whether it killed the target (for hit-marker feedback). */
+	bool TryDamageActor(AActor* Target, bool& bOutCrit, bool& bOutKill);
+
+	/** Server: notify the instigating player's controller of a hit-marker (Player-team projectiles only — enemy
+	 *  projectiles have no HUD owner). Strongest outcome wins: Kill > Crit > Hit (Game.MD §2-14). */
+	void NotifyInstigatorHitMarker(bool bCrit, bool bKill) const;
 
 	/** Release this projectile back to the pool. */
 	void ReleaseToPool();
