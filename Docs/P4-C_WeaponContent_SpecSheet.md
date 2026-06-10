@@ -11,11 +11,13 @@
 1. **베이스 복제**: `Content/Weapons/DataTable/DA_Weapon_Rifle`를 복제(Ctrl+D)해 시작 → 반동/블룸/ADS 기본값을 물려받고 아래 표의 필드만 덮어쓰기. (Knife는 근접이라 베이스로 부적합.)
    - 또는 우클릭 > Miscellaneous > Data Asset > **`FPSRWeaponDataAsset`** 신규 생성 후 전 필드 입력.
 2. 파일명/위치: `Content/Weapons/DataTable/DA_Weapon_<이름>` (기존 Rifle/Knife와 동일 폴더).
-3. **DataAsset 최상위 필드**(4개): `DisplayName`, `Archetype`, `FireAbility`, `ProjectileClass`(AOE만). 나머지 게임플레이 수치는 전부 **`BaseStats`**(=`FFPSRWeaponStatBlock`) 안에 있음.
-4. 투사체 무기(Bazooka/Grenade)는 §2의 `BP_Rocket`/`BP_Grenade`를 먼저 만들고 `ProjectileClass`에 지정.
-5. 표기 규약: `BaseStats.X` = BaseStats 구조체 안의 X 필드. 표에 없는 필드는 **Rifle 베이스값 유지**.
+3. **DataAsset 최상위 필드**: `DisplayName`, `FireAbility`, `ProjectileClass`(AOE만), `BaseStats`. **`Archetype`은 `BaseStats` 안으로 이동**(2026-06-10) — `BaseStats.Archetype`에서 설정.
+4. **⭐ 아키타입별 조건부 노출(2026-06-10)**: `BaseStats.Archetype`을 먼저 고르면, **그 아키타입에 관련된 필드만 나타납니다**. 예) Shotgun → `PelletCount` 표시 / Sniper → `MaxPenetration` / AOE → Projectile 5필드 / ChargeLaser → Charge 2필드 / Melee → Melee 2필드. `BurstCount`는 `FireMode=Burst`일 때만, ADS 세부필드는 `bHasADS=true`일 때만 표시. **→ Archetype·FireMode·bHasADS를 먼저 설정**한 뒤 나머지를 채우세요.
+5. 투사체 무기(Bazooka/Grenade)는 §2의 `BP_Rocket`/`BP_Grenade`를 먼저 만들고 `ProjectileClass`에 지정.
+6. 표기 규약: `BaseStats.X` = BaseStats 구조체 안의 X 필드. 표에 없는 필드는 **Rifle 베이스값 유지**.
 
 > ⚠️ **FireAbility 값**: 에디터 드롭다운에서 클래스 선택 — `FPSRGA_WeaponFire_Hitscan` / `FPSRGA_WeaponFire_Projectile` / `FPSRGA_WeaponFire_ChargeLaser`.
+> ⚠️ **기존 `DA_Weapon_Knife` 재설정 필요**: Archetype 필드 이동으로 Knife의 값이 FullAuto로 리셋됨 → `BaseStats.Archetype = Melee`로 다시 설정(안 하면 칼이 총처럼 동작). Rifle은 FullAuto 기본값이라 보통 무영향(확인 권장).
 
 ---
 

@@ -20,8 +20,9 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon")
 	FText DisplayName;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon")
-	EFPSRWeaponArchetype Archetype = EFPSRWeaponArchetype::FullAuto;
+	/** Weapon archetype now lives in BaseStats so per-archetype stat fields can drive EditCondition visibility. */
+	UFUNCTION(BlueprintPure, Category = "Weapon")
+	EFPSRWeaponArchetype GetArchetype() const { return BaseStats.Archetype; }
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon")
 	FFPSRWeaponStatBlock BaseStats;

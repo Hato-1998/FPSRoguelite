@@ -100,7 +100,7 @@ void UFPSRWeaponFireComponent::StartFiring()
 	// alpha is measured server-authoritatively (a client can't claim a longer charge than the server saw).
 	if (UFPSRWeaponDataAsset* Weapon = Instance->GetSource())
 	{
-		if (Weapon->Archetype == EFPSRWeaponArchetype::ChargeLaser)
+		if (Weapon->GetArchetype() == EFPSRWeaponArchetype::ChargeLaser)
 		{
 			bChargingLaser = true;
 			ChargeStartWorldTime = GetWorld()->GetTimeSeconds();
@@ -139,7 +139,7 @@ void UFPSRWeaponFireComponent::StopFiring()
 		UFPSRWeaponInstance* Instance = Inventory ? Inventory->GetCurrentInstance() : nullptr;
 		UFPSRWeaponDataAsset* Weapon = Instance ? Instance->GetSource() : nullptr;
 		const bool bStillChargeLaser = OwnerPawn && Weapon
-			&& Weapon->Archetype == EFPSRWeaponArchetype::ChargeLaser && Weapon->FireAbility;
+			&& Weapon->GetArchetype() == EFPSRWeaponArchetype::ChargeLaser && Weapon->FireAbility;
 		if (bStillChargeLaser && !OwnerPawn->HasAuthority())
 		{
 			if (UAbilitySystemComponent* ASC = UAbilitySystemGlobals::GetAbilitySystemComponentFromActor(OwnerPawn))
@@ -164,7 +164,7 @@ void UFPSRWeaponFireComponent::ServerReleaseCharge()
 	// Server-authoritative charged-beam activation, driven by the owning client's ordered release RPC. The
 	// LocalOnly ability runs here with authority, applies damage, and consumes the charge. A release whose
 	// weapon is no longer a ChargeLaser just drops the server charge stamp so it can never boost a later shot.
-	if (OwnerPawn && Weapon && Weapon->Archetype == EFPSRWeaponArchetype::ChargeLaser && Weapon->FireAbility)
+	if (OwnerPawn && Weapon && Weapon->GetArchetype() == EFPSRWeaponArchetype::ChargeLaser && Weapon->FireAbility)
 	{
 		if (UAbilitySystemComponent* ASC = UAbilitySystemGlobals::GetAbilitySystemComponentFromActor(OwnerPawn))
 		{
@@ -183,7 +183,7 @@ void UFPSRWeaponFireComponent::ServerBeginCharge()
 	UFPSRWeaponInstance* Instance = Inventory ? Inventory->GetCurrentInstance() : nullptr;
 	UFPSRWeaponDataAsset* Weapon = Instance ? Instance->GetSource() : nullptr;
 	// Only a ChargeLaser can begin a charge — ignore a spoofed RPC for any other equipped weapon.
-	if (Weapon && Weapon->Archetype == EFPSRWeaponArchetype::ChargeLaser)
+	if (Weapon && Weapon->GetArchetype() == EFPSRWeaponArchetype::ChargeLaser)
 	{
 		ChargeStartWorldTime = GetWorld()->GetTimeSeconds();
 	}
@@ -211,7 +211,7 @@ void UFPSRWeaponFireComponent::FireOneShot()
 		return;
 	}
 
-	const bool bMelee = (Weapon->Archetype == EFPSRWeaponArchetype::Melee);
+	const bool bMelee = (Weapon->GetArchetype() == EFPSRWeaponArchetype::Melee);
 
 	// Ranged: block on empty magazine or during reload. Melee uses no ammo.
 	if (!bMelee && (Inventory->IsReloading() || Inventory->GetCurrentAmmo() <= 0))
@@ -312,7 +312,7 @@ void UFPSRWeaponFireComponent::TickComponent(float DeltaTime, ELevelTick TickTyp
 	}
 
 	// Melee: repeat attacks while the button is held; FireOneShot self-gates on MeleeAttackDelay.
-	if (bWantsToFire && Weapon->Archetype == EFPSRWeaponArchetype::Melee)
+	if (bWantsToFire && Weapon->GetArchetype() == EFPSRWeaponArchetype::Melee)
 	{
 		FireOneShot();
 	}
@@ -393,7 +393,7 @@ void UFPSRWeaponFireComponent::TickComponent(float DeltaTime, ELevelTick TickTyp
 
 #if ENABLE_DRAW_DEBUG
 	// Debug scaffolding (replaced by HUD in P3): show ammo for the local player (ammo weapons only).
-	if (GEngine && Weapon->Archetype != EFPSRWeaponArchetype::Melee && Stats.MagSize > 0)
+	if (GEngine && Weapon->GetArchetype() != EFPSRWeaponArchetype::Melee && Stats.MagSize > 0)
 	{
 		const int32 Ammo = Inventory->GetCurrentAmmo();
 		const int32 Mag = Inventory->GetCurrentMagSize();

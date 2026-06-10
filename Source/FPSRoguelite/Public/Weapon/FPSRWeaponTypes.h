@@ -45,6 +45,9 @@ struct FPSROGUELITE_API FFPSRWeaponStatBlock
 	GENERATED_BODY()
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon")
+	EFPSRWeaponArchetype Archetype = EFPSRWeaponArchetype::FullAuto;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon")
 	float Damage = 10.0f;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Fire")
@@ -53,13 +56,13 @@ struct FPSROGUELITE_API FFPSRWeaponStatBlock
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Fire")
 	float FireRate = 8.0f; // shots per second
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Fire")
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Fire", meta = (EditConditionHides, EditCondition = "FireMode == EFPSRFireMode::Burst"))
 	int32 BurstCount = 3;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Fire")
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Fire", meta = (EditConditionHides, EditCondition = "Archetype == EFPSRWeaponArchetype::Shotgun"))
 	int32 PelletCount = 1; // pellets fired per round in one spread cone (shotgun); 1 = single bullet, costs 1 ammo regardless
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Fire")
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Fire", meta = (EditConditionHides, EditCondition = "Archetype == EFPSRWeaponArchetype::Sniper"))
 	int32 MaxPenetration = 1; // max enemies a single pellet passes through (sniper pierce); 1 = stops at first enemy
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon")
@@ -116,46 +119,46 @@ struct FPSROGUELITE_API FFPSRWeaponStatBlock
 	float ADSHorizontalRandom = 0.15f; // ADS horizontal random fraction (low = pattern shows)
 
 	// --- Melee ---
-	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Melee")
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Melee", meta = (EditConditionHides, EditCondition = "Archetype == EFPSRWeaponArchetype::Melee"))
 	float MeleeRadius = 175.0f;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Melee")
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Melee", meta = (EditConditionHides, EditCondition = "Archetype == EFPSRWeaponArchetype::Melee"))
 	float MeleeAttackDelay = 0.5f; // seconds between melee attacks (also rate-limits rapid clicks)
 
 	// --- ADS (aim down sights) ---
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|ADS")
 	bool bHasADS = false; // melee / no-ADS weapons leave this false
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|ADS")
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|ADS", meta = (EditConditionHides, EditCondition = "bHasADS"))
 	float ADSFieldOfView = 55.0f; // zoomed FOV while aiming (default camera ~90)
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|ADS")
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|ADS", meta = (EditConditionHides, EditCondition = "bHasADS"))
 	float ADSSpreadMultiplier = 0.4f; // spread scale while aiming (lower = tighter)
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|ADS")
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|ADS", meta = (EditConditionHides, EditCondition = "bHasADS"))
 	float ADSInterpSpeed = 14.0f; // FOV interpolation speed
 
 	// --- Projectile (AOE archetypes; spawned by the projectile fire ability) ---
-	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Projectile")
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Projectile", meta = (EditConditionHides, EditCondition = "Archetype == EFPSRWeaponArchetype::AOE"))
 	float ProjectileSpeed = 3000.0f; // initial velocity (cm/s)
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Projectile")
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Projectile", meta = (EditConditionHides, EditCondition = "Archetype == EFPSRWeaponArchetype::AOE"))
 	float ProjectileGravityScale = 0.0f; // 0 = straight (rocket); >0 = arc (grenade)
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Projectile")
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Projectile", meta = (EditConditionHides, EditCondition = "Archetype == EFPSRWeaponArchetype::AOE"))
 	float AOERadius = 0.0f; // >0 = radial explosion on impact; 0 = single-target
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Projectile")
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Projectile", meta = (EditConditionHides, EditCondition = "Archetype == EFPSRWeaponArchetype::AOE"))
 	float ProjectileLifetime = 5.0f; // seconds before auto-release
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Projectile")
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Projectile", meta = (EditConditionHides, EditCondition = "Archetype == EFPSRWeaponArchetype::AOE"))
 	int32 ProjectilePierce = 0; // extra pawns a single-hit projectile passes through (ignored if AOE)
 
 	// --- Charge (ChargeLaser archetype; charge alpha scales damage) ---
-	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Charge")
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Charge", meta = (EditConditionHides, EditCondition = "Archetype == EFPSRWeaponArchetype::ChargeLaser"))
 	float ChargeTime = 0.0f; // seconds of hold to reach full charge; 0 = not a charge weapon
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Charge")
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Charge", meta = (EditConditionHides, EditCondition = "Archetype == EFPSRWeaponArchetype::ChargeLaser"))
 	float ChargeFullDamageMultiplier = 3.0f; // damage multiplier at full charge (alpha lerps 1.0 -> this)
 };
 
