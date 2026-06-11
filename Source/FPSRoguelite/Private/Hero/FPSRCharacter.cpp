@@ -478,6 +478,20 @@ void AFPSRCharacter::TryBindVisionDelegate()
 	HandleRunStateChanged_Vision();
 }
 
+void AFPSRCharacter::NotifyControllerChanged()
+{
+	Super::NotifyControllerChanged();
+
+	// A pawn possessed AFTER BeginPlay (e.g. a late join while LimitedVision is already active) binds the vision
+	// delegate before it is locally controlled, so the initial apply was skipped. Re-check now that the
+	// controller is known so the local player catches a restriction that won't broadcast again.
+	if (IsLocallyControlled())
+	{
+		TryBindVisionDelegate();   // ensure bound (no-op if already)
+		HandleRunStateChanged_Vision();
+	}
+}
+
 void AFPSRCharacter::HandleRunStateChanged_Vision()
 {
 	// Camera post-process only affects the local view — ignore on simulated proxies / server-side non-local pawns.
@@ -516,7 +530,10 @@ void AFPSRCharacter::ApplyVisionRestriction(bool bRestricted)
 		}
 		else
 		{
-			// Built-in fallback: heavy vignette darkening the screen edges.
+			// Built-in fallback: heavy vignette darkening the screen edges. Save the camera's authored vignette
+			// override so it can be restored when the mission ends (don't clobber it).
+			bSavedVignetteOverride = PP.bOverride_VignetteIntensity;
+			SavedVignetteIntensity = PP.VignetteIntensity;
 			PP.bOverride_VignetteIntensity = true;
 			PP.VignetteIntensity = VisionVignetteIntensity;
 		}
@@ -529,7 +546,9 @@ void AFPSRCharacter::ApplyVisionRestriction(bool bRestricted)
 		}
 		else
 		{
-			PP.bOverride_VignetteIntensity = false;
+			// Restore the camera's pre-mission vignette settings instead of force-disabling the override.
+			PP.bOverride_VignetteIntensity = bSavedVignetteOverride;
+			PP.VignetteIntensity = SavedVignetteIntensity;
 		}
 	}
 

@@ -31,6 +31,7 @@ public:
 	virtual void SetupPlayerInputComponent(UInputComponent* PlayerInputComponent) override;
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+	virtual void NotifyControllerChanged() override;
 
 #if ENABLE_DRAW_DEBUG
 	virtual void Tick(float DeltaSeconds) override;
@@ -188,6 +189,11 @@ protected:
 
 	/** Local-client: true while the vision-restriction PP is currently applied (idempotency guard). */
 	bool bVisionRestrictionApplied = false;
+
+	/** Local-client: saved camera vignette override flag/intensity (fallback path) so the camera's authored
+	 *  settings are restored when the mission ends instead of being clobbered. */
+	bool bSavedVignetteOverride = false;
+	float SavedVignetteIntensity = 0.0f;
 
 	/** Local-client: true once bound to GameState OnRunStateChanged. */
 	bool bVisionDelegateBound = false;
