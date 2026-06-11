@@ -13,11 +13,13 @@
 #include "Core/FPSRLogChannels.h"
 #include "Core/FPSRPlayerState.h"
 #include "Core/FPSRGameState.h"
+#include "Core/FPSRGameFlowSubsystem.h"
 #include "Card/FPSRCardSubsystem.h"
 #include "Card/FPSRCardDataAsset.h"
 #include "UI/FPSRPrimaryGameLayout.h"
 #include "UI/FPSRCardSelectWidget.h"
 #include "UI/FPSRGameHUDWidget.h"
+#include "UI/FPSRResultWidget.h"
 #include "Hero/FPSRPlayerFeedbackComponent.h"
 #include "GameFramework/Pawn.h"
 
@@ -435,6 +437,49 @@ void AFPSRPlayerController::ServerAbandonOffer_Implementation(int32 OfferId)
 	}
 
 	NotifyPauseStateDirty();
+}
+
+void AFPSRPlayerController::ClientShowRunResult_Implementation(EFPSRRunOutcome Outcome)
+{
+	if (!IsLocalController())
+	{
+		return;
+	}
+
+	// Lazily create the layout if needed (usually already exists from BeginPlay).
+	if (!EnsurePrimaryLayout() || !ResultWidgetClass)
+	{
+		UE_LOG(LogFPSR, Warning, TEXT("[UI] Cannot show run result (PrimaryLayout/ResultWidgetClass missing)"));
+		return;
+	}
+
+	UCommonActivatableWidget* Pushed =
+		PrimaryLayout->PushWidgetToLayer(FGameplayTag::RequestGameplayTag(FName("UI.Layer.Menu")), ResultWidgetClass);
+
+	if (UFPSRResultWidget* ResultWidget = Cast<UFPSRResultWidget>(Pushed))
+	{
+		ResultWidget->SetOutcome(Outcome);
+	}
+	else
+	{
+		UE_LOG(LogFPSR, Warning, TEXT("[UI] Failed to push result widget to Menu layer"));
+	}
+}
+
+void AFPSRPlayerController::ServerRequestReturnToMenu_Implementation(EFPSRRunOutcome Outcome)
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+
+	if (UGameInstance* GI = GetGameInstance())
+	{
+		if (UFPSRGameFlowSubsystem* Flow = GI->GetSubsystem<UFPSRGameFlowSubsystem>())
+		{
+			Flow->ReturnToMenu(Outcome);
+		}
+	}
 }
 
 #if !UE_BUILD_SHIPPING

@@ -22,7 +22,8 @@ public class FPSRoguelite : ModuleRules
 			"NetCore",
 			"CommonUI",
 			"CommonInput",
-			"UMG"
+			"UMG",
+			"DeveloperSettings"
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[]
