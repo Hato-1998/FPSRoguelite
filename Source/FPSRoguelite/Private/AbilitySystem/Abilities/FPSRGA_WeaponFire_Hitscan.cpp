@@ -7,8 +7,10 @@
 #include "Weapon/FPSRWeaponFragment.h"
 #include "Weapon/FPSRWeaponDataAsset.h"
 #include "Weapon/FPSRWeaponFireComponent.h"
+#include "Combat/FPSRCombatStatics.h"
 #include "Enemy/FPSREnemyHealthComponent.h"
 #include "Core/FPSRGameState.h"
+#include "Core/FPSRPlayerController.h"
 #include "Core/FPSRLogChannels.h"
 
 #include "AbilitySystemComponent.h"
@@ -56,6 +58,8 @@ void UFPSRGA_WeaponFire_Hitscan::ActivateAbility(
 	float Damage = 10.0f;
 	float Range = 10000.0f;
 	float SpreadDegrees = 1.0f;
+	int32 PelletCount = 1;
+	int32 MaxPenetration = 1;
 	UFPSRWeaponInventoryComponent* Inventory = Avatar->FindComponentByClass<UFPSRWeaponInventoryComponent>();
 	UFPSRWeaponInstance* Instance = Inventory ? Inventory->GetCurrentInstance() : nullptr;
 	const FFPSRWeaponStatBlock* Stats = Instance ? &Instance->GetResolvedStats() : nullptr;
@@ -64,10 +68,12 @@ void UFPSRGA_WeaponFire_Hitscan::ActivateAbility(
 		Damage = Stats->Damage;
 		Range = Stats->Range;
 		SpreadDegrees = Stats->SpreadDegrees;
+		PelletCount = FMath::Clamp(Stats->PelletCount, 1, 32); // upper-bound authored data to cap traces/activation
+		MaxPenetration = FMath::Max(1, Stats->MaxPenetration);
 	}
 
 	// Server-authoritative gates: empty mag / reloading / fire-rate. Ammo is consumed later, once the fragment
-	// hooks have determined the pellet count (multishot debits one magazine round per pellet, §2-4-1).
+	// hooks have determined the round count (each round costs one magazine round; a round fires PelletCount pellets, §2-4-1).
 	if (Avatar->HasAuthority() && Inventory)
 	{
 		if (Inventory->IsReloading() || Inventory->GetCurrentAmmo() <= 0)
@@ -118,22 +124,23 @@ void UFPSRGA_WeaponFire_Hitscan::ActivateAbility(
 			if (Frag) { Frag->ModifyShotCount(FireCtx); }
 		}
 	}
-	int32 NumShots = FMath::Clamp(FireCtx.ShotCount, 1, 32);
-	// Multishot debits one magazine round per pellet (Game.MD §2-4-1). Clamp the pellet count to the rounds
-	// actually loaded — CurrentAmmo is replicated, so the server and the owning client clamp to the same
-	// pre-fire value — then the server deducts exactly that many. The empty-mag gate above guarantees at least
-	// one round remains, so at least one pellet always fires.
+	int32 NumRounds = FMath::Clamp(FireCtx.ShotCount, 1, 32);
+	// One trigger pull may fire multiple rounds via multishot; each round costs one magazine round.
+	// A round fires PelletCount pellets. Clamp the round count to the rounds actually loaded —
+	// CurrentAmmo is replicated, so the server and the owning client clamp to the same pre-fire value —
+	// then the server deducts exactly that many. The empty-mag gate above guarantees at least one round
+	// remains, so at least one round always fires.
 	if (Inventory)
 	{
-		NumShots = FMath::Min(NumShots, FMath::Max(Inventory->GetCurrentAmmo(), 1));
+		NumRounds = FMath::Min(NumRounds, FMath::Max(Inventory->GetCurrentAmmo(), 1));
 		if (Avatar->HasAuthority())
 		{
-			Inventory->ConsumeAmmo(NumShots);
+			Inventory->ConsumeAmmo(NumRounds);
 		}
 	}
 
-	// Crit/damage multipliers from the ASC are fetched once; crit is rolled per pellet so multishot pellets
-	// can crit independently.
+	// Crit/damage multipliers from the ASC are fetched once; crit is rolled per hit so each pellet / pierced
+	// enemy can crit independently.
 	float DamageMultiplier = 1.0f;
 	float CritChance = 0.0f;
 	float CritMultiplier = 1.0f;
@@ -151,52 +158,143 @@ void UFPSRGA_WeaponFire_Hitscan::ActivateAbility(
 	const FVector Start = ViewLocation;
 	const FVector BaseDir = ViewRotation.Vector();
 
-	for (int32 ShotIndex = 0; ShotIndex < NumShots; ++ShotIndex)
-	{
-		const FVector ShotDir = (SpreadDegrees > 0.0f)
-			? FMath::VRandCone(BaseDir, FMath::DegreesToRadians(SpreadDegrees))
-			: BaseDir;
-		const FVector End = Start + ShotDir * Range;
+	// Hit-marker feedback aggregated across pellets so a multishot fires at most one pulse per activation
+	// (Game.MD §2-14). All markers are server-authoritative: with random spread the client and server traces
+	// can diverge, so a client-predicted "Hit" could be a false positive / miss vs the authoritative damage.
+	// The server confirms the strongest outcome to the owning client (Game.MD §6-2 server authority).
+	bool bServerHit = false;
+	bool bServerCrit = false;
+	bool bServerKill = false;
 
-		FHitResult Hit;
-		FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(FPSRWeaponFire), false, Avatar);
-		const bool bHit = World->LineTraceSingleByChannel(Hit, Start, End, ECC_Visibility, QueryParams);
+	// Damageable-pawn object query (enemies via ECC_Pawn + players via ECC_FPSRPlayerPawn), reused per pellet. An
+	// ECC_Pawn-only query would miss players (distinct object channel) — so friendly fire would never land. (§2-4)
+	FCollisionObjectQueryParams PawnObjParams;
+	FPSRCombat::AddDamageablePawnObjectTypes(PawnObjParams);
+
+	// bAllowSelf for any per-impact explosion (ExplosiveRounds card): self unless the NoSelfDamage card cleared it.
+	const bool bAllowSelfOnImpact = !FireCtx.bSuppressSelfDamage;
+
+	// Resolve crit + per-hit fragment bonus + self/friendly rules for one target. Returns true if damage landed
+	// (bullet stops / spends a penetration here); false = pass-through (a friendly while FF is off).
+	auto ApplyToTarget = [&](AActor* HitActor) -> bool
+	{
+		if (!HitActor || !FireCtx.bAuthority)
+		{
+			return false;
+		}
+		float FinalDamage = Damage * DamageMultiplier;
+		bool bCrit = false;
+		if (CritChance > 0.0f && FMath::FRand() < CritChance)
+		{
+			FinalDamage *= CritMultiplier;
+			bCrit = true;
+		}
+		if (Fragments)
+		{
+			for (const TObjectPtr<UFPSRWeaponFragment>& Frag : *Fragments)
+			{
+				if (Frag) { Frag->OnHitActor(FireCtx, HitActor, FinalDamage); }
+			}
+		}
+		// Direct hitscan never self-damages (bAllowSelf=false); ResolveDamage applies enemy/friendly rules.
+		const float Resolved = FPSRCombat::ResolveDamage(Avatar, HitActor, FinalDamage, /*bAllowSelf*/ false, World);
+		if (Resolved <= 0.0f)
+		{
+			return false; // friendly pass-through (FF off): don't stop the bullet, don't spend penetration
+		}
+		const FPSRCombat::FDamageResult Result = FPSRCombat::ApplyDamage(HitActor, Resolved, Avatar);
+		if (Result.bWasEnemy && Result.bApplied)
+		{
+			bServerHit = true;
+			if (Result.bKilled) { bServerKill = true; }
+			else if (bCrit) { bServerCrit = true; }
+		}
+		return Result.bApplied;
+	};
+
+	// Notify ExplosiveRounds-style fragments of a terminal impact (server-only).
+	auto NotifyImpact = [&](const FVector& ImpactPoint)
+	{
+		if (!FireCtx.bAuthority || !Fragments)
+		{
+			return;
+		}
+		for (const TObjectPtr<UFPSRWeaponFragment>& Frag : *Fragments)
+		{
+			if (Frag) { Frag->OnImpact(FireCtx, ImpactPoint, bAllowSelfOnImpact); }
+		}
+	};
+
+	// Nested loop: outer over rounds (each costs 1 ammo), inner over pellets per round.
+	for (int32 Round = 0; Round < NumRounds; ++Round)
+	{
+		for (int32 Pellet = 0; Pellet < PelletCount; ++Pellet)
+		{
+			const FVector PelletDir = (SpreadDegrees > 0.0f)
+				? FMath::VRandCone(BaseDir, FMath::DegreesToRadians(SpreadDegrees))
+				: BaseDir;
+			const FVector End = Start + PelletDir * Range;
+
+			// Unified path (single-trace = MaxPenetration 1): gather damageable pawns (enemies + players) along the
+			// ray, then find the wall (Visibility) cutoff ignoring those pawns so a pawn never masquerades as the
+			// wall. Query-only dynamics that ignore Visibility (in-flight projectiles) don't count as walls.
+			FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(FPSRWeaponFire), false, Avatar);
+			TArray<FHitResult> PawnHits;
+			World->LineTraceMultiByObjectType(PawnHits, Start, End, PawnObjParams, QueryParams);
+
+			FCollisionQueryParams WallParams(SCENE_QUERY_STAT(FPSRWeaponFireWall), false, Avatar);
+			for (const FHitResult& PawnHit : PawnHits)
+			{
+				if (AActor* PawnActor = PawnHit.GetActor()) { WallParams.AddIgnoredActor(PawnActor); }
+			}
+			FHitResult WallHit;
+			const bool bWall = World->LineTraceSingleByChannel(WallHit, Start, End, ECC_Visibility, WallParams);
+			const float WallDist = bWall ? WallHit.Distance : Range;
 
 #if ENABLE_DRAW_DEBUG
-		const FVector DebugEnd = bHit ? Hit.ImpactPoint : End;
-		DrawDebugLine(World, Start, DebugEnd, FColor::Yellow, false, 0.5f, 0, 1.0f);
-		if (bHit)
-		{
-			DrawDebugPoint(World, Hit.ImpactPoint, 10.0f, FColor::Red, false, 0.5f);
-		}
+			DrawDebugLine(World, Start, Start + PelletDir * FMath::Min(WallDist, Range), FColor::Yellow, false, 0.5f, 0, 1.0f);
 #endif
 
-		// Server-authoritative damage application.
-		if (bHit && FireCtx.bAuthority)
-		{
-			float FinalDamage = Damage * DamageMultiplier;
-			if (CritChance > 0.0f && FMath::FRand() < CritChance)
+			// Apply to up to MaxPenetration valid targets, nearest first (PawnHits are distance-sorted). Friendly
+			// pass-throughs (FF off) don't count toward penetration. Track the terminal impact for OnImpact.
+			int32 PenetrationCount = 0;
+			bool bHasImpact = false;
+			FVector ImpactPoint = bWall ? WallHit.ImpactPoint : End;
+			for (const FHitResult& PawnHit : PawnHits)
 			{
-				FinalDamage *= CritMultiplier;
-			}
-
-			if (AActor* HitActor = Hit.GetActor())
-			{
-				// Per-hit behavior hooks (e.g. bonus/leech) can adjust the damage before it lands.
-				if (Fragments)
+				if (PawnHit.Distance > WallDist)
 				{
-					for (const TObjectPtr<UFPSRWeaponFragment>& Frag : *Fragments)
+					break; // behind the wall (everything after is too — distance-sorted)
+				}
+				if (ApplyToTarget(PawnHit.GetActor()))
+				{
+					ImpactPoint = PawnHit.ImpactPoint; // the bullet lands / detonates here
+					bHasImpact = true;
+					++PenetrationCount;
+					if (PenetrationCount >= MaxPenetration)
 					{
-						if (Frag) { Frag->OnHitActor(FireCtx, HitActor, FinalDamage); }
+						break;
 					}
 				}
-				if (UFPSREnemyHealthComponent* HealthComp = HitActor->FindComponentByClass<UFPSREnemyHealthComponent>())
-				{
-					HealthComp->ApplyDamage(FinalDamage, Avatar);
-				}
 			}
 
-			UE_LOG(LogFPSR, Verbose, TEXT("[Fire] hit=%s dmg=%.1f"), *GetNameSafe(Hit.GetActor()), FinalDamage);
+			// Detonate per-impact fragments at the terminal point: last damaged pawn, or the wall if only geometry
+			// was hit. A pellet that hit nothing (sky) fires no impact event.
+			if (bHasImpact || bWall)
+			{
+				NotifyImpact(ImpactPoint);
+			}
+		}
+	}
+
+	// Server delivers one marker per activation to the owning client — strongest outcome (Kill > Crit > Hit).
+	if (FireCtx.bAuthority && bServerHit)
+	{
+		if (AFPSRPlayerController* OwnerPC = Cast<AFPSRPlayerController>(Controller))
+		{
+			const EFPSRHitMarkerType MarkerType = bServerKill ? EFPSRHitMarkerType::Kill
+				: (bServerCrit ? EFPSRHitMarkerType::Crit : EFPSRHitMarkerType::Hit);
+			OwnerPC->ClientNotifyHitMarker(MarkerType);
 		}
 	}
 

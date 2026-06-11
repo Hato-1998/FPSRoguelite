@@ -9,6 +9,7 @@
 class UFPSRWeaponDataAsset;
 class UFPSRWeaponInstance;
 class UAbilitySystemComponent;
+class AFPSRGameState;
 
 /** Server-authoritative 3-slot weapon inventory. Grants the equipped weapon's fire ability. */
 UCLASS(ClassGroup = (FPSR), meta = (BlueprintSpawnableComponent))
@@ -20,6 +21,12 @@ public:
 	UFPSRWeaponInventoryComponent();
 
 	static constexpr int32 MaxSlots = 3;
+
+	/** Minimum delay (seconds) after a weapon swap before the next shot may fire. Prevents bypassing a weapon's
+	 *  fire cadence by rapidly swapping slots; also the natural "weapon swap" feel. Applied on both the server gate
+	 *  (ServerNextAllowedFireTime) and the owning client's recoil prediction (FireComponent). */
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Weapon", meta = (ClampMin = "0.0"))
+	float EquipFireCooldown = 0.2f;
 
 	/** Server: add weapon to the first free slot; auto-equips if nothing is equipped. Returns slot index or INDEX_NONE. */
 	int32 AddWeapon(UFPSRWeaponDataAsset* WeaponData);
@@ -36,6 +43,10 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "FPSR|Weapon")
 	TArray<UFPSRWeaponDataAsset*> GetOwnedWeapons() const;
+
+	/** Owned weapon instance whose source DataAsset matches Weapon (any slot, equipped or not). null if not owned.
+	 *  Lets weapon-scope cards apply to their source weapon rather than the currently equipped one. */
+	UFPSRWeaponInstance* GetInstanceForWeapon(const UFPSRWeaponDataAsset* Weapon) const;
 
 	/** Invalidate every weapon instance's resolved-stat cache (e.g. after an AllWeapons modifier changes). */
 	void MarkAllInstancesResolvedDirty();
@@ -66,8 +77,16 @@ public:
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 protected:
+	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+
 	UFUNCTION()
 	void OnRep_CurrentSlotIndex();
+
+	/** Server: pause/resume the in-flight reload timer when the run freezes/unfreezes (Game.MD §2-2), so a reload
+	 *  cannot complete during the card-selection freeze. Bound to the GameState's OnRunStateChanged. */
+	UFUNCTION()
+	void HandleRunStateChanged();
 
 	/** Server timer callback: refill current slot to MagSize. */
 	void FinishReload();
@@ -95,4 +114,7 @@ protected:
 
 	/** Server-only: earliest world time (seconds) the next shot is allowed for the current slot. Reset on equip. */
 	float ServerNextAllowedFireTime = 0.0f;
+
+	/** Server-only: the GameState we bound OnRunStateChanged to (cached so EndPlay can unbind the exact object). */
+	TWeakObjectPtr<AFPSRGameState> BoundRunState;
 };

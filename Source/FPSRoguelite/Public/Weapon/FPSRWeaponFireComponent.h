@@ -18,9 +18,15 @@ class FPSROGUELITE_API UFPSRWeaponFireComponent : public UActorComponent
 public:
 	UFPSRWeaponFireComponent();
 
-	/** Called on Fire input pressed/released (owning client). */
+	/** Called on Fire input pressed/released (owning client). ChargeLaser uses the same single-press path as other
+	 *  weapons — one click activates the fire ability, which runs the whole charge sequence server-side. */
 	void StartFiring();
 	void StopFiring();
+
+	/** Equip boundary (called from the inventory's server EquipSlot + client OnRep_CurrentSlotIndex): imposes a
+	 *  minimum post-swap fire cooldown before the next shot, so a rapid weapon swap can't bypass fire cadence and
+	 *  the local recoil prediction stays in sync with the server. */
+	void OnWeaponEquipped(float EquipCooldown);
 
 	/** Extra spread (degrees) from sustained fire; read by the fire ability when tracing. */
 	UFUNCTION(BlueprintPure, Category = "FPSR|Weapon")
@@ -62,6 +68,7 @@ protected:
 
 	bool bReloadRequestPending = false; // guards against spamming the reload RPC each tick
 	float LastMeleeTime = -1000.0f; // world time of last melee attack (melee attack-rate cooldown)
+	float NextFireReadyTime = 0.0f; // world time the next ranged shot is allowed (per-weapon cadence + post-swap cooldown); gates the immediate press shot's recoil. Mirrors the server's ServerNextAllowedFireTime.
 
 	bool bIsAiming = false;
 	TObjectPtr<UCameraComponent> CachedCamera; // resolved lazily for ADS FOV
@@ -73,4 +80,14 @@ protected:
 	float PendingRiseYaw = 0.0f;        // not-yet-applied horizontal recoil, smoothed in over time (no recovery)
 	float PlayerPitchCompensation = 0.0f; // player's downward look input this frame, consumes debt
 	int32 ShotsFiredThisSpray = 0;      // shot index within current trigger hold (horizontal pattern)
+
+	// --- ChargeLaser charge sequence — local-feel recoil ramp + re-press gate (driven in TickComponent) ---
+	// bChargeSequenceActive marks a ChargeLaser charge in progress on this client: it drives the recoil ramp (the
+	// up-kick climbs over the charge duration and finishes at the fire moment, instead of an instant kick) AND blocks
+	// a re-press from starting a phantom second charge. Set up in FireOneShot on click; cleared when the ramp ends.
+	bool bChargeSequenceActive = false;
+	float ChargeRecoilElapsed = 0.0f;   // seconds into the current charge ramp
+	float ChargeRecoilDuration = 0.0f;  // total charge ramp length (= fragment-adjusted ChargeTime, matches the server)
+	float ChargeRecoilTotalPitch = 0.0f; // full up-kick spread across the ramp
+	float ChargeRecoilTotalYaw = 0.0f;   // full horizontal drift spread across the ramp
 };

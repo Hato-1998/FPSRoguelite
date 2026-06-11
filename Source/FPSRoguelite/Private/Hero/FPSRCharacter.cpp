@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Hero/FPSRCharacter.h"
+#include "Core/FPSRPlayerController.h"
 #include "Core/FPSRPlayerState.h"
 #include "Core/FPSRLogChannels.h"
 #include "Core/FPSRGameState.h"
@@ -10,6 +11,8 @@
 #include "Weapon/FPSRWeaponInventoryComponent.h"
 #include "Weapon/FPSRWeaponFireComponent.h"
 #include "Weapon/FPSRWeaponDataAsset.h"
+#include "Hero/FPSRPlayerFeedbackComponent.h"
+#include "FPSRCollisionChannels.h"
 
 #include "Camera/CameraComponent.h"
 #include "Components/CapsuleComponent.h"
@@ -35,6 +38,9 @@ AFPSRCharacter::AFPSRCharacter()
 #endif
 
 	GetCapsuleComponent()->InitCapsuleSize(34.0f, 88.0f);
+	// Player uses a distinct object channel so enemies can block the player while ignoring EACH OTHER (the swarm
+	// overlaps and spreads via soft separation instead of expensive mutual physics blocking — Game.MD §1/§5).
+	GetCapsuleComponent()->SetCollisionObjectType(ECC_FPSRPlayerPawn);
 
 	bUseControllerRotationYaw = true;
 	bUseControllerRotationPitch = false;
@@ -64,6 +70,7 @@ AFPSRCharacter::AFPSRCharacter()
 
 	WeaponInventory = CreateDefaultSubobject<UFPSRWeaponInventoryComponent>(TEXT("WeaponInventory"));
 	WeaponFire = CreateDefaultSubobject<UFPSRWeaponFireComponent>(TEXT("WeaponFire"));
+	PlayerFeedback = CreateDefaultSubobject<UFPSRPlayerFeedbackComponent>(TEXT("PlayerFeedback"));
 
 	// Required so the inventory component's registered weapon-instance subobjects replicate (engine: the
 	// owning actor must also opt into the registered subobject list, not just the component).
@@ -289,6 +296,8 @@ void AFPSRCharacter::Input_Fire(const FInputActionValue& Value)
 	}
 	if (WeaponFire)
 	{
+		// All archetypes (incl. ChargeLaser) fire through the single-press path: StartFiring activates the weapon's
+		// fire ability, and ChargeLaser's ability runs the whole charge sequence server-side from its own timers.
 		WeaponFire->StartFiring();
 	}
 }
@@ -376,6 +385,14 @@ void AFPSRCharacter::ServerDash_Implementation(FVector DashDirection)
 		return;
 	}
 
+	// No dashing during the card-selection freeze (mirror the ServerEquipSlot server gate).
+	// Input_Dash already gates client-side, but a dash RPC in flight when the freeze replicates must be rejected
+	// on the server too, or the run is no longer globally stopped.
+	if (IsRunFrozen())
+	{
+		return;
+	}
+
 	// Cooldown gate (server-authoritative).
 	const float Now = World->GetTimeSeconds();
 	if ((Now - LastDashTime) < DashCooldown)
@@ -439,6 +456,16 @@ void AFPSRCharacter::ApplyContactDamage(float DamageAmount, AActor* DamageInstig
 	if (UAbilitySystemComponent* ASC = GetAbilitySystemComponent())
 	{
 		ASC->ApplyModToAttribute(UFPSRHealthSet::GetHealthAttribute(), EGameplayModOp::Additive, -DamageAmount);
+	}
+
+	// Tell the owning client which direction the hit came from (CoD-style damage indicator, §2-14). Cosmetic,
+	// owner-only, unreliable; the client converts the instigator location to a camera-relative angle.
+	if (DamageInstigator)
+	{
+		if (AFPSRPlayerController* PC = Cast<AFPSRPlayerController>(GetController()))
+		{
+			PC->ClientNotifyDamageFrom(DamageInstigator->GetActorLocation());
+		}
 	}
 }
 

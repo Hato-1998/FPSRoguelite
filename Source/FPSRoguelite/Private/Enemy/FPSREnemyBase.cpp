@@ -23,6 +23,10 @@ AFPSREnemyBase::AFPSREnemyBase()
 	Capsule->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 	Capsule->SetCollisionObjectType(ECC_Pawn);
 	Capsule->SetCollisionResponseToAllChannels(ECR_Block);
+	// Ignore OTHER enemies (also ECC_Pawn): the swarm overlaps and spreads via soft separation steering instead
+	// of mutual physics blocking, which would gridlock a dense crowd and stack co-spawned enemies (Game.MD §1/§5).
+	// Walls (WorldStatic), the rifle trace (Visibility) and the player (ECC_FPSRPlayerPawn) stay blocked.
+	Capsule->SetCollisionResponseToChannel(ECC_Pawn, ECR_Ignore);
 	SetRootComponent(Capsule);
 
 	Mesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("Mesh"));
@@ -80,6 +84,10 @@ void AFPSREnemyBase::Activate(const FVector& Location)
 	}
 
 	CurrentMoveSpeed = MoveSpeed * FMath::FRandRange(0.9f, 1.1f);
+	VerticalVelocity = 0.0f; // reset fall state for the reused actor
+	bGrounded = false;       // re-check ground on the first update (may spawn on a rooftop)
+	GroundRecheckTimer = 0.0f;
+	KnockbackVelocityXY = FVector::ZeroVector; // clear residual knockback from a prior life
 }
 
 void AFPSREnemyBase::Deactivate()
@@ -96,12 +104,126 @@ void AFPSREnemyBase::TickServerMovement(const FVector& MoveDirection, float Scal
 		return;
 	}
 
+	// Knockback (explosion push): a decaying horizontal impulse. While it's active, suppress flow-field steering
+	// so the push isn't immediately cancelled by the enemy walking back toward the player.
+	const bool bKnockbackActive = !KnockbackVelocityXY.IsNearlyZero(1.0f);
+
+	// Horizontal steering (flow-field + separation), swept so it blocks against walls.
 	FVector Dir = MoveDirection;
 	Dir.Z = 0.0f;
-	if (Dir.SizeSquared() > KINDA_SMALL_NUMBER)
+	if (!bKnockbackActive && Dir.SizeSquared() > KINDA_SMALL_NUMBER)
 	{
 		const FVector Normalized = Dir.GetSafeNormal();
 		AddActorWorldOffset(Normalized * CurrentMoveSpeed * ScaledDeltaSeconds, true);
 		SetActorRotation(Normalized.Rotation());
 	}
+
+	if (bKnockbackActive)
+	{
+		AddActorWorldOffset(KnockbackVelocityXY * ScaledDeltaSeconds, true); // swept: blocks against walls
+		const float DecayFactor = FMath::Exp(-ScaledDeltaSeconds / FMath::Max(KnockbackDecayTime, 0.01f));
+		KnockbackVelocityXY *= DecayFactor;
+		if (KnockbackVelocityXY.IsNearlyZero(1.0f))
+		{
+			KnockbackVelocityXY = FVector::ZeroVector;
+		}
+	}
+
+	// Vertical: ground-follow + gravity ALWAYS (even when not steering) so enemies never float and a
+	// rooftop-spawned enemy falls before chasing.
+	ApplyGravity(ScaledDeltaSeconds);
+}
+
+void AFPSREnemyBase::ApplyKnockback(const FVector& Velocity)
+{
+	if (!HasAuthority() || (HealthComponent && HealthComponent->IsDead()))
+	{
+		return;
+	}
+	// Additive: stacking blasts compound. Horizontal goes to the decaying member; vertical feeds VerticalVelocity
+	// so the existing gravity integrator carries the enemy up and back down (a launched pop).
+	KnockbackVelocityXY += FVector(Velocity.X, Velocity.Y, 0.0f);
+	VerticalVelocity += Velocity.Z;
+	bGrounded = false;        // leave the ground; re-acquire it on landing
+	GroundRecheckTimer = 0.0f; // re-check the floor immediately
+}
+
+void AFPSREnemyBase::ApplyGravity(float ScaledDeltaSeconds)
+{
+	UWorld* World = GetWorld();
+	if (!World || !Capsule)
+	{
+		return;
+	}
+
+	// Amortize: a stably grounded enemy re-checks the floor only every GroundRecheckInterval; airborne enemies
+	// (falling) run every update so they land promptly (Codex P1 — no per-frame scene query for the whole swarm).
+	GroundRecheckTimer -= ScaledDeltaSeconds;
+	if (bGrounded && GroundRecheckTimer > 0.0f)
+	{
+		return;
+	}
+	GroundRecheckTimer = GroundRecheckInterval;
+
+	const float HalfHeight = Capsule->GetScaledCapsuleHalfHeight();
+	const FVector Loc = GetActorLocation();
+
+	// Down-trace against STATIC world ONLY — ignore other pawns/dynamic actors so a falling enemy doesn't 'land'
+	// on the swarm and jitter (Codex P2). Short probe; the fall step is clamped below so the floor is always
+	// within reach on the next update (no tunneling).
+	FCollisionObjectQueryParams ObjParams;
+	ObjParams.AddObjectTypesToQuery(ECC_WorldStatic);
+	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(FPSREnemyGround), false, this);
+	FHitResult Hit;
+	const FVector TraceStart(Loc.X, Loc.Y, Loc.Z + HalfHeight);
+	const FVector TraceEnd(Loc.X, Loc.Y, Loc.Z + HalfHeight - GroundProbeDistance);
+
+	if (World->LineTraceSingleByObjectType(Hit, TraceStart, TraceEnd, ObjParams, QueryParams))
+	{
+		const float TargetZ = Hit.ImpactPoint.Z + HalfHeight + GroundRestClearance; // rest just above the floor (not flush — see GroundRestClearance)
+		const float Diff = Loc.Z - TargetZ;
+
+		// Snap only within tolerance in EITHER direction (a surface far above is a ledge to route around, not
+		// ground to teleport onto; a far-below floor means the enemy is airborne). NOT while rising under a
+		// knockback impulse (VerticalVelocity > 0) — snapping then would instantly cancel the launch.
+		if (VerticalVelocity <= 0.0f && FMath::Abs(Diff) <= GroundSnapTolerance)
+		{
+			if (!FMath::IsNearlyZero(Diff))
+			{
+				SetActorLocation(FVector(Loc.X, Loc.Y, TargetZ), false); // small slope/step correction
+			}
+			VerticalVelocity = 0.0f;
+			bGrounded = true;
+			return;
+		}
+
+		if (Diff > 0.0f || VerticalVelocity > 0.0f)
+		{
+			// Above the floor (or launched upward) — integrate ballistically, clamping to land exactly on the floor
+			// only while descending (a rising knockback passes up through TargetZ without snapping).
+			VerticalVelocity -= GravityAccel * ScaledDeltaSeconds;
+			float NewZ = Loc.Z + VerticalVelocity * ScaledDeltaSeconds;
+			if (VerticalVelocity <= 0.0f && NewZ <= TargetZ)
+			{
+				NewZ = TargetZ;
+				VerticalVelocity = 0.0f;
+				bGrounded = true;
+			}
+			else
+			{
+				bGrounded = false;
+			}
+			SetActorLocation(FVector(Loc.X, Loc.Y, NewZ), false);
+			return;
+		}
+		// Diff < -tolerance: a static surface is far ABOVE the feet (overhang) — fall through to the path below.
+	}
+
+	// No reachable floor within the probe — fall, clamping the step so it can't overshoot the probe range and
+	// tunnel below the floor before the next update's trace can catch it.
+	VerticalVelocity -= GravityAccel * ScaledDeltaSeconds;
+	const float MaxFallStep = FMath::Max(GroundProbeDistance - 2.0f * HalfHeight - GroundSnapTolerance, 1.0f);
+	const float StepZ = FMath::Max(VerticalVelocity * ScaledDeltaSeconds, -MaxFallStep);
+	SetActorLocation(FVector(Loc.X, Loc.Y, Loc.Z + StepZ), false);
+	bGrounded = false;
 }

@@ -15,6 +15,7 @@ class UFPSRWeaponInventoryComponent;
 class UFPSRWeaponFireComponent;
 class UFPSRWeaponDataAsset;
 class UMaterialInterface;
+class UFPSRPlayerFeedbackComponent;
 struct FInputActionValue;
 
 /** Base player character: first-person camera + Separated-Arms meshes + Enhanced Input + weapon inventory/firing. ASC lives on PlayerState. */
@@ -120,6 +121,10 @@ protected:
 
 	UPROPERTY(VisibleAnywhere, Category = "FPSR|Weapon")
 	TObjectPtr<UFPSRWeaponFireComponent> WeaponFire;
+
+	/** Local-only hit-marker + threat-indicator feedback (Game.MD §2-14). Not replicated; WBP HUD binds to it. */
+	UPROPERTY(VisibleAnywhere, Category = "FPSR|Feedback")
+	TObjectPtr<UFPSRPlayerFeedbackComponent> PlayerFeedback;
 
 	/** Starting weapons granted on possession (slot order). Set via ConstructorHelpers (P1) / HeroDataAsset (later). */
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Weapon")

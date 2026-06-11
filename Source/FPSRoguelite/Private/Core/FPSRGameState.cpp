@@ -25,6 +25,7 @@ void AFPSRGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLi
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRGameState, bRunPaused, Params);
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRGameState, bVisionRestricted, Params);
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRGameState, RunClockSeconds, Params);
+	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRGameState, bFriendlyFireEnabled, Params);
 }
 
 int32 AFPSRGameState::GetRequiredXP(int32 Level) const
@@ -109,6 +110,19 @@ void AFPSRGameState::SetVisionRestricted(bool bRestricted)
 	UE_LOG(LogFPSR, Log, TEXT("[Run] Vision %s"), bRestricted ? TEXT("RESTRICTED (mission)") : TEXT("RESTORED"));
 }
 
+void AFPSRGameState::SetFriendlyFireEnabled(bool bEnabled)
+{
+	if (!HasAuthority() || bFriendlyFireEnabled == bEnabled)
+	{
+		return;
+	}
+	bFriendlyFireEnabled = bEnabled;
+	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRGameState, bFriendlyFireEnabled, this);
+	OnRunStateChanged.Broadcast();
+
+	UE_LOG(LogFPSR, Log, TEXT("[Run] Friendly fire %s"), bEnabled ? TEXT("ON") : TEXT("OFF"));
+}
+
 void AFPSRGameState::RefreshPauseState()
 {
 	if (!HasAuthority())
@@ -154,6 +168,10 @@ void AFPSRGameState::SetRunClockSeconds(float Seconds)
 	}
 	RunClockSeconds = Seconds;
 	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRGameState, RunClockSeconds, this);
+
+	// Authority gets no OnRep_RunState, so notify HUD widgets locally on the host (clients refresh via
+	// replication). Authority-only path + the 0.25s dead-band above keep this to a low UI cadence.
+	OnRunStateChanged.Broadcast();
 }
 
 void AFPSRGameState::OnRep_RunState()
@@ -207,6 +225,28 @@ namespace
 				bPaused = FCString::Atoi(*Args[0]) != 0;
 			}
 			GS->SetRunPaused(bPaused);
+		}));
+
+	FAutoConsoleCommandWithWorldAndArgs GCmd_SetFriendlyFire(
+		TEXT("FPSR.SetFriendlyFire"),
+		TEXT("Toggle friendly fire for the run (debug). Usage: FPSR.SetFriendlyFire [0|1]"),
+		FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& Args, UWorld* World)
+		{
+			if (!World)
+			{
+				return;
+			}
+			AFPSRGameState* GS = World->GetGameState<AFPSRGameState>();
+			if (!GS)
+			{
+				return;
+			}
+			bool bEnabled = !GS->IsFriendlyFireEnabled();
+			if (Args.Num() > 0)
+			{
+				bEnabled = FCString::Atoi(*Args[0]) != 0;
+			}
+			GS->SetFriendlyFireEnabled(bEnabled);
 		}));
 }
 

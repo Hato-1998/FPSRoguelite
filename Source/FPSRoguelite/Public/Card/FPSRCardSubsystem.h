@@ -8,6 +8,7 @@
 
 class UFPSRCardDataAsset;
 class UFPSRCardPoolDataAsset;
+class UFPSRWeaponDataAsset;
 class AController;
 
 /** Server-authoritative card draw and application logic (P3-C).
@@ -55,8 +56,10 @@ protected:
 	/** Effective draw weight of a card at a specific rarity, given player luck. */
 	float GetEffectiveWeight(const UFPSRCardDataAsset* Card, ECardRarity Rarity, float Luck) const;
 
-	/** Gather all candidate cards from the pool and player's owned weapons. */
-	void GatherCandidatePool(AController* ForPlayer, TArray<UFPSRCardDataAsset*>& OutCandidates) const;
+	/** Gather candidate cards: the central pool (character / all-weapons) plus every owned weapon's WeaponCards.
+	 *  OutSourceWeapons is index-aligned with OutCandidates — the weapon that contributed each card (null for the
+	 *  central pool / character cards), used to set FFPSRCardDraw::TargetWeapon. */
+	void GatherCandidatePool(AController* ForPlayer, TArray<UFPSRCardDataAsset*>& OutCandidates, TArray<UFPSRWeaponDataAsset*>& OutSourceWeapons) const;
 
 private:
 	UPROPERTY()

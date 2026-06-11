@@ -3,6 +3,8 @@
 #include "Weapon/FPSRWeaponInventoryComponent.h"
 #include "Weapon/FPSRWeaponDataAsset.h"
 #include "Weapon/FPSRWeaponInstance.h"
+#include "Weapon/FPSRWeaponFireComponent.h"
+#include "Core/FPSRGameState.h"
 #include "Core/FPSRLogChannels.h"
 
 #include "AbilitySystemComponent.h"
@@ -22,6 +24,58 @@ UFPSRWeaponInventoryComponent::UFPSRWeaponInventoryComponent()
 	// (AFPSRCharacter) must also enable bReplicateUsingRegisteredSubObjectList (engine requirement).
 	bReplicateUsingRegisteredSubObjectList = true;
 	Slots.SetNum(MaxSlots);
+}
+
+void UFPSRWeaponInventoryComponent::BeginPlay()
+{
+	Super::BeginPlay();
+
+	// Server owns the reload timer; bind the run-freeze observer so an in-flight reload pauses during the
+	// card-selection freeze (Game.MD §2-2). Clients never run reload, so they don't bind.
+	if (GetOwner() && GetOwner()->HasAuthority())
+	{
+		if (AFPSRGameState* RunState = GetWorld() ? GetWorld()->GetGameState<AFPSRGameState>() : nullptr)
+		{
+			RunState->OnRunStateChanged.AddDynamic(this, &UFPSRWeaponInventoryComponent::HandleRunStateChanged);
+			BoundRunState = RunState;
+		}
+	}
+}
+
+void UFPSRWeaponInventoryComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	if (BoundRunState.IsValid())
+	{
+		BoundRunState->OnRunStateChanged.RemoveDynamic(this, &UFPSRWeaponInventoryComponent::HandleRunStateChanged);
+	}
+	BoundRunState.Reset();
+
+	Super::EndPlay(EndPlayReason);
+}
+
+void UFPSRWeaponInventoryComponent::HandleRunStateChanged()
+{
+	if (!GetOwner() || !GetOwner()->HasAuthority() || !GetWorld())
+	{
+		return;
+	}
+	const AFPSRGameState* RunState = GetWorld()->GetGameState<AFPSRGameState>();
+	if (!RunState)
+	{
+		return;
+	}
+
+	// PauseTimer/UnPauseTimer are no-ops on an inactive/invalid handle, so this is safe whether or not a reload
+	// is actually in progress; the remaining time is preserved across the freeze.
+	FTimerManager& TimerManager = GetWorld()->GetTimerManager();
+	if (RunState->IsRunPaused())
+	{
+		TimerManager.PauseTimer(ReloadTimerHandle);
+	}
+	else
+	{
+		TimerManager.UnPauseTimer(ReloadTimerHandle);
+	}
 }
 
 void UFPSRWeaponInventoryComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
@@ -95,8 +149,21 @@ void UFPSRWeaponInventoryComponent::EquipSlot(int32 SlotIndex)
 	MARK_PROPERTY_DIRTY_FROM_NAME(UFPSRWeaponInventoryComponent, CurrentSlotIndex, this);
 	RefreshEquippedAbility();
 
-	// Fresh weapon: clear the previous slot's fire-rate gate so the first shot isn't blocked by it.
-	ServerNextAllowedFireTime = 0.0f;
+	// Switching weapons cancels any in-progress ChargeLaser charge (server side): a banked charge must not survive
+	// an equip and fire later as a free full-charge beam on re-equip. OnWeaponEquipped also imposes the post-swap
+	// fire cooldown on the owning client's recoil prediction (mirrors the server gate below).
+	if (AActor* Owner = GetOwner())
+	{
+		if (UFPSRWeaponFireComponent* FireComp = Owner->FindComponentByClass<UFPSRWeaponFireComponent>())
+		{
+			FireComp->OnWeaponEquipped(EquipFireCooldown);
+		}
+	}
+
+	// Impose a minimum post-swap cooldown before the next shot. A reset to 0 would let a rapid A->B->A swap re-fire
+	// A instantly, bypassing its fire cadence. The new weapon still isn't blocked by the PREVIOUS weapon's (possibly
+	// long) interval — this is a fixed swap time, not the old cadence.
+	ServerNextAllowedFireTime = GetWorld()->GetTimeSeconds() + EquipFireCooldown;
 
 	// Re-equipping a weapon whose reload was cancelled mid-switch resumes the reload ONLY if its
 	// magazine is empty. If ammo remains, the reload stays cancelled (player keeps the partial mag).
@@ -154,7 +221,16 @@ UFPSRWeaponDataAsset* UFPSRWeaponInventoryComponent::GetCurrentWeapon() const
 
 void UFPSRWeaponInventoryComponent::OnRep_CurrentSlotIndex()
 {
-	// Cosmetic hook for clients (weapon visual swap added later).
+	// Cosmetic hook for clients (weapon visual swap added later). Also cancel any local ChargeLaser charge and apply
+	// the post-swap fire cooldown to recoil prediction so a charge started before this swap can't be released into
+	// the newly-equipped weapon, and a rapid swap can't fire early on the client (mirrors the server gate).
+	if (AActor* Owner = GetOwner())
+	{
+		if (UFPSRWeaponFireComponent* FireComp = Owner->FindComponentByClass<UFPSRWeaponFireComponent>())
+		{
+			FireComp->OnWeaponEquipped(EquipFireCooldown);
+		}
+	}
 }
 
 int32 UFPSRWeaponInventoryComponent::GetCurrentAmmo() const
@@ -188,6 +264,22 @@ TArray<UFPSRWeaponDataAsset*> UFPSRWeaponInventoryComponent::GetOwnedWeapons() c
 	return Result;
 }
 
+UFPSRWeaponInstance* UFPSRWeaponInventoryComponent::GetInstanceForWeapon(const UFPSRWeaponDataAsset* Weapon) const
+{
+	if (!Weapon)
+	{
+		return nullptr;
+	}
+	for (const TObjectPtr<UFPSRWeaponInstance>& Instance : Slots)
+	{
+		if (Instance && Instance->GetSource() == Weapon)
+		{
+			return Instance.Get();
+		}
+	}
+	return nullptr;
+}
+
 void UFPSRWeaponInventoryComponent::MarkAllInstancesResolvedDirty()
 {
 	for (const TObjectPtr<UFPSRWeaponInstance>& Instance : Slots)
@@ -219,6 +311,15 @@ void UFPSRWeaponInventoryComponent::StartReload()
 	if (!GetOwner() || !GetOwner()->HasAuthority())
 	{
 		return;
+	}
+	// No reload start during the card-selection freeze (Game.MD §2-2). Single chokepoint for every entry point
+	// (manual ServerReload, auto-reload, equip-resume). An already-running reload is paused by HandleRunStateChanged.
+	if (const AFPSRGameState* RunState = GetWorld() ? GetWorld()->GetGameState<AFPSRGameState>() : nullptr)
+	{
+		if (RunState->IsRunPaused())
+		{
+			return;
+		}
 	}
 	UFPSRWeaponInstance* Instance = GetCurrentInstance();
 	if (!Instance || Instance->IsReloading())

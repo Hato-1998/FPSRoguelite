@@ -5,6 +5,7 @@
 #include "Weapon/FPSRWeaponInstance.h"
 #include "Weapon/FPSRWeaponDataAsset.h"
 #include "Weapon/FPSRWeaponTypes.h"
+#include "Weapon/FPSRWeaponFragment.h"
 #include "Hero/FPSRCharacter.h"
 
 #include "AbilitySystemComponent.h"
@@ -89,11 +90,40 @@ void UFPSRWeaponFireComponent::StartFiring()
 		return;
 	}
 
+	// ChargeLaser: ignore a re-press while a charge sequence is already running on this client. The server-only fire
+	// ability already rejects re-activation, but without this gate a re-click — possible when a FireRate card pushes
+	// 1/FireRate below ChargeTime — would restart the local recoil ramp, add bloom, and advance NextFireReadyTime,
+	// producing a phantom charge. One click = one sequence until it completes (DoChargeTick window) or a weapon swap.
+	if (bChargeSequenceActive && Instance->GetSource()
+		&& Instance->GetSource()->GetArchetype() == EFPSRWeaponArchetype::ChargeLaser)
+	{
+		return;
+	}
+
 	bWantsToFire = true;
 	TimeSinceLastShot = 0.0f;
 	ShotsFiredThisSpray = 0;
 
 	const FFPSRWeaponStatBlock& Stats = Instance->GetResolvedStats();
+
+	// ChargeLaser flows through the normal single-shot press path below: one click activates the fire ability, which
+	// runs the whole charge sequence server-side (warm-up ticks -> full-power beam). No hold-to-charge state here.
+
+	// Local fire-rate gate for the immediate press shot. The Tick auto/burst path already paces itself via
+	// TimeSinceLastShot, but a fresh trigger pull fires immediately — so spam-clicking a single-shot weapon
+	// (or swap-spamming) during the cooldown would apply local recoil/bloom for a shot the server-authoritative
+	// cadence gate (GA ServerTryConsumeFireInterval) rejects. NextFireReadyTime tracks the same next-allowed time
+	// the server uses (set per-shot to Now+1/FireRate, and to Now+swap-cooldown on equip), so recoil only kicks
+	// when a shot can actually fire. Melee self-gates on MeleeAttackDelay inside FireOneShot.
+	const UFPSRWeaponDataAsset* WeaponSource = Instance->GetSource();
+	if (WeaponSource && WeaponSource->GetArchetype() != EFPSRWeaponArchetype::Melee)
+	{
+		if (GetWorld()->GetTimeSeconds() < NextFireReadyTime)
+		{
+			return;
+		}
+	}
+
 	if (Stats.FireMode == EFPSRFireMode::Burst)
 	{
 		BurstShotsRemaining = FMath::Max(1, Stats.BurstCount);
@@ -109,8 +139,21 @@ void UFPSRWeaponFireComponent::StartFiring()
 
 void UFPSRWeaponFireComponent::StopFiring()
 {
+	// ChargeLaser no longer uses release-to-fire — one click activates the full server-side charge sequence in the
+	// fire ability, so releasing the trigger just stops the auto/burst/melee repeat like any other weapon.
 	bWantsToFire = false;
 	ShotsFiredThisSpray = 0;
+}
+
+void UFPSRWeaponFireComponent::OnWeaponEquipped(float EquipCooldown)
+{
+	// Equip boundary (server EquipSlot + client OnRep_CurrentSlotIndex). Impose a minimum post-swap cooldown before
+	// the next shot. This clears the PREVIOUS weapon's cadence (a fast weapon isn't blocked by a slow one's interval)
+	// while still gating the first shot by a fixed swap time — mirroring the server setting ServerNextAllowedFireTime
+	// = Now + swap-cooldown, so swap-spam can't bypass fire cadence. (A mid-charge swap cancels the ChargeLaser fire
+	// ability via RefreshEquippedAbility, which clears its timers in EndAbility — no charge state lives here anymore.)
+	bChargeSequenceActive = false; // drop any in-progress ChargeLaser recoil ramp on a weapon swap
+	NextFireReadyTime = GetWorld()->GetTimeSeconds() + FMath::Max(0.0f, EquipCooldown);
 }
 
 void UFPSRWeaponFireComponent::FireOneShot()
@@ -129,7 +172,7 @@ void UFPSRWeaponFireComponent::FireOneShot()
 		return;
 	}
 
-	const bool bMelee = (Weapon->Archetype == EFPSRWeaponArchetype::Melee);
+	const bool bMelee = (Weapon->GetArchetype() == EFPSRWeaponArchetype::Melee);
 
 	// Ranged: block on empty magazine or during reload. Melee uses no ammo.
 	if (!bMelee && (Inventory->IsReloading() || Inventory->GetCurrentAmmo() <= 0))
@@ -161,6 +204,9 @@ void UFPSRWeaponFireComponent::FireOneShot()
 	}
 	else
 	{
+		// Stamp the next-allowed fire time (Now + interval) so the next trigger press is cadence-gated (StartFiring).
+		NextFireReadyTime = GetWorld()->GetTimeSeconds() + 1.0f / FMath::Max(Stats.FireRate, 0.01f);
+
 		// Camera recoil (local feel only), ADS-dependent:
 		//  - Hip-fire: weak vertical climb + strong horizontal randomness (scattered, screen stays low).
 		//  - ADS: strong vertical climb + low randomness so the deterministic pattern shows (learnable line).
@@ -169,14 +215,48 @@ void UFPSRWeaponFireComponent::FireOneShot()
 		const float HRandom = bADS ? Stats.ADSHorizontalRandom : Stats.HipHorizontalRandom;
 
 		const FVector2D ShotDelta = ComputeShotRecoilDelta(Stats, ShotsFiredThisSpray);
-		if (ShotDelta.Y != 0.0f)
-		{
-			PendingRisePitch += ShotDelta.Y * VScale;
-		}
+		const float KickPitch = ShotDelta.Y * VScale;
+		float KickYaw = 0.0f;
 		if (Stats.RecoilHorizontal != 0.0f)
 		{
 			const float Variance = FMath::FRandRange(-1.0f, 1.0f) * Stats.RecoilHorizontal * HRandom;
-			PendingRiseYaw += ShotDelta.X + Variance; // smoothed in Tick (was instant) to avoid jitter
+			KickYaw = ShotDelta.X + Variance;
+		}
+
+		// ChargeLaser: instead of an instant kick on press, the up-kick CLIMBS gradually over the charge duration and
+		// finishes exactly when the beam fires (charge complete). Set up the local ramp here; TickComponent integrates
+		// it (and suppresses auto-recovery until the climb finishes). Local feel only — no networking/server-auth.
+		// KNOWN LIMITATION (follow-up): this starts from the client's own click. On a REMOTE client the ServerOnly fire
+		// ability may be rejected after RPC latency (an ammo/cadence/pause race the local pre-checks above missed), so
+		// the ramp + re-press gate can run briefly for a shot that never fired (cosmetic only — server owns all damage;
+		// self-clears at ChargeTime). The listen-server host is unaffected. Proper fix = a server charge-start/end
+		// client notify, bundled with the client beam VFX follow-up (same signal).
+		if (Weapon->GetArchetype() == EFPSRWeaponArchetype::ChargeLaser && Stats.ChargeTime > 0.0f)
+		{
+			// Mirror the server fire ability's charge duration: apply fragment PreFire + ModifyChargeTime so the ramp
+			// finishes exactly when the payoff beam fires, even if a charge-time fragment shortens/extends the charge.
+			float RampChargeTime = Stats.ChargeTime;
+			FFPSRFireContext Ctx;
+			Ctx.Avatar = OwnerPawn;
+			Ctx.Controller = OwnerPawn->GetController();
+			Ctx.World = GetWorld();
+			Ctx.Instance = Instance;
+			Ctx.ShotCount = 1;
+			Ctx.bAuthority = OwnerPawn->HasAuthority();
+			const TArray<TObjectPtr<UFPSRWeaponFragment>>& Frags = Instance->GetActiveFragments();
+			for (const TObjectPtr<UFPSRWeaponFragment>& Frag : Frags) { if (Frag) { Frag->PreFire(Ctx); } }
+			for (const TObjectPtr<UFPSRWeaponFragment>& Frag : Frags) { if (Frag) { Frag->ModifyChargeTime(Ctx, RampChargeTime); } }
+
+			bChargeSequenceActive = true;
+			ChargeRecoilElapsed = 0.0f;
+			ChargeRecoilDuration = RampChargeTime;
+			ChargeRecoilTotalPitch = KickPitch;
+			ChargeRecoilTotalYaw = KickYaw;
+		}
+		else
+		{
+			if (KickPitch != 0.0f) { PendingRisePitch += KickPitch; }
+			if (KickYaw != 0.0f) { PendingRiseYaw += KickYaw; } // smoothed in Tick (was instant) to avoid jitter
 		}
 		++ShotsFiredThisSpray;
 
@@ -230,7 +310,7 @@ void UFPSRWeaponFireComponent::TickComponent(float DeltaTime, ELevelTick TickTyp
 	}
 
 	// Melee: repeat attacks while the button is held; FireOneShot self-gates on MeleeAttackDelay.
-	if (bWantsToFire && Weapon->Archetype == EFPSRWeaponArchetype::Melee)
+	if (bWantsToFire && Weapon->GetArchetype() == EFPSRWeaponArchetype::Melee)
 	{
 		FireOneShot();
 	}
@@ -253,14 +333,49 @@ void UFPSRWeaponFireComponent::TickComponent(float DeltaTime, ELevelTick TickTyp
 		CachedCamera->FieldOfView = FMath::FInterpTo(CachedCamera->FieldOfView, TargetFOV, DeltaTime, FMath::Max(0.01f, Stats.ADSInterpSpeed));
 	}
 
-	// --- Recoil pitch handling (smoothed rise + debt-aware recovery + player compensation) ---
-	// A spray interrupted by an empty magazine / reload must stop kicking the instant rounds stop leaving the
-	// gun: discard any queued (not-yet-applied) recoil rise. Otherwise the smoothed-rise backlog keeps climbing
-	// the view during the reload with no shot firing — especially noticeable once fire rate is boosted.
-	if (!CanFire())
+	// 0) ChargeLaser charge-recoil ramp: spread the shot's up-kick across the charge so the view climbs gradually and
+	//    the rise FINISHES at the fire moment (charge complete). Applied directly here (the charge duration IS the
+	//    smoothing, so it bypasses the RecoilRiseRate path) and accumulates recovery debt so auto-recovery — gated off
+	//    while the ramp is active — pulls the view back down only after the climb finishes.
+	if (bChargeSequenceActive)
 	{
-		PendingRisePitch = 0.0f;
-		PendingRiseYaw = 0.0f;
+		const float Dur = FMath::Max(0.0001f, ChargeRecoilDuration);
+		const float PrevAlpha = FMath::Clamp(ChargeRecoilElapsed / Dur, 0.0f, 1.0f);
+		ChargeRecoilElapsed += DeltaTime;
+		const float Alpha = FMath::Clamp(ChargeRecoilElapsed / Dur, 0.0f, 1.0f);
+		const float AlphaDelta = Alpha - PrevAlpha;
+		if (AlphaDelta > 0.0f)
+		{
+			const float ApplyPitch = ChargeRecoilTotalPitch * AlphaDelta;
+			if (ApplyPitch != 0.0f)
+			{
+				OwnerPawn->AddControllerPitchInput(-ApplyPitch); // negative = up
+				RecoilDebtPitch += ApplyPitch;
+			}
+			const float ApplyYaw = ChargeRecoilTotalYaw * AlphaDelta;
+			if (ApplyYaw != 0.0f)
+			{
+				OwnerPawn->AddControllerYawInput(ApplyYaw);
+			}
+		}
+		if (Alpha >= 1.0f)
+		{
+			bChargeSequenceActive = false; // climb complete at the fire moment
+		}
+	}
+
+	// --- Recoil pitch handling (smoothed rise + debt-aware recovery + player compensation) ---
+	// During a reload, TRIM a large smoothed-rise backlog (from boosted rapid fire) so the view doesn't keep
+	// climbing through the reload — but KEEP up to a single shot's worth so the round that EMPTIED the magazine
+	// still kicks. Zeroing the queue here erased the last shot's recoil entirely: emptying the mag triggers an
+	// auto-reload within a frame of that shot, so IsReloading flips true before the smoothed rise (applied over
+	// ~RecoilVertical/RecoilRiseRate seconds) has played out — worst on a high-recoil single-shot sniper.
+	if (Inventory->IsReloading())
+	{
+		const float MaxRise = Stats.RecoilVertical * FMath::Max(Stats.HipVerticalScale, Stats.ADSVerticalScale);
+		PendingRisePitch = FMath::Min(PendingRisePitch, FMath::Max(0.0f, MaxRise));
+		const float MaxYaw = FMath::Abs(Stats.RecoilHorizontal) * 2.0f; // one shot incl. random-variance headroom
+		PendingRiseYaw = FMath::Clamp(PendingRiseYaw, -MaxYaw, MaxYaw);
 	}
 
 	// 1) Smoothly apply any pending up-kick (snappy rise), accumulating recovery debt.
@@ -296,7 +411,7 @@ void UFPSRWeaponFireComponent::TickComponent(float DeltaTime, ELevelTick TickTyp
 	const bool bAutoRecover =
 		(Stats.RecoilRecovery == ERecoilRecovery::Always) ||
 		(Stats.RecoilRecovery == ERecoilRecovery::Auto && Stats.FireMode == EFPSRFireMode::Single);
-	if (bAutoRecover && !bWantsToFire && RecoilDebtPitch > 0.0f)
+	if (bAutoRecover && !bWantsToFire && !bChargeSequenceActive && RecoilDebtPitch > 0.0f)
 	{
 		const float Recover = FMath::Min(Stats.RecoilRecoveryRate * DeltaTime, RecoilDebtPitch);
 		OwnerPawn->AddControllerPitchInput(Recover); // positive = down
@@ -311,7 +426,7 @@ void UFPSRWeaponFireComponent::TickComponent(float DeltaTime, ELevelTick TickTyp
 
 #if ENABLE_DRAW_DEBUG
 	// Debug scaffolding (replaced by HUD in P3): show ammo for the local player (ammo weapons only).
-	if (GEngine && Weapon->Archetype != EFPSRWeaponArchetype::Melee && Stats.MagSize > 0)
+	if (GEngine && Weapon->GetArchetype() != EFPSRWeaponArchetype::Melee && Stats.MagSize > 0)
 	{
 		const int32 Ammo = Inventory->GetCurrentAmmo();
 		const int32 Mag = Inventory->GetCurrentMagSize();

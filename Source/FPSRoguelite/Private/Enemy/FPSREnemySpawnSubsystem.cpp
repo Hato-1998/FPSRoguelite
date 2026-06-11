@@ -2,11 +2,13 @@
 
 #include "Enemy/FPSREnemySpawnSubsystem.h"
 #include "Enemy/FPSREnemyBase.h"
+#include "Enemy/FPSREnemySpawnPoint.h"
 #include "Enemy/FPSRFlowFieldSubsystem.h"
 #include "Hero/FPSRCharacter.h"
 #include "Core/FPSRLogChannels.h"
 #include "Core/FPSRGameState.h"
 #include "Engine/World.h"
+#include "EngineUtils.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/Pawn.h"
 #include "CollisionQueryParams.h"
@@ -61,6 +63,8 @@ void UFPSREnemySpawnSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 
 	if (HasServerAuthority())
 	{
+		CacheSpawnPoints();
+
 		InWorld.GetTimerManager().SetTimer(
 			DirectorTimerHandle,
 			this,
@@ -69,6 +73,27 @@ void UFPSREnemySpawnSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 			true
 		);
 	}
+}
+
+void UFPSREnemySpawnSubsystem::CacheSpawnPoints()
+{
+	SpawnPoints.Reset();
+
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
+	for (TActorIterator<AFPSREnemySpawnPoint> It(World); It; ++It)
+	{
+		if (AFPSREnemySpawnPoint* Point = *It)
+		{
+			SpawnPoints.Add(Point);
+		}
+	}
+
+	UE_LOG(LogFPSR, Log, TEXT("[Spawn] Cached %d enemy spawn point(s)."), SpawnPoints.Num());
 }
 
 void UFPSREnemySpawnSubsystem::Deinitialize()
@@ -191,9 +216,12 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 
 		Enemy->SetNetUpdateFrequency(NetFreq);
 
-		// Contact attack: in range + cooldown elapsed + the target player's attack-token budget allows.
+		// Contact attack: in horizontal range + within a vertical gap (no through-floor hits) + cooldown elapsed
+		// + the target player's attack-token budget allows. The XY nearest test ignores Z, so gate Z explicitly.
 		const float AttackRange = Enemy->GetAttackRange();
+		const float AttackVertGap = FMath::Abs(EnemyLocation.Z - BestPlayerLocation.Z);
 		if (BestDistSq <= (AttackRange * AttackRange)
+			&& AttackVertGap <= AttackVerticalRange
 			&& Enemy->CanAttack(Now)
 			&& AttackersThisPass[BestPlayerIndex] < AttackTokenLimit)
 		{
@@ -229,6 +257,15 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 		MoveDir.Z = 0.0f;
 
 		Enemy->TickServerMovement(MoveDir, DeltaTime * UpdateStride);
+
+		// Recycle an enemy that has fallen out of the playable world (walked into a pit / no static floor under
+		// it) so the endless-fall path can't pin a director slot forever. Safe here: Agents/Locations/SpatialHash
+		// are snapshots; ReleaseEnemy only mutates ActiveEnemies/DormantPool and this enemy isn't touched again
+		// this pass.
+		if (Enemy->GetActorLocation().Z < WorldKillZ)
+		{
+			ReleaseEnemy(Enemy);
+		}
 	}
 }
 
@@ -257,10 +294,23 @@ FVector UFPSREnemySpawnSubsystem::ComputeSeparation(int32 AgentIndex, const TArr
 					FVector Diff = Origin - Locations[OtherIndex];
 					Diff.Z = 0.0f;
 					const float DistSq = Diff.SizeSquared();
-					if (DistSq > KINDA_SMALL_NUMBER && DistSq < RadiusSq)
+					if (DistSq >= RadiusSq)
+					{
+						continue; // outside the separation radius
+					}
+					if (DistSq > KINDA_SMALL_NUMBER)
 					{
 						const float Dist = FMath::Sqrt(DistSq);
 						Separation += (Diff / Dist) * (1.0f - Dist / SeparationRadius); // stronger when closer
+					}
+					else
+					{
+						// Exactly co-located (e.g. two enemies spawned on the same designer point in one tick): a
+						// zero vector has no direction, so push this agent along a deterministic golden-angle heading
+						// unique to its index. Co-located agents fan out instead of staying stuck — fixes the stacking
+						// at its source so spawn locations never have to be jittered into unsafe geometry (Codex 2026-06-09).
+						const float Heading = static_cast<float>(AgentIndex) * 2.39996323f; // golden angle (radians)
+						Separation += FVector(FMath::Cos(Heading), FMath::Sin(Heading), 0.0f);
 					}
 				}
 			}
@@ -285,7 +335,9 @@ void UFPSREnemySpawnSubsystem::TickDirector()
 	int32 SpawnedThisTick = 0;
 	while (ActiveEnemies.Num() < TargetAliveCount && ActiveEnemies.Num() < MaxActiveEnemies && SpawnedThisTick < MaxSpawnPerTick)
 	{
-		if (AcquireEnemy(ComputeSpawnLocation()) == nullptr)
+		bool bSnapToGround = true;
+		const FVector SpawnAt = ComputeSpawnLocation(bSnapToGround);
+		if (AcquireEnemy(SpawnAt, bSnapToGround) == nullptr)
 		{
 			break;
 		}
@@ -293,8 +345,22 @@ void UFPSREnemySpawnSubsystem::TickDirector()
 	}
 }
 
-FVector UFPSREnemySpawnSubsystem::ComputeSpawnLocation() const
+FVector UFPSREnemySpawnSubsystem::ComputeSpawnLocation(bool& bOutSnapToGround) const
 {
+	// Prefer a designer-placed spawn point that is out of every player's view (Game.MD §2-8 / P4 backlog);
+	// fall back to the ring pattern when none are placed or none currently qualify (unplaced maps still work).
+	FVector PointLocation;
+	if (TrySelectSpawnPoint(PointLocation))
+	{
+		// Designer point is authoritative: keep its exact Z so an indoor/under-roof placement is not re-snapped
+		// up onto the ceiling/roof by the downward ground trace (Codex review 2026-06-09).
+		bOutSnapToGround = false;
+		return PointLocation;
+	}
+
+	// Ring fallback is procedural (arbitrary Z above the player) and must be snapped to the floor.
+	bOutSnapToGround = true;
+
 	FVector Center = FVector::ZeroVector;
 
 	// Find first player pawn location as center.
@@ -318,6 +384,137 @@ FVector UFPSREnemySpawnSubsystem::ComputeSpawnLocation() const
 	const float Radius = FMath::FRandRange(SpawnRadiusInner, SpawnRadiusOuter);
 
 	return Center + FVector(FMath::Cos(Angle) * Radius, FMath::Sin(Angle) * Radius, 100.0f);
+}
+
+bool UFPSREnemySpawnSubsystem::TrySelectSpawnPoint(FVector& OutLocation) const
+{
+	const UWorld* World = GetWorld();
+	if (!World || SpawnPoints.Num() == 0)
+	{
+		return false;
+	}
+
+	// Gather each local/remote player's view (camera) + pawn location once. Spawn points are filtered against
+	// ALL players so an enemy never pops into anyone's view.
+	struct FPlayerView { FVector CamLocation; FVector CamForward2D; };
+	TArray<FPlayerView, TInlineAllocator<4>> PlayerViews;
+	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+	{
+		const APlayerController* PC = It->Get();
+		if (PC == nullptr || PC->GetPawn() == nullptr)
+		{
+			continue;
+		}
+		FVector CamLocation;
+		FRotator CamRotation;
+		PC->GetPlayerViewPoint(CamLocation, CamRotation);
+		FVector Forward2D = CamRotation.Vector();
+		Forward2D.Z = 0.0f;
+		if (!Forward2D.Normalize())
+		{
+			continue;
+		}
+		PlayerViews.Add({ CamLocation, Forward2D });
+	}
+
+	if (PlayerViews.Num() == 0)
+	{
+		return false; // no players to gate against — let the caller fall back to the ring pattern
+	}
+
+	const float CosHalfVis = FMath::Cos(FMath::DegreesToRadians(SpawnPointVisibilityHalfAngleDeg));
+	const bool bZoneFilter = ActiveSpawnZone.IsValid();
+
+	// Build the eligible candidate set with cumulative weights for a single weighted-random draw.
+	TArray<const AFPSREnemySpawnPoint*, TInlineAllocator<32>> Candidates;
+	TArray<float, TInlineAllocator<32>> CumulativeWeights;
+	float WeightTotal = 0.0f;
+
+	for (const TObjectPtr<AFPSREnemySpawnPoint>& PointPtr : SpawnPoints)
+	{
+		const AFPSREnemySpawnPoint* Point = PointPtr;
+		if (Point == nullptr || !Point->IsEnabled() || Point->GetWeight() <= 0.0f)
+		{
+			continue;
+		}
+		if (bZoneFilter && !Point->GetZoneTag().MatchesTag(ActiveSpawnZone))
+		{
+			continue;
+		}
+
+		const FVector PointLocation = Point->GetActorLocation();
+
+		// Nearest-player distance (XY) for the MinPlayerDistance gate + distance weighting.
+		float NearestDistSq = TNumericLimits<float>::Max();
+		bool bVisibleToAnyPlayer = false;
+		for (const FPlayerView& View : PlayerViews)
+		{
+			FVector ToPoint = PointLocation - View.CamLocation;
+			ToPoint.Z = 0.0f;
+			const float DistSq = ToPoint.SizeSquared();
+			NearestDistSq = FMath::Min(NearestDistSq, DistSq);
+
+			if (DistSq > KINDA_SMALL_NUMBER)
+			{
+				const FVector Dir = ToPoint * FMath::InvSqrt(DistSq);
+				if (FVector::DotProduct(View.CamForward2D, Dir) > CosHalfVis)
+				{
+					bVisibleToAnyPlayer = true;
+					break; // inside this player's view cone — exclude the point
+				}
+			}
+			else
+			{
+				bVisibleToAnyPlayer = true; // a player is standing on the point
+				break;
+			}
+		}
+
+		if (bVisibleToAnyPlayer)
+		{
+			continue;
+		}
+
+		const float NearestDist = FMath::Sqrt(NearestDistSq);
+		if (Point->GetMinPlayerDistance() > 0.0f && NearestDist < Point->GetMinPlayerDistance())
+		{
+			continue;
+		}
+
+		// Favor points nearer the fight without hard-excluding far ones.
+		const float DistanceWeight = 1.0f / (1.0f + NearestDist / SpawnPointFalloffDistance);
+		const float EffectiveWeight = Point->GetWeight() * DistanceWeight;
+		if (EffectiveWeight <= 0.0f)
+		{
+			continue;
+		}
+
+		WeightTotal += EffectiveWeight;
+		Candidates.Add(Point);
+		CumulativeWeights.Add(WeightTotal);
+	}
+
+	if (Candidates.Num() == 0 || WeightTotal <= 0.0f)
+	{
+		return false;
+	}
+
+	// Weighted-random draw: first cumulative weight >= roll. The exact designer anchor is used (no jitter): it is
+	// the validated, authoritative spawn transform (§1 fixed map). If the same point is picked more than once in a
+	// tick, the co-located enemies are pushed apart at the source by ComputeSeparation's coincident handling rather
+	// than by moving the spawn into possibly-unsafe wall/ledge geometry.
+	const float Roll = FMath::FRandRange(0.0f, WeightTotal);
+	for (int32 i = 0; i < Candidates.Num(); ++i)
+	{
+		if (Roll <= CumulativeWeights[i])
+		{
+			OutLocation = Candidates[i]->GetActorLocation();
+			return true;
+		}
+	}
+
+	OutLocation = Candidates.Last()->GetActorLocation(); // float-rounding guard
+	return true;
 }
 
 FVector UFPSREnemySpawnSubsystem::SnapToGround(const FVector& Location) const
@@ -344,7 +541,7 @@ FVector UFPSREnemySpawnSubsystem::SnapToGround(const FVector& Location) const
 	return Location; // no floor found (e.g. off-map): keep the original candidate
 }
 
-AFPSREnemyBase* UFPSREnemySpawnSubsystem::AcquireEnemy(const FVector& Location)
+AFPSREnemyBase* UFPSREnemySpawnSubsystem::AcquireEnemy(const FVector& Location, bool bSnapToGround)
 {
 	UWorld* World = GetWorld();
 	if (!World || !HasServerAuthority())
@@ -352,7 +549,7 @@ AFPSREnemyBase* UFPSREnemySpawnSubsystem::AcquireEnemy(const FVector& Location)
 		return nullptr;
 	}
 
-	const FVector SpawnLocation = SnapToGround(Location);
+	const FVector SpawnLocation = bSnapToGround ? SnapToGround(Location) : Location;
 
 	AFPSREnemyBase* Enemy = nullptr;
 
