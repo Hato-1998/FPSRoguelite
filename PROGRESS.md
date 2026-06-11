@@ -23,6 +23,9 @@
 > **알려진 폴리시 후속(버그 아님)**: ① ExplosiveRounds 적 직격 시 히트마커 2회(직격+스플래시) ② 플레이어 넉백=서버 LaunchCharacter 권위적이나 오너클라 스무딩은 후속.
 > ⚠️ 머지 순서: `fix/weapon-fire-freeze-hardening`(미머지) → p5-friendly-fire. 머지 시점 Codex 일괄 리뷰(메모리 `codex-review-gate`).
 
+## 🗺️ (후속 마일스톤) P7 멀티플레이 게임 루프 — **`Docs/P7-MultiplayerLoop_Plan.md`** (플랜만)
+> 로비(Steam 초대)→인게임→보스(맵중앙 박스, 체력만)→로비 복귀 E2E. **백로그 D5(세션)+D4(보스 축소)+신규 로비/트래블 통합**. **확정값**: 세션=Steam(app id 480), 보스=BossTime 트리거+`UFPSREnemyHealthComponent` 재사용(무기 데미지 그대로), 승=보스킬·패=전멸 둘 다 로비, seamless travel. **선행**: 무기6종+미션 완료 + P5 FF 머지. 파일단위 설계·구현순서·재개프롬프트는 플랜 문서. (브랜치 미생성, 무기/미션/FF 이후 착수)
+
 ## 🎨 콘텐츠 작업 핸드오프 (무기 DA 작성) — **`Docs/P4-C_WeaponContent_SpecSheet.md`**
 > **무기 콘텐츠 커밋 완료(2026-06-11, `1557b8c`, 바주카까지)**: BP_Bullet + DA Sniper(투사체 탄환)/Shotgun/Bazooka/BurstRifle + BP_FPSRPlayer 슬롯 + 반동값. **남은 DA = Grenade/ChargeLaser + Knife=Melee 확인**. Bazooka는 P5 FF 작업과 직결(자폭/아군). 스펙시트대로 계속.
 
