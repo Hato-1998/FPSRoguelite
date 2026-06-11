@@ -391,6 +391,14 @@ void AFPSRCharacter::ServerDash_Implementation(FVector DashDirection)
 		return;
 	}
 
+	// No dashing during the card-selection freeze (mirror ServerEquipSlot / ServerStartChargeLaser server gates).
+	// Input_Dash already gates client-side, but a dash RPC in flight when the freeze replicates must be rejected
+	// on the server too, or the run is no longer globally stopped.
+	if (IsRunFrozen())
+	{
+		return;
+	}
+
 	// Cooldown gate (server-authoritative).
 	const float Now = World->GetTimeSeconds();
 	if ((Now - LastDashTime) < DashCooldown)

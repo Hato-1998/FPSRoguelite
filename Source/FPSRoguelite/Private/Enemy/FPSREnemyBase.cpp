@@ -87,6 +87,7 @@ void AFPSREnemyBase::Activate(const FVector& Location)
 	VerticalVelocity = 0.0f; // reset fall state for the reused actor
 	bGrounded = false;       // re-check ground on the first update (may spawn on a rooftop)
 	GroundRecheckTimer = 0.0f;
+	KnockbackVelocityXY = FVector::ZeroVector; // clear residual knockback from a prior life
 }
 
 void AFPSREnemyBase::Deactivate()
@@ -103,19 +104,48 @@ void AFPSREnemyBase::TickServerMovement(const FVector& MoveDirection, float Scal
 		return;
 	}
 
+	// Knockback (explosion push): a decaying horizontal impulse. While it's active, suppress flow-field steering
+	// so the push isn't immediately cancelled by the enemy walking back toward the player.
+	const bool bKnockbackActive = !KnockbackVelocityXY.IsNearlyZero(1.0f);
+
 	// Horizontal steering (flow-field + separation), swept so it blocks against walls.
 	FVector Dir = MoveDirection;
 	Dir.Z = 0.0f;
-	if (Dir.SizeSquared() > KINDA_SMALL_NUMBER)
+	if (!bKnockbackActive && Dir.SizeSquared() > KINDA_SMALL_NUMBER)
 	{
 		const FVector Normalized = Dir.GetSafeNormal();
 		AddActorWorldOffset(Normalized * CurrentMoveSpeed * ScaledDeltaSeconds, true);
 		SetActorRotation(Normalized.Rotation());
 	}
 
+	if (bKnockbackActive)
+	{
+		AddActorWorldOffset(KnockbackVelocityXY * ScaledDeltaSeconds, true); // swept: blocks against walls
+		const float DecayFactor = FMath::Exp(-ScaledDeltaSeconds / FMath::Max(KnockbackDecayTime, 0.01f));
+		KnockbackVelocityXY *= DecayFactor;
+		if (KnockbackVelocityXY.IsNearlyZero(1.0f))
+		{
+			KnockbackVelocityXY = FVector::ZeroVector;
+		}
+	}
+
 	// Vertical: ground-follow + gravity ALWAYS (even when not steering) so enemies never float and a
 	// rooftop-spawned enemy falls before chasing.
 	ApplyGravity(ScaledDeltaSeconds);
+}
+
+void AFPSREnemyBase::ApplyKnockback(const FVector& Velocity)
+{
+	if (!HasAuthority() || (HealthComponent && HealthComponent->IsDead()))
+	{
+		return;
+	}
+	// Additive: stacking blasts compound. Horizontal goes to the decaying member; vertical feeds VerticalVelocity
+	// so the existing gravity integrator carries the enemy up and back down (a launched pop).
+	KnockbackVelocityXY += FVector(Velocity.X, Velocity.Y, 0.0f);
+	VerticalVelocity += Velocity.Z;
+	bGrounded = false;        // leave the ground; re-acquire it on landing
+	GroundRecheckTimer = 0.0f; // re-check the floor immediately
 }
 
 void AFPSREnemyBase::ApplyGravity(float ScaledDeltaSeconds)
@@ -154,8 +184,9 @@ void AFPSREnemyBase::ApplyGravity(float ScaledDeltaSeconds)
 		const float Diff = Loc.Z - TargetZ;
 
 		// Snap only within tolerance in EITHER direction (a surface far above is a ledge to route around, not
-		// ground to teleport onto; a far-below floor means the enemy is airborne).
-		if (FMath::Abs(Diff) <= GroundSnapTolerance)
+		// ground to teleport onto; a far-below floor means the enemy is airborne). NOT while rising under a
+		// knockback impulse (VerticalVelocity > 0) — snapping then would instantly cancel the launch.
+		if (VerticalVelocity <= 0.0f && FMath::Abs(Diff) <= GroundSnapTolerance)
 		{
 			if (!FMath::IsNearlyZero(Diff))
 			{
@@ -166,12 +197,13 @@ void AFPSREnemyBase::ApplyGravity(float ScaledDeltaSeconds)
 			return;
 		}
 
-		if (Diff > 0.0f)
+		if (Diff > 0.0f || VerticalVelocity > 0.0f)
 		{
-			// Above the floor within the probe — fall under gravity, clamped to land exactly on it.
+			// Above the floor (or launched upward) — integrate ballistically, clamping to land exactly on the floor
+			// only while descending (a rising knockback passes up through TargetZ without snapping).
 			VerticalVelocity -= GravityAccel * ScaledDeltaSeconds;
 			float NewZ = Loc.Z + VerticalVelocity * ScaledDeltaSeconds;
-			if (NewZ <= TargetZ)
+			if (VerticalVelocity <= 0.0f && NewZ <= TargetZ)
 			{
 				NewZ = TargetZ;
 				VerticalVelocity = 0.0f;

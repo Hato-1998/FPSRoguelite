@@ -7,6 +7,7 @@
 #include "Weapon/FPSRWeaponFragment.h"
 #include "Weapon/FPSRWeaponDataAsset.h"
 #include "Weapon/FPSRWeaponFireComponent.h"
+#include "Combat/FPSRCombatStatics.h"
 #include "Enemy/FPSREnemyHealthComponent.h"
 #include "Core/FPSRGameState.h"
 #include "Core/FPSRPlayerController.h"
@@ -165,45 +166,62 @@ void UFPSRGA_WeaponFire_Hitscan::ActivateAbility(
 	bool bServerCrit = false;
 	bool bServerKill = false;
 
-	// Lambda to apply damage to a single hit actor (factors out logic for both single-trace and pierce paths).
-	auto ApplyDamageToActor = [&](AActor* HitActor) -> void
+	// Damageable-pawn object query (enemies via ECC_Pawn + players via ECC_FPSRPlayerPawn), reused per pellet. An
+	// ECC_Pawn-only query would miss players (distinct object channel) — so friendly fire would never land. (§2-4)
+	FCollisionObjectQueryParams PawnObjParams;
+	FPSRCombat::AddDamageablePawnObjectTypes(PawnObjParams);
+
+	// bAllowSelf for any per-impact explosion (ExplosiveRounds card): self unless the NoSelfDamage card cleared it.
+	const bool bAllowSelfOnImpact = !FireCtx.bSuppressSelfDamage;
+
+	// Resolve crit + per-hit fragment bonus + self/friendly rules for one target. Returns true if damage landed
+	// (bullet stops / spends a penetration here); false = pass-through (a friendly while FF is off).
+	auto ApplyToTarget = [&](AActor* HitActor) -> bool
 	{
-		if (!HitActor)
+		if (!HitActor || !FireCtx.bAuthority)
 		{
-			return;
+			return false;
 		}
-
-		UFPSREnemyHealthComponent* HealthComp = HitActor->FindComponentByClass<UFPSREnemyHealthComponent>();
-		if (!HealthComp)
+		float FinalDamage = Damage * DamageMultiplier;
+		bool bCrit = false;
+		if (CritChance > 0.0f && FMath::FRand() < CritChance)
 		{
-			return;
+			FinalDamage *= CritMultiplier;
+			bCrit = true;
 		}
-
-		if (FireCtx.bAuthority)
+		if (Fragments)
 		{
-			float FinalDamage = Damage * DamageMultiplier;
-			bool bCrit = false;
-			if (CritChance > 0.0f && FMath::FRand() < CritChance)
+			for (const TObjectPtr<UFPSRWeaponFragment>& Frag : *Fragments)
 			{
-				FinalDamage *= CritMultiplier;
-				bCrit = true;
+				if (Frag) { Frag->OnHitActor(FireCtx, HitActor, FinalDamage); }
 			}
-
-			// Per-hit behavior hooks (e.g. bonus/leech) can adjust the damage before it lands.
-			if (Fragments)
-			{
-				for (const TObjectPtr<UFPSRWeaponFragment>& Frag : *Fragments)
-				{
-					if (Frag) { Frag->OnHitActor(FireCtx, HitActor, FinalDamage); }
-				}
-			}
-
-			HealthComp->ApplyDamage(FinalDamage, Avatar);
+		}
+		// Direct hitscan never self-damages (bAllowSelf=false); ResolveDamage applies enemy/friendly rules.
+		const float Resolved = FPSRCombat::ResolveDamage(Avatar, HitActor, FinalDamage, /*bAllowSelf*/ false, World);
+		if (Resolved <= 0.0f)
+		{
+			return false; // friendly pass-through (FF off): don't stop the bullet, don't spend penetration
+		}
+		const FPSRCombat::FDamageResult Result = FPSRCombat::ApplyDamage(HitActor, Resolved, Avatar);
+		if (Result.bWasEnemy && Result.bApplied)
+		{
 			bServerHit = true;
-			if (HealthComp->IsDead()) { bServerKill = true; }
+			if (Result.bKilled) { bServerKill = true; }
 			else if (bCrit) { bServerCrit = true; }
+		}
+		return Result.bApplied;
+	};
 
-			UE_LOG(LogFPSR, Verbose, TEXT("[Fire] hit=%s dmg=%.1f"), *GetNameSafe(HitActor), FinalDamage);
+	// Notify ExplosiveRounds-style fragments of a terminal impact (server-only).
+	auto NotifyImpact = [&](const FVector& ImpactPoint)
+	{
+		if (!FireCtx.bAuthority || !Fragments)
+		{
+			return;
+		}
+		for (const TObjectPtr<UFPSRWeaponFragment>& Frag : *Fragments)
+		{
+			if (Frag) { Frag->OnImpact(FireCtx, ImpactPoint, bAllowSelfOnImpact); }
 		}
 	};
 
@@ -217,84 +235,54 @@ void UFPSRGA_WeaponFire_Hitscan::ActivateAbility(
 				: BaseDir;
 			const FVector End = Start + PelletDir * Range;
 
-			// Branch on penetration: single-trace for low penetration, multi-trace for piercing.
-			if (MaxPenetration <= 1)
+			// Unified path (single-trace = MaxPenetration 1): gather damageable pawns (enemies + players) along the
+			// ray, then find the wall (Visibility) cutoff ignoring those pawns so a pawn never masquerades as the
+			// wall. Query-only dynamics that ignore Visibility (in-flight projectiles) don't count as walls.
+			FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(FPSRWeaponFire), false, Avatar);
+			TArray<FHitResult> PawnHits;
+			World->LineTraceMultiByObjectType(PawnHits, Start, End, PawnObjParams, QueryParams);
+
+			FCollisionQueryParams WallParams(SCENE_QUERY_STAT(FPSRWeaponFireWall), false, Avatar);
+			for (const FHitResult& PawnHit : PawnHits)
 			{
-				// Single-trace path: rifle, shotgun, burst — stops at first enemy.
-				FHitResult Hit;
-				FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(FPSRWeaponFire), false, Avatar);
-				const bool bHit = World->LineTraceSingleByChannel(Hit, Start, End, ECC_Visibility, QueryParams);
-
-#if ENABLE_DRAW_DEBUG
-				const FVector DebugEnd = bHit ? Hit.ImpactPoint : End;
-				DrawDebugLine(World, Start, DebugEnd, FColor::Yellow, false, 0.5f, 0, 1.0f);
-				if (bHit)
-				{
-					DrawDebugPoint(World, Hit.ImpactPoint, 10.0f, FColor::Red, false, 0.5f);
-				}
-#endif
-
-				AActor* HitActor = bHit ? Hit.GetActor() : nullptr;
-				ApplyDamageToActor(HitActor);
+				if (AActor* PawnActor = PawnHit.GetActor()) { WallParams.AddIgnoredActor(PawnActor); }
 			}
-			else
-			{
-				// Pierce path: sniper — pass through enemies but stop at world geometry that blocks the weapon
-				// (Visibility) channel. Gather the pawns on the line first, then run a single Visibility trace
-				// that ignores those pawns: the wall cutoff then matches exactly what blocks a normal hitscan
-				// shot (movable cover/doors that block Visibility included), while query-only dynamics that
-				// ignore Visibility — e.g. in-flight AFPSRProjectile collision spheres — do NOT count as walls.
-				FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(FPSRWeaponFire), false, Avatar);
-
-				// Find all pawns along the line (enemies are pierced; non-enemy pawns are skipped below).
-				TArray<FHitResult> PawnHits;
-				FCollisionObjectQueryParams PawnObjParams;
-				PawnObjParams.AddObjectTypesToQuery(ECC_Pawn);
-				World->LineTraceMultiByObjectType(PawnHits, Start, End, PawnObjParams, QueryParams);
-
-				// Wall = first Visibility-blocking geometry, ignoring the pawns (which also block Visibility)
-				// so an enemy never masquerades as the wall and shortens the pierce.
-				FCollisionQueryParams WallParams(SCENE_QUERY_STAT(FPSRWeaponFireWall), false, Avatar);
-				for (const FHitResult& PawnHit : PawnHits)
-				{
-					if (AActor* PawnActor = PawnHit.GetActor()) { WallParams.AddIgnoredActor(PawnActor); }
-				}
-				FHitResult WallHit;
-				const bool bWall = World->LineTraceSingleByChannel(WallHit, Start, End, ECC_Visibility, WallParams);
-				const float WallDist = bWall ? WallHit.Distance : Range;
+			FHitResult WallHit;
+			const bool bWall = World->LineTraceSingleByChannel(WallHit, Start, End, ECC_Visibility, WallParams);
+			const float WallDist = bWall ? WallHit.Distance : Range;
 
 #if ENABLE_DRAW_DEBUG
-				DrawDebugLine(World, Start, Start + PelletDir * FMath::Min(WallDist, Range), FColor::Yellow, false, 0.5f, 0, 1.0f);
+			DrawDebugLine(World, Start, Start + PelletDir * FMath::Min(WallDist, Range), FColor::Yellow, false, 0.5f, 0, 1.0f);
 #endif
 
-				// Apply damage to up to MaxPenetration enemies (skipping those behind the wall).
-				int32 PenetrationCount = 0;
-				for (const FHitResult& PawnHit : PawnHits)
+			// Apply to up to MaxPenetration valid targets, nearest first (PawnHits are distance-sorted). Friendly
+			// pass-throughs (FF off) don't count toward penetration. Track the terminal impact for OnImpact.
+			int32 PenetrationCount = 0;
+			bool bHasImpact = false;
+			FVector ImpactPoint = bWall ? WallHit.ImpactPoint : End;
+			for (const FHitResult& PawnHit : PawnHits)
+			{
+				if (PawnHit.Distance > WallDist)
 				{
-					if (PawnHit.Distance > WallDist)
-					{
-						continue; // Behind the wall.
-					}
-
-					AActor* HitActor = PawnHit.GetActor();
-					if (!HitActor)
-					{
-						continue;
-					}
-
-					UFPSREnemyHealthComponent* HealthComp = HitActor->FindComponentByClass<UFPSREnemyHealthComponent>();
-					if (!HealthComp)
-					{
-						continue;
-					}
-
-					ApplyDamageToActor(HitActor);
+					break; // behind the wall (everything after is too — distance-sorted)
+				}
+				if (ApplyToTarget(PawnHit.GetActor()))
+				{
+					ImpactPoint = PawnHit.ImpactPoint; // the bullet lands / detonates here
+					bHasImpact = true;
 					++PenetrationCount;
 					if (PenetrationCount >= MaxPenetration)
 					{
 						break;
 					}
 				}
+			}
+
+			// Detonate per-impact fragments at the terminal point: last damaged pawn, or the wall if only geometry
+			// was hit. A pellet that hit nothing (sky) fires no impact event.
+			if (bHasImpact || bWall)
+			{
+				NotifyImpact(ImpactPoint);
 			}
 		}
 	}

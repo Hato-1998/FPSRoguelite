@@ -43,6 +43,19 @@ public:
 	UFUNCTION(BlueprintPure, Category = "FPSR|Run")
 	bool IsRunPaused() const { return bRunPaused; }
 
+	/** Host-controlled friendly-fire toggle (P5 §2-2). When false, player weapons do no damage to OTHER players;
+	 *  when true, friendly hits land at GetFriendlyFireDamageScale(). Self-damage (explosions) and knockback are
+	 *  independent of this flag. Server sets it; replicated for UI mirroring (damage resolves server-side). */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Run")
+	bool IsFriendlyFireEnabled() const { return bFriendlyFireEnabled; }
+
+	/** Damage multiplier applied to friendly-player hits while friendly fire is enabled (0.5 = half damage). */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Run")
+	float GetFriendlyFireDamageScale() const { return FriendlyFireDamageScale; }
+
+	/** Server: enable/disable friendly fire for the run (host setting entry point; debug cmd FPSR.SetFriendlyFire). */
+	void SetFriendlyFireEnabled(bool bEnabled);
+
 	/** Replicated run clock (survival seconds; pauses during freeze and after boss, low-frequency UI mirror). */
 	UFUNCTION(BlueprintPure, Category = "FPSR|Run")
 	float GetRunClockSeconds() const { return RunClockSeconds; }
@@ -104,4 +117,12 @@ protected:
 
 	UPROPERTY(ReplicatedUsing = OnRep_RunState)
 	float RunClockSeconds = 0.0f;
+
+	/** Host friendly-fire setting (replicated; read server-side for damage, mirrored to clients for UI). */
+	UPROPERTY(ReplicatedUsing = OnRep_RunState)
+	bool bFriendlyFireEnabled = false;
+
+	/** Friendly-player damage multiplier while friendly fire is on (editor-tunable; 0.5 = half). */
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Run")
+	float FriendlyFireDamageScale = 0.5f;
 };

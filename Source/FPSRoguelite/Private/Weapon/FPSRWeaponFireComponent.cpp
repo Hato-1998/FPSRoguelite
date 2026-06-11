@@ -108,6 +108,21 @@ void UFPSRWeaponFireComponent::StartFiring()
 		}
 	}
 
+	// Local fire-rate gate for the immediate press shot. The Tick auto/burst path already paces itself via
+	// TimeSinceLastShot, but a fresh trigger pull fires immediately — so spam-clicking a single-shot weapon
+	// (or swap-spamming) during the cooldown would apply local recoil/bloom for a shot the server-authoritative
+	// cadence gate (GA ServerTryConsumeFireInterval) rejects. NextFireReadyTime tracks the same next-allowed time
+	// the server uses (set per-shot to Now+1/FireRate, and to Now+swap-cooldown on equip), so recoil only kicks
+	// when a shot can actually fire. Melee self-gates on MeleeAttackDelay inside FireOneShot.
+	const UFPSRWeaponDataAsset* WeaponSource = Instance->GetSource();
+	if (WeaponSource && WeaponSource->GetArchetype() != EFPSRWeaponArchetype::Melee)
+	{
+		if (GetWorld()->GetTimeSeconds() < NextFireReadyTime)
+		{
+			return;
+		}
+	}
+
 	if (Stats.FireMode == EFPSRFireMode::Burst)
 	{
 		BurstShotsRemaining = FMath::Max(1, Stats.BurstCount);
@@ -195,6 +210,16 @@ void UFPSRWeaponFireComponent::ResetCharge()
 	ChargeStartWorldTime = -1.0f;
 }
 
+void UFPSRWeaponFireComponent::OnWeaponEquipped(float EquipCooldown)
+{
+	// Equip boundary (server EquipSlot + client OnRep_CurrentSlotIndex). Drop any in-progress charge, then impose a
+	// minimum post-swap cooldown before the next shot. This clears the PREVIOUS weapon's cadence (a fast weapon
+	// isn't blocked by a slow one's interval) while still gating the first shot by a fixed swap time — mirroring the
+	// server setting ServerNextAllowedFireTime = Now + swap-cooldown, so swap-spam can't bypass fire cadence.
+	ResetCharge();
+	NextFireReadyTime = GetWorld()->GetTimeSeconds() + FMath::Max(0.0f, EquipCooldown);
+}
+
 void UFPSRWeaponFireComponent::FireOneShot()
 {
 	APawn* OwnerPawn = Cast<APawn>(GetOwner());
@@ -243,6 +268,9 @@ void UFPSRWeaponFireComponent::FireOneShot()
 	}
 	else
 	{
+		// Stamp the next-allowed fire time (Now + interval) so the next trigger press is cadence-gated (StartFiring).
+		NextFireReadyTime = GetWorld()->GetTimeSeconds() + 1.0f / FMath::Max(Stats.FireRate, 0.01f);
+
 		// Camera recoil (local feel only), ADS-dependent:
 		//  - Hip-fire: weak vertical climb + strong horizontal randomness (scattered, screen stays low).
 		//  - ADS: strong vertical climb + low randomness so the deterministic pattern shows (learnable line).
@@ -336,13 +364,17 @@ void UFPSRWeaponFireComponent::TickComponent(float DeltaTime, ELevelTick TickTyp
 	}
 
 	// --- Recoil pitch handling (smoothed rise + debt-aware recovery + player compensation) ---
-	// A spray interrupted by an empty magazine / reload must stop kicking the instant rounds stop leaving the
-	// gun: discard any queued (not-yet-applied) recoil rise. Otherwise the smoothed-rise backlog keeps climbing
-	// the view during the reload with no shot firing — especially noticeable once fire rate is boosted.
-	if (!CanFire())
+	// During a reload, TRIM a large smoothed-rise backlog (from boosted rapid fire) so the view doesn't keep
+	// climbing through the reload — but KEEP up to a single shot's worth so the round that EMPTIED the magazine
+	// still kicks. Zeroing the queue here erased the last shot's recoil entirely: emptying the mag triggers an
+	// auto-reload within a frame of that shot, so IsReloading flips true before the smoothed rise (applied over
+	// ~RecoilVertical/RecoilRiseRate seconds) has played out — worst on a high-recoil single-shot sniper.
+	if (Inventory->IsReloading())
 	{
-		PendingRisePitch = 0.0f;
-		PendingRiseYaw = 0.0f;
+		const float MaxRise = Stats.RecoilVertical * FMath::Max(Stats.HipVerticalScale, Stats.ADSVerticalScale);
+		PendingRisePitch = FMath::Min(PendingRisePitch, FMath::Max(0.0f, MaxRise));
+		const float MaxYaw = FMath::Abs(Stats.RecoilHorizontal) * 2.0f; // one shot incl. random-variance headroom
+		PendingRiseYaw = FMath::Clamp(PendingRiseYaw, -MaxYaw, MaxYaw);
 	}
 
 	// 1) Smoothly apply any pending up-kick (snappy rise), accumulating recovery debt.

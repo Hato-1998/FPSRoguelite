@@ -2,9 +2,12 @@
 
 #include "Weapon/FPSRProjectile.h"
 #include "Weapon/FPSRProjectileSubsystem.h"
+#include "Combat/FPSRCombatStatics.h"
+#include "FPSRCollisionChannels.h"
 #include "Enemy/FPSREnemyHealthComponent.h"
 #include "Hero/FPSRCharacter.h"
 #include "Core/FPSRGameState.h"
+#include "Core/FPSRPlayerController.h"
 #include "Core/FPSRLogChannels.h"
 
 #include "Components/SphereComponent.h"
@@ -122,6 +125,9 @@ void AFPSRProjectile::Activate(const FVector& Location, const FFPSRProjectilePar
 		CollisionSphere->SetCollisionResponseToAllChannels(ECR_Ignore);
 		CollisionSphere->SetCollisionResponseToChannel(ECC_WorldStatic, ECR_Block);
 		CollisionSphere->SetCollisionResponseToChannel(ECC_Pawn, ECR_Overlap);
+		// Also overlap the player object channel so a projectile can hit a friendly player (friendly fire) or a
+		// player target (enemy-team projectile). IsHostileTarget/ResolveDamage still gate whether damage lands.
+		CollisionSphere->SetCollisionResponseToChannel(ECC_FPSRPlayerPawn, ECR_Overlap);
 		CollisionSphere->SetGenerateOverlapEvents(true);
 	}
 }
@@ -200,7 +206,13 @@ void AFPSRProjectile::OnSphereOverlap(UPrimitiveComponent* OverlappedComp, AActo
 	}
 
 	// Single-target (optionally piercing): apply the direct hit, then stop once pierce is exhausted.
-	TryDamageActor(OtherActor);
+	bool bCrit = false;
+	bool bKill = false;
+	bool bWasEnemy = false;
+	if (TryDamageActor(OtherActor, bCrit, bKill, bWasEnemy) && bWasEnemy)
+	{
+		NotifyInstigatorHitMarker(bCrit, bKill); // per-impact marker — enemies only (no marker for FF on allies)
+	}
 	--PierceRemaining;
 	if (PierceRemaining < 0)
 	{
@@ -230,30 +242,42 @@ void AFPSRProjectile::HandleImpact(const FVector& ImpactPoint)
 	{
 		if (UWorld* World = GetWorld())
 		{
-			const FCollisionShape Sphere = FCollisionShape::MakeSphere(Params.ExplosionRadius);
-
-			// Query pawns by OBJECT TYPE, not the Pawn trace channel: a target that has set its Pawn-channel
-			// response to Ignore (e.g. a player mid-dash, AFPSRCharacter::ServerDash) is still found here.
-			// Object-type queries match on what an actor IS, not how it responds, so the blast can't be dodged
-			// by a transient channel-response change.
-			FCollisionObjectQueryParams ObjectParams;
-			ObjectParams.AddObjectTypesToQuery(ECC_Pawn);
-			FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(ProjectileAOE), false, this);
-			if (Params.InstigatorActor)
+			if (Params.Team == EFPSRProjectileTeam::Player)
 			{
-				QueryParams.AddIgnoredActor(Params.InstigatorActor);
+				// Unified player explosion: enemy/self/friendly damage resolution + radial knockback + a single
+				// hit-marker, all server-authoritative. bAllowSelf is the baked self-damage flag (NoSelfDamage card
+				// clears it); knockback is independent of damage (still launches at 0 damage, excludes the killed).
+				FPSRCombat::ApplyExplosion(World, ImpactPoint, Params.ExplosionRadius, Params.Damage,
+					Params.CritChance, Params.CritMultiplier, Params.InstigatorActor,
+					/*bAllowSelf*/ Params.bSelfDamage, Params.KnockbackStrength);
 			}
-
-			TArray<FOverlapResult> Overlaps;
-			World->OverlapMultiByObjectType(Overlaps, ImpactPoint, FQuat::Identity, ObjectParams, Sphere, QueryParams);
-
-			TArray<AActor*> Damaged;
-			for (const FOverlapResult& Overlap : Overlaps)
+			else
 			{
-				AActor* Target = Overlap.GetActor();
-				if (Target && !Damaged.Contains(Target) && TryDamageActor(Target))
+				// Enemy-team AOE (B1 follow-up): existing radial loop damages players only via TryDamageActor. Query
+				// pawns by OBJECT TYPE (both channels) so a dashing player — Pawn-response Ignore — is still found.
+				const FCollisionShape Sphere = FCollisionShape::MakeSphere(Params.ExplosionRadius);
+				FCollisionObjectQueryParams ObjectParams;
+				FPSRCombat::AddDamageablePawnObjectTypes(ObjectParams);
+				FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(ProjectileAOE), false, this);
+				if (Params.InstigatorActor)
 				{
-					Damaged.Add(Target);
+					QueryParams.AddIgnoredActor(Params.InstigatorActor);
+				}
+
+				TArray<FOverlapResult> Overlaps;
+				World->OverlapMultiByObjectType(Overlaps, ImpactPoint, FQuat::Identity, ObjectParams, Sphere, QueryParams);
+
+				TArray<AActor*> Damaged;
+				for (const FOverlapResult& Overlap : Overlaps)
+				{
+					AActor* Target = Overlap.GetActor();
+					bool bCrit = false;
+					bool bKill = false;
+					bool bWasEnemy = false;
+					if (Target && !Damaged.Contains(Target) && TryDamageActor(Target, bCrit, bKill, bWasEnemy))
+					{
+						Damaged.Add(Target);
+					}
 				}
 			}
 		}
@@ -272,8 +296,18 @@ bool AFPSRProjectile::IsHostileTarget(AActor* Target) const
 
 	if (Params.Team == EFPSRProjectileTeam::Player)
 	{
-		// Player projectiles damage swarm enemies (identified by their non-GAS health component).
-		return Target->FindComponentByClass<UFPSREnemyHealthComponent>() != nullptr;
+		// Player projectiles damage swarm enemies (identified by their non-GAS health component)...
+		if (Target->FindComponentByClass<UFPSREnemyHealthComponent>())
+		{
+			return true;
+		}
+		// ...and friendly players ONLY when friendly fire is on (otherwise a teammate is a pure pass-through —
+		// a non-piercing round doesn't stop on them, an AOE round doesn't detonate on them).
+		if (Target->IsA(AFPSRCharacter::StaticClass()))
+		{
+			return FPSRCombat::IsFriendlyFireEnabled(GetWorld());
+		}
+		return false;
 	}
 	if (Params.Team == EFPSRProjectileTeam::Enemy)
 	{
@@ -283,31 +317,67 @@ bool AFPSRProjectile::IsHostileTarget(AActor* Target) const
 	return false;
 }
 
-bool AFPSRProjectile::TryDamageActor(AActor* Target)
+bool AFPSRProjectile::TryDamageActor(AActor* Target, bool& bOutCrit, bool& bOutKill, bool& bOutWasEnemy)
 {
+	bOutCrit = false;
+	bOutKill = false;
+	bOutWasEnemy = false;
 	if (!HasAuthority() || !IsHostileTarget(Target))
 	{
 		return false;
 	}
 
+	// Roll crit per impact using the chance/multiplier baked from the instigator's ASC at spawn (mirrors the
+	// hitscan ability's per-hit crit; enemy projectiles carry CritChance 0 so they never crit).
+	float FinalDamage = Params.Damage;
+	if (Params.CritChance > 0.0f && FMath::FRand() < Params.CritChance)
+	{
+		FinalDamage *= Params.CritMultiplier;
+		bOutCrit = true;
+	}
+
 	if (Params.Team == EFPSRProjectileTeam::Player)
 	{
-		if (UFPSREnemyHealthComponent* HealthComp = Target->FindComponentByClass<UFPSREnemyHealthComponent>())
+		// Direct hit (single-target/piercing): never self-damage (bAllowSelf=false); the unified resolver applies
+		// the enemy/friendly rules (friendly is 0 when FF is off — already screened by IsHostileTarget above).
+		const float Resolved = FPSRCombat::ResolveDamage(Params.InstigatorActor, Target, FinalDamage, /*bAllowSelf*/ false, GetWorld());
+		if (Resolved > 0.0f)
 		{
-			HealthComp->ApplyDamage(Params.Damage, Params.InstigatorActor);
-			return true;
+			const FPSRCombat::FDamageResult Result = FPSRCombat::ApplyDamage(Target, Resolved, Params.InstigatorActor);
+			bOutKill = Result.bKilled;
+			bOutWasEnemy = Result.bWasEnemy;
+			return Result.bApplied;
 		}
+		return false;
 	}
-	else if (Params.Team == EFPSRProjectileTeam::Enemy)
+	if (Params.Team == EFPSRProjectileTeam::Enemy)
 	{
+		// Enemy-team projectiles damage players only (team-specific path retained until B1 generalizes it).
 		if (AFPSRCharacter* Character = Cast<AFPSRCharacter>(Target))
 		{
-			Character->ApplyContactDamage(Params.Damage, Params.InstigatorActor);
+			Character->ApplyContactDamage(FinalDamage, Params.InstigatorActor);
 			return true;
 		}
 	}
 
 	return false;
+}
+
+void AFPSRProjectile::NotifyInstigatorHitMarker(bool bCrit, bool bKill) const
+{
+	// Hit-markers belong to the firing player's HUD; enemy-team projectiles have no HUD owner.
+	if (!HasAuthority() || Params.Team != EFPSRProjectileTeam::Player || !Params.InstigatorActor)
+	{
+		return;
+	}
+	const APawn* InstigatorPawn = Cast<APawn>(Params.InstigatorActor);
+	AController* InstigatorController = InstigatorPawn ? InstigatorPawn->GetController() : nullptr;
+	if (AFPSRPlayerController* OwnerPC = Cast<AFPSRPlayerController>(InstigatorController))
+	{
+		const EFPSRHitMarkerType MarkerType = bKill ? EFPSRHitMarkerType::Kill
+			: (bCrit ? EFPSRHitMarkerType::Crit : EFPSRHitMarkerType::Hit);
+		OwnerPC->ClientNotifyHitMarker(MarkerType);
+	}
 }
 
 void AFPSRProjectile::ReleaseToPool()

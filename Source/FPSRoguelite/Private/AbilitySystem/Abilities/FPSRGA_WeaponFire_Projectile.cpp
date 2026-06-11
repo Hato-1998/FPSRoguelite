@@ -60,6 +60,7 @@ void UFPSRGA_WeaponFire_Projectile::ActivateAbility(
 	float Lifetime = 5.0f;
 	float SpreadDegrees = 0.0f;
 	int32 ProjectilePierce = 0;
+	float KnockbackStrength = 0.0f;
 	UFPSRWeaponInventoryComponent* Inventory = Avatar->FindComponentByClass<UFPSRWeaponInventoryComponent>();
 	UFPSRWeaponInstance* Instance = Inventory ? Inventory->GetCurrentInstance() : nullptr;
 	const FFPSRWeaponStatBlock* Stats = Instance ? &Instance->GetResolvedStats() : nullptr;
@@ -72,6 +73,7 @@ void UFPSRGA_WeaponFire_Projectile::ActivateAbility(
 		Lifetime = Stats->ProjectileLifetime;
 		ProjectilePierce = FMath::Max(0, Stats->ProjectilePierce);
 		SpreadDegrees = Stats->SpreadDegrees;
+		KnockbackStrength = FMath::Max(0.0f, Stats->KnockbackStrength);
 	}
 
 	// Server-authoritative gates: empty mag / reloading / fire-rate. Ammo is consumed after the fragment hooks
@@ -137,12 +139,17 @@ void UFPSRGA_WeaponFire_Projectile::ActivateAbility(
 	// Server-authoritative spawn: AcquireProjectile returns null on clients (cosmetic prediction is a follow-up).
 	if (FireCtx.bAuthority)
 	{
-		// Global damage multiplier baked into projectile damage at spawn (projectiles apply damage on impact,
-		// server-authoritatively; per-impact crit / OnHitActor are a follow-up needing a projectile->fragment callback).
+		// Global damage multiplier + crit (chance/multiplier) baked at spawn; the projectile rolls crit per impact
+		// server-authoritatively and notifies the owner's hit-marker. (OnHitActor fragments on projectiles remain
+		// a follow-up needing a projectile->fragment callback.)
 		float DamageMultiplier = 1.0f;
+		float CritChance = 0.0f;
+		float CritMultiplier = 1.0f;
 		if (UAbilitySystemComponent* ASC = GetAbilitySystemComponentFromActorInfo())
 		{
 			DamageMultiplier = ASC->GetNumericAttribute(UFPSRCombatSet::GetGlobalDamageMultiplierAttribute());
+			CritChance = ASC->GetNumericAttribute(UFPSRCombatSet::GetGlobalCritChanceAttribute());
+			CritMultiplier = ASC->GetNumericAttribute(UFPSRCombatSet::GetGlobalCritMultiplierAttribute());
 		}
 
 		UFPSRProjectileSubsystem* ProjSub = World->GetSubsystem<UFPSRProjectileSubsystem>();
@@ -161,9 +168,15 @@ void UFPSRGA_WeaponFire_Projectile::ActivateAbility(
 				Params.InitialSpeed = ProjectileSpeed;
 				Params.GravityScale = GravityScale;
 				Params.Damage = Damage * DamageMultiplier;
+				Params.CritChance = CritChance;
+				Params.CritMultiplier = CritMultiplier;
 				Params.Lifetime = Lifetime;
 				Params.ExplosionRadius = AOERadius;
 				Params.Pierce = ProjectilePierce;
+				Params.KnockbackStrength = KnockbackStrength;
+				// Self-damage on unless the NoSelfDamage card suppressed it (PreFire). Knockback is independent —
+				// a self-no-damage rocket still launches the instigator (rocket jump).
+				Params.bSelfDamage = !FireCtx.bSuppressSelfDamage;
 				Params.Team = EFPSRProjectileTeam::Player;
 				Params.InstigatorActor = Avatar;
 
