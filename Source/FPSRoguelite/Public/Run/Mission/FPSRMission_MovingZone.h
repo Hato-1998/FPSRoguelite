@@ -5,8 +5,12 @@
 #include "Run/Mission/FPSRMissionActor.h"
 #include "FPSRMission_MovingZone.generated.h"
 
-/** Mission: a capture zone that travels through a set of waypoints. Players accumulate occupancy time while
- *  any of them stands within the moving zone; reaching RequiredHoldSeconds completes the mission. */
+class AFPSRMovingZoneRoute;
+
+/** Mission: tour a designer-placed route (AFPSRMovingZoneRoute set), capturing each point in order. Players
+ *  accumulate hold time while any of them stands within ZoneRadius of the current point; reaching
+ *  RequiredHoldSeconds captures it and the zone instantly switches to the next point. Capturing every point
+ *  completes the mission. Falls back to a single capture point at the spawn location when no route is assigned. */
 UCLASS()
 class FPSROGUELITE_API AFPSRMission_MovingZone : public AFPSRMissionActor
 {
@@ -15,26 +19,27 @@ class FPSROGUELITE_API AFPSRMission_MovingZone : public AFPSRMissionActor
 public:
 	AFPSRMission_MovingZone();
 
+	/** Server: assign the route to tour (called by the director before ServerActivate). */
+	void SetRoute(AFPSRMovingZoneRoute* InRoute) { Route = InRoute; }
+
 	UPROPERTY(EditDefaultsOnly, Category = "Mission|MovingZone")
 	float ZoneRadius = 400.0f;
 
+	/** Hold time (seconds) required to capture EACH point in the route. */
 	UPROPERTY(EditDefaultsOnly, Category = "Mission|MovingZone")
 	float RequiredHoldSeconds = 30.0f;
-
-	/** Speed (cm/s) the zone center travels toward each waypoint. */
-	UPROPERTY(EditDefaultsOnly, Category = "Mission|MovingZone", meta = (ClampMin = "0.0"))
-	float ZoneMoveSpeed = 200.0f;
-
-	/** Waypoints as offsets (cm) from the spawn location; the zone moves spawn -> wp[0] -> wp[1] ... and stops at the last. */
-	UPROPERTY(EditDefaultsOnly, Category = "Mission|MovingZone")
-	TArray<FVector> RelativeWaypoints;
 
 protected:
 	virtual void OnMissionActivated() override;
 	virtual void OnMissionTickServer(float DeltaSeconds) override;
 
 private:
-	FVector SpawnOrigin = FVector::ZeroVector;
-	int32 CurrentWaypoint = 0;
+	/** Server-only: the assigned route (not replicated; the zone transform is what clients see). */
+	UPROPERTY()
+	TObjectPtr<AFPSRMovingZoneRoute> Route = nullptr;
+
+	/** World-space capture points (gathered from the route on activation; fallback = spawn location). */
+	TArray<FVector> Points;
+	int32 CurrentPoint = 0;
 	float HeldSeconds = 0.0f;
 };

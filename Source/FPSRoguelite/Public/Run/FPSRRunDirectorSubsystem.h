@@ -10,6 +10,7 @@ class AFPSRMissionActor;
 class UFPSRMissionDataAsset;
 class AFPSRGameState;
 class UFPSREnemySpawnSubsystem;
+class AFPSRMovingZoneRoute;
 
 /** Server-authoritative run director (redesign 2026-06-04, Game.MD §2-8).
  *  No rounds — the run is continuous. The director advances a run clock (paused during the global card-
@@ -51,6 +52,9 @@ private:
 	/** Pick where a mission spawns: weighted-random among designer-placed, tag-matched, enabled spawn points
 	 *  (falls back to a player location when none exist). */
 	FTransform SelectMissionSpawnTransform(const UFPSRMissionDataAsset* Mission) const;
+	/** Pick which AFPSRMovingZoneRoute a MovingZone mission tours: weighted-random among enabled, tag-matched
+	 *  routes (MinPlayerDistance measured to the route's first point). Null when none match. */
+	AFPSRMovingZoneRoute* SelectMovingZoneRoute(const UFPSRMissionDataAsset* Mission) const;
 	/** True if at least one player controller currently possesses a pawn (run start gate). */
 	bool HasAnyPlayerPawn() const;
 	/** True if every present FPSR player controller has had its opening seed issued (pre-combat hold gate). */

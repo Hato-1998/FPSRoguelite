@@ -5,6 +5,8 @@
 #include "Run/Mission/FPSRMissionActor.h"
 #include "Run/Mission/FPSRMissionDataAsset.h"
 #include "Run/Mission/FPSRMissionSpawnPoint.h"
+#include "Run/Mission/FPSRMovingZoneRoute.h"
+#include "Run/Mission/FPSRMission_MovingZone.h"
 #include "Card/FPSRCardDataAsset.h"
 #include "Core/FPSRGameState.h"
 #include "Core/FPSRPlayerController.h"
@@ -236,12 +238,27 @@ void UFPSRRunDirectorSubsystem::SpawnMission(UFPSRMissionDataAsset* MissionData)
 	FActorSpawnParameters SpawnParams;
 	SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 
-	const FTransform SpawnXform = SelectMissionSpawnTransform(MissionData);
+	// MovingZone missions tour a designer-placed route set; other missions use the point / player selection.
+	AFPSRMovingZoneRoute* Route = nullptr;
+	if (Cls->IsChildOf(AFPSRMission_MovingZone::StaticClass()))
+	{
+		Route = SelectMovingZoneRoute(MissionData);
+	}
+
+	const FTransform SpawnXform = Route ? Route->GetFirstPointTransform() : SelectMissionSpawnTransform(MissionData);
 	ActiveMission = World->SpawnActor<AFPSRMissionActor>(Cls, SpawnXform.GetLocation(), SpawnXform.Rotator(), SpawnParams);
 	if (!ActiveMission)
 	{
 		UE_LOG(LogFPSR, Warning, TEXT("[Run] Failed to spawn mission actor from class %s"), *Cls->GetName());
 		return;
+	}
+
+	if (Route)
+	{
+		if (AFPSRMission_MovingZone* MZ = Cast<AFPSRMission_MovingZone>(ActiveMission))
+		{
+			MZ->SetRoute(Route);
+		}
 	}
 
 	ActiveMission->OnMissionEndedNative.AddUObject(this, &UFPSRRunDirectorSubsystem::OnMissionEnded);
@@ -430,6 +447,101 @@ FTransform UFPSRRunDirectorSubsystem::SelectMissionSpawnTransform(const UFPSRMis
 	}
 
 	return FTransform::Identity;
+}
+
+AFPSRMovingZoneRoute* UFPSRRunDirectorSubsystem::SelectMovingZoneRoute(const UFPSRMissionDataAsset* Mission) const
+{
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return nullptr;
+	}
+
+	const FGameplayTag RequiredTag = Mission ? Mission->SpawnPointTag : FGameplayTag();
+
+	TArray<FVector> PlayerLocations;
+	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+	{
+		if (APlayerController* PC = It->Get())
+		{
+			if (APawn* PlayerPawn = PC->GetPawn())
+			{
+				PlayerLocations.Add(PlayerPawn->GetActorLocation());
+			}
+		}
+	}
+
+	struct FRouteCandidate
+	{
+		AFPSRMovingZoneRoute* Route;
+		float Weight;
+		float NearestPlayerDistSq;
+	};
+	TArray<FRouteCandidate> TagMatched;
+	for (TActorIterator<AFPSRMovingZoneRoute> It(World); It; ++It)
+	{
+		AFPSRMovingZoneRoute* Route = *It;
+		if (!Route || !Route->IsEnabled() || Route->GetWeight() <= 0.0f)
+		{
+			continue;
+		}
+		if (RequiredTag.IsValid() && !Route->GetRouteTag().MatchesTag(RequiredTag))
+		{
+			continue;
+		}
+		const FVector FirstPoint = Route->GetFirstPointTransform().GetLocation();
+		float NearestSq = TNumericLimits<float>::Max();
+		for (const FVector& PL : PlayerLocations)
+		{
+			NearestSq = FMath::Min(NearestSq, FVector::DistSquared(FirstPoint, PL));
+		}
+		TagMatched.Add({ Route, Route->GetWeight(), NearestSq });
+	}
+
+	// Prefer routes whose first point satisfies MinPlayerDistance (weighted-random among them).
+	TArray<const FRouteCandidate*> FarEnough;
+	float TotalWeight = 0.0f;
+	for (const FRouteCandidate& C : TagMatched)
+	{
+		const float MinDist = C.Route->GetMinPlayerDistance();
+		const bool bFarEnough = (MinDist <= 0.0f) || PlayerLocations.Num() == 0 || C.NearestPlayerDistSq >= FMath::Square(MinDist);
+		if (bFarEnough)
+		{
+			FarEnough.Add(&C);
+			TotalWeight += C.Weight;
+		}
+	}
+
+	if (FarEnough.Num() > 0 && TotalWeight > 0.0f)
+	{
+		const float Pick = FMath::FRandRange(0.0f, TotalWeight);
+		float Cumulative = 0.0f;
+		for (const FRouteCandidate* C : FarEnough)
+		{
+			Cumulative += C->Weight;
+			if (Pick <= Cumulative)
+			{
+				return C->Route;
+			}
+		}
+		return FarEnough.Last()->Route;
+	}
+
+	// All within MinPlayerDistance — choose the farthest matching route rather than none.
+	if (TagMatched.Num() > 0)
+	{
+		const FRouteCandidate* Farthest = &TagMatched[0];
+		for (const FRouteCandidate& C : TagMatched)
+		{
+			if (C.NearestPlayerDistSq > Farthest->NearestPlayerDistSq)
+			{
+				Farthest = &C;
+			}
+		}
+		return Farthest->Route;
+	}
+
+	return nullptr;
 }
 
 bool UFPSRRunDirectorSubsystem::HasAnyPlayerPawn() const

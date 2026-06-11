@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Run/Mission/FPSRMission_MovingZone.h"
+#include "Run/Mission/FPSRMovingZoneRoute.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/Pawn.h"
@@ -9,44 +10,39 @@
 AFPSRMission_MovingZone::AFPSRMission_MovingZone()
 {
 	PrimaryActorTick.TickInterval = 0.1f;
-	// Replicate the moving zone transform so clients see it travel (1 actor, cheap).
+	// Replicate the zone transform so clients see it switch between captured points (1 actor, cheap).
 	SetReplicateMovement(true);
 }
 
 void AFPSRMission_MovingZone::OnMissionActivated()
 {
-	SpawnOrigin = GetActorLocation();
-	CurrentWaypoint = 0;
+	Points.Reset();
+	if (Route)
+	{
+		Route->GetWorldPoints(Points);
+	}
+	// Fallback: no route (or empty spline) — capture a single point at the spawn location so the mission still
+	// works on a map without routes placed (debug trigger).
+	if (Points.Num() == 0)
+	{
+		Points.Add(GetActorLocation());
+	}
+
+	CurrentPoint = 0;
 	HeldSeconds = 0.0f;
+	SetActorLocation(Points[0]); // teleport the zone to the first point (replicated)
+	SetMissionProgress(0.0f);
 }
 
 void AFPSRMission_MovingZone::OnMissionTickServer(float DeltaSeconds)
 {
 	UWorld* World = GetWorld();
-	if (!World)
+	if (!World || Points.Num() == 0 || !Points.IsValidIndex(CurrentPoint))
 	{
 		return;
 	}
 
-	// Advance the zone center toward the current waypoint (world = spawn origin + relative offset).
-	if (RelativeWaypoints.IsValidIndex(CurrentWaypoint))
-	{
-		const FVector Target = SpawnOrigin + RelativeWaypoints[CurrentWaypoint];
-		const FVector Cur = GetActorLocation();
-		const FVector ToTarget = Target - Cur;
-		const float Step = ZoneMoveSpeed * DeltaSeconds;
-		if (ToTarget.SizeSquared() <= Step * Step)
-		{
-			SetActorLocation(Target);
-			++CurrentWaypoint; // reached; advance to the next waypoint (stops once exhausted)
-		}
-		else
-		{
-			SetActorLocation(Cur + ToTarget.GetSafeNormal() * Step);
-		}
-	}
-
-	// Occupancy: any player within the moving zone accumulates hold time.
+	// Occupancy: any player within ZoneRadius (2D) of the current point accumulates hold time.
 	const FVector ZoneLoc = GetActorLocation();
 	bool bPlayerPresent = false;
 	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
@@ -67,12 +63,27 @@ void AFPSRMission_MovingZone::OnMissionTickServer(float DeltaSeconds)
 	if (bPlayerPresent)
 	{
 		HeldSeconds += DeltaSeconds;
-		SetMissionProgress(FMath::Clamp(HeldSeconds / FMath::Max(RequiredHoldSeconds, 0.01f), 0.0f, 1.0f));
 		if (HeldSeconds >= RequiredHoldSeconds)
 		{
-			CompleteMission();
+			// Point captured — instantly switch to the next point, or complete when the circuit is done.
+			++CurrentPoint;
+			HeldSeconds = 0.0f;
+			if (Points.IsValidIndex(CurrentPoint))
+			{
+				SetActorLocation(Points[CurrentPoint]);
+			}
+			else
+			{
+				SetMissionProgress(1.0f);
+				CompleteMission();
+				return;
+			}
 		}
 	}
+
+	// Overall progress across the whole circuit (captured points + current point's hold fraction).
+	const float PerPoint = FMath::Clamp(HeldSeconds / FMath::Max(RequiredHoldSeconds, 0.01f), 0.0f, 1.0f);
+	SetMissionProgress(FMath::Clamp((CurrentPoint + PerPoint) / static_cast<float>(Points.Num()), 0.0f, 1.0f));
 
 #if ENABLE_DRAW_DEBUG
 	DrawDebugCylinder(World, ZoneLoc, ZoneLoc + FVector(0.0f, 0.0f, 200.0f), ZoneRadius, 32, FColor::Cyan, false, 0.0f);
