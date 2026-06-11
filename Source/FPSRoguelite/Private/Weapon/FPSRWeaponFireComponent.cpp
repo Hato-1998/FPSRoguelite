@@ -226,6 +226,11 @@ void UFPSRWeaponFireComponent::FireOneShot()
 		// ChargeLaser: instead of an instant kick on press, the up-kick CLIMBS gradually over the charge duration and
 		// finishes exactly when the beam fires (charge complete). Set up the local ramp here; TickComponent integrates
 		// it (and suppresses auto-recovery until the climb finishes). Local feel only — no networking/server-auth.
+		// KNOWN LIMITATION (follow-up): this starts from the client's own click. On a REMOTE client the ServerOnly fire
+		// ability may be rejected after RPC latency (an ammo/cadence/pause race the local pre-checks above missed), so
+		// the ramp + re-press gate can run briefly for a shot that never fired (cosmetic only — server owns all damage;
+		// self-clears at ChargeTime). The listen-server host is unaffected. Proper fix = a server charge-start/end
+		// client notify, bundled with the client beam VFX follow-up (same signal).
 		if (Weapon->GetArchetype() == EFPSRWeaponArchetype::ChargeLaser && Stats.ChargeTime > 0.0f)
 		{
 			// Mirror the server fire ability's charge duration: apply fragment PreFire + ModifyChargeTime so the ramp
