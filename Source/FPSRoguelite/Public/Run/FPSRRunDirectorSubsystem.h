@@ -10,6 +10,7 @@ class AFPSRMissionActor;
 class UFPSRMissionDataAsset;
 class AFPSRGameState;
 class UFPSREnemySpawnSubsystem;
+class AFPSRMissionPointSet;
 
 /** Server-authoritative run director (redesign 2026-06-04, Game.MD §2-8).
  *  No rounds — the run is continuous. The director advances a run clock (paused during the global card-
@@ -28,7 +29,7 @@ public:
 	void StartRun();
 
 	// Debug/testing entry points
-	void DebugTriggerMission();
+	void DebugTriggerMission(int32 WindowIndex = -1, int32 PoolIndex = -1);
 	void DebugClearMission();
 	void DebugSkipToBoss();
 	void SetTimeScale(float InScale) { TimeScale = FMath::Max(0.0f, InScale); }
@@ -48,9 +49,15 @@ private:
 	int32 ComputeTargetAliveCount() const;
 	float GetBossTime() const;
 
+	/** Uniformly pick a non-null mission from the window's pool (null when the pool has none). */
+	UFPSRMissionDataAsset* PickRandomMission(const FFPSRMissionWindow& Window) const;
+
 	/** Pick where a mission spawns: weighted-random among designer-placed, tag-matched, enabled spawn points
 	 *  (falls back to a player location when none exist). */
 	FTransform SelectMissionSpawnTransform(const UFPSRMissionDataAsset* Mission) const;
+	/** Pick which AFPSRMissionPointSet a point-set mission uses: weighted-random among enabled, tag-matched sets
+	 *  (MinPlayerDistance measured to the set's first point). Null when none match. */
+	AFPSRMissionPointSet* SelectMissionPointSet(const UFPSRMissionDataAsset* Mission) const;
 	/** True if at least one player controller currently possesses a pawn (run start gate). */
 	bool HasAnyPlayerPawn() const;
 	/** True if every present FPSR player controller has had its opening seed issued (pre-combat hold gate). */
@@ -65,8 +72,9 @@ private:
 	UPROPERTY()
 	TObjectPtr<AFPSRMissionActor> ActiveMission;
 
-	/** Per-mission-event "already fired" flags (sized to the schedule's MissionEvents at StartRun). */
-	TArray<bool> MissionEventFired;
+	TArray<bool> MissionWindowFired;
+	/** Per-window trigger time, rolled within [MinTime, MaxTime] at run start. */
+	TArray<float> WindowTriggerTimes;
 
 	float RunClock = 0.0f;
 	float TimeScale = 1.0f;

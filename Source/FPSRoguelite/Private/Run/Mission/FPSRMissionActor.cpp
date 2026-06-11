@@ -2,6 +2,8 @@
 
 #include "Run/Mission/FPSRMissionActor.h"
 #include "Run/Mission/FPSRMissionDataAsset.h"
+#include "Core/FPSRGameState.h"
+#include "Engine/World.h"
 #include "Net/UnrealNetwork.h"
 
 AFPSRMissionActor::AFPSRMissionActor()
@@ -71,6 +73,20 @@ void AFPSRMissionActor::Tick(float DeltaSeconds)
 	if (!HasAuthority() || MissionState != EFPSRMissionState::Active)
 	{
 		return;
+	}
+
+	// Freeze all mission advancement (objective time, zone movement, time limit) while the run is globally
+	// paused for card selection (Game.MD §2-2): players are immobilized, so progressing objectives — or letting
+	// the time limit expire — would be unfair. Applies to every mission subclass via this single base gate.
+	if (const UWorld* World = GetWorld())
+	{
+		if (const AFPSRGameState* RunState = World->GetGameState<AFPSRGameState>())
+		{
+			if (RunState->IsRunPaused())
+			{
+				return;
+			}
+		}
 	}
 
 	ElapsedTime += DeltaSeconds;

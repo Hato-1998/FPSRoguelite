@@ -42,6 +42,15 @@
 > **콘텐츠 완료(2026-06-11, `content/weapon-da-ff-cards`)**: FF 카드 4종(`DA_Fragment_NoSelfDamage`/`DA_CardModifiers_NoSelfDamage`/`DA_Fragment_ExplosiveRounds`/`DA_CardModifiers_ExplosiveRounds`) 작성 + 무기 `AvailableModifiers` 등록 + 바주카/유탄 `KnockbackStrength`. 무기+모디파이어 PIE 동작 확인(사용자). **남은 검증**: 2-client FF(아군50%·아군런칭)는 멀티 PIE 시 확인.
 > **알려진 폴리시 후속(버그 아님)**: ① ExplosiveRounds 적 직격 시 히트마커 2회(직격+스플래시) ② 플레이어 넉백=서버 LaunchCharacter 권위적이나 오너클라 스무딩은 후속. ③ **관통 무기(스나이퍼 등 `MaxPenetration>1`)+ExplosiveRounds = 탄착점 1회만 폭발**(앞서 관통된 적은 스플래시/넉백 없음, Codex P2). 설계 판단으로 수용 — "관통한 적마다 폭발"로 바꾸려면 `FPSRGA_WeaponFire_Hitscan.cpp` NotifyImpact를 관통 루프 안으로 이동+벽 임팩트 분리(밸런스 변경, 빌드 재검증 필요).
 
+## 🎯 P4-B-3 미션 6종 — **코드+콘텐츠 완료, main 머지(2026-06-11, `phase/p4b3-missions`)**
+> 미션 종류 6종 + 공용 PointSet + 시간 윈도우 스케줄러 완료. 빌드+스모크+**Codex 머지게이트(P2 2건 교정)**+PIE(사용자) 통과. 상세는 §2-8(`Docs/SSOT/RunFlow.md`)·`git log`.
+> - **미션 6종**: `StandStill`/`MovingZone`/`CollectOrbs`/`CarryNoHit`/`DefeatFleeing`/`LimitedVision`. 베이스 `AFPSRMissionActor`가 `bRunPaused`(프리즈) 중 진행/시간제한 게이트. 디버그 `FPSR.MissionTrigger [windowIndex] [poolIndex]`.
+> - **공용 `AFPSRMissionPointSet`**(비복제): 자식 Scene/Billboard 컴포넌트=월드 점 목록. MovingZone(순차 점령)·CollectOrbs(각 점 오브 스폰) 공용. 디렉터 CDO 가상함수(`UsesPointSet`/`AssignPointSet`)로 일반 선택·주입. 셋 미배치 시 폴백.
+> - **LimitedVision**: 서버권위 복제 `AFPSRGameState::bVisionRestricted` + 로컬 카메라 PP(머티리얼 슬롯/내장 비네트 폴백). Codex P2 교정=`NotifyControllerChanged` 늦possession 재적용 + 비네트 save/restore.
+> - **스케줄러 = 시간 윈도우+풀 랜덤**: `FFPSRMissionWindow{MinTime,MaxTime,MissionPool[]}` — 런 시작 시 범위 내 랜덤 트리거 시각 + 발화 시 풀 균등 랜덤 1개. 윈도우별 풀로 시간대 제한(예: 초반 HoldZone 제외).
+> - **콘텐츠**: 미션 6종 BP/DA + `BP_MissionPointSet`/오브/도주타깃 BP + `DA_RunSchedule`(윈도우/풀) + L_Sandbox 미션 배치(PIE 검증).
+> - **⚠️ 임시 테스트값**: `DA_RunSchedule.MissionWindows` 윈도우 시간범위·보스 300s → 프로덕션값 원복(메모리 `p4a-temp-test-values`).
+
 ## 🗺️ (후속 마일스톤) P7 멀티플레이 게임 루프 — **`Docs/P7-MultiplayerLoop_Plan.md`** (플랜만)
 > 로비(Steam 초대)→인게임→보스(맵중앙 박스, 체력만)→로비 복귀 E2E. **백로그 D5(세션)+D4(보스 축소)+신규 로비/트래블 통합**. **확정값**: 세션=Steam(app id 480), 보스=BossTime 트리거+`UFPSREnemyHealthComponent` 재사용(무기 데미지 그대로), 승=보스킬·패=전멸 둘 다 로비, seamless travel. **선행**: 무기6종+미션 완료 + P5 FF 머지. 파일단위 설계·구현순서·재개프롬프트는 플랜 문서. (브랜치 미생성, 무기/미션/FF 이후 착수)
 
@@ -62,17 +71,17 @@
 ## ▶▶ 미머지 브랜치 (콘텐츠 PIE 대기) — `phase/p4d-gamefeel`·`phase/p4-enemyspawnpoints`는 2026-06-09 완전 머지됨
 > 코드는 main에 있고, 남은 건 사용자 콘텐츠+PIE. 머지 순서·시점은 사용자 판단.
 
-- **`phase/p4b3-missions`** — 미션 5종(콘텐츠+PIE 대기, 상세 아래 P4-B-3 절). `AFPSRMission_LimitedVision`은 비주얼 디자인 결정 보류.
+- **`phase/p4b3-missions` = 완전 머지 완료(코드+콘텐츠, 2026-06-11)** — 미션 6종+PointSet+윈도우 스케줄러, 위 P4-B-3 절 참조. 브랜치 정리 대상.
 
 - **`phase/p4-enemyspawnpoints` = 완전 머지 완료(코드+콘텐츠, 2026-06-09)** — 브랜치 정리 대상. 상세는 완료 이력. **유일 후속(C1 백로그)**: 플로우필드 셀 클리어런스(좁은 통로 과차단) + 멀티레벨/높이 인지 — PIE 의존, `phase/p2-flowfield-height`. (계단/높이 주행 PIE 관찰 시 C1 우선순위 판단)
   - **⚠️ 적 바닥 판정 gotcha(2026-06-10)**: `AFPSREnemyBase::ApplyGravity` down-trace는 **`ECC_WorldStatic`만** 쿼리(의도적 — 폰/투사체 위 착지 방지). **바닥 지오메트리가 WorldStatic+블록이 아니면 적이 영원히 떨어짐**. 플레이스홀더 바닥은 **Mobility=Static + Collision Block** 필수. (코드 정상, 콘텐츠/콜리전 설정 이슈 — WorldDynamic 추가 금지: 비행 투사체 위 착지 부작용)
 
-## ▶▶ 새 세션 우선 작업 = P4-B-3 (미션 6종) / P4-C / P4-D
-- **P4-B-2 완료·main 머지됨(2026-06-08)** — 무기 행동 Fragment 전체(상세는 아래 완료 이력 + `git log`). 다음 후보: **P4-B-3**(나머지 6종 미션), **P4-C**(무기 7종), **P4-D**(게임필 히트마커/핑/위협인디케이터/사각오디오 + PickupRadius/XPGain + 런상태 HUD 위젯). 새 작업이므로 **플랜 우선**, `phase/` 브랜치 분기(§6-7).
+## ▶▶ 새 세션 우선 작업 = (P4-B-3 완료) → P4-C 콘텐츠 / 코드 백로그
+- **P4-B-3 완료·main 머지(2026-06-11)** — 미션 6종+PointSet+윈도우 스케줄러(위 P4-B-3 절). 다음 후보: **P4-C**(무기 콘텐츠 잔여), **코드 선행 백로그**(B1 원거리 적 AI 등 아래). 새 작업이므로 **플랜 우선**, `phase/` 브랜치 분기(§6-7).
 - **Fragment 후속(미완)**: `ModifyChargeTime`/`OnProjectileSpawn` 훅(차징/투사체 아키타입 도입 시), Melee fragment, fragment 제거/교체 UI. 무기별 `AvailableModifiers` 콘텐츠 확장(현재 Rifle만 MultiShot/BonusDamage 등록).
-- **⚠️ 임시 테스트값(프로덕션 전환 시 노티·원복)**: 스케줄 DA(`DA_RunSchedule`)의 미션 60/120/180s·보스 300s → 프로덕션 5/10/15분·보스 20분. 메모리 `p4a-temp-test-values`. (XP는 프로덕션 공식)
+- **⚠️ 임시 테스트값(프로덕션 전환 시 노티·원복)**: 스케줄 DA(`DA_RunSchedule.MissionWindows`)의 윈도우 시간범위(예 50~120/240~300s)·보스 300s → 프로덕션값. 메모리 `p4a-temp-test-values`. (XP는 프로덕션 공식)
 - **P4-D 완료(main 머지 2026-06-09, `phase/p4d-gamefeel`)** — 게임필. 상세는 완료 이력. **후속(이월)**: ① **히트마커 최종 연출 재확인**(크로스헤어/발사체 작업 후). ② **원거리 타겟 사전경고 생산자**(원거리 적 AI 구현 시 `ClientNotifyRangedTarget` 호출 배선; 현재 디버그 `FPSR.TestRangedWarn`만). ③ 핑/Gibs/사각 오디오(§2-14). ④ 근접 사각지대 인지=사운드(오디오 단계). ⑤ **동적 스프레드 크로스헤어(원 레티클)** — 산포 무기(샷건/바주카) 크로스헤어에 스프레드 크기 원 표시. 발사 랜덤은 이미 구현(`SpreadDegrees`+`VRandCone`), 신규=시각만(`GetCurrentSpreadDegrees()` 게터 + WBP 원). 스펙시트 §4. 차징 게이지 HUD와 묶기 가능.
-- **P4 잔여(이월)**: **P4-B-3**(브랜치 `phase/p4b3-missions`, 미션 5종 콘텐츠+PIE+머지 대기) + 나머지 미션. **스폰포인트**(브랜치 `phase/p4-enemyspawnpoints`, 코드 완료·배치+PIE+머지 대기). **P4-C** 무기 7종.
+- **P4 잔여(이월)**: ~~P4-B-3 미션~~ ✅완료(2026-06-11). **P4-C** 무기 콘텐츠 잔여.
 - **디자이너 배치 스폰 포인트 = 완료(코드 main 머지 2026-06-09)**. 콘텐츠 배치+PIE만 잔류(위 미머지 절). 후속 플로우필드 품질은 아래 백로그 C1.
 - **빌드/검증**: §6-6 (`Build.bat FPSRogueliteEditor ... -WaitMutex` / 스모크 `FPSRoguelite.Smoke.ModuleLoads` / `Scripts/codex-review.ps1 -Base main`).
 
