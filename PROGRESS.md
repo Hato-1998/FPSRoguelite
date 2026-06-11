@@ -19,16 +19,14 @@
 > - **카드 2종(C++ 프래그먼트)**: `UFPSRFragment_NoSelfDamage`(PreFire→bSuppressSelfDamage)·`UFPSRFragment_ExplosiveRounds`(OnImpact→소형 ApplyExplosion). `FPSRWeaponFragment.cpp` 신규.
 > **★핵심 발견**: 플레이어 캡슐=별도 오브젝트채널 `ECC_FPSRPlayerPawn`(ECC_Pawn 아님) → AOE/관통/근접/차지빔의 ECC_Pawn 전용 쿼리는 플레이어를 못 잡음. 모든 경로를 **양채널 오브젝트쿼리**로 전환해야 FF 성립(헬퍼 `AddDamageablePawnObjectTypes`로 통일). 히트스캔 단일트레이스도 Visibility 의존 대신 pawn-gather로 통합.
 > **재검증 교정(편향 배제 자체 리뷰)**: ① 적 KillZ → 기존 인프라 재사용(중복 FellOutOfWorld 제거) ② 친선 직격에 적 히트마커 오발화 → `TryDamageActor`에 `bWasEnemy` 추가해 적 명중만 마커.
-> **남은 작업**:
-> - **사용자 콘텐츠**: 카드 DA 2종(NoSelfDamage/ExplosiveRounds, Scope=ThisWeapon) 작성 + 무기 `AvailableModifiers` 등록(NoSelfDamage→Bazooka/Grenade, ExplosiveRounds→Rifle) + 바주카/유탄 `KnockbackStrength` 지정(예 바주카 1200/유탄 900).
-> - **사용자 2-client PIE**(서버권위라 필수): FF on/off·자폭·아군50%·카드2종·로켓점프·아군런칭·죽은적 넉백제외(플랜 §4).
+> **콘텐츠 완료(2026-06-11, `content/weapon-da-ff-cards`)**: FF 카드 4종(`DA_Fragment_NoSelfDamage`/`DA_CardModifiers_NoSelfDamage`/`DA_Fragment_ExplosiveRounds`/`DA_CardModifiers_ExplosiveRounds`) 작성 + 무기 `AvailableModifiers` 등록 + 바주카/유탄 `KnockbackStrength`. 무기+모디파이어 PIE 동작 확인(사용자). **남은 검증**: 2-client FF(아군50%·아군런칭)는 멀티 PIE 시 확인.
 > **알려진 폴리시 후속(버그 아님)**: ① ExplosiveRounds 적 직격 시 히트마커 2회(직격+스플래시) ② 플레이어 넉백=서버 LaunchCharacter 권위적이나 오너클라 스무딩은 후속.
 
 ## 🗺️ (후속 마일스톤) P7 멀티플레이 게임 루프 — **`Docs/P7-MultiplayerLoop_Plan.md`** (플랜만)
 > 로비(Steam 초대)→인게임→보스(맵중앙 박스, 체력만)→로비 복귀 E2E. **백로그 D5(세션)+D4(보스 축소)+신규 로비/트래블 통합**. **확정값**: 세션=Steam(app id 480), 보스=BossTime 트리거+`UFPSREnemyHealthComponent` 재사용(무기 데미지 그대로), 승=보스킬·패=전멸 둘 다 로비, seamless travel. **선행**: 무기6종+미션 완료 + P5 FF 머지. 파일단위 설계·구현순서·재개프롬프트는 플랜 문서. (브랜치 미생성, 무기/미션/FF 이후 착수)
 
 ## 🎨 콘텐츠 작업 핸드오프 (무기 DA 작성) — **`Docs/P4-C_WeaponContent_SpecSheet.md`**
-> **무기 콘텐츠 커밋 완료(2026-06-11, `1557b8c`, 바주카까지)**: BP_Bullet + DA Sniper(투사체 탄환)/Shotgun/Bazooka/BurstRifle + BP_FPSRPlayer 슬롯 + 반동값. **남은 DA = Grenade/ChargeLaser + Knife=Melee 확인**. Bazooka는 P5 FF 작업과 직결(자폭/아군). 스펙시트대로 계속.
+> **무기 콘텐츠 완료(2026-06-11)**: BP_Bullet + DA Sniper(투사체 탄환)/Shotgun/Bazooka/BurstRifle/**Grenade/ChargeLaser** + Knife(Melee) + BP_FPSRPlayer 슬롯 + 반동값 + FF 카드. **무기+모디파이어 PIE 동작 확인**. ⚠️ `DA_Weapon_ChargeLaser`는 **현 hold-charge 코드 기준**이라, ChargeLaser 재설계(`fix/chargelaser-redesign`, `Docs/ChargeLaser-Redesign_Plan.md`) 머지 후 새 스탯(ChargeTickDamage/Interval)으로 **갱신 필요**.
 
 ## 🎨 (참고) P4-C 콘텐츠 가이드 — **`Docs/P4-C_UserContent_Guide.md`**
 > 새 세션에서 "콘텐츠 작업 세팅" 시작점. P4-C 무기 6종(Burst/Sniper/Shotgun/Bazooka/Grenade/ChargeLaser)의 **코드 완료**, 남은 건 콘텐츠(무기 DA + 투사체 BP). **무기=순수 DataAsset**(무기 BP 불필요), AOE만 투사체 actor BP(`BP_Rocket`/`BP_Grenade`) 필요.
