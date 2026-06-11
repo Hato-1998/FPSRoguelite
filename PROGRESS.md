@@ -29,6 +29,8 @@
 
 ## 🎨 콘텐츠 작업 핸드오프 (무기 DA 작성) — **`Docs/P4-C_WeaponContent_SpecSheet.md`**
 > **무기 콘텐츠 커밋 완료(2026-06-11, `1557b8c`, 바주카까지)**: BP_Bullet + DA Sniper(투사체 탄환)/Shotgun/Bazooka/BurstRifle + BP_FPSRPlayer 슬롯 + 반동값. **남은 DA = Grenade/ChargeLaser + Knife=Melee 확인**. Bazooka는 P5 FF 작업과 직결(자폭/아군). 스펙시트대로 계속.
+> **⚠️ ChargeLaser는 기획 재설계 중** — 현 hold-charge 폐지, **클릭1회→자동 차징 시퀀스(틱 소뎀 연속→완료 시 본뎀 1발)**. 코드 미구현, 플랜만: **`Docs/ChargeLaser-Redesign_Plan.md`**, 브랜치 `fix/chargelaser-redesign`(GAS 타이머 시퀀스, 서버권위, Opus 직접). **ChargeLaser DA는 재설계 코드(새 스탯 ChargeTickDamage/ChargeTickInterval) 머지 후 작성** — 지금 만들지 말 것.
+> **콘텐츠 작업 브랜치**: `content/weapon-da-ff-cards`(무기 DA + P5 카드 NoSelfDamage/ExplosiveRounds, main 분기). FF 카드/넉백 가이드는 `Docs/P5-FriendlyFire_Plan.md` §2-5~7.
 
 ## 🎨 (참고) P4-C 콘텐츠 가이드 — **`Docs/P4-C_UserContent_Guide.md`**
 > 새 세션에서 "콘텐츠 작업 세팅" 시작점. P4-C 무기 6종(Burst/Sniper/Shotgun/Bazooka/Grenade/ChargeLaser)의 **코드 완료**, 남은 건 콘텐츠(무기 DA + 투사체 BP). **무기=순수 DataAsset**(무기 BP 불필요), AOE만 투사체 actor BP(`BP_Rocket`/`BP_Grenade`) 필요.
