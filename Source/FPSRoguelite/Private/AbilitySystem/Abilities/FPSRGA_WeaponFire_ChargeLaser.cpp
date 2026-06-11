@@ -131,7 +131,9 @@ void UFPSRGA_WeaponFire_ChargeLaser::ActivateAbility(
 
 	// Arm the sequence: a looping warm-up beam (only if ChargeTickDamage > 0) and the one-shot payoff beam at
 	// ChargeTime. The ability stays ACTIVE for the whole charge, so the server rejects any re-activation until the
-	// sequence ends — a re-click mid-charge can't start a second beam (no double fire).
+	// sequence ends — a re-click mid-charge can't start a second beam (no double fire). CachedChargeEndTime lets a
+	// tick that lands on the payoff timestamp bow out (see DoChargeTick).
+	CachedChargeEndTime = World->GetTimeSeconds() + ChargeTime;
 	if (CachedTickDamage > 0.0f)
 	{
 		World->GetTimerManager().SetTimer(TickTimerHandle, this, &UFPSRGA_WeaponFire_ChargeLaser::DoChargeTick, TickInterval, true);
@@ -141,6 +143,16 @@ void UFPSRGA_WeaponFire_ChargeLaser::ActivateAbility(
 
 void UFPSRGA_WeaponFire_ChargeLaser::DoChargeTick()
 {
+	// Skip a warm-up tick that lands at/after the payoff timestamp: when ChargeTime is an exact multiple of
+	// ChargeTickInterval the loop tick and DoFinalShot expire on the same frame, and if the tick runs first it would
+	// double the payoff with an extra chip beam. The payoff shot (DoFinalShot) covers that instant instead.
+	if (UWorld* World = CachedWorld.Get())
+	{
+		if (World->GetTimeSeconds() >= CachedChargeEndTime - KINDA_SMALL_NUMBER)
+		{
+			return;
+		}
+	}
 	// Warm-up beam: PURE fixed chip damage (no global multiplier / crit / fragments / marker).
 	FireBeam(CachedTickDamage, /*bIsPayoffShot*/ false);
 }

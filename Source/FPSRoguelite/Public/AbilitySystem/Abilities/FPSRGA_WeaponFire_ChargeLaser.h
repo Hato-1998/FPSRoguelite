@@ -63,6 +63,7 @@ protected:
 	float CachedTickDamage = 0.0f; // warm-up beam damage per tick
 	float CachedRange = 0.0f;
 	float CachedSpread = 0.0f;
+	float CachedChargeEndTime = 0.0f; // world time the payoff fires; lets a same-frame warm-up tick bow out
 	FFPSRFireContext CachedFireCtx; // rebuilt per activation; carries fragment list context for the payoff shot
 
 	FTimerHandle TickTimerHandle;  // looping warm-up beam
