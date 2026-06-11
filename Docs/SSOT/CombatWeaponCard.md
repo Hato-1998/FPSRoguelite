@@ -43,6 +43,7 @@
 **① 스탯 모디파이어 카드 (확정 2026-06-04 — 레벨업 카드 풀)**
 - 예: **탄창 용량↑ / 연사 속도↑ / 반동↓** (그 외 데미지/확산/재장전속도 등 `FFPSRWeaponStatBlock` 축 확장 가능).
 - **두 스코프, 같은 효과 다른 수치**(§2-3): **`AllWeapons`**(들고 있는 모든 무기, 수치 **작게**) vs **`ThisWeapon`**(현재 무기 1정, **큰 수치**). 둘 다 레벨업 프리즈(§2-2) 카드 풀에 합류(무기 보유 시).
+- **무기별 AllWeapons 제외 (확정 2026-06-11)**: 무기 DA `AllWeaponsStatExclusions`(`TArray<EFPSRWeaponStat>`)에 나열된 축은 **AllWeapons 스코프 모디파이어가 적용되지 않는다**(per-weapon·per-axis). 해석은 `UFPSRWeaponInstance::RecomputeResolved`가 AllWeapons 스택을 합산할 때 필터(ThisWeapon 스택은 플레이어가 의도 타겟이라 항상 적용·미필터). 예: ChargeLaser 반동은 차징 램프라 일반 "반동↓" 광역 카드가 무의미 → DA에서 `RecoilVertical` 제외. DA는 정적이라 복제 불필요·클라/서버 결정적.
 - 데이터: 카드 `Scope`로 적용 범위, `RarityTiers[].Magnitude`로 수치(SetByCaller 동일 패턴). 무기 스탯 모디파이어는 GE가 아닌 **WeaponInstance 모디파이어로 적용**(무기 스탯은 ASC 밖이므로) — `ApplyCard`에서 weapon-scope 분기로 처리(P4-B).
 
 **② 행동 Fragment (미션 보상 = 동작 근본 변경)**

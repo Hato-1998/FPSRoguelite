@@ -79,16 +79,6 @@ protected:
 	UFUNCTION(Server, Reliable)
 	void ServerSetAiming(bool bNewAiming);
 
-	/** Server: begin a ChargeLaser charge so the server can measure the charge alpha authoritatively (the fire
-	 *  ability scales damage by it on release). Input is client-side; the charge measurement is server-authoritative. */
-	UFUNCTION(Server, Reliable)
-	void ServerStartChargeLaser();
-
-	/** Server: release the ChargeLaser and fire the charged beam authoritatively. Reliable + on the same Character
-	 *  channel as ServerStartChargeLaser, so charge begin is always processed before release (no cross-channel race). */
-	UFUNCTION(Server, Reliable)
-	void ServerReleaseChargeLaser();
-
 	/** Server: perform a collision-ignoring dash in DashDirection (input is client-side; dash is server-authoritative). */
 	UFUNCTION(Server, Reliable)
 	void ServerDash(FVector DashDirection);

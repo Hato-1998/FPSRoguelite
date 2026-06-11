@@ -126,10 +126,16 @@ void UFPSRWeaponInstance::RecomputeResolved()
 	// Keyed by the enum's integer value to avoid relying on enum-class TMap hashing.
 	TMap<int32, FAxisAccum> Accum;
 
-	auto GatherStack = [&Accum](const FFPSRWeaponModContainer& Container)
+	// Exclusions (optional) drop mods on listed axes — used ONLY for the AllWeapons stack, so a broad "all weapons"
+	// card can't touch an axis the weapon opted out of (e.g. ChargeLaser recoil). ThisWeapon mods always apply.
+	auto GatherStack = [&Accum](const FFPSRWeaponModContainer& Container, const TArray<EFPSRWeaponStat>* Exclusions)
 	{
 		for (const FFPSRWeaponStatMod& Mod : Container.Mods)
 		{
+			if (Exclusions && Exclusions->Contains(Mod.Stat))
+			{
+				continue; // this weapon opts out of AllWeapons mods on this axis
+			}
 			FAxisAccum& A = Accum.FindOrAdd(static_cast<int32>(Mod.Stat));
 			if (Mod.Op == EFPSRWeaponModOp::Additive)
 			{
@@ -142,10 +148,10 @@ void UFPSRWeaponInstance::RecomputeResolved()
 		}
 	};
 
-	GatherStack(Modifiers);
+	GatherStack(Modifiers, nullptr); // ThisWeapon: never filtered (deliberately targeted at this weapon)
 	if (const AFPSRPlayerState* PS = ResolveOwningPlayerState())
 	{
-		GatherStack(PS->GetAllWeaponsMods());
+		GatherStack(PS->GetAllWeaponsMods(), &Source->AllWeaponsStatExclusions);
 	}
 
 	for (const TPair<int32, FAxisAccum>& Pair : Accum)

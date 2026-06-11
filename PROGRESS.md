@@ -6,6 +6,26 @@
 
 **최종 갱신: 2026-06-11**
 
+## 🔧 ChargeLaser 재설계 — **코드 구현 완료(2026-06-11, Opus 직접, 브랜치 `fix/chargelaser-redesign`)**
+> **설계 문서**: `Docs/ChargeLaser-Redesign_Plan.md`. **클릭 1회 = 자동 차징 시퀀스로 전환**(hold/release 폐지). 차징 중 `ChargeTickInterval`마다 고정 소뎀(`ChargeTickDamage`) 워밍업 빔(조준 추적), 차징 완료 시 본뎀(`Damage`) 풀파워 관통 빔 1발(크릿+히트마커). **빌드 성공 + 스모크 Success로 검증.**
+> **네트워킹 확정**: GA `NetExecutionPolicy = ServerOnly` + InstancedPerActor 타이머 시퀀스. 엔진 소스(`AbilitySystemComponent_Abilities.cpp:1633`) 확인 — 클라 클릭 `TryActivateAbilityByClass` → `CallServerTryActivateAbility`(예측키 없음)로 서버가 전 시퀀스 권위 구동. 기존 cross-channel RPC 2종(과설계) 폐지.
+> **구현(코드 8파일)**:
+> - **GA 전면 재작성** `FPSRGA_WeaponFire_ChargeLaser.{h,cpp}`: ServerOnly + 타이머(Tick 루프/Final 1회) + `FireBeam(BeamDamage,bRollCrit,bSendMarker)` 팩터링(P5 FF 헬퍼 재사용, 매 호출 viewpoint 재트레이스로 조준 추적) + `EndAbility` 오버라이드(타이머 ClearTimer로 무기교체/사망 취소 시 누수·stale 방지). 워밍업 틱=소뎀·크릿X·마커X·OnHitActor X / 최종=본뎀·크릿·마커·OnHitActor·PostFire.
+> - **스탯** `FFPSRWeaponStatBlock`: `ChargeFullDamageMultiplier` 제거 → `ChargeTickDamage`(2.0)·`ChargeTickInterval`(0.12, min 0.02 클램프) 추가(ChargeLaser EditConditionHides). `ChargeTime`/`Damage` 유지.
+> - **FireComponent** 단순화: hold/release 차지 로직·`bChargingLaser`/`ChargeStartWorldTime`/`GetChargeStartWorldTime`/`IsChargingLaser`/`ServerBeginCharge`/`ServerReleaseCharge`/`ResetCharge` 전부 제거 → ChargeLaser가 일반 `FireOneShot`(Single) 경로로 흐름. OnWeaponEquipped는 NextFireReadyTime 리셋만 유지.
+> - **Character** 입력·RPC 제거: `ServerStartChargeLaser`/`ServerReleaseChargeLaser`(선언+구현) 삭제, Input_Fire/FireReleased는 StartFiring/StopFiring만.
+> - **DataAsset** IsDataValid 경고 메시지 갱신(hold-to-charge 표현 제거).
+> **후속 폴리시 3건(2026-06-11, PIE 피드백 반영, 빌드+스모크 통과)**:
+> - **차징 반동 램프**(FireComponent): ChargeLaser는 클릭 즉발 킥 대신 **차징 시간 동안 반동 점진 상승 → 발사(차징 완료) 순간 상승 종료**. Tick에서 `총킥×(dt/ChargeTime)` 직접 적용+복구부채 누적, 램프 중 auto-recovery 억제, 무기교체 시 리셋. 로컬 필 전용(네트워크 무관). 멤버 추가로 **Live Coding 불가→에디터 재시작 필요**.
+> - **틱뎀 고정화**(GA): 글로벌 데미지 배수·크릿을 **최종 페이오프 빔에만** 적용, 워밍업 틱은 순수 고정 소뎀(데미지 카드가 틱뎀 안 키움). 중복 플래그 `bRollCrit`/`bSendMarker` → `bIsPayoffShot` 단일화.
+> - **무기별 AllWeapons 제외**(Option A, DataAsset/WeaponInstance): 무기 DA `AllWeaponsStatExclusions`(`TArray<EFPSRWeaponStat>`)에 나열한 축은 AllWeapons 스코프 모디파이어 미적용(per-weapon·per-axis, AllWeapons 스택만 필터·ThisWeapon 항상 적용). `RecomputeResolved` GatherStack에 제외 인자. **제외 축은 사용자가 DA에서 직접 지정**(예 ChargeLaser=RecoilVertical). SSOT §2-4-1 반영.
+> **남은 작업**:
+> - **사용자 콘텐츠**: `DA_Weapon_ChargeLaser`에 ChargeTime/ChargeTickDamage/ChargeTickInterval/Damage 지정 + **FireRate ≤ 1/ChargeTime 권장**(차징 중 재클릭 반동 억제, 플랜 §3).
+> - **사용자 2-client PIE**(서버권위 데미지라 필수): 클릭1회→자동차징(틱 소뎀 연속)→완료 본뎀1발 / 차징 중 조준이동=빔 추적 / 재클릭 무시 / 무기교체 시 시퀀스 취소·무크래시 / 적·아군(FF)·관통.
+> **알려진 정책 결정(버그 아님)**: ① 차징 중 프리즈(§2-2) = 타이머 계속·`FireBeam`이 IsRunPaused면 데미지만 스킵(짧은 차징 엣지로 플랜 §3 수용; [[freeze-gate-client-server-symmetry]]의 PauseTimer 방식 대신 의도적 단순화). ② 탄약은 클릭 시점 1발 선소모 → 차징 중 무기교체 시 그 탄 소모됨(샷 커밋으로 간주, 플랜 §2-2). ③ ChargeLaser도 클릭 시 FireOneShot 반동 발생 → DA에서 RecoilVertical 낮게/0 권장(플랜 §3).
+> **Codex 머지게이트 실행 완료(2026-06-11)**: `codex-review.ps1 -Base main` 2회. 1라운드 P2 2건(재클릭 미차단·반동 raw ChargeTime) → 교정(`f8452f9`). 2라운드 P2 2건 중 **B(틱/페이오프 동일 타임스탬프 여분 틱)** 교정(`4064742`), **A(원격 클라 희귀 레이스 시 코스메틱 파텀 반동/게이트)**는 사용자 결정으로 **문서화 후 머지**.
+> **알려진 한계 — Finding A(코스메틱, 버그 아님)**: ServerOnly라 원격 클라에서 서버 활성이 RPC 지연/거부(탄약·케이던스·프리즈 복제 레이스)될 때, 클라 반동 램프·재클릭 게이트·블룸이 발사 안 된 샷에 잠깐 돌 수 있음. **데미지·게임플레이 무영향(서버 권위), ChargeTime에 자가 해제, 리슨서버 호스트 무영향.** 클라 사전체크(탄약/케이던스/프리즈)로 대부분 차단됨. **적절한 해법=서버 차징 시작/종료 클라 notify → 클라 빔 VFX 후속과 함께**(같은 신호).
+
 ## 🚩 P5 친선사격(FF) — **코드 main 머지 완료(2026-06-11, `6727214`), 남은 건 콘텐츠(카드 DA) + 2-client PIE**
 > **`phase/p5-friendly-fire` → main `--no-ff` 머지 완료(`6727214`). `fix/weapon-fire-freeze-hardening`(스나이퍼 투사체/발사 하드닝)도 선형 포함돼 함께 머지·브랜치 정리(삭제)됨.** 플랜 §3 ①~⑦ 코드 구현·빌드·헤드리스 스모크 통과. 플레이어 무기 데미지를 **적/자기/아군** 통합 판정으로 전환 완료. **확정값**: 아군=FF ON일 때 50%, FF=전체 범위(히트스캔/투사체/근접/차지빔/폭발), 자기=폭발만 풀(자폭), 폭발 넉백=데미지 독립(죽은 폰만 제외).
 > ⚠️ **Codex 머지게이트 미실행**: 이 세션 샌드박스 오류(`CreateProcessWithLogonW 1056`)로 자동 실행 불가 → 원하면 인터랙티브 터미널에서 `powershell -File Scripts\codex-review.ps1 -Commit 6727214` 별도 실행. 빌드+스모크+적대적 자체리뷰(2건 교정)로 코드측 게이트는 통과.
@@ -26,7 +46,7 @@
 > 로비(Steam 초대)→인게임→보스(맵중앙 박스, 체력만)→로비 복귀 E2E. **백로그 D5(세션)+D4(보스 축소)+신규 로비/트래블 통합**. **확정값**: 세션=Steam(app id 480), 보스=BossTime 트리거+`UFPSREnemyHealthComponent` 재사용(무기 데미지 그대로), 승=보스킬·패=전멸 둘 다 로비, seamless travel. **선행**: 무기6종+미션 완료 + P5 FF 머지. 파일단위 설계·구현순서·재개프롬프트는 플랜 문서. (브랜치 미생성, 무기/미션/FF 이후 착수)
 
 ## 🎨 콘텐츠 작업 핸드오프 (무기 DA 작성) — **`Docs/P4-C_WeaponContent_SpecSheet.md`**
-> **무기 콘텐츠 완료(2026-06-11)**: BP_Bullet + DA Sniper(투사체 탄환)/Shotgun/Bazooka/BurstRifle/**Grenade/ChargeLaser** + Knife(Melee) + BP_FPSRPlayer 슬롯 + 반동값 + FF 카드. **무기+모디파이어 PIE 동작 확인**. ⚠️ `DA_Weapon_ChargeLaser`는 **현 hold-charge 코드 기준**이라, ChargeLaser 재설계(`fix/chargelaser-redesign`, `Docs/ChargeLaser-Redesign_Plan.md`) 머지 후 새 스탯(ChargeTickDamage/Interval)으로 **갱신 필요**.
+> **무기 콘텐츠 완료(2026-06-11)**: BP_Bullet + DA Sniper(투사체 탄환)/Shotgun/Bazooka/BurstRifle/**Grenade/ChargeLaser** + Knife(Melee) + BP_FPSRPlayer 슬롯 + 반동값 + FF 카드. **무기+모디파이어 PIE 동작 확인**. `DA_Weapon_ChargeLaser`는 **ChargeLaser 재설계 머지(2026-06-11) 후 새 스탯(ChargeTickDamage/ChargeTickInterval)·AllWeapons 제외축 적용 완료**(상단 ChargeLaser 재설계 섹션 참조).
 
 ## 🎨 (참고) P4-C 콘텐츠 가이드 — **`Docs/P4-C_UserContent_Guide.md`**
 > 새 세션에서 "콘텐츠 작업 세팅" 시작점. P4-C 무기 6종(Burst/Sniper/Shotgun/Bazooka/Grenade/ChargeLaser)의 **코드 완료**, 남은 건 콘텐츠(무기 DA + 투사체 BP). **무기=순수 DataAsset**(무기 BP 불필요), AOE만 투사체 actor BP(`BP_Rocket`/`BP_Grenade`) 필요.
