@@ -4,7 +4,18 @@
 > **작업 단계를 끝낼 때마다, 그리고 중단 전 반드시 이 파일을 갱신하고 커밋한다.**
 > 확정 설계·기획·코드구조·규칙은 `Game.md`(**SSOT 허브** → 도메인별 `Docs/SSOT/*.md`, 작업별 라우팅은 허브 §0-1), **완료 작업 상세는 `git log --oneline`**. 여기엔 *무엇을 했는지*만 요약한다.
 
-**최종 갱신: 2026-06-11**
+**최종 갱신: 2026-06-12**
+
+## 🎮 P6-A 게임플로우 셸 콘텐츠 — **에디터 콘텐츠 구현 완료(2026-06-12, Opus 직접+VibeUE MCP, 브랜치 `phase/p6a-content`, 커밋 `1f12704`)**
+> C++ 베이스(`c673d03`)에 맞춘 메뉴/결과 콘텐츠를 VibeUE MCP로 작성. **메뉴→런→결과→메뉴 루프 콘텐츠 완성**. 가이드: `Docs/P6A_GameFlow_UserContent_Guide.md`.
+> **만든 것**: `Content/UI/Menu/` — `WBP_MainMenu`(부모 FPSRMainMenuWidget, PlayButton/QuitButton), `WBP_Result`(부모 FPSRResultWidget, OutcomeText+ReturnButton, OnOutcomeSet 그래프 Switch→VICTORY초록/DEFEAT빨강), CommonButton 인프라 **신규** `BnW_MenuButtonStyle`(CommonButtonStyle)+`WBP_Play/Quit/ReturnButton`(부모 CommonButtonBase). `BP_FPSRMenuGameMode`/`BP_FPSRMenuPC`(레이아웃+메뉴위젯 지정), `BP_FPSRPC.ResultWidgetClass=WBP_Result`, `L_MainMenu`(GM override+PlayerStart), `DefaultGame.ini`[FPSRGameFlowSettings], `DefaultEngine.ini` GameDefaultMap/EditorStartupMap=L_MainMenu.
+> **가이드 전제 정정**: 기존 카드 UI는 일반 `UButton`(FButtonStyle)이라 **재사용할 CommonButtonStyle이 없었음** → CommonButton 스타일/버튼 WBP를 처음부터 작성(라벨은 per-WBP 베이크 — VibeUE가 위젯바인딩 변수 getter를 컴파일 전 못 만들어 PreConstruct 파라미터화는 포기, 신뢰성 우선).
+> **검증(MCP)**: 전 위젯/BP 컴파일 클린, BindWidget(PlayButton/QuitButton/ReturnButton/OutcomeText) 결인 확인, 스타일 렌더 `capture_preview` 육안 확인. **최종 PIE 육안(루프 클로즈 1~6단계)은 사용자 복귀 후**(헤드리스 불가 + 라이브 세션은 ini 재로드 위해 에디터 재시작 필요). Codex 리뷰: 내 커밋엔 무지적, 유일 P1은 **uncommitted** `.uproject`의 VibeUE 활성(아래).
+> **⚠️ 후속/주의**:
+> - **머지 대기**: `phase/p6a-content` → main `--no-ff` 머지는 **사용자 PIE 육안 통과 후**. 명령: `git checkout main; git merge --no-ff phase/p6a-content`.
+> - **`.uproject` 미커밋(의도)**: VibeUE 플러그인 활성(`FPSRoguelite.uproject:54-55`)+`.gitignore` `Plugins/VibeUE/` 제외 = 클린 체크아웃/CI 깨짐(Codex P1). P6-A 커밋에서 **제외**함. 영구 해결책: .uproject의 VibeUE 항목에 `"Optional": true` 추가 후 커밋(권장) 또는 미커밋 유지.
+> - **레이아웃 미세조정**: 메뉴 버튼은 텍스트 크기 자동(클릭 가능하나 작음), VerticalBox 상단 스택. 위치/타이틀/색 폴리시는 디자이너에서 후속.
+> - **루프 진짜 닫기**: 승리=보스처치(P6)/패배=전원사망 → `AFPSRGameMode::EndRun` 호출 연결(C++ TODO 시임). 현재는 디버그 `FPSR.EndRun [victory|defeat]`/`FPSR.ReturnToMenu`가 트리거.
 
 ## 🔧 ChargeLaser 재설계 — **코드 구현 완료(2026-06-11, Opus 직접, 브랜치 `fix/chargelaser-redesign`)**
 > **설계 문서**: `Docs/ChargeLaser-Redesign_Plan.md`. **클릭 1회 = 자동 차징 시퀀스로 전환**(hold/release 폐지). 차징 중 `ChargeTickInterval`마다 고정 소뎀(`ChargeTickDamage`) 워밍업 빔(조준 추적), 차징 완료 시 본뎀(`Damage`) 풀파워 관통 빔 1발(크릿+히트마커). **빌드 성공 + 스모크 Success로 검증.**
