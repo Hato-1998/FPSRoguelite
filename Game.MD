@@ -181,7 +181,8 @@
   - **베이스 강화**: `AFPSRMissionActor::Tick`이 `bRunPaused`(카드 프리즈) 중 미션 진행/시간제한 게이트(§2-2 정합, 전 미션 일괄). 디버그 `FPSR.MissionTrigger [index]`.
   - **LimitedVision 시야 제한(2026-06-11)**: 서버권위 복제 `AFPSRGameState::bVisionRestricted`(`bRunPaused` 미러). 각 로컬 클라가 `OnRunStateChanged` 구독→자기 `FirstPersonCamera` PostProcess 적용(할당 시 `VisionRestrictionMaterial` 블렌더블, 미할당 시 **내장 비네트 폴백**=콘텐츠 없이 PIE 가능). cosmetic·게임플레이 중립. 미션 시작=set true, 완료/실패/`EndPlay` 어느 경로든 set false(시야 복구 보장). **제1원리**: 전원 동시 cosmetic→GameState bool 1개가 per-character 복제보다 단순(카메라 PP는 로컬 적용).
 - **보스 실물**은 후속(P6).
-- **테스트 스케줄**: DataAsset 교체로 압축(예: 미션 60/120/180s·보스 300s). ⚠️ 압축값은 임시(프로덕션 전환 시 원복).
+- **스케줄 = 시간 윈도우 + 미션 풀 랜덤(2026-06-11 재설계)**: `DA_RunSchedule.MissionWindows`(`FFPSRMissionWindow{MinTime, MaxTime, MissionPool[]}`). 각 윈도우 = 런 시작 시 `[MinTime,MaxTime]` 내 **랜덤 트리거 시각 롤**(서버권위, 런마다 변주) + 발화 시 `MissionPool`에서 **균등 랜덤 1개** 스폰. 윈도우별 풀로 시간대 제한(예: 초반 풀에서 HoldZone 제외). 빈 풀=스킵·경고. 디버그 `FPSR.MissionTrigger [windowIndex] [poolIndex]`(poolIndex 생략=랜덤). 기존 `{TriggerTime, Mission}` 단건 폐지.
+- **테스트 스케줄**: DataAsset 교체로 압축(예: 윈도우 50~120/240~300s·보스 300s). ⚠️ 압축값은 임시(프로덕션 전환 시 원복).
 
 ### 2-9. 카메라 / 메시
 - **Separated Arms**: 본인 = FP팔(`OnlyOwnerSee`) + 무기 / 타인 = 3P 캐릭터(`OwnerNoSee`)

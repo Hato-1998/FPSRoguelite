@@ -29,7 +29,7 @@ public:
 	void StartRun();
 
 	// Debug/testing entry points
-	void DebugTriggerMission(int32 MissionIndex = -1);
+	void DebugTriggerMission(int32 WindowIndex = -1, int32 PoolIndex = -1);
 	void DebugClearMission();
 	void DebugSkipToBoss();
 	void SetTimeScale(float InScale) { TimeScale = FMath::Max(0.0f, InScale); }
@@ -48,6 +48,9 @@ private:
 	/** Time-scaled target alive enemy count from the schedule (or fallback) at the current run clock. */
 	int32 ComputeTargetAliveCount() const;
 	float GetBossTime() const;
+
+	/** Uniformly pick a non-null mission from the window's pool (null when the pool has none). */
+	UFPSRMissionDataAsset* PickRandomMission(const FFPSRMissionWindow& Window) const;
 
 	/** Pick where a mission spawns: weighted-random among designer-placed, tag-matched, enabled spawn points
 	 *  (falls back to a player location when none exist). */
@@ -69,8 +72,9 @@ private:
 	UPROPERTY()
 	TObjectPtr<AFPSRMissionActor> ActiveMission;
 
-	/** Per-mission-event "already fired" flags (sized to the schedule's MissionEvents at StartRun). */
-	TArray<bool> MissionEventFired;
+	TArray<bool> MissionWindowFired;
+	/** Per-window trigger time, rolled within [MinTime, MaxTime] at run start. */
+	TArray<float> WindowTriggerTimes;
 
 	float RunClock = 0.0f;
 	float TimeScale = 1.0f;

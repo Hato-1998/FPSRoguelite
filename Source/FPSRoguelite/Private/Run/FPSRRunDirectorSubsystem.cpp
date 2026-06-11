@@ -37,9 +37,17 @@ void UFPSRRunDirectorSubsystem::StartRun()
 	bBossStarted = false;
 	NextRunLogTime = 30.0f;
 
-	// Size the per-event fired flags to the active schedule (no missions without a schedule asset).
-	const int32 NumEvents = ActiveSchedule ? ActiveSchedule->MissionEvents.Num() : 0;
-	MissionEventFired.Init(false, NumEvents);
+	// Size the per-window fired flags and roll each window's trigger time within its [MinTime, MaxTime] range
+	// (server-authoritative; the schedule varies run to run). No missions without a schedule asset.
+	const int32 NumWindows = ActiveSchedule ? ActiveSchedule->MissionWindows.Num() : 0;
+	MissionWindowFired.Init(false, NumWindows);
+	WindowTriggerTimes.Reset();
+	WindowTriggerTimes.Reserve(NumWindows);
+	for (int32 i = 0; i < NumWindows; ++i)
+	{
+		const FFPSRMissionWindow& W = ActiveSchedule->MissionWindows[i];
+		WindowTriggerTimes.Add(FMath::FRandRange(W.MinTime, FMath::Max(W.MaxTime, W.MinTime)));
+	}
 
 	// Spawning begins once a player pawn exists (avoids origin spawns) AND the opening-seed freeze has engaged
 	// (so enemies can't spawn before the run-start card selection). We don't set a spawn target yet.
@@ -186,32 +194,54 @@ void UFPSRRunDirectorSubsystem::TrySpawnDueMission()
 		return; // one mission at a time; no schedule = no missions
 	}
 
-	for (int32 i = 0; i < ActiveSchedule->MissionEvents.Num(); ++i)
+	for (int32 i = 0; i < ActiveSchedule->MissionWindows.Num(); ++i)
 	{
-		if (MissionEventFired.IsValidIndex(i) && MissionEventFired[i])
+		if (MissionWindowFired.IsValidIndex(i) && MissionWindowFired[i])
 		{
 			continue;
 		}
-		const FFPSRMissionEvent& Event = ActiveSchedule->MissionEvents[i];
-		// Skip events scheduled at/after the boss — they'd be destroyed by the boss transition anyway.
-		if (Event.TriggerTime >= GetBossTime())
+		const float TriggerTime = WindowTriggerTimes.IsValidIndex(i) ? WindowTriggerTimes[i] : ActiveSchedule->MissionWindows[i].MinTime;
+		// Skip windows rolled at/after the boss — they'd be destroyed by the boss transition anyway.
+		if (TriggerTime >= GetBossTime())
 		{
-			if (MissionEventFired.IsValidIndex(i)) { MissionEventFired[i] = true; }
+			if (MissionWindowFired.IsValidIndex(i)) { MissionWindowFired[i] = true; }
 			continue;
 		}
-		if (RunClock >= Event.TriggerTime)
+		if (RunClock >= TriggerTime)
 		{
-			if (MissionEventFired.IsValidIndex(i))
+			if (MissionWindowFired.IsValidIndex(i))
 			{
-				MissionEventFired[i] = true;
+				MissionWindowFired[i] = true;
 			}
-			if (Event.Mission)
+			if (UFPSRMissionDataAsset* Mission = PickRandomMission(ActiveSchedule->MissionWindows[i]))
 			{
-				SpawnMission(Event.Mission);
+				SpawnMission(Mission);
+			}
+			else
+			{
+				UE_LOG(LogFPSR, Warning, TEXT("[Run] Mission window %d has no valid mission in its pool"), i);
 			}
 			return; // fire one per tick
 		}
 	}
+}
+
+UFPSRMissionDataAsset* UFPSRRunDirectorSubsystem::PickRandomMission(const FFPSRMissionWindow& Window) const
+{
+	TArray<UFPSRMissionDataAsset*> Valid;
+	Valid.Reserve(Window.MissionPool.Num());
+	for (const TObjectPtr<UFPSRMissionDataAsset>& M : Window.MissionPool)
+	{
+		if (M)
+		{
+			Valid.Add(M);
+		}
+	}
+	if (Valid.Num() == 0)
+	{
+		return nullptr;
+	}
+	return Valid[FMath::RandRange(0, Valid.Num() - 1)];
 }
 
 void UFPSRRunDirectorSubsystem::SpawnMission(UFPSRMissionDataAsset* MissionData)
@@ -594,41 +624,50 @@ UFPSREnemySpawnSubsystem* UFPSRRunDirectorSubsystem::GetSpawnSub() const
 	return World ? World->GetSubsystem<UFPSREnemySpawnSubsystem>() : nullptr;
 }
 
-void UFPSRRunDirectorSubsystem::DebugTriggerMission(int32 MissionIndex)
+void UFPSRRunDirectorSubsystem::DebugTriggerMission(int32 WindowIndex, int32 PoolIndex)
 {
 	if (!HasServerAuthority() || ActiveMission || !ActiveSchedule)
 	{
 		return;
 	}
 
-	// Explicit index: spawn that scheduled mission directly (debug — test each mission type in isolation).
-	if (MissionIndex >= 0)
+	// Explicit window: spawn from that window's pool (PoolIndex >= 0 = that specific mission for targeted
+	// testing, otherwise a random one). Ignores the rolled trigger time.
+	if (WindowIndex >= 0)
 	{
-		if (ActiveSchedule->MissionEvents.IsValidIndex(MissionIndex) && ActiveSchedule->MissionEvents[MissionIndex].Mission)
+		if (!ActiveSchedule->MissionWindows.IsValidIndex(WindowIndex))
 		{
-			if (MissionEventFired.IsValidIndex(MissionIndex))
+			return;
+		}
+		const FFPSRMissionWindow& Window = ActiveSchedule->MissionWindows[WindowIndex];
+		UFPSRMissionDataAsset* Mission = (PoolIndex >= 0)
+			? (Window.MissionPool.IsValidIndex(PoolIndex) ? Window.MissionPool[PoolIndex].Get() : nullptr)
+			: PickRandomMission(Window);
+		if (Mission)
+		{
+			if (MissionWindowFired.IsValidIndex(WindowIndex))
 			{
-				MissionEventFired[MissionIndex] = true;
+				MissionWindowFired[WindowIndex] = true;
 			}
-			SpawnMission(ActiveSchedule->MissionEvents[MissionIndex].Mission);
+			SpawnMission(Mission);
 		}
 		return;
 	}
 
-	// Spawn the next not-yet-fired mission immediately (ignoring its trigger time).
-	for (int32 i = 0; i < ActiveSchedule->MissionEvents.Num(); ++i)
+	// Spawn the next not-yet-fired window immediately (random mission from its pool).
+	for (int32 i = 0; i < ActiveSchedule->MissionWindows.Num(); ++i)
 	{
-		if (MissionEventFired.IsValidIndex(i) && MissionEventFired[i])
+		if (MissionWindowFired.IsValidIndex(i) && MissionWindowFired[i])
 		{
 			continue;
 		}
-		if (MissionEventFired.IsValidIndex(i))
+		if (MissionWindowFired.IsValidIndex(i))
 		{
-			MissionEventFired[i] = true;
+			MissionWindowFired[i] = true;
 		}
-		if (ActiveSchedule->MissionEvents[i].Mission)
+		if (UFPSRMissionDataAsset* Mission = PickRandomMission(ActiveSchedule->MissionWindows[i]))
 		{
-			SpawnMission(ActiveSchedule->MissionEvents[i].Mission);
+			SpawnMission(Mission);
 		}
 		return;
 	}
@@ -655,13 +694,14 @@ void UFPSRRunDirectorSubsystem::DebugSkipToBoss()
 #if !UE_BUILD_SHIPPING
 static FAutoConsoleCommandWithWorldAndArgs GFPSRMissionTriggerCmd(
 	TEXT("FPSR.MissionTrigger"),
-	TEXT("Spawn a scheduled mission immediately (debug). Usage: FPSR.MissionTrigger [index]  (no index = next unfired)."),
+	TEXT("Spawn a scheduled mission immediately (debug). Usage: FPSR.MissionTrigger [windowIndex] [poolIndex]  (no args = next unfired window, random from pool)."),
 	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic([](const TArray<FString>& Args, UWorld* World)
 	{
 		if (UFPSRRunDirectorSubsystem* Dir = World ? World->GetSubsystem<UFPSRRunDirectorSubsystem>() : nullptr)
 		{
-			const int32 Index = Args.Num() > 0 ? FCString::Atoi(*Args[0]) : -1;
-			Dir->DebugTriggerMission(Index);
+			const int32 WindowIndex = Args.Num() > 0 ? FCString::Atoi(*Args[0]) : -1;
+			const int32 PoolIndex = Args.Num() > 1 ? FCString::Atoi(*Args[1]) : -1;
+			Dir->DebugTriggerMission(WindowIndex, PoolIndex);
 		}
 	}));
 

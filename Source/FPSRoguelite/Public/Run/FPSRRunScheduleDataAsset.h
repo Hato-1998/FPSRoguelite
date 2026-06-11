@@ -7,22 +7,30 @@
 
 class UFPSRMissionDataAsset;
 
-/** One time-scheduled mission event: a mission spawns when the run clock reaches TriggerTime (Game.MD §2-8). */
+/** One scheduled mission window: at a random time within [MinTime, MaxTime] (rolled once at run start), one
+ *  mission is chosen uniformly at random from MissionPool and spawned (Game.MD §2-8). */
 USTRUCT(BlueprintType)
-struct FFPSRMissionEvent
+struct FFPSRMissionWindow
 {
 	GENERATED_BODY()
 
-	/** Run-clock time (seconds) at which this mission appears. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Mission Event")
-	float TriggerTime = 60.0f;
+	/** Earliest run-clock time (seconds) this window can fire. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Mission Window", meta = (ClampMin = "0.0"))
+	float MinTime = 60.0f;
 
-	/** The mission to spawn (null = no-op). */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Mission Event")
-	TObjectPtr<UFPSRMissionDataAsset> Mission = nullptr;
+	/** Latest run-clock time (seconds). Actual trigger = a random time in [MinTime, MaxTime], rolled at run
+	 *  start. Set MinTime == MaxTime for an exact time. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Mission Window", meta = (ClampMin = "0.0"))
+	float MaxTime = 120.0f;
+
+	/** Candidate missions — one is chosen uniformly at random when the window fires (empty = no-op). Restrict
+	 *  the pool to control which missions can appear in this window (e.g. exclude HoldZone early). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Mission Window")
+	TArray<TObjectPtr<UFPSRMissionDataAsset>> MissionPool;
 };
 
-/** Data-driven run schedule (redesign 2026-06-04, §2-8): time-based mission events + boss time + a
+/** Data-driven run schedule (redesign 2026-06-04 / windows 2026-06-11, §2-8): time-windowed mission spawns
+ *  (each fires once at a random time in its range, picking a random mission from its pool) + boss time + a
  *  time-scaled enemy target count. No rounds — the run is continuous, frozen only for card selection. */
 UCLASS(BlueprintType)
 class FPSROGUELITE_API UFPSRRunScheduleDataAsset : public UPrimaryDataAsset
@@ -30,9 +38,9 @@ class FPSROGUELITE_API UFPSRRunScheduleDataAsset : public UPrimaryDataAsset
 	GENERATED_BODY()
 
 public:
-	/** Time-scheduled missions (any order; the director fires each when the run clock passes its TriggerTime). */
+	/** Time-windowed missions (any order; the director rolls each window's trigger time at run start). */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Run")
-	TArray<FFPSRMissionEvent> MissionEvents;
+	TArray<FFPSRMissionWindow> MissionWindows;
 
 	/** Run-clock time (seconds) at which the boss appears (Combat -> Boss; after this no missions / no timer). */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Run")
