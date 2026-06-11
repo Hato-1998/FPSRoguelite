@@ -43,6 +43,11 @@ public:
 	UFUNCTION(BlueprintPure, Category = "FPSR|Run")
 	bool IsRunPaused() const { return bRunPaused; }
 
+	/** Mission-driven global vision restriction (LimitedVision mission). Cosmetic camera post-process applied
+	 *  per-client; gameplay-neutral. Server-authoritative, replicated like bRunPaused. */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Run")
+	bool IsVisionRestricted() const { return bVisionRestricted; }
+
 	/** Replicated run clock (survival seconds; pauses during freeze and after boss, low-frequency UI mirror). */
 	UFUNCTION(BlueprintPure, Category = "FPSR|Run")
 	float GetRunClockSeconds() const { return RunClockSeconds; }
@@ -64,6 +69,9 @@ public:
 
 	/** Server: set the global freeze flag directly (normally driven by RefreshPauseState). */
 	void SetRunPaused(bool bPaused);
+
+	/** Server: toggle the global vision restriction (driven by the LimitedVision mission). */
+	void SetVisionRestricted(bool bRestricted);
 
 	/** Server: recompute the freeze state from outstanding player selections and (re)present needed offers.
 	 *  Paused iff any connected player still has a pending pick or an active offer; unpauses when all done. */
@@ -101,6 +109,9 @@ protected:
 
 	UPROPERTY(ReplicatedUsing = OnRep_RunState)
 	bool bRunPaused = false;
+
+	UPROPERTY(ReplicatedUsing = OnRep_RunState)
+	bool bVisionRestricted = false;
 
 	UPROPERTY(ReplicatedUsing = OnRep_RunState)
 	float RunClockSeconds = 0.0f;
