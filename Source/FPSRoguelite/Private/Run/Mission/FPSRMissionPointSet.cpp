@@ -1,9 +1,9 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
-#include "Run/Mission/FPSRMovingZoneRoute.h"
+#include "Run/Mission/FPSRMissionPointSet.h"
 #include "Components/SceneComponent.h"
 
-AFPSRMovingZoneRoute::AFPSRMovingZoneRoute()
+AFPSRMissionPointSet::AFPSRMissionPointSet()
 {
 	PrimaryActorTick.bCanEverTick = false;
 	bReplicates = false;
@@ -12,7 +12,7 @@ AFPSRMovingZoneRoute::AFPSRMovingZoneRoute()
 	SetRootComponent(Root);
 }
 
-void AFPSRMovingZoneRoute::GetWorldPoints(TArray<FVector>& Out) const
+void AFPSRMissionPointSet::GetWorldPoints(TArray<FVector>& Out) const
 {
 	const USceneComponent* Root = GetRootComponent();
 	if (!Root)
@@ -20,7 +20,7 @@ void AFPSRMovingZoneRoute::GetWorldPoints(TArray<FVector>& Out) const
 		return;
 	}
 
-	// Each direct child scene component is a capture point; attach order = capture order.
+	// Each direct child scene component is a point; attach order = order.
 	const TArray<TObjectPtr<USceneComponent>>& PointChildren = Root->GetAttachChildren();
 	Out.Reserve(Out.Num() + PointChildren.Num());
 	for (const USceneComponent* Child : PointChildren)
@@ -32,7 +32,7 @@ void AFPSRMovingZoneRoute::GetWorldPoints(TArray<FVector>& Out) const
 	}
 }
 
-FTransform AFPSRMovingZoneRoute::GetFirstPointTransform() const
+FTransform AFPSRMissionPointSet::GetFirstPointTransform() const
 {
 	if (const USceneComponent* Root = GetRootComponent())
 	{

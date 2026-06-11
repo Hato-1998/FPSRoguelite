@@ -7,6 +7,7 @@
 
 class AFPSRMissionOrb;
 class APawn;
+class AFPSRMissionPointSet;
 
 /** Mission: collect every orb the mission spawns at its configured relative locations. Self-contained
  *  (spawns its own orbs), so it is testable without level placement. */
@@ -26,6 +27,9 @@ public:
 	UPROPERTY(EditDefaultsOnly, Category = "Mission|CollectOrbs")
 	TArray<FVector> OrbRelativeLocations;
 
+	virtual bool UsesPointSet() const override { return true; }
+	virtual void AssignPointSet(AFPSRMissionPointSet* InSet) override { PointSet = InSet; }
+
 protected:
 	virtual void OnMissionActivated() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
@@ -35,6 +39,10 @@ private:
 
 	UPROPERTY()
 	TArray<TObjectPtr<AFPSRMissionOrb>> SpawnedOrbs;
+
+	/** Server-only: optional designer point set; when assigned, orbs spawn at its points instead of OrbRelativeLocations. */
+	UPROPERTY()
+	TObjectPtr<AFPSRMissionPointSet> PointSet = nullptr;
 
 	int32 TotalOrbs = 0;
 	int32 CollectedOrbs = 0;

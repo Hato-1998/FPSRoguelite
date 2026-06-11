@@ -5,12 +5,12 @@
 #include "Run/Mission/FPSRMissionActor.h"
 #include "FPSRMission_MovingZone.generated.h"
 
-class AFPSRMovingZoneRoute;
+class AFPSRMissionPointSet;
 
-/** Mission: tour a designer-placed route (AFPSRMovingZoneRoute set), capturing each point in order. Players
+/** Mission: tour a designer-placed point set (AFPSRMissionPointSet), capturing each point in order. Players
  *  accumulate hold time while any of them stands within ZoneRadius of the current point; reaching
  *  RequiredHoldSeconds captures it and the zone instantly switches to the next point. Capturing every point
- *  completes the mission. Falls back to a single capture point at the spawn location when no route is assigned. */
+ *  completes the mission. Falls back to a single capture point at the spawn location when no point set is assigned. */
 UCLASS()
 class FPSROGUELITE_API AFPSRMission_MovingZone : public AFPSRMissionActor
 {
@@ -19,8 +19,8 @@ class FPSROGUELITE_API AFPSRMission_MovingZone : public AFPSRMissionActor
 public:
 	AFPSRMission_MovingZone();
 
-	/** Server: assign the route to tour (called by the director before ServerActivate). */
-	void SetRoute(AFPSRMovingZoneRoute* InRoute) { Route = InRoute; }
+	virtual bool UsesPointSet() const override { return true; }
+	virtual void AssignPointSet(AFPSRMissionPointSet* InSet) override { PointSet = InSet; }
 
 	UPROPERTY(EditDefaultsOnly, Category = "Mission|MovingZone")
 	float ZoneRadius = 400.0f;
@@ -34,9 +34,9 @@ protected:
 	virtual void OnMissionTickServer(float DeltaSeconds) override;
 
 private:
-	/** Server-only: the assigned route (not replicated; the zone transform is what clients see). */
+	/** Server-only: the assigned point set (not replicated; the zone transform is what clients see). */
 	UPROPERTY()
-	TObjectPtr<AFPSRMovingZoneRoute> Route = nullptr;
+	TObjectPtr<AFPSRMissionPointSet> PointSet = nullptr;
 
 	/** World-space capture points (gathered from the route on activation; fallback = spawn location). */
 	TArray<FVector> Points;

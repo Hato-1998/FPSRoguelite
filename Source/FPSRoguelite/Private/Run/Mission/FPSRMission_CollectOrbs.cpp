@@ -2,6 +2,7 @@
 
 #include "Run/Mission/FPSRMission_CollectOrbs.h"
 #include "Run/Mission/FPSRMissionOrb.h"
+#include "Run/Mission/FPSRMissionPointSet.h"
 #include "Engine/World.h"
 
 AFPSRMission_CollectOrbs::AFPSRMission_CollectOrbs()
@@ -20,23 +21,36 @@ void AFPSRMission_CollectOrbs::OnMissionActivated()
 	SpawnedOrbs.Reset();
 	CollectedOrbs = 0;
 
-	// Default test layout when the designer has not authored offsets yet.
-	TArray<FVector> Offsets = OrbRelativeLocations;
-	if (Offsets.Num() == 0)
+	// Spawn locations: a designer point set (world points) when assigned; otherwise fall back to relative
+	// offsets from the mission location (a default test set when none authored) so it works without placement.
+	TArray<FVector> SpawnLocations;
+	if (PointSet)
 	{
-		Offsets = { FVector(600.0f, 0.0f, 50.0f), FVector(0.0f, 600.0f, 50.0f), FVector(-600.0f, 0.0f, 50.0f) };
+		PointSet->GetWorldPoints(SpawnLocations);
+	}
+	if (SpawnLocations.Num() == 0)
+	{
+		TArray<FVector> Offsets = OrbRelativeLocations;
+		if (Offsets.Num() == 0)
+		{
+			Offsets = { FVector(600.0f, 0.0f, 50.0f), FVector(0.0f, 600.0f, 50.0f), FVector(-600.0f, 0.0f, 50.0f) };
+		}
+		const FVector Origin = GetActorLocation();
+		for (const FVector& Offset : Offsets)
+		{
+			SpawnLocations.Add(Origin + Offset);
+		}
 	}
 
-	const FVector Origin = GetActorLocation();
 	UClass* SpawnClass = OrbClass ? OrbClass.Get() : AFPSRMissionOrb::StaticClass();
 
 	FActorSpawnParameters Params;
 	Params.Owner = this;
 	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 
-	for (const FVector& Offset : Offsets)
+	for (const FVector& Loc : SpawnLocations)
 	{
-		AFPSRMissionOrb* NewOrb = World->SpawnActor<AFPSRMissionOrb>(SpawnClass, Origin + Offset, FRotator::ZeroRotator, Params);
+		AFPSRMissionOrb* NewOrb = World->SpawnActor<AFPSRMissionOrb>(SpawnClass, Loc, FRotator::ZeroRotator, Params);
 		if (NewOrb)
 		{
 			NewOrb->OnCollectedNative.AddUObject(this, &AFPSRMission_CollectOrbs::HandleOrbCollected);

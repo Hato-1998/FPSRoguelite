@@ -8,6 +8,7 @@
 
 class AFPSRMissionActor;
 class UFPSRMissionDataAsset;
+class AFPSRMissionPointSet;
 
 DECLARE_MULTICAST_DELEGATE_TwoParams(FOnMissionEndedNative, AFPSRMissionActor* /*Mission*/, bool /*bSuccess*/);
 
@@ -43,6 +44,12 @@ public:
 
 	/** Native multicast delegate for the director to subscribe to mission end events. */
 	FOnMissionEndedNative OnMissionEndedNative;
+
+	/** Whether this mission consumes a designer-placed point set (the director selects one for it via CDO). */
+	virtual bool UsesPointSet() const { return false; }
+
+	/** Server: the director assigns the selected point set before ServerActivate (no-op by default). */
+	virtual void AssignPointSet(AFPSRMissionPointSet* InSet) {}
 
 	virtual void Tick(float DeltaSeconds) override;
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;

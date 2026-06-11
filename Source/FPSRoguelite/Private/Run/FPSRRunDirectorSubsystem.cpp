@@ -5,8 +5,7 @@
 #include "Run/Mission/FPSRMissionActor.h"
 #include "Run/Mission/FPSRMissionDataAsset.h"
 #include "Run/Mission/FPSRMissionSpawnPoint.h"
-#include "Run/Mission/FPSRMovingZoneRoute.h"
-#include "Run/Mission/FPSRMission_MovingZone.h"
+#include "Run/Mission/FPSRMissionPointSet.h"
 #include "Card/FPSRCardDataAsset.h"
 #include "Core/FPSRGameState.h"
 #include "Core/FPSRPlayerController.h"
@@ -238,14 +237,12 @@ void UFPSRRunDirectorSubsystem::SpawnMission(UFPSRMissionDataAsset* MissionData)
 	FActorSpawnParameters SpawnParams;
 	SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 
-	// MovingZone missions tour a designer-placed route set; other missions use the point / player selection.
-	AFPSRMovingZoneRoute* Route = nullptr;
-	if (Cls->IsChildOf(AFPSRMission_MovingZone::StaticClass()))
-	{
-		Route = SelectMovingZoneRoute(MissionData);
-	}
+	// Point-set missions (MovingZone, CollectOrbs) use a designer-placed set; others use the point / player
+	// selection. Query the class default object so we can pick the set (and spawn at it) before spawning.
+	const AFPSRMissionActor* CDO = Cls->GetDefaultObject<AFPSRMissionActor>();
+	AFPSRMissionPointSet* PointSet = (CDO && CDO->UsesPointSet()) ? SelectMissionPointSet(MissionData) : nullptr;
 
-	const FTransform SpawnXform = Route ? Route->GetFirstPointTransform() : SelectMissionSpawnTransform(MissionData);
+	const FTransform SpawnXform = PointSet ? PointSet->GetFirstPointTransform() : SelectMissionSpawnTransform(MissionData);
 	ActiveMission = World->SpawnActor<AFPSRMissionActor>(Cls, SpawnXform.GetLocation(), SpawnXform.Rotator(), SpawnParams);
 	if (!ActiveMission)
 	{
@@ -253,12 +250,9 @@ void UFPSRRunDirectorSubsystem::SpawnMission(UFPSRMissionDataAsset* MissionData)
 		return;
 	}
 
-	if (Route)
+	if (PointSet)
 	{
-		if (AFPSRMission_MovingZone* MZ = Cast<AFPSRMission_MovingZone>(ActiveMission))
-		{
-			MZ->SetRoute(Route);
-		}
+		ActiveMission->AssignPointSet(PointSet);
 	}
 
 	ActiveMission->OnMissionEndedNative.AddUObject(this, &UFPSRRunDirectorSubsystem::OnMissionEnded);
@@ -449,7 +443,7 @@ FTransform UFPSRRunDirectorSubsystem::SelectMissionSpawnTransform(const UFPSRMis
 	return FTransform::Identity;
 }
 
-AFPSRMovingZoneRoute* UFPSRRunDirectorSubsystem::SelectMovingZoneRoute(const UFPSRMissionDataAsset* Mission) const
+AFPSRMissionPointSet* UFPSRRunDirectorSubsystem::SelectMissionPointSet(const UFPSRMissionDataAsset* Mission) const
 {
 	UWorld* World = GetWorld();
 	if (!World)
@@ -471,39 +465,39 @@ AFPSRMovingZoneRoute* UFPSRRunDirectorSubsystem::SelectMovingZoneRoute(const UFP
 		}
 	}
 
-	struct FRouteCandidate
+	struct FPointSetCandidate
 	{
-		AFPSRMovingZoneRoute* Route;
+		AFPSRMissionPointSet* PointSet;
 		float Weight;
 		float NearestPlayerDistSq;
 	};
-	TArray<FRouteCandidate> TagMatched;
-	for (TActorIterator<AFPSRMovingZoneRoute> It(World); It; ++It)
+	TArray<FPointSetCandidate> TagMatched;
+	for (TActorIterator<AFPSRMissionPointSet> It(World); It; ++It)
 	{
-		AFPSRMovingZoneRoute* Route = *It;
-		if (!Route || !Route->IsEnabled() || Route->GetWeight() <= 0.0f)
+		AFPSRMissionPointSet* Set = *It;
+		if (!Set || !Set->IsEnabled() || Set->GetWeight() <= 0.0f)
 		{
 			continue;
 		}
-		if (RequiredTag.IsValid() && !Route->GetRouteTag().MatchesTag(RequiredTag))
+		if (RequiredTag.IsValid() && !Set->GetPointSetTag().MatchesTag(RequiredTag))
 		{
 			continue;
 		}
-		const FVector FirstPoint = Route->GetFirstPointTransform().GetLocation();
+		const FVector FirstPoint = Set->GetFirstPointTransform().GetLocation();
 		float NearestSq = TNumericLimits<float>::Max();
 		for (const FVector& PL : PlayerLocations)
 		{
 			NearestSq = FMath::Min(NearestSq, FVector::DistSquared(FirstPoint, PL));
 		}
-		TagMatched.Add({ Route, Route->GetWeight(), NearestSq });
+		TagMatched.Add({ Set, Set->GetWeight(), NearestSq });
 	}
 
-	// Prefer routes whose first point satisfies MinPlayerDistance (weighted-random among them).
-	TArray<const FRouteCandidate*> FarEnough;
+	// Prefer point sets whose first point satisfies MinPlayerDistance (weighted-random among them).
+	TArray<const FPointSetCandidate*> FarEnough;
 	float TotalWeight = 0.0f;
-	for (const FRouteCandidate& C : TagMatched)
+	for (const FPointSetCandidate& C : TagMatched)
 	{
-		const float MinDist = C.Route->GetMinPlayerDistance();
+		const float MinDist = C.PointSet->GetMinPlayerDistance();
 		const bool bFarEnough = (MinDist <= 0.0f) || PlayerLocations.Num() == 0 || C.NearestPlayerDistSq >= FMath::Square(MinDist);
 		if (bFarEnough)
 		{
@@ -516,29 +510,29 @@ AFPSRMovingZoneRoute* UFPSRRunDirectorSubsystem::SelectMovingZoneRoute(const UFP
 	{
 		const float Pick = FMath::FRandRange(0.0f, TotalWeight);
 		float Cumulative = 0.0f;
-		for (const FRouteCandidate* C : FarEnough)
+		for (const FPointSetCandidate* C : FarEnough)
 		{
 			Cumulative += C->Weight;
 			if (Pick <= Cumulative)
 			{
-				return C->Route;
+				return C->PointSet;
 			}
 		}
-		return FarEnough.Last()->Route;
+		return FarEnough.Last()->PointSet;
 	}
 
-	// All within MinPlayerDistance — choose the farthest matching route rather than none.
+	// All within MinPlayerDistance — choose the farthest matching point set rather than none.
 	if (TagMatched.Num() > 0)
 	{
-		const FRouteCandidate* Farthest = &TagMatched[0];
-		for (const FRouteCandidate& C : TagMatched)
+		const FPointSetCandidate* Farthest = &TagMatched[0];
+		for (const FPointSetCandidate& C : TagMatched)
 		{
 			if (C.NearestPlayerDistSq > Farthest->NearestPlayerDistSq)
 			{
 				Farthest = &C;
 			}
 		}
-		return Farthest->Route;
+		return Farthest->PointSet;
 	}
 
 	return nullptr;

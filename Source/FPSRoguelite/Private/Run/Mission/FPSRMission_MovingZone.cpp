@@ -1,7 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Run/Mission/FPSRMission_MovingZone.h"
-#include "Run/Mission/FPSRMovingZoneRoute.h"
+#include "Run/Mission/FPSRMissionPointSet.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/Pawn.h"
@@ -17,9 +17,9 @@ AFPSRMission_MovingZone::AFPSRMission_MovingZone()
 void AFPSRMission_MovingZone::OnMissionActivated()
 {
 	Points.Reset();
-	if (Route)
+	if (PointSet)
 	{
-		Route->GetWorldPoints(Points);
+		PointSet->GetWorldPoints(Points);
 	}
 	// Fallback: no route (or empty spline) — capture a single point at the spawn location so the mission still
 	// works on a map without routes placed (debug trigger).
