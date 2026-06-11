@@ -1,37 +1,48 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Run/Mission/FPSRMovingZoneRoute.h"
-#include "Components/SplineComponent.h"
+#include "Components/SceneComponent.h"
 
 AFPSRMovingZoneRoute::AFPSRMovingZoneRoute()
 {
 	PrimaryActorTick.bCanEverTick = false;
 	bReplicates = false;
 
-	RouteSpline = CreateDefaultSubobject<USplineComponent>(TEXT("RouteSpline"));
-	SetRootComponent(RouteSpline);
-	RouteSpline->SetClosedLoop(false);
+	USceneComponent* Root = CreateDefaultSubobject<USceneComponent>(TEXT("Root"));
+	SetRootComponent(Root);
 }
 
 void AFPSRMovingZoneRoute::GetWorldPoints(TArray<FVector>& Out) const
 {
-	if (!RouteSpline)
+	const USceneComponent* Root = GetRootComponent();
+	if (!Root)
 	{
 		return;
 	}
-	const int32 Num = RouteSpline->GetNumberOfSplinePoints();
-	Out.Reserve(Out.Num() + Num);
-	for (int32 i = 0; i < Num; ++i)
+
+	// Each direct child scene component is a capture point; attach order = capture order.
+	const TArray<TObjectPtr<USceneComponent>>& PointChildren = Root->GetAttachChildren();
+	Out.Reserve(Out.Num() + PointChildren.Num());
+	for (const USceneComponent* Child : PointChildren)
 	{
-		Out.Add(RouteSpline->GetLocationAtSplinePoint(i, ESplineCoordinateSpace::World));
+		if (Child)
+		{
+			Out.Add(Child->GetComponentLocation());
+		}
 	}
 }
 
 FTransform AFPSRMovingZoneRoute::GetFirstPointTransform() const
 {
-	if (RouteSpline && RouteSpline->GetNumberOfSplinePoints() > 0)
+	if (const USceneComponent* Root = GetRootComponent())
 	{
-		return FTransform(RouteSpline->GetLocationAtSplinePoint(0, ESplineCoordinateSpace::World));
+		for (const USceneComponent* Child : Root->GetAttachChildren())
+		{
+			if (Child)
+			{
+				return FTransform(Child->GetComponentLocation());
+			}
+		}
 	}
 	return GetActorTransform();
 }
