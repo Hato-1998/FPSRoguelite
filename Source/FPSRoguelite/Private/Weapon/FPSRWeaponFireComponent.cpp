@@ -141,6 +141,7 @@ void UFPSRWeaponFireComponent::OnWeaponEquipped(float EquipCooldown)
 	// while still gating the first shot by a fixed swap time — mirroring the server setting ServerNextAllowedFireTime
 	// = Now + swap-cooldown, so swap-spam can't bypass fire cadence. (A mid-charge swap cancels the ChargeLaser fire
 	// ability via RefreshEquippedAbility, which clears its timers in EndAbility — no charge state lives here anymore.)
+	bChargeRecoilActive = false; // drop any in-progress ChargeLaser recoil ramp on a weapon swap
 	NextFireReadyTime = GetWorld()->GetTimeSeconds() + FMath::Max(0.0f, EquipCooldown);
 }
 
@@ -203,14 +204,29 @@ void UFPSRWeaponFireComponent::FireOneShot()
 		const float HRandom = bADS ? Stats.ADSHorizontalRandom : Stats.HipHorizontalRandom;
 
 		const FVector2D ShotDelta = ComputeShotRecoilDelta(Stats, ShotsFiredThisSpray);
-		if (ShotDelta.Y != 0.0f)
-		{
-			PendingRisePitch += ShotDelta.Y * VScale;
-		}
+		const float KickPitch = ShotDelta.Y * VScale;
+		float KickYaw = 0.0f;
 		if (Stats.RecoilHorizontal != 0.0f)
 		{
 			const float Variance = FMath::FRandRange(-1.0f, 1.0f) * Stats.RecoilHorizontal * HRandom;
-			PendingRiseYaw += ShotDelta.X + Variance; // smoothed in Tick (was instant) to avoid jitter
+			KickYaw = ShotDelta.X + Variance;
+		}
+
+		// ChargeLaser: instead of an instant kick on press, the up-kick CLIMBS gradually over the charge duration and
+		// finishes exactly when the beam fires (charge complete). Set up the local ramp here; TickComponent integrates
+		// it (and suppresses auto-recovery until the climb finishes). Local feel only — no networking/server-auth.
+		if (Weapon->GetArchetype() == EFPSRWeaponArchetype::ChargeLaser && Stats.ChargeTime > 0.0f)
+		{
+			bChargeRecoilActive = true;
+			ChargeRecoilElapsed = 0.0f;
+			ChargeRecoilDuration = Stats.ChargeTime;
+			ChargeRecoilTotalPitch = KickPitch;
+			ChargeRecoilTotalYaw = KickYaw;
+		}
+		else
+		{
+			if (KickPitch != 0.0f) { PendingRisePitch += KickPitch; }
+			if (KickYaw != 0.0f) { PendingRiseYaw += KickYaw; } // smoothed in Tick (was instant) to avoid jitter
 		}
 		++ShotsFiredThisSpray;
 
@@ -287,6 +303,37 @@ void UFPSRWeaponFireComponent::TickComponent(float DeltaTime, ELevelTick TickTyp
 		CachedCamera->FieldOfView = FMath::FInterpTo(CachedCamera->FieldOfView, TargetFOV, DeltaTime, FMath::Max(0.01f, Stats.ADSInterpSpeed));
 	}
 
+	// 0) ChargeLaser charge-recoil ramp: spread the shot's up-kick across the charge so the view climbs gradually and
+	//    the rise FINISHES at the fire moment (charge complete). Applied directly here (the charge duration IS the
+	//    smoothing, so it bypasses the RecoilRiseRate path) and accumulates recovery debt so auto-recovery — gated off
+	//    while the ramp is active — pulls the view back down only after the climb finishes.
+	if (bChargeRecoilActive)
+	{
+		const float Dur = FMath::Max(0.0001f, ChargeRecoilDuration);
+		const float PrevAlpha = FMath::Clamp(ChargeRecoilElapsed / Dur, 0.0f, 1.0f);
+		ChargeRecoilElapsed += DeltaTime;
+		const float Alpha = FMath::Clamp(ChargeRecoilElapsed / Dur, 0.0f, 1.0f);
+		const float AlphaDelta = Alpha - PrevAlpha;
+		if (AlphaDelta > 0.0f)
+		{
+			const float ApplyPitch = ChargeRecoilTotalPitch * AlphaDelta;
+			if (ApplyPitch != 0.0f)
+			{
+				OwnerPawn->AddControllerPitchInput(-ApplyPitch); // negative = up
+				RecoilDebtPitch += ApplyPitch;
+			}
+			const float ApplyYaw = ChargeRecoilTotalYaw * AlphaDelta;
+			if (ApplyYaw != 0.0f)
+			{
+				OwnerPawn->AddControllerYawInput(ApplyYaw);
+			}
+		}
+		if (Alpha >= 1.0f)
+		{
+			bChargeRecoilActive = false; // climb complete at the fire moment
+		}
+	}
+
 	// --- Recoil pitch handling (smoothed rise + debt-aware recovery + player compensation) ---
 	// During a reload, TRIM a large smoothed-rise backlog (from boosted rapid fire) so the view doesn't keep
 	// climbing through the reload — but KEEP up to a single shot's worth so the round that EMPTIED the magazine
@@ -334,7 +381,7 @@ void UFPSRWeaponFireComponent::TickComponent(float DeltaTime, ELevelTick TickTyp
 	const bool bAutoRecover =
 		(Stats.RecoilRecovery == ERecoilRecovery::Always) ||
 		(Stats.RecoilRecovery == ERecoilRecovery::Auto && Stats.FireMode == EFPSRFireMode::Single);
-	if (bAutoRecover && !bWantsToFire && RecoilDebtPitch > 0.0f)
+	if (bAutoRecover && !bWantsToFire && !bChargeRecoilActive && RecoilDebtPitch > 0.0f)
 	{
 		const float Recover = FMath::Min(Stats.RecoilRecoveryRate * DeltaTime, RecoilDebtPitch);
 		OwnerPawn->AddControllerPitchInput(Recover); // positive = down

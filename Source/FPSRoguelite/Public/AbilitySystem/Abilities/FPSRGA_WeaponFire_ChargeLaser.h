@@ -46,10 +46,13 @@ protected:
 	/** One-shot timer callback (charge complete): stop the warm-up ticks, fire the full-power beam, end the ability. */
 	void DoFinalShot();
 
-	/** Re-trace the piercing hitscan beam from the current view point and apply BeamDamage (× global multiplier).
-	 *  bRollCrit rolls a crit (final shot only); bSendMarker aggregates an enemy hit-marker + runs per-hit fragment
-	 *  hooks (final shot only — warm-up ticks are pure chip damage). Server-authoritative; reuses the FF helpers. */
-	void FireBeam(float BeamDamage, bool bRollCrit, bool bSendMarker);
+	/** Re-trace the piercing hitscan beam from the current view point and apply BeamDamage. Server-authoritative;
+	 *  reuses the FF helpers. bIsPayoffShot distinguishes the two beam kinds:
+	 *   - payoff (final) shot: scales by the player's global damage multiplier, rolls crit, runs per-hit fragment
+	 *     hooks, aggregates an enemy hit-marker, and fires PostFire.
+	 *   - warm-up tick (false): PURE fixed chip damage — NO global damage multiplier, NO crit, NO fragments, NO
+	 *     marker. So a "+damage" card raises the payoff beam but never the warm-up ticks. */
+	void FireBeam(float BeamDamage, bool bIsPayoffShot);
 
 	// --- Per-activation cache (set in ActivateAbility on the server; read by the timer callbacks) ---
 	TWeakObjectPtr<APawn> CachedAvatar;

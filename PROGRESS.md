@@ -15,6 +15,10 @@
 > - **FireComponent** 단순화: hold/release 차지 로직·`bChargingLaser`/`ChargeStartWorldTime`/`GetChargeStartWorldTime`/`IsChargingLaser`/`ServerBeginCharge`/`ServerReleaseCharge`/`ResetCharge` 전부 제거 → ChargeLaser가 일반 `FireOneShot`(Single) 경로로 흐름. OnWeaponEquipped는 NextFireReadyTime 리셋만 유지.
 > - **Character** 입력·RPC 제거: `ServerStartChargeLaser`/`ServerReleaseChargeLaser`(선언+구현) 삭제, Input_Fire/FireReleased는 StartFiring/StopFiring만.
 > - **DataAsset** IsDataValid 경고 메시지 갱신(hold-to-charge 표현 제거).
+> **후속 폴리시 3건(2026-06-11, PIE 피드백 반영, 빌드+스모크 통과)**:
+> - **차징 반동 램프**(FireComponent): ChargeLaser는 클릭 즉발 킥 대신 **차징 시간 동안 반동 점진 상승 → 발사(차징 완료) 순간 상승 종료**. Tick에서 `총킥×(dt/ChargeTime)` 직접 적용+복구부채 누적, 램프 중 auto-recovery 억제, 무기교체 시 리셋. 로컬 필 전용(네트워크 무관). 멤버 추가로 **Live Coding 불가→에디터 재시작 필요**.
+> - **틱뎀 고정화**(GA): 글로벌 데미지 배수·크릿을 **최종 페이오프 빔에만** 적용, 워밍업 틱은 순수 고정 소뎀(데미지 카드가 틱뎀 안 키움). 중복 플래그 `bRollCrit`/`bSendMarker` → `bIsPayoffShot` 단일화.
+> - **무기별 AllWeapons 제외**(Option A, DataAsset/WeaponInstance): 무기 DA `AllWeaponsStatExclusions`(`TArray<EFPSRWeaponStat>`)에 나열한 축은 AllWeapons 스코프 모디파이어 미적용(per-weapon·per-axis, AllWeapons 스택만 필터·ThisWeapon 항상 적용). `RecomputeResolved` GatherStack에 제외 인자. **제외 축은 사용자가 DA에서 직접 지정**(예 ChargeLaser=RecoilVertical). SSOT §2-4-1 반영.
 > **남은 작업**:
 > - **사용자 콘텐츠**: `DA_Weapon_ChargeLaser`에 ChargeTime/ChargeTickDamage/ChargeTickInterval/Damage 지정 + **FireRate ≤ 1/ChargeTime 권장**(차징 중 재클릭 반동 억제, 플랜 §3).
 > - **사용자 2-client PIE**(서버권위 데미지라 필수): 클릭1회→자동차징(틱 소뎀 연속)→완료 본뎀1발 / 차징 중 조준이동=빔 추적 / 재클릭 무시 / 무기교체 시 시퀀스 취소·무크래시 / 적·아군(FF)·관통.

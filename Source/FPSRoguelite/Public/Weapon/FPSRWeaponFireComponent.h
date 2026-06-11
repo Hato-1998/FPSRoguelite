@@ -80,4 +80,13 @@ protected:
 	float PendingRiseYaw = 0.0f;        // not-yet-applied horizontal recoil, smoothed in over time (no recovery)
 	float PlayerPitchCompensation = 0.0f; // player's downward look input this frame, consumes debt
 	int32 ShotsFiredThisSpray = 0;      // shot index within current trigger hold (horizontal pattern)
+
+	// --- ChargeLaser charge-recoil ramp (local feel only; driven in TickComponent) ---
+	// The up-kick climbs gradually over the charge duration and finishes exactly at the fire moment, instead of a
+	// single instant kick on press. Set up in FireOneShot when a ChargeLaser is clicked; integrated each tick.
+	bool bChargeRecoilActive = false;
+	float ChargeRecoilElapsed = 0.0f;   // seconds into the current charge ramp
+	float ChargeRecoilDuration = 0.0f;  // total charge ramp length (= resolved ChargeTime)
+	float ChargeRecoilTotalPitch = 0.0f; // full up-kick spread across the ramp
+	float ChargeRecoilTotalYaw = 0.0f;   // full horizontal drift spread across the ramp
 };

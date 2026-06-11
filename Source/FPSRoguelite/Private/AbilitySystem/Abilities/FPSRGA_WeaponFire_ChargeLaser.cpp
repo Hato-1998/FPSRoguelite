@@ -141,22 +141,23 @@ void UFPSRGA_WeaponFire_ChargeLaser::ActivateAbility(
 
 void UFPSRGA_WeaponFire_ChargeLaser::DoChargeTick()
 {
-	// Warm-up beam: fixed chip damage, no crit, no hit-marker, no fragment per-hit hooks.
-	FireBeam(CachedTickDamage, /*bRollCrit*/ false, /*bSendMarker*/ false);
+	// Warm-up beam: PURE fixed chip damage (no global multiplier / crit / fragments / marker).
+	FireBeam(CachedTickDamage, /*bIsPayoffShot*/ false);
 }
 
 void UFPSRGA_WeaponFire_ChargeLaser::DoFinalShot()
 {
-	// Charge complete: stop the warm-up ticks, fire the full-power payoff beam (crit + hit-marker), end the ability.
+	// Charge complete: stop the warm-up ticks, fire the full-power payoff beam (global multiplier + crit + marker),
+	// end the ability.
 	if (UWorld* World = CachedWorld.Get())
 	{
 		World->GetTimerManager().ClearTimer(TickTimerHandle);
 	}
-	FireBeam(CachedDamage, /*bRollCrit*/ true, /*bSendMarker*/ true);
+	FireBeam(CachedDamage, /*bIsPayoffShot*/ true);
 	EndAbility(GetCurrentAbilitySpecHandle(), GetCurrentActorInfo(), GetCurrentActivationInfo(), true, false);
 }
 
-void UFPSRGA_WeaponFire_ChargeLaser::FireBeam(float BeamDamage, bool bRollCrit, bool bSendMarker)
+void UFPSRGA_WeaponFire_ChargeLaser::FireBeam(float BeamDamage, bool bIsPayoffShot)
 {
 	APawn* Avatar = CachedAvatar.Get();
 	AController* Controller = CachedController.Get();
@@ -176,15 +177,16 @@ void UFPSRGA_WeaponFire_ChargeLaser::FireBeam(float BeamDamage, bool bRollCrit, 
 		}
 	}
 
-	// Global damage multiplier (always) + crit (payoff shot only) from the player's combat attributes.
+	// Global damage multiplier + crit apply to the PAYOFF shot only. Warm-up ticks are pure fixed chip damage
+	// (multiplier stays 1.0, no crit) so a "+damage" card raises the final beam but never the warm-up ticks.
 	float DamageMultiplier = 1.0f;
 	float CritChance = 0.0f;
 	float CritMultiplier = 1.0f;
-	if (UAbilitySystemComponent* ASC = GetAbilitySystemComponentFromActorInfo())
+	if (bIsPayoffShot)
 	{
-		DamageMultiplier = ASC->GetNumericAttribute(UFPSRCombatSet::GetGlobalDamageMultiplierAttribute());
-		if (bRollCrit)
+		if (UAbilitySystemComponent* ASC = GetAbilitySystemComponentFromActorInfo())
 		{
+			DamageMultiplier = ASC->GetNumericAttribute(UFPSRCombatSet::GetGlobalDamageMultiplierAttribute());
 			CritChance = ASC->GetNumericAttribute(UFPSRCombatSet::GetGlobalCritChanceAttribute());
 			CritMultiplier = ASC->GetNumericAttribute(UFPSRCombatSet::GetGlobalCritMultiplierAttribute());
 		}
@@ -218,14 +220,14 @@ void UFPSRGA_WeaponFire_ChargeLaser::FireBeam(float BeamDamage, bool bRollCrit, 
 		}
 		float FinalDamage = BeamDamage * DamageMultiplier;
 		bool bCrit = false;
-		if (bRollCrit && CritChance > 0.0f && FMath::FRand() < CritChance)
+		if (bIsPayoffShot && CritChance > 0.0f && FMath::FRand() < CritChance)
 		{
 			FinalDamage *= CritMultiplier;
 			bCrit = true;
 		}
 
 		// Per-hit behavior hooks (e.g. bonus/leech) run on the PAYOFF shot only — warm-up ticks are pure chip damage.
-		if (bSendMarker && Fragments)
+		if (bIsPayoffShot && Fragments)
 		{
 			for (const TObjectPtr<UFPSRWeaponFragment>& Frag : *Fragments)
 			{
@@ -270,7 +272,7 @@ void UFPSRGA_WeaponFire_ChargeLaser::FireBeam(float BeamDamage, bool bRollCrit, 
 #if ENABLE_DRAW_DEBUG
 	// Payoff beam = bright cyan, longer-lived; warm-up tick = dim blue, brief.
 	DrawDebugLine(World, Start, Start + BaseDir * FMath::Min(WallDist, CachedRange),
-		bSendMarker ? FColor::Cyan : FColor::Blue, false, bSendMarker ? 0.5f : 0.08f, 0, bSendMarker ? 2.0f : 1.0f);
+		bIsPayoffShot ? FColor::Cyan : FColor::Blue, false, bIsPayoffShot ? 0.5f : 0.08f, 0, bIsPayoffShot ? 2.0f : 1.0f);
 #endif
 
 	for (const FHitResult& PawnHit : PawnHits)
@@ -283,7 +285,7 @@ void UFPSRGA_WeaponFire_ChargeLaser::FireBeam(float BeamDamage, bool bRollCrit, 
 	}
 
 	// Hit-marker + post-fire hooks fire only on the payoff shot (warm-up ticks are silent to avoid marker/hook spam).
-	if (bSendMarker)
+	if (bIsPayoffShot)
 	{
 		if (bServerHit)
 		{
