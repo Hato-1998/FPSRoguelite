@@ -5,6 +5,7 @@
 #include "GameFramework/PlayerController.h"
 #include "Card/FPSRCardTypes.h"
 #include "Hero/FPSRFeedbackTypes.h"
+#include "Core/FPSRGameFlowTypes.h"
 #include "FPSRPlayerController.generated.h"
 
 class UInputMappingContext;
@@ -13,6 +14,7 @@ class UFPSRCardSelectWidget;
 class UCommonActivatableWidget;
 class UFPSRGameHUDWidget;
 class UFPSRCardDataAsset;
+class UFPSRResultWidget;
 
 /** Base player controller. Adds the default Enhanced Input mapping context for the local player and
  *  drives the card-selection UI flow over server-authoritative RPCs.
@@ -98,6 +100,14 @@ public:
 	UFUNCTION(Server, Reliable)
 	void ServerAbandonOffer(int32 OfferId);
 
+	/** Client (owner): show the run outcome widget (called when AFPSRGameMode::EndRun fires). */
+	UFUNCTION(Client, Reliable)
+	void ClientShowRunResult(EFPSRRunOutcome Outcome);
+
+	/** Server (host/authority): return to the menu with the given outcome (called by result widget on non-authority clients). */
+	UFUNCTION(Server, Reliable)
+	void ServerRequestReturnToMenu(EFPSRRunOutcome Outcome);
+
 protected:
 	virtual void SetupInputComponent() override;
 
@@ -119,6 +129,10 @@ protected:
 
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|UI")
 	TSubclassOf<UFPSRCardSelectWidget> CardSelectWidgetClass;
+
+	/** Result widget (Victory/Defeat screen) shown when a run ends. */
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|UI")
+	TSubclassOf<UFPSRResultWidget> ResultWidgetClass;
 
 private:
 	/** Server: refresh the global freeze + present after a selection/grant changed this player's pending picks. */

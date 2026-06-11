@@ -4,6 +4,7 @@
 
 #include "GameFramework/GameModeBase.h"
 #include "Templates/SubclassOf.h"
+#include "Core/FPSRGameFlowTypes.h"
 #include "FPSRGameMode.generated.h"
 
 class UFPSRCardPoolDataAsset;
@@ -21,6 +22,11 @@ public:
 
 	virtual void BeginPlay() override;
 
+	/** Called when the run ends (victory or defeat). Authority-only.
+	 *  Notifies all players with their individual result (ClientShowRunResult RPC). */
+	UFUNCTION(BlueprintCallable, Category = "FPSR|Flow")
+	void EndRun(EFPSRRunOutcome Outcome);
+
 protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Cards")
 	TObjectPtr<UFPSRCardPoolDataAsset> CardPool;
@@ -34,4 +40,8 @@ protected:
 	 *  If null the spawn director falls back to the C++ AFPSREnemyBase (engine cube placeholder). */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Enemy")
 	TSubclassOf<AFPSREnemyBase> EnemyClass;
+
+private:
+	/** Guard: prevents EndRun from being called twice (RPC spam / race condition). */
+	bool bRunEnded = false;
 };
