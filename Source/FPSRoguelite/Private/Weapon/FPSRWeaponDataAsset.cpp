@@ -26,10 +26,10 @@ EDataValidationResult UFPSRWeaponDataAsset::IsDataValid(FDataValidationContext& 
 		Context.AddWarning(LOCTEXT("AOENoRadius", "AOE weapon has AOERadius <= 0 — it will only hit a single target (no explosion). Set AOERadius > 0 for a blast."));
 	}
 
-	// ChargeLaser with ChargeTime 0 reaches full charge instantly (the charge alpha is forced to 1).
+	// ChargeLaser with ChargeTime 0 fires the full-power beam instantly on click (no warm-up sequence).
 	if (Archetype == EFPSRWeaponArchetype::ChargeLaser && BaseStats.ChargeTime <= 0.0f)
 	{
-		Context.AddWarning(LOCTEXT("ChargeLaserNoChargeTime", "ChargeLaser has ChargeTime <= 0 — every shot is an instant full charge. Set ChargeTime > 0 for a hold-to-charge ramp."));
+		Context.AddWarning(LOCTEXT("ChargeLaserNoChargeTime", "ChargeLaser has ChargeTime <= 0 — a click fires the full-power beam instantly with no warm-up. Set ChargeTime > 0 for a charge-up sequence."));
 	}
 
 	// Ranged weapons consume ammo; a 0 magazine can never fire past the empty-mag gate.

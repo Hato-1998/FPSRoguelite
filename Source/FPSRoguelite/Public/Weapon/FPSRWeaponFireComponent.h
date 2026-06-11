@@ -18,32 +18,14 @@ class FPSROGUELITE_API UFPSRWeaponFireComponent : public UActorComponent
 public:
 	UFPSRWeaponFireComponent();
 
-	/** Called on Fire input pressed/released (owning client). */
+	/** Called on Fire input pressed/released (owning client). ChargeLaser uses the same single-press path as other
+	 *  weapons — one click activates the fire ability, which runs the whole charge sequence server-side. */
 	void StartFiring();
 	void StopFiring();
 
-	// --- ChargeLaser (hold-to-charge, release-to-fire; server-authoritative charge measurement) ---
-	/** True while a ChargeLaser is charging on this machine (set by StartFiring on the local client). */
-	bool IsChargingLaser() const { return bChargingLaser; }
-
-	/** World time the current charge began on THIS machine (-1 = not charging). The ChargeLaser fire ability
-	 *  reads this to compute the charge alpha against its own clock (client = local feel, server = authoritative). */
-	float GetChargeStartWorldTime() const { return ChargeStartWorldTime; }
-
-	/** Server: stamp the charge start time (called from the owning client's ServerStartChargeLaser RPC). Only
-	 *  stamps when the equipped weapon is actually a ChargeLaser, so a spoofed RPC for another weapon is ignored. */
-	void ServerBeginCharge();
-
-	/** Server: activate the charged beam authoritatively (called from the owning client's ServerReleaseChargeLaser
-	 *  RPC, ordered after ServerStartChargeLaser). Reads the server-stamped charge and consumes it. */
-	void ServerReleaseCharge();
-
-	/** Clear the charge state after the fire ability consumes it (prevents a single charge firing twice). */
-	void ResetCharge();
-
-	/** Equip boundary (called from the inventory's server EquipSlot + client OnRep_CurrentSlotIndex): clears any
-	 *  in-progress charge and imposes a minimum post-swap fire cooldown before the next shot, so a rapid weapon
-	 *  swap can't bypass fire cadence and the local recoil prediction stays in sync with the server. */
+	/** Equip boundary (called from the inventory's server EquipSlot + client OnRep_CurrentSlotIndex): imposes a
+	 *  minimum post-swap fire cooldown before the next shot, so a rapid weapon swap can't bypass fire cadence and
+	 *  the local recoil prediction stays in sync with the server. */
 	void OnWeaponEquipped(float EquipCooldown);
 
 	/** Extra spread (degrees) from sustained fire; read by the fire ability when tracing. */
@@ -83,11 +65,6 @@ protected:
 	float TimeSinceLastShot = 0.0f;
 	int32 BurstShotsRemaining = 0;
 	float CurrentBloom = 0.0f;
-
-	// ChargeLaser charge state. ChargeStartWorldTime is stamped locally (StartFiring) and on the server
-	// (ServerBeginCharge); the fire ability computes alpha against it and calls ResetCharge to consume it.
-	bool bChargingLaser = false;
-	float ChargeStartWorldTime = -1.0f;
 
 	bool bReloadRequestPending = false; // guards against spamming the reload RPC each tick
 	float LastMeleeTime = -1000.0f; // world time of last melee attack (melee attack-rate cooldown)

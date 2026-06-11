@@ -158,12 +158,15 @@ struct FPSROGUELITE_API FFPSRWeaponStatBlock
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Projectile", meta = (EditConditionHides, EditCondition = "Archetype == EFPSRWeaponArchetype::AOE"))
 	float KnockbackStrength = 0.0f; // AOE radial knockback impulse (cm/s) baked into the projectile; 0 = none
 
-	// --- Charge (ChargeLaser archetype; charge alpha scales damage) ---
+	// --- Charge (ChargeLaser archetype; one click -> auto charge sequence: warm-up ticks, then a full-power beam) ---
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Charge", meta = (EditConditionHides, EditCondition = "Archetype == EFPSRWeaponArchetype::ChargeLaser"))
-	float ChargeTime = 0.0f; // seconds of hold to reach full charge; 0 = not a charge weapon
+	float ChargeTime = 0.0f; // seconds from click to the full-power beam; 0 = fire instantly
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Charge", meta = (EditConditionHides, EditCondition = "Archetype == EFPSRWeaponArchetype::ChargeLaser"))
-	float ChargeFullDamageMultiplier = 3.0f; // damage multiplier at full charge (alpha lerps 1.0 -> this)
+	float ChargeTickDamage = 2.0f; // fixed hitscan damage per warm-up tick while charging; 0 = no warm-up beam
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Charge", meta = (EditConditionHides, EditCondition = "Archetype == EFPSRWeaponArchetype::ChargeLaser"))
+	float ChargeTickInterval = 0.12f; // seconds between warm-up ticks (clamped to a 0.02 minimum)
 };
 
 /** Stat axis a weapon modifier targets. Maps 1:1 to an FFPSRWeaponStatBlock field (compile-checked switch in

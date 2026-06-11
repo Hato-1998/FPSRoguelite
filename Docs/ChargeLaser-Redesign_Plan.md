@@ -1,6 +1,8 @@
 # ChargeLaser 재설계 — 클릭 1회 자동 차징 시퀀스 (구현 플랜 / 세션 핸드오프)
 
-> **상태**: 설계 확정·미구현. 브랜치 `fix/chargelaser-redesign`(코드 0줄, 이 문서만).
+> **상태**: ✅ **코드 구현 완료(2026-06-11, Opus 직접)** — 빌드 성공 + 스모크(`FPSRoguelite.Smoke.ModuleLoads`) Success. 브랜치 `fix/chargelaser-redesign`.
+> **네트워킹 확정**: `NetExecutionPolicy = ServerOnly`(§2-2 권장안). 엔진 소스 `AbilitySystemComponent_Abilities.cpp:1633`에서 ServerOnly + bAllowRemoteActivation → `CallServerTryActivateAbility`(예측키 없음) 확인 — 클라 클릭이 서버 활성요청으로 라우팅, 서버 타이머가 전 시퀀스 권위 구동. 클라 빔 VFX는 후속(ServerOnly는 클라에 활성 복제 안 함).
+> **남은 작업**: 사용자 2-client PIE(§5) + ChargeLaser DA(ChargeTime/ChargeTickDamage/ChargeTickInterval/Damage, FireRate≤1/ChargeTime).
 > **필독**: `Game.md` 허브 + `PROGRESS.md` + 본 문서 + `Docs/SSOT/Enemy.md`(§2-10 레이저=히트스캔).
 > **모델 정책**: GAS 네트워킹 모델 변경 + 서버권위 데미지라 **Opus 직접 구현/검증**.
 > ⚠️ **선행 의존**: 방금 머지된 **P5 FF**(`Combat/FPSRCombatStatics.h`: `ResolveDamage`/`ApplyDamage`/`AddDamageablePawnObjectTypes`) 위에서 동작 — FireBeam이 이걸 재사용한다.

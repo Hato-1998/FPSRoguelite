@@ -265,13 +265,9 @@ void AFPSRCharacter::Input_Fire(const FInputActionValue& Value)
 	}
 	if (WeaponFire)
 	{
+		// All archetypes (incl. ChargeLaser) fire through the single-press path: StartFiring activates the weapon's
+		// fire ability, and ChargeLaser's ability runs the whole charge sequence server-side from its own timers.
 		WeaponFire->StartFiring();
-		// ChargeLaser: tell the server to start measuring the charge (anti-cheat alpha). Mirrors the ADS
-		// pattern (local state + server RPC). Other archetypes fire via the GA's own activation replication.
-		if (WeaponFire->IsChargingLaser())
-		{
-			ServerStartChargeLaser();
-		}
 	}
 }
 
@@ -279,16 +275,7 @@ void AFPSRCharacter::Input_FireReleased(const FInputActionValue& Value)
 {
 	if (WeaponFire)
 	{
-		// Capture the charge state before StopFiring clears it: if this release ends a ChargeLaser charge, the
-		// authoritative beam is activated by the server via this ordered Character-channel RPC (paired with the
-		// ServerStartChargeLaser sent on press), not by GAS client→server activation, so begin always precedes
-		// release on the server and there is no cross-channel race.
-		const bool bWasChargingLaser = WeaponFire->IsChargingLaser();
 		WeaponFire->StopFiring();
-		if (bWasChargingLaser)
-		{
-			ServerReleaseChargeLaser();
-		}
 	}
 }
 
@@ -359,30 +346,6 @@ void AFPSRCharacter::ServerSetAiming_Implementation(bool bNewAiming)
 	}
 }
 
-void AFPSRCharacter::ServerStartChargeLaser_Implementation()
-{
-	// No charging during the card-selection freeze (mirrors the other server input gates).
-	if (IsRunFrozen())
-	{
-		return;
-	}
-	if (WeaponFire)
-	{
-		WeaponFire->ServerBeginCharge();
-	}
-}
-
-void AFPSRCharacter::ServerReleaseChargeLaser_Implementation()
-{
-	// Ordered after ServerStartChargeLaser on the Character channel, so the server's charge-start stamp is
-	// already set. Activate the charged beam server-authoritatively. (A release arriving during the freeze still
-	// activates: the ability itself gates on the freeze and drops the charge, mirroring the other fire paths.)
-	if (WeaponFire)
-	{
-		WeaponFire->ServerReleaseCharge();
-	}
-}
-
 void AFPSRCharacter::ServerDash_Implementation(FVector DashDirection)
 {
 	UWorld* World = GetWorld();
@@ -391,7 +354,7 @@ void AFPSRCharacter::ServerDash_Implementation(FVector DashDirection)
 		return;
 	}
 
-	// No dashing during the card-selection freeze (mirror ServerEquipSlot / ServerStartChargeLaser server gates).
+	// No dashing during the card-selection freeze (mirror the ServerEquipSlot server gate).
 	// Input_Dash already gates client-side, but a dash RPC in flight when the freeze replicates must be rejected
 	// on the server too, or the run is no longer globally stopped.
 	if (IsRunFrozen())

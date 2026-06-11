@@ -6,6 +6,21 @@
 
 **최종 갱신: 2026-06-11**
 
+## 🔧 ChargeLaser 재설계 — **코드 구현 완료(2026-06-11, Opus 직접, 브랜치 `fix/chargelaser-redesign`)**
+> **설계 문서**: `Docs/ChargeLaser-Redesign_Plan.md`. **클릭 1회 = 자동 차징 시퀀스로 전환**(hold/release 폐지). 차징 중 `ChargeTickInterval`마다 고정 소뎀(`ChargeTickDamage`) 워밍업 빔(조준 추적), 차징 완료 시 본뎀(`Damage`) 풀파워 관통 빔 1발(크릿+히트마커). **빌드 성공 + 스모크 Success로 검증.**
+> **네트워킹 확정**: GA `NetExecutionPolicy = ServerOnly` + InstancedPerActor 타이머 시퀀스. 엔진 소스(`AbilitySystemComponent_Abilities.cpp:1633`) 확인 — 클라 클릭 `TryActivateAbilityByClass` → `CallServerTryActivateAbility`(예측키 없음)로 서버가 전 시퀀스 권위 구동. 기존 cross-channel RPC 2종(과설계) 폐지.
+> **구현(코드 8파일)**:
+> - **GA 전면 재작성** `FPSRGA_WeaponFire_ChargeLaser.{h,cpp}`: ServerOnly + 타이머(Tick 루프/Final 1회) + `FireBeam(BeamDamage,bRollCrit,bSendMarker)` 팩터링(P5 FF 헬퍼 재사용, 매 호출 viewpoint 재트레이스로 조준 추적) + `EndAbility` 오버라이드(타이머 ClearTimer로 무기교체/사망 취소 시 누수·stale 방지). 워밍업 틱=소뎀·크릿X·마커X·OnHitActor X / 최종=본뎀·크릿·마커·OnHitActor·PostFire.
+> - **스탯** `FFPSRWeaponStatBlock`: `ChargeFullDamageMultiplier` 제거 → `ChargeTickDamage`(2.0)·`ChargeTickInterval`(0.12, min 0.02 클램프) 추가(ChargeLaser EditConditionHides). `ChargeTime`/`Damage` 유지.
+> - **FireComponent** 단순화: hold/release 차지 로직·`bChargingLaser`/`ChargeStartWorldTime`/`GetChargeStartWorldTime`/`IsChargingLaser`/`ServerBeginCharge`/`ServerReleaseCharge`/`ResetCharge` 전부 제거 → ChargeLaser가 일반 `FireOneShot`(Single) 경로로 흐름. OnWeaponEquipped는 NextFireReadyTime 리셋만 유지.
+> - **Character** 입력·RPC 제거: `ServerStartChargeLaser`/`ServerReleaseChargeLaser`(선언+구현) 삭제, Input_Fire/FireReleased는 StartFiring/StopFiring만.
+> - **DataAsset** IsDataValid 경고 메시지 갱신(hold-to-charge 표현 제거).
+> **남은 작업**:
+> - **사용자 콘텐츠**: `DA_Weapon_ChargeLaser`에 ChargeTime/ChargeTickDamage/ChargeTickInterval/Damage 지정 + **FireRate ≤ 1/ChargeTime 권장**(차징 중 재클릭 반동 억제, 플랜 §3).
+> - **사용자 2-client PIE**(서버권위 데미지라 필수): 클릭1회→자동차징(틱 소뎀 연속)→완료 본뎀1발 / 차징 중 조준이동=빔 추적 / 재클릭 무시 / 무기교체 시 시퀀스 취소·무크래시 / 적·아군(FF)·관통.
+> **알려진 정책 결정(버그 아님)**: ① 차징 중 프리즈(§2-2) = 타이머 계속·`FireBeam`이 IsRunPaused면 데미지만 스킵(짧은 차징 엣지로 플랜 §3 수용; [[freeze-gate-client-server-symmetry]]의 PauseTimer 방식 대신 의도적 단순화). ② 탄약은 클릭 시점 1발 선소모 → 차징 중 무기교체 시 그 탄 소모됨(샷 커밋으로 간주, 플랜 §2-2). ③ ChargeLaser도 클릭 시 FireOneShot 반동 발생 → DA에서 RecoilVertical 낮게/0 권장(플랜 §3).
+> ⚠️ **Codex 머지게이트 미실행**: main 머지 전 `Scripts/codex-review.ps1 -Base main` 실행 권장(정책: 브랜치 머지 시점 일괄).
+
 ## 🚩 P5 친선사격(FF) — **코드 main 머지 완료(2026-06-11, `6727214`), 남은 건 콘텐츠(카드 DA) + 2-client PIE**
 > **`phase/p5-friendly-fire` → main `--no-ff` 머지 완료(`6727214`). `fix/weapon-fire-freeze-hardening`(스나이퍼 투사체/발사 하드닝)도 선형 포함돼 함께 머지·브랜치 정리(삭제)됨.** 플랜 §3 ①~⑦ 코드 구현·빌드·헤드리스 스모크 통과. 플레이어 무기 데미지를 **적/자기/아군** 통합 판정으로 전환 완료. **확정값**: 아군=FF ON일 때 50%, FF=전체 범위(히트스캔/투사체/근접/차지빔/폭발), 자기=폭발만 풀(자폭), 폭발 넉백=데미지 독립(죽은 폰만 제외).
 > ⚠️ **Codex 머지게이트 미실행**: 이 세션 샌드박스 오류(`CreateProcessWithLogonW 1056`)로 자동 실행 불가 → 원하면 인터랙티브 터미널에서 `powershell -File Scripts\codex-review.ps1 -Commit 6727214` 별도 실행. 빌드+스모크+적대적 자체리뷰(2건 교정)로 코드측 게이트는 통과.
