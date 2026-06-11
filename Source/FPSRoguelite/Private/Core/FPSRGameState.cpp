@@ -23,6 +23,7 @@ void AFPSRGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLi
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRGameState, PartyLevel, Params);
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRGameState, RunPhase, Params);
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRGameState, bRunPaused, Params);
+	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRGameState, bVisionRestricted, Params);
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRGameState, RunClockSeconds, Params);
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRGameState, bFriendlyFireEnabled, Params);
 }
@@ -94,6 +95,19 @@ void AFPSRGameState::SetRunPaused(bool bPaused)
 	OnRunStateChanged.Broadcast();
 
 	UE_LOG(LogFPSR, Log, TEXT("[Run] %s"), bPaused ? TEXT("FREEZE (card selection)") : TEXT("RESUME"));
+}
+
+void AFPSRGameState::SetVisionRestricted(bool bRestricted)
+{
+	if (!HasAuthority() || bVisionRestricted == bRestricted)
+	{
+		return;
+	}
+	bVisionRestricted = bRestricted;
+	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRGameState, bVisionRestricted, this);
+	OnRunStateChanged.Broadcast();
+
+	UE_LOG(LogFPSR, Log, TEXT("[Run] Vision %s"), bRestricted ? TEXT("RESTRICTED (mission)") : TEXT("RESTORED"));
 }
 
 void AFPSRGameState::SetFriendlyFireEnabled(bool bEnabled)

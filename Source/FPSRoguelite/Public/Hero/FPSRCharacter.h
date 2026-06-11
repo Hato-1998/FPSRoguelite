@@ -14,6 +14,7 @@ class UInputAction;
 class UFPSRWeaponInventoryComponent;
 class UFPSRWeaponFireComponent;
 class UFPSRWeaponDataAsset;
+class UMaterialInterface;
 class UFPSRPlayerFeedbackComponent;
 struct FInputActionValue;
 
@@ -29,6 +30,9 @@ public:
 	virtual void PossessedBy(AController* NewController) override;
 	virtual void OnRep_PlayerState() override;
 	virtual void SetupPlayerInputComponent(UInputComponent* PlayerInputComponent) override;
+	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+	virtual void NotifyControllerChanged() override;
 
 #if ENABLE_DRAW_DEBUG
 	virtual void Tick(float DeltaSeconds) override;
@@ -52,6 +56,16 @@ protected:
 
 	/** Bound to the health set's OnOutOfHealth (server). Placeholder: logs; full DBNO/respawn is P5. */
 	void HandleOutOfHealth();
+
+	/** Local client: react to GameState OnRunStateChanged — apply/clear the mission vision restriction PP. */
+	UFUNCTION()
+	void HandleRunStateChanged_Vision();
+
+	/** Local client: try to bind to GameState OnRunStateChanged (GameState may arrive after BeginPlay). */
+	void TryBindVisionDelegate();
+
+	/** Local client: apply (true) or clear (false) the camera vision-restriction post-process. Idempotent. */
+	void ApplyVisionRestriction(bool bRestricted);
 
 	// Enhanced Input handlers
 	void Input_MoveForward(const FInputActionValue& Value);
@@ -88,6 +102,15 @@ protected:
 
 	UPROPERTY(VisibleAnywhere, Category = "FPSR|Camera")
 	TObjectPtr<UCameraComponent> FirstPersonCamera;
+
+	/** Optional post-process material for the LimitedVision mission (tunnel/radial mask). When unset, a built-in
+	 *  vignette fallback is used so the effect works without content. Assigned in the BP subclass (no hardcoded path). */
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Vision")
+	TObjectPtr<UMaterialInterface> VisionRestrictionMaterial = nullptr;
+
+	/** Built-in fallback vignette intensity used when VisionRestrictionMaterial is unset. */
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Vision", meta = (ClampMin = "0.0"))
+	float VisionVignetteIntensity = 1.4f;
 
 	/** First-person arms, visible to the owning client only. */
 	UPROPERTY(VisibleAnywhere, Category = "FPSR|Mesh")
@@ -168,4 +191,18 @@ protected:
 
 	/** Server-only: world time of the last accepted contact hit (i-frame gate). */
 	float LastDamagedTime = -1000.0f;
+
+	/** Local-client: true while the vision-restriction PP is currently applied (idempotency guard). */
+	bool bVisionRestrictionApplied = false;
+
+	/** Local-client: saved camera vignette override flag/intensity (fallback path) so the camera's authored
+	 *  settings are restored when the mission ends instead of being clobbered. */
+	bool bSavedVignetteOverride = false;
+	float SavedVignetteIntensity = 0.0f;
+
+	/** Local-client: true once bound to GameState OnRunStateChanged. */
+	bool bVisionDelegateBound = false;
+
+	/** Local-client: retry timer for binding the vision delegate before GameState is replicated. */
+	FTimerHandle VisionBindRetryTimerHandle;
 };

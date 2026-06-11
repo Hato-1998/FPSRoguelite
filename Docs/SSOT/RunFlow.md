@@ -43,8 +43,14 @@
   - **확장형 프레임워크**: `AFPSRMissionActor`(서버권위 리플리케이트 Actor 베이스) 서브클래스 + `UFPSRMissionDataAsset`(메타+로직클래스+보상카드) + **디자이너 배치 `AFPSRMissionSpawnPoint`**(태그매칭+가중랜덤). 디렉터가 스폰·생명주기 관리.
   - **미션 카탈로그**(기획, 프레임워크로 수용): 좁은구역 N초 버티기 / 이동 구역 점령 / 도망치는 고체력 몹 처치 / 점프맵 오브 획득 / 피격 없이 구체 N초 소지 / 시야 극제한 버티기 / 전원 제자리 정지 등. 각 종류 = `AFPSRMission_*` 서브클래스(필요 인프라는 서브클래스+콘텐츠로 격리, 코어 불변).
 - 난이도 곡선은 `UCurveFloat`로 분리(후속)
-- **구현 상태(P4-A)**: 디렉터(시간 미션+보스타임) + 미션 프레임워크 + 레퍼런스 미션 1종(`AFPSRMission_HoldZone`) + 스폰포인트 + 레벨업/미션보상 전역 프리즈 + 오프닝시드. 미션 보상의 **무기 모디파이어 실적용(weapon-scope `ApplyCard`)은 P4-B**(P4-A는 프리즈+선택 흐름까지). 나머지 6종 미션·보스 실물은 후속.
-- **테스트 스케줄**: DataAsset 교체로 압축(예: 미션 60/120/180s·보스 300s). ⚠️ 압축값은 임시(프로덕션 전환 시 원복).
+- **구현 상태(P4-A)**: 디렉터(시간 미션+보스타임) + 미션 프레임워크 + 레퍼런스 미션 1종(`AFPSRMission_HoldZone`) + 스폰포인트 + 레벨업/미션보상 전역 프리즈 + 오프닝시드. 미션 보상의 **무기 모디파이어 실적용(weapon-scope `ApplyCard`)은 P4-B**(P4-A는 프리즈+선택 흐름까지).
+- **구현 상태(P4-B-3, main 머지 2026-06-11)**: 미션 종류 **6종** + 공용 PointSet + 시간 윈도우 스케줄러. 빌드+스모크+Codex 머지게이트(P2 교정)+PIE 통과.
+  - **6종**: `AFPSRMission_StandStill`(전원 정지 N초) / `AFPSRMission_MovingZone`(PointSet 점 순차 점령) / `AFPSRMission_CollectOrbs`(PointSet 각 점 오브 스폰·수집) / `AFPSRMission_CarryNoHit`(오브 소지 무피격 N초, 캐리어 Health 폴링) / `AFPSRMission_DefeatFleeing`(독립 고체력 도망 타깃 `AFPSRMissionFleeTarget` 처치) / `AFPSRMission_LimitedVision`(시야 극제한 N초 버티기). 베이스 `AFPSRMissionActor::Tick`이 `bRunPaused`(프리즈) 중 진행/시간제한 게이트(전 미션 일괄). 공유 인프라 `AFPSRMissionOrb`(서버 오버랩, `EndPlay` 정리). 디버그 `FPSR.MissionTrigger [windowIndex] [poolIndex]`.
+  - **공용 `AFPSRMissionPointSet`**(비복제 서버권위, 스폰포인트 패턴): 자식 Scene/Billboard 컴포넌트=월드 점 목록(attach 순서). 미션이 소비 방식 결정(MovingZone=순차 순회 / CollectOrbs=각 점 스폰). 디렉터가 미션 **CDO 가상함수**(`UsesPointSet`/`AssignPointSet`)로 일반 선택·주입(미션별 cast 없음), `SelectMissionPointSet`(태그매칭+가중랜덤, 개수 무관, 0개면 미션 폴백). 점 좌표=콘텐츠.
+  - **LimitedVision 시야 제한**: 서버권위 복제 `AFPSRGameState::bVisionRestricted`(`bRunPaused` 미러) → 각 로컬 클라가 `OnRunStateChanged` 구독해 자기 `FirstPersonCamera` PostProcess 적용(`VisionRestrictionMaterial` 블렌더블 / 미할당 시 내장 비네트 폴백, save·restore). cosmetic·게임플레이 중립. 미션 종료/`EndPlay` 어느 경로든 복구. 바인딩=로컬게이트 없이·적용만 `IsLocallyControlled`(+`NotifyControllerChanged` 늦possession 재적용).
+- **스케줄 = 시간 윈도우 + 미션 풀 랜덤(2026-06-11)**: `UFPSRRunScheduleDataAsset.MissionWindows`(`FFPSRMissionWindow{MinTime, MaxTime, MissionPool[]}`). 윈도우마다 런 시작 시 `[MinTime,MaxTime]` 내 **랜덤 트리거 시각 롤**(서버권위, 런마다 변주) + 발화 시 풀 **균등 랜덤 1개** 스폰. 윈도우별 풀로 시간대 제한(예: 초반 풀에서 HoldZone 제외). 빈 풀=스킵. 기존 `{TriggerTime, Mission}` 단건 폐지.
+- **보스 실물**은 후속(P6).
+- **테스트 스케줄**: DataAsset 교체로 압축(예: 윈도우 50~120/240~300s·보스 300s). ⚠️ 압축값은 임시(프로덕션 전환 시 원복).
 
 ### 2-11. 메타 프로그레션
 - `URogueliteSaveGame`(USaveGame) — 누적 재화, 업그레이드 트리 상태, 캐릭터/무기 해금

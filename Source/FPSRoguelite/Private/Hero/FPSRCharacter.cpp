@@ -22,6 +22,7 @@
 #include "TimerManager.h"
 #include "Engine/World.h"
 #include "Engine/Engine.h"
+#include "Materials/MaterialInterface.h"
 
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
@@ -113,6 +114,36 @@ void AFPSRCharacter::Tick(float DeltaSeconds)
 	}
 }
 #endif
+
+void AFPSRCharacter::BeginPlay()
+{
+	Super::BeginPlay();
+
+	// Bind regardless of local-control state: BeginPlay can run before the controller ref replicates on a remote
+	// client's own pawn, so gating the bind on IsLocallyControlled() here would permanently miss it. The GameState
+	// delegate is the trigger; the camera PP is only APPLIED for the locally controlled pawn (checked at apply time,
+	// when controller state is stable). Binding on proxies / server-side pawns is a cheap no-op.
+	TryBindVisionDelegate();
+}
+
+void AFPSRCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(VisionBindRetryTimerHandle);
+	}
+
+	if (bVisionDelegateBound)
+	{
+		if (AFPSRGameState* GS = GetWorld() ? GetWorld()->GetGameState<AFPSRGameState>() : nullptr)
+		{
+			GS->OnRunStateChanged.RemoveDynamic(this, &AFPSRCharacter::HandleRunStateChanged_Vision);
+		}
+		bVisionDelegateBound = false;
+	}
+
+	Super::EndPlay(EndPlayReason);
+}
 
 void AFPSRCharacter::PossessedBy(AController* NewController)
 {
@@ -447,6 +478,108 @@ void AFPSRCharacter::HandleOutOfHealth()
 void AFPSRCharacter::RequestReload()
 {
 	ServerReload();
+}
+
+void AFPSRCharacter::TryBindVisionDelegate()
+{
+	if (bVisionDelegateBound)
+	{
+		return;
+	}
+
+	AFPSRGameState* GS = GetWorld() ? GetWorld()->GetGameState<AFPSRGameState>() : nullptr;
+	if (!GS)
+	{
+		// GameState not replicated yet — retry shortly (local client only).
+		if (UWorld* World = GetWorld())
+		{
+			World->GetTimerManager().SetTimer(VisionBindRetryTimerHandle, this, &AFPSRCharacter::TryBindVisionDelegate, 0.25f, false);
+		}
+		return;
+	}
+
+	GS->OnRunStateChanged.AddDynamic(this, &AFPSRCharacter::HandleRunStateChanged_Vision);
+	bVisionDelegateBound = true;
+
+	// Apply the current state immediately (in case the restriction was already active when we bound).
+	HandleRunStateChanged_Vision();
+}
+
+void AFPSRCharacter::NotifyControllerChanged()
+{
+	Super::NotifyControllerChanged();
+
+	// A pawn possessed AFTER BeginPlay (e.g. a late join while LimitedVision is already active) binds the vision
+	// delegate before it is locally controlled, so the initial apply was skipped. Re-check now that the
+	// controller is known so the local player catches a restriction that won't broadcast again.
+	if (IsLocallyControlled())
+	{
+		TryBindVisionDelegate();   // ensure bound (no-op if already)
+		HandleRunStateChanged_Vision();
+	}
+}
+
+void AFPSRCharacter::HandleRunStateChanged_Vision()
+{
+	// Camera post-process only affects the local view — ignore on simulated proxies / server-side non-local pawns.
+	if (!IsLocallyControlled())
+	{
+		return;
+	}
+
+	const AFPSRGameState* GS = GetWorld() ? GetWorld()->GetGameState<AFPSRGameState>() : nullptr;
+	if (!GS)
+	{
+		return;
+	}
+
+	const bool bRestricted = GS->IsVisionRestricted();
+	if (bRestricted != bVisionRestrictionApplied)
+	{
+		ApplyVisionRestriction(bRestricted);
+	}
+}
+
+void AFPSRCharacter::ApplyVisionRestriction(bool bRestricted)
+{
+	if (!FirstPersonCamera)
+	{
+		return;
+	}
+
+	FPostProcessSettings& PP = FirstPersonCamera->PostProcessSettings;
+
+	if (bRestricted)
+	{
+		if (VisionRestrictionMaterial)
+		{
+			PP.AddBlendable(VisionRestrictionMaterial, 1.0f);
+		}
+		else
+		{
+			// Built-in fallback: heavy vignette darkening the screen edges. Save the camera's authored vignette
+			// override so it can be restored when the mission ends (don't clobber it).
+			bSavedVignetteOverride = PP.bOverride_VignetteIntensity;
+			SavedVignetteIntensity = PP.VignetteIntensity;
+			PP.bOverride_VignetteIntensity = true;
+			PP.VignetteIntensity = VisionVignetteIntensity;
+		}
+	}
+	else
+	{
+		if (VisionRestrictionMaterial)
+		{
+			PP.RemoveBlendable(VisionRestrictionMaterial);
+		}
+		else
+		{
+			// Restore the camera's pre-mission vignette settings instead of force-disabling the override.
+			PP.bOverride_VignetteIntensity = bSavedVignetteOverride;
+			PP.VignetteIntensity = SavedVignetteIntensity;
+		}
+	}
+
+	bVisionRestrictionApplied = bRestricted;
 }
 
 UAbilitySystemComponent* AFPSRCharacter::GetAbilitySystemComponent() const
