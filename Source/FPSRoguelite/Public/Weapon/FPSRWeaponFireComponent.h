@@ -81,12 +81,13 @@ protected:
 	float PlayerPitchCompensation = 0.0f; // player's downward look input this frame, consumes debt
 	int32 ShotsFiredThisSpray = 0;      // shot index within current trigger hold (horizontal pattern)
 
-	// --- ChargeLaser charge-recoil ramp (local feel only; driven in TickComponent) ---
-	// The up-kick climbs gradually over the charge duration and finishes exactly at the fire moment, instead of a
-	// single instant kick on press. Set up in FireOneShot when a ChargeLaser is clicked; integrated each tick.
-	bool bChargeRecoilActive = false;
+	// --- ChargeLaser charge sequence — local-feel recoil ramp + re-press gate (driven in TickComponent) ---
+	// bChargeSequenceActive marks a ChargeLaser charge in progress on this client: it drives the recoil ramp (the
+	// up-kick climbs over the charge duration and finishes at the fire moment, instead of an instant kick) AND blocks
+	// a re-press from starting a phantom second charge. Set up in FireOneShot on click; cleared when the ramp ends.
+	bool bChargeSequenceActive = false;
 	float ChargeRecoilElapsed = 0.0f;   // seconds into the current charge ramp
-	float ChargeRecoilDuration = 0.0f;  // total charge ramp length (= resolved ChargeTime)
+	float ChargeRecoilDuration = 0.0f;  // total charge ramp length (= fragment-adjusted ChargeTime, matches the server)
 	float ChargeRecoilTotalPitch = 0.0f; // full up-kick spread across the ramp
 	float ChargeRecoilTotalYaw = 0.0f;   // full horizontal drift spread across the ramp
 };

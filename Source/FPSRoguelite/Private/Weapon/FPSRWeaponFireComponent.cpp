@@ -5,6 +5,7 @@
 #include "Weapon/FPSRWeaponInstance.h"
 #include "Weapon/FPSRWeaponDataAsset.h"
 #include "Weapon/FPSRWeaponTypes.h"
+#include "Weapon/FPSRWeaponFragment.h"
 #include "Hero/FPSRCharacter.h"
 
 #include "AbilitySystemComponent.h"
@@ -89,6 +90,16 @@ void UFPSRWeaponFireComponent::StartFiring()
 		return;
 	}
 
+	// ChargeLaser: ignore a re-press while a charge sequence is already running on this client. The server-only fire
+	// ability already rejects re-activation, but without this gate a re-click — possible when a FireRate card pushes
+	// 1/FireRate below ChargeTime — would restart the local recoil ramp, add bloom, and advance NextFireReadyTime,
+	// producing a phantom charge. One click = one sequence until it completes (DoChargeTick window) or a weapon swap.
+	if (bChargeSequenceActive && Instance->GetSource()
+		&& Instance->GetSource()->GetArchetype() == EFPSRWeaponArchetype::ChargeLaser)
+	{
+		return;
+	}
+
 	bWantsToFire = true;
 	TimeSinceLastShot = 0.0f;
 	ShotsFiredThisSpray = 0;
@@ -141,7 +152,7 @@ void UFPSRWeaponFireComponent::OnWeaponEquipped(float EquipCooldown)
 	// while still gating the first shot by a fixed swap time — mirroring the server setting ServerNextAllowedFireTime
 	// = Now + swap-cooldown, so swap-spam can't bypass fire cadence. (A mid-charge swap cancels the ChargeLaser fire
 	// ability via RefreshEquippedAbility, which clears its timers in EndAbility — no charge state lives here anymore.)
-	bChargeRecoilActive = false; // drop any in-progress ChargeLaser recoil ramp on a weapon swap
+	bChargeSequenceActive = false; // drop any in-progress ChargeLaser recoil ramp on a weapon swap
 	NextFireReadyTime = GetWorld()->GetTimeSeconds() + FMath::Max(0.0f, EquipCooldown);
 }
 
@@ -217,9 +228,23 @@ void UFPSRWeaponFireComponent::FireOneShot()
 		// it (and suppresses auto-recovery until the climb finishes). Local feel only — no networking/server-auth.
 		if (Weapon->GetArchetype() == EFPSRWeaponArchetype::ChargeLaser && Stats.ChargeTime > 0.0f)
 		{
-			bChargeRecoilActive = true;
+			// Mirror the server fire ability's charge duration: apply fragment PreFire + ModifyChargeTime so the ramp
+			// finishes exactly when the payoff beam fires, even if a charge-time fragment shortens/extends the charge.
+			float RampChargeTime = Stats.ChargeTime;
+			FFPSRFireContext Ctx;
+			Ctx.Avatar = OwnerPawn;
+			Ctx.Controller = OwnerPawn->GetController();
+			Ctx.World = GetWorld();
+			Ctx.Instance = Instance;
+			Ctx.ShotCount = 1;
+			Ctx.bAuthority = OwnerPawn->HasAuthority();
+			const TArray<TObjectPtr<UFPSRWeaponFragment>>& Frags = Instance->GetActiveFragments();
+			for (const TObjectPtr<UFPSRWeaponFragment>& Frag : Frags) { if (Frag) { Frag->PreFire(Ctx); } }
+			for (const TObjectPtr<UFPSRWeaponFragment>& Frag : Frags) { if (Frag) { Frag->ModifyChargeTime(Ctx, RampChargeTime); } }
+
+			bChargeSequenceActive = true;
 			ChargeRecoilElapsed = 0.0f;
-			ChargeRecoilDuration = Stats.ChargeTime;
+			ChargeRecoilDuration = RampChargeTime;
 			ChargeRecoilTotalPitch = KickPitch;
 			ChargeRecoilTotalYaw = KickYaw;
 		}
@@ -307,7 +332,7 @@ void UFPSRWeaponFireComponent::TickComponent(float DeltaTime, ELevelTick TickTyp
 	//    the rise FINISHES at the fire moment (charge complete). Applied directly here (the charge duration IS the
 	//    smoothing, so it bypasses the RecoilRiseRate path) and accumulates recovery debt so auto-recovery — gated off
 	//    while the ramp is active — pulls the view back down only after the climb finishes.
-	if (bChargeRecoilActive)
+	if (bChargeSequenceActive)
 	{
 		const float Dur = FMath::Max(0.0001f, ChargeRecoilDuration);
 		const float PrevAlpha = FMath::Clamp(ChargeRecoilElapsed / Dur, 0.0f, 1.0f);
@@ -330,7 +355,7 @@ void UFPSRWeaponFireComponent::TickComponent(float DeltaTime, ELevelTick TickTyp
 		}
 		if (Alpha >= 1.0f)
 		{
-			bChargeRecoilActive = false; // climb complete at the fire moment
+			bChargeSequenceActive = false; // climb complete at the fire moment
 		}
 	}
 
@@ -381,7 +406,7 @@ void UFPSRWeaponFireComponent::TickComponent(float DeltaTime, ELevelTick TickTyp
 	const bool bAutoRecover =
 		(Stats.RecoilRecovery == ERecoilRecovery::Always) ||
 		(Stats.RecoilRecovery == ERecoilRecovery::Auto && Stats.FireMode == EFPSRFireMode::Single);
-	if (bAutoRecover && !bWantsToFire && !bChargeRecoilActive && RecoilDebtPitch > 0.0f)
+	if (bAutoRecover && !bWantsToFire && !bChargeSequenceActive && RecoilDebtPitch > 0.0f)
 	{
 		const float Recover = FMath::Min(Stats.RecoilRecoveryRate * DeltaTime, RecoilDebtPitch);
 		OwnerPawn->AddControllerPitchInput(Recover); // positive = down
