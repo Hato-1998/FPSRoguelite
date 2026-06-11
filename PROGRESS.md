@@ -6,8 +6,10 @@
 
 **최종 갱신: 2026-06-11**
 
-## 🚩 P5 친선사격(FF) — **코드 베이스 완료(2026-06-11), 남은 건 콘텐츠(카드 DA) + 2-client PIE**
-> **브랜치 `phase/p5-friendly-fire`. 플랜 §3 ①~⑦ 코드 구현·빌드·헤드리스 스모크 통과(2026-06-11).** 플레이어 무기 데미지를 **적/자기/아군** 통합 판정으로 전환 완료. **확정값**: 아군=FF ON일 때 50%, FF=전체 범위(히트스캔/투사체/근접/차지빔/폭발), 자기=폭발만 풀(자폭), 폭발 넉백=데미지 독립(죽은 폰만 제외).
+## 🚩 P5 친선사격(FF) — **코드 main 머지 완료(2026-06-11, `6727214`), 남은 건 콘텐츠(카드 DA) + 2-client PIE**
+> **`phase/p5-friendly-fire` → main `--no-ff` 머지 완료(`6727214`). `fix/weapon-fire-freeze-hardening`(스나이퍼 투사체/발사 하드닝)도 선형 포함돼 함께 머지·브랜치 정리(삭제)됨.** 플랜 §3 ①~⑦ 코드 구현·빌드·헤드리스 스모크 통과. 플레이어 무기 데미지를 **적/자기/아군** 통합 판정으로 전환 완료. **확정값**: 아군=FF ON일 때 50%, FF=전체 범위(히트스캔/투사체/근접/차지빔/폭발), 자기=폭발만 풀(자폭), 폭발 넉백=데미지 독립(죽은 폰만 제외).
+> ⚠️ **Codex 머지게이트 미실행**: 이 세션 샌드박스 오류(`CreateProcessWithLogonW 1056`)로 자동 실행 불가 → 원하면 인터랙티브 터미널에서 `powershell -File Scripts\codex-review.ps1 -Commit 6727214` 별도 실행. 빌드+스모크+적대적 자체리뷰(2건 교정)로 코드측 게이트는 통과.
+> ⚠️ **origin 미푸시**: main 로컬이 origin/main보다 앞섬(머지 커밋). 사용자 판단으로 `git push` 필요 시 실행.
 > **구현된 것(코드)**:
 > - **통합 헬퍼 신규** `Combat/FPSRCombatStatics.{h,cpp}` — `ResolveDamage`(적/자기/아군+FF배수)·`ApplyDamage`(적HealthComp/플레이어GAS 브릿지, `FDamageResult`)·`ApplyExplosion`(라디얼 오버랩+크릿+히트마커+넉백, 자폭/넉백독립)·`ApplyKnockback`(플레이어=가산 LaunchCharacter / 적=감쇠속도)·`NotifyHitMarker`·`AddDamageablePawnObjectTypes`(★ECC_Pawn+ECC_FPSRPlayerPawn 둘 다).
 > - **GameState** `bFriendlyFireEnabled`(복제, bRunPaused 패턴)+게터+`SetFriendlyFireEnabled`+`FPSR.SetFriendlyFire 0/1` 디버그. `FriendlyFireDamageScale=0.5`(EditDefaultsOnly).
@@ -21,7 +23,6 @@
 > - **사용자 콘텐츠**: 카드 DA 2종(NoSelfDamage/ExplosiveRounds, Scope=ThisWeapon) 작성 + 무기 `AvailableModifiers` 등록(NoSelfDamage→Bazooka/Grenade, ExplosiveRounds→Rifle) + 바주카/유탄 `KnockbackStrength` 지정(예 바주카 1200/유탄 900).
 > - **사용자 2-client PIE**(서버권위라 필수): FF on/off·자폭·아군50%·카드2종·로켓점프·아군런칭·죽은적 넉백제외(플랜 §4).
 > **알려진 폴리시 후속(버그 아님)**: ① ExplosiveRounds 적 직격 시 히트마커 2회(직격+스플래시) ② 플레이어 넉백=서버 LaunchCharacter 권위적이나 오너클라 스무딩은 후속.
-> ⚠️ 머지 순서: `fix/weapon-fire-freeze-hardening`(미머지) → p5-friendly-fire. 머지 시점 Codex 일괄 리뷰(메모리 `codex-review-gate`).
 
 ## 🗺️ (후속 마일스톤) P7 멀티플레이 게임 루프 — **`Docs/P7-MultiplayerLoop_Plan.md`** (플랜만)
 > 로비(Steam 초대)→인게임→보스(맵중앙 박스, 체력만)→로비 복귀 E2E. **백로그 D5(세션)+D4(보스 축소)+신규 로비/트래블 통합**. **확정값**: 세션=Steam(app id 480), 보스=BossTime 트리거+`UFPSREnemyHealthComponent` 재사용(무기 데미지 그대로), 승=보스킬·패=전멸 둘 다 로비, seamless travel. **선행**: 무기6종+미션 완료 + P5 FF 머지. 파일단위 설계·구현순서·재개프롬프트는 플랜 문서. (브랜치 미생성, 무기/미션/FF 이후 착수)
