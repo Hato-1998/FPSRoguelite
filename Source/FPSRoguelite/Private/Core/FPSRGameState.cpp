@@ -97,6 +97,19 @@ void AFPSRGameState::SetRunPaused(bool bPaused)
 	UE_LOG(LogFPSR, Log, TEXT("[Run] %s"), bPaused ? TEXT("FREEZE (card selection)") : TEXT("RESUME"));
 }
 
+void AFPSRGameState::EndRunFreeze()
+{
+	if (!HasAuthority() || bRunEnded)
+	{
+		return;
+	}
+	// Latch first so the SetRunPaused below (and any in-flight RefreshPauseState) can't be undone by a card
+	// selection that resolves after the run has ended — the world stays frozen behind the result screen.
+	bRunEnded = true;
+	SetRunPaused(true);
+	UE_LOG(LogFPSR, Log, TEXT("[Run] END — freeze pinned (result screen)."));
+}
+
 void AFPSRGameState::SetVisionRestricted(bool bRestricted)
 {
 	if (!HasAuthority() || bVisionRestricted == bRestricted)
@@ -126,6 +139,13 @@ void AFPSRGameState::SetFriendlyFireEnabled(bool bEnabled)
 void AFPSRGameState::RefreshPauseState()
 {
 	if (!HasAuthority())
+	{
+		return;
+	}
+
+	// Run ended: the freeze is pinned on (EndRunFreeze). Never recompute from pending picks — a card selection
+	// completing after EndRun must not resume gameplay behind the result screen.
+	if (bRunEnded)
 	{
 		return;
 	}

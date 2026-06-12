@@ -83,6 +83,11 @@ public:
 	/** Server: set the global freeze flag directly (normally driven by RefreshPauseState). */
 	void SetRunPaused(bool bPaused);
 
+	/** Server: end-of-run terminal freeze. Pins the global freeze on (reuses bRunPaused) and latches bRunEnded so
+	 *  RefreshPauseState stops recomputing — the world stays frozen behind the result screen even if a player's
+	 *  card selection completes after EndRun. Idempotent. */
+	void EndRunFreeze();
+
 	/** Server: toggle the global vision restriction (driven by the LimitedVision mission). */
 	void SetVisionRestricted(bool bRestricted);
 
@@ -136,4 +141,9 @@ protected:
 	/** Friendly-player damage multiplier while friendly fire is on (editor-tunable; 0.5 = half). */
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Run")
 	float FriendlyFireDamageScale = 0.5f;
+
+	/** Server-only terminal latch: true once the run has ended (EndRunFreeze). Pins bRunPaused on by making
+	 *  RefreshPauseState early-out, so the world stays frozen behind the result screen. Not replicated — the
+	 *  visible freeze rides the replicated bRunPaused; this resets naturally on the next run (fresh GameState). */
+	bool bRunEnded = false;
 };
