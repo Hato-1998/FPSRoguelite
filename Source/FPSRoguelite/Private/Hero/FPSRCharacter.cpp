@@ -17,6 +17,12 @@
 #include "Camera/CameraComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "Components/StaticMeshComponent.h"
+#include "Animation/AnimInstance.h"
+#include "Animation/AnimMontage.h"
+#include "Sound/SoundBase.h"
+#include "Particles/ParticleSystem.h"
+#include "Kismet/GameplayStatics.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/PlayerController.h"
 #include "TimerManager.h"
@@ -62,6 +68,20 @@ AFPSRCharacter::AFPSRCharacter()
 	FirstPersonArms->SetOnlyOwnerSee(true);
 	FirstPersonArms->bCastDynamicShadow = false;
 	FirstPersonArms->CastShadow = false;
+
+	WeaponMesh1P = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("WeaponMesh1P"));
+	WeaponMesh1P->SetupAttachment(FirstPersonArms);
+	WeaponMesh1P->SetOnlyOwnerSee(true);
+	WeaponMesh1P->bCastDynamicShadow = false;
+	WeaponMesh1P->CastShadow = false;
+	WeaponMesh1P->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+
+	WeaponMeshStatic1P = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("WeaponMeshStatic1P"));
+	WeaponMeshStatic1P->SetupAttachment(FirstPersonArms);
+	WeaponMeshStatic1P->SetOnlyOwnerSee(true);
+	WeaponMeshStatic1P->bCastDynamicShadow = false;
+	WeaponMeshStatic1P->CastShadow = false;
+	WeaponMeshStatic1P->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 
 	if (USkeletalMeshComponent* BodyMesh = GetMesh())
 	{
@@ -580,6 +600,107 @@ void AFPSRCharacter::ApplyVisionRestriction(bool bRestricted)
 	}
 
 	bVisionRestrictionApplied = bRestricted;
+}
+
+void AFPSRCharacter::RefreshFirstPersonWeaponVisual()
+{
+	// Owner-client cosmetic only (listen-server host's own pawn + remote autonomous proxy both reach here).
+	if (!IsLocallyControlled() || !WeaponInventory)
+	{
+		return;
+	}
+
+	const UFPSRWeaponDataAsset* Weapon = WeaponInventory->GetCurrentWeapon();
+
+	// Reset cached fire cosmetics; repopulated below when a weapon is equipped.
+	CachedFireMontage = nullptr;
+	CachedFireSound = nullptr;
+	CachedMuzzleFlash = nullptr;
+	CachedMuzzleSocket = NAME_None;
+
+	if (!Weapon)
+	{
+		// No weapon: hide both meshes.
+		if (WeaponMesh1P) { WeaponMesh1P->SetSkeletalMesh(nullptr); }
+		if (WeaponMeshStatic1P) { WeaponMeshStatic1P->SetStaticMesh(nullptr); }
+		return;
+	}
+
+	const FName AttachSocket = Weapon->WeaponAttachSocket;
+
+	// Skeletal weapon mesh (firearms) takes priority; static mesh (melee) is the fallback.
+	USkeletalMesh* SkelMesh = Weapon->WeaponMesh1P.IsNull() ? nullptr : Weapon->WeaponMesh1P.LoadSynchronous();
+	UStaticMesh* StaticMesh = (SkelMesh == nullptr && !Weapon->WeaponMeshStatic1P.IsNull())
+		? Weapon->WeaponMeshStatic1P.LoadSynchronous() : nullptr;
+
+	if (WeaponMesh1P)
+	{
+		// SetSkeletalMeshAsset is the engine's documented setter (calls SetSkeletalMesh(NewMesh, false)) — UE5.7.
+		// The weapon mesh has its OWN skeleton (SKEL_LPAMG_<W>); arm anims drive the arms only (applied below).
+		WeaponMesh1P->SetSkeletalMeshAsset(SkelMesh);
+		WeaponMesh1P->AttachToComponent(FirstPersonArms, FAttachmentTransformRules::SnapToTargetIncludingScale, AttachSocket);
+	}
+	if (WeaponMeshStatic1P)
+	{
+		WeaponMeshStatic1P->SetStaticMesh(StaticMesh);
+		WeaponMeshStatic1P->AttachToComponent(FirstPersonArms, FAttachmentTransformRules::SnapToTargetIncludingScale, AttachSocket);
+	}
+
+	// Optional per-weapon arms anim BP applied to the arms mesh (the pack ships per-weapon arm anims).
+	if (FirstPersonArms && !Weapon->ArmsAnimInstanceClass.IsNull())
+	{
+		if (UClass* ArmsAnimClass = Weapon->ArmsAnimInstanceClass.LoadSynchronous())
+		{
+			FirstPersonArms->SetAnimInstanceClass(ArmsAnimClass);
+		}
+	}
+
+	// Cache per-shot fire cosmetics (resolve soft refs once, here, not per shot).
+	CachedFireMontage = Weapon->FireMontage.IsNull() ? nullptr : Weapon->FireMontage.LoadSynchronous();
+	CachedFireSound = Weapon->FireSound.IsNull() ? nullptr : Weapon->FireSound.LoadSynchronous();
+	CachedMuzzleFlash = Weapon->MuzzleFlash.IsNull() ? nullptr : Weapon->MuzzleFlash.LoadSynchronous();
+	CachedMuzzleSocket = Weapon->MuzzleSocket;
+
+	// Optional equip montage on the arms.
+	if (FirstPersonArms && !Weapon->EquipMontage.IsNull())
+	{
+		if (UAnimMontage* EquipM = Weapon->EquipMontage.LoadSynchronous())
+		{
+			if (UAnimInstance* AnimInst = FirstPersonArms->GetAnimInstance())
+			{
+				AnimInst->Montage_Play(EquipM);
+			}
+		}
+	}
+}
+
+void AFPSRCharacter::PlayWeaponFireCosmetics()
+{
+	if (!IsLocallyControlled())
+	{
+		return;
+	}
+
+	// Fire montage on the arms.
+	if (CachedFireMontage && FirstPersonArms)
+	{
+		if (UAnimInstance* AnimInst = FirstPersonArms->GetAnimInstance())
+		{
+			AnimInst->Montage_Play(CachedFireMontage);
+		}
+	}
+
+	// Fire sound (attached to the weapon mesh so it tracks the muzzle).
+	if (CachedFireSound && WeaponMesh1P)
+	{
+		UGameplayStatics::SpawnSoundAttached(CachedFireSound, WeaponMesh1P);
+	}
+
+	// Cascade muzzle flash at the weapon mesh's muzzle socket (cosmetic origin only).
+	if (CachedMuzzleFlash && WeaponMesh1P)
+	{
+		UGameplayStatics::SpawnEmitterAttached(CachedMuzzleFlash, WeaponMesh1P, CachedMuzzleSocket);
+	}
 }
 
 UAbilitySystemComponent* AFPSRCharacter::GetAbilitySystemComponent() const

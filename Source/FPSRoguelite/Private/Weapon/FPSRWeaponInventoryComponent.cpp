@@ -4,6 +4,7 @@
 #include "Weapon/FPSRWeaponDataAsset.h"
 #include "Weapon/FPSRWeaponInstance.h"
 #include "Weapon/FPSRWeaponFireComponent.h"
+#include "Hero/FPSRCharacter.h"
 #include "Core/FPSRGameState.h"
 #include "Core/FPSRLogChannels.h"
 
@@ -160,6 +161,11 @@ void UFPSRWeaponInventoryComponent::EquipSlot(int32 SlotIndex)
 		}
 	}
 
+	if (AFPSRCharacter* Char = Cast<AFPSRCharacter>(GetOwner()))
+	{
+		Char->RefreshFirstPersonWeaponVisual();
+	}
+
 	// Impose a minimum post-swap cooldown before the next shot. A reset to 0 would let a rapid A->B->A swap re-fire
 	// A instantly, bypassing its fire cadence. The new weapon still isn't blocked by the PREVIOUS weapon's (possibly
 	// long) interval — this is a fixed swap time, not the old cadence.
@@ -230,6 +236,11 @@ void UFPSRWeaponInventoryComponent::OnRep_CurrentSlotIndex()
 		{
 			FireComp->OnWeaponEquipped(EquipFireCooldown);
 		}
+	}
+
+	if (AFPSRCharacter* Char = Cast<AFPSRCharacter>(GetOwner()))
+	{
+		Char->RefreshFirstPersonWeaponVisual();
 	}
 }
 
