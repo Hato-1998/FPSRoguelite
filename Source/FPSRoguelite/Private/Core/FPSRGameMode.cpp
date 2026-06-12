@@ -66,7 +66,13 @@ void AFPSRGameMode::EndRun(EFPSRRunOutcome Outcome)
 		}
 	}
 
-	// TODO(P6): optional GameState freeze once merge-safe.
+	// Freeze the run behind the result screen — reuse the §2-2 global freeze (gameplay-state gate, NOT
+	// TimeDilation): enemies, projectiles, abilities and players stop while the world stays rendered. The
+	// end latch inside EndRunFreeze keeps it frozen so a late card-selection completion can't resume it.
+	if (AFPSRGameState* GS = GetGameState<AFPSRGameState>())
+	{
+		GS->EndRunFreeze();
+	}
 }
 
 #if !UE_BUILD_SHIPPING
