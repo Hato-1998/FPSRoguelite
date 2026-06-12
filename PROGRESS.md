@@ -4,7 +4,10 @@
 > **작업 단계를 끝낼 때마다, 그리고 중단 전 반드시 이 파일을 갱신하고 커밋한다.**
 > 확정 설계·기획·코드구조·규칙은 `Game.md`(**SSOT 허브** → 도메인별 `Docs/SSOT/*.md`, 작업별 라우팅은 허브 §0-1), **완료 작업 상세는 `git log --oneline`**. 여기엔 *무엇을 했는지*만 요약한다.
 
-**최종 갱신: 2026-06-12**
+**최종 갱신: 2026-06-13**
+
+## 🗂️ 마스터 작업 분해 — **`Docs/TaskPrompts_Master.md` (2026-06-13 신설, 최상위 계획)**
+> 남은 로드맵 전체를 의존성 기준 18유닛으로 분해 + 유닛별 새 세션 복붙 실행 프롬프트. **확정 순서: V0(무기 비주얼/Infima 팩) ∥ V1(사각 오디오) → U2(패배 배선) → U3(보스 스캐폴드) → U4(보스 콘텐츠, 플로우 완성) → W1(Fable+Codex 전체 검증) → U1(재미/성능 게이트) ∥ V2(2-client) → 2차 트랙(U5~U14)**. 아래 "코드 선행 백로그"의 잔여 유닛(B1/A4/C1/C2/D2~D5)은 이 문서의 U5~U11로 승계됨 — 착수 시 TaskPrompts_Master의 프롬프트를 사용할 것(함정/주의 내장).
 
 ## 🎮 P6-A 게임플로우 셸 콘텐츠 — **main 머지 완료(2026-06-12, `--no-ff` `4dacec1`, Opus 직접+VibeUE MCP)**
 > C++ 베이스(`c673d03`)에 맞춘 메뉴/결과 콘텐츠를 VibeUE MCP로 작성 + 결과창 프리즈 + L_Sandbox 런 수정까지 main 반영. **메뉴→런→결과→메뉴 루프 완성·PIE 통과**. 가이드: `Docs/P6A_GameFlow_UserContent_Guide.md`.
@@ -14,7 +17,7 @@
 > **검증**: 위젯/BP 컴파일·BindWidget 결인·`capture_preview`(MCP) + **사용자 빌드 후 PIE 루프 1~6단계 + EndRun 프리즈 통과**. Codex 머지게이트: run-freeze sound, 유일 P1=미커밋 `.uproject`(VibeUE, 머지 제외).
 > **⚠️ 후속/주의**:
 > - **머지 완료**: `phase/p6a-content` → main `--no-ff` `4dacec1`. (브랜치 정리 권장)
-> - **`.uproject` 미커밋(의도)**: VibeUE 플러그인 활성(`FPSRoguelite.uproject:54-55`)+`.gitignore` `Plugins/VibeUE/` 제외 = 클린 체크아웃/CI 깨짐(Codex P1). P6-A 커밋에서 **제외**함. 영구 해결책: .uproject의 VibeUE 항목에 `"Optional": true` 추가 후 커밋(권장) 또는 미커밋 유지.
+> - ~~**`.uproject` 미커밋(의도)**~~ ✅**해소(2026-06-13 확인)**: VibeUE 항목 `"Optional": true` 처리 후 커밋 완료(`15d4e34`) — 클린 체크아웃/CI 안전.
 > - **레이아웃 미세조정**: 메뉴 버튼은 텍스트 크기 자동(클릭 가능하나 작음), VerticalBox 상단 스택. 위치/타이틀/색 폴리시는 디자이너에서 후속.
 > - **루프 진짜 닫기**: 승리=보스처치(P6)/패배=전원사망 → `AFPSRGameMode::EndRun` 호출 연결(C++ TODO 시임). 현재는 디버그 `FPSR.EndRun [victory|defeat]`/`FPSR.ReturnToMenu`가 트리거.
 
@@ -41,7 +44,7 @@
 ## 🚩 P5 친선사격(FF) — **코드 main 머지 완료(2026-06-11, `6727214`), 남은 건 콘텐츠(카드 DA) + 2-client PIE**
 > **`phase/p5-friendly-fire` → main `--no-ff` 머지 완료(`6727214`). `fix/weapon-fire-freeze-hardening`(스나이퍼 투사체/발사 하드닝)도 선형 포함돼 함께 머지·브랜치 정리(삭제)됨.** 플랜 §3 ①~⑦ 코드 구현·빌드·헤드리스 스모크 통과. 플레이어 무기 데미지를 **적/자기/아군** 통합 판정으로 전환 완료. **확정값**: 아군=FF ON일 때 50%, FF=전체 범위(히트스캔/투사체/근접/차지빔/폭발), 자기=폭발만 풀(자폭), 폭발 넉백=데미지 독립(죽은 폰만 제외).
 > ✅ **Codex 머지게이트 실행 완료(2026-06-11)**: `codex-review.ps1 -Commit 6727214`. 결과 **P2 1건** — 관통 히트스캔(`MaxPenetration>1`)+`ExplosiveRounds` 조합 시 `NotifyImpact`가 루프 후 1회만 호출돼 마지막 관통 적만 스플래시/넉백(앞선 적은 폭발 없음). **사용자 결정: 설계 판단(탄착점 1회 폭발)으로 수용·문서화 후 진행**(아래 알려진 폴리시 후속 ③). 빌드+스모크+적대적 자체리뷰(2건 교정)로 코드측 게이트 통과.
-> ⚠️ **origin 미푸시**: main 로컬이 origin/main보다 앞섬(머지 커밋). 사용자 판단으로 `git push` 필요 시 실행.
+> ~~⚠️ origin 미푸시~~ ✅**해소(2026-06-13 확인)**: main=origin/main 동기화 완료(ahead/behind 없음).
 > **구현된 것(코드)**:
 > - **통합 헬퍼 신규** `Combat/FPSRCombatStatics.{h,cpp}` — `ResolveDamage`(적/자기/아군+FF배수)·`ApplyDamage`(적HealthComp/플레이어GAS 브릿지, `FDamageResult`)·`ApplyExplosion`(라디얼 오버랩+크릿+히트마커+넉백, 자폭/넉백독립)·`ApplyKnockback`(플레이어=가산 LaunchCharacter / 적=감쇠속도)·`NotifyHitMarker`·`AddDamageablePawnObjectTypes`(★ECC_Pawn+ECC_FPSRPlayerPawn 둘 다).
 > - **GameState** `bFriendlyFireEnabled`(복제, bRunPaused 패턴)+게터+`SetFriendlyFireEnabled`+`FPSR.SetFriendlyFire 0/1` 디버그. `FriendlyFireDamageScale=0.5`(EditDefaultsOnly).
