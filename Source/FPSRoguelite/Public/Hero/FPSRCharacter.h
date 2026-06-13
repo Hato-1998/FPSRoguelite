@@ -18,6 +18,7 @@ class UMaterialInterface;
 class UFPSRPlayerFeedbackComponent;
 struct FInputActionValue;
 class UStaticMeshComponent;
+class UMeshComponent;
 class UAnimMontage;
 class USoundBase;
 class UParticleSystem;
@@ -135,6 +136,12 @@ protected:
 	UPROPERTY(VisibleAnywhere, Category = "FPSR|Mesh")
 	TObjectPtr<UStaticMeshComponent> WeaponMeshStatic1P;
 
+	/** Socket on FirstPersonArms the weapon meshes attach to (pack default "SOCKET_Weapon"). C++-created component
+	 *  sockets can't be edited in the BP, so this exposes the default here; the design-time preview attaches to it,
+	 *  and a weapon DA's WeaponAttachSocket overrides it per-weapon at equip. */
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Mesh")
+	FName WeaponAttachSocketName = FName(TEXT("SOCKET_Weapon"));
+
 	UPROPERTY(VisibleAnywhere, Category = "FPSR|Weapon")
 	TObjectPtr<UFPSRWeaponInventoryComponent> WeaponInventory;
 
@@ -237,4 +244,9 @@ protected:
 	TObjectPtr<UParticleSystem> CachedMuzzleFlash;
 
 	FName CachedMuzzleSocket = NAME_None;
+
+	/** The weapon mesh currently shown (skeletal OR static — whichever the equipped weapon's DA provides). Fire
+	 *  cosmetics (muzzle flash / sound) attach here so they track the active mesh. Null when no weapon is equipped. */
+	UPROPERTY(Transient)
+	TObjectPtr<UMeshComponent> ActiveWeaponMesh;
 };

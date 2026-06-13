@@ -69,15 +69,18 @@ AFPSRCharacter::AFPSRCharacter()
 	FirstPersonArms->bCastDynamicShadow = false;
 	FirstPersonArms->CastShadow = false;
 
+	// Attach the weapon meshes to the arms' weapon socket so the design-time preview (and runtime, when a weapon
+	// DA leaves WeaponAttachSocket empty) sits at the grip. C++-created component sockets aren't editable in the BP,
+	// hence WeaponAttachSocketName carries the default.
 	WeaponMesh1P = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("WeaponMesh1P"));
-	WeaponMesh1P->SetupAttachment(FirstPersonArms);
+	WeaponMesh1P->SetupAttachment(FirstPersonArms, WeaponAttachSocketName);
 	WeaponMesh1P->SetOnlyOwnerSee(true);
 	WeaponMesh1P->bCastDynamicShadow = false;
 	WeaponMesh1P->CastShadow = false;
 	WeaponMesh1P->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 
 	WeaponMeshStatic1P = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("WeaponMeshStatic1P"));
-	WeaponMeshStatic1P->SetupAttachment(FirstPersonArms);
+	WeaponMeshStatic1P->SetupAttachment(FirstPersonArms, WeaponAttachSocketName);
 	WeaponMeshStatic1P->SetOnlyOwnerSee(true);
 	WeaponMeshStatic1P->bCastDynamicShadow = false;
 	WeaponMeshStatic1P->CastShadow = false;
@@ -618,15 +621,19 @@ void AFPSRCharacter::RefreshFirstPersonWeaponVisual()
 	CachedMuzzleFlash = nullptr;
 	CachedMuzzleSocket = NAME_None;
 
+	ActiveWeaponMesh = nullptr;
+
 	if (!Weapon)
 	{
 		// No weapon: hide both meshes.
-		if (WeaponMesh1P) { WeaponMesh1P->SetSkeletalMesh(nullptr); }
+		if (WeaponMesh1P) { WeaponMesh1P->SetSkeletalMeshAsset(nullptr); }
 		if (WeaponMeshStatic1P) { WeaponMeshStatic1P->SetStaticMesh(nullptr); }
 		return;
 	}
 
-	const FName AttachSocket = Weapon->WeaponAttachSocket;
+	// Per-weapon DA socket overrides the character default (SOCKET_Weapon). KeepRelativeTransform preserves the
+	// BP-authored relative offset so designers can fine-tune the grip alignment in the BP viewport.
+	const FName AttachSocket = Weapon->WeaponAttachSocket.IsNone() ? WeaponAttachSocketName : Weapon->WeaponAttachSocket;
 
 	// Skeletal weapon mesh (firearms) takes priority; static mesh (melee) is the fallback.
 	USkeletalMesh* SkelMesh = Weapon->WeaponMesh1P.IsNull() ? nullptr : Weapon->WeaponMesh1P.LoadSynchronous();
@@ -638,13 +645,17 @@ void AFPSRCharacter::RefreshFirstPersonWeaponVisual()
 		// SetSkeletalMeshAsset is the engine's documented setter (calls SetSkeletalMesh(NewMesh, false)) — UE5.7.
 		// The weapon mesh has its OWN skeleton (SKEL_LPAMG_<W>); arm anims drive the arms only (applied below).
 		WeaponMesh1P->SetSkeletalMeshAsset(SkelMesh);
-		WeaponMesh1P->AttachToComponent(FirstPersonArms, FAttachmentTransformRules::SnapToTargetIncludingScale, AttachSocket);
+		WeaponMesh1P->AttachToComponent(FirstPersonArms, FAttachmentTransformRules::KeepRelativeTransform, AttachSocket);
 	}
 	if (WeaponMeshStatic1P)
 	{
 		WeaponMeshStatic1P->SetStaticMesh(StaticMesh);
-		WeaponMeshStatic1P->AttachToComponent(FirstPersonArms, FAttachmentTransformRules::SnapToTargetIncludingScale, AttachSocket);
+		WeaponMeshStatic1P->AttachToComponent(FirstPersonArms, FAttachmentTransformRules::KeepRelativeTransform, AttachSocket);
 	}
+
+	// Track which mesh is actually shown so fire cosmetics attach to it (skeletal firearm vs static melee/preview).
+	ActiveWeaponMesh = SkelMesh ? Cast<UMeshComponent>(WeaponMesh1P)
+		: (StaticMesh ? Cast<UMeshComponent>(WeaponMeshStatic1P) : nullptr);
 
 	// Optional per-weapon arms anim BP applied to the arms mesh (the pack ships per-weapon arm anims).
 	if (FirstPersonArms && !Weapon->ArmsAnimInstanceClass.IsNull())
@@ -690,16 +701,18 @@ void AFPSRCharacter::PlayWeaponFireCosmetics()
 		}
 	}
 
-	// Fire sound (attached to the weapon mesh so it tracks the muzzle).
-	if (CachedFireSound && WeaponMesh1P)
+	// Fire sound + muzzle flash attach to the ACTIVE weapon mesh (skeletal firearm or static preview) so they track
+	// whichever mesh the equipped weapon shows. CachedMuzzleSocket is a socket on that mesh (NAME_None = mesh origin).
+	if (ActiveWeaponMesh)
 	{
-		UGameplayStatics::SpawnSoundAttached(CachedFireSound, WeaponMesh1P);
-	}
-
-	// Cascade muzzle flash at the weapon mesh's muzzle socket (cosmetic origin only).
-	if (CachedMuzzleFlash && WeaponMesh1P)
-	{
-		UGameplayStatics::SpawnEmitterAttached(CachedMuzzleFlash, WeaponMesh1P, CachedMuzzleSocket);
+		if (CachedFireSound)
+		{
+			UGameplayStatics::SpawnSoundAttached(CachedFireSound, ActiveWeaponMesh);
+		}
+		if (CachedMuzzleFlash)
+		{
+			UGameplayStatics::SpawnEmitterAttached(CachedMuzzleFlash, ActiveWeaponMesh, CachedMuzzleSocket);
+		}
 	}
 }
 

@@ -35,27 +35,30 @@
 
 ## 3. 무기 DA 8종 배선 (`Content/Weapons/DataTable/`)
 
-각 DA 열어 아래 값 입력. 경로 접두사 공통: `/Game/Assets/LowPolyAnimatedModernGuns/`
+> **모듈러 무기 결정(2026-06-14)**: Infima 무기는 모듈러라 `SK_LPAMG_<W>`(스켈레탈)는 **리시버 본체만**이고 배럴/포어그립/사이트/탄창이 별도 부품이다. V0는 **부품이 합쳐진 통합 Preview 스태틱 메시(`SM_LPAMG_<W>_Preview`)를 `WeaponMeshStatic1P`에 사용**한다(옵션 A) — 무기 1덩어리·완전한 모습·코드 0. 무기 자체 미세 애님(볼트 등)은 없지만 팔 애님으로 충분. 모듈러 SK+부품 부착 시스템은 부착물 교체 게임플레이가 생길 때(범위 밖) 도입. **그래서 8종 모두 `WeaponMeshStatic1P` 필드를 쓰고 `WeaponMesh1P`(스켈)는 비운다.**
 
-| DA | 팩 무기 | `WeaponMesh1P` (`…/Art/Weapons/<W>/Meshes/`) | `FireSound` (`…/Audio/Cues/Weapons/<W>/`) | `MuzzleFlash` (`…/Art/Effects/Particles/`) |
+각 DA 열어 아래 값 입력. 경로 접두사 공통: `/Game/Assets/LowPolyAnimatedModernGuns/`. **메시는 전부 `WeaponMeshStatic1P` 필드에 넣고 `WeaponMesh1P`는 비울 것.**
+
+| DA | 팩 무기 | `WeaponMeshStatic1P` (`…/Art/Weapons/<W>/Meshes/`) | `FireSound` (`…/Audio/Cues/Weapons/<W>/`) | `MuzzleFlash` (`…/Art/Effects/Particles/`) |
 |---|---|---|---|---|
-| `DA_Weapon_Rifle` | MAK12 | `SK_LPAMG_MAK12` | `SC_LPAMG_WEP_MAK12_Fire` | `PS_LPAMG_Muzzle_Flash` |
-| `DA_Weapon_BurstRifle` | AG14W | `SK_LPAMG_AG14W` | `SC_LPAMG_WEP_AG14W_Fire` | `PS_LPAMG_Muzzle_Flash` |
-| `DA_Weapon_Shotgun` | SP60 | `SK_LPAMG_SP60` | `SC_LPAMG_WEP_SP60_Fire` | `PS_LPAMG_Muzzle_Flash_Shotgun` |
-| `DA_Weapon_Sniper` | LRAF9 | `SK_LPAMG_LRAF9` | `SC_LPAMG_WEP_LRAF9_Fire` | `PS_LPAMG_Muzzle_Flash` |
-| `DA_Weapon_Bazooka` | X13 | `SK_LPAMG_X13` | `SC_LPAMG_WEP_X13_Fire` | `PS_LPAMG_Muzzle_Rocket` |
-| `DA_Weapon_Grenade` | HVG7 | `SK_LPAMG_HVG7` | `SC_LPAMG_WEP_HVG7_Fire` | `PS_LPAMG_Muzzle_Rocket` |
-| `DA_Weapon_ChargeLaser` | RC425 | `SK_LPAMG_RC425` | `SC_LPAMG_WEP_RC425_Fire` | *(비움 — 빔 VFX는 U13)* |
-| `DA_Weapon_Knife` | _Melee | **`WeaponMeshStatic1P`** = `…/Art/Weapons/_Melee/SM_LPAMG_Knife` | `…/Knife/SC_LPAMG_WEP_Knife_Attack` | *(없음)* |
+| `DA_Weapon_Rifle` | MAK12 | `SM_LPAMG_MAK12_Preview` | `SC_LPAMG_WEP_MAK12_Fire` | `PS_LPAMG_Muzzle_Flash` |
+| `DA_Weapon_BurstRifle` | AG14W | `SM_LPAMG_AG14W_Preview` | `SC_LPAMG_WEP_AG14W_Fire` | `PS_LPAMG_Muzzle_Flash` |
+| `DA_Weapon_Shotgun` | SP60 | `SM_LPAMG_SP60_Preview` | `SC_LPAMG_WEP_SP60_Fire` | `PS_LPAMG_Muzzle_Flash_Shotgun` |
+| `DA_Weapon_Sniper` | LRAF9 | `SM_LPAMG_LRAF9_Preview` | `SC_LPAMG_WEP_LRAF9_Fire` | `PS_LPAMG_Muzzle_Flash` |
+| `DA_Weapon_Bazooka` | X13 | `SM_LPAMG_X13_Preview` | `SC_LPAMG_WEP_X13_Fire` | `PS_LPAMG_Muzzle_Rocket` |
+| `DA_Weapon_Grenade` | HVG7 | `SM_LPAMG_HVG7_Preview` | `SC_LPAMG_WEP_HVG7_Fire` | `PS_LPAMG_Muzzle_Rocket` |
+| `DA_Weapon_ChargeLaser` | RC425 | `SM_LPAMG_RC425_Preview` | `SC_LPAMG_WEP_RC425_Fire` | *(비움 — 빔 VFX는 U13)* |
+| `DA_Weapon_Knife` | _Melee | `…/Art/Weapons/_Melee/SM_LPAMG_Knife` | `…/Knife/SC_LPAMG_WEP_Knife_Attack` | *(없음)* |
 
-> **칼 주의**: 칼은 StaticMesh라 `WeaponMesh1P`(스켈)이 아니라 **`WeaponMeshStatic1P`** 필드에 넣는다. `WeaponMesh1P`는 비워둘 것.
+> Preview 메시 이름이 다르면(`_Preview` 접미사 확인) 각 무기 `Meshes/` 폴더에서 통합본을 고른다.
 > 팩 총기는 8정, 총기 DA는 7종 → **MR22 미사용**(향후 무기 추가 시 사용).
+> 참고: `WeaponMesh1P`(스켈레탈) 필드/컴포넌트는 코드에 남겨둠 — 향후 무기 자체 애니메이션이 필요하면 SK 본체+모듈러 부품으로 전환할 때 사용.
 
 ### `MuzzleSocket` (각 무기 메시)
-에디터에서 무기 SK 메시 더블클릭 → 소켓 목록 확인 후 머즐 소켓명을 `MuzzleSocket`에 입력(Infima는 보통 `Muzzle` 류). **모르면 비워둬도 됨** — 무기 메시 원점에서 플래시가 나옴(대략 총 위치). PIE로 보고 어긋나면 정확한 소켓명 입력.
+Preview 스태틱 메시에 머즐 소켓이 있으면 그 이름을 `MuzzleSocket`에 입력. **모르면 비워둬도 됨** — 무기 메시 원점에서 플래시가 나옴(대략 총 위치). PIE로 보고 어긋나면 메시에 소켓을 추가하거나 정확한 소켓명 입력. (머즐/사운드는 코드가 **활성 무기 메시 = `WeaponMeshStatic1P`**에 자동 부착)
 
 ### `WeaponAttachSocket` (팔 메시)
-무기를 팔의 특정 손 소켓에 붙이려면 팔 메시의 소켓명 입력. **모르면 비워둠** — 무기가 팔 컴포넌트 루트에 붙는다. 정렬은 §4 AnimBP/소켓으로 다듬는다.
+**비워두세요** → 코드가 캐릭터 기본값 `SOCKET_Weapon`(팔 메시 소켓)에 부착합니다. 무기별로 다른 소켓이 필요할 때만 입력. 그립 정렬은 BP에서 `WeaponMeshStatic1P` 컴포넌트의 상대 트랜스폼 + 팔 AnimBP(§4)로 다듬는다.
 
 ---
 
