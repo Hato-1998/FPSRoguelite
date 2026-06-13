@@ -19,6 +19,7 @@ class UFPSRPlayerFeedbackComponent;
 struct FInputActionValue;
 class UStaticMeshComponent;
 class UMeshComponent;
+class UAnimInstance;
 class UAnimMontage;
 class USoundBase;
 class UParticleSystem;
@@ -249,4 +250,12 @@ protected:
 	 *  cosmetics (muzzle flash / sound) attach here so they track the active mesh. Null when no weapon is equipped. */
 	UPROPERTY(Transient)
 	TObjectPtr<UMeshComponent> ActiveWeaponMesh;
+
+	/** Arms anim default captured at BeginPlay, so a weapon's per-weapon ArmsAnimInstanceClass override can be
+	 *  reverted when the next weapon has none. Only touched once an override has actually been applied
+	 *  (bArmsAnimOverridden), so weapons that never set an override leave the BP-authored arms anim untouched. */
+	bool bArmsAnimOverridden = false;
+	bool bDefaultArmsUsesBlueprint = false;
+	UPROPERTY(Transient)
+	TSubclassOf<UAnimInstance> DefaultArmsAnimClass;
 };

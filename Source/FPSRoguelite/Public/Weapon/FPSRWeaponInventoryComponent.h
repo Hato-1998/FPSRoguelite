@@ -83,6 +83,12 @@ protected:
 	UFUNCTION()
 	void OnRep_CurrentSlotIndex();
 
+	/** Client: the weapon instances (and their Source) may replicate AFTER CurrentSlotIndex on a remote owning
+	 *  client; refresh the first-person weapon visual here too so the initial weapon mesh isn't left blank until a
+	 *  manual slot switch. */
+	UFUNCTION()
+	void OnRep_Slots();
+
 	/** Server: pause/resume the in-flight reload timer when the run freezes/unfreezes (Game.MD §2-2), so a reload
 	 *  cannot complete during the card-selection freeze. Bound to the GameState's OnRunStateChanged. */
 	UFUNCTION()
@@ -97,7 +103,7 @@ protected:
 	void RefreshEquippedAbility();
 
 	/** One runtime instance per slot (nullptr = empty). Replicated as registered subobjects. */
-	UPROPERTY(Replicated)
+	UPROPERTY(ReplicatedUsing = OnRep_Slots)
 	TArray<TObjectPtr<UFPSRWeaponInstance>> Slots;
 
 	UPROPERTY(ReplicatedUsing = OnRep_CurrentSlotIndex)

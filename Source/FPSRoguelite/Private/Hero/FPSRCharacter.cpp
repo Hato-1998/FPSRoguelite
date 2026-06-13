@@ -147,6 +147,14 @@ void AFPSRCharacter::BeginPlay()
 	// delegate is the trigger; the camera PP is only APPLIED for the locally controlled pawn (checked at apply time,
 	// when controller state is stable). Binding on proxies / server-side pawns is a cheap no-op.
 	TryBindVisionDelegate();
+
+	// Capture the BP-authored arms anim default so a per-weapon ArmsAnimInstanceClass override can be reverted later
+	// (P2-B). Mode may be "Use Animation Asset" (single-node idle) or a real AnimBP — restore the matching one.
+	if (FirstPersonArms)
+	{
+		bDefaultArmsUsesBlueprint = (FirstPersonArms->GetAnimationMode() == EAnimationMode::AnimationBlueprint);
+		DefaultArmsAnimClass = FirstPersonArms->AnimClass;
+	}
 }
 
 void AFPSRCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -657,12 +665,31 @@ void AFPSRCharacter::RefreshFirstPersonWeaponVisual()
 	ActiveWeaponMesh = SkelMesh ? Cast<UMeshComponent>(WeaponMesh1P)
 		: (StaticMesh ? Cast<UMeshComponent>(WeaponMeshStatic1P) : nullptr);
 
-	// Optional per-weapon arms anim BP applied to the arms mesh (the pack ships per-weapon arm anims).
-	if (FirstPersonArms && !Weapon->ArmsAnimInstanceClass.IsNull())
+	// Optional per-weapon arms anim BP applied to the arms mesh (the pack ships per-weapon arm anims). When the next
+	// weapon has no override, revert to the BP-authored default — but only if we actually applied one before, so a
+	// loadout that never uses overrides keeps its "Use Animation Asset" idle untouched (P2-B).
+	if (FirstPersonArms)
 	{
-		if (UClass* ArmsAnimClass = Weapon->ArmsAnimInstanceClass.LoadSynchronous())
+		if (!Weapon->ArmsAnimInstanceClass.IsNull())
 		{
-			FirstPersonArms->SetAnimInstanceClass(ArmsAnimClass);
+			if (UClass* ArmsAnimClass = Weapon->ArmsAnimInstanceClass.LoadSynchronous())
+			{
+				FirstPersonArms->SetAnimInstanceClass(ArmsAnimClass);
+				bArmsAnimOverridden = true;
+			}
+		}
+		else if (bArmsAnimOverridden)
+		{
+			if (bDefaultArmsUsesBlueprint)
+			{
+				FirstPersonArms->SetAnimInstanceClass(DefaultArmsAnimClass);
+			}
+			else
+			{
+				// Restore single-node mode (re-inits from the component's BP-authored AnimationData / idle).
+				FirstPersonArms->SetAnimationMode(EAnimationMode::AnimationSingleNode);
+			}
+			bArmsAnimOverridden = false;
 		}
 	}
 

@@ -244,6 +244,16 @@ void UFPSRWeaponInventoryComponent::OnRep_CurrentSlotIndex()
 	}
 }
 
+void UFPSRWeaponInventoryComponent::OnRep_Slots()
+{
+	// On a remote owning client the instance subobjects can arrive after CurrentSlotIndex (whose OnRep then saw no
+	// weapon and cleared the meshes). Refresh again now that the slot instances + their Source are present.
+	if (AFPSRCharacter* Char = Cast<AFPSRCharacter>(GetOwner()))
+	{
+		Char->RefreshFirstPersonWeaponVisual();
+	}
+}
+
 int32 UFPSRWeaponInventoryComponent::GetCurrentAmmo() const
 {
 	UFPSRWeaponInstance* Instance = GetCurrentInstance();
