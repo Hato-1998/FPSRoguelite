@@ -9,6 +9,12 @@
 class UGameplayAbility;
 class UFPSRCardDataAsset;
 class AFPSRProjectile;
+class USkeletalMesh;
+class UStaticMesh;
+class UAnimInstance;
+class UAnimMontage;
+class USoundBase;
+class UParticleSystem;
 
 /** Data-driven weapon definition. */
 UCLASS(BlueprintType)
@@ -49,6 +55,44 @@ public:
 	 *  per-axis, AllWeapons-only: ThisWeapon cards (the player deliberately targeted this weapon) always apply. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Cards")
 	TArray<EFPSRWeaponStat> AllWeaponsStatExclusions;
+
+	// --- 1P visual / cosmetic (Game.MD §2-9, V0) — all soft refs, null = no visual (no gameplay effect) ---
+
+	/** First-person weapon skeletal mesh (firearms). Attached to the character's FirstPersonArms on equip. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Visual")
+	TSoftObjectPtr<USkeletalMesh> WeaponMesh1P;
+
+	/** First-person weapon static mesh (e.g. melee knife). Used when WeaponMesh1P is unset. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Visual")
+	TSoftObjectPtr<UStaticMesh> WeaponMeshStatic1P;
+
+	/** Optional per-weapon arms anim instance applied to FirstPersonArms on equip (the pack has per-weapon arm anims). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Visual")
+	TSoftClassPtr<UAnimInstance> ArmsAnimInstanceClass;
+
+	/** Socket on FirstPersonArms the weapon mesh attaches to (NAME_None = arms component root). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Visual")
+	FName WeaponAttachSocket = NAME_None;
+
+	/** Socket on the WEAPON mesh used as the muzzle-flash origin (cosmetic only; trace origin stays the camera). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Visual")
+	FName MuzzleSocket = NAME_None;
+
+	/** Optional montage played on the arms when this weapon is equipped. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Visual")
+	TSoftObjectPtr<UAnimMontage> EquipMontage;
+
+	/** Optional montage played on the arms each shot (owner-client local feel). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Visual")
+	TSoftObjectPtr<UAnimMontage> FireMontage;
+
+	/** Cascade muzzle-flash particle spawned at MuzzleSocket each shot (owner-client local). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Visual")
+	TSoftObjectPtr<UParticleSystem> MuzzleFlash;
+
+	/** Fire sound played each shot (owner-client local; multi-client cosmetic is a later unit). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Audio")
+	TSoftObjectPtr<USoundBase> FireSound;
 
 #if WITH_EDITOR
 	/** Editor validation: missing FireAbility never fires (error); archetype/stat mismatches (AOE without an

@@ -197,6 +197,13 @@ void UFPSRWeaponFireComponent::FireOneShot()
 		}
 	}
 
+	// Owner-client per-shot cosmetics (montage/sound/muzzle flash). Reached only after ammo/cadence/melee-cooldown
+	// checks above, so a blocked shot plays nothing. Server damage/trace is unaffected (camera-viewpoint authoritative).
+	if (AFPSRCharacter* Char = Cast<AFPSRCharacter>(OwnerPawn))
+	{
+		Char->PlayWeaponFireCosmetics();
+	}
+
 	if (bMelee)
 	{
 		// Melee has no camera recoil / bloom; just stamp the attack time.

@@ -17,6 +17,12 @@ class UFPSRWeaponDataAsset;
 class UMaterialInterface;
 class UFPSRPlayerFeedbackComponent;
 struct FInputActionValue;
+class UStaticMeshComponent;
+class UMeshComponent;
+class UAnimInstance;
+class UAnimMontage;
+class USoundBase;
+class UParticleSystem;
 
 /** Base player character: first-person camera + Separated-Arms meshes + Enhanced Input + weapon inventory/firing. ASC lives on PlayerState. */
 UCLASS()
@@ -47,6 +53,13 @@ public:
 
 	/** Server: apply contact damage from an enemy to this character's Health (clamped via HealthSet). */
 	void ApplyContactDamage(float DamageAmount, AActor* DamageInstigator);
+
+	/** Owner-client: refresh the first-person weapon mesh + arms anim when the equipped weapon changes
+	 *  (called from the inventory's server EquipSlot + client OnRep). No-op on non-locally-controlled pawns. */
+	void RefreshFirstPersonWeaponVisual();
+
+	/** Owner-client: play the equipped weapon's per-shot cosmetics (fire montage + sound + muzzle flash). */
+	void PlayWeaponFireCosmetics();
 
 protected:
 	void InitAbilitySystem();
@@ -115,6 +128,20 @@ protected:
 	/** First-person arms, visible to the owning client only. */
 	UPROPERTY(VisibleAnywhere, Category = "FPSR|Mesh")
 	TObjectPtr<USkeletalMeshComponent> FirstPersonArms;
+
+	/** First-person weapon skeletal mesh (firearms), owner-only. Mesh set from the equipped weapon's DataAsset. */
+	UPROPERTY(VisibleAnywhere, Category = "FPSR|Mesh")
+	TObjectPtr<USkeletalMeshComponent> WeaponMesh1P;
+
+	/** First-person weapon static mesh (e.g. melee), owner-only. Mesh set from the equipped weapon's DataAsset. */
+	UPROPERTY(VisibleAnywhere, Category = "FPSR|Mesh")
+	TObjectPtr<UStaticMeshComponent> WeaponMeshStatic1P;
+
+	/** Socket on FirstPersonArms the weapon meshes attach to (pack default "SOCKET_Weapon"). C++-created component
+	 *  sockets can't be edited in the BP, so this exposes the default here; the design-time preview attaches to it,
+	 *  and a weapon DA's WeaponAttachSocket overrides it per-weapon at equip. */
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Mesh")
+	FName WeaponAttachSocketName = FName(TEXT("SOCKET_Weapon"));
 
 	UPROPERTY(VisibleAnywhere, Category = "FPSR|Weapon")
 	TObjectPtr<UFPSRWeaponInventoryComponent> WeaponInventory;
@@ -205,4 +232,30 @@ protected:
 
 	/** Local-client: retry timer for binding the vision delegate before GameState is replicated. */
 	FTimerHandle VisionBindRetryTimerHandle;
+
+	/** Cached hard refs for the currently-equipped weapon's fire cosmetics (resolved once on equip to avoid
+	 *  per-shot soft-pointer loads). Refreshed in RefreshFirstPersonWeaponVisual. */
+	UPROPERTY(Transient)
+	TObjectPtr<UAnimMontage> CachedFireMontage;
+
+	UPROPERTY(Transient)
+	TObjectPtr<USoundBase> CachedFireSound;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UParticleSystem> CachedMuzzleFlash;
+
+	FName CachedMuzzleSocket = NAME_None;
+
+	/** The weapon mesh currently shown (skeletal OR static — whichever the equipped weapon's DA provides). Fire
+	 *  cosmetics (muzzle flash / sound) attach here so they track the active mesh. Null when no weapon is equipped. */
+	UPROPERTY(Transient)
+	TObjectPtr<UMeshComponent> ActiveWeaponMesh;
+
+	/** Arms anim default captured at BeginPlay, so a weapon's per-weapon ArmsAnimInstanceClass override can be
+	 *  reverted when the next weapon has none. Only touched once an override has actually been applied
+	 *  (bArmsAnimOverridden), so weapons that never set an override leave the BP-authored arms anim untouched. */
+	bool bArmsAnimOverridden = false;
+	bool bDefaultArmsUsesBlueprint = false;
+	UPROPERTY(Transient)
+	TSubclassOf<UAnimInstance> DefaultArmsAnimClass;
 };

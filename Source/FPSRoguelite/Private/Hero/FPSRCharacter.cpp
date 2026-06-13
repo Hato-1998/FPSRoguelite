@@ -17,6 +17,12 @@
 #include "Camera/CameraComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "Components/StaticMeshComponent.h"
+#include "Animation/AnimInstance.h"
+#include "Animation/AnimMontage.h"
+#include "Sound/SoundBase.h"
+#include "Particles/ParticleSystem.h"
+#include "Kismet/GameplayStatics.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/PlayerController.h"
 #include "TimerManager.h"
@@ -62,6 +68,23 @@ AFPSRCharacter::AFPSRCharacter()
 	FirstPersonArms->SetOnlyOwnerSee(true);
 	FirstPersonArms->bCastDynamicShadow = false;
 	FirstPersonArms->CastShadow = false;
+
+	// Attach the weapon meshes to the arms' weapon socket so the design-time preview (and runtime, when a weapon
+	// DA leaves WeaponAttachSocket empty) sits at the grip. C++-created component sockets aren't editable in the BP,
+	// hence WeaponAttachSocketName carries the default.
+	WeaponMesh1P = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("WeaponMesh1P"));
+	WeaponMesh1P->SetupAttachment(FirstPersonArms, WeaponAttachSocketName);
+	WeaponMesh1P->SetOnlyOwnerSee(true);
+	WeaponMesh1P->bCastDynamicShadow = false;
+	WeaponMesh1P->CastShadow = false;
+	WeaponMesh1P->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+
+	WeaponMeshStatic1P = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("WeaponMeshStatic1P"));
+	WeaponMeshStatic1P->SetupAttachment(FirstPersonArms, WeaponAttachSocketName);
+	WeaponMeshStatic1P->SetOnlyOwnerSee(true);
+	WeaponMeshStatic1P->bCastDynamicShadow = false;
+	WeaponMeshStatic1P->CastShadow = false;
+	WeaponMeshStatic1P->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 
 	if (USkeletalMeshComponent* BodyMesh = GetMesh())
 	{
@@ -124,6 +147,14 @@ void AFPSRCharacter::BeginPlay()
 	// delegate is the trigger; the camera PP is only APPLIED for the locally controlled pawn (checked at apply time,
 	// when controller state is stable). Binding on proxies / server-side pawns is a cheap no-op.
 	TryBindVisionDelegate();
+
+	// Capture the BP-authored arms anim default so a per-weapon ArmsAnimInstanceClass override can be reverted later
+	// (P2-B). Mode may be "Use Animation Asset" (single-node idle) or a real AnimBP — restore the matching one.
+	if (FirstPersonArms)
+	{
+		bDefaultArmsUsesBlueprint = (FirstPersonArms->GetAnimationMode() == EAnimationMode::AnimationBlueprint);
+		DefaultArmsAnimClass = FirstPersonArms->AnimClass;
+	}
 }
 
 void AFPSRCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -580,6 +611,136 @@ void AFPSRCharacter::ApplyVisionRestriction(bool bRestricted)
 	}
 
 	bVisionRestrictionApplied = bRestricted;
+}
+
+void AFPSRCharacter::RefreshFirstPersonWeaponVisual()
+{
+	// Owner-client cosmetic only (listen-server host's own pawn + remote autonomous proxy both reach here).
+	if (!IsLocallyControlled() || !WeaponInventory)
+	{
+		return;
+	}
+
+	const UFPSRWeaponDataAsset* Weapon = WeaponInventory->GetCurrentWeapon();
+
+	// Reset cached fire cosmetics; repopulated below when a weapon is equipped.
+	CachedFireMontage = nullptr;
+	CachedFireSound = nullptr;
+	CachedMuzzleFlash = nullptr;
+	CachedMuzzleSocket = NAME_None;
+
+	ActiveWeaponMesh = nullptr;
+
+	if (!Weapon)
+	{
+		// No weapon: hide both meshes.
+		if (WeaponMesh1P) { WeaponMesh1P->SetSkeletalMeshAsset(nullptr); }
+		if (WeaponMeshStatic1P) { WeaponMeshStatic1P->SetStaticMesh(nullptr); }
+		return;
+	}
+
+	// Per-weapon DA socket overrides the character default (SOCKET_Weapon). KeepRelativeTransform preserves the
+	// BP-authored relative offset so designers can fine-tune the grip alignment in the BP viewport.
+	const FName AttachSocket = Weapon->WeaponAttachSocket.IsNone() ? WeaponAttachSocketName : Weapon->WeaponAttachSocket;
+
+	// Skeletal weapon mesh (firearms) takes priority; static mesh (melee) is the fallback.
+	USkeletalMesh* SkelMesh = Weapon->WeaponMesh1P.IsNull() ? nullptr : Weapon->WeaponMesh1P.LoadSynchronous();
+	UStaticMesh* StaticMesh = (SkelMesh == nullptr && !Weapon->WeaponMeshStatic1P.IsNull())
+		? Weapon->WeaponMeshStatic1P.LoadSynchronous() : nullptr;
+
+	if (WeaponMesh1P)
+	{
+		// SetSkeletalMeshAsset is the engine's documented setter (calls SetSkeletalMesh(NewMesh, false)) — UE5.7.
+		// The weapon mesh has its OWN skeleton (SKEL_LPAMG_<W>); arm anims drive the arms only (applied below).
+		WeaponMesh1P->SetSkeletalMeshAsset(SkelMesh);
+		WeaponMesh1P->AttachToComponent(FirstPersonArms, FAttachmentTransformRules::KeepRelativeTransform, AttachSocket);
+	}
+	if (WeaponMeshStatic1P)
+	{
+		WeaponMeshStatic1P->SetStaticMesh(StaticMesh);
+		WeaponMeshStatic1P->AttachToComponent(FirstPersonArms, FAttachmentTransformRules::KeepRelativeTransform, AttachSocket);
+	}
+
+	// Track which mesh is actually shown so fire cosmetics attach to it (skeletal firearm vs static melee/preview).
+	ActiveWeaponMesh = SkelMesh ? Cast<UMeshComponent>(WeaponMesh1P)
+		: (StaticMesh ? Cast<UMeshComponent>(WeaponMeshStatic1P) : nullptr);
+
+	// Optional per-weapon arms anim BP applied to the arms mesh (the pack ships per-weapon arm anims). When the next
+	// weapon has no override, revert to the BP-authored default — but only if we actually applied one before, so a
+	// loadout that never uses overrides keeps its "Use Animation Asset" idle untouched (P2-B).
+	if (FirstPersonArms)
+	{
+		if (!Weapon->ArmsAnimInstanceClass.IsNull())
+		{
+			if (UClass* ArmsAnimClass = Weapon->ArmsAnimInstanceClass.LoadSynchronous())
+			{
+				FirstPersonArms->SetAnimInstanceClass(ArmsAnimClass);
+				bArmsAnimOverridden = true;
+			}
+		}
+		else if (bArmsAnimOverridden)
+		{
+			if (bDefaultArmsUsesBlueprint)
+			{
+				FirstPersonArms->SetAnimInstanceClass(DefaultArmsAnimClass);
+			}
+			else
+			{
+				// Restore single-node mode (re-inits from the component's BP-authored AnimationData / idle).
+				FirstPersonArms->SetAnimationMode(EAnimationMode::AnimationSingleNode);
+			}
+			bArmsAnimOverridden = false;
+		}
+	}
+
+	// Cache per-shot fire cosmetics (resolve soft refs once, here, not per shot).
+	CachedFireMontage = Weapon->FireMontage.IsNull() ? nullptr : Weapon->FireMontage.LoadSynchronous();
+	CachedFireSound = Weapon->FireSound.IsNull() ? nullptr : Weapon->FireSound.LoadSynchronous();
+	CachedMuzzleFlash = Weapon->MuzzleFlash.IsNull() ? nullptr : Weapon->MuzzleFlash.LoadSynchronous();
+	CachedMuzzleSocket = Weapon->MuzzleSocket;
+
+	// Optional equip montage on the arms.
+	if (FirstPersonArms && !Weapon->EquipMontage.IsNull())
+	{
+		if (UAnimMontage* EquipM = Weapon->EquipMontage.LoadSynchronous())
+		{
+			if (UAnimInstance* AnimInst = FirstPersonArms->GetAnimInstance())
+			{
+				AnimInst->Montage_Play(EquipM);
+			}
+		}
+	}
+}
+
+void AFPSRCharacter::PlayWeaponFireCosmetics()
+{
+	if (!IsLocallyControlled())
+	{
+		return;
+	}
+
+	// Fire montage on the arms.
+	if (CachedFireMontage && FirstPersonArms)
+	{
+		if (UAnimInstance* AnimInst = FirstPersonArms->GetAnimInstance())
+		{
+			AnimInst->Montage_Play(CachedFireMontage);
+		}
+	}
+
+	// Fire sound + muzzle flash attach to the ACTIVE weapon mesh (skeletal firearm or static preview) so they track
+	// whichever mesh the equipped weapon shows. CachedMuzzleSocket is a socket on that mesh (NAME_None = mesh origin).
+	if (ActiveWeaponMesh)
+	{
+		if (CachedFireSound)
+		{
+			UGameplayStatics::SpawnSoundAttached(CachedFireSound, ActiveWeaponMesh);
+		}
+		if (CachedMuzzleFlash)
+		{
+			UGameplayStatics::SpawnEmitterAttached(CachedMuzzleFlash, ActiveWeaponMesh, CachedMuzzleSocket);
+		}
+	}
 }
 
 UAbilitySystemComponent* AFPSRCharacter::GetAbilitySystemComponent() const
