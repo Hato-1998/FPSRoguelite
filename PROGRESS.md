@@ -4,7 +4,7 @@
 > **작업 단계를 끝낼 때마다, 그리고 중단 전 반드시 이 파일을 갱신하고 커밋한다.**
 > 확정 설계·기획·코드구조·규칙은 `Game.md`(**SSOT 허브** → 도메인별 `Docs/SSOT/*.md`, 작업별 라우팅은 허브 §0-1), **완료 작업 상세는 `git log --oneline`**. 여기엔 *무엇을 했는지*만 요약한다.
 
-**최종 갱신: 2026-06-13**
+**최종 갱신: 2026-06-15**
 
 ## 🗂️ 마스터 작업 분해 — **`Docs/TaskPrompts_Master.md` (2026-06-13 신설, 최상위 계획)**
 > 남은 로드맵 전체를 의존성 기준 22유닛으로 분해 + 유닛별 새 세션 복붙 실행 프롬프트. **확정 순서: V0(무기 비주얼/Infima 팩) ∥ V1(사각 오디오) ∥ V3(기본 크로스헤어) ∥ U16(스핀업 LMG) → U2(패배 배선) ∥ U3a(약점 부위 데미지) → U3(보스 스캐폴드) → U4(보스 콘텐츠, 플로우 완성) → W1(Fable+Codex 전체 검증) → U1(재미/성능 게이트) ∥ V2(2-client) → 2차 트랙(U5~U15)**. V3=기본 크로스헤어(게이트 손맛① 전제, U12 동적 스프레드의 베이스), U15=무기 애님(U1 후 조건부), U16=스핀업 LMG(1차 병행). 아래 "코드 선행 백로그"의 잔여 유닛(B1/A4/C1/C2/D2~D5)은 이 문서의 U5~U11로 승계됨 — 착수 시 TaskPrompts_Master의 프롬프트를 사용할 것(함정/주의 내장).
@@ -15,6 +15,14 @@
 > **콘텐츠(사용자)**: 무기 DA 8종 = **통합 Preview 스태틱**(`SM_LPAMG_<W>_Preview`)을 `WeaponMeshStatic1P`에(칼=`SM_LPAMG_Knife`) + `FireSound`/`MuzzleFlash` + Preview 메시에 `Muzzle` 소켓 추가. `BP_FPSRPlayer` 팔 메시(`SK_LPAMG_Arms_Gloves`)+idle 애님(`Use Animation Asset`, `A_FP_PCH_*_Idle_Loop_NoAdditive`).
 > **확정 설계**: Infima는 **모듈러 무기**(SK=리시버 본체, 부품 별도)라 V0는 통합 Preview 스태틱으로 마감(손맛 코어=§2-4-2 카메라킥/머즐/사운드 충분). 스켈(`WeaponMesh1P`) 경로는 코드에 남겨 확장 길 유지.
 > **후속(TaskPrompts 등재됨 `4a2b459`)**: ① 모듈러+노리쇠 풀 무기 애님=**U15**(U1 손맛 게이트 후 조건부) ② 무기별 팔 AnimBP=**U12** 폴리시 ③ 무기별 부착 오프셋 DA 필드=U15. 범위 밖: 3P 메시(U11 전)·멀티 코스메틱(U13)·ChargeLaser 빔(U13). MR22는 미사용(총기 8정 중 1정 여유).
+
+## 🔫 U16 스핀업 LMG (연사속도 가속 기관총) — **완료(2026-06-15, 브랜치 `phase/p4c-spinup-lmg`)**
+> 새 무기 1종: 발사 시작 시 연사 느림 → 연속 발사로 가속 → SpinupRampTime 후 최대(FireRate) 도달. 발사 케이던스 코어라 W1·U1 게이트 평가 대상. 코드(`699ea9b`)는 병렬 세션 rebase로 main 수렴(origin/main 포함). 콘텐츠(DA/BP/메시)는 사용자 작업.
+> **확정 설계(Codex 플랜 게이트 반영 — Option B)**: 스핀업 램프=**클라이언트 로컬 케이던스(손맛 전용)**, 서버는 기존 `ServerTryConsumeFireInterval`의 **max-rate(1/FireRate) anti-abuse 천장만** 유지(Inventory/GA/복제 **무변경**). 제1원리: 4인 협동 PvE라 스핀업=자기 핸디캡 → 서버 추적 실익 약함. **서버 스핀 추적 제거로 클라/서버 desync 원천 차단**(초기 플랜의 gap-재구성+즉시리셋 모순을 Codex가 구현 전 적발 → 재설계). [[plan-codex-comparison-gate]]
+> **코드(2파일+타입1)**: `FFPSRWeaponStatBlock`에 `bHasSpinup`/`SpinupFireRateStart`/`SpinupRampTime`(EditConditionHides=bHasSpinup), `FireRate`=램프 종점(최대). `UFPSRWeaponFireComponent`: static `ComputeSpinupFireRate`(**BaseStats 사용 → FireRate 카드 면역**) + `SpinupElapsed` 멤버, Tick/FireOneShot 동적 케이던스, StopFiring/Equip **즉시 리셋**(스핀 뱅킹 금지). 전역 프리즈(§2-2) 발사 루프 `!IsRunPaused` 게이트(Codex P2, phantom 로컬 발사 차단). [[freeze-gate-client-server-symmetry]]
+> **콘텐츠(사용자)**: `DA_Weapon_LMG`(Archetype=FullAuto, FireAbility=Hitscan, bHasSpinup, Start/Ramp/FireRate, `AllWeaponsStatExclusions+=FireRate`, FireRate ThisWeapon 카드 미제공) + `BP_FPSRPlayer` 슬롯 배치 + HVG7 메시(V0 비주얼) + `DA_Weapon_Rifle` 조정.
+> **검증**: 빌드 Succeeded + 헤드리스 스모크(ModuleLoads) succeeded:1/failed:0 + 사용자 PIE(가속 램프/즉시리셋/교체리셋/프리즈 미발사/FireRate 면역) 통과. Codex 머지게이트=코드 이미 main 수렴이라 diff는 콘텐츠 바이너리만(소스 무변경, no actionable findings).
+> **후속 튜닝**: 최고속 반동/블룸이 과하면 DA에서 `RecoilVertical`/`BloomPerShot` 조정(FireRate 가속을 자동 추종). 비주얼 폴리시(모듈러 무기 애님)는 U15.
 
 ## 🎮 P6-A 게임플로우 셸 콘텐츠 — **main 머지 완료(2026-06-12, `--no-ff` `4dacec1`, Opus 직접+VibeUE MCP)**
 > C++ 베이스(`c673d03`)에 맞춘 메뉴/결과 콘텐츠를 VibeUE MCP로 작성 + 결과창 프리즈 + L_Sandbox 런 수정까지 main 반영. **메뉴→런→결과→메뉴 루프 완성·PIE 통과**. 가이드: `Docs/P6A_GameFlow_UserContent_Guide.md`.
