@@ -47,6 +47,12 @@ public:
 	 *  Returns {Yaw, Pitch} in degrees: Pitch = up-kick magnitude, Yaw = horizontal pattern (no random variance). */
 	static FVector2D ComputeShotRecoilDelta(const struct FFPSRWeaponStatBlock& Stats, int32 ShotIndex);
 
+	/** Spin-up fire rate (shots/sec) at the given continuous-fire elapsed time. Linear ramp from
+	 *  SpinupFireRateStart to FireRate over SpinupRampTime; returns FireRate when bHasSpinup is false.
+	 *  Reads BASE stats so the ramp is immune to FireRate modifier cards. Client-local cadence only
+	 *  (the server still enforces just the max-rate anti-abuse ceiling). */
+	static float ComputeSpinupFireRate(const struct FFPSRWeaponStatBlock& Stats, float SpinupElapsed);
+
 	/** Returns the equipped weapon's inventory component (needed by debug tools). */
 	UFPSRWeaponInventoryComponent* GetInventory() const;
 
@@ -69,6 +75,7 @@ protected:
 	bool bReloadRequestPending = false; // guards against spamming the reload RPC each tick
 	float LastMeleeTime = -1000.0f; // world time of last melee attack (melee attack-rate cooldown)
 	float NextFireReadyTime = 0.0f; // world time the next ranged shot is allowed (per-weapon cadence + post-swap cooldown); gates the immediate press shot's recoil. Mirrors the server's ServerNextAllowedFireTime.
+	float SpinupElapsed = 0.0f; // seconds of continuous fire this trigger hold (spin-up ramp progress; client-local feel). Reset on StopFiring / equip; advances only while auto-firing and not run-paused.
 
 	bool bIsAiming = false;
 	TObjectPtr<UCameraComponent> CachedCamera; // resolved lazily for ADS FOV

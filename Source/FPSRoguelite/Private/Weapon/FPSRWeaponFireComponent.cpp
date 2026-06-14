@@ -7,6 +7,7 @@
 #include "Weapon/FPSRWeaponTypes.h"
 #include "Weapon/FPSRWeaponFragment.h"
 #include "Hero/FPSRCharacter.h"
+#include "Core/FPSRGameState.h"
 
 #include "AbilitySystemComponent.h"
 #include "Engine/Engine.h"
@@ -29,6 +30,16 @@ FVector2D UFPSRWeaponFireComponent::ComputeShotRecoilDelta(const FFPSRWeaponStat
 	const float Pitch = Stats.RecoilVertical;
 	const float Yaw = FMath::Sin(ShotIndex * Stats.RecoilHorizontalPatternFreq) * Stats.RecoilHorizontal;
 	return FVector2D(Yaw, Pitch);
+}
+
+float UFPSRWeaponFireComponent::ComputeSpinupFireRate(const FFPSRWeaponStatBlock& Stats, float SpinupElapsed)
+{
+	if (!Stats.bHasSpinup || Stats.SpinupRampTime <= 0.0f)
+	{
+		return Stats.FireRate;
+	}
+	const float Alpha = FMath::Clamp(SpinupElapsed / Stats.SpinupRampTime, 0.0f, 1.0f);
+	return FMath::Lerp(Stats.SpinupFireRateStart, Stats.FireRate, Alpha);
 }
 
 void UFPSRWeaponFireComponent::NotifyPlayerPitchCompensation(float DownAmount)
@@ -143,6 +154,7 @@ void UFPSRWeaponFireComponent::StopFiring()
 	// fire ability, so releasing the trigger just stops the auto/burst/melee repeat like any other weapon.
 	bWantsToFire = false;
 	ShotsFiredThisSpray = 0;
+	SpinupElapsed = 0.0f;
 }
 
 void UFPSRWeaponFireComponent::OnWeaponEquipped(float EquipCooldown)
@@ -153,6 +165,7 @@ void UFPSRWeaponFireComponent::OnWeaponEquipped(float EquipCooldown)
 	// = Now + swap-cooldown, so swap-spam can't bypass fire cadence. (A mid-charge swap cancels the ChargeLaser fire
 	// ability via RefreshEquippedAbility, which clears its timers in EndAbility — no charge state lives here anymore.)
 	bChargeSequenceActive = false; // drop any in-progress ChargeLaser recoil ramp on a weapon swap
+	SpinupElapsed = 0.0f; // drop spin-up ramp on weapon swap (no spin banking across equip)
 	NextFireReadyTime = GetWorld()->GetTimeSeconds() + FMath::Max(0.0f, EquipCooldown);
 }
 
@@ -211,8 +224,11 @@ void UFPSRWeaponFireComponent::FireOneShot()
 	}
 	else
 	{
-		// Stamp the next-allowed fire time (Now + interval) so the next trigger press is cadence-gated (StartFiring).
-		NextFireReadyTime = GetWorld()->GetTimeSeconds() + 1.0f / FMath::Max(Stats.FireRate, 0.01f);
+		// Spin-up weapons ramp the client-local cadence using BASE stats (FireRate-card immune); others use resolved FireRate.
+		const float CadenceRate = Weapon->BaseStats.bHasSpinup
+			? ComputeSpinupFireRate(Weapon->BaseStats, SpinupElapsed)
+			: Stats.FireRate;
+		NextFireReadyTime = GetWorld()->GetTimeSeconds() + 1.0f / FMath::Max(CadenceRate, 0.01f);
 
 		// Camera recoil (local feel only), ADS-dependent:
 		//  - Hip-fire: weak vertical climb + strong horizontal randomness (scattered, screen stays low).
@@ -291,10 +307,26 @@ void UFPSRWeaponFireComponent::TickComponent(float DeltaTime, ELevelTick TickTyp
 	}
 
 	const FFPSRWeaponStatBlock& Stats = Instance->GetResolvedStats();
-	const float Interval = 1.0f / FMath::Max(Stats.FireRate, 0.01f);
+	const bool bSpinup = Weapon->BaseStats.bHasSpinup;
+	const float CadenceRate = bSpinup ? ComputeSpinupFireRate(Weapon->BaseStats, SpinupElapsed) : Stats.FireRate;
+	const float Interval = 1.0f / FMath::Max(CadenceRate, 0.01f);
 
-	const bool bAutoFiring = (bWantsToFire && Stats.FireMode == EFPSRFireMode::FullAuto && CanFire());
-	const bool bBurstFiring = (Stats.FireMode == EFPSRFireMode::Burst && BurstShotsRemaining > 0 && CanFire());
+	// Global run-freeze (§2-2): gate client fire so a held trigger doesn't produce phantom local shots/recoil/cosmetics
+	// during the card-selection freeze (the server fire ability already rejects). Spin-up does not advance while paused.
+	bool bRunPaused = false;
+	if (const AFPSRGameState* GS = GetWorld()->GetGameState<AFPSRGameState>())
+	{
+		bRunPaused = GS->IsRunPaused();
+	}
+
+	const bool bAutoFiring = (bWantsToFire && Stats.FireMode == EFPSRFireMode::FullAuto && CanFire() && !bRunPaused);
+	const bool bBurstFiring = (Stats.FireMode == EFPSRFireMode::Burst && BurstShotsRemaining > 0 && CanFire() && !bRunPaused);
+
+	// Advance the spin-up ramp only while actually auto-firing (continuous hold); frozen during reload, reset on StopFiring/equip.
+	if (bSpinup && bAutoFiring)
+	{
+		SpinupElapsed += DeltaTime;
+	}
 
 	if (bAutoFiring || bBurstFiring)
 	{
@@ -317,7 +349,7 @@ void UFPSRWeaponFireComponent::TickComponent(float DeltaTime, ELevelTick TickTyp
 	}
 
 	// Melee: repeat attacks while the button is held; FireOneShot self-gates on MeleeAttackDelay.
-	if (bWantsToFire && Weapon->GetArchetype() == EFPSRWeaponArchetype::Melee)
+	if (bWantsToFire && !bRunPaused && Weapon->GetArchetype() == EFPSRWeaponArchetype::Melee)
 	{
 		FireOneShot();
 	}

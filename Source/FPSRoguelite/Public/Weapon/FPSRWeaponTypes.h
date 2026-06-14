@@ -54,7 +54,16 @@ struct FPSROGUELITE_API FFPSRWeaponStatBlock
 	EFPSRFireMode FireMode = EFPSRFireMode::FullAuto;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Fire")
-	float FireRate = 8.0f; // shots per second
+	float FireRate = 8.0f; // shots per second (spin-up weapons: this is the ramp ENDPOINT = max rate)
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Fire")
+	bool bHasSpinup = false; // FullAuto spin-up: fire rate ramps from SpinupFireRateStart up to FireRate over SpinupRampTime of continuous fire (client-local feel; server enforces only the max-rate ceiling)
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Fire", meta = (EditConditionHides, EditCondition = "bHasSpinup"))
+	float SpinupFireRateStart = 2.0f; // shots/sec at the start of sustained fire (ramp floor)
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Fire", meta = (EditConditionHides, EditCondition = "bHasSpinup"))
+	float SpinupRampTime = 1.5f; // seconds of continuous fire to reach FireRate (max)
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Fire", meta = (EditConditionHides, EditCondition = "FireMode == EFPSRFireMode::Burst"))
 	int32 BurstCount = 3;
