@@ -1,7 +1,7 @@
 # P4-C 무기 콘텐츠 스펙시트 (따라하기 — 에디터 작업용)
 
 > **전제: A2(Hitscan)·A3(AOE+ChargeLaser) 코드가 main에 머지됨(2026-06-10).** 에디터를 열면 아래 스탯 필드(`PelletCount`/`MaxPenetration`/`ProjectileSpeed`/`AOERadius`/`ChargeTime` 등)와 GA 클래스(`FPSRGA_WeaponFire_Projectile`/`_ChargeLaser`)가 모두 노출됩니다.
-> 이 문서는 [Docs/P4-C_UserContent_Guide.md](P4-C_UserContent_Guide.md)의 **시작 제안값을 실제 필드 단위로 확정**한 작업 시트입니다. 수치는 PIE 튜닝 대상(시작점).
+> 이 문서는 P4-C 무기 콘텐츠의 **시작 제안값을 실제 필드 단위로 확정**한 작업 시트입니다. 수치는 PIE 튜닝 대상(시작점).
 > **MCP 미인증으로 AI가 에셋을 직접 생성할 수 없어**, 사용자가 에디터에서 아래대로 생성·연결합니다.
 
 ---

@@ -284,7 +284,7 @@ Game.md + PROGRESS.md 먼저 읽어. Docs/TaskPrompts_Master.md의 유닛 V1을 
 ```
 ⚠️[병렬 작업 시] 다중 세션이면 이 문서 §B-2(병렬 가이드)·§B-3(검토·머지) 먼저 읽고 별도 worktree에서 진행(git worktree add ../FPSR-<키워드> -b <브랜치> main). main 머지는 빌드+스모크 통과·PR·사용자 승인 후.
 Game.md + PROGRESS.md 먼저 읽어. Docs/TaskPrompts_Master.md의 유닛 V3를 진행한다.
-읽을 SSOT: Docs/SSOT/PlayerFeel.md §2-14(게임필/HUD), Docs/SSOT/CombatWeaponCard.md §2-4-2(확산/ADS), Docs/P3-D_UserContent_Guide.md(HUD 위젯 전례), 메모리 [[vibeue-mcp-capabilities]].
+읽을 SSOT: Docs/SSOT/PlayerFeel.md §2-14(게임필/HUD), Docs/SSOT/CombatWeaponCard.md §2-4-2(확산/ADS), 메모리 [[vibeue-mcp-capabilities]].
 
 [목표] 현재 화면에 조준점이 없어 사격 체감이 어렵다. **기본 정적 크로스헤어(중앙 레티클)**를 Game 레이어 HUD에 추가한다. U1 재미 게이트 손맛 판정 ①(스웜 사격 손맛)의 사실상 전제 — 게이트 전 1차 트랙에서 작업한다. 동적 스프레드(원 확대/축소)는 U12 — 여기선 정적 베이스만.
 
