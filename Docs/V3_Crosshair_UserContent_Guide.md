@@ -98,12 +98,40 @@ Get Owning Player Pawn
 
 ---
 
+## STEP 3-B — 히트마커 색상 구분 (명중=흰 대각선 / 처치=빨강)
+
+> ⚠️ **새로 만들지 말 것.** 흰색 대각선 히트마커는 **이미 존재**한다(`WBP_HitMarker`, §2-14, P4-D 완료 — 스크린샷의 중앙 흰 X). 이 단계는 기존 위젯에 **MarkerType별 색 분기만 추가**한다. 순수 콘텐츠, **C++ 변경 없음**.
+
+### 이미 배선된 것 (조사 확인)
+- 마커 종류 enum: `EFPSRHitMarkerType { Hit, Crit, Kill }`(`Source/.../Hero/FPSRFeedbackTypes.h`).
+- 전 무기 경로(Hitscan/Melee/ChargeLaser/Projectile/CombatStatics)가 서버권위로 Hit/Crit/**Kill**을 산출 → `AFPSRPlayerController`(`FPSRPlayerController.cpp:391`)가 `UFPSRPlayerFeedbackComponent::NotifyHitConfirmed(MarkerType)` 호출 → **`OnHitMarker(MarkerType)` 델리게이트 브로드캐스트**.
+- 즉 **Kill 타입이 이미 클라이언트까지 도달**한다 — `WBP_HitMarker`가 색만 분기하면 끝.
+
+### 작업: `WBP_HitMarker` 편집
+1. `Content/UI/HUD/WBP_HitMarker` 열기.
+2. **`OnHitMarker` 이벤트 핸들러**를 찾는다(현재 흰 X 펄스를 트리거하는 곳). 이 이벤트는 파라미터 **`MarkerType`(EFPSRHitMarkerType)** 을 받는다.
+   - 만약 핸들러가 없다면(흰 X가 PlayerController 직접 호출이면): `Event Construct`에서 오너 폰의 `FPSRPlayerFeedbackComponent`를 `Get Component By Class`로 얻어 **`OnHitMarker` → Bind Event**(AddDynamic)로 커스텀 이벤트 `ShowHitMarker(MarkerType)`에 연결.
+3. 마커 비주얼(대각선 X Image, 예: `Img_Marker`)의 색을 **MarkerType로 분기**:
+   - `Switch on EFPSRHitMarkerType`(MarkerType 입력) →
+     - **Hit** → `SetColorAndOpacity` = 흰색 `(1,1,1,1)`
+     - **Crit** → 흰색(또는 폴리시로 노랑 — 선택. 지금은 흰색 권장, 처치만 빨강 요구)
+     - **Kill** → `SetColorAndOpacity` = 빨강 `(1,0,0,1)`
+   - 색 적용 후 **기존 펄스 애니메이션 재생**(이미 있는 `PlayAnimation`)으로 연결.
+   - 대상이 여러 Image(대각선 4개)면 모두 같은 색을 적용하거나, 공통 부모 패널의 `SetColorAndOpacity`로 일괄 틴트.
+4. 컴파일 + 저장.
+
+> 설계 메모(§2-14): "히트마커 최종 연출은 크로스헤어/발사체 작업 후 재확인" — V3 시점에 색 구분을 확정하는 게 그 재확인에 해당. **틴트만** 추가(레이아웃/펄스 타이밍은 기존 유지). 약점(헤드샷) 전용 마커는 U3a/U12 범위 — 여기선 Hit/Kill 색만.
+
+---
+
 ## STEP 4 — 검증 (PIE)
 
 - [ ] 크로스헤어가 화면 **정중앙** 표시.
 - [ ] 발사해도 위치 정합(정적이라 중앙 고정이 정상).
 - [ ] **우클릭 ADS 중 숨김**, 떼면 다시 표시.
 - [ ] 히트마커가 크로스헤어 **위에** 겹쳐 보임.
+- [ ] **적 명중 시 흰색 대각선** 마커 펄스.
+- [ ] **적 처치 시 빨간색** 마커 펄스(Kill 색 분기 동작).
 - [ ] **메뉴(Menu 레이어)에선 미표시** — Game 레이어 전용이라 자동 충족(확인만).
 
 ---
@@ -112,8 +140,8 @@ Get Owning Player Pawn
 
 PIE 통과 후:
 ```powershell
-git add Content/UI/HUD/WBP_BasicCrosshair.uasset Content/UI/HUD/WBP_GameHUD.uasset
-git commit -m "content(V3): 기본 정적 크로스헤어 + ADS 숨김 (WBP_BasicCrosshair, WBP_GameHUD 중앙 배치)"
+git add Content/UI/HUD/WBP_BasicCrosshair.uasset Content/UI/HUD/WBP_GameHUD.uasset Content/UI/HUD/WBP_HitMarker.uasset
+git commit -m "content(V3): 기본 정적 크로스헤어 + ADS 숨김 + 히트마커 색상 구분(명중 흰/처치 빨강)"
 git push -u origin phase/p4d-crosshair
 ```
 - 코드 변경 없음 → Codex 머지게이트는 콘텐츠 바이너리라 diff 무관(스킵 가능).
