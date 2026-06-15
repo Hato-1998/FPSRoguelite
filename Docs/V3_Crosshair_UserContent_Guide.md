@@ -64,6 +64,26 @@ git checkout -b phase/p4d-crosshair main   # 또는 이미 있으면: git checko
 - 인게임 크기 설정 유닛(별도 — `Docs/TaskPrompts_Master.md` §B 신규 유닛)이 **바로 이 `CrosshairRoot`의 Scale을 덮어쓴다**. 그래서 `CrosshairRoot`를 단일 Is-Variable 루트로 유지하는 게 중요(설정값이 한 곳만 건드림).
 - "너무 작다" 즉시 해결: 위 픽셀값을 키우거나 `CrosshairRoot` RenderTransform Scale 기본값을 `1.5`~`2.0`으로 올려 V3 마감.
 
+### (권장) 바 속성을 변수 3개로 묶기 — `Event PreConstruct`
+4개 바에 길이/두께/갭을 일일이 입력하지 말고 **변수 3개 → PreConstruct에서 일괄 적용**. 변수 하나만 고치면 5개 전부 반영(디자이너 프리뷰도 실시간). **U12 동적 스프레드가 이 `Gap` 변수를 애니메이트** → 프로덕션 구조로도 정답.
+
+1. 변수 추가(Details → Variable, **Instance Editable ✔**, Category `Crosshair`):
+   - `Thickness` (float) = 3
+   - `Length` (float) = 12
+   - `Gap` (float) = 16
+2. **`Event PreConstruct`** 그래프에서 각 바에 적용:
+   - 크기: 각 Image → **`Set Desired Size Override`**
+     - `Bar_Top` / `Bar_Bottom` → `(Thickness, Length)`
+     - `Bar_Left` / `Bar_Right` → `(Length, Thickness)`  ← 가로바라 전치
+     - `Dot_Center` → `(Thickness, Thickness)`
+   - 갭(중앙에서 밀어내기): 각 바의 `Slot` → **Cast To `Overlay Slot`** → **`Set Padding`**(Make Margin, 해당 변만 `Gap`)
+     - `Bar_Top` → Bottom = `Gap` / `Bar_Bottom` → Top = `Gap` / `Bar_Left` → Right = `Gap` / `Bar_Right` → Left = `Gap`
+     - (Overlay 슬롯 정렬이 Center여야 패딩이 중앙 기준으로 밀어냄)
+3. 컴파일 → 디자이너에서 `Thickness`/`Length`/`Gap` 기본값을 바꾸면 **5개 바가 한 번에** 갱신.
+
+> 2층 구조 요약: **형태=PreConstruct 변수 3개**(Thickness/Length/Gap), **전체 배율=CrosshairRoot Scale 1개**(U17 설정/U12 확장이 덮어씀). 둘 다 "한 값"으로 전부 적용.
+> 그래프가 부담되면 대안: 십자 1장을 **단일 텍스처 Image**로 두면 크기=Image Size 한 값(단 갭 독립 조절·U12 스프레드는 어려움 → PreConstruct 권장).
+
 ---
 
 ## STEP 2 — ADS 시 숨김 (핵심 배선)
