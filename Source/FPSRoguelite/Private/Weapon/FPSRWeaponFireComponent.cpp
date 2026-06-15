@@ -19,6 +19,15 @@
 #include "Camera/PlayerCameraManager.h"
 #include "Camera/CameraComponent.h"
 
+#if ENABLE_DRAW_DEBUG
+// Console toggle for all weapon debug draws (fire/laser trace lines, melee hit sphere, on-screen ammo). Default off; enable with `FPSR.Debug.WeaponDraw 1`.
+static TAutoConsoleVariable<int32> CVarFPSRWeaponDebugDraw(
+	TEXT("FPSR.Debug.WeaponDraw"),
+	0,
+	TEXT("Draw weapon debug visuals (fire/laser trace lines, melee hit sphere, on-screen ammo). 0=off (default), 1=on."),
+	ECVF_Cheat);
+#endif
+
 UFPSRWeaponFireComponent::UFPSRWeaponFireComponent()
 {
 	PrimaryComponentTick.bCanEverTick = true;
@@ -464,8 +473,8 @@ void UFPSRWeaponFireComponent::TickComponent(float DeltaTime, ELevelTick TickTyp
 	}
 
 #if ENABLE_DRAW_DEBUG
-	// Debug scaffolding (replaced by HUD in P3): show ammo for the local player (ammo weapons only).
-	if (GEngine && Weapon->GetArchetype() != EFPSRWeaponArchetype::Melee && Stats.MagSize > 0)
+	// Debug scaffolding (replaced by HUD in P3): show ammo for the local player (ammo weapons only). Gated by FPSR.Debug.WeaponDraw.
+	if (CVarFPSRWeaponDebugDraw.GetValueOnGameThread() > 0 && GEngine && Weapon->GetArchetype() != EFPSRWeaponArchetype::Melee && Stats.MagSize > 0)
 	{
 		const int32 Ammo = Inventory->GetCurrentAmmo();
 		const int32 Mag = Inventory->GetCurrentMagSize();

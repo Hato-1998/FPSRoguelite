@@ -15,6 +15,7 @@
 #include "Engine/World.h"
 #include "TimerManager.h"
 #include "DrawDebugHelpers.h"
+#include "HAL/IConsoleManager.h"
 
 UFPSRGA_WeaponFire_ChargeLaser::UFPSRGA_WeaponFire_ChargeLaser()
 {
@@ -282,9 +283,15 @@ void UFPSRGA_WeaponFire_ChargeLaser::FireBeam(float BeamDamage, bool bIsPayoffSh
 	const float WallDist = bWall ? WallHit.Distance : CachedRange;
 
 #if ENABLE_DRAW_DEBUG
-	// Payoff beam = bright cyan, longer-lived; warm-up tick = dim blue, brief.
-	DrawDebugLine(World, Start, Start + BaseDir * FMath::Min(WallDist, CachedRange),
-		bIsPayoffShot ? FColor::Cyan : FColor::Blue, false, bIsPayoffShot ? 0.5f : 0.08f, 0, bIsPayoffShot ? 2.0f : 1.0f);
+	// Payoff beam = bright cyan, longer-lived; warm-up tick = dim blue, brief. Gated by FPSR.Debug.WeaponDraw.
+	if (const IConsoleVariable* CVarWeaponDraw = IConsoleManager::Get().FindConsoleVariable(TEXT("FPSR.Debug.WeaponDraw")))
+	{
+		if (CVarWeaponDraw->GetInt() > 0)
+		{
+			DrawDebugLine(World, Start, Start + BaseDir * FMath::Min(WallDist, CachedRange),
+				bIsPayoffShot ? FColor::Cyan : FColor::Blue, false, bIsPayoffShot ? 0.5f : 0.08f, 0, bIsPayoffShot ? 2.0f : 1.0f);
+		}
+	}
 #endif
 
 	for (const FHitResult& PawnHit : PawnHits)
