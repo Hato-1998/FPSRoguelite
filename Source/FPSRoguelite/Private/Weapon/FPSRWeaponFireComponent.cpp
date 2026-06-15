@@ -331,10 +331,13 @@ void UFPSRWeaponFireComponent::TickComponent(float DeltaTime, ELevelTick TickTyp
 	const bool bAutoFiring = (bWantsToFire && Stats.FireMode == EFPSRFireMode::FullAuto && CanFire() && !bRunPaused);
 	const bool bBurstFiring = (Stats.FireMode == EFPSRFireMode::Burst && BurstShotsRemaining > 0 && CanFire() && !bRunPaused);
 
-	// Advance the spin-up ramp only while actually auto-firing (continuous hold); frozen during reload, reset on StopFiring/equip.
-	if (bSpinup && bAutoFiring)
+	// Spin-up ramp advances ONLY while actively auto-firing. ANY interruption resets it to the minimum: empty mag,
+	// reload (manual R or auto), run-freeze, or simply not holding fire. This keeps a trigger held THROUGH a reload
+	// from resuming at full speed — the ramp must rebuild from the floor after the gun stops putting rounds downrange.
+	// (StopFiring and OnWeaponEquipped also zero it explicitly for release/weapon-swap immediacy.)
+	if (bSpinup)
 	{
-		SpinupElapsed += DeltaTime;
+		SpinupElapsed = bAutoFiring ? (SpinupElapsed + DeltaTime) : 0.0f;
 	}
 
 	if (bAutoFiring || bBurstFiring)
