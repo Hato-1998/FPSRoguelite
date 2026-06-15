@@ -50,14 +50,19 @@ git checkout -b phase/p4d-crosshair main   # 또는 이미 있으면: git checko
 
 | 위젯 | 크기(px) | 위치(Overlay Slot Padding) |
 |---|---|---|
-| `Bar_Top` | 2 × 8 | 위로 (Padding Bottom 12) |
-| `Bar_Bottom` | 2 × 8 | 아래로 (Padding Top 12) |
-| `Bar_Left` | 8 × 2 | 왼쪽 (Padding Right 12) |
-| `Bar_Right` | 8 × 2 | 오른쪽 (Padding Left 12) |
-| `Dot_Center` | 2 × 2 | 중앙(패딩 0) |
+| `Bar_Top` | 3 × 12 | 위로 (Padding Bottom 16) |
+| `Bar_Bottom` | 3 × 12 | 아래로 (Padding Top 16) |
+| `Bar_Left` | 12 × 3 | 왼쪽 (Padding Right 16) |
+| `Bar_Right` | 12 × 3 | 오른쪽 (Padding Left 16) |
+| `Dot_Center` | 3 × 3 | 중앙(패딩 0) |
 
 > 가독성 팁(선택): 어두운 외곽선이 필요하면 각 바 뒤에 1px 큰 검정 Image를 깔거나 폴리시(후속)로 미룬다. **지금은 플레이스홀더면 충분.**
-> 갭(12)·두께(2)는 PIE에서 보며 미세조정.
+> 갭(16)·두께(3)는 PIE에서 보며 미세조정 — **처음엔 살짝 크게 잡고 줄이는 게 편함**(작으면 안 보임).
+
+### ⚠️ 크기 조절축 = `CrosshairRoot` RenderTransform Scale (설정 유닛 연동 대비)
+- 전체 크기는 **`CrosshairRoot`(Overlay)의 RenderTransform → Scale**(X=Y 균일)로 조절한다. 바 픽셀값은 "Scale 1.0에서 보기 좋은 기본형"으로만 잡고, 확대/축소는 **Scale 스칼라 1개**로.
+- 인게임 크기 설정 유닛(별도 — `Docs/TaskPrompts_Master.md` §B 신규 유닛)이 **바로 이 `CrosshairRoot`의 Scale을 덮어쓴다**. 그래서 `CrosshairRoot`를 단일 Is-Variable 루트로 유지하는 게 중요(설정값이 한 곳만 건드림).
+- "너무 작다" 즉시 해결: 위 픽셀값을 키우거나 `CrosshairRoot` RenderTransform Scale 기본값을 `1.5`~`2.0`으로 올려 V3 마감.
 
 ---
 
