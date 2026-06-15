@@ -158,6 +158,33 @@ Get Owning Player Pawn
 
 > 가독성(선택): 각 바 뒤에 1px 큰 검정 바를 깔면 밝은 배경에서도 보임 — 폴리시(후속)로 미뤄도 됨.
 
+### ①-B (권장) 세그먼트 속성 공통화 — `Event PreConstruct`
+크로스헤어와 동일 패턴. 4개 세그먼트의 차이는 **Position(±Offset)·Angle(±45)** 뿐, Size는 공통이라 변수 3개로 묶는다. 변수 하나만 고치면 4선 전부 반영(디자이너 실시간).
+
+1. 변수 추가(Details → Variable, **Instance Editable ✔**, Category `HitMarker`):
+   - `MarkerLength` (float) = 16
+   - `MarkerThickness` (float) = 3
+   - `MarkerOffset` (float) = 8   ← 중앙에서 각 세그먼트 중심까지 거리(=갭 조절)
+   - (선택) `MarkerAngle` (float) = 45   ← X 기울기 튜닝용
+2. **`Event PreConstruct`** 에서 각 세그먼트에 적용:
+   - 크기: 4개 모두 → **`Set Desired Size Override`**( `(MarkerLength, MarkerThickness)` ) — 회전 전 가로바 기준이라 전부 동일.
+   - 위치: 각 `Slot` → **Cast To `Canvas Panel Slot`** → **`Set Position`**( 아래 부호 × `MarkerOffset` )
+   - 각도: 각 세그먼트 → **`Set Render Transform Angle`**( 아래 부호 × `MarkerAngle` )
+
+   | 세그먼트 | Position | Angle |
+   |---|---|---|
+   | `Seg_TL` | (−Offset, −Offset) | **+**Angle |
+   | `Seg_BR` | (+Offset, +Offset) | **+**Angle |
+   | `Seg_TR` | (+Offset, −Offset) | **−**Angle |
+   | `Seg_BL` | (−Offset, +Offset) | **−**Angle |
+
+   - Canvas Slot은 **Anchors 중앙(0.5,0.5)·Alignment(0.5,0.5)** 여야 Position이 중앙 기준 오프셋이 됨.
+   - 음수는 `MarkerOffset`/`MarkerAngle`에 `-1` 곱(또는 리터럴 `-`).
+3. 컴파일 → 디자이너에서 `MarkerLength`/`MarkerThickness`/`MarkerOffset`만 바꾸면 **4선 한 번에** 갱신.
+
+> PreConstruct(정적 레이아웃)는 ②펄스(RenderTransform Scale/Opacity)·③틴트(ColorAndOpacity)와 **트랙이 안 겹쳐** 충돌 없음.
+> 전체 배율을 한 값으로 더 주고 싶으면: Canvas를 루트 컨테이너로 감싸 그 **RenderTransform Scale** 사용(크로스헤어 `CrosshairRoot` Scale과 동일 개념 — 선택).
+
 ### ② 펄스 애니메이션 (기존 것 재사용/확인)
 짧은 펄스(예: 0.12s)로 **Render Transform Scale 1.3→1.0 + Render Opacity 1→0**. 색(ColorAndOpacity) 트랙은 넣지 말 것(③ 틴트와 충돌 방지). 기존 펄스 애님이 색을 건드리면 **Render Opacity 기반으로 교체**.
 
