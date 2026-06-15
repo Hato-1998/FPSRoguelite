@@ -18,6 +18,7 @@
 #include "GameFramework/Controller.h"
 #include "Engine/World.h"
 #include "DrawDebugHelpers.h"
+#include "HAL/IConsoleManager.h"
 
 UFPSRGA_WeaponFire_Hitscan::UFPSRGA_WeaponFire_Hitscan()
 {
@@ -252,7 +253,13 @@ void UFPSRGA_WeaponFire_Hitscan::ActivateAbility(
 			const float WallDist = bWall ? WallHit.Distance : Range;
 
 #if ENABLE_DRAW_DEBUG
-			DrawDebugLine(World, Start, Start + PelletDir * FMath::Min(WallDist, Range), FColor::Yellow, false, 0.5f, 0, 1.0f);
+			if (const IConsoleVariable* CVarWeaponDraw = IConsoleManager::Get().FindConsoleVariable(TEXT("FPSR.Debug.WeaponDraw")))
+			{
+				if (CVarWeaponDraw->GetInt() > 0)
+				{
+					DrawDebugLine(World, Start, Start + PelletDir * FMath::Min(WallDist, Range), FColor::Yellow, false, 0.5f, 0, 1.0f);
+				}
+			}
 #endif
 
 			// Apply to up to MaxPenetration valid targets, nearest first (PawnHits are distance-sorted). Friendly

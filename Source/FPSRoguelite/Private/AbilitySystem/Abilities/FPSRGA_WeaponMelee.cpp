@@ -18,6 +18,7 @@
 #include "Engine/EngineTypes.h"
 #include "Engine/OverlapResult.h"
 #include "DrawDebugHelpers.h"
+#include "HAL/IConsoleManager.h"
 
 UFPSRGA_WeaponMelee::UFPSRGA_WeaponMelee()
 {
@@ -77,7 +78,13 @@ void UFPSRGA_WeaponMelee::ActivateAbility(
 	const FVector Center = ViewLocation + ViewRotation.Vector() * (MeleeRadius * 0.5f);
 
 #if ENABLE_DRAW_DEBUG
-	DrawDebugSphere(World, Center, MeleeRadius, 12, FColor::Cyan, false, 0.5f, 0, 1.0f);
+	if (const IConsoleVariable* CVarWeaponDraw = IConsoleManager::Get().FindConsoleVariable(TEXT("FPSR.Debug.WeaponDraw")))
+	{
+		if (CVarWeaponDraw->GetInt() > 0)
+		{
+			DrawDebugSphere(World, Center, MeleeRadius, 12, FColor::Cyan, false, 0.5f, 0, 1.0f);
+		}
+	}
 #endif
 
 	if (Avatar->HasAuthority())
