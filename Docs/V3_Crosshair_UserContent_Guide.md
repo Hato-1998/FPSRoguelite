@@ -98,29 +98,57 @@ Get Owning Player Pawn
 
 ---
 
-## STEP 3-B — 히트마커 색상 구분 (명중=흰 대각선 / 처치=빨강)
+## STEP 3-B — 히트마커 비주얼 교체 (거대 네모 → 대각선 X 4선) + 색상 구분
 
-> ⚠️ **새로 만들지 말 것.** 흰색 대각선 히트마커는 **이미 존재**한다(`WBP_HitMarker`, §2-14, P4-D 완료 — 스크린샷의 중앙 흰 X). 이 단계는 기존 위젯에 **MarkerType별 색 분기만 추가**한다. 순수 콘텐츠, **C++ 변경 없음**.
+> ⚠️ **로직은 손대지 말 것 — 이미 완성됨.** 사용자 그래프 확인 결과 바인딩은 이미 정상:
+> `Event Construct → Set Timer by Event(0.2, Looping) → SET Bind Retry Handle`(리트라이 패턴) / `TryBind → Get Owning Player Pawn → Get Component by Class(FPSRPlayerFeedbackComponent) → Is Valid → Bind Event to On Hit Marker → Clear & Invalidate Timer` / `OnHitMarker_Event(Marker Type) → Setting Hit Marker`. **이 부분 그대로 둔다.**
+> 문제는 **비주얼이 거대한 네모 한 장**이라는 것. 이 단계는 ① 그 네모를 **대각선 X 4선 플레이스홀더**로 교체하고 ② `Setting Hit Marker` 이벤트에 **MarkerType별 틴트**를 넣는다. 순수 콘텐츠, **C++ 변경 없음**.
 
-### 이미 배선된 것 (조사 확인)
-- 마커 종류 enum: `EFPSRHitMarkerType { Hit, Crit, Kill }`(`Source/.../Hero/FPSRFeedbackTypes.h`).
-- 전 무기 경로(Hitscan/Melee/ChargeLaser/Projectile/CombatStatics)가 서버권위로 Hit/Crit/**Kill**을 산출 → `AFPSRPlayerController`(`FPSRPlayerController.cpp:391`)가 `UFPSRPlayerFeedbackComponent::NotifyHitConfirmed(MarkerType)` 호출 → **`OnHitMarker(MarkerType)` 델리게이트 브로드캐스트**.
-- 즉 **Kill 타입이 이미 클라이언트까지 도달**한다 — `WBP_HitMarker`가 색만 분기하면 끝.
+### 이미 배선된 것 (확인됨)
+- enum `EFPSRHitMarkerType { Hit, Crit, Kill }` / 전 무기 경로 서버권위 → `FPSRPlayerController.cpp:391` `NotifyHitConfirmed(MarkerType)` → `OnHitMarker(MarkerType)` 브로드캐스트 → 위 그래프가 수신 중. **Kill 타입까지 이미 도달**.
 
-### 작업: `WBP_HitMarker` 편집
-1. `Content/UI/HUD/WBP_HitMarker` 열기.
-2. **`OnHitMarker` 이벤트 핸들러**를 찾는다(현재 흰 X 펄스를 트리거하는 곳). 이 이벤트는 파라미터 **`MarkerType`(EFPSRHitMarkerType)** 을 받는다.
-   - 만약 핸들러가 없다면(흰 X가 PlayerController 직접 호출이면): `Event Construct`에서 오너 폰의 `FPSRPlayerFeedbackComponent`를 `Get Component By Class`로 얻어 **`OnHitMarker` → Bind Event**(AddDynamic)로 커스텀 이벤트 `ShowHitMarker(MarkerType)`에 연결.
-3. 마커 비주얼(대각선 X Image, 예: `Img_Marker`)의 색을 **MarkerType로 분기**:
-   - `Switch on EFPSRHitMarkerType`(MarkerType 입력) →
-     - **Hit** → `SetColorAndOpacity` = 흰색 `(1,1,1,1)`
-     - **Crit** → 흰색(또는 폴리시로 노랑 — 선택. 지금은 흰색 권장, 처치만 빨강 요구)
-     - **Kill** → `SetColorAndOpacity` = 빨강 `(1,0,0,1)`
-   - 색 적용 후 **기존 펄스 애니메이션 재생**(이미 있는 `PlayAnimation`)으로 연결.
-   - 대상이 여러 Image(대각선 4개)면 모두 같은 색을 적용하거나, 공통 부모 패널의 `SetColorAndOpacity`로 일괄 틴트.
-4. 컴파일 + 저장.
+### ① 비주얼 교체 — 디자이너 탭 (`WBP_HitMarker` Designer)
+기존 **거대한 네모 Image를 삭제**하고, **Canvas Panel** 아래에 대각선 바 4개로 X를 만든다(중앙 갭).
 
-> 설계 메모(§2-14): "히트마커 최종 연출은 크로스헤어/발사체 작업 후 재확인" — V3 시점에 색 구분을 확정하는 게 그 재확인에 해당. **틴트만** 추가(레이아웃/펄스 타이밍은 기존 유지). 약점(헤드샷) 전용 마커는 U3a/U12 범위 — 여기선 Hit/Kill 색만.
+```
+[Root]
+└─ Canvas Panel
+   ├─ Image  "Seg_TL"   ← Is Variable ✔
+   ├─ Image  "Seg_TR"   ← Is Variable ✔
+   ├─ Image  "Seg_BL"   ← Is Variable ✔
+   └─ Image  "Seg_BR"   ← Is Variable ✔
+```
+
+4개 모두 공통: **Brush 단색 흰색(1,1,1,1)**, Canvas Slot **Anchors = 중앙(0.5,0.5)**, **Alignment(0.5,0.5)**, **Size = 16 × 3**.
+세그먼트별 **Position**(중앙 기준 오프셋)과 **RenderTransform → Angle**(자기중심 회전, Pivot 0.5):
+
+| 위젯 | Position (X,Y) | Angle | 모양 |
+|---|---|---|---|
+| `Seg_TL` | (-8, -8) | **45** | `\` (좌상 팔) |
+| `Seg_BR` | ( 8,  8) | **45** | `\` (우하 팔) |
+| `Seg_TR` | ( 8, -8) | **-45** | `/` (우상 팔) |
+| `Seg_BL` | (-8,  8) | **-45** | `/` (좌하 팔) |
+
+→ 중앙에 점 없는 X(┌가 아니라 ✕ 모양 4선). 갭/길이/두께(8/16/3)는 PIE 보며 미세조정. **히트마커는 정적 크로스헤어보다 약간 크게**(레퍼런스 사진 비율).
+
+> 가독성(선택): 각 바 뒤에 1px 큰 검정 바를 깔면 밝은 배경에서도 보임 — 폴리시(후속)로 미뤄도 됨.
+
+### ② 펄스 애니메이션 (기존 것 재사용/확인)
+짧은 펄스(예: 0.12s)로 **Render Transform Scale 1.3→1.0 + Render Opacity 1→0**. 색(ColorAndOpacity) 트랙은 넣지 말 것(③ 틴트와 충돌 방지). 기존 펄스 애님이 색을 건드리면 **Render Opacity 기반으로 교체**.
+
+### ③ 색상 구분 — `Setting Hit Marker` 이벤트 그래프
+이미 있는 `Setting Hit Marker(MarkerType)` 커스텀 이벤트 본문에:
+1. `Switch on EFPSRHitMarkerType`(MarkerType) →
+   - **Hit / Crit** → 흰색 `(1,1,1,1)`
+   - **Kill** → 빨강 `(1,0,0,1)`
+   (Crit은 지금 흰색 권장 — 노랑은 폴리시 선택.)
+2. 그 색을 **`Set Color and Opacity` (Target = `self`)** 에 연결 → 위젯 전체(4선) 일괄 틴트.
+   - ⚠️ 펄스 애님이 self의 Color를 애니메이트하면 self 대신 **Seg_TL~BR 각각에 `Set Color and Opacity`** 4회(또는 4선을 Overlay로 묶고 그 위 처리)로 우회.
+3. 틴트 적용 → **`Play Animation`(펄스)** 호출.
+
+### ④ 컴파일 + 저장.
+
+> 설계 메모(§2-14): "히트마커 최종 연출은 크로스헤어/발사체 작업 후 재확인" = 바로 이 시점. **비주얼 형태(X) + 틴트만** 확정(로직·바인딩은 기존 유지). 약점(헤드샷) 전용 마커는 U3a/U12 범위 — 여기선 Hit/Kill 색만.
 
 ---
 
