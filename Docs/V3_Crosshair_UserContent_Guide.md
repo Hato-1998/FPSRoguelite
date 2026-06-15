@@ -12,17 +12,17 @@
 
 ---
 
-## STEP 0 — 브랜치/워크트리 (작업 격리)
+## STEP 0 — 브랜치 (작업 격리) — ✅ 완료됨
 
-V3는 별도 브랜치가 필요하다. 콘텐츠 전용이라 C++ 리빌드가 없어 가볍지만 다른 유닛(V1 등)과 섞이지 않게:
+병렬 세션이 없으므로 워크트리 없이 **단일 작업 폴더에서 브랜치 체크아웃**으로 진행한다. 이미 셋업 완료:
 
 ```powershell
-# main 기준 V3 워크트리 생성 (별도 폴더)
-git worktree add ../FPSR-crosshair -b phase/p4d-crosshair main
+# (이미 적용됨) main 기준 V3 브랜치 생성 + 체크아웃
+git checkout -b phase/p4d-crosshair main   # 또는 이미 있으면: git checkout phase/p4d-crosshair
 ```
 
-그 다음 **에디터를 `../FPSR-crosshair/FPSRoguelite.uproject`로 열어** 작업하면 저장되는 `.uasset`이 V3 브랜치 폴더에 들어간다.
-> ⚠️ 에디터/VibeUE는 한 번에 하나의 인스턴스가 안전. 다른 유닛 에디터가 떠 있으면 닫고 V3 워크트리로 연다(콘텐츠 검증·PIE는 §B-2 규칙3대로 직렬).
+현재 작업 폴더 `E:/Git_Project/FPSRoguelite`가 `phase/p4d-crosshair` 브랜치다. **에디터를 `FPSRoguelite.uproject`로 그대로 열어** 작업하면 저장되는 `.uasset`이 이 브랜치에 들어간다.
+> ⚠️ V3는 콘텐츠 전용(C++ 리빌드 없음)이라 브랜치 체크아웃이 가벼움. 나중에 병렬 세션이 생기면 그때 워크트리로 분리.
 
 ---
 
