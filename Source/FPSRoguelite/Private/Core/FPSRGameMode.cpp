@@ -12,6 +12,7 @@
 #include "Run/FPSRRunDirectorSubsystem.h"
 #include "Enemy/FPSREnemySpawnSubsystem.h"
 #include "Engine/World.h"
+#include "GameFramework/GameStateBase.h"
 #include "HAL/IConsoleManager.h"
 
 AFPSRGameMode::AFPSRGameMode()
@@ -72,6 +73,53 @@ void AFPSRGameMode::EndRun(EFPSRRunOutcome Outcome)
 	if (AFPSRGameState* GS = GetGameState<AFPSRGameState>())
 	{
 		GS->EndRunFreeze();
+	}
+}
+
+int32 AFPSRGameMode::GetLivingPlayerCount() const
+{
+	int32 Living = 0;
+	if (const AGameStateBase* GS = GetGameState<AGameStateBase>())
+	{
+		for (APlayerState* PS : GS->PlayerArray)
+		{
+			const AFPSRPlayerState* FPS = Cast<AFPSRPlayerState>(PS);
+			if (FPS && !FPS->IsOnlyASpectator() && FPS->IsAlive())
+			{
+				++Living;
+			}
+		}
+	}
+	return Living;
+}
+
+bool AFPSRGameMode::AreAllPlayersDead() const
+{
+	int32 Participants = 0;
+	if (const AGameStateBase* GS = GetGameState<AGameStateBase>())
+	{
+		for (APlayerState* PS : GS->PlayerArray)
+		{
+			const AFPSRPlayerState* FPS = Cast<AFPSRPlayerState>(PS);
+			if (FPS && !FPS->IsOnlyASpectator())
+			{
+				++Participants;
+			}
+		}
+	}
+	// At least one participant AND nobody alive — avoids reading a transient empty PlayerArray as a wipe.
+	return Participants > 0 && GetLivingPlayerCount() == 0;
+}
+
+void AFPSRGameMode::NotifyPlayerDefeated()
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+	if (AreAllPlayersDead())
+	{
+		EndRun(EFPSRRunOutcome::Defeat);
 	}
 }
 

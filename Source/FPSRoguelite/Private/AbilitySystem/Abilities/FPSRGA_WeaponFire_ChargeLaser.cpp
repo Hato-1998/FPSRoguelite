@@ -8,6 +8,7 @@
 #include "Combat/FPSRCombatStatics.h"
 #include "Core/FPSRGameState.h"
 #include "Core/FPSRPlayerController.h"
+#include "Core/FPSRPlayerState.h"
 
 #include "AbilitySystemComponent.h"
 #include "GameFramework/Pawn.h"
@@ -59,6 +60,16 @@ void UFPSRGA_WeaponFire_ChargeLaser::ActivateAbility(
 	if (const AFPSRGameState* RunState = World->GetGameState<AFPSRGameState>())
 	{
 		if (RunState->IsRunPaused())
+		{
+			EndAbility(Handle, ActorInfo, ActivationInfo, true, true);
+			return;
+		}
+	}
+
+	// No firing once the player is dead (U2 defeat wiring) — server-authoritative gate mirroring the input block.
+	if (const AFPSRPlayerState* OwnerPS = Avatar ? Avatar->GetPlayerState<AFPSRPlayerState>() : nullptr)
+	{
+		if (OwnerPS->IsDead())
 		{
 			EndAbility(Handle, ActorInfo, ActivationInfo, true, true);
 			return;

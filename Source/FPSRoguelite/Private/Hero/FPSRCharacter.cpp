@@ -3,6 +3,7 @@
 #include "Hero/FPSRCharacter.h"
 #include "Core/FPSRPlayerController.h"
 #include "Core/FPSRPlayerState.h"
+#include "Core/FPSRGameMode.h"
 #include "Core/FPSRLogChannels.h"
 #include "Core/FPSRGameState.h"
 #include "AbilitySystem/FPSRAbilitySystemComponent.h"
@@ -274,9 +275,15 @@ bool AFPSRCharacter::IsRunFrozen() const
 	return GS && GS->IsRunPaused();
 }
 
+bool AFPSRCharacter::IsDeadLocal() const
+{
+	const AFPSRPlayerState* PS = GetPlayerState<AFPSRPlayerState>();
+	return PS && PS->IsDead();
+}
+
 void AFPSRCharacter::Input_MoveForward(const FInputActionValue& Value)
 {
-	if (IsRunFrozen())
+	if (IsRunFrozen() || IsDeadLocal())
 	{
 		GetCharacterMovement()->StopMovementImmediately(); // kill residual slide during the freeze
 		return;
@@ -290,7 +297,7 @@ void AFPSRCharacter::Input_MoveForward(const FInputActionValue& Value)
 
 void AFPSRCharacter::Input_MoveRight(const FInputActionValue& Value)
 {
-	if (IsRunFrozen())
+	if (IsRunFrozen() || IsDeadLocal())
 	{
 		GetCharacterMovement()->StopMovementImmediately();
 		return;
@@ -304,7 +311,7 @@ void AFPSRCharacter::Input_MoveRight(const FInputActionValue& Value)
 
 void AFPSRCharacter::Input_Look(const FInputActionValue& Value)
 {
-	if (IsRunFrozen())
+	if (IsRunFrozen() || IsDeadLocal())
 	{
 		return; // camera frozen during card selection (mouse goes to the card UI in Menu input mode)
 	}
@@ -323,7 +330,7 @@ void AFPSRCharacter::Input_Look(const FInputActionValue& Value)
 
 void AFPSRCharacter::Input_Fire(const FInputActionValue& Value)
 {
-	if (IsRunFrozen())
+	if (IsRunFrozen() || IsDeadLocal())
 	{
 		return; // no firing during the card-selection freeze
 	}
@@ -343,17 +350,19 @@ void AFPSRCharacter::Input_FireReleased(const FInputActionValue& Value)
 	}
 }
 
-void AFPSRCharacter::Input_EquipSlot1(const FInputActionValue& Value) { ServerEquipSlot(0); }
-void AFPSRCharacter::Input_EquipSlot2(const FInputActionValue& Value) { ServerEquipSlot(1); }
-void AFPSRCharacter::Input_EquipSlot3(const FInputActionValue& Value) { ServerEquipSlot(2); }
+void AFPSRCharacter::Input_EquipSlot1(const FInputActionValue& Value) { if (IsRunFrozen() || IsDeadLocal()) { return; } ServerEquipSlot(0); }
+void AFPSRCharacter::Input_EquipSlot2(const FInputActionValue& Value) { if (IsRunFrozen() || IsDeadLocal()) { return; } ServerEquipSlot(1); }
+void AFPSRCharacter::Input_EquipSlot3(const FInputActionValue& Value) { if (IsRunFrozen() || IsDeadLocal()) { return; } ServerEquipSlot(2); }
 
 void AFPSRCharacter::Input_Reload(const FInputActionValue& Value)
 {
+	if (IsRunFrozen() || IsDeadLocal()) { return; }
 	ServerReload();
 }
 
 void AFPSRCharacter::Input_ADSPressed(const FInputActionValue& Value)
 {
+	if (IsRunFrozen() || IsDeadLocal()) { return; }
 	if (WeaponFire) { WeaponFire->SetAiming(true); }
 	ServerSetAiming(true);
 }
@@ -366,7 +375,7 @@ void AFPSRCharacter::Input_ADSReleased(const FInputActionValue& Value)
 
 void AFPSRCharacter::Input_Dash(const FInputActionValue& Value)
 {
-	if (IsRunFrozen())
+	if (IsRunFrozen() || IsDeadLocal())
 	{
 		return; // no dashing during the card-selection freeze
 	}
@@ -384,7 +393,7 @@ void AFPSRCharacter::ServerEquipSlot_Implementation(int32 SlotIndex)
 {
 	// No weapon switching during the card-selection freeze: the run is globally stopped, and locking the
 	// equipped slot keeps a ThisWeapon-scope card's target deterministic (it can't be swapped mid-offer).
-	if (IsRunFrozen())
+	if (IsRunFrozen() || IsDeadLocal())
 	{
 		return;
 	}
@@ -396,6 +405,7 @@ void AFPSRCharacter::ServerEquipSlot_Implementation(int32 SlotIndex)
 
 void AFPSRCharacter::ServerReload_Implementation()
 {
+	if (IsDeadLocal()) { return; }
 	if (WeaponInventory)
 	{
 		WeaponInventory->StartReload();
@@ -404,6 +414,7 @@ void AFPSRCharacter::ServerReload_Implementation()
 
 void AFPSRCharacter::ServerSetAiming_Implementation(bool bNewAiming)
 {
+	if (IsDeadLocal()) { return; }
 	if (WeaponFire)
 	{
 		WeaponFire->SetAiming(bNewAiming);
@@ -421,7 +432,7 @@ void AFPSRCharacter::ServerDash_Implementation(FVector DashDirection)
 	// No dashing during the card-selection freeze (mirror the ServerEquipSlot server gate).
 	// Input_Dash already gates client-side, but a dash RPC in flight when the freeze replicates must be rejected
 	// on the server too, or the run is no longer globally stopped.
-	if (IsRunFrozen())
+	if (IsRunFrozen() || IsDeadLocal())
 	{
 		return;
 	}
@@ -476,6 +487,12 @@ void AFPSRCharacter::ApplyContactDamage(float DamageAmount, AActor* DamageInstig
 		return;
 	}
 
+	// Dead players take no further contact damage (no repeated corpse hits).
+	if (IsDeadLocal())
+	{
+		return;
+	}
+
 	// Invulnerability frames: ignore further hits within DamageInvulnerabilityDuration of the last
 	// accepted hit, so a swarm can't stack damage in a single window (per-player, server-authoritative).
 	const UWorld* World = GetWorld();
@@ -504,8 +521,44 @@ void AFPSRCharacter::ApplyContactDamage(float DamageAmount, AActor* DamageInstig
 
 void AFPSRCharacter::HandleOutOfHealth()
 {
-	// Placeholder: full Down-But-Not-Out / revive / respawn is P5 (Game.MD §2-13). Log for now.
-	UE_LOG(LogFPSR, Warning, TEXT("[Player] %s reached 0 health (DBNO/respawn handling is P5)."), *GetNameSafe(this));
+	// Server-authoritative (bound under HasAuthority in InitAbilitySystem). U2 defeat wiring: mark the player dead
+	// (simplified — full DBNO/revive/respawn is U9, Game.MD §2-13), stop all activity, and let the GameMode check
+	// for a party wipe -> EndRun(Defeat).
+	UE_LOG(LogFPSR, Warning, TEXT("[Player] %s reached 0 health (marking Dead; DBNO/respawn is U9)."), *GetNameSafe(this));
+
+	if (AFPSRPlayerState* PS = GetPlayerState<AFPSRPlayerState>())
+	{
+		if (PS->IsDead())
+		{
+			return; // already processed (idempotent)
+		}
+		PS->SetDead(true);
+	}
+
+	// Stop firing and cancel any in-progress ability (e.g. the server-only ChargeLaser charge sequence) so the
+	// corpse can't keep dealing damage. Clear aiming so ADS doesn't stay latched.
+	if (WeaponFire)
+	{
+		WeaponFire->StopFiring();
+		WeaponFire->SetAiming(false);
+	}
+	if (AbilitySystemComponent)
+	{
+		AbilitySystemComponent->CancelAllAbilities();
+	}
+
+	// Server-authoritative movement stop so the corpse doesn't slide / keep being driven on remote clients.
+	if (UCharacterMovementComponent* Move = GetCharacterMovement())
+	{
+		Move->StopMovementImmediately();
+		Move->DisableMovement();
+	}
+
+	// Wipe check: solo death = immediate wipe; co-op ends only when the last player falls.
+	if (AFPSRGameMode* GM = GetWorld() ? GetWorld()->GetAuthGameMode<AFPSRGameMode>() : nullptr)
+	{
+		GM->NotifyPlayerDefeated();
+	}
 }
 
 void AFPSRCharacter::RequestReload()

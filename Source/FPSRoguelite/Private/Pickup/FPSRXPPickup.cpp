@@ -2,6 +2,7 @@
 
 #include "Pickup/FPSRXPPickup.h"
 #include "Core/FPSRGameState.h"
+#include "Core/FPSRPlayerState.h"
 
 #include "AbilitySystem/Attributes/FPSRCombatSet.h"
 #include "AbilitySystemComponent.h"
@@ -65,6 +66,15 @@ void AFPSRXPPickup::Tick(float DeltaSeconds)
 		if (PlayerPawn == nullptr)
 		{
 			continue;
+		}
+
+		// Dead players don't collect or magnet XP (U2).
+		if (const AFPSRPlayerState* PS = PC->GetPlayerState<AFPSRPlayerState>())
+		{
+			if (PS->IsDead())
+			{
+				continue;
+			}
 		}
 
 		const FVector PlayerLocation = PlayerPawn->GetActorLocation();

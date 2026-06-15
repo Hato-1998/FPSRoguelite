@@ -68,6 +68,9 @@ protected:
 	/** True while the run is globally frozen for card selection (Game.MD §2-2) — gates player input. */
 	bool IsRunFrozen() const;
 
+	/** True once this player's PlayerState is marked dead (U2 defeat wiring) — gates input/firing like IsRunFrozen. */
+	bool IsDeadLocal() const;
+
 	/** Bound to the health set's OnOutOfHealth (server). Placeholder: logs; full DBNO/respawn is P5. */
 	void HandleOutOfHealth();
 

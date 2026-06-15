@@ -5,6 +5,7 @@
 #include "AbilitySystem/Attributes/FPSRHealthSet.h"
 #include "AbilitySystem/Attributes/FPSRCombatSet.h"
 #include "Weapon/FPSRWeaponInventoryComponent.h"
+#include "Weapon/FPSRWeaponFireComponent.h"
 #include "GameFramework/Pawn.h"
 #include "Net/UnrealNetwork.h"
 #include "Net/Core/PushModel/PushModel.h"
@@ -42,6 +43,7 @@ void AFPSRPlayerState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Out
 
 	FDoRepLifetimeParams Params;
 	Params.bIsPushBased = true;
+	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRPlayerState, bIsDead, Params);
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRPlayerState, RunRerollCharges, Params);
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRPlayerState, CardPicksPending, Params);
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRPlayerState, MissionRewardPicksPending, Params);
@@ -166,6 +168,33 @@ void AFPSRPlayerState::AddAllWeaponsModifier(const FFPSRWeaponStatMod& Mod)
 		if (UFPSRWeaponInventoryComponent* Inv = Pawn->FindComponentByClass<UFPSRWeaponInventoryComponent>())
 		{
 			Inv->MarkAllInstancesResolvedDirty();
+		}
+	}
+}
+
+void AFPSRPlayerState::SetDead(bool bNewDead)
+{
+	if (!HasAuthority() || bIsDead == bNewDead)
+	{
+		return;
+	}
+	bIsDead = bNewDead;
+	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRPlayerState, bIsDead, this);
+}
+
+void AFPSRPlayerState::OnRep_LifeState()
+{
+	// Owning client: stop the local fire loop immediately on death so a held trigger doesn't keep
+	// auto-firing until the input gate catches up next frame. Server-side cancellation is handled in
+	// AFPSRCharacter::HandleOutOfHealth (CancelAllAbilities).
+	if (bIsDead)
+	{
+		if (APawn* OwnerPawn = GetPawn())
+		{
+			if (UFPSRWeaponFireComponent* Fire = OwnerPawn->FindComponentByClass<UFPSRWeaponFireComponent>())
+			{
+				Fire->StopFiring();
+			}
 		}
 	}
 }

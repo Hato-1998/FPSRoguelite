@@ -10,6 +10,7 @@
 #include "Weapon/FPSRProjectileSubsystem.h"
 #include "Weapon/FPSRProjectileTypes.h"
 #include "Core/FPSRGameState.h"
+#include "Core/FPSRPlayerState.h"
 #include "Core/FPSRLogChannels.h"
 
 #include "AbilitySystemComponent.h"
@@ -46,6 +47,16 @@ void UFPSRGA_WeaponFire_Projectile::ActivateAbility(
 	if (const AFPSRGameState* RunState = World->GetGameState<AFPSRGameState>())
 	{
 		if (RunState->IsRunPaused())
+		{
+			EndAbility(Handle, ActorInfo, ActivationInfo, true, true);
+			return;
+		}
+	}
+
+	// No firing once the player is dead (U2 defeat wiring) — server-authoritative gate mirroring the input block.
+	if (const AFPSRPlayerState* OwnerPS = Avatar ? Avatar->GetPlayerState<AFPSRPlayerState>() : nullptr)
+	{
+		if (OwnerPS->IsDead())
 		{
 			EndAbility(Handle, ActorInfo, ActivationInfo, true, true);
 			return;
