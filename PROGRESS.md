@@ -24,6 +24,13 @@
 > **검증**: 빌드 Succeeded + 헤드리스 스모크(ModuleLoads) succeeded:1/failed:0 + 사용자 PIE(가속 램프/즉시리셋/교체리셋/프리즈 미발사/FireRate 면역) 통과. Codex 머지게이트=코드 이미 main 수렴이라 diff는 콘텐츠 바이너리만(소스 무변경, no actionable findings).
 > **후속 튜닝**: 최고속 반동/블룸이 과하면 DA에서 `RecoilVertical`/`BloomPerShot` 조정(FireRate 가속을 자동 추종). 비주얼 폴리시(모듈러 무기 애님)는 U15.
 
+## 🎯 V3 기본 크로스헤어 HUD — **완료(2026-06-15, 브랜치 `phase/p4d-crosshair` → main `--no-ff` 머지). 빌드+스모크+사용자 PIE 통과**
+> 정적 중앙 레티클 + ADS 숨김 + 히트마커 비주얼 정비. U1 재미 게이트 손맛 판정 ①의 전제. 동적 스프레드(원 확대/축소)는 U12. 가이드: `Docs/V3_Crosshair_UserContent_Guide.md`. **코드=거의 없음**(IsAiming 이미 BlueprintPure). 디버그 드로우 cvar 게이트만 C++.
+> **콘텐츠(사용자/WBP)**: ① `WBP_BasicCrosshair` 신설(`CrosshairRoot` Overlay에 십자 4바+점, **PreConstruct 변수** Thickness/Length/Gap로 형태 일괄 제어, 전체배율=CrosshairRoot RenderTransform Scale). ADS 숨김=`CrosshairRoot` Visibility 바인딩(GetOwningPlayerPawn→GetComponentByClass(FPSRWeaponFireComponent)→IsAiming → Hidden/Visible). ② `WBP_HitMarker` 비주얼 교체(거대 네모→대각선 **X 4선**, PreConstruct MarkerLength/Thickness/Offset/Angle 변수화) + `Setting Hit Marker`에 MarkerType 틴트(**Hit/Crit=흰, Kill=빨강**, self SetColorAndOpacity). 바인딩 로직(리트라이 타이머+OnHitMarker)은 기존 유지. ③ `WBP_GameHUD` 중앙 배치(크로스헤어 아래, 히트마커 위).
+> **C++(`d25aaf8`)**: 무기 디버그 드로우 4곳(Hitscan 트레이스/ChargeLaser 빔/Melee 구체/온스크린 탄약)을 신규 cvar `FPSR.Debug.WeaponDraw`(기본 0=OFF, `ECVF_Cheat`, `#if ENABLE_DRAW_DEBUG` 내부)로 게이트 — 크로스헤어/히트마커 생겨 개발 디버그 불필요. `FPSR.Debug.WeaponDraw 1`로 재활성.
+> **검증**: 빌드 Succeeded(up to date) + 헤드리스 스모크(ModuleLoads) Success + Opus 직접 diff 리뷰(클린) + Codex 머지게이트(no actionable findings) + 사용자 PIE(중앙 표시/ADS 숨김/명중 흰·처치 빨강/메뉴 미표시) 통과.
+> **후속**: 동적 스프레드(GetCurrentBloom+SpreadDegrees로 Gap 애니메이트)·무기별 크로스헤어=**U12**. **크로스헤어 인게임 크기 설정**(UGameUserSettings+WBP_Settings+메인메뉴 진입)=**U17 신규 유닛**(TaskPrompts §B/§C 등재, 사용자 확정 2026-06-15). 약점 전용 마커=U3a/U12.
+
 ## 🔊 V1 최소 사각 경고 오디오 — **완료(2026-06-15, 브랜치 `phase/p5-blindspot-audio` → main `--no-ff` 머지). 빌드+스모크+사용자 PIE(좌/우 방향 인지) 통과**
 > 등 뒤/사각(전방 시야 밖) 근접 적에 대한 방향성 경고 사운드. §2-14 확정분(P4-D 말~P5 당김, 재미 게이트 §7-5 판정 ④ 1인칭 사각 위협 체감의 선행). **사운드 전용 — 시각 인디케이터 부활 안 함**(§2-14 의도적 제외). 풀 오디오 폴리시는 U13(P7).
 > **확정 설계(제1원리 3줄)**: ① **제1원리** — 서버가 수백 적×플레이어별 사각 각도 전수계산은 §5 복제/CPU 예산 위반 + 사각 인지는 *로컬 코스메틱* → **클라 로컬 throttled 폴링**(~5Hz). 거리² 선컬링 = Significance S0/S1 근접 적만 각도 판정(§5-1 정합, S2/S3는 dot 전 거리컬에서 탈락). ② **Lyra/UE표준** — Lyra엔 해당 시스템 없음(플레이어 측 교차검증 대상 아님); 방향성은 UE 표준 `PlaySoundAtLocation`(리스너 상대 공간화) 그대로. ③ **프로젝트 정합** — `UFPSRPlayerFeedbackComponent`의 로컬·비복제·`IsLocalView` 패턴 차용(단 이벤트형 아닌 폴링), 프리즈 `IsRunPaused` 게이트(§2-2), 적 enumeration은 hidden-skip으로 풀링 인프라 정합. 적 단위 오디오 컴포넌트 상시 부착 없음.
