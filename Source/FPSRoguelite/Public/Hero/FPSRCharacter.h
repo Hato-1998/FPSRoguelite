@@ -16,6 +16,7 @@ class UFPSRWeaponFireComponent;
 class UFPSRWeaponDataAsset;
 class UMaterialInterface;
 class UFPSRPlayerFeedbackComponent;
+class UFPSRBlindspotAudioComponent;
 struct FInputActionValue;
 class UStaticMeshComponent;
 class UMeshComponent;
@@ -152,6 +153,11 @@ protected:
 	/** Local-only hit-marker + threat-indicator feedback (Game.MD §2-14). Not replicated; WBP HUD binds to it. */
 	UPROPERTY(VisibleAnywhere, Category = "FPSR|Feedback")
 	TObjectPtr<UFPSRPlayerFeedbackComponent> PlayerFeedback;
+
+	/** Local-only blind-spot threat audio (Game.MD §2-14). Not replicated; warns by sound when an enemy is
+	 *  close and outside the forward view (audio only — no visual indicator). */
+	UPROPERTY(VisibleAnywhere, Category = "FPSR|Feedback")
+	TObjectPtr<UFPSRBlindspotAudioComponent> BlindspotAudio;
 
 	/** Starting weapons granted on possession (slot order). Set via ConstructorHelpers (P1) / HeroDataAsset (later). */
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Weapon")
