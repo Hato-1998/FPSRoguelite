@@ -6,6 +6,7 @@
 #include "FPSRBlindspotAudioComponent.generated.h"
 
 class USoundBase;
+class USoundAttenuation;
 class AFPSREnemyBase;
 
 /** Local-only blind-spot threat audio (Game.MD §2-14): warns the owning player, by spatialized sound only,
@@ -46,10 +47,17 @@ protected:
 	/** Play the spatialized warning cue toward ThreatDirection (unit, world) from the listener view location. */
 	void PlayWarningCue(const FVector& ViewLocation, const FVector& ThreatDirection);
 
-	/** Sound played when a blind-spot threat is detected. Spatialized (set Attenuation on the asset for falloff).
-	 *  Designer-assigned in BP; null = feature inert. */
+	/** Sound played when a blind-spot threat is detected. Designer-assigned in BP; null = feature inert. The cue
+	 *  is force-spatialized (see WarningAttenuation) so it pans by direction even if this asset is a plain 2D
+	 *  SoundWave with no attenuation of its own. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "FPSR|Blindspot")
 	TObjectPtr<USoundBase> WarningSound;
+
+	/** Optional attenuation override for the cue. When null, a built-in spatialized attenuation (left/right
+	 *  panning, falloff = SpatializeFalloffDistance) is used so directional audio works with zero asset setup.
+	 *  Assign an asset (e.g. with HRTF) to customize — this is where U13 plugs in front/back binaural polish. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "FPSR|Blindspot")
+	TObjectPtr<USoundAttenuation> WarningAttenuation;
 
 	/** Only enemies within this range are considered (cm). Doubles as the Significance gate — far S2/S3 enemies
 	 *  fail this cull before any angle test (§5-1). */
@@ -74,10 +82,23 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "FPSR|Blindspot", meta = (ClampMin = "1.0"))
 	float CueDistance = 200.0f;
 
+	/** Falloff distance (cm) of the built-in spatialized attenuation (used when WarningAttenuation is null).
+	 *  Generous so the near cue stays audible while still panning by direction. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "FPSR|Blindspot", meta = (ClampMin = "1.0"))
+	float SpatializeFalloffDistance = 5000.0f;
+
 private:
+	/** Resolve the attenuation to play the cue with: the designer override, else a lazily-built, cached
+	 *  spatialized attenuation configured from the tunables (forces panning regardless of the sound asset). */
+	USoundAttenuation* ResolveAttenuation();
+
 	/** Accumulated time since the last scan (throttle). */
 	float ScanAccumulator = 0.0f;
 
 	/** World time of the last warning cue (cooldown gate). */
 	float LastWarnTime = -1000.0f;
+
+	/** Cached built-in spatialized attenuation (created on first use when WarningAttenuation is null). */
+	UPROPERTY(Transient)
+	TObjectPtr<USoundAttenuation> RuntimeAttenuation;
 };

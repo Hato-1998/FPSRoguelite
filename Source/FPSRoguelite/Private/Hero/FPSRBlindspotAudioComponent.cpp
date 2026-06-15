@@ -10,6 +10,8 @@
 #include "EngineUtils.h"
 #include "Kismet/GameplayStatics.h"
 #include "Sound/SoundBase.h"
+#include "Sound/SoundAttenuation.h"
+#include "Engine/Attenuation.h"
 #include "HAL/IConsoleManager.h"
 
 UFPSRBlindspotAudioComponent::UFPSRBlindspotAudioComponent()
@@ -127,6 +129,30 @@ void UFPSRBlindspotAudioComponent::ScanAndWarn()
 	PlayWarningCue(ViewLocation, NearestThreatDir2D);
 }
 
+USoundAttenuation* UFPSRBlindspotAudioComponent::ResolveAttenuation()
+{
+	if (WarningAttenuation)
+	{
+		return WarningAttenuation; // designer override (e.g. HRTF) takes precedence
+	}
+
+	// Build a spatialized attenuation in code so the cue pans by direction even when WarningSound is a plain
+	// 2D SoundWave (no attenuation of its own → otherwise it plays non-spatialized/centered and gives NO
+	// directional cue at all). Cached and refreshed from the tunables each call (cheap struct copy).
+	if (RuntimeAttenuation == nullptr)
+	{
+		RuntimeAttenuation = NewObject<USoundAttenuation>(this);
+	}
+	FSoundAttenuationSettings& Att = RuntimeAttenuation->Attenuation;
+	Att.bAttenuate = true;
+	Att.bSpatialize = true; // THE fix: enable 3D panning (left/right) relative to the listener
+	Att.SpatializationAlgorithm = ESoundSpatializationAlgorithm::SPATIALIZATION_Default; // stereo panning
+	Att.AttenuationShape = EAttenuationShape::Sphere;
+	Att.AttenuationShapeExtents = FVector(CueDistance, 0.0f, 0.0f); // full volume within the cue distance
+	Att.FalloffDistance = FMath::Max(SpatializeFalloffDistance, 1.0f);
+	return RuntimeAttenuation;
+}
+
 void UFPSRBlindspotAudioComponent::PlayWarningCue(const FVector& ViewLocation, const FVector& ThreatDirection)
 {
 	if (WarningSound == nullptr)
@@ -134,9 +160,11 @@ void UFPSRBlindspotAudioComponent::PlayWarningCue(const FVector& ViewLocation, c
 		return;
 	}
 	// Place the cue a fixed short distance toward the threat so the engine spatializes it relative to the
-	// listener (behind-you panning) at a consistent loudness regardless of the enemy's real distance.
+	// listener (left/right panning) at a consistent loudness regardless of the enemy's real distance. NOTE:
+	// stereo panning resolves left/right reliably; front/back disambiguation needs headphones + HRTF (U13).
 	const FVector CueLocation = ViewLocation + ThreatDirection * CueDistance;
-	UGameplayStatics::PlaySoundAtLocation(this, WarningSound, CueLocation);
+	UGameplayStatics::SpawnSoundAtLocation(this, WarningSound, CueLocation, FRotator::ZeroRotator,
+		1.0f, 1.0f, 0.0f, ResolveAttenuation());
 }
 
 #if !UE_BUILD_SHIPPING
