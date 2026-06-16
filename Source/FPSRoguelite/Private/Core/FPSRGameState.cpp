@@ -108,6 +108,10 @@ void AFPSRGameState::EndRunFreeze()
 	bRunEnded = true;
 	SetRunPaused(true);
 	UE_LOG(LogFPSR, Log, TEXT("[Run] END — freeze pinned (result screen)."));
+
+	// Decoupled run-end signal (fires once — the bRunEnded latch guards re-entry). The GameMode subscribes to
+	// drive the post-run travel back to the lobby (P7 §3-5) without touching EndRun's body.
+	OnRunEnded.Broadcast();
 }
 
 void AFPSRGameState::SetVisionRestricted(bool bRestricted)

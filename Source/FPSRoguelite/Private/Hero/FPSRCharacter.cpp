@@ -186,13 +186,29 @@ void AFPSRCharacter::PossessedBy(AController* NewController)
 
 	if (HasAuthority() && WeaponInventory)
 	{
-		if (DefaultPrimaryWeapon)
+		// Lobby loadout pick (P7 §3-8): the chosen weapon is the single weapon for the run. Only when no pick
+		// was made (e.g. debug FPSR.TravelGame straight into gameplay, bypassing the lobby) do we fall back to
+		// the character BP's default loadout, so direct-to-gameplay testing still spawns armed.
+		UFPSRWeaponDataAsset* SelectedWeapon = nullptr;
+		if (const AFPSRPlayerState* PS = GetPlayerState<AFPSRPlayerState>())
 		{
-			WeaponInventory->AddWeapon(DefaultPrimaryWeapon);
+			SelectedWeapon = PS->GetSelectedWeapon();
 		}
-		if (DefaultSecondaryWeapon)
+
+		if (SelectedWeapon)
 		{
-			WeaponInventory->AddWeapon(DefaultSecondaryWeapon);
+			WeaponInventory->AddWeapon(SelectedWeapon);
+		}
+		else
+		{
+			if (DefaultPrimaryWeapon)
+			{
+				WeaponInventory->AddWeapon(DefaultPrimaryWeapon);
+			}
+			if (DefaultSecondaryWeapon)
+			{
+				WeaponInventory->AddWeapon(DefaultSecondaryWeapon);
+			}
 		}
 	}
 }

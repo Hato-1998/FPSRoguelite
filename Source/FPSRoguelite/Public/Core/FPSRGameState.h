@@ -16,6 +16,11 @@ enum class ERunPhase : uint8
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnRunStateChanged);
 
+/** Fired once on the server when the run ends (EndRunFreeze, victory or defeat). Decoupled hook so flow logic
+ *  (e.g. the GameMode's post-run travel back to the lobby, P7 §3-5) can react WITHOUT editing EndRun's body —
+ *  keeps the victory caller (U3) and the lobby-return caller (U11) on independent code paths. */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnRunEnded);
+
 /** Server-authoritative run progression state (shared XP, party level, run phase, global freeze).
  *  Redesign 2026-06-04 (Game.MD §2-2): on level-up (or mission clear) the run globally freezes — enemies
  *  and players stop — until every player finishes their card picks. Replicated via Push Model. */
@@ -100,6 +105,10 @@ public:
 
 	UPROPERTY(BlueprintAssignable, Category = "FPSR|Run")
 	FOnRunStateChanged OnRunStateChanged;
+
+	/** Server: broadcast once when the run ends (see FOnRunEnded). Subscribers travel/clean up after the run. */
+	UPROPERTY(BlueprintAssignable, Category = "FPSR|Run")
+	FOnRunEnded OnRunEnded;
 
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 

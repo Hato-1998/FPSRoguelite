@@ -5,6 +5,7 @@
 #include "Core/FPSRPlayerController.h"
 #include "Core/FPSRPlayerState.h"
 #include "Core/FPSRGameFlowSubsystem.h"
+#include "Core/FPSRGameFlowSettings.h"
 #include "Core/FPSRLogChannels.h"
 #include "Hero/FPSRCharacter.h"
 #include "Card/FPSRCardSubsystem.h"
@@ -13,7 +14,29 @@
 #include "Enemy/FPSREnemySpawnSubsystem.h"
 #include "Engine/World.h"
 #include "GameFramework/GameStateBase.h"
+#include "TimerManager.h"
 #include "HAL/IConsoleManager.h"
+
+namespace
+{
+	/** Seamless ServerTravel to a configured (soft) map as a listen server. Shared by the post-run lobby travel
+	 *  and the debug travel commands. No-op (logged) if the map is unset/invalid. */
+	void ServerTravelListenToMap(UWorld* World, const TSoftObjectPtr<UWorld>& Map)
+	{
+		if (!World)
+		{
+			return;
+		}
+		const UFPSRGameFlowSettings* Settings = GetDefault<UFPSRGameFlowSettings>();
+		const FName PackageName = Settings ? Settings->GetLevelPackageName(Map) : NAME_None;
+		if (PackageName == NAME_None)
+		{
+			UE_LOG(LogFPSR, Error, TEXT("[Flow] ServerTravel target map is null/invalid — travel aborted."));
+			return;
+		}
+		World->ServerTravel(PackageName.ToString() + TEXT("?listen"));
+	}
+}
 
 AFPSRGameMode::AFPSRGameMode()
 {
@@ -21,6 +44,10 @@ AFPSRGameMode::AFPSRGameMode()
 	PlayerControllerClass = AFPSRPlayerController::StaticClass();
 	PlayerStateClass = AFPSRPlayerState::StaticClass();
 	DefaultPawnClass = AFPSRCharacter::StaticClass();
+
+	// Seamless travel keeps connections/PlayerControllers/PlayerStates alive across gameplay<->lobby travel
+	// (P7 §3-4); the empty TransitionMap is configured in DefaultEngine.ini.
+	bUseSeamlessTravel = true;
 }
 
 void AFPSRGameMode::BeginPlay()
@@ -47,6 +74,44 @@ void AFPSRGameMode::BeginPlay()
 			RunDirector->StartRun();
 		}
 	}
+
+	// Close the loop: when the run ends (EndRunFreeze, victory or defeat) travel back to the lobby. Subscribing
+	// here (not editing EndRun's body) keeps this caller independent of the victory caller U3 adds (P7 §3-5).
+	if (AFPSRGameState* GS = GetGameState<AFPSRGameState>())
+	{
+		GS->OnRunEnded.AddDynamic(this, &AFPSRGameMode::HandlePostRunTravel);
+	}
+}
+
+void AFPSRGameMode::HandlePostRunTravel()
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+
+	// Let the result screen sit for a readable beat, then seamless-travel everyone back to the lobby hub.
+	if (UWorld* World = GetWorld())
+	{
+		if (PostRunTravelDelay > 0.0f)
+		{
+			World->GetTimerManager().SetTimer(PostRunTravelTimer, this, &AFPSRGameMode::TravelToLobby, PostRunTravelDelay, false);
+		}
+		else
+		{
+			TravelToLobby();
+		}
+	}
+}
+
+void AFPSRGameMode::TravelToLobby()
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+	const UFPSRGameFlowSettings* Settings = GetDefault<UFPSRGameFlowSettings>();
+	ServerTravelListenToMap(GetWorld(), Settings ? Settings->LobbyMap : nullptr);
 }
 
 void AFPSRGameMode::EndRun(EFPSRRunOutcome Outcome)
@@ -145,6 +210,32 @@ namespace
 			}
 
 			GM->EndRun(Outcome);
+		}));
+
+	FAutoConsoleCommandWithWorld GCmd_TravelLobby(
+		TEXT("FPSR.TravelLobby"),
+		TEXT("Seamless ServerTravel to the lobby map as listen server (debug, host only). Pre-tests the travel skeleton without a session."),
+		FConsoleCommandWithWorldDelegate::CreateLambda([](UWorld* World)
+		{
+			if (!World || (!World->IsNetMode(NM_ListenServer) && !World->IsNetMode(NM_Standalone)))
+			{
+				return;
+			}
+			const UFPSRGameFlowSettings* Settings = GetDefault<UFPSRGameFlowSettings>();
+			ServerTravelListenToMap(World, Settings ? Settings->LobbyMap : nullptr);
+		}));
+
+	FAutoConsoleCommandWithWorld GCmd_TravelGame(
+		TEXT("FPSR.TravelGame"),
+		TEXT("Seamless ServerTravel to the gameplay (run) map as listen server (debug, host only). Pre-tests the travel skeleton without a session."),
+		FConsoleCommandWithWorldDelegate::CreateLambda([](UWorld* World)
+		{
+			if (!World || (!World->IsNetMode(NM_ListenServer) && !World->IsNetMode(NM_Standalone)))
+			{
+				return;
+			}
+			const UFPSRGameFlowSettings* Settings = GetDefault<UFPSRGameFlowSettings>();
+			ServerTravelListenToMap(World, Settings ? Settings->RunMap : nullptr);
 		}));
 
 	FAutoConsoleCommandWithWorld GCmd_ReturnToMenu(

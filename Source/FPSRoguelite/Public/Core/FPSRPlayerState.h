@@ -11,9 +11,11 @@ class UFPSRAbilitySystemComponent;
 class UFPSRHealthSet;
 class UFPSRCombatSet;
 class UAbilitySystemComponent;
+class UFPSRWeaponDataAsset;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnCardPicksChanged);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnRerollChargesChanged);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnLoadoutChanged);
 
 /** PlayerState owns the AbilitySystemComponent and global attribute sets (co-op / revive friendly). */
 UCLASS()
@@ -87,11 +89,33 @@ public:
 	 *  weapon instances' resolved-stat caches dirty. */
 	void AddAllWeaponsModifier(const FFPSRWeaponStatMod& Mod);
 
+	/** The weapon this player picked in the lobby (P7 §3-8). Read by AFPSRCharacter::PossessedBy to grant the
+	 *  single run weapon; null = fall back to the character BP's default loadout (e.g. debug straight-to-gameplay).
+	 *  Survives the lobby->gameplay seamless travel via CopyProperties. */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Loadout")
+	UFPSRWeaponDataAsset* GetSelectedWeapon() const { return SelectedWeapon; }
+
+	/** Server: set the lobby-chosen weapon (validated against the loadout pool by ServerSelectLoadoutWeapon). */
+	void SetSelectedWeapon(UFPSRWeaponDataAsset* Weapon);
+
+	/** Server: reset all per-run progression to a fresh-run baseline (called on lobby entry, P7 §3-6). Clears
+	 *  life state, pending picks, AllWeapons modifiers and the loadout pick. XP/PartyLevel reset naturally via the
+	 *  fresh GameState on each map; weapon inventory resets via pawn respawn. Run on the server (authority). */
+	void ResetRunState();
+
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 	virtual void BeginPlay() override;
 
+	/** Carry seamless-travel-persistent fields (the loadout pick) to the new PlayerState when traveling
+	 *  lobby->gameplay. Run-progression fields are intentionally NOT carried (reset on lobby entry anyway). */
+	virtual void CopyProperties(APlayerState* PlayerState) override;
+
 	UPROPERTY(BlueprintAssignable, Category = "FPSR|Run")
 	FOnCardPicksChanged OnCardPicksChanged;
+
+	/** Owning client: the loadout selection replicated/changed — lobby UI refreshes its highlight. */
+	UPROPERTY(BlueprintAssignable, Category = "FPSR|Loadout")
+	FOnLoadoutChanged OnLoadoutChanged;
 
 protected:
 	UFUNCTION()
@@ -105,6 +129,9 @@ protected:
 
 	UFUNCTION()
 	void OnRep_AllWeaponsMods();
+
+	UFUNCTION()
+	void OnRep_SelectedWeapon();
 
 private:
 	UPROPERTY(VisibleAnywhere, Category = "FPSR|Abilities")
@@ -133,4 +160,9 @@ private:
 
 	UPROPERTY(ReplicatedUsing = OnRep_AllWeaponsMods)
 	FFPSRWeaponModContainer AllWeaponsMods;
+
+	/** Lobby loadout pick (the single run weapon). Hard ref — weapon DataAssets are always-loaded primary assets,
+	 *  so this replicates cleanly. ReplicatedUsing drives the owning-client lobby UI refresh. */
+	UPROPERTY(ReplicatedUsing = OnRep_SelectedWeapon)
+	TObjectPtr<UFPSRWeaponDataAsset> SelectedWeapon;
 };

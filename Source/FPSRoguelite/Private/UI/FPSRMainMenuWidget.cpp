@@ -1,7 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "UI/FPSRMainMenuWidget.h"
-#include "Core/FPSRGameFlowSubsystem.h"
+#include "Core/FPSRSessionSubsystem.h"
 #include "CommonButtonBase.h"
 #include "CommonInputModeTypes.h"
 #include "Kismet/KismetSystemLibrary.h"
@@ -35,11 +35,13 @@ TOptional<FUIInputConfig> UFPSRMainMenuWidget::GetDesiredInputConfig() const
 
 void UFPSRMainMenuWidget::HandlePlayClicked()
 {
+	// Play always hosts a session and travels into the lobby hub — even solo (1-player lobby). The lobby is the
+	// hub for every run; the host starts the run from there (P7 §3-3, user-confirmed).
 	if (UGameInstance* GI = GetGameInstance())
 	{
-		if (UFPSRGameFlowSubsystem* Flow = GI->GetSubsystem<UFPSRGameFlowSubsystem>())
+		if (UFPSRSessionSubsystem* Session = GI->GetSubsystem<UFPSRSessionSubsystem>())
 		{
-			Flow->StartRun();
+			Session->HostSession(4);
 		}
 	}
 }

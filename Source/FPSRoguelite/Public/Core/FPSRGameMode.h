@@ -40,6 +40,22 @@ public:
 	void NotifyPlayerDefeated();
 
 protected:
+	/** Bound to GameState OnRunEnded (subscribed in BeginPlay): closes the loop by traveling back to the lobby
+	 *  hub a short beat after the result screen shows. Deliberately a SEPARATE method (not in EndRun's body) so
+	 *  the victory caller (U3) and this lobby-return caller stay on independent code paths (P7 §3-5). */
+	UFUNCTION()
+	void HandlePostRunTravel();
+
+	/** Seamless ServerTravel back to the lobby hub (LobbyMap + "?listen"). Authority only. */
+	void TravelToLobby();
+
+	/** Delay (seconds) after the run ends before traveling back to the lobby, so the result screen is readable. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Flow")
+	float PostRunTravelDelay = 3.0f;
+
+	/** Server-only timer for the post-run lobby travel. */
+	FTimerHandle PostRunTravelTimer;
+
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Cards")
 	TObjectPtr<UFPSRCardPoolDataAsset> CardPool;
 
