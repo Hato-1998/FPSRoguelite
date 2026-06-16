@@ -32,6 +32,19 @@ public:
 	UFPSRHealthSet* GetHealthSet() const { return HealthSet; }
 	UFPSRCombatSet* GetCombatSet() const { return CombatSet; }
 
+	/** Per-player life state. Simplified for U2 (defeat wiring): a single replicated bool. U9 (DBNO) replaces
+	 *  this with an ELifeState{Alive,DBNO,Dead} state machine — IsAlive() is the single predicate U9 re-defines
+	 *  (e.g. DBNO also counts as not-alive for the wipe check). Lives on the PlayerState so it survives pawn
+	 *  death/respawn and the wipe aggregation is independent of pawn validity. */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Run")
+	bool IsDead() const { return bIsDead; }
+
+	/** True while this player is a live participant. The single predicate U9 (DBNO) re-defines. */
+	bool IsAlive() const { return !bIsDead; }
+
+	/** Server: mark this player dead/alive. Idempotent. Replicates to all (owning client gates input via OnRep). */
+	void SetDead(bool bNewDead);
+
 	UFUNCTION(BlueprintPure, Category = "FPSR|Run")
 	int32 GetRunRerollCharges() const { return RunRerollCharges; }
 
@@ -82,6 +95,9 @@ public:
 
 protected:
 	UFUNCTION()
+	void OnRep_LifeState();
+
+	UFUNCTION()
 	void OnRep_RunRerollCharges();
 
 	UFUNCTION()
@@ -102,6 +118,9 @@ private:
 
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Run")
 	int32 DefaultRerollCharges = 3;
+
+	UPROPERTY(ReplicatedUsing = OnRep_LifeState)
+	bool bIsDead = false;
 
 	UPROPERTY(ReplicatedUsing = OnRep_RunRerollCharges)
 	int32 RunRerollCharges = 3;

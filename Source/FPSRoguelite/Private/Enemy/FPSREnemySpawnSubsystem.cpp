@@ -7,6 +7,7 @@
 #include "Hero/FPSRCharacter.h"
 #include "Core/FPSRLogChannels.h"
 #include "Core/FPSRGameState.h"
+#include "Core/FPSRPlayerState.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "GameFramework/PlayerController.h"
@@ -140,6 +141,15 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 		{
 			if (APawn* PlayerPawn = PC->GetPawn())
 			{
+				// Skip dead players (U2): they're not targeted and take no contact damage (no corpse hits). U9 (DBNO)
+				// revisits whether downed players remain targetable.
+				if (const AFPSRPlayerState* PS = PC->GetPlayerState<AFPSRPlayerState>())
+				{
+					if (PS->IsDead())
+					{
+						continue;
+					}
+				}
 				PlayerPawns.Add(PlayerPawn);
 				PlayerLocations.Add(PlayerPawn->GetActorLocation());
 			}
