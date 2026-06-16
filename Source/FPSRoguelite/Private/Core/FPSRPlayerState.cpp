@@ -185,8 +185,9 @@ void AFPSRPlayerState::SetDead(bool bNewDead)
 void AFPSRPlayerState::OnRep_LifeState()
 {
 	// Owning client: stop the local fire loop immediately on death so a held trigger doesn't keep
-	// auto-firing until the input gate catches up next frame. Server-side cancellation is handled in
-	// AFPSRCharacter::HandleOutOfHealth (CancelAllAbilities).
+	// auto-firing until the input gate catches up next frame, and clear the local (non-replicated) ADS
+	// state so the camera can't stay zoom-latched if the result UI swallows the ADS-release input.
+	// Server-side cancellation/aim-clear is handled in AFPSRCharacter::HandleOutOfHealth (CancelAllAbilities).
 	if (bIsDead)
 	{
 		if (APawn* OwnerPawn = GetPawn())
@@ -194,6 +195,7 @@ void AFPSRPlayerState::OnRep_LifeState()
 			if (UFPSRWeaponFireComponent* Fire = OwnerPawn->FindComponentByClass<UFPSRWeaponFireComponent>())
 			{
 				Fire->StopFiring();
+				Fire->SetAiming(false);
 			}
 		}
 	}
