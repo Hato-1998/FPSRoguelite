@@ -4,10 +4,17 @@
 > **작업 단계를 끝낼 때마다, 그리고 중단 전 반드시 이 파일을 갱신하고 커밋한다.**
 > 확정 설계·기획·코드구조·규칙은 `Game.md`(**SSOT 허브** → 도메인별 `Docs/SSOT/*.md`, 작업별 라우팅은 허브 §0-1), **완료 작업 상세는 `git log --oneline`**. 여기엔 *무엇을 했는지*만 요약한다.
 
-**최종 갱신: 2026-06-15**
+**최종 갱신: 2026-06-16**
 
 ## 🗂️ 마스터 작업 분해 — **`Docs/TaskPrompts_Master.md` (2026-06-13 신설, 최상위 계획)**
-> 남은 로드맵 전체를 의존성 기준 유닛으로 분해 + 유닛별 새 세션 복붙 실행 프롬프트. **한 유닛씩 순차 진행(병렬 폐지 2026-06-15). 순서: ✅V0·V1·V3·U16 완료 → U2(패배 배선) → U3a(약점 부위 데미지) → U3(보스 스캐폴드) → U4(보스 콘텐츠, 플로우 완성) → W1(Fable+Codex 전체 검증) → U1(재미/성능 게이트) → V2(2-client) → 2차 트랙(U5~U15·U17)**. U15=무기 애님(U1 후 조건부). 아래 "코드 선행 백로그"의 잔여 유닛(B1/A4/C1/C2/D2~D5)은 이 문서의 U5~U11로 승계됨 — 착수 시 TaskPrompts_Master의 프롬프트를 사용할 것(함정/주의 내장).
+> 남은 로드맵 전체를 의존성 기준 유닛으로 분해 + 유닛별 새 세션 복붙 실행 프롬프트. **한 유닛씩 순차 진행(병렬 폐지 2026-06-15). 순서: ✅V0·V1·V3·U16·U2 완료 → U3a(약점 부위 데미지) → U3(보스 스캐폴드) → U4(보스 콘텐츠, 플로우 완성) → W1(Fable+Codex 전체 검증) → U1(재미/성능 게이트) → V2(2-client) → 2차 트랙(U5~U15·U17)**. U15=무기 애님(U1 후 조건부). 아래 "코드 선행 백로그"의 잔여 유닛(B1/A4/C1/C2/D2~D5)은 이 문서의 U5~U11로 승계됨 — 착수 시 TaskPrompts_Master의 프롬프트를 사용할 것(함정/주의 내장).
+
+## 💀 U2 패배 배선 (전원 사망 → EndRun Defeat) — **완료(2026-06-16, 브랜치 `phase/p6-defeat-wiring` → main `--no-ff` 머지). 빌드+스모크+사용자 PIE 통과**
+> 게임 루프 "진짜 닫기" 1/2(패배). 그동안 패배는 디버그 `FPSR.EndRun defeat`로만 트리거됐고, 사망(`HandleOutOfHealth`)은 로그만 남겼음. 이제 전원 사망 시 자동 `EndRun(Defeat)`. 솔로=1인 사망 즉시 전멸. DBNO/부활/관전/시체연출은 **U9 범위(미구현)**. P6-A의 `EndRun`/`EndRunFreeze`/`bRunEnded` 래치를 그대로 활용(미간섭).
+> **확정 설계(제1원리 3줄)**: ① **제1원리** — "생존 플레이어 수"는 폰(아바타)이 아니라 *플레이어*의 속성(폰은 사망 후 시체로 남고 U9 부활/관전 시 교체될 수 있음) → **사망 상태를 `AFPSRPlayerState`에 복제 bool로 두어** 집계가 폰 유효성과 무관(`GameState.PlayerArray` 서버권위 순회). ② **Lyra/UE표준** — Lyra는 DeathState 머신을 HealthComponent에 두지만, U2는 간이판이라 PlayerState에 bool 1개로 경량화(GAS DeathState 풀도입 의도적 이탈). ③ **프로젝트 정합** — 기존 run-state(`CardPicksPending`/`AllWeaponsMods`)가 이미 PlayerState에 Push Model 복제 → 동일 패턴. 입력 게이트는 캐릭터의 기존 `IsRunFrozen()` 미러.
+> **코드(12파일, `f1df2de`+`ef23813`)**: ① `AFPSRPlayerState` — 복제 `bIsDead`(Push Model) + `IsDead()`/`IsAlive()`/`SetDead()`(멱등, MARK_PROPERTY_DIRTY) + `OnRep_LifeState`(소유 클라 `StopFiring`+`SetAiming(false)`). **`IsAlive()`=U9(DBNO)가 판정식만 교체할 단일 지점**. ② `AFPSRGameMode` — 독립 집계함수 `GetLivingPlayerCount()`/`AreAllPlayersDead()`(참가자>0 && 생존0, 관전자·빈 PlayerArray 트랜션트 방어 = P7 §3-6 'Wiped' 재료) + `NotifyPlayerDefeated()`→`EndRun(Defeat)`. ③ `AFPSRCharacter::HandleOutOfHealth`(서버) — `SetDead(true)`+`StopFiring`/`SetAiming(false)`+`CancelAllAbilities`(진행 중 ChargeLaser 시퀀스 취소)+서버권위 이동정지(`DisableMovement`)+`NotifyPlayerDefeated`. 입력 게이트 `IsDeadLocal()`을 기존 `IsRunFrozen` 핸들러(Move/Look/Fire/Dash/Equip/Reload/ADS)+서버 RPC(EquipSlot/Dash/Reload/SetAiming) 양쪽에 **대칭** 추가. `ApplyContactDamage` early-out. ④ 무기 GA 4종(Hitscan/ChargeLaser/Projectile/Melee) `ActivateAbility`의 `IsRunPaused` 옆에 서버권위 Dead 게이트. ⑤ 적 타게팅/접촉뎀(`FPSREnemySpawnSubsystem`)·XP 자석(`FPSRXPPickup`) 사망 플레이어 제외(죽은 폰 반복뎀·자석 금지). [[freeze-gate-client-server-symmetry]]
+> **검증**: 빌드 Succeeded + 헤드리스 스모크(ModuleLoads) `Result={Success}` + **사용자 PIE 통과**(사망→DEFEAT→ReturnButton 메뉴 복귀→재시작 정상; 사망 후 입력/발사 차단·적 시체 무시). Codex 플랜 대조 게이트 통과(P1 3·P2 2 반영). Codex 머지게이트 P2 1건(소유 클라 ADS 줌 고착) 교정(`ef23813`).
+> **U9 후속 메모**: 적/XP가 직접 `IsDead()`를 사용하므로 DBNO의 "쓰러진 플레이어 타게팅/자석" 정책은 U9에서 별도 결정 필요(판정식만 교체로 안 끝남). `AFPSRGameMode.h`에 P7 'Wiped' 재료 명시.
 
 ## 🔫 V0 무기 비주얼 베이스 (Infima 팩) — **완료(2026-06-14, 브랜치 `phase/p6-weapon-visuals`)**
 > 1P 무기 메시 + 발사 코스메틱(머즐/사운드) 배선. 무기는 그동안 순수 DataAsset이라 메시 미배선이었음. 가이드: `Docs/V0_WeaponVisual_UserContent_Guide.md`. **빌드+스모크+사용자 PIE(무기 8종 표시/머즐/사운드/반동·탄약·데미지 무회귀) 통과.**
