@@ -68,6 +68,10 @@ private:
 	/** Resolve the active session interface (Steam) for this world. Null if the OSS/session interface is absent. */
 	IOnlineSessionPtr GetSessionInterface() const;
 
+	/** Build the session settings and issue CreateSession (uses PendingHostMaxPlayers). Split out so the host flow
+	 *  can defer it until an async DestroySession of a stale session completes. */
+	void CreateSessionInternal();
+
 	/** Shared join path for both a search result and an accepted invite. */
 	void JoinSearchResult(const FOnlineSessionSearchResult& SearchResult);
 
@@ -86,4 +90,10 @@ private:
 
 	/** Search state for FindSessions (kept alive across the async call so the callback can read results). */
 	TSharedPtr<FOnlineSessionSearch> SearchSettings;
+
+	/** MaxPlayers carried into the deferred CreateSession after a stale session is destroyed. */
+	int32 PendingHostMaxPlayers = 4;
+
+	/** True while a stale session is being destroyed before (re)hosting — the destroy callback then creates. */
+	bool bHostAfterDestroy = false;
 };

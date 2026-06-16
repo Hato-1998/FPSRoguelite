@@ -61,14 +61,34 @@ void UFPSRSessionSubsystem::HostSession(int32 MaxPlayers)
 		return;
 	}
 
-	// If a stale session lingers (e.g. returned from a prior run), tear it down first so CreateSession succeeds.
+	PendingHostMaxPlayers = FMath::Max(1, MaxPlayers);
+
+	// If a stale session lingers (e.g. quit to menu then pressed Play again), tear it down FIRST and defer the
+	// create to the destroy-complete callback — DestroySession is async, so creating immediately would race the
+	// still-registered session and most OSS backends reject it (host flow stuck).
 	if (Sessions->GetNamedSession(GFPSRSessionName) != nullptr)
 	{
+		bHostAfterDestroy = true;
+		DestroySessionCompleteHandle = Sessions->AddOnDestroySessionCompleteDelegate_Handle(
+			FOnDestroySessionCompleteDelegate::CreateUObject(this, &UFPSRSessionSubsystem::HandleDestroySessionComplete));
 		Sessions->DestroySession(GFPSRSessionName);
+		return;
+	}
+
+	CreateSessionInternal();
+}
+
+void UFPSRSessionSubsystem::CreateSessionInternal()
+{
+	IOnlineSessionPtr Sessions = GetSessionInterface();
+	if (!Sessions.IsValid())
+	{
+		OnHostComplete.Broadcast(false);
+		return;
 	}
 
 	FOnlineSessionSettings SessionSettings;
-	SessionSettings.NumPublicConnections = FMath::Max(1, MaxPlayers);
+	SessionSettings.NumPublicConnections = PendingHostMaxPlayers;
 	SessionSettings.NumPrivateConnections = 0;
 	SessionSettings.bIsLANMatch = false;                 // Steam only (user-confirmed — no LAN fallback).
 	SessionSettings.bShouldAdvertise = true;
@@ -242,6 +262,20 @@ void UFPSRSessionSubsystem::HandleDestroySessionComplete(FName SessionName, bool
 		Sessions->ClearOnDestroySessionCompleteDelegate_Handle(DestroySessionCompleteHandle);
 	}
 	UE_LOG(LogFPSR, Log, TEXT("[Session] DestroySession '%s' %s"), *SessionName.ToString(), bWasSuccessful ? TEXT("OK") : TEXT("FAILED"));
+
+	// Host flow: this destroy was a pre-host teardown of a stale session — now create the new one.
+	if (bHostAfterDestroy)
+	{
+		bHostAfterDestroy = false;
+		if (bWasSuccessful)
+		{
+			CreateSessionInternal();
+		}
+		else
+		{
+			OnHostComplete.Broadcast(false);
+		}
+	}
 }
 
 void UFPSRSessionSubsystem::ShowInviteUI()
