@@ -807,3 +807,10 @@ Game.md + PROGRESS.md 먼저 읽어. Docs/TaskPrompts_Master.md의 유닛 U17을
 | C4 | 〃 | DA 곡선 단계 노출(`SpinupAudioPitch/Volume`, `SpinupCrosshair*`, `SpinupBarrelSpin*`, 선택 `SpinupRecoil/BloomScaleCurve`) — 부담 시 Alpha 노출만으로 1차 충족 | 코드/콘텐츠 | U13/U15 | 신규 |
 | C5 | 〃 | **스핀업 곡선 튜닝값 확정**: Start=최대 FireRate 50~65%, RampTime 0.8~1.2s, 최고속 5~7s+ 지속(RampTime ≤ 탄창소모시간 20~25%) | 🙋사용자결정(DA) | U16 후속 튜닝 | 사용자 |
 | C6 | 〃 | **사망 경로는 U2에서 해소** — `HandleOutOfHealth`가 `StopFiring()`+`CancelAllAbilities()` 호출(서버권위). **남은 것 = U9 DBNO/부활**: 다운→부활 전이에서도 발사상태·스핀업 리셋 보장(부활 시 stale 케이던스 방지) | 코드(U9 게이트) | U9(DBNO) | ⚠️체크리스트 |
+| D1 | [Review/20260616-volumeup-design.md](Review/20260616-volumeup-design.md) | 재미 게이트 §7-5를 **G1(손맛/페이싱/성능, 양산관문)+G2(빌드다양성/시너지)** 2분할 기재 | 문서(SSOT) | Roadmap.md §7-5 | ✅반영(2026-06-16) |
+| D2 | 〃 | **EnemyDefinition DataAsset + 시간 가중 로스터 디렉터** 골격(종류/속도/공격타입/HP커브/드랍 + 시간대별 가중풀). 기존 B1(원거리 적) 흡수 | 코드(골격) | 신규 U(적시스템) | ⏸️보스/로비 후(결정1=B) |
+| D3 | 〃 | **경량 적 상태이상 서브시스템** C++ 베이스(배치틱/풀리셋/연쇄캡/Significance 피드백). 적500 예산 건드림=HIGH_RISK. Enemy/Combat/Performance SSOT 선갱신 | 코드(골격) | 신규 U(상태계) | ⏸️G1 후·🙋결정대기 |
+| D4 | 〃 | **프리즈 하이브리드 최소 프로토**(일반 수치카드=Q/E 비동기, 무게큰선택=프리즈). G1 *전* 선행. RunFlow §2-2 선갱신(설계변경) | 코드+문서 | 신규 U(프리즈) | ⏸️G1 직전·🙋결정대기 |
+| D5 | 〃 | **G1 게이트 계측 기준 고정 + 실행**(FPS/적수/프리즈빈도/선택소요시간/이탈감 메모). G1 항목=손맛/페이싱/사각/성능(§7-5) | 검증 마일스톤 | 보스/로비 후 | ⏸️현 로드맵 후(결정1=B) |
+| D6 | 〃 | **빌드 시너지 축 정의 패스**(상태이상 4종 + Fragment 물림 매트릭스) — §2-3 자기경고 해소. Combat §2-3 갱신. D3 의존 | 문서/설계 | Combat §2-3 | ⏸️D3 의존 |
+| D7 | 〃 | 맵 선택/정의 데이터 골격 + 메타 SaveManager/보스정의 골격 — **현 로드맵 U3/U4/U11a(보스·로비 스파인)와 정합**(결정1=B로 사실상 선행 진행 중) | 코드(골격) | U3/U4/U11a | 진행정합 |
