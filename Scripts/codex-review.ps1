@@ -4,7 +4,7 @@
 .DESCRIPTION
   Claude 검증 단계의 최종 게이트. 비대화(approval=never)로 자동 실행한다.
   프로젝트 원칙은 리포의 AGENTS.md(핵심 3원칙) + Game.md/PROGRESS.md를 Codex가 자동 로드해 적용한다.
-  결과는 stdout 출력 + Docs/reviews/ 에 타임스탬프 md(UTF-8) 저장(gitignore됨).
+  결과는 stdout 출력 + Docs/codex-reviews/ 에 타임스탬프 md(UTF-8) 저장(gitignore됨; Docs/Review 컨설팅 폴더와 분리).
   주의:
     - codex review 는 scope 플래그(--base/--uncommitted/--commit)와 커스텀 프롬프트를 동시에 쓸 수 없다.
     - Windows에서 codex review 는 자체적으로 workspace-write 샌드박스로 동작한다(-s read-only 미반영 관찰됨).
@@ -30,9 +30,18 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$CodexExe = 'C:\Users\koras\AppData\Local\OpenAI\Codex\bin\codex.exe'
-if (-not (Test-Path $CodexExe)) {
-    Write-Error "Codex CLI를 찾을 수 없습니다: $CodexExe"
+# Codex 자동탐지 (이식성): 환경변수 → PATH → 알려진 네이티브 설치경로
+function Resolve-Codex {
+    if ($env:CODEX_EXE -and (Test-Path $env:CODEX_EXE)) { return $env:CODEX_EXE }
+    $cmd = Get-Command codex -ErrorAction SilentlyContinue
+    if ($cmd) { return $cmd.Source }
+    $known = Join-Path $env:LOCALAPPDATA 'OpenAI\Codex\bin\codex.exe'
+    if (Test-Path $known) { return $known }
+    return $null
+}
+$CodexExe = Resolve-Codex
+if (-not $CodexExe) {
+    Write-Error "Codex CLI를 찾을 수 없습니다. 'npm install -g @openai/codex' + 'codex login' 후 다시 실행하세요(또는 `$env:CODEX_EXE 로 경로 지정)."
     exit 1
 }
 
@@ -75,7 +84,8 @@ $clean = ($output -split "`r?`n" | Where-Object { $_ -notmatch '^SUCCESS: The pr
 Write-Host $clean
 
 if (-not $NoSave) {
-    $reviewDir = Join-Path $RepoRoot 'Docs\reviews'
+    # Docs\codex-reviews (Docs\Review 컨설팅 폴더와 Windows 대소문자 충돌 회피). gitignore됨.
+    $reviewDir = Join-Path $RepoRoot 'Docs\codex-reviews'
     if (-not (Test-Path $reviewDir)) { New-Item -ItemType Directory -Path $reviewDir -Force | Out-Null }
     $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
     $outFile = Join-Path $reviewDir "codex-review-$stamp.md"

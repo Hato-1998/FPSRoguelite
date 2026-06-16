@@ -51,7 +51,7 @@
   `UnrealEditor-Cmd.exe <uproject> -unattended -nopause -nullrhi -nosplash -nosound -ExecCmds="Automation RunTests FPSRoguelite.Smoke.ModuleLoads" -TestExit="Automation Test Queue Empty" -abslog=...`
 - 새 UCLASS 다수면 Live Coding 불가 → 풀빌드(에디터 닫아야 함). 입력 IA 생성은 `Scripts/gen_input_assets.py`
 - **MCP(unreal) 인증 실패로 미사용** → UBT 빌드 + 헤드리스 자동화로 검증
-- **Codex 코드리뷰 게이트**: 단계 완료·커밋 직전 `Scripts/codex-review.ps1` 실행 → 외부 AI(Codex gpt-5.5)가 Game.md 원칙 기준으로 diff 리뷰. 기본 `-Base main`(브랜치 diff) / `-Uncommitted`(작업트리). 비대화(approval never; Windows codex review는 workspace-write 샌드박스 → 신뢰 로컬 리포 전용). 결과 `Docs/reviews/`(gitignore). 호출·판독은 Opus가 직접
+- **Codex 코드리뷰 게이트**: 단계 완료·커밋 직전 `Scripts/codex-review.ps1` 실행 → 외부 AI(Codex gpt-5.5)가 Game.md 원칙 기준으로 diff 리뷰. 기본 `-Base main`(브랜치 diff) / `-Uncommitted`(작업트리). 비대화(approval never; Windows codex review는 workspace-write 샌드박스 → 신뢰 로컬 리포 전용). 결과 `Docs/codex-reviews/`(gitignore; 컨설팅 `Docs/Review/`와 Windows 대소문자 충돌 회피용 분리). 호출·판독은 Opus가 직접
 
 ### 6-7. 브랜치 전략 (Phase 단위 워크플로)
 로드맵(§7-3)의 각 **P 단계**는 `main`에 직접 커밋하지 않고 **전용 브랜치에서 작업 → 검증 통과 후 `main`에 머지**한다. (도입 2026-05-30. 이전 main 히스토리는 소급 적용하지 않음.)
@@ -75,4 +75,5 @@
 ## 10. 리뷰 루프 (외부 AI 협업)
 - 사용자 + 다른 AI가 이 문서를 읽고 추가/수정점을 **`GameConfirm.md`**(다른 AI 작성, **우리는 만들지 않음**)에 정리
 - 이후 세션이 `GameConfirm.md`를 불러와 현재 프로젝트와 비교 → (a) 타당한 추가/보완은 문서 갱신 + 작업계획 반영, (b) 사용자 판단·결정 필요한 것은 사용자에게 정리 보고
-- **코드 리뷰(Codex CLI)**: 문서 리뷰와 별개로, 구현 검증 단계에서 `Scripts/codex-review.ps1`로 Codex(gpt-5.5)에 diff 코드리뷰를 받는다(§6-6). 지적은 Opus가 판독해 수정 여부 결정. **분리 원칙: 문서 제안=`GameConfirm.md`(외부 AI 작성) / 코드 리뷰=`Docs/reviews/`(Codex 산출).**
+- **코드 리뷰(Codex CLI)**: 문서 리뷰와 별개로, 구현 검증 단계에서 `Scripts/codex-review.ps1`로 Codex(gpt-5.5)에 diff 코드리뷰를 받는다(§6-6). 지적은 Opus가 판독해 수정 여부 결정. **분리 원칙: 문서 제안=`GameConfirm.md`(외부 AI 작성) / 코드 리뷰=`Docs/codex-reviews/`(Codex 산출) / 컨설팅 토론=`Docs/Review/`.**
+- **컨설팅 토론(제3 채널, ConsultLoop)**: 위 둘과 별개로, 사용자가 주제를 지목하면 백엔드(Claude)×클라이언트(Codex) **라이브 토론**으로 설계/콘텐츠를 자문받는다. 프로토콜=`Docs/ConsultLoop.md`, 호출=`Scripts/consult-codex.ps1`(`codex exec`), 트리거=`/consult <주제>`, 산출=`Docs/Review/`(추적, **프롬프트 매니저 `TaskPrompts_Master.md` §E가 읽어 백로그 인입**). **자문 전용**(코드 무변경) — 채택 설계는 이 문서/도메인 SSOT를 먼저 갱신 후 구현(§6-4). ※ 코드리뷰 덤프 저장폴더는 `Docs/codex-reviews/`로 분리(Windows 대소문자 충돌 회피).
