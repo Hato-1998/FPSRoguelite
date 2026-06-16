@@ -2,6 +2,7 @@
 
 #include "Combat/FPSRCombatStatics.h"
 #include "FPSRCollisionChannels.h"
+#include "Combat/FPSRWeakpointComponent.h"
 #include "Enemy/FPSREnemyHealthComponent.h"
 #include "Enemy/FPSREnemyBase.h"
 #include "Hero/FPSRCharacter.h"
@@ -12,6 +13,8 @@
 #include "GameFramework/Controller.h"
 #include "Engine/World.h"
 #include "Engine/OverlapResult.h"
+#include "Components/PrimitiveComponent.h"
+#include "GameFramework/Actor.h"
 #include "CollisionShape.h"
 
 namespace FPSRCombat
@@ -207,6 +210,73 @@ namespace FPSRCombat
 		if (bAnyEnemyHit)
 		{
 			NotifyHitMarker(Instigator, bAnyCrit, bAnyKill); // one marker per explosion (strongest outcome)
+		}
+	}
+
+	void AddWeakpointObjectType(FCollisionObjectQueryParams& OutParams)
+	{
+		OutParams.AddObjectTypesToQuery(ECC_FPSRWeakpoint);
+	}
+
+	float GetWeakpointMultiplier(const UPrimitiveComponent* Component)
+	{
+		const UFPSRWeakpointComponent* Weakpoint = Cast<UFPSRWeakpointComponent>(Component);
+		return Weakpoint ? FMath::Max(1.0f, Weakpoint->DamageMultiplier) : 1.0f;
+	}
+
+	float GetBestWeakpointMultiplierForSphere(const AActor* Target, const FVector& SphereCenter, float SphereRadius)
+	{
+		if (!Target)
+		{
+			return 1.0f;
+		}
+		float Best = 1.0f;
+		TArray<UFPSRWeakpointComponent*> Weakpoints;
+		Target->GetComponents<UFPSRWeakpointComponent>(Weakpoints);
+		for (const UFPSRWeakpointComponent* Wp : Weakpoints)
+		{
+			// Skip a weakpoint whose query collision is disabled (e.g. a phase-gated boss spot the designer toggled
+			// off). The line-trace paths (hitscan/charge-laser) already miss such a component, so the sphere paths
+			// (projectile/melee) must match — otherwise the same disabled spot would still boost those hits.
+			if (!Wp || !Wp->IsQueryCollisionEnabled())
+			{
+				continue;
+			}
+			const float CombinedRadius = SphereRadius + Wp->GetScaledSphereRadius();
+			if (FVector::DistSquared(SphereCenter, Wp->GetComponentLocation()) <= CombinedRadius * CombinedRadius)
+			{
+				Best = FMath::Max(Best, FMath::Max(1.0f, Wp->DamageMultiplier));
+			}
+		}
+		return Best;
+	}
+
+	void DedupePawnHitsByActor(const TArray<FHitResult>& InHits, TArray<FResolvedHit>& OutHits)
+	{
+		// InHits is distance-sorted (LineTraceMulti). First time we see an actor we record its nearest hit; later
+		// hits on the same actor only raise the weakpoint multiplier. Output order = nearest-first insertion order.
+		TMap<const AActor*, int32> ActorToIndex;
+		for (const FHitResult& Hit : InHits)
+		{
+			AActor* HitActor = Hit.GetActor();
+			if (!HitActor)
+			{
+				continue;
+			}
+			const float Mult = GetWeakpointMultiplier(Hit.GetComponent());
+			if (int32* Found = ActorToIndex.Find(HitActor))
+			{
+				OutHits[*Found].WeakpointMultiplier = FMath::Max(OutHits[*Found].WeakpointMultiplier, Mult);
+			}
+			else
+			{
+				FResolvedHit Entry;
+				Entry.Actor = HitActor;
+				Entry.Distance = Hit.Distance;
+				Entry.ImpactPoint = Hit.ImpactPoint;
+				Entry.WeakpointMultiplier = Mult;
+				ActorToIndex.Add(HitActor, OutHits.Add(Entry));
+			}
 		}
 	}
 }

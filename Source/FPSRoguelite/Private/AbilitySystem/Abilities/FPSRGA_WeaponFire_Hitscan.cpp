@@ -8,6 +8,7 @@
 #include "Weapon/FPSRWeaponDataAsset.h"
 #include "Weapon/FPSRWeaponFireComponent.h"
 #include "Combat/FPSRCombatStatics.h"
+#include "Combat/FPSRWeakpointComponent.h"
 #include "Enemy/FPSREnemyHealthComponent.h"
 #include "Core/FPSRGameState.h"
 #include "Core/FPSRPlayerController.h"
@@ -176,19 +177,21 @@ void UFPSRGA_WeaponFire_Hitscan::ActivateAbility(
 	// The server confirms the strongest outcome to the owning client (Game.MD §6-2 server authority).
 	bool bServerHit = false;
 	bool bServerCrit = false;
+	bool bServerWeak = false;
 	bool bServerKill = false;
 
 	// Damageable-pawn object query (enemies via ECC_Pawn + players via ECC_FPSRPlayerPawn), reused per pellet. An
 	// ECC_Pawn-only query would miss players (distinct object channel) — so friendly fire would never land. (§2-4)
 	FCollisionObjectQueryParams PawnObjParams;
 	FPSRCombat::AddDamageablePawnObjectTypes(PawnObjParams);
+	FPSRCombat::AddWeakpointObjectType(PawnObjParams);
 
 	// bAllowSelf for any per-impact explosion (ExplosiveRounds card): self unless the NoSelfDamage card cleared it.
 	const bool bAllowSelfOnImpact = !FireCtx.bSuppressSelfDamage;
 
 	// Resolve crit + per-hit fragment bonus + self/friendly rules for one target. Returns true if damage landed
 	// (bullet stops / spends a penetration here); false = pass-through (a friendly while FF is off).
-	auto ApplyToTarget = [&](AActor* HitActor) -> bool
+	auto ApplyToTarget = [&](AActor* HitActor, float WeakpointMult) -> bool
 	{
 		if (!HitActor || !FireCtx.bAuthority)
 		{
@@ -208,6 +211,7 @@ void UFPSRGA_WeaponFire_Hitscan::ActivateAbility(
 				if (Frag) { Frag->OnHitActor(FireCtx, HitActor, FinalDamage); }
 			}
 		}
+		FinalDamage *= WeakpointMult;
 		// Direct hitscan never self-damages (bAllowSelf=false); ResolveDamage applies enemy/friendly rules.
 		const float Resolved = FPSRCombat::ResolveDamage(Avatar, HitActor, FinalDamage, /*bAllowSelf*/ false, World);
 		if (Resolved <= 0.0f)
@@ -219,6 +223,7 @@ void UFPSRGA_WeaponFire_Hitscan::ActivateAbility(
 		{
 			bServerHit = true;
 			if (Result.bKilled) { bServerKill = true; }
+			else if (WeakpointMult > 1.0f) { bServerWeak = true; }
 			else if (bCrit) { bServerCrit = true; }
 		}
 		return Result.bApplied;
@@ -273,20 +278,23 @@ void UFPSRGA_WeaponFire_Hitscan::ActivateAbility(
 			}
 #endif
 
-			// Apply to up to MaxPenetration valid targets, nearest first (PawnHits are distance-sorted). Friendly
-			// pass-throughs (FF off) don't count toward penetration. Track the terminal impact for OnImpact.
+			// Collapse to one entry per actor (nearest kept, max weakpoint multiplier) so body+weakpoint hits
+			// on the same enemy never double-damage or double-spend penetration (U3a).
+			TArray<FPSRCombat::FResolvedHit> ResolvedHits;
+			FPSRCombat::DedupePawnHitsByActor(PawnHits, ResolvedHits);
+
 			int32 PenetrationCount = 0;
 			bool bHasImpact = false;
 			FVector ImpactPoint = bWall ? WallHit.ImpactPoint : End;
-			for (const FHitResult& PawnHit : PawnHits)
+			for (const FPSRCombat::FResolvedHit& Entry : ResolvedHits)
 			{
-				if (PawnHit.Distance > WallDist)
+				if (Entry.Distance > WallDist)
 				{
 					break; // behind the wall (everything after is too — distance-sorted)
 				}
-				if (ApplyToTarget(PawnHit.GetActor()))
+				if (ApplyToTarget(Entry.Actor, Entry.WeakpointMultiplier))
 				{
-					ImpactPoint = PawnHit.ImpactPoint; // the bullet lands / detonates here
+					ImpactPoint = Entry.ImpactPoint; // the bullet lands / detonates here
 					bHasImpact = true;
 					++PenetrationCount;
 					if (PenetrationCount >= MaxPenetration)
@@ -305,13 +313,14 @@ void UFPSRGA_WeaponFire_Hitscan::ActivateAbility(
 		}
 	}
 
-	// Server delivers one marker per activation to the owning client — strongest outcome (Kill > Crit > Hit).
+	// Server delivers one marker per activation to the owning client — strongest outcome (Kill > Weak > Crit > Hit).
 	if (FireCtx.bAuthority && bServerHit)
 	{
 		if (AFPSRPlayerController* OwnerPC = Cast<AFPSRPlayerController>(Controller))
 		{
 			const EFPSRHitMarkerType MarkerType = bServerKill ? EFPSRHitMarkerType::Kill
-				: (bServerCrit ? EFPSRHitMarkerType::Crit : EFPSRHitMarkerType::Hit);
+				: (bServerWeak ? EFPSRHitMarkerType::Weak
+				: (bServerCrit ? EFPSRHitMarkerType::Crit : EFPSRHitMarkerType::Hit));
 			OwnerPC->ClientNotifyHitMarker(MarkerType);
 		}
 	}

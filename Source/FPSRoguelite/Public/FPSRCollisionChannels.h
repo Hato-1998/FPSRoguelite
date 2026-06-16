@@ -20,3 +20,17 @@
  * should query BOTH ECC_Pawn (enemies) and ECC_FPSRPlayerPawn (players) and team-filter.
  */
 constexpr ECollisionChannel ECC_FPSRPlayerPawn = ECC_GameTraceChannel1;
+
+/**
+ * Custom object channel for enemy/boss weakpoint shapes (headshot/weak zones, U3a).
+ *
+ * Why a DEDICATED channel (not ECC_Pawn): weakpoint shapes must be found ONLY by the precise-aim damage paths
+ * (hitscan/charge-laser line traces, single-target projectile, melee). Putting them on ECC_Pawn would make
+ * AOE explosions (FPSRCombat::ApplyExplosion's OverlapMultiByObjectType(ECC_Pawn)) also gather them, breaking
+ * "AOE never reads weakpoints" (no-regression). On their own object channel, only queries that explicitly add
+ * this type see them; movement/ground(WorldStatic)/separation/flow-field never query it, so zero interference.
+ *
+ * Registered in Config/DefaultEngine.ini as DefaultChannelResponses Channel=ECC_GameTraceChannel2 Name="Weakpoint".
+ * Keep this alias and the .ini channel index in sync.
+ */
+constexpr ECollisionChannel ECC_FPSRWeakpoint = ECC_GameTraceChannel2;

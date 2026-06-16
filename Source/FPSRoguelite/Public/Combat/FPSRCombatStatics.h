@@ -4,9 +4,11 @@
 
 #include "CoreMinimal.h"
 #include "CollisionQueryParams.h"
+#include "Engine/HitResult.h"
 
 class AActor;
 class UWorld;
+class UPrimitiveComponent;
 
 /**
  * Server-authoritative combat resolution helpers (P5 friendly fire / self-damage / explosions / knockback).
@@ -29,6 +31,16 @@ namespace FPSRCombat
 		bool bApplied = false;  // a damage receiver was found and damage was applied
 		bool bKilled = false;   // the target died from this hit (enemies only; player DBNO is a later phase)
 		bool bWasEnemy = false; // the target was a swarm enemy (drives the firing player's hit-marker)
+	};
+
+	/** One actor's collapsed contribution from a multi-hit trace: the NEAREST hit's distance/impact (for wall
+	 *  cutoff + penetration ordering) plus the HIGHEST weakpoint multiplier among that actor's hits. */
+	struct FResolvedHit
+	{
+		AActor* Actor = nullptr;
+		float Distance = 0.0f;
+		FVector ImpactPoint = FVector::ZeroVector;
+		float WeakpointMultiplier = 1.0f;
 	};
 
 	/** Host friendly-fire toggle from the run's GameState (false if unavailable). */
@@ -71,4 +83,21 @@ namespace FPSRCombat
 	/** Dispatch a knockback velocity to Target: players -> additive LaunchCharacter (preserves jump for rocket
 	 *  jumping); swarm enemies -> AFPSREnemyBase decaying-velocity knockback (integrated by their movement tick). */
 	FPSROGUELITE_API void ApplyKnockback(AActor* Target, const FVector& Velocity);
+
+	/** Add the weakpoint object type to an object query (line-trace damage paths only — NOT the explosion query,
+	 *  which must never gather weakpoints). */
+	FPSROGUELITE_API void AddWeakpointObjectType(FCollisionObjectQueryParams& OutParams);
+
+	/** Weakpoint damage multiplier for a hit primitive (1.0 if it is not a UFPSRWeakpointComponent). */
+	FPSROGUELITE_API float GetWeakpointMultiplier(const UPrimitiveComponent* Component);
+
+	/** Highest weakpoint multiplier among Target's UFPSRWeakpointComponents whose sphere intersects the query
+	 *  sphere (SphereCenter/SphereRadius). 1.0 if none — used by the sphere-overlap paths (projectile / melee)
+	 *  so a body-first overlap still upgrades to a weakpoint hit (re-queried at damage time, not event order). */
+	FPSROGUELITE_API float GetBestWeakpointMultiplierForSphere(const AActor* Target, const FVector& SphereCenter, float SphereRadius);
+
+	/** Collapse a distance-sorted multi-hit result to ONE entry per actor (nearest distance/impact kept; weakpoint
+	 *  multiplier = max across that actor's hits), preserving nearest-first order. Shared by hitscan + charge-laser
+	 *  so the same actor's body + weakpoint hits never double-damage or double-spend penetration. */
+	FPSROGUELITE_API void DedupePawnHitsByActor(const TArray<FHitResult>& InHits, TArray<FResolvedHit>& OutHits);
 }
