@@ -235,7 +235,10 @@ namespace FPSRCombat
 		Target->GetComponents<UFPSRWeakpointComponent>(Weakpoints);
 		for (const UFPSRWeakpointComponent* Wp : Weakpoints)
 		{
-			if (!Wp)
+			// Skip a weakpoint whose query collision is disabled (e.g. a phase-gated boss spot the designer toggled
+			// off). The line-trace paths (hitscan/charge-laser) already miss such a component, so the sphere paths
+			// (projectile/melee) must match — otherwise the same disabled spot would still boost those hits.
+			if (!Wp || !Wp->IsQueryCollisionEnabled())
 			{
 				continue;
 			}
