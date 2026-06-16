@@ -56,7 +56,7 @@
 > - **머지 완료**: `phase/p6a-content` → main `--no-ff` `4dacec1`. (브랜치 정리 권장)
 > - ~~**`.uproject` 미커밋(의도)**~~ ✅**해소(2026-06-13 확인)**: VibeUE 항목 `"Optional": true` 처리 후 커밋 완료(`15d4e34`) — 클린 체크아웃/CI 안전.
 > - **레이아웃 미세조정**: 메뉴 버튼은 텍스트 크기 자동(클릭 가능하나 작음), VerticalBox 상단 스택. 위치/타이틀/색 폴리시는 디자이너에서 후속.
-> - **루프 진짜 닫기**: 승리=보스처치(P6)/패배=전원사망 → `AFPSRGameMode::EndRun` 호출 연결(C++ TODO 시임). 현재는 디버그 `FPSR.EndRun [victory|defeat]`/`FPSR.ReturnToMenu`가 트리거.
+> - **루프 진짜 닫기**: ✅패배=전원사망 자동 `EndRun(Defeat)` 완료(U2, `3506da9`). 승리=보스처치는 U3a→U3에서 자동화 예정(현재 디버그 `FPSR.EndRun victory`/`FPSR.SkipToBoss`). `FPSR.ReturnToMenu`는 결과창 트리거로 유지.
 
 ## 🔧 ChargeLaser 재설계 — **코드 구현 완료(2026-06-11, Opus 직접, 브랜치 `fix/chargelaser-redesign`)**
 > **설계**(상세 git log): **클릭 1회 = 자동 차징 시퀀스로 전환**(hold/release 폐지). 차징 중 `ChargeTickInterval`마다 고정 소뎀(`ChargeTickDamage`) 워밍업 빔(조준 추적), 차징 완료 시 본뎀(`Damage`) 풀파워 관통 빔 1발(크릿+히트마커). **빌드 성공 + 스모크 Success로 검증.**

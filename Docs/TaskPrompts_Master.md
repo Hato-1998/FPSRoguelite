@@ -18,11 +18,12 @@
 - **운영**: origin 동기화 완료, phase 브랜치 정리 완료, `.uproject` VibeUE `Optional:true` 커밋 완료(`15d4e34`)
 
 ### 미배선 핵심 (게임 루프의 진짜 닫기)
+> 갱신 2026-06-16: 패배 배선(U2) 완료. 승리(보스)는 U3a→U3→U4 트랙에서 닫는다. 완료 유닛 전체는 §B 표(✅)·`PROGRESS.md`·`git log` 참조.
 | 항목 | 근거 | 상태 |
 |---|---|---|
-| 승리 = 보스 처치 | `Source/FPSRoguelite/Private/Run/FPSRRunDirectorSubsystem.cpp:365` — "boss actor is a P6 stub", 보스 게이트 도달 시 타임라인 정지만 | 보스 액터 자체가 없음 |
-| 패배 = 전원 사망 | `Source/FPSRoguelite/Private/Hero/FPSRCharacter.cpp:472-476` `HandleOutOfHealth` = 로그만("DBNO/respawn handling is P5") | 사망 처리 플레이스홀더 |
-| `EndRun` 호출자 | `Source/FPSRoguelite/Private/Core/FPSRGameMode.cpp:51` (`bRunEnded` 래치) | 디버그 커맨드만 |
+| 승리 = 보스 처치 | `Source/FPSRoguelite/Private/Run/FPSRRunDirectorSubsystem.cpp:365` — "boss actor is a P6 stub", 보스 게이트 도달 시 타임라인 정지만 | 미배선 — U3a(약점)→U3(보스 스캐폴드+승리 배선)에서 닫음 |
+| 패배 = 전원 사망 | `AFPSRCharacter::HandleOutOfHealth`→`SetDead`+`NotifyPlayerDefeated`→`AFPSRGameMode::AreAllPlayersDead()`→`EndRun(Defeat)` | ✅ 완료(U2, main 머지 `3506da9`, 2026-06-16) |
+| `EndRun` 호출자 | `Source/FPSRoguelite/Private/Core/FPSRGameMode.cpp` (`bRunEnded` 래치) | 패배=자동(U2) / 승리=디버그 `FPSR.EndRun victory`만(U3에서 보스 처치 자동화 예정) |
 
 ### 미실시 검증 게이트
 - **§7-5 코어 재미 게이트**(Roadmap) + **§5 성능 검증**(Insights/NetProfiler, 적 500, 호스트 기준 하드캡 확정, Push→RepGraph→Iris 평가 순서)
