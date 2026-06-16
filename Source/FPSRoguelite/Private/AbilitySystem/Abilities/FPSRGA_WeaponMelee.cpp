@@ -6,6 +6,7 @@
 #include "Weapon/FPSRWeaponInstance.h"
 #include "Weapon/FPSRWeaponDataAsset.h"
 #include "Combat/FPSRCombatStatics.h"
+#include "Combat/FPSRWeakpointComponent.h"
 #include "Enemy/FPSREnemyHealthComponent.h"
 #include "Core/FPSRGameState.h"
 #include "Core/FPSRPlayerController.h"
@@ -109,6 +110,7 @@ void UFPSRGA_WeaponMelee::ActivateAbility(
 
 		float FinalDamage = Damage;
 		bool bSwingCrit = false;
+		bool bAnyWeak = false;
 		if (UAbilitySystemComponent* ASC = GetAbilitySystemComponentFromActorInfo())
 		{
 			const float CritChance = ASC->GetNumericAttribute(UFPSRCombatSet::GetGlobalCritChanceAttribute());
@@ -147,8 +149,10 @@ void UFPSRGA_WeaponMelee::ActivateAbility(
 				}
 				Processed.Add(HitActor);
 
+				const float WeakpointMult = FPSRCombat::GetBestWeakpointMultiplierForSphere(HitActor, Center, MeleeRadius);
+				const float TargetDamage = FinalDamage * WeakpointMult;
 				// Melee never self-damages (bAllowSelf=false); ResolveDamage applies the enemy/friendly rules.
-				const float Resolved = FPSRCombat::ResolveDamage(Avatar, HitActor, FinalDamage, /*bAllowSelf*/ false, World);
+				const float Resolved = FPSRCombat::ResolveDamage(Avatar, HitActor, TargetDamage, /*bAllowSelf*/ false, World);
 				if (Resolved <= 0.0f)
 				{
 					continue;
@@ -158,18 +162,20 @@ void UFPSRGA_WeaponMelee::ActivateAbility(
 				{
 					bAnyHit = true;
 					if (Result.bKilled) { bAnyKill = true; }
+					if (WeakpointMult > 1.0f) { bAnyWeak = true; }
 				}
 			}
 		}
 
 		// Melee has no client prediction (server-only overlap), so all markers come from the server here.
-		// One pulse per swing, strongest outcome (Kill > Crit > Hit). (Game.MD §2-14)
+		// One pulse per swing, strongest outcome (Kill > Weak > Crit > Hit). (Game.MD §2-14)
 		if (bAnyHit)
 		{
 			if (AFPSRPlayerController* OwnerPC = Cast<AFPSRPlayerController>(Controller))
 			{
 				const EFPSRHitMarkerType MarkerType = bAnyKill ? EFPSRHitMarkerType::Kill
-					: (bSwingCrit ? EFPSRHitMarkerType::Crit : EFPSRHitMarkerType::Hit);
+					: (bAnyWeak ? EFPSRHitMarkerType::Weak
+					: (bSwingCrit ? EFPSRHitMarkerType::Crit : EFPSRHitMarkerType::Hit));
 				OwnerPC->ClientNotifyHitMarker(MarkerType);
 			}
 		}
