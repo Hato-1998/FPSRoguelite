@@ -16,6 +16,7 @@ class UFPSRWeaponDataAsset;
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnCardPicksChanged);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnRerollChargesChanged);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnLoadoutChanged);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnReadyChanged);
 
 /** PlayerState owns the AbilitySystemComponent and global attribute sets (co-op / revive friendly). */
 UCLASS()
@@ -98,6 +99,21 @@ public:
 	/** Server: set the lobby-chosen weapon (validated against the loadout pool by ServerSelectLoadoutWeapon). */
 	void SetSelectedWeapon(UFPSRWeaponDataAsset* Weapon);
 
+	/** Lobby ready state (U11a). The host-only "Start" gate is replaced by a per-player ready: the server starts
+	 *  the run once every participant is ready (AFPSRLobbyGameMode::NotifyReadyChanged). Lives on the PlayerState so
+	 *  the lobby UI / podium can read it for all players, and it resets to false on each lobby (re)entry. */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Lobby")
+	bool IsReady() const { return bReady; }
+
+	/** Server: set the lobby ready state. Idempotent. SetReady(true) is rejected unless a loadout weapon is chosen
+	 *  (no ready-with-empty-hands). Replicates to all so every client's lobby list reflects each player's state. */
+	void SetReady(bool bNewReady);
+
+	/** Owning client: this player's ready state changed (drives the local ready button) — also broadcast on the
+	 *  listen-server host directly from SetReady since the host gets no OnRep. */
+	UPROPERTY(BlueprintAssignable, Category = "FPSR|Lobby")
+	FOnReadyChanged OnReadyChanged;
+
 	/** Server: reset all per-run progression to a fresh-run baseline (called on lobby entry, P7 §3-6). Clears
 	 *  life state, pending picks, AllWeapons modifiers and the loadout pick. XP/PartyLevel reset naturally via the
 	 *  fresh GameState on each map; weapon inventory resets via pawn respawn. Run on the server (authority). */
@@ -133,6 +149,9 @@ protected:
 	UFUNCTION()
 	void OnRep_SelectedWeapon();
 
+	UFUNCTION()
+	void OnRep_Ready();
+
 private:
 	UPROPERTY(VisibleAnywhere, Category = "FPSR|Abilities")
 	TObjectPtr<UFPSRAbilitySystemComponent> AbilitySystemComponent;
@@ -165,4 +184,8 @@ private:
 	 *  so this replicates cleanly. ReplicatedUsing drives the owning-client lobby UI refresh. */
 	UPROPERTY(ReplicatedUsing = OnRep_SelectedWeapon)
 	TObjectPtr<UFPSRWeaponDataAsset> SelectedWeapon;
+
+	/** Lobby ready flag (U11a). Replicated to all so every client's lobby list/podium shows each player's state. */
+	UPROPERTY(ReplicatedUsing = OnRep_Ready)
+	bool bReady = false;
 };

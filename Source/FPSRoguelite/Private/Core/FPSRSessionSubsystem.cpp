@@ -15,6 +15,12 @@ namespace
 {
 	// All sessions in this game use the canonical game-session name.
 	const FName GFPSRSessionName = NAME_GameSession;
+
+	// Advertised session-settings key carrying the human-typeable lobby join code (U11a).
+	const FName GFPSRLobbyCodeKey = FName(TEXT("FPSR_LOBBYCODE"));
+
+	// Lobby code: fixed-length, uppercase alphanumerics (typeable, no ambiguous casing).
+	const int32 GFPSRLobbyCodeLen = 6;
 }
 
 void UFPSRSessionSubsystem::Initialize(FSubsystemCollectionBase& Collection)
@@ -98,6 +104,11 @@ void UFPSRSessionSubsystem::CreateSessionInternal()
 	SessionSettings.bAllowJoinViaPresence = true;
 	SessionSettings.bUseLobbiesIfAvailable = true;       // Steam lobbies — required for friend invites/overlay.
 
+	// Generate and advertise the lobby join code so a friend can join by typing it (U11a). ViaOnlineService so it
+	// rides the session's online metadata and is queryable/readable by searchers and joined clients.
+	CurrentLobbyCode = GenerateLobbyCode();
+	SessionSettings.Set(GFPSRLobbyCodeKey, CurrentLobbyCode, EOnlineDataAdvertisementType::ViaOnlineService);
+
 	CreateSessionCompleteHandle = Sessions->AddOnCreateSessionCompleteDelegate_Handle(
 		FOnCreateSessionCompleteDelegate::CreateUObject(this, &UFPSRSessionSubsystem::HandleCreateSessionComplete));
 
@@ -170,6 +181,31 @@ void UFPSRSessionSubsystem::HandleFindSessionsComplete(bool bWasSuccessful)
 	}
 
 	const int32 Count = (SearchSettings.IsValid()) ? SearchSettings->SearchResults.Num() : 0;
+
+	// Code-join lookup: the query filtered by code, but app id 480 is shared and some backends apply filters loosely,
+	// so re-verify each result's advertised code client-side (exact) and join the first true match.
+	if (bSearchingByCode)
+	{
+		bSearchingByCode = false;
+		UE_LOG(LogFPSR, Log, TEXT("[Session] JoinByCode search %s — %d candidate(s) for '%s'"), bWasSuccessful ? TEXT("OK") : TEXT("FAILED"), Count, *PendingJoinCode);
+		if (bWasSuccessful && SearchSettings.IsValid())
+		{
+			for (const FOnlineSessionSearchResult& Result : SearchSettings->SearchResults)
+			{
+				FString Code;
+				if (Result.Session.SessionSettings.Get(GFPSRLobbyCodeKey, Code) && Code.Equals(PendingJoinCode, ESearchCase::IgnoreCase))
+				{
+					OnJoinByCodeComplete.Broadcast(true);   // match found — the join now flows through OnJoinComplete.
+					JoinSearchResult(Result);
+					return;
+				}
+			}
+		}
+		UE_LOG(LogFPSR, Warning, TEXT("[Session] JoinByCode: no session matched code '%s'."), *PendingJoinCode);
+		OnJoinByCodeComplete.Broadcast(false);
+		return;
+	}
+
 	UE_LOG(LogFPSR, Log, TEXT("[Session] FindSessions %s — %d result(s)"), bWasSuccessful ? TEXT("OK") : TEXT("FAILED"), Count);
 	OnFindComplete.Broadcast(bWasSuccessful);
 }
@@ -263,6 +299,9 @@ void UFPSRSessionSubsystem::HandleDestroySessionComplete(FName SessionName, bool
 	}
 	UE_LOG(LogFPSR, Log, TEXT("[Session] DestroySession '%s' %s"), *SessionName.ToString(), bWasSuccessful ? TEXT("OK") : TEXT("FAILED"));
 
+	// Our session is gone — drop the host code (a fresh one is generated if we re-host below).
+	CurrentLobbyCode.Reset();
+
 	// Host flow: this destroy was a pre-host teardown of a stale session — now create the new one.
 	if (bHostAfterDestroy)
 	{
@@ -276,6 +315,108 @@ void UFPSRSessionSubsystem::HandleDestroySessionComplete(FName SessionName, bool
 			OnHostComplete.Broadcast(false);
 		}
 	}
+	// Join-by-code flow: this destroy tore down our own (host/joined) session before searching — now search.
+	else if (bFindByCodeAfterDestroy)
+	{
+		bFindByCodeAfterDestroy = false;
+		if (bWasSuccessful)
+		{
+			FindSessionsByCode();
+		}
+		else
+		{
+			OnJoinByCodeComplete.Broadcast(false);
+		}
+	}
+}
+
+FString UFPSRSessionSubsystem::GetLobbyCode() const
+{
+	// Host: the code we generated at create. Client: read it off the joined session's advertised settings.
+	if (!CurrentLobbyCode.IsEmpty())
+	{
+		return CurrentLobbyCode;
+	}
+	if (IOnlineSessionPtr Sessions = GetSessionInterface())
+	{
+		if (const FNamedOnlineSession* Named = Sessions->GetNamedSession(GFPSRSessionName))
+		{
+			FString Code;
+			if (Named->SessionSettings.Get(GFPSRLobbyCodeKey, Code))
+			{
+				return Code;
+			}
+		}
+	}
+	return FString();
+}
+
+void UFPSRSessionSubsystem::JoinByCode(const FString& Code)
+{
+	IOnlineSessionPtr Sessions = GetSessionInterface();
+	const FString Trimmed = Code.TrimStartAndEnd().ToUpper();
+	if (!Sessions.IsValid() || Trimmed.IsEmpty())
+	{
+		UE_LOG(LogFPSR, Warning, TEXT("[Session] JoinByCode: no session interface or empty code."));
+		OnJoinByCodeComplete.Broadcast(false);
+		return;
+	}
+
+	PendingJoinCode = Trimmed;
+
+	// If we currently hold a session (hosting solo, or already in a lobby), tear it down FIRST — joining while a
+	// named session is registered races the still-live session (same pattern as the pre-host teardown).
+	if (Sessions->GetNamedSession(GFPSRSessionName) != nullptr)
+	{
+		bFindByCodeAfterDestroy = true;
+		CurrentLobbyCode.Reset();   // leaving our own lobby — drop the host code.
+		DestroySessionCompleteHandle = Sessions->AddOnDestroySessionCompleteDelegate_Handle(
+			FOnDestroySessionCompleteDelegate::CreateUObject(this, &UFPSRSessionSubsystem::HandleDestroySessionComplete));
+		Sessions->DestroySession(GFPSRSessionName);
+		return;
+	}
+
+	FindSessionsByCode();
+}
+
+void UFPSRSessionSubsystem::FindSessionsByCode()
+{
+	IOnlineSessionPtr Sessions = GetSessionInterface();
+	if (!Sessions.IsValid())
+	{
+		OnJoinByCodeComplete.Broadcast(false);
+		return;
+	}
+
+	SearchSettings = MakeShared<FOnlineSessionSearch>();
+	SearchSettings->MaxSearchResults = 50;
+	SearchSettings->bIsLanQuery = false;
+	SearchSettings->QuerySettings.Set(GFPSRLobbyCodeKey, PendingJoinCode, EOnlineComparisonOp::Equals);
+
+	bSearchingByCode = true;
+	FindSessionsCompleteHandle = Sessions->AddOnFindSessionsCompleteDelegate_Handle(
+		FOnFindSessionsCompleteDelegate::CreateUObject(this, &UFPSRSessionSubsystem::HandleFindSessionsComplete));
+
+	if (!Sessions->FindSessions(0, SearchSettings.ToSharedRef()))
+	{
+		Sessions->ClearOnFindSessionsCompleteDelegate_Handle(FindSessionsCompleteHandle);
+		bSearchingByCode = false;
+		OnJoinByCodeComplete.Broadcast(false);
+	}
+}
+
+FString UFPSRSessionSubsystem::GenerateLobbyCode()
+{
+	// Excludes visually ambiguous chars (0/O, 1/I) for typeability.
+	static const TCHAR Alphabet[] = TEXT("ABCDEFGHJKLMNPQRSTUVWXYZ23456789");
+	const int32 NumChars = UE_ARRAY_COUNT(Alphabet) - 1;   // drop the null terminator.
+	FString Code;
+	Code.Reserve(GFPSRLobbyCodeLen);
+	for (int32 i = 0; i < GFPSRLobbyCodeLen; ++i)
+	{
+		Code.AppendChar(Alphabet[FMath::RandRange(0, NumChars - 1)]);
+	}
+	return Code;
 }
 
 void UFPSRSessionSubsystem::ShowInviteUI()

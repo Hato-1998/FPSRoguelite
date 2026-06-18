@@ -69,10 +69,19 @@ void AFPSRLobbyPlayerController::ServerSelectLoadoutWeapon_Implementation(int32 
 	PS->SetSelectedWeapon(Pool->GetWeaponAt(PoolIndex));
 }
 
-void AFPSRLobbyPlayerController::ServerRequestStartRun_Implementation()
+void AFPSRLobbyPlayerController::ServerSetReady_Implementation(bool bReady)
 {
+	AFPSRPlayerState* PS = GetPlayerState<AFPSRPlayerState>();
+	if (!PS)
+	{
+		return;
+	}
+
+	PS->SetReady(bReady);
+
+	// Re-evaluate the all-ready start gate (the server owns the travel decision; clients only send intent).
 	if (AFPSRLobbyGameMode* GM = GetWorld() ? GetWorld()->GetAuthGameMode<AFPSRLobbyGameMode>() : nullptr)
 	{
-		GM->RequestStartRun(this);
+		GM->NotifyReadyChanged();
 	}
 }

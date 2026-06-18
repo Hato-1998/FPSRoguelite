@@ -30,6 +30,7 @@ void UFPSRLobbyWidget::NativeDestruct()
 			if (AFPSRPlayerState* PS = PC->GetPlayerState<AFPSRPlayerState>())
 			{
 				PS->OnLoadoutChanged.RemoveDynamic(this, &UFPSRLobbyWidget::HandleLoadoutChanged);
+				PS->OnReadyChanged.RemoveDynamic(this, &UFPSRLobbyWidget::HandleReadyChanged);
 			}
 		}
 		bBoundToPlayerState = false;
@@ -54,9 +55,11 @@ bool UFPSRLobbyWidget::TryBindPlayerState()
 	if (PS)
 	{
 		PS->OnLoadoutChanged.AddDynamic(this, &UFPSRLobbyWidget::HandleLoadoutChanged);
+		PS->OnReadyChanged.AddDynamic(this, &UFPSRLobbyWidget::HandleReadyChanged);
 		bBoundToPlayerState = true;
 		// Initial paint with whatever state already exists.
 		OnLoadoutRefreshed();
+		OnReadyRefreshed();
 		return true;
 	}
 
@@ -73,6 +76,11 @@ void UFPSRLobbyWidget::HandleLoadoutChanged()
 	OnLoadoutRefreshed();
 }
 
+void UFPSRLobbyWidget::HandleReadyChanged()
+{
+	OnReadyRefreshed();
+}
+
 void UFPSRLobbyWidget::SelectLoadoutWeapon(int32 PoolIndex)
 {
 	if (AFPSRLobbyPlayerController* PC = Cast<AFPSRLobbyPlayerController>(GetOwningPlayer()))
@@ -81,11 +89,13 @@ void UFPSRLobbyWidget::SelectLoadoutWeapon(int32 PoolIndex)
 	}
 }
 
-void UFPSRLobbyWidget::RequestStartRun()
+void UFPSRLobbyWidget::ToggleReady()
 {
-	if (AFPSRLobbyPlayerController* PC = Cast<AFPSRLobbyPlayerController>(GetOwningPlayer()))
+	AFPSRLobbyPlayerController* PC = Cast<AFPSRLobbyPlayerController>(GetOwningPlayer());
+	const AFPSRPlayerState* PS = PC ? PC->GetPlayerState<AFPSRPlayerState>() : nullptr;
+	if (PC && PS)
 	{
-		PC->ServerRequestStartRun();
+		PC->ServerSetReady(!PS->IsReady());
 	}
 }
 
@@ -96,6 +106,17 @@ void UFPSRLobbyWidget::RequestShowInvite()
 		if (UFPSRSessionSubsystem* Session = GI->GetSubsystem<UFPSRSessionSubsystem>())
 		{
 			Session->ShowInviteUI();
+		}
+	}
+}
+
+void UFPSRLobbyWidget::JoinLobbyByCode(const FString& Code)
+{
+	if (const UGameInstance* GI = GetGameInstance())
+	{
+		if (UFPSRSessionSubsystem* Session = GI->GetSubsystem<UFPSRSessionSubsystem>())
+		{
+			Session->JoinByCode(Code);
 		}
 	}
 }
@@ -113,8 +134,27 @@ UFPSRWeaponDataAsset* UFPSRLobbyWidget::GetSelectedWeapon() const
 	return PS ? PS->GetSelectedWeapon() : nullptr;
 }
 
+bool UFPSRLobbyWidget::IsLocalPlayerReady() const
+{
+	const APlayerController* PC = GetOwningPlayer();
+	const AFPSRPlayerState* PS = PC ? PC->GetPlayerState<AFPSRPlayerState>() : nullptr;
+	return PS && PS->IsReady();
+}
+
 bool UFPSRLobbyWidget::IsLocalPlayerHost() const
 {
 	const UWorld* World = GetWorld();
 	return World && World->GetNetMode() != NM_Client;
+}
+
+FString UFPSRLobbyWidget::GetLobbyCode() const
+{
+	if (const UGameInstance* GI = GetGameInstance())
+	{
+		if (UFPSRSessionSubsystem* Session = GI->GetSubsystem<UFPSRSessionSubsystem>())
+		{
+			return Session->GetLobbyCode();
+		}
+	}
+	return FString();
 }

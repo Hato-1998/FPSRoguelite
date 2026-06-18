@@ -32,6 +32,12 @@ public:
 
 	virtual void BeginPlay() override;
 
+	/** Add the local player's default Enhanced Input mapping context (idempotent — removes a prior copy first).
+	 *  Public so the possessed pawn's input setup can also trigger it: the pawn's SetupPlayerInputComponent is the
+	 *  one hook guaranteed to run after a travel possession (the swapped gameplay PC's own SetupInputComponent does
+	 *  NOT re-run, leaving Enhanced Input dead). Caller is logged for diagnostics. (P7 §3-4) */
+	void ApplyDefaultMappingContext(const TCHAR* Caller);
+
 	/** Server-only (NOT an RPC): begin an opening-seed sequence of Count picks. Trusted server / authority
 	 *  debug only — deliberately not client-callable so a client can't grant itself free offers. */
 	void BeginOpeningSeed(int32 Count);
@@ -110,6 +116,14 @@ public:
 
 protected:
 	virtual void SetupInputComponent() override;
+
+	/** The mapping context must be (re)applied after lobby->gameplay travel — the swapped-in gameplay PC does NOT
+	 *  re-run SetupInputComponent, so its context never lands and Enhanced Input is dead. No single possession
+	 *  hook fires for every host/client travel case, so ApplyDefaultMappingContext() is called (idempotently) from
+	 *  OnPossess (server / listen-host authority), AcknowledgePossession (owning client), and the pawn's input
+	 *  setup. (P7 §3-4) */
+	virtual void OnPossess(APawn* InPawn) override;
+	virtual void AcknowledgePossession(APawn* P) override;
 
 	/** Server-only: draw + cache an offer of the given type for this player and present it. */
 	void RequestCardOffer(EFPSROfferType OfferType);

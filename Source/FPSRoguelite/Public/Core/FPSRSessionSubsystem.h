@@ -52,6 +52,17 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "FPSR|Session")
 	void ShowInviteUI();
 
+	/** This lobby's 6-char join code (U11a). Host = the code generated at create; client = the code advertised on
+	 *  the joined session's settings. Empty if there is no session yet / it hasn't replicated. */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Session")
+	FString GetLobbyCode() const;
+
+	/** Join a lobby by its 6-char code (U11a). Tears down the current session first (async) if one exists, then
+	 *  searches for the advertised code and joins the first exact match. Reports the lookup via OnJoinByCodeComplete;
+	 *  the actual join then flows through OnJoinComplete (same as the invite/browser path). */
+	UFUNCTION(BlueprintCallable, Category = "FPSR|Session")
+	void JoinByCode(const FString& Code);
+
 	/** Fired when CreateSession completes (success → already traveling to the lobby). */
 	UPROPERTY(BlueprintAssignable, Category = "FPSR|Session")
 	FFPSRSessionResult OnHostComplete;
@@ -64,6 +75,11 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "FPSR|Session")
 	FFPSRSessionResult OnJoinComplete;
 
+	/** Fired when a JoinByCode lookup resolves: true → a matching session was found and the join was started (watch
+	 *  OnJoinComplete for the result); false → no session matched the code / the search failed. */
+	UPROPERTY(BlueprintAssignable, Category = "FPSR|Session")
+	FFPSRSessionResult OnJoinByCodeComplete;
+
 private:
 	/** Resolve the active session interface (Steam) for this world. Null if the OSS/session interface is absent. */
 	IOnlineSessionPtr GetSessionInterface() const;
@@ -72,8 +88,15 @@ private:
 	 *  can defer it until an async DestroySession of a stale session completes. */
 	void CreateSessionInternal();
 
+	/** Issue a FindSessions filtered by PendingJoinCode (the code-join search). Split out so the join-by-code flow
+	 *  can defer it until an async DestroySession of a stale session completes. */
+	void FindSessionsByCode();
+
 	/** Shared join path for both a search result and an accepted invite. */
 	void JoinSearchResult(const FOnlineSessionSearchResult& SearchResult);
+
+	/** Generate a random 6-char (A-Z0-9) lobby code (host side, at session create). */
+	static FString GenerateLobbyCode();
 
 	//~ Native OSS delegate handlers (bound via CreateUObject — not UFUNCTIONs).
 	void HandleCreateSessionComplete(FName SessionName, bool bWasSuccessful);
@@ -96,4 +119,17 @@ private:
 
 	/** True while a stale session is being destroyed before (re)hosting — the destroy callback then creates. */
 	bool bHostAfterDestroy = false;
+
+	/** This host's generated lobby code (empty on a pure client — read GetLobbyCode from the joined session there). */
+	FString CurrentLobbyCode;
+
+	/** True while the active FindSessions is a code-join lookup (the complete handler joins the match instead of
+	 *  just reporting results). */
+	bool bSearchingByCode = false;
+
+	/** True while a stale session is being destroyed before a code-join search — the destroy callback then searches. */
+	bool bFindByCodeAfterDestroy = false;
+
+	/** The code being joined (carried into the deferred FindSessionsByCode after a stale session is destroyed). */
+	FString PendingJoinCode;
 };

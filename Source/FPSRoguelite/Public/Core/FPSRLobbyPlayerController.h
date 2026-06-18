@@ -11,7 +11,8 @@ class UCommonActivatableWidget;
 
 /** Lobby player controller (P7 §3-3): creates the primary layout and pushes the lobby widget (mirrors the menu
  *  PC — UI only, no gameplay HUD / card flow). Hosts the server-authoritative lobby RPCs: loadout selection and
- *  the host-only start-run request. On the run start the engine seamlessly swaps this for the gameplay PC. */
+ *  the per-player ready toggle (U11a — the all-ready aggregation in the GameMode starts the run; there is no
+ *  host-only "Start"). On the run start the engine seamlessly swaps this for the gameplay PC. */
 UCLASS()
 class FPSROGUELITE_API AFPSRLobbyPlayerController : public APlayerController
 {
@@ -25,9 +26,10 @@ public:
 	UFUNCTION(Server, Reliable)
 	void ServerSelectLoadoutWeapon(int32 PoolIndex);
 
-	/** Server RPC (client intent): request the run start. The GameMode gates this to the host. */
+	/** Server RPC (client intent): set this player's lobby ready state. The server applies it to the PlayerState
+	 *  (guarded: ready requires a chosen weapon) and re-evaluates the all-ready start gate (U11a). */
 	UFUNCTION(Server, Reliable)
-	void ServerRequestStartRun();
+	void ServerSetReady(bool bReady);
 
 protected:
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|UI")

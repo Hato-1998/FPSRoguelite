@@ -283,6 +283,15 @@ void AFPSRCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompo
 	{
 		EIC->BindAction(DashAction, ETriggerEvent::Started, this, &AFPSRCharacter::Input_Dash);
 	}
+
+	// The pawn's input setup is the one hook guaranteed to run for the locally-controlled pawn after a travel
+	// possession (the swapped gameplay PC's own SetupInputComponent does NOT re-run, so its mapping context would
+	// otherwise never land — actions bound here but no key->action map = dead input). Apply the mapping context here.
+	UE_LOG(LogFPSR, Log, TEXT("[Input] Character::SetupPlayerInputComponent ran (actions bound)"));
+	if (AFPSRPlayerController* FPSRPC = Cast<AFPSRPlayerController>(GetController()))
+	{
+		FPSRPC->ApplyDefaultMappingContext(TEXT("Char::SetupPlayerInputComponent"));
+	}
 }
 
 bool AFPSRCharacter::IsRunFrozen() const

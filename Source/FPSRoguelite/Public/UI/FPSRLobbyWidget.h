@@ -27,13 +27,19 @@ protected:
 	UFUNCTION(BlueprintCallable, Category = "FPSR|Lobby")
 	void SelectLoadoutWeapon(int32 PoolIndex);
 
-	/** Host-only request to start the run (the server gates this to the host). */
+	/** Toggle the local player's ready state (U11a). The run auto-starts once every participant is ready — there is
+	 *  no host-only "Start". Readying requires a chosen weapon (the server rejects it otherwise). */
 	UFUNCTION(BlueprintCallable, Category = "FPSR|Lobby")
-	void RequestStartRun();
+	void ToggleReady();
 
 	/** Open the Steam friend-invite overlay for the current session. */
 	UFUNCTION(BlueprintCallable, Category = "FPSR|Lobby")
 	void RequestShowInvite();
+
+	/** Join a lobby by its 6-char code (U11a). Tears down the local session first if hosting/joined, then searches
+	 *  for the advertised code and joins the first match. */
+	UFUNCTION(BlueprintCallable, Category = "FPSR|Lobby")
+	void JoinLobbyByCode(const FString& Code);
 
 	/** The configured selectable-weapon pool (same content on client and server). Null if unset. */
 	UFUNCTION(BlueprintPure, Category = "FPSR|Lobby")
@@ -43,13 +49,26 @@ protected:
 	UFUNCTION(BlueprintPure, Category = "FPSR|Lobby")
 	UFPSRWeaponDataAsset* GetSelectedWeapon() const;
 
-	/** True if the local player is the host (listen server / standalone) — gate the "Start" button on this. */
+	/** True if the local player is currently ready (drives the ready-button visual state). */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Lobby")
+	bool IsLocalPlayerReady() const;
+
+	/** True if the local player is the host (listen server / standalone). UI hint (e.g. a "host" tag); the run
+	 *  start is no longer host-gated (U11a — all-ready starts it). */
 	UFUNCTION(BlueprintPure, Category = "FPSR|Lobby")
 	bool IsLocalPlayerHost() const;
+
+	/** This lobby's join code (6 chars). Empty until a session exists / before it replicates to a client. */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Lobby")
+	FString GetLobbyCode() const;
 
 	/** Fired when the local player's loadout selection changes — the WBP refreshes its highlight/state. */
 	UFUNCTION(BlueprintImplementableEvent, Category = "FPSR|Lobby")
 	void OnLoadoutRefreshed();
+
+	/** Fired when the local player's ready state changes — the WBP refreshes its ready-button visual. */
+	UFUNCTION(BlueprintImplementableEvent, Category = "FPSR|Lobby")
+	void OnReadyRefreshed();
 
 private:
 	/** Bind to the local PlayerState's OnLoadoutChanged; retries until the PlayerState exists (client replication). */
@@ -57,6 +76,9 @@ private:
 
 	UFUNCTION()
 	void HandleLoadoutChanged();
+
+	UFUNCTION()
+	void HandleReadyChanged();
 
 	/** Retry timer for the PlayerState binding. */
 	FTimerHandle BindRetryTimer;

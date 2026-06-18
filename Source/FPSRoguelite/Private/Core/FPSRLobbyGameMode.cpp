@@ -8,7 +8,9 @@
 #include "Core/FPSRLogChannels.h"
 #include "GameFramework/SpectatorPawn.h"
 #include "GameFramework/PlayerController.h"
+#include "GameFramework/GameStateBase.h"
 #include "Engine/World.h"
+#include "TimerManager.h"
 
 AFPSRLobbyGameMode::AFPSRLobbyGameMode()
 {
@@ -28,6 +30,16 @@ void AFPSRLobbyGameMode::PostLogin(APlayerController* NewPlayer)
 	Super::PostLogin(NewPlayer);
 	// Fresh join: default state already, but reset is idempotent and covers a non-seamless return path.
 	ResetPlayerRunState(NewPlayer);
+	// A new (un-ready) participant joined — re-evaluate the start gate (cancels any armed countdown).
+	NotifyReadyChanged();
+}
+
+void AFPSRLobbyGameMode::Logout(AController* Exiting)
+{
+	Super::Logout(Exiting);
+	// A participant left — re-evaluate so the remaining party can still start if they were all ready (the leaver's
+	// PlayerState is removed from the array by the time NotifyReadyChanged iterates on the next tick / here).
+	NotifyReadyChanged();
 }
 
 void AFPSRLobbyGameMode::HandleSeamlessTravelPlayer(AController*& C)
@@ -50,18 +62,77 @@ void AFPSRLobbyGameMode::ResetPlayerRunState(AController* C) const
 	}
 }
 
-void AFPSRLobbyGameMode::RequestStartRun(APlayerController* Requester)
+bool AFPSRLobbyGameMode::AreAllParticipantsReady(int32& OutParticipants) const
+{
+	OutParticipants = 0;
+	const AGameStateBase* GS = GetGameState<AGameStateBase>();
+	if (!GS)
+	{
+		return false;
+	}
+
+	bool bAllReady = true;
+	for (const APlayerState* Base : GS->PlayerArray)
+	{
+		const AFPSRPlayerState* PS = Cast<AFPSRPlayerState>(Base);
+		// Only count live participants (skip spectators / null). No bots in the lobby.
+		if (!PS || PS->IsOnlyASpectator())
+		{
+			continue;
+		}
+		++OutParticipants;
+		if (!PS->IsReady())
+		{
+			bAllReady = false;
+		}
+	}
+
+	return OutParticipants > 0 && bAllReady;
+}
+
+void AFPSRLobbyGameMode::NotifyReadyChanged()
 {
 	if (!HasAuthority())
 	{
 		return;
 	}
 
-	// Host-only gate: on a listen server only the host's controller is local to the server. This rejects a client
-	// trying to start the run (their controller is a remote proxy on the server).
-	if (!Requester || !Requester->IsLocalController())
+	UWorld* World = GetWorld();
+	if (!World)
 	{
-		UE_LOG(LogFPSR, Warning, TEXT("[Lobby] RequestStartRun rejected — only the host may start the run."));
+		return;
+	}
+
+	int32 Participants = 0;
+	if (AreAllParticipantsReady(Participants))
+	{
+		if (!World->GetTimerManager().IsTimerActive(ReadyStartTimer))
+		{
+			UE_LOG(LogFPSR, Log, TEXT("[Lobby] All %d participant(s) ready — starting run in %.1fs."), Participants, ReadyStartCountdown);
+			World->GetTimerManager().SetTimer(ReadyStartTimer, this, &AFPSRLobbyGameMode::StartRunNow, FMath::Max(0.01f, ReadyStartCountdown), false);
+		}
+	}
+	else if (World->GetTimerManager().IsTimerActive(ReadyStartTimer))
+	{
+		UE_LOG(LogFPSR, Log, TEXT("[Lobby] Ready countdown cancelled (a participant is no longer ready or left)."));
+		World->GetTimerManager().ClearTimer(ReadyStartTimer);
+	}
+}
+
+float AFPSRLobbyGameMode::GetReadyCountdownRemaining() const
+{
+	const UWorld* World = GetWorld();
+	if (!World || !World->GetTimerManager().IsTimerActive(ReadyStartTimer))
+	{
+		return 0.0f;
+	}
+	return FMath::Max(0.0f, World->GetTimerManager().GetTimerRemaining(ReadyStartTimer));
+}
+
+void AFPSRLobbyGameMode::StartRunNow()
+{
+	if (!HasAuthority())
+	{
 		return;
 	}
 
@@ -69,11 +140,11 @@ void AFPSRLobbyGameMode::RequestStartRun(APlayerController* Requester)
 	const FName RunPackage = Settings ? Settings->GetLevelPackageName(Settings->RunMap) : NAME_None;
 	if (UWorld* World = GetWorld(); World && RunPackage != NAME_None)
 	{
-		UE_LOG(LogFPSR, Log, TEXT("[Lobby] Host starting run — traveling to %s"), *RunPackage.ToString());
+		UE_LOG(LogFPSR, Log, TEXT("[Lobby] Starting run — traveling to %s"), *RunPackage.ToString());
 		World->ServerTravel(RunPackage.ToString() + TEXT("?listen"));
 	}
 	else
 	{
-		UE_LOG(LogFPSR, Error, TEXT("[Lobby] RequestStartRun: RunMap is null/invalid."));
+		UE_LOG(LogFPSR, Error, TEXT("[Lobby] StartRunNow: RunMap is null/invalid."));
 	}
 }

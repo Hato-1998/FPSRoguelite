@@ -50,6 +50,7 @@ void AFPSRPlayerState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Out
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRPlayerState, MissionRewardPicksPending, Params);
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRPlayerState, AllWeaponsMods, Params);
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRPlayerState, SelectedWeapon, Params);
+	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRPlayerState, bReady, Params);
 }
 
 bool AFPSRPlayerState::ConsumeRerollCharge()
@@ -224,6 +225,14 @@ void AFPSRPlayerState::SetSelectedWeapon(UFPSRWeaponDataAsset* Weapon)
 	}
 	SelectedWeapon = Weapon;
 	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRPlayerState, SelectedWeapon, this);
+
+	// Can't stay ready with no weapon — clearing the pick un-readies (keeps the ready guard consistent). Swapping to
+	// another valid weapon leaves ready intact.
+	if (!Weapon)
+	{
+		SetReady(false);
+	}
+
 	// Listen-server host's own UI doesn't get OnRep — broadcast directly so the host's lobby highlight updates too.
 	OnLoadoutChanged.Broadcast();
 }
@@ -231,6 +240,30 @@ void AFPSRPlayerState::SetSelectedWeapon(UFPSRWeaponDataAsset* Weapon)
 void AFPSRPlayerState::OnRep_SelectedWeapon()
 {
 	OnLoadoutChanged.Broadcast();
+}
+
+void AFPSRPlayerState::SetReady(bool bNewReady)
+{
+	if (!HasAuthority() || bReady == bNewReady)
+	{
+		return;
+	}
+
+	// Guard: readying requires a chosen loadout weapon (no ready-with-empty-hands). Un-readying is always allowed.
+	if (bNewReady && !SelectedWeapon)
+	{
+		return;
+	}
+
+	bReady = bNewReady;
+	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRPlayerState, bReady, this);
+	// Listen-server host gets no OnRep — broadcast directly so the host's ready button updates too.
+	OnReadyChanged.Broadcast();
+}
+
+void AFPSRPlayerState::OnRep_Ready()
+{
+	OnReadyChanged.Broadcast();
 }
 
 void AFPSRPlayerState::ResetRunState()
@@ -242,6 +275,9 @@ void AFPSRPlayerState::ResetRunState()
 
 	// Life state back to alive (U2 field).
 	SetDead(false);
+
+	// Lobby ready resets on every (re)entry — a returning party must re-ready (U11a).
+	SetReady(false);
 
 	// Pending card / mission-reward picks.
 	CardPicksPending = 0;
