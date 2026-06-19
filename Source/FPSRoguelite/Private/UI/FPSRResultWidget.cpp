@@ -2,9 +2,10 @@
 
 #include "UI/FPSRResultWidget.h"
 #include "Core/FPSRPlayerController.h"
-#include "Core/FPSRGameFlowSubsystem.h"
+#include "Core/FPSRGameMode.h"
 #include "CommonButtonBase.h"
 #include "CommonInputModeTypes.h"
+#include "Engine/World.h"
 
 UFPSRResultWidget::UFPSRResultWidget()
 {
@@ -29,7 +30,6 @@ TOptional<FUIInputConfig> UFPSRResultWidget::GetDesiredInputConfig() const
 
 void UFPSRResultWidget::SetOutcome(EFPSRRunOutcome Outcome)
 {
-	CachedOutcome = Outcome;
 	OnOutcomeSet(Outcome);
 }
 
@@ -41,20 +41,17 @@ void UFPSRResultWidget::HandleReturnClicked()
 		return;
 	}
 
+	// Return goes to the LOBBY hub, not the main menu (P7 §3-6 — every run returns to the lobby; this matches the
+	// GameMode's automatic post-run travel and just fires it now instead of waiting out PostRunTravelDelay).
 	if (PC->HasAuthority())
 	{
-		// Authority: call the subsystem directly.
-		if (UGameInstance* GI = GetGameInstance())
+		if (AFPSRGameMode* GM = GetWorld() ? GetWorld()->GetAuthGameMode<AFPSRGameMode>() : nullptr)
 		{
-			if (UFPSRGameFlowSubsystem* Flow = GI->GetSubsystem<UFPSRGameFlowSubsystem>())
-			{
-				Flow->ReturnToMenu(CachedOutcome);
-			}
+			GM->RequestReturnToLobby();
 		}
 	}
 	else
 	{
-		// Non-authority client: send RPC to server.
-		PC->ServerRequestReturnToMenu(CachedOutcome);
+		PC->ServerRequestReturnToLobby();
 	}
 }

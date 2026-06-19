@@ -13,6 +13,7 @@
 #include "Core/FPSRLogChannels.h"
 #include "Core/FPSRPlayerState.h"
 #include "Core/FPSRGameState.h"
+#include "Core/FPSRGameMode.h"
 #include "Core/FPSRGameFlowSubsystem.h"
 #include "Card/FPSRCardSubsystem.h"
 #include "Card/FPSRCardDataAsset.h"
@@ -124,7 +125,7 @@ void AFPSRPlayerController::ApplyDefaultMappingContext(const TCHAR* Caller)
 	// a prior copy before re-adding so the contexts never stack duplicates.
 	Subsystem->RemoveMappingContext(DefaultMappingContext);
 	Subsystem->AddMappingContext(DefaultMappingContext, 0);
-	UE_LOG(LogFPSR, Log, TEXT("[Input] (%s) Added DefaultMappingContext to local player"), Caller);
+	UE_LOG(LogFPSR, Verbose, TEXT("[Input] (%s) Added DefaultMappingContext to local player"), Caller);
 }
 
 void AFPSRPlayerController::BeginOpeningSeed(int32 Count)
@@ -501,6 +502,20 @@ void AFPSRPlayerController::ServerRequestReturnToMenu_Implementation(EFPSRRunOut
 		{
 			Flow->ReturnToMenu(Outcome);
 		}
+	}
+}
+
+void AFPSRPlayerController::ServerRequestReturnToLobby_Implementation()
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+
+	// The GameMode owns the (single source of truth) lobby travel — fire it now and cancel the pending auto-travel.
+	if (AFPSRGameMode* GM = GetWorld() ? GetWorld()->GetAuthGameMode<AFPSRGameMode>() : nullptr)
+	{
+		GM->RequestReturnToLobby();
 	}
 }
 

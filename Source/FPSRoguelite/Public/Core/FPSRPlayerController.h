@@ -114,6 +114,12 @@ public:
 	UFUNCTION(Server, Reliable)
 	void ServerRequestReturnToMenu(EFPSRRunOutcome Outcome);
 
+	/** Server (host/authority): return to the lobby hub now (non-authority result widget path). Mirrors the GameMode's
+	 *  automatic post-run lobby travel but fires immediately on the player's Return click instead of after the delay
+	 *  (P7 §3-6 — all runs return to the lobby, not the main menu). */
+	UFUNCTION(Server, Reliable)
+	void ServerRequestReturnToLobby();
+
 protected:
 	virtual void SetupInputComponent() override;
 

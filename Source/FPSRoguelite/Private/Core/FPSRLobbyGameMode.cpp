@@ -103,6 +103,8 @@ void AFPSRLobbyGameMode::NotifyReadyChanged()
 		return;
 	}
 
+	AFPSRGameState* GS = GetGameState<AFPSRGameState>();
+
 	int32 Participants = 0;
 	if (AreAllParticipantsReady(Participants))
 	{
@@ -110,23 +112,29 @@ void AFPSRLobbyGameMode::NotifyReadyChanged()
 		{
 			UE_LOG(LogFPSR, Log, TEXT("[Lobby] All %d participant(s) ready — starting run in %.1fs."), Participants, ReadyStartCountdown);
 			World->GetTimerManager().SetTimer(ReadyStartTimer, this, &AFPSRLobbyGameMode::StartRunNow, FMath::Max(0.01f, ReadyStartCountdown), false);
+			// Publish the end stamp so every lobby client (not just the host) can show the countdown.
+			if (GS)
+			{
+				GS->SetLobbyCountdownEndTime(GS->GetServerWorldTimeSeconds() + ReadyStartCountdown);
+			}
 		}
 	}
 	else if (World->GetTimerManager().IsTimerActive(ReadyStartTimer))
 	{
 		UE_LOG(LogFPSR, Log, TEXT("[Lobby] Ready countdown cancelled (a participant is no longer ready or left)."));
 		World->GetTimerManager().ClearTimer(ReadyStartTimer);
+		if (GS)
+		{
+			GS->SetLobbyCountdownEndTime(0.0f);
+		}
 	}
 }
 
 float AFPSRLobbyGameMode::GetReadyCountdownRemaining() const
 {
-	const UWorld* World = GetWorld();
-	if (!World || !World->GetTimerManager().IsTimerActive(ReadyStartTimer))
-	{
-		return 0.0f;
-	}
-	return FMath::Max(0.0f, World->GetTimerManager().GetTimerRemaining(ReadyStartTimer));
+	// Delegate to the replicated GameState value so host and clients agree (the timer itself is host-only).
+	const AFPSRGameState* GS = GetGameState<AFPSRGameState>();
+	return GS ? GS->GetLobbyReadyCountdownRemaining() : 0.0f;
 }
 
 void AFPSRLobbyGameMode::StartRunNow()

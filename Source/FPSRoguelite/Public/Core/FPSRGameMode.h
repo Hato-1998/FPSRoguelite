@@ -39,6 +39,10 @@ public:
 	/** Server: called when a player dies. Ends the run in Defeat if the whole party is now wiped. */
 	void NotifyPlayerDefeated();
 
+	/** Server: travel back to the lobby hub immediately (result-screen Return click). Cancels the pending
+	 *  post-run auto-travel timer so the two paths can't double-fire, then reuses the same TravelToLobby. */
+	void RequestReturnToLobby();
+
 protected:
 	/** Bound to GameState OnRunEnded (subscribed in BeginPlay): closes the loop by traveling back to the lobby
 	 *  hub a short beat after the result screen shows. Deliberately a SEPARATE method (not in EndRun's body) so

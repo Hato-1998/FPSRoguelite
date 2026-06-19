@@ -62,6 +62,11 @@ protected:
 	UFUNCTION(BlueprintPure, Category = "FPSR|Lobby")
 	FString GetLobbyCode() const;
 
+	/** Seconds left on the all-ready start countdown (0 when not counting down). Reads the replicated GameState
+	 *  value, so it works on host AND remote clients (the lobby GameMode timer is server-only). (U11a) */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Lobby")
+	float GetReadyCountdownRemaining() const;
+
 	/** Fired when the local player's loadout selection changes — the WBP refreshes its highlight/state. */
 	UFUNCTION(BlueprintImplementableEvent, Category = "FPSR|Lobby")
 	void OnLoadoutRefreshed();

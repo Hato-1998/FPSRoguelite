@@ -20,6 +20,7 @@ class FPSROGUELITE_API AFPSRLobbyPlayerController : public APlayerController
 
 public:
 	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 	/** Server RPC (client intent): pick the loadout weapon at PoolIndex. The server validates the index against
 	 *  the configured loadout pool (the client only ever sends an index) and stores it on the PlayerState. */

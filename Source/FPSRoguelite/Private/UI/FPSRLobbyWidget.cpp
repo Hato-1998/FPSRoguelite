@@ -3,6 +3,7 @@
 #include "UI/FPSRLobbyWidget.h"
 #include "Core/FPSRLobbyPlayerController.h"
 #include "Core/FPSRPlayerState.h"
+#include "Core/FPSRGameState.h"
 #include "Core/FPSRGameFlowSettings.h"
 #include "Core/FPSRSessionSubsystem.h"
 #include "Weapon/FPSRLoadoutPoolDataAsset.h"
@@ -157,4 +158,11 @@ FString UFPSRLobbyWidget::GetLobbyCode() const
 		}
 	}
 	return FString();
+}
+
+float UFPSRLobbyWidget::GetReadyCountdownRemaining() const
+{
+	const UWorld* World = GetWorld();
+	const AFPSRGameState* GS = World ? World->GetGameState<AFPSRGameState>() : nullptr;
+	return GS ? GS->GetLobbyReadyCountdownRemaining() : 0.0f;
 }

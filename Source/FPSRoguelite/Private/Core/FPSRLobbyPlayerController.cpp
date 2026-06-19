@@ -42,6 +42,22 @@ void AFPSRLobbyPlayerController::BeginPlay()
 	}
 }
 
+void AFPSRLobbyPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	// On lobby->run SEAMLESS travel this UI-only lobby PC is swapped out and destroyed. Tear down its viewport
+	// layout explicitly: the lobby widget runs a CommonUI Menu input config, and if the layout is left on the
+	// viewport (the LocalPlayer + CommonUI action router survive seamless travel) its activatable root lingers and
+	// keeps the swapped-in gameplay client stuck in Menu input mode — so game input is swallowed and never reaches
+	// the pawn after travel (P7 movement blocker). Removing it deactivates the lobby widget and deregisters it.
+	if (PrimaryLayout)
+	{
+		PrimaryLayout->RemoveFromParent();
+		PrimaryLayout = nullptr;
+	}
+
+	Super::EndPlay(EndPlayReason);
+}
+
 void AFPSRLobbyPlayerController::ServerSelectLoadoutWeapon_Implementation(int32 PoolIndex)
 {
 	AFPSRPlayerState* PS = GetPlayerState<AFPSRPlayerState>();

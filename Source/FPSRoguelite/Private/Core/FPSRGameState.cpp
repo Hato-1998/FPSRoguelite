@@ -26,6 +26,7 @@ void AFPSRGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLi
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRGameState, bVisionRestricted, Params);
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRGameState, RunClockSeconds, Params);
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRGameState, bFriendlyFireEnabled, Params);
+	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRGameState, LobbyCountdownEndServerTime, Params);
 }
 
 int32 AFPSRGameState::GetRequiredXP(int32 Level) const
@@ -196,6 +197,28 @@ void AFPSRGameState::SetRunClockSeconds(float Seconds)
 	// Authority gets no OnRep_RunState, so notify HUD widgets locally on the host (clients refresh via
 	// replication). Authority-only path + the 0.25s dead-band above keep this to a low UI cadence.
 	OnRunStateChanged.Broadcast();
+}
+
+void AFPSRGameState::SetLobbyCountdownEndTime(float ServerTimeSeconds)
+{
+	if (!HasAuthority() || LobbyCountdownEndServerTime == ServerTimeSeconds)
+	{
+		return;
+	}
+	LobbyCountdownEndServerTime = ServerTimeSeconds;
+	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRGameState, LobbyCountdownEndServerTime, this);
+	// Authority gets no OnRep — notify host UI directly (clients refresh via replication).
+	OnRunStateChanged.Broadcast();
+}
+
+float AFPSRGameState::GetLobbyReadyCountdownRemaining() const
+{
+	if (LobbyCountdownEndServerTime <= 0.0f)
+	{
+		return 0.0f;
+	}
+	// Synced server clock on host and clients (AGameStateBase::GetServerWorldTimeSeconds) — no GameMode access needed.
+	return FMath::Max(0.0f, LobbyCountdownEndServerTime - GetServerWorldTimeSeconds());
 }
 
 void AFPSRGameState::OnRep_RunState()

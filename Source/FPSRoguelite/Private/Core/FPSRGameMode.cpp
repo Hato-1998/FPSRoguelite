@@ -114,6 +114,20 @@ void AFPSRGameMode::TravelToLobby()
 	ServerTravelListenToMap(GetWorld(), Settings ? Settings->LobbyMap : nullptr);
 }
 
+void AFPSRGameMode::RequestReturnToLobby()
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+	// Cancel the pending auto-travel so the manual Return and the timer don't both ServerTravel.
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(PostRunTravelTimer);
+	}
+	TravelToLobby();
+}
+
 void AFPSRGameMode::EndRun(EFPSRRunOutcome Outcome)
 {
 	if (!HasAuthority() || bRunEnded)
