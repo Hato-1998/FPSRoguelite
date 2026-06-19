@@ -100,6 +100,12 @@ protected:
 	UFUNCTION(BlueprintPure, Category = "FPSR|Lobby")
 	TArray<FFPSRLobbyPlayerRow> GetLobbyPlayerRows() const;
 
+	/** The full player roster preformatted as a single multi-line FText (one row per participant:
+	 *  self-marker / name / chosen weapon / ready). The WBP binds this straight to a TextBlock — no
+	 *  loop or per-field formatting in the graph (ForEach macros aren't authorable via the tooling). (U11a) */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Lobby")
+	FText GetLobbyPlayerListText() const;
+
 	/** Fired when the local player's loadout selection changes — the WBP refreshes its highlight/state. */
 	UFUNCTION(BlueprintImplementableEvent, Category = "FPSR|Lobby")
 	void OnLoadoutRefreshed();

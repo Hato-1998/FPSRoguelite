@@ -206,3 +206,20 @@ TArray<FFPSRLobbyPlayerRow> UFPSRLobbyWidget::GetLobbyPlayerRows() const
 
 	return Rows;
 }
+
+FText UFPSRLobbyWidget::GetLobbyPlayerListText() const
+{
+	const TArray<FFPSRLobbyPlayerRow> Rows = GetLobbyPlayerRows();
+
+	TArray<FString> Lines;
+	Lines.Reserve(Rows.Num());
+	for (const FFPSRLobbyPlayerRow& Row : Rows)
+	{
+		const FString SelfMark = Row.bIsLocalPlayer ? TEXT("> ") : TEXT("");
+		const FString WeaponLabel = Row.bHasWeapon ? Row.WeaponName.ToString() : TEXT("...");
+		const FString ReadyMark = Row.bReady ? TEXT("   [READY]") : TEXT("");
+		Lines.Add(FString::Printf(TEXT("%s%s  -  %s%s"), *SelfMark, *Row.PlayerName, *WeaponLabel, *ReadyMark));
+	}
+
+	return FText::FromString(FString::Join(Lines, TEXT("\n")));
+}
