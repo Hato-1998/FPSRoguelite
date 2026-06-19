@@ -2,7 +2,7 @@
 
 > `Game.md`(SSOT 허브)의 분할 문서. **섹션 번호(§x)는 원본 그대로 보존** — 소스 주석·교차참조 호환.
 > **모든 코드 작업 시 필독.** 환경/경로·빌드/검증·브랜치 전략·모델 정책·핸드오프 규칙·리뷰 루프를 담는다.
-> 담는 섹션: §6 작업 방식·규칙(§6-1~6-7) / §10 리뷰 루프.
+> 담는 섹션: §6 작업 방식·규칙(§6-1~6-8) / §10 리뷰 루프.
 
 ---
 
@@ -69,6 +69,32 @@
 6. **정리** — `git push origin --delete phase/<단계>-<키워드>` + `git branch -d phase/<단계>-<키워드>`
 
 > 전역 `claude/` 브랜치 클린업 정책과 prefix(`phase/`)로 분리되어 충돌 없음.
+
+### 6-8. 커밋 메시지 컨벤션
+형식: **`type(scope): <한 줄 요약>`** — Conventional Commits 콜론 형식. `[type]` 대괄호 금지(commitlint·git-cliff 등 툴 호환 + 기존 히스토리 일관).
+
+- **type**(필수):
+
+| type | 용도 |
+|------|------|
+| `feat` | 새 기능 추가 |
+| `fix` | 버그 수정 |
+| `content` | BP·DataAsset·umap 등 **콘텐츠** 변경(C++ 로직 아님 — §6-2 데이터 드리븐 경계) |
+| `perf` | 성능 개선(기능 변경 없음 — 적 수백·성능예산이 제1원리, 원칙1) |
+| `refactor` | 리팩토링(기능 변경 없음) |
+| `docs` | 문서(`PROGRESS.md`·`Docs/SSOT/`·README 등) |
+| `style` | 포맷팅·세미콜론 등(코드 동작 변경 없음) |
+| `test` | 테스트(자동화·스모크) 추가·수정 |
+| `chore` | 빌드·설정·툴(`.uproject`·`*.Build.cs`·gitignore·스킬·슬래시커맨드) |
+| `plan` | 계획·신규 유닛 기록(플랜모드 산출물) |
+| `merge` | `--no-ff` 검증 통과 통합 지점 마커(§6-7) |
+| `revert` | 커밋 되돌림 |
+
+- **scope**(권장): 작업 단위 ID(`U11a`·`V3`·`P7`) 또는 서브시스템(`camera`·`pm`·`gitignore`).
+- **config 분류**: 게임플레이 값(`DefaultGame.ini` 밸런스 등) = `content` / 빌드·플러그인 설정(`DefaultEngine.ini`·`*.Build.cs`) = `chore`.
+- **머지 커밋**: `merge(phase): <단계> <요약> — 검증 통과`(§6-7 라이프사이클 5와 동일).
+
+예: `feat(U11a): 로비 허브/Steam 세션/Seamless 트래블` · `content(V0): 무기 DA 8종 비주얼/사운드 배선` · `perf(spawn): 플로우필드 갱신 주기 분할`.
 
 ---
 
