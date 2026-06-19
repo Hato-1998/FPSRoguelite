@@ -4,7 +4,7 @@
 > **작업 단계를 끝낼 때마다, 그리고 중단 전 반드시 이 파일을 갱신하고 커밋한다.**
 > 확정 설계·기획·코드구조·규칙은 `Game.md`(**SSOT 허브** → 도메인별 `Docs/SSOT/*.md`, 작업별 라우팅은 허브 §0-1), **완료 작업 상세는 `git log --oneline`**. 여기엔 *무엇을 했는지*만 요약한다.
 
-**최종 갱신: 2026-06-18**
+**최종 갱신: 2026-06-19**
 
 ## ✅ 핸드오프 (2026-06-19, 브랜치 `phase/p7-mp-loop-lobby`) — 이동 블로커 **해결**(사용자 PIE 확인), 멀티플레이 U11a 마무리 단계
 > **이동 블로커 RESOLVED**: 트래블 후 인게임 이동/조작 불가 = **누적 2버그 + 적신호 1**. 6가설×UE5.7 엔진소스 교차검증+적대검증 워크플로 + `showdebug enhancedinput`/디스크로그 라이브 진단으로 확정. [[seamless-travel-input-loadout]]
@@ -12,7 +12,8 @@
 >   - **버그B (진짜 이동 블로커, 콘텐츠)**: Third Person 템플릿 임포트(로비 마네킹 SKM_Manny용)가 `IMC_Default`를 템플릿 **2D `IA_Move`**(신규 `Content/Input/Actions/`)로 덮어씀 → C++/BP는 원본 별도 `IA_MoveForward`/`IA_MoveRight`(`Content/Input/`) 바인딩이라 미스매치(showdebug: IA_Move 트리거되나 커스텀 핸들러 미호출). **수정**: `git checkout -- Content/Input/IMC_Default.uasset`(에디터 종료 후 — 열려 있으면 파일 잠금). ⚠️**템플릿/콘텐츠팩 임포트는 IMC_Default를 조용히 덮어쓸 수 있음** — 임포트 후 `git status` 확인.
 >   - **버그A (CommonUI Menu 고착, 코드)**: 로비 PC가 `AddToViewport`한 `PrimaryLayout`을 정리 안 함(EndPlay 전무) → seamless 트래블 후 로비 위젯(Menu 입력설정)이 stale CommonUI root로 생존 → 카드모달 닫혀도 Game 복원 안 됨(입력 삼켜짐). **수정** `AFPSRLobbyPlayerController::EndPlay`→`PrimaryLayout->RemoveFromParent()`. (로그로 Menu→Game 복원·`Input_MoveForward` 도달 확인.)
 > **이번 세션 부수 수정(코드, 빌드 OK)**: ① 결과창 ReturnButton→**로비**(`AFPSRGameMode::RequestReturnToLobby`+PC `ServerRequestReturnToLobby` RPC, 미사용 `CachedOutcome` 제거; 플랜§3-6 "전부 로비 복귀" 정합 — P6-A 잔존 메뉴행 해소) ② Ready 카운트다운 **복제**(`AFPSRGameState::LobbyCountdownEndServerTime` 서버시각 스탬프+`GetLobbyReadyCountdownRemaining`; LobbyGameMode arm/cancel서 set/clear; `UFPSRLobbyWidget::GetReadyCountdownRemaining` WBP 클라 게터) — 원격 클라도 카운트다운 표시. 임시 진단 로그 전부 정리.
-> **검증/커밋**: 풀빌드 `Result: Succeeded`(3회). 이동·발사·교체·리로드 PIE 통과(사용자 2026-06-19). **코드 커밋됨**(이 phase 브랜치). config 정리(`DefaultInput.ini` 레거시 매핑 제거)는 콘텐츠와 함께 미커밋 유지.
+> **검증/커밋**: 풀빌드 `Result: Succeeded`(다회). 이동·발사·교체·리로드 PIE 통과(사용자 2026-06-19). **코드 커밋됨**: `5ed43d7`(이동 블로커 + 결과창→로비 + Ready복제 + 진단정리) · `9ff2d8c`(플레이어목록 헬퍼 `GetLobbyPlayerRows`) — 이 phase 브랜치(중간에 main 동기화 머지 `0502cc7`=§6-8 커밋컨벤션 docs 유입, 충돌 0). config 정리(`DefaultInput.ini` 레거시 매핑 제거)는 콘텐츠와 함께 미커밋 유지.
+> **⚙️ VibeUE MCP(다음 세션 주의)**: 아래 콘텐츠 배선(WBP/BP)은 VibeUE MCP로 보조 가능하나, VibeUE는 **UE 에디터 플러그인이 호스팅하는 서버**라 git 커밋으로 재연결되는 게 아니다. **다음 세션을 에디터 켠 상태로 시작**해야 자동 연결됨(`~/.claude.json`에 VibeUE/mcpServers 설정 존재). 에디터를 닫으면 끊긴다(이번 세션이 IMC 되돌리려 에디터 닫으면서 끊겼음). 끊긴 세션에선 코드/레시피만 가능.
 > **🟢 다음(U11a 마무리)**: ① **풀 루프 PIE 재검증**(로비→Ready→트래블→플레이→사망/`FPSR.EndRun defeat`→로비 복귀→재Ready→재트래블) — 이동 블로커 해소로 처음 끝까지 가능 ② 남은 로비 콘텐츠 폴리시(가이드 §3, C++ 베이스 완비): **플레이어목록=`UFPSRLobbyWidget::GetLobbyPlayerRows()`**(신규 — `FFPSRLobbyPlayerRow{PlayerName,WeaponName,bHasWeapon,bReady,bIsLocalPlayer}` 배열, WBP가 Cast 없이 ForEach) / 포디움 무기=`AFPSRLobbyDisplayPawn::OnDisplayWeaponChanged` / 카운트다운=`GetReadyCountdownRemaining` ③ 2-PC Steam E2E → `Scripts/codex-review.ps1 -Base main` → `--no-ff` 머지.
 > **선택 후속**: PIE 노이즈 LeftShift→디버그 바인딩은 출시 제외라 방치 가능(원하면 `DefaultInput.ini` `[/Script/Engine.PlayerInput]`서 무력화). `Content/Input/Actions/`·`IMC_MouseLook`(템플릿 잔여)는 미사용 untracked — 정리 가능.
 > **미커밋 콘텐츠(사용자 작업으로 남김)**: `WBP_Lobby`/`WBP_LoadoutEntry`/`L_Lobby`/`L_Transition`/`BP_FPSRLobbyGameMode`/`BP_FPSRLobbyPC`/`BP_LobbyDisplayPawn`/`DA_LoadoutPool`/`steam_appid.txt`/`Content/Input/Actions/`/`IMC_MouseLook` 등 (`git status` Content/). **config도 미커밋 유지**: `DefaultGame.ini`/`DefaultInput.ini`/`DefaultEditor.ini`(콘텐츠와 묶음).
