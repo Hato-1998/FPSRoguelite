@@ -9,6 +9,34 @@
 class UFPSRLoadoutPoolDataAsset;
 class UFPSRWeaponDataAsset;
 
+/** One row of the lobby player list — precomputed server-replicated state so the WBP can ForEach this array
+ *  directly (no PlayerState cast / null-deref in the graph). Built by UFPSRLobbyWidget::GetLobbyPlayerRows. */
+USTRUCT(BlueprintType)
+struct FFPSRLobbyPlayerRow
+{
+	GENERATED_BODY()
+
+	/** Player display name. */
+	UPROPERTY(BlueprintReadOnly, Category = "FPSR|Lobby")
+	FString PlayerName;
+
+	/** Chosen loadout weapon's display name (empty when bHasWeapon is false). */
+	UPROPERTY(BlueprintReadOnly, Category = "FPSR|Lobby")
+	FText WeaponName;
+
+	/** True once this player has picked a loadout weapon (false => still choosing). */
+	UPROPERTY(BlueprintReadOnly, Category = "FPSR|Lobby")
+	bool bHasWeapon = false;
+
+	/** True when this player is ready. */
+	UPROPERTY(BlueprintReadOnly, Category = "FPSR|Lobby")
+	bool bReady = false;
+
+	/** True for the local player's own row (so the UI can highlight self). */
+	UPROPERTY(BlueprintReadOnly, Category = "FPSR|Lobby")
+	bool bIsLocalPlayer = false;
+};
+
 /** Lobby UI base (P7 §3-3/§3-8). The C++ base exposes the lobby actions (loadout pick, invite, host start) and
  *  read-only state for the WBP to build its player list / weapon list. Visuals are authored in the WBP child. */
 UCLASS(Abstract)
@@ -66,6 +94,11 @@ protected:
 	 *  value, so it works on host AND remote clients (the lobby GameMode timer is server-only). (U11a) */
 	UFUNCTION(BlueprintPure, Category = "FPSR|Lobby")
 	float GetReadyCountdownRemaining() const;
+
+	/** Server-replicated lobby roster (name / chosen weapon / ready / is-self), one row per participant. The WBP
+	 *  ForEach-es this directly to build the player list — no PlayerState cast or null-guard needed in the graph. */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Lobby")
+	TArray<FFPSRLobbyPlayerRow> GetLobbyPlayerRows() const;
 
 	/** Fired when the local player's loadout selection changes — the WBP refreshes its highlight/state. */
 	UFUNCTION(BlueprintImplementableEvent, Category = "FPSR|Lobby")

@@ -7,9 +7,12 @@
 #include "Core/FPSRGameFlowSettings.h"
 #include "Core/FPSRSessionSubsystem.h"
 #include "Weapon/FPSRLoadoutPoolDataAsset.h"
+#include "Weapon/FPSRWeaponDataAsset.h"
 #include "CommonInputModeTypes.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
+#include "GameFramework/GameStateBase.h"
+#include "GameFramework/PlayerController.h"
 #include "TimerManager.h"
 
 void UFPSRLobbyWidget::NativeConstruct()
@@ -165,4 +168,41 @@ float UFPSRLobbyWidget::GetReadyCountdownRemaining() const
 	const UWorld* World = GetWorld();
 	const AFPSRGameState* GS = World ? World->GetGameState<AFPSRGameState>() : nullptr;
 	return GS ? GS->GetLobbyReadyCountdownRemaining() : 0.0f;
+}
+
+TArray<FFPSRLobbyPlayerRow> UFPSRLobbyWidget::GetLobbyPlayerRows() const
+{
+	TArray<FFPSRLobbyPlayerRow> Rows;
+
+	const UWorld* World = GetWorld();
+	const AGameStateBase* GS = World ? World->GetGameState<AGameStateBase>() : nullptr;
+	if (!GS)
+	{
+		return Rows;
+	}
+
+	// Identify the local player's PlayerState so the WBP can highlight its own row.
+	const APlayerController* LocalPC = GetOwningPlayer();
+	const APlayerState* LocalPS = LocalPC ? LocalPC->PlayerState : nullptr;
+
+	for (const APlayerState* Base : GS->PlayerArray)
+	{
+		const AFPSRPlayerState* PS = Cast<AFPSRPlayerState>(Base);
+		if (!PS || PS->IsOnlyASpectator())
+		{
+			continue; // skip spectators / non-FPSR states (server-authoritative roster only)
+		}
+
+		FFPSRLobbyPlayerRow& Row = Rows.AddDefaulted_GetRef();
+		Row.PlayerName = PS->GetPlayerName();
+		if (const UFPSRWeaponDataAsset* Weapon = PS->GetSelectedWeapon())
+		{
+			Row.WeaponName = Weapon->DisplayName;
+			Row.bHasWeapon = true;
+		}
+		Row.bReady = PS->IsReady();
+		Row.bIsLocalPlayer = (PS == LocalPS);
+	}
+
+	return Rows;
 }
