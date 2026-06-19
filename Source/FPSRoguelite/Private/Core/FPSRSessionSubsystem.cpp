@@ -77,7 +77,13 @@ void UFPSRSessionSubsystem::HostSession(int32 MaxPlayers)
 		bHostAfterDestroy = true;
 		DestroySessionCompleteHandle = Sessions->AddOnDestroySessionCompleteDelegate_Handle(
 			FOnDestroySessionCompleteDelegate::CreateUObject(this, &UFPSRSessionSubsystem::HandleDestroySessionComplete));
-		Sessions->DestroySession(GFPSRSessionName);
+		if (!Sessions->DestroySession(GFPSRSessionName))
+		{
+			// Synchronous failure — the completion delegate won't fire, so undo and report instead of hanging. (merge-gate P2)
+			Sessions->ClearOnDestroySessionCompleteDelegate_Handle(DestroySessionCompleteHandle);
+			bHostAfterDestroy = false;
+			OnHostComplete.Broadcast(false);
+		}
 		return;
 	}
 
@@ -244,7 +250,13 @@ void UFPSRSessionSubsystem::JoinSearchResult(const FOnlineSessionSearchResult& S
 		PendingJoinResult = SearchResult;
 		DestroySessionCompleteHandle = Sessions->AddOnDestroySessionCompleteDelegate_Handle(
 			FOnDestroySessionCompleteDelegate::CreateUObject(this, &UFPSRSessionSubsystem::HandleDestroySessionComplete));
-		Sessions->DestroySession(GFPSRSessionName);
+		if (!Sessions->DestroySession(GFPSRSessionName))
+		{
+			// Synchronous failure — the completion delegate won't fire, so undo and report instead of hanging. (merge-gate P2)
+			Sessions->ClearOnDestroySessionCompleteDelegate_Handle(DestroySessionCompleteHandle);
+			bJoinAfterDestroy = false;
+			OnJoinComplete.Broadcast(false);
+		}
 		return;
 	}
 
@@ -398,7 +410,13 @@ void UFPSRSessionSubsystem::JoinByCode(const FString& Code)
 		CurrentLobbyCode.Reset();   // leaving our own lobby — drop the host code.
 		DestroySessionCompleteHandle = Sessions->AddOnDestroySessionCompleteDelegate_Handle(
 			FOnDestroySessionCompleteDelegate::CreateUObject(this, &UFPSRSessionSubsystem::HandleDestroySessionComplete));
-		Sessions->DestroySession(GFPSRSessionName);
+		if (!Sessions->DestroySession(GFPSRSessionName))
+		{
+			// Synchronous failure — the completion delegate won't fire, so undo and report instead of hanging. (merge-gate P2)
+			Sessions->ClearOnDestroySessionCompleteDelegate_Handle(DestroySessionCompleteHandle);
+			bFindByCodeAfterDestroy = false;
+			OnJoinByCodeComplete.Broadcast(false);
+		}
 		return;
 	}
 

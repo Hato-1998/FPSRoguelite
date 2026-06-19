@@ -37,9 +37,14 @@ void AFPSRLobbyGameMode::PostLogin(APlayerController* NewPlayer)
 void AFPSRLobbyGameMode::Logout(AController* Exiting)
 {
 	Super::Logout(Exiting);
-	// A participant left — re-evaluate so the remaining party can still start if they were all ready (the leaver's
-	// PlayerState is removed from the array by the time NotifyReadyChanged iterates on the next tick / here).
-	NotifyReadyChanged();
+	// A participant left — re-evaluate the start gate, but DEFER to next tick: Super::Logout does not necessarily
+	// remove the exiting PlayerState from GameState->PlayerArray before this returns, so an immediate re-eval could
+	// still count the leaver (countdown stuck for an empty lobby, or failing to start when the rest are ready). (merge-gate P2)
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().SetTimerForNextTick(
+			FTimerDelegate::CreateUObject(this, &AFPSRLobbyGameMode::NotifyReadyChanged));
+	}
 }
 
 void AFPSRLobbyGameMode::HandleSeamlessTravelPlayer(AController*& C)
