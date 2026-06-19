@@ -4,8 +4,10 @@
 #include "AbilitySystem/FPSRAbilitySystemComponent.h"
 #include "AbilitySystem/Attributes/FPSRHealthSet.h"
 #include "AbilitySystem/Attributes/FPSRCombatSet.h"
+#include "GameplayEffect.h"
 #include "Weapon/FPSRWeaponInventoryComponent.h"
 #include "Weapon/FPSRWeaponFireComponent.h"
+#include "Weapon/FPSRWeaponDataAsset.h"
 #include "GameFramework/Pawn.h"
 #include "Net/UnrealNetwork.h"
 #include "Net/Core/PushModel/PushModel.h"
@@ -48,6 +50,8 @@ void AFPSRPlayerState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Out
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRPlayerState, CardPicksPending, Params);
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRPlayerState, MissionRewardPicksPending, Params);
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRPlayerState, AllWeaponsMods, Params);
+	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRPlayerState, SelectedWeapon, Params);
+	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRPlayerState, bReady, Params);
 }
 
 bool AFPSRPlayerState::ConsumeRerollCharge()
@@ -211,5 +215,116 @@ void AFPSRPlayerState::OnRep_AllWeaponsMods()
 		{
 			Inv->MarkAllInstancesResolvedDirty();
 		}
+	}
+}
+
+void AFPSRPlayerState::SetSelectedWeapon(UFPSRWeaponDataAsset* Weapon)
+{
+	if (!HasAuthority() || SelectedWeapon == Weapon)
+	{
+		return;
+	}
+	SelectedWeapon = Weapon;
+	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRPlayerState, SelectedWeapon, this);
+
+	// Can't stay ready with no weapon — clearing the pick un-readies (keeps the ready guard consistent). Swapping to
+	// another valid weapon leaves ready intact.
+	if (!Weapon)
+	{
+		SetReady(false);
+	}
+
+	// Listen-server host's own UI doesn't get OnRep — broadcast directly so the host's lobby highlight updates too.
+	OnLoadoutChanged.Broadcast();
+}
+
+void AFPSRPlayerState::OnRep_SelectedWeapon()
+{
+	OnLoadoutChanged.Broadcast();
+}
+
+void AFPSRPlayerState::SetReady(bool bNewReady)
+{
+	if (!HasAuthority() || bReady == bNewReady)
+	{
+		return;
+	}
+
+	// Guard: readying requires a chosen loadout weapon (no ready-with-empty-hands). Un-readying is always allowed.
+	if (bNewReady && !SelectedWeapon)
+	{
+		return;
+	}
+
+	bReady = bNewReady;
+	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRPlayerState, bReady, this);
+	// Listen-server host gets no OnRep — broadcast directly so the host's ready button updates too.
+	OnReadyChanged.Broadcast();
+}
+
+void AFPSRPlayerState::OnRep_Ready()
+{
+	OnReadyChanged.Broadcast();
+}
+
+void AFPSRPlayerState::ResetRunState()
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+
+	// Life state back to alive (U2 field).
+	SetDead(false);
+
+	// Lobby ready resets on every (re)entry — a returning party must re-ready (U11a).
+	SetReady(false);
+
+	// Pending card / mission-reward picks.
+	CardPicksPending = 0;
+	MissionRewardPicksPending = 0;
+	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRPlayerState, CardPicksPending, this);
+	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRPlayerState, MissionRewardPicksPending, this);
+	OnCardPicksChanged.Broadcast();
+
+	// Reroll charges to default.
+	ResetRerollCharges();
+
+	// AllWeapons-scope modifiers (these survive pawn respawn, so they must be cleared explicitly).
+	AllWeaponsMods.Mods.Empty();
+	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRPlayerState, AllWeaponsMods, this);
+	if (APawn* Pawn = GetPawn())
+	{
+		if (UFPSRWeaponInventoryComponent* Inv = Pawn->FindComponentByClass<UFPSRWeaponInventoryComponent>())
+		{
+			Inv->MarkAllInstancesResolvedDirty();
+		}
+	}
+
+	// Loadout pick is re-chosen each lobby visit.
+	SetSelectedWeapon(nullptr);
+
+	// Fresh-run ASC baseline (merge-gate P1): the ASC + attribute sets live on the PlayerState and survive the
+	// lobby<->run seamless travel, so a wiped/buffed player would otherwise start the next run at 0 HP (death
+	// state) or with stale run effects. Clear run-applied gameplay effects, then restore full health. (Weapon
+	// fire abilities are re-granted per equip by the inventory, so ability specs are intentionally left alone.)
+	if (AbilitySystemComponent)
+	{
+		AbilitySystemComponent->RemoveActiveEffects(FGameplayEffectQuery());
+		AbilitySystemComponent->SetNumericAttributeBase(
+			UFPSRHealthSet::GetHealthAttribute(),
+			AbilitySystemComponent->GetNumericAttribute(UFPSRHealthSet::GetMaxHealthAttribute()));
+	}
+}
+
+void AFPSRPlayerState::CopyProperties(APlayerState* PlayerState)
+{
+	Super::CopyProperties(PlayerState);
+
+	// Carry the lobby loadout pick across the lobby->gameplay seamless travel so the gameplay pawn can grant it.
+	// Run-progression fields are deliberately NOT copied — they are reset on lobby entry regardless.
+	if (AFPSRPlayerState* PS = Cast<AFPSRPlayerState>(PlayerState))
+	{
+		PS->SelectedWeapon = SelectedWeapon;
 	}
 }

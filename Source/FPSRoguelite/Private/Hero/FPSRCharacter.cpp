@@ -186,13 +186,29 @@ void AFPSRCharacter::PossessedBy(AController* NewController)
 
 	if (HasAuthority() && WeaponInventory)
 	{
-		if (DefaultPrimaryWeapon)
+		// Lobby loadout pick (P7 §3-8): the chosen weapon is the single weapon for the run. Only when no pick
+		// was made (e.g. debug FPSR.TravelGame straight into gameplay, bypassing the lobby) do we fall back to
+		// the character BP's default loadout, so direct-to-gameplay testing still spawns armed.
+		UFPSRWeaponDataAsset* SelectedWeapon = nullptr;
+		if (const AFPSRPlayerState* PS = GetPlayerState<AFPSRPlayerState>())
 		{
-			WeaponInventory->AddWeapon(DefaultPrimaryWeapon);
+			SelectedWeapon = PS->GetSelectedWeapon();
 		}
-		if (DefaultSecondaryWeapon)
+
+		if (SelectedWeapon)
 		{
-			WeaponInventory->AddWeapon(DefaultSecondaryWeapon);
+			WeaponInventory->AddWeapon(SelectedWeapon);
+		}
+		else
+		{
+			if (DefaultPrimaryWeapon)
+			{
+				WeaponInventory->AddWeapon(DefaultPrimaryWeapon);
+			}
+			if (DefaultSecondaryWeapon)
+			{
+				WeaponInventory->AddWeapon(DefaultSecondaryWeapon);
+			}
 		}
 	}
 }
@@ -266,6 +282,14 @@ void AFPSRCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompo
 	if (DashAction)
 	{
 		EIC->BindAction(DashAction, ETriggerEvent::Started, this, &AFPSRCharacter::Input_Dash);
+	}
+
+	// The pawn's input setup is the one hook guaranteed to run for the locally-controlled pawn after a travel
+	// possession (the swapped gameplay PC's own SetupInputComponent does NOT re-run, so its mapping context would
+	// otherwise never land — actions bound here but no key->action map = dead input). Apply the mapping context here.
+	if (AFPSRPlayerController* FPSRPC = Cast<AFPSRPlayerController>(GetController()))
+	{
+		FPSRPC->ApplyDefaultMappingContext(TEXT("Char::SetupPlayerInputComponent"));
 	}
 }
 

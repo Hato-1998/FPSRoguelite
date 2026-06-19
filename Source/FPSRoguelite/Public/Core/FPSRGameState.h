@@ -16,6 +16,11 @@ enum class ERunPhase : uint8
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnRunStateChanged);
 
+/** Fired once on the server when the run ends (EndRunFreeze, victory or defeat). Decoupled hook so flow logic
+ *  (e.g. the GameMode's post-run travel back to the lobby, P7 §3-5) can react WITHOUT editing EndRun's body —
+ *  keeps the victory caller (U3) and the lobby-return caller (U11) on independent code paths. */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnRunEnded);
+
 /** Server-authoritative run progression state (shared XP, party level, run phase, global freeze).
  *  Redesign 2026-06-04 (Game.MD §2-2): on level-up (or mission clear) the run globally freezes — enemies
  *  and players stop — until every player finishes their card picks. Replicated via Push Model. */
@@ -65,6 +70,11 @@ public:
 	UFUNCTION(BlueprintPure, Category = "FPSR|Run")
 	float GetRunClockSeconds() const { return RunClockSeconds; }
 
+	/** Lobby ready-countdown remaining seconds (0 when not counting down). Replicated via the server-time end stamp,
+	 *  so it reads correctly on BOTH the host and remote clients (the lobby GameMode timer is server-only). (U11a) */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Lobby")
+	float GetLobbyReadyCountdownRemaining() const;
+
 	/** XP required to advance FROM the given level to the next. */
 	UFUNCTION(BlueprintPure, Category = "FPSR|Run")
 	int32 GetRequiredXP(int32 Level) const;
@@ -98,8 +108,16 @@ public:
 	/** Server: update the replicated run clock (low-frequency UI mirror). */
 	void SetRunClockSeconds(float Seconds);
 
+	/** Server: arm/clear the replicated lobby ready-countdown. Pass the server-world-time the run will start at
+	 *  (GetServerWorldTimeSeconds() + countdown), or 0 to clear. Drives GetLobbyReadyCountdownRemaining on all. */
+	void SetLobbyCountdownEndTime(float ServerTimeSeconds);
+
 	UPROPERTY(BlueprintAssignable, Category = "FPSR|Run")
 	FOnRunStateChanged OnRunStateChanged;
+
+	/** Server: broadcast once when the run ends (see FOnRunEnded). Subscribers travel/clean up after the run. */
+	UPROPERTY(BlueprintAssignable, Category = "FPSR|Run")
+	FOnRunEnded OnRunEnded;
 
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
@@ -133,6 +151,11 @@ protected:
 
 	UPROPERTY(ReplicatedUsing = OnRep_RunState)
 	float RunClockSeconds = 0.0f;
+
+	/** Server-world-time stamp at which the lobby ready-countdown completes (0 = not counting down). Replicated so a
+	 *  remote client can compute the remaining time against the synced server clock (the GameMode timer is host-only). */
+	UPROPERTY(ReplicatedUsing = OnRep_RunState)
+	float LobbyCountdownEndServerTime = 0.0f;
 
 	/** Host friendly-fire setting (replicated; read server-side for damage, mirrored to clients for UI). */
 	UPROPERTY(ReplicatedUsing = OnRep_RunState)

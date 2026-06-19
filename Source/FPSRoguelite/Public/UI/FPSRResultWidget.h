@@ -42,7 +42,4 @@ protected:
 private:
 	UFUNCTION()
 	void HandleReturnClicked();
-
-	/** Cached outcome from SetOutcome; returned to the menu. */
-	EFPSRRunOutcome CachedOutcome = EFPSRRunOutcome::None;
 };

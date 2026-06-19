@@ -13,6 +13,7 @@
 #include "Core/FPSRLogChannels.h"
 #include "Core/FPSRPlayerState.h"
 #include "Core/FPSRGameState.h"
+#include "Core/FPSRGameMode.h"
 #include "Core/FPSRGameFlowSubsystem.h"
 #include "Card/FPSRCardSubsystem.h"
 #include "Card/FPSRCardDataAsset.h"
@@ -81,7 +82,26 @@ bool AFPSRPlayerController::EnsurePrimaryLayout()
 void AFPSRPlayerController::SetupInputComponent()
 {
 	Super::SetupInputComponent();
+	ApplyDefaultMappingContext(TEXT("SetupInputComponent"));
+}
 
+void AFPSRPlayerController::OnPossess(APawn* InPawn)
+{
+	Super::OnPossess(InPawn);
+	// Server / listen-server host (authority) possession. After lobby->gameplay travel the swapped-in gameplay PC
+	// does NOT re-run SetupInputComponent, so re-apply the mapping context on possession. (AcknowledgePossession
+	// covers the remote-client case.)
+	ApplyDefaultMappingContext(TEXT("OnPossess"));
+}
+
+void AFPSRPlayerController::AcknowledgePossession(APawn* P)
+{
+	Super::AcknowledgePossession(P);
+	ApplyDefaultMappingContext(TEXT("AcknowledgePossession"));
+}
+
+void AFPSRPlayerController::ApplyDefaultMappingContext(const TCHAR* Caller)
+{
 	if (!IsLocalPlayerController())
 	{
 		return;
@@ -91,18 +111,21 @@ void AFPSRPlayerController::SetupInputComponent()
 		ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(GetLocalPlayer());
 	if (!Subsystem)
 	{
-		UE_LOG(LogFPSR, Error, TEXT("[Input] EnhancedInputLocalPlayerSubsystem not found on PlayerController"));
+		UE_LOG(LogFPSR, Warning, TEXT("[Input] (%s) EnhancedInputLocalPlayerSubsystem not found (local player not ready yet)"), Caller);
 		return;
 	}
 
 	if (!DefaultMappingContext)
 	{
-		UE_LOG(LogFPSR, Error, TEXT("[Input] DefaultMappingContext is NULL (assign it in BP_FPSRPlayerController)"));
+		UE_LOG(LogFPSR, Error, TEXT("[Input] (%s) DefaultMappingContext is NULL (assign it in BP_FPSRPlayerController)"), Caller);
 		return;
 	}
 
+	// Idempotent: several possession/input hooks call this (none fire for every host/client travel case), so clear
+	// a prior copy before re-adding so the contexts never stack duplicates.
+	Subsystem->RemoveMappingContext(DefaultMappingContext);
 	Subsystem->AddMappingContext(DefaultMappingContext, 0);
-	UE_LOG(LogFPSR, Verbose, TEXT("[Input] Added DefaultMappingContext to local player subsystem"));
+	UE_LOG(LogFPSR, Verbose, TEXT("[Input] (%s) Added DefaultMappingContext to local player"), Caller);
 }
 
 void AFPSRPlayerController::BeginOpeningSeed(int32 Count)
@@ -479,6 +502,20 @@ void AFPSRPlayerController::ServerRequestReturnToMenu_Implementation(EFPSRRunOut
 		{
 			Flow->ReturnToMenu(Outcome);
 		}
+	}
+}
+
+void AFPSRPlayerController::ServerRequestReturnToLobby_Implementation()
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+
+	// The GameMode owns the (single source of truth) lobby travel — fire it now and cancel the pending auto-travel.
+	if (AFPSRGameMode* GM = GetWorld() ? GetWorld()->GetAuthGameMode<AFPSRGameMode>() : nullptr)
+	{
+		GM->RequestReturnToLobby();
 	}
 }
 
