@@ -235,6 +235,19 @@ void UFPSRSessionSubsystem::JoinSearchResult(const FOnlineSessionSearchResult& S
 		return;
 	}
 
+	// If a session already exists (hosting, or sitting in a lobby when a Steam invite is accepted), tear it down
+	// FIRST and defer the join to the destroy-complete callback — JoinSession with an already-registered name is
+	// rejected by most OSS backends. (JoinByCode destroys before searching, so it reaches here already clean.) (merge-gate P2)
+	if (Sessions->GetNamedSession(GFPSRSessionName) != nullptr)
+	{
+		bJoinAfterDestroy = true;
+		PendingJoinResult = SearchResult;
+		DestroySessionCompleteHandle = Sessions->AddOnDestroySessionCompleteDelegate_Handle(
+			FOnDestroySessionCompleteDelegate::CreateUObject(this, &UFPSRSessionSubsystem::HandleDestroySessionComplete));
+		Sessions->DestroySession(GFPSRSessionName);
+		return;
+	}
+
 	JoinSessionCompleteHandle = Sessions->AddOnJoinSessionCompleteDelegate_Handle(
 		FOnJoinSessionCompleteDelegate::CreateUObject(this, &UFPSRSessionSubsystem::HandleJoinSessionComplete));
 
@@ -326,6 +339,19 @@ void UFPSRSessionSubsystem::HandleDestroySessionComplete(FName SessionName, bool
 		else
 		{
 			OnJoinByCodeComplete.Broadcast(false);
+		}
+	}
+	// Invite/browser join flow: this destroy tore down an existing session before joining — now join the pending result.
+	else if (bJoinAfterDestroy)
+	{
+		bJoinAfterDestroy = false;
+		if (bWasSuccessful)
+		{
+			JoinSearchResult(PendingJoinResult);
+		}
+		else
+		{
+			OnJoinComplete.Broadcast(false);
 		}
 	}
 }

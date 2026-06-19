@@ -4,6 +4,7 @@
 #include "AbilitySystem/FPSRAbilitySystemComponent.h"
 #include "AbilitySystem/Attributes/FPSRHealthSet.h"
 #include "AbilitySystem/Attributes/FPSRCombatSet.h"
+#include "GameplayEffect.h"
 #include "Weapon/FPSRWeaponInventoryComponent.h"
 #include "Weapon/FPSRWeaponFireComponent.h"
 #include "Weapon/FPSRWeaponDataAsset.h"
@@ -302,6 +303,18 @@ void AFPSRPlayerState::ResetRunState()
 
 	// Loadout pick is re-chosen each lobby visit.
 	SetSelectedWeapon(nullptr);
+
+	// Fresh-run ASC baseline (merge-gate P1): the ASC + attribute sets live on the PlayerState and survive the
+	// lobby<->run seamless travel, so a wiped/buffed player would otherwise start the next run at 0 HP (death
+	// state) or with stale run effects. Clear run-applied gameplay effects, then restore full health. (Weapon
+	// fire abilities are re-granted per equip by the inventory, so ability specs are intentionally left alone.)
+	if (AbilitySystemComponent)
+	{
+		AbilitySystemComponent->RemoveActiveEffects(FGameplayEffectQuery());
+		AbilitySystemComponent->SetNumericAttributeBase(
+			UFPSRHealthSet::GetHealthAttribute(),
+			AbilitySystemComponent->GetNumericAttribute(UFPSRHealthSet::GetMaxHealthAttribute()));
+	}
 }
 
 void AFPSRPlayerState::CopyProperties(APlayerState* PlayerState)

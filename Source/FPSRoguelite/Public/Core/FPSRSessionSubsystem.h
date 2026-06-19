@@ -4,6 +4,7 @@
 
 #include "Subsystems/GameInstanceSubsystem.h"
 #include "Interfaces/OnlineSessionInterface.h"
+#include "OnlineSessionSettings.h"   // FOnlineSessionSearchResult full definition (PendingJoinResult by-value member)
 #include "FPSRSessionSubsystem.generated.h"
 
 /** Result delegate for the host/find/join async flows (BP-bindable). bWasSuccessful = the OSS call succeeded. */
@@ -132,4 +133,10 @@ private:
 
 	/** The code being joined (carried into the deferred FindSessionsByCode after a stale session is destroyed). */
 	FString PendingJoinCode;
+
+	/** True while an existing session is destroyed before an invite/browser join — the destroy callback then joins. */
+	bool bJoinAfterDestroy = false;
+
+	/** The search result to join once the deferred DestroySession completes (invite/browser join — merge-gate P2). */
+	FOnlineSessionSearchResult PendingJoinResult;
 };
