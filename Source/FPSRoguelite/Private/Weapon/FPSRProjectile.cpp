@@ -3,6 +3,7 @@
 #include "Weapon/FPSRProjectile.h"
 #include "Weapon/FPSRProjectileSubsystem.h"
 #include "Combat/FPSRCombatStatics.h"
+#include "Combat/FPSRWeakpointComponent.h"
 #include "FPSRCollisionChannels.h"
 #include "Enemy/FPSREnemyHealthComponent.h"
 #include "Hero/FPSRCharacter.h"
@@ -60,6 +61,7 @@ void AFPSRProjectile::Launch(const FFPSRProjectileParams& InParams, const FVecto
 {
 	Params = InParams;
 	PierceRemaining = Params.Pierce;
+	HitActors.Reset();
 
 	if (ProjectileMovement)
 	{
@@ -128,6 +130,7 @@ void AFPSRProjectile::Activate(const FVector& Location, const FFPSRProjectilePar
 		// Also overlap the player object channel so a projectile can hit a friendly player (friendly fire) or a
 		// player target (enemy-team projectile). IsHostileTarget/ResolveDamage still gate whether damage lands.
 		CollisionSphere->SetCollisionResponseToChannel(ECC_FPSRPlayerPawn, ECR_Overlap);
+		CollisionSphere->SetCollisionResponseToChannel(ECC_FPSRWeakpoint, ECR_Overlap);
 		CollisionSphere->SetGenerateOverlapEvents(true);
 	}
 }
@@ -138,6 +141,7 @@ void AFPSRProjectile::Deactivate()
 	// Reset the freeze flag so a recycled projectile starts unpaused; otherwise a projectile force-released
 	// mid-freeze would keep bSimulationPaused=true and the next reuse's pause/resume logic would no-op.
 	bSimulationPaused = false;
+	HitActors.Reset();
 
 	// Clear lifetime timer
 	if (UWorld* World = GetWorld())
@@ -205,13 +209,24 @@ void AFPSRProjectile::OnSphereOverlap(UPrimitiveComponent* OverlappedComp, AActo
 		return;
 	}
 
-	// Single-target (optionally piercing): apply the direct hit, then stop once pierce is exhausted.
+	// Single-target (optionally piercing): dedupe per actor (a body + weakpoint overlap on the same enemy must
+	// damage once), re-query weakpoints at damage time so a body-first overlap still upgrades to a weakpoint hit.
+	if (HitActors.Contains(OtherActor))
+	{
+		return;
+	}
+	HitActors.Add(OtherActor);
+
+	const float WeakpointMult = CollisionSphere
+		? FPSRCombat::GetBestWeakpointMultiplierForSphere(OtherActor, CollisionSphere->GetComponentLocation(), CollisionSphere->GetScaledSphereRadius())
+		: 1.0f;
+
 	bool bCrit = false;
 	bool bKill = false;
 	bool bWasEnemy = false;
-	if (TryDamageActor(OtherActor, bCrit, bKill, bWasEnemy) && bWasEnemy)
+	if (TryDamageActor(OtherActor, WeakpointMult, bCrit, bKill, bWasEnemy) && bWasEnemy)
 	{
-		NotifyInstigatorHitMarker(bCrit, bKill); // per-impact marker — enemies only (no marker for FF on allies)
+		NotifyInstigatorHitMarker(bCrit, WeakpointMult > 1.0f, bKill);
 	}
 	--PierceRemaining;
 	if (PierceRemaining < 0)
@@ -274,7 +289,7 @@ void AFPSRProjectile::HandleImpact(const FVector& ImpactPoint)
 					bool bCrit = false;
 					bool bKill = false;
 					bool bWasEnemy = false;
-					if (Target && !Damaged.Contains(Target) && TryDamageActor(Target, bCrit, bKill, bWasEnemy))
+					if (Target && !Damaged.Contains(Target) && TryDamageActor(Target, 1.0f, bCrit, bKill, bWasEnemy))
 					{
 						Damaged.Add(Target);
 					}
@@ -317,7 +332,7 @@ bool AFPSRProjectile::IsHostileTarget(AActor* Target) const
 	return false;
 }
 
-bool AFPSRProjectile::TryDamageActor(AActor* Target, bool& bOutCrit, bool& bOutKill, bool& bOutWasEnemy)
+bool AFPSRProjectile::TryDamageActor(AActor* Target, float WeakpointMultiplier, bool& bOutCrit, bool& bOutKill, bool& bOutWasEnemy)
 {
 	bOutCrit = false;
 	bOutKill = false;
@@ -340,6 +355,7 @@ bool AFPSRProjectile::TryDamageActor(AActor* Target, bool& bOutCrit, bool& bOutK
 	{
 		// Direct hit (single-target/piercing): never self-damage (bAllowSelf=false); the unified resolver applies
 		// the enemy/friendly rules (friendly is 0 when FF is off — already screened by IsHostileTarget above).
+		FinalDamage *= WeakpointMultiplier;
 		const float Resolved = FPSRCombat::ResolveDamage(Params.InstigatorActor, Target, FinalDamage, /*bAllowSelf*/ false, GetWorld());
 		if (Resolved > 0.0f)
 		{
@@ -363,7 +379,7 @@ bool AFPSRProjectile::TryDamageActor(AActor* Target, bool& bOutCrit, bool& bOutK
 	return false;
 }
 
-void AFPSRProjectile::NotifyInstigatorHitMarker(bool bCrit, bool bKill) const
+void AFPSRProjectile::NotifyInstigatorHitMarker(bool bCrit, bool bWeak, bool bKill) const
 {
 	// Hit-markers belong to the firing player's HUD; enemy-team projectiles have no HUD owner.
 	if (!HasAuthority() || Params.Team != EFPSRProjectileTeam::Player || !Params.InstigatorActor)
@@ -375,7 +391,8 @@ void AFPSRProjectile::NotifyInstigatorHitMarker(bool bCrit, bool bKill) const
 	if (AFPSRPlayerController* OwnerPC = Cast<AFPSRPlayerController>(InstigatorController))
 	{
 		const EFPSRHitMarkerType MarkerType = bKill ? EFPSRHitMarkerType::Kill
-			: (bCrit ? EFPSRHitMarkerType::Crit : EFPSRHitMarkerType::Hit);
+			: (bWeak ? EFPSRHitMarkerType::Weak
+			: (bCrit ? EFPSRHitMarkerType::Crit : EFPSRHitMarkerType::Hit));
 		OwnerPC->ClientNotifyHitMarker(MarkerType);
 	}
 }

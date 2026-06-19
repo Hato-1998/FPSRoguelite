@@ -16,6 +16,7 @@
 | **PROGRESS.md** | 휘발성 진행현황·핸드오프(완료/진행중/다음순서/검증법) | 우리(세션) |
 | `CLAUDE.md` / `AGENTS.md` | 진입 포인터(≤10줄). "Game.md·PROGRESS.md 읽기" + 절대금지 3줄 | 거의 불변 |
 | `GameConfirm.md` | **다른 AI가 작성**하는 리뷰/추가제안 문서. 우리는 만들지 않음(§10, `Docs/SSOT/Workflow.md`) | 외부 AI |
+| `Docs/ConsultLoop.md` | **컨설팅 토론 프로토콜** — 백엔드(Claude)×클라(Codex) 라이브 토론. 트리거 `/consult <주제>`, 산출 `Docs/Review/`(프롬프트 매니저 인입원, §10) | 우리(세션) |
 
 → **AI가 읽는 본문 = 이 허브 + PROGRESS.md + 작업 관련 `Docs/SSOT/` 파일.**
 

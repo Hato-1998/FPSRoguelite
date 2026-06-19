@@ -6,6 +6,7 @@
 #include "Weapon/FPSRWeaponInstance.h"
 #include "Weapon/FPSRWeaponFragment.h"
 #include "Combat/FPSRCombatStatics.h"
+#include "Combat/FPSRWeakpointComponent.h"
 #include "Core/FPSRGameState.h"
 #include "Core/FPSRPlayerController.h"
 #include "Core/FPSRPlayerState.h"
@@ -229,6 +230,7 @@ void UFPSRGA_WeaponFire_ChargeLaser::FireBeam(float BeamDamage, bool bIsPayoffSh
 	// Hit-marker aggregated across pierced enemies — one pulse for the payoff shot, strongest outcome (Game.MD §2-14).
 	bool bServerHit = false;
 	bool bServerCrit = false;
+	bool bServerWeak = false;
 	bool bServerKill = false;
 
 	UFPSRWeaponInstance* Instance = CachedInstance.Get();
@@ -236,7 +238,7 @@ void UFPSRGA_WeaponFire_ChargeLaser::FireBeam(float BeamDamage, bool bIsPayoffSh
 
 	// Apply beam damage to one target (server-authoritative); shared across all pierced targets. The beam pierces
 	// everything, so a friendly while FF is off simply resolves to 0 and the beam continues.
-	auto ApplyDamageToActor = [&](AActor* HitActor) -> void
+	auto ApplyDamageToActor = [&](AActor* HitActor, float WeakpointMult) -> void
 	{
 		if (!HitActor)
 		{
@@ -259,6 +261,7 @@ void UFPSRGA_WeaponFire_ChargeLaser::FireBeam(float BeamDamage, bool bIsPayoffSh
 			}
 		}
 
+		FinalDamage *= WeakpointMult;
 		// Beam never self-damages (bAllowSelf=false); ResolveDamage applies the enemy/friendly rules.
 		const float Resolved = FPSRCombat::ResolveDamage(Avatar, HitActor, FinalDamage, /*bAllowSelf*/ false, World);
 		if (Resolved <= 0.0f)
@@ -270,6 +273,7 @@ void UFPSRGA_WeaponFire_ChargeLaser::FireBeam(float BeamDamage, bool bIsPayoffSh
 		{
 			bServerHit = true;
 			if (Result.bKilled) { bServerKill = true; }
+			else if (WeakpointMult > 1.0f) { bServerWeak = true; }
 			else if (bCrit) { bServerCrit = true; }
 		}
 	};
@@ -282,6 +286,7 @@ void UFPSRGA_WeaponFire_ChargeLaser::FireBeam(float BeamDamage, bool bIsPayoffSh
 	TArray<FHitResult> PawnHits;
 	FCollisionObjectQueryParams PawnObjParams;
 	FPSRCombat::AddDamageablePawnObjectTypes(PawnObjParams);
+	FPSRCombat::AddWeakpointObjectType(PawnObjParams);
 	World->LineTraceMultiByObjectType(PawnHits, Start, End, PawnObjParams, QueryParams);
 
 	FCollisionQueryParams WallParams(SCENE_QUERY_STAT(FPSRChargeLaserWall), false, Avatar);
@@ -305,13 +310,15 @@ void UFPSRGA_WeaponFire_ChargeLaser::FireBeam(float BeamDamage, bool bIsPayoffSh
 	}
 #endif
 
-	for (const FHitResult& PawnHit : PawnHits)
+	TArray<FPSRCombat::FResolvedHit> ResolvedHits;
+	FPSRCombat::DedupePawnHitsByActor(PawnHits, ResolvedHits);
+	for (const FPSRCombat::FResolvedHit& Entry : ResolvedHits)
 	{
-		if (PawnHit.Distance > WallDist)
+		if (Entry.Distance > WallDist)
 		{
-			continue; // behind the wall
+			break; // behind the wall (distance-sorted)
 		}
-		ApplyDamageToActor(PawnHit.GetActor());
+		ApplyDamageToActor(Entry.Actor, Entry.WeakpointMultiplier);
 	}
 
 	// Hit-marker + post-fire hooks fire only on the payoff shot (warm-up ticks are silent to avoid marker/hook spam).
@@ -322,7 +329,8 @@ void UFPSRGA_WeaponFire_ChargeLaser::FireBeam(float BeamDamage, bool bIsPayoffSh
 			if (AFPSRPlayerController* OwnerPC = Cast<AFPSRPlayerController>(Controller))
 			{
 				const EFPSRHitMarkerType MarkerType = bServerKill ? EFPSRHitMarkerType::Kill
-					: (bServerCrit ? EFPSRHitMarkerType::Crit : EFPSRHitMarkerType::Hit);
+					: (bServerWeak ? EFPSRHitMarkerType::Weak
+					: (bServerCrit ? EFPSRHitMarkerType::Crit : EFPSRHitMarkerType::Hit));
 				OwnerPC->ClientNotifyHitMarker(MarkerType);
 			}
 		}

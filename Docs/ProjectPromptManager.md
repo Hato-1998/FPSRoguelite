@@ -17,6 +17,7 @@
 1. `Game.md`(SSOT 허브) + `PROGRESS.md`(라이브 현황) + `Docs/TaskPrompts_Master.md`(마스터 계획)를 읽는다.
 2. **문서 말고 실제 상태를 확인한다**: `git log --oneline -15`, `git status -sb`, `git branch -a`, `git worktree list`. 문서(PROGRESS/TaskPrompts)는 stale일 수 있으니 git을 1차 진실로 본다.
 3. 불일치(문서엔 미완인데 git엔 머지됨, 또는 그 반대)를 발견하면 먼저 보고하고 동기화한다.
+4. **컨설팅 결과 인입 확인**: `Docs/Review/`에 `TaskPrompts_Master.md §E 인입 표`에 아직 없는 신규 리포트가 있는지 본다. 있으면 그 `📌 액션 아이템`·`🙋 사용자 결정 필요`를 §E에 등재하고 대상 유닛(§C)에 반영(자문 전용 — 코드 변경 X, 채택 시 해당 SSOT 먼저). 프로토콜=`Docs/ConsultLoop.md`.
 
 ## 2. 세 가지 책임
 
@@ -66,7 +67,8 @@
 
 ## 6. 현재 프로젝트 스냅샷 포인터 (세션마다 git으로 갱신 확인)
 
-- 마스터 계획: `Docs/TaskPrompts_Master.md` (§A 현황 / §B DAG·표 / §B-3 프로토콜 / §C 유닛 프롬프트 / §D 문서 정합 메모)
+- 마스터 계획: `Docs/TaskPrompts_Master.md` (§A 현황 / §B DAG·표 / §B-3 프로토콜 / §C 유닛 프롬프트 / §D 문서 정합 메모 / **§E ConsultLoop 결과 인입 표**)
+- 컨설팅 토론 인입원: `Docs/Review/`(백엔드×클라 토론 리포트, 추적) — 프로토콜 `Docs/ConsultLoop.md`, 트리거 `/consult <주제>`. 신규 리포트 → §E 등재 → 유닛 반영(§1.4).
 - 진행: `PROGRESS.md` 상단 "마스터 작업 분해" 절의 순서 문자열이 현재 순서.
 - 검증/빌드 상세: `Docs/SSOT/Workflow.md` §6, `Scripts/codex-review.ps1`.
 - ⚠️ 이 절의 구체 유닛 상태는 빠르게 stale된다 — **항상 git log + TaskPrompts §B로 실확인** 후 말한다.
