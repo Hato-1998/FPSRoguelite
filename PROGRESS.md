@@ -22,7 +22,7 @@
 > **콘텐츠 커밋됨(가벼운 커밋 `03bda96`)**: `WBP_Lobby`/`WBP_LoadoutEntry`/`L_Lobby`/`L_Transition`/`BP_FPSRLobbyGameMode`/`BP_FPSRLobbyPC`/`BP_LobbyDisplayPawn`/`DA_LoadoutPool`/`LevelPrototyping`/Config(`DefaultGame`/`DefaultInput`/`DefaultEditor`)/`steam_appid.txt`(480). **제외(미커밋·디스크 잔존, 사용자 결정 "가벼운 커밋")**: `Content/Assets`(Third Person 템플릿 ~682MB — 포디움 마네킹은 플레이스홀더)·미사용 템플릿 입력(`Content/Input/Actions`·`Touch`·`IMC_MouseLook`).
 
 ## 🗂️ 마스터 작업 분해 — **`Docs/TaskPrompts_Master.md` (2026-06-13 신설, 최상위 계획)**
-> 남은 로드맵 전체를 의존성 기준 유닛으로 분해 + 유닛별 새 세션 복붙 실행 프롬프트. **순서(갱신 2026-06-20): ✅V0·V1·V3·U16·U2·U3a·U11a 완료 → [2-클론, 2026-06-16] 트랙 A: U18(카드 규약 정비, 2026-06-20 U3 앞 추가)→U3(보스 스캐폴드)→U4(보스 콘텐츠) ‖ 트랙 B ✅U11a 완료(main 머지 `b3b364e`, 잔여 Steam E2E=U11b) → 합류 → W1(전체 검증) → U1(게이트)/V2 → 2차 트랙(U5~U15·U17) → U11b(보스-승리 멀티 통합+E2E)**. 병렬은 2026-06-15 폐지했으나 U11a는 파일 도메인 분리+충돌점 GameMode 1파일 근거로 한정 부활(사용자 결정, 완료). U18=카드 시스템 느슨한 규약 정비(토론→SSOT→리팩토링). U15=무기 애님(U1 후 조건부).
+> 남은 로드맵 전체를 의존성 기준 유닛으로 분해 + 유닛별 새 세션 복붙 실행 프롬프트. **순서(갱신 2026-06-20): ✅V0·V1·V3·U16·U2·U3a·U11a 완료 → [2-클론, 2026-06-16] 트랙 A: U18(카드 시스템 재설계=목표사양 9조건, 2026-06-20 U3 앞 추가)→U3(보스 스캐폴드)→U4(보스 콘텐츠) ‖ 트랙 B ✅U11a 완료(main 머지 `b3b364e`, 잔여 Steam E2E=U11b) → 합류 → W1(전체 검증) → U1(게이트)/V2 → 2차 트랙(U5~U15·U17) → U11b(보스-승리 멀티 통합+E2E)**. 병렬은 2026-06-15 폐지했으나 U11a는 파일 도메인 분리+충돌점 GameMode 1파일 근거로 한정 부활(사용자 결정, 완료). U18=카드 시스템 재설계(목표사양 9조건: 3 카드군·멀티효과·무기해금·행동훅·이동속도+검증, 토론→SSOT→서브유닛; 상태이상 처치·상태창=시임). U15=무기 애님(U1 후 조건부).
 
 ## 🎯 U3a 약점 부위 데미지 (헤드샷/디자이너 지정 존) — **완료(2026-06-16, 브랜치 `phase/p6-weakpoint-damage` → main `--no-ff` 머지). 빌드+스모크+사용자 PIE 통과**
 > 적/보스 디자이너 지정 부위 명중 시 추가 데미지. **U3/U4 보스가 1차 소비자**, 스웜 범용(BP 컴포넌트 옵트인). 보스(U3)가 이 인프라를 그대로 상속·소비. 가이드: `Docs/U3a_Weakpoint_UserContent_Guide.md`.
