@@ -6,6 +6,19 @@
 
 **최종 갱신: 2026-06-20**
 
+## 🃏 핸드오프 (2026-06-20) — U18 카드 v2 **페이즈1(아키텍처 수렴) 완료**. 코드 0, 산출=§2-3 재작성 + 서브유닛 분해. 다음=U18a 구현
+> **사양 고정(사용자 2026-06-20)**: 3 카드군(캐릭터/무기/무기해금)·멀티효과·무기해금·행동훅·이동속도 + **directive**: ①확장성-우선 스키마 ②기획자 툴/비주얼 서포트. 3정 차단=**새 무기만**(사용자 결정).
+> **수렴 방법**: 코드 전수조사 + Plan 적대검증 + 확장성/툴 리서치 워크플로(4 read-only 조사 + 합성) + **Codex 플랜↔목표 게이트**(`Docs/Review/_raw/20260620-080452-plan-U18-card-v2.md`). 게이트 교정 전부 §2-3 반영.
+> **핵심 아키텍처 결정**:
+> - **효과 레이어 = 폴리모픽 Instanced `UFPSRCardEffect` 서브클래스**(enum+switch 폐기) — 새 효과 타입=서브클래스 1파일·중앙 0수정(확장성 directive). 5 서브클래스(CharacterGE/CharacterPassive/WeaponStat+bThisWeaponOnly/WeaponBehavior/GrantWeapon) + virtual Apply/GetDescription/ValidateEffect/GetDamageTypeTag + 효과별 RarityTiers. ⚠️ Instanced cook/load/network 스모크 = U18a 첫 커밋 게이트(실패 시 공유 asset-ref 폴백).
+> - **`ECardGroup`{Character/Weapon/WeaponUnlock} ⟂ 효과별 `bThisWeaponOnly`** — 구 `ECardScope` 폐지·매핑(무회귀). 멀티효과 `CardFamily` 필수(GE폴백 붕괴 교정).
+> - **무기 해금** = `EFPSROfferType::WeaponUnlock` + `UCardEffect_GrantWeapon`(새무기 AddWeapon 3슬롯) + 기능해금(재사용 효과·무기 DA `UnlockableFeatures[]`) + 미션/레벨20·30·40 트리거.
+> - **행동훅**: 무기=OnAim/OnFire/OnMiss/OnKill(+OnStatusKill 시임 D3), **5 데미지경로 공통 헬퍼**·OnKill=`bJustKilled` 전이(코프스 재타격 중복 금지). 캐릭터=**GAS-native**(단일 브릿지 `ApplyDamage`→`Event.Player.DealtDamage` GameplayEvent→패시브 GA, `UFPSRPassiveAbility` 베이스).
+> - **이동속도**=`UFPSRCombatSet.MoveSpeedMultiplier`+PostAttributeChange→CMC(하드 600 제거). **속성 데미지 시임**=`ApplyDamage`에 `FGameplayTag DamageType`(빈=Physical) 디폴트 인자(거동 D3).
+> - **기획자 툴**: IsDataValid 가드레일·자동설명(`GetDescription`)·서브클래스 깔끔 UI(공짜)=U18a 동봉 / 카드 카탈로그 에디터 유틸=U18d(비차단).
+> **분해(`Docs/TaskPrompts_Master.md` §B)**: U18a(효과레이어+3군+검증+이동속도+속성시임, **U18a1 그라운드워크/U18a2 스키마코어 분할 권고**)→U18b(무기해금)→U18c(행동훅)→**U18d 기획자 툴(비차단, U3 무차단)**. **U18a/b/c=런타임=U3 앞 / U18d=툴=비게이팅**(TaskPrompts 정합). 무회귀 절대조건: 기존 카드 동일거동(PostLoad 마이그레이션 + `FFPSRCardDraw.Magnitude` 제거 블라스트=debug캐시/BuildSingleDraw/ClientPresentCards/ServerSelectCard).
+> **검증(페이즈1)**: 문서 정합(섹션번호 보존·교차참조·무회귀 절). 페이즈2(서브유닛별)=빌드+스모크+PIE+codex-review+`--no-ff`. 구현=Haiku/검증=Opus.
+
 ## ✅ 핸드오프 (2026-06-20) — U11a 멀티플레이 루프 **main 머지 완료**(콘텐츠 3종 + 머지게이트 P1/P2 교정). 잔여=2-PC Steam E2E(U11b)
 > **이동 블로커 RESOLVED**: 트래블 후 인게임 이동/조작 불가 = **누적 2버그 + 적신호 1**. 6가설×UE5.7 엔진소스 교차검증+적대검증 워크플로 + `showdebug enhancedinput`/디스크로그 라이브 진단으로 확정. [[seamless-travel-input-loadout]]
 >   - **적신호(이전 세션 오진)**: 로그 `Cmd: DebugManager.CycleToPreviousColumn` = 엔진 `BaseInput.ini`의 `+DebugExecBindings=(Key=LeftShift,...)`(LeftShift에 묶인 PIE 전용 디버그 명령, 출시 제외·standalone에도 동일). "Gameplay Debugger/심레이싱 휠이 키 소비"는 **오진** — Enhanced Input이 키 소비 못 한 *증상*일 뿐.

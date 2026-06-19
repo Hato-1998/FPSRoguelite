@@ -317,6 +317,18 @@ Game.md + PROGRESS.md 먼저 읽어. Docs/TaskPrompts_Master.md의 유닛 U3a를
 
 > **2026-06-20 사용자 사양 확정.** 원래 "규약 정비"였으나 사용자가 목표 사양(3 카드군·멀티효과·무기해금·행동훅·이동속도)을 확정 → **카드 시스템 v2 재설계**로 확대. 규약 정비(검증·명명·안정ID)는 이 안에 흡수. 분량이 커서 **페이즈1 토론이 구현을 서브유닛으로 분해**한다. 상태이상 처치 트리거·상태창은 상태시스템(컨설트 D3, G1 후)·후속이라 **시임만**.
 
+> ### ✅ 페이즈1(아키텍처 수렴) 완료 — 2026-06-20. 상세 설계 = `Docs/SSOT/CombatWeaponCard.md` §2-3 (v2 재작성). 핸드오프 = `PROGRESS.md`.
+> **추가 directive(사용자 2026-06-20)**: ①스키마 **확장성-우선**(향후 속성/elemental·새 효과를 데이터+서브클래스로 싸게) ②**기획자 툴/비주얼 서포트**. 3정 차단=**새 무기 해금만**(사용자 결정).
+> **수렴 = 코드 전수조사 + Plan 적대검증 + 확장성/툴 리서치 워크플로 + Codex 플랜↔목표 게이트**(교정 §2-3 반영). 페이즈1 설계쟁점 (a)~(f) 결론:
+> - (a) 멀티효과 = **폴리모픽 Instanced `UFPSRCardEffect` 서브클래스**(enum+switch·struct 폐기) — 새 효과=서브클래스 1파일·중앙 0수정. 효과별 `RarityTiers`(rarity 커버리지 IsDataValid 강제). Instanced cook/load 스모크=U18a 게이트(폴백=공유 asset-ref).
+> - (b) 3군 = `ECardGroup`{Character/Weapon/WeaponUnlock} ⟂ 효과별 `bThisWeaponOnly`. 구 `ECardScope` 폐지·매핑(무회귀). 멀티효과 `CardFamily` 필수.
+> - (c) 무기해금 = `EFPSROfferType::WeaponUnlock` + `UCardEffect_GrantWeapon`(AddWeapon 3슬롯) + 기능해금(재사용 효과·무기DA `UnlockableFeatures[]`) + 미션/레벨20·30·40.
+> - (d) 행동훅 = 무기 OnAim/OnFire/OnMiss/OnKill(+OnStatusKill 시임 D3) **5 데미지경로 공통 헬퍼**·OnKill=`bJustKilled` 전이 / 캐릭터=**GAS-native**(ApplyDamage→`Event.Player.DealtDamage`→패시브 GA, `UFPSRPassiveAbility` 베이스). 캐릭터 Fragment 컴포넌트 **폐기**.
+> - (e) 이동속도 = `UFPSRCombatSet.MoveSpeedMultiplier` + PostAttributeChange→CMC(하드 600 제거).
+> - (f) 검증 = per-effect `ValidateEffect` 매트릭스 + rarity 커버리지 + 명명 린트 / 'Bouns'=`BP_Card_RarityBouns` **삭제**(개명 아님) / CardId=**보류**(U10 키 확정 후). + (신규) **속성 데미지 시임** = `ApplyDamage`에 `FGameplayTag DamageType`(빈=Physical) 디폴트 인자(거동 D3).
+> **최종 분해(예시 line 352 대체)**: **U18a**(효과레이어+3군+검증+이동속도+속성시임; 권고 분할 **U18a1 그라운드워크**[이동속도+DamageType 시임]/​**U18a2 스키마코어**[효과레이어+군+마이그레이션+UI+검증]) → **U18b**(무기해금) → **U18c**(행동훅: 무기 공통헬퍼 + 캐릭터 GAS-native) → **U18d 기획자 툴**(카드 카탈로그 에디터 유틸, 비런타임). 순서 a→b→c→d.
+> **시퀀싱 정합(사용자결정 A 보강)**: **U18a/b/c = 런타임 = U3 보스 앞 완료**. **U18d(툴) = 비런타임·비게이팅 → U3 무차단**(must-have 툴=검증/자동설명은 U18a2 동봉이라 콘텐츠 저작은 U3 전 가능; 카탈로그만 후행). 기획자 콘텐츠 양산은 §B 구현유닛(U18a~c) 진행과 병행.
+
 ```
 Game.md + PROGRESS.md 먼저 읽어. 그다음 Docs/SSOT/CombatWeaponCard.md §2-3(카드)·§2-4-1(무기 모디파이어/Fragment)를 정독해. 이 작업(U18)은 **카드 시스템을 아래 목표 사양에 맞춰 재설계**한다 — 콘텐츠 양산 전에 스키마·규약·확장축을 사양에 정합. 사양=사용자 확정(요구사항 고정), 아키텍처(구현 방법)=토론으로 수렴. 플랜모드 우선, HIGH_RISK 승인 후, 구현=Haiku 위임/설계·토론·검증=Opus 직접(CLAUDE.md·§6-5).
 

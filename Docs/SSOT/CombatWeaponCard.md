@@ -6,27 +6,81 @@
 
 ---
 
-### 2-3. 카드 시스템
-- 데이터 방식: **DataAsset + GameplayEffect(GE)** — 스탯 하드코딩 금지
-- 카드 확장 비용:
-  - **기존 Attribute 범위 내 새 카드 = GE + DataAsset 추가 (코드 변경 0)**
-  - **완전히 새로운 Attribute = C++ AttributeSet 확장 + GE + DataAsset (코드 변경 필요)**
-  - → AttributeSet 설계 시 스탯 축을 넉넉히 미리 확보할 것
-- `UCardDataAsset`: `Scope`(Character / ThisWeapon / AllWeapons), `AppliedEffect`(GE), `Weight`, **`RarityTiers[]`**, **`CardFamily`** (P3-C 확정 2026-06-02)
-  - **`RarityTiers[]`(`FFPSRCardRarityTier`{Rarity, Magnitude})**: 카드 1개가 **여러 등급에서 각기 다른 수치로** 등장. 추첨이 등급을 굴려(등급 기본가중치×Luck) 해당 티어의 `Magnitude`를 적용. **"모든 등급에서 나오는 카드 = 1 에셋"**(등급당 1티어). 1티어만 두면 단일 등급 카드. → 등급별 별도 에셋 불필요(콘텐츠 폭증 방지)
-  - **수치 주입=`SetByCaller`**: GE 모디파이어를 `SetByCaller`(태그 `SetByCaller.CardMagnitude`)로 작성 → `ApplyCard`가 굴린 티어의 `Magnitude`를 주입. 고정 수치 GE(SetByCaller 미사용)에도 무해(무시)
-  - **`CardFamily`(GameplayTag, 선택)**: 같은 family 카드는 **한 추첨에 1장만 제안**(상호배타). 미설정 시 `AppliedEffect` GE 클래스를 family 키로 사용 → 단일 GE 방식이면 자동 그룹핑(같은 카드의 다른 티어도 한 번에 1개만)
-  - **데이터 검증**: `UFPSRCardDataAsset::IsDataValid`(WITH_EDITOR) — RarityTiers 비면 에러(추첨 누락 방지), AppliedEffect 없으면 경고. 런타임에도 빈 티어 카드는 경고 로그(무음 실패 금지)
-- **`Scope` 의미 (확정 2026-06-04)**:
-  - **`Character`** — 캐릭터 ASC 글로벌 속성(MaxHealth/Luck/이속/Crit 등). Character-scope GE를 ASC에 적용(현재 구현).
-  - **`AllWeapons`** — **들고 있는 모든 무기**에 적용되는 무기 스탯/모디파이어("캐릭터 종속" 느낌). 수치 **작게**.
-  - **`ThisWeapon`** — **현재(대상) 무기 1정**에만 적용. **같은 효과를 더 큰 수치**로(집중 강화).
-  - → 같은 효과(예: 연사속도↑)를 **AllWeapons(소·전체)** 와 **ThisWeapon(대·단일)** 두 카드로 제공 = "넓고 얕게 vs 좁고 깊게" 빌드 선택. (구현은 무기 모디파이어 시스템 §2-4-1, P4-B)
-- **등급 4단계** (Common/Rare/Epic/Legendary) — **Luck** 스탯이 추첨 가중치(상위 등급 확률)에 작용. (※ RarityBonus는 Luck으로 통합·폐지 — 2026-06-02. 광역 행운 1개 축으로 단순화; 향후 드랍품질·희귀스폰 등도 Luck이 담당)
-- **무기별 전용 카드**: 무기 보유 시 해당 무기 카드(ThisWeapon)가 레벨업 카드 풀에 동적 합류 (Gunfire Reborn식)
-- **리롤**: 캐릭터 메타로 해금, **게임당 3회 제한** (`RunRerollCharges`, 서버 권위 차감)
-- **카드 소비 시점**(§2-2): 오프닝 시드(런 시작 2장) + **레벨업 전역 프리즈**(레벨업 스택 소비) + **미션 클리어 프리즈**(무기 모디파이어 보상). 모두 게임이 멈춘 프리즈 중 선택
-- **빌드 시너지 설계 (기획 추가 2026-06-10)**: 카드 *메커니즘*(Scope/Rarity/Fragment)과 별개로, **무엇이 빌드를 서로 다르게 느끼게 하는가**(시너지 축)를 별도로 설계한다 — 뱀서 장르의 핵심 리텐션. 예시 축: 원소/상태이상, 투사체 수↔단발 위력, 크리↔지속피해, AOE↔관통. **Fragment 상호작용(2연발+관통 등 §2-4-1)이 시너지의 1차 수단**. **시너지 설계 패스 = 재미 게이트(§7-5) 전후 1회** — 카드 콘텐츠 폭증 전에 축을 먼저 정의(콘텐츠 양산 후엔 재설계 비용 큼).
+### 2-3. 카드 시스템 — **v2 재설계 (U18, 2026-06-20)**
+
+> **설계 상태**: 이 절은 **v2 목표 설계**(사용자 확정 사양 + 확장성/툴 directive). **구현 = U18a~d**(§B/`TaskPrompts_Master.md`). 현행 출시 코드는 **v1 단일효과**(카드 1=효과 1, `ECardScope` enum)이며 U18a 마이그레이션 대상이다. 설계-우선(SSOT 먼저) 원칙에 따라 본 절을 v2로 갱신하고 코드가 뒤따른다.
+> **무회귀 절대조건**: 기존 캐릭터카드 7종·무기 stat 카드·Fragment 4종은 v2 전환 후에도 **현행과 동일 거동**(단일→멀티효과 = 1효과 배열로 마이그레이션).
+
+- **데이터 방식**: **DataAsset + (효과별) GE/GAS/무기모디파이어/Fragment** — 스탯 하드코딩 금지. 에셋 경로 C++ 하드코딩 금지(§6-2).
+- **카드 확장 비용 (확장성-우선 directive 2026-06-20)**:
+  - **새 효과 타입 = `UFPSRCardEffect` 서브클래스 1개(~40줄) — 중앙 코드 0 수정**(아래 §2-3-1). 새 카드 = DataAsset 1개(코드 0).
+  - **기존 Attribute 범위 내 새 카드 = GE 효과 + DataAsset (코드 0)** / **완전히 새 Attribute = C++ AttributeSet 확장 필요** → AttributeSet 스탯 축을 넉넉히 미리 확보(`UFPSRCombatSet`에 예약 슬롯 주석). 상세 = 컨벤션 쿡북(§2-3-8).
+
+#### 2-3-1. 데이터 모델 — 폴리모픽 효과 레이어 (토대)
+- `UFPSRCardDataAsset` 단일효과 필드(v1) → **`UPROPERTY(Instanced) TArray<TObjectPtr<UFPSRCardEffect>> Effects`** (멀티효과). + 카드레벨: `ECardGroup Group`(§2-3-2), `OfferRarities`(제안 등급 집합), `Weight`, `CardFamily`.
+- **`UFPSRCardEffect`** : `UObject` (`Abstract, EditInlineNew, DefaultToInstanced`):
+  - `TArray<FFPSRCardRarityTier> RarityTiers` — **효과별 per-rarity 수치**(같은 등급 roll에서 효과마다 다른 magnitude → "연사+ / 데미지-" 트레이드오프).
+  - virtual: `Apply(const FFPSRCardEffectContext&)`(서버) / `GetDescription(ECardRarity)→FText`(UI 자동설명) / `#if WITH_EDITOR ValidateEffect(FDataValidationContext&)` / `GetDamageTypeTag()→FGameplayTag`(속성 시임, §2-3-7).
+  - 서브클래스(5종, 거동 1:1): `UCardEffect_CharacterGE`(ASC에 GE, SetByCaller) · `UCardEffect_CharacterPassive`(패시브 GA grant, §2-3-5) · `UCardEffect_WeaponStat`(`EFPSRWeaponStat`+`EFPSRWeaponModOp`+**`bThisWeaponOnly`**=효과별 범위) · `UCardEffect_WeaponBehavior`(Fragment grant, §2-4-1) · `UCardEffect_GrantWeapon`(새 무기 해금, §2-3-4).
+- **등급/수치 모델**: 추첨이 카드당 **등급 1회 roll**(`OfferRarities`, 등급 기본가중치×Luck) → 각 효과가 굴린 등급에서 자기 `RarityTiers`의 `Magnitude` 조회. **수치 주입=`SetByCaller`**(GE 효과; 태그 `SetByCaller.CardMagnitude`). **"모든 등급 1에셋"**(등급당 1티어) 유지 — 등급별 별도 에셋 불필요.
+  - ⚠️ **rarity 커버리지 강제**(Codex 게이트 P1): magnitude를 갖는 모든 효과는 카드 `OfferRarities` **전부에 대해 티어 보유 필수**(`IsDataValid` 에러). 누락 시 부분/무음 적용 회귀 → 금지.
+- **확장성/보안**: 효과는 always-loaded 카드 asset의 inline 서브오브젝트 → **와이어 미통과**. 서버권위 인덱스-선택(클라=`Index`+`OfferId`만, `ServerSelectCard`) 불변. `ApplyCard`는 서버에서 `Effects[i]->Apply()` 루프(효과타입-무지, 새 타입에 무수정).
+- **Instanced 결정 + 폴백**: `EditInlineNew`/`Instanced` 서브오브젝트 on DataAsset = UE5.7/Lyra 표준 데이터드리븐 확장(인라인 저작 = 최선의 기획자 UX, 에셋 폭증 없음). ⚠️ 단 *cook/load/network 스모크를 U18a 첫 커밋의 통과 조건으로 고정*(기존 `UFPSRWeaponFragment`는 *공유 asset ref*지 instanced 서브오브젝트가 아니므로 별도 검증). **스모크 실패 시 폴백 = 효과를 공유 asset ref(`UPrimaryDataAsset`)로**(Fragment와 동일 모델, 에셋 수↑ 대가).
+- **제1원리 3줄**: ① directive=OCP(확장 개방/수정 폐쇄) 그 자체 — enum+switch는 효과당 5레이어 결합(~58줄·5파일), 폴리모픽은 서브클래스 1파일·중앙 0. ② Instanced UObject on DataAsset = UE/Lyra 표준(컨텍스트 이펙트·코스트/쿨다운) — 단 cook/load는 스모크로 증명(Fragment "공유 ref"를 근거로 쓰지 말 것). ③ SetByCaller·서버권위 인덱스선택·`FFPSRCardRarityTier`·Luck 보존.
+
+#### 2-3-2. 3 카드군 — `ECardGroup` ⟂ 효과별 범위
+- **`ECardGroup`{Character, Weapon, WeaponUnlock}** = 추첨 **풀 + 트리거 + UI 필터**(= 사양의 "카드군"). 효과 적용 **범위**는 **효과별**(`UCardEffect_WeaponStat.bThisWeaponOnly`) — 카드 전역 `ECardScope` 폐지(효과별이 더 표현적).
+  - **캐릭터 카드** = 캐릭터 + 든 모든 무기. 효과 = 캐릭터 속성(GE)·캐릭터 행동(패시브)·**전체무기 소폭 stat**(`WeaponStat bThisWeaponOnly=false`, 사양7).
+  - **무기 카드** = 각 무기 귀속. 효과 = 무기 stat(`bThisWeaponOnly=true`)·행동 트리거 Fragment(§2-3-5).
+  - **무기 해금 카드** = §2-3-4.
+- **구 `ECardScope` 매핑(무회귀)**: `Character`→군=Character·`CharacterGE` / `AllWeapons`→**군=Character·`WeaponStat(false)`** / `ThisWeapon`→군=Weapon·`WeaponStat(true)` 또는 `WeaponBehavior`.
+- **같은 주제 양군 공존**(사양7): 연사 Up = 캐릭터 카드(전체무기 소폭) ‖ 무기 카드(해당무기 크게) — "넓고 얕게 vs 좁고 깊게" 빌드 선택.
+- **family-key 교정(무회귀 위험, Codex 게이트)**: `GetCardFamilyKey`의 `AppliedEffect` GE클래스 폴백은 멀티효과에서 카드레벨 Scope/AppliedEffect 소멸로 붕괴 → **멀티효과 카드 `CardFamily` 필수**(`IsDataValid` 에러) + 폴백 삭제. 같은 family = 한 추첨 1장(상호배타) 유지.
+
+#### 2-3-3. 추첨·적용 (서버권위)
+- **레벨업 프리즈(§2-2)**: 캐릭터군 + 보유 무기군 풀 전체에서 **3장 랜덤**, **리롤 3회**(`RunRerollCharges`, 서버 차감) 또는 선택, **런 종료까지 영구**. 무기 stat 카드는 무기 보유 시 동적 합류(Gunfire Reborn식). 등급 4단계(Common/Rare/Epic/Legendary), **Luck**이 상위등급 가중치(※ RarityBonus는 Luck 통합·폐지 2026-06-02).
+- **무기 해금**(§2-3-4) = 별도 풀·트리거.
+- **카드 소비 시점**(§2-2): 오프닝 시드(런 시작) + 레벨업 프리즈 + 미션/마일스톤(해금). 모두 전역 프리즈 중 선택.
+- **`FFPSRCardDraw` 변경**: 단일 `Magnitude` 제거(클라가 효과별 `GetDescription`/magnitude를 로컬 asset에서 조회). ⚠️ **블라스트 라디우스**(Codex 게이트): UI(`FPSRCardEntryWidget`)뿐 아니라 **debug 캐시(`FDebugCardOffer`)·`BuildSingleDraw`·`ClientPresentCards` RPC payload·`ServerSelectCard` apply 계약** 전부 점검 — U18a 검증 항목.
+- **보안 불변(테스트 항목)**: 클라는 `Index`+`OfferId`만 전송, 카드/효과/수치 포인터 미전송(`FPSRCardSubsystem.cpp` 서버 빌드 오퍼 인덱싱). family 상호배제·SetByCaller·`AllWeaponsStatExclusions`(§2-4-1) 보존.
+
+#### 2-3-4. 무기 해금 시스템
+- **오퍼타입 신설** `EFPSROfferType::WeaponUnlock`(MissionReward 오버로드 금지 — reroll 차단·`DrawWeaponModifierOffer` 특수처리). `ECardGroup::WeaponUnlock`은 직교 grouping/routing 태그.
+- **새 무기 해금** = `UCardEffect_GrantWeapon`(효과 서브클래스) → `Inventory->AddWeapon`(3슬롯 캡, full=INDEX_NONE). 해금 무기의 WeaponCards/AvailableModifiers는 이후 풀에 자동 합류.
+- **잠긴 기능 해금** = 신규 효과타입 불요 — 기존 `WeaponBehavior`/`WeaponStat` 효과를 **해금 전용 풀**(무기 DA `UnlockableFeatures[]`)에 둠. 후보생성 = `DrawWeaponModifierOffer`처럼 보유무기 순회·소속무기 태깅. 예: "탄도 2배"(MultiShot 류)·"차징 후 연사"(Fragment).
+- **새 무기 풀** = `UFPSRCardPoolDataAsset.WeaponUnlockCards[]`.
+- **트리거**: 미션 클리어(기존 `GrantMissionReward` 분리) + **레벨 20/30/40**(신규 마일스톤 훅 = `FPSRGameState::AddSharedXP` 레벨업 루프). `PresentNextOfferIfNeeded`에 unlock 슬롯. 마일스톤 레벨엔 레벨업+해금 **순차 2프리즈**(데드락 없음).
+- **3정 차단 = 새 무기 후보만**(사용자 결정 2026-06-20). 기능 해금은 3정 후 계속.
+- **U3 시임**: 보스 킬은 `ApplyDamage`(EnemyHealthComponent) 미경유 GAS 경로 → 무기 OnKill 시임이 보스엔 미발화 → **보스 OnKill = U3가 별도 배선**.
+
+#### 2-3-5. 행동 트리거 (무기 훅 + 캐릭터 행동)
+- **무기 행동 훅**(`UFPSRWeaponFragment`에 default-empty virtual 추가, §2-4-1): 기존(PreFire/ModifyShotCount/OnHitActor/PostFire/OnProjectileSpawn/ModifyChargeTime/OnImpact) + **OnAim**(`ServerSetAiming`서 현 무기 Fragment 순회; 지속버프=활성효과 슬롯 필요→U18c) · **OnFire**(탄약 커밋 직후, PostFire 아님 — "on-fire 적립/on-hit 소비" 레이스 방지) · **OnMiss**(`PostFire`서 `bServerHit` false 1회) · **OnKill** · **OnStatusKill**(default-empty 시임, **D3 후 배선**).
+  - ⚠️ **공통 훅 브릿지 필수**(Codex 게이트 P1): 데미지 경로가 **Hitscan/ChargeLaser/Melee/Projectile/Explosion** 5종 분산 → OnKill/OnFire/OnMiss는 **공유 헬퍼로 5경로 전부에서 호출**(히트스캔 한정 금지, 무기군별 미발화 방지). 각 경로의 라이브 `FFPSRFireContext` + per-hit kill 결과 사용.
+  - ⚠️ **OnKill = "이번 타격 처치" 전이**(Codex 게이트 P1): `Result.bKilled`(`FPSRCombatStatics.cpp:85`)는 현재 *타격 후 dead*(코프스 재타격 시 true) → `ApplyDamage`가 **pre-state 캡처로 alive→dead 전이만 true**가 되도록 교정(`bJustKilled`). 기존 Kill 히트마커 코프스-재타격 엣지도 동시 교정. ❌적 `OnDeath` 델리게이트 per-enemy 바인딩 금지(적500 dispatch 예산).
+- **캐릭터 행동 = GAS-native**(무상태 Fragment 미러 아님 — 플레이어는 ASC 보유·4인뿐, 적500 perf 이유 없음): ① "데미지 줄 때 회복" = **단일 브릿지 `FPSRCombat::ApplyDamage`**에서 instigator ASC에 `GameplayEvent`(`Event.Player.DealtDamage`, 페이로드=뎀) → 트리거 패시브 GA가 회복 GE(**모든 무기경로 균일** — 브릿지가 공통이라 캐릭터 효과엔 충분, 무기 Fragment 훅과 달리 FireCtx 불요). ② "N초 유휴 회복" = 타이머/WaitDelay 패시브 GA, 같은 이벤트 리셋(GA 인스턴스=상태 보유). `UCardEffect_CharacterPassive`가 **신규 `UFPSRPassiveAbility` 베이스**(`OnGranted/OnRemoved`) 서브클래스를 grant.
+- **서버권위**: 무기 해금·캐릭터 행동·행동 훅·이동속도 전부 서버권위(클라 보고 금지). [[freeze-gate-client-server-symmetry]]
+
+#### 2-3-6. 이동속도 속성
+- `UFPSRCombatSet`에 **`MoveSpeedMultiplier`(base 1.0)** + **`PostAttributeChange` 오버라이드 신설**(현재 없음; `UFPSRHealthSet` 패턴 차용) → 소유 Pawn `MaxWalkSpeed = BaseWalkSpeed × Mult`(서버 PostAttributeChange + 클라 OnRep, `COND_None`이라 시뮬프록시 도달). `FPSRCharacter.cpp:60` 하드코딩 600 → `BaseWalkSpeed` 상수. 4인 협동 desync 없음(속성만 복제, MaxWalkSpeed 로컬 재계산·CMC 예측 처리). 적용 순서(서버/클라 OnRep) = U18 검증 항목.
+
+#### 2-3-7. 속성(elemental) 데미지 forward-compat 시임 — 시임만, 거동은 D3
+- **데미지타입 태그 배선**(U18a): `FPSRCombat::ApplyDamage`/`ApplyExplosion`/`AFPSRCharacter::ApplyContactDamage`/`EnemyHealthComponent`에 **`FGameplayTag DamageType = FGameplayTag()`(빈=Physical) 디폴트 인자** 추가(기존 콜러 무수정 컴파일). `DefaultGameplayTags.ini`에 `DamageType.Physical/Fire/Ice/Poison/Lightning` 선언. **~7파일 ~15줄, 거동 변화 0.**
+- **효과 시임**: `UFPSRCardEffect::GetDamageTypeTag()`(빈 default). 향후 `UCardEffect_ElementalDamage`가 override → 태그를 무기 인스턴스에 기록 → 발사 GA가 `ApplyDamage`에 전달. **U18은 elemental 서브클래스 미출시**.
+- **D3 이연**: `Event.DamageTaken`(태그 페이로드) 듣는 패시브 GA→상태이상 / 적 저항·배수 태그 룩업(U3 보스 약점 공유). 시임=지금(싸다), 거동=D3(비싸다) 분리.
+- **기획자가 새 속성 추가(향후)**: ①`.ini`에 `DamageType.<New>` 1줄 → ②카드에 elemental 효과 + 보너스 → ③풀에 추가. 파이프라인/어빌리티/서브시스템 수정 0.
+
+#### 2-3-8. 검증·명명·기획자 툴 (directive ②)
+- **`IsDataValid` 가드레일**(load-bearing): `Effects[]`→`ValidateEffect()`(서브클래스별 자기 필드) + 빈 Effects 에러 + 멀티효과 `CardFamily` 필수 + **rarity 커버리지**(§2-3-1) + 빈 DisplayName 경고 + 명명 prefix 린트. 메시지=자산+필드 명시(무음 실패 금지).
+- **자동 설명 `GetDescription`**: 카드 표시텍스트를 효과에서 **생성**(기획자 Description 수기 불요, 멀티효과="primary (+N more)" 집계). `FPSRCardEntryWidget`가 `Effect->GetDescription(Rarity)` 소비.
+- **서브클래스별 깔끔 에디터 UI** = `EditInlineNew` 폴리모픽의 공짜 부산물(각 효과 자기 필드만 노출, `EditConditionHides` 캐스케이드 제거). [[dataasset-conditional-field-visibility]]
+- **카드 카탈로그 에디터 유틸**(U18d, 비차단): Blutility + `BlueprintCallable` C++ 로더 = 전 `DA_Card_*`의 군/효과/등급 magnitude/family/풀소속 한눈에 + 필터 → 밸런스 이상치 점검. [[vibeue-mcp-capabilities]]
+- **명명 규약**: `DA_Card_<Group>_<Theme>` / `DA_Frag_<Weapon>_<Behavior>` / `GE_Card_<Attr>`.
+- **잡정비**: `BP_Card_RarityBouns.uasset`(삭제된 속성 `RarityBonus` 참조로 이미 깨짐) = **개명 아니라 삭제**(가리키는 GE 포함). `CardId`(U10 세이브 대비)=보류(`GetPrimaryAssetId()` 존재, U10 키 확정 후 결정).
+- **컨벤션 쿡북**: 새 카드=5분(복제) / 새 효과 타입=~40줄 1파일 / 새 무기 Fragment=15분(서브클래스+DA) / 새 무기 stat mod(기존축)=5분 / 새 무기 stat **축**=enum+`RecomputeResolved` switch case(**컴파일체크 유지**, 데이터화 금지) / 새 캐릭터 속성=C++ AttributeSet(예약 슬롯 활용) / 새 캐릭터 패시브=`UFPSRPassiveAbility` 서브클래스 / 새 카드 스코프/오퍼타입=v2 후 동결.
+
+#### 2-3-9. 빌드 시너지 · 경계
+- **빌드 시너지 설계 (기획 2026-06-10)**: 카드 *메커니즘*과 별개로 **무엇이 빌드를 다르게 느끼게 하는가**(시너지 축: 원소/상태이상, 투사체수↔단발위력, 크리↔지속피해, AOE↔관통)를 별도 설계 — 뱀서 핵심 리텐션. **Fragment 상호작용(§2-4-1) + 멀티효과 트레이드오프가 1차 수단**. 시너지 패스 = 재미 게이트(§7-5) 전후.
+- **경계/시임**: 상태창 UI(사양9)=후속(데이터 노출 시임만). 상태이상 본체·OnStatusKill 배선·elemental 거동=**D3**. 보스 OnKill=**U3**. AllWeapons 복제=**U11b**. CardId=**U10**.
 
 ### 2-4. 무기 시스템
 - 최대 **3개 동시 보유** (기본 1 + 추가 2). 5렙/20렙 등에 무기 카드 등장
@@ -44,13 +98,14 @@
 - 예: **탄창 용량↑ / 연사 속도↑ / 반동↓** (그 외 데미지/확산/재장전속도 등 `FFPSRWeaponStatBlock` 축 확장 가능).
 - **두 스코프, 같은 효과 다른 수치**(§2-3): **`AllWeapons`**(들고 있는 모든 무기, 수치 **작게**) vs **`ThisWeapon`**(현재 무기 1정, **큰 수치**). 둘 다 레벨업 프리즈(§2-2) 카드 풀에 합류(무기 보유 시).
 - **무기별 AllWeapons 제외 (확정 2026-06-11)**: 무기 DA `AllWeaponsStatExclusions`(`TArray<EFPSRWeaponStat>`)에 나열된 축은 **AllWeapons 스코프 모디파이어가 적용되지 않는다**(per-weapon·per-axis). 해석은 `UFPSRWeaponInstance::RecomputeResolved`가 AllWeapons 스택을 합산할 때 필터(ThisWeapon 스택은 플레이어가 의도 타겟이라 항상 적용·미필터). 예: ChargeLaser 반동은 차징 램프라 일반 "반동↓" 광역 카드가 무의미 → DA에서 `RecoilVertical` 제외. DA는 정적이라 복제 불필요·클라/서버 결정적.
-- 데이터: 카드 `Scope`로 적용 범위, `RarityTiers[].Magnitude`로 수치(SetByCaller 동일 패턴). 무기 스탯 모디파이어는 GE가 아닌 **WeaponInstance 모디파이어로 적용**(무기 스탯은 ASC 밖이므로) — `ApplyCard`에서 weapon-scope 분기로 처리(P4-B).
+- 데이터: 카드 `Scope`로 적용 범위(**v2: 효과 `UCardEffect_WeaponStat.bThisWeaponOnly`로 이동, §2-3-2**), `RarityTiers[].Magnitude`로 수치(SetByCaller 동일 패턴). 무기 스탯 모디파이어는 GE가 아닌 **WeaponInstance 모디파이어로 적용**(무기 스탯은 ASC 밖이므로) — `ApplyCard`에서 효과 루프로 처리(v2; v1 weapon-scope 분기 P4-B).
 
-**② 행동 Fragment (미션 보상 = 동작 근본 변경)**
-- 미션 보상으로 무기 동작을 **근본 변경** (2연발, 차징 무효, 아군 힐 빔 등)
+**② 행동 Fragment (동작 변경)**
+> **v2 변경(U18, §2-3-5)**: 행동 트리거 Fragment(`UCardEffect_WeaponBehavior`)는 **레벨업 무기 카드**로 이동(미션 아님). 미션/마일스톤은 **무기 해금**(§2-3-4)으로 재편. 훅 면 확장 = **OnAim/OnFire/OnMiss/OnKill/OnStatusKill**(OnStatusKill=D3 시임). OnKill·OnMiss·OnFire는 5 데미지경로(Hitscan/ChargeLaser/Melee/Projectile/Explosion) **공통 헬퍼**로 호출, OnKill=`bJustKilled` 전이.
+- (v1) 미션 보상으로 무기 동작을 **근본 변경** (2연발, 차징 무효, 아군 힐 빔 등) — v2에선 "근본 변경"=잠긴 기능 해금(§2-3-4), 점진 트리거=무기 카드
 - 적용 방식: **Weapon Behavior Fragment (합성형 훅) + 누적 가능**
   - `UWeaponInstance.ActiveModifiers[]`에 누적, 서로 상호작용 (예: 2연발+관통)
-  - `GA_WeaponFire`(아키타입별 베이스)에 훅: `PreFire → ModifyShotCount → ModifyChargeTime → OnProjectileSpawn → OnHitActor → PostFire`
+  - `GA_WeaponFire`(아키타입별 베이스)에 훅: `PreFire → ModifyShotCount → ModifyChargeTime → OnProjectileSpawn → OnHitActor → PostFire` (+ v2 트리거 훅 `OnAim/OnFire/OnMiss/OnKill/OnStatusKill`, §2-3-5)
   - 각 무기 DA가 `AvailableModifiers`(약 4종) 정의 → **미션 클리어 시 즉시 프리즈(§2-2)에 모디파이어 해금/변경 카드로 1종 선택**
 - **GA 교체 방식 금지**(조합 폭발), **거대 태그 분기 금지**(유지보수 지옥)
 - ⚠️ **성능**: `OnHitActor`가 500마리 타격 시 과도한 virtual dispatch/heap alloc 금지 → 훅은 경량(데이터 기반·히트당 무할당)
