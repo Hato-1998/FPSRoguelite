@@ -8,6 +8,7 @@
 #include "Core/FPSRGameState.h"
 #include "AbilitySystem/FPSRAbilitySystemComponent.h"
 #include "AbilitySystem/Attributes/FPSRHealthSet.h"
+#include "AbilitySystem/Attributes/FPSRCombatSet.h"
 #include "AbilitySystemComponent.h"
 #include "Weapon/FPSRWeaponInventoryComponent.h"
 #include "Weapon/FPSRWeaponFireComponent.h"
@@ -57,7 +58,7 @@ AFPSRCharacter::AFPSRCharacter()
 	if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
 	{
 		MoveComp->bOrientRotationToMovement = false;
-		MoveComp->MaxWalkSpeed = 600.0f;
+		MoveComp->MaxWalkSpeed = BaseWalkSpeed;
 	}
 
 	FirstPersonCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("FirstPersonCamera"));
@@ -211,12 +212,32 @@ void AFPSRCharacter::PossessedBy(AController* NewController)
 			}
 		}
 	}
+
+	// Reflect the current MoveSpeedMultiplier once (attribute may have replicated before this pawn existed,
+	// or the pawn was possessed after the attribute was already set). Safe default 1.0 if the set isn't ready.
+	if (const AFPSRPlayerState* FPSRPS = GetPlayerState<AFPSRPlayerState>())
+	{
+		if (const UFPSRCombatSet* CombatSet = FPSRPS->GetCombatSet())
+		{
+			ApplyMoveSpeedMultiplier(CombatSet->GetMoveSpeedMultiplier());
+		}
+	}
 }
 
 void AFPSRCharacter::OnRep_PlayerState()
 {
 	Super::OnRep_PlayerState();
 	InitAbilitySystem();
+
+	// Reflect the current MoveSpeedMultiplier once (attribute may have replicated before this pawn existed,
+	// or the pawn was possessed after the attribute was already set). Safe default 1.0 if the set isn't ready.
+	if (const AFPSRPlayerState* FPSRPS = GetPlayerState<AFPSRPlayerState>())
+	{
+		if (const UFPSRCombatSet* CombatSet = FPSRPS->GetCombatSet())
+		{
+			ApplyMoveSpeedMultiplier(CombatSet->GetMoveSpeedMultiplier());
+		}
+	}
 }
 
 void AFPSRCharacter::InitAbilitySystem()
@@ -303,6 +324,14 @@ bool AFPSRCharacter::IsDeadLocal() const
 {
 	const AFPSRPlayerState* PS = GetPlayerState<AFPSRPlayerState>();
 	return PS && PS->IsDead();
+}
+
+void AFPSRCharacter::ApplyMoveSpeedMultiplier(float Mult)
+{
+	if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
+	{
+		MoveComp->MaxWalkSpeed = BaseWalkSpeed * Mult;
+	}
 }
 
 void AFPSRCharacter::Input_MoveForward(const FInputActionValue& Value)
@@ -504,8 +533,9 @@ void AFPSRCharacter::EndDash()
 	}
 }
 
-void AFPSRCharacter::ApplyContactDamage(float DamageAmount, AActor* DamageInstigator)
+void AFPSRCharacter::ApplyContactDamage(float DamageAmount, AActor* DamageInstigator, FGameplayTag DamageType)
 {
+	(void)DamageType; // U18a seam (D3 elemental)
 	if (!HasAuthority() || DamageAmount <= 0.0f)
 	{
 		return;

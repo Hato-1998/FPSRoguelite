@@ -32,8 +32,9 @@ void UFPSREnemyHealthComponent::GetLifetimeReplicatedProps(TArray<FLifetimePrope
 	DOREPLIFETIME_WITH_PARAMS_FAST(UFPSREnemyHealthComponent, bDead, Params);
 }
 
-void UFPSREnemyHealthComponent::ApplyDamage(float DamageAmount, AActor* DamageInstigator)
+void UFPSREnemyHealthComponent::ApplyDamage(float DamageAmount, AActor* DamageInstigator, FGameplayTag DamageType)
 {
+	(void)DamageType; // U18a seam (D3 elemental)
 	if (!GetOwner() || !GetOwner()->HasAuthority() || bDead || DamageAmount <= 0.0f)
 	{
 		return;

@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "CollisionQueryParams.h"
 #include "Engine/HitResult.h"
+#include "GameplayTagContainer.h"
 
 class AActor;
 class UWorld;
@@ -64,7 +65,7 @@ namespace FPSRCombat
 
 	/** Bridge FinalDamage to the receiver that matches Target's kind (enemy health component vs player GAS) and
 	 *  report what happened. No-op (bApplied=false) for FinalDamage <= 0 or an unrecognized target. */
-	FPSROGUELITE_API FDamageResult ApplyDamage(AActor* Target, float FinalDamage, AActor* Instigator);
+	FPSROGUELITE_API FDamageResult ApplyDamage(AActor* Target, float FinalDamage, AActor* Instigator, FGameplayTag DamageType = FGameplayTag());
 
 	/** Server: notify the instigating player's controller of a hit-marker (one strongest-outcome pulse). No-op for
 	 *  a non-player instigator. Mirrors the per-path aggregation: Kill > Crit > Hit (Game.MD §2-14). */
@@ -78,7 +79,7 @@ namespace FPSRCombat
 	 *  falling off linearly to the rim. Applied EVEN when damage is 0 (FF-off friendly / self-no-damage) — only the
 	 *  freshly killed are excluded. Player knockback launches the character (rocket jump / ally launch). */
 	FPSROGUELITE_API void ApplyExplosion(UWorld* World, const FVector& Center, float Radius, float Damage,
-		float CritChance, float CritMultiplier, AActor* Instigator, bool bAllowSelf, float KnockbackStrength);
+		float CritChance, float CritMultiplier, AActor* Instigator, bool bAllowSelf, float KnockbackStrength, FGameplayTag DamageType = FGameplayTag());
 
 	/** Dispatch a knockback velocity to Target: players -> additive LaunchCharacter (preserves jump for rocket
 	 *  jumping); swarm enemies -> AFPSREnemyBase decaying-velocity knockback (integrated by their movement tick). */
