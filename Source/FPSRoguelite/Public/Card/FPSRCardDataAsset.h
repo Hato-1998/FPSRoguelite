@@ -4,12 +4,9 @@
 
 #include "Engine/DataAsset.h"
 #include "Card/FPSRCardTypes.h"
-#include "Weapon/FPSRWeaponTypes.h"
 #include "GameplayTagContainer.h"
 #include "FPSRCardDataAsset.generated.h"
 
-class UGameplayEffect;
-class UFPSRWeaponFragment;
 class UFPSRCardEffect;
 
 /** Data-driven card definition (U18a v2): a card owns one or more polymorphic Instanced effects. The draw rolls a
@@ -50,31 +47,10 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Card")
 	FGameplayTag CardFamily;
 
-	// --- Legacy v1 fields (DEPRECATED by U18a, §2-3-1). ORIGINAL names kept verbatim so pre-v2 serialized data loads
-	//     by name match (no CoreRedirect needed); PostLoad migrates them into Effects and clears them. Field
-	//     declarations are removed in a follow-up commit once every card asset has been re-saved (so cooked data never
-	//     loses the source values). Do not author against these — they are editor-hidden. ---
-
-	UPROPERTY(meta = (DeprecatedProperty))
-	ECardScope Scope = ECardScope::Character;
-
-	UPROPERTY(meta = (DeprecatedProperty))
-	TSubclassOf<UGameplayEffect> AppliedEffect;
-
-	UPROPERTY(meta = (DeprecatedProperty))
-	TArray<FFPSRCardRarityTier> RarityTiers;
-
-	UPROPERTY(meta = (DeprecatedProperty))
-	EFPSRWeaponStat WeaponStat = EFPSRWeaponStat::FireRate;
-
-	UPROPERTY(meta = (DeprecatedProperty))
-	EFPSRWeaponModOp WeaponStatOp = EFPSRWeaponModOp::PercentMultiply;
-
-	UPROPERTY(meta = (DeprecatedProperty))
-	TObjectPtr<UFPSRWeaponFragment> GrantedFragment = nullptr;
+	// (v1 legacy fields + PostLoad migration removed in U18a-legacy-cleanup — every card asset was re-saved to v2.)
 
 #if WITH_EDITOR
-	/** Migrate v1 single-effect fields into the polymorphic Effects array (idempotent) + refresh OfferRarities. */
+	/** Keep OfferRarities synced with the effects' rarity tiers on load / edit. */
 	virtual void PostLoad() override;
 	virtual void PostEditChangeProperty(struct FPropertyChangedEvent& PropertyChangedEvent) override;
 
@@ -82,9 +58,6 @@ public:
 	virtual EDataValidationResult IsDataValid(class FDataValidationContext& Context) const override;
 
 private:
-	/** Build the single v2 effect from the legacy fields (only when Effects is empty — idempotent). */
-	void MigrateFromLegacy();
-
 	/** Recompute OfferRarities from the first magnitude-bearing effect's tiers (IsDataValid enforces the rest match). */
 	void RefreshOfferRarities();
 #endif
