@@ -53,8 +53,9 @@ protected:
 	UPROPERTY(VisibleAnywhere, Category = "FPSR|Boss")
 	TObjectPtr<UFPSREnemyHealthComponent> HealthComponent;
 
-	/** Max health used when no BossDefinition overrides it (e.g. the C++ fallback boss for FPSR.SkipToBoss before
-	 *  any boss BP/definition exists). Balance value. */
+	/** Max health used when no BossDefinition overrides it (the C++ fallback boss for FPSR.SkipToBoss before any
+	 *  boss BP/definition exists). Kept testable so the kill->victory loop is verifiable in a PIE session — the
+	 *  real boss's larger health is authored on its DA_BossDefinition (U4). Balance value. */
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Boss", meta = (ClampMin = "1.0"))
-	float DefaultMaxHealth = 10000.0f;
+	float DefaultMaxHealth = 1000.0f;
 };
