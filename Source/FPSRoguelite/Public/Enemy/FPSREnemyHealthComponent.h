@@ -3,6 +3,7 @@
 #pragma once
 
 #include "Components/ActorComponent.h"
+#include "GameplayTagContainer.h"
 #include "FPSREnemyHealthComponent.generated.h"
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FFPSREnemyDeathSignature, AActor*, DeadActor, AActor*, Killer);
@@ -17,7 +18,7 @@ public:
 	UFPSREnemyHealthComponent();
 
 	/** Server: apply damage and handle death. */
-	void ApplyDamage(float DamageAmount, AActor* DamageInstigator);
+	void ApplyDamage(float DamageAmount, AActor* DamageInstigator, FGameplayTag DamageType = FGameplayTag());
 
 	/** Server: reset health/dead flag for pooled reuse. */
 	void ResetForReuse();

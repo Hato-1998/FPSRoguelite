@@ -21,6 +21,11 @@ public:
 	ATTRIBUTE_ACCESSORS_BASIC(UFPSRCombatSet, Luck)
 	ATTRIBUTE_ACCESSORS_BASIC(UFPSRCombatSet, PickupRadius)
 	ATTRIBUTE_ACCESSORS_BASIC(UFPSRCombatSet, XPGain)
+	ATTRIBUTE_ACCESSORS_BASIC(UFPSRCombatSet, MoveSpeedMultiplier)
+
+	// Reserved attribute axes (extensibility directive §2-3-1): add new player stat axes here — a GE + DataAsset card
+	// can target them with zero pipeline edits (e.g. CooldownReduction, Armor, MoveAccel). Define the FGameplayAttributeData
+	// field + ATTRIBUTE_ACCESSORS_BASIC + OnRep + Init + DOREPLIFETIME_CONDITION_NOTIFY following the pattern above.
 
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
@@ -43,6 +48,14 @@ protected:
 	UFUNCTION()
 	void OnRep_XPGain(const FGameplayAttributeData& OldValue);
 
+	UFUNCTION()
+	void OnRep_MoveSpeedMultiplier(const FGameplayAttributeData& OldValue);
+
+	virtual void PostAttributeChange(const FGameplayAttribute& Attribute, float OldValue, float NewValue) override;
+
+	/** Apply the current MoveSpeedMultiplier to the owning character's movement (server PostAttributeChange + client/sim-proxy OnRep). */
+	void ApplyMoveSpeedToOwner();
+
 private:
 	UPROPERTY(BlueprintReadOnly, Category = "Combat", ReplicatedUsing = OnRep_GlobalCritChance, meta = (AllowPrivateAccess = true))
 	FGameplayAttributeData GlobalCritChance;
@@ -61,4 +74,7 @@ private:
 
 	UPROPERTY(BlueprintReadOnly, Category = "Combat", ReplicatedUsing = OnRep_XPGain, meta = (AllowPrivateAccess = true))
 	FGameplayAttributeData XPGain;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Combat", ReplicatedUsing = OnRep_MoveSpeedMultiplier, meta = (AllowPrivateAccess = true))
+	FGameplayAttributeData MoveSpeedMultiplier;
 };

@@ -69,8 +69,9 @@ namespace FPSRCombat
 		return 0.0f;
 	}
 
-	FDamageResult ApplyDamage(AActor* Target, float FinalDamage, AActor* Instigator)
+	FDamageResult ApplyDamage(AActor* Target, float FinalDamage, AActor* Instigator, FGameplayTag DamageType)
 	{
+		// U18a forward-compat seam: DamageType (empty = Physical) is threaded to leaf appliers for D3 elemental; no behavior change in U18a.
 		FDamageResult Result;
 		if (!Target || FinalDamage <= 0.0f)
 		{
@@ -79,7 +80,7 @@ namespace FPSRCombat
 
 		if (UFPSREnemyHealthComponent* HealthComp = Target->FindComponentByClass<UFPSREnemyHealthComponent>())
 		{
-			HealthComp->ApplyDamage(FinalDamage, Instigator);
+			HealthComp->ApplyDamage(FinalDamage, Instigator, DamageType);
 			Result.bApplied = true;
 			Result.bWasEnemy = true;
 			Result.bKilled = HealthComp->IsDead();
@@ -90,7 +91,7 @@ namespace FPSRCombat
 		{
 			// Player death (DBNO) is a later phase and isn't reported back here, so bKilled stays false — friendly
 			// knockback therefore always lands (intended: allies get launched).
-			Character->ApplyContactDamage(FinalDamage, Instigator);
+			Character->ApplyContactDamage(FinalDamage, Instigator, DamageType);
 			Result.bApplied = true;
 			return Result;
 		}
@@ -132,8 +133,9 @@ namespace FPSRCombat
 	}
 
 	void ApplyExplosion(UWorld* World, const FVector& Center, float Radius, float Damage,
-		float CritChance, float CritMultiplier, AActor* Instigator, bool bAllowSelf, float KnockbackStrength)
+		float CritChance, float CritMultiplier, AActor* Instigator, bool bAllowSelf, float KnockbackStrength, FGameplayTag DamageType)
 	{
+		// U18a forward-compat seam: DamageType (empty = Physical) is threaded to leaf appliers for D3 elemental; no behavior change in U18a.
 		if (!World || Radius <= 0.0f)
 		{
 			return;
@@ -177,7 +179,7 @@ namespace FPSRCombat
 			FDamageResult Result;
 			if (FinalDamage > 0.0f)
 			{
-				Result = ApplyDamage(Target, FinalDamage, Instigator);
+				Result = ApplyDamage(Target, FinalDamage, Instigator, DamageType);
 			}
 
 			if (Result.bWasEnemy && Result.bApplied)

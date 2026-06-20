@@ -4,6 +4,7 @@
 
 #include "GameFramework/Character.h"
 #include "AbilitySystemInterface.h"
+#include "GameplayTagContainer.h"
 #include "FPSRCharacter.generated.h"
 
 class UAbilitySystemComponent;
@@ -53,7 +54,10 @@ public:
 	void RequestReload();
 
 	/** Server: apply contact damage from an enemy to this character's Health (clamped via HealthSet). */
-	void ApplyContactDamage(float DamageAmount, AActor* DamageInstigator);
+	void ApplyContactDamage(float DamageAmount, AActor* DamageInstigator, FGameplayTag DamageType = FGameplayTag());
+
+	/** Set MaxWalkSpeed = BaseWalkSpeed * Mult. Called by UFPSRCombatSet when MoveSpeedMultiplier changes (server + client). */
+	void ApplyMoveSpeedMultiplier(float Mult);
 
 	/** Owner-client: refresh the first-person weapon mesh + arms anim when the equipped weapon changes
 	 *  (called from the inventory's server EquipSlot + client OnRep). No-op on non-locally-controlled pawns. */
@@ -213,6 +217,10 @@ protected:
 
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Dash")
 	float DashCooldown = 2.0f;
+
+	/** Baseline walk speed before MoveSpeedMultiplier. Designers may tune per-hero. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Movement")
+	float BaseWalkSpeed = 600.0f;
 
 	/** Server-only: world time of last dash (init far in the past so the first dash is allowed). */
 	float LastDashTime = -1000.0f;
