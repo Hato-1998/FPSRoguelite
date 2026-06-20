@@ -430,6 +430,8 @@ Game.md + PROGRESS.md 먼저 읽어. 그다음 Docs/SSOT/CombatWeaponCard.md §2
 
 #### U18c — 행동 트리거 확장: 무기 훅 + 캐릭터 GAS-native + 미룬 기능해금 (U18 카드 v2 마무리)
 
+> **사용자 스코프 확정(2026-06-20)**: ① **Feature A(ChargeLaser 차징→연사) 전면 연기**(DoFinalShot 1빔후 EndAbility 시퀀스 수술 필요 → 후속 유닛). U18c 기능해금 = **B(LMG 빗나감→탄 리필)·C(샷건·바주카 처치→재장전) 2개만**. ② **c2 회복 2종**: 흡혈(실제 입힌 데미지의 비율)·초당 체력 재생(기존 CharacterGE periodic). "N초 유휴 회복" 폐기. 플랜=`Docs/U18c_BehaviorHooks_Plan.md`(Codex 플랜게이트 P1×2 반영: DamageDealt 실측 이벤트·문서 정합).
+
 ```
 Game.md + PROGRESS.md 먼저 읽어. 그다음 Docs/SSOT/CombatWeaponCard.md §2-3-5(행동 트리거 — 이 작업의 설계 SSOT)·§2-4-1(Fragment 훅)·§2-3-7(속성 시임=OnStatusKill 자리)를 정독해. U18c는 U18 카드 v2의 마지막 조각 — 무기 행동 훅(OnAim/OnFire/OnMiss/OnKill) 5데미지경로 공통 브릿지 + bJustKilled 전이 + 캐릭터 GAS-native 패시브 + U18b서 미룬 3 기능해금. 플랜모드 우선, HIGH_RISK 승인 후. 구현=Haiku 위임 / 설계·검증·보안배선(GAS 브릿지·5경로 훅·서버권위)=Opus 직접(CLAUDE.md §6-5).
 
