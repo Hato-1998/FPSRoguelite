@@ -75,11 +75,45 @@ public:
 	/** Charge-time hook (ChargeLaser): adjust the seconds-to-full-charge before the charge alpha is computed. */
 	virtual void ModifyChargeTime(const FFPSRFireContext& Context, float& ChargeTimeInOut) const {}
 
-	/** Hitscan impact hook (server-only): called at each terminal impact point of a hitscan pellet so a fragment
-	 *  can spawn an effect at the hit — e.g. ExplosiveRounds turns a rifle hit into a small AOE. bAllowSelf passes
-	 *  through the NoSelfDamage suppression so a spawned explosion respects it. */
-	virtual void OnImpact(const FFPSRFireContext& Context, const FVector& ImpactPoint, bool bAllowSelf) const {}
+	/** Hitscan impact hook (server-only): called at each terminal impact point of a hitscan pellet so a fragment can
+	 *  spawn an effect at the hit — e.g. ExplosiveRounds turns a rifle hit into a small AOE. bAllowSelf passes through
+	 *  the NoSelfDamage suppression so a spawned explosion respects it. bOutHitEnemy: set true if this hook dealt real
+	 *  damage to an enemy (e.g. a splash that connected) so the activation isn't counted as a miss — the caller OR-s
+	 *  it across fragments before deciding OnMiss. */
+	virtual void OnImpact(const FFPSRFireContext& Context, const FVector& ImpactPoint, bool bAllowSelf, bool& bOutHitEnemy) const {}
+
+	/** Behavior-trigger hooks (U18c, §2-3-5). Fired by the shared FPSRWeaponHooks bridge from all 5 damage paths so
+	 *  a fragment reacts to firing outcomes uniformly. All state-mutating overrides MUST gate on Context.bAuthority
+	 *  (mirror UFPSRFragment_ExplosiveRounds::OnImpact) — these run on the hot damage path, so keep them allocation-free.
+	 *  - OnAim   : ADS pressed/released (server-authoritative aiming RPC). bAiming = entering ADS.
+	 *  - OnFire  : once per activation, right after the ammo commit (NOT PostFire — avoids the on-fire/on-hit race).
+	 *  - OnMiss  : once per activation that landed no damage on any enemy (synchronous paths only).
+	 *  - OnKill  : once per enemy this activation freshly killed (alive->dead; corpse re-hits excluded by bJustKilled).
+	 *  - OnStatusKill : empty seam — D3 (status-effect kills) wires the call site; declared here only. */
+	virtual void OnAim(const FFPSRFireContext& Context, bool bAiming) const {}
+	virtual void OnFire(const FFPSRFireContext& Context) const {}
+	virtual void OnMiss(const FFPSRFireContext& Context) const {}
+	virtual void OnKill(const FFPSRFireContext& Context, AActor* KilledActor) const {}
+	virtual void OnStatusKill(const FFPSRFireContext& Context, AActor* KilledActor) const {}
 };
+
+/**
+ * Shared behavior-hook bridge (U18c §2-3-5). One choke point each so every damage path (Hitscan / ChargeLaser /
+ * Melee / Projectile / Explosion) fires the trigger hooks identically instead of re-deriving the fragment list.
+ * Each helper resolves the active fragments from Context.Instance and early-outs when there are none — empty-fast on
+ * the hot path. The hooks themselves gate on Context.bAuthority; callers already invoke these inside server-only scopes.
+ */
+namespace FPSRWeaponHooks
+{
+	/** Fire OnFire on every active fragment (once per activation). */
+	FPSROGUELITE_API void NotifyFire(const FFPSRFireContext& Context);
+	/** Fire OnMiss on every active fragment (activation dealt no enemy damage). */
+	FPSROGUELITE_API void NotifyMiss(const FFPSRFireContext& Context);
+	/** Fire OnKill on every active fragment for one freshly-killed enemy. */
+	FPSROGUELITE_API void NotifyKill(const FFPSRFireContext& Context, AActor* KilledActor);
+	/** Fire OnAim on every active fragment (ADS press/release). */
+	FPSROGUELITE_API void NotifyAim(const FFPSRFireContext& Context, bool bAiming);
+}
 
 /** Reference fragment: fires extra shots/pellets per activation (e.g. 2-round multishot, shotgun spread). */
 UCLASS()
@@ -147,5 +181,36 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Fragment", meta = (ClampMin = "0"))
 	float KnockbackStrength = 0.0f;
 
-	virtual void OnImpact(const FFPSRFireContext& Context, const FVector& ImpactPoint, bool bAllowSelf) const override;
+	virtual void OnImpact(const FFPSRFireContext& Context, const FVector& ImpactPoint, bool bAllowSelf, bool& bOutHitEnemy) const override;
+};
+
+/** Feature B (U18c): refill magazine rounds whenever an activation lands NO damage on any enemy — "suppressive
+ *  fire pays off" (e.g. LMG miss → top up). Fires on the OnMiss trigger, server-authoritative. */
+UCLASS()
+class FPSROGUELITE_API UFPSRFragment_AmmoOnMiss : public UFPSRWeaponFragment
+{
+	GENERATED_BODY()
+
+public:
+	/** Rounds added back to the magazine on each miss (clamped to MagSize). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Fragment", meta = (ClampMin = "1"))
+	int32 RefillAmount = 1;
+
+	virtual void OnMiss(const FFPSRFireContext& Context) const override;
+};
+
+/** Feature C (U18c): reload on kill — a freshly-killed enemy refills this weapon (shotgun / bazooka payoff). Fires
+ *  on the OnKill trigger (alive->dead transition only), server-authoritative. bInstantRefill tops the mag to full
+ *  immediately; otherwise it kicks off the weapon's normal timed reload. */
+UCLASS()
+class FPSROGUELITE_API UFPSRFragment_ReloadOnKill : public UFPSRWeaponFragment
+{
+	GENERATED_BODY()
+
+public:
+	/** true = instantly fill the magazine to MagSize on a kill; false = start the weapon's timed reload instead. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Fragment")
+	bool bInstantRefill = true;
+
+	virtual void OnKill(const FFPSRFireContext& Context, AActor* KilledActor) const override;
 };

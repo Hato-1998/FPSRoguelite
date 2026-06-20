@@ -5,6 +5,7 @@
 #include "Weapon/FPSRWeaponInventoryComponent.h"
 #include "Weapon/FPSRWeaponInstance.h"
 #include "Weapon/FPSRWeaponDataAsset.h"
+#include "Weapon/FPSRWeaponFragment.h"
 #include "Combat/FPSRCombatStatics.h"
 #include "Combat/FPSRWeakpointComponent.h"
 #include "Enemy/FPSREnemyHealthComponent.h"
@@ -73,15 +74,13 @@ void UFPSRGA_WeaponMelee::ActivateAbility(
 	float MeleeRadius = 175.0f;
 	float MeleeAttackDelay = 0.0f;
 	UFPSRWeaponInventoryComponent* Inventory = Avatar->FindComponentByClass<UFPSRWeaponInventoryComponent>();
-	if (Inventory)
+	UFPSRWeaponInstance* Instance = Inventory ? Inventory->GetCurrentInstance() : nullptr;
+	if (Instance)
 	{
-		if (UFPSRWeaponInstance* Instance = Inventory->GetCurrentInstance())
-		{
-			const FFPSRWeaponStatBlock& Stats = Instance->GetResolvedStats();
-			Damage = Stats.Damage;
-			MeleeRadius = Stats.MeleeRadius;
-			MeleeAttackDelay = Stats.MeleeAttackDelay;
-		}
+		const FFPSRWeaponStatBlock& Stats = Instance->GetResolvedStats();
+		Damage = Stats.Damage;
+		MeleeRadius = Stats.MeleeRadius;
+		MeleeAttackDelay = Stats.MeleeAttackDelay;
 	}
 
 	FVector ViewLocation;
@@ -107,6 +106,16 @@ void UFPSRGA_WeaponMelee::ActivateAbility(
 			EndAbility(Handle, ActorInfo, ActivationInfo, true, true);
 			return;
 		}
+
+		// Behavior-trigger context (U18c): melee has no shared FireCtx upstream, so build one here. This whole block
+		// runs under Avatar->HasAuthority(), so bAuthority = true. One swing per activation (ShotCount = 1).
+		FFPSRFireContext FireCtx;
+		FireCtx.Avatar = Avatar;
+		FireCtx.Controller = Controller;
+		FireCtx.World = World;
+		FireCtx.Instance = Instance;
+		FireCtx.ShotCount = 1;
+		FireCtx.bAuthority = true;
 
 		float FinalDamage = Damage;
 		bool bSwingCrit = false;
@@ -158,10 +167,11 @@ void UFPSRGA_WeaponMelee::ActivateAbility(
 					continue;
 				}
 				const FPSRCombat::FDamageResult Result = FPSRCombat::ApplyDamage(HitActor, Resolved, Avatar);
-				if (Result.bWasEnemy && Result.bApplied)
+				// Markers / kill trigger key on real damage (DamageDealt), so a corpse re-hit in the swing is inert.
+				if (Result.bWasEnemy && Result.DamageDealt > 0.0f)
 				{
 					bAnyHit = true;
-					if (Result.bKilled) { bAnyKill = true; }
+					if (Result.bKilled) { bAnyKill = true; FPSRWeaponHooks::NotifyKill(FireCtx, HitActor); }
 					if (WeakpointMult > 1.0f) { bAnyWeak = true; }
 				}
 			}
@@ -178,6 +188,13 @@ void UFPSRGA_WeaponMelee::ActivateAbility(
 					: (bSwingCrit ? EFPSRHitMarkerType::Crit : EFPSRHitMarkerType::Hit));
 				OwnerPC->ClientNotifyHitMarker(MarkerType);
 			}
+		}
+
+		// OnFire / OnMiss triggers (server): once per swing after all overlaps resolved (§2-3-5).
+		FPSRWeaponHooks::NotifyFire(FireCtx);
+		if (!bAnyHit)
+		{
+			FPSRWeaponHooks::NotifyMiss(FireCtx);
 		}
 	}
 

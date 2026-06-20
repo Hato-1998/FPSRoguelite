@@ -140,6 +140,12 @@ void UFPSRGA_WeaponFire_Projectile::ActivateAbility(
 		}
 	}
 
+	// OnFire trigger (server): once per activation, right after the ammo commit (§2-3-5).
+	if (FireCtx.bAuthority)
+	{
+		FPSRWeaponHooks::NotifyFire(FireCtx);
+	}
+
 	// Spawn from the player view point.
 	FVector ViewLocation;
 	FRotator ViewRotation;
@@ -190,6 +196,11 @@ void UFPSRGA_WeaponFire_Projectile::ActivateAbility(
 				Params.bSelfDamage = !FireCtx.bSuppressSelfDamage;
 				Params.Team = EFPSRProjectileTeam::Player;
 				Params.InstigatorActor = Avatar;
+				// Server-only weak back-ref so the projectile can fire the OnKill behavior hook at damage time (U18c).
+				Params.WeaponInstance = Instance;
+				// Per-activation OnMiss parity: only a single-projectile activation may fire the projectile miss hook
+				// (a multishot volley releases asynchronously and would otherwise refund per-projectile / on partial hits).
+				Params.bSingleProjectileActivation = (NumRounds == 1);
 
 				// Behavior fragments may adjust projectile params per spawn (speed / radius / lifetime / etc.).
 				if (Fragments)

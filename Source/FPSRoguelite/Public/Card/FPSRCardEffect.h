@@ -10,6 +10,7 @@
 
 class UGameplayEffect;
 class UFPSRWeaponFragment;
+class UFPSRPassiveAbility;
 class AController;
 class AFPSRPlayerState;
 class UFPSRAbilitySystemComponent;
@@ -153,6 +154,28 @@ public:
 	virtual void Apply(const FFPSRCardEffectContext& Context, float Magnitude) const override;
 	virtual FText GetDescription(ECardRarity Rarity, float Magnitude) const override;
 	virtual bool RequiresWeapon() const override { return false; }
+	virtual bool CanApply(const FFPSRCardEffectContext& Context) const override;
+#if WITH_EDITOR
+	virtual void ValidateEffect(FDataValidationContext& Context) const override;
+#endif
+};
+
+/** Character passive effect (U18c §2-3-5): grants a passive GameplayAbility to the player ASC — lifesteal, an
+ *  always-on regen loop, etc. The granted handle is tracked on the PlayerState so the run-reset clears it (the ASC
+ *  survives lobby<->run travel). Players are GAS-native, so character behaviors live as abilities, not fragments. */
+UCLASS(meta = (DisplayName = "Character: Passive Ability"))
+class FPSROGUELITE_API UCardEffect_CharacterPassive : public UFPSRCardEffect
+{
+	GENERATED_BODY()
+
+public:
+	/** Passive ability granted when this card is picked — a UFPSRPassiveAbility subclass (usually a content BP with
+	 *  its heal GE / ratio authored). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Card Effect")
+	TSubclassOf<UFPSRPassiveAbility> PassiveAbility;
+
+	virtual void Apply(const FFPSRCardEffectContext& Context, float Magnitude) const override;
+	virtual FText GetDescription(ECardRarity Rarity, float Magnitude) const override;
 	virtual bool CanApply(const FFPSRCardEffectContext& Context) const override;
 #if WITH_EDITOR
 	virtual void ValidateEffect(FDataValidationContext& Context) const override;

@@ -11,7 +11,9 @@
 #include "AbilitySystem/Attributes/FPSRCombatSet.h"
 #include "AbilitySystemComponent.h"
 #include "Weapon/FPSRWeaponInventoryComponent.h"
+#include "Weapon/FPSRWeaponInstance.h"
 #include "Weapon/FPSRWeaponFireComponent.h"
+#include "Weapon/FPSRWeaponFragment.h"
 #include "Weapon/FPSRWeaponDataAsset.h"
 #include "Hero/FPSRPlayerFeedbackComponent.h"
 #include "Hero/FPSRBlindspotAudioComponent.h"
@@ -471,6 +473,23 @@ void AFPSRCharacter::ServerSetAiming_Implementation(bool bNewAiming)
 	if (WeaponFire)
 	{
 		WeaponFire->SetAiming(bNewAiming);
+	}
+
+	// OnAim behavior trigger (server): fire after the authoritative aiming state is set. Aiming is weapon-agnostic,
+	// but the hooks live on the equipped weapon's fragments, so build a minimal FireContext from it (§2-3-5). This
+	// is the only server-authoritative aiming entry point; the hook is fire-only (persistent aim buffs are a follow-up).
+	if (WeaponInventory)
+	{
+		if (UFPSRWeaponInstance* Instance = WeaponInventory->GetCurrentInstance())
+		{
+			FFPSRFireContext AimCtx;
+			AimCtx.Avatar = this;
+			AimCtx.Controller = GetController();
+			AimCtx.World = GetWorld();
+			AimCtx.Instance = Instance;
+			AimCtx.bAuthority = true;
+			FPSRWeaponHooks::NotifyAim(AimCtx, bNewAiming);
+		}
 	}
 }
 

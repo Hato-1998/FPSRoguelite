@@ -2,6 +2,7 @@
 
 #include "Weapon/FPSRProjectile.h"
 #include "Weapon/FPSRProjectileSubsystem.h"
+#include "Weapon/FPSRWeaponFragment.h"
 #include "Combat/FPSRCombatStatics.h"
 #include "Combat/FPSRWeakpointComponent.h"
 #include "FPSRCollisionChannels.h"
@@ -13,11 +14,31 @@
 
 #include "Components/SphereComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "GameFramework/Pawn.h"
+#include "GameFramework/Controller.h"
 #include "GameFramework/ProjectileMovementComponent.h"
 #include "Engine/World.h"
 #include "Engine/OverlapResult.h"
 #include "TimerManager.h"
 #include "CollisionShape.h"
+
+namespace
+{
+	/** Rebuild a minimal server FireContext from a projectile's spawn-time params so the U18c OnKill bridge can run at
+	 *  damage time (the live FFPSRFireContext is long gone — the firing ability ended when the projectile launched).
+	 *  Instance is the weak weapon ref (null if the weapon was swapped/dropped mid-flight — the bridge then no-ops). */
+	FFPSRFireContext MakeProjectileFireContext(const FFPSRProjectileParams& Params, UWorld* World)
+	{
+		FFPSRFireContext Ctx;
+		Ctx.Avatar = Cast<APawn>(Params.InstigatorActor);
+		Ctx.Controller = Ctx.Avatar ? Ctx.Avatar->GetController() : nullptr;
+		Ctx.World = World;
+		Ctx.Instance = Params.WeaponInstance.Get();
+		Ctx.ShotCount = 1;
+		Ctx.bAuthority = true; // every caller is inside a HasAuthority() gate
+		return Ctx;
+	}
+}
 
 AFPSRProjectile::AFPSRProjectile()
 {
@@ -62,6 +83,7 @@ void AFPSRProjectile::Launch(const FFPSRProjectileParams& InParams, const FVecto
 	Params = InParams;
 	PierceRemaining = Params.Pierce;
 	HitActors.Reset();
+	bDealtEnemyDamage = false;
 
 	if (ProjectileMovement)
 	{
@@ -224,9 +246,16 @@ void AFPSRProjectile::OnSphereOverlap(UPrimitiveComponent* OverlappedComp, AActo
 	bool bCrit = false;
 	bool bKill = false;
 	bool bWasEnemy = false;
-	if (TryDamageActor(OtherActor, WeakpointMult, bCrit, bKill, bWasEnemy) && bWasEnemy)
+	bool bDamaged = false;
+	// Marker fires only when REAL damage landed on an enemy — a corpse re-hit (bDamaged false) is inert. The hit is
+	// still consumed below (pierce decrements unconditionally), and a friendly hit raises no marker (bWasEnemy false).
+	if (TryDamageActor(OtherActor, WeakpointMult, bCrit, bKill, bWasEnemy, bDamaged) && bWasEnemy && bDamaged)
 	{
 		NotifyInstigatorHitMarker(bCrit, WeakpointMult > 1.0f, bKill);
+	}
+	if (bDamaged)
+	{
+		bDealtEnemyDamage = true; // not a miss — suppresses the OnMiss hook at release
 	}
 	--PierceRemaining;
 	if (PierceRemaining < 0)
@@ -262,9 +291,25 @@ void AFPSRProjectile::HandleImpact(const FVector& ImpactPoint)
 				// Unified player explosion: enemy/self/friendly damage resolution + radial knockback + a single
 				// hit-marker, all server-authoritative. bAllowSelf is the baked self-damage flag (NoSelfDamage card
 				// clears it); knockback is independent of damage (still launches at 0 damage, excludes the killed).
-				FPSRCombat::ApplyExplosion(World, ImpactPoint, Params.ExplosionRadius, Params.Damage,
+				const FPSRCombat::FExplosionResult Outcome = FPSRCombat::ApplyExplosion(
+					World, ImpactPoint, Params.ExplosionRadius, Params.Damage,
 					Params.CritChance, Params.CritMultiplier, Params.InstigatorActor,
 					/*bAllowSelf*/ Params.bSelfDamage, Params.KnockbackStrength);
+
+				// OnKill trigger (server): fire once per enemy this blast freshly killed (bazooka reload-on-kill etc.).
+				// Rebuild the FireContext from spawn params; the weak weapon ref no-ops the bridge if the weapon is gone.
+				if (Outcome.KilledEnemies.Num() > 0)
+				{
+					const FFPSRFireContext KillCtx = MakeProjectileFireContext(Params, World);
+					for (AActor* KilledActor : Outcome.KilledEnemies)
+					{
+						FPSRWeaponHooks::NotifyKill(KillCtx, KilledActor);
+					}
+				}
+				if (Outcome.bAnyEnemyHit)
+				{
+					bDealtEnemyDamage = true; // splash connected — not a miss
+				}
 			}
 			else
 			{
@@ -289,7 +334,8 @@ void AFPSRProjectile::HandleImpact(const FVector& ImpactPoint)
 					bool bCrit = false;
 					bool bKill = false;
 					bool bWasEnemy = false;
-					if (Target && !Damaged.Contains(Target) && TryDamageActor(Target, 1.0f, bCrit, bKill, bWasEnemy))
+					bool bDamaged = false;
+					if (Target && !Damaged.Contains(Target) && TryDamageActor(Target, 1.0f, bCrit, bKill, bWasEnemy, bDamaged))
 					{
 						Damaged.Add(Target);
 					}
@@ -332,11 +378,12 @@ bool AFPSRProjectile::IsHostileTarget(AActor* Target) const
 	return false;
 }
 
-bool AFPSRProjectile::TryDamageActor(AActor* Target, float WeakpointMultiplier, bool& bOutCrit, bool& bOutKill, bool& bOutWasEnemy)
+bool AFPSRProjectile::TryDamageActor(AActor* Target, float WeakpointMultiplier, bool& bOutCrit, bool& bOutKill, bool& bOutWasEnemy, bool& bOutDamaged)
 {
 	bOutCrit = false;
 	bOutKill = false;
 	bOutWasEnemy = false;
+	bOutDamaged = false;
 	if (!HasAuthority() || !IsHostileTarget(Target))
 	{
 		return false;
@@ -362,6 +409,15 @@ bool AFPSRProjectile::TryDamageActor(AActor* Target, float WeakpointMultiplier, 
 			const FPSRCombat::FDamageResult Result = FPSRCombat::ApplyDamage(Target, Resolved, Params.InstigatorActor);
 			bOutKill = Result.bKilled;
 			bOutWasEnemy = Result.bWasEnemy;
+			bOutDamaged = Result.DamageDealt > 0.0f; // real health removed (0 for a corpse re-hit) — gates the marker
+			// OnKill trigger (server): this direct hit freshly killed an enemy (sniper etc.). Rebuild a minimal
+			// FireContext from spawn params — the weak weapon ref no-ops the bridge if the weapon is gone.
+			if (Result.bKilled)
+			{
+				FPSRWeaponHooks::NotifyKill(MakeProjectileFireContext(Params, GetWorld()), Target);
+			}
+			// Return CONSUMPTION (bApplied), not damage: a friendly-fire hit (DamageDealt 0 for a player target) must
+			// still consume the projectile (pierce/release), so the marker is gated separately on bOutDamaged below.
 			return Result.bApplied;
 		}
 		return false;
@@ -399,6 +455,17 @@ void AFPSRProjectile::NotifyInstigatorHitMarker(bool bCrit, bool bWeak, bool bKi
 
 void AFPSRProjectile::ReleaseToPool()
 {
+	// OnMiss trigger (server): a player projectile that ends without ever damaging an enemy is a true miss (expired,
+	// fell out of world, or hit only geometry) — fire the behavior hook so e.g. AmmoOnMiss refunds, matching the
+	// hitscan/melee/charge-laser miss behavior. Only single-projectile activations qualify (a multishot volley would
+	// fire per-projectile / on partial hits — see FFPSRProjectileParams::bSingleProjectileActivation). bActive guards
+	// re-entry (Deactivate clears it during release).
+	if (bActive && HasAuthority() && Params.Team == EFPSRProjectileTeam::Player && !bDealtEnemyDamage
+		&& Params.bSingleProjectileActivation)
+	{
+		FPSRWeaponHooks::NotifyMiss(MakeProjectileFireContext(Params, GetWorld()));
+	}
+
 	if (UWorld* World = GetWorld())
 	{
 		if (UFPSRProjectileSubsystem* Subsystem = World->GetSubsystem<UFPSRProjectileSubsystem>())

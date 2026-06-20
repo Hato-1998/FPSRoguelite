@@ -8,6 +8,9 @@
 #include "Hero/FPSRCharacter.h"
 #include "Core/FPSRGameState.h"
 #include "Core/FPSRPlayerController.h"
+#include "Core/FPSRPlayerState.h"
+#include "AbilitySystem/FPSRAbilitySystemComponent.h"
+#include "AbilitySystemComponent.h"
 
 #include "GameFramework/Pawn.h"
 #include "GameFramework/Controller.h"
@@ -69,6 +72,33 @@ namespace FPSRCombat
 		return 0.0f;
 	}
 
+	/** GAS-native character behavior bridge (U18c §2-3-5): tell the instigating player's ASC how much real damage it
+	 *  just dealt, so a lifesteal/regen-style passive GA can react. Gated on a cheap per-player listener count, so a
+	 *  player who never picked such a card pays ~nothing on this hot path (the cost scales with that player's
+	 *  triggered-ability count, never with enemy count). Server-only (every ApplyDamage caller is authority-gated). */
+	static void SendDealtDamageEvent(AActor* Instigator, float DamageDealt)
+	{
+		APawn* InstigatorPawn = Cast<APawn>(Instigator);
+		if (!InstigatorPawn)
+		{
+			return;
+		}
+		const AFPSRPlayerState* PS = InstigatorPawn->GetPlayerState<AFPSRPlayerState>();
+		if (!PS || !PS->HasDamageEventListeners())
+		{
+			return;
+		}
+		if (UAbilitySystemComponent* ASC = PS->GetFPSRAbilitySystemComponent())
+		{
+			static const FGameplayTag DealtDamageTag = FGameplayTag::RequestGameplayTag(FName("GameplayEvent.Player.DealtDamage"));
+			FGameplayEventData EventData;
+			EventData.EventTag = DealtDamageTag;
+			EventData.Instigator = InstigatorPawn;
+			EventData.EventMagnitude = DamageDealt;
+			ASC->HandleGameplayEvent(DealtDamageTag, &EventData);
+		}
+	}
+
 	FDamageResult ApplyDamage(AActor* Target, float FinalDamage, AActor* Instigator, FGameplayTag DamageType)
 	{
 		// U18a forward-compat seam: DamageType (empty = Physical) is threaded to leaf appliers for D3 elemental; no behavior change in U18a.
@@ -80,10 +110,22 @@ namespace FPSRCombat
 
 		if (UFPSREnemyHealthComponent* HealthComp = Target->FindComponentByClass<UFPSREnemyHealthComponent>())
 		{
+			// Capture pre-state so kill/damage are TRANSITIONS, not post-facto reads: a corpse re-hit (already dead,
+			// ApplyDamage no-ops) and an overkill (damage clamped to remaining health) both report DamageDealt = 0
+			// and bKilled = false — so feedback (markers / lifesteal event) never fires on a corpse or rewards overkill.
+			const bool bWasDeadBefore = HealthComp->IsDead();
+			const float HealthBefore = HealthComp->GetHealth();
 			HealthComp->ApplyDamage(FinalDamage, Instigator, DamageType);
 			Result.bApplied = true;
 			Result.bWasEnemy = true;
-			Result.bKilled = HealthComp->IsDead();
+			Result.DamageDealt = FMath::Max(0.0f, HealthBefore - HealthComp->GetHealth());
+			Result.bKilled = (!bWasDeadBefore && HealthComp->IsDead());
+
+			// GAS-native character behavior (lifesteal etc.): event carries the REAL damage dealt (corpse/overkill = 0).
+			if (Result.DamageDealt > 0.0f)
+			{
+				SendDealtDamageEvent(Instigator, Result.DamageDealt);
+			}
 			return Result;
 		}
 
@@ -132,13 +174,14 @@ namespace FPSRCombat
 		}
 	}
 
-	void ApplyExplosion(UWorld* World, const FVector& Center, float Radius, float Damage,
+	FExplosionResult ApplyExplosion(UWorld* World, const FVector& Center, float Radius, float Damage,
 		float CritChance, float CritMultiplier, AActor* Instigator, bool bAllowSelf, float KnockbackStrength, FGameplayTag DamageType)
 	{
 		// U18a forward-compat seam: DamageType (empty = Physical) is threaded to leaf appliers for D3 elemental; no behavior change in U18a.
+		FExplosionResult Outcome;
 		if (!World || Radius <= 0.0f)
 		{
-			return;
+			return Outcome;
 		}
 
 		// Query pawns by OBJECT TYPE (both enemy and player channels), NOT a trace channel: a target that has set
@@ -182,11 +225,15 @@ namespace FPSRCombat
 				Result = ApplyDamage(Target, FinalDamage, Instigator, DamageType);
 			}
 
-			if (Result.bWasEnemy && Result.bApplied)
+			if (Result.bWasEnemy && Result.DamageDealt > 0.0f)
 			{
 				bAnyEnemyHit = true;
 				bAnyCrit |= bCrit;
 				bAnyKill |= Result.bKilled;
+			}
+			if (Result.bKilled)
+			{
+				Outcome.KilledEnemies.Add(Target); // freshly killed (alive->dead this blast) — drives the weapon OnKill bridge
 			}
 
 			// Knockback is INDEPENDENT of damage: it applies even at 0 damage (FF-off ally, self-no-damage), and is
@@ -213,6 +260,9 @@ namespace FPSRCombat
 		{
 			NotifyHitMarker(Instigator, bAnyCrit, bAnyKill); // one marker per explosion (strongest outcome)
 		}
+
+		Outcome.bAnyEnemyHit = bAnyEnemyHit;
+		return Outcome;
 	}
 
 	void AddWeakpointObjectType(FCollisionObjectQueryParams& OutParams)

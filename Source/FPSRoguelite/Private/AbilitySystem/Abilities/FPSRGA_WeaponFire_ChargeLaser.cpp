@@ -269,10 +269,11 @@ void UFPSRGA_WeaponFire_ChargeLaser::FireBeam(float BeamDamage, bool bIsPayoffSh
 			return;
 		}
 		const FPSRCombat::FDamageResult Result = FPSRCombat::ApplyDamage(HitActor, Resolved, Avatar);
-		if (Result.bWasEnemy && Result.bApplied)
+		if (Result.bWasEnemy && Result.DamageDealt > 0.0f)
 		{
 			bServerHit = true;
-			if (Result.bKilled) { bServerKill = true; }
+			// OnKill fires on the PAYOFF beam only — warm-up ticks skip every fragment hook (pure chip damage, §2-3-5).
+			if (Result.bKilled) { bServerKill = true; if (bIsPayoffShot) { FPSRWeaponHooks::NotifyKill(CachedFireCtx, HitActor); } }
 			else if (WeakpointMult > 1.0f) { bServerWeak = true; }
 			else if (bCrit) { bServerCrit = true; }
 		}
@@ -334,6 +335,14 @@ void UFPSRGA_WeaponFire_ChargeLaser::FireBeam(float BeamDamage, bool bIsPayoffSh
 				OwnerPC->ClientNotifyHitMarker(MarkerType);
 			}
 		}
+
+		// OnFire / OnMiss triggers (payoff only — warm-up ticks are silent; ServerOnly ability so authority is implicit).
+		FPSRWeaponHooks::NotifyFire(CachedFireCtx);
+		if (!bServerHit)
+		{
+			FPSRWeaponHooks::NotifyMiss(CachedFireCtx);
+		}
+
 		if (Fragments)
 		{
 			for (const TObjectPtr<UFPSRWeaponFragment>& Frag : *Fragments)

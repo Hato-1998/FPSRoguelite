@@ -5,6 +5,8 @@
 #include "CoreMinimal.h"
 #include "FPSRProjectileTypes.generated.h"
 
+class UFPSRWeaponInstance;
+
 UENUM(BlueprintType)
 enum class EFPSRProjectileTeam : uint8
 {
@@ -67,4 +69,20 @@ struct FPSROGUELITE_API FFPSRProjectileParams
 	/** The actor that fired this projectile (never damaged by its own projectile). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Projectile")
 	TObjectPtr<AActor> InstigatorActor = nullptr;
+
+	/** SERVER-ONLY back-reference to the weapon instance that fired this projectile, for the U18c behavior-trigger
+	 *  bridge (OnKill) at damage time. Weak so it auto-nulls if the player swaps/drops the weapon mid-flight — the
+	 *  hook then degrades gracefully (no fragments). NOT replicated: FFPSRProjectileParams is server-side state and
+	 *  is never registered in GetLifetimeReplicatedProps, so this handle never crosses the wire. If Params is ever
+	 *  made replicated, this field MUST be excluded. */
+	UPROPERTY(Transient)
+	TWeakObjectPtr<UFPSRWeaponInstance> WeaponInstance = nullptr;
+
+	/** SERVER-ONLY (U18c): true if this projectile was the ONLY one spawned by its activation. The OnMiss behavior
+	 *  hook is per-ACTIVATION on every other fire path, but projectiles release asynchronously and independently —
+	 *  so it only fires the miss hook for single-projectile activations (where per-projectile == per-activation:
+	 *  sniper/bazooka/grenade). A multishot projectile volley leaves this false and fires no per-projectile OnMiss,
+	 *  avoiding over-/partial-refunds (AmmoOnMiss + MultiShot on a projectile weapon is an unsupported rare combo). */
+	UPROPERTY(Transient)
+	bool bSingleProjectileActivation = true;
 };

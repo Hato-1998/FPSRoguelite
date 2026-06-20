@@ -3,6 +3,7 @@
 #include "Card/FPSRCardEffect.h"
 #include "Core/FPSRPlayerState.h"
 #include "AbilitySystem/FPSRAbilitySystemComponent.h"
+#include "AbilitySystem/Abilities/FPSRPassiveAbility.h"
 #include "Weapon/FPSRWeaponInventoryComponent.h"
 #include "Weapon/FPSRWeaponInstance.h"
 #include "Weapon/FPSRWeaponFragment.h"
@@ -226,6 +227,49 @@ void UCardEffect_GrantWeapon::ValidateEffect(FDataValidationContext& Context) co
 	if (!WeaponToGrant)
 	{
 		Context.AddError(LOCTEXT("GrantWeaponNoWeapon", "GrantWeapon effect has no WeaponToGrant set."));
+	}
+}
+#endif
+
+// ---------------------------------------------------------------------------------------------------------------
+// UCardEffect_CharacterPassive — grants a passive GameplayAbility to the player ASC (U18c).
+// ---------------------------------------------------------------------------------------------------------------
+void UCardEffect_CharacterPassive::Apply(const FFPSRCardEffectContext& Context, float /*Magnitude*/) const
+{
+	// Server-authoritative: grant the passive and record its handle on the PlayerState so the run-reset clears it
+	// (the ASC survives lobby<->run travel). Stacking is allowed — picking the same passive twice grants two specs
+	// (e.g. 2× lifesteal), matching how weapon fragments stack. (CanApply already gated ASC/PS validity.)
+	if (!PassiveAbility || !Context.ASC || !Context.PS)
+	{
+		return;
+	}
+	const FGameplayAbilitySpec Spec(PassiveAbility, 1, INDEX_NONE, nullptr);
+	const FGameplayAbilitySpecHandle Handle = Context.ASC->GiveAbility(Spec);
+
+	const UFPSRPassiveAbility* PassiveCDO = PassiveAbility.GetDefaultObject();
+	const bool bListens = PassiveCDO && PassiveCDO->RequiresDealtDamageEvent();
+	Context.PS->AddCardGrantedAbility(Handle, bListens);
+}
+
+FText UCardEffect_CharacterPassive::GetDescription(ECardRarity /*Rarity*/, float /*Magnitude*/) const
+{
+	// Passive GAs carry their own flavor; the card's DisplayName is the authored description. Keep this non-empty so
+	// the multi-effect aggregator never renders a blank line.
+	return LOCTEXT("CharacterPassiveDesc", "Passive ability");
+}
+
+bool UCardEffect_CharacterPassive::CanApply(const FFPSRCardEffectContext& Context) const
+{
+	// Complete precondition: the ASC (grant target) and PlayerState (handle bookkeeping) must resolve.
+	return PassiveAbility != nullptr && Context.ASC != nullptr && Context.PS != nullptr;
+}
+
+#if WITH_EDITOR
+void UCardEffect_CharacterPassive::ValidateEffect(FDataValidationContext& Context) const
+{
+	if (!PassiveAbility)
+	{
+		Context.AddError(LOCTEXT("PassiveNoAbility", "Character passive effect has no PassiveAbility set — it grants nothing."));
 	}
 }
 #endif

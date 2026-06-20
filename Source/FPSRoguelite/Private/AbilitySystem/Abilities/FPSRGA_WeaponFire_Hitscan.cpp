@@ -152,6 +152,12 @@ void UFPSRGA_WeaponFire_Hitscan::ActivateAbility(
 		}
 	}
 
+	// OnFire trigger (server): once per activation, right after the ammo commit (§2-3-5).
+	if (FireCtx.bAuthority)
+	{
+		FPSRWeaponHooks::NotifyFire(FireCtx);
+	}
+
 	// Crit/damage multipliers from the ASC are fetched once; crit is rolled per hit so each pellet / pierced
 	// enemy can crit independently.
 	float DamageMultiplier = 1.0f;
@@ -179,6 +185,9 @@ void UFPSRGA_WeaponFire_Hitscan::ActivateAbility(
 	bool bServerCrit = false;
 	bool bServerWeak = false;
 	bool bServerKill = false;
+	// True if a per-impact fragment (e.g. ExplosiveRounds splash) dealt real damage to an enemy — folded into the
+	// miss check so a connecting wall-splash doesn't count as a miss (would otherwise refund AmmoOnMiss on a hit).
+	bool bImpactHitEnemy = false;
 
 	// Damageable-pawn object query (enemies via ECC_Pawn + players via ECC_FPSRPlayerPawn), reused per pellet. An
 	// ECC_Pawn-only query would miss players (distinct object channel) — so friendly fire would never land. (§2-4)
@@ -219,10 +228,12 @@ void UFPSRGA_WeaponFire_Hitscan::ActivateAbility(
 			return false; // friendly pass-through (FF off): don't stop the bullet, don't spend penetration
 		}
 		const FPSRCombat::FDamageResult Result = FPSRCombat::ApplyDamage(HitActor, Resolved, Avatar);
-		if (Result.bWasEnemy && Result.bApplied)
+		// Markers / kill triggers key on DamageDealt (real health removed), so a corpse re-hit (DamageDealt 0) is inert;
+		// the bullet still spends penetration via bApplied below (geometry), it just produces no feedback or kill.
+		if (Result.bWasEnemy && Result.DamageDealt > 0.0f)
 		{
 			bServerHit = true;
-			if (Result.bKilled) { bServerKill = true; }
+			if (Result.bKilled) { bServerKill = true; FPSRWeaponHooks::NotifyKill(FireCtx, HitActor); }
 			else if (WeakpointMult > 1.0f) { bServerWeak = true; }
 			else if (bCrit) { bServerCrit = true; }
 		}
@@ -238,7 +249,12 @@ void UFPSRGA_WeaponFire_Hitscan::ActivateAbility(
 		}
 		for (const TObjectPtr<UFPSRWeaponFragment>& Frag : *Fragments)
 		{
-			if (Frag) { Frag->OnImpact(FireCtx, ImpactPoint, bAllowSelfOnImpact); }
+			if (Frag)
+			{
+				bool bFragHitEnemy = false;
+				Frag->OnImpact(FireCtx, ImpactPoint, bAllowSelfOnImpact, bFragHitEnemy);
+				bImpactHitEnemy |= bFragHitEnemy;
+			}
 		}
 	};
 
@@ -332,6 +348,13 @@ void UFPSRGA_WeaponFire_Hitscan::ActivateAbility(
 		{
 			if (Frag) { Frag->PostFire(FireCtx); }
 		}
+	}
+
+	// OnMiss trigger (server): this activation landed no real damage on any enemy — neither a direct hit (bServerHit)
+	// nor a per-impact fragment splash (bImpactHitEnemy, e.g. ExplosiveRounds) connected (§2-3-5).
+	if (FireCtx.bAuthority && !bServerHit && !bImpactHitEnemy)
+	{
+		FPSRWeaponHooks::NotifyMiss(FireCtx);
 	}
 
 	EndAbility(Handle, ActorInfo, ActivationInfo, true, false);
