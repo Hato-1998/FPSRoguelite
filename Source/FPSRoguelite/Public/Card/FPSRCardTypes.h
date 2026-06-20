@@ -8,16 +8,6 @@
 class UFPSRCardDataAsset;
 class UFPSRWeaponDataAsset;
 
-/** v1 card scope. DEPRECATED by ECardGroup + per-effect bThisWeaponOnly (U18a, §2-3-2). Retained only so the
- *  legacy UFPSRCardDataAsset fields + PostLoad migration can still read pre-v2 assets. Removed in a follow-up commit. */
-UENUM(BlueprintType)
-enum class ECardScope : uint8
-{
-	Character   UMETA(DisplayName = "Character"),
-	ThisWeapon  UMETA(DisplayName = "This Weapon"),
-	AllWeapons  UMETA(DisplayName = "All Weapons")
-};
-
 /** v2 card group (§2-3-2): the draw pool / trigger / UI filter a card belongs to. Orthogonal to per-effect
  *  application scope (UCardEffect_WeaponStat::bThisWeaponOnly). Character = character + all-weapons effects
  *  (no target weapon). Weapon = this-weapon stat / behavior cards (TargetWeapon set). WeaponUnlock = reserved (U18b). */

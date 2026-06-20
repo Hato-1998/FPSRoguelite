@@ -11,7 +11,6 @@
 void UFPSRCardDataAsset::PostLoad()
 {
 	Super::PostLoad();
-	MigrateFromLegacy();
 	RefreshOfferRarities();
 }
 
@@ -20,76 +19,6 @@ void UFPSRCardDataAsset::PostEditChangeProperty(FPropertyChangedEvent& PropertyC
 	Super::PostEditChangeProperty(PropertyChangedEvent);
 	// Keep OfferRarities in sync as the designer edits Effects' RarityTiers.
 	RefreshOfferRarities();
-}
-
-void UFPSRCardDataAsset::MigrateFromLegacy()
-{
-	// Idempotent: only v1 cards (no v2 effects yet) migrate. Re-saved v2 assets skip this on every subsequent load.
-	if (Effects.Num() > 0)
-	{
-		return;
-	}
-
-	UFPSRCardEffect* NewEffect = nullptr;
-	switch (Scope)
-	{
-	case ECardScope::Character:
-	{
-		UCardEffect_CharacterGE* E = NewObject<UCardEffect_CharacterGE>(this);
-		E->Effect = AppliedEffect;
-		Group = ECardGroup::Character;
-		NewEffect = E;
-		break;
-	}
-	case ECardScope::AllWeapons:
-	{
-		// All-weapons stat -> a Weapon-stat effect that targets every weapon. Stays in the CHARACTER group/pool
-		// (no source weapon, applies to the PlayerState) — preserving v1 central-pool membership & null TargetWeapon.
-		UCardEffect_WeaponStat* E = NewObject<UCardEffect_WeaponStat>(this);
-		E->Stat = WeaponStat;
-		E->Op = WeaponStatOp;
-		E->bThisWeaponOnly = false;
-		Group = ECardGroup::Character;
-		NewEffect = E;
-		break;
-	}
-	case ECardScope::ThisWeapon:
-	{
-		if (GrantedFragment)
-		{
-			UCardEffect_WeaponBehavior* E = NewObject<UCardEffect_WeaponBehavior>(this);
-			E->Fragment = GrantedFragment;
-			NewEffect = E;
-		}
-		else
-		{
-			UCardEffect_WeaponStat* E = NewObject<UCardEffect_WeaponStat>(this);
-			E->Stat = WeaponStat;
-			E->Op = WeaponStatOp;
-			E->bThisWeaponOnly = true;
-			NewEffect = E;
-		}
-		Group = ECardGroup::Weapon;
-		break;
-	}
-	default:
-		break;
-	}
-
-	if (!NewEffect)
-	{
-		return;
-	}
-
-	// Copy the legacy per-rarity magnitudes onto the effect BEFORE clearing the card-level legacy data.
-	NewEffect->RarityTiers = RarityTiers;
-	Effects.Add(NewEffect);
-
-	// Clear the migrated legacy fields so the re-saved asset carries no stale v1 data (effect now owns it). The
-	// field declarations are removed in a follow-up commit after every asset is re-saved.
-	RarityTiers.Reset();
-	AppliedEffect = nullptr;
-	GrantedFragment = nullptr;
 }
 
 void UFPSRCardDataAsset::RefreshOfferRarities()
