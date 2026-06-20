@@ -45,6 +45,15 @@ namespace FPSRCombat
 	 *  per-explosion path; >8 kills falls back to one allocation (rare). Consumed by the weapon OnKill bridge. */
 	using FKilledEnemies = TArray<AActor*, TInlineAllocator<8>>;
 
+	/** Outcome of an ApplyExplosion call for the weapon behavior hooks: which enemies it freshly killed (OnKill) and
+	 *  whether it dealt real damage to ANY enemy (so a splash that connects doesn't count the activation as a miss —
+	 *  e.g. ExplosiveRounds + AmmoOnMiss on the same weapon must not refund ammo on a successful wall-splash hit). */
+	struct FExplosionResult
+	{
+		FKilledEnemies KilledEnemies;
+		bool bAnyEnemyHit = false;
+	};
+
 	/** One actor's collapsed contribution from a multi-hit trace: the NEAREST hit's distance/impact (for wall
 	 *  cutoff + penetration ordering) plus the HIGHEST weakpoint multiplier among that actor's hits. */
 	struct FResolvedHit
@@ -89,7 +98,7 @@ namespace FPSRCombat
 	 *  Knockback (KnockbackStrength > 0): a radial impulse pushing every survivor outward from Center, magnitude
 	 *  falling off linearly to the rim. Applied EVEN when damage is 0 (FF-off friendly / self-no-damage) — only the
 	 *  freshly killed are excluded. Player knockback launches the character (rocket jump / ally launch). */
-	FPSROGUELITE_API FKilledEnemies ApplyExplosion(UWorld* World, const FVector& Center, float Radius, float Damage,
+	FPSROGUELITE_API FExplosionResult ApplyExplosion(UWorld* World, const FVector& Center, float Radius, float Damage,
 		float CritChance, float CritMultiplier, AActor* Instigator, bool bAllowSelf, float KnockbackStrength, FGameplayTag DamageType = FGameplayTag());
 
 	/** Dispatch a knockback velocity to Target: players -> additive LaunchCharacter (preserves jump for rocket

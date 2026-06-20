@@ -283,17 +283,17 @@ void AFPSRProjectile::HandleImpact(const FVector& ImpactPoint)
 				// Unified player explosion: enemy/self/friendly damage resolution + radial knockback + a single
 				// hit-marker, all server-authoritative. bAllowSelf is the baked self-damage flag (NoSelfDamage card
 				// clears it); knockback is independent of damage (still launches at 0 damage, excludes the killed).
-				const FPSRCombat::FKilledEnemies Killed = FPSRCombat::ApplyExplosion(
+				const FPSRCombat::FExplosionResult Outcome = FPSRCombat::ApplyExplosion(
 					World, ImpactPoint, Params.ExplosionRadius, Params.Damage,
 					Params.CritChance, Params.CritMultiplier, Params.InstigatorActor,
 					/*bAllowSelf*/ Params.bSelfDamage, Params.KnockbackStrength);
 
 				// OnKill trigger (server): fire once per enemy this blast freshly killed (bazooka reload-on-kill etc.).
 				// Rebuild the FireContext from spawn params; the weak weapon ref no-ops the bridge if the weapon is gone.
-				if (Killed.Num() > 0)
+				if (Outcome.KilledEnemies.Num() > 0)
 				{
 					const FFPSRFireContext KillCtx = MakeProjectileFireContext(Params, World);
-					for (AActor* KilledActor : Killed)
+					for (AActor* KilledActor : Outcome.KilledEnemies)
 					{
 						FPSRWeaponHooks::NotifyKill(KillCtx, KilledActor);
 					}

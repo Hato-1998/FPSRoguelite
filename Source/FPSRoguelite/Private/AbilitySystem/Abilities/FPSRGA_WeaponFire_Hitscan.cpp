@@ -185,6 +185,9 @@ void UFPSRGA_WeaponFire_Hitscan::ActivateAbility(
 	bool bServerCrit = false;
 	bool bServerWeak = false;
 	bool bServerKill = false;
+	// True if a per-impact fragment (e.g. ExplosiveRounds splash) dealt real damage to an enemy — folded into the
+	// miss check so a connecting wall-splash doesn't count as a miss (would otherwise refund AmmoOnMiss on a hit).
+	bool bImpactHitEnemy = false;
 
 	// Damageable-pawn object query (enemies via ECC_Pawn + players via ECC_FPSRPlayerPawn), reused per pellet. An
 	// ECC_Pawn-only query would miss players (distinct object channel) — so friendly fire would never land. (§2-4)
@@ -246,7 +249,12 @@ void UFPSRGA_WeaponFire_Hitscan::ActivateAbility(
 		}
 		for (const TObjectPtr<UFPSRWeaponFragment>& Frag : *Fragments)
 		{
-			if (Frag) { Frag->OnImpact(FireCtx, ImpactPoint, bAllowSelfOnImpact); }
+			if (Frag)
+			{
+				bool bFragHitEnemy = false;
+				Frag->OnImpact(FireCtx, ImpactPoint, bAllowSelfOnImpact, bFragHitEnemy);
+				bImpactHitEnemy |= bFragHitEnemy;
+			}
 		}
 	};
 
@@ -342,8 +350,9 @@ void UFPSRGA_WeaponFire_Hitscan::ActivateAbility(
 		}
 	}
 
-	// OnMiss trigger (server): this activation landed no real damage on any enemy (§2-3-5).
-	if (FireCtx.bAuthority && !bServerHit)
+	// OnMiss trigger (server): this activation landed no real damage on any enemy — neither a direct hit (bServerHit)
+	// nor a per-impact fragment splash (bImpactHitEnemy, e.g. ExplosiveRounds) connected (§2-3-5).
+	if (FireCtx.bAuthority && !bServerHit && !bImpactHitEnemy)
 	{
 		FPSRWeaponHooks::NotifyMiss(FireCtx);
 	}

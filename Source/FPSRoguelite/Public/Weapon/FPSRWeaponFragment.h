@@ -75,10 +75,12 @@ public:
 	/** Charge-time hook (ChargeLaser): adjust the seconds-to-full-charge before the charge alpha is computed. */
 	virtual void ModifyChargeTime(const FFPSRFireContext& Context, float& ChargeTimeInOut) const {}
 
-	/** Hitscan impact hook (server-only): called at each terminal impact point of a hitscan pellet so a fragment
-	 *  can spawn an effect at the hit — e.g. ExplosiveRounds turns a rifle hit into a small AOE. bAllowSelf passes
-	 *  through the NoSelfDamage suppression so a spawned explosion respects it. */
-	virtual void OnImpact(const FFPSRFireContext& Context, const FVector& ImpactPoint, bool bAllowSelf) const {}
+	/** Hitscan impact hook (server-only): called at each terminal impact point of a hitscan pellet so a fragment can
+	 *  spawn an effect at the hit — e.g. ExplosiveRounds turns a rifle hit into a small AOE. bAllowSelf passes through
+	 *  the NoSelfDamage suppression so a spawned explosion respects it. bOutHitEnemy: set true if this hook dealt real
+	 *  damage to an enemy (e.g. a splash that connected) so the activation isn't counted as a miss — the caller OR-s
+	 *  it across fragments before deciding OnMiss. */
+	virtual void OnImpact(const FFPSRFireContext& Context, const FVector& ImpactPoint, bool bAllowSelf, bool& bOutHitEnemy) const {}
 
 	/** Behavior-trigger hooks (U18c, §2-3-5). Fired by the shared FPSRWeaponHooks bridge from all 5 damage paths so
 	 *  a fragment reacts to firing outcomes uniformly. All state-mutating overrides MUST gate on Context.bAuthority
@@ -179,7 +181,7 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Fragment", meta = (ClampMin = "0"))
 	float KnockbackStrength = 0.0f;
 
-	virtual void OnImpact(const FFPSRFireContext& Context, const FVector& ImpactPoint, bool bAllowSelf) const override;
+	virtual void OnImpact(const FFPSRFireContext& Context, const FVector& ImpactPoint, bool bAllowSelf, bool& bOutHitEnemy) const override;
 };
 
 /** Feature B (U18c): refill magazine rounds whenever an activation lands NO damage on any enemy — "suppressive

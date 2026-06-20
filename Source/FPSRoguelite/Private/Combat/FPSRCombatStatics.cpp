@@ -174,14 +174,14 @@ namespace FPSRCombat
 		}
 	}
 
-	FKilledEnemies ApplyExplosion(UWorld* World, const FVector& Center, float Radius, float Damage,
+	FExplosionResult ApplyExplosion(UWorld* World, const FVector& Center, float Radius, float Damage,
 		float CritChance, float CritMultiplier, AActor* Instigator, bool bAllowSelf, float KnockbackStrength, FGameplayTag DamageType)
 	{
 		// U18a forward-compat seam: DamageType (empty = Physical) is threaded to leaf appliers for D3 elemental; no behavior change in U18a.
-		FKilledEnemies KilledEnemies;
+		FExplosionResult Outcome;
 		if (!World || Radius <= 0.0f)
 		{
-			return KilledEnemies;
+			return Outcome;
 		}
 
 		// Query pawns by OBJECT TYPE (both enemy and player channels), NOT a trace channel: a target that has set
@@ -233,7 +233,7 @@ namespace FPSRCombat
 			}
 			if (Result.bKilled)
 			{
-				KilledEnemies.Add(Target); // freshly killed (alive->dead this blast) — drives the weapon OnKill bridge
+				Outcome.KilledEnemies.Add(Target); // freshly killed (alive->dead this blast) — drives the weapon OnKill bridge
 			}
 
 			// Knockback is INDEPENDENT of damage: it applies even at 0 damage (FF-off ally, self-no-damage), and is
@@ -261,7 +261,8 @@ namespace FPSRCombat
 			NotifyHitMarker(Instigator, bAnyCrit, bAnyKill); // one marker per explosion (strongest outcome)
 		}
 
-		return KilledEnemies;
+		Outcome.bAnyEnemyHit = bAnyEnemyHit;
+		return Outcome;
 	}
 
 	void AddWeakpointObjectType(FCollisionObjectQueryParams& OutParams)

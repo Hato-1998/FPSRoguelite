@@ -45,7 +45,7 @@ namespace FPSRWeaponHooks
 	}
 }
 
-void UFPSRFragment_ExplosiveRounds::OnImpact(const FFPSRFireContext& Context, const FVector& ImpactPoint, bool bAllowSelf) const
+void UFPSRFragment_ExplosiveRounds::OnImpact(const FFPSRFireContext& Context, const FVector& ImpactPoint, bool bAllowSelf, bool& bOutHitEnemy) const
 {
 	// Server-authoritative: spawn a small radial explosion at the bullet's impact. No crit on the splash (the
 	// pellet already rolled its own crit); self/friendly damage and knockback follow the shared explosion rules.
@@ -54,12 +54,16 @@ void UFPSRFragment_ExplosiveRounds::OnImpact(const FFPSRFireContext& Context, co
 		return;
 	}
 
-	const FPSRCombat::FKilledEnemies Killed = FPSRCombat::ApplyExplosion(Context.World, ImpactPoint, AOERadius, AOEDamage,
+	const FPSRCombat::FExplosionResult Outcome = FPSRCombat::ApplyExplosion(Context.World, ImpactPoint, AOERadius, AOEDamage,
 		/*CritChance*/ 0.0f, /*CritMultiplier*/ 1.0f, Context.Avatar, bAllowSelf, KnockbackStrength);
+
+	// Report a connecting splash so the firing ability doesn't count this activation as a miss (the ExplosiveRounds +
+	// AmmoOnMiss combo must not refund ammo when the wall-splash actually hit an enemy).
+	bOutHitEnemy = Outcome.bAnyEnemyHit;
 
 	// A splash kill (e.g. rifle + ExplosiveRounds) fires OnKill too — Context here is the live firing context, so the
 	// bridge reaches this weapon's fragments directly (e.g. a reload-on-kill fragment on the same weapon).
-	for (AActor* KilledActor : Killed)
+	for (AActor* KilledActor : Outcome.KilledEnemies)
 	{
 		FPSRWeaponHooks::NotifyKill(Context, KilledActor);
 	}
