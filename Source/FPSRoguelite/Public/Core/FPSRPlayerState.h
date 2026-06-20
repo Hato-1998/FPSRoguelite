@@ -4,6 +4,7 @@
 
 #include "GameFramework/PlayerState.h"
 #include "AbilitySystemInterface.h"
+#include "Abilities/GameplayAbilityTypes.h"
 #include "Weapon/FPSRWeaponTypes.h"
 #include "FPSRPlayerState.generated.h"
 
@@ -114,9 +115,19 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "FPSR|Lobby")
 	FOnReadyChanged OnReadyChanged;
 
+	/** Server: track a passive ability granted by a character-passive card (U18c), so the run-reset can clear it.
+	 *  bIsDamageEventListener bumps the DealtDamage listener count (drives the cheap ApplyDamage event-send gate so
+	 *  players without such a passive pay nothing on the hot damage path). Idempotent per handle is the caller's job. */
+	void AddCardGrantedAbility(FGameplayAbilitySpecHandle Handle, bool bIsDamageEventListener);
+
+	/** Server: true if any granted passive listens for GameplayEvent.Player.DealtDamage (lifesteal etc.). Gates the
+	 *  per-hit event send in FPSRCombat::ApplyDamage — 0-cost for players who never picked such a card. */
+	bool HasDamageEventListeners() const { return DamageEventListenerCount > 0; }
+
 	/** Server: reset all per-run progression to a fresh-run baseline (called on lobby entry, P7 §3-6). Clears
-	 *  life state, pending picks, AllWeapons modifiers and the loadout pick. XP/PartyLevel reset naturally via the
-	 *  fresh GameState on each map; weapon inventory resets via pawn respawn. Run on the server (authority). */
+	 *  life state, pending picks, AllWeapons modifiers, the loadout pick, and card-granted passive abilities. XP/
+	 *  PartyLevel reset naturally via the fresh GameState on each map; weapon inventory resets via pawn respawn.
+	 *  Run on the server (authority). */
 	void ResetRunState();
 
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
@@ -188,4 +199,13 @@ private:
 	/** Lobby ready flag (U11a). Replicated to all so every client's lobby list/podium shows each player's state. */
 	UPROPERTY(ReplicatedUsing = OnRep_Ready)
 	bool bReady = false;
+
+	/** Server-only: passive ability specs granted by character-passive cards this run (U18c). Not replicated —
+	 *  ability specs are server ASC state. Cleared (ClearAbility) on ResetRunState so they never leak to the next run
+	 *  (the ASC survives lobby<->run seamless travel, like the run GEs cleared alongside). */
+	TArray<FGameplayAbilitySpecHandle> CardGrantedAbilityHandles;
+
+	/** Server-only: how many granted passives listen for the DealtDamage event (lifesteal). Gates the hot-path event
+	 *  send. Reset to 0 on ResetRunState. */
+	int32 DamageEventListenerCount = 0;
 };

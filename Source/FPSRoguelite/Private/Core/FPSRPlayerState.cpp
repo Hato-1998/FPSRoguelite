@@ -310,10 +310,32 @@ void AFPSRPlayerState::ResetRunState()
 	// fire abilities are re-granted per equip by the inventory, so ability specs are intentionally left alone.)
 	if (AbilitySystemComponent)
 	{
+		// Clear card-granted passive abilities first (U18c) — they live on the persistent ASC and would otherwise
+		// carry into the next run. ClearAbility ends any active instance (the passive's OnRemoveAbility cleanup runs).
+		for (const FGameplayAbilitySpecHandle& Handle : CardGrantedAbilityHandles)
+		{
+			AbilitySystemComponent->ClearAbility(Handle);
+		}
+		CardGrantedAbilityHandles.Empty();
+		DamageEventListenerCount = 0;
+
 		AbilitySystemComponent->RemoveActiveEffects(FGameplayEffectQuery());
 		AbilitySystemComponent->SetNumericAttributeBase(
 			UFPSRHealthSet::GetHealthAttribute(),
 			AbilitySystemComponent->GetNumericAttribute(UFPSRHealthSet::GetMaxHealthAttribute()));
+	}
+}
+
+void AFPSRPlayerState::AddCardGrantedAbility(FGameplayAbilitySpecHandle Handle, bool bIsDamageEventListener)
+{
+	if (!HasAuthority() || !Handle.IsValid())
+	{
+		return;
+	}
+	CardGrantedAbilityHandles.Add(Handle);
+	if (bIsDamageEventListener)
+	{
+		++DamageEventListenerCount;
 	}
 }
 

@@ -8,6 +8,9 @@
 #include "Hero/FPSRCharacter.h"
 #include "Core/FPSRGameState.h"
 #include "Core/FPSRPlayerController.h"
+#include "Core/FPSRPlayerState.h"
+#include "AbilitySystem/FPSRAbilitySystemComponent.h"
+#include "AbilitySystemComponent.h"
 
 #include "GameFramework/Pawn.h"
 #include "GameFramework/Controller.h"
@@ -69,6 +72,33 @@ namespace FPSRCombat
 		return 0.0f;
 	}
 
+	/** GAS-native character behavior bridge (U18c §2-3-5): tell the instigating player's ASC how much real damage it
+	 *  just dealt, so a lifesteal/regen-style passive GA can react. Gated on a cheap per-player listener count, so a
+	 *  player who never picked such a card pays ~nothing on this hot path (the cost scales with that player's
+	 *  triggered-ability count, never with enemy count). Server-only (every ApplyDamage caller is authority-gated). */
+	static void SendDealtDamageEvent(AActor* Instigator, float DamageDealt)
+	{
+		APawn* InstigatorPawn = Cast<APawn>(Instigator);
+		if (!InstigatorPawn)
+		{
+			return;
+		}
+		const AFPSRPlayerState* PS = InstigatorPawn->GetPlayerState<AFPSRPlayerState>();
+		if (!PS || !PS->HasDamageEventListeners())
+		{
+			return;
+		}
+		if (UAbilitySystemComponent* ASC = PS->GetFPSRAbilitySystemComponent())
+		{
+			static const FGameplayTag DealtDamageTag = FGameplayTag::RequestGameplayTag(FName("GameplayEvent.Player.DealtDamage"));
+			FGameplayEventData EventData;
+			EventData.EventTag = DealtDamageTag;
+			EventData.Instigator = InstigatorPawn;
+			EventData.EventMagnitude = DamageDealt;
+			ASC->HandleGameplayEvent(DealtDamageTag, &EventData);
+		}
+	}
+
 	FDamageResult ApplyDamage(AActor* Target, float FinalDamage, AActor* Instigator, FGameplayTag DamageType)
 	{
 		// U18a forward-compat seam: DamageType (empty = Physical) is threaded to leaf appliers for D3 elemental; no behavior change in U18a.
@@ -90,6 +120,12 @@ namespace FPSRCombat
 			Result.bWasEnemy = true;
 			Result.DamageDealt = FMath::Max(0.0f, HealthBefore - HealthComp->GetHealth());
 			Result.bKilled = (!bWasDeadBefore && HealthComp->IsDead());
+
+			// GAS-native character behavior (lifesteal etc.): event carries the REAL damage dealt (corpse/overkill = 0).
+			if (Result.DamageDealt > 0.0f)
+			{
+				SendDealtDamageEvent(Instigator, Result.DamageDealt);
+			}
 			return Result;
 		}
 
