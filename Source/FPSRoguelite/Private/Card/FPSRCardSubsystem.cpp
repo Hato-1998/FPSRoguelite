@@ -130,7 +130,8 @@ TArray<FFPSRCardDraw> UFPSRCardSubsystem::DrawCards(AController* ForPlayer, int3
 		}
 		// Behavior-fragment cards now join the level-up draw (U18b routing). Stack gate: a fragment already maxed on its
 		// target weapon is no longer offered (ported from the old mission path). SourceWeapon picks the target instance.
-		if (UFPSRWeaponFragment* BehFrag = GetCardBehaviorFragment(Card))
+		UFPSRWeaponFragment* BehFrag = GetCardBehaviorFragment(Card);
+		if (BehFrag)
 		{
 			UFPSRWeaponInstance* Inst = (Inv && SourceWeapon) ? Inv->GetInstanceForWeapon(SourceWeapon)
 			                                                  : (Inv ? Inv->GetCurrentInstance() : nullptr);
@@ -146,7 +147,26 @@ TArray<FFPSRCardDraw> UFPSRCardSubsystem::DrawCards(AController* ForPlayer, int3
 		}
 		if (Card->OfferRarities.Num() == 0)
 		{
-			UE_LOG(LogFPSR, Warning, TEXT("[Card] '%s' has no OfferRarities — skipped (give an effect at least one RarityTier)."), *Card->GetName());
+			// Behavior-fragment cards carry no numeric tiers, so OfferRarities is empty — build a single Common offer
+			// (BuildSingleDraw parity) so a fragment re-routed to the level-up pool (U18b) still appears. A non-behavior
+			// card with no tiers is genuinely misconfigured and is skipped with a warning.
+			if (BehFrag)
+			{
+				const float Weight = GetEffectiveWeight(Card, ECardRarity::Common, Luck);
+				if (Weight > 0.0f)
+				{
+					FFPSRCardDraw Offer;
+					Offer.Card = Card;
+					Offer.Rarity = ECardRarity::Common;
+					Offer.TargetWeapon = SourceWeapon;
+					Candidates.Add(Offer);
+					CandidateWeights.Add(Weight);
+				}
+			}
+			else
+			{
+				UE_LOG(LogFPSR, Warning, TEXT("[Card] '%s' has no OfferRarities — skipped (give an effect at least one RarityTier)."), *Card->GetName());
+			}
 			continue;
 		}
 		for (const ECardRarity Rarity : Card->OfferRarities)
