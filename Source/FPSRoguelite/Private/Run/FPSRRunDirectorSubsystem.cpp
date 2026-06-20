@@ -10,6 +10,9 @@
 #include "Core/FPSRGameState.h"
 #include "Core/FPSRPlayerController.h"
 #include "Enemy/FPSREnemySpawnSubsystem.h"
+#include "Boss/FPSRBossBase.h"
+#include "Boss/FPSRBossSpawnPoint.h"
+#include "Boss/FPSRBossDefinitionDataAsset.h"
 #include "Core/FPSRLogChannels.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
@@ -350,10 +353,112 @@ void UFPSRRunDirectorSubsystem::EnterBoss()
 	if (UFPSREnemySpawnSubsystem* SpawnSub = GetSpawnSub())
 	{
 		SpawnSub->SetTargetAliveCount(0);
-		SpawnSub->ReleaseAllEnemies(); // clear the swarm for the boss arena (boss-specific spawns are P6)
+		SpawnSub->ReleaseAllEnemies(); // clear the swarm for the boss arena
 	}
 
-	UE_LOG(LogFPSR, Log, TEXT("[Run] Boss gate reached at t=%.0fs (boss actor is a P6 stub) — timeline halted"), RunClock);
+	// Spawn the boss: defeating it ends the run in Victory (boss OnDeath -> GameMode::NotifyBossDefeated, U3).
+	SpawnBoss();
+}
+
+void UFPSRRunDirectorSubsystem::SpawnBoss()
+{
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
+	const UFPSRBossDefinitionDataAsset* Def = ActiveSchedule ? ActiveSchedule->BossDefinition : nullptr;
+
+	// Designer-assigned boss class, or the C++ AFPSRBossBase placeholder so the victory loop is testable before
+	// any boss BP/definition exists (mirrors the enemy-class fallback in the spawn subsystem).
+	UClass* BossClassToSpawn = (Def && Def->BossClass) ? Def->BossClass.Get() : AFPSRBossBase::StaticClass();
+
+	// Honor the definition's spawn-mode (default true for the C++ fallback boss / no definition).
+	const bool bUseSpawnPoint = Def ? Def->bUseBossSpawnPoint : true;
+	const FTransform SpawnXform = SelectBossSpawnTransform(bUseSpawnPoint);
+
+	FActorSpawnParameters SpawnParams;
+	SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	ActiveBoss = World->SpawnActor<AFPSRBossBase>(BossClassToSpawn, SpawnXform.GetLocation(), SpawnXform.Rotator(), SpawnParams);
+	if (!ActiveBoss)
+	{
+		UE_LOG(LogFPSR, Warning, TEXT("[Run] Boss gate reached but boss spawn failed (class %s)"), *BossClassToSpawn->GetName());
+		return;
+	}
+
+	// Apply the definition's tuning (health override) to the spawned instance.
+	if (Def)
+	{
+		ActiveBoss->InitializeFromDefinition(Def);
+	}
+
+	UE_LOG(LogFPSR, Log, TEXT("[Run] Boss spawned: %s at %s (t=%.0fs)"), *ActiveBoss->GetName(),
+		*SpawnXform.GetLocation().ToCompactString(), RunClock);
+}
+
+FTransform UFPSRRunDirectorSubsystem::SelectBossSpawnTransform(bool bUseSpawnPoint) const
+{
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return FTransform::Identity;
+	}
+
+	// Spawn points only when the definition opts in. Weighted-random among enabled, designer-placed boss spawn
+	// points (a boss usually has one; several allow variety). bUseBossSpawnPoint=false skips straight to the fallback.
+	if (bUseSpawnPoint)
+	{
+		struct FBossCandidate { AFPSRBossSpawnPoint* Point; float Weight; };
+		TArray<FBossCandidate> Candidates;
+		float TotalWeight = 0.0f;
+		for (TActorIterator<AFPSRBossSpawnPoint> It(World); It; ++It)
+		{
+			AFPSRBossSpawnPoint* Point = *It;
+			if (Point && Point->IsEnabled() && Point->GetWeight() > 0.0f)
+			{
+				Candidates.Add({ Point, Point->GetWeight() });
+				TotalWeight += Point->GetWeight();
+			}
+		}
+
+		if (Candidates.Num() > 0 && TotalWeight > 0.0f)
+		{
+			const float Pick = FMath::FRandRange(0.0f, TotalWeight);
+			float Cumulative = 0.0f;
+			for (const FBossCandidate& C : Candidates)
+			{
+				Cumulative += C.Weight;
+				if (Pick <= Cumulative)
+				{
+					return C.Point->GetActorTransform();
+				}
+			}
+			return Candidates.Last().Point->GetActorTransform();
+		}
+
+		// Opted into spawn points but none placed — warn so the designer adds an AFPSRBossSpawnPoint, then fall back.
+		UE_LOG(LogFPSR, Warning, TEXT("[Run] No AFPSRBossSpawnPoint placed — spawning boss at a player fallback. Place a boss spawn point for content."));
+	}
+
+	// Fallback: in front of the first player so the boss is visible (definition opted out, or no point placed).
+	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+	{
+		if (const APlayerController* PC = It->Get())
+		{
+			if (const APawn* PlayerPawn = PC->GetPawn())
+			{
+				// 800cm ahead, lifted ~one boss half-height so the placeholder isn't half-buried (gravity is off on
+				// the scaffold boss). Rough on purpose — this is the no-spawn-point fallback, not authored placement.
+				const FVector Loc = PlayerPawn->GetActorLocation()
+					+ PlayerPawn->GetActorForwardVector() * 800.0f
+					+ FVector(0.0f, 0.0f, 200.0f);
+				return FTransform(FRotator::ZeroRotator, Loc);
+			}
+		}
+	}
+
+	return FTransform::Identity;
 }
 
 FTransform UFPSRRunDirectorSubsystem::SelectMissionSpawnTransform(const UFPSRMissionDataAsset* Mission) const

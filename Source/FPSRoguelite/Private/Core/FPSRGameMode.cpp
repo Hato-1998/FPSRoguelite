@@ -202,6 +202,15 @@ void AFPSRGameMode::NotifyPlayerDefeated()
 	}
 }
 
+void AFPSRGameMode::NotifyBossDefeated()
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+	EndRun(EFPSRRunOutcome::Victory);
+}
+
 #if !UE_BUILD_SHIPPING
 
 namespace

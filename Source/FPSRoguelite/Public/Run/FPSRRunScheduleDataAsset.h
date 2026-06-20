@@ -6,6 +6,7 @@
 #include "FPSRRunScheduleDataAsset.generated.h"
 
 class UFPSRMissionDataAsset;
+class UFPSRBossDefinitionDataAsset;
 
 /** One scheduled mission window: at a random time within [MinTime, MaxTime] (rolled once at run start), one
  *  mission is chosen uniformly at random from MissionPool and spawned (Game.MD §2-8). */
@@ -45,6 +46,11 @@ public:
 	/** Run-clock time (seconds) at which the boss appears (Combat -> Boss; after this no missions / no timer). */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Run")
 	float BossTime = 300.0f;
+
+	/** Boss to spawn at BossTime (which class + tuning). Null = the director spawns the C++ AFPSRBossBase
+	 *  placeholder (so the victory loop is testable before boss content exists). Game.MD §2-7/§2-8. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Run")
+	TObjectPtr<UFPSRBossDefinitionDataAsset> BossDefinition;
 
 	/** Target alive enemy count at run start (the spawn director's base intensity). */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Run")

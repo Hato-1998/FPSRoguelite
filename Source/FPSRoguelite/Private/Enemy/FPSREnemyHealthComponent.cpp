@@ -65,6 +65,24 @@ void UFPSREnemyHealthComponent::ResetForReuse()
 	MARK_PROPERTY_DIRTY_FROM_NAME(UFPSREnemyHealthComponent, bDead, this);
 }
 
+void UFPSREnemyHealthComponent::InitializeMaxHealth(float NewMaxHealth)
+{
+	if (!GetOwner() || !GetOwner()->HasAuthority() || NewMaxHealth <= 0.0f)
+	{
+		return;
+	}
+
+	// MaxHealth is server-side only (clamp reference); Health/bDead replicate. A runtime-set MaxHealth is therefore
+	// not visible to clients — fine for the scaffold (no client health bar). A boss health bar (U4/U12) that needs
+	// X/Max on clients would replicate MaxHealth then.
+	MaxHealth = NewMaxHealth;
+	Health = NewMaxHealth;
+	MARK_PROPERTY_DIRTY_FROM_NAME(UFPSREnemyHealthComponent, Health, this);
+
+	bDead = false;
+	MARK_PROPERTY_DIRTY_FROM_NAME(UFPSREnemyHealthComponent, bDead, this);
+}
+
 void UFPSREnemyHealthComponent::OnRep_Health()
 {
 	// Client cosmetic hook (health bar / hit flash later).

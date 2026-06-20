@@ -39,6 +39,11 @@ public:
 	/** Server: called when a player dies. Ends the run in Defeat if the whole party is now wiped. */
 	void NotifyPlayerDefeated();
 
+	/** Server: called when the boss dies (the victory caller, U3). Ends the run in Victory — closing the loop the
+	 *  same way as defeat (EndRun -> EndRunFreeze -> OnRunEnded -> lobby travel). EndRun's bRunEnded latch guards a
+	 *  same-frame victory/defeat race. Mirrors NotifyPlayerDefeated; does NOT touch EndRun's body (U11a owns it). */
+	void NotifyBossDefeated();
+
 	/** Server: travel back to the lobby hub immediately (result-screen Return click). Cancels the pending
 	 *  post-run auto-travel timer so the two paths can't double-fire, then reuses the same TravelToLobby. */
 	void RequestReturnToLobby();
