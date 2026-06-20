@@ -47,9 +47,10 @@ private:
 	/** Spawn the boss (BossDefinition->BossClass, or the C++ AFPSRBossBase fallback) at a boss spawn point and
 	 *  apply its definition. Called by EnterBoss after the swarm is cleared. */
 	void SpawnBoss();
-	/** Pick where the boss spawns: weighted-random among enabled AFPSRBossSpawnPoint actors, falling back to a
-	 *  player location + forward offset (with a warning) when none are placed — so the boss always appears. */
-	FTransform SelectBossSpawnTransform() const;
+	/** Pick where the boss spawns. When bUseSpawnPoint, weighted-random among enabled AFPSRBossSpawnPoint actors
+	 *  (falling back to a player location + forward offset, with a warning, when none are placed). When false, the
+	 *  definition opted out of spawn points — go straight to the player-relative fallback. The boss always appears. */
+	FTransform SelectBossSpawnTransform(bool bUseSpawnPoint) const;
 	void DestroyActiveMission();
 
 	/** Time-scaled target alive enemy count from the schedule (or fallback) at the current run clock. */

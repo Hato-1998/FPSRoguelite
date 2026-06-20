@@ -374,7 +374,9 @@ void UFPSRRunDirectorSubsystem::SpawnBoss()
 	// any boss BP/definition exists (mirrors the enemy-class fallback in the spawn subsystem).
 	UClass* BossClassToSpawn = (Def && Def->BossClass) ? Def->BossClass.Get() : AFPSRBossBase::StaticClass();
 
-	const FTransform SpawnXform = SelectBossSpawnTransform();
+	// Honor the definition's spawn-mode (default true for the C++ fallback boss / no definition).
+	const bool bUseSpawnPoint = Def ? Def->bUseBossSpawnPoint : true;
+	const FTransform SpawnXform = SelectBossSpawnTransform(bUseSpawnPoint);
 
 	FActorSpawnParameters SpawnParams;
 	SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
@@ -395,7 +397,7 @@ void UFPSRRunDirectorSubsystem::SpawnBoss()
 		*SpawnXform.GetLocation().ToCompactString(), RunClock);
 }
 
-FTransform UFPSRRunDirectorSubsystem::SelectBossSpawnTransform() const
+FTransform UFPSRRunDirectorSubsystem::SelectBossSpawnTransform(bool bUseSpawnPoint) const
 {
 	UWorld* World = GetWorld();
 	if (!World)
@@ -403,38 +405,43 @@ FTransform UFPSRRunDirectorSubsystem::SelectBossSpawnTransform() const
 		return FTransform::Identity;
 	}
 
-	// Weighted-random among enabled, designer-placed boss spawn points (a boss usually has one; several allow variety).
-	struct FBossCandidate { AFPSRBossSpawnPoint* Point; float Weight; };
-	TArray<FBossCandidate> Candidates;
-	float TotalWeight = 0.0f;
-	for (TActorIterator<AFPSRBossSpawnPoint> It(World); It; ++It)
+	// Spawn points only when the definition opts in. Weighted-random among enabled, designer-placed boss spawn
+	// points (a boss usually has one; several allow variety). bUseBossSpawnPoint=false skips straight to the fallback.
+	if (bUseSpawnPoint)
 	{
-		AFPSRBossSpawnPoint* Point = *It;
-		if (Point && Point->IsEnabled() && Point->GetWeight() > 0.0f)
+		struct FBossCandidate { AFPSRBossSpawnPoint* Point; float Weight; };
+		TArray<FBossCandidate> Candidates;
+		float TotalWeight = 0.0f;
+		for (TActorIterator<AFPSRBossSpawnPoint> It(World); It; ++It)
 		{
-			Candidates.Add({ Point, Point->GetWeight() });
-			TotalWeight += Point->GetWeight();
-		}
-	}
-
-	if (Candidates.Num() > 0 && TotalWeight > 0.0f)
-	{
-		const float Pick = FMath::FRandRange(0.0f, TotalWeight);
-		float Cumulative = 0.0f;
-		for (const FBossCandidate& C : Candidates)
-		{
-			Cumulative += C.Weight;
-			if (Pick <= Cumulative)
+			AFPSRBossSpawnPoint* Point = *It;
+			if (Point && Point->IsEnabled() && Point->GetWeight() > 0.0f)
 			{
-				return C.Point->GetActorTransform();
+				Candidates.Add({ Point, Point->GetWeight() });
+				TotalWeight += Point->GetWeight();
 			}
 		}
-		return Candidates.Last().Point->GetActorTransform();
+
+		if (Candidates.Num() > 0 && TotalWeight > 0.0f)
+		{
+			const float Pick = FMath::FRandRange(0.0f, TotalWeight);
+			float Cumulative = 0.0f;
+			for (const FBossCandidate& C : Candidates)
+			{
+				Cumulative += C.Weight;
+				if (Pick <= Cumulative)
+				{
+					return C.Point->GetActorTransform();
+				}
+			}
+			return Candidates.Last().Point->GetActorTransform();
+		}
+
+		// Opted into spawn points but none placed — warn so the designer adds an AFPSRBossSpawnPoint, then fall back.
+		UE_LOG(LogFPSR, Warning, TEXT("[Run] No AFPSRBossSpawnPoint placed — spawning boss at a player fallback. Place a boss spawn point for content."));
 	}
 
-	// No boss spawn point placed — fall back to in front of the first player so the boss is visible (testability
-	// before U4 places a point). Warn so the designer adds an AFPSRBossSpawnPoint.
-	UE_LOG(LogFPSR, Warning, TEXT("[Run] No AFPSRBossSpawnPoint placed — spawning boss at a player fallback. Place a boss spawn point for content."));
+	// Fallback: in front of the first player so the boss is visible (definition opted out, or no point placed).
 	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
 	{
 		if (const APlayerController* PC = It->Get())
