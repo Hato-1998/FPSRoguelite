@@ -114,6 +114,11 @@ protected:
 	/** True while the projectile's simulation is suspended for the run freeze (avoids redundant pause/resume). */
 	bool bSimulationPaused = false;
 
+	/** Server: set once this projectile deals real damage to any enemy (direct hit or AOE splash). Drives the OnMiss
+	 *  behavior hook at release: a player projectile that ends having damaged no enemy (expired / world-only impact)
+	 *  is a true miss, so e.g. AmmoOnMiss can refund. Reset on Launch. (U18c — projectile parity with hitscan/melee.) */
+	bool bDealtEnemyDamage = false;
+
 	/** Lifetime timer handle. */
 	FTimerHandle LifetimeTimer;
 

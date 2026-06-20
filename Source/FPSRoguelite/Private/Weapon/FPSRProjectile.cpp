@@ -83,6 +83,7 @@ void AFPSRProjectile::Launch(const FFPSRProjectileParams& InParams, const FVecto
 	Params = InParams;
 	PierceRemaining = Params.Pierce;
 	HitActors.Reset();
+	bDealtEnemyDamage = false;
 
 	if (ProjectileMovement)
 	{
@@ -252,6 +253,10 @@ void AFPSRProjectile::OnSphereOverlap(UPrimitiveComponent* OverlappedComp, AActo
 	{
 		NotifyInstigatorHitMarker(bCrit, WeakpointMult > 1.0f, bKill);
 	}
+	if (bDamaged)
+	{
+		bDealtEnemyDamage = true; // not a miss — suppresses the OnMiss hook at release
+	}
 	--PierceRemaining;
 	if (PierceRemaining < 0)
 	{
@@ -300,6 +305,10 @@ void AFPSRProjectile::HandleImpact(const FVector& ImpactPoint)
 					{
 						FPSRWeaponHooks::NotifyKill(KillCtx, KilledActor);
 					}
+				}
+				if (Outcome.bAnyEnemyHit)
+				{
+					bDealtEnemyDamage = true; // splash connected — not a miss
 				}
 			}
 			else
@@ -446,6 +455,14 @@ void AFPSRProjectile::NotifyInstigatorHitMarker(bool bCrit, bool bWeak, bool bKi
 
 void AFPSRProjectile::ReleaseToPool()
 {
+	// OnMiss trigger (server): a player projectile that ends without ever damaging an enemy is a true miss (expired,
+	// fell out of world, or hit only geometry) — fire the behavior hook so e.g. AmmoOnMiss refunds, matching the
+	// hitscan/melee/charge-laser miss behavior. bActive guards re-entry (Deactivate clears it during release).
+	if (bActive && HasAuthority() && Params.Team == EFPSRProjectileTeam::Player && !bDealtEnemyDamage)
+	{
+		FPSRWeaponHooks::NotifyMiss(MakeProjectileFireContext(Params, GetWorld()));
+	}
+
 	if (UWorld* World = GetWorld())
 	{
 		if (UFPSRProjectileSubsystem* Subsystem = World->GetSubsystem<UFPSRProjectileSubsystem>())
