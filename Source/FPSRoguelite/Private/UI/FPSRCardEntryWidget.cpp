@@ -2,6 +2,7 @@
 
 #include "UI/FPSRCardEntryWidget.h"
 #include "Card/FPSRCardDataAsset.h"
+#include "Card/FPSRCardEffect.h"
 #include "Components/TextBlock.h"
 #include "Components/Button.h"
 #include "Core/FPSRLogChannels.h"
@@ -40,28 +41,45 @@ void UFPSRCardEntryWidget::UpdateDisplay()
 	if (!CardAsset)
 	{
 		if (CardNameText) CardNameText->SetText(FText::FromString(TEXT("[Missing]")));
-		if (RarityText) RarityText->SetText(FText::FromString(TEXT("")));
-		if (DescriptionText) DescriptionText->SetText(FText::FromString(TEXT("")));
-		if (MagnitudeText) MagnitudeText->SetText(FText::FromString(TEXT("")));
+		if (RarityText) RarityText->SetText(FText::GetEmpty());
+		if (DescriptionText) DescriptionText->SetText(FText::GetEmpty());
+		if (MagnitudeText) MagnitudeText->SetText(FText::GetEmpty());
 		return;
 	}
 
-	// Display card name
+	// Card name.
 	if (CardNameText)
 	{
 		CardNameText->SetText(CardAsset->DisplayName);
 	}
 
-	// Behavior-fragment cards have no meaningful rarity or numeric magnitude: show a category label in the
-	// rarity slot and leave the magnitude slot blank. Match the application path — ApplyCard only honors
-	// GrantedFragment in the ThisWeapon branch, so a stale fragment on a non-ThisWeapon card is not a fragment
-	// here either (no misclassifying a stat card as a modifier / blanking its magnitude).
-	const bool bIsFragment = (CardAsset->Scope == ECardScope::ThisWeapon && CardAsset->GrantedFragment != nullptr);
+	// Walk the effects (v2): collect each effect's auto-generated description line (§2-3-8) and detect whether any
+	// effect carries a magnitude. A card whose effects carry no magnitude (pure behavior/fragment) shows a category
+	// label in the rarity slot — matching v1's fragment-card display — while value cards show the rolled rarity.
+	TArray<FText> EffectLines;
+	bool bAnyMagnitude = false;
+	for (const TObjectPtr<UFPSRCardEffect>& Effect : CardAsset->Effects)
+	{
+		if (!Effect)
+		{
+			continue;
+		}
+		if (Effect->RarityTiers.Num() > 0)
+		{
+			bAnyMagnitude = true;
+		}
+		const float Magnitude = Effect->ResolveMagnitude(CachedDraw.Rarity);
+		const FText Line = Effect->GetDescription(CachedDraw.Rarity, Magnitude);
+		if (!Line.IsEmpty())
+		{
+			EffectLines.Add(Line);
+		}
+	}
 
-	// Display rarity — or, for fragment cards, the category label.
+	// Rarity slot: rolled rarity for value cards; designer category label for pure-behavior cards.
 	if (RarityText)
 	{
-		if (bIsFragment)
+		if (!bAnyMagnitude)
 		{
 			RarityText->SetText(FragmentCategoryText);
 		}
@@ -78,40 +96,16 @@ void UFPSRCardEntryWidget::UpdateDisplay()
 		}
 	}
 
-	// Display description
+	// Description slot: the authored Description (kept).
 	if (DescriptionText)
 	{
 		DescriptionText->SetText(CardAsset->Description);
 	}
 
-	// Display magnitude. Weapon-scope percent modifiers show as a signed percentage ("+25%", "-25%");
-	// flat values show as an integer when whole, otherwise with up to 2 decimals — never truncating a
-	// fractional magnitude (e.g. +0.25 / +0.05) down to a misleading "+0".
+	// Value slot: the auto-generated per-effect lines, newline-joined (multi-effect aware, e.g. "FireRate +25%"
+	// over "Damage -10%"). Replaces the v1 single hard-read magnitude — no Scope / WeaponStatOp branching here.
 	if (MagnitudeText)
 	{
-		if (bIsFragment)
-		{
-			// Fragments unlock behavior, not a numeric magnitude — blank the value slot (no misleading "+0%").
-			MagnitudeText->SetText(FText::GetEmpty());
-			return;
-		}
-
-		const float Mag = CachedDraw.Magnitude;
-		const bool bWeaponScope = (CardAsset->Scope == ECardScope::ThisWeapon || CardAsset->Scope == ECardScope::AllWeapons);
-
-		FString MagStr;
-		if (bWeaponScope && CardAsset->WeaponStatOp == EFPSRWeaponModOp::PercentMultiply)
-		{
-			MagStr = FString::Printf(TEXT("%+d%%"), FMath::RoundToInt(Mag * 100.0f));
-		}
-		else if (FMath::IsNearlyEqual(Mag, FMath::RoundToFloat(Mag)))
-		{
-			MagStr = FString::Printf(TEXT("%+d"), FMath::RoundToInt(Mag));
-		}
-		else
-		{
-			MagStr = FString::Printf(TEXT("%+.2f"), Mag);
-		}
-		MagnitudeText->SetText(FText::FromString(MagStr));
+		MagnitudeText->SetText(FText::Join(FText::FromString(TEXT("\n")), EffectLines));
 	}
 }

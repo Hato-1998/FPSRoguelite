@@ -2,6 +2,7 @@
 
 #include "Card/FPSRCardSubsystem.h"
 #include "Card/FPSRCardDataAsset.h"
+#include "Card/FPSRCardEffect.h"
 #include "Card/FPSRCardPoolDataAsset.h"
 #include "Core/FPSRPlayerState.h"
 #include "Core/FPSRLogChannels.h"
@@ -21,26 +22,32 @@
 
 namespace
 {
-	/** Family key used to keep same-family cards mutually exclusive in a single draw.
-	 *  Prefers the explicit CardFamily tag; falls back to the AppliedEffect GE class. */
+	/** Family key used to keep same-family cards mutually exclusive in a single draw. v2: the explicit CardFamily tag
+	 *  only (the v1 AppliedEffect-GE-class fallback was removed — with polymorphic multi-effect cards there is no
+	 *  single card-level GE to key on, and IsDataValid requires multi-effect cards to set CardFamily). */
 	FName GetCardFamilyKey(const UFPSRCardDataAsset* Card)
 	{
-		if (!Card)
+		if (!Card || !Card->CardFamily.IsValid())
 		{
 			return NAME_None;
 		}
-		if (Card->CardFamily.IsValid())
-		{
-			return Card->CardFamily.GetTagName();
-		}
-		// AppliedEffect is only meaningful (and only applied) for Character-scope cards, so use it as the family
-		// fallback only there. Weapon-scope cards never apply a GE — a stale AppliedEffect (e.g. left over on a
-		// Character asset copied/retargeted to a weapon scope) must not group them into an unrelated GE family.
-		if (Card->Scope == ECardScope::Character && Card->AppliedEffect)
-		{
-			return Card->AppliedEffect->GetFName();
-		}
-		return NAME_None;
+		return Card->CardFamily.GetTagName();
+	}
+
+	/** True if any of the card's effects targets a weapon (WeaponStat / WeaponBehavior). Mirrors v1's "weapon-scope
+	 *  cards join the level-up pool only once a weapon is owned" gate — effect-based so routing is unchanged. */
+	bool CardRequiresWeapon(const UFPSRCardDataAsset* Card)
+	{
+		return Card && Card->Effects.ContainsByPredicate(
+			[](const TObjectPtr<UFPSRCardEffect>& E) { return E && E->RequiresWeapon(); });
+	}
+
+	/** True if the card grants a behavior fragment. v1 routing: fragment cards live only in a weapon's
+	 *  AvailableModifiers (mission-reward pool), never the level-up draw — keep that invariant in U18a (re-route = U18b). */
+	bool CardHasBehaviorEffect(const UFPSRCardDataAsset* Card)
+	{
+		return Card && Card->Effects.ContainsByPredicate(
+			[](const TObjectPtr<UFPSRCardEffect>& E) { return Cast<UCardEffect_WeaponBehavior>(E) != nullptr; });
 	}
 }
 
@@ -96,8 +103,8 @@ TArray<FFPSRCardDraw> UFPSRCardSubsystem::DrawCards(AController* ForPlayer, int3
 		}
 	}
 
-	// Flatten each eligible card into one weighted offer per rarity tier. Excluded cards, and weapon-scope
-	// cards while the player owns no weapon, are skipped so they are never offered.
+	// Flatten each eligible card into one weighted offer per OFFERED rarity. Excluded cards, behavior-fragment
+	// cards (mission-reward only), and weapon-targeting cards while the player owns no weapon are skipped.
 	TArray<FFPSRCardDraw> Candidates;
 	TArray<float> CandidateWeights;
 	for (int32 CardIdx = 0; CardIdx < Cards.Num(); ++CardIdx)
@@ -108,29 +115,38 @@ TArray<FFPSRCardDraw> UFPSRCardSubsystem::DrawCards(AController* ForPlayer, int3
 		{
 			continue;
 		}
-		const bool bWeaponScope = (Card->Scope == ECardScope::ThisWeapon || Card->Scope == ECardScope::AllWeapons);
-		if (bWeaponScope && !bHasWeapon)
+		if (Card->Effects.Num() == 0)
+		{
+			// Not silent: a misconfigured card with no effects is logged rather than vanishing from the draw.
+			UE_LOG(LogFPSR, Warning, TEXT("[Card] '%s' has no Effects — skipped (configure at least one effect)."), *Card->GetName());
+			continue;
+		}
+		// Behavior-fragment cards are mission-reward only in U18a (v1 routing) — never offered in the level-up draw.
+		if (CardHasBehaviorEffect(Card))
 		{
 			continue;
 		}
-		if (Card->RarityTiers.Num() == 0)
+		// Weapon-targeting cards (this-weapon / all-weapons stat) join the pool only once a weapon is owned (v1 gate).
+		if (CardRequiresWeapon(Card) && !bHasWeapon)
 		{
-			// Not silent: a misconfigured card with no tiers is logged rather than vanishing from the draw.
-			UE_LOG(LogFPSR, Warning, TEXT("[Card] '%s' has no RarityTiers — skipped (configure at least one tier)."), *Card->GetName());
 			continue;
 		}
-		for (const FFPSRCardRarityTier& Tier : Card->RarityTiers)
+		if (Card->OfferRarities.Num() == 0)
 		{
-			const float Weight = GetEffectiveWeight(Card, Tier.Rarity, Luck);
+			UE_LOG(LogFPSR, Warning, TEXT("[Card] '%s' has no OfferRarities — skipped (give an effect at least one RarityTier)."), *Card->GetName());
+			continue;
+		}
+		for (const ECardRarity Rarity : Card->OfferRarities)
+		{
+			const float Weight = GetEffectiveWeight(Card, Rarity, Luck);
 			if (Weight <= 0.0f)
 			{
 				continue;
 			}
 			FFPSRCardDraw Offer;
 			Offer.Card = Card;
-			Offer.Rarity = Tier.Rarity;
-			Offer.Magnitude = Tier.Magnitude;
-			Offer.TargetWeapon = SourceWeapon; // ThisWeapon card → its source weapon; central/character → null
+			Offer.Rarity = Rarity;
+			Offer.TargetWeapon = SourceWeapon; // Weapon-group card → its source weapon; character/all-weapons → null
 			Candidates.Add(Offer);
 			CandidateWeights.Add(Weight);
 		}
@@ -225,62 +241,51 @@ bool UFPSRCardSubsystem::ApplyCard(AController* ForPlayer, const FFPSRCardDraw& 
 		return false;
 	}
 
-	// Apply the card's effect. Character-scope applies a GameplayEffect to the ASC; weapon-scope cards apply
-	// a stat modifier to the weapon instance(s) (weapon stats live outside the ASC, §2-4-1).
-	if (Card->Scope == ECardScope::Character)
+	// Build the server-side effect context (never replicated). The pawn's inventory + the draw's TargetWeapon let
+	// weapon effects resolve their target; an unowned TargetWeapon resolves to null (anti-cheat: the offer was
+	// server-built from owned weapons), so a forged target is rejected in pass 1 below.
+	FFPSRCardEffectContext EffCtx;
+	EffCtx.Player = ForPlayer;
+	EffCtx.PS = PS;
+	EffCtx.ASC = ASC;
+	if (APawn* Pawn = ForPlayer->GetPawn())
 	{
-		if (Card->AppliedEffect)
-		{
-			FGameplayEffectContextHandle Ctx = ASC->MakeEffectContext();
-			Ctx.AddSourceObject(this);
-			FGameplayEffectSpecHandle Spec = ASC->MakeOutgoingSpec(Card->AppliedEffect, 1.0f, Ctx);
-			if (Spec.IsValid())
-			{
-				// For GEs whose modifier uses SetByCaller (tag SetByCaller.CardMagnitude). Harmless for fixed GEs.
-				static const FGameplayTag CardMagnitudeTag = FGameplayTag::RequestGameplayTag(FName("SetByCaller.CardMagnitude"));
-				Spec.Data->SetSetByCallerMagnitude(CardMagnitudeTag, Draw.Magnitude);
-				ASC->ApplyGameplayEffectSpecToSelf(*Spec.Data.Get());
-			}
-		}
+		EffCtx.Inventory = Pawn->FindComponentByClass<UFPSRWeaponInventoryComponent>();
 	}
-	else // ThisWeapon / AllWeapons
+	EffCtx.TargetWeapon = Draw.TargetWeapon;
+
+	if (Card->Effects.Num() == 0)
 	{
-		APawn* Pawn = ForPlayer->GetPawn();
-		UFPSRWeaponInventoryComponent* Inventory = Pawn ? Pawn->FindComponentByClass<UFPSRWeaponInventoryComponent>() : nullptr;
-		if (!Inventory)
+		// Misconfigured card (IsDataValid guards authoring) — reject so the pick is NOT consumed.
+		return false;
+	}
+
+	// Pass 1: every effect must be applicable (CanApply = complete precondition: ASC / inventory / target instance
+	// resolvable). If any can't, reject WITHOUT consuming — preserves the v1 "no weapon/instance -> offer stays up"
+	// contract and makes the apply transactional (single-threaded server: no yield between passes, so no
+	// partial-apply-then-fail).
+	for (const TObjectPtr<UFPSRCardEffect>& Effect : Card->Effects)
+	{
+		if (Effect && !Effect->CanApply(EffCtx))
 		{
-			// No weapon system on this pawn — reject so the pick is NOT consumed (offer stays up).
+			UE_LOG(LogFPSR, Verbose, TEXT("[Card] ApplyCard '%s' rejected: %s cannot apply (pick not consumed)."),
+				*Card->GetName(), *Effect->GetClass()->GetName());
 			return false;
 		}
+	}
 
-		const FFPSRWeaponStatMod Mod{ Card->WeaponStat, Card->WeaponStatOp, Draw.Magnitude };
-		if (Card->Scope == ECardScope::ThisWeapon)
+	// Pass 2: apply each effect with its OWN rolled-rarity magnitude (so multi-effect trade-offs scale independently).
+	// No effect fails here — CanApply was the complete gate. Effect-type-agnostic: a new effect type needs no edit here.
+	for (const TObjectPtr<UFPSRCardEffect>& Effect : Card->Effects)
+	{
+		if (!Effect)
 		{
-			// Apply to the weapon that contributed this offer (Draw.TargetWeapon), resolved to the player's
-			// owned instance — so the card lands on its source weapon even if another is equipped. This also
-			// gates anti-cheat: the offer was server-built from owned weapons, and an unowned TargetWeapon
-			// resolves to null and is rejected. Legacy offers with no target fall back to the equipped weapon.
-			UFPSRWeaponInstance* Instance = Draw.TargetWeapon
-				? Inventory->GetInstanceForWeapon(Draw.TargetWeapon)
-				: Inventory->GetCurrentInstance();
-			if (!Instance)
-			{
-				return false;
-			}
-			if (Card->GrantedFragment)
-			{
-				// Behavior-fragment card (mission reward): attach the fragment to the target weapon.
-				Instance->AddFragment(Card->GrantedFragment);
-			}
-			else
-			{
-				Instance->AddModifier(Mod);
-			}
+			continue;
 		}
-		else // AllWeapons
-		{
-			PS->AddAllWeaponsModifier(Mod);
-		}
+		const float Magnitude = Effect->ResolveMagnitude(Draw.Rarity);
+		Effect->Apply(EffCtx, Magnitude);
+		UE_LOG(LogFPSR, Log, TEXT("[Card] '%s': applied %s (mag %.2f)"),
+			*Card->GetName(), *Effect->GetClass()->GetName(), Magnitude);
 	}
 
 	// Consume the matching pick.
@@ -299,7 +304,7 @@ bool UFPSRCardSubsystem::ApplyCard(AController* ForPlayer, const FFPSRCardDraw& 
 FFPSRCardDraw UFPSRCardSubsystem::BuildSingleDraw(UFPSRCardDataAsset* Card, AController* ForPlayer) const
 {
 	FFPSRCardDraw Draw;
-	if (!Card || Card->RarityTiers.Num() == 0)
+	if (!Card || Card->OfferRarities.Num() == 0)
 	{
 		return Draw;
 	}
@@ -313,31 +318,30 @@ FFPSRCardDraw UFPSRCardSubsystem::BuildSingleDraw(UFPSRCardDataAsset* Card, ACon
 		}
 	}
 
-	// Weighted pick among the card's tiers by effective weight (rarity base * luck), like DrawCards.
+	// Weighted pick among the card's offered rarities by effective weight (rarity base * luck), like DrawCards.
 	float TotalWeight = 0.0f;
-	for (const FFPSRCardRarityTier& Tier : Card->RarityTiers)
+	for (const ECardRarity Rarity : Card->OfferRarities)
 	{
-		TotalWeight += GetEffectiveWeight(Card, Tier.Rarity, Luck);
+		TotalWeight += GetEffectiveWeight(Card, Rarity, Luck);
 	}
-	const FFPSRCardRarityTier* Chosen = &Card->RarityTiers[0];
+	ECardRarity Chosen = Card->OfferRarities[0];
 	if (TotalWeight > 0.0f)
 	{
 		const float Pick = FMath::FRandRange(0.0f, TotalWeight);
 		float Cumulative = 0.0f;
-		for (const FFPSRCardRarityTier& Tier : Card->RarityTiers)
+		for (const ECardRarity Rarity : Card->OfferRarities)
 		{
-			Cumulative += GetEffectiveWeight(Card, Tier.Rarity, Luck);
+			Cumulative += GetEffectiveWeight(Card, Rarity, Luck);
 			if (Pick <= Cumulative)
 			{
-				Chosen = &Tier;
+				Chosen = Rarity;
 				break;
 			}
 		}
 	}
 
 	Draw.Card = Card;
-	Draw.Rarity = Chosen->Rarity;
-	Draw.Magnitude = Chosen->Magnitude;
+	Draw.Rarity = Chosen;
 	return Draw;
 }
 
@@ -376,8 +380,21 @@ TArray<FFPSRCardDraw> UFPSRCardSubsystem::DrawWeaponModifierOffer(AController* F
 		}
 		for (const TObjectPtr<UFPSRCardDataAsset>& Card : Weapon->AvailableModifiers)
 		{
-			if (Card && Card->Scope == ECardScope::ThisWeapon && Card->GrantedFragment
-				&& Instance->GetFragmentStackCount(Card->GrantedFragment) < FMath::Max(Card->GrantedFragment->MaxStacks, 1))
+			if (!Card)
+			{
+				continue;
+			}
+			// v2: the granted fragment lives on a WeaponBehavior effect. Find it, then check the weapon has stack room.
+			UFPSRWeaponFragment* Fragment = nullptr;
+			for (const TObjectPtr<UFPSRCardEffect>& Effect : Card->Effects)
+			{
+				if (const UCardEffect_WeaponBehavior* Behavior = Cast<UCardEffect_WeaponBehavior>(Effect))
+				{
+					Fragment = Behavior->Fragment;
+					break;
+				}
+			}
+			if (Fragment && Instance->GetFragmentStackCount(Fragment) < FMath::Max(Fragment->MaxStacks, 1))
 			{
 				// Same card asset on two weapons yields two candidates (distinct target weapons).
 				Candidates.Add(Card.Get());
@@ -491,8 +508,8 @@ void UFPSRCardSubsystem::GatherCandidatePool(AController* ForPlayer, TArray<UFPS
 			{
 				continue;
 			}
-			// ThisWeapon card → target this weapon. Character/AllWeapons card carried by a weapon → no target.
-			UFPSRWeaponDataAsset* Target = (Card->Scope == ECardScope::ThisWeapon) ? Weapon : nullptr;
+			// Weapon-group card → target this weapon. Character-group card carried by a weapon → no target.
+			UFPSRWeaponDataAsset* Target = (Card->Group == ECardGroup::Weapon) ? Weapon : nullptr;
 
 			// De-dup on (card, target): the same card may legitimately appear for different target weapons.
 			bool bAlready = false;
@@ -521,7 +538,6 @@ namespace
 	{
 		TWeakObjectPtr<UFPSRCardDataAsset> Card;
 		ECardRarity Rarity = ECardRarity::Common;
-		float Magnitude = 0.0f;
 		TWeakObjectPtr<UFPSRWeaponDataAsset> TargetWeapon; // preserve so FPSR.ApplyCard hits the right weapon
 	};
 	TArray<FDebugCardOffer> GLastDraw;
@@ -543,12 +559,11 @@ namespace
 			FDebugCardOffer Offer;
 			Offer.Card = Draws[i].Card;
 			Offer.Rarity = Draws[i].Rarity;
-			Offer.Magnitude = Draws[i].Magnitude;
 			Offer.TargetWeapon = Draws[i].TargetWeapon;
 			GLastDraw.Add(Offer);
 
 			const FString RarityStr = StaticEnum<ECardRarity>()->GetNameStringByValue((int64)Draws[i].Rarity);
-			UE_LOG(LogFPSR, Log, TEXT("[Card] [%d] %s (%s, mag %.2f)"), i, *Draws[i].Card->GetName(), *RarityStr, Draws[i].Magnitude);
+			UE_LOG(LogFPSR, Log, TEXT("[Card] [%d] %s (%s)"), i, *Draws[i].Card->GetName(), *RarityStr);
 		}
 	}
 
@@ -614,7 +629,6 @@ namespace
 				FFPSRCardDraw Draw;
 				Draw.Card = GLastDraw[Index].Card.Get();
 				Draw.Rarity = GLastDraw[Index].Rarity;
-				Draw.Magnitude = GLastDraw[Index].Magnitude;
 				Draw.TargetWeapon = GLastDraw[Index].TargetWeapon.Get();
 				// Debug apply as an opening-seed pick (no pending level-up required).
 				const bool bApplied = CardSubsystem->ApplyCard(PC, Draw, EFPSROfferType::OpeningSeed);

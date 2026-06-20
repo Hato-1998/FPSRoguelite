@@ -8,12 +8,25 @@
 class UFPSRCardDataAsset;
 class UFPSRWeaponDataAsset;
 
+/** v1 card scope. DEPRECATED by ECardGroup + per-effect bThisWeaponOnly (U18a, §2-3-2). Retained only so the
+ *  legacy UFPSRCardDataAsset fields + PostLoad migration can still read pre-v2 assets. Removed in a follow-up commit. */
 UENUM(BlueprintType)
 enum class ECardScope : uint8
 {
 	Character   UMETA(DisplayName = "Character"),
 	ThisWeapon  UMETA(DisplayName = "This Weapon"),
 	AllWeapons  UMETA(DisplayName = "All Weapons")
+};
+
+/** v2 card group (§2-3-2): the draw pool / trigger / UI filter a card belongs to. Orthogonal to per-effect
+ *  application scope (UCardEffect_WeaponStat::bThisWeaponOnly). Character = character + all-weapons effects
+ *  (no target weapon). Weapon = this-weapon stat / behavior cards (TargetWeapon set). WeaponUnlock = reserved (U18b). */
+UENUM(BlueprintType)
+enum class ECardGroup : uint8
+{
+	Character    UMETA(DisplayName = "Character"),
+	Weapon       UMETA(DisplayName = "Weapon"),
+	WeaponUnlock UMETA(DisplayName = "Weapon Unlock")
 };
 
 /** What a presented card offer represents — drives the draw pool and the consume/gate behavior. */
@@ -49,7 +62,9 @@ struct FFPSRCardRarityTier
 	float Magnitude = 0.0f;
 };
 
-/** A single drawn card offer: the card, the rarity it rolled at, and the magnitude to apply on selection. */
+/** A single drawn card offer: the card and the rarity it rolled at. Per-effect magnitude is no longer carried on
+ *  the draw (v2) — each effect resolves its own magnitude from its RarityTiers at this rolled Rarity, both on the
+ *  server (UFPSRCardEffect::Apply) and on the client (UI reads Card->Effects locally). */
 USTRUCT(BlueprintType)
 struct FFPSRCardDraw
 {
@@ -60,9 +75,6 @@ struct FFPSRCardDraw
 
 	UPROPERTY(BlueprintReadOnly, Category = "Card")
 	ECardRarity Rarity = ECardRarity::Common;
-
-	UPROPERTY(BlueprintReadOnly, Category = "Card")
-	float Magnitude = 0.0f;
 
 	/** Weapon this offer applies to (the weapon whose pool contributed the card). null = character / all-weapons
 	 *  target. Set server-side at draw time so weapon-scope cards apply to their SOURCE weapon — owned but not
