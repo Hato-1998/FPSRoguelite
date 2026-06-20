@@ -152,6 +152,12 @@ void UFPSRGA_WeaponFire_Hitscan::ActivateAbility(
 		}
 	}
 
+	// OnFire trigger (server): once per activation, right after the ammo commit (§2-3-5).
+	if (FireCtx.bAuthority)
+	{
+		FPSRWeaponHooks::NotifyFire(FireCtx);
+	}
+
 	// Crit/damage multipliers from the ASC are fetched once; crit is rolled per hit so each pellet / pierced
 	// enemy can crit independently.
 	float DamageMultiplier = 1.0f;
@@ -219,10 +225,12 @@ void UFPSRGA_WeaponFire_Hitscan::ActivateAbility(
 			return false; // friendly pass-through (FF off): don't stop the bullet, don't spend penetration
 		}
 		const FPSRCombat::FDamageResult Result = FPSRCombat::ApplyDamage(HitActor, Resolved, Avatar);
-		if (Result.bWasEnemy && Result.bApplied)
+		// Markers / kill triggers key on DamageDealt (real health removed), so a corpse re-hit (DamageDealt 0) is inert;
+		// the bullet still spends penetration via bApplied below (geometry), it just produces no feedback or kill.
+		if (Result.bWasEnemy && Result.DamageDealt > 0.0f)
 		{
 			bServerHit = true;
-			if (Result.bKilled) { bServerKill = true; }
+			if (Result.bKilled) { bServerKill = true; FPSRWeaponHooks::NotifyKill(FireCtx, HitActor); }
 			else if (WeakpointMult > 1.0f) { bServerWeak = true; }
 			else if (bCrit) { bServerCrit = true; }
 		}
@@ -332,6 +340,12 @@ void UFPSRGA_WeaponFire_Hitscan::ActivateAbility(
 		{
 			if (Frag) { Frag->PostFire(FireCtx); }
 		}
+	}
+
+	// OnMiss trigger (server): this activation landed no real damage on any enemy (§2-3-5).
+	if (FireCtx.bAuthority && !bServerHit)
+	{
+		FPSRWeaponHooks::NotifyMiss(FireCtx);
 	}
 
 	EndAbility(Handle, ActorInfo, ActivationInfo, true, false);

@@ -80,10 +80,16 @@ namespace FPSRCombat
 
 		if (UFPSREnemyHealthComponent* HealthComp = Target->FindComponentByClass<UFPSREnemyHealthComponent>())
 		{
+			// Capture pre-state so kill/damage are TRANSITIONS, not post-facto reads: a corpse re-hit (already dead,
+			// ApplyDamage no-ops) and an overkill (damage clamped to remaining health) both report DamageDealt = 0
+			// and bKilled = false — so feedback (markers / lifesteal event) never fires on a corpse or rewards overkill.
+			const bool bWasDeadBefore = HealthComp->IsDead();
+			const float HealthBefore = HealthComp->GetHealth();
 			HealthComp->ApplyDamage(FinalDamage, Instigator, DamageType);
 			Result.bApplied = true;
 			Result.bWasEnemy = true;
-			Result.bKilled = HealthComp->IsDead();
+			Result.DamageDealt = FMath::Max(0.0f, HealthBefore - HealthComp->GetHealth());
+			Result.bKilled = (!bWasDeadBefore && HealthComp->IsDead());
 			return Result;
 		}
 
@@ -132,13 +138,14 @@ namespace FPSRCombat
 		}
 	}
 
-	void ApplyExplosion(UWorld* World, const FVector& Center, float Radius, float Damage,
+	FKilledEnemies ApplyExplosion(UWorld* World, const FVector& Center, float Radius, float Damage,
 		float CritChance, float CritMultiplier, AActor* Instigator, bool bAllowSelf, float KnockbackStrength, FGameplayTag DamageType)
 	{
 		// U18a forward-compat seam: DamageType (empty = Physical) is threaded to leaf appliers for D3 elemental; no behavior change in U18a.
+		FKilledEnemies KilledEnemies;
 		if (!World || Radius <= 0.0f)
 		{
-			return;
+			return KilledEnemies;
 		}
 
 		// Query pawns by OBJECT TYPE (both enemy and player channels), NOT a trace channel: a target that has set
@@ -182,11 +189,15 @@ namespace FPSRCombat
 				Result = ApplyDamage(Target, FinalDamage, Instigator, DamageType);
 			}
 
-			if (Result.bWasEnemy && Result.bApplied)
+			if (Result.bWasEnemy && Result.DamageDealt > 0.0f)
 			{
 				bAnyEnemyHit = true;
 				bAnyCrit |= bCrit;
 				bAnyKill |= Result.bKilled;
+			}
+			if (Result.bKilled)
+			{
+				KilledEnemies.Add(Target); // freshly killed (alive->dead this blast) — drives the weapon OnKill bridge
 			}
 
 			// Knockback is INDEPENDENT of damage: it applies even at 0 damage (FF-off ally, self-no-damage), and is
@@ -213,6 +224,8 @@ namespace FPSRCombat
 		{
 			NotifyHitMarker(Instigator, bAnyCrit, bAnyKill); // one marker per explosion (strongest outcome)
 		}
+
+		return KilledEnemies;
 	}
 
 	void AddWeakpointObjectType(FCollisionObjectQueryParams& OutParams)

@@ -2,6 +2,7 @@
 
 #include "Weapon/FPSRProjectile.h"
 #include "Weapon/FPSRProjectileSubsystem.h"
+#include "Weapon/FPSRWeaponFragment.h"
 #include "Combat/FPSRCombatStatics.h"
 #include "Combat/FPSRWeakpointComponent.h"
 #include "FPSRCollisionChannels.h"
@@ -13,11 +14,31 @@
 
 #include "Components/SphereComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "GameFramework/Pawn.h"
+#include "GameFramework/Controller.h"
 #include "GameFramework/ProjectileMovementComponent.h"
 #include "Engine/World.h"
 #include "Engine/OverlapResult.h"
 #include "TimerManager.h"
 #include "CollisionShape.h"
+
+namespace
+{
+	/** Rebuild a minimal server FireContext from a projectile's spawn-time params so the U18c OnKill bridge can run at
+	 *  damage time (the live FFPSRFireContext is long gone — the firing ability ended when the projectile launched).
+	 *  Instance is the weak weapon ref (null if the weapon was swapped/dropped mid-flight — the bridge then no-ops). */
+	FFPSRFireContext MakeProjectileFireContext(const FFPSRProjectileParams& Params, UWorld* World)
+	{
+		FFPSRFireContext Ctx;
+		Ctx.Avatar = Cast<APawn>(Params.InstigatorActor);
+		Ctx.Controller = Ctx.Avatar ? Ctx.Avatar->GetController() : nullptr;
+		Ctx.World = World;
+		Ctx.Instance = Params.WeaponInstance.Get();
+		Ctx.ShotCount = 1;
+		Ctx.bAuthority = true; // every caller is inside a HasAuthority() gate
+		return Ctx;
+	}
+}
 
 AFPSRProjectile::AFPSRProjectile()
 {
@@ -262,9 +283,21 @@ void AFPSRProjectile::HandleImpact(const FVector& ImpactPoint)
 				// Unified player explosion: enemy/self/friendly damage resolution + radial knockback + a single
 				// hit-marker, all server-authoritative. bAllowSelf is the baked self-damage flag (NoSelfDamage card
 				// clears it); knockback is independent of damage (still launches at 0 damage, excludes the killed).
-				FPSRCombat::ApplyExplosion(World, ImpactPoint, Params.ExplosionRadius, Params.Damage,
+				const FPSRCombat::FKilledEnemies Killed = FPSRCombat::ApplyExplosion(
+					World, ImpactPoint, Params.ExplosionRadius, Params.Damage,
 					Params.CritChance, Params.CritMultiplier, Params.InstigatorActor,
 					/*bAllowSelf*/ Params.bSelfDamage, Params.KnockbackStrength);
+
+				// OnKill trigger (server): fire once per enemy this blast freshly killed (bazooka reload-on-kill etc.).
+				// Rebuild the FireContext from spawn params; the weak weapon ref no-ops the bridge if the weapon is gone.
+				if (Killed.Num() > 0)
+				{
+					const FFPSRFireContext KillCtx = MakeProjectileFireContext(Params, World);
+					for (AActor* KilledActor : Killed)
+					{
+						FPSRWeaponHooks::NotifyKill(KillCtx, KilledActor);
+					}
+				}
 			}
 			else
 			{
@@ -362,7 +395,14 @@ bool AFPSRProjectile::TryDamageActor(AActor* Target, float WeakpointMultiplier, 
 			const FPSRCombat::FDamageResult Result = FPSRCombat::ApplyDamage(Target, Resolved, Params.InstigatorActor);
 			bOutKill = Result.bKilled;
 			bOutWasEnemy = Result.bWasEnemy;
-			return Result.bApplied;
+			// OnKill trigger (server): this direct hit freshly killed an enemy (sniper etc.). Rebuild a minimal
+			// FireContext from spawn params — the weak weapon ref no-ops the bridge if the weapon is gone.
+			if (Result.bKilled)
+			{
+				FPSRWeaponHooks::NotifyKill(MakeProjectileFireContext(Params, GetWorld()), Target);
+			}
+			// Markers key on real damage (DamageDealt), so a corpse re-hit is inert (no marker); pierce still spends.
+			return Result.DamageDealt > 0.0f;
 		}
 		return false;
 	}

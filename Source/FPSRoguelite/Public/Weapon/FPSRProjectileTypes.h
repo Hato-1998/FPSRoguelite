@@ -5,6 +5,8 @@
 #include "CoreMinimal.h"
 #include "FPSRProjectileTypes.generated.h"
 
+class UFPSRWeaponInstance;
+
 UENUM(BlueprintType)
 enum class EFPSRProjectileTeam : uint8
 {
@@ -67,4 +69,12 @@ struct FPSROGUELITE_API FFPSRProjectileParams
 	/** The actor that fired this projectile (never damaged by its own projectile). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Projectile")
 	TObjectPtr<AActor> InstigatorActor = nullptr;
+
+	/** SERVER-ONLY back-reference to the weapon instance that fired this projectile, for the U18c behavior-trigger
+	 *  bridge (OnKill) at damage time. Weak so it auto-nulls if the player swaps/drops the weapon mid-flight — the
+	 *  hook then degrades gracefully (no fragments). NOT replicated: FFPSRProjectileParams is server-side state and
+	 *  is never registered in GetLifetimeReplicatedProps, so this handle never crosses the wire. If Params is ever
+	 *  made replicated, this field MUST be excluded. */
+	UPROPERTY(Transient)
+	TWeakObjectPtr<UFPSRWeaponInstance> WeaponInstance = nullptr;
 };

@@ -79,7 +79,39 @@ public:
 	 *  can spawn an effect at the hit — e.g. ExplosiveRounds turns a rifle hit into a small AOE. bAllowSelf passes
 	 *  through the NoSelfDamage suppression so a spawned explosion respects it. */
 	virtual void OnImpact(const FFPSRFireContext& Context, const FVector& ImpactPoint, bool bAllowSelf) const {}
+
+	/** Behavior-trigger hooks (U18c, §2-3-5). Fired by the shared FPSRWeaponHooks bridge from all 5 damage paths so
+	 *  a fragment reacts to firing outcomes uniformly. All state-mutating overrides MUST gate on Context.bAuthority
+	 *  (mirror UFPSRFragment_ExplosiveRounds::OnImpact) — these run on the hot damage path, so keep them allocation-free.
+	 *  - OnAim   : ADS pressed/released (server-authoritative aiming RPC). bAiming = entering ADS.
+	 *  - OnFire  : once per activation, right after the ammo commit (NOT PostFire — avoids the on-fire/on-hit race).
+	 *  - OnMiss  : once per activation that landed no damage on any enemy (synchronous paths only).
+	 *  - OnKill  : once per enemy this activation freshly killed (alive->dead; corpse re-hits excluded by bJustKilled).
+	 *  - OnStatusKill : empty seam — D3 (status-effect kills) wires the call site; declared here only. */
+	virtual void OnAim(const FFPSRFireContext& Context, bool bAiming) const {}
+	virtual void OnFire(const FFPSRFireContext& Context) const {}
+	virtual void OnMiss(const FFPSRFireContext& Context) const {}
+	virtual void OnKill(const FFPSRFireContext& Context, AActor* KilledActor) const {}
+	virtual void OnStatusKill(const FFPSRFireContext& Context, AActor* KilledActor) const {}
 };
+
+/**
+ * Shared behavior-hook bridge (U18c §2-3-5). One choke point each so every damage path (Hitscan / ChargeLaser /
+ * Melee / Projectile / Explosion) fires the trigger hooks identically instead of re-deriving the fragment list.
+ * Each helper resolves the active fragments from Context.Instance and early-outs when there are none — empty-fast on
+ * the hot path. The hooks themselves gate on Context.bAuthority; callers already invoke these inside server-only scopes.
+ */
+namespace FPSRWeaponHooks
+{
+	/** Fire OnFire on every active fragment (once per activation). */
+	FPSROGUELITE_API void NotifyFire(const FFPSRFireContext& Context);
+	/** Fire OnMiss on every active fragment (activation dealt no enemy damage). */
+	FPSROGUELITE_API void NotifyMiss(const FFPSRFireContext& Context);
+	/** Fire OnKill on every active fragment for one freshly-killed enemy. */
+	FPSROGUELITE_API void NotifyKill(const FFPSRFireContext& Context, AActor* KilledActor);
+	/** Fire OnAim on every active fragment (ADS press/release). */
+	FPSROGUELITE_API void NotifyAim(const FFPSRFireContext& Context, bool bAiming);
+}
 
 /** Reference fragment: fires extra shots/pellets per activation (e.g. 2-round multishot, shotgun spread). */
 UCLASS()

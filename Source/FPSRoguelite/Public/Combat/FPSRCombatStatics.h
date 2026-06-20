@@ -26,13 +26,24 @@ class UPrimitiveComponent;
  */
 namespace FPSRCombat
 {
-	/** Outcome of an ApplyDamage call, used for hit-marker feedback and knockback (exclude the freshly killed). */
+	/** Outcome of an ApplyDamage call. Three independent axes so a corpse re-hit / overkill is unambiguous:
+	 *   - bApplied  : a damage receiver was found and ApplyDamage was invoked. Drives penetration / impact GEOMETRY.
+	 *                 Stays true even on a corpse re-hit (a bullet still passes "through" the body, spends pierce).
+	 *   - bKilled   : this hit transitioned the enemy ALIVE -> DEAD (bJustKilled). A corpse re-hit reports false,
+	 *                 so kill-markers / knockback-exclusion / kill aggregates never double-fire on a corpse.
+	 *   - DamageDealt: actual health removed (clamped; 0 on a corpse re-hit, and the overkill excess is excluded).
+	 *                 Drives hit-markers, the DealtDamage GAS event, and lifesteal — the "real damage" axis. */
 	struct FDamageResult
 	{
-		bool bApplied = false;  // a damage receiver was found and damage was applied
-		bool bKilled = false;   // the target died from this hit (enemies only; player DBNO is a later phase)
-		bool bWasEnemy = false; // the target was a swarm enemy (drives the firing player's hit-marker)
+		bool bApplied = false;
+		bool bKilled = false;
+		bool bWasEnemy = false;
+		float DamageDealt = 0.0f;
 	};
+
+	/** Enemies an explosion freshly killed (alive->dead this blast). Inline-sized (<=8) to avoid a heap alloc on the
+	 *  per-explosion path; >8 kills falls back to one allocation (rare). Consumed by the weapon OnKill bridge. */
+	using FKilledEnemies = TArray<AActor*, TInlineAllocator<8>>;
 
 	/** One actor's collapsed contribution from a multi-hit trace: the NEAREST hit's distance/impact (for wall
 	 *  cutoff + penetration ordering) plus the HIGHEST weakpoint multiplier among that actor's hits. */
@@ -78,7 +89,7 @@ namespace FPSRCombat
 	 *  Knockback (KnockbackStrength > 0): a radial impulse pushing every survivor outward from Center, magnitude
 	 *  falling off linearly to the rim. Applied EVEN when damage is 0 (FF-off friendly / self-no-damage) — only the
 	 *  freshly killed are excluded. Player knockback launches the character (rocket jump / ally launch). */
-	FPSROGUELITE_API void ApplyExplosion(UWorld* World, const FVector& Center, float Radius, float Damage,
+	FPSROGUELITE_API FKilledEnemies ApplyExplosion(UWorld* World, const FVector& Center, float Radius, float Damage,
 		float CritChance, float CritMultiplier, AActor* Instigator, bool bAllowSelf, float KnockbackStrength, FGameplayTag DamageType = FGameplayTag());
 
 	/** Dispatch a knockback velocity to Target: players -> additive LaunchCharacter (preserves jump for rocket
