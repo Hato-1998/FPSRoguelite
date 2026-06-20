@@ -141,22 +141,15 @@ void AFPSRPlayerController::BeginOpeningSeed(int32 Count)
 	NotifyPauseStateDirty();
 }
 
-void AFPSRPlayerController::GrantMissionReward(UFPSRCardDataAsset* RewardCard)
+void AFPSRPlayerController::GrantWeaponUnlock()
 {
 	if (!HasAuthority())
 	{
 		return;
 	}
-
-	// Mission clear always grants a reward pick. The default reward is a choice from the equipped weapon's
-	// AvailableModifiers (resolved at offer time); a non-null RewardCard is an optional per-mission override.
 	if (AFPSRPlayerState* PS = GetPlayerState<AFPSRPlayerState>())
 	{
-		PS->AddMissionRewardPick();
-		if (RewardCard)
-		{
-			PendingMissionRewardCards.Add(RewardCard);
-		}
+		PS->AddWeaponUnlockPick();
 	}
 }
 
@@ -168,7 +161,7 @@ bool AFPSRPlayerController::HasPendingSelection() const
 	}
 	if (const AFPSRPlayerState* PS = GetPlayerState<AFPSRPlayerState>())
 	{
-		return PS->GetMissionRewardPicksPending() > 0 || PS->GetCardPicksPending() > 0;
+		return PS->GetWeaponUnlockPicksPending() > 0 || PS->GetCardPicksPending() > 0;
 	}
 	return false;
 }
@@ -187,9 +180,9 @@ void AFPSRPlayerController::PresentNextOfferIfNeeded()
 	}
 
 	const AFPSRPlayerState* PS = GetPlayerState<AFPSRPlayerState>();
-	if (PS && PS->GetMissionRewardPicksPending() > 0)
+	if (PS && PS->GetWeaponUnlockPicksPending() > 0)
 	{
-		RequestCardOffer(EFPSROfferType::MissionReward);
+		RequestCardOffer(EFPSROfferType::WeaponUnlock);
 		return;
 	}
 	if (PS && PS->GetCardPicksPending() > 0)
@@ -230,23 +223,9 @@ void AFPSRPlayerController::RequestCardOffer(EFPSROfferType OfferType)
 
 	CurrentOfferType = OfferType;
 
-	if (OfferType == EFPSROfferType::MissionReward)
+	if (OfferType == EFPSROfferType::WeaponUnlock)
 	{
-		CachedOffer.Reset();
-		if (PendingMissionRewardCards.Num() > 0)
-		{
-			// Per-mission override: single designer-specified reward card from the front of the queue.
-			const FFPSRCardDraw Draw = Sub->BuildSingleDraw(PendingMissionRewardCards[0].Get(), this);
-			if (Draw.Card)
-			{
-				CachedOffer.Add(Draw);
-			}
-		}
-		else
-		{
-			// Default: a choice from the equipped weapon's AvailableModifiers (unowned behavior fragments).
-			CachedOffer = Sub->DrawWeaponModifierOffer(this, 3);
-		}
+		CachedOffer = Sub->DrawWeaponUnlockOffer(this, 3);
 	}
 	else
 	{
@@ -255,16 +234,15 @@ void AFPSRPlayerController::RequestCardOffer(EFPSROfferType OfferType)
 
 	if (CachedOffer.Num() == 0)
 	{
-		UE_LOG(LogFPSR, Warning, TEXT("[Card] Empty offer for type %d (check pool/reward card)"), (int32)OfferType);
+		UE_LOG(LogFPSR, Warning, TEXT("[Card] Empty offer for type %d (check pool)"), (int32)OfferType);
 		// Can't present this selection — release it so the global freeze doesn't hard-lock on this player.
 		if (OfferType == EFPSROfferType::OpeningSeed)
 		{
 			PendingOpeningSeeds = 0;
 		}
-		else if (OfferType == EFPSROfferType::MissionReward)
+		else if (OfferType == EFPSROfferType::WeaponUnlock)
 		{
-			if (PendingMissionRewardCards.Num() > 0) { PendingMissionRewardCards.RemoveAt(0); }
-			if (AFPSRPlayerState* PS = GetPlayerState<AFPSRPlayerState>()) { PS->ConsumeMissionRewardPick(); }
+			if (AFPSRPlayerState* PS = GetPlayerState<AFPSRPlayerState>()) { PS->ConsumeWeaponUnlockPick(); }
 		}
 		else if (AFPSRPlayerState* PS = GetPlayerState<AFPSRPlayerState>())
 		{
@@ -336,14 +314,10 @@ void AFPSRPlayerController::ServerSelectCard_Implementation(int32 Index, int32 O
 		return;
 	}
 
-	// Per-type bookkeeping (the level-up / mission-reward pick was consumed inside ApplyCard).
+	// Per-type bookkeeping (the level-up / weapon-unlock pick was consumed inside ApplyCard).
 	if (CurrentOfferType == EFPSROfferType::OpeningSeed)
 	{
 		if (PendingOpeningSeeds > 0) { --PendingOpeningSeeds; }
-	}
-	else if (CurrentOfferType == EFPSROfferType::MissionReward)
-	{
-		if (PendingMissionRewardCards.Num() > 0) { PendingMissionRewardCards.RemoveAt(0); }
 	}
 
 	CachedOffer.Reset();
@@ -366,8 +340,8 @@ void AFPSRPlayerController::ServerRerollOffer_Implementation(int32 OfferId)
 		return;
 	}
 
-	// Mission-reward offers are a single fixed card — not rerollable.
-	if (CurrentOfferType == EFPSROfferType::MissionReward)
+	// WeaponUnlock offers are fixed unlock choices — not rerollable.
+	if (CurrentOfferType == EFPSROfferType::WeaponUnlock)
 	{
 		return;
 	}
@@ -452,11 +426,10 @@ void AFPSRPlayerController::ServerAbandonOffer_Implementation(int32 OfferId)
 	UE_LOG(LogFPSR, Error, TEXT("[UI] Card offer abandoned — releasing this player's pending picks (check WBP setup)"));
 	CachedOffer.Reset();
 	PendingOpeningSeeds = 0;
-	PendingMissionRewardCards.Reset();
 	if (AFPSRPlayerState* PS = GetPlayerState<AFPSRPlayerState>())
 	{
 		while (PS->ConsumeCardPick()) {}
-		while (PS->ConsumeMissionRewardPick()) {}
+		while (PS->ConsumeWeaponUnlockPick()) {}
 	}
 
 	NotifyPauseStateDirty();
@@ -546,10 +519,9 @@ namespace
 			PC->BeginOpeningSeed(Count);
 		}));
 
-	FAutoConsoleCommandWithWorld GCmd_GrantMissionRewardPick(
-		TEXT("FPSR.GrantMissionRewardPick"),
-		TEXT("Grant the local player a mission-reward pick (debug, authority/host only) — freezes the run and "
-		     "offers a behavior-fragment choice from the equipped weapon's AvailableModifiers."),
+	FAutoConsoleCommandWithWorld GCmd_GrantWeaponUnlock(
+		TEXT("FPSR.GrantWeaponUnlock"),
+		TEXT("Grant the local player a weapon-unlock pick (debug, authority/host only) — freezes the run and presents weapon-unlock options."),
 		FConsoleCommandWithWorldDelegate::CreateLambda([](UWorld* World)
 		{
 			AFPSRPlayerController* PC = GetLocalFPSRController(World);
@@ -557,10 +529,10 @@ namespace
 			{
 				return;
 			}
-			PC->GrantMissionReward(nullptr); // null = default weapon-modifier choice (no override card)
+			PC->GrantWeaponUnlock();
 			if (AFPSRGameState* GS = World ? World->GetGameState<AFPSRGameState>() : nullptr)
 			{
-				GS->RefreshPauseState(); // freeze + present the reward offer
+				GS->RefreshPauseState();
 			}
 		}));
 }

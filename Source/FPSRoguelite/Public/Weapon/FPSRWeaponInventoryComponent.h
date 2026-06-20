@@ -31,6 +31,9 @@ public:
 	/** Server: add weapon to the first free slot; auto-equips if nothing is equipped. Returns slot index or INDEX_NONE. */
 	int32 AddWeapon(UFPSRWeaponDataAsset* WeaponData);
 
+	/** True if any inventory slot is empty (a new weapon can be added). Const; runs on server and client. */
+	bool HasFreeSlot() const;
+
 	/** Server: equip the given slot index (grants its fire ability). */
 	void EquipSlot(int32 SlotIndex);
 

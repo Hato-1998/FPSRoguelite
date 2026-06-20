@@ -124,6 +124,11 @@ int32 UFPSRWeaponInventoryComponent::AddWeapon(UFPSRWeaponDataAsset* WeaponData)
 	return FreeSlot;
 }
 
+bool UFPSRWeaponInventoryComponent::HasFreeSlot() const
+{
+	return Slots.ContainsByPredicate([](const TObjectPtr<UFPSRWeaponInstance>& S){ return S == nullptr; });
+}
+
 void UFPSRWeaponInventoryComponent::EquipSlot(int32 SlotIndex)
 {
 	if (!GetOwner() || !GetOwner()->HasAuthority())

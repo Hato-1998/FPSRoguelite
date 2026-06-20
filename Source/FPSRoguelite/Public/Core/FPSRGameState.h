@@ -134,6 +134,10 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Run")
 	int32 XPPerLevel = 50;
 
+	/** Party levels at which a weapon-unlock pick is granted to everyone (U18b). Data-driven (no hardcode). */
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Run")
+	TArray<int32> WeaponUnlockMilestones = { 20, 30, 40 };
+
 	UPROPERTY(ReplicatedUsing = OnRep_RunState)
 	int32 SharedXP = 0;
 

@@ -48,7 +48,7 @@ void AFPSRPlayerState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Out
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRPlayerState, bIsDead, Params);
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRPlayerState, RunRerollCharges, Params);
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRPlayerState, CardPicksPending, Params);
-	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRPlayerState, MissionRewardPicksPending, Params);
+	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRPlayerState, WeaponUnlockPicksPending, Params);
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRPlayerState, AllWeaponsMods, Params);
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRPlayerState, SelectedWeapon, Params);
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRPlayerState, bReady, Params);
@@ -126,27 +126,27 @@ bool AFPSRPlayerState::ConsumeCardPick()
 	return true;
 }
 
-void AFPSRPlayerState::AddMissionRewardPick()
+void AFPSRPlayerState::AddWeaponUnlockPick()
 {
 	if (!HasAuthority())
 	{
 		return;
 	}
 
-	++MissionRewardPicksPending;
-	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRPlayerState, MissionRewardPicksPending, this);
+	++WeaponUnlockPicksPending;
+	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRPlayerState, WeaponUnlockPicksPending, this);
 	OnCardPicksChanged.Broadcast();
 }
 
-bool AFPSRPlayerState::ConsumeMissionRewardPick()
+bool AFPSRPlayerState::ConsumeWeaponUnlockPick()
 {
-	if (!HasAuthority() || MissionRewardPicksPending <= 0)
+	if (!HasAuthority() || WeaponUnlockPicksPending <= 0)
 	{
 		return false;
 	}
 
-	--MissionRewardPicksPending;
-	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRPlayerState, MissionRewardPicksPending, this);
+	--WeaponUnlockPicksPending;
+	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRPlayerState, WeaponUnlockPicksPending, this);
 	OnCardPicksChanged.Broadcast();
 	return true;
 }
@@ -280,11 +280,11 @@ void AFPSRPlayerState::ResetRunState()
 	// Lobby ready resets on every (re)entry — a returning party must re-ready (U11a).
 	SetReady(false);
 
-	// Pending card / mission-reward picks.
+	// Pending card / weapon-unlock picks.
 	CardPicksPending = 0;
-	MissionRewardPicksPending = 0;
+	WeaponUnlockPicksPending = 0;
 	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRPlayerState, CardPicksPending, this);
-	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRPlayerState, MissionRewardPicksPending, this);
+	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRPlayerState, WeaponUnlockPicksPending, this);
 	OnCardPicksChanged.Broadcast();
 
 	// Reroll charges to default.

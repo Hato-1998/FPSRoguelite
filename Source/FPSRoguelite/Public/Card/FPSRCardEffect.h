@@ -139,3 +139,22 @@ public:
 	virtual void ValidateEffect(FDataValidationContext& Context) const override;
 #endif
 };
+
+/** Weapon-unlock effect (U18b): grants a brand-new weapon into a free inventory slot. */
+UCLASS(meta = (DisplayName = "Grant Weapon (Unlock)"))
+class UCardEffect_GrantWeapon : public UFPSRCardEffect
+{
+	GENERATED_BODY()
+public:
+	/** The weapon DataAsset added to the player's inventory when this card is picked. */
+	UPROPERTY(EditDefaultsOnly, Category = "Effect")
+	TObjectPtr<UFPSRWeaponDataAsset> WeaponToGrant = nullptr;
+
+	virtual void Apply(const FFPSRCardEffectContext& Context, float Magnitude) const override;
+	virtual FText GetDescription(ECardRarity Rarity, float Magnitude) const override;
+	virtual bool RequiresWeapon() const override { return false; }
+	virtual bool CanApply(const FFPSRCardEffectContext& Context) const override;
+#if WITH_EDITOR
+	virtual void ValidateEffect(FDataValidationContext& Context) const override;
+#endif
+};

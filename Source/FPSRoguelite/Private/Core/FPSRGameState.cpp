@@ -43,6 +43,7 @@ void AFPSRGameState::AddSharedXP(int32 Amount)
 
 	SharedXP += Amount;
 	int32 LevelsGained = 0;
+	const int32 PrevLevel = PartyLevel;
 	while (SharedXP >= GetRequiredXP(PartyLevel))
 	{
 		SharedXP -= GetRequiredXP(PartyLevel);
@@ -63,6 +64,14 @@ void AFPSRGameState::AddSharedXP(int32 Amount)
 				for (int32 i = 0; i < LevelsGained; ++i)
 				{
 					FPS->AddCardPick();
+				}
+				// Weapon-unlock milestone picks: one per milestone level crossed this XP gain (Game.MD §2-3-4).
+				for (int32 L = PrevLevel + 1; L <= PartyLevel; ++L)
+				{
+					if (WeaponUnlockMilestones.Contains(L))
+					{
+						FPS->AddWeaponUnlockPick();
+					}
 				}
 			}
 		}

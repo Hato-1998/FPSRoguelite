@@ -44,8 +44,13 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Cards")
 	TArray<TObjectPtr<UFPSRCardDataAsset>> WeaponCards;
 
-	/** Behavior-fragment reward cards (Scope=ThisWeapon, GrantedFragment set) offerable as this weapon's
-	 *  mission-clear reward (Game.MD §2-4-1 ②). One is chosen at the mission-reward freeze. */
+	/** Feature-unlock cards (U18b): locked capabilities offered as weapon-unlock candidates on mission clear /
+	 *  level milestones (reuse WeaponBehavior/WeaponStat effects). Behavior features are stack-gated by MaxStacks. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Cards")
+	TArray<TObjectPtr<UFPSRCardDataAsset>> UnlockableFeatures;
+
+	/** DEPRECATED (U18b): was the mission-reward fragment pool. Fragments moved to WeaponCards (level-up); feature
+	 *  unlocks now live in UnlockableFeatures. Retained only so the content resave can migrate off it — remove in a follow-up. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Cards")
 	TArray<TObjectPtr<UFPSRCardDataAsset>> AvailableModifiers;
 

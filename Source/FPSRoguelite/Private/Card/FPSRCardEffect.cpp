@@ -6,6 +6,7 @@
 #include "Weapon/FPSRWeaponInventoryComponent.h"
 #include "Weapon/FPSRWeaponInstance.h"
 #include "Weapon/FPSRWeaponFragment.h"
+#include "Weapon/FPSRWeaponDataAsset.h"
 #include "AbilitySystemComponent.h"
 #include "GameplayEffect.h"
 
@@ -170,7 +171,14 @@ FText UCardEffect_WeaponBehavior::GetDescription(ECardRarity Rarity, float Magni
 
 bool UCardEffect_WeaponBehavior::CanApply(const FFPSRCardEffectContext& Context) const
 {
-	return Fragment != nullptr && ResolveTargetInstance(Context) != nullptr;
+	if (!Fragment)
+	{
+		return false;
+	}
+	UFPSRWeaponInstance* Instance = ResolveTargetInstance(Context);
+	// Reject (without consuming the pick) when there's no target instance OR the fragment is already maxed on it —
+	// belt-and-suspenders with the draw-time stack gate so a stale/maxed pick never silently wastes a selection.
+	return Instance != nullptr && Instance->GetFragmentStackCount(Fragment) < FMath::Max(Fragment->MaxStacks, 1);
 }
 
 #if WITH_EDITOR
@@ -179,6 +187,45 @@ void UCardEffect_WeaponBehavior::ValidateEffect(FDataValidationContext& Context)
 	if (!Fragment)
 	{
 		Context.AddError(LOCTEXT("BehaviorNoFragment", "Weapon behavior effect has no Fragment — it grants nothing."));
+	}
+}
+#endif
+
+// ---------------------------------------------------------------------------------------------------------------
+// UCardEffect_GrantWeapon — grants a brand-new weapon (U18b).
+// ---------------------------------------------------------------------------------------------------------------
+void UCardEffect_GrantWeapon::Apply(const FFPSRCardEffectContext& Context, float /*Magnitude*/) const
+{
+	// Server-authoritative: add the new weapon to the first free slot (CanApply already gated ownership/slot).
+	if (WeaponToGrant && Context.Inventory)
+	{
+		Context.Inventory->AddWeapon(WeaponToGrant);
+	}
+}
+
+FText UCardEffect_GrantWeapon::GetDescription(ECardRarity /*Rarity*/, float /*Magnitude*/) const
+{
+	const FText WeaponName = WeaponToGrant ? WeaponToGrant->DisplayName : LOCTEXT("UnknownWeapon", "Weapon");
+	return FText::Format(LOCTEXT("UnlockWeaponFmt", "Unlock: {0}"), WeaponName);
+}
+
+bool UCardEffect_GrantWeapon::CanApply(const FFPSRCardEffectContext& Context) const
+{
+	// Transactional: applicable only when a slot is free AND the weapon isn't already owned (else the pick is
+	// rejected without being consumed, so the offer stays up — same invariant as the other effects).
+	if (!WeaponToGrant || !Context.Inventory)
+	{
+		return false;
+	}
+	return Context.Inventory->HasFreeSlot() && !Context.Inventory->GetOwnedWeapons().Contains(WeaponToGrant);
+}
+
+#if WITH_EDITOR
+void UCardEffect_GrantWeapon::ValidateEffect(FDataValidationContext& Context) const
+{
+	if (!WeaponToGrant)
+	{
+		Context.AddError(LOCTEXT("GrantWeaponNoWeapon", "GrantWeapon effect has no WeaponToGrant set."));
 	}
 }
 #endif

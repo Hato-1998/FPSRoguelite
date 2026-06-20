@@ -72,15 +72,15 @@ public:
 	/** Server: consume one pending card pick. Returns true if successful. */
 	bool ConsumeCardPick();
 
-	/** Pending mission-reward picks (granted on mission clear; selected at the freeze, Game.MD §2-8). */
+	/** Pending weapon-unlock picks (granted on mission clear + level 20/30/40 milestones; selected at the freeze). */
 	UFUNCTION(BlueprintPure, Category = "FPSR|Run")
-	int32 GetMissionRewardPicksPending() const { return MissionRewardPicksPending; }
+	int32 GetWeaponUnlockPicksPending() const { return WeaponUnlockPicksPending; }
 
-	/** Server: add one pending mission-reward pick. */
-	void AddMissionRewardPick();
+	/** Server: add one pending weapon-unlock pick. */
+	void AddWeaponUnlockPick();
 
-	/** Server: consume one pending mission-reward pick. Returns true if successful. */
-	bool ConsumeMissionRewardPick();
+	/** Server: consume one pending weapon-unlock pick. Returns true if successful. */
+	bool ConsumeWeaponUnlockPick();
 
 	/** AllWeapons-scope stat modifiers (apply to every owned weapon). Lives on the PlayerState so it is
 	 *  character-wide and survives pawn respawn, consistent with the run state (CardPicksPending). */
@@ -175,7 +175,7 @@ private:
 	int32 CardPicksPending = 0;
 
 	UPROPERTY(ReplicatedUsing = OnRep_CardPicksPending)
-	int32 MissionRewardPicksPending = 0;
+	int32 WeaponUnlockPicksPending = 0;
 
 	UPROPERTY(ReplicatedUsing = OnRep_AllWeaponsMods)
 	FFPSRWeaponModContainer AllWeaponsMods;

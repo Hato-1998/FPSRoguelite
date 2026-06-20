@@ -295,33 +295,24 @@ void UFPSRRunDirectorSubsystem::OnMissionEnded(AFPSRMissionActor* Mission, bool 
 {
 	if (bSuccess)
 	{
-		// Mission cleared: grant every player a mission-reward pick and freeze the run for selection (§2-8).
-		UFPSRCardDataAsset* RewardCard = nullptr;
-		if (Mission)
-		{
-			if (const UFPSRMissionDataAsset* Data = Mission->GetMissionData())
-			{
-				RewardCard = Data->RewardCard;
-			}
-		}
-
+		// Mission cleared: grant every player a weapon-unlock pick and freeze the run for selection (§2-3-4).
 		if (UWorld* World = GetWorld())
 		{
 			for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
 			{
 				if (AFPSRPlayerController* PC = Cast<AFPSRPlayerController>(It->Get()))
 				{
-					PC->GrantMissionReward(RewardCard);
+					PC->GrantWeaponUnlock();
 				}
 			}
 		}
 
 		if (AFPSRGameState* GS = GetGS())
 		{
-			GS->RefreshPauseState(); // freeze + present the reward offers (weapon-modifier choice when no override card)
+			GS->RefreshPauseState(); // freeze + present the weapon-unlock offer
 		}
 
-		UE_LOG(LogFPSR, Log, TEXT("[Run] Mission cleared — reward granted, run frozen for selection"));
+		UE_LOG(LogFPSR, Log, TEXT("[Run] Mission cleared — weapon-unlock pick granted, run frozen for selection"));
 	}
 	else
 	{
