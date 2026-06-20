@@ -11,6 +11,7 @@ class UFPSRMissionDataAsset;
 class AFPSRGameState;
 class UFPSREnemySpawnSubsystem;
 class AFPSRMissionPointSet;
+class AFPSRBossBase;
 
 /** Server-authoritative run director (redesign 2026-06-04, Game.MD §2-8).
  *  No rounds — the run is continuous. The director advances a run clock (paused during the global card-
@@ -43,6 +44,12 @@ private:
 	void SpawnMission(UFPSRMissionDataAsset* MissionData);
 	void OnMissionEnded(AFPSRMissionActor* Mission, bool bSuccess);
 	void EnterBoss();
+	/** Spawn the boss (BossDefinition->BossClass, or the C++ AFPSRBossBase fallback) at a boss spawn point and
+	 *  apply its definition. Called by EnterBoss after the swarm is cleared. */
+	void SpawnBoss();
+	/** Pick where the boss spawns: weighted-random among enabled AFPSRBossSpawnPoint actors, falling back to a
+	 *  player location + forward offset (with a warning) when none are placed — so the boss always appears. */
+	FTransform SelectBossSpawnTransform() const;
 	void DestroyActiveMission();
 
 	/** Time-scaled target alive enemy count from the schedule (or fallback) at the current run clock. */
@@ -71,6 +78,10 @@ private:
 
 	UPROPERTY()
 	TObjectPtr<AFPSRMissionActor> ActiveMission;
+
+	/** The spawned boss (server). Held so it isn't GC'd and for future boss-phase logic (real boss unit). */
+	UPROPERTY()
+	TObjectPtr<AFPSRBossBase> ActiveBoss;
 
 	TArray<bool> MissionWindowFired;
 	/** Per-window trigger time, rolled within [MinTime, MaxTime] at run start. */

@@ -23,6 +23,11 @@ public:
 	/** Server: reset health/dead flag for pooled reuse. */
 	void ResetForReuse();
 
+	/** Server: (re)initialize the health pool to NewMaxHealth (sets MaxHealth and full Health, clears dead). Used by
+	 *  content-driven actors that size their health at runtime — e.g. the U3 boss applies its definition's value.
+	 *  Swarm enemies don't call this (they author MaxHealth as the editor default). No-op off-authority / <= 0. */
+	void InitializeMaxHealth(float NewMaxHealth);
+
 	UFUNCTION(BlueprintPure, Category = "FPSR|Enemy")
 	float GetHealth() const { return Health; }
 
