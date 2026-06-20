@@ -18,6 +18,11 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Card Pool")
 	TArray<TObjectPtr<UFPSRCardDataAsset>> Cards;
 
+	/** Weapon-unlock cards (U18b): each grants a brand-new weapon (UCardEffect_GrantWeapon). Drawn for the
+	 *  WeaponUnlock offer on mission clear + level milestones. Separate from the level-up `Cards` pool. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Card Pool")
+	TArray<TObjectPtr<UFPSRCardDataAsset>> WeaponUnlockCards;
+
 	UPROPERTY(EditDefaultsOnly, Category = "Card Pool|Rarity Weights")
 	float CommonWeight = 1.0f;
 

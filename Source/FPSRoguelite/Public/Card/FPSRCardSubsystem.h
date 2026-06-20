@@ -36,7 +36,7 @@ public:
 	 *  was accepted (so the offer flow can advance / unfreeze). Consume behavior depends on OfferType:
 	 *   - OpeningSeed: applies, consumes nothing.
 	 *   - LevelUp: requires & consumes a level-up pick (CardPicksPending).
-	 *   - MissionReward: requires & consumes a mission-reward pick (MissionRewardPicksPending).
+	 *   - WeaponUnlock: requires & consumes a weapon-unlock pick (WeaponUnlockPicksPending).
 	 *  Character-scope cards apply their GE now; weapon-scope (modifier) cards are accepted/consumed but their
 	 *  effect application lands in P4-B (logged no-op here) so the freeze can never soft-lock. */
 	bool ApplyCard(AController* ForPlayer, const FFPSRCardDraw& Draw, EFPSROfferType OfferType);
@@ -44,6 +44,10 @@ public:
 	/** Build a single card draw from one card (used for mission-reward offers), rolling a rarity tier by
 	 *  the player's luck. Returns an offer with a null Card if the card has no tiers. */
 	FFPSRCardDraw BuildSingleDraw(UFPSRCardDataAsset* Card, AController* ForPlayer) const;
+
+	/** Build a WeaponUnlock offer: new-weapon candidates from the pool's WeaponUnlockCards (gated on free slot +
+	 *  not-already-owned, de-duped by granted weapon). U18b. (U18b2 adds feature-unlock candidates.) */
+	TArray<FFPSRCardDraw> DrawWeaponUnlockOffer(AController* ForPlayer, int32 Count = 3);
 
 	/** Build a mission-reward offer (up to Count) from the player's equipped weapon's AvailableModifiers —
 	 *  fragment cards not already owned by the weapon instance (Game.MD §2-4-1 ②). Server authority only. */

@@ -131,10 +131,10 @@ void AFPSRCharacter::Tick(float DeltaSeconds)
 		{
 			AFPSRPlayerState* PS = GetPlayerState<AFPSRPlayerState>();
 			const int32 CardPicks = PS ? PS->GetCardPicksPending() : 0;
-			const int32 RewardPicks = PS ? PS->GetMissionRewardPicksPending() : 0;
-			const FString RunMsg = FString::Printf(TEXT("Lv %d   XP %d / %d   Picks %d (+%d rwd)   [%s%s]"),
+			const int32 UnlockPicks = PS ? PS->GetWeaponUnlockPicksPending() : 0;
+			const FString RunMsg = FString::Printf(TEXT("Lv %d   XP %d / %d   Picks %d (+%d unlock)   [%s%s]"),
 				RunState->GetPartyLevel(), RunState->GetSharedXP(), RunState->GetRequiredXPForNextLevel(),
-				CardPicks, RewardPicks, RunState->IsCombatPhase() ? TEXT("Combat") : TEXT("Boss"),
+				CardPicks, UnlockPicks, RunState->IsCombatPhase() ? TEXT("Combat") : TEXT("Boss"),
 				RunState->IsRunPaused() ? TEXT(" FROZEN") : TEXT(""));
 			GEngine->AddOnScreenDebugMessage((uint64)(UPTRINT)this + 1, 0.0f, FColor::Cyan, RunMsg);
 		}

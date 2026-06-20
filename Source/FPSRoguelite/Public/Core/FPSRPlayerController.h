@@ -42,9 +42,8 @@ public:
 	 *  debug only — deliberately not client-callable so a client can't grant itself free offers. */
 	void BeginOpeningSeed(int32 Count);
 
-	/** Server-only (NOT an RPC): grant this player one mission-reward pick for the given reward card. The
-	 *  reward is presented (and the run freezes) on the next RefreshPauseState. */
-	void GrantMissionReward(UFPSRCardDataAsset* RewardCard);
+	/** Server: grant one weapon-unlock pick (mission clear / level milestone). */
+	void GrantWeaponUnlock();
 
 	/** Client intent: notify the server the local UI is ready, so the server can issue the one-time
 	 *  run-start opening seed (§2-2). Count is fixed server-side; processed at most once per player. */
@@ -174,10 +173,6 @@ private:
 
 	/** Server-only: remaining opening-seed picks to present. */
 	int32 PendingOpeningSeeds = 0;
-
-	/** Server-only: queued mission-reward cards (one per pending mission-reward pick), FIFO. */
-	UPROPERTY(Transient)
-	TArray<TObjectPtr<UFPSRCardDataAsset>> PendingMissionRewardCards;
 
 	/** Server-only: monotonic id of the current offer; selections must echo it (anti double-apply). */
 	int32 CurrentOfferId = 0;

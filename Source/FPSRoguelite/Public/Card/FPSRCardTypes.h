@@ -25,7 +25,7 @@ enum class EFPSROfferType : uint8
 {
 	OpeningSeed  UMETA(DisplayName = "Opening Seed"),  // run-start seed; applies without consuming a pick
 	LevelUp      UMETA(DisplayName = "Level Up"),      // consumes a level-up pick (CardPicksPending)
-	MissionReward UMETA(DisplayName = "Mission Reward") // consumes a mission-reward pick; weapon-modifier card
+	WeaponUnlock UMETA(DisplayName = "Weapon Unlock") // WeaponUnlock: requires & consumes a weapon-unlock pick; new-weapon unlock (mission clear + level milestones). Not rerollable.
 };
 
 UENUM(BlueprintType)

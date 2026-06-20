@@ -236,7 +236,7 @@ bool UFPSRCardSubsystem::ApplyCard(AController* ForPlayer, const FFPSRCardDraw& 
 	{
 		return false;
 	}
-	if (OfferType == EFPSROfferType::MissionReward && PS->GetMissionRewardPicksPending() <= 0)
+	if (OfferType == EFPSROfferType::WeaponUnlock && PS->GetWeaponUnlockPicksPending() <= 0)
 	{
 		return false;
 	}
@@ -293,9 +293,9 @@ bool UFPSRCardSubsystem::ApplyCard(AController* ForPlayer, const FFPSRCardDraw& 
 	{
 		PS->ConsumeCardPick();
 	}
-	else if (OfferType == EFPSROfferType::MissionReward)
+	else if (OfferType == EFPSROfferType::WeaponUnlock)
 	{
-		PS->ConsumeMissionRewardPick();
+		PS->ConsumeWeaponUnlockPick();
 	}
 
 	return true;
@@ -426,6 +426,75 @@ TArray<FFPSRCardDraw> UFPSRCardSubsystem::DrawWeaponModifierOffer(AController* F
 		if (Draw.Card)
 		{
 			Draw.TargetWeapon = CandidateWeapons[i]; // fragment applies to its source weapon
+			Result.Add(Draw);
+		}
+	}
+	return Result;
+}
+
+TArray<FFPSRCardDraw> UFPSRCardSubsystem::DrawWeaponUnlockOffer(AController* ForPlayer, int32 Count)
+{
+	TArray<FFPSRCardDraw> Result;
+	UWorld* World = GetWorld();
+	if (!World || World->GetNetMode() == NM_Client || !ActivePool)
+	{
+		return Result;
+	}
+
+	APawn* Pawn = ForPlayer ? ForPlayer->GetPawn() : nullptr;
+	UFPSRWeaponInventoryComponent* Inv = Pawn ? Pawn->FindComponentByClass<UFPSRWeaponInventoryComponent>() : nullptr;
+	if (!Inv)
+	{
+		return Result;
+	}
+
+	const bool bHasFreeSlot = Inv->HasFreeSlot();
+	const TArray<UFPSRWeaponDataAsset*> Owned = Inv->GetOwnedWeapons();
+
+	// New-weapon candidates: each WeaponUnlockCards card grants a weapon (UCardEffect_GrantWeapon). Offer only when
+	// a slot is free AND the weapon isn't already owned. De-dup by granted weapon so the same weapon never appears twice.
+	TArray<UFPSRCardDataAsset*> Candidates;
+	TArray<UFPSRWeaponDataAsset*> GrantedSeen;
+	if (bHasFreeSlot)
+	{
+		for (const TObjectPtr<UFPSRCardDataAsset>& Card : ActivePool->WeaponUnlockCards)
+		{
+			if (!Card)
+			{
+				continue;
+			}
+			UFPSRWeaponDataAsset* Granted = nullptr;
+			for (const TObjectPtr<UFPSRCardEffect>& Effect : Card->Effects)
+			{
+				if (const UCardEffect_GrantWeapon* Grant = Cast<UCardEffect_GrantWeapon>(Effect))
+				{
+					Granted = Grant->WeaponToGrant;
+					break;
+				}
+			}
+			if (!Granted || Owned.Contains(Granted) || GrantedSeen.Contains(Granted))
+			{
+				continue;
+			}
+			Candidates.Add(Card.Get());
+			GrantedSeen.Add(Granted);
+		}
+	}
+
+	// (U18b2 adds feature-unlock candidates from each owned weapon's UnlockableFeatures here.)
+
+	// Shuffle (Fisher-Yates) and take up to Count. TargetWeapon stays null for brand-new-weapon cards.
+	for (int32 i = Candidates.Num() - 1; i > 0; --i)
+	{
+		const int32 j = FMath::RandRange(0, i);
+		Candidates.Swap(i, j);
+	}
+	const int32 Take = FMath::Min(Count, Candidates.Num());
+	for (int32 i = 0; i < Take; ++i)
+	{
+		FFPSRCardDraw Draw = BuildSingleDraw(Candidates[i], ForPlayer);
+		if (Draw.Card)
+		{
 			Result.Add(Draw);
 		}
 	}

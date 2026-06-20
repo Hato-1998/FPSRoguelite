@@ -37,10 +37,6 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Mission")
 	FGameplayTag SpawnPointTag;
 
-	/** Weapon/modifier reward card for clearing this mission (P4-A counts only, not offered yet). */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Mission")
-	TObjectPtr<UFPSRCardDataAsset> RewardCard = nullptr;
-
 #if WITH_EDITOR
 	/** Editor validation: MissionClass must be set. */
 	virtual EDataValidationResult IsDataValid(class FDataValidationContext& Context) const override;
