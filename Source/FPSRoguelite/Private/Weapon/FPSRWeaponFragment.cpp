@@ -89,13 +89,20 @@ void UFPSRFragment_ReloadOnKill::OnKill(const FFPSRFireContext& Context, AActor*
 	}
 	if (bInstantRefill)
 	{
+		// Instant: refill the EXACT killing weapon instance, even if it is now holstered (e.g. a bazooka projectile
+		// that landed after a weapon swap). SetCurrentAmmo targets Context.Instance directly, so this is swap-safe.
 		Context.Instance->SetCurrentAmmo(Context.Instance->GetResolvedStats().MagSize);
 	}
 	else if (Context.Avatar)
 	{
 		if (UFPSRWeaponInventoryComponent* Inventory = Context.Avatar->FindComponentByClass<UFPSRWeaponInventoryComponent>())
 		{
-			Inventory->StartReload();
+			// Timed reload animates the EQUIPPED weapon only. If the kill came from a now-holstered weapon (deferred
+			// projectile after a swap), skip rather than reload the wrong slot — StartReload only knows the current slot.
+			if (Inventory->GetCurrentInstance() == Context.Instance)
+			{
+				Inventory->StartReload();
+			}
 		}
 	}
 }

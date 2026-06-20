@@ -32,7 +32,14 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "Passive")
 	bool bActivateOnGrant = false;
 
+	//~UGameplayAbility — a card grant mid-run fires OnGiveAbility (avatar already set); a startup grant before
+	// possession fires OnAvatarSet later. Try to auto-activate from BOTH (guarded against double-activation) so an
+	// always-on passive starts no matter which order grant/avatar happen.
+	virtual void OnGiveAbility(const FGameplayAbilityActorInfo* ActorInfo, const FGameplayAbilitySpec& Spec) override;
 	virtual void OnAvatarSet(const FGameplayAbilityActorInfo* ActorInfo, const FGameplayAbilitySpec& Spec) override;
+
+	/** Activate the granted spec if bActivateOnGrant and the avatar/spec are ready, unless it is already running. */
+	void TryAutoActivate(const FGameplayAbilityActorInfo* ActorInfo, const FGameplayAbilitySpec& Spec);
 };
 
 /**

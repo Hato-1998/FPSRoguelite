@@ -13,19 +13,42 @@ UFPSRPassiveAbility::UFPSRPassiveAbility()
 	NetExecutionPolicy = EGameplayAbilityNetExecutionPolicy::ServerOnly;
 }
 
+void UFPSRPassiveAbility::OnGiveAbility(const FGameplayAbilityActorInfo* ActorInfo, const FGameplayAbilitySpec& Spec)
+{
+	Super::OnGiveAbility(ActorInfo, Spec);
+	// A card-granted passive is given mid-run (avatar already set) — GiveAbility routes here, NOT OnAvatarSet — so
+	// this is the path that actually auto-activates a card-picked always-on passive.
+	TryAutoActivate(ActorInfo, Spec);
+}
+
 void UFPSRPassiveAbility::OnAvatarSet(const FGameplayAbilityActorInfo* ActorInfo, const FGameplayAbilitySpec& Spec)
 {
 	Super::OnAvatarSet(ActorInfo, Spec);
+	// Covers the startup-grant case (granted before possession): activate once the avatar arrives.
+	TryAutoActivate(ActorInfo, Spec);
+}
 
-	// Auto-activate an always-on passive the moment it is granted (event-triggered passives leave bActivateOnGrant
-	// false and fire from their AbilityTrigger instead).
-	if (bActivateOnGrant && ActorInfo)
+void UFPSRPassiveAbility::TryAutoActivate(const FGameplayAbilityActorInfo* ActorInfo, const FGameplayAbilitySpec& Spec)
+{
+	// Event-triggered passives leave bActivateOnGrant false and fire from their AbilityTrigger instead.
+	if (!bActivateOnGrant || !ActorInfo || !ActorInfo->AvatarActor.IsValid())
 	{
-		if (UAbilitySystemComponent* ASC = ActorInfo->AbilitySystemComponent.Get())
+		return;
+	}
+	UAbilitySystemComponent* ASC = ActorInfo->AbilitySystemComponent.Get();
+	if (!ASC)
+	{
+		return;
+	}
+	// OnGiveAbility + OnAvatarSet can both fire — don't re-activate an instance that is already running.
+	if (const FGameplayAbilitySpec* FoundSpec = ASC->FindAbilitySpecFromHandle(Spec.Handle))
+	{
+		if (FoundSpec->IsActive())
 		{
-			ASC->TryActivateAbility(Spec.Handle);
+			return;
 		}
 	}
+	ASC->TryActivateAbility(Spec.Handle);
 }
 
 UFPSRPassiveAbility_Lifesteal::UFPSRPassiveAbility_Lifesteal()
