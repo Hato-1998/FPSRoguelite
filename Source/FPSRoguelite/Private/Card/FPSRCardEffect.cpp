@@ -171,7 +171,14 @@ FText UCardEffect_WeaponBehavior::GetDescription(ECardRarity Rarity, float Magni
 
 bool UCardEffect_WeaponBehavior::CanApply(const FFPSRCardEffectContext& Context) const
 {
-	return Fragment != nullptr && ResolveTargetInstance(Context) != nullptr;
+	if (!Fragment)
+	{
+		return false;
+	}
+	UFPSRWeaponInstance* Instance = ResolveTargetInstance(Context);
+	// Reject (without consuming the pick) when there's no target instance OR the fragment is already maxed on it —
+	// belt-and-suspenders with the draw-time stack gate so a stale/maxed pick never silently wastes a selection.
+	return Instance != nullptr && Instance->GetFragmentStackCount(Fragment) < FMath::Max(Fragment->MaxStacks, 1);
 }
 
 #if WITH_EDITOR

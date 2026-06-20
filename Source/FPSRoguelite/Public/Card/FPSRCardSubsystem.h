@@ -49,10 +49,6 @@ public:
 	 *  not-already-owned, de-duped by granted weapon). U18b. (U18b2 adds feature-unlock candidates.) */
 	TArray<FFPSRCardDraw> DrawWeaponUnlockOffer(AController* ForPlayer, int32 Count = 3);
 
-	/** Build a mission-reward offer (up to Count) from the player's equipped weapon's AvailableModifiers —
-	 *  fragment cards not already owned by the weapon instance (Game.MD §2-4-1 ②). Server authority only. */
-	TArray<FFPSRCardDraw> DrawWeaponModifierOffer(AController* ForPlayer, int32 Count);
-
 	/** Try to consume a reroll charge from the player. Returns true if successful. */
 	bool TryReroll(AController* ForPlayer);
 

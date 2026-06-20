@@ -42,12 +42,21 @@ namespace
 			[](const TObjectPtr<UFPSRCardEffect>& E) { return E && E->RequiresWeapon(); });
 	}
 
-	/** True if the card grants a behavior fragment. v1 routing: fragment cards live only in a weapon's
-	 *  AvailableModifiers (mission-reward pool), never the level-up draw — keep that invariant in U18a (re-route = U18b). */
-	bool CardHasBehaviorEffect(const UFPSRCardDataAsset* Card)
+	// Returns the behavior fragment a card grants (first UCardEffect_WeaponBehavior's Fragment), or null.
+	UFPSRWeaponFragment* GetCardBehaviorFragment(const UFPSRCardDataAsset* Card)
 	{
-		return Card && Card->Effects.ContainsByPredicate(
-			[](const TObjectPtr<UFPSRCardEffect>& E) { return Cast<UCardEffect_WeaponBehavior>(E) != nullptr; });
+		if (!Card)
+		{
+			return nullptr;
+		}
+		for (const TObjectPtr<UFPSRCardEffect>& E : Card->Effects)
+		{
+			if (const UCardEffect_WeaponBehavior* Beh = Cast<UCardEffect_WeaponBehavior>(E))
+			{
+				return Beh->Fragment;
+			}
+		}
+		return nullptr;
 	}
 }
 
@@ -94,14 +103,12 @@ TArray<FFPSRCardDraw> UFPSRCardSubsystem::DrawCards(AController* ForPlayer, int3
 
 	// Weapon-scope (ThisWeapon/AllWeapons) stat cards join the level-up pool only once the player owns a
 	// weapon to apply them to (Game.MD §2-4-1). Character-scope cards are always eligible.
-	bool bHasWeapon = false;
+	UFPSRWeaponInventoryComponent* Inv = nullptr;
 	if (APawn* Pawn = ForPlayer ? ForPlayer->GetPawn() : nullptr)
 	{
-		if (UFPSRWeaponInventoryComponent* Inv = Pawn->FindComponentByClass<UFPSRWeaponInventoryComponent>())
-		{
-			bHasWeapon = Inv->GetOwnedWeapons().Num() > 0;
-		}
+		Inv = Pawn->FindComponentByClass<UFPSRWeaponInventoryComponent>();
 	}
+	const bool bHasWeapon = Inv && Inv->GetOwnedWeapons().Num() > 0;
 
 	// Flatten each eligible card into one weighted offer per OFFERED rarity. Excluded cards, behavior-fragment
 	// cards (mission-reward only), and weapon-targeting cards while the player owns no weapon are skipped.
@@ -121,10 +128,16 @@ TArray<FFPSRCardDraw> UFPSRCardSubsystem::DrawCards(AController* ForPlayer, int3
 			UE_LOG(LogFPSR, Warning, TEXT("[Card] '%s' has no Effects — skipped (configure at least one effect)."), *Card->GetName());
 			continue;
 		}
-		// Behavior-fragment cards are mission-reward only in U18a (v1 routing) — never offered in the level-up draw.
-		if (CardHasBehaviorEffect(Card))
+		// Behavior-fragment cards now join the level-up draw (U18b routing). Stack gate: a fragment already maxed on its
+		// target weapon is no longer offered (ported from the old mission path). SourceWeapon picks the target instance.
+		if (UFPSRWeaponFragment* BehFrag = GetCardBehaviorFragment(Card))
 		{
-			continue;
+			UFPSRWeaponInstance* Inst = (Inv && SourceWeapon) ? Inv->GetInstanceForWeapon(SourceWeapon)
+			                                                  : (Inv ? Inv->GetCurrentInstance() : nullptr);
+			if (!Inst || Inst->GetFragmentStackCount(BehFrag) >= FMath::Max(BehFrag->MaxStacks, 1))
+			{
+				continue;
+			}
 		}
 		// Weapon-targeting cards (this-weapon / all-weapons stat) join the pool only once a weapon is owned (v1 gate).
 		if (CardRequiresWeapon(Card) && !bHasWeapon)
@@ -311,7 +324,7 @@ FFPSRCardDraw UFPSRCardSubsystem::BuildSingleDraw(UFPSRCardDataAsset* Card, ACon
 	if (Card->OfferRarities.Num() == 0)
 	{
 		// Pure-behavior card (no numeric tiers, e.g. a fragment): there is no meaningful rarity to roll, but it must
-		// still build a VALID draw so DrawWeaponModifierOffer can present it. Default the rarity to Common.
+		// still build a VALID draw so offer flows can present it. Default the rarity to Common.
 		Draw.Card = Card;
 		Draw.Rarity = ECardRarity::Common;
 		return Draw;
@@ -353,85 +366,6 @@ FFPSRCardDraw UFPSRCardSubsystem::BuildSingleDraw(UFPSRCardDataAsset* Card, ACon
 	return Draw;
 }
 
-TArray<FFPSRCardDraw> UFPSRCardSubsystem::DrawWeaponModifierOffer(AController* ForPlayer, int32 Count)
-{
-	TArray<FFPSRCardDraw> Result;
-
-	UWorld* World = GetWorld();
-	if (!World || World->GetNetMode() == NM_Client || Count <= 0)
-	{
-		return Result;
-	}
-
-	APawn* Pawn = ForPlayer ? ForPlayer->GetPawn() : nullptr;
-	UFPSRWeaponInventoryComponent* Inv = Pawn ? Pawn->FindComponentByClass<UFPSRWeaponInventoryComponent>() : nullptr;
-	if (!Inv)
-	{
-		return Result;
-	}
-
-	// Candidate fragment cards = every OWNED weapon's AvailableModifiers that the weapon's own instance still has
-	// room to stack. Each candidate is tagged with its source weapon so the fragment applies to that weapon (not
-	// whatever is equipped). A stackable fragment (e.g. MultiShot MaxStacks=2) keeps appearing until full.
-	TArray<UFPSRCardDataAsset*> Candidates;
-	TArray<UFPSRWeaponDataAsset*> CandidateWeapons; // index-aligned with Candidates
-	for (UFPSRWeaponDataAsset* Weapon : Inv->GetOwnedWeapons())
-	{
-		if (!Weapon)
-		{
-			continue;
-		}
-		UFPSRWeaponInstance* Instance = Inv->GetInstanceForWeapon(Weapon);
-		if (!Instance)
-		{
-			continue;
-		}
-		for (const TObjectPtr<UFPSRCardDataAsset>& Card : Weapon->AvailableModifiers)
-		{
-			if (!Card)
-			{
-				continue;
-			}
-			// v2: the granted fragment lives on a WeaponBehavior effect. Find it, then check the weapon has stack room.
-			UFPSRWeaponFragment* Fragment = nullptr;
-			for (const TObjectPtr<UFPSRCardEffect>& Effect : Card->Effects)
-			{
-				if (const UCardEffect_WeaponBehavior* Behavior = Cast<UCardEffect_WeaponBehavior>(Effect))
-				{
-					Fragment = Behavior->Fragment;
-					break;
-				}
-			}
-			if (Fragment && Instance->GetFragmentStackCount(Fragment) < FMath::Max(Fragment->MaxStacks, 1))
-			{
-				// Same card asset on two weapons yields two candidates (distinct target weapons).
-				Candidates.Add(Card.Get());
-				CandidateWeapons.Add(Weapon);
-			}
-		}
-	}
-
-	// Shuffle (Fisher–Yates, parallel arrays) so the offered subset varies, then take up to Count.
-	for (int32 i = Candidates.Num() - 1; i > 0; --i)
-	{
-		const int32 j = FMath::RandRange(0, i);
-		Candidates.Swap(i, j);
-		CandidateWeapons.Swap(i, j);
-	}
-
-	const int32 Take = FMath::Min(Count, Candidates.Num());
-	for (int32 i = 0; i < Take; ++i)
-	{
-		FFPSRCardDraw Draw = BuildSingleDraw(Candidates[i], ForPlayer);
-		if (Draw.Card)
-		{
-			Draw.TargetWeapon = CandidateWeapons[i]; // fragment applies to its source weapon
-			Result.Add(Draw);
-		}
-	}
-	return Result;
-}
-
 TArray<FFPSRCardDraw> UFPSRCardSubsystem::DrawWeaponUnlockOffer(AController* ForPlayer, int32 Count)
 {
 	TArray<FFPSRCardDraw> Result;
@@ -451,12 +385,14 @@ TArray<FFPSRCardDraw> UFPSRCardSubsystem::DrawWeaponUnlockOffer(AController* For
 	const bool bHasFreeSlot = Inv->HasFreeSlot();
 	const TArray<UFPSRWeaponDataAsset*> Owned = Inv->GetOwnedWeapons();
 
-	// New-weapon candidates: each WeaponUnlockCards card grants a weapon (UCardEffect_GrantWeapon). Offer only when
-	// a slot is free AND the weapon isn't already owned. De-dup by granted weapon so the same weapon never appears twice.
+	// Parallel candidate arrays: TargetWeapon is null for brand-new-weapon cards, the owned weapon for feature unlocks.
 	TArray<UFPSRCardDataAsset*> Candidates;
-	TArray<UFPSRWeaponDataAsset*> GrantedSeen;
+	TArray<UFPSRWeaponDataAsset*> CandidateWeapons;
+
+	// Part A — new-weapon candidates (WeaponUnlockCards): free slot + not already owned, de-duped by granted weapon.
 	if (bHasFreeSlot)
 	{
+		TArray<UFPSRWeaponDataAsset*> GrantedSeen;
 		for (const TObjectPtr<UFPSRCardDataAsset>& Card : ActivePool->WeaponUnlockCards)
 		{
 			if (!Card)
@@ -477,17 +413,61 @@ TArray<FFPSRCardDraw> UFPSRCardSubsystem::DrawWeaponUnlockOffer(AController* For
 				continue;
 			}
 			Candidates.Add(Card.Get());
+			CandidateWeapons.Add(nullptr);
 			GrantedSeen.Add(Granted);
 		}
 	}
 
-	// (U18b2 adds feature-unlock candidates from each owned weapon's UnlockableFeatures here.)
+	// Part B — feature-unlock candidates: each owned weapon's UnlockableFeatures. Behavior features are stack-gated
+	// (skip when the fragment is maxed on that weapon); stat-only features (no fragment) are always offered.
+	for (UFPSRWeaponDataAsset* Weapon : Owned)
+	{
+		if (!Weapon)
+		{
+			continue;
+		}
+		UFPSRWeaponInstance* Instance = Inv->GetInstanceForWeapon(Weapon);
+		if (!Instance)
+		{
+			continue;
+		}
+		for (const TObjectPtr<UFPSRCardDataAsset>& Card : Weapon->UnlockableFeatures)
+		{
+			if (!Card)
+			{
+				continue;
+			}
+			if (UFPSRWeaponFragment* Frag = GetCardBehaviorFragment(Card))
+			{
+				if (Instance->GetFragmentStackCount(Frag) >= FMath::Max(Frag->MaxStacks, 1))
+				{
+					continue; // maxed on this weapon — skip
+				}
+			}
+			// De-dup on (card, weapon).
+			bool bAlready = false;
+			for (int32 i = 0; i < Candidates.Num(); ++i)
+			{
+				if (Candidates[i] == Card && CandidateWeapons[i] == Weapon)
+				{
+					bAlready = true;
+					break;
+				}
+			}
+			if (!bAlready)
+			{
+				Candidates.Add(Card.Get());
+				CandidateWeapons.Add(Weapon);
+			}
+		}
+	}
 
-	// Shuffle (Fisher-Yates) and take up to Count. TargetWeapon stays null for brand-new-weapon cards.
+	// Shuffle parallel arrays in lockstep (Fisher-Yates) and take up to Count.
 	for (int32 i = Candidates.Num() - 1; i > 0; --i)
 	{
 		const int32 j = FMath::RandRange(0, i);
 		Candidates.Swap(i, j);
+		CandidateWeapons.Swap(i, j);
 	}
 	const int32 Take = FMath::Min(Count, Candidates.Num());
 	for (int32 i = 0; i < Take; ++i)
@@ -495,6 +475,7 @@ TArray<FFPSRCardDraw> UFPSRCardSubsystem::DrawWeaponUnlockOffer(AController* For
 		FFPSRCardDraw Draw = BuildSingleDraw(Candidates[i], ForPlayer);
 		if (Draw.Card)
 		{
+			Draw.TargetWeapon = CandidateWeapons[i];
 			Result.Add(Draw);
 		}
 	}
