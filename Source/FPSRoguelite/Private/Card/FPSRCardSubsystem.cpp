@@ -304,8 +304,16 @@ bool UFPSRCardSubsystem::ApplyCard(AController* ForPlayer, const FFPSRCardDraw& 
 FFPSRCardDraw UFPSRCardSubsystem::BuildSingleDraw(UFPSRCardDataAsset* Card, AController* ForPlayer) const
 {
 	FFPSRCardDraw Draw;
-	if (!Card || Card->OfferRarities.Num() == 0)
+	if (!Card)
 	{
+		return Draw;
+	}
+	if (Card->OfferRarities.Num() == 0)
+	{
+		// Pure-behavior card (no numeric tiers, e.g. a fragment): there is no meaningful rarity to roll, but it must
+		// still build a VALID draw so DrawWeaponModifierOffer can present it. Default the rarity to Common.
+		Draw.Card = Card;
+		Draw.Rarity = ECardRarity::Common;
 		return Draw;
 	}
 

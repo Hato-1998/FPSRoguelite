@@ -134,7 +134,13 @@ EDataValidationResult UFPSRCardDataAsset::IsDataValid(FDataValidationContext& Co
 			continue;
 		}
 		++NumValidEffects;
+		// Fold per-effect validation errors into the card's result (AddError alone doesn't fail the asset gate).
+		const uint32 ErrorsBefore = Context.GetNumErrors();
 		Effect->ValidateEffect(Context);
+		if (Context.GetNumErrors() > ErrorsBefore)
+		{
+			Result = EDataValidationResult::Invalid;
+		}
 	}
 
 	// Rarity coverage (§2-3-1): every magnitude-bearing effect must declare a tier for each offered rarity, or a
