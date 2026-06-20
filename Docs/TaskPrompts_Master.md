@@ -388,6 +388,43 @@ SetByCaller 1에셋 다Rarity 패턴 / 서버권위 인덱스-선택 보안(FPSR
 §2-3 재작성 + 멀티효과 스키마 + 3카드군 + 무기해금 + 비상태 행동훅 + 이동속도 + 검증강화. 상태이상 처치 훅·상태창은 시임으로 남기고 D3/후속에 연결 기록. PROGRESS 완료절 + TaskPrompts §B ✅.
 ```
 
+#### U18a — 카드 v2 토대: 폴리모픽 효과 레이어 + 이동속도 + 속성 시임 (페이즈1 분해 산출, 2026-06-20 플랜 승인)
+
+```
+Game.md + PROGRESS.md 먼저 읽어. 그다음 Docs/SSOT/CombatWeaponCard.md §2-3(v2 재설계 — 이게 이 작업의 설계 SSOT)·§2-4-1(Fragment)를 정독해. 이 작업(U18a)은 U18 카드 v2의 **토대**를 구현한다 — 카드 데이터 모델을 단일효과(v1) → 폴리모픽 멀티효과(UFPSRCardEffect 서브클래스)로 전환 + 이동속도 속성 + 속성(elemental) 데미지 시임. 플랜모드 우선, HIGH_RISK 승인 후. 구현=Haiku 위임 / 설계·검증·보안배선=Opus 직접(CLAUDE.md §6-5).
+
+[절대조건]
+- 무회귀: 기존 캐릭터카드 7종·무기 stat 카드·Fragment 4종이 현행과 동일 거동.
+- 라우팅 불변: U18a는 추첨 라우팅을 바꾸지 않는다(행동 Fragment는 v1대로 미션 보상 잔존). 재편(Fragment→레벨업, 미션→무기해금)은 U18b. → U18a=순수 스키마 마이그레이션(미션 보상 공백 없음).
+- 보존: SetByCaller 1에셋 다Rarity / 서버권위 인덱스-선택(클라=Index+OfferId만, FPSRPlayerController ServerSelectCard) / CardFamily 상호배제 / Fragment MaxStacks / AllWeaponsStatExclusions.
+
+[브랜치/시퀀싱] main→phase/u18a-card-schema 분기(§6-7). 한 브랜치에서 a1→a2 2커밋·각자 검증, 1회 --no-ff 머지.
+
+■ a1 — 그라운드워크 (독립·저위험·선행)
+- 이동속도: UFPSRCombatSet(FPSRCombatSet.{h,cpp})에 MoveSpeedMultiplier(base 1.0) 추가 — ATTRIBUTE_ACCESSORS_BASIC + FGameplayAttributeData(ReplicatedUsing OnRep) + InitMoveSpeedMultiplier(1.0f)(ctor) + DOREPLIFETIME_CONDITION_NOTIFY(...,COND_None,REPNOTIFY_Always) + OnRep(GAMEPLAYATTRIBUTE_REPNOTIFY) + 예약 슬롯 주석. **PostAttributeChange 오버라이드 신설**(CombatSet엔 없음; UFPSRHealthSet 패턴 차용) → 소유 PS의 GetPawn()→UCharacterMovementComponent.MaxWalkSpeed = BaseWalkSpeed × NewValue. AFPSRCharacter: FPSRCharacter.cpp:60 하드코딩 600 → BaseWalkSpeed 상수 + PossessedBy/BeginPlay에서 현재 멀티플라이어 1회 반영(폰 부재 레이스 대비).
+- 속성 데미지 시임(거동 0): FPSRCombatStatics.{h,cpp} ApplyDamage(:67)·ApplyExplosion(:80)에 FGameplayTag DamageType = FGameplayTag()(빈=Physical) 후행 디폴트 인자(기존 콜러 무수정, 헤더 #include "GameplayTagContainer.h"). AFPSRCharacter::ApplyContactDamage·UFPSREnemyHealthComponent::ApplyDamage도 동일(캐시/무시). Config/DefaultGameplayTags.ini에 DamageType.Physical/Fire/Ice/Poison/Lightning 선언. **elemental 거동·bKilled→bJustKilled 교정은 U18 범위 아님(D3/U18c).**
+- a1 게이트: 빌드(-WaitMutex) + 헤드리스 스모크 Result={Success} + 이동속도 PIE 체감(디버그로 멀티플라이어 조정) + 데미지 무회귀.
+
+■ a2 — 스키마 코어 (폴리모픽 효과 레이어 + 마이그레이션)
+- 신규 UFPSRCardEffect(Card/FPSRCardEffect.{h,cpp}) : UObject, UCLASS(Abstract, EditInlineNew, DefaultToInstanced, CollapseCategories). 필드 TArray<FFPSRCardRarityTier> RarityTiers(효과별). virtual: Apply(const FFPSRCardEffectContext&, float Magnitude)[서버 PURE_VIRTUAL] / GetDescription(ECardRarity, float)[UI] / #if WITH_EDITOR ValidateEffect(FDataValidationContext&) / GetDamageTypeTag()→FGameplayTag{}(시임). 신규 struct FFPSRCardEffectContext{AController* Player, AFPSRPlayerState* PS, UFPSRAbilitySystemComponent* ASC, UFPSRWeaponInventoryComponent* Inventory, UFPSRWeaponDataAsset* TargetWeapon}.
+- 3 서브클래스(v1 거동 1:1): UCardEffect_CharacterGE{TSubclassOf<UGameplayEffect> Effect}→ASC 적용+SetByCaller.CardMagnitude / UCardEffect_WeaponStat{EFPSRWeaponStat Stat, EFPSRWeaponModOp Op, bool bThisWeaponOnly}→bThisWeaponOnly면 TargetWeapon 인스턴스 AddModifier 아니면 PS->AddAllWeaponsModifier / UCardEffect_WeaponBehavior{UFPSRWeaponFragment* Fragment}→TargetWeapon 인스턴스 AddFragment. (GrantWeapon=U18b, CharacterPassive=U18c — 미생성.)
+- UFPSRCardDataAsset(FPSRCardDataAsset.{h,cpp}): 신규 UPROPERTY(Instanced) TArray<TObjectPtr<UFPSRCardEffect>> Effects(⚠️EditFixedSize 금지) + ECardGroup Group(신규 enum FPSRCardTypes.h). 레거시 필드(Scope/AppliedEffect/WeaponStat/WeaponStatOp/GrantedFragment/RarityTiers) meta=(DeprecatedProperty). **PostLoad 마이그레이션**(#if WITH_EDITOR, 멱등 Effects.Num()==0 게이트): 구 Scope→Group+서브클래스 NewObject(Character→CharacterGE / ThisWeapon+GrantedFragment→WeaponBehavior / ThisWeapon|AllWeapons stat→WeaponStat) + 구 RarityTiers→effect, 구 필드 null, Modify(). 11 자산 재저장 → 검증 후 후속 커밋서 레거시 필드 삭제. 등급 모델: 카드 제안 등급=magnitude 효과들의 공통 등급집합(IsDataValid 강제), 카드당 등급 1회 roll→각 효과가 그 등급 magnitude.
+- FPSRCardSubsystem.{h,cpp} **[Opus 직접]**: ApplyCard→효과 루프(Scope switch 폐기; FFPSRCardEffectContext 구성 후 for Effect : Card->Effects → Apply, 효과별 명시 로그). DrawCards/GatherCandidatePool: Scope 판별→ECardGroup/효과 판별(레벨업=Character+Weapon군, 라우팅 결과 v1 동일, TargetWeapon 세팅 유지). GetCardFamilyKey GE클래스 폴백 삭제(멀티효과 CardFamily 필수). BuildSingleDraw·debug 캐시(FDebugCardOffer)·DrawWeaponModifierOffer Magnitude 정합.
+- FPSRCardTypes.h: FFPSRCardDraw에서 Magnitude 제거(클라가 Card->Effects[i]를 Draw.Rarity로 조회) + ECardGroup enum. **블라스트 점검[Opus]**: FPSRPlayerController ClientPresentCards(RPC payload)·ServerSelectCard(인덱스선택 불변)·FDebugCardOffer.
+- IsDataValid 가드레일: 빈 Effects 에러 / 효과별 ValidateEffect / 등급집합 불일치 에러 / 멀티효과 CardFamily 미설정 에러 / 명명 prefix 린트.
+- UI 재작성 FPSRCardEntryWidget.{h,cpp}: UpdateDisplay에서 CardAsset->Scope/GrantedFragment/WeaponStatOp·CachedDraw.Magnitude 하드리드(:59,99,100,103) 제거 → Effects 순회 GetDescription(CachedDraw.Rarity, mag). 이름+등급(CachedDraw.Rarity 유지)+효과별/집계 설명. FragmentCategoryText 폴백은 GetDescription 흡수.
+- 잡정비: BP_Card_RarityBouns.uasset(+가리키는 GE) 삭제(개명 아님; 삭제된 RarityBonus 속성 참조로 이미 깨짐). 에디터 종료 상태 git 조작 주의.
+- a2 게이트: ⚠️**Instanced 효과 cook/load/network 스모크 최우선**(trivial 효과 1개를 카드에 만들어 네트워크 PIE 적용·쿠킹 확인 — 실패 시 효과를 공유 asset-ref(UPrimaryDataAsset)로 폴백). → 빌드+스모크 → 사용자 PIE 무회귀(기존 7 캐릭터·무기 stat·4 Fragment) + 멀티효과 카드 1개(연사+ 데미지- 동시) + 이동속도 카드.
+
+[함정/주의]
+- Instanced 서브오브젝트는 기존 Fragment(공유 asset ref)와 다름 → cook/load 스모크 선행 필수.
+- 마이그레이션 자산별 검증 + 멱등 게이트 + 레거시 필드 후속 삭제(drift 방지).
+- 콘텐츠 .uasset 삭제/재저장=참조·에디터 리다이렉터 주의(에디터 종료상태 git 조작 금지). [[marketplace-asset-import-relocate]] [[vibeue-mcp-capabilities]]
+- 보안배선(ApplyCard 루프·인덱스선택·복제·마이그레이션)=Opus 직접. [[haiku-delegation-security-wiring]] [[freeze-gate-client-server-symmetry]]
+
+[검증/완료] 빌드+스모크+사용자 PIE(위) → Scripts/codex-review.ps1 -Base main → PROGRESS·TaskPrompts 갱신 + 콘텐츠 동반커밋 질문 + --no-ff 머지. 완료 후 다음=U18b(무기해금 + 라우팅 재편).
+```
+
 ### U3 — 보스 스캐폴드(D4) + 승리 배선
 
 ```
