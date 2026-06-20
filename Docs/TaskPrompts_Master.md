@@ -326,7 +326,7 @@ Game.md + PROGRESS.md 먼저 읽어. Docs/TaskPrompts_Master.md의 유닛 U3a를
 > - (d) 행동훅 = 무기 OnAim/OnFire/OnMiss/OnKill(+OnStatusKill 시임 D3) **5 데미지경로 공통 헬퍼**·OnKill=`bJustKilled` 전이 / 캐릭터=**GAS-native**(ApplyDamage→`Event.Player.DealtDamage`→패시브 GA, `UFPSRPassiveAbility` 베이스). 캐릭터 Fragment 컴포넌트 **폐기**.
 > - (e) 이동속도 = `UFPSRCombatSet.MoveSpeedMultiplier` + PostAttributeChange→CMC(하드 600 제거).
 > - (f) 검증 = per-effect `ValidateEffect` 매트릭스 + rarity 커버리지 + 명명 린트 / 'Bouns'=`BP_Card_RarityBouns` **삭제**(개명 아님) / CardId=**보류**(U10 키 확정 후). + (신규) **속성 데미지 시임** = `ApplyDamage`에 `FGameplayTag DamageType`(빈=Physical) 디폴트 인자(거동 D3).
-> **최종 분해(예시 line 352 대체)**: **U18a**(효과레이어+3군+검증+이동속도+속성시임; 권고 분할 **U18a1 그라운드워크**[이동속도+DamageType 시임]/​**U18a2 스키마코어**[효과레이어+군+마이그레이션+UI+검증]) → **U18b**(무기해금) → **U18c**(행동훅: 무기 공통헬퍼 + 캐릭터 GAS-native) → **U18d 기획자 툴**(카드 카탈로그 에디터 유틸, 비런타임). 순서 a→b→c→d.
+> **최종 분해(예시 line 352 대체)**: **✅U18a 완료**(효과레이어+3군+검증+이동속도+속성시임; a1 그라운드워크+a2 스키마코어, **main `--no-ff` 머지 2026-06-20**: 빌드+스모크+마이그레이션 17/17+Instanced 직렬화 증명+Codex 플랜/머지게이트+PIE 무회귀) → **U18b**(무기해금 + 라우팅 재편: Fragment→레벨업, 미션→무기해금) → **U18c**(행동훅: 무기 공통헬퍼 + 캐릭터 GAS-native + CharacterPassive) → **U18d 기획자 툴**(카드 카탈로그 에디터 유틸, 비런타임). 순서 a→b→c→d.
 > **시퀀싱 정합(사용자결정 A 보강)**: **U18a/b/c = 런타임 = U3 보스 앞 완료**. **U18d(툴) = 비런타임·비게이팅 → U3 무차단**(must-have 툴=검증/자동설명은 U18a2 동봉이라 콘텐츠 저작은 U3 전 가능; 카탈로그만 후행). 기획자 콘텐츠 양산은 §B 구현유닛(U18a~c) 진행과 병행.
 
 ```
@@ -388,7 +388,7 @@ SetByCaller 1에셋 다Rarity 패턴 / 서버권위 인덱스-선택 보안(FPSR
 §2-3 재작성 + 멀티효과 스키마 + 3카드군 + 무기해금 + 비상태 행동훅 + 이동속도 + 검증강화. 상태이상 처치 훅·상태창은 시임으로 남기고 D3/후속에 연결 기록. PROGRESS 완료절 + TaskPrompts §B ✅.
 ```
 
-#### U18a — 카드 v2 토대: 폴리모픽 효과 레이어 + 이동속도 + 속성 시임 (페이즈1 분해 산출, 2026-06-20 플랜 승인)
+#### ✅ U18a — 카드 v2 토대: 폴리모픽 효과 레이어 + 이동속도 + 속성 시임 (완료, main `--no-ff` 머지 2026-06-20 — 상세 PROGRESS 핸드오프)
 
 ```
 Game.md + PROGRESS.md 먼저 읽어. 그다음 Docs/SSOT/CombatWeaponCard.md §2-3(v2 재설계 — 이게 이 작업의 설계 SSOT)·§2-4-1(Fragment)를 정독해. 이 작업(U18a)은 U18 카드 v2의 **토대**를 구현한다 — 카드 데이터 모델을 단일효과(v1) → 폴리모픽 멀티효과(UFPSRCardEffect 서브클래스)로 전환 + 이동속도 속성 + 속성(elemental) 데미지 시임. 플랜모드 우선, HIGH_RISK 승인 후. 구현=Haiku 위임 / 설계·검증·보안배선=Opus 직접(CLAUDE.md §6-5).
