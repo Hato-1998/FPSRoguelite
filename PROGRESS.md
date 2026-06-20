@@ -14,6 +14,7 @@
 > **프리즈(§2-2) 대칭**: 스캐폴드 보스는 tick/이동/공격 없음 → 프리즈 중 게이트할 보스 로직 무(자동 대칭). EnterBoss는 디렉터 프리즈 게이트 뒤라 프리즈 중 미실행. 데미지는 무기 GA가 IsRunPaused 게이트 → 프리즈 중 보스 피격 불가. 실보스 이동/공격 추가 시 bRunPaused 게이트 필수(헤더 시임 문서화).
 > **검증**: 빌드 `Result: Succeeded`(풀+증분, 경고 0) + 헤드리스 스모크 `Result={Success}`(ModuleLoads) + Opus diff 자체검토(클린) + **Codex 머지게이트 P2 1건 교정**(`bUseBossSpawnPoint` 미배선 → `SelectBossSpawnTransform`에 플래그 honor; 그 외 블로킹 0). **사용자 PIE 통과(2026-06-21)**: `FPSR.SkipToBoss`→보스 스폰→전 무기 8종 데미지→처치→VICTORY→로비 복귀(U11a 자동)→무기 OnKill fragment 보스킬 반응. U2와 합쳐 승/패 양쪽 E2E. (C++ 폴백 보스 체력=1000 테스트값; 약점 배수는 U4 약점 컴포넌트 배치 후.)
 > **콘텐츠(U4, 본 유닛 밖)**: BP_Boss(AFPSRBossBase 상속)+DA_BossDefinition(체력)+약점 컴포넌트 배치+L_Sandbox 보스 스폰포인트 배치+체력바. 본 유닛은 코드 베이스+C++ 폴백 보스로 스캐폴드 완성(콘텐츠 없이도 승리 루프 PIE 검증 가능). **보스 OnKill 시임(U18c)·멀티 보스-승리 통합(U11b)** 이 베이스가 소비처.
+> **▶ U4 착수(2026-06-21 사용자 결정 = main 직접 + VibeUE MCP)**: 실행 레시피 = `Docs/U4_BossContent_Guide.md`(필드명·수치·함정·PIE 체크리스트). **MCP는 에디터 호스팅이라 이번 세션 미연결 → U4는 에디터 켜고 새 세션 시작해야 착수**(레시피 §세션시작). C++ 표면은 전부 준비됨(신규 코드 0 목표).
 
 ## ✅ U18 카드 시스템 v2 — **완료 아카이브** (2026-06-20, 페이즈1 설계 + U18a/b/c 전부 main `--no-ff` 머지)
 > **개요**: v1 "카드 1=효과 1"(`ECardScope` enum) → **v2 확장성-우선 멀티효과**. 사용자 목표사양 9조건(3 카드군·멀티효과·무기해금·행동훅·이동속도) + directive(확장성-우선·기획자 툴) 충족. 설계 SSOT=`Docs/SSOT/CombatWeaponCard.md` **§2-3(§2-3-1~9)**. 플랜=`Docs/U18{b,c}_*Plan.md`·`Docs/reviews/plan-U18-card-v2.md`. **상세 커밋 = `git log`**(머지 `f02536a`·`78b1bb5`·`7a85773`·`730d771`). **다음 작업=U3 보스 스캐폴드(보스 OnKill 시임 소비)**.
