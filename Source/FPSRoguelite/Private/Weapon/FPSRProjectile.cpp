@@ -245,7 +245,10 @@ void AFPSRProjectile::OnSphereOverlap(UPrimitiveComponent* OverlappedComp, AActo
 	bool bCrit = false;
 	bool bKill = false;
 	bool bWasEnemy = false;
-	if (TryDamageActor(OtherActor, WeakpointMult, bCrit, bKill, bWasEnemy) && bWasEnemy)
+	bool bDamaged = false;
+	// Marker fires only when REAL damage landed on an enemy — a corpse re-hit (bDamaged false) is inert. The hit is
+	// still consumed below (pierce decrements unconditionally), and a friendly hit raises no marker (bWasEnemy false).
+	if (TryDamageActor(OtherActor, WeakpointMult, bCrit, bKill, bWasEnemy, bDamaged) && bWasEnemy && bDamaged)
 	{
 		NotifyInstigatorHitMarker(bCrit, WeakpointMult > 1.0f, bKill);
 	}
@@ -322,7 +325,8 @@ void AFPSRProjectile::HandleImpact(const FVector& ImpactPoint)
 					bool bCrit = false;
 					bool bKill = false;
 					bool bWasEnemy = false;
-					if (Target && !Damaged.Contains(Target) && TryDamageActor(Target, 1.0f, bCrit, bKill, bWasEnemy))
+					bool bDamaged = false;
+					if (Target && !Damaged.Contains(Target) && TryDamageActor(Target, 1.0f, bCrit, bKill, bWasEnemy, bDamaged))
 					{
 						Damaged.Add(Target);
 					}
@@ -365,11 +369,12 @@ bool AFPSRProjectile::IsHostileTarget(AActor* Target) const
 	return false;
 }
 
-bool AFPSRProjectile::TryDamageActor(AActor* Target, float WeakpointMultiplier, bool& bOutCrit, bool& bOutKill, bool& bOutWasEnemy)
+bool AFPSRProjectile::TryDamageActor(AActor* Target, float WeakpointMultiplier, bool& bOutCrit, bool& bOutKill, bool& bOutWasEnemy, bool& bOutDamaged)
 {
 	bOutCrit = false;
 	bOutKill = false;
 	bOutWasEnemy = false;
+	bOutDamaged = false;
 	if (!HasAuthority() || !IsHostileTarget(Target))
 	{
 		return false;
@@ -395,14 +400,16 @@ bool AFPSRProjectile::TryDamageActor(AActor* Target, float WeakpointMultiplier, 
 			const FPSRCombat::FDamageResult Result = FPSRCombat::ApplyDamage(Target, Resolved, Params.InstigatorActor);
 			bOutKill = Result.bKilled;
 			bOutWasEnemy = Result.bWasEnemy;
+			bOutDamaged = Result.DamageDealt > 0.0f; // real health removed (0 for a corpse re-hit) — gates the marker
 			// OnKill trigger (server): this direct hit freshly killed an enemy (sniper etc.). Rebuild a minimal
 			// FireContext from spawn params — the weak weapon ref no-ops the bridge if the weapon is gone.
 			if (Result.bKilled)
 			{
 				FPSRWeaponHooks::NotifyKill(MakeProjectileFireContext(Params, GetWorld()), Target);
 			}
-			// Markers key on real damage (DamageDealt), so a corpse re-hit is inert (no marker); pierce still spends.
-			return Result.DamageDealt > 0.0f;
+			// Return CONSUMPTION (bApplied), not damage: a friendly-fire hit (DamageDealt 0 for a player target) must
+			// still consume the projectile (pierce/release), so the marker is gated separately on bOutDamaged below.
+			return Result.bApplied;
 		}
 		return false;
 	}

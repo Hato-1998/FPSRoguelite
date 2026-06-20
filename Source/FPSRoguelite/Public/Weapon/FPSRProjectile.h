@@ -70,10 +70,11 @@ protected:
 	 *  so a round never explodes on a friendly pass-through. */
 	bool IsHostileTarget(AActor* Target) const;
 
-	/** Try to apply (crit-rolled) damage to an actor. Server-only. Returns true if a damage path applied, and
-	 *  outputs whether the hit critted, whether it killed the target, and whether the target was an ENEMY (a
-	 *  friendly-fire hit on another player must NOT raise the firing player's hit-marker). */
-	bool TryDamageActor(AActor* Target, float WeakpointMultiplier, bool& bOutCrit, bool& bOutKill, bool& bOutWasEnemy);
+	/** Try to apply (crit-rolled) damage to an actor. Server-only. Returns true if a damage path APPLIED (a receiver
+	 *  consumed the hit — drives pierce/release), and outputs whether the hit critted, killed, hit an ENEMY (a
+	 *  friendly-fire hit on another player must NOT raise the firing player's hit-marker), and whether REAL damage
+	 *  landed (bOutDamaged — a corpse re-hit applies but deals 0, so it gets no marker). */
+	bool TryDamageActor(AActor* Target, float WeakpointMultiplier, bool& bOutCrit, bool& bOutKill, bool& bOutWasEnemy, bool& bOutDamaged);
 
 	/** Server: notify the instigating player's controller of a hit-marker (Player-team projectiles only — enemy
 	 *  projectiles have no HUD owner). Strongest outcome wins: Kill > Weak > Crit > Hit (Game.MD §2-14). */
