@@ -364,6 +364,22 @@ void UFPSRWeaponInventoryComponent::StartReload()
 		FMath::Max(0.01f, Stats.ReloadTime), false);
 }
 
+void UFPSRWeaponInventoryComponent::CancelReload()
+{
+	if (!GetOwner() || !GetOwner()->HasAuthority())
+	{
+		return;
+	}
+	// Mirror the weapon-swap reload-cancel (HandleEquip), minus the PendingReloadSlot resume: the magazine is already
+	// full, so there is nothing to resume — just stop the timer and clear the flag so the fire gate reopens.
+	UFPSRWeaponInstance* Instance = GetCurrentInstance();
+	if (Instance && Instance->IsReloading())
+	{
+		GetWorld()->GetTimerManager().ClearTimer(ReloadTimerHandle);
+		Instance->SetReloading(false);
+	}
+}
+
 void UFPSRWeaponInventoryComponent::FinishReload()
 {
 	if (!GetOwner() || !GetOwner()->HasAuthority())

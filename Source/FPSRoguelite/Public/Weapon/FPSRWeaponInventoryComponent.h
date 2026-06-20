@@ -72,6 +72,10 @@ public:
 	/** Server: begin a timed reload of the current slot (no-op if already reloading or full). */
 	void StartReload();
 
+	/** Server: cancel an in-progress reload on the current slot (clears the reload timer + reloading flag). Used when
+	 *  the magazine became full by other means mid-reload (e.g. instant reload-on-kill) so the fire gate unblocks now. */
+	void CancelReload();
+
 	/** Server: returns true if the current weapon's fire interval has elapsed since the last shot, then stamps
 	 *  the next-allowed time. A jitter tolerance keeps legitimate fire from being blocked — this is anti-abuse,
 	 *  not exact cadence. On non-authority (client prediction) it always returns true (the server is authoritative). */
