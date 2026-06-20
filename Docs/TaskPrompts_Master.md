@@ -425,6 +425,67 @@ Game.md + PROGRESS.md 먼저 읽어. 그다음 Docs/SSOT/CombatWeaponCard.md §2
 [검증/완료] 빌드+스모크+사용자 PIE(위) → Scripts/codex-review.ps1 -Base main → PROGRESS·TaskPrompts 갱신 + 콘텐츠 동반커밋 질문 + --no-ff 머지. 완료 후 다음=U18b(무기해금 + 라우팅 재편).
 ```
 
+#### ✅ U18b — 무기 해금 시스템 + 추첨 라우팅 재편 (완료, main `--no-ff` 머지 `78b1bb5` 2026-06-20 — 상세 PROGRESS 핸드오프)
+> WeaponUnlock 오퍼타입(MissionReward 완전 치환) + `UCardEffect_GrantWeapon`(서버권위·트랜잭션 CanApply) + 마일스톤 20/30/40 + 미션 트리거. Fragment 가드 해제→레벨업 합류(스택게이트+CanApply 이중방어), 미션→기능해금(`UnlockableFeatures[]`). 콘텐츠: 8 `DA_CardUnlock_*` + 무기 카드 재배치(AvailableModifiers→WeaponCards / MultiShot→UnlockableFeatures 탄도 MaxStacks 3) + pool WeaponUnlockCards=8. 빌드+스모크+Codex 플랜/머지게이트+fresh-reload+사용자 PIE 통과. 미룬 3 기능해금(차징연사·LMG OnMiss리필·샷건/바주카 OnKill재장전)=U18c(훅 의존).
+
+#### U18c — 행동 트리거 확장: 무기 훅 + 캐릭터 GAS-native + 미룬 기능해금 (U18 카드 v2 마무리)
+
+```
+Game.md + PROGRESS.md 먼저 읽어. 그다음 Docs/SSOT/CombatWeaponCard.md §2-3-5(행동 트리거 — 이 작업의 설계 SSOT)·§2-4-1(Fragment 훅)·§2-3-7(속성 시임=OnStatusKill 자리)를 정독해. U18c는 U18 카드 v2의 마지막 조각 — 무기 행동 훅(OnAim/OnFire/OnMiss/OnKill) 5데미지경로 공통 브릿지 + bJustKilled 전이 + 캐릭터 GAS-native 패시브 + U18b서 미룬 3 기능해금. 플랜모드 우선, HIGH_RISK 승인 후. 구현=Haiku 위임 / 설계·검증·보안배선(GAS 브릿지·5경로 훅·서버권위)=Opus 직접(CLAUDE.md §6-5).
+
+[목표]
+1. 무기 행동 훅 신설: OnAim/OnFire/OnMiss/OnKill (+OnStatusKill default-empty 시임=D3 후 배선) — UFPSRWeaponFragment에 virtual 추가, 5경로 공통 브릿지로 호출.
+2. OnKill = "이번 타격 alive→dead 전이"(bJustKilled) — 코프스 재타격 중복 처치/킬마커 차단(동시 교정).
+3. 캐릭터 행동 = GAS-native: ApplyDamage→GameplayEvent→패시브 GA(회복). UFPSRPassiveAbility 베이스 + UCardEffect_CharacterPassive(5번째 효과).
+4. 미룬 3 기능해금(U18b): LMG 빗나감→탄 리필 / 샷건·바주카 처치→재장전 / ChargeLaser 차징 후 연사.
+
+[절대조건]
+- 무회귀: 기존 7 훅(PreFire/ModifyShotCount/OnHitActor/PostFire/OnProjectileSpawn/ModifyChargeTime/OnImpact)·U18b 거동(무기해금·라우팅·탄도) 유지. bKilled 의미 변경이 6개 리더(킬마커 4+폭발집계+넉백)에 동일 적용 → 정상 킬 그대로·코프스 재타격만 차단 확인.
+- 적500 예산: OnFire/OnMiss/OnKill 훅 루프는 핫 데미지경로 — 빈-빠른(if(Frag) 가드·훅 미구현 시 조기탈출·무할당·서버only).
+- 서버권위: 모든 상태변경 훅(탄 리필·재장전·GiveAbility·이벤트송신) bAuthority/HasAuthority 게이트. Melee 신규 FireCtx bAuthority 정확히. 투사체 브릿지 핸들 클라 누출 금지.
+- U3 시임: 보스 킬은 GAS 경로(ApplyDamage/EnemyHealthComponent 미경유)라 무기 OnKill 보스 미발화 → 보스 OnKill 배선은 U3. 여기서 시도 금지. OnStatusKill 빈 시임만(D3).
+
+[브랜치/시퀀싱] main→phase/u18c-behavior-hooks 분기(§6-7). 규모 크므로 3서브유닛 권고(U18a/b 패턴):
+- c1: 훅 신설 + bJustKilled + 5경로 공통 브릿지(load-bearing 코어)
+- c2: 캐릭터 GAS-native 패시브(UFPSRPassiveAbility + UCardEffect_CharacterPassive + 이벤트 브릿지)
+- c3: 미룬 3 기능해금(콘텐츠 + ChargeLaser 추가 훅) — Feature A(차징연사)가 무거우면 c3b 분리/연기
+
+■ c1 — 무기 훅 + bJustKilled + 5경로 공통 브릿지 [보안배선=Opus 직접]
+- bJustKilled: FPSRCombatStatics.cpp:81-88 enemy 브랜치 — HealthComp->ApplyDamage(:83) 전에 `const bool bWasDeadBefore = HealthComp->IsDead();` 캡처 → :86 `Result.bKilled = (!bWasDeadBefore && HealthComp->IsDead());`. 한 줄로 전 경로·6 리더 교정(리더: FPSRProjectile.cpp:363 · FPSRCombatStatics.cpp:189/194 · WeaponMelee.cpp:164 · Hitscan.cpp:225 · ChargeLaser.cpp:275). FDamageResult=FPSRCombatStatics.h:30-35{bApplied,bKilled,bWasEnemy}. 의미=bJustKilled(주석 명시).
+- 신규 훅: FPSRWeaponFragment.h:67-81 패턴대로 OnAim/OnFire/OnMiss/OnKill(+빈 OnStatusKill) virtual const, 빈 바디, const FFPSRFireContext&. FFPSRFireContext=h:21-37 플레인 스택구조체(Avatar/Controller/World/Instance/ShotCount/bAuthority/bSuppressSelfDamage — 히트결과·탄약 멤버 없음).
+- 공통 브릿지: 새 free/static 헬퍼 `(const FFPSRFireContext&, const FDamageResult&, AActor* HitActor)`→OnKill 루프 + 활성화당 OnFire/OnMiss 헬퍼. 호출 루프 패턴=FPSRWeaponFireComponent.cpp:278-280(GetActiveFragments 1회 잡고 range-for + if(Frag)).
+- 5경로 배선(choke point) — ⚠️**단일 공통점 없음, 2계열**:
+  · 계열A(ApplyDamage 수렴, FireCtx 존재): Hitscan OnKill @:221(→bServerKill :225)·OnFire/OnMiss @:317-333(탄약 :151) / ChargeLaser OnKill @:271·OnFire/OnMiss payoff @:325-336(탄약 :103, ⚠️warm-up 틱 bIsPayoffShot=false은 현재 fragment 스킵 — payoff-only 유지 권장) / Melee ⚠️**FireCtx 미존재→신규 구성**(:41-43,:78 로컬, bAuthority 정확), OnKill @:160·OnFire/OnMiss @:172(탄약없음, 쿨다운게이트 :105).
+  · 계열B(구조변경 필요): Projectile ⚠️**FireCtx/Instance 백레프 없음**(FFPSRProjectileParams만)→스폰 시 instance/브릿지 핸들 스레드(채움 Projectile.cpp:178-191), 소비 TryDamageActor :362(스왑 전 투사체 stale/null 주의=최대위험) / Explosion ⚠️**ApplyExplosion void라 bAnyKill 폐기**(:185-189)→집계 반환(또는 콜백)으로 변경(.h:81 decl+콜러), HandleImpact FPSRProjectile.cpp:265서 forward.
+- OnAim: SetAiming(FPSRWeaponFireComponent.h:36)은 권한맥락 없음 — 서버 aiming RPC는 AFPSRCharacter/입력층(미조사, 찾을 것)→거기서 OnAim 권한게이트. ⚠️지속 조준버프는 활성효과 슬롯 필요(이번엔 훅 발화만, 지속상태=후속).
+- c1 게이트: 빌드+스모크 + PIE(킬마커 정상·코프스 재타격 킬마커 없음·5경로 OnKill 발화).
+
+■ c2 — 캐릭터 GAS-native 패시브 [보안배선=Opus 직접]
+- 신규 UFPSRPassiveAbility : UFPSRGameplayAbility(베이스 Public/AbilitySystem/Abilities/FPSRGameplayAbility.h:10) — auto-activate-on-grant(OnAvatarSet 오버라이드). ⚠️**패시브/스타트업 인프라 전무**(precedent 0, 신규).
+- 이벤트 브릿지: FPSRCombatStatics ApplyDamage가 instigator(플레이어 Pawn)의 ASC에 GameplayEvent 송신. ASC 도달=`UAbilitySystemGlobals::GetAbilitySystemComponentFromActor(Instigator)`(기존 리졸버 FPSRWeaponInventoryComponent.cpp:94). ⚠️**프로젝트 첫 이벤트 송신**(기존 SendGameplayEvent 0건).
+- 태그: ⚠️**Event.* 네임스페이스 없음** — 컨벤션=GameplayEvent.*(Config/DefaultGameplayTags.ini:40-44, ImportTagsFromConfig=True). SSOT §2-3-5의 "Event.Player.DealtDamage"를 **GameplayEvent.Player.DealtDamage로 정합**(ini 1줄 + SSOT 문구 갱신).
+- 패시브 GA(회복): 위 이벤트 듣고 회복 GE("데미지 줄 때 회복"). "N초 유휴 회복"=타이머/WaitDelay 패시브 GA(같은 이벤트 리셋, GA 인스턴스=상태).
+- UCardEffect_CharacterPassive(5번째 효과 FPSRCardEffect.h, ~40줄): Apply→Context.ASC->GiveAbility(FGameplayAbilitySpec(PassiveAbilityClass,1,INDEX_NONE,...))(idiom FPSRWeaponInventoryComponent.cpp:218). ⚠️**카드부여 어빌리티 핸들 추적 + 런종료 클리어=신규 부기**(ResetRunState 정합, 기존 카드granted 핸들추적 없음).
+- c2 게이트: 빌드+스모크 + PIE(회복 카드 픽→데미지시 회복·유휴 회복·런종료 클리어).
+
+■ c3 — 미룬 3 기능해금(콘텐츠 + ChargeLaser 추가 훅)
+- Feature B(LMG 빗나감→탄 리필): 신규 UFPSRFragment_* on **OnMiss**. 증가=Instance->SetCurrentAmmo(min(GetCurrentAmmo()+1, GetResolvedStats().MagSize))(AddAmmo 헬퍼 없음·SetCurrentAmmo 클램프 없음→수동, 인스턴스 직접). bAuthority 게이트.
+- Feature C(샷건·바주카 처치→재장전): 신규 UFPSRFragment_* on **OnKill**. 재장전=Instance->SetCurrentAmmo(GetResolvedStats().MagSize)(즉시) 또는 Context.Avatar->FindComponentByClass<UFPSRWeaponInventoryComponent>()->StartReload()(타이머). 권한패턴=ExplosiveRounds::OnImpact(FPSRWeaponFragment.cpp:10) 미러.
+- Feature A(ChargeLaser 차징 후 연사): ⚠️**가장 무거움** — 현 어떤 훅도 발사 반복 안 함(DoFinalShot 1빔 후 EndAbility, ModifyChargeTime은 duration만). 신규 훅(OnChargeComplete/burst-count) + FPSRGA_WeaponFire_ChargeLaser DoFinalShot/타이머루프 머신러리. c3b 분리 또는 범위팽창 시 연기 고려.
+- 콘텐츠: 신규 fragment DA + 각 무기 UnlockableFeatures 배치(Scripts/u18b_migrate.py 패턴, 헤드리스 commandlet). 에디터 종료상태 git. [[vibeue-mcp-capabilities]]
+- c3 게이트: 빌드+스모크 + PIE(B 빗나감 리필·C 처치 재장전·A 차징연사).
+
+[함정/주의]
+- bKilled 의미 플립=헤드라인 회귀항목: 정상 킬 등록·코프스 재타격 킬마커 소거 양쪽 PIE.
+- 적500 예산: 훅 루프 핫패스 — 빈-빠른·무할당·서버only.
+- 투사체 비대칭: 브릿지 핸들 스레딩=최대 구조변경·null/stale 1순위 위험.
+- U3 보스 시임: 보스 OnKill 여기서 안 함(U3가 소비). OnStatusKill 빈 시임만(D3).
+- GAS 첫 이벤트송신·첫 패시브 인프라·첫 카드granted 핸들추적 = 전부 신규(precedent 0, Opus 직접).
+- [[haiku-delegation-security-wiring]] [[freeze-gate-client-server-symmetry]] [[plan-codex-comparison-gate]]
+
+[검증/완료] c1·c2·c3 각 빌드(-WaitMutex)+헤드리스 스모크 Result={Success} + 사용자 PIE(위) → Scripts/codex-review.ps1 -Base main → PROGRESS·TaskPrompts 갱신 + 콘텐츠 동반커밋 질문 + --no-ff 머지. 완료 후 다음=U3(보스 스캐폴드+승리 — 보스 OnKill 시임 소비).
+```
+
 ### U3 — 보스 스캐폴드(D4) + 승리 배선
 
 ```
