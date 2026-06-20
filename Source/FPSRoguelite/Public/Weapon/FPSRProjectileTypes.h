@@ -77,4 +77,12 @@ struct FPSROGUELITE_API FFPSRProjectileParams
 	 *  made replicated, this field MUST be excluded. */
 	UPROPERTY(Transient)
 	TWeakObjectPtr<UFPSRWeaponInstance> WeaponInstance = nullptr;
+
+	/** SERVER-ONLY (U18c): true if this projectile was the ONLY one spawned by its activation. The OnMiss behavior
+	 *  hook is per-ACTIVATION on every other fire path, but projectiles release asynchronously and independently —
+	 *  so it only fires the miss hook for single-projectile activations (where per-projectile == per-activation:
+	 *  sniper/bazooka/grenade). A multishot projectile volley leaves this false and fires no per-projectile OnMiss,
+	 *  avoiding over-/partial-refunds (AmmoOnMiss + MultiShot on a projectile weapon is an unsupported rare combo). */
+	UPROPERTY(Transient)
+	bool bSingleProjectileActivation = true;
 };

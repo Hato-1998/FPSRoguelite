@@ -457,8 +457,11 @@ void AFPSRProjectile::ReleaseToPool()
 {
 	// OnMiss trigger (server): a player projectile that ends without ever damaging an enemy is a true miss (expired,
 	// fell out of world, or hit only geometry) — fire the behavior hook so e.g. AmmoOnMiss refunds, matching the
-	// hitscan/melee/charge-laser miss behavior. bActive guards re-entry (Deactivate clears it during release).
-	if (bActive && HasAuthority() && Params.Team == EFPSRProjectileTeam::Player && !bDealtEnemyDamage)
+	// hitscan/melee/charge-laser miss behavior. Only single-projectile activations qualify (a multishot volley would
+	// fire per-projectile / on partial hits — see FFPSRProjectileParams::bSingleProjectileActivation). bActive guards
+	// re-entry (Deactivate clears it during release).
+	if (bActive && HasAuthority() && Params.Team == EFPSRProjectileTeam::Player && !bDealtEnemyDamage
+		&& Params.bSingleProjectileActivation)
 	{
 		FPSRWeaponHooks::NotifyMiss(MakeProjectileFireContext(Params, GetWorld()));
 	}
