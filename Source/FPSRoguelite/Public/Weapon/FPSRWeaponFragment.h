@@ -181,3 +181,34 @@ public:
 
 	virtual void OnImpact(const FFPSRFireContext& Context, const FVector& ImpactPoint, bool bAllowSelf) const override;
 };
+
+/** Feature B (U18c): refill magazine rounds whenever an activation lands NO damage on any enemy — "suppressive
+ *  fire pays off" (e.g. LMG miss → top up). Fires on the OnMiss trigger, server-authoritative. */
+UCLASS()
+class FPSROGUELITE_API UFPSRFragment_AmmoOnMiss : public UFPSRWeaponFragment
+{
+	GENERATED_BODY()
+
+public:
+	/** Rounds added back to the magazine on each miss (clamped to MagSize). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Fragment", meta = (ClampMin = "1"))
+	int32 RefillAmount = 1;
+
+	virtual void OnMiss(const FFPSRFireContext& Context) const override;
+};
+
+/** Feature C (U18c): reload on kill — a freshly-killed enemy refills this weapon (shotgun / bazooka payoff). Fires
+ *  on the OnKill trigger (alive->dead transition only), server-authoritative. bInstantRefill tops the mag to full
+ *  immediately; otherwise it kicks off the weapon's normal timed reload. */
+UCLASS()
+class FPSROGUELITE_API UFPSRFragment_ReloadOnKill : public UFPSRWeaponFragment
+{
+	GENERATED_BODY()
+
+public:
+	/** true = instantly fill the magazine to MagSize on a kill; false = start the weapon's timed reload instead. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Fragment")
+	bool bInstantRefill = true;
+
+	virtual void OnKill(const FFPSRFireContext& Context, AActor* KilledActor) const override;
+};

@@ -3,6 +3,8 @@
 #include "Weapon/FPSRWeaponFragment.h"
 #include "Combat/FPSRCombatStatics.h"
 #include "Weapon/FPSRWeaponInstance.h"
+#include "Weapon/FPSRWeaponInventoryComponent.h"
+#include "GameFramework/Pawn.h"
 
 namespace FPSRWeaponHooks
 {
@@ -60,5 +62,36 @@ void UFPSRFragment_ExplosiveRounds::OnImpact(const FFPSRFireContext& Context, co
 	for (AActor* KilledActor : Killed)
 	{
 		FPSRWeaponHooks::NotifyKill(Context, KilledActor);
+	}
+}
+
+void UFPSRFragment_AmmoOnMiss::OnMiss(const FFPSRFireContext& Context) const
+{
+	// Server-authoritative: top up the magazine (clamped — SetCurrentAmmo does not clamp, there is no AddAmmo helper).
+	if (!Context.bAuthority || !Context.Instance)
+	{
+		return;
+	}
+	const int32 MagSize = Context.Instance->GetResolvedStats().MagSize;
+	Context.Instance->SetCurrentAmmo(FMath::Min(Context.Instance->GetCurrentAmmo() + RefillAmount, MagSize));
+}
+
+void UFPSRFragment_ReloadOnKill::OnKill(const FFPSRFireContext& Context, AActor* /*KilledActor*/) const
+{
+	// Server-authoritative: instant top-up, or kick off the weapon's timed reload (no-op if full/already reloading).
+	if (!Context.bAuthority || !Context.Instance)
+	{
+		return;
+	}
+	if (bInstantRefill)
+	{
+		Context.Instance->SetCurrentAmmo(Context.Instance->GetResolvedStats().MagSize);
+	}
+	else if (Context.Avatar)
+	{
+		if (UFPSRWeaponInventoryComponent* Inventory = Context.Avatar->FindComponentByClass<UFPSRWeaponInventoryComponent>())
+		{
+			Inventory->StartReload();
+		}
 	}
 }
