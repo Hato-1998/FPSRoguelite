@@ -329,18 +329,18 @@ Game.md + PROGRESS.md 먼저 읽어. Docs/TaskPrompts_Master.md의 유닛 U3(코
 읽을 SSOT: Docs/SSOT/RunFlow.md §2-7(보스)·§2-2(프리즈), Docs/P7-MultiplayerLoop_Plan.md §3-5(보스 박스 설계 — 이 유닛과 통합됨), Docs/SSOT/Enemy.md §2-10(데미지 경로), Docs/SSOT/Workflow.md §6.
 
 [목표] 게임 루프 "진짜 닫기" 2/2 — 승리. 보스 스캐폴드(체력만 있는 보스) + 처치 시 EndRun(Victory).
-현재: Source/FPSRoguelite/Private/Run/FPSRRunDirectorSubsystem.cpp:365 — BossTime 도달 시 "boss actor is a P6 stub" 로그+타임라인 정지만. 디버그 FPSR.SkipToBoss(:719) 있음.
+현재(라인 갱신 2026-06-20): Source/FPSRoguelite/Private/Run/FPSRRunDirectorSubsystem.cpp — EnterBoss()(:335)가 BossTime 도달 시 "boss actor is a P6 stub" 로그(:356)+타임라인 정지만. 디버그 DebugSkipToBoss()(:675)·FPSR.SkipToBoss cmd(:710).
 
 - 브랜치: phase/p6-boss-scaffold 분기 (§6-7)
 - 플랜 우선 → 승인 후 Haiku 구현 / Opus 검증
-- 선행: U2 머지 확인(전멸 판정·EndRun 배선 패턴 공유) + U3a 머지 확인(약점 부위 인프라 — 보스가 소비)
+- 선행(전부 ✅ 머지 완료 2026-06-20): U2(전멸 판정·EndRun 배선 패턴 공유) + U3a(약점 부위 인프라 — 보스가 소비) + U18 카드 v2(무기 OnKill 훅 시임을 보스 처치가 소비 — 아래 [U18 시임] 참조)
 
 [산출물]
 1. ABossBase(또는 동급): UFPSREnemyHealthComponent 재사용으로 기존 무기 전 경로(히트스캔/투사체/레이저/근접) 데미지가 신규 코드 0으로 먹히게(P7 플랜 §1 확정). 큰 체력, 이동/공격은 스캐폴드 단계 생략 가능(체력만 박스 = 확정 스코프).
 2. UFPSRBossDefinitionDataAsset: 체력/스폰 위치 규칙 등 콘텐츠 주도 필드(에셋 경로 하드코딩 금지). StateTree 골격(빈 상태기계)은 백로그 D4 명세대로 클래스만 — 실제 패턴은 장기 백로그.
 2-b. U3a 약점 인프라 소비 확인: 보스 베이스에서 약점 컴포넌트 배치가 동작하는지(배치 자체는 U4 콘텐츠) — 신규 약점 코드를 여기서 또 만들지 마라.
 3. RunDirector EnterBoss() 연결: 타임라인 정지 지점에서 보스 스폰/활성화(GameMode 설정 클래스 주입 — BP_Enemy 주입 패턴과 동일).
-4. 승리 배선: 보스 OnDeath → 델리게이트로 GameMode에 통지 → EndRun(Victory). 느슨한 결합 필수 — U11(P7 멀티)이 같은 신호를 "결과 표시 후 ServerTravel(Lobby)"로 확장하므로 직접 호출 박지 말고 훅으로.
+4. 승리 배선: 보스 OnDeath → (느슨한 결합) → GameMode → EndRun(Victory). **U11a가 이미 로비 복귀 시임을 구현했다(2026-06-20 완료)**: EndRun → EndRunFreeze가 GameState `OnRunEnded` broadcast → `AFPSRGameMode::HandlePostRunTravel`(FPSRGameMode.cpp:86, 구독 :82)가 3s 후 ServerTravel(Lobby). 주석에 "victory caller U3 adds (P7 §3-5)"로 이 시임이 명시돼 있다. **∴ U3는 보스 OnDeath→EndRun(Victory) 호출만 하면 로비 복귀가 자동으로 흐른다** — `EndRun`(:131)/`EndRunFreeze` 본문·`OnRunEnded` 구독 수정 금지(U11a 소유, 패배 경로와 공유). 멀티 컨텍스트 보스-승리 통합(보스별 런 리셋)은 U11b.
 
 [함정/주의]
 - P7-MultiplayerLoop_Plan §3-5의 AFPSRBossBox를 별도로 만들지 마라 — 이 유닛의 보스 베이스가 그 역할을 대체한다(중복 구현 방지, U11 프롬프트에도 동일 명시됨).
@@ -348,8 +348,9 @@ Game.md + PROGRESS.md 먼저 읽어. Docs/TaskPrompts_Master.md의 유닛 U3(코
 - 보스 페이즈 중에도 레벨업 전역 프리즈(§2-2) 동작 — 보스 로직(스폰 직후 활성화 포함)에 bRunPaused 게이트.
 - 보스 비폰이면 넉백 비대상(LaunchCharacter 경로) — 의도된 동작, 버그 아님.
 - GAS는 보스에 허용되는 영역(§1)이지만 이번 스캐폴드는 EnemyHealthComponent 확정 — GAS/ASC를 붙이지 마라(확장은 실보스 유닛에서 판단).
+- **[U18 시임] 보스 처치 = 무기 OnKill 훅 발화 점검**: 보스가 EnemyHealthComponent + FPSRCombatStatics::ApplyDamage(enemy 브랜치, `bJustKilled` 전이) 경로로 데미지를 받으면 U18c 무기 OnKill 훅(예: 처치 시 재장전 fragment)이 보스 처치에도 발화한다. U18c가 "보스 OnKill 배선=U3"로 남긴 시임 — 보스가 표준 enemy 데미지 경로를 타는지 확인하고, 보스 킬이 OnKill fragment에 반응하는 게 의도인지 점검(코프스 재타격 `bJustKilled` 중복 차단도 보스에 적용되는지 확인). OnStatusKill은 D3까지 빈 시임.
 
-[검증] 빌드+스모크 → PIE: FPSR.SkipToBoss → 보스 스폰 → 전 무기로 데미지 확인 → 처치 → VICTORY 결과창 → 메뉴 복귀. U2와 합쳐 승/패 양쪽 E2E. codex-review.ps1 -Base main → PROGRESS 갱신+✅+--no-ff 머지.
+[검증] 빌드+스모크 → PIE: FPSR.SkipToBoss → 보스 스폰 → 전 무기(8종)로 데미지 확인(+약점 U3a 배수) → 처치 → EndRun(Victory) → 결과 표시 → **로비 복귀(U11a HandlePostRunTravel 자동)** + 무기 OnKill fragment가 보스 킬에 반응하는지(U18 시임) 확인. U2와 합쳐 승/패 양쪽 E2E. codex-review.ps1 -Base main → PROGRESS 갱신+✅+--no-ff 머지.
 ```
 
 ### U4 — 보스 콘텐츠 + PIE (전체 게임 플로우 완성 지점)
