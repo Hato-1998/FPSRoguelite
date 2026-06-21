@@ -469,6 +469,14 @@ void AFPSRPlayerController::ServerRequestReturnToMenu_Implementation(EFPSRRunOut
 		return;
 	}
 
+	// Gate on the run-ended latch so a client can't force a mid-run menu travel (W1 P2-3). This RPC is a P6-A
+	// holdover (the result screen now returns to the lobby); the guard hardens the legacy path.
+	const AFPSRGameMode* GM = GetWorld() ? GetWorld()->GetAuthGameMode<AFPSRGameMode>() : nullptr;
+	if (!GM || !GM->IsRunEnded())
+	{
+		return;
+	}
+
 	if (UGameInstance* GI = GetGameInstance())
 	{
 		if (UFPSRGameFlowSubsystem* Flow = GI->GetSubsystem<UFPSRGameFlowSubsystem>())

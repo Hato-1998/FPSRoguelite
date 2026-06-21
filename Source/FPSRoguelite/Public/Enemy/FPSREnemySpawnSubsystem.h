@@ -89,6 +89,14 @@ private:
 	/** Frame counter used to spread throttled (low-LOD) enemy updates across frames. */
 	int32 MovementFrameCounter = 0;
 
+	// Per-pass movement scratch, hoisted to members (Reset()+rebuilt at the top of each TickEnemyMovement pass) so
+	// the batch over up to 500 enemies doesn't heap-realloc the agent/location arrays and spatial hash every frame
+	// (W1 P2-4). Raw pointers are safe: the enemies are owned by ActiveEnemies/DormantPool (pooled, never GC'd
+	// mid-run), and these are cleared+rebuilt before any use each pass and never read between passes.
+	TArray<AFPSREnemyBase*> MovementAgentsScratch;
+	TArray<FVector> MovementLocationsScratch;
+	TMap<FIntPoint, TArray<int32>> MovementSpatialHashScratch;
+
 	// Significance distance tiers (squared cm) and per-tier update stride / net update frequency (Game.MD §5/§5-1).
 	static constexpr float TierS0RadiusSq = 1500.0f * 1500.0f; // S0: full update
 	static constexpr float TierS1RadiusSq = 3500.0f * 3500.0f; // S1

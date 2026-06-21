@@ -469,7 +469,9 @@ void AFPSRCharacter::ServerReload_Implementation()
 
 void AFPSRCharacter::ServerSetAiming_Implementation(bool bNewAiming)
 {
-	if (IsDeadLocal()) { return; }
+	// Mirror the ServerEquipSlot/ServerDash server gate: reject an in-flight ADS RPC during the freeze so the OnAim
+	// behavior hook can't fire while the run is globally stopped (W1 P3-3). Input_ADS already gates client-side.
+	if (IsRunFrozen() || IsDeadLocal()) { return; }
 	if (WeaponFire)
 	{
 		WeaponFire->SetAiming(bNewAiming);

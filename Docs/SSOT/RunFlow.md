@@ -32,7 +32,7 @@
 ### 2-7. 보스
 - **Base 구조**: `ABossBase` + `UBossDefinitionDataAsset` + StateTree (소수라 GAS/StateTree OK)
 - **출현 = `BossTime` 도달 시**(프로덕션 ~20분, 스케줄 DA, §2-1·§2-8). 보스전부터 **시간 무제한·미션 없음**, 처치 = 클리어. 2페이즈. 스케줄에 보스 시각·정의 추가로 확장. (단 보스 중에도 레벨업 프리즈는 동작 §2-2)
-- 구현 상태: 보스 실물은 P6. P4-A는 보스 게이트(`ERunPhase::Boss` 전환 + 훅)만 스텁
+- **구현 상태(U3/U4 스캐폴드, 2026-06-21 머지)**: `AFPSRBossBase : ACharacter`(StateTree/GAS 미장착·정지 box, 재부모화 불요 구조) + `UFPSRBossDefinitionDataAsset`(체력 주도) + 전용 `AFPSRBossSpawnPoint`. **`UFPSREnemyHealthComponent` 재사용**으로 전 무기경로(히트스캔/투사체/차지/근접/폭발)가 데미지·크릿·FF·약점(U3a) 적용(신규 데미지코드 0), 처치→`FPSRGameMode::NotifyBossDefeated`→`EndRun(Victory)`. 콘텐츠=BP_Boss(약점2)+DA(체력3000)+L_Sandbox 스폰포인트+체력바. **실보스(이동·StateTree·GAS 스킬·2페이즈)는 장기 백로그** — 위 Base 구조(StateTree/GAS)는 그 목표 비전.
 
 ### 2-8. 런 스케줄 / 미션 (재설계 2026-06-04, P4-A — 시간 기반)
 - **런 스케줄 = `UFPSRRunScheduleDataAsset`**(서버 권위, **전부 에디터 설정값**): **시간 기반 미션 이벤트** `TArray<FFPSRMissionEvent>{ float TriggerTime, UFPSRMissionDataAsset* Mission }` + `float BossTime` + 스폰 강도 스케일링(시간경과 `UCurveFloat` 또는 base+rate). 라운드 개념 없음.

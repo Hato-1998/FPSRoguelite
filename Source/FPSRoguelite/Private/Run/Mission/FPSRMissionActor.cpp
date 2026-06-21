@@ -5,6 +5,7 @@
 #include "Core/FPSRGameState.h"
 #include "Engine/World.h"
 #include "Net/UnrealNetwork.h"
+#include "Net/Core/PushModel/PushModel.h"
 
 AFPSRMissionActor::AFPSRMissionActor()
 {
@@ -24,11 +25,14 @@ void AFPSRMissionActor::ServerActivate(UFPSRMissionDataAsset* InData)
 	}
 
 	MissionData = InData;
+	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRMissionActor, MissionData, this);
 	MissionState = EFPSRMissionState::Active;
+	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRMissionActor, MissionState, this);
 	ElapsedTime = 0.0f;
 	MissionProgress = 0.0f;
+	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRMissionActor, MissionProgress, this);
 
-	// Mark dirty for replication
+	// Force immediate consideration for replication this frame
 	ForceNetUpdate();
 
 	OnMissionActivated();
@@ -42,6 +46,7 @@ void AFPSRMissionActor::CompleteMission()
 	}
 
 	MissionState = EFPSRMissionState::Completed;
+	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRMissionActor, MissionState, this);
 	EndMissionInternal(true);
 }
 
@@ -53,6 +58,7 @@ void AFPSRMissionActor::FailMission()
 	}
 
 	MissionState = EFPSRMissionState::Failed;
+	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRMissionActor, MissionState, this);
 	EndMissionInternal(false);
 }
 
@@ -64,6 +70,7 @@ void AFPSRMissionActor::SetMissionProgress(float NewProgress)
 	}
 
 	MissionProgress = FMath::Clamp(NewProgress, 0.0f, 1.0f);
+	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRMissionActor, MissionProgress, this);
 }
 
 void AFPSRMissionActor::Tick(float DeltaSeconds)
@@ -114,7 +121,9 @@ void AFPSRMissionActor::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Ou
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
-	DOREPLIFETIME(AFPSRMissionActor, MissionState);
-	DOREPLIFETIME(AFPSRMissionActor, MissionProgress);
-	DOREPLIFETIME(AFPSRMissionActor, MissionData);
+	FDoRepLifetimeParams Params;
+	Params.bIsPushBased = true;
+	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRMissionActor, MissionState, Params);
+	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRMissionActor, MissionProgress, Params);
+	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRMissionActor, MissionData, Params);
 }

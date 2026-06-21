@@ -48,6 +48,10 @@ public:
 	 *  post-run auto-travel timer so the two paths can't double-fire, then reuses the same TravelToLobby. */
 	void RequestReturnToLobby();
 
+	/** Server: true once EndRun has latched (victory/defeat). Gates the manual return-to-lobby/menu RPCs so a client
+	 *  can't trigger a mid-run travel before the result screen (W1 P2-3). */
+	bool IsRunEnded() const { return bRunEnded; }
+
 protected:
 	/** Bound to GameState OnRunEnded (subscribed in BeginPlay): closes the loop by traveling back to the lobby
 	 *  hub a short beat after the result screen shows. Deliberately a SEPARATE method (not in EndRun's body) so
@@ -79,6 +83,7 @@ protected:
 	TSubclassOf<AFPSREnemyBase> EnemyClass;
 
 private:
-	/** Guard: prevents EndRun from being called twice (RPC spam / race condition). */
+	/** Guard: prevents EndRun from being called twice (RPC spam / race condition). Distinct from
+	 *  AFPSRGameState::bRunEnded (the freeze latch) — this is the GameMode's one-shot EndRun guard (W1 P3-7). */
 	bool bRunEnded = false;
 };
