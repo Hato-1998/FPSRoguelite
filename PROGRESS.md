@@ -6,6 +6,16 @@
 
 **최종 갱신: 2026-06-21**
 
+## 🚧 콘텐츠: 캐릭터·배경 애셋 — 1차(BroBot: 적 VAT + 플레이어/로비 3P) **정적 완료·커밋, PIE 검증 대기** (브랜치 `content/character-environment`)
+> **재개 노트 = `Docs/AssetWork_CharEnv_Resume.md`**(STEP 1~6 플랜·VAT 레시피·배선 타깃). **다음 = 사용자 PIE → (문제 시 facing/scale 보정) → 보스 메시 → 환경.** 2~3차(보스/환경)는 미착수.
+> **완료(2026-06-21, VibeUE MCP Python, 신규 C++ 0)**: `BroBot` 팩을 `Content/Assets/Characters/BroBot/`로 재배치 + 적 VAT + 플레이어/로비 3P 배선. 커밋 `content(char)`(+`.uproject` AnimToTexture 활성).
+> - **STEP 1 재배치/트리밍**: `/Game/BCC_01_BroBot`(33)→`/Game/Assets/Characters/BroBot`(29) `rename_directory` 참조보정. 데모 체인(Overview맵+`GM_`+`BP_BCC_01_BroBot`+BuiltData) 제거(외부참조 0 확인 후). rename 부분실패 잔존 SK 디스크 정리, 신규 SK 무결성(스켈레톤/피직스/머티리얼 참조보정) 확인. [[marketplace-asset-import-relocate]]
+> - **STEP 4 플레이어 3P**: `BP_FPSRPlayer.CharacterMesh0`(=`GetMesh()`)·`BP_LobbyDisplayPawn.BodyMesh` ← `SK_BCC_01_BroBot`+AnimClass `BCC_01_BroBot_AnimBlueprint`+`MI_BCC_01_BroBot_02`. **비자명**: 둘 다 C++ 상속 네이티브 컴포넌트라 VibeUE `set_component_property`·`component_exists` 불가(SCS 전용) → **CDO `set_editor_property`(ICH 오버라이드)** 로 처리, 컴파일·저장 후 **.uasset 바이너리 직렬화 grep으로 디스크 영속 확인**(재시작 생존). AnimBP 타깃 스켈레톤 일치. 1P 팔(`FirstPersonArms`=SK_LPAMG_Arms) 무수정.
+> - **STEP 2 VAT 베이크**(BONE 모드, AnimToTexture): `VAT/SM_BroBot_VAT`(`ConvertSkeletalMeshToStaticMesh` **lod 0**)·본텍스처 3종(`T_BroBot_BonePos/BoneRot/BoneWeight` 32×32, 67본/30프레임 Walk)·`DA_BroBot_VAT`·**최소 머티리얼** `M_BroBot_VAT`(Use Material Attributes + `MF_BoneAnimation` **1함수콜** — 엔진 `M_Body_BoneAnimation`의 42함수콜+Mannequin 텍스처 의존 회피, 스웜 perf §1/§5 정합)·`MI_BroBot_VAT_Enemy`(빨강 `BodyColor`, `UpdateMaterialInstanceFromDataAsset`로 베이크 파라미터 주입). 검증: 컴파일 0err·NumBones67/NumFrames30·UseUV1·AutoPlay·UseFourInfluences·바운드 자동확장(애니범위 커버=컬링無).
+> - **STEP 3 적 배선**: `BP_EnemyBase.Mesh`(상속 StaticMeshComponent) ← `SM_BroBot_VAT`, RelLoc(0,0,-80)·yaw-90·scale1.0(캡슐 half80 실측 정렬, 발바닥 지면), NoCollision 유지, 머티리얼 `MI_BroBot_VAT_Enemy` SM 슬롯 상속. [[vibeue-mcp-capabilities]]
+> - **재개노트 레시피 정정 3건**: ① `lod_index=-1` 엔진 거부 → `0` ② BONE 모드 머티리얼함수=`MF_BoneAnimation`(노트의 `MF_VertexAnimation`은 Vertex 모드용) ③ 엔진 머티리얼 복제(무거움) 대신 최소 머티리얼 신축.
+> - **검증 상태**: 정적 전부 통과(컴파일·read-back·디스크 직렬화·LFS 포인터·BuiltData 0). **PIE 미실시 → 사용자**: 다회 BP 재컴파일 후라 **에디터 재시작(Don't Save)** 후 PIE. 체크 = 플레이어 3P 로코모션/1P팔 정상·로비 포디움 idle·적 빨간BroBot **Walk 루프**/facing(yaw-90)/scale(자연 138×108 vs 캡슐 160×60 폭 넓음)/이동·분리·플로우필드·약점(U3a) 무회귀. **스푸리어스 `L_MainMenu.umap` 재저장은 커밋 제외**(로드된 레벨 자동 dirty). §8 플레이스홀더 인벤토리(적 큐브·3P 바디 교체) 갱신은 후속.
+
 ## ✅ 👑 U4 보스 콘텐츠 — **완료(2026-06-21, `content/boss` → main `--no-ff` 머지). 정적·시각 검증 + 사용자 PIE 통과. 신규 코드 0**
 > U3 스캐폴드 위에 **콘텐츠만** 얹어 승리 경로(BossTime→스폰→처치→VICTORY→로비)를 실콘텐츠로 닫음. VibeUE MCP 저작(main 직접 작업, 사용자 결정). 실행 레시피=`Docs/U4_BossContent_Guide.md`.
 > **산출물(5)**: ① `BP_Boss`(/Game/Boss, 부모 `FPSRBossBase`) — 약점 2개 `Weak_Head`(Z+150/r60/**x2.5**)·`Weak_Core`(Z0/r80/**x2.0**)(U3a 인프라 소비, 캡슐 콜리전 무수정) + `HealthBarWidget`(WidgetComponent Screen, Z+260). ② `WBP_BossHealthBar` — ProgressBar+`HealthComp`+Event Tick→SetPercent(GetHealth/GetMaxHealth)+`InitHealthComp` 세터. ③ `DA_BossDefinition` — BossClass=`BP_Boss`·MaxHealth=**3000**·bUseBossSpawnPoint=true. ④ `DA_RunSchedule.BossDefinition`=DA_BossDefinition(BossTime **300 유지**, [[p4a-temp-test-values]]). ⑤ `L_Sandbox` — `BossSpawnPoint` 맵중앙 **(0,0,200)**(바닥top0+캡슐half200).

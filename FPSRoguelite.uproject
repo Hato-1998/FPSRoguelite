@@ -63,6 +63,10 @@
 			"Enabled": true
 		},
 		{
+			"Name": "AnimToTexture",
+			"Enabled": true
+		},
+		{
 			"Name": "VibeUE",
 			"Enabled": true,
 			"Optional": true
