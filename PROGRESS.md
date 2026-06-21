@@ -6,6 +6,13 @@
 
 **최종 갱신: 2026-06-21**
 
+## ✅ 👑 U4 보스 콘텐츠 — **완료(2026-06-21, `content/boss` → main `--no-ff` 머지). 정적·시각 검증 + 사용자 PIE 통과. 신규 코드 0**
+> U3 스캐폴드 위에 **콘텐츠만** 얹어 승리 경로(BossTime→스폰→처치→VICTORY→로비)를 실콘텐츠로 닫음. VibeUE MCP 저작(main 직접 작업, 사용자 결정). 실행 레시피=`Docs/U4_BossContent_Guide.md`.
+> **산출물(5)**: ① `BP_Boss`(/Game/Boss, 부모 `FPSRBossBase`) — 약점 2개 `Weak_Head`(Z+150/r60/**x2.5**)·`Weak_Core`(Z0/r80/**x2.0**)(U3a 인프라 소비, 캡슐 콜리전 무수정) + `HealthBarWidget`(WidgetComponent Screen, Z+260). ② `WBP_BossHealthBar` — ProgressBar+`HealthComp`+Event Tick→SetPercent(GetHealth/GetMaxHealth)+`InitHealthComp` 세터. ③ `DA_BossDefinition` — BossClass=`BP_Boss`·MaxHealth=**3000**·bUseBossSpawnPoint=true. ④ `DA_RunSchedule.BossDefinition`=DA_BossDefinition(BossTime **300 유지**, [[p4a-temp-test-values]]). ⑤ `L_Sandbox` — `BossSpawnPoint` 맵중앙 **(0,0,200)**(바닥top0+캡슐half200).
+> **체력바 바인딩(비자명 1건)**: BP_Boss BeginPlay → GetUserWidgetObject→Cast→`GetComponentByClass(FPSREnemyHealthComponent)`→Cast→InitHealthComp. 보스 `HealthComponent`가 C++ protected(BlueprintReadOnly 아님)이고 MCP가 class 핀 문자열설정 불가 → **검증가능한 `HCClass`(TSubclassOf, default 확인) 변수**로 클래스 공급. WBP는 보스전용 아닌 **범용 `UFPSREnemyHealthComponent` 바인딩**(엘리트/잡몹 재사용 가능하나 잡몹 전체는 perf·원칙1 위배 → 보류).
+> **검증**: BP_Boss·WBP 컴파일 0err/0warn + 15핀 연결 read-back + DA/RunSchedule/스폰포인트 값 검증 + WBP 프리뷰 렌더(빨간 바) + **사용자 PIE 통과(2026-06-21)**. 신규 .cpp/.h 0(약점/히트마커/승리/디렉터 전부 기존 C++ 소비) → content-only라 Codex 머지게이트·빌드 비해당. [[vibeue-mcp-capabilities]]
+> **다음 = W1 전체 검증**(트랙 A U3→U4 완료 + 트랙 B U11a 완료 → 양 트랙 합류).
+
 ## ✅ 👑 U3 보스 스캐폴드(D4) + 승리 배선 — **완료(2026-06-21, `phase/p6-boss-scaffold` → main `--no-ff` 머지). 빌드+스모크+Codex(P2교정)+사용자 PIE 통과**
 > 게임 루프 "진짜 닫기" **2/2 = 승리**(패배=U2). BossTime 도달 시 **체력만 있는 보스**를 스폰하고, 처치 시 `EndRun(Victory)` → 결과 표시 → 로비 복귀(U11a 자동). 실보스(이동·StateTree·GAS 스킬·2페이즈)는 장기 백로그 — 단 베이스를 **재부모화 없이 확장 가능한 프로덕션 구조**로 둠(사용자 확정: 실보스는 움직이고 스킬도 씀). 플랜: `~/.claude/plans/stateful-prancing-sedgewick.md`.
 > **핵심 = 신규 데미지 코드 0**: 데미지 브릿지(`FPSRCombatStatics::ResolveDamage`/`ApplyDamage`)가 적을 **클래스가 아닌 `UFPSREnemyHealthComponent` 컴포넌트로 식별**(플레이어 FF 분기보다 먼저) → 보스가 그 컴포넌트만 가지면 히트스캔/투사체/레이저/근접/폭발 전 경로 데미지+크릿+FF+약점(U3a)+무기 OnKill 훅(U18)이 자동 작동. PIE에서 점검만.
@@ -14,7 +21,7 @@
 > **프리즈(§2-2) 대칭**: 스캐폴드 보스는 tick/이동/공격 없음 → 프리즈 중 게이트할 보스 로직 무(자동 대칭). EnterBoss는 디렉터 프리즈 게이트 뒤라 프리즈 중 미실행. 데미지는 무기 GA가 IsRunPaused 게이트 → 프리즈 중 보스 피격 불가. 실보스 이동/공격 추가 시 bRunPaused 게이트 필수(헤더 시임 문서화).
 > **검증**: 빌드 `Result: Succeeded`(풀+증분, 경고 0) + 헤드리스 스모크 `Result={Success}`(ModuleLoads) + Opus diff 자체검토(클린) + **Codex 머지게이트 P2 1건 교정**(`bUseBossSpawnPoint` 미배선 → `SelectBossSpawnTransform`에 플래그 honor; 그 외 블로킹 0). **사용자 PIE 통과(2026-06-21)**: `FPSR.SkipToBoss`→보스 스폰→전 무기 8종 데미지→처치→VICTORY→로비 복귀(U11a 자동)→무기 OnKill fragment 보스킬 반응. U2와 합쳐 승/패 양쪽 E2E. (C++ 폴백 보스 체력=1000 테스트값; 약점 배수는 U4 약점 컴포넌트 배치 후.)
 > **콘텐츠(U4, 본 유닛 밖)**: BP_Boss(AFPSRBossBase 상속)+DA_BossDefinition(체력)+약점 컴포넌트 배치+L_Sandbox 보스 스폰포인트 배치+체력바. 본 유닛은 코드 베이스+C++ 폴백 보스로 스캐폴드 완성(콘텐츠 없이도 승리 루프 PIE 검증 가능). **보스 OnKill 시임(U18c)·멀티 보스-승리 통합(U11b)** 이 베이스가 소비처.
-> **▶ U4 착수(2026-06-21 사용자 결정 = main 직접 + VibeUE MCP)**: 실행 레시피 = `Docs/U4_BossContent_Guide.md`(필드명·수치·함정·PIE 체크리스트). **MCP는 에디터 호스팅이라 이번 세션 미연결 → U4는 에디터 켜고 새 세션 시작해야 착수**(레시피 §세션시작). C++ 표면은 전부 준비됨(신규 코드 0 목표).
+> **▶ U4 완료(2026-06-21)** — 상단 ✅ U4 섹션 참조(콘텐츠 저작 끝, 승리 루프 실콘텐츠로 닫힘). 실행 레시피 = `Docs/U4_BossContent_Guide.md`.
 
 ## ✅ U18 카드 시스템 v2 — **완료 아카이브** (2026-06-20, 페이즈1 설계 + U18a/b/c 전부 main `--no-ff` 머지)
 > **개요**: v1 "카드 1=효과 1"(`ECardScope` enum) → **v2 확장성-우선 멀티효과**. 사용자 목표사양 9조건(3 카드군·멀티효과·무기해금·행동훅·이동속도) + directive(확장성-우선·기획자 툴) 충족. 설계 SSOT=`Docs/SSOT/CombatWeaponCard.md` **§2-3(§2-3-1~9)**. 플랜=`Docs/U18{b,c}_*Plan.md`·`Docs/reviews/plan-U18-card-v2.md`. **상세 커밋 = `git log`**(머지 `f02536a`·`78b1bb5`·`7a85773`·`730d771`). **다음 작업=U3 보스 스캐폴드(보스 OnKill 시임 소비)**.
