@@ -4,7 +4,13 @@
 > **작업 단계를 끝낼 때마다, 그리고 중단 전 반드시 이 파일을 갱신하고 커밋한다.**
 > 확정 설계·기획·코드구조·규칙은 `Game.md`(**SSOT 허브** → 도메인별 `Docs/SSOT/*.md`, 작업별 라우팅은 허브 §0-1), **완료 작업 상세는 `git log --oneline`**. 여기엔 *무엇을 했는지*만 요약한다.
 
-**최종 갱신: 2026-06-21**
+**최종 갱신: 2026-06-22**
+
+## 🚧 콘텐츠: 환경(창고) — ZerinLabs SciFi 팩 이동 + L_Sandbox 창고 블록아웃 **재배치 대기(새 세션 인계)** (브랜치 `content/character-environment`)
+> **재개 노트 = `Docs/AssetWork_Env_Resume.md`**(측정값·안전 재배치법·창고 플랜 전부). **새 세션은 에디터 열린 채 시작 → VibeUE 자동연결 → 이 노트 STEP 1부터.**
+> **상태(2026-06-22)**: 사용자가 `ZerinLabs_lowpolyPack_SciFi`를 `/Game/ZerinLabs_lowpolyPack_SciFi`(Content 루트)에 **재임포트 완료**(124 reals + 2 umap, ~103 고유 메시, 클린). `Content/Assets/Environment/` 빈 채 대기.
+> **⚠️ 인계 사유**: 첫 시도서 124-asset 팩을 `rename_directory`로 **한 번에 이동→부분실패**(리다이렉터+레지스트리 손상)→재임포트로 복구. 그 후 에디터 재시작했으나 **VibeUE가 이 세션 재연결 안 됨**(세션 시작 시에만 연결). → 사용자 결정: **새 세션(에디터 켠 채)** 으로 이어감. 다음 세션은 **재배치를 per-asset ≤40 배치로** 해야 함(bulk rename 금지). [[marketplace-asset-import-relocate]]
+> **플랜 요약**: ① 안전 재배치 → `/Game/Assets/Environment/ZerinLabs_lowpolyPack_SciFi` + 데모 Scenes 트림. ② L_Sandbox 창고 = 직사각형 8000×5000(바닥 top z=0 유지·기존 Floor 리사이즈)·SciFi 직선벽 둘레 타일(Static+block ~600~900h)·게임플레이 액터(스폰/보스/조명/PlayerStart) 전부 보존. ③ 검증+`content(env)` 커밋. 측정값·벽 치수 전부 재개 노트에.
 
 ## 🚧 콘텐츠: 캐릭터·배경 애셋 — 1차(BroBot: 적 VAT + 플레이어/로비 3P) **정적 완료·커밋, PIE 검증 대기** (브랜치 `content/character-environment`)
 > **재개 노트 = `Docs/AssetWork_CharEnv_Resume.md`**(STEP 1~6 플랜·VAT 레시피·배선 타깃). **다음 = 사용자 PIE → (문제 시 facing/scale 보정) → 보스 메시 → 환경.** 2~3차(보스/환경)는 미착수.
