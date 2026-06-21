@@ -6,11 +6,14 @@
 
 **최종 갱신: 2026-06-22**
 
-## 🚧 콘텐츠: 환경(창고) — ZerinLabs SciFi 팩 이동 + L_Sandbox 창고 블록아웃 **재배치 대기(새 세션 인계)** (브랜치 `content/character-environment`)
-> **재개 노트 = `Docs/AssetWork_Env_Resume.md`**(측정값·안전 재배치법·창고 플랜 전부). **새 세션은 에디터 열린 채 시작 → VibeUE 자동연결 → 이 노트 STEP 1부터.**
-> **상태(2026-06-22)**: 사용자가 `ZerinLabs_lowpolyPack_SciFi`를 `/Game/ZerinLabs_lowpolyPack_SciFi`(Content 루트)에 **재임포트 완료**(124 reals + 2 umap, ~103 고유 메시, 클린). `Content/Assets/Environment/` 빈 채 대기.
-> **⚠️ 인계 사유**: 첫 시도서 124-asset 팩을 `rename_directory`로 **한 번에 이동→부분실패**(리다이렉터+레지스트리 손상)→재임포트로 복구. 그 후 에디터 재시작했으나 **VibeUE가 이 세션 재연결 안 됨**(세션 시작 시에만 연결). → 사용자 결정: **새 세션(에디터 켠 채)** 으로 이어감. 다음 세션은 **재배치를 per-asset ≤40 배치로** 해야 함(bulk rename 금지). [[marketplace-asset-import-relocate]]
-> **플랜 요약**: ① 안전 재배치 → `/Game/Assets/Environment/ZerinLabs_lowpolyPack_SciFi` + 데모 Scenes 트림. ② L_Sandbox 창고 = 직사각형 8000×5000(바닥 top z=0 유지·기존 Floor 리사이즈)·SciFi 직선벽 둘레 타일(Static+block ~600~900h)·게임플레이 액터(스폰/보스/조명/PlayerStart) 전부 보존. ③ 검증+`content(env)` 커밋. 측정값·벽 치수 전부 재개 노트에.
+## 🚧 콘텐츠: 환경(창고) — ZerinLabs SciFi 팩 이동 + L_Sandbox 창고 블록아웃 **정적 완료·검증, PIE 검증 대기** (브랜치 `content/character-environment`)
+> **재개 노트 = `Docs/AssetWork_Env_Resume.md`**(측정값·안전 재배치법·창고 플랜). **다음 = 사용자 PIE**(L_Sandbox 런: 벽 솔리드 충돌·플레이어/적/보스 정상·플로우필드·이동 무회귀) → 문제 시 벽 facing/높이 보정 → 보스 메시 등 후속.
+> **완료(2026-06-22, VibeUE MCP Python, 신규 C++ 0)**: SciFi 팩을 `/Game/Assets/Environment/ZerinLabs_lowpolyPack_SciFi`로 안전 재배치 + 데모 트림 + L_Sandbox 8000×5000 창고 벽 블록아웃. 커밋 `content(env)`.
+> - **STEP 1 재배치 진단 정정**: 임포트 상태 = AssetRegistry가 103 메시 패키지마다 `StaticMesh SM_*` + **레거시 별칭 `ObjectRedirector`**(팩 저작자가 `deco_*`→`SM_deco_*` 리네임 시 패키지 내 잔존, 디스크 124파일 전부 ≥7.5KB reals) 동거 → **이전 실패의 손상 아님, 팩 내장 별칭**. 외부 참조 0(클린 임포트). [[marketplace-asset-import-relocate]]
+> - **STEP 1 안전 이동(bulk rename 금지 준수)**: ① 데모 Scenes 4(umap2+BuiltData2) 선삭제(메시 유일 참조자 제거) → ② per-asset `rename_asset` ≤34 청크 4회(Textures3→Materials16→Meshes103) 각 청크 카운트 검증, 0 실패. 참조자 없어 **이동 리다이렉터·레거시 별칭 전부 자동 소멸**(SRC 완전 비움). ③ **비자명 함정**: rename이 referencer(MI 8개) ref를 **메모리만** 갱신·dirty 미설정 → `save_directory(only_if_is_dirty=True)` 스킵 → **디스크 .uasset에 구 경로 잔류**(grep 확인). **`save_directory(only_if_is_dirty=False)` 강제저장**으로 디스크 영속 → 전 DST grep 구경로 0. ④ 구 디렉터리 삭제(디스크 소멸). 최종 = **122 패키지**(StaticMesh103+Material8+MI8+Texture2D3, 리다이렉터 0).
+> - **STEP 2 L_Sandbox 창고 블록아웃**: Floor X스케일 5→8(8000×5000, top z≈0·**ECC_WORLD_STATIC+QUERY_AND_PHYSICS 충돌 보존**·MOVABLE 유지=기존 PIE 적 지면트레이스 작동 검증됨, mobility 무변경). 둘레 벽 **66개** `SM_wallDouble_A`(400폭·base z0·Z스케일2.5=750높이·Static·BlockAll·**장식면 안쪽 yaw**): PX13(yaw180)·NX13(yaw0)·PY20(yaw270)·NY20(yaw90), folder `Warehouse/Walls`. 적 스폰 z400 < 벽750.
+> - **검증(정적·시각)**: 액터 99 = 원본 33(Floor·Floor4·SkySphere·Box×5·조명5·스폰14·Brush4·PlayerStart 전부 보존) + 벽66. 스크린샷 3컷(우측면 facing·탑다운 포위·내부 코너) = 4면 안쪽 향함·직사각 포위·코너 닫힘 확인. 코어 스폰(적4·보스·PlayerStart) 전부 벽 안쪽. L_Sandbox 저장. **PIE 미실시 → 사용자**(MCP 다수 액터 후 PIE 전 에디터 재시작 권장=World Leak 방지). 스푸리어스 `L_MainMenu.umap`·`*.localbak`·`Docs/reviews` 커밋 제외.
+> - **후속(선택)**: 코너 전용 피스(`SM_wallAngleStraightIn`)·천장(`SM_ceiling_closed`)·SciFi 바닥타일·라이팅 빌드는 미적용(블록아웃=형태만). Box×5(±2500 z<0 기존 블록아웃)는 보존(정리는 사용자 판단).
 
 ## 🚧 콘텐츠: 캐릭터·배경 애셋 — 1차(BroBot: 적 VAT + 플레이어/로비 3P) **정적 완료·커밋, PIE 검증 대기** (브랜치 `content/character-environment`)
 > **재개 노트 = `Docs/AssetWork_CharEnv_Resume.md`**(STEP 1~6 플랜·VAT 레시피·배선 타깃). **다음 = 사용자 PIE → (문제 시 facing/scale 보정) → 보스 메시 → 환경.** 2~3차(보스/환경)는 미착수.
