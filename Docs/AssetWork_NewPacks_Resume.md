@@ -6,8 +6,8 @@
 ## 🔁 재시작 절차
 1. **에디터 열린 채 새 Claude 세션 시작** → VibeUE-Claude(127.0.0.1:8088) 자동 재연결.
    - 진단됨(2026-06-22): UnrealEditor 실행 중(PID 20016) + 포트 8088 LISTENING. 서버 정상, **클라 세션 재시작만** 하면 붙음. 에디터 재시작 불요.
-2. 새 세션: 이 노트 + `Game.md`/`PROGRESS.md` 읽고 아래 진행.
-3. **착수 전 ParagonMinions 사용 계획부터 사용자와 확정**(아래 §B 결정사항).
+2. 새 세션: 이 노트 + `Game.md`/`PROGRESS.md` 읽고 아래 진행. **팩별 적용 방침은 사용자 확정 완료**(🅰️🅱️🅲️).
+3. **🅲️ 크로스헤어는 코드+UI 기능 → 착수 시 플랜 우선**(C++ `FPSRWeaponDataAsset` 필드 + WBP). 나머지(🅾️🅰️🅱️)는 에셋 작업이라 바로 진행.
 
 ## 📦 현재 상태 (디스크 확인됨, git untracked/uncommitted) — 사용자가 에디터에서 다수 작업 진행 중
 **신규 임포트 팩(미처리)**:
@@ -22,17 +22,17 @@
 
 ---
 
-## 🅾️ 즉시 처리 (가벼움, 큰 팩 전에)
-### 보스 이동 — **사용자가 끝냄, 커밋만 필요**
+## 🅾️ 즉시 처리 — 보스 이동 커밋 (가벼움)
 사용자가 에디터에서 `/Game/Boss/*` → `/Game/Character/Boss/`로 이동(`Character/Player`·`Character/Enemy` 기존 구조에 보스 합류). **검증됨(2026-06-22)**: DA_RunSchedule 참조=신 경로만, 전역 grep 구 `/Game/Boss/` 0건, BuiltData 잔여 0. git=`D Content/Boss/{BP_Boss,DA_BossDefinition,WBP_BossHealthBar}` + `?? Content/Character/Boss/` + `M DA_RunSchedule`.
 → **할 일**: `git add Content/Boss Content/Character/Boss Content/Game/Data/DA_RunSchedule.uasset` 후 `content(boss): /Game/Boss → /Game/Character/Boss 정리 이동` 커밋(사용자 확인 후). 신규 작업 아님, 정리 마감.
 
-### CrosshairFreePack — relocate + HUD 배선
-20 텍스처(`Content/CrosshairFreePack/Textures/`). **할 일**: ① `/Game/Assets/UI/Crosshair/`로 relocate(소량이라 청크 불요, but rename 후 강제저장은 동일). ② 기존 HUD/조준 위젯·`WBP_HitMarker`(U3a)에 배선(크로스헤어=조준점, T_HM=히트마커 틴트, T_KI=킬인디). 사용자와 어느 위젯에 붙일지 확정.
+> 3개 팩 적용 = 🅰️ 스테이션(맵 키트) · 🅱️ 미니언(적/보스) · 🅲️ 크로스헤어(기능). **🅲️는 단순 에셋 아닌 코드+UI 기능** → 착수 시 플랜 우선.
 
 ---
 
 ## 🅰️ ModularSciFiStation — 환경 키트 (relocate 대상)
+**용도(사용자 확정)**: **맵 제작용 추가 에셋**. 새 맵/기존 L_Sandbox 디테일업의 모듈 빌딩블록으로 보유. 특별 배선 없음 — relocate + 트림 후 레벨 디자인에 사용 가능 상태로 두면 끝(즉시 배치는 사용자 지시 시).
+
 **구조**:
 - `Environment/` (실콘텐츠): Door·Floor·Ladders·Lamps·Pipes·Props·Railing·Rocks·Scaffold·Stairs·Tunnel·Walls (모듈 키트)
 - `Materials/`(Decals·Glass·Landscape·Light·Master·Metal·Pipes·Tiles·Trims) · `Textures/`(다수 카테고리) · `Particles/`
@@ -62,14 +62,52 @@
 - **트림**: `Characters/Maps/`(`Lighting_Background.umap`·`Minions.umap` 데모) + 대용량 `FX/`(쓸 것만 선별)
 - 애님셋: Melee·Attack·Jog·Death 등 풀 세트(미니언당)
 
-**🔑 결정사항(착수 전 사용자 확정)**:
-1. **어떤 캐릭터를 적으로?** — 스웜 잡몹 1~2종(예: White_Camp Minion 기본형) + 가능하면 엘리트용 별도 1종. 전부 안 씀.
-2. **역할별 처리**:
-   - **스웜 잡몹** → BroBot 방식 **VAT 베이크**(애님 1종=Jog/Walk만 32×32 본텍스처, 최소 머티리얼 `MF_BoneAnimation`, `MI_*_Enemy` 빨강). `BP_EnemyBase.Mesh`(상속 StaticMeshComponent)에 배선. → 원칙1(적 수백 경량) 정합. 레시피=[[vat-bake-inherited-component-wiring]].
-   - **엘리트/보스급**(소수) → 스켈레탈+애님 유지 + GAS(원칙1 허용 영역). 선택지.
-3. **선별분만** `/Game/Assets/Characters/Paragon<Name>/`로 relocate(per-asset ≤40 청크). 나머지 2000여 에셋은 미임포트/트림.
+**🔑 선택 확정(사용자, 2026-06-22)** — 아래 3종 + **각각의 연동(의존성) 에셋 전부 포함**. Buff 5색·White_Camp_Minion·기타는 제외:
+| 폴더 | 메시 | 역할 | 처리 |
+|---|---|---|---|
+| **Down_Minions** | Minion_Lane_Core · Minion_Lane_Siege | **스웜 적 + 엘리트/강화 몬스터** | 스웜=VAT 베이크 / 엘리트·강화=같은 소스 메시 변형(스케일↑·MI 틴트·체력↑, 데이터드리븐) |
+| **Dusk_Minions** | Minion_Lane_Siege(Dusk 변종) | **스웜 적 + 엘리트/강화 몬스터** | 동일(Dusk=어두운 변종 → 강화/엘리트 톤에 적합) |
+| **Prime_Helix** | Prime_Helix | **보스용** | 스켈레탈+애님 유지 + GAS/StateTree(보스=단일액터 헤비스택 허용, 원칙1). `BP_Boss`(Character/Boss) 또는 보스 변종에 배선 |
 
-**방법**: 선별 캐릭터의 스켈레탈메시+스켈레톤+필요 머티리얼/텍스처만 골라 이동. Buff/Minion은 Global 공유 머티리얼레이어 참조 가능 → 의존성 grep으로 필요분 파악 후 동반 이동.
+**처리 원칙**:
+- **스웜 잡몹** → BroBot 방식 **VAT 베이크**(애님 1종=Jog/Walk만, 32×32 본텍스처, 최소 머티리얼 `MF_BoneAnimation`, `MI_*_Enemy` 틴트). `BP_EnemyBase.Mesh`(상속 StaticMeshComponent) 배선. 원칙1(적 수백 경량) 정합. 레시피=[[vat-bake-inherited-component-wiring]].
+- **엘리트/강화 몬스터** → 동일 VAT 메시 재사용 + 데이터(스케일·체력·MI 색)로 구분(별도 베이크 불요, perf 절약). 능력 부여 시 소수라 GAS 옵션.
+- **보스(Prime_Helix)** → VAT 아님. 스켈레탈+풀 애님(Attack/Melee/Death)+피직스 유지. 보스는 이동·스킬 쓰는 단일 액터(U3 스캐폴드 `AFPSRBossBase` 소비처).
+
+**relocate 방법**: 3종 폴더 + **의존성 클로저** = `get_dependencies(recursive)`로 각 메시/AnimBP/머티리얼이 참조하는 **Global 공유분(MaterialFunctions·MaterialLayers·ParameterCollections·Eyes·스켈레톤·애님·텍스처) 전부 포함**해서 `/Game/Assets/Characters/Paragon/{DownMinion,DuskMinion,PrimeHelix}/`(또는 Global은 `Paragon/Shared/`)로 per-asset ≤40 청크 이동. 클로저 밖(Buff·미사용 FX·데모맵)은 미이동/트림. **연동 누락 0** 검증=이동 후 메시 로드 시 머티리얼/스켈레톤 무결.
+
+---
+
+---
+
+## 🅲️ CrosshairFreePack — 크로스헤어 교체 + 동적 분산 + 무기별 (⚠️ 기능 작업 = 코드+UI, 단순 에셋 아님)
+**텍스처 20**(`Content/CrosshairFreePack/Textures/`): T_CH001~009(크로스헤어)·T_HM_001~004(히트마커)·T_KI_001~002(킬인디)·T_AH001~004(아머/조준보조).
+
+**사용자 요구 3기능**:
+1. **현재 크로스헤어 교체** → 새 T_CH 텍스처로.
+2. **동적 분산 크로스헤어** → 쏠수록 분산(bloom) 커지고 **크로스헤어 갭도 맞춰 벌어짐**, 멈추면 회복.
+3. **무기별 크로스헤어** → 장착 무기에 따라 다른 크로스헤어.
+
+**✅ 조사 완료 — 바인딩할 기존 인프라(이미 존재, 재사용)**:
+- **분산도 소스**: `UFPSRWeaponFireComponent::GetCurrentBloom()` (BlueprintPure, **도 단위**, 지속사격 증가·`BloomRecoveryRate`로 회복). 사격 GA가 트레이스 콘에 이미 사용.
+- **무기 스탯**(`FFPSRWeaponStatBlock` @ `Weapon/FPSRWeaponTypes.h:86~`): `SpreadDegrees`(base 1.0)·`BloomPerShot`(0.3)·`MaxBloom`(4.0)·`BloomRecoveryRate`(6.0/s)·`ADSSpreadMultiplier`(0.4). → **총분산(도) = (SpreadDegrees + GetCurrentBloom()) × (IsAiming() ? ADSSpreadMultiplier : 1)**.
+- **조준**: `UFPSRWeaponFireComponent::IsAiming()` (BlueprintPure). 둘 다 플레이어 폰 컴포넌트.
+- **현재 HUD**: `Content/UI/HUD/WBP_RunHUD`(전용 WBP_Crosshair 없음 → 크로스헤어는 여기 서브요소이거나 미구현, 확인 필요). 히트마커는 **`WBP_HitMarker`(U3a) + `UFPSRPlayerFeedbackComponent::OnHitMarker`/`NotifyHitConfirmed`** 이미 작동.
+
+**구현 스펙**:
+1. **신규 C++ 필드 1개** → `UFPSRWeaponDataAsset`(`Weapon|Visual` 카테고리, WeaponMesh1P 옆) `TSoftObjectPtr<UTexture2D> CrosshairTexture`(null=기본). 기존 소프트레프 패턴 그대로. **⚠️ C++ 변경 = 빌드 필요(content-only 아님)**.
+2. **WBP_RunHUD 크로스헤어 위젯**:
+   - 4방향 라인(또는 스케일 Image), 중앙 갭 = `MinGap + 총분산도 × PxPerDeg`(PxPerDeg 튜너블). 매프레임 `GetCurrentBloom`+스탯 폴링(로컬 코스메틱·위젯1개 → 틱/프로퍼티바인딩 허용; §2-14 피드백컴포넌트 no-tick과 별개 관심사).
+   - 텍스처 = 장착무기 `CrosshairTexture`(없으면 기본 T_CH). 무기 교체 갱신(인벤토리 `OnRep_CurrentSlotIndex` 훅 또는 폴링).
+   - 데이터 접근: 폰의 `UFPSRWeaponFireComponent` + 인벤토리 현재 `UFPSRWeaponInstance` resolved 스탯. resolved가 BP 미노출이면 BlueprintPure 게터 1개 추가.
+3. **히트마커/킬인디 재사용**: T_HM→`WBP_HitMarker` 스타일 교체(OnHitMarker 소비 기존), T_KI→킬마커. T_AH=역할 확인 후 후속.
+
+**처리 순서**:
+1. relocate: 20텍스처 → `/Game/Assets/UI/Crosshair/`(소량, rename 후 강제저장 동일) + 원본 삭제. (이건 가벼움, 먼저)
+2. **플랜 우선**(C++ 필드 + WBP 기능 = HIGH_RISK 코드변경). 구현=Haiku 위임 가능, 분산↔px 매핑·무기교체 갱신은 Opus 검증.
+3. 빌드(에디터 닫고) + 헤드리스 스모크 + PIE: 쏠때 갭↑·회복·조준시↓·무기별 텍스처 전환·히트마커 정상.
+
+> **유닛 기록 권장**: C++ 포함이라 content 아님 → 로드맵 새 유닛(예: `U-crosshair`, §2-5 사격감각/§2-14 HUD)으로 등록 + 머지 시 Codex 게이트. TaskPrompts_Master 반영.
 
 ---
 
@@ -88,8 +126,9 @@
 
 ## 📋 새 세션 복붙용 재개 프롬프트
 ```
-Game.md + PROGRESS.md 먼저 읽고, Docs/AssetWork_NewPacks_Resume.md대로 진행해. 에디터 열려있어 VibeUE 8088 연결됨. git status로 현재 워킹트리 먼저 확인.
-① (가벼움) 보스 이동(Content/Boss→Character/Boss, 검증완료) 커밋 + CrosshairFreePack 20텍스처 /Game/Assets/UI/Crosshair/ relocate + HUD/WBP_HitMarker 배선.
-② ModularSciFiStation: ThirdPersonBP·Level 데모 트림 → per-asset ≤40 청크(bulk rename 금지)로 /Game/Assets/Environment/ModularSciFiStation/ 이동 + rename 후 강제저장.
-③ ParagonMinions(2105·4.8GB): 전부 옮기지 말고, 어떤 미니언을 적으로 쓸지 먼저 정한 뒤 선별분만 relocate + BroBot 방식 VAT 베이크. 착수 전 결정부터.
+Game.md + PROGRESS.md 먼저 읽고, Docs/AssetWork_NewPacks_Resume.md대로 진행해. 에디터 열려있어 VibeUE 8088 연결됨. git status로 워킹트리 먼저 확인. 팩별 적용방침은 확정됨.
+① (가벼움) 보스 이동(Content/Boss→Character/Boss, 검증완료) 커밋.
+② ModularSciFiStation(맵 키트): ThirdPersonBP·Level 데모 트림 → per-asset ≤40 청크(bulk rename 금지)로 /Game/Assets/Environment/ModularSciFiStation/ 이동 + rename 후 강제저장.
+③ ParagonMinions: Down_Minions·Dusk_Minions(스웜+엘리트/강화)·Prime_Helix(보스) + 의존성 클로저만 선별 relocate(Buff·나머지 제외) → /Game/Assets/Characters/Paragon/. 스웜=VAT 베이크(BroBot 방식), 보스=스켈레탈 유지.
+④ CrosshairFreePack: /Game/Assets/UI/Crosshair/ relocate 후 — 크로스헤어 교체 + 동적 분산(UFPSRWeaponFireComponent::GetCurrentBloom 바인딩) + 무기별(FPSRWeaponDataAsset에 CrosshairTexture 신규) 기능. **플랜 우선·C++ 빌드 포함**.
 ```
