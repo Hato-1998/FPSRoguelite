@@ -6,6 +6,10 @@
 
 **최종 갱신: 2026-06-22**
 
+## 🚧 콘텐츠: 신규 팩 2종(ModularSciFiStation + ParagonMinions) — **착수 대기(MCP 재연결 필요, 새 세션 인계)** (브랜치 `content/character-environment`)
+> **재개 노트 = `Docs/AssetWork_NewPacks_Resume.md`**(디스크 조사·트림/relocate 플랜·VAT·결정사항·복붙 프롬프트 전부). **VibeUE MCP가 세션 중간 연결 해제 → 에디터 켠 채(8088 LISTENING·PID20016 확인됨) 새 Claude 세션 시작으로 재연결.**
+> **상태(2026-06-22)**: 사용자가 Fab 팩 2개 임포트(미처리, git untracked). **① ModularSciFiStation**(2.3GB·323): 환경 키트 → `/Game/Assets/Environment/`로 relocate + ThirdPersonBP·Level 데모 트림(ZerinLabs 선례). **② ParagonMinions**(4.8GB·**2105**): Paragon 적 캐릭터(Buff 5색·레인 미니언 다종+풀 애님) — **⚠️ 전부 옮기지 말 것**, 적으로 쓸 1~2종만 선별 relocate + **BroBot 방식 VAT 베이크**(스웜=경량, 원칙1). **착수 전 사용자와 미니언 선택 확정**. [[marketplace-asset-import-relocate]] [[vat-bake-inherited-component-wiring]]
+
 ## 🚧 콘텐츠: 환경(창고) — ZerinLabs SciFi 팩 이동 + L_Sandbox 창고 블록아웃 **정적 완료·검증, PIE 검증 대기** (브랜치 `content/character-environment`)
 > **재개 노트 = `Docs/AssetWork_Env_Resume.md`**(측정값·안전 재배치법·창고 플랜). **다음 = 사용자 PIE**(L_Sandbox 런: 벽 솔리드 충돌·플레이어/적/보스 정상·플로우필드·이동 무회귀) → 문제 시 벽 facing/높이 보정 → 보스 메시 등 후속.
 > **완료(2026-06-22, VibeUE MCP Python, 신규 C++ 0)**: SciFi 팩을 `/Game/Assets/Environment/ZerinLabs_lowpolyPack_SciFi`로 안전 재배치 + 데모 트림 + L_Sandbox 8000×5000 창고 벽 블록아웃. 커밋 `content(env)`.
