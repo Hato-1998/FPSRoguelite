@@ -134,11 +134,21 @@
 - 신규 팩(`Content/{ModularSciFiStation,ParagonMinions}/`)은 **처리(트림·relocate) 후 선별분만 커밋**. 원본 통째 커밋 금지(LFS 7GB). CrosshairFreePack은 relocate 후 커밋.
 - 커밋 scope: `content(boss)`(보스이동)·`content(env)`(스테이션)·`content(enemy)`(미니언)·`content(ui)`(크로스헤어). `*_BuiltData`는 gitignore, LFS 포인터 확인.
 
-## 📋 새 세션 복붙용 재개 프롬프트
+## 📋 새 세션 복붙용 재개 프롬프트 (2026-06-22 갱신 — ④b WBP 위젯 + PIE)
+> ①②③④a + ④b-C++ 전부 완료·커밋(C++ 풀빌드 Succeeded `5b0d2de`). 이번 세션 = **④b 크로스헤어 WBP + PIE**.
 ```
-Game.md + PROGRESS.md 먼저 읽고, Docs/AssetWork_NewPacks_Resume.md대로 진행해. 에디터 열려있어 VibeUE 8088 연결됨. git status로 워킹트리 먼저 확인. 팩별 적용방침은 확정됨.
-① (가벼움) 보스 이동(Content/Boss→Character/Boss, 검증완료) 커밋.
-② ModularSciFiStation(맵 키트): ThirdPersonBP·Level 데모 트림 → per-asset ≤40 청크(bulk rename 금지)로 /Game/Assets/Environment/ModularSciFiStation/ 이동 + rename 후 강제저장.
-③ ParagonMinions: Down_Minions·Dusk_Minions(스웜+엘리트/강화)·Prime_Helix(보스) + 의존성 클로저만 선별 relocate(Buff·나머지 제외) → /Game/Assets/Characters/Paragon/. 스웜=VAT 베이크(BroBot 방식), 보스=스켈레탈 유지.
-④ CrosshairFreePack: /Game/Assets/UI/Crosshair/ relocate 후 — 크로스헤어 교체 + 동적 분산(UFPSRWeaponFireComponent::GetCurrentBloom 바인딩) + 무기별(FPSRWeaponDataAsset에 CrosshairTexture 신규) 기능. **플랜 우선·C++ 빌드 포함**.
+Game.md + PROGRESS.md(최상단 섹션) 먼저 읽고, Docs/AssetWork_NewPacks_Resume.md §🅲️ "처리 순서"대로 진행. **에디터 열고 시작**(VibeUE 8088 MCP 자동연결). git status로 워킹트리 확인(스푸리어스 맵 2개만 있어야).
+
+이번 세션 = ④b 크로스헤어 WBP + PIE 검증. ①②③(미니언 VAT+적배선)④a + ④b-C++ 전부 완료·커밋됨.
+
+[메인] WBP_RunHUD에 4방향 동적 라인 크로스헤어(사용자 확정). C++ 게터 준비·빌드됨:
+- 플레이어 폰 UFPSRWeaponFireComponent: GetCurrentSpreadDegrees()(BlueprintPure 총분산도)·GetEquippedCrosshairTexture()(BlueprintPure 장착무기 텍스처 null=기본). FPSRWeaponDataAsset.CrosshairTexture 필드 존재.
+- WBP_RunHUD(Content/UI/HUD): 중앙에 상하좌우 4 Image. 라인 오프셋=MinGap+GetCurrentSpreadDegrees()×PxPerDeg(클램프·튜너블). 텍스처=GetEquippedCrosshairTexture()(없으면 기본 /Game/Assets/UI/Crosshair/T_CH001). 매프레임 갭 갱신·무기교체 시 텍스처 재취득(FireComponent 폴링). 순수 로컬 코스메틱.
+- 완료 후 content(ui) 커밋 + (main 머지 시 Codex 게이트). T_HM 히트마커·T_KI 킬인디 텍스처 교체는 후속.
+
+[PIE] 크로스헤어: 쏠때 갭↑·멈추면 회복·ADS시 갭↓·무기교체 텍스처 전환·기본 폴백. + 이전 미검증분: 적=미니언 VAT(빨강 BroBot→teal Melee, Combat_JogFwd 루프) facing/scale 확인(미니언 176cm>캡슐160 → BP_EnemyBase.Mesh relLoc/yaw/scale 튜닝). 스테이션 키트=/Game/Assets/Environment/ModularSciFiStation/.
+
+[후속] 보스 메시: Prime_Helix 스켈레탈+30애님 relocate됨(/Game/Assets/Characters/Paragon/Minions/Prime_Helix) → BP_Boss(Content/Character/Boss) 배선(AnimBP/idle 필요).
+
+주의: VibeUE로 BP/WBP 편집 후 PIE 전 에디터 재시작(World Leak 방지). 스푸리어스 맵 재저장은 커밋 제외.
 ```
