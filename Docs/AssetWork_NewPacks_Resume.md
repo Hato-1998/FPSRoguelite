@@ -9,13 +9,26 @@
 2. 새 세션: 이 노트 + `Game.md`/`PROGRESS.md` 읽고 아래 진행.
 3. **착수 전 ParagonMinions 사용 계획부터 사용자와 확정**(아래 §B 결정사항).
 
-## 📦 현재 상태 (디스크 확인됨, git untracked)
-사용자가 Fab 팩 2개를 Content 루트에 임포트함(미처리, `?? Content/{ModularSciFiStation,ParagonMinions}/`):
+## 📦 현재 상태 (디스크 확인됨, git untracked/uncommitted) — 사용자가 에디터에서 다수 작업 진행 중
+**신규 임포트 팩(미처리)**:
 
 | 팩 | 크기 | 에셋 | 성격 |
 |---|---|---|---|
 | **ModularSciFiStation** | 2.3GB | 323 uasset + 1 umap | 모듈러 SciFi 스테이션 환경 키트 + 템플릿 데모 |
 | **ParagonMinions** | **4.8GB** | **2105 uasset** + 2 umap | Paragon 미니언/버프 **적 캐릭터**(스켈레탈+풀 애님) + FX |
+| **CrosshairFreePack** | 소 | 20 텍스처 | 크로스헤어(T_CH)·히트마커(T_HM)·킬인디(T_KI)·아머(T_AH). UE5.0–5.6 표기지만 텍스처라 5.7 무관 |
+
+**사용자 에디터 작업(미커밋, 워킹트리)**: 보스 콘텐츠를 기존 `Content/Character/` 계층으로 정리 이동 완료(아래 🅾️). `L_Sandbox.umap`·`L_MainMenu.umap` 재dirty(스푸리어스 추정).
+
+---
+
+## 🅾️ 즉시 처리 (가벼움, 큰 팩 전에)
+### 보스 이동 — **사용자가 끝냄, 커밋만 필요**
+사용자가 에디터에서 `/Game/Boss/*` → `/Game/Character/Boss/`로 이동(`Character/Player`·`Character/Enemy` 기존 구조에 보스 합류). **검증됨(2026-06-22)**: DA_RunSchedule 참조=신 경로만, 전역 grep 구 `/Game/Boss/` 0건, BuiltData 잔여 0. git=`D Content/Boss/{BP_Boss,DA_BossDefinition,WBP_BossHealthBar}` + `?? Content/Character/Boss/` + `M DA_RunSchedule`.
+→ **할 일**: `git add Content/Boss Content/Character/Boss Content/Game/Data/DA_RunSchedule.uasset` 후 `content(boss): /Game/Boss → /Game/Character/Boss 정리 이동` 커밋(사용자 확인 후). 신규 작업 아님, 정리 마감.
+
+### CrosshairFreePack — relocate + HUD 배선
+20 텍스처(`Content/CrosshairFreePack/Textures/`). **할 일**: ① `/Game/Assets/UI/Crosshair/`로 relocate(소량이라 청크 불요, but rename 후 강제저장은 동일). ② 기존 HUD/조준 위젯·`WBP_HitMarker`(U3a)에 배선(크로스헤어=조준점, T_HM=히트마커 틴트, T_KI=킬인디). 사용자와 어느 위젯에 붙일지 확정.
 
 ---
 
@@ -68,13 +81,15 @@
 - VAT 베이크: `lod_index=0`, BONE 모드 머티리얼함수=`MF_BoneAnimation`, 최소 머티리얼 신축([[vat-bake-inherited-component-wiring]]).
 
 ## 🗂️ git 상태 (커밋 제외/주의)
+- **커밋 가능(완료, 사용자 확인 후)**: 보스 이동 = `Content/Boss`(D3) + `Content/Character/Boss`(신규) + `DA_RunSchedule`(M). 🅾️ 참조.
 - **미커밋 스푸리어스**: `Content/Maps/L_MainMenu.umap`(로드 dirty)·`Content/Maps/L_Sandbox.umap`(env 커밋 후 재dirty — **커밋 전 의미변경인지 확인**, 스푸리어스면 `git checkout`)·`Config/DefaultEditor.ini.localbak`·`Docs/reviews/`.
-- 신규 팩(`Content/{ModularSciFiStation,ParagonMinions}/`)은 **처리(트림·relocate) 후 선별분만 커밋**. 원본 통째 커밋 금지(LFS 7GB).
-- 커밋: `content(env)`(스테이션)·`content(char/enemy)`(미니언). `*_BuiltData`는 gitignore, LFS 포인터 확인.
+- 신규 팩(`Content/{ModularSciFiStation,ParagonMinions}/`)은 **처리(트림·relocate) 후 선별분만 커밋**. 원본 통째 커밋 금지(LFS 7GB). CrosshairFreePack은 relocate 후 커밋.
+- 커밋 scope: `content(boss)`(보스이동)·`content(env)`(스테이션)·`content(enemy)`(미니언)·`content(ui)`(크로스헤어). `*_BuiltData`는 gitignore, LFS 포인터 확인.
 
 ## 📋 새 세션 복붙용 재개 프롬프트
 ```
-Game.md + PROGRESS.md 먼저 읽고, Docs/AssetWork_NewPacks_Resume.md대로 신규 팩 작업 진행해. 에디터 열려있어 VibeUE 8088 연결됨.
-① ModularSciFiStation: ThirdPersonBP·Level 데모 트림 → per-asset ≤40 청크(bulk rename 금지)로 /Game/Assets/Environment/ModularSciFiStation/ 이동 + rename 후 강제저장.
-② ParagonMinions(2105·4.8GB): 전부 옮기지 말고, 어떤 미니언을 적으로 쓸지 먼저 같이 정한 뒤 선별분만 relocate + BroBot 방식 VAT 베이크. 착수 전 §B 결정부터.
+Game.md + PROGRESS.md 먼저 읽고, Docs/AssetWork_NewPacks_Resume.md대로 진행해. 에디터 열려있어 VibeUE 8088 연결됨. git status로 현재 워킹트리 먼저 확인.
+① (가벼움) 보스 이동(Content/Boss→Character/Boss, 검증완료) 커밋 + CrosshairFreePack 20텍스처 /Game/Assets/UI/Crosshair/ relocate + HUD/WBP_HitMarker 배선.
+② ModularSciFiStation: ThirdPersonBP·Level 데모 트림 → per-asset ≤40 청크(bulk rename 금지)로 /Game/Assets/Environment/ModularSciFiStation/ 이동 + rename 후 강제저장.
+③ ParagonMinions(2105·4.8GB): 전부 옮기지 말고, 어떤 미니언을 적으로 쓸지 먼저 정한 뒤 선별분만 relocate + BroBot 방식 VAT 베이크. 착수 전 결정부터.
 ```
