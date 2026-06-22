@@ -2,6 +2,11 @@
 
 > **목적**: VibeUE MCP가 세션 중간에 연결 해제됨(서버는 살아있으나 클라 연결만 끊김). **에디터 켠 채 새 Claude 세션 시작**으로 재연결. 이 노트로 새 세션이 즉시 이어간다.
 > **작성**: 2026-06-22. **브랜치**: `content/character-environment`(env 커밋 `aed9c50` 위). 원 작업 지시: 사용자 — "추가 에셋 작업 진행".
+>
+> ## ✅ 상태 업데이트 (2026-06-22, 실행 세션) — **🅾️🅰️🅱️ + 🅲️relocate 완료(6커밋), 🅲️기능(④b)만 남음**
+> 아래 🅾️🅰️🅱️ 본문은 **실행 전 플랜**(완료됨, 참고용). 실제 결과·커밋·다음할일은 **PROGRESS.md 최상단** 참조.
+> - 🅾️ 보스이동 `26288c4` · 🅰️ ModularSciFiStation(289) `2025021` · 🅱️ ParagonMinions relocate(367) `e58ea55` + 미니언 VAT(Melee스웜+Siege엘리트)+BP_EnemyBase 배선 `e0654dc` · 🅲️ Crosshair relocate(20) `1c939c0` 완료.
+> - **남은 것 2 (다음 세션)**: ① 구 ParagonMinions 트림 = **에디터 닫고** `rm -rf Content/ParagonMinions`(열린 채는 파일잠금 차단 확인). ② **④b 크로스헤어 C++ 기능** = §🅲️ "처리 순서" 갱신본의 확정 플랜(4방향 동적 라인). 보스 메시 배선(Prime_Helix→BP_Boss)은 후속.
 
 ## 🔁 재시작 절차
 1. **에디터 열린 채 새 Claude 세션 시작** → VibeUE-Claude(127.0.0.1:8088) 자동 재연결.
@@ -103,9 +108,14 @@
 3. **히트마커/킬인디 재사용**: T_HM→`WBP_HitMarker` 스타일 교체(OnHitMarker 소비 기존), T_KI→킬마커. T_AH=역할 확인 후 후속.
 
 **처리 순서**:
-1. relocate: 20텍스처 → `/Game/Assets/UI/Crosshair/`(소량, rename 후 강제저장 동일) + 원본 삭제. (이건 가벼움, 먼저)
-2. **플랜 우선**(C++ 필드 + WBP 기능 = HIGH_RISK 코드변경). 구현=Haiku 위임 가능, 분산↔px 매핑·무기교체 갱신은 Opus 검증.
-3. 빌드(에디터 닫고) + 헤드리스 스모크 + PIE: 쏠때 갭↑·회복·조준시↓·무기별 텍스처 전환·히트마커 정상.
+1. ✅ **relocate 완료**(2026-06-22, 커밋 `1c939c0`): 20텍스처 → `/Game/Assets/UI/Crosshair/`(평탄화), 원본 삭제. (가벼움, 먼저 = 끝)
+2. **④b 기능 = 다음 세션(플랜 확정됨, 2026-06-22 사용자 승인)**. ⚠️**선행**: 에디터 닫힌 상태에서 `rm -rf Content/ParagonMinions`(구 팩 3.5GB 트림, 에디터 열린 채는 파일잠금). 그 다음 C++:
+   - **사용자 결정**: 크로스헤어 스타일 = **4방향 동적 라인**(상하좌우 4 Image, 중앙 갭=분산). ④b는 이 세션 핸드오프(U-crosshair 유닛).
+   - **분산 공식 SSOT(조사확정)**: `FPSRGA_WeaponFire_Hitscan.cpp:73~115` = `SpreadDegrees = Stats->SpreadDegrees + FireComp->GetCurrentBloom(); if (IsAiming() && Stats->bHasADS) SpreadDegrees *= Stats->ADSSpreadMultiplier;` → `VRandCone(deg→rad)`. **위젯에 공식 중복 금지** → C++ 정적 헬퍼로 추출.
+   - **C++ 변경(Haiku 위임/Opus 검증, 빌드 필요)**: ⓐ `UFPSRWeaponDataAsset`(헤더 Line 64~ `Weapon|Visual`, WeaponMesh1P 옆)에 `class UTexture2D;` fwd-decl + `UPROPERTY(EditDefaultsOnly,BlueprintReadOnly,Category="Weapon|Visual") TSoftObjectPtr<UTexture2D> CrosshairTexture;`(null=기본). ⓑ `UFPSRWeaponFireComponent`(기존 `ComputeShotRecoilDelta`/`ComputeSpinupFireRate` 정적 패턴 따라): `static float ComputeSpreadDegrees(const FFPSRWeaponStatBlock&, float Bloom, bool bAiming)` + `UFUNCTION(BlueprintPure) float GetCurrentSpreadDegrees() const`(=`GetInventory()->GetCurrentInstance()->GetResolvedStats()` + CurrentBloom/bIsAiming → ComputeSpreadDegrees) + `UFUNCTION(BlueprintPure) UTexture2D* GetEquippedCrosshairTexture() const`(=현재 Instance `GetSource()->CrosshairTexture.LoadSynchronous()`, null=nullptr). **Hitscan GA를 ComputeSpreadDegrees 호출로 DRY 리팩터**(무회귀 — 동일 결과). 데이터접근 기존: `Inventory->GetCurrentInstance()`(C++) → `GetResolvedStats()`(서버+클라 계산)·`GetSource()`(BlueprintPure).
+   - **WBP_RunHUD 4방향 라인(콘텐츠 MCP)**: 중앙 Canvas에 상하좌우 4 Image(텍스처=`GetEquippedCrosshairTexture()`, 없으면 기본 `T_CH00x`), 각 라인 오프셋 = `MinGap + GetCurrentSpreadDegrees()×PxPerDeg`(클램프, PxPerDeg/MinGap 튜너블). 매프레임 갭 갱신(로컬 코스메틱·위젯1개 틱 허용), 무기교체 시 텍스처 재취득(폰 FireComponent 폴링 또는 인벤토리 `OnRep_CurrentSlotIndex`). 순수 클라(서버 무관).
+3. 빌드(에디터 닫고) + 헤드리스 스모크 + Codex 플랜게이트 + **머지 시 Codex 게이트(C++)** + PIE: 쏠때 갭↑·회복·조준시↓·무기별 텍스처 전환·기본 폴백.
+4. (후속) T_HM 히트마커 텍스처 → `WBP_HitMarker` 교체, T_KI 킬인디, T_AH 역할확인.
 
 > **유닛 기록 권장**: C++ 포함이라 content 아님 → 로드맵 새 유닛(예: `U-crosshair`, §2-5 사격감각/§2-14 HUD)으로 등록 + 머지 시 Codex 게이트. TaskPrompts_Master 반영.
 

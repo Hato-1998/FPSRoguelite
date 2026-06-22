@@ -6,9 +6,19 @@
 
 **최종 갱신: 2026-06-22**
 
-## 🚧 콘텐츠: 신규 팩 2종(ModularSciFiStation + ParagonMinions) — **착수 대기(MCP 재연결 필요, 새 세션 인계)** (브랜치 `content/character-environment`)
-> **재개 노트 = `Docs/AssetWork_NewPacks_Resume.md`**(디스크 조사·트림/relocate 플랜·VAT·결정사항·복붙 프롬프트 전부). **VibeUE MCP가 세션 중간 연결 해제 → 에디터 켠 채(8088 LISTENING·PID20016 확인됨) 새 Claude 세션 시작으로 재연결.**
-> **상태(2026-06-22, 팩별 적용방침 사용자 확정)**: 사용자가 에디터에서 다수 진행 중. **🅾️ 보스 이동**(`Content/Boss`→`Content/Character/Boss`, 검증 클린 → 커밋만). **🅰️ ModularSciFiStation**(2.3GB·323)=**맵 제작 키트** → `/Game/Assets/Environment/` relocate + ThirdPersonBP·Level 데모 트림. **🅱️ ParagonMinions**(4.8GB·2105) **선별만**: Down_Minions·Dusk_Minions(스웜+엘리트/강화)·Prime_Helix(보스) + **의존성 클로저** → `/Game/Assets/Characters/Paragon/`(Buff·나머지 제외). 스웜=**VAT 베이크**(원칙1), 보스=스켈레탈+GAS 유지. **🅲️ CrosshairFreePack**(20텍스처)=**기능 작업**(코드+UI, 단순에셋 아님): 크로스헤어 교체+동적 분산(`UFPSRWeaponFireComponent::GetCurrentBloom()` 바인딩, 총분산=`(SpreadDegrees+Bloom)×ADS`)+무기별(`FPSRWeaponDataAsset`에 `CrosshairTexture` 신규 C++ 필드) → **플랜 우선·빌드 포함, U-crosshair 유닛 권장**. [[marketplace-asset-import-relocate]] [[vat-bake-inherited-component-wiring]]
+## 🚧 콘텐츠: 신규 3팩(ModularSciFiStation·ParagonMinions·CrosshairFreePack)+보스이동 — **①②③④a 완료·커밋(6), ④b 크로스헤어 C++ 플랜확정→핸드오프** (브랜치 `content/character-environment`)
+> **재개 노트 = `Docs/AssetWork_NewPacks_Resume.md`**(팩별 방침·relocate·VAT·**④b 확정 플랜**·트림 명령). VibeUE MCP는 에디터 켠 채 새 세션으로 재연결.
+> **완료(2026-06-22, VibeUE MCP Python, 신규 C++ 0 — ④b만 C++)**:
+> - **① 보스 이동** `content(boss)` `26288c4` — `/Game/Boss`→`/Game/Character/Boss`(검증 클린, 맵 스푸리어스 제외).
+> - **② ModularSciFiStation** `content(env)` `2025021` — 맵 키트 324→트림35(ThirdPersonBP+Level데모)→**289 relocate** `/Game/Assets/Environment/ModularSciFiStation/`. 강제저장·구경로0·MI부모해결 검증.
+> - **③ ParagonMinions relocate** `content(enemy)` `e58ea55` — 선별 **367개(1.2GB)**=Down(226)+Dusk(44)+Prime_Helix(50,보스)+클로저(Global46+Buff1) → `/Game/Assets/Characters/Paragon/`. Dusk→Down 크로스폴더 스켈레톤 공유 정합 검증. 팬텀 애님참조(`/Game/Characters/.../LaneMinions` 미존재) 무해.
+> - **③ 미니언 VAT+배선** `content(enemy)` `e0654dc` — BroBot 레시피로 **스웜 `SM_Minion_Melee_VAT`**(Combat_JogFwd 41본/55f, teal)+**엘리트 `SM_Minion_Siege_VAT`**(Jog_Fwd_Combat 39본/57f, crimson). `M_BroBot_VAT` 제네릭 마스터 재사용(MI에 update_material_instance_from_data_asset로 베이크파라미터 주입). **BP_EnemyBase.Mesh CDO 스왑** SM_BroBot_VAT→SM_Minion_Melee_VAT(BroBot은 플레이어/로비 3P 유지). 미니언 176cm>BroBot 138 → facing/scale 정밀정렬 **사용자 PIE**.
+> - **④a Crosshair relocate** `content(ui)` `1c939c0` — 20텍스처(CH9·HM4·KI3·AH4) → `/Game/Assets/UI/Crosshair/`.
+> **남은 작업(다음 세션 = ④b U-crosshair 유닛)**:
+> 1. **구 ParagonMinions 트림(첫 단계)**: **에디터 닫힌 상태에서** `rm -rf Content/ParagonMinions`(3.5GB·1757 untracked, 외부참조0). ⚠️**에디터 열린 채는 파일잠금으로 disk-rm 차단**(이번 세션 GC 후에도 busy 확인) → 에디터 닫힘 필수. 재시작 시 레지스트리 자동정리. git 영향0(untracked, 커밋 안 들어감). [[marketplace-asset-import-relocate]]
+> 2. **④b 크로스헤어 기능(C++ 빌드 포함, 플랜 확정)**: 사용자 결정=**4방향 동적 라인**. 상세=`Docs/AssetWork_NewPacks_Resume.md` §🅲️. 요약: ⓐ `UFPSRWeaponDataAsset`+`TSoftObjectPtr<UTexture2D> CrosshairTexture`(Weapon|Visual) ⓑ `UFPSRWeaponFireComponent`+`static ComputeSpreadDegrees(Stats,Bloom,bAiming)`+`GetCurrentSpreadDegrees()`+`GetEquippedCrosshairTexture()` BlueprintPure(**분산공식 SSOT=`FPSRGA_WeaponFire_Hitscan.cpp:73~115`**와 동일, GA를 헬퍼 호출로 DRY) ⓒ WBP_RunHUD 4방향 라인 갭=`MinGap+GetCurrentSpreadDegrees()×PxPerDeg`·텍스처=`GetEquippedCrosshairTexture()`(없으면 기본 T_CH). 빌드(에디터닫고)→스모크→Codex 플랜게이트→PIE. 구현=Haiku/검증=Opus.
+> 3. **보스 메시 배선(후속)**: Prime_Helix 스켈레탈+30애님 relocate됨 → `BP_Boss`(Character/Boss)에 배선(AnimBP/idle 필요, U3 `AFPSRBossBase` 소비). 미착수.
+> [[marketplace-asset-import-relocate]] [[vat-bake-inherited-component-wiring]]
 
 ## 🚧 콘텐츠: 환경(창고) — ZerinLabs SciFi 팩 이동 + L_Sandbox 창고 블록아웃 **정적 완료·검증, PIE 검증 대기** (브랜치 `content/character-environment`)
 > **재개 노트 = `Docs/AssetWork_Env_Resume.md`**(측정값·안전 재배치법·창고 플랜). **다음 = 사용자 PIE**(L_Sandbox 런: 벽 솔리드 충돌·플레이어/적/보스 정상·플로우필드·이동 무회귀) → 문제 시 벽 facing/높이 보정 → 보스 메시 등 후속.
