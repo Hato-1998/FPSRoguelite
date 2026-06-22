@@ -6,7 +6,7 @@
 > ## ✅ 상태 업데이트 (2026-06-22, 실행 세션) — **🅾️🅰️🅱️ + 🅲️relocate 완료(6커밋), 🅲️기능(④b)만 남음**
 > 아래 🅾️🅰️🅱️ 본문은 **실행 전 플랜**(완료됨, 참고용). 실제 결과·커밋·다음할일은 **PROGRESS.md 최상단** 참조.
 > - 🅾️ 보스이동 `26288c4` · 🅰️ ModularSciFiStation(289) `2025021` · 🅱️ ParagonMinions relocate(367) `e58ea55` + 미니언 VAT(Melee스웜+Siege엘리트)+BP_EnemyBase 배선 `e0654dc` · 🅲️ Crosshair relocate(20) `1c939c0` 완료.
-> - **남은 것 2 (다음 세션)**: ① 구 ParagonMinions 트림 = **에디터 닫고** `rm -rf Content/ParagonMinions`(열린 채는 파일잠금 차단 확인). ② **④b 크로스헤어 C++ 기능** = §🅲️ "처리 순서" 갱신본의 확정 플랜(4방향 동적 라인). 보스 메시 배선(Prime_Helix→BP_Boss)은 후속.
+> - **진척(2026-06-22 실행 세션 계속)**: ✅ 구 ParagonMinions 트림 완료(에디터 닫고 rm 3.5G). ✅ **④b 크로스헤어 C++ 완료·풀빌드 Succeeded·커밋 `5b0d2de`**(DataAsset 필드+FireComponent 게터3+Hitscan DRY). **남은 것 = ④b WBP_RunHUD 4방향 라인 위젯**(콘텐츠 MCP, 에디터 재오픈 필요) → §🅲️ "처리 순서" 2-마지막 글머리. + 로비 idle 수정 미커밋(`BP_LobbyDisplayPawn`). 보스 메시 배선(Prime_Helix→BP_Boss)은 후속.
 
 ## 🔁 재시작 절차
 1. **에디터 열린 채 새 Claude 세션 시작** → VibeUE-Claude(127.0.0.1:8088) 자동 재연결.

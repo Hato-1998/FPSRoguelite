@@ -6,7 +6,7 @@
 
 **최종 갱신: 2026-06-22**
 
-## 🚧 콘텐츠: 신규 3팩(ModularSciFiStation·ParagonMinions·CrosshairFreePack)+보스이동 — **①②③④a 완료·커밋(6), ④b 크로스헤어 C++ 플랜확정→핸드오프** (브랜치 `content/character-environment`)
+## 🚧 콘텐츠: 신규 3팩+보스이동+④b크로스헤어 — **①②③④a + ④b-C++ 완료·커밋(7), ④b-WBP 위젯만 남음** (브랜치 `content/character-environment`)
 > **재개 노트 = `Docs/AssetWork_NewPacks_Resume.md`**(팩별 방침·relocate·VAT·**④b 확정 플랜**·트림 명령). VibeUE MCP는 에디터 켠 채 새 세션으로 재연결.
 > **완료(2026-06-22, VibeUE MCP Python, 신규 C++ 0 — ④b만 C++)**:
 > - **① 보스 이동** `content(boss)` `26288c4` — `/Game/Boss`→`/Game/Character/Boss`(검증 클린, 맵 스푸리어스 제외).
@@ -14,10 +14,11 @@
 > - **③ ParagonMinions relocate** `content(enemy)` `e58ea55` — 선별 **367개(1.2GB)**=Down(226)+Dusk(44)+Prime_Helix(50,보스)+클로저(Global46+Buff1) → `/Game/Assets/Characters/Paragon/`. Dusk→Down 크로스폴더 스켈레톤 공유 정합 검증. 팬텀 애님참조(`/Game/Characters/.../LaneMinions` 미존재) 무해.
 > - **③ 미니언 VAT+배선** `content(enemy)` `e0654dc` — BroBot 레시피로 **스웜 `SM_Minion_Melee_VAT`**(Combat_JogFwd 41본/55f, teal)+**엘리트 `SM_Minion_Siege_VAT`**(Jog_Fwd_Combat 39본/57f, crimson). `M_BroBot_VAT` 제네릭 마스터 재사용(MI에 update_material_instance_from_data_asset로 베이크파라미터 주입). **BP_EnemyBase.Mesh CDO 스왑** SM_BroBot_VAT→SM_Minion_Melee_VAT(BroBot은 플레이어/로비 3P 유지). 미니언 176cm>BroBot 138 → facing/scale 정밀정렬 **사용자 PIE**.
 > - **④a Crosshair relocate** `content(ui)` `1c939c0` — 20텍스처(CH9·HM4·KI3·AH4) → `/Game/Assets/UI/Crosshair/`.
-> **남은 작업(다음 세션 = ④b U-crosshair 유닛)**:
-> 1. **구 ParagonMinions 트림(첫 단계)**: **에디터 닫힌 상태에서** `rm -rf Content/ParagonMinions`(3.5GB·1757 untracked, 외부참조0). ⚠️**에디터 열린 채는 파일잠금으로 disk-rm 차단**(이번 세션 GC 후에도 busy 확인) → 에디터 닫힘 필수. 재시작 시 레지스트리 자동정리. git 영향0(untracked, 커밋 안 들어감). [[marketplace-asset-import-relocate]]
-> 2. **④b 크로스헤어 기능(C++ 빌드 포함, 플랜 확정)**: 사용자 결정=**4방향 동적 라인**. 상세=`Docs/AssetWork_NewPacks_Resume.md` §🅲️. 요약: ⓐ `UFPSRWeaponDataAsset`+`TSoftObjectPtr<UTexture2D> CrosshairTexture`(Weapon|Visual) ⓑ `UFPSRWeaponFireComponent`+`static ComputeSpreadDegrees(Stats,Bloom,bAiming)`+`GetCurrentSpreadDegrees()`+`GetEquippedCrosshairTexture()` BlueprintPure(**분산공식 SSOT=`FPSRGA_WeaponFire_Hitscan.cpp:73~115`**와 동일, GA를 헬퍼 호출로 DRY) ⓒ WBP_RunHUD 4방향 라인 갭=`MinGap+GetCurrentSpreadDegrees()×PxPerDeg`·텍스처=`GetEquippedCrosshairTexture()`(없으면 기본 T_CH). 빌드(에디터닫고)→스모크→Codex 플랜게이트→PIE. 구현=Haiku/검증=Opus.
-> 3. **보스 메시 배선(후속)**: Prime_Helix 스켈레탈+30애님 relocate됨 → `BP_Boss`(Character/Boss)에 배선(AnimBP/idle 필요, U3 `AFPSRBossBase` 소비). 미착수.
+> **남은 작업**:
+> 1. ✅ **구 ParagonMinions 트림 완료**(2026-06-22, 에디터 닫고 `rm -rf` 3.5GB·1757 untracked 제거, git 영향0). ⚠️**교훈**: 에디터 열린 채는 파일잠금으로 disk-rm 차단(GC 후에도 busy) → 에디터 닫힘 필수. [[marketplace-asset-import-relocate]]
+> 2. **④b 크로스헤어** — **C++ 완료·풀빌드 Succeeded·커밋 `5b0d2de`**(2026-06-22, Haiku구현/Opus검증). ⓐ `UFPSRWeaponDataAsset.CrosshairTexture`(TSoftObjectPtr<UTexture2D>, Weapon\|Visual) ⓑ `UFPSRWeaponFireComponent`: `static ComputeSpreadDegrees(Stats,Bloom,bAiming)`+`GetCurrentSpreadDegrees()`+`GetEquippedCrosshairTexture()` BlueprintPure(분산공식 SSOT, Hitscan GA를 헬퍼호출로 DRY 무회귀). **남은 것=`WBP_RunHUD` 4방향 라인 위젯(콘텐츠 MCP, 에디터 재오픈 필요)**: 갭=`MinGap+GetCurrentSpreadDegrees()×PxPerDeg`·텍스처=`GetEquippedCrosshairTexture()`(없으면 기본 `/Game/Assets/UI/Crosshair/T_CH00x`)·무기교체 재취득(폰 FireComponent 폴링). → content(ui) 커밋 + (main 머지 시 Codex 게이트) + 사용자 PIE(쏠때 갭↑·회복·ADS↓·무기별 전환). 사용자결정=4방향 동적라인. T_HM 히트마커/T_KI 킬인디는 후속.
+> 3. **로비 idle 수정(미커밋)**: `BP_LobbyDisplayPawn`이 BroBot 로코모션 AnimBP를 써서 이동컴포넌트 없는 디스플레이폰에서 `GetMovementComponent` None 에러(PIE 매틱). 사용자가 BodyMesh를 단일 idle(`BCC_01_BroBot_Idle`)로 교체(검증됨). 워킹트리 `M BP_LobbyDisplayPawn.uasset` — content(char) 커밋 대기.
+> 4. **보스 메시 배선(후속)**: Prime_Helix 스켈레탈+30애님 relocate됨 → `BP_Boss`(Character/Boss)에 배선(AnimBP/idle 필요, U3 `AFPSRBossBase` 소비). 미착수.
 > [[marketplace-asset-import-relocate]] [[vat-bake-inherited-component-wiring]]
 
 ## 🚧 콘텐츠: 환경(창고) — ZerinLabs SciFi 팩 이동 + L_Sandbox 창고 블록아웃 **정적 완료·검증, PIE 검증 대기** (브랜치 `content/character-environment`)
