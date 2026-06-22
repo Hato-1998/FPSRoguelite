@@ -15,6 +15,7 @@ class UAnimInstance;
 class UAnimMontage;
 class USoundBase;
 class UParticleSystem;
+class UTexture2D;
 
 /** Data-driven weapon definition. */
 UCLASS(BlueprintType)
@@ -94,6 +95,10 @@ public:
 	/** Cascade muzzle-flash particle spawned at MuzzleSocket each shot (owner-client local). */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Visual")
 	TSoftObjectPtr<UParticleSystem> MuzzleFlash;
+
+	/** Per-weapon HUD crosshair texture (cosmetic; owner-client only). Null = HUD default crosshair. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Visual")
+	TSoftObjectPtr<UTexture2D> CrosshairTexture;
 
 	/** Fire sound played each shot (owner-client local; multi-client cosmetic is a later unit). */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Audio")
