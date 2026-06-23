@@ -120,6 +120,12 @@ void AFPSRGameMode::RequestReturnToLobby()
 	{
 		return;
 	}
+	// Only valid once the run has ended (the result screen's Return). Reject a mid-run call so a client can't
+	// travel the whole party out of a live run (W1 P2-3). Debug travel uses the lower-level FPSR.TravelLobby.
+	if (!bRunEnded)
+	{
+		return;
+	}
 	// Cancel the pending auto-travel so the manual Return and the timer don't both ServerTravel.
 	if (UWorld* World = GetWorld())
 	{

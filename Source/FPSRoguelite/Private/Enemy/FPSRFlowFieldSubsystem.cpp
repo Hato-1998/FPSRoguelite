@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Enemy/FPSRFlowFieldSubsystem.h"
+#include "Core/FPSRGameState.h"
 #include "Core/FPSRLogChannels.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
@@ -182,6 +183,16 @@ void UFPSRFlowFieldSubsystem::RecomputeField()
 	if (!World)
 	{
 		return;
+	}
+
+	// Skip the recompute during the global freeze (§2-2): enemy movement is gated off, so nothing samples the
+	// field while paused — recomputing toward stationary players is wasted work (W1 P3-2).
+	if (const AFPSRGameState* GS = World->GetGameState<AFPSRGameState>())
+	{
+		if (GS->IsRunPaused())
+		{
+			return;
+		}
 	}
 
 	const int32 NumCells = GridDim * GridDim;

@@ -5,6 +5,7 @@
 #include "GameFramework/Pawn.h"
 #include "Engine/World.h"
 #include "Net/UnrealNetwork.h"
+#include "Net/Core/PushModel/PushModel.h"
 #include "DrawDebugHelpers.h"
 
 AFPSRMissionOrb::AFPSRMissionOrb()
@@ -27,7 +28,9 @@ AFPSRMissionOrb::AFPSRMissionOrb()
 void AFPSRMissionOrb::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
-	DOREPLIFETIME(AFPSRMissionOrb, bCollected);
+	FDoRepLifetimeParams Params;
+	Params.bIsPushBased = true;
+	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRMissionOrb, bCollected, Params);
 }
 
 void AFPSRMissionOrb::SetCollected(bool bNewCollected)
@@ -37,6 +40,7 @@ void AFPSRMissionOrb::SetCollected(bool bNewCollected)
 		return;
 	}
 	bCollected = bNewCollected;
+	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRMissionOrb, bCollected, this);
 	SetActorHiddenInGame(bNewCollected);
 	SetActorEnableCollision(!bNewCollected);
 }
@@ -55,6 +59,7 @@ void AFPSRMissionOrb::OnSphereBeginOverlap(UPrimitiveComponent* OverlappedComp, 
 	}
 	// Mark collected so it cannot retrigger; the owning mission decides what "collected" means (consume vs carry).
 	bCollected = true;
+	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRMissionOrb, bCollected, this);
 	SetActorEnableCollision(false);
 	OnCollectedNative.Broadcast(this, Pawn);
 }

@@ -177,11 +177,15 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 	const UFPSRFlowFieldSubsystem* FlowField = World->GetSubsystem<UFPSRFlowFieldSubsystem>();
 
 	// Build the per-pass agent arrays + uniform-grid spatial hash (all valid active enemies) for separation.
-	TArray<AFPSREnemyBase*> Agents;
-	TArray<FVector> Locations;
+	// Reuse the member scratch (Reset keeps capacity) so the 500-enemy batch doesn't realloc every frame (W1 P2-4).
+	TArray<AFPSREnemyBase*>& Agents = MovementAgentsScratch;
+	TArray<FVector>& Locations = MovementLocationsScratch;
+	TMap<FIntPoint, TArray<int32>>& SpatialHash = MovementSpatialHashScratch;
+	Agents.Reset();
+	Locations.Reset();
+	SpatialHash.Reset();
 	Agents.Reserve(ActiveEnemies.Num());
 	Locations.Reserve(ActiveEnemies.Num());
-	TMap<FIntPoint, TArray<int32>> SpatialHash;
 	for (const TObjectPtr<AFPSREnemyBase>& EnemyPtr : ActiveEnemies)
 	{
 		AFPSREnemyBase* Enemy = EnemyPtr.Get();

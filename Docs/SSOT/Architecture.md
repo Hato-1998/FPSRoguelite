@@ -36,7 +36,7 @@ Source/FPSRoguelite/Public/
 ├── Hero/             UHeroDataAsset, AFPSRCharacter (Separated Arms)
 ├── AbilitySystem/    ASC, AttributeSets(글로벌), GA, GE, Cue, DamageCalc(브릿지)
 ├── Weapon/           Archetype 7종, WeaponInstance, StatBlock, ModifierFragment
-├── Card/             CardDataAsset(Scope), CardPool, DrawSystem, Reroll
+├── Card/             CardDataAsset(폴리모픽 Instanced `Effects[]`·`ECardGroup`, v2 U18), CardPool, DrawSystem(서버권위 인덱스선택), Reroll, `UFPSRCardEffect` 서브클래스(CharacterGE/CharacterPassive/WeaponStat/WeaponBehavior/GrantWeapon)
 ├── Enemy/            경량 풀액터, HealthComponent, AttackType, FlowField, ScalingProfile
 ├── Boss/             ABossBase, BossDefinition, StateTree
 ├── Run/              SpawnDirector, **RunDirector(`UFPSRRunDirectorSubsystem`=런클럭/스폰강도/시간 미션 스케줄/보스타임, 서버 전용)**, RunSchedule(`UFPSRRunScheduleDataAsset`), **Mission/**(`AFPSRMissionActor` 베이스+`UFPSRMissionDataAsset`+`AFPSRMissionSpawnPoint`+서브클래스, P4-A)  ※ 공유XP/레벨/RunPhase/**bRunPaused** = **복제 필요 → `AFPSRGameState` 호스팅**(Push Model, 서버 권위). WorldSubsystem은 복제 불가라 런 상태는 GameState에 둔다(P3-A 확정 2026-06-01). **레벨업 보류 픽은 플레이어별이라 `AFPSRPlayerState::CardPicksPending`(+미션보상 `MissionRewardPicksPending`)에 둔다**(§2-2). 레벨업/미션클리어 시 `bRunPaused`로 전역 프리즈(§2-2, 재설계 2026-06-04).
@@ -51,7 +51,7 @@ Source/FPSRoguelite/Public/
 - 무기별 스탯 → WeaponInstance 스탯 블록 (ASC 아님)
 - 하단 무기바 HUD: 가시성을 HUD State(GMS/Tag)에 바인딩 → ADS/카드UI/미션UI 시 숨김
 
-### 4-2. 실제 구현된 클래스맵 (현재 코드, P0~P1.5-A)
+### 4-2. 구현 클래스맵 (⚠️ P0~P1.5-A 시점 역사 스냅샷 — 현재 전체 구조는 §4-1 목표구조 + `git log`·`PROGRESS.md` 참조; 이후 Boss/·Card v2·Run/Mission/·Combat/·Pickup/·UI Menu·Lobby·Session 등 대폭 추가됨)
 ```
 Source/FPSRoguelite/
 ├── FPSRoguelite.Build.cs / *.Target.cs (UE5.7, V6, Unreal5_7)

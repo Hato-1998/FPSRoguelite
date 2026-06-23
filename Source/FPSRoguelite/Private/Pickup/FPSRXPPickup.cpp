@@ -46,6 +46,16 @@ void AFPSRXPPickup::Tick(float DeltaSeconds)
 		return;
 	}
 
+	// Global freeze (card selection, §2-2): the world is stopped — don't magnet, collect, or grant XP. Every other
+	// progressing server loop (enemy movement/spawn, director, missions, projectiles) gates the same way (W1 P2-1).
+	if (const AFPSRGameState* GameState = World->GetGameState<AFPSRGameState>())
+	{
+		if (GameState->IsRunPaused())
+		{
+			return;
+		}
+	}
+
 	const FVector PickupLocation = GetActorLocation();
 	const float CollectRadiusSq = CollectRadius * CollectRadius;
 
