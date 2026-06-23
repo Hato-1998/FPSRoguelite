@@ -108,11 +108,10 @@ void UFPSRGA_WeaponFire_Hitscan::ActivateAbility(
 	// Add bloom from sustained fire, then tighten spread while aiming down sights.
 	if (UFPSRWeaponFireComponent* FireComp = Avatar->FindComponentByClass<UFPSRWeaponFireComponent>())
 	{
-		SpreadDegrees += FireComp->GetCurrentBloom();
-		if (FireComp->IsAiming() && Stats && Stats->bHasADS)
-		{
-			SpreadDegrees *= Stats->ADSSpreadMultiplier;
-		}
+		const float Bloom = FireComp->GetCurrentBloom();
+		SpreadDegrees = Stats
+			? UFPSRWeaponFireComponent::ComputeSpreadDegrees(*Stats, Bloom, FireComp->IsAiming())
+			: SpreadDegrees + Bloom;
 	}
 
 	// Behavior fragments (P4-B-2): build the per-activation context and let fragments adjust the shot count

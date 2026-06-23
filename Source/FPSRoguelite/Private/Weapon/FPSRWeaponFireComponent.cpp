@@ -11,6 +11,8 @@
 
 #include "AbilitySystemComponent.h"
 #include "Engine/Engine.h"
+#include "Engine/Texture2D.h"
+#include "Materials/MaterialInterface.h"
 #include "AbilitySystemGlobals.h"
 #include "GameFramework/Pawn.h"
 #include "HAL/IConsoleManager.h"
@@ -62,6 +64,39 @@ void UFPSRWeaponFireComponent::NotifyPlayerPitchCompensation(float DownAmount)
 UFPSRWeaponInventoryComponent* UFPSRWeaponFireComponent::GetInventory() const
 {
 	return GetOwner() ? GetOwner()->FindComponentByClass<UFPSRWeaponInventoryComponent>() : nullptr;
+}
+
+float UFPSRWeaponFireComponent::ComputeSpreadDegrees(const FFPSRWeaponStatBlock& Stats, float Bloom, bool bAiming)
+{
+	const float Base = Stats.SpreadDegrees + Bloom;
+	return (bAiming && Stats.bHasADS) ? Base * Stats.ADSSpreadMultiplier : Base;
+}
+
+float UFPSRWeaponFireComponent::GetCurrentSpreadDegrees() const
+{
+	UFPSRWeaponInventoryComponent* Inv = GetInventory();
+	UFPSRWeaponInstance* Inst = Inv ? Inv->GetCurrentInstance() : nullptr;
+	if (!Inst)
+	{
+		return CurrentBloom;
+	}
+	return ComputeSpreadDegrees(Inst->GetResolvedStats(), CurrentBloom, bIsAiming);
+}
+
+UMaterialInterface* UFPSRWeaponFireComponent::GetEquippedCrosshairMaterial() const
+{
+	UFPSRWeaponInventoryComponent* Inv = GetInventory();
+	UFPSRWeaponInstance* Inst = Inv ? Inv->GetCurrentInstance() : nullptr;
+	UFPSRWeaponDataAsset* Src = Inst ? Inst->GetSource() : nullptr;
+	return Src ? Src->CrosshairMaterial.LoadSynchronous() : nullptr;
+}
+
+bool UFPSRWeaponFireComponent::GetEquippedCrosshairUsesDynamic() const
+{
+	UFPSRWeaponInventoryComponent* Inv = GetInventory();
+	UFPSRWeaponInstance* Inst = Inv ? Inv->GetCurrentInstance() : nullptr;
+	UFPSRWeaponDataAsset* Src = Inst ? Inst->GetSource() : nullptr;
+	return Src ? Src->bUseDynamicCrosshair : true;
 }
 
 bool UFPSRWeaponFireComponent::CanFire() const

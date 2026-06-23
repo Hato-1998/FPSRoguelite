@@ -6,6 +6,9 @@
 #include "FPSRWeaponFireComponent.generated.h"
 
 class UFPSRWeaponInventoryComponent;
+class UFPSRWeaponInstance;
+class UTexture2D;
+class UMaterialInterface;
 class UCameraComponent;
 
 /** Owning-client component that drives fire cadence (fire rate / fire mode), camera recoil, and spread bloom.
@@ -31,6 +34,23 @@ public:
 	/** Extra spread (degrees) from sustained fire; read by the fire ability when tracing. */
 	UFUNCTION(BlueprintPure, Category = "FPSR|Weapon")
 	float GetCurrentBloom() const { return CurrentBloom; }
+
+	/** Total spread half-angle (deg) the fire trace uses = (resolved SpreadDegrees + bloom) x ADS.
+	 *  Single source of truth shared with the fire ability cone; the HUD crosshair gap reads this. */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Weapon")
+	float GetCurrentSpreadDegrees() const;
+
+	/** Equipped weapon's per-weapon crosshair material (resolved soft-ref), or null for the HUD default MI. */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Weapon")
+	UMaterialInterface* GetEquippedCrosshairMaterial() const;
+
+	/** Equipped weapon's dynamic-crosshair toggle (true = apply spread bloom; false = static crosshair). */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Weapon")
+	bool GetEquippedCrosshairUsesDynamic() const;
+
+	/** Shared spread formula used by BOTH the fire ability cone and the HUD crosshair:
+	 *  (Stats.SpreadDegrees + Bloom) x (bAiming && Stats.bHasADS ? Stats.ADSSpreadMultiplier : 1). */
+	static float ComputeSpreadDegrees(const struct FFPSRWeaponStatBlock& Stats, float Bloom, bool bAiming);
 
 	/** Owner-client + server (via RPC): set aim-down-sights state (FOV/recoil local, spread read by fire GA). */
 	void SetAiming(bool bNewAiming) { bIsAiming = bNewAiming; }
