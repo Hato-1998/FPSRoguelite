@@ -56,11 +56,15 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Run")
 	int32 BaseAliveCount = 40;
 
-	/** Added to the target alive count per minute of survival (time-scaling difficulty). */
+	/** Added to the target alive count per minute of survival (time-scaling difficulty), BEFORE the boss appears. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Run")
 	float AliveCountPerMinute = 30.0f;
 
+	/** Added per minute AFTER the boss appears — the swarm persists and keeps ramping at this (higher) rate. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Run")
+	float AliveCountPerMinuteAfterBoss = 50.0f;
+
 	/** Hard cap on the time-scaled target alive count. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Run")
-	int32 MaxAliveCount = 250;
+	int32 MaxAliveCount = 300;
 };

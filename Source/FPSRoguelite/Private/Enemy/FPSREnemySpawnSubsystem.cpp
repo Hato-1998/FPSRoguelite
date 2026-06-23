@@ -8,6 +8,7 @@
 #include "Core/FPSRLogChannels.h"
 #include "Core/FPSRGameState.h"
 #include "Core/FPSRPlayerState.h"
+#include "Run/FPSRRunDirectorSubsystem.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "GameFramework/PlayerController.h"
@@ -168,10 +169,27 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 
 	const AFPSRGameState* GameState = World->GetGameState<AFPSRGameState>();
 	// Global freeze (card selection): enemies are frozen in place — skip the whole movement+attack pass.
-	// (Enemies move/attack during both Combat and Boss; only spawning is Combat-only.)
+	// (Enemies move/attack during both Combat and Boss phases.)
 	if (GameState && GameState->IsRunPaused())
 	{
 		return;
+	}
+
+	// Time-scaled contact damage, computed ONCE per pass (one global scalar — keeps the swarm a batch, no per-enemy
+	// state): 25 for the first minute, linear ramp 25->50 by BossTime, 50 thereafter (incl. the boss phase, where the
+	// run clock is pinned at BossTime). Overrides the per-enemy AttackDamage for the player-contact path.
+	float ContactDamage = 25.0f;
+	{
+		const float RunClock = GameState ? GameState->GetRunClockSeconds() : 0.0f;
+		float BossTime = 300.0f;
+		if (const UFPSRRunDirectorSubsystem* Director = World->GetSubsystem<UFPSRRunDirectorSubsystem>())
+		{
+			BossTime = Director->GetBossTime();
+		}
+		constexpr float RampStart = 60.0f;
+		const float RampEnd = FMath::Max(BossTime, RampStart + 1.0f);
+		const float Alpha = FMath::Clamp((RunClock - RampStart) / (RampEnd - RampStart), 0.0f, 1.0f);
+		ContactDamage = FMath::Lerp(25.0f, 50.0f, Alpha);
 	}
 
 	const UFPSRFlowFieldSubsystem* FlowField = World->GetSubsystem<UFPSRFlowFieldSubsystem>();
@@ -241,7 +259,7 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 		{
 			if (AFPSRCharacter* TargetChar = Cast<AFPSRCharacter>(PlayerPawns[BestPlayerIndex]))
 			{
-				TargetChar->ApplyContactDamage(Enemy->GetAttackDamage(), Enemy);
+				TargetChar->ApplyContactDamage(ContactDamage, Enemy);
 				Enemy->NotifyAttacked(Now);
 				++AttackersThisPass[BestPlayerIndex];
 			}
@@ -341,9 +359,12 @@ void UFPSREnemySpawnSubsystem::TickDirector()
 	}
 
 	const AFPSRGameState* GameState = GetWorld() ? GetWorld()->GetGameState<AFPSRGameState>() : nullptr;
-	if (GameState && (!GameState->IsCombatPhase() || GameState->IsRunPaused()))
+	if (GameState && (GameState->IsRunPaused()
+		|| (!GameState->IsCombatPhase() && GameState->GetRunPhase() != ERunPhase::Boss)))
 	{
-		return; // Spawning only during Combat and only while not frozen for card selection (Game.MD §2-2).
+		// Spawn during Combat AND Boss (the swarm persists + keeps ramping through the boss fight); never while
+		// frozen for card selection, and not in pre-combat/menu phases (Game.MD §2-2).
+		return;
 	}
 
 	int32 SpawnedThisTick = 0;

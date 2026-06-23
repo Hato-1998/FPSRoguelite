@@ -3,6 +3,7 @@
 #include "UI/FPSRCardEntryWidget.h"
 #include "Card/FPSRCardDataAsset.h"
 #include "Card/FPSRCardEffect.h"
+#include "Weapon/FPSRWeaponDataAsset.h"
 #include "Components/TextBlock.h"
 #include "Components/Button.h"
 #include "Core/FPSRLogChannels.h"
@@ -107,5 +108,19 @@ void UFPSRCardEntryWidget::UpdateDisplay()
 	if (MagnitudeText)
 	{
 		MagnitudeText->SetText(FText::Join(FText::FromString(TEXT("\n")), EffectLines));
+	}
+
+	// Target weapon slot: show the weapon name if this card targets a specific weapon, else hide.
+	if (TargetWeaponText)
+	{
+		if (CachedDraw.TargetWeapon)
+		{
+			TargetWeaponText->SetText(CachedDraw.TargetWeapon->DisplayName);
+			TargetWeaponText->SetVisibility(ESlateVisibility::HitTestInvisible);
+		}
+		else
+		{
+			TargetWeaponText->SetVisibility(ESlateVisibility::Collapsed);
+		}
 	}
 }

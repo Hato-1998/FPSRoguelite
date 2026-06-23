@@ -36,6 +36,10 @@ public:
 	void SetTimeScale(float InScale) { TimeScale = FMath::Max(0.0f, InScale); }
 	void SetRunDebug(bool bEnable) { bRunDebug = bEnable; }
 
+	/** Run-clock time (seconds) the boss appears at (from the schedule, or the fallback). Public so the enemy spawn
+	 *  subsystem can time-scale contact damage to the run timeline. */
+	float GetBossTime() const;
+
 private:
 	bool HasServerAuthority() const;
 	void DirectorTick();
@@ -55,7 +59,6 @@ private:
 
 	/** Time-scaled target alive enemy count from the schedule (or fallback) at the current run clock. */
 	int32 ComputeTargetAliveCount() const;
-	float GetBossTime() const;
 
 	/** Uniformly pick a non-null mission from the window's pool (null when the pool has none). */
 	UFPSRMissionDataAsset* PickRandomMission(const FFPSRMissionWindow& Window) const;
@@ -89,6 +92,9 @@ private:
 	TArray<float> WindowTriggerTimes;
 
 	float RunClock = 0.0f;
+	/** Seconds elapsed since the boss appeared — drives the continued post-boss spawn ramp while RunClock stays pinned
+	 *  at BossTime (the survival/HUD clock stops at the boss). */
+	float PostBossElapsed = 0.0f;
 	float TimeScale = 1.0f;
 	bool bRunActive = false;
 	bool bRunDebug = false;
@@ -112,5 +118,6 @@ private:
 	static constexpr float FallbackBossTime = 300.0f;
 	static constexpr int32 FallbackBaseAliveCount = 40;
 	static constexpr float FallbackAliveCountPerMinute = 30.0f;
-	static constexpr int32 FallbackMaxAliveCount = 250;
+	static constexpr float FallbackAliveCountPerMinuteAfterBoss = 50.0f;
+	static constexpr int32 FallbackMaxAliveCount = 300;
 };

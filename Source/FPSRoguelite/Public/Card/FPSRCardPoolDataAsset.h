@@ -35,11 +35,27 @@ public:
 	UPROPERTY(EditDefaultsOnly, Category = "Card Pool|Rarity Weights")
 	float LegendaryWeight = 0.05f;
 
-	/** How strongly the player's Luck attribute biases draws toward higher rarities. */
+	/** Per Luck point, added to Common rarity's selection weight. */
 	UPROPERTY(EditDefaultsOnly, Category = "Card Pool|Luck")
-	float LuckScale = 0.1f;
+	float LuckPerRarity_Common = 0.0f;
+
+	/** Per Luck point, added to Rare rarity's selection weight. */
+	UPROPERTY(EditDefaultsOnly, Category = "Card Pool|Luck")
+	float LuckPerRarity_Rare = 0.03f;
+
+	/** Per Luck point, added to Epic rarity's selection weight. */
+	UPROPERTY(EditDefaultsOnly, Category = "Card Pool|Luck")
+	float LuckPerRarity_Epic = 0.02f;
+
+	/** Per Luck point, added to Legendary rarity's selection weight. */
+	UPROPERTY(EditDefaultsOnly, Category = "Card Pool|Luck")
+	float LuckPerRarity_Legendary = 0.01f;
 
 	/** Returns the base weight for the given rarity. */
 	UFUNCTION(BlueprintPure, Category = "Card Pool")
 	float GetRarityBaseWeight(ECardRarity Rarity) const;
+
+	/** Returns the luck bonus per rarity for the given rarity. */
+	UFUNCTION(BlueprintPure, Category = "Card Pool")
+	float GetLuckPerRarity(ECardRarity Rarity) const;
 };

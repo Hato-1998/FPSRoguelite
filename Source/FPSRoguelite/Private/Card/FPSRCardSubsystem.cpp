@@ -528,12 +528,10 @@ float UFPSRCardSubsystem::GetEffectiveWeight(const UFPSRCardDataAsset* Card, ECa
 
 	const float RarityBase = ActivePool->GetRarityBaseWeight(Rarity);
 
-	// Higher rarity tiers are boosted by player Luck (tier index Common=0 .. Legendary=3).
-	const int32 RarityTier = static_cast<int32>(Rarity);
-	float LuckBoost = 1.0f + (Luck * ActivePool->LuckScale) * static_cast<float>(RarityTier);
-	LuckBoost = FMath::Max(LuckBoost, 0.0f);
+	// Apply per-rarity luck increments: Luck adds to the base rarity weight.
+	const float EffectiveRarityWeight = RarityBase + Luck * ActivePool->GetLuckPerRarity(Rarity);
 
-	const float FinalWeight = Card->Weight * RarityBase * LuckBoost;
+	const float FinalWeight = Card->Weight * FMath::Max(EffectiveRarityWeight, 0.0f);
 	return FMath::Max(FinalWeight, 0.0f);
 }
 

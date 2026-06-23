@@ -55,6 +55,9 @@ protected:
 	UPROPERTY(meta = (BindWidgetOptional))
 	TObjectPtr<UTextBlock> MagnitudeText;
 
+	UPROPERTY(meta = (BindWidgetOptional))
+	TObjectPtr<UTextBlock> TargetWeaponText;
+
 	UPROPERTY(meta = (BindWidget))
 	TObjectPtr<UButton> SelectButton;
 
