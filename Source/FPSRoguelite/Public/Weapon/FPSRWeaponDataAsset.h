@@ -16,6 +16,7 @@ class UAnimMontage;
 class USoundBase;
 class UParticleSystem;
 class UTexture2D;
+class UMaterialInterface;
 
 /** Data-driven weapon definition. */
 UCLASS(BlueprintType)
@@ -96,9 +97,15 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Visual")
 	TSoftObjectPtr<UParticleSystem> MuzzleFlash;
 
-	/** Per-weapon HUD crosshair texture (cosmetic; owner-client only). Null = HUD default crosshair. */
+	/** Per-weapon HUD crosshair material instance (a child MI of M_DynamicCrosshair; texture + spread tuning
+	 *  baked into the MI). Null = HUD default crosshair MI. The HUD widget drives only the per-frame Spread
+	 *  parameter on a dynamic copy of this material; all other tuning lives in the MI (designer-authored). */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Visual")
-	TSoftObjectPtr<UTexture2D> CrosshairTexture;
+	TSoftObjectPtr<UMaterialInterface> CrosshairMaterial;
+
+	/** HUD crosshair behaviour: true = dynamic (spread bloom widens the gap), false = static (no spread applied). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Visual")
+	bool bUseDynamicCrosshair = true;
 
 	/** Fire sound played each shot (owner-client local; multi-client cosmetic is a later unit). */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Audio")

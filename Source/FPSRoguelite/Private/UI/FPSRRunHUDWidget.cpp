@@ -3,6 +3,12 @@
 #include "UI/FPSRRunHUDWidget.h"
 #include "Core/FPSRGameState.h"
 #include "Engine/World.h"
+#include "Components/Image.h"
+#include "Components/CanvasPanelSlot.h"
+#include "Materials/MaterialInterface.h"
+#include "Materials/MaterialInstanceDynamic.h"
+#include "Weapon/FPSRWeaponFireComponent.h"
+#include "GameFramework/Pawn.h"
 
 void UFPSRRunHUDWidget::NativeConstruct()
 {
@@ -14,6 +20,84 @@ void UFPSRRunHUDWidget::NativeConstruct()
 	}
 
 	OnRunStateUpdated();
+
+	// Center the crosshair image in its canvas slot (idempotent; independent of the designer's slot setup).
+	if (CrosshairImage)
+	{
+		if (UCanvasPanelSlot* CanvasSlot = Cast<UCanvasPanelSlot>(CrosshairImage->Slot))
+		{
+			CanvasSlot->SetAnchors(FAnchors(0.5f, 0.5f));
+			CanvasSlot->SetAlignment(FVector2D(0.5f, 0.5f));
+			CanvasSlot->SetSize(FVector2D(CrosshairSizePx, CrosshairSizePx));
+			CanvasSlot->SetPosition(FVector2D::ZeroVector);
+			CanvasSlot->SetZOrder(10);
+		}
+	}
+}
+
+void UFPSRRunHUDWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
+{
+	Super::NativeTick(MyGeometry, InDeltaTime);
+
+	if (!CrosshairImage)
+	{
+		return;
+	}
+	UFPSRWeaponFireComponent* FireComp = ResolveFireComponent();
+	if (!FireComp)
+	{
+		return;
+	}
+
+	// Hide the crosshair while aiming down sights — the iron sights / scope take over.
+	if (FireComp->IsAiming())
+	{
+		CrosshairImage->SetVisibility(ESlateVisibility::Collapsed);
+		return;
+	}
+	CrosshairImage->SetVisibility(ESlateVisibility::HitTestInvisible);
+
+	// Per-weapon crosshair material instance, or the HUD default fallback.
+	UMaterialInterface* SourceMat = FireComp->GetEquippedCrosshairMaterial();
+	if (!SourceMat)
+	{
+		SourceMat = DefaultCrosshairMaterial.LoadSynchronous();
+	}
+	if (!SourceMat)
+	{
+		return;
+	}
+
+	// Rebuild the dynamic instance only on weapon swap (source material change), not every frame.
+	if (SourceMat != CurrentSourceMaterial)
+	{
+		CurrentSourceMaterial = SourceMat;
+		CrosshairImage->SetBrushFromMaterial(SourceMat);
+		CrosshairDMI = CrosshairImage->GetDynamicMaterial();
+	}
+	if (!CrosshairDMI)
+	{
+		return;
+	}
+
+	// Static weapons pin Spread to 0; dynamic weapons open by current bloom (tight at rest, widens on fire,
+	// recovers when not firing). Clamped so the crosshair never over-spreads past the texture edge.
+	const bool bDynamic = FireComp->GetEquippedCrosshairUsesDynamic();
+	const float Spread = bDynamic ? FMath::Min(FireComp->GetCurrentBloom() * SpreadToPush, MaxCrosshairSpread) : 0.0f;
+	CrosshairDMI->SetScalarParameterValue(TEXT("Spread"), Spread);
+}
+
+UFPSRWeaponFireComponent* UFPSRRunHUDWidget::ResolveFireComponent()
+{
+	if (CachedFireComp.IsValid())
+	{
+		return CachedFireComp.Get();
+	}
+	if (APawn* OwningPawn = GetOwningPlayerPawn())
+	{
+		CachedFireComp = OwningPawn->FindComponentByClass<UFPSRWeaponFireComponent>();
+	}
+	return CachedFireComp.Get();
 }
 
 void UFPSRRunHUDWidget::NativeDestruct()

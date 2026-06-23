@@ -8,6 +8,7 @@
 class UFPSRWeaponInventoryComponent;
 class UFPSRWeaponInstance;
 class UTexture2D;
+class UMaterialInterface;
 class UCameraComponent;
 
 /** Owning-client component that drives fire cadence (fire rate / fire mode), camera recoil, and spread bloom.
@@ -39,9 +40,13 @@ public:
 	UFUNCTION(BlueprintPure, Category = "FPSR|Weapon")
 	float GetCurrentSpreadDegrees() const;
 
-	/** Equipped weapon's per-weapon crosshair texture (resolved soft-ref), or null for the HUD default. */
+	/** Equipped weapon's per-weapon crosshair material (resolved soft-ref), or null for the HUD default MI. */
 	UFUNCTION(BlueprintPure, Category = "FPSR|Weapon")
-	UTexture2D* GetEquippedCrosshairTexture() const;
+	UMaterialInterface* GetEquippedCrosshairMaterial() const;
+
+	/** Equipped weapon's dynamic-crosshair toggle (true = apply spread bloom; false = static crosshair). */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Weapon")
+	bool GetEquippedCrosshairUsesDynamic() const;
 
 	/** Shared spread formula used by BOTH the fire ability cone and the HUD crosshair:
 	 *  (Stats.SpreadDegrees + Bloom) x (bAiming && Stats.bHasADS ? Stats.ADSSpreadMultiplier : 1). */
