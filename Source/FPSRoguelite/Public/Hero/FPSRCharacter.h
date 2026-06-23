@@ -82,6 +82,11 @@ protected:
 	UFUNCTION()
 	void HandleRunStateChanged_Vision();
 
+	/** Server (authority): on the run-freeze (§2-2) halt residual locomotion — notably an in-flight dash impulse —
+	 *  and cancel any in-progress dash so the player can't drift across the frozen card screen. CMC replicates the stop. */
+	UFUNCTION()
+	void HandleRunStateChanged_Movement();
+
 	/** Local client: try to bind to GameState OnRunStateChanged (GameState may arrive after BeginPlay). */
 	void TryBindVisionDelegate();
 

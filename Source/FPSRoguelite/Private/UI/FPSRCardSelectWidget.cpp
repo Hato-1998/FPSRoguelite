@@ -38,6 +38,19 @@ void UFPSRCardSelectWidget::NativeOnInitialized()
 	}
 }
 
+void UFPSRCardSelectWidget::NativeDestruct()
+{
+	// The reroll-charge delegate lives on the PlayerState (which outlives this widget) — remove the binding on
+	// teardown to match the Lobby/RunHUD widgets' cleanup convention. The owned CardEntry/Button delegates die with
+	// their sub-widgets, so only the PlayerState binding needs explicit removal.
+	if (AFPSRPlayerState* PS = GetOwningPlayerState<AFPSRPlayerState>())
+	{
+		PS->OnRerollChargesChanged.RemoveDynamic(this, &UFPSRCardSelectWidget::UpdateRerollCharges);
+	}
+
+	Super::NativeDestruct();
+}
+
 TOptional<FUIInputConfig> UFPSRCardSelectWidget::GetDesiredInputConfig() const
 {
 	return FUIInputConfig(ECommonInputMode::Menu, EMouseCaptureMode::NoCapture);
