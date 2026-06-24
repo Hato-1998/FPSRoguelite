@@ -42,10 +42,12 @@ void UFPSRRunDirectorSubsystem::StartRun()
 	NextRunLogTime = 30.0f;
 
 	// Push schedule-driven spawn pacing to the spawn subsystem (the swarm fill rate — how fast it builds toward the
-	// target alive count). Tunable on DA_RunSchedule.MaxSpawnPerTick without further code changes.
+	// target alive count). Both the per-tick batch (MaxSpawnPerTick) and the tick interval (SpawnIntervalSeconds) are
+	// tunable on DA_RunSchedule without further code changes; together they set the per-second spawn pace.
 	if (UFPSREnemySpawnSubsystem* SpawnSub = GetSpawnSub())
 	{
 		SpawnSub->SetMaxSpawnPerTick(ActiveSchedule ? ActiveSchedule->MaxSpawnPerTick : FallbackMaxSpawnPerTick);
+		SpawnSub->SetSpawnInterval(ActiveSchedule ? ActiveSchedule->SpawnIntervalSeconds : FallbackSpawnIntervalSeconds);
 	}
 
 	// Size the per-window fired flags and roll each window's trigger time within its [MinTime, MaxTime] range

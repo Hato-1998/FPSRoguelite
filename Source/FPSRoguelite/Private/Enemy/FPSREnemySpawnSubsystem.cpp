@@ -77,6 +77,30 @@ void UFPSREnemySpawnSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 	}
 }
 
+void UFPSREnemySpawnSubsystem::SetSpawnInterval(float InSeconds)
+{
+	SpawnInterval = FMath::Max(0.02f, InSeconds);
+
+	// The director timer is armed once at OnWorldBeginPlay (before the director pushes the schedule), so re-arm it
+	// here with the new interval so a schedule change takes effect immediately. Server-only, mirroring the timer setup.
+	if (HasServerAuthority())
+	{
+		if (UWorld* World = GetWorld())
+		{
+			if (World->GetTimerManager().IsTimerActive(DirectorTimerHandle))
+			{
+				World->GetTimerManager().SetTimer(
+					DirectorTimerHandle,
+					this,
+					&UFPSREnemySpawnSubsystem::TickDirector,
+					SpawnInterval,
+					true
+				);
+			}
+		}
+	}
+}
+
 void UFPSREnemySpawnSubsystem::CacheSpawnPoints()
 {
 	SpawnPoints.Reset();
