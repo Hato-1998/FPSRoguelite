@@ -41,6 +41,13 @@ void UFPSRRunDirectorSubsystem::StartRun()
 	bBossStarted = false;
 	NextRunLogTime = 30.0f;
 
+	// Push schedule-driven spawn pacing to the spawn subsystem (the swarm fill rate — how fast it builds toward the
+	// target alive count). Tunable on DA_RunSchedule.MaxSpawnPerTick without further code changes.
+	if (UFPSREnemySpawnSubsystem* SpawnSub = GetSpawnSub())
+	{
+		SpawnSub->SetMaxSpawnPerTick(ActiveSchedule ? ActiveSchedule->MaxSpawnPerTick : FallbackMaxSpawnPerTick);
+	}
+
 	// Size the per-window fired flags and roll each window's trigger time within its [MinTime, MaxTime] range
 	// (server-authoritative; the schedule varies run to run). No missions without a schedule asset.
 	const int32 NumWindows = ActiveSchedule ? ActiveSchedule->MissionWindows.Num() : 0;

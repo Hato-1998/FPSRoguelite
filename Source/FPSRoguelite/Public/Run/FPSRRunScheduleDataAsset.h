@@ -67,4 +67,9 @@ public:
 	/** Hard cap on the time-scaled target alive count. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Run")
 	int32 MaxAliveCount = 300;
+
+	/** Per director-tick spawn cap = the swarm FILL RATE (this x ~10/sec). Lower = enemies trickle in and the crowd
+	 *  builds up / recovers gradually; higher = the swarm snaps to the target count fast. Tune for pacing feel. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Run", meta = (ClampMin = "1"))
+	int32 MaxSpawnPerTick = 3;
 };

@@ -120,4 +120,5 @@ private:
 	static constexpr float FallbackAliveCountPerMinute = 30.0f;
 	static constexpr float FallbackAliveCountPerMinuteAfterBoss = 50.0f;
 	static constexpr int32 FallbackMaxAliveCount = 300;
+	static constexpr int32 FallbackMaxSpawnPerTick = 3;
 };
