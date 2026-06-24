@@ -394,8 +394,14 @@ void UFPSREnemySpawnSubsystem::TickDirector()
 	int32 SpawnedThisTick = 0;
 	while (ActiveEnemies.Num() < TargetAliveCount && ActiveEnemies.Num() < MaxActiveEnemies && SpawnedThisTick < MaxSpawnPerTick)
 	{
+		FVector SpawnAt;
 		bool bSnapToGround = true;
-		const FVector SpawnAt = ComputeSpawnLocation(bSnapToGround);
+		// Spawn ONLY at designer spawn points: when none qualifies this tick (e.g. all in view), stop and retry on the
+		// next director tick rather than falling back to a player-proximity ring (removed 2026-06-24).
+		if (!ComputeSpawnLocation(SpawnAt, bSnapToGround))
+		{
+			break;
+		}
 		if (AcquireEnemy(SpawnAt, bSnapToGround) == nullptr)
 		{
 			break;
@@ -404,45 +410,19 @@ void UFPSREnemySpawnSubsystem::TickDirector()
 	}
 }
 
-FVector UFPSREnemySpawnSubsystem::ComputeSpawnLocation(bool& bOutSnapToGround) const
+bool UFPSREnemySpawnSubsystem::ComputeSpawnLocation(FVector& OutLocation, bool& bOutSnapToGround) const
 {
-	// Prefer a designer-placed spawn point that is out of every player's view (Game.MD §2-8 / P4 backlog);
-	// fall back to the ring pattern when none are placed or none currently qualify (unplaced maps still work).
-	FVector PointLocation;
-	if (TrySelectSpawnPoint(PointLocation))
+	// The swarm spawns ONLY at designer-placed spawn points that are out of every player's view (Game.MD §2-8, §1
+	// fixed map). The player-proximity/ring fallback was removed (user 2026-06-24): when no point qualifies this tick
+	// (none placed, or all currently in view / too close), return false so the director skips spawning and retries
+	// next tick. The designer point is authoritative — keep its exact Z (no ground re-snap onto a ceiling/roof for
+	// indoor placements, Codex review 2026-06-09).
+	if (TrySelectSpawnPoint(OutLocation))
 	{
-		// Designer point is authoritative: keep its exact Z so an indoor/under-roof placement is not re-snapped
-		// up onto the ceiling/roof by the downward ground trace (Codex review 2026-06-09).
 		bOutSnapToGround = false;
-		return PointLocation;
+		return true;
 	}
-
-	// Ring fallback is procedural (arbitrary Z above the player) and must be snapped to the floor.
-	bOutSnapToGround = true;
-
-	FVector Center = FVector::ZeroVector;
-
-	// Find first player pawn location as center.
-	if (UWorld* World = GetWorld())
-	{
-		for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
-		{
-			if (const APlayerController* PC = It->Get())
-			{
-				if (const APawn* PlayerPawn = PC->GetPawn())
-				{
-					Center = PlayerPawn->GetActorLocation();
-					break;
-				}
-			}
-		}
-	}
-
-	// Random angle and radius in ring pattern.
-	const float Angle = FMath::FRandRange(0.0f, 2.0f * PI);
-	const float Radius = FMath::FRandRange(SpawnRadiusInner, SpawnRadiusOuter);
-
-	return Center + FVector(FMath::Cos(Angle) * Radius, FMath::Sin(Angle) * Radius, 100.0f);
+	return false;
 }
 
 bool UFPSREnemySpawnSubsystem::TrySelectSpawnPoint(FVector& OutLocation) const

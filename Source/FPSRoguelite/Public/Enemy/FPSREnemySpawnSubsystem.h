@@ -86,10 +86,11 @@ private:
 	/** Check if this subsystem has server authority. */
 	bool HasServerAuthority() const;
 
-	/** Compute a spawn location: a designer spawn point if one qualifies, else a random ring point around the
-	 *  nearest player. Sets bOutSnapToGround=false for an authoritative designer point (preserve its Z), true for
-	 *  the ring fallback (needs floor-snapping). */
-	FVector ComputeSpawnLocation(bool& bOutSnapToGround) const;
+	/** Try to compute a spawn location at a qualifying designer spawn point (out-of-view, weighted). Returns false
+	 *  when none qualify this tick — the swarm spawns ONLY at designer points (no player-proximity/ring fallback,
+	 *  removed 2026-06-24), so the director skips spawning until a point qualifies. Sets bOutSnapToGround=false (the
+	 *  designer point's Z is authoritative — no ground re-snap). */
+	bool ComputeSpawnLocation(FVector& OutLocation, bool& bOutSnapToGround) const;
 
 	/** Trace down to the static floor under Location and return a ground-snapped spawn point (feet on
 	 *  the floor). Decouples spawn Z from the player's jump height. Falls back to Location if no floor hit. */
@@ -166,12 +167,6 @@ private:
 	/** Director tick interval (seconds) = the swarm spawn PACE (per-second fill = MaxSpawnPerTick / SpawnInterval).
 	 *  Schedule-driven (DA_RunSchedule.SpawnIntervalSeconds), pushed by the director at StartRun via SetSpawnInterval. */
 	float SpawnInterval = 0.1f;
-
-	/** Inner radius for ring spawn pattern. */
-	float SpawnRadiusInner = 1200.0f;
-
-	/** Outer radius for ring spawn pattern. */
-	float SpawnRadiusOuter = 1500.0f;
 
 	// --- Designer spawn points (Game.MD §2-8 / P4 backlog) ---
 
