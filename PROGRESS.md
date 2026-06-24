@@ -4,7 +4,15 @@
 > **작업 단계를 끝낼 때마다, 그리고 중단 전 반드시 이 파일을 갱신하고 커밋한다.**
 > 확정 설계·기획·코드구조·규칙은 `Game.md`(**SSOT 허브** → 도메인별 `Docs/SSOT/*.md`, 작업별 라우팅은 허브 §0-1), **완료 작업 상세는 `git log --oneline`**. 여기엔 *무엇을 했는지*만 요약한다.
 
-**최종 갱신: 2026-06-24**
+**최종 갱신: 2026-06-25**
+
+## 🚧 밸런스 2차 패스 — 기반 2커밋 완료(`balance/pass2`, 머지 대기) + 룸 스폰 시스템(다음 세션)
+> **기반 완료(빌드+스모크+헤드리스 검증, 미머지)**:
+> - `93e8a28` **feat(card)**: 카드 magnitude **퍼센트 표시**(`UCardEffect_CharacterGE.bShowAsPercent`; Damage/CritChance/PickupRadius/XPGain=%·CritMult 평문) + `FormatCardMagnitude` 퍼센트 소수1자리(Damage +2.5/5/6.5/7.5%) + CharacterGE 0매그니튜드 줄 숨김(WeaponStat 일관) + `FPSRCardEntryWidget` 등급슬롯 키잉(`bAnyMagnitude && EffectLines>0`) + IsDataValid 0해결 경고. **IsDataValid 스윕 29/29 VALID(오탐 0)**.
+> - `79e95b3` **feat(spawn)**: **레벨기반 밀도**(`DA_RunSchedule.AliveCountByLevel` 앵커 `FFPSRAliveCountAnchor` piecewise-linear@`GetPartyLevel`; 빈배열=레거시 시간램프 폴백·무회귀; 라이브=**[(1,10),(20,30),(30,50)]**) + **스폰포인트 전용**(`ComputeSpawnLocation`→bool, 플레이어 근처 **링 폴백 제거**, 적격 포인트 없으면 그 틱 스킵). 가중치 제거는 룸 작업에서.
+> **남은 튜닝 상태**: ① Task1 무기 킬발수=데이터 검증완료(무변경, 9종 정확). ② Task2 XP=보스5분 도달레벨 **PIE 측정** 후 `BP_EnemyBase.XPReward` 역산(92,800/[(L−1)(L+2)], 현 100). ③ Task3 스폰밀도=레벨기반으로 전환(PIE 재판단). ④ Task4 P4-A 임시값 원복=전환 시 [[p4a-temp-test-values]]. (데미지카드 +7.5% **시각확인**도 PIE 잔여.)
+> **사용자 미커밋(본인 작업)**: `Content/Actors/SM_Doors·SM_SpawnGate`(문 메시), `L_Sandbox.umap`(스폰게이트/룸 배치 중), `Config/DefaultEditor.ini`(스푸리어스) → 사용자 커밋.
+> **▶ 다음 세션 = 룸 기반 점진 개방 스폰 = `Docs/RoomSpawnSystem_Handoff.md`**(설계 확정 + 복붙 프롬프트). 문 사격破壊→통로 개방→진입→그 방 스폰포인트 활성(누적). 신규 `AFPSRDoor`(순수장벽, BP 메시·`OnDoorBroken` 연출 시임)·`AFPSRSpawnRoom`(박스진입→`ActivateSpawnZone`, 방영역 자동태깅) + `UFPSREnemyHealthComponent.bCountsAsKill`(문=처치후타 억제) + 서브시스템 누적존(`FGameplayTagContainer`)·**가중치 제거**(균등). 사용자 4결정: 위치만 누적/문파괴=후타X/방영역 자동태깅/진입=방전체.
 
 ## ✅ 밸런스 1차 패스 + PIE 2R (사용자 스펙 2026-06-24) — **`balance/pass1` → main `--no-ff` 머지 완료. 후속 튜닝 = 새 브랜치 `balance/pass2`**
 > **재개 = `Docs/BalanceTuning_Reference.md`(조절가능 전수치 카탈로그) + 아래 "남은 튜닝". 재튜닝 = 헤드리스 `-run=pythonscript`(에디터 닫고) 또는 VibeUE.** 별도 미완 = W1 dash 픽스 `fix/w1-loop-20260623`(아래).
