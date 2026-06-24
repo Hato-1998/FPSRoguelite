@@ -95,6 +95,43 @@ EDataValidationResult UFPSRCardDataAsset::IsDataValid(FDataValidationContext& Co
 		}
 	}
 
+	// 0-resolution guard (§ review residual): a magnitude-bearing card must surface at least one non-empty value line
+	// at every rarity it offers — using the same GetDescription the entry widget consumes — or the selection UI shows
+	// a rarity badge over a blank value slot. Magnitude-independent effects (passives/fragments/grants) return fixed
+	// text so they never trip this; a legitimate per-effect 0 tier (e.g. a Legendary-only sub-effect) is fine as long
+	// as a sibling effect still shows a value at that rarity.
+	bool bHasMagnitudeEffect = false;
+	for (const TObjectPtr<UFPSRCardEffect>& Effect : Effects)
+	{
+		if (Effect && Effect->RarityTiers.Num() > 0)
+		{
+			bHasMagnitudeEffect = true;
+			break;
+		}
+	}
+	if (bHasMagnitudeEffect)
+	{
+		for (const ECardRarity R : OfferRarities)
+		{
+			bool bAnyVisibleLine = false;
+			for (const TObjectPtr<UFPSRCardEffect>& Effect : Effects)
+			{
+				if (Effect && !Effect->GetDescription(R, Effect->ResolveMagnitude(R)).IsEmpty())
+				{
+					bAnyVisibleLine = true;
+					break;
+				}
+			}
+			if (!bAnyVisibleLine)
+			{
+				const FString RarityStr = StaticEnum<ECardRarity>()->GetNameStringByValue(static_cast<int64>(R));
+				Context.AddWarning(FText::Format(
+					LOCTEXT("ZeroResolution", "Card offers rarity '{0}' but every effect resolves to no visible value there — the selection UI would show a rarity badge over a blank value. Give an effect a non-zero tier for this rarity, or drop it from OfferRarities."),
+					FText::FromString(RarityStr)));
+			}
+		}
+	}
+
 	// Multi-effect cards must set CardFamily (the v1 AppliedEffect-GE-class family fallback was removed).
 	if (NumValidEffects > 1 && !CardFamily.IsValid())
 	{
