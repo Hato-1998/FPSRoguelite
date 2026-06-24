@@ -52,6 +52,15 @@ public:
 	/** Set the target alive count (director will spawn/release to maintain this). */
 	void SetTargetAliveCount(int32 InTarget);
 
+	/** Set the per-tick spawn cap = the swarm fill rate (schedule-driven; clamped to >=1). Lower = the swarm
+	 *  builds up gradually instead of snapping to the target count. */
+	void SetMaxSpawnPerTick(int32 InMax) { MaxSpawnPerTick = FMath::Max(1, InMax); }
+
+	/** Set the director tick interval (seconds) = the swarm spawn PACE. With MaxSpawnPerTick this sets the per-second
+	 *  fill rate (MaxSpawnPerTick / interval). Re-arms the running director timer so the new pace takes effect at
+	 *  once. Clamped to a small minimum. Schedule-driven (DA_RunSchedule.SpawnIntervalSeconds), pushed at StartRun. */
+	void SetSpawnInterval(float InSeconds);
+
 	/** Set the active spawn zone (empty = all points eligible). Only points whose ZoneTag is, or is a child of,
 	 *  this tag are eligible while set — lets the director switch spawn regions by time/phase (Game.MD §2-8). */
 	void SetActiveSpawnZone(FGameplayTag Zone) { ActiveSpawnZone = Zone; }
@@ -149,10 +158,13 @@ private:
 	/** Hard cap on active enemies (Game.MD §5). */
 	static constexpr int32 MaxActiveEnemies = 500;
 
-	/** Max enemies spawned per tick. */
-	static constexpr int32 MaxSpawnPerTick = 10;
+	/** Max enemies spawned per director tick = the swarm FILL RATE (x ~1/SpawnInterval per second). Lower = enemies
+	 *  trickle in and the crowd recovers gradually after a clear; higher = the swarm snaps to the target count fast.
+	 *  Schedule-driven (DA_RunSchedule.MaxSpawnPerTick), pushed by the director at StartRun. */
+	int32 MaxSpawnPerTick = 3;
 
-	/** Director tick interval (seconds). */
+	/** Director tick interval (seconds) = the swarm spawn PACE (per-second fill = MaxSpawnPerTick / SpawnInterval).
+	 *  Schedule-driven (DA_RunSchedule.SpawnIntervalSeconds), pushed by the director at StartRun via SetSpawnInterval. */
 	float SpawnInterval = 0.1f;
 
 	/** Inner radius for ring spawn pattern. */

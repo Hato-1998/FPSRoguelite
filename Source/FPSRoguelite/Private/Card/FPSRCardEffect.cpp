@@ -129,6 +129,13 @@ void UCardEffect_WeaponStat::Apply(const FFPSRCardEffectContext& Context, float 
 
 FText UCardEffect_WeaponStat::GetDescription(ECardRarity Rarity, float Magnitude) const
 {
+	// A zero-magnitude stat mod is a no-op — e.g. a rarity tier absent from this effect resolves to 0 via
+	// ResolveMagnitude (a Legendary-only sub-effect on an otherwise all-tier card). Suppress its line so the
+	// card tooltip doesn't render a stray "+0" for the rarities that intentionally carry no bonus.
+	if (FMath::IsNearlyZero(Magnitude))
+	{
+		return FText::GetEmpty();
+	}
 	const bool bPercent = (Op == EFPSRWeaponModOp::PercentMultiply);
 	const FString StatName = StaticEnum<EFPSRWeaponStat>()
 		? StaticEnum<EFPSRWeaponStat>()->GetDisplayNameTextByValue(static_cast<int64>(Stat)).ToString()

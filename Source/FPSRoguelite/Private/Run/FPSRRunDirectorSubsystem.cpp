@@ -37,8 +37,18 @@ void UFPSRRunDirectorSubsystem::StartRun()
 
 	bRunActive = true;
 	RunClock = 0.0f;
+	PostBossElapsed = 0.0f;
 	bBossStarted = false;
 	NextRunLogTime = 30.0f;
+
+	// Push schedule-driven spawn pacing to the spawn subsystem (the swarm fill rate — how fast it builds toward the
+	// target alive count). Both the per-tick batch (MaxSpawnPerTick) and the tick interval (SpawnIntervalSeconds) are
+	// tunable on DA_RunSchedule without further code changes; together they set the per-second spawn pace.
+	if (UFPSREnemySpawnSubsystem* SpawnSub = GetSpawnSub())
+	{
+		SpawnSub->SetMaxSpawnPerTick(ActiveSchedule ? ActiveSchedule->MaxSpawnPerTick : FallbackMaxSpawnPerTick);
+		SpawnSub->SetSpawnInterval(ActiveSchedule ? ActiveSchedule->SpawnIntervalSeconds : FallbackSpawnIntervalSeconds);
+	}
 
 	// Size the per-window fired flags and roll each window's trigger time within its [MinTime, MaxTime] range
 	// (server-authoritative; the schedule varies run to run). No missions without a schedule asset.
@@ -81,9 +91,13 @@ int32 UFPSRRunDirectorSubsystem::ComputeTargetAliveCount() const
 {
 	const int32 Base = ActiveSchedule ? ActiveSchedule->BaseAliveCount : FallbackBaseAliveCount;
 	const float PerMin = ActiveSchedule ? ActiveSchedule->AliveCountPerMinute : FallbackAliveCountPerMinute;
+	const float PerMinAfterBoss = ActiveSchedule ? ActiveSchedule->AliveCountPerMinuteAfterBoss : FallbackAliveCountPerMinuteAfterBoss;
 	const int32 MaxCount = ActiveSchedule ? ActiveSchedule->MaxAliveCount : FallbackMaxAliveCount;
-	const int32 Scaled = Base + FMath::FloorToInt(PerMin * (RunClock / 60.0f));
-	return FMath::Clamp(Scaled, 0, MaxCount);
+	// Continuous piecewise ramp: +PerMin/min up to BossTime (RunClock stops there), then +PerMinAfterBoss/min while
+	// the boss is up (PostBossElapsed). No discontinuity at the boss — the swarm keeps spawning and scales faster.
+	const float PreBossClock = FMath::Min(RunClock, GetBossTime());
+	const float Scaled = Base + PerMin * (PreBossClock / 60.0f) + PerMinAfterBoss * (PostBossElapsed / 60.0f);
+	return FMath::Clamp(FMath::FloorToInt(Scaled), 0, MaxCount);
 }
 
 void UFPSRRunDirectorSubsystem::UpdateSpawnIntensity()
@@ -149,9 +163,13 @@ void UFPSRRunDirectorSubsystem::DirectorTick()
 		return;
 	}
 
-	// Boss phase: timeline halted (no clock, no missions, no scaling).
+	// Boss phase: the survival clock + scheduled missions halt, but the swarm KEEPS spawning and ramps at the
+	// post-boss rate (the §2-2 freeze gate above still halts everything; boss death ends the run via Victory).
+	// PostBossElapsed drives the continued ramp without advancing the survival/HUD RunClock.
 	if (GS->GetRunPhase() == ERunPhase::Boss)
 	{
+		PostBossElapsed += DirectorInterval * TimeScale;
+		UpdateSpawnIntensity();
 		return;
 	}
 
@@ -350,11 +368,8 @@ void UFPSRRunDirectorSubsystem::EnterBoss()
 		GS->SetRunPhase(ERunPhase::Boss);
 	}
 
-	if (UFPSREnemySpawnSubsystem* SpawnSub = GetSpawnSub())
-	{
-		SpawnSub->SetTargetAliveCount(0);
-		SpawnSub->ReleaseAllEnemies(); // clear the swarm for the boss arena
-	}
+	// The swarm PERSISTS through the boss fight (Game.MD: enemies keep spawning after the boss appears). The next
+	// DirectorTick boss branch keeps the spawn target at the post-boss ramp — no SetTargetAliveCount(0)/ReleaseAllEnemies.
 
 	// Spawn the boss: defeating it ends the run in Victory (boss OnDeath -> GameMode::NotifyBossDefeated, U3).
 	SpawnBoss();
