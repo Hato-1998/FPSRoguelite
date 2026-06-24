@@ -6,19 +6,26 @@
 
 **최종 갱신: 2026-06-24**
 
-## 🚧 밸런스 1차 패스 (사용자 스펙 2026-06-24) — **코드+콘텐츠 적용·전수검증 완료, PIE 튜닝 진행중** (브랜치 `balance/pass1`)
-> **재개 = 아래 "다음 작업" + `Docs/reviews/plan-balance-pass1.md`(플랜) + `Scripts/balance_dump.py`/`balance_apply*.py`(재튜닝 도구).** 별도 미완 = W1 dash 픽스 `fix/w1-loop-20260623`(아래).
+## ✅ 밸런스 1차 패스 + PIE 2R (사용자 스펙 2026-06-24) — **`balance/pass1` → main `--no-ff` 머지 완료. 후속 튜닝 = 새 브랜치 `balance/pass2`**
+> **재개 = `Docs/BalanceTuning_Reference.md`(조절가능 전수치 카탈로그) + 아래 "남은 튜닝". 재튜닝 = 헤드리스 `-run=pythonscript`(에디터 닫고) 또는 VibeUE.** 별도 미완 = W1 dash 픽스 `fix/w1-loop-20260623`(아래).
+> **완료 2R(PIE 튜닝, 다각도 리뷰 워크플로 + IsDataValid 검증 통과)**:
+> - **XP HUD 작동 수정**: 죽은 정적 XP위젯이 WBP_GameHUD(게터無 컨테이너)에 있고 게터+OnRunStateUpdated는 WBP_RunHUD에 있어 단절 → WBP_RunHUD에 XP바+레벨텍스트 이식·OnRunStateUpdated 배선(SetPercent/Conv_IntToText). GameHUD 죽은위젯 제거(사용자 수동). PIE 작동 확인.
+> - **데미지 카드 폭주 버그**: GE `BP_Card_Damage`가 GlobalDamageMultiplier에 SetByCaller **raw ADD(×0.01 계수 無)** → magnitude 7.5=+750% → `DA_Card_Damage` magnitude **×0.01**(0.025~0.075=+2.5~7.5%, 레전 라이플 15→14발). ⚠️표시 raw "+0.07"(퍼센트표시 폴리시=후속).
+> - **장탄 카드 장전보너스 레전 전용**: `DA_Card_MagSize_ThisWeapon` ReloadTime **4티어**(C/R/E=0·L=−0.1, IsDataValid 커버리지 충족) + C++ `UCardEffect_WeaponStat::GetDescription` **0매그니튜드 줄 숨김** + 멀티이펙트 필수 `CardFamily=Card.Family.MagSize`(신규 태그) → 카드 **VALID**.
+> - **스폰 페이스 DA화**: `SpawnInterval`(하드코드)→`DA_RunSchedule.SpawnIntervalSeconds`(C++ `SetSpawnInterval` 타이머재무장·StartRun푸시·Fallback, MaxSpawnPerTick 미러링). 값=**0.25s(4/초)**·MaxSpawnPerTick=1. 리빌드 없이 조절.
+> - **카드풀 라우팅 교정**: 행동 프래그먼트(BounsShot/ExplosiveRounds/NoSelfDamage)가 8무기 `WeaponCards`(=오프닝시드/레벨업 풀)에 섞여 시드 누수 → `UnlockableFeatures`(미션클리어/마일스톤 풀)로 이동. WeaponCards=연사/장탄만. (코드無·데이터만, 헤드리스 전수 재덤프 검증.)
+> **리뷰 잔여(후속·비차단)**: ① 데미지카드 "+0.07"→퍼센트 표시(작은 C++) ② `FPSRCardEntryWidget` 등급슬롯(bAnyMagnitude)·값슬롯(EffectLines) 키 불일치 — 현재 도달불가하나 미래 단일효과 0해결 카드서 값슬롯 공백 위험(EffectLine 생성여부로 키잉 권장) ③ IsDataValid에 0해결 티어 경고 추가.
 > **사용자 스펙**: 보스5분(BossTime 300)·미션 2/4분 **버티기만**(제한60s/점령30s)·스폰램프(+30/분→보스後+50, 상한300, 보스後 스웜지속)·무기뎀=몬스터 N발킬(라이플15·스나3·바주카2·버스트9·샷건1·차지2·LMG20·근접2·그레3)·**카드 6종**(연사·데미지·장탄·체젝·최대체력·Luck)·몬스터HP180·보스HP24000·플레이어100+적공격력 25→50 램프.
 > **완료(빌드+스모크+Codex 머지게이트 그린; 헤드리스 커맨드릿 콘텐츠편집·전수 재덤프 검증)**:
 > - **Phase A C++**(`fa92e1a` 밸런스값 + 스폰페이싱 후속커밋, 9+5파일): ① 스폰 디렉터 보스전후 램프(+30/+50/분, `PostBossElapsed` 연속) + **보스後 스웜 지속**(EnterBoss 전멸제거·`TickDirector` Combat\|Boss 허용) ② 적 접촉공격력 **시간스케일 25→50**(배치 1스칼라, `GetBossTime()` public) ③ 카드 엔트리 위젯 **대상무기명 표시**(`TargetWeaponText`) ④ Luck **등급별 가중치식**(`LuckPerRarity_*` 0/0.03/0.02/0.01, LuckScale 제거) ⑤ **`MaxSpawnPerTick` 스케줄-튜너블**(`DA_RunSchedule`, 10→**3** 채움속도; PIE피드백 "스폰 너무 빠름" 대응 — 리빌드 없이 RunSchedule에서 조절).
 > - **Phase B 콘텐츠(20 .uasset, `Scripts/balance_apply*.py`)**: 무기뎀 9종(라이플12·버스트20·스나60·샷건22.5/펠릿8·LMG9·바주카90·그레60·차지90+틱4·근접90) · 보스HP **24000**(DA_BossDefinition) · 몬스터HP **180**(BP_EnemyBase 상속 HealthComp CDO) · DA_RunSchedule(미션윈도우 **120/240 HoldZone**·램프30/50·상한300) · 미션 TimeLimit **60** · 카드 중앙풀 **4종**(데미지/최대체력/Luck/체젝)+무기카드 연사/장탄(Recoil 제거) · 카드 magnitude(데미지 2.5/5/6.5/7.5%·연사 1/3/5/7%·장탄 5/7/10/10% **+장전 −0.1s 멀티효과**·최대체력 5/8/12/15·체젝 0.5/1/1.5/2·**Luck 1/2/3/4 4티어**).
 > **보류**: 🚫 보스 공격력 75 = 보스 정지형(공격 미구현) → 보스 AI 작업 시.
 > **⚠️ PIE 미검증 가정 2**: (a) 데미지 카드 magnitude=퍼센트(GE×0.01) 가정 → **레전 라이플 15→14발**로 확인. (b) XP=XPReward **100**(BP_EnemyBase) 초기값 → **보스5분 도달레벨 측정해 ~30레벨로 XPReward 역산**.
-> **다음 작업(새 세션)**:
-> 1. **PIE 재테스트** — 스폰 채움속도(MaxSpawnPerTick=3) 확인 → 빠르면 `DA_RunSchedule.MaxSpawnPerTick`↓(리빌드X). 마릿수 많으면 Base40/PerMin30/Max300↓(DA, 리빌드X).
-> 2. **무기 킬 발수 검증**(약점없이 위 9종) + 데미지카드 % 확인.
-> 3. **XP 측정·조정** — 보스 도달레벨 → `BP_EnemyBase.XPReward` 역산(DA 아님, BP CDO).
-> 4. 만족 시 PROGRESS·`TaskPrompts §B` 갱신 + `balance/pass1` `--no-ff` main 머지.
+> **남은 튜닝(새 브랜치 `balance/pass2`, 새 세션)**:
+> 1. **무기 킬 발수 전수 검증**(약점없이 9종: 라이플15·스나3·바주카2·버스트9·샷건1·차지2·LMG20·근접2·그레3) + 리뷰 잔여 ①(데미지카드 퍼센트 표시).
+> 2. **XP 측정·조정** — 보스5분 도달레벨 측정 → `BP_EnemyBase.XPReward` 역산(공식 92,800/[(L−1)(L+2)]; DA 아님, BP CDO).
+> 3. **스폰 페이스/마릿수 미세조정**(`SpawnIntervalSeconds`/Base/PerMin, 리빌드X) — PIE 체감 기준.
+> 4. **P4-A 임시값 원복**(미션 60/120/180→300/600/900·BossTime 300→1200) 전환 시. [[p4a-temp-test-values]]
 > **재튜닝 = 콘텐츠 수치는 리빌드 불요**: `Scripts/balance_dump.py`(현재값)/`balance_apply.py`(편집) 에디터 닫고 `-run=pythonscript`, 또는 에디터에서 DA 직접. **C++ 변경만 리빌드(에디터 닫힘 필수)**. UE Python 함정: struct 신규생성=키워드construct(`unreal.FPSRCardRarityTier(rarity=..,magnitude=..)`), OfferRarities=read-only(PostLoad 자동), BP컴포넌트 default=CDO `set_editor_property`.
 > **별개 미완**: **W1 2차 dash 픽스** `fix/w1-loop-20260623`(`f12bb1f`, 빌드/스모크/Codex 그린) = 사용자 PIE 전체플로우 + main `--no-ff` 머지 승인 **대기**(밸런스와 독립). 리포트 `Docs/codex-reviews/full-audit-loop-20260623.md`.
 

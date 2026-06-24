@@ -131,6 +131,10 @@ ehthumbs.db
 # =============================================================================
 Docs/codex-reviews/
 
+# 로컬 작업용 리뷰/플랜 덤프(throwaway) + 에디터 ini 로컬 백업
+Docs/reviews/
+*.localbak
+
 # ConsultLoop 원시 Codex 응답(verbose) — 결과 리포트(Docs/Review/*.md)만 추적, 원시는 무시
 Docs/Review/_raw/
 
