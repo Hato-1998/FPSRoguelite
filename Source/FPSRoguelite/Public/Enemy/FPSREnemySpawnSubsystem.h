@@ -67,8 +67,13 @@ public:
 	 *  swarm keeps spawning in cleared rooms). Called by AFPSRSpawnRoom on player entry. (Room spawn system.) */
 	void ActivateSpawnZone(FGameplayTag Zone);
 
-	/** Server: clear all active zones, then re-activate every cached room flagged bActiveAtStart (the start room).
-	 *  Called at world begin and at StartRun so a re-run starts from only the start room (no leaked accumulation). */
+	/** Server: deactivate a spawn zone (remove its tag) so its tagged points stop being eligible — the symmetric
+	 *  inverse of ActivateSpawnZone. Called by a Deactivate-mode AFPSRSpawnRoom on player entry (Enemy.md §2-6).
+	 *  Already-spawned enemies are unaffected (zones gate spawn LOCATIONS, not existing actors). */
+	void DeactivateSpawnZone(FGameplayTag Zone);
+
+	/** Server: clear all active zones, then re-activate every cached Activate room flagged bActiveAtStart (the start
+	 *  room). Called at world begin and at StartRun so a re-run starts from only the start room (no leaked accumulation). */
 	void ResetSpawnZones();
 
 private:

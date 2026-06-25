@@ -161,6 +161,23 @@ void UFPSREnemySpawnSubsystem::ActivateSpawnZone(FGameplayTag Zone)
 	}
 }
 
+void UFPSREnemySpawnSubsystem::DeactivateSpawnZone(FGameplayTag Zone)
+{
+	if (!HasServerAuthority() || !Zone.IsValid())
+	{
+		return;
+	}
+
+	// Symmetric inverse of ActivateSpawnZone: remove the exact zone tag so its tagged points stop spawning. Rooms use
+	// flat unique tags (SpawnZone.Room.*), so exact removal is correct (the eligibility gate uses HasTag, but zones
+	// don't nest in practice). Already-spawned enemies are untouched — zones gate spawn LOCATIONS, not live actors.
+	if (ActiveSpawnZones.HasTagExact(Zone))
+	{
+		ActiveSpawnZones.RemoveTag(Zone);
+		UE_LOG(LogFPSR, Log, TEXT("[Spawn] Deactivated spawn zone %s (%d active)."), *Zone.ToString(), ActiveSpawnZones.Num());
+	}
+}
+
 void UFPSREnemySpawnSubsystem::ResetSpawnZones()
 {
 	if (!HasServerAuthority())
@@ -173,7 +190,8 @@ void UFPSREnemySpawnSubsystem::ResetSpawnZones()
 	for (const TObjectPtr<AFPSRSpawnRoom>& RoomPtr : SpawnRooms)
 	{
 		const AFPSRSpawnRoom* Room = RoomPtr;
-		if (Room && Room->IsActiveAtStart() && Room->GetRoomTag().IsValid())
+		if (Room && Room->GetTriggerMode() == ESpawnRoomTriggerMode::Activate
+			&& Room->IsActiveAtStart() && Room->GetRoomTag().IsValid())
 		{
 			ActiveSpawnZones.AddTag(Room->GetRoomTag());
 		}

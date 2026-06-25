@@ -46,7 +46,8 @@ void AFPSRSpawnRoom::BeginPlay()
 	// Auto-tag the enemy spawn points inside this room with its zone (designer convenience — drop points in, no
 	// per-point setup). A point that already carries a manual ZoneTag is left alone (explicit override wins).
 	// Containment uses the box's oriented bounds (OBB), so a rotated room still tags correctly.
-	if (RoomTag.IsValid() && EntryTrigger)
+	// Activate mode ONLY: a Deactivate volume references an existing zone by RoomTag and must not steal/own points.
+	if (TriggerMode == ESpawnRoomTriggerMode::Activate && RoomTag.IsValid() && EntryTrigger)
 	{
 		const FTransform BoxTransform = EntryTrigger->GetComponentTransform();
 		const FVector Extent = EntryTrigger->GetScaledBoxExtent();
@@ -90,7 +91,14 @@ void AFPSRSpawnRoom::OnEntryBeginOverlap(UPrimitiveComponent* OverlappedComp, AA
 	{
 		if (UFPSREnemySpawnSubsystem* SpawnSub = World->GetSubsystem<UFPSREnemySpawnSubsystem>())
 		{
-			SpawnSub->ActivateSpawnZone(RoomTag);
+			if (TriggerMode == ESpawnRoomTriggerMode::Deactivate)
+			{
+				SpawnSub->DeactivateSpawnZone(RoomTag); // turn the target zone off (1 volume = 1 zone, same tag)
+			}
+			else
+			{
+				SpawnSub->ActivateSpawnZone(RoomTag); // latch this room's zone on (accumulates)
+			}
 		}
 	}
 }
