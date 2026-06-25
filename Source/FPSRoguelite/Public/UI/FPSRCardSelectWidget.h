@@ -27,6 +27,9 @@ protected:
 	// Bind once per instance — NativeConstruct can run again on pooled re-activation (would stack handlers).
 	virtual void NativeOnInitialized() override;
 
+	// Remove the PlayerState reroll-charge delegate on teardown (it outlives this widget). Matches Lobby/RunHUD cleanup.
+	virtual void NativeDestruct() override;
+
 	/** UI-only input while the modal is up (mouse visible, game input suppressed). */
 	virtual TOptional<FUIInputConfig> GetDesiredInputConfig() const override;
 

@@ -175,6 +175,7 @@ void AFPSRCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 		if (AFPSRGameState* GS = GetWorld() ? GetWorld()->GetGameState<AFPSRGameState>() : nullptr)
 		{
 			GS->OnRunStateChanged.RemoveDynamic(this, &AFPSRCharacter::HandleRunStateChanged_Vision);
+			GS->OnRunStateChanged.RemoveDynamic(this, &AFPSRCharacter::HandleRunStateChanged_Movement);
 		}
 		bVisionDelegateBound = false;
 	}
@@ -659,11 +660,15 @@ void AFPSRCharacter::TryBindVisionDelegate()
 		return;
 	}
 
+	// Bind both run-state reactions together (lifecycle shared, gated by bVisionDelegateBound): the local-only vision
+	// PP and the authority-only movement halt (§2-2 freeze must stop an in-flight dash, not just gate new input).
 	GS->OnRunStateChanged.AddDynamic(this, &AFPSRCharacter::HandleRunStateChanged_Vision);
+	GS->OnRunStateChanged.AddDynamic(this, &AFPSRCharacter::HandleRunStateChanged_Movement);
 	bVisionDelegateBound = true;
 
-	// Apply the current state immediately (in case the restriction was already active when we bound).
+	// Apply the current state immediately (in case the restriction / freeze was already active when we bound).
 	HandleRunStateChanged_Vision();
+	HandleRunStateChanged_Movement();
 }
 
 void AFPSRCharacter::NotifyControllerChanged()
@@ -698,6 +703,34 @@ void AFPSRCharacter::HandleRunStateChanged_Vision()
 	if (bRestricted != bVisionRestrictionApplied)
 	{
 		ApplyVisionRestriction(bRestricted);
+	}
+}
+
+void AFPSRCharacter::HandleRunStateChanged_Movement()
+{
+	// §2-2 freeze is a STATE gate (not time dilation), so the CharacterMovement keeps integrating while the run is
+	// paused. Input-driven moves already gate on IsRunFrozen, but a dash is an impulse (ServerDash -> LaunchCharacter)
+	// whose velocity — and its collision-ignore window — would otherwise carry the player across the frozen card screen
+	// (the sibling fire/equip/dash-INITIATION gates don't cover an already-launched dash). Run on the authority (the
+	// server owns every pawn here; CMC replicates the stop) and halt residual locomotion + cancel any live dash.
+	if (!HasAuthority())
+	{
+		return;
+	}
+	UWorld* World = GetWorld();
+	const AFPSRGameState* GS = World ? World->GetGameState<AFPSRGameState>() : nullptr;
+	if (!GS || !GS->IsRunPaused())
+	{
+		return; // only act on entering the freeze; resume restores normal input-driven control (dash was cancelled)
+	}
+
+	GetCharacterMovement()->StopMovementImmediately(); // kill the dash impulse / residual slide so the player is stopped
+	FTimerManager& TimerManager = World->GetTimerManager();
+	if (TimerManager.IsTimerActive(DashEndTimerHandle))
+	{
+		// Cancel the in-flight dash cleanly: drop the pending end-timer and restore pawn-collision blocking now.
+		TimerManager.ClearTimer(DashEndTimerHandle);
+		EndDash();
 	}
 }
 
