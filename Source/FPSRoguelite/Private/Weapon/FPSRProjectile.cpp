@@ -254,9 +254,12 @@ void AFPSRProjectile::OnSphereOverlap(UPrimitiveComponent* OverlappedComp, AActo
 	{
 		NotifyInstigatorHitMarker(bCrit && bWasEnemy, (WeakpointMult > 1.0f) && bWasEnemy, bKill);
 	}
-	if (bDamaged)
+	if (bWasEnemy && bDamaged)
 	{
-		bDealtEnemyDamage = true; // not a miss — suppresses the OnMiss hook at release
+		// Enemy damage only suppresses OnMiss at release. A projectile that hits ONLY a door (bWasEnemy false) stays a
+		// "miss" so OnMiss-driven effects (e.g. ammo refund) still fire — consistent with the hitscan/melee/charge/AOE
+		// paths, which also keep door damage out of enemy-hit accounting (door raises a hit marker but isn't a kill/hit).
+		bDealtEnemyDamage = true;
 	}
 	--PierceRemaining;
 	if (PierceRemaining < 0)
