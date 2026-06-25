@@ -44,7 +44,9 @@ private:
 
 	// --- Grid config (debug-tier placeholder; data-driven bounds via a volume is a follow-up) ---
 	static constexpr float CellSize = 200.0f;     // cm per cell
-	static constexpr float HalfExtent = 10000.0f; // cm; grid covers [-HalfExtent, +HalfExtent] on X/Y around origin
+	// Grid covers [-HalfExtent, +HalfExtent] on X/Y around origin. Sized to enclose an off-origin multi-room map
+	// (e.g. the sandbox spans X ~[-12200, 4000]); enlarge or switch to a data-driven bounds volume if the map grows.
+	static constexpr float HalfExtent = 14000.0f; // cm
 	static constexpr float FlowUpdateInterval = 0.2f; // seconds between recomputes
 
 	// Obstacle probe: box overlap ABOVE the floor (so the flat ground isn't flagged) to catch walls/buildings.

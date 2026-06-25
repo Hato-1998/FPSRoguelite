@@ -6,9 +6,11 @@
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/Pawn.h"
+#include "GameFramework/PlayerStart.h"
 #include "CollisionShape.h"
 #include "TimerManager.h"
 #include "Containers/Queue.h"
+#include "EngineUtils.h"
 
 bool UFPSRFlowFieldSubsystem::ShouldCreateSubsystem(UObject* Outer) const
 {
@@ -33,9 +35,26 @@ void UFPSRFlowFieldSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 {
 	Super::OnWorldBeginPlay(InWorld);
 
-	// Grid setup: square grid centered on the world origin.
+	// Grid setup: square grid centered on the world origin, anchored in Z to the playable floor.
+	// The obstacle probe is taken at GridOrigin.Z + ObstacleProbeZ, so GridOrigin.Z MUST sit near the floor —
+	// otherwise (floor far from the world origin, e.g. a basement at Z ~ -1000) the probe samples wall/doorway
+	// geometry at the wrong height and mis-marks passable floor openings as blocked, jamming enemies. Detect the
+	// floor under a PlayerStart (trace down); fall back to the start's Z, then to the origin.
+	float FloorZ = 0.0f;
+	for (TActorIterator<APlayerStart> It(&InWorld); It; ++It)
+	{
+		if (const APlayerStart* Start = *It)
+		{
+			const FVector StartLoc = Start->GetActorLocation();
+			FHitResult Hit;
+			FloorZ = InWorld.LineTraceSingleByChannel(Hit, StartLoc, StartLoc - FVector(0.0f, 0.0f, 5000.0f), ECC_WorldStatic)
+				? Hit.ImpactPoint.Z : StartLoc.Z;
+			break;
+		}
+	}
+
 	GridDim = FMath::Max(1, FMath::CeilToInt((2.0f * HalfExtent) / CellSize));
-	GridOrigin = FVector(-HalfExtent, -HalfExtent, 0.0f);
+	GridOrigin = FVector(-HalfExtent, -HalfExtent, FloorZ);
 	DistField.Init(MAX_int32, GridDim * GridDim);
 	FlowField.Init(FVector2D::ZeroVector, GridDim * GridDim);
 	BlockedField.Init(false, GridDim * GridDim);
