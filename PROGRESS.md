@@ -6,7 +6,14 @@
 
 **최종 갱신: 2026-06-25**
 
-## 🚧 밸런스 2차 패스 — 룸 스폰 + 문(破壊/Chaos/단계연출) + 플로우필드(데이터드리븐 바운드/clearance) + 스폰존 비활성화 볼륨 전체 구현·검증 완료(`balance/pass2`, 미머지) → 다음=사용자 PIE 전체검증 후 머지
+## ✅ main 통합 + 브랜치 정리 + 패키징 (2026-06-25 c) — **모든 작업 main 머지 완료, 로컬·원격 `main` 하나만 남음**
+> **머지(--no-ff, 빌드/스모크/Codex 머지게이트 통과):** `balance/pass2`(21커밋: 밸런스 2차+룸 스폰+문 破壊/Chaos+플로우필드 데이터드리븐 바운드/clearance+스폰존 비활성화 볼륨) + `fix/w1-loop-20260623`(W1 대시 프리즈 대칭갭+CardSelect 정리) → `main` (`d285c69`·`411bcf8`). main이 직계 조상 + 파일 겹침 0 → 충돌 0.
+> **Codex 머지게이트 P2 1건 교정**: `e799531` fix(combat) — 투사체 문-only 타격이 `bDealtEnemyDamage`를 `bDamaged` 단독으로 세팅해 OnMiss(탄약환급) 억제 → `bWasEnemy && bDamaged`로 게이트(히트스캔/근접/AOE 경로와 일치). 빌드 Succeeded+스모크 Success.
+> **브랜치 정리**: 삭제 = 로컬 `balance/pass1`·`balance/pass2`·`fix/w1-loop-20260623` / 원격 `origin/balance/pass2`·`origin/phase/p6-weakpoint-damage`(전부 0 unmerged 검증). **남은 브랜치 = `main` 단독**(로컬·원격).
+> **패키징(Development Win64)**: `RunUAT BuildCookRun` → `Packaged/Windows/`(런처 `FPSRoguelite.exe`, 1.14GB). 4맵 명시 쿡(`DefaultGame.ini` ProjectPackagingSettings) + 게임플레이 데이터 always-cook + `steam_appid.txt`(480). **스팀 MP 인프라는 U11a/P7에서 이미 완비**(세션/로비/Seamless/서버권위) → 패키지로 2PC/2계정 호스트·코드조인·초대 E2E 테스트 가능.
+> **다음 = 마스터 로드맵**(W1 전체검증 → U1 게이트 → V2 …, [[taskprompts-master-roadmap]]). 미커밋 잔여 = 스푸리어스(`Config/DefaultEditor.ini`·ZerinLabs `M_col_*_ORIG`)뿐.
+
+## ✅ 밸런스 2차 패스 — 룸 스폰 + 문(破壊/Chaos/단계연출) + 플로우필드(데이터드리븐 바운드/clearance) + 스폰존 비활성화 볼륨 — **main 머지 완료**(위 통합 섹션)
 > **이번 세션 완료(전부 `balance/pass2` 커밋; 코드 빌드 Succeeded, BP 헤드리스 검증, 도어웨이 끼임 트레이스 진단):**
 > - 룸 스폰 C++ `4923a66`(AFPSRDoor/AFPSRSpawnRoom/bCountsAsKill/누적존, 설계 `Docs/RoomSpawnSystem_Handoff.md`).
 > - 문 HP 단계연출 훅 `dbe779f`(`UFPSREnemyHealthComponent.OnHealthChanged` 서버 브로드캐스트 + `AFPSRDoor` `DamageStageThresholds{.75,.5,.25,.05}`·복제 `DamageStage`·`OnDoorDamageStage` BIE).
