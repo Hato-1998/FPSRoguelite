@@ -247,15 +247,19 @@ void AFPSRProjectile::OnSphereOverlap(UPrimitiveComponent* OverlappedComp, AActo
 	bool bKill = false;
 	bool bWasEnemy = false;
 	bool bDamaged = false;
-	// Marker fires only when REAL damage landed on an enemy — a corpse re-hit (bDamaged false) is inert. The hit is
-	// still consumed below (pierce decrements unconditionally), and a friendly hit raises no marker (bWasEnemy false).
-	if (TryDamageActor(OtherActor, WeakpointMult, bCrit, bKill, bWasEnemy, bDamaged) && bWasEnemy && bDamaged)
+	// Marker fires on any REAL damage to a destructible (enemy OR door) — a corpse re-hit (bDamaged false) is inert,
+	// and a friendly player raises no marker (the player damage branch leaves DamageDealt 0 -> bDamaged false). The hit
+	// is still consumed below (pierce decrements unconditionally). Kill/Crit/Weak upgrades are enemy-only (door = Hit).
+	if (TryDamageActor(OtherActor, WeakpointMult, bCrit, bKill, bWasEnemy, bDamaged) && bDamaged)
 	{
-		NotifyInstigatorHitMarker(bCrit, WeakpointMult > 1.0f, bKill);
+		NotifyInstigatorHitMarker(bCrit && bWasEnemy, (WeakpointMult > 1.0f) && bWasEnemy, bKill);
 	}
-	if (bDamaged)
+	if (bWasEnemy && bDamaged)
 	{
-		bDealtEnemyDamage = true; // not a miss — suppresses the OnMiss hook at release
+		// Enemy damage only suppresses OnMiss at release. A projectile that hits ONLY a door (bWasEnemy false) stays a
+		// "miss" so OnMiss-driven effects (e.g. ammo refund) still fire — consistent with the hitscan/melee/charge/AOE
+		// paths, which also keep door damage out of enemy-hit accounting (door raises a hit marker but isn't a kill/hit).
+		bDealtEnemyDamage = true;
 	}
 	--PierceRemaining;
 	if (PierceRemaining < 0)

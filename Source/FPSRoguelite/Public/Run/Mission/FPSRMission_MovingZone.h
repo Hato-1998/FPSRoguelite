@@ -23,7 +23,7 @@ public:
 	virtual void AssignPointSet(AFPSRMissionPointSet* InSet) override { PointSet = InSet; }
 
 	UPROPERTY(EditDefaultsOnly, Category = "Mission|MovingZone")
-	float ZoneRadius = 400.0f;
+	float ZoneRadius = 700.0f;
 
 	/** Hold time (seconds) required to capture EACH point in the route. */
 	UPROPERTY(EditDefaultsOnly, Category = "Mission|MovingZone")

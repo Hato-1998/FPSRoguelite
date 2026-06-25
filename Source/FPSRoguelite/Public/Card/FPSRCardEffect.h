@@ -88,6 +88,12 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Card Effect")
 	TSubclassOf<UGameplayEffect> Effect;
 
+	/** UI-only: render this effect's magnitude as a percentage (×100, e.g. "+7.5%") instead of a flat value. Set true
+	 *  for cards whose GE magnitude is a fractional multiplier (damage / crit-chance / pickup-radius / xp gain); leave
+	 *  false for flat attributes (max health, luck, regen). Does not change Apply(). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Card Effect")
+	bool bShowAsPercent = false;
+
 	virtual void Apply(const FFPSRCardEffectContext& Context, float Magnitude) const override;
 	virtual FText GetDescription(ECardRarity Rarity, float Magnitude) const override;
 	virtual bool CanApply(const FFPSRCardEffectContext& Context) const override;

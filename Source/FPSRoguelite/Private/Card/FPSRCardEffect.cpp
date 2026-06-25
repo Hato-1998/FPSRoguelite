@@ -25,7 +25,13 @@ namespace
 	{
 		if (bPercent)
 		{
-			return FString::Printf(TEXT("%+d%%"), FMath::RoundToInt(Mag * 100.0f));
+			// Whole-percent → integer ("+7%"); fractional → one decimal ("+7.5%") so e.g. +2.5% isn't shown as +3%.
+			const float Pct = Mag * 100.0f;
+			if (FMath::IsNearlyEqual(Pct, FMath::RoundToFloat(Pct)))
+			{
+				return FString::Printf(TEXT("%+d%%"), FMath::RoundToInt(Pct));
+			}
+			return FString::Printf(TEXT("%+.1f%%"), Pct);
 		}
 		if (FMath::IsNearlyEqual(Mag, FMath::RoundToFloat(Mag)))
 		{
@@ -88,9 +94,16 @@ void UCardEffect_CharacterGE::Apply(const FFPSRCardEffectContext& Context, float
 
 FText UCardEffect_CharacterGE::GetDescription(ECardRarity Rarity, float Magnitude) const
 {
-	// The card's authored Description carries the human text; this slot shows the rolled numeric value (flat — the
-	// GE's modified attribute isn't introspected cheaply, matching v1 character-scope magnitude formatting).
-	return FText::FromString(FormatCardMagnitude(Magnitude, /*bPercent*/ false));
+	// A zero-magnitude roll is a no-op (e.g. a per-rarity tier intentionally left at 0) — suppress the line so the
+	// tooltip doesn't render a stray "+0", mirroring UCardEffect_WeaponStat. This also lets the card-level
+	// 0-resolution guard (IsDataValid) and the entry widget key consistently off "did any effect emit a line".
+	if (FMath::IsNearlyZero(Magnitude))
+	{
+		return FText::GetEmpty();
+	}
+	// The card's authored Description carries the human text; this slot shows the rolled numeric value. bShowAsPercent
+	// renders fractional-multiplier attributes (damage/crit-chance/pickup/xp) as "+7.5%"; flat attributes as "+15".
+	return FText::FromString(FormatCardMagnitude(Magnitude, bShowAsPercent));
 }
 
 bool UCardEffect_CharacterGE::CanApply(const FFPSRCardEffectContext& Context) const

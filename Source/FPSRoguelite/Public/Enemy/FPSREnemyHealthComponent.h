@@ -7,6 +7,7 @@
 #include "FPSREnemyHealthComponent.generated.h"
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FFPSREnemyDeathSignature, AActor*, DeadActor, AActor*, Killer);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FFPSREnemyHealthChangedSignature, float, NewHealth, float, MaxHealth);
 
 /** Lightweight, non-GAS health for swarm enemies. Server-authoritative; damage applied via the GAS->bridge. */
 UCLASS(ClassGroup = (FPSR), meta = (BlueprintSpawnableComponent))
@@ -37,8 +38,24 @@ public:
 	UFUNCTION(BlueprintPure, Category = "FPSR|Enemy")
 	bool IsDead() const { return bDead; }
 
+	/** True if this owner counts as an ENEMY for combat credit (kill markers / kill triggers / on-damage GAS event
+	 *  such as lifesteal). A destructible non-enemy (a door) sets this false: it still takes/loses health and is
+	 *  destroyed, but breaking it never fires on-kill fragments, kill credit, or lifesteal (see FPSRCombat::ApplyDamage). */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Enemy")
+	bool CountsAsKill() const { return bCountsAsKill; }
+
+	/** Server/setup: set whether this owner counts as an enemy for combat credit (default true = swarm enemy). */
+	void SetCountsAsKill(bool bInCountsAsKill) { bCountsAsKill = bInCountsAsKill; }
+
 	UPROPERTY(BlueprintAssignable, Category = "FPSR|Enemy")
 	FFPSREnemyDeathSignature OnDeath;
+
+	/** Server-authoritative health change (post-clamp), fired on every applied hit including the lethal one. The
+	 *  authoritative damage path runs server-side, so this broadcasts on the server only — clients should react to
+	 *  replicated state / OnRep instead (e.g. AFPSRDoor replicates its own DamageStage for the cosmetic break feel).
+	 *  MaxHealth is server-side (see InitializeMaxHealth), so percent math here is only valid on authority. */
+	UPROPERTY(BlueprintAssignable, Category = "FPSR|Enemy")
+	FFPSREnemyHealthChangedSignature OnHealthChanged;
 
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
@@ -50,6 +67,11 @@ protected:
 
 	UPROPERTY(EditAnywhere, Category = "FPSR|Enemy")
 	float MaxHealth = 50.0f;
+
+	/** When false, this owner is destructible but NOT an enemy for combat credit (no kill/enemy-hit/lifesteal —
+	 *  see CountsAsKill). Default true preserves all swarm-enemy behavior (no regression). Doors set this false. */
+	UPROPERTY(EditAnywhere, Category = "FPSR|Enemy")
+	bool bCountsAsKill = true;
 
 	UPROPERTY(ReplicatedUsing = OnRep_Health)
 	float Health = 50.0f;

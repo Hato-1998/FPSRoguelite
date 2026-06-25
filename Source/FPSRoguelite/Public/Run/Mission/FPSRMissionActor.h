@@ -67,6 +67,10 @@ protected:
 	/** Server: set the mission progress (0..1) and replicate it. */
 	void SetMissionProgress(float NewProgress);
 
+	/** Effective mission-zone radius: returns the `FPSR.Mission.ZoneRadius` console override when > 0, else InRadius.
+	 *  Lets designers live-tune hold/moving zone size during PIE (`FPSR.Mission.ZoneRadius 800`) without a recompile. */
+	float ResolveZoneRadius(float InRadius) const;
+
 	UFUNCTION()
 	void OnRep_MissionState();
 

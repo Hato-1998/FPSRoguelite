@@ -8,10 +8,10 @@
 
 class UArrowComponent;
 
-/** Designer-placed enemy spawn anchor. The enemy spawn subsystem selects among enabled points (not visible
- *  to any player + min distance) by weighted random, falling back to ring-random when none qualify.
- *  Server-only selection; this actor is not replicated (the spawned enemy actor it anchors is the replicated
- *  object). Lightweight: no tick, no collision. */
+/** Designer-placed enemy spawn anchor. The enemy spawn subsystem selects UNIFORMLY at random among eligible
+ *  points (enabled + not visible to any player + min distance + its spawn zone active). Server-only selection;
+ *  this actor is not replicated (the spawned enemy actor it anchors is the replicated object). Lightweight: no
+ *  tick, no collision. A point's ZoneTag is normally auto-applied by the enclosing AFPSRSpawnRoom at BeginPlay. */
 UCLASS()
 class FPSROGUELITE_API AFPSREnemySpawnPoint : public AActor
 {
@@ -20,15 +20,12 @@ class FPSROGUELITE_API AFPSREnemySpawnPoint : public AActor
 public:
 	AFPSREnemySpawnPoint();
 
-	/** Optional spawn-zone tag. When the director sets an active zone, only points whose ZoneTag matches (is, or
-	 *  is a child of) the active zone are eligible; an empty active zone allows all points. Enables time-of-day /
-	 *  phase spawn-region switching (Game.MD §2-8 TimeGate). */
+	/** Spawn-zone (room) tag. A point with NO tag is always eligible; a tagged point is eligible only while its
+	 *  zone is active in the spawn subsystem (a room opens -> its zone activates -> its points go live, and stay
+	 *  live as more rooms open — accumulating spawn locations). Usually auto-applied by the enclosing
+	 *  AFPSRSpawnRoom; a manually set tag is respected (override). (Room spawn system, Enemy.md §2-6.) */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Enemy Spawn")
 	FGameplayTag ZoneTag;
-
-	/** Relative weight in the weighted-random selection among matching points (<= 0 excludes the point). */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Enemy Spawn", meta = (ClampMin = "0.0"))
-	float Weight = 1.0f;
 
 	/** If > 0, this point is only eligible when the nearest player is at least this far away (cm). */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Enemy Spawn", meta = (ClampMin = "0.0"))
@@ -39,9 +36,11 @@ public:
 	bool bEnabled = true;
 
 	FGameplayTag GetZoneTag() const { return ZoneTag; }
-	float GetWeight() const { return Weight; }
 	float GetMinPlayerDistance() const { return MinPlayerDistance; }
 	bool IsEnabled() const { return bEnabled; }
+
+	/** Server/setup: assign this point's spawn zone (used by AFPSRSpawnRoom to auto-tag its interior points). */
+	void SetZoneTag(const FGameplayTag& InZoneTag) { ZoneTag = InZoneTag; }
 
 #if WITH_EDITORONLY_DATA
 private:

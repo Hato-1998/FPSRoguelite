@@ -146,6 +146,7 @@ void UFPSRGA_WeaponMelee::ActivateAbility(
 
 		bool bAnyHit = false;
 		bool bAnyKill = false;
+		bool bAnyDamage = false; // visual marker: enemies AND destructible doors (friendly players leave DamageDealt 0)
 		if (bAny)
 		{
 			TSet<AActor*> Processed;
@@ -168,18 +169,23 @@ void UFPSRGA_WeaponMelee::ActivateAbility(
 				}
 				const FPSRCombat::FDamageResult Result = FPSRCombat::ApplyDamage(HitActor, Resolved, Avatar);
 				// Markers / kill trigger key on real damage (DamageDealt), so a corpse re-hit in the swing is inert.
-				if (Result.bWasEnemy && Result.DamageDealt > 0.0f)
+				if (Result.DamageDealt > 0.0f)
 				{
-					bAnyHit = true;
-					if (Result.bKilled) { bAnyKill = true; FPSRWeaponHooks::NotifyKill(FireCtx, HitActor); }
-					if (WeakpointMult > 1.0f) { bAnyWeak = true; }
+					bAnyDamage = true; // visual marker for enemies AND destructible doors (not friendly players)
+					if (Result.bWasEnemy)
+					{
+						bAnyHit = true;
+						if (Result.bKilled) { bAnyKill = true; FPSRWeaponHooks::NotifyKill(FireCtx, HitActor); }
+						if (WeakpointMult > 1.0f) { bAnyWeak = true; }
+					}
 				}
 			}
 		}
 
 		// Melee has no client prediction (server-only overlap), so all markers come from the server here.
 		// One pulse per swing, strongest outcome (Kill > Weak > Crit > Hit). (Game.MD §2-14)
-		if (bAnyHit)
+		// Fires on ANY damage dealt (door-only swing => plain Hit, since Kill/Weak are enemy-only above).
+		if (bAnyDamage)
 		{
 			if (AFPSRPlayerController* OwnerPC = Cast<AFPSRPlayerController>(Controller))
 			{

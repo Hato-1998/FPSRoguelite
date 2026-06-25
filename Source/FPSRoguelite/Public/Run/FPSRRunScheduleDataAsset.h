@@ -30,9 +30,26 @@ struct FFPSRMissionWindow
 	TArray<TObjectPtr<UFPSRMissionDataAsset>> MissionPool;
 };
 
+/** One anchor in the level-driven alive-count curve: at party Level, the spawn director targets Count alive enemies.
+ *  The director interpolates piecewise-linearly between anchors (author them in ascending Level order). */
+USTRUCT(BlueprintType)
+struct FFPSRAliveCountAnchor
+{
+	GENERATED_BODY()
+
+	/** Party level (FPSRGameState::GetPartyLevel) at this anchor. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Alive Count", meta = (ClampMin = "1"))
+	int32 Level = 1;
+
+	/** Target alive enemy count at this level. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Alive Count", meta = (ClampMin = "0"))
+	int32 Count = 10;
+};
+
 /** Data-driven run schedule (redesign 2026-06-04 / windows 2026-06-11, §2-8): time-windowed mission spawns
  *  (each fires once at a random time in its range, picking a random mission from its pool) + boss time + a
- *  time-scaled enemy target count. No rounds — the run is continuous, frozen only for card selection. */
+ *  level-scaled (preferred) or time-scaled enemy target count. No rounds — the run is continuous, frozen only for
+ *  card selection. */
 UCLASS(BlueprintType)
 class FPSROGUELITE_API UFPSRRunScheduleDataAsset : public UPrimaryDataAsset
 {
@@ -52,11 +69,20 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Run")
 	TObjectPtr<UFPSRBossDefinitionDataAsset> BossDefinition;
 
-	/** Target alive enemy count at run start (the spawn director's base intensity). */
+	/** Level-driven target alive count (preferred): piecewise-linear anchors over party level. When NON-EMPTY this
+	 *  REPLACES the time ramp below — target = interp(GetPartyLevel()) (below the first anchor uses its Count, above
+	 *  the last stays flat at its Count), clamped to MaxAliveCount. Empty = legacy time ramp (BaseAliveCount + …).
+	 *  e.g. (1,10),(20,30),(30,50): density scales with progression, not the clock. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Run")
+	TArray<FFPSRAliveCountAnchor> AliveCountByLevel;
+
+	/** Target alive enemy count at run start (the spawn director's base intensity). LEGACY time ramp — used only when
+	 *  AliveCountByLevel is empty. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Run")
 	int32 BaseAliveCount = 40;
 
-	/** Added to the target alive count per minute of survival (time-scaling difficulty), BEFORE the boss appears. */
+	/** Added to the target alive count per minute of survival, BEFORE the boss appears. LEGACY — used only when
+	 *  AliveCountByLevel is empty. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Run")
 	float AliveCountPerMinute = 30.0f;
 

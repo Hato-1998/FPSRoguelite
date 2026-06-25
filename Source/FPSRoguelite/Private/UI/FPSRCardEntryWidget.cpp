@@ -77,10 +77,13 @@ void UFPSRCardEntryWidget::UpdateDisplay()
 		}
 	}
 
-	// Rarity slot: rolled rarity for value cards; designer category label for pure-behavior cards.
+	// Rarity slot: show the rolled rarity only for value cards that actually produced a value line; otherwise the
+	// designer category label. Keying on EffectLines (not bAnyMagnitude alone) stops a magnitude card that resolves
+	// to no visible value at the rolled rarity from showing a rarity badge over a blank value slot.
 	if (RarityText)
 	{
-		if (!bAnyMagnitude)
+		const bool bShowRarity = bAnyMagnitude && EffectLines.Num() > 0;
+		if (!bShowRarity)
 		{
 			RarityText->SetText(FragmentCategoryText);
 		}

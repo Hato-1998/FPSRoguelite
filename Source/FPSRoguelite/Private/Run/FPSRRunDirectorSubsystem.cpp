@@ -22,6 +22,40 @@
 #include "Engine/Engine.h"
 #include "EngineUtils.h"
 
+namespace
+{
+	/** Piecewise-linear interpolation of the level→alive-count anchors at the given party level. Anchors are authored
+	 *  in ascending Level; below the first anchor returns its Count, above the last stays flat at its Count. */
+	float EvalAliveCountByLevel(const TArray<FFPSRAliveCountAnchor>& Anchors, int32 Level)
+	{
+		const int32 Num = Anchors.Num();
+		if (Num == 0)
+		{
+			return 0.0f;
+		}
+		if (Level <= Anchors[0].Level)
+		{
+			return static_cast<float>(Anchors[0].Count);
+		}
+		if (Level >= Anchors[Num - 1].Level)
+		{
+			return static_cast<float>(Anchors[Num - 1].Count);
+		}
+		for (int32 i = 1; i < Num; ++i)
+		{
+			const FFPSRAliveCountAnchor& A = Anchors[i - 1];
+			const FFPSRAliveCountAnchor& B = Anchors[i];
+			if (Level <= B.Level)
+			{
+				const float Span = static_cast<float>(B.Level - A.Level);
+				const float T = (Span > 0.0f) ? static_cast<float>(Level - A.Level) / Span : 0.0f;
+				return FMath::Lerp(static_cast<float>(A.Count), static_cast<float>(B.Count), T);
+			}
+		}
+		return static_cast<float>(Anchors[Num - 1].Count);
+	}
+}
+
 bool UFPSRRunDirectorSubsystem::HasServerAuthority() const
 {
 	const UWorld* World = GetWorld();
@@ -48,6 +82,9 @@ void UFPSRRunDirectorSubsystem::StartRun()
 	{
 		SpawnSub->SetMaxSpawnPerTick(ActiveSchedule ? ActiveSchedule->MaxSpawnPerTick : FallbackMaxSpawnPerTick);
 		SpawnSub->SetSpawnInterval(ActiveSchedule ? ActiveSchedule->SpawnIntervalSeconds : FallbackSpawnIntervalSeconds);
+		// Re-run safety: restart the room-spawn accumulation from only the start room(s) (a same-world re-run would
+		// otherwise keep zones opened in the previous run). A fresh level load is already reset at world begin.
+		SpawnSub->ResetSpawnZones();
 	}
 
 	// Size the per-window fired flags and roll each window's trigger time within its [MinTime, MaxTime] range
@@ -89,12 +126,30 @@ float UFPSRRunDirectorSubsystem::GetBossTime() const
 
 int32 UFPSRRunDirectorSubsystem::ComputeTargetAliveCount() const
 {
+	const int32 MaxCount = ActiveSchedule ? ActiveSchedule->MaxAliveCount : FallbackMaxAliveCount;
+
+	// Level-driven scaling (preferred): density scales with party PROGRESSION, not the clock (user 2026-06-24). The
+	// schedule's AliveCountByLevel anchors map party level -> target alive count (piecewise-linear). Falls back to the
+	// legacy time ramp only when no anchors are authored (null/legacy schedule), so existing schedules don't regress.
+	if (ActiveSchedule && ActiveSchedule->AliveCountByLevel.Num() > 0)
+	{
+		int32 PartyLevel = 1;
+		if (const UWorld* World = GetWorld())
+		{
+			if (const AFPSRGameState* GameState = World->GetGameState<AFPSRGameState>())
+			{
+				PartyLevel = GameState->GetPartyLevel();
+			}
+		}
+		const float Scaled = EvalAliveCountByLevel(ActiveSchedule->AliveCountByLevel, PartyLevel);
+		return FMath::Clamp(FMath::RoundToInt(Scaled), 0, MaxCount);
+	}
+
+	// Legacy time ramp (only when AliveCountByLevel is empty): +PerMin/min up to BossTime (RunClock stops there), then
+	// +PerMinAfterBoss/min while the boss is up (PostBossElapsed). No discontinuity at the boss.
 	const int32 Base = ActiveSchedule ? ActiveSchedule->BaseAliveCount : FallbackBaseAliveCount;
 	const float PerMin = ActiveSchedule ? ActiveSchedule->AliveCountPerMinute : FallbackAliveCountPerMinute;
 	const float PerMinAfterBoss = ActiveSchedule ? ActiveSchedule->AliveCountPerMinuteAfterBoss : FallbackAliveCountPerMinuteAfterBoss;
-	const int32 MaxCount = ActiveSchedule ? ActiveSchedule->MaxAliveCount : FallbackMaxAliveCount;
-	// Continuous piecewise ramp: +PerMin/min up to BossTime (RunClock stops there), then +PerMinAfterBoss/min while
-	// the boss is up (PostBossElapsed). No discontinuity at the boss — the swarm keeps spawning and scales faster.
 	const float PreBossClock = FMath::Min(RunClock, GetBossTime());
 	const float Scaled = Base + PerMin * (PreBossClock / 60.0f) + PerMinAfterBoss * (PostBossElapsed / 60.0f);
 	return FMath::Clamp(FMath::FloorToInt(Scaled), 0, MaxCount);

@@ -43,6 +43,10 @@ void UFPSREnemyHealthComponent::ApplyDamage(float DamageAmount, AActor* DamageIn
 	Health = FMath::Clamp(Health - DamageAmount, 0.0f, MaxHealth);
 	MARK_PROPERTY_DIRTY_FROM_NAME(UFPSREnemyHealthComponent, Health, this);
 
+	// Server-side health-change notification (before death) — drives cosmetic damage stages (e.g. door crack/break
+	// thresholds). Fired on the lethal hit too (NewHealth == 0), so the final stage runs ahead of OnDeath.
+	OnHealthChanged.Broadcast(Health, MaxHealth);
+
 	if (Health <= 0.0f)
 	{
 		bDead = true;
