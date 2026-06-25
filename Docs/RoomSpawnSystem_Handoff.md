@@ -48,6 +48,7 @@ VibeUE 연결 확인(127.0.0.1:8088, 에디터 열림+플러그인). C++ 빌드=
 ### 라이프사이클/엣지
 - **시작 방**: `bActiveAtStart` 방은 StartRun에 활성(플레이어가 트리거 안에서 스폰돼 BeginOverlap 타이밍 불확실 → 명시 플래그가 안전). 서브시스템이 방 캐시 후 활성(재런 안전).
 - **누적 리셋**: 런 종료/새 런 시 `ResetSpawnZones()`(서브시스템) → 룸 재런 시 시작방만 재활성. 레벨 리로드형 런이면 월드 신규라 자연 리셋.
+- **비활성화 볼륨**(2026-06-25 추가, 사용자 요청): 누적이 기본이나 디자이너가 특정 방 스폰을 끄고 싶을 때 — `AFPSRSpawnRoom.TriggerMode`(`ESpawnRoomTriggerMode{Activate,Deactivate}`, 기본 Activate=무회귀). `Deactivate` 룸 진입(서버)→`SpawnSub->DeactivateSpawnZone(RoomTag)`=`ActiveSpawnZones.RemoveTag`(활성화의 대칭). Deactivate 룸은 **자동태깅 안 함**(대상 존을 `RoomTag`로 참조만, 같은태그 대칭 1볼륨=1존). `ResetSpawnZones`는 Activate 시작방만 재활성(Deactivate룸 `bActiveAtStart`는 `EditConditionHides`로 숨김). 재진입 시 Activate 볼륨 다시 들어가면 ON 복귀(last-trigger-wins). 존=전역 서버권위라 4인서 1인 진입=전역 토글(분리 파티 주의).
 - **문 콜리전**: 닫힘=ECC_Pawn(플레이어 차단)·ECC_Visibility(히트스캔 피격+관통 차단). 부서지면 둘 다 off → 적도 통과(이전 방 적이 추격). 닫힌 문 뒤 방은 비활성이라 적 없음 → 정합.
 - **플로우필드/적 패스**: 닫힌 문이 통로 막으면 적도 막힘(닫힌 문 뒤엔 적 없으니 무해). 열린 후 추격 정합. PIE 점검 포인트.
 
