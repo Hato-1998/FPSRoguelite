@@ -16,6 +16,8 @@
 - **개체별 이속 편차**(확정 2026-05-30): 아키타입 기본속도는 고정, **스폰 시 개체마다 ±10% 무작위 편차** 부여 → 단일 Blob 밀착 방지, 스웜을 입체적·유기적으로 분산해 카이팅 재미. 비용 0(스폰 시 1회 곱셈)
 - **원거리 공격 규격**(확정 2026-05-30): 기본 **투사체(Projectile)** 방식(눈으로 보고 회피 가능)으로 강제. 히트스캔 사용 시 **차징 유예 + 사전경고 인디케이터 필수**(부조리 탄막 금지)
 - **공격 토큰(Attack Token)**(확정 2026-05-30): 플레이어당 **동시에 공격을 시도할 수 있는 적 개체 수 상한**(서버 권위). 수백 마리 동시 사격/특수공격의 불합리 방지 + §5 "적 공격 판정 서버 배치"의 구현 수단. (토큰 개수·FF 기본 10% 등 수치는 밸런스 후속)
+- **룸 기반 점진 개방 스폰**(구현 2026-06-25): 맵=방(룸) 구성. 벽의 `AFPSRDoor`(파괴 장벽)를 사격해 부수면 통로 개방 → 플레이어가 `AFPSRSpawnRoom`(박스 트리거) 진입 시 그 방의 스폰존이 활성. 활성 존은 **누적**(지나온 방 계속 스폰; 적 총량은 레벨기반(§위)으로 불변, 방 개방은 스폰 **위치**만 추가). 스폰포인트는 방 박스가 BeginPlay에 자동 태깅(`AFPSREnemySpawnPoint.ZoneTag=RoomTag`, 수동 태그는 존중), 선택은 적격(out-of-view + MinPlayerDistance + 존활성) **균등 랜덤**(가중치·거리폴오프 폐지 2026-06-25). 시작방=`bActiveAtStart`. 서버 권위(`UFPSREnemySpawnSubsystem.ActiveSpawnZones`/`ActivateSpawnZone`/`ResetSpawnZones`; 리셋=OnWorldBeginPlay + StartRun). 설계상세 `Docs/RoomSpawnSystem_Handoff.md`.
+- **파괴 장벽(`AFPSRDoor`) = 비-적 데미지 대상**: `UFPSREnemyHealthComponent`를 가져 **데미지 브릿지로 전 무기 경로 자동 피격**(신규 데미지 코드 0). 콜리전 오브젝트타입 = `ECC_FPSRPlayerPawn`(플레이어·적 모두 차단 + 대시로 통과 불가 + 모든 무기 오브젝트쿼리에 포함). **`bCountsAsKill=false`** → 부숴도 킬 크레딧·on-kill 프래그먼트·흡혈(on-damage GAS 이벤트) 미발동(데미지/`DamageDealt`/파괴는 정상; `FPSRCombat::ApplyDamage` 게이트). 메시는 BP 지정(C++ 하드코딩 금지), 파괴 연출=`OnDoorBroken`(BlueprintImplementableEvent). 문틀은 `FrameMesh`(WorldStatic=무기쿼리 비대상=무반응 벽). XP는 `AFPSREnemyBase::HandleDeath` 전용이라 문은 자동 0.
 
 ### 2-10. 발사체 / 네트워크
 - 발사체: **클라 예측 + 서버 검증**

@@ -113,16 +113,23 @@ namespace FPSRCombat
 			// Capture pre-state so kill/damage are TRANSITIONS, not post-facto reads: a corpse re-hit (already dead,
 			// ApplyDamage no-ops) and an overkill (damage clamped to remaining health) both report DamageDealt = 0
 			// and bKilled = false — so feedback (markers / lifesteal event) never fires on a corpse or rewards overkill.
+			// bCountsAsKill gates the combat-CREDIT axes only. A destructible non-enemy (a door, bCountsAsKill=false)
+			// still takes damage and is destroyed — DamageDealt / bApplied / the health component's death all run
+			// unchanged — but it never counts as an enemy hit (bWasEnemy) or a kill (bKilled), so on-kill fragments,
+			// kill markers, and kill credit don't fire on it. Enemies default true → no behavior change.
+			const bool bCountsAsKill = HealthComp->CountsAsKill();
 			const bool bWasDeadBefore = HealthComp->IsDead();
 			const float HealthBefore = HealthComp->GetHealth();
 			HealthComp->ApplyDamage(FinalDamage, Instigator, DamageType);
 			Result.bApplied = true;
-			Result.bWasEnemy = true;
+			Result.bWasEnemy = bCountsAsKill;
 			Result.DamageDealt = FMath::Max(0.0f, HealthBefore - HealthComp->GetHealth());
-			Result.bKilled = (!bWasDeadBefore && HealthComp->IsDead());
+			Result.bKilled = bCountsAsKill && (!bWasDeadBefore && HealthComp->IsDead());
 
 			// GAS-native character behavior (lifesteal etc.): event carries the REAL damage dealt (corpse/overkill = 0).
-			if (Result.DamageDealt > 0.0f)
+			// Gated on bWasEnemy too, so shooting a door (bCountsAsKill=false) can't feed lifesteal / heal-on-damage
+			// (no farming health off a high-HP destructible).
+			if (Result.bWasEnemy && Result.DamageDealt > 0.0f)
 			{
 				SendDealtDamageEvent(Instigator, Result.DamageDealt);
 			}

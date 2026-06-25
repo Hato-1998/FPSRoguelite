@@ -3,6 +3,7 @@
 #include "Enemy/FPSREnemySpawnSubsystem.h"
 #include "Enemy/FPSREnemyBase.h"
 #include "Enemy/FPSREnemySpawnPoint.h"
+#include "Enemy/FPSRSpawnRoom.h"
 #include "Enemy/FPSRFlowFieldSubsystem.h"
 #include "Hero/FPSRCharacter.h"
 #include "Core/FPSRLogChannels.h"
@@ -66,6 +67,8 @@ void UFPSREnemySpawnSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 	if (HasServerAuthority())
 	{
 		CacheSpawnPoints();
+		CacheSpawnRooms();
+		ResetSpawnZones(); // start with only bActiveAtStart rooms live (fresh world)
 
 		InWorld.GetTimerManager().SetTimer(
 			DirectorTimerHandle,
@@ -120,6 +123,63 @@ void UFPSREnemySpawnSubsystem::CacheSpawnPoints()
 	}
 
 	UE_LOG(LogFPSR, Log, TEXT("[Spawn] Cached %d enemy spawn point(s)."), SpawnPoints.Num());
+}
+
+void UFPSREnemySpawnSubsystem::CacheSpawnRooms()
+{
+	SpawnRooms.Reset();
+
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
+	for (TActorIterator<AFPSRSpawnRoom> It(World); It; ++It)
+	{
+		if (AFPSRSpawnRoom* Room = *It)
+		{
+			SpawnRooms.Add(Room);
+		}
+	}
+
+	UE_LOG(LogFPSR, Log, TEXT("[Spawn] Cached %d spawn room(s)."), SpawnRooms.Num());
+}
+
+void UFPSREnemySpawnSubsystem::ActivateSpawnZone(FGameplayTag Zone)
+{
+	if (!HasServerAuthority() || !Zone.IsValid())
+	{
+		return;
+	}
+
+	// Accumulate: a room, once entered, stays a live spawn region for the rest of the run.
+	if (!ActiveSpawnZones.HasTagExact(Zone))
+	{
+		ActiveSpawnZones.AddTag(Zone);
+		UE_LOG(LogFPSR, Log, TEXT("[Spawn] Activated spawn zone %s (%d active)."), *Zone.ToString(), ActiveSpawnZones.Num());
+	}
+}
+
+void UFPSREnemySpawnSubsystem::ResetSpawnZones()
+{
+	if (!HasServerAuthority())
+	{
+		return;
+	}
+
+	// Clear accumulated zones, then re-arm the start room(s) so a re-run begins from only the start region.
+	ActiveSpawnZones.Reset();
+	for (const TObjectPtr<AFPSRSpawnRoom>& RoomPtr : SpawnRooms)
+	{
+		const AFPSRSpawnRoom* Room = RoomPtr;
+		if (Room && Room->IsActiveAtStart() && Room->GetRoomTag().IsValid())
+		{
+			ActiveSpawnZones.AddTag(Room->GetRoomTag());
+		}
+	}
+
+	UE_LOG(LogFPSR, Log, TEXT("[Spawn] Reset spawn zones — %d start zone(s) active."), ActiveSpawnZones.Num());
 }
 
 void UFPSREnemySpawnSubsystem::Deinitialize()
@@ -458,32 +518,34 @@ bool UFPSREnemySpawnSubsystem::TrySelectSpawnPoint(FVector& OutLocation) const
 
 	if (PlayerViews.Num() == 0)
 	{
-		return false; // no players to gate against — let the caller fall back to the ring pattern
+		return false; // no players to gate against — nothing to spawn this tick
 	}
 
 	const float CosHalfVis = FMath::Cos(FMath::DegreesToRadians(SpawnPointVisibilityHalfAngleDeg));
-	const bool bZoneFilter = ActiveSpawnZone.IsValid();
 
-	// Build the eligible candidate set with cumulative weights for a single weighted-random draw.
+	// Build the eligible candidate set, then pick UNIFORMLY at random (weight + distance-falloff removed 2026-06-25):
+	// designer points are equal-probability, and the room/zone gate decides WHICH points are live this tick.
 	TArray<const AFPSREnemySpawnPoint*, TInlineAllocator<32>> Candidates;
-	TArray<float, TInlineAllocator<32>> CumulativeWeights;
-	float WeightTotal = 0.0f;
 
 	for (const TObjectPtr<AFPSREnemySpawnPoint>& PointPtr : SpawnPoints)
 	{
 		const AFPSREnemySpawnPoint* Point = PointPtr;
-		if (Point == nullptr || !Point->IsEnabled() || Point->GetWeight() <= 0.0f)
+		if (Point == nullptr || !Point->IsEnabled())
 		{
 			continue;
 		}
-		if (bZoneFilter && !Point->GetZoneTag().MatchesTag(ActiveSpawnZone))
+
+		// Zone (room) gate: an untagged point is always eligible; a tagged point only while its room is active.
+		// HasTag (not exact) so activating a parent zone would enable its child rooms (hierarchical, optional).
+		const FGameplayTag PointZone = Point->GetZoneTag();
+		if (PointZone.IsValid() && !ActiveSpawnZones.HasTag(PointZone))
 		{
 			continue;
 		}
 
 		const FVector PointLocation = Point->GetActorLocation();
 
-		// Nearest-player distance (XY) for the MinPlayerDistance gate + distance weighting.
+		// Nearest-player distance (XY) for the MinPlayerDistance gate + out-of-view test.
 		float NearestDistSq = TNumericLimits<float>::Max();
 		bool bVisibleToAnyPlayer = false;
 		for (const FPlayerView& View : PlayerViews)
@@ -520,39 +582,19 @@ bool UFPSREnemySpawnSubsystem::TrySelectSpawnPoint(FVector& OutLocation) const
 			continue;
 		}
 
-		// Favor points nearer the fight without hard-excluding far ones.
-		const float DistanceWeight = 1.0f / (1.0f + NearestDist / SpawnPointFalloffDistance);
-		const float EffectiveWeight = Point->GetWeight() * DistanceWeight;
-		if (EffectiveWeight <= 0.0f)
-		{
-			continue;
-		}
-
-		WeightTotal += EffectiveWeight;
 		Candidates.Add(Point);
-		CumulativeWeights.Add(WeightTotal);
 	}
 
-	if (Candidates.Num() == 0 || WeightTotal <= 0.0f)
+	if (Candidates.Num() == 0)
 	{
 		return false;
 	}
 
-	// Weighted-random draw: first cumulative weight >= roll. The exact designer anchor is used (no jitter): it is
-	// the validated, authoritative spawn transform (§1 fixed map). If the same point is picked more than once in a
-	// tick, the co-located enemies are pushed apart at the source by ComputeSeparation's coincident handling rather
-	// than by moving the spawn into possibly-unsafe wall/ledge geometry.
-	const float Roll = FMath::FRandRange(0.0f, WeightTotal);
-	for (int32 i = 0; i < Candidates.Num(); ++i)
-	{
-		if (Roll <= CumulativeWeights[i])
-		{
-			OutLocation = Candidates[i]->GetActorLocation();
-			return true;
-		}
-	}
-
-	OutLocation = Candidates.Last()->GetActorLocation(); // float-rounding guard
+	// Uniform random among eligible points. The exact designer anchor is used (no jitter): it is the validated,
+	// authoritative spawn transform (§1 fixed map). If the same point is picked more than once in a tick, the
+	// co-located enemies are pushed apart at the source by ComputeSeparation's coincident handling rather than by
+	// moving the spawn into possibly-unsafe wall/ledge geometry.
+	OutLocation = Candidates[FMath::RandRange(0, Candidates.Num() - 1)]->GetActorLocation();
 	return true;
 }
 

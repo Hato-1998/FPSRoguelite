@@ -10,6 +10,7 @@
 
 class AFPSREnemyBase;
 class AFPSREnemySpawnPoint;
+class AFPSRSpawnRoom;
 
 /** Lightweight server-authoritative object pool + spawn director for swarm enemies (P2-A).
  *  Pooling reuses dormant actors; director keeps ~TargetAliveCount alive around players.
@@ -61,9 +62,14 @@ public:
 	 *  once. Clamped to a small minimum. Schedule-driven (DA_RunSchedule.SpawnIntervalSeconds), pushed at StartRun. */
 	void SetSpawnInterval(float InSeconds);
 
-	/** Set the active spawn zone (empty = all points eligible). Only points whose ZoneTag is, or is a child of,
-	 *  this tag are eligible while set — lets the director switch spawn regions by time/phase (Game.MD §2-8). */
-	void SetActiveSpawnZone(FGameplayTag Zone) { ActiveSpawnZone = Zone; }
+	/** Server: mark a spawn zone (room) active so its tagged spawn points become eligible. ACCUMULATES — already
+	 *  active zones stay active, so opening a new room ADDS spawn locations without ever removing earlier ones (the
+	 *  swarm keeps spawning in cleared rooms). Called by AFPSRSpawnRoom on player entry. (Room spawn system.) */
+	void ActivateSpawnZone(FGameplayTag Zone);
+
+	/** Server: clear all active zones, then re-activate every cached room flagged bActiveAtStart (the start room).
+	 *  Called at world begin and at StartRun so a re-run starts from only the start room (no leaked accumulation). */
+	void ResetSpawnZones();
 
 private:
 	/** Director tick: spawn/release enemies to maintain TargetAliveCount. */
@@ -72,9 +78,13 @@ private:
 	/** Cache designer-placed AFPSREnemySpawnPoint actors once at world begin (server). */
 	void CacheSpawnPoints();
 
-	/** Pick a designer spawn point that no player can currently see (FOV gate) and that satisfies its
-	 *  MinPlayerDistance + active-zone filter, by Weight × distance falloff. Returns false when none qualify
-	 *  (or none are placed), so the caller falls back to the ring pattern. */
+	/** Cache designer-placed AFPSRSpawnRoom actors once at world begin (server). Used by ResetSpawnZones to know
+	 *  which rooms are active at start. */
+	void CacheSpawnRooms();
+
+	/** Pick a designer spawn point UNIFORMLY at random among those that are enabled, not visible to any player (FOV
+	 *  gate), satisfy their MinPlayerDistance, and whose spawn zone is active (an untagged point is always eligible).
+	 *  Returns false when none qualify (or none are placed) — the director then skips spawning this tick (no fallback). */
 	bool TrySelectSpawnPoint(FVector& OutLocation) const;
 
 	/** Batched server movement pass with distance LOD (replaces per-actor enemy Tick). */
@@ -174,14 +184,15 @@ private:
 	 *  enemies appear out of view (behind/beside). Horizontal (XY) test. */
 	static constexpr float SpawnPointVisibilityHalfAngleDeg = 70.0f;
 
-	/** Distance falloff for point weighting: weight *= 1/(1 + nearestPlayerDist / this). Favors points near the
-	 *  fight without hard-excluding far ones. */
-	static constexpr float SpawnPointFalloffDistance = 2500.0f; // cm
-
 	/** Designer-placed spawn anchors, cached once at world begin (server). May contain entries to null-check. */
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<AFPSREnemySpawnPoint>> SpawnPoints;
 
-	/** Active spawn-zone filter (invalid/empty = all points eligible). Set by the director (TimeGate, §2-8). */
-	FGameplayTag ActiveSpawnZone;
+	/** Designer-placed spawn rooms, cached once at world begin (server). Used to re-activate start zones on reset. */
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<AFPSRSpawnRoom>> SpawnRooms;
+
+	/** Active spawn zones (rooms). A point with no zone is always eligible; a tagged point is eligible only while
+	 *  its zone is in this container. Accumulates as rooms open (ActivateSpawnZone); cleared by ResetSpawnZones. */
+	FGameplayTagContainer ActiveSpawnZones;
 };

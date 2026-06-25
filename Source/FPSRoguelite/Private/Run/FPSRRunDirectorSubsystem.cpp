@@ -82,6 +82,9 @@ void UFPSRRunDirectorSubsystem::StartRun()
 	{
 		SpawnSub->SetMaxSpawnPerTick(ActiveSchedule ? ActiveSchedule->MaxSpawnPerTick : FallbackMaxSpawnPerTick);
 		SpawnSub->SetSpawnInterval(ActiveSchedule ? ActiveSchedule->SpawnIntervalSeconds : FallbackSpawnIntervalSeconds);
+		// Re-run safety: restart the room-spawn accumulation from only the start room(s) (a same-world re-run would
+		// otherwise keep zones opened in the previous run). A fresh level load is already reset at world begin.
+		SpawnSub->ResetSpawnZones();
 	}
 
 	// Size the per-window fired flags and roll each window's trigger time within its [MinTime, MaxTime] range
