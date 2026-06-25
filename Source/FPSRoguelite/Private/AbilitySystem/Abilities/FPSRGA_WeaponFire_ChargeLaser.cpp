@@ -232,6 +232,7 @@ void UFPSRGA_WeaponFire_ChargeLaser::FireBeam(float BeamDamage, bool bIsPayoffSh
 	bool bServerCrit = false;
 	bool bServerWeak = false;
 	bool bServerKill = false;
+	bool bServerAnyDamage = false; // visual marker: enemies AND destructible doors (friendly players leave DamageDealt 0)
 
 	UFPSRWeaponInstance* Instance = CachedInstance.Get();
 	const TArray<TObjectPtr<UFPSRWeaponFragment>>* Fragments = Instance ? &Instance->GetActiveFragments() : nullptr;
@@ -269,13 +270,17 @@ void UFPSRGA_WeaponFire_ChargeLaser::FireBeam(float BeamDamage, bool bIsPayoffSh
 			return;
 		}
 		const FPSRCombat::FDamageResult Result = FPSRCombat::ApplyDamage(HitActor, Resolved, Avatar);
-		if (Result.bWasEnemy && Result.DamageDealt > 0.0f)
+		if (Result.DamageDealt > 0.0f)
 		{
-			bServerHit = true;
-			// OnKill fires on the PAYOFF beam only — warm-up ticks skip every fragment hook (pure chip damage, §2-3-5).
-			if (Result.bKilled) { bServerKill = true; if (bIsPayoffShot) { FPSRWeaponHooks::NotifyKill(CachedFireCtx, HitActor); } }
-			else if (WeakpointMult > 1.0f) { bServerWeak = true; }
-			else if (bCrit) { bServerCrit = true; }
+			bServerAnyDamage = true; // visual marker for enemies AND destructible doors (not friendly players)
+			if (Result.bWasEnemy)
+			{
+				bServerHit = true;
+				// OnKill fires on the PAYOFF beam only — warm-up ticks skip every fragment hook (pure chip damage, §2-3-5).
+				if (Result.bKilled) { bServerKill = true; if (bIsPayoffShot) { FPSRWeaponHooks::NotifyKill(CachedFireCtx, HitActor); } }
+				else if (WeakpointMult > 1.0f) { bServerWeak = true; }
+				else if (bCrit) { bServerCrit = true; }
+			}
 		}
 	};
 
@@ -325,7 +330,8 @@ void UFPSRGA_WeaponFire_ChargeLaser::FireBeam(float BeamDamage, bool bIsPayoffSh
 	// Hit-marker + post-fire hooks fire only on the payoff shot (warm-up ticks are silent to avoid marker/hook spam).
 	if (bIsPayoffShot)
 	{
-		if (bServerHit)
+		// Fires on ANY damage dealt (door-only beam => plain Hit, since Kill/Weak/Crit are enemy-only above).
+		if (bServerAnyDamage)
 		{
 			if (AFPSRPlayerController* OwnerPC = Cast<AFPSRPlayerController>(Controller))
 			{

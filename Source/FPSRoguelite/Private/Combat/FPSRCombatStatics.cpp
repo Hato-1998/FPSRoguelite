@@ -206,6 +206,7 @@ namespace FPSRCombat
 		bool bAnyEnemyHit = false;
 		bool bAnyCrit = false;
 		bool bAnyKill = false;
+		bool bAnyDamageDealt = false; // visual marker: enemies AND destructible doors (friendly players leave DamageDealt 0)
 
 		for (const FOverlapResult& Overlap : Overlaps)
 		{
@@ -232,11 +233,15 @@ namespace FPSRCombat
 				Result = ApplyDamage(Target, FinalDamage, Instigator, DamageType);
 			}
 
-			if (Result.bWasEnemy && Result.DamageDealt > 0.0f)
+			if (Result.DamageDealt > 0.0f)
 			{
-				bAnyEnemyHit = true;
-				bAnyCrit |= bCrit;
-				bAnyKill |= Result.bKilled;
+				bAnyDamageDealt = true; // visual marker for enemies AND destructible doors (not friendly players)
+				if (Result.bWasEnemy)
+				{
+					bAnyEnemyHit = true;
+					bAnyCrit |= bCrit;
+					bAnyKill |= Result.bKilled;
+				}
 			}
 			if (Result.bKilled)
 			{
@@ -263,7 +268,8 @@ namespace FPSRCombat
 			}
 		}
 
-		if (bAnyEnemyHit)
+		// Fires on ANY damage dealt — enemies AND destructible doors (door-only blast => plain Hit, Crit/Kill enemy-only).
+		if (bAnyDamageDealt)
 		{
 			NotifyHitMarker(Instigator, bAnyCrit, bAnyKill); // one marker per explosion (strongest outcome)
 		}

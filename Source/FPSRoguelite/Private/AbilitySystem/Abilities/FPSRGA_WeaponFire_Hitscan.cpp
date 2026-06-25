@@ -184,6 +184,10 @@ void UFPSRGA_WeaponFire_Hitscan::ActivateAbility(
 	bool bServerCrit = false;
 	bool bServerWeak = false;
 	bool bServerKill = false;
+	// Visual hit-marker fires for ANY damageable that lost health — enemies AND destructible non-enemies (doors,
+	// bCountsAsKill=false). Distinct from bServerHit (enemy combat-credit: drives OnMiss / Kill·Crit·Weak / lifesteal).
+	// A friendly player never sets this: the player damage branch leaves DamageDealt = 0 (FPSRCombatStatics::ApplyDamage).
+	bool bServerAnyDamage = false;
 	// True if a per-impact fragment (e.g. ExplosiveRounds splash) dealt real damage to an enemy — folded into the
 	// miss check so a connecting wall-splash doesn't count as a miss (would otherwise refund AmmoOnMiss on a hit).
 	bool bImpactHitEnemy = false;
@@ -229,12 +233,16 @@ void UFPSRGA_WeaponFire_Hitscan::ActivateAbility(
 		const FPSRCombat::FDamageResult Result = FPSRCombat::ApplyDamage(HitActor, Resolved, Avatar);
 		// Markers / kill triggers key on DamageDealt (real health removed), so a corpse re-hit (DamageDealt 0) is inert;
 		// the bullet still spends penetration via bApplied below (geometry), it just produces no feedback or kill.
-		if (Result.bWasEnemy && Result.DamageDealt > 0.0f)
+		if (Result.DamageDealt > 0.0f)
 		{
-			bServerHit = true;
-			if (Result.bKilled) { bServerKill = true; FPSRWeaponHooks::NotifyKill(FireCtx, HitActor); }
-			else if (WeakpointMult > 1.0f) { bServerWeak = true; }
-			else if (bCrit) { bServerCrit = true; }
+			bServerAnyDamage = true; // visual marker for enemies AND destructible doors (not friendly players: DamageDealt 0)
+			if (Result.bWasEnemy)
+			{
+				bServerHit = true;
+				if (Result.bKilled) { bServerKill = true; FPSRWeaponHooks::NotifyKill(FireCtx, HitActor); }
+				else if (WeakpointMult > 1.0f) { bServerWeak = true; }
+				else if (bCrit) { bServerCrit = true; }
+			}
 		}
 		return Result.bApplied;
 	};
@@ -329,7 +337,8 @@ void UFPSRGA_WeaponFire_Hitscan::ActivateAbility(
 	}
 
 	// Server delivers one marker per activation to the owning client — strongest outcome (Kill > Weak > Crit > Hit).
-	if (FireCtx.bAuthority && bServerHit)
+	// Fires on ANY damage dealt (door-only hit => plain Hit, since Kill/Weak/Crit are enemy-only above).
+	if (FireCtx.bAuthority && bServerAnyDamage)
 	{
 		if (AFPSRPlayerController* OwnerPC = Cast<AFPSRPlayerController>(Controller))
 		{
