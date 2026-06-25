@@ -7,6 +7,7 @@
 #include "FPSREnemyHealthComponent.generated.h"
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FFPSREnemyDeathSignature, AActor*, DeadActor, AActor*, Killer);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FFPSREnemyHealthChangedSignature, float, NewHealth, float, MaxHealth);
 
 /** Lightweight, non-GAS health for swarm enemies. Server-authoritative; damage applied via the GAS->bridge. */
 UCLASS(ClassGroup = (FPSR), meta = (BlueprintSpawnableComponent))
@@ -48,6 +49,13 @@ public:
 
 	UPROPERTY(BlueprintAssignable, Category = "FPSR|Enemy")
 	FFPSREnemyDeathSignature OnDeath;
+
+	/** Server-authoritative health change (post-clamp), fired on every applied hit including the lethal one. The
+	 *  authoritative damage path runs server-side, so this broadcasts on the server only — clients should react to
+	 *  replicated state / OnRep instead (e.g. AFPSRDoor replicates its own DamageStage for the cosmetic break feel).
+	 *  MaxHealth is server-side (see InitializeMaxHealth), so percent math here is only valid on authority. */
+	UPROPERTY(BlueprintAssignable, Category = "FPSR|Enemy")
+	FFPSREnemyHealthChangedSignature OnHealthChanged;
 
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 

@@ -52,8 +52,10 @@ void AFPSRDoor::BeginPlay()
 	{
 		if (HealthComponent)
 		{
-			// Size HP to the designer's durability (overrides the component default), then listen for death.
+			// Size HP to the designer's durability (overrides the component default), then listen for health changes
+			// (damage stages) and death (break).
 			HealthComponent->InitializeMaxHealth(Durability);
+			HealthComponent->OnHealthChanged.AddDynamic(this, &AFPSRDoor::HandleHealthChanged);
 			HealthComponent->OnDeath.AddDynamic(this, &AFPSRDoor::HandleBroken);
 		}
 	}
@@ -72,6 +74,55 @@ void AFPSRDoor::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetim
 	FDoRepLifetimeParams Params;
 	Params.bIsPushBased = true;
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRDoor, bBroken, Params);
+	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRDoor, DamageStage, Params);
+}
+
+void AFPSRDoor::HandleHealthChanged(float NewHealth, float MaxHealth)
+{
+	// Server-only (OnHealthChanged broadcasts on authority): advance the damage stage and fire the BP presentation
+	// for any thresholds the hit just crossed. Clients fire the same stages via OnRep_DamageStage.
+	if (!HasAuthority() || bBroken || MaxHealth <= 0.0f)
+	{
+		return;
+	}
+
+	const float Pct = NewHealth / MaxHealth;
+
+	// Count how many thresholds the current percent is at-or-below (thresholds are descending, so this is the new
+	// stage count). Order-independent for the count; index semantics assume descending (see header).
+	int32 NewStage = 0;
+	for (const float Threshold : DamageStageThresholds)
+	{
+		if (Pct <= Threshold)
+		{
+			++NewStage;
+		}
+	}
+
+	if (NewStage > DamageStage)
+	{
+		FireDamageStages(DamageStage, NewStage, Pct); // server-local presentation
+		DamageStage = static_cast<uint8>(NewStage);
+		MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRDoor, DamageStage, this);
+	}
+}
+
+void AFPSRDoor::OnRep_DamageStage(uint8 OldStage)
+{
+	if (DamageStage > OldStage)
+	{
+		FireDamageStages(OldStage, DamageStage, -1.0f); // client: no exact health, report per-stage threshold
+	}
+}
+
+void AFPSRDoor::FireDamageStages(int32 FromStage, int32 ToStage, float CurrentPct)
+{
+	for (int32 Stage = FromStage; Stage < ToStage; ++Stage)
+	{
+		const float Threshold = DamageStageThresholds.IsValidIndex(Stage) ? DamageStageThresholds[Stage] : 0.0f;
+		const float ReportPct = (CurrentPct >= 0.0f) ? CurrentPct : Threshold;
+		OnDoorDamageStage(Stage, ReportPct, Threshold);
+	}
 }
 
 void AFPSRDoor::HandleBroken(AActor* DeadActor, AActor* Killer)

@@ -40,10 +40,24 @@ protected:
 	UFUNCTION()
 	void OnRep_Broken();
 
+	/** Server: HealthComponent reported a (post-clamp) health change — advance the damage stage and fire the BP
+	 *  presentation for any newly-crossed thresholds. Bound to UFPSREnemyHealthComponent::OnHealthChanged. */
+	UFUNCTION()
+	void HandleHealthChanged(float NewHealth, float MaxHealth);
+
+	UFUNCTION()
+	void OnRep_DamageStage(uint8 OldStage);
+
 	/** Broken-door presentation (anim open / Chaos shatter / VFX) — BP-implemented so the visual can change without
 	 *  a C++ rebuild. Fires on the server and on clients (via OnRep). */
 	UFUNCTION(BlueprintImplementableEvent, Category = "FPSR|Door")
 	void OnDoorBroken();
+
+	/** Progressive-damage presentation (crack / shake / tint), fired once per crossed threshold as the door takes
+	 *  damage — BP-implemented so the visual is content. StageIndex is 0-based into DamageStageThresholds (0 = first/
+	 *  highest threshold), so the BP can escalate intensity. Fires on the server and on clients (via OnRep). */
+	UFUNCTION(BlueprintImplementableEvent, Category = "FPSR|Door")
+	void OnDoorDamageStage(int32 StageIndex, float HealthPct, float Threshold);
 
 	/** Breakable door leaves (상·하단). Object type ECC_FPSRPlayerPawn: gathered by EVERY weapon object-query so all
 	 *  weapon types damage it via HealthComponent (no new code), blocked by players AND enemies (both block the
@@ -65,11 +79,24 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Door", meta = (ClampMin = "1.0"))
 	float Durability = 150.0f;
 
+	/** Remaining-health fractions (1..0) at which OnDoorDamageStage fires, in DESCENDING order. Default {0.75, 0.5,
+	 *  0.25, 0.05} = crack feedback at 75/50/25/5%. Designer-tunable per door BP (add/remove stages freely). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Door")
+	TArray<float> DamageStageThresholds = {0.75f, 0.5f, 0.25f, 0.05f};
+
 	UPROPERTY(ReplicatedUsing = OnRep_Broken)
 	bool bBroken = false;
+
+	/** Count of DamageStageThresholds crossed so far (server-computed, replicated so clients fire the same stages). */
+	UPROPERTY(ReplicatedUsing = OnRep_DamageStage)
+	uint8 DamageStage = 0;
 
 private:
 	/** Hide + disable collision on the door leaves ONLY (the frame, a sibling, stays solid and visible). Shared by
 	 *  the server break path and the client OnRep so both open the passage identically. */
 	void ApplyBrokenState();
+
+	/** Fire OnDoorDamageStage for each stage in [FromStage, ToStage). CurrentPct >= 0 reports the real percent
+	 *  (server); CurrentPct < 0 reports each stage's own threshold (client OnRep, which lacks exact health). */
+	void FireDamageStages(int32 FromStage, int32 ToStage, float CurrentPct);
 };
