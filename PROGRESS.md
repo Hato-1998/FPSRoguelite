@@ -6,20 +6,25 @@
 
 **최종 갱신: 2026-06-25**
 
-## 🚧 밸런스 2차 패스 — 룸 스폰 + 문(破壊/Chaos/단계연출) 전체 구현·저작 완료(`balance/pass2`, 미머지) → 다음=사용자 PIE 전체검증 후 머지
+## 🚧 밸런스 2차 패스 — 룸 스폰 + 문(破壊/Chaos/단계연출) + 플로우필드(데이터드리븐 바운드/clearance) + 스폰존 비활성화 볼륨 전체 구현·검증 완료(`balance/pass2`, 미머지) → 다음=사용자 PIE 전체검증 후 머지
 > **이번 세션 완료(전부 `balance/pass2` 커밋; 코드 빌드 Succeeded, BP 헤드리스 검증, 도어웨이 끼임 트레이스 진단):**
 > - 룸 스폰 C++ `4923a66`(AFPSRDoor/AFPSRSpawnRoom/bCountsAsKill/누적존, 설계 `Docs/RoomSpawnSystem_Handoff.md`).
 > - 문 HP 단계연출 훅 `dbe779f`(`UFPSREnemyHealthComponent.OnHealthChanged` 서버 브로드캐스트 + `AFPSRDoor` `DamageStageThresholds{.75,.5,.25,.05}`·복제 `DamageStage`·`OnDoorDamageStage` BIE).
 > - 콘텐츠 저작(VibeUE): `ed72e88`(BP_Door[DoorMesh=SM_DoubleDoor·Durability=3600=라이플12×300발·bCountsAsKill=false]/BP_SpawnRoom + L_Sandbox 2룸[SpawnRoom_Start active/Left NE]·스폰포인트13·PlayerStart 바닥보정) · `4f425f5`(OnDoorDamageStage=피치워블+StageVFX/SFX 훅) · `bcf8270`(Chaos: BrokenGC[GeometryCollectionComponent]+OnDoorBroken[Visibility→Collision→SimulatePhysics(프록시생성=로드베어링)→CrumbleActiveClusters→AddRadialImpulse]+GC_SM_DoubleDoor[사용자 Fracture]).
 > - 후속 픽스(PIE 피드백): `72a9644` fix(combat) 문도 히트마커(전 무기 경로 마커를 `bWasEnemy`→`DamageDealt>0`; 아군 FF는 DamageDealt=0이라 미발) · `a181a13` fix(door) BrokenGC 투명콜리전 제거(BeginPlay NoCollision)+90도 회전정렬(GC가 SM 대비 X/Y스왑) · `15fa021` feat(door) 파괴 시 콜리전없이 무너짐+3초후 소멸(Delay→숨김+SimulatePhysics false) · `3310c73` fix(enemy) **플로우필드** 바닥높이 프로빙(GridOrigin.Z=PlayerStart 아래 바닥 자동감지; 기존 z=120이 바닥-1000보다 1120위라 개구부 오판→끼임)+그리드 커버리지(원점±10000→14000, 오프오리진 레벨) · `2bbd081` feat(mission) 존반경 라이브튜닝 CVar `FPSR.Mission.ZoneRadius`+기본 400→700.
-> **▶ 다음 코드 작업(비차단 후속, 우선순위순):**
-> 1. **밸런스 2차 원래 잔여 튜닝**(PIE 측정 의존): ② XP=보스5분 도달레벨 측정→`BP_EnemyBase.XPReward` 역산(공식 92,800/[(L−1)(L+2)], 현100) · ③ 스폰 페이스/밀도 미세조정(`DA_RunSchedule`, 리빌드X) · ④ P4-A 임시값 원복(미션 60/120/180→300/600/900·BossTime 300→1200) [[p4a-temp-test-values]].
-> 2. **플로우필드 데이터드리븐 바운드 볼륨**(현재 `FPSRFlowFieldSubsystem` HalfExtent 14000 하드코딩·원점중심 — 레벨 확장 시 한계) + clearance-aware 프로빙(좁은 도어웨이 대응, 현재 full-cell이라 ~2셀 미만 통로 막힐 수 있음).
+> **▶ 이번 세션(2026-06-25 b) 추가 완료 — 빌드 `Succeeded` + 헤드리스 스모크 `Result={Success}`, `balance/pass2` 3커밋 (설계 워크플로 3렌즈 적대검증 + Codex 플랜게이트 2블로커 반영):**
+> - **플로우필드 데이터드리븐 바운드 볼륨 + clearance-aware 프로빙** `a358450`(perf): 신규 `AFPSRFlowFieldBoundsVolume`(AActor+UBoxComponent 배치 박스→그리드 범위 데이터화, 콜리전0·non-replicated·에디터 빌보드), `GridDim`→`GridDimX/GridDimY`(비정사각, 전 참조 원자 치환), **볼륨 미배치=원점중심 14000 폴백 bit-identical**(140×140), 총셀곱(40000) 초과 시 **셀 크기 확대로 커버리지 보존**(클램프 아님=Codex 블로커2 반영). 점유 프로브 full-cell→**40cm 풋프린트** 축소(좁은 도어웨이 과차단 해소) + **셀 경계 엣지 박스오버랩 마스크**(`EdgeTraversable`, 경계벽 누수 차단) + **BFS·steepest-descent 양 루프** `IsEdgeTraversable` 게이트(블록셀 탈출 예외 유지=적대검증이 잡은 핵심픽스). `AgentFootprintRadius=40`은 적 캡슐(`FPSREnemyBase.cpp:22`) 결합.
+> - **스폰존 비활성화 볼륨** `6083768`(feat) + `3c30aa3`(docs, Enemy.md §2-6 — Codex 블로커1=설계 먼저 반영): `AFPSRSpawnRoom.TriggerMode{Activate,Deactivate}`(기본 Activate=**무회귀**) + `UFPSREnemySpawnSubsystem::DeactivateSpawnZone`(=`ActiveSpawnZones.RemoveTag`, `ActivateSpawnZone` 대칭). 같은태그 대칭 **1볼륨=1존**(사용자 확정). 누적=기본·비활성화=디자이너 명시. Deactivate룸 자동태깅X·`bActiveAtStart`(EditConditionHides)·`ResetSpawnZones` 재활성은 Activate만. [[balance-pass2-room-spawn]]
+> **▶ 다음 코드 작업(비차단 후속):**
+> 1. **밸런스 2차 잔여 튜닝 = 전부 콘텐츠/PIE = 사용자**(코드 아님): ② XP=보스5분 도달레벨 측정→`BP_EnemyBase.XPReward` 역산(공식 92,800/[(L−1)(L+2)], 현100) · ③ 스폰 페이스(`DA_RunSchedule`, 리빌드X) · ④ P4-A 임시값 원복(미션 60/120/180→300/600/900·BossTime 300→1200) — ⚠️**전환 시 노티 후 원복**, 지금 원복하면 보스 5→20분이라 PIE 지연 [[p4a-temp-test-values]].
+> 2. (선택·후속) 플로우필드 멀티레벨/높이인지 프로빙(현재 단일 Z밴드 `GridOrigin.Z+120`±60 — 다층 맵 시) + 바운드 볼륨 explicit-Z 앵커 옵션(현재 Z=PlayerStart 트레이스 유지).
 > **블로커/주의:**
 > - `balance/pass2` **미머지** — 사용자 PIE 전체검증(룸 플로우·문 단계연출·Chaos 무너짐·미션존·히트마커) 후 main `--no-ff` 머지 결정.
 > - **문틀(SM_SM_WallDoor)이 바닥 개구부를 Y≈0~600으로 좁힘** — 플로우필드 수정 후에도 병목이면 문틀 넓히기/제거(칸막이+문으로 이미 넓은 도어웨이 존재)=레벨 콘텐츠 작업.
 > - PIE 확인 포인트: 미션존 `FPSR.Mission.ZoneRadius`로 적정값 찾아 기본값 확정 / Chaos 파편이 NoCollision에서 안 떨어지면 `PhysicsOnly` 전환([[balance-pass2-room-spawn]]) / 문 내구도 3600(≈37.5초 연사) 과하면 하향.
+> - **이번 세션 신규 PIE 확인**: (a) 좁은 도어웨이에서 적이 안 끼고 통과하는지(clearance 40cm 풋프린트, 문틀 Y≈0~600 통로) · 얇은 벽 관통(누수) 없는지 / (b) `AFPSRFlowFieldBoundsVolume` 배치 시 그리드가 맵을 덮는지(`[FlowField] Grid …` 로그, 미배치여도 14000 폴백 동작) / (c) Deactivate 룸 진입 시 그 존 스폰만 멈추고 기존 적은 유지되는지.
 > **미커밋 콘텐츠(사용자 작업으로 남김)**: `Content/Maps/L_Sandbox.umap`(문 배치·GC·룸) · `Content/Assets/.../M_col_{A,B,D}_ORIG.uasset`(ZerinLabs 머티리얼 처닝) · `Config/DefaultEditor.ini`(스푸리어스).
+> **선택 콘텐츠 저작(사용자, 코드는 폴백으로 무배치 동작)**: ① `AFPSRFlowFieldBoundsVolume` 1개를 L_Sandbox 플레이 영역에 배치(박스를 맵 전체로 사이징; 미배치=원점중심 14000 폴백) · ② 특정 방 스폰을 끄고 싶으면 `BP_SpawnRoom`(부모 `AFPSRSpawnRoom`) 인스턴스의 `TriggerMode=Deactivate`+대상 `RoomTag` 설정해 배치.
 
 ## ✅ 밸런스 1차 패스 + PIE 2R (사용자 스펙 2026-06-24) — **`balance/pass1` → main `--no-ff` 머지 완료. 후속 튜닝 = 새 브랜치 `balance/pass2`**
 > **재개 = `Docs/BalanceTuning_Reference.md`(조절가능 전수치 카탈로그) + 아래 "남은 튜닝". 재튜닝 = 헤드리스 `-run=pythonscript`(에디터 닫고) 또는 VibeUE.** 별도 미완 = W1 dash 픽스 `fix/w1-loop-20260623`(아래).
