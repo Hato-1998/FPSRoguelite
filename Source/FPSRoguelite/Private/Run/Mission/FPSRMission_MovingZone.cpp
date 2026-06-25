@@ -44,6 +44,7 @@ void AFPSRMission_MovingZone::OnMissionTickServer(float DeltaSeconds)
 
 	// Occupancy: any player within ZoneRadius (2D) of the current point accumulates hold time.
 	const FVector ZoneLoc = GetActorLocation();
+	const float Radius = ResolveZoneRadius(ZoneRadius); // live-tunable via FPSR.Mission.ZoneRadius
 	bool bPlayerPresent = false;
 	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
 	{
@@ -51,7 +52,7 @@ void AFPSRMission_MovingZone::OnMissionTickServer(float DeltaSeconds)
 		{
 			if (APawn* PlayerPawn = PC->GetPawn())
 			{
-				if (FVector::DistSquared2D(ZoneLoc, PlayerPawn->GetActorLocation()) <= ZoneRadius * ZoneRadius)
+				if (FVector::DistSquared2D(ZoneLoc, PlayerPawn->GetActorLocation()) <= Radius * Radius)
 				{
 					bPlayerPresent = true;
 					break;
@@ -86,6 +87,6 @@ void AFPSRMission_MovingZone::OnMissionTickServer(float DeltaSeconds)
 	SetMissionProgress(FMath::Clamp((CurrentPoint + PerPoint) / static_cast<float>(Points.Num()), 0.0f, 1.0f));
 
 #if ENABLE_DRAW_DEBUG
-	DrawDebugCylinder(World, ZoneLoc, ZoneLoc + FVector(0.0f, 0.0f, 200.0f), ZoneRadius, 32, FColor::Cyan, false, 0.0f);
+	DrawDebugCylinder(World, ZoneLoc, ZoneLoc + FVector(0.0f, 0.0f, 200.0f), Radius, 32, FColor::Cyan, false, 0.0f);
 #endif
 }

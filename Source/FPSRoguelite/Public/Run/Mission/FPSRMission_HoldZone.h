@@ -15,7 +15,7 @@ public:
 	AFPSRMission_HoldZone();
 
 	UPROPERTY(EditDefaultsOnly, Category = "Mission|HoldZone")
-	float ZoneRadius = 400.0f;
+	float ZoneRadius = 700.0f;
 
 	UPROPERTY(EditDefaultsOnly, Category = "Mission|HoldZone")
 	float RequiredHoldSeconds = 30.0f;

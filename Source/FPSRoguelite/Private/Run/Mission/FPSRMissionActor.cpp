@@ -6,6 +6,14 @@
 #include "Engine/World.h"
 #include "Net/UnrealNetwork.h"
 #include "Net/Core/PushModel/PushModel.h"
+#include "HAL/IConsoleManager.h"
+
+// Live tuning: override the authored hold/moving mission zone radius from the console during PIE
+// (`FPSR.Mission.ZoneRadius 800`). <= 0 = use each mission's authored ZoneRadius. Designers iterate without recompiling.
+static TAutoConsoleVariable<float> CVarMissionZoneRadius(
+	TEXT("FPSR.Mission.ZoneRadius"), -1.0f,
+	TEXT("Override mission hold/moving zone radius (cm) for live tuning. <= 0 = use the mission's authored ZoneRadius."),
+	ECVF_Cheat);
 
 AFPSRMissionActor::AFPSRMissionActor()
 {
@@ -71,6 +79,12 @@ void AFPSRMissionActor::SetMissionProgress(float NewProgress)
 
 	MissionProgress = FMath::Clamp(NewProgress, 0.0f, 1.0f);
 	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRMissionActor, MissionProgress, this);
+}
+
+float AFPSRMissionActor::ResolveZoneRadius(float InRadius) const
+{
+	const float Override = CVarMissionZoneRadius.GetValueOnGameThread();
+	return Override > 0.0f ? Override : InRadius;
 }
 
 void AFPSRMissionActor::Tick(float DeltaSeconds)

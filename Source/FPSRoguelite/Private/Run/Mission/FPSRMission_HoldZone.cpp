@@ -27,6 +27,7 @@ void AFPSRMission_HoldZone::OnMissionTickServer(float DeltaSeconds)
 	// Check if any player pawn is within the zone
 	bool bPlayerPresent = false;
 	FVector MissionLoc = GetActorLocation();
+	const float Radius = ResolveZoneRadius(ZoneRadius); // live-tunable via FPSR.Mission.ZoneRadius
 
 	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
 	{
@@ -36,7 +37,7 @@ void AFPSRMission_HoldZone::OnMissionTickServer(float DeltaSeconds)
 			{
 				FVector PlayerLoc = PlayerPawn->GetActorLocation();
 				float DistSq = FVector::DistSquared2D(MissionLoc, PlayerLoc);
-				if (DistSq <= (ZoneRadius * ZoneRadius))
+				if (DistSq <= (Radius * Radius))
 				{
 					bPlayerPresent = true;
 					break;
@@ -63,7 +64,7 @@ void AFPSRMission_HoldZone::OnMissionTickServer(float DeltaSeconds)
 		World,
 		MissionLoc,
 		MissionLoc + FVector(0, 0, 200.0f),
-		ZoneRadius,
+		Radius,
 		32,
 		FColor::Green,
 		false,
