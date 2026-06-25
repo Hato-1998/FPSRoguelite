@@ -36,6 +36,9 @@ Build/*/**
 !Build/*/PakBlacklist*.txt
 !Build/**/*.ico
 
+# Packaged builds (BuildCookRun -archivedirectory) — large cooked artifacts, never tracked
+Packaged/
+
 # =============================================================================
 # UE5 Content
 # =============================================================================
