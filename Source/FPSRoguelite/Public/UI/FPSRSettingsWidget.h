@@ -20,6 +20,9 @@ class FPSROGUELITE_API UFPSRSettingsWidget : public UCommonActivatableWidget
 {
 	GENERATED_BODY()
 
+public:
+	UFPSRSettingsWidget();
+
 protected:
 	virtual void NativeOnInitialized() override;
 	virtual void NativeOnActivated() override;

@@ -8,6 +8,13 @@
 #include "CommonInputModeTypes.h"
 #include "Engine/World.h"
 
+UFPSRSettingsWidget::UFPSRSettingsWidget()
+{
+	// Handle CommonUI Back (Esc / gamepad-back) → deactivate. Without this the overlay opened via IA_Menu could
+	// only be closed by clicking the optional BackButton (Codex merge gate P2).
+	bIsBackHandler = true;
+}
+
 void UFPSRSettingsWidget::NativeOnInitialized()
 {
 	Super::NativeOnInitialized();
@@ -16,9 +23,11 @@ void UFPSRSettingsWidget::NativeOnInitialized()
 	{
 		MasterVolumeSlider->SetMinValue(0.0f);
 		MasterVolumeSlider->SetMaxValue(1.0f);
-		// OnValueChanged = live drag (apply, no save). OnMouseCaptureEnd = release (persist). Both dynamic.
+		// OnValueChanged = live drag (apply, no save). Capture-end = release → persist. Bind BOTH the mouse and
+		// the controller/keyboard capture-end events so gamepad/keyboard adjustments are saved too (Codex P2).
 		MasterVolumeSlider->OnValueChanged.AddDynamic(this, &UFPSRSettingsWidget::HandleMasterVolumeChanged);
 		MasterVolumeSlider->OnMouseCaptureEnd.AddDynamic(this, &UFPSRSettingsWidget::HandleMasterVolumeCommitted);
+		MasterVolumeSlider->OnControllerCaptureEnd.AddDynamic(this, &UFPSRSettingsWidget::HandleMasterVolumeCommitted);
 	}
 
 	if (BackButton)
