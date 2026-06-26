@@ -387,45 +387,39 @@ Game.md + PROGRESS.md 먼저 읽어. Docs/TaskPrompts_Master.md의 유닛 U4를 
 완료 시: PROGRESS 갱신+✅ + 사용자 콘텐츠 동반 커밋 질문 + --no-ff 머지. → 다음 = W1 전체 검증.
 ```
 
-### W1 — 전체 프로젝트 정합 검증 (루프 엔지니어링: Claude×Codex 토론-교정 자율 루프)
+### W1 — 전체 정합 검증 (반복 게이트, 자율 Claude×Codex 토론-교정 루프)
 
-> **1차 W1 완료**(`Docs/codex-reviews/full-audit-2026-06-21.md`, bd44939 시점): **P1 0건·P2 4건(전부 교정·머지 `fix/w1-audit-corrections`→main)·P3 7건(5 교정·보류 P3-4/P3-5)**. 코드베이스 매우 양호, 최근추가분(Boss/·Card v2·U18c 훅) 무결.
-> **이 유닛 = 2차 자율 루프**(사용자 지시 2026-06-23): ① 1차 이후 추가된 미감사 델타(④b 크로스헤어 C++·VAT 적 배선·보스 메시) + ② 보류 P3 + ③ 적대적 홀리스틱 재검을 **Claude×Codex 토론-교정 자율 루프**로. 사용자는 **최종 검증·개선 결과만** 받는다(중간 보고 없음). main 머지만 승인 게이트.
+> **1차**(`full-audit-2026-06-21`, bd44939: P1 0·P2 4·P3 7 — 교정 머지) + **2차 루프**(`full-audit-loop-20260623`, c59d80e: P2 1·P3 1 — 대시 프리즈 갭 교정·머지 `411bcf8`) 완료. 코드베이스 매우 양호.
+> **이 유닛 = 3차 자율 루프**(사용자 지시 2026-06-26): 2차(c59d80e) 이후 머지된 **balance/pass2(문/Chaos·룸 스폰·플로우필드 데이터드리븐·스폰존 비활성화)+오디오 설정** = **52파일/+1940줄, 5 신규 클러스터 미감사**. Claude×Codex 토론-교정 자율 루프. 사용자는 **최종 결과만** 받고 main 머지만 승인.
 
 ```
-Game.md + PROGRESS.md + Docs/TaskPrompts_Master.md(§A·§B·W1) + Docs/codex-reviews/full-audit-2026-06-21.md(1차 결과) 먼저 읽어. 이 세션은 **W1 2차 전수검증을 자율 루프(Claude×Codex 토론-교정)로** 수행한다. 사용자는 최종 통합 리포트+적용결과만 받는다(중간 개입 없이 자율 진행). 단 main 머지는 최종 승인 게이트.
+[복붙: W1 3차 전수검증 — 자율 Claude×Codex 토론-교정 루프. 사용자 중간개입 없이 수렴까지 진행하고, 최종 통합 리포트 1메시지 + main 머지 승인 요청만 한다.]
 
-[자율/안전 계약 — 사용자 승인 2026-06-23]
-- 자율: 검증→Codex 토론→P1/P2 교정 적용→빌드/스모크 게이트→재검증 루프를 **사용자 중간개입 없이** 수렴까지 진행. 최종에 통합 리포트+적용결과만 1메시지로 제시.
-- 게이트(절대): ① 모든 교정은 `fix/w1-loop-<날짜>` 브랜치에만(main 직접·머지 자율 금지) ② 각 교정 후 빌드(-WaitMutex)+헤드리스 스모크 그린 필수, 깨지면 즉시 수정/롤백 ③ **main 머지 = 최종 리포트 후 사용자 승인** ④ force-push·--no-verify·hook 스킵·main 직접커밋 금지 ⑤ P1/P2만 자동교정, P3는 백로그(트리비얼+무회귀 확실 시만 적용, 아니면 리스트만).
-- 모델: 구현=Haiku 위임 / 검증·토론판정·보안배선=Opus 직접(§6-5). [[haiku-delegation-security-wiring]] [[plan-codex-comparison-gate]] [[codex-gate-5min-watchdog]]
+■ 먼저 읽기: Game.md + PROGRESS.md + Docs/TaskPrompts_Master.md(§A·§B·W1) + Docs/codex-reviews/full-audit-2026-06-21.md(1차) + full-audit-loop-20260623.md(2차). 두 감사가 확정한 수용설계·방법론·보류항목 흡수.
 
-[스코프 — 1차가 안 본 것 우선]
-1. **델타(최우선)**: `git diff --name-only bd44939..HEAD -- 'Source/**'`로 1차 이후 추가 C++ 식별. 핵심=④b 동적 크로스헤어(`FPSRWeaponDataAsset`·`FPSRWeaponFireComponent`·`FPSRRunHUDWidget`·`FPSRGA_WeaponFire_Hitscan`)·분산공식 SSOT. 1차 미포함.
-2. **콘텐츠 배선 검증**: VAT 적(`BP_EnemyBase` Mesh CDO 스왑·`M_BroBot_VAT` MI)·보스 메시(Prime_Helix→BP_Boss)·미니언 facing/scale — C++/CDO 정합·서버권위·perf(적500 VAT 비용 §5).
-3. **보류 P3 재평가**: P3-4(`_Validate` 규약 noise)·P3-5(per-shot 할당=§5 측정 후).
-4. **적대적 홀리스틱 재검**: 1차 clean 영역도 Codex가 독립 의심. (1차 교훈=서브에이전트 과분류 경향 — P1 오탐을 Opus가 P2/non-issue로 강등한 이력 多. 이번엔 토론으로 처음부터 정밀 severity 분류.)
+■ 베이스라인(2026-06-26): 현 main HEAD=747a9b2. 2차 감사=c59d80e. **3차 스코프 = `git diff --name-only c59d80e..HEAD -- 'Source/**'` (52파일/+1940줄)** = balance/pass2(`d285c69`)+오디오 설정(`747a9b2`). **1차/2차가 본 것(크로스헤어·VAT·보스메시·카드 v2 코어·기존 5데미지경로)은 재검 제외 — 아래 신규 5클러스터에 집중.**
 
-[검증 체크리스트 — 1차 8항목 유지(델타에 한정 재확인)]
-1. 장르 3원칙(스웜 적 GAS/ASC·StateTree·NavMesh·적별 비용 — VAT 적도 경량 유지 확인). 2. 서버 권위(데미지/스폰/카드/XP/탄약·클라 RPC 검증). 3. Push Model(`DOREPLIFETIME_WITH_PARAMS_FAST`+`MARK_PROPERTY_DIRTY`). 4. 전역 프리즈 대칭(§2-2, 전 행동경로 클라+서버 양게이트·FTimerHandle PauseTimer·bRunEnded 래치). 5. 콜리전/채널(ECC_FPSRPlayerPawn 양채널·보스 ECC_Pawn·약점 ECC_FPSRWeakpoint·바닥 WorldStatic). 6. 하드코딩/임시/TODO grep. 7. 수치(FF=50%·임시 스케줄/BossTime=U14 미원복). 8. **알려진 수용설계 재보고 금지**: 관통+ExplosiveRounds 1회폭발 / ChargeLaser 프리즈·Finding A / 보스 WBP 범용 EnemyHealthComponent 바인딩 / 보스 C++ 폴백 DefaultMaxHealth / U18 Instanced 효과 직렬화 / bJustKilled / 보스 킬=무기 OnKill 발화(의도) / OnStatusKill·상태창·elemental=빈 시임 / 카드 v2 레거시 DeprecatedProperty 잔존 / VAT 머티리얼 CDO 바인딩.
+■ 자율/안전 계약(사용자 승인 2026-06-26):
+- 자율: 검증→Codex 토론→P1/P2 교정→빌드/스모크 게이트→재검증 루프를 **중간개입 없이** 수렴까지. 최종에 통합 리포트+적용결과만 1메시지.
+- 게이트(절대): ① 교정은 `fix/w1-loop-<날짜>` 브랜치에만(main 직접·머지 자율 금지) ② 각 교정 후 빌드(-WaitMutex)+헤드리스 스모크 그린 필수, 깨지면 즉시 수정/롤백 ③ **main 머지=최종 리포트 후 사용자 승인** ④ force-push·--no-verify·hook 스킵·main 직접커밋 금지 ⑤ P1/P2만 자동교정, P3=백로그(트리비얼+무회귀 확실 시만).
+- 모델: 구현=Haiku / 검증·토론판정·보안배선=Opus 직접(§6-5). [[haiku-delegation-security-wiring]] [[plan-codex-comparison-gate]] [[codex-gate-5min-watchdog]]
 
-[루프 — 수렴까지 반복]
-각 라운드(스코프 슬라이스별):
- a. **Claude(Opus) 검증**: 정적 대조 + 서브에이전트 증거수집(판정은 직접).
- b. **Codex 독립 리뷰(적대적)**: 같은 슬라이스를 `codex exec`(read-only, 절대경로 C:\Users\koras\AppData\Local\OpenAI\Codex\bin\codex.exe, -C 리포루트, -s read-only, -a never; PS5.1 주의) 또는 `Scripts/consult-codex.ps1`(ConsultLoop, Docs/ConsultLoop.md). **반박·누락 찾기 지시**.
- c. **토론·수렴**: Claude×Codex 소견 대조 → 오탐 필터(severity 강등/기각)·진짜 결함 확정. 이견은 코드 증거(file:line)로 판정. ConsultLoop 2라운드 수렴 패턴.
- d. 확정 결함 **P1/P2/P3 분류**.
- e. **P1/P2 교정** `fix/w1-loop-<날짜>` 적용(Haiku) → 빌드+스모크 게이트 → Opus diff 무회귀.
- f. 교정 영향면 재검(회귀 0).
- **루프 종료** = 신규 발견 0인 라운드 2연속(loop-until-dry) AND 전 스코프 커버 AND 전 P1/P2 교정·그린.
+■ 신규 5클러스터 스코프 (정찰 매핑 완료 — file:line 핫스팟 직행):
+① **문 파괴(Door/Chaos)** — `Door/FPSRDoor.{h,cpp}` + `Combat/FPSRCombatStatics.cpp:102-149`(unified ApplyDamage·bCountsAsKill 게이트) + `Weapon/FPSRProjectile.cpp:355-440`(IsHostileTarget). 핫스팟: Durability 150f/DamageStageThresholds 밸런스 정합 / late-joiner `BeginPlay:51-67` 권위無 cosmetic 동기(클라전용 검증) / `MARK_PROPERTY_DIRTY` 매 변경(:106,136) / IsHostileTarget가 HealthComponent로 문 판별(:365)→문 무조건 컴포넌트 보유 확인 / 프리즈 게이트=무기발사 진입에만(문 자체 無). 수용설계: 문=ECC_FPSRPlayerPawn 채널·EnemyHealthComponent(bCountsAsKill=false) 재사용·OnDoorBroken BP이벤트·문 자체 IsRunFrozen 無(무기게이트 의존).
+② **룸 스폰+비활성화** — `Enemy/FPSRSpawnRoom.{h,cpp}` + `Enemy/FPSREnemySpawnSubsystem.cpp:149-201,506-617` + `Run/FPSRRunDirectorSubsystem.cpp:166-264` + `RunScheduleDataAsset.h:49-108`. 핫스팟: `ResetSpawnZones`(런시작 누적 누수 방지) / TickDirector 보스페이즈 vs 프리즈 게이트 분리(:463-470 보스 스폰 stall 안 되는지) / 자동태깅 `TActorIterator` O(n) BeginPlay(:54-66) / `SetNetUpdateFrequency` 매 무브틱(:351) 스로틀 / 오프닝시드 dual-activate 엣지(:207-210). 수용설계: Room.bReplicates=false·ActiveSpawnZones 서버전용 비복제·존트리거 ECC_WorldDynamic×ECC_FPSRPlayerPawn·접촉뎀 패스당1회.
+③ **플로우필드 데이터드리븐** — `Enemy/FPSRFlowFieldSubsystem.cpp:35-127,302-474` + `Enemy/FPSRFlowFieldBoundsVolume.{h,cpp}`. 핫스팟(perf-critical 적500): FloorZ=PlayerStart 트레이스, 無이면 0.0f 기본(:43-54) / 셀 성장 math 커버리지 손실(:97-108) / FindNearestOpenCell LOS가 player.Z 직접→플랫폼 오판(:250-257) / AgentFootprintRadius 40cm 하드코딩 per-적타입 오버라이드無(:78) / BFS 전그리드 스캔 0.2s×40k셀 프레임예산(§5 Codex perf게이트). 수용설계: 프리즈 중 recompute 스킵(이동 게이트오프)·대각 코너컷 차단·바운드볼륨 옵셔널 발견·고정맵 가정.
+④ **오디오 설정(4클래스)** — `Audio/FPSRAudioSubsystem.{h,cpp}` + `Settings/FPSRGameUserSettings.{h,cpp}`·`FPSRAudioSettings.h` + `UI/FPSRSettingsWidget.{h,cpp}` + `Core/FPSRPlayerController.cpp:382-409` + `Hero/FPSRCharacter.cpp:452-460`. 핫스팟: WeakLambda OnDeactivated가 PC 파괴 후 발화 안전(:407) / 슬라이더 OnMouseCaptureEnd+OnControllerCaptureEnd 양쪽 저장(:28-30) / SoundMix 미할당 LoadSynchronous null 무음 no-op(:55-62) / GameUserSettingsClassName FSoftClassPath 해석. 수용설계: 로컬전용 코스메틱(복제無)·설정오버레이 프리즈/사망 중 접근가능(메뉴라 의도)·콘솔 클램프 다운스트림·NoCapture 입력모드.
+⑤ **미션존/카드/전투** — `Run/Mission/FPSRMission_HoldZone.cpp`·`FPSRMission_MovingZone.cpp`·`FPSRMissionActor.cpp:99-143` + `Card/FPSRCardSubsystem.cpp:76-335`·`FPSRCardEffect.cpp:43-54`·`FPSRCardDataAsset.cpp:46-140`. 핫스팟: 가중샘플 TotalWeight≈0 엣지 SelectedIndex 기본0(:203-214) / behavior-fragment 판별이 첫 효과만→혼합효과(behavior+magnitude) 오판(:172-186) / ResolveTargetInstance 위조 TargetWeapon 폴백 안티치트(:43-54) / CardFamily 런타임 검증 WITH_EDITOR-only(:85-86,136-140) / MovingZone 포인트캡처 복제 레이스(:70-82). 수용설계: 카드 등급=카드당1회 roll·효과별 magnitude독립(트레이드오프)·멀티효과 CardFamily 필수·클라 인덱스선택 안티치트·존반경 CVar 라이브튜닝·CardSelect 델리게이트 NativeDestruct 정리(2차 교정).
 
-[Codex 사용 — 한도 고려] 영역 분할·세션 분산(메모리 [[codex-review-gate]]). 적용 교정은 codex-review.ps1 -Base main 일괄. 5분 무출력=스킵 진행([[codex-gate-5min-watchdog]]). 영역 순서: ① Core/Run ② Enemy+Boss ③ Weapon+AbilitySystem(+크로스헤어 델타) ④ Card+UI ⑤ Hero/Pickup.
+■ 루프(수렴까지): 각 라운드 슬라이스별 — ⓐ Claude(Opus) 검증(정적대조+서브에이전트 증거, 판정 직접) → ⓑ Codex 독립 적대 리뷰(`codex exec` read-only, C:\Users\koras\AppData\Local\OpenAI\Codex\bin\codex.exe -C 리포루트 -s read-only -a never; PS5.1 / 또는 `Scripts/consult-codex.ps1`) "반박·누락 찾기" → ⓒ 토론 수렴(오탐 severity 강등/기각·진짜결함 file:line 확정) → ⓓ P1/P2/P3 분류 → ⓔ P1/P2 교정 `fix/w1-loop-<날짜>`(Haiku)+빌드+스모크 게이트+Opus diff 무회귀 → ⓕ 회귀 재검. **종료=신규 발견 0 라운드 2연속(loop-until-dry) AND 5클러스터 전부 커버 AND 전 P1/P2 그린.** Codex 한도: 영역 분할(①Door+Combat ②Enemy spawn/flowfield ③Run/Mission ④Audio/UI), 5분 무출력=스킵. 적용 교정 일괄 `codex-review.ps1 -Base main`.
 
-[최종 산출 — 사용자에게 이것만]
-- 통합 리포트 `Docs/codex-reviews/full-audit-loop-<날짜>.md`: 1차 대비 신규 발견·토론 수렴 근거·적용 교정(P1/P2)·P3 백로그·잔여.
-- `fix/w1-loop-<날짜>` 브랜치(교정 적용·빌드/스모크 그린).
-- **사용자에게 1메시지**: "W1 2차 루프 완료 — 발견 N건(P1 x/P2 y/P3 z), 교정 적용·빌드/스모크 그린, main 머지 승인 대기. [핵심 발견·개선 3~5줄 요약]." + 사용자 PIE 전체플로우(U4 ①~⑥) 재실행 의뢰.
-- 사용자 승인 → --no-ff main 머지 + PROGRESS·TaskPrompts §B ✅. 통과 후 U1 재미게이트 진입 가능 보고.
+■ 수용설계 재보고 금지(1·2차 확정 + 위 5클러스터 수용설계 전부): 관통+ExplosiveRounds 1회폭발 / ChargeLaser 프리즈·Finding A / 보스 EnemyHealthComponent 바인딩·폴백체력 / U18 Instanced 효과·DeprecatedProperty 잔존 / bJustKilled / 보스킬=무기 OnKill(의도) / OnStatusKill·상태창·elemental=빈시임 / VAT 머티 CDO / +위 ①~⑤ 각 수용설계.
+
+■ 최종 산출(사용자에게 이것만):
+- 통합 리포트 `Docs/codex-reviews/full-audit-loop2-<날짜>.md`(2차 대비 신규 발견·토론 수렴근거·적용 교정·P3 백로그·잔여).
+- `fix/w1-loop-<날짜>` 브랜치(빌드/스모크 그린).
+- **사용자에게 1메시지**: "W1 3차 루프 완료 — 발견 N건(P1 x/P2 y/P3 z), 교정 적용·빌드/스모크 그린, main 머지 승인 대기. [핵심 발견·개선 3~5줄]" + PIE 전체플로우(U4 ①~⑥ + 신규: 문 파괴·룸 진행 스폰·오디오 슬라이더) 재실행 의뢰.
+- 사용자 승인 → --no-ff main 머지 + PROGRESS·TaskPrompts §B W1 ✅. 통과 후 U1 재미게이트 진입 가능 보고.
 ```
 
 ### U1 — 재미 게이트(§7-5) + 성능 검증(§5) ※ V2와 같은 멀티 세팅에서 동시 진행
