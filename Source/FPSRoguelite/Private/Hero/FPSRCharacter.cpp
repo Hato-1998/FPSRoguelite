@@ -307,6 +307,10 @@ void AFPSRCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompo
 	{
 		EIC->BindAction(DashAction, ETriggerEvent::Started, this, &AFPSRCharacter::Input_Dash);
 	}
+	if (MenuAction)
+	{
+		EIC->BindAction(MenuAction, ETriggerEvent::Started, this, &AFPSRCharacter::Input_Menu);
+	}
 
 	// The pawn's input setup is the one hook guaranteed to run for the locally-controlled pawn after a travel
 	// possession (the swapped gameplay PC's own SetupInputComponent does NOT re-run, so its mapping context would
@@ -443,6 +447,16 @@ void AFPSRCharacter::Input_Dash(const FInputActionValue& Value)
 		Direction.Z = 0.0f;
 	}
 	ServerDash(Direction.GetSafeNormal());
+}
+
+void AFPSRCharacter::Input_Menu(const FInputActionValue& Value)
+{
+	// Settings overlay is intentionally available even while dead / during the freeze (it's a menu, not
+	// gameplay). The owning PC handles the push; CommonUI Back closes it.
+	if (AFPSRPlayerController* FPSRPC = Cast<AFPSRPlayerController>(GetController()))
+	{
+		FPSRPC->OpenSettingsOverlay();
+	}
 }
 
 void AFPSRCharacter::ServerEquipSlot_Implementation(int32 SlotIndex)

@@ -106,6 +106,8 @@ protected:
 	void Input_ADSPressed(const FInputActionValue& Value);
 	void Input_ADSReleased(const FInputActionValue& Value);
 	void Input_Dash(const FInputActionValue& Value);
+	/** Esc: open the settings overlay (delegates to the owning PC; non-pause overlay). */
+	void Input_Menu(const FInputActionValue& Value);
 
 	/** Server: equip a weapon slot (input is client-side; equip is server-authoritative). */
 	UFUNCTION(Server, Reliable)
@@ -210,6 +212,10 @@ protected:
 
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Input")
 	TObjectPtr<UInputAction> DashAction;
+
+	/** Esc — opens the settings overlay (non-pause). */
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Input")
+	TObjectPtr<UInputAction> MenuAction;
 
 	/** Server: end the dash window — restore Pawn collision blocking. */
 	void EndDash();

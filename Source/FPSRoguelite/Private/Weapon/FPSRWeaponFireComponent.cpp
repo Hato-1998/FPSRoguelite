@@ -8,6 +8,7 @@
 #include "Weapon/FPSRWeaponFragment.h"
 #include "Hero/FPSRCharacter.h"
 #include "Core/FPSRGameState.h"
+#include "Core/FPSRLogChannels.h" // LogFPSR (was relied on transitively via unity — make the dependency explicit, IWYU)
 
 #include "AbilitySystemComponent.h"
 #include "Engine/Engine.h"

@@ -19,6 +19,9 @@ class FPSROGUELITE_API AFPSRMenuPlayerController : public APlayerController
 public:
 	virtual void BeginPlay() override;
 
+	/** The local-player layout root (so the main menu widget can push the shared settings overlay to a layer). */
+	UFPSRPrimaryGameLayout* GetPrimaryLayout() const { return PrimaryLayout; }
+
 protected:
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|UI")
 	TSubclassOf<UFPSRPrimaryGameLayout> PrimaryLayoutClass;
