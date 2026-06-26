@@ -6,6 +6,13 @@
 
 **최종 갱신: 2026-06-26**
 
+## 🔔 핸드오프 (2026-06-26 d) — U1 패키지 준비 완료, 다음=U1 재미게이트(PIE 주도)
+> **이 세션(PM)**: W1 종결 반영 + **U1용 Development 패키지 빌드**(`Packaged/26_6_26_BuildTest_1/`, 소스 `b2c55d3`=net-freq 적500 perf 픽스 포함, `BUILD_INFO.txt` 동봉) + **U1 게이트 시트 커밋**(`Docs/U1_GateSheet.md`) + `GlobalDefaultGameMode` 경로 교정(쿡 경고 해소). 커밋 `6e9377a` push 완료. 빌드폴더 규약 메모리화(`Packaged/<YY_M_D>_BuildTest_<N>/`). main↔origin 동기화.
+> **다음 작업 = U1 재미게이트(코드 아님 — 사용자 PIE/Insights 주도)**: `Packaged/26_6_26_BuildTest_1/FPSRoguelite.exe` Standalone 실행 → ① G1 손맛/프리즈(B안 baseline)/사각/**적500 perf**(`stat unit`·`FPSR.EnemyTarget 500`·`FPSR.SpawnEnemies 200`) ② §5 성능 ③ V2 2-client(리슨서버 2인스턴스, FF·ChargeLaser). 판정 = `Docs/U1_GateSheet.md` 각 항목 합격/불합격/보류 기록 → `PROGRESS.md`+SSOT(§5 Performance·§7-5 Roadmap)+TaskPrompts §B U1 ✅. **G2(빌드 다양성)=보류**(상태이상 미구현, 거짓판정 위험).
+>   - **U1 불합격 시 후속 코드 유닛**: ③프리즈 불합격→하이브리드 프로토(일반 수치카드=비동기 Q/E) / ④적500 perf 불합격→§5 최적화(Push→RepGraph→Iris 순) / ①손맛 불합격→U15 무기애님 최우선.
+> **블로커/주의**: 현 패키지엔 GameMode 교정(`6e9377a`) 미포함(비차단, 4맵 World Settings GM 오버라이드)→**다음 빌드부터 쿡 경고 0**. 빌드 전 `git pull`로 main 최신 확인(패키지 코드=빌드 시점 HEAD). 빌드 규약 [[build-output-folder-convention]].
+> **미커밋 콘텐츠(사용자 작업으로 남김)**: `Config/DefaultEditor.ini`(에디터 상태) + `Content/Assets/Environment/ZerinLabs_lowpolyPack_SciFi/Materials/M_col_{A,B,D}_ORIG.uasset`(아트 원본) — 이번 작업과 무관.
+
 ## ✅ W1 3차 전체검증 루프 — **완료. main `--no-ff` 머지 `b2c55d3`**(2026-06-26 c)
 > **W1 종결**: 1·2·3차 반복 게이트 모두 통과. 3차 스코프=`c59d80e..eb6abb2` 신규 델타(52파일/+1940 = balance/pass2 룸스폰·문파괴·플로우필드 데이터드리븐 + 오디오 설정). 자율 Claude×Codex 토론-교정 루프(Opus 직접 정독 + Codex 4영역 적대리뷰 + **엔진 소스 대조**). **다음 = U1 재미게이트(§7-5)+성능검증(§5), V2 2-client 병행 가능.**
 > - **발견 6건 (P1:0 / P2:2 / P3:4)**. 교정=`fix/w1-loop-20260626`(`cd9ca73`) → main 머지 `b2c55d3`.
