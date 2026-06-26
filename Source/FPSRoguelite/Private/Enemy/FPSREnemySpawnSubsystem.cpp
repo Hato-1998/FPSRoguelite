@@ -348,7 +348,13 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 		else if (BestDistSq <= TierS2RadiusSq) { UpdateStride = 4; NetFreq = 5.0f;  }
 		else                                   { UpdateStride = 8; NetFreq = 2.0f;  }
 
-		Enemy->SetNetUpdateFrequency(NetFreq);
+		// Only push a net-update-frequency change when the LOD tier actually changed. AActor::SetNetUpdateFrequency
+		// (UE5.7) unconditionally broadcasts NetDriver->OnNetUpdateFrequencyChanged even when the value is unchanged,
+		// so calling it every movement pass for every enemy is a 500-enemy hot-path regression (W1 P2).
+		if (Enemy->GetNetUpdateFrequency() != NetFreq)
+		{
+			Enemy->SetNetUpdateFrequency(NetFreq);
+		}
 
 		// Contact attack: in horizontal range + within a vertical gap (no through-floor hits) + cooldown elapsed
 		// + the target player's attack-token budget allows. The XY nearest test ignores Z, so gate Z explicitly.
