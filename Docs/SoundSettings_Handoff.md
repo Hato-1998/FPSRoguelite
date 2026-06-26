@@ -61,3 +61,46 @@ VibeUE 연결 확인(127.0.0.1:8088, 에디터 열림+플러그인). C++ 빌드=
 ### 후속(선택)
 - 카테고리 볼륨(SFX/Music/UI): SC_Master 밑 자식 SoundClass + UFPSRGameUserSettings에 필드 추가 + WBP_Settings에 슬라이더 추가. 중앙 로직 무변경.
 - 기타 설정(해상도/그래픽/감도): UGameUserSettings가 이미 해상도/그래픽 보유 → WBP_Settings 탭 확장.
+
+---
+
+## ✅ 코드 페이즈 완료 (2026-06-26, 브랜치 `phase/audio-settings`)
+> **C++/config 전부 구현·검증 완료. 남은 것 = 콘텐츠 저작(에셋·WBP·입력·BP 디폴트) → PIE 검증 → main 머지.**
+- 커밋: `3a1476c` feat(audio) 코어 4클래스+배선+config / `0df34d5` fix(audio) Codex 머지게이트 P2 2건(컨트롤러 슬라이더 저장·Back 핸들러).
+- 검증: 빌드 Succeeded(에디터 닫고 UBT) + 헤드리스 스모크 `Result={Success}` + Codex 플랜게이트(2블로커 반영)·머지게이트(2 P2 교정) 통과.
+- 코드는 콘텐츠 미저작 상태에서도 **안전 no-op**(SoundMix/SoundClass 미설정 시 적용 스킵). 즉 지금 빌드/PIE는 깨지지 않으나, 마스터 볼륨이 실제로 들리려면 아래 콘텐츠가 필요.
+
+### 신규 C++ 심볼 (콘텐츠가 참조할 것)
+- `UFPSRSettingsWidget`(UI 베이스) — BindWidget: `MasterVolumeSlider`(USlider, **필수**) / BindWidgetOptional: `MasterVolumeValueText`(CommonTextBlock), `BackButton`(CommonButtonBase). bIsBackHandler=true(Esc/back로 닫힘).
+- `AFPSRPlayerController::SettingsWidgetClass`(EditDefaultsOnly) — 인게임 오버레이 클래스.
+- `AFPSRCharacter::MenuAction`(EditDefaultsOnly UInputAction) — Esc 입력(IA_Menu).
+- `UFPSRMainMenuWidget::SettingsButton`(BindWidgetOptional CommonButtonBase) + `SettingsWidgetClass`(EditDefaultsOnly) — 메뉴 Settings 버튼.
+- config는 `/Game/Audio/SC_Master`·`/Game/Audio/SMix_Master` 경로를 이미 가리킴(DefaultEngine.AudioSettings.DefaultSoundClassName + DefaultGame.FPSRAudioSettings) — **이 경로/이름 그대로 저작**.
+
+---
+
+## ▶ 콘텐츠 저작 핸드오프 프롬프트 (새 세션 첫 메시지로 붙여넣기 — 에디터 켜고 VibeUE 재연결)
+
+```
+사운드 설정 콘텐츠 저작 — 브랜치 phase/audio-settings(코드 완료, 커밋 3a1476c·0df34d5). 에디터 열고 VibeUE(127.0.0.1:8088, 플러그인 활성) 재연결 후 진행. 안 되면 사용자 수동.
+
+[먼저 읽기] Docs/SoundSettings_Handoff.md(이 문서, "코드 페이즈 완료"+"신규 C++ 심볼") + Game.md §9(UE5.7 IMC 매핑 수동) + 메모리 [[vibeue-mcp-capabilities]]/[[vibeue-render-target-gpu-hazard]](위젯 컨테이너 프로그래매틱 compile/save 손상 위험 주의).
+
+[목표] 코드가 참조하는 오디오/입력/UI 콘텐츠를 저작해 마스터 볼륨을 실제로 들리게+조절가능하게.
+
+[저작 목록]
+1. /Game/Audio/SC_Master (USoundClass, 신규) + /Game/Audio/SMix_Master (USoundMix, 신규·빈 채로 OK — 오버라이드는 SetSoundMixClassOverride가 런타임 주입). 경로/이름 정확히(config가 이미 가리킴).
+2. 기존 Content/Assets/LowPolyAnimatedModernGuns/Audio/_Common/SC_LPAMG_Master 의 ParentClass를 SC_Master로 reparent(총기 SFX도 마스터 경유).
+3. IA_Menu (UInputAction, value_type=Bool) 생성(/Game/Input, Scripts/gen_input_assets.py 패턴) + IMC_Default에 Esc→IA_Menu 매핑. ⚠️ UE5.7은 Python으로 IMC 키매핑이 안 박히니 에디터에서 수동 1스텝(Game.md §9).
+4. WBP_Settings (CommonActivatableWidget, 부모=UFPSRSettingsWidget) 신규(/Game/UI 권장): USlider 이름 MasterVolumeSlider(필수) + CommonTextBlock MasterVolumeValueText(옵션) + CommonButtonBase BackButton(옵션). 슬라이더 Min/Max는 코드가 0~1로 세팅.
+5. WBP_MainMenu(Content/UI/Menu/)에 CommonButtonBase 이름 SettingsButton 추가 + 위젯 디폴트 SettingsWidgetClass=WBP_Settings.
+6. BP 디폴트 배선: BP_FPSRPC(부모 AFPSRPlayerController) → SettingsWidgetClass=WBP_Settings / BP_FPSRPlayer(부모 AFPSRCharacter) → MenuAction=IA_Menu.
+
+[검증 PIE]
+- 콘솔 FPSR.SetMasterVolume 0 / 0.5 / 1 → 볼륨 실제 변동.
+- 0.5로 두고 에디터/게임 재시작 → 영속(Saved/Config/.../GameUserSettings.ini의 [/Script/FPSRoguelite.FPSRGameUserSettings] MasterVolume).
+- 메인메뉴 Settings 버튼 → WBP_Settings 열림, 슬라이더 조절 시 % 갱신·볼륨 변동, Back/Esc로 닫힘.
+- 인게임 Esc → 오버레이 열림(게임 안 멈춤=협동), 슬라이더 동작, Esc/Back 닫힘. 패드 슬라이더도 저장되는지.
+
+[머지] 콘텐츠 동반 커밋(content: …) + 빌드/스모크 재확인 불요(C++ 무변경) → main --no-ff 머지 + 브랜치 정리. PROGRESS 갱신.
+```
