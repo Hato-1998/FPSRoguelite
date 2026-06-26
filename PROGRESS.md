@@ -6,6 +6,16 @@
 
 **최종 갱신: 2026-06-26**
 
+## ✅ W1 3차 전체검증 루프 — **완료. main `--no-ff` 머지 `b2c55d3`**(2026-06-26 c)
+> **W1 종결**: 1·2·3차 반복 게이트 모두 통과. 3차 스코프=`c59d80e..eb6abb2` 신규 델타(52파일/+1940 = balance/pass2 룸스폰·문파괴·플로우필드 데이터드리븐 + 오디오 설정). 자율 Claude×Codex 토론-교정 루프(Opus 직접 정독 + Codex 4영역 적대리뷰 + **엔진 소스 대조**). **다음 = U1 재미게이트(§7-5)+성능검증(§5), V2 2-client 병행 가능.**
+> - **발견 6건 (P1:0 / P2:2 / P3:4)**. 교정=`fix/w1-loop-20260626`(`cd9ca73`) → main 머지 `b2c55d3`.
+> - **▶ P2-1 (perf, #1 리스크 경로)**: `FPSREnemySpawnSubsystem.cpp:351` — 적 LOD net-frequency를 매-이동패스마다 전 적에 `SetNetUpdateFrequency` 호출. **엔진소스 확인**(`Actor.cpp:6907`): UE5.7 setter는 값 불변에도 `NetDriver->OnNetUpdateFrequencyChanged`를 무조건 브로드캐스트 → 적500×fps churn. **교정**: `GetNetUpdateFrequency() != NetFreq` 가드(티어 변경 시에만).
+> - **▶ P2-2 (게임플레이)**: 비-프리즈 설정 오버레이를 풀오토 발사 중 Esc로 열면 메뉴가 입력 캡처→트리거 릴리즈 미도달→**무기 연사/조준 래치**. **교정**: `FPSRCharacter::Input_Menu`가 오버레이 전 `StopFiring()`+`SetAiming(false)`+`ServerSetAiming(false)`(클라 로컬, `Input_FireReleased/ADSReleased` 미러).
+> - **▶ P3 백로그 4건(미교정)**: ① 문 OnRep 등록순서(치명타 시 클라 크랙 VFX가 파괴 뒤 — 코스메틱) ② `AliveCountByLevel` 앵커 오름차순 IsDataValid 누락(기획자 footgun) ③ `CardEffect_CharacterGE::CanApply` GE-null 미체크→무효 카드가 픽 소모(콘텐츠-게이트, IsDataValid 경고만) ④ 문 명중이 OnMiss/AmmoOnMiss 발화(디자인 결정 필요).
+> - **검증**: 빌드 `Succeeded` + 헤드리스 스모크 `Result={Success}` + Codex 머지게이트 무이슈 + **사용자 PIE 통과**(U4 ①~⑥ + 문파괴·룸진행스폰·오디오슬라이더·발사래치).
+> - **리포트**: `Docs/codex-reviews/full-audit-loop2-20260626.md`(gitignore). 1·2차 확정 수용설계(크로스헤어·VAT·보스메시·카드 v2 코어·5데미지경로) 재검 제외.
+> - **브랜치 정리**: `fix/w1-loop-20260626` 머지 후 삭제. 로컬·원격 `main` 단독.
+
 ## ✅ 사운드 설정(마스터 볼륨) — **완료. PIE 통과 + main `--no-ff` 머지**(2026-06-26 b)
 > **마스터 볼륨 MVP 닫힘**: 메인메뉴 Settings + 인게임 Esc 논-포즈 오버레이, SoundClass+SoundMix 표준, 확장(SFX/Music/UI)=자식 SoundClass 추가만. 코드(`3a1476c`·`0df34d5`)+콘텐츠 저작(`4a6dbf3`·`0baad37`) 전부 완료, **사용자 PIE 통과**.
 > - **▶ 콘텐츠 저작(`4a6dbf3` content(audio), VibeUE Python, 신규 C++ 0)**: ① `/Game/Audio/SC_Master`(USoundClass)+`SMix_Master`(USoundMix) 신규(config 경로 정확 일치) ② `SC_LPAMG_Master`→SC_Master reparent(parent+child 양방향=총기 SFX 마스터 경유) ③ `IA_Menu`(Bool)+**IMC_Default Esc→IA_Menu 자동영속**(핸드오프 "수동" 예정이었으나 `InputService.add_key_mapping`이 디스크 강제리로드 후에도 영속 확인=수동 불요, [[vibeue-mcp-capabilities]]) ④ `WBP_Settings`(부모 UFPSRSettingsWidget: MasterVolumeSlider 필수+MasterVolumeValueText CommonTextBlock 옵션, 컴파일 0/0) ⑤ `WBP_MainMenu`+`SettingsButton`(=WBP_PlayButton 복제·라벨 "Settings")+SettingsWidgetClass ⑥ `BP_FPSRPC.SettingsWidgetClass`·`BP_FPSRPlayer.MenuAction` CDO. 정적 11/11 PASS.
