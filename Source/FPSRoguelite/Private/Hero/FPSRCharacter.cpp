@@ -451,6 +451,17 @@ void AFPSRCharacter::Input_Dash(const FInputActionValue& Value)
 
 void AFPSRCharacter::Input_Menu(const FInputActionValue& Value)
 {
+	// Release any held fire/ADS before opening the menu. The settings overlay is a NON-PAUSE Menu overlay, so once
+	// it captures UI input the trigger-release IA never reaches Input_FireReleased/Input_ADSReleased — the
+	// locally-latched bWantsToFire/aim would otherwise persist and the weapon would keep auto-firing while the menu
+	// is open (W1 P2). Mirrors Input_FireReleased + Input_ADSReleased.
+	if (WeaponFire)
+	{
+		WeaponFire->StopFiring();
+		WeaponFire->SetAiming(false);
+	}
+	ServerSetAiming(false);
+
 	// Settings overlay is intentionally available even while dead / during the freeze (it's a menu, not
 	// gameplay). The owning PC handles the push; CommonUI Back closes it.
 	if (AFPSRPlayerController* FPSRPC = Cast<AFPSRPlayerController>(GetController()))
