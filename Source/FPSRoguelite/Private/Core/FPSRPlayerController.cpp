@@ -379,6 +379,35 @@ void AFPSRPlayerController::ClientDismissCardUI_Implementation()
 	ActiveCardWidget = nullptr;
 }
 
+void AFPSRPlayerController::OpenSettingsOverlay()
+{
+	if (!IsLocalController())
+	{
+		return; // UI + local audio settings are owner-local only (Codex plan gate: local-controller guard)
+	}
+	if (ActiveSettingsWidget)
+	{
+		return; // already open — don't push a second copy (CommonUI Back pops the existing one)
+	}
+	if (!EnsurePrimaryLayout() || !SettingsWidgetClass)
+	{
+		UE_LOG(LogFPSR, Warning, TEXT("[UI] Cannot open settings overlay (PrimaryLayout/SettingsWidgetClass missing)"));
+		return;
+	}
+
+	// GameMenu layer = non-pause overlay above the HUD. The run keeps running (4-player coop, §2-2 freeze is
+	// card-select only and unrelated).
+	UCommonActivatableWidget* Pushed =
+		PrimaryLayout->PushWidgetToLayer(FGameplayTag::RequestGameplayTag(FName("UI.Layer.GameMenu")), SettingsWidgetClass);
+	ActiveSettingsWidget = Pushed;
+
+	if (Pushed)
+	{
+		// Clear the guard when the widget pops itself (Back button / CommonUI Back action) so it can reopen.
+		Pushed->OnDeactivated().AddWeakLambda(this, [this]() { ActiveSettingsWidget = nullptr; });
+	}
+}
+
 void AFPSRPlayerController::ClientNotifyHitMarker_Implementation(EFPSRHitMarkerType MarkerType)
 {
 	if (APawn* ControlledPawn = GetPawn())

@@ -2,8 +2,13 @@
 
 #include "UI/FPSRMainMenuWidget.h"
 #include "Core/FPSRSessionSubsystem.h"
+#include "Core/FPSRMenuPlayerController.h"
+#include "Core/FPSRLogChannels.h"
+#include "UI/FPSRPrimaryGameLayout.h"
+#include "CommonActivatableWidget.h"
 #include "CommonButtonBase.h"
 #include "CommonInputModeTypes.h"
+#include "GameplayTagContainer.h"
 #include "Kismet/KismetSystemLibrary.h"
 
 UFPSRMainMenuWidget::UFPSRMainMenuWidget()
@@ -20,6 +25,11 @@ void UFPSRMainMenuWidget::NativeOnInitialized()
 	if (PlayButton)
 	{
 		PlayButton->OnClicked().AddUObject(this, &UFPSRMainMenuWidget::HandlePlayClicked);
+	}
+
+	if (SettingsButton)
+	{
+		SettingsButton->OnClicked().AddUObject(this, &UFPSRMainMenuWidget::HandleSettingsClicked);
 	}
 
 	if (QuitButton)
@@ -44,6 +54,26 @@ void UFPSRMainMenuWidget::HandlePlayClicked()
 			Session->HostSession(4);
 		}
 	}
+}
+
+void UFPSRMainMenuWidget::HandleSettingsClicked()
+{
+	if (!SettingsWidgetClass)
+	{
+		UE_LOG(LogFPSR, Warning, TEXT("[Menu] SettingsWidgetClass is not assigned"));
+		return;
+	}
+
+	const AFPSRMenuPlayerController* MenuPC = Cast<AFPSRMenuPlayerController>(GetOwningPlayer());
+	UFPSRPrimaryGameLayout* Layout = MenuPC ? MenuPC->GetPrimaryLayout() : nullptr;
+	if (!Layout)
+	{
+		UE_LOG(LogFPSR, Warning, TEXT("[Menu] No PrimaryLayout to push the settings overlay"));
+		return;
+	}
+
+	// Push onto the Menu layer (above the main menu); the settings widget's Back action pops back to the menu.
+	Layout->PushWidgetToLayer(FGameplayTag::RequestGameplayTag(FName("UI.Layer.Menu")), SettingsWidgetClass);
 }
 
 void UFPSRMainMenuWidget::HandleQuitClicked()

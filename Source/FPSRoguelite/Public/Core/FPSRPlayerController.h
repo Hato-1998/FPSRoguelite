@@ -119,6 +119,12 @@ public:
 	UFUNCTION(Server, Reliable)
 	void ServerRequestReturnToLobby();
 
+	/** Local (owner): open the settings overlay on the GameMenu layer (idempotent — won't push a second copy).
+	 *  Non-pause: 4-player coop never stops the server, so the run keeps running underneath (SoundSettings
+	 *  handoff "인게임 논-포즈"). Bound to IA_Menu (Esc) by the possessed pawn. CommonUI Back / the widget's Back
+	 *  button pops it. */
+	void OpenSettingsOverlay();
+
 protected:
 	virtual void SetupInputComponent() override;
 
@@ -153,6 +159,10 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|UI")
 	TSubclassOf<UFPSRResultWidget> ResultWidgetClass;
 
+	/** Settings overlay (master volume) pushed to the GameMenu layer by IA_Menu in-game. */
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|UI")
+	TSubclassOf<UCommonActivatableWidget> SettingsWidgetClass;
+
 private:
 	/** Server: refresh the global freeze + present after a selection/grant changed this player's pending picks. */
 	void NotifyPauseStateDirty();
@@ -164,6 +174,10 @@ private:
 	/** Currently shown card-select modal instance (owner client). */
 	UPROPERTY(Transient)
 	TObjectPtr<UFPSRCardSelectWidget> ActiveCardWidget;
+
+	/** Currently shown settings overlay instance (owner client) — guards against a second push. */
+	UPROPERTY(Transient)
+	TObjectPtr<UCommonActivatableWidget> ActiveSettingsWidget;
 
 	/** Server-only: the offer last issued to this player; selection applies from here by index. */
 	TArray<FFPSRCardDraw> CachedOffer;

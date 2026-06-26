@@ -4,7 +4,20 @@
 > **작업 단계를 끝낼 때마다, 그리고 중단 전 반드시 이 파일을 갱신하고 커밋한다.**
 > 확정 설계·기획·코드구조·규칙은 `Game.md`(**SSOT 허브** → 도메인별 `Docs/SSOT/*.md`, 작업별 라우팅은 허브 §0-1), **완료 작업 상세는 `git log --oneline`**. 여기엔 *무엇을 했는지*만 요약한다.
 
-**최종 갱신: 2026-06-25**
+**최종 갱신: 2026-06-26**
+
+## ✅ 사운드 설정(마스터 볼륨) — **완료. PIE 통과 + main `--no-ff` 머지**(2026-06-26 b)
+> **마스터 볼륨 MVP 닫힘**: 메인메뉴 Settings + 인게임 Esc 논-포즈 오버레이, SoundClass+SoundMix 표준, 확장(SFX/Music/UI)=자식 SoundClass 추가만. 코드(`3a1476c`·`0df34d5`)+콘텐츠 저작(`4a6dbf3`·`0baad37`) 전부 완료, **사용자 PIE 통과**.
+> - **▶ 콘텐츠 저작(`4a6dbf3` content(audio), VibeUE Python, 신규 C++ 0)**: ① `/Game/Audio/SC_Master`(USoundClass)+`SMix_Master`(USoundMix) 신규(config 경로 정확 일치) ② `SC_LPAMG_Master`→SC_Master reparent(parent+child 양방향=총기 SFX 마스터 경유) ③ `IA_Menu`(Bool)+**IMC_Default Esc→IA_Menu 자동영속**(핸드오프 "수동" 예정이었으나 `InputService.add_key_mapping`이 디스크 강제리로드 후에도 영속 확인=수동 불요, [[vibeue-mcp-capabilities]]) ④ `WBP_Settings`(부모 UFPSRSettingsWidget: MasterVolumeSlider 필수+MasterVolumeValueText CommonTextBlock 옵션, 컴파일 0/0) ⑤ `WBP_MainMenu`+`SettingsButton`(=WBP_PlayButton 복제·라벨 "Settings")+SettingsWidgetClass ⑥ `BP_FPSRPC.SettingsWidgetClass`·`BP_FPSRPlayer.MenuAction` CDO. 정적 11/11 PASS.
+> - **▶ Back 버튼(`0baad37` content(audio), UMG 수동)**: `WBP_BackButton`(=WBP_PlayButton 복제·라벨 "Back") → WBP_Settings에 BindWidgetOptional `BackButton` 임베드. C++ `HandleBackClicked`→`DeactivateWidget()` 자동 배선. **PIE에서 Esc는 에디터가 PIE 정지로 가로채 닫기 불가 → 가시 Back 버튼 필수**(패키지/스탠드얼론에선 Esc 정상).
+> - **⚠️ 인시던트(메모리 [[vibeue-render-target-gpu-hazard]] 반영)**: 자식 WBP를 임베드한 **컨테이너 위젯**은 VibeUE 프로그래매틱 `remove_component`/`capture_preview`가 **에디터 행/크래시 2회**(add는 OK·remove/render가 트리거). 복구=프로세스 종료 후 `git checkout HEAD -- <wbp>` → **BackButton은 UMG 수동 저작**으로 마무리. 헤드리스 슬롯 API는 padding/zorder/offset 미반영(캔버스 Position/Size만).
+> - **▶ PIE 검증 통과(사용자)**: 메인메뉴 Settings→오버레이·슬라이더 %·Back 닫기. (잔여 선택: 콘솔 `FPSR.SetMasterVolume`·영속·인게임 Esc는 패키지에서.)
+> - **커밋**: `3a1476c` feat(audio) 코어 4클래스+배선+config / `0df34d5` fix(audio) Codex 머지게이트 P2 2건 / `4a6dbf3` content(audio) 콘텐츠 저작 / `0baad37` content(audio) Back 버튼. **C++ 무변경=빌드/스모크/Codex 코드게이트 N/A.**
+> - **코어(C++, Opus 직접)**: `UFPSRGameUserSettings`(UGameUserSettings=MasterVolume 영속전담, GameUserSettings.ini) + `UFPSRAudioSettings`(UDeveloperSettings=SoundMix/SoundClass soft ref, 에셋경로 C++ 하드코딩 0) + `UFPSRAudioSubsystem`(UWorldSubsystem=OnWorldBeginPlay 재적용 SetSoundMixClassOverride+PushSoundMixModifier, 콘솔 `FPSR.SetMasterVolume`) + `UFPSRSettingsWidget`(CommonActivatableWidget 공용 오버레이). 배선: PC `OpenSettingsOverlay`(GameMenu push·로컬가드) / Character `IA_Menu`(Esc) / MainMenu Settings 버튼(BindWidgetOptional).
+> - **검증**: 빌드 Succeeded(에디터 닫고 UBT) + 헤드리스 스모크 `Result={Success}`. **Codex 플랜게이트**(2블로커: `GameUserSettingsClassName` config 키·`LoadSynchronous` — 엔진소스 대조 반영) + **Codex 머지게이트**(2 P2: 컨트롤러 슬라이더 저장·`bIsBackHandler` Back핸들러 교정).
+> - **부수**: `FPSRWeaponFireComponent.cpp`에 `LogFPSR` include 명시(unity 재구성으로 노출된 잠복 누락, IWYU). 설계 `Docs/SSOT/Architecture.md` §4-1(Settings/·Audio/ 폴더).
+> - **콘텐츠 안전성**: SoundMix/SoundClass 미저작 상태에서도 서브시스템 **안전 no-op** → 현재 빌드/PIE 안 깨짐. 실제 볼륨 변동은 콘텐츠 필요.
+> **주의**: 인게임은 **논-포즈 오버레이**(협동=서버 안 멈춤). 미커밋 잔여 스푸리어스(`Config/DefaultEditor.ini`·ZerinLabs `M_col_*_ORIG`)는 이 작업과 무관(건드리지 않음). 저작 레시피·설계 상세=`Docs/SoundSettings_Handoff.md`.
 
 ## ✅ main 통합 + 브랜치 정리 + 패키징 (2026-06-25 c) — **모든 작업 main 머지 완료, 로컬·원격 `main` 하나만 남음**
 > **머지(--no-ff, 빌드/스모크/Codex 머지게이트 통과):** `balance/pass2`(21커밋: 밸런스 2차+룸 스폰+문 破壊/Chaos+플로우필드 데이터드리븐 바운드/clearance+스폰존 비활성화 볼륨) + `fix/w1-loop-20260623`(W1 대시 프리즈 대칭갭+CardSelect 정리) → `main` (`d285c69`·`411bcf8`). main이 직계 조상 + 파일 겹침 0 → 충돌 0.
