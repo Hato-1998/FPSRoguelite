@@ -15,6 +15,11 @@ AFPSREnemySpawnPoint::AFPSREnemySpawnPoint()
 	USceneComponent* Root = CreateDefaultSubobject<USceneComponent>(TEXT("Root"));
 	SetRootComponent(Root);
 
+	// Actual spawn position (default at the actor origin = no behavior change for simple points). A structured-spawner
+	// BP moves this INSIDE its mesh cavity so enemies appear inside the pipe/box, not at the placement gizmo.
+	SpawnAnchor = CreateDefaultSubobject<USceneComponent>(TEXT("SpawnAnchor"));
+	SpawnAnchor->SetupAttachment(Root);
+
 	// Waypoint container — designers add Scene children to this in a structured-spawner BP (kept separate from the
 	// root so a pipe/box mesh added under the root isn't mistaken for a waypoint). (C1)
 	ExitPathRoot = CreateDefaultSubobject<USceneComponent>(TEXT("ExitPathRoot"));
@@ -31,6 +36,11 @@ AFPSREnemySpawnPoint::AFPSREnemySpawnPoint()
 		EditorArrow->bIsScreenSizeScaled = true;
 	}
 #endif
+}
+
+FVector AFPSREnemySpawnPoint::GetSpawnLocation() const
+{
+	return SpawnAnchor ? SpawnAnchor->GetComponentLocation() : GetActorLocation();
 }
 
 void AFPSREnemySpawnPoint::GetExitPathWorldPoints(TArray<FVector>& Out) const

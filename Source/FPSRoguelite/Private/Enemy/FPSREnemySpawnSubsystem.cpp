@@ -581,7 +581,7 @@ bool UFPSREnemySpawnSubsystem::TrySelectSpawnPoint(FVector& OutLocation, const A
 		// MinPlayerDistance gate (XY): keep spawns at least this far from the nearest player (no FOV test anymore).
 		if (Point->GetMinPlayerDistance() > 0.0f)
 		{
-			const FVector PointLocation = Point->GetActorLocation();
+			const FVector PointLocation = Point->GetSpawnLocation();
 			float NearestDistSq = TNumericLimits<float>::Max();
 			for (const FVector& PL : PlayerLocations)
 			{
@@ -606,7 +606,7 @@ bool UFPSREnemySpawnSubsystem::TrySelectSpawnPoint(FVector& OutLocation, const A
 	// co-located enemies are pushed apart at the source by ComputeSeparation's coincident handling rather than by
 	// moving the spawn into possibly-unsafe wall/ledge geometry.
 	const AFPSREnemySpawnPoint* Chosen = Candidates[FMath::RandRange(0, Candidates.Num() - 1)];
-	OutLocation = Chosen->GetActorLocation();
+	OutLocation = Chosen->GetSpawnLocation(); // SpawnAnchor world loc (inside a structured spawner), else actor origin
 	OutPoint = Chosen; // carries the authored exit path (C1) to AcquireEnemy
 	return true;
 }
