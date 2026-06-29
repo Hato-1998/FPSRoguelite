@@ -8,6 +8,7 @@
 #include "Weapon/FPSRWeaponInventoryComponent.h"
 #include "Weapon/FPSRWeaponFireComponent.h"
 #include "Weapon/FPSRWeaponDataAsset.h"
+#include "Hero/FPSRCharacter.h"
 #include "GameFramework/Pawn.h"
 #include "Net/UnrealNetwork.h"
 #include "Net/Core/PushModel/PushModel.h"
@@ -214,6 +215,13 @@ void AFPSRPlayerState::OnRep_LifeState()
 				Fire->SetAiming(false);
 			}
 		}
+	}
+
+	// Mirror the server's downed locomotion on clients so movement prediction matches: crawl speed while DBNO,
+	// normal (combat-mult) speed once revived back to Alive. (Mirrors the move-speed-multiplier client sync path.)
+	if (AFPSRCharacter* OwnerChar = Cast<AFPSRCharacter>(GetPawn()))
+	{
+		OwnerChar->ApplyDownedLocomotion(LifeState == EFPSRLifeState::DBNO);
 	}
 }
 

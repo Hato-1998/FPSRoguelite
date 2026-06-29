@@ -212,6 +212,20 @@ void AFPSRGameMode::NotifyPlayerDefeated()
 	}
 	if (AreAllPlayersDead())
 	{
+		// Team wipe (no Alive players remain): no one can revive the downed, so any DBNO players are now truly Dead.
+		if (const AGameStateBase* GS = GetGameState<AGameStateBase>())
+		{
+			for (APlayerState* PS : GS->PlayerArray)
+			{
+				if (AFPSRPlayerState* FPS = Cast<AFPSRPlayerState>(PS))
+				{
+					if (FPS->IsDBNO())
+					{
+						FPS->SetLifeState(EFPSRLifeState::Dead);
+					}
+				}
+			}
+		}
 		EndRun(EFPSRRunOutcome::Defeat);
 	}
 }

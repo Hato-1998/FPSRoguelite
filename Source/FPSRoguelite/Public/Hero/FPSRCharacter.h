@@ -59,6 +59,10 @@ public:
 	/** Set MaxWalkSpeed = BaseWalkSpeed * Mult. Called by UFPSRCombatSet when MoveSpeedMultiplier changes (server + client). */
 	void ApplyMoveSpeedMultiplier(float Mult);
 
+	/** Set MaxWalkSpeed for the downed (crawl) vs normal state (U9 DBNO). Called server-side on DBNO/revive and on the
+	 *  owning client from AFPSRPlayerState::OnRep_LifeState so movement prediction matches (mirrors ApplyMoveSpeedMultiplier). */
+	void ApplyDownedLocomotion(bool bDowned);
+
 	/** Owner-client: refresh the first-person weapon mesh + arms anim when the equipped weapon changes
 	 *  (called from the inventory's server EquipSlot + client OnRep). No-op on non-locally-controlled pawns. */
 	void RefreshFirstPersonWeaponVisual();
@@ -79,11 +83,19 @@ protected:
 	/** True while the run is globally frozen for card selection (Game.MD §2-2) — gates player input. */
 	bool IsRunFrozen() const;
 
-	/** True once this player's PlayerState is marked dead (U2 defeat wiring) — gates input/firing like IsRunFrozen. */
-	bool IsDeadLocal() const;
+	/** True when this player can't ACT (fire / dash / swap / reload / ADS) — i.e. NOT alive (DBNO downed, or Dead).
+	 *  Gates actions + contact damage like IsRunFrozen. DBNO still crawls/looks — those gate on IsTrulyDeadLocal. */
+	bool IsIncapacitatedLocal() const;
 
-	/** Bound to the health set's OnOutOfHealth (server). Placeholder: logs; full DBNO/respawn is P5. */
+	/** True only when truly Dead (out of the run) — blocks even crawl/look. DBNO returns false (can crawl + look). */
+	bool IsTrulyDeadLocal() const;
+
+	/** Bound to the health set's OnOutOfHealth (server). Transitions the player to DBNO (downed) + crawl and runs the
+	 *  wipe check (team-wipe -> Defeat). Revive back to Alive is UFPSRReviveComponent (U9 Phase 1B, Game.MD §2-13). */
 	void HandleOutOfHealth();
+
+	//~ACharacter: no jumping while incapacitated (DBNO or Dead).
+	virtual bool CanJumpInternal_Implementation() const override;
 
 	/** Local client: react to GameState OnRunStateChanged — apply/clear the mission vision restriction PP. */
 	UFUNCTION()
@@ -239,6 +251,10 @@ protected:
 	/** Baseline walk speed before MoveSpeedMultiplier. Designers may tune per-hero. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Movement")
 	float BaseWalkSpeed = 600.0f;
+
+	/** Downed (DBNO) crawl speed as a fraction of the normal walk speed (Game.MD §2-13). Balance value. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Movement", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float DownedMoveScale = 0.3f;
 
 	/** Server-only: world time of last dash (init far in the past so the first dash is allowed). */
 	float LastDashTime = -1000.0f;

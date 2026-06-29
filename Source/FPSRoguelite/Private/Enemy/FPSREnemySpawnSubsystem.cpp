@@ -244,11 +244,11 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 		{
 			if (APawn* PlayerPawn = PC->GetPawn())
 			{
-				// Skip dead players (U2): they're not targeted and take no contact damage (no corpse hits). U9 (DBNO)
-				// revisits whether downed players remain targetable.
+				// B17 (U9): enemies don't target non-alive players (DBNO downed or Dead) — a downed teammate stops
+				// drawing aggro and the swarm re-targets the living. (Downed players also take no contact damage.)
 				if (const AFPSRPlayerState* PS = PC->GetPlayerState<AFPSRPlayerState>())
 				{
-					if (PS->IsDead())
+					if (!PS->IsAlive())
 					{
 						continue;
 					}

@@ -67,10 +67,10 @@ void UFPSRGA_WeaponFire_ChargeLaser::ActivateAbility(
 		}
 	}
 
-	// No firing once the player is dead (U2 defeat wiring) — server-authoritative gate mirroring the input block.
+	// No firing while not alive (DBNO downed or Dead) — server-authoritative gate mirroring the input block (U9).
 	if (const AFPSRPlayerState* OwnerPS = Avatar ? Avatar->GetPlayerState<AFPSRPlayerState>() : nullptr)
 	{
-		if (OwnerPS->IsDead())
+		if (!OwnerPS->IsAlive())
 		{
 			EndAbility(Handle, ActorInfo, ActivationInfo, true, true);
 			return;
