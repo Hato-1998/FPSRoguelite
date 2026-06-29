@@ -17,6 +17,7 @@ class UFPSRWeaponFireComponent;
 class UFPSRWeaponDataAsset;
 class UMaterialInterface;
 class UFPSRPlayerFeedbackComponent;
+class UFPSRReviveComponent;
 class UFPSRBlindspotAudioComponent;
 struct FInputActionValue;
 class UStaticMeshComponent;
@@ -182,6 +183,10 @@ protected:
 
 	UPROPERTY(VisibleAnywhere, Category = "FPSR|Weapon")
 	TObjectPtr<UFPSRWeaponFireComponent> WeaponFire;
+
+	/** Co-op DBNO revive (U9 §2-13): server-authoritative proximity revive; replicates ReviveProgress for the HUD gauge. */
+	UPROPERTY(VisibleAnywhere, Category = "FPSR|Revive")
+	TObjectPtr<UFPSRReviveComponent> ReviveComponent;
 
 	/** Local-only hit-marker + threat-indicator feedback (Game.MD §2-14). Not replicated; WBP HUD binds to it. */
 	UPROPERTY(VisibleAnywhere, Category = "FPSR|Feedback")

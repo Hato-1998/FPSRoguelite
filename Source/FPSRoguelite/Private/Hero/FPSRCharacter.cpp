@@ -17,6 +17,7 @@
 #include "Weapon/FPSRWeaponDataAsset.h"
 #include "Hero/FPSRPlayerFeedbackComponent.h"
 #include "Hero/FPSRBlindspotAudioComponent.h"
+#include "Hero/FPSRReviveComponent.h"
 #include "FPSRCollisionChannels.h"
 
 #include "Camera/CameraComponent.h"
@@ -100,6 +101,7 @@ AFPSRCharacter::AFPSRCharacter()
 	WeaponFire = CreateDefaultSubobject<UFPSRWeaponFireComponent>(TEXT("WeaponFire"));
 	PlayerFeedback = CreateDefaultSubobject<UFPSRPlayerFeedbackComponent>(TEXT("PlayerFeedback"));
 	BlindspotAudio = CreateDefaultSubobject<UFPSRBlindspotAudioComponent>(TEXT("BlindspotAudio"));
+	ReviveComponent = CreateDefaultSubobject<UFPSRReviveComponent>(TEXT("ReviveComponent"));
 
 	// Required so the inventory component's registered weapon-instance subobjects replicate (engine: the
 	// owning actor must also opt into the registered subobject list, not just the component).
