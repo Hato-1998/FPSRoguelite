@@ -34,6 +34,11 @@ class FPSROGUELITE_API AFPSRBossBase : public ACharacter
 public:
 	AFPSRBossBase();
 
+	/** The boss's non-GAS health component — exposed so the HUD boss bar (B11) can bind OnHealthChanged (now
+	 *  client-fired via B12) and read GetHealth()/GetMaxHealth(). */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Boss")
+	UFPSREnemyHealthComponent* GetHealthComponent() const { return HealthComponent; }
+
 	/** Server: apply a boss definition's tuning (MaxHealth, …) to this instance. Called by the run director right
 	 *  after spawn. Overrides DefaultMaxHealth. No-op off-authority / null definition. */
 	void InitializeFromDefinition(const UFPSRBossDefinitionDataAsset* Definition);

@@ -463,6 +463,13 @@ void UFPSRRunDirectorSubsystem::SpawnBoss()
 		ActiveBoss->InitializeFromDefinition(Def);
 	}
 
+	// Publish the boss to the GameState so every client's HUD boss bar can locate + bind it (B11). After
+	// InitializeFromDefinition so the replicated MaxHealth (B12) is set before clients first read the bar.
+	if (AFPSRGameState* GS = GetGS())
+	{
+		GS->SetActiveBoss(ActiveBoss);
+	}
+
 	UE_LOG(LogFPSR, Log, TEXT("[Run] Boss spawned: %s at %s (t=%.0fs)"), *ActiveBoss->GetName(),
 		*SpawnXform.GetLocation().ToCompactString(), RunClock);
 }

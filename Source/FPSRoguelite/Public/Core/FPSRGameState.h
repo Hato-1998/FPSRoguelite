@@ -5,6 +5,8 @@
 #include "GameFramework/GameStateBase.h"
 #include "FPSRGameState.generated.h"
 
+class AFPSRBossBase;
+
 /** Macro run phase. Combat = normal run / mission window; Boss = final boss (no timer, no missions).
  *  Global freeze during card selection is the separate bRunPaused flag, independent of the phase. */
 UENUM(BlueprintType)
@@ -20,6 +22,10 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnRunStateChanged);
  *  (e.g. the GameMode's post-run travel back to the lobby, P7 §3-5) can react WITHOUT editing EndRun's body —
  *  keeps the victory caller (U3) and the lobby-return caller (U11) on independent code paths. */
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnRunEnded);
+
+/** Fired on every client (and the host) when the active boss is set or cleared (B11). Boss = the spawned boss, or
+ *  null when the boss is gone — the HUD boss health bar shows/hides and (re)binds to the boss health on this. */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnActiveBossChanged, AFPSRBossBase*, Boss);
 
 /** Server-authoritative run progression state (shared XP, party level, run phase, global freeze).
  *  Redesign 2026-06-04 (Game.MD §2-2): on level-up (or mission clear) the run globally freezes — enemies
@@ -119,11 +125,26 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "FPSR|Run")
 	FOnRunEnded OnRunEnded;
 
+	/** Active boss (B11) — replicated so a client HUD boss bar can locate the boss and bind its health. Null = none. */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Run")
+	AFPSRBossBase* GetActiveBoss() const { return ActiveBoss; }
+
+	/** Server: set/clear the active boss (called by the run director on boss spawn / clear). Replicates + broadcasts. */
+	void SetActiveBoss(AFPSRBossBase* InBoss);
+
+	/** Fires on all clients (+ host) when the active boss is set/cleared (B11) — the HUD boss bar binds here to
+	 *  show/hide and (re)bind the boss's UFPSREnemyHealthComponent::OnHealthChanged (now client-fired via B12). */
+	UPROPERTY(BlueprintAssignable, Category = "FPSR|Run")
+	FOnActiveBossChanged OnActiveBossChanged;
+
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 protected:
 	UFUNCTION()
 	void OnRep_RunState();
+
+	UFUNCTION()
+	void OnRep_ActiveBoss();
 
 	/** XP required to advance from level 1; each level adds XPPerLevel (linear curve placeholder —
 	 *  a UCurveFloat data-driven curve is a follow-up, Game.MD §2-8). Editor-tunable. */
@@ -164,6 +185,11 @@ protected:
 	/** Host friendly-fire setting (replicated; read server-side for damage, mirrored to clients for UI). */
 	UPROPERTY(ReplicatedUsing = OnRep_RunState)
 	bool bFriendlyFireEnabled = false;
+
+	/** Active boss (B11). Replicated to all so the HUD boss bar can find it; the boss is bAlwaysRelevant so its
+	 *  UFPSREnemyHealthComponent replicates regardless of distance. Set/cleared by the run director (server). */
+	UPROPERTY(ReplicatedUsing = OnRep_ActiveBoss)
+	TObjectPtr<AFPSRBossBase> ActiveBoss = nullptr;
 
 	/** Friendly-player damage multiplier while friendly fire is on (editor-tunable; 0.5 = half). */
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Run")

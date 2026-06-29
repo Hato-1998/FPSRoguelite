@@ -27,6 +27,25 @@ void AFPSRGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLi
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRGameState, RunClockSeconds, Params);
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRGameState, bFriendlyFireEnabled, Params);
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRGameState, LobbyCountdownEndServerTime, Params);
+	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRGameState, ActiveBoss, Params);
+}
+
+void AFPSRGameState::SetActiveBoss(AFPSRBossBase* InBoss)
+{
+	if (!HasAuthority() || ActiveBoss == InBoss)
+	{
+		return;
+	}
+	ActiveBoss = InBoss;
+	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRGameState, ActiveBoss, this);
+	// The listen-server host gets no OnRep — broadcast directly so the host's HUD boss bar reacts too (same pattern
+	// as the ready/run-state setters).
+	OnActiveBossChanged.Broadcast(ActiveBoss);
+}
+
+void AFPSRGameState::OnRep_ActiveBoss()
+{
+	OnActiveBossChanged.Broadcast(ActiveBoss);
 }
 
 int32 AFPSRGameState::GetRequiredXP(int32 Level) const

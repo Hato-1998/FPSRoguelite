@@ -17,6 +17,10 @@ AFPSRBossBase::AFPSRBossBase()
 {
 	PrimaryActorTick.bCanEverTick = false;
 
+	// Always relevant so the boss + its replicated HealthComponent reach every client regardless of distance — the
+	// HUD boss bar (B11) must reflect boss health for all players, not just those near the boss. Cheap (one actor).
+	bAlwaysRelevant = true;
+
 	// Capsule (ACharacter root): object type ECC_Pawn so the weapon pawn-gather traces find the boss AND the
 	// hitscan wall trace ignores it (NOT WorldStatic — that would self-block the boss's own bullets, P7 §6).
 	// Mirror the swarm capsule: block everything, ignore other Pawns (residual swarm don't stack on the boss).
