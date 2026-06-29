@@ -6,6 +6,18 @@
 
 **최종 갱신: 2026-06-29**
 
+## 🔔 핸드오프 (2026-06-29 d) — PIE 전 사전작업 일괄 완료(C++ 폴리시·DBNO 설계확정·B2 계획), 다음=사용자 PIE E2E
+> **이 세션**: `fix/mp-steam-e2e`에서 U1 사후 7항목(A1/A2/A3·C2·B1/B2·C1) **코드 정합 적대검증**(워크플로 8에이전트 + 엔진소스 대조) → **블로커 0·확정 메이저 0**(콘솔명령 "메이저" 1건은 UE5.7 엔진소스로 반증=에디터 Cmd바도 PIE월드 라우팅). 검증 후 PIE 전 사전작업 일괄:
+>   - **선택 C++ 폴리시 2건(검증완료)**: A1 `FPSREnemyHealthComponent::ResetForReuse`에 `OnHealthChanged.Broadcast`(풀링 재사용 시 **호스트** 적HP바 stale 0% 해소 — 클라는 OnRep로 이미 받던 동작과 대칭=무회귀) · B1 `FPSRGameMode::EndRun`에 `SetMissionProgress(0)`(Defeat 결과화면 뒤 미션바 잔존 해소). **빌드 Succeeded + 헤드리스 스모크 Success + git diff 자기비판 통과.** Codex=머지게이트 일괄.
+>   - **③ DBNO 미니설계 확정(APPROVED)**: `Docs/DBNO_MiniDesign.md`(§6 추천디폴트 채택) + SSOT `PlayerFeel.md` §2-13 반영. 상태기계 `ELifeState{Alive,DBNO,Dead}` · 근접 자동부활(신규 `UFPSRReviveComponent`, ReviveProgress 복제) · 팀와이프=생존0→전원Dead→`EndRun(Defeat)` · 다운=크롤+무피해+비타겟 · 블리드아웃=시임만 비활성. **기존 시임만 확장(신규 중앙클래스 0)**. 구현=**Phase 1B**(이후 일정, 서버권위=Opus 직접).
+>   - **② B2 폴리시 저작계획**: `Docs/B2_TimelinePolish_Plan.md`(WBP_RunHUD 미션 윈도우 밴드+보스 끝 아이콘; **스케줄 ref 변경 시에만 재구성 + null가드**). **저작은 에디터+VibeUE 연결 필요(현재 미연결)**.
+> **⚠️ 다음 순서**:
+>   ① **PIE E2E 검증(최우선, 사용자)** — 솔로 PIE, **in-PIE `~` 콘솔**에서: `FPSR.TravelGame` → `FPSR.EnemyTarget 50`(콤뱃 시작 전/초기, 라이브런 중엔 디렉터가 매틱 덮어씀) → `FPSR.MissionTrigger` → `FPSR.SkipToBoss`(오프닝시드 홀드 ~5s 후) + 우클릭 ADS 결정론 스프레이. A1 적HP바/숫자·A2 미션배너·A3 보스HUD바·C2 ADS·B1/B2 바 확인.
+>   ② **B2 저작**(에디터 연결 후, 위 계획서) → ③ **DBNO 구현**(Phase 1B) → Codex 머지게이트 → main `--no-ff`.
+> **WBP 콘텐츠 계약(PIE서 확인 — C++ 미가시)**: B1바=`AFPSRGameState::GetMissionProgress()` 직접 리드 / A3 보스바=non-null fire에서 `OnHealthChanged` 바인드 **+ 즉시 현재 체력 리드** + null fire=숨김 / B2·A3=`OnRunStateChanged`마다(또는 ref변경 캐싱) 재구성 + `GetRunSchedule()` null가드(첫 OnRep 일시 null).
+> **데이터 주의**: authored BossTime/미션윈도우 = **P4-A 임시값**(미션 60/120/180·보스 300) → PIE 타임라인 바가 임시값 반영(프로덕션 300/600/900·보스1200 아님) [[p4a-temp-test-values]].
+> **미커밋 콘텐츠(사용자, 무관)**: `.uasset`·`Config/DefaultEditor.ini`·`Docs/TaskPrompts_Master.md`(세션 전 수정).
+
 ## 🔔 핸드오프 (2026-06-29 c) — U1 사후 HUD/게임플레이(A/B/C) C+++위젯 완료, 다음=PIE E2E 검증 + B2 폴리시
 > **이 세션**: `fix/mp-steam-e2e`에서 U1 사후 7항목(A1·A2·A3·B1·B2·C1·C2) 구현. C++=빌드+스모크 검증, 위젯=VibeUE 저작·compile 0err. **6커밋**:
 >   - `811a0d1 feat(U1)` Phase 1 C++ — C1 적 탈출경로 인프라(`AFPSREnemySpawnPoint` ExitPathRoot 웨이포인트 + `AFPSREnemyBase` SetExitPath/ConsumeExitPathSteering + 스폰서브시스템 배선) · A1 위젯 풀링훅(`BeginPlay` InitWidget+`OnHealthBarReady` BIE) · C2 ADS 결정론(`FPSRGA_WeaponFire_Hitscan` 트레이스: ADS 단발=조준점/힙=랜덤콘/샷건=콘유지) · B1/B2 GameState 복제 게터(`MissionProgress`·`RunScheduleAsset`·`GetRunTotalDuration`).
