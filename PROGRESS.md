@@ -6,6 +6,19 @@
 
 **최종 갱신: 2026-06-29**
 
+## 🔔 핸드오프 (2026-06-29 e) — 보스 오버헤드바 제거 + DBNO Phase 1B 서버로직(증분1~3) 완성, 다음=DBNO HUD(에디터)+PIE 검증
+> **이 세션 후반**: ① **PIE E2E = 사용자 통과**(A1/A2/A3·C2·B1/B2). ② 사용자 지적 **보스 머리 위 월드 HP바 제거**(`5a981d8 fix(boss)` — `AFPSRBossBase::BeginPlay`에서 월드 `UWidgetComponent` 제거, HUD 상단 보스바 A3만 사용; VibeUE 미연결로 BP 직접편집 불가→코드 강제, idempotent). ③ **DBNO Phase 1B 구현 착수**(브랜치 `phase/p1b-dbno`, fix/mp-steam-e2e 기반 분기, MP/복제=Opus 직접).
+> **DBNO 서버 로직 = 증분1~3 완성**(각 빌드+스모크 검증·커밋):
+>   - `b01f76f` **증분1**: `EFPSRLifeState{Alive,DBNO,Dead}` 상태기계(`AFPSRPlayerState`, `bIsDead`→복제 enum+OnRep). 순수 리팩토링(거동 무변경, IsAlive 술어 그대로).
+>   - `1a5e534` **증분2**: `HandleOutOfHealth`→DBNO+크롤(`DownedMoveScale=0.3`) / 입력게이트 분리(`IsIncapacitatedLocal`=!Alive=행동/접촉피해 차단 · `IsTrulyDeadLocal`=Dead=이동/시점 차단 → DBNO는 크롤+시점 OK, 사격/대시/스왑/장전/점프 불가) / 다운 무피해 / B17 적 타겟 !Alive 제외 / GA 4종·XP 게이트 !Alive / 팀와이프(생존0→DBNO 전원 Dead 승격→`EndRun(Defeat)`, 솔로 다운=즉시 Defeat) / 크롤 복제정합(서버+OnRep_LifeState).
+>   - `4de7569` **증분3**: 신규 `UFPSRReviveComponent`(폰 부착, 서버틱). DBNO 시 반경300 내 Alive 아군 체류→`ReviveProgress`(복제)3초 충전→부활(Alive+50%HP `SetNumericAttributeBase`·콘텐츠 GE 불요·OnOutOfHealth 자동재무장). 이탈 시 감소, 전역 프리즈 중 정지(freeze-gate 대칭). 비-authority 틱 비활성.
+> **⚠️ 다음**:
+>   ① **DBNO 증분4 = HUD 콘텐츠(에디터+VibeUE 필요)**: 부활 게이지 위젯(`UFPSRReviveComponent::OnReviveProgressChanged`/`GetReviveProgress()` 바인딩) + 다운/관전 노티. C++ 0(데이터 이미 복제).
+>   ② **PIE 검증(사용자)**: 리슨서버 2인(`DBNO_MiniDesign.md` §7) — A 다운→B 근접 부활/이탈 감소, 전원다운→Defeat, 솔로 다운→Defeat, 다운자 비타겟·무피해·크롤·사격불가, 프리즈 중 부활정지.
+>   ③ Codex 머지게이트 → `phase/p1b-dbno` → main `--no-ff`. (후속: 블리드아웃 활성·튜닝, 풀 관전 리그 B16.)
+> **블로커/주의**: DBNO=MP라 정량검증은 패키지/리슨서버. 부활 체력복구=`SetNumericAttributeBase`(스크립트 set, 콘텐츠 GE 원하면 후속 교체). 신규 UCLASS(ReviveComponent) 추가로 라이브코딩 불가=풀빌드 필요. 보스 바 코드강제는 BP에서 컴포넌트 제거해도 무회귀(no-op).
+> **미커밋 콘텐츠(사용자, 무관)**: `.uasset`·`Config/DefaultEditor.ini`·`Docs/TaskPrompts_Master.md`.
+
 ## 🔔 핸드오프 (2026-06-29 d) — PIE 전 사전작업 일괄 완료(C++ 폴리시·DBNO 설계확정·B2 계획), 다음=사용자 PIE E2E
 > **이 세션**: `fix/mp-steam-e2e`에서 U1 사후 7항목(A1/A2/A3·C2·B1/B2·C1) **코드 정합 적대검증**(워크플로 8에이전트 + 엔진소스 대조) → **블로커 0·확정 메이저 0**(콘솔명령 "메이저" 1건은 UE5.7 엔진소스로 반증=에디터 Cmd바도 PIE월드 라우팅). 검증 후 PIE 전 사전작업 일괄:
 >   - **선택 C++ 폴리시 2건(검증완료)**: A1 `FPSREnemyHealthComponent::ResetForReuse`에 `OnHealthChanged.Broadcast`(풀링 재사용 시 **호스트** 적HP바 stale 0% 해소 — 클라는 OnRep로 이미 받던 동작과 대칭=무회귀) · B1 `FPSRGameMode::EndRun`에 `SetMissionProgress(0)`(Defeat 결과화면 뒤 미션바 잔존 해소). **빌드 Succeeded + 헤드리스 스모크 Success + git diff 자기비판 통과.** Codex=머지게이트 일괄.

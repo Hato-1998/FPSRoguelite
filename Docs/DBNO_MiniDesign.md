@@ -1,6 +1,13 @@
 # DBNO 미니설계 (U9 / Phase 1B) — 사망 모델 = 정식 다운(Down But Not Out)
 
-> **상태: APPROVED (2026-06-29) — §6 추천 디폴트 전부 채택·확정. SSOT `PlayerFeel.md` §2-13 반영 완료.** 구현(Phase 1B)은 별도 일정. 이 문서는 `U1_PostGate_Fixes.md` 결정("사망 모델 = 정식 DBNO 당겨옴, 서버권위 = Phase 1B, **DBNO 미니설계 선행 필요**")의 선행 산출물이다.
+> **상태: APPROVED (2026-06-29) — §6 추천 디폴트 전부 채택·확정. SSOT `PlayerFeel.md` §2-13 반영 완료.** 이 문서는 `U1_PostGate_Fixes.md` 결정("사망 모델 = 정식 DBNO 당겨옴, 서버권위 = Phase 1B, **DBNO 미니설계 선행 필요**")의 선행 산출물이다.
+>
+> **구현 진행 (브랜치 `phase/p1b-dbno`, 빌드+스모크 검증):**
+> - ✅ **증분1**(`b01f76f`): `EFPSRLifeState{Alive,DBNO,Dead}` 상태기계(PlayerState, 복제·OnRep 입력게이트). 순수 리팩토링(거동 무변경).
+> - ✅ **증분2**(`1a5e534`): `HandleOutOfHealth`→DBNO + 크롤(`DownedMoveScale`) + 입력게이트 분리(`IsIncapacitatedLocal`/`IsTrulyDeadLocal`, 점프 `CanJumpInternal` override) + 다운 무피해(`ApplyContactDamage`) + B17 타겟제외 + GA/XP 게이트 + 팀와이프(생존0→DBNO→Dead→Defeat).
+> - ✅ **증분3**(`4de7569`): `UFPSRReviveComponent`(근접 자동부활·`ReviveProgress` 복제·GAS 체력복구·프리즈 중 정지). **DBNO 서버 로직 완성.**
+> - 🔜 **증분4(C++ 범위 밖)**: 부활 게이지 HUD 위젯(`OnReviveProgressChanged`/`GetReviveProgress()` 바인딩) + 다운/관전 노티 = **VibeUE 저작(에디터 필요)**.
+> - 🔜 **검증**: PIE 리슨서버 2인(§7) — 사용자 / 후속: 블리드아웃 활성·값 튜닝, 풀 관전 리그(B16) → Codex 머지게이트 → main `--no-ff`.
 > 승인 후 → ① SSOT `Docs/SSOT/PlayerFeel.md` §2-13 본문 갱신 → ② C++ 구현(서버권위·복제 = Opus 직접) → ③ 콘텐츠(다운/부활 UI·VFX) → Codex 머지게이트 → main `--no-ff`.
 > 출처 규격: PlayerFeel.md §2-13("수동 부활(DBNO)": 체력0→쓰러짐, 아군 근접 반경 체류 시 부활 게이지 충전→가득 차면 부활, 상태기계 Alive/DBNO/Dead, 블리드아웃·전원다운 = 밸런스 후속). 통합 대상: A4(프리즈 사망자 제외)·B16(관전)·B17(어그로 사망자 제외)·B2(클라 Defeat UI).
 
