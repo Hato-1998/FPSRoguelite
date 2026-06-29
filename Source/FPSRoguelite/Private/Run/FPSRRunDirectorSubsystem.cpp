@@ -364,6 +364,12 @@ void UFPSRRunDirectorSubsystem::SpawnMission(UFPSRMissionDataAsset* MissionData)
 	ActiveMission->OnMissionEndedNative.AddUObject(this, &UFPSRRunDirectorSubsystem::OnMissionEnded);
 	ActiveMission->ServerActivate(MissionData);
 
+	// Publish to the GameState so every client's HUD shows a mission-start banner with the mission name (B10).
+	if (AFPSRGameState* GS = GetGS())
+	{
+		GS->SetActiveMission(MissionData);
+	}
+
 	UE_LOG(LogFPSR, Log, TEXT("[Run] Mission spawned: %s (t=%.0fs)"), *MissionData->GetName(), RunClock);
 }
 
@@ -405,6 +411,11 @@ void UFPSRRunDirectorSubsystem::DestroyActiveMission()
 		ActiveMission->OnMissionEndedNative.RemoveAll(this);
 		ActiveMission->Destroy();
 		ActiveMission = nullptr;
+	}
+	// Clear the replicated mission so the next mission's start banner fires cleanly (B10).
+	if (AFPSRGameState* GS = GetGS())
+	{
+		GS->SetActiveMission(nullptr);
 	}
 }
 

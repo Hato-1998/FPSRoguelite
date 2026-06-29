@@ -6,6 +6,7 @@
 #include "FPSRGameState.generated.h"
 
 class AFPSRBossBase;
+class UFPSRMissionDataAsset;
 
 /** Macro run phase. Combat = normal run / mission window; Boss = final boss (no timer, no missions).
  *  Global freeze during card selection is the separate bRunPaused flag, independent of the phase. */
@@ -26,6 +27,10 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnRunEnded);
 /** Fired on every client (and the host) when the active boss is set or cleared (B11). Boss = the spawned boss, or
  *  null when the boss is gone — the HUD boss health bar shows/hides and (re)binds to the boss health on this. */
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnActiveBossChanged, AFPSRBossBase*, Boss);
+
+/** Fired on every client (and the host) when a mission starts (MissionData set) or ends (null) (B10). The HUD shows
+ *  a "<DisplayName> 미션 시작" banner for a few seconds when MissionData is non-null. */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnActiveMissionChanged, UFPSRMissionDataAsset*, MissionData);
 
 /** Server-authoritative run progression state (shared XP, party level, run phase, global freeze).
  *  Redesign 2026-06-04 (Game.MD §2-2): on level-up (or mission clear) the run globally freezes — enemies
@@ -137,6 +142,17 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "FPSR|Run")
 	FOnActiveBossChanged OnActiveBossChanged;
 
+	/** Active mission DataAsset (B10) — replicated so every client's HUD can show a start banner. Null = no mission. */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Run")
+	UFPSRMissionDataAsset* GetActiveMission() const { return ActiveMissionData; }
+
+	/** Server: set/clear the active mission (called by the run director on mission spawn / end). Replicates + broadcasts. */
+	void SetActiveMission(UFPSRMissionDataAsset* InMission);
+
+	/** Fires on all clients (+ host) when a mission starts/ends (B10) — the HUD banner shows the mission name on start. */
+	UPROPERTY(BlueprintAssignable, Category = "FPSR|Run")
+	FOnActiveMissionChanged OnActiveMissionChanged;
+
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 protected:
@@ -145,6 +161,9 @@ protected:
 
 	UFUNCTION()
 	void OnRep_ActiveBoss();
+
+	UFUNCTION()
+	void OnRep_ActiveMission();
 
 	/** XP required to advance from level 1; each level adds XPPerLevel (linear curve placeholder —
 	 *  a UCurveFloat data-driven curve is a follow-up, Game.MD §2-8). Editor-tunable. */
@@ -190,6 +209,11 @@ protected:
 	 *  UFPSREnemyHealthComponent replicates regardless of distance. Set/cleared by the run director (server). */
 	UPROPERTY(ReplicatedUsing = OnRep_ActiveBoss)
 	TObjectPtr<AFPSRBossBase> ActiveBoss = nullptr;
+
+	/** Active mission DataAsset (B10). Hard ref — mission DataAssets are always-loaded primary assets so this
+	 *  replicates cleanly (same as SelectedWeapon). Set/cleared by the run director (server); drives the HUD banner. */
+	UPROPERTY(ReplicatedUsing = OnRep_ActiveMission)
+	TObjectPtr<UFPSRMissionDataAsset> ActiveMissionData = nullptr;
 
 	/** Friendly-player damage multiplier while friendly fire is on (editor-tunable; 0.5 = half). */
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Run")

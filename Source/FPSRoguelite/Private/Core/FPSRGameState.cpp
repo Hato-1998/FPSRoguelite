@@ -28,6 +28,7 @@ void AFPSRGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLi
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRGameState, bFriendlyFireEnabled, Params);
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRGameState, LobbyCountdownEndServerTime, Params);
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRGameState, ActiveBoss, Params);
+	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRGameState, ActiveMissionData, Params);
 }
 
 void AFPSRGameState::SetActiveBoss(AFPSRBossBase* InBoss)
@@ -46,6 +47,22 @@ void AFPSRGameState::SetActiveBoss(AFPSRBossBase* InBoss)
 void AFPSRGameState::OnRep_ActiveBoss()
 {
 	OnActiveBossChanged.Broadcast(ActiveBoss);
+}
+
+void AFPSRGameState::SetActiveMission(UFPSRMissionDataAsset* InMission)
+{
+	if (!HasAuthority() || ActiveMissionData == InMission)
+	{
+		return;
+	}
+	ActiveMissionData = InMission;
+	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRGameState, ActiveMissionData, this);
+	OnActiveMissionChanged.Broadcast(ActiveMissionData); // host gets no OnRep — broadcast directly (B10 banner)
+}
+
+void AFPSRGameState::OnRep_ActiveMission()
+{
+	OnActiveMissionChanged.Broadcast(ActiveMissionData);
 }
 
 int32 AFPSRGameState::GetRequiredXP(int32 Level) const
