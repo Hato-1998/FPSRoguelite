@@ -3,3 +3,4 @@
 #include "Core/FPSRLogChannels.h"
 
 DEFINE_LOG_CATEGORY(LogFPSR);
+DEFINE_LOG_CATEGORY(LogFPSRFlow);

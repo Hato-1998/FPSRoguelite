@@ -4,6 +4,7 @@
 #include "Core/FPSRSessionSubsystem.h"
 #include "Core/FPSRMenuPlayerController.h"
 #include "Core/FPSRLogChannels.h"
+#include "Core/FPSRFlowLog.h"
 #include "UI/FPSRPrimaryGameLayout.h"
 #include "CommonActivatableWidget.h"
 #include "CommonButtonBase.h"
@@ -45,6 +46,7 @@ TOptional<FUIInputConfig> UFPSRMainMenuWidget::GetDesiredInputConfig() const
 
 void UFPSRMainMenuWidget::HandlePlayClicked()
 {
+	FPSRFlowLog::Event(this, TEXT("MENU"), TEXT("Play clicked -> HostSession(4)"));
 	// Play always hosts a session and travels into the lobby hub — even solo (1-player lobby). The lobby is the
 	// hub for every run; the host starts the run from there (P7 §3-3, user-confirmed).
 	if (UGameInstance* GI = GetGameInstance())
@@ -58,6 +60,7 @@ void UFPSRMainMenuWidget::HandlePlayClicked()
 
 void UFPSRMainMenuWidget::HandleSettingsClicked()
 {
+	FPSRFlowLog::Event(this, TEXT("MENU"), TEXT("Settings clicked"));
 	if (!SettingsWidgetClass)
 	{
 		UE_LOG(LogFPSR, Warning, TEXT("[Menu] SettingsWidgetClass is not assigned"));
@@ -78,5 +81,6 @@ void UFPSRMainMenuWidget::HandleSettingsClicked()
 
 void UFPSRMainMenuWidget::HandleQuitClicked()
 {
+	FPSRFlowLog::Event(this, TEXT("MENU"), TEXT("Quit clicked"));
 	UKismetSystemLibrary::QuitGame(this, GetOwningPlayer(), EQuitPreference::Quit, false);
 }

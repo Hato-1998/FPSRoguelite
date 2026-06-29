@@ -6,6 +6,7 @@
 #include "Core/FPSRGameState.h"
 #include "Core/FPSRGameFlowSettings.h"
 #include "Core/FPSRSessionSubsystem.h"
+#include "Core/FPSRFlowLog.h"
 #include "Weapon/FPSRLoadoutPoolDataAsset.h"
 #include "Weapon/FPSRWeaponDataAsset.h"
 #include "CommonInputModeTypes.h"
@@ -87,6 +88,7 @@ void UFPSRLobbyWidget::HandleReadyChanged()
 
 void UFPSRLobbyWidget::SelectLoadoutWeapon(int32 PoolIndex)
 {
+	FPSRFlowLog::Event(this, TEXT("LOBBY"), FString::Printf(TEXT("SelectLoadoutWeapon(%d)"), PoolIndex));
 	if (AFPSRLobbyPlayerController* PC = Cast<AFPSRLobbyPlayerController>(GetOwningPlayer()))
 	{
 		PC->ServerSelectLoadoutWeapon(PoolIndex);
@@ -95,6 +97,7 @@ void UFPSRLobbyWidget::SelectLoadoutWeapon(int32 PoolIndex)
 
 void UFPSRLobbyWidget::ToggleReady()
 {
+	FPSRFlowLog::Event(this, TEXT("LOBBY"), TEXT("ToggleReady"));
 	AFPSRLobbyPlayerController* PC = Cast<AFPSRLobbyPlayerController>(GetOwningPlayer());
 	const AFPSRPlayerState* PS = PC ? PC->GetPlayerState<AFPSRPlayerState>() : nullptr;
 	if (PC && PS)
@@ -105,6 +108,7 @@ void UFPSRLobbyWidget::ToggleReady()
 
 void UFPSRLobbyWidget::RequestShowInvite()
 {
+	FPSRFlowLog::Event(this, TEXT("LOBBY"), TEXT("RequestShowInvite"));
 	if (const UGameInstance* GI = GetGameInstance())
 	{
 		if (UFPSRSessionSubsystem* Session = GI->GetSubsystem<UFPSRSessionSubsystem>())
@@ -116,6 +120,7 @@ void UFPSRLobbyWidget::RequestShowInvite()
 
 void UFPSRLobbyWidget::JoinLobbyByCode(const FString& Code)
 {
+	FPSRFlowLog::Event(this, TEXT("LOBBY"), FString::Printf(TEXT("JoinLobbyByCode('%s')"), *Code));
 	if (const UGameInstance* GI = GetGameInstance())
 	{
 		if (UFPSRSessionSubsystem* Session = GI->GetSubsystem<UFPSRSessionSubsystem>())

@@ -6,6 +6,7 @@
 #include "Core/FPSRPlayerState.h"
 #include "Core/FPSRGameFlowSettings.h"
 #include "Core/FPSRLogChannels.h"
+#include "Core/FPSRFlowLog.h"
 #include "GameFramework/SpectatorPawn.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/GameStateBase.h"
@@ -28,6 +29,7 @@ AFPSRLobbyGameMode::AFPSRLobbyGameMode()
 void AFPSRLobbyGameMode::PostLogin(APlayerController* NewPlayer)
 {
 	Super::PostLogin(NewPlayer);
+	FPSRFlowLog::Event(this, TEXT("LOBBY-GM"), FString::Printf(TEXT("PostLogin: %s"), NewPlayer ? *NewPlayer->GetName() : TEXT("null")));
 	// Fresh join: default state already, but reset is idempotent and covers a non-seamless return path.
 	ResetPlayerRunState(NewPlayer);
 	// A new (un-ready) participant joined — re-evaluate the start gate (cancels any armed countdown).
@@ -37,6 +39,7 @@ void AFPSRLobbyGameMode::PostLogin(APlayerController* NewPlayer)
 void AFPSRLobbyGameMode::Logout(AController* Exiting)
 {
 	Super::Logout(Exiting);
+	FPSRFlowLog::Event(this, TEXT("LOBBY-GM"), FString::Printf(TEXT("Logout: %s"), Exiting ? *Exiting->GetName() : TEXT("null")));
 	// A participant left — re-evaluate the start gate, but DEFER to next tick: Super::Logout does not necessarily
 	// remove the exiting PlayerState from GameState->PlayerArray before this returns, so an immediate re-eval could
 	// still count the leaver (countdown stuck for an empty lobby, or failing to start when the rest are ready). (merge-gate P2)
@@ -116,6 +119,7 @@ void AFPSRLobbyGameMode::NotifyReadyChanged()
 		if (!World->GetTimerManager().IsTimerActive(ReadyStartTimer))
 		{
 			UE_LOG(LogFPSR, Log, TEXT("[Lobby] All %d participant(s) ready — starting run in %.1fs."), Participants, ReadyStartCountdown);
+			FPSRFlowLog::Event(this, TEXT("LOBBY-GM"), FString::Printf(TEXT("All %d ready - run countdown %.1fs"), Participants, ReadyStartCountdown));
 			World->GetTimerManager().SetTimer(ReadyStartTimer, this, &AFPSRLobbyGameMode::StartRunNow, FMath::Max(0.01f, ReadyStartCountdown), false);
 			// Publish the end stamp so every lobby client (not just the host) can show the countdown.
 			if (GS)
@@ -127,6 +131,7 @@ void AFPSRLobbyGameMode::NotifyReadyChanged()
 	else if (World->GetTimerManager().IsTimerActive(ReadyStartTimer))
 	{
 		UE_LOG(LogFPSR, Log, TEXT("[Lobby] Ready countdown cancelled (a participant is no longer ready or left)."));
+		FPSRFlowLog::Event(this, TEXT("LOBBY-GM"), TEXT("Run countdown cancelled"));
 		World->GetTimerManager().ClearTimer(ReadyStartTimer);
 		if (GS)
 		{
@@ -154,6 +159,7 @@ void AFPSRLobbyGameMode::StartRunNow()
 	if (UWorld* World = GetWorld(); World && RunPackage != NAME_None)
 	{
 		UE_LOG(LogFPSR, Log, TEXT("[Lobby] Starting run — traveling to %s"), *RunPackage.ToString());
+		FPSRFlowLog::Event(this, TEXT("LOBBY-GM"), FString::Printf(TEXT("StartRun -> ServerTravel %s"), *RunPackage.ToString()));
 		World->ServerTravel(RunPackage.ToString() + TEXT("?listen"));
 	}
 	else
