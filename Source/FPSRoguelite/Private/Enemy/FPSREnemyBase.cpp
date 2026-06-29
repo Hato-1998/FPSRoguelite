@@ -76,7 +76,13 @@ void AFPSREnemyBase::Activate(const FVector& Location)
 	SetActorLocation(Location);
 	SetActorHiddenInGame(false);
 	SetActorEnableCollision(true);
-	FlushNetDormancy();
+	// Wake the pooled actor for its WHOLE active life so its server movement (AddActorWorldOffset each pass)
+	// replicates to clients. A pooled reuse returns from DORM_DormantAll, and FlushNetDormancy would force only ONE
+	// update — the still-dormant enemy then stops streaming its transform (invisible / frozen on clients while the
+	// server enemy keeps moving and dealing damage), and the death hide set in Deactivate never reaches them (zombie).
+	// DORM_Awake here + DORM_DormantAll in Deactivate makes the awake->dormant transition flush the final
+	// hidden/dead state. Mirrors the projectile pool recipe (FPSRProjectile::Activate/Deactivate).
+	SetNetDormancy(DORM_Awake);
 
 	if (HealthComponent)
 	{
