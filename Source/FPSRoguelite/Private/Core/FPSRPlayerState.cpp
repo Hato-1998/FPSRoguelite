@@ -52,6 +52,17 @@ void AFPSRPlayerState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Out
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRPlayerState, AllWeaponsMods, Params);
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRPlayerState, SelectedWeapon, Params);
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRPlayerState, bReady, Params);
+	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRPlayerState, LobbySeatIndex, Params);
+}
+
+void AFPSRPlayerState::SetLobbySeatIndex(int32 NewSeat)
+{
+	if (!HasAuthority() || LobbySeatIndex == NewSeat)
+	{
+		return;
+	}
+	LobbySeatIndex = NewSeat;
+	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRPlayerState, LobbySeatIndex, this);
 }
 
 bool AFPSRPlayerState::ConsumeRerollCharge()

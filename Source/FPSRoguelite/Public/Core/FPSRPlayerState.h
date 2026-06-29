@@ -115,6 +115,16 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "FPSR|Lobby")
 	FOnReadyChanged OnReadyChanged;
 
+	/** Lobby podium seat index (0..NumPodiumSlots-1), server-assigned on lobby entry so each co-op player occupies a
+	 *  distinct podium slot (B3b — replaces the engine's random ChoosePlayerStart that let two players share a spot).
+	 *  INDEX_NONE until assigned. Replicated so clients can map seat->podium for per-seat cosmetics; placement itself
+	 *  is server-only (AFPSRLobbyGameMode::ChoosePlayerStart). Lobby-only — reset each lobby entry, not carried into the run. */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Lobby")
+	int32 GetLobbySeatIndex() const { return LobbySeatIndex; }
+
+	/** Server: set this player's lobby podium seat (B3b). Idempotent; replicates to all. */
+	void SetLobbySeatIndex(int32 NewSeat);
+
 	/** Server: track a passive ability granted by a character-passive card (U18c), so the run-reset can clear it.
 	 *  bIsDamageEventListener bumps the DealtDamage listener count (drives the cheap ApplyDamage event-send gate so
 	 *  players without such a passive pay nothing on the hot damage path). Idempotent per handle is the caller's job. */
@@ -199,6 +209,11 @@ private:
 	/** Lobby ready flag (U11a). Replicated to all so every client's lobby list/podium shows each player's state. */
 	UPROPERTY(ReplicatedUsing = OnRep_Ready)
 	bool bReady = false;
+
+	/** Lobby podium seat (B3b). See GetLobbySeatIndex. Plain Replicated (no OnRep — placement is server-side; the
+	 *  replication only lets clients map seat->podium for future per-seat UI). */
+	UPROPERTY(Replicated)
+	int32 LobbySeatIndex = INDEX_NONE;
 
 	/** Server-only: passive ability specs granted by character-passive cards this run (U18c). Not replicated —
 	 *  ability specs are server ASC state. Cleared (ClearAbility) on ResetRunState so they never leak to the next run

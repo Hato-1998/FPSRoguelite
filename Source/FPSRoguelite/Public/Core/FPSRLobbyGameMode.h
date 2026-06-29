@@ -36,11 +36,28 @@ protected:
 	virtual void Logout(AController* Exiting) override;
 	virtual void HandleSeamlessTravelPlayer(AController*& C) override;
 
+	/** Deterministic per-seat placement (B3b): return the PlayerStart tagged "Podium{seat}" for this player's
+	 *  assigned LobbySeatIndex so 4 co-op players occupy 4 distinct podiums instead of the engine's random pick.
+	 *  Falls back to Super when the seat is unassigned or the tagged start is missing. */
+	virtual AActor* ChoosePlayerStart_Implementation(AController* Player) override;
+
+	/** Always place via ChoosePlayerStart (never a cached StartSpot) so seamless-return players still seat by index. */
+	virtual bool ShouldSpawnAtStartSpot(AController* Player) override { return false; }
+
 	/** Seconds between "everyone ready" and the run start, giving players a beat to back out (un-ready cancels it). */
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Lobby")
 	float ReadyStartCountdown = 3.0f;
 
+	/** Podium slots in L_Lobby — content must place this many PlayerStarts tagged Podium0..Podium{N-1} (B3b). */
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Lobby")
+	int32 NumPodiumSlots = 4;
+
 private:
+	/** Server: assign the lowest free podium seat to this controller's PlayerState. Called from BOTH spawn paths
+	 *  (PostLogin fresh join, HandleSeamlessTravelPlayer post-run return) BEFORE Super spawns the pawn, so
+	 *  ChoosePlayerStart reads a valid seat. A departed player's PlayerState leaves PlayerArray, freeing its seat. */
+	void AssignSeat(AController* C) const;
+
 	/** Reset the player's per-run progression to a fresh-run baseline (idempotent; server authority). */
 	void ResetPlayerRunState(AController* C) const;
 
