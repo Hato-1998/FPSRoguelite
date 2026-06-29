@@ -149,6 +149,11 @@ void AFPSRPlayerController::GrantWeaponUnlock()
 	}
 	if (AFPSRPlayerState* PS = GetPlayerState<AFPSRPlayerState>())
 	{
+		// Dead players don't participate in card/weapon-unlock selection (mission-clear grant skips them).
+		if (!PS->IsAlive())
+		{
+			return;
+		}
 		PS->AddWeaponUnlockPick();
 	}
 }

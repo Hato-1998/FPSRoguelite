@@ -59,19 +59,23 @@ void AFPSRGameState::AddSharedXP(int32 Amount)
 	{
 		for (APlayerState* PS : PlayerArray)
 		{
-			if (AFPSRPlayerState* FPS = Cast<AFPSRPlayerState>(PS))
+			AFPSRPlayerState* FPS = Cast<AFPSRPlayerState>(PS);
+			// Dead players don't participate in level-up selection — grant them no card / weapon-unlock picks
+			// (server-authoritative bIsDead). This also keeps them out of the RefreshPauseState freeze gate below.
+			if (!FPS || !FPS->IsAlive())
 			{
-				for (int32 i = 0; i < LevelsGained; ++i)
+				continue;
+			}
+			for (int32 i = 0; i < LevelsGained; ++i)
+			{
+				FPS->AddCardPick();
+			}
+			// Weapon-unlock milestone picks: one per milestone level crossed this XP gain (Game.MD §2-3-4).
+			for (int32 L = PrevLevel + 1; L <= PartyLevel; ++L)
+			{
+				if (WeaponUnlockMilestones.Contains(L))
 				{
-					FPS->AddCardPick();
-				}
-				// Weapon-unlock milestone picks: one per milestone level crossed this XP gain (Game.MD §2-3-4).
-				for (int32 L = PrevLevel + 1; L <= PartyLevel; ++L)
-				{
-					if (WeaponUnlockMilestones.Contains(L))
-					{
-						FPS->AddWeaponUnlockPick();
-					}
+					FPS->AddWeaponUnlockPick();
 				}
 			}
 		}
@@ -170,7 +174,9 @@ void AFPSRGameState::RefreshPauseState()
 	for (APlayerState* PS : PlayerArray)
 	{
 		AFPSRPlayerState* FPS = Cast<AFPSRPlayerState>(PS);
-		if (!FPS)
+		// Dead players are excluded from card selection: no offer is presented and they never count toward the
+		// freeze, so a dead teammate can't soft-lock the resume for everyone (mirrors the AddSharedXP grant gate).
+		if (!FPS || !FPS->IsAlive())
 		{
 			continue;
 		}
