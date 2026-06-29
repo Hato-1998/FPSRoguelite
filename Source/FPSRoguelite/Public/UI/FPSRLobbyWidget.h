@@ -51,6 +51,13 @@ protected:
 	/** Establish menu input mode (menu input, no mouse capture) — mirrors the main menu. */
 	virtual TOptional<FUIInputConfig> GetDesiredInputConfig() const override;
 
+	/** Provide a focus target so CommonUI focuses the lobby (not the game viewport) when it activates. Without this,
+	 *  CommonUI logs "No focus target ... focusing the game viewport" and keyboard/gamepad + CommonUI input actions
+	 *  (Ready/Invite/Join) are dead in the lobby (mouse still works via hit-testing). Returns the first interactive
+	 *  button found in the widget tree. (The other CommonUI menus share this latent gap; the lobby is fixed first
+	 *  because it is keyboard-action driven.) */
+	virtual UWidget* NativeGetDesiredFocusTarget() const override;
+
 	/** Pick the loadout weapon at the given pool index (routes to the server-authoritative lobby PC RPC). */
 	UFUNCTION(BlueprintCallable, Category = "FPSR|Lobby")
 	void SelectLoadoutWeapon(int32 PoolIndex);
