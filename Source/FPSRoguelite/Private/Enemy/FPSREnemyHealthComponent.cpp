@@ -69,6 +69,12 @@ void UFPSREnemyHealthComponent::ResetForReuse()
 
 	bDead = false;
 	MARK_PROPERTY_DIRTY_FROM_NAME(UFPSREnemyHealthComponent, bDead, this);
+
+	// Repaint the bound health bar to full on the LISTEN-SERVER HOST (A1). The host has no OnRep, so without this it
+	// would keep the last ~0% paint from the prior life until the next hit. Clients already get this for free: the
+	// reused actor's Health replicates 0 -> MaxHealth and OnRep_Health fires the same broadcast, so this is purely
+	// host/client symmetry (the bar hides at full health; full-health delta is the same one clients already handle).
+	OnHealthChanged.Broadcast(Health, MaxHealth);
 }
 
 void UFPSREnemyHealthComponent::InitializeMaxHealth(float NewMaxHealth)

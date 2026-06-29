@@ -162,6 +162,10 @@ void AFPSRGameMode::EndRun(EFPSRRunOutcome Outcome)
 	if (AFPSRGameState* GS = GetGameState<AFPSRGameState>())
 	{
 		GS->EndRunFreeze();
+		// Clear the HUD mission progress so a partial capture/hold bar doesn't strand behind the result screen (B1).
+		// Victory already clears it via EnterBoss -> DestroyActiveMission; this covers the Defeat path (which freezes
+		// without destroying the active mission) and is a harmless no-op when no mission is active.
+		GS->SetMissionProgress(0.0f);
 	}
 }
 
