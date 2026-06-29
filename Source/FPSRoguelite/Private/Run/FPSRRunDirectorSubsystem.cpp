@@ -75,6 +75,14 @@ void UFPSRRunDirectorSubsystem::StartRun()
 	bBossStarted = false;
 	NextRunLogTime = 30.0f;
 
+	// Publish the schedule to the GameState so every client's HUD can lay out the run-timeline bar (window markers +
+	// boss endpoint) (B2), and reset the replicated mission progress (B1).
+	if (AFPSRGameState* GS = GetGS())
+	{
+		GS->SetRunSchedule(ActiveSchedule);
+		GS->SetMissionProgress(0.0f);
+	}
+
 	// Push schedule-driven spawn pacing to the spawn subsystem (the swarm fill rate — how fast it builds toward the
 	// target alive count). Both the per-tick batch (MaxSpawnPerTick) and the tick interval (SpawnIntervalSeconds) are
 	// tunable on DA_RunSchedule without further code changes; together they set the per-second spawn pace.
@@ -231,6 +239,9 @@ void UFPSRRunDirectorSubsystem::DirectorTick()
 	// --- Combat: advance the run clock, scale spawns, fire scheduled missions, trigger the boss. ---
 	RunClock += DirectorInterval * TimeScale;
 	GS->SetRunClockSeconds(RunClock);
+
+	// Mirror the active mission's progress to the GameState for the HUD capture/progress bar (B1). 0 when no mission.
+	GS->SetMissionProgress(ActiveMission ? ActiveMission->GetMissionProgress() : 0.0f);
 
 	UpdateSpawnIntensity();
 
@@ -412,10 +423,11 @@ void UFPSRRunDirectorSubsystem::DestroyActiveMission()
 		ActiveMission->Destroy();
 		ActiveMission = nullptr;
 	}
-	// Clear the replicated mission so the next mission's start banner fires cleanly (B10).
+	// Clear the replicated mission so the next mission's start banner fires cleanly (B10) + reset the HUD progress (B1).
 	if (AFPSRGameState* GS = GetGS())
 	{
 		GS->SetActiveMission(nullptr);
+		GS->SetMissionProgress(0.0f);
 	}
 }
 

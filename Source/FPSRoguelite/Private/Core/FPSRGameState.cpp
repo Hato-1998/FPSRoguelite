@@ -3,6 +3,7 @@
 #include "Core/FPSRGameState.h"
 #include "Core/FPSRPlayerState.h"
 #include "Core/FPSRPlayerController.h"
+#include "Run/FPSRRunScheduleDataAsset.h"
 #include "Net/UnrealNetwork.h"
 #include "Net/Core/PushModel/PushModel.h"
 #include "Engine/World.h"
@@ -29,6 +30,8 @@ void AFPSRGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLi
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRGameState, LobbyCountdownEndServerTime, Params);
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRGameState, ActiveBoss, Params);
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRGameState, ActiveMissionData, Params);
+	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRGameState, MissionProgress, Params);
+	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRGameState, RunScheduleAsset, Params);
 }
 
 void AFPSRGameState::SetActiveBoss(AFPSRBossBase* InBoss)
@@ -63,6 +66,46 @@ void AFPSRGameState::SetActiveMission(UFPSRMissionDataAsset* InMission)
 void AFPSRGameState::OnRep_ActiveMission()
 {
 	OnActiveMissionChanged.Broadcast(ActiveMissionData);
+}
+
+void AFPSRGameState::SetMissionProgress(float NewProgress)
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+	NewProgress = FMath::Clamp(NewProgress, 0.0f, 1.0f);
+	if (MissionProgress == NewProgress)
+	{
+		return;
+	}
+	// Dead-band to avoid per-director-tick churn, but always honor the exact endpoints (0 on clear, 1 on complete).
+	const bool bEndpoint = (NewProgress == 0.0f || NewProgress == 1.0f);
+	if (!bEndpoint && FMath::IsNearlyEqual(MissionProgress, NewProgress, 0.01f))
+	{
+		return;
+	}
+	MissionProgress = NewProgress;
+	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRGameState, MissionProgress, this);
+	OnRunStateChanged.Broadcast(); // host has no OnRep — refresh host HUD directly (B1)
+}
+
+void AFPSRGameState::SetRunSchedule(UFPSRRunScheduleDataAsset* InSchedule)
+{
+	if (!HasAuthority() || RunScheduleAsset == InSchedule)
+	{
+		return;
+	}
+	RunScheduleAsset = InSchedule;
+	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRGameState, RunScheduleAsset, this);
+	OnRunStateChanged.Broadcast(); // host has no OnRep — refresh host HUD directly (B2)
+}
+
+float AFPSRGameState::GetRunTotalDuration() const
+{
+	// The boss endpoint from the authored schedule; a default when no schedule is set (test/fallback runs) matching
+	// the run director's FallbackBossTime so the bar still reads sensibly.
+	return RunScheduleAsset ? RunScheduleAsset->BossTime : 300.0f;
 }
 
 int32 AFPSRGameState::GetRequiredXP(int32 Level) const

@@ -8,6 +8,7 @@
 class UCapsuleComponent;
 class UStaticMeshComponent;
 class UFPSREnemyHealthComponent;
+class UWidgetComponent;
 
 /** Lightweight swarm enemy (P1 test version: manual chase steering, engine cube placeholder).
  *  P2 replaces movement with flow-field + pooling. NOT GAS-based. */
@@ -30,6 +31,20 @@ public:
 	 *  movement subsystem's batched pass (flow-field + separation). ScaledDeltaSeconds is the real delta
 	 *  times this enemy's LOD stride so throttled enemies still cover the right distance. */
 	void TickServerMovement(const FVector& MoveDirection, float ScaledDeltaSeconds);
+
+	/** Server: assign an authored exit path (world-space waypoints) the enemy follows OUT of its spawn structure
+	 *  (e.g. a pipe/box that the flow-field can't path out of) before reverting to flow-field player-chase at the
+	 *  final waypoint. Empty = no path (immediate chase). Set right after Activate by the spawn subsystem from the
+	 *  selected spawn point; cleared on Deactivate / overwritten on the next reuse. (C1) */
+	void SetExitPath(const TArray<FVector>& InWaypoints);
+
+	/** Server: true while the enemy is still following its authored exit path (not yet handed off to the flow-field). */
+	bool IsFollowingExitPath() const { return bFollowingExitPath; }
+
+	/** Server: if following the exit path, advance past any reached waypoint and output the unit XY steer direction to
+	 *  the current target (returns true). Returns false once the path is exhausted or abandoned (stall timeout) — the
+	 *  caller then steers via the flow-field. ScaledDeltaSeconds drives the stall safety timer. */
+	bool ConsumeExitPathSteering(const FVector& MyLocation, float ScaledDeltaSeconds, FVector& OutDir);
 
 	/** Distance at which the enemy stops advancing toward a player (used by the movement subsystem). */
 	float GetStopDistance() const { return StopDistance; }
@@ -63,6 +78,21 @@ protected:
 
 	UFUNCTION()
 	void HandleDeath(AActor* DeadActor, AActor* Killer);
+
+	/** Server + clients: force the world-space health-bar widget (a BP-added UWidgetComponent) to exist now — it can
+	 *  otherwise be created lazily on first render, after BeginPlay, leaving the BP bind on a null widget — then fire
+	 *  OnHealthBarReady so the BP binds it to the health component (A1/B20). Runs on clients too: the bar is a client
+	 *  visual and OnHealthChanged is client-fired via OnRep_Health (B12). The widget + health component persist across
+	 *  pooling (the actor is reused, not destroyed), so this once-per-lifetime bind stays valid for every reuse. */
+	void InitHealthBarWidget();
+
+	/** BP hook (fired by InitHealthBarWidget): the BP does GetUserWidgetObject -> Cast(WBP_EnemyHealthBar) ->
+	 *  InitHealthComp(GetHealthComponent()) so the bar/floating-damage widget binds OnHealthChanged. */
+	UFUNCTION(BlueprintImplementableEvent, Category = "FPSR|Enemy")
+	void OnHealthBarReady();
+
+	/** Reset exit-path follow state (on Deactivate / before a new SetExitPath). */
+	void ClearExitPath();
 
 	UPROPERTY(VisibleAnywhere, Category = "FPSR|Enemy")
 	TObjectPtr<UCapsuleComponent> Capsule;
@@ -140,4 +170,33 @@ protected:
 
 	/** Time constant (s) for the exponential decay of horizontal knockback (~0.25s feels like a shove, not a slide). */
 	static constexpr float KnockbackDecayTime = 0.18f;
+
+	// --- Authored exit path (C1) — server-only. Guides enemies spawned inside a structure (pipe/box) out to its
+	// mouth along designer waypoints before flow-field player-chase takes over, so they never jam inside concave
+	// geometry the flow-field can't path out of. ---
+
+	/** XY distance (cm) within which the current waypoint counts as reached (advance to the next). */
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Enemy|Movement")
+	float ExitWaypointReachRadius = 80.0f;
+
+	/** Safety: abandon a stalled exit path after this many seconds without reaching the current waypoint (misplaced /
+	 *  blocked waypoint) and hand off to the flow-field, so a bad path can never soft-lock an enemy. */
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Enemy|Movement")
+	float ExitPathTimeout = 15.0f;
+
+	/** Server-only: remaining authored waypoints (world space). Empty once handed off to the flow-field. */
+	UPROPERTY(Transient)
+	TArray<FVector> ExitPath;
+
+	/** Server-only: index of the current target waypoint within ExitPath. */
+	UPROPERTY(Transient)
+	int32 ExitPathIndex = 0;
+
+	/** Server-only: true while still following the exit path. */
+	UPROPERTY(Transient)
+	bool bFollowingExitPath = false;
+
+	/** Server-only: seconds since the last waypoint advance (stall timer for ExitPathTimeout). */
+	UPROPERTY(Transient)
+	float ExitPathElapsed = 0.0f;
 };

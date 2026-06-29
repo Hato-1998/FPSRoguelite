@@ -7,6 +7,7 @@
 
 class AFPSRBossBase;
 class UFPSRMissionDataAsset;
+class UFPSRRunScheduleDataAsset;
 
 /** Macro run phase. Combat = normal run / mission window; Boss = final boss (no timer, no missions).
  *  Global freeze during card selection is the separate bRunPaused flag, independent of the phase. */
@@ -153,6 +154,27 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "FPSR|Run")
 	FOnActiveMissionChanged OnActiveMissionChanged;
 
+	/** Replicated active-mission progress 0..1 for the HUD capture/progress bar (B1). Meaningful while
+	 *  GetActiveMission() != null; 0 otherwise. Driven by the run director from the active mission actor (server). */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Run")
+	float GetMissionProgress() const { return MissionProgress; }
+
+	/** Server: update the replicated mission progress (low-frequency UI mirror, dead-banded). */
+	void SetMissionProgress(float NewProgress);
+
+	/** Replicated run schedule (B2) — set once at run start so a client HUD can read the mission windows + boss time
+	 *  to lay out the run-timeline bar (window markers + boss endpoint). Null = built-in fallback (no authored schedule). */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Run")
+	UFPSRRunScheduleDataAsset* GetRunSchedule() const { return RunScheduleAsset; }
+
+	/** Total run duration (seconds) = the boss time from the schedule (or a default when none is set). The timeline bar
+	 *  fills GetRunClockSeconds()/this and the boss icon sits at the end. (B2) */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Run")
+	float GetRunTotalDuration() const;
+
+	/** Server: set the run schedule reference (called by the run director at StartRun). Replicates to all. */
+	void SetRunSchedule(UFPSRRunScheduleDataAsset* InSchedule);
+
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 protected:
@@ -214,6 +236,16 @@ protected:
 	 *  replicates cleanly (same as SelectedWeapon). Set/cleared by the run director (server); drives the HUD banner. */
 	UPROPERTY(ReplicatedUsing = OnRep_ActiveMission)
 	TObjectPtr<UFPSRMissionDataAsset> ActiveMissionData = nullptr;
+
+	/** Active-mission progress 0..1 (B1). Shares OnRep_RunState (re-broadcasts OnRunStateChanged on clients so the HUD
+	 *  progress bar refreshes in the same handler as the run clock). Server-driven by the run director, dead-banded. */
+	UPROPERTY(ReplicatedUsing = OnRep_RunState)
+	float MissionProgress = 0.0f;
+
+	/** Run schedule (B2) — replicated once at run start so a client HUD can read MissionWindows + BossTime to lay out
+	 *  the timeline bar. Hard ref like ActiveMissionData (always-loaded primary asset). Set by the run director. */
+	UPROPERTY(ReplicatedUsing = OnRep_RunState)
+	TObjectPtr<UFPSRRunScheduleDataAsset> RunScheduleAsset = nullptr;
 
 	/** Friendly-player damage multiplier while friendly fire is on (editor-tunable; 0.5 = half). */
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Run")

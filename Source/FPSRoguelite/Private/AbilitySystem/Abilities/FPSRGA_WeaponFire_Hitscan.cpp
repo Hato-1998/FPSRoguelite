@@ -106,12 +106,19 @@ void UFPSRGA_WeaponFire_Hitscan::ActivateAbility(
 	}
 
 	// Add bloom from sustained fire, then tighten spread while aiming down sights.
+	// C2: while ADS, the shot is DETERMINISTIC — the bullet follows the crosshair exactly so the (already
+	// deterministic) camera recoil pattern IS the learnable spray; the random cone is hip-fire only. Captured here
+	// (FireComp scope) and consumed at the trace below. Multi-pellet weapons (shotgun) keep a cone even in ADS
+	// (gated at the trace) so a single-line pattern doesn't collapse all pellets onto one ray.
+	bool bADSDeterministic = false;
 	if (UFPSRWeaponFireComponent* FireComp = Avatar->FindComponentByClass<UFPSRWeaponFireComponent>())
 	{
 		const float Bloom = FireComp->GetCurrentBloom();
+		const bool bAiming = FireComp->IsAiming();
 		SpreadDegrees = Stats
-			? UFPSRWeaponFireComponent::ComputeSpreadDegrees(*Stats, Bloom, FireComp->IsAiming())
+			? UFPSRWeaponFireComponent::ComputeSpreadDegrees(*Stats, Bloom, bAiming)
 			: SpreadDegrees + Bloom;
+		bADSDeterministic = Stats && Stats->bHasADS && bAiming;
 	}
 
 	// Behavior fragments (P4-B-2): build the per-activation context and let fragments adjust the shot count
@@ -270,7 +277,11 @@ void UFPSRGA_WeaponFire_Hitscan::ActivateAbility(
 	{
 		for (int32 Pellet = 0; Pellet < PelletCount; ++Pellet)
 		{
-			const FVector PelletDir = (SpreadDegrees > 0.0f)
+			// Hip-fire: random cone (bloom scatter). ADS single-pellet (C2): deterministic — bullet to the crosshair,
+			// the camera recoil pattern is the learnable spray (also keeps server/client traces in agreement). Shotgun
+			// (PelletCount>1) keeps a cone even in ADS so its pellets still spread.
+			const bool bDeterministicShot = bADSDeterministic && PelletCount == 1;
+			const FVector PelletDir = (!bDeterministicShot && SpreadDegrees > 0.0f)
 				? FMath::VRandCone(BaseDir, FMath::DegreesToRadians(SpreadDegrees))
 				: BaseDir;
 			const FVector End = Start + PelletDir * Range;

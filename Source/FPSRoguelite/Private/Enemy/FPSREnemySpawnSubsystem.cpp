@@ -379,24 +379,38 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 			continue;
 		}
 
-		// Flow-field direction toward players (fall back to direct-to-nearest if the field isn't ready).
-		FVector FlowDir = FlowField ? FlowField->SampleFlowDirection(EnemyLocation) : FVector::ZeroVector;
-		if (FlowDir.IsNearlyZero())
+		const float ScaledDelta = DeltaTime * UpdateStride;
+
+		// Authored exit path (C1): an enemy spawned INSIDE a structure (pipe/box) files OUT along its waypoints first,
+		// ignoring the flow-field and separation (the route is narrow — separation would shove it into the walls). At
+		// the final waypoint ConsumeExitPathSteering returns false and the enemy hands off to flow-field chase below.
+		FVector ExitDir;
+		if (Enemy->ConsumeExitPathSteering(EnemyLocation, ScaledDelta, ExitDir))
 		{
-			FlowDir = (BestPlayerLocation - EnemyLocation);
-			FlowDir.Z = 0.0f;
-			FlowDir = FlowDir.GetSafeNormal();
+			ExitDir.Z = 0.0f;
+			Enemy->TickServerMovement(ExitDir, ScaledDelta);
 		}
+		else
+		{
+			// Flow-field direction toward players (fall back to direct-to-nearest if the field isn't ready).
+			FVector FlowDir = FlowField ? FlowField->SampleFlowDirection(EnemyLocation) : FVector::ZeroVector;
+			if (FlowDir.IsNearlyZero())
+			{
+				FlowDir = (BestPlayerLocation - EnemyLocation);
+				FlowDir.Z = 0.0f;
+				FlowDir = FlowDir.GetSafeNormal();
+			}
 
-		// Stop advancing toward the player within StopDistance (still separate to avoid stacking on them).
-		const float StopDistSq = FMath::Square(Enemy->GetStopDistance());
-		const FVector Desired = (BestDistSq > StopDistSq) ? FlowDir : FVector::ZeroVector;
+			// Stop advancing toward the player within StopDistance (still separate to avoid stacking on them).
+			const float StopDistSq = FMath::Square(Enemy->GetStopDistance());
+			const FVector Desired = (BestDistSq > StopDistSq) ? FlowDir : FVector::ZeroVector;
 
-		// Combine flow + separation; TickServerMovement normalizes and moves at CurrentMoveSpeed.
-		FVector MoveDir = Desired + ComputeSeparation(i, Locations, SpatialHash) * SeparationStrength;
-		MoveDir.Z = 0.0f;
+			// Combine flow + separation; TickServerMovement normalizes and moves at CurrentMoveSpeed.
+			FVector MoveDir = Desired + ComputeSeparation(i, Locations, SpatialHash) * SeparationStrength;
+			MoveDir.Z = 0.0f;
 
-		Enemy->TickServerMovement(MoveDir, DeltaTime * UpdateStride);
+			Enemy->TickServerMovement(MoveDir, ScaledDelta);
+		}
 
 		// Recycle an enemy that has fallen out of the playable world (walked into a pit / no static floor under
 		// it) so the endless-fall path can't pin a director slot forever. Safe here: Agents/Locations/SpatialHash
@@ -480,13 +494,14 @@ void UFPSREnemySpawnSubsystem::TickDirector()
 	{
 		FVector SpawnAt;
 		bool bSnapToGround = true;
+		const AFPSREnemySpawnPoint* SpawnPoint = nullptr;
 		// Spawn ONLY at designer spawn points: when none qualifies this tick (e.g. all in view), stop and retry on the
 		// next director tick rather than falling back to a player-proximity ring (removed 2026-06-24).
-		if (!ComputeSpawnLocation(SpawnAt, bSnapToGround))
+		if (!ComputeSpawnLocation(SpawnAt, bSnapToGround, SpawnPoint))
 		{
 			break;
 		}
-		if (AcquireEnemy(SpawnAt, bSnapToGround) == nullptr)
+		if (AcquireEnemy(SpawnAt, bSnapToGround, SpawnPoint) == nullptr)
 		{
 			break;
 		}
@@ -494,14 +509,14 @@ void UFPSREnemySpawnSubsystem::TickDirector()
 	}
 }
 
-bool UFPSREnemySpawnSubsystem::ComputeSpawnLocation(FVector& OutLocation, bool& bOutSnapToGround) const
+bool UFPSREnemySpawnSubsystem::ComputeSpawnLocation(FVector& OutLocation, bool& bOutSnapToGround, const AFPSREnemySpawnPoint*& OutPoint) const
 {
 	// The swarm spawns ONLY at designer-placed spawn points that are out of every player's view (Game.MD §2-8, §1
 	// fixed map). The player-proximity/ring fallback was removed (user 2026-06-24): when no point qualifies this tick
 	// (none placed, or all currently in view / too close), return false so the director skips spawning and retries
 	// next tick. The designer point is authoritative — keep its exact Z (no ground re-snap onto a ceiling/roof for
 	// indoor placements, Codex review 2026-06-09).
-	if (TrySelectSpawnPoint(OutLocation))
+	if (TrySelectSpawnPoint(OutLocation, OutPoint))
 	{
 		bOutSnapToGround = false;
 		return true;
@@ -509,8 +524,10 @@ bool UFPSREnemySpawnSubsystem::ComputeSpawnLocation(FVector& OutLocation, bool& 
 	return false;
 }
 
-bool UFPSREnemySpawnSubsystem::TrySelectSpawnPoint(FVector& OutLocation) const
+bool UFPSREnemySpawnSubsystem::TrySelectSpawnPoint(FVector& OutLocation, const AFPSREnemySpawnPoint*& OutPoint) const
 {
+	OutPoint = nullptr;
+
 	const UWorld* World = GetWorld();
 	if (!World || SpawnPoints.Num() == 0)
 	{
@@ -618,7 +635,9 @@ bool UFPSREnemySpawnSubsystem::TrySelectSpawnPoint(FVector& OutLocation) const
 	// authoritative spawn transform (§1 fixed map). If the same point is picked more than once in a tick, the
 	// co-located enemies are pushed apart at the source by ComputeSeparation's coincident handling rather than by
 	// moving the spawn into possibly-unsafe wall/ledge geometry.
-	OutLocation = Candidates[FMath::RandRange(0, Candidates.Num() - 1)]->GetActorLocation();
+	const AFPSREnemySpawnPoint* Chosen = Candidates[FMath::RandRange(0, Candidates.Num() - 1)];
+	OutLocation = Chosen->GetActorLocation();
+	OutPoint = Chosen; // carries the authored exit path (C1) to AcquireEnemy
 	return true;
 }
 
@@ -646,7 +665,7 @@ FVector UFPSREnemySpawnSubsystem::SnapToGround(const FVector& Location) const
 	return Location; // no floor found (e.g. off-map): keep the original candidate
 }
 
-AFPSREnemyBase* UFPSREnemySpawnSubsystem::AcquireEnemy(const FVector& Location, bool bSnapToGround)
+AFPSREnemyBase* UFPSREnemySpawnSubsystem::AcquireEnemy(const FVector& Location, bool bSnapToGround, const AFPSREnemySpawnPoint* SpawnPoint)
 {
 	UWorld* World = GetWorld();
 	if (!World || !HasServerAuthority())
@@ -686,6 +705,20 @@ AFPSREnemyBase* UFPSREnemySpawnSubsystem::AcquireEnemy(const FVector& Location, 
 
 	// Activate and add to active set.
 	Enemy->Activate(SpawnLocation);
+
+	// Structured spawner (C1): if this point authored an exit path, the enemy follows the waypoints OUT of the spawn
+	// structure (pipe/box) before flow-field player-chase takes over — so it never jams inside concave geometry the
+	// flow-field can't path out of. Applied after Activate (which clears any leftover path from a prior life).
+	if (SpawnPoint)
+	{
+		TArray<FVector> ExitWaypoints;
+		SpawnPoint->GetExitPathWorldPoints(ExitWaypoints);
+		if (ExitWaypoints.Num() > 0)
+		{
+			Enemy->SetExitPath(ExitWaypoints);
+		}
+	}
+
 	ActiveEnemies.Add(Enemy);
 	return Enemy;
 }

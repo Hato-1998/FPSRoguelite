@@ -34,8 +34,10 @@ public:
 
 	/** Acquire an enemy from the pool or spawn a new one at the given location.
 	 *  bSnapToGround=true traces down to the static floor (procedural/ring spawns). Pass false for an
-	 *  authoritative designer-placed point whose Z must be preserved exactly (Game.MD §1 fixed-map placement). */
-	AFPSREnemyBase* AcquireEnemy(const FVector& Location, bool bSnapToGround = true);
+	 *  authoritative designer-placed point whose Z must be preserved exactly (Game.MD §1 fixed-map placement).
+	 *  SpawnPoint (optional): if it has authored exit-path waypoints, the enemy follows them out of its spawn
+	 *  structure before flow-field chase takes over (C1). */
+	AFPSREnemyBase* AcquireEnemy(const FVector& Location, bool bSnapToGround = true, const AFPSREnemySpawnPoint* SpawnPoint = nullptr);
 
 	/** Release an enemy back to the dormant pool. */
 	void ReleaseEnemy(AFPSREnemyBase* Enemy);
@@ -89,8 +91,9 @@ private:
 
 	/** Pick a designer spawn point UNIFORMLY at random among those that are enabled, not visible to any player (FOV
 	 *  gate), satisfy their MinPlayerDistance, and whose spawn zone is active (an untagged point is always eligible).
-	 *  Returns false when none qualify (or none are placed) — the director then skips spawning this tick (no fallback). */
-	bool TrySelectSpawnPoint(FVector& OutLocation) const;
+	 *  Returns false when none qualify (or none are placed) — the director then skips spawning this tick (no fallback).
+	 *  OutPoint receives the chosen point (for its authored exit path, C1). */
+	bool TrySelectSpawnPoint(FVector& OutLocation, const AFPSREnemySpawnPoint*& OutPoint) const;
 
 	/** Batched server movement pass with distance LOD (replaces per-actor enemy Tick). */
 	void TickEnemyMovement(float DeltaTime);
@@ -105,7 +108,7 @@ private:
 	 *  when none qualify this tick — the swarm spawns ONLY at designer points (no player-proximity/ring fallback,
 	 *  removed 2026-06-24), so the director skips spawning until a point qualifies. Sets bOutSnapToGround=false (the
 	 *  designer point's Z is authoritative — no ground re-snap). */
-	bool ComputeSpawnLocation(FVector& OutLocation, bool& bOutSnapToGround) const;
+	bool ComputeSpawnLocation(FVector& OutLocation, bool& bOutSnapToGround, const AFPSREnemySpawnPoint*& OutPoint) const;
 
 	/** Trace down to the static floor under Location and return a ground-snapped spawn point (feet on
 	 *  the floor). Decouples spawn Z from the player's jump height. Falls back to Location if no floor hit. */
