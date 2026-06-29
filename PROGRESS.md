@@ -4,7 +4,16 @@
 > **작업 단계를 끝낼 때마다, 그리고 중단 전 반드시 이 파일을 갱신하고 커밋한다.**
 > 확정 설계·기획·코드구조·규칙은 `Game.md`(**SSOT 허브** → 도메인별 `Docs/SSOT/*.md`, 작업별 라우팅은 허브 §0-1), **완료 작업 상세는 `git log --oneline`**. 여기엔 *무엇을 했는지*만 요약한다.
 
-**최종 갱신: 2026-06-26**
+**최종 갱신: 2026-06-29**
+
+## 🔔 핸드오프 (2026-06-29) — U1 게이트+MP 테스트 완료(조건부 합격), 버그배치 25건 정리, 다음=Phase 1 MP 넷코드 수정
+> **이 세션(PM)**: U1 재미게이트(솔로) + 2-client/Steam E2E 멀티 테스트 완료 → **U1 = 조건부 합격**(핵심 루프 동작 / MP 동기화·피드백 결함 다수 → **Phase 1 MP 넷코드 수정 패키지 E2E 검증 후 U1 ✅ 확정**, 사용자 결정). 발견 결함을 시스템·리스크별 **25건 배치로 정리 = [`Docs/U1_PostGate_Fixes.md`](Docs/U1_PostGate_Fixes.md)**(5 Phase).
+> **⚠️ 작업트리 미커밋 = MP 수정 5건(범위 A, 빌드·검증·커밋 대기)**: ① Steam 넷드라이버 UE5.7 SteamSockets(`DefaultEngine.ini`·`.uproject`, **옛 `OnlineSubsystemSteam.SteamNetDriver` 무음실패→IpNet 폴백→join 즉시 튕김** 근본해결) ② 세션검색 `SEARCH_LOBBIES`(JoinByCode 0건) ③ 로비 조이너 카메라(`ApplyLobbyViewTarget`) ④ 사망자 레벨업 소프트락(`!IsAlive` 제외) ⑤ FlowLog 진단 서브시스템(신규 4파일+배선, `LogFPSRFlow`, `.gitignore logs/`). **미빌드 — Phase 1 첫 작업 = 빌드 통과 확인.**
+> **⛔ MP 검증 제약**: SteamSockets는 **패키지에서만 등록**(PIE/에디터 미등록) → MP 전부 **Development 패키지 2-PC/2계정 Steam E2E**로 검증(빌드 규약 [[build-output-folder-convention]]).
+> **버그 판단 17건 완료(2026-06-29, 워크플로 적대검증)** → 결정 반영 = `U1_PostGate_Fixes.md` §결정반영. 핵심: **사망모델=정식 DBNO 당겨옴**(A4·B17·B16·B2 통합, P5 앞당김, **DBNO 미니설계 선행**) · B13=예고형 선딜레이 · B18=공중 프리즈 낙하방지 · 연기 B8→U7·B20→P7·B3a→콘텐츠.
+> **다음 작업 = Phase 1A MP 복제 정합**(범위 A 5건 마무리 + B7 클라 적 동기화·B12 보스 체력바·B11 HP바·B2 Defeat UI·B4 아군 사격음·B3b 로비 슬롯) → **Phase 1B 사망모델/DBNO**(설계 선행). MP/세션/복제/RPC = **Opus 직접**(Haiku 위임 금지 [[haiku-delegation-security-wiring]]). 브랜치 `fix/mp-steam-e2e`. Phase 2~5(적 AI·프리즈 페이싱·UI 피드백·VFX)=후속.
+> **§5 perf 측정 보류**: 적 500 미도달(클라 적 동기화 B7 + 디렉터 램프 영향)로 정량 측정 못 함 → **B7 수정 후 재측정**. 클라 적 동기화(B7)·보스 체력바(B12) 복제 결함은 정성 발견.
+> **미커밋 콘텐츠(사용자, 무관)**: `Config/DefaultEditor.ini`·ZerinLabs `M_col_*_ORIG`.
 
 ## 🔔 핸드오프 (2026-06-26 d) — U1 패키지 준비 완료, 다음=U1 재미게이트(PIE 주도)
 > **이 세션(PM)**: W1 종결 반영 + **U1용 Development 패키지 빌드**(`Packaged/26_6_26_BuildTest_1/`, 소스 `b2c55d3`=net-freq 적500 perf 픽스 포함, `BUILD_INFO.txt` 동봉) + **U1 게이트 시트 커밋**(`Docs/U1_GateSheet.md`) + `GlobalDefaultGameMode` 경로 교정(쿡 경고 해소). 커밋 `6e9377a` push 완료. 빌드폴더 규약 메모리화(`Packaged/<YY_M_D>_BuildTest_<N>/`). main↔origin 동기화.
