@@ -19,6 +19,7 @@ void UFPSREnemyHealthComponent::BeginPlay()
 	{
 		Health = MaxHealth;
 		MARK_PROPERTY_DIRTY_FROM_NAME(UFPSREnemyHealthComponent, Health, this);
+		MARK_PROPERTY_DIRTY_FROM_NAME(UFPSREnemyHealthComponent, MaxHealth, this);
 	}
 }
 
@@ -29,6 +30,7 @@ void UFPSREnemyHealthComponent::GetLifetimeReplicatedProps(TArray<FLifetimePrope
 	FDoRepLifetimeParams Params;
 	Params.bIsPushBased = true;
 	DOREPLIFETIME_WITH_PARAMS_FAST(UFPSREnemyHealthComponent, Health, Params);
+	DOREPLIFETIME_WITH_PARAMS_FAST(UFPSREnemyHealthComponent, MaxHealth, Params);
 	DOREPLIFETIME_WITH_PARAMS_FAST(UFPSREnemyHealthComponent, bDead, Params);
 }
 
@@ -76,12 +78,11 @@ void UFPSREnemyHealthComponent::InitializeMaxHealth(float NewMaxHealth)
 		return;
 	}
 
-	// MaxHealth is server-side only (clamp reference); Health/bDead replicate. A runtime-set MaxHealth is therefore
-	// not visible to clients — fine for the scaffold (no client health bar). A boss health bar (U4/U12) that needs
-	// X/Max on clients would replicate MaxHealth then.
+	// MaxHealth replicates (B12) so a runtime-set value (boss/door) reaches clients for a correct health-bar percent.
 	MaxHealth = NewMaxHealth;
 	Health = NewMaxHealth;
 	MARK_PROPERTY_DIRTY_FROM_NAME(UFPSREnemyHealthComponent, Health, this);
+	MARK_PROPERTY_DIRTY_FROM_NAME(UFPSREnemyHealthComponent, MaxHealth, this);
 
 	bDead = false;
 	MARK_PROPERTY_DIRTY_FROM_NAME(UFPSREnemyHealthComponent, bDead, this);
@@ -89,5 +90,8 @@ void UFPSREnemyHealthComponent::InitializeMaxHealth(float NewMaxHealth)
 
 void UFPSREnemyHealthComponent::OnRep_Health()
 {
-	// Client cosmetic hook (health bar / hit flash later).
+	// Client-side mirror of the server's OnHealthChanged broadcast (B12). Fires when Health OR MaxHealth replicates
+	// (both share this RepNotify), so a client health bar / hit flash bound to OnHealthChanged repaints with the
+	// correct NewHealth/MaxHealth percent. The server fires the same delegate from the authoritative ApplyDamage.
+	OnHealthChanged.Broadcast(Health, MaxHealth);
 }
