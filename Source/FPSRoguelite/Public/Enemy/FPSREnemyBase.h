@@ -37,6 +37,11 @@ public:
 	float GetAttackRange() const { return AttackRange; }
 	float GetAttackDamage() const { return AttackDamage; }
 
+	/** The enemy's non-GAS health component — exposed so the on-damage HP bar (B11) and floating damage numbers (B20)
+	 *  WBPs can bind OnHealthChanged (client-fired via B12) and read GetHealth()/GetMaxHealth(). */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Enemy")
+	UFPSREnemyHealthComponent* GetHealthComponent() const { return HealthComponent; }
+
 	/** Server: true if the attack cooldown has elapsed at time Now. */
 	bool CanAttack(float Now) const { return (Now - LastAttackTime) >= AttackInterval; }
 
