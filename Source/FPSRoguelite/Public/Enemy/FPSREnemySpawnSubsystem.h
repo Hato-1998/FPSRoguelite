@@ -89,10 +89,10 @@ private:
 	 *  which rooms are active at start. */
 	void CacheSpawnRooms();
 
-	/** Pick a designer spawn point UNIFORMLY at random among those that are enabled, not visible to any player (FOV
-	 *  gate), satisfy their MinPlayerDistance, and whose spawn zone is active (an untagged point is always eligible).
-	 *  Returns false when none qualify (or none are placed) — the director then skips spawning this tick (no fallback).
-	 *  OutPoint receives the chosen point (for its authored exit path, C1). */
+	/** Pick a designer spawn point UNIFORMLY at random among those that are enabled, satisfy their MinPlayerDistance,
+	 *  and whose spawn zone is active (an untagged point is always eligible). No out-of-view (FOV) filter — enemies may
+	 *  spawn in view (user 2026-06-29). Returns false when none qualify (or none placed) — the director then skips
+	 *  spawning this tick (no fallback). OutPoint receives the chosen point (for its authored exit path, C1). */
 	bool TrySelectSpawnPoint(FVector& OutLocation, const AFPSREnemySpawnPoint*& OutPoint) const;
 
 	/** Batched server movement pass with distance LOD (replaces per-actor enemy Tick). */
@@ -187,10 +187,6 @@ private:
 	float SpawnInterval = 0.1f;
 
 	// --- Designer spawn points (Game.MD §2-8 / P4 backlog) ---
-
-	/** Half-angle (deg) of each player's "visible" cone; a point inside any player's cone is excluded so
-	 *  enemies appear out of view (behind/beside). Horizontal (XY) test. */
-	static constexpr float SpawnPointVisibilityHalfAngleDeg = 70.0f;
 
 	/** Designer-placed spawn anchors, cached once at world begin (server). May contain entries to null-check. */
 	UPROPERTY(Transient)

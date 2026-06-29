@@ -511,11 +511,12 @@ void UFPSREnemySpawnSubsystem::TickDirector()
 
 bool UFPSREnemySpawnSubsystem::ComputeSpawnLocation(FVector& OutLocation, bool& bOutSnapToGround, const AFPSREnemySpawnPoint*& OutPoint) const
 {
-	// The swarm spawns ONLY at designer-placed spawn points that are out of every player's view (Game.MD §2-8, §1
-	// fixed map). The player-proximity/ring fallback was removed (user 2026-06-24): when no point qualifies this tick
-	// (none placed, or all currently in view / too close), return false so the director skips spawning and retries
-	// next tick. The designer point is authoritative — keep its exact Z (no ground re-snap onto a ceiling/roof for
-	// indoor placements, Codex review 2026-06-09).
+	// The swarm spawns ONLY at designer-placed spawn points (Game.MD §2-8, §1 fixed map). The player-proximity/ring
+	// fallback was removed (user 2026-06-24) and the out-of-view (FOV) gate was removed (user 2026-06-29): a point is
+	// eligible regardless of whether it's in a player's view — designer placement + MinPlayerDistance + room zones
+	// control where/when. When no point qualifies this tick (none placed / wrong zone / too close), return false so the
+	// director skips spawning and retries next tick. The designer point is authoritative — keep its exact Z (no ground
+	// re-snap onto a ceiling/roof for indoor placements, Codex review 2026-06-09).
 	if (TrySelectSpawnPoint(OutLocation, OutPoint))
 	{
 		bOutSnapToGround = false;
@@ -534,10 +535,11 @@ bool UFPSREnemySpawnSubsystem::TrySelectSpawnPoint(FVector& OutLocation, const A
 		return false;
 	}
 
-	// Gather each local/remote player's view (camera) + pawn location once. Spawn points are filtered against
-	// ALL players so an enemy never pops into anyone's view.
-	struct FPlayerView { FVector CamLocation; FVector CamForward2D; };
-	TArray<FPlayerView, TInlineAllocator<4>> PlayerViews;
+	// Gather each player's location once for the MinPlayerDistance gate. The out-of-view (FOV) gate was REMOVED
+	// (user 2026-06-29): a point is eligible regardless of whether it lies in any player's view — designer placement
+	// + MinPlayerDistance + room zones now fully control where/when enemies appear, so a single visible point no
+	// longer starves spawns.
+	TArray<FVector, TInlineAllocator<4>> PlayerLocations;
 	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
 	{
 		const APlayerController* PC = It->Get();
@@ -548,21 +550,13 @@ bool UFPSREnemySpawnSubsystem::TrySelectSpawnPoint(FVector& OutLocation, const A
 		FVector CamLocation;
 		FRotator CamRotation;
 		PC->GetPlayerViewPoint(CamLocation, CamRotation);
-		FVector Forward2D = CamRotation.Vector();
-		Forward2D.Z = 0.0f;
-		if (!Forward2D.Normalize())
-		{
-			continue;
-		}
-		PlayerViews.Add({ CamLocation, Forward2D });
+		PlayerLocations.Add(CamLocation);
 	}
 
-	if (PlayerViews.Num() == 0)
+	if (PlayerLocations.Num() == 0)
 	{
-		return false; // no players to gate against — nothing to spawn this tick
+		return false; // no players present — nothing to spawn this tick
 	}
-
-	const float CosHalfVis = FMath::Cos(FMath::DegreesToRadians(SpawnPointVisibilityHalfAngleDeg));
 
 	// Build the eligible candidate set, then pick UNIFORMLY at random (weight + distance-falloff removed 2026-06-25):
 	// designer points are equal-probability, and the room/zone gate decides WHICH points are live this tick.
@@ -584,43 +578,19 @@ bool UFPSREnemySpawnSubsystem::TrySelectSpawnPoint(FVector& OutLocation, const A
 			continue;
 		}
 
-		const FVector PointLocation = Point->GetActorLocation();
-
-		// Nearest-player distance (XY) for the MinPlayerDistance gate + out-of-view test.
-		float NearestDistSq = TNumericLimits<float>::Max();
-		bool bVisibleToAnyPlayer = false;
-		for (const FPlayerView& View : PlayerViews)
+		// MinPlayerDistance gate (XY): keep spawns at least this far from the nearest player (no FOV test anymore).
+		if (Point->GetMinPlayerDistance() > 0.0f)
 		{
-			FVector ToPoint = PointLocation - View.CamLocation;
-			ToPoint.Z = 0.0f;
-			const float DistSq = ToPoint.SizeSquared();
-			NearestDistSq = FMath::Min(NearestDistSq, DistSq);
-
-			if (DistSq > KINDA_SMALL_NUMBER)
+			const FVector PointLocation = Point->GetActorLocation();
+			float NearestDistSq = TNumericLimits<float>::Max();
+			for (const FVector& PL : PlayerLocations)
 			{
-				const FVector Dir = ToPoint * FMath::InvSqrt(DistSq);
-				if (FVector::DotProduct(View.CamForward2D, Dir) > CosHalfVis)
-				{
-					bVisibleToAnyPlayer = true;
-					break; // inside this player's view cone — exclude the point
-				}
+				NearestDistSq = FMath::Min(NearestDistSq, FVector::DistSquaredXY(PL, PointLocation));
 			}
-			else
+			if (NearestDistSq < FMath::Square(Point->GetMinPlayerDistance()))
 			{
-				bVisibleToAnyPlayer = true; // a player is standing on the point
-				break;
+				continue;
 			}
-		}
-
-		if (bVisibleToAnyPlayer)
-		{
-			continue;
-		}
-
-		const float NearestDist = FMath::Sqrt(NearestDistSq);
-		if (Point->GetMinPlayerDistance() > 0.0f && NearestDist < Point->GetMinPlayerDistance())
-		{
-			continue;
 		}
 
 		Candidates.Add(Point);
