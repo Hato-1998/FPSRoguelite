@@ -4,6 +4,7 @@
 #include "Combat/FPSRCombatStatics.h"
 #include "Weapon/FPSRWeaponInstance.h"
 #include "Weapon/FPSRWeaponInventoryComponent.h"
+#include "Hero/FPSRCharacter.h"
 #include "GameFramework/Pawn.h"
 
 namespace FPSRWeaponHooks
@@ -14,6 +15,18 @@ namespace FPSRWeaponHooks
 		for (const TObjectPtr<UFPSRWeaponFragment>& Frag : Context.Instance->GetActiveFragments())
 		{
 			if (Frag) { Frag->OnFire(Context); }
+		}
+
+		// B4 (cosmetic): the server broadcasts the fire SFX to all clients so teammates hear each other's fire. This
+		// is the central per-shot, all-weapons fire-confirm site (every fire GA calls NotifyFire), so a new weapon GA
+		// gets remote fire audio for free. Gate on authority so only the server originates the multicast; the owner's
+		// own shot is played locally and MulticastFireCosmetics skips the locally-controlled owner (no double-play).
+		if (Context.bAuthority)
+		{
+			if (AFPSRCharacter* Char = Cast<AFPSRCharacter>(Context.Avatar))
+			{
+				Char->MulticastFireCosmetics();
+			}
 		}
 	}
 

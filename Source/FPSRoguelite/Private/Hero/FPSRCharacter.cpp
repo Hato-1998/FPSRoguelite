@@ -931,6 +931,47 @@ void AFPSRCharacter::PlayWeaponFireCosmetics()
 	}
 }
 
+void AFPSRCharacter::MulticastFireCosmetics_Implementation()
+{
+	// The owning client already played its predicted fire cosmetics locally (PlayWeaponFireCosmetics), so skip here
+	// to avoid double-play. On the listen-server host the host pawn is locally controlled and also skips (it heard
+	// its own shot). Only REMOTE observers fall through and hear the teammate's fire (B4).
+	if (IsLocallyControlled())
+	{
+		return;
+	}
+
+	// Resolve the fire sound from the REPLICATED inventory — the owner-only CachedFireSound is never set on remote
+	// machines (the equip cosmetic cache is IsLocallyControlled-gated). GetCurrentWeapon() is valid on every client
+	// (the inventory's Slots/CurrentSlotIndex replicate).
+	const UFPSRWeaponDataAsset* Weapon = WeaponInventory ? WeaponInventory->GetCurrentWeapon() : nullptr;
+	if (!Weapon || Weapon->FireSound.IsNull())
+	{
+		return;
+	}
+
+	// Coarse distance cull against the local viewer so a far-off teammate's shot doesn't spawn an audio component
+	// (the sound's own attenuation still shapes falloff for audible shots). Cheap belt at the <=4-player scale.
+	constexpr float FireSoundCullDistance = 8000.0f; // cm (~80 m)
+	if (const APlayerController* LocalPC = GetWorld() ? GetWorld()->GetFirstPlayerController() : nullptr)
+	{
+		if (const APawn* LocalPawn = LocalPC->GetPawn())
+		{
+			if (FVector::DistSquared(GetActorLocation(), LocalPawn->GetActorLocation()) > FMath::Square(FireSoundCullDistance))
+			{
+				return;
+			}
+		}
+	}
+
+	// Spatialized one-shot at the shooter so the sound comes from the teammate's position (the muzzle socket isn't
+	// available on remote pawns; actor location is accurate enough for positional fire audio).
+	if (USoundBase* FireSound = Weapon->FireSound.LoadSynchronous())
+	{
+		UGameplayStatics::PlaySoundAtLocation(this, FireSound, GetActorLocation());
+	}
+}
+
 UAbilitySystemComponent* AFPSRCharacter::GetAbilitySystemComponent() const
 {
 	return AbilitySystemComponent;

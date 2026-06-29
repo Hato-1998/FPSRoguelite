@@ -66,6 +66,13 @@ public:
 	/** Owner-client: play the equipped weapon's per-shot cosmetics (fire montage + sound + muzzle flash). */
 	void PlayWeaponFireCosmetics();
 
+	/** Server->all: play the spatialized fire SFX for REMOTE observers so teammates hear each other's weapon fire
+	 *  (B4). The owning client already played it locally (PlayWeaponFireCosmetics), so the implementation early-outs
+	 *  on IsLocallyControlled to avoid double-play. Unreliable (cosmetic — drops gracefully on packet loss). Fired
+	 *  once per server-confirmed shot from FPSRWeaponHooks::NotifyFire (the central, all-weapons fire-confirm site). */
+	UFUNCTION(NetMulticast, Unreliable)
+	void MulticastFireCosmetics();
+
 protected:
 	void InitAbilitySystem();
 
