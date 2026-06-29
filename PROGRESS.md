@@ -6,6 +6,14 @@
 
 **최종 갱신: 2026-06-29**
 
+## 🔔 핸드오프 (2026-06-29 b) — Phase 1A MP 복제 정합 C++ 완료·검증, 다음=사용자 콘텐츠+패키지 2-PC E2E → U1 ✅
+> **이 세션**: `fix/mp-steam-e2e` 브랜치에서 **U1-게이팅 넷코드 C++ 전부 구현·빌드·스모크 검증 완료**(10커밋). MP/복제/RPC = Opus 직접. 메시지버스(Lyra GameplayMessageSubsystem) 도입은 **제1원리로 철회**(프로젝트가 이미 PC 코스메틱 RPC+복제 GameState 델리게이트 보유 → 중복; 원칙4 Lyra 맹종 회피, native 패턴 재사용. 상세 `U1_PostGate_Fixes.md`/플랜).
+> **커밋(10)**: ①`feat(diag)` FlowLog 진단 ②`fix(net)` SteamSockets 넷드라이버+SEARCH_LOBBIES+로비카메라 ③`fix(run)` 사망자 소프트락 ④`docs(u1)` 버그배치 ⑤`fix(B7)` 적 dormancy(Activate=DORM_Awake, 투사체 풀 미러) ⑥`fix(B12)` 적/보스 체력 MaxHealth 복제+OnRep_Health 발행 ⑦`fix(B3b)` 로비 좌석(LobbySeatIndex 복제+ChoosePlayerStart Podium{N}) ⑧`fix(B4)` 아군 사격음 NetMulticast(NotifyFire 중앙훅) ⑨`fix(B2)` Defeat UI 진단 ⑩`feat(B11)` 보스 HUD바 배선(GameState ActiveBoss 복제+보스 GetHealthComponent+bAlwaysRelevant).
+> **⚠️ 다음 = 사용자 콘텐츠 저작(E2E 전 필수)**: ⓐ **WBP_BossHUDBar**(HUD 상단 슬롯, GameState OnActiveBossChanged→보스 GetHealthComponent→OnHealthChanged 바인딩) ⓑ **WBP_EnemyHealthBar**(적 BP에 UWidgetComponent, OnHealthChanged 바인딩, **피격(감소)시만 표시·2초 무피격시 숨김**) ⓒ **L_Lobby PlayerStart 4개 + PlayerStartTag=Podium0..3** ⓓ **게임플레이 BP_FPSRPlayerController에 ResultWidgetClass 할당**(B2 — 미할당이 클라 Defeat UI 미표시 원인).
+> **검증(패키지 2-PC/2계정 Steam E2E)**: host→join(코드/초대)→로비(카메라·**4인 슬롯 분리**)→ready→travel→양클라 진입 / B7 적 가시·사망정리 / B12 체력 클라갱신 / B11 스웜바·보스HUD바 / B2 Defeat UI / B4 아군 사격음 / A4 소프트락X. **FlowLog `logs/FlowLog_*.log` 교차확인**. → **통과 = Codex 머지게이트 → main `--no-ff` → TaskPrompts §B U1 ✅ 확정**.
+> **C 비-게이팅 피드백(후속, 사용자 판단 대기)**: B20 플로팅데미지(★ 예상보다 큼 — 기존 hit-marker는 **활성당 1회 집계**라 per-hit 위치/데미지 이벤트 신규 필요) · B10 미션배너(복제 미션명+OnRunStateChanged) · B9 사각 Z(피치 변조, §2-14 design 업데이트 선행). U1-게이팅 아님.
+> **미커밋 콘텐츠(사용자, 무관)**: `Config/DefaultEditor.ini`·ZerinLabs `M_col_*_ORIG`.
+
 ## 🔔 핸드오프 (2026-06-29) — U1 게이트+MP 테스트 완료(조건부 합격), 버그배치 25건 정리, 다음=Phase 1 MP 넷코드 수정
 > **이 세션(PM)**: U1 재미게이트(솔로) + 2-client/Steam E2E 멀티 테스트 완료 → **U1 = 조건부 합격**(핵심 루프 동작 / MP 동기화·피드백 결함 다수 → **Phase 1 MP 넷코드 수정 패키지 E2E 검증 후 U1 ✅ 확정**, 사용자 결정). 발견 결함을 시스템·리스크별 **25건 배치로 정리 = [`Docs/U1_PostGate_Fixes.md`](Docs/U1_PostGate_Fixes.md)**(5 Phase).
 > **⚠️ 작업트리 미커밋 = MP 수정 5건(범위 A, 빌드·검증·커밋 대기)**: ① Steam 넷드라이버 UE5.7 SteamSockets(`DefaultEngine.ini`·`.uproject`, **옛 `OnlineSubsystemSteam.SteamNetDriver` 무음실패→IpNet 폴백→join 즉시 튕김** 근본해결) ② 세션검색 `SEARCH_LOBBIES`(JoinByCode 0건) ③ 로비 조이너 카메라(`ApplyLobbyViewTarget`) ④ 사망자 레벨업 소프트락(`!IsAlive` 제외) ⑤ FlowLog 진단 서브시스템(신규 4파일+배선, `LogFPSRFlow`, `.gitignore logs/`). **미빌드 — Phase 1 첫 작업 = 빌드 통과 확인.**
