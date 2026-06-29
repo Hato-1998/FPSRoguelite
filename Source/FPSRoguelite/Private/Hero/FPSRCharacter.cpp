@@ -629,11 +629,11 @@ void AFPSRCharacter::HandleOutOfHealth()
 
 	if (AFPSRPlayerState* PS = GetPlayerState<AFPSRPlayerState>())
 	{
-		if (PS->IsDead())
+		if (!PS->IsAlive())
 		{
-			return; // already processed (idempotent)
+			return; // already processed (idempotent: already DBNO or Dead)
 		}
-		PS->SetDead(true);
+		PS->SetLifeState(EFPSRLifeState::Dead);
 	}
 
 	// Stop firing and cancel any in-progress ability (e.g. the server-only ChargeLaser charge sequence) so the

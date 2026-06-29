@@ -19,6 +19,20 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnRerollChargesChanged);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnLoadoutChanged);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnReadyChanged);
 
+/** Per-player life state (U9 DBNO, Phase 1B). The run keys off IsAlive() == (LifeState == Alive):
+ *  - Alive: full participant.
+ *  - DBNO (Down But Not Out): downed but revivable — NOT a live participant for the wipe / card-select freeze (A4) /
+ *    enemy targeting (B17). The pawn persists (crawl only); an ally's proximity revives it (UFPSRReviveComponent).
+ *  - Dead: out of the run (team-wipe, or [후속] bleedout).
+ *  Lives on the PlayerState so it survives pawn death and the wipe aggregation is independent of pawn validity. */
+UENUM(BlueprintType)
+enum class EFPSRLifeState : uint8
+{
+	Alive,
+	DBNO,
+	Dead
+};
+
 /** PlayerState owns the AbilitySystemComponent and global attribute sets (co-op / revive friendly). */
 UCLASS()
 class FPSROGUELITE_API AFPSRPlayerState : public APlayerState, public IAbilitySystemInterface
@@ -36,18 +50,25 @@ public:
 	UFPSRHealthSet* GetHealthSet() const { return HealthSet; }
 	UFPSRCombatSet* GetCombatSet() const { return CombatSet; }
 
-	/** Per-player life state. Simplified for U2 (defeat wiring): a single replicated bool. U9 (DBNO) replaces
-	 *  this with an ELifeState{Alive,DBNO,Dead} state machine — IsAlive() is the single predicate U9 re-defines
-	 *  (e.g. DBNO also counts as not-alive for the wipe check). Lives on the PlayerState so it survives pawn
-	 *  death/respawn and the wipe aggregation is independent of pawn validity. */
+	/** Current life state (U9 DBNO state machine). */
 	UFUNCTION(BlueprintPure, Category = "FPSR|Run")
-	bool IsDead() const { return bIsDead; }
+	EFPSRLifeState GetLifeState() const { return LifeState; }
 
-	/** True while this player is a live participant. The single predicate U9 (DBNO) re-defines. */
-	bool IsAlive() const { return !bIsDead; }
+	/** True while this player is a LIVE participant (Alive only). The single predicate the run uses for the wipe
+	 *  check, the card-select freeze gate (A4) and enemy targeting (B17) — DBNO and Dead both count as not-alive. */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Run")
+	bool IsAlive() const { return LifeState == EFPSRLifeState::Alive; }
 
-	/** Server: mark this player dead/alive. Idempotent. Replicates to all (owning client gates input via OnRep). */
-	void SetDead(bool bNewDead);
+	/** True only when truly OUT of the run (team-wipe / bleedout) — NOT while DBNO (downed-but-revivable). */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Run")
+	bool IsDead() const { return LifeState == EFPSRLifeState::Dead; }
+
+	/** True while downed (Down But Not Out) — revivable, pawn persists (crawl only). */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Run")
+	bool IsDBNO() const { return LifeState == EFPSRLifeState::DBNO; }
+
+	/** Server: set the life state. Idempotent. Replicates to all (owning client gates input via OnRep_LifeState). */
+	void SetLifeState(EFPSRLifeState NewState);
 
 	UFUNCTION(BlueprintPure, Category = "FPSR|Run")
 	int32 GetRunRerollCharges() const { return RunRerollCharges; }
@@ -187,7 +208,7 @@ private:
 	int32 DefaultRerollCharges = 3;
 
 	UPROPERTY(ReplicatedUsing = OnRep_LifeState)
-	bool bIsDead = false;
+	EFPSRLifeState LifeState = EFPSRLifeState::Alive;
 
 	UPROPERTY(ReplicatedUsing = OnRep_RunRerollCharges)
 	int32 RunRerollCharges = 3;

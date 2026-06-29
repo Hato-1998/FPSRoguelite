@@ -139,8 +139,9 @@ void AFPSRGameState::AddSharedXP(int32 Amount)
 		for (APlayerState* PS : PlayerArray)
 		{
 			AFPSRPlayerState* FPS = Cast<AFPSRPlayerState>(PS);
-			// Dead players don't participate in level-up selection — grant them no card / weapon-unlock picks
-			// (server-authoritative bIsDead). This also keeps them out of the RefreshPauseState freeze gate below.
+			// Non-alive players (DBNO or Dead) don't participate in level-up selection — grant them no card /
+			// weapon-unlock picks (server-authoritative LifeState). Also keeps them out of the RefreshPauseState
+			// freeze gate below (A4: a downed/dead teammate must not block the card-select freeze).
 			if (!FPS || !FPS->IsAlive())
 			{
 				continue;

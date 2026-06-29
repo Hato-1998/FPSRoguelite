@@ -45,7 +45,7 @@ void AFPSRPlayerState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Out
 
 	FDoRepLifetimeParams Params;
 	Params.bIsPushBased = true;
-	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRPlayerState, bIsDead, Params);
+	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRPlayerState, LifeState, Params);
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRPlayerState, RunRerollCharges, Params);
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRPlayerState, CardPicksPending, Params);
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRPlayerState, WeaponUnlockPicksPending, Params);
@@ -187,14 +187,14 @@ void AFPSRPlayerState::AddAllWeaponsModifier(const FFPSRWeaponStatMod& Mod)
 	}
 }
 
-void AFPSRPlayerState::SetDead(bool bNewDead)
+void AFPSRPlayerState::SetLifeState(EFPSRLifeState NewState)
 {
-	if (!HasAuthority() || bIsDead == bNewDead)
+	if (!HasAuthority() || LifeState == NewState)
 	{
 		return;
 	}
-	bIsDead = bNewDead;
-	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRPlayerState, bIsDead, this);
+	LifeState = NewState;
+	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRPlayerState, LifeState, this);
 }
 
 void AFPSRPlayerState::OnRep_LifeState()
@@ -203,7 +203,8 @@ void AFPSRPlayerState::OnRep_LifeState()
 	// auto-firing until the input gate catches up next frame, and clear the local (non-replicated) ADS
 	// state so the camera can't stay zoom-latched if the result UI swallows the ADS-release input.
 	// Server-side cancellation/aim-clear is handled in AFPSRCharacter::HandleOutOfHealth (CancelAllAbilities).
-	if (bIsDead)
+	// Fires for DBNO and Dead alike (both are not-Alive) so a downed player also drops the local fire/ADS latch.
+	if (LifeState != EFPSRLifeState::Alive)
 	{
 		if (APawn* OwnerPawn = GetPawn())
 		{
@@ -285,8 +286,8 @@ void AFPSRPlayerState::ResetRunState()
 		return;
 	}
 
-	// Life state back to alive (U2 field).
-	SetDead(false);
+	// Life state back to alive.
+	SetLifeState(EFPSRLifeState::Alive);
 
 	// Lobby ready resets on every (re)entry — a returning party must re-ready (U11a).
 	SetReady(false);
