@@ -11,6 +11,9 @@
 #include "CommonActivatableWidget.h"
 #include "GameplayTagContainer.h"
 #include "Engine/World.h"
+#include "Camera/CameraActor.h"
+#include "EngineUtils.h"
+#include "TimerManager.h"
 
 void AFPSRLobbyPlayerController::BeginPlay()
 {
@@ -20,6 +23,10 @@ void AFPSRLobbyPlayerController::BeginPlay()
 	{
 		return;
 	}
+
+	// Lock the local view to the room-overview camera before/independent of the UI setup (a listen-server client's
+	// pawn possession would otherwise leave the view inside the podium meshes — the reported joiner camera bug).
+	ApplyLobbyViewTarget();
 
 	if (!PrimaryLayoutClass || !LobbyWidgetClass)
 	{
@@ -42,8 +49,57 @@ void AFPSRLobbyPlayerController::BeginPlay()
 	}
 }
 
+void AFPSRLobbyPlayerController::ApplyLobbyViewTarget()
+{
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
+	// Prefer a designer-tagged camera ("LobbyCamera"); otherwise fall back to the first CameraActor in the level.
+	ACameraActor* LobbyCam = nullptr;
+	for (TActorIterator<ACameraActor> It(World); It; ++It)
+	{
+		ACameraActor* Cam = *It;
+		if (!Cam)
+		{
+			continue;
+		}
+		if (Cam->ActorHasTag(FName("LobbyCamera")))
+		{
+			LobbyCam = Cam;
+			break;
+		}
+		if (!LobbyCam)
+		{
+			LobbyCam = Cam;
+		}
+	}
+
+	if (LobbyCam)
+	{
+		// Stop the controller from re-pointing the view at the (spectator) pawn on possess, then lock the overview.
+		bAutoManageActiveCameraTarget = false;
+		SetViewTargetWithBlend(LobbyCam, 0.0f);
+		return;
+	}
+
+	// Level CameraActor may not be present yet on a fresh client travel — retry a bounded number of times.
+	if (LobbyViewRetries < 12)
+	{
+		++LobbyViewRetries;
+		World->GetTimerManager().SetTimer(LobbyViewTimer, this, &AFPSRLobbyPlayerController::ApplyLobbyViewTarget, 0.25f, false);
+	}
+}
+
 void AFPSRLobbyPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(LobbyViewTimer);
+	}
+
 	// On lobby->run SEAMLESS travel this UI-only lobby PC is swapped out and destroyed. Tear down its viewport
 	// layout explicitly: the lobby widget runs a CommonUI Menu input config, and if the layout is left on the
 	// viewport (the LocalPlayer + CommonUI action router survive seamless travel) its activatable root lingers and
