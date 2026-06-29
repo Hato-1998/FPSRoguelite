@@ -6,6 +6,22 @@
 
 **최종 갱신: 2026-06-29**
 
+## 🔔 핸드오프 (2026-06-29 c) — U1 사후 HUD/게임플레이(A/B/C) C+++위젯 완료, 다음=PIE E2E 검증 + B2 폴리시
+> **이 세션**: `fix/mp-steam-e2e`에서 U1 사후 7항목(A1·A2·A3·B1·B2·C1·C2) 구현. C++=빌드+스모크 검증, 위젯=VibeUE 저작·compile 0err. **6커밋**:
+>   - `811a0d1 feat(U1)` Phase 1 C++ — C1 적 탈출경로 인프라(`AFPSREnemySpawnPoint` ExitPathRoot 웨이포인트 + `AFPSREnemyBase` SetExitPath/ConsumeExitPathSteering + 스폰서브시스템 배선) · A1 위젯 풀링훅(`BeginPlay` InitWidget+`OnHealthBarReady` BIE) · C2 ADS 결정론(`FPSRGA_WeaponFire_Hitscan` 트레이스: ADS 단발=조준점/힙=랜덤콘/샷건=콘유지) · B1/B2 GameState 복제 게터(`MissionProgress`·`RunScheduleAsset`·`GetRunTotalDuration`).
+>   - `d41896b content(hud)` A1/A2/A3 위젯 **이벤트 구동 전환**(적HP바 `OnHealthChanged`·미션배너 `OnActiveMissionChanged`·보스HUD바 `OnActiveBossChanged` — Collapsed/world 위젯이 Tick 안 도는 공통 버그 해소).
+>   - `a17ae58 content(hud)` B2 런 타임라인 바 + B1 미션 진행 바(`WBP_RunHUD`, ClockText→바).
+>   - `74c961d content(C1)` `BP_StructuredSpawner` 스캐폴드.
+>   - `4c43ffb feat(spawn)` **시야 밖(FOV) 스폰 게이트 폐지**(사용자 결정 — 정면 1포인트 스폰 굶음 해소. 폐기된 건 링폴백·가중치뿐이었고 FOV 게이트는 현행 설계였음. Enemy.md §2-6·BalanceTuning 갱신).
+>   - `e293f0d feat(spawn)` **SpawnAnchor** — 스폰 위치를 액터원점 대신 BP 내부 컴포넌트에서(구조형 스폰: 메시 공동 안). 기본=원점이라 무회귀.
+> **C1 게이트 충돌 해결(콘텐츠, 사용자)**: 속 빈 메시의 자동 convex 충돌이 통을 막던 문제 → 사용자가 `SM_SpawnGate`에 **심플 박스 벽 5면**(convex 제거, CTF_USE_DEFAULT) 저작. **C1 PIE 확인됨**(적이 게이트 공동→개구부→WP_1 이동).
+> **⚠️ 다음 코드/콘텐츠 작업**:
+>   ① **PIE E2E 검증(최우선, 사용자)** — A1 적HP바/데미지숫자 · A2 미션배너 · A3 보스HUD바 · C2 ADS 결정론 · B1/B2 바. (compile만 통과, 인게임 미검증)
+>   ② **B2 폴리시(미완, 콘텐츠)** — 타임라인 바에 미션 윈도우 마커(밴드) + 끝 보스 아이콘. 데이터 이미 복제(`GetRunSchedule()->MissionWindows`/`BossTime`). `WBP_RunHUD` 그래프 스케줄 순회 — VibeUE 저작.
+>   ③ 이후 = `Docs/U1_PostGate_Fixes.md` 잔여 Phase(DBNO 미니설계 등) → Codex 머지게이트 → main `--no-ff`.
+> **블로커/주의**: A1 적HP바 world widget(`TickMode=Enabled`)은 적500 perf 우려(B11 후속=스크린공간 재검토). C2는 Hitscan 한정(투사체/차지 무관). C1 구조형 스폰=Enemy.md §2-6 문서화(SpawnAnchor=스폰위치 / ExitPathRoot 웨이포인트=탈출경로, attach 순서=경로, 마지막→플로우필드 인계).
+> **미커밋 콘텐츠(사용자 작업, 커밋 안 함)**: `BP_StructuredSpawner`·`SM_SpawnGate`(C1 게이트) · `WBP_GameHUD` · `L_Lobby`/`L_MainMenu`/`L_Sandbox` · `M_col_*_ORIG`. + `Docs/TaskPrompts_Master.md`(세션 전 수정).
+
 ## 🔔 핸드오프 (2026-06-29 b) — Phase 1A MP 복제 정합 C++ 완료·검증, 다음=사용자 콘텐츠+패키지 2-PC E2E → U1 ✅
 > **이 세션**: `fix/mp-steam-e2e` 브랜치에서 **U1-게이팅 넷코드 C++ 전부 구현·빌드·스모크 검증 완료**(10커밋). MP/복제/RPC = Opus 직접. 메시지버스(Lyra GameplayMessageSubsystem) 도입은 **제1원리로 철회**(프로젝트가 이미 PC 코스메틱 RPC+복제 GameState 델리게이트 보유 → 중복; 원칙4 Lyra 맹종 회피, native 패턴 재사용. 상세 `U1_PostGate_Fixes.md`/플랜).
 > **커밋(10)**: ①`feat(diag)` FlowLog 진단 ②`fix(net)` SteamSockets 넷드라이버+SEARCH_LOBBIES+로비카메라 ③`fix(run)` 사망자 소프트락 ④`docs(u1)` 버그배치 ⑤`fix(B7)` 적 dormancy(Activate=DORM_Awake, 투사체 풀 미러) ⑥`fix(B12)` 적/보스 체력 MaxHealth 복제+OnRep_Health 발행 ⑦`fix(B3b)` 로비 좌석(LobbySeatIndex 복제+ChoosePlayerStart Podium{N}) ⑧`fix(B4)` 아군 사격음 NetMulticast(NotifyFire 중앙훅) ⑨`fix(B2)` Defeat UI 진단 ⑩`feat(B11)` 보스 HUD바 배선(GameState ActiveBoss 복제+보스 GetHealthComponent+bAlwaysRelevant).
