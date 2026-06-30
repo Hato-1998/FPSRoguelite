@@ -18,6 +18,11 @@
 #include "Core/FPSRGameFlowSubsystem.h"
 #include "Card/FPSRCardSubsystem.h"
 #include "Card/FPSRCardDataAsset.h"
+#include "Card/FPSRCardEffect.h"
+#include "Weapon/FPSRWeaponInventoryComponent.h"
+#include "Weapon/FPSRWeaponInstance.h"
+#include "Weapon/FPSRWeaponDataAsset.h"
+#include "Weapon/FPSRWeaponFragment.h"
 #include "UI/FPSRPrimaryGameLayout.h"
 #include "UI/FPSRCardSelectWidget.h"
 #include "UI/FPSRGameHUDWidget.h"
@@ -300,24 +305,36 @@ void AFPSRPlayerController::ClientPresentCards_Implementation(int32 OfferId, con
 
 void AFPSRPlayerController::ServerSelectCard_Implementation(int32 Index, int32 OfferId)
 {
+	HandleCardSelection(Index, OfferId, INDEX_NONE);
+}
+
+void AFPSRPlayerController::ServerSelectCardReplacement_Implementation(int32 Index, int32 OfferId, int32 ReplaceFragmentIndex)
+{
+	HandleCardSelection(Index, OfferId, ReplaceFragmentIndex);
+}
+
+bool AFPSRPlayerController::HandleCardSelection(int32 Index, int32 OfferId, int32 ReplaceFragmentIndex)
+{
 	// Ignore stale/duplicate selections (double-click, spam) that don't match the current offer.
 	if (OfferId != CurrentOfferId)
 	{
-		return;
+		return false;
 	}
 
 	// Ignore invalid intent — keep the current offer up so the client can't force a free redraw.
 	if (!CachedOffer.IsValidIndex(Index))
 	{
-		return;
+		return false;
 	}
 
+	// Apply from the SERVER-cached offer only (client sent an index, never a card). ReplaceFragmentIndex is likewise
+	// just an index — the card effect validates it against the resolved target weapon's distinct-fragment list.
 	UFPSRCardSubsystem* Sub = GetWorld() ? GetWorld()->GetSubsystem<UFPSRCardSubsystem>() : nullptr;
-	const bool bApplied = Sub && Sub->ApplyCard(this, CachedOffer[Index], CurrentOfferType);
+	const bool bApplied = Sub && Sub->ApplyCard(this, CachedOffer[Index], CurrentOfferType, ReplaceFragmentIndex);
 	if (!bApplied)
 	{
-		// Application rejected (e.g. no pending pick) — leave the offer up; do not advance or redraw.
-		return;
+		// Rejected (no pending pick, or at slot cap with no valid replacement index) — leave the offer up; no advance.
+		return false;
 	}
 
 	// Per-type bookkeeping (the level-up / weapon-unlock pick was consumed inside ApplyCard).
@@ -330,6 +347,7 @@ void AFPSRPlayerController::ServerSelectCard_Implementation(int32 Index, int32 O
 
 	// Re-present this player's next pick (if any) and recompute the global freeze (unpause when all done).
 	NotifyPauseStateDirty();
+	return true;
 }
 
 void AFPSRPlayerController::ServerRerollOffer_Implementation(int32 OfferId)
@@ -549,6 +567,145 @@ void AFPSRPlayerController::ServerRequestReturnToLobby_Implementation()
 
 #if !UE_BUILD_SHIPPING
 
+void AFPSRPlayerController::DebugFillFragmentSlots()
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+	APawn* P = GetPawn();
+	UFPSRWeaponInventoryComponent* Inv = P ? P->FindComponentByClass<UFPSRWeaponInventoryComponent>() : nullptr;
+	UFPSRWeaponInstance* Instance = Inv ? Inv->GetCurrentInstance() : nullptr;
+	UFPSRWeaponDataAsset* Weapon = Instance ? Instance->GetSource() : nullptr;
+	if (!Instance || !Weapon)
+	{
+		UE_LOG(LogFPSR, Warning, TEXT("[Frag] Fill: no current weapon instance"));
+		return;
+	}
+
+	// Collect this weapon's distinct behavior-fragment cards from its UnlockableFeatures pool (card + fragment paired).
+	TArray<UFPSRCardDataAsset*> PoolCards;
+	TArray<UFPSRWeaponFragment*> PoolFrags;
+	for (const TObjectPtr<UFPSRCardDataAsset>& Card : Weapon->UnlockableFeatures)
+	{
+		if (!Card)
+		{
+			continue;
+		}
+		for (const TObjectPtr<UFPSRCardEffect>& Effect : Card->Effects)
+		{
+			const UCardEffect_WeaponBehavior* Beh = Cast<UCardEffect_WeaponBehavior>(Effect);
+			if (Beh && Beh->Fragment && !PoolFrags.Contains(Beh->Fragment))
+			{
+				PoolCards.Add(Card.Get());
+				PoolFrags.Add(Beh->Fragment);
+			}
+		}
+	}
+
+	const int32 Cap = Instance->GetMaxFragmentSlots();
+
+	// Reset our known fragments then fill to the cap, so re-running the command is idempotent.
+	for (UFPSRWeaponFragment* Frag : PoolFrags)
+	{
+		Instance->RemoveFragment(Frag);
+	}
+	int32 Added = 0;
+	for (UFPSRWeaponFragment* Frag : PoolFrags)
+	{
+		if (Added >= Cap)
+		{
+			break;
+		}
+		if (Instance->AddFragment(Frag)) { ++Added; }
+	}
+
+	TArray<UFPSRWeaponFragment*> Distinct;
+	Instance->GetDistinctFragments(Distinct);
+	UE_LOG(LogFPSR, Warning, TEXT("[Frag] Fill: '%s' now holds %d/%d distinct fragment(s):"), *Weapon->GetName(), Distinct.Num(), Cap);
+	for (int32 i = 0; i < Distinct.Num(); ++i)
+	{
+		UE_LOG(LogFPSR, Warning, TEXT("[Frag]   slot[%d] = %s"), i, Distinct[i] ? *Distinct[i]->GetName() : TEXT("null"));
+	}
+
+	// Need at least one MORE distinct fragment than the cap to present an incoming replacement candidate.
+	if (PoolCards.Num() <= Cap)
+	{
+		UE_LOG(LogFPSR, Warning, TEXT("[Frag] Fill: weapon '%s' UnlockableFeatures has only %d distinct fragment(s) (need > %d) — cannot present a replacement offer"),
+			*Weapon->GetName(), PoolCards.Num(), Cap);
+		return;
+	}
+
+	// Build + cache a single-card weapon-unlock offer for the first not-yet-equipped fragment, then present it so the
+	// run freezes (mirrors the real mission-unlock path). FPSR.Frag.Replace <dropIndex> then drives the swap.
+	UFPSRCardSubsystem* Sub = GetWorld() ? GetWorld()->GetSubsystem<UFPSRCardSubsystem>() : nullptr;
+	if (!Sub)
+	{
+		return;
+	}
+	FFPSRCardDraw Draw = Sub->BuildSingleDraw(PoolCards[Cap], this);
+	if (!Draw.Card)
+	{
+		return;
+	}
+	Draw.TargetWeapon = Weapon;
+	CachedOffer.Reset();
+	CachedOffer.Add(Draw);
+	CurrentOfferType = EFPSROfferType::WeaponUnlock;
+	++CurrentOfferId;
+	if (AFPSRPlayerState* PS = GetPlayerState<AFPSRPlayerState>())
+	{
+		PS->AddWeaponUnlockPick(); // so ApplyCard's WeaponUnlock pick gate passes when the swap is applied
+	}
+	ClientPresentCards(CurrentOfferId, CachedOffer);
+	NotifyPauseStateDirty();
+	UE_LOG(LogFPSR, Warning, TEXT("[Frag] Fill: presented incoming fragment '%s' (offer[0]). Run FPSR.Frag.Replace <dropIndex> (0..%d valid; e.g. 99 to test the server rejecting an out-of-range index)."),
+		*PoolFrags[Cap]->GetName(), Cap - 1);
+}
+
+void AFPSRPlayerController::DebugSelectFragmentReplacement(int32 DropIndex)
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+	if (CachedOffer.Num() == 0)
+	{
+		UE_LOG(LogFPSR, Warning, TEXT("[Frag] Replace: no active offer — run FPSR.GrantWeaponUnlock first"));
+		return;
+	}
+
+	// Find the first offered card that grants a behavior fragment (the replacement candidate).
+	int32 OfferIndex = INDEX_NONE;
+	for (int32 i = 0; i < CachedOffer.Num(); ++i)
+	{
+		const UFPSRCardDataAsset* Card = CachedOffer[i].Card;
+		if (!Card)
+		{
+			continue;
+		}
+		for (const TObjectPtr<UFPSRCardEffect>& Effect : Card->Effects)
+		{
+			if (Cast<UCardEffect_WeaponBehavior>(Effect)) { OfferIndex = i; break; }
+		}
+		if (OfferIndex != INDEX_NONE)
+		{
+			break;
+		}
+	}
+	if (OfferIndex == INDEX_NONE)
+	{
+		UE_LOG(LogFPSR, Warning, TEXT("[Frag] Replace: current offer has no fragment card — re-run FPSR.GrantWeaponUnlock (offers are shuffled)"));
+		return;
+	}
+
+	UE_LOG(LogFPSR, Warning, TEXT("[Frag] Replace: offer[%d]='%s', dropIndex=%d (server validates the drop index)"),
+		OfferIndex, *CachedOffer[OfferIndex].Card->GetName(), DropIndex);
+	const bool bApplied = HandleCardSelection(OfferIndex, CurrentOfferId, DropIndex);
+	UE_LOG(LogFPSR, Warning, TEXT("[Frag] Replace: %s"),
+		bApplied ? TEXT("APPLIED — fragment swapped in") : TEXT("REJECTED — at cap with no valid drop index (anti-cheat / out-of-range)"));
+}
+
 namespace
 {
 	AFPSRPlayerController* GetLocalFPSRController(UWorld* World)
@@ -589,6 +746,32 @@ namespace
 			{
 				GS->RefreshPauseState();
 			}
+		}));
+
+	FAutoConsoleCommandWithWorld GCmd_FragFill(
+		TEXT("FPSR.Frag.Fill"),
+		TEXT("Fill the local player's current weapon to its fragment slot cap (debug, authority/host). Then run FPSR.GrantWeaponUnlock + FPSR.Frag.Replace <dropIndex>."),
+		FConsoleCommandWithWorldDelegate::CreateLambda([](UWorld* World)
+		{
+			AFPSRPlayerController* PC = GetLocalFPSRController(World);
+			if (PC && PC->HasAuthority())
+			{
+				PC->DebugFillFragmentSlots();
+			}
+		}));
+
+	FAutoConsoleCommandWithWorldAndArgs GCmd_FragReplace(
+		TEXT("FPSR.Frag.Replace"),
+		TEXT("Pick the fragment card in the current offer, dropping the equipped fragment at <dropIndex> (debug). An out-of-range index is server-rejected. Usage: FPSR.Frag.Replace [dropIndex=0]"),
+		FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& Args, UWorld* World)
+		{
+			AFPSRPlayerController* PC = GetLocalFPSRController(World);
+			if (!PC || !PC->HasAuthority())
+			{
+				return;
+			}
+			const int32 DropIndex = Args.Num() > 0 ? FCString::Atoi(*Args[0]) : 0;
+			PC->DebugSelectFragmentReplacement(DropIndex);
 		}));
 }
 

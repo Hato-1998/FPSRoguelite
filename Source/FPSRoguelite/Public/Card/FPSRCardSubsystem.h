@@ -39,7 +39,7 @@ public:
 	 *   - WeaponUnlock: requires & consumes a weapon-unlock pick (WeaponUnlockPicksPending).
 	 *  Character-scope cards apply their GE now; weapon-scope (modifier) cards are accepted/consumed but their
 	 *  effect application lands in P4-B (logged no-op here) so the freeze can never soft-lock. */
-	bool ApplyCard(AController* ForPlayer, const FFPSRCardDraw& Draw, EFPSROfferType OfferType);
+	bool ApplyCard(AController* ForPlayer, const FFPSRCardDraw& Draw, EFPSROfferType OfferType, int32 ReplaceFragmentIndex = INDEX_NONE);
 
 	/** Build a single card draw from one card (used for mission-reward offers), rolling a rarity tier by
 	 *  the player's luck. Returns an offer with a null Card if the card has no tiers. */

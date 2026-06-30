@@ -30,6 +30,11 @@ struct FFPSRCardEffectContext
 	UFPSRWeaponInventoryComponent* Inventory = nullptr;
 	/** The weapon this card targets (weapon-group cards). null for character/all-weapons effects. */
 	UFPSRWeaponDataAsset* TargetWeapon = nullptr;
+
+	/** Index (into the target weapon's distinct-fragment list) of the fragment to DROP when granting a new behavior
+	 *  fragment to a weapon already at its slot cap (U6 replacement flow). INDEX_NONE = no replacement (plain add /
+	 *  under-cap). Server-validated against the resolved target weapon's list — a forged/out-of-range index is rejected. */
+	int32 ReplaceFragmentIndex = INDEX_NONE;
 };
 
 /**

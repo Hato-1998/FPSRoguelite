@@ -45,6 +45,17 @@ public:
 	/** Server: grant one weapon-unlock pick (mission clear / level milestone). */
 	void GrantWeaponUnlock();
 
+#if !UE_BUILD_SHIPPING
+	/** Debug (authority/host): fill the local player's current weapon to its fragment slot cap from the weapon's
+	 *  UnlockableFeatures, so the at-cap replacement flow can be exercised in PIE (FPSR.Frag.Fill). */
+	void DebugFillFragmentSlots();
+
+	/** Debug (authority/host): pick the fragment card in the current cached offer, dropping the equipped fragment at
+	 *  DropIndex via the same server-authoritative path as the replacement RPC (FPSR.Frag.Replace). An out-of-range
+	 *  DropIndex demonstrates the anti-cheat rejection. */
+	void DebugSelectFragmentReplacement(int32 DropIndex);
+#endif
+
 	/** Client intent: notify the server the local UI is ready, so the server can issue the one-time
 	 *  run-start opening seed (§2-2). Count is fixed server-side; processed at most once per player. */
 	UFUNCTION(Server, Reliable)
@@ -72,6 +83,13 @@ public:
 	 *  server offer (stale/duplicate selections from spam/double-click are ignored). */
 	UFUNCTION(Server, Reliable)
 	void ServerSelectCard(int32 Index, int32 OfferId);
+
+	/** Server RPC (client intent): apply the cached offer entry at Index, but when its behavior fragment would
+	 *  exceed the target weapon's slot cap, DROP the equipped fragment at ReplaceFragmentIndex first (U6 swap).
+	 *  OfferId must match; the drop index is validated server-side against the resolved target weapon's distinct
+	 *  fragment list (a forged/out-of-range index is rejected — the client only ever sends an index intent). */
+	UFUNCTION(Server, Reliable)
+	void ServerSelectCardReplacement(int32 Index, int32 OfferId, int32 ReplaceFragmentIndex);
 
 	/** Server RPC (client intent): consume a reroll charge and redraw the current offer (level-up / opening
 	 *  only; mission-reward offers are single-card and not rerollable). OfferId must match the shown offer. */
@@ -166,6 +184,11 @@ protected:
 private:
 	/** Server: refresh the global freeze + present after a selection/grant changed this player's pending picks. */
 	void NotifyPauseStateDirty();
+
+	/** Server: shared body of ServerSelectCard / ServerSelectCardReplacement — validate the offer (OfferId + index),
+	 *  apply the cached entry (passing ReplaceFragmentIndex for the at-cap fragment swap; INDEX_NONE = plain pick),
+	 *  then do per-type bookkeeping + re-present. Returns true if the selection was accepted (offer advanced). */
+	bool HandleCardSelection(int32 Index, int32 OfferId, int32 ReplaceFragmentIndex);
 
 	/** Local-player layout root (created in BeginPlay). */
 	UPROPERTY(Transient)

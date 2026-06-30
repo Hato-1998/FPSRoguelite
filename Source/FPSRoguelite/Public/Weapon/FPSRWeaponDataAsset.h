@@ -51,6 +51,12 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Cards")
 	TArray<TObjectPtr<UFPSRCardDataAsset>> UnlockableFeatures;
 
+	/** Max number of DISTINCT behavior fragments this weapon can hold (U6). Reaching it makes a further new-fragment
+	 *  pick a REPLACEMENT (drop one equipped fragment for the new one); stacking an already-held fragment is governed
+	 *  by the fragment's own MaxStacks, not this cap. Per-weapon so e.g. a simple sidearm can allow fewer than a rifle. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Cards", meta = (ClampMin = "1"))
+	int32 MaxFragmentSlots = 3;
+
 	/** DEPRECATED (U18b): was the mission-reward fragment pool. Fragments moved to WeaponCards (level-up); feature
 	 *  unlocks now live in UnlockableFeatures. Retained only so the content resave can migrate off it — remove in a follow-up. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Cards")

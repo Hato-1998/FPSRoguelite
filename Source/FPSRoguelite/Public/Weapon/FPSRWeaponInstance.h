@@ -49,8 +49,26 @@ public:
 	/** Number of copies (stacks) of this fragment currently active on the weapon. */
 	int32 GetFragmentStackCount(const UFPSRWeaponFragment* Fragment) const;
 
-	/** Server: add a behavior fragment (stack-limited to the fragment's MaxStacks). No effect on resolved stats. */
-	void AddFragment(UFPSRWeaponFragment* Fragment);
+	/** Distinct behavior fragments currently on the weapon, in first-appearance order (stacks collapse to one entry).
+	 *  The replace-index in the swap flow indexes into THIS list — identical on server and clients (ActiveFragments
+	 *  replicates in order), so a client's chosen drop index validates against the same list server-side. */
+	void GetDistinctFragments(TArray<UFPSRWeaponFragment*>& OutFragments) const;
+
+	/** Number of DISTINCT behavior fragments (stacks of one fragment count as a single slot). */
+	int32 GetDistinctFragmentCount() const;
+
+	/** Per-weapon distinct-fragment slot cap (from the source DA; fallback 3 when unset). */
+	int32 GetMaxFragmentSlots() const;
+
+	/** True when the weapon already holds GetMaxFragmentSlots() distinct fragments (a new distinct pick needs a swap). */
+	bool IsAtFragmentSlotCap() const;
+
+	/** Server: add a behavior fragment. Rejected (returns false) when the fragment is already at MaxStacks, OR when it
+	 *  is a NEW distinct fragment and the weapon is at its slot cap (stacking an already-held fragment ignores the cap). */
+	bool AddFragment(UFPSRWeaponFragment* Fragment);
+
+	/** Server: remove a behavior fragment entirely (all stacks). Used by the at-cap replacement flow. */
+	void RemoveFragment(UFPSRWeaponFragment* Fragment);
 
 	/** Invalidate the resolved-stat cache (call when AllWeapons mods change). */
 	void MarkResolvedDirty() { bResolvedDirty = true; }

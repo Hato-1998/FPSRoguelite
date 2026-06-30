@@ -237,7 +237,7 @@ TArray<FFPSRCardDraw> UFPSRCardSubsystem::DrawCards(AController* ForPlayer, int3
 	return Result;
 }
 
-bool UFPSRCardSubsystem::ApplyCard(AController* ForPlayer, const FFPSRCardDraw& Draw, EFPSROfferType OfferType)
+bool UFPSRCardSubsystem::ApplyCard(AController* ForPlayer, const FFPSRCardDraw& Draw, EFPSROfferType OfferType, int32 ReplaceFragmentIndex)
 {
 	UWorld* World = GetWorld();
 	if (!World || World->GetNetMode() == NM_Client)
@@ -286,6 +286,7 @@ bool UFPSRCardSubsystem::ApplyCard(AController* ForPlayer, const FFPSRCardDraw& 
 		EffCtx.Inventory = Pawn->FindComponentByClass<UFPSRWeaponInventoryComponent>();
 	}
 	EffCtx.TargetWeapon = Draw.TargetWeapon;
+	EffCtx.ReplaceFragmentIndex = ReplaceFragmentIndex;
 
 	if (Card->Effects.Num() == 0)
 	{
