@@ -460,9 +460,19 @@ TArray<FFPSRCardDraw> UFPSRCardSubsystem::DrawWeaponUnlockOffer(AController* For
 			}
 			if (UFPSRWeaponFragment* Frag = GetCardBehaviorFragment(Card))
 			{
-				if (Instance->GetFragmentStackCount(Frag) >= FMath::Max(Frag->MaxStacks, 1))
+				const int32 Stacks = Instance->GetFragmentStackCount(Frag);
+				if (Stacks >= FMath::Max(Frag->MaxStacks, 1))
 				{
 					continue; // maxed on this weapon — skip
+				}
+				// A brand-new distinct fragment on a weapon already at its slot cap would need the (deferred) replacement
+				// UI to choose what to drop. Skip it from the auto-offer so a plain ServerSelectCard pick can't bounce
+				// (CanApply rejects an at-cap new fragment with no replace index) and strand the card-selection freeze
+				// (U6). The deliberate swap path (ServerSelectCardReplacement) re-introduces such a fragment with a drop
+				// index. Stacking an already-held fragment (Stacks > 0) is unaffected — it consumes no new slot.
+				if (Stacks == 0 && Instance->IsAtFragmentSlotCap())
+				{
+					continue;
 				}
 			}
 			// De-dup on (card, weapon).
