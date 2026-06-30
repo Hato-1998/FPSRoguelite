@@ -135,7 +135,11 @@ TArray<FFPSRCardDraw> UFPSRCardSubsystem::DrawCards(AController* ForPlayer, int3
 		{
 			UFPSRWeaponInstance* Inst = (Inv && SourceWeapon) ? Inv->GetInstanceForWeapon(SourceWeapon)
 			                                                  : (Inv ? Inv->GetCurrentInstance() : nullptr);
-			if (!Inst || Inst->GetFragmentStackCount(BehFrag) >= FMath::Max(BehFrag->MaxStacks, 1))
+			const int32 Stacks = Inst ? Inst->GetFragmentStackCount(BehFrag) : 0;
+			// Skip a maxed-stack fragment, OR a new distinct fragment on a weapon already at its slot cap — the latter
+			// needs the (deferred) replacement UI to choose a drop, so a plain pick would bounce and strand the level-up
+			// freeze (mirrors DrawWeaponUnlockOffer; U6). Stacking an already-held fragment (Stacks > 0) is unaffected.
+			if (!Inst || Stacks >= FMath::Max(BehFrag->MaxStacks, 1) || (Stacks == 0 && Inst->IsAtFragmentSlotCap()))
 			{
 				continue;
 			}
