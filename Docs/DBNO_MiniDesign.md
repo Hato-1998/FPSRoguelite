@@ -94,6 +94,7 @@
   - 반경 `ReviveRadius` 내 **Alive 아군**(자신 제외, IsAlive) 존재 여부 스캔.
   - 있으면 `ReviveProgress += ReviveRate * dt`(아군 N명 가산 옵션 §6), 없으면 `-= ReviveDecayRate*dt`(또는 정지·유지 §6).
   - `ReviveProgress >= 1` → `PS->SetLifeState(Alive)`; 체력 = `ReviveHealthFraction * Max`; 이동/입력 복구; `ReviveProgress=0`.
+  - **부활 직후 PostReviveInvuln(기본 5s, 편집가능 `PostReviveInvulnSeconds`)**: `PerformRevive`→`AFPSRCharacter::BeginPostReviveInvulnerability`(서버). ① 무적 = `ApplyContactDamage` 게이트 `Now < PostReviveInvulnUntil` → 전 데미지 경로(접촉/투사체/히트스캔) 무피해. ② 적 충돌무시 = 캡슐 `ECC_Pawn`(적) 응답 `ECR_Ignore`(통과). 타임아웃(타이머) 시 복원. **근거**: 갓-부활 폰이 자신을 다운시킨 적 무리 한가운데서 깨어나므로 즉시 재다운 방지. 대시 충돌무시창과 같은 채널을 토글하므로 **타임스탬프 기반 공유 헬퍼 `RefreshPawnCollisionResponse()`**로 합성(대시·부활창이 서로 조기복원 안 되게).
 - `ReviveProgress`는 **복제**(다운 플레이어 + 근접 아군 UI). Push Model, 다운자 채널.
 
 ### 3-3. → Dead + 팀와이프 (`AFPSRGameMode`)

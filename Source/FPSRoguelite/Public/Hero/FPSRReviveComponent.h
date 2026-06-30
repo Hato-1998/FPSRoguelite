@@ -63,6 +63,12 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Revive", meta = (ClampMin = "0.1"))
 	float ReviveSeconds = 3.0f;
 
+	/** Seconds of invulnerability (+ enemy pass-through) granted right after a revive so the swarm that downed the
+	 *  player can't instantly re-down them at the spot they fell (U9 §2-13). Applied via
+	 *  AFPSRCharacter::BeginPostReviveInvulnerability. Balance value; 0 disables. */
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Revive", meta = (ClampMin = "0.0"))
+	float PostReviveInvulnSeconds = 5.0f;
+
 	/** With no ally near, the gauge decays this many times faster than it fills (0 = hold, don't decay). */
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Revive", meta = (ClampMin = "0.0"))
 	float ReviveDecayMultiplier = 1.0f;

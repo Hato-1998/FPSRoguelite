@@ -64,6 +64,11 @@ public:
 	 *  owning client from AFPSRPlayerState::OnRep_LifeState so movement prediction matches (mirrors ApplyMoveSpeedMultiplier). */
 	void ApplyDownedLocomotion(bool bDowned);
 
+	/** Server: start the post-revive grace window (U9 §2-13) — i-frames in ApplyContactDamage + the capsule passes
+	 *  through enemy pawns (ECC_Pawn) so the just-revived player can escape the surround that downed them. Called from
+	 *  UFPSRReviveComponent::PerformRevive; no-op off authority or for Seconds <= 0. */
+	void BeginPostReviveInvulnerability(float Seconds);
+
 	/** Owner-client: refresh the first-person weapon mesh + arms anim when the equipped weapon changes
 	 *  (called from the inventory's server EquipSlot + client OnRep). No-op on non-locally-controlled pawns. */
 	void RefreshFirstPersonWeaponVisual();
@@ -241,8 +246,17 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Input")
 	TObjectPtr<UInputAction> MenuAction;
 
-	/** Server: end the dash window — restore Pawn collision blocking. */
+	/** Server: end the dash collision-ignore window (recomputes the enemy-pawn response — it may stay ignored if a
+	 *  post-revive grace window is still active). */
 	void EndDash();
+
+	/** Server: end the post-revive grace collision-ignore window (recomputes the enemy-pawn response). */
+	void EndPostReviveInvulnerability();
+
+	/** Server: recompute the capsule's response to enemy pawns (ECC_Pawn) — ignore while dashing OR within the
+	 *  post-revive grace window (both windows derive from server timestamps, so an overlap composes correctly), block
+	 *  otherwise. Shared by dash + post-revive grace so neither restores blocking while the other is still active. */
+	void RefreshPawnCollisionResponse();
 
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Dash")
 	float DashSpeed = 2000.0f;
@@ -274,6 +288,13 @@ protected:
 
 	/** Server-only: world time of the last accepted contact hit (i-frame gate). */
 	float LastDamagedTime = -1000.0f;
+
+	/** Server-only: world time until which the player is invulnerable + passes through enemy pawns after a revive
+	 *  (U9 §2-13 post-revive grace). Set in BeginPostReviveInvulnerability; read by ApplyContactDamage. */
+	float PostReviveInvulnUntil = -1000.0f;
+
+	/** Server-only: timer to end the post-revive collision-ignore window. */
+	FTimerHandle PostReviveInvulnTimerHandle;
 
 	/** Local-client: true while the vision-restriction PP is currently applied (idempotency guard). */
 	bool bVisionRestrictionApplied = false;

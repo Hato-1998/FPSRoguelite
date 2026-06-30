@@ -609,11 +609,10 @@ void AFPSRCharacter::ServerDash_Implementation(FVector DashDirection)
 
 	LastDashTime = Now;
 
-	// Ignore other pawns (enemies + allies) for the dash window so the player can pass through a surround.
-	if (UCapsuleComponent* Capsule = GetCapsuleComponent())
-	{
-		Capsule->SetCollisionResponseToChannel(ECC_Pawn, ECR_Ignore);
-	}
+	// Ignore other pawns (enemies + allies) for the dash window so the player can pass through a surround. Routed
+	// through the shared helper so it composes with a post-revive grace window (RefreshPawnCollisionResponse derives
+	// "dashing" from LastDashTime + DashDuration, just set above).
+	RefreshPawnCollisionResponse();
 
 	// Launch along the dash direction (keep current vertical velocity so air dashes feel natural).
 	LaunchCharacter(Direction * DashSpeed, true, false);
@@ -624,10 +623,45 @@ void AFPSRCharacter::ServerDash_Implementation(FVector DashDirection)
 
 void AFPSRCharacter::EndDash()
 {
-	if (UCapsuleComponent* Capsule = GetCapsuleComponent())
+	// Recompute rather than unconditionally block — a post-revive grace window may still want enemy pass-through.
+	RefreshPawnCollisionResponse();
+}
+
+void AFPSRCharacter::RefreshPawnCollisionResponse()
+{
+	UCapsuleComponent* Capsule = GetCapsuleComponent();
+	if (!Capsule)
 	{
-		Capsule->SetCollisionResponseToChannel(ECC_Pawn, ECR_Block);
+		return;
 	}
+	const UWorld* World = GetWorld();
+	const float Now = World ? World->GetTimeSeconds() : 0.0f;
+	// Both windows derive from server timestamps so an overlapping dash + post-revive grace compose correctly —
+	// whichever ends first doesn't restore enemy blocking while the other is still active.
+	const bool bDashing = (Now - LastDashTime) < DashDuration;
+	const bool bReviveGrace = Now < PostReviveInvulnUntil;
+	Capsule->SetCollisionResponseToChannel(ECC_Pawn, (bDashing || bReviveGrace) ? ECR_Ignore : ECR_Block);
+}
+
+void AFPSRCharacter::BeginPostReviveInvulnerability(float Seconds)
+{
+	UWorld* World = GetWorld();
+	if (!HasAuthority() || Seconds <= 0.0f || !World)
+	{
+		return;
+	}
+	PostReviveInvulnUntil = World->GetTimeSeconds() + Seconds;
+
+	// Pass through enemy pawns for the grace window (mirrors the dash collision-ignore) so the just-revived player can
+	// walk out of the surround that downed them. The shared helper composes this with any active dash window.
+	RefreshPawnCollisionResponse();
+	World->GetTimerManager().SetTimer(PostReviveInvulnTimerHandle, this, &AFPSRCharacter::EndPostReviveInvulnerability, Seconds, false);
+}
+
+void AFPSRCharacter::EndPostReviveInvulnerability()
+{
+	// Recompute rather than unconditionally block — a dash may still be in its own collision-ignore window.
+	RefreshPawnCollisionResponse();
 }
 
 void AFPSRCharacter::ApplyContactDamage(float DamageAmount, AActor* DamageInstigator, FGameplayTag DamageType)
@@ -645,10 +679,19 @@ void AFPSRCharacter::ApplyContactDamage(float DamageAmount, AActor* DamageInstig
 		return;
 	}
 
-	// Invulnerability frames: ignore further hits within DamageInvulnerabilityDuration of the last
-	// accepted hit, so a swarm can't stack damage in a single window (per-player, server-authoritative).
 	const UWorld* World = GetWorld();
 	const float Now = World ? World->GetTimeSeconds() : 0.0f;
+
+	// Post-revive grace (§2-13): a just-revived player is invulnerable for PostReviveInvulnSeconds so the swarm that
+	// downed them can't instantly re-down them at the spot they fell. Server-authoritative timestamp set in
+	// UFPSRReviveComponent::PerformRevive -> BeginPostReviveInvulnerability.
+	if (Now < PostReviveInvulnUntil)
+	{
+		return;
+	}
+
+	// Invulnerability frames: ignore further hits within DamageInvulnerabilityDuration of the last
+	// accepted hit, so a swarm can't stack damage in a single window (per-player, server-authoritative).
 	if ((Now - LastDamagedTime) < DamageInvulnerabilityDuration)
 	{
 		return;
@@ -1000,25 +1043,57 @@ void AFPSRCharacter::MulticastFireCosmetics_Implementation()
 {
 	// The owning client already played its predicted fire cosmetics locally (PlayWeaponFireCosmetics), so skip here
 	// to avoid double-play. On the listen-server host the host pawn is locally controlled and also skips (it heard
-	// its own shot). Only REMOTE observers fall through and hear the teammate's fire (B4).
+	// its own shot). Only REMOTE observers fall through (teammate fire SFX B4 + 1P muzzle/montage for a spectator).
 	if (IsLocallyControlled())
 	{
 		return;
 	}
 
-	// Resolve the fire sound from the REPLICATED inventory — the owner-only CachedFireSound is never set on remote
-	// machines (the equip cosmetic cache is IsLocallyControlled-gated). GetCurrentWeapon() is valid on every client
-	// (the inventory's Slots/CurrentSlotIndex replicate).
+	// Resolve the equipped weapon from the REPLICATED inventory — the owner-only Cached* cosmetics aren't relied on
+	// here. GetCurrentWeapon() is valid on every client (the inventory's Slots/CurrentSlotIndex replicate).
 	const UFPSRWeaponDataAsset* Weapon = WeaponInventory ? WeaponInventory->GetCurrentWeapon() : nullptr;
-	if (!Weapon || Weapon->FireSound.IsNull())
+	if (!Weapon)
 	{
 		return;
 	}
 
-	// Coarse distance cull against the local viewer so a far-off teammate's shot doesn't spawn an audio component
-	// (the sound's own attenuation still shapes falloff for audible shots). Cheap belt at the <=4-player scale.
+	const APlayerController* LocalPC = GetWorld() ? GetWorld()->GetFirstPlayerController() : nullptr;
+
+	// First-person fire visuals (muzzle flash + arms fire montage) for a DOWNED teammate who is SPECTATING this pawn
+	// (§2-13). OnlyOwnerSee 1P meshes render for the view target, so the spectator already sees this pawn's arms+gun;
+	// without this they'd see the gun but no muzzle/recoil. Gate strictly on "the local viewer's view target IS this
+	// pawn": the muzzle particle is NOT OnlyOwnerSee, so an UNgated spawn would float a muzzle flash at the 1P weapon
+	// position inside a (non-spectating) teammate's head. No distance cull here — the spectator's camera is on this pawn.
+	if (LocalPC && LocalPC->GetViewTarget() == this)
+	{
+		if (ActiveWeaponMesh && !Weapon->MuzzleFlash.IsNull())
+		{
+			if (UParticleSystem* Muzzle = Weapon->MuzzleFlash.LoadSynchronous())
+			{
+				UGameplayStatics::SpawnEmitterAttached(Muzzle, ActiveWeaponMesh, Weapon->MuzzleSocket);
+			}
+		}
+		if (FirstPersonArms && !Weapon->FireMontage.IsNull())
+		{
+			if (UAnimMontage* FireMontage = Weapon->FireMontage.LoadSynchronous())
+			{
+				if (UAnimInstance* AnimInst = FirstPersonArms->GetAnimInstance())
+				{
+					AnimInst->Montage_Play(FireMontage);
+				}
+			}
+		}
+	}
+
+	// Spatialized fire SFX so REMOTE teammates hear each other's fire (B4). Coarse distance cull against the local
+	// viewer's pawn so a far-off shot doesn't spawn an audio component (the sound's own attenuation still shapes
+	// falloff for audible shots). Cheap belt at the <=4-player scale.
+	if (Weapon->FireSound.IsNull())
+	{
+		return;
+	}
 	constexpr float FireSoundCullDistance = 8000.0f; // cm (~80 m)
-	if (const APlayerController* LocalPC = GetWorld() ? GetWorld()->GetFirstPlayerController() : nullptr)
+	if (LocalPC)
 	{
 		if (const APawn* LocalPawn = LocalPC->GetPawn())
 		{

@@ -151,6 +151,10 @@ void UFPSRReviveComponent::PerformRevive()
 	if (AFPSRCharacter* OwnerChar = Cast<AFPSRCharacter>(OwnerPawn))
 	{
 		OwnerChar->ApplyDownedLocomotion(false);
+
+		// Post-revive grace (§2-13): a brief window of invulnerability + enemy pass-through so the player isn't
+		// instantly re-downed by the swarm at the spot they fell. Server-authoritative (we're on the server tick).
+		OwnerChar->BeginPostReviveInvulnerability(PostReviveInvulnSeconds);
 	}
 
 	// Camera back to the revived player's own pawn — it never moved (DBNO is stationary), so the player stands up
