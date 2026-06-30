@@ -5,8 +5,10 @@
 #include "Weapon/FPSRProjectile.h"
 #include "Weapon/FPSRProjectileSubsystem.h"
 #include "Weapon/FPSRProjectileTypes.h"
+#include "Hero/FPSRCharacter.h"
 #include "Core/FPSRPlayerController.h"
 #include "Core/FPSRLogChannels.h"
+#include "FPSRCollisionChannels.h"
 
 #include "Engine/World.h"
 #include "CollisionQueryParams.h"
@@ -60,7 +62,7 @@ EFPSRServerAttackResult AFPSRRangedEnemyBase::ServerTickAttack(const FFPSRServer
 		UFPSREnemySpawnSubsystem* Sub = GetWorld() ? GetWorld()->GetSubsystem<UFPSREnemySpawnSubsystem>() : nullptr;
 		// Cheap gates first (range, then a read-only token peek) so a capped-out idle ranged enemy never pays for the
 		// line-of-sight trace every pass at swarm scale (Game.MD §5). Acquire only after LOS confirms a clear shot.
-		if (bInRange && Sub && Sub->IsRangedTokenAvailable(Ctx.TargetController) && HasLineOfSight(Ctx.TargetLocation))
+		if (bInRange && Sub && Sub->IsRangedTokenAvailable(Ctx.TargetController) && HasLineOfSight(Ctx.TargetChar, Ctx.TargetLocation))
 		{
 			if (Sub->TryAcquireRangedToken(Ctx.TargetController))
 			{
@@ -167,7 +169,7 @@ void AFPSRRangedEnemyBase::FireProjectile(const FFPSRServerAttackContext& Ctx)
 	ProjSub->AcquireProjectile(ProjectileClass, MuzzleLoc, Dir, Params);
 }
 
-bool AFPSRRangedEnemyBase::HasLineOfSight(const FVector& TargetLocation) const
+bool AFPSRRangedEnemyBase::HasLineOfSight(const AActor* TargetActor, const FVector& TargetLocation) const
 {
 	if (!bRequireLineOfSight)
 	{
@@ -179,10 +181,21 @@ bool AFPSRRangedEnemyBase::HasLineOfSight(const FVector& TargetLocation) const
 		return false;
 	}
 
-	// Clear if no STATIC geometry blocks the muzzle->target segment. Ignore self (and other pawns are not queried).
+	// Block on STATIC geometry (walls / door frames) AND the player-pawn object channel — which includes CLOSED
+	// AFPSRDoor leaves (ECC_FPSRPlayerPawn, Enemy.md §2-6). Without the player-pawn channel a ranged enemy would
+	// "see" — and shoot — through a closed door to the player behind it (the enemy projectile overlaps that channel
+	// but treats only AFPSRCharacter as hostile, so it would pass straight through the door). Doors only ever break
+	// OPEN (never re-close), so gating the SHOT on LOS fully prevents a through-door hit — no barrier can appear in
+	// front of an in-flight projectile. Ignore self + the target so neither counts as an occluder. Other ENEMIES
+	// (ECC_Pawn) are intentionally NOT queried — an enemy projectile passes through them, so they don't block LOS.
 	FCollisionObjectQueryParams ObjParams;
 	ObjParams.AddObjectTypesToQuery(ECC_WorldStatic);
+	ObjParams.AddObjectTypesToQuery(ECC_FPSRPlayerPawn);
 	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(FPSRRangedLOS), false, this);
+	if (TargetActor)
+	{
+		QueryParams.AddIgnoredActor(TargetActor);
+	}
 	FHitResult Hit;
 	return !World->LineTraceSingleByObjectType(Hit, GetMuzzleLocation(), TargetLocation, ObjParams, QueryParams);
 }

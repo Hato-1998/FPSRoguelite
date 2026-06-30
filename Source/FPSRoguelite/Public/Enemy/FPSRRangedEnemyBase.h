@@ -95,8 +95,9 @@ private:
 	/** Fire one enemy-team projectile toward the target (reuses UFPSRProjectileSubsystem — no new damage code). */
 	void FireProjectile(const FFPSRServerAttackContext& Ctx);
 
-	/** True if a static-geometry trace from the muzzle to TargetLocation is clear (or LOS isn't required). */
-	bool HasLineOfSight(const FVector& TargetLocation) const;
+	/** True if a trace from the muzzle to the target is clear of static geometry AND closed door leaves (or LOS isn't
+	 *  required). Ignores self + the target so neither counts as an occluder. */
+	bool HasLineOfSight(const AActor* TargetActor, const FVector& TargetLocation) const;
 
 	/** Send the ranged-target warning (Client RPC) to the held target's controller. bActive=false clears it. */
 	void SendRangedWarning(bool bActive);
