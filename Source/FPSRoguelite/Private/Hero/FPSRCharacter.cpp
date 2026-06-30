@@ -863,8 +863,13 @@ void AFPSRCharacter::ApplyVisionRestriction(bool bRestricted)
 
 void AFPSRCharacter::RefreshFirstPersonWeaponVisual()
 {
-	// Owner-client cosmetic only (listen-server host's own pawn + remote autonomous proxy both reach here).
-	if (!IsLocallyControlled() || !WeaponInventory)
+	// Populate the 1P arms/weapon visual on ALL clients (not just the owner). A DOWNED teammate spectates this pawn via
+	// SetViewTarget (§2-13 DBNO), and OnlyOwnerSee is evaluated against the VIEW TARGET — so the spectator renders THIS
+	// pawn's 1P arms + weapon. The weapon mesh is set dynamically per-equip, so if it isn't populated on the spectator's
+	// client the downed viewer sees arms but no gun. The 1P meshes stay OnlyOwnerSee (non-spectating remotes still don't
+	// see them); the cached fire cosmetics below are owner-only-used (PlayWeaponFireCosmetics gates on IsLocallyControlled)
+	// so they are harmless on remote pawns.
+	if (!WeaponInventory)
 	{
 		return;
 	}
