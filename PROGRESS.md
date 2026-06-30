@@ -4,7 +4,16 @@
 > **작업 단계를 끝낼 때마다, 그리고 중단 전 반드시 이 파일을 갱신하고 커밋한다.**
 > 확정 설계·기획·코드구조·규칙은 `Game.md`(**SSOT 허브** → 도메인별 `Docs/SSOT/*.md`, 작업별 라우팅은 허브 §0-1), **완료 작업 상세는 `git log --oneline`**. 여기엔 *무엇을 했는지*만 요약한다.
 
-**최종 갱신: 2026-06-30**
+**최종 갱신: 2026-07-01**
+
+## 🔔 핸드오프 (2026-07-01) — ✅ **U5 완료**(원거리 적 콘텐츠 + 베이스 BP 분리 + PIE 통과) → main `--no-ff` 머지. 다음=2차 트랙 남은 유닛
+> **U5 종결**: 기완료 코드에 더해 **콘텐츠 4종 저작 + 근접↔원거리 베이스 BP 분리 + 사거리 튜닝**을 마치고 사용자 PIE 통과 → `phase/p4-ranged-enemy` → `main --no-ff` 머지. 브랜치 정리(로컬 단독, 원격 없었음).
+> **콘텐츠/구조**: ⓐ `BP_EnemyProjectile`(AFPSRProjectile 자식, 엔진 Sphere×0.3+이미시브=가시화; VFX·색구분=후속) ⓑ `BP_EnemyRangedBase`(←BP_RangedEnemy 리네임, AFPSRRangedEnemyBase 자식, ProjectileClass 배선) ⓒ `BP_EnemyMeleeBase`(←BP_EnemyBase 리네임, 아키타입 베이스) ⓓ `DA_EnemyRoster`(_Static 2룰, 근접:원거리=3:1) → `DA_RunSchedule.EnemyRoster` 배선. **후속 변종은 `BP_Enemy{Melee,Ranged}Base` 상속**. GameMode.EnemyClass 재지정+리다이렉터 0 잔존(헤드리스 전수 검증).
+> **튜닝(사용자 PIE 피드백)**: 원거리 사거리 ↑ — `RangedEngageRange 1400→2400`, `StopDistance 900→1500`(≈15m 정지·발사). 전 스탯은 **이미 BP Details 편집 가능**(MaxHealth=HealthComponent 하위 / MoveSpeed·AttackRange·Damage·Interval·XP=FPSR\|Enemy(\|Attack) / Ranged=FPSR\|Enemy\|Ranged).
+> **밸런스 보류(U14)**: 원거리 적 HP=50(C++ 기본=글래스캐논) vs 근접 180. 적탄 perf=§5 미측정 이월.
+> **결정 기록**: 게임 스탯/설정 **엑셀(CSV)→DataTable 추출 = 후반 전체 일괄**로 보류(기능별 산발 금지) [[defer-excel-datatable-stats-extraction]]. 당장은 BP EditDefaultsOnly 노출로 충분.
+> **커밋**: `f5f0055 chore`(세션 전 미커밋 무관 콘텐츠 9개=맵·머티리얼·HUD·SpawnGate·StructuredSpawner, 사용자 승인 동반정리) + `3c694ed feat(U5)`(콘텐츠 7파일) + main 머지커밋.
+> **⚠️ 다음 = 2차 트랙 남은 유닛**(순서 자유) [[taskprompts-master-roadmap]]: U6 Fragment / U7 플로우필드 높이 / U8 GMS / U10 SaveGame / U15 1P 무기 애님 / U17 플레이어 설정. 새 작업=TaskPrompts 프롬프트 사용.
 
 ## 🔔 핸드오프 (2026-06-30 k) — U5 원거리 적 AI + 사전경고 생산자 **코드 완료·검증**(빌드+스모크+Codex게이트+P2교정), 다음=사용자 콘텐츠+PIE → main 머지
 > **브랜치**: `phase/p4-ranged-enemy`(main `dab7f59`에서 분기). 2커밋: `a4d604d feat(U5)` + `080352a fix(U5)` Codex P2 교정. **코드/베이스만**(콘텐츠 미생성 — 원칙).
