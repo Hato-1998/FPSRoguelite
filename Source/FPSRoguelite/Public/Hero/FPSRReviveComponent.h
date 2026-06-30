@@ -30,6 +30,11 @@ public:
 	UFUNCTION(BlueprintPure, Category = "FPSR|Revive")
 	float GetReviveProgress() const { return ReviveProgress; }
 
+	/** Radius (cm) within which an alive ally fills this downed player's gauge. Exposed for the reviver-side HUD query
+	 *  (AFPSRCharacter::GetReviveTargetProgress) — same value on every client (CDO default, not per-instance tuned). */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Revive")
+	float GetReviveRadius() const { return ReviveRadius; }
+
 	/** Fires on the host (direct) + clients (OnRep) whenever ReviveProgress changes — bind the HUD revive gauge here. */
 	UPROPERTY(BlueprintAssignable, Category = "FPSR|Revive")
 	FOnReviveProgressChanged OnReviveProgressChanged;
@@ -65,7 +70,7 @@ protected:
 
 	/** Seconds of invulnerability (+ enemy pass-through) granted right after a revive so the swarm that downed the
 	 *  player can't instantly re-down them at the spot they fell (U9 §2-13). Applied via
-	 *  AFPSRCharacter::BeginPostReviveInvulnerability. Balance value; 0 disables. */
+	 *  AFPSRCharacter::BeginGraceWindow. Balance value; 0 disables. */
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Revive", meta = (ClampMin = "0.0"))
 	float PostReviveInvulnSeconds = 5.0f;
 

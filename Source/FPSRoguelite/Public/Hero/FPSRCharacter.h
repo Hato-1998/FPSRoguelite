@@ -71,10 +71,17 @@ public:
 	 *  owning client from AFPSRPlayerState::OnRep_LifeState so movement prediction matches (mirrors ApplyMoveSpeedMultiplier). */
 	void ApplyDownedLocomotion(bool bDowned);
 
-	/** Server: start the post-revive grace window (U9 §2-13) — i-frames in ApplyContactDamage + the capsule passes
-	 *  through enemy pawns (ECC_Pawn) so the just-revived player can escape the surround that downed them. Called from
-	 *  UFPSRReviveComponent::PerformRevive; no-op off authority or for Seconds <= 0. */
-	void BeginPostReviveInvulnerability(float Seconds);
+	/** Server: start a grace window of Seconds — i-frames in ApplyContactDamage + the capsule passes through enemy
+	 *  pawns (ECC_Pawn) so the player can escape a surround. Used by the post-revive grace
+	 *  (UFPSRReviveComponent::PerformRevive) and the post-card-selection resume grace (HandleRunStateChanged_Movement).
+	 *  No-op off authority or for Seconds <= 0. (U9 §2-13) */
+	void BeginGraceWindow(float Seconds);
+
+	/** Local reviver HUD (U9 §2-13): if this player is alive and standing within a DBNO ally's revive radius, returns
+	 *  that ally's revive progress (0..1) so the HUD can show a "reviving teammate" gauge; returns -1 when not reviving
+	 *  anyone. Client-side query over already-replicated data (LifeState + ReviveProgress). */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Revive")
+	float GetReviveTargetProgress() const;
 
 	/** Owner-client: refresh the first-person weapon mesh + arms anim when the equipped weapon changes
 	 *  (called from the inventory's server EquipSlot + client OnRep). No-op on non-locally-controlled pawns. */
@@ -254,15 +261,15 @@ protected:
 	TObjectPtr<UInputAction> MenuAction;
 
 	/** Server: end the dash collision-ignore window (recomputes the enemy-pawn response — it may stay ignored if a
-	 *  post-revive grace window is still active). */
+	 *  grace window is still active). */
 	void EndDash();
 
-	/** Server: end the post-revive grace collision-ignore window (recomputes the enemy-pawn response). */
-	void EndPostReviveInvulnerability();
+	/** Server: end the grace collision-ignore window (recomputes the enemy-pawn response). */
+	void EndGraceWindow();
 
-	/** Server: recompute the capsule's response to enemy pawns (ECC_Pawn) — ignore while dashing OR within the
-	 *  post-revive grace window (both windows derive from server timestamps, so an overlap composes correctly), block
-	 *  otherwise. Shared by dash + post-revive grace so neither restores blocking while the other is still active. */
+	/** Server: recompute the capsule's response to enemy pawns (ECC_Pawn) — ignore while dashing OR within a grace
+	 *  window (both derive from server timestamps, so an overlap composes correctly), block otherwise. Shared by dash
+	 *  + grace window so neither restores blocking while the other is still active. */
 	void RefreshPawnCollisionResponse();
 
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Dash")
@@ -293,15 +300,24 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Combat")
 	float DamageInvulnerabilityDuration = 0.25f;
 
+	/** Seconds of grace (invulnerable + enemy pass-through) granted when the card-selection freeze ENDS, so a player
+	 *  who unfreezes surrounded by the swarm isn't hit the instant the world resumes (U9 §2-13). Balance value; 0 disables. */
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Combat", meta = (ClampMin = "0.0"))
+	float PostFreezeInvulnSeconds = 3.0f;
+
 	/** Server-only: world time of the last accepted contact hit (i-frame gate). */
 	float LastDamagedTime = -1000.0f;
 
-	/** Server-only: world time until which the player is invulnerable + passes through enemy pawns after a revive
-	 *  (U9 §2-13 post-revive grace). Set in BeginPostReviveInvulnerability; read by ApplyContactDamage. */
-	float PostReviveInvulnUntil = -1000.0f;
+	/** Server-only: world time until which the player is invulnerable + passes through enemy pawns (grace window:
+	 *  post-revive and post-card-selection resume, U9 §2-13). Set in BeginGraceWindow; read by ApplyContactDamage. */
+	float GraceUntil = -1000.0f;
 
-	/** Server-only: timer to end the post-revive collision-ignore window. */
-	FTimerHandle PostReviveInvulnTimerHandle;
+	/** Server-only: timer to end the grace collision-ignore window. */
+	FTimerHandle GraceTimerHandle;
+
+	/** Server-only: previous run-paused state (authority) — detects the card-selection freeze ENDING so the resume
+	 *  grace fires once on the paused->unpaused transition. */
+	bool bWasRunPausedAuth = false;
 
 	/** Local-client: true while the vision-restriction PP is currently applied (idempotency guard). */
 	bool bVisionRestrictionApplied = false;

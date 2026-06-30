@@ -623,7 +623,7 @@ void AFPSRCharacter::ServerDash_Implementation(FVector DashDirection)
 
 void AFPSRCharacter::EndDash()
 {
-	// Recompute rather than unconditionally block — a post-revive grace window may still want enemy pass-through.
+	// Recompute rather than unconditionally block — a grace window may still want enemy pass-through.
 	RefreshPawnCollisionResponse();
 }
 
@@ -636,29 +636,30 @@ void AFPSRCharacter::RefreshPawnCollisionResponse()
 	}
 	const UWorld* World = GetWorld();
 	const float Now = World ? World->GetTimeSeconds() : 0.0f;
-	// Both windows derive from server timestamps so an overlapping dash + post-revive grace compose correctly —
-	// whichever ends first doesn't restore enemy blocking while the other is still active.
+	// Both windows derive from server timestamps so an overlapping dash + grace window compose correctly — whichever
+	// ends first doesn't restore enemy blocking while the other is still active.
 	const bool bDashing = (Now - LastDashTime) < DashDuration;
-	const bool bReviveGrace = Now < PostReviveInvulnUntil;
-	Capsule->SetCollisionResponseToChannel(ECC_Pawn, (bDashing || bReviveGrace) ? ECR_Ignore : ECR_Block);
+	const bool bGrace = Now < GraceUntil;
+	Capsule->SetCollisionResponseToChannel(ECC_Pawn, (bDashing || bGrace) ? ECR_Ignore : ECR_Block);
 }
 
-void AFPSRCharacter::BeginPostReviveInvulnerability(float Seconds)
+void AFPSRCharacter::BeginGraceWindow(float Seconds)
 {
 	UWorld* World = GetWorld();
 	if (!HasAuthority() || Seconds <= 0.0f || !World)
 	{
 		return;
 	}
-	PostReviveInvulnUntil = World->GetTimeSeconds() + Seconds;
+	GraceUntil = World->GetTimeSeconds() + Seconds;
 
-	// Pass through enemy pawns for the grace window (mirrors the dash collision-ignore) so the just-revived player can
-	// walk out of the surround that downed them. The shared helper composes this with any active dash window.
+	// Pass through enemy pawns for the grace window (mirrors the dash collision-ignore) so the player can walk out of a
+	// surround — the swarm that downed them (post-revive) or that closed in during the card freeze (post-freeze). The
+	// shared helper composes this with any active dash window.
 	RefreshPawnCollisionResponse();
-	World->GetTimerManager().SetTimer(PostReviveInvulnTimerHandle, this, &AFPSRCharacter::EndPostReviveInvulnerability, Seconds, false);
+	World->GetTimerManager().SetTimer(GraceTimerHandle, this, &AFPSRCharacter::EndGraceWindow, Seconds, false);
 }
 
-void AFPSRCharacter::EndPostReviveInvulnerability()
+void AFPSRCharacter::EndGraceWindow()
 {
 	// Recompute rather than unconditionally block — a dash may still be in its own collision-ignore window.
 	RefreshPawnCollisionResponse();
@@ -682,10 +683,10 @@ void AFPSRCharacter::ApplyContactDamage(float DamageAmount, AActor* DamageInstig
 	const UWorld* World = GetWorld();
 	const float Now = World ? World->GetTimeSeconds() : 0.0f;
 
-	// Post-revive grace (§2-13): a just-revived player is invulnerable for PostReviveInvulnSeconds so the swarm that
-	// downed them can't instantly re-down them at the spot they fell. Server-authoritative timestamp set in
-	// UFPSRReviveComponent::PerformRevive -> BeginPostReviveInvulnerability.
-	if (Now < PostReviveInvulnUntil)
+	// Grace window (§2-13): the player is invulnerable for a short window after a revive (post-revive grace) or after
+	// the card-selection freeze resumes (post-freeze grace), so a surrounding swarm can't instantly down them.
+	// Server-authoritative timestamp set in BeginGraceWindow.
+	if (Now < GraceUntil)
 	{
 		return;
 	}
@@ -847,7 +848,18 @@ void AFPSRCharacter::HandleRunStateChanged_Movement()
 	}
 	UWorld* World = GetWorld();
 	const AFPSRGameState* GS = World ? World->GetGameState<AFPSRGameState>() : nullptr;
-	if (!GS || !GS->IsRunPaused())
+	const bool bPaused = GS && GS->IsRunPaused();
+
+	// Post-card-selection resume grace (§2-13): when the global freeze ENDS, grant a short grace window so a player who
+	// unfreezes standing in the swarm isn't hit the instant the world resumes (the card screen otherwise can't be left
+	// safely). Fires once on the paused->unpaused transition; BeginGraceWindow is server-only (we're on authority).
+	if (bWasRunPausedAuth && !bPaused)
+	{
+		BeginGraceWindow(PostFreezeInvulnSeconds);
+	}
+	bWasRunPausedAuth = bPaused;
+
+	if (!bPaused)
 	{
 		return; // only act on entering the freeze; resume restores normal input-driven control (dash was cancelled)
 	}
@@ -1116,18 +1128,64 @@ void AFPSRCharacter::CalcCamera(float DeltaTime, FMinimalViewInfo& OutResult)
 {
 	// A DBNO teammate spectates a living ally via SetViewTarget (§2-13). On the spectator's machine the ally pawn is
 	// NOT locally controlled, so UCameraComponent::GetCameraView skips bUsePawnControlRotation (it only follows the
-	// LOCAL controller) — the spectator's view tracks yaw (replicated actor rotation) but not pitch. Build the view
-	// from GetBaseAimRotation(): yaw from the actor rotation, pitch from the replicated RemoteViewPitch16 (UE5.7), so
-	// the spectated teammate's up/down aim is reflected. The locally-controlled owner keeps the camera-component path.
+	// LOCAL controller) — the spectator's view (and the attached 1P arms/weapon) would track yaw (replicated actor
+	// rotation) but not pitch. GetBaseAimRotation() gives the full aim: yaw from the actor rotation, pitch from the
+	// replicated RemoteViewPitch16 (UE5.7). Drive the camera component with it (CalcCamera runs each frame only while
+	// this pawn is the view target) so the attached 1P arms + weapon mesh pitch with the aim, then return that view.
+	// The locally-controlled owner keeps the default camera-component path (bUsePawnControlRotation handles pitch).
 	if (FirstPersonCamera && !IsLocallyControlled())
 	{
+		const FRotator AimRotation = GetBaseAimRotation();
+		FirstPersonCamera->SetWorldRotation(AimRotation);
 		OutResult.Location = FirstPersonCamera->GetComponentLocation();
-		OutResult.Rotation = GetBaseAimRotation();
+		OutResult.Rotation = AimRotation;
 		OutResult.FOV = FirstPersonCamera->FieldOfView;
 		return;
 	}
 
 	Super::CalcCamera(DeltaTime, OutResult);
+}
+
+float AFPSRCharacter::GetReviveTargetProgress() const
+{
+	// Local reviver HUD (§2-13): an ALIVE player standing within a DBNO ally's revive radius is reviving them — surface
+	// that ally's (replicated) ReviveProgress so the reviver's HUD can show a gauge + prompt. Returns the highest
+	// progress among in-range downed allies, or -1 when this player isn't reviving anyone. Pure client-side read of
+	// already-replicated data (LifeState + ReviveProgress); no new replication.
+	const AFPSRPlayerState* MyPS = GetPlayerState<AFPSRPlayerState>();
+	if (!MyPS || !MyPS->IsAlive())
+	{
+		return -1.0f; // only an alive player can be reviving someone
+	}
+	const UWorld* World = GetWorld();
+	const AFPSRGameState* GS = World ? World->GetGameState<AFPSRGameState>() : nullptr;
+	if (!GS)
+	{
+		return -1.0f;
+	}
+	const FVector MyLoc = GetActorLocation();
+	float BestProgress = -1.0f;
+	for (APlayerState* PS : GS->PlayerArray)
+	{
+		const AFPSRPlayerState* AllyPS = Cast<AFPSRPlayerState>(PS);
+		if (!AllyPS || AllyPS == MyPS || !AllyPS->IsDBNO())
+		{
+			continue;
+		}
+		const APawn* AllyPawn = AllyPS->GetPawn();
+		const UFPSRReviveComponent* AllyRevive = AllyPawn ? AllyPawn->FindComponentByClass<UFPSRReviveComponent>() : nullptr;
+		if (!AllyRevive)
+		{
+			continue;
+		}
+		FVector ToAlly = AllyPawn->GetActorLocation() - MyLoc;
+		ToAlly.Z = 0.0f;
+		if (ToAlly.SizeSquared() <= FMath::Square(AllyRevive->GetReviveRadius()))
+		{
+			BestProgress = FMath::Max(BestProgress, AllyRevive->GetReviveProgress());
+		}
+	}
+	return BestProgress;
 }
 
 UAbilitySystemComponent* AFPSRCharacter::GetAbilitySystemComponent() const

@@ -94,7 +94,9 @@
   - 반경 `ReviveRadius` 내 **Alive 아군**(자신 제외, IsAlive) 존재 여부 스캔.
   - 있으면 `ReviveProgress += ReviveRate * dt`(아군 N명 가산 옵션 §6), 없으면 `-= ReviveDecayRate*dt`(또는 정지·유지 §6).
   - `ReviveProgress >= 1` → `PS->SetLifeState(Alive)`; 체력 = `ReviveHealthFraction * Max`; 이동/입력 복구; `ReviveProgress=0`.
-  - **부활 직후 PostReviveInvuln(기본 5s, 편집가능 `PostReviveInvulnSeconds`)**: `PerformRevive`→`AFPSRCharacter::BeginPostReviveInvulnerability`(서버). ① 무적 = `ApplyContactDamage` 게이트 `Now < PostReviveInvulnUntil` → 전 데미지 경로(접촉/투사체/히트스캔) 무피해. ② 적 충돌무시 = 캡슐 `ECC_Pawn`(적) 응답 `ECR_Ignore`(통과). 타임아웃(타이머) 시 복원. **근거**: 갓-부활 폰이 자신을 다운시킨 적 무리 한가운데서 깨어나므로 즉시 재다운 방지. 대시 충돌무시창과 같은 채널을 토글하므로 **타임스탬프 기반 공유 헬퍼 `RefreshPawnCollisionResponse()`**로 합성(대시·부활창이 서로 조기복원 안 되게).
+  - **부활 직후 PostReviveInvuln(기본 5s, 편집가능 `PostReviveInvulnSeconds`)**: `PerformRevive`→`AFPSRCharacter::BeginGraceWindow`(서버, 일반화된 grace 메커니즘). ① 무적 = `ApplyContactDamage` 게이트 `Now < GraceUntil` → 전 데미지 경로(접촉/투사체/히트스캔) 무피해. ② 적 충돌무시 = 캡슐 `ECC_Pawn`(적) 응답 `ECR_Ignore`(통과). 타임아웃(타이머) 시 복원. **근거**: 갓-부활 폰이 자신을 다운시킨 적 무리 한가운데서 깨어나므로 즉시 재다운 방지. 대시 충돌무시창과 같은 채널을 토글하므로 **타임스탬프 기반 공유 헬퍼 `RefreshPawnCollisionResponse()`**로 합성(대시·grace창이 서로 조기복원 안 되게).
+  - **카드선택 프리즈 종료 후 grace(기본 3s, 편집가능 `PostFreezeInvulnSeconds`)**: 같은 `BeginGraceWindow` 재사용. `HandleRunStateChanged_Movement`(서버권위)가 `bRunPaused` true→false 전이를 감지해 부여. **근거**: 카드 선택 중 적이 포위한 상태로 재개되면 프리즈 해제 즉시 피해를 입어 카드 화면을 안전하게 빠져나올 수 없음.
+  - **부활시키는 사람(생존 아군) HUD 노티**: `AFPSRCharacter::GetReviveTargetProgress()`(BlueprintPure, 클라) — 생존 플레이어가 반경 내 DBNO 아군의 `ReviveProgress`(복제됨) 반환(없으면 −1). 다운된 본인 오버레이는 전체화면 비네트+텍스트+게이지, **부활시키는 사람은 게이지(로딩바)+설명 텍스트만**(비네트 없음). 신규 복제 0.
 - `ReviveProgress`는 **복제**(다운 플레이어 + 근접 아군 UI). Push Model, 다운자 채널.
 
 ### 3-3. → Dead + 팀와이프 (`AFPSRGameMode`)
