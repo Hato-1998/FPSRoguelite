@@ -1112,6 +1112,24 @@ void AFPSRCharacter::MulticastFireCosmetics_Implementation()
 	}
 }
 
+void AFPSRCharacter::CalcCamera(float DeltaTime, FMinimalViewInfo& OutResult)
+{
+	// A DBNO teammate spectates a living ally via SetViewTarget (§2-13). On the spectator's machine the ally pawn is
+	// NOT locally controlled, so UCameraComponent::GetCameraView skips bUsePawnControlRotation (it only follows the
+	// LOCAL controller) — the spectator's view tracks yaw (replicated actor rotation) but not pitch. Build the view
+	// from GetBaseAimRotation(): yaw from the actor rotation, pitch from the replicated RemoteViewPitch16 (UE5.7), so
+	// the spectated teammate's up/down aim is reflected. The locally-controlled owner keeps the camera-component path.
+	if (FirstPersonCamera && !IsLocallyControlled())
+	{
+		OutResult.Location = FirstPersonCamera->GetComponentLocation();
+		OutResult.Rotation = GetBaseAimRotation();
+		OutResult.FOV = FirstPersonCamera->FieldOfView;
+		return;
+	}
+
+	Super::CalcCamera(DeltaTime, OutResult);
+}
+
 UAbilitySystemComponent* AFPSRCharacter::GetAbilitySystemComponent() const
 {
 	return AbilitySystemComponent;

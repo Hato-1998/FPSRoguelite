@@ -43,6 +43,13 @@ public:
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	virtual void NotifyControllerChanged() override;
 
+	/** First-person spectate fix (U9 §2-13): a DBNO teammate views this pawn via SetViewTarget. When this pawn isn't
+	 *  locally controlled, UCameraComponent skips bUsePawnControlRotation (it only follows the LOCAL controller) so the
+	 *  spectator's view would track yaw (replicated actor rotation) but not pitch. Drive the view from
+	 *  GetBaseAimRotation() — its pitch comes from the replicated RemoteViewPitch16 — so up/down aim is reflected. The
+	 *  locally-controlled owner keeps the default camera-component path. */
+	virtual void CalcCamera(float DeltaTime, struct FMinimalViewInfo& OutResult) override;
+
 #if ENABLE_DRAW_DEBUG
 	virtual void Tick(float DeltaSeconds) override;
 #endif
