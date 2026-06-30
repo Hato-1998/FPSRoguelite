@@ -4,7 +4,20 @@
 > **작업 단계를 끝낼 때마다, 그리고 중단 전 반드시 이 파일을 갱신하고 커밋한다.**
 > 확정 설계·기획·코드구조·규칙은 `Game.md`(**SSOT 허브** → 도메인별 `Docs/SSOT/*.md`, 작업별 라우팅은 허브 §0-1), **완료 작업 상세는 `git log --oneline`**. 여기엔 *무엇을 했는지*만 요약한다.
 
-**최종 갱신: 2026-06-29**
+**최종 갱신: 2026-06-30**
+
+## 🔔 핸드오프 (2026-06-30) — DBNO 부활게이지 오버레이 + B2 타임라인 밴드 VibeUE 저작 완료, 다음=사용자 WBP_GameHUD 임베드 + PIE 2인 검증
+> **이 세션**: VibeUE 연결됨. DBNO 증분4 + B2 폴리시 = **위젯 저작만** 완료(신규 C++ 0). 정적 검증(compile 0err·capture_preview 육안). **2 콘텐츠 커밋**:
+>   - `638694c content(U9)`: **신규 독립 위젯 `WBP_DownedOverlay`**(UserWidget). RootCanvas > DownedVignette(전체화면 반투명 적색)+DownedText+ReviveBar. **Event Tick 폴링**: GetOwningPlayer→PlayerState→Cast `AFPSRPlayerState`→`IsDBNO()` 분기로 self 가시성(DBNO=SelfHitTestInvisible / 그외=**Hidden**=틱 유지) + GetOwningPlayerPawn→GetComponentByClass(`UFPSRReviveComponent`)→`GetReviveProgress()`→ReviveBar.SetPercent + Prog>0?"부활 중...":"다운 — 아군을 기다리는 중". 기본 Visibility=Hidden. `ReviveCompClass`(TSubclassOf) CDO 디폴트로 GetComponentByClass 클래스-핀 우회.
+>   - `0323cb0 content(U1)`: **`WBP_RunHUD` B2** — `TimelineMarkerCanvas`(RunTimelineBar와 동일슬롯 0.5,0/Pos0,12/Size520,14) + `BossEndIcon`(금색 우측끝 상시) + `Band0..5` 풀(반투명 시안, 기본 Collapsed). `ApplyBand(Band,Index)`/`RebuildMarkers`(6밴드 호출) + `OnRunStateUpdated`에 `LastSchedule!=GetRunSchedule` 게이트 **인라인 삽입**(ref 변경 시만 재구성, 첫 null·재런 안전; 기존 플레이헤드 채움 배선 보존).
+> **구조 결정(사용자 2026-06-30)**: "구조 최우선 + 위험 단계만 사용자 핸드오프". 위험 컨테이너 `WBP_GameHUD`(자식 WBP 5개 임베드)는 프로그래매틱 **무접촉**([[vibeue-render-target-gpu-hazard]]) → DBNO UI=독립위젯 + 사용자 수동 임베드(정석 우회). B2는 WBP_RunHUD가 **네이티브-온리**라 compile/save 안전.
+> **B2 밴드 = 디자인타임 풀 채택(런타임 위젯생성 대신)**: VibeUE 제약(런타임 ConstructObject 클래스핀·트리오너십 불확실 + ForEach 매크로 API 미생성) → 사전생성 풀 + 런타임 `CanvasPanelSlot.SetPosition/SetSize`. `RebuildMarkers`는 스케줄 ref 변경 시(런당 1회)만 실행이라 무비용. 풀=6(현 임시 3윈도우+여유, 초과 시 미표시). split_pin으로 FFPSRMissionWindow Min/Max 추출(BreakStruct 우회).
+> **⚠️ 다음**:
+>   ① **★사용자 잔여(A-3)**: `WBP_GameHUD` UMG 디자이너에서 `WBP_DownedOverlay`를 `Canvas_Root`에 드래그(전체화면 앵커 0,0→1,1, **ZOrder 최상단**) → 컴파일/저장/커밋. (프로그래매틱 임베드=컨테이너 크래시 회피.)
+>   ② **PIE 2인 리슨서버 검증**(DBNO_MiniDesign §7 / B2 §6): A 다운→A화면 오버레이+게이지, B 근접 ~3s 충전→부활/이탈 감소·양 클라 동기 / 런 시작→미션 밴드 N개·보스 아이콘 끝·플레이헤드 좌→우(클라=호스트 동일).
+>   ③ 통과 후 머지순서: U1(`fix/mp-steam-e2e`) 패키지 Steam 2-PC E2E→main → `phase/p1b-dbno`(Codex 머지게이트)→main `--no-ff`.
+> **데이터 주의**: authored 값 = **P4-A 임시**(미션 60/120/180·보스 300) → 밴드가 임시값 반영(정상) [[p4a-temp-test-values]].
+> **미커밋(사용자, 무관)**: `WBP_GameHUD.uasset`(임베드 대상)·기타 `.uasset`·`Config/DefaultEditor.ini`·`Docs/TaskPrompts_Master.md`.
 
 ## 🔔 핸드오프 (2026-06-29 e) — 보스 오버헤드바 제거 + DBNO Phase 1B 서버로직(증분1~3) 완성, 다음=DBNO HUD(에디터)+PIE 검증
 > **이 세션 후반**: ① **PIE E2E = 사용자 통과**(A1/A2/A3·C2·B1/B2). ② 사용자 지적 **보스 머리 위 월드 HP바 제거**(`5a981d8 fix(boss)` — `AFPSRBossBase::BeginPlay`에서 월드 `UWidgetComponent` 제거, HUD 상단 보스바 A3만 사용; VibeUE 미연결로 BP 직접편집 불가→코드 강제, idempotent). ③ **DBNO Phase 1B 구현 착수**(브랜치 `phase/p1b-dbno`, fix/mp-steam-e2e 기반 분기, MP/복제=Opus 직접).
