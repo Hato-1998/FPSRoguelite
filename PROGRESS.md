@@ -6,6 +6,20 @@
 
 **최종 갱신: 2026-06-30**
 
+## 🔔 핸드오프 (2026-06-30 f) — DBNO HUD/관전/반동 완료, 다음 새 세션=관전 발사이펙트 + 부활 무적창
+> **현 상태**: U9 DBNO HUD(증분4)·B2 타임라인·반동·DBNO 관전(제자리 정지+아군 시점)·오버레이 폴리시·관전 총기 표시 = **전부 구현·빌드·커밋**(`phase/p1b-dbno`). 관전/부활/오버레이/총기 PIE 확인됨. **남은 2건(아래)만 새 세션에서**.
+> **다음 작업 A — 관전 중 대상의 발사 이펙트(머즐플래시+발사 몽타주) 미표시**:
+>   - 원인: `AFPSRCharacter::MulticastFireCosmetics`([FPSRCharacter.cpp:999](Source/FPSRoguelite/Private/Hero/FPSRCharacter.cpp))가 원격 관전자에게 **사운드만** 재생(머즐 소켓이 원격엔 없다는 옛 주석 기준). 머즐/몽타주는 owner 전용 `PlayWeaponFireCosmetics`(:968)에만.
+>   - 해결: `efdb07f`로 1P 무기 메시가 **전 클라 populate**됐으니, `MulticastFireCosmetics`에 머즐(`Weapon->MuzzleFlash`→`SpawnEmitterAttached(ActiveWeaponMesh, MuzzleSocket)`)+발사몽타주(`Weapon->FireMontage`→FirstPersonArms)를 추가. ⚠️**단 "이 폰을 관전 중인 뷰어"에게만**(viewer PC의 view target==this pawn 체크) — 안 그러면 비관전 원격 관찰자에게 아군 머리 안에서 머즐플래시가 떠 보임(1P 무기 위치). 트리거=`FPSRWeaponFragment.cpp:28`(서버 멀티캐스트).
+> **다음 작업 B — 부활 직후 즉사 방지: 무적 + 적 충돌무시 (~5초, 속성값 편집가능)**:
+>   - 신규 EditDefaultsOnly 속성 `PostReviveInvulnSeconds=5.0f`(권장 위치 `UFPSRReviveComponent`, ReviveSeconds 옆). 부활 시점 `PerformRevive`([FPSRReviveComponent.cpp:124](Source/FPSRoguelite/Private/Hero/FPSRReviveComponent.cpp))에서 `PostReviveInvulnUntil = Now + PostReviveInvulnSeconds` 세팅(서버권위; 캐릭터/PS에 타임스탬프).
+>   - 무적: `ApplyContactDamage`([FPSRCharacter.cpp:633](Source/FPSRoguelite/Private/Hero/FPSRCharacter.cpp))의 기존 DBNO무피해+i-frame 게이트 옆에 `if (Now < PostReviveInvulnUntil) return;` 추가(모든 데미지 경로가 여기 모임: 적접촉 `FPSREnemySpawnSubsystem.cpp:370`·투사체 `FPSRProjectile.cpp:434`·히트스캔 `FPSRCombatStatics.cpp:143`).
+>   - 적 충돌무시: 부활 창 동안 플레이어 캡슐의 `ECC_Pawn`(적) 응답을 `ECR_Ignore`로(복원 타이머). 적=`ECC_Pawn`, 플레이어=`ECC_FPSRPlayerPawn`([FPSREnemyBase.cpp:26](Source/FPSRoguelite/Private/Enemy/FPSREnemyBase.cpp)); 플레이어 캡슐 셋업은 `AFPSRCharacter` 생성자(`ECC_FPSRPlayerPawn`)에서 찾을 것. 창 종료 시 응답 복원.
+>   - 설계 반영: `DBNO_MiniDesign.md`·`PlayerFeel.md §2-13`에 "부활 후 PostReviveInvuln(기본 5s, 무적+적충돌무시)" 추가. (시각 피드백=관전 시 부활자 깜빡임 등은 선택/후속.)
+>   - 검증: 빌드 Succeeded + 헤드리스 스모크 + PIE 2인(부활 직후 적 무리 속에서 5s간 무피해·통과, 5s 후 정상 피해/충돌).
+> **재개 프롬프트**: 이 세션 응답에 작성됨(또는 동일 내용 위 A/B). 브랜치=`phase/p1b-dbno`. 검증 후 Codex 머지게이트→main `--no-ff`.
+
+
 ## 🔔 핸드오프 (2026-06-30) — DBNO 부활게이지 오버레이 + B2 타임라인 밴드 VibeUE 저작 완료, 다음=사용자 WBP_GameHUD 임베드 + PIE 2인 검증
 > **이 세션**: VibeUE 연결됨. DBNO 증분4 + B2 폴리시 = **위젯 저작만** 완료(신규 C++ 0). 정적 검증(compile 0err·capture_preview 육안). **2 콘텐츠 커밋**:
 >   - `638694c content(U9)`: **신규 독립 위젯 `WBP_DownedOverlay`**(UserWidget). RootCanvas > DownedVignette(전체화면 반투명 적색)+DownedText+ReviveBar. **Event Tick 폴링**: GetOwningPlayer→PlayerState→Cast `AFPSRPlayerState`→`IsDBNO()` 분기로 self 가시성(DBNO=SelfHitTestInvisible / 그외=**Hidden**=틱 유지) + GetOwningPlayerPawn→GetComponentByClass(`UFPSRReviveComponent`)→`GetReviveProgress()`→ReviveBar.SetPercent + Prog>0?"부활 중...":"다운 — 아군을 기다리는 중". 기본 Visibility=Hidden. `ReviveCompClass`(TSubclassOf) CDO 디폴트로 GetComponentByClass 클래스-핀 우회.
