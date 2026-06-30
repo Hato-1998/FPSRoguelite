@@ -6,6 +6,14 @@
 
 **최종 갱신: 2026-06-30**
 
+## 🔔 핸드오프 (2026-06-30 g) — DBNO 후속 2건(관전 발사이펙트 + 부활 무적창) 코드완료·빌드·리뷰, 다음=사용자 PIE 2인 → Codex 머지게이트 → main
+> **이 세션**: A/B 두 follow-up **구현·빌드·헤드리스 스모크·적대적 리뷰 완료**(`3ab63ed feat(dbno)`, `phase/p1b-dbno`). MP/복제·서버권위 = Opus 직접. 신규 C++ 클래스 0(기존 확장).
+>   - **A) fix(weapon) 관전 발사이펙트**: `MulticastFireCosmetics`([FPSRCharacter.cpp](Source/FPSRoguelite/Private/Hero/FPSRCharacter.cpp))에 머즐플래시+발사몽타주 추가 — 복제 인벤토리 `GetCurrentWeapon` DA 해석(사운드와 동일 경로). **게이팅 = `LocalPC->GetViewTarget()==this`**(이 폰을 관전 중인 로컬 뷰어에게만; 머즐 파티클은 OnlyOwnerSee 비상속이라 무게이트 시 비관전 원격 관찰자에게 아군 머리 머즐 누출). 사운드/거리컬 보존(LocalPC 호이스트).
+>   - **B) feat(player) 부활 PostReviveInvuln(기본 5s, 편집가능)**: 신규 `UFPSRReviveComponent::PostReviveInvulnSeconds`(EditDefaultsOnly, ReviveSeconds 옆). `PerformRevive`(서버)→`AFPSRCharacter::BeginPostReviveInvulnerability`. ① 무적=`ApplyContactDamage`([:633](Source/FPSRoguelite/Private/Hero/FPSRCharacter.cpp))에 `Now < PostReviveInvulnUntil` 게이트(전 데미지 경로 접촉/투사체/히트스캔 수렴). ② 적충돌무시=캡슐 `ECC_Pawn`→Ignore, 타임아웃 복원. **대시와 같은 채널 토글이라 타임스탬프 합성 헬퍼 `RefreshPawnCollisionResponse()`** 도입(대시·부활창 상호 조기복원 방지; `ServerDash`/`EndDash`도 이 헬퍼 경유). 설계 `DBNO_MiniDesign §3-2`·`PlayerFeel §2-13` 갱신.
+> **검증 완료**: 빌드 Succeeded(129s) + 헤드리스 ModuleLoads Success + 적대적 다중에이전트 리뷰(3렌즈/4발견 **전부 엔진소스 대조 반증, 확정 실제버그 0**: AnimInstance null가드 존재·`FTimerManager` 동일핸들 SetTimer 자동클리어·EndPlay/파괴 시 타이머 안전정리). diff 자기비판 통과.
+> **⚠️ 다음(사용자 PIE 2인 리슨서버)**: A) A 다운→B 시점 관전 중 B 발사 시 머즐+발사애님 보임(비관전 시엔 아군 머리 머즐 없음) · B) A 부활 직후 ~5s 적무리 속 **무피해+적 통과**, 5s 후 정상 피해/충돌 복귀(대시 통과도 정상). 통과 후 → **Codex 머지게이트**(`Scripts/codex-review.ps1 -Base main`) → `main --no-ff` → 본 핸드오프 정리.
+> **미커밋(사용자, 무관)**: `Content/*.uasset`·`Config/DefaultEditor.ini`·`Docs/TaskPrompts_Master.md`·`Docs/Review/20260629-build-structures.md`.
+
 ## 🔔 핸드오프 (2026-06-30 f) — DBNO HUD/관전/반동 완료, 다음 새 세션=관전 발사이펙트 + 부활 무적창
 > **현 상태**: U9 DBNO HUD(증분4)·B2 타임라인·반동·DBNO 관전(제자리 정지+아군 시점)·오버레이 폴리시·관전 총기 표시 = **전부 구현·빌드·커밋**(`phase/p1b-dbno`). 관전/부활/오버레이/총기 PIE 확인됨. **남은 2건(아래)만 새 세션에서**.
 > **다음 작업 A — 관전 중 대상의 발사 이펙트(머즐플래시+발사 몽타주) 미표시**:
