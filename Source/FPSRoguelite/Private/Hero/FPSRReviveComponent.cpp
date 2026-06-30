@@ -8,6 +8,7 @@
 #include "AbilitySystemComponent.h"
 #include "GameFramework/PlayerState.h"
 #include "GameFramework/Pawn.h"
+#include "GameFramework/PlayerController.h"
 #include "Engine/World.h"
 #include "Net/UnrealNetwork.h"
 #include "Net/Core/PushModel/PushModel.h"
@@ -59,6 +60,10 @@ void UFPSRReviveComponent::TickComponent(float DeltaTime, ELevelTick TickType, F
 		}
 		return;
 	}
+
+	// Keep the downed player's camera pointed at a living ally (re-picks if that ally moves out of the party / dies).
+	// Maintained even during the card-selection freeze so the spectate view stays valid.
+	UpdateDownedSpectate();
 
 	// No revive while the run is globally frozen for card selection (freeze-gate symmetry, §2-2).
 	const UWorld* World = GetWorld();
@@ -148,7 +153,79 @@ void UFPSRReviveComponent::PerformRevive()
 		OwnerChar->ApplyDownedLocomotion(false);
 	}
 
+	// Camera back to the revived player's own pawn — it never moved (DBNO is stationary), so the player stands up
+	// exactly where it fell. (Was spectating a living ally while downed; §2-13.)
+	RestoreOwnView();
+
 	SetReviveProgress(0.0f);
+}
+
+void UFPSRReviveComponent::UpdateDownedSpectate()
+{
+	APawn* OwnerPawn = Cast<APawn>(GetOwner());
+	if (!OwnerPawn || !OwnerPawn->HasAuthority())
+	{
+		return; // server-authoritative; the view-target call replicates to the owning client (ClientSetViewTarget)
+	}
+	const AFPSRPlayerState* OwnerPS = OwnerPawn->GetPlayerState<AFPSRPlayerState>();
+	if (!OwnerPS || !OwnerPS->IsDBNO())
+	{
+		return; // only spectate while downed
+	}
+	APlayerController* PC = Cast<APlayerController>(OwnerPawn->GetController());
+	if (!PC)
+	{
+		return;
+	}
+
+	// Pick the nearest ALIVE ally pawn (any range) to spectate.
+	APawn* Best = nullptr;
+	float BestDistSq = TNumericLimits<float>::Max();
+	const FVector MyLoc = OwnerPawn->GetActorLocation();
+	const UWorld* World = GetWorld();
+	if (const AGameStateBase* GS = World ? World->GetGameState() : nullptr)
+	{
+		for (APlayerState* PS : GS->PlayerArray)
+		{
+			const AFPSRPlayerState* AllyPS = Cast<AFPSRPlayerState>(PS);
+			if (!AllyPS || AllyPS == OwnerPS || !AllyPS->IsAlive())
+			{
+				continue;
+			}
+			APawn* AllyPawn = AllyPS->GetPawn();
+			if (!AllyPawn)
+			{
+				continue;
+			}
+			const float DistSq = FVector::DistSquared(AllyPawn->GetActorLocation(), MyLoc);
+			if (DistSq < BestDistSq)
+			{
+				BestDistSq = DistSq;
+				Best = AllyPawn;
+			}
+		}
+	}
+
+	// Only (re)blend when the chosen ally changes (no living ally => keep current view; a wipe ends the run).
+	if (Best && Best != SpectatedPawn.Get())
+	{
+		PC->SetViewTargetWithBlend(Best, 0.3f);
+		SpectatedPawn = Best;
+	}
+}
+
+void UFPSRReviveComponent::RestoreOwnView()
+{
+	SpectatedPawn = nullptr;
+	APawn* OwnerPawn = Cast<APawn>(GetOwner());
+	if (!OwnerPawn || !OwnerPawn->HasAuthority())
+	{
+		return;
+	}
+	if (APlayerController* PC = Cast<APlayerController>(OwnerPawn->GetController()))
+	{
+		PC->SetViewTargetWithBlend(OwnerPawn, 0.3f);
+	}
 }
 
 void UFPSRReviveComponent::OnRep_ReviveProgress()

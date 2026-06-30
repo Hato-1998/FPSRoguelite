@@ -5,6 +5,8 @@
 #include "Components/ActorComponent.h"
 #include "FPSRReviveComponent.generated.h"
 
+class APawn;
+
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnReviveProgressChanged, float, Progress);
 
 /** Co-op proximity revive (U9 DBNO, Phase 1B, Game.MD §2-13). Lives on the player pawn (created by AFPSRCharacter).
@@ -32,6 +34,12 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "FPSR|Revive")
 	FOnReviveProgressChanged OnReviveProgressChanged;
 
+	/** Server: while the owner is DBNO, point its PlayerController camera at the nearest ALIVE ally (spectate, §2-13).
+	 *  Idempotent — only re-blends when the chosen ally changes. Called on down (AFPSRCharacter::HandleOutOfHealth)
+	 *  and maintained each server tick (re-picks if the spectated ally moves out of the party / dies). No-op with no
+	 *  living ally (a team wipe ends the run in Defeat instead). The owning client receives it via ClientSetViewTarget. */
+	void UpdateDownedSpectate();
+
 protected:
 	virtual void BeginPlay() override;
 
@@ -43,6 +51,9 @@ protected:
 
 	/** Server: gauge full — revive the owner to Alive at ReviveHealthFraction health and clear the gauge. */
 	void PerformRevive();
+
+	/** Server: blend the owner's camera back to its own pawn (revive / no longer downed). */
+	void RestoreOwnView();
 
 	/** Radius (cm) within which an alive ally fills the gauge. Balance value. */
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Revive", meta = (ClampMin = "0.0"))
@@ -62,4 +73,7 @@ protected:
 
 	UPROPERTY(ReplicatedUsing = OnRep_ReviveProgress)
 	float ReviveProgress = 0.0f;
+
+	/** Server-only: ally pawn currently spectated while DBNO (avoids re-blending the camera every tick). */
+	TWeakObjectPtr<APawn> SpectatedPawn;
 };

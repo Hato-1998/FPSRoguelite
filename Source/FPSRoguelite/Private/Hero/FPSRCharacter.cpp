@@ -366,8 +366,10 @@ void AFPSRCharacter::ApplyDownedLocomotion(bool bDowned)
 	}
 	if (bDowned)
 	{
-		// Crawl: a heavy fraction of the normal walk speed (DBNO).
-		MoveComp->MaxWalkSpeed = BaseWalkSpeed * DownedMoveScale;
+		// Stationary: DBNO no longer crawls — the player stays where it fell and spectates an ally (§2-13). Movement
+		// input is also gated for !Alive (Input_Move*), so this is belt-and-suspenders against residual slide.
+		// (DownedMoveScale is now unused — kept for a possible future crawl toggle.)
+		MoveComp->MaxWalkSpeed = 0.0f;
 	}
 	else
 	{
@@ -386,8 +388,9 @@ void AFPSRCharacter::ApplyDownedLocomotion(bool bDowned)
 
 void AFPSRCharacter::Input_MoveForward(const FInputActionValue& Value)
 {
-	// DBNO crawls (IsTrulyDeadLocal is false while downed) — only a hard freeze or true death stops movement here.
-	if (IsRunFrozen() || IsTrulyDeadLocal())
+	// Downed (DBNO) is stationary + spectating an ally (§2-13), so block movement for DBNO and Dead alike. A hard
+	// freeze (card select) also stops movement here.
+	if (IsRunFrozen() || IsIncapacitatedLocal())
 	{
 		GetCharacterMovement()->StopMovementImmediately(); // kill residual slide during the freeze
 		return;
@@ -401,7 +404,8 @@ void AFPSRCharacter::Input_MoveForward(const FInputActionValue& Value)
 
 void AFPSRCharacter::Input_MoveRight(const FInputActionValue& Value)
 {
-	if (IsRunFrozen() || IsTrulyDeadLocal())
+	// Downed (DBNO) is stationary (spectating an ally) — same gate as MoveForward.
+	if (IsRunFrozen() || IsIncapacitatedLocal())
 	{
 		GetCharacterMovement()->StopMovementImmediately();
 		return;
@@ -415,8 +419,9 @@ void AFPSRCharacter::Input_MoveRight(const FInputActionValue& Value)
 
 void AFPSRCharacter::Input_Look(const FInputActionValue& Value)
 {
-	// DBNO can still look around (only a hard freeze or true death locks the camera).
-	if (IsRunFrozen() || IsTrulyDeadLocal())
+	// Downed (DBNO) spectates a living ally, so the local camera/look is locked (block DBNO + Dead). A hard freeze
+	// (card select) also locks it.
+	if (IsRunFrozen() || IsIncapacitatedLocal())
 	{
 		return; // camera frozen during card selection (mouse goes to the card UI in Menu input mode)
 	}
@@ -702,6 +707,13 @@ void AFPSRCharacter::HandleOutOfHealth()
 		Move->StopMovementImmediately();
 	}
 	ApplyDownedLocomotion(true);
+
+	// Switch the downed player's camera to a living ally immediately (spectate, §2-13). The ReviveComponent's server
+	// tick maintains / re-picks it; PerformRevive restores the own-pawn view. No-op if no ally (a wipe follows below).
+	if (UFPSRReviveComponent* Revive = FindComponentByClass<UFPSRReviveComponent>())
+	{
+		Revive->UpdateDownedSpectate();
+	}
 
 	// Wipe check: if no Alive players remain (solo down, or the last teammate falls) the GameMode ends in Defeat.
 	if (AFPSRGameMode* GM = GetWorld() ? GetWorld()->GetAuthGameMode<AFPSRGameMode>() : nullptr)
