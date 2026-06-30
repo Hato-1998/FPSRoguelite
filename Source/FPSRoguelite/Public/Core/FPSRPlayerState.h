@@ -19,6 +19,20 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnRerollChargesChanged);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnLoadoutChanged);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnReadyChanged);
 
+/** Per-player life state (U9 DBNO, Phase 1B). The run keys off IsAlive() == (LifeState == Alive):
+ *  - Alive: full participant.
+ *  - DBNO (Down But Not Out): downed but revivable — NOT a live participant for the wipe / card-select freeze (A4) /
+ *    enemy targeting (B17). The pawn persists (crawl only); an ally's proximity revives it (UFPSRReviveComponent).
+ *  - Dead: out of the run (team-wipe, or [후속] bleedout).
+ *  Lives on the PlayerState so it survives pawn death and the wipe aggregation is independent of pawn validity. */
+UENUM(BlueprintType)
+enum class EFPSRLifeState : uint8
+{
+	Alive,
+	DBNO,
+	Dead
+};
+
 /** PlayerState owns the AbilitySystemComponent and global attribute sets (co-op / revive friendly). */
 UCLASS()
 class FPSROGUELITE_API AFPSRPlayerState : public APlayerState, public IAbilitySystemInterface
@@ -36,18 +50,25 @@ public:
 	UFPSRHealthSet* GetHealthSet() const { return HealthSet; }
 	UFPSRCombatSet* GetCombatSet() const { return CombatSet; }
 
-	/** Per-player life state. Simplified for U2 (defeat wiring): a single replicated bool. U9 (DBNO) replaces
-	 *  this with an ELifeState{Alive,DBNO,Dead} state machine — IsAlive() is the single predicate U9 re-defines
-	 *  (e.g. DBNO also counts as not-alive for the wipe check). Lives on the PlayerState so it survives pawn
-	 *  death/respawn and the wipe aggregation is independent of pawn validity. */
+	/** Current life state (U9 DBNO state machine). */
 	UFUNCTION(BlueprintPure, Category = "FPSR|Run")
-	bool IsDead() const { return bIsDead; }
+	EFPSRLifeState GetLifeState() const { return LifeState; }
 
-	/** True while this player is a live participant. The single predicate U9 (DBNO) re-defines. */
-	bool IsAlive() const { return !bIsDead; }
+	/** True while this player is a LIVE participant (Alive only). The single predicate the run uses for the wipe
+	 *  check, the card-select freeze gate (A4) and enemy targeting (B17) — DBNO and Dead both count as not-alive. */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Run")
+	bool IsAlive() const { return LifeState == EFPSRLifeState::Alive; }
 
-	/** Server: mark this player dead/alive. Idempotent. Replicates to all (owning client gates input via OnRep). */
-	void SetDead(bool bNewDead);
+	/** True only when truly OUT of the run (team-wipe / bleedout) — NOT while DBNO (downed-but-revivable). */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Run")
+	bool IsDead() const { return LifeState == EFPSRLifeState::Dead; }
+
+	/** True while downed (Down But Not Out) — revivable, pawn persists (crawl only). */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Run")
+	bool IsDBNO() const { return LifeState == EFPSRLifeState::DBNO; }
+
+	/** Server: set the life state. Idempotent. Replicates to all (owning client gates input via OnRep_LifeState). */
+	void SetLifeState(EFPSRLifeState NewState);
 
 	UFUNCTION(BlueprintPure, Category = "FPSR|Run")
 	int32 GetRunRerollCharges() const { return RunRerollCharges; }
@@ -115,6 +136,16 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "FPSR|Lobby")
 	FOnReadyChanged OnReadyChanged;
 
+	/** Lobby podium seat index (0..NumPodiumSlots-1), server-assigned on lobby entry so each co-op player occupies a
+	 *  distinct podium slot (B3b — replaces the engine's random ChoosePlayerStart that let two players share a spot).
+	 *  INDEX_NONE until assigned. Replicated so clients can map seat->podium for per-seat cosmetics; placement itself
+	 *  is server-only (AFPSRLobbyGameMode::ChoosePlayerStart). Lobby-only — reset each lobby entry, not carried into the run. */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Lobby")
+	int32 GetLobbySeatIndex() const { return LobbySeatIndex; }
+
+	/** Server: set this player's lobby podium seat (B3b). Idempotent; replicates to all. */
+	void SetLobbySeatIndex(int32 NewSeat);
+
 	/** Server: track a passive ability granted by a character-passive card (U18c), so the run-reset can clear it.
 	 *  bIsDamageEventListener bumps the DealtDamage listener count (drives the cheap ApplyDamage event-send gate so
 	 *  players without such a passive pay nothing on the hot damage path). Idempotent per handle is the caller's job. */
@@ -177,7 +208,7 @@ private:
 	int32 DefaultRerollCharges = 3;
 
 	UPROPERTY(ReplicatedUsing = OnRep_LifeState)
-	bool bIsDead = false;
+	EFPSRLifeState LifeState = EFPSRLifeState::Alive;
 
 	UPROPERTY(ReplicatedUsing = OnRep_RunRerollCharges)
 	int32 RunRerollCharges = 3;
@@ -199,6 +230,11 @@ private:
 	/** Lobby ready flag (U11a). Replicated to all so every client's lobby list/podium shows each player's state. */
 	UPROPERTY(ReplicatedUsing = OnRep_Ready)
 	bool bReady = false;
+
+	/** Lobby podium seat (B3b). See GetLobbySeatIndex. Plain Replicated (no OnRep — placement is server-side; the
+	 *  replication only lets clients map seat->podium for future per-seat UI). */
+	UPROPERTY(Replicated)
+	int32 LobbySeatIndex = INDEX_NONE;
 
 	/** Server-only: passive ability specs granted by character-passive cards this run (U18c). Not replicated —
 	 *  ability specs are server ASC state. Cleared (ClearAbility) on ResetRunState so they never leak to the next run

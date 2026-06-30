@@ -75,6 +75,14 @@ void UFPSRRunDirectorSubsystem::StartRun()
 	bBossStarted = false;
 	NextRunLogTime = 30.0f;
 
+	// Publish the schedule to the GameState so every client's HUD can lay out the run-timeline bar (window markers +
+	// boss endpoint) (B2), and reset the replicated mission progress (B1).
+	if (AFPSRGameState* GS = GetGS())
+	{
+		GS->SetRunSchedule(ActiveSchedule);
+		GS->SetMissionProgress(0.0f);
+	}
+
 	// Push schedule-driven spawn pacing to the spawn subsystem (the swarm fill rate — how fast it builds toward the
 	// target alive count). Both the per-tick batch (MaxSpawnPerTick) and the tick interval (SpawnIntervalSeconds) are
 	// tunable on DA_RunSchedule without further code changes; together they set the per-second spawn pace.
@@ -232,6 +240,9 @@ void UFPSRRunDirectorSubsystem::DirectorTick()
 	RunClock += DirectorInterval * TimeScale;
 	GS->SetRunClockSeconds(RunClock);
 
+	// Mirror the active mission's progress to the GameState for the HUD capture/progress bar (B1). 0 when no mission.
+	GS->SetMissionProgress(ActiveMission ? ActiveMission->GetMissionProgress() : 0.0f);
+
 	UpdateSpawnIntensity();
 
 	// Boss supersedes missions: check it BEFORE spawning a due mission so a mission at/near BossTime (or a
@@ -364,6 +375,12 @@ void UFPSRRunDirectorSubsystem::SpawnMission(UFPSRMissionDataAsset* MissionData)
 	ActiveMission->OnMissionEndedNative.AddUObject(this, &UFPSRRunDirectorSubsystem::OnMissionEnded);
 	ActiveMission->ServerActivate(MissionData);
 
+	// Publish to the GameState so every client's HUD shows a mission-start banner with the mission name (B10).
+	if (AFPSRGameState* GS = GetGS())
+	{
+		GS->SetActiveMission(MissionData);
+	}
+
 	UE_LOG(LogFPSR, Log, TEXT("[Run] Mission spawned: %s (t=%.0fs)"), *MissionData->GetName(), RunClock);
 }
 
@@ -405,6 +422,12 @@ void UFPSRRunDirectorSubsystem::DestroyActiveMission()
 		ActiveMission->OnMissionEndedNative.RemoveAll(this);
 		ActiveMission->Destroy();
 		ActiveMission = nullptr;
+	}
+	// Clear the replicated mission so the next mission's start banner fires cleanly (B10) + reset the HUD progress (B1).
+	if (AFPSRGameState* GS = GetGS())
+	{
+		GS->SetActiveMission(nullptr);
+		GS->SetMissionProgress(0.0f);
 	}
 }
 
@@ -461,6 +484,13 @@ void UFPSRRunDirectorSubsystem::SpawnBoss()
 	if (Def)
 	{
 		ActiveBoss->InitializeFromDefinition(Def);
+	}
+
+	// Publish the boss to the GameState so every client's HUD boss bar can locate + bind it (B11). After
+	// InitializeFromDefinition so the replicated MaxHealth (B12) is set before clients first read the bar.
+	if (AFPSRGameState* GS = GetGS())
+	{
+		GS->SetActiveBoss(ActiveBoss);
 	}
 
 	UE_LOG(LogFPSR, Log, TEXT("[Run] Boss spawned: %s at %s (t=%.0fs)"), *ActiveBoss->GetName(),

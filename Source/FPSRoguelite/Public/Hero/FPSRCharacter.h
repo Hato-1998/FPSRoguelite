@@ -17,6 +17,7 @@ class UFPSRWeaponFireComponent;
 class UFPSRWeaponDataAsset;
 class UMaterialInterface;
 class UFPSRPlayerFeedbackComponent;
+class UFPSRReviveComponent;
 class UFPSRBlindspotAudioComponent;
 struct FInputActionValue;
 class UStaticMeshComponent;
@@ -42,6 +43,13 @@ public:
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	virtual void NotifyControllerChanged() override;
 
+	/** First-person spectate fix (U9 §2-13): a DBNO teammate views this pawn via SetViewTarget. When this pawn isn't
+	 *  locally controlled, UCameraComponent skips bUsePawnControlRotation (it only follows the LOCAL controller) so the
+	 *  spectator's view would track yaw (replicated actor rotation) but not pitch. Drive the view from
+	 *  GetBaseAimRotation() — its pitch comes from the replicated RemoteViewPitch16 — so up/down aim is reflected. The
+	 *  locally-controlled owner keeps the default camera-component path. */
+	virtual void CalcCamera(float DeltaTime, struct FMinimalViewInfo& OutResult) override;
+
 #if ENABLE_DRAW_DEBUG
 	virtual void Tick(float DeltaSeconds) override;
 #endif
@@ -59,6 +67,22 @@ public:
 	/** Set MaxWalkSpeed = BaseWalkSpeed * Mult. Called by UFPSRCombatSet when MoveSpeedMultiplier changes (server + client). */
 	void ApplyMoveSpeedMultiplier(float Mult);
 
+	/** Set MaxWalkSpeed for the downed (crawl) vs normal state (U9 DBNO). Called server-side on DBNO/revive and on the
+	 *  owning client from AFPSRPlayerState::OnRep_LifeState so movement prediction matches (mirrors ApplyMoveSpeedMultiplier). */
+	void ApplyDownedLocomotion(bool bDowned);
+
+	/** Server: start a grace window of Seconds — i-frames in ApplyContactDamage + the capsule passes through enemy
+	 *  pawns (ECC_Pawn) so the player can escape a surround. Used by the post-revive grace
+	 *  (UFPSRReviveComponent::PerformRevive) and the post-card-selection resume grace (HandleRunStateChanged_Movement).
+	 *  No-op off authority or for Seconds <= 0. (U9 §2-13) */
+	void BeginGraceWindow(float Seconds);
+
+	/** Local reviver HUD (U9 §2-13): if this player is alive and standing within a DBNO ally's revive radius, returns
+	 *  that ally's revive progress (0..1) so the HUD can show a "reviving teammate" gauge; returns -1 when not reviving
+	 *  anyone. Client-side query over already-replicated data (LifeState + ReviveProgress). */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Revive")
+	float GetReviveTargetProgress() const;
+
 	/** Owner-client: refresh the first-person weapon mesh + arms anim when the equipped weapon changes
 	 *  (called from the inventory's server EquipSlot + client OnRep). No-op on non-locally-controlled pawns. */
 	void RefreshFirstPersonWeaponVisual();
@@ -66,17 +90,32 @@ public:
 	/** Owner-client: play the equipped weapon's per-shot cosmetics (fire montage + sound + muzzle flash). */
 	void PlayWeaponFireCosmetics();
 
+	/** Server->all: play the spatialized fire SFX for REMOTE observers so teammates hear each other's weapon fire
+	 *  (B4). The owning client already played it locally (PlayWeaponFireCosmetics), so the implementation early-outs
+	 *  on IsLocallyControlled to avoid double-play. Unreliable (cosmetic — drops gracefully on packet loss). Fired
+	 *  once per server-confirmed shot from FPSRWeaponHooks::NotifyFire (the central, all-weapons fire-confirm site). */
+	UFUNCTION(NetMulticast, Unreliable)
+	void MulticastFireCosmetics();
+
 protected:
 	void InitAbilitySystem();
 
 	/** True while the run is globally frozen for card selection (Game.MD §2-2) — gates player input. */
 	bool IsRunFrozen() const;
 
-	/** True once this player's PlayerState is marked dead (U2 defeat wiring) — gates input/firing like IsRunFrozen. */
-	bool IsDeadLocal() const;
+	/** True when this player can't ACT (fire / dash / swap / reload / ADS) — i.e. NOT alive (DBNO downed, or Dead).
+	 *  Gates actions + contact damage like IsRunFrozen. DBNO still crawls/looks — those gate on IsTrulyDeadLocal. */
+	bool IsIncapacitatedLocal() const;
 
-	/** Bound to the health set's OnOutOfHealth (server). Placeholder: logs; full DBNO/respawn is P5. */
+	/** True only when truly Dead (out of the run) — blocks even crawl/look. DBNO returns false (can crawl + look). */
+	bool IsTrulyDeadLocal() const;
+
+	/** Bound to the health set's OnOutOfHealth (server). Transitions the player to DBNO (downed) + crawl and runs the
+	 *  wipe check (team-wipe -> Defeat). Revive back to Alive is UFPSRReviveComponent (U9 Phase 1B, Game.MD §2-13). */
 	void HandleOutOfHealth();
+
+	//~ACharacter: no jumping while incapacitated (DBNO or Dead).
+	virtual bool CanJumpInternal_Implementation() const override;
 
 	/** Local client: react to GameState OnRunStateChanged — apply/clear the mission vision restriction PP. */
 	UFUNCTION()
@@ -164,6 +203,10 @@ protected:
 	UPROPERTY(VisibleAnywhere, Category = "FPSR|Weapon")
 	TObjectPtr<UFPSRWeaponFireComponent> WeaponFire;
 
+	/** Co-op DBNO revive (U9 §2-13): server-authoritative proximity revive; replicates ReviveProgress for the HUD gauge. */
+	UPROPERTY(VisibleAnywhere, Category = "FPSR|Revive")
+	TObjectPtr<UFPSRReviveComponent> ReviveComponent;
+
 	/** Local-only hit-marker + threat-indicator feedback (Game.MD §2-14). Not replicated; WBP HUD binds to it. */
 	UPROPERTY(VisibleAnywhere, Category = "FPSR|Feedback")
 	TObjectPtr<UFPSRPlayerFeedbackComponent> PlayerFeedback;
@@ -217,8 +260,17 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Input")
 	TObjectPtr<UInputAction> MenuAction;
 
-	/** Server: end the dash window — restore Pawn collision blocking. */
+	/** Server: end the dash collision-ignore window (recomputes the enemy-pawn response — it may stay ignored if a
+	 *  grace window is still active). */
 	void EndDash();
+
+	/** Server: end the grace collision-ignore window (recomputes the enemy-pawn response). */
+	void EndGraceWindow();
+
+	/** Server: recompute the capsule's response to enemy pawns (ECC_Pawn) — ignore while dashing OR within a grace
+	 *  window (both derive from server timestamps, so an overlap composes correctly), block otherwise. Shared by dash
+	 *  + grace window so neither restores blocking while the other is still active. */
+	void RefreshPawnCollisionResponse();
 
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Dash")
 	float DashSpeed = 2000.0f;
@@ -233,6 +285,10 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Movement")
 	float BaseWalkSpeed = 600.0f;
 
+	/** Downed (DBNO) crawl speed as a fraction of the normal walk speed (Game.MD §2-13). Balance value. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Movement", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float DownedMoveScale = 0.3f;
+
 	/** Server-only: world time of last dash (init far in the past so the first dash is allowed). */
 	float LastDashTime = -1000.0f;
 
@@ -244,8 +300,24 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Combat")
 	float DamageInvulnerabilityDuration = 0.25f;
 
+	/** Seconds of grace (invulnerable + enemy pass-through) granted when the card-selection freeze ENDS, so a player
+	 *  who unfreezes surrounded by the swarm isn't hit the instant the world resumes (U9 §2-13). Balance value; 0 disables. */
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Combat", meta = (ClampMin = "0.0"))
+	float PostFreezeInvulnSeconds = 3.0f;
+
 	/** Server-only: world time of the last accepted contact hit (i-frame gate). */
 	float LastDamagedTime = -1000.0f;
+
+	/** Server-only: world time until which the player is invulnerable + passes through enemy pawns (grace window:
+	 *  post-revive and post-card-selection resume, U9 §2-13). Set in BeginGraceWindow; read by ApplyContactDamage. */
+	float GraceUntil = -1000.0f;
+
+	/** Server-only: timer to end the grace collision-ignore window. */
+	FTimerHandle GraceTimerHandle;
+
+	/** Server-only: previous run-paused state (authority) — detects the card-selection freeze ENDING so the resume
+	 *  grace fires once on the paused->unpaused transition. */
+	bool bWasRunPausedAuth = false;
 
 	/** Local-client: true while the vision-restriction PP is currently applied (idempotency guard). */
 	bool bVisionRestrictionApplied = false;

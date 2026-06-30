@@ -78,10 +78,10 @@ void AFPSRXPPickup::Tick(float DeltaSeconds)
 			continue;
 		}
 
-		// Dead players don't collect or magnet XP (U2).
+		// Non-alive players (DBNO downed or Dead) don't collect or magnet XP (U9).
 		if (const AFPSRPlayerState* PS = PC->GetPlayerState<AFPSRPlayerState>())
 		{
-			if (PS->IsDead())
+			if (!PS->IsAlive())
 			{
 				continue;
 			}

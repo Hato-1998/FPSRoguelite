@@ -8,6 +8,7 @@
 
 #include "Components/CapsuleComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Components/WidgetComponent.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
 #include "UObject/ConstructorHelpers.h"
@@ -51,6 +52,22 @@ void AFPSREnemyBase::BeginPlay()
 	{
 		HealthComponent->OnDeath.AddDynamic(this, &AFPSREnemyBase::HandleDeath);
 	}
+
+	// Bind the world-space health bar / floating-damage widget to the health component once (server + clients).
+	// Pooling-safe: the actor + widget persist across dormancy, so this single bind survives every reuse.
+	InitHealthBarWidget();
+}
+
+void AFPSREnemyBase::InitHealthBarWidget()
+{
+	// Force the BP-added world-space widget to exist NOW (it can otherwise be created lazily on first render — after
+	// BeginPlay — which would leave the BP bind on a null widget). Then let the BP bind it to OnHealthChanged. Runs on
+	// clients too (the bar is a client visual; OnHealthChanged is client-fired via OnRep_Health, B12).
+	if (UWidgetComponent* WidgetComp = FindComponentByClass<UWidgetComponent>())
+	{
+		WidgetComp->InitWidget();
+	}
+	OnHealthBarReady();
 }
 
 void AFPSREnemyBase::HandleDeath(AActor* DeadActor, AActor* Killer)
@@ -76,7 +93,13 @@ void AFPSREnemyBase::Activate(const FVector& Location)
 	SetActorLocation(Location);
 	SetActorHiddenInGame(false);
 	SetActorEnableCollision(true);
-	FlushNetDormancy();
+	// Wake the pooled actor for its WHOLE active life so its server movement (AddActorWorldOffset each pass)
+	// replicates to clients. A pooled reuse returns from DORM_DormantAll, and FlushNetDormancy would force only ONE
+	// update — the still-dormant enemy then stops streaming its transform (invisible / frozen on clients while the
+	// server enemy keeps moving and dealing damage), and the death hide set in Deactivate never reaches them (zombie).
+	// DORM_Awake here + DORM_DormantAll in Deactivate makes the awake->dormant transition flush the final
+	// hidden/dead state. Mirrors the projectile pool recipe (FPSRProjectile::Activate/Deactivate).
+	SetNetDormancy(DORM_Awake);
 
 	if (HealthComponent)
 	{
@@ -88,6 +111,71 @@ void AFPSREnemyBase::Activate(const FVector& Location)
 	bGrounded = false;       // re-check ground on the first update (may spawn on a rooftop)
 	GroundRecheckTimer = 0.0f;
 	KnockbackVelocityXY = FVector::ZeroVector; // clear residual knockback from a prior life
+	ClearExitPath();                           // drop any leftover path; AcquireEnemy re-assigns it if this spawn point has one
+}
+
+void AFPSREnemyBase::SetExitPath(const TArray<FVector>& InWaypoints)
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+	ExitPath = InWaypoints;
+	ExitPathIndex = 0;
+	ExitPathElapsed = 0.0f;
+	bFollowingExitPath = (ExitPath.Num() > 0);
+}
+
+void AFPSREnemyBase::ClearExitPath()
+{
+	ExitPath.Reset();
+	ExitPathIndex = 0;
+	ExitPathElapsed = 0.0f;
+	bFollowingExitPath = false;
+}
+
+bool AFPSREnemyBase::ConsumeExitPathSteering(const FVector& MyLocation, float ScaledDeltaSeconds, FVector& OutDir)
+{
+	if (!bFollowingExitPath)
+	{
+		return false;
+	}
+
+	// Skip past any waypoints already reached (XY), then steer toward the next one.
+	while (ExitPathIndex < ExitPath.Num())
+	{
+		FVector ToWp = ExitPath[ExitPathIndex] - MyLocation;
+		ToWp.Z = 0.0f;
+		if (ToWp.SizeSquared() <= FMath::Square(ExitWaypointReachRadius))
+		{
+			++ExitPathIndex;          // reached: advance
+			ExitPathElapsed = 0.0f;   // progress made — reset the stall timer
+			continue;
+		}
+
+		// Not yet reached: tick the stall safety timer; a misplaced/blocked waypoint hands off to the flow-field.
+		ExitPathElapsed += ScaledDeltaSeconds;
+		if (ExitPathElapsed >= ExitPathTimeout)
+		{
+			ClearExitPath();
+			return false;
+		}
+
+		const FVector Dir = ToWp.GetSafeNormal();
+		if (Dir.IsNearlyZero())
+		{
+			// Degenerate (waypoint directly above/below): treat as reached to avoid spinning in place.
+			++ExitPathIndex;
+			ExitPathElapsed = 0.0f;
+			continue;
+		}
+		OutDir = Dir;
+		return true;
+	}
+
+	// Path exhausted — hand off to flow-field player-chase.
+	ClearExitPath();
+	return false;
 }
 
 void AFPSREnemyBase::Deactivate()

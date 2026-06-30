@@ -76,9 +76,12 @@ void UFPSRBlindspotAudioComponent::ScanAndWarn()
 	const float RadiusSq = ThreatRadius * ThreatRadius;
 	const float CosHalfAngle = FMath::Cos(FMath::DegreesToRadians(BlindspotHalfAngleDeg));
 
-	// Find the nearest enemy that is close AND outside the forward view cone (behind/side = blind spot).
+	// Nearest (3D) enemy that is a blind-spot threat: outside the forward HORIZONTAL cone (behind/side) OR steeply
+	// ABOVE/BELOW the view plane (off the top/bottom of the screen). 3D distance so an enemy directly overhead — which
+	// the old 2D-flattened cull saw as ~zero distance and then skipped (no horizontal direction) — is still found (B9).
 	const AFPSREnemyBase* NearestThreat = nullptr;
-	FVector NearestThreatDir2D = FVector::ZeroVector;
+	FVector NearestThreatDirH = Forward2D; // horizontal cue dir; fallback = in front for a directly-overhead threat
+	float NearestElevationDeg = 0.0f;
 	float NearestDistSq = RadiusSq;
 
 	for (TActorIterator<AFPSREnemyBase> It(World); It; ++It)
@@ -89,28 +92,38 @@ void UFPSRBlindspotAudioComponent::ScanAndWarn()
 			continue;
 		}
 
-		FVector ToEnemy = Enemy->GetActorLocation() - ViewLocation;
-		ToEnemy.Z = 0.0f;
-		const float DistSq = ToEnemy.SizeSquared();
+		const FVector ToEnemy = Enemy->GetActorLocation() - ViewLocation;
+		const float DistSq = ToEnemy.SizeSquared(); // 3D: includes height
 		if (DistSq > RadiusSq || DistSq >= NearestDistSq) // distance cull = Significance gate (§5-1)
 		{
 			continue;
 		}
 
-		FVector ToEnemyDir = ToEnemy;
-		if (!ToEnemyDir.Normalize())
-		{
-			continue; // enemy on top of the player — no meaningful direction
-		}
+		// Split into the horizontal plane (panning + behind/side cone) and elevation (pitch).
+		FVector ToEnemyH = ToEnemy;
+		ToEnemyH.Z = 0.0f;
+		const float HorizDist = ToEnemyH.Size();
+		const float ElevationDeg = FMath::RadiansToDegrees(FMath::Atan2(ToEnemy.Z, FMath::Max(HorizDist, 1.0f)));
 
-		// Outside the forward cone? (dot < cos(halfAngle) means the angle exceeds the half-angle = blind spot).
-		if (FVector::DotProduct(Forward2D, ToEnemyDir) >= CosHalfAngle)
+		// Horizontal blind spot: behind / to the side (only meaningful when there's a horizontal direction).
+		bool bHorizontalBlindspot = false;
+		FVector ToEnemyDirH = Forward2D;
+		if (ToEnemyH.Normalize())
 		{
-			continue; // in front / within view — not a blind-spot threat
+			ToEnemyDirH = ToEnemyH;
+			bHorizontalBlindspot = FVector::DotProduct(Forward2D, ToEnemyDirH) < CosHalfAngle;
+		}
+		// Vertical blind spot: steeply above/below regardless of horizontal position (off-screen vertically).
+		const bool bVerticalBlindspot = FMath::Abs(ElevationDeg) > VerticalBlindspotAngleDeg;
+
+		if (!bHorizontalBlindspot && !bVerticalBlindspot)
+		{
+			continue; // within the forward cone and not steeply off-screen — visible, not a threat
 		}
 
 		NearestThreat = Enemy;
-		NearestThreatDir2D = ToEnemyDir;
+		NearestThreatDirH = ToEnemyDirH;
+		NearestElevationDeg = ElevationDeg;
 		NearestDistSq = DistSq;
 	}
 
@@ -126,7 +139,12 @@ void UFPSRBlindspotAudioComponent::ScanAndWarn()
 	}
 	LastWarnTime = Now;
 
-	PlayWarningCue(ViewLocation, NearestThreatDir2D);
+	// Pitch conveys elevation (stereo panning only covers the horizontal plane): lerp Below..Above by signed
+	// elevation, so an overhead threat reads higher and one below reads lower (B9).
+	const float ElevationAlpha = FMath::GetMappedRangeValueClamped(FVector2D(-90.0f, 90.0f), FVector2D(0.0f, 1.0f), NearestElevationDeg);
+	const float PitchMultiplier = FMath::Lerp(BelowThreatPitch, AboveThreatPitch, ElevationAlpha);
+
+	PlayWarningCue(ViewLocation, NearestThreatDirH, PitchMultiplier);
 }
 
 USoundAttenuation* UFPSRBlindspotAudioComponent::ResolveAttenuation()
@@ -153,18 +171,18 @@ USoundAttenuation* UFPSRBlindspotAudioComponent::ResolveAttenuation()
 	return RuntimeAttenuation;
 }
 
-void UFPSRBlindspotAudioComponent::PlayWarningCue(const FVector& ViewLocation, const FVector& ThreatDirection)
+void UFPSRBlindspotAudioComponent::PlayWarningCue(const FVector& ViewLocation, const FVector& ThreatDirection, float PitchMultiplier)
 {
 	if (WarningSound == nullptr)
 	{
 		return;
 	}
-	// Place the cue a fixed short distance toward the threat so the engine spatializes it relative to the
-	// listener (left/right panning) at a consistent loudness regardless of the enemy's real distance. NOTE:
-	// stereo panning resolves left/right reliably; front/back disambiguation needs headphones + HRTF (U13).
+	// Place the cue a fixed short distance toward the threat so the engine spatializes it relative to the listener
+	// (left/right panning) at a consistent loudness regardless of the enemy's real distance. Pitch conveys elevation
+	// (above/below) which stereo panning can't (B9). NOTE: front/back disambiguation needs headphones + HRTF (U13).
 	const FVector CueLocation = ViewLocation + ThreatDirection * CueDistance;
 	UGameplayStatics::SpawnSoundAtLocation(this, WarningSound, CueLocation, FRotator::ZeroRotator,
-		1.0f, 1.0f, 0.0f, ResolveAttenuation());
+		1.0f, PitchMultiplier, 0.0f, ResolveAttenuation());
 }
 
 #if !UE_BUILD_SHIPPING
@@ -187,7 +205,7 @@ void UFPSRBlindspotAudioComponent::DebugForceWarn(float AngleDeg)
 	}
 	const FVector Dir = Forward2D.RotateAngleAxis(AngleDeg, FVector::UpVector);
 	LastWarnTime = -1000.0f; // bypass cooldown for the test
-	PlayWarningCue(ViewLocation, Dir);
+	PlayWarningCue(ViewLocation, Dir, 1.0f);
 }
 
 namespace

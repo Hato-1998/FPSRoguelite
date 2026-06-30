@@ -5,6 +5,10 @@
 #include "GameFramework/GameStateBase.h"
 #include "FPSRGameState.generated.h"
 
+class AFPSRBossBase;
+class UFPSRMissionDataAsset;
+class UFPSRRunScheduleDataAsset;
+
 /** Macro run phase. Combat = normal run / mission window; Boss = final boss (no timer, no missions).
  *  Global freeze during card selection is the separate bRunPaused flag, independent of the phase. */
 UENUM(BlueprintType)
@@ -20,6 +24,14 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnRunStateChanged);
  *  (e.g. the GameMode's post-run travel back to the lobby, P7 §3-5) can react WITHOUT editing EndRun's body —
  *  keeps the victory caller (U3) and the lobby-return caller (U11) on independent code paths. */
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnRunEnded);
+
+/** Fired on every client (and the host) when the active boss is set or cleared (B11). Boss = the spawned boss, or
+ *  null when the boss is gone — the HUD boss health bar shows/hides and (re)binds to the boss health on this. */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnActiveBossChanged, AFPSRBossBase*, Boss);
+
+/** Fired on every client (and the host) when a mission starts (MissionData set) or ends (null) (B10). The HUD shows
+ *  a "<DisplayName> 미션 시작" banner for a few seconds when MissionData is non-null. */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnActiveMissionChanged, UFPSRMissionDataAsset*, MissionData);
 
 /** Server-authoritative run progression state (shared XP, party level, run phase, global freeze).
  *  Redesign 2026-06-04 (Game.MD §2-2): on level-up (or mission clear) the run globally freezes — enemies
@@ -119,11 +131,61 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "FPSR|Run")
 	FOnRunEnded OnRunEnded;
 
+	/** Active boss (B11) — replicated so a client HUD boss bar can locate the boss and bind its health. Null = none. */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Run")
+	AFPSRBossBase* GetActiveBoss() const { return ActiveBoss; }
+
+	/** Server: set/clear the active boss (called by the run director on boss spawn / clear). Replicates + broadcasts. */
+	void SetActiveBoss(AFPSRBossBase* InBoss);
+
+	/** Fires on all clients (+ host) when the active boss is set/cleared (B11) — the HUD boss bar binds here to
+	 *  show/hide and (re)bind the boss's UFPSREnemyHealthComponent::OnHealthChanged (now client-fired via B12). */
+	UPROPERTY(BlueprintAssignable, Category = "FPSR|Run")
+	FOnActiveBossChanged OnActiveBossChanged;
+
+	/** Active mission DataAsset (B10) — replicated so every client's HUD can show a start banner. Null = no mission. */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Run")
+	UFPSRMissionDataAsset* GetActiveMission() const { return ActiveMissionData; }
+
+	/** Server: set/clear the active mission (called by the run director on mission spawn / end). Replicates + broadcasts. */
+	void SetActiveMission(UFPSRMissionDataAsset* InMission);
+
+	/** Fires on all clients (+ host) when a mission starts/ends (B10) — the HUD banner shows the mission name on start. */
+	UPROPERTY(BlueprintAssignable, Category = "FPSR|Run")
+	FOnActiveMissionChanged OnActiveMissionChanged;
+
+	/** Replicated active-mission progress 0..1 for the HUD capture/progress bar (B1). Meaningful while
+	 *  GetActiveMission() != null; 0 otherwise. Driven by the run director from the active mission actor (server). */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Run")
+	float GetMissionProgress() const { return MissionProgress; }
+
+	/** Server: update the replicated mission progress (low-frequency UI mirror, dead-banded). */
+	void SetMissionProgress(float NewProgress);
+
+	/** Replicated run schedule (B2) — set once at run start so a client HUD can read the mission windows + boss time
+	 *  to lay out the run-timeline bar (window markers + boss endpoint). Null = built-in fallback (no authored schedule). */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Run")
+	UFPSRRunScheduleDataAsset* GetRunSchedule() const { return RunScheduleAsset; }
+
+	/** Total run duration (seconds) = the boss time from the schedule (or a default when none is set). The timeline bar
+	 *  fills GetRunClockSeconds()/this and the boss icon sits at the end. (B2) */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Run")
+	float GetRunTotalDuration() const;
+
+	/** Server: set the run schedule reference (called by the run director at StartRun). Replicates to all. */
+	void SetRunSchedule(UFPSRRunScheduleDataAsset* InSchedule);
+
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 protected:
 	UFUNCTION()
 	void OnRep_RunState();
+
+	UFUNCTION()
+	void OnRep_ActiveBoss();
+
+	UFUNCTION()
+	void OnRep_ActiveMission();
 
 	/** XP required to advance from level 1; each level adds XPPerLevel (linear curve placeholder —
 	 *  a UCurveFloat data-driven curve is a follow-up, Game.MD §2-8). Editor-tunable. */
@@ -164,6 +226,26 @@ protected:
 	/** Host friendly-fire setting (replicated; read server-side for damage, mirrored to clients for UI). */
 	UPROPERTY(ReplicatedUsing = OnRep_RunState)
 	bool bFriendlyFireEnabled = false;
+
+	/** Active boss (B11). Replicated to all so the HUD boss bar can find it; the boss is bAlwaysRelevant so its
+	 *  UFPSREnemyHealthComponent replicates regardless of distance. Set/cleared by the run director (server). */
+	UPROPERTY(ReplicatedUsing = OnRep_ActiveBoss)
+	TObjectPtr<AFPSRBossBase> ActiveBoss = nullptr;
+
+	/** Active mission DataAsset (B10). Hard ref — mission DataAssets are always-loaded primary assets so this
+	 *  replicates cleanly (same as SelectedWeapon). Set/cleared by the run director (server); drives the HUD banner. */
+	UPROPERTY(ReplicatedUsing = OnRep_ActiveMission)
+	TObjectPtr<UFPSRMissionDataAsset> ActiveMissionData = nullptr;
+
+	/** Active-mission progress 0..1 (B1). Shares OnRep_RunState (re-broadcasts OnRunStateChanged on clients so the HUD
+	 *  progress bar refreshes in the same handler as the run clock). Server-driven by the run director, dead-banded. */
+	UPROPERTY(ReplicatedUsing = OnRep_RunState)
+	float MissionProgress = 0.0f;
+
+	/** Run schedule (B2) — replicated once at run start so a client HUD can read MissionWindows + BossTime to lay out
+	 *  the timeline bar. Hard ref like ActiveMissionData (always-loaded primary asset). Set by the run director. */
+	UPROPERTY(ReplicatedUsing = OnRep_RunState)
+	TObjectPtr<UFPSRRunScheduleDataAsset> RunScheduleAsset = nullptr;
 
 	/** Friendly-player damage multiplier while friendly fire is on (editor-tunable; 0.5 = half). */
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Run")

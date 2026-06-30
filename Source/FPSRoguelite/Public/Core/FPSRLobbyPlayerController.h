@@ -40,7 +40,19 @@ protected:
 	TSubclassOf<UCommonActivatableWidget> LobbyWidgetClass;
 
 private:
+	/** Point the local view at the lobby's room-overview CameraActor (tag "LobbyCamera", else the first camera in
+	 *  the level) and stop auto-managing the view target — otherwise a listen-server client's pawn possession steals
+	 *  the view onto the (spectator) pawn, which sits inside the podium meshes. Retries until the camera is found
+	 *  (level actors may lag a fresh client travel). No-op if the level has no CameraActor (engine default kept). */
+	void ApplyLobbyViewTarget();
+
 	/** Local-player layout root (created in BeginPlay). */
 	UPROPERTY(Transient)
 	TObjectPtr<UFPSRPrimaryGameLayout> PrimaryLayout;
+
+	/** Retry timer for ApplyLobbyViewTarget while the lobby camera hasn't replicated/loaded yet. */
+	FTimerHandle LobbyViewTimer;
+
+	/** Bounded retry counter for the lobby view-target lookup. */
+	int32 LobbyViewRetries = 0;
 };

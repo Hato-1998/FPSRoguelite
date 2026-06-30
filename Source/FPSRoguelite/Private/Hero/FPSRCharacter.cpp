@@ -17,6 +17,7 @@
 #include "Weapon/FPSRWeaponDataAsset.h"
 #include "Hero/FPSRPlayerFeedbackComponent.h"
 #include "Hero/FPSRBlindspotAudioComponent.h"
+#include "Hero/FPSRReviveComponent.h"
 #include "FPSRCollisionChannels.h"
 
 #include "Camera/CameraComponent.h"
@@ -100,6 +101,7 @@ AFPSRCharacter::AFPSRCharacter()
 	WeaponFire = CreateDefaultSubobject<UFPSRWeaponFireComponent>(TEXT("WeaponFire"));
 	PlayerFeedback = CreateDefaultSubobject<UFPSRPlayerFeedbackComponent>(TEXT("PlayerFeedback"));
 	BlindspotAudio = CreateDefaultSubobject<UFPSRBlindspotAudioComponent>(TEXT("BlindspotAudio"));
+	ReviveComponent = CreateDefaultSubobject<UFPSRReviveComponent>(TEXT("ReviveComponent"));
 
 	// Required so the inventory component's registered weapon-instance subobjects replicate (engine: the
 	// owning actor must also opt into the registered subobject list, not just the component).
@@ -327,10 +329,24 @@ bool AFPSRCharacter::IsRunFrozen() const
 	return GS && GS->IsRunPaused();
 }
 
-bool AFPSRCharacter::IsDeadLocal() const
+bool AFPSRCharacter::IsIncapacitatedLocal() const
 {
+	// Not a live participant: DBNO (downed) OR Dead. Gates actions (fire/dash/swap/reload/ADS) + contact damage.
+	const AFPSRPlayerState* PS = GetPlayerState<AFPSRPlayerState>();
+	return !PS || !PS->IsAlive();
+}
+
+bool AFPSRCharacter::IsTrulyDeadLocal() const
+{
+	// Truly out of the run (blocks even crawl/look). DBNO is NOT truly dead — it can still crawl + look around.
 	const AFPSRPlayerState* PS = GetPlayerState<AFPSRPlayerState>();
 	return PS && PS->IsDead();
+}
+
+bool AFPSRCharacter::CanJumpInternal_Implementation() const
+{
+	// No jumping while downed (DBNO) or dead.
+	return Super::CanJumpInternal_Implementation() && !IsIncapacitatedLocal();
 }
 
 void AFPSRCharacter::ApplyMoveSpeedMultiplier(float Mult)
@@ -341,9 +357,40 @@ void AFPSRCharacter::ApplyMoveSpeedMultiplier(float Mult)
 	}
 }
 
+void AFPSRCharacter::ApplyDownedLocomotion(bool bDowned)
+{
+	UCharacterMovementComponent* MoveComp = GetCharacterMovement();
+	if (!MoveComp)
+	{
+		return;
+	}
+	if (bDowned)
+	{
+		// Stationary: DBNO no longer crawls — the player stays where it fell and spectates an ally (§2-13). Movement
+		// input is also gated for !Alive (Input_Move*), so this is belt-and-suspenders against residual slide.
+		// (DownedMoveScale is now unused — kept for a possible future crawl toggle.)
+		MoveComp->MaxWalkSpeed = 0.0f;
+	}
+	else
+	{
+		// Restore to the combat-multiplier-driven speed (revive / re-enter Alive). Default 1.0 if the set isn't ready.
+		float Mult = 1.0f;
+		if (const AFPSRPlayerState* FPSRPS = GetPlayerState<AFPSRPlayerState>())
+		{
+			if (const UFPSRCombatSet* CombatSet = FPSRPS->GetCombatSet())
+			{
+				Mult = CombatSet->GetMoveSpeedMultiplier();
+			}
+		}
+		MoveComp->MaxWalkSpeed = BaseWalkSpeed * Mult;
+	}
+}
+
 void AFPSRCharacter::Input_MoveForward(const FInputActionValue& Value)
 {
-	if (IsRunFrozen() || IsDeadLocal())
+	// Downed (DBNO) is stationary + spectating an ally (§2-13), so block movement for DBNO and Dead alike. A hard
+	// freeze (card select) also stops movement here.
+	if (IsRunFrozen() || IsIncapacitatedLocal())
 	{
 		GetCharacterMovement()->StopMovementImmediately(); // kill residual slide during the freeze
 		return;
@@ -357,7 +404,8 @@ void AFPSRCharacter::Input_MoveForward(const FInputActionValue& Value)
 
 void AFPSRCharacter::Input_MoveRight(const FInputActionValue& Value)
 {
-	if (IsRunFrozen() || IsDeadLocal())
+	// Downed (DBNO) is stationary (spectating an ally) — same gate as MoveForward.
+	if (IsRunFrozen() || IsIncapacitatedLocal())
 	{
 		GetCharacterMovement()->StopMovementImmediately();
 		return;
@@ -371,7 +419,9 @@ void AFPSRCharacter::Input_MoveRight(const FInputActionValue& Value)
 
 void AFPSRCharacter::Input_Look(const FInputActionValue& Value)
 {
-	if (IsRunFrozen() || IsDeadLocal())
+	// Downed (DBNO) spectates a living ally, so the local camera/look is locked (block DBNO + Dead). A hard freeze
+	// (card select) also locks it.
+	if (IsRunFrozen() || IsIncapacitatedLocal())
 	{
 		return; // camera frozen during card selection (mouse goes to the card UI in Menu input mode)
 	}
@@ -390,7 +440,7 @@ void AFPSRCharacter::Input_Look(const FInputActionValue& Value)
 
 void AFPSRCharacter::Input_Fire(const FInputActionValue& Value)
 {
-	if (IsRunFrozen() || IsDeadLocal())
+	if (IsRunFrozen() || IsIncapacitatedLocal())
 	{
 		return; // no firing during the card-selection freeze
 	}
@@ -410,19 +460,19 @@ void AFPSRCharacter::Input_FireReleased(const FInputActionValue& Value)
 	}
 }
 
-void AFPSRCharacter::Input_EquipSlot1(const FInputActionValue& Value) { if (IsRunFrozen() || IsDeadLocal()) { return; } ServerEquipSlot(0); }
-void AFPSRCharacter::Input_EquipSlot2(const FInputActionValue& Value) { if (IsRunFrozen() || IsDeadLocal()) { return; } ServerEquipSlot(1); }
-void AFPSRCharacter::Input_EquipSlot3(const FInputActionValue& Value) { if (IsRunFrozen() || IsDeadLocal()) { return; } ServerEquipSlot(2); }
+void AFPSRCharacter::Input_EquipSlot1(const FInputActionValue& Value) { if (IsRunFrozen() || IsIncapacitatedLocal()) { return; } ServerEquipSlot(0); }
+void AFPSRCharacter::Input_EquipSlot2(const FInputActionValue& Value) { if (IsRunFrozen() || IsIncapacitatedLocal()) { return; } ServerEquipSlot(1); }
+void AFPSRCharacter::Input_EquipSlot3(const FInputActionValue& Value) { if (IsRunFrozen() || IsIncapacitatedLocal()) { return; } ServerEquipSlot(2); }
 
 void AFPSRCharacter::Input_Reload(const FInputActionValue& Value)
 {
-	if (IsRunFrozen() || IsDeadLocal()) { return; }
+	if (IsRunFrozen() || IsIncapacitatedLocal()) { return; }
 	ServerReload();
 }
 
 void AFPSRCharacter::Input_ADSPressed(const FInputActionValue& Value)
 {
-	if (IsRunFrozen() || IsDeadLocal()) { return; }
+	if (IsRunFrozen() || IsIncapacitatedLocal()) { return; }
 	if (WeaponFire) { WeaponFire->SetAiming(true); }
 	ServerSetAiming(true);
 }
@@ -435,7 +485,7 @@ void AFPSRCharacter::Input_ADSReleased(const FInputActionValue& Value)
 
 void AFPSRCharacter::Input_Dash(const FInputActionValue& Value)
 {
-	if (IsRunFrozen() || IsDeadLocal())
+	if (IsRunFrozen() || IsIncapacitatedLocal())
 	{
 		return; // no dashing during the card-selection freeze
 	}
@@ -474,7 +524,7 @@ void AFPSRCharacter::ServerEquipSlot_Implementation(int32 SlotIndex)
 {
 	// No weapon switching during the card-selection freeze: the run is globally stopped, and locking the
 	// equipped slot keeps a ThisWeapon-scope card's target deterministic (it can't be swapped mid-offer).
-	if (IsRunFrozen() || IsDeadLocal())
+	if (IsRunFrozen() || IsIncapacitatedLocal())
 	{
 		return;
 	}
@@ -486,7 +536,7 @@ void AFPSRCharacter::ServerEquipSlot_Implementation(int32 SlotIndex)
 
 void AFPSRCharacter::ServerReload_Implementation()
 {
-	if (IsDeadLocal()) { return; }
+	if (IsIncapacitatedLocal()) { return; }
 	if (WeaponInventory)
 	{
 		WeaponInventory->StartReload();
@@ -497,7 +547,7 @@ void AFPSRCharacter::ServerSetAiming_Implementation(bool bNewAiming)
 {
 	// Mirror the ServerEquipSlot/ServerDash server gate: reject an in-flight ADS RPC during the freeze so the OnAim
 	// behavior hook can't fire while the run is globally stopped (W1 P3-3). Input_ADS already gates client-side.
-	if (IsRunFrozen() || IsDeadLocal()) { return; }
+	if (IsRunFrozen() || IsIncapacitatedLocal()) { return; }
 	if (WeaponFire)
 	{
 		WeaponFire->SetAiming(bNewAiming);
@@ -532,7 +582,7 @@ void AFPSRCharacter::ServerDash_Implementation(FVector DashDirection)
 	// No dashing during the card-selection freeze (mirror the ServerEquipSlot server gate).
 	// Input_Dash already gates client-side, but a dash RPC in flight when the freeze replicates must be rejected
 	// on the server too, or the run is no longer globally stopped.
-	if (IsRunFrozen() || IsDeadLocal())
+	if (IsRunFrozen() || IsIncapacitatedLocal())
 	{
 		return;
 	}
@@ -559,11 +609,10 @@ void AFPSRCharacter::ServerDash_Implementation(FVector DashDirection)
 
 	LastDashTime = Now;
 
-	// Ignore other pawns (enemies + allies) for the dash window so the player can pass through a surround.
-	if (UCapsuleComponent* Capsule = GetCapsuleComponent())
-	{
-		Capsule->SetCollisionResponseToChannel(ECC_Pawn, ECR_Ignore);
-	}
+	// Ignore other pawns (enemies + allies) for the dash window so the player can pass through a surround. Routed
+	// through the shared helper so it composes with a post-revive grace window (RefreshPawnCollisionResponse derives
+	// "dashing" from LastDashTime + DashDuration, just set above).
+	RefreshPawnCollisionResponse();
 
 	// Launch along the dash direction (keep current vertical velocity so air dashes feel natural).
 	LaunchCharacter(Direction * DashSpeed, true, false);
@@ -574,10 +623,46 @@ void AFPSRCharacter::ServerDash_Implementation(FVector DashDirection)
 
 void AFPSRCharacter::EndDash()
 {
-	if (UCapsuleComponent* Capsule = GetCapsuleComponent())
+	// Recompute rather than unconditionally block — a grace window may still want enemy pass-through.
+	RefreshPawnCollisionResponse();
+}
+
+void AFPSRCharacter::RefreshPawnCollisionResponse()
+{
+	UCapsuleComponent* Capsule = GetCapsuleComponent();
+	if (!Capsule)
 	{
-		Capsule->SetCollisionResponseToChannel(ECC_Pawn, ECR_Block);
+		return;
 	}
+	const UWorld* World = GetWorld();
+	const float Now = World ? World->GetTimeSeconds() : 0.0f;
+	// Both windows derive from server timestamps so an overlapping dash + grace window compose correctly — whichever
+	// ends first doesn't restore enemy blocking while the other is still active.
+	const bool bDashing = (Now - LastDashTime) < DashDuration;
+	const bool bGrace = Now < GraceUntil;
+	Capsule->SetCollisionResponseToChannel(ECC_Pawn, (bDashing || bGrace) ? ECR_Ignore : ECR_Block);
+}
+
+void AFPSRCharacter::BeginGraceWindow(float Seconds)
+{
+	UWorld* World = GetWorld();
+	if (!HasAuthority() || Seconds <= 0.0f || !World)
+	{
+		return;
+	}
+	GraceUntil = World->GetTimeSeconds() + Seconds;
+
+	// Pass through enemy pawns for the grace window (mirrors the dash collision-ignore) so the player can walk out of a
+	// surround — the swarm that downed them (post-revive) or that closed in during the card freeze (post-freeze). The
+	// shared helper composes this with any active dash window.
+	RefreshPawnCollisionResponse();
+	World->GetTimerManager().SetTimer(GraceTimerHandle, this, &AFPSRCharacter::EndGraceWindow, Seconds, false);
+}
+
+void AFPSRCharacter::EndGraceWindow()
+{
+	// Recompute rather than unconditionally block — a dash may still be in its own collision-ignore window.
+	RefreshPawnCollisionResponse();
 }
 
 void AFPSRCharacter::ApplyContactDamage(float DamageAmount, AActor* DamageInstigator, FGameplayTag DamageType)
@@ -588,16 +673,26 @@ void AFPSRCharacter::ApplyContactDamage(float DamageAmount, AActor* DamageInstig
 		return;
 	}
 
-	// Dead players take no further contact damage (no repeated corpse hits).
-	if (IsDeadLocal())
+	// Non-alive players take no contact damage: a downed (DBNO) player is invulnerable while awaiting revive (a swarm
+	// would otherwise instakill the downed body), and a dead player takes no repeated corpse hits. (U9 §2-13)
+	if (IsIncapacitatedLocal())
+	{
+		return;
+	}
+
+	const UWorld* World = GetWorld();
+	const float Now = World ? World->GetTimeSeconds() : 0.0f;
+
+	// Grace window (§2-13): the player is invulnerable for a short window after a revive (post-revive grace) or after
+	// the card-selection freeze resumes (post-freeze grace), so a surrounding swarm can't instantly down them.
+	// Server-authoritative timestamp set in BeginGraceWindow.
+	if (Now < GraceUntil)
 	{
 		return;
 	}
 
 	// Invulnerability frames: ignore further hits within DamageInvulnerabilityDuration of the last
 	// accepted hit, so a swarm can't stack damage in a single window (per-player, server-authoritative).
-	const UWorld* World = GetWorld();
-	const float Now = World ? World->GetTimeSeconds() : 0.0f;
 	if ((Now - LastDamagedTime) < DamageInvulnerabilityDuration)
 	{
 		return;
@@ -622,22 +717,22 @@ void AFPSRCharacter::ApplyContactDamage(float DamageAmount, AActor* DamageInstig
 
 void AFPSRCharacter::HandleOutOfHealth()
 {
-	// Server-authoritative (bound under HasAuthority in InitAbilitySystem). U2 defeat wiring: mark the player dead
-	// (simplified — full DBNO/revive/respawn is U9, Game.MD §2-13), stop all activity, and let the GameMode check
-	// for a party wipe -> EndRun(Defeat).
-	UE_LOG(LogFPSR, Warning, TEXT("[Player] %s reached 0 health (marking Dead; DBNO/respawn is U9)."), *GetNameSafe(this));
+	// Server-authoritative (bound under HasAuthority in InitAbilitySystem). U9 DBNO (Game.MD §2-13): the player goes
+	// DOWN (revivable) instead of dying outright. Stop all action, switch to a crawl, then ask the GameMode to check
+	// for a team wipe (no Alive players remain) -> EndRun(Defeat). Revive back to Alive is UFPSRReviveComponent.
+	UE_LOG(LogFPSR, Log, TEXT("[Player] %s reached 0 health -> DBNO (downed)."), *GetNameSafe(this));
 
 	if (AFPSRPlayerState* PS = GetPlayerState<AFPSRPlayerState>())
 	{
-		if (PS->IsDead())
+		if (!PS->IsAlive())
 		{
-			return; // already processed (idempotent)
+			return; // already processed (idempotent: already DBNO or Dead)
 		}
-		PS->SetDead(true);
+		PS->SetLifeState(EFPSRLifeState::DBNO);
 	}
 
-	// Stop firing and cancel any in-progress ability (e.g. the server-only ChargeLaser charge sequence) so the
-	// corpse can't keep dealing damage. Clear aiming so ADS doesn't stay latched.
+	// Stop firing and cancel any in-progress ability (e.g. the server-only ChargeLaser charge sequence) so a downed
+	// player can't keep dealing damage. Clear aiming so ADS doesn't stay latched.
 	if (WeaponFire)
 	{
 		WeaponFire->StopFiring();
@@ -648,14 +743,23 @@ void AFPSRCharacter::HandleOutOfHealth()
 		AbilitySystemComponent->CancelAllAbilities();
 	}
 
-	// Server-authoritative movement stop so the corpse doesn't slide / keep being driven on remote clients.
+	// Downed locomotion: drop residual velocity and switch to crawl speed (movement stays ENABLED so the downed
+	// player can crawl out of danger / toward an ally). The owning client mirrors this from OnRep_LifeState so its
+	// movement prediction matches; revive restores the normal speed.
 	if (UCharacterMovementComponent* Move = GetCharacterMovement())
 	{
 		Move->StopMovementImmediately();
-		Move->DisableMovement();
+	}
+	ApplyDownedLocomotion(true);
+
+	// Switch the downed player's camera to a living ally immediately (spectate, §2-13). The ReviveComponent's server
+	// tick maintains / re-picks it; PerformRevive restores the own-pawn view. No-op if no ally (a wipe follows below).
+	if (UFPSRReviveComponent* Revive = FindComponentByClass<UFPSRReviveComponent>())
+	{
+		Revive->UpdateDownedSpectate();
 	}
 
-	// Wipe check: solo death = immediate wipe; co-op ends only when the last player falls.
+	// Wipe check: if no Alive players remain (solo down, or the last teammate falls) the GameMode ends in Defeat.
 	if (AFPSRGameMode* GM = GetWorld() ? GetWorld()->GetAuthGameMode<AFPSRGameMode>() : nullptr)
 	{
 		GM->NotifyPlayerDefeated();
@@ -744,7 +848,18 @@ void AFPSRCharacter::HandleRunStateChanged_Movement()
 	}
 	UWorld* World = GetWorld();
 	const AFPSRGameState* GS = World ? World->GetGameState<AFPSRGameState>() : nullptr;
-	if (!GS || !GS->IsRunPaused())
+	const bool bPaused = GS && GS->IsRunPaused();
+
+	// Post-card-selection resume grace (§2-13): when the global freeze ENDS, grant a short grace window so a player who
+	// unfreezes standing in the swarm isn't hit the instant the world resumes (the card screen otherwise can't be left
+	// safely). Fires once on the paused->unpaused transition; BeginGraceWindow is server-only (we're on authority).
+	if (bWasRunPausedAuth && !bPaused)
+	{
+		BeginGraceWindow(PostFreezeInvulnSeconds);
+	}
+	bWasRunPausedAuth = bPaused;
+
+	if (!bPaused)
 	{
 		return; // only act on entering the freeze; resume restores normal input-driven control (dash was cancelled)
 	}
@@ -803,8 +918,13 @@ void AFPSRCharacter::ApplyVisionRestriction(bool bRestricted)
 
 void AFPSRCharacter::RefreshFirstPersonWeaponVisual()
 {
-	// Owner-client cosmetic only (listen-server host's own pawn + remote autonomous proxy both reach here).
-	if (!IsLocallyControlled() || !WeaponInventory)
+	// Populate the 1P arms/weapon visual on ALL clients (not just the owner). A DOWNED teammate spectates this pawn via
+	// SetViewTarget (§2-13 DBNO), and OnlyOwnerSee is evaluated against the VIEW TARGET — so the spectator renders THIS
+	// pawn's 1P arms + weapon. The weapon mesh is set dynamically per-equip, so if it isn't populated on the spectator's
+	// client the downed viewer sees arms but no gun. The 1P meshes stay OnlyOwnerSee (non-spectating remotes still don't
+	// see them); the cached fire cosmetics below are owner-only-used (PlayWeaponFireCosmetics gates on IsLocallyControlled)
+	// so they are harmless on remote pawns.
+	if (!WeaponInventory)
 	{
 		return;
 	}
@@ -929,6 +1049,146 @@ void AFPSRCharacter::PlayWeaponFireCosmetics()
 			UGameplayStatics::SpawnEmitterAttached(CachedMuzzleFlash, ActiveWeaponMesh, CachedMuzzleSocket);
 		}
 	}
+}
+
+void AFPSRCharacter::MulticastFireCosmetics_Implementation()
+{
+	// The owning client already played its predicted fire cosmetics locally (PlayWeaponFireCosmetics), so skip here
+	// to avoid double-play. On the listen-server host the host pawn is locally controlled and also skips (it heard
+	// its own shot). Only REMOTE observers fall through (teammate fire SFX B4 + 1P muzzle/montage for a spectator).
+	if (IsLocallyControlled())
+	{
+		return;
+	}
+
+	// Resolve the equipped weapon from the REPLICATED inventory — the owner-only Cached* cosmetics aren't relied on
+	// here. GetCurrentWeapon() is valid on every client (the inventory's Slots/CurrentSlotIndex replicate).
+	const UFPSRWeaponDataAsset* Weapon = WeaponInventory ? WeaponInventory->GetCurrentWeapon() : nullptr;
+	if (!Weapon)
+	{
+		return;
+	}
+
+	const APlayerController* LocalPC = GetWorld() ? GetWorld()->GetFirstPlayerController() : nullptr;
+
+	// First-person fire visuals (muzzle flash + arms fire montage) for a DOWNED teammate who is SPECTATING this pawn
+	// (§2-13). OnlyOwnerSee 1P meshes render for the view target, so the spectator already sees this pawn's arms+gun;
+	// without this they'd see the gun but no muzzle/recoil. Gate strictly on "the local viewer's view target IS this
+	// pawn": the muzzle particle is NOT OnlyOwnerSee, so an UNgated spawn would float a muzzle flash at the 1P weapon
+	// position inside a (non-spectating) teammate's head. No distance cull here — the spectator's camera is on this pawn.
+	if (LocalPC && LocalPC->GetViewTarget() == this)
+	{
+		if (ActiveWeaponMesh && !Weapon->MuzzleFlash.IsNull())
+		{
+			if (UParticleSystem* Muzzle = Weapon->MuzzleFlash.LoadSynchronous())
+			{
+				UGameplayStatics::SpawnEmitterAttached(Muzzle, ActiveWeaponMesh, Weapon->MuzzleSocket);
+			}
+		}
+		if (FirstPersonArms && !Weapon->FireMontage.IsNull())
+		{
+			if (UAnimMontage* FireMontage = Weapon->FireMontage.LoadSynchronous())
+			{
+				if (UAnimInstance* AnimInst = FirstPersonArms->GetAnimInstance())
+				{
+					AnimInst->Montage_Play(FireMontage);
+				}
+			}
+		}
+	}
+
+	// Spatialized fire SFX so REMOTE teammates hear each other's fire (B4). Coarse distance cull against the local
+	// viewer's pawn so a far-off shot doesn't spawn an audio component (the sound's own attenuation still shapes
+	// falloff for audible shots). Cheap belt at the <=4-player scale.
+	if (Weapon->FireSound.IsNull())
+	{
+		return;
+	}
+	constexpr float FireSoundCullDistance = 8000.0f; // cm (~80 m)
+	if (LocalPC)
+	{
+		// Cull against the local viewer's VIEW TARGET (where the audio listener is), not its pawn: a DBNO spectator's
+		// pawn is its downed body (possibly far away), while the listener rides the spectated ally — using GetPawn()
+		// would wrongly cull a shot the spectator is right next to. For a normal player the view target IS their pawn.
+		if (const AActor* LocalViewActor = LocalPC->GetViewTarget())
+		{
+			if (FVector::DistSquared(GetActorLocation(), LocalViewActor->GetActorLocation()) > FMath::Square(FireSoundCullDistance))
+			{
+				return;
+			}
+		}
+	}
+
+	// Spatialized one-shot at the shooter so the sound comes from the teammate's position (the muzzle socket isn't
+	// available on remote pawns; actor location is accurate enough for positional fire audio).
+	if (USoundBase* FireSound = Weapon->FireSound.LoadSynchronous())
+	{
+		UGameplayStatics::PlaySoundAtLocation(this, FireSound, GetActorLocation());
+	}
+}
+
+void AFPSRCharacter::CalcCamera(float DeltaTime, FMinimalViewInfo& OutResult)
+{
+	// A DBNO teammate spectates a living ally via SetViewTarget (§2-13). On the spectator's machine the ally pawn is
+	// NOT locally controlled, so UCameraComponent::GetCameraView skips bUsePawnControlRotation (it only follows the
+	// LOCAL controller) — the spectator's view (and the attached 1P arms/weapon) would track yaw (replicated actor
+	// rotation) but not pitch. GetBaseAimRotation() gives the full aim: yaw from the actor rotation, pitch from the
+	// replicated RemoteViewPitch16 (UE5.7). Drive the camera component with it (CalcCamera runs each frame only while
+	// this pawn is the view target) so the attached 1P arms + weapon mesh pitch with the aim, then return that view.
+	// The locally-controlled owner keeps the default camera-component path (bUsePawnControlRotation handles pitch).
+	if (FirstPersonCamera && !IsLocallyControlled())
+	{
+		const FRotator AimRotation = GetBaseAimRotation();
+		FirstPersonCamera->SetWorldRotation(AimRotation);
+		OutResult.Location = FirstPersonCamera->GetComponentLocation();
+		OutResult.Rotation = AimRotation;
+		OutResult.FOV = FirstPersonCamera->FieldOfView;
+		return;
+	}
+
+	Super::CalcCamera(DeltaTime, OutResult);
+}
+
+float AFPSRCharacter::GetReviveTargetProgress() const
+{
+	// Local reviver HUD (§2-13): an ALIVE player standing within a DBNO ally's revive radius is reviving them — surface
+	// that ally's (replicated) ReviveProgress so the reviver's HUD can show a gauge + prompt. Returns the highest
+	// progress among in-range downed allies, or -1 when this player isn't reviving anyone. Pure client-side read of
+	// already-replicated data (LifeState + ReviveProgress); no new replication.
+	const AFPSRPlayerState* MyPS = GetPlayerState<AFPSRPlayerState>();
+	if (!MyPS || !MyPS->IsAlive())
+	{
+		return -1.0f; // only an alive player can be reviving someone
+	}
+	const UWorld* World = GetWorld();
+	const AFPSRGameState* GS = World ? World->GetGameState<AFPSRGameState>() : nullptr;
+	if (!GS)
+	{
+		return -1.0f;
+	}
+	const FVector MyLoc = GetActorLocation();
+	float BestProgress = -1.0f;
+	for (APlayerState* PS : GS->PlayerArray)
+	{
+		const AFPSRPlayerState* AllyPS = Cast<AFPSRPlayerState>(PS);
+		if (!AllyPS || AllyPS == MyPS || !AllyPS->IsDBNO())
+		{
+			continue;
+		}
+		const APawn* AllyPawn = AllyPS->GetPawn();
+		const UFPSRReviveComponent* AllyRevive = AllyPawn ? AllyPawn->FindComponentByClass<UFPSRReviveComponent>() : nullptr;
+		if (!AllyRevive)
+		{
+			continue;
+		}
+		FVector ToAlly = AllyPawn->GetActorLocation() - MyLoc;
+		ToAlly.Z = 0.0f;
+		if (ToAlly.SizeSquared() <= FMath::Square(AllyRevive->GetReviveRadius()))
+		{
+			BestProgress = FMath::Max(BestProgress, AllyRevive->GetReviveProgress());
+		}
+	}
+	return BestProgress;
 }
 
 UAbilitySystemComponent* AFPSRCharacter::GetAbilitySystemComponent() const

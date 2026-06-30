@@ -3,9 +3,11 @@
 #include "Core/FPSRSessionSubsystem.h"
 #include "Core/FPSRGameFlowSettings.h"
 #include "Core/FPSRLogChannels.h"
+#include "Core/FPSRFlowLog.h"
 #include "OnlineSubsystem.h"
 #include "OnlineSubsystemUtils.h"
 #include "OnlineSessionSettings.h"
+#include "Online/OnlineSessionNames.h"   // SEARCH_LOBBIES
 #include "Interfaces/OnlineExternalUIInterface.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
@@ -59,6 +61,7 @@ IOnlineSessionPtr UFPSRSessionSubsystem::GetSessionInterface() const
 
 void UFPSRSessionSubsystem::HostSession(int32 MaxPlayers)
 {
+	FPSRFlowLog::Event(this, TEXT("SESSION"), FString::Printf(TEXT("HostSession requested (MaxPlayers=%d)"), MaxPlayers));
 	IOnlineSessionPtr Sessions = GetSessionInterface();
 	if (!Sessions.IsValid())
 	{
@@ -74,6 +77,7 @@ void UFPSRSessionSubsystem::HostSession(int32 MaxPlayers)
 	// still-registered session and most OSS backends reject it (host flow stuck).
 	if (Sessions->GetNamedSession(GFPSRSessionName) != nullptr)
 	{
+		FPSRFlowLog::Event(this, TEXT("SESSION"), TEXT("Stale session present - destroying before host"));
 		bHostAfterDestroy = true;
 		DestroySessionCompleteHandle = Sessions->AddOnDestroySessionCompleteDelegate_Handle(
 			FOnDestroySessionCompleteDelegate::CreateUObject(this, &UFPSRSessionSubsystem::HandleDestroySessionComplete));
@@ -115,6 +119,7 @@ void UFPSRSessionSubsystem::CreateSessionInternal()
 	CurrentLobbyCode = GenerateLobbyCode();
 	SessionSettings.Set(GFPSRLobbyCodeKey, CurrentLobbyCode, EOnlineDataAdvertisementType::ViaOnlineService);
 
+	FPSRFlowLog::Event(this, TEXT("SESSION"), FString::Printf(TEXT("CreateSession issued (code=%s, max=%d)"), *CurrentLobbyCode, PendingHostMaxPlayers));
 	CreateSessionCompleteHandle = Sessions->AddOnCreateSessionCompleteDelegate_Handle(
 		FOnCreateSessionCompleteDelegate::CreateUObject(this, &UFPSRSessionSubsystem::HandleCreateSessionComplete));
 
@@ -135,6 +140,7 @@ void UFPSRSessionSubsystem::HandleCreateSessionComplete(FName SessionName, bool 
 	}
 
 	UE_LOG(LogFPSR, Log, TEXT("[Session] CreateSession '%s' %s"), *SessionName.ToString(), bWasSuccessful ? TEXT("OK") : TEXT("FAILED"));
+	FPSRFlowLog::Event(this, TEXT("SESSION"), FString::Printf(TEXT("CreateSession complete: %s"), bWasSuccessful ? TEXT("OK") : TEXT("FAILED")));
 	OnHostComplete.Broadcast(bWasSuccessful);
 
 	if (!bWasSuccessful)
@@ -148,6 +154,7 @@ void UFPSRSessionSubsystem::HandleCreateSessionComplete(FName SessionName, bool 
 	const FName LobbyPackage = Settings ? Settings->GetLevelPackageName(Settings->LobbyMap) : NAME_None;
 	if (World && LobbyPackage != NAME_None)
 	{
+		FPSRFlowLog::Event(this, TEXT("SESSION"), FString::Printf(TEXT("ServerTravel -> lobby (%s)"), *LobbyPackage.ToString()));
 		World->ServerTravel(LobbyPackage.ToString() + TEXT("?listen"));
 	}
 	else
@@ -165,9 +172,13 @@ void UFPSRSessionSubsystem::FindSessions()
 		return;
 	}
 
+	FPSRFlowLog::Event(this, TEXT("SESSION"), TEXT("FindSessions issued"));
 	SearchSettings = MakeShared<FOnlineSessionSearch>();
 	SearchSettings->MaxSearchResults = 20;
 	SearchSettings->bIsLanQuery = false;
+	// Our sessions are Steam presence LOBBIES (bUseLobbiesIfAvailable). Without SEARCH_LOBBIES, FindSessions queries
+	// the dedicated-server browser (which our lobbies are NOT in) and returns 0 — query the lobby list instead.
+	SearchSettings->QuerySettings.Set(SEARCH_LOBBIES, true, EOnlineComparisonOp::Equals);
 
 	FindSessionsCompleteHandle = Sessions->AddOnFindSessionsCompleteDelegate_Handle(
 		FOnFindSessionsCompleteDelegate::CreateUObject(this, &UFPSRSessionSubsystem::HandleFindSessionsComplete));
@@ -194,6 +205,7 @@ void UFPSRSessionSubsystem::HandleFindSessionsComplete(bool bWasSuccessful)
 	{
 		bSearchingByCode = false;
 		UE_LOG(LogFPSR, Log, TEXT("[Session] JoinByCode search %s — %d candidate(s) for '%s'"), bWasSuccessful ? TEXT("OK") : TEXT("FAILED"), Count, *PendingJoinCode);
+		FPSRFlowLog::Event(this, TEXT("JOIN"), FString::Printf(TEXT("Code search complete: %s, %d candidate(s) for '%s'"), bWasSuccessful ? TEXT("OK") : TEXT("FAILED"), Count, *PendingJoinCode));
 		if (bWasSuccessful && SearchSettings.IsValid())
 		{
 			for (const FOnlineSessionSearchResult& Result : SearchSettings->SearchResults)
@@ -208,11 +220,13 @@ void UFPSRSessionSubsystem::HandleFindSessionsComplete(bool bWasSuccessful)
 			}
 		}
 		UE_LOG(LogFPSR, Warning, TEXT("[Session] JoinByCode: no session matched code '%s'."), *PendingJoinCode);
+		FPSRFlowLog::Event(this, TEXT("JOIN"), FString::Printf(TEXT("JoinByCode FAILED: no session matched code '%s'"), *PendingJoinCode));
 		OnJoinByCodeComplete.Broadcast(false);
 		return;
 	}
 
 	UE_LOG(LogFPSR, Log, TEXT("[Session] FindSessions %s — %d result(s)"), bWasSuccessful ? TEXT("OK") : TEXT("FAILED"), Count);
+	FPSRFlowLog::Event(this, TEXT("SESSION"), FString::Printf(TEXT("FindSessions complete: %s, %d result(s)"), bWasSuccessful ? TEXT("OK") : TEXT("FAILED"), Count));
 	OnFindComplete.Broadcast(bWasSuccessful);
 }
 
@@ -234,6 +248,7 @@ void UFPSRSessionSubsystem::JoinFoundSession(int32 SearchResultIndex)
 
 void UFPSRSessionSubsystem::JoinSearchResult(const FOnlineSessionSearchResult& SearchResult)
 {
+	FPSRFlowLog::Event(this, TEXT("JOIN"), FString::Printf(TEXT("JoinSearchResult (resultValid=%d)"), SearchResult.IsValid() ? 1 : 0));
 	IOnlineSessionPtr Sessions = GetSessionInterface();
 	if (!Sessions.IsValid() || !SearchResult.IsValid())
 	{
@@ -263,6 +278,7 @@ void UFPSRSessionSubsystem::JoinSearchResult(const FOnlineSessionSearchResult& S
 	JoinSessionCompleteHandle = Sessions->AddOnJoinSessionCompleteDelegate_Handle(
 		FOnJoinSessionCompleteDelegate::CreateUObject(this, &UFPSRSessionSubsystem::HandleJoinSessionComplete));
 
+	FPSRFlowLog::Event(this, TEXT("JOIN"), TEXT("JoinSession issued"));
 	if (!Sessions->JoinSession(0, GFPSRSessionName, SearchResult))
 	{
 		Sessions->ClearOnJoinSessionCompleteDelegate_Handle(JoinSessionCompleteHandle);
@@ -280,6 +296,7 @@ void UFPSRSessionSubsystem::HandleJoinSessionComplete(FName SessionName, EOnJoin
 
 	const bool bSuccess = (Result == EOnJoinSessionCompleteResult::Success);
 	UE_LOG(LogFPSR, Log, TEXT("[Session] JoinSession '%s' — %s"), *SessionName.ToString(), LexToString(Result));
+	FPSRFlowLog::Event(this, TEXT("JOIN"), FString::Printf(TEXT("JoinSession complete: %s"), LexToString(Result)));
 	OnJoinComplete.Broadcast(bSuccess);
 
 	if (!bSuccess || !Sessions.IsValid())
@@ -294,6 +311,7 @@ void UFPSRSessionSubsystem::HandleJoinSessionComplete(FName SessionName, EOnJoin
 		UWorld* World = GetGameInstance() ? GetGameInstance()->GetWorld() : nullptr;
 		if (APlayerController* PC = GetGameInstance() ? GetGameInstance()->GetFirstLocalPlayerController(World) : nullptr)
 		{
+			FPSRFlowLog::Event(this, TEXT("JOIN"), FString::Printf(TEXT("ClientTravel -> %s"), *ConnectInfo));
 			PC->ClientTravel(ConnectInfo, TRAVEL_Absolute);
 		}
 	}
@@ -323,6 +341,7 @@ void UFPSRSessionSubsystem::HandleDestroySessionComplete(FName SessionName, bool
 		Sessions->ClearOnDestroySessionCompleteDelegate_Handle(DestroySessionCompleteHandle);
 	}
 	UE_LOG(LogFPSR, Log, TEXT("[Session] DestroySession '%s' %s"), *SessionName.ToString(), bWasSuccessful ? TEXT("OK") : TEXT("FAILED"));
+	FPSRFlowLog::Event(this, TEXT("SESSION"), FString::Printf(TEXT("DestroySession complete: %s"), bWasSuccessful ? TEXT("OK") : TEXT("FAILED")));
 
 	// Our session is gone — drop the host code (a fresh one is generated if we re-host below).
 	CurrentLobbyCode.Reset();
@@ -401,6 +420,7 @@ void UFPSRSessionSubsystem::JoinByCode(const FString& Code)
 	}
 
 	PendingJoinCode = Trimmed;
+	FPSRFlowLog::Event(this, TEXT("JOIN"), FString::Printf(TEXT("JoinByCode requested (code=%s)"), *Trimmed));
 
 	// If we currently hold a session (hosting solo, or already in a lobby), tear it down FIRST — joining while a
 	// named session is registered races the still-live session (same pattern as the pre-host teardown).
@@ -435,8 +455,12 @@ void UFPSRSessionSubsystem::FindSessionsByCode()
 	SearchSettings = MakeShared<FOnlineSessionSearch>();
 	SearchSettings->MaxSearchResults = 50;
 	SearchSettings->bIsLanQuery = false;
+	// Steam: query the LOBBY list (our sessions are presence lobbies), not the dedicated-server browser — otherwise
+	// the code search returns 0 candidates even though the host's lobby exists (confirmed via OSS Steam source).
+	SearchSettings->QuerySettings.Set(SEARCH_LOBBIES, true, EOnlineComparisonOp::Equals);
 	SearchSettings->QuerySettings.Set(GFPSRLobbyCodeKey, PendingJoinCode, EOnlineComparisonOp::Equals);
 
+	FPSRFlowLog::Event(this, TEXT("JOIN"), FString::Printf(TEXT("Code search issued (code=%s)"), *PendingJoinCode));
 	bSearchingByCode = true;
 	FindSessionsCompleteHandle = Sessions->AddOnFindSessionsCompleteDelegate_Handle(
 		FOnFindSessionsCompleteDelegate::CreateUObject(this, &UFPSRSessionSubsystem::HandleFindSessionsComplete));
@@ -465,6 +489,7 @@ FString UFPSRSessionSubsystem::GenerateLobbyCode()
 
 void UFPSRSessionSubsystem::ShowInviteUI()
 {
+	FPSRFlowLog::Event(this, TEXT("SESSION"), TEXT("ShowInviteUI (Steam overlay requested)"));
 	const UWorld* World = GetGameInstance() ? GetGameInstance()->GetWorld() : nullptr;
 	IOnlineSubsystem* OSS = Online::GetSubsystem(World);
 	const IOnlineExternalUIPtr ExternalUI = OSS ? OSS->GetExternalUIInterface() : nullptr;
@@ -480,6 +505,7 @@ void UFPSRSessionSubsystem::ShowInviteUI()
 
 void UFPSRSessionSubsystem::HandleSessionUserInviteAccepted(const bool bWasSuccessful, const int32 ControllerId, FUniqueNetIdPtr UserId, const FOnlineSessionSearchResult& InviteResult)
 {
+	FPSRFlowLog::Event(this, TEXT("INVITE"), FString::Printf(TEXT("Steam invite accepted (success=%d, resultValid=%d)"), bWasSuccessful ? 1 : 0, InviteResult.IsValid() ? 1 : 0));
 	if (!bWasSuccessful || !InviteResult.IsValid())
 	{
 		UE_LOG(LogFPSR, Warning, TEXT("[Session] Invite accepted but result invalid."));

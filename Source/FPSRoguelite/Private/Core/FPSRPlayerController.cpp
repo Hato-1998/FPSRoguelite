@@ -11,6 +11,7 @@
 #include "Blueprint/UserWidget.h"
 #include "CommonActivatableWidget.h"
 #include "Core/FPSRLogChannels.h"
+#include "Core/FPSRFlowLog.h"
 #include "Core/FPSRPlayerState.h"
 #include "Core/FPSRGameState.h"
 #include "Core/FPSRGameMode.h"
@@ -149,6 +150,11 @@ void AFPSRPlayerController::GrantWeaponUnlock()
 	}
 	if (AFPSRPlayerState* PS = GetPlayerState<AFPSRPlayerState>())
 	{
+		// Dead players don't participate in card/weapon-unlock selection (mission-clear grant skips them).
+		if (!PS->IsAlive())
+		{
+			return;
+		}
 		PS->AddWeaponUnlockPick();
 	}
 }
@@ -466,6 +472,14 @@ void AFPSRPlayerController::ServerAbandonOffer_Implementation(int32 OfferId)
 
 void AFPSRPlayerController::ClientShowRunResult_Implementation(EFPSRRunOutcome Outcome)
 {
+	const TCHAR* OutcomeStr = Outcome == EFPSRRunOutcome::Victory ? TEXT("Victory")
+		: (Outcome == EFPSRRunOutcome::Defeat ? TEXT("Defeat") : TEXT("None"));
+	// Diagnostic (B2): confirms the per-client RPC actually arrived. If a client never shows the result screen and
+	// no "RESULT" line appears in its FlowLog, the EndRun loop / RPC didn't reach it; if it appears but the next
+	// line reports a missing PrimaryLayout/ResultWidgetClass, the gameplay PlayerController BP needs ResultWidgetClass
+	// assigned (the most common cause — the RPC + wiring are correct, the content slot is empty).
+	FPSRFlowLog::Event(this, TEXT("RESULT"), FString::Printf(TEXT("ClientShowRunResult arrived (outcome=%s)"), OutcomeStr));
+
 	if (!IsLocalController())
 	{
 		return;
@@ -475,6 +489,8 @@ void AFPSRPlayerController::ClientShowRunResult_Implementation(EFPSRRunOutcome O
 	if (!EnsurePrimaryLayout() || !ResultWidgetClass)
 	{
 		UE_LOG(LogFPSR, Warning, TEXT("[UI] Cannot show run result (PrimaryLayout/ResultWidgetClass missing)"));
+		FPSRFlowLog::Event(this, TEXT("RESULT"), FString::Printf(TEXT("ABORT — %s missing"),
+			!ResultWidgetClass ? TEXT("ResultWidgetClass (assign on gameplay PC BP)") : TEXT("PrimaryLayout")));
 		return;
 	}
 
@@ -484,10 +500,12 @@ void AFPSRPlayerController::ClientShowRunResult_Implementation(EFPSRRunOutcome O
 	if (UFPSRResultWidget* ResultWidget = Cast<UFPSRResultWidget>(Pushed))
 	{
 		ResultWidget->SetOutcome(Outcome);
+		FPSRFlowLog::Event(this, TEXT("RESULT"), TEXT("Result widget shown"));
 	}
 	else
 	{
 		UE_LOG(LogFPSR, Warning, TEXT("[UI] Failed to push result widget to Menu layer"));
+		FPSRFlowLog::Event(this, TEXT("RESULT"), TEXT("ABORT — push to Menu layer failed"));
 	}
 }
 

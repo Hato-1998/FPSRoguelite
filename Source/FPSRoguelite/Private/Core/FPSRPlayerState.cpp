@@ -8,6 +8,7 @@
 #include "Weapon/FPSRWeaponInventoryComponent.h"
 #include "Weapon/FPSRWeaponFireComponent.h"
 #include "Weapon/FPSRWeaponDataAsset.h"
+#include "Hero/FPSRCharacter.h"
 #include "GameFramework/Pawn.h"
 #include "Net/UnrealNetwork.h"
 #include "Net/Core/PushModel/PushModel.h"
@@ -45,13 +46,24 @@ void AFPSRPlayerState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Out
 
 	FDoRepLifetimeParams Params;
 	Params.bIsPushBased = true;
-	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRPlayerState, bIsDead, Params);
+	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRPlayerState, LifeState, Params);
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRPlayerState, RunRerollCharges, Params);
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRPlayerState, CardPicksPending, Params);
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRPlayerState, WeaponUnlockPicksPending, Params);
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRPlayerState, AllWeaponsMods, Params);
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRPlayerState, SelectedWeapon, Params);
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRPlayerState, bReady, Params);
+	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRPlayerState, LobbySeatIndex, Params);
+}
+
+void AFPSRPlayerState::SetLobbySeatIndex(int32 NewSeat)
+{
+	if (!HasAuthority() || LobbySeatIndex == NewSeat)
+	{
+		return;
+	}
+	LobbySeatIndex = NewSeat;
+	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRPlayerState, LobbySeatIndex, this);
 }
 
 bool AFPSRPlayerState::ConsumeRerollCharge()
@@ -176,14 +188,14 @@ void AFPSRPlayerState::AddAllWeaponsModifier(const FFPSRWeaponStatMod& Mod)
 	}
 }
 
-void AFPSRPlayerState::SetDead(bool bNewDead)
+void AFPSRPlayerState::SetLifeState(EFPSRLifeState NewState)
 {
-	if (!HasAuthority() || bIsDead == bNewDead)
+	if (!HasAuthority() || LifeState == NewState)
 	{
 		return;
 	}
-	bIsDead = bNewDead;
-	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRPlayerState, bIsDead, this);
+	LifeState = NewState;
+	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRPlayerState, LifeState, this);
 }
 
 void AFPSRPlayerState::OnRep_LifeState()
@@ -192,7 +204,8 @@ void AFPSRPlayerState::OnRep_LifeState()
 	// auto-firing until the input gate catches up next frame, and clear the local (non-replicated) ADS
 	// state so the camera can't stay zoom-latched if the result UI swallows the ADS-release input.
 	// Server-side cancellation/aim-clear is handled in AFPSRCharacter::HandleOutOfHealth (CancelAllAbilities).
-	if (bIsDead)
+	// Fires for DBNO and Dead alike (both are not-Alive) so a downed player also drops the local fire/ADS latch.
+	if (LifeState != EFPSRLifeState::Alive)
 	{
 		if (APawn* OwnerPawn = GetPawn())
 		{
@@ -202,6 +215,13 @@ void AFPSRPlayerState::OnRep_LifeState()
 				Fire->SetAiming(false);
 			}
 		}
+	}
+
+	// Mirror the server's downed locomotion on clients so movement prediction matches: crawl speed while DBNO,
+	// normal (combat-mult) speed once revived back to Alive. (Mirrors the move-speed-multiplier client sync path.)
+	if (AFPSRCharacter* OwnerChar = Cast<AFPSRCharacter>(GetPawn()))
+	{
+		OwnerChar->ApplyDownedLocomotion(LifeState == EFPSRLifeState::DBNO);
 	}
 }
 
@@ -274,8 +294,8 @@ void AFPSRPlayerState::ResetRunState()
 		return;
 	}
 
-	// Life state back to alive (U2 field).
-	SetDead(false);
+	// Life state back to alive.
+	SetLifeState(EFPSRLifeState::Alive);
 
 	// Lobby ready resets on every (re)entry — a returning party must re-ready (U11a).
 	SetReady(false);

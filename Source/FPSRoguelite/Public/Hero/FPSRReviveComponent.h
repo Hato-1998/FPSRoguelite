@@ -1,0 +1,90 @@
+// Copyright Epic Games, Inc. All Rights Reserved.
+
+#pragma once
+
+#include "Components/ActorComponent.h"
+#include "FPSRReviveComponent.generated.h"
+
+class APawn;
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnReviveProgressChanged, float, Progress);
+
+/** Co-op proximity revive (U9 DBNO, Phase 1B, Game.MD §2-13). Lives on the player pawn (created by AFPSRCharacter).
+ *  Server-authoritative: while the owner is DBNO (downed), if any ALIVE ally stands within ReviveRadius the revive
+ *  gauge fills; full = revive back to Alive at ReviveHealthFraction of MaxHealth. Auto (no hold-interact). Paused
+ *  during the global card-selection freeze (§2-2). ReviveProgress replicates so the downed player's HUD gauge (and a
+ *  nearby ally's "reviving" prompt) can bind OnReviveProgressChanged. Solo / all-down never reaches a reviver, so the
+ *  GameMode wipe (AFPSRGameMode::NotifyPlayerDefeated) ends the run in Defeat instead. */
+UCLASS(ClassGroup = (FPSR), meta = (BlueprintSpawnableComponent))
+class FPSROGUELITE_API UFPSRReviveComponent : public UActorComponent
+{
+	GENERATED_BODY()
+
+public:
+	UFPSRReviveComponent();
+
+	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
+
+	/** 0..1 revive gauge for the downed owner (meaningful only while the owner is DBNO; 0 otherwise). */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Revive")
+	float GetReviveProgress() const { return ReviveProgress; }
+
+	/** Radius (cm) within which an alive ally fills this downed player's gauge. Exposed for the reviver-side HUD query
+	 *  (AFPSRCharacter::GetReviveTargetProgress) — same value on every client (CDO default, not per-instance tuned). */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Revive")
+	float GetReviveRadius() const { return ReviveRadius; }
+
+	/** Fires on the host (direct) + clients (OnRep) whenever ReviveProgress changes — bind the HUD revive gauge here. */
+	UPROPERTY(BlueprintAssignable, Category = "FPSR|Revive")
+	FOnReviveProgressChanged OnReviveProgressChanged;
+
+	/** Server: while the owner is DBNO, point its PlayerController camera at the nearest ALIVE ally (spectate, §2-13).
+	 *  Idempotent — only re-blends when the chosen ally changes. Called on down (AFPSRCharacter::HandleOutOfHealth)
+	 *  and maintained each server tick (re-picks if the spectated ally moves out of the party / dies). No-op with no
+	 *  living ally (a team wipe ends the run in Defeat instead). The owning client receives it via ClientSetViewTarget. */
+	void UpdateDownedSpectate();
+
+protected:
+	virtual void BeginPlay() override;
+
+	UFUNCTION()
+	void OnRep_ReviveProgress();
+
+	/** Server: update + replicate the gauge (broadcasts the delegate; host has no OnRep). */
+	void SetReviveProgress(float NewProgress);
+
+	/** Server: gauge full — revive the owner to Alive at ReviveHealthFraction health and clear the gauge. */
+	void PerformRevive();
+
+	/** Server: blend the owner's camera back to its own pawn (revive / no longer downed). */
+	void RestoreOwnView();
+
+	/** Radius (cm) within which an alive ally fills the gauge. Balance value. */
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Revive", meta = (ClampMin = "0.0"))
+	float ReviveRadius = 300.0f;
+
+	/** Seconds of continuous ally proximity to fully revive. Balance value. */
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Revive", meta = (ClampMin = "0.1"))
+	float ReviveSeconds = 3.0f;
+
+	/** Seconds of invulnerability (+ enemy pass-through) granted right after a revive so the swarm that downed the
+	 *  player can't instantly re-down them at the spot they fell (U9 §2-13). Applied via
+	 *  AFPSRCharacter::BeginGraceWindow. Balance value; 0 disables. */
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Revive", meta = (ClampMin = "0.0"))
+	float PostReviveInvulnSeconds = 5.0f;
+
+	/** With no ally near, the gauge decays this many times faster than it fills (0 = hold, don't decay). */
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Revive", meta = (ClampMin = "0.0"))
+	float ReviveDecayMultiplier = 1.0f;
+
+	/** Health fraction (of MaxHealth) restored on revive. Balance value. */
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Revive", meta = (ClampMin = "0.01", ClampMax = "1.0"))
+	float ReviveHealthFraction = 0.5f;
+
+	UPROPERTY(ReplicatedUsing = OnRep_ReviveProgress)
+	float ReviveProgress = 0.0f;
+
+	/** Server-only: ally pawn currently spectated while DBNO (avoids re-blending the camera every tick). */
+	TWeakObjectPtr<APawn> SpectatedPawn;
+};

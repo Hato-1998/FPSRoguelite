@@ -7,6 +7,7 @@
 #include "Core/FPSRGameFlowSubsystem.h"
 #include "Core/FPSRGameFlowSettings.h"
 #include "Core/FPSRLogChannels.h"
+#include "Core/FPSRFlowLog.h"
 #include "Hero/FPSRCharacter.h"
 #include "Card/FPSRCardSubsystem.h"
 #include "Card/FPSRCardPoolDataAsset.h"
@@ -53,6 +54,7 @@ AFPSRGameMode::AFPSRGameMode()
 void AFPSRGameMode::BeginPlay()
 {
 	Super::BeginPlay();
+	FPSRFlowLog::Event(this, TEXT("RUN-GM"), TEXT("Run BeginPlay (gameplay map start)"));
 
 	if (UWorld* World = GetWorld())
 	{
@@ -110,6 +112,7 @@ void AFPSRGameMode::TravelToLobby()
 	{
 		return;
 	}
+	FPSRFlowLog::Event(this, TEXT("RUN-GM"), TEXT("ServerTravel -> lobby (post-run)"));
 	const UFPSRGameFlowSettings* Settings = GetDefault<UFPSRGameFlowSettings>();
 	ServerTravelListenToMap(GetWorld(), Settings ? Settings->LobbyMap : nullptr);
 }
@@ -142,6 +145,7 @@ void AFPSRGameMode::EndRun(EFPSRRunOutcome Outcome)
 	}
 
 	bRunEnded = true;
+	FPSRFlowLog::Event(this, TEXT("RUN-GM"), FString::Printf(TEXT("EndRun outcome=%s"), Outcome == EFPSRRunOutcome::Victory ? TEXT("Victory") : (Outcome == EFPSRRunOutcome::Defeat ? TEXT("Defeat") : TEXT("None"))));
 
 	// Notify each player with the run outcome (they'll show the result widget locally).
 	for (FConstPlayerControllerIterator It = GetWorld()->GetPlayerControllerIterator(); It; ++It)
@@ -158,6 +162,10 @@ void AFPSRGameMode::EndRun(EFPSRRunOutcome Outcome)
 	if (AFPSRGameState* GS = GetGameState<AFPSRGameState>())
 	{
 		GS->EndRunFreeze();
+		// Clear the HUD mission progress so a partial capture/hold bar doesn't strand behind the result screen (B1).
+		// Victory already clears it via EnterBoss -> DestroyActiveMission; this covers the Defeat path (which freezes
+		// without destroying the active mission) and is a harmless no-op when no mission is active.
+		GS->SetMissionProgress(0.0f);
 	}
 }
 
@@ -204,6 +212,20 @@ void AFPSRGameMode::NotifyPlayerDefeated()
 	}
 	if (AreAllPlayersDead())
 	{
+		// Team wipe (no Alive players remain): no one can revive the downed, so any DBNO players are now truly Dead.
+		if (const AGameStateBase* GS = GetGameState<AGameStateBase>())
+		{
+			for (APlayerState* PS : GS->PlayerArray)
+			{
+				if (AFPSRPlayerState* FPS = Cast<AFPSRPlayerState>(PS))
+				{
+					if (FPS->IsDBNO())
+					{
+						FPS->SetLifeState(EFPSRLifeState::Dead);
+					}
+				}
+			}
+		}
 		EndRun(EFPSRRunOutcome::Defeat);
 	}
 }

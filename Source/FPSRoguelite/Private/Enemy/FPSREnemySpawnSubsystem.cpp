@@ -244,11 +244,11 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 		{
 			if (APawn* PlayerPawn = PC->GetPawn())
 			{
-				// Skip dead players (U2): they're not targeted and take no contact damage (no corpse hits). U9 (DBNO)
-				// revisits whether downed players remain targetable.
+				// B17 (U9): enemies don't target non-alive players (DBNO downed or Dead) — a downed teammate stops
+				// drawing aggro and the swarm re-targets the living. (Downed players also take no contact damage.)
 				if (const AFPSRPlayerState* PS = PC->GetPlayerState<AFPSRPlayerState>())
 				{
-					if (PS->IsDead())
+					if (!PS->IsAlive())
 					{
 						continue;
 					}
@@ -379,24 +379,38 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 			continue;
 		}
 
-		// Flow-field direction toward players (fall back to direct-to-nearest if the field isn't ready).
-		FVector FlowDir = FlowField ? FlowField->SampleFlowDirection(EnemyLocation) : FVector::ZeroVector;
-		if (FlowDir.IsNearlyZero())
+		const float ScaledDelta = DeltaTime * UpdateStride;
+
+		// Authored exit path (C1): an enemy spawned INSIDE a structure (pipe/box) files OUT along its waypoints first,
+		// ignoring the flow-field and separation (the route is narrow — separation would shove it into the walls). At
+		// the final waypoint ConsumeExitPathSteering returns false and the enemy hands off to flow-field chase below.
+		FVector ExitDir;
+		if (Enemy->ConsumeExitPathSteering(EnemyLocation, ScaledDelta, ExitDir))
 		{
-			FlowDir = (BestPlayerLocation - EnemyLocation);
-			FlowDir.Z = 0.0f;
-			FlowDir = FlowDir.GetSafeNormal();
+			ExitDir.Z = 0.0f;
+			Enemy->TickServerMovement(ExitDir, ScaledDelta);
 		}
+		else
+		{
+			// Flow-field direction toward players (fall back to direct-to-nearest if the field isn't ready).
+			FVector FlowDir = FlowField ? FlowField->SampleFlowDirection(EnemyLocation) : FVector::ZeroVector;
+			if (FlowDir.IsNearlyZero())
+			{
+				FlowDir = (BestPlayerLocation - EnemyLocation);
+				FlowDir.Z = 0.0f;
+				FlowDir = FlowDir.GetSafeNormal();
+			}
 
-		// Stop advancing toward the player within StopDistance (still separate to avoid stacking on them).
-		const float StopDistSq = FMath::Square(Enemy->GetStopDistance());
-		const FVector Desired = (BestDistSq > StopDistSq) ? FlowDir : FVector::ZeroVector;
+			// Stop advancing toward the player within StopDistance (still separate to avoid stacking on them).
+			const float StopDistSq = FMath::Square(Enemy->GetStopDistance());
+			const FVector Desired = (BestDistSq > StopDistSq) ? FlowDir : FVector::ZeroVector;
 
-		// Combine flow + separation; TickServerMovement normalizes and moves at CurrentMoveSpeed.
-		FVector MoveDir = Desired + ComputeSeparation(i, Locations, SpatialHash) * SeparationStrength;
-		MoveDir.Z = 0.0f;
+			// Combine flow + separation; TickServerMovement normalizes and moves at CurrentMoveSpeed.
+			FVector MoveDir = Desired + ComputeSeparation(i, Locations, SpatialHash) * SeparationStrength;
+			MoveDir.Z = 0.0f;
 
-		Enemy->TickServerMovement(MoveDir, DeltaTime * UpdateStride);
+			Enemy->TickServerMovement(MoveDir, ScaledDelta);
+		}
 
 		// Recycle an enemy that has fallen out of the playable world (walked into a pit / no static floor under
 		// it) so the endless-fall path can't pin a director slot forever. Safe here: Agents/Locations/SpatialHash
@@ -480,13 +494,14 @@ void UFPSREnemySpawnSubsystem::TickDirector()
 	{
 		FVector SpawnAt;
 		bool bSnapToGround = true;
+		const AFPSREnemySpawnPoint* SpawnPoint = nullptr;
 		// Spawn ONLY at designer spawn points: when none qualifies this tick (e.g. all in view), stop and retry on the
 		// next director tick rather than falling back to a player-proximity ring (removed 2026-06-24).
-		if (!ComputeSpawnLocation(SpawnAt, bSnapToGround))
+		if (!ComputeSpawnLocation(SpawnAt, bSnapToGround, SpawnPoint))
 		{
 			break;
 		}
-		if (AcquireEnemy(SpawnAt, bSnapToGround) == nullptr)
+		if (AcquireEnemy(SpawnAt, bSnapToGround, SpawnPoint) == nullptr)
 		{
 			break;
 		}
@@ -494,14 +509,15 @@ void UFPSREnemySpawnSubsystem::TickDirector()
 	}
 }
 
-bool UFPSREnemySpawnSubsystem::ComputeSpawnLocation(FVector& OutLocation, bool& bOutSnapToGround) const
+bool UFPSREnemySpawnSubsystem::ComputeSpawnLocation(FVector& OutLocation, bool& bOutSnapToGround, const AFPSREnemySpawnPoint*& OutPoint) const
 {
-	// The swarm spawns ONLY at designer-placed spawn points that are out of every player's view (Game.MD §2-8, §1
-	// fixed map). The player-proximity/ring fallback was removed (user 2026-06-24): when no point qualifies this tick
-	// (none placed, or all currently in view / too close), return false so the director skips spawning and retries
-	// next tick. The designer point is authoritative — keep its exact Z (no ground re-snap onto a ceiling/roof for
-	// indoor placements, Codex review 2026-06-09).
-	if (TrySelectSpawnPoint(OutLocation))
+	// The swarm spawns ONLY at designer-placed spawn points (Game.MD §2-8, §1 fixed map). The player-proximity/ring
+	// fallback was removed (user 2026-06-24) and the out-of-view (FOV) gate was removed (user 2026-06-29): a point is
+	// eligible regardless of whether it's in a player's view — designer placement + MinPlayerDistance + room zones
+	// control where/when. When no point qualifies this tick (none placed / wrong zone / too close), return false so the
+	// director skips spawning and retries next tick. The designer point is authoritative — keep its exact Z (no ground
+	// re-snap onto a ceiling/roof for indoor placements, Codex review 2026-06-09).
+	if (TrySelectSpawnPoint(OutLocation, OutPoint))
 	{
 		bOutSnapToGround = false;
 		return true;
@@ -509,18 +525,21 @@ bool UFPSREnemySpawnSubsystem::ComputeSpawnLocation(FVector& OutLocation, bool& 
 	return false;
 }
 
-bool UFPSREnemySpawnSubsystem::TrySelectSpawnPoint(FVector& OutLocation) const
+bool UFPSREnemySpawnSubsystem::TrySelectSpawnPoint(FVector& OutLocation, const AFPSREnemySpawnPoint*& OutPoint) const
 {
+	OutPoint = nullptr;
+
 	const UWorld* World = GetWorld();
 	if (!World || SpawnPoints.Num() == 0)
 	{
 		return false;
 	}
 
-	// Gather each local/remote player's view (camera) + pawn location once. Spawn points are filtered against
-	// ALL players so an enemy never pops into anyone's view.
-	struct FPlayerView { FVector CamLocation; FVector CamForward2D; };
-	TArray<FPlayerView, TInlineAllocator<4>> PlayerViews;
+	// Gather each player's location once for the MinPlayerDistance gate. The out-of-view (FOV) gate was REMOVED
+	// (user 2026-06-29): a point is eligible regardless of whether it lies in any player's view — designer placement
+	// + MinPlayerDistance + room zones now fully control where/when enemies appear, so a single visible point no
+	// longer starves spawns.
+	TArray<FVector, TInlineAllocator<4>> PlayerLocations;
 	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
 	{
 		const APlayerController* PC = It->Get();
@@ -531,21 +550,13 @@ bool UFPSREnemySpawnSubsystem::TrySelectSpawnPoint(FVector& OutLocation) const
 		FVector CamLocation;
 		FRotator CamRotation;
 		PC->GetPlayerViewPoint(CamLocation, CamRotation);
-		FVector Forward2D = CamRotation.Vector();
-		Forward2D.Z = 0.0f;
-		if (!Forward2D.Normalize())
-		{
-			continue;
-		}
-		PlayerViews.Add({ CamLocation, Forward2D });
+		PlayerLocations.Add(CamLocation);
 	}
 
-	if (PlayerViews.Num() == 0)
+	if (PlayerLocations.Num() == 0)
 	{
-		return false; // no players to gate against — nothing to spawn this tick
+		return false; // no players present — nothing to spawn this tick
 	}
-
-	const float CosHalfVis = FMath::Cos(FMath::DegreesToRadians(SpawnPointVisibilityHalfAngleDeg));
 
 	// Build the eligible candidate set, then pick UNIFORMLY at random (weight + distance-falloff removed 2026-06-25):
 	// designer points are equal-probability, and the room/zone gate decides WHICH points are live this tick.
@@ -567,43 +578,19 @@ bool UFPSREnemySpawnSubsystem::TrySelectSpawnPoint(FVector& OutLocation) const
 			continue;
 		}
 
-		const FVector PointLocation = Point->GetActorLocation();
-
-		// Nearest-player distance (XY) for the MinPlayerDistance gate + out-of-view test.
-		float NearestDistSq = TNumericLimits<float>::Max();
-		bool bVisibleToAnyPlayer = false;
-		for (const FPlayerView& View : PlayerViews)
+		// MinPlayerDistance gate (XY): keep spawns at least this far from the nearest player (no FOV test anymore).
+		if (Point->GetMinPlayerDistance() > 0.0f)
 		{
-			FVector ToPoint = PointLocation - View.CamLocation;
-			ToPoint.Z = 0.0f;
-			const float DistSq = ToPoint.SizeSquared();
-			NearestDistSq = FMath::Min(NearestDistSq, DistSq);
-
-			if (DistSq > KINDA_SMALL_NUMBER)
+			const FVector PointLocation = Point->GetSpawnLocation();
+			float NearestDistSq = TNumericLimits<float>::Max();
+			for (const FVector& PL : PlayerLocations)
 			{
-				const FVector Dir = ToPoint * FMath::InvSqrt(DistSq);
-				if (FVector::DotProduct(View.CamForward2D, Dir) > CosHalfVis)
-				{
-					bVisibleToAnyPlayer = true;
-					break; // inside this player's view cone — exclude the point
-				}
+				NearestDistSq = FMath::Min(NearestDistSq, FVector::DistSquaredXY(PL, PointLocation));
 			}
-			else
+			if (NearestDistSq < FMath::Square(Point->GetMinPlayerDistance()))
 			{
-				bVisibleToAnyPlayer = true; // a player is standing on the point
-				break;
+				continue;
 			}
-		}
-
-		if (bVisibleToAnyPlayer)
-		{
-			continue;
-		}
-
-		const float NearestDist = FMath::Sqrt(NearestDistSq);
-		if (Point->GetMinPlayerDistance() > 0.0f && NearestDist < Point->GetMinPlayerDistance())
-		{
-			continue;
 		}
 
 		Candidates.Add(Point);
@@ -618,7 +605,9 @@ bool UFPSREnemySpawnSubsystem::TrySelectSpawnPoint(FVector& OutLocation) const
 	// authoritative spawn transform (§1 fixed map). If the same point is picked more than once in a tick, the
 	// co-located enemies are pushed apart at the source by ComputeSeparation's coincident handling rather than by
 	// moving the spawn into possibly-unsafe wall/ledge geometry.
-	OutLocation = Candidates[FMath::RandRange(0, Candidates.Num() - 1)]->GetActorLocation();
+	const AFPSREnemySpawnPoint* Chosen = Candidates[FMath::RandRange(0, Candidates.Num() - 1)];
+	OutLocation = Chosen->GetSpawnLocation(); // SpawnAnchor world loc (inside a structured spawner), else actor origin
+	OutPoint = Chosen; // carries the authored exit path (C1) to AcquireEnemy
 	return true;
 }
 
@@ -646,7 +635,7 @@ FVector UFPSREnemySpawnSubsystem::SnapToGround(const FVector& Location) const
 	return Location; // no floor found (e.g. off-map): keep the original candidate
 }
 
-AFPSREnemyBase* UFPSREnemySpawnSubsystem::AcquireEnemy(const FVector& Location, bool bSnapToGround)
+AFPSREnemyBase* UFPSREnemySpawnSubsystem::AcquireEnemy(const FVector& Location, bool bSnapToGround, const AFPSREnemySpawnPoint* SpawnPoint)
 {
 	UWorld* World = GetWorld();
 	if (!World || !HasServerAuthority())
@@ -686,6 +675,20 @@ AFPSREnemyBase* UFPSREnemySpawnSubsystem::AcquireEnemy(const FVector& Location, 
 
 	// Activate and add to active set.
 	Enemy->Activate(SpawnLocation);
+
+	// Structured spawner (C1): if this point authored an exit path, the enemy follows the waypoints OUT of the spawn
+	// structure (pipe/box) before flow-field player-chase takes over — so it never jams inside concave geometry the
+	// flow-field can't path out of. Applied after Activate (which clears any leftover path from a prior life).
+	if (SpawnPoint)
+	{
+		TArray<FVector> ExitWaypoints;
+		SpawnPoint->GetExitPathWorldPoints(ExitWaypoints);
+		if (ExitWaypoints.Num() > 0)
+		{
+			Enemy->SetExitPath(ExitWaypoints);
+		}
+	}
+
 	ActiveEnemies.Add(Enemy);
 	return Enemy;
 }

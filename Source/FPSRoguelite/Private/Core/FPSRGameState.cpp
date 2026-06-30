@@ -3,6 +3,7 @@
 #include "Core/FPSRGameState.h"
 #include "Core/FPSRPlayerState.h"
 #include "Core/FPSRPlayerController.h"
+#include "Run/FPSRRunScheduleDataAsset.h"
 #include "Net/UnrealNetwork.h"
 #include "Net/Core/PushModel/PushModel.h"
 #include "Engine/World.h"
@@ -27,6 +28,84 @@ void AFPSRGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLi
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRGameState, RunClockSeconds, Params);
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRGameState, bFriendlyFireEnabled, Params);
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRGameState, LobbyCountdownEndServerTime, Params);
+	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRGameState, ActiveBoss, Params);
+	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRGameState, ActiveMissionData, Params);
+	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRGameState, MissionProgress, Params);
+	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRGameState, RunScheduleAsset, Params);
+}
+
+void AFPSRGameState::SetActiveBoss(AFPSRBossBase* InBoss)
+{
+	if (!HasAuthority() || ActiveBoss == InBoss)
+	{
+		return;
+	}
+	ActiveBoss = InBoss;
+	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRGameState, ActiveBoss, this);
+	// The listen-server host gets no OnRep — broadcast directly so the host's HUD boss bar reacts too (same pattern
+	// as the ready/run-state setters).
+	OnActiveBossChanged.Broadcast(ActiveBoss);
+}
+
+void AFPSRGameState::OnRep_ActiveBoss()
+{
+	OnActiveBossChanged.Broadcast(ActiveBoss);
+}
+
+void AFPSRGameState::SetActiveMission(UFPSRMissionDataAsset* InMission)
+{
+	if (!HasAuthority() || ActiveMissionData == InMission)
+	{
+		return;
+	}
+	ActiveMissionData = InMission;
+	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRGameState, ActiveMissionData, this);
+	OnActiveMissionChanged.Broadcast(ActiveMissionData); // host gets no OnRep — broadcast directly (B10 banner)
+}
+
+void AFPSRGameState::OnRep_ActiveMission()
+{
+	OnActiveMissionChanged.Broadcast(ActiveMissionData);
+}
+
+void AFPSRGameState::SetMissionProgress(float NewProgress)
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+	NewProgress = FMath::Clamp(NewProgress, 0.0f, 1.0f);
+	if (MissionProgress == NewProgress)
+	{
+		return;
+	}
+	// Dead-band to avoid per-director-tick churn, but always honor the exact endpoints (0 on clear, 1 on complete).
+	const bool bEndpoint = (NewProgress == 0.0f || NewProgress == 1.0f);
+	if (!bEndpoint && FMath::IsNearlyEqual(MissionProgress, NewProgress, 0.01f))
+	{
+		return;
+	}
+	MissionProgress = NewProgress;
+	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRGameState, MissionProgress, this);
+	OnRunStateChanged.Broadcast(); // host has no OnRep — refresh host HUD directly (B1)
+}
+
+void AFPSRGameState::SetRunSchedule(UFPSRRunScheduleDataAsset* InSchedule)
+{
+	if (!HasAuthority() || RunScheduleAsset == InSchedule)
+	{
+		return;
+	}
+	RunScheduleAsset = InSchedule;
+	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRGameState, RunScheduleAsset, this);
+	OnRunStateChanged.Broadcast(); // host has no OnRep — refresh host HUD directly (B2)
+}
+
+float AFPSRGameState::GetRunTotalDuration() const
+{
+	// The boss endpoint from the authored schedule; a default when no schedule is set (test/fallback runs) matching
+	// the run director's FallbackBossTime so the bar still reads sensibly.
+	return RunScheduleAsset ? RunScheduleAsset->BossTime : 300.0f;
 }
 
 int32 AFPSRGameState::GetRequiredXP(int32 Level) const
@@ -59,19 +138,24 @@ void AFPSRGameState::AddSharedXP(int32 Amount)
 	{
 		for (APlayerState* PS : PlayerArray)
 		{
-			if (AFPSRPlayerState* FPS = Cast<AFPSRPlayerState>(PS))
+			AFPSRPlayerState* FPS = Cast<AFPSRPlayerState>(PS);
+			// Non-alive players (DBNO or Dead) don't participate in level-up selection — grant them no card /
+			// weapon-unlock picks (server-authoritative LifeState). Also keeps them out of the RefreshPauseState
+			// freeze gate below (A4: a downed/dead teammate must not block the card-select freeze).
+			if (!FPS || !FPS->IsAlive())
 			{
-				for (int32 i = 0; i < LevelsGained; ++i)
+				continue;
+			}
+			for (int32 i = 0; i < LevelsGained; ++i)
+			{
+				FPS->AddCardPick();
+			}
+			// Weapon-unlock milestone picks: one per milestone level crossed this XP gain (Game.MD §2-3-4).
+			for (int32 L = PrevLevel + 1; L <= PartyLevel; ++L)
+			{
+				if (WeaponUnlockMilestones.Contains(L))
 				{
-					FPS->AddCardPick();
-				}
-				// Weapon-unlock milestone picks: one per milestone level crossed this XP gain (Game.MD §2-3-4).
-				for (int32 L = PrevLevel + 1; L <= PartyLevel; ++L)
-				{
-					if (WeaponUnlockMilestones.Contains(L))
-					{
-						FPS->AddWeaponUnlockPick();
-					}
+					FPS->AddWeaponUnlockPick();
 				}
 			}
 		}
@@ -170,7 +254,9 @@ void AFPSRGameState::RefreshPauseState()
 	for (APlayerState* PS : PlayerArray)
 	{
 		AFPSRPlayerState* FPS = Cast<AFPSRPlayerState>(PS);
-		if (!FPS)
+		// Dead players are excluded from card selection: no offer is presented and they never count toward the
+		// freeze, so a dead teammate can't soft-lock the resume for everyone (mirrors the AddSharedXP grant gate).
+		if (!FPS || !FPS->IsAlive())
 		{
 			continue;
 		}

@@ -4,7 +4,106 @@
 > **작업 단계를 끝낼 때마다, 그리고 중단 전 반드시 이 파일을 갱신하고 커밋한다.**
 > 확정 설계·기획·코드구조·규칙은 `Game.md`(**SSOT 허브** → 도메인별 `Docs/SSOT/*.md`, 작업별 라우팅은 허브 §0-1), **완료 작업 상세는 `git log --oneline`**. 여기엔 *무엇을 했는지*만 요약한다.
 
-**최종 갱신: 2026-06-26**
+**최종 갱신: 2026-06-30**
+
+## 🔔 핸드오프 (2026-06-30 g) — DBNO 후속 2건(관전 발사이펙트 + 부활 무적창) 코드완료·빌드·리뷰, 다음=사용자 PIE 2인 → Codex 머지게이트 → main
+> **이 세션**: A/B 두 follow-up **구현·빌드·헤드리스 스모크·적대적 리뷰 완료**(`3ab63ed feat(dbno)`, `phase/p1b-dbno`). MP/복제·서버권위 = Opus 직접. 신규 C++ 클래스 0(기존 확장).
+>   - **A) fix(weapon) 관전 발사이펙트**: `MulticastFireCosmetics`([FPSRCharacter.cpp](Source/FPSRoguelite/Private/Hero/FPSRCharacter.cpp))에 머즐플래시+발사몽타주 추가 — 복제 인벤토리 `GetCurrentWeapon` DA 해석(사운드와 동일 경로). **게이팅 = `LocalPC->GetViewTarget()==this`**(이 폰을 관전 중인 로컬 뷰어에게만; 머즐 파티클은 OnlyOwnerSee 비상속이라 무게이트 시 비관전 원격 관찰자에게 아군 머리 머즐 누출). 사운드/거리컬 보존(LocalPC 호이스트).
+>   - **B) feat(player) 부활 PostReviveInvuln(기본 5s, 편집가능)**: 신규 `UFPSRReviveComponent::PostReviveInvulnSeconds`(EditDefaultsOnly, ReviveSeconds 옆). `PerformRevive`(서버)→`AFPSRCharacter::BeginPostReviveInvulnerability`. ① 무적=`ApplyContactDamage`([:633](Source/FPSRoguelite/Private/Hero/FPSRCharacter.cpp))에 `Now < PostReviveInvulnUntil` 게이트(전 데미지 경로 접촉/투사체/히트스캔 수렴). ② 적충돌무시=캡슐 `ECC_Pawn`→Ignore, 타임아웃 복원. **대시와 같은 채널 토글이라 타임스탬프 합성 헬퍼 `RefreshPawnCollisionResponse()`** 도입(대시·부활창 상호 조기복원 방지; `ServerDash`/`EndDash`도 이 헬퍼 경유). 설계 `DBNO_MiniDesign §3-2`·`PlayerFeel §2-13` 갱신.
+> **검증 완료**: 빌드 Succeeded(129s) + 헤드리스 ModuleLoads Success + 적대적 다중에이전트 리뷰(3렌즈/4발견 **전부 엔진소스 대조 반증, 확정 실제버그 0**: AnimInstance null가드 존재·`FTimerManager` 동일핸들 SetTimer 자동클리어·EndPlay/파괴 시 타이머 안전정리). diff 자기비판 통과.
+> **PIE 라운드1(2026-06-30) 수정**: 사용자 PIE에서 **관전 시 좌우(yaw)는 추적되나 상하(pitch) 미추적** 발견 → `30a600d fix(camera)`. `AFPSRCharacter::CalcCamera` 오버라이드 — 비로컬제어(관전 대상) 폰일 때 뷰 회전을 `GetBaseAimRotation()`(yaw=액터 회전, pitch=복제 `RemoteViewPitch16`)에서 가져옴. 원인=`UCameraComponent` `bUsePawnControlRotation`이 `IsLocalPlayerController`일 때만 회전 갱신(엔진소스 대조 CameraComponent.cpp:425·Pawn.cpp:984). 소유자는 기존 경로 유지(무회귀). **빌드 Succeeded+스모크 Success**.
+> **PIE 라운드2(2026-06-30) 수정 3건**(`4778bbc feat(dbno)`, 빌드 Succeeded+스모크+적대리뷰 확정0): ① **관전 시 에임만 pitch되고 1P 팔/무기 메시는 안 따라감** → CalcCamera 원격 분기에 `FirstPersonCamera->SetWorldRotation(GetBaseAimRotation())` 추가(부착 메시 동반 회전). ② **카드선택 프리즈 종료 후 즉시 피해(포위 재개)** → 부활 grace 메커니즘 일반화(`BeginPostReviveInvulnerability`→`BeginGraceWindow`, `PostReviveInvulnUntil`→`GraceUntil`) + 신규 `PostFreezeInvulnSeconds=3s`. `HandleRunStateChanged_Movement`(서버권위)가 `bRunPaused` true→false 전이(`bWasRunPausedAuth`) 감지해 부여(전 폰 바인딩이라 호스트·원격 전원). ③ **부활시키는 사람 게이지 노티** → C++ 헬퍼 `GetReviveTargetProgress()`(BlueprintPure, 클라; 반경 내 DBNO 아군 복제 ReviveProgress 반환) + `GetReviveRadius()` getter. **WBP 미완(아래 ★)**.
+> **#3 WBP 완료**(`d74d78f content(U9)`, VibeUE 저작·컴파일 0에러): `WBP_DownedOverlay`에 `ReviverText`("아군 부활 중...")+`ReviverBar` 추가 + Event Tick **앞단 독립 리바이버 분기** 직렬 삽입(`GetOwningPlayerPawn→Cast FPSRCharacter→GetReviveTargetProgress()>=0` ? 게이지+텍스트 표시 : Collapsed → 기존 다운 로직 Cast로 합류, 기존 그래프 무변경). 생존자=게이지+설명만(비네트 없음), DBNO=헬퍼 −1로 자동 숨김(상호배타). 컨테이너 `WBP_GameHUD` 무접촉. **위치/문구는 PIE 후 튜닝 가능**.
+> **⚠️ 다음(사용자 PIE 2인 리슨서버)**: A) A 다운→B 시점 관전 중 B 발사 시 머즐+발사애님 보임(비관전 시엔 아군 머리 머즐 없음)·**관전 카메라가 B의 상하 조준 따라감** · B) A 부활 직후 ~5s 적무리 속 **무피해+적 통과**, 5s 후 정상 피해/충돌 복귀(대시 통과도 정상). 통과 후 → **Codex 머지게이트**(`Scripts/codex-review.ps1 -Base main`) → `main --no-ff` → 본 핸드오프 정리.
+> **미커밋(사용자, 무관)**: `Content/*.uasset`·`Config/DefaultEditor.ini`·`Docs/TaskPrompts_Master.md`·`Docs/Review/20260629-build-structures.md`.
+
+## 🔔 핸드오프 (2026-06-30 f) — DBNO HUD/관전/반동 완료, 다음 새 세션=관전 발사이펙트 + 부활 무적창
+> **현 상태**: U9 DBNO HUD(증분4)·B2 타임라인·반동·DBNO 관전(제자리 정지+아군 시점)·오버레이 폴리시·관전 총기 표시 = **전부 구현·빌드·커밋**(`phase/p1b-dbno`). 관전/부활/오버레이/총기 PIE 확인됨. **남은 2건(아래)만 새 세션에서**.
+> **다음 작업 A — 관전 중 대상의 발사 이펙트(머즐플래시+발사 몽타주) 미표시**:
+>   - 원인: `AFPSRCharacter::MulticastFireCosmetics`([FPSRCharacter.cpp:999](Source/FPSRoguelite/Private/Hero/FPSRCharacter.cpp))가 원격 관전자에게 **사운드만** 재생(머즐 소켓이 원격엔 없다는 옛 주석 기준). 머즐/몽타주는 owner 전용 `PlayWeaponFireCosmetics`(:968)에만.
+>   - 해결: `efdb07f`로 1P 무기 메시가 **전 클라 populate**됐으니, `MulticastFireCosmetics`에 머즐(`Weapon->MuzzleFlash`→`SpawnEmitterAttached(ActiveWeaponMesh, MuzzleSocket)`)+발사몽타주(`Weapon->FireMontage`→FirstPersonArms)를 추가. ⚠️**단 "이 폰을 관전 중인 뷰어"에게만**(viewer PC의 view target==this pawn 체크) — 안 그러면 비관전 원격 관찰자에게 아군 머리 안에서 머즐플래시가 떠 보임(1P 무기 위치). 트리거=`FPSRWeaponFragment.cpp:28`(서버 멀티캐스트).
+> **다음 작업 B — 부활 직후 즉사 방지: 무적 + 적 충돌무시 (~5초, 속성값 편집가능)**:
+>   - 신규 EditDefaultsOnly 속성 `PostReviveInvulnSeconds=5.0f`(권장 위치 `UFPSRReviveComponent`, ReviveSeconds 옆). 부활 시점 `PerformRevive`([FPSRReviveComponent.cpp:124](Source/FPSRoguelite/Private/Hero/FPSRReviveComponent.cpp))에서 `PostReviveInvulnUntil = Now + PostReviveInvulnSeconds` 세팅(서버권위; 캐릭터/PS에 타임스탬프).
+>   - 무적: `ApplyContactDamage`([FPSRCharacter.cpp:633](Source/FPSRoguelite/Private/Hero/FPSRCharacter.cpp))의 기존 DBNO무피해+i-frame 게이트 옆에 `if (Now < PostReviveInvulnUntil) return;` 추가(모든 데미지 경로가 여기 모임: 적접촉 `FPSREnemySpawnSubsystem.cpp:370`·투사체 `FPSRProjectile.cpp:434`·히트스캔 `FPSRCombatStatics.cpp:143`).
+>   - 적 충돌무시: 부활 창 동안 플레이어 캡슐의 `ECC_Pawn`(적) 응답을 `ECR_Ignore`로(복원 타이머). 적=`ECC_Pawn`, 플레이어=`ECC_FPSRPlayerPawn`([FPSREnemyBase.cpp:26](Source/FPSRoguelite/Private/Enemy/FPSREnemyBase.cpp)); 플레이어 캡슐 셋업은 `AFPSRCharacter` 생성자(`ECC_FPSRPlayerPawn`)에서 찾을 것. 창 종료 시 응답 복원.
+>   - 설계 반영: `DBNO_MiniDesign.md`·`PlayerFeel.md §2-13`에 "부활 후 PostReviveInvuln(기본 5s, 무적+적충돌무시)" 추가. (시각 피드백=관전 시 부활자 깜빡임 등은 선택/후속.)
+>   - 검증: 빌드 Succeeded + 헤드리스 스모크 + PIE 2인(부활 직후 적 무리 속에서 5s간 무피해·통과, 5s 후 정상 피해/충돌).
+> **재개 프롬프트**: 이 세션 응답에 작성됨(또는 동일 내용 위 A/B). 브랜치=`phase/p1b-dbno`. 검증 후 Codex 머지게이트→main `--no-ff`.
+
+
+## 🔔 핸드오프 (2026-06-30) — DBNO 부활게이지 오버레이 + B2 타임라인 밴드 VibeUE 저작 완료, 다음=사용자 WBP_GameHUD 임베드 + PIE 2인 검증
+> **이 세션**: VibeUE 연결됨. DBNO 증분4 + B2 폴리시 = **위젯 저작만** 완료(신규 C++ 0). 정적 검증(compile 0err·capture_preview 육안). **2 콘텐츠 커밋**:
+>   - `638694c content(U9)`: **신규 독립 위젯 `WBP_DownedOverlay`**(UserWidget). RootCanvas > DownedVignette(전체화면 반투명 적색)+DownedText+ReviveBar. **Event Tick 폴링**: GetOwningPlayer→PlayerState→Cast `AFPSRPlayerState`→`IsDBNO()` 분기로 self 가시성(DBNO=SelfHitTestInvisible / 그외=**Hidden**=틱 유지) + GetOwningPlayerPawn→GetComponentByClass(`UFPSRReviveComponent`)→`GetReviveProgress()`→ReviveBar.SetPercent + Prog>0?"부활 중...":"다운 — 아군을 기다리는 중". 기본 Visibility=Hidden. `ReviveCompClass`(TSubclassOf) CDO 디폴트로 GetComponentByClass 클래스-핀 우회.
+>   - `0323cb0 content(U1)`: **`WBP_RunHUD` B2** — `TimelineMarkerCanvas`(RunTimelineBar와 동일슬롯 0.5,0/Pos0,12/Size520,14) + `BossEndIcon`(금색 우측끝 상시) + `Band0..5` 풀(반투명 시안, 기본 Collapsed). `ApplyBand(Band,Index)`/`RebuildMarkers`(6밴드 호출) + `OnRunStateUpdated`에 `LastSchedule!=GetRunSchedule` 게이트 **인라인 삽입**(ref 변경 시만 재구성, 첫 null·재런 안전; 기존 플레이헤드 채움 배선 보존).
+> **구조 결정(사용자 2026-06-30)**: "구조 최우선 + 위험 단계만 사용자 핸드오프". 위험 컨테이너 `WBP_GameHUD`(자식 WBP 5개 임베드)는 프로그래매틱 **무접촉**([[vibeue-render-target-gpu-hazard]]) → DBNO UI=독립위젯 + 사용자 수동 임베드(정석 우회). B2는 WBP_RunHUD가 **네이티브-온리**라 compile/save 안전.
+> **B2 밴드 = 디자인타임 풀 채택(런타임 위젯생성 대신)**: VibeUE 제약(런타임 ConstructObject 클래스핀·트리오너십 불확실 + ForEach 매크로 API 미생성) → 사전생성 풀 + 런타임 `CanvasPanelSlot.SetPosition/SetSize`. `RebuildMarkers`는 스케줄 ref 변경 시(런당 1회)만 실행이라 무비용. 풀=6(현 임시 3윈도우+여유, 초과 시 미표시). split_pin으로 FFPSRMissionWindow Min/Max 추출(BreakStruct 우회).
+> **⚠️ 다음**:
+>   ① **★사용자 잔여(A-3)**: `WBP_GameHUD` UMG 디자이너에서 `WBP_DownedOverlay`를 `Canvas_Root`에 드래그(전체화면 앵커 0,0→1,1, **ZOrder 최상단**) → 컴파일/저장/커밋. (프로그래매틱 임베드=컨테이너 크래시 회피.)
+>   ② **PIE 2인 리슨서버 검증**(DBNO_MiniDesign §7 / B2 §6): A 다운→A화면 오버레이+게이지, B 근접 ~3s 충전→부활/이탈 감소·양 클라 동기 / 런 시작→미션 밴드 N개·보스 아이콘 끝·플레이헤드 좌→우(클라=호스트 동일).
+>   ③ 통과 후 머지순서: U1(`fix/mp-steam-e2e`) 패키지 Steam 2-PC E2E→main → `phase/p1b-dbno`(Codex 머지게이트)→main `--no-ff`.
+> **데이터 주의**: authored 값 = **P4-A 임시**(미션 60/120/180·보스 300) → 밴드가 임시값 반영(정상) [[p4a-temp-test-values]].
+> **미커밋(사용자, 무관)**: `WBP_GameHUD.uasset`(임베드 완료=사용자, 미커밋)·기타 `.uasset`·`Config/DefaultEditor.ini`·`Docs/TaskPrompts_Master.md`.
+> **PIE 라운드1 수정(2026-06-30)**: 사용자 임베드+테스트 후 2버그 발견·수정. ① `98b3194 fix(U9)` **DBNO 오버레이가 다운 시 안 뜸** — 루트 기본 Visibility=Hidden인데 UE5.7 Slate는 `SWidget::Tick`을 Paint 내부 호출이라 Hidden=Paint안됨=Tick안됨→Event Tick 영구 미발화. 수정=루트 항상 SelfHitTestInvisible(Construct 강제)+자식 토글 [[umg-hidden-widgets-dont-tick]]. ② `a5d4390 fix(weapon)` **발사 중단 후 에임 자동 상승** — `PendingRisePitch` 백로그가 릴리즈 후에도 적용됨. 수정=`!bWantsToFire`면 PendingRise* 0(전 발사모드, 사용자 결정). **빌드 Succeeded**. → 사용자 재-PIE(오버레이 표시·반동 정지) 후 머지게이트.
+> **PIE 라운드2 설계변경(2026-06-30)**: 사용자 결정 — DBNO **크롤 → 제자리 정지 + 살아있는 아군 시점 관전**, 부활 = 쓰러진 자리 기상(`16db4bd feat(U9)`). `ApplyDownedLocomotion(true)`=MaxWalkSpeed 0 + 이동/시점 입력 DBNO 차단(`IsTrulyDeadLocal`→`IsIncapacitatedLocal`) / `UFPSRReviveComponent::UpdateDownedSpectate`=서버 `SetViewTargetWithBlend`(가까운 Alive 아군, 원격=ClientSetViewTarget 복제)·틱 유지/재선정 · `PerformRevive`→`RestoreOwnView`. 설계 `DBNO_MiniDesign §2/§6`·`PlayerFeel §2-13` 갱신(B16 관전을 DBNO로 당겨옴). **빌드 Succeeded + 모듈로드 스모크 OK**. ⚠️원격 아군 1P SetViewTarget의 3P 바디 가시성은 PIE 후 평가(흉하면 v2 3인칭 관전 카메라). → 사용자 재-PIE.
+> **PIE 라운드3 폴리시(2026-06-30)**: 관전 동작 확인됨(아군 1P 뷰). 3건 수정 — ① `fa9e322 content(U9)` DownedText Y −130→−240(크로스헤어 안 가림)·게이지 Y→+60 ② `fa9e322` ReviveBar를 **ReviveProgress>0(부활 중)일 때만** 표시(Prog>0 브랜치) ③ `efdb07f fix(weapon)` 관전 시 아군 **총기 미표시 해소** — `RefreshFirstPersonWeaponVisual`의 `!IsLocallyControlled()` 게이트 제거(1P 무기 비주얼 전 클라 populate; OnlyOwnerSee+뷰타깃이라 관전 시에만 렌더). **빌드 Succeeded**. → 사용자 재-PIE 3건 확인.
+
+## 🔔 핸드오프 (2026-06-29 e) — 보스 오버헤드바 제거 + DBNO Phase 1B 서버로직(증분1~3) 완성, 다음=DBNO HUD(에디터)+PIE 검증
+> **이 세션 후반**: ① **PIE E2E = 사용자 통과**(A1/A2/A3·C2·B1/B2). ② 사용자 지적 **보스 머리 위 월드 HP바 제거**(`5a981d8 fix(boss)` — `AFPSRBossBase::BeginPlay`에서 월드 `UWidgetComponent` 제거, HUD 상단 보스바 A3만 사용; VibeUE 미연결로 BP 직접편집 불가→코드 강제, idempotent). ③ **DBNO Phase 1B 구현 착수**(브랜치 `phase/p1b-dbno`, fix/mp-steam-e2e 기반 분기, MP/복제=Opus 직접).
+> **DBNO 서버 로직 = 증분1~3 완성**(각 빌드+스모크 검증·커밋):
+>   - `b01f76f` **증분1**: `EFPSRLifeState{Alive,DBNO,Dead}` 상태기계(`AFPSRPlayerState`, `bIsDead`→복제 enum+OnRep). 순수 리팩토링(거동 무변경, IsAlive 술어 그대로).
+>   - `1a5e534` **증분2**: `HandleOutOfHealth`→DBNO+크롤(`DownedMoveScale=0.3`) / 입력게이트 분리(`IsIncapacitatedLocal`=!Alive=행동/접촉피해 차단 · `IsTrulyDeadLocal`=Dead=이동/시점 차단 → DBNO는 크롤+시점 OK, 사격/대시/스왑/장전/점프 불가) / 다운 무피해 / B17 적 타겟 !Alive 제외 / GA 4종·XP 게이트 !Alive / 팀와이프(생존0→DBNO 전원 Dead 승격→`EndRun(Defeat)`, 솔로 다운=즉시 Defeat) / 크롤 복제정합(서버+OnRep_LifeState).
+>   - `4de7569` **증분3**: 신규 `UFPSRReviveComponent`(폰 부착, 서버틱). DBNO 시 반경300 내 Alive 아군 체류→`ReviveProgress`(복제)3초 충전→부활(Alive+50%HP `SetNumericAttributeBase`·콘텐츠 GE 불요·OnOutOfHealth 자동재무장). 이탈 시 감소, 전역 프리즈 중 정지(freeze-gate 대칭). 비-authority 틱 비활성.
+> **⚠️ 다음**:
+>   ① **DBNO 증분4 = HUD 콘텐츠(에디터+VibeUE 필요)**: 부활 게이지 위젯(`UFPSRReviveComponent::OnReviveProgressChanged`/`GetReviveProgress()` 바인딩) + 다운/관전 노티. C++ 0(데이터 이미 복제).
+>   ② **PIE 검증(사용자)**: 리슨서버 2인(`DBNO_MiniDesign.md` §7) — A 다운→B 근접 부활/이탈 감소, 전원다운→Defeat, 솔로 다운→Defeat, 다운자 비타겟·무피해·크롤·사격불가, 프리즈 중 부활정지.
+>   ③ Codex 머지게이트 → `phase/p1b-dbno` → main `--no-ff`. (후속: 블리드아웃 활성·튜닝, 풀 관전 리그 B16.)
+> **블로커/주의**: DBNO=MP라 정량검증은 패키지/리슨서버. 부활 체력복구=`SetNumericAttributeBase`(스크립트 set, 콘텐츠 GE 원하면 후속 교체). 신규 UCLASS(ReviveComponent) 추가로 라이브코딩 불가=풀빌드 필요. 보스 바 코드강제는 BP에서 컴포넌트 제거해도 무회귀(no-op).
+> **미커밋 콘텐츠(사용자, 무관)**: `.uasset`·`Config/DefaultEditor.ini`·`Docs/TaskPrompts_Master.md`.
+
+## 🔔 핸드오프 (2026-06-29 d) — PIE 전 사전작업 일괄 완료(C++ 폴리시·DBNO 설계확정·B2 계획), 다음=사용자 PIE E2E
+> **이 세션**: `fix/mp-steam-e2e`에서 U1 사후 7항목(A1/A2/A3·C2·B1/B2·C1) **코드 정합 적대검증**(워크플로 8에이전트 + 엔진소스 대조) → **블로커 0·확정 메이저 0**(콘솔명령 "메이저" 1건은 UE5.7 엔진소스로 반증=에디터 Cmd바도 PIE월드 라우팅). 검증 후 PIE 전 사전작업 일괄:
+>   - **선택 C++ 폴리시 2건(검증완료)**: A1 `FPSREnemyHealthComponent::ResetForReuse`에 `OnHealthChanged.Broadcast`(풀링 재사용 시 **호스트** 적HP바 stale 0% 해소 — 클라는 OnRep로 이미 받던 동작과 대칭=무회귀) · B1 `FPSRGameMode::EndRun`에 `SetMissionProgress(0)`(Defeat 결과화면 뒤 미션바 잔존 해소). **빌드 Succeeded + 헤드리스 스모크 Success + git diff 자기비판 통과.** Codex=머지게이트 일괄.
+>   - **③ DBNO 미니설계 확정(APPROVED)**: `Docs/DBNO_MiniDesign.md`(§6 추천디폴트 채택) + SSOT `PlayerFeel.md` §2-13 반영. 상태기계 `ELifeState{Alive,DBNO,Dead}` · 근접 자동부활(신규 `UFPSRReviveComponent`, ReviveProgress 복제) · 팀와이프=생존0→전원Dead→`EndRun(Defeat)` · 다운=크롤+무피해+비타겟 · 블리드아웃=시임만 비활성. **기존 시임만 확장(신규 중앙클래스 0)**. 구현=**Phase 1B**(이후 일정, 서버권위=Opus 직접).
+>   - **② B2 폴리시 저작계획**: `Docs/B2_TimelinePolish_Plan.md`(WBP_RunHUD 미션 윈도우 밴드+보스 끝 아이콘; **스케줄 ref 변경 시에만 재구성 + null가드**). **저작은 에디터+VibeUE 연결 필요(현재 미연결)**.
+> **⚠️ 다음 순서**:
+>   ① **PIE E2E 검증(최우선, 사용자)** — 솔로 PIE, **in-PIE `~` 콘솔**에서: `FPSR.TravelGame` → `FPSR.EnemyTarget 50`(콤뱃 시작 전/초기, 라이브런 중엔 디렉터가 매틱 덮어씀) → `FPSR.MissionTrigger` → `FPSR.SkipToBoss`(오프닝시드 홀드 ~5s 후) + 우클릭 ADS 결정론 스프레이. A1 적HP바/숫자·A2 미션배너·A3 보스HUD바·C2 ADS·B1/B2 바 확인.
+>   ② **B2 저작**(에디터 연결 후, 위 계획서) → ③ **DBNO 구현**(Phase 1B) → Codex 머지게이트 → main `--no-ff`.
+> **WBP 콘텐츠 계약(PIE서 확인 — C++ 미가시)**: B1바=`AFPSRGameState::GetMissionProgress()` 직접 리드 / A3 보스바=non-null fire에서 `OnHealthChanged` 바인드 **+ 즉시 현재 체력 리드** + null fire=숨김 / B2·A3=`OnRunStateChanged`마다(또는 ref변경 캐싱) 재구성 + `GetRunSchedule()` null가드(첫 OnRep 일시 null).
+> **데이터 주의**: authored BossTime/미션윈도우 = **P4-A 임시값**(미션 60/120/180·보스 300) → PIE 타임라인 바가 임시값 반영(프로덕션 300/600/900·보스1200 아님) [[p4a-temp-test-values]].
+> **미커밋 콘텐츠(사용자, 무관)**: `.uasset`·`Config/DefaultEditor.ini`·`Docs/TaskPrompts_Master.md`(세션 전 수정).
+
+## 🔔 핸드오프 (2026-06-29 c) — U1 사후 HUD/게임플레이(A/B/C) C+++위젯 완료, 다음=PIE E2E 검증 + B2 폴리시
+> **이 세션**: `fix/mp-steam-e2e`에서 U1 사후 7항목(A1·A2·A3·B1·B2·C1·C2) 구현. C++=빌드+스모크 검증, 위젯=VibeUE 저작·compile 0err. **6커밋**:
+>   - `811a0d1 feat(U1)` Phase 1 C++ — C1 적 탈출경로 인프라(`AFPSREnemySpawnPoint` ExitPathRoot 웨이포인트 + `AFPSREnemyBase` SetExitPath/ConsumeExitPathSteering + 스폰서브시스템 배선) · A1 위젯 풀링훅(`BeginPlay` InitWidget+`OnHealthBarReady` BIE) · C2 ADS 결정론(`FPSRGA_WeaponFire_Hitscan` 트레이스: ADS 단발=조준점/힙=랜덤콘/샷건=콘유지) · B1/B2 GameState 복제 게터(`MissionProgress`·`RunScheduleAsset`·`GetRunTotalDuration`).
+>   - `d41896b content(hud)` A1/A2/A3 위젯 **이벤트 구동 전환**(적HP바 `OnHealthChanged`·미션배너 `OnActiveMissionChanged`·보스HUD바 `OnActiveBossChanged` — Collapsed/world 위젯이 Tick 안 도는 공통 버그 해소).
+>   - `a17ae58 content(hud)` B2 런 타임라인 바 + B1 미션 진행 바(`WBP_RunHUD`, ClockText→바).
+>   - `74c961d content(C1)` `BP_StructuredSpawner` 스캐폴드.
+>   - `4c43ffb feat(spawn)` **시야 밖(FOV) 스폰 게이트 폐지**(사용자 결정 — 정면 1포인트 스폰 굶음 해소. 폐기된 건 링폴백·가중치뿐이었고 FOV 게이트는 현행 설계였음. Enemy.md §2-6·BalanceTuning 갱신).
+>   - `e293f0d feat(spawn)` **SpawnAnchor** — 스폰 위치를 액터원점 대신 BP 내부 컴포넌트에서(구조형 스폰: 메시 공동 안). 기본=원점이라 무회귀.
+> **C1 게이트 충돌 해결(콘텐츠, 사용자)**: 속 빈 메시의 자동 convex 충돌이 통을 막던 문제 → 사용자가 `SM_SpawnGate`에 **심플 박스 벽 5면**(convex 제거, CTF_USE_DEFAULT) 저작. **C1 PIE 확인됨**(적이 게이트 공동→개구부→WP_1 이동).
+> **⚠️ 다음 코드/콘텐츠 작업**:
+>   ① **PIE E2E 검증(최우선, 사용자)** — A1 적HP바/데미지숫자 · A2 미션배너 · A3 보스HUD바 · C2 ADS 결정론 · B1/B2 바. (compile만 통과, 인게임 미검증)
+>   ② **B2 폴리시(미완, 콘텐츠)** — 타임라인 바에 미션 윈도우 마커(밴드) + 끝 보스 아이콘. 데이터 이미 복제(`GetRunSchedule()->MissionWindows`/`BossTime`). `WBP_RunHUD` 그래프 스케줄 순회 — VibeUE 저작.
+>   ③ 이후 = `Docs/U1_PostGate_Fixes.md` 잔여 Phase(DBNO 미니설계 등) → Codex 머지게이트 → main `--no-ff`.
+> **블로커/주의**: A1 적HP바 world widget(`TickMode=Enabled`)은 적500 perf 우려(B11 후속=스크린공간 재검토). C2는 Hitscan 한정(투사체/차지 무관). C1 구조형 스폰=Enemy.md §2-6 문서화(SpawnAnchor=스폰위치 / ExitPathRoot 웨이포인트=탈출경로, attach 순서=경로, 마지막→플로우필드 인계).
+> **미커밋 콘텐츠(사용자 작업, 커밋 안 함)**: `BP_StructuredSpawner`·`SM_SpawnGate`(C1 게이트) · `WBP_GameHUD` · `L_Lobby`/`L_MainMenu`/`L_Sandbox` · `M_col_*_ORIG`. + `Docs/TaskPrompts_Master.md`(세션 전 수정).
+
+## 🔔 핸드오프 (2026-06-29 b) — Phase 1A MP 복제 정합 C++ 완료·검증, 다음=사용자 콘텐츠+패키지 2-PC E2E → U1 ✅
+> **이 세션**: `fix/mp-steam-e2e` 브랜치에서 **U1-게이팅 넷코드 C++ 전부 구현·빌드·스모크 검증 완료**(10커밋). MP/복제/RPC = Opus 직접. 메시지버스(Lyra GameplayMessageSubsystem) 도입은 **제1원리로 철회**(프로젝트가 이미 PC 코스메틱 RPC+복제 GameState 델리게이트 보유 → 중복; 원칙4 Lyra 맹종 회피, native 패턴 재사용. 상세 `U1_PostGate_Fixes.md`/플랜).
+> **커밋(10)**: ①`feat(diag)` FlowLog 진단 ②`fix(net)` SteamSockets 넷드라이버+SEARCH_LOBBIES+로비카메라 ③`fix(run)` 사망자 소프트락 ④`docs(u1)` 버그배치 ⑤`fix(B7)` 적 dormancy(Activate=DORM_Awake, 투사체 풀 미러) ⑥`fix(B12)` 적/보스 체력 MaxHealth 복제+OnRep_Health 발행 ⑦`fix(B3b)` 로비 좌석(LobbySeatIndex 복제+ChoosePlayerStart Podium{N}) ⑧`fix(B4)` 아군 사격음 NetMulticast(NotifyFire 중앙훅) ⑨`fix(B2)` Defeat UI 진단 ⑩`feat(B11)` 보스 HUD바 배선(GameState ActiveBoss 복제+보스 GetHealthComponent+bAlwaysRelevant).
+> **⚠️ 다음 = 사용자 콘텐츠 저작(E2E 전 필수)**: ⓐ **WBP_BossHUDBar**(HUD 상단 슬롯, GameState OnActiveBossChanged→보스 GetHealthComponent→OnHealthChanged 바인딩) ⓑ **WBP_EnemyHealthBar**(적 BP에 UWidgetComponent, OnHealthChanged 바인딩, **피격(감소)시만 표시·2초 무피격시 숨김**) ⓒ **L_Lobby PlayerStart 4개 + PlayerStartTag=Podium0..3** ⓓ **게임플레이 BP_FPSRPlayerController에 ResultWidgetClass 할당**(B2 — 미할당이 클라 Defeat UI 미표시 원인).
+> **검증(패키지 2-PC/2계정 Steam E2E)**: host→join(코드/초대)→로비(카메라·**4인 슬롯 분리**)→ready→travel→양클라 진입 / B7 적 가시·사망정리 / B12 체력 클라갱신 / B11 스웜바·보스HUD바 / B2 Defeat UI / B4 아군 사격음 / A4 소프트락X. **FlowLog `logs/FlowLog_*.log` 교차확인**. → **통과 = Codex 머지게이트 → main `--no-ff` → TaskPrompts §B U1 ✅ 확정**.
+> **C 비-게이팅 피드백 C++ 완료(빌드 검증)**: **B9** 사각 Z/높이 — 3D 탐지+피치 변조(`UFPSRBlindspotAudioComponent`, §2-14 갱신) · **B10** 미션 시작 배너 — GameState `ActiveMissionData` 복제+`OnActiveMissionChanged`(RunDirector SpawnMission/DestroyActiveMission 배선) · **B20** 플로팅 데미지 = **신규 C++ 0**(B12 클라 `OnHealthChanged` 델타에 편승, B11 적 바와 동일 이벤트 — RPC 불요, 데이터 이미 복제). 적 `GetHealthComponent()` 노출(B11 적바·B20 WBP 바인딩용). **콘텐츠**: WBP_MissionBanner(`OnActiveMissionChanged`→DisplayName N초), WBP_DamageNumber(적 `OnHealthChanged` 델타). B9 피치값은 디자이너 튜닝(`Above/BelowThreatPitch`).
+> **미커밋 콘텐츠(사용자, 무관)**: `Config/DefaultEditor.ini`·ZerinLabs `M_col_*_ORIG`.
+
+## 🔔 핸드오프 (2026-06-29) — U1 게이트+MP 테스트 완료(조건부 합격), 버그배치 25건 정리, 다음=Phase 1 MP 넷코드 수정
+> **이 세션(PM)**: U1 재미게이트(솔로) + 2-client/Steam E2E 멀티 테스트 완료 → **U1 = 조건부 합격**(핵심 루프 동작 / MP 동기화·피드백 결함 다수 → **Phase 1 MP 넷코드 수정 패키지 E2E 검증 후 U1 ✅ 확정**, 사용자 결정). 발견 결함을 시스템·리스크별 **25건 배치로 정리 = [`Docs/U1_PostGate_Fixes.md`](Docs/U1_PostGate_Fixes.md)**(5 Phase).
+> **⚠️ 작업트리 미커밋 = MP 수정 5건(범위 A, 빌드·검증·커밋 대기)**: ① Steam 넷드라이버 UE5.7 SteamSockets(`DefaultEngine.ini`·`.uproject`, **옛 `OnlineSubsystemSteam.SteamNetDriver` 무음실패→IpNet 폴백→join 즉시 튕김** 근본해결) ② 세션검색 `SEARCH_LOBBIES`(JoinByCode 0건) ③ 로비 조이너 카메라(`ApplyLobbyViewTarget`) ④ 사망자 레벨업 소프트락(`!IsAlive` 제외) ⑤ FlowLog 진단 서브시스템(신규 4파일+배선, `LogFPSRFlow`, `.gitignore logs/`). **미빌드 — Phase 1 첫 작업 = 빌드 통과 확인.**
+> **⛔ MP 검증 제약**: SteamSockets는 **패키지에서만 등록**(PIE/에디터 미등록) → MP 전부 **Development 패키지 2-PC/2계정 Steam E2E**로 검증(빌드 규약 [[build-output-folder-convention]]).
+> **버그 판단 17건 완료(2026-06-29, 워크플로 적대검증)** → 결정 반영 = `U1_PostGate_Fixes.md` §결정반영. 핵심: **사망모델=정식 DBNO 당겨옴**(A4·B17·B16·B2 통합, P5 앞당김, **DBNO 미니설계 선행**) · B13=예고형 선딜레이 · B18=공중 프리즈 낙하방지 · 연기 B8→U7·B20→P7·B3a→콘텐츠.
+> **다음 작업 = Phase 1A MP 복제 정합**(범위 A 5건 마무리 + B7 클라 적 동기화·B12 보스 체력바·B11 HP바·B2 Defeat UI·B4 아군 사격음·B3b 로비 슬롯) → **Phase 1B 사망모델/DBNO**(설계 선행). MP/세션/복제/RPC = **Opus 직접**(Haiku 위임 금지 [[haiku-delegation-security-wiring]]). 브랜치 `fix/mp-steam-e2e`. Phase 2~5(적 AI·프리즈 페이싱·UI 피드백·VFX)=후속.
+> **§5 perf 측정 보류**: 적 500 미도달(클라 적 동기화 B7 + 디렉터 램프 영향)로 정량 측정 못 함 → **B7 수정 후 재측정**. 클라 적 동기화(B7)·보스 체력바(B12) 복제 결함은 정성 발견.
+> **미커밋 콘텐츠(사용자, 무관)**: `Config/DefaultEditor.ini`·ZerinLabs `M_col_*_ORIG`.
 
 ## 🔔 핸드오프 (2026-06-26 d) — U1 패키지 준비 완료, 다음=U1 재미게이트(PIE 주도)
 > **이 세션(PM)**: W1 종결 반영 + **U1용 Development 패키지 빌드**(`Packaged/26_6_26_BuildTest_1/`, 소스 `b2c55d3`=net-freq 적500 perf 픽스 포함, `BUILD_INFO.txt` 동봉) + **U1 게이트 시트 커밋**(`Docs/U1_GateSheet.md`) + `GlobalDefaultGameMode` 경로 교정(쿡 경고 해소). 커밋 `6e9377a` push 완료. 빌드폴더 규약 메모리화(`Packaged/<YY_M_D>_BuildTest_<N>/`). main↔origin 동기화.

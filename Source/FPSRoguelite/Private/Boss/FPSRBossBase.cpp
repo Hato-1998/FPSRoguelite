@@ -8,6 +8,7 @@
 
 #include "Components/CapsuleComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Components/WidgetComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
@@ -16,6 +17,10 @@
 AFPSRBossBase::AFPSRBossBase()
 {
 	PrimaryActorTick.bCanEverTick = false;
+
+	// Always relevant so the boss + its replicated HealthComponent reach every client regardless of distance — the
+	// HUD boss bar (B11) must reflect boss health for all players, not just those near the boss. Cheap (one actor).
+	bAlwaysRelevant = true;
 
 	// Capsule (ACharacter root): object type ECC_Pawn so the weapon pawn-gather traces find the boss AND the
 	// hitscan wall trace ignores it (NOT WorldStatic — that would self-block the boss's own bullets, P7 §6).
@@ -53,6 +58,22 @@ AFPSRBossBase::AFPSRBossBase()
 void AFPSRBossBase::BeginPlay()
 {
 	Super::BeginPlay();
+
+	// The boss's health is shown ONLY by the dedicated screen-space HUD bar (A3 — WBP_BossHUDBar, driven by the
+	// GameState's replicated ActiveBoss + this HealthComponent). It must NOT also carry the swarm-style world-space
+	// overhead bar. Suppress any UWidgetComponent authored on the boss BP (runs on clients too, where the bar would
+	// render). Idempotent — a no-op once the component is removed from the BP, so removing it there later is safe.
+	{
+		TArray<UWidgetComponent*> BossWidgetComps;
+		GetComponents<UWidgetComponent>(BossWidgetComps);
+		for (UWidgetComponent* WidgetComp : BossWidgetComps)
+		{
+			if (WidgetComp)
+			{
+				WidgetComp->DestroyComponent();
+			}
+		}
+	}
 
 	// Pin movement off so the static box stays exactly where it spawned (the real boss enables AI movement).
 	if (UCharacterMovementComponent* Move = GetCharacterMovement())

@@ -50,10 +50,11 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "FPSR|Enemy")
 	FFPSREnemyDeathSignature OnDeath;
 
-	/** Server-authoritative health change (post-clamp), fired on every applied hit including the lethal one. The
-	 *  authoritative damage path runs server-side, so this broadcasts on the server only — clients should react to
-	 *  replicated state / OnRep instead (e.g. AFPSRDoor replicates its own DamageStage for the cosmetic break feel).
-	 *  MaxHealth is server-side (see InitializeMaxHealth), so percent math here is only valid on authority. */
+	/** Health change (post-clamp), fired on every applied hit including the lethal one. Fires on the SERVER from the
+	 *  authoritative damage path (ApplyDamage) AND on CLIENTS from OnRep_Health once replicated Health/MaxHealth
+	 *  arrive — so a client HUD / world-space health bar can bind here directly (B12). MaxHealth now replicates
+	 *  (below), so the NewHealth/MaxHealth percent is valid on both sides. (AFPSRDoor still gates its handler to
+	 *  authority, so the door cosmetic stays server-driven and doesn't double-fire.) */
 	UPROPERTY(BlueprintAssignable, Category = "FPSR|Enemy")
 	FFPSREnemyHealthChangedSignature OnHealthChanged;
 
@@ -65,7 +66,10 @@ protected:
 	UFUNCTION()
 	void OnRep_Health();
 
-	UPROPERTY(EditAnywhere, Category = "FPSR|Enemy")
+	/** Replicated so clients compute a correct NewHealth/MaxHealth percent for the health bar (B12). Swarm enemies
+	 *  author it as the editor default; content actors (boss/door) set it at runtime via InitializeMaxHealth. Shares
+	 *  OnRep_Health, which re-broadcasts OnHealthChanged on the client whenever Health OR MaxHealth replicates. */
+	UPROPERTY(EditAnywhere, ReplicatedUsing = OnRep_Health, Category = "FPSR|Enemy")
 	float MaxHealth = 50.0f;
 
 	/** When false, this owner is destructible but NOT an enemy for combat credit (no kill/enemy-hit/lifesteal —

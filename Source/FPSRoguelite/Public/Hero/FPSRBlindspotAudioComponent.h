@@ -44,8 +44,10 @@ protected:
 	 *  cue (subject to WarnCooldown). Called from the throttled tick. */
 	void ScanAndWarn();
 
-	/** Play the spatialized warning cue toward ThreatDirection (unit, world) from the listener view location. */
-	void PlayWarningCue(const FVector& ViewLocation, const FVector& ThreatDirection);
+	/** Play the spatialized warning cue toward ThreatDirection (unit, horizontal world dir) from the listener view
+	 *  location. PitchMultiplier conveys the threat's ELEVATION (above = higher pitch, below = lower) since stereo
+	 *  panning only resolves the horizontal plane (B9 — vertical blind spots). */
+	void PlayWarningCue(const FVector& ViewLocation, const FVector& ThreatDirection, float PitchMultiplier);
 
 	/** Sound played when a blind-spot threat is detected. Designer-assigned in BP; null = feature inert. The cue
 	 *  is force-spatialized (see WarningAttenuation) so it pans by direction even if this asset is a plain 2D
@@ -68,6 +70,20 @@ protected:
 	 *  camera forward counts as a blind-spot threat (behind/side). */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "FPSR|Blindspot", meta = (ClampMin = "0.0", ClampMax = "180.0"))
 	float BlindspotHalfAngleDeg = 75.0f;
+
+	/** Elevation (deg, above OR below the listener's horizontal plane) beyond which an enemy is a VERTICAL blind
+	 *  spot even if it's horizontally in front — it's off the top/bottom of the screen (B9). The cue's pitch then
+	 *  conveys the height (stereo panning can't). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "FPSR|Blindspot", meta = (ClampMin = "0.0", ClampMax = "90.0"))
+	float VerticalBlindspotAngleDeg = 45.0f;
+
+	/** Cue pitch multiplier for a threat directly BELOW (-90 deg elevation) / directly ABOVE (+90 deg). The actual
+	 *  pitch lerps between these by the threat's elevation, so above-you reads higher and below-you reads lower (B9). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "FPSR|Blindspot", meta = (ClampMin = "0.1"))
+	float BelowThreatPitch = 0.8f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "FPSR|Blindspot", meta = (ClampMin = "0.1"))
+	float AboveThreatPitch = 1.35f;
 
 	/** Minimum seconds between warning cues while a threat persists (over-fire suppression). */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "FPSR|Blindspot", meta = (ClampMin = "0.0"))
