@@ -6,6 +6,14 @@
 
 **최종 갱신: 2026-06-30**
 
+## 🔔 핸드오프 (2026-06-30 i) — PM 최신화: 머지·push·브랜치정리 완료(git 실측), 컨설트 파킹, 다음=U1 마무리(§5 적500 재측정+V2)
+> **PM 부팅 git 실측 정정**: 핸드오프 h가 "사용자 확인 대기"로 남긴 ①origin push ②`phase/p1b-dbno` 삭제는 **git상 이미 완료**다 — `main↔origin/main` = **0/0 동기화**(push됨), 로컬 브랜치 = `main` 단독(phase 삭제됨). 작업트리 깨끗(미커밋=사용자 자산뿐).
+> **이번 PM 세션 = 최신화 + 핸드오프**: ① 위 push/정리 상태 정정 ② **건설 구조물 컨설트**(`Docs/Review/20260629-build-structures.md`) = **아이디어 풀 파킹**(§E E1~E3, **정식 로드맵/SSOT 미등재** — 사용자 지침). 채택은 했으나 코어 잠금 후 정식화. MVP=센트리 포탑+메디컬 비콘(비파괴/비차단/충전·시간제), ❌XP타워·❌바리케이드 기각.
+> **⚠️ 다음 작업 = U1 재미게이트 마무리(+V2)** [[taskprompts-master-roadmap]]: U1 조건부합격(2026-06-29)의 **MP 차단조건이 Phase 1A(복제)+1B(DBNO=U9) 머지(`e38dfbe`)+사용자 PIE 2-client 통과로 해소됨**. 남은 것 = **§5 성능 정량 재측정**(적500 — B7 클라동기화 픽스로 이제 도달 가능, 직전엔 미도달로 보류) + **G1 ①~⑤ 최종 사인오프** + **V2 FF/ChargeLaser 체크리스트** → `Performance.md §5` 하드캡 확정 → TaskPrompts §B **U1 ✅** → 2차 트랙(U5/U6/U7/U8/U10/U15) 해금. 프롬프트 = §C U1(line 425) + 본 핸드오프 재개 프롬프트.
+> **⚠️ 패키지 재빌드 필수**: 기존 `Packaged/26_6_26_BuildTest_1`은 `b2c55d3`(MP픽스/DBNO 미포함). U1 마무리 전 **현재 main(`e38dfbe`)로 Development 패키지 재빌드**(규약 `Packaged/<YY_M_D>_BuildTest_<N>/` [[build-output-folder-convention]]). MP/perf는 패키지에서만(SteamSockets PIE 미등록).
+> **DBNO 후속(밸런스 트랙)**: 블리드아웃 활성·값 튜닝·풀 관전 리그(B16)·다운 반격 — U1 후 밸런스 패스에서.
+> **미커밋(사용자 자산, 무관)**: `Content/*.uasset`(WBP_GameHUD·맵·머티리얼·SM_SpawnGate·BP_StructuredSpawner)·`Config/DefaultEditor.ini`.
+
 ## 🔔 핸드오프 (2026-06-30 h) — ✅ phase/p1b-dbno → main 머지 완료(U1 사후 + DBNO Phase 1B 전체)
 > **머지**: `e38dfbe Merge phase/p1b-dbno`(`--no-ff`, main). 64파일 +2406. main = 로컬 단독 최신(origin보다 54커밋 앞섬 — **push는 사용자 확인 후**). 머지 전 검증: 전 유닛 빌드 Succeeded + 헤드리스 스모크 + 적대적 다중에이전트 리뷰(확정 0) + **Codex 머지게이트(P3 1건=관전 발사음 거리컬 view target 기준 `209fa50` 교정)** + **사용자 PIE 2인 리슨서버 전 항목 통과**.
 > **담긴 내용**: U1 사후(A1~A3·B1/B2·C1/C2 HUD·게임플레이, 스폰 앵커/시야무관, 보스 월드바 제거) + **DBNO Phase 1B 전체**(생존 상태기계·근접 자동부활·다운 제자리정지+아군관전·팀와이프·관전 발사이펙트·관전 카메라 pitch[뷰+1P메시]·부활/카드재개 grace[무적+적통과]·부활시키는 사람 게이지 HUD).
