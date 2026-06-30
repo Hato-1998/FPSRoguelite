@@ -1107,9 +1107,12 @@ void AFPSRCharacter::MulticastFireCosmetics_Implementation()
 	constexpr float FireSoundCullDistance = 8000.0f; // cm (~80 m)
 	if (LocalPC)
 	{
-		if (const APawn* LocalPawn = LocalPC->GetPawn())
+		// Cull against the local viewer's VIEW TARGET (where the audio listener is), not its pawn: a DBNO spectator's
+		// pawn is its downed body (possibly far away), while the listener rides the spectated ally — using GetPawn()
+		// would wrongly cull a shot the spectator is right next to. For a normal player the view target IS their pawn.
+		if (const AActor* LocalViewActor = LocalPC->GetViewTarget())
 		{
-			if (FVector::DistSquared(GetActorLocation(), LocalPawn->GetActorLocation()) > FMath::Square(FireSoundCullDistance))
+			if (FVector::DistSquared(GetActorLocation(), LocalViewActor->GetActorLocation()) > FMath::Square(FireSoundCullDistance))
 			{
 				return;
 			}
