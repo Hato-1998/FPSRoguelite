@@ -454,25 +454,56 @@ Game.md + PROGRESS.md + Docs/SSOT/Roadmap.md §7-5 + Docs/SSOT/Performance.md §
 ### U5 — B1 원거리 적 AI + 사전경고 생산자
 
 ```
-Game.md + PROGRESS.md 먼저 읽어. Docs/TaskPrompts_Master.md의 유닛 U5(코드 백로그 B1)를 진행한다.
-읽을 SSOT: Docs/SSOT/Enemy.md §2-6(원거리 아키타입·공격토큰)·§2-10(투사체), Docs/SSOT/PlayerFeel.md §2-14(원거리 경고 소비자 — 이미 구현됨), Docs/SSOT/Performance.md §5.
+[작업] U5 — B1 원거리 적 AI + 사전경고 생산자 (2차 트랙 / 코드 유닛)
 
-- 브랜치: phase/p4-ranged-enemy 분기 (§6-7)
-- 플랜 우선 → 승인 후 Haiku 구현 / Opus 검증. 콘텐츠 보류분(적 메시/투사체 VFX)은 만들지 마라.
+■ 컨텍스트
+  U1 재미게이트+V2 = ✅합격(2026-06-30, 커밋 4fc9190) → 2차 트랙 해금됨. U5는 그 첫 유닛.
+  검증된 건 "근접 스웜 손맛"이다 — U5는 다음 위협축(원거리)을 검증된 루프 위에 얹는 콘텐츠 확장.
 
-[산출물]
-1. 원거리 적 아키타입: 경량 유지(GAS 금지 — §1). 사거리 내 정지→차징(경고)→발사 사이클.
-2. 투사체: A1 AFPSRProjectile+UFPSRProjectileSubsystem 재사용, Team=Enemy 경로(P5 FF에서 보존됨 — Enemy→플레이어 ApplyContactDamage 브릿지)+IsHostileTarget 친화/instigator 차단 그대로.
-3. 사전경고 생산자: 차징 시작/종료 시 대상 플레이어 PC의 ClientNotifyRangedTarget 호출(P4-D 소비자 — Reliable·다수소스 id별 TMap — 그대로 소비, 현재 디버그 FPSR.TestRangedWarn만 있음).
-4. 공격토큰: 기존 토큰 상한 시스템에 원거리 토큰 통합(§2-6 — 무한 포격 방지).
+■ 먼저 읽을 것
+  Game.md(§0-1 라우팅) + PROGRESS.md(핸드오프 j 최신) + Docs/SSOT/Workflow.md §6(빌드/브랜치/모델정책, 필독)
+  + Docs/SSOT/Enemy.md §2-6(원거리 아키타입·공격토큰)·§2-10(투사체)
+  + Docs/SSOT/PlayerFeel.md §2-14(원거리 경고 "소비자" — 이미 구현됨)
+  + Docs/SSOT/Performance.md §5(복제/풀 예산 — ⚠️ §5 적500 정량 측정은 보류 상태)
 
-[함정/주의]
-- 복제 투사체 ≤64 캡 FIFO 강제회수를 플레이어 AOE와 **공유**한다(§5) — 원거리 적 다수 시 풀 고갈 설계(발사 빈도 상한/적 투사체 비복제 검토 등)를 플랜에 명시.
-- 전역 프리즈(§2-2): 차징/발사 사이클 타이머 모두 게이트+PauseTimer.
-- 스폰 비율/아키타입 혼합은 DA/스케줄 데이터 주도(하드코딩 금지).
-- ±10% 이속 편차·분리(separation) 등 기존 스웜 규칙과 충돌 없는지 확인.
+■ 브랜치 / 모델 정책
+  - main(4fc9190 이후)에서 phase/p4-ranged-enemy 분기 (Workflow §6-7)
+  - 플랜 우선 → 사용자 승인 후 구현(Haiku 위임)/검증(Opus 직접). MP·복제·서버권위 RPC는 Opus 직접.
+  - 콘텐츠 보류분(적 메시·투사체 VFX)은 만들지 마라 — 로직/베이스만.
 
-[검증] 빌드+스모크 → PIE: 원거리 적 차징 시 화면 경고 방향 표시(기존 위젯), 피격, FF OFF 시 적탄 아군 오발 없음 → codex-review.ps1 -Base main → PROGRESS 갱신+✅+--no-ff 머지.
+■ 산출물
+  1. 원거리 적 아키타입: 경량 Pawn 유지(GAS 금지 — 원칙1, 스웜 적엔 ASC 절대 X).
+     사거리 내 정지 → 차징(예고) → 발사 사이클. AFPSREnemyBase 확장(별 클래스/서브클래스), 데이터 주도.
+  2. 투사체: 기존 AFPSRProjectile + UFPSRProjectileSubsystem 재사용. Team=Enemy 경로
+     (Enemy→플레이어 데미지 브릿지 보존) + IsHostileTarget 친화/instigator 차단 그대로(신규 데미지코드 0 지향).
+  3. 사전경고 생산자: 차징 시작/종료 시 대상 플레이어 PC의 클라 RPC로
+     UFPSRPlayerFeedbackComponent::ReceiveRangedTarget(SourceId, Location, bActive) 호출
+     (P4-D 소비자 = id별 TMap 다수소스, 그대로 소비. 현재는 디버그 FPSR.TestRangedWarn만 구동 중).
+  4. 공격토큰: 기존 토큰 상한 시스템에 원거리 토큰 통합(§2-6 — 무한 포격 방지).
+
+■ [검증된 재사용 앵커 — 2026-06-30 HEAD 소스 재확인, 그대로 신뢰 가능]
+  - 적 베이스/풀: AFPSREnemyBase(경량 Pawn, dormancy 풀링) + UFPSREnemySpawnSubsystem
+    (하드캡 MaxActiveEnemies=500, 거리기반 NetUpdateFreq 티어 S0 30/S1 10/S2 5/S3 2Hz·UpdateStride 1/2/4/8
+     — 원거리 적도 FPSREnemyBase라 이 티어링/스폰 게이트를 그대로 상속).
+  - 투사체/데미지: AFPSRProjectile(IsHostileTarget = team 기반 친화 판정, 플레이어 채널 Overlap) +
+    FPSRCombat::ResolveDamage/ApplyDamage/ApplyExplosion(통합 데미지 chokepoint). FF는 player↔player만 관장
+    (Enemy→player는 FF와 무관하게 적중) — enemy 투사체는 다른 적을 맞히지 않게 IsHostileTarget로 차단됨.
+  - 경고 소비자: UFPSRPlayerFeedbackComponent::ReceiveRangedTarget (FPSR.TestRangedWarn으로 검증 가능).
+  - 프리즈: GameState bRunPaused / 전역 프리즈 게이트 + FTimerHandle PauseTimer 패턴(freeze-gate 클라/서버 대칭).
+
+■ 함정 / 주의 (플랜에 명시)
+  - 복제 투사체 ≤64 캡 FIFO 강제회수를 "플레이어 AOE와 공유"한다(§5). 원거리 적 다수 시 풀 고갈 →
+    발사빈도 상한 / 적 투사체 비복제(코스메틱) 옵션 등 풀 예산 설계를 플랜에 박을 것.
+    ⚠️ §5 적500 정량 측정이 보류라 복제 예산은 보수적으로(net-cull 미구현 = 클라당 전 적 복제 상태).
+  - 전역 프리즈(§2-2): 차징·발사 사이클 타이머 전부 게이트 + PauseTimer(진행 중 타이머 멈춤).
+  - 스폰 비율/아키타입 혼합 = DA/스케줄 데이터 주도(C++ 하드코딩 금지 — 원칙2).
+  - ±10% 이속 편차·separation 등 기존 스웜 규칙과 충돌 없는지 확인.
+  - 원거리 적도 약점(U3a UFPSRWeakpointComponent)·DBNO 타겟 제외(!Alive) 규칙 정합 확인.
+
+■ 검증
+  빌드(-WaitMutex) + 헤드리스 스모크 → PIE: 원거리 적이 차징 시 화면 경고 방향 표시(기존 위젯)·발사·피격,
+  FF OFF에서 적탄이 다른 적/아군 오발 없음, 프리즈 중 차징/발사 정지.
+  → Scripts/codex-review.ps1 -Base main(머지게이트) → PROGRESS 갱신 + TaskPrompts §B U5 ✅ → main --no-ff 머지.
 ```
 
 ### U6 — A4 Fragment 마무리
