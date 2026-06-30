@@ -6,6 +6,12 @@
 
 **최종 갱신: 2026-06-30**
 
+## 🔔 핸드오프 (2026-06-30 h) — ✅ phase/p1b-dbno → main 머지 완료(U1 사후 + DBNO Phase 1B 전체)
+> **머지**: `e38dfbe Merge phase/p1b-dbno`(`--no-ff`, main). 64파일 +2406. main = 로컬 단독 최신(origin보다 54커밋 앞섬 — **push는 사용자 확인 후**). 머지 전 검증: 전 유닛 빌드 Succeeded + 헤드리스 스모크 + 적대적 다중에이전트 리뷰(확정 0) + **Codex 머지게이트(P3 1건=관전 발사음 거리컬 view target 기준 `209fa50` 교정)** + **사용자 PIE 2인 리슨서버 전 항목 통과**.
+> **담긴 내용**: U1 사후(A1~A3·B1/B2·C1/C2 HUD·게임플레이, 스폰 앵커/시야무관, 보스 월드바 제거) + **DBNO Phase 1B 전체**(생존 상태기계·근접 자동부활·다운 제자리정지+아군관전·팀와이프·관전 발사이펙트·관전 카메라 pitch[뷰+1P메시]·부활/카드재개 grace[무적+적통과]·부활시키는 사람 게이지 HUD).
+> **⚠️ 다음**: ① **origin/main push**(사용자 확인 후 — 현재 미push) ② **브랜치 정리**: `phase/p1b-dbno`(머지됨) 삭제 여부 사용자 확인 ③ 마스터 로드맵 [[taskprompts-master-roadmap]] W1 다음 유닛(U1 재미게이트/성능검증·V2 2-client·U15 등). ④ DBNO 후속(블리드아웃 활성·값 튜닝·풀 관전 리그 B16·다운 반격)은 밸런스 후속.
+> **미커밋(사용자, 무관)**: `Content/*.uasset`(WBP_GameHUD 임베드·맵·머티리얼)·`Config/DefaultEditor.ini`·`Docs/TaskPrompts_Master.md`·`Docs/Review/`.
+
 ## 🔔 핸드오프 (2026-06-30 g) — DBNO 후속 2건(관전 발사이펙트 + 부활 무적창) 코드완료·빌드·리뷰, 다음=사용자 PIE 2인 → Codex 머지게이트 → main
 > **이 세션**: A/B 두 follow-up **구현·빌드·헤드리스 스모크·적대적 리뷰 완료**(`3ab63ed feat(dbno)`, `phase/p1b-dbno`). MP/복제·서버권위 = Opus 직접. 신규 C++ 클래스 0(기존 확장).
 >   - **A) fix(weapon) 관전 발사이펙트**: `MulticastFireCosmetics`([FPSRCharacter.cpp](Source/FPSRoguelite/Private/Hero/FPSRCharacter.cpp))에 머즐플래시+발사몽타주 추가 — 복제 인벤토리 `GetCurrentWeapon` DA 해석(사운드와 동일 경로). **게이팅 = `LocalPC->GetViewTarget()==this`**(이 폰을 관전 중인 로컬 뷰어에게만; 머즐 파티클은 OnlyOwnerSee 비상속이라 무게이트 시 비관전 원격 관찰자에게 아군 머리 머즐 누출). 사운드/거리컬 보존(LocalPC 호이스트).
