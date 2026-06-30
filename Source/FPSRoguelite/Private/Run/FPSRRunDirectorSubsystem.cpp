@@ -10,6 +10,7 @@
 #include "Core/FPSRGameState.h"
 #include "Core/FPSRPlayerController.h"
 #include "Enemy/FPSREnemySpawnSubsystem.h"
+#include "Enemy/FPSREnemyRosterDataAsset.h"
 #include "Boss/FPSRBossBase.h"
 #include "Boss/FPSRBossSpawnPoint.h"
 #include "Boss/FPSRBossDefinitionDataAsset.h"
@@ -90,6 +91,9 @@ void UFPSRRunDirectorSubsystem::StartRun()
 	{
 		SpawnSub->SetMaxSpawnPerTick(ActiveSchedule ? ActiveSchedule->MaxSpawnPerTick : FallbackMaxSpawnPerTick);
 		SpawnSub->SetSpawnInterval(ActiveSchedule ? ActiveSchedule->SpawnIntervalSeconds : FallbackSpawnIntervalSeconds);
+		// Data-driven enemy archetype mix (Game.MD §2-6): push the run's roster so the swarm spawns melee/ranged by
+		// weighted random. Null = the spawn subsystem falls back to its single configured EnemyClass (no regression).
+		SpawnSub->SetEnemyRoster(ActiveSchedule ? ActiveSchedule->EnemyRoster : nullptr);
 		// Re-run safety: restart the room-spawn accumulation from only the start room(s) (a same-world re-run would
 		// otherwise keep zones opened in the previous run). A fresh level load is already reset at world begin.
 		SpawnSub->ResetSpawnZones();

@@ -64,8 +64,14 @@ private:
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<AFPSRProjectile>> ActiveProjectiles;
 
-	/** Max simultaneous replicated projectiles (Game.MD §5 cap). */
+	/** Max simultaneous replicated PLAYER projectiles (Game.MD §5 cap). Enemy projectiles use a SEPARATE budget
+	 *  (CVarEnemyProjectileBudget) so heavy enemy fire never FIFO-evicts a player's in-flight AOE and vice versa. */
 	static constexpr int32 MaxReplicatedProjectiles = 64;
+
+	/** Hard ceiling for the enemy projectile budget cvar (FPSR.Enemy.ProjectileBudget). Bounds total replicated
+	 *  projectiles (player + enemy) — exceeds the legacy ≤64 line, documented as a provisional §5 budget pending the
+	 *  deferred perf measurement; the per-player ranged concurrency token keeps the typical enemy count far below it. */
+	static constexpr int32 MaxEnemyProjectileCeiling = 100;
 
 	/** Last observed global-freeze state, so Tick only acts on the pause/resume transition. */
 	bool bProjectilesPaused = false;

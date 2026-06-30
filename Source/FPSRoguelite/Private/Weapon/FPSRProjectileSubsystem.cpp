@@ -10,6 +10,16 @@
 #include "GameFramework/Pawn.h"
 #include "HAL/IConsoleManager.h"
 
+// Separate replicated-projectile budget for ENEMY-team projectiles (Game.MD §5). Kept distinct from the player cap
+// so ranged-enemy fire and player AOE never FIFO-evict each other. Balance/perf knob — default conservative; the
+// per-player ranged concurrency token keeps the typical enemy count well below this. Clamped to MaxEnemyProjectileCeiling.
+static TAutoConsoleVariable<int32> CVarEnemyProjectileBudget(
+	TEXT("FPSR.Enemy.ProjectileBudget"),
+	32,
+	TEXT("Max concurrent replicated ENEMY projectiles (separate from the player budget, Game.MD §5). ")
+	TEXT("Balance/perf knob; clamped to [1, 100]."),
+	ECVF_Default);
+
 // FTickableGameObject — drives the global-freeze suspension of active projectiles (server-authoritative).
 
 void UFPSRProjectileSubsystem::Tick(float DeltaTime)
@@ -120,10 +130,41 @@ AFPSRProjectile* UFPSRProjectileSubsystem::AcquireProjectile(
 	// pending-kill. Without this, the cap loop below could spin on an unremovable entry or pool a dead actor.
 	ActiveProjectiles.RemoveAll([](const TObjectPtr<AFPSRProjectile>& P) { return !IsValid(P); });
 
-	// Enforce cap: release the oldest active projectiles (FIFO) until we're under the limit.
-	while (ActiveProjectiles.Num() >= MaxReplicatedProjectiles && ActiveProjectiles.Num() > 0)
+	// Enforce the per-team replicated-projectile cap (Game.MD §5): players and enemies have SEPARATE budgets, so heavy
+	// enemy fire never FIFO-evicts a player's in-flight AOE (and vice versa). Evict the oldest of the SAME team (FIFO)
+	// until that team is under its cap. Enemy budget = balance/perf cvar (≤ MaxEnemyProjectileCeiling); player = 64.
+	const EFPSRProjectileTeam SpawnTeam = InParams.Team;
+	const int32 TeamCap = (SpawnTeam == EFPSRProjectileTeam::Enemy)
+		? FMath::Clamp(CVarEnemyProjectileBudget.GetValueOnGameThread(), 1, MaxEnemyProjectileCeiling)
+		: MaxReplicatedProjectiles;
+	auto CountTeamActive = [this, SpawnTeam]()
 	{
-		ReleaseProjectile(ActiveProjectiles[0]);
+		int32 Num = 0;
+		for (const TObjectPtr<AFPSRProjectile>& P : ActiveProjectiles)
+		{
+			if (IsValid(P) && P->GetTeam() == SpawnTeam)
+			{
+				++Num;
+			}
+		}
+		return Num;
+	};
+	while (CountTeamActive() >= TeamCap)
+	{
+		int32 OldestIdx = INDEX_NONE;
+		for (int32 i = 0; i < ActiveProjectiles.Num(); ++i)
+		{
+			if (IsValid(ActiveProjectiles[i]) && ActiveProjectiles[i]->GetTeam() == SpawnTeam)
+			{
+				OldestIdx = i; // front-most of this team = oldest (FIFO)
+				break;
+			}
+		}
+		if (OldestIdx == INDEX_NONE)
+		{
+			break;
+		}
+		ReleaseProjectile(ActiveProjectiles[OldestIdx]);
 	}
 
 	// Reuse a dormant projectile of the SAME class as requested (so a later request never gets a different

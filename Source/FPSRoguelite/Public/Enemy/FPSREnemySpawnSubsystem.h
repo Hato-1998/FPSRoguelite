@@ -6,11 +6,14 @@
 #include "Tickable.h"
 #include "Templates/SubclassOf.h"
 #include "GameplayTagContainer.h"
+#include "UObject/ObjectKey.h"
 #include "FPSREnemySpawnSubsystem.generated.h"
 
 class AFPSREnemyBase;
 class AFPSREnemySpawnPoint;
 class AFPSRSpawnRoom;
+class AFPSRPlayerController;
+class UFPSREnemyRosterDataAsset;
 
 /** Lightweight server-authoritative object pool + spawn director for swarm enemies (P2-A).
  *  Pooling reuses dormant actors; director keeps ~TargetAliveCount alive around players.
@@ -49,8 +52,26 @@ public:
 	int32 GetAliveCount() const { return ActiveEnemies.Num(); }
 
 	/** Set the actor class to spawn for swarm enemies (designer-configured BP child of AFPSREnemyBase).
-	 *  Falls back to AFPSREnemyBase if unset. Set this from trusted server config (e.g. GameMode). */
+	 *  Falls back to AFPSREnemyBase if unset. Set this from trusted server config (e.g. GameMode). Used as the
+	 *  fallback when no EnemyRoster is set (or the roster yields nothing). */
 	void SetEnemyClass(TSubclassOf<AFPSREnemyBase> InClass) { EnemyClass = InClass; }
+
+	/** Set the data-driven enemy roster (archetype mix). Null/empty = spawn the single EnemyClass (no regression).
+	 *  Pushed by the run director at StartRun from DA_RunSchedule.EnemyRoster (Game.MD §2-6). */
+	void SetEnemyRoster(UFPSREnemyRosterDataAsset* InRoster) { EnemyRoster = InRoster; }
+
+	/** Server: read-only — is there a ranged-attack slot free against TargetPC? Lets a ranged enemy skip the (more
+	 *  expensive) line-of-sight trace when it's already capped out, so capped idle ranged enemies don't trace every
+	 *  pass at swarm scale (Game.MD §5). */
+	bool IsRangedTokenAvailable(AFPSRPlayerController* TargetPC) const;
+
+	/** Server: try to reserve a ranged-attack (charge) slot against TargetPC. Caps CONCURRENT ranged chargers per
+	 *  player (attack token, Game.MD §2-6) — which also bounds in-flight enemy projectiles. Returns true + reserves
+	 *  when under the cap. Released on fire / abort / enemy teardown via ReleaseRangedToken. */
+	bool TryAcquireRangedToken(AFPSRPlayerController* TargetPC);
+
+	/** Server: release a previously-reserved ranged-attack slot. Safe to call with a stale/expired controller. */
+	void ReleaseRangedToken(const TWeakObjectPtr<AFPSRPlayerController>& TargetPC);
 
 	/** Set the target alive count (director will spawn/release to maintain this). */
 	void SetTargetAliveCount(int32 InTarget);
@@ -138,6 +159,16 @@ private:
 	/** Max enemies allowed to deal contact damage to a single player per pass (attack token, Game.MD §2-6/§5). */
 	static constexpr int32 AttackTokenLimit = 10;
 
+	/** Max CONCURRENT ranged chargers per player (held attack token, Game.MD §2-6). Unlike the melee per-pass token,
+	 *  this is held for the whole charge so it bounds simultaneous ranged threats AND in-flight enemy projectiles
+	 *  (the primary projectile-pool limiter). Balance value (tune later). */
+	static constexpr int32 RangedAttackTokenLimit = 3;
+
+	/** Server-only: per-player count of enemies currently holding a ranged-charge token (keyed by controller so it
+	 *  survives the per-pass PlayerPawns rebuild). Incremented in TryAcquireRangedToken, decremented in
+	 *  ReleaseRangedToken; cleared on ReleaseAllEnemies. */
+	TMap<TObjectKey<AFPSRPlayerController>, int32> RangedChargeCountByPlayer;
+
 	/** Max vertical (Z) gap for a contact attack to land — stops an airborne/rooftop or falling enemy from
 	 *  damaging a player through a floor when only horizontal (XY) distance is in range (Codex review 2026-06-09). */
 	static constexpr float AttackVerticalRange = 150.0f; // cm (covers capsule heights + a small step)
@@ -153,9 +184,15 @@ private:
 	static constexpr float SpawnGroundTraceDown = 10000.0f; // cm below the candidate to end the down-trace
 	static constexpr float SpawnGroundHalfHeight = 90.0f;   // cm; capsule half-height -> feet on floor
 
-	/** Designer-configured enemy class to spawn (BP child of AFPSREnemyBase). Null = spawn AFPSREnemyBase. */
+	/** Designer-configured enemy class to spawn (BP child of AFPSREnemyBase). Null = spawn AFPSREnemyBase. Used as the
+	 *  fallback when EnemyRoster is unset or yields no eligible class. */
 	UPROPERTY()
 	TSubclassOf<AFPSREnemyBase> EnemyClass;
+
+	/** Data-driven archetype mix (Game.MD §2-6). When set + non-empty, AcquireEnemy picks a class by weighted random
+	 *  per spawn; otherwise it falls back to EnemyClass. Pushed by the run director from DA_RunSchedule.EnemyRoster. */
+	UPROPERTY()
+	TObjectPtr<UFPSREnemyRosterDataAsset> EnemyRoster;
 
 	/** Pool of dormant (hidden, disabled) enemies ready for reuse. */
 	UPROPERTY(Transient)

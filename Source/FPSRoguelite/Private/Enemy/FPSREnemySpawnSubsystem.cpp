@@ -5,10 +5,12 @@
 #include "Enemy/FPSREnemySpawnPoint.h"
 #include "Enemy/FPSRSpawnRoom.h"
 #include "Enemy/FPSRFlowFieldSubsystem.h"
+#include "Enemy/FPSREnemyRosterDataAsset.h"
 #include "Hero/FPSRCharacter.h"
 #include "Core/FPSRLogChannels.h"
 #include "Core/FPSRGameState.h"
 #include "Core/FPSRPlayerState.h"
+#include "Core/FPSRPlayerController.h"
 #include "Run/FPSRRunDirectorSubsystem.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
@@ -356,19 +358,25 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 			Enemy->SetNetUpdateFrequency(NetFreq);
 		}
 
-		// Contact attack: in horizontal range + within a vertical gap (no through-floor hits) + cooldown elapsed
-		// + the target player's attack-token budget allows. The XY nearest test ignores Z, so gate Z explicitly.
-		const float AttackRange = Enemy->GetAttackRange();
+		// Per-archetype attack decision: the subsystem owns the batch context (nearest ALIVE player, the freeze gate
+		// above, and the attack-token budgets); the enemy archetype owns the DECISION — melee contact for the base,
+		// ranged charge->fire for AFPSRRangedEnemyBase (it manages its own held token). The XY nearest test ignores
+		// Z, so compute the vertical gap (no through-floor melee) and pass it as a gate.
 		const float AttackVertGap = FMath::Abs(EnemyLocation.Z - BestPlayerLocation.Z);
-		if (BestDistSq <= (AttackRange * AttackRange)
-			&& AttackVertGap <= AttackVerticalRange
-			&& Enemy->CanAttack(Now)
-			&& AttackersThisPass[BestPlayerIndex] < AttackTokenLimit)
+		if (AFPSRCharacter* TargetChar = Cast<AFPSRCharacter>(PlayerPawns[BestPlayerIndex]))
 		{
-			if (AFPSRCharacter* TargetChar = Cast<AFPSRCharacter>(PlayerPawns[BestPlayerIndex]))
+			FFPSRServerAttackContext AttackCtx;
+			AttackCtx.Now = Now;
+			AttackCtx.DeltaSeconds = DeltaTime;
+			AttackCtx.TargetChar = TargetChar;
+			AttackCtx.TargetController = Cast<AFPSRPlayerController>(TargetChar->GetController());
+			AttackCtx.TargetLocation = BestPlayerLocation;
+			AttackCtx.DistSqToTarget = BestDistSq;
+			AttackCtx.bVerticalInRange = (AttackVertGap <= AttackVerticalRange);
+			AttackCtx.ContactDamage = ContactDamage;
+			AttackCtx.bMeleeTokenAvailable = (AttackersThisPass[BestPlayerIndex] < AttackTokenLimit);
+			if (Enemy->ServerTickAttack(AttackCtx) == EFPSRServerAttackResult::MeleeAttacked)
 			{
-				TargetChar->ApplyContactDamage(ContactDamage, Enemy);
-				Enemy->NotifyAttacked(Now);
 				++AttackersThisPass[BestPlayerIndex];
 			}
 		}
@@ -645,26 +653,55 @@ AFPSREnemyBase* UFPSREnemySpawnSubsystem::AcquireEnemy(const FVector& Location, 
 
 	const FVector SpawnLocation = bSnapToGround ? SnapToGround(Location) : Location;
 
+	// Pick the archetype to spawn: weighted-random from the data-driven roster (Game.MD §2-6), falling back to the
+	// single configured EnemyClass (then the C++ base) so an unconfigured run still spawns.
+	TSubclassOf<AFPSREnemyBase> PickedClass;
+	if (EnemyRoster)
+	{
+		FFPSREnemySpawnContext SpawnCtx;
+		if (const AFPSRGameState* GS = World->GetGameState<AFPSRGameState>())
+		{
+			SpawnCtx.RunClockSeconds = GS->GetRunClockSeconds();
+			SpawnCtx.PartyLevel = GS->GetPartyLevel();
+		}
+		PickedClass = EnemyRoster->PickEnemyClass(SpawnCtx);
+	}
+	if (!PickedClass)
+	{
+		PickedClass = EnemyClass;
+	}
+	UClass* ClassToSpawn = PickedClass ? PickedClass.Get() : AFPSREnemyBase::StaticClass();
+
 	AFPSREnemyBase* Enemy = nullptr;
 
-	// Reuse a dormant actor (skip any stale nulls).
-	while (DormantPool.Num() > 0 && Enemy == nullptr)
+	// Reuse a dormant actor of the SAME class as picked — a later request must never get a different archetype's
+	// mesh/behaviour. Drop any stale nulls; the pool is bounded (<=MaxActiveEnemies) so the linear scan is cheap.
+	for (int32 i = DormantPool.Num() - 1; i >= 0; --i)
 	{
-		Enemy = DormantPool.Pop();
+		AFPSREnemyBase* Candidate = DormantPool[i].Get();
+		if (!IsValid(Candidate))
+		{
+			DormantPool.RemoveAtSwap(i);
+			continue;
+		}
+		if (Candidate->GetClass() == ClassToSpawn)
+		{
+			Enemy = Candidate;
+			DormantPool.RemoveAtSwap(i);
+			break;
+		}
 	}
 
 	if (Enemy == nullptr)
 	{
-		// Hard cap reached.
+		// Hard cap on total pooled actors (Game.MD §5).
 		if (TotalSpawned >= MaxActiveEnemies)
 		{
 			return nullptr;
 		}
 
-		// Spawn a new enemy of the configured class (designer BP child), falling back to the C++ base.
 		FActorSpawnParameters SpawnParams;
 		SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-		UClass* ClassToSpawn = EnemyClass ? EnemyClass.Get() : AFPSREnemyBase::StaticClass();
 		Enemy = World->SpawnActor<AFPSREnemyBase>(ClassToSpawn, SpawnLocation, FRotator::ZeroRotator, SpawnParams);
 		if (Enemy == nullptr)
 		{
@@ -725,6 +762,45 @@ void UFPSREnemySpawnSubsystem::ReleaseAllEnemies()
 	for (AFPSREnemyBase* Enemy : ToRelease)
 	{
 		ReleaseEnemy(Enemy);
+	}
+
+	// Every charging enemy released its ranged token via Deactivate; reset the per-player counts as a safety net
+	// (e.g. against a stale-controller decrement that couldn't match its key after a player left mid-charge).
+	RangedChargeCountByPlayer.Reset();
+}
+
+bool UFPSREnemySpawnSubsystem::IsRangedTokenAvailable(AFPSRPlayerController* TargetPC) const
+{
+	if (TargetPC == nullptr)
+	{
+		return false;
+	}
+	const int32* Count = RangedChargeCountByPlayer.Find(TObjectKey<AFPSRPlayerController>(TargetPC));
+	return (Count == nullptr) || (*Count < RangedAttackTokenLimit);
+}
+
+bool UFPSREnemySpawnSubsystem::TryAcquireRangedToken(AFPSRPlayerController* TargetPC)
+{
+	if (!HasServerAuthority() || TargetPC == nullptr)
+	{
+		return false;
+	}
+	int32& Count = RangedChargeCountByPlayer.FindOrAdd(TObjectKey<AFPSRPlayerController>(TargetPC));
+	if (Count >= RangedAttackTokenLimit)
+	{
+		return false;
+	}
+	++Count;
+	return true;
+}
+
+void UFPSREnemySpawnSubsystem::ReleaseRangedToken(const TWeakObjectPtr<AFPSRPlayerController>& TargetPC)
+{
+	// Decrement by the controller's object key. If the controller is gone (player left mid-charge), the key won't
+	// match and the (now-unconsulted) stale count is left for ReleaseAllEnemies to clear — harmless.
+	if (int32* Count = RangedChargeCountByPlayer.Find(TObjectKey<AFPSRPlayerController>(TargetPC.Get())))
+	{
+		*Count = FMath::Max(0, *Count - 1);
 	}
 }
 
