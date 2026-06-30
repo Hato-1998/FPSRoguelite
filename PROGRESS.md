@@ -17,7 +17,8 @@
 >   ② **PIE 2인 리슨서버 검증**(DBNO_MiniDesign §7 / B2 §6): A 다운→A화면 오버레이+게이지, B 근접 ~3s 충전→부활/이탈 감소·양 클라 동기 / 런 시작→미션 밴드 N개·보스 아이콘 끝·플레이헤드 좌→우(클라=호스트 동일).
 >   ③ 통과 후 머지순서: U1(`fix/mp-steam-e2e`) 패키지 Steam 2-PC E2E→main → `phase/p1b-dbno`(Codex 머지게이트)→main `--no-ff`.
 > **데이터 주의**: authored 값 = **P4-A 임시**(미션 60/120/180·보스 300) → 밴드가 임시값 반영(정상) [[p4a-temp-test-values]].
-> **미커밋(사용자, 무관)**: `WBP_GameHUD.uasset`(임베드 대상)·기타 `.uasset`·`Config/DefaultEditor.ini`·`Docs/TaskPrompts_Master.md`.
+> **미커밋(사용자, 무관)**: `WBP_GameHUD.uasset`(임베드 완료=사용자, 미커밋)·기타 `.uasset`·`Config/DefaultEditor.ini`·`Docs/TaskPrompts_Master.md`.
+> **PIE 라운드1 수정(2026-06-30)**: 사용자 임베드+테스트 후 2버그 발견·수정. ① `98b3194 fix(U9)` **DBNO 오버레이가 다운 시 안 뜸** — 루트 기본 Visibility=Hidden인데 UE5.7 Slate는 `SWidget::Tick`을 Paint 내부 호출이라 Hidden=Paint안됨=Tick안됨→Event Tick 영구 미발화. 수정=루트 항상 SelfHitTestInvisible(Construct 강제)+자식 토글 [[umg-hidden-widgets-dont-tick]]. ② `a5d4390 fix(weapon)` **발사 중단 후 에임 자동 상승** — `PendingRisePitch` 백로그가 릴리즈 후에도 적용됨. 수정=`!bWantsToFire`면 PendingRise* 0(전 발사모드, 사용자 결정). **빌드 Succeeded**. → 사용자 재-PIE(오버레이 표시·반동 정지) 후 머지게이트.
 
 ## 🔔 핸드오프 (2026-06-29 e) — 보스 오버헤드바 제거 + DBNO Phase 1B 서버로직(증분1~3) 완성, 다음=DBNO HUD(에디터)+PIE 검증
 > **이 세션 후반**: ① **PIE E2E = 사용자 통과**(A1/A2/A3·C2·B1/B2). ② 사용자 지적 **보스 머리 위 월드 HP바 제거**(`5a981d8 fix(boss)` — `AFPSRBossBase::BeginPlay`에서 월드 `UWidgetComponent` 제거, HUD 상단 보스바 A3만 사용; VibeUE 미연결로 BP 직접편집 불가→코드 강제, idempotent). ③ **DBNO Phase 1B 구현 착수**(브랜치 `phase/p1b-dbno`, fix/mp-steam-e2e 기반 분기, MP/복제=Opus 직접).
