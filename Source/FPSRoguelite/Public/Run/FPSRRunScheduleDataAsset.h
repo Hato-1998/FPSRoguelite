@@ -7,6 +7,7 @@
 
 class UFPSRMissionDataAsset;
 class UFPSRBossDefinitionDataAsset;
+class UFPSREnemyRosterDataAsset;
 
 /** One scheduled mission window: at a random time within [MinTime, MaxTime] (rolled once at run start), one
  *  mission is chosen uniformly at random from MissionPool and spawned (Game.MD §2-8). */
@@ -59,6 +60,12 @@ public:
 	/** Time-windowed missions (any order; the director rolls each window's trigger time at run start). */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Run")
 	TArray<FFPSRMissionWindow> MissionWindows;
+
+	/** Data-driven enemy archetype mix for this run (Game.MD §2-6). The spawn director picks a class by weighted
+	 *  random from the roster's rules each spawn. Null = the swarm spawns the single configured EnemyClass (no
+	 *  regression — the melee-only behaviour before U5). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Run")
+	TObjectPtr<UFPSREnemyRosterDataAsset> EnemyRoster;
 
 	/** Run-clock time (seconds) at which the boss appears (Combat -> Boss; after this no missions / no timer). */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Run")

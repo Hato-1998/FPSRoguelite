@@ -3,6 +3,7 @@
 #include "Enemy/FPSREnemyBase.h"
 #include "Enemy/FPSREnemyHealthComponent.h"
 #include "Enemy/FPSREnemySpawnSubsystem.h"
+#include "Hero/FPSRCharacter.h"
 #include "Pickup/FPSRPickupSubsystem.h"
 #include "Core/FPSRLogChannels.h"
 
@@ -183,6 +184,24 @@ void AFPSREnemyBase::Deactivate()
 	SetActorHiddenInGame(true);
 	SetActorEnableCollision(false);
 	SetNetDormancy(DORM_DormantAll);
+}
+
+EFPSRServerAttackResult AFPSREnemyBase::ServerTickAttack(const FFPSRServerAttackContext& Ctx)
+{
+	// Melee contact attack: in horizontal range + within the vertical gap (no through-floor hits) + cooldown elapsed
+	// + the target player's attack-token budget allows. Behaviour-identical refactor of the spawn subsystem's former
+	// inline attack block — the subsystem now delegates the decision here so ranged archetypes can override it.
+	if (Ctx.TargetChar
+		&& Ctx.DistSqToTarget <= (AttackRange * AttackRange)
+		&& Ctx.bVerticalInRange
+		&& CanAttack(Ctx.Now)
+		&& Ctx.bMeleeTokenAvailable)
+	{
+		Ctx.TargetChar->ApplyContactDamage(Ctx.ContactDamage, this);
+		NotifyAttacked(Ctx.Now);
+		return EFPSRServerAttackResult::MeleeAttacked;
+	}
+	return EFPSRServerAttackResult::None;
 }
 
 void AFPSREnemyBase::TickServerMovement(const FVector& MoveDirection, float ScaledDeltaSeconds)

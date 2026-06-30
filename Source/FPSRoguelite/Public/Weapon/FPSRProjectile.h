@@ -40,6 +40,10 @@ public:
 	 *  never simulates), so this is server-side only. */
 	void SetSimulationPaused(bool bPaused);
 
+	/** Team affiliation of the active projectile (Player vs Enemy). Used by the pool to budget each team's replicated
+	 *  projectiles separately so enemy fire and player AOE never evict each other (Game.MD §5). */
+	EFPSRProjectileTeam GetTeam() const { return Params.Team; }
+
 protected:
 	virtual void BeginPlay() override;
 
