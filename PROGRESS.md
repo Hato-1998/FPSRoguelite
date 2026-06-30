@@ -6,6 +6,22 @@
 
 **최종 갱신: 2026-06-30**
 
+## 🔔 핸드오프 (2026-06-30 k) — U5 원거리 적 AI + 사전경고 생산자 **코드 완료·검증**(빌드+스모크+Codex게이트+P2교정), 다음=사용자 콘텐츠+PIE → main 머지
+> **브랜치**: `phase/p4-ranged-enemy`(main `dab7f59`에서 분기). 2커밋: `a4d604d feat(U5)` + `080352a fix(U5)` Codex P2 교정. **코드/베이스만**(콘텐츠 미생성 — 원칙).
+> **이 세션 = U5 구현·검증**(서버권위·복제·RPC 밀도로 [[haiku-delegation-security-wiring]] 카브아웃 따라 **Opus 직접**, 검증 철저). 3개 사용자 결정: ① 전용 `UFPSREnemyRosterDataAsset`(혼합) ② 가상 `ServerTickAttack` 시임 ③ 적 투사체 예산 분리.
+>   - **원거리 아키타입** `AFPSRRangedEnemyBase : AFPSREnemyBase`(GAS無): 사거리 정지→차징(예고)→발사→쿨다운. 차징·쿨다운=**프리즈-멈춤 누산기**(패스 early-return), LOS 게이트(벽+닫힌 문), DBNO 타겟 abort. 베이스에 가상 `ServerTickAttack(FFPSRServerAttackContext)` 추가(근접 거동 동일 이전), `Activate`/`Deactivate` virtual화.
+>   - **사전경고 생산자**: 서버→타겟PC `ClientNotifyRangedTarget`(기존 Client/Reliable RPC, 신규 RPC 0). 차징시작 true/발사·중단·teardown false, Reliable off 전경로 보장(`ReleaseRangedHold` 멱등, Deactivate/EndPlay 포함). SourceId=`GetUniqueID()`. 소비자=§2-14 `ReceiveRangedTarget`(디버그 `FPSR.TestRangedWarn`로 사전검증 가능).
+>   - **공격토큰 이원화**: 근접 per-pass(`AttackTokenLimit=10`) + 원거리 **held 동시성**(`RangedAttackTokenLimit=3`/플레이어, 키=타겟PC; `TryAcquire`/`Release`/`IsRangedTokenAvailable` peek). 토큰 peek로 캡 초과 idle 원거리 적의 매프레임 LOS 트레이스 회피(§5).
+>   - **데이터 주도 혼합**: `UFPSREnemyRosterDataAsset`(폴리모픽 `UFPSREnemySpawnRule` EditInlineNew, MVP=`_Static` class+weight, `FFPSREnemySpawnContext{RunClock,PartyLevel}` 전달로 시간/레벨 스케일 시임 예약). `DA_RunSchedule.EnemyRoster`→디렉터 StartRun이 push. `AcquireEnemy` 가중랜덤+클래스별 풀 재사용. **빈=단일 EnemyClass 폴백(무회귀)**.
+>   - **투사체**: Team=Enemy 재사용(신규 데미지 0). **팀별 예산 분리**: 플레이어 ≤64 / 적 `FPSR.Enemy.ProjectileBudget`(기본32·천장100, cvar), 팀별 FIFO 회수로 상호 비잠식. ⚠️§5 "복제 ≤64" 위로 여는 거라 `Performance.md §5` 갱신(적 서브예산=잠정·미측정·U14 이월; 동시성캡이 실질 리미터).
+> **검증(코드)**: 빌드 Succeeded(-MaxParallelActions=4, 페이징 회피) + 헤드리스 스모크 ModuleLoads Success ×2 + **Codex 머지게이트 P2 1건 교정**(원거리 LOS에 닫힌 문 ECC_FPSRPlayerPawn 포함 — 관통 차단; 문 단방향파괴라 LOS 게이트만으로 완전 차단) + diff 자기비판(근접 리팩토링 무회귀 동치 확인).
+> **⚠️ 다음 = 사용자 콘텐츠 + PIE → main 머지** (콘텐츠 없으면 원거리 적이 차징/경고는 뜨나 `ProjectileClass` null로 발사 스킵+경고로그):
+>   ① **콘텐츠 저작**: ⓐ `BP_RangedEnemy`(AFPSRRangedEnemyBase 자식, `ProjectileClass`·차징/쿨다운/사거리/데미지/MuzzleOffset EditDefaultsOnly 저작) ⓑ **적 투사체 BP**(AFPSRProjectile 자식, 메시/VFX — 없으면 기존 플레이어 투사체 BP 임시 재사용 가능) ⓒ `DA_EnemyRoster`(SpawnRules에 `_Static` 2개=근접 BP+가중치·BP_RangedEnemy+가중치) ⓓ `DA_RunSchedule.EnemyRoster`에 ⓒ 연결.
+>   ② **PIE 검증**: 원거리 적 차징 시 화면 테두리 방향경고(기존 ThreatIndicator 위젯)·가시 투사체 발사·피격 데미지 / FF OFF에서 적탄이 다른 적·아군 무오발(IsHostileTarget) / **프리즈 중 차징·발사·투사체 정지**(누산기) / 차징 중 타겟 DBNO화 시 경고 해제 / **닫힌 문 뒤 플레이어엔 발사 안 함**(P2) / 원거리 적 약점 피격 / 동시 차징이 3 초과 안 함.
+>   ③ 통과 → `main --no-ff` 머지(`merge(phase): p4-ranged-enemy …`) + push + 브랜치 정리 → TaskPrompts §B **U5 ✅** → 2차 트랙 다음 유닛.
+> **밸런스 튜너블(현 보수적 기본)**: `RangedAttackTokenLimit=3`·차징1.5s·쿨다운2.5s·사거리1400·StopDistance900·투사체 데미지20/속도1800/수명4s·적탄예산32. 콘텐츠 밸런싱/U14 perf에서 조정.
+> **미커밋(사용자 자산, 무관)**: `Content/*.uasset`·`Config/DefaultEditor.ini`·`Docs/TaskPrompts_Master.md`.
+
 ## 🔔 핸드오프 (2026-06-30 j) — ✅ U1 재미게이트 + V2 = 합격(사용자 판정), §5 적500 정량만 보류 → 2차 트랙 해금
 > **판정(사용자 결정 2026-06-30)**: U1 = ✅ **합격**(양산 해금), V2 = ✅ **합격**. 조건부합격(2026-06-29)의 **MP 차단조건 25건이 Phase 1A(복제)+1B(DBNO/U9) 머지(`e38dfbe`) + PIE 2-client 통과로 해소**됨이 전제. 기록처 5문서 갱신 완료: [`Docs/U1_GateSheet.md`](Docs/U1_GateSheet.md) §A/§D · `Docs/SSOT/Performance.md §5` · `Docs/SSOT/Roadmap.md §7-5` · `Docs/TaskPrompts_Master.md` §A/§B(U1✅·V2✅).
 > **G1 정성 ①~④ = 합격**: ① 스웜손맛(Phase4/5 보완) ② 프리즈 **B안(baseline-only, 하이브리드 미평가)** ③ 사각(V1+B9 Z축) ④ 적500 체감. ⑤ 카드 빌드분기 = **G2 보류**(상태이상 미구현, 이번 범위 아님).
