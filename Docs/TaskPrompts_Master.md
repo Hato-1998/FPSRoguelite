@@ -509,24 +509,45 @@ Game.md + PROGRESS.md + Docs/SSOT/Roadmap.md §7-5 + Docs/SSOT/Performance.md §
 ### U6 — A4 Fragment 마무리
 
 ```
-Game.md + PROGRESS.md 먼저 읽어. Docs/TaskPrompts_Master.md의 유닛 U6(코드 백로그 A4)를 진행한다.
-읽을 SSOT: Docs/SSOT/CombatWeaponCard.md §2-4-1(Fragment 훅 구조)·§2-3(카드), Docs/SSOT/Workflow.md §6.
+[작업] U6 — A4 Fragment 마무리 + AvailableModifiers 확장 (2차 트랙 / 코드 유닛)
 
-- 브랜치: phase/p4b-fragment-finish 분기 (§6-7)
-- 플랜 우선 → 승인 후 Haiku 구현 / Opus 검증. 교체 UI 위젯 콘텐츠는 보류(레이아웃만 후속).
+■ 컨텍스트
+  U5 원거리 적까지 완료(2026-07-01, 머지 cd7de43) → 2차 트랙 진행 중. U6 = 우선순위 #2.
+  무기 모디파이어(Fragment) 시스템의 마지막 구멍(근접 GA 훅 + 슬롯 교체 플로우)을 메운다.
 
-[산출물]
-1. Melee fragment: UFPSRGA_WeaponMelee에 fragment 훅(PreFire/OnHitActor/PostFire 상당) 배선 — 형제 GA(Hitscan/Projectile/ChargeLaser) 패턴 대칭.
-2. Fragment 제거/교체 서버 로직: 슬롯 상한 도달 시 교체 플로우. 기존 안티치트 패턴 준수 — 서버가 발급한 offer 캐시+인덱스 검증(클라는 인텐트만, 임의 fragment 적용 불가).
-3. 콘텐츠 꼬리: 무기별 AvailableModifiers 확장(현재 Rifle 중심+FF 카드 4종) — 어떤 무기에 어떤 fragment를 열지 사용자에게 질문 후 등록.
+■ 먼저 읽을 것
+  Game.md(§0-1) + PROGRESS.md(최신 핸드오프) + Docs/SSOT/Workflow.md §6(빌드/브랜치/모델정책, 필독)
+  + Docs/SSOT/CombatWeaponCard.md §2-4-1(Fragment 훅 구조)·§2-3(카드)
 
-[함정/주의 — stale 정보]
-- PROGRESS 구절 "ModifyChargeTime/OnProjectileSpawn 훅 미완"은 **stale — 둘 다 A3a/A3b에서 이미 구현됨**. 재구현하지 마라(grep으로 확인 후 재사용).
-- MaxStacks 규칙: 훅은 스택마다 적용(MultiShot 2스택=3발), MultiShot은 펠릿당 탄약 소모(잔량 클램프) — 기존 의미 유지.
-- fragment 카드 UI 규칙: 등급 대신 카테고리 라벨(FragmentCategoryText), 수치 빈칸(P4-B-2 확정).
-- 제거/교체는 ThisWeapon 귀속(FFPSRCardDraw.TargetWeapon 서버 세팅) 구조 유지.
+■ 브랜치 / 모델 정책
+  - main(a9457db 이후)에서 phase/p4b-fragment-finish 분기 (Workflow §6-7)
+  - 플랜 우선 → 사용자 승인 후 구현(Haiku 위임)/검증(Opus 직접). 서버 교체 로직·안티치트는 Opus 직접.
+  - 교체 UI 위젯 콘텐츠는 보류(레이아웃만 후속).
 
-[검증] 빌드+스모크 → PIE: 칼에 fragment 적용·발동, 슬롯 초과 시 교체 동작, 교체 악용(임의 인덱스) 서버 거부 → codex-review.ps1 -Base main → PROGRESS 갱신+✅+--no-ff 머지.
+■ 산출물
+  1. Melee fragment 훅: UFPSRGA_WeaponMelee에 fragment 훅(PreFire/OnHitActor/PostFire 상당) 배선 —
+     형제 발사 GA(Hitscan/Projectile/ChargeLaser) 패턴과 대칭.
+  2. Fragment 제거/교체 서버 로직: 슬롯 상한 도달 시 교체 플로우. 기존 안티치트 패턴 준수 —
+     서버 발급 offer 캐시 + 인덱스 검증(클라는 인텐트만, 임의 fragment 적용 불가).
+  3. 콘텐츠 꼬리: 무기별 AvailableModifiers 확장(현재 Rifle 중심+FF 카드 4종) —
+     어떤 무기에 어떤 fragment를 열지 ★사용자에게 질문 후 등록(플랜 단계에서 결정).
+
+■ [재사용 앵커 — grep으로 확인 후 재사용]
+  - 형제 GA 훅: 발사 GA들은 fragment/행동 훅 보유(U18c에서 무기 공통 OnAim/OnFire/OnMiss/OnKill 추가). 근접 GA만 미배선.
+  - 안티치트 offer 캐시: UFPSRCardSubsystem이 서버 발급 offer 캐시+인덱스 검증 보유([[card-pool-routing]] 패턴). 교체도 동형.
+  - ThisWeapon 귀속: FFPSRCardDraw.TargetWeapon 서버 세팅(ResolveTargetInstance가 위조 TargetWeapon 폴백 차단).
+
+■ 함정 / 주의 (stale 정보 주의)
+  - PROGRESS 구절 "ModifyChargeTime/OnProjectileSpawn 훅 미완"은 stale — 둘 다 A3a/A3b에서 이미 구현됨.
+    재구현하지 마라(grep 확인 후 재사용).
+  - MaxStacks 규칙: 훅은 스택마다 적용(MultiShot 2스택=3발), MultiShot은 펠릿당 탄약 소모(잔량 클램프) — 기존 의미 유지.
+  - fragment 카드 UI 규칙: 등급 대신 카테고리 라벨(FragmentCategoryText), 수치 빈칸(P4-B-2 확정).
+  - 제거/교체는 ThisWeapon 귀속 구조 유지.
+
+■ 검증
+  빌드(-WaitMutex) + 헤드리스 스모크 → PIE: 칼에 fragment 적용·발동, 슬롯 초과 시 교체 동작,
+  교체 악용(임의 인덱스) 서버 거부 → Scripts/codex-review.ps1 -Base main(머지게이트)
+  → PROGRESS 갱신 + TaskPrompts §B U6 ✅ → main --no-ff 머지.
 ```
 
 ### U7 — C1 플로우필드 높이/클리어런스
