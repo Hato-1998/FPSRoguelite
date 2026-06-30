@@ -6,6 +6,14 @@
 
 **최종 갱신: 2026-06-30**
 
+## 🔔 핸드오프 (2026-06-30 j) — ✅ U1 재미게이트 + V2 = 합격(사용자 판정), §5 적500 정량만 보류 → 2차 트랙 해금
+> **판정(사용자 결정 2026-06-30)**: U1 = ✅ **합격**(양산 해금), V2 = ✅ **합격**. 조건부합격(2026-06-29)의 **MP 차단조건 25건이 Phase 1A(복제)+1B(DBNO/U9) 머지(`e38dfbe`) + PIE 2-client 통과로 해소**됨이 전제. 기록처 5문서 갱신 완료: [`Docs/U1_GateSheet.md`](Docs/U1_GateSheet.md) §A/§D · `Docs/SSOT/Performance.md §5` · `Docs/SSOT/Roadmap.md §7-5` · `Docs/TaskPrompts_Master.md` §A/§B(U1✅·V2✅).
+> **G1 정성 ①~④ = 합격**: ① 스웜손맛(Phase4/5 보완) ② 프리즈 **B안(baseline-only, 하이브리드 미평가)** ③ 사각(V1+B9 Z축) ④ 적500 체감. ⑤ 카드 빌드분기 = **G2 보류**(상태이상 미구현, 이번 범위 아님).
+> **V2 = 소스 재검증 confirmed**: 6에이전트 read-only 워크플로로 HEAD(`e38dfbe`) 36항목 file:line 대조 — FF(ON 50%/OFF 무피해+관통/런칭 독립)·ChargeLaser(클릭1회 자동차징·빔추적·재클릭무시·무기교체 취소·무크래시·적/아군/관통)·콘솔 치트 11종·W1 3차 교정 2건 전부 confirmed + 사전 2-client PIE 통과.
+> **⚠️ 미실시(정직 기록) = §5 적500 정량 측정**: 패키지 재빌드 + Insights/NetProfiler **미수행**(사용자가 이번 세션 빌드 스킵). **하드캡은 잠정값 유지**(500/통상=스케줄주도) → **콘텐츠 밸런싱/U14 perf 패스로 이월**. 재검증으로 확인된 §5 코드 사실: **NetCullDistance 미구현**(엔진 기본 ~2.25km → 적500서 클라당 전 적 복제 = RepGraph 이전 **1순위 후보 레버**) / "통상 200~350"=코드 상수 아님(스케줄 `MaxAliveCount` 주도) / 하드캡 500·NetUpdateFreq 30/10/5/2Hz·Push Model(RepGraph·Iris 미사용)은 코드 일치.
+> **⚠️ 다음 작업 = 2차 트랙 해금됨**(순서 자유) [[taskprompts-master-roadmap]]: U5 원거리적 / U6 Fragment / U7 플로우필드 높이 / U8 GMS / U10 SaveGame / **U15 1P 무기 애님**(U1 손맛 합격 → 폴리시 우선순위) / **U17 플레이어 설정 시스템**(게이트 독립, V3+오디오설정 MVP 기반). + 후속: §5 perf 정량 측정(이월)·DBNO 밸런스(블리드아웃·B16)·U11b 멀티 E2E.
+> **미커밋(사용자 자산, 무관)**: `Content/*.uasset`(WBP_GameHUD·맵·머티리얼·SM_SpawnGate·BP_StructuredSpawner)·`Config/DefaultEditor.ini`.
+
 ## 🔔 핸드오프 (2026-06-30 i) — PM 최신화: 머지·push·브랜치정리 완료(git 실측), 컨설트 파킹, 다음=U1 마무리(§5 적500 재측정+V2)
 > **PM 부팅 git 실측 정정**: 핸드오프 h가 "사용자 확인 대기"로 남긴 ①origin push ②`phase/p1b-dbno` 삭제는 **git상 이미 완료**다 — `main↔origin/main` = **0/0 동기화**(push됨), 로컬 브랜치 = `main` 단독(phase 삭제됨). 작업트리 깨끗(미커밋=사용자 자산뿐).
 > **이번 PM 세션 = 최신화 + 핸드오프**: ① 위 push/정리 상태 정정 ② **건설 구조물 컨설트**(`Docs/Review/20260629-build-structures.md`) = **아이디어 풀 파킹**(§E E1~E3, **정식 로드맵/SSOT 미등재** — 사용자 지침). 채택은 했으나 코어 잠금 후 정식화. MVP=센트리 포탑+메디컬 비콘(비파괴/비차단/충전·시간제), ❌XP타워·❌바리케이드 기각.

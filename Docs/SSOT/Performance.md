@@ -10,13 +10,15 @@
 
 > 이 프로젝트 최대 리스크는 Hero Shooter 과설계가 아니라, **적 500마리 협동의 성능/복제 예산이 미수치화된 점**이다. 아래는 잠정값이며 Unreal Insights + NetProfiler로 검증·조정한다.
 > **⚠️ 검증 시점 (확정 2026-06-10)**: 당초 P2 예정이었으나 미실시 → **P4-C 무기 콘텐츠(6종) 완료 직후, 코어 재미 게이트(§7-5)와 함께 일괄 측정**한다. 그때까지 본 §5 수치는 *미검증 가정*이며, 그 위에 쌓인 P4 콘텐츠는 검증 결과에 따라 조정될 수 있다.
+>
+> **⚠️ 측정 미실시 갱신 (2026-06-30, U1 게이트)**: U1은 G1 재미(①~④) + MP 조건으로 **합격**했으나, **§5 적500 정량 측정(Insights/NetProfiler)은 미실시(보류)** — 패키지 재빌드 미수행(사용자 결정). 따라서 **하드캡은 아래 잠정값 유지**, 적500 정량 + 하드캡 확정은 **콘텐츠 밸런싱/U14 perf 패스로 이월**. **코드 실측 확인분(2026-06-30, 6에이전트 read-only 워크플로)**: 하드캡 500(`MaxActiveEnemies` constexpr)·NetUpdateFreq 티어(S0 30/S1 10/S2 5/S3 2Hz, 거리기반·티어변경시만 set)는 코드 일치 / **NetCullDistance는 미구현**(아래 교정) / 복제 = Push Model(`net.IsPushModelEnabled=1`), **RepGraph·Iris 미사용** → 판정 시작점 Push 맞음.
 
 | 항목 | 잠정 목표 | 비고 |
 |---|---|---|
-| 최대 활성 적 수(서버) | 하드캡 500, 통상 200~350 | 풀 고갈 시 스폰 보류 |
+| 최대 활성 적 수(서버) | 하드캡 500(`MaxActiveEnemies` constexpr, 코드 실측 2026-06-30), 통상=스케줄 `MaxAliveCount`/`AliveCountByLevel` 주도(코드 폴백캡 300) | 풀 고갈 시 스폰 보류. ⚠️"통상 200~350"은 잠정 문서값 — 실측 통상치는 활성 스케줄 에셋 MaxAliveCount |
 | 클라이언트별 관련(relevant) 적 | 상한 ~150 | relevancy cull |
-| 적 NetCullDistance | 잠정 ~40m (조정 대상) | 화면 밖 컬링 |
-| 적 NetUpdateFrequency | 위협도별 S0 30Hz / S1 10Hz / S2 5Hz / S3 2Hz | Significance 연동 |
+| 적 NetCullDistance | **미구현**(엔진 기본 ~2.25km 사용 — 코드 실측 2026-06-30) | ⚠️ relevancy cull 없음 → 적500서 호스트가 클라당 전 적 복제. **RepGraph 이전 1순위 후보 레버**(net-cull 도입/relevancy) |
+| 적 NetUpdateFrequency | 위협도별 S0 30Hz / S1 10Hz / S2 5Hz / S3 2Hz (코드 실측 일치 2026-06-30) | 거리기반(최근접 플레이어), 티어변경시만 SetNetUpdateFrequency(적500 핫패스 가드, W1 P2) |
 | 적 Dormancy | 원거리·비활성 DORMANT, 접근 시 wake | |
 | 적 복제 상태 | Transform(위치/Yaw)만 최소 복제, 체력=서버 권위 | 히트/사망 코스메틱은 GameplayMessage/Cue (복제 액터 상태 아님) |
 | XP/픽업 | 개수 cap + 인접 병합, 자석=클라 코스메틱·서버 권위 수령 | |
