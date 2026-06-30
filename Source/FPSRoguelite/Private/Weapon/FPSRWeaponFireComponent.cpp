@@ -465,6 +465,17 @@ void UFPSRWeaponFireComponent::TickComponent(float DeltaTime, ELevelTick TickTyp
 		PendingRiseYaw = FMath::Clamp(PendingRiseYaw, -MaxYaw, MaxYaw);
 	}
 
+	// On fire release, drop the un-applied smoothed-rise backlog so the view does not keep climbing after the trigger
+	// is released. Sustained fire builds a PendingRise* queue (smoothed in over time); once the player stops firing
+	// (and stops compensating) any leftover would otherwise play out as an unwanted upward/lateral drift. Applies to
+	// ALL fire modes (user decision 2026-06-30) — recoil only rises WHILE the trigger is held. Note: a quick
+	// single-shot tap therefore delivers only the recoil applied before release; hold the button for the full kick.
+	if (!bWantsToFire)
+	{
+		PendingRisePitch = 0.0f;
+		PendingRiseYaw = 0.0f;
+	}
+
 	// 1) Smoothly apply any pending up-kick (snappy rise), accumulating recovery debt.
 	if (PendingRisePitch > 0.0f)
 	{
