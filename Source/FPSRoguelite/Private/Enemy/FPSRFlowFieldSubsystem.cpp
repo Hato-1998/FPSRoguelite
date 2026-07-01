@@ -146,13 +146,24 @@ void UFPSRFlowFieldSubsystem::BuildObstacleMask()
 	ObjParams.AddObjectTypesToQuery(ECC_WorldStatic);
 	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(FPSRFlowObstacle), false);
 
-	// U7 Part A pass 1 — per-cell walkable floor height (2.5D). ONE downward multi-hit trace per cell picks the TOPMOST
-	// up-facing (walkable) static surface, so stairs / ramps / raised platforms are sampled at their real height
-	// instead of one global plane, and a ceiling's downward-facing underside is rejected. Same ECC_WorldStatic channel
-	// the enemy ground-follow (AFPSREnemyBase::ApplyGravity) uses, so the sampled height matches where enemies rest.
-	// One-time on the fixed map — never in the 0.2s recompute.
+	// U7 Part A — per-cell REACHABLE walking-surface height (2.5D height field). A naive "take the topmost walkable hit"
+	// would wrongly accept a wall/roof/ceiling top (a walkable-normal surface below the apex) as floor, run the later
+	// occupancy probe ABOVE it, and mark the cell/edges traversable — steering the swarm into walls or breaking indoor
+	// door/wall connectivity (Codex P2). Instead, in three one-time steps on the fixed map:
+	//   (1) collect EVERY up-facing static surface per cell (candidate walking heights) via one down multi-hit trace,
+	//   (2) SEED from the known ground floor (GridOrigin.Z, the PlayerStart trace), then
+	//   (3) FLOOD outward, accepting a neighbour surface only if it is within one climbable step (ActiveClimbableStepHeight)
+	//       of the current cell's surface — so the walking surface climbs ramps/stairs onto platforms but NEVER jumps to a
+	//       disconnected ceiling/obstacle top. Cells the flood never reaches have no reachable floor -> blocked, which
+	//       preserves the pre-U7 "escape flow toward open ground" behaviour for obstacle-top cells.
+	// Same ECC_WorldStatic channel the enemy ground-follow (AFPSREnemyBase::ApplyGravity) uses. Never in the 0.2s recompute.
+	const int32 NumCells = GridDimX * GridDimY;
 	const float ApexZ = GridOrigin.Z + ActiveProbeApexAboveOrigin;
 	FCollisionQueryParams FloorQP(SCENE_QUERY_STAT(FPSRFlowFloor), false);
+
+	// (1) Candidate up-facing surfaces per cell (build-time scratch; freed at function end).
+	TArray<TArray<float>> CellCandidates;
+	CellCandidates.SetNum(NumCells);
 	for (int32 CY = 0; CY < GridDimY; ++CY)
 	{
 		for (int32 CX = 0; CX < GridDimX; ++CX)
@@ -164,21 +175,83 @@ void UFPSRFlowFieldSubsystem::BuildObstacleMask()
 			const FVector Base(CenterX, CenterY, ApexZ - MaxProbeDrop);
 
 			TArray<FHitResult> Hits;
-			World->LineTraceMultiByObjectType(Hits, Apex, Base, ObjParams, FloorQP); // near->far == top->bottom
-			float FloorZ = MAX_flt;
+			World->LineTraceMultiByObjectType(Hits, Apex, Base, ObjParams, FloorQP);
 			for (const FHitResult& H : Hits)
 			{
-				if (H.ImpactNormal.Z >= WalkableNormalZ) // first walkable (up-facing) surface from the top
+				if (H.ImpactNormal.Z >= WalkableNormalZ) // up-facing (walkable) surface; rejects ceiling undersides / steep faces
 				{
-					FloorZ = H.ImpactPoint.Z;
-					break;
+					CellCandidates[Cell].Add(H.ImpactPoint.Z);
 				}
 			}
-			CellFloorZ[Cell] = FloorZ;
-			if (FloorZ == MAX_flt)
+		}
+	}
+
+	// (2) Seed the flood from every cell holding a candidate within one climbable step of the known ground floor.
+	for (int32 i = 0; i < NumCells; ++i)
+	{
+		CellFloorZ[i] = MAX_flt; // unassigned
+	}
+	TQueue<int32> FloorFrontier;
+	for (int32 Cell = 0; Cell < NumCells; ++Cell)
+	{
+		for (const float H : CellCandidates[Cell])
+		{
+			if (FMath::Abs(H - GridOrigin.Z) <= ActiveClimbableStepHeight)
 			{
-				BlockedField[Cell] = true; // no walkable floor in this column -> not standable
+				CellFloorZ[Cell] = H;
+				FloorFrontier.Enqueue(Cell);
+				break;
 			}
+		}
+	}
+
+	// (3) Flood: a neighbour inherits its candidate closest to (and within one climbable step of) the current surface.
+	static const int32 FDX[4] = { 1, -1, 0, 0 };
+	static const int32 FDY[4] = { 0, 0, 1, -1 };
+	int32 FloodCell;
+	while (FloorFrontier.Dequeue(FloodCell))
+	{
+		const int32 CX = FloodCell % GridDimX;
+		const int32 CY = FloodCell / GridDimX;
+		const float H = CellFloorZ[FloodCell];
+		for (int32 N = 0; N < 4; ++N)
+		{
+			const int32 NX = CX + FDX[N];
+			const int32 NY = CY + FDY[N];
+			if (NX < 0 || NX >= GridDimX || NY < 0 || NY >= GridDimY)
+			{
+				continue;
+			}
+			const int32 NIdx = NY * GridDimX + NX;
+			if (CellFloorZ[NIdx] != MAX_flt)
+			{
+				continue; // already assigned
+			}
+			float BestH = MAX_flt;
+			float BestDelta = ActiveClimbableStepHeight;
+			for (const float CandH : CellCandidates[NIdx])
+			{
+				const float D = FMath::Abs(CandH - H);
+				if (D <= BestDelta)
+				{
+					BestDelta = D;
+					BestH = CandH;
+				}
+			}
+			if (BestH != MAX_flt)
+			{
+				CellFloorZ[NIdx] = BestH;
+				FloorFrontier.Enqueue(NIdx);
+			}
+		}
+	}
+
+	// Cells the flood never reached have no reachable walking surface -> block (escape-flow toward open ground, not zero-flow).
+	for (int32 Cell = 0; Cell < NumCells; ++Cell)
+	{
+		if (CellFloorZ[Cell] == MAX_flt)
+		{
+			BlockedField[Cell] = true;
 		}
 	}
 

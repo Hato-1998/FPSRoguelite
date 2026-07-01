@@ -119,9 +119,11 @@ private:
 	 *  grid entry never leaks flow). Lets a 1-cell-wide doorway stay open while a thin boundary wall still blocks. */
 	TArray<bool> EdgeTraversable;
 
-	/** Per-cell walkable floor Z (world), sampled ONCE in BuildObstacleMask (topmost up-facing static surface). BUILD-
-	 *  TIME state ONLY: the occupancy/edge probes + climbable-step edge gate read it during the build; RecomputeField
-	 *  and SampleFlowDirection MUST NOT (the 0.2s BFS + 500-enemy sample stay pure array reads). MAX_flt = no floor. */
+	/** Per-cell REACHABLE walking-surface Z (world), computed ONCE in BuildObstacleMask: candidate up-facing surfaces
+	 *  are flood-filled from the ground floor accepting only one-climbable-step height changes, so ramps/stairs climb
+	 *  onto platforms but a disconnected wall/ceiling top is never mistaken for floor. BUILD-TIME state ONLY: the
+	 *  occupancy/edge probes + climbable-step edge gate read it during the build; RecomputeField and SampleFlowDirection
+	 *  MUST NOT (the 0.2s BFS + 500-enemy sample stay pure array reads). MAX_flt = no reachable floor (cell blocked). */
 	TArray<float> CellFloorZ;
 
 	bool bFieldReady = false;
