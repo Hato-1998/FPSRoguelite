@@ -274,7 +274,16 @@ void UFPSRFlowFieldSubsystem::BuildObstacleMask()
 			const int32 NIdx = NY * GridDimX + NX;
 			if (CellFloorZ[NIdx] != MAX_flt)
 			{
-				continue; // already assigned
+				// Already assigned — a cell holds ONE walking surface (2.5D height field: one Z per XY). This is the
+					// DELIBERATE, approved scope boundary: a true multi-layer grid (separate cell states per stacked
+					// surface) would multiply the cell count by the layer count and blow the 0.2s multi-source BFS budget
+					// for the 500-enemy swarm (Performance 5-2, first-principles 1 — 3D nav is intentionally rejected).
+					// Consequence: where a walkable deck overlaps a walkable floor at the same XY (bridge/mezzanine over
+					// ground), the ground wins (seeded first) and the upper deck routes as the lower level. Accepted: the
+					// swarm chases players who are almost always on the ground, and the reference layout (Spell Brigade)
+					// is single-surface-per-XY. FUTURE SEAM for true stacked play: a layered/portal grid (Z-indexed cells
+					// + inter-layer edges), out of scope here (Codex P2 — by design, not a defect).
+					continue;
 			}
 			float BestH = MAX_flt;
 			bool bBestSloped = false;
