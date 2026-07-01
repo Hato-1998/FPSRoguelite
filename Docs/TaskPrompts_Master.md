@@ -553,24 +553,46 @@ Game.md + PROGRESS.md + Docs/SSOT/Roadmap.md §7-5 + Docs/SSOT/Performance.md §
 ### U7 — C1 플로우필드 높이/클리어런스
 
 ```
-Game.md + PROGRESS.md 먼저 읽어. Docs/TaskPrompts_Master.md의 유닛 U7(코드 백로그 C1)을 진행한다.
-읽을 SSOT: Docs/SSOT/Performance.md §5-2(플로우필드), Docs/SSOT/Enemy.md §2-6.
+[작업] U7 — C1 플로우필드 높이/클리어런스 (2차 트랙 / 코드 유닛, perf 민감)
 
-[선행 확인] U1 게이트의 PIE 관찰(계단/높이 주행, 좁은 통로)에서 실제 문제가 확인됐는지 먼저 PROGRESS에서 확인 — 관찰 결과가 없으면 사용자에게 우선순위 재확인 후 착수(PIE 의존 유닛).
+■ 컨텍스트
+  U5(원거리 적)·U6(Fragment) 완료 → 2차 트랙 진행 중. U7 = 우선순위 #3(HEAD 18db390).
+  검증된 스웜 루프의 "이동 품질" 하드닝 — 매 런·모든 적에 영향.
 
-- 브랜치: phase/p2-flowfield-height 분기 (§6-7)
-- 플랜 우선 → 승인 후 Haiku 구현 / Opus 검증
+■ [선행 확인 — 이미 충족]
+  U1 §5 정량 PIE는 보류됐으나, 대상 결함은 이미 문서화돼 있어 착수 정당함(우선순위 재확인 불요):
+   · 좁은 도어웨이 과차단 = balance/pass2 PIE 잔여(PROGRESS)·Performance §5-2 C1 "경계 벽 양쪽 셀 차단 트레이드오프"
+   · 멀티레벨/높이(계단·단차) 경로 품질 = §5-2 C1 후속 항목
+  → 이 두 개가 U7의 타깃. 추가 관측 필요 없음.
 
-[산출물]
-1. 멀티레벨/높이 인지 BFS 샘플링(계단·단차에서 적 경로 품질).
-2. 셀 클리어런스 인지 프로브: 현재 전셀 오버랩 방식이 경계 벽 양쪽 셀을 차단(좁은 통로 과차단) — 해소.
+■ 먼저 읽을 것
+  Game.md(§0-1) + PROGRESS.md(최신) + Docs/SSOT/Workflow.md §6(필독)
+  + Docs/SSOT/Performance.md §5-2(플로우필드 — balance/pass2 데이터드리븐 바운드/clearance 반영분 포함)
+  + Docs/SSOT/Enemy.md §2-6
 
-[함정/주의]
-- AFPSREnemyBase::ApplyGravity down-trace는 **의도적으로 ECC_WorldStatic만** 쿼리(폰/투사체 위 착지 방지) — 바닥 콘텐츠 규칙(Mobility=Static+Block)은 유지, **WorldDynamic 추가 금지**(비행 투사체 위 착지 부작용).
-- 0.2s 간격 멀티소스 BFS 예산(§5-2) 초과 금지 — 높이 샘플링 추가 비용을 측정해 플랜에 명시.
-- 그리드/셀 크기(200cm) 변경은 전 맵 영향 — 변경 시 제1원리 3줄 명시.
+■ 브랜치 / 모델 정책
+  - main(18db390 이후)에서 phase/p2-flowfield-height 분기 (Workflow §6-7)
+  - 플랜 우선 → 사용자 승인 후 구현(Haiku 위임)/검증(Opus 직접).
 
-[검증] 빌드+스모크 → PIE: 계단/단차 추격, 좁은 통로 통과 → codex-review.ps1 -Base main → PROGRESS 갱신+✅+--no-ff 머지.
+■ 산출물
+  1. 멀티레벨/높이 인지 BFS 샘플링(계단·단차에서 적 경로 품질).
+  2. 셀 클리어런스 인지 프로브: 현재 전셀 오버랩 방식이 경계 벽 양쪽 셀을 차단(좁은 통로 과차단) — 해소.
+
+■ [재사용 앵커 — grep 확인 후 재사용]
+  - 플로우필드: UFPSRFlowFieldSubsystem(BFS 라우팅·장애물 마스크) + AFPSRFlowFieldBoundsVolume
+    (balance/pass2에서 데이터드리븐 바운드볼륨 + clearance-aware 프로빙 기도입 — 그 위에 높이/좁은통로 해소).
+  - 지면 추종: AFPSREnemyBase::ApplyGravity down-trace.
+
+■ 함정 / 주의
+  - ApplyGravity down-trace는 의도적으로 ECC_WorldStatic만 쿼리(폰/투사체 위 착지 방지). 바닥 규칙(Mobility=Static+Block) 유지,
+    **WorldDynamic 추가 금지**(비행 투사체 위 착지 부작용).
+  - 0.2s 간격 멀티소스 BFS 예산(§5-2) 초과 금지 — 높이 샘플링 추가 비용을 측정해 플랜에 명시.
+    ⚠️ §5 적500 정량이 보류 상태라 BFS 비용 증가는 특히 보수적으로(적500 핫패스).
+  - 그리드/셀 크기(200cm) 변경은 전 맵 영향 — 변경 시 제1원리 3줄 명시.
+
+■ 검증
+  빌드(-WaitMutex) + 헤드리스 스모크 → PIE: 계단/단차 추격, 좁은 통로 통과(과차단 해소)
+  → Scripts/codex-review.ps1 -Base main(머지게이트) → PROGRESS 갱신 + TaskPrompts §B U7 ✅ → main --no-ff 머지.
 ```
 
 ### U8 — C2 GameplayMessageSubsystem 재구현
