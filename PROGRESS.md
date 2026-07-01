@@ -6,6 +6,11 @@
 
 **최종 갱신: 2026-07-01**
 
+## 🔔 핸드오프 (2026-07-01 c) — ✅ **U6 완료**(근접 fragment 훅 + 슬롯상한/제거/교체 안티치트 + 콘텐츠 배선 + 사용자 PIE 통과) → main `--no-ff` 머지. 다음=2차 트랙 남은 유닛
+> **U6 종결**: 코드(근접 PreFire/OnHitActor/PostFire 훅 · `MaxFragmentSlots`/`RemoveFragment`/`ServerSelectCardReplacement` 안티치트) + 콘텐츠(7무기 `UnlockableFeatures` 아키타입 매트릭스 배선, headless commandlet) + **사용자 PIE 통과** → `phase/p4b-fragment-finish` → `main --no-ff` 머지. 검증: 빌드×3 + 헤드리스 스모크×3 + Codex 머지게이트(P1 해소·P2 교정/수용). 브랜치 정리(로컬·원격).
+> **교체 UI = 후속 유닛 시드**: at-cap fragment 제시 + 드롭 선택 → `ServerSelectCardReplacement`(데이터·서버 경로 완비, UI만 남음). + (선택) 매트릭스 밖 기존 항목 정리(Grenade/ChargeLaser/Bazooka MultiShot, Bazooka ExplosiveRounds — 비파괴 유지 중).
+> **⚠️ 다음 = 2차 트랙 남은 유닛**(순서 자유) [[taskprompts-master-roadmap]]: U7 플로우필드 높이 / U8 GMS / U10 SaveGame / U15 1P 무기 애님 / U17 플레이어 설정. 새 작업=TaskPrompts 프롬프트 사용.
+
 ## 🔔 핸드오프 (2026-07-01 b) — ✅ **U6 코드 완료·검증**(근접 fragment 훅 + 슬롯상한/제거/교체 안티치트 + Codex 머지게이트 P1/P2 교정) → 다음=콘텐츠 등록 + 사용자 PIE → main 머지
 > **브랜치**: `phase/p4b-fragment-finish`(main `a758d9d`에서 분기, origin push됨). 3커밋: `f598dad feat(U6)` + `524f8a8 fix(U6)`(Codex P1) + `51b0a60 fix(U6)`(Codex P2-b). **코드만**(콘텐츠 미생성 — 원칙).
 > **① Melee 훅**(Haiku 위임→Opus 검증): `UFPSRGA_WeaponMelee`에 PreFire/OnHitActor/PostFire 배선(형제 발사 GA 대칭). **트리거 훅(OnFire/OnMiss/OnKill)은 U18c 기존 보유**(앵커/PROGRESS "근접 미배선"은 stale였음 — grep 확인). ModifyShotCount·OnImpact는 근접=구체오버랩 의미상 제외(추가 스윙=재타격 익스플로잇·트레이스 임팩트 없음) → **BounsDamage(OnHitBonusDamage)가 칼에 발동**.
