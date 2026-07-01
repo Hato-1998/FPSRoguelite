@@ -74,4 +74,4 @@
 - 무기 교체 = 숫자키 **1/2/3**(`IA_EquipSlot1~3`) / 사격 = 좌클릭
 - **UE5.7 IMC 매핑은 Python `set_editor_property` 미반영 → 에디터 수동**(IA 에셋 생성은 Python OK)
 - 카드선택 = **레벨업/미션클리어 시 전역 프리즈**(적·플레이어 정지)에 전원 선택 → 재개(§2-2, `Docs/SSOT/RunFlow.md`). 오프닝 시드 2장은 런 시작 시. (라운드제·정비시간 폐지 2026-06-04)
-- git: 사용자 콘텐츠(L_Sandbox 맵, DA_Weapon_Rifle/Knife @ `Content/Weapons/DataTable/`)는 디스크 존재·**미커밋**(untracked)
+- git: 사용자 콘텐츠(L_Sandbox 맵, DA_Weapon_Rifle/Knife @ `Content/Weapons/DataTable/` 등)는 **커밋 완료**(LFS tracked, 2026-07-01 확인). 신규 콘텐츠 저작 후엔 Phase 종료 시 `git status`로 동반커밋 확인.

@@ -15,7 +15,7 @@
 - 시간 스케일링: `UEnemyScalingProfile` DataAsset — HP/공격력 커브 (이속 불변, 스탯별 슬롯 확장 가능)
 - **개체별 이속 편차**(확정 2026-05-30): 아키타입 기본속도는 고정, **스폰 시 개체마다 ±10% 무작위 편차** 부여 → 단일 Blob 밀착 방지, 스웜을 입체적·유기적으로 분산해 카이팅 재미. 비용 0(스폰 시 1회 곱셈)
 - **원거리 공격 규격**(확정 2026-05-30): 기본 **투사체(Projectile)** 방식(눈으로 보고 회피 가능)으로 강제. 히트스캔 사용 시 **차징 유예 + 사전경고 인디케이터 필수**(부조리 탄막 금지)
-- **공격 토큰(Attack Token)**(확정 2026-05-30): 플레이어당 **동시에 공격을 시도할 수 있는 적 개체 수 상한**(서버 권위). 수백 마리 동시 사격/특수공격의 불합리 방지 + §5 "적 공격 판정 서버 배치"의 구현 수단. (토큰 개수·FF 기본 10% 등 수치는 밸런스 후속)
+- **공격 토큰(Attack Token)**(확정 2026-05-30): 플레이어당 **동시에 공격을 시도할 수 있는 적 개체 수 상한**(서버 권위). 수백 마리 동시 사격/특수공격의 불합리 방지 + §5 "적 공격 판정 서버 배치"의 구현 수단. (토큰 개수 등 수치 튜닝은 밸런스 후속 — 기전=U5 구현 완료, 아래 참조; FF 배율은 §2-10)
   - **구현(U5, 2026-06-30)**: 근접/원거리 **이원 토큰**. ① 근접 = `UFPSREnemySpawnSubsystem` per-pass 순간 게이트(`AttackTokenLimit=10`, 매 패스 데미지 적용 적 수 상한). ② 원거리 = **held 토큰**(`RangedAttackTokenLimit=3`, 플레이어당 동시 **차징 중** 적 수 상한; 차징 시작에 획득→발사/중단/teardown에 반납, `TryAcquireRangedToken`/`ReleaseRangedToken`/`IsRangedTokenAvailable`, 키=타겟 PC). held 모델이라야 여러 패스에 걸친 차징의 동시 위협을 제한 + 동시 적탄(복제 투사체)을 자연 상한. 수치는 밸런스 후속.
 - **원거리 아키타입(U5, 2026-06-30 — B1)**: `AFPSRRangedEnemyBase : AFPSREnemyBase`(경량 Pawn, **GAS 無**). **사거리 정지 → 차징(예고) → 발사 → 쿨다운** 사이클을 서버 배치 패스에서 구동. 베이스에 가상 `ServerTickAttack(FFPSRServerAttackContext)` 시임 추가(근접 거동을 이 override로 이전 — 거동 동일), 원거리는 차징/발사로 override. **차징·쿨다운=프리즈-멈춤 누산기**(패스가 §2-2 프리즈에 early-return하므로 `DeltaSeconds` 미가산=자동 정지). 차징 시작/종료에 대상 PC `ClientNotifyRangedTarget`(기존 Client/Reliable RPC)로 사전경고 생산(소비자=§2-14 `ReceiveRangedTarget`, 신규 RPC 0). LOS 차단 시 차징 안 함(트레이스=`ECC_WorldStatic`+`ECC_FPSRPlayerPawn`이라 벽·**닫힌 문 leaf** 너머 헛발사/관통 방지; 문은 단방향 파괴라 발사 후 재차단 없음 → LOS 게이트만으로 관통 완전 차단, Codex 머지게이트 P2 교정). DBNO/!Alive 타겟은 배치 alive 필터로 자동 제외 + 차징 중 타겟 다운 시 Abort+경고해제. 투사체=기존 `AFPSRProjectile` Team=Enemy 재사용(신규 데미지 코드 0). 약점=투사체 임팩트 자동. **콘텐츠**: BP 자식이 `ProjectileClass`·차징/쿨다운/사거리/데미지 등 EditDefaultsOnly 값 저작.
 - **데이터 주도 아키타입 혼합(U5, 2026-06-30)**: 신규 `UFPSREnemyRosterDataAsset`(`DA_RunSchedule.EnemyRoster`가 참조, 디렉터 StartRun이 스폰 서브시스템에 push). 폴리모픽 `UFPSREnemySpawnRule`(EditInlineNew, 확장성-우선=중앙 enum/switch 無; MVP=`_Static` class+weight, `FFPSREnemySpawnContext{RunClock,PartyLevel}` 전달로 시간/레벨 스케일 룰 시임 예약). 스폰 서브시스템이 가중랜덤으로 클래스 선택 + **동질 풀을 클래스별 매칭 재사용**. 빈 로스터=기존 단일 `EnemyClass` 폴백(무회귀).
@@ -27,7 +27,7 @@
 - 발사체: **클라 예측 + 서버 검증**
   - 스나이퍼/레이저 = 히트스캔, 바주카/유탄 = 실제 발사체(소수), 샷건 = 다중 히트스캔, 연사 = 히트스캔/경량
 - 데미지: **플레이어 GAS 계산 → 적 HealthComponent.ApplyDamage 브릿지** (적 ASC 없음)
-- **아군 오사(Friendly Fire)**(확정 2026-05-30): 판정은 존재하나 아군 적중 시 **몬스터 데미지의 10%만 적용**(기본값, 불쾌감 완화). 호스트가 세션 설정에서 **FF 적용 토글** 가능. 데미지 브릿지에 팀/FF 배율 경로를 둠(구현 P5)
+- **아군 오사(Friendly Fire)**(확정 2026-05-30 · **구현 P5 완료**): 판정은 존재하나 **기본 OFF**(`bFriendlyFireEnabled=false` → 아군 무피해). 호스트가 세션 설정에서 **FF 토글** 가능(`SetFriendlyFireEnabled`/디버그 `FPSR.SetFriendlyFire`); **ON 시 아군 적중 = 몬스터 데미지의 50%**(`FriendlyFireDamageScale=0.5f`). 데미지 브릿지 팀/FF 배율 경로=`FPSRCombatStatics`. 자폭(폭발)·넉백은 FF 플래그와 독립.
 - 토폴로지: **리슨서버 P2P** (Steam Sockets/EOS 세션, P5에서 구축)
 - **개발 방법론: P1부터 Net-aware (서버 권위 + Push Model), PIE 2-client 상시 검증.** 솔로로 만들고 나중에 리플리케이션 retrofit 금지
 - GAS ASC Replication Mode: 솔로 = Minimal, 협동 = Mixed
