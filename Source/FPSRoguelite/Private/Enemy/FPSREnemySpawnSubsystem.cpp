@@ -409,9 +409,14 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 				FlowDir = FlowDir.GetSafeNormal();
 			}
 
-			// Stop advancing toward the player within StopDistance (still separate to avoid stacking on them).
+			// Stop advancing toward the player only when within StopDistance AND at roughly the same height (same layer).
+			// The nearest-player test is XY-only (DistSquaredXY above), so a player on an overlapping upper deck (U7
+			// multi-layer) reads as XY-close but is a storey up; without the vertical gate the enemy would halt
+			// underneath them instead of following the flow up the connecting stair. Reuse the melee vertical gap. On a
+			// flat map AttackVertGap ~= 0 <= AttackVerticalRange, so this is a no-op (no regression).
 			const float StopDistSq = FMath::Square(Enemy->GetStopDistance());
-			const FVector Desired = (BestDistSq > StopDistSq) ? FlowDir : FVector::ZeroVector;
+			const bool bAtStopDistance = (BestDistSq <= StopDistSq) && (AttackVertGap <= AttackVerticalRange);
+			const FVector Desired = bAtStopDistance ? FVector::ZeroVector : FlowDir;
 
 			// Combine flow + separation; TickServerMovement normalizes and moves at CurrentMoveSpeed. Face the player
 			// (FlowDir points toward them, direct near them) — NOT MoveDir, whose separation jitter would spin the enemy.
