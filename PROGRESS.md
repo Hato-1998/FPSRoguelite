@@ -6,6 +6,12 @@
 
 **최종 갱신: 2026-07-01**
 
+## 🔔 핸드오프 (2026-07-01 d) — 📝 **SSOT·메모리 오염 정리**(감사 후속, 별도 main 클론 FPSRoguelite2) → main 커밋 `54d0dc7` push. 활성 U7(`phase/p2-flowfield-height`)과 분리·무접촉
+> **배경**: 별도 클론(FPSRoguelite2)이 origin/main보다 **213커밋 뒤처짐** → `git reset --hard origin/main`(GIT_LFS_SKIP_SMUDGE, 문서 텍스트만 최신화·바이너리는 LFS 포인터 유지)로 동기화 후 문서만 교정. **U7 phase 브랜치(다른 클론)는 무접촉**.
+> **리포 교정(커밋 `54d0dc7`, 8파일)**: ① Enemy.md §2-10 아군 오사 **10%→50%**(`FriendlyFireDamageScale=0.5f`)·**기본 OFF**(`bFriendlyFireEnabled=false`)·구현 P5 완료 ② §2-6 공격토큰 곁가지 "FF 10%" 제거(토큰 10/3 U5 구현) ③ Roadmap §7-3 **P5 ✅**(FF·DBNO 완료 / Iris=비채택(Push 유지)·NetProfiler=U14 이월) ④ Game.md §9 "미커밋(untracked)" 불릿 교정(L_Sandbox·DA_Weapon 전부 tracked) ⑤ AGENTS.md **핵심 4원칙**(원칙4 추가) ⑥ CLAUDE/AGENTS/ConsultLoop "Hero Shooter 아님" **긍정형** 정렬(제1원리 앞세움) ⑦ CombatWeaponCard §2-3 카드라우팅 **U6 반영**(행동 fragment=미션 `UnlockableFeatures`, `AvailableModifiers` 폐지 — [[card-pool-routing]] override 해소) ⑧ TaskPrompts §B **U9=✅**(`e38dfbe` DBNO Phase1B, `UFPSRReviveComponent` 근접 자동부활)·**U11b=✅**(사용자 2-PC Steam E2E 확인).
+> **메모리 교정(리포 밖, `E--Git-Project-FPSRoguelite\memory\`)**: balance-pass2("다음=W1"→dated history·GC 경로 `Meshs/` 보정)·taskprompts-master-roadmap(U7 진행중/U9·U11b 완료)·codex-review-gate(`Docs/reviews`→`Docs/codex-reviews` ×2)·p6a-gameflow(.uproject 해결 `15d4e34`·루프 닫힘)·MEMORY.md 인덱스 동기.
+> **⚠️ 다음 = 활성 U7 계속**(다른 클론 `phase/p2-flowfield-height`, 미머지) 또는 2차 트랙 남은 유닛(U8/U10/U15/U17).
+
 ## 🔔 핸드오프 (2026-07-01 c) — ✅ **U6 완료**(근접 fragment 훅 + 슬롯상한/제거/교체 안티치트 + 콘텐츠 배선 + 사용자 PIE 통과) → main `--no-ff` 머지. 다음=2차 트랙 남은 유닛
 > **U6 종결**: 코드(근접 PreFire/OnHitActor/PostFire 훅 · `MaxFragmentSlots`/`RemoveFragment`/`ServerSelectCardReplacement` 안티치트) + 콘텐츠(7무기 `UnlockableFeatures` 아키타입 매트릭스 배선, headless commandlet) + **사용자 PIE 통과** → `phase/p4b-fragment-finish` → `main --no-ff` 머지. 검증: 빌드×3 + 헤드리스 스모크×3 + Codex 머지게이트(P1 해소·P2 교정/수용). 브랜치 정리(로컬·원격).
 > **교체 UI = 후속 유닛 시드**: at-cap fragment 제시 + 드롭 선택 → `ServerSelectCardReplacement`(데이터·서버 경로 완비, UI만 남음). + (선택) 매트릭스 밖 기존 항목 정리(Grenade/ChargeLaser/Bazooka MultiShot, Bazooka ExplosiveRounds — 비파괴 유지 중).
