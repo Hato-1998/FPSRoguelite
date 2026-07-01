@@ -86,6 +86,12 @@ private:
 	// ground-snap can actually climb, so ApplyGravity needs no change. A bounds volume can override per map.
 	static constexpr float DefaultClimbableStepHeight = 45.0f;
 
+	// Hard cap on the (flat-step) climbable height, enforced over any bounds-volume override: a FLAT ledge taller than
+	// the enemy's per-recheck ground snap (AFPSREnemyBase::GroundSnapTolerance = 60) can be opened by the field but not
+	// actually climbed by ApplyGravity, jamming enemies. Keep == GroundSnapTolerance. (Ramps are climbed incrementally,
+	// so the larger ramp allowance is not bound by this — only single vertical steps are.)
+	static constexpr float MaxClimbableStepHeight = 60.0f; // = AFPSREnemyBase::GroundSnapTolerance
+
 	// Min up-facing normal Z for a per-cell floor sample to count as walkable (rejects ceiling undersides / too-steep
 	// faces). Mirrors UCharacterMovementComponent walkable floor Z (0.71 = cos ~44.8deg).
 	static constexpr float WalkableNormalZ = 0.71f;

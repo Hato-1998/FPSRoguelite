@@ -45,8 +45,8 @@ protected:
 	float CellSizeOverride = 0.0f;
 
 	/** Optional per-map climbable step height (cm); 0 = subsystem default (45, mirrors UE MaxStepHeight). An inter-cell
-	 *  floor step <= this is walkable (stairs/ramps); a larger step is a wall the flow routes around. Keep <= the enemy
-	 *  GroundSnapTolerance (60) so routed steps are actually climbable. */
+	 *  flat floor step <= this is walkable (curbs/short stairs); a larger step is a wall the flow routes around. Values
+	 *  above the enemy GroundSnapTolerance (60) are CLAMPED by the subsystem — a taller flat step can't be climbed. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "FPSR|Flow Field", meta = (ClampMin = "0.0"))
 	float ClimbableStepHeightOverride = 0.0f;
 

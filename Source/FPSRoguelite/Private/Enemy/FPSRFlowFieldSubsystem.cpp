@@ -143,6 +143,18 @@ void UFPSRFlowFieldSubsystem::BuildObstacleMask()
 		return;
 	}
 
+	// Enforce the movement invariant (Codex P2): a FLAT ledge taller than the enemy per-recheck ground snap
+	// (MaxClimbableStepHeight = GroundSnapTolerance) can be opened by the field but NOT climbed by ApplyGravity, jamming
+	// enemies. Cap the step height regardless of any designer override; the (larger) ramp allowance is unaffected — a
+	// continuous ramp is climbed incrementally across many rechecks, not in one snap.
+	if (ActiveClimbableStepHeight > MaxClimbableStepHeight)
+	{
+		UE_LOG(LogFPSR, Warning,
+			TEXT("[FlowField] ClimbableStepHeight %.0fcm exceeds the enemy ground-snap limit %.0fcm; clamping (a taller flat step can't be climbed)."),
+			ActiveClimbableStepHeight, MaxClimbableStepHeight);
+		ActiveClimbableStepHeight = MaxClimbableStepHeight;
+	}
+
 	FCollisionObjectQueryParams ObjParams;
 	ObjParams.AddObjectTypesToQuery(ECC_WorldStatic);
 	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(FPSRFlowObstacle), false);
