@@ -416,9 +416,14 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 			// the vertical gap into the distance keeps it following the flow UP the stair until it is genuinely close in
 			// 3D (i.e. actually on the player's surface), then stops. Flat map: AttackVertGap ~= 0, so this reduces to
 			// the original XY stop (no regression); ranged (StopDistance 1500) is essentially unchanged by a 450cm gap.
+			// Also keep advancing while still meaningfully BELOW the player (climbing a stair toward a platform-standing
+			// player): with the player at the stair top (a chokepoint), the 3D stop would otherwise trigger a step below
+			// the platform edge and the swarm bunches on the stair instead of cresting onto the platform. Once the enemy
+			// reaches ~the player's height (crested) the stop applies. Flat map: gap ~= 0 < StopClimbBelowPlayer (no regression).
 			const float StopDistSq = FMath::Square(Enemy->GetStopDistance());
 			const float BestDist3DSq = BestDistSq + AttackVertGap * AttackVertGap;
-			const FVector Desired = (BestDist3DSq <= StopDistSq) ? FVector::ZeroVector : FlowDir;
+			const bool bClimbingToPlayer = (BestPlayerLocation.Z - EnemyLocation.Z) > StopClimbBelowPlayer;
+			const FVector Desired = (!bClimbingToPlayer && BestDist3DSq <= StopDistSq) ? FVector::ZeroVector : FlowDir;
 
 			// Combine flow + separation; TickServerMovement normalizes and moves at CurrentMoveSpeed. Face the player
 			// (FlowDir points toward them, direct near them) — NOT MoveDir, whose separation jitter would spin the enemy.
