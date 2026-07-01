@@ -255,6 +255,14 @@ void AFPSREnemyBase::TickServerMovement(const FVector& MoveDirection, const FVec
 				// allow up to MaxCrestStepUp; on FLAT ground cap at one step so enemies don't scale walls the field routes
 				// around. Each lift is swept (stops under a low ceiling); ApplyGravity settles onto the top. Revert if none
 				// clears (taller than the cap = a wall, not a riser) so we don't bob against it.
+				//
+				// Re-advance along the FLOW (FaceDirection), NOT the separation-laden move dir: a lifted enemy carrying the
+				// lateral separation push of its stair-mates would walk off the side of a narrow flight and fall. Climbing
+				// FORWARD (toward the objective) keeps it on the stairs. Magnitude = the blocked remainder of this move.
+				FVector StepFwd = FaceDirection;
+				StepFwd.Z = 0.0f;
+				StepFwd = StepFwd.IsNearlyZero() ? MoveDir.GetSafeNormal2D() : StepFwd.GetSafeNormal();
+				const FVector StepAdvance = StepFwd * (MoveDist * (1.0f - MoveHit.Time));
 				const FVector PreStepLoc = GetActorLocation();
 				const float MaxLift = (GroundNormal.Z < 0.99f) ? MaxCrestStepUp : GroundSnapTolerance;
 				bool bCleared = false;
@@ -263,7 +271,7 @@ void AFPSREnemyBase::TickServerMovement(const FVector& MoveDirection, const FVec
 					SetActorLocation(PreStepLoc, false);
 					AddActorWorldOffset(FVector(0.0f, 0.0f, Lift), true);
 					FHitResult StepFwdHit;
-					AddActorWorldOffset(Remaining, true, &StepFwdHit);
+					AddActorWorldOffset(StepAdvance, true, &StepFwdHit);
 					if (!(StepFwdHit.bBlockingHit && StepFwdHit.Time < KINDA_SMALL_NUMBER))
 					{
 						bCleared = true; // this lift cleared the riser/lip (re-advance made progress)
