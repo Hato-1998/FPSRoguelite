@@ -871,7 +871,7 @@ Game.md + PROGRESS.md 먼저 읽어. Docs/TaskPrompts_Master.md의 유닛 U17을
 | # | 이슈 | 위치 | 내용 |
 |---|---|---|---|
 | 1 | **"P7" 명칭 충돌** | `Docs/SSOT/Roadmap.md` §7-3 vs `Docs/P7-MultiplayerLoop_Plan.md` | Roadmap의 P7=폴리시/빌드(U14), 플랜 문서의 P7=멀티 루프(U11). 멀티 루프는 Roadmap상 P5 행(4인 협동+세션) 영역. 본 문서는 유닛 번호(U11/U14)로 구분 — Roadmap 개정 시 명칭 정리 권장 |
-| 2 | **FF 10% stale** | `Docs/SSOT/Roadmap.md` §7-3 P5 행, PROGRESS 백로그 D1 행 | 확정값=50%(`FriendlyFireDamageScale=0.5`). 10%를 인용하지 말 것 |
+| 2 | ~~**FF 10% stale**~~ ✅해소(2026-07-01) | `Docs/SSOT/Roadmap.md` §7-3 P5 행 · `Docs/SSOT/Enemy.md` §2-10 | 확정값=50%(`FriendlyFireDamageScale=0.5f`, 기본 OFF `bFriendlyFireEnabled=false`). Roadmap §7-3·Enemy §2-10·§2-6 교정 완료(`54d0dc7`). 10% 인용 금지 |
 | 3 | **Fragment 훅 stale** | `PROGRESS.md` "Fragment 후속(미완)" 구절 | `ModifyChargeTime`/`OnProjectileSpawn` 훅은 A3a/A3b에서 구현 완료 — U6에서 재구현 금지 |
 | 4 | **origin 미푸시/.uproject 경고 해소** | `PROGRESS.md` P5·P6-A 절 | 실측(2026-06-13): origin 동기화 완료, `.uproject` VibeUE Optional 커밋(`15d4e34`) 완료 — 경고 stale |
 | 5 | ~~**메뉴↔로비 설계 공백**~~ ✅해소(2026-06-16) | P6-A 셸 vs P7 플랜 | 사용자 확정: **Play→항상 로비 허브**(솔로도 1인 로비 경유), 결과창 복귀처=로비, 세션=Steam(480)만. U11a 프롬프트에 내장 |
