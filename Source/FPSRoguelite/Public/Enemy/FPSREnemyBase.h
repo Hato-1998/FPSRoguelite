@@ -222,6 +222,12 @@ protected:
 	UPROPERTY(Transient)
 	float GroundRecheckTimer = 0.0f;
 
+	/** Server-only: surface normal of the ground under the enemy from the last ApplyGravity trace (up while airborne).
+	 *  TickServerMovement projects the steering onto this plane so the enemy walks smoothly UP/DOWN ramps/stairs instead
+	 *  of jamming flat against them (the swarm equivalent of CharacterMovement's MoveAlongFloor). */
+	UPROPERTY(Transient)
+	FVector GroundNormal = FVector::UpVector;
+
 	/** Server-only horizontal knockback velocity (cm/s), decayed each tick. Vertical knockback lives in
 	 *  VerticalVelocity (integrated by ApplyGravity). */
 	UPROPERTY(Transient)
