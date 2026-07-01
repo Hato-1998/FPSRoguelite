@@ -182,21 +182,23 @@ protected:
 	float GravityAccel = 1800.0f;
 
 	/** If the floor is within this of the feet (up or down), snap to it (slopes/steps); beyond it (a real drop),
-	 *  fall under gravity. Also the height the movement step-up lifts over a stair riser (see StepUpTriggerNormalZ). */
+	 *  fall under gravity. Also the BASE increment the movement step-up lifts over a stair riser (see MaxCrestStepUp). */
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Enemy|Movement")
 	float GroundSnapTolerance = 60.0f;
 
-	/** A swept horizontal-move blocking hit whose surface normal Z is below this (steeper than ~66deg — a stair riser /
-	 *  low ledge, not a walkable ramp) triggers a movement STEP-UP so the enemy climbs what the flow field routed it
-	 *  toward (the field only routes onto climbable height changes). Ramps (higher normal Z) are crawled by the swept
-	 *  move + ground snap instead. Enemies are lightweight Pawns without CharacterMovement's StepUp, so this is the
-	 *  minimal equivalent: lift by GroundSnapTolerance, re-advance, let ApplyGravity settle onto the step top. */
-	static constexpr float StepUpTriggerNormalZ = 0.4f;
+	/** Max lift the movement step-up tries when cresting off a SLOPE. A swept-move blocking hit steeper than a walkable
+	 *  slope (normal Z < WalkableSlopeNormalZ — a stair riser / ledge / ramp-crest lip) triggers a STEP-UP so the enemy
+	 *  climbs what the flow field routed it toward (the field only opens climbable height changes). Enemies are lightweight
+	 *  Pawns without CharacterMovement's StepUp, so the minimal equivalent: lift, re-advance, let ApplyGravity settle onto
+	 *  the top. The lift is tried in GroundSnapTolerance increments up to this max, taking the SMALLEST that clears (no
+	 *  over-hop). A ramp/stair top onto a platform can present a lip taller than one flat step, so on a SLOPE we allow up to
+	 *  here; on FLAT ground the lift stays capped at one GroundSnapTolerance so enemies don't scale walls the field routes around. */
+	static constexpr float MaxCrestStepUp = 180.0f; // cm (== 3 x GroundSnapTolerance)
 
 	/** A swept-move blocking hit whose surface normal Z is >= this is a WALKABLE SLOPE (ramp / stair simple-collision
 	 *  incline): instead of stalling flat against it, the enemy slides the blocked remainder UP along the surface so it
 	 *  ascends. 0.5 = cos 60deg — matches the flow field's walkable slope (slightly more permissive so the enemy always
-	 *  climbs what the field routed it up). Between this and StepUpTriggerNormalZ is a wall/riser (step-up handles it). */
+	 *  climbs what the field routed it up). Below this is a wall / riser / ramp-crest lip — the step-up (MaxCrestStepUp) handles it. */
 	static constexpr float WalkableSlopeNormalZ = 0.5f;
 
 	/** Short down-trace length for the ground check. Falling is incremental (re-traced each airborne update),

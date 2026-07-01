@@ -245,16 +245,32 @@ void AFPSREnemyBase::TickServerMovement(const FVector& MoveDirection, const FVec
 					AddActorWorldOffset(FVector::VectorPlaneProject(Remaining, MoveHit.ImpactNormal), true);
 				}
 			}
-			else if (bGrounded && MoveHit.ImpactNormal.Z < StepUpTriggerNormalZ && !Remaining.IsNearlyZero())
+			else if (bGrounded && !Remaining.IsNearlyZero())
 			{
-				// (b) NEAR-VERTICAL riser / low ledge: step up — lift by GroundSnapTolerance (swept, stops under a low
-				// ceiling), re-advance at the raised height, let ApplyGravity settle onto the step top. No progress = a
-				// wall taller than a step (not a riser) -> revert so we don't bob against walls.
+				// (b) RISER / LEDGE / ramp-crest LIP (anything not a walkable slope — covers the whole normal-Z range below
+				// WalkableSlopeNormalZ, so a face between a ramp and vertical no longer stalls the enemy dead). Step up so it
+				// climbs what the flow field routed it toward. A ramp/stair top onto a platform can present a lip taller than
+				// one flat GroundSnapTolerance step, so try progressively taller lifts and take the SMALLEST that lets the
+				// re-advance make progress (no over-hop on small risers). On a SLOPE (cresting a ramp — GroundNormal tilted)
+				// allow up to MaxCrestStepUp; on FLAT ground cap at one step so enemies don't scale walls the field routes
+				// around. Each lift is swept (stops under a low ceiling); ApplyGravity settles onto the top. Revert if none
+				// clears (taller than the cap = a wall, not a riser) so we don't bob against it.
 				const FVector PreStepLoc = GetActorLocation();
-				AddActorWorldOffset(FVector(0.0f, 0.0f, GroundSnapTolerance), true);
-				FHitResult StepFwdHit;
-				AddActorWorldOffset(Remaining, true, &StepFwdHit);
-				if (StepFwdHit.bBlockingHit && StepFwdHit.Time < KINDA_SMALL_NUMBER)
+				const float MaxLift = (GroundNormal.Z < 0.99f) ? MaxCrestStepUp : GroundSnapTolerance;
+				bool bCleared = false;
+				for (float Lift = GroundSnapTolerance; Lift <= MaxLift + KINDA_SMALL_NUMBER; Lift += GroundSnapTolerance)
+				{
+					SetActorLocation(PreStepLoc, false);
+					AddActorWorldOffset(FVector(0.0f, 0.0f, Lift), true);
+					FHitResult StepFwdHit;
+					AddActorWorldOffset(Remaining, true, &StepFwdHit);
+					if (!(StepFwdHit.bBlockingHit && StepFwdHit.Time < KINDA_SMALL_NUMBER))
+					{
+						bCleared = true; // this lift cleared the riser/lip (re-advance made progress)
+						break;
+					}
+				}
+				if (!bCleared)
 				{
 					SetActorLocation(PreStepLoc, false);
 				}
