@@ -13,6 +13,7 @@
 > - **FF 기본 OFF→ON 설계확정**(코어 협동 사선관리 긴장·실력 축) — Enemy §2-10·Roadmap P5·§D#2 반영. ⚠️**코드 후속**: `bFriendlyFireEnabled` 기본값 `false→true` flip(활성 클론 작업).
 > - 협동 상호의존 = **다축 원칙**(사각엄호[내장 USP산물]·DBNO부활[기구현]·**FF→회복 전환 카드**·협동유도 스페셜 적/어그로 분산) — 개별 메커닉·수치는 콘텐츠 단계.
 > **⚠️ 다음(P0 — 사용자 선택 "코어 리스크 검증 우선")**: ① 적200-300 정량 perf 측정 + NetCull 구현 ② **1인칭 가독성 게이트**(USP 검증: 동시 적 상한·방향큐 하드캡·에임 유의미성·4인 오디오 혼잡) ③ 메타 루프 본체 설계(재화 소스·실패 보상·트리). + Concept §1-C-8 미확정(후크 문구·리텐션 목표치) + FF ON 코드 flip. 상세 평가 산출물=이 세션 워크플로 결과.
+> **추가(2026-07-01, 컨설트 후속)**: 백엔드×Codex 2R 컨설트 완료(`Docs/Review/20260701-concept-conclusions.md`) → 합의 **F1·F3~F7 SSOT 반영 완료**(Concept USP문장/멀티스코프·PlayerFeel §2-14 HUD 큐 원칙·Enemy §2-6 초반 협동비트+협동유도 스페셜 적·Performance §5 1인칭 가독성 게이트 5지표(P0)·CombatWeaponCard §2-3-5 FF→회복 카드). **F2 FF=치사 ON 50% 확정**(멀티 스코프=솔로+친구 협동, 공개매칭 미고려 → 트롤 안전장치 불요). 잔여 코드=`bFriendlyFireEnabled` false→true. **→ 2차 트랙(U8 GMS/U10 SaveGame/U15 무기애님/U17 설정) 재개 가능.**
 
 ## 🔔 핸드오프 (2026-07-01 d) — 📝 **SSOT·메모리 오염 정리**(감사 후속, 별도 main 클론 FPSRoguelite2) → main 커밋 `54d0dc7` push. 활성 U7(`phase/p2-flowfield-height`)과 분리·무접촉
 > **배경**: 별도 클론(FPSRoguelite2)이 origin/main보다 **213커밋 뒤처짐** → `git reset --hard origin/main`(GIT_LFS_SKIP_SMUDGE, 문서 텍스트만 최신화·바이너리는 LFS 포인터 유지)로 동기화 후 문서만 교정. **U7 phase 브랜치(다른 클론)는 무접촉**.
