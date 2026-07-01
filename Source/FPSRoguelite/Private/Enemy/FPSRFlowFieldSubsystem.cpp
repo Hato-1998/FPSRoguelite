@@ -10,7 +10,6 @@
 #include "GameFramework/PlayerStart.h"
 #include "CollisionShape.h"
 #include "Engine/HitResult.h"
-#include "Components/PrimitiveComponent.h"
 #include "TimerManager.h"
 #include "Containers/Queue.h"
 #include "EngineUtils.h"
@@ -195,31 +194,35 @@ void UFPSRFlowFieldSubsystem::BuildObstacleMask()
 			const int32 Cell = CY * GridDimX + CX;
 			const float CenterX = GridOrigin.X + (CX + 0.5f) * ActiveCellSize;
 			const float CenterY = GridOrigin.Y + (CY + 0.5f) * ActiveCellSize;
-			const FVector Apex(CenterX, CenterY, ApexZ);
 			const FVector Base(CenterX, CenterY, ApexZ - MaxProbeDrop);
 
 			// Collect ALL stacked walkable surfaces in this column (e.g. the floor UNDER a bridge/ceiling AND the bridge
-			// top). A single LineTraceMultiByObjectType stops at the first blocking hit (engine: "only the single closest
-			// blocking result will be generated"), hiding lower floors — so re-trace from the apex, ignoring each surface's
-			// mesh in turn, until nothing remains below (capped at MaxColumnSurfaces). One-time on the fixed map.
+			// top, even when they are ONE merged static mesh). A single trace stops at the first blocking hit (engine:
+			// "only the single closest blocking result will be generated"), so re-trace DOWN, restarting just below each
+			// hit, until nothing remains below (capped at MaxColumnSurfaces). One-time on the fixed map.
 			FCollisionQueryParams IterQP(SCENE_QUERY_STAT(FPSRFlowFloor), false);
+			float ProbeStartZ = ApexZ;
 			for (int32 Surface = 0; Surface < MaxColumnSurfaces; ++Surface)
 			{
 				FHitResult Hit;
-				if (!World->LineTraceSingleByObjectType(Hit, Apex, Base, ObjParams, IterQP))
+				if (!World->LineTraceSingleByObjectType(Hit, FVector(CenterX, CenterY, ProbeStartZ), Base, ObjParams, IterQP))
 				{
 					break; // no more static geometry below in this column
 				}
-				if (Hit.ImpactNormal.Z >= WalkableNormalZ) // up-facing (walkable) surface; rejects undersides / steep faces
+				// A real up-facing surface top (not a start-inside-solid penetration) is a walking candidate.
+				if (!Hit.bStartPenetrating && Hit.ImpactNormal.Z >= WalkableNormalZ) // rejects undersides / steep faces
 				{
 					CellCandidates[Cell].Add(FVector2f(static_cast<float>(Hit.ImpactPoint.Z), static_cast<float>(Hit.ImpactNormal.Z)));
 				}
-				const UPrimitiveComponent* HitComp = Hit.GetComponent();
-				if (!HitComp)
+				// Restart the next trace just below this hit (drop >= SurfaceProbeSkip so a thick slab is stepped through
+				// and ProbeStartZ strictly decreases -> the loop terminates). Works within a single merged mesh, unlike
+				// ignoring the whole component (which would hide a lower floor sharing the upper surface's mesh).
+				const float NextStartZ = FMath::Min(static_cast<float>(Hit.ImpactPoint.Z), ProbeStartZ) - SurfaceProbeSkip;
+				if (NextStartZ <= Base.Z)
 				{
 					break;
 				}
-				IterQP.AddIgnoredComponent(HitComp); // skip this surface's mesh so the next trace reveals the surface below it
+				ProbeStartZ = NextStartZ;
 			}
 		}
 	}

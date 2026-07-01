@@ -109,10 +109,13 @@ private:
 	static constexpr float DefaultProbeApexAboveOrigin = 500.0f; // cm above GridOrigin.Z (floor) to start the down-trace
 	static constexpr float MaxProbeDrop = 4000.0f;               // cm total downward trace length (reaches sunken floors)
 
-	// A single object-type multi-trace stops at the first blocking hit (engine: "only the single closest blocking result
-	// will be generated"), which would hide a floor UNDER a bridge/ceiling. So the per-cell probe re-traces from the apex,
-	// ignoring each surface's mesh in turn, to collect every stacked walkable surface — capped at this many per column.
-	static constexpr int32 MaxColumnSurfaces = 8;
+	// A single object-type trace stops at the first blocking hit (engine: "only the single closest blocking result will
+	// be generated"), which would hide a floor UNDER a bridge/ceiling. So the per-cell probe re-traces DOWN, restarting
+	// just below each hit, to collect every stacked walkable surface — even when the upper surface and the floor are the
+	// SAME merged static mesh. Capped at MaxColumnSurfaces iterations; each restart drops at least SurfaceProbeSkip so a
+	// thick slab is stepped through and the loop always terminates. One-time on the fixed map.
+	static constexpr int32 MaxColumnSurfaces = 16;   // max downward re-traces per column (stacked levels + slab step-through)
+	static constexpr float SurfaceProbeSkip = 20.0f; // cm the next trace restarts below the last hit
 
 	/** Active cell size (cm): DefaultCellSize, a volume's CellSizeOverride, or grown to fit the perf budget. */
 	float ActiveCellSize = DefaultCellSize;
