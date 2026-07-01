@@ -204,7 +204,7 @@ EFPSRServerAttackResult AFPSREnemyBase::ServerTickAttack(const FFPSRServerAttack
 	return EFPSRServerAttackResult::None;
 }
 
-void AFPSREnemyBase::TickServerMovement(const FVector& MoveDirection, float ScaledDeltaSeconds)
+void AFPSREnemyBase::TickServerMovement(const FVector& MoveDirection, const FVector& FaceDirection, float ScaledDeltaSeconds)
 {
 	if (!HasAuthority() || (HealthComponent && HealthComponent->IsDead()))
 	{
@@ -268,7 +268,14 @@ void AFPSREnemyBase::TickServerMovement(const FVector& MoveDirection, float Scal
 			GroundRecheckTimer = 0.0f;
 		}
 
-		SetActorRotation(Normalized.Rotation());
+		// Face the PLAYER (FaceDirection), not the move direction: at StopDistance the move is separation-only and its
+		// direction jitters, which would spin the enemy 360deg in place. FaceDirection is stable (toward the target).
+		FVector FaceXY = FaceDirection;
+		FaceXY.Z = 0.0f;
+		if (!FaceXY.IsNearlyZero())
+		{
+			SetActorRotation(FaceXY.GetSafeNormal().Rotation());
+		}
 	}
 
 	if (bKnockbackActive)

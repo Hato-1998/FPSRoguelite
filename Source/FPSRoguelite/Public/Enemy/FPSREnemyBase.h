@@ -69,8 +69,10 @@ public:
 	/** Server: move along MoveDirection (XY world dir; magnitude ignored, normalized internally) at
 	 *  CurrentMoveSpeed * ScaledDeltaSeconds. No-op if MoveDirection is ~zero. Driven by the enemy
 	 *  movement subsystem's batched pass (flow-field + separation). ScaledDeltaSeconds is the real delta
-	 *  times this enemy's LOD stride so throttled enemies still cover the right distance. */
-	void TickServerMovement(const FVector& MoveDirection, float ScaledDeltaSeconds);
+	 *  times this enemy's LOD stride so throttled enemies still cover the right distance.
+	 *  FaceDirection is what the enemy TURNS to face (XY) — the direction to the player, NOT MoveDirection:
+	 *  at StopDistance MoveDirection is separation-only and jitters, which would spin the enemy in place. */
+	void TickServerMovement(const FVector& MoveDirection, const FVector& FaceDirection, float ScaledDeltaSeconds);
 
 	/** Server: assign an authored exit path (world-space waypoints) the enemy follows OUT of its spawn structure
 	 *  (e.g. a pipe/box that the flow-field can't path out of) before reverting to flow-field player-chase at the

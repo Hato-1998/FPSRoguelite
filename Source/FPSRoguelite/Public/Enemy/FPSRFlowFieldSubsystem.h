@@ -106,11 +106,13 @@ private:
 	// what lets the flood climb ramps/stairs while a true flat-to-flat cliff (both flat, big drop) stays blocked.
 	static constexpr float FlatNormalZThreshold = 0.98f;
 
-	// Per-cell floor probe: a downward multi-hit trace from (GridOrigin.Z + ActiveProbeApexAboveOrigin) picks the
-	// topmost walkable static surface. The default apex sits above typical platforms but below a room ceiling so a solid
-	// roof isn't mistaken for floor; a bounds volume raises it for taller / multi-storey maps.
-	static constexpr float DefaultProbeApexAboveOrigin = 500.0f; // cm above GridOrigin.Z (floor) to start the down-trace
-	static constexpr float MaxProbeDrop = 4000.0f;               // cm total downward trace length (reaches sunken floors)
+	// Per-cell floor probe: a downward re-tracing probe starts at (GridOrigin.Z + ActiveProbeApexAboveOrigin) and collects
+	// every stacked walkable surface below it (see MaxColumnSurfaces). The apex must sit ABOVE the highest walkable floor
+	// (e.g. an upper storey / raised platform) or that floor is never sampled and reads as blocked. It may sit above a
+	// solid roof safely: the Z-step re-trace passes THROUGH the roof to the floors below, and the ground-height flood seed
+	// never selects the disconnected roof surface. Default 2000cm covers several storeys; a bounds volume can raise it.
+	static constexpr float DefaultProbeApexAboveOrigin = 2000.0f; // cm above GridOrigin.Z (floor) to start the down-trace
+	static constexpr float MaxProbeDrop = 6000.0f;                // cm total downward trace length (reaches sunken floors below a high apex)
 
 	// A single object-type trace stops at the first blocking hit (engine: "only the single closest blocking result will
 	// be generated"), which would hide a floor UNDER a bridge/ceiling. So the per-cell probe re-traces DOWN, restarting

@@ -396,7 +396,7 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 		if (Enemy->ConsumeExitPathSteering(EnemyLocation, ScaledDelta, ExitDir))
 		{
 			ExitDir.Z = 0.0f;
-			Enemy->TickServerMovement(ExitDir, ScaledDelta);
+			Enemy->TickServerMovement(ExitDir, ExitDir, ScaledDelta); // follow the exit path; face the way we're going
 		}
 		else
 		{
@@ -413,11 +413,12 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 			const float StopDistSq = FMath::Square(Enemy->GetStopDistance());
 			const FVector Desired = (BestDistSq > StopDistSq) ? FlowDir : FVector::ZeroVector;
 
-			// Combine flow + separation; TickServerMovement normalizes and moves at CurrentMoveSpeed.
+			// Combine flow + separation; TickServerMovement normalizes and moves at CurrentMoveSpeed. Face the player
+			// (FlowDir points toward them, direct near them) — NOT MoveDir, whose separation jitter would spin the enemy.
 			FVector MoveDir = Desired + ComputeSeparation(i, Locations, SpatialHash) * SeparationStrength;
 			MoveDir.Z = 0.0f;
 
-			Enemy->TickServerMovement(MoveDir, ScaledDelta);
+			Enemy->TickServerMovement(MoveDir, FlowDir, ScaledDelta);
 		}
 
 		// Recycle an enemy that has fallen out of the playable world (walked into a pit / no static floor under

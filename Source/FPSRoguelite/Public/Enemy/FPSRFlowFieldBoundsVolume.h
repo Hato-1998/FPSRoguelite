@@ -50,9 +50,9 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "FPSR|Flow Field", meta = (ClampMin = "0.0"))
 	float ClimbableStepHeightOverride = 0.0f;
 
-	/** Optional per-map floor-probe apex (cm above the grid floor); 0 = subsystem default (500). Raise it for maps with
-	 *  platforms/upper floors taller than the default, but keep it BELOW a solid room ceiling so the roof isn't sampled
-	 *  as floor. */
+	/** Optional per-map floor-probe apex (cm above the grid floor); 0 = subsystem default (2000). Must sit ABOVE the
+	 *  highest walkable floor (upper storeys / raised platforms) or that floor reads as blocked. Sitting above a solid
+	 *  roof is safe (the re-trace passes through it and the ground-seeded flood ignores the roof surface). */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "FPSR|Flow Field", meta = (ClampMin = "0.0"))
 	float ProbeApexAboveOriginOverride = 0.0f;
 
