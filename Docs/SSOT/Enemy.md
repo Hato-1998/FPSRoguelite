@@ -27,7 +27,7 @@
 - 발사체: **클라 예측 + 서버 검증**
   - 스나이퍼/레이저 = 히트스캔, 바주카/유탄 = 실제 발사체(소수), 샷건 = 다중 히트스캔, 연사 = 히트스캔/경량
 - 데미지: **플레이어 GAS 계산 → 적 HealthComponent.ApplyDamage 브릿지** (적 ASC 없음)
-- **아군 오사(Friendly Fire)**(확정 2026-05-30 · **기본 ON 설계확정 2026-07-01 = 코어 협동 정체성**, Concept §1-C-6): FF **기본 ON** — 아군 적중 = **몬스터 데미지의 50%**(`FriendlyFireDamageScale=0.5f`). 사선 관리가 코어 협동 긴장·실력 축; 호스트가 세션 설정에서 **OFF 토글** 가능(`SetFriendlyFireEnabled`/디버그 `FPSR.SetFriendlyFire`). ⚠️ **코드 후속**: 현재 `bFriendlyFireEnabled=false`(OFF) → 기본 ON 전환 = 코드 기본값 flip 필요(활성 클론). 데미지 브릿지 팀/FF 배율=`FPSRCombatStatics`. 자폭(폭발)·넉백은 FF 플래그와 독립. **협동 카드 시임**: FF 데미지를 아군 회복으로 전환하는 카드 등(CombatWeaponCard, 콘텐츠).
+- **아군 오사(Friendly Fire)**(확정 2026-05-30 · **기본 ON 설계확정 2026-07-01 = 코어 협동 정체성**, Concept §1-C-6): FF **기본 ON · 치사(lethal)** — 아군 적중 = **몬스터 데미지의 50%**(`FriendlyFireDamageScale=0.5f`, 크리 없음; **아군 다운(HP 0)까지 가능, HP 클램프 없음**). 사선 관리가 코어 협동 긴장·실력 축; **공개 매칭 미고려(솔로+친구 협동)라 트롤 안전장치 불요**(Codex '비치명' 권고=공개매칭 전제, 무관). 호스트가 세션 설정에서 **OFF 토글** 가능(`SetFriendlyFireEnabled`/디버그 `FPSR.SetFriendlyFire`). ⚠️ **코드 후속**: 현재 `bFriendlyFireEnabled=false`(OFF) → 기본 ON 전환 = 코드 기본값 flip 필요(활성 클론). 데미지 브릿지 팀/FF 배율=`FPSRCombatStatics`. 자폭(폭발)·넉백은 FF 플래그와 독립. **협동 카드 시임**: FF 데미지를 아군 회복으로 전환하는 카드 등(CombatWeaponCard, 콘텐츠).
 - 토폴로지: **리슨서버 P2P** (Steam Sockets/EOS 세션, P5에서 구축)
 - **개발 방법론: P1부터 Net-aware (서버 권위 + Push Model), PIE 2-client 상시 검증.** 솔로로 만들고 나중에 리플리케이션 retrofit 금지
 - GAS ASC Replication Mode: 솔로 = Minimal, 협동 = Mixed
