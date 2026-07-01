@@ -196,6 +196,17 @@ void UFPSRFlowFieldSubsystem::BuildObstacleMask()
 	// (1) Candidate up-facing surfaces per cell, {X=world Z, Y=surface normal Z} (build-time scratch; freed at function end).
 	TArray<TArray<FVector2f>> CellCandidates;
 	CellCandidates.SetNum(NumCells);
+
+	// CellSloped[Cell] = the cell's walkable ground spans more than a step ACROSS the cell — a ramp, OR a staircase whose
+	// small steps fall inside one coarse 200cm cell (so adjacent cell centers differ by several risers). Detected by
+	// sub-sampling the ground below. Sloped cells use the ramp (grade) allowance in the flood/edges — else a staircase
+	// reads as too-big FLAT steps between cells and is wrongly marked unreachable — and skip the wall-occupancy check
+	// (they're walkable terrain the coarse knee-probe would false-flag as a wall on its own higher steps).
+	TArray<bool> CellSloped;
+	CellSloped.Init(false, NumCells);
+	static const float SubDX[5] = { 0.0f, 1.0f, -1.0f, 0.0f, 0.0f };
+	static const float SubDY[5] = { 0.0f, 0.0f, 0.0f, 1.0f, -1.0f };
+
 	for (int32 CY = 0; CY < GridDimY; ++CY)
 	{
 		for (int32 CX = 0; CX < GridDimX; ++CX)
@@ -233,12 +244,26 @@ void UFPSRFlowFieldSubsystem::BuildObstacleMask()
 				}
 				ProbeStartZ = NextStartZ;
 			}
+
+			// Slope/staircase detection: sub-sample the ground across the cell (center + 4 mid-points). If the walkable
+			// ground varies by more than a step within this one coarse cell, it's a ramp or an in-cell staircase -> mark
+			// sloped so the flood/edges use the ramp allowance (else stairs read as unreachable) and occupancy is skipped.
+			float SubMin = MAX_flt, SubMax = -MAX_flt;
+			const float SubR = ActiveCellSize * 0.35f;
+			for (int32 S = 0; S < 5; ++S)
+			{
+				const FVector SubStart(CenterX + SubDX[S] * SubR, CenterY + SubDY[S] * SubR, ApexZ);
+				FHitResult SubHit;
+				if (World->LineTraceSingleByObjectType(SubHit, SubStart, FVector(SubStart.X, SubStart.Y, ApexZ - MaxProbeDrop), ObjParams, IterQP) &&
+					!SubHit.bStartPenetrating && SubHit.ImpactNormal.Z >= WalkableNormalZ)
+				{
+					SubMin = FMath::Min(SubMin, static_cast<float>(SubHit.ImpactPoint.Z));
+					SubMax = FMath::Max(SubMax, static_cast<float>(SubHit.ImpactPoint.Z));
+				}
+			}
+			CellSloped[Cell] = (SubMax > -MAX_flt) && ((SubMax - SubMin) > ActiveClimbableStepHeight);
 		}
 	}
-
-	// CellSloped[Cell] = the assigned walking surface is a ramp (not near-flat) — gates the ramp height allowance above.
-	TArray<bool> CellSloped;
-	CellSloped.Init(false, NumCells);
 
 	// (2) Seed the flood: start all cells unassigned, then seed ground sources (PlayerStart anchors + ground-height cells).
 	for (int32 i = 0; i < NumCells; ++i)
@@ -265,7 +290,6 @@ void UFPSRFlowFieldSubsystem::BuildObstacleMask()
 			continue; // outside the grid or already seeded
 		}
 		float BestH = MAX_flt, BestD = MAX_flt;
-		bool bBestSloped = false;
 		for (const FVector2f& Cand : CellCandidates[SCell])
 		{
 			const float D = FMath::Abs(Cand.X - StartLoc.Z);
@@ -273,13 +297,11 @@ void UFPSRFlowFieldSubsystem::BuildObstacleMask()
 			{
 				BestD = D;
 				BestH = Cand.X;
-				bBestSloped = Cand.Y < FlatNormalZThreshold;
 			}
 		}
 		if (BestH != MAX_flt)
 		{
 			CellFloorZ[SCell] = BestH;
-			CellSloped[SCell] = bBestSloped;
 			FloorFrontier.Enqueue(SCell);
 		}
 	}
@@ -297,7 +319,6 @@ void UFPSRFlowFieldSubsystem::BuildObstacleMask()
 			if (FMath::Abs(Cand.X - GridOrigin.Z) <= ActiveClimbableStepHeight)
 			{
 				CellFloorZ[Cell] = Cand.X;
-				CellSloped[Cell] = Cand.Y < FlatNormalZThreshold;
 				FloorFrontier.Enqueue(Cell);
 				break;
 			}
@@ -338,26 +359,23 @@ void UFPSRFlowFieldSubsystem::BuildObstacleMask()
 					// + inter-layer edges), out of scope here (Codex P2 — by design, not a defect).
 					continue;
 			}
+			const bool bNeighborSloped = CellSloped[NIdx];
 			float BestH = MAX_flt;
-			bool bBestSloped = false;
 			float BestDelta = MAX_flt;
 			for (const FVector2f& Cand : CellCandidates[NIdx])
 			{
-				const bool bCandSloped = Cand.Y < FlatNormalZThreshold;
 				const float D = FMath::Abs(Cand.X - H);
-				// Either the cell we're leaving or the surface we're stepping onto being a ramp earns the ramp allowance
-				// (matches the Pass-2 edge gate's "either sloped"); store the neighbour's OWN slope for its later edges.
-				if (D <= MaxTraverseDelta(bFromSloped || bCandSloped) && D < BestDelta)
+				// Either the cell we're leaving or the cell we're entering being sloped (a ramp / in-cell staircase)
+				// earns the ramp allowance (matches the Pass-2 edge gate's "either sloped").
+				if (D <= MaxTraverseDelta(bFromSloped || bNeighborSloped) && D < BestDelta)
 				{
 					BestDelta = D;
 					BestH = Cand.X;
-					bBestSloped = bCandSloped;
 				}
 			}
 			if (BestH != MAX_flt)
 			{
 				CellFloorZ[NIdx] = BestH;
-				CellSloped[NIdx] = bBestSloped;
 				FloorFrontier.Enqueue(NIdx);
 			}
 		}
@@ -398,8 +416,9 @@ void UFPSRFlowFieldSubsystem::BuildObstacleMask()
 			const float CenterY = GridOrigin.Y + (CY + 0.5f) * ActiveCellSize;
 			const float CellProbeZ = CellFloorZ[Cell] + ObstacleProbeZ; // knee/wall height above THIS cell's floor
 
-			// (1) Occupancy: can a footprint-sized agent stand at this cell's center?
-			if (World->OverlapAnyTestByObjectType(FVector(CenterX, CenterY, CellProbeZ), FQuat::Identity, ObjParams, OccupancyBox, QueryParams))
+			// (1) Occupancy: can a footprint-sized agent stand at this cell's center? Skip on sloped cells (ramp / in-cell
+			// staircase) — the knee-height box would false-hit the cell's OWN higher steps and wrongly block walkable stairs.
+			if (!CellSloped[Cell] && World->OverlapAnyTestByObjectType(FVector(CenterX, CenterY, CellProbeZ), FQuat::Identity, ObjParams, OccupancyBox, QueryParams))
 			{
 				BlockedField[Cell] = true;
 			}
@@ -776,7 +795,9 @@ void UFPSRFlowFieldSubsystem::RecomputeField()
 					const float WZ = ((CellFloorZ[Idx] != MAX_flt) ? CellFloorZ[Idx] : GridOrigin.Z) + 10.0f;
 					if (BlockedField[Idx])
 					{
-						DrawDebugBox(World, FVector(WX, WY, WZ), FVector(CellHalf * 0.8f, CellHalf * 0.8f, 4.0f), FColor::Red, false, DrawLife);
+						// Red = no reachable floor (flood never reached / not walkable); Orange = has a floor but occupancy-blocked (a wall).
+						const FColor BlockColor = (CellFloorZ[Idx] == MAX_flt) ? FColor::Red : FColor::Orange;
+						DrawDebugBox(World, FVector(WX, WY, WZ), FVector(CellHalf * 0.8f, CellHalf * 0.8f, 4.0f), BlockColor, false, DrawLife);
 					}
 					else
 					{
