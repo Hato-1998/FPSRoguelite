@@ -641,14 +641,16 @@ void UFPSRFlowFieldSubsystem::RecomputeField()
 				{
 					// Diagonal corner-clearance: take a diagonal only if BOTH orthogonal CELLS are open (the swept
 					// capsule can't clip a blocked corner), AND — for a non-escaping open cell — BOTH orthogonal
-					// EDGES are open, so the diagonal can't cut across a thin wall the edge test rejects (Part B).
+					// EDGES are open, so the diagonal can't cut a thin wall (Part B).
+						// U7: ALSO require the two FAR edges (each side -> the diagonal target) so a diagonal can't cross a
+						// height/step-gated cliff the 4-connected BFS routed around; IsEdgeTraversable bakes both in (Codex).
 					const int32 OrthoA = CY * GridDimX + NX; // (NX, CY)
 					const int32 OrthoB = NY * GridDimX + CX; // (CX, NY)
 					if (BlockedField[OrthoA] || BlockedField[OrthoB])
 					{
 						continue;
 					}
-					if (!BlockedField[Idx] && (!IsEdgeTraversable(Idx, OrthoA) || !IsEdgeTraversable(Idx, OrthoB)))
+					if (!BlockedField[Idx] && (!IsEdgeTraversable(Idx, OrthoA) || !IsEdgeTraversable(Idx, OrthoB) || !IsEdgeTraversable(OrthoA, NIdx) || !IsEdgeTraversable(OrthoB, NIdx)))
 					{
 						continue;
 					}
