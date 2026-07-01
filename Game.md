@@ -24,6 +24,7 @@
 
 | 작업 종류 | 읽을 파일 | 담긴 섹션 |
 |---|---|---|
+| **컨셉·피치·USP·판타지·타겟·포지셔닝** | [`Docs/SSOT/Concept.md`](Docs/SSOT/Concept.md) | §1-C |
 | 런 루프·XP/레벨업·프리즈·미션/스케줄·보스·메타 | [`Docs/SSOT/RunFlow.md`](Docs/SSOT/RunFlow.md) | §2-1, §2-2, §2-7, §2-8, §2-11, §2-12 |
 | 무기·카드·모디파이어/Fragment·사격 감각 | [`Docs/SSOT/CombatWeaponCard.md`](Docs/SSOT/CombatWeaponCard.md) | §2-3, §2-4(+2-4-1·2-4-2), §2-5 |
 | 적 스웜·스폰·발사체·데미지 브릿지·네트워크 | [`Docs/SSOT/Enemy.md`](Docs/SSOT/Enemy.md) | §2-6, §2-10 |

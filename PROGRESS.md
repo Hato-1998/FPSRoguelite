@@ -6,6 +6,14 @@
 
 **최종 갱신: 2026-07-01**
 
+## 🔔 핸드오프 (2026-07-01 e) — 🎯 컨셉 방향 확정 + `Concept.md` 신설 + FF 기본 ON 설계확정 (객관평가 후속)
+> **객관 평가(9-에이전트 적대 워크플로)**: 코어 3축(①1인칭×적 가독성 ②빌드 분기[상태이상축 0구현→G2 미개봉] ③리텐션 스노볼[메타 9줄 골격])이 *"설계됨≠재밌음"* 미검증/미설계로, 그 위에 콘텐츠가 쌓이는 게 최대 리스크로 판정. → 사용자 방향 결정 반영:
+> - **판타지=협동 생존 유대 / 타겟=코어 협동슈터층 / 1인칭=USP+검증** 확정 → **`Docs/SSOT/Concept.md` 신설**(§1-C, Game.md §0-1 라우팅 등재). 핵심 USP 논증 = **"1인칭=정보 비대칭→등을 맡기는 협동을 시스템으로 강제"**(탑다운의 사각 '버그'가 협동에선 USP; 평가 자기모순 해소). USP 성립은 §5 가독성 게이트 통과 조건부(실패 시 폴백 트리거).
+> - **적 동시규모 실측 정정 ~300-500 → ~200-300**(코드 폴백캡 300 부합, 하드캡 500=헤드룸; `e75a49f`). perf/가독성 게이트 목표=200-300 기준.
+> - **FF 기본 OFF→ON 설계확정**(코어 협동 사선관리 긴장·실력 축) — Enemy §2-10·Roadmap P5·§D#2 반영. ⚠️**코드 후속**: `bFriendlyFireEnabled` 기본값 `false→true` flip(활성 클론 작업).
+> - 협동 상호의존 = **다축 원칙**(사각엄호[내장 USP산물]·DBNO부활[기구현]·**FF→회복 전환 카드**·협동유도 스페셜 적/어그로 분산) — 개별 메커닉·수치는 콘텐츠 단계.
+> **⚠️ 다음(P0 — 사용자 선택 "코어 리스크 검증 우선")**: ① 적200-300 정량 perf 측정 + NetCull 구현 ② **1인칭 가독성 게이트**(USP 검증: 동시 적 상한·방향큐 하드캡·에임 유의미성·4인 오디오 혼잡) ③ 메타 루프 본체 설계(재화 소스·실패 보상·트리). + Concept §1-C-8 미확정(후크 문구·리텐션 목표치) + FF ON 코드 flip. 상세 평가 산출물=이 세션 워크플로 결과.
+
 ## 🔔 핸드오프 (2026-07-01 d) — 📝 **SSOT·메모리 오염 정리**(감사 후속, 별도 main 클론 FPSRoguelite2) → main 커밋 `54d0dc7` push. 활성 U7(`phase/p2-flowfield-height`)과 분리·무접촉
 > **배경**: 별도 클론(FPSRoguelite2)이 origin/main보다 **213커밋 뒤처짐** → `git reset --hard origin/main`(GIT_LFS_SKIP_SMUDGE, 문서 텍스트만 최신화·바이너리는 LFS 포인터 유지)로 동기화 후 문서만 교정. **U7 phase 브랜치(다른 클론)는 무접촉**.
 > **리포 교정(커밋 `54d0dc7`, 8파일)**: ① Enemy.md §2-10 아군 오사 **10%→50%**(`FriendlyFireDamageScale=0.5f`)·**기본 OFF**(`bFriendlyFireEnabled=false`)·구현 P5 완료 ② §2-6 공격토큰 곁가지 "FF 10%" 제거(토큰 10/3 U5 구현) ③ Roadmap §7-3 **P5 ✅**(FF·DBNO 완료 / Iris=비채택(Push 유지)·NetProfiler=U14 이월) ④ Game.md §9 "미커밋(untracked)" 불릿 교정(L_Sandbox·DA_Weapon 전부 tracked) ⑤ AGENTS.md **핵심 4원칙**(원칙4 추가) ⑥ CLAUDE/AGENTS/ConsultLoop "Hero Shooter 아님" **긍정형** 정렬(제1원리 앞세움) ⑦ CombatWeaponCard §2-3 카드라우팅 **U6 반영**(행동 fragment=미션 `UnlockableFeatures`, `AvailableModifiers` 폐지 — [[card-pool-routing]] override 해소) ⑧ TaskPrompts §B **U9=✅**(`e38dfbe` DBNO Phase1B, `UFPSRReviveComponent` 근접 자동부활)·**U11b=✅**(사용자 2-PC Steam E2E 확인).
