@@ -180,9 +180,16 @@ protected:
 	float GravityAccel = 1800.0f;
 
 	/** If the floor is within this of the feet (up or down), snap to it (slopes/steps); beyond it (a real drop),
-	 *  fall under gravity. */
+	 *  fall under gravity. Also the height the movement step-up lifts over a stair riser (see StepUpTriggerNormalZ). */
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Enemy|Movement")
 	float GroundSnapTolerance = 60.0f;
+
+	/** A swept horizontal-move blocking hit whose surface normal Z is below this (steeper than ~66deg — a stair riser /
+	 *  low ledge, not a walkable ramp) triggers a movement STEP-UP so the enemy climbs what the flow field routed it
+	 *  toward (the field only routes onto climbable height changes). Ramps (higher normal Z) are crawled by the swept
+	 *  move + ground snap instead. Enemies are lightweight Pawns without CharacterMovement's StepUp, so this is the
+	 *  minimal equivalent: lift by GroundSnapTolerance, re-advance, let ApplyGravity settle onto the step top. */
+	static constexpr float StepUpTriggerNormalZ = 0.4f;
 
 	/** Short down-trace length for the ground check. Falling is incremental (re-traced each airborne update),
 	 *  so this only needs to reach a bit past the feet — keeps the per-enemy scene query cheap at swarm scale. */

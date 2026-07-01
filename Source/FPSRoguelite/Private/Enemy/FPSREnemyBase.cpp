@@ -221,7 +221,39 @@ void AFPSREnemyBase::TickServerMovement(const FVector& MoveDirection, float Scal
 	if (!bKnockbackActive && Dir.SizeSquared() > KINDA_SMALL_NUMBER)
 	{
 		const FVector Normalized = Dir.GetSafeNormal();
-		AddActorWorldOffset(Normalized * CurrentMoveSpeed * ScaledDeltaSeconds, true);
+		const FVector DesiredMove = Normalized * CurrentMoveSpeed * ScaledDeltaSeconds;
+		FHitResult MoveHit;
+		AddActorWorldOffset(DesiredMove, true, &MoveHit);
+
+		// Step-up (enemies are lightweight Pawns without CharacterMovement's StepUp): the flow field only routes the
+		// swarm toward height changes it deemed climbable (a step, or a walkable ramp — UFPSRFlowFieldSubsystem), but a
+		// raw swept move stalls flat against a stair riser / low ledge (a near-vertical static face), pooling enemies at
+		// the base of stairs the flow points up. If that blocked us while grounded, climb it: lift by GroundSnapTolerance
+		// (swept, so it stops under a low ceiling), re-advance the remaining move at the raised height, and let
+		// ApplyGravity settle onto the step top. If the raised move makes no progress it was a wall taller than a step,
+		// not a riser — revert so enemies don't bob against walls.
+		if (MoveHit.bBlockingHit && bGrounded && MoveHit.ImpactNormal.Z < StepUpTriggerNormalZ)
+		{
+			const FVector Remaining = DesiredMove * (1.0f - MoveHit.Time);
+			if (!Remaining.IsNearlyZero())
+			{
+				const FVector PreStepLoc = GetActorLocation();
+				AddActorWorldOffset(FVector(0.0f, 0.0f, GroundSnapTolerance), true); // lift over the riser
+				FHitResult StepFwdHit;
+				AddActorWorldOffset(Remaining, true, &StepFwdHit);                   // advance at the raised height
+				if (StepFwdHit.bBlockingHit && StepFwdHit.Time < KINDA_SMALL_NUMBER)
+				{
+					SetActorLocation(PreStepLoc, false); // wall taller than a step -> undo the lift (ApplyGravity keeps us grounded)
+				}
+				else
+				{
+					// Climbed onto the step: force ApplyGravity to re-trace THIS tick (bypass the amortized ground-recheck
+					// timer) so it snaps down onto the step top instead of leaving us briefly floating at the raised height.
+					bGrounded = false;
+					GroundRecheckTimer = 0.0f;
+				}
+			}
+		}
 		SetActorRotation(Normalized.Rotation());
 	}
 

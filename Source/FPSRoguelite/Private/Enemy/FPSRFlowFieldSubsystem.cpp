@@ -14,6 +14,15 @@
 #include "Containers/Queue.h"
 #include "EngineUtils.h"
 
+#if !UE_BUILD_SHIPPING
+#include "DrawDebugHelpers.h"
+#include "HAL/IConsoleManager.h"
+static TAutoConsoleVariable<int32> CVarFlowFieldDebug(
+	TEXT("FPSR.FlowField.Debug"), 0,
+	TEXT("Draw the swarm flow field near players (1 = flow arrows + blocked cells, at each cell's floor height). Dev only."),
+	ECVF_Cheat);
+#endif
+
 bool UFPSRFlowFieldSubsystem::ShouldCreateSubsystem(UObject* Outer) const
 {
 	if (!Super::ShouldCreateSubsystem(Outer))
@@ -688,6 +697,54 @@ void UFPSRFlowFieldSubsystem::RecomputeField()
 	}
 
 	bFieldReady = true;
+
+#if !UE_BUILD_SHIPPING
+	// Dev viz (FPSR.FlowField.Debug 1): flow arrows (green) + blocked cells (red) near each player, drawn AT each cell's
+	// walking-surface height so ramps/stairs are visible — lets a designer confirm whether the field routes the swarm UP
+	// a ramp or leaves the upper area unreachable. Radius-limited around players so it never iterates the whole grid.
+	if (CVarFlowFieldDebug.GetValueOnAnyThread() > 0)
+	{
+		const float CellHalf = ActiveCellSize * 0.5f;
+		const float DrawLife = FlowUpdateInterval * 1.2f;
+		const int32 DrawRadius = 25; // cells around each player
+		for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+		{
+			const APlayerController* PC = It->Get();
+			const APawn* Pawn = PC ? PC->GetPawn() : nullptr;
+			const int32 PCell = Pawn ? WorldToCellIndex(Pawn->GetActorLocation()) : INDEX_NONE;
+			if (PCell == INDEX_NONE)
+			{
+				continue;
+			}
+			const int32 PCX = PCell % GridDimX, PCY = PCell / GridDimX;
+			for (int32 dy = -DrawRadius; dy <= DrawRadius; ++dy)
+			{
+				for (int32 dx = -DrawRadius; dx <= DrawRadius; ++dx)
+				{
+					const int32 CX = PCX + dx, CY = PCY + dy;
+					if (CX < 0 || CX >= GridDimX || CY < 0 || CY >= GridDimY)
+					{
+						continue;
+					}
+					const int32 Idx = CY * GridDimX + CX;
+					const float WX = GridOrigin.X + (CX + 0.5f) * ActiveCellSize;
+					const float WY = GridOrigin.Y + (CY + 0.5f) * ActiveCellSize;
+					const float WZ = ((CellFloorZ[Idx] != MAX_flt) ? CellFloorZ[Idx] : GridOrigin.Z) + 10.0f;
+					if (BlockedField[Idx])
+					{
+						DrawDebugBox(World, FVector(WX, WY, WZ), FVector(CellHalf * 0.8f, CellHalf * 0.8f, 4.0f), FColor::Red, false, DrawLife);
+					}
+					else
+					{
+						const FVector2D F = FlowField[Idx];
+						const FVector Start(WX, WY, WZ);
+						DrawDebugDirectionalArrow(World, Start, Start + FVector(F.X, F.Y, 0.0f) * (CellHalf * 0.9f), 20.0f, FColor::Green, false, DrawLife, 0, 2.0f);
+					}
+				}
+			}
+		}
+	}
+#endif
 }
 
 FVector UFPSRFlowFieldSubsystem::SampleFlowDirection(const FVector& WorldLocation) const
