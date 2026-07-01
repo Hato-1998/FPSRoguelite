@@ -92,9 +92,12 @@ private:
 	// so the larger ramp allowance is not bound by this — only single vertical steps are.)
 	static constexpr float MaxClimbableStepHeight = 60.0f; // = AFPSREnemyBase::GroundSnapTolerance
 
-	// Min up-facing normal Z for a per-cell floor sample to count as walkable (rejects ceiling undersides / too-steep
-	// faces). Mirrors UCharacterMovementComponent walkable floor Z (0.71 = cos ~44.8deg).
-	static constexpr float WalkableNormalZ = 0.71f;
+	// Min up-facing normal Z for a per-cell floor sample to count as walkable (rejects ceiling undersides / near-vertical
+	// faces). Set to the ENEMY's actual traversal limit, NOT the UE player default (0.71 = 44.8deg): a swarm Pawn climbs
+	// a slope incrementally (swept slide + per-recheck ground snap up to GroundSnapTolerance) so it can ascend steeper
+	// grades than a walking player — up to ~58deg for MoveSpeed 250 / recheck 0.15s. 0.573 = cos 55deg gives margin and
+	// accepts common steep-stair simple-collision ramps (e.g. a 50deg staircase collider) that 0.71 would reject as a wall.
+	static constexpr float WalkableNormalZ = 0.573f;
 
 	// A sampled surface flatter than this (normal Z >= threshold, ~<11.5deg) is treated as FLAT: reaching it across a
 	// cell boundary is a vertical STEP, allowed only up to one ClimbableStepHeight. A tilted-but-walkable surface

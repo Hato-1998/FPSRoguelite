@@ -191,6 +191,12 @@ protected:
 	 *  minimal equivalent: lift by GroundSnapTolerance, re-advance, let ApplyGravity settle onto the step top. */
 	static constexpr float StepUpTriggerNormalZ = 0.4f;
 
+	/** A swept-move blocking hit whose surface normal Z is >= this is a WALKABLE SLOPE (ramp / stair simple-collision
+	 *  incline): instead of stalling flat against it, the enemy slides the blocked remainder UP along the surface so it
+	 *  ascends. 0.5 = cos 60deg — matches the flow field's walkable slope (slightly more permissive so the enemy always
+	 *  climbs what the field routed it up). Between this and StepUpTriggerNormalZ is a wall/riser (step-up handles it). */
+	static constexpr float WalkableSlopeNormalZ = 0.5f;
+
 	/** Short down-trace length for the ground check. Falling is incremental (re-traced each airborne update),
 	 *  so this only needs to reach a bit past the feet — keeps the per-enemy scene query cheap at swarm scale. */
 	static constexpr float GroundProbeDistance = 700.0f; // cm

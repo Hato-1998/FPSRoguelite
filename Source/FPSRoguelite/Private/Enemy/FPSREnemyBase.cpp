@@ -225,30 +225,40 @@ void AFPSREnemyBase::TickServerMovement(const FVector& MoveDirection, float Scal
 		FHitResult MoveHit;
 		AddActorWorldOffset(DesiredMove, true, &MoveHit);
 
-		// Step-up (enemies are lightweight Pawns without CharacterMovement's StepUp): the flow field only routes the
-		// swarm toward height changes it deemed climbable (a step, or a walkable ramp — UFPSRFlowFieldSubsystem), but a
-		// raw swept move stalls flat against a stair riser / low ledge (a near-vertical static face), pooling enemies at
-		// the base of stairs the flow points up. If that blocked us while grounded, climb it: lift by GroundSnapTolerance
-		// (swept, so it stops under a low ceiling), re-advance the remaining move at the raised height, and let
-		// ApplyGravity settle onto the step top. If the raised move makes no progress it was a wall taller than a step,
-		// not a riser — revert so enemies don't bob against walls.
-		if (MoveHit.bBlockingHit && bGrounded && MoveHit.ImpactNormal.Z < StepUpTriggerNormalZ)
+		// Enemies are lightweight Pawns without CharacterMovement, so a raw swept move stalls flat against any rise the
+		// flow field routed us toward (ramp / stair simple-collision incline / vertical riser). Resolve the blocked
+		// remainder so the swarm ascends instead of pooling at the base:
+		if (MoveHit.bBlockingHit)
 		{
 			const FVector Remaining = DesiredMove * (1.0f - MoveHit.Time);
-			if (!Remaining.IsNearlyZero())
+			if (MoveHit.ImpactNormal.Z >= WalkableSlopeNormalZ)
 			{
+				// (a) WALKABLE SLOPE (ramp / stair incline collider): slide the remainder UP ALONG the surface (remove the
+				// into-slope component) so we climb it; ApplyGravity then settles us onto the slope. A flat swept move alone
+				// would just jam against it.
+				if (!Remaining.IsNearlyZero())
+				{
+					AddActorWorldOffset(FVector::VectorPlaneProject(Remaining, MoveHit.ImpactNormal), true);
+					GroundRecheckTimer = 0.0f; // climbing a slope -> re-snap to ground this tick (not stably grounded in place)
+				}
+			}
+			else if (bGrounded && MoveHit.ImpactNormal.Z < StepUpTriggerNormalZ && !Remaining.IsNearlyZero())
+			{
+				// (b) NEAR-VERTICAL riser / low ledge: step up — lift by GroundSnapTolerance (swept, stops under a low
+				// ceiling), re-advance at the raised height, and let ApplyGravity settle onto the step top. If the raised
+				// move makes no progress it was a wall taller than a step (not a riser) — revert so we don't bob at walls.
 				const FVector PreStepLoc = GetActorLocation();
-				AddActorWorldOffset(FVector(0.0f, 0.0f, GroundSnapTolerance), true); // lift over the riser
+				AddActorWorldOffset(FVector(0.0f, 0.0f, GroundSnapTolerance), true);
 				FHitResult StepFwdHit;
-				AddActorWorldOffset(Remaining, true, &StepFwdHit);                   // advance at the raised height
+				AddActorWorldOffset(Remaining, true, &StepFwdHit);
 				if (StepFwdHit.bBlockingHit && StepFwdHit.Time < KINDA_SMALL_NUMBER)
 				{
-					SetActorLocation(PreStepLoc, false); // wall taller than a step -> undo the lift (ApplyGravity keeps us grounded)
+					SetActorLocation(PreStepLoc, false);
 				}
 				else
 				{
-					// Climbed onto the step: force ApplyGravity to re-trace THIS tick (bypass the amortized ground-recheck
-					// timer) so it snaps down onto the step top instead of leaving us briefly floating at the raised height.
+					// Force ApplyGravity to re-trace THIS tick (bypass the amortized ground-recheck timer) so it snaps
+					// down onto the step top instead of leaving us briefly floating at the raised height.
 					bGrounded = false;
 					GroundRecheckTimer = 0.0f;
 				}
