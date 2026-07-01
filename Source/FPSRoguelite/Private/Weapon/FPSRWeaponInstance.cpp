@@ -59,16 +59,71 @@ int32 UFPSRWeaponInstance::GetFragmentStackCount(const UFPSRWeaponFragment* Frag
 	return Count;
 }
 
-void UFPSRWeaponInstance::AddFragment(UFPSRWeaponFragment* Fragment)
+bool UFPSRWeaponInstance::AddFragment(UFPSRWeaponFragment* Fragment)
 {
-	// Stackable up to the fragment's MaxStacks: each accepted pick appends another copy, so the per-element
-	// fire hooks (e.g. MultiShot's ModifyShotCount) apply once per stack. Server-authoritative.
-	if (!Fragment || GetFragmentStackCount(Fragment) >= FMath::Max(Fragment->MaxStacks, 1))
+	// Stackable up to the fragment's MaxStacks: each accepted pick appends another copy, so the per-element fire
+	// hooks (e.g. MultiShot's ModifyShotCount) apply once per stack. Server-authoritative.
+	if (!Fragment)
 	{
-		return;
+		return false;
+	}
+	const int32 ExistingStacks = GetFragmentStackCount(Fragment);
+	if (ExistingStacks >= FMath::Max(Fragment->MaxStacks, 1))
+	{
+		return false; // already at this fragment's stack limit
+	}
+	// The slot cap applies ONLY to a brand-new distinct fragment — stacking one already held doesn't consume a new
+	// slot. A new distinct pick at the cap must go through the replacement flow (RemoveFragment first), so reject here.
+	if (ExistingStacks == 0 && GetDistinctFragmentCount() >= GetMaxFragmentSlots())
+	{
+		return false;
 	}
 	ActiveFragments.Add(Fragment);
 	MARK_PROPERTY_DIRTY_FROM_NAME(UFPSRWeaponInstance, ActiveFragments, this);
+	return true;
+}
+
+void UFPSRWeaponInstance::RemoveFragment(UFPSRWeaponFragment* Fragment)
+{
+	// Remove every stack of this fragment (the replacement flow drops a whole distinct slot). Server-authoritative.
+	if (!Fragment)
+	{
+		return;
+	}
+	if (ActiveFragments.Remove(Fragment) > 0)
+	{
+		MARK_PROPERTY_DIRTY_FROM_NAME(UFPSRWeaponInstance, ActiveFragments, this);
+	}
+}
+
+void UFPSRWeaponInstance::GetDistinctFragments(TArray<UFPSRWeaponFragment*>& OutFragments) const
+{
+	OutFragments.Reset();
+	for (const TObjectPtr<UFPSRWeaponFragment>& Frag : ActiveFragments)
+	{
+		if (Frag && !OutFragments.Contains(Frag.Get()))
+		{
+			OutFragments.Add(Frag.Get());
+		}
+	}
+}
+
+int32 UFPSRWeaponInstance::GetDistinctFragmentCount() const
+{
+	TArray<UFPSRWeaponFragment*> Distinct;
+	GetDistinctFragments(Distinct);
+	return Distinct.Num();
+}
+
+int32 UFPSRWeaponInstance::GetMaxFragmentSlots() const
+{
+	// Data-driven per weapon; fall back to the DA default when no source is bound.
+	return Source ? FMath::Max(1, Source->MaxFragmentSlots) : 3;
+}
+
+bool UFPSRWeaponInstance::IsAtFragmentSlotCap() const
+{
+	return GetDistinctFragmentCount() >= GetMaxFragmentSlots();
 }
 
 void UFPSRWeaponInstance::SetCurrentAmmo(int32 NewAmmo)

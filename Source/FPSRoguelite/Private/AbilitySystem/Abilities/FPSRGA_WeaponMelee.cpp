@@ -117,6 +117,16 @@ void UFPSRGA_WeaponMelee::ActivateAbility(
 		FireCtx.ShotCount = 1;
 		FireCtx.bAuthority = true;
 
+		// Behavior fragments: resolve the active list once; PreFire runs before the swing (mirrors hitscan L134-140).
+		const TArray<TObjectPtr<UFPSRWeaponFragment>>* Fragments = Instance ? &Instance->GetActiveFragments() : nullptr;
+		if (Fragments)
+		{
+			for (const TObjectPtr<UFPSRWeaponFragment>& Frag : *Fragments)
+			{
+				if (Frag) { Frag->PreFire(FireCtx); }
+			}
+		}
+
 		float FinalDamage = Damage;
 		bool bSwingCrit = false;
 		bool bAnyWeak = false;
@@ -160,7 +170,16 @@ void UFPSRGA_WeaponMelee::ActivateAbility(
 				Processed.Add(HitActor);
 
 				const float WeakpointMult = FPSRCombat::GetBestWeakpointMultiplierForSphere(HitActor, Center, MeleeRadius);
-				const float TargetDamage = FinalDamage * WeakpointMult;
+				// Per-hit fragment hook (e.g. OnHitBonusDamage) before the weakpoint multiplier — mirrors hitscan ApplyToTarget.
+				float HitDamage = FinalDamage;
+				if (Fragments)
+				{
+					for (const TObjectPtr<UFPSRWeaponFragment>& Frag : *Fragments)
+					{
+						if (Frag) { Frag->OnHitActor(FireCtx, HitActor, HitDamage); }
+					}
+				}
+				const float TargetDamage = HitDamage * WeakpointMult;
 				// Melee never self-damages (bAllowSelf=false); ResolveDamage applies the enemy/friendly rules.
 				const float Resolved = FPSRCombat::ResolveDamage(Avatar, HitActor, TargetDamage, /*bAllowSelf*/ false, World);
 				if (Resolved <= 0.0f)
@@ -193,6 +212,15 @@ void UFPSRGA_WeaponMelee::ActivateAbility(
 					: (bAnyWeak ? EFPSRHitMarkerType::Weak
 					: (bSwingCrit ? EFPSRHitMarkerType::Crit : EFPSRHitMarkerType::Hit));
 				OwnerPC->ClientNotifyHitMarker(MarkerType);
+			}
+		}
+
+		// Post-fire hooks (after all overlaps resolved) — mirrors hitscan L364-370, before the OnFire/OnMiss triggers.
+		if (Fragments)
+		{
+			for (const TObjectPtr<UFPSRWeaponFragment>& Frag : *Fragments)
+			{
+				if (Frag) { Frag->PostFire(FireCtx); }
 			}
 		}
 

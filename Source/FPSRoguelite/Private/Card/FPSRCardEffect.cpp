@@ -175,10 +175,24 @@ void UCardEffect_WeaponBehavior::Apply(const FFPSRCardEffectContext& Context, fl
 	{
 		return;
 	}
-	if (UFPSRWeaponInstance* Instance = ResolveTargetInstance(Context))
+	UFPSRWeaponInstance* Instance = ResolveTargetInstance(Context);
+	if (!Instance)
 	{
-		Instance->AddFragment(Fragment); // MaxStacks gate is inside AddFragment
+		return;
 	}
+	// At the slot cap with a NEW distinct fragment: drop the player-chosen equipped fragment first (CanApply already
+	// validated ReplaceFragmentIndex against this same server-resolved list), then add. Otherwise a plain add (the
+	// instance's stack/slot gates apply). Stacking an already-held fragment never triggers a replacement.
+	if (Instance->GetFragmentStackCount(Fragment) == 0 && Instance->IsAtFragmentSlotCap())
+	{
+		TArray<UFPSRWeaponFragment*> Distinct;
+		Instance->GetDistinctFragments(Distinct);
+		if (Distinct.IsValidIndex(Context.ReplaceFragmentIndex))
+		{
+			Instance->RemoveFragment(Distinct[Context.ReplaceFragmentIndex]);
+		}
+	}
+	Instance->AddFragment(Fragment); // MaxStacks + slot-cap gates are inside AddFragment
 }
 
 FText UCardEffect_WeaponBehavior::GetDescription(ECardRarity Rarity, float Magnitude) const
@@ -197,9 +211,26 @@ bool UCardEffect_WeaponBehavior::CanApply(const FFPSRCardEffectContext& Context)
 		return false;
 	}
 	UFPSRWeaponInstance* Instance = ResolveTargetInstance(Context);
-	// Reject (without consuming the pick) when there's no target instance OR the fragment is already maxed on it —
-	// belt-and-suspenders with the draw-time stack gate so a stale/maxed pick never silently wastes a selection.
-	return Instance != nullptr && Instance->GetFragmentStackCount(Fragment) < FMath::Max(Fragment->MaxStacks, 1);
+	if (!Instance)
+	{
+		return false; // no target instance (e.g. a forged/unowned TargetWeapon resolves to null)
+	}
+	const int32 ExistingStacks = Instance->GetFragmentStackCount(Fragment);
+	if (ExistingStacks > 0)
+	{
+		// Already held: accept only if there's stack room (the slot cap is irrelevant — no new slot is consumed).
+		return ExistingStacks < FMath::Max(Fragment->MaxStacks, 1);
+	}
+	// A new distinct fragment: free under the cap; at the cap it needs a VALID replacement index (server-authoritative
+	// anti-cheat — the index must map to a real equipped fragment on the resolved target weapon). A plain pick
+	// (ReplaceFragmentIndex == INDEX_NONE) or a forged/out-of-range index at the cap is rejected without consuming.
+	if (!Instance->IsAtFragmentSlotCap())
+	{
+		return true;
+	}
+	TArray<UFPSRWeaponFragment*> Distinct;
+	Instance->GetDistinctFragments(Distinct);
+	return Distinct.IsValidIndex(Context.ReplaceFragmentIndex);
 }
 
 #if WITH_EDITOR

@@ -6,6 +6,23 @@
 
 **최종 갱신: 2026-07-01**
 
+## 🔔 핸드오프 (2026-07-01 c) — ✅ **U6 완료**(근접 fragment 훅 + 슬롯상한/제거/교체 안티치트 + 콘텐츠 배선 + 사용자 PIE 통과) → main `--no-ff` 머지. 다음=2차 트랙 남은 유닛
+> **U6 종결**: 코드(근접 PreFire/OnHitActor/PostFire 훅 · `MaxFragmentSlots`/`RemoveFragment`/`ServerSelectCardReplacement` 안티치트) + 콘텐츠(7무기 `UnlockableFeatures` 아키타입 매트릭스 배선, headless commandlet) + **사용자 PIE 통과** → `phase/p4b-fragment-finish` → `main --no-ff` 머지. 검증: 빌드×3 + 헤드리스 스모크×3 + Codex 머지게이트(P1 해소·P2 교정/수용). 브랜치 정리(로컬·원격).
+> **교체 UI = 후속 유닛 시드**: at-cap fragment 제시 + 드롭 선택 → `ServerSelectCardReplacement`(데이터·서버 경로 완비, UI만 남음). + (선택) 매트릭스 밖 기존 항목 정리(Grenade/ChargeLaser/Bazooka MultiShot, Bazooka ExplosiveRounds — 비파괴 유지 중).
+> **⚠️ 다음 = 2차 트랙 남은 유닛**(순서 자유) [[taskprompts-master-roadmap]]: U7 플로우필드 높이 / U8 GMS / U10 SaveGame / U15 1P 무기 애님 / U17 플레이어 설정. 새 작업=TaskPrompts 프롬프트 사용.
+
+## 🔔 핸드오프 (2026-07-01 b) — ✅ **U6 코드 완료·검증**(근접 fragment 훅 + 슬롯상한/제거/교체 안티치트 + Codex 머지게이트 P1/P2 교정) → 다음=콘텐츠 등록 + 사용자 PIE → main 머지
+> **브랜치**: `phase/p4b-fragment-finish`(main `a758d9d`에서 분기, origin push됨). 3커밋: `f598dad feat(U6)` + `524f8a8 fix(U6)`(Codex P1) + `51b0a60 fix(U6)`(Codex P2-b). **코드만**(콘텐츠 미생성 — 원칙).
+> **① Melee 훅**(Haiku 위임→Opus 검증): `UFPSRGA_WeaponMelee`에 PreFire/OnHitActor/PostFire 배선(형제 발사 GA 대칭). **트리거 훅(OnFire/OnMiss/OnKill)은 U18c 기존 보유**(앵커/PROGRESS "근접 미배선"은 stale였음 — grep 확인). ModifyShotCount·OnImpact는 근접=구체오버랩 의미상 제외(추가 스윙=재타격 익스플로잇·트레이스 임팩트 없음) → **BounsDamage(OnHitBonusDamage)가 칼에 발동**.
+> **② 슬롯상한+제거/교체 안티치트**(Opus 직접): `UFPSRWeaponDataAsset.MaxFragmentSlots`(distinct 캡, 기본3, per-weapon, 데이터드리븐) / `UFPSRWeaponInstance` RemoveFragment·GetDistinctFragments(+Count)·GetMaxFragmentSlots·IsAtFragmentSlotCap, `AddFragment(bool)`에 신규-distinct 슬롯캡 게이트(스택은 MaxStacks 별도) / `UCardEffect_WeaponBehavior` CanApply·Apply 캡 인지(`ReplaceFragmentIndex`로 교체 — 서버가 대상무기 distinct 목록에 인덱스 대조→위조/임의 인덱스 거부, ThisWeapon 귀속 유지) / `ServerSelectCardReplacement` RPC(비파괴 신설)+`HandleCardSelection` 공유 핸들러(ServerSelectCard 리팩토링) / `FFPSRCardEffectContext.ReplaceFragmentIndex`·`ApplyCard` 4th param(기본 INDEX_NONE, 기존 콜러 무변경).
+> **검증**: 빌드 Succeeded(-WaitMutex ×3) + 헤드리스 스모크 ModuleLoads Success ×3 + **Codex 머지게이트**: P1 1건(at-cap 오퍼가 기존 카드UI로 적용 불가→프리즈 소프트락) = **양 추첨(언락/레벨업)에서 at-cap 신규 fragment 필터아웃으로 교정**; P2-b(레벨업 DrawCards 대칭 필터) 교정; P2-a(포화 시 빈 unlock 오퍼→픽 소비)=진짜 언락 대상 없을 때만·이미 Warning 로그 → **의도 거동 수용**.
+> **⚠️ 교체 UI = 보류(태스크 명시 "레이아웃만 후속")**: at-cap 신규 fragment는 양 추첨에서 **필터아웃**(프리즈 차단). 교체는 의도적 경로만 = 후속 **교체 UI**(at-cap fragment 재제시+드롭 인덱스 수집→`ServerSelectCardReplacement` 호출) 또는 dev 콘솔 `FPSR.Frag.Fill`/`FPSR.Frag.Replace <dropIdx>`(`#if !UE_BUILD_SHIPPING`). 라우팅 규칙 [[card-pool-routing]]: 스탯 변화=레벨업 / 행동 fragment=미션.
+> **✅ ③ 콘텐츠 배선 완료**(headless commandlet, `12febee`): 무기별 `UnlockableFeatures`에 아키타입 매트릭스 누락분 추가(비파괴 — 기존 항목 유지). 최종 distinct 수: Rifle/LMG/BurstRifle/Grenade/Bazooka·Shotgun/Sniper = 4~6, ChargeLaser=3, Knife=1 → **대부분 ≥4라 교체 테스트 가능**(Rifle 권장). `MaxFragmentSlots=3`은 신규 UPROPERTY 기본값으로 기존 9에셋 자동적용. `WeaponCards`=스탯카드만·`AvailableModifiers`(deprecated) 빈값=라우팅 이미 정상. ⚠️매트릭스 밖 기존 항목 비파괴 유지(사용자 판단): Grenade/ChargeLaser/Bazooka의 MultiShot, Bazooka의 ExplosiveRounds.
+> **⚠️ 다음 = 사용자 PIE → main 머지**(코드+콘텐츠 완비, PIE만 남음). **재개 프롬프트**:
+>   ① **PIE 검증**(에디터 열고, listen-host): (a) 칼 장착→적 근접타격 시 BounsDamage 데미지 증가 확인. (b) 아무 무기(Rifle 권장) 장착→콘솔 `FPSR.Frag.Fill`(슬롯캡3까지 채우고 교체 오퍼 제시+프리즈, 로그 `[Frag]`)→`FPSR.Frag.Replace 0`(slot0 드롭+incoming 추가 = 로그 `APPLIED`, 프리즈 해제)→다시 `FPSR.Frag.Fill`→`FPSR.Frag.Replace 99`(범위초과 = 로그 `REJECTED` 안티치트). (c) (멀티) 클라에 ActiveFragments 복제.
+>   ② 통과 → `git checkout main && git merge --no-ff phase/p4b-fragment-finish -m "merge(phase): p4b-fragment-finish — U6 근접훅+슬롯상한/교체 안티치트+콘텐츠 검증 통과"` → `git push origin main` → 브랜치 정리(`git push origin --delete` + `git branch -d`) → TaskPrompts §B **U6 ✅** → 2차 트랙 다음 유닛(U7/U8/U10/U15/U17).
+> **후속 유닛 시드**: 교체 UI 위젯(at-cap fragment 제시 + 드롭 선택 → `ServerSelectCardReplacement`). 데이터·서버 경로 완비, UI만 남음. + (선택) 매트릭스 밖 MultiShot/ExplosiveRounds 정리.
+
 ## 🔔 핸드오프 (2026-07-01) — ✅ **U5 완료**(원거리 적 콘텐츠 + 베이스 BP 분리 + PIE 통과) → main `--no-ff` 머지. 다음=2차 트랙 남은 유닛
 > **U5 종결**: 기완료 코드에 더해 **콘텐츠 4종 저작 + 근접↔원거리 베이스 BP 분리 + 사거리 튜닝**을 마치고 사용자 PIE 통과 → `phase/p4-ranged-enemy` → `main --no-ff` 머지. 브랜치 정리(로컬 단독, 원격 없었음).
 > **콘텐츠/구조**: ⓐ `BP_EnemyProjectile`(AFPSRProjectile 자식, 엔진 Sphere×0.3+이미시브=가시화; VFX·색구분=후속) ⓑ `BP_EnemyRangedBase`(←BP_RangedEnemy 리네임, AFPSRRangedEnemyBase 자식, ProjectileClass 배선) ⓒ `BP_EnemyMeleeBase`(←BP_EnemyBase 리네임, 아키타입 베이스) ⓓ `DA_EnemyRoster`(_Static 2룰, 근접:원거리=3:1) → `DA_RunSchedule.EnemyRoster` 배선. **후속 변종은 `BP_Enemy{Melee,Ranged}Base` 상속**. GameMode.EnemyClass 재지정+리다이렉터 0 잔존(헤드리스 전수 검증).

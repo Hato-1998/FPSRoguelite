@@ -135,7 +135,11 @@ TArray<FFPSRCardDraw> UFPSRCardSubsystem::DrawCards(AController* ForPlayer, int3
 		{
 			UFPSRWeaponInstance* Inst = (Inv && SourceWeapon) ? Inv->GetInstanceForWeapon(SourceWeapon)
 			                                                  : (Inv ? Inv->GetCurrentInstance() : nullptr);
-			if (!Inst || Inst->GetFragmentStackCount(BehFrag) >= FMath::Max(BehFrag->MaxStacks, 1))
+			const int32 Stacks = Inst ? Inst->GetFragmentStackCount(BehFrag) : 0;
+			// Skip a maxed-stack fragment, OR a new distinct fragment on a weapon already at its slot cap — the latter
+			// needs the (deferred) replacement UI to choose a drop, so a plain pick would bounce and strand the level-up
+			// freeze (mirrors DrawWeaponUnlockOffer; U6). Stacking an already-held fragment (Stacks > 0) is unaffected.
+			if (!Inst || Stacks >= FMath::Max(BehFrag->MaxStacks, 1) || (Stacks == 0 && Inst->IsAtFragmentSlotCap()))
 			{
 				continue;
 			}
@@ -237,7 +241,7 @@ TArray<FFPSRCardDraw> UFPSRCardSubsystem::DrawCards(AController* ForPlayer, int3
 	return Result;
 }
 
-bool UFPSRCardSubsystem::ApplyCard(AController* ForPlayer, const FFPSRCardDraw& Draw, EFPSROfferType OfferType)
+bool UFPSRCardSubsystem::ApplyCard(AController* ForPlayer, const FFPSRCardDraw& Draw, EFPSROfferType OfferType, int32 ReplaceFragmentIndex)
 {
 	UWorld* World = GetWorld();
 	if (!World || World->GetNetMode() == NM_Client)
@@ -286,6 +290,7 @@ bool UFPSRCardSubsystem::ApplyCard(AController* ForPlayer, const FFPSRCardDraw& 
 		EffCtx.Inventory = Pawn->FindComponentByClass<UFPSRWeaponInventoryComponent>();
 	}
 	EffCtx.TargetWeapon = Draw.TargetWeapon;
+	EffCtx.ReplaceFragmentIndex = ReplaceFragmentIndex;
 
 	if (Card->Effects.Num() == 0)
 	{
@@ -459,9 +464,19 @@ TArray<FFPSRCardDraw> UFPSRCardSubsystem::DrawWeaponUnlockOffer(AController* For
 			}
 			if (UFPSRWeaponFragment* Frag = GetCardBehaviorFragment(Card))
 			{
-				if (Instance->GetFragmentStackCount(Frag) >= FMath::Max(Frag->MaxStacks, 1))
+				const int32 Stacks = Instance->GetFragmentStackCount(Frag);
+				if (Stacks >= FMath::Max(Frag->MaxStacks, 1))
 				{
 					continue; // maxed on this weapon — skip
+				}
+				// A brand-new distinct fragment on a weapon already at its slot cap would need the (deferred) replacement
+				// UI to choose what to drop. Skip it from the auto-offer so a plain ServerSelectCard pick can't bounce
+				// (CanApply rejects an at-cap new fragment with no replace index) and strand the card-selection freeze
+				// (U6). The deliberate swap path (ServerSelectCardReplacement) re-introduces such a fragment with a drop
+				// index. Stacking an already-held fragment (Stacks > 0) is unaffected — it consumes no new slot.
+				if (Stacks == 0 && Instance->IsAtFragmentSlotCap())
+				{
+					continue;
 				}
 			}
 			// De-dup on (card, weapon).
