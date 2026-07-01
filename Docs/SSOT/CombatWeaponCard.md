@@ -31,7 +31,7 @@
 #### 2-3-2. 3 카드군 — `ECardGroup` ⟂ 효과별 범위
 - **`ECardGroup`{Character, Weapon, WeaponUnlock}** = 추첨 **풀 + 트리거 + UI 필터**(= 사양의 "카드군"). 효과 적용 **범위**는 **효과별**(`UCardEffect_WeaponStat.bThisWeaponOnly`) — 카드 전역 `ECardScope` 폐지(효과별이 더 표현적).
   - **캐릭터 카드** = 캐릭터 + 든 모든 무기. 효과 = 캐릭터 속성(GE)·캐릭터 행동(패시브)·**전체무기 소폭 stat**(`WeaponStat bThisWeaponOnly=false`, 사양7).
-  - **무기 카드** = 각 무기 귀속. 효과 = 무기 stat(`bThisWeaponOnly=true`)·행동 트리거 Fragment(§2-3-5).
+  - **무기 카드** = 각 무기 귀속. 효과 = 무기 stat(`bThisWeaponOnly=true`, **레벨업 풀** `WeaponCards`)·행동 트리거 Fragment(`UCardEffect_WeaponBehavior` → **미션/마일스톤 해금 풀** `UnlockableFeatures`, §2-3-4 라우팅 — 레벨업/오프닝시드 누수 방지; U6 재확정, §2-3-5).
   - **무기 해금 카드** = §2-3-4.
 - **구 `ECardScope` 매핑(무회귀)**: `Character`→군=Character·`CharacterGE` / `AllWeapons`→**군=Character·`WeaponStat(false)`** / `ThisWeapon`→군=Weapon·`WeaponStat(true)` 또는 `WeaponBehavior`.
 - **같은 주제 양군 공존**(사양7): 연사 Up = 캐릭터 카드(전체무기 소폭) ‖ 무기 카드(해당무기 크게) — "넓고 얕게 vs 좁고 깊게" 빌드 선택.
@@ -46,7 +46,7 @@
 
 #### 2-3-4. 무기 해금 시스템
 - **오퍼타입 신설** `EFPSROfferType::WeaponUnlock`(MissionReward 오버로드 금지 — reroll 차단·`DrawWeaponModifierOffer` 특수처리). `ECardGroup::WeaponUnlock`은 직교 grouping/routing 태그.
-- **새 무기 해금** = `UCardEffect_GrantWeapon`(효과 서브클래스) → `Inventory->AddWeapon`(3슬롯 캡, full=INDEX_NONE). 해금 무기의 WeaponCards/AvailableModifiers는 이후 풀에 자동 합류.
+- **새 무기 해금** = `UCardEffect_GrantWeapon`(효과 서브클래스) → `Inventory->AddWeapon`(3슬롯 캡, full=INDEX_NONE). 해금 무기의 WeaponCards/UnlockableFeatures는 이후 풀에 자동 합류.
 - **잠긴 기능 해금** = 신규 효과타입 불요 — 기존 `WeaponBehavior`/`WeaponStat` 효과를 **해금 전용 풀**(무기 DA `UnlockableFeatures[]`)에 둠. 후보생성 = `DrawWeaponModifierOffer`처럼 보유무기 순회·소속무기 태깅. 예: "탄도 2배"(MultiShot 류)·"차징 후 연사"(Fragment).
 - **새 무기 풀** = `UFPSRCardPoolDataAsset.WeaponUnlockCards[]`.
 - **트리거**: 미션 클리어(기존 `GrantMissionReward` 분리) + **레벨 20/30/40**(신규 마일스톤 훅 = `FPSRGameState::AddSharedXP` 레벨업 루프). `PresentNextOfferIfNeeded`에 unlock 슬롯. 마일스톤 레벨엔 레벨업+해금 **순차 2프리즈**(데드락 없음).
@@ -60,6 +60,7 @@
   - **ChargeLaser warm-up 틱 OnKill 미발화(의도 사양, U18c)**: warm-up 틱은 fragment 훅 전체를 스킵(payoff-only)하므로 OnKill도 payoff 빔에서만 발화. warm-up 칩뎀이 적을 처치해도 OnKill 미발화(기능 소비자 없음 — ChargeLaser는 처치-트리거 무기 아님, 마커도 현재 payoff-only).
 - **캐릭터 행동 = GAS-native**(무상태 Fragment 미러 아님 — 플레이어는 ASC 보유·4인뿐, 적500 perf 이유 없음): ① **흡혈** "데미지 줄 때 회복" = **단일 브릿지 `FPSRCombat::ApplyDamage`**에서 instigator ASC에 `GameplayEvent`(`GameplayEvent.Player.DealtDamage`, 페이로드=**실제 입힌 데미지 `DamageDealt`**, 오버킬/코프스 제외) → 트리거 패시브 GA가 회복 GE(힐=DamageDealt×비율, **모든 무기경로 균일** — 브릿지가 공통이라 캐릭터 효과엔 충분, 무기 Fragment 훅과 달리 FireCtx 불요). ⚠️적500: 이벤트송신은 플레이어-instigator·`DamageDealt>0`·**리스너 카운트>0**(흡혈 grant 시 캐릭터에 set)일 때만. ② **초당 체력 재생** = **기존 `UCardEffect_CharacterGE` + periodic infinite GE**(패시브 GA 불요, 코드 0). ~~"N초 유휴 회복"(reset 루프)~~ 폐기(사용자 2026-06-20). `UCardEffect_CharacterPassive`(흡혈용)가 **신규 `UFPSRPassiveAbility` 베이스**(auto-activate-on-grant·`OnRemoveAbility` 정리) 서브클래스를 grant, 핸들은 PS 추적·런종료 ClearAbility.
 - **서버권위**: 무기 해금·캐릭터 행동·행동 훅·이동속도 전부 서버권위(클라 보고 금지). [[freeze-gate-client-server-symmetry]]
+- **협동 카드 시임 (컨설트 2026-07-01 F7 — `Docs/Review/20260701-concept-conclusions.md`)**: FF 기본 ON·치사(Enemy §2-10)와 짝 = **FF 데미지를 아군 회복으로 전환하는 카드**(사선을 벌이 아니라 지원으로). 캐릭터 행동(GAS-native, 흡혈과 동일 `ApplyDamage` 브릿지 경로 재사용 가능 — 아군 타겟 분기). **제약**: 오버힐 없음·틱/초당 힐 상한·다운 직전 세이브 용도(지속 '힐건'化 금지 = "아군을 쏴서 힐하는 게임" 붕괴 방지). 협동 유도 가성비 = 협동유도 스페셜 적(§2-6) > 어그로 룰/카드 > FF→회복 카드.
 
 #### 2-3-6. 이동속도 속성
 - `UFPSRCombatSet`에 **`MoveSpeedMultiplier`(base 1.0)** + **`PostAttributeChange` 오버라이드 신설**(현재 없음; `UFPSRHealthSet` 패턴 차용) → 소유 Pawn `MaxWalkSpeed = BaseWalkSpeed × Mult`(서버 PostAttributeChange + 클라 OnRep, `COND_None`이라 시뮬프록시 도달). `FPSRCharacter.cpp:60` 하드코딩 600 → `BaseWalkSpeed` 상수. 4인 협동 desync 없음(속성만 복제, MaxWalkSpeed 로컬 재계산·CMC 예측 처리). 적용 순서(서버/클라 OnRep) = U18 검증 항목.
@@ -102,12 +103,12 @@
 - 데이터: 카드 `Scope`로 적용 범위(**v2: 효과 `UCardEffect_WeaponStat.bThisWeaponOnly`로 이동, §2-3-2**), `RarityTiers[].Magnitude`로 수치(SetByCaller 동일 패턴). 무기 스탯 모디파이어는 GE가 아닌 **WeaponInstance 모디파이어로 적용**(무기 스탯은 ASC 밖이므로) — `ApplyCard`에서 효과 루프로 처리(v2; v1 weapon-scope 분기 P4-B).
 
 **② 행동 Fragment (동작 변경)**
-> **v2 변경(U18, §2-3-5)**: 행동 트리거 Fragment(`UCardEffect_WeaponBehavior`)는 **레벨업 무기 카드**로 이동(미션 아님). 미션/마일스톤은 **무기 해금**(§2-3-4)으로 재편. 훅 면 확장 = **OnAim/OnFire/OnMiss/OnKill/OnStatusKill**(OnStatusKill=D3 시임). OnKill·OnMiss·OnFire는 5 데미지경로(Hitscan/ChargeLaser/Melee/Projectile/Explosion) **공통 헬퍼**로 호출, OnKill=`bJustKilled` 전이.
-- (v1) 미션 보상으로 무기 동작을 **근본 변경** (2연발, 차징 무효, 아군 힐 빔 등) — v2에선 "근본 변경"=잠긴 기능 해금(§2-3-4), 점진 트리거=무기 카드
+> **라우팅 확정(U6, 2026-07-01 — U18 v2 경유값 교정)**: 행동 트리거 Fragment(`UCardEffect_WeaponBehavior`) 전부는 **미션/마일스톤 해금 풀**(무기 DA `UnlockableFeatures[]`, §2-3-4)로 라우팅. **레벨업 무기 카드 = 순수 stat만**(FireRate/MagSize/Damage/Crit…) — Fragment의 레벨업·오프닝시드 누수 방지. (U18은 일시적으로 Fragment→레벨업 카드였으나 U6가 미션 풀로 재확정. 구 `AvailableModifiers` 필드 폐지→`UnlockableFeatures`.) 훅 면 확장 = **OnAim/OnFire/OnMiss/OnKill/OnStatusKill**(OnStatusKill=D3 시임). OnKill·OnMiss·OnFire는 5 데미지경로(Hitscan/ChargeLaser/Melee/Projectile/Explosion) **공통 헬퍼**로 호출, OnKill=`bJustKilled` 전이.
+- (v1) 미션 보상으로 무기 동작을 **근본 변경** (2연발, 차징 무효, 아군 힐 빔 등) — U6 라우팅: 모든 행동 Fragment(근본 변경·점진 트리거 무관)=미션/마일스톤 해금 풀(§2-3-4)
 - 적용 방식: **Weapon Behavior Fragment (합성형 훅) + 누적 가능**
   - `UWeaponInstance.ActiveModifiers[]`에 누적, 서로 상호작용 (예: 2연발+관통)
   - `GA_WeaponFire`(아키타입별 베이스)에 훅: `PreFire → ModifyShotCount → ModifyChargeTime → OnProjectileSpawn → OnHitActor → PostFire` (+ v2 트리거 훅 `OnAim/OnFire/OnMiss/OnKill/OnStatusKill`, §2-3-5)
-  - 각 무기 DA가 `AvailableModifiers`(약 4종) 정의 → **미션 클리어 시 즉시 프리즈(§2-2)에 모디파이어 해금/변경 카드로 1종 선택**
+  - 각 무기 DA가 `UnlockableFeatures`(구 `AvailableModifiers`, 폐지) 정의 → **미션 클리어/레벨 마일스톤(20/30/40) 시 즉시 프리즈(§2-2)에 모디파이어 해금/변경 카드로 1종 선택**
 - **GA 교체 방식 금지**(조합 폭발), **거대 태그 분기 금지**(유지보수 지옥)
 - ⚠️ **성능**: `OnHitActor`가 500마리 타격 시 과도한 virtual dispatch/heap alloc 금지 → 훅은 경량(데이터 기반·히트당 무할당)
 - **구현 확정 (P4-B-2, 2026-06-08)**:

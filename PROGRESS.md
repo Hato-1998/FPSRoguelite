@@ -6,7 +6,7 @@
 
 **최종 갱신: 2026-07-01**
 
-## 🔔 핸드오프 (2026-07-01 e) — ⏸️ **U7 2.5D 높이/이동 완료·검증**(계단·램프·단차·경사걷기·회전) → **다음=멀티레이어(2-레이어) 확장**(겹친 2층, 사용자 Option B). 컨텍스트 부담으로 새 세션 인계
+## 🔔 핸드오프 (2026-07-01 e · U7 브랜치) — ⏸️ **U7 2.5D 높이/이동 완료·검증**(계단·램프·단차·경사걷기·회전) → **다음=멀티레이어(2-레이어) 확장**(겹친 2층, 사용자 Option B). 컨텍스트 부담으로 새 세션 인계
 > **브랜치**: `phase/p2-flowfield-height`(main `a5ac549`에서 분기, **16커밋, origin push됨**). **코드만**(콘텐츠 미커밋=사용자 테스트 지오메트리). HEAD=`c0bb7b8`.
 > **✅ 완료·검증(2.5D 높이 인지 = U7 원래 산출물, 전부 커밋)**: BuildObstacleMask **지면-플러드필**(계단/램프/단차/플랫폼 도달가능 walking surface) + **Z-스텝 반복 다운트레이스**(컬럼 적층표면·다리/천장아래 바닥·병합메시 포집; `LineTraceMultiByObjectType`=첫hit만이라 반복, [[ue-linetrace-multi-stops-first-block]]) + **셀 서브샘플 경사판정**(격자보다 작은 계단=램프로 인식) + **footprint폭 edge**(좁은통로 과차단 해소) + **스텝높이 GroundSnapTolerance 클램프** + **대각선 2×2 4-edge**(높이게이트 우회차단) + **WalkableNormalZ=0.573(55°)**(50° 계단 심플콜리전 수용; 적 크롤한계 기준) + **apex 2000cm**(상층 포집, Z-스텝이 천장 통과) + **PlayerStart 앵커 시드** + **경사걷기(MoveAlongFloor 방식)**: ApplyGravity가 GroundNormal 저장→TickServerMovement가 경사면 투영 이동(램프 부드럽게 등반) + 램프 진입 슬라이드 + 라이저 스텝업 + **회전=플레이어 향**(FaceDirection, 정지 시 분리력 지터로 360°회전 버그 해소). **디버그 viz** `FPSR.FlowField.Debug 1`(#if !UE_BUILD_SHIPPING, 녹=플로우/빨=무바닥/주황=점유차단). 검증=빌드 Succeeded 다수 + 헤드리스 스모크 ModuleLoads Success 다수 + Codex 다회(구현 P2 다수 교정).
 > **⚠️ 다음 코드 작업 = 멀티레이어(2-레이어) 플로우필드** (사용자 결정 Option B, U7 내 확장):
@@ -20,7 +20,7 @@
 > **미커밋 콘텐츠(사용자 작업으로 남김, 커밋 금지)**: `Config/DefaultEditor.ini` · `Content/Maps/L_Sandbox.umap`(계단+2층 배치) · `Content/Assets/Environment/ZerinLabs.../SM_stairs_short.uasset`(50° 심플콜리전). = 멀티레이어 PIE 테스트 지오메트리.
 > **재개 프롬프트**: `phase/p2-flowfield-height 코드작업 이어서 — PROGRESS 핸드오프(e) + Game.MD + Docs/SSOT/Performance §5-2·Enemy §2-6 먼저 읽고, U7 멀티레이어(2-레이어) 플로우필드 설계 플랜부터(겹친 2층 지원). 착수 전 SSOT 갱신+제1원리 3줄+플랜 승인+Codex 플랜게이트. 콘텐츠/PIE는 사용자, 코드만·검증=빌드+스모크+Codex. 머지 전 Codex P2 3건 하드닝.`
 
-## 🔔 핸드오프 (2026-07-01 d) — ✅ **U7 코드 완료·검증**(2.5D 높이 인지 플로우필드 + 좁은통로 footprint edge + Codex 머지게이트 7R) → 다음=**사용자 PIE**(지오메트리 배치) → main 머지
+## 🔔 핸드오프 (2026-07-01 d · U7 브랜치) — ✅ **U7 코드 완료·검증**(2.5D 높이 인지 플로우필드 + 좁은통로 footprint edge + Codex 머지게이트 7R) → 다음=**사용자 PIE**(지오메트리 배치) → main 머지
 > **브랜치**: `phase/p2-flowfield-height`(main `a5ac549`에서 분기, origin push됨). 7커밋(`85dfca9 feat` + `ab25c10`·`93aed86`·`d945b1d`·`6261b7d`·`d2a24d3`·`28dcd5b` fix + `353ddab docs`). **코드만**(콘텐츠 미생성 — 원칙). 수정 파일=플로우필드 3개(`FPSRFlowFieldSubsystem.{h,cpp}`·`FPSRFlowFieldBoundsVolume.h`).
 > **① Part A(높이/멀티레벨, 2.5D)**: `BuildObstacleMask`에서 셀당 **Z-스텝 반복 다운트레이스**(ECC_WorldStatic=중력과 동일 채널, WorldDynamic 미추가; 컬럼 적층 표면 전부 포집·**병합메시 포함**, `bStartPenetrating` 필터)로 walkable(normal.Z≥0.71) 후보 수집 → **지면(`GridOrigin.Z`)에서 클라이머블 스텝 플러드필**로 셀별 **도달 가능 walking surface**(`CellFloorZ`) 확정(램프/계단 오르되 벽/천장윗면·절벽엔 안 감; 미도달=blocked→escape-flow). 점유/edge 프로브를 **셀 자기 바닥높이**에서 + **스텝게이트를 `EdgeTraversable`에 굽기**(연속 램프=경사상한 `cell·tan(max각)`, 평지 단차=step; `MaxStepHeight=45` 미러, **`GroundSnapTolerance`=60 클램프**). 대각선 흐름=2×2 코너 4-edge 요구(높이게이트 우회 차단).
 > **② Part B(좁은통로 과차단 해소)**: edge 박스 전셀폭(HalfCell)→**footprint폭**(AgentFootprintRadius). balance/pass2 점유프로브는 기완료, 이번엔 edge 잔여 하드닝.
@@ -30,6 +30,21 @@
 > **⚠️ 다음 = 사용자 PIE → main 머지**(코드+검증 완비, PIE만 남음). **⚠️ L_Sandbox 현재 완전 평지(z=0)라 Part A 검증엔 계단/램프/플랫폼 배치 필요**(사용자 결정: 직접 배치; 메시 임포트됨=`SM_stairs_short`/`SM_Ramp`/`SM_floorTile_*_ramp`, L_Lobby에 배치 선례). **재개 프롬프트**:
 >   ① **PIE 검증**(에디터 열고, listen-host): L_Sandbox에 계단+램프+플랫폼(스폰 반경 내) 배치 후 — (a) 적이 계단/램프로 **플랫폼 위 추격**(base서 안 잠기고 등반; **1차 PIE 실패→③ 스텝업으로 교정**) (b) 단차/커브 통과 (c) **좁은 통로(도어)** 통과=과차단 해소 (d) **평지 무회귀**(기존 추격 정상). **디버그**: 콘솔 `FPSR.FlowField.Debug 1` → 플레이어 주변 플로우 화살표(녹, 셀 바닥높이=램프 위로 올라가야)+막힌 셀(빨강)로 라우팅 육안 확인. 로그 `[FlowField] Obstacle mask: … step<=…cm, ramp<=…cm, apex+…cm`; 대다수 셀 무바닥 WARN 뜨면 apex를 천장 아래로(ProbeApexAboveOriginOverride).
 >   ② 통과 → `git checkout main && git merge --no-ff phase/p2-flowfield-height -m "merge(phase): p2-flowfield-height — U7 2.5D 높이 인지 플로우필드+footprint edge 검증 통과"` → `git push origin main` → 브랜치 정리(`git push origin --delete` + `git branch -d`) → TaskPrompts §B **U7 ✅** → 2차 트랙 남은 유닛(U8/U10/U15/U17).
+
+## 🔔 핸드오프 (2026-07-01 e · main 컨셉) — 🎯 컨셉 방향 확정 + `Concept.md` 신설 + FF 기본 ON 설계확정 (객관평가 후속)
+> **객관 평가(9-에이전트 적대 워크플로)**: 코어 3축(①1인칭×적 가독성 ②빌드 분기[상태이상축 0구현→G2 미개봉] ③리텐션 스노볼[메타 9줄 골격])이 *"설계됨≠재밌음"* 미검증/미설계로, 그 위에 콘텐츠가 쌓이는 게 최대 리스크로 판정. → 사용자 방향 결정 반영:
+> - **판타지=협동 생존 유대 / 타겟=코어 협동슈터층 / 1인칭=USP+검증** 확정 → **`Docs/SSOT/Concept.md` 신설**(§1-C, Game.md §0-1 라우팅 등재). 핵심 USP 논증 = **"1인칭=정보 비대칭→등을 맡기는 협동을 시스템으로 강제"**(탑다운의 사각 '버그'가 협동에선 USP; 평가 자기모순 해소). USP 성립은 §5 가독성 게이트 통과 조건부(실패 시 폴백 트리거).
+> - **적 동시규모 실측 정정 ~300-500 → ~200-300**(코드 폴백캡 300 부합, 하드캡 500=헤드룸; `e75a49f`). perf/가독성 게이트 목표=200-300 기준.
+> - **FF 기본 OFF→ON 설계확정**(코어 협동 사선관리 긴장·실력 축) — Enemy §2-10·Roadmap P5·§D#2 반영. ⚠️**코드 후속**: `bFriendlyFireEnabled` 기본값 `false→true` flip(활성 클론 작업).
+> - 협동 상호의존 = **다축 원칙**(사각엄호[내장 USP산물]·DBNO부활[기구현]·**FF→회복 전환 카드**·협동유도 스페셜 적/어그로 분산) — 개별 메커닉·수치는 콘텐츠 단계.
+> **⚠️ 다음(P0 — 사용자 선택 "코어 리스크 검증 우선")**: ① 적200-300 정량 perf 측정 + NetCull 구현 ② **1인칭 가독성 게이트**(USP 검증: 동시 적 상한·방향큐 하드캡·에임 유의미성·4인 오디오 혼잡) ③ 메타 루프 본체 설계(재화 소스·실패 보상·트리). + Concept §1-C-8 미확정(후크 문구·리텐션 목표치) + FF ON 코드 flip. 상세 평가 산출물=이 세션 워크플로 결과.
+> **추가(2026-07-01, 컨설트 후속)**: 백엔드×Codex 2R 컨설트 완료(`Docs/Review/20260701-concept-conclusions.md`) → 합의 **F1·F3~F7 SSOT 반영 완료**(Concept USP문장/멀티스코프·PlayerFeel §2-14 HUD 큐 원칙·Enemy §2-6 초반 협동비트+협동유도 스페셜 적·Performance §5 1인칭 가독성 게이트 5지표(P0)·CombatWeaponCard §2-3-5 FF→회복 카드). **F2 FF=치사 ON 50% 확정**(멀티 스코프=솔로+친구 협동, 공개매칭 미고려 → 트롤 안전장치 불요). 잔여 코드=`bFriendlyFireEnabled` false→true. **→ 2차 트랙(U8 GMS/U10 SaveGame/U15 무기애님/U17 설정) 재개 가능.**
+
+## 🔔 핸드오프 (2026-07-01 d · main 정리) — 📝 **SSOT·메모리 오염 정리**(감사 후속, 별도 main 클론 FPSRoguelite2) → main 커밋 `54d0dc7` push. 활성 U7(`phase/p2-flowfield-height`)과 분리·무접촉
+> **배경**: 별도 클론(FPSRoguelite2)이 origin/main보다 **213커밋 뒤처짐** → `git reset --hard origin/main`(GIT_LFS_SKIP_SMUDGE, 문서 텍스트만 최신화·바이너리는 LFS 포인터 유지)로 동기화 후 문서만 교정. **U7 phase 브랜치(다른 클론)는 무접촉**.
+> **리포 교정(커밋 `54d0dc7`, 8파일)**: ① Enemy.md §2-10 아군 오사 **10%→50%**(`FriendlyFireDamageScale=0.5f`)·**기본 OFF**(`bFriendlyFireEnabled=false`)·구현 P5 완료 ② §2-6 공격토큰 곁가지 "FF 10%" 제거(토큰 10/3 U5 구현) ③ Roadmap §7-3 **P5 ✅**(FF·DBNO 완료 / Iris=비채택(Push 유지)·NetProfiler=U14 이월) ④ Game.md §9 "미커밋(untracked)" 불릿 교정(L_Sandbox·DA_Weapon 전부 tracked) ⑤ AGENTS.md **핵심 4원칙**(원칙4 추가) ⑥ CLAUDE/AGENTS/ConsultLoop "Hero Shooter 아님" **긍정형** 정렬(제1원리 앞세움) ⑦ CombatWeaponCard §2-3 카드라우팅 **U6 반영**(행동 fragment=미션 `UnlockableFeatures`, `AvailableModifiers` 폐지 — [[card-pool-routing]] override 해소) ⑧ TaskPrompts §B **U9=✅**(`e38dfbe` DBNO Phase1B, `UFPSRReviveComponent` 근접 자동부활)·**U11b=✅**(사용자 2-PC Steam E2E 확인).
+> **메모리 교정(리포 밖, `E--Git-Project-FPSRoguelite\memory\`)**: balance-pass2("다음=W1"→dated history·GC 경로 `Meshs/` 보정)·taskprompts-master-roadmap(U7 진행중/U9·U11b 완료)·codex-review-gate(`Docs/reviews`→`Docs/codex-reviews` ×2)·p6a-gameflow(.uproject 해결 `15d4e34`·루프 닫힘)·MEMORY.md 인덱스 동기.
+> **⚠️ 다음 = 활성 U7 계속**(다른 클론 `phase/p2-flowfield-height`, 미머지) 또는 2차 트랙 남은 유닛(U8/U10/U15/U17).
 
 ## 🔔 핸드오프 (2026-07-01 c) — ✅ **U6 완료**(근접 fragment 훅 + 슬롯상한/제거/교체 안티치트 + 콘텐츠 배선 + 사용자 PIE 통과) → main `--no-ff` 머지. 다음=2차 트랙 남은 유닛
 > **U6 종결**: 코드(근접 PreFire/OnHitActor/PostFire 훅 · `MaxFragmentSlots`/`RemoveFragment`/`ServerSelectCardReplacement` 안티치트) + 콘텐츠(7무기 `UnlockableFeatures` 아키타입 매트릭스 배선, headless commandlet) + **사용자 PIE 통과** → `phase/p4b-fragment-finish` → `main --no-ff` 머지. 검증: 빌드×3 + 헤드리스 스모크×3 + Codex 머지게이트(P1 해소·P2 교정/수용). 브랜치 정리(로컬·원격).

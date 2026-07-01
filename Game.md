@@ -2,7 +2,7 @@
 
 > **이 문서는 SSOT(Single Source of Truth)의 허브다.** 장르 정체성·문서 체계·빠른 참조만 본문에 두고, **도메인 상세는 `Docs/SSOT/`로 분할**했다(문서 비대화 방지). 작업에 맞는 파일만 읽어라(아래 §0-1 라우팅).
 > 작업 시작 전 **이 허브(Game.md) + `PROGRESS.md`(라이브 진행현황) + 해당 도메인 파일**을 읽는다. 설계 변경은 **해당 도메인 파일(또는 이 허브)을 먼저 갱신**한 뒤 코드/에셋을 수정한다.
-> 엔진: **UE 5.7** (`D:\UnrealEngine\UE_5.7`) / 최종 확정일 기준: 2026-05-30 / 설계 잠금 버전: v6(Locked)
+> 엔진: **UE 5.7** (`D:\UnrealEngine\UE_5.7`) / 최종 확정일 기준: 2026-05-30 / 설계 잠금 버전: v6(Locked) · **적 동시규모 실측 갱신 2026-07-01(~200-300)**
 > ⚠️ **섹션 번호(§1, §2-4-1, §5-2 …)는 분할 후에도 보존**된다. 소스 주석·교차참조의 "§x"는 아래 라우팅으로 해당 파일을 찾는다.
 
 ---
@@ -24,6 +24,7 @@
 
 | 작업 종류 | 읽을 파일 | 담긴 섹션 |
 |---|---|---|
+| **컨셉·피치·USP·판타지·타겟·포지셔닝** | [`Docs/SSOT/Concept.md`](Docs/SSOT/Concept.md) | §1-C |
 | 런 루프·XP/레벨업·프리즈·미션/스케줄·보스·메타 | [`Docs/SSOT/RunFlow.md`](Docs/SSOT/RunFlow.md) | §2-1, §2-2, §2-7, §2-8, §2-11, §2-12 |
 | 무기·카드·모디파이어/Fragment·사격 감각 | [`Docs/SSOT/CombatWeaponCard.md`](Docs/SSOT/CombatWeaponCard.md) | §2-3, §2-4(+2-4-1·2-4-2), §2-5 |
 | 적 스웜·스폰·발사체·데미지 브릿지·네트워크 | [`Docs/SSOT/Enemy.md`](Docs/SSOT/Enemy.md) | §2-6, §2-10 |
@@ -37,17 +38,16 @@
 
 ---
 
-## 1. ⚠️ 장르 정체성 — 가장 먼저 읽을 것 (안티-편향)
+## 1. ⚠️ 장르 정체성 & 제1원리 제약 — 가장 먼저 읽을 것
 
 이 프로젝트는 **1인칭 FPS × 뱀파이어 서바이벌 × 4인 협동 로그라이트**다.
 레퍼런스: **The Spell Brigade (Steam)**.
 
-**이것은 Hero Shooter(Overwatch/Valorant/Apex)가 아니다.** 적은 수백 마리(~300-500)의 싼 액터다.
-과거 참조 PDF 커리큘럼(`HeroShooter_Portfolio_Curriculum.pdf`)은 PvP Hero Shooter 기준이라 그 기술 스택을 **그대로 가져오면 안 된다.**
+**핵심 제약 (모든 아키텍처 결정의 기준)**: 적을 **동시 ~200-300마리(실측 2026-07-01; 코드 폴백캡 300 부합, 하드캡 `MaxActiveEnemies`=500은 헤드룸) 싸게** 굴려야 한다. 이 한 가지가 표준 FPS/멀티플레이 튜토리얼의 디폴트(무거운 per-actor 시스템)에서 **의도적으로 이탈**하게 만드는 제1원리다 — **액터당 비용 최소화가 다른 모든 편의보다 우선**한다.
 
-| | Hero Shooter (가져오면 안 됨) | **이 게임 (Survivor Swarm)** |
+| 축 | 무거운 per-actor 접근 (지양) | **이 게임 (Survivor Swarm)** |
 |---|---|---|
-| 액터 수 | ~12명 | **적 수백 (~300-500)** |
+| 액터 수 | ~12명 | **적 수백 (동시 ~200-300 실측)** |
 | 액터당 비용 | 높아도 OK | **반드시 최소화** |
 | AI | 개별 스마트 (StateTree/BT) | **단순 추격 스티어링 + Flow-Field, 배치** |
 | 길찾기 | 에이전트별 NavMesh | **Flow-Field (고정맵 사전계산)** |
@@ -55,15 +55,17 @@
 | 적 애니메이션 | 풀 피델리티 | **인스턴싱/VAT + LOD** |
 | 리플리케이션 | 플레이어별 고정밀 | **적은 최소상태/Push Model** |
 
-**임의로 도입 금지** (Hero Shooter 편향):
+**임의로 도입 금지** (표준 디폴트 과설계 — 제1원리 위배):
 - ❌ Lyra 풀 fork → 경량 커스텀 모듈 + 엔진 플러그인 체리픽
 - ❌ 모든 적에 GAS/ASC → 적은 경량 `UHealthComponent` + 비-GE 데미지
 - ❌ 적별 StateTree/BehaviorTree + NavMesh 길찾기 → Flow-Field + 스티어링, 배치 처리
 - ❌ Iris 핵심 의존 → 디폴트는 Push Model, Iris는 P5 평가용·OFF
-- ❌ MassEntity 선도입 → 목표 규모 ~500은 풀액터로 충분
+- ❌ MassEntity 선도입 → 목표 규모(동시 ~200-300, 캡 500)는 풀액터로 충분
 - ❌ Server-Side Rewind, Motion Matching, Bhop/Wall-run, PCG, True First Person 풀바디
 
 **GAS는 플레이어(1~4)와 보스/엘리트(소수)에만. 스웜 적에는 절대 붙이지 않는다.**
+
+> 📌 **한 줄 대조**: 위 "지양" 열은 표준 Hero Shooter/Lyra류 튜토리얼 스택의 디폴트다 — 그쪽 기술 스택을 *그대로* 가져오지 말 것(Lyra는 플레이어 측 시스템 한정 교차검증 레퍼런스). 과거 참조하던 PvP Hero Shooter 커리큘럼은 이 프로젝트 기준 아님.
 
 > 🔑 **아키텍처 결정 = 제1원리 우선, 레퍼런스 맹종 금지** — 비자명한 구조 결정은 ① 제1원리 근거 ② (참고) Lyra/UE표준과 같은가·다른가 ③ 이 프로젝트 제약과의 정합을 3줄로 명시. Lyra는 *플레이어 측 시스템*(무기·어빌리티·UI) 한정 교차검증 레퍼런스이며, 적/스케일은 의도적으로 이탈한다. (상세 `CLAUDE.md` 핵심 4원칙)
 
@@ -73,4 +75,4 @@
 - 무기 교체 = 숫자키 **1/2/3**(`IA_EquipSlot1~3`) / 사격 = 좌클릭
 - **UE5.7 IMC 매핑은 Python `set_editor_property` 미반영 → 에디터 수동**(IA 에셋 생성은 Python OK)
 - 카드선택 = **레벨업/미션클리어 시 전역 프리즈**(적·플레이어 정지)에 전원 선택 → 재개(§2-2, `Docs/SSOT/RunFlow.md`). 오프닝 시드 2장은 런 시작 시. (라운드제·정비시간 폐지 2026-06-04)
-- git: 사용자 콘텐츠(L_Sandbox 맵, DA_Weapon_Rifle/Knife @ `Content/Weapons/DataTable/`)는 디스크 존재·**미커밋**(untracked)
+- git: 사용자 콘텐츠(L_Sandbox 맵, DA_Weapon_Rifle/Knife @ `Content/Weapons/DataTable/` 등)는 **커밋 완료**(LFS tracked, 2026-07-01 확인). 신규 콘텐츠 저작 후엔 Phase 종료 시 `git status`로 동반커밋 확인.
