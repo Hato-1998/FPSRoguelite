@@ -240,14 +240,58 @@ void UFPSRFlowFieldSubsystem::BuildObstacleMask()
 	TArray<bool> CellSloped;
 	CellSloped.Init(false, NumCells);
 
-	// (2) Seed the flood from every cell holding a candidate within one step of the known (flat) ground floor.
+	// (2) Seed the flood: start all cells unassigned, then seed ground sources (PlayerStart anchors + ground-height cells).
 	for (int32 i = 0; i < NumCells; ++i)
 	{
 		CellFloorZ[i] = MAX_flt; // unassigned
 	}
 	TQueue<int32> FloorFrontier;
+
+	// (2a) Guaranteed seed: every PlayerStart sits on walkable ground, so seed the flood from its cell using the
+	// candidate nearest the start's own floor Z — even if that differs from GridOrigin.Z by more than a step (the
+	// start may sit on a ramp/slope). Without this a fully-sloped start could leave the whole field unseeded/blocked
+	// (Codex). Guarantees at least one ground source on any map with a PlayerStart inside the grid.
+	for (TActorIterator<APlayerStart> It(World); It; ++It)
+	{
+		const APlayerStart* Start = *It;
+		if (!Start)
+		{
+			continue;
+		}
+		const FVector StartLoc = Start->GetActorLocation();
+		const int32 SCell = WorldToCellIndex(StartLoc);
+		if (SCell == INDEX_NONE || CellFloorZ[SCell] != MAX_flt)
+		{
+			continue; // outside the grid or already seeded
+		}
+		float BestH = MAX_flt, BestD = MAX_flt;
+		bool bBestSloped = false;
+		for (const FVector2f& Cand : CellCandidates[SCell])
+		{
+			const float D = FMath::Abs(Cand.X - StartLoc.Z);
+			if (D < BestD)
+			{
+				BestD = D;
+				BestH = Cand.X;
+				bBestSloped = Cand.Y < FlatNormalZThreshold;
+			}
+		}
+		if (BestH != MAX_flt)
+		{
+			CellFloorZ[SCell] = BestH;
+			CellSloped[SCell] = bBestSloped;
+			FloorFrontier.Enqueue(SCell);
+		}
+	}
+
+	// (2b) Also seed every cell holding a candidate within one step of the known ground floor (flat spawn plane) — covers
+	// disconnected same-height regions and maps without a PlayerStart-in-grid. Skips cells already anchor-seeded above.
 	for (int32 Cell = 0; Cell < NumCells; ++Cell)
 	{
+		if (CellFloorZ[Cell] != MAX_flt)
+		{
+			continue;
+		}
 		for (const FVector2f& Cand : CellCandidates[Cell])
 		{
 			if (FMath::Abs(Cand.X - GridOrigin.Z) <= ActiveClimbableStepHeight)
