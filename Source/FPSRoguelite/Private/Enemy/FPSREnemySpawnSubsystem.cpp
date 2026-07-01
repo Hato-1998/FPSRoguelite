@@ -409,14 +409,16 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 				FlowDir = FlowDir.GetSafeNormal();
 			}
 
-			// Stop advancing toward the player only when within StopDistance AND at roughly the same height (same layer).
-			// The nearest-player test is XY-only (DistSquaredXY above), so a player on an overlapping upper deck (U7
-			// multi-layer) reads as XY-close but is a storey up; without the vertical gate the enemy would halt
-			// underneath them instead of following the flow up the connecting stair. Reuse the melee vertical gap. On a
-			// flat map AttackVertGap ~= 0 <= AttackVerticalRange, so this is a no-op (no regression).
+			// Stop advancing only when within StopDistance in FULL 3D. The nearest-player test above is XY-only
+			// (DistSquaredXY), so a player on an overlapping upper deck (U7 multi-layer) reads as XY-close while a storey
+			// up: a 2D stop (or a loose vertical band) freezes the enemy on the connecting stair ~one storey below the
+			// platform — it bunches with its neighbours at the stair top and never crests (separation jitter). Folding
+			// the vertical gap into the distance keeps it following the flow UP the stair until it is genuinely close in
+			// 3D (i.e. actually on the player's surface), then stops. Flat map: AttackVertGap ~= 0, so this reduces to
+			// the original XY stop (no regression); ranged (StopDistance 1500) is essentially unchanged by a 450cm gap.
 			const float StopDistSq = FMath::Square(Enemy->GetStopDistance());
-			const bool bAtStopDistance = (BestDistSq <= StopDistSq) && (AttackVertGap <= AttackVerticalRange);
-			const FVector Desired = bAtStopDistance ? FVector::ZeroVector : FlowDir;
+			const float BestDist3DSq = BestDistSq + AttackVertGap * AttackVertGap;
+			const FVector Desired = (BestDist3DSq <= StopDistSq) ? FVector::ZeroVector : FlowDir;
 
 			// Combine flow + separation; TickServerMovement normalizes and moves at CurrentMoveSpeed. Face the player
 			// (FlowDir points toward them, direct near them) — NOT MoveDir, whose separation jitter would spin the enemy.
