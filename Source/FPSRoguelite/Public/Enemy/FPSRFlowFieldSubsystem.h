@@ -77,8 +77,31 @@ private:
 	// capsule; a future per-archetype radius could read this from the enemy CDO (out of scope here).
 	static constexpr float AgentFootprintRadius = 40.0f;    // cm; = AFPSREnemyBase capsule radius
 
+	// --- Part A: 2.5D per-cell ground-height (U7) — sampled ONCE in BuildObstacleMask so the 0.2s RecomputeField and
+	// the per-enemy SampleFlowDirection stay pure O(1) array reads (NO height/trace in the 500-enemy hot path). ---
+
+	// An inter-cell floor-height step <= this is a walkable step (stairs/curb/gentle rise); a larger delta is a
+	// cliff/wall and that edge is closed. Mirrors UCharacterMovementComponent::MaxStepHeight (UE 5.7 default 45cm).
+	// INVARIANT: keep <= AFPSREnemyBase::GroundSnapTolerance (60) — the field only routes across steps the per-enemy
+	// ground-snap can actually climb, so ApplyGravity needs no change. A bounds volume can override per map.
+	static constexpr float DefaultClimbableStepHeight = 45.0f;
+
+	// Min up-facing normal Z for a per-cell floor sample to count as walkable (rejects ceiling undersides / too-steep
+	// faces). Mirrors UCharacterMovementComponent walkable floor Z (0.71 = cos ~44.8deg).
+	static constexpr float WalkableNormalZ = 0.71f;
+
+	// Per-cell floor probe: a downward multi-hit trace from (GridOrigin.Z + ActiveProbeApexAboveOrigin) picks the
+	// topmost walkable static surface. The default apex sits above typical platforms but below a room ceiling so a solid
+	// roof isn't mistaken for floor; a bounds volume raises it for taller / multi-storey maps.
+	static constexpr float DefaultProbeApexAboveOrigin = 500.0f; // cm above GridOrigin.Z (floor) to start the down-trace
+	static constexpr float MaxProbeDrop = 4000.0f;               // cm total downward trace length (reaches sunken floors)
+
 	/** Active cell size (cm): DefaultCellSize, a volume's CellSizeOverride, or grown to fit the perf budget. */
 	float ActiveCellSize = DefaultCellSize;
+	/** Active climbable step height (cm): DefaultClimbableStepHeight or a bounds volume's ClimbableStepHeightOverride. */
+	float ActiveClimbableStepHeight = DefaultClimbableStepHeight;
+	/** Active floor-probe apex (cm above GridOrigin.Z): DefaultProbeApexAboveOrigin or a bounds volume override. */
+	float ActiveProbeApexAboveOrigin = DefaultProbeApexAboveOrigin;
 	/** Grid dimensions (cells per axis; non-square when a bounds volume's AABB is non-square). Cell index = CY*GridDimX + CX. */
 	int32 GridDimX = 0;
 	int32 GridDimY = 0;
@@ -95,6 +118,11 @@ private:
 	 *  true = an agent can cross). Built once with BlockedField. Default false = blocked (safe: a forgotten/edge-of-
 	 *  grid entry never leaks flow). Lets a 1-cell-wide doorway stay open while a thin boundary wall still blocks. */
 	TArray<bool> EdgeTraversable;
+
+	/** Per-cell walkable floor Z (world), sampled ONCE in BuildObstacleMask (topmost up-facing static surface). BUILD-
+	 *  TIME state ONLY: the occupancy/edge probes + climbable-step edge gate read it during the build; RecomputeField
+	 *  and SampleFlowDirection MUST NOT (the 0.2s BFS + 500-enemy sample stay pure array reads). MAX_flt = no floor. */
+	TArray<float> CellFloorZ;
 
 	bool bFieldReady = false;
 	FTimerHandle RecomputeTimerHandle;

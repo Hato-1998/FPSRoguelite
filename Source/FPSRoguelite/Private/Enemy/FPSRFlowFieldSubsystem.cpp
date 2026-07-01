@@ -9,6 +9,7 @@
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerStart.h"
 #include "CollisionShape.h"
+#include "Engine/HitResult.h"
 #include "TimerManager.h"
 #include "Containers/Queue.h"
 #include "EngineUtils.h"
@@ -71,6 +72,10 @@ void UFPSRFlowFieldSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 		const FBox WB = BoundsVolume->GetWorldBounds();
 		const float Override = BoundsVolume->GetCellSizeOverride();
 		ActiveCellSize = (Override > 0.0f) ? Override : DefaultCellSize;
+		const float StepOverride = BoundsVolume->GetClimbableStepHeightOverride();
+		ActiveClimbableStepHeight = (StepOverride > 0.0f) ? StepOverride : DefaultClimbableStepHeight;
+		const float ApexOverride = BoundsVolume->GetProbeApexAboveOriginOverride();
+		ActiveProbeApexAboveOrigin = (ApexOverride > 0.0f) ? ApexOverride : DefaultProbeApexAboveOrigin;
 		GridOrigin = FVector(WB.Min.X, WB.Min.Y, FloorZ);
 		SizeX = FMath::Max(ActiveCellSize, WB.GetSize().X);
 		SizeY = FMath::Max(ActiveCellSize, WB.GetSize().Y);
@@ -83,6 +88,8 @@ void UFPSRFlowFieldSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 	else
 	{
 		ActiveCellSize = DefaultCellSize;
+		ActiveClimbableStepHeight = DefaultClimbableStepHeight;
+		ActiveProbeApexAboveOrigin = DefaultProbeApexAboveOrigin;
 		GridOrigin = FVector(-HalfExtentFallback, -HalfExtentFallback, FloorZ);
 		SizeX = 2.0f * HalfExtentFallback;
 		SizeY = 2.0f * HalfExtentFallback;
@@ -111,6 +118,7 @@ void UFPSRFlowFieldSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 	FlowField.Init(FVector2D::ZeroVector, GridDimX * GridDimY);
 	BlockedField.Init(false, GridDimX * GridDimY);
 	EdgeTraversable.Init(false, GridDimX * GridDimY * 2); // default blocked; BuildObstacleMask opens passable edges
+	CellFloorZ.Init(GridOrigin.Z, GridDimX * GridDimY);  // default = grid floor; BuildObstacleMask refines per cell (MAX_flt = no floor)
 
 	UE_LOG(LogFPSR, Log, TEXT("[FlowField] Grid %dx%d cell=%.0f origin=%s (%s)."),
 		GridDimX, GridDimY, ActiveCellSize, *GridOrigin.ToString(),
@@ -138,22 +146,13 @@ void UFPSRFlowFieldSubsystem::BuildObstacleMask()
 	ObjParams.AddObjectTypesToQuery(ECC_WorldStatic);
 	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(FPSRFlowObstacle), false);
 
-	// Clearance-aware probing (Part B — replaces the old full-cell over-blocking that jammed narrow doorways).
-	// TWO masks, both built once on the fixed map:
-	//  (1) OCCUPANCY (BlockedField): an agent-footprint box (AgentFootprintRadius, NOT the full cell) at the cell
-	//      CENTER. A cell is blocked only if geometry intrudes within a capsule radius of its center, so a cell a
-	//      capsule can stand in is NOT blocked just because a wall clips its far edge (fixes the doorway jam).
-	//  (2) EDGE (EdgeTraversable): a box straddling each shared +X / +Y boundary face — thin across the boundary
-	//      (AgentFootprintRadius) and spanning the full edge width (the cell size). This catches a thin wall sitting
-	//      ON a cell boundary that both neighbors' shrunk center probes would miss, so BFS/flow never cross a wall
-	//      even when both cells are individually open (closes the through-wall leak the shrink would otherwise open).
-	const FCollisionShape OccupancyBox = FCollisionShape::MakeBox(
-		FVector(AgentFootprintRadius, AgentFootprintRadius, ObstacleProbeHalfHeight));
-	const float HalfCell = ActiveCellSize * 0.5f;
-	const FCollisionShape EdgeBoxX = FCollisionShape::MakeBox(FVector(AgentFootprintRadius, HalfCell, ObstacleProbeHalfHeight));
-	const FCollisionShape EdgeBoxY = FCollisionShape::MakeBox(FVector(HalfCell, AgentFootprintRadius, ObstacleProbeHalfHeight));
-
-	int32 BlockedCount = 0;
+	// U7 Part A pass 1 — per-cell walkable floor height (2.5D). ONE downward multi-hit trace per cell picks the TOPMOST
+	// up-facing (walkable) static surface, so stairs / ramps / raised platforms are sampled at their real height
+	// instead of one global plane, and a ceiling's downward-facing underside is rejected. Same ECC_WorldStatic channel
+	// the enemy ground-follow (AFPSREnemyBase::ApplyGravity) uses, so the sampled height matches where enemies rest.
+	// One-time on the fixed map — never in the 0.2s recompute.
+	const float ApexZ = GridOrigin.Z + ActiveProbeApexAboveOrigin;
+	FCollisionQueryParams FloorQP(SCENE_QUERY_STAT(FPSRFlowFloor), false);
 	for (int32 CY = 0; CY < GridDimY; ++CY)
 	{
 		for (int32 CX = 0; CX < GridDimX; ++CX)
@@ -161,39 +160,101 @@ void UFPSRFlowFieldSubsystem::BuildObstacleMask()
 			const int32 Cell = CY * GridDimX + CX;
 			const float CenterX = GridOrigin.X + (CX + 0.5f) * ActiveCellSize;
 			const float CenterY = GridOrigin.Y + (CY + 0.5f) * ActiveCellSize;
-			const float ProbeZ = GridOrigin.Z + ObstacleProbeZ;
+			const FVector Apex(CenterX, CenterY, ApexZ);
+			const FVector Base(CenterX, CenterY, ApexZ - MaxProbeDrop);
+
+			TArray<FHitResult> Hits;
+			World->LineTraceMultiByObjectType(Hits, Apex, Base, ObjParams, FloorQP); // near->far == top->bottom
+			float FloorZ = MAX_flt;
+			for (const FHitResult& H : Hits)
+			{
+				if (H.ImpactNormal.Z >= WalkableNormalZ) // first walkable (up-facing) surface from the top
+				{
+					FloorZ = H.ImpactPoint.Z;
+					break;
+				}
+			}
+			CellFloorZ[Cell] = FloorZ;
+			if (FloorZ == MAX_flt)
+			{
+				BlockedField[Cell] = true; // no walkable floor in this column -> not standable
+			}
+		}
+	}
+
+	// Pass 2 — clearance-aware probing (balance/pass2) + U7 height gate. Both masks built once on the fixed map:
+	//  (1) OCCUPANCY (BlockedField): an agent-footprint box at the cell CENTER, at THIS cell's own floor height, so a
+	//      cell a capsule can stand in isn't blocked by a wall that merely clips its far edge (narrow-doorway fix).
+	//  (2) EDGE (EdgeTraversable): opened only if BOTH cells have a floor, the inter-cell floor step is climbable
+	//      (<= ActiveClimbableStepHeight — U7: a taller delta is a cliff/wall), AND no thin wall straddles a
+	//      footprint-wide gap on the shared boundary (U7 Part B: a footprint-width box, NOT the old full-cell width, so
+	//      a doorway narrower than a cell on a boundary is no longer over-blocked while a full-boundary wall still is).
+	const FCollisionShape OccupancyBox = FCollisionShape::MakeBox(
+		FVector(AgentFootprintRadius, AgentFootprintRadius, ObstacleProbeHalfHeight));
+	const FCollisionShape EdgeBox = FCollisionShape::MakeBox(
+		FVector(AgentFootprintRadius, AgentFootprintRadius, ObstacleProbeHalfHeight));
+
+	for (int32 CY = 0; CY < GridDimY; ++CY)
+	{
+		for (int32 CX = 0; CX < GridDimX; ++CX)
+		{
+			const int32 Cell = CY * GridDimX + CX;
+			if (CellFloorZ[Cell] == MAX_flt)
+			{
+				continue; // no floor -> already blocked; its edges stay closed (default false)
+			}
+			const float CenterX = GridOrigin.X + (CX + 0.5f) * ActiveCellSize;
+			const float CenterY = GridOrigin.Y + (CY + 0.5f) * ActiveCellSize;
+			const float CellProbeZ = CellFloorZ[Cell] + ObstacleProbeZ; // knee/wall height above THIS cell's floor
 
 			// (1) Occupancy: can a footprint-sized agent stand at this cell's center?
-			if (World->OverlapAnyTestByObjectType(FVector(CenterX, CenterY, ProbeZ), FQuat::Identity, ObjParams, OccupancyBox, QueryParams))
+			if (World->OverlapAnyTestByObjectType(FVector(CenterX, CenterY, CellProbeZ), FQuat::Identity, ObjParams, OccupancyBox, QueryParams))
 			{
 				BlockedField[Cell] = true;
-				++BlockedCount;
 			}
 
-			// (2a) +X edge (shared boundary with cell CX+1): open if no static geometry straddles the face.
+			// (2a) +X edge (shared boundary with cell CX+1).
 			if (CX + 1 < GridDimX)
 			{
-				const FVector EdgeCenter(GridOrigin.X + (CX + 1) * ActiveCellSize, CenterY, ProbeZ);
-				if (!World->OverlapAnyTestByObjectType(EdgeCenter, FQuat::Identity, ObjParams, EdgeBoxX, QueryParams))
+				const float NFloor = CellFloorZ[Cell + 1];
+				if (NFloor != MAX_flt && FMath::Abs(CellFloorZ[Cell] - NFloor) <= ActiveClimbableStepHeight)
 				{
-					EdgeTraversable[Cell * 2 + 0] = true;
+					const float EdgeZ = FMath::Max(CellFloorZ[Cell], NFloor) + ObstacleProbeZ;
+					const FVector EdgeCenter(GridOrigin.X + (CX + 1) * ActiveCellSize, CenterY, EdgeZ);
+					if (!World->OverlapAnyTestByObjectType(EdgeCenter, FQuat::Identity, ObjParams, EdgeBox, QueryParams))
+					{
+						EdgeTraversable[Cell * 2 + 0] = true;
+					}
 				}
 			}
 
 			// (2b) +Y edge (shared boundary with cell CY+1).
 			if (CY + 1 < GridDimY)
 			{
-				const FVector EdgeCenter(CenterX, GridOrigin.Y + (CY + 1) * ActiveCellSize, ProbeZ);
-				if (!World->OverlapAnyTestByObjectType(EdgeCenter, FQuat::Identity, ObjParams, EdgeBoxY, QueryParams))
+				const float NFloor = CellFloorZ[Cell + GridDimX];
+				if (NFloor != MAX_flt && FMath::Abs(CellFloorZ[Cell] - NFloor) <= ActiveClimbableStepHeight)
 				{
-					EdgeTraversable[Cell * 2 + 1] = true;
+					const float EdgeZ = FMath::Max(CellFloorZ[Cell], NFloor) + ObstacleProbeZ;
+					const FVector EdgeCenter(CenterX, GridOrigin.Y + (CY + 1) * ActiveCellSize, EdgeZ);
+					if (!World->OverlapAnyTestByObjectType(EdgeCenter, FQuat::Identity, ObjParams, EdgeBox, QueryParams))
+					{
+						EdgeTraversable[Cell * 2 + 1] = true;
+					}
 				}
 			}
 		}
 	}
 
-	UE_LOG(LogFPSR, Log, TEXT("[FlowField] Obstacle mask: %d/%d cells blocked (clearance-aware, footprint %.0fcm)."),
-		BlockedCount, GridDimX * GridDimY, AgentFootprintRadius);
+	int32 BlockedCount = 0;
+	for (const bool bBlocked : BlockedField)
+	{
+		if (bBlocked)
+		{
+			++BlockedCount;
+		}
+	}
+	UE_LOG(LogFPSR, Log, TEXT("[FlowField] Obstacle mask: %d/%d cells blocked (clearance+height-aware, footprint %.0fcm, step<=%.0fcm, apex+%.0fcm)."),
+		BlockedCount, GridDimX * GridDimY, AgentFootprintRadius, ActiveClimbableStepHeight, ActiveProbeApexAboveOrigin);
 }
 
 void UFPSRFlowFieldSubsystem::Deinitialize()
@@ -301,6 +362,10 @@ bool UFPSRFlowFieldSubsystem::IsEdgeTraversable(int32 CellA, int32 CellB) const
 
 void UFPSRFlowFieldSubsystem::RecomputeField()
 {
+	// PERF GUARDRAIL (U7): this 0.2s multi-source BFS + steepest-descent runs over up to MaxTotalCells and the 500-enemy
+	// swarm samples the result every tick — it MUST stay pure O(1) array math. NO world/collision query, NO per-cell
+	// trace, NO height re-sample here: all obstacle / height / clearance data is pre-baked ONCE into BlockedField /
+	// EdgeTraversable / CellFloorZ by BuildObstacleMask. Keep it that way (§5-2, adversarial perf audit).
 	if (!HasServerAuthority() || GridDimX <= 0 || GridDimY <= 0)
 	{
 		return;
