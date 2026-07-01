@@ -9,7 +9,7 @@
 ### 2-6. 몬스터 (스웜 적)
 - 공격 타입 **근거리 / 원거리 / 특수 중 정확히 1개 고정** (상황 따라 전환 안 함)
 - **GAS 미사용** — 경량 `UHealthComponent`(`UFPSREnemyHealthComponent`) + 비-GE 데미지 적용
-- 이동: **Flow-Field 샘플링(고정맵 사전계산) + 분리(separation)**, 배치 업데이트 (P2)
+- 이동: **Flow-Field 샘플링(고정맵 사전계산, 높이/유계 2층 인지) + 분리(separation)**, 배치 업데이트 (P2). 적 Z로 레이어(서피스 rank) 선택 → 겹친 2층(메자닌) 플레이어를 계단/램프로 추격(U7, 상세 `Performance §5-2`). ⚠️층간 중첩은 **storey급(≥~1층)**으로 저작(storey 미만 근접 2면은 단일 계단면으로 — 레이어 진동 회피)
 - 렌더: 인스턴싱/VAT + 거리 LOD (Significance Manager)
 - 풀링 필수 (`UActorPool`)
 - 시간 스케일링: `UEnemyScalingProfile` DataAsset — HP/공격력 커브 (이속 불변, 스탯별 슬롯 확장 가능)
