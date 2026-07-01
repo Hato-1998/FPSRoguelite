@@ -6,6 +6,20 @@
 
 **최종 갱신: 2026-07-01**
 
+## 🔔 핸드오프 (2026-07-01 e) — ⏸️ **U7 2.5D 높이/이동 완료·검증**(계단·램프·단차·경사걷기·회전) → **다음=멀티레이어(2-레이어) 확장**(겹친 2층, 사용자 Option B). 컨텍스트 부담으로 새 세션 인계
+> **브랜치**: `phase/p2-flowfield-height`(main `a5ac549`에서 분기, **16커밋, origin push됨**). **코드만**(콘텐츠 미커밋=사용자 테스트 지오메트리). HEAD=`c0bb7b8`.
+> **✅ 완료·검증(2.5D 높이 인지 = U7 원래 산출물, 전부 커밋)**: BuildObstacleMask **지면-플러드필**(계단/램프/단차/플랫폼 도달가능 walking surface) + **Z-스텝 반복 다운트레이스**(컬럼 적층표면·다리/천장아래 바닥·병합메시 포집; `LineTraceMultiByObjectType`=첫hit만이라 반복, [[ue-linetrace-multi-stops-first-block]]) + **셀 서브샘플 경사판정**(격자보다 작은 계단=램프로 인식) + **footprint폭 edge**(좁은통로 과차단 해소) + **스텝높이 GroundSnapTolerance 클램프** + **대각선 2×2 4-edge**(높이게이트 우회차단) + **WalkableNormalZ=0.573(55°)**(50° 계단 심플콜리전 수용; 적 크롤한계 기준) + **apex 2000cm**(상층 포집, Z-스텝이 천장 통과) + **PlayerStart 앵커 시드** + **경사걷기(MoveAlongFloor 방식)**: ApplyGravity가 GroundNormal 저장→TickServerMovement가 경사면 투영 이동(램프 부드럽게 등반) + 램프 진입 슬라이드 + 라이저 스텝업 + **회전=플레이어 향**(FaceDirection, 정지 시 분리력 지터로 360°회전 버그 해소). **디버그 viz** `FPSR.FlowField.Debug 1`(#if !UE_BUILD_SHIPPING, 녹=플로우/빨=무바닥/주황=점유차단). 검증=빌드 Succeeded 다수 + 헤드리스 스모크 ModuleLoads Success 다수 + Codex 다회(구현 P2 다수 교정).
+> **⚠️ 다음 코드 작업 = 멀티레이어(2-레이어) 플로우필드** (사용자 결정 Option B, U7 내 확장):
+>   - **목표**: 같은 XY에 **수직중첩된 walkable 표면**(1층+2층) 지원 → 2층 플레이어를 적이 쫓아 올라옴. 현재 2.5D는 XY당 **단일표면(1층 우선)** 이라 겹친 2층 미표현.
+>   - **진단(확정, 사용자 실측 Z)**: 맵 1층 Z=**-1000**, 2층 Z=**-550**(450cm 위), 천장 1950. apex(+1000)가 2층 덮어 트레이스는 2층 잡으나, **시드(2b)가 1층(-1000=GridOrigin.Z) 우선 배정** → 2층 셀=1층으로 flood → 2층 화살표가 -1000에 그려짐(2층 시점 "안 보임")·시드도 1층 → 적 1층만 쫓음. = **승인된 2.5D 한계**(동일 XY 단일표면, [[architecture-decision-first-principles]] 제1원리서 멀티레이어 3D 거부한 지점의 확장).
+>   - **설계 방향**: 셀을 `(cell, layer)`로 확장(우선 2층). 층별 `CellFloorZ/BlockedField/EdgeTraversable/DistField/FlowField`. **층간 edge**=계단/램프가 layer L↔L+1 연결하는 지점. BFS 멀티소스=플레이어의 `(cell,layer)`(Z로 판정) 시드. `SampleFlowDirection`=적 Z로 layer 선택. **perf 검증 필수**(셀수 2×, 0.2s BFS·500적 예산; §5-2). 스파스(중첩 셀만 2층) vs 덴스(전셀 2층) 결정.
+>   - **주 파일**: `FPSRFlowFieldSubsystem.{h,cpp}`(BuildObstacleMask 층 빌드·RecomputeField 층 BFS·SampleFlowDirection Z-인지) / `FPSREnemyBase`·`FPSREnemySpawnSubsystem`(샘플 호출에 적 Z 전달). **디버그 viz도 층별 확장**.
+>   - **선행**: 승인된 아키텍처 경계 **확장**이므로 착수 전 **Game.MD/§5-2/Enemy §2-6 먼저 갱신**(2.5D→2.5D+제한적 멀티레이어) + 제1원리 3줄. 플랜 우선(사용자 승인)→Codex 플랜게이트→구현.
+> **⚠️ 머지 전 하드닝(미해결 Codex 로버스트니스 P2 3건)**: ①경사 셀 점유 프로브 **스킵** → 램프 위 기둥/난간 미감지(CellMaxGround 위 프로브 or 지형만 필터) ②경사 셀 **side-edge**도 램프허용 → 램프 옆 절벽 오연결(per-edge 경계 트레이스로 계단↔절벽 구분) ③**PlayerStart 시드가 StartLoc.Z(캡슐원점)** 비교 → traced floor Z로. (멀티레이어와 함께 or 직전 반영)
+> **별도 후속 유닛(사용자 결정, U7 밖)**: **원거리 적 LOS 재배치**(사거리 내지만 가려지면 보이는 곳 이동해 공격) = U5 원거리적 확장. TaskPrompts/로드맵에 신규 유닛으로 등록 필요.
+> **미커밋 콘텐츠(사용자 작업으로 남김, 커밋 금지)**: `Config/DefaultEditor.ini` · `Content/Maps/L_Sandbox.umap`(계단+2층 배치) · `Content/Assets/Environment/ZerinLabs.../SM_stairs_short.uasset`(50° 심플콜리전). = 멀티레이어 PIE 테스트 지오메트리.
+> **재개 프롬프트**: `phase/p2-flowfield-height 코드작업 이어서 — PROGRESS 핸드오프(e) + Game.MD + Docs/SSOT/Performance §5-2·Enemy §2-6 먼저 읽고, U7 멀티레이어(2-레이어) 플로우필드 설계 플랜부터(겹친 2층 지원). 착수 전 SSOT 갱신+제1원리 3줄+플랜 승인+Codex 플랜게이트. 콘텐츠/PIE는 사용자, 코드만·검증=빌드+스모크+Codex. 머지 전 Codex P2 3건 하드닝.`
+
 ## 🔔 핸드오프 (2026-07-01 d) — ✅ **U7 코드 완료·검증**(2.5D 높이 인지 플로우필드 + 좁은통로 footprint edge + Codex 머지게이트 7R) → 다음=**사용자 PIE**(지오메트리 배치) → main 머지
 > **브랜치**: `phase/p2-flowfield-height`(main `a5ac549`에서 분기, origin push됨). 7커밋(`85dfca9 feat` + `ab25c10`·`93aed86`·`d945b1d`·`6261b7d`·`d2a24d3`·`28dcd5b` fix + `353ddab docs`). **코드만**(콘텐츠 미생성 — 원칙). 수정 파일=플로우필드 3개(`FPSRFlowFieldSubsystem.{h,cpp}`·`FPSRFlowFieldBoundsVolume.h`).
 > **① Part A(높이/멀티레벨, 2.5D)**: `BuildObstacleMask`에서 셀당 **Z-스텝 반복 다운트레이스**(ECC_WorldStatic=중력과 동일 채널, WorldDynamic 미추가; 컬럼 적층 표면 전부 포집·**병합메시 포함**, `bStartPenetrating` 필터)로 walkable(normal.Z≥0.71) 후보 수집 → **지면(`GridOrigin.Z`)에서 클라이머블 스텝 플러드필**로 셀별 **도달 가능 walking surface**(`CellFloorZ`) 확정(램프/계단 오르되 벽/천장윗면·절벽엔 안 감; 미도달=blocked→escape-flow). 점유/edge 프로브를 **셀 자기 바닥높이**에서 + **스텝게이트를 `EdgeTraversable`에 굽기**(연속 램프=경사상한 `cell·tan(max각)`, 평지 단차=step; `MaxStepHeight=45` 미러, **`GroundSnapTolerance`=60 클램프**). 대각선 흐름=2×2 코너 4-edge 요구(높이게이트 우회 차단).
