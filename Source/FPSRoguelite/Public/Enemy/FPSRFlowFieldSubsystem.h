@@ -90,6 +90,13 @@ private:
 	// faces). Mirrors UCharacterMovementComponent walkable floor Z (0.71 = cos ~44.8deg).
 	static constexpr float WalkableNormalZ = 0.71f;
 
+	// A sampled surface flatter than this (normal Z >= threshold, ~<11.5deg) is treated as FLAT: reaching it across a
+	// cell boundary is a vertical STEP, allowed only up to one ClimbableStepHeight. A tilted-but-walkable surface
+	// (WalkableNormalZ..FlatNormalZThreshold) is a continuous RAMP whose center-to-center rise over one cell can far
+	// exceed a step, so its edges are allowed up to the max walkable grade across the cell (ramp allowance). This is
+	// what lets the flood climb ramps/stairs while a true flat-to-flat cliff (both flat, big drop) stays blocked.
+	static constexpr float FlatNormalZThreshold = 0.98f;
+
 	// Per-cell floor probe: a downward multi-hit trace from (GridOrigin.Z + ActiveProbeApexAboveOrigin) picks the
 	// topmost walkable static surface. The default apex sits above typical platforms but below a room ceiling so a solid
 	// roof isn't mistaken for floor; a bounds volume raises it for taller / multi-storey maps.

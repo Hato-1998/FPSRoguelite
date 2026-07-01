@@ -161,8 +161,20 @@ void UFPSRFlowFieldSubsystem::BuildObstacleMask()
 	const float ApexZ = GridOrigin.Z + ActiveProbeApexAboveOrigin;
 	FCollisionQueryParams FloorQP(SCENE_QUERY_STAT(FPSRFlowFloor), false);
 
-	// (1) Candidate up-facing surfaces per cell (build-time scratch; freed at function end).
-	TArray<TArray<float>> CellCandidates;
+	// Max height an agent can traverse between two orthogonally-adjacent cells:
+	//  - a FLAT surface reached across a boundary is a vertical STEP -> up to one ClimbableStepHeight (mirrors MaxStepHeight);
+	//  - a walkable RAMP surface changes height continuously, so its center-to-center rise over one cell can reach the
+	//    max walkable grade (ActiveCellSize * tan(max walkable angle)); ApplyGravity climbs it incrementally each recheck.
+	// Shared by the floor flood (below) and the Pass-2 edge gate so the reachable-floor and the BFS-traversable edges agree.
+	const float MaxSlopeTan = FMath::Sqrt(FMath::Max(0.0f, 1.0f - WalkableNormalZ * WalkableNormalZ)) / WalkableNormalZ;
+	const float RampAllowance = ActiveCellSize * MaxSlopeTan;
+	auto MaxTraverseDelta = [&](bool bSloped) -> float
+	{
+		return bSloped ? FMath::Max(ActiveClimbableStepHeight, RampAllowance) : ActiveClimbableStepHeight;
+	};
+
+	// (1) Candidate up-facing surfaces per cell, {X=world Z, Y=surface normal Z} (build-time scratch; freed at function end).
+	TArray<TArray<FVector2f>> CellCandidates;
 	CellCandidates.SetNum(NumCells);
 	for (int32 CY = 0; CY < GridDimY; ++CY)
 	{
@@ -180,13 +192,17 @@ void UFPSRFlowFieldSubsystem::BuildObstacleMask()
 			{
 				if (H.ImpactNormal.Z >= WalkableNormalZ) // up-facing (walkable) surface; rejects ceiling undersides / steep faces
 				{
-					CellCandidates[Cell].Add(H.ImpactPoint.Z);
+					CellCandidates[Cell].Add(FVector2f(static_cast<float>(H.ImpactPoint.Z), static_cast<float>(H.ImpactNormal.Z)));
 				}
 			}
 		}
 	}
 
-	// (2) Seed the flood from every cell holding a candidate within one climbable step of the known ground floor.
+	// CellSloped[Cell] = the assigned walking surface is a ramp (not near-flat) — gates the ramp height allowance above.
+	TArray<bool> CellSloped;
+	CellSloped.Init(false, NumCells);
+
+	// (2) Seed the flood from every cell holding a candidate within one step of the known (flat) ground floor.
 	for (int32 i = 0; i < NumCells; ++i)
 	{
 		CellFloorZ[i] = MAX_flt; // unassigned
@@ -194,18 +210,21 @@ void UFPSRFlowFieldSubsystem::BuildObstacleMask()
 	TQueue<int32> FloorFrontier;
 	for (int32 Cell = 0; Cell < NumCells; ++Cell)
 	{
-		for (const float H : CellCandidates[Cell])
+		for (const FVector2f& Cand : CellCandidates[Cell])
 		{
-			if (FMath::Abs(H - GridOrigin.Z) <= ActiveClimbableStepHeight)
+			if (FMath::Abs(Cand.X - GridOrigin.Z) <= ActiveClimbableStepHeight)
 			{
-				CellFloorZ[Cell] = H;
+				CellFloorZ[Cell] = Cand.X;
+				CellSloped[Cell] = Cand.Y < FlatNormalZThreshold;
 				FloorFrontier.Enqueue(Cell);
 				break;
 			}
 		}
 	}
 
-	// (3) Flood: a neighbour inherits its candidate closest to (and within one climbable step of) the current surface.
+	// (3) Flood: a neighbour inherits its candidate closest to the current surface, within the step-or-ramp allowance
+	//     for that candidate (a flat ledge is step-limited, a ramp surface is grade-limited) — so the walking surface
+	//     climbs ramps/stairs onto platforms but never jumps a cliff or onto a disconnected wall/ceiling top.
 	static const int32 FDX[4] = { 1, -1, 0, 0 };
 	static const int32 FDY[4] = { 0, 0, 1, -1 };
 	int32 FloodCell;
@@ -228,19 +247,23 @@ void UFPSRFlowFieldSubsystem::BuildObstacleMask()
 				continue; // already assigned
 			}
 			float BestH = MAX_flt;
-			float BestDelta = ActiveClimbableStepHeight;
-			for (const float CandH : CellCandidates[NIdx])
+			bool bBestSloped = false;
+			float BestDelta = MAX_flt;
+			for (const FVector2f& Cand : CellCandidates[NIdx])
 			{
-				const float D = FMath::Abs(CandH - H);
-				if (D <= BestDelta)
+				const bool bSloped = Cand.Y < FlatNormalZThreshold;
+				const float D = FMath::Abs(Cand.X - H);
+				if (D <= MaxTraverseDelta(bSloped) && D < BestDelta)
 				{
 					BestDelta = D;
-					BestH = CandH;
+					BestH = Cand.X;
+					bBestSloped = bSloped;
 				}
 			}
 			if (BestH != MAX_flt)
 			{
 				CellFloorZ[NIdx] = BestH;
+				CellSloped[NIdx] = bBestSloped;
 				FloorFrontier.Enqueue(NIdx);
 			}
 		}
@@ -258,10 +281,11 @@ void UFPSRFlowFieldSubsystem::BuildObstacleMask()
 	// Pass 2 — clearance-aware probing (balance/pass2) + U7 height gate. Both masks built once on the fixed map:
 	//  (1) OCCUPANCY (BlockedField): an agent-footprint box at the cell CENTER, at THIS cell's own floor height, so a
 	//      cell a capsule can stand in isn't blocked by a wall that merely clips its far edge (narrow-doorway fix).
-	//  (2) EDGE (EdgeTraversable): opened only if BOTH cells have a floor, the inter-cell floor step is climbable
-	//      (<= ActiveClimbableStepHeight — U7: a taller delta is a cliff/wall), AND no thin wall straddles a
-	//      footprint-wide gap on the shared boundary (U7 Part B: a footprint-width box, NOT the old full-cell width, so
-	//      a doorway narrower than a cell on a boundary is no longer over-blocked while a full-boundary wall still is).
+	//  (2) EDGE (EdgeTraversable): opened only if BOTH cells have a floor, the inter-cell height change is traversable
+	//      (MaxTraverseDelta — a flat ledge is step-limited, a ramp is grade-limited; a taller flat-to-flat delta is a
+	//      cliff/wall), AND no thin wall straddles a footprint-wide gap on the shared boundary (U7 Part B: a
+	//      footprint-width box, NOT the old full-cell width, so a doorway narrower than a cell on a boundary is no
+	//      longer over-blocked while a full-boundary wall still is).
 	const FCollisionShape OccupancyBox = FCollisionShape::MakeBox(
 		FVector(AgentFootprintRadius, AgentFootprintRadius, ObstacleProbeHalfHeight));
 	const FCollisionShape EdgeBox = FCollisionShape::MakeBox(
@@ -289,8 +313,9 @@ void UFPSRFlowFieldSubsystem::BuildObstacleMask()
 			// (2a) +X edge (shared boundary with cell CX+1).
 			if (CX + 1 < GridDimX)
 			{
-				const float NFloor = CellFloorZ[Cell + 1];
-				if (NFloor != MAX_flt && FMath::Abs(CellFloorZ[Cell] - NFloor) <= ActiveClimbableStepHeight)
+				const int32 NCell = Cell + 1;
+				const float NFloor = CellFloorZ[NCell];
+				if (NFloor != MAX_flt && FMath::Abs(CellFloorZ[Cell] - NFloor) <= MaxTraverseDelta(CellSloped[Cell] || CellSloped[NCell]))
 				{
 					const float EdgeZ = FMath::Max(CellFloorZ[Cell], NFloor) + ObstacleProbeZ;
 					const FVector EdgeCenter(GridOrigin.X + (CX + 1) * ActiveCellSize, CenterY, EdgeZ);
@@ -304,8 +329,9 @@ void UFPSRFlowFieldSubsystem::BuildObstacleMask()
 			// (2b) +Y edge (shared boundary with cell CY+1).
 			if (CY + 1 < GridDimY)
 			{
-				const float NFloor = CellFloorZ[Cell + GridDimX];
-				if (NFloor != MAX_flt && FMath::Abs(CellFloorZ[Cell] - NFloor) <= ActiveClimbableStepHeight)
+				const int32 NCell = Cell + GridDimX;
+				const float NFloor = CellFloorZ[NCell];
+				if (NFloor != MAX_flt && FMath::Abs(CellFloorZ[Cell] - NFloor) <= MaxTraverseDelta(CellSloped[Cell] || CellSloped[NCell]))
 				{
 					const float EdgeZ = FMath::Max(CellFloorZ[Cell], NFloor) + ObstacleProbeZ;
 					const FVector EdgeCenter(CenterX, GridOrigin.Y + (CY + 1) * ActiveCellSize, EdgeZ);
@@ -326,8 +352,18 @@ void UFPSRFlowFieldSubsystem::BuildObstacleMask()
 			++BlockedCount;
 		}
 	}
-	UE_LOG(LogFPSR, Log, TEXT("[FlowField] Obstacle mask: %d/%d cells blocked (clearance+height-aware, footprint %.0fcm, step<=%.0fcm, apex+%.0fcm)."),
-		BlockedCount, GridDimX * GridDimY, AgentFootprintRadius, ActiveClimbableStepHeight, ActiveProbeApexAboveOrigin);
+	UE_LOG(LogFPSR, Log, TEXT("[FlowField] Obstacle mask: %d/%d cells blocked (clearance+height-aware, footprint %.0fcm, step<=%.0fcm, ramp<=%.0fcm, apex+%.0fcm)."),
+		BlockedCount, NumCells, AgentFootprintRadius, ActiveClimbableStepHeight, RampAllowance, ActiveProbeApexAboveOrigin);
+
+	// Diagnostic (Codex P2): if almost every cell has no reachable floor, the flood likely never found the ground —
+	// most often because the probe apex sits ABOVE a solid ceiling that the down-trace can't see past, or the floor
+	// isn't a static mesh. Warn the designer to lower the bounds volume's ProbeApexAboveOriginOverride below the ceiling.
+	if (NumCells > 0 && BlockedCount * 10 >= NumCells * 9)
+	{
+		UE_LOG(LogFPSR, Warning,
+			TEXT("[FlowField] %d%% of cells have NO reachable floor — the flood may not have found the ground floor. If this map has a solid ceiling below the probe apex (apex = grid floor + %.0fcm), set the bounds volume's ProbeApexAboveOriginOverride below the ceiling, or ensure the floor is a separate WorldStatic mesh."),
+			(BlockedCount * 100) / NumCells, ActiveProbeApexAboveOrigin);
+	}
 }
 
 void UFPSRFlowFieldSubsystem::Deinitialize()
