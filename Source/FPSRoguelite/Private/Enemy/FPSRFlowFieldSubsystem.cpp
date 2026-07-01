@@ -10,6 +10,7 @@
 #include "GameFramework/PlayerStart.h"
 #include "CollisionShape.h"
 #include "Engine/HitResult.h"
+#include "Components/PrimitiveComponent.h"
 #include "TimerManager.h"
 #include "Containers/Queue.h"
 #include "EngineUtils.h"
@@ -159,7 +160,6 @@ void UFPSRFlowFieldSubsystem::BuildObstacleMask()
 	// Same ECC_WorldStatic channel the enemy ground-follow (AFPSREnemyBase::ApplyGravity) uses. Never in the 0.2s recompute.
 	const int32 NumCells = GridDimX * GridDimY;
 	const float ApexZ = GridOrigin.Z + ActiveProbeApexAboveOrigin;
-	FCollisionQueryParams FloorQP(SCENE_QUERY_STAT(FPSRFlowFloor), false);
 
 	// Max height an agent can traverse between two orthogonally-adjacent cells:
 	//  - a FLAT surface reached across a boundary is a vertical STEP -> up to one ClimbableStepHeight (mirrors MaxStepHeight);
@@ -186,14 +186,28 @@ void UFPSRFlowFieldSubsystem::BuildObstacleMask()
 			const FVector Apex(CenterX, CenterY, ApexZ);
 			const FVector Base(CenterX, CenterY, ApexZ - MaxProbeDrop);
 
-			TArray<FHitResult> Hits;
-			World->LineTraceMultiByObjectType(Hits, Apex, Base, ObjParams, FloorQP);
-			for (const FHitResult& H : Hits)
+			// Collect ALL stacked walkable surfaces in this column (e.g. the floor UNDER a bridge/ceiling AND the bridge
+			// top). A single LineTraceMultiByObjectType stops at the first blocking hit (engine: "only the single closest
+			// blocking result will be generated"), hiding lower floors — so re-trace from the apex, ignoring each surface's
+			// mesh in turn, until nothing remains below (capped at MaxColumnSurfaces). One-time on the fixed map.
+			FCollisionQueryParams IterQP(SCENE_QUERY_STAT(FPSRFlowFloor), false);
+			for (int32 Surface = 0; Surface < MaxColumnSurfaces; ++Surface)
 			{
-				if (H.ImpactNormal.Z >= WalkableNormalZ) // up-facing (walkable) surface; rejects ceiling undersides / steep faces
+				FHitResult Hit;
+				if (!World->LineTraceSingleByObjectType(Hit, Apex, Base, ObjParams, IterQP))
 				{
-					CellCandidates[Cell].Add(FVector2f(static_cast<float>(H.ImpactPoint.Z), static_cast<float>(H.ImpactNormal.Z)));
+					break; // no more static geometry below in this column
 				}
+				if (Hit.ImpactNormal.Z >= WalkableNormalZ) // up-facing (walkable) surface; rejects undersides / steep faces
+				{
+					CellCandidates[Cell].Add(FVector2f(static_cast<float>(Hit.ImpactPoint.Z), static_cast<float>(Hit.ImpactNormal.Z)));
+				}
+				const UPrimitiveComponent* HitComp = Hit.GetComponent();
+				if (!HitComp)
+				{
+					break;
+				}
+				IterQP.AddIgnoredComponent(HitComp); // skip this surface's mesh so the next trace reveals the surface below it
 			}
 		}
 	}
@@ -233,6 +247,7 @@ void UFPSRFlowFieldSubsystem::BuildObstacleMask()
 		const int32 CX = FloodCell % GridDimX;
 		const int32 CY = FloodCell / GridDimX;
 		const float H = CellFloorZ[FloodCell];
+		const bool bFromSloped = CellSloped[FloodCell]; // leaving a ramp keeps the ramp allowance even onto a flat platform
 		for (int32 N = 0; N < 4; ++N)
 		{
 			const int32 NX = CX + FDX[N];
@@ -251,13 +266,15 @@ void UFPSRFlowFieldSubsystem::BuildObstacleMask()
 			float BestDelta = MAX_flt;
 			for (const FVector2f& Cand : CellCandidates[NIdx])
 			{
-				const bool bSloped = Cand.Y < FlatNormalZThreshold;
+				const bool bCandSloped = Cand.Y < FlatNormalZThreshold;
 				const float D = FMath::Abs(Cand.X - H);
-				if (D <= MaxTraverseDelta(bSloped) && D < BestDelta)
+				// Either the cell we're leaving or the surface we're stepping onto being a ramp earns the ramp allowance
+				// (matches the Pass-2 edge gate's "either sloped"); store the neighbour's OWN slope for its later edges.
+				if (D <= MaxTraverseDelta(bFromSloped || bCandSloped) && D < BestDelta)
 				{
 					BestDelta = D;
 					BestH = Cand.X;
-					bBestSloped = bSloped;
+					bBestSloped = bCandSloped;
 				}
 			}
 			if (BestH != MAX_flt)
