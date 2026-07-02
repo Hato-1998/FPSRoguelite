@@ -90,7 +90,7 @@ public:
 	template <typename FMessageStructType>
 	void BroadcastMessage(FGameplayTag Channel, const FMessageStructType& Message)
 	{
-		const UScriptStruct* StructType = TBaseStructure<FMessageStructType>::Get();
+		const UScriptStruct* StructType = FMessageStructType::StaticStruct();
 		BroadcastMessageInternal(Channel, StructType, &Message);
 	}
 
@@ -103,7 +103,7 @@ public:
 			InnerCallback(ActualChannel, *reinterpret_cast<const FMessageStructType*>(SenderPayload));
 		};
 
-		return RegisterListenerInternal(Channel, ThunkCallback, TBaseStructure<FMessageStructType>::Get(), MatchType);
+		return RegisterListenerInternal(Channel, ThunkCallback, FMessageStructType::StaticStruct(), MatchType);
 	}
 
 	/** Register a UObject member-function listener (auto weak-guarded; skipped if the object is gone). */

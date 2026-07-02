@@ -74,7 +74,12 @@ void UFPSRGameplayMessageSubsystem::UnregisterListener(FFPSRMessageListenerHandl
 {
 	if (Handle.IsValid())
 	{
-		ensureMsgf(Handle.Subsystem == this, TEXT("Unregistering a GMS listener handle on the wrong subsystem."));
+		// Guard against a handle from a DIFFERENT world's GMS (multi-world PIE / listen-server share a process;
+		// per-subsystem IDs both start at 1, so a foreign handle could collide with a valid local listener).
+		if (!ensureMsgf(Handle.Subsystem == this, TEXT("Unregistering a GMS listener handle on the wrong subsystem.")))
+		{
+			return;
+		}
 		UnregisterListenerInternal(Handle.Channel, Handle.ID);
 	}
 }
