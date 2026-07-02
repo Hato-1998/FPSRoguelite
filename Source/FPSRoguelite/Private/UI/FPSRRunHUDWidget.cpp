@@ -9,6 +9,7 @@
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Weapon/FPSRWeaponFireComponent.h"
 #include "GameFramework/Pawn.h"
+#include "Settings/FPSRGameUserSettings.h"
 
 void UFPSRRunHUDWidget::NativeConstruct()
 {
@@ -32,6 +33,13 @@ void UFPSRRunHUDWidget::NativeConstruct()
 			CanvasSlot->SetPosition(FVector2D::ZeroVector);
 			CanvasSlot->SetZOrder(10);
 		}
+	}
+
+	// Apply the persisted crosshair size and subscribe for live updates from the settings overlay.
+	if (UFPSRGameUserSettings* Settings = UFPSRGameUserSettings::Get())
+	{
+		ApplyCrosshairScale(Settings->GetCrosshairScale());
+		Settings->OnCrosshairSettingsChanged.AddDynamic(this, &UFPSRRunHUDWidget::HandleCrosshairScaleChanged);
 	}
 }
 
@@ -100,11 +108,31 @@ UFPSRWeaponFireComponent* UFPSRRunHUDWidget::ResolveFireComponent()
 	return CachedFireComp.Get();
 }
 
+void UFPSRRunHUDWidget::HandleCrosshairScaleChanged(float NewScale)
+{
+	ApplyCrosshairScale(NewScale);
+}
+
+void UFPSRRunHUDWidget::ApplyCrosshairScale(float Scale)
+{
+	if (CrosshairImage)
+	{
+		// Uniform render-transform scale about the default center pivot (0.5,0.5) — orthogonal to the
+		// canvas-slot sizing and the per-frame Spread material update.
+		CrosshairImage->SetRenderScale(FVector2D(Scale, Scale));
+	}
+}
+
 void UFPSRRunHUDWidget::NativeDestruct()
 {
 	if (AFPSRGameState* GS = GetWorld() ? GetWorld()->GetGameState<AFPSRGameState>() : nullptr)
 	{
 		GS->OnRunStateChanged.RemoveDynamic(this, &UFPSRRunHUDWidget::HandleRunStateChanged);
+	}
+
+	if (UFPSRGameUserSettings* Settings = UFPSRGameUserSettings::Get())
+	{
+		Settings->OnCrosshairSettingsChanged.RemoveDynamic(this, &UFPSRRunHUDWidget::HandleCrosshairScaleChanged);
 	}
 
 	Super::NativeDestruct();

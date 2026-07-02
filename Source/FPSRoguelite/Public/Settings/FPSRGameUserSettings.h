@@ -5,6 +5,10 @@
 #include "GameFramework/GameUserSettings.h"
 #include "FPSRGameUserSettings.generated.h"
 
+/** Broadcast whenever CrosshairScale changes (live drag included). The HUD crosshair subscribes to rescale in
+ *  real time; MasterVolume has no analogue because the audio subsystem applies volume immediately on set. */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnCrosshairSettingsChanged, float, NewScale);
+
 /** Project UGameUserSettings subclass = the persistence owner for local audio (and future) settings.
  *  MasterVolume is a config float saved to Saved/Config/.../GameUserSettings.ini automatically.
  *
@@ -33,8 +37,26 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "FPSR|Audio")
 	void SetMasterVolume(float InVolume, bool bSave = true);
 
+	/** Current crosshair size multiplier (0.5 .. 2.5, 1.0 = default). */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Crosshair")
+	float GetCrosshairScale() const { return CrosshairScale; }
+
+	/** Set + persist the crosshair size multiplier (clamped 0.5..2.5). ALWAYS broadcasts
+	 *  OnCrosshairSettingsChanged so a live drag rescales the HUD crosshair; bSave=false skips the disk
+	 *  write until the drag is released. */
+	UFUNCTION(BlueprintCallable, Category = "FPSR|Crosshair")
+	void SetCrosshairScale(float InScale, bool bSave = true);
+
+	/** Fires on every crosshair-scale change (live drag included). BlueprintAssignable for BP/content consumers. */
+	UPROPERTY(BlueprintAssignable, Category = "FPSR|Crosshair")
+	FOnCrosshairSettingsChanged OnCrosshairSettingsChanged;
+
 protected:
 	/** Master output volume scalar, 0 (mute) .. 1 (full). Persisted to GameUserSettings.ini. */
 	UPROPERTY(config)
 	float MasterVolume = 1.0f;
+
+	/** Crosshair size multiplier, 0.5 (small) .. 2.5 (large), 1.0 = default. Persisted to GameUserSettings.ini. */
+	UPROPERTY(config)
+	float CrosshairScale = 1.0f;
 };

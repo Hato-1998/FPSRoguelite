@@ -38,6 +38,14 @@ protected:
 	UPROPERTY(meta = (BindWidgetOptional))
 	TObjectPtr<UCommonTextBlock> MasterVolumeValueText;
 
+	/** Crosshair size slider (0.5..2.5). Optional so existing WBP_Settings that predate it still bind. */
+	UPROPERTY(meta = (BindWidgetOptional))
+	TObjectPtr<USlider> CrosshairScaleSlider;
+
+	/** Optional "N.NNx" readout next to the crosshair slider. */
+	UPROPERTY(meta = (BindWidgetOptional))
+	TObjectPtr<UCommonTextBlock> CrosshairScaleValueText;
+
 	/** Optional explicit Back/Close button (CommonUI Back also closes). */
 	UPROPERTY(meta = (BindWidgetOptional))
 	TObjectPtr<UCommonButtonBase> BackButton;
@@ -51,6 +59,14 @@ private:
 	UFUNCTION()
 	void HandleMasterVolumeCommitted();
 
+	/** Live drag: apply to the settings singleton (broadcasts to HUD), no disk write, refresh the readout. */
+	UFUNCTION()
+	void HandleCrosshairScaleChanged(float Value);
+
+	/** Drag released: persist the current crosshair scale. */
+	UFUNCTION()
+	void HandleCrosshairScaleCommitted();
+
 	UFUNCTION()
 	void HandleBackClicked();
 
@@ -62,4 +78,7 @@ private:
 
 	/** Format a 0..1 scalar as an "NN%" string into the readout. */
 	void UpdateValueText(float Value);
+
+	/** Format a crosshair multiplier as an "N.NNx" string into the readout. */
+	void UpdateCrosshairValueText(float Value);
 };

@@ -86,6 +86,13 @@ private:
 	/** Resolve (and cache) the owning pawn's fire component. */
 	UFPSRWeaponFireComponent* ResolveFireComponent();
 
+	/** Re-apply the crosshair size when the local player changes it in settings (live). */
+	UFUNCTION()
+	void HandleCrosshairScaleChanged(float NewScale);
+
+	/** Apply a uniform render-transform scale to the crosshair image (about the default center pivot). */
+	void ApplyCrosshairScale(float Scale);
+
 	UPROPERTY(Transient)
 	TWeakObjectPtr<UFPSRWeaponFireComponent> CachedFireComp;
 

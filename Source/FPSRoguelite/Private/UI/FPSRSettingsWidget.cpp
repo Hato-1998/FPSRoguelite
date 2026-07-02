@@ -2,6 +2,7 @@
 
 #include "UI/FPSRSettingsWidget.h"
 #include "Audio/FPSRAudioSubsystem.h"
+#include "Settings/FPSRGameUserSettings.h"
 #include "Components/Slider.h"
 #include "CommonTextBlock.h"
 #include "CommonButtonBase.h"
@@ -28,6 +29,15 @@ void UFPSRSettingsWidget::NativeOnInitialized()
 		MasterVolumeSlider->OnValueChanged.AddDynamic(this, &UFPSRSettingsWidget::HandleMasterVolumeChanged);
 		MasterVolumeSlider->OnMouseCaptureEnd.AddDynamic(this, &UFPSRSettingsWidget::HandleMasterVolumeCommitted);
 		MasterVolumeSlider->OnControllerCaptureEnd.AddDynamic(this, &UFPSRSettingsWidget::HandleMasterVolumeCommitted);
+	}
+
+	if (CrosshairScaleSlider)
+	{
+		CrosshairScaleSlider->SetMinValue(0.5f);
+		CrosshairScaleSlider->SetMaxValue(2.5f);
+		CrosshairScaleSlider->OnValueChanged.AddDynamic(this, &UFPSRSettingsWidget::HandleCrosshairScaleChanged);
+		CrosshairScaleSlider->OnMouseCaptureEnd.AddDynamic(this, &UFPSRSettingsWidget::HandleCrosshairScaleCommitted);
+		CrosshairScaleSlider->OnControllerCaptureEnd.AddDynamic(this, &UFPSRSettingsWidget::HandleCrosshairScaleCommitted);
 	}
 
 	if (BackButton)
@@ -58,6 +68,16 @@ void UFPSRSettingsWidget::SyncFromSettings()
 		MasterVolumeSlider->SetValue(Volume);
 	}
 	UpdateValueText(Volume);
+
+	if (UFPSRGameUserSettings* Settings = UFPSRGameUserSettings::Get())
+	{
+		const float Scale = Settings->GetCrosshairScale();
+		if (CrosshairScaleSlider)
+		{
+			CrosshairScaleSlider->SetValue(Scale);
+		}
+		UpdateCrosshairValueText(Scale);
+	}
 }
 
 void UFPSRSettingsWidget::HandleMasterVolumeChanged(float Value)
@@ -95,5 +115,31 @@ void UFPSRSettingsWidget::UpdateValueText(float Value)
 	{
 		const int32 Percent = FMath::RoundToInt(FMath::Clamp(Value, 0.0f, 1.0f) * 100.0f);
 		MasterVolumeValueText->SetText(FText::FromString(FString::Printf(TEXT("%d%%"), Percent)));
+	}
+}
+
+void UFPSRSettingsWidget::HandleCrosshairScaleChanged(float Value)
+{
+	if (UFPSRGameUserSettings* Settings = UFPSRGameUserSettings::Get())
+	{
+		Settings->SetCrosshairScale(Value, /*bSave=*/false); // live apply (broadcasts to HUD), no per-frame disk write
+	}
+	UpdateCrosshairValueText(Value);
+}
+
+void UFPSRSettingsWidget::HandleCrosshairScaleCommitted()
+{
+	const float Value = CrosshairScaleSlider ? CrosshairScaleSlider->GetValue() : 1.0f;
+	if (UFPSRGameUserSettings* Settings = UFPSRGameUserSettings::Get())
+	{
+		Settings->SetCrosshairScale(Value, /*bSave=*/true); // persist on release
+	}
+}
+
+void UFPSRSettingsWidget::UpdateCrosshairValueText(float Value)
+{
+	if (CrosshairScaleValueText)
+	{
+		CrosshairScaleValueText->SetText(FText::FromString(FString::Printf(TEXT("%.2fx"), Value)));
 	}
 }
