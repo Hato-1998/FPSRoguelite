@@ -654,24 +654,15 @@ int32 UFPSRFlowFieldSubsystem::WorldToCellIndex(const FVector& WorldLocation) co
 int32 UFPSRFlowFieldSubsystem::PickRankForFootZ(int32 Cell, float FootZ) const
 {
 	const int32 Base = Cell * NumLayers;
-	// 1) Lowest valid rank within GroundSnapTolerance of FootZ (== MaxClimbableStepHeight). This matches what
-	//    ApplyGravity snaps to; iterating rank 0 first makes a degenerate <snap stacked pair resolve to the LOWER
-	//    surface deterministically -> no frame-to-frame layer oscillation. On a flat map rank 0 matches immediately.
-	for (int32 R = 0; R < NumLayers; ++R)
-	{
-		const float Z = CellFloorZ[Base + R];
-		if (Z != MAX_flt && FMath::Abs(Z - FootZ) <= MaxClimbableStepHeight)
-		{
-			return R;
-		}
-	}
-	// 2) Otherwise the NEAREST valid rank within MaxLayerPickDrop of FootZ (above OR below). Two multi-layer hazards this
-	//    handles at once: (a) an enemy at platform height (-550) in a cell whose only surface is ground a storey below
-	//    (-1000) must NOT resolve to that ground rank (> budget -> rejected -> INDEX_NONE -> direct-to-player, not ground
-	//    flow while a storey up); (b) on a STEEP stair the coarse cell's single rank sample can differ from the enemy's
-	//    actual foot Z by up to ~half a cell's rise, so an at-or-below-only pick would skip the tread the enemy is really
-	//    on and fall to the ground below -> the resulting ground-flow-vs-tread-flow flip as the foot Z jitters spins the
-	//    enemy and drifts it sideways. Nearest-within-budget locks onto the tread while still rejecting a full-storey drop.
+	// Pick the NEAREST valid rank to FootZ within MaxLayerPickDrop (above OR below) — the surface the enemy actually
+	// stands on. NEAREST, not "lowest": an earlier "lowest rank within a step" preference mis-picked the GROUND under a
+	// ramp/deck whenever the walkable surface sat within a step of the ground below it — which is the ENTIRE lower run of
+	// a gentle ramp over open ground (a gentler ramp is worse: more of it is within a step of the ground). The enemy then
+	// read GROUND flow while standing on the ramp -> walked off the ramp / sank / spun. Nearest locks onto the surface at
+	// the foot. Storey-scale layers (>> jitter) make nearest stable; a ledge/tread's own surface always wins over the
+	// ground a step below it. A surface a full storey away (> budget) is rejected -> INDEX_NONE -> SampleFlowDirection
+	// returns zero -> the mover chases the player directly (not ground flow while a storey up, and not into a pit).
+	// Strict < keeps the lower rank on an exact tie (deterministic, no frame-to-frame oscillation).
 	int32 NearBest = INDEX_NONE;
 	float NearDist = MaxLayerPickDrop;
 	for (int32 R = 0; R < NumLayers; ++R)
@@ -680,15 +671,13 @@ int32 UFPSRFlowFieldSubsystem::PickRankForFootZ(int32 Cell, float FootZ) const
 		if (Z != MAX_flt)
 		{
 			const float D = FMath::Abs(Z - FootZ);
-			if (D <= NearDist)
+			if (D < NearDist)
 			{
 				NearDist = D;
 				NearBest = R;
 			}
 		}
 	}
-	// No surface within the budget: the enemy is a storey off any surface at this XY (deck edge over ground / falling in
-	// a pit) -> INDEX_NONE -> SampleFlowDirection returns zero -> the mover chases the player directly (not ground flow).
 	return NearBest;
 }
 
