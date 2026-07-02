@@ -600,23 +600,48 @@ Game.md + PROGRESS.md + Docs/SSOT/Roadmap.md §7-5 + Docs/SSOT/Performance.md §
 
 ### U8 — C2 GameplayMessageSubsystem 재구현
 
+> **프롬프트 갱신 2026-07-02**: 코드베이스·엔진 그라운딩 + 적대 검증(ultracode 설계 워크플로)으로 자족화. 핵심: Lyra `GameplayMessageRouter` 플러그인/`UGameplayMessageSubsystem`은 UE5.7 **부재**(→ 모듈 내 최소 재구현 확정), `AsyncMessageSystem`(Experimental·async·기본off)은 배제, `GameplayEvent.*` 6태그=ini 정의만·C++ 발행 0건.
+
 ```
-Game.md + PROGRESS.md 먼저 읽어. Docs/TaskPrompts_Master.md의 유닛 U8(코드 백로그 C2)을 진행한다.
-읽을 SSOT: Docs/SSOT/Architecture.md §3·§4(기술 채택/구조), Docs/SSOT/Performance.md §5(코스메틱 계약).
+[작업] GMS(GameplayMessageSubsystem) 경량 재구현 — GameplayTag 채널 기반 로컬 publish/subscribe 메시지 버스로 Performance §5 "히트/사망 코스메틱=GMS/Cue, 복제 아님" 계약의 인프라를 놓는다(소비처 U13 VFX/Gibs/핑, U20 적 애니 공격·사망 트리거).
 
-- 브랜치: phase/infra-gms 분기 (§6-7)
-- 플랜 우선 → 승인 후 Sonnet 구현 / Opus 검증
+■ 먼저 읽을 것
+- Game.md §0-1(라우팅) + PROGRESS.md(현황) + Docs/SSOT/Workflow.md §6(프로덕션/브랜치/모델정책)
+- 도메인 SSOT: Docs/SSOT/Architecture.md §3(기술 채택 테이블 line17 — "GameplayMessageSubsystem 경량 재구현/Lyra 복사")·§4-1(폴더 구조 line46 — "Messages/ GMS Payload structs" + line55 HUD 가시성=HUD State(GMS/Tag) 바인딩), Docs/SSOT/Performance.md §5(line25 코스메틱=GameplayMessage/Cue 계약, 복제 액터 상태 금지)
+- 소비처 프롬프트(§C): U13(핑/Gibs GMS 경유), U20(적 애니 공격/사망 트리거 — "GMS 브로드캐스트 재사용 우선, 신규 복제 프로퍼티/RPC 금지")
 
-[산출물]
-- GameplayMessageSubsystem(또는 동급 경량 메시지 버스) + Payload struct 정의. GameplayTag 채널 기반 publish/subscribe.
-- 기존 GameplayEvent 태그(GameplayEvent.EnemyKilled/LevelUp/MissionComplete/MissionStart/PickupCollected — DefaultGameplayTags.ini에 이미 정의됨) 활용 설계.
+■ 브랜치·모델정책
+- main → phase/infra-gms 분기 (Workflow §6-7), 검증 후 --no-ff 머지
+- 플랜 우선 → 승인 후 구현=Sonnet 위임 / 검증=Opus 직접
+- 복제·서버권위 배선 판단(발행/구독이 서버냐 클라냐)=Opus 직접 (memory: haiku-delegation-security-wiring). GMS는 순수 로컬 버스라 신규 복제 프로퍼티/RPC 없음을 반드시 코드로 보장
 
-[함정/주의]
-- §5 계약: "히트/사망 코스메틱은 GameplayMessage/Cue — 복제 액터 상태 아님". U13(VFX/Gibs/핑)이 이 버스의 소비자다 — Payload struct에 U13 요구(위치/적 타입/킬 여부 등)를 미리 반영하되 과설계 금지.
-- 수백 적 스케일: 메시지 발행 비용 최소(스택 할당 payload, 구독자 없으면 zero-cost).
-- 엔진 플러그인 GameplayMessageRouter(Lyra 발췌) 사용 가능 여부를 먼저 엔진 소스에서 확인(§6-3 — UE5.7에 플러그인 존재 여부 grep) 후 자체 구현과 비교해 플랜에 명시.
+■ DESIGN-FIRST 조사(신규 만들기 전 grep으로 재확인 — 아래 앵커는 이 클론에서 재검증할 것)
+- 엔진 재확인: D:/UnrealEngine/UE_5.7/Engine/Plugins 에서 "GameplayMessageRouter"/"UGameplayMessageSubsystem" grep. 초안 검증 결과 = Lyra의 GameplayMessageRouter 플러그인·UGameplayMessageSubsystem 클래스는 부재(0건). 단, 태그기반 메시지 플러그인이 하나 존재함 = Experimental/AsyncMessageSystem(class FAsyncGameplayMessageSystem·UAsyncMessageWorldSubsystem, FAsyncMessageId=FGameplayTag 래핑). 그러나 이 플러그인은 async·IsExperimentalVersion:true·EnabledByDefault:false로 "동기 zero-cost 발행 핫패스"와 부적합 → 배제 근거를 플랜에 1줄 명시. (엔진 접근 불가면 "엔진 확인 필요" 명시). 결론: 모듈 내 최소 재구현 확정
+- 기존 서브시스템 컨벤션(정확 클래스명 grep): UFPSRAudioSubsystem/UFPSRCardSubsystem/UFPSRRunDirectorSubsystem/UFPSREnemySpawnSubsystem/UFPSRFlowFieldSubsystem/UFPSRPickupSubsystem/UFPSRProjectileSubsystem = UWorldSubsystem; UFPSRSessionSubsystem/UFPSRGameFlowSubsystem/UFPSRFlowLogSubsystem = UGameInstanceSubsystem → GMS를 어느 베이스로 할지 결정(권장 UWorldSubsystem=맵/세션 수명·다수 컨벤션 일치, 로컬 코스메틱 전용 강조 시 ULocalPlayerSubsystem 검토)
+- 현행 이벤트 경로: Source/FPSRoguelite/Private/Combat/FPSRCombatStatics.cpp:98 = ASC->HandleGameplayEvent(타겟형, Player.DealtDamage만 라이브). Config/DefaultGameplayTags.ini:41-46 의 EnemyKilled/LevelUp/MissionComplete/MissionStart/PickupCollected는 ini 정의만·C++ 미발행(예약 태그, 발행 0건 재확인). 킬 현행 경로=FPSRWeaponFragment.h:96,112-113 OnKill()/NotifyKill() C++ 콜백(서버 bAuthority·empty-fast) → GMS는 이들을 '대체'가 아니라 '코스메틱 브로드캐스트'로 보완(게임로직 이벤트는 기존 경로 유지가 기본, 넘길지는 아래 결정항목)
 
-[검증] 빌드+스모크+발행/구독 유닛 경로 로그 확인 → codex-review.ps1 -Base main → PROGRESS 갱신+✅+--no-ff 머지.
+■ 산출물 (C++ / 콘텐츠 분리)
+- C++: 로컬 메시지 버스 서브시스템 1개(예 UFPSRGameplayMessageSubsystem) — GameplayTag 채널 pub/sub. 최소 API: 발행(BroadcastMessage<T>(Channel, const T&)), 구독(RegisterListener<T>(Channel, callback, MatchType)), 해제(UnregisterListener(handle)). 태그 계층 매칭(ExactMatch/PartialMatch)은 Lyra 발췌 수준으로. 구독자 0이면 zero-cost(태그→리스너 배열 조회 후 empty early-out) 보장
+- C++: Source/FPSRoguelite/Public/Messages/ 아래 payload struct(값복사·스택). U13 요구(WorldLocation, EnemyType 또는 Tag, bWasKill, InstigatorTeam 등) 최소 반영 + U20(공격/사망 신호) 필요분 — 과설계 금지, 이벤트별 최소셋(U13/U20 이후 유닛 요구를 지금 다 넣지 말 것)
+- 콘텐츠: 신규 채널 GameplayTag 필요 시 DefaultGameplayTags.ini에 추가(기존 GameplayEvent.* 6태그 재사용 우선 검토). 에셋 경로 C++ 하드코딩 금지
+- 발행/구독 데모 경로 1개(예 적 사망 → GMS 발행 → 임시 로그 구독자)로 스모크 검증 가능하게
+
+■ 플랜에서 결정할 항목(지어내지 말 것)
+1. 서브시스템 베이스: UWorldSubsystem vs ULocalPlayerSubsystem (로컬 코스메틱 전용 강제 여부)
+2. 스코프 경계: 코스메틱만 담을지 vs 서버 게임로직 이벤트(EnemyKilled/LevelUp/미션)도 GMS로 흘릴지 — 기본은 코스메틱만, 확장 여지만 명시(과설계 방지)
+3. Payload struct 설계: 단일 범용 vs 이벤트별. U13/U20 요구 최소셋 확정
+4. Lyra 발췌 범위: ListenerHandle·MatchType(태그계층)·Unregister를 그대로 이식 vs 축소
+5. BP 노출: C++ 델리게이트만 우선 vs K2Node/AsyncAction(BP에서 구독) 이식 — U13 VFX가 BP면 필요, 과설계면 후속
+6. AsyncMessageSystem 플러그인 배제 최종 확인(async·Experimental·EnabledByDefault:false로 배제 권장, 사용자 확인)
+
+■ 함정·주의(제1원리 3줄)
+① 제1원리: 발행 핫패스=적 사망×수백(동시 200-300, 캡 500)/프레임 — 구독자 0 zero-cost(태그→리스너 empty early-out) + payload 스택/값복사, 힙할당·TArray 재확보 금지. ② 복제/서버권위: GMS는 순수 로컬 프로세스 내 버스 — 신규 복제 프로퍼티/RPC 절대 추가 금지(§5 계약: 적 복제=Transform만, 300적×복제=대역폭 폭증). 코스메틱은 각 클라 로컬 발행·구독. ③ 정합: GAS는 플레이어+보스만 원칙 유지(GMS는 GAS 비의존 순수 버스), 기존 ASC->HandleGameplayEvent 타겟형 경로(FPSRCombatStatics.cpp:98)를 GMS로 무분별 대체 말 것(둘은 목적이 다름 — 타겟형 어빌리티 트리거 vs 다대다 코스메틱 브로드캐스트).
+
+■ 검증
+- 빌드: UE 빌드(-WaitMutex) 성공
+- 헤드리스 스모크: 발행/구독 1경로 로그로 "브로드캐스트→구독자 수신" + "구독자 0이면 미호출(zero-cost early-out)" 확인
+- codex-review.ps1 -Base main 통과
+- PROGRESS.md 갱신 + TaskPrompts_Master §B에 U8 ✅ + phase/infra-gms → main --no-ff 머지
 ```
 
 ### U9 — D2 DBNO 수동 부활
