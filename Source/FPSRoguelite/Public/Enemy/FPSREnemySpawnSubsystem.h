@@ -173,6 +173,13 @@ private:
 	 *  damaging a player through a floor when only horizontal (XY) distance is in range (Codex review 2026-06-09). */
 	static constexpr float AttackVerticalRange = 150.0f; // cm (covers capsule heights + a small step)
 
+	/** While an enemy's actor Z is more than this BELOW the player's, it is still climbing UP toward the player (e.g.
+	 *  a stair to an overlapping upper deck, U7 multi-layer) and must NOT be halted by the stop-gate — otherwise, with
+	 *  the player standing at the stair top (a chokepoint), the 3D stop triggers a step below the platform edge and the
+	 *  swarm bunches on the stair instead of cresting onto the platform. Above the flat-ground capsule-height difference
+	 *  (a few cm, so no flat-map regression) but below one step, so the enemy climbs to roughly the player's level then stops. */
+	static constexpr float StopClimbBelowPlayer = 30.0f; // cm
+
 	/** Z below which a fallen enemy (pit / no static floor under it) is recycled to the pool so the endless-fall
 	 *  path can't pin a director alive-count/hard-cap slot forever (Codex review 2026-06-09). Far below any
 	 *  playable floor on the fixed map (§1). */

@@ -396,7 +396,7 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 		if (Enemy->ConsumeExitPathSteering(EnemyLocation, ScaledDelta, ExitDir))
 		{
 			ExitDir.Z = 0.0f;
-			Enemy->TickServerMovement(ExitDir, ScaledDelta);
+			Enemy->TickServerMovement(ExitDir, ExitDir, ScaledDelta); // follow the exit path; face the way we're going
 		}
 		else
 		{
@@ -409,15 +409,28 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 				FlowDir = FlowDir.GetSafeNormal();
 			}
 
-			// Stop advancing toward the player within StopDistance (still separate to avoid stacking on them).
+			// Stop advancing only when within StopDistance in FULL 3D. The nearest-player test above is XY-only
+			// (DistSquaredXY), so a player on an overlapping upper deck (U7 multi-layer) reads as XY-close while a storey
+			// up: a 2D stop (or a loose vertical band) freezes the enemy on the connecting stair ~one storey below the
+			// platform — it bunches with its neighbours at the stair top and never crests (separation jitter). Folding
+			// the vertical gap into the distance keeps it following the flow UP the stair until it is genuinely close in
+			// 3D (i.e. actually on the player's surface), then stops. Flat map: AttackVertGap ~= 0, so this reduces to
+			// the original XY stop (no regression); ranged (StopDistance 1500) is essentially unchanged by a 450cm gap.
+			// Also keep advancing while still meaningfully BELOW the player (climbing a stair toward a platform-standing
+			// player): with the player at the stair top (a chokepoint), the 3D stop would otherwise trigger a step below
+			// the platform edge and the swarm bunches on the stair instead of cresting onto the platform. Once the enemy
+			// reaches ~the player's height (crested) the stop applies. Flat map: gap ~= 0 < StopClimbBelowPlayer (no regression).
 			const float StopDistSq = FMath::Square(Enemy->GetStopDistance());
-			const FVector Desired = (BestDistSq > StopDistSq) ? FlowDir : FVector::ZeroVector;
+			const float BestDist3DSq = BestDistSq + AttackVertGap * AttackVertGap;
+			const bool bClimbingToPlayer = (BestPlayerLocation.Z - EnemyLocation.Z) > StopClimbBelowPlayer;
+			const FVector Desired = (!bClimbingToPlayer && BestDist3DSq <= StopDistSq) ? FVector::ZeroVector : FlowDir;
 
-			// Combine flow + separation; TickServerMovement normalizes and moves at CurrentMoveSpeed.
+			// Combine flow + separation; TickServerMovement normalizes and moves at CurrentMoveSpeed. Face the player
+			// (FlowDir points toward them, direct near them) — NOT MoveDir, whose separation jitter would spin the enemy.
 			FVector MoveDir = Desired + ComputeSeparation(i, Locations, SpatialHash) * SeparationStrength;
 			MoveDir.Z = 0.0f;
 
-			Enemy->TickServerMovement(MoveDir, ScaledDelta);
+			Enemy->TickServerMovement(MoveDir, FlowDir, ScaledDelta);
 		}
 
 		// Recycle an enemy that has fallen out of the playable world (walked into a pit / no static floor under

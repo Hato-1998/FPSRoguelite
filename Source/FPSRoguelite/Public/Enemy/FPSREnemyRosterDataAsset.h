@@ -4,9 +4,8 @@
 
 #include "Engine/DataAsset.h"
 #include "Templates/SubclassOf.h"
+#include "Enemy/FPSREnemyBase.h" // full type: the inline spawn-rule accessors deref TSubclassOf<AFPSREnemyBase> (needs StaticClass)
 #include "FPSREnemyRosterDataAsset.generated.h"
-
-class AFPSREnemyBase;
 
 /** Run context handed to a spawn rule so it can scale its weight by progression (Game.MD §2-12 — e.g. the ranged
  *  share rises over time / party level). Kept tiny: the spawn director builds it from the GameState each spawn. */

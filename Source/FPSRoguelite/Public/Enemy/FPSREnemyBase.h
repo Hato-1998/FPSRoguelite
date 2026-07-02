@@ -69,8 +69,10 @@ public:
 	/** Server: move along MoveDirection (XY world dir; magnitude ignored, normalized internally) at
 	 *  CurrentMoveSpeed * ScaledDeltaSeconds. No-op if MoveDirection is ~zero. Driven by the enemy
 	 *  movement subsystem's batched pass (flow-field + separation). ScaledDeltaSeconds is the real delta
-	 *  times this enemy's LOD stride so throttled enemies still cover the right distance. */
-	void TickServerMovement(const FVector& MoveDirection, float ScaledDeltaSeconds);
+	 *  times this enemy's LOD stride so throttled enemies still cover the right distance.
+	 *  FaceDirection is what the enemy TURNS to face (XY) — the direction to the player, NOT MoveDirection:
+	 *  at StopDistance MoveDirection is separation-only and jitters, which would spin the enemy in place. */
+	void TickServerMovement(const FVector& MoveDirection, const FVector& FaceDirection, float ScaledDeltaSeconds);
 
 	/** Server: assign an authored exit path (world-space waypoints) the enemy follows OUT of its spawn structure
 	 *  (e.g. a pipe/box that the flow-field can't path out of) before reverting to flow-field player-chase at the
@@ -180,9 +182,31 @@ protected:
 	float GravityAccel = 1800.0f;
 
 	/** If the floor is within this of the feet (up or down), snap to it (slopes/steps); beyond it (a real drop),
-	 *  fall under gravity. */
+	 *  fall under gravity. Also the BASE increment the movement step-up lifts over a stair riser (see MaxCrestStepUp). */
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Enemy|Movement")
 	float GroundSnapTolerance = 60.0f;
+
+	/** Max lift the movement step-up tries when cresting off a SLOPE. A swept-move blocking hit steeper than a walkable
+	 *  slope (normal Z < WalkableSlopeNormalZ — a stair riser / ledge / ramp-crest lip) triggers a STEP-UP so the enemy
+	 *  climbs what the flow field routed it toward (the field only opens climbable height changes). Enemies are lightweight
+	 *  Pawns without CharacterMovement's StepUp, so the minimal equivalent: lift, re-advance, let ApplyGravity settle onto
+	 *  the top. The lift is tried in GroundSnapTolerance increments up to this max, taking the SMALLEST that clears (no
+	 *  over-hop). A ramp/stair top onto a platform can present a lip taller than one flat step, so on a SLOPE we allow up to
+	 *  here; on FLAT ground the lift stays capped at one GroundSnapTolerance so enemies don't scale walls the field routes around. */
+	static constexpr float MaxCrestStepUp = 180.0f; // cm (== 3 x GroundSnapTolerance)
+
+	/** Max DOWNWARD snap for a GROUNDED enemy — the descent mirror of the step-up so an enemy walking off a small ledge
+	 *  or down a stair snaps onto the surface below instead of free-falling (ApplyGravity's old symmetric ±GroundSnap-
+	 *  Tolerance window had step-UP logic but no step-DOWN, so any drop > 60cm free-fell — and MaxFallStep ~= a storey,
+	 *  so a deck enemy dropped a whole floor). Kept WELL BELOW a storey (a true deck-edge cliff still falls; the flow
+	 *  routes to the stair). Only widens the DOWN side; the UP snap stays GroundSnapTolerance so enemies can't scale walls. */
+	static constexpr float MaxStepDownHeight = 180.0f; // cm (== MaxCrestStepUp; symmetric climb/descend budget)
+
+	/** A swept-move blocking hit whose surface normal Z is >= this is a WALKABLE SLOPE (ramp / stair simple-collision
+	 *  incline): instead of stalling flat against it, the enemy slides the blocked remainder UP along the surface so it
+	 *  ascends. 0.5 = cos 60deg — matches the flow field's walkable slope (slightly more permissive so the enemy always
+	 *  climbs what the field routed it up). Below this is a wall / riser / ramp-crest lip — the step-up (MaxCrestStepUp) handles it. */
+	static constexpr float WalkableSlopeNormalZ = 0.5f;
 
 	/** Short down-trace length for the ground check. Falling is incremental (re-traced each airborne update),
 	 *  so this only needs to reach a bit past the feet — keeps the per-enemy scene query cheap at swarm scale. */
@@ -208,6 +232,12 @@ protected:
 	/** Server-only: countdown until the next ground re-check while grounded. */
 	UPROPERTY(Transient)
 	float GroundRecheckTimer = 0.0f;
+
+	/** Server-only: surface normal of the ground under the enemy from the last ApplyGravity trace (up while airborne).
+	 *  TickServerMovement projects the steering onto this plane so the enemy walks smoothly UP/DOWN ramps/stairs instead
+	 *  of jamming flat against them (the swarm equivalent of CharacterMovement's MoveAlongFloor). */
+	UPROPERTY(Transient)
+	FVector GroundNormal = FVector::UpVector;
 
 	/** Server-only horizontal knockback velocity (cm/s), decayed each tick. Vertical knockback lives in
 	 *  VerticalVelocity (integrated by ApplyGravity). */

@@ -204,7 +204,7 @@ EFPSRServerAttackResult AFPSREnemyBase::ServerTickAttack(const FFPSRServerAttack
 	return EFPSRServerAttackResult::None;
 }
 
-void AFPSREnemyBase::TickServerMovement(const FVector& MoveDirection, float ScaledDeltaSeconds)
+void AFPSREnemyBase::TickServerMovement(const FVector& MoveDirection, const FVector& FaceDirection, float ScaledDeltaSeconds)
 {
 	if (!HasAuthority() || (HealthComponent && HealthComponent->IsDead()))
 	{
@@ -221,8 +221,85 @@ void AFPSREnemyBase::TickServerMovement(const FVector& MoveDirection, float Scal
 	if (!bKnockbackActive && Dir.SizeSquared() > KINDA_SMALL_NUMBER)
 	{
 		const FVector Normalized = Dir.GetSafeNormal();
-		AddActorWorldOffset(Normalized * CurrentMoveSpeed * ScaledDeltaSeconds, true);
-		SetActorRotation(Normalized.Rotation());
+		const float MoveDist = CurrentMoveSpeed * ScaledDeltaSeconds;
+
+		// Walk ALONG the ground slope (the swarm equivalent of CharacterMovement's MoveAlongFloor): project the steering
+		// onto the last-known ground plane and move at full speed along it, so the enemy ascends/descends ramps and stair
+		// inclines SMOOTHLY instead of jamming flat against them each tick (the earlier jam-then-slide was janky). On flat
+		// ground GroundNormal is up -> a plain horizontal move. GroundNormal is refreshed by ApplyGravity every tick while
+		// on a slope (forced below).
+		FVector MoveDir = FVector::VectorPlaneProject(Normalized, GroundNormal);
+		MoveDir = MoveDir.IsNearlyZero() ? Normalized : MoveDir.GetSafeNormal();
+		FHitResult MoveHit;
+		AddActorWorldOffset(MoveDir * MoveDist, true, &MoveHit);
+
+		if (MoveHit.bBlockingHit)
+		{
+			const FVector Remaining = MoveDir * MoveDist * (1.0f - MoveHit.Time);
+			if (MoveHit.ImpactNormal.Z >= WalkableSlopeNormalZ)
+			{
+				// (a) Hit a WALKABLE SLOPE (stepping from flat ground ONTO a ramp/incline): slide the remainder UP ALONG
+				// it so we mount the slope; next tick GroundNormal reflects the slope and the move follows it directly.
+				if (!Remaining.IsNearlyZero())
+				{
+					AddActorWorldOffset(FVector::VectorPlaneProject(Remaining, MoveHit.ImpactNormal), true);
+				}
+			}
+			else if (bGrounded && !Remaining.IsNearlyZero())
+			{
+				// (b) RISER / LEDGE / ramp-crest LIP (anything not a walkable slope — covers the whole normal-Z range below
+				// WalkableSlopeNormalZ, so a face between a ramp and vertical no longer stalls the enemy dead). Step up so it
+				// climbs what the flow field routed it toward. A ramp/stair top onto a platform can present a lip taller than
+				// one flat GroundSnapTolerance step, so try progressively taller lifts and take the SMALLEST that lets the
+				// re-advance make progress (no over-hop on small risers). On a SLOPE (cresting a ramp — GroundNormal tilted)
+				// allow up to MaxCrestStepUp; on FLAT ground cap at one step so enemies don't scale walls the field routes
+				// around. Each lift is swept (stops under a low ceiling); ApplyGravity settles onto the top. Revert if none
+				// clears (taller than the cap = a wall, not a riser) so we don't bob against it.
+				//
+				// Re-advance along the FLOW (FaceDirection), NOT the separation-laden move dir: a lifted enemy carrying the
+				// lateral separation push of its stair-mates would walk off the side of a narrow flight and fall. Climbing
+				// FORWARD (toward the objective) keeps it on the stairs. Magnitude = the blocked remainder of this move.
+				FVector StepFwd = FaceDirection;
+				StepFwd.Z = 0.0f;
+				StepFwd = StepFwd.IsNearlyZero() ? MoveDir.GetSafeNormal2D() : StepFwd.GetSafeNormal();
+				const FVector StepAdvance = StepFwd * (MoveDist * (1.0f - MoveHit.Time));
+				const FVector PreStepLoc = GetActorLocation();
+				const float MaxLift = (GroundNormal.Z < 0.99f) ? MaxCrestStepUp : GroundSnapTolerance;
+				bool bCleared = false;
+				for (float Lift = GroundSnapTolerance; Lift <= MaxLift + KINDA_SMALL_NUMBER; Lift += GroundSnapTolerance)
+				{
+					SetActorLocation(PreStepLoc, false);
+					AddActorWorldOffset(FVector(0.0f, 0.0f, Lift), true);
+					FHitResult StepFwdHit;
+					AddActorWorldOffset(StepAdvance, true, &StepFwdHit);
+					if (!(StepFwdHit.bBlockingHit && StepFwdHit.Time < KINDA_SMALL_NUMBER))
+					{
+						bCleared = true; // this lift cleared the riser/lip (re-advance made progress)
+						break;
+					}
+				}
+				if (!bCleared)
+				{
+					SetActorLocation(PreStepLoc, false);
+				}
+			}
+		}
+
+		// On a slope (or right after hitting a rise), re-trace the ground THIS tick so GroundNormal tracks the incline and
+		// ApplyGravity re-snaps us onto it — no float/jitter while climbing. Flat movers keep the cheap amortized recheck.
+		if (GroundNormal.Z < 0.99f || MoveHit.bBlockingHit)
+		{
+			GroundRecheckTimer = 0.0f;
+		}
+
+		// Face the PLAYER (FaceDirection), not the move direction: at StopDistance the move is separation-only and its
+		// direction jitters, which would spin the enemy 360deg in place. FaceDirection is stable (toward the target).
+		FVector FaceXY = FaceDirection;
+		FaceXY.Z = 0.0f;
+		if (!FaceXY.IsNearlyZero())
+		{
+			SetActorRotation(FaceXY.GetSafeNormal().Rotation());
+		}
 	}
 
 	if (bKnockbackActive)
@@ -285,15 +362,33 @@ void AFPSREnemyBase::ApplyGravity(float ScaledDeltaSeconds)
 	const FVector TraceStart(Loc.X, Loc.Y, Loc.Z + HalfHeight);
 	const FVector TraceEnd(Loc.X, Loc.Y, Loc.Z + HalfHeight - GroundProbeDistance);
 
-	if (World->LineTraceSingleByObjectType(Hit, TraceStart, TraceEnd, ObjParams, QueryParams))
+	// Floor probe. PRIMARY: a footprint-sized SPHERE sweep (not a single center line) so a small gap/seam in a
+	// tiled/paneled platform floor isn't fallen through — the sphere bridges it, matching UCharacterMovementComponent::
+	// ComputeFloorDist. But a sphere sweeping down NEAR a wall/riser can return the wall's SIDE as its first blocking hit
+	// (a sideways normal), which would wrongly ground-snap the enemy to the wall or feed a sideways GroundNormal (Codex).
+	// So accept the sphere hit ONLY if it is a WALKABLE up-facing surface; otherwise FALL BACK to a straight-down center
+	// LINE trace, which only returns a surface directly under the foot (no side geometry) — the pre-sphere behavior.
+	// Amortized (grounded enemies probe every GroundRecheckInterval), so the sweep+fallback cost is bounded at swarm scale.
+	const FCollisionShape GroundProbeShape = FCollisionShape::MakeSphere(Capsule->GetScaledCapsuleRadius());
+	bool bHitFloor = World->SweepSingleByObjectType(Hit, TraceStart, TraceEnd, FQuat::Identity, ObjParams, GroundProbeShape, QueryParams)
+		&& !Hit.bStartPenetrating && Hit.ImpactNormal.Z >= WalkableSlopeNormalZ;
+	if (!bHitFloor)
+	{
+		bHitFloor = World->LineTraceSingleByObjectType(Hit, TraceStart, TraceEnd, ObjParams, QueryParams);
+	}
+	if (bHitFloor)
 	{
 		const float TargetZ = Hit.ImpactPoint.Z + HalfHeight + GroundRestClearance; // rest just above the floor (not flush — see GroundRestClearance)
 		const float Diff = Loc.Z - TargetZ;
 
-		// Snap only within tolerance in EITHER direction (a surface far above is a ledge to route around, not
-		// ground to teleport onto; a far-below floor means the enemy is airborne). NOT while rising under a
-		// knockback impulse (VerticalVelocity > 0) — snapping then would instantly cancel the launch.
-		if (VerticalVelocity <= 0.0f && FMath::Abs(Diff) <= GroundSnapTolerance)
+		// Snap window: DOWN up to MaxStepDownHeight while GROUNDED (a grounded enemy walking off a small ledge / down a
+		// stair step-DOWNs deterministically instead of free-falling the storey gap — the descent mirror of the swept
+		// step-UP), UP only within GroundSnapTolerance (never teleport up onto a wall; the step-up handles real risers).
+		// A drop beyond the down budget is a true cliff -> fall under gravity below (the flow routes to the stair; don't
+		// snap across a storey). An AIRBORNE enemy keeps the tight ±GroundSnapTolerance window so it lands cleanly rather
+		// than snapping onto a passing ledge. NOT while rising under a knockback impulse (VerticalVelocity > 0).
+		const float SnapDown = bGrounded ? MaxStepDownHeight : GroundSnapTolerance;
+		if (VerticalVelocity <= 0.0f && Diff <= SnapDown && Diff >= -GroundSnapTolerance)
 		{
 			if (!FMath::IsNearlyZero(Diff))
 			{
@@ -301,6 +396,7 @@ void AFPSREnemyBase::ApplyGravity(float ScaledDeltaSeconds)
 			}
 			VerticalVelocity = 0.0f;
 			bGrounded = true;
+			GroundNormal = Hit.ImpactNormal; // remember the slope so TickServerMovement walks along it
 			return;
 		}
 
@@ -315,10 +411,12 @@ void AFPSREnemyBase::ApplyGravity(float ScaledDeltaSeconds)
 				NewZ = TargetZ;
 				VerticalVelocity = 0.0f;
 				bGrounded = true;
+				GroundNormal = Hit.ImpactNormal; // just landed -> remember the slope
 			}
 			else
 			{
 				bGrounded = false;
+				GroundNormal = FVector::UpVector; // airborne -> steer horizontally
 			}
 			SetActorLocation(FVector(Loc.X, Loc.Y, NewZ), false);
 			return;
@@ -333,4 +431,5 @@ void AFPSREnemyBase::ApplyGravity(float ScaledDeltaSeconds)
 	const float StepZ = FMath::Max(VerticalVelocity * ScaledDeltaSeconds, -MaxFallStep);
 	SetActorLocation(FVector(Loc.X, Loc.Y, Loc.Z + StepZ), false);
 	bGrounded = false;
+	GroundNormal = FVector::UpVector; // airborne -> steer horizontally
 }
