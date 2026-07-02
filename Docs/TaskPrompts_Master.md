@@ -798,6 +798,7 @@ Game.md + PROGRESS.md 먼저 읽어. Docs/TaskPrompts_Master.md의 유닛 U13을
 - 관통(MaxPenetration>1)+ExplosiveRounds = 탄착점 1회만 폭발(설계 수용, Codex P2 문서화됨) — 폭발 VFX도 탄착점 1회만.
 - ExplosiveRounds 적 직격 히트마커 2회(직격+스플래시) = 알려진 폴리시.
 - ChargeLaser 차징 중 프리즈 = 타이머 계속+데미지만 스킵(의도적 단순화) — PauseTimer로 "고치지" 마라.
+- ⚠️ **[U8 GMS 핫패스 후속 — PM 감사 2026-07-02, 산출물 3 배선 전 필독]** `FPSRGameplayMessageSubsystem::BroadcastMessageInternal`(cpp:37)이 재진입 안전용으로 **브로드캐스트마다 리스너 `TArray`를 통복사**한다. U8은 무publisher라 현재 무해하나, **U13(핑/Gibs)이 적 사망(`NotifyKill`/HealthComponent death)에 상주 리스너를 붙이는 순간** 적 사망 ×수백/프레임에서 이 복사가 §5 "발행 핫패스 힙할당 금지"를 **위반**한다(U20 적 애님도 동일 소비처=같은 breach). → **상주 리스너 배선 전에 GMS 통복사를 재진입 가드 in-place 순회 또는 예약 스크래치 버퍼로 교체**(GMS 소폭 개선을 U13 산출물에 포함). 부수: zero-cost early-out이 현재 전역맵 `ListenerMap.IsEmpty()`에서만 성립 → 채널 단위 early-out도 함께 검토(타 채널 상주 리스너 존재 시 구독0 채널도 부모태그 체인 순회).
 
 [검증] 빌드+스모크 → PIE(+2-client에서 Finding A 해소 확인: 원격 클라 차징 표시/빔 정합) → codex-review.ps1 -Base main → PROGRESS 갱신+✅+--no-ff 머지.
 ```
