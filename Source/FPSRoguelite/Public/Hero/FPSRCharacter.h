@@ -100,6 +100,12 @@ public:
 protected:
 	void InitAbilitySystem();
 
+	/** Server-authoritative run-start seam (U10): meta-progression stat effects are applied here, right after the ASC
+	 *  actor info is initialized. Empty at U10 — the real GameplayEffects land in P0-③. Server-authoritative because
+	 *  GAS attributes must be applied on the authority and replicate down; this does NOT commit to where the per-player
+	 *  meta payload comes from (client-reported vs server-side) — that provenance is decided in P0-③. RunFlow §2-11. */
+	void ApplyMetaProgressionEffects();
+
 	/** True while the run is globally frozen for card selection (Game.MD §2-2) — gates player input. */
 	bool IsRunFrozen() const;
 

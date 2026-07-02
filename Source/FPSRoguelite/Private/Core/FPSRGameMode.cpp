@@ -153,6 +153,9 @@ void AFPSRGameMode::EndRun(EFPSRRunOutcome Outcome)
 		if (AFPSRPlayerController* PC = Cast<AFPSRPlayerController>(It->Get()))
 		{
 			PC->ClientShowRunResult(Outcome);
+			// Per-client local meta save (U10): the server only SIGNALS each client to persist its own save — it never
+			// touches a player's save (per-player local ownership). Reliable, so it lands before the post-run travel.
+			PC->ClientCommitMetaSave(Outcome);
 		}
 	}
 

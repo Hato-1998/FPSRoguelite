@@ -258,6 +258,12 @@ void AFPSRCharacter::InitAbilitySystem()
 	{
 		AbilitySystemComponent->InitAbilityActorInfo(PS, this);
 
+		// Run-start meta-progression stat seam (U10): server-authoritative, applied once the ASC actor info is ready.
+		if (HasAuthority())
+		{
+			ApplyMetaProgressionEffects();
+		}
+
 		// Bind health out-of-health callback (server-only).
 		if (HasAuthority())
 		{
@@ -270,6 +276,13 @@ void AFPSRCharacter::InitAbilitySystem()
 			}
 		}
 	}
+}
+
+void AFPSRCharacter::ApplyMetaProgressionEffects()
+{
+	// U10 seam — intentionally empty. P0-③ applies the player's persisted meta stats here as server-authoritative
+	// GameplayEffects (idiom used across this codebase: ASC->MakeOutgoingSpec -> ApplyGameplayEffectSpecToSelf). Kept
+	// as a named entry point so the run-start stat path has a single, discoverable insertion site (RunFlow §2-11).
 }
 
 void AFPSRCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
