@@ -6,6 +6,16 @@
 
 **최종 갱신: 2026-07-02**
 
+## 🔔 핸드오프 (2026-07-02 h · PM 결정반영) — 🧭 (C) 사용자 결정 3건 확정(후크 canonical·리텐션 목표·위임기본 Sonnet 5) + U7 완료 인지 (문서/PM 클론, main)
+> **이 세션 = 문서/PM만**(코드 무접촉). rebase로 origin/main(U7 머지 `8d8e232`) 위에 이 문서 커밋 재적용. **U7(멀티레이어 2층 플로우필드)은 활성 클론에서 ✅완료·머지됨** → 바로 아래 `(2026-07-02 g · U7 완료)` 핸드오프 참조. U7 §C 프롬프트는 완료 유닛이라 Haiku 표기 이력 보존(무수정).
+> **확정·반영(사용자 결정 2026-07-02)**:
+> - **후크(§1-C-1)** = 현 긴 문구 **canonical 확정** / 짧은 스팀태그 변형 = **마케팅 단계 보류**(후보 A/B/C = PM 세션 기록).
+> - **리텐션(§1-C-8) 권장 패키지 확정** = 런 **~20분** · **D1 35% / D7 15%**(지향 북극성, 출시 후 계측 교정) · 목표 반복 **~90런** · **"30h 여정" = 언락(무기/카드)+난이도 계단식 승급+캐릭터/맵 다양성**. ⚠️ 상세 트리·재화 곡선은 **메타 루프 본체 설계(P0 · RunFlow §2-11)** 산출 후 구체화.
+> - **위임 기본 모델 전역 전환: Haiku → Sonnet 5**(`claude-sonnet-5`), 검증=Opus 유지. 갱신처: 전역 `CLAUDE.md [MODEL ASSIGNMENT POLICY]`(리포 밖) + `Workflow.md §6-5·§6-7` + `ProjectPromptManager §2·§4` + `TaskPrompts §C 공통전제·미완유닛(U8/U10/U12/U13/U14/U15/U17)`. **✅완료 유닛 프롬프트는 이력 보존(무수정)**. 메모리 `delegate-sonnet-latest-version` 반영(리포 밖). 비용감각: Haiku 대비 표준 3배/인트로 2배(~2026-08-31).
+> **커밋(이 세션, 문서만)**: `Concept.md`·`Workflow.md`·`ProjectPromptManager.md`·`TaskPrompts_Master.md`·`PROGRESS.md` 명시 stage(전역 CLAUDE.md·메모리=리포 밖 비커밋). `-A` 금지·Content/.uasset 제외.
+> **⚠️ 미해결 코드 후속(활성 클론)**: `bFriendlyFireEnabled` `false→true` flip(Enemy §2-10 치사 ON) — main 코드 기본값 아직 `false`(`Source/FPSRoguelite/Public/Core/FPSRGameState.h:228`).
+> **⚠️ 다음**: 2차 잔여 유닛 **U8 GMS / U10 SaveGame / U15 1P무기애님 / U17 플레이어설정**(U7 완료로 제거) + P0 코어 리스크 검증(적200-300 perf+NetCull=U14 이월 / 1인칭 가독성 5지표 실측 / 메타 루프 설계 RunFlow §2-11). §C 프롬프트 사용.
+
 ## 🔔 핸드오프 (2026-07-02 g · U7 완료) — ✅ **U7 멀티레이어 2층 플로우필드 = 사용자 PIE 통과 → main `--no-ff` 머지 완료**. 다음=2차 잔여(U8/U10/U15/U17)
 > **U7 종결**: 겹친 2층(지면 위 덱/메자닌 + 램프/계단) 추격이 실사용 수준으로 동작(오르내림·플랫폼 유지·추격 사용자 확인). `phase/p2-flowfield-height` → `main --no-ff` 머지 + 브랜치 정리. **콘텐츠(검증된 2층 L_Sandbox)도 동반 커밋**.
 > **핵심 산출물**: Design3 서피스그래프(dense `NumLayers=2`, `Surf=Cell*NumLayers+Rank`, `EdgeMask` ra×rb 캐노니컬) + 층별 BFS/steepest-descent + Z-인지 샘플. **성능계약 유지**(월드쿼리 0 핫패스; RecomputeField 예외=기존 `FindNearestOpenSurface` 플레이어소스 스냅만, 플레이어수 유계).
