@@ -362,7 +362,14 @@ void AFPSREnemyBase::ApplyGravity(float ScaledDeltaSeconds)
 	const FVector TraceStart(Loc.X, Loc.Y, Loc.Z + HalfHeight);
 	const FVector TraceEnd(Loc.X, Loc.Y, Loc.Z + HalfHeight - GroundProbeDistance);
 
-	if (World->LineTraceSingleByObjectType(Hit, TraceStart, TraceEnd, ObjParams, QueryParams))
+	// Footprint-sized SPHERE sweep, not a single center LINE: a straight-down line at the capsule center falls through a
+	// small gap/seam in the floor collision (tiled/paneled platforms), dropping the enemy — it sinks slightly then wedges
+	// in the seam and stops. A sphere the size of the footprint bridges such seams, matching what
+	// UCharacterMovementComponent::ComputeFloorDist does. A vertical wall beside the enemy isn't false-detected as floor
+	// (a downward sweep slides along it); only a real horizontal-ish surface under the footprint registers. Amortized
+	// (grounded enemies probe every GroundRecheckInterval), so the sweep-vs-line cost is bounded at swarm scale.
+	const FCollisionShape GroundProbeShape = FCollisionShape::MakeSphere(Capsule->GetScaledCapsuleRadius());
+	if (World->SweepSingleByObjectType(Hit, TraceStart, TraceEnd, FQuat::Identity, ObjParams, GroundProbeShape, QueryParams) && !Hit.bStartPenetrating)
 	{
 		const float TargetZ = Hit.ImpactPoint.Z + HalfHeight + GroundRestClearance; // rest just above the floor (not flush — see GroundRestClearance)
 		const float Diff = Loc.Z - TargetZ;
