@@ -669,25 +669,62 @@ Game.md + PROGRESS.md 먼저 읽어. Docs/TaskPrompts_Master.md의 유닛 U9(코
 
 ### U10 — D3 메타 SaveGame
 
+> **프롬프트 갱신 2026-07-02**: 코드베이스 그라운딩 + 적대 검증(ultracode 설계 워크플로, verdict PASS). 핵심: SaveGame **그린필드**(USaveGame grep 0건), **스코프 분리**(P0-③ 메타 설계 미완 → 범용 버전드 인프라+최소 스키마만, 실제 메타 필드 미커밋), 카드 언락 키=`GetPrimaryAssetId()`는 **엔진 상속**(전용 안정 키 신설 여부=U10 결정), 저장 트리거=`EndRun`/`HandlePostRunTravel`/기존 ClientRPC 재사용.
+
 ```
-Game.md + PROGRESS.md 먼저 읽어. Docs/TaskPrompts_Master.md의 유닛 U10(코드 백로그 D3)을 진행한다.
-읽을 SSOT: Docs/SSOT/RunFlow.md §2-11(메타 프로그레션·저장 정책), Docs/SSOT/Architecture.md §4.
+[작업] U10 — 메타 프로그레션 영속화 인프라 착지: 범용 버전드 USaveGame + 모든 저장/로드를 경유 강제하는 UGameInstanceSubsystem SaveManager + 확장 가능한 최소 스키마(실제 메타 필드는 P0-③ 확정 후). 인프라와 스키마를 분리한다.
 
-- 브랜치: phase/p6-savegame 분기 (§6-7)
-- 플랜 우선 → 승인 후 Sonnet 구현 / Opus 검증. 메타 업그레이드 트리 콘텐츠/UI는 보류(저장 인프라만).
+■ 먼저 읽을 것
+- Game.md (SSOT 허브 §0-1 라우팅 가이드) → PROGRESS.md (진행 현황) → Docs/SSOT/Workflow.md §6(프로덕션 방식·빌드/검증·커밋/머지)
+- 도메인 SSOT: Docs/SSOT/RunFlow.md §2-11(메타 프로그레션·저장 정책 — URogueliteSaveGame·UGameplayStatics::AsyncSaveGameToSlot·저장정책 P6 전항목: 버전+마이그레이션/슬롯명/Steam Cloud/저장실패/해금 삭제·리네임 fallback/런중 vs 로비/SaveManager 경유), Docs/SSOT/Architecture.md §4-1(MetaProgression/ 목표 폴더 구조)
+- Docs/SSOT/CombatWeaponCard.md:80 (카드 CardId 보류 = U10 키 확정 대기 근거)
 
-[산출물]
-1. URogueliteSaveGame: 버전 필드 + 마이그레이션 경로(§2-11 정책 전항목 준수).
-2. SaveManager(UGameInstanceSubsystem): 모든 저장/로드는 이 서브시스템 경유 강제(UI/Actor 직접 SaveGameToSlot 금지). AsyncSaveGameToSlot 사용.
-3. 저장 시점 구분: 런 중 vs 로비/메뉴(§2-11). 런 종료(EndRun) 시 재화/기록 영속화 훅.
-4. 영구 스탯 적용 경로: 런 시작 시 GE로 ASC 적용(§2-11 — GAS는 플레이어 영역).
+■ 브랜치·모델 정책
+- main → phase/p6-savegame 분기 (Workflow §6-7). 검증 후 --no-ff 머지.
+- 플랜 우선 → 승인 후: 구현=Sonnet 위임(model="sonnet") / 검증=Opus 직접.
+- ⚠️ 복제·서버권위·세이브 소유권(per-player 로컬 소유, 서버가 타인 세이브 안 씀)·세션/트래블 대칭 배선 = Opus 직접(하위모델 위임 금지, memory haiku-delegation-security-wiring). SaveManager의 저장 트리거를 EndRun/트래블/ClientRPC에 배선하는 부분이 여기 해당.
 
-[함정/주의]
-- Steam Cloud 호환 고려(파일 슬롯 구조) — U11 세션 작업과 충돌 없게.
-- 호스트/클라 구분: 메타 저장은 각 로컬 플레이어 소유(서버가 타인 세이브 쓰지 않게).
-- 검증 없이 마이그레이션 코드 방치 금지 — 구버전 더미 세이브로 로드 테스트.
+■ 핵심 스코프 제약(반드시 지킬 것)
+- 메타 루프 본체(P0-③ · RunFlow §2-11 재화/업그레이드 트리)가 아직 미확정이다. 따라서 U10 = 범용 버전드 세이브 인프라 + 확장 가능한 최소 스키마만 착지. 실제 메타 필드(재화 종류·언락트리·캐릭터·난이도 승급)에 커밋하지 말 것 — 미정 스키마 지어내기 금지.
+- 인프라(서브시스템·버전·async I/O·마이그레이션·슬롯 규칙·손상복구)와 스키마(실제 데이터 필드)를 클래스/책임 분리. P0-③ 확정 시 필드 추가+버전 bump만으로 확장 가능해야 함.
 
-[검증] 빌드+스모크+저장/로드/버전 마이그레이션 자동화 경로 → codex-review.ps1 -Base main → PROGRESS 갱신+✅+--no-ff 머지.
+■ DESIGN-FIRST 재사용 앵커(grep으로 실재 확인 후 사용 — 아래는 검증자가 실재 대조 완료)
+- UGameInstanceSubsystem 컨벤션: UFPSRSessionSubsystem [FPSRSessionSubsystem.h:23] / UFPSRGameFlowSubsystem [FPSRGameFlowSubsystem.h:14] / UFPSRFlowLogSubsystem [FPSRFlowLogSubsystem.h:20] (Source/FPSRoguelite/Public/Core/). Initialize(FSubsystemCollectionBase&)/Deinitialize() override 패턴 그대로. SaveManager도 UGameInstanceSubsystem(세션/트래블 넘어 지속).
+- 저장 시점 훅: AFPSRGameMode::EndRun(EFPSRRunOutcome) [FPSRGameMode.cpp:140, HasAuthority()+bRunEnded 원샷] / 로비 복귀 = HandlePostRunTravel [FPSRGameMode.cpp:88, GS->OnRunEnded.AddDynamic 델리게이트 cpp:84] → 타이머 후 TravelToLobby [cpp:98-109] (PostRunTravelDelay).
+- per-client 저장 트리거: AFPSRPlayerController에 UFUNCTION(Client, Reliable) 다수 기존 존재 [FPSRPlayerController.h:79/100/117/127 …]. 서버 EndRun→각 클라 로컬 세이브 트리거를 기존 ClientRPC 컨벤션으로 확장(신규 배선 지어내지 말고 이 패턴 재사용, 배선=Opus 직접).
+- GAS 런시작 스탯 적용 시임: AFPSRCharacter::InitAbilityActorInfo [FPSRCharacter.cpp:259] 직후 메타 보너스 GE 적용. GE/어빌리티 실사용례 = FPSRWeaponInventoryComponent.cpp:218(GiveAbility), FPSRCardEffect.cpp:298(GiveAbility)/cpp:91(ApplyGameplayEffectSpecToSelf). (실제 스탯 필드=P0-③, 지금은 시임/진입점만.)
+- 메타 언락 키: UFPSRCardDataAsset : public UPrimaryDataAsset [FPSRCardDataAsset.h:15]. ⚠️ GetPrimaryAssetId()는 프로젝트 override가 아니라 UPrimaryDataAsset **엔진 상속** 메서드(헤더에 override 없음, 기본 반환 type=클래스명/name=에셋명). 별도 CardKey/CardId 문자열 필드 없음(확정 필요). CombatWeaponCard.md:80이 이 키 결정(엔진 기본 FPrimaryAssetId 재사용 vs 전용 안정 키 신설)을 U10으로 미뤄둠 — 지금 결정.
+- 세션/트래블 독립: UFPSRSessionSubsystem::ServerTravel [FPSRSessionSubsystem.cpp:158], AFPSRLobbyGameMode bUseSeamlessTravel=true [FPSRLobbyGameMode.cpp:26]. 세이브 슬롯 파일이 트래블/세션과 충돌 없게(memory seamless-travel-input-loadout).
+- 혼동 금지(세이브 아님): U17 UFPSRGameUserSettings:UGameUserSettings [Public/Settings/FPSRGameUserSettings.h] = 로컬설정 영속(GameUserSettings.ini, 별개 채널) / U18b AFPSRGameState::WeaponUnlockMilestones={20,30,40} [FPSRGameState.h:201, 사용처 cpp:156] = 런레벨 언락(config, 메타 아님).
+- 영속화 부재 확인: USaveGame/SaveGameToSlot/LoadGameFromSlot/AsyncSaveGameToSlot grep 0건 = 그린필드(재확인).
+
+■ 산출물 (C++ 로직 / 콘텐츠 분리)
+1. C++: URogueliteSaveGame(USaveGame) — 버전 필드(int32 SaveVersion) + 마이그레이션 경로 스캐폴드(MigrateIfNeeded, 버전별 케이스). 최소 스키마만(자리표시), 실제 메타 필드는 P0-③ 후. 에셋 경로 하드코딩 금지.
+2. C++: SaveManager(UGameInstanceSubsystem) — 모든 저장/로드 이 서브시스템 경유 강제(UI/Actor 직접 SaveGameToSlot 금지). UGameplayStatics::AsyncSaveGameToSlot 사용, async 완료 델리게이트, 로드 실패/부재 → 기본값 인스턴스, 손상 → fallback 정책(플랜 확정). 슬롯명 규칙(플랜 확정).
+3. C++: 저장 시점 배선(Opus 직접) — 런중 vs 로비/메뉴 구분(§2-11). EndRun 훅 + 트래블 전 flush 게이팅. per-player 로컬 소유(서버가 타인 세이브 안 씀) — 서버 EndRun에서 각 클라 로컬 트리거는 기존 ClientRPC 재사용.
+4. C++: 영구 스탯 적용 경로 시임 — InitAbilityActorInfo 직후 메타 GE 적용 훅(실제 GE/스탯=P0-③, 지금은 진입점만).
+5. 콘텐츠/설정: Steam Cloud 파일 화이트리스트(Config), 슬롯 관련 config 키(있으면). C++ 하드코딩 금지.
+
+■ 플랜에서 결정할 항목(지어내지 말 것 — 미정이면 사용자 질문)
+- 슬롯명 규칙(고정명 vs 플랫폼/userId 접미) + Steam Cloud 파일 패턴 정합
+- 카드 언락 키 결정: 엔진 기본 GetPrimaryAssetId()(FPrimaryAssetId) 재사용 vs 전용 안정 문자열 키 신설(에셋 리네임 내성 — 후자면 CardDataAsset에 필드 추가 필요, CombatWeaponCard.md:80 근거)
+- 저장 시점 정책(런중 vs 로비만) + per-player 로컬 세이브를 서버 EndRun에서 각 클라로 트리거하는 방식(기존 ClientRPC[FPSRPlayerController.h] vs GameState OnRep vs 로컬 델리게이트)
+- 최소 스키마 범위(버전만 vs 재화 자리표시 1필드) — P0-③ 미정 필드 커밋 금지선
+- 마이그레이션 자동화 테스트 방식(더미 구버전 세이브 생성/체크인; 기존 IMPLEMENT_SIMPLE_AUTOMATION_TEST 패턴[Source/FPSRoguelite/Private/Tests/] 재사용, Scripts/u18a_migcheck.py 등 참고)
+- 손상/부재 복구 fallback(백업 슬롯 vs 기본값 리셋)
+- async 저장 완료 vs PostRunTravelDelay 경합 게이팅 필요 여부
+
+■ 함정·주의(제1원리 3줄)
+① 제1원리: 메타=각 플레이어 로컬 계정 자산, 협동(솔로+친구4인)에서 서버는 타인 세이브 소유/기록 금지 → SaveManager(GameInstanceSubsystem) 단일 경유·per-player 로컬 소유·버전 마이그레이션 집중. 이는 적 수백 성능예산과 무관한 프론트엔드 인프라라 경량 Pawn/플로우필드 이탈원칙과 충돌 없음.
+② (참고) Lyra: Local(GameUserSettings)+Shared(USaveGame/계정) 분리. 본 프로젝트=계정 시스템 없음 → 로컬설정=U17 GameUserSettings(기존), 메타=단일 로컬 USaveGame으로 의도적 단순화(Lyra SharedSettings 계정계층 미채택).
+③ 제약 정합: P0-③(메타 루프 본체) 미확정 → 인프라+최소 스키마만 착지, 실제 필드 미커밋. 인프라/스키마 분리로 재작업 없이 후속 확장(필드 추가+버전 bump).
+
+■ 검증
+- 빌드(활성 코드 클론 경로 = 문서 클론 FPSRoguelite2 아님): "D:\UnrealEngine\UE_5.7\Engine\Build\BatchFiles\Build.bat" FPSRogueliteEditor Win64 Development -Project="E:\Git_Project\FPSRoguelite\FPSRoguelite.uproject" -WaitMutex (에디터 닫고 UBT).
+- 헤드리스 스모크: UnrealEditor-Cmd.exe <uproject> -unattended -nopause -nullrhi -nosplash -nosound -ExecCmds="Automation RunTests FPSRoguelite.Smoke.ModuleLoads" -TestExit="Automation Test Queue Empty" -abslog=... (테스트 실재: FPSRSmokeTest.cpp:8).
+- 저장/로드/버전 마이그레이션 자동화: 구버전 더미 세이브 → 로드 → 마이그레이션 후 필드 무결성 확인 — IMPLEMENT_SIMPLE_AUTOMATION_TEST 신규 테스트로 착지(기존 Source/FPSRoguelite/Private/Tests/ 패턴 재사용).
+- Scripts/codex-review.ps1 -Base main (브랜치 diff 리뷰, Opus 판독) → 지적 반영.
+- PROGRESS.md 갱신 + TaskPrompts_Master.md §B DAG U10 ✅ + main --no-ff 머지.
 ```
 
 ### U11a — D5 세션 + 로비 + 트래블 루프 (클론 B 병렬, 보스 제외)
