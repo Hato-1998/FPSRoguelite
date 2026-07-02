@@ -362,14 +362,21 @@ void AFPSREnemyBase::ApplyGravity(float ScaledDeltaSeconds)
 	const FVector TraceStart(Loc.X, Loc.Y, Loc.Z + HalfHeight);
 	const FVector TraceEnd(Loc.X, Loc.Y, Loc.Z + HalfHeight - GroundProbeDistance);
 
-	// Footprint-sized SPHERE sweep, not a single center LINE: a straight-down line at the capsule center falls through a
-	// small gap/seam in the floor collision (tiled/paneled platforms), dropping the enemy — it sinks slightly then wedges
-	// in the seam and stops. A sphere the size of the footprint bridges such seams, matching what
-	// UCharacterMovementComponent::ComputeFloorDist does. A vertical wall beside the enemy isn't false-detected as floor
-	// (a downward sweep slides along it); only a real horizontal-ish surface under the footprint registers. Amortized
-	// (grounded enemies probe every GroundRecheckInterval), so the sweep-vs-line cost is bounded at swarm scale.
+	// Floor probe. PRIMARY: a footprint-sized SPHERE sweep (not a single center line) so a small gap/seam in a
+	// tiled/paneled platform floor isn't fallen through — the sphere bridges it, matching UCharacterMovementComponent::
+	// ComputeFloorDist. But a sphere sweeping down NEAR a wall/riser can return the wall's SIDE as its first blocking hit
+	// (a sideways normal), which would wrongly ground-snap the enemy to the wall or feed a sideways GroundNormal (Codex).
+	// So accept the sphere hit ONLY if it is a WALKABLE up-facing surface; otherwise FALL BACK to a straight-down center
+	// LINE trace, which only returns a surface directly under the foot (no side geometry) — the pre-sphere behavior.
+	// Amortized (grounded enemies probe every GroundRecheckInterval), so the sweep+fallback cost is bounded at swarm scale.
 	const FCollisionShape GroundProbeShape = FCollisionShape::MakeSphere(Capsule->GetScaledCapsuleRadius());
-	if (World->SweepSingleByObjectType(Hit, TraceStart, TraceEnd, FQuat::Identity, ObjParams, GroundProbeShape, QueryParams) && !Hit.bStartPenetrating)
+	bool bHitFloor = World->SweepSingleByObjectType(Hit, TraceStart, TraceEnd, FQuat::Identity, ObjParams, GroundProbeShape, QueryParams)
+		&& !Hit.bStartPenetrating && Hit.ImpactNormal.Z >= WalkableSlopeNormalZ;
+	if (!bHitFloor)
+	{
+		bHitFloor = World->LineTraceSingleByObjectType(Hit, TraceStart, TraceEnd, ObjParams, QueryParams);
+	}
+	if (bHitFloor)
 	{
 		const float TargetZ = Hit.ImpactPoint.Z + HalfHeight + GroundRestClearance; // rest just above the floor (not flush — see GroundRestClearance)
 		const float Diff = Loc.Z - TargetZ;
