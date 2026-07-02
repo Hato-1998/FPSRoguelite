@@ -195,6 +195,13 @@ protected:
 	 *  here; on FLAT ground the lift stays capped at one GroundSnapTolerance so enemies don't scale walls the field routes around. */
 	static constexpr float MaxCrestStepUp = 180.0f; // cm (== 3 x GroundSnapTolerance)
 
+	/** Max DOWNWARD snap for a GROUNDED enemy — the descent mirror of the step-up so an enemy walking off a small ledge
+	 *  or down a stair snaps onto the surface below instead of free-falling (ApplyGravity's old symmetric ±GroundSnap-
+	 *  Tolerance window had step-UP logic but no step-DOWN, so any drop > 60cm free-fell — and MaxFallStep ~= a storey,
+	 *  so a deck enemy dropped a whole floor). Kept WELL BELOW a storey (a true deck-edge cliff still falls; the flow
+	 *  routes to the stair). Only widens the DOWN side; the UP snap stays GroundSnapTolerance so enemies can't scale walls. */
+	static constexpr float MaxStepDownHeight = 180.0f; // cm (== MaxCrestStepUp; symmetric climb/descend budget)
+
 	/** A swept-move blocking hit whose surface normal Z is >= this is a WALKABLE SLOPE (ramp / stair simple-collision
 	 *  incline): instead of stalling flat against it, the enemy slides the blocked remainder UP along the surface so it
 	 *  ascends. 0.5 = cos 60deg — matches the flow field's walkable slope (slightly more permissive so the enemy always

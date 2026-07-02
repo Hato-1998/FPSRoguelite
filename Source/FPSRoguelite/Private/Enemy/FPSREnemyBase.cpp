@@ -367,10 +367,14 @@ void AFPSREnemyBase::ApplyGravity(float ScaledDeltaSeconds)
 		const float TargetZ = Hit.ImpactPoint.Z + HalfHeight + GroundRestClearance; // rest just above the floor (not flush — see GroundRestClearance)
 		const float Diff = Loc.Z - TargetZ;
 
-		// Snap only within tolerance in EITHER direction (a surface far above is a ledge to route around, not
-		// ground to teleport onto; a far-below floor means the enemy is airborne). NOT while rising under a
-		// knockback impulse (VerticalVelocity > 0) — snapping then would instantly cancel the launch.
-		if (VerticalVelocity <= 0.0f && FMath::Abs(Diff) <= GroundSnapTolerance)
+		// Snap window: DOWN up to MaxStepDownHeight while GROUNDED (a grounded enemy walking off a small ledge / down a
+		// stair step-DOWNs deterministically instead of free-falling the storey gap — the descent mirror of the swept
+		// step-UP), UP only within GroundSnapTolerance (never teleport up onto a wall; the step-up handles real risers).
+		// A drop beyond the down budget is a true cliff -> fall under gravity below (the flow routes to the stair; don't
+		// snap across a storey). An AIRBORNE enemy keeps the tight ±GroundSnapTolerance window so it lands cleanly rather
+		// than snapping onto a passing ledge. NOT while rising under a knockback impulse (VerticalVelocity > 0).
+		const float SnapDown = bGrounded ? MaxStepDownHeight : GroundSnapTolerance;
+		if (VerticalVelocity <= 0.0f && Diff <= SnapDown && Diff >= -GroundSnapTolerance)
 		{
 			if (!FMath::IsNearlyZero(Diff))
 			{

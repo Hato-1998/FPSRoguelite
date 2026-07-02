@@ -128,6 +128,13 @@ private:
 	// snap window (PickRankForFootZ) — it mirrors GroundSnapTolerance so the picked layer matches what ApplyGravity snaps to.
 	static constexpr float MaxClimbableStepHeight = 60.0f; // = AFPSREnemyBase::GroundSnapTolerance
 
+	// Max drop below the enemy's foot that PickRankForFootZ's "highest surface at-or-below" fallback accepts as the
+	// surface it stands on. Guards the multi-layer case: an enemy at deck height (-550) in a cell whose only surface is
+	// the ground a storey below (-1000) must NOT resolve to that ground rank and follow ground flow while up on the deck
+	// (it would walk to the rim / stall / fall — U7 PIE). Beyond this, the pick returns INDEX_NONE and the mover falls
+	// back to direct-to-player. Kept well below a storey (~450cm) but above any real ledge/stair the enemy stands on.
+	static constexpr float MaxLayerPickDrop = 200.0f; // cm
+
 	// Min up-facing normal Z for a per-cell floor sample to count as walkable (rejects ceiling undersides / near-vertical
 	// faces). Set to the ENEMY's actual traversal limit, NOT the UE player default (0.71 = 44.8deg): a swarm Pawn climbs
 	// a slope incrementally (swept slide + per-recheck ground snap up to GroundSnapTolerance) so it can ascend steeper

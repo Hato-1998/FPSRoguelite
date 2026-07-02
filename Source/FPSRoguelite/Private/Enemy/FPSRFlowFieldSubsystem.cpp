@@ -665,7 +665,11 @@ int32 UFPSRFlowFieldSubsystem::PickRankForFootZ(int32 Cell, float FootZ) const
 			return R;
 		}
 	}
-	// 2) Highest valid rank at or below FootZ — the surface the pawn stands on / is falling toward.
+	// 2) Highest valid rank at or below FootZ — the surface the pawn stands on / is falling toward — but ONLY within a
+	//    step-down budget. An enemy at platform height (-550) in a cell whose only surface is rank 0 ground (-1000, a
+	//    storey below) must NOT resolve to that ground surface and follow GROUND flow while a storey up: that mis-route
+	//    walks it to the deck rim / stalls / drops it (U7 PIE S1/S2/S3). Beyond the budget, fall through to INDEX_NONE
+	//    -> SampleFlowDirection returns zero -> the mover uses direct-to-player (a coherent target), not ground flow.
 	int32 BelowBest = INDEX_NONE;
 	float BelowZ = -MAX_flt;
 	for (int32 R = 0; R < NumLayers; ++R)
@@ -677,7 +681,7 @@ int32 UFPSRFlowFieldSubsystem::PickRankForFootZ(int32 Cell, float FootZ) const
 			BelowBest = R;
 		}
 	}
-	if (BelowBest != INDEX_NONE)
+	if (BelowBest != INDEX_NONE && (FootZ - BelowZ) <= MaxLayerPickDrop)
 	{
 		return BelowBest;
 	}
