@@ -6,13 +6,34 @@
 
 **최종 갱신: 2026-07-02**
 
-## 🔔 핸드오프 (2026-07-02 h · U8 GMS 완료) — ✅ **U8 GMS(GameplayMessageSubsystem) 경량 재구현 = GameplayTag 채널 로컬 pub/sub 코스메틱 버스 인프라 완료 → main `--no-ff` 머지**. 다음=2차 잔여(U10/U15/U17)
+## 🔔 핸드오프 (2026-07-02 j · U8 GMS 완료) — ✅ **U8 GMS(GameplayMessageSubsystem) 경량 재구현 = GameplayTag 채널 로컬 pub/sub 코스메틱 버스 인프라 완료 → main `--no-ff` 머지**. 다음=2차 잔여(U10/U15/U17/U19/U20)
 > **U8 결과**: `UFPSRGameplayMessageSubsystem`(UWorldSubsystem) = GameplayTag 채널 **순수 로컬 동기 pub/sub 버스**. Performance.md §5 계약("히트/사망 코스메틱=GameplayMessage/Cue, 복제 액터 상태 아님")의 인프라를 놓음. `phase/infra-gms` → `main --no-ff`. **콘텐츠 0**(신규 태그 없음, 데모는 기존 `GameplayEvent.EnemyKilled` 재사용).
 > **핵심 산출물(Lyra GMS 경량 재구현 — 엔진 부재 3-에이전트 재확인: GameplayMessageRouter/UGameplayMessageSubsystem 0건, AsyncMessageSystem=async·Experimental·EnabledByDefault:false로 배제)**: `BroadcastMessage<T>(Channel,const T&)` / `RegisterListener<T>`(TFunction+멤버함수 오버로드, `EFPSRMessageMatch` Exact/Partial 태그계층) / `UnregisterListener(Handle)` + `FFPSRMessageListenerHandle`. **zero-cost 발행**: 구독자 0이면 `ListenerMap.IsEmpty()` early-out(힙할당/순회 0 — 적 사망 ×수백/프레임 대비). payload=`FFPSRCosmeticEventMessage`(U13 최소셋: WorldLocation/SourceType tag/InstigatorTeam/bWasKill, 값복사·스택). 파일=`Source/FPSRoguelite/{Public,Private}/Messages/` + `Private/Tests/`. 데모=`#if !UE_BUILD_SHIPPING` `FPSR.GMS.Demo` 콘솔커맨드(**실 적사망 발행=U13 시임**, 프로덕션 핫패스 무오염).
 > **복제/서버권위(Opus 직접 판단·검증)**: 신규 복제 프로퍼티/RPC **0**(grep 검증, `Public/Messages`·`Private/Messages` 양쪽 0매치). UWorldSubsystem=클라별 월드 로컬 인스턴스라 코스메틱은 각 클라 로컬 발행·구독(복제 아님). 기존 `ASC->HandleGameplayEvent` 타겟형 경로·게임로직 이벤트(GameState 복제) **무대체**(목적 상이).
 > **검증**: 빌드 Succeeded×4 + 헤드리스 `FPSRoguelite.Smoke.GameplayMessage` Success(발행/수신+payload복사 / unregister→미수신 / 구독0 early-out / **stale핸들 재사용 방지 케이스d**) + **Codex 머지게이트 3패스**: 1차 P2=리스너ID를 서브시스템 전역 단조증가로(채널 비운 뒤 재등록 시 per-channel ID 재사용→stale핸들 오detach 방지)+회귀케이스 / 2차 P2=타 월드 GMS 핸들 unregister 차단(멀티월드 PIE ID충돌)·P1=payload `StaticStruct()` 명시(컴파일 오탐이나 명시성 채택, TBaseStructure도 빌드통과 확인) / **3차 clean**.
-> **⚠️ 소비처 미배선(설계대로)**: 실제 코스메틱 발행(적 사망→GMS)은 **U13(VFX/Gibs/핑)** 배선 시임(`NotifyKill`/HealthComponent death). U8=인프라만. **U20(적 애니)=TaskPrompts 문서 부재**(최대 유닛 U17, 프롬프트 인용 U20:972/981은 917줄 파일에 없음) → payload 시임만 남기고 지금 미구현. BP async-listen 노드=U13이 BP 저작 시 후속.
-> **재개 프롬프트**: `U8 GMS main 머지 완료. 다음=2차 잔여 유닛(U10 SaveGame/U15 1P무기애님/U17 플레이어설정) 중 택1 — TaskPrompts_Master §C 프롬프트 사용. U13 VFX 착수 시 GMS 소비(FFPSRCosmeticEventMessage 발행+RegisterListener) 배선.`
+> **⚠️ 소비처 미배선(설계대로)**: 실제 코스메틱 발행(적 사망→GMS)은 **U13(VFX/Gibs/핑)** 배선 시임(`NotifyKill`/HealthComponent death). U8=인프라만. **U20(적 애니, 신규 등재 `36da910`)=적 애니 상태전환/사망 신호 GMS 소비처**(프롬프트대로 GMS 브로드캐스트 재사용, 신규 복제 프로퍼티/RPC 금지) → U8은 payload 시임만, 실제 소비 배선=U13/U20. BP async-listen 노드=소비처가 BP 저작 시 후속. (⚠️ 착수 당시 U20 미등재였으나 병렬 PM 세션 `36da910`이 U19/U20 등재 — 소비처 존재로 정정.)
+> **재개 프롬프트**: `U8 GMS main 머지 완료. 다음=2차 잔여 유닛(U10 SaveGame/U15 1P무기애님/U17 플레이어설정/U19 3P팀원애님/U20 적애님) 중 택1 — TaskPrompts_Master §C 프롬프트 사용. U13 VFX·U20 적애님 착수 시 GMS 소비(FFPSRCosmeticEventMessage 발행+RegisterListener) 배선.`
+## 🔔 핸드오프 (2026-07-02 i · 캐릭터 애님 + 1인칭 확정) — 🧭 PM: 1인칭 픽스(게이트→가드레일) + 캐릭터 애님 신규 유닛 U19/U20 등재 + U15 확장 (문서/PM 클론, main)
+> **이 세션 = 문서/PM만**(코드 무접촉). 사용자 결정 반영: 순서=2차 유닛 먼저(그 위에 설계·검증), 1인칭 = **확정(폴백 없음)**, 캐릭터 애님 = 3P 팀원 + 1P 팔·손 + 적 애님 3범위.
+> **설계 변경(SSOT 먼저, 원칙3)**:
+> - **1인칭 확정**: `Concept.md §1-C-3` 검증 게이트/탑다운 폴백 프레이밍 **해제** → 1인칭 아키텍처 고정. 가독성 리스크는 "시점 문제 → 설계 문제"로 전환(HUD 큐/오디오/밀도로 해소). `Performance.md §5` 1인칭 가독성 5지표 = **P0 go/no-go 게이트 → "가독성 설계 목표(가드레일)"로 강등**(수치 유지).
+> **신규 유닛 등재(§B 24유닛 · §C 프롬프트 — ultracode 설계 워크플로 = 코드베이스 그라운딩 + 적대 검증)**:
+> - **U15 확장**: 1P 무기 애님 → **+ 1P 팔·손 애님 강화**(U12 "무기별 팔 AnimBP" 흡수, 중복 방지). 1인칭 확정이라 투자 안전.
+> - **U19 (신규)**: **3P 팀원 캐릭터 애니메이션**(협동 가시성). 근거: `GetMesh()` 이미 SetOwnerNoSee·`MulticastFireCosmetics`(발사 코스메틱) 재사용·복제 `bReloading` 폴링·WeaponDataAsset 1P블록 대칭 3P필드. 복제/서버권위 트리거=Opus 직접. `phase/u19-thirdperson-teammate-anim`.
+> - **U20 (신규)**: **적 애니메이션 = 기존 VAT 파이프라인 확장**(⚠️적대검증이 "VAT 도입" 오프레이밍 교정: VAT 스웜 이미 배선·머지=SM_Minion_*_VAT·M_BroBot_VAT·BP_EnemyBase.Mesh CDO 스왑·AnimToTexture 플러그인 on, PIE 대기). 공백=단일 AutoPlay 워크루프 → 상태전환/속도매핑/거리 LOD C++ 배선 + 엘리트 스켈 하이브리드. 제1원리=액터당 비용(per-actor MID 300 경고, S2↓ 스킵). `phase/p7-enemy-anim`.
+> **⚠️ 발견(기존 리포 상태, 이번에 인지)**: VAT 적(미니언) 파이프라인 + BroBot 플레이어 3P 메시/AnimBP가 활성 클론에서 이미 배선·머지됨(PIE 미검증). U19/U20은 "확장" 유닛. 상세=`Docs/AssetWork_CharEnv_Resume.md` + PROGRESS 캐릭터 애셋 섹션.
+> **커밋(문서만)**: `Concept.md`·`Performance.md`·`TaskPrompts_Master.md`·`PROGRESS.md` 명시 stage. `-A` 금지·Content 제외.
+> **⚠️ 다음(사용자 순서 = 2차 먼저 + 설계 병렬)**: 활성 클론 = U8(GMS)/U17/U10인프라/U15(+1P팔손)/U19/U20 (순서 자유) · 이 클론 = P0-③ 메타 루프 설계(RunFlow §2-11, U10 스키마 확정). P0-① perf+NetCull은 U20 적애님 착수 전후 병렬 권장.
+
+## 🔔 핸드오프 (2026-07-02 h · PM 결정반영) — 🧭 (C) 사용자 결정 3건 확정(후크 canonical·리텐션 목표·위임기본 Sonnet 5) + U7 완료 인지 (문서/PM 클론, main)
+> **이 세션 = 문서/PM만**(코드 무접촉). rebase로 origin/main(U7 머지 `8d8e232`) 위에 이 문서 커밋 재적용. **U7(멀티레이어 2층 플로우필드)은 활성 클론에서 ✅완료·머지됨** → 바로 아래 `(2026-07-02 g · U7 완료)` 핸드오프 참조. U7 §C 프롬프트는 완료 유닛이라 Haiku 표기 이력 보존(무수정).
+> **확정·반영(사용자 결정 2026-07-02)**:
+> - **후크(§1-C-1)** = 현 긴 문구 **canonical 확정** / 짧은 스팀태그 변형 = **마케팅 단계 보류**(후보 A/B/C = PM 세션 기록).
+> - **리텐션(§1-C-8) 권장 패키지 확정** = 런 **~20분** · **D1 35% / D7 15%**(지향 북극성, 출시 후 계측 교정) · 목표 반복 **~90런** · **"30h 여정" = 언락(무기/카드)+난이도 계단식 승급+캐릭터/맵 다양성**. ⚠️ 상세 트리·재화 곡선은 **메타 루프 본체 설계(P0 · RunFlow §2-11)** 산출 후 구체화.
+> - **위임 기본 모델 전역 전환: Haiku → Sonnet 5**(`claude-sonnet-5`), 검증=Opus 유지. 갱신처: 전역 `CLAUDE.md [MODEL ASSIGNMENT POLICY]`(리포 밖) + `Workflow.md §6-5·§6-7` + `ProjectPromptManager §2·§4` + `TaskPrompts §C 공통전제·미완유닛(U8/U10/U12/U13/U14/U15/U17)`. **✅완료 유닛 프롬프트는 이력 보존(무수정)**. 메모리 `delegate-sonnet-latest-version` 반영(리포 밖). 비용감각: Haiku 대비 표준 3배/인트로 2배(~2026-08-31).
+> **커밋(이 세션, 문서만)**: `Concept.md`·`Workflow.md`·`ProjectPromptManager.md`·`TaskPrompts_Master.md`·`PROGRESS.md` 명시 stage(전역 CLAUDE.md·메모리=리포 밖 비커밋). `-A` 금지·Content/.uasset 제외.
+> **⚠️ 미해결 코드 후속(활성 클론)**: `bFriendlyFireEnabled` `false→true` flip(Enemy §2-10 치사 ON) — main 코드 기본값 아직 `false`(`Source/FPSRoguelite/Public/Core/FPSRGameState.h:228`).
+> **⚠️ 다음**: 2차 잔여 유닛 **U8 GMS / U10 SaveGame / U15 1P무기애님 / U17 플레이어설정**(U7 완료로 제거) + P0 코어 리스크 검증(적200-300 perf+NetCull=U14 이월 / 1인칭 가독성 5지표 실측 / 메타 루프 설계 RunFlow §2-11). §C 프롬프트 사용.
 
 ## 🔔 핸드오프 (2026-07-02 g · U7 완료) — ✅ **U7 멀티레이어 2층 플로우필드 = 사용자 PIE 통과 → main `--no-ff` 머지 완료**. 다음=2차 잔여(U8/U10/U15/U17)
 > **U7 종결**: 겹친 2층(지면 위 덱/메자닌 + 램프/계단) 추격이 실사용 수준으로 동작(오르내림·플랫폼 유지·추격 사용자 확인). `phase/p2-flowfield-height` → `main --no-ff` 머지 + 브랜치 정리. **콘텐츠(검증된 2층 L_Sandbox)도 동반 커밋**.

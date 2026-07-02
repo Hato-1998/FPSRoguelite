@@ -41,7 +41,7 @@
 
 ### 6-5. 모델 / 작업 흐름 정책 (전역 HotL 준수)
 - 새 작업은 **플랜 우선**. HIGH_RISK(파일 생성/수정/삭제, 빌드, 커밋)는 승인 후 실행
-- **구현(코드 작성·파일 수정) → Haiku 위임 / 검증(빌드·diff·스모크·UI) → 메인(Opus) 직접**. 검증은 Haiku에 위임 금지
+- **구현(코드 작성·파일 수정) → Sonnet 위임(현 최신 Sonnet 5 `claude-sonnet-5`, 2026-07-02 전환 — 기존 Haiku 기본에서) / 검증(빌드·diff·스모크·UI) → 메인(Opus) 직접**. 검증은 하위 모델(Sonnet/Haiku)에 위임 금지
 - 단순 한 줄 수정·읽기 전용 조회는 모델 분리 없이 즉시 처리
 
 ### 6-6. 빌드 / 검증 방법
@@ -62,7 +62,7 @@
 
 라이프사이클:
 1. **분기** — `git checkout main` → `git checkout -b phase/<단계>-<키워드>` → `git push -u origin phase/<단계>-<키워드>`
-2. **작업** — 해당 phase 구현·문서를 이 브랜치에서만 커밋(구현=Haiku 위임 / 검증=Opus 직접, §6-5)
+2. **작업** — 해당 phase 구현·문서를 이 브랜치에서만 커밋(구현=Sonnet 위임 / 검증=Opus 직접, §6-5)
 3. **검증(머지 전 필수)** — 빌드(§6-6) → 헤드리스 스모크 → `Scripts/codex-review.ps1 -Base main`(브랜치 diff 리뷰). 검증 없이 머지 금지(§6-3)
 4. **핸드오프** — phase 완료/세션 중단 전 `PROGRESS.md` 갱신·커밋(활성 브랜치명 명시, §6-4)
 5. **머지** — `git checkout main` → `git merge --no-ff phase/<단계>-<키워드> -m "merge(phase): <단계> <요약> — 검증 통과"` → `git push origin main`
