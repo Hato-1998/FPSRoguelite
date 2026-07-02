@@ -4,7 +4,15 @@
 > **작업 단계를 끝낼 때마다, 그리고 중단 전 반드시 이 파일을 갱신하고 커밋한다.**
 > 확정 설계·기획·코드구조·규칙은 `Game.md`(**SSOT 허브** → 도메인별 `Docs/SSOT/*.md`, 작업별 라우팅은 허브 §0-1), **완료 작업 상세는 `git log --oneline`**. 여기엔 *무엇을 했는지*만 요약한다.
 
-**최종 갱신: 2026-07-01**
+**최종 갱신: 2026-07-02**
+
+## 🔔 핸드오프 (2026-07-02 g · U7 완료) — ✅ **U7 멀티레이어 2층 플로우필드 = 사용자 PIE 통과 → main `--no-ff` 머지 완료**. 다음=2차 잔여(U8/U10/U15/U17)
+> **U7 종결**: 겹친 2층(지면 위 덱/메자닌 + 램프/계단) 추격이 실사용 수준으로 동작(오르내림·플랫폼 유지·추격 사용자 확인). `phase/p2-flowfield-height` → `main --no-ff` 머지 + 브랜치 정리. **콘텐츠(검증된 2층 L_Sandbox)도 동반 커밋**.
+> **핵심 산출물**: Design3 서피스그래프(dense `NumLayers=2`, `Surf=Cell*NumLayers+Rank`, `EdgeMask` ra×rb 캐노니컬) + 층별 BFS/steepest-descent + Z-인지 샘플. **성능계약 유지**(월드쿼리 0 핫패스; RecomputeField 예외=기존 `FindNearestOpenSurface` 플레이어소스 스냅만, 플레이어수 유계).
+> **8차 PIE 반복 후 근본교정(순서대로, 상세 아래 핸드오프들)**: ①3D stop-gate ②StopClimbBelowPlayer ③반복 스텝업+데드존제거 ④스텝업 옆낙하(flow방향 재전진) ⑤랭크픽 하강예산+이동 step-down(MaxStepDownHeight) ⑥랭크픽 최근접(step2) ⑦**랭크픽 "최저"→"최근접" 단일화(근본: 열린 지면 위 램프/덱서 지면 오선택→스핀/꺼짐/미등반)** ⑧지면체크 footprint 스피어스윕(플랫폼 이음새 낙하) + **Codex 머지게이트 P2**(스피어스윕 벽면 오스냅→walkable 게이트+라인폴백; P2-1 footprint edge=U7 Part B 트레이드오프 수용). 검증=빌드×多 + 헤드리스 스모크×多 + Codex 머지게이트.
+> **⚠️ 미해결 후속(다음 세션)**: (a) **덱 가장자리(비계단) 콜리전 립** = 열린 절벽서 밀려 낙하는 코드로 완전차단 불가(지오메트리 권고, 사용자). (b) **적 ~200-300 정량 perf**(멀티레이어 스캔 ×2=U14 이월). (c) 3층+·상층 대각선flow·원거리 LOS재배치(U7 밖 시임).
+> **⚠️ main-line 병렬 컨텍스트(origin/main `39660ac` 머지로 반영, Concept.md/SSOT에 durable)**: 컨셉 확정(1인칭 USP·FF 치사 ON 50%·적~200-300)·**미해결 코드후속 `bFriendlyFireEnabled` false→true flip**(FPSRGameState.h)·1인칭 가독성 게이트 5지표(P0). 이 PROGRESS 병합 시 U7 브랜치본 채택(--ours)이라 해당 (f 컨설트) 핸드오프 항목은 git 히스토리(`39660ac`)·Concept.md 참조.
+> **재개 프롬프트**: `U7 멀티레이어 2층 플로우필드 main 머지 완료. 다음=2차 잔여 유닛(U8 GMS/U10 SaveGame/U15 1P무기애님/U17 플레이어설정) 중 택1 — TaskPrompts_Master §C 프롬프트 사용. 또는 FF 기본 ON flip(간단 코드후속)·덱 립 지오메트리(사용자).`
 
 ## 🔔 핸드오프 (2026-07-01 f · U7 브랜치) — ✅ **U7 멀티레이어(유계 2층) 코드 완료·검증**(겹친 2층 추격) → 다음=**사용자 PIE**(2층 지오메트리) → main 머지
 > **브랜치**: `phase/p2-flowfield-height`(main 분기, origin push됨). **main 최신 반영 병합 완료**(`c61d96f` merge = docs 9커밋: Concept.md·FF 기본 ON/50%·적 동시규모 ~200-300 실측·§1 긍정형 리프레임·1인칭 가독성 USP 게이트). 멀티레이어 코드=`d6e0516`. **코드+SSOT만**(콘텐츠 미커밋=사용자 2층 테스트 지오메트리).
