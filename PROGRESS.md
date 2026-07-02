@@ -6,6 +6,14 @@
 
 **최종 갱신: 2026-07-02**
 
+## 🔔 핸드오프 (2026-07-02 h · U8 GMS 완료) — ✅ **U8 GMS(GameplayMessageSubsystem) 경량 재구현 = GameplayTag 채널 로컬 pub/sub 코스메틱 버스 인프라 완료 → main `--no-ff` 머지**. 다음=2차 잔여(U10/U15/U17)
+> **U8 결과**: `UFPSRGameplayMessageSubsystem`(UWorldSubsystem) = GameplayTag 채널 **순수 로컬 동기 pub/sub 버스**. Performance.md §5 계약("히트/사망 코스메틱=GameplayMessage/Cue, 복제 액터 상태 아님")의 인프라를 놓음. `phase/infra-gms` → `main --no-ff`. **콘텐츠 0**(신규 태그 없음, 데모는 기존 `GameplayEvent.EnemyKilled` 재사용).
+> **핵심 산출물(Lyra GMS 경량 재구현 — 엔진 부재 3-에이전트 재확인: GameplayMessageRouter/UGameplayMessageSubsystem 0건, AsyncMessageSystem=async·Experimental·EnabledByDefault:false로 배제)**: `BroadcastMessage<T>(Channel,const T&)` / `RegisterListener<T>`(TFunction+멤버함수 오버로드, `EFPSRMessageMatch` Exact/Partial 태그계층) / `UnregisterListener(Handle)` + `FFPSRMessageListenerHandle`. **zero-cost 발행**: 구독자 0이면 `ListenerMap.IsEmpty()` early-out(힙할당/순회 0 — 적 사망 ×수백/프레임 대비). payload=`FFPSRCosmeticEventMessage`(U13 최소셋: WorldLocation/SourceType tag/InstigatorTeam/bWasKill, 값복사·스택). 파일=`Source/FPSRoguelite/{Public,Private}/Messages/` + `Private/Tests/`. 데모=`#if !UE_BUILD_SHIPPING` `FPSR.GMS.Demo` 콘솔커맨드(**실 적사망 발행=U13 시임**, 프로덕션 핫패스 무오염).
+> **복제/서버권위(Opus 직접 판단·검증)**: 신규 복제 프로퍼티/RPC **0**(grep 검증, `Public/Messages`·`Private/Messages` 양쪽 0매치). UWorldSubsystem=클라별 월드 로컬 인스턴스라 코스메틱은 각 클라 로컬 발행·구독(복제 아님). 기존 `ASC->HandleGameplayEvent` 타겟형 경로·게임로직 이벤트(GameState 복제) **무대체**(목적 상이).
+> **검증**: 빌드 Succeeded×4 + 헤드리스 `FPSRoguelite.Smoke.GameplayMessage` Success(발행/수신+payload복사 / unregister→미수신 / 구독0 early-out / **stale핸들 재사용 방지 케이스d**) + **Codex 머지게이트 3패스**: 1차 P2=리스너ID를 서브시스템 전역 단조증가로(채널 비운 뒤 재등록 시 per-channel ID 재사용→stale핸들 오detach 방지)+회귀케이스 / 2차 P2=타 월드 GMS 핸들 unregister 차단(멀티월드 PIE ID충돌)·P1=payload `StaticStruct()` 명시(컴파일 오탐이나 명시성 채택, TBaseStructure도 빌드통과 확인) / **3차 clean**.
+> **⚠️ 소비처 미배선(설계대로)**: 실제 코스메틱 발행(적 사망→GMS)은 **U13(VFX/Gibs/핑)** 배선 시임(`NotifyKill`/HealthComponent death). U8=인프라만. **U20(적 애니)=TaskPrompts 문서 부재**(최대 유닛 U17, 프롬프트 인용 U20:972/981은 917줄 파일에 없음) → payload 시임만 남기고 지금 미구현. BP async-listen 노드=U13이 BP 저작 시 후속.
+> **재개 프롬프트**: `U8 GMS main 머지 완료. 다음=2차 잔여 유닛(U10 SaveGame/U15 1P무기애님/U17 플레이어설정) 중 택1 — TaskPrompts_Master §C 프롬프트 사용. U13 VFX 착수 시 GMS 소비(FFPSRCosmeticEventMessage 발행+RegisterListener) 배선.`
+
 ## 🔔 핸드오프 (2026-07-02 g · U7 완료) — ✅ **U7 멀티레이어 2층 플로우필드 = 사용자 PIE 통과 → main `--no-ff` 머지 완료**. 다음=2차 잔여(U8/U10/U15/U17)
 > **U7 종결**: 겹친 2층(지면 위 덱/메자닌 + 램프/계단) 추격이 실사용 수준으로 동작(오르내림·플랫폼 유지·추격 사용자 확인). `phase/p2-flowfield-height` → `main --no-ff` 머지 + 브랜치 정리. **콘텐츠(검증된 2층 L_Sandbox)도 동반 커밋**.
 > **핵심 산출물**: Design3 서피스그래프(dense `NumLayers=2`, `Surf=Cell*NumLayers+Rank`, `EdgeMask` ra×rb 캐노니컬) + 층별 BFS/steepest-descent + Z-인지 샘플. **성능계약 유지**(월드쿼리 0 핫패스; RecomputeField 예외=기존 `FindNearestOpenSurface` 플레이어소스 스냅만, 플레이어수 유계).
