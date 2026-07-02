@@ -136,15 +136,21 @@ protected:
 	void UnregisterListenerInternal(FGameplayTag Channel, int32 HandleID);
 
 private:
-	/** Per-channel listener list + monotonic handle-ID counter. */
+	/** Per-channel listener list. */
 	struct FChannelListenerList
 	{
 		TArray<FFPSRMessageListenerData> Listeners;
-		int32 HandleID = 0;
 	};
 
 	/** Channel tag -> listeners. Plain member (holds TFunctions; not reflected/replicated). */
 	TMap<FGameplayTag, FChannelListenerList> ListenerMap;
+
+	/**
+	 * Global monotonic listener-ID counter (never reset). IDs must stay unique across a channel being
+	 * emptied and re-populated, otherwise a stale copied handle could detach an unrelated future listener
+	 * (Codex U8 merge-gate P2). Empty channel entries are still removed, so the IsEmpty() fast path holds.
+	 */
+	int32 NextListenerHandleID = 0;
 
 #if !UE_BUILD_SHIPPING
 	int64 TotalDispatchCount = 0;

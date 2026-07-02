@@ -64,7 +64,7 @@ FFPSRMessageListenerHandle UFPSRGameplayMessageSubsystem::RegisterListenerIntern
 	FFPSRMessageListenerData& Entry = List.Listeners.AddDefaulted_GetRef();
 	Entry.ReceivedCallback = MoveTemp(Callback);
 	Entry.StructType = StructType;
-	Entry.HandleID = ++List.HandleID;
+	Entry.HandleID = ++NextListenerHandleID;
 	Entry.MatchType = MatchType;
 
 	return FFPSRMessageListenerHandle(this, Channel, Entry.HandleID);
