@@ -665,35 +665,31 @@ int32 UFPSRFlowFieldSubsystem::PickRankForFootZ(int32 Cell, float FootZ) const
 			return R;
 		}
 	}
-	// 2) Highest valid rank at or below FootZ — the surface the pawn stands on / is falling toward — but ONLY within a
-	//    step-down budget. An enemy at platform height (-550) in a cell whose only surface is rank 0 ground (-1000, a
-	//    storey below) must NOT resolve to that ground surface and follow GROUND flow while a storey up: that mis-route
-	//    walks it to the deck rim / stalls / drops it (U7 PIE S1/S2/S3). Beyond the budget, fall through to INDEX_NONE
-	//    -> SampleFlowDirection returns zero -> the mover uses direct-to-player (a coherent target), not ground flow.
-	int32 BelowBest = INDEX_NONE;
-	float BelowZ = -MAX_flt;
+	// 2) Otherwise the NEAREST valid rank within MaxLayerPickDrop of FootZ (above OR below). Two multi-layer hazards this
+	//    handles at once: (a) an enemy at platform height (-550) in a cell whose only surface is ground a storey below
+	//    (-1000) must NOT resolve to that ground rank (> budget -> rejected -> INDEX_NONE -> direct-to-player, not ground
+	//    flow while a storey up); (b) on a STEEP stair the coarse cell's single rank sample can differ from the enemy's
+	//    actual foot Z by up to ~half a cell's rise, so an at-or-below-only pick would skip the tread the enemy is really
+	//    on and fall to the ground below -> the resulting ground-flow-vs-tread-flow flip as the foot Z jitters spins the
+	//    enemy and drifts it sideways. Nearest-within-budget locks onto the tread while still rejecting a full-storey drop.
+	int32 NearBest = INDEX_NONE;
+	float NearDist = MaxLayerPickDrop;
 	for (int32 R = 0; R < NumLayers; ++R)
 	{
 		const float Z = CellFloorZ[Base + R];
-		if (Z != MAX_flt && Z <= FootZ && Z > BelowZ)
+		if (Z != MAX_flt)
 		{
-			BelowZ = Z;
-			BelowBest = R;
+			const float D = FMath::Abs(Z - FootZ);
+			if (D <= NearDist)
+			{
+				NearDist = D;
+				NearBest = R;
+			}
 		}
 	}
-	if (BelowBest != INDEX_NONE && (FootZ - BelowZ) <= MaxLayerPickDrop)
-	{
-		return BelowBest;
-	}
-	// 3) Lowest valid rank (all valid surfaces sit above FootZ — pawn below the lowest floor, e.g. falling into a pit).
-	for (int32 R = 0; R < NumLayers; ++R)
-	{
-		if (CellFloorZ[Base + R] != MAX_flt)
-		{
-			return R;
-		}
-	}
-	return INDEX_NONE; // no valid surface at this cell
+	// No surface within the budget: the enemy is a storey off any surface at this XY (deck edge over ground / falling in
+	// a pit) -> INDEX_NONE -> SampleFlowDirection returns zero -> the mover chases the player directly (not ground flow).
+	return NearBest;
 }
 
 bool UFPSRFlowFieldSubsystem::IsSurfaceEdgeTraversable(int32 CellA, int32 RankA, int32 CellB, int32 RankB) const
