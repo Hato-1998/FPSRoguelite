@@ -58,4 +58,9 @@ public:
 	/** Returns the luck bonus per rarity for the given rarity. */
 	UFUNCTION(BlueprintPure, Category = "Card Pool")
 	float GetLuckPerRarity(ECardRarity Rarity) const;
+
+#if WITH_EDITOR
+	/** Editor validation: no two cards in this pool share a CardId (U10 — duplicate keys alias unlocks in the save). */
+	virtual EDataValidationResult IsDataValid(class FDataValidationContext& Context) const override;
+#endif
 };

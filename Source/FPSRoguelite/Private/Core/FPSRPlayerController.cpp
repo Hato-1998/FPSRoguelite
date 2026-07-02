@@ -16,6 +16,8 @@
 #include "Core/FPSRGameState.h"
 #include "Core/FPSRGameMode.h"
 #include "Core/FPSRGameFlowSubsystem.h"
+#include "MetaProgression/FPSRSaveGameSubsystem.h"
+#include "Engine/GameInstance.h"
 #include "Card/FPSRCardSubsystem.h"
 #include "Card/FPSRCardDataAsset.h"
 #include "Card/FPSRCardEffect.h"
@@ -524,6 +526,24 @@ void AFPSRPlayerController::ClientShowRunResult_Implementation(EFPSRRunOutcome O
 	{
 		UE_LOG(LogFPSR, Warning, TEXT("[UI] Failed to push result widget to Menu layer"));
 		FPSRFlowLog::Event(this, TEXT("RESULT"), TEXT("ABORT — push to Menu layer failed"));
+	}
+}
+
+void AFPSRPlayerController::ClientCommitMetaSave_Implementation(EFPSRRunOutcome Outcome)
+{
+	if (!IsLocalController())
+	{
+		return;
+	}
+	// Persist THIS client's local meta save (per-player local ownership — the server issued the signal but never
+	// touches our save). At U10 the save holds only the versioned scaffold; P0-③ folds this run's rewards into the
+	// SaveManager's save object before this call. All persistence routes through the single SaveManager gateway.
+	if (UGameInstance* GI = GetGameInstance())
+	{
+		if (UFPSRSaveGameSubsystem* Saves = GI->GetSubsystem<UFPSRSaveGameSubsystem>())
+		{
+			Saves->RequestSave(EFPSRSaveReason::RunEnd);
+		}
 	}
 }
 

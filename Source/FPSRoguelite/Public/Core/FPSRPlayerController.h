@@ -127,6 +127,14 @@ public:
 	UFUNCTION(Client, Reliable)
 	void ClientShowRunResult(EFPSRRunOutcome Outcome);
 
+	/** Client (owner): commit THIS player's local meta save at run end (U10). Server-authoritative EndRun signals
+	 *  each client to persist its OWN save — the server never touches a player's save (per-player local ownership).
+	 *  Reliable + issued at EndRun (~PostRunTravelDelay before the post-run lobby ServerTravel) so it is delivered and
+	 *  starts the local async save before the client travels; the GameInstance SaveManager carries it to completion
+	 *  across the travel. At U10 this persists the versioned scaffold; P0-③ folds run rewards into the save first. */
+	UFUNCTION(Client, Reliable)
+	void ClientCommitMetaSave(EFPSRRunOutcome Outcome);
+
 	/** Server (host/authority): return to the menu with the given outcome (called by result widget on non-authority clients). */
 	UFUNCTION(Server, Reliable)
 	void ServerRequestReturnToMenu(EFPSRRunOutcome Outcome);

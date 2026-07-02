@@ -47,6 +47,12 @@ EDataValidationResult UFPSRCardDataAsset::IsDataValid(FDataValidationContext& Co
 {
 	EDataValidationResult Result = Super::IsDataValid(Context);
 
+	if (CardId.IsNone())
+	{
+		Context.AddError(LOCTEXT("EmptyCardId", "Card has no CardId — the meta save needs a stable per-card key. Set a unique CardId (U10)."));
+		Result = EDataValidationResult::Invalid;
+	}
+
 	if (Effects.Num() == 0)
 	{
 		Context.AddError(LOCTEXT("NoEffects", "Card has no Effects — it applies nothing. Add at least one effect."));

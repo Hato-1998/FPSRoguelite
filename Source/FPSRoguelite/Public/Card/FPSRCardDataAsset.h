@@ -47,6 +47,16 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Card")
 	FGameplayTag CardFamily;
 
+	/** Stable meta-save key (U10): identifies this card in the player's save independent of the asset's file name,
+	 *  so renaming the asset does not orphan a player's unlock. Authored per card. IsDataValid requires it non-empty;
+	 *  the owning card pool requires it unique. The actual unlocked-cards list lands in P0-③. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Card|Identity")
+	FName CardId;
+
+	/** The stable meta-save key for this card. */
+	UFUNCTION(BlueprintPure, Category = "Card|Identity")
+	FName GetStableKey() const { return CardId; }
+
 	// (v1 legacy fields + PostLoad migration removed in U18a-legacy-cleanup — every card asset was re-saved to v2.)
 
 #if WITH_EDITOR
