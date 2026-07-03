@@ -866,34 +866,74 @@ Game.md + PROGRESS.md + Docs/SSOT/Roadmap.md §8(플레이스홀더 인벤토리
 
 ### U15 — 1P 무기 애니메이션 시스템 (모듈러 + 노리쇠 + 1P 팔·손 강화)
 
+> **프롬프트 갱신 2026-07-03**: 코드베이스 그라운딩 + 적대 검증(ultracode, verdict PASS). ⚠️ **핵심 발견**: V0가 **스켈레탈 무기 경로를 코드에 완전 배선**해 둠(`RefreshFirstPersonWeaponVisual` SkelMesh 우선/Static 폴백·`SetSkeletalMeshAsset`·ArmsAnimInstanceClass 적용) + DA 1P visual 필드(WeaponMesh1P/ArmsAnimInstanceClass/FireMontage/EquipMontage…) 전부 존재 + Infima 팩 애님 자원(A_FP_PCH_/A_FP_WEP_·SKEL_LPAMG·모듈러 SM) 완비. → U15 = **재작성 아님**. 남은 C++ = 재장전 몽타주 훅 신규 + 모듈러 부품 부착 + (선택)오프셋. 나머지 = **콘텐츠 저작**(DA를 Static→SK 전환·AnimBP). U12 "무기별 팔 AnimBP" 흡수·3P는 U19 별개.
+
 ```
-Game.md + PROGRESS.md + Docs/V0_WeaponVisual_UserContent_Guide.md(V0 베이스/스켈 경로) 먼저 읽어. Docs/TaskPrompts_Master.md의 유닛 U15를 진행한다.
-읽을 SSOT: Docs/SSOT/PlayerFeel.md §2-9(Separated Arms)·§2-14, Docs/SSOT/CombatWeaponCard.md §2-4-2(사격감).
+Game.md + PROGRESS.md + Docs/V0_WeaponVisual_UserContent_Guide.md(V0 베이스/스켈 경로·모듈러 결정) 먼저 읽어. Docs/TaskPrompts_Master.md의 유닛 U15를 진행한다.
+읽을 SSOT: Game.md §0-1 라우팅으로 이 도메인만 선별 + Docs/SSOT/PlayerFeel.md §2-9(Separated Arms)·§2-13(관전)·§2-14(HUD), Docs/SSOT/CombatWeaponCard.md §2-4-2(사격감), Docs/SSOT/Workflow.md §6·§6-7. TaskPrompts_Master.md 내 U15 산출물·V0 정리노트·U19·U12 경계 재확인.
 
-[목표] V0는 통합 스태틱 메시 + 팔 애님(게이트 검증용)으로 마감했다. 이 유닛은 Infima 팩이 완전 지원하는 **모듈러 SK 무기 + 노리쇠(Bolt) 본 + 팔↔무기 이중 스켈레탈 동기 애님**으로 무기 피델리티를 올린다(A_FP_WEP_*_Fire_Bolt/Reload 등).
+[작업] U15 — 1P 무기 애니메이션 시스템: V0가 남겨둔 스켈레탈 무기 경로 활성화 + 무기 AnimBP(노리쇠 Bolt/재장전) + 모듈러 부품 부착 + 팔↔무기 이중 스켈 동기 + 1P 팔/손 애님 강화. 순수 1인칭 로컬 코스메틱(게임플레이 수치·트레이스 불변).
 
-[착수 조건 — U1 게이트 결과로 우선순위 확정]
-- U1 손맛 판정 ①(사격 손맛)이 **불합격**이면 이 유닛이 §2-4 사격 보강의 일부로 2차 트랙 최우선.
-- **합격**(스태틱+팔 애님으로 손맛 충분)이면 피델리티 폴리시로 후순위(U12 이후). PROGRESS에서 U1 판정 확인 후 착수, 미정이면 사용자에게 우선순위 질문.
+[착수 조건 — U1 게이트]
+- U1 손맛 게이트는 이미 **합격**(PROGRESS 2026-06-30 U1 합격). U15는 게이트 후 **폴리시**(스태틱+팔 애님으로 손맛 충분 판정 → 피델리티 폴리시, 1인칭 확정이라 투자 안전 Concept §1-C-3). 착수 전 PROGRESS에서 우선순위 재확인, 애매하면 사용자에게 질문.
 
-- 브랜치: phase/p6-weapon-anim 분기 (§6-7)
-- 플랜 우선 → 승인 후 Sonnet 구현 / Opus 검증
+■ 브랜치 / 모델 정책
+- main에서 phase/p6-weapon-anim 분기(§6-7), 검증 후 --no-ff 머지.
+- 플랜 우선 → 승인 후 구현=Sonnet 위임 / 검증=Opus 직접.
+- ⚠️ 서버권위/안티치트 표면 없음(bReloading은 이미 서버 복제, 소비만 로컬) → 위임 카브아웃 해당 없음(구현 Sonnet 가능). 단 재장전 트리거 훅(OnRep vs 폴링)은 복제 상태 소비라 검증 시 Opus가 서버확정 시점·동기 정합 확인.
 
-[산출물]
-1. SK 무기 경로 활성화: V0가 남겨둔 WeaponMesh1P(스켈) 사용 + 무기 AnimBP(노리쇠/재장전 몽타주).
-2. 모듈러 부품 동적 부착: DA 부품 목록(배럴/탄창 등) → 소켓 부착(에셋 경로 하드코딩 금지, DA 데이터).
-3. 팔↔무기 이중 스켈 동기: 발사/장전 시 팔 AnimBP와 무기 AnimBP 동기 재생.
-4. (선택) 무기별 부착 오프셋 DA 필드 — V0 후속 ③ 흡수.
-5. **1P 팔·손 애님 강화(사용자 추가 2026-07-02)**: 이동 로코모션·피격 리액션·손 IK(무기 그립 정합)·무기별 그립 BlendByEnum(U12 "무기별 팔 AnimBP" 폴리시분 흡수 — 중복 구현 금지, 여기로 통합). 1인칭 확정이라 투자 안전(Concept §1-C-3).
+■ 현재 상태 — 이미 된 것 vs 남은 것 (⚠️ V0 scaffold 재사용, 재생성 절대 금지 — 전부 실측 확인)
+[이미 존재 — 재사용, 재생성 금지]
+- 스켈레탈 무기 경로가 코드에 완전 배선됨. AFPSRCharacter::RefreshFirstPersonWeaponVisual() [Private/Hero/FPSRCharacter.cpp:932]가 이미: SkelMesh 우선/StaticMesh 폴백(968-970) → WeaponMesh1P->SetSkeletalMeshAsset + AttachToComponent(KeepRelativeTransform, AttachSocket)(976-977) → ArmsAnimInstanceClass 적용+무override시 revert(992-1015, bArmsAnimOverridden 가드) → Cached 발사 코스메틱 캐싱(1018-1021) → EquipMontage 재생(1024-1033). ActiveWeaponMesh 스켈/정적 자동 분기(986-987). **이 함수 재작성 금지 — 모듈러 부품 부착·부착오프셋만 확장.**
+- WeaponMesh1P : USkeletalMeshComponent [FPSRCharacter.cpp 생성자 81-86, FPSRCharacter.h:193-194] — 생성자에서 이미 FirstPersonArms(SOCKET_Weapon)에 SetupAttachment·SetOnlyOwnerSee·NoShadow·NoCollision. **컴포넌트 신설 금지.** DA WeaponMesh1P 채우면 코드가 자동 사용(현재 V0 8종은 WeaponMeshStatic1P만 채워 정적 경로 사용 중).
+- WeaponMeshStatic1P : UStaticMeshComponent [FPSRCharacter.cpp 생성자 88-93, h:197-198] — 칼(정적) 폴백 유지.
+- PlayWeaponFireCosmetics() [FPSRCharacter.cpp:1036] — IsLocallyControlled early-return(1038) 후 CachedFireMontage를 팔 AnimInstance에 Montage_Play(1044-1050) + ActiveWeaponMesh에 muzzle/sound(1052-1064). **노리쇠(무기 AnimBP) 몽타주 재생·팔↔무기 동기 지점 = 여기(단일 훅).**
+- UFPSRWeaponDataAsset '1P visual' 블록 [Public/Weapon/FPSRWeaponDataAsset.h:72-124] — WeaponMesh1P(:76)/WeaponMeshStatic1P(:80)/ArmsAnimInstanceClass(:84)/WeaponAttachSocket(:88)/MuzzleSocket(:92)/EquipMontage(:96)/FireMontage(:100)/MuzzleFlash(:104)/FireSound(:124) 전부 존재(Soft ref, null=무회귀). **이 필드들 재추가 금지.**
+- 재장전 서버 로직: UFPSRWeaponInventoryComponent::StartReload/FinishReload [Private/Weapon/FPSRWeaponInventoryComponent.cpp:335,383] 서버권위·IsRunPaused 게이트(345)·ReloadTime 타이머(363-364)·프리즈 시 타이머 Pause/UnPause(72-78). UFPSRWeaponInstance::bReloading [Private/Weapon/FPSRWeaponInstance.cpp: DOREPLIFETIME_WITH_PARAMS_FAST:23, SetReloading:135-138 MARK_PROPERTY_DIRTY]. **RepNotify 아님(콜백 없음, 실측 확인).**
+- 콘텐츠 자원 완비(제작 아닌 배선): Infima PCH 팔 애님(A_FP_PCH_<CODE>_Fire/Reload/Reload_Empty/Idle_Loop/Sprint_F_Loop/Jump_*, 스켈=SKEL_LPAMG_Character), WEP 무기 애님(A_FP_WEP_<CODE>_Fire/Reload/Reload_Empty=노리쇠·탄창, 무기스켈=SKEL_LPAMG_<CODE>, SK_LPAMG_<CODE> 리시버), 모듈러 부품(SM_LPAMG_<CODE>_{Forestock/Ironsight/Magazine}), 1P 팔 메시(SK_LPAMG_Arms_Gloves). **팩 코드=AG14W/MAK12/SP60/LRAF9/X13/HVG7/RC425/MR22(리터럴 <W> 아님, git ls-files 확인).**
+[남은 것 — 이번 유닛 실제 작업]
+- (C++) 재장전 몽타주 훅 신규(현재 발사만 있음): bReloading 소비 경로 추가(OnRep_Reloading 신규 or 팔 AnimBP IsReloading() 폴링) → 팔+무기 재장전 몽타주 재생.
+- (C++) 모듈러 부품 동적 부착: DA 부품목록 → WeaponMesh1P 소켓에 부착(경로 하드코딩 금지, 전부 DA Soft ref).
+- (C++, 선택) 무기별 부착 오프셋 DA 필드(V0 후속 ③ = U15 흡수).
+- (콘텐츠) 총기 DA를 WeaponMeshStatic1P(Preview)→WeaponMesh1P(SK_LPAMG_<CODE>) 전환 + ArmsAnimInstanceClass에 무기별 팔 AnimBP + FireMontage/EquipMontage/(신규)ReloadMontage 지정 + 무기 자체 AnimBP(노리쇠).
+- (콘텐츠) 1P 팔/손 강화: 이동 로코모션·피격 리액션·손 IK(그립 정합)·무기별 그립 BlendByEnum(U12 '무기별 팔 AnimBP' 폴리시분 흡수 — 중복 구현 금지).
 
-[함정/주의]
-- 게임플레이 무영향: 트레이스/탄도/데미지/케이던스는 V0와 동일하게 카메라 뷰포인트 기준 유지. 애님은 코스메틱 전용(머즐 소켓=활성 메시).
-- 재장전 애님 길이와 ReloadTime 스탯 정합(애님이 스탯보다 길면 무기 사용 가능 타이밍 어긋남) — 애님은 ReloadTime에 맞춰 스케일/동기.
-- 전역 프리즈(§2-2) 중 몽타주 정지.
-- Demo/Mannequin 폴더 사용 금지. 에셋 경로 하드코딩 금지(§6-2).
-- 멀티(타 플레이어가 보는 3P 무기 애님)는 별도(U11 전 3P 메시와 함께) — 이번엔 1P만.
+■ 조사(착수 전 Grep/Read로 재확인 — 위 라인번호 대조, 병렬 세션으로 밀렸을 수 있으니 심볼로 재검색)
+- FPSRCharacter.cpp:932-1034(RefreshFirstPersonWeaponVisual 전문)·1036-1065(PlayWeaponFireCosmetics)·1067-1130(Multicast, U19 경계) / FPSRCharacter.h:188-204(컴포넌트)·342-363(Cached*/ActiveWeaponMesh/bArmsAnimOverridden).
+- FPSRWeaponDataAsset.h:72-124(1P visual 블록 — 신규 필드 추가 지점) / GetArchetype() h:33 / EFPSRWeaponArchetype WeaponTypes.h:10.
+- FPSRWeaponInventoryComponent.cpp:335-394(reload 라이프사이클)·72-78(프리즈 Pause) / FPSRWeaponInstance.cpp:23,135-138(bReloading 복제).
+- git ls-files "Content/Assets/LowPolyAnimatedModernGuns/*"로 무기별 SK/SKEL/SM 부품·WEP/PCH 애님 실재 확인(코드=AG14W 등).
+- U19 블록·U12 섹션·V0 정리노트·U15 산출물 재확인 — 경계 준수(3P=U19, 케이던스/블룸 수치=U12).
 
-[검증] 빌드+스모크 → PIE: 발사 시 노리쇠 왕복, 재장전 애님↔스탯 정합, 무기별 부품 정확 부착, 게임플레이 수치 무회귀 → codex-review.ps1 -Base main → PROGRESS 갱신+✅+사용자 콘텐츠 동반 커밋 질문+--no-ff 머지.
+■ C++ 산출물
+1. 모듈러 부품 부착(RefreshFirstPersonWeaponVisual 확장): DA 신규 필드 TArray<FFPSRWeaponPartAttachment{TSoftObjectPtr<UStaticMesh> Part; FName Socket; FTransform Offset;}> → 스켈 무기 장착 시 WeaponMesh1P 소켓에 부품 UStaticMeshComponent 부착(가변 개수 → 런타임 생성/풀). null-safe, 정적(칼)·부품無 무기는 스킵. 함수 비대해지면 헬퍼 분리(구현 판단).
+2. 재장전 몽타주 훅: bReloading 소비 경로(플랜 결정: UFPSRWeaponInstance에 OnRep_Reloading 추가 → 소유 클라에서 팔+무기 ReloadMontage 재생 / 또는 팔 AnimBP가 IsReloading() 폴링). OnRep은 서버확정 시점 정확·대역폭 최소, 폴링은 U19 3P와 코드 일관 — 플랜에서 근거 명시(U19는 폴링 채택). 재장전 몽타주 재생 길이 = Stats.ReloadTime 정합(애님 PlayRate 스케일).
+3. 팔↔무기 이중 스켈 동기: PlayWeaponFireCosmetics 단일 훅에서 팔 CachedFireMontage(기존)와 무기 AnimBP 노리쇠 몽타주를 동시 트리거(WeaponMesh1P->GetAnimInstance()->Montage_Play). 재장전도 동일 동기 원칙(2번 훅에서 팔+무기 동시).
+4. (선택) 부착 오프셋: 부품별 FTransform은 1번 구조체에 포함, 무기 루트 오프셋은 기존 KeepRelativeTransform(BP 편집)로 충분한지 확인 후 필요 시 DA 필드.
+
+■ 콘텐츠 산출물 (VibeUE MCP 또는 editor-bridge 스킬 — 편집 후 에디터 재시작 후 PIE, [[vibeue-buildgraph-pie-worldleak]])
+- 무기 AnimBP 생성(무기 스켈 SKEL_LPAMG_<CODE>): idle + 발사(WEP_Fire=노리쇠) + 재장전(WEP_Reload/Reload_Empty) 상태/슬롯.
+- 팔 AnimBP(스켈 SKEL_LPAMG_Character): 로코모션(Idle_Loop/Sprint_F_Loop/Jump BlendSpace) + 발사/재장전 몽타주 슬롯 + 무기별 그립 BlendByEnum(EFPSRWeaponArchetype, GetArchetype() 존재) 또는 무기별 ArmsAnimInstanceClass(코드 이미 지원) 중 플랜 선택(DESIGN-FIRST: ArmsAnimInstanceClass 재사용 우선) + 손 IK(팩 애님이 무기별 손위치 포함이면 생략).
+- 총기 DA(Content/Weapons/DataTable/): WeaponMeshStatic1P 비우고 WeaponMesh1P=SK_LPAMG_<CODE> + ArmsAnimInstanceClass + FireMontage/EquipMontage/ReloadMontage(신규) + 모듈러 부품목록. 1종 먼저 PIE 후 확대(단계적, 롤백 안전).
+- BP_FPSRPlayer FirstPersonArms 메시=SK_LPAMG_Arms_Gloves 확인(V0 가이드 §2, C++가 WeaponMesh1P/Static은 자동 관리 — BP에서 건드리지 말 것).
+
+■ 플랜 결정 항목(플랜에 3줄 이상 명시)
+- 재장전 트리거: OnRep_Reloading(WeaponInstance 신규) vs 팔 AnimBP IsReloading() 폴링(U19 동형). 대역폭·정확성·U19 일관성 근거. bReloading은 RepNotify 아님이 실측 확인 — OnRep 채택 시 UFUNCTION 신규 필요.
+- 노리쇠 재생: 무기 몽타주 vs 무기 AnimBP 상태머신. 팔 몽타주와 프레임 동기(단일 훅 PlayWeaponFireCosmetics) 확정.
+- 모듈러 부품 데이터 구조: 배열+소켓+오프셋 struct vs 개별 필드. 런타임 교체 게임플레이는 범위 밖(V0 §3)이나 향후 확장성(U18b UnlockableFeatures 연계?) 위해 데이터화 배열 권장. 부품 컴포넌트 생성 방식(고정 풀 vs 런타임).
+- 무기별 그립: BlendByEnum 단일 AnimBP vs ArmsAnimInstanceClass 무기별(코드 이미 지원, DESIGN-FIRST 재사용 우선).
+- 손 IK 필요성: 팩 PCH 애님이 무기별 손위치 포함이면 IK 생략(과설계 지양) — PIE 확인 후.
+
+■ 함정(제1원리 3줄)
+① 제1원리: 순수 1P 로컬 코스메틱 → 트레이스/탄도/데미지/케이던스는 V0와 동일 카메라 뷰포인트 기준 불변, 애님은 코스메틱 전용(머즐=활성 메시). 1인칭 확정이라 투자 안전(Concept §1-C-3), 적 수백 비용예산과 무관(플레이어 1인 렌더). ② (참고) Lyra=플레이어측 무기/애님 레퍼런스로 동형(Separated Arms·무기 AnimBP·몽타주 슬롯) — 적/스케일 이탈 원칙과 무충돌. ③ 정합: V0가 SK 경로를 코드에 완비 → U15는 재작성 아닌 DA 채우기+부품부착 확장+재장전 훅 신규. 서버권위 표면 없음(bReloading 이미 복제).
+- 재장전 애님 길이 vs ReloadTime 스탯 정합(애님>스탯이면 무기 사용 타이밍 어긋남) — PlayRate로 스케일/동기.
+- 전역 프리즈(§2-2) 중 몽타주 정지(StartReload가 이미 IsRunPaused 게이트·타이머 Pause 72-78 — 재생 훅도 프리즈 확인).
+- Demo/Mannequin 폴더 사용 금지. 에셋 경로 C++ 하드코딩 금지(§6-2, 전부 DA Soft ref).
+- 멀티(타 플레이어가 보는 3P 무기 애님)=U19 별개(WeaponMesh3P/FireMontage3P/ReloadMontage3P, GetMesh() 3P 바디, MulticastFireCosmetics 확장). 이번엔 1P 로컬만 — MulticastFireCosmetics 원격 경로 건드리지 말 것.
+- U12 발사 케이던스/블룸 스프레드 '수치'는 U12 유지 — U15는 그립 BlendByEnum '애님'만 흡수(중복 구현 금지).
+
+■ 검증
+빌드+헤드리스 스모크(코드) → 사용자 PIE: 발사 시 팔↔무기 노리쇠 왕복 동기, 재장전 애님↔ReloadTime 정합, 무기별 모듈러 부품 정확 부착, 무기 교체 시 SK/부품 갱신, 게임플레이 수치(반동/탄약/데미지/연사·점사·차징) 무회귀, 칼=정적 폴백 유지, 프리즈 중 몽타주 정지 → codex-review.ps1 -Base main → PROGRESS 갱신+✅+사용자 콘텐츠 동반 커밋 질문+--no-ff 머지.
 ```
 
 ### U17 — 플레이어 설정 시스템 (크로스헤어 크기 등) + 메인메뉴 Settings 진입
