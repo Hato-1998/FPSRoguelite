@@ -4,6 +4,7 @@
 #include "Audio/FPSRAudioSubsystem.h"
 #include "Settings/FPSRGameUserSettings.h"
 #include "Components/Slider.h"
+#include "Components/Button.h"
 #include "CommonTextBlock.h"
 #include "CommonButtonBase.h"
 #include "CommonInputModeTypes.h"
@@ -49,23 +50,23 @@ void UFPSRSettingsWidget::NativeOnInitialized()
 	// Color presets — each is a fixed-color CommonButton. Bind the same way as BackButton (native event).
 	if (ColorPresetWhite)
 	{
-		ColorPresetWhite->OnClicked().AddUObject(this, &UFPSRSettingsWidget::HandleColorPresetWhite);
+		ColorPresetWhite->OnClicked.AddDynamic(this, &UFPSRSettingsWidget::HandleColorPresetWhite);
 	}
 	if (ColorPresetGreen)
 	{
-		ColorPresetGreen->OnClicked().AddUObject(this, &UFPSRSettingsWidget::HandleColorPresetGreen);
+		ColorPresetGreen->OnClicked.AddDynamic(this, &UFPSRSettingsWidget::HandleColorPresetGreen);
 	}
 	if (ColorPresetCyan)
 	{
-		ColorPresetCyan->OnClicked().AddUObject(this, &UFPSRSettingsWidget::HandleColorPresetCyan);
+		ColorPresetCyan->OnClicked.AddDynamic(this, &UFPSRSettingsWidget::HandleColorPresetCyan);
 	}
 	if (ColorPresetRed)
 	{
-		ColorPresetRed->OnClicked().AddUObject(this, &UFPSRSettingsWidget::HandleColorPresetRed);
+		ColorPresetRed->OnClicked.AddDynamic(this, &UFPSRSettingsWidget::HandleColorPresetRed);
 	}
 	if (ColorPresetYellow)
 	{
-		ColorPresetYellow->OnClicked().AddUObject(this, &UFPSRSettingsWidget::HandleColorPresetYellow);
+		ColorPresetYellow->OnClicked.AddDynamic(this, &UFPSRSettingsWidget::HandleColorPresetYellow);
 	}
 }
 

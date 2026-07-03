@@ -8,6 +8,7 @@
 class USlider;
 class UCommonTextBlock;
 class UCommonButtonBase;
+class UButton;
 
 /** Shared settings overlay (MVP = master volume). Pushed to the Menu layer from the main menu and to the
  *  GameMenu layer in-game (non-pause overlay — 4-player coop never stops the server). The slider drives
@@ -48,19 +49,19 @@ protected:
 
 	/** Crosshair color preset buttons (each sets a fixed color). All optional so the WBP wires whichever it has. */
 	UPROPERTY(meta = (BindWidgetOptional))
-	TObjectPtr<UCommonButtonBase> ColorPresetWhite;
+	TObjectPtr<UButton> ColorPresetWhite;
 
 	UPROPERTY(meta = (BindWidgetOptional))
-	TObjectPtr<UCommonButtonBase> ColorPresetGreen;
+	TObjectPtr<UButton> ColorPresetGreen;
 
 	UPROPERTY(meta = (BindWidgetOptional))
-	TObjectPtr<UCommonButtonBase> ColorPresetCyan;
+	TObjectPtr<UButton> ColorPresetCyan;
 
 	UPROPERTY(meta = (BindWidgetOptional))
-	TObjectPtr<UCommonButtonBase> ColorPresetRed;
+	TObjectPtr<UButton> ColorPresetRed;
 
 	UPROPERTY(meta = (BindWidgetOptional))
-	TObjectPtr<UCommonButtonBase> ColorPresetYellow;
+	TObjectPtr<UButton> ColorPresetYellow;
 
 	/** Optional explicit Back/Close button (CommonUI Back also closes). */
 	UPROPERTY(meta = (BindWidgetOptional))
