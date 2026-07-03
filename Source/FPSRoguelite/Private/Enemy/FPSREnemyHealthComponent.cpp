@@ -94,6 +94,17 @@ void UFPSREnemyHealthComponent::InitializeMaxHealth(float NewMaxHealth)
 	MARK_PROPERTY_DIRTY_FROM_NAME(UFPSREnemyHealthComponent, bDead, this);
 }
 
+void UFPSREnemyHealthComponent::OnRep_bDead()
+{
+	// Client death notify (U20): fire the cosmetic death signal only on the death edge (bDead true). A pooled reuse
+	// replicates bDead true -> false; the false edge is NOT a death, so it doesn't broadcast (the reused actor resets
+	// its anim state to Idle on Activate). No new replication — this is a RepNotify on the pre-existing bDead flag.
+	if (bDead)
+	{
+		OnDeathCosmetic.Broadcast();
+	}
+}
+
 void UFPSREnemyHealthComponent::OnRep_Health()
 {
 	// Client-side mirror of the server's OnHealthChanged broadcast (B12). Fires when Health OR MaxHealth replicates

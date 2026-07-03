@@ -18,6 +18,27 @@ class UParticleSystem;
 class UTexture2D;
 class UMaterialInterface;
 
+/** One modular cosmetic part attached to the 1P skeletal weapon mesh at a named socket (U15). Purely visual: the
+ *  part is a static mesh (barrel / forestock / magazine / sight from the pack) child-attached to the equipped
+ *  skeletal weapon. Null Part = skipped (null-safe). Static/melee weapons and empty lists attach nothing. */
+USTRUCT(BlueprintType)
+struct FFPSRWeaponPartAttachment
+{
+	GENERATED_BODY()
+
+	/** Static mesh of the part (soft ref; null = this entry is skipped). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Visual")
+	TSoftObjectPtr<UStaticMesh> Part;
+
+	/** Socket on the WEAPON mesh (SKEL_LPAMG_<W>) the part attaches to. NAME_None = weapon mesh root. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Visual")
+	FName Socket = NAME_None;
+
+	/** Relative transform applied after attach (fine-tune the part's placement on the socket). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Visual")
+	FTransform Offset;
+};
+
 /** Data-driven weapon definition. */
 UCLASS(BlueprintType)
 class FPSROGUELITE_API UFPSRWeaponDataAsset : public UPrimaryDataAsset
@@ -99,9 +120,38 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Visual")
 	TSoftObjectPtr<UAnimMontage> FireMontage;
 
+	/** Optional montage played on the arms on reload start (owner-client 1P). Driven by UFPSRWeaponInstance's
+	 *  OnRep_Reloading (server-confirmed edge), scaled so its play length matches the resolved ReloadTime. Null = none. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Visual")
+	TSoftObjectPtr<UAnimMontage> ReloadMontage;
+
+	/** Optional modular cosmetic parts child-attached to the 1P skeletal weapon mesh on equip (U15). Static/melee
+	 *  weapons and empty lists attach nothing (null-safe). Parts inherit the weapon mesh's OnlyOwnerSee visibility. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Visual")
+	TArray<FFPSRWeaponPartAttachment> WeaponParts1P;
+
 	/** Cascade muzzle-flash particle spawned at MuzzleSocket each shot (owner-client local). */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Visual")
 	TSoftObjectPtr<UParticleSystem> MuzzleFlash;
+
+	// --- 3P visual / cosmetic (U19 — teammate co-op visibility) — all soft refs, null = no 3P visual (no gameplay
+	//     effect). Rendered on the 3P body mesh (GetMesh(), SetOwnerNoSee) for REMOTE observers; the owner sees only 1P. ---
+
+	/** Third-person weapon skeletal mesh, attached to the 3P body hand socket on equip. Null = no 3P weapon. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Visual3P")
+	TSoftObjectPtr<USkeletalMesh> WeaponMesh3P;
+
+	/** Socket on the 3P BODY skeleton the WeaponMesh3P attaches to (NAME_None = body mesh root). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Visual3P")
+	FName WeaponAttachSocket3P = NAME_None;
+
+	/** Montage played on the 3P body each shot for remote observers (MulticastFireCosmetics remote branch). Null = none. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Visual3P")
+	TSoftObjectPtr<UAnimMontage> FireMontage3P;
+
+	/** Montage played on the 3P body on reload start for remote observers (OnRep_Reloading remote branch). Null = none. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Visual3P")
+	TSoftObjectPtr<UAnimMontage> ReloadMontage3P;
 
 	/** Crosshair style (preferred). When set, this style's Material + dynamic flag drive the HUD crosshair,
 	 *  overriding the legacy CrosshairMaterial / bUseDynamicCrosshair below (those remain as a fallback used

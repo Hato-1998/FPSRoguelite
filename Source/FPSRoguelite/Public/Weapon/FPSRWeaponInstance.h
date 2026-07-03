@@ -93,6 +93,12 @@ protected:
 	UFUNCTION()
 	void OnRep_Modifiers();
 
+	/** Client notify on the (already-replicated) reload flag — no new replication, just a RepNotify. Routes the
+	 *  edge to the owning character's reload cosmetics: owner client plays the 1P arms ReloadMontage, remote
+	 *  clients play the 3P body ReloadMontage3P (event-driven; replaces per-frame AnimBP polling). */
+	UFUNCTION()
+	void OnRep_Reloading();
+
 	void RecomputeResolved();
 
 	AFPSRPlayerState* ResolveOwningPlayerState() const;
@@ -111,7 +117,7 @@ protected:
 	UPROPERTY(Replicated)
 	int32 CurrentAmmo = 0;
 
-	UPROPERTY(Replicated)
+	UPROPERTY(ReplicatedUsing = OnRep_Reloading)
 	bool bReloading = false;
 
 	// --- Transient resolved-stat cache (not replicated; computed on demand on both server and clients) ---

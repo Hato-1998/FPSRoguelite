@@ -5,6 +5,7 @@
 #include "Weapon/FPSRWeaponFragment.h"
 #include "Weapon/FPSRWeaponInventoryComponent.h"
 #include "Core/FPSRPlayerState.h"
+#include "Hero/FPSRCharacter.h"
 
 #include "GameFramework/Pawn.h"
 #include "Net/UnrealNetwork.h"
@@ -136,6 +137,12 @@ void UFPSRWeaponInstance::SetReloading(bool bNewReloading)
 {
 	bReloading = bNewReloading;
 	MARK_PROPERTY_DIRTY_FROM_NAME(UFPSRWeaponInstance, bReloading, this);
+	// SetReloading is server-authoritative (only ever called on the authority). The authority does NOT receive its
+	// own RepNotify, so a listen-server host would miss reload cosmetics — its own 1P arms montage AND the 3P body
+	// montages of remote players on the server-rendered copies. Drive the notify manually here so the host sees them
+	// (HandleReloadStateChanged no-ops on a dedicated server where nothing is rendered). Remote clients still get the
+	// real replicated OnRep exactly once, so there is no double-play.
+	OnRep_Reloading();
 }
 
 void UFPSRWeaponInstance::OnRep_Source()
@@ -146,6 +153,19 @@ void UFPSRWeaponInstance::OnRep_Source()
 void UFPSRWeaponInstance::OnRep_Modifiers()
 {
 	MarkResolvedDirty();
+}
+
+void UFPSRWeaponInstance::OnRep_Reloading()
+{
+	// Route the server-confirmed reload edge to the owning character's cosmetics. This fires on every client that
+	// holds this replicated subobject; the character gates owner-vs-remote (1P arms vs 3P body) and the freeze
+	// internally. Only the current weapon reloads, so this instance is the equipped one. No new replication —
+	// this is a RepNotify on the pre-existing bReloading flag.
+	const UFPSRWeaponInventoryComponent* Comp = Cast<UFPSRWeaponInventoryComponent>(GetOuter());
+	if (AFPSRCharacter* Char = Comp ? Cast<AFPSRCharacter>(Comp->GetOwner()) : nullptr)
+	{
+		Char->HandleReloadStateChanged(bReloading);
+	}
 }
 
 const FFPSRWeaponStatBlock& UFPSRWeaponInstance::GetResolvedStats()
