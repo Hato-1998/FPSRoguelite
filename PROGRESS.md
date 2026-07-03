@@ -4,7 +4,17 @@
 > **작업 단계를 끝낼 때마다, 그리고 중단 전 반드시 이 파일을 갱신하고 커밋한다.**
 > 확정 설계·기획·코드구조·규칙은 `Game.md`(**SSOT 허브** → 도메인별 `Docs/SSOT/*.md`, 작업별 라우팅은 허브 §0-1), **완료 작업 상세는 `git log --oneline`**. 여기엔 *무엇을 했는지*만 요약한다.
 
-**최종 갱신: 2026-07-03**
+**최종 갱신: 2026-07-04**
+
+## 🔔 핸드오프 (2026-07-04 o · 통합 애니메이션 패스 A/B/C = U15+U19+U20 코드 흡수) — ✅ **1P무기(A)+3P팀원(B)+적VAT(C)+보스스켈 코드 인프라 완료·검증·Codex 게이트 통과 → `phase/p6-animation-pass` → `--no-ff` main 머지**. **콘텐츠 저작=사용자**([Docs/AnimationPass_ContentGuide.md](Docs/AnimationPass_ContentGuide.md)). 다음=사용자 콘텐츠 저작 후 PIE / 잔여=U13(VFX/오디오)·U14(perf·원복·패키지)
+> **범위**: 세 도메인 애니를 한 패스로. **본질=코드 인프라 패스**(훅·필드·드라이버) — 실제 애니 콘텐츠(무기/팔 AnimBP·몽타주·VAT idle/attack/death 베이크·머티리얼)는 사용자 저작(결정 2026-07-03). 전부 null-safe·휴면이라 콘텐츠 전 무회귀.
+> **A(1P, `9e06f83`)**: DA `ReloadMontage`+`WeaponParts1P`(부품 struct/배열)·`OnRep_Reloading`(bReloading RepNotify=신규복제0, 오너 1P팔 몽타주 재생속도=몽타주/ReloadTime 정합·프리즈게이트·SetReloading 수동OnRep로 리슨호스트 보정)·`RefreshWeaponPartComponents`(스켈무기 런타임부품). 그립=`ArmsAnimInstanceClass` 재사용.
+> **B(3P, `19a930f`)**: DA 3P블록(WeaponMesh3P·소켓·Fire/ReloadMontage3P)·`WeaponMesh3P` 컴포넌트(GetMesh()부착·SetOwnerNoSee=1P SetOnlyOwnerSee 반대)·Refresh 3P attach·`MulticastFireCosmetics` 원격 3P발사(관전게이트밖·FireSound early-return앞)·`OnRep_Reloading` 원격 3P분기(AnimBP폴링 대체=이벤트구동)·`IsReloading()` 노출. 신규복제0(GetBaseAimRotation·복제Velocity).
+> **C(적VAT, `23474c9`+`49f5bbb`)**: `EFPSRAnimState`+폴리모픽 `UFPSREnemyAnimProfile`(_VAT concrete, MID 스칼라)·`AFPSREnemyBase` 드라이버(⚠️상태소스 이원화: 권위=서버 배치패스[TickServerMovement Walk/Idle·ServerTickAttack Attack], 클라=PostNetReceiveLocationAndRotation[위치델타·근접Attack휴리스틱·거리LOD **PlayRate 0 정지**])·`OnRep_bDead`+OnDeathCosmetic(권위 자기미수신→서버경로)·`FPSRVATAnimParams.h` 계약헤더. **AnimProfile null 기본=전체 휴면(zero-cost, 현 큐브/VAT 무회귀)**. ⛔스웜 스켈직결 없음. 신규복제0(bDead RepNotify만). 보스=`AFPSRBossBase` 스켈시임(PlayBossMontage+DeathMontage, 사용자"보스만스켈"). 엘리트 Siege=VAT유지.
+> **Codex 머지게이트(`49f5bbb` 반영)**: P2 2건 — ①[수정] 거리LOD 정지가 실제 미정지(Idle PlayRate1.0)→명시 PlayRate 0 리팩터로 클립 프레임고정. ②[수용·Stage3이월] 스웜 사망 즉시 풀숨김→Death VAT 미가시=death-dwell(사망클립 길이=콘텐츠) 필요, 주석문서화(보스는 존치→가시).
+> **GMS 무접촉**: 이 패스 상주 리스너 0(사망=OnRep_bDead 직접·공격=휴리스틱) → **BroadcastMessageInternal 통복사 수정은 U13 소유 유지**(U13 미착수 확인, TaskPrompts §C U13 GMS 항목 그대로).
+> **검증**: 빌드×4 Succeeded + 헤드리스 스모크 ModuleLoads Result={Success}×4 + Codex 게이트. **사용자 PIE·정량 perf(200-300 hitch)=콘텐츠 저작 후/U14 이월**. C 활성화=Stage2(MF 파라미터 에디터확인)→Stage3(VAT베이크+프로파일할당), 가이드 참조.
+> **⚠️ 후속 이월**: (C) death-dwell·공격애니 지속=Stage3 / MF 파라미터 실제명 에디터확인=Stage2 / 정량 perf=U14 / (B) DBNO 관전 1P/3P 오버랩 흉함 판정=PIE서.
 
 ## 🔔 핸드오프 (2026-07-03 n · U12 크로스헤어 시스템 + U17 설정 = **main 머지 완료**) — ✅ **파라메트릭 진실 크로스헤어 + 색/두께 설정 전면 재구축 → 선별 커밋 + Codex 머지게이트 + `--no-ff` main 머지 + push 완료**. 다음=2차 잔여(U15 1P무기애님 / U19 3P팀원애님 / U20 적애님, `Docs/TaskPrompts_Master §C`)
 > **머지**: `phase/settings-system` → `main` `--no-ff` 머지(`36cf3d4`)·push 완료(2026-07-03). 에디터 종료 후 락 없이 클린 머지(origin/main 2 docs 커밋 선행 FF 후 TaskPrompts 자동병합, 충돌 0). 브랜치 삭제(로컬+원격). 콘텐츠 8종(WBP_Settings 색/두께 UI·MI/M_XH 튜닝·DA_Weapon_Rifle + 세션 저작 BP_FPSRPlayer·WBP_HitMarker·L_MainMenu, 사용자 "전부 포함" 승인) 동반 커밋.
