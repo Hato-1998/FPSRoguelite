@@ -3,6 +3,7 @@
 #include "Enemy/FPSREnemyBase.h"
 #include "Enemy/FPSREnemyHealthComponent.h"
 #include "Enemy/FPSREnemySpawnSubsystem.h"
+#include "Enemy/FPSREnemyAnimProfile.h"
 #include "Hero/FPSRCharacter.h"
 #include "Pickup/FPSRPickupSubsystem.h"
 #include "Core/FPSRLogChannels.h"
@@ -12,6 +13,7 @@
 #include "Components/WidgetComponent.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
+#include "GameFramework/PlayerController.h"
 #include "UObject/ConstructorHelpers.h"
 
 AFPSREnemyBase::AFPSREnemyBase()
@@ -52,7 +54,13 @@ void AFPSREnemyBase::BeginPlay()
 	if (HealthComponent)
 	{
 		HealthComponent->OnDeath.AddDynamic(this, &AFPSREnemyBase::HandleDeath);
+		// Client-side death cosmetic (U20): OnDeathCosmetic fires from OnRep_bDead on clients (the authority drives
+		// death cosmetics from its own path). Enters the Death animation state. Harmless when no AnimProfile is set.
+		HealthComponent->OnDeathCosmetic.AddDynamic(this, &AFPSREnemyBase::HandleDeathCosmetic);
 	}
+
+	// Per-actor animation phase (0..1) derived from the actor id so pooled enemies don't animate in lockstep (U20).
+	AnimPhase = static_cast<float>(GetUniqueID() % 1000) / 1000.0f;
 
 	// Bind the world-space health bar / floating-damage widget to the health component once (server + clients).
 	// Pooling-safe: the actor + widget persist across dormancy, so this single bind survives every reuse.
@@ -113,6 +121,14 @@ void AFPSREnemyBase::Activate(const FVector& Location)
 	GroundRecheckTimer = 0.0f;
 	KnockbackVelocityXY = FVector::ZeroVector; // clear residual knockback from a prior life
 	ClearExitPath();                           // drop any leftover path; AcquireEnemy re-assigns it if this spawn point has one
+
+	// Reset the cosmetic animation state for the reused actor (U20). No-op when dormant / on a dedicated server. On a
+	// client the reused actor self-corrects on its first PostNetReceiveLocationAndRotation (it's alive, so movement
+	// state overrides any stale Death), so this authority-side reset covers the standalone / listen-server host.
+	CurrentAnimState = EFPSRAnimState::Idle;
+	CurrentSpeedBucket = -1;
+	LastRecvTime = -1.0f;
+	SetAnimState(EFPSRAnimState::Idle);
 }
 
 void AFPSREnemyBase::SetExitPath(const TArray<FVector>& InWaypoints)
@@ -186,6 +202,97 @@ void AFPSREnemyBase::Deactivate()
 	SetNetDormancy(DORM_DormantAll);
 }
 
+void AFPSREnemyBase::SetAnimState(EFPSRAnimState NewState, float MoveSpeedAlpha)
+{
+	// Dormant unless an archetype opted into animation; no local rendering (so no cosmetics) on a dedicated server.
+	if (!AnimProfile || GetNetMode() == NM_DedicatedServer)
+	{
+		return;
+	}
+
+	// Quantize the walk speed so the playrate is re-written only when it crosses a bucket boundary (write-on-change).
+	const int32 NewBucket = (NewState == EFPSRAnimState::Walk)
+		? FMath::Clamp(static_cast<int32>(MoveSpeedAlpha * FPSRVATAnim::SpeedBucketCount), 0, FPSRVATAnim::SpeedBucketCount - 1)
+		: 0;
+	if (NewState == CurrentAnimState && NewBucket == CurrentSpeedBucket)
+	{
+		return; // event-driven: state + speed bucket unchanged, nothing to write
+	}
+	CurrentAnimState = NewState;
+	CurrentSpeedBucket = NewBucket;
+
+	if (Mesh)
+	{
+		AnimProfile->ApplyAnimState(Mesh, NewState, MoveSpeedAlpha, AnimPhase, AnimMID);
+	}
+}
+
+void AFPSREnemyBase::PostNetReceiveLocationAndRotation()
+{
+	Super::PostNetReceiveLocationAndRotation();
+
+	// Client-side cosmetic animation from the replicated transform (the authority uses its server pass instead). This
+	// fires only when new location data arrives, so it is naturally distance-throttled by the server's per-enemy net
+	// frequency (S0 30Hz .. S3 2Hz) — a free coarse LOD. Dormant unless an archetype opted in.
+	if (!AnimProfile)
+	{
+		return;
+	}
+	// Dead enemies hold the Death state (set via OnDeathCosmetic); don't override it with movement.
+	if (HealthComponent && HealthComponent->IsDead())
+	{
+		return;
+	}
+
+	const UWorld* World = GetWorld();
+	const float Now = World ? World->GetTimeSeconds() : 0.0f;
+	const FVector Loc = GetActorLocation();
+
+	// Nearest LOCAL viewer (one local player per client) for distance LOD + the melee attack tell.
+	const AActor* LocalPawn = nullptr;
+	if (const APlayerController* PC = World ? World->GetFirstPlayerController() : nullptr)
+	{
+		LocalPawn = PC->GetPawn();
+	}
+	const float DistSqToLocal = LocalPawn ? FVector::DistSquaredXY(Loc, LocalPawn->GetActorLocation()) : 0.0f;
+
+	// Speed from the position delta since the last received update.
+	bool bMoving = false;
+	if (LastRecvTime >= 0.0f && Now > LastRecvTime)
+	{
+		const float Dt = Now - LastRecvTime;
+		const float SpeedXY = FVector::DistXY(Loc, LastRecvLocation) / Dt;
+		bMoving = SpeedXY > 10.0f; // cm/s: below this the enemy is effectively stopped
+	}
+	LastRecvLocation = Loc;
+	LastRecvTime = Now;
+
+	// Distance LOD: beyond the freeze radius, hold Idle and stop issuing walk updates (sheds CPU writes + distant GPU
+	// frame advance). Reuses the S1 boundary (Performance §5-1); no new per-enemy world query (arithmetic on data the
+	// client already has).
+	if (LocalPawn && DistSqToLocal > FPSRVATAnim::AnimFreezeRadiusSq)
+	{
+		SetAnimState(EFPSRAnimState::Idle);
+		return;
+	}
+
+	// Melee attack tell (cosmetic heuristic): stationary AND within melee range of the local player. Damage stays
+	// server-authoritative regardless of this tell. Refined with the real attack clip in Stage 3.
+	if (!bMoving && LocalPawn && DistSqToLocal <= (AttackRange * AttackRange))
+	{
+		SetAnimState(EFPSRAnimState::Attack);
+		return;
+	}
+
+	SetAnimState(bMoving ? EFPSRAnimState::Walk : EFPSRAnimState::Idle);
+}
+
+void AFPSREnemyBase::HandleDeathCosmetic()
+{
+	// Client death edge (from the health component's OnRep_bDead). Enter the Death animation state. No-op when dormant.
+	SetAnimState(EFPSRAnimState::Death);
+}
+
 EFPSRServerAttackResult AFPSREnemyBase::ServerTickAttack(const FFPSRServerAttackContext& Ctx)
 {
 	// Melee contact attack: in horizontal range + within the vertical gap (no through-floor hits) + cooldown elapsed
@@ -199,6 +306,10 @@ EFPSRServerAttackResult AFPSREnemyBase::ServerTickAttack(const FFPSRServerAttack
 	{
 		Ctx.TargetChar->ApplyContactDamage(Ctx.ContactDamage, this);
 		NotifyAttacked(Ctx.Now);
+		// Authority-side attack anim tell (U20) — drives the listen-server host / standalone render. Clients derive
+		// their own attack tell from proximity in PostNetReceiveLocationAndRotation. Foundational/transient this pass:
+		// the next movement pass reverts to Walk/Idle (attack-anim persistence needs the baked clip length, Stage 3).
+		SetAnimState(EFPSRAnimState::Attack);
 		return EFPSRServerAttackResult::MeleeAttacked;
 	}
 	return EFPSRServerAttackResult::None;
@@ -210,6 +321,10 @@ void AFPSREnemyBase::TickServerMovement(const FVector& MoveDirection, const FVec
 	{
 		return;
 	}
+
+	// (U20) Pre-move location to classify walk vs idle for the cosmetic anim. Guarded so it is zero-cost when no
+	// AnimProfile is assigned (the swarm default until Stage 3). Authority render only (standalone / listen host).
+	const FVector AnimStartLoc = AnimProfile ? GetActorLocation() : FVector::ZeroVector;
 
 	// Knockback (explosion push): a decaying horizontal impulse. While it's active, suppress flow-field steering
 	// so the push isn't immediately cancelled by the enemy walking back toward the player.
@@ -316,6 +431,24 @@ void AFPSREnemyBase::TickServerMovement(const FVector& MoveDirection, const FVec
 	// Vertical: ground-follow + gravity ALWAYS (even when not steering) so enemies never float and a
 	// rooftop-spawned enemy falls before chasing.
 	ApplyGravity(ScaledDeltaSeconds);
+
+	// (U20) Cosmetic walk/idle from the actual XY displacement this pass. Skip the override while a fresh melee attack
+	// tell is still within its cooldown window so ServerTickAttack's Attack state isn't clobbered the same pass (a
+	// stationary attacker reads as Idle otherwise). Attack-anim length/persistence is refined with the clips in Stage 3.
+	if (AnimProfile)
+	{
+		const float ExpectedMove = CurrentMoveSpeed * ScaledDeltaSeconds;
+		const float MovedSq = FVector::DistSquaredXY(GetActorLocation(), AnimStartLoc);
+		const bool bMoved = ExpectedMove > KINDA_SMALL_NUMBER && MovedSq > FMath::Square(ExpectedMove * 0.25f);
+		if (bMoved)
+		{
+			SetAnimState(EFPSRAnimState::Walk);
+		}
+		else if (CurrentAnimState != EFPSRAnimState::Attack)
+		{
+			SetAnimState(EFPSRAnimState::Idle);
+		}
+	}
 }
 
 void AFPSREnemyBase::ApplyKnockback(const FVector& Velocity)

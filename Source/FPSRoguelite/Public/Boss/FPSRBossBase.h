@@ -8,6 +8,7 @@
 class UStaticMeshComponent;
 class UFPSREnemyHealthComponent;
 class UFPSRBossDefinitionDataAsset;
+class UAnimMontage;
 
 /** Boss scaffold (U3, D4) — a health-only target that closes the run's victory path. Reuses the swarm's
  *  UFPSREnemyHealthComponent so EVERY existing weapon path (hitscan / projectile / charge-laser / melee /
@@ -43,12 +44,28 @@ public:
 	 *  after spawn. Overrides DefaultMaxHealth. No-op off-authority / null definition. */
 	void InitializeFromDefinition(const UFPSRBossDefinitionDataAsset* Definition);
 
+	/** Play a montage on the boss's SKELETAL mesh (the inherited ACharacter Mesh — the boss BP assigns Prime_Helix +
+	 *  its AnimBP there; U20 "boss skeletal" seam). The reusable animation entry point for future boss abilities / AI
+	 *  and the death anim. No-op when the mesh has no AnimInstance (i.e. before content assigns a skeletal mesh/AnimBP)
+	 *  or when Montage is null. Cosmetic. */
+	UFUNCTION(BlueprintCallable, Category = "FPSR|Boss")
+	void PlayBossMontage(UAnimMontage* Montage, float PlayRate = 1.0f);
+
 protected:
 	virtual void BeginPlay() override;
 
 	/** Server: boss died — end the run in Victory via the GameMode (loose coupling; U2 NotifyPlayerDefeated mirror). */
 	UFUNCTION()
 	void HandleDeath(AActor* DeadActor, AActor* Killer);
+
+	/** Play the boss death montage (U20). Bound to the health component's OnDeathCosmetic so CLIENTS play it on the
+	 *  replicated death edge; also invoked from HandleDeath so the listen-server host / standalone play it. */
+	UFUNCTION()
+	void HandleDeathCosmetic();
+
+	/** Optional montage played on the boss skeletal mesh on death (U20). Null = none (null-safe). Content-assigned. */
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Boss")
+	TSoftObjectPtr<UAnimMontage> DeathMontage;
 
 	/** Visible placeholder box (no collision — the capsule handles hits). Designers swap the mesh in the boss BP. */
 	UPROPERTY(VisibleAnywhere, Category = "FPSR|Boss")

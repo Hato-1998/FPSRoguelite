@@ -3,6 +3,7 @@
 #pragma once
 
 #include "GameFramework/Pawn.h"
+#include "Enemy/FPSRVATAnimParams.h"
 #include "FPSREnemyBase.generated.h"
 
 class UCapsuleComponent;
@@ -11,6 +12,8 @@ class UFPSREnemyHealthComponent;
 class UWidgetComponent;
 class AFPSRCharacter;
 class AFPSRPlayerController;
+class UFPSREnemyAnimProfile;
+class UMaterialInstanceDynamic;
 
 /** Outcome of a per-pass server attack decision, returned to the spawn subsystem so it can account the melee
  *  attack token. Ranged archetypes manage their own (held) token directly and return None. */
@@ -141,6 +144,24 @@ protected:
 
 	/** Reset exit-path follow state (on Deactivate / before a new SetExitPath). */
 	void ClearExitPath();
+
+	// --- Animation (U20 domain C) — cosmetic VAT state driver. DORMANT (zero cost) until an AnimProfile is assigned
+	//     to the archetype. State source: authority (standalone / listen-server host) = the server batch pass below;
+	//     clients = the replicated transform (PostNetReceiveLocationAndRotation). Never replicated (Performance §5). ---
+
+	/** Set the current animation state (+ walk-speed alpha). Event-driven: a no-op when the state and quantized speed
+	 *  bucket are unchanged, and a no-op entirely when no AnimProfile is assigned or on a dedicated server (no local
+	 *  rendering). Applies the state to the mesh via the AnimProfile (MID/CPD scalar writes). */
+	void SetAnimState(EFPSRAnimState NewState, float MoveSpeedAlpha = 1.0f);
+
+	/** Client: derive the animation state from the replicated transform when new location data arrives (walk/idle from
+	 *  position delta, a melee-attack tell from proximity to the nearest local player, distance LOD freeze). Runs only
+	 *  off-authority; the authority drives state from its server movement/attack pass instead. */
+	virtual void PostNetReceiveLocationAndRotation() override;
+
+	/** Bound to the health component's OnDeathCosmetic (client death edge) — enters the Death animation state. */
+	UFUNCTION()
+	void HandleDeathCosmetic();
 
 	UPROPERTY(VisibleAnywhere, Category = "FPSR|Enemy")
 	TObjectPtr<UCapsuleComponent> Capsule;
@@ -275,4 +296,29 @@ protected:
 	/** Server-only: seconds since the last waypoint advance (stall timer for ExitPathTimeout). */
 	UPROPERTY(Transient)
 	float ExitPathElapsed = 0.0f;
+
+	// --- Animation (U20 domain C) ---
+
+	/** Data-driven VAT render/animation backend for this archetype. NULL (the default) = the anim driver is DORMANT
+	 *  (no MID created, no scalar written) so the current cube/VAT render is untouched. Content assigns a
+	 *  UFPSREnemyAnimProfile_VAT (Stage 3) to enable state-driven animation. Instanced/polymorphic (no central switch). */
+	UPROPERTY(EditDefaultsOnly, Instanced, Category = "FPSR|Enemy|Anim")
+	TObjectPtr<UFPSREnemyAnimProfile> AnimProfile;
+
+	/** Per-actor MID lazily created by the AnimProfile on first state application (reused across the actor's life). */
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInstanceDynamic> AnimMID;
+
+	/** Current cosmetic animation state (not replicated). */
+	EFPSRAnimState CurrentAnimState = EFPSRAnimState::Idle;
+
+	/** Quantized walk-speed bucket of the last applied state (so playrate is re-written only on a bucket change). */
+	int32 CurrentSpeedBucket = -1;
+
+	/** Per-actor animation phase offset (0..1, set once on Activate from the actor id) so the swarm doesn't lockstep. */
+	float AnimPhase = 0.0f;
+
+	/** Client-only: last replicated location + world time, to derive movement speed for the walk/idle state. */
+	FVector LastRecvLocation = FVector::ZeroVector;
+	float LastRecvTime = -1.0f;
 };

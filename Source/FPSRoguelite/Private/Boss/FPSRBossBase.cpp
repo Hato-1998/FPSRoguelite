@@ -8,8 +8,10 @@
 
 #include "Components/CapsuleComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "Components/WidgetComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
+#include "Animation/AnimInstance.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
 #include "UObject/ConstructorHelpers.h"
@@ -84,6 +86,9 @@ void AFPSRBossBase::BeginPlay()
 	if (HealthComponent)
 	{
 		HealthComponent->OnDeath.AddDynamic(this, &AFPSRBossBase::HandleDeath);
+		// Client death cosmetic (U20): OnDeathCosmetic fires from OnRep_bDead on clients (the authority plays it from
+		// HandleDeath). Plays the boss death montage on the skeletal mesh. Harmless before content assigns a skel mesh.
+		HealthComponent->OnDeathCosmetic.AddDynamic(this, &AFPSRBossBase::HandleDeathCosmetic);
 
 		// Server: size health from the class default; a BossDefinition overrides it via InitializeFromDefinition.
 		if (HasAuthority())
@@ -103,8 +108,36 @@ void AFPSRBossBase::InitializeFromDefinition(const UFPSRBossDefinitionDataAsset*
 	HealthComponent->InitializeMaxHealth(Definition->MaxHealth);
 }
 
+void AFPSRBossBase::PlayBossMontage(UAnimMontage* Montage, float PlayRate)
+{
+	// Play on the inherited ACharacter skeletal mesh (the boss BP assigns Prime_Helix + its AnimBP there). No-op until
+	// content assigns a skeletal mesh/AnimBP (no AnimInstance) or when Montage is null. Cosmetic, all net modes.
+	if (!Montage)
+	{
+		return;
+	}
+	if (USkeletalMeshComponent* BossMesh = GetMesh())
+	{
+		if (UAnimInstance* AnimInst = BossMesh->GetAnimInstance())
+		{
+			AnimInst->Montage_Play(Montage, PlayRate);
+		}
+	}
+}
+
+void AFPSRBossBase::HandleDeathCosmetic()
+{
+	if (!DeathMontage.IsNull())
+	{
+		PlayBossMontage(DeathMontage.LoadSynchronous());
+	}
+}
+
 void AFPSRBossBase::HandleDeath(AActor* DeadActor, AActor* Killer)
 {
+	// Death animation for the listen-server host / standalone (clients play it via OnDeathCosmetic / OnRep_bDead).
+	HandleDeathCosmetic();
+
 	// OnDeath broadcasts on the server (UFPSREnemyHealthComponent::ApplyDamage is authority-gated). End the run in
 	// Victory through the GameMode — loose coupling: the boss never calls EndRun directly (U2 NotifyPlayerDefeated
 	// mirror). bRunEnded inside EndRun guards against a same-frame defeat race.

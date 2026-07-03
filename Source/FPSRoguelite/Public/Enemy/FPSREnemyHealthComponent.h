@@ -8,6 +8,7 @@
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FFPSREnemyDeathSignature, AActor*, DeadActor, AActor*, Killer);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FFPSREnemyHealthChangedSignature, float, NewHealth, float, MaxHealth);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FFPSREnemyDeathCosmeticSignature);
 
 /** Lightweight, non-GAS health for swarm enemies. Server-authoritative; damage applied via the GAS->bridge. */
 UCLASS(ClassGroup = (FPSR), meta = (BlueprintSpawnableComponent))
@@ -58,6 +59,13 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "FPSR|Enemy")
 	FFPSREnemyHealthChangedSignature OnHealthChanged;
 
+	/** CLIENT-side death notify (U20): fired from OnRep_bDead when bDead replicates true, so a client can play a death
+	 *  cosmetic (VAT death state) without new replication. NOT the server OnDeath path (which drives XP + pool release
+	 *  and must stay authority-only). The listen-server host has no OnRep, so it drives death cosmetics from its own
+	 *  authoritative death path instead. */
+	UPROPERTY(BlueprintAssignable, Category = "FPSR|Enemy")
+	FFPSREnemyDeathCosmeticSignature OnDeathCosmetic;
+
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 protected:
@@ -65,6 +73,11 @@ protected:
 
 	UFUNCTION()
 	void OnRep_Health();
+
+	/** Client RepNotify on the (already-replicated) death flag — no new replication, just a notify. Broadcasts
+	 *  OnDeathCosmetic on the death edge so clients play the death animation. */
+	UFUNCTION()
+	void OnRep_bDead();
 
 	/** Replicated so clients compute a correct NewHealth/MaxHealth percent for the health bar (B12). Swarm enemies
 	 *  author it as the editor default; content actors (boss/door) set it at runtime via InitializeMaxHealth. Shares
@@ -80,6 +93,6 @@ protected:
 	UPROPERTY(ReplicatedUsing = OnRep_Health)
 	float Health = 50.0f;
 
-	UPROPERTY(Replicated)
+	UPROPERTY(ReplicatedUsing = OnRep_bDead)
 	bool bDead = false;
 };
