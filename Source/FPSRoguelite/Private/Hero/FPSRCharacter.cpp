@@ -97,6 +97,14 @@ AFPSRCharacter::AFPSRCharacter()
 		BodyMesh->SetOwnerNoSee(true);
 	}
 
+	// Third-person weapon mesh (U19): attached to the 3P body, visible to REMOTE observers only (SetOwnerNoSee — the
+	// exact inverse of the 1P weapon's SetOnlyOwnerSee). Unlike the 1P weapon it keeps its shadow (world-visible).
+	// The mesh + per-weapon body socket are set per-equip in RefreshFirstPersonWeaponVisual.
+	WeaponMesh3P = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("WeaponMesh3P"));
+	WeaponMesh3P->SetupAttachment(GetMesh());
+	WeaponMesh3P->SetOwnerNoSee(true);
+	WeaponMesh3P->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+
 	WeaponInventory = CreateDefaultSubobject<UFPSRWeaponInventoryComponent>(TEXT("WeaponInventory"));
 	WeaponFire = CreateDefaultSubobject<UFPSRWeaponFireComponent>(TEXT("WeaponFire"));
 	PlayerFeedback = CreateDefaultSubobject<UFPSRPlayerFeedbackComponent>(TEXT("PlayerFeedback"));
@@ -955,9 +963,10 @@ void AFPSRCharacter::RefreshFirstPersonWeaponVisual()
 
 	if (!Weapon)
 	{
-		// No weapon: hide both meshes and drop any modular parts.
+		// No weapon: hide all meshes (1P + 3P) and drop any modular parts.
 		if (WeaponMesh1P) { WeaponMesh1P->SetSkeletalMeshAsset(nullptr); }
 		if (WeaponMeshStatic1P) { WeaponMeshStatic1P->SetStaticMesh(nullptr); }
+		if (WeaponMesh3P) { WeaponMesh3P->SetSkeletalMeshAsset(nullptr); }
 		RefreshWeaponPartComponents(nullptr);
 		return;
 	}
@@ -987,6 +996,15 @@ void AFPSRCharacter::RefreshFirstPersonWeaponVisual()
 	// Track which mesh is actually shown so fire cosmetics attach to it (skeletal firearm vs static melee/preview).
 	ActiveWeaponMesh = SkelMesh ? Cast<UMeshComponent>(WeaponMesh1P)
 		: (StaticMesh ? Cast<UMeshComponent>(WeaponMeshStatic1P) : nullptr);
+
+	// Third-person weapon mesh (U19) for REMOTE observers: attach to the 3P body hand socket. This runs on all clients
+	// (Refresh is all-clients); WeaponMesh3P is SetOwnerNoSee, so the owner never sees it. Null 3P mesh = nothing shown.
+	if (WeaponMesh3P)
+	{
+		USkeletalMesh* SkelMesh3P = Weapon->WeaponMesh3P.IsNull() ? nullptr : Weapon->WeaponMesh3P.LoadSynchronous();
+		WeaponMesh3P->SetSkeletalMeshAsset(SkelMesh3P);
+		WeaponMesh3P->AttachToComponent(GetMesh(), FAttachmentTransformRules::SnapToTargetNotIncludingScale, Weapon->WeaponAttachSocket3P);
+	}
 
 	// Optional per-weapon arms anim BP applied to the arms mesh (the pack ships per-weapon arm anims). When the next
 	// weapon has no override, revert to the BP-authored default — but only if we actually applied one before, so a
@@ -1124,7 +1142,13 @@ void AFPSRCharacter::HandleReloadStateChanged(bool bIsReloading)
 			PlayScaledReload(FirstPersonArms->GetAnimInstance(), CachedReloadMontage);
 		}
 	}
-	// Remote observers (3P body ReloadMontage3P) are wired in domain B, once the 3P weapon fields land.
+	else if (USkeletalMeshComponent* BodyMesh = GetMesh())
+	{
+		// Remote observers (U19): 3P body reload montage, loaded on demand from the weapon DA's 3P field. This is the
+		// event-driven counterpart to the 3P fire montage — no per-frame AnimBP polling of bReloading is needed.
+		UAnimMontage* ReloadM3P = Weapon->ReloadMontage3P.IsNull() ? nullptr : Weapon->ReloadMontage3P.LoadSynchronous();
+		PlayScaledReload(BodyMesh->GetAnimInstance(), ReloadM3P);
+	}
 }
 
 void AFPSRCharacter::PlayWeaponFireCosmetics()
@@ -1199,6 +1223,24 @@ void AFPSRCharacter::MulticastFireCosmetics_Implementation()
 				if (UAnimInstance* AnimInst = FirstPersonArms->GetAnimInstance())
 				{
 					AnimInst->Montage_Play(FireMontage);
+				}
+			}
+		}
+	}
+
+	// Third-person body fire montage (U19) for REMOTE observers — plays on every non-owner client (this multicast
+	// already early-returned for the locally-controlled owner above). The 3P body is SetOwnerNoSee, so only remotes
+	// see it. Placed OUTSIDE the spectator view-target gate above so BOTH a spectating downed teammate AND normal
+	// remotes see the shooter's 3P recoil. Null FireMontage3P = no 3P reaction (null-safe, no gameplay effect).
+	if (USkeletalMeshComponent* BodyMesh = GetMesh())
+	{
+		if (!Weapon->FireMontage3P.IsNull())
+		{
+			if (UAnimMontage* FireM3P = Weapon->FireMontage3P.LoadSynchronous())
+			{
+				if (UAnimInstance* BodyAnimInst = BodyMesh->GetAnimInstance())
+				{
+					BodyAnimInst->Montage_Play(FireM3P);
 				}
 			}
 		}

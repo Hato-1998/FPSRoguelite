@@ -134,6 +134,25 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Visual")
 	TSoftObjectPtr<UParticleSystem> MuzzleFlash;
 
+	// --- 3P visual / cosmetic (U19 — teammate co-op visibility) — all soft refs, null = no 3P visual (no gameplay
+	//     effect). Rendered on the 3P body mesh (GetMesh(), SetOwnerNoSee) for REMOTE observers; the owner sees only 1P. ---
+
+	/** Third-person weapon skeletal mesh, attached to the 3P body hand socket on equip. Null = no 3P weapon. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Visual3P")
+	TSoftObjectPtr<USkeletalMesh> WeaponMesh3P;
+
+	/** Socket on the 3P BODY skeleton the WeaponMesh3P attaches to (NAME_None = body mesh root). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Visual3P")
+	FName WeaponAttachSocket3P = NAME_None;
+
+	/** Montage played on the 3P body each shot for remote observers (MulticastFireCosmetics remote branch). Null = none. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Visual3P")
+	TSoftObjectPtr<UAnimMontage> FireMontage3P;
+
+	/** Montage played on the 3P body on reload start for remote observers (OnRep_Reloading remote branch). Null = none. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Visual3P")
+	TSoftObjectPtr<UAnimMontage> ReloadMontage3P;
+
 	/** Crosshair style (preferred). When set, this style's Material + dynamic flag drive the HUD crosshair,
 	 *  overriding the legacy CrosshairMaterial / bUseDynamicCrosshair below (those remain as a fallback used
 	 *  only when CrosshairStyle is unset). */

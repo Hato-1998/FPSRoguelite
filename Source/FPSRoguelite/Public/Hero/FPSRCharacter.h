@@ -203,6 +203,11 @@ protected:
 	UPROPERTY(VisibleAnywhere, Category = "FPSR|Mesh")
 	TObjectPtr<UStaticMeshComponent> WeaponMeshStatic1P;
 
+	/** Third-person weapon skeletal mesh (U19), attached to the 3P body mesh and visible to REMOTE observers only
+	 *  (SetOwnerNoSee — the exact inverse of WeaponMesh1P's SetOnlyOwnerSee). Mesh set per-equip from the weapon DA. */
+	UPROPERTY(VisibleAnywhere, Category = "FPSR|Mesh")
+	TObjectPtr<USkeletalMeshComponent> WeaponMesh3P;
+
 	/** Socket on FirstPersonArms the weapon meshes attach to (pack default "SOCKET_Weapon"). C++-created component
 	 *  sockets can't be edited in the BP, so this exposes the default here; the design-time preview attaches to it,
 	 *  and a weapon DA's WeaponAttachSocket overrides it per-weapon at equip. */
