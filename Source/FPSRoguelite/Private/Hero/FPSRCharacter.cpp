@@ -955,6 +955,8 @@ void AFPSRCharacter::RefreshFirstPersonWeaponVisual()
 	// Reset cached fire cosmetics; repopulated below when a weapon is equipped.
 	CachedFireMontage = nullptr;
 	CachedReloadMontage = nullptr;
+	CachedWeaponFireMontage = nullptr;
+	CachedWeaponReloadMontage = nullptr;
 	CachedFireSound = nullptr;
 	CachedMuzzleFlash = nullptr;
 	CachedMuzzleSocket = NAME_None;
@@ -986,6 +988,19 @@ void AFPSRCharacter::RefreshFirstPersonWeaponVisual()
 		// The weapon mesh has its OWN skeleton (SKEL_LPAMG_<W>); arm anims drive the arms only (applied below).
 		WeaponMesh1P->SetSkeletalMeshAsset(SkelMesh);
 		WeaponMesh1P->AttachToComponent(FirstPersonArms, FAttachmentTransformRules::KeepRelativeTransform, AttachSocket);
+		// Per-weapon WEAPON-mesh AnimBP so the bolt/magazine montages (A_FP_WEP_<W>_*) can play on the weapon's own
+		// skeleton. Only a skeletal weapon has one; clear it otherwise so a static/next weapon keeps no stale bolt anim.
+		if (SkelMesh && !Weapon->WeaponAnimInstanceClass.IsNull())
+		{
+			if (UClass* WeaponAnimClass = Weapon->WeaponAnimInstanceClass.LoadSynchronous())
+			{
+				WeaponMesh1P->SetAnimInstanceClass(WeaponAnimClass);
+			}
+		}
+		else
+		{
+			WeaponMesh1P->SetAnimInstanceClass(nullptr);
+		}
 	}
 	if (WeaponMeshStatic1P)
 	{
@@ -1037,6 +1052,8 @@ void AFPSRCharacter::RefreshFirstPersonWeaponVisual()
 	// Cache per-shot fire cosmetics (resolve soft refs once, here, not per shot).
 	CachedFireMontage = Weapon->FireMontage.IsNull() ? nullptr : Weapon->FireMontage.LoadSynchronous();
 	CachedReloadMontage = Weapon->ReloadMontage.IsNull() ? nullptr : Weapon->ReloadMontage.LoadSynchronous();
+	CachedWeaponFireMontage = Weapon->WeaponFireMontage.IsNull() ? nullptr : Weapon->WeaponFireMontage.LoadSynchronous();
+	CachedWeaponReloadMontage = Weapon->WeaponReloadMontage.IsNull() ? nullptr : Weapon->WeaponReloadMontage.LoadSynchronous();
 	CachedFireSound = Weapon->FireSound.IsNull() ? nullptr : Weapon->FireSound.LoadSynchronous();
 	CachedMuzzleFlash = Weapon->MuzzleFlash.IsNull() ? nullptr : Weapon->MuzzleFlash.LoadSynchronous();
 	CachedMuzzleSocket = Weapon->MuzzleSocket;
@@ -1141,6 +1158,11 @@ void AFPSRCharacter::HandleReloadStateChanged(bool bIsReloading)
 		{
 			PlayScaledReload(FirstPersonArms->GetAnimInstance(), CachedReloadMontage);
 		}
+		// Owner client: WEAPON-mesh reload montage (magazine/bolt) synced to the same reload (rate-scaled identically).
+		if (WeaponMesh1P)
+		{
+			PlayScaledReload(WeaponMesh1P->GetAnimInstance(), CachedWeaponReloadMontage);
+		}
 	}
 	else if (USkeletalMeshComponent* BodyMesh = GetMesh())
 	{
@@ -1164,6 +1186,15 @@ void AFPSRCharacter::PlayWeaponFireCosmetics()
 		if (UAnimInstance* AnimInst = FirstPersonArms->GetAnimInstance())
 		{
 			AnimInst->Montage_Play(CachedFireMontage);
+		}
+	}
+
+	// Bolt/action montage on the WEAPON mesh (its own skeleton, SKEL_LPAMG_<W>), synced with the arm recoil above.
+	if (CachedWeaponFireMontage && WeaponMesh1P)
+	{
+		if (UAnimInstance* WeaponAnimInst = WeaponMesh1P->GetAnimInstance())
+		{
+			WeaponAnimInst->Montage_Play(CachedWeaponFireMontage);
 		}
 	}
 
@@ -1223,6 +1254,17 @@ void AFPSRCharacter::MulticastFireCosmetics_Implementation()
 				if (UAnimInstance* AnimInst = FirstPersonArms->GetAnimInstance())
 				{
 					AnimInst->Montage_Play(FireMontage);
+				}
+			}
+		}
+		// Bolt/action on the WEAPON mesh for the spectator too (they see the ally's 1P weapon via OnlyOwnerSee).
+		if (WeaponMesh1P && !Weapon->WeaponFireMontage.IsNull())
+		{
+			if (UAnimMontage* WeaponFireM = Weapon->WeaponFireMontage.LoadSynchronous())
+			{
+				if (UAnimInstance* WeaponAnimInst = WeaponMesh1P->GetAnimInstance())
+				{
+					WeaponAnimInst->Montage_Play(WeaponFireM);
 				}
 			}
 		}

@@ -359,6 +359,14 @@ protected:
 	UPROPERTY(Transient)
 	TObjectPtr<UAnimMontage> CachedReloadMontage;
 
+	/** Cached hard refs for the equipped weapon MESH's bolt montages (fire/reload), played on WeaponMesh1P's own
+	 *  AnimInstance so the bolt/magazine syncs with the arm montages (owner-only-used). Refreshed on equip. */
+	UPROPERTY(Transient)
+	TObjectPtr<UAnimMontage> CachedWeaponFireMontage;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UAnimMontage> CachedWeaponReloadMontage;
+
 	UPROPERTY(Transient)
 	TObjectPtr<USoundBase> CachedFireSound;
 
