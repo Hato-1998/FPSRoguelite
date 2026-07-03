@@ -946,6 +946,7 @@ void AFPSRCharacter::RefreshFirstPersonWeaponVisual()
 
 	// Reset cached fire cosmetics; repopulated below when a weapon is equipped.
 	CachedFireMontage = nullptr;
+	CachedReloadMontage = nullptr;
 	CachedFireSound = nullptr;
 	CachedMuzzleFlash = nullptr;
 	CachedMuzzleSocket = NAME_None;
@@ -954,9 +955,10 @@ void AFPSRCharacter::RefreshFirstPersonWeaponVisual()
 
 	if (!Weapon)
 	{
-		// No weapon: hide both meshes.
+		// No weapon: hide both meshes and drop any modular parts.
 		if (WeaponMesh1P) { WeaponMesh1P->SetSkeletalMeshAsset(nullptr); }
 		if (WeaponMeshStatic1P) { WeaponMeshStatic1P->SetStaticMesh(nullptr); }
+		RefreshWeaponPartComponents(nullptr);
 		return;
 	}
 
@@ -1016,9 +1018,13 @@ void AFPSRCharacter::RefreshFirstPersonWeaponVisual()
 
 	// Cache per-shot fire cosmetics (resolve soft refs once, here, not per shot).
 	CachedFireMontage = Weapon->FireMontage.IsNull() ? nullptr : Weapon->FireMontage.LoadSynchronous();
+	CachedReloadMontage = Weapon->ReloadMontage.IsNull() ? nullptr : Weapon->ReloadMontage.LoadSynchronous();
 	CachedFireSound = Weapon->FireSound.IsNull() ? nullptr : Weapon->FireSound.LoadSynchronous();
 	CachedMuzzleFlash = Weapon->MuzzleFlash.IsNull() ? nullptr : Weapon->MuzzleFlash.LoadSynchronous();
 	CachedMuzzleSocket = Weapon->MuzzleSocket;
+
+	// Rebuild modular cosmetic parts on the (skeletal) weapon mesh from the weapon's part list.
+	RefreshWeaponPartComponents(Weapon);
 
 	// Optional equip montage on the arms.
 	if (FirstPersonArms && !Weapon->EquipMontage.IsNull())
@@ -1031,6 +1037,94 @@ void AFPSRCharacter::RefreshFirstPersonWeaponVisual()
 			}
 		}
 	}
+}
+
+void AFPSRCharacter::RefreshWeaponPartComponents(const UFPSRWeaponDataAsset* Weapon)
+{
+	// Tear down the previous weapon's parts (weapon swaps are infrequent, so a full rebuild is simpler than diffing).
+	for (UStaticMeshComponent* Part : WeaponPartComponents1P)
+	{
+		if (Part)
+		{
+			Part->DestroyComponent();
+		}
+	}
+	WeaponPartComponents1P.Reset();
+
+	// Parts attach to the SKELETAL weapon mesh only — static/melee/preview weapons carry no modular parts, and the
+	// pack part sockets live on SKEL_LPAMG_<W>. ActiveWeaponMesh == WeaponMesh1P means a skeletal weapon is shown.
+	if (!Weapon || !WeaponMesh1P || ActiveWeaponMesh != WeaponMesh1P)
+	{
+		return;
+	}
+
+	for (const FFPSRWeaponPartAttachment& PartDef : Weapon->WeaponParts1P)
+	{
+		if (PartDef.Part.IsNull())
+		{
+			continue; // null entry — skip (null-safe)
+		}
+		UStaticMesh* PartMesh = PartDef.Part.LoadSynchronous();
+		if (!PartMesh)
+		{
+			continue;
+		}
+		UStaticMeshComponent* PartComp = NewObject<UStaticMeshComponent>(this);
+		PartComp->SetStaticMesh(PartMesh);
+		PartComp->SetOnlyOwnerSee(true); // match the 1P weapon mesh visibility (owner + spectating view target)
+		PartComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		PartComp->RegisterComponent();
+		PartComp->AttachToComponent(WeaponMesh1P, FAttachmentTransformRules::KeepRelativeTransform, PartDef.Socket);
+		PartComp->SetRelativeTransform(PartDef.Offset);
+		WeaponPartComponents1P.Add(PartComp);
+	}
+}
+
+void AFPSRCharacter::HandleReloadStateChanged(bool bIsReloading)
+{
+	// No local rendering on a dedicated server — reload cosmetics are a no-op there (SetReloading calls this on the
+	// authority to cover a listen-server host, which DOES render). Only the reload-START edge plays a montage; it
+	// ends naturally at its rate-scaled length. Skip during the level-up freeze (§2-2) — reloads don't start while
+	// frozen, so we never kick off a cosmetic mid-freeze.
+	if (GetNetMode() == NM_DedicatedServer || !bIsReloading || IsRunFrozen())
+	{
+		return;
+	}
+
+	const UFPSRWeaponDataAsset* Weapon = WeaponInventory ? WeaponInventory->GetCurrentWeapon() : nullptr;
+	if (!Weapon)
+	{
+		return;
+	}
+
+	// Scale the montage so its play length matches the resolved ReloadTime (the anim must not outlast the reload).
+	float ReloadTime = Weapon->BaseStats.ReloadTime;
+	if (UFPSRWeaponInstance* Instance = WeaponInventory->GetCurrentInstance())
+	{
+		ReloadTime = Instance->GetResolvedStats().ReloadTime;
+	}
+
+	auto PlayScaledReload = [ReloadTime](UAnimInstance* AnimInst, UAnimMontage* Montage)
+	{
+		if (!AnimInst || !Montage)
+		{
+			return;
+		}
+		const float MontageLen = Montage->GetPlayLength();
+		const float Rate = (ReloadTime > KINDA_SMALL_NUMBER && MontageLen > KINDA_SMALL_NUMBER)
+			? (MontageLen / ReloadTime) : 1.0f;
+		AnimInst->Montage_Play(Montage, Rate);
+	};
+
+	if (IsLocallyControlled())
+	{
+		// Owner client: 1P arms reload montage (cached on equip).
+		if (FirstPersonArms)
+		{
+			PlayScaledReload(FirstPersonArms->GetAnimInstance(), CachedReloadMontage);
+		}
+	}
+	// Remote observers (3P body ReloadMontage3P) are wired in domain B, once the 3P weapon fields land.
 }
 
 void AFPSRCharacter::PlayWeaponFireCosmetics()

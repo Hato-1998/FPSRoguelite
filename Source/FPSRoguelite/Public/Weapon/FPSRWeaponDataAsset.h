@@ -18,6 +18,27 @@ class UParticleSystem;
 class UTexture2D;
 class UMaterialInterface;
 
+/** One modular cosmetic part attached to the 1P skeletal weapon mesh at a named socket (U15). Purely visual: the
+ *  part is a static mesh (barrel / forestock / magazine / sight from the pack) child-attached to the equipped
+ *  skeletal weapon. Null Part = skipped (null-safe). Static/melee weapons and empty lists attach nothing. */
+USTRUCT(BlueprintType)
+struct FFPSRWeaponPartAttachment
+{
+	GENERATED_BODY()
+
+	/** Static mesh of the part (soft ref; null = this entry is skipped). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Visual")
+	TSoftObjectPtr<UStaticMesh> Part;
+
+	/** Socket on the WEAPON mesh (SKEL_LPAMG_<W>) the part attaches to. NAME_None = weapon mesh root. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Visual")
+	FName Socket = NAME_None;
+
+	/** Relative transform applied after attach (fine-tune the part's placement on the socket). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Visual")
+	FTransform Offset;
+};
+
 /** Data-driven weapon definition. */
 UCLASS(BlueprintType)
 class FPSROGUELITE_API UFPSRWeaponDataAsset : public UPrimaryDataAsset
@@ -98,6 +119,16 @@ public:
 	/** Optional montage played on the arms each shot (owner-client local feel). */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Visual")
 	TSoftObjectPtr<UAnimMontage> FireMontage;
+
+	/** Optional montage played on the arms on reload start (owner-client 1P). Driven by UFPSRWeaponInstance's
+	 *  OnRep_Reloading (server-confirmed edge), scaled so its play length matches the resolved ReloadTime. Null = none. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Visual")
+	TSoftObjectPtr<UAnimMontage> ReloadMontage;
+
+	/** Optional modular cosmetic parts child-attached to the 1P skeletal weapon mesh on equip (U15). Static/melee
+	 *  weapons and empty lists attach nothing (null-safe). Parts inherit the weapon mesh's OnlyOwnerSee visibility. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Visual")
+	TArray<FFPSRWeaponPartAttachment> WeaponParts1P;
 
 	/** Cascade muzzle-flash particle spawned at MuzzleSocket each shot (owner-client local). */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Visual")

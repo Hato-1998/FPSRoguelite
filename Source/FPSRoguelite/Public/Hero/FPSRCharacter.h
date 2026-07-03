@@ -90,6 +90,12 @@ public:
 	/** Owner-client: play the equipped weapon's per-shot cosmetics (fire montage + sound + muzzle flash). */
 	void PlayWeaponFireCosmetics();
 
+	/** Play reload cosmetics on a server-confirmed reload-start edge (called from UFPSRWeaponInstance::OnRep_Reloading,
+	 *  which fires on every client holding the replicated instance). Owner client -> 1P arms ReloadMontage; remote
+	 *  clients -> 3P body ReloadMontage3P. No-op when bIsReloading is false, during the level-up freeze, or when the
+	 *  equipped weapon has no reload montage. The play rate is scaled so the montage length matches the ReloadTime. */
+	void HandleReloadStateChanged(bool bIsReloading);
+
 	/** Server->all: play the spatialized fire SFX for REMOTE observers so teammates hear each other's weapon fire
 	 *  (B4). The owning client already played it locally (PlayWeaponFireCosmetics), so the implementation early-outs
 	 *  on IsLocallyControlled to avoid double-play. Unreliable (cosmetic — drops gracefully on packet loss). Fired
@@ -344,6 +350,10 @@ protected:
 	UPROPERTY(Transient)
 	TObjectPtr<UAnimMontage> CachedFireMontage;
 
+	/** Cached hard ref for the equipped weapon's 1P arms reload montage (owner-only-used). Refreshed on equip. */
+	UPROPERTY(Transient)
+	TObjectPtr<UAnimMontage> CachedReloadMontage;
+
 	UPROPERTY(Transient)
 	TObjectPtr<USoundBase> CachedFireSound;
 
@@ -356,6 +366,15 @@ protected:
 	 *  cosmetics (muzzle flash / sound) attach here so they track the active mesh. Null when no weapon is equipped. */
 	UPROPERTY(Transient)
 	TObjectPtr<UMeshComponent> ActiveWeaponMesh;
+
+	/** Runtime-created modular weapon-part components (U15), child-attached to WeaponMesh1P and rebuilt on each
+	 *  weapon change. Owner-only-visible (match the 1P weapon mesh). Empty for static/melee/partless weapons. */
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UStaticMeshComponent>> WeaponPartComponents1P;
+
+	/** Destroy any existing modular part components and rebuild them from the equipped weapon's WeaponParts1P list
+	 *  (only when a SKELETAL weapon mesh is shown; static/melee/empty attach nothing). Called from the weapon refresh. */
+	void RefreshWeaponPartComponents(const UFPSRWeaponDataAsset* Weapon);
 
 	/** Arms anim default captured at BeginPlay, so a weapon's per-weapon ArmsAnimInstanceClass override can be
 	 *  reverted when the next weapon has none. Only touched once an override has actually been applied
