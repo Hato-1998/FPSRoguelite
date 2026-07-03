@@ -866,6 +866,8 @@ Game.md + PROGRESS.md + Docs/SSOT/Roadmap.md §8(플레이스홀더 인벤토리
 
 ### 🎬 애니메이션 통합 패스 (U15 + U19 + U20 병행 — 사용자 결정 2026-07-03)
 
+> ✅ **코드 완료 — main `--no-ff` 머지 `e651cce`(2026-07-04)**. 아래 프롬프트는 실행됨(재실행 금지, 참조용). 코드 인프라(A/B/C 훅·필드·드라이버+보스 스켈 시임)+빌드×4+스모크×4+Codex게이트 통과. **콘텐츠 저작(AnimBP·몽타주·VAT 베이크·DA)=사용자** → [`Docs/AnimationPass_ContentGuide.md`](AnimationPass_ContentGuide.md). C 활성화=Stage2(MF 파라미터 에디터확인)→Stage3(베이크+프로파일 할당). GMS=이 패스 무접촉(U13 소유 유지). 상세=PROGRESS 핸드오프 o(2026-07-04).
+
 > **1P 무기(도메인 A) + 3P 팀원/아군 캐릭터(도메인 B) + 적 VAT(도메인 C) 세 도메인을 한 패스로.** ultracode 합성 + 적대 검증(zero 날조 앵커, 제약 비희석·경계 명확 확인). 브랜치=`phase/p6-animation-pass`(A→B→C 순차 스테이지, 도메인별 PIE 체크포인트=안전 롤백 지점). **U15/U19/U20를 흡수** — 아래 개별 §C(U15/U19/U20)는 도메인별 원안 참조용, **실행은 이 통합 프롬프트**. ⚠️핵심: A/B=플레이어측 경량 스켈(≤4 액터), **C=적 perf-critical(200-300, VAT 필수) — A/B 기법을 C에 복붙 금지**. B=복제 carve-out(Opus 직접). GMS 통복사 수정=U13과 공유(먼저 리스너 붙이는 쪽 소유).
 
 ```
