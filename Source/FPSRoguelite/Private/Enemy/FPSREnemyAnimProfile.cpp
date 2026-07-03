@@ -15,7 +15,7 @@ namespace
 	static const FName NAME_Phase(TEXT("Phase"));
 }
 
-void UFPSREnemyAnimProfile_VAT::ApplyAnimState(UMeshComponent* Mesh, EFPSRAnimState State, float MoveSpeedAlpha,
+void UFPSREnemyAnimProfile_VAT::ApplyAnimState(UMeshComponent* Mesh, EFPSRAnimState State, float PlayRate,
 	float Phase, TObjectPtr<UMaterialInstanceDynamic>& CachedMID) const
 {
 	if (!Mesh)
@@ -38,31 +38,18 @@ void UFPSREnemyAnimProfile_VAT::ApplyAnimState(UMeshComponent* Mesh, EFPSRAnimSt
 		return;
 	}
 
-	// Map the state to a clip index + playrate. Death holds (playrate 0 handled by the caller/LOD path when frozen);
-	// Walk scales with the enemy's speed; Idle/Attack play at unit rate. Clip indices are placeholders until Stage 3.
+	// Clip index comes from the state; PlayRate is supplied by the caller (walk-speed scaled, or 0 to FREEZE the clip
+	// for distance LOD). Clip indices are placeholders until the Stage-3 content bake.
 	float ClipIndex = FPSRVATAnim::ClipIndex_Idle;
-	float PlayRate = 1.0f;
 	switch (State)
 	{
-	case EFPSRAnimState::Idle:
-		ClipIndex = FPSRVATAnim::ClipIndex_Idle;
-		PlayRate = 1.0f;
-		break;
-	case EFPSRAnimState::Walk:
-		ClipIndex = FPSRVATAnim::ClipIndex_Walk;
-		PlayRate = FMath::Max(0.1f, MoveSpeedAlpha);
-		break;
-	case EFPSRAnimState::Attack:
-		ClipIndex = FPSRVATAnim::ClipIndex_Attack;
-		PlayRate = 1.0f;
-		break;
-	case EFPSRAnimState::Death:
-		ClipIndex = FPSRVATAnim::ClipIndex_Death;
-		PlayRate = 1.0f;
-		break;
+	case EFPSRAnimState::Idle:   ClipIndex = FPSRVATAnim::ClipIndex_Idle;   break;
+	case EFPSRAnimState::Walk:   ClipIndex = FPSRVATAnim::ClipIndex_Walk;   break;
+	case EFPSRAnimState::Attack: ClipIndex = FPSRVATAnim::ClipIndex_Attack; break;
+	case EFPSRAnimState::Death:  ClipIndex = FPSRVATAnim::ClipIndex_Death;  break;
 	}
 
 	MID->SetScalarParameterValue(NAME_AnimationIndex, ClipIndex);
-	MID->SetScalarParameterValue(NAME_PlayRate, PlayRate);
+	MID->SetScalarParameterValue(NAME_PlayRate, FMath::Max(0.0f, PlayRate));
 	MID->SetScalarParameterValue(NAME_Phase, Phase);
 }

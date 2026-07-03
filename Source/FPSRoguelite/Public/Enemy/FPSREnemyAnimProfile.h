@@ -22,11 +22,12 @@ class FPSROGUELITE_API UFPSREnemyAnimProfile : public UObject
 	GENERATED_BODY()
 
 public:
-	/** Apply an animation state to the enemy's mesh. Called ONLY on state/speed-bucket transitions (event-driven), never
-	 *  per-frame — the GPU keeps advancing the VAT frame from time. MoveSpeedAlpha (~0..1) scales the walk playrate;
-	 *  Phase (0..1) is a per-actor offset so the swarm doesn't march in lockstep. CachedMID is the caller's lazily
-	 *  created MID slot (a concrete profile creates it here on first use and reuses it). */
-	virtual void ApplyAnimState(UMeshComponent* Mesh, EFPSRAnimState State, float MoveSpeedAlpha, float Phase,
+	/** Apply an animation state to the enemy's mesh. Called ONLY on state/playrate-bucket transitions (event-driven),
+	 *  never per-frame — the GPU keeps advancing the VAT frame from time. PlayRate is the EXPLICIT playback rate to
+	 *  write (the caller computes it): 1.0 for a normal clip, a speed-scaled value for walk, and 0.0 to FREEZE the
+	 *  clip in place (distance LOD — sheds CPU writes AND distant GPU frame advance). Phase (0..1) is a per-actor
+	 *  offset so the swarm doesn't march in lockstep. CachedMID is the caller's lazily created MID slot. */
+	virtual void ApplyAnimState(UMeshComponent* Mesh, EFPSRAnimState State, float PlayRate, float Phase,
 		TObjectPtr<UMaterialInstanceDynamic>& CachedMID) const {}
 };
 
@@ -40,6 +41,6 @@ class FPSROGUELITE_API UFPSREnemyAnimProfile_VAT : public UFPSREnemyAnimProfile
 	GENERATED_BODY()
 
 public:
-	virtual void ApplyAnimState(UMeshComponent* Mesh, EFPSRAnimState State, float MoveSpeedAlpha, float Phase,
+	virtual void ApplyAnimState(UMeshComponent* Mesh, EFPSRAnimState State, float PlayRate, float Phase,
 		TObjectPtr<UMaterialInstanceDynamic>& CachedMID) const override;
 };

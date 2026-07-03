@@ -149,10 +149,10 @@ protected:
 	//     to the archetype. State source: authority (standalone / listen-server host) = the server batch pass below;
 	//     clients = the replicated transform (PostNetReceiveLocationAndRotation). Never replicated (Performance §5). ---
 
-	/** Set the current animation state (+ walk-speed alpha). Event-driven: a no-op when the state and quantized speed
-	 *  bucket are unchanged, and a no-op entirely when no AnimProfile is assigned or on a dedicated server (no local
-	 *  rendering). Applies the state to the mesh via the AnimProfile (MID/CPD scalar writes). */
-	void SetAnimState(EFPSRAnimState NewState, float MoveSpeedAlpha = 1.0f);
+	/** Set the current animation state (+ explicit playrate: 1.0 normal, speed-scaled for walk, 0.0 to FREEZE the clip
+	 *  for distance LOD). Event-driven: a no-op when the state and quantized playrate bucket are unchanged, and a no-op
+	 *  entirely when no AnimProfile is assigned or on a dedicated server (no local rendering). Applies via the profile. */
+	void SetAnimState(EFPSRAnimState NewState, float PlayRate = 1.0f);
 
 	/** Client: derive the animation state from the replicated transform when new location data arrives (walk/idle from
 	 *  position delta, a melee-attack tell from proximity to the nearest local player, distance LOD freeze). Runs only

@@ -202,7 +202,7 @@ void AFPSREnemyBase::Deactivate()
 	SetNetDormancy(DORM_DormantAll);
 }
 
-void AFPSREnemyBase::SetAnimState(EFPSRAnimState NewState, float MoveSpeedAlpha)
+void AFPSREnemyBase::SetAnimState(EFPSRAnimState NewState, float PlayRate)
 {
 	// Dormant unless an archetype opted into animation; no local rendering (so no cosmetics) on a dedicated server.
 	if (!AnimProfile || GetNetMode() == NM_DedicatedServer)
@@ -210,20 +210,20 @@ void AFPSREnemyBase::SetAnimState(EFPSRAnimState NewState, float MoveSpeedAlpha)
 		return;
 	}
 
-	// Quantize the walk speed so the playrate is re-written only when it crosses a bucket boundary (write-on-change).
-	const int32 NewBucket = (NewState == EFPSRAnimState::Walk)
-		? FMath::Clamp(static_cast<int32>(MoveSpeedAlpha * FPSRVATAnim::SpeedBucketCount), 0, FPSRVATAnim::SpeedBucketCount - 1)
-		: 0;
+	// Quantize the playrate so the scalar is re-written only when it crosses a bucket boundary (write-on-change). A
+	// frozen clip (playrate 0) lands in bucket 0 and a playing clip in a higher bucket, so freeze<->play transitions
+	// still trigger exactly one write.
+	const int32 NewBucket = FMath::Clamp(static_cast<int32>(PlayRate * FPSRVATAnim::SpeedBucketCount), 0, FPSRVATAnim::SpeedBucketCount - 1);
 	if (NewState == CurrentAnimState && NewBucket == CurrentSpeedBucket)
 	{
-		return; // event-driven: state + speed bucket unchanged, nothing to write
+		return; // event-driven: state + playrate bucket unchanged, nothing to write
 	}
 	CurrentAnimState = NewState;
 	CurrentSpeedBucket = NewBucket;
 
 	if (Mesh)
 	{
-		AnimProfile->ApplyAnimState(Mesh, NewState, MoveSpeedAlpha, AnimPhase, AnimMID);
+		AnimProfile->ApplyAnimState(Mesh, NewState, PlayRate, AnimPhase, AnimMID);
 	}
 }
 
@@ -267,12 +267,12 @@ void AFPSREnemyBase::PostNetReceiveLocationAndRotation()
 	LastRecvLocation = Loc;
 	LastRecvTime = Now;
 
-	// Distance LOD: beyond the freeze radius, hold Idle and stop issuing walk updates (sheds CPU writes + distant GPU
-	// frame advance). Reuses the S1 boundary (Performance §5-1); no new per-enemy world query (arithmetic on data the
-	// client already has).
+	// Distance LOD: beyond the freeze radius, FREEZE the clip (playrate 0) — this stops CPU scalar writes (write-on-
+	// change settles after one freeze) AND the distant GPU frame advance. Reuses the S1 boundary (Performance §5-1);
+	// no new per-enemy world query (arithmetic on data the client already has).
 	if (LocalPawn && DistSqToLocal > FPSRVATAnim::AnimFreezeRadiusSq)
 	{
-		SetAnimState(EFPSRAnimState::Idle);
+		SetAnimState(EFPSRAnimState::Idle, 0.0f);
 		return;
 	}
 
@@ -290,6 +290,11 @@ void AFPSREnemyBase::PostNetReceiveLocationAndRotation()
 void AFPSREnemyBase::HandleDeathCosmetic()
 {
 	// Client death edge (from the health component's OnRep_bDead). Enter the Death animation state. No-op when dormant.
+	// ⚠️ KNOWN Stage-3 dependency (Codex merge-gate P2, accepted+deferred): for a SWARM enemy the authoritative
+	// HandleDeath immediately ReleaseEnemy -> Deactivate (hide + dormancy flush) in the same death flow, so this Death
+	// state is applied to an actor that is being hidden and won't be visibly seen until Stage 3 adds a server
+	// death-dwell (delay the pool release for the death-clip window; the clip LENGTH is content, hence Stage 3). This
+	// hook is the foundation for that. The BOSS (AFPSRBossBase) persists after death, so its death montage IS visible.
 	SetAnimState(EFPSRAnimState::Death);
 }
 
