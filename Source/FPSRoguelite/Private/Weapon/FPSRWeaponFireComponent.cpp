@@ -4,6 +4,7 @@
 #include "Weapon/FPSRWeaponInventoryComponent.h"
 #include "Weapon/FPSRWeaponInstance.h"
 #include "Weapon/FPSRWeaponDataAsset.h"
+#include "Weapon/FPSRCrosshairStyleDataAsset.h"
 #include "Weapon/FPSRWeaponTypes.h"
 #include "Weapon/FPSRWeaponFragment.h"
 #include "Hero/FPSRCharacter.h"
@@ -89,7 +90,16 @@ UMaterialInterface* UFPSRWeaponFireComponent::GetEquippedCrosshairMaterial() con
 	UFPSRWeaponInventoryComponent* Inv = GetInventory();
 	UFPSRWeaponInstance* Inst = Inv ? Inv->GetCurrentInstance() : nullptr;
 	UFPSRWeaponDataAsset* Src = Inst ? Inst->GetSource() : nullptr;
-	return Src ? Src->CrosshairMaterial.LoadSynchronous() : nullptr;
+	if (!Src)
+	{
+		return nullptr;
+	}
+	// Crosshair style takes precedence over the legacy per-weapon material.
+	if (UFPSRCrosshairStyleDataAsset* Style = Src->CrosshairStyle.LoadSynchronous())
+	{
+		return Style->Material.LoadSynchronous();
+	}
+	return Src->CrosshairMaterial.LoadSynchronous();
 }
 
 bool UFPSRWeaponFireComponent::GetEquippedCrosshairUsesDynamic() const
@@ -97,7 +107,15 @@ bool UFPSRWeaponFireComponent::GetEquippedCrosshairUsesDynamic() const
 	UFPSRWeaponInventoryComponent* Inv = GetInventory();
 	UFPSRWeaponInstance* Inst = Inv ? Inv->GetCurrentInstance() : nullptr;
 	UFPSRWeaponDataAsset* Src = Inst ? Inst->GetSource() : nullptr;
-	return Src ? Src->bUseDynamicCrosshair : true;
+	if (!Src)
+	{
+		return true;
+	}
+	if (UFPSRCrosshairStyleDataAsset* Style = Src->CrosshairStyle.LoadSynchronous())
+	{
+		return Style->bDynamic;
+	}
+	return Src->bUseDynamicCrosshair;
 }
 
 bool UFPSRWeaponFireComponent::CanFire() const

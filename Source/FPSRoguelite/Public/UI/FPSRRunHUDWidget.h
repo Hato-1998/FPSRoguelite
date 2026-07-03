@@ -69,29 +69,37 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Crosshair")
 	TSoftObjectPtr<UMaterialInterface> DefaultCrosshairMaterial;
 
-	/** On-screen size (px) of the square crosshair image. */
+	/** On-screen size (logical px) of the square crosshair image. This is the projection reference: the truthful
+	 *  spread cone is mapped into this box, so it must be large enough to fit the widest dispersion without
+	 *  clipping (the image is mostly transparent — only the thin SDF shapes draw). NOT a user size setting. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Crosshair")
-	float CrosshairSizePx = 96.0f;
+	float CrosshairSizePx = 600.0f;
 
-	/** Maps the weapon's current bloom (degrees) to the material's Spread (UV-push). Bloom is 0 at rest and grows
-	 *  while firing, so the crosshair is tight at rest and widens on fire (then recovers). Tune for feel. */
+	/** Optional floor on the projected spread (UV radius, 0..1) so a very accurate weapon's crosshair is still
+	 *  visible at rest. 0 = pure truthful (crosshair tracks the exact cone). Raise if it reads too small. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Crosshair")
-	float SpreadToPush = 0.25f;
+	float MinCrosshairSpreadUV = 0.0f;
 
-	/** Upper clamp on the material Spread so the crosshair never over-spreads past the texture edge. */
+	/** Upper clamp on the projected spread (UV radius) so an extreme dispersion never draws past the crosshair
+	 *  image edge (which would clip the ring/box). */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Crosshair")
-	float MaxCrosshairSpread = 0.18f;
+	float MaxCrosshairSpreadUV = 0.95f;
 
 private:
 	/** Resolve (and cache) the owning pawn's fire component. */
 	UFPSRWeaponFireComponent* ResolveFireComponent();
 
-	/** Re-apply the crosshair size when the local player changes it in settings (live). */
+	/** Re-apply crosshair appearance (color / thickness) when the local player changes it in settings (live). */
 	UFUNCTION()
-	void HandleCrosshairScaleChanged(float NewScale);
+	void HandleCrosshairSettingsChanged();
 
-	/** Apply a uniform render-transform scale to the crosshair image (about the default center pivot). */
-	void ApplyCrosshairScale(float Scale);
+	/** Push the persisted crosshair color + thickness into the current dynamic material instance. */
+	void ApplyCrosshairAppearance();
+
+	/** Project a weapon spread half-angle (deg) to the material's Spread parameter (UV radius, 0..1) so the
+	 *  crosshair truthfully bounds the actual dispersion cone (accounts for camera FOV, viewport, image size,
+	 *  DPI). Returns 0 if the view context is unavailable. */
+	float ComputeSpreadUV(float SpreadHalfAngleDeg) const;
 
 	UPROPERTY(Transient)
 	TWeakObjectPtr<UFPSRWeaponFireComponent> CachedFireComp;

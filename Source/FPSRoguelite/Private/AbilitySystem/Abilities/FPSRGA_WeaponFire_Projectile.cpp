@@ -4,6 +4,7 @@
 #include "AbilitySystem/Attributes/FPSRCombatSet.h"
 #include "Weapon/FPSRWeaponInventoryComponent.h"
 #include "Weapon/FPSRWeaponInstance.h"
+#include "Weapon/FPSRWeaponFireComponent.h"
 #include "Weapon/FPSRWeaponFragment.h"
 #include "Weapon/FPSRWeaponDataAsset.h"
 #include "Weapon/FPSRProjectile.h"
@@ -85,6 +86,19 @@ void UFPSRGA_WeaponFire_Projectile::ActivateAbility(
 		ProjectilePierce = FMath::Max(0, Stats->ProjectilePierce);
 		SpreadDegrees = Stats->SpreadDegrees;
 		KnockbackStrength = FMath::Max(0.0f, Stats->KnockbackStrength);
+	}
+
+	// Grow the dispersion cone with sustained-fire bloom (+ ADS multiplier), matching the hitscan weapons and the
+	// truthful HUD crosshair. Bloom is tracked on the fire component (input cadence); the projectile shot direction
+	// was previously base-spread only, so a spraying launcher never actually widened. (Projectiles have no
+	// deterministic-ADS single-line path — they always use the resolved cone at the trace below.)
+	if (UFPSRWeaponFireComponent* FireComp = Avatar->FindComponentByClass<UFPSRWeaponFireComponent>())
+	{
+		const float Bloom = FireComp->GetCurrentBloom();
+		const bool bAiming = FireComp->IsAiming();
+		SpreadDegrees = Stats
+			? UFPSRWeaponFireComponent::ComputeSpreadDegrees(*Stats, Bloom, bAiming)
+			: SpreadDegrees + Bloom;
 	}
 
 	// Server-authoritative gates: empty mag / reloading / fire-rate. Ammo is consumed after the fragment hooks

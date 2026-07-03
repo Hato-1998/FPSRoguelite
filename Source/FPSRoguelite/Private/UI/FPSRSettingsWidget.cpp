@@ -31,19 +31,41 @@ void UFPSRSettingsWidget::NativeOnInitialized()
 		MasterVolumeSlider->OnControllerCaptureEnd.AddDynamic(this, &UFPSRSettingsWidget::HandleMasterVolumeCommitted);
 	}
 
-	if (CrosshairScaleSlider)
+	if (CrosshairThicknessSlider)
 	{
-		CrosshairScaleSlider->SetMinValue(0.5f);
-		CrosshairScaleSlider->SetMaxValue(2.5f);
-		CrosshairScaleSlider->OnValueChanged.AddDynamic(this, &UFPSRSettingsWidget::HandleCrosshairScaleChanged);
-		CrosshairScaleSlider->OnMouseCaptureEnd.AddDynamic(this, &UFPSRSettingsWidget::HandleCrosshairScaleCommitted);
-		CrosshairScaleSlider->OnControllerCaptureEnd.AddDynamic(this, &UFPSRSettingsWidget::HandleCrosshairScaleCommitted);
+		CrosshairThicknessSlider->SetMinValue(0.5f);
+		CrosshairThicknessSlider->SetMaxValue(2.0f);
+		CrosshairThicknessSlider->OnValueChanged.AddDynamic(this, &UFPSRSettingsWidget::HandleCrosshairThicknessChanged);
+		CrosshairThicknessSlider->OnMouseCaptureEnd.AddDynamic(this, &UFPSRSettingsWidget::HandleCrosshairThicknessCommitted);
+		CrosshairThicknessSlider->OnControllerCaptureEnd.AddDynamic(this, &UFPSRSettingsWidget::HandleCrosshairThicknessCommitted);
 	}
 
 	if (BackButton)
 	{
 		// UCommonButtonBase::OnClicked() is a native event — bind with AddUObject (see FPSRMainMenuWidget).
 		BackButton->OnClicked().AddUObject(this, &UFPSRSettingsWidget::HandleBackClicked);
+	}
+
+	// Color presets — each is a fixed-color CommonButton. Bind the same way as BackButton (native event).
+	if (ColorPresetWhite)
+	{
+		ColorPresetWhite->OnClicked().AddUObject(this, &UFPSRSettingsWidget::HandleColorPresetWhite);
+	}
+	if (ColorPresetGreen)
+	{
+		ColorPresetGreen->OnClicked().AddUObject(this, &UFPSRSettingsWidget::HandleColorPresetGreen);
+	}
+	if (ColorPresetCyan)
+	{
+		ColorPresetCyan->OnClicked().AddUObject(this, &UFPSRSettingsWidget::HandleColorPresetCyan);
+	}
+	if (ColorPresetRed)
+	{
+		ColorPresetRed->OnClicked().AddUObject(this, &UFPSRSettingsWidget::HandleColorPresetRed);
+	}
+	if (ColorPresetYellow)
+	{
+		ColorPresetYellow->OnClicked().AddUObject(this, &UFPSRSettingsWidget::HandleColorPresetYellow);
 	}
 }
 
@@ -71,12 +93,12 @@ void UFPSRSettingsWidget::SyncFromSettings()
 
 	if (UFPSRGameUserSettings* Settings = UFPSRGameUserSettings::Get())
 	{
-		const float Scale = Settings->GetCrosshairScale();
-		if (CrosshairScaleSlider)
+		const float Thickness = Settings->GetCrosshairThickness();
+		if (CrosshairThicknessSlider)
 		{
-			CrosshairScaleSlider->SetValue(Scale);
+			CrosshairThicknessSlider->SetValue(Thickness);
 		}
-		UpdateCrosshairValueText(Scale);
+		UpdateThicknessValueText(Thickness);
 	}
 }
 
@@ -118,28 +140,42 @@ void UFPSRSettingsWidget::UpdateValueText(float Value)
 	}
 }
 
-void UFPSRSettingsWidget::HandleCrosshairScaleChanged(float Value)
+void UFPSRSettingsWidget::HandleCrosshairThicknessChanged(float Value)
 {
 	if (UFPSRGameUserSettings* Settings = UFPSRGameUserSettings::Get())
 	{
-		Settings->SetCrosshairScale(Value, /*bSave=*/false); // live apply (broadcasts to HUD), no per-frame disk write
+		Settings->SetCrosshairThickness(Value, /*bSave=*/false); // live apply (broadcasts to HUD), no per-frame disk write
 	}
-	UpdateCrosshairValueText(Value);
+	UpdateThicknessValueText(Value);
 }
 
-void UFPSRSettingsWidget::HandleCrosshairScaleCommitted()
+void UFPSRSettingsWidget::HandleCrosshairThicknessCommitted()
 {
-	const float Value = CrosshairScaleSlider ? CrosshairScaleSlider->GetValue() : 1.0f;
+	const float Value = CrosshairThicknessSlider ? CrosshairThicknessSlider->GetValue() : 1.0f;
 	if (UFPSRGameUserSettings* Settings = UFPSRGameUserSettings::Get())
 	{
-		Settings->SetCrosshairScale(Value, /*bSave=*/true); // persist on release
+		Settings->SetCrosshairThickness(Value, /*bSave=*/true); // persist on release
 	}
 }
 
-void UFPSRSettingsWidget::UpdateCrosshairValueText(float Value)
+void UFPSRSettingsWidget::ApplyColorPreset(const FLinearColor& Color)
 {
-	if (CrosshairScaleValueText)
+	if (UFPSRGameUserSettings* Settings = UFPSRGameUserSettings::Get())
 	{
-		CrosshairScaleValueText->SetText(FText::FromString(FString::Printf(TEXT("%.2fx"), Value)));
+		Settings->SetCrosshairColor(Color, /*bSave=*/true);
+	}
+}
+
+void UFPSRSettingsWidget::HandleColorPresetWhite()  { ApplyColorPreset(FLinearColor(1.0f, 1.0f, 1.0f, 1.0f)); }
+void UFPSRSettingsWidget::HandleColorPresetGreen()  { ApplyColorPreset(FLinearColor(0.10f, 1.0f, 0.10f, 1.0f)); }
+void UFPSRSettingsWidget::HandleColorPresetCyan()   { ApplyColorPreset(FLinearColor(0.10f, 1.0f, 1.0f, 1.0f)); }
+void UFPSRSettingsWidget::HandleColorPresetRed()    { ApplyColorPreset(FLinearColor(1.0f, 0.10f, 0.10f, 1.0f)); }
+void UFPSRSettingsWidget::HandleColorPresetYellow() { ApplyColorPreset(FLinearColor(1.0f, 1.0f, 0.10f, 1.0f)); }
+
+void UFPSRSettingsWidget::UpdateThicknessValueText(float Value)
+{
+	if (CrosshairThicknessValueText)
+	{
+		CrosshairThicknessValueText->SetText(FText::FromString(FString::Printf(TEXT("%.2fx"), Value)));
 	}
 }

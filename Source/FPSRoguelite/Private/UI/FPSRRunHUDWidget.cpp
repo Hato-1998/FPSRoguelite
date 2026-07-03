@@ -10,6 +10,11 @@
 #include "Weapon/FPSRWeaponFireComponent.h"
 #include "GameFramework/Pawn.h"
 #include "Settings/FPSRGameUserSettings.h"
+#include "Blueprint/WidgetLayoutLibrary.h"
+#include "Engine/GameViewportClient.h"
+#include "Engine/Engine.h"
+#include "GameFramework/PlayerController.h"
+#include "Camera/PlayerCameraManager.h"
 
 void UFPSRRunHUDWidget::NativeConstruct()
 {
@@ -35,11 +40,11 @@ void UFPSRRunHUDWidget::NativeConstruct()
 		}
 	}
 
-	// Apply the persisted crosshair size and subscribe for live updates from the settings overlay.
+	// Subscribe for live crosshair appearance updates (color / thickness) from the settings overlay. The values
+	// are pushed onto the material instance in NativeTick once it exists (and on every weapon swap).
 	if (UFPSRGameUserSettings* Settings = UFPSRGameUserSettings::Get())
 	{
-		ApplyCrosshairScale(Settings->GetCrosshairScale());
-		Settings->OnCrosshairSettingsChanged.AddDynamic(this, &UFPSRRunHUDWidget::HandleCrosshairScaleChanged);
+		Settings->OnCrosshairSettingsChanged.AddDynamic(this, &UFPSRRunHUDWidget::HandleCrosshairSettingsChanged);
 	}
 }
 
@@ -76,23 +81,31 @@ void UFPSRRunHUDWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTim
 		return;
 	}
 
-	// Rebuild the dynamic instance only on weapon swap (source material change), not every frame.
+	// Rebuild the dynamic instance only on weapon swap (source material change), not every frame; push the
+	// player's appearance (color / thickness) onto the fresh instance.
 	if (SourceMat != CurrentSourceMaterial)
 	{
 		CurrentSourceMaterial = SourceMat;
 		CrosshairImage->SetBrushFromMaterial(SourceMat);
 		CrosshairDMI = CrosshairImage->GetDynamicMaterial();
+		ApplyCrosshairAppearance();
 	}
 	if (!CrosshairDMI)
 	{
 		return;
 	}
 
-	// Static weapons pin Spread to 0; dynamic weapons open by current bloom (tight at rest, widens on fire,
-	// recovers when not firing). Clamped so the crosshair never over-spreads past the texture edge.
+	// Truthful spread: dynamic weapons drive the material's Spread (UV radius) from the weapon's ACTUAL current
+	// dispersion half-angle (base + bloom, x ADS), projected to screen — so the crosshair bounds where shots go.
+	// Static crosshairs (e.g. the melee dot) pin Spread to 0.
 	const bool bDynamic = FireComp->GetEquippedCrosshairUsesDynamic();
-	const float Spread = bDynamic ? FMath::Min(FireComp->GetCurrentBloom() * SpreadToPush, MaxCrosshairSpread) : 0.0f;
-	CrosshairDMI->SetScalarParameterValue(TEXT("Spread"), Spread);
+	float SpreadUV = 0.0f;
+	if (bDynamic)
+	{
+		SpreadUV = ComputeSpreadUV(FireComp->GetCurrentSpreadDegrees());
+		SpreadUV = FMath::Clamp(SpreadUV, MinCrosshairSpreadUV, MaxCrosshairSpreadUV);
+	}
+	CrosshairDMI->SetScalarParameterValue(TEXT("Spread"), SpreadUV);
 }
 
 UFPSRWeaponFireComponent* UFPSRRunHUDWidget::ResolveFireComponent()
@@ -108,19 +121,53 @@ UFPSRWeaponFireComponent* UFPSRRunHUDWidget::ResolveFireComponent()
 	return CachedFireComp.Get();
 }
 
-void UFPSRRunHUDWidget::HandleCrosshairScaleChanged(float NewScale)
+void UFPSRRunHUDWidget::HandleCrosshairSettingsChanged()
 {
-	ApplyCrosshairScale(NewScale);
+	ApplyCrosshairAppearance();
 }
 
-void UFPSRRunHUDWidget::ApplyCrosshairScale(float Scale)
+void UFPSRRunHUDWidget::ApplyCrosshairAppearance()
 {
-	if (CrosshairImage)
+	if (!CrosshairDMI)
 	{
-		// Uniform render-transform scale about the default center pivot (0.5,0.5) — orthogonal to the
-		// canvas-slot sizing and the per-frame Spread material update.
-		CrosshairImage->SetRenderScale(FVector2D(Scale, Scale));
+		return;
 	}
+	if (const UFPSRGameUserSettings* Settings = UFPSRGameUserSettings::Get())
+	{
+		// FillColor + Thickness are per-style material parameters; the SDF crosshairs read them (color tints the
+		// shape, thickness scales the line/arm/ring/box/dot weight). Orthogonal to the per-frame Spread update.
+		CrosshairDMI->SetVectorParameterValue(TEXT("FillColor"), Settings->GetCrosshairColor());
+		CrosshairDMI->SetScalarParameterValue(TEXT("Thickness"), Settings->GetCrosshairThickness());
+	}
+}
+
+float UFPSRRunHUDWidget::ComputeSpreadUV(float SpreadHalfAngleDeg) const
+{
+	const APlayerController* PC = GetOwningPlayer();
+	if (!PC || !PC->PlayerCameraManager || !GEngine || !GEngine->GameViewport || CrosshairSizePx <= 0.0f)
+	{
+		return 0.0f;
+	}
+	const float FovDeg = PC->PlayerCameraManager->GetFOVAngle();
+	if (FovDeg <= 1.0f)
+	{
+		return 0.0f;
+	}
+	FVector2D ViewportPx(0.0f, 0.0f);
+	GEngine->GameViewport->GetViewportSize(ViewportPx);
+	const float Dpi = UWidgetLayoutLibrary::GetViewportScale(this);
+	if (ViewportPx.X <= 0.0f || Dpi <= 0.0f)
+	{
+		return 0.0f;
+	}
+	// Spread as a fraction of the viewport half-width (angular, so distance-independent), then rescaled from the
+	// viewport into the crosshair image's own [-1,1] space. DPI cancels because both the viewport width and the
+	// image size are taken in logical (DPI-independent) units.
+	const float AngleRad = FMath::DegreesToRadians(FMath::Clamp(SpreadHalfAngleDeg, 0.0f, 60.0f));
+	const float HalfFovRad = FMath::DegreesToRadians(FovDeg * 0.5f);
+	const float FracHalfWidth = FMath::Tan(AngleRad) / FMath::Max(FMath::Tan(HalfFovRad), 1e-4f);
+	const float ViewportWidthLogical = ViewportPx.X / Dpi;
+	return FracHalfWidth * ViewportWidthLogical / CrosshairSizePx;
 }
 
 void UFPSRRunHUDWidget::NativeDestruct()
@@ -132,7 +179,7 @@ void UFPSRRunHUDWidget::NativeDestruct()
 
 	if (UFPSRGameUserSettings* Settings = UFPSRGameUserSettings::Get())
 	{
-		Settings->OnCrosshairSettingsChanged.RemoveDynamic(this, &UFPSRRunHUDWidget::HandleCrosshairScaleChanged);
+		Settings->OnCrosshairSettingsChanged.RemoveDynamic(this, &UFPSRRunHUDWidget::HandleCrosshairSettingsChanged);
 	}
 
 	Super::NativeDestruct();
