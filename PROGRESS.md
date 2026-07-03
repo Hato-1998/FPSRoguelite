@@ -6,6 +6,12 @@
 
 **최종 갱신: 2026-07-04**
 
+## 🔔 핸드오프 (2026-07-04 p · 애니 콘텐츠 저작 = 새 세션 인계) — 🎬 코드 인프라 완료(A/B/C+보스+무기 노리쇠 훅 main 머지·push), **남은 건 에디터 콘텐츠 저작**. 직전 세션 VibeUE MCP **세션 미연결**(에디터 열림·8088 LISTENING이나 MCP 툴 부재) → editor-bridge 인계.
+> **추가 코드(무기 노리쇠, main 머지 `5655aaf`)**: DA `WeaponAnimInstanceClass`+`WeaponFireMontage`/`WeaponReloadMontage` → 발사/재장전 시 `WeaponMesh1P`에 노리쇠 몽타주를 팔과 동기 재생(오너+관전자). 신규복제0. 빌드+스모크 통과.
+> **사용자 결정(2026-07-04)**: 애니 콘텐츠 **처음부터·팩 데모 AnimBP/몽타주 미사용**(raw 시퀀스만 소스), 있던 것(BroBot AnimBP)도 새로. **전용 Animation 폴더**: 무기=`Content/Weapons/Animation/`(존재)·캐릭터=`Content/Character/Animation/`(생성). **Rifle(MAK12) 1종 먼저** 완성해 템플릿.
+> **재개 프롬프트**: **[Docs/AnimationContent_ResumePrompt.md](Docs/AnimationContent_ResumePrompt.md)** (복붙용 + 코드계약 표 + 소스 시퀀스 + 작업순서 A/B/C + PIE 검증). 연결=에디터+VibeUE MCP(새 세션 연결 확인) 또는 DA배선/몽타주는 headless commandlet. AnimBP 그래프/BlendSpace는 취약하면 사용자 수동.
+> **미커밋 Content**: 없음(사용자 WIP 삭제·워킹트리 클린). 코드/문서만 커밋.
+
 ## 🔔 핸드오프 (2026-07-04 o · 통합 애니메이션 패스 A/B/C = U15+U19+U20 코드 흡수) — ✅ **1P무기(A)+3P팀원(B)+적VAT(C)+보스스켈 코드 인프라 완료·검증·Codex 게이트 통과 → `phase/p6-animation-pass` → `--no-ff` main 머지**. **콘텐츠 저작=사용자**([Docs/AnimationPass_ContentGuide.md](Docs/AnimationPass_ContentGuide.md)). 다음=사용자 콘텐츠 저작 후 PIE / 잔여=U13(VFX/오디오)·U14(perf·원복·패키지)
 > **범위**: 세 도메인 애니를 한 패스로. **본질=코드 인프라 패스**(훅·필드·드라이버) — 실제 애니 콘텐츠(무기/팔 AnimBP·몽타주·VAT idle/attack/death 베이크·머티리얼)는 사용자 저작(결정 2026-07-03). 전부 null-safe·휴면이라 콘텐츠 전 무회귀.
 > **A(1P, `9e06f83`)**: DA `ReloadMontage`+`WeaponParts1P`(부품 struct/배열)·`OnRep_Reloading`(bReloading RepNotify=신규복제0, 오너 1P팔 몽타주 재생속도=몽타주/ReloadTime 정합·프리즈게이트·SetReloading 수동OnRep로 리슨호스트 보정)·`RefreshWeaponPartComponents`(스켈무기 런타임부품). 그립=`ArmsAnimInstanceClass` 재사용.
