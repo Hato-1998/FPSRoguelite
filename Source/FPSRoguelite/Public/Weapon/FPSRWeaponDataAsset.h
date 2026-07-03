@@ -104,6 +104,12 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Visual")
 	TSoftClassPtr<UAnimInstance> ArmsAnimInstanceClass;
 
+	/** Optional per-weapon anim instance applied to the 1P WEAPON mesh (WeaponMesh1P) on equip. The weapon has its OWN
+	 *  skeleton (SKEL_LPAMG_<W>), so its bolt/magazine (A_FP_WEP_<W>_*) needs its own AnimBP to play WeaponFire/
+	 *  ReloadMontage below. Only applied to skeletal weapons; null = no bolt animation (null-safe). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Visual")
+	TSoftClassPtr<UAnimInstance> WeaponAnimInstanceClass;
+
 	/** Socket on FirstPersonArms the weapon mesh attaches to (NAME_None = arms component root). */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Visual")
 	FName WeaponAttachSocket = NAME_None;
@@ -120,10 +126,22 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Visual")
 	TSoftObjectPtr<UAnimMontage> FireMontage;
 
+	/** Optional montage played on the WEAPON mesh (WeaponMesh1P) each shot — the bolt/action cycle (A_FP_WEP_<W>_Fire).
+	 *  Played on the same fire hook as FireMontage so the bolt syncs with the arm recoil. Needs WeaponAnimInstanceClass
+	 *  set. Null = no bolt animation (null-safe). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Visual")
+	TSoftObjectPtr<UAnimMontage> WeaponFireMontage;
+
 	/** Optional montage played on the arms on reload start (owner-client 1P). Driven by UFPSRWeaponInstance's
 	 *  OnRep_Reloading (server-confirmed edge), scaled so its play length matches the resolved ReloadTime. Null = none. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Visual")
 	TSoftObjectPtr<UAnimMontage> ReloadMontage;
+
+	/** Optional montage played on the WEAPON mesh (WeaponMesh1P) on reload — the magazine/bolt action (A_FP_WEP_<W>_
+	 *  Reload). Played on the same reload hook as ReloadMontage, rate-scaled to the ReloadTime. Needs
+	 *  WeaponAnimInstanceClass set. Null = no weapon reload animation (null-safe). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Visual")
+	TSoftObjectPtr<UAnimMontage> WeaponReloadMontage;
 
 	/** Optional modular cosmetic parts child-attached to the 1P skeletal weapon mesh on equip (U15). Static/melee
 	 *  weapons and empty lists attach nothing (null-safe). Parts inherit the weapon mesh's OnlyOwnerSee visibility. */
