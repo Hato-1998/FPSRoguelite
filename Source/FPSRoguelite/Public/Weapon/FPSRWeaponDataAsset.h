@@ -103,6 +103,12 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Visual")
 	TSoftObjectPtr<UParticleSystem> MuzzleFlash;
 
+	/** Crosshair style (preferred). When set, this style's Material + dynamic flag drive the HUD crosshair,
+	 *  overriding the legacy CrosshairMaterial / bUseDynamicCrosshair below (those remain as a fallback used
+	 *  only when CrosshairStyle is unset). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Visual")
+	TSoftObjectPtr<class UFPSRCrosshairStyleDataAsset> CrosshairStyle;
+
 	/** Per-weapon HUD crosshair material instance (a child MI of M_DynamicCrosshair; texture + spread tuning
 	 *  baked into the MI). Null = HUD default crosshair MI. The HUD widget drives only the per-frame Spread
 	 *  parameter on a dynamic copy of this material; all other tuning lives in the MI (designer-authored). */

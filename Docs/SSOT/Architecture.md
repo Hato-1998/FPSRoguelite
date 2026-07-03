@@ -44,11 +44,12 @@ Source/FPSRoguelite/Public/
 ├── MetaProgression/  SaveGame, UpgradeTree, Subsystem
 ├── Performance/      ActorPool, SignificanceConfig, 인스턴싱
 ├── Messages/         GMS Payload structs
-├── Settings/         **UFPSRGameUserSettings**(UGameUserSettings 서브클래스=로컬설정 영속전담, MasterVolume) + **UFPSRAudioSettings**(UDeveloperSettings, SoundMix/SoundClass soft ref=에셋경로 데이터드리븐)
+├── Settings/         **UFPSRGameUserSettings**(UGameUserSettings 서브클래스=로컬설정 영속전담, MasterVolume·CrosshairScale+`OnCrosshairSettingsChanged` 델리게이트) + **UFPSRAudioSettings**(UDeveloperSettings, SoundMix/SoundClass soft ref=에셋경로 데이터드리븐)
 ├── Audio/            **UFPSRAudioSubsystem**(UWorldSubsystem, OnWorldBeginPlay 마스터볼륨 재적용=SetSoundMixClassOverride+PushSoundMixModifier; 콘솔 FPSR.SetMasterVolume)
 └── UI/               HUD(공유XP바/하단 무기바), CardSelect, MissionUI, MetaUI, **FPSRSettingsWidget**(CommonActivatableWidget 공용 설정 오버레이=메뉴 push/인게임 논-포즈 GameMenu push)
 ```
 - 사운드 설정(마스터 볼륨, MVP): 영속=`UFPSRGameUserSettings`(GameUserSettings.ini), 적용=`UFPSRAudioSubsystem`(SoundClass+SoundMix 표준), 라우팅 에셋=`UFPSRAudioSettings` soft ref(DefaultGame.ini). 확장(SFX/Music/UI)=자식 SoundClass+필드 추가(중앙 0수정). 설계 상세 `Docs/SoundSettings_Handoff.md`.
+- 크로스헤어 크기 설정(U17): 영속=`UFPSRGameUserSettings.CrosshairScale`(GameUserSettings.ini, Clamp 0.5~2.5, 기본 1.0), 조절=`FPSRSettingsWidget` 슬라이더(**GUS 직접**·크로스헤어 서브시스템 無 — 오디오와 달리 world-scoped 적용 없음), 실시간 반영=`UFPSRRunHUDWidget`이 `OnCrosshairSettingsChanged` 구독→`CrosshairImage` RenderScale. **비대칭 근거=소비자(HUD)가 라이브**라 델리게이트 필요(볼륨은 즉시 적용이라 불요). 고아 `WBP_BasicCrosshair`(V3 잔재)는 미사용.
 - 글로벌 스탯(Luck, GlobalCrit, CritMult, MoveSpeed, MaxHealth, HealthRegen, PickupRadius, XPGain) → Character ASC AttributeSet
   - ※ Luck = 광역 행운(카드 등급 가중 + 향후 드랍품질·희귀스폰 등). RarityBonus는 Luck으로 통합·폐지(2026-06-02). PickupRadius·XPGain·MoveSpeed·HealthRegen은 미구현(필요 단계에서 추가)
 - 무기별 스탯 → WeaponInstance 스탯 블록 (ASC 아님)

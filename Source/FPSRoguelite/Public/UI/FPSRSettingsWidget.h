@@ -8,6 +8,7 @@
 class USlider;
 class UCommonTextBlock;
 class UCommonButtonBase;
+class UButton;
 
 /** Shared settings overlay (MVP = master volume). Pushed to the Menu layer from the main menu and to the
  *  GameMenu layer in-game (non-pause overlay — 4-player coop never stops the server). The slider drives
@@ -38,6 +39,30 @@ protected:
 	UPROPERTY(meta = (BindWidgetOptional))
 	TObjectPtr<UCommonTextBlock> MasterVolumeValueText;
 
+	/** Crosshair thickness slider (0.5..2.0). Optional so a WBP that predates it still binds. */
+	UPROPERTY(meta = (BindWidgetOptional))
+	TObjectPtr<USlider> CrosshairThicknessSlider;
+
+	/** Optional "N.NNx" readout next to the thickness slider. */
+	UPROPERTY(meta = (BindWidgetOptional))
+	TObjectPtr<UCommonTextBlock> CrosshairThicknessValueText;
+
+	/** Crosshair color preset buttons (each sets a fixed color). All optional so the WBP wires whichever it has. */
+	UPROPERTY(meta = (BindWidgetOptional))
+	TObjectPtr<UButton> ColorPresetWhite;
+
+	UPROPERTY(meta = (BindWidgetOptional))
+	TObjectPtr<UButton> ColorPresetGreen;
+
+	UPROPERTY(meta = (BindWidgetOptional))
+	TObjectPtr<UButton> ColorPresetCyan;
+
+	UPROPERTY(meta = (BindWidgetOptional))
+	TObjectPtr<UButton> ColorPresetRed;
+
+	UPROPERTY(meta = (BindWidgetOptional))
+	TObjectPtr<UButton> ColorPresetYellow;
+
 	/** Optional explicit Back/Close button (CommonUI Back also closes). */
 	UPROPERTY(meta = (BindWidgetOptional))
 	TObjectPtr<UCommonButtonBase> BackButton;
@@ -51,6 +76,21 @@ private:
 	UFUNCTION()
 	void HandleMasterVolumeCommitted();
 
+	/** Live drag: apply thickness to the settings singleton (broadcasts to HUD), no disk write, refresh readout. */
+	UFUNCTION()
+	void HandleCrosshairThicknessChanged(float Value);
+
+	/** Drag released: persist the current crosshair thickness. */
+	UFUNCTION()
+	void HandleCrosshairThicknessCommitted();
+
+	/** Color preset button handlers — each applies + persists a fixed crosshair color. */
+	UFUNCTION() void HandleColorPresetWhite();
+	UFUNCTION() void HandleColorPresetGreen();
+	UFUNCTION() void HandleColorPresetCyan();
+	UFUNCTION() void HandleColorPresetRed();
+	UFUNCTION() void HandleColorPresetYellow();
+
 	UFUNCTION()
 	void HandleBackClicked();
 
@@ -62,4 +102,10 @@ private:
 
 	/** Format a 0..1 scalar as an "NN%" string into the readout. */
 	void UpdateValueText(float Value);
+
+	/** Shared: apply + persist a crosshair color preset. */
+	void ApplyColorPreset(const FLinearColor& Color);
+
+	/** Format a crosshair thickness multiplier as an "N.NNx" string into the readout. */
+	void UpdateThicknessValueText(float Value);
 };

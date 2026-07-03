@@ -4,6 +4,7 @@
 #include "AbilitySystem/Attributes/FPSRCombatSet.h"
 #include "Weapon/FPSRWeaponInventoryComponent.h"
 #include "Weapon/FPSRWeaponInstance.h"
+#include "Weapon/FPSRWeaponFireComponent.h"
 #include "Weapon/FPSRWeaponFragment.h"
 #include "Weapon/FPSRWeaponDataAsset.h"
 #include "Weapon/FPSRProjectile.h"
@@ -85,6 +86,28 @@ void UFPSRGA_WeaponFire_Projectile::ActivateAbility(
 		ProjectilePierce = FMath::Max(0, Stats->ProjectilePierce);
 		SpreadDegrees = Stats->SpreadDegrees;
 		KnockbackStrength = FMath::Max(0.0f, Stats->KnockbackStrength);
+	}
+
+	// Grow the dispersion cone with sustained-fire bloom (+ ADS multiplier), matching the hitscan weapons and the
+	// truthful HUD crosshair. Bloom is tracked on the fire component (input cadence); the projectile shot direction
+	// was previously base-spread only, so a spraying launcher never actually widened. (Projectiles have no
+	// deterministic-ADS single-line path — they always use the resolved cone at the trace below.)
+	//
+	// KNOWN LIMITATION (follow-up, systemic — shared with the hitscan trace): CurrentBloom is owning-client-local
+	// (advanced only on the locally-controlled owner in FireOneShot/TickComponent; not replicated). On a server, a
+	// REMOTE client's fire component reads bloom == 0, so the authoritative projectile spawn below uses base spread
+	// while that client's HUD crosshair shows the widened cone. This is exact parity with the hitscan trace (same
+	// GetCurrentBloom() read) and NOT a regression (projectiles were base-spread only before); the listen-server
+	// host + single-player are always exact. Cosmetic only in PvE co-op — the server owns the spawn, so it is not an
+	// exploit. Proper fix = server-authoritative bloom (advance server-side when a shot is accepted, or replicate),
+	// applied to hitscan + projectile together — deferred as its own weapon-net unit.
+	if (UFPSRWeaponFireComponent* FireComp = Avatar->FindComponentByClass<UFPSRWeaponFireComponent>())
+	{
+		const float Bloom = FireComp->GetCurrentBloom();
+		const bool bAiming = FireComp->IsAiming();
+		SpreadDegrees = Stats
+			? UFPSRWeaponFireComponent::ComputeSpreadDegrees(*Stats, Bloom, bAiming)
+			: SpreadDegrees + Bloom;
 	}
 
 	// Server-authoritative gates: empty mag / reloading / fire-rate. Ammo is consumed after the fragment hooks
