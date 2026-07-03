@@ -7,7 +7,7 @@
 **최종 갱신: 2026-07-03**
 
 ## 🔔 핸드오프 (2026-07-03 n · U12 크로스헤어 시스템 + U17 설정 = **main 머지 완료**) — ✅ **파라메트릭 진실 크로스헤어 + 색/두께 설정 전면 재구축 → 선별 커밋 + Codex 머지게이트 + `--no-ff` main 머지 + push 완료**. 다음=2차 잔여(U15 1P무기애님 / U19 3P팀원애님 / U20 적애님, `Docs/TaskPrompts_Master §C`)
-> **머지**: `phase/settings-system`(16커밋) → `main` `--no-ff` 머지·push 완료(2026-07-03). 에디터 종료 후 락 없이 클린 머지. 브랜치 삭제(로컬+원격). 콘텐츠 8종(WBP_Settings 색/두께 UI·MI/M_XH 튜닝·DA_Weapon_Rifle + 세션 저작 BP_FPSRPlayer·WBP_HitMarker·L_MainMenu, 사용자 "전부 포함" 승인) 동반 커밋.
+> **머지**: `phase/settings-system` → `main` `--no-ff` 머지(`36cf3d4`)·push 완료(2026-07-03). 에디터 종료 후 락 없이 클린 머지(origin/main 2 docs 커밋 선행 FF 후 TaskPrompts 자동병합, 충돌 0). 브랜치 삭제(로컬+원격). 콘텐츠 8종(WBP_Settings 색/두께 UI·MI/M_XH 튜닝·DA_Weapon_Rifle + 세션 저작 BP_FPSRPlayer·WBP_HitMarker·L_MainMenu, 사용자 "전부 포함" 승인) 동반 커밋.
 > **Codex 머지게이트**: **P2 1건** — 발사체 블룸이 원격 클라에 서버권위적이지 않음(`CurrentBloom` owning-client-local·비복제 → 서버의 원격 클라 스폰=bloom 0). **검증=기존 히트스캔 트레이스와 동일 패턴(parity)·회귀 아님(발사체 원래 base-spread)·리슨호스트/싱글 정확·PvE 코옵 코스메틱(익스플로잇 아님)**. → **문서화(인코드 주석 `FPSRGA_WeaponFire_Projectile.cpp:91` + TaskPrompts 백로그) + 후속 이월**(정식=서버권위/복제 블룸 히트스캔+발사체 공동, 별도 무기-네트 유닛). 사용자 승인 후 머지.
 > **결과(재정의, l 이후)**: 텍스처-warp 크로스헤어 폐기→절차적 파라메트릭. ①U17 크기설정 폐기→**색/두께**만(GUS `CrosshairColor`+`CrosshairThickness` 0.5~2.0+`OnCrosshairSettingsChanged`, 설정위젯 두께슬라이더·색프리셋5 UButton) ②**진실 크로스헤어**(런HUD `ComputeSpreadUV`=무기 실분산 콘 base+블룸×ADS를 FOV/뷰포트/DPI 화면투영→탄이 크로스헤어 안 착탄) ③발사체 블룸(`ComputeSpreadDegrees` 서버) ④무기별 `CrosshairStyle` DataAsset + 4종 절차적 SDF(Cross/Ring/BoxDots/Dot). 빌드×2+Smoke 4/4+사용자 PIE. 구 warp/텍스처=미사용 존치.
 
