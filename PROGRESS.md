@@ -4,7 +4,22 @@
 > **작업 단계를 끝낼 때마다, 그리고 중단 전 반드시 이 파일을 갱신하고 커밋한다.**
 > 확정 설계·기획·코드구조·규칙은 `Game.md`(**SSOT 허브** → 도메인별 `Docs/SSOT/*.md`, 작업별 라우팅은 허브 §0-1), **완료 작업 상세는 `git log --oneline`**. 여기엔 *무엇을 했는지*만 요약한다.
 
-**최종 갱신: 2026-07-04**
+**최종 갱신: 2026-07-05**
+
+## 🔔 핸드오프 (2026-07-05 · 무기 모듈총구+ADS 코드 = 새 세션 인계, 컨텍스트 소진) — 🎯 **AG14W Rifle 1P 애니 세트 완성(사용자 PIE ✅) + 모듈형 총구(파트 소켓) + IsDataValid 소켓검증 + 절차적 ADS 스캐폴딩 + 애셋통합 문서2**. 코드/문서는 커밋(빌드 Succeeded·스모크 4/4·main), **콘텐츠는 미커밋(사용자 작업)**. ADS 정렬 미완 → 다음 세션.
+> **이 브랜치(main)에서 한 일(커밋됨)**:
+> - **모듈형 총구**(`FPSRCharacter` `CachedMuzzleComponent`): 총구 플래시를 `MuzzleSocket`을 가진 **파트 컴포넌트**(AG14W=Forestock, MAK12=Barrel)에 부착, 없으면 리시버 폴백(관례 기반, 스키마변경0). 오너+관전자 경로. ⚠️발견: DA `MuzzleSocket`이 `"SOCKET Muzzle"`(공백) 오타로 저장돼 있었음→`unreal.Name("SOCKET_Muzzle")`로 교정.
+> - **`UFPSRWeaponDataAsset::IsDataValid` 소켓검증**: `MuzzleSocket`·`WeaponParts1P` 소켓이 실제 메시/파트에 존재하는지(본/소켓 겸용, `SkeletalMeshHasAttachPoint`). 공백오타·오소켓 저작시점 차단.
+> - **절차적 ADS(A안)**: `AFPSRCharacter::UpdateAimDownSights(DeltaTime)` — 조준 시 무기 `AimSocket`이 카메라 전방중앙선(`ADSSightDistance`)에 오도록 `FirstPersonArms` 상대위치 오프셋 보간(오너로컬·translation). `FPSRWeaponFireComponent::TickComponent`에서 호출(캐릭터 Tick은 `ENABLE_DRAW_DEBUG`-only). DA 신규필드 `AimSocket`/`ADSSightDistance`(+기존 `bHasADS`/`ADSInterpSpeed` 재사용). 근거: FP카메라=캡슐고정(head본 미추종)이라 팩 조준애니(head-camera 전제)가 사이트 정렬 안 함→사이트를 카메라로 가져옴.
+> - **문서**: `Docs/AssetIntegration_Protocol.md`(범용 애셋통합 4단계: 규약역설계→의도매핑→저작→조립검증+데이터검증), `Docs/WeaponPack_Integration.md`(LowPolyAnimatedModernGuns 규약: 소켓·2탄창스왑·additive·모듈총구·BS파이썬함정).
+> **다음 코드 작업(구체)**:
+> - **ADS 회전 정렬**(현 translation만 → 총이 기울어 보임): `UpdateAimDownSights`에 회전 정렬 추가(AimSocket forward축을 카메라 forward에 맞추는 상대회전 보간). 또는 별도 `AimRotationSocket`.
+> - **ADS 정렬값 튜닝은 콘텐츠**: `DA_Weapon_Rifle.ADSSightDistance`(현25 **너무 짧음→총이 얼굴에 붙음, 40~70 권장**) + `SK_LPAMG_AG14W`의 `SOCKET_Aim` 위치(현 0,9,7.3).
+> **⚠️ 블로커/주의**:
+> - **ADS 정렬 미완**(PIE: 총 너무 가깝고 기울어짐) — 위 튜닝+회전정렬 필요.
+> - **조준+이동 시 걷기 애니 재생 문제**(사용자: "조준이 상위 애니여야 함") = **AnimBP 콘텐츠 이슈**(`ABP_Arms_AG14W` BlendByBool이 조준 우선 못함) → AnimGraph 재구조(조준을 상위 레이어, 또는 aimed locomotion 블렌드). ⚠️코드 아님, 에디터 저작.
+> - **BS 파이썬저작 함정**: `BS_Arms_AG14W`류는 런타임 보간데이터 미빌드로 팔/무기 사라질 수 있음→저작후 강제리빌드+AnimBP재컴파일 or 에디터직접생성, 콜드PIE 검증([[anim-content-authoring-vibeue-pipeline]]).
+> **미커밋 콘텐츠(사용자 작업, 커밋 안 함)**: `Content/Character/Animation/`·`Content/Weapons/Animation/`(AG14W+보류 MAK12 몽타주·BS·AnimBP), `DA_Weapon_Rifle`(AimSocket 등 배선), `SK_LPAMG_AG14W`(SOCKET_Muzzle제거·SOCKET_Aim추가), `SM_LPAMG_AG14W_Forestock_Default/Extended`(총구 yaw90), `SK_LPAMG_MAK12`(보류 소켓). 스퓨리어스=`L_Sandbox.umap`·`BP_FPSRPlayer.uasset`(내 임시액터/미변경, 커밋말것). 무기↔팩코드 매핑=[[weapon-da-pack-code-mapping]].
 
 ## 🔔 핸드오프 (2026-07-04 p · 애니 콘텐츠 저작 = 새 세션 인계) — 🎬 코드 인프라 완료(A/B/C+보스+무기 노리쇠 훅 main 머지·push), **남은 건 에디터 콘텐츠 저작**. 직전 세션 VibeUE MCP **세션 미연결**(에디터 열림·8088 LISTENING이나 MCP 툴 부재) → editor-bridge 인계.
 > **추가 코드(무기 노리쇠, main 머지 `5655aaf`)**: DA `WeaponAnimInstanceClass`+`WeaponFireMontage`/`WeaponReloadMontage` → 발사/재장전 시 `WeaponMesh1P`에 노리쇠 몽타주를 팔과 동기 재생(오너+관전자). 신규복제0. 빌드+스모크 통과.

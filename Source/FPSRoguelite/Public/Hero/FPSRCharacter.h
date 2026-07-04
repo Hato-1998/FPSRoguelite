@@ -90,6 +90,12 @@ public:
 	/** Owner-client: play the equipped weapon's per-shot cosmetics (fire montage + sound + muzzle flash). */
 	void PlayWeaponFireCosmetics();
 
+	/** Owner-client per-frame procedural aim-down-sights: offset the 1P arms (relative to the camera) so the equipped
+	 *  weapon's AimSocket sits on the camera's forward centre-line when aiming, interpolated by the weapon's
+	 *  ADSInterpSpeed. Called from UFPSRWeaponFireComponent::TickComponent (which already ticks + owns the aim state).
+	 *  No-op on remote pawns / weapons without ADS or an AimSocket. Translation only (rotation-align is a follow-up). */
+	void UpdateAimDownSights(float DeltaTime);
+
 	/** Play reload cosmetics on a server-confirmed reload-start edge (called from UFPSRWeaponInstance::OnRep_Reloading,
 	 *  which fires on every client holding the replicated instance). Owner client -> 1P arms ReloadMontage; remote
 	 *  clients -> 3P body ReloadMontage3P. No-op when bIsReloading is false, during the level-up freeze, or when the
@@ -376,9 +382,27 @@ protected:
 	FName CachedMuzzleSocket = NAME_None;
 
 	/** The weapon mesh currently shown (skeletal OR static — whichever the equipped weapon's DA provides). Fire
-	 *  cosmetics (muzzle flash / sound) attach here so they track the active mesh. Null when no weapon is equipped. */
+	 *  cosmetics (fire sound) attach here so they track the active mesh. Null when no weapon is equipped. */
 	UPROPERTY(Transient)
 	TObjectPtr<UMeshComponent> ActiveWeaponMesh;
+
+	/** Component the muzzle flash attaches to at CachedMuzzleSocket. On modular weapons the muzzle socket lives on a
+	 *  cosmetic PART (barrel/forestock) — swapping the part moves the muzzle — so RefreshWeaponPartComponents resolves
+	 *  this to whichever part component carries CachedMuzzleSocket, falling back to ActiveWeaponMesh (receiver) when no
+	 *  part provides it. Convention-based: no extra DA field — the part that owns a socket named MuzzleSocket wins. */
+	UPROPERTY(Transient)
+	TObjectPtr<UMeshComponent> CachedMuzzleComponent;
+
+	// --- Procedural aim-down-sights (owner-local) ---
+	/** FirstPersonArms relative-to-camera location captured on BeginPlay (the "hip" base the ADS offset is added to). */
+	FVector BaseArmsRelLoc = FVector::ZeroVector;
+	/** Interpolated ADS arm offset (camera space), added to BaseArmsRelLoc each frame. Zero = hip. */
+	FVector CurrentADSArmOffset = FVector::ZeroVector;
+	/** Equipped weapon's ADS params, cached on equip (RefreshFirstPersonWeaponVisual). */
+	FName CachedAimSocket = NAME_None;
+	float CachedADSSightDistance = 25.0f;
+	bool bCachedHasADS = false;
+	float CachedADSInterpSpeed = 12.0f;
 
 	/** Runtime-created modular weapon-part components (U15), child-attached to WeaponMesh1P and rebuilt on each
 	 *  weapon change. Owner-only-visible (match the 1P weapon mesh). Empty for static/melee/partless weapons. */

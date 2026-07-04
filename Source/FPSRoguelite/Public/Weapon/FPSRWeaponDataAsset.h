@@ -118,6 +118,18 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Visual")
 	FName MuzzleSocket = NAME_None;
 
+	/** Aim-down-sights (procedural ADS): socket on the WEAPON mesh whose position is aligned to the camera's forward
+	 *  centre-line when aiming — the 1P arms offset so this socket sits on the view axis (the fixed capsule camera does
+	 *  not follow a head bone, so the sight is brought to the camera instead). Put it on the optic / iron-sight line at
+	 *  sight height. NAME_None = no procedural alignment (only the ADS FOV zoom + spread run). Gated by BaseStats.bHasADS. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Visual")
+	FName AimSocket = NAME_None;
+
+	/** ADS: distance (cm) in front of the camera the AimSocket is placed on the view centre-line. Larger = the sight
+	 *  sits further out. Tune together with AimSocket so the sights read centred. Ignored when AimSocket is NAME_None. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Visual", meta = (ClampMin = "1.0"))
+	float ADSSightDistance = 25.0f;
+
 	/** Optional montage played on the arms when this weapon is equipped. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Visual")
 	TSoftObjectPtr<UAnimMontage> EquipMontage;

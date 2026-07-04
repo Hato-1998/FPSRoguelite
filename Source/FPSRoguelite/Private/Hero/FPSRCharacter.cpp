@@ -170,6 +170,8 @@ void AFPSRCharacter::BeginPlay()
 	{
 		bDefaultArmsUsesBlueprint = (FirstPersonArms->GetAnimationMode() == EAnimationMode::AnimationBlueprint);
 		DefaultArmsAnimClass = FirstPersonArms->AnimClass;
+		// Hip base for procedural ADS: UpdateAimDownSights adds its offset to this each frame (owner-local).
+		BaseArmsRelLoc = FirstPersonArms->GetRelativeLocation();
 	}
 }
 
@@ -962,6 +964,11 @@ void AFPSRCharacter::RefreshFirstPersonWeaponVisual()
 	CachedMuzzleSocket = NAME_None;
 
 	ActiveWeaponMesh = nullptr;
+	CachedMuzzleComponent = nullptr;
+
+	// Reset ADS caching; the arm offset interps back to hip when no weapon provides ADS.
+	CachedAimSocket = NAME_None;
+	bCachedHasADS = false;
 
 	if (!Weapon)
 	{
@@ -1058,6 +1065,12 @@ void AFPSRCharacter::RefreshFirstPersonWeaponVisual()
 	CachedMuzzleFlash = Weapon->MuzzleFlash.IsNull() ? nullptr : Weapon->MuzzleFlash.LoadSynchronous();
 	CachedMuzzleSocket = Weapon->MuzzleSocket;
 
+	// ADS params for the owner-local procedural aim-down-sights (UpdateAimDownSights).
+	CachedAimSocket = Weapon->AimSocket;
+	CachedADSSightDistance = Weapon->ADSSightDistance;
+	bCachedHasADS = Weapon->BaseStats.bHasADS;
+	CachedADSInterpSpeed = Weapon->BaseStats.ADSInterpSpeed;
+
 	// Rebuild modular cosmetic parts on the (skeletal) weapon mesh from the weapon's part list.
 	RefreshWeaponPartComponents(Weapon);
 
@@ -1112,6 +1125,22 @@ void AFPSRCharacter::RefreshWeaponPartComponents(const UFPSRWeaponDataAsset* Wea
 		PartComp->AttachToComponent(WeaponMesh1P, FAttachmentTransformRules::KeepRelativeTransform, PartDef.Socket);
 		PartComp->SetRelativeTransform(PartDef.Offset);
 		WeaponPartComponents1P.Add(PartComp);
+	}
+
+	// Modular muzzle source: the muzzle socket lives on a cosmetic part (barrel/forestock), so prefer the part
+	// component that carries CachedMuzzleSocket — swapping that part then moves the muzzle. When no part provides it,
+	// CachedMuzzleComponent stays null and the fire site falls back to the receiver (ActiveWeaponMesh). Convention-
+	// based: the part whose mesh owns a socket named MuzzleSocket wins, so no extra DA field is needed.
+	if (!CachedMuzzleSocket.IsNone())
+	{
+		for (UStaticMeshComponent* Part : WeaponPartComponents1P)
+		{
+			if (Part && Part->DoesSocketExist(CachedMuzzleSocket))
+			{
+				CachedMuzzleComponent = Part;
+				break;
+			}
+		}
 	}
 }
 
@@ -1208,9 +1237,42 @@ void AFPSRCharacter::PlayWeaponFireCosmetics()
 		}
 		if (CachedMuzzleFlash)
 		{
-			UGameplayStatics::SpawnEmitterAttached(CachedMuzzleFlash, ActiveWeaponMesh, CachedMuzzleSocket);
+			// Muzzle flash attaches to the modular part that owns the muzzle socket (barrel/forestock) when present,
+			// else the receiver. CachedMuzzleComponent is resolved per-equip in RefreshWeaponPartComponents.
+			UMeshComponent* MuzzleComp = CachedMuzzleComponent ? CachedMuzzleComponent : ActiveWeaponMesh;
+			UGameplayStatics::SpawnEmitterAttached(CachedMuzzleFlash, MuzzleComp, CachedMuzzleSocket);
 		}
 	}
+}
+
+void AFPSRCharacter::UpdateAimDownSights(float DeltaTime)
+{
+	// Owner-local only — the 1P arms are OnlyOwnerSee and the offset only affects the local view (no-op on a dedicated
+	// server or remote pawns). Called every frame from UFPSRWeaponFireComponent::TickComponent (the character's own
+	// Tick is debug-only / disabled in shipping).
+	if (!IsLocallyControlled() || !FirstPersonArms || GetNetMode() == NM_DedicatedServer)
+	{
+		return;
+	}
+
+	// Target arm offset (camera space): when aiming, bring the weapon's AimSocket onto the camera's forward centre-line
+	// (camera-local +X) at ADSSightDistance; otherwise 0 (hip). The fixed capsule camera doesn't follow a head bone, so
+	// the SIGHT is brought to the camera instead of moving the camera to the sight.
+	FVector TargetOffset = FVector::ZeroVector;
+	if (bCachedHasADS && !CachedAimSocket.IsNone() && WeaponFire && WeaponFire->IsAiming()
+		&& WeaponMesh1P && WeaponMesh1P->DoesSocketExist(CachedAimSocket))
+	{
+		// AimSocket location relative to the arms — invariant to the current ADS offset (socket + arms move together),
+		// so there is no feedback loop. The arms keep their authored relative rotation; only the location is offset.
+		const FTransform ArmsWorld = FirstPersonArms->GetComponentTransform();
+		const FVector SocketLocArms = ArmsWorld.InverseTransformPositionNoScale(WeaponMesh1P->GetSocketLocation(CachedAimSocket));
+		const FVector SocketInCamSpace = FirstPersonArms->GetRelativeRotation().RotateVector(SocketLocArms) + BaseArmsRelLoc;
+		const FVector AimPointCamSpace(CachedADSSightDistance, 0.0f, 0.0f); // camera-local forward is +X
+		TargetOffset = AimPointCamSpace - SocketInCamSpace;
+	}
+
+	CurrentADSArmOffset = FMath::VInterpTo(CurrentADSArmOffset, TargetOffset, DeltaTime, FMath::Max(0.01f, CachedADSInterpSpeed));
+	FirstPersonArms->SetRelativeLocation(BaseArmsRelLoc + CurrentADSArmOffset);
 }
 
 void AFPSRCharacter::MulticastFireCosmetics_Implementation()
@@ -1244,7 +1306,8 @@ void AFPSRCharacter::MulticastFireCosmetics_Implementation()
 		{
 			if (UParticleSystem* Muzzle = Weapon->MuzzleFlash.LoadSynchronous())
 			{
-				UGameplayStatics::SpawnEmitterAttached(Muzzle, ActiveWeaponMesh, Weapon->MuzzleSocket);
+				UMeshComponent* MuzzleComp = CachedMuzzleComponent ? CachedMuzzleComponent : ActiveWeaponMesh;
+				UGameplayStatics::SpawnEmitterAttached(Muzzle, MuzzleComp, Weapon->MuzzleSocket);
 			}
 		}
 		if (FirstPersonArms && !Weapon->FireMontage.IsNull())
