@@ -6,6 +6,15 @@
 
 **최종 갱신: 2026-07-05**
 
+## 🔔 핸드오프 (2026-07-05 r · #3 다중맵 아키텍처 A 사인오프 — Codex 5R 컨설트 수렴 + SSOT 반영 + Tier 0 프롬프트 — PM/문서 클론, main) — ✅ 설계 수렴·문서화 완료. 다음 = Tier 0 구현(새 세션·활성 클론) / 에셋(SyntyPass·적교체)=별도 세션
+> **이 세션 = 문서/PM만**(코드 무접촉). #3 다중맵 "전역 예산 하 게임필/재집결"을 **Codex 5라운드 컨설트**로 수렴 → 리포트 [`Docs/Review/20260705-multimap-budget-regroup.md`](Docs/Review/20260705-multimap-budget-regroup.md).
+> **수렴 명제**: 다중맵=자유, 본게임 압력·보상·burst는 **"2명 이상 같은 전선"에서 선명**. 솔로=정찰 모드. 하드 테더 없음. **전역 공유 캡**(잠정 200, perf 미검증)·map-aware allocator("2인+ 맵>솔로 맵")·per-map 플로우필드 레지스트리·NetCull→RepGraph→level-streaming. 문=쏴서 파괴(기존 Chaos, b-1 확인).
+> **SSOT 반영(원칙3)**: `Performance §5`(다중맵 예산 모델)·`Architecture §3-4`(레벨 다중맵 심리스·allocator/레지스트리)·`RunFlow §2-1`(명제·Tier 구조). TaskPrompts §E **G1-G5** 등재.
+> **Tier 0 실행 프롬프트**: [`Docs/MultiMap_Tier0_ResumePrompt.md`](Docs/MultiMap_Tier0_ResumePrompt.md)(새 세션·활성 코드 클론 `E:\Git_Project\FPSRoguelite`). Tier 0=레벨 스트리밍·per-map 필드·allocator v0·NetCull·최소 진입시드·빈맵 드레인·문파괴 복제·전환 grace·stream-in fallback. **Tier 1**(burst reserve·silent recycle·전환 추적자·allocator 정책)·**Tier 2**(rally pad·split 감지·양성 인센티브)=후속 유닛.
+> **🙋 디렉터 결정 6항목(Tier 0 비블로킹, Tier 2 튜닝 방향)**: ①솔로 억제 강도 ②2인+ 보상 강도 ③rally 정체성 ④분산 판타지 태도 ⑤보상 페어+ 체감 강도 ⑥XP/자석/드롭 맵 경계 정책. 리포트 §🙋.
+> **에셋 결정(사용자 2026-07-05)**: 획득 = **SyntyPass**(상용 라이선스 확인됨 · 프로덕션 후 비주얼 성숙 시 에셋 교체 가능성 참고) / **적 교체 확정**(Synty City Zombies+환경팩 동봉 캐릭터 → 에셋 추가·교체 완료 후 **Paragon 제거**). 추천표=Artifact 구매플랜(슬롯별 검증 톱픽). ⚠️ **적 교체를 U20 VAT 베이크 콘텐츠 저작 전에 확정**(재베이크 방지, 애니 콘텐츠 작업과 조율).
+> **다음**: (A) #3 Tier 0 구현(새 세션·활성 클론) / (B) Synty 파일럿+적 교체(별도 세션) / 애니 콘텐츠 저작(진행 중, 별도 트랙).
+
 ## 🔔 핸드오프 (2026-07-05 q · 컨셉 피벗 SSOT 정식반영 — PM/문서 클론, main) — ✅ **git 정합 확인(불일치 0) + 컨셉 피벗(07-03 확정)을 SSOT에 정식 등재**. 다음 = ⚠️ #3 다중맵 아키텍처 설계(P0급 OPEN) / 애니 콘텐츠 저작(사용자)
 > **이 세션 = 문서/PM만**(코드 무접촉). 부팅 시 git 실측 = HEAD `e0cba9f`(main·origin 동기 ahead/behind 0), phase 브랜치 0, 애니 패스 머지(`e651cce`+`5655aaf`) 확인 → **문서↔git 불일치 없음**(피벗은 07-03 이후 PROGRESS에만 있었고 SSOT 미반영 상태였음 = 이번에 해소).
 > **반영(명시 stage, `-A` 금지·Content 제외)**: `Concept.md §1-C-9`(세팅 = 사이버펑크 다이브·**코어 불변**·아트불일치→디제시스·The Spell Brigade 정합 노트 + §1-C-8 체크박스·헤더 ⑥) / `RunFlow.md §2-1`(다중맵 심리스 문전환·맵점유·**#3 OPEN 명기**)·`§2-8`(맵점유 미션/스폰) / `Roadmap.md §8`(환경 에셋 Synty Path A + 파일럿 검증 게이트) / `TaskPrompts_Master.md` 백로그 갱신.

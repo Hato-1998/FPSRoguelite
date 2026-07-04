@@ -19,7 +19,7 @@
 | 저장 | SaveGame | |
 | 네트워크 | 리슨서버 P2P, Push Model | ❌ Iris 핵심 의존, ❌ Server-Side Rewind |
 | 무브먼트 | 표준 CMC + **충돌무시 대시(회피기)** | ❌ Bhop/Wall-run/Motion Matching |
-| 레벨 | 고정 맵(**복수 authored, 런마다 선택** — §2-1) | ❌ PCG |
+| 레벨 | 고정 authored 맵 · **다중맵 심리스**(문 파괴→인접맵 스트림-in, §2-1 · 피벗 2026-07-03) | ❌ PCG · ❌ WP 런타임 오픈월드 그리드(authored·bounded라 불요, 스트리밍=LoadStreamLevel/WP Data Layer) |
 
 - **엔진 포함 플러그인(바로 enable)**: GameplayAbilities, EnhancedInput, ModularGameplay, GameFeatures, CommonUI, StateTree, GameplayStateTree, SignificanceManager, Iris(off)
 - **엔진에 없는 Lyra 출신 플러그인(P3+ 필요 시 경량 재구현/복사)**: CommonUser, CommonGame, ModularGameplayActors, GameplayMessageRouter
@@ -54,6 +54,7 @@ Source/FPSRoguelite/Public/
   - ※ Luck = 광역 행운(카드 등급 가중 + 향후 드랍품질·희귀스폰 등). RarityBonus는 Luck으로 통합·폐지(2026-06-02). PickupRadius·XPGain·MoveSpeed·HealthRegen은 미구현(필요 단계에서 추가)
 - 무기별 스탯 → WeaponInstance 스탯 블록 (ASC 아님)
 - 하단 무기바 HUD: 가시성을 HUD State(GMS/Tag)에 바인딩 → ADS/카드UI/미션UI 시 숨김
+- **다중맵(#3, 설계 수렴 2026-07-05 `Docs/Review/20260705-multimap-budget-regroup.md`)**: 단일 `UFPSREnemySpawnSubsystem` → **map-aware allocator**(전역 공유 예산·점유맵 배분·빈 맵 드레인·"2인+ 맵 > 솔로 맵" 가중), U7 플로우필드 → **per-map 레지스트리**(`ULevel*` 키). `UFPSRRunDirectorSubsystem`은 단일·런클럭 전역 유지(미션/스폰만 대상맵 파라미터화). 다중맵 점유상태 중 복제 필요분=GameState/PlayerState(WorldSubsystem 복제 불가). 레벨 스트리밍=LoadStreamLevel(서브레벨) 우선. rally pad·split 감지·양성 인센티브=Tier 2(콘텐츠/밸런스). Tier 0 실행=`Docs/MultiMap_Tier0_ResumePrompt.md`.
 
 ### 4-2. 구현 클래스맵 (⚠️ P0~P1.5-A 시점 역사 스냅샷 — 현재 전체 구조는 §4-1 목표구조 + `git log`·`PROGRESS.md` 참조; 이후 Boss/·Card v2·Run/Mission/·Combat/·Pickup/·UI Menu·Lobby·Session 등 대폭 추가됨)
 ```
