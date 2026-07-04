@@ -1317,7 +1317,7 @@ C++ (Source/FPSRoguelite):
 | G2 | 〃 | **Tier 0 실행 프롬프트**(코어 인프라: 레벨 스트리밍·per-map 필드·allocator v0·NetCull·최소 진입시드·빈맵 드레인·문파괴 복제·전환 grace·stream-in fallback) | 코드(신규 유닛) | #3 Tier 0 = `Docs/MultiMap_Tier0_ResumePrompt.md` | 새 세션 대기 |
 | G3 | 〃 | **Tier 1**(예산 게임필: 동적 burst reserve · silent recycle 안전게이트 · local pressure floor · 전환 추적자 · 최대그룹크기 allocator 정책 확정) | 코드 | 후속 유닛 | 파킹(Tier0 후) |
 | G4 | 〃 | **Tier 2**(rally pad · split 감지 → 솔로 억제 · 양성 인센티브[자석 smoothing·큐 공유] · 보스 rally · 문리셋 debt) | 코드+콘텐츠 | 후속 유닛 | 파킹(콘텐츠/밸런스) |
-| G5 | 〃 | **🙋 디렉터 결정 6항목**: 솔로 억제 강도 · 2인+ 보상 강도 · rally 정체성 · 분산 판타지 태도 · 보상 페어+ 체감 강도 · **XP/자석/드롭 맵 경계 정책** | 🙋사용자결정 | Tier 2 튜닝(Tier0 비블로킹) | 사용자 |
+| G5 | 〃 | **디렉터 결정 6항목 확정(2026-07-05, R6)**: 솔로=정찰(약억제) · 2인+ 효율좋음(강제X, "2인+"=2·3·4 전부) · **그룹 버프 전면 폐기**(뭉침=콘텐츠 배분만) · 텔포=장치·대상지정·쿨타임(+앵커/채널/shared) · 문=혼자 어려운 체력 · 맵=언로드X·LOD컬·잔존. ⚠️allocator=예산+콘텐츠 배분(심장) | ✅결정+SSOT반영 | RunFlow §2-1·Performance §5·Tier0 프롬프트 | ✅(2026-07-05, 리포트 §✅) |
 
 > **✅ G1 SSOT 반영 완료 (2026-07-05)**: #3 다중맵 설계 수렴(Codex 5R 컨설트)을 Performance §5(다중맵 예산 모델)·Architecture §3-4(레벨 다중맵 심리스·allocator/레지스트리)·RunFlow §2-1(명제·Tier 구조)에 반영. Tier 0 실행=`Docs/MultiMap_Tier0_ResumePrompt.md`(새 세션·활성 코드 클론). G5 디렉터 결정은 Tier 0 비블로킹(Tier 2 튜닝 방향).
 

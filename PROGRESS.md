@@ -11,7 +11,7 @@
 > **수렴 명제**: 다중맵=자유, 본게임 압력·보상·burst는 **"2명 이상 같은 전선"에서 선명**. 솔로=정찰 모드. 하드 테더 없음. **전역 공유 캡**(잠정 200, perf 미검증)·map-aware allocator("2인+ 맵>솔로 맵")·per-map 플로우필드 레지스트리·NetCull→RepGraph→level-streaming. 문=쏴서 파괴(기존 Chaos, b-1 확인).
 > **SSOT 반영(원칙3)**: `Performance §5`(다중맵 예산 모델)·`Architecture §3-4`(레벨 다중맵 심리스·allocator/레지스트리)·`RunFlow §2-1`(명제·Tier 구조). TaskPrompts §E **G1-G5** 등재.
 > **Tier 0 실행 프롬프트**: [`Docs/MultiMap_Tier0_ResumePrompt.md`](Docs/MultiMap_Tier0_ResumePrompt.md)(새 세션·활성 코드 클론 `E:\Git_Project\FPSRoguelite`). Tier 0=레벨 스트리밍·per-map 필드·allocator v0·NetCull·최소 진입시드·빈맵 드레인·문파괴 복제·전환 grace·stream-in fallback. **Tier 1**(burst reserve·silent recycle·전환 추적자·allocator 정책)·**Tier 2**(rally pad·split 감지·양성 인센티브)=후속 유닛.
-> **🙋 디렉터 결정 6항목(Tier 0 비블로킹, Tier 2 튜닝 방향)**: ①솔로 억제 강도 ②2인+ 보상 강도 ③rally 정체성 ④분산 판타지 태도 ⑤보상 페어+ 체감 강도 ⑥XP/자석/드롭 맵 경계 정책. 리포트 §🙋.
+> **✅ 디렉터 결정 6항목 확정(2026-07-05, 컨설트 R6 반영·리포트 §✅)**: 솔로=정찰(약억제, per-map 미션이 이미 억제) · 2인+=효율 좋음(강제X; **"2인+"=파티크기 아닌 뭉침 임계값 2·3·4 전부, 게임 1~4인**) · **그룹 버프 전면 폐기**(근접 버프·자석·큐공유 없음→뭉침 유인=콘텐츠 배분만) · 텔포=장치 활성화·대상 지정·쿨타임(+도착 앵커·채널·개인/팀 shared 쿨타임) · 문=혼자선 어려운 체력(soft group-gate) · 맵=언로드X·LOD컬·잔존(픽업 dormant/HISM·적만 드레인). ⚠️ **R6 핵심 = allocator가 설계의 심장**: 그룹 버프 0이라 "뭉치면 효율"(#2)은 고가치 콘텐츠(미션/보스/엘리트)를 2인+ 그룹에 집중시켜야만 성립 → **Tier 1 allocator = 적 예산 + 콘텐츠/이벤트 배분 공동**. SSOT(RunFlow §2-1·Performance §5)·Tier 0 프롬프트 반영 완료.
 > **에셋 결정(사용자 2026-07-05)**: 획득 = **SyntyPass**(상용 라이선스 확인됨 · 프로덕션 후 비주얼 성숙 시 에셋 교체 가능성 참고) / **적 교체 확정**(Synty City Zombies+환경팩 동봉 캐릭터 → 에셋 추가·교체 완료 후 **Paragon 제거**). 추천표=Artifact 구매플랜(슬롯별 검증 톱픽). ⚠️ **적 교체를 U20 VAT 베이크 콘텐츠 저작 전에 확정**(재베이크 방지, 애니 콘텐츠 작업과 조율).
 > **다음**: (A) #3 Tier 0 구현(새 세션·활성 클론) / (B) Synty 파일럿+적 교체(별도 세션) / 애니 콘텐츠 저작(진행 중, 별도 트랙).
 
