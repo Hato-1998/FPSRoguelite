@@ -6,6 +6,14 @@
 
 **최종 갱신: 2026-07-05**
 
+## 🔔 핸드오프 (2026-07-05 s · PM 세션 마무리 — 실행 트랙 2개 프롬프트 준비 완료 — PM/문서 클론, main) — 설계 종결, 다음=구현 세션
+> **이 PM 세션 종료**. #3 다중맵 아키텍처 설계 **완전 종결**(Codex 6R, 디렉터 6+1항목 결정 잠금). 두 실행 트랙 프롬프트 준비 완료(둘 다 활성 코드 클론 `E:\Git_Project\FPSRoguelite`):
+> - **A = #3 Tier 0 구현** → [`Docs/MultiMap_Tier0_ResumePrompt.md`](Docs/MultiMap_Tier0_ResumePrompt.md). 화이트박스 2맵, 에셋 독립.
+> - **B = Synty 에셋 전체교체** → [`Docs/AssetReplacement_Synty_ResumePrompt.md`](Docs/AssetReplacement_Synty_ResumePrompt.md). 파일럿 게이트 → 환경 3맵 → 적 교체(Paragon 제거) → 갭(커스텀 거대문·UI/오디오 별도). 획득=SyntyPass, 추천=Artifact 구매플랜.
+> **사용자 계획(2026-07-05)**: **A 먼저(새 세션) → B 에셋 전체교체.**
+> **⚠️ 크로스 트랙 의존**: (1) B의 Synty 맵은 나중에 A(#3)의 스트리밍 대상으로 합류(B는 에셋만 만듦). (2) B의 적 교체(Paragon→Synty)를 **U20 VAT 베이크(애니 콘텐츠 트랙) 전에** 완료(재베이크 방지). (3) B 파일럿에 **다중맵 상주 메모리 체크** 추가(#3 잔존 정책=맵 언로드 안 함이라 상주 메모리가 관건).
+> **다음 PM 작업(복귀 시)**: A/B 완료 보고 검증(§3 게이트) · B 파일럿 통과분 Roadmap §8 확정 스택 기록 · P0-③ 메타 루프 설계(RunFlow §2-11).
+
 ## 🔔 핸드오프 (2026-07-05 r · #3 다중맵 아키텍처 A 사인오프 — Codex 5R 컨설트 수렴 + SSOT 반영 + Tier 0 프롬프트 — PM/문서 클론, main) — ✅ 설계 수렴·문서화 완료. 다음 = Tier 0 구현(새 세션·활성 클론) / 에셋(SyntyPass·적교체)=별도 세션
 > **이 세션 = 문서/PM만**(코드 무접촉). #3 다중맵 "전역 예산 하 게임필/재집결"을 **Codex 5라운드 컨설트**로 수렴 → 리포트 [`Docs/Review/20260705-multimap-budget-regroup.md`](Docs/Review/20260705-multimap-budget-regroup.md).
 > **수렴 명제**: 다중맵=자유, 본게임 압력·보상·burst는 **"2명 이상 같은 전선"에서 선명**. 솔로=정찰 모드. 하드 테더 없음. **전역 공유 캡**(잠정 200, perf 미검증)·map-aware allocator("2인+ 맵>솔로 맵")·per-map 플로우필드 레지스트리·NetCull→RepGraph→level-streaming. 문=쏴서 파괴(기존 Chaos, b-1 확인).
