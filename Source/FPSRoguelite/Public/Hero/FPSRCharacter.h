@@ -83,6 +83,13 @@ public:
 	UFUNCTION(BlueprintPure, Category = "FPSR|Revive")
 	float GetReviveTargetProgress() const;
 
+	/** BlueprintPure aim-down-sights state for the 1P arms AnimBP: drive the ADS pose/state AND its EXIT transition off
+	 *  this. Forwards the owner-local aim flag on WeaponFire (which is only VisibleAnywhere, not BlueprintReadable, so the
+	 *  AnimBP can't reach it directly — hence this accessor). Resets to false the instant ADS is released
+	 *  (Input_ADSReleased -> SetAiming(false)), so an aim state driven by this reverts cleanly to hip when leaving ADS. */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Weapon")
+	bool IsAiming() const;
+
 	/** Owner-client: refresh the first-person weapon mesh + arms anim when the equipped weapon changes
 	 *  (called from the inventory's server EquipSlot + client OnRep). No-op on non-locally-controlled pawns. */
 	void RefreshFirstPersonWeaponVisual();
@@ -90,10 +97,12 @@ public:
 	/** Owner-client: play the equipped weapon's per-shot cosmetics (fire montage + sound + muzzle flash). */
 	void PlayWeaponFireCosmetics();
 
-	/** Owner-client per-frame procedural aim-down-sights: offset the 1P arms (relative to the camera) so the equipped
+	/** Owner-client per-frame procedural aim-down-sights: interpolate the 1P arms (relative to the camera) so the equipped
 	 *  weapon's AimSocket sits on the camera's forward centre-line when aiming, interpolated by the weapon's
 	 *  ADSInterpSpeed. Called from UFPSRWeaponFireComponent::TickComponent (which already ticks + owns the aim state).
-	 *  No-op on remote pawns / weapons without ADS or an AimSocket. Translation only (rotation-align is a follow-up). */
+	 *  No-op on remote pawns / weapons without ADS or an AimSocket. Interpolates location AND rotation: when the weapon's
+	 *  bADSAlignRotation is set it aligns the AimSocket frame to the camera, removing the authored hip cant so the sight
+	 *  reads level (else translation-only, keeping the authored weapon tilt). */
 	void UpdateAimDownSights(float DeltaTime);
 
 	/** Play reload cosmetics on a server-confirmed reload-start edge (called from UFPSRWeaponInstance::OnRep_Reloading,
@@ -393,15 +402,31 @@ protected:
 	UPROPERTY(Transient)
 	TObjectPtr<UMeshComponent> CachedMuzzleComponent;
 
+	/** Component the procedural-ADS AimSocket is read from. Like the muzzle, the sight (iron sight / optic) is a modular
+	 *  PART, so RefreshWeaponPartComponents resolves this to whichever part component carries CachedAimSocket — swapping
+	 *  the sight then moves the ADS reference — falling back to the receiver (WeaponMesh1P) when no part provides it.
+	 *  Convention-based: the part that owns a socket named AimSocket wins (first in WeaponParts1P order). */
+	UPROPERTY(Transient)
+	TObjectPtr<UMeshComponent> CachedAimComponent;
+
 	// --- Procedural aim-down-sights (owner-local) ---
-	/** FirstPersonArms relative-to-camera location captured on BeginPlay (the "hip" base the ADS offset is added to). */
+	/** FirstPersonArms relative-to-camera transform captured on BeginPlay (the "hip" base the ADS interps to/from). */
 	FVector BaseArmsRelLoc = FVector::ZeroVector;
-	/** Interpolated ADS arm offset (camera space), added to BaseArmsRelLoc each frame. Zero = hip. */
-	FVector CurrentADSArmOffset = FVector::ZeroVector;
+	FRotator BaseArmsRelRot = FRotator::ZeroRotator;
+	/** Runtime ADS blend state: interpolated alpha (0 = hip, 1 = fully aimed) + the EXACT aim-pose arms transform,
+	 *  recomputed each aiming frame. Blending hip<->aim by alpha (instead of chasing the live target with a lagging
+	 *  transform interp) glues the sight onto the centre-line at full ADS, so weapon/arm animation sway/bob is cancelled
+	 *  AT THE SIGHT and the reticle holds steady rather than wobbling as an interp lags the animated socket. */
+	float CurrentADSAlpha = 0.0f;
+	FVector ADSAimLoc = FVector::ZeroVector;
+	FRotator ADSAimRot = FRotator::ZeroRotator;
 	/** Equipped weapon's ADS params, cached on equip (RefreshFirstPersonWeaponVisual). */
 	FName CachedAimSocket = NAME_None;
 	float CachedADSSightDistance = 25.0f;
 	bool bCachedHasADS = false;
+	bool bCachedADSAlignRotation = true;
+	FRotator CachedADSAimRotationOffset = FRotator::ZeroRotator;
+	bool bCachedSuppressFireMontagesWhileADS = true;
 	float CachedADSInterpSpeed = 12.0f;
 
 	/** Runtime-created modular weapon-part components (U15), child-attached to WeaponMesh1P and rebuilt on each

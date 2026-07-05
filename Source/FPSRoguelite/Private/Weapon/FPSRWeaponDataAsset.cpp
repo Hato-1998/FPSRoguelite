@@ -109,6 +109,34 @@ EDataValidationResult UFPSRWeaponDataAsset::IsDataValid(FDataValidationContext& 
 		}
 	}
 
+	// The procedural-ADS AimSocket may live on the weapon receiver OR on a sight part (iron sight / optic), same as the
+	// muzzle. A typo makes DoesSocketExist fail at runtime (ADS silently stays at hip). Validate across receiver + parts.
+	if (BaseStats.bHasADS && !AimSocket.IsNone() && (SkelWeapon != nullptr || WeaponParts1P.Num() > 0))
+	{
+		bool bAimFound = SkelWeapon != nullptr && SkeletalMeshHasAttachPoint(SkelWeapon, AimSocket);
+		for (const FFPSRWeaponPartAttachment& Part : WeaponParts1P)
+		{
+			if (bAimFound)
+			{
+				break;
+			}
+			if (Part.Part.IsNull())
+			{
+				continue;
+			}
+			if (const UStaticMesh* PartMesh = Part.Part.LoadSynchronous())
+			{
+				bAimFound = PartMesh->FindSocket(AimSocket) != nullptr;
+			}
+		}
+		if (!bAimFound)
+		{
+			Context.AddWarning(FText::Format(LOCTEXT("AimSocketMissing",
+				"AimSocket '{0}' is not found on WeaponMesh1P or any modular part — procedural ADS will not align (it stays at hip). Put the aim socket on the sight part (iron sight / optic) or the weapon mesh (+X forward, +Z up), and check for typos (e.g. a space instead of '_')."),
+				FText::FromName(AimSocket)));
+		}
+	}
+
 	return Result;
 }
 

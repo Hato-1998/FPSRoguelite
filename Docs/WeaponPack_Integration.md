@@ -21,12 +21,19 @@
 - **팔**: `SOCKET_Weapon`(무기 부착), `SOCKET_Weapon_L`, `SOCKET_Knife`, `hand_l/r`.
 - **무기 리시버**: `SOCKET_Forestock` 또는 `SOCKET_Barrel`(전방 파트), `SOCKET_Magazine` + `SOCKET_Magazine_Reserve`(2탄창 리로드), `SOCKET_Scope`, `SOCKET_Default`, `SOCKET_Eject`, `Grip`.
 - **전방 파트(배럴/포어스톡) 메시 자체**: `SOCKET_Muzzle`, `SOCKET_Ironsight_F`, `SOCKET_Laser`, `SOCKET_Grip`.
+- **사이트 파트(아이언사이트/조준경) 메시 자체**: `SOCKET_Aim`(우리 저작 — 절차적 ADS 조준선, 아래 참조). 팩 `SOCKET_Ironsight_F`는 회전이 우리 +X전방 규약과 불일치 → 재사용 말고 `SOCKET_Aim` 별도 저작.
 
 ## 총구 = **파트 소켓** (핵심)
 - 총구는 **배럴(MAK12)/포어스톡(AG14W) 파트 메시**의 `SOCKET_Muzzle`에 있다(리시버 아님). 파트 변형(Short/Extended)마다 위치가 맞게 authored → **파트를 바꾸면 총구가 따라감**.
 - **코드**(`AFPSRCharacter`): `RefreshWeaponPartComponents`가 `MuzzleSocket`을 가진 **파트 컴포넌트**를 `CachedMuzzleComponent`로 해석, 없으면 리시버 폴백. `PlayWeaponFireCosmetics`/`MulticastFireCosmetics`가 거기 플래시 부착. **관례 기반**(DA 필드 추가 0 — `MuzzleSocket` 이름이 곧 조회 키).
 - **DA**: `MuzzleSocket = "SOCKET_Muzzle"`(언더스코어! 공백 금지), `WeaponMesh1P`엔 이 소켓 넣지 말 것(파트가 정본).
 - **플래시 방향**: 파트 메시의 `SOCKET_Muzzle` **회전**이 결정. 팩은 identity로 심어둠 → 우리 플래시(`PS_LPAMG_Muzzle_Flash`)가 소켓 +X로 분사하는데 배럴은 +Y라, **yaw=90**으로 소켓 회전 보정(소켓 +X→배럴 +Y). Socket Manager에서 조정(파트 변형마다 동일 값 복제). ⚠️ `unreal.Rotator(pitch,yaw,roll)` positional 순서 주의 — yaw는 keyword로.
+
+## ADS 조준 소켓 = **사이트 파트 소켓** (핵심, 총구와 동형)
+- 절차적 ADS는 무기 `AimSocket`(관례상 `SOCKET_Aim`)의 **변환(위치+회전)**을 카메라 전방중앙선에 정렬한다(고정 카메라라 사이트를 카메라로 가져옴). 조준선은 물리적으로 **사이트 파트(아이언사이트/조준경)** 위에 있으므로 `SOCKET_Aim`을 **사이트 파트 메시**에 심는다(리시버 아님) → **사이트 파트를 바꾸면 조준선이 따라감**(총구가 배럴 파트 따라가는 것과 동일 관례).
+- **코드**(`AFPSRCharacter`): `RefreshWeaponPartComponents`가 `SOCKET_Aim`을 가진 **파트 컴포넌트**를 `CachedAimComponent`로 해석(WeaponParts1P 순서상 첫 매치), 없으면 리시버(`WeaponMesh1P`) 폴백. `UpdateAimDownSights`가 거기서 조준선을 읽음. **관례 기반**(DA 필드 추가 0 — `AimSocket` 이름이 곧 조회 키).
+- **소켓 회전 규약**: `SOCKET_Aim`은 **+X=사이트 전방(총구 방향), +Z=위**로 authored. DA `bADSAlignRotation=true`(기본)면 이 프레임을 카메라에 완전 정렬(hip 기울기 제거·사이트 수평). 회전이 애매하면 `bADSAlignRotation=false`로 translation-only 폴백.
+- **DA**: `AimSocket="SOCKET_Aim"`, `bHasADS=true`, `ADSSightDistance`(눈~사이트 거리, 40~70 권장). **IsDataValid**가 리시버+전 파트에서 `SOCKET_Aim` 존재를 검증(오타 시 경고). 여러 사이트 파트를 넣으면 목록 첫 매치가 조준선(총구와 동일 순서 규칙).
 
 ## 재장전 = **2탄창 스왑** (핵심)
 - 리로드 애니(`A_FP_WEP_<CODE>_Reload`)가 **두 탄창 본**을 구동:
@@ -41,7 +48,7 @@
 | Forestock_Default | `SOCKET_Forestock` | 총구 소스(SOCKET_Muzzle 보유) |
 | Magazine_Default | `SOCKET_Magazine` | 빠지는 탄창 |
 | Magazine_Default | `SOCKET_Magazine_Reserve` | 삽입 탄창 |
-| Ironsight_F | `SOCKET_Scope` | 팩 의도는 포어스톡의 `SOCKET_Ironsight_F` — 단, 현 파트 시스템은 파트를 **리시버**에만 부착(파트-위-파트 중첩 미지원) → 후속 |
+| Ironsight_F | `SOCKET_Scope` | 팩 의도는 포어스톡의 `SOCKET_Ironsight_F` — 단, 현 파트 시스템은 파트를 **리시버**에만 부착(파트-위-파트 중첩 미지원) → 후속. **이 사이트 파트 메시에 `SOCKET_Aim`(+X전방·+Z위) 저작 → ADS 조준선**(위 ADS 조준 소켓 참조) |
 
 ## 무기 ↔ 팩 코드 매핑
 전체 표 = 메모리 [[weapon-da-pack-code-mapping]]. 요약: **Rifle=AG14W**(사용자 결정), MAK12=샷건용 보류, Sniper/ChargeLaser=MR22, LMG=HVG7, Bazooka=LRAF9, Grenade=RC425, Shotgun=SP60(프리뷰). ⚠️ **새 무기 저작 전 이 표로 팩 코드 확인**, 애매하면 사용자 확인.

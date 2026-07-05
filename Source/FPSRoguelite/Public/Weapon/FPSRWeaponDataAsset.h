@@ -118,10 +118,12 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Visual")
 	FName MuzzleSocket = NAME_None;
 
-	/** Aim-down-sights (procedural ADS): socket on the WEAPON mesh whose position is aligned to the camera's forward
-	 *  centre-line when aiming — the 1P arms offset so this socket sits on the view axis (the fixed capsule camera does
-	 *  not follow a head bone, so the sight is brought to the camera instead). Put it on the optic / iron-sight line at
-	 *  sight height. NAME_None = no procedural alignment (only the ADS FOV zoom + spread run). Gated by BaseStats.bHasADS. */
+	/** Aim-down-sights (procedural ADS): socket whose transform is aligned to the camera's forward centre-line when aiming
+	 *  — the 1P arms offset/rotate so this socket sits on the view axis (the fixed capsule camera does not follow a head
+	 *  bone, so the sight is brought to the camera instead). Author it on the SIGHT PART (iron sight / optic) so swapping
+	 *  the sight moves the aim reference — like the muzzle — else on the weapon receiver mesh; put it on the sight line at
+	 *  sight height with +X forward, +Z up. NAME_None = no procedural alignment (only the ADS FOV zoom + spread run).
+	 *  Gated by BaseStats.bHasADS. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Visual")
 	FName AimSocket = NAME_None;
 
@@ -129,6 +131,27 @@ public:
 	 *  sits further out. Tune together with AimSocket so the sights read centred. Ignored when AimSocket is NAME_None. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Visual", meta = (ClampMin = "1.0"))
 	float ADSSightDistance = 25.0f;
+
+	/** ADS rotation alignment: when true (default) aiming also ROTATES the arms so the AimSocket frame aligns with the
+	 *  camera — removing the authored hip-pose cant so the sight reads level and centred (author the socket with +X down
+	 *  the sight line, +Z up). Set false for translation-only ADS (keep the authored weapon tilt) if a weapon's AimSocket
+	 *  rotation isn't authored down the sight line. Ignored when AimSocket is NAME_None or BaseStats.bHasADS is false. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Visual")
+	bool bADSAlignRotation = true;
+
+	/** ADS full-frame alignment offset: an extra rotation applied to the AimSocket's frame (as if you rotated the socket
+	 *  itself) so the gun points forward for packs whose socket axes are off-forward. This pack's weapon-forward is +Y
+	 *  (the same reason the muzzle socket needs Yaw 90), so set Yaw 90 here ONCE per weapon instead of rotating every
+	 *  sight part's socket — fine-tune pitch/roll in degrees. Only used when bADSAlignRotation is true. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Visual", meta = (EditConditionHides, EditCondition = "bADSAlignRotation"))
+	FRotator ADSAimRotationOffset = FRotator::ZeroRotator;
+
+	/** While aiming, suppress the fire recoil montages (arm kick + weapon bolt): they animate the arms/weapon and fight
+	 *  the procedural ADS sight-centering (UpdateAimDownSights re-solves each frame), reading as sight shake. The shot
+	 *  still reads via muzzle flash + sound + camera recoil. Default true. Only affects ADS weapons (BaseStats.bHasADS)
+	 *  while aiming — hip fire and non-ADS weapons keep the full recoil montage. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Visual")
+	bool bSuppressFireMontagesWhileADS = true;
 
 	/** Optional montage played on the arms when this weapon is equipped. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Visual")

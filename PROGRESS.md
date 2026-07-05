@@ -6,6 +6,23 @@
 
 **최종 갱신: 2026-07-05**
 
+## 🔔 핸드오프 (2026-07-05 b · ADS 회전정렬(글루)+사이트파트소켓+리로드relax+IsAiming = 코드 커밋, 컨텍스트 소진) — 🎯 **절차적 ADS 완성도 대폭 향상(코드) → 다음=새 세션 VibeUE로 AnimBP 조준 포즈**. 코드/문서 커밋(Build Succeeded·Smoke 4/4·main), **콘텐츠 미커밋(사용자)**. ⚠️ VibeUE MCP 이 세션 미연결이라 AnimBP 작업은 새 세션(재연결)에서.
+> **이 브랜치(main)에서 한 일(커밋됨)**:
+> - **`UpdateAimDownSights` alpha 글루**: translation-only→**위치+회전 동시 alpha 블렌드**. 조준 시 `AimSocket` 프레임을 카메라 중앙선에 **매 프레임 정확히 고정**(interp 추적 아님)→애니 sway/bob이 사이트에서 상쇄=레티클 안 흔들림. 회전=slerp. 근거=고정카메라 유지(head-bone 미채택, [[fps-camera-fixed-vs-headbone]]).
+> - **리로드 중 글루 relax**: `WeaponInventory->IsReloading()` 참이면 조준 취급 해제→alpha 하강(총 살짝 내림)→리로드 몽타주(큰 팔 스윙)와 안 싸움→끝나면 재조준. (리로드 시 글루가 큰 몽타주 상쇄하며 총 크게 흔들리던 것 해결)
+> - **`SOCKET_Aim` = 사이트 파트 소켓**: `CachedAimComponent`(총구 `CachedMuzzleComponent`와 동형 관례—파트 우선·리시버 폴백, `RefreshWeaponPartComponents`). 사이트 파트(아이언사이트/조준경) 스왑 시 조준선 따라감. `IsDataValid` AimSocket 검증(리시버+전 파트).
+> - **DA `ADSAimRotationOffset`**(FRotator, `bADSAlignRotation` 조건): 소켓 국소 프레임 **선-합성**=소켓 직접 회전과 동일. 팩 weapon-forward=+Y라 **Yaw 90**(총구 소켓과 동일 이유)—**무기 DA에 1회**(파트마다 저작 X). `bADSAlignRotation` 토글(full-frame vs translation-only).
+> - **DA `bSuppressFireMontagesWhileADS`**(기본 true): 조준 중 팔+무기 발사 몽타주(반동 킥) 억제→글루와 안 싸움(흔들림↓). 총구플래시·사운드·카메라리코일·힙·비-ADS·원격3P 무영향.
+> - **`AFPSRCharacter::IsAiming()` BlueprintPure**: `WeaponFire`가 BlueprintReadOnly 아니라 AnimBP가 조준상태 못 읽던 것 해결(**A안=캐릭터 파사드 getter 채택**, B=`WeaponFire` BlueprintReadOnly 미채택—캐릭터 컨벤션=`GetReviveTargetProgress` 파사드와 정합). AnimBP 조준 상태/전환 구동용.
+> - **문서**: `Docs/WeaponPack_Integration.md` ADS 조준 소켓 규약. config `CrosshairThickness`=1.0 리셋(PIE가 0.9987 저장→CrosshairSettings 스모크 오염 복구; 테스트 격리결함=별도 태스크 `task_ceefd07d`).
+> **다음 작업(새 세션, VibeUE 연결 필수)**:
+> - **주작업(콘텐츠/에디터)**: **`ABP_Arms_AG14W` 조준 포즈** — Blend Poses by bool(Active=`Character->IsAiming()`, False=현 로코모션[풀 sway], True=**저-sway aim 포즈**, blend≈0.15s), COLD PIE 검증. **목적=concern3 해결**: 현재 글루가 총/사이트를 고정하는데 AnimBP가 ADS 중에도 풀-sway hip idle 재생→글루가 sway 상쇄하며 팔 뿌리(어깨)가 반대로 흔들려 **팔 부자연**. 조준 포즈 sway 최소면 글루가 싸울 게 없어 자연+안정 둘 다.
+> - **콘텐츠 튜닝**: `DA_Weapon_Rifle.ADSAimRotationOffset` **Yaw 90**(소켓 identity 기준; 방향 반대면 −90), `SOCKET_Aim`을 사이트 파트(Ironsight_F/B) 메시에 **+X전방·+Z위**, AnimBP `IsAiming` 배선.
+> - **concern4**(Idle↔힙파이어 총 위치 튐)=**발사 몽타주 콘텐츠**: Blend In/Out 시간·additive 베이스(`_NoAdditive`)·마지막 프레임 idle 복귀 점검(ADS 코드 아님).
+> - **선택(코드)**: 조준 포즈로도 부족하면 `UpdateAimDownSights`에 **"ADS 안정화 노브"**(회전 완전고정+위치 bob 일부 허용) 추가 스톱갭.
+> **⚠️ 블로커/주의**: ①**VibeUE MCP 이 세션 미연결**(에디터+8088 서버는 떴으나 툴 부재)→재연결=Claude 세션 재시작 필요(그래서 이 핸드오프). 새 세션 부팅 시 VibeUE 연결 확인. ②글루 현재=완전 고정→**concern3 미해결**(조준 포즈 전까지 팔 부자연 잔존). ③사용자 PIE 확인=글루 흔들림·리로드 relax·offset yaw90·이동 중 사이트.
+> **미커밋 콘텐츠(사용자, 커밋 말것)**: `Content/Assets/…AG14W/Meshes/*`(SK_LPAMG_AG14W·SM Forestock/Ironsight)·`SK_LPAMG_MAK12`·`DA_Weapon_Rifle`(offset/소켓 배선)·`BP_FPSRPlayer`·`L_Sandbox.umap`·`Content/Character|Weapons/Animation/`(AnimBP·몽타주·BS). 무기↔팩코드=[[weapon-da-pack-code-mapping]].
+
 ## 🔔 핸드오프 (2026-07-05 · 무기 모듈총구+ADS 코드 = 새 세션 인계, 컨텍스트 소진) — 🎯 **AG14W Rifle 1P 애니 세트 완성(사용자 PIE ✅) + 모듈형 총구(파트 소켓) + IsDataValid 소켓검증 + 절차적 ADS 스캐폴딩 + 애셋통합 문서2**. 코드/문서는 커밋(빌드 Succeeded·스모크 4/4·main), **콘텐츠는 미커밋(사용자 작업)**. ADS 정렬 미완 → 다음 세션.
 > **이 브랜치(main)에서 한 일(커밋됨)**:
 > - **모듈형 총구**(`FPSRCharacter` `CachedMuzzleComponent`): 총구 플래시를 `MuzzleSocket`을 가진 **파트 컴포넌트**(AG14W=Forestock, MAK12=Barrel)에 부착, 없으면 리시버 폴백(관례 기반, 스키마변경0). 오너+관전자 경로. ⚠️발견: DA `MuzzleSocket`이 `"SOCKET Muzzle"`(공백) 오타로 저장돼 있었음→`unreal.Name("SOCKET_Muzzle")`로 교정.

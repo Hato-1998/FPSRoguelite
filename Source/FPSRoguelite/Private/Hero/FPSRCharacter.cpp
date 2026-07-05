@@ -170,8 +170,11 @@ void AFPSRCharacter::BeginPlay()
 	{
 		bDefaultArmsUsesBlueprint = (FirstPersonArms->GetAnimationMode() == EAnimationMode::AnimationBlueprint);
 		DefaultArmsAnimClass = FirstPersonArms->AnimClass;
-		// Hip base for procedural ADS: UpdateAimDownSights adds its offset to this each frame (owner-local).
+		// Hip base for procedural ADS: UpdateAimDownSights interpolates the arms toward/from this each frame (owner-local).
 		BaseArmsRelLoc = FirstPersonArms->GetRelativeLocation();
+		BaseArmsRelRot = FirstPersonArms->GetRelativeRotation();
+		ADSAimLoc = BaseArmsRelLoc;
+		ADSAimRot = BaseArmsRelRot;
 	}
 }
 
@@ -350,6 +353,13 @@ bool AFPSRCharacter::IsRunFrozen() const
 {
 	const AFPSRGameState* GS = GetWorld() ? GetWorld()->GetGameState<AFPSRGameState>() : nullptr;
 	return GS && GS->IsRunPaused();
+}
+
+bool AFPSRCharacter::IsAiming() const
+{
+	// Owner-local aim state lives on the weapon-fire component (set by Input_ADS* + ServerSetAiming). Exposed here as a
+	// BlueprintPure so the 1P arms AnimBP can read a live, self-resetting aiming flag to drive its ADS pose/transitions.
+	return WeaponFire && WeaponFire->IsAiming();
 }
 
 bool AFPSRCharacter::IsIncapacitatedLocal() const
@@ -965,10 +975,14 @@ void AFPSRCharacter::RefreshFirstPersonWeaponVisual()
 
 	ActiveWeaponMesh = nullptr;
 	CachedMuzzleComponent = nullptr;
+	CachedAimComponent = nullptr;
 
-	// Reset ADS caching; the arm offset interps back to hip when no weapon provides ADS.
+	// Reset ADS caching; the arms interp back to the hip base when no weapon provides ADS.
 	CachedAimSocket = NAME_None;
 	bCachedHasADS = false;
+	bCachedADSAlignRotation = true;
+	CachedADSAimRotationOffset = FRotator::ZeroRotator;
+	bCachedSuppressFireMontagesWhileADS = true;
 
 	if (!Weapon)
 	{
@@ -1069,6 +1083,9 @@ void AFPSRCharacter::RefreshFirstPersonWeaponVisual()
 	CachedAimSocket = Weapon->AimSocket;
 	CachedADSSightDistance = Weapon->ADSSightDistance;
 	bCachedHasADS = Weapon->BaseStats.bHasADS;
+	bCachedADSAlignRotation = Weapon->bADSAlignRotation;
+	CachedADSAimRotationOffset = Weapon->ADSAimRotationOffset;
+	bCachedSuppressFireMontagesWhileADS = Weapon->bSuppressFireMontagesWhileADS;
 	CachedADSInterpSpeed = Weapon->BaseStats.ADSInterpSpeed;
 
 	// Rebuild modular cosmetic parts on the (skeletal) weapon mesh from the weapon's part list.
@@ -1142,6 +1159,21 @@ void AFPSRCharacter::RefreshWeaponPartComponents(const UFPSRWeaponDataAsset* Wea
 			}
 		}
 	}
+
+	// Modular aim source (same shape as the muzzle above): the AimSocket sits on the SIGHT part (iron sight / optic), so
+	// prefer the part component that carries CachedAimSocket — swapping the sight then moves the ADS reference. When no
+	// part provides it, CachedAimComponent stays null and UpdateAimDownSights falls back to the receiver (WeaponMesh1P).
+	if (!CachedAimSocket.IsNone())
+	{
+		for (UStaticMeshComponent* Part : WeaponPartComponents1P)
+		{
+			if (Part && Part->DoesSocketExist(CachedAimSocket))
+			{
+				CachedAimComponent = Part;
+				break;
+			}
+		}
+	}
 }
 
 void AFPSRCharacter::HandleReloadStateChanged(bool bIsReloading)
@@ -1209,8 +1241,15 @@ void AFPSRCharacter::PlayWeaponFireCosmetics()
 		return;
 	}
 
+	// While aiming (ADS), the arm/weapon fire recoil montages animate the arms + weapon and fight the procedural ADS
+	// sight-centering (UpdateAimDownSights re-solves the socket each frame), which reads as sight shake. Suppress them
+	// during ADS so the gun holds steady — the shot still reads via muzzle flash + sound + camera recoil. Hip fire and
+	// non-ADS weapons are unaffected. Remote/3P fire montages (MulticastFireCosmetics) are separate and keep their kick.
+	const bool bSuppressFireMontages = bCachedSuppressFireMontagesWhileADS && bCachedHasADS
+		&& WeaponFire && WeaponFire->IsAiming();
+
 	// Fire montage on the arms.
-	if (CachedFireMontage && FirstPersonArms)
+	if (CachedFireMontage && FirstPersonArms && !bSuppressFireMontages)
 	{
 		if (UAnimInstance* AnimInst = FirstPersonArms->GetAnimInstance())
 		{
@@ -1219,7 +1258,7 @@ void AFPSRCharacter::PlayWeaponFireCosmetics()
 	}
 
 	// Bolt/action montage on the WEAPON mesh (its own skeleton, SKEL_LPAMG_<W>), synced with the arm recoil above.
-	if (CachedWeaponFireMontage && WeaponMesh1P)
+	if (CachedWeaponFireMontage && WeaponMesh1P && !bSuppressFireMontages)
 	{
 		if (UAnimInstance* WeaponAnimInst = WeaponMesh1P->GetAnimInstance())
 		{
@@ -1255,24 +1294,70 @@ void AFPSRCharacter::UpdateAimDownSights(float DeltaTime)
 		return;
 	}
 
-	// Target arm offset (camera space): when aiming, bring the weapon's AimSocket onto the camera's forward centre-line
-	// (camera-local +X) at ADSSightDistance; otherwise 0 (hip). The fixed capsule camera doesn't follow a head bone, so
-	// the SIGHT is brought to the camera instead of moving the camera to the sight.
-	FVector TargetOffset = FVector::ZeroVector;
-	if (bCachedHasADS && !CachedAimSocket.IsNone() && WeaponFire && WeaponFire->IsAiming()
-		&& WeaponMesh1P && WeaponMesh1P->DoesSocketExist(CachedAimSocket))
+	// The AimSocket may live on a SIGHT part (iron sight / optic) or the receiver — CachedAimComponent resolves to the
+	// part that owns it (RefreshWeaponPartComponents), else fall back to the weapon receiver mesh.
+	UMeshComponent* AimComp = CachedAimComponent;
+	if (!AimComp)
 	{
-		// AimSocket location relative to the arms — invariant to the current ADS offset (socket + arms move together),
-		// so there is no feedback loop. The arms keep their authored relative rotation; only the location is offset.
-		const FTransform ArmsWorld = FirstPersonArms->GetComponentTransform();
-		const FVector SocketLocArms = ArmsWorld.InverseTransformPositionNoScale(WeaponMesh1P->GetSocketLocation(CachedAimSocket));
-		const FVector SocketInCamSpace = FirstPersonArms->GetRelativeRotation().RotateVector(SocketLocArms) + BaseArmsRelLoc;
-		const FVector AimPointCamSpace(CachedADSSightDistance, 0.0f, 0.0f); // camera-local forward is +X
-		TargetOffset = AimPointCamSpace - SocketInCamSpace;
+		AimComp = WeaponMesh1P;
 	}
 
-	CurrentADSArmOffset = FMath::VInterpTo(CurrentADSArmOffset, TargetOffset, DeltaTime, FMath::Max(0.01f, CachedADSInterpSpeed));
-	FirstPersonArms->SetRelativeLocation(BaseArmsRelLoc + CurrentADSArmOffset);
+	// Relax the ADS glue during a reload: the reload (mag-swap) montage swings the arms a lot, and re-solving each frame to
+	// keep the sight glued to centre would make the arms counter-swing hard — a violent shake at reload timing. Treat a
+	// reload as not-aiming so the alpha smoothly lowers the gun toward hip for the reload and raises back afterwards; the
+	// reload animation then plays cleanly with nothing fighting it. IsReloading() reflects the replicated per-instance
+	// reload state, set on the same OnRep as the reload montage, so the relax is in sync with the montage.
+	const bool bReloading = WeaponInventory && WeaponInventory->IsReloading();
+	const bool bAiming = bCachedHasADS && !CachedAimSocket.IsNone() && WeaponFire && WeaponFire->IsAiming() && !bReloading
+		&& AimComp && AimComp->DoesSocketExist(CachedAimSocket);
+
+	// When aiming, recompute the EXACT arms transform (relative to the camera) that lands the weapon's AimSocket on the
+	// camera's forward centre-line at ADSSightDistance THIS frame, and store it. The fixed capsule camera doesn't follow a
+	// head bone, so the SIGHT is brought to the camera, not the camera to the sight.
+	if (bAiming)
+	{
+		// AimSocket transform RELATIVE TO THE ARMS. The weapon rides the arms rigidly, so this is invariant to the arms'
+		// own transform (it cancels out below) — no feedback loop — yet recomputed each frame so it tracks weapon/arm
+		// animation (idle sway, walk bob, bolt montage) that moves the socket.
+		const FTransform ArmsWorld = FirstPersonArms->GetComponentTransform();
+		// Pre-compose the designer's aim rotation offset in the socket's LOCAL frame (identical to authoring that rotation
+		// onto the socket) so full-frame alignment points the gun forward for packs whose socket axes are off-forward
+		// (this pack's weapon-forward is +Y → ADSAimRotationOffset Yaw 90). Zero offset = use the socket frame as-authored.
+		const FTransform SocketRelArms = FTransform(CachedADSAimRotationOffset)
+			* AimComp->GetSocketTransform(CachedAimSocket, RTS_World).GetRelativeTransform(ArmsWorld);
+
+		if (bCachedADSAlignRotation)
+		{
+			// Full-frame alignment: level the socket frame to the camera (identity rotation) AND place it on the centre-
+			// line, so the authored hip cant is removed and the sight reads straight. Solve arms-rel-camera from the
+			// desired socket-rel-camera: SocketRelArms * ArmsRelCam == Desired (UE composes child * parent), hence
+			// ArmsRelCam = SocketRelArms^-1 * Desired.
+			const FTransform DesiredSocketRelCam(FRotator::ZeroRotator, FVector(CachedADSSightDistance, 0.0f, 0.0f));
+			const FTransform TargetArmsRelCam = SocketRelArms.Inverse() * DesiredSocketRelCam;
+			ADSAimLoc = TargetArmsRelCam.GetLocation();
+			ADSAimRot = TargetArmsRelCam.Rotator();
+		}
+		else
+		{
+			// Translation-only ADS (escape hatch): keep the authored arms rotation and only slide so the socket sits on
+			// the centre-line. Socket position under the hip pose is BaseArmsRelRot.Rotate(socket-loc-rel-arms) + arms-loc,
+			// so solve arms-loc for a socket at (D, 0, 0).
+			ADSAimRot = BaseArmsRelRot;
+			ADSAimLoc = FVector(CachedADSSightDistance, 0.0f, 0.0f) - BaseArmsRelRot.RotateVector(SocketRelArms.GetLocation());
+		}
+	}
+
+	// Interpolate the ADS blend alpha (0 = hip, 1 = fully aimed) at the weapon's ADS speed (matches the FOV interp), then
+	// BLEND the hip base and the stored aim pose by it — we don't chase the moving aim target with a lagging transform
+	// interp. At full ADS (alpha≈1) the arms take the exact aim transform every frame, so the socket sits precisely on the
+	// centre-line and animated sway/bob is cancelled AT THE SIGHT (steady reticle). While disengaging, the stored aim pose
+	// is held frozen and alpha decays, so the return to hip stays smooth. Rotation blends on the short arc via slerp.
+	const float InterpSpeed = FMath::Max(0.01f, CachedADSInterpSpeed);
+	CurrentADSAlpha = FMath::FInterpTo(CurrentADSAlpha, bAiming ? 1.0f : 0.0f, DeltaTime, InterpSpeed);
+
+	const FVector NewLoc = FMath::Lerp(BaseArmsRelLoc, ADSAimLoc, CurrentADSAlpha);
+	const FQuat NewRot = FQuat::Slerp(BaseArmsRelRot.Quaternion(), ADSAimRot.Quaternion(), CurrentADSAlpha);
+	FirstPersonArms->SetRelativeLocationAndRotation(NewLoc, NewRot);
 }
 
 void AFPSRCharacter::MulticastFireCosmetics_Implementation()
