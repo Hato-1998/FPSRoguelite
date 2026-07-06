@@ -550,9 +550,19 @@ void UFPSREnemySpawnSubsystem::ComputeOccupancy(TArray<FGameplayTag>& OutOccupie
 		// Committed occupancy = the map whose grid physically contains the pawn (unset = Default single-map). S2b commits
 		// it directly; the settle-delay/grace 2-channel refinement is S3.
 		const FGameplayTag Map = Flow ? Flow->FindMapIdForLocation(Pawn->GetActorLocation()) : FGameplayTag();
-		if (AFPSRPlayerState* PS = PC->GetPlayerState<AFPSRPlayerState>())
+		AFPSRPlayerState* PS = PC->GetPlayerState<AFPSRPlayerState>();
+		if (PS)
 		{
-			PS->SetCurrentMapId(Map); // idempotent (low-churn: only dirties on a real map change)
+			// Set CurrentMapId for ALL players with a pawn (a downed player is still physically in a map) so the combat
+			// cross-map gate + UI stay correct. Idempotent (low-churn: only dirties on a real map change).
+			PS->SetCurrentMapId(Map);
+		}
+		// Allocation occupancy counts only LIVE participants — consistent with the movement pass, which excludes DBNO/dead
+		// from targeting. A map with only downed players isn't "occupied" for budget: it drains and the budget flows to
+		// living teammates elsewhere; it re-occupies when a living player (a reviver) arrives (Codex merge-gate P2).
+		if (PS && !PS->IsAlive())
+		{
+			continue;
 		}
 		const int32 Idx = OutOccupiedMaps.IndexOfByKey(Map);
 		if (Idx == INDEX_NONE)
