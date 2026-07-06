@@ -4,7 +4,14 @@
 > **작업 단계를 끝낼 때마다, 그리고 중단 전 반드시 이 파일을 갱신하고 커밋한다.**
 > 확정 설계·기획·코드구조·규칙은 `Game.md`(**SSOT 허브** → 도메인별 `Docs/SSOT/*.md`, 작업별 라우팅은 허브 §0-1), **완료 작업 상세는 `git log --oneline`**. 여기엔 *무엇을 했는지*만 요약한다.
 
-**최종 갱신: 2026-07-06**
+**최종 갱신: 2026-07-07**
+
+## 🔔 핸드오프 (2026-07-07 · P0 데이터 검증 시임 = FPSRogueliteEditor 에디터 모듈 신설 → main 머지) — 🎯 **무기·미션 데이터 편집 툴 P0(Codex 5R 수렴 설계) 구현·빌드·스모크·Codex 머지게이트·main `--no-ff` 머지 완료. 다음 = P1(미션 스케줄 타임라인 read-only) / P2(무기 밸런스 매트릭스), 둘 다 이 검증서비스 재사용.**
+> **머지**: `phase/editor-tooling-seam` → main `--no-ff`(`57270c5`). **프로젝트 첫 C++ 에디터 모듈 `FPSRogueliteEditor`**(Slate/편집UI 0 — P0는 검증 시임만). ⚠️ 신규 모듈이라 **에디터 재기동 필요**(빌드 반영).
+> **구현**: ①앵커 `UEditorValidatorBase` 3종(CardPool 전역CardId유일성[제외경로 준수]·오퍼성립성 / RunSchedule 얕은검증[보스/로스터 null=**경고**=문서화된 런타임 폴백] / LoadoutPool) — usecase 게이트(저장=싼검증 / 명시·커맨드릿=교차) ②`FFPSRAnchoredValidationService`(AssetRegistry 앵커발견+패키지 의존성 BFS reachable+고아, Dev/Test/_Scratch 제외) ③`UFPSRValidateAnchoredDataCommandlet`(NumInvalid>0 return1·앵커0=에러[false-green가드]·고아 경고 return0)+`Scripts/validate-data.ps1`(LASTEXITCODE 전달) ④`Tools>FPSR>Validate Anchored Data` 메뉴명령(창 아님) ⑤per-asset IsDataValid 보강(무기 죽는값 sanity·EnemyRoster 내부·미션 SpawnPointTag 등록검증).
+> **검증**: Build Succeeded(`-NoXGE`) + 커맨드릿·PS래퍼 스모크(**anchors=3 validated=32 invalid=0 orphans=16 exit0**) + Codex 머지게이트 P2 2건 교정(`d4b6a44`: CardId 제외경로 준수·보스/로스터 null 경고화). 코드=Sonnet 위임/검증=Opus 직접(모델정책).
+> **스모크 즉시 발견 실 신호**: 고아 16개(비-HoldZone 미션DA 6·Knife·전무기/캐릭터 카드) = 앵커 미배선 콘텐츠 → 사용자 배선/정리 대상(경고, 빌드 무실패).
+> **P0 제외=후속(TaskPrompts §E H2/H3)**: 라우팅 누수 검증(CombatWeaponCard §2-3-4 surface 라우팅 스펙 코드↔SSOT 정합 **선행**)·CardFamily 충돌·미션 튜닝 BP CDO→DA통합(RunFlow §2-8). ToolingBacklog "Batch DataAsset Validator" ✅. 리포트 [`Docs/Review/20260707-data-tooling-p0.md`](Docs/Review/20260707-data-tooling-p0.md).
 
 ## 🔔 핸드오프 (2026-07-06 e · ① "힙파이어 잔상" 진짜 원인 규명 = 총구화염 VFX(오진 정정) → 해결·커밋 완료) — 🎯 **RAA는 오진이라 철회. 실증 테스트로 원인 확정 = 총구화염 파티클. 사용자 Cascade 편집(Heat Distortion/Smoke Puff 에미터 비활성화) → 힙·ADS PIE 정상. content(①)+PROGRESS 커밋.**
 > **핵심 정정**: 이전 여러 핸드오프의 "힙파이어 잔상 = TSR 시간적 고스트" 진단은 **오진**. 실증: PIE 콘솔 `showflag.Particles 0` → 잔상·신기루 **즉시 사라짐**; `r.AntiAliasingMethod 1`(FXAA)·`showflag.Bloom 0`으로도 파티클 켜져 있으면 잔상 유지 → **원인 = 총구화염 파티클(`PS_LPAMG_Muzzle_Flash`, Cascade), TSR/블룸/모션 전부 아님**. (사용자 지적: 조준점 고정인데 그 자리 잔상 = 모션 아닌 VFX가 논리적으로 맞음.)

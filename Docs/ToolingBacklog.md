@@ -19,7 +19,7 @@
 | Seam 툴 | 유형 | 공수 | 임팩트 | 상속 phase | 근거 | 상태 |
 |---|---|---|---|---|---|---|
 | **FPSR.Perf.SwarmHarness** | 검증 | M | high | SYNTY→P7-SHIP→BALANCE | §5 적500 램프 CSV 하나가 파일럿 게이트·ship perf 패스·양산 회귀 벤치를 전부 태움 | 📋 |
-| **Batch DataAsset Validator** | 검증 | S | high | CORE→BALANCE→P6-META | non-zero exit CI로 이후 전 콘텐츠 단계가 red line 상속 | 📋 |
+| **Batch DataAsset Validator** | 검증 | S | high | CORE→BALANCE→P6-META | non-zero exit CI로 이후 전 콘텐츠 단계가 red line 상속 | ✅ P0(`FPSRogueliteEditor` 모듈·앵커 검증기 3종·`validate-data.ps1`, main 57270c5) |
 | **FPSR.Alloc.Debug** | 계측 | M | high | MM-T0→MM-T1/2 | allocator=심장, per-map 오버레이가 전 다중맵 정책 이터레이션 재사용(+Togetherness 백엔드) | 📋 |
 | **Collision-for-FlowField Validator** | 검증 | M | high | MM-T0→SYNTY | ECC_WorldStatic 계약=두 active-next 세션 공통 언블로커 | 📋 |
 | **FPSR.Significance.Debug** | 계측 | S | high | MM-T0→P7-SHIP | NetCull pre-cull 베이스라인 + 한 번도 안 한 §5 perf 눈 | 📋 |
@@ -37,7 +37,7 @@
 ### CORE — P1.5-B/P2/P3/P4 코어 루프 (DONE · 회귀/유지보수 가드)
 | 툴 | 유형 | 공수 | 임팩트 | 왜 (병목) | 상태 |
 |---|---|---|---|---|---|
-| Batch DataAsset Validator | 검증 | S | high | 폴리모픽 카드/풀/무기/스케줄/로스터 29+에셋 부분적용 회귀가 PIE까지 침묵 → 전 DA IsDataValid 헤드리스+non-zero exit CI | 📋 |
+| Batch DataAsset Validator | 검증 | S | high | 폴리모픽 카드/풀/무기/스케줄/로스터 29+에셋 부분적용 회귀가 PIE까지 침묵 → 전 DA IsDataValid 헤드리스+non-zero exit CI | ✅ P0(57270c5): 앵커드 검증기 3종+per-asset sanity+고아 경고+커맨드릿(exit) — 라우팅누수/CardFamily/미션튜닝 통합은 후속(§E H2/H3) |
 | SSOT-Code Drift Sentinel | 검증 | M | high | SSOT 인용 수치(캡500·NetFreq 30/10/5/2·FF 0.5·토큰 10/3·캡200) vs 실 DA/UCLASS 조용한 드리프트를 헤드리스 diff | 📋 |
 | Temp-Test-Value Tracker / Revert Guard | 검증 | S | high | 압축 테스트값(윈도우 50-120/보스 300·U14 하드캡)이 출시에 남는 침묵 리스크 → test/prod diff+원클릭 flip-back | 📋 |
 | FPSR.Save.MigrationMatrix | 검증 | S | high | 버전드 세이브 조용한 필드 유실=메타 진행도 손실 → 전 SaveVersion+다운그레이드 무손실 단언(P6 확장 전 차단) | 📋 |
