@@ -6,6 +6,13 @@
 
 **최종 갱신: 2026-07-06**
 
+## 🔔 핸드오프 (2026-07-06 e · ① "힙파이어 잔상" 진짜 원인 규명 = 총구화염 VFX(오진 정정) → 해결·커밋 완료) — 🎯 **RAA는 오진이라 철회. 실증 테스트로 원인 확정 = 총구화염 파티클. 사용자 Cascade 편집(Heat Distortion/Smoke Puff 에미터 비활성화) → 힙·ADS PIE 정상. content(①)+PROGRESS 커밋.**
+> **핵심 정정**: 이전 여러 핸드오프의 "힙파이어 잔상 = TSR 시간적 고스트" 진단은 **오진**. 실증: PIE 콘솔 `showflag.Particles 0` → 잔상·신기루 **즉시 사라짐**; `r.AntiAliasingMethod 1`(FXAA)·`showflag.Bloom 0`으로도 파티클 켜져 있으면 잔상 유지 → **원인 = 총구화염 파티클(`PS_LPAMG_Muzzle_Flash`, Cascade), TSR/블룸/모션 전부 아님**. (사용자 지적: 조준점 고정인데 그 자리 잔상 = 모션 아닌 VFX가 논리적으로 맞음.)
+> **①(a) Responsive AA 시도→전량 철회**: FP 팔/무기/파츠가 쓰는 4개 베이스 머티리얼(`M_LPAMG_Weapon`/`Character_Base`/`Casing`/`WEP_Dot`)에 `bEnableResponsiveAA=true` 켰으나 **TSR과 상극**(히스토리 거부→신기루 일렁임 순증, 잔상은 그대로). 전량 False 복원 + `git checkout`으로 HEAD 바이트 복원(레포 클린). **RAA=레거시 TAA 도구, TSR에선 역효과**(엔진소스 "base pass에 적용"은 맞으나 TSR 시각 결과는 PIE로만 판별됨).
+> **①(b) 진짜 해결**: `PS_LPAMG_Muzzle_Flash` 에미터 5개(Muzzle Flash 메시·Sparks·Smoke Puff·Heat Distortion·Sparks Bullet) 중 **Heat Distortion(배경 굴절=신기루 일렁임)** + **Smoke Puff(연기 잔류=잔상)** 비활성화(사용자 Cascade 수동). **팩 공유 에셋이라 ③ 무기복제/3P 원격에도 자동 적용.** (미세 잔여 시 후속 = Muzzle Flash 메시 Lifetime 단축.)
+> **커밋**: `content(①)` PS_LPAMG_Muzzle_Flash + PROGRESS. **미커밋(사용자 WIP·무관, 손대지 않음)**: ② 배선(`ABP_Wep_AG14W`·`DA_Weapon_Rifle`)·③ MAK12 클론 WIP(`SK_LPAMG_MAK12`·MAK12 anims 8종)·PIE dirty(`BP_FPSRPlayer`·`L_Sandbox`).
+> **⏭️ 다음 = ③ 무기복제**(팩매핑→②기반, 미착수). **교훈**: 렌더 아티팩트는 이론 전에 `showflag`/AA 토글로 실증 격리부터([[fp-afterimage-muzzle-flash-not-tsr]]).
+
 ## 🔔 핸드오프 (2026-07-06 d · ① TSR 힙블러 = FP 머티리얼 Responsive AA 에디터 작업 → 새 세션 인계) — 🎯 **코드/설정 전부 완료·커밋. 남은 ①은 순수 에디터 머티리얼 토글(코드 아님). VibeUE MCP 이 세션 미연결로 editor-bridge 인계.**
 > **연결 상태**: VibeUE MCP 클라이언트 툴이 이 세션에 **부재**(ToolSearch 확인). 서버는 up(127.0.0.1:8088 LISTENING), 에디터도 `E:\Git_Project\FPSRoguelite` 트리에 열림 — 그러나 **세션 시작 시 MCP 핸드셰이크 미성립**. 헤드리스 커맨드릿은 에디터 열려있어 저장 충돌 → **새 세션(에디터 열린 상태로 재시작→MCP 연결) 또는 사용자 수동**.
 > **에디터 작업(①)**: **FP 팔 메시 + `WeaponMesh1P`(SK_LPAMG_AG14W) + `WeaponParts1P` 파츠 메시들이 쓰는 머티리얼**에 **Responsive AA(`bEnableResponsiveAA=true`)** 켜기. 근거=엔진소스 `BasePassRendering.cpp:411`(base pass 불투명 적용). 목적=힙파이어 시 TSR 시간적 고스트(사격방향 번짐) 제거(FP 한정, 적 비용 0 — 전역 velocity cvar은 제1원리로 철회함).
