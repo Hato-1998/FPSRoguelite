@@ -5,6 +5,7 @@
 #include "Enemy/FPSREnemySpawnPoint.h"
 #include "Enemy/FPSRSpawnRoom.h"
 #include "Enemy/FPSRFlowFieldSubsystem.h"
+#include "Enemy/FPSREnemyAllocator.h"
 #include "Enemy/FPSREnemyRosterDataAsset.h"
 #include "Hero/FPSRCharacter.h"
 #include "Core/FPSRLogChannels.h"
@@ -524,14 +525,101 @@ FVector UFPSREnemySpawnSubsystem::ComputeSeparation(int32 AgentIndex, const TArr
 	return Separation;
 }
 
+void UFPSREnemySpawnSubsystem::ComputeOccupancy(TArray<FGameplayTag>& OutOccupiedMaps, TArray<int32>& OutPlayerCounts) const
+{
+	OutOccupiedMaps.Reset();
+	OutPlayerCounts.Reset();
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+	const UFPSRFlowFieldSubsystem* Flow = World->GetSubsystem<UFPSRFlowFieldSubsystem>();
+	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+	{
+		APlayerController* PC = It->Get();
+		if (!PC)
+		{
+			continue;
+		}
+		const APawn* Pawn = PC->GetPawn();
+		if (!Pawn)
+		{
+			continue; // a player with no pawn doesn't occupy a map
+		}
+		// Committed occupancy = the map whose grid physically contains the pawn (unset = Default single-map). S2b commits
+		// it directly; the settle-delay/grace 2-channel refinement is S3.
+		const FGameplayTag Map = Flow ? Flow->FindMapIdForLocation(Pawn->GetActorLocation()) : FGameplayTag();
+		if (AFPSRPlayerState* PS = PC->GetPlayerState<AFPSRPlayerState>())
+		{
+			PS->SetCurrentMapId(Map); // idempotent (low-churn: only dirties on a real map change)
+		}
+		const int32 Idx = OutOccupiedMaps.IndexOfByKey(Map);
+		if (Idx == INDEX_NONE)
+		{
+			OutOccupiedMaps.Add(Map);
+			OutPlayerCounts.Add(1);
+		}
+		else
+		{
+			++OutPlayerCounts[Idx];
+		}
+	}
+}
+
+void UFPSREnemySpawnSubsystem::ComputeAliveByMap(TMap<FGameplayTag, int32>& OutAliveByMap) const
+{
+	OutAliveByMap.Reset();
+	for (const TObjectPtr<AFPSREnemyBase>& EnemyPtr : ActiveEnemies)
+	{
+		AFPSREnemyBase* Enemy = EnemyPtr.Get();
+		if (IsValid(Enemy))
+		{
+			++OutAliveByMap.FindOrAdd(Enemy->GetMapId());
+		}
+	}
+}
+
+int32 UFPSREnemySpawnSubsystem::DrainMapEnemies(const FGameplayTag& MapId, int32 MaxToRelease)
+{
+	if (MaxToRelease <= 0)
+	{
+		return 0;
+	}
+	// Collect first (ReleaseEnemy mutates ActiveEnemies — never mutate while iterating it).
+	TArray<AFPSREnemyBase*, TInlineAllocator<16>> ToRelease;
+	for (const TObjectPtr<AFPSREnemyBase>& EnemyPtr : ActiveEnemies)
+	{
+		AFPSREnemyBase* Enemy = EnemyPtr.Get();
+		if (IsValid(Enemy) && Enemy->GetMapId() == MapId)
+		{
+			ToRelease.Add(Enemy);
+			if (ToRelease.Num() >= MaxToRelease)
+			{
+				break;
+			}
+		}
+	}
+	for (AFPSREnemyBase* Enemy : ToRelease)
+	{
+		ReleaseEnemy(Enemy);
+	}
+	return ToRelease.Num();
+}
+
 void UFPSREnemySpawnSubsystem::TickDirector()
 {
 	if (!HasServerAuthority())
 	{
 		return;
 	}
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
 
-	const AFPSRGameState* GameState = GetWorld() ? GetWorld()->GetGameState<AFPSRGameState>() : nullptr;
+	const AFPSRGameState* GameState = World->GetGameState<AFPSRGameState>();
 	if (GameState && (GameState->IsRunPaused()
 		|| (!GameState->IsCombatPhase() && GameState->GetRunPhase() != ERunPhase::Boss)))
 	{
@@ -540,27 +628,74 @@ void UFPSREnemySpawnSubsystem::TickDirector()
 		return;
 	}
 
-	int32 SpawnedThisTick = 0;
-	while (ActiveEnemies.Num() < TargetAliveCount && ActiveEnemies.Num() < MaxActiveEnemies && SpawnedThisTick < MaxSpawnPerTick)
+	// Map-aware allocator (multimap Tier 0). Occupancy (also commits each player's CurrentMapId) + per-map alive counts.
+	TArray<FGameplayTag> OccupiedMaps;
+	TArray<int32> PlayerCounts;
+	ComputeOccupancy(OccupiedMaps, PlayerCounts);
+
+	TMap<FGameplayTag, int32> AliveByMap;
+	ComputeAliveByMap(AliveByMap);
+
+	// Empty-map drain: any map holding enemies but NO players -> bounded release toward 0 (reclaim budget). Occupied-map
+	// recycle is Tier 1; this only drains 0-player maps (pickups/XP/doors persist — they aren't spawn-subsystem owned).
+	for (const TPair<FGameplayTag, int32>& Pair : AliveByMap)
 	{
-		FVector SpawnAt;
-		bool bSnapToGround = true;
-		const AFPSREnemySpawnPoint* SpawnPoint = nullptr;
-		// Spawn ONLY at designer spawn points: when none qualifies this tick (e.g. all in view), stop and retry on the
-		// next director tick rather than falling back to a player-proximity ring (removed 2026-06-24).
-		if (!ComputeSpawnLocation(SpawnAt, bSnapToGround, SpawnPoint))
+		if (Pair.Value > 0 && !OccupiedMaps.Contains(Pair.Key))
 		{
-			break;
+			DrainMapEnemies(Pair.Key, EmptyMapDrainPerTick);
 		}
-		if (AcquireEnemy(SpawnAt, bSnapToGround, SpawnPoint) == nullptr)
+	}
+
+	if (OccupiedMaps.Num() == 0)
+	{
+		return; // no players anywhere -> nothing to fill
+	}
+
+	// Split the global target across occupied maps. The STEADY apportionment targets (Cap - SeedReserve) so the reserve
+	// stays as free headroom below the hard cap; the fill loop below hard-gates on the FULL cap so a newly-occupied map
+	// can seed immediately from that headroom (Codex R3 0-3s entry seed) while the total never exceeds GlobalAliveCap.
+	const int32 GlobalSteady = FMath::Max(0, FMath::Min(TargetAliveCount, GlobalAliveCap - SeedReserve));
+	TArray<int32> PerMapTarget;
+	FPSREnemyAllocator::Apportion(PlayerCounts, GlobalSteady, MapGroupBonus, PerMapTarget);
+
+	// Round-robin fill: at most one spawn per map per outer pass so a big map doesn't consume the whole per-tick budget
+	// before a smaller / newly-seeded map gets a turn. Every spawn is hard-gated on the GLOBAL cap.
+	int32 SpawnedThisTick = 0;
+	bool bSpawnedAny = true;
+	while (bSpawnedAny && SpawnedThisTick < MaxSpawnPerTick && ActiveEnemies.Num() < GlobalAliveCap)
+	{
+		bSpawnedAny = false;
+		for (int32 m = 0; m < OccupiedMaps.Num(); ++m)
 		{
-			break;
+			if (SpawnedThisTick >= MaxSpawnPerTick || ActiveEnemies.Num() >= GlobalAliveCap)
+			{
+				break;
+			}
+			const FGameplayTag& Map = OccupiedMaps[m];
+			int32& Alive = AliveByMap.FindOrAdd(Map);
+			if (Alive >= PerMapTarget[m])
+			{
+				continue; // this map is at (or over, after apportionment shrank) its target
+			}
+			FVector SpawnAt;
+			bool bSnapToGround = true;
+			const AFPSREnemySpawnPoint* SpawnPoint = nullptr;
+			if (!ComputeSpawnLocation(Map, SpawnAt, bSnapToGround, SpawnPoint))
+			{
+				continue; // no eligible spawn point in this map this tick (all too close / wrong zone / none placed)
+			}
+			if (AcquireEnemy(SpawnAt, bSnapToGround, SpawnPoint) == nullptr)
+			{
+				continue;
+			}
+			++Alive;
+			++SpawnedThisTick;
+			bSpawnedAny = true;
 		}
-		++SpawnedThisTick;
 	}
 }
 
-bool UFPSREnemySpawnSubsystem::ComputeSpawnLocation(FVector& OutLocation, bool& bOutSnapToGround, const AFPSREnemySpawnPoint*& OutPoint) const
+bool UFPSREnemySpawnSubsystem::ComputeSpawnLocation(const FGameplayTag& TargetMapId, FVector& OutLocation, bool& bOutSnapToGround, const AFPSREnemySpawnPoint*& OutPoint) const
 {
 	// The swarm spawns ONLY at designer-placed spawn points (Game.MD §2-8, §1 fixed map). The player-proximity/ring
 	// fallback was removed (user 2026-06-24) and the out-of-view (FOV) gate was removed (user 2026-06-29): a point is
@@ -568,7 +703,7 @@ bool UFPSREnemySpawnSubsystem::ComputeSpawnLocation(FVector& OutLocation, bool& 
 	// control where/when. When no point qualifies this tick (none placed / wrong zone / too close), return false so the
 	// director skips spawning and retries next tick. The designer point is authoritative — keep its exact Z (no ground
 	// re-snap onto a ceiling/roof for indoor placements, Codex review 2026-06-09).
-	if (TrySelectSpawnPoint(OutLocation, OutPoint))
+	if (TrySelectSpawnPoint(TargetMapId, OutLocation, OutPoint))
 	{
 		bOutSnapToGround = false;
 		return true;
@@ -576,7 +711,7 @@ bool UFPSREnemySpawnSubsystem::ComputeSpawnLocation(FVector& OutLocation, bool& 
 	return false;
 }
 
-bool UFPSREnemySpawnSubsystem::TrySelectSpawnPoint(FVector& OutLocation, const AFPSREnemySpawnPoint*& OutPoint) const
+bool UFPSREnemySpawnSubsystem::TrySelectSpawnPoint(const FGameplayTag& TargetMapId, FVector& OutLocation, const AFPSREnemySpawnPoint*& OutPoint) const
 {
 	OutPoint = nullptr;
 
@@ -617,6 +752,12 @@ bool UFPSREnemySpawnSubsystem::TrySelectSpawnPoint(FVector& OutLocation, const A
 	{
 		const AFPSREnemySpawnPoint* Point = PointPtr;
 		if (Point == nullptr || !Point->IsEnabled())
+		{
+			continue;
+		}
+
+		// Map gate (multimap Tier 0): only this map's points spawn this map's allocation. Single-map: both unset -> match.
+		if (Point->GetMapId() != TargetMapId)
 		{
 			continue;
 		}

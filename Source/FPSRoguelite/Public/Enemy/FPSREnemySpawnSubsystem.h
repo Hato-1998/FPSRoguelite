@@ -114,7 +114,20 @@ private:
 	 *  and whose spawn zone is active (an untagged point is always eligible). No out-of-view (FOV) filter — enemies may
 	 *  spawn in view (user 2026-06-29). Returns false when none qualify (or none placed) — the director then skips
 	 *  spawning this tick (no fallback). OutPoint receives the chosen point (for its authored exit path, C1). */
-	bool TrySelectSpawnPoint(FVector& OutLocation, const AFPSREnemySpawnPoint*& OutPoint) const;
+	bool TrySelectSpawnPoint(const FGameplayTag& TargetMapId, FVector& OutLocation, const AFPSREnemySpawnPoint*& OutPoint) const;
+
+	/** Recompute per-map committed occupancy (server): for each player pawn, resolve the map its location is in (flow-field
+	 *  registry AABB) and set its PlayerState CurrentMapId (idempotent, low-churn). Fills OutOccupiedMaps + OutPlayerCounts
+	 *  (parallel arrays, occupied maps only). Single-map: everyone resolves to the Default (unset) map. */
+	void ComputeOccupancy(TArray<FGameplayTag>& OutOccupiedMaps, TArray<int32>& OutPlayerCounts) const;
+
+	/** Count currently-active enemies per map (by each enemy's current MapId). Recomputed each director tick so map
+	 *  changes (an enemy crossing a boundary) stay consistent — O(alive), cheap at the 0.25s director cadence. */
+	void ComputeAliveByMap(TMap<FGameplayTag, int32>& OutAliveByMap) const;
+
+	/** Release up to MaxToRelease active enemies whose MapId == MapId back to the pool (bounded empty-map drain). Returns
+	 *  the number released. */
+	int32 DrainMapEnemies(const FGameplayTag& MapId, int32 MaxToRelease);
 
 	/** Batched server movement pass with distance LOD (replaces per-actor enemy Tick). */
 	void TickEnemyMovement(float DeltaTime);
@@ -129,7 +142,7 @@ private:
 	 *  when none qualify this tick — the swarm spawns ONLY at designer points (no player-proximity/ring fallback,
 	 *  removed 2026-06-24), so the director skips spawning until a point qualifies. Sets bOutSnapToGround=false (the
 	 *  designer point's Z is authoritative — no ground re-snap). */
-	bool ComputeSpawnLocation(FVector& OutLocation, bool& bOutSnapToGround, const AFPSREnemySpawnPoint*& OutPoint) const;
+	bool ComputeSpawnLocation(const FGameplayTag& TargetMapId, FVector& OutLocation, bool& bOutSnapToGround, const AFPSREnemySpawnPoint*& OutPoint) const;
 
 	/** Trace down to the static floor under Location and return a ground-snapped spawn point (feet on
 	 *  the floor). Decouples spawn Z from the player's jump height. Falls back to Location if no floor hit. */
@@ -218,8 +231,28 @@ private:
 	/** Total enemies spawned (hard cap at MaxActiveEnemies). */
 	int32 TotalSpawned = 0;
 
-	/** Hard cap on active enemies (Game.MD §5). */
+	/** Hard cap on active enemies (Game.MD §5) — the pool ceiling / endless-fall backstop. */
 	static constexpr int32 MaxActiveEnemies = 500;
+
+	// --- Map-aware allocator (multimap Tier 0, Performance §5 / Codex consult 2026-07-06) ---
+
+	/** Global alive cap across ALL maps (the host worst-case budget — per-map caps are forbidden). The allocator splits
+	 *  this across occupied maps; the fill loop hard-gates every spawn on ActiveEnemies.Num() < GlobalAliveCap so the
+	 *  total never exceeds it. Tunable Tier-0 value = SSOT §5 잠정 200 (was previously un-enforced; schedule could reach 300). */
+	static constexpr int32 GlobalAliveCap = 200;
+
+	/** Headroom held below GlobalAliveCap so a newly-occupied map can seed enemies immediately even when the rest of the
+	 *  budget is saturated (Codex R3: the 0-3s entry-seed promise). = Clamp(ceil(200*0.04), 4, 10). The steady per-map
+	 *  apportionment targets GlobalAliveCap - SeedReserve; the reserve is the free headroom for entry seeding. */
+	static constexpr int32 SeedReserve = 8;
+
+	/** Temp Tier-0 weight bonus for a map with 2+ players (aggregate 2+ front > solo, without per-capita starvation).
+	 *  weight = players + (players>=2 ? MapGroupBonus : 0). The content-aware allocator policy is Tier 1. */
+	static constexpr int32 MapGroupBonus = 1;
+
+	/** Max enemies drained from an UNOCCUPIED map per director tick (bounded, so an emptied map thins smoothly rather
+	 *  than popping the whole crowd at once). Occupied-map recycle is Tier 1 (this only drains 0-player maps). */
+	static constexpr int32 EmptyMapDrainPerTick = 4;
 
 	/** Max enemies spawned per director tick = the swarm FILL RATE (x ~1/SpawnInterval per second). Lower = enemies
 	 *  trickle in and the crowd recovers gradually after a clear; higher = the swarm snaps to the target count fast.
