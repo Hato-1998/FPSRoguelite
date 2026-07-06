@@ -4,7 +4,15 @@
 > **작업 단계를 끝낼 때마다, 그리고 중단 전 반드시 이 파일을 갱신하고 커밋한다.**
 > 확정 설계·기획·코드구조·규칙은 `Game.md`(**SSOT 허브** → 도메인별 `Docs/SSOT/*.md`, 작업별 라우팅은 허브 §0-1), **완료 작업 상세는 `git log --oneline`**. 여기엔 *무엇을 했는지*만 요약한다.
 
-**최종 갱신: 2026-07-05**
+**최종 갱신: 2026-07-06**
+
+## 🔔 핸드오프 (2026-07-06 · #3 다중맵 Tier 0 **C++ 코드 완료**(S1a~S3) — 코드 클론 FPSRoguelite2·브랜치 `phase/p8-multimap-tier0`) — ✅ 빌드+헤드리스 유닛 검증. **머지 대기 = Codex 게이트 + 사용자 콘텐츠 저작 후 PIE**
+> **이 세션 = 활성 코드 작업**(사용자 결정: FPSRoguelite는 무기 ADS 중이라 **FPSRoguelite2에서** 진행). Codex 5R 컨설트로 플랜 하드닝(`Docs/Review/20260706-multimap-tier0-plan.md`) 후 5스테이지 구현·각 단계 빌드(-WaitMutex)+헤드리스 유닛 검증.
+> **커밋(브랜치 `phase/p8-multimap-tier0`)**: S1a `d11c788`(플로우필드→`UFPSRFlowFieldComputer` 추출·worldless 코어·`FlowField.Unit`) / S1b `6890804`(per-map 레지스트리 `TMap<FGameplayTag,Computer*>`·BakeMap·mid-transition 재조회) / S2a `0fd34d2`(MapId identity: PlayerState.CurrentMapId 복제·이동 map-gate·크로스맵 전투 가드 CanAffectTarget) / S2b `a01be35`(map-aware allocator: `FPSREnemyAllocator::Apportion` Hamilton·전역캡200·빈맵 드레인·seed reserve·`Allocator.Unit`) / S3 `c642dcb`(스트리밍: `UFPSRMapStreamSubsystem`·`AFPSRBoundaryBlocker`·NetCull·문→스트림·grace).
+> **자동 검증(이 세션)**: 빌드 Succeeded×5 + 헤드리스 `Smoke.ModuleLoads`+`FlowField.Unit`+`Allocator.Unit` Success. **콘텐츠 독립**(컨설트 성과: 합성 유닛테스트가 플로우필드 회귀·멀티맵·allocator 예산 불변식을 PIE 없이 포착). ⚠️ **FPSRoguelite2는 이제 코드 빌드 대상**(메모리 [[build-livecoding-cross-clone-block]]).
+> **⚠️ 미검증(전부 사용자 PIE — 화이트박스 콘텐츠 미저작)**: 실 스트림·추격 연속·빈맵 드레인·전역200·late-join·NetCull·단일맵 실맵 회귀. **콘텐츠 저작 가이드=[`Docs/MultiMap_Tier0_ContentChecklist.md`](Docs/MultiMap_Tier0_ContentChecklist.md)**(persistent+서브레벨A/B+bounds/MapId+스폰/MapId+거대문/TargetMapId+TargetLevelName+boundary blocker + `git lfs pull -I Content/Maps`).
+> **`FPSRCharacter` 미접촉**(활성 클론 무기 ADS 머지 안전 — 점유=서브시스템 pawn-AABB). GlobalAliveCap=200 신설(기존 무캡→최대300, SSOT §5 잠정200 enforce).
+> **다음**: (1) Codex 머지게이트 판독 (2) 사용자 콘텐츠 저작 → PIE 게이트 → 승인 시 `--no-ff` main 머지 + 브랜치 삭제 (3) 콘텐츠 동반커밋 여부 질문. **Tier 1**(전환 추적자·silent recycle 안전게이트·콘텐츠-aware allocator·rally·late-join ack)=후속 유닛.
 
 ## 🔔 핸드오프 (2026-07-05 s · PM 세션 마무리 — 실행 트랙 2개 프롬프트 준비 완료 — PM/문서 클론, main) — 설계 종결, 다음=구현 세션
 > **이 PM 세션 종료**. #3 다중맵 아키텍처 설계 **완전 종결**(Codex 6R, 디렉터 6+1항목 결정 잠금). 두 실행 트랙 프롬프트 준비 완료(둘 다 활성 코드 클론 `E:\Git_Project\FPSRoguelite`):
