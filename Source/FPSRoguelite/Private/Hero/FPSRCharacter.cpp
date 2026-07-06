@@ -68,6 +68,11 @@ AFPSRCharacter::AFPSRCharacter()
 	FirstPersonCamera->SetupAttachment(GetCapsuleComponent());
 	FirstPersonCamera->SetRelativeLocation(FVector(0.0f, 0.0f, 64.0f));
 	FirstPersonCamera->bUsePawnControlRotation = true;
+	// Motion blur off on the player view: the camera-parented 1P weapon gets a large world-space velocity during camera
+	// recoil / the ADS fire kick and would smear (ghost) even while screen-static, and a fast swarm reads better crisp.
+	// This is the only camera, so it disables motion blur game-wide (a deliberate art choice for this genre).
+	FirstPersonCamera->PostProcessSettings.bOverride_MotionBlurAmount = true;
+	FirstPersonCamera->PostProcessSettings.MotionBlurAmount = 0.0f;
 
 	FirstPersonArms = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("FirstPersonArms"));
 	FirstPersonArms->SetupAttachment(FirstPersonCamera);
@@ -1087,6 +1092,11 @@ void AFPSRCharacter::RefreshFirstPersonWeaponVisual()
 	CachedADSAimRotationOffset = Weapon->ADSAimRotationOffset;
 	bCachedSuppressFireMontagesWhileADS = Weapon->bSuppressFireMontagesWhileADS;
 	CachedADSInterpSpeed = Weapon->BaseStats.ADSInterpSpeed;
+	CachedADSPositionBobScale = Weapon->ADSPositionBobScale;
+	bCachedSuppressWeaponBoltWhileADS = Weapon->bSuppressWeaponBoltWhileADS;
+	bCachedSuppressMuzzleFlashWhileADS = Weapon->bSuppressMuzzleFlashWhileADS;
+	CachedADSFireKickDegrees = Weapon->ADSFireKickDegrees;
+	CachedADSFireKickRecoveryRate = Weapon->ADSFireKickRecoveryRate;
 
 	// Rebuild modular cosmetic parts on the (skeletal) weapon mesh from the weapon's part list.
 	RefreshWeaponPartComponents(Weapon);
@@ -1241,15 +1251,17 @@ void AFPSRCharacter::PlayWeaponFireCosmetics()
 		return;
 	}
 
-	// While aiming (ADS), the arm/weapon fire recoil montages animate the arms + weapon and fight the procedural ADS
-	// sight-centering (UpdateAimDownSights re-solves the socket each frame), which reads as sight shake. Suppress them
-	// during ADS so the gun holds steady — the shot still reads via muzzle flash + sound + camera recoil. Hip fire and
-	// non-ADS weapons are unaffected. Remote/3P fire montages (MulticastFireCosmetics) are separate and keep their kick.
-	const bool bSuppressFireMontages = bCachedSuppressFireMontagesWhileADS && bCachedHasADS
-		&& WeaponFire && WeaponFire->IsAiming();
+	// While aiming (ADS) the ARM fire montage swings the whole arm and fights the procedural ADS sight-centering
+	// (UpdateAimDownSights re-solves the socket each frame), reading as sight shake — so it's suppressed while aiming.
+	// The WEAPON bolt montage, however, animates the bolt bone (not the sight) so it KEEPS cycling in ADS as fire
+	// feedback (the bolt-reciprocation read), plus the ADS fire kick below — the shot no longer reads as dead-still in ADS.
+	// Hip fire and non-ADS weapons keep both montages. Remote/3P fire montages (MulticastFireCosmetics) are separate.
+	const bool bAimingADS = bCachedHasADS && WeaponFire && WeaponFire->IsAiming();
+	const bool bSuppressArmFireMontage = bCachedSuppressFireMontagesWhileADS && bAimingADS;
+	const bool bSuppressWeaponBolt = bCachedSuppressWeaponBoltWhileADS && bAimingADS;
 
 	// Fire montage on the arms.
-	if (CachedFireMontage && FirstPersonArms && !bSuppressFireMontages)
+	if (CachedFireMontage && FirstPersonArms && !bSuppressArmFireMontage)
 	{
 		if (UAnimInstance* AnimInst = FirstPersonArms->GetAnimInstance())
 		{
@@ -1258,12 +1270,20 @@ void AFPSRCharacter::PlayWeaponFireCosmetics()
 	}
 
 	// Bolt/action montage on the WEAPON mesh (its own skeleton, SKEL_LPAMG_<W>), synced with the arm recoil above.
-	if (CachedWeaponFireMontage && WeaponMesh1P && !bSuppressFireMontages)
+	if (CachedWeaponFireMontage && WeaponMesh1P && !bSuppressWeaponBolt)
 	{
 		if (UAnimInstance* WeaponAnimInst = WeaponMesh1P->GetAnimInstance())
 		{
 			WeaponAnimInst->Montage_Play(CachedWeaponFireMontage);
 		}
+	}
+
+	// ADS fire kick: bump the decaying kick angle on each aimed shot (applied about the sight pivot in
+	// UpdateAimDownSights so the gun snaps but the reticle holds). Refresh (max, not accumulate) so sustained fire
+	// holds a steady kick without running away; the per-frame FInterpTo settles it back between shots.
+	if (bAimingADS && CachedADSFireKickDegrees > 0.0f)
+	{
+		ADSFireKickPitch = FMath::Max(ADSFireKickPitch, CachedADSFireKickDegrees);
 	}
 
 	// Fire sound + muzzle flash attach to the ACTIVE weapon mesh (skeletal firearm or static preview) so they track
@@ -1274,7 +1294,9 @@ void AFPSRCharacter::PlayWeaponFireCosmetics()
 		{
 			UGameplayStatics::SpawnSoundAttached(CachedFireSound, ActiveWeaponMesh);
 		}
-		if (CachedMuzzleFlash)
+		// Skip the muzzle flash while aiming (default): in ADS the muzzle sits just behind the sight, so the flash glow
+		// washes over the reticle. Hip fire keeps it; the aimed shot still reads via the bolt cycle + fire kick + sound.
+		if (CachedMuzzleFlash && !(bCachedSuppressMuzzleFlashWhileADS && bAimingADS))
 		{
 			// Muzzle flash attaches to the modular part that owns the muzzle socket (barrel/forestock) when present,
 			// else the receiver. CachedMuzzleComponent is resolved per-equip in RefreshWeaponPartComponents.
@@ -1355,8 +1377,27 @@ void AFPSRCharacter::UpdateAimDownSights(float DeltaTime)
 	const float InterpSpeed = FMath::Max(0.01f, CachedADSInterpSpeed);
 	CurrentADSAlpha = FMath::FInterpTo(CurrentADSAlpha, bAiming ? 1.0f : 0.0f, DeltaTime, InterpSpeed);
 
-	const FVector NewLoc = FMath::Lerp(BaseArmsRelLoc, ADSAimLoc, CurrentADSAlpha);
-	const FQuat NewRot = FQuat::Slerp(BaseArmsRelRot.Quaternion(), ADSAimRot.Quaternion(), CurrentADSAlpha);
+	// ADS position glue (stabilization knob): ADSAimLoc cancels the animated socket motion each frame, so at bob scale 0
+	// the sight is pinned exactly on the centre-line (steady reticle). Lerping the aim location back toward the hip base
+	// removes that fraction of the anti-bob correction, letting an equal fraction of the animated positional bob survive
+	// (a livelier ADS) while rotation below stays fully glued. Scale 0 (default) == the original exact-glue behaviour.
+	const FVector GluedAimLoc = FMath::Lerp(ADSAimLoc, BaseArmsRelLoc, CachedADSPositionBobScale);
+	FVector NewLoc = FMath::Lerp(BaseArmsRelLoc, GluedAimLoc, CurrentADSAlpha);
+	FQuat NewRot = FQuat::Slerp(BaseArmsRelRot.Quaternion(), ADSAimRot.Quaternion(), CurrentADSAlpha);
+
+	// ADS fire kick: rotate the arms about the pinned sight (camera-space ≈ (ADSSightDistance, 0, 0)) by the current
+	// kick angle, faded by the ADS alpha. Pivoting about the sight keeps the reticle on centre while the muzzle/gun
+	// body snaps (+pitch = muzzle up) — a physical fire read that doesn't disturb aim. The kick is set on each aimed
+	// shot (PlayWeaponFireCosmetics) and settled back toward zero here each frame.
+	if (ADSFireKickPitch > KINDA_SMALL_NUMBER && CurrentADSAlpha > KINDA_SMALL_NUMBER)
+	{
+		const FVector Pivot(CachedADSSightDistance, 0.0f, 0.0f);
+		const FQuat KickRot(FRotator(ADSFireKickPitch * CurrentADSAlpha, 0.0f, 0.0f));
+		NewLoc = Pivot + KickRot.RotateVector(NewLoc - Pivot);
+		NewRot = KickRot * NewRot;
+	}
+	ADSFireKickPitch = FMath::FInterpTo(ADSFireKickPitch, 0.0f, DeltaTime, CachedADSFireKickRecoveryRate);
+
 	FirstPersonArms->SetRelativeLocationAndRotation(NewLoc, NewRot);
 }
 

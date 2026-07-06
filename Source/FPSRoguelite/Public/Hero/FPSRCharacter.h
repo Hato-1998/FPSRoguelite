@@ -428,6 +428,16 @@ protected:
 	FRotator CachedADSAimRotationOffset = FRotator::ZeroRotator;
 	bool bCachedSuppressFireMontagesWhileADS = true;
 	float CachedADSInterpSpeed = 12.0f;
+	/** Fraction of the aim pose's animated positional bob allowed through while aiming (0 = sight fully glued to the
+	 *  centre-line; >0 lets that fraction of the bob survive). Rotation stays fully glued regardless. */
+	float CachedADSPositionBobScale = 0.0f;
+	bool bCachedSuppressWeaponBoltWhileADS = false;
+	bool bCachedSuppressMuzzleFlashWhileADS = true;
+	float CachedADSFireKickDegrees = 1.5f;
+	float CachedADSFireKickRecoveryRate = 12.0f;
+	/** Current decaying ADS fire-kick angle (deg), owner-local. Bumped on each aimed shot, settled toward 0 each frame;
+	 *  applied as a rotation about the AimSocket pivot in UpdateAimDownSights so the gun kicks while the sight stays put. */
+	float ADSFireKickPitch = 0.0f;
 
 	/** Runtime-created modular weapon-part components (U15), child-attached to WeaponMesh1P and rebuilt on each
 	 *  weapon change. Owner-only-visible (match the 1P weapon mesh). Empty for static/melee/partless weapons. */

@@ -153,6 +153,37 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Visual")
 	bool bSuppressFireMontagesWhileADS = true;
 
+	/** ADS stabilization knob: how much of the aim pose's animated positional bob is allowed through while aiming.
+	 *  0 (default) pins the AimSocket exactly on the view centre-line every frame — steadiest reticle, no drift.
+	 *  Raise slightly (e.g. 0.1–0.25) to let that fraction of the animated bob survive for a livelier ADS, at the cost
+	 *  of a small sight drift off centre. ROTATION stays fully glued regardless. Only used when aiming an ADS weapon
+	 *  with an AimSocket; ignored otherwise. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Visual", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float ADSPositionBobScale = 0.0f;
+
+	/** While aiming, suppress the WEAPON bolt/action montage too. Default false: the bolt keeps cycling in ADS as fire
+	 *  feedback (it animates the bolt bone, not the sight, so the reticle holds). Set true only for a weapon whose bolt
+	 *  montage visibly disturbs the aimed sight. Independent of bSuppressFireMontagesWhileADS (which gates the ARM montage). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Visual")
+	bool bSuppressWeaponBoltWhileADS = false;
+
+	/** ADS fire kick (degrees): a per-shot recoil kick that PIVOTS the weapon about the AimSocket while aiming — the
+	 *  sight stays centred but the gun body/muzzle snaps, giving the shot a physical read without moving the reticle.
+	 *  0 disables. Only applied while aiming an ADS weapon with an AimSocket. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Visual", meta = (ClampMin = "0.0"))
+	float ADSFireKickDegrees = 1.5f;
+
+	/** ADS fire-kick recovery speed (FInterpTo speed) — how fast the per-shot kick settles back to the aimed pose.
+	 *  Higher = snappier recovery. Only used when ADSFireKickDegrees > 0. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Visual", meta = (ClampMin = "0.1"))
+	float ADSFireKickRecoveryRate = 12.0f;
+
+	/** While aiming, don't spawn the muzzle flash. In ADS the muzzle sits right behind the sight, so a large flash
+	 *  glow washes over the reticle (obscures the aim). Default true: hip fire keeps the flash, ADS drops it (the shot
+	 *  still reads via bolt cycle + fire kick + sound + camera recoil). Set false to keep the flash while aiming. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Visual")
+	bool bSuppressMuzzleFlashWhileADS = true;
+
 	/** Optional montage played on the arms when this weapon is equipped. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Visual")
 	TSoftObjectPtr<UAnimMontage> EquipMontage;
