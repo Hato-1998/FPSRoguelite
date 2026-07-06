@@ -3,17 +3,22 @@
 #pragma once
 
 #include "Subsystems/WorldSubsystem.h"
+#include "GameplayTagContainer.h"
 #include "FPSRFlowFieldSubsystem.generated.h"
 
 class UFPSRFlowFieldComputer;
+class AFPSRFlowFieldBoundsVolume;
 
-/** Server-authoritative flow-field driver for swarm pathing (P2-B2, U7 multi-layer). Owns one or more
- *  UFPSRFlowFieldComputer instances (one per map — S1a keeps a single Default computer; the multimap
- *  registry lands in S1b) and drives their 0.2s recompute. Enemies sample the field in O(1).
+/** Server-authoritative flow-field driver for swarm pathing (P2-B2, U7 multi-layer). Owns a per-map REGISTRY of
+ *  UFPSRFlowFieldComputer instances keyed by MapId (multimap Tier 0) and drives their 0.2s recompute from a single
+ *  scheduler. Enemies sample the field in O(1).
  *
- *  Refactor (Codex consult 2026-07-06): the grid/BFS/flow algorithm moved into UFPSRFlowFieldComputer so a
- *  worldless core can be unit-tested (FPSRoguelite.FlowField.Unit) and so the field can be keyed per map.
- *  This subsystem now owns discovery (bounds volume / floor Z), the recompute timer, and the sample forward. */
+ *  Refactor (Codex consult 2026-07-06): the grid/BFS/flow algorithm lives in UFPSRFlowFieldComputer (worldless core
+ *  unit-tested by FPSRoguelite.FlowField.Unit). This subsystem owns discovery (bounds volume / floor Z), the recompute
+ *  timer, and routing. An unset MapId is the "Default" single-map field, so an untagged L_Sandbox is unchanged.
+ *
+ *  S1b: registry + per-map bake/sample built here; the actual streamed-map bake is TRIGGERED by the MapStreamSubsystem
+ *  on collision-ready (S3). At world begin, every bounds volume present in the persistent world is baked immediately. */
 UCLASS()
 class FPSROGUELITE_API UFPSRFlowFieldSubsystem : public UWorldSubsystem
 {
@@ -24,21 +29,40 @@ public:
 	virtual void OnWorldBeginPlay(UWorld& InWorld) override;
 	virtual void Deinitialize() override;
 
-	/** Returns the normalized flow direction (XY, Z=0) at WorldLocation, or ZeroVector if outside the grid /
-	 *  field not ready / no reachable surface. Callers should fall back to a direct-to-player direction on ZeroVector.
-	 *  (S1a: samples the single Default computer. S1b adds a MapId overload.) */
+	/** Flow direction at WorldLocation, routed to the computer whose grid contains it (S1b bridge — used until enemies
+	 *  carry a MapId in S2a). ZeroVector if no map covers the location / field not ready. */
 	FVector SampleFlowDirection(const FVector& WorldLocation) const;
 
+	/** Flow direction at WorldLocation from the given map's computer (S2a caller — the enemy passes its own MapId). An
+	 *  unset MapId uses the Default field. If the location is outside the passed map's grid (mid-transition across a door),
+	 *  retries against the map whose grid actually contains it so flow stays continuous at the boundary. */
+	FVector SampleFlowDirection(const FGameplayTag& MapId, const FVector& WorldLocation) const;
+
+	/** Get (creating + baking if needed) the computer for MapId over BoundsVolume, anchored at FloorZ. Server-only. Used
+	 *  at world begin (S1b) and by the MapStreamSubsystem on stream-in collision-ready (S3). Returns null off-authority. */
+	UFPSRFlowFieldComputer* BakeMap(const FGameplayTag& MapId, const AFPSRFlowFieldBoundsVolume* BoundsVolume, float FloorZ);
+
+	/** Whether a baked, ready computer exists for MapId (used by the stream/allocator gate before spawning into a map). */
+	bool IsMapFieldReady(const FGameplayTag& MapId) const;
+
+	/** Remove a map's computer (stream-out). Tier 0 keeps maps loaded (LOD-cull only) so this is not exercised, but the
+	 *  registry supports it; callers must ensure the map has no active enemies before evicting (S3 contract). */
+	bool EvictMap(const FGameplayTag& MapId);
+
 private:
-	void RecomputeField();
+	void RecomputeAllFields();
 	bool HasServerAuthority() const;
 
-	/** Trace the floor Z under the first PlayerStart (grid Z anchor), or fall back to the start's Z / origin. */
+	/** Trace the floor Z under the first PlayerStart (Default grid Z anchor), or the start's Z / origin. */
 	float DetectFloorZ(UWorld& InWorld) const;
 
-	/** The single-map flow-field computer (S1a). Server-only; created in OnWorldBeginPlay. */
+	/** Trace the floor Z under a bounds volume's box center (per-map Z anchor for a streamed sublevel with no PlayerStart),
+	 *  falling back to the box's world-min Z. */
+	float DetectFloorZForVolume(UWorld& InWorld, const AFPSRFlowFieldBoundsVolume& Volume) const;
+
+	/** The per-map flow-field computers, keyed by MapId (unset tag = Default single-map). Server-only. */
 	UPROPERTY(Transient)
-	TObjectPtr<UFPSRFlowFieldComputer> DefaultComputer;
+	TMap<FGameplayTag, TObjectPtr<UFPSRFlowFieldComputer>> Computers;
 
 	FTimerHandle RecomputeTimerHandle;
 };

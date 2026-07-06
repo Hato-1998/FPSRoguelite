@@ -3,6 +3,7 @@
 #pragma once
 
 #include "GameFramework/Actor.h"
+#include "GameplayTagContainer.h"
 #include "FPSRFlowFieldBoundsVolume.generated.h"
 
 class UBoxComponent;
@@ -25,6 +26,15 @@ public:
 	/** World-space axis-aligned bounds of the sizing box (rotation-robust via the component's cached bounds).
 	 *  Returns an empty box if the box component is missing. */
 	FBox GetWorldBounds() const;
+
+	/** Which map this volume's grid belongs to (multimap Tier 0). An unset tag = the Default single-map field, so an
+	 *  untagged L_Sandbox keeps its single grid unchanged. In multimap content, each streaming sublevel's volume carries
+	 *  a distinct MapId that keys its per-map flow-field computer + spawn points + occupancy (§3 Tier 0). */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "FPSR|Flow Field")
+	FGameplayTag MapId;
+
+	/** MapId accessor (unset = Default single-map). */
+	const FGameplayTag& GetMapId() const { return MapId; }
 
 	/** Per-map cell size override (cm); 0 = use the subsystem default. >0 trades grid resolution vs recompute cost. */
 	float GetCellSizeOverride() const { return CellSizeOverride; }
