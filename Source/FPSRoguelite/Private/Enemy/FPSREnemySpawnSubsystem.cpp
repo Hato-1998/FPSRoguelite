@@ -238,10 +238,11 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 
 	++MovementFrameCounter;
 
-	// Cache alive player pawn locations, pawns, and committed MapIds once for this pass.
+	// Cache alive player pawn locations, pawns, controllers, and committed MapIds once for this pass.
 	TArray<APawn*, TInlineAllocator<4>> PlayerPawns;
 	TArray<FVector, TInlineAllocator<4>> PlayerLocations;
 	TArray<FGameplayTag, TInlineAllocator<4>> PlayerMapIds; // multimap Tier 0: enemies target only same-map players
+	TArray<APlayerController*, TInlineAllocator<4>> PlayerControllers; // Tier 1: match a tracker's designated controller
 	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
 	{
 		if (APlayerController* PC = It->Get())
@@ -260,6 +261,7 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 				// Committed occupancy (unset = Default single-map). Grace is a server-only allocator notion, NOT used
 				// here for targeting/attack (Codex R5: combat uses committed MapId strictly, flow-continuity uses grace).
 				PlayerMapIds.Add(PS ? PS->GetCurrentMapId() : FGameplayTag());
+				PlayerControllers.Add(PC);
 			}
 		}
 	}
@@ -362,9 +364,42 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 				BestPlayerIndex = p;
 			}
 		}
-		// No same-map player (an unoccupied map before the empty-map drain culls it, S2b) -> the enemy has no target: it
-		// gets the cheapest LOD, no attack, and no player-directed movement (separation only). It never beelines cross-map.
-		const bool bHasTarget = (BestPlayerIndex != INDEX_NONE);
+		bool bHasTarget = (BestPlayerIndex != INDEX_NONE);
+
+		// Transition tracker (multimap Tier 1): an enemy with NO same-map target but a live designation to pursue a player
+		// who just crossed a boundary chases that (cross-map) player toward the door. MOVEMENT/LOD/flow only — the attack
+		// stays gated to same-map players below (bAttackEligible), so this never lands a hit through the boundary wall;
+		// contact damage re-enables naturally once the enemy crosses into the player's map (its MapId re-resolves, above).
+		bool bTrackerChase = false;
+		FVector TrackerDoorLocation = FVector::ZeroVector;
+		FGameplayTag TrackerDepartedMap;
+		if (!bHasTarget)
+		{
+			if (APlayerController* Tracked = Enemy->GetCrossingTracker(Now))
+			{
+				const int32 tp = PlayerControllers.IndexOfByKey(Tracked);
+				if (tp != INDEX_NONE)
+				{
+					// Beeline target snapshot comes from the ENEMY (bound to its own crossing), not the shared per-player
+					// transition record — so a later crossing by the same player can't repoint this tracker at the wrong door.
+					BestPlayerIndex = tp;
+					BestDistSq = FVector::DistSquaredXY(PlayerLocations[tp], EnemyLocation);
+					bHasTarget = true;
+					bTrackerChase = true;
+					TrackerDoorLocation = Enemy->GetCrossingTrackerDoorLocation();
+					TrackerDepartedMap = Enemy->GetCrossingTrackerDepartedMap();
+				}
+			}
+		}
+
+		// Strict same-map target -> may deal contact damage. A transition tracker (cross-map by construction) may only
+		// MOVE toward its player, never attack it, until it crosses in and becomes same-map (then bHasTarget is set by the
+		// same-map loop above and bTrackerChase is false). This is the sole guard against through-boundary-wall melee
+		// (enemy contact damage bypasses FPSRCombat::CanAffectTarget — it calls ApplyContactDamage directly).
+		const bool bAttackEligible = bHasTarget && !bTrackerChase;
+
+		// No target at all (an unoccupied map before the empty-map drain culls it, S2b) -> cheapest LOD, no attack, no
+		// player-directed movement (separation only).
 		const FVector BestPlayerLocation = bHasTarget ? PlayerLocations[BestPlayerIndex] : EnemyLocation;
 
 		// Distance LOD tier -> update stride + net update frequency (Game.MD §5).
@@ -388,23 +423,40 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 		// ranged charge->fire for AFPSRRangedEnemyBase (it manages its own held token). The XY nearest test ignores
 		// Z, so compute the vertical gap (no through-floor melee) and pass it as a gate.
 		const float AttackVertGap = FMath::Abs(EnemyLocation.Z - BestPlayerLocation.Z);
-		if (bHasTarget)
-		if (AFPSRCharacter* TargetChar = Cast<AFPSRCharacter>(PlayerPawns[BestPlayerIndex]))
+		if (bAttackEligible)
 		{
+			// Strict same-map target: full attack decision (melee contact for the base, ranged charge->fire override).
+			if (AFPSRCharacter* TargetChar = Cast<AFPSRCharacter>(PlayerPawns[BestPlayerIndex]))
+			{
+				FFPSRServerAttackContext AttackCtx;
+				AttackCtx.Now = Now;
+				AttackCtx.DeltaSeconds = DeltaTime;
+				AttackCtx.TargetChar = TargetChar;
+				AttackCtx.TargetController = Cast<AFPSRPlayerController>(TargetChar->GetController());
+				AttackCtx.TargetLocation = BestPlayerLocation;
+				AttackCtx.DistSqToTarget = BestDistSq;
+				AttackCtx.bVerticalInRange = (AttackVertGap <= AttackVerticalRange);
+				AttackCtx.ContactDamage = ContactDamage;
+				AttackCtx.bMeleeTokenAvailable = (AttackersThisPass[BestPlayerIndex] < AttackTokenLimit);
+				if (Enemy->ServerTickAttack(AttackCtx) == EFPSRServerAttackResult::MeleeAttacked)
+				{
+					++AttackersThisPass[BestPlayerIndex];
+				}
+			}
+		}
+		else
+		{
+			// No attack-eligible target — either NO same-map player (this enemy's map emptied: the player left/died) or a
+			// transition tracker chasing a CROSS-MAP player (MOVEMENT only, Tier 1). Tick the archetype with an EMPTY-target
+			// context so its attack FSM still advances: a ranged enemy mid-charge whose target just crossed a boundary / died
+			// ABORTS + releases its charge token + clears its client warning instead of freezing mid-charge (its whole charge
+			// FSM lives in ServerTickAttack). The base melee no-ops on the null target, and no damage can land (null target),
+			// so this never lands a hit across a boundary wall. Single-map: with players present every enemy has a same-map
+			// target, so this branch never runs there — zero regression. Cheap: one no-op virtual call per targetless enemy.
 			FFPSRServerAttackContext AttackCtx;
 			AttackCtx.Now = Now;
 			AttackCtx.DeltaSeconds = DeltaTime;
-			AttackCtx.TargetChar = TargetChar;
-			AttackCtx.TargetController = Cast<AFPSRPlayerController>(TargetChar->GetController());
-			AttackCtx.TargetLocation = BestPlayerLocation;
-			AttackCtx.DistSqToTarget = BestDistSq;
-			AttackCtx.bVerticalInRange = (AttackVertGap <= AttackVerticalRange);
-			AttackCtx.ContactDamage = ContactDamage;
-			AttackCtx.bMeleeTokenAvailable = (AttackersThisPass[BestPlayerIndex] < AttackTokenLimit);
-			if (Enemy->ServerTickAttack(AttackCtx) == EFPSRServerAttackResult::MeleeAttacked)
-			{
-				++AttackersThisPass[BestPlayerIndex];
-			}
+			Enemy->ServerTickAttack(AttackCtx);
 		}
 
 		// Spread throttled updates across frames by the enemy's stable id.
@@ -433,7 +485,13 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 			FVector FlowDir = FlowField ? FlowField->SampleFlowDirection(EnemyMap, EnemyLocation) : FVector::ZeroVector;
 			if (FlowDir.IsNearlyZero() && bHasTarget)
 			{
-				FlowDir = (BestPlayerLocation - EnemyLocation);
+				// A transition tracker still on the departed side (the departed map's field has no source, so FlowDir is
+				// zero here) beelines to the DOOR — a chokepoint — rather than straight at the cross-map player, so it
+				// heads through the doorway instead of jamming the wall beside it. Once it crosses (its MapId re-resolves
+				// away from the departed map, above), it aims at the player and picks up the new map's field (handoff).
+				const bool bBeelineToDoor = bTrackerChase && (EnemyMap == TrackerDepartedMap);
+				const FVector Aim = bBeelineToDoor ? TrackerDoorLocation : BestPlayerLocation;
+				FlowDir = (Aim - EnemyLocation);
 				FlowDir.Z = 0.0f;
 				FlowDir = FlowDir.GetSafeNormal();
 			}
@@ -525,7 +583,7 @@ FVector UFPSREnemySpawnSubsystem::ComputeSeparation(int32 AgentIndex, const TArr
 	return Separation;
 }
 
-void UFPSREnemySpawnSubsystem::ComputeOccupancy(TArray<FGameplayTag>& OutOccupiedMaps, TArray<int32>& OutPlayerCounts) const
+void UFPSREnemySpawnSubsystem::ComputeOccupancy(TArray<FGameplayTag>& OutOccupiedMaps, TArray<int32>& OutPlayerCounts, float Now)
 {
 	OutOccupiedMaps.Reset();
 	OutPlayerCounts.Reset();
@@ -553,6 +611,21 @@ void UFPSREnemySpawnSubsystem::ComputeOccupancy(TArray<FGameplayTag>& OutOccupie
 		AFPSRPlayerState* PS = PC->GetPlayerState<AFPSRPlayerState>();
 		if (PS)
 		{
+			// Transition tracker (multimap Tier 1): if this ALIVE player's committed map is changing AWAY from a valid map,
+			// they just crossed a boundary — record the crossing (departed map + pawn location ~= the door) so the director
+			// can elect a few boundary enemies to follow them through. Recorded BEFORE the SetCurrentMapId commit (needs the
+			// old value). Single-map: the map never changes from unset, so this never fires. Downed players don't draw a
+			// tracker (they're filtered from targeting, B17), so only alive crossings are recorded.
+			const FGameplayTag OldMap = PS->GetCurrentMapId();
+			if (PS->IsAlive() && OldMap.IsValid() && OldMap != Map)
+			{
+				FMapTransitionRecord& Rec = PlayerTransitions.FindOrAdd(TObjectKey<APlayerController>(PC));
+				Rec.Player = PC;
+				Rec.DepartedMap = OldMap;
+				Rec.DepartTime = Now;
+				Rec.DoorLocation = Pawn->GetActorLocation();
+				Rec.bElected = false; // a fresh crossing: (re-)elect trackers for it this director tick
+			}
 			// Set CurrentMapId for ALL players with a pawn (a downed player is still physically in a map) so the combat
 			// cross-map gate + UI stay correct. Idempotent (low-churn: only dirties on a real map change).
 			PS->SetCurrentMapId(Map);
@@ -590,7 +663,7 @@ void UFPSREnemySpawnSubsystem::ComputeAliveByMap(TMap<FGameplayTag, int32>& OutA
 	}
 }
 
-int32 UFPSREnemySpawnSubsystem::DrainMapEnemies(const FGameplayTag& MapId, int32 MaxToRelease)
+int32 UFPSREnemySpawnSubsystem::DrainMapEnemies(const FGameplayTag& MapId, int32 MaxToRelease, float Now)
 {
 	if (MaxToRelease <= 0)
 	{
@@ -601,7 +674,9 @@ int32 UFPSREnemySpawnSubsystem::DrainMapEnemies(const FGameplayTag& MapId, int32
 	for (const TObjectPtr<AFPSREnemyBase>& EnemyPtr : ActiveEnemies)
 	{
 		AFPSREnemyBase* Enemy = EnemyPtr.Get();
-		if (IsValid(Enemy) && Enemy->GetMapId() == MapId)
+		// Skip enemies still pursuing a crossed player out of this map (Tier 1): don't recycle an active transition
+		// tracker mid-chase. It self-excludes once it crosses (its MapId changes), and becomes drainable again on expiry.
+		if (IsValid(Enemy) && Enemy->GetMapId() == MapId && !Enemy->IsCrossingTracker(Now))
 		{
 			ToRelease.Add(Enemy);
 			if (ToRelease.Num() >= MaxToRelease)
@@ -615,6 +690,66 @@ int32 UFPSREnemySpawnSubsystem::DrainMapEnemies(const FGameplayTag& MapId, int32
 		ReleaseEnemy(Enemy);
 	}
 	return ToRelease.Num();
+}
+
+void UFPSREnemySpawnSubsystem::ElectTransitionTrackers(APlayerController* Player, const FGameplayTag& DepartedMap, const FVector& DoorLocation, float Now)
+{
+	if (!Player || !DepartedMap.IsValid())
+	{
+		return;
+	}
+
+	const float RadiusSq = FMath::Square(TrackerBoundaryRadius);
+
+	// One pass over the swarm. A fresh crossing SUPERSEDES this player's earlier cohort: any enemy still designated to this
+	// player from a PRIOR crossing is CLEARED — the player crossed another door before it caught up, so it gives up and
+	// reverts to its map's normal swarm/drain. This stops a straggler from (a) chasing with a stale door / jamming a
+	// boundary it can't route through, and (b) consuming the new crossing's slots (Codex P2 / adversarial review). Trackers
+	// pursuing OTHER players are untouched. A cleared enemy that happens to be in the NEW departed map near the NEW door is
+	// re-eligible below, so a tracker that already crossed into the new departed map hands off seamlessly to the new door.
+	TArray<TPair<float, AFPSREnemyBase*>, TInlineAllocator<32>> Eligible;
+	for (const TObjectPtr<AFPSREnemyBase>& EnemyPtr : ActiveEnemies)
+	{
+		AFPSREnemyBase* Enemy = EnemyPtr.Get();
+		if (!IsValid(Enemy))
+		{
+			continue;
+		}
+		if (Enemy->IsCrossingTracker(Now))
+		{
+			if (Enemy->GetCrossingTracker(Now) != Player)
+			{
+				continue; // pursuing a different player -> not eligible, and don't disturb its designation
+			}
+			Enemy->ClearCrossingTracker(); // superseded by this fresh crossing; re-eligible below only if at the new door
+		}
+		if (Enemy->GetMapId() != DepartedMap)
+		{
+			continue; // only the departed map's swarm follows out of it
+		}
+		const float DistSq = FVector::DistSquaredXY(Enemy->GetActorLocation(), DoorLocation);
+		if (DistSq > RadiusSq)
+		{
+			continue; // too far from the door to bother following (소수 near the boundary)
+		}
+		Eligible.Add(TPair<float, AFPSREnemyBase*>(DistSq, Enemy));
+	}
+
+	if (Eligible.Num() == 0)
+	{
+		return;
+	}
+
+	// Designate the nearest-to-door enemies, up to the per-player concurrent cap (prior trackers for this player were just
+	// cleared, so the fresh cohort gets the full budget). Snapshot the departed map + door onto each enemy so its beeline
+	// is bound to THIS crossing (immune to a later crossing overwriting the shared per-player transition record).
+	Eligible.Sort([](const TPair<float, AFPSREnemyBase*>& A, const TPair<float, AFPSREnemyBase*>& B) { return A.Key < B.Key; });
+	const float ExpireAt = Now + TrackerGraceSeconds;
+	const int32 NumToAssign = FMath::Min(MaxTrackersPerPlayer, Eligible.Num());
+	for (int32 i = 0; i < NumToAssign; ++i)
+	{
+		Eligible[i].Value->SetCrossingTracker(Player, ExpireAt, DepartedMap, DoorLocation);
+	}
 }
 
 void UFPSREnemySpawnSubsystem::RefreshSpawnPointCache()
@@ -650,17 +785,37 @@ void UFPSREnemySpawnSubsystem::TickDirector()
 		return;
 	}
 
-	// Map-aware allocator (multimap Tier 0). Occupancy (also commits each player's CurrentMapId) + per-map alive counts.
+	const float Now = World->GetTimeSeconds();
+
+	// Map-aware allocator (multimap Tier 0). Occupancy (also commits each player's CurrentMapId + records boundary
+	// crossings for the Tier 1 transition tracker) + per-map alive counts.
 	TArray<FGameplayTag> OccupiedMaps;
 	TArray<int32> PlayerCounts;
-	ComputeOccupancy(OccupiedMaps, PlayerCounts);
+	ComputeOccupancy(OccupiedMaps, PlayerCounts, Now);
 
 	TMap<FGameplayTag, int32> AliveByMap;
 	ComputeAliveByMap(AliveByMap);
 
+	// Transition tracker (multimap Tier 1): for each freshly-recorded crossing, elect a few boundary enemies (once) to
+	// pursue that player through the door; prune records that have aged out of the grace window or whose player is gone.
+	for (auto It = PlayerTransitions.CreateIterator(); It; ++It)
+	{
+		FMapTransitionRecord& Rec = It->Value;
+		APlayerController* PC = Rec.Player.Get();
+		if (!PC || (Now - Rec.DepartTime) >= TrackerGraceSeconds)
+		{
+			It.RemoveCurrent(); // player gone / window elapsed -> drop the record (designations expire on their own)
+			continue;
+		}
+		if (!Rec.bElected)
+		{
+			ElectTransitionTrackers(PC, Rec.DepartedMap, Rec.DoorLocation, Now);
+			Rec.bElected = true;
+		}
+	}
+
 	// Grace: stamp each occupied map's last-seen time so a just-vacated map isn't drained for MapDrainGraceSeconds (a
 	// player dipping across a boundary and back finds the crowd intact). Server-only.
-	const float Now = World->GetTimeSeconds();
 	for (const FGameplayTag& Map : OccupiedMaps)
 	{
 		MapLastOccupiedTime.FindOrAdd(Map) = Now;
@@ -679,7 +834,7 @@ void UFPSREnemySpawnSubsystem::TickDirector()
 		{
 			continue; // grace: recently vacated -> keep the crowd for a few seconds (no door-cross thrash)
 		}
-		DrainMapEnemies(Pair.Key, EmptyMapDrainPerTick);
+		DrainMapEnemies(Pair.Key, EmptyMapDrainPerTick, Now);
 	}
 
 	if (OccupiedMaps.Num() == 0)

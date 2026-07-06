@@ -13,6 +13,7 @@ class AFPSREnemyBase;
 class AFPSREnemySpawnPoint;
 class AFPSRSpawnRoom;
 class AFPSRPlayerController;
+class APlayerController;
 class UFPSREnemyRosterDataAsset;
 
 /** Lightweight server-authoritative object pool + spawn director for swarm enemies (P2-A).
@@ -123,16 +124,24 @@ private:
 
 	/** Recompute per-map committed occupancy (server): for each player pawn, resolve the map its location is in (flow-field
 	 *  registry AABB) and set its PlayerState CurrentMapId (idempotent, low-churn). Fills OutOccupiedMaps + OutPlayerCounts
-	 *  (parallel arrays, occupied maps only). Single-map: everyone resolves to the Default (unset) map. */
-	void ComputeOccupancy(TArray<FGameplayTag>& OutOccupiedMaps, TArray<int32>& OutPlayerCounts) const;
+	 *  (parallel arrays, occupied maps only). Also records a per-player boundary DEPARTURE into PlayerTransitions when an
+	 *  alive player's committed map changes away from a valid map (multimap Tier 1 transition tracker source). Single-map:
+	 *  everyone resolves to the Default (unset) map, no departures are ever recorded. Now = current world seconds. */
+	void ComputeOccupancy(TArray<FGameplayTag>& OutOccupiedMaps, TArray<int32>& OutPlayerCounts, float Now);
 
 	/** Count currently-active enemies per map (by each enemy's current MapId). Recomputed each director tick so map
 	 *  changes (an enemy crossing a boundary) stay consistent — O(alive), cheap at the 0.25s director cadence. */
 	void ComputeAliveByMap(TMap<FGameplayTag, int32>& OutAliveByMap) const;
 
-	/** Release up to MaxToRelease active enemies whose MapId == MapId back to the pool (bounded empty-map drain). Returns
-	 *  the number released. */
-	int32 DrainMapEnemies(const FGameplayTag& MapId, int32 MaxToRelease);
+	/** Release up to MaxToRelease active enemies whose MapId == MapId back to the pool (bounded empty-map drain). Skips
+	 *  enemies holding a live transition-tracker designation at Now (Tier 1: don't recycle an enemy still pursuing a
+	 *  crossed player out of this map). Returns the number released. */
+	int32 DrainMapEnemies(const FGameplayTag& MapId, int32 MaxToRelease, float Now);
+
+	/** Server (multimap Tier 1 transition tracker): designate the enemies in DepartedMap that are within TrackerBoundaryRadius
+	 *  of DoorLocation (nearest first) to pursue the crossing Player through the door until Now + TrackerGraceSeconds, up to
+	 *  MaxTrackersPerPlayer concurrent per player. Skips enemies already holding a live designation. One-shot per crossing. */
+	void ElectTransitionTrackers(APlayerController* Player, const FGameplayTag& DepartedMap, const FVector& DoorLocation, float Now);
 
 	/** Batched server movement pass with distance LOD (replaces per-actor enemy Tick). */
 	void TickEnemyMovement(float DeltaTime);
@@ -265,6 +274,40 @@ private:
 
 	/** Server-only: world time each map last had a player (grace source for the empty-map drain). Not replicated. */
 	TMap<FGameplayTag, float> MapLastOccupiedTime;
+
+	// --- Transition tracker (multimap Tier 1, server-only) — a few boundary enemies follow a player who crosses a door. ---
+
+	/** Max enemies concurrently designated to pursue a single player across boundaries (소수 — protects the global budget:
+	 *  the rest of the departed map's swarm stays and drains rather than funneling into the new map). A per-player concurrent
+	 *  cap: a chained crossing (A->B->C) does NOT stack cohorts — a fresh crossing supersedes (clears) the player's earlier
+	 *  trackers and elects up to this many anew at the new door, so total concurrent trackers per player never exceeds this.
+	 *  Tunable Tier-1 value. */
+	static constexpr int32 MaxTrackersPerPlayer = 8;
+
+	/** Only enemies within this XY radius of the crossing point (~the door) are eligible to become transition trackers —
+	 *  a distant enemy across the departed map doesn't bother following. Tunable Tier-1 value (PIE). */
+	static constexpr float TrackerBoundaryRadius = 1500.0f; // cm
+
+	/** How long a transition-tracker designation stays live (world seconds). Sized to cover a full door/bridge crossing
+	 *  at enemy move speed (~250 cm/s) — deliberately longer than MapDrainGraceSeconds (which is the "dip across and
+	 *  return" drain grace); DrainMapEnemies skipping live trackers keeps the two independent. Tunable (PIE). */
+	static constexpr float TrackerGraceSeconds = 6.0f;
+
+	/** A per-player record of the most recent map boundary the player crossed OUT of (multimap Tier 1). Recorded in
+	 *  ComputeOccupancy when an alive player's committed map changes away from a valid map; consumed by the director to
+	 *  elect trackers (once) and by the movement pass (DoorLocation beeline + DepartedMap handoff test). Server-only. */
+	struct FMapTransitionRecord
+	{
+		TWeakObjectPtr<APlayerController> Player;    // the crossing player (resolved by the director for election)
+		FGameplayTag DepartedMap;                    // the map the player just left (trackers come from here)
+		float DepartTime = 0.0f;                     // world time of the crossing (grace window start)
+		FVector DoorLocation = FVector::ZeroVector;  // where the player crossed (~the door) — beeline waypoint
+		bool bElected = false;                       // trackers elected for this crossing yet (one-shot)
+	};
+
+	/** Server-only: latest boundary crossing per player (keyed by controller). Bounded by player count; pruned in the
+	 *  director when the record ages past TrackerGraceSeconds or the controller is gone. Not replicated. */
+	TMap<TObjectKey<APlayerController>, FMapTransitionRecord> PlayerTransitions;
 
 	/** Max enemies spawned per director tick = the swarm FILL RATE (x ~1/SpawnInterval per second). Lower = enemies
 	 *  trickle in and the crowd recovers gradually after a clear; higher = the swarm snaps to the target count fast.
