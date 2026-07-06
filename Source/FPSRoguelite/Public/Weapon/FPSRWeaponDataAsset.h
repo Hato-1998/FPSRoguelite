@@ -178,6 +178,23 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Visual", meta = (ClampMin = "0.1"))
 	float ADSFireKickRecoveryRate = 12.0f;
 
+	/** ADS idle sway — LEFT-RIGHT (yaw) amplitude in degrees. While aiming, the weapon gently wanders about the sight
+	 *  pivot to add a handheld "breathing" life: the gun body sways but the reticle stays centred (same pivot trick as
+	 *  ADSFireKickDegrees). 0 disables the yaw sway. Only applied while aiming an ADS weapon with an AimSocket; faded
+	 *  in/out by the ADS blend. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Visual", meta = (ClampMin = "0.0"))
+	float ADSSwayYawDegrees = 0.4f;
+
+	/** ADS idle sway — subtle UP-DOWN (pitch) amplitude in degrees, out of phase with the yaw so the wander reads
+	 *  organic rather than a straight line. 0 = yaw-only sway. Only used while aiming when a sway amplitude is > 0. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Visual", meta = (ClampMin = "0.0"))
+	float ADSSwayPitchDegrees = 0.15f;
+
+	/** ADS idle sway speed (oscillation frequency, rad/s). Lower = slower, calmer breathing; higher = jitterier.
+	 *  Only used when a sway amplitude is > 0. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Visual", meta = (ClampMin = "0.0"))
+	float ADSSwaySpeed = 1.2f;
+
 	/** While aiming, don't spawn the muzzle flash. In ADS the muzzle sits right behind the sight, so a large flash
 	 *  glow washes over the reticle (obscures the aim). Default true: hip fire keeps the flash, ADS drops it (the shot
 	 *  still reads via bolt cycle + fire kick + sound + camera recoil). Set false to keep the flash while aiming. */

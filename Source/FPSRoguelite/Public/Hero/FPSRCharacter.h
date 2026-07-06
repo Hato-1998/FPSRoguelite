@@ -435,6 +435,11 @@ protected:
 	bool bCachedSuppressMuzzleFlashWhileADS = true;
 	float CachedADSFireKickDegrees = 1.5f;
 	float CachedADSFireKickRecoveryRate = 12.0f;
+	/** Equipped weapon's ADS idle-sway params, cached on equip (owner-local cosmetic). Amplitudes in degrees about the
+	 *  sight pivot (yaw = L-R, pitch = subtle up-down); speed = oscillation frequency. 0 amplitude = no sway. */
+	float CachedADSSwayYawDegrees = 0.0f;
+	float CachedADSSwayPitchDegrees = 0.0f;
+	float CachedADSSwaySpeed = 1.2f;
 	/** Current decaying ADS fire-kick angle (deg), owner-local. Bumped on each aimed shot, settled toward 0 each frame;
 	 *  applied as a rotation about the AimSocket pivot in UpdateAimDownSights so the gun kicks while the sight stays put. */
 	float ADSFireKickPitch = 0.0f;

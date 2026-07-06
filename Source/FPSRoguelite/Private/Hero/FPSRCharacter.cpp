@@ -1097,6 +1097,9 @@ void AFPSRCharacter::RefreshFirstPersonWeaponVisual()
 	bCachedSuppressMuzzleFlashWhileADS = Weapon->bSuppressMuzzleFlashWhileADS;
 	CachedADSFireKickDegrees = Weapon->ADSFireKickDegrees;
 	CachedADSFireKickRecoveryRate = Weapon->ADSFireKickRecoveryRate;
+	CachedADSSwayYawDegrees = Weapon->ADSSwayYawDegrees;
+	CachedADSSwayPitchDegrees = Weapon->ADSSwayPitchDegrees;
+	CachedADSSwaySpeed = Weapon->ADSSwaySpeed;
 
 	// Rebuild modular cosmetic parts on the (skeletal) weapon mesh from the weapon's part list.
 	RefreshWeaponPartComponents(Weapon);
@@ -1385,16 +1388,29 @@ void AFPSRCharacter::UpdateAimDownSights(float DeltaTime)
 	FVector NewLoc = FMath::Lerp(BaseArmsRelLoc, GluedAimLoc, CurrentADSAlpha);
 	FQuat NewRot = FQuat::Slerp(BaseArmsRelRot.Quaternion(), ADSAimRot.Quaternion(), CurrentADSAlpha);
 
-	// ADS fire kick: rotate the arms about the pinned sight (camera-space ≈ (ADSSightDistance, 0, 0)) by the current
-	// kick angle, faded by the ADS alpha. Pivoting about the sight keeps the reticle on centre while the muzzle/gun
-	// body snaps (+pitch = muzzle up) — a physical fire read that doesn't disturb aim. The kick is set on each aimed
-	// shot (PlayWeaponFireCosmetics) and settled back toward zero here each frame.
-	if (ADSFireKickPitch > KINDA_SMALL_NUMBER && CurrentADSAlpha > KINDA_SMALL_NUMBER)
+	// ADS idle sway + fire kick: BOTH pivot the arms about the pinned sight (camera-space ≈ (ADSSightDistance, 0, 0)),
+	// faded by the ADS alpha, so the gun body/muzzle moves while the sight stays on the centre-line (steady reticle).
+	//  - Sway: a gentle time-driven handheld "breathing" wander (yaw = L-R, subtle pitch) — two out-of-phase sines per
+	//    axis so it reads organic rather than a metronome. Purely cosmetic + owner-local; no runtime state (time-based).
+	//  - Kick: the per-shot recoil snap (+pitch = muzzle up) set on each aimed shot (PlayWeaponFireCosmetics), settled
+	//    back toward zero each frame. Both are scaled by the alpha so they appear only in ADS and fade out on release.
+	FRotator ExtraRot(ADSFireKickPitch, 0.0f, 0.0f);
+	if (CurrentADSAlpha > KINDA_SMALL_NUMBER)
 	{
-		const FVector Pivot(CachedADSSightDistance, 0.0f, 0.0f);
-		const FQuat KickRot(FRotator(ADSFireKickPitch * CurrentADSAlpha, 0.0f, 0.0f));
-		NewLoc = Pivot + KickRot.RotateVector(NewLoc - Pivot);
-		NewRot = KickRot * NewRot;
+		if (CachedADSSwayYawDegrees > 0.0f || CachedADSSwayPitchDegrees > 0.0f)
+		{
+			const float T = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
+			const float W = CachedADSSwaySpeed;
+			ExtraRot.Yaw   += CachedADSSwayYawDegrees   * (0.6f * FMath::Sin(T * W)            + 0.4f * FMath::Sin(T * W * 1.7f + 1.1f));
+			ExtraRot.Pitch += CachedADSSwayPitchDegrees * (0.6f * FMath::Sin(T * W * 0.8f + 0.5f) + 0.4f * FMath::Sin(T * W * 1.3f + 2.3f));
+		}
+		if (!ExtraRot.IsNearlyZero())
+		{
+			const FVector Pivot(CachedADSSightDistance, 0.0f, 0.0f);
+			const FQuat ExtraQuat = (ExtraRot * CurrentADSAlpha).Quaternion();
+			NewLoc = Pivot + ExtraQuat.RotateVector(NewLoc - Pivot);
+			NewRot = ExtraQuat * NewRot;
+		}
 	}
 	ADSFireKickPitch = FMath::FInterpTo(ADSFireKickPitch, 0.0f, DeltaTime, CachedADSFireKickRecoveryRate);
 
