@@ -432,7 +432,7 @@ protected:
 	 *  centre-line; >0 lets that fraction of the bob survive). Rotation stays fully glued regardless. */
 	float CachedADSPositionBobScale = 0.0f;
 	bool bCachedSuppressWeaponBoltWhileADS = false;
-	bool bCachedSuppressMuzzleFlashWhileADS = true;
+	float CachedADSMuzzleFlashScale = 0.35f;
 	float CachedADSFireKickDegrees = 1.5f;
 	float CachedADSFireKickRecoveryRate = 12.0f;
 	/** Equipped weapon's ADS idle-sway params, cached on equip (owner-local cosmetic). Amplitudes in degrees about the

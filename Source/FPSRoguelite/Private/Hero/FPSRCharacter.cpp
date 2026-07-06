@@ -1101,7 +1101,7 @@ void AFPSRCharacter::RefreshFirstPersonWeaponVisual()
 	CachedADSInterpSpeed = Weapon->BaseStats.ADSInterpSpeed;
 	CachedADSPositionBobScale = Weapon->ADSPositionBobScale;
 	bCachedSuppressWeaponBoltWhileADS = Weapon->bSuppressWeaponBoltWhileADS;
-	bCachedSuppressMuzzleFlashWhileADS = Weapon->bSuppressMuzzleFlashWhileADS;
+	CachedADSMuzzleFlashScale = Weapon->ADSMuzzleFlashScale;
 	CachedADSFireKickDegrees = Weapon->ADSFireKickDegrees;
 	CachedADSFireKickRecoveryRate = Weapon->ADSFireKickRecoveryRate;
 	CachedADSSwayYawDegrees = Weapon->ADSSwayYawDegrees;
@@ -1304,14 +1304,18 @@ void AFPSRCharacter::PlayWeaponFireCosmetics()
 		{
 			UGameplayStatics::SpawnSoundAttached(CachedFireSound, ActiveWeaponMesh);
 		}
-		// Skip the muzzle flash while aiming (default): in ADS the muzzle sits just behind the sight, so the flash glow
-		// washes over the reticle. Hip fire keeps it; the aimed shot still reads via the bolt cycle + fire kick + sound.
-		if (CachedMuzzleFlash && !(bCachedSuppressMuzzleFlashWhileADS && bAimingADS))
+		// Muzzle flash scale while aiming: in ADS the muzzle sits just behind the sight, so a full-size flash washes over
+		// the reticle. Shrink it (CachedADSMuzzleFlashScale) so the shot still reads without obscuring the aim; hip fire
+		// is always full size. Scale 0 = no flash while aiming. (Spectators use MulticastFireCosmetics at full size —
+		// they don't have the shooter's owner-local aim state.)
+		const float MuzzleScale = bAimingADS ? CachedADSMuzzleFlashScale : 1.0f;
+		if (CachedMuzzleFlash && MuzzleScale > KINDA_SMALL_NUMBER)
 		{
 			// Muzzle flash attaches to the modular part that owns the muzzle socket (barrel/forestock) when present,
 			// else the receiver. CachedMuzzleComponent is resolved per-equip in RefreshWeaponPartComponents.
 			UMeshComponent* MuzzleComp = CachedMuzzleComponent ? CachedMuzzleComponent : ActiveWeaponMesh;
-			UGameplayStatics::SpawnEmitterAttached(CachedMuzzleFlash, MuzzleComp, CachedMuzzleSocket);
+			UGameplayStatics::SpawnEmitterAttached(CachedMuzzleFlash, MuzzleComp, CachedMuzzleSocket,
+				FVector::ZeroVector, FRotator::ZeroRotator, FVector(MuzzleScale));
 		}
 	}
 }

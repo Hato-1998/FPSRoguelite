@@ -195,11 +195,12 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Visual", meta = (ClampMin = "0.0"))
 	float ADSSwaySpeed = 1.2f;
 
-	/** While aiming, don't spawn the muzzle flash. In ADS the muzzle sits right behind the sight, so a large flash
-	 *  glow washes over the reticle (obscures the aim). Default true: hip fire keeps the flash, ADS drops it (the shot
-	 *  still reads via bolt cycle + fire kick + sound + camera recoil). Set false to keep the flash while aiming. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Visual")
-	bool bSuppressMuzzleFlashWhileADS = true;
+	/** ADS muzzle-flash scale (0..1): how big the muzzle flash is while aiming, relative to hip fire. In ADS the muzzle
+	 *  sits right behind the sight, so a full-size flash washes over the reticle — shrink it so the shot still reads (a
+	 *  smaller flash) without obscuring the aim. 0 = no flash while aiming; 1 = full hip-fire size. Hip fire is always
+	 *  full size. Only affects ADS weapons while aiming. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Visual", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float ADSMuzzleFlashScale = 0.35f;
 
 	/** Optional montage played on the arms when this weapon is equipped. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Visual")
