@@ -23,6 +23,7 @@
 - [ ] 화이트박스 바닥/벽 지오메트리(**WorldStatic 콜리전** — 플로우필드 bake가 ECC_WorldStatic 다운트레이스로 바닥을 잡음).
 - [ ] `AFPSRFlowFieldBoundsVolume` 1개: 박스를 플레이 영역에 맞춤 + **MapId 태그 설정**(맵A=`Map.A` 등, 맵B=`Map.B`).
 - [ ] `AFPSREnemySpawnPoint` 여러 개: **같은 MapId 태그**. 측후방(플레이어 시야 밖 선호는 MinPlayerDistance로). 각 맵에 최소 3~4개.
+  - ⚠️ **스폰포인트 Z = 바닥 위 ~100cm** (바닥면 Z에서 +100). 코드가 디자이너 점의 Z를 **재투영 없이 그대로** 사용(`FPSREnemySpawnSubsystem.cpp` "keep exact Z, no ground re-snap"). 적 캡슐 half-height=90이라 Z를 바닥면(예: 0)에 두면 **발이 바닥 아래로 묻혀 스냅 실패 → 바닥 뚫고 낙하**. 바닥+100이면 발이 위 10cm에서 ApplyGravity가 바닥에 스냅(디버그 스폰 링도 +100 사용).
 - [ ] (선택) 맵B에도 PlayerStart 1개(런시작 ready gate 대칭용, 없어도 bounds 박스 중심 다운트레이스로 Z앵커).
 
 ### 2-3. 경계 문 (persistent, 맵A↔맵B 사이)
