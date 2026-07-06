@@ -438,6 +438,13 @@ void UFPSRWeaponFireComponent::TickComponent(float DeltaTime, ELevelTick TickTyp
 		CachedCamera->FieldOfView = FMath::FInterpTo(CachedCamera->FieldOfView, TargetFOV, DeltaTime, FMath::Max(0.01f, Stats.ADSInterpSpeed));
 	}
 
+	// Procedural aim-down-sights arm offset (owner-local) — the character owns the 1P arms; drive it from this tick
+	// (the character's own Tick is debug-only / disabled in shipping). Mirrors the FOV interp above.
+	if (AFPSRCharacter* Char = Cast<AFPSRCharacter>(OwnerPawn))
+	{
+		Char->UpdateAimDownSights(DeltaTime);
+	}
+
 	// 0) ChargeLaser charge-recoil ramp: spread the shot's up-kick across the charge so the view climbs gradually and
 	//    the rise FINISHES at the fire moment (charge complete). Applied directly here (the charge duration IS the
 	//    smoothing, so it bypasses the RecoilRiseRate path) and accumulates recovery debt so auto-recovery — gated off

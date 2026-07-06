@@ -83,12 +83,27 @@ public:
 	UFUNCTION(BlueprintPure, Category = "FPSR|Revive")
 	float GetReviveTargetProgress() const;
 
+	/** BlueprintPure aim-down-sights state for the 1P arms AnimBP: drive the ADS pose/state AND its EXIT transition off
+	 *  this. Forwards the owner-local aim flag on WeaponFire (which is only VisibleAnywhere, not BlueprintReadable, so the
+	 *  AnimBP can't reach it directly — hence this accessor). Resets to false the instant ADS is released
+	 *  (Input_ADSReleased -> SetAiming(false)), so an aim state driven by this reverts cleanly to hip when leaving ADS. */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Weapon")
+	bool IsAiming() const;
+
 	/** Owner-client: refresh the first-person weapon mesh + arms anim when the equipped weapon changes
 	 *  (called from the inventory's server EquipSlot + client OnRep). No-op on non-locally-controlled pawns. */
 	void RefreshFirstPersonWeaponVisual();
 
 	/** Owner-client: play the equipped weapon's per-shot cosmetics (fire montage + sound + muzzle flash). */
 	void PlayWeaponFireCosmetics();
+
+	/** Owner-client per-frame procedural aim-down-sights: interpolate the 1P arms (relative to the camera) so the equipped
+	 *  weapon's AimSocket sits on the camera's forward centre-line when aiming, interpolated by the weapon's
+	 *  ADSInterpSpeed. Called from UFPSRWeaponFireComponent::TickComponent (which already ticks + owns the aim state).
+	 *  No-op on remote pawns / weapons without ADS or an AimSocket. Interpolates location AND rotation: when the weapon's
+	 *  bADSAlignRotation is set it aligns the AimSocket frame to the camera, removing the authored hip cant so the sight
+	 *  reads level (else translation-only, keeping the authored weapon tilt). */
+	void UpdateAimDownSights(float DeltaTime);
 
 	/** Play reload cosmetics on a server-confirmed reload-start edge (called from UFPSRWeaponInstance::OnRep_Reloading,
 	 *  which fires on every client holding the replicated instance). Owner client -> 1P arms ReloadMontage; remote
@@ -376,9 +391,62 @@ protected:
 	FName CachedMuzzleSocket = NAME_None;
 
 	/** The weapon mesh currently shown (skeletal OR static — whichever the equipped weapon's DA provides). Fire
-	 *  cosmetics (muzzle flash / sound) attach here so they track the active mesh. Null when no weapon is equipped. */
+	 *  cosmetics (fire sound) attach here so they track the active mesh. Null when no weapon is equipped. */
 	UPROPERTY(Transient)
 	TObjectPtr<UMeshComponent> ActiveWeaponMesh;
+
+	/** Component the muzzle flash attaches to at CachedMuzzleSocket. On modular weapons the muzzle socket lives on a
+	 *  cosmetic PART (barrel/forestock) — swapping the part moves the muzzle — so RefreshWeaponPartComponents resolves
+	 *  this to whichever part component carries CachedMuzzleSocket, falling back to ActiveWeaponMesh (receiver) when no
+	 *  part provides it. Convention-based: no extra DA field — the part that owns a socket named MuzzleSocket wins. */
+	UPROPERTY(Transient)
+	TObjectPtr<UMeshComponent> CachedMuzzleComponent;
+
+	/** Component the procedural-ADS AimSocket is read from. Like the muzzle, the sight (iron sight / optic) is a modular
+	 *  PART, so RefreshWeaponPartComponents resolves this to whichever part component carries CachedAimSocket — swapping
+	 *  the sight then moves the ADS reference — falling back to the receiver (WeaponMesh1P) when no part provides it.
+	 *  Convention-based: the part that owns a socket named AimSocket wins (first in WeaponParts1P order). */
+	UPROPERTY(Transient)
+	TObjectPtr<UMeshComponent> CachedAimComponent;
+
+	// --- Procedural aim-down-sights (owner-local) ---
+	/** FirstPersonArms relative-to-camera transform captured on BeginPlay (the "hip" base the ADS interps to/from). */
+	FVector BaseArmsRelLoc = FVector::ZeroVector;
+	FRotator BaseArmsRelRot = FRotator::ZeroRotator;
+	/** Runtime ADS blend state: interpolated alpha (0 = hip, 1 = fully aimed) + the EXACT aim-pose arms transform,
+	 *  recomputed each aiming frame. Blending hip<->aim by alpha (instead of chasing the live target with a lagging
+	 *  transform interp) glues the sight onto the centre-line at full ADS, so weapon/arm animation sway/bob is cancelled
+	 *  AT THE SIGHT and the reticle holds steady rather than wobbling as an interp lags the animated socket. */
+	float CurrentADSAlpha = 0.0f;
+	FVector ADSAimLoc = FVector::ZeroVector;
+	FRotator ADSAimRot = FRotator::ZeroRotator;
+	/** Equipped weapon's ADS params, cached on equip (RefreshFirstPersonWeaponVisual). */
+	FName CachedAimSocket = NAME_None;
+	float CachedADSSightDistance = 25.0f;
+	bool bCachedHasADS = false;
+	bool bCachedADSAlignRotation = true;
+	FRotator CachedADSAimRotationOffset = FRotator::ZeroRotator;
+	bool bCachedSuppressFireMontagesWhileADS = true;
+	float CachedADSInterpSpeed = 12.0f;
+	/** Fraction of the aim pose's animated positional bob allowed through while aiming (0 = sight fully glued to the
+	 *  centre-line; >0 lets that fraction of the bob survive). Rotation stays fully glued regardless. */
+	float CachedADSPositionBobScale = 0.0f;
+	bool bCachedSuppressWeaponBoltWhileADS = false;
+	float CachedADSMuzzleFlashScale = 0.35f;
+	float CachedADSFireKickDegrees = 1.5f;
+	float CachedADSFireKickRecoveryRate = 12.0f;
+	/** Equipped weapon's ADS idle-sway params, cached on equip (owner-local cosmetic). Amplitudes in degrees about the
+	 *  sight pivot (yaw = L-R, pitch = subtle up-down); speed = oscillation frequency. 0 amplitude = no sway. */
+	float CachedADSSwayYawDegrees = 0.0f;
+	float CachedADSSwayPitchDegrees = 0.0f;
+	float CachedADSSwaySpeed = 1.2f;
+	/** Current decaying ADS fire-kick angle (deg), owner-local. Bumped on each aimed shot, settled toward 0 each frame;
+	 *  applied as a rotation about the AimSocket pivot in UpdateAimDownSights so the gun kicks while the sight stays put. */
+	float ADSFireKickPitch = 0.0f;
+
+	/** Smoothed 0..1 movement factor gating the ADS idle sway: 0 when the pawn is standing still (steady aim), ramps
+	 *  to 1 with planar speed (relative to BaseWalkSpeed) so the handheld sway only lives while moving. Owner-local. */
+	float ADSSwayMoveAlpha = 0.0f;
 
 	/** Runtime-created modular weapon-part components (U15), child-attached to WeaponMesh1P and rebuilt on each
 	 *  weapon change. Owner-only-visible (match the 1P weapon mesh). Empty for static/melee/partless weapons. */

@@ -17,6 +17,7 @@
 >   - **리뷰 clear**: 벽 너머 데미지 0 · 단일맵 회귀 0 · 신규복제 0(핵심 불변식 사수). 워크플로 나머지 4건 = 반증(freeze 스트랜드·FindMapId 히스테리시스 갭 등 = 비이슈).
 > **⏭ 다음**: (1) **콘텐츠+PIE**(사용자): 문 크로스 시 소수 추격 연속·나머지 드레인·**벽 너머 무피해**·ranged 경고 무잔존·연쇄크로스(A→B→C) 문 정합·전역200·단일맵 L_Sandbox 무회귀. 튜닝 시작값(PIE): trackers=8/반경1500cm/grace6s. (2) 머지 경계 `Scripts/codex-review.ps1 -Base main`(브랜치 전체 재검, S1a~S3+Tier1) (3) 승인 시 `--no-ff` main 머지 + 브랜치 삭제.
 > **범위 밖(명기)**: 이탈맵 플로우필드 문방향 시딩(현=직선 beeline)=프로덕션 후속. 맵 3종(L_MapA/B/RunPersistent)=로컬 존치·미커밋.
+> **🔀 무기작업 main 머지(이 세션, 통합 PIE 테스트용)**: `origin/main`(무기 ADS sway·발사파츠 반동·총구화염 VFX, `c8a8ed6`)를 이 phase 브랜치에 머지. **충돌=PROGRESS.md 1건만**(양쪽 핸드오프 보존 해소), 소스/Content **무충돌**(무기=Hero/Weapon·내 트랙=Enemy/Combat/Core/Door/Map = 파일 비중첩). 무기 LFS 에셋(AG14W 메시/애니 등 16종) smudge 완료. ⚠️ **머지로 무기 소스 변경 반영 → 재빌드 필요**(위 검증 3종은 머지 전 트래커 단독 기준; 통합 빌드 후 PIE=트래커+무기 동시).
 
 ## 🔔 핸드오프 (2026-07-06 · #3 다중맵 Tier 0 **화이트박스 콘텐츠 저작 + 부분 PIE 검증 완료** — FPSRoguelite2·`phase/p8-multimap-tier0`) — ⏭ 다음 코드작업 = **"전환 추적자"(Tier 1) 앞당김**
 > **이 세션 = 콘텐츠 저작(VibeUE MCP execute_python) + PIE 디버그**. 코드 무변경(`Source/`·`Scripts/` diff 0). 커밋 = **config + 문서만**(Content/ 맵 = 사용자 콘텐츠로 미커밋 존치).
@@ -34,6 +35,95 @@
 > **`FPSRCharacter` 미접촉**(활성 클론 무기 ADS 머지 안전 — 점유=서브시스템 pawn-AABB). GlobalAliveCap=200 신설(기존 무캡→최대300, SSOT §5 잠정200 enforce).
 > **✅ Codex 머지게이트 CLEAN**(2026-07-06): P2 2건 수정 후 재리뷰 "No discrete blocking correctness issues... consistent with intended multimap Tier 0". 수정=`7f473e1`(bake 실패 시 경계 봉인 유지)·`7f42776`(점유 계산 non-alive 제외).
 > **다음**: (1) ✅Codex 게이트 clean (2) 사용자 콘텐츠 저작(체크리스트) → PIE 게이트 → 승인 시 `--no-ff` main 머지 + 브랜치 삭제 (3) 콘텐츠 동반커밋 여부 질문. **Tier 1**(전환 추적자·silent recycle 안전게이트·콘텐츠-aware allocator·rally·late-join ack)=후속 유닛.
+## 🔔 핸드오프 (2026-07-06 e · ① "힙파이어 잔상" 진짜 원인 규명 = 총구화염 VFX(오진 정정) → 해결·커밋 완료) — 🎯 **RAA는 오진이라 철회. 실증 테스트로 원인 확정 = 총구화염 파티클. 사용자 Cascade 편집(Heat Distortion/Smoke Puff 에미터 비활성화) → 힙·ADS PIE 정상. content(①)+PROGRESS 커밋.**
+> **핵심 정정**: 이전 여러 핸드오프의 "힙파이어 잔상 = TSR 시간적 고스트" 진단은 **오진**. 실증: PIE 콘솔 `showflag.Particles 0` → 잔상·신기루 **즉시 사라짐**; `r.AntiAliasingMethod 1`(FXAA)·`showflag.Bloom 0`으로도 파티클 켜져 있으면 잔상 유지 → **원인 = 총구화염 파티클(`PS_LPAMG_Muzzle_Flash`, Cascade), TSR/블룸/모션 전부 아님**. (사용자 지적: 조준점 고정인데 그 자리 잔상 = 모션 아닌 VFX가 논리적으로 맞음.)
+> **①(a) Responsive AA 시도→전량 철회**: FP 팔/무기/파츠가 쓰는 4개 베이스 머티리얼(`M_LPAMG_Weapon`/`Character_Base`/`Casing`/`WEP_Dot`)에 `bEnableResponsiveAA=true` 켰으나 **TSR과 상극**(히스토리 거부→신기루 일렁임 순증, 잔상은 그대로). 전량 False 복원 + `git checkout`으로 HEAD 바이트 복원(레포 클린). **RAA=레거시 TAA 도구, TSR에선 역효과**(엔진소스 "base pass에 적용"은 맞으나 TSR 시각 결과는 PIE로만 판별됨).
+> **①(b) 진짜 해결**: `PS_LPAMG_Muzzle_Flash` 에미터 5개(Muzzle Flash 메시·Sparks·Smoke Puff·Heat Distortion·Sparks Bullet) 중 **Heat Distortion(배경 굴절=신기루 일렁임)** + **Smoke Puff(연기 잔류=잔상)** 비활성화(사용자 Cascade 수동). **팩 공유 에셋이라 ③ 무기복제/3P 원격에도 자동 적용.** (미세 잔여 시 후속 = Muzzle Flash 메시 Lifetime 단축.)
+> **커밋**: `content(①)` PS_LPAMG_Muzzle_Flash + PROGRESS. **미커밋(사용자 WIP·무관, 손대지 않음)**: ② 배선(`ABP_Wep_AG14W`·`DA_Weapon_Rifle`)·③ MAK12 클론 WIP(`SK_LPAMG_MAK12`·MAK12 anims 8종)·PIE dirty(`BP_FPSRPlayer`·`L_Sandbox`).
+> **⏭️ 다음 = ③ 무기복제**(팩매핑→②기반, 미착수). **교훈**: 렌더 아티팩트는 이론 전에 `showflag`/AA 토글로 실증 격리부터([[fp-afterimage-muzzle-flash-not-tsr]]).
+
+## 🔔 핸드오프 (2026-07-06 d · ① TSR 힙블러 = FP 머티리얼 Responsive AA 에디터 작업 → 새 세션 인계) — 🎯 **코드/설정 전부 완료·커밋. 남은 ①은 순수 에디터 머티리얼 토글(코드 아님). VibeUE MCP 이 세션 미연결로 editor-bridge 인계.**
+> **연결 상태**: VibeUE MCP 클라이언트 툴이 이 세션에 **부재**(ToolSearch 확인). 서버는 up(127.0.0.1:8088 LISTENING), 에디터도 `E:\Git_Project\FPSRoguelite` 트리에 열림 — 그러나 **세션 시작 시 MCP 핸드셰이크 미성립**. 헤드리스 커맨드릿은 에디터 열려있어 저장 충돌 → **새 세션(에디터 열린 상태로 재시작→MCP 연결) 또는 사용자 수동**.
+> **에디터 작업(①)**: **FP 팔 메시 + `WeaponMesh1P`(SK_LPAMG_AG14W) + `WeaponParts1P` 파츠 메시들이 쓰는 머티리얼**에 **Responsive AA(`bEnableResponsiveAA=true`)** 켜기. 근거=엔진소스 `BasePassRendering.cpp:411`(base pass 불투명 적용). 목적=힙파이어 시 TSR 시간적 고스트(사격방향 번짐) 제거(FP 한정, 적 비용 0 — 전역 velocity cvar은 제1원리로 철회함).
+> > **방법 3택**: (a) 새 세션 에디터+VibeUE MCP로 각 머티리얼 `bEnableResponsiveAA` 토글 (b) **사용자 수동**: 각 FP 머티리얼 열기→Details 검색 "Responsive AA" 체크→저장 (c) 에디터 닫고 headless commandlet(python `set_editor_property('bEnableResponsiveAA', True)`+`save_asset`). 어느 머티리얼인지=팔/무기 메시의 머티리얼 슬롯에서 확인.
+> > **검증**: PIE 힙파이어 → 사격방향 번짐 사라졌는지(육안). 안 되거나 과하면 (b)발사몽타주/킥 완화 대안.
+> **미커밋 콘텐츠(사용자)**: ② 배선(`ABP_Wep_AG14W`·`DA_Weapon_Rifle`) + ① Responsive AA 머티리얼 저장분. **이후 = ③ 무기복제**(팩매핑→②기반, 미착수).
+
+## 🔔 핸드오프 (2026-07-06 c · ADS sway 2건 + ② 발사파츠 반동 C++ 완료 → 다음 ① TSR 힙블러) — 🎯 **플레이 피드백 sway(신규+이동연동) 및 ②의 C++ 인프라 완료·커밋·사용자 PIE 검증. 남은 트랙: ①TSR 힙블러 → ③무기복제.**
+> **브랜치=main. 미푸시 10건**(3bbfb8a·c3be1cc·8d8082c·c804b48·8020d11·44cc40d + 이전 4건 a397c76·7b02254·51ea8e3·9b872ba).
+> **✅ ADS idle sway**(플레이 피드백): 사이트 피벗 기준 좌우 흔들림(총기 몸통만, 레티클 고정). DA 노브 `ADSSwayYawDegrees`(0.4)/`ADSSwayPitchDegrees`(0.15)/`ADSSwaySpeed`(1.2), 오너로컬·복제0. **이동 연동**: `ADSSwayMoveAlpha`=`GetVelocity().Size2D()/BaseWalkSpeed` clamp+FInterpTo(8) → **정지=총기 고정, 이동시만 sway**(멈추면 ease-out). 발사킥 무회귀. (`44cc40d`·`8020d11`, Build+Smoke 통과)
+> **✅ ② 제네릭 발사파츠 반동 — C++ 인프라**: 신규 `UFPSRWeaponAnimInstance : UAnimInstance`(`NativeUpdateAnimation`서 `FirePartRecoilOffset = GetCurveValue(Curve)×DistanceCm×Axis`, Curve None/Distance≈0=no-op) + DA 4필드(`FirePartRecoilBone`/`DistanceCm`(3.5)/`Axis`((0,-1,0))/`Curve`("CHRecoil"))+IsDataValid 본검증 + 캐릭터 주입(`RefreshFirstPersonWeaponVisual` SetAnimInstanceClass 직후 캐스트, 오너+스펙터). (`c804b48`, Build+Smoke 통과)
+> > **에디터 배선=사용자 완료·PIE 정상**: `ABP_Wep_AG14W` 리페어런트(Parent=UFPSRWeaponAnimInstance) + ModifyBone(`Charging_Handle`+`Bolt`) Translation=`FirePartRecoilOffset`/**Alpha=1.0**(커브 스케일은 C++에 있음→이중스케일 회피) + `DA_Weapon_Rifle` 값. **다중 파츠=같은 오프셋에 ModifyBone 여러개 바인딩(코드 변경 0)**. ⚠️콘텐츠(ABP/DA) 미커밋=사용자 WIP.
+> **✅ ADS 총구화염 축소**(`3bbfb8a`): `bSuppressMuzzleFlashWhileADS`(bool)→`ADSMuzzleFlashScale`(0~1, 기본 0.35). ADS시 완전차단→0.35 축소표시, 힙파이어 무회귀, 스펙터 풀사이즈(슈터 애임상태 미복제, 주석). 기본0.35라 DA편집 없이 즉시 적용. Build+Smoke.
+> **✅ DA 에디터 한글화+기능별 분류**(`c3be1cc`): 무기 DA 50필드 한글 DisplayName+Category `무기|{기본·발사체·카드·1인칭메시·조준(ADS)⭐13개·발사연출·애니몽타주·발사파츠반동·모듈파츠·크로스헤어·3인칭}`. UPROPERTY 메타만·런타임무영향(변수명=영어유지). Build+Smoke(UHT 한글 파싱OK).
+> **⏭️ 다음 = ① TSR 힙블러(에디터 대기) → ③ 무기복제**: 블러 잔여=TSR 시간적 고스트(모션블러 off됨). **(a) FP 팔·무기 머티리얼 Responsive AA = 유일 타겟해법**(엔진소스 확인: `bEnableResponsiveAA`가 base pass 불투명에 적용 `BasePassRendering.cpp:411`) → **에디터 여유 시**. **(c) 전역 velocity cvar = 철회**(제1원리 위배: 적 수백 velocity 패스비용). (b) 몽타주완화=피드백 훼손 보류. ③=팩매핑→②기반 복제(미착수). ⚠️**LC 주의**: 별도 클론 `FPSRoguelite2` 에디터 열려있으면 같은 엔진 Live Coding 락으로 this트리 빌드 실패 → 빌드 전 LC끄기/종료 필요([[build-octobuild-xge-c1076-flaky]] 인접 함정).
+
+## 🔔 핸드오프 (2026-07-06 b · 다음 세션 코드작업 인계 — ADS 확장 3작업 계획 승인, 코드 미착수) — 🎯 **Rifle ADS 발사감각 완료(코드 a397c76·콘텐츠 7b02254) 위에, 사용자 승인 3작업: ①TSR 힙블러 잔여 ②제네릭 발사파츠 반동(DA+C++ AnimInstance) ③무기 복제. 이 세션=계획 확정만, 컨텍스트 소진으로 인계.**
+> **브랜치=main. 미푸시 4건**(a397c76·7b02254 + 이전 51ea8e3·9b872ba). **권장 순서 ②→①→③**.
+> **① TSR 힙블러 잔여**: 모션블러 off(`r.MotionBlurQuality=0`) 후에도 힙파이어 사격방향 살짝 번짐 = **TSR 시간적 고스트**(팔 발사몽타주/ADS킥 화면 이동, 모션블러 아님). 대응 후보 PIE 반복: (a)FP 팔·무기 머티리얼 **Responsive AA**[우선] (b)팔 발사몽타주/킥 모션 완화 (c)TSR cvar 완화[전역품질↓].
+> **② 제네릭 발사파츠 반동 (승인 설계, DA+C++ AnimInstance)** — 현 Rifle 장전손잡이는 `ABP_Wep_AG14W` ModifyBone에 −3.5cm 하드코딩. 데이터화+일반화(장전손잡이 없거나 다른 파츠 구동 가능하게):
+> >   - **C++ `UFPSRWeaponAnimInstance : UAnimInstance`** 신설(무기메시 베이스): `FVector FirePartRecoilOffset`(BlueprintReadOnly)=`NativeUpdateAnimation`서 `GetCurveValue(CurveName)×DistanceCm×Axis`. Distance/Axis/CurveName 캐시(장착 시 주입).
+> >   - **DA 필드**(FPSRWeaponDataAsset): `FirePartRecoilBone`(FName, **None=파츠없음**)·`FirePartRecoilDistanceCm`(3.5)·`FirePartRecoilAxis`((0,−1,0)=컴포넌트 뒤)·`FirePartRecoilCurve`("CHRecoil"). `IsDataValid`서 bone 존재검증.
+> >   - **캐릭터**(`FPSRCharacter::RefreshFirstPersonWeaponVisual`): 장착 시 `WeaponMesh1P->GetAnimInstance()`→`UFPSRWeaponAnimInstance` 캐스트→DA 파라미터 주입(1회).
+> >   - **AnimBP**: `ABP_Wep_AG14W`를 `UFPSRWeaponAnimInstance` 부모로 **리페어런트** + ModifyBone `Translation`을 `FirePartRecoilOffset`에 바인딩(현 하드 −3.5 제거). `DA_Weapon_Rifle`에 값(Charging_Handle/3.5/(0,−1,0)/CHRecoil).
+> >   - 순서: **C++→빌드(-NoXGE)→(에디터)리페어런트+바인딩+DA세팅→PIE**. ⚠️ ModifyBone 본(BoneToModify)은 런타임 변수불가→per-AnimBP 저작(DA bone=검증/문서용). 파츠없는무기=Distance0/None→no-op.
+> **③ 무기 복제 (사용자 지시: 내가 매핑 제안→승인)** — Rifle(AG14W) 셋(팔 AnimBP 조준블렌드+무기 AnimBP 노리쇠/발사파츠+몽타주+DA소켓)을 다른 총으로. **선행=무기↔팩 매핑 확정**. 게임무기9: Bazooka·BurstRifle·ChargeLaser·Grenade·Knife·**Rifle(=AG14W확정)**·LMG·Shotgun·Sniper. 팩코드: AG14W(used)·HVG7·LRAF9·MAK12·MR22·RC425·SP60·X13. **다음세션: 팩 각 코드 메시/애니 조사→무기타입 매핑표 제안→사용자 승인→②기반 복제**(Knife=근접·Grenade=투척 제외, ChargeLaser/Bazooka=특수 판단).
+> **핵심 사실**: AA=TSR(엔진기본, Config 무오버라이드) / 커스텀 AnimInstance C++ 없음(②가 첫 신설) / VibeUE MCP=에디터+플러그인 활성시만(헤드리스 `-run=pythonscript` commandlet도 `unreal.AnimGraphService/BlueprintService/AnimSequenceService/SkeletonService` 등 python서비스 사용가능—진단·저작 검증됨) / 빌드=**`-NoXGE`**(octobuild C1076·초장시간 회피 [[build-octobuild-xge-c1076-flaky]]) / ModifyBone=컴포넌트공간→L2C/C2L 컨버터 필수·struct enum은 `get_animation_graphs()[0].get_graph_nodes_of_class()`로 raw set(configure_node 불가) / 무기↔팩=[[weapon-da-pack-code-mapping]].
+
+## 🔔 핸드오프 (2026-07-06 · ADS 발사 감각 전면 + 장전손잡이 절차 후퇴 + 모션블러 off — 사용자 PIE "작업 완료") — 🎯 **07-05 c(concern3 배선반전·concern4·bob노브)에 이어 ADS 발사 피드백(노리쇠/총기킥)+총구플래시 잔상 제거+모션블러 전역 off+장전손잡이 ModifyBone 절차 후퇴까지 완성. 코드(Build+Smoke 4/4)·설정 커밋, 콘텐츠 사용자 확인 후 커밋.**
+> **코드/설정(커밋)**:
+> - **ADS 발사 피드백**: `bSuppressFireMontagesWhileADS`를 팔몽타주 전용으로 분리 + **`bSuppressWeaponBoltWhileADS`(기본false)** → ADS서도 노리쇠 몽타주 재생. **`ADSFireKickDegrees`(1.5)/`ADSFireKickRecoveryRate`(12)** → 발사 시 AimSocket 피벗 회전 킥(조준기 고정, 총 하부/총구 반동): `UpdateAimDownSights`서 per-shot 임펄스+감쇠(FInterpTo).
+> - **`bSuppressMuzzleFlashWhileADS`(기본true)** → ADS서 총구 플래시 스폰 차단. **잔상의 진짜 원인 = 총구 플래시(조준기 덮던 핑크 블롭), 스크린샷으로 확정**(초기 모션블러/리코일지연 가설은 오진). `ADSPositionBobScale`(기본0=무회귀) 노브(07-05 c).
+> - **모션블러 off**: `FirstPersonCamera` PP MotionBlurAmount=0 **+** `DefaultEngine.ini [SystemSettings] r.MotionBlurQuality=0`(전역, 레벨 PPV까지 무시 — 힙파이어 블러 제거). ⚠️FirstPersonArms=카메라 자식이라 리코일에 강체동행(사이트 지연 아님).
+> **콘텐츠(사용자 PIE 검증, 커밋 확인 중)**:
+> - **concern3**: `ABP_Arms_AG14W` Blend-by-bool 포즈 핀 반전 교정(True=조준포즈/False=로코모션), BlendTime 0.15. **concern4**: `AM_Arms_AG14W_Fire` 블렌드 완화(HermiteCubic in0.06/out0.18).
+> - **장전손잡이**: `ABP_Wep_AG14W`에 Slot→**LocalToComponent→ModifyBone(`Charging_Handle`, 컴포넌트 -Y 3.5cm Additive, Alpha=CHRecoil커브)→ComponentToLocal**→Output. `A_FP_WEP_AG14W_Fire`에 `CHRecoil` 커브(0→1@0.04→0@0.2s). 힙·ADS 양쪽 재생. ⚠️ModifyBone=컴포넌트공간이라 L2C/C2L 컨버터 필수(VibeUE 자동삽입 안함), 노드 struct enum(translation_mode/space/alpha_input_type)은 configure_node 불가→`get_animation_graphs()[0].get_graph_nodes_of_class()`로 raw set.
+> - DA_Weapon_Rifle(ADS 소켓 배선)·AG14W 메시/소켓=이전 세션 사용자 WIP 동반.
+> **검증**: Build Succeeded(**-NoXGE**, octobuild C1076 회피 [[build-octobuild-xge-c1076-flaky]]) + Smoke 4/4(ModuleLoads/SaveGame/GameplayMessage/CrosshairSettings) + 사용자 PIE 전항목(잔상제거·킥·노리쇠·장전손잡이·힙블러) 확인.
+> **⚠️ 스퓨리어스 제외**: `BP_FPSRPlayer.uasset`·`L_Sandbox.umap`(PIE dirty)·`SK_LPAMG_MAK12`(무관 WIP) = 미커밋.
+> **후속(선택)**: 힙 블러가 모션블러 off로도 남으면 TAA 고스트 대응. 장전손잡이 이동량=ModifyBone Y(-3.5)/타이밍=CHRecoil 커브서 튜닝. 무기별 노리쇠(`Charging_Handle` 있는 팩 무기)에 동일 패턴 복제.
+
+## 🔔 핸드오프 (2026-07-05 c · ADS 조준포즈 배선반전 교정(concern3)+발사몽타주 블렌드(concern4)+위치bob 노브) — 🎯 **concern3 원인=신규저작 아니라 AnimBP Blend-by-bool 포즈 핀 반전. 스왑 교정+concern4 몽타주+ADS 노브(기본0=무회귀) → Build Succeeded·Smoke 4/4. 코드 커밋 / 콘텐츠(ABP·몽타주)=미커밋(사용자 COLD PIE 후 확인)**
+> **진단(핵심)**: 이전 미커밋 세션이 조준 셋업을 이미 저작했으나 **`ABP_Arms_AG14W`의 Blend Poses by bool 두 포즈 핀을 반전** 연결. 엔진소스 확정(`AnimGraphNode_BlendListByBool.cpp`: BlendPose_0="True Pose"=조준, BlendPose_1="False Pose"=힙; `GetActiveChildIndex=bActiveValue?0:1`). 반전=조준 시 풀-sway 로코모션 재생→글루가 큰 sway와 싸워 팔뿌리 흔들림(=concern3). EventGraph `bIsAiming`←`IsAiming()`는 정상이었음.
+> **이 세션 수정**:
+> - **[콘텐츠·미커밋] concern3**: ABP AnimGraph 포즈 핀 스왑 교정 → BlendPose_0(True)=AimSeq(`A_FP_PCH_AG14W_Idle_Loop_Aimed_NoAdditive`), BlendPose_1(False)=`BS_Arms_AG14W`. BlendTime 0.15s. 컴파일 0에러/0경고, 연결 재확인, 저장.
+> - **[콘텐츠·미커밋] concern4**: `AM_Arms_AG14W_Fire` 블렌드 완화(in 0.04→0.06, out 0.10→0.18, Linear→HermiteCubic)로 Idle↔힙파이어 스냅백 튐 감소.
+> - **[코드·커밋] ADS 안정화 노브**: DA `ADSPositionBobScale`(0~1, 기본 0, `Weapon|Visual`) + `CachedADSPositionBobScale` + `UpdateAimDownSights`에 `GluedAimLoc=Lerp(ADSAimLoc,BaseArmsRelLoc,bobScale)`→`NewLoc=Lerp(base,GluedAimLoc,alpha)`. **기본 0=현 글루와 바이트 동일(무회귀)**; >0이면 회전 완전고정 유지+위치 bob 그 비율만큼 통과(reticle 소량 드리프트 트레이드오프).
+> **검증**: Build Succeeded(FPSRogueliteEditor Win64 Development, 87s, UHT 반영 OK) + 헤드리스 Smoke 4/4(ModuleLoads/SaveGame/GameplayMessage/CrosshairSettings) 전부 Result={Success}. DA는 이미 정상 배선 확인(AimSocket=SOCKET_Aim·ADSSightDistance40·bADSAlignRotation·ADSAimRotationOffset Yaw90·bSuppressFireMontagesWhileADS). SOCKET_Aim=리시버+양 Ironsight 파트 존재.
+> **다음(사용자 COLD PIE)**: 에디터 재오픈 → ①조준 시 팔 자연스러움(concern3 해소) ②힙파이어 총 위치 튐(concern4) 확인. 부족하면 DA `ADSPositionBobScale` 0.1~0.25 시도, 또는 조준포즈를 `A_FP_PCH_AG14W_Aim_Pose`(정적 zero-sway)로 교체. PIE OK면 **콘텐츠 커밋**(ABP·몽타주·DA 등).
+> **미커밋 콘텐츠(사용자 확인 후 커밋)**: `Content/Character/Animation/`(ABP 스왑·몽타주 블렌드)·`DA_Weapon_Rifle`·AG14W 메시/소켓·`SK_LPAMG_MAK12`·`BP_FPSRPlayer`·`L_Sandbox.umap`. 무기↔팩코드=[[weapon-da-pack-code-mapping]].
+
+## 🔔 핸드오프 (2026-07-05 b · ADS 회전정렬(글루)+사이트파트소켓+리로드relax+IsAiming = 코드 커밋, 컨텍스트 소진) — 🎯 **절차적 ADS 완성도 대폭 향상(코드) → 다음=새 세션 VibeUE로 AnimBP 조준 포즈**. 코드/문서 커밋(Build Succeeded·Smoke 4/4·main), **콘텐츠 미커밋(사용자)**. ⚠️ VibeUE MCP 이 세션 미연결이라 AnimBP 작업은 새 세션(재연결)에서.
+> **이 브랜치(main)에서 한 일(커밋됨)**:
+> - **`UpdateAimDownSights` alpha 글루**: translation-only→**위치+회전 동시 alpha 블렌드**. 조준 시 `AimSocket` 프레임을 카메라 중앙선에 **매 프레임 정확히 고정**(interp 추적 아님)→애니 sway/bob이 사이트에서 상쇄=레티클 안 흔들림. 회전=slerp. 근거=고정카메라 유지(head-bone 미채택, [[fps-camera-fixed-vs-headbone]]).
+> - **리로드 중 글루 relax**: `WeaponInventory->IsReloading()` 참이면 조준 취급 해제→alpha 하강(총 살짝 내림)→리로드 몽타주(큰 팔 스윙)와 안 싸움→끝나면 재조준. (리로드 시 글루가 큰 몽타주 상쇄하며 총 크게 흔들리던 것 해결)
+> - **`SOCKET_Aim` = 사이트 파트 소켓**: `CachedAimComponent`(총구 `CachedMuzzleComponent`와 동형 관례—파트 우선·리시버 폴백, `RefreshWeaponPartComponents`). 사이트 파트(아이언사이트/조준경) 스왑 시 조준선 따라감. `IsDataValid` AimSocket 검증(리시버+전 파트).
+> - **DA `ADSAimRotationOffset`**(FRotator, `bADSAlignRotation` 조건): 소켓 국소 프레임 **선-합성**=소켓 직접 회전과 동일. 팩 weapon-forward=+Y라 **Yaw 90**(총구 소켓과 동일 이유)—**무기 DA에 1회**(파트마다 저작 X). `bADSAlignRotation` 토글(full-frame vs translation-only).
+> - **DA `bSuppressFireMontagesWhileADS`**(기본 true): 조준 중 팔+무기 발사 몽타주(반동 킥) 억제→글루와 안 싸움(흔들림↓). 총구플래시·사운드·카메라리코일·힙·비-ADS·원격3P 무영향.
+> - **`AFPSRCharacter::IsAiming()` BlueprintPure**: `WeaponFire`가 BlueprintReadOnly 아니라 AnimBP가 조준상태 못 읽던 것 해결(**A안=캐릭터 파사드 getter 채택**, B=`WeaponFire` BlueprintReadOnly 미채택—캐릭터 컨벤션=`GetReviveTargetProgress` 파사드와 정합). AnimBP 조준 상태/전환 구동용.
+> - **문서**: `Docs/WeaponPack_Integration.md` ADS 조준 소켓 규약. config `CrosshairThickness`=1.0 리셋(PIE가 0.9987 저장→CrosshairSettings 스모크 오염 복구; 테스트 격리결함=별도 태스크 `task_ceefd07d`).
+> **다음 작업(새 세션, VibeUE 연결 필수)**:
+> - **주작업(콘텐츠/에디터)**: **`ABP_Arms_AG14W` 조준 포즈** — Blend Poses by bool(Active=`Character->IsAiming()`, False=현 로코모션[풀 sway], True=**저-sway aim 포즈**, blend≈0.15s), COLD PIE 검증. **목적=concern3 해결**: 현재 글루가 총/사이트를 고정하는데 AnimBP가 ADS 중에도 풀-sway hip idle 재생→글루가 sway 상쇄하며 팔 뿌리(어깨)가 반대로 흔들려 **팔 부자연**. 조준 포즈 sway 최소면 글루가 싸울 게 없어 자연+안정 둘 다.
+> - **콘텐츠 튜닝**: `DA_Weapon_Rifle.ADSAimRotationOffset` **Yaw 90**(소켓 identity 기준; 방향 반대면 −90), `SOCKET_Aim`을 사이트 파트(Ironsight_F/B) 메시에 **+X전방·+Z위**, AnimBP `IsAiming` 배선.
+> - **concern4**(Idle↔힙파이어 총 위치 튐)=**발사 몽타주 콘텐츠**: Blend In/Out 시간·additive 베이스(`_NoAdditive`)·마지막 프레임 idle 복귀 점검(ADS 코드 아님).
+> - **선택(코드)**: 조준 포즈로도 부족하면 `UpdateAimDownSights`에 **"ADS 안정화 노브"**(회전 완전고정+위치 bob 일부 허용) 추가 스톱갭.
+> **⚠️ 블로커/주의**: ①**VibeUE MCP 이 세션 미연결**(에디터+8088 서버는 떴으나 툴 부재)→재연결=Claude 세션 재시작 필요(그래서 이 핸드오프). 새 세션 부팅 시 VibeUE 연결 확인. ②글루 현재=완전 고정→**concern3 미해결**(조준 포즈 전까지 팔 부자연 잔존). ③사용자 PIE 확인=글루 흔들림·리로드 relax·offset yaw90·이동 중 사이트.
+> **미커밋 콘텐츠(사용자, 커밋 말것)**: `Content/Assets/…AG14W/Meshes/*`(SK_LPAMG_AG14W·SM Forestock/Ironsight)·`SK_LPAMG_MAK12`·`DA_Weapon_Rifle`(offset/소켓 배선)·`BP_FPSRPlayer`·`L_Sandbox.umap`·`Content/Character|Weapons/Animation/`(AnimBP·몽타주·BS). 무기↔팩코드=[[weapon-da-pack-code-mapping]].
+
+## 🔔 핸드오프 (2026-07-05 · 무기 모듈총구+ADS 코드 = 새 세션 인계, 컨텍스트 소진) — 🎯 **AG14W Rifle 1P 애니 세트 완성(사용자 PIE ✅) + 모듈형 총구(파트 소켓) + IsDataValid 소켓검증 + 절차적 ADS 스캐폴딩 + 애셋통합 문서2**. 코드/문서는 커밋(빌드 Succeeded·스모크 4/4·main), **콘텐츠는 미커밋(사용자 작업)**. ADS 정렬 미완 → 다음 세션.
+> **이 브랜치(main)에서 한 일(커밋됨)**:
+> - **모듈형 총구**(`FPSRCharacter` `CachedMuzzleComponent`): 총구 플래시를 `MuzzleSocket`을 가진 **파트 컴포넌트**(AG14W=Forestock, MAK12=Barrel)에 부착, 없으면 리시버 폴백(관례 기반, 스키마변경0). 오너+관전자 경로. ⚠️발견: DA `MuzzleSocket`이 `"SOCKET Muzzle"`(공백) 오타로 저장돼 있었음→`unreal.Name("SOCKET_Muzzle")`로 교정.
+> - **`UFPSRWeaponDataAsset::IsDataValid` 소켓검증**: `MuzzleSocket`·`WeaponParts1P` 소켓이 실제 메시/파트에 존재하는지(본/소켓 겸용, `SkeletalMeshHasAttachPoint`). 공백오타·오소켓 저작시점 차단.
+> - **절차적 ADS(A안)**: `AFPSRCharacter::UpdateAimDownSights(DeltaTime)` — 조준 시 무기 `AimSocket`이 카메라 전방중앙선(`ADSSightDistance`)에 오도록 `FirstPersonArms` 상대위치 오프셋 보간(오너로컬·translation). `FPSRWeaponFireComponent::TickComponent`에서 호출(캐릭터 Tick은 `ENABLE_DRAW_DEBUG`-only). DA 신규필드 `AimSocket`/`ADSSightDistance`(+기존 `bHasADS`/`ADSInterpSpeed` 재사용). 근거: FP카메라=캡슐고정(head본 미추종)이라 팩 조준애니(head-camera 전제)가 사이트 정렬 안 함→사이트를 카메라로 가져옴.
+> - **문서**: `Docs/AssetIntegration_Protocol.md`(범용 애셋통합 4단계: 규약역설계→의도매핑→저작→조립검증+데이터검증), `Docs/WeaponPack_Integration.md`(LowPolyAnimatedModernGuns 규약: 소켓·2탄창스왑·additive·모듈총구·BS파이썬함정).
+> **다음 코드 작업(구체)**:
+> - **ADS 회전 정렬**(현 translation만 → 총이 기울어 보임): `UpdateAimDownSights`에 회전 정렬 추가(AimSocket forward축을 카메라 forward에 맞추는 상대회전 보간). 또는 별도 `AimRotationSocket`.
+> - **ADS 정렬값 튜닝은 콘텐츠**: `DA_Weapon_Rifle.ADSSightDistance`(현25 **너무 짧음→총이 얼굴에 붙음, 40~70 권장**) + `SK_LPAMG_AG14W`의 `SOCKET_Aim` 위치(현 0,9,7.3).
+> **⚠️ 블로커/주의**:
+> - **ADS 정렬 미완**(PIE: 총 너무 가깝고 기울어짐) — 위 튜닝+회전정렬 필요.
+> - **조준+이동 시 걷기 애니 재생 문제**(사용자: "조준이 상위 애니여야 함") = **AnimBP 콘텐츠 이슈**(`ABP_Arms_AG14W` BlendByBool이 조준 우선 못함) → AnimGraph 재구조(조준을 상위 레이어, 또는 aimed locomotion 블렌드). ⚠️코드 아님, 에디터 저작.
+> - **BS 파이썬저작 함정**: `BS_Arms_AG14W`류는 런타임 보간데이터 미빌드로 팔/무기 사라질 수 있음→저작후 강제리빌드+AnimBP재컴파일 or 에디터직접생성, 콜드PIE 검증([[anim-content-authoring-vibeue-pipeline]]).
+> **미커밋 콘텐츠(사용자 작업, 커밋 안 함)**: `Content/Character/Animation/`·`Content/Weapons/Animation/`(AG14W+보류 MAK12 몽타주·BS·AnimBP), `DA_Weapon_Rifle`(AimSocket 등 배선), `SK_LPAMG_AG14W`(SOCKET_Muzzle제거·SOCKET_Aim추가), `SM_LPAMG_AG14W_Forestock_Default/Extended`(총구 yaw90), `SK_LPAMG_MAK12`(보류 소켓). 스퓨리어스=`L_Sandbox.umap`·`BP_FPSRPlayer.uasset`(내 임시액터/미변경, 커밋말것). 무기↔팩코드 매핑=[[weapon-da-pack-code-mapping]].
 
 ## 🔔 핸드오프 (2026-07-05 s · PM 세션 마무리 — 실행 트랙 2개 프롬프트 준비 완료 — PM/문서 클론, main) — 설계 종결, 다음=구현 세션
 > **이 PM 세션 종료**. #3 다중맵 아키텍처 설계 **완전 종결**(Codex 6R, 디렉터 6+1항목 결정 잠금). 두 실행 트랙 프롬프트 준비 완료(둘 다 활성 코드 클론 `E:\Git_Project\FPSRoguelite`):
