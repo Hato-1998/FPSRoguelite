@@ -28,12 +28,12 @@ public:
 	 *  reachable from any anchor. Warning-only signal for designers (dead content), never fails a build. */
 	static TArray<FAssetData> FindOrphans();
 
-private:
 	/** True if PackagePath sits under an excluded designer/test/scratch root — /Game/Developers, /Game/Test, or any
-	 *  path containing "_Scratch" (case-insensitive). Anchors and leaves alike are excluded from discovery here so a
-	 *  designer's private sandbox never blocks CI. */
+	 *  path containing "_Scratch" (case-insensitive). Public so cross-asset validators can honor the SAME exclusion
+	 *  (e.g. the CardId-uniqueness scan must not let a scratch/sandbox card fail an anchored build). */
 	static bool IsExcludedPath(FName PackagePath);
 
+private:
 	/** All on-disk assets of the leaf content types (Card / Weapon / Mission / Fragment), excluding scratch roots.
 	 *  Shared by GatherAssetsToValidate (reachable subset) and FindOrphans (unreachable subset). */
 	static TArray<FAssetData> FindLeafCandidates();

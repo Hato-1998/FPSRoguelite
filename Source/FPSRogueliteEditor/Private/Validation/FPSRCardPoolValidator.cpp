@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Validation/FPSRCardPoolValidator.h"
+#include "Validation/FPSRAnchoredValidationService.h"
 #include "Card/FPSRCardPoolDataAsset.h"
 #include "Card/FPSRCardDataAsset.h"
 #include "AssetRegistry/AssetRegistryModule.h"
@@ -120,6 +121,13 @@ EDataValidationResult UFPSRCardPoolValidator::ValidateCrossPoolChecks(const UFPS
 	// one-time load cost across the project's card count is acceptable.
 	for (const FAssetData& CardAssetData : AllCardAssets)
 	{
+		// Honor the same scratch/Dev/Test exclusion as anchored discovery: an abandoned or sandbox-folder card that
+		// happens to reuse a CardId must never fail an anchored build (the validation contract says excluded/unreachable
+		// content doesn't gate CI). A dup CardId between two SHIPPING cards is still flagged below.
+		if (FFPSRAnchoredValidationService::IsExcludedPath(CardAssetData.PackagePath))
+		{
+			continue;
+		}
 		const UFPSRCardDataAsset* CardAsset = Cast<UFPSRCardDataAsset>(CardAssetData.GetAsset());
 		if (CardAsset == nullptr || CardAsset->CardId.IsNone())
 		{

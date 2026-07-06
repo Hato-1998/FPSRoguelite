@@ -62,16 +62,18 @@ EDataValidationResult UFPSRRunScheduleValidator::ValidateLoadedAsset_Implementat
 		Result = EDataValidationResult::Invalid;
 	}
 
+	// WARNING (not error): null BossDefinition / EnemyRoster are DOCUMENTED runtime fallbacks (director spawns the C++
+	// AFPSRBossBase placeholder; swarm uses the spawner's single configured EnemyClass). An intentional placeholder /
+	// boss-less / single-archetype test schedule is valid, so these must NOT fail the anchored CI commandlet — only
+	// flag the likely-forgotten assignment. (Codex merge-gate: don't gate builds on documented fallbacks.)
 	if (Schedule->BossDefinition == nullptr)
 	{
-		Context.AddError(LOCTEXT("NoBossDefinition", "BossDefinition is null — the director falls back to the placeholder AFPSRBossBase. Assign the run's boss (or leave unset ONLY intentionally for a boss-less test schedule)."));
-		Result = EDataValidationResult::Invalid;
+		Context.AddWarning(LOCTEXT("NoBossDefinition", "BossDefinition is null — the director will fall back to the placeholder AFPSRBossBase. Assign the run's boss unless this is intentionally a boss-less / placeholder schedule."));
 	}
 
 	if (Schedule->EnemyRoster == nullptr)
 	{
-		Context.AddError(LOCTEXT("NoEnemyRoster", "EnemyRoster is null — the swarm falls back to the spawner's single configured EnemyClass (no archetype mix). Assign a roster."));
-		Result = EDataValidationResult::Invalid;
+		Context.AddWarning(LOCTEXT("NoEnemyRoster", "EnemyRoster is null — the swarm will fall back to the spawner's single configured EnemyClass (no archetype mix). Assign a roster unless a single-archetype swarm is intended."));
 	}
 
 	// --- Alive-count anchors: strictly ascending Level, no duplicate Level keys; a non-positive Count is a soft bug
