@@ -135,13 +135,20 @@ void UFPSRMapStreamSubsystem::HandleMapReady(const FGameplayTag& MapId)
 	{
 		return;
 	}
-	ReadyMaps.Add(MapId);
 
-	// 1. Bake the per-map flow field now that the sublevel's WorldStatic collision is registered.
-	if (UFPSRFlowFieldSubsystem* Flow = World->GetSubsystem<UFPSRFlowFieldSubsystem>())
+	// 1. Bake the per-map flow field now that the sublevel's WorldStatic collision is registered. If the streamed level
+	//    has no AFPSRFlowFieldBoundsVolume tagged with this MapId (a content-authoring error), the map is NOT routable —
+	//    leave the boundary SEALED and do NOT mark it ready rather than open a map with no flow field / occupancy routing
+	//    (Codex merge-gate P2). The sealed door surfaces the content error instead of a silently-broken map.
+	UFPSRFlowFieldSubsystem* Flow = World->GetSubsystem<UFPSRFlowFieldSubsystem>();
+	if (!Flow || !Flow->BakeDiscoveredMap(MapId))
 	{
-		Flow->BakeDiscoveredMap(MapId);
+		UE_LOG(LogFPSR, Error,
+			TEXT("[MapStream] map '%s' is visible but its flow-field bake FAILED (no bounds volume with that MapId in the streamed sublevel) — passage stays sealed. Author an AFPSRFlowFieldBoundsVolume with MapId '%s' in that sublevel."),
+			*MapId.ToString(), *MapId.ToString());
+		return; // do NOT add to ReadyMaps / re-cache / open the boundary
 	}
+	ReadyMaps.Add(MapId);
 
 	// 2. Re-cache spawn points so the streamed sublevel's points become selectable (they weren't cached at world begin).
 	if (UFPSREnemySpawnSubsystem* Spawn = World->GetSubsystem<UFPSREnemySpawnSubsystem>())
