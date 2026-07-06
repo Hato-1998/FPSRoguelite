@@ -226,6 +226,26 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Visual")
 	TSoftObjectPtr<UAnimMontage> WeaponReloadMontage;
 
+	/** --- Fire-part recoil (bolt / charging handle), data-driven via UFPSRWeaponAnimInstance ---
+	 *  The bone the weapon AnimBP's ModifyBone targets (bolt / charging handle). None = no moving fire part (no-op).
+	 *  NOTE: the ModifyBone target bone is authored in the AnimBP (not runtime-settable) — this field is for IsDataValid
+	 *  verification + documentation of which bone the AnimBP should drive. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Visual")
+	FName FirePartRecoilBone = NAME_None;
+
+	/** Fire-part recoil travel distance (cm) at the recoil curve's peak. 0 disables the effect. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Visual", meta = (ClampMin = "0.0"))
+	float FirePartRecoilDistanceCm = 3.5f;
+
+	/** Fire-part recoil direction in the weapon mesh's COMPONENT space (unit vector). This pack's charging handle travels
+	 *  along component -Y, so (0, -1, 0). Scaled by FirePartRecoilDistanceCm x the curve value each shot. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Visual")
+	FVector FirePartRecoilAxis = FVector(0.0f, -1.0f, 0.0f);
+
+	/** Anim curve (on the weapon fire montage, e.g. CHRecoil) driving the recoil 0..1 over the shot. None disables. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Visual")
+	FName FirePartRecoilCurve = FName("CHRecoil");
+
 	/** Optional modular cosmetic parts child-attached to the 1P skeletal weapon mesh on equip (U15). Static/melee
 	 *  weapons and empty lists attach nothing (null-safe). Parts inherit the weapon mesh's OnlyOwnerSee visibility. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Visual")

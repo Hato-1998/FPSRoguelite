@@ -15,6 +15,7 @@
 #include "Weapon/FPSRWeaponFireComponent.h"
 #include "Weapon/FPSRWeaponFragment.h"
 #include "Weapon/FPSRWeaponDataAsset.h"
+#include "Weapon/FPSRWeaponAnimInstance.h"
 #include "Hero/FPSRPlayerFeedbackComponent.h"
 #include "Hero/FPSRBlindspotAudioComponent.h"
 #include "Hero/FPSRReviveComponent.h"
@@ -1021,6 +1022,12 @@ void AFPSRCharacter::RefreshFirstPersonWeaponVisual()
 			if (UClass* WeaponAnimClass = Weapon->WeaponAnimInstanceClass.LoadSynchronous())
 			{
 				WeaponMesh1P->SetAnimInstanceClass(WeaponAnimClass);
+				// Inject the data-driven fire-part recoil params into the weapon AnimInstance (when it's our native base)
+				// so the AnimBP's ModifyBone offset comes from the DA curve/distance/axis, not a per-AnimBP hardcode.
+				if (UFPSRWeaponAnimInstance* WeaponAnimInst = Cast<UFPSRWeaponAnimInstance>(WeaponMesh1P->GetAnimInstance()))
+				{
+					WeaponAnimInst->SetFirePartRecoilParams(Weapon->FirePartRecoilCurve, Weapon->FirePartRecoilDistanceCm, Weapon->FirePartRecoilAxis);
+				}
 			}
 		}
 		else

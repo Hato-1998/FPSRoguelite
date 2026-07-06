@@ -137,6 +137,16 @@ EDataValidationResult UFPSRWeaponDataAsset::IsDataValid(FDataValidationContext& 
 		}
 	}
 
+	// The fire-part recoil bone (bolt / charging handle driven by UFPSRWeaponAnimInstance) must exist on the weapon mesh
+	// — a typo means the AnimBP's ModifyBone targets nothing and the part never kicks. Only validate when a bone is set
+	// (None = no moving part = no-op).
+	if (!FirePartRecoilBone.IsNone() && SkelWeapon != nullptr && !SkeletalMeshHasAttachPoint(SkelWeapon, FirePartRecoilBone))
+	{
+		Context.AddWarning(FText::Format(LOCTEXT("FirePartRecoilBoneMissing",
+			"FirePartRecoilBone '{0}' does not exist on WeaponMesh1P — the fire-part recoil (bolt / charging handle) will drive nothing. Check the bone name for typos."),
+			FText::FromName(FirePartRecoilBone)));
+	}
+
 	return Result;
 }
 
