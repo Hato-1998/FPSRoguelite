@@ -38,6 +38,11 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "FPSR|Door")
 	FGameplayTag TargetMapId;
 
+	/** The authored streaming sublevel (short package name, e.g. "L_MapB") this door streams in on break — must be a
+	 *  streaming sublevel of the persistent map. Paired with TargetMapId (the logical key). Unset = non-streaming gate. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "FPSR|Door")
+	FName TargetLevelName;
+
 	/** Which map this door streams in when broken (unset = non-streaming gate). */
 	const FGameplayTag& GetTargetMapId() const { return TargetMapId; }
 

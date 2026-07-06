@@ -42,6 +42,11 @@ public:
 	 *  at world begin (S1b) and by the MapStreamSubsystem on stream-in collision-ready (S3). Returns null off-authority. */
 	UFPSRFlowFieldComputer* BakeMap(const FGameplayTag& MapId, const AFPSRFlowFieldBoundsVolume* BoundsVolume, float FloorZ);
 
+	/** Discover the (now-loaded) bounds volume tagged MapId anywhere in the world and bake its per-map field, anchoring Z
+	 *  from the volume's own box (a streamed sublevel need not contain a PlayerStart). Called by the MapStreamSubsystem
+	 *  once a streamed map's collision is registered (S3). Returns false if no volume with that MapId is loaded. */
+	bool BakeDiscoveredMap(const FGameplayTag& MapId);
+
 	/** Whether a baked, ready computer exists for MapId (used by the stream/allocator gate before spawning into a map). */
 	bool IsMapFieldReady(const FGameplayTag& MapId) const;
 

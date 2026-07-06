@@ -22,6 +22,11 @@ AFPSREnemyBase::AFPSREnemyBase()
 	bReplicates = true;
 	SetReplicateMovement(true);
 
+	// Multimap Tier 0 (Codex R5): distance net-cull is the SOLE cross-map relevancy lever (enemies spawn into the
+	// persistent level, which is always level-relevant to every connection, so level visibility never culls them). Sized
+	// >= same-map engagement and < the inter-map offset. Designers can override NetCullDistanceSquared per BP.
+	NetCullDistanceSquared = FMath::Square(NetCullDistance);
+
 	Capsule = CreateDefaultSubobject<UCapsuleComponent>(TEXT("Capsule"));
 	Capsule->InitCapsuleSize(40.0f, 90.0f);
 	Capsule->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);

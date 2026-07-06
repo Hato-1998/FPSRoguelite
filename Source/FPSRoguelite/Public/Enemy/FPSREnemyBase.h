@@ -201,6 +201,13 @@ protected:
 	/** Server-only: this enemy's map (multimap Tier 0). See GetMapId. Not replicated. */
 	FGameplayTag MapId;
 
+	/** Net-cull radius (cm) applied to NetCullDistanceSquared in the ctor (multimap Tier 0, Codex R5). Enemies spawn into
+	 *  the PERSISTENT level (always level-relevant to every connection), so distance is the SOLE lever that culls a
+	 *  cross-map enemy from a player in another sublevel. Sized >= same-map engagement range and < the inter-map world
+	 *  offset (content contract: offset >= max(NetCull, weapon range, audio, separation)). Designers can override the
+	 *  actor's NetCullDistanceSquared per BP. Boss is separately bAlwaysRelevant (must always replicate). */
+	static constexpr float NetCullDistance = 20000.0f; // cm (200m)
+
 	/** XP dropped on death (editor-tunable per enemy type / DataAsset). Balance value. */
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Enemy")
 	int32 XPReward = 5;

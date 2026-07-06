@@ -2,10 +2,12 @@
 
 #include "Door/FPSRDoor.h"
 #include "Enemy/FPSREnemyHealthComponent.h"
+#include "Map/FPSRMapStreamSubsystem.h"
 #include "FPSRCollisionChannels.h"
 
 #include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Engine/World.h"
 #include "Net/UnrealNetwork.h"
 #include "Net/Core/PushModel/PushModel.h"
 
@@ -137,6 +139,20 @@ void AFPSRDoor::HandleBroken(AActor* DeadActor, AActor* Killer)
 
 	ApplyBrokenState(); // server: open the passage (collision off) + hide the leaves
 	OnDoorBroken();     // BP presentation (server)
+
+	// Multimap Tier 0: a giant boundary door streams in the adjacent map when broken. The MapStreamSubsystem bakes the
+	// field / re-caches spawn points / drops the boundary blocker once the sublevel's collision is verified ready (S3).
+	// A plain (non-streaming) room gate leaves TargetMapId unset and this is a no-op. Client visibility is engine-replicated.
+	if (TargetMapId.IsValid() && !TargetLevelName.IsNone())
+	{
+		if (UWorld* World = GetWorld())
+		{
+			if (UFPSRMapStreamSubsystem* Stream = World->GetSubsystem<UFPSRMapStreamSubsystem>())
+			{
+				Stream->RequestStreamIn(TargetMapId, TargetLevelName);
+			}
+		}
+	}
 }
 
 void AFPSRDoor::OnRep_Broken()

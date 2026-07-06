@@ -607,6 +607,18 @@ int32 UFPSREnemySpawnSubsystem::DrainMapEnemies(const FGameplayTag& MapId, int32
 	return ToRelease.Num();
 }
 
+void UFPSREnemySpawnSubsystem::RefreshSpawnPointCache()
+{
+	if (!HasServerAuthority())
+	{
+		return;
+	}
+	// Re-scan the world (all loaded sublevels) so a newly-streamed map's spawn points + rooms become selectable. Cheap,
+	// fires only on a stream-in event (not per tick). Full re-cache is simplest and idempotent (points are cached refs).
+	CacheSpawnPoints();
+	CacheSpawnRooms();
+}
+
 void UFPSREnemySpawnSubsystem::TickDirector()
 {
 	if (!HasServerAuthority())
@@ -636,14 +648,28 @@ void UFPSREnemySpawnSubsystem::TickDirector()
 	TMap<FGameplayTag, int32> AliveByMap;
 	ComputeAliveByMap(AliveByMap);
 
-	// Empty-map drain: any map holding enemies but NO players -> bounded release toward 0 (reclaim budget). Occupied-map
-	// recycle is Tier 1; this only drains 0-player maps (pickups/XP/doors persist — they aren't spawn-subsystem owned).
+	// Grace: stamp each occupied map's last-seen time so a just-vacated map isn't drained for MapDrainGraceSeconds (a
+	// player dipping across a boundary and back finds the crowd intact). Server-only.
+	const float Now = World->GetTimeSeconds();
+	for (const FGameplayTag& Map : OccupiedMaps)
+	{
+		MapLastOccupiedTime.FindOrAdd(Map) = Now;
+	}
+
+	// Empty-map drain: any map holding enemies but NO players (and past its grace window) -> bounded release toward 0
+	// (reclaim budget). Occupied-map recycle is Tier 1; this only drains 0-player maps (pickups/XP/doors persist).
 	for (const TPair<FGameplayTag, int32>& Pair : AliveByMap)
 	{
-		if (Pair.Value > 0 && !OccupiedMaps.Contains(Pair.Key))
+		if (Pair.Value <= 0 || OccupiedMaps.Contains(Pair.Key))
 		{
-			DrainMapEnemies(Pair.Key, EmptyMapDrainPerTick);
+			continue;
 		}
+		const float* LastOcc = MapLastOccupiedTime.Find(Pair.Key);
+		if (LastOcc && (Now - *LastOcc) < MapDrainGraceSeconds)
+		{
+			continue; // grace: recently vacated -> keep the crowd for a few seconds (no door-cross thrash)
+		}
+		DrainMapEnemies(Pair.Key, EmptyMapDrainPerTick);
 	}
 
 	if (OccupiedMaps.Num() == 0)

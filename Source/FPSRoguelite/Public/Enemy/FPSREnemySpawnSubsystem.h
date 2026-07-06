@@ -76,6 +76,11 @@ public:
 	/** Set the target alive count (director will spawn/release to maintain this). */
 	void SetTargetAliveCount(int32 InTarget);
 
+	/** Re-scan designer spawn points + rooms (multimap Tier 0). Spawn points are cached ONCE at world begin, so a
+	 *  sublevel that streams in mid-run has none cached and would never spawn — the MapStreamSubsystem calls this on
+	 *  a map's collision-ready so the new map's points become selectable (Codex streaming BLOCKER fix). */
+	void RefreshSpawnPointCache();
+
 	/** Set the per-tick spawn cap = the swarm fill rate (schedule-driven; clamped to >=1). Lower = the swarm
 	 *  builds up gradually instead of snapping to the target count. */
 	void SetMaxSpawnPerTick(int32 InMax) { MaxSpawnPerTick = FMath::Max(1, InMax); }
@@ -253,6 +258,13 @@ private:
 	/** Max enemies drained from an UNOCCUPIED map per director tick (bounded, so an emptied map thins smoothly rather
 	 *  than popping the whole crowd at once). Occupied-map recycle is Tier 1 (this only drains 0-player maps). */
 	static constexpr int32 EmptyMapDrainPerTick = 4;
+
+	/** Grace after a map loses its last player before its enemies start draining (multimap Tier 0, server-only). A player
+	 *  who dips across a boundary and returns within this window finds the crowd intact — no drain thrash at the door. */
+	static constexpr float MapDrainGraceSeconds = 3.0f;
+
+	/** Server-only: world time each map last had a player (grace source for the empty-map drain). Not replicated. */
+	TMap<FGameplayTag, float> MapLastOccupiedTime;
 
 	/** Max enemies spawned per director tick = the swarm FILL RATE (x ~1/SpawnInterval per second). Lower = enemies
 	 *  trickle in and the crowd recovers gradually after a clear; higher = the swarm snaps to the target count fast.

@@ -130,6 +130,30 @@ UFPSRFlowFieldComputer* UFPSRFlowFieldSubsystem::BakeMap(const FGameplayTag& Map
 	return Slot;
 }
 
+bool UFPSRFlowFieldSubsystem::BakeDiscoveredMap(const FGameplayTag& MapId)
+{
+	if (!HasServerAuthority() || !MapId.IsValid())
+	{
+		return false;
+	}
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return false;
+	}
+	for (TActorIterator<AFPSRFlowFieldBoundsVolume> It(World); It; ++It)
+	{
+		const AFPSRFlowFieldBoundsVolume* Volume = *It;
+		if (Volume && Volume->GetMapId() == MapId)
+		{
+			BakeMap(MapId, Volume, DetectFloorZForVolume(*World, *Volume));
+			return true;
+		}
+	}
+	UE_LOG(LogFPSR, Warning, TEXT("[FlowField] BakeDiscoveredMap: no bounds volume with MapId '%s' is loaded."), *MapId.ToString());
+	return false;
+}
+
 bool UFPSRFlowFieldSubsystem::IsMapFieldReady(const FGameplayTag& MapId) const
 {
 	const TObjectPtr<UFPSRFlowFieldComputer>* Slot = Computers.Find(MapId);
