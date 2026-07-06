@@ -75,4 +75,10 @@ public:
 	/** Server: weighted-random pick of an enemy class for the given run context. Returns null when no rule is
 	 *  eligible (the caller then falls back to its single configured class). */
 	TSubclassOf<AFPSREnemyBase> PickEnemyClass(const FFPSREnemySpawnContext& Context) const;
+
+#if WITH_EDITOR
+	/** Editor validation: null rule entries, Static rules with no EnemyClass, and an empty/all-inert roster (falls
+	 *  back to the spawner's single configured class — a warning, not necessarily wrong). */
+	virtual EDataValidationResult IsDataValid(class FDataValidationContext& Context) const override;
+#endif
 };

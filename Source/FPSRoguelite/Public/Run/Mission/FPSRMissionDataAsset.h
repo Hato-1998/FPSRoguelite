@@ -33,12 +33,13 @@ public:
 	float TimeLimit = 0.0f;
 
 	/** Which designer-placed AFPSRMissionSpawnPoint(s) this mission may spawn at (matched against the
-	 *  point's MissionTag). Leave empty to allow any point / fall back to a player location when none exist. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Mission")
+	 *  point's MissionTag). Leave empty to allow any point / fall back to a player location when none exist.
+	 *  Restricted to the Mission.Spawn.* root (DefaultGameplayTags.ini) so the picker only shows spawn-point tags. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Mission", meta = (Categories = "Mission.Spawn"))
 	FGameplayTag SpawnPointTag;
 
 #if WITH_EDITOR
-	/** Editor validation: MissionClass must be set. */
+	/** Editor validation: MissionClass must be set; a non-empty SpawnPointTag must be a valid (registered) tag. */
 	virtual EDataValidationResult IsDataValid(class FDataValidationContext& Context) const override;
 #endif
 };
