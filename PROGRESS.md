@@ -6,6 +6,18 @@
 
 **최종 갱신: 2026-07-06**
 
+## 🔔 핸드오프 (2026-07-06 b · 다음 세션 코드작업 인계 — ADS 확장 3작업 계획 승인, 코드 미착수) — 🎯 **Rifle ADS 발사감각 완료(코드 a397c76·콘텐츠 7b02254) 위에, 사용자 승인 3작업: ①TSR 힙블러 잔여 ②제네릭 발사파츠 반동(DA+C++ AnimInstance) ③무기 복제. 이 세션=계획 확정만, 컨텍스트 소진으로 인계.**
+> **브랜치=main. 미푸시 4건**(a397c76·7b02254 + 이전 51ea8e3·9b872ba). **권장 순서 ②→①→③**.
+> **① TSR 힙블러 잔여**: 모션블러 off(`r.MotionBlurQuality=0`) 후에도 힙파이어 사격방향 살짝 번짐 = **TSR 시간적 고스트**(팔 발사몽타주/ADS킥 화면 이동, 모션블러 아님). 대응 후보 PIE 반복: (a)FP 팔·무기 머티리얼 **Responsive AA**[우선] (b)팔 발사몽타주/킥 모션 완화 (c)TSR cvar 완화[전역품질↓].
+> **② 제네릭 발사파츠 반동 (승인 설계, DA+C++ AnimInstance)** — 현 Rifle 장전손잡이는 `ABP_Wep_AG14W` ModifyBone에 −3.5cm 하드코딩. 데이터화+일반화(장전손잡이 없거나 다른 파츠 구동 가능하게):
+> >   - **C++ `UFPSRWeaponAnimInstance : UAnimInstance`** 신설(무기메시 베이스): `FVector FirePartRecoilOffset`(BlueprintReadOnly)=`NativeUpdateAnimation`서 `GetCurveValue(CurveName)×DistanceCm×Axis`. Distance/Axis/CurveName 캐시(장착 시 주입).
+> >   - **DA 필드**(FPSRWeaponDataAsset): `FirePartRecoilBone`(FName, **None=파츠없음**)·`FirePartRecoilDistanceCm`(3.5)·`FirePartRecoilAxis`((0,−1,0)=컴포넌트 뒤)·`FirePartRecoilCurve`("CHRecoil"). `IsDataValid`서 bone 존재검증.
+> >   - **캐릭터**(`FPSRCharacter::RefreshFirstPersonWeaponVisual`): 장착 시 `WeaponMesh1P->GetAnimInstance()`→`UFPSRWeaponAnimInstance` 캐스트→DA 파라미터 주입(1회).
+> >   - **AnimBP**: `ABP_Wep_AG14W`를 `UFPSRWeaponAnimInstance` 부모로 **리페어런트** + ModifyBone `Translation`을 `FirePartRecoilOffset`에 바인딩(현 하드 −3.5 제거). `DA_Weapon_Rifle`에 값(Charging_Handle/3.5/(0,−1,0)/CHRecoil).
+> >   - 순서: **C++→빌드(-NoXGE)→(에디터)리페어런트+바인딩+DA세팅→PIE**. ⚠️ ModifyBone 본(BoneToModify)은 런타임 변수불가→per-AnimBP 저작(DA bone=검증/문서용). 파츠없는무기=Distance0/None→no-op.
+> **③ 무기 복제 (사용자 지시: 내가 매핑 제안→승인)** — Rifle(AG14W) 셋(팔 AnimBP 조준블렌드+무기 AnimBP 노리쇠/발사파츠+몽타주+DA소켓)을 다른 총으로. **선행=무기↔팩 매핑 확정**. 게임무기9: Bazooka·BurstRifle·ChargeLaser·Grenade·Knife·**Rifle(=AG14W확정)**·LMG·Shotgun·Sniper. 팩코드: AG14W(used)·HVG7·LRAF9·MAK12·MR22·RC425·SP60·X13. **다음세션: 팩 각 코드 메시/애니 조사→무기타입 매핑표 제안→사용자 승인→②기반 복제**(Knife=근접·Grenade=투척 제외, ChargeLaser/Bazooka=특수 판단).
+> **핵심 사실**: AA=TSR(엔진기본, Config 무오버라이드) / 커스텀 AnimInstance C++ 없음(②가 첫 신설) / VibeUE MCP=에디터+플러그인 활성시만(헤드리스 `-run=pythonscript` commandlet도 `unreal.AnimGraphService/BlueprintService/AnimSequenceService/SkeletonService` 등 python서비스 사용가능—진단·저작 검증됨) / 빌드=**`-NoXGE`**(octobuild C1076·초장시간 회피 [[build-octobuild-xge-c1076-flaky]]) / ModifyBone=컴포넌트공간→L2C/C2L 컨버터 필수·struct enum은 `get_animation_graphs()[0].get_graph_nodes_of_class()`로 raw set(configure_node 불가) / 무기↔팩=[[weapon-da-pack-code-mapping]].
+
 ## 🔔 핸드오프 (2026-07-06 · ADS 발사 감각 전면 + 장전손잡이 절차 후퇴 + 모션블러 off — 사용자 PIE "작업 완료") — 🎯 **07-05 c(concern3 배선반전·concern4·bob노브)에 이어 ADS 발사 피드백(노리쇠/총기킥)+총구플래시 잔상 제거+모션블러 전역 off+장전손잡이 ModifyBone 절차 후퇴까지 완성. 코드(Build+Smoke 4/4)·설정 커밋, 콘텐츠 사용자 확인 후 커밋.**
 > **코드/설정(커밋)**:
 > - **ADS 발사 피드백**: `bSuppressFireMontagesWhileADS`를 팔몽타주 전용으로 분리 + **`bSuppressWeaponBoltWhileADS`(기본false)** → ADS서도 노리쇠 몽타주 재생. **`ADSFireKickDegrees`(1.5)/`ADSFireKickRecoveryRate`(12)** → 발사 시 AimSocket 피벗 회전 킥(조준기 고정, 총 하부/총구 반동): `UpdateAimDownSights`서 per-shot 임펄스+감쇠(FInterpTo).
