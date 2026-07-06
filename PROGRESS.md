@@ -12,7 +12,8 @@
 > **자동 검증(이 세션)**: 빌드 Succeeded×5 + 헤드리스 `Smoke.ModuleLoads`+`FlowField.Unit`+`Allocator.Unit` Success. **콘텐츠 독립**(컨설트 성과: 합성 유닛테스트가 플로우필드 회귀·멀티맵·allocator 예산 불변식을 PIE 없이 포착). ⚠️ **FPSRoguelite2는 이제 코드 빌드 대상**(메모리 [[build-livecoding-cross-clone-block]]).
 > **⚠️ 미검증(전부 사용자 PIE — 화이트박스 콘텐츠 미저작)**: 실 스트림·추격 연속·빈맵 드레인·전역200·late-join·NetCull·단일맵 실맵 회귀. **콘텐츠 저작 가이드=[`Docs/MultiMap_Tier0_ContentChecklist.md`](Docs/MultiMap_Tier0_ContentChecklist.md)**(persistent+서브레벨A/B+bounds/MapId+스폰/MapId+거대문/TargetMapId+TargetLevelName+boundary blocker + `git lfs pull -I Content/Maps`).
 > **`FPSRCharacter` 미접촉**(활성 클론 무기 ADS 머지 안전 — 점유=서브시스템 pawn-AABB). GlobalAliveCap=200 신설(기존 무캡→최대300, SSOT §5 잠정200 enforce).
-> **다음**: (1) Codex 머지게이트 판독 (2) 사용자 콘텐츠 저작 → PIE 게이트 → 승인 시 `--no-ff` main 머지 + 브랜치 삭제 (3) 콘텐츠 동반커밋 여부 질문. **Tier 1**(전환 추적자·silent recycle 안전게이트·콘텐츠-aware allocator·rally·late-join ack)=후속 유닛.
+> **✅ Codex 머지게이트 CLEAN**(2026-07-06): P2 2건 수정 후 재리뷰 "No discrete blocking correctness issues... consistent with intended multimap Tier 0". 수정=`7f473e1`(bake 실패 시 경계 봉인 유지)·`7f42776`(점유 계산 non-alive 제외).
+> **다음**: (1) ✅Codex 게이트 clean (2) 사용자 콘텐츠 저작(체크리스트) → PIE 게이트 → 승인 시 `--no-ff` main 머지 + 브랜치 삭제 (3) 콘텐츠 동반커밋 여부 질문. **Tier 1**(전환 추적자·silent recycle 안전게이트·콘텐츠-aware allocator·rally·late-join ack)=후속 유닛.
 
 ## 🔔 핸드오프 (2026-07-05 s · PM 세션 마무리 — 실행 트랙 2개 프롬프트 준비 완료 — PM/문서 클론, main) — 설계 종결, 다음=구현 세션
 > **이 PM 세션 종료**. #3 다중맵 아키텍처 설계 **완전 종결**(Codex 6R, 디렉터 6+1항목 결정 잠금). 두 실행 트랙 프롬프트 준비 완료(둘 다 활성 코드 클론 `E:\Git_Project\FPSRoguelite`):
