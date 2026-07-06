@@ -6,6 +6,13 @@
 
 **최종 갱신: 2026-07-06**
 
+## 🔔 핸드오프 (2026-07-06 d · ① TSR 힙블러 = FP 머티리얼 Responsive AA 에디터 작업 → 새 세션 인계) — 🎯 **코드/설정 전부 완료·커밋. 남은 ①은 순수 에디터 머티리얼 토글(코드 아님). VibeUE MCP 이 세션 미연결로 editor-bridge 인계.**
+> **연결 상태**: VibeUE MCP 클라이언트 툴이 이 세션에 **부재**(ToolSearch 확인). 서버는 up(127.0.0.1:8088 LISTENING), 에디터도 `E:\Git_Project\FPSRoguelite` 트리에 열림 — 그러나 **세션 시작 시 MCP 핸드셰이크 미성립**. 헤드리스 커맨드릿은 에디터 열려있어 저장 충돌 → **새 세션(에디터 열린 상태로 재시작→MCP 연결) 또는 사용자 수동**.
+> **에디터 작업(①)**: **FP 팔 메시 + `WeaponMesh1P`(SK_LPAMG_AG14W) + `WeaponParts1P` 파츠 메시들이 쓰는 머티리얼**에 **Responsive AA(`bEnableResponsiveAA=true`)** 켜기. 근거=엔진소스 `BasePassRendering.cpp:411`(base pass 불투명 적용). 목적=힙파이어 시 TSR 시간적 고스트(사격방향 번짐) 제거(FP 한정, 적 비용 0 — 전역 velocity cvar은 제1원리로 철회함).
+> > **방법 3택**: (a) 새 세션 에디터+VibeUE MCP로 각 머티리얼 `bEnableResponsiveAA` 토글 (b) **사용자 수동**: 각 FP 머티리얼 열기→Details 검색 "Responsive AA" 체크→저장 (c) 에디터 닫고 headless commandlet(python `set_editor_property('bEnableResponsiveAA', True)`+`save_asset`). 어느 머티리얼인지=팔/무기 메시의 머티리얼 슬롯에서 확인.
+> > **검증**: PIE 힙파이어 → 사격방향 번짐 사라졌는지(육안). 안 되거나 과하면 (b)발사몽타주/킥 완화 대안.
+> **미커밋 콘텐츠(사용자)**: ② 배선(`ABP_Wep_AG14W`·`DA_Weapon_Rifle`) + ① Responsive AA 머티리얼 저장분. **이후 = ③ 무기복제**(팩매핑→②기반, 미착수).
+
 ## 🔔 핸드오프 (2026-07-06 c · ADS sway 2건 + ② 발사파츠 반동 C++ 완료 → 다음 ① TSR 힙블러) — 🎯 **플레이 피드백 sway(신규+이동연동) 및 ②의 C++ 인프라 완료·커밋·사용자 PIE 검증. 남은 트랙: ①TSR 힙블러 → ③무기복제.**
 > **브랜치=main. 미푸시 10건**(3bbfb8a·c3be1cc·8d8082c·c804b48·8020d11·44cc40d + 이전 4건 a397c76·7b02254·51ea8e3·9b872ba).
 > **✅ ADS idle sway**(플레이 피드백): 사이트 피벗 기준 좌우 흔들림(총기 몸통만, 레티클 고정). DA 노브 `ADSSwayYawDegrees`(0.4)/`ADSSwayPitchDegrees`(0.15)/`ADSSwaySpeed`(1.2), 오너로컬·복제0. **이동 연동**: `ADSSwayMoveAlpha`=`GetVelocity().Size2D()/BaseWalkSpeed` clamp+FInterpTo(8) → **정지=총기 고정, 이동시만 sway**(멈추면 ease-out). 발사킥 무회귀. (`44cc40d`·`8020d11`, Build+Smoke 통과)
