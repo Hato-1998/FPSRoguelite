@@ -1319,6 +1319,9 @@ C++ (Source/FPSRoguelite):
 | G3 | 〃 | **Tier 1**(예산 게임필: 동적 burst reserve · silent recycle 안전게이트 · local pressure floor · 전환 추적자 · 최대그룹크기 allocator 정책 확정) | 코드 | 후속 유닛 | 파킹(Tier0 후) |
 | G4 | 〃 | **Tier 2**(rally pad · split 감지 → 솔로 억제 · 양성 인센티브[자석 smoothing·큐 공유] · 보스 rally · 문리셋 debt) | 코드+콘텐츠 | 후속 유닛 | 파킹(콘텐츠/밸런스) |
 | G5 | 〃 | **디렉터 결정 6항목 확정(2026-07-05, R6)**: 솔로=정찰(약억제) · 2인+ 효율좋음(강제X, "2인+"=2·3·4 전부) · **그룹 버프 전면 폐기**(뭉침=콘텐츠 배분만) · 텔포=장치·대상지정·쿨타임(+앵커/채널/shared) · 문=혼자 어려운 체력 · 맵=언로드X·LOD컬·잔존 · 분산판타지=하이브리드(명시). ⚠️allocator=예산+콘텐츠 배분(심장) | ✅결정+SSOT반영 | RunFlow §2-1·Performance §5·Tier0 프롬프트 | ✅(2026-07-05, 리포트 §✅) |
+| H1 | [Review/20260707-data-tooling-p0.md](Review/20260707-data-tooling-p0.md) | **P0 데이터 검증 시임 = `FPSRogueliteEditor` 에디터 모듈 신설**(Codex 5R 수렴): 앵커 교차검증기 3종(CardPool/RunSchedule/LoadoutPool, usecase 게이트)+per-asset sanity 보강+얇은 `FFPSRAnchoredValidationService`(reachable+orphan)+`ValidateAnchoredDataCommandlet`(NumInvalid>0 return1·앵커0=에러·orphan 경고)+`validate-data.ps1`+`Tools>FPSR>Validate Anchored Data` 메뉴명령. Slate/편집UI/CSV/자동수정 제외 | 코드(신규 모듈) | `phase/editor-tooling-seam` (백로그 "Batch DataAsset Validator" 정식구현) | 착수대기 |
+| H2 | 〃 | 🙋**라우팅 스펙 정합 선행**: 행동프래그먼트/feature-unlock(`UnlockableFeatures`)/무기-unlock(`WeaponUnlockCards`)/레벨업(`Cards`) surface를 코드(`FPSRCardSubsystem.cpp:131`)↔SSOT↔메모리 [[card-pool-routing]] 간 확정 → 이후에만 "라우팅 누수" 검증 추가(P0 제외) | 🙋사용자결정+문서 | CombatWeaponCard §2-3-4 | 🙋결정대기 |
+| H3 | 〃 | 미션 튜닝(ZoneRadius/HoldSeconds 등) BP CDO→DA-소유 통합 여부(단일편집+`ServerActivate(Data)` 주입). P1+ 순서 권고=미션 스케줄 타임라인(read-only 프리뷰)>무기 밸런스 매트릭스(둘 다 검증 서비스 재사용) | 문서(SSOT)/백로그 | RunFlow §2-8 / ToolingBacklog | 파킹(P0 후) |
 
 > **✅ G1 SSOT 반영 완료 (2026-07-05)**: #3 다중맵 설계 수렴(Codex 5R 컨설트)을 Performance §5(다중맵 예산 모델)·Architecture §3-4(레벨 다중맵 심리스·allocator/레지스트리)·RunFlow §2-1(명제·Tier 구조)에 반영. Tier 0 실행=`Docs/MultiMap_Tier0_ResumePrompt.md`(새 세션·활성 코드 클론). G5 디렉터 결정은 Tier 0 비블로킹(Tier 2 튜닝 방향).
 
