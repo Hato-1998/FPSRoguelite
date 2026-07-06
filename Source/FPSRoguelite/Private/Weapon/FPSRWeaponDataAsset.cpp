@@ -60,6 +60,65 @@ EDataValidationResult UFPSRWeaponDataAsset::IsDataValid(FDataValidationContext& 
 		Context.AddWarning(LOCTEXT("NoMagSize", "Ranged weapon has MagSize <= 0 — it will be permanently empty and unable to fire. Set MagSize > 0."));
 	}
 
+	// --- "Dead value" sanity (P0 data-validation seam): archetype-gated stat fields that are structurally required
+	//     for that archetype to do ANYTHING. These are ERRORS (not warnings) — unlike the softer archetype-mismatch
+	//     warnings above (AOE radius / charge time / mag size, which degrade to a lesser-but-functional weapon), a
+	//     zero here means the weapon cannot function as its declared archetype at all. ---
+	if (BaseStats.Damage <= 0.0f)
+	{
+		Context.AddError(LOCTEXT("NoDamage", "Weapon has Damage <= 0 — every hit will deal zero damage. Set Damage > 0."));
+		Result = EDataValidationResult::Invalid;
+	}
+	if (BaseStats.FireRate <= 0.0f)
+	{
+		Context.AddError(LOCTEXT("NoFireRate", "Weapon has FireRate <= 0 — the fire loop's rate-of-fire timer would never re-arm. Set FireRate > 0."));
+		Result = EDataValidationResult::Invalid;
+	}
+	if (Archetype != EFPSRWeaponArchetype::Melee)
+	{
+		if (BaseStats.MagSize <= 0)
+		{
+			Context.AddError(LOCTEXT("MagSizeNotPositive", "Non-melee weapon has MagSize <= 0 — it can never load a round. Set MagSize > 0 (or switch Archetype to Melee)."));
+			Result = EDataValidationResult::Invalid;
+		}
+		if (BaseStats.ReloadTime <= 0.0f)
+		{
+			Context.AddError(LOCTEXT("ReloadTimeNotPositive", "Non-melee weapon has ReloadTime <= 0 — the reload timer would never complete. Set ReloadTime > 0."));
+			Result = EDataValidationResult::Invalid;
+		}
+	}
+	if (Archetype == EFPSRWeaponArchetype::Shotgun && BaseStats.PelletCount <= 0)
+	{
+		Context.AddError(LOCTEXT("PelletCountNotPositive", "Shotgun has PelletCount <= 0 — firing would spawn no pellets at all. Set PelletCount > 0."));
+		Result = EDataValidationResult::Invalid;
+	}
+	if (Archetype == EFPSRWeaponArchetype::AOE || Archetype == EFPSRWeaponArchetype::Sniper)
+	{
+		if (BaseStats.ProjectileSpeed <= 0.0f)
+		{
+			Context.AddError(LOCTEXT("ProjectileSpeedNotPositive", "Projectile archetype has ProjectileSpeed <= 0 — the projectile would never travel toward its target. Set ProjectileSpeed > 0."));
+			Result = EDataValidationResult::Invalid;
+		}
+		if (BaseStats.ProjectileLifetime <= 0.0f)
+		{
+			Context.AddError(LOCTEXT("ProjectileLifetimeNotPositive", "Projectile archetype has ProjectileLifetime <= 0 — the projectile would auto-release before it can ever hit anything. Set ProjectileLifetime > 0."));
+			Result = EDataValidationResult::Invalid;
+		}
+	}
+	if (Archetype == EFPSRWeaponArchetype::Melee)
+	{
+		if (BaseStats.MeleeRadius <= 0.0f)
+		{
+			Context.AddError(LOCTEXT("MeleeRadiusNotPositive", "Melee weapon has MeleeRadius <= 0 — the attack's hit sweep would find nothing. Set MeleeRadius > 0."));
+			Result = EDataValidationResult::Invalid;
+		}
+		if (BaseStats.MeleeAttackDelay <= 0.0f)
+		{
+			Context.AddError(LOCTEXT("MeleeAttackDelayNotPositive", "Melee weapon has MeleeAttackDelay <= 0 — rapid clicks would never be rate-limited (or the attack loop may never re-arm, depending on the ability). Set MeleeAttackDelay > 0."));
+			Result = EDataValidationResult::Invalid;
+		}
+	}
+
 	// --- Socket / attach-point validation. A referenced socket that doesn't exist on the target mesh (a typo such as a
 	//     space instead of '_', or the wrong socket) makes the part / muzzle flash silently fall back to the mesh
 	//     origin — the exact class of bug that is invisible until you look at the assembled weapon in-game. Warnings
