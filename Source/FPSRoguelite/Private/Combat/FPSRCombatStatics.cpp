@@ -26,6 +26,34 @@ namespace FPSRCombat
 	 *  jump / launch feel) instead of sliding them flat along the ground. */
 	static constexpr float KnockbackUpwardBias = 0.35f;
 
+	FGameplayTag GetActorMapId(const AActor* Actor)
+	{
+		if (!Actor)
+		{
+			return FGameplayTag();
+		}
+		if (const AFPSREnemyBase* Enemy = Cast<AFPSREnemyBase>(Actor))
+		{
+			return Enemy->GetMapId();
+		}
+		if (const APawn* Pawn = Cast<APawn>(Actor))
+		{
+			if (const AFPSRPlayerState* PS = Pawn->GetPlayerState<AFPSRPlayerState>())
+			{
+				return PS->GetCurrentMapId();
+			}
+		}
+		return FGameplayTag();
+	}
+
+	bool CanAffectTarget(const AActor* Instigator, const AActor* Target)
+	{
+		const FGameplayTag A = GetActorMapId(Instigator);
+		const FGameplayTag B = GetActorMapId(Target);
+		// Cross-map only when BOTH are settled in a map and they differ. Unset on either side allows (transition/default).
+		return !(A.IsValid() && B.IsValid() && A != B);
+	}
+
 	bool IsFriendlyFireEnabled(const UWorld* World)
 	{
 		const AFPSRGameState* GS = World ? World->GetGameState<AFPSRGameState>() : nullptr;
@@ -55,6 +83,13 @@ namespace FPSRCombat
 		if (Target == Instigator)
 		{
 			return bAllowSelf ? BaseDamage : 0.0f;
+		}
+
+		// Cross-map guard (multimap Tier 0): a shot can never damage across a streamed map boundary. Belt on the spatial
+		// offset contract; a no-op in single-map play (both maps unset). Self is exempt above (same map trivially).
+		if (!CanAffectTarget(Instigator, Target))
+		{
+			return 0.0f;
 		}
 
 		// Swarm enemy (identified by its non-GAS health component): always full damage.
@@ -216,6 +251,13 @@ namespace FPSRCombat
 				continue;
 			}
 			Processed.Add(Target);
+
+			// Cross-map guard (multimap Tier 0): skip a target in a different map entirely — no damage AND no knockback
+			// across a streamed boundary (knockback below is independent of damage). No-op in single-map play. Self exempt.
+			if (!CanAffectTarget(Instigator, Target))
+			{
+				continue;
+			}
 
 			// Per-target crit roll, then self/friendly resolution (may be 0 = no damage but knockback can still apply).
 			float BaseDamage = Damage;

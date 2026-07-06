@@ -3,6 +3,7 @@
 #pragma once
 
 #include "GameFramework/Actor.h"
+#include "GameplayTagContainer.h"
 #include "FPSRDoor.generated.h"
 
 class USceneComponent;
@@ -29,6 +30,16 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "FPSR|Door")
 	bool IsBroken() const { return bBroken; }
+
+	/** The map this door streams in when broken (multimap Tier 0). Set per door BP to the adjacent sublevel's MapId.
+	 *  On break (server), HandleBroken asks the MapStreamSubsystem to stream this map in (S3). Unset = a non-streaming
+	 *  door (a plain room gate, existing behavior). The door lives in the persistent level so its broken state + this
+	 *  target reach late joiners (persistent actors are always relevant). */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "FPSR|Door")
+	FGameplayTag TargetMapId;
+
+	/** Which map this door streams in when broken (unset = non-streaming gate). */
+	const FGameplayTag& GetTargetMapId() const { return TargetMapId; }
 
 protected:
 	virtual void BeginPlay() override;

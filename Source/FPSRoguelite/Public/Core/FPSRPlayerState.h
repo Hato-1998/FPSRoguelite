@@ -5,6 +5,7 @@
 #include "GameFramework/PlayerState.h"
 #include "AbilitySystemInterface.h"
 #include "Abilities/GameplayAbilityTypes.h"
+#include "GameplayTagContainer.h"
 #include "Weapon/FPSRWeaponTypes.h"
 #include "FPSRPlayerState.generated.h"
 
@@ -146,6 +147,17 @@ public:
 	/** Server: set this player's lobby podium seat (B3b). Idempotent; replicates to all. */
 	void SetLobbySeatIndex(int32 NewSeat);
 
+	/** The map this player currently occupies (multimap Tier 0 — COMMITTED occupancy). Server-authoritative; replicated to
+	 *  all for UI / late-join. This is the low-churn "settled" occupancy the allocator counts + the combat cross-map gate
+	 *  reads — assigned only when the player has definitively settled in a map (not the per-frame boundary AABB). Grace /
+	 *  instantaneous occupancy is a separate SERVER-ONLY notion in the stream/allocator subsystem (never replicated). An
+	 *  unset tag = the Default single-map field (single-map play is unchanged). */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Run")
+	FGameplayTag GetCurrentMapId() const { return CurrentMapId; }
+
+	/** Server: set the committed occupancy map. Idempotent (low-churn); replicates to all. */
+	void SetCurrentMapId(const FGameplayTag& NewMapId);
+
 	/** Server: track a passive ability granted by a character-passive card (U18c), so the run-reset can clear it.
 	 *  bIsDamageEventListener bumps the DealtDamage listener count (drives the cheap ApplyDamage event-send gate so
 	 *  players without such a passive pay nothing on the hot damage path). Idempotent per handle is the caller's job. */
@@ -235,6 +247,12 @@ private:
 	 *  replication only lets clients map seat->podium for future per-seat UI). */
 	UPROPERTY(Replicated)
 	int32 LobbySeatIndex = INDEX_NONE;
+
+	/** Committed occupancy map (multimap Tier 0). See GetCurrentMapId. Plain Replicated (no OnRep — the allocator reads
+	 *  the authoritative server value; the replication lets client UI / late-joiners show which map each player is on).
+	 *  Low-churn: only set on a settled map change, not per boundary AABB frame. */
+	UPROPERTY(Replicated)
+	FGameplayTag CurrentMapId;
 
 	/** Server-only: passive ability specs granted by character-passive cards this run (U18c). Not replicated —
 	 *  ability specs are server ASC state. Cleared (ClearAbility) on ResetRunState so they never leak to the next run

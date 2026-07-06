@@ -54,6 +54,7 @@ void AFPSRPlayerState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Out
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRPlayerState, SelectedWeapon, Params);
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRPlayerState, bReady, Params);
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRPlayerState, LobbySeatIndex, Params);
+	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRPlayerState, CurrentMapId, Params);
 }
 
 void AFPSRPlayerState::SetLobbySeatIndex(int32 NewSeat)
@@ -64,6 +65,19 @@ void AFPSRPlayerState::SetLobbySeatIndex(int32 NewSeat)
 	}
 	LobbySeatIndex = NewSeat;
 	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRPlayerState, LobbySeatIndex, this);
+}
+
+void AFPSRPlayerState::SetCurrentMapId(const FGameplayTag& NewMapId)
+{
+	// Committed occupancy (multimap Tier 0). Idempotent + low-churn: the stream/allocator subsystem calls this only when
+	// a player has settled in a new map, NOT every boundary AABB frame, so this Push-Model property rarely dirties even
+	// though the PlayerState replicates at 100Hz for GAS.
+	if (!HasAuthority() || CurrentMapId == NewMapId)
+	{
+		return;
+	}
+	CurrentMapId = NewMapId;
+	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRPlayerState, CurrentMapId, this);
 }
 
 bool AFPSRPlayerState::ConsumeRerollCharge()
@@ -323,6 +337,9 @@ void AFPSRPlayerState::ResetRunState()
 
 	// Loadout pick is re-chosen each lobby visit.
 	SetSelectedWeapon(nullptr);
+
+	// Multimap occupancy back to the Default (unset) map for a fresh run.
+	SetCurrentMapId(FGameplayTag());
 
 	// Fresh-run ASC baseline (merge-gate P1): the ASC + attribute sets live on the PlayerState and survive the
 	// lobby<->run seamless travel, so a wiped/buffed player would otherwise start the next run at 0 HP (death

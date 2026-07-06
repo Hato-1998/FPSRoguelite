@@ -3,6 +3,7 @@
 #pragma once
 
 #include "GameFramework/Pawn.h"
+#include "GameplayTagContainer.h"
 #include "Enemy/FPSRVATAnimParams.h"
 #include "FPSREnemyBase.generated.h"
 
@@ -119,6 +120,13 @@ public:
 	 *  falls back. Lightweight (velocity add, no physics) — cheap at swarm scale. */
 	void ApplyKnockback(const FVector& Velocity);
 
+	/** The map this enemy belongs to (multimap Tier 0). Server-only (not replicated — cross-map relevancy is handled by
+	 *  NetCullDistance, not this tag). Assigned by the spawn subsystem from the selected spawn point at spawn, and refreshed
+	 *  by the movement pass (AABB) when the enemy crosses a map boundary. Unset = the Default single-map. Used to gate the
+	 *  enemy's nearest-player target / flow sample / attack to same-map players + the cross-map combat guard. */
+	const FGameplayTag& GetMapId() const { return MapId; }
+	void SetMapId(const FGameplayTag& InMapId) { MapId = InMapId; }
+
 protected:
 	virtual void BeginPlay() override;
 
@@ -189,6 +197,9 @@ protected:
 
 	/** Server-only: world time of last attack (init far in the past so the first attack is allowed). */
 	float LastAttackTime = -1000.0f;
+
+	/** Server-only: this enemy's map (multimap Tier 0). See GetMapId. Not replicated. */
+	FGameplayTag MapId;
 
 	/** XP dropped on death (editor-tunable per enemy type / DataAsset). Balance value. */
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Enemy")

@@ -45,6 +45,15 @@ public:
 	/** Whether a baked, ready computer exists for MapId (used by the stream/allocator gate before spawning into a map). */
 	bool IsMapFieldReady(const FGameplayTag& MapId) const;
 
+	/** True if WorldLocation is within MapId's grid (plus a small hysteresis margin, so an enemy near its own map's edge
+	 *  doesn't flip-flop maps at the boundary). Used by the movement pass to fast-skip re-resolving an enemy's MapId while
+	 *  it's still in its map. Unset/absent MapId with no computer -> false. */
+	bool IsLocationInMap(const FGameplayTag& MapId, const FVector& WorldLocation) const;
+
+	/** The MapId whose grid strictly contains WorldLocation (spatially separated maps -> at most one), or unset if none.
+	 *  Used to re-resolve an enemy's MapId once it has left its previous map's grid (door crossing). */
+	FGameplayTag FindMapIdForLocation(const FVector& WorldLocation) const;
+
 	/** Remove a map's computer (stream-out). Tier 0 keeps maps loaded (LOD-cull only) so this is not exercised, but the
 	 *  registry supports it; callers must ensure the map has no active enemies before evicting (S3 contract). */
 	bool EvictMap(const FGameplayTag& MapId);

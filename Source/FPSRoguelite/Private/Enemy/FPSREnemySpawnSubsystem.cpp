@@ -237,9 +237,10 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 
 	++MovementFrameCounter;
 
-	// Cache alive player pawn locations and pawns once for this pass.
+	// Cache alive player pawn locations, pawns, and committed MapIds once for this pass.
 	TArray<APawn*, TInlineAllocator<4>> PlayerPawns;
 	TArray<FVector, TInlineAllocator<4>> PlayerLocations;
+	TArray<FGameplayTag, TInlineAllocator<4>> PlayerMapIds; // multimap Tier 0: enemies target only same-map players
 	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
 	{
 		if (APlayerController* PC = It->Get())
@@ -248,15 +249,16 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 			{
 				// B17 (U9): enemies don't target non-alive players (DBNO downed or Dead) — a downed teammate stops
 				// drawing aggro and the swarm re-targets the living. (Downed players also take no contact damage.)
-				if (const AFPSRPlayerState* PS = PC->GetPlayerState<AFPSRPlayerState>())
+				const AFPSRPlayerState* PS = PC->GetPlayerState<AFPSRPlayerState>();
+				if (PS && !PS->IsAlive())
 				{
-					if (!PS->IsAlive())
-					{
-						continue;
-					}
+					continue;
 				}
 				PlayerPawns.Add(PlayerPawn);
 				PlayerLocations.Add(PlayerPawn->GetActorLocation());
+				// Committed occupancy (unset = Default single-map). Grace is a server-only allocator notion, NOT used
+				// here for targeting/attack (Codex R5: combat uses committed MapId strictly, flow-continuity uses grace).
+				PlayerMapIds.Add(PS ? PS->GetCurrentMapId() : FGameplayTag());
 			}
 		}
 	}
@@ -328,11 +330,30 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 		AFPSREnemyBase* Enemy = Agents[i];
 		const FVector EnemyLocation = Locations[i];
 
-		// Nearest player (2D).
+		// Multimap Tier 0: keep the enemy's MapId synced to the grid it is physically in — fast-skip (hysteresis margin)
+		// while it is still in its own map, re-resolve only the few that crossed a boundary (Codex R3). Single-map: the
+		// enemy's Default (unset) map contains everything -> no re-resolve, zero behaviour change.
+		FGameplayTag EnemyMap = Enemy->GetMapId();
+		if (FlowField && !FlowField->IsLocationInMap(EnemyMap, EnemyLocation))
+		{
+			const FGameplayTag NewMap = FlowField->FindMapIdForLocation(EnemyLocation);
+			if (NewMap != EnemyMap)
+			{
+				Enemy->SetMapId(NewMap);
+				EnemyMap = NewMap;
+			}
+		}
+
+		// Nearest SAME-MAP player (committed occupancy, 2D). A cross-map player is invisible to this enemy for targeting,
+		// attack, LOD, and the flow beeline — so an enemy never chases or hits a player in another sublevel through a wall.
 		float BestDistSq = TNumericLimits<float>::Max();
-		int32 BestPlayerIndex = 0;
+		int32 BestPlayerIndex = INDEX_NONE;
 		for (int32 p = 0; p < PlayerLocations.Num(); ++p)
 		{
+			if (PlayerMapIds[p] != EnemyMap)
+			{
+				continue; // different map (committed) -> not a target for this enemy
+			}
 			const float DistSq = FVector::DistSquaredXY(PlayerLocations[p], EnemyLocation);
 			if (DistSq < BestDistSq)
 			{
@@ -340,7 +361,10 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 				BestPlayerIndex = p;
 			}
 		}
-		const FVector BestPlayerLocation = PlayerLocations[BestPlayerIndex];
+		// No same-map player (an unoccupied map before the empty-map drain culls it, S2b) -> the enemy has no target: it
+		// gets the cheapest LOD, no attack, and no player-directed movement (separation only). It never beelines cross-map.
+		const bool bHasTarget = (BestPlayerIndex != INDEX_NONE);
+		const FVector BestPlayerLocation = bHasTarget ? PlayerLocations[BestPlayerIndex] : EnemyLocation;
 
 		// Distance LOD tier -> update stride + net update frequency (Game.MD §5).
 		int32 UpdateStride;
@@ -363,6 +387,7 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 		// ranged charge->fire for AFPSRRangedEnemyBase (it manages its own held token). The XY nearest test ignores
 		// Z, so compute the vertical gap (no through-floor melee) and pass it as a gate.
 		const float AttackVertGap = FMath::Abs(EnemyLocation.Z - BestPlayerLocation.Z);
+		if (bHasTarget)
 		if (AFPSRCharacter* TargetChar = Cast<AFPSRCharacter>(PlayerPawns[BestPlayerIndex]))
 		{
 			FFPSRServerAttackContext AttackCtx;
@@ -400,9 +425,12 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 		}
 		else
 		{
-			// Flow-field direction toward players (fall back to direct-to-nearest if the field isn't ready).
-			FVector FlowDir = FlowField ? FlowField->SampleFlowDirection(EnemyLocation) : FVector::ZeroVector;
-			if (FlowDir.IsNearlyZero())
+			// Flow-field direction toward SAME-MAP players (fall back to direct-to-nearest same-map player if the field
+			// isn't ready). Sampled from the enemy's own map so a mid-transition enemy near the door still gets its map's
+			// flow (the subsystem retries by containing-grid on a stale MapId). No same-map player -> no beeline (never
+			// chase cross-map): FlowDir stays zero and the enemy just separates.
+			FVector FlowDir = FlowField ? FlowField->SampleFlowDirection(EnemyMap, EnemyLocation) : FVector::ZeroVector;
+			if (FlowDir.IsNearlyZero() && bHasTarget)
 			{
 				FlowDir = (BestPlayerLocation - EnemyLocation);
 				FlowDir.Z = 0.0f;
@@ -422,8 +450,10 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 			// reaches ~the player's height (crested) the stop applies. Flat map: gap ~= 0 < StopClimbBelowPlayer (no regression).
 			const float StopDistSq = FMath::Square(Enemy->GetStopDistance());
 			const float BestDist3DSq = BestDistSq + AttackVertGap * AttackVertGap;
-			const bool bClimbingToPlayer = (BestPlayerLocation.Z - EnemyLocation.Z) > StopClimbBelowPlayer;
-			const FVector Desired = (!bClimbingToPlayer && BestDist3DSq <= StopDistSq) ? FVector::ZeroVector : FlowDir;
+			const bool bClimbingToPlayer = bHasTarget && (BestPlayerLocation.Z - EnemyLocation.Z) > StopClimbBelowPlayer;
+			// No target -> no advance (separation only, below); with a target, stop within 3D StopDistance unless climbing.
+			const FVector Desired = !bHasTarget ? FVector::ZeroVector
+				: ((!bClimbingToPlayer && BestDist3DSq <= StopDistSq) ? FVector::ZeroVector : FlowDir);
 
 			// Combine flow + separation; TickServerMovement normalizes and moves at CurrentMoveSpeed. Face the player
 			// (FlowDir points toward them, direct near them) — NOT MoveDir, whose separation jitter would spin the enemy.
@@ -725,6 +755,10 @@ AFPSREnemyBase* UFPSREnemySpawnSubsystem::AcquireEnemy(const FVector& Location, 
 
 	// Activate and add to active set.
 	Enemy->Activate(SpawnLocation);
+
+	// Multimap Tier 0: inherit the spawn point's MapId (unset = Default single-map). Set explicitly on every acquire so a
+	// pooled enemy reused in a different map never carries a stale MapId; the movement pass keeps it synced as it moves.
+	Enemy->SetMapId(SpawnPoint ? SpawnPoint->GetMapId() : FGameplayTag());
 
 	// Structured spawner (C1): if this point authored an exit path, the enemy follows the waypoints OUT of the spawn
 	// structure (pipe/box) before flow-field player-chase takes over — so it never jams inside concave geometry the

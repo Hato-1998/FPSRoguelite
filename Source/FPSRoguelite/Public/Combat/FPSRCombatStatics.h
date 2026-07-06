@@ -64,6 +64,16 @@ namespace FPSRCombat
 		float WeakpointMultiplier = 1.0f;
 	};
 
+	/** The map an actor belongs to (multimap Tier 0): a swarm enemy -> its MapId; a player pawn -> its PlayerState's
+	 *  committed CurrentMapId; anything else (doors, world, projectiles) -> unset. Unset = the Default single-map. */
+	FPSROGUELITE_API FGameplayTag GetActorMapId(const AActor* Actor);
+
+	/** Cross-map combat guard (multimap Tier 0): false only when Instigator and Target are BOTH settled in a map and the
+	 *  maps DIFFER (a shot/AOE can never cross a streamed map boundary). An unset map on either side (transition / default /
+	 *  a boundary door) allows the interaction. Belt on top of the spatial offset contract; also covers explosion knockback
+	 *  (which applies even at 0 damage). Cheap: one tag compare per hit, off the swarm hot path. */
+	FPSROGUELITE_API bool CanAffectTarget(const AActor* Instigator, const AActor* Target);
+
 	/** Host friendly-fire toggle from the run's GameState (false if unavailable). */
 	FPSROGUELITE_API bool IsFriendlyFireEnabled(const UWorld* World);
 

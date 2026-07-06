@@ -136,6 +136,41 @@ bool UFPSRFlowFieldSubsystem::IsMapFieldReady(const FGameplayTag& MapId) const
 	return Slot && *Slot && (*Slot)->IsFieldReady();
 }
 
+bool UFPSRFlowFieldSubsystem::IsLocationInMap(const FGameplayTag& MapId, const FVector& WorldLocation) const
+{
+	const TObjectPtr<UFPSRFlowFieldComputer>* Slot = Computers.Find(MapId);
+	if (!Slot || !*Slot)
+	{
+		return false;
+	}
+	const FBox B = (*Slot)->GetGridBounds();
+	if (!B.IsValid)
+	{
+		return false;
+	}
+	constexpr float Margin = 200.0f; // hysteresis: stay in-map a cell past the edge so a boundary enemy doesn't flip-flop
+	return WorldLocation.X >= B.Min.X - Margin && WorldLocation.X < B.Max.X + Margin &&
+		WorldLocation.Y >= B.Min.Y - Margin && WorldLocation.Y < B.Max.Y + Margin;
+}
+
+FGameplayTag UFPSRFlowFieldSubsystem::FindMapIdForLocation(const FVector& WorldLocation) const
+{
+	for (const TPair<FGameplayTag, TObjectPtr<UFPSRFlowFieldComputer>>& Pair : Computers)
+	{
+		if (!Pair.Value)
+		{
+			continue;
+		}
+		const FBox B = Pair.Value->GetGridBounds();
+		if (B.IsValid && WorldLocation.X >= B.Min.X && WorldLocation.X < B.Max.X &&
+			WorldLocation.Y >= B.Min.Y && WorldLocation.Y < B.Max.Y)
+		{
+			return Pair.Key;
+		}
+	}
+	return FGameplayTag();
+}
+
 bool UFPSRFlowFieldSubsystem::EvictMap(const FGameplayTag& MapId)
 {
 	// Tier 0 keeps maps loaded (LOD-cull only); this is an API stub for the S3 stream-out contract. The caller must have
