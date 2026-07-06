@@ -7,11 +7,13 @@
 **최종 갱신: 2026-07-06**
 
 ## 🔔 핸드오프 (2026-07-06 c · ADS sway 2건 + ② 발사파츠 반동 C++ 완료 → 다음 ① TSR 힙블러) — 🎯 **플레이 피드백 sway(신규+이동연동) 및 ②의 C++ 인프라 완료·커밋·사용자 PIE 검증. 남은 트랙: ①TSR 힙블러 → ③무기복제.**
-> **브랜치=main. 미푸시 7건**(44cc40d·8020d11·c804b48 + 이전 4건 a397c76·7b02254·51ea8e3·9b872ba).
+> **브랜치=main. 미푸시 10건**(3bbfb8a·c3be1cc·8d8082c·c804b48·8020d11·44cc40d + 이전 4건 a397c76·7b02254·51ea8e3·9b872ba).
 > **✅ ADS idle sway**(플레이 피드백): 사이트 피벗 기준 좌우 흔들림(총기 몸통만, 레티클 고정). DA 노브 `ADSSwayYawDegrees`(0.4)/`ADSSwayPitchDegrees`(0.15)/`ADSSwaySpeed`(1.2), 오너로컬·복제0. **이동 연동**: `ADSSwayMoveAlpha`=`GetVelocity().Size2D()/BaseWalkSpeed` clamp+FInterpTo(8) → **정지=총기 고정, 이동시만 sway**(멈추면 ease-out). 발사킥 무회귀. (`44cc40d`·`8020d11`, Build+Smoke 통과)
 > **✅ ② 제네릭 발사파츠 반동 — C++ 인프라**: 신규 `UFPSRWeaponAnimInstance : UAnimInstance`(`NativeUpdateAnimation`서 `FirePartRecoilOffset = GetCurveValue(Curve)×DistanceCm×Axis`, Curve None/Distance≈0=no-op) + DA 4필드(`FirePartRecoilBone`/`DistanceCm`(3.5)/`Axis`((0,-1,0))/`Curve`("CHRecoil"))+IsDataValid 본검증 + 캐릭터 주입(`RefreshFirstPersonWeaponVisual` SetAnimInstanceClass 직후 캐스트, 오너+스펙터). (`c804b48`, Build+Smoke 통과)
 > > **에디터 배선=사용자 완료·PIE 정상**: `ABP_Wep_AG14W` 리페어런트(Parent=UFPSRWeaponAnimInstance) + ModifyBone(`Charging_Handle`+`Bolt`) Translation=`FirePartRecoilOffset`/**Alpha=1.0**(커브 스케일은 C++에 있음→이중스케일 회피) + `DA_Weapon_Rifle` 값. **다중 파츠=같은 오프셋에 ModifyBone 여러개 바인딩(코드 변경 0)**. ⚠️콘텐츠(ABP/DA) 미커밋=사용자 WIP.
-> **⏭️ 다음 = ① TSR 힙블러 잔여**: 모션블러 off(`r.MotionBlurQuality=0`) 후에도 힙파이어 사격방향 살짝 번짐 = TSR 시간적 고스트. 후보 PIE 반복: (a)FP 팔·무기 머티리얼 **Responsive AA**[우선] (b)발사몽타주/킥 모션 완화 (c)TSR cvar[전역품질↓]. 이후 ③무기복제(팩매핑→②기반 복제).
+> **✅ ADS 총구화염 축소**(`3bbfb8a`): `bSuppressMuzzleFlashWhileADS`(bool)→`ADSMuzzleFlashScale`(0~1, 기본 0.35). ADS시 완전차단→0.35 축소표시, 힙파이어 무회귀, 스펙터 풀사이즈(슈터 애임상태 미복제, 주석). 기본0.35라 DA편집 없이 즉시 적용. Build+Smoke.
+> **✅ DA 에디터 한글화+기능별 분류**(`c3be1cc`): 무기 DA 50필드 한글 DisplayName+Category `무기|{기본·발사체·카드·1인칭메시·조준(ADS)⭐13개·발사연출·애니몽타주·발사파츠반동·모듈파츠·크로스헤어·3인칭}`. UPROPERTY 메타만·런타임무영향(변수명=영어유지). Build+Smoke(UHT 한글 파싱OK).
+> **⏭️ 다음 = ① TSR 힙블러(에디터 대기) → ③ 무기복제**: 블러 잔여=TSR 시간적 고스트(모션블러 off됨). **(a) FP 팔·무기 머티리얼 Responsive AA = 유일 타겟해법**(엔진소스 확인: `bEnableResponsiveAA`가 base pass 불투명에 적용 `BasePassRendering.cpp:411`) → **에디터 여유 시**. **(c) 전역 velocity cvar = 철회**(제1원리 위배: 적 수백 velocity 패스비용). (b) 몽타주완화=피드백 훼손 보류. ③=팩매핑→②기반 복제(미착수). ⚠️**LC 주의**: 별도 클론 `FPSRoguelite2` 에디터 열려있으면 같은 엔진 Live Coding 락으로 this트리 빌드 실패 → 빌드 전 LC끄기/종료 필요([[build-octobuild-xge-c1076-flaky]] 인접 함정).
 
 ## 🔔 핸드오프 (2026-07-06 b · 다음 세션 코드작업 인계 — ADS 확장 3작업 계획 승인, 코드 미착수) — 🎯 **Rifle ADS 발사감각 완료(코드 a397c76·콘텐츠 7b02254) 위에, 사용자 승인 3작업: ①TSR 힙블러 잔여 ②제네릭 발사파츠 반동(DA+C++ AnimInstance) ③무기 복제. 이 세션=계획 확정만, 컨텍스트 소진으로 인계.**
 > **브랜치=main. 미푸시 4건**(a397c76·7b02254 + 이전 51ea8e3·9b872ba). **권장 순서 ②→①→③**.
