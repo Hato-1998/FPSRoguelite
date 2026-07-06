@@ -71,5 +71,9 @@ PROGRESS.md '사용자 대기 작업' 참조. 요약: **BP 3종 생성 + 참조 
 | XP 픽업 placeholder 스피어(`AFPSRXPPickup`, ConstructorHelpers) | 엔진 기본 스피어 | 실제 XP 오브 VFX + 풀링/배칭(P3-B 후속) |
 | FP팔/3P 바디 메시 미할당 | 빈 SkeletalMesh | HeroDataAsset 메시 바인딩 |
 | 적 추격 = 단순 스티어링 | 최근접 추격 | P2 Flow-Field + separation + 배치 교체 |
+| 환경/레벨 지오메트리 | L_Sandbox 화이트박스(테스트 지오) | **Synty POLYGON Path A**(통일 로우폴리): 1맵 Sci-Fi City · 2맵 Nature · 3맵 Sci-Fi Space. 다중맵 심리스(`RunFlow.md §2-1`) |
 | PlayerController `[Input] Added DefaultMappingContext` Warning | 1회성 로그 | 다음 빌드 시 Verbose 다운그레이드 |
 | CommonUI `LogUIActionRouter` 에러 | 무해 | P3 `CommonGameViewportClient` 설정 시 해결 |
+
+> **환경 에셋 방향 = Path A (통일 로우폴리 Synty POLYGON 패밀리) 확정 (피벗 2026-07-03, `Concept.md §1-C-9`)**. 근거(제1원리): 로우폴리 = 드로우콜/텍스처 최소 → 적 200-300 프레임예산 보존 + 기존 로우폴리 에셋 정합 + 벤더 통일 = 통일감 자동. (Path B 리얼리스틱 = 무겁·톤충돌로 기각.)
+> ⚠️ **착수 전 필수 = 파일럿 검증**: Synty 후보 1팩을 **UE5.7 임포트 + 적 300 스폰 + U7 플로우필드 + 20분 런 프레임 실측** → 통과분만 채택. **Fab 등재 여부 팩별 확인**(예: POLYGON Sci-Fi City는 Fab 미이관·Epic 볼트만일 수 있음).

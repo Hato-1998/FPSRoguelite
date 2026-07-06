@@ -96,6 +96,29 @@
 > - **BS 파이썬저작 함정**: `BS_Arms_AG14W`류는 런타임 보간데이터 미빌드로 팔/무기 사라질 수 있음→저작후 강제리빌드+AnimBP재컴파일 or 에디터직접생성, 콜드PIE 검증([[anim-content-authoring-vibeue-pipeline]]).
 > **미커밋 콘텐츠(사용자 작업, 커밋 안 함)**: `Content/Character/Animation/`·`Content/Weapons/Animation/`(AG14W+보류 MAK12 몽타주·BS·AnimBP), `DA_Weapon_Rifle`(AimSocket 등 배선), `SK_LPAMG_AG14W`(SOCKET_Muzzle제거·SOCKET_Aim추가), `SM_LPAMG_AG14W_Forestock_Default/Extended`(총구 yaw90), `SK_LPAMG_MAK12`(보류 소켓). 스퓨리어스=`L_Sandbox.umap`·`BP_FPSRPlayer.uasset`(내 임시액터/미변경, 커밋말것). 무기↔팩코드 매핑=[[weapon-da-pack-code-mapping]].
 
+## 🔔 핸드오프 (2026-07-05 s · PM 세션 마무리 — 실행 트랙 2개 프롬프트 준비 완료 — PM/문서 클론, main) — 설계 종결, 다음=구현 세션
+> **이 PM 세션 종료**. #3 다중맵 아키텍처 설계 **완전 종결**(Codex 6R, 디렉터 6+1항목 결정 잠금). 두 실행 트랙 프롬프트 준비 완료(둘 다 활성 코드 클론 `E:\Git_Project\FPSRoguelite`):
+> - **A = #3 Tier 0 구현** → [`Docs/MultiMap_Tier0_ResumePrompt.md`](Docs/MultiMap_Tier0_ResumePrompt.md). 화이트박스 2맵, 에셋 독립.
+> - **B = Synty 에셋 전체교체** → [`Docs/AssetReplacement_Synty_ResumePrompt.md`](Docs/AssetReplacement_Synty_ResumePrompt.md). 파일럿 게이트 → 환경 3맵 → 적 교체(Paragon 제거) → 갭(커스텀 거대문·UI/오디오 별도). 획득=SyntyPass, 추천=Artifact 구매플랜.
+> **사용자 계획(2026-07-05)**: **A 먼저(새 세션) → B 에셋 전체교체.**
+> **⚠️ 크로스 트랙 의존**: (1) B의 Synty 맵은 나중에 A(#3)의 스트리밍 대상으로 합류(B는 에셋만 만듦). (2) B의 적 교체(Paragon→Synty)를 **U20 VAT 베이크(애니 콘텐츠 트랙) 전에** 완료(재베이크 방지). (3) B 파일럿에 **다중맵 상주 메모리 체크** 추가(#3 잔존 정책=맵 언로드 안 함이라 상주 메모리가 관건).
+> **다음 PM 작업(복귀 시)**: A/B 완료 보고 검증(§3 게이트) · B 파일럿 통과분 Roadmap §8 확정 스택 기록 · P0-③ 메타 루프 설계(RunFlow §2-11).
+
+## 🔔 핸드오프 (2026-07-05 r · #3 다중맵 아키텍처 A 사인오프 — Codex 5R 컨설트 수렴 + SSOT 반영 + Tier 0 프롬프트 — PM/문서 클론, main) — ✅ 설계 수렴·문서화 완료. 다음 = Tier 0 구현(새 세션·활성 클론) / 에셋(SyntyPass·적교체)=별도 세션
+> **이 세션 = 문서/PM만**(코드 무접촉). #3 다중맵 "전역 예산 하 게임필/재집결"을 **Codex 5라운드 컨설트**로 수렴 → 리포트 [`Docs/Review/20260705-multimap-budget-regroup.md`](Docs/Review/20260705-multimap-budget-regroup.md).
+> **수렴 명제**: 다중맵=자유, 본게임 압력·보상·burst는 **"2명 이상 같은 전선"에서 선명**. 솔로=정찰 모드. 하드 테더 없음. **전역 공유 캡**(잠정 200, perf 미검증)·map-aware allocator("2인+ 맵>솔로 맵")·per-map 플로우필드 레지스트리·NetCull→RepGraph→level-streaming. 문=쏴서 파괴(기존 Chaos, b-1 확인).
+> **SSOT 반영(원칙3)**: `Performance §5`(다중맵 예산 모델)·`Architecture §3-4`(레벨 다중맵 심리스·allocator/레지스트리)·`RunFlow §2-1`(명제·Tier 구조). TaskPrompts §E **G1-G5** 등재.
+> **Tier 0 실행 프롬프트**: [`Docs/MultiMap_Tier0_ResumePrompt.md`](Docs/MultiMap_Tier0_ResumePrompt.md)(새 세션·활성 코드 클론 `E:\Git_Project\FPSRoguelite`). Tier 0=레벨 스트리밍·per-map 필드·allocator v0·NetCull·최소 진입시드·빈맵 드레인·문파괴 복제·전환 grace·stream-in fallback. **Tier 1**(burst reserve·silent recycle·전환 추적자·allocator 정책)·**Tier 2**(rally pad·split 감지·양성 인센티브)=후속 유닛.
+> **✅ 디렉터 결정 6항목 확정(2026-07-05, 컨설트 R6 반영·리포트 §✅)**: 솔로=정찰(약억제, per-map 미션이 이미 억제) · 2인+=효율 좋음(강제X; **"2인+"=파티크기 아닌 뭉침 임계값 2·3·4 전부, 게임 1~4인**) · **그룹 버프 전면 폐기**(근접 버프·자석·큐공유 없음→뭉침 유인=콘텐츠 배분만) · 텔포=장치 활성화·대상 지정·쿨타임(+도착 앵커·채널·개인/팀 shared 쿨타임) · 문=혼자선 어려운 체력(soft group-gate) · 맵=언로드X·LOD컬·잔존(픽업 dormant/HISM·적만 드레인). ⚠️ **R6 핵심 = allocator가 설계의 심장**: 그룹 버프 0이라 "뭉치면 효율"(#2)은 고가치 콘텐츠(미션/보스/엘리트)를 2인+ 그룹에 집중시켜야만 성립 → **Tier 1 allocator = 적 예산 + 콘텐츠/이벤트 배분 공동**. **분산 판타지=하이브리드**(짧은 정찰=자유/장기 완전분산=은근 비효율, 명시 확정 2026-07-05). 은근한 비효율 리스트에서 **전투 열기·고가치 이벤트 최소인원 제외**(게이트/페널티 인접). SSOT(RunFlow §2-1·Performance §5)·Tier 0 프롬프트 반영 완료.
+> **에셋 결정(사용자 2026-07-05)**: 획득 = **SyntyPass**(상용 라이선스 확인됨 · 프로덕션 후 비주얼 성숙 시 에셋 교체 가능성 참고) / **적 교체 확정**(Synty City Zombies+환경팩 동봉 캐릭터 → 에셋 추가·교체 완료 후 **Paragon 제거**). 추천표=Artifact 구매플랜(슬롯별 검증 톱픽). ⚠️ **적 교체를 U20 VAT 베이크 콘텐츠 저작 전에 확정**(재베이크 방지, 애니 콘텐츠 작업과 조율).
+> **다음**: (A) #3 Tier 0 구현(새 세션·활성 클론) / (B) Synty 파일럿+적 교체(별도 세션) / 애니 콘텐츠 저작(진행 중, 별도 트랙).
+
+## 🔔 핸드오프 (2026-07-05 q · 컨셉 피벗 SSOT 정식반영 — PM/문서 클론, main) — ✅ **git 정합 확인(불일치 0) + 컨셉 피벗(07-03 확정)을 SSOT에 정식 등재**. 다음 = ⚠️ #3 다중맵 아키텍처 설계(P0급 OPEN) / 애니 콘텐츠 저작(사용자)
+> **이 세션 = 문서/PM만**(코드 무접촉). 부팅 시 git 실측 = HEAD `e0cba9f`(main·origin 동기 ahead/behind 0), phase 브랜치 0, 애니 패스 머지(`e651cce`+`5655aaf`) 확인 → **문서↔git 불일치 없음**(피벗은 07-03 이후 PROGRESS에만 있었고 SSOT 미반영 상태였음 = 이번에 해소).
+> **반영(명시 stage, `-A` 금지·Content 제외)**: `Concept.md §1-C-9`(세팅 = 사이버펑크 다이브·**코어 불변**·아트불일치→디제시스·The Spell Brigade 정합 노트 + §1-C-8 체크박스·헤더 ⑥) / `RunFlow.md §2-1`(다중맵 심리스 문전환·맵점유·**#3 OPEN 명기**)·`§2-8`(맵점유 미션/스폰) / `Roadmap.md §8`(환경 에셋 Synty Path A + 파일럿 검증 게이트) / `TaskPrompts_Master.md` 백로그 갱신.
+> **⚠️ OPEN 유지(이번에 결정 안 함 — 작업 A로 이월)**: **#3 다중맵 아키텍처** = (a) 플레이어 분산 vs back-to-back USP (b) 적 예산 점유맵 공유 vs per-map(하드캡 500 재정의) (c) RepGraph relevancy + World Partition 앞당김. 이번 반영은 피벗 **"등재"**만, 아키텍처 **"설계"**는 별도 세션.
+> **다음**: (A) #3 다중맵 아키텍처 설계(P0급) / (B) Synty 파일럿 검증(적300+U7+20분 프레임 실측) / (C) 애니 콘텐츠 저작(사용자) 후 PIE → 완료 검증 게이트(§3) / P0-③ 메타 루프 설계(RunFlow §2-11).
+
 ## 🔔 핸드오프 (2026-07-04 p · 애니 콘텐츠 저작 = 새 세션 인계) — 🎬 코드 인프라 완료(A/B/C+보스+무기 노리쇠 훅 main 머지·push), **남은 건 에디터 콘텐츠 저작**. 직전 세션 VibeUE MCP **세션 미연결**(에디터 열림·8088 LISTENING이나 MCP 툴 부재) → editor-bridge 인계.
 > **추가 코드(무기 노리쇠, main 머지 `5655aaf`)**: DA `WeaponAnimInstanceClass`+`WeaponFireMontage`/`WeaponReloadMontage` → 발사/재장전 시 `WeaponMesh1P`에 노리쇠 몽타주를 팔과 동기 재생(오너+관전자). 신규복제0. 빌드+스모크 통과.
 > **사용자 결정(2026-07-04)**: 애니 콘텐츠 **처음부터·팩 데모 AnimBP/몽타주 미사용**(raw 시퀀스만 소스), 있던 것(BroBot AnimBP)도 새로. **전용 Animation 폴더**: 무기=`Content/Weapons/Animation/`(존재)·캐릭터=`Content/Character/Animation/`(생성). **Rifle(MAK12) 1종 먼저** 완성해 템플릿.
@@ -111,6 +134,16 @@
 > **GMS 무접촉**: 이 패스 상주 리스너 0(사망=OnRep_bDead 직접·공격=휴리스틱) → **BroadcastMessageInternal 통복사 수정은 U13 소유 유지**(U13 미착수 확인, TaskPrompts §C U13 GMS 항목 그대로).
 > **검증**: 빌드×4 Succeeded + 헤드리스 스모크 ModuleLoads Result={Success}×4 + Codex 게이트. **사용자 PIE·정량 perf(200-300 hitch)=콘텐츠 저작 후/U14 이월**. C 활성화=Stage2(MF 파라미터 에디터확인)→Stage3(VAT베이크+프로파일할당), 가이드 참조.
 > **⚠️ 후속 이월**: (C) death-dwell·공격애니 지속=Stage3 / MF 파라미터 실제명 에디터확인=Stage2 / 정량 perf=U14 / (B) DBNO 관전 1P/3P 오버랩 흉함 판정=PIE서.
+
+## 🔔 핸드오프 (2026-07-03 p · 🌐 컨셉 피벗 확정 — 사이버펑크 게임세계 다이브 + 다중맵 심리스 + 에셋 Path A) — 🧭 설계 결정 로그(SSOT 정식반영·#3 아키텍처 설계는 다음 세션)
+> **사용자 결정(2026-07-03, 토의 수렴)** — 컨셉/콘텐츠 트랙(진행 중 애니메이션 통합 패스와 별개):
+> - **테마 확정 = 사이버펑크 · "게임세계 다이브"**(캐릭터가 게임 안으로 접속해 시뮬/월드를 넘나듦). **코어 불변**(1인칭 협동 서바이버·적 수백·back-to-back USP), **세팅/픽션만 교체.** 기존 에셋(Infima Modern Guns·BroBot 로봇·Paragon 미니언)과 정합↑(판타지보다). ⭐**아트 불일치→기능 전환**: "다른 심에 다이빙"이라 맵마다 테마 달라도 의도된 것.
+> - **레벨 구조 = 맵 4방향 끝 거대한 문(일관 디자인=통일 요소 겸) 부수기 → 심리스 다음 맵**(레벨 스트리밍/World Partition, 하드 트래블 아님).
+> - **미션/스폰 = 플레이어 점유 맵 기반**(1·2맵 분산 시 양쪽 미션·스폰).
+> - **에셋 방향 = Path A(통일 로우폴리 Synty POLYGON 패밀리)** 확정: 1맵 사이버펑크=`POLYGON Sci-Fi City`(또는 Sci-Fi Worlds) / 2맵 숲=`POLYGON Nature` / 3맵 SF=`POLYGON Sci-Fi Space`. **근거(제1원리)**: 로우폴리=드로우콜/텍스처 최소→적 200-300 프레임예산 보존 + 기존 로우폴리 정합 + 벤더 통일=통일감 자동. (Path B 리얼리스틱=무겁·톤충돌로 기각.)
+> **⚠️ OPEN 서브결정 = #3 다중맵 아키텍처(P0급 RunFlow 설계변경, 다음 세션)**: (a) **플레이어 분산 허용 vs back-to-back USP 긴장**(분산 페널티 vs 뭉침 유도) (b) **적 예산 = 점유맵 공유 vs per-map**(하드캡 500 재정의 — per-map이면 예산 붕괴) (c) **RepGraph relevancy + 레벨스트리밍/World Partition 앞당겨짐**(§5 다음 레버). FPSREnemySpawnSubsystem(단일 풀)·U7 플로우필드(단일)를 다중맵으로 확장.
+> **✅ SSOT 정식반영 완료(2026-07-05 q, 최상단 핸드오프 참조)**: `Concept.md §1-C-9` / `RunFlow.md §2-1·§2-8` / `Roadmap.md §8` 등재. (원래 "대기"였던 항목 — 해소.) 구현=콘텐츠 단계(U14+/P6+).
+> **⚠️ 착수 전 필수 = 파일럿 검증**: Synty 후보 1개 **UE5.7 임포트 + 적 300 스폰 + U7 플로우필드 + 20분 런 프레임 실측** → 통과분만 채택. **Fab 등재 여부 팩별 확인**(Sci-Fi City는 Fab 미이관·Epic 볼트만일 수 있음).
 
 ## 🔔 핸드오프 (2026-07-03 o · PM 프롬프트 그라운딩 세션 — 문서/PM 클론, main) — 🧭 U8/U10/U17 완료 검증 + U8/U10/U15 §C 그라운딩 + 🎬**애니메이션 통합 패스 신설**(U15+U19+U20). 다음=활성 클론이 통합 애니 패스 실행 / 이 클론=P0-③ 메타 설계
 > **이 세션 = 문서/PM만**(코드 무접촉, 전부 origin/main push됨 HEAD `4d934c4`, 0/0). 활성 코드 작업=별도 클론(`E:\Git_Project\FPSRoguelite` no-2). ⚠️ **컨텍스트 소진으로 세션 인계** — 새 세션은 아래 재개 프롬프트로 부팅.
