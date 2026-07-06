@@ -1390,19 +1390,26 @@ void AFPSRCharacter::UpdateAimDownSights(float DeltaTime)
 
 	// ADS idle sway + fire kick: BOTH pivot the arms about the pinned sight (camera-space ≈ (ADSSightDistance, 0, 0)),
 	// faded by the ADS alpha, so the gun body/muzzle moves while the sight stays on the centre-line (steady reticle).
-	//  - Sway: a gentle time-driven handheld "breathing" wander (yaw = L-R, subtle pitch) — two out-of-phase sines per
-	//    axis so it reads organic rather than a metronome. Purely cosmetic + owner-local; no runtime state (time-based).
+	//  - Sway: a gentle handheld "breathing" wander (yaw = L-R, subtle pitch) — two out-of-phase sines per axis so it
+	//    reads organic rather than a metronome. MOVEMENT-GATED (below): scaled by a smoothed 0..1 speed factor so a
+	//    planted/standing-still aim stays dead steady and the sway only lives while walking. Cosmetic + owner-local.
 	//  - Kick: the per-shot recoil snap (+pitch = muzzle up) set on each aimed shot (PlayWeaponFireCosmetics), settled
-	//    back toward zero each frame. Both are scaled by the alpha so they appear only in ADS and fade out on release.
+	//    back toward zero each frame. Both are scaled by the ADS alpha so they appear only in ADS and fade on release.
+	// Smoothed movement factor: 0 when still → 1 at BaseWalkSpeed, eased (FInterpTo) so the sway winds down after you
+	// stop rather than cutting off. GetVelocity() is the pawn's movement velocity; Size2D() ignores jump/gravity.
+	const float SwayRefSpeed = FMath::Max(1.0f, BaseWalkSpeed);
+	const float SwayMoveTarget = FMath::Clamp(GetVelocity().Size2D() / SwayRefSpeed, 0.0f, 1.0f);
+	ADSSwayMoveAlpha = FMath::FInterpTo(ADSSwayMoveAlpha, SwayMoveTarget, DeltaTime, 8.0f);
+
 	FRotator ExtraRot(ADSFireKickPitch, 0.0f, 0.0f);
 	if (CurrentADSAlpha > KINDA_SMALL_NUMBER)
 	{
-		if (CachedADSSwayYawDegrees > 0.0f || CachedADSSwayPitchDegrees > 0.0f)
+		if (ADSSwayMoveAlpha > KINDA_SMALL_NUMBER && (CachedADSSwayYawDegrees > 0.0f || CachedADSSwayPitchDegrees > 0.0f))
 		{
 			const float T = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
 			const float W = CachedADSSwaySpeed;
-			ExtraRot.Yaw   += CachedADSSwayYawDegrees   * (0.6f * FMath::Sin(T * W)            + 0.4f * FMath::Sin(T * W * 1.7f + 1.1f));
-			ExtraRot.Pitch += CachedADSSwayPitchDegrees * (0.6f * FMath::Sin(T * W * 0.8f + 0.5f) + 0.4f * FMath::Sin(T * W * 1.3f + 2.3f));
+			ExtraRot.Yaw   += ADSSwayMoveAlpha * CachedADSSwayYawDegrees   * (0.6f * FMath::Sin(T * W)            + 0.4f * FMath::Sin(T * W * 1.7f + 1.1f));
+			ExtraRot.Pitch += ADSSwayMoveAlpha * CachedADSSwayPitchDegrees * (0.6f * FMath::Sin(T * W * 0.8f + 0.5f) + 0.4f * FMath::Sin(T * W * 1.3f + 2.3f));
 		}
 		if (!ExtraRot.IsNearlyZero())
 		{

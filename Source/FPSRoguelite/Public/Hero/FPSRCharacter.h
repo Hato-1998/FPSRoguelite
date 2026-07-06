@@ -444,6 +444,10 @@ protected:
 	 *  applied as a rotation about the AimSocket pivot in UpdateAimDownSights so the gun kicks while the sight stays put. */
 	float ADSFireKickPitch = 0.0f;
 
+	/** Smoothed 0..1 movement factor gating the ADS idle sway: 0 when the pawn is standing still (steady aim), ramps
+	 *  to 1 with planar speed (relative to BaseWalkSpeed) so the handheld sway only lives while moving. Owner-local. */
+	float ADSSwayMoveAlpha = 0.0f;
+
 	/** Runtime-created modular weapon-part components (U15), child-attached to WeaponMesh1P and rebuilt on each
 	 *  weapon change. Owner-only-visible (match the 1P weapon mesh). Empty for static/melee/partless weapons. */
 	UPROPERTY(Transient)
