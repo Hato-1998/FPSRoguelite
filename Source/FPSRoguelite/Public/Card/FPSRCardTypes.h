@@ -28,6 +28,18 @@ enum class EFPSROfferType : uint8
 	WeaponUnlock UMETA(DisplayName = "Weapon Unlock") // WeaponUnlock: requires & consumes a weapon-unlock pick; new-weapon unlock (mission clear + level milestones). Not rerollable.
 };
 
+/** Closed set of card DRAW ROUTES = which membership array a card lives in (each has different draw semantics).
+ *  Closed by schema (the arrays are fixed C++ members); the OPEN axis is card effects, which declare which of
+ *  these routes they permit via UFPSRCardEffect::GetEditorEligibleRoutes(). Editor-tool preflight uses this. */
+UENUM()
+enum class EFPSRCardRoute : uint8
+{
+	LevelUpGlobal             UMETA(DisplayName = "Level-Up: Global Pool (Pool.Cards)"),
+	MissionClearNewWeapon     UMETA(DisplayName = "Mission-Clear: New Weapon (Pool.WeaponUnlockCards)"),
+	LevelUpWeapon             UMETA(DisplayName = "Level-Up: Weapon Card (Weapon.WeaponCards)"),
+	MissionClearWeaponFeature UMETA(DisplayName = "Mission-Clear: Weapon Feature (Weapon.UnlockableFeatures)")
+};
+
 UENUM(BlueprintType)
 enum class ECardRarity : uint8
 {

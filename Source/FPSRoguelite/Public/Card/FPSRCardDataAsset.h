@@ -67,6 +67,12 @@ public:
 	/** Editor validation: empty Effects, per-effect ValidateEffect, rarity coverage, multi-effect CardFamily, naming. */
 	virtual EDataValidationResult IsDataValid(class FDataValidationContext& Context) const override;
 
+	/** Editor-tool: set the magnitude of an EXISTING rarity tier on the effect at EffectIndex. Does NOT create a tier
+	 *  (returns false if that effect has no tier for Rarity — P1 edits in place only). Wraps Modify() + writes the tier
+	 *  + PostEditChangeProperty so OfferRarities re-derives and the package is marked dirty. The caller (Slate) owns the
+	 *  FScopedTransaction. Returns true if a tier was found and written. */
+	bool SetEffectRarityMagnitude(int32 EffectIndex, ECardRarity Rarity, float NewMagnitude);
+
 private:
 	/** Recompute OfferRarities from the first magnitude-bearing effect's tiers (IsDataValid enforces the rest match). */
 	void RefreshOfferRarities();

@@ -162,5 +162,43 @@ EDataValidationResult UFPSRCardDataAsset::IsDataValid(FDataValidationContext& Co
 	return Result;
 }
 
+bool UFPSRCardDataAsset::SetEffectRarityMagnitude(int32 EffectIndex, ECardRarity Rarity, float NewMagnitude)
+{
+	if (!Effects.IsValidIndex(EffectIndex))
+	{
+		return false;
+	}
+	UFPSRCardEffect* Effect = Effects[EffectIndex];
+	if (!Effect)
+	{
+		return false;
+	}
+
+	// P1 edits in place only: find an EXISTING tier for Rarity. A rarity this effect doesn't cover yet is not
+	// silently created here — that would change which rarities the card offers as a side effect of a magnitude
+	// edit, which is a wiring change the guided-add flow (not the grid) should make explicit.
+	FFPSRCardRarityTier* Tier = Effect->RarityTiers.FindByPredicate(
+		[Rarity](const FFPSRCardRarityTier& T) { return T.Rarity == Rarity; });
+	if (!Tier)
+	{
+		return false;
+	}
+
+	// Modify BOTH the card and the effect subobject: the tier lives on the Instanced effect (a distinct UObject),
+	// so the card's Modify() alone would not capture the tier change into the transaction buffer and Ctrl+Z would
+	// not revert the magnitude. The card is modified too because RefreshOfferRarities (below) may change its OfferRarities.
+	Effect->Modify();
+	Modify();
+	Tier->Magnitude = NewMagnitude;
+
+	// Route through PostEditChangeProperty (as if the designer had edited Effects in the details panel) so
+	// RefreshOfferRarities recomputes and the package is marked dirty — same path a manual details-panel edit takes.
+	FProperty* EffectsProp = FindFProperty<FProperty>(StaticClass(), GET_MEMBER_NAME_CHECKED(UFPSRCardDataAsset, Effects));
+	FPropertyChangedEvent Evt(EffectsProp, EPropertyChangeType::ValueSet);
+	PostEditChangeProperty(Evt);
+
+	return true;
+}
+
 #undef LOCTEXT_NAMESPACE
 #endif // WITH_EDITOR

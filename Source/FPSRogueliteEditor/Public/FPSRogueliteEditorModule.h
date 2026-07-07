@@ -6,9 +6,11 @@
 #include "Modules/ModuleInterface.h"
 
 /**
- * Editor-only module for FPSRoguelite designer tooling (data validation seam, P0).
- * Holds cross-asset UEditorValidatorBase validators, the anchored-validation service, the
- * headless validation commandlet, and the Tools > FPSR menu entry point. No Slate editing UI (P0).
+ * Editor-only module for FPSRoguelite designer tooling. P0 shipped the data-validation seam (cross-asset
+ * UEditorValidatorBase validators, the anchored-validation service, the headless validation commandlet, and the
+ * Tools > FPSR > "Validate Anchored Data" menu entry). P1 adds the FPSR Data Editor — a Slate tool tab (Tools > FPSR
+ * > "Data Editor...") for wiring/orphan-fixing and card per-rarity magnitude editing, reusing the P0 validation
+ * service for discovery.
  */
 class FFPSRogueliteEditorModule : public IModuleInterface
 {
@@ -17,11 +19,21 @@ public:
 	virtual void ShutdownModule() override;
 
 private:
-	/** Registers the Tools > FPSR > "Validate Anchored Data" menu entry. Deferred via
-	 *  UToolMenus::RegisterStartupCallback (menus aren't ready to register at module-load time). */
+	/** Registers the Tools > FPSR menu entries. Deferred via UToolMenus::RegisterStartupCallback (menus aren't
+	 *  ready to register at module-load time). */
 	void RegisterMenus();
 
 	/** Menu command handler: runs the same anchors+reachable validation as the commandlet, in-editor, then opens
 	 *  the AssetCheck message log so results are visible without digging through Output Log. */
 	static void OnValidateAnchoredDataMenuEntry();
+
+	/** Menu command handler (P1): opens (or focuses) the FPSR Data Editor nomad tab. */
+	static void OnOpenDataEditorMenuEntry();
+
+	/** Nomad tab spawner for the FPSR Data Editor (P1) — registered in StartupModule, unregistered in
+	 *  ShutdownModule. Returns a dock tab hosting a single SFPSRDataEditorWidget. */
+	static TSharedRef<class SDockTab> SpawnDataEditorTab(const class FSpawnTabArgs& Args);
+
+	/** Tab identifier for the FPSR Data Editor nomad tab (RegisterNomadTabSpawner / TryInvokeTab both key off this). */
+	static const FName FPSRDataEditorTabName;
 };

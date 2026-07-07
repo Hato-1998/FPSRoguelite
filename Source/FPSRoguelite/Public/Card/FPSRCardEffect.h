@@ -78,6 +78,16 @@ public:
 #if WITH_EDITOR
 	/** Editor validation of this effect's OWN fields. Append errors/warnings to Context. */
 	virtual void ValidateEffect(FDataValidationContext& Context) const {}
+
+	/** Editor-tool grid label: a rarity-independent one-line identity of this effect for the Data Editor magnitude
+	 *  grid's Summary column (e.g. "Character GE", "Weapon Stat: Damage (all weapons)"). Base = the effect's class
+	 *  display name. Override per subclass. Editor-only; no runtime cost. */
+	virtual FText GetEditorGridLabel() const;
+
+	/** Editor-tool routing: which closed draw routes this effect PERMITS a card to be placed in. The Data Editor
+	 *  intersects this across a card's effects for its wiring preflight (a card in an ineligible route is blocked).
+	 *  Declared per subclass so a NEW effect type surfaces in the tool with zero central edits (OCP). Base = empty. */
+	virtual TArray<EFPSRCardRoute> GetEditorEligibleRoutes() const;
 #endif
 };
 
@@ -104,6 +114,8 @@ public:
 	virtual bool CanApply(const FFPSRCardEffectContext& Context) const override;
 #if WITH_EDITOR
 	virtual void ValidateEffect(FDataValidationContext& Context) const override;
+	virtual FText GetEditorGridLabel() const override;
+	virtual TArray<EFPSRCardRoute> GetEditorEligibleRoutes() const override;
 #endif
 };
 
@@ -130,6 +142,10 @@ public:
 	virtual FText GetDescription(ECardRarity Rarity, float Magnitude) const override;
 	virtual bool RequiresWeapon() const override { return true; }
 	virtual bool CanApply(const FFPSRCardEffectContext& Context) const override;
+#if WITH_EDITOR
+	virtual FText GetEditorGridLabel() const override;
+	virtual TArray<EFPSRCardRoute> GetEditorEligibleRoutes() const override;
+#endif
 };
 
 /** Weapon behavior effect: grants a behavior fragment to the card's target weapon instance. v1 ThisWeapon +
@@ -149,6 +165,8 @@ public:
 	virtual bool CanApply(const FFPSRCardEffectContext& Context) const override;
 #if WITH_EDITOR
 	virtual void ValidateEffect(FDataValidationContext& Context) const override;
+	virtual FText GetEditorGridLabel() const override;
+	virtual TArray<EFPSRCardRoute> GetEditorEligibleRoutes() const override;
 #endif
 };
 
@@ -168,6 +186,8 @@ public:
 	virtual bool CanApply(const FFPSRCardEffectContext& Context) const override;
 #if WITH_EDITOR
 	virtual void ValidateEffect(FDataValidationContext& Context) const override;
+	virtual FText GetEditorGridLabel() const override;
+	virtual TArray<EFPSRCardRoute> GetEditorEligibleRoutes() const override;
 #endif
 };
 
@@ -190,5 +210,7 @@ public:
 	virtual bool CanApply(const FFPSRCardEffectContext& Context) const override;
 #if WITH_EDITOR
 	virtual void ValidateEffect(FDataValidationContext& Context) const override;
+	virtual FText GetEditorGridLabel() const override;
+	virtual TArray<EFPSRCardRoute> GetEditorEligibleRoutes() const override;
 #endif
 };
