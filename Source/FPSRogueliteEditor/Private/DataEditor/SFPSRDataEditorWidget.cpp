@@ -9,6 +9,7 @@
 #include "Card/FPSRCardEffect.h"
 #include "Card/FPSRCardPoolDataAsset.h"
 #include "Weapon/FPSRWeaponDataAsset.h"
+#include "Weapon/FPSRWeaponFragment.h"
 #include "Weapon/FPSRLoadoutPoolDataAsset.h"
 #include "Run/FPSRRunScheduleDataAsset.h"
 #include "Run/Mission/FPSRMissionDataAsset.h"
@@ -118,7 +119,7 @@ public:
 				FSlateLayoutTransform(FVector2D(StartX, RowY)));
 			FSlateDrawElement::MakeBox(OutDrawElements, Layer, BarGeometry, WhiteBrush, ESlateDrawEffect::None, FLinearColor(0.2f, 0.5f, 0.8f, 0.85f));
 
-			const FString Label = FString::Printf(TEXT("Window %d (%d mission%s)"), WindowIndex, Window.MissionPool.Num(), Window.MissionPool.Num() == 1 ? TEXT("") : TEXT("s"));
+			const FString Label = FString::Printf(TEXT("윈도우 %d (미션 %d개)"), WindowIndex, Window.MissionPool.Num());
 			const FPaintGeometry LabelGeometry = AllottedGeometry.ToPaintGeometry(
 				FVector2D(LocalSize.X, RowHeight),
 				FSlateLayoutTransform(FVector2D(StartX + 2.0f, RowY - 1.0f)));
@@ -136,7 +137,7 @@ public:
 			const FPaintGeometry BossLabelGeometry = AllottedGeometry.ToPaintGeometry(
 				FVector2D(80.0f, 16.0f),
 				FSlateLayoutTransform(FVector2D(FMath::Min(BossX + 2.0f, LocalSize.X - 40.0f), LocalSize.Y - 20.0f)));
-			FSlateDrawElement::MakeText(OutDrawElements, Layer + 3, BossLabelGeometry, FString(TEXT("Boss")), Font, ESlateDrawEffect::None, FLinearColor(1.0f, 0.6f, 0.6f));
+			FSlateDrawElement::MakeText(OutDrawElements, Layer + 3, BossLabelGeometry, FString(TEXT("보스")), Font, ESlateDrawEffect::None, FLinearColor(1.0f, 0.6f, 0.6f));
 		}
 
 		return Layer + 4;
@@ -181,14 +182,14 @@ void SFPSRDataEditorWidget::Construct(const FArguments& InArgs)
 				+ SVerticalBox::Slot().AutoHeight().Padding(4.0f)
 				[
 					SNew(STextBlock)
-					.Text(LOCTEXT("HeaderTitle", "FPSR Data Editor"))
+					.Text(LOCTEXT("HeaderTitle", "FPSR 데이터 에디터"))
 					.Font(FAppStyle::GetFontStyle("HeadingExtraSmall"))
 				]
 
 				+ SVerticalBox::Slot().AutoHeight().Padding(4.0f)
 				[
 					SNew(SButton)
-					.Text(LOCTEXT("SaveAndRescan", "Save Modified + Rescan"))
+					.Text(LOCTEXT("SaveAndRescan", "변경 저장 + 재검사"))
 					.OnClicked(this, &SFPSRDataEditorWidget::OnSaveAndRescanClicked)
 				]
 
@@ -207,29 +208,16 @@ void SFPSRDataEditorWidget::Construct(const FArguments& InArgs)
 
 				+ SVerticalBox::Slot().AutoHeight().Padding(4.0f, 6.0f, 4.0f, 2.0f)
 				[
-					SNew(STextBlock).Text(LOCTEXT("AnchorsHeader", "Anchors (Card Pool / Run Schedule / Loadout Pool)"))
+					SNew(STextBlock).Text(LOCTEXT("AssetTreeHeader", "데이터 에셋"))
 				]
 
-				+ SVerticalBox::Slot().FillHeight(0.5f).Padding(4.0f)
+				+ SVerticalBox::Slot().FillHeight(1.0f).Padding(4.0f)
 				[
-					SAssignNew(AnchorListView, SListView<TSharedPtr<FAssetData>>)
-					.ListItemsSource(&AnchorItems)
-					.OnGenerateRow(this, &SFPSRDataEditorWidget::OnGenerateAnchorRow)
-					.OnSelectionChanged(this, &SFPSRDataEditorWidget::OnAnchorSelectionChanged)
-					.SelectionMode(ESelectionMode::Single)
-				]
-
-				+ SVerticalBox::Slot().AutoHeight().Padding(4.0f, 6.0f, 4.0f, 2.0f)
-				[
-					SNew(STextBlock).Text(LOCTEXT("OrphansHeader", "Orphans (unreachable from any anchor)"))
-				]
-
-				+ SVerticalBox::Slot().FillHeight(0.5f).Padding(4.0f)
-				[
-					SAssignNew(OrphanListView, SListView<TSharedPtr<FAssetData>>)
-					.ListItemsSource(&OrphanItems)
-					.OnGenerateRow(this, &SFPSRDataEditorWidget::OnGenerateOrphanRow)
-					.OnSelectionChanged(this, &SFPSRDataEditorWidget::OnOrphanSelectionChanged)
+					SAssignNew(AssetTreeView, STreeView<TSharedPtr<FFPSRDataEditorTreeItem>>)
+					.TreeItemsSource(&TreeRoots)
+					.OnGenerateRow(this, &SFPSRDataEditorWidget::OnGenerateTreeRow)
+					.OnGetChildren(this, &SFPSRDataEditorWidget::OnGetTreeChildren)
+					.OnSelectionChanged(this, &SFPSRDataEditorWidget::OnTreeSelectionChanged)
 					.SelectionMode(ESelectionMode::Single)
 				]
 			]
@@ -283,13 +271,11 @@ void SFPSRDataEditorWidget::RefreshLists()
 	{
 		if (ScanStatusText.IsValid())
 		{
-			ScanStatusText->SetText(LOCTEXT("StillScanning", "Asset Registry still scanning..."));
+			ScanStatusText->SetText(LOCTEXT("StillScanning", "에셋 레지스트리 스캔 중…"));
 			ScanStatusText->SetVisibility(EVisibility::Visible);
 		}
-		AnchorItems.Reset();
-		OrphanItems.Reset();
-		if (AnchorListView.IsValid()) { AnchorListView->RequestListRefresh(); }
-		if (OrphanListView.IsValid()) { OrphanListView->RequestListRefresh(); }
+		TreeRoots.Reset();
+		if (AssetTreeView.IsValid()) { AssetTreeView->RequestTreeRefresh(); }
 		return;
 	}
 
@@ -298,24 +284,75 @@ void SFPSRDataEditorWidget::RefreshLists()
 		ScanStatusText->SetVisibility(EVisibility::Collapsed);
 	}
 
-	AnchorItems.Reset();
-	for (const FAssetData& Anchor : FFPSRAnchoredValidationService::FindAnchorAssets())
-	{
-		AnchorItems.Add(MakeShared<FAssetData>(Anchor));
-	}
-	if (AnchorListView.IsValid())
-	{
-		AnchorListView->RequestListRefresh();
-	}
-
-	OrphanItems.Reset();
+	// Orphan package set: cross-referenced against every category below so an unreachable leaf is flagged inline
+	// instead of living in a separate list (this is the whole point of TASK B — reachable weapons/cards/missions
+	// used to not appear ANYWHERE; now every asset of every in-scope type shows up under its category, orphan or not).
+	TSet<FName> OrphanPackages;
 	for (const FAssetData& Orphan : FFPSRAnchoredValidationService::FindOrphans())
 	{
-		OrphanItems.Add(MakeShared<FAssetData>(Orphan));
+		OrphanPackages.Add(Orphan.PackageName);
 	}
-	if (OrphanListView.IsValid())
+
+	// Ordered category table (label, class). Order here IS the on-screen order — weapons/cards first (most-edited),
+	// anchors (pool/schedule/loadout) after, fragments last (P1 has no guided-add for them, see RebuildGuidedAddForOrphan).
+	struct FCategoryEntry
 	{
-		OrphanListView->RequestListRefresh();
+		FText Label;
+		UClass* Class = nullptr;
+	};
+	const FCategoryEntry Categories[] = {
+		{ LOCTEXT("Category_Weapon", "무기"), UFPSRWeaponDataAsset::StaticClass() },
+		{ LOCTEXT("Category_Card", "카드"), UFPSRCardDataAsset::StaticClass() },
+		{ LOCTEXT("Category_CardPool", "카드 풀"), UFPSRCardPoolDataAsset::StaticClass() },
+		{ LOCTEXT("Category_Mission", "미션"), UFPSRMissionDataAsset::StaticClass() },
+		{ LOCTEXT("Category_RunSchedule", "런 스케줄"), UFPSRRunScheduleDataAsset::StaticClass() },
+		{ LOCTEXT("Category_LoadoutPool", "로드아웃 풀"), UFPSRLoadoutPoolDataAsset::StaticClass() },
+		{ LOCTEXT("Category_Fragment", "프래그먼트"), UFPSRWeaponFragment::StaticClass() },
+	};
+
+	TreeRoots.Reset();
+	for (const FCategoryEntry& CategoryEntry : Categories)
+	{
+		FARFilter Filter;
+		Filter.bRecursiveClasses = false;
+		Filter.ClassPaths.Add(CategoryEntry.Class->GetClassPathName());
+		TArray<FAssetData> FoundAssets;
+		AssetRegistry.GetAssets(Filter, FoundAssets);
+
+		TSharedPtr<FFPSRDataEditorTreeItem> CategoryItem = MakeShared<FFPSRDataEditorTreeItem>();
+		CategoryItem->bIsCategory = true;
+
+		for (const FAssetData& Found : FoundAssets)
+		{
+			if (FFPSRAnchoredValidationService::IsExcludedPath(Found.PackagePath))
+			{
+				continue; // designer scratch space (/Game/Developers, /Game/Test, *_Scratch) — never shown
+			}
+			TSharedPtr<FFPSRDataEditorTreeItem> Leaf = MakeShared<FFPSRDataEditorTreeItem>();
+			Leaf->Label = FText::FromName(Found.AssetName);
+			Leaf->Asset = Found;
+			Leaf->bIsOrphan = OrphanPackages.Contains(Found.PackageName);
+			CategoryItem->Children.Add(Leaf);
+		}
+		CategoryItem->Children.Sort([](const TSharedPtr<FFPSRDataEditorTreeItem>& A, const TSharedPtr<FFPSRDataEditorTreeItem>& B)
+		{
+			return A->Asset.AssetName.LexicalLess(B->Asset.AssetName);
+		});
+
+		// Category node is added ALWAYS, even at 0 children — a designer should see every asset TYPE that exists in
+		// the schema, not just the ones with content today (mirrors the "closed table for a closed enum" spirit: the
+		// category list is fixed by the schema, so it's shown in full regardless of current content).
+		CategoryItem->Label = FText::Format(LOCTEXT("CategoryHeaderFmt", "{0} ({1})"), CategoryEntry.Label, FText::AsNumber(CategoryItem->Children.Num()));
+		TreeRoots.Add(CategoryItem);
+	}
+
+	if (AssetTreeView.IsValid())
+	{
+		AssetTreeView->RequestTreeRefresh();
+		for (const TSharedPtr<FFPSRDataEditorTreeItem>& Root : TreeRoots)
+		{
+			AssetTreeView->SetItemExpansion(Root, true); // categories start expanded — this IS the whole point of the browser
+		}
 	}
 }
 
@@ -361,40 +398,67 @@ FText SFPSRDataEditorWidget::GetStaleStatusText() const
 {
 	if (DirtyTrackedPackages.Num() == 0)
 	{
-		return LOCTEXT("UpToDate", "Up to date");
+		return LOCTEXT("UpToDate", "최신 상태");
 	}
-	return FText::Format(LOCTEXT("StaleStatus", "{0} unsaved edit(s) — validation reflects last save"), FText::AsNumber(DirtyTrackedPackages.Num()));
+	return FText::Format(LOCTEXT("StaleStatus", "저장 안 된 편집 {0}건 — 검증은 마지막 저장 기준"), FText::AsNumber(DirtyTrackedPackages.Num()));
 }
 
 // ---------------------------------------------------------------------------------------------------------------
-// Anchor / orphan lists (custom widget #1)
+// Categorized asset tree (custom widget #1)
 // ---------------------------------------------------------------------------------------------------------------
 
-TSharedRef<ITableRow> SFPSRDataEditorWidget::OnGenerateAnchorRow(TSharedPtr<FAssetData> Item, const TSharedRef<STableViewBase>& OwnerTable)
+TSharedRef<ITableRow> SFPSRDataEditorWidget::OnGenerateTreeRow(TSharedPtr<FFPSRDataEditorTreeItem> Item, const TSharedRef<STableViewBase>& OwnerTable)
 {
-	return SNew(STableRow<TSharedPtr<FAssetData>>, OwnerTable)
+	if (!Item.IsValid())
+	{
+		return SNew(STableRow<TSharedPtr<FFPSRDataEditorTreeItem>>, OwnerTable)[SNullWidget::NullWidget];
+	}
+
+	if (Item->bIsCategory)
+	{
+		// Category header row: bold, no orphan coloring — this is a grouping node, not a selectable asset.
+		return SNew(STableRow<TSharedPtr<FFPSRDataEditorTreeItem>>, OwnerTable)
+			[
+				SNew(STextBlock)
+				.Text(Item->Label)
+				.Font(FAppStyle::GetFontStyle("PropertyWindow.BoldFont"))
+			];
+	}
+
+	// Leaf asset row: plain label, or "{name}  (미배선)" in orange if this asset is unreachable from any anchor
+	// (same visual signal the old OrphanListView gave, just inline in the tree instead of a separate list).
+	const FText DisplayText = Item->bIsOrphan
+		? FText::Format(LOCTEXT("OrphanLeafFmt", "{0}  (미배선)"), Item->Label)
+		: Item->Label;
+	return SNew(STableRow<TSharedPtr<FFPSRDataEditorTreeItem>>, OwnerTable)
 		[
-			SNew(STextBlock).Text(Item.IsValid() ? FText::FromName(Item->AssetName) : FText::GetEmpty())
+			SNew(STextBlock)
+			.Text(DisplayText)
+			.ColorAndOpacity(Item->bIsOrphan ? FLinearColor(0.9f, 0.7f, 0.2f) : FSlateColor::UseForeground())
 		];
 }
 
-TSharedRef<ITableRow> SFPSRDataEditorWidget::OnGenerateOrphanRow(TSharedPtr<FAssetData> Item, const TSharedRef<STableViewBase>& OwnerTable)
+void SFPSRDataEditorWidget::OnGetTreeChildren(TSharedPtr<FFPSRDataEditorTreeItem> Item, TArray<TSharedPtr<FFPSRDataEditorTreeItem>>& OutChildren)
 {
-	return SNew(STableRow<TSharedPtr<FAssetData>>, OwnerTable)
-		[
-			SNew(STextBlock).Text(Item.IsValid() ? FText::FromName(Item->AssetName) : FText::GetEmpty())
-			.ColorAndOpacity(FLinearColor(0.9f, 0.7f, 0.2f))
-		];
+	if (Item.IsValid())
+	{
+		OutChildren = Item->Children;
+	}
 }
 
-void SFPSRDataEditorWidget::OnAnchorSelectionChanged(TSharedPtr<FAssetData> Item, ESelectInfo::Type SelectInfo)
+void SFPSRDataEditorWidget::OnTreeSelectionChanged(TSharedPtr<FFPSRDataEditorTreeItem> Item, ESelectInfo::Type SelectInfo)
 {
-	OnAssetSelected(Item, /*bIsOrphan=*/false);
-}
-
-void SFPSRDataEditorWidget::OnOrphanSelectionChanged(TSharedPtr<FAssetData> Item, ESelectInfo::Type SelectInfo)
-{
-	OnAssetSelected(Item, /*bIsOrphan=*/true);
+	// Category nodes (and a null/deselect event) clear the right side exactly like an invalid asset selection always
+	// has — OnAssetSelected already handles Item.IsValid()==false as "SetObject(nullptr) + RebuildAuxPanels clears
+	// the aux panels", so route both cases through the SAME selection path the old anchor/orphan handlers used.
+	if (Item.IsValid() && !Item->bIsCategory && Item->Asset.IsValid())
+	{
+		OnAssetSelected(MakeShared<FAssetData>(Item->Asset), Item->bIsOrphan);
+	}
+	else
+	{
+		OnAssetSelected(TSharedPtr<FAssetData>(), /*bIsOrphan=*/false);
+	}
 }
 
 void SFPSRDataEditorWidget::OnAssetSelected(const TSharedPtr<FAssetData>& Item, bool bIsOrphan)
@@ -489,14 +553,22 @@ void SFPSRDataEditorWidget::RebuildMagnitudeGridFromCard(UFPSRCardDataAsset* Car
 	MagnitudeGridContainer->AddSlot().AutoHeight()
 	[
 		SNew(SExpandableArea)
-		.AreaTitle(LOCTEXT("MagnitudeGridTitle", "Card Magnitude Grid"))
+		.AreaTitle(LOCTEXT("MagnitudeGridTitle", "카드 매그니튜드 그리드"))
 		.InitiallyCollapsed(false)
 		.BodyContent()
 		[
-			SAssignNew(MagnitudeGridListView, SListView<TSharedPtr<FMagnitudeGridRow>>)
-			.ListItemsSource(&MagnitudeGridItems)
-			.OnGenerateRow(this, &SFPSRDataEditorWidget::OnGenerateMagnitudeGridRow)
-			.SelectionMode(ESelectionMode::None)
+			SNew(SVerticalBox)
+			+ SVerticalBox::Slot().AutoHeight()
+			[
+				BuildMagnitudeGridHeaderRow()
+			]
+			+ SVerticalBox::Slot().AutoHeight()
+			[
+				SAssignNew(MagnitudeGridListView, SListView<TSharedPtr<FMagnitudeGridRow>>)
+				.ListItemsSource(&MagnitudeGridItems)
+				.OnGenerateRow(this, &SFPSRDataEditorWidget::OnGenerateMagnitudeGridRow)
+				.SelectionMode(ESelectionMode::None)
+			]
 		]
 	];
 }
@@ -541,16 +613,67 @@ void SFPSRDataEditorWidget::RebuildMagnitudeGridFromPool(UFPSRCardPoolDataAsset*
 	MagnitudeGridContainer->AddSlot().AutoHeight()
 	[
 		SNew(SExpandableArea)
-		.AreaTitle(LOCTEXT("MagnitudeGridTitlePool", "Card Magnitude Grid (all cards in this pool)"))
+		.AreaTitle(LOCTEXT("MagnitudeGridTitlePool", "카드 매그니튜드 그리드 (이 풀의 전체 카드)"))
 		.InitiallyCollapsed(true) // a pool can be large — collapsed by default, unlike a single-card selection
 		.BodyContent()
 		[
-			SAssignNew(MagnitudeGridListView, SListView<TSharedPtr<FMagnitudeGridRow>>)
-			.ListItemsSource(&MagnitudeGridItems)
-			.OnGenerateRow(this, &SFPSRDataEditorWidget::OnGenerateMagnitudeGridRow)
-			.SelectionMode(ESelectionMode::None)
+			SNew(SVerticalBox)
+			+ SVerticalBox::Slot().AutoHeight()
+			[
+				BuildMagnitudeGridHeaderRow()
+			]
+			+ SVerticalBox::Slot().AutoHeight()
+			[
+				SAssignNew(MagnitudeGridListView, SListView<TSharedPtr<FMagnitudeGridRow>>)
+				.ListItemsSource(&MagnitudeGridItems)
+				.OnGenerateRow(this, &SFPSRDataEditorWidget::OnGenerateMagnitudeGridRow)
+				.SelectionMode(ESelectionMode::None)
+			]
 		]
 	];
+}
+
+TSharedRef<SWidget> SFPSRDataEditorWidget::BuildMagnitudeGridHeaderRow() const
+{
+	// Column labels matching OnGenerateMagnitudeGridRow's layout exactly (same FillWidth proportions) so the header
+	// lines up with the data rows below it. Rarity names (Common/Rare/Epic/Legendary) stay in English — standard
+	// game terms, not UI chrome — everything else is Korean per the localization pass.
+	const FSlateFontInfo BoldFont = FAppStyle::GetFontStyle("PropertyWindow.BoldFont");
+
+	return SNew(SHorizontalBox)
+
+		+ SHorizontalBox::Slot().FillWidth(0.14f).VAlign(VAlign_Center).Padding(2.0f)
+		[
+			SNew(STextBlock).Text(LOCTEXT("GridHeader_CardId", "카드ID")).Font(BoldFont)
+		]
+		+ SHorizontalBox::Slot().FillWidth(0.18f).VAlign(VAlign_Center).Padding(2.0f)
+		[
+			SNew(STextBlock).Text(LOCTEXT("GridHeader_Name", "이름")).Font(BoldFont)
+		]
+		+ SHorizontalBox::Slot().FillWidth(0.06f).VAlign(VAlign_Center).Padding(2.0f)
+		[
+			SNew(STextBlock).Text(LOCTEXT("GridHeader_EffectIndex", "효과#")).Font(BoldFont)
+		]
+		+ SHorizontalBox::Slot().FillWidth(0.24f).VAlign(VAlign_Center).Padding(2.0f)
+		[
+			SNew(STextBlock).Text(LOCTEXT("GridHeader_Effect", "효과")).Font(BoldFont)
+		]
+		+ SHorizontalBox::Slot().FillWidth(0.095f).VAlign(VAlign_Center).Padding(2.0f)
+		[
+			SNew(STextBlock).Text(LOCTEXT("GridHeader_Common", "Common")).Font(BoldFont)
+		]
+		+ SHorizontalBox::Slot().FillWidth(0.095f).VAlign(VAlign_Center).Padding(2.0f)
+		[
+			SNew(STextBlock).Text(LOCTEXT("GridHeader_Rare", "Rare")).Font(BoldFont)
+		]
+		+ SHorizontalBox::Slot().FillWidth(0.095f).VAlign(VAlign_Center).Padding(2.0f)
+		[
+			SNew(STextBlock).Text(LOCTEXT("GridHeader_Epic", "Epic")).Font(BoldFont)
+		]
+		+ SHorizontalBox::Slot().FillWidth(0.095f).VAlign(VAlign_Center).Padding(2.0f)
+		[
+			SNew(STextBlock).Text(LOCTEXT("GridHeader_Legendary", "Legendary")).Font(BoldFont)
+		];
 }
 
 TSharedRef<ITableRow> SFPSRDataEditorWidget::OnGenerateMagnitudeGridRow(TSharedPtr<FMagnitudeGridRow> Item, const TSharedRef<STableViewBase>& OwnerTable)
@@ -562,7 +685,7 @@ TSharedRef<ITableRow> SFPSRDataEditorWidget::OnGenerateMagnitudeGridRow(TSharedP
 
 	UFPSRCardDataAsset* Card = Item->Card.Get();
 	const UFPSRCardEffect* Effect = Card->Effects[Item->EffectIndex];
-	const FText CardIdText = Card->CardId.IsNone() ? LOCTEXT("NoCardId", "(no CardId)") : FText::FromName(Card->CardId);
+	const FText CardIdText = Card->CardId.IsNone() ? LOCTEXT("NoCardId", "(CardId 없음)") : FText::FromName(Card->CardId);
 	const FText EffectLabel = Effect->GetEditorGridLabel();
 
 	return SNew(STableRow<TSharedPtr<FMagnitudeGridRow>>, OwnerTable)
@@ -676,7 +799,7 @@ void SFPSRDataEditorWidget::RebuildScheduleTimeline(UFPSRRunScheduleDataAsset* S
 	ScheduleTimelineContainer->AddSlot().AutoHeight()
 	[
 		SNew(SExpandableArea)
-		.AreaTitle(LOCTEXT("ScheduleTimelineTitle", "Mission Schedule Timeline (read-only)"))
+		.AreaTitle(LOCTEXT("ScheduleTimelineTitle", "미션 스케줄 타임라인 (읽기 전용)"))
 		.InitiallyCollapsed(false)
 		.BodyContent()
 		[
@@ -752,7 +875,7 @@ void SFPSRDataEditorWidget::RebuildGuidedAddForOrphan(UObject* Orphan)
 			SNew(SVerticalBox)
 			+ SVerticalBox::Slot().AutoHeight()
 			[
-				SNew(STextBlock).Text(LOCTEXT("GuidedAddCardTitle", "Wire orphan card into a route:"))
+				SNew(STextBlock).Text(LOCTEXT("GuidedAddCardTitle", "고아 카드를 라우트에 배선:"))
 			]
 			+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 2.0f)
 			[
@@ -771,7 +894,7 @@ void SFPSRDataEditorWidget::RebuildGuidedAddForOrphan(UObject* Orphan)
 				[
 					SNew(STextBlock).Text_Lambda([this]()
 					{
-						return GuidedAddSelectedRoute.IsValid() ? FFPSRDataEditorHelpers::GetRouteDisplayText(*GuidedAddSelectedRoute) : LOCTEXT("NoEligibleRoute", "(no eligible route)");
+						return GuidedAddSelectedRoute.IsValid() ? FFPSRDataEditorHelpers::GetRouteDisplayText(*GuidedAddSelectedRoute) : LOCTEXT("NoEligibleRoute", "(적격 라우트 없음)");
 					})
 				]
 			]
@@ -791,14 +914,14 @@ void SFPSRDataEditorWidget::RebuildGuidedAddForOrphan(UObject* Orphan)
 				[
 					SNew(STextBlock).Text_Lambda([this]()
 					{
-						return GuidedAddSelectedTarget.IsValid() ? FText::FromName(GuidedAddSelectedTarget->AssetName) : LOCTEXT("NoTarget", "(no target)");
+						return GuidedAddSelectedTarget.IsValid() ? FText::FromName(GuidedAddSelectedTarget->AssetName) : LOCTEXT("NoTarget", "(대상 없음)");
 					})
 				]
 			]
 			+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 2.0f)
 			[
 				SNew(SButton)
-				.Text(LOCTEXT("GuidedAddButton", "Add"))
+				.Text(LOCTEXT("GuidedAddButton", "추가"))
 				.OnClicked(this, &SFPSRDataEditorWidget::OnGuidedAddCardClicked)
 			]
 			+ SVerticalBox::Slot().AutoHeight()
@@ -831,7 +954,7 @@ void SFPSRDataEditorWidget::RebuildGuidedAddForOrphan(UObject* Orphan)
 			SNew(SVerticalBox)
 			+ SVerticalBox::Slot().AutoHeight()
 			[
-				SNew(STextBlock).Text(LOCTEXT("GuidedAddMissionTitle", "Wire orphan mission into a schedule window:"))
+				SNew(STextBlock).Text(LOCTEXT("GuidedAddMissionTitle", "고아 미션을 스케줄 윈도우에 배선:"))
 			]
 			+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 2.0f)
 			[
@@ -850,7 +973,7 @@ void SFPSRDataEditorWidget::RebuildGuidedAddForOrphan(UObject* Orphan)
 				[
 					SNew(STextBlock).Text_Lambda([this]()
 					{
-						return GuidedAddSelectedTarget.IsValid() ? FText::FromName(GuidedAddSelectedTarget->AssetName) : LOCTEXT("NoTarget", "(no target)");
+						return GuidedAddSelectedTarget.IsValid() ? FText::FromName(GuidedAddSelectedTarget->AssetName) : LOCTEXT("NoTarget", "(대상 없음)");
 					})
 				]
 			]
@@ -870,14 +993,14 @@ void SFPSRDataEditorWidget::RebuildGuidedAddForOrphan(UObject* Orphan)
 				[
 					SNew(STextBlock).Text_Lambda([this]()
 					{
-						return GuidedAddSelectedWindowIndex.IsValid() ? FText::AsNumber(*GuidedAddSelectedWindowIndex) : LOCTEXT("NoWindow", "(no window)");
+						return GuidedAddSelectedWindowIndex.IsValid() ? FText::AsNumber(*GuidedAddSelectedWindowIndex) : LOCTEXT("NoWindow", "(윈도우 없음)");
 					})
 				]
 			]
 			+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 2.0f)
 			[
 				SNew(SButton)
-				.Text(LOCTEXT("GuidedAddButton", "Add"))
+				.Text(LOCTEXT("GuidedAddButton", "추가"))
 				.OnClicked(this, &SFPSRDataEditorWidget::OnGuidedAddMissionClicked)
 			]
 			+ SVerticalBox::Slot().AutoHeight()
@@ -908,7 +1031,7 @@ void SFPSRDataEditorWidget::RebuildGuidedAddForOrphan(UObject* Orphan)
 			SNew(SVerticalBox)
 			+ SVerticalBox::Slot().AutoHeight()
 			[
-				SNew(STextBlock).Text(LOCTEXT("GuidedAddWeaponTitle", "Wire orphan weapon into a loadout pool:"))
+				SNew(STextBlock).Text(LOCTEXT("GuidedAddWeaponTitle", "고아 무기를 로드아웃 풀에 배선:"))
 			]
 			+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 2.0f)
 			[
@@ -926,14 +1049,14 @@ void SFPSRDataEditorWidget::RebuildGuidedAddForOrphan(UObject* Orphan)
 				[
 					SNew(STextBlock).Text_Lambda([this]()
 					{
-						return GuidedAddSelectedTarget.IsValid() ? FText::FromName(GuidedAddSelectedTarget->AssetName) : LOCTEXT("NoTarget", "(no target)");
+						return GuidedAddSelectedTarget.IsValid() ? FText::FromName(GuidedAddSelectedTarget->AssetName) : LOCTEXT("NoTarget", "(대상 없음)");
 					})
 				]
 			]
 			+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 2.0f)
 			[
 				SNew(SButton)
-				.Text(LOCTEXT("GuidedAddButton", "Add"))
+				.Text(LOCTEXT("GuidedAddButton", "추가"))
 				.OnClicked(this, &SFPSRDataEditorWidget::OnGuidedAddWeaponClicked)
 			]
 			+ SVerticalBox::Slot().AutoHeight()
@@ -1078,7 +1201,7 @@ FReply SFPSRDataEditorWidget::OnGuidedAddCardClicked()
 		{
 			if (GuidedAddStatusText.IsValid())
 			{
-				GuidedAddStatusText->SetText(LOCTEXT("RouteNeedsPool", "This route targets a Card Pool — pick a card pool as the target."));
+				GuidedAddStatusText->SetText(LOCTEXT("RouteNeedsPool", "이 라우트의 대상은 카드 풀입니다 — 대상으로 카드 풀을 선택하세요."));
 				GuidedAddStatusText->SetColorAndOpacity(FLinearColor(0.9f, 0.2f, 0.2f));
 			}
 			return FReply::Handled();
@@ -1093,7 +1216,7 @@ FReply SFPSRDataEditorWidget::OnGuidedAddCardClicked()
 		{
 			if (GuidedAddStatusText.IsValid())
 			{
-				GuidedAddStatusText->SetText(LOCTEXT("RouteNeedsWeapon", "This route targets a Weapon — pick a weapon as the target."));
+				GuidedAddStatusText->SetText(LOCTEXT("RouteNeedsWeapon", "이 라우트의 대상은 무기입니다 — 대상으로 무기를 선택하세요."));
 				GuidedAddStatusText->SetColorAndOpacity(FLinearColor(0.9f, 0.2f, 0.2f));
 			}
 			return FReply::Handled();
@@ -1120,12 +1243,12 @@ FReply SFPSRDataEditorWidget::OnGuidedAddCardClicked()
 	{
 		if (Verdict == EFPSRWiringVerdict::Warn)
 		{
-			GuidedAddStatusText->SetText(bAdded ? FText::Format(LOCTEXT("AddedWithWarning", "Added (with warning): {0}"), Reason) : Reason);
+			GuidedAddStatusText->SetText(bAdded ? FText::Format(LOCTEXT("AddedWithWarning", "추가됨(경고): {0}"), Reason) : Reason);
 			GuidedAddStatusText->SetColorAndOpacity(FLinearColor(0.9f, 0.7f, 0.2f));
 		}
 		else
 		{
-			GuidedAddStatusText->SetText(bAdded ? LOCTEXT("AddedOk", "Added.") : LOCTEXT("AddedNoop", "Already present — no change."));
+			GuidedAddStatusText->SetText(bAdded ? LOCTEXT("AddedOk", "추가됨.") : LOCTEXT("AddedNoop", "이미 있음 — 변경 없음"));
 			GuidedAddStatusText->SetColorAndOpacity(FLinearColor::White);
 		}
 	}
@@ -1152,7 +1275,7 @@ FReply SFPSRDataEditorWidget::OnGuidedAddMissionClicked()
 	}
 	if (GuidedAddStatusText.IsValid())
 	{
-		GuidedAddStatusText->SetText(bAdded ? LOCTEXT("AddedOk", "Added.") : LOCTEXT("AddedNoop", "Already present — no change."));
+		GuidedAddStatusText->SetText(bAdded ? LOCTEXT("AddedOk", "추가됨.") : LOCTEXT("AddedNoop", "이미 있음 — 변경 없음"));
 	}
 	if (bAdded)
 	{
@@ -1177,7 +1300,7 @@ FReply SFPSRDataEditorWidget::OnGuidedAddWeaponClicked()
 	}
 	if (GuidedAddStatusText.IsValid())
 	{
-		GuidedAddStatusText->SetText(bAdded ? LOCTEXT("AddedOk", "Added.") : LOCTEXT("AddedNoop", "Already present — no change."));
+		GuidedAddStatusText->SetText(bAdded ? LOCTEXT("AddedOk", "추가됨.") : LOCTEXT("AddedNoop", "이미 있음 — 변경 없음"));
 	}
 	if (bAdded)
 	{

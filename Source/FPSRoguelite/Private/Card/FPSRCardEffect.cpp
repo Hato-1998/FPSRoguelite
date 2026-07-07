@@ -138,7 +138,7 @@ void UCardEffect_CharacterGE::ValidateEffect(FDataValidationContext& Context) co
 
 FText UCardEffect_CharacterGE::GetEditorGridLabel() const
 {
-	return FText::Format(LOCTEXT("GridLabel_CharacterGE", "Character GE{0}"),
+	return FText::Format(LOCTEXT("GridLabel_CharacterGE", "캐릭터 GE{0}"),
 		bShowAsPercent ? FText::FromString(TEXT(" (%)")) : FText::GetEmpty());
 }
 
@@ -203,8 +203,8 @@ FText UCardEffect_WeaponStat::GetEditorGridLabel() const
 		? StaticEnum<EFPSRWeaponStat>()->GetDisplayNameTextByValue(static_cast<int64>(Stat)).ToString()
 		: FString(TEXT("Stat"));
 	const TCHAR* OpSuffix = (Op == EFPSRWeaponModOp::PercentMultiply) ? TEXT("%") : TEXT("+");
-	const FString ScopeSuffix = bThisWeaponOnly ? FString() : FString(TEXT(" (all weapons)"));
-	return FText::FromString(FString::Printf(TEXT("Weapon Stat: %s %s%s"), *StatName, OpSuffix, *ScopeSuffix));
+	const FString ScopeSuffix = bThisWeaponOnly ? FString() : FString(TEXT(" (전체 무기)"));
+	return FText::FromString(FString::Printf(TEXT("무기 스탯: %s %s%s"), *StatName, OpSuffix, *ScopeSuffix));
 }
 
 TArray<EFPSRCardRoute> UCardEffect_WeaponStat::GetEditorEligibleRoutes() const
@@ -293,8 +293,8 @@ void UCardEffect_WeaponBehavior::ValidateEffect(FDataValidationContext& Context)
 
 FText UCardEffect_WeaponBehavior::GetEditorGridLabel() const
 {
-	return FText::Format(LOCTEXT("GridLabel_WeaponBehavior", "Fragment: {0}"),
-		Fragment ? Fragment->DisplayName : LOCTEXT("GridLabel_WeaponBehavior_NoFragment", "(none)"));
+	return FText::Format(LOCTEXT("GridLabel_WeaponBehavior", "프래그먼트: {0}"),
+		Fragment ? Fragment->DisplayName : LOCTEXT("GridLabel_WeaponBehavior_NoFragment", "(없음)"));
 }
 
 TArray<EFPSRCardRoute> UCardEffect_WeaponBehavior::GetEditorEligibleRoutes() const
@@ -347,8 +347,8 @@ void UCardEffect_GrantWeapon::ValidateEffect(FDataValidationContext& Context) co
 
 FText UCardEffect_GrantWeapon::GetEditorGridLabel() const
 {
-	return FText::Format(LOCTEXT("GridLabel_GrantWeapon", "Grant Weapon: {0}"),
-		WeaponToGrant ? WeaponToGrant->DisplayName : LOCTEXT("GridLabel_GrantWeapon_NoWeapon", "(none)"));
+	return FText::Format(LOCTEXT("GridLabel_GrantWeapon", "무기 지급: {0}"),
+		WeaponToGrant ? WeaponToGrant->DisplayName : LOCTEXT("GridLabel_GrantWeapon_NoWeapon", "(없음)"));
 }
 
 TArray<EFPSRCardRoute> UCardEffect_GrantWeapon::GetEditorEligibleRoutes() const
@@ -402,7 +402,7 @@ void UCardEffect_CharacterPassive::ValidateEffect(FDataValidationContext& Contex
 
 FText UCardEffect_CharacterPassive::GetEditorGridLabel() const
 {
-	return LOCTEXT("GridLabel_CharacterPassive", "Character Passive");
+	return LOCTEXT("GridLabel_CharacterPassive", "캐릭터 패시브");
 }
 
 TArray<EFPSRCardRoute> UCardEffect_CharacterPassive::GetEditorEligibleRoutes() const

@@ -36,7 +36,7 @@ void FFPSRogueliteEditorModule::StartupModule()
 	// FPSR Data Editor (P1) nomad tab — same lifetime pattern as the engine's own tool tabs (register at startup,
 	// unregister at shutdown). Nomad = can be docked anywhere, not tied to a specific asset editor's tab layout.
 	FGlobalTabmanager::Get()->RegisterNomadTabSpawner(FPSRDataEditorTabName, FOnSpawnTab::CreateStatic(&FFPSRogueliteEditorModule::SpawnDataEditorTab))
-		.SetDisplayName(LOCTEXT("DataEditorTabTitle", "FPSR Data Editor"))
+		.SetDisplayName(LOCTEXT("DataEditorTabTitle", "FPSR 데이터 에디터"))
 		.SetGroup(WorkspaceMenu::GetMenuStructure().GetToolsCategory());
 }
 
@@ -55,15 +55,15 @@ void FFPSRogueliteEditorModule::RegisterMenus()
 	FToolMenuSection& Section = Menu->FindOrAddSection(TEXT("FPSR"), LOCTEXT("FPSRSection", "FPSR"));
 	Section.AddMenuEntry(
 		"FPSRValidateAnchoredData",
-		LOCTEXT("ValidateAnchoredDataTitle", "Validate Anchored Data"),
-		LOCTEXT("ValidateAnchoredDataTooltip", "Runs data validation on the card pool / run schedule / loadout pool anchors and everything reachable from them (not every asset under Content/)."),
+		LOCTEXT("ValidateAnchoredDataTitle", "앵커 데이터 검증"),
+		LOCTEXT("ValidateAnchoredDataTooltip", "카드 풀 / 런 스케줄 / 로드아웃 풀 앵커와 그로부터 도달 가능한 모든 것에 데이터 검증을 실행합니다 (Content/ 하위 전체 에셋이 아님)."),
 		FSlateIcon(FAppStyle::GetAppStyleSetName(), "DeveloperTools.MenuIcon"),
 		FUIAction(FExecuteAction::CreateStatic(&FFPSRogueliteEditorModule::OnValidateAnchoredDataMenuEntry))
 	);
 	Section.AddMenuEntry(
 		"FPSROpenDataEditor",
-		LOCTEXT("OpenDataEditorTitle", "Data Editor..."),
-		LOCTEXT("OpenDataEditorTooltip", "Open the FPSR Data Editor (wiring + card magnitude + schedule preview)."),
+		LOCTEXT("OpenDataEditorTitle", "데이터 에디터…"),
+		LOCTEXT("OpenDataEditorTooltip", "FPSR 데이터 에디터 열기 (배선 + 카드 매그니튜드 + 스케줄 미리보기)."),
 		FSlateIcon(FAppStyle::GetAppStyleSetName(), "DeveloperTools.MenuIcon"),
 		FUIAction(FExecuteAction::CreateStatic(&FFPSRogueliteEditorModule::OnOpenDataEditorMenuEntry))
 	);

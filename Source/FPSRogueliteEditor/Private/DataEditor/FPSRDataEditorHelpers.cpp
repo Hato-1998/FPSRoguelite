@@ -110,7 +110,7 @@ EFPSRWiringVerdict FFPSRDataEditorHelpers::CheckCardRoute(const UFPSRCardDataAss
 	OutReason = FText::GetEmpty();
 	if (!Card)
 	{
-		OutReason = LOCTEXT("CheckRoute_NoCard", "No card selected.");
+		OutReason = LOCTEXT("CheckRoute_NoCard", "선택된 카드가 없습니다.");
 		return EFPSRWiringVerdict::Blocked;
 	}
 
@@ -118,7 +118,7 @@ EFPSRWiringVerdict FFPSRDataEditorHelpers::CheckCardRoute(const UFPSRCardDataAss
 	if (!Eligible.Contains(Route))
 	{
 		OutReason = FText::Format(
-			LOCTEXT("CheckRoute_Blocked", "'{0}' is not an eligible route for this card's effects — placing it here would be a silent no-op (or a semantically wrong offer) at draw time."),
+			LOCTEXT("CheckRoute_Blocked", "'{0}'은(는) 이 카드의 효과에 적격인 라우트가 아닙니다 — 여기 배선하면 드로우 시 무효(또는 의미상 잘못된 오퍼)가 됩니다."),
 			GetRouteDisplayText(Route));
 		return EFPSRWiringVerdict::Blocked;
 	}
@@ -128,7 +128,7 @@ EFPSRWiringVerdict FFPSRDataEditorHelpers::CheckCardRoute(const UFPSRCardDataAss
 	// if a designer explicitly wires one into the level-up weapon pool instead.
 	if (Route == EFPSRCardRoute::LevelUpWeapon && Eligible.Contains(EFPSRCardRoute::MissionClearWeaponFeature))
 	{
-		OutReason = LOCTEXT("CheckRoute_WarnBehaviorLevelUp", "This card is eligible for Level-Up: Weapon Card, but behavior-fragment cards are conventionally routed through Mission-Clear: Weapon Feature instead. Continue only if this is intentional.");
+		OutReason = LOCTEXT("CheckRoute_WarnBehaviorLevelUp", "이 카드는 '레벨업: 무기 카드'에 적격이지만, 행동 프래그먼트 카드는 관례상 '미션 클리어: 무기 피처'로 라우팅합니다. 의도한 경우에만 진행하세요.");
 		return EFPSRWiringVerdict::Warn;
 	}
 
@@ -142,8 +142,8 @@ bool FFPSRDataEditorHelpers::AddCardToPool(UFPSRCardPoolDataAsset* Pool, UFPSRCa
 		return false;
 	}
 	return bUnlockArray
-		? AddUniqueToArray(Pool, Pool->WeaponUnlockCards, Card, GET_MEMBER_NAME_CHECKED(UFPSRCardPoolDataAsset, WeaponUnlockCards), LOCTEXT("Transaction_AddCardToPoolUnlock", "Add Card to Pool (Weapon Unlock)"))
-		: AddUniqueToArray(Pool, Pool->Cards, Card, GET_MEMBER_NAME_CHECKED(UFPSRCardPoolDataAsset, Cards), LOCTEXT("Transaction_AddCardToPool", "Add Card to Pool"));
+		? AddUniqueToArray(Pool, Pool->WeaponUnlockCards, Card, GET_MEMBER_NAME_CHECKED(UFPSRCardPoolDataAsset, WeaponUnlockCards), LOCTEXT("Transaction_AddCardToPoolUnlock", "카드를 풀에 추가 (무기 언락)"))
+		: AddUniqueToArray(Pool, Pool->Cards, Card, GET_MEMBER_NAME_CHECKED(UFPSRCardPoolDataAsset, Cards), LOCTEXT("Transaction_AddCardToPool", "카드를 풀에 추가"));
 }
 
 bool FFPSRDataEditorHelpers::RemoveCardFromPool(UFPSRCardPoolDataAsset* Pool, UFPSRCardDataAsset* Card, bool bUnlockArray)
@@ -153,8 +153,8 @@ bool FFPSRDataEditorHelpers::RemoveCardFromPool(UFPSRCardPoolDataAsset* Pool, UF
 		return false;
 	}
 	return bUnlockArray
-		? RemoveFromArray(Pool, Pool->WeaponUnlockCards, Card, GET_MEMBER_NAME_CHECKED(UFPSRCardPoolDataAsset, WeaponUnlockCards), LOCTEXT("Transaction_RemoveCardFromPoolUnlock", "Remove Card from Pool (Weapon Unlock)"))
-		: RemoveFromArray(Pool, Pool->Cards, Card, GET_MEMBER_NAME_CHECKED(UFPSRCardPoolDataAsset, Cards), LOCTEXT("Transaction_RemoveCardFromPool", "Remove Card from Pool"));
+		? RemoveFromArray(Pool, Pool->WeaponUnlockCards, Card, GET_MEMBER_NAME_CHECKED(UFPSRCardPoolDataAsset, WeaponUnlockCards), LOCTEXT("Transaction_RemoveCardFromPoolUnlock", "카드를 풀에서 제거 (무기 언락)"))
+		: RemoveFromArray(Pool, Pool->Cards, Card, GET_MEMBER_NAME_CHECKED(UFPSRCardPoolDataAsset, Cards), LOCTEXT("Transaction_RemoveCardFromPool", "카드를 풀에서 제거"));
 }
 
 bool FFPSRDataEditorHelpers::AddCardToWeapon(UFPSRWeaponDataAsset* Weapon, UFPSRCardDataAsset* Card, bool bUnlockableFeatures)
@@ -164,8 +164,8 @@ bool FFPSRDataEditorHelpers::AddCardToWeapon(UFPSRWeaponDataAsset* Weapon, UFPSR
 		return false;
 	}
 	return bUnlockableFeatures
-		? AddUniqueToArray(Weapon, Weapon->UnlockableFeatures, Card, GET_MEMBER_NAME_CHECKED(UFPSRWeaponDataAsset, UnlockableFeatures), LOCTEXT("Transaction_AddCardToWeaponFeature", "Add Card to Weapon (Unlockable Feature)"))
-		: AddUniqueToArray(Weapon, Weapon->WeaponCards, Card, GET_MEMBER_NAME_CHECKED(UFPSRWeaponDataAsset, WeaponCards), LOCTEXT("Transaction_AddCardToWeapon", "Add Card to Weapon (Level-Up)"));
+		? AddUniqueToArray(Weapon, Weapon->UnlockableFeatures, Card, GET_MEMBER_NAME_CHECKED(UFPSRWeaponDataAsset, UnlockableFeatures), LOCTEXT("Transaction_AddCardToWeaponFeature", "카드를 무기에 추가 (언락 피처)"))
+		: AddUniqueToArray(Weapon, Weapon->WeaponCards, Card, GET_MEMBER_NAME_CHECKED(UFPSRWeaponDataAsset, WeaponCards), LOCTEXT("Transaction_AddCardToWeapon", "카드를 무기에 추가 (레벨업)"));
 }
 
 bool FFPSRDataEditorHelpers::RemoveCardFromWeapon(UFPSRWeaponDataAsset* Weapon, UFPSRCardDataAsset* Card, bool bUnlockableFeatures)
@@ -175,8 +175,8 @@ bool FFPSRDataEditorHelpers::RemoveCardFromWeapon(UFPSRWeaponDataAsset* Weapon, 
 		return false;
 	}
 	return bUnlockableFeatures
-		? RemoveFromArray(Weapon, Weapon->UnlockableFeatures, Card, GET_MEMBER_NAME_CHECKED(UFPSRWeaponDataAsset, UnlockableFeatures), LOCTEXT("Transaction_RemoveCardFromWeaponFeature", "Remove Card from Weapon (Unlockable Feature)"))
-		: RemoveFromArray(Weapon, Weapon->WeaponCards, Card, GET_MEMBER_NAME_CHECKED(UFPSRWeaponDataAsset, WeaponCards), LOCTEXT("Transaction_RemoveCardFromWeapon", "Remove Card from Weapon (Level-Up)"));
+		? RemoveFromArray(Weapon, Weapon->UnlockableFeatures, Card, GET_MEMBER_NAME_CHECKED(UFPSRWeaponDataAsset, UnlockableFeatures), LOCTEXT("Transaction_RemoveCardFromWeaponFeature", "카드를 무기에서 제거 (언락 피처)"))
+		: RemoveFromArray(Weapon, Weapon->WeaponCards, Card, GET_MEMBER_NAME_CHECKED(UFPSRWeaponDataAsset, WeaponCards), LOCTEXT("Transaction_RemoveCardFromWeapon", "카드를 무기에서 제거 (레벨업)"));
 }
 
 bool FFPSRDataEditorHelpers::AddWeaponToLoadout(UFPSRLoadoutPoolDataAsset* Loadout, UFPSRWeaponDataAsset* Weapon)
@@ -185,7 +185,7 @@ bool FFPSRDataEditorHelpers::AddWeaponToLoadout(UFPSRLoadoutPoolDataAsset* Loado
 	{
 		return false;
 	}
-	return AddUniqueToArray(Loadout, Loadout->SelectableWeapons, Weapon, GET_MEMBER_NAME_CHECKED(UFPSRLoadoutPoolDataAsset, SelectableWeapons), LOCTEXT("Transaction_AddWeaponToLoadout", "Add Weapon to Loadout"));
+	return AddUniqueToArray(Loadout, Loadout->SelectableWeapons, Weapon, GET_MEMBER_NAME_CHECKED(UFPSRLoadoutPoolDataAsset, SelectableWeapons), LOCTEXT("Transaction_AddWeaponToLoadout", "무기를 로드아웃에 추가"));
 }
 
 bool FFPSRDataEditorHelpers::RemoveWeaponFromLoadout(UFPSRLoadoutPoolDataAsset* Loadout, UFPSRWeaponDataAsset* Weapon)
@@ -194,7 +194,7 @@ bool FFPSRDataEditorHelpers::RemoveWeaponFromLoadout(UFPSRLoadoutPoolDataAsset* 
 	{
 		return false;
 	}
-	return RemoveFromArray(Loadout, Loadout->SelectableWeapons, Weapon, GET_MEMBER_NAME_CHECKED(UFPSRLoadoutPoolDataAsset, SelectableWeapons), LOCTEXT("Transaction_RemoveWeaponFromLoadout", "Remove Weapon from Loadout"));
+	return RemoveFromArray(Loadout, Loadout->SelectableWeapons, Weapon, GET_MEMBER_NAME_CHECKED(UFPSRLoadoutPoolDataAsset, SelectableWeapons), LOCTEXT("Transaction_RemoveWeaponFromLoadout", "무기를 로드아웃에서 제거"));
 }
 
 bool FFPSRDataEditorHelpers::AddMissionToScheduleWindow(UFPSRRunScheduleDataAsset* Schedule, int32 WindowIndex, UFPSRMissionDataAsset* Mission)
@@ -209,7 +209,7 @@ bool FFPSRDataEditorHelpers::AddMissionToScheduleWindow(UFPSRRunScheduleDataAsse
 		return false;
 	}
 
-	const FScopedTransaction Transaction(LOCTEXT("Transaction_AddMissionToWindow", "Add Mission to Schedule Window"));
+	const FScopedTransaction Transaction(LOCTEXT("Transaction_AddMissionToWindow", "미션을 스케줄 윈도우에 추가"));
 	Schedule->Modify();
 	Pool.AddUnique(Mission);
 
@@ -237,7 +237,7 @@ bool FFPSRDataEditorHelpers::RemoveMissionFromScheduleWindow(UFPSRRunScheduleDat
 		return false;
 	}
 
-	const FScopedTransaction Transaction(LOCTEXT("Transaction_RemoveMissionFromWindow", "Remove Mission from Schedule Window"));
+	const FScopedTransaction Transaction(LOCTEXT("Transaction_RemoveMissionFromWindow", "미션을 스케줄 윈도우에서 제거"));
 	Schedule->Modify();
 	Pool.Remove(Mission);
 
@@ -255,15 +255,15 @@ FText FFPSRDataEditorHelpers::GetRouteDisplayText(EFPSRCardRoute Route)
 	switch (Route)
 	{
 	case EFPSRCardRoute::LevelUpGlobal:
-		return LOCTEXT("Route_LevelUpGlobal", "Level-Up: Global Pool");
+		return LOCTEXT("Route_LevelUpGlobal", "레벨업: 전역 풀");
 	case EFPSRCardRoute::MissionClearNewWeapon:
-		return LOCTEXT("Route_MissionClearNewWeapon", "Mission-Clear: New Weapon");
+		return LOCTEXT("Route_MissionClearNewWeapon", "미션 클리어: 새 무기");
 	case EFPSRCardRoute::LevelUpWeapon:
-		return LOCTEXT("Route_LevelUpWeapon", "Level-Up: Weapon Card");
+		return LOCTEXT("Route_LevelUpWeapon", "레벨업: 무기 카드");
 	case EFPSRCardRoute::MissionClearWeaponFeature:
-		return LOCTEXT("Route_MissionClearWeaponFeature", "Mission-Clear: Weapon Feature");
+		return LOCTEXT("Route_MissionClearWeaponFeature", "미션 클리어: 무기 피처");
 	default:
-		return LOCTEXT("Route_Unknown", "(unknown route)");
+		return LOCTEXT("Route_Unknown", "(알 수 없는 라우트)");
 	}
 }
 
@@ -273,7 +273,7 @@ bool FFPSRDataEditorHelpers::SetCardEffectMagnitude(UFPSRCardDataAsset* Card, in
 	{
 		return false;
 	}
-	const FScopedTransaction Transaction(LOCTEXT("Transaction_SetCardEffectMagnitude", "Edit Card Effect Magnitude"));
+	const FScopedTransaction Transaction(LOCTEXT("Transaction_SetCardEffectMagnitude", "카드 효과 매그니튜드 편집"));
 	return Card->SetEffectRarityMagnitude(EffectIndex, Rarity, NewMagnitude);
 }
 
@@ -283,7 +283,7 @@ bool FFPSRDataEditorHelpers::SetCardGroup(UFPSRCardDataAsset* Card, ECardGroup N
 	{
 		return false;
 	}
-	const FScopedTransaction Transaction(LOCTEXT("Transaction_SetCardGroup", "Set Card Group"));
+	const FScopedTransaction Transaction(LOCTEXT("Transaction_SetCardGroup", "카드 그룹 설정"));
 	Card->Modify();
 	Card->Group = NewGroup;
 	FProperty* Prop = FindFProperty<FProperty>(UFPSRCardDataAsset::StaticClass(), GET_MEMBER_NAME_CHECKED(UFPSRCardDataAsset, Group));
