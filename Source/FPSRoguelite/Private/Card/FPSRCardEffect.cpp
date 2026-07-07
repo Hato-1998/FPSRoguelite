@@ -85,6 +85,13 @@ TArray<EFPSRCardRoute> UFPSRCardEffect::GetEditorEligibleRoutes() const
 	// "blocked everywhere" rather than silently eligible for a route it was never designed for.
 	return {};
 }
+
+EFPSREditorMagnitudeUnit UFPSRCardEffect::GetEditorMagnitudeUnit() const
+{
+	// Base = None. A brand-new effect subclass that forgets to override this is intentionally excluded from the
+	// Data Editor's bulk-arithmetic tools rather than silently treated as a numeric magnitude.
+	return EFPSREditorMagnitudeUnit::None;
+}
 #endif
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -146,6 +153,11 @@ TArray<EFPSRCardRoute> UCardEffect_CharacterGE::GetEditorEligibleRoutes() const
 {
 	// Character-scope GE — always lives in the level-up global pool (Pool.Cards).
 	return { EFPSRCardRoute::LevelUpGlobal };
+}
+
+EFPSREditorMagnitudeUnit UCardEffect_CharacterGE::GetEditorMagnitudeUnit() const
+{
+	return bShowAsPercent ? EFPSREditorMagnitudeUnit::Percent : EFPSREditorMagnitudeUnit::Flat;
 }
 #endif
 
@@ -212,6 +224,11 @@ TArray<EFPSRCardRoute> UCardEffect_WeaponStat::GetEditorEligibleRoutes() const
 	// ThisWeapon-scope stat cards ride the weapon's own level-up pool; AllWeapons-scope cards ride the global
 	// level-up pool (same split ApplyCard uses at runtime — bThisWeaponOnly picks the instance vs. the PlayerState).
 	return { bThisWeaponOnly ? EFPSRCardRoute::LevelUpWeapon : EFPSRCardRoute::LevelUpGlobal };
+}
+
+EFPSREditorMagnitudeUnit UCardEffect_WeaponStat::GetEditorMagnitudeUnit() const
+{
+	return Op == EFPSRWeaponModOp::PercentMultiply ? EFPSREditorMagnitudeUnit::Percent : EFPSREditorMagnitudeUnit::Flat;
 }
 #endif
 

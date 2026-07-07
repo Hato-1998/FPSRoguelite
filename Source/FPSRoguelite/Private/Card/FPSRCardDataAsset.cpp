@@ -76,6 +76,14 @@ EDataValidationResult UFPSRCardDataAsset::IsDataValid(FDataValidationContext& Co
 		{
 			Result = EDataValidationResult::Invalid;
 		}
+
+		// Editor-tool hygiene (P2): an effect that ignores its magnitude at runtime (GetEditorMagnitudeUnit()==None —
+		// grant/passive/behavior) but still carries RarityTiers is a dead value nobody reads; warn (not block) so a
+		// stray tier left over from re-authoring gets noticed instead of silently sitting unused forever.
+		if (Effect->GetEditorMagnitudeUnit() == EFPSREditorMagnitudeUnit::None && Effect->RarityTiers.Num() > 0)
+		{
+			Context.AddWarning(LOCTEXT("DeadMagnitudeTiers", "이 효과는 magnitude를 사용하지 않는데 RarityTiers가 설정되어 있습니다 — 죽은 값입니다. 정리하세요."));
+		}
 	}
 
 	// Rarity coverage (§2-3-1): every magnitude-bearing effect must declare a tier for each offered rarity, or a
@@ -197,6 +205,109 @@ bool UFPSRCardDataAsset::SetEffectRarityMagnitude(int32 EffectIndex, ECardRarity
 	FPropertyChangedEvent Evt(EffectsProp, EPropertyChangeType::ValueSet);
 	PostEditChangeProperty(Evt);
 
+	return true;
+}
+
+bool UFPSRCardDataAsset::CreateEffectRarityTier(ECardRarity Rarity)
+{
+	bool bAnyAdded = false;
+	for (const TObjectPtr<UFPSRCardEffect>& Effect : Effects)
+	{
+		if (!Effect || Effect->GetEditorMagnitudeUnit() == EFPSREditorMagnitudeUnit::None)
+		{
+			continue; // not a magnitude-bearing effect — nothing to tier here
+		}
+		const bool bAlreadyHasTier = Effect->RarityTiers.ContainsByPredicate(
+			[Rarity](const FFPSRCardRarityTier& T) { return T.Rarity == Rarity; });
+		if (bAlreadyHasTier)
+		{
+			continue; // this effect already covers Rarity — leave its existing value alone
+		}
+
+		// Seed value: the nearest existing tier, preferring the closest LOWER rarity, else the closest HIGHER
+		// rarity, else 0. This keeps a freshly-created tier in the same ballpark as its neighbors instead of
+		// defaulting to 0 (which would trip the 0-resolution IsDataValid warning immediately).
+		float SeedMagnitude = 0.0f;
+		const FFPSRCardRarityTier* BestLower = nullptr;
+		const FFPSRCardRarityTier* BestHigher = nullptr;
+		for (const FFPSRCardRarityTier& Tier : Effect->RarityTiers)
+		{
+			if (static_cast<uint8>(Tier.Rarity) < static_cast<uint8>(Rarity))
+			{
+				if (!BestLower || static_cast<uint8>(Tier.Rarity) > static_cast<uint8>(BestLower->Rarity))
+				{
+					BestLower = &Tier;
+				}
+			}
+			else if (static_cast<uint8>(Tier.Rarity) > static_cast<uint8>(Rarity))
+			{
+				if (!BestHigher || static_cast<uint8>(Tier.Rarity) < static_cast<uint8>(BestHigher->Rarity))
+				{
+					BestHigher = &Tier;
+				}
+			}
+		}
+		if (BestLower)
+		{
+			SeedMagnitude = BestLower->Magnitude;
+		}
+		else if (BestHigher)
+		{
+			SeedMagnitude = BestHigher->Magnitude;
+		}
+
+		Effect->Modify();
+		Effect->RarityTiers.Add(FFPSRCardRarityTier{ Rarity, SeedMagnitude });
+		bAnyAdded = true;
+	}
+
+	if (!bAnyAdded)
+	{
+		return false;
+	}
+
+	Modify();
+	FProperty* EffectsProp = FindFProperty<FProperty>(StaticClass(), GET_MEMBER_NAME_CHECKED(UFPSRCardDataAsset, Effects));
+	FPropertyChangedEvent Evt(EffectsProp, EPropertyChangeType::ValueSet);
+	PostEditChangeProperty(Evt);
+	return true;
+}
+
+bool UFPSRCardDataAsset::DeleteEffectRarityTier(ECardRarity Rarity)
+{
+	// Refuse if Rarity is the card's only offered rarity — a card must always offer at least one.
+	if (OfferRarities.Num() <= 1 && OfferRarities.Contains(Rarity))
+	{
+		return false;
+	}
+
+	bool bAnyRemoved = false;
+	for (const TObjectPtr<UFPSRCardEffect>& Effect : Effects)
+	{
+		if (!Effect || Effect->GetEditorMagnitudeUnit() == EFPSREditorMagnitudeUnit::None)
+		{
+			continue;
+		}
+		if (!Effect->RarityTiers.ContainsByPredicate([Rarity](const FFPSRCardRarityTier& T) { return T.Rarity == Rarity; }))
+		{
+			continue; // this effect has no tier for Rarity — nothing to remove, and Modify() would be a needless no-op
+		}
+		// Modify() BEFORE the mutation so the transaction buffer captures the pre-removal state (Ctrl+Z correctness) —
+		// mirrors SetEffectRarityMagnitude's ordering.
+		Effect->Modify();
+		Effect->RarityTiers.RemoveAll([Rarity](const FFPSRCardRarityTier& T) { return T.Rarity == Rarity; });
+		bAnyRemoved = true;
+	}
+
+	if (!bAnyRemoved)
+	{
+		return false;
+	}
+
+	Modify();
+	FProperty* EffectsProp = FindFProperty<FProperty>(StaticClass(), GET_MEMBER_NAME_CHECKED(UFPSRCardDataAsset, Effects));
+	FPropertyChangedEvent Evt(EffectsProp, EPropertyChangeType::ValueSet);
+	PostEditChangeProperty(Evt);
 	return true;
 }
 

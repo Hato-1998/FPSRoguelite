@@ -10,6 +10,7 @@
 #include "Widgets/Views/STreeView.h"
 #include "AssetRegistry/AssetData.h"
 #include "Card/FPSRCardTypes.h"
+#include "DataEditor/FPSRDataEditorHelpers.h"
 
 class IDetailsView;
 class UFPSRCardDataAsset;
@@ -110,6 +111,18 @@ private:
 	 *  (single-card selection and whole-pool selection) so the two grids stay visually identical. */
 	TSharedRef<SWidget> BuildMagnitudeGridHeaderRow() const;
 
+	/** P2: builds the "오퍼 등급:" toggle row (4 SCheckBox, one per ECardRarity) for a SINGLE selected card's magnitude
+	 *  grid — checking/unchecking creates/deletes that rarity's tier across every magnitude-bearing effect on the card
+	 *  (FFPSRDataEditorHelpers::CreateCardOfferRarity / DeleteCardOfferRarity). Not shown for the whole-pool grid (a
+	 *  pool has no single OfferRarities to toggle). */
+	TSharedRef<SWidget> BuildOfferRarityToggleRow(UFPSRCardDataAsset* Card);
+
+	/** P2: builds the bulk-arithmetic toolbar (op combo / operand entry / rarity-filter combo / Apply button / status
+	 *  text) shared by both the single-card and whole-pool magnitude grids. OnApplyBulkClicked reads the CURRENT
+	 *  MagnitudeGridItems + BulkSelectedOp/BulkOperand/BulkRarityFilter at click time. */
+	TSharedRef<SWidget> BuildBulkOpToolbar();
+	FReply OnApplyBulkClicked();
+
 	/** Builds one rarity's SNumericEntryBox<float> cell for a magnitude grid row (disabled/blank if the effect has
 	 *  no tier for that rarity — see UFPSRCardDataAsset::SetEffectRarityMagnitude's "edit existing tier only" contract). */
 	TSharedRef<SWidget> BuildMagnitudeCell(TWeakObjectPtr<UFPSRCardDataAsset> Card, int32 EffectIndex, ECardRarity Rarity);
@@ -169,6 +182,16 @@ private:
 	TSharedPtr<SVerticalBox> MagnitudeGridContainer;
 	TArray<TSharedPtr<FMagnitudeGridRow>> MagnitudeGridItems;
 	TSharedPtr<SListView<TSharedPtr<FMagnitudeGridRow>>> MagnitudeGridListView;
+
+	// P2: bulk-arithmetic toolbar state (shared by the single-card and whole-pool grids)
+	TArray<TSharedPtr<EFPSRBulkMagnitudeOp>> BulkOpOptions;
+	TSharedPtr<EFPSRBulkMagnitudeOp> BulkSelectedOp;
+	TOptional<float> BulkOperand;
+	/** Rarity options for the bulk-op filter combo: index 0 = "전체" (nullptr = all four rarities), the rest = one
+	 *  option per ECardRarity. */
+	TArray<TSharedPtr<ECardRarity>> BulkRarityFilterOptions;
+	TSharedPtr<ECardRarity> BulkRarityFilterSelection;
+	TSharedPtr<STextBlock> BulkStatusText;
 
 	// Schedule timeline state
 	TSharedPtr<SVerticalBox> ScheduleTimelineContainer;

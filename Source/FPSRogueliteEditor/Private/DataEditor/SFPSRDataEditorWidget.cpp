@@ -25,6 +25,7 @@
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SNumericEntryBox.h"
 #include "Widgets/Input/SComboBox.h"
+#include "Widgets/Input/SCheckBox.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SSplitter.h"
 #include "Widgets/Layout/SScrollBox.h"
@@ -532,11 +533,13 @@ void SFPSRDataEditorWidget::RebuildMagnitudeGridFromCard(UFPSRCardDataAsset* Car
 	MagnitudeGridContainer->ClearChildren();
 	MagnitudeGridItems.Reset();
 
-	// Only rows for magnitude-bearing effects (an effect with zero RarityTiers has nothing to edit here — it still
-	// shows in the IDetailsView above for its own non-magnitude fields, e.g. UCardEffect_GrantWeapon::WeaponToGrant).
+	// Only rows for magnitude-bearing effects (GetEditorMagnitudeUnit() != None) — a fresh effect with zero
+	// RarityTiers still surfaces as a row (P2: the offer-rarity toggle row can create its first tier), while an
+	// effect whose runtime never reads magnitude (grant/passive/behavior) is left to the IDetailsView above for its
+	// own non-magnitude fields (e.g. UCardEffect_GrantWeapon::WeaponToGrant).
 	for (int32 EffectIndex = 0; EffectIndex < Card->Effects.Num(); ++EffectIndex)
 	{
-		if (Card->Effects[EffectIndex] && Card->Effects[EffectIndex]->RarityTiers.Num() > 0)
+		if (Card->Effects[EffectIndex] && Card->Effects[EffectIndex]->GetEditorMagnitudeUnit() != EFPSREditorMagnitudeUnit::None)
 		{
 			TSharedPtr<FMagnitudeGridRow> Row = MakeShared<FMagnitudeGridRow>();
 			Row->Card = Card;
@@ -558,6 +561,14 @@ void SFPSRDataEditorWidget::RebuildMagnitudeGridFromCard(UFPSRCardDataAsset* Car
 		.BodyContent()
 		[
 			SNew(SVerticalBox)
+			+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 4.0f)
+			[
+				BuildOfferRarityToggleRow(Card)
+			]
+			+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 4.0f)
+			[
+				BuildBulkOpToolbar()
+			]
 			+ SVerticalBox::Slot().AutoHeight()
 			[
 				BuildMagnitudeGridHeaderRow()
@@ -592,7 +603,7 @@ void SFPSRDataEditorWidget::RebuildMagnitudeGridFromPool(UFPSRCardPoolDataAsset*
 			}
 			for (int32 EffectIndex = 0; EffectIndex < Card->Effects.Num(); ++EffectIndex)
 			{
-				if (Card->Effects[EffectIndex] && Card->Effects[EffectIndex]->RarityTiers.Num() > 0)
+				if (Card->Effects[EffectIndex] && Card->Effects[EffectIndex]->GetEditorMagnitudeUnit() != EFPSREditorMagnitudeUnit::None)
 				{
 					TSharedPtr<FMagnitudeGridRow> Row = MakeShared<FMagnitudeGridRow>();
 					Row->Card = Card;
@@ -618,6 +629,10 @@ void SFPSRDataEditorWidget::RebuildMagnitudeGridFromPool(UFPSRCardPoolDataAsset*
 		.BodyContent()
 		[
 			SNew(SVerticalBox)
+			+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 4.0f)
+			[
+				BuildBulkOpToolbar()
+			]
 			+ SVerticalBox::Slot().AutoHeight()
 			[
 				BuildMagnitudeGridHeaderRow()
@@ -673,6 +688,212 @@ TSharedRef<SWidget> SFPSRDataEditorWidget::BuildMagnitudeGridHeaderRow() const
 		+ SHorizontalBox::Slot().FillWidth(0.095f).VAlign(VAlign_Center).Padding(2.0f)
 		[
 			SNew(STextBlock).Text(LOCTEXT("GridHeader_Legendary", "Legendary")).Font(BoldFont)
+		];
+}
+
+TSharedRef<SWidget> SFPSRDataEditorWidget::BuildOfferRarityToggleRow(UFPSRCardDataAsset* Card)
+{
+	// One checkbox per rarity — checked state is re-queried every frame from Card->OfferRarities (IsChecked_Lambda),
+	// never cached, so a create/delete elsewhere (e.g. IDetailsView editing RarityTiers directly) stays reflected.
+	TWeakObjectPtr<UFPSRCardDataAsset> WeakCard = Card;
+
+	auto MakeToggle = [this, WeakCard](ECardRarity Rarity, FText Label)
+	{
+		return SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(2.0f, 0.0f)
+			[
+				SNew(SCheckBox)
+				.IsChecked_Lambda([WeakCard, Rarity]() -> ECheckBoxState
+				{
+					const UFPSRCardDataAsset* C = WeakCard.Get();
+					return (C && C->OfferRarities.Contains(Rarity)) ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
+				})
+				.OnCheckStateChanged_Lambda([this, WeakCard, Rarity](ECheckBoxState NewState)
+				{
+					UFPSRCardDataAsset* C = WeakCard.Get();
+					if (!C)
+					{
+						return;
+					}
+					const bool bChanged = (NewState == ECheckBoxState::Checked)
+						? FFPSRDataEditorHelpers::CreateCardOfferRarity(C, Rarity)
+						: FFPSRDataEditorHelpers::DeleteCardOfferRarity(C, Rarity);
+					if (bChanged)
+					{
+						TrackDirtyPackage(C->GetPackage());
+					}
+					// Rebuild regardless of success — this re-syncs every checkbox to the ACTUAL OfferRarities (a
+					// refused delete, e.g. the card's last rarity, snaps the checkbox back to checked).
+					RebuildMagnitudeGridFromCard(C);
+				})
+			]
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(2.0f, 0.0f, 10.0f, 0.0f)
+			[
+				SNew(STextBlock).Text(Label)
+			];
+	};
+
+	return SNew(SHorizontalBox)
+		+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(2.0f)
+		[
+			SNew(STextBlock).Text(LOCTEXT("OfferRarityToggleLabel", "오퍼 등급:"))
+		]
+		+ SHorizontalBox::Slot().AutoWidth()
+		[
+			MakeToggle(ECardRarity::Common, LOCTEXT("Rarity_Common", "Common"))
+		]
+		+ SHorizontalBox::Slot().AutoWidth()
+		[
+			MakeToggle(ECardRarity::Rare, LOCTEXT("Rarity_Rare", "Rare"))
+		]
+		+ SHorizontalBox::Slot().AutoWidth()
+		[
+			MakeToggle(ECardRarity::Epic, LOCTEXT("Rarity_Epic", "Epic"))
+		]
+		+ SHorizontalBox::Slot().AutoWidth()
+		[
+			MakeToggle(ECardRarity::Legendary, LOCTEXT("Rarity_Legendary", "Legendary"))
+		];
+}
+
+TSharedRef<SWidget> SFPSRDataEditorWidget::BuildBulkOpToolbar()
+{
+	// Op combo options (Multiply / Add) — rebuilt each call so the toolbar can be re-instantiated per grid rebuild
+	// without stale TSharedPtr<EFPSRBulkMagnitudeOp> selections pointing at a torn-down options array.
+	BulkOpOptions.Reset();
+	BulkOpOptions.Add(MakeShared<EFPSRBulkMagnitudeOp>(EFPSRBulkMagnitudeOp::Multiply));
+	BulkOpOptions.Add(MakeShared<EFPSRBulkMagnitudeOp>(EFPSRBulkMagnitudeOp::Add));
+	// Preserve the previously chosen OP VALUE (not TSharedPtr identity, which is rebuilt fresh every call) across
+	// grid rebuilds, so applying a bulk op doesn't silently reset the combo back to Multiply.
+	const EFPSRBulkMagnitudeOp PreviousOp = BulkSelectedOp.IsValid() ? *BulkSelectedOp : EFPSRBulkMagnitudeOp::Multiply;
+	BulkSelectedOp = (PreviousOp == EFPSRBulkMagnitudeOp::Add) ? BulkOpOptions[1] : BulkOpOptions[0];
+
+	auto GetOpLabel = [](EFPSRBulkMagnitudeOp Op) -> FText
+	{
+		return Op == EFPSRBulkMagnitudeOp::Multiply
+			? LOCTEXT("BulkOp_Multiply", "× (곱하기)")
+			: LOCTEXT("BulkOp_Add", "+ (더하기)");
+	};
+
+	// Rarity-filter combo: index 0 = nullptr sentinel = "전체" (all four rarities); the rest = one option per
+	// ECardRarity. Rebuilt each call for the same reason as BulkOpOptions above. Preserve the previously chosen
+	// VALUE (nullptr = all, or a specific rarity) by remapping it into the freshly-built options array.
+	const TOptional<ECardRarity> PreviousRarityFilter = BulkRarityFilterSelection.IsValid() ? TOptional<ECardRarity>(*BulkRarityFilterSelection) : TOptional<ECardRarity>();
+	BulkRarityFilterOptions.Reset();
+	BulkRarityFilterOptions.Add(nullptr);
+	BulkRarityFilterOptions.Add(MakeShared<ECardRarity>(ECardRarity::Common));
+	BulkRarityFilterOptions.Add(MakeShared<ECardRarity>(ECardRarity::Rare));
+	BulkRarityFilterOptions.Add(MakeShared<ECardRarity>(ECardRarity::Epic));
+	BulkRarityFilterOptions.Add(MakeShared<ECardRarity>(ECardRarity::Legendary));
+	BulkRarityFilterSelection = nullptr; // default = 전체 (all)
+	if (PreviousRarityFilter.IsSet())
+	{
+		for (const TSharedPtr<ECardRarity>& Option : BulkRarityFilterOptions)
+		{
+			if (Option.IsValid() && *Option == PreviousRarityFilter.GetValue())
+			{
+				BulkRarityFilterSelection = Option;
+				break;
+			}
+		}
+	}
+
+	auto GetRarityFilterLabel = [](const TSharedPtr<ECardRarity>& Opt) -> FText
+	{
+		if (!Opt.IsValid())
+		{
+			return LOCTEXT("BulkRarityFilter_All", "전체");
+		}
+		switch (*Opt)
+		{
+		case ECardRarity::Common: return LOCTEXT("Rarity_Common", "Common");
+		case ECardRarity::Rare: return LOCTEXT("Rarity_Rare", "Rare");
+		case ECardRarity::Epic: return LOCTEXT("Rarity_Epic", "Epic");
+		case ECardRarity::Legendary: return LOCTEXT("Rarity_Legendary", "Legendary");
+		default: return FText::GetEmpty();
+		}
+	};
+
+	return SNew(SVerticalBox)
+		+ SVerticalBox::Slot().AutoHeight()
+		[
+			SNew(SHorizontalBox)
+
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(2.0f)
+			[
+				SNew(STextBlock).Text(LOCTEXT("BulkOpToolbarLabel", "일괄 연산:"))
+			]
+
+			+ SHorizontalBox::Slot().AutoWidth().Padding(2.0f)
+			[
+				SNew(SBox).WidthOverride(120.0f)
+				[
+					SNew(SComboBox<TSharedPtr<EFPSRBulkMagnitudeOp>>)
+					.OptionsSource(&BulkOpOptions)
+					.InitiallySelectedItem(BulkSelectedOp)
+					.OnGenerateWidget_Lambda([GetOpLabel](TSharedPtr<EFPSRBulkMagnitudeOp> Option)
+					{
+						return SNew(STextBlock).Text(Option.IsValid() ? GetOpLabel(*Option) : FText::GetEmpty());
+					})
+					.OnSelectionChanged_Lambda([this](TSharedPtr<EFPSRBulkMagnitudeOp> NewSelection, ESelectInfo::Type)
+					{
+						BulkSelectedOp = NewSelection;
+					})
+					[
+						SNew(STextBlock).Text_Lambda([this, GetOpLabel]()
+						{
+							return BulkSelectedOp.IsValid() ? GetOpLabel(*BulkSelectedOp) : FText::GetEmpty();
+						})
+					]
+				]
+			]
+
+			+ SHorizontalBox::Slot().AutoWidth().Padding(2.0f)
+			[
+				SNew(SBox).WidthOverride(100.0f)
+				[
+					SNew(SNumericEntryBox<float>)
+					.Value_Lambda([this]() -> TOptional<float> { return BulkOperand; })
+					.OnValueChanged_Lambda([this](float NewValue) { BulkOperand = NewValue; })
+					.OnValueCommitted_Lambda([this](float NewValue, ETextCommit::Type) { BulkOperand = NewValue; })
+					.UndeterminedString(LOCTEXT("BulkOperandPlaceholder", "값"))
+				]
+			]
+
+			+ SHorizontalBox::Slot().AutoWidth().Padding(2.0f)
+			[
+				SNew(SBox).WidthOverride(100.0f)
+				[
+					SNew(SComboBox<TSharedPtr<ECardRarity>>)
+					.OptionsSource(&BulkRarityFilterOptions)
+					.InitiallySelectedItem(BulkRarityFilterSelection)
+					.OnGenerateWidget_Lambda([GetRarityFilterLabel](TSharedPtr<ECardRarity> Option)
+					{
+						return SNew(STextBlock).Text(GetRarityFilterLabel(Option));
+					})
+					.OnSelectionChanged_Lambda([this](TSharedPtr<ECardRarity> NewSelection, ESelectInfo::Type)
+					{
+						BulkRarityFilterSelection = NewSelection;
+					})
+					[
+						SNew(STextBlock).Text_Lambda([this, GetRarityFilterLabel]()
+						{
+							return GetRarityFilterLabel(BulkRarityFilterSelection);
+						})
+					]
+				]
+			]
+
+			+ SHorizontalBox::Slot().AutoWidth().Padding(2.0f)
+			[
+				SNew(SButton)
+				.Text(LOCTEXT("BulkApplyButton", "적용"))
+				.OnClicked(this, &SFPSRDataEditorWidget::OnApplyBulkClicked)
+			]
+		]
+		+ SVerticalBox::Slot().AutoHeight().Padding(2.0f)
+		[
+			SAssignNew(BulkStatusText, STextBlock)
 		];
 }
 
@@ -772,6 +993,90 @@ void SFPSRDataEditorWidget::OnMagnitudeCommitted(float NewValue, ETextCommit::Ty
 	{
 		TrackDirtyPackage(CardPtr->GetPackage());
 	}
+}
+
+FReply SFPSRDataEditorWidget::OnApplyBulkClicked()
+{
+	if (!BulkStatusText.IsValid())
+	{
+		return FReply::Handled();
+	}
+	if (!BulkSelectedOp.IsValid() || !BulkOperand.IsSet())
+	{
+		BulkStatusText->SetText(LOCTEXT("BulkApply_NoOperand", "연산과 값을 먼저 지정하세요."));
+		return FReply::Handled();
+	}
+
+	// Build the cell list from the CURRENT grid rows × {selected rarity, or all four if "전체"} — only cells whose
+	// effect actually has a tier for that rarity are included (BulkApplyMagnitude also re-checks this, but filtering
+	// here keeps the cell count meaningful for a mixed grid where rows cover different rarity sets).
+	TArray<ECardRarity> Rarities;
+	if (BulkRarityFilterSelection.IsValid())
+	{
+		Rarities.Add(*BulkRarityFilterSelection);
+	}
+	else
+	{
+		Rarities = { ECardRarity::Common, ECardRarity::Rare, ECardRarity::Epic, ECardRarity::Legendary };
+	}
+
+	TArray<FFPSRMagnitudeCellRef> Cells;
+	TSet<TWeakObjectPtr<UFPSRCardDataAsset>> AffectedCards;
+	for (const TSharedPtr<FMagnitudeGridRow>& Row : MagnitudeGridItems)
+	{
+		if (!Row.IsValid() || !Row->Card.IsValid() || !Row->Card->Effects.IsValidIndex(Row->EffectIndex) || !Row->Card->Effects[Row->EffectIndex])
+		{
+			continue;
+		}
+		const UFPSRCardEffect* Effect = Row->Card->Effects[Row->EffectIndex];
+		for (const ECardRarity Rarity : Rarities)
+		{
+			const bool bHasTier = Effect->RarityTiers.ContainsByPredicate(
+				[Rarity](const FFPSRCardRarityTier& T) { return T.Rarity == Rarity; });
+			if (!bHasTier)
+			{
+				continue;
+			}
+			FFPSRMagnitudeCellRef Cell;
+			Cell.Card = Row->Card;
+			Cell.EffectIndex = Row->EffectIndex;
+			Cell.Rarity = Rarity;
+			Cells.Add(Cell);
+			AffectedCards.Add(Row->Card);
+		}
+	}
+
+	FText Status;
+	const int32 NumChanged = FFPSRDataEditorHelpers::BulkApplyMagnitude(Cells, *BulkSelectedOp, BulkOperand.GetValue(), Status);
+
+	if (NumChanged > 0)
+	{
+		for (const TWeakObjectPtr<UFPSRCardDataAsset>& WeakCard : AffectedCards)
+		{
+			if (UFPSRCardDataAsset* CardPtr = WeakCard.Get())
+			{
+				TrackDirtyPackage(CardPtr->GetPackage());
+			}
+		}
+		// Rebuild whichever grid is currently shown (single card vs. whole pool) so the cells reflect the new values.
+		// This tears down and re-creates BulkStatusText (BuildBulkOpToolbar is called again), so the status must be
+		// applied AFTER the rebuild, not before — otherwise it'd be set on the widget about to be destroyed.
+		if (UFPSRCardDataAsset* SelectedCard = Cast<UFPSRCardDataAsset>(SelectedAsset.Get()))
+		{
+			RebuildMagnitudeGridFromCard(SelectedCard);
+		}
+		else if (UFPSRCardPoolDataAsset* SelectedPool = Cast<UFPSRCardPoolDataAsset>(SelectedAsset.Get()))
+		{
+			RebuildMagnitudeGridFromPool(SelectedPool);
+		}
+	}
+
+	if (BulkStatusText.IsValid())
+	{
+		BulkStatusText->SetText(Status);
+	}
+
+	return FReply::Handled();
 }
 
 // ---------------------------------------------------------------------------------------------------------------

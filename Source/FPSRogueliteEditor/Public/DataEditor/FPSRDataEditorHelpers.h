@@ -23,6 +23,17 @@ enum class EFPSRWiringVerdict : uint8
 	         // at draw/apply time (or worse, a semantically wrong offer).
 };
 
+/** Bulk magnitude arithmetic op for the Data Editor's magnitude grid toolbar (P2). */
+enum class EFPSRBulkMagnitudeOp : uint8 { Multiply, Add };
+
+/** One target cell for a bulk magnitude op: a (card, effect, rarity) triple. */
+struct FFPSRMagnitudeCellRef
+{
+	TWeakObjectPtr<UFPSRCardDataAsset> Card;
+	int32 EffectIndex = INDEX_NONE;
+	ECardRarity Rarity = ECardRarity::Common;
+};
+
 /**
  * Plain static helper class (not a UObject) backing the FPSR Data Editor Slate tool (P1). Mirrors the style of
  * FFPSRAnchoredValidationService: no lifetime to manage, callable from the widget, a future commandlet, or tests.
@@ -71,6 +82,20 @@ public:
 	/** Magnitude write: transaction-wrap + call Card->SetEffectRarityMagnitude. Returns true if a tier existed and
 	 *  was written (see UFPSRCardDataAsset::SetEffectRarityMagnitude — does not create a new tier). */
 	static bool SetCardEffectMagnitude(UFPSRCardDataAsset* Card, int32 EffectIndex, ECardRarity Rarity, float NewMagnitude);
+
+	/** Transaction-wrap + Card->CreateEffectRarityTier. Returns true if a tier was added. */
+	static bool CreateCardOfferRarity(UFPSRCardDataAsset* Card, ECardRarity Rarity);
+
+	/** Transaction-wrap + Card->DeleteEffectRarityTier. Returns true if a tier was removed (false if refused/no-op). */
+	static bool DeleteCardOfferRarity(UFPSRCardDataAsset* Card, ECardRarity Rarity);
+
+	/** Apply Op(Operand) to each cell's EXISTING tier under ONE transaction.
+	 *  Multiply: raw *= Operand (unit-agnostic, any selection).
+	 *  Add: unit-sensitive. All affected effects must share the same GetEditorMagnitudeUnit() (Percent OR Flat); a mixed
+	 *   selection is REFUSED (returns 0, OutStatus explains, no change). Operand is in DISPLAY unit: Percent set ->
+	 *   raw += Operand/100 ("+5" means +5 percentage points); Flat set -> raw += Operand.
+	 *  Skips cells whose effect is null / unit==None / has no tier for that rarity. Returns number of cells changed. */
+	static int32 BulkApplyMagnitude(const TArray<FFPSRMagnitudeCellRef>& Cells, EFPSRBulkMagnitudeOp Op, float Operand, FText& OutStatus);
 
 	/** Set the card's Group (transactional). Makes a card wired into a weapon's level-up pool correct-by-construction:
 	 *  GatherCandidatePool only sets the draw's TargetWeapon when Group == Weapon (FPSRCardSubsystem.cpp:603), so a

@@ -277,6 +277,114 @@ bool FFPSRDataEditorHelpers::SetCardEffectMagnitude(UFPSRCardDataAsset* Card, in
 	return Card->SetEffectRarityMagnitude(EffectIndex, Rarity, NewMagnitude);
 }
 
+bool FFPSRDataEditorHelpers::CreateCardOfferRarity(UFPSRCardDataAsset* Card, ECardRarity Rarity)
+{
+	if (!Card)
+	{
+		return false;
+	}
+	const FScopedTransaction Transaction(LOCTEXT("Transaction_CreateCardOfferRarity", "카드 오퍼 등급 생성"));
+	return Card->CreateEffectRarityTier(Rarity);
+}
+
+bool FFPSRDataEditorHelpers::DeleteCardOfferRarity(UFPSRCardDataAsset* Card, ECardRarity Rarity)
+{
+	if (!Card)
+	{
+		return false;
+	}
+	const FScopedTransaction Transaction(LOCTEXT("Transaction_DeleteCardOfferRarity", "카드 오퍼 등급 삭제"));
+	return Card->DeleteEffectRarityTier(Rarity);
+}
+
+int32 FFPSRDataEditorHelpers::BulkApplyMagnitude(const TArray<FFPSRMagnitudeCellRef>& Cells, EFPSRBulkMagnitudeOp Op, float Operand, FText& OutStatus)
+{
+	OutStatus = FText::GetEmpty();
+
+	// Pass 1: gather the valid cells (card alive, effect index valid, effect non-null, unit != None, tier exists for
+	// that rarity) and cache each one's current unit — this pass must NOT mutate anything, since a mixed-unit Add
+	// selection has to be detected and fully refused before any cell is touched.
+	struct FValidCell
+	{
+		UFPSRCardDataAsset* Card = nullptr;
+		int32 EffectIndex = INDEX_NONE;
+		ECardRarity Rarity = ECardRarity::Common;
+		float CurrentMagnitude = 0.0f;
+		EFPSREditorMagnitudeUnit Unit = EFPSREditorMagnitudeUnit::None;
+	};
+	TArray<FValidCell> ValidCells;
+	ValidCells.Reserve(Cells.Num());
+
+	for (const FFPSRMagnitudeCellRef& Cell : Cells)
+	{
+		UFPSRCardDataAsset* Card = Cell.Card.Get();
+		if (!Card || !Card->Effects.IsValidIndex(Cell.EffectIndex) || !Card->Effects[Cell.EffectIndex])
+		{
+			continue;
+		}
+		const UFPSRCardEffect* Effect = Card->Effects[Cell.EffectIndex];
+		const EFPSREditorMagnitudeUnit Unit = Effect->GetEditorMagnitudeUnit();
+		if (Unit == EFPSREditorMagnitudeUnit::None)
+		{
+			continue;
+		}
+		const FFPSRCardRarityTier* Tier = Effect->RarityTiers.FindByPredicate(
+			[Rarity = Cell.Rarity](const FFPSRCardRarityTier& T) { return T.Rarity == Rarity; });
+		if (!Tier)
+		{
+			continue;
+		}
+		ValidCells.Add(FValidCell{ Card, Cell.EffectIndex, Cell.Rarity, Tier->Magnitude, Unit });
+	}
+
+	if (ValidCells.Num() == 0)
+	{
+		OutStatus = LOCTEXT("BulkApply_NoTargets", "대상 티어가 없습니다.");
+		return 0;
+	}
+
+	float AddRaw = 0.0f;
+	if (Op == EFPSRBulkMagnitudeOp::Add)
+	{
+		// Unit-sensitive: every affected effect must share the same unit (Percent OR Flat). A mixed selection would
+		// otherwise silently apply a percentage-point delta to a flat stat (or vice-versa) — refuse instead.
+		EFPSREditorMagnitudeUnit CommonUnit = ValidCells[0].Unit;
+		bool bMixed = false;
+		for (const FValidCell& ValidCell : ValidCells)
+		{
+			if (ValidCell.Unit != CommonUnit)
+			{
+				bMixed = true;
+				break;
+			}
+		}
+		if (bMixed)
+		{
+			OutStatus = LOCTEXT("BulkApply_MixedUnits", "단위가 다른 효과가 섞여 있어 덧셈 일괄연산을 적용하지 않았습니다(퍼센트/고정값 혼합). 곱셈(×)은 안전하게 적용됩니다.");
+			return 0;
+		}
+		AddRaw = (CommonUnit == EFPSREditorMagnitudeUnit::Percent) ? (Operand / 100.0f) : Operand;
+	}
+
+	const FScopedTransaction Transaction(LOCTEXT("Transaction_BulkApplyMagnitude", "카드 매그니튜드 일괄 연산"));
+	int32 NumChanged = 0;
+	for (const FValidCell& ValidCell : ValidCells)
+	{
+		const float NewMagnitude = (Op == EFPSRBulkMagnitudeOp::Multiply)
+			? ValidCell.CurrentMagnitude * Operand
+			: ValidCell.CurrentMagnitude + AddRaw;
+		// Direct call (not SetCardEffectMagnitude) — that helper opens its OWN FScopedTransaction per call, which
+		// would fragment this bulk op into N separate undo steps instead of one.
+		if (ValidCell.Card->SetEffectRarityMagnitude(ValidCell.EffectIndex, ValidCell.Rarity, NewMagnitude))
+		{
+			++NumChanged;
+		}
+	}
+
+	OutStatus = FText::Format(LOCTEXT("BulkApply_Applied", "{0}개 셀에 적용됨."), FText::AsNumber(NumChanged));
+	return NumChanged;
+}
+
 bool FFPSRDataEditorHelpers::SetCardGroup(UFPSRCardDataAsset* Card, ECardGroup NewGroup)
 {
 	if (!Card || Card->Group == NewGroup)
