@@ -6,6 +6,13 @@
 
 **최종 갱신: 2026-07-07**
 
+## 🔔 핸드오프 (2026-07-07 h · **P2 ③a 미션 튜닝 DA 소유 마이그레이션 → main 머지 완료. 남은 ③=③b 콘텐츠 저작·③c 타임라인 편집기**) — 🎯 **③a(런타임) 구현·빌드(70액션)·자동화(Mission.Tuning+DataEditor4/4)·Codex 클린·`--no-ff` 머지 완료. 동작 무변경(소프트).**
+> **③a 머지**: `phase/editor-tooling-p2-mission-tuning` → main `--no-ff`. 커밋 `daeb321`(SSOT §2-8-1)+`27fe724`(코드). **미푸시(로컬 main만)**.
+> **③a 요약**: 미션 타입별 튜닝을 미션 액터 BP CDO→미션 DA로 이관(폴리모픽 Instanced `UFPSRMissionTuning` 베이스+타입별 서브클래스 7종, 카드 효과 패턴). DA에 `Instanced Tuning`+IsDataValid 매칭(null=경고/불일치=에러). 베이스 액터 `GetExpectedTuningClass()`+`GetTuningBase()`. **7개 미션 소프트 마이그레이션**: OnMissionActivated서 tuning-or-fallback(tick값=`Eff*` 캐시·스폰클래스=로컬), **Tuning null=기존 필드 fallback→동작 무변경(BP CDO값 무손실)**. 기존 필드는 fallback 유지(콘텐츠 이관 후 제거 예정). 테스트 `FFPSRMissionTuningTest`. ⚠️테스트 초기 실패=`IsDataValid==Valid` 오단언(깨끗=NotValidated 반환)→`!=Invalid`로 교정(코드 무변경).
+> **남은 ③ (착수 전 방식 확인 권장)**: **③b 콘텐츠** — 미션 DA 7종에 각 Tuning 객체 저작(BP CDO 값 이관, VibeUE/커맨드릿) + **PIE 검증(사용자, 튜닝 값 실림 확인)**. 이후 액터 fallback 필드 제거(후속). **③c 에디터** — `SFPSRScheduleTimelineBar` read-only→편집(윈도우 드래그·MinTime/MaxTime·MissionPool add/remove) + 미션 튜닝 집약 패널(선택 미션의 Tuning을 IDetailsView로). **④ 양방향 배선뷰=보류**.
+> **②가 검출한 실콘텐츠 누수(사용자 수정 대기, 유효)**: `DA_Card_FireRate_ThisWeapon`이 `DA_Character_CardPool`의 전역 `Cards`에 배선 → 무기별 풀로 이동. 🔒사용자결정=콘텐츠 버그(규칙 유지). 미수정 시 `validate-data` exit1.
+> **절차**: ③b/③c=플랜-우선. ③b는 에디터/콘텐츠(editor-bridge)·PIE 사용자. 신규소스=에디터 종료→`-NoXGE`빌드→재기동. Content 미커밋(사용자 WIP) 손대지 말 것.
+
 ## 🔔 핸드오프 (2026-07-07 g · FPSR Data Editor **P2 ② 라우팅 누수 검증기 → main 머지 완료. 다음=③ 미션 타임라인 편집(H3=DA통합)**) — 🎯 **② 구현·빌드(70액션 Succeeded)·자동화4/4·커맨드릿 스모크(실콘텐츠 누수 1건 검출)·Codex 머지게이트 클린·`--no-ff` 머지 완료. ③ 착수 예정.**
 > **② 머지**: `phase/editor-tooling-p2-routing` → main `--no-ff`. 커밋 `4bb2ad8`(②). **미푸시(로컬 main만)**.
 > **② 구현 요약**(Codex 비교게이트 보강 반영): ⓐ효과 적격 라우트 정합 — WeaponBehavior={MissionClearWeaponFeature}만(레벨업 제거, H2), WeaponStat(this-weapon)={LevelUpWeapon,MissionClearWeaponFeature}(미션 stat 피처 추가; DrawWeaponUnlockOffer Part B가 stat-only 피처 항상 오퍼함과 정합). ⓑ`CheckCardRoute` Warn 판정 제거(H2로 Allowed/Blocked만)+멀티효과 공집합 전용 메시지, `EFPSRWiringVerdict::Warn` enum 제거. ⓒ카드 풀 검증기 라우팅 검사(Cards→LevelUpGlobal/WeaponUnlockCards→MissionClearNewWeapon, 저렴=저장시에도), TODO(routing) 해소. ⓓ신규 `UFPSRWeaponValidator`(자동발견): WeaponCards→LevelUpWeapon/UnlockableFeatures→MissionClearWeaponFeature. ⓔ**런타임 U18b 경로 제거(🔒사용자결정)**: `DrawCards`에서 행동 프래그먼트를 레벨업 draw에 넣던 특수처리 삭제 → 행동 프래그먼트는 `DrawWeaponUnlockOffer`(미션)로만. 스테일 주석 U6/H2 정정. ⓕ테스트 `FFPSRDataEditorRoutingTest`.
