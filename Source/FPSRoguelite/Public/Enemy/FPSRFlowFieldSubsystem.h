@@ -67,6 +67,14 @@ private:
 	void RecomputeAllFields();
 	bool HasServerAuthority() const;
 
+	/** U (2026-07-07): build the single continuous grid from a bUnifiedExtent bounds volume and bake every currently-loaded
+	 *  MapId'd slot volume into it. Called at world begin when such a volume exists. Server-only. */
+	void BuildUnifiedField(UWorld& InWorld, const AFPSRFlowFieldBoundsVolume& UnifiedVolume);
+
+	/** U: bake one slot volume into the unified grid at its computed cell offset (BakeSlotIntoUnifiedGrid). No-op if the
+	 *  unified grid isn't built. Used at world begin and when a slot streams in (BakeDiscoveredMap). Returns bake success. */
+	bool BakeSlotIntoUnified(UWorld& InWorld, const AFPSRFlowFieldBoundsVolume& Slot);
+
 	/** Trace the floor Z under the first PlayerStart (Default grid Z anchor), or the start's Z / origin. */
 	float DetectFloorZ(UWorld& InWorld) const;
 
@@ -77,6 +85,12 @@ private:
 	/** The per-map flow-field computers, keyed by MapId (unset tag = Default single-map). Server-only. */
 	UPROPERTY(Transient)
 	TMap<FGameplayTag, TObjectPtr<UFPSRFlowFieldComputer>> Computers;
+
+	/** U unified continuous field (2026-07-07): non-null when a bUnifiedExtent bounds volume is present -> ONE pre-sized grid
+	 *  covers all slots (each MapId'd slot baked into it). Swarm flow samples THIS when set; the per-map registry above
+	 *  coexists (still baked/recomputed for the allocator's IsMapFieldReady) but is unused for flow until removed in P-G. */
+	UPROPERTY(Transient)
+	TObjectPtr<UFPSRFlowFieldComputer> UnifiedComputer;
 
 	FTimerHandle RecomputeTimerHandle;
 };

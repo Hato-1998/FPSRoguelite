@@ -19,6 +19,51 @@
 #endif
 
 // ======================================================================================
+//  U (unified 3x3) GRID BUDGET GATE (P-0) — pure arithmetic, no world/state.
+//  Exercised by FPSRoguelite.FlowField.CapGate. Locks the D1 content contract for U.
+// ======================================================================================
+
+int32 UFPSRFlowFieldComputer::SlotCellsForSize(float SlotSizeCm, float CellSizeCm)
+{
+	if (CellSizeCm <= 0.0f)
+	{
+		return 0;
+	}
+	return FMath::Max(1, FMath::CeilToInt(SlotSizeCm / CellSizeCm));
+}
+
+UFPSRFlowFieldComputer::FUnifiedGridBudget UFPSRFlowFieldComputer::CheckUnifiedGridBudget(
+	int32 SlotCellsX, int32 SlotCellsY, int32 WallCellsPerSeam, int32 SlotsPerAxis)
+{
+	FUnifiedGridBudget Out;
+
+	SlotsPerAxis = FMath::Max(1, SlotsPerAxis);
+	SlotCellsX = FMath::Max(1, SlotCellsX);
+	SlotCellsY = FMath::Max(1, SlotCellsY);
+	WallCellsPerSeam = FMath::Max(0, WallCellsPerSeam);
+	const int32 Seams = SlotsPerAxis - 1;
+
+	Out.GridDimX = SlotsPerAxis * SlotCellsX + Seams * WallCellsPerSeam;
+	Out.GridDimY = SlotsPerAxis * SlotCellsY + Seams * WallCellsPerSeam;
+	Out.TotalCells = static_cast<int64>(Out.GridDimX) * static_cast<int64>(Out.GridDimY);
+
+	Out.bAxisWithinCap = (Out.GridDimX <= MaxGridDimPerAxis) && (Out.GridDimY <= MaxGridDimPerAxis);
+	Out.bTotalWithinCap = (Out.TotalCells <= static_cast<int64>(MaxTotalCells));
+	Out.bWithinBudget = Out.bAxisWithinCap && Out.bTotalWithinCap;
+
+	Out.Reason = FString::Printf(
+		TEXT("U grid %dx%d slots (%dx%d cells/slot, %d wall cells/seam) -> %dx%d cells = %lld total. ")
+		TEXT("AxisCap=%d [%s] TotalCap=%d [%s] => %s"),
+		SlotsPerAxis, SlotsPerAxis, SlotCellsX, SlotCellsY, WallCellsPerSeam,
+		Out.GridDimX, Out.GridDimY, static_cast<long long>(Out.TotalCells),
+		MaxGridDimPerAxis, Out.bAxisWithinCap ? TEXT("OK") : TEXT("OVER"),
+		MaxTotalCells, Out.bTotalWithinCap ? TEXT("OK") : TEXT("OVER"),
+		Out.bWithinBudget ? TEXT("WITHIN BUDGET") : TEXT("EXCEEDS BUDGET (shrink slot / raise CellSize / raise caps)"));
+
+	return Out;
+}
+
+// ======================================================================================
 //  WORLDLESS CORE (no world query — exercised by FPSRoguelite.FlowField.Unit)
 // ======================================================================================
 
@@ -28,6 +73,9 @@ void UFPSRFlowFieldComputer::BuildFromSurfaceData(const FFPSRFlowFieldSurfaceDat
 	GridDimY = Data.GridDimY;
 	GridOrigin = Data.GridOrigin;
 	ActiveCellSize = Data.CellSize;
+	// Adopt the slot's baked step, clamped to the enemy ground-snap limit so a data-driven / over-cap override can't open a
+	// door seam the movement graph rejects (Codex R4/R5). ExtractSurfaceData / door stamps then see the real usable step.
+	ActiveClimbableStepHeight = FMath::Min(Data.ClimbableStepHeight, MaxClimbableStepHeight);
 
 	const int32 NumCells = GridDimX * GridDimY;
 	const int32 NumSurf = NumCells * NumLayers;
@@ -46,13 +94,407 @@ void UFPSRFlowFieldComputer::BuildFromSurfaceData(const FFPSRFlowFieldSurfaceDat
 	bFieldReady = false;
 }
 
+// ======================================================================================
+//  U SUBREGION BAKE (P-A) — one fixed 3x3 grid; atomically transplant / clear per-slot subregions.
+//  Worldless core (exercised by FPSRoguelite.FlowField.Subregion). Bake-in-isolation -> transplant.
+// ======================================================================================
+
+void UFPSRFlowFieldComputer::BuildEmptyGrid(int32 InGridDimX, int32 InGridDimY, const FVector& InGridOrigin, float InCellSize, float InClimbableStepHeight)
+{
+	GridDimX = FMath::Max(0, InGridDimX);
+	GridDimY = FMath::Max(0, InGridDimY);
+	GridOrigin = InGridOrigin;
+	ActiveCellSize = (InCellSize > 0.0f) ? InCellSize : DefaultCellSize;
+	// Door edges use the ACTIVE bake step (not the 60cm hard cap) so a door never connects a step the bake wouldn't (Codex
+	// R2 P2). U requires a UNIFORM step: every committed slot must share this value (CommitSubregion validates) so a door
+	// seam and the slots' baked edges agree (Codex R3). Content sets it here; default = the bake default.
+	ActiveClimbableStepHeight = FMath::Min((InClimbableStepHeight > 0.0f) ? InClimbableStepHeight : DefaultClimbableStepHeight, MaxClimbableStepHeight);
+
+	if (static_cast<int64>(GridDimX) * GridDimY > MaxTotalCells || GridDimX > MaxGridDimPerAxis || GridDimY > MaxGridDimPerAxis)
+	{
+		UE_LOG(LogFPSR, Warning,
+			TEXT("[FlowField] BuildEmptyGrid %dx%d exceeds the U cell budget (axis<=%d, total<=%d); run the P-0 CheckUnifiedGridBudget gate on the slot contract before pre-sizing."),
+			GridDimX, GridDimY, MaxGridDimPerAxis, MaxTotalCells);
+	}
+
+	const int32 NumCells = GridDimX * GridDimY;
+	const int32 NumSurf = NumCells * NumLayers;
+	CellFloorZ.Init(MAX_flt, NumSurf);   // every cell absent (unloaded slot) until a slot is committed
+	BlockedField.Init(false, NumSurf);
+	EdgeMask.Init(0, NumCells * 2);      // no connectivity (all walls) until slots + doors
+	DistField.Init(MAX_int32, NumSurf);
+	FlowField.Init(FVector2D::ZeroVector, NumSurf);
+	bFieldReady = false;
+}
+
+bool UFPSRFlowFieldComputer::CommitSubregion(FIntPoint CellOffset, const FFPSRFlowFieldSurfaceData& SlotData)
+{
+	const int32 SDX = SlotData.GridDimX;
+	const int32 SDY = SlotData.GridDimY;
+
+	// --- Validate (fail-closed): grid non-empty, slot fits, integer-owned alignment (CellSize + origin), array sizes. ---
+	if (GridDimX <= 0 || GridDimY <= 0 || SDX <= 0 || SDY <= 0)
+	{
+		UE_LOG(LogFPSR, Warning, TEXT("[FlowField] CommitSubregion rejected: unified grid or slot is empty."));
+		return false;
+	}
+	if (CellOffset.X < 0 || CellOffset.Y < 0 || CellOffset.X + SDX > GridDimX || CellOffset.Y + SDY > GridDimY)
+	{
+		UE_LOG(LogFPSR, Warning, TEXT("[FlowField] CommitSubregion rejected: slot %dx%d at (%d,%d) does not fit the %dx%d grid."),
+			SDX, SDY, CellOffset.X, CellOffset.Y, GridDimX, GridDimY);
+		return false;
+	}
+	// Past the fit check the target rect is valid & clearable. SEAL it now (Codex R6/R7): ClearSubregion resets the cells and
+	// clears the boundary edges on BOTH sides, so (a) a failed re-bake leaves no stale traversable data, and (b) a successful
+	// re-bake starts from a CLEAN seam — a door opened before the re-bake can't survive a boundary geometry change and
+	// mis-route enemies. Doors are (re-)stamped after commit. On a first bake the rect is already absent -> harmless no-op.
+	ClearSubregion(CellOffset, FIntPoint(SDX, SDY));
+
+	// Any rejection past here returns false with the subregion already sealed (fail-closed).
+	if (!FMath::IsNearlyEqual(SlotData.CellSize, ActiveCellSize, 0.01f))
+	{
+		UE_LOG(LogFPSR, Warning, TEXT("[FlowField] CommitSubregion rejected (subregion sealed): slot CellSize %.2f != unified %.2f."),
+			SlotData.CellSize, ActiveCellSize);
+		return false;
+	}
+	if (!FMath::IsNearlyEqual(SlotData.ClimbableStepHeight, ActiveClimbableStepHeight, 0.01f))
+	{
+		// U requires a uniform climbable step so door seams use the same step gate as the slots' baked edges (Codex R3).
+		UE_LOG(LogFPSR, Warning, TEXT("[FlowField] CommitSubregion rejected (subregion sealed): slot step %.1f != unified %.1f (U requires a uniform step)."),
+			SlotData.ClimbableStepHeight, ActiveClimbableStepHeight);
+		return false;
+	}
+	const float ExpectX = GridOrigin.X + CellOffset.X * ActiveCellSize;
+	const float ExpectY = GridOrigin.Y + CellOffset.Y * ActiveCellSize;
+	if (!FMath::IsNearlyEqual(SlotData.GridOrigin.X, ExpectX, 1.0f) || !FMath::IsNearlyEqual(SlotData.GridOrigin.Y, ExpectY, 1.0f))
+	{
+		UE_LOG(LogFPSR, Warning, TEXT("[FlowField] CommitSubregion rejected (subregion sealed): slot origin (%.1f,%.1f) not cell-aligned to (%.1f,%.1f) (author bounds drift)."),
+			SlotData.GridOrigin.X, SlotData.GridOrigin.Y, ExpectX, ExpectY);
+		return false;
+	}
+	const int32 SlotSurf = SDX * SDY * NumLayers;
+	if (SlotData.CellFloorZ.Num() != SlotSurf || SlotData.BlockedField.Num() != SlotSurf || SlotData.EdgeMask.Num() != SDX * SDY * 2)
+	{
+		UE_LOG(LogFPSR, Warning, TEXT("[FlowField] CommitSubregion rejected (subregion sealed): slot arrays malformed for %dx%d."), SDX, SDY);
+		return false;
+	}
+
+	// Fail-closed on "no reachable floor" (Codex R1 Q1): a slot bake with zero valid surfaces is a bad bake (e.g. a re-stream
+	// with missing collision) -> seal the subregion so the prior slot's data can't linger, rather than commit an all-absent slot.
+	bool bAnyFloor = false;
+	for (int32 i = 0; i < SlotSurf; ++i)
+	{
+		if (SlotData.CellFloorZ[i] != MAX_flt) { bAnyFloor = true; break; }
+	}
+	if (!bAnyFloor)
+	{
+		UE_LOG(LogFPSR, Warning, TEXT("[FlowField] CommitSubregion rejected (subregion sealed): slot at (%d,%d) has no reachable floor."),
+			CellOffset.X, CellOffset.Y);
+		return false;
+	}
+
+	// --- Atomic transplant: surfaces + INTERNAL edges only. The seal above cleared this rect's boundary edges (both sides),
+	//     so cross-slot seams start CLOSED and doors are (re-)stamped after commit. Single game thread + no yield -> no
+	//     half-applied read (Codex R1 Q2). ---
+	for (int32 SY = 0; SY < SDY; ++SY)
+	{
+		for (int32 SX = 0; SX < SDX; ++SX)
+		{
+			const int32 SCell = SY * SDX + SX;
+			const int32 UCell = (CellOffset.Y + SY) * GridDimX + (CellOffset.X + SX);
+
+			for (int32 R = 0; R < NumLayers; ++R)
+			{
+				CellFloorZ[UCell * NumLayers + R] = SlotData.CellFloorZ[SCell * NumLayers + R];
+				BlockedField[UCell * NumLayers + R] = SlotData.BlockedField[SCell * NumLayers + R];
+			}
+
+			// +X / +Y edges are stored on the lower/left cell: copy only when the neighbour is INSIDE the slot. A slot
+			// boundary edge (last col / last row) is never read from SlotData (Codex R1 Q1) and left as-is on the unified grid.
+			if (SX + 1 < SDX) { EdgeMask[UCell * 2 + 0] = SlotData.EdgeMask[SCell * 2 + 0]; }
+			if (SY + 1 < SDY) { EdgeMask[UCell * 2 + 1] = SlotData.EdgeMask[SCell * 2 + 1]; }
+		}
+	}
+
+	bFieldReady = false; // topology changed -> invalidate; caller must RunBFS before enemies sample (Codex R1 Q2)
+	return true;
+}
+
+void UFPSRFlowFieldComputer::ClearSubregion(FIntPoint CellOffset, FIntPoint SlotDims)
+{
+	if (GridDimX <= 0 || GridDimY <= 0)
+	{
+		return;
+	}
+	const int32 X0 = FMath::Max(0, CellOffset.X);
+	const int32 Y0 = FMath::Max(0, CellOffset.Y);
+	const int32 X1 = FMath::Min(GridDimX, CellOffset.X + FMath::Max(0, SlotDims.X)); // exclusive
+	const int32 Y1 = FMath::Min(GridDimY, CellOffset.Y + FMath::Max(0, SlotDims.Y));
+	if (X0 >= X1 || Y0 >= Y1)
+	{
+		return;
+	}
+
+	// Reset the slot's cells to absent + clear their own +X/+Y edges (covers the slot's right/top boundaries).
+	for (int32 UY = Y0; UY < Y1; ++UY)
+	{
+		for (int32 UX = X0; UX < X1; ++UX)
+		{
+			const int32 UCell = UY * GridDimX + UX;
+			for (int32 R = 0; R < NumLayers; ++R)
+			{
+				const int32 Surf = UCell * NumLayers + R;
+				CellFloorZ[Surf] = MAX_flt;
+				BlockedField[Surf] = false;
+				DistField[Surf] = MAX_int32;
+				FlowField[Surf] = FVector2D::ZeroVector;
+			}
+			EdgeMask[UCell * 2 + 0] = 0;
+			EdgeMask[UCell * 2 + 1] = 0;
+		}
+	}
+
+	// Clear the OTHER side of the LEFT and BOTTOM boundaries: the outside neighbours' edges pointing INTO the slot (the
+	// right/top boundaries are the slot cells' own +X/+Y, already zeroed above). Ghost-path prevention (Codex R1 Q3).
+	if (X0 > 0)
+	{
+		for (int32 UY = Y0; UY < Y1; ++UY) { EdgeMask[(UY * GridDimX + (X0 - 1)) * 2 + 0] = 0; }
+	}
+	if (Y0 > 0)
+	{
+		for (int32 UX = X0; UX < X1; ++UX) { EdgeMask[((Y0 - 1) * GridDimX + UX) * 2 + 1] = 0; }
+	}
+
+	bFieldReady = false; // topology changed -> invalidate (Codex R1 Q2)
+}
+
+void UFPSRFlowFieldComputer::SetSurfaceEdge(int32 CellA, int32 RankA, int32 CellB, int32 RankB, bool bOpen)
+{
+	if (GridDimX <= 0 || RankA < 0 || RankA >= NumLayers || RankB < 0 || RankB >= NumLayers)
+	{
+		return;
+	}
+	if (!CellFloorZ.IsValidIndex(CellA * NumLayers + RankA) || !CellFloorZ.IsValidIndex(CellB * NumLayers + RankB))
+	{
+		return;
+	}
+	const int32 AX = CellA % GridDimX, AY = CellA / GridDimX;
+	const int32 BX = CellB % GridDimX, BY = CellB / GridDimX;
+
+	int32 EdgeIdx = INDEX_NONE;
+	int32 LowRank = 0, HighRank = 0; // canonical order: lower/left cell's rank, then higher/right cell's rank
+	if (AY == BY && FMath::Abs(AX - BX) == 1)
+	{
+		const bool bALeft = AX < BX;
+		EdgeIdx = (bALeft ? CellA : CellB) * 2 + 0;
+		LowRank = bALeft ? RankA : RankB;
+		HighRank = bALeft ? RankB : RankA;
+	}
+	else if (AX == BX && FMath::Abs(AY - BY) == 1)
+	{
+		const bool bABottom = AY < BY;
+		EdgeIdx = (bABottom ? CellA : CellB) * 2 + 1;
+		LowRank = bABottom ? RankA : RankB;
+		HighRank = bABottom ? RankB : RankA;
+	}
+	else
+	{
+		return; // not orthogonally adjacent
+	}
+
+	const uint8 Bit = static_cast<uint8>(1u << (LowRank * NumLayers + HighRank));
+	if (bOpen) { EdgeMask[EdgeIdx] |= Bit; }
+	else { EdgeMask[EdgeIdx] &= static_cast<uint8>(~Bit); }
+
+	bFieldReady = false; // topology changed -> invalidate (Codex R1 Q2)
+}
+
+void UFPSRFlowFieldComputer::ExtractSurfaceData(FFPSRFlowFieldSurfaceData& OutData) const
+{
+	OutData.GridDimX = GridDimX;
+	OutData.GridDimY = GridDimY;
+	OutData.GridOrigin = GridOrigin;
+	OutData.CellSize = ActiveCellSize;
+	OutData.ClimbableStepHeight = ActiveClimbableStepHeight;
+	OutData.CellFloorZ = CellFloorZ;
+	OutData.BlockedField = BlockedField;
+	OutData.EdgeMask = EdgeMask;
+}
+
+// ======================================================================================
+//  U DOOR STAMPING (P-B) — grid primitives a breaking door drives. Worldless (exercised by
+//  FPSRoguelite.FlowField.DoorStamp). The door-object -> cell mapping is server/FPSRDoor wiring (PIE).
+// ======================================================================================
+
+void UFPSRFlowFieldComputer::StampCellBlocked(int32 Cell, int32 Rank, bool bBlocked)
+{
+	if (Rank < 0 || Rank >= NumLayers)
+	{
+		return;
+	}
+	const int32 Surf = Cell * NumLayers + Rank;
+	if (!BlockedField.IsValidIndex(Surf))
+	{
+		return;
+	}
+	BlockedField[Surf] = bBlocked;
+	bFieldReady = false; // topology changed -> invalidate (Codex R1 Q2)
+}
+
+int32 UFPSRFlowFieldComputer::StampDoorEdgesOpen(int32 CellA, int32 CellB)
+{
+	const int32 NumCells = GridDimX * GridDimY;
+	if (GridDimX <= 0 || CellA < 0 || CellA >= NumCells || CellB < 0 || CellB >= NumCells)
+	{
+		return 0;
+	}
+	// A door only connects orthogonally-adjacent cells (the flow graph is 4-connected).
+	const int32 AX = CellA % GridDimX, AY = CellA / GridDimX;
+	const int32 BX = CellB % GridDimX, BY = CellB / GridDimX;
+	if (!((AY == BY && FMath::Abs(AX - BX) == 1) || (AX == BX && FMath::Abs(AY - BY) == 1)))
+	{
+		return 0;
+	}
+
+	// Codex R1 Q1: compute the cross-slot rank-pairs from the two cells' BAKED floor Z (not from a stale temp boundary
+	// edge). Open every pair whose Z is within the ACTIVE bake step (ActiveClimbableStepHeight, NOT the MaxClimbableStepHeight
+	// hard cap — Codex R2 P2), so a door never connects two surfaces the bake itself would not have (an unclimbable seam).
+	int32 Opened = 0;
+	for (int32 RA = 0; RA < NumLayers; ++RA)
+	{
+		const float ZA = CellFloorZ[CellA * NumLayers + RA];
+		if (ZA == MAX_flt) { continue; }
+		for (int32 RB = 0; RB < NumLayers; ++RB)
+		{
+			const float ZB = CellFloorZ[CellB * NumLayers + RB];
+			if (ZB == MAX_flt) { continue; }
+			if (FMath::Abs(ZA - ZB) <= ActiveClimbableStepHeight)
+			{
+				SetSurfaceEdge(CellA, RA, CellB, RB, /*bOpen=*/true); // also invalidates the field
+				++Opened;
+			}
+		}
+	}
+	return Opened;
+}
+
+// ======================================================================================
+//  U ORIGIN-AWARE CONNECTIVITY (P-C) — open-grid connected components for the combat gate.
+//  Worldless (exercised by FPSRoguelite.FlowField.Connectivity). Rebuilt by RunBFS.
+// ======================================================================================
+
+void UFPSRFlowFieldComputer::RebuildConnectivity()
+{
+	const int32 NumCells = GridDimX * GridDimY;
+	const int32 NumSurf = NumCells * NumLayers;
+	ComponentLabels.Init(INDEX_NONE, NumSurf);
+	if (NumCells <= 0)
+	{
+		return;
+	}
+
+	// Flood valid, NON-blocked surfaces via traversable edges — mirrors RunBFS's reachability EXACTLY. A blocked surface is
+	// structural impassability (a bake obstacle OR a closed door's stamped gap cell, P-B StampCellBlocked), so it is a WALL
+	// for combat: excluded from every component and never flooded through (Codex R8). Only open reachable surfaces share one.
+	static const int32 DX4[4] = { 1, -1, 0, 0 };
+	static const int32 DY4[4] = { 0, 0, 1, -1 };
+	TArray<int32> Stack;
+	int32 NextLabel = 0;
+	for (int32 Cell = 0; Cell < NumCells; ++Cell)
+	{
+		for (int32 Rank = 0; Rank < NumLayers; ++Rank)
+		{
+			const int32 Seed = Cell * NumLayers + Rank;
+			if (CellFloorZ[Seed] == MAX_flt || BlockedField[Seed] || ComponentLabels[Seed] != INDEX_NONE)
+			{
+				continue;
+			}
+			const int32 Label = NextLabel++;
+			Stack.Reset();
+			Stack.Push(Seed);
+			ComponentLabels[Seed] = Label;
+			while (Stack.Num() > 0)
+			{
+				const int32 S = Stack.Pop();
+				const int32 SC = S / NumLayers;
+				const int32 SR = S - SC * NumLayers;
+				const int32 CX = SC % GridDimX;
+				const int32 CY = SC / GridDimX;
+				for (int32 N = 0; N < 4; ++N)
+				{
+					const int32 NX = CX + DX4[N];
+					const int32 NY = CY + DY4[N];
+					if (NX < 0 || NX >= GridDimX || NY < 0 || NY >= GridDimY)
+					{
+						continue;
+					}
+					const int32 NCell = NY * GridDimX + NX;
+					for (int32 RB = 0; RB < NumLayers; ++RB)
+					{
+						const int32 NSurf = NCell * NumLayers + RB;
+						if (CellFloorZ[NSurf] == MAX_flt || BlockedField[NSurf] || ComponentLabels[NSurf] != INDEX_NONE)
+						{
+							continue;
+						}
+						if (!IsSurfaceEdgeTraversable(SC, SR, NCell, RB))
+						{
+							continue;
+						}
+						ComponentLabels[NSurf] = Label;
+						Stack.Push(NSurf);
+					}
+				}
+			}
+		}
+	}
+}
+
+bool UFPSRFlowFieldComputer::AreSurfacesConnected(int32 SurfA, int32 SurfB) const
+{
+	// Stale-topology guard (Codex R9): a door/slot mutation sets bFieldReady=false and leaves ComponentLabels stale until
+	// the next RunBFS rebuilds them. Fail-closed (no damage across an uncertain seam) until connectivity is refreshed — the
+	// subsystem runs RunBFS immediately after a door stamp, so this window is a single tick.
+	if (!bFieldReady)
+	{
+		return false;
+	}
+	if (!ComponentLabels.IsValidIndex(SurfA) || !ComponentLabels.IsValidIndex(SurfB))
+	{
+		return false;
+	}
+	const int32 LA = ComponentLabels[SurfA];
+	return LA != INDEX_NONE && LA == ComponentLabels[SurfB];
+}
+
+bool UFPSRFlowFieldComputer::AreWorldLocationsConnected(const FVector& A, const FVector& B) const
+{
+	const int32 CellA = WorldToCellIndex(A);
+	const int32 CellB = WorldToCellIndex(B);
+	if (CellA == INDEX_NONE || CellB == INDEX_NONE)
+	{
+		return false;
+	}
+	const int32 RankA = PickRankForFootZ(CellA, A.Z - EnemyStandOffset);
+	const int32 RankB = PickRankForFootZ(CellB, B.Z - EnemyStandOffset);
+	if (RankA == INDEX_NONE || RankB == INDEX_NONE)
+	{
+		return false;
+	}
+	return AreSurfacesConnected(CellA * NumLayers + RankA, CellB * NumLayers + RankB);
+}
+
 void UFPSRFlowFieldComputer::RunBFS(const TArray<int32>& SourceSurfaces)
 {
 	if (GridDimX <= 0 || GridDimY <= 0)
 	{
 		bFieldReady = false;
+		ComponentLabels.Reset();
 		return;
 	}
+
+	// Connectivity is topology-based (source-independent), so refresh it here -> it's valid whenever the field is queried
+	// (the combat gate reads it right after the subsystem's post-mutation RunBFS, same freshness contract as the flow).
+	RebuildConnectivity();
 
 	const int32 NumSurf = GridDimX * GridDimY * NumLayers;
 	for (int32 i = 0; i < NumSurf; ++i)
@@ -322,6 +764,31 @@ FBox UFPSRFlowFieldComputer::GetGridBounds() const
 // ======================================================================================
 //  PRODUCTION PATH (server, world queries) — funnels into the worldless core above
 // ======================================================================================
+
+bool UFPSRFlowFieldComputer::BakeSlotIntoUnifiedGrid(UWorld* World, const AFPSRFlowFieldBoundsVolume* SlotVolume, float FloorZ, FIntPoint CellOffset)
+{
+	if (!World || GridDimX <= 0 || GridDimY <= 0)
+	{
+		return false;
+	}
+	// Fail-closed on a null slot volume (Codex R2 P2): BuildFromWorldTrace(nullptr) would fall back to a huge origin-centered
+	// bake, NOT the slot — an unsafe grid we'd only reject later on alignment. Reject it here explicitly.
+	if (!SlotVolume)
+	{
+		UE_LOG(LogFPSR, Warning, TEXT("[FlowField] BakeSlotIntoUnifiedGrid rejected: null slot volume (would fall back to an origin-centered bake, not the slot)."));
+		return false;
+	}
+
+	// Bake the slot in ISOLATION on a throwaway grid via the proven world-trace path (no surgery on BuildObstacleMask's
+	// flood-fill), then transplant. If the isolation bake auto-coarsens (CellSize drift) or yields no reachable floor,
+	// CommitSubregion rejects it (fail-closed) so the subregion stays a blocked wall. In-world crossing proven at P-B.
+	UFPSRFlowFieldComputer* Temp = NewObject<UFPSRFlowFieldComputer>();
+	Temp->BuildFromWorldTrace(World, SlotVolume, FloorZ);
+
+	FFPSRFlowFieldSurfaceData SlotData;
+	Temp->ExtractSurfaceData(SlotData);
+	return CommitSubregion(CellOffset, SlotData);
+}
 
 void UFPSRFlowFieldComputer::BuildFromWorldTrace(UWorld* World, const AFPSRFlowFieldBoundsVolume* BoundsVolume, float FloorZ)
 {
@@ -731,6 +1198,9 @@ void UFPSRFlowFieldComputer::BuildFromWorldTrace(UWorld* World, const AFPSRFlowF
 		}
 	}
 
+	// Carry the CLAMPED step (BuildObstacleMask clamps ActiveClimbableStepHeight above) so the adopt round-trip preserves
+	// the real bake step, not a pre-clamp override — door stamps must match the baked edges (Codex R5).
+	Data.ClimbableStepHeight = ActiveClimbableStepHeight;
 	// Adopt the baked graph into the hot-path arrays (worldless core).
 	BuildFromSurfaceData(Data);
 }

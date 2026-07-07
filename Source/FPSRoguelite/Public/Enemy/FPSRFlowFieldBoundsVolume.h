@@ -36,6 +36,15 @@ public:
 	/** MapId accessor (unset = Default single-map). */
 	const FGameplayTag& GetMapId() const { return MapId; }
 
+	/** U (2026-07-07): mark this volume as the FIXED 3x3 UNIFIED EXTENT — its box covers ALL slots. When present, the flow
+	 *  subsystem pre-sizes ONE continuous grid over this box and bakes each MapId'd slot volume into it, instead of routing
+	 *  swarm flow through the per-map registry. Exactly one per level; absent = legacy per-map field (unchanged). */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "FPSR|Flow Field")
+	bool bUnifiedExtent = false;
+
+	/** True if this volume defines the U unified 3x3 extent (see bUnifiedExtent). */
+	bool IsUnifiedExtent() const { return bUnifiedExtent; }
+
 	/** Per-map cell size override (cm); 0 = use the subsystem default. >0 trades grid resolution vs recompute cost. */
 	float GetCellSizeOverride() const { return CellSizeOverride; }
 

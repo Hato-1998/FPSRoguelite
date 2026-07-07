@@ -87,6 +87,7 @@ void UFPSRFlowFieldSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 	// (PlayerStart floor anchor, S1a parity); a MapId'd volume -> its own per-map computer (own-box floor anchor). Streamed
 	// sublevels that arrive later are baked by the MapStreamSubsystem on collision-ready (S3).
 	bool bAnyVolume = false;
+	const AFPSRFlowFieldBoundsVolume* UnifiedVolume = nullptr;
 	for (TActorIterator<AFPSRFlowFieldBoundsVolume> It(&InWorld); It; ++It)
 	{
 		const AFPSRFlowFieldBoundsVolume* Volume = *It;
@@ -94,14 +95,26 @@ void UFPSRFlowFieldSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 		{
 			continue;
 		}
+		if (Volume->IsUnifiedExtent())
+		{
+			UnifiedVolume = Volume; // U extent — built below (not a per-map slot)
+			continue;
+		}
 		bAnyVolume = true;
 		const FGameplayTag Map = Volume->GetMapId();
 		const float FloorZ = Map.IsValid() ? DetectFloorZForVolume(InWorld, *Volume) : DetectFloorZ(InWorld);
 		BakeMap(Map, Volume, FloorZ);
 	}
-	if (!bAnyVolume)
+	if (!bAnyVolume && !UnifiedVolume)
 	{
 		BakeMap(FGameplayTag(), nullptr, DetectFloorZ(InWorld)); // origin-centered fallback Default grid (existing maps)
+	}
+
+	// U (2026-07-07): if a bUnifiedExtent volume is present, build the single continuous grid over it and bake each loaded
+	// slot into it. The per-map registry above still exists (allocator / IsMapFieldReady coexistence) until P-G removes it.
+	if (UnifiedVolume)
+	{
+		BuildUnifiedField(InWorld, *UnifiedVolume);
 	}
 
 	InWorld.GetTimerManager().SetTimer(
@@ -130,6 +143,83 @@ UFPSRFlowFieldComputer* UFPSRFlowFieldSubsystem::BakeMap(const FGameplayTag& Map
 	return Slot;
 }
 
+void UFPSRFlowFieldSubsystem::BuildUnifiedField(UWorld& InWorld, const AFPSRFlowFieldBoundsVolume& UnifiedVolume)
+{
+	if (!HasServerAuthority())
+	{
+		return;
+	}
+	const FBox Extent = UnifiedVolume.GetWorldBounds();
+	if (!Extent.IsValid)
+	{
+		UE_LOG(LogFPSR, Warning, TEXT("[FlowField] U: bUnifiedExtent volume has no valid bounds; unified field not built."));
+		return;
+	}
+	const float CellSize = (UnifiedVolume.GetCellSizeOverride() > 0.0f) ? UnifiedVolume.GetCellSizeOverride() : 200.0f;
+	const float Step = UnifiedVolume.GetClimbableStepHeightOverride(); // 0 -> BuildEmptyGrid uses the bake default (45)
+	const float FloorZ = DetectFloorZForVolume(InWorld, UnifiedVolume);
+	const FVector Origin(Extent.Min.X, Extent.Min.Y, FloorZ);
+	const int32 DimX = FMath::Max(1, FMath::CeilToInt(Extent.GetSize().X / CellSize));
+	const int32 DimY = FMath::Max(1, FMath::CeilToInt(Extent.GetSize().Y / CellSize));
+
+	// Enforce the P-0 cell budget BEFORE allocating (Codex R10): unlike BuildFromWorldTrace, BuildEmptyGrid does NOT coarsen,
+	// so an oversized bUnifiedExtent must fail here (leaving the per-map registry as the flow source) rather than allocate an
+	// over-budget grid with runaway recompute / memory. This is the P-0 gate applied to the actual authored extent.
+	if (DimX > UFPSRFlowFieldComputer::GetMaxGridDimPerAxis() || DimY > UFPSRFlowFieldComputer::GetMaxGridDimPerAxis() ||
+		static_cast<int64>(DimX) * DimY > UFPSRFlowFieldComputer::GetMaxTotalCells())
+	{
+		UE_LOG(LogFPSR, Error,
+			TEXT("[FlowField] U: unified extent %dx%d cells exceeds the budget (axis<=%d, total<=%d); NOT building the unified grid (per-map registry remains the flow source). Shrink the extent or raise the volume's CellSizeOverride (P-0 gate)."),
+			DimX, DimY, UFPSRFlowFieldComputer::GetMaxGridDimPerAxis(), UFPSRFlowFieldComputer::GetMaxTotalCells());
+		return;
+	}
+
+	UnifiedComputer = NewObject<UFPSRFlowFieldComputer>(this);
+	UnifiedComputer->BuildEmptyGrid(DimX, DimY, Origin, CellSize, Step);
+	UE_LOG(LogFPSR, Log, TEXT("[FlowField] U unified grid %dx%d cell=%.0f origin=%s built from bUnifiedExtent volume."),
+		DimX, DimY, CellSize, *Origin.ToString());
+
+	// Bake every currently-loaded MapId'd slot volume into the unified grid (streamed slots bake in later via BakeDiscoveredMap).
+	int32 Baked = 0;
+	for (TActorIterator<AFPSRFlowFieldBoundsVolume> It(&InWorld); It; ++It)
+	{
+		const AFPSRFlowFieldBoundsVolume* Slot = *It;
+		if (Slot && !Slot->IsUnifiedExtent() && BakeSlotIntoUnified(InWorld, *Slot))
+		{
+			++Baked;
+		}
+	}
+	UE_LOG(LogFPSR, Log, TEXT("[FlowField] U: %d slot(s) baked into the unified grid at world begin."), Baked);
+}
+
+bool UFPSRFlowFieldSubsystem::BakeSlotIntoUnified(UWorld& InWorld, const AFPSRFlowFieldBoundsVolume& Slot)
+{
+	if (!UnifiedComputer)
+	{
+		return false;
+	}
+	const FBox SlotBox = Slot.GetWorldBounds();
+	if (!SlotBox.IsValid)
+	{
+		return false;
+	}
+	// Integer-owned alignment (Codex R1 Q4): CellOffset is the source of truth; CommitSubregion rejects a slot whose box
+	// doesn't snap to Origin + CellOffset*CellSize (author bounds drift) -> that subregion stays sealed (fail-closed).
+	const FVector Origin = UnifiedComputer->GetGridOrigin();
+	const float CellSize = UnifiedComputer->GetCellSize();
+	const FIntPoint CellOffset(
+		FMath::RoundToInt((SlotBox.Min.X - Origin.X) / CellSize),
+		FMath::RoundToInt((SlotBox.Min.Y - Origin.Y) / CellSize));
+	const float SlotFloorZ = DetectFloorZForVolume(InWorld, Slot);
+	const bool bOk = UnifiedComputer->BakeSlotIntoUnifiedGrid(&InWorld, &Slot, SlotFloorZ, CellOffset);
+	if (!bOk)
+	{
+		UE_LOG(LogFPSR, Warning, TEXT("[FlowField] U: slot '%s' at offset (%d,%d) failed to bake (misaligned / no floor / step mismatch) — subregion sealed."),
+			*Slot.GetMapId().ToString(), CellOffset.X, CellOffset.Y);
+	}
+	return bOk;
+}
+
 bool UFPSRFlowFieldSubsystem::BakeDiscoveredMap(const FGameplayTag& MapId)
 {
 	if (!HasServerAuthority() || !MapId.IsValid())
@@ -147,6 +237,13 @@ bool UFPSRFlowFieldSubsystem::BakeDiscoveredMap(const FGameplayTag& MapId)
 		if (Volume && Volume->GetMapId() == MapId)
 		{
 			BakeMap(MapId, Volume, DetectFloorZForVolume(*World, *Volume));
+			if (UnifiedComputer)
+			{
+				// U: swarm flow samples ONLY the unified field, so readiness = the unified slot bake succeeded. If it fails
+				// (misaligned / no floor / step mismatch) report NOT ready, so the stream subsystem keeps the boundary
+				// blockers up rather than letting players into a slot the swarm can't route through (Codex R10).
+				return BakeSlotIntoUnified(*World, *Volume);
+			}
 			return true;
 		}
 	}
@@ -209,6 +306,7 @@ void UFPSRFlowFieldSubsystem::Deinitialize()
 		World->GetTimerManager().ClearTimer(RecomputeTimerHandle);
 	}
 	Computers.Reset();
+	UnifiedComputer = nullptr;
 	Super::Deinitialize();
 }
 
@@ -242,6 +340,12 @@ void UFPSRFlowFieldSubsystem::RecomputeAllFields()
 			Pair.Value->RecomputeFromWorld(World);
 		}
 	}
+	if (UnifiedComputer)
+	{
+		// U: single continuous field, seeded by every player physically inside its extent (also rebuilds connectivity for
+		// the origin-aware combat gate). This is the door-open-topology recompute the near-cap bench measured (~5ms @39k).
+		UnifiedComputer->RecomputeFromWorld(World);
+	}
 
 #if !UE_BUILD_SHIPPING
 	if (CVarFlowFieldDebug.GetValueOnAnyThread() > 0)
@@ -270,6 +374,10 @@ void UFPSRFlowFieldSubsystem::RecomputeAllFields()
 
 FVector UFPSRFlowFieldSubsystem::SampleFlowDirection(const FVector& WorldLocation) const
 {
+	if (UnifiedComputer)
+	{
+		return UnifiedComputer->Sample(WorldLocation); // U: single continuous field covers all slots
+	}
 	// By-location routing (S1b bridge): pick the computer whose grid AABB (XY) contains WorldLocation. Maps are spatially
 	// separated so at most one contains it. S2a replaces this with a MapId-keyed sample (enemy carries its map).
 	for (const TPair<FGameplayTag, TObjectPtr<UFPSRFlowFieldComputer>>& Pair : Computers)
@@ -290,6 +398,10 @@ FVector UFPSRFlowFieldSubsystem::SampleFlowDirection(const FVector& WorldLocatio
 
 FVector UFPSRFlowFieldSubsystem::SampleFlowDirection(const FGameplayTag& MapId, const FVector& WorldLocation) const
 {
+	if (UnifiedComputer)
+	{
+		return UnifiedComputer->Sample(WorldLocation); // U: single field — the enemy's MapId is irrelevant (one grid)
+	}
 	if (const TObjectPtr<UFPSRFlowFieldComputer>* Slot = Computers.Find(MapId))
 	{
 		if (*Slot)
