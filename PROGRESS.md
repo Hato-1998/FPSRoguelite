@@ -6,6 +6,14 @@
 
 **최종 갱신: 2026-07-07**
 
+## 🔔 핸드오프 (2026-07-08 i · **P2 ③c 미션 스케줄 타임라인 인터랙티브 편집 → main 머지. 남은 = ③b 콘텐츠(미션DA에 Tuning 저작+PIE)만**) — 🎯 **③c(에디터) 구현·빌드(28액션)·자동화 DataEditor5/5·Codex게이트(P2 1건 교정)·`--no-ff` 머지 완료. P2 ①②③(a·c) 코드 전부 완료 — 남은 건 ③b 콘텐츠 저작뿐.**
+> **③c 머지**: `phase/editor-tooling-p2c-timeline` → main `--no-ff`. 커밋 `7a0b715`(③c)+`65c0b60`(Codex P2: 좁은 윈도우 가장자리 히트테스트). **미푸시(로컬 main만)**.
+> **③c 요약**(과설계 게이트 준수 — MissionPool·시간 타이핑은 IDetailsView 무료, 커스텀=시각 드래그만): `SFPSRScheduleTimelineBar` 읽기전용→인터랙티브. 헬퍼 `SetScheduleWindowTime`(트랜잭션·클램프 Min≥0/Max≥Min·no-op). 바: 가장자리(±6px) 드래그=MinTime/MaxTime 리사이즈·몸통 드래그=이동(폭유지), 커밋=마우스업 1회, 드래그중 Pending preview(노란색), OnCursorQuery=ResizeLeftRight. 배선=OnEdited→dirty추적. 테스트 `FFPSRDataEditorScheduleTimeTest`. **드래그 UX 느낌=사용자 PIE 검증 예정**.
+> **남은 ③b 콘텐츠(플랜-우선, editor-bridge/PIE)**: 미션 DA 7종에 각 `UFPSRMissionTuning_*` 객체 저작(현재 BP CDO 값 이관; C++ 기본값 사용 중이면 기본 Tuning 저작만) → **PIE 검증(사용자, 튜닝값 실림 확인)** → 이후 미션 액터 fallback 필드 제거(후속 커밋). 방식: 에디터 열고 VibeUE 또는 헤드리스 커맨드릿(python DA 저작 [[headless-gas-content-authoring]]).
+> **②가 검출한 실콘텐츠 누수(사용자 수정 대기, 유효)**: `DA_Card_FireRate_ThisWeapon`이 `DA_Character_CardPool` 전역 `Cards`에 배선 → 무기별 풀로 이동(🔒콘텐츠 버그). 미수정 시 `validate-data` exit1.
+> **④ 양방향 배선뷰=보류**. 리포트=[`Docs/Review/20260707-data-tooling-p1.md`](Docs/Review/20260707-data-tooling-p1.md).
+> **절차**: ③b=플랜-우선(editor-bridge). 신규소스=에디터 종료→`-NoXGE`빌드. Content 미커밋(사용자 WIP) 손대지 말 것.
+
 ## 🔔 핸드오프 (2026-07-07 h · **P2 ③a 미션 튜닝 DA 소유 마이그레이션 → main 머지 완료. 남은 ③=③b 콘텐츠 저작·③c 타임라인 편집기**) — 🎯 **③a(런타임) 구현·빌드(70액션)·자동화(Mission.Tuning+DataEditor4/4)·Codex 클린·`--no-ff` 머지 완료. 동작 무변경(소프트).**
 > **③a 머지**: `phase/editor-tooling-p2-mission-tuning` → main `--no-ff`. 커밋 `daeb321`(SSOT §2-8-1)+`27fe724`(코드). **미푸시(로컬 main만)**.
 > **③a 요약**: 미션 타입별 튜닝을 미션 액터 BP CDO→미션 DA로 이관(폴리모픽 Instanced `UFPSRMissionTuning` 베이스+타입별 서브클래스 7종, 카드 효과 패턴). DA에 `Instanced Tuning`+IsDataValid 매칭(null=경고/불일치=에러). 베이스 액터 `GetExpectedTuningClass()`+`GetTuningBase()`. **7개 미션 소프트 마이그레이션**: OnMissionActivated서 tuning-or-fallback(tick값=`Eff*` 캐시·스폰클래스=로컬), **Tuning null=기존 필드 fallback→동작 무변경(BP CDO값 무손실)**. 기존 필드는 fallback 유지(콘텐츠 이관 후 제거 예정). 테스트 `FFPSRMissionTuningTest`. ⚠️테스트 초기 실패=`IsDataValid==Valid` 오단언(깨끗=NotValidated 반환)→`!=Invalid`로 교정(코드 무변경).
