@@ -325,16 +325,17 @@ private:
 			const float StartX = TimeToX(Window.MinTime);
 			const float EndX = FMath::Max(TimeToX(Window.MaxTime), StartX + 2.0f);
 
-			if (FMath::Abs(LocalPos.X - StartX) <= EdgeTolerance)
+			// Edge grab: when the mouse is within tolerance of BOTH edges (a narrow window where StartX/EndX are
+			// closer than 2*EdgeTolerance), pick the CLOSEST edge — otherwise the left-edge check would always win
+			// and the right edge (Max) could never be resized on a narrow/exact window (Codex P2).
+			const float DistToStart = FMath::Abs(LocalPos.X - StartX);
+			const float DistToEnd = FMath::Abs(LocalPos.X - EndX);
+			const bool bNearStart = DistToStart <= EdgeTolerance;
+			const bool bNearEnd = DistToEnd <= EdgeTolerance;
+			if (bNearStart || bNearEnd)
 			{
 				OutWindowIndex = WindowIndex;
-				OutMode = EDragMode::Min;
-				return;
-			}
-			if (FMath::Abs(LocalPos.X - EndX) <= EdgeTolerance)
-			{
-				OutWindowIndex = WindowIndex;
-				OutMode = EDragMode::Max;
+				OutMode = (bNearStart && (!bNearEnd || DistToStart <= DistToEnd)) ? EDragMode::Min : EDragMode::Max;
 				return;
 			}
 			if (LocalPos.X > StartX && LocalPos.X < EndX)
