@@ -6,6 +6,12 @@
 
 **최종 갱신: 2026-07-07**
 
+## 🔔 핸드오프 (2026-07-07 d · FPSR Data Editor UX 후속 = 좌측 카테고리 트리 + 전체 한국어화 → main 머지) — 🎯 **사용자 요청 2건 완료·머지(`7d5526d`). 다음 = 사용자 인터랙티브 테스트(에디터 재기동).**
+> **머지**: `phase/editor-tooling-p1b-ui-korean` → main `--no-ff`(`7d5526d`). ①좌측 패널 앵커+고아 2리스트 → **단일 `STreeView` 카테고리 브라우저**(무기/카드/카드풀/미션/런스케줄/로드아웃풀/프래그먼트 7분류, **전체 에셋** 표시 — 기존엔 배선된 무기·카드·미션 미표시가 버그였음; 고아=주황+"(미배선)" 인라인 태그, 카테고리 항상 표시+개수+기본 펼침). ②**UI 전체 한국어화**(위젯·헬퍼 라우트/사유·모듈 메뉴/탭·효과 그리드 라벨·언두 라벨, LOCTEXT 키 유지; magnitude 그리드 한국어 헤더행 추가, rarity명은 영어 유지).
+> **정합 보존**: 트리 선택→기존 `OnAssetSelected` 재사용, 정합-핵심 로직(Value_Lambda·RebuildAuxPanels·reachable 무기필터·SetCardGroup·저장실패추적·route add+타겟검증) 전부 무변경(문자열+좌측 discovery만).
+> **검증**: -NoXGE 빌드 Succeeded + 라운드트립2+ModuleLoads Success. ⚠️**Codex 머지게이트=2회 연속 무응답(빈 출력, 사용량/레이트 추정) → 5분 워치독 정책으로 스킵**(정합 로직 무변경+직전 5R 클린+빌드/테스트 통과 근거). 재개 시 게이트 재시도 가능.
+> **다음**: 사용자 인터랙티브 테스트(에디터 재기동→Tools>FPSR>데이터 에디터→트리서 전체 에셋 확인·고아 배선·magnitude 편집). 미푸시(로컬 main). P2 후속=이전 핸드오프 c와 동일.
+
 ## 🔔 핸드오프 (2026-07-07 c · P1 데이터 편집 툴 = FPSR Data Editor → main 머지 완료) — 🎯 **무기·미션·카드 데이터 편집 툴 P1 구현·빌드·라운드트립테스트·Codex 머지게이트(5R 클린)·main `--no-ff` 머지 완료(`c4e0d77`). 다음 = 사용자 인터랙티브 테스트(에디터 재기동→Tools>FPSR>Data Editor).**
 > **머지**: `phase/editor-tooling-p1-dataeditor` → main `--no-ff`(`c4e0d77`). P0 검증 시임 위 실제 편집 툴. **과설계 게이트 실증**(엔진소스): 무기 밸런스 그리드는 UE 내장 Property Matrix가 공짜 → 문서화(`Docs/PropertyMatrix_DataEditing.md`) 대체, 커스텀은 내장이 못 하는 **배선 멤버십**·**묻힌 per-rarity magnitude**에만.
 > **구현**: ①런타임 시임 = `EFPSRCardRoute` 닫힌 enum + `UFPSRCardEffect` WITH_EDITOR 가상(`GetEditorGridLabel`/`GetEditorEligibleRoutes`, 효과별 로컬선언=중앙 switch 0=OCP) + `UFPSRCardDataAsset::SetEffectRarityMagnitude`(존재 티어 in-place). ②에디터 툴 = `Tools>FPSR>Data Editor` 단일 도킹탭(`SFPSRDataEditorWidget`): 좌 앵커/고아(P0 `FFPSRAnchoredValidationService` 재사용)·우 `IDetailsView`(전 배열 편집)+카드 magnitude 그리드(행=(카드,효과))+미션 read-only 타임라인 바+route-인지 guided-add(3축 카드/미션/무기). `FFPSRDataEditorHelpers`(멤버십·magnitude·preflight·`SetCardGroup`·`SavePackages`). "Save Modified + Rescan"(디스크기준 stale 명시).
