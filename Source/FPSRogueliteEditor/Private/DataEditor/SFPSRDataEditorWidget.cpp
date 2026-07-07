@@ -959,20 +959,39 @@ void SFPSRDataEditorWidget::RefreshCardTargetOptions()
 	GuidedAddTargetOptions.Reset();
 	if (GuidedAddSelectedRoute.IsValid())
 	{
+		const bool bPoolRoute = RouteExpectsPool(*GuidedAddSelectedRoute);
 		IAssetRegistry& AssetRegistry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
 		FARFilter Filter;
 		Filter.bRecursiveClasses = false;
-		Filter.ClassPaths.Add((RouteExpectsPool(*GuidedAddSelectedRoute)
+		Filter.ClassPaths.Add((bPoolRoute
 			? UFPSRCardPoolDataAsset::StaticClass()
 			: UFPSRWeaponDataAsset::StaticClass())->GetClassPathName());
 		TArray<FAssetData> Candidates;
 		AssetRegistry.GetAssets(Filter, Candidates);
+
+		// Weapon-route targets must be REACHABLE weapons: wiring a card into an ORPHAN weapon wouldn't make the card
+		// reachable (the weapon itself is unreachable from any anchor), so the "repair" would silently leave the card
+		// orphaned and still report "Added.". Pool routes target card pools, which ARE anchors (reachable by
+		// definition), so they need no such filter.
+		TSet<FName> ReachablePackages;
+		if (!bPoolRoute)
+		{
+			for (const FAssetData& Reachable : FFPSRAnchoredValidationService::GatherAssetsToValidate())
+			{
+				ReachablePackages.Add(Reachable.PackageName);
+			}
+		}
 		for (const FAssetData& Candidate : Candidates)
 		{
-			if (!FFPSRAnchoredValidationService::IsExcludedPath(Candidate.PackagePath))
+			if (FFPSRAnchoredValidationService::IsExcludedPath(Candidate.PackagePath))
 			{
-				GuidedAddTargetOptions.Add(MakeShared<FAssetData>(Candidate));
+				continue;
 			}
+			if (!bPoolRoute && !ReachablePackages.Contains(Candidate.PackageName))
+			{
+				continue; // orphan weapon — wiring a card into it wouldn't un-orphan the card
+			}
+			GuidedAddTargetOptions.Add(MakeShared<FAssetData>(Candidate));
 		}
 	}
 	GuidedAddSelectedTarget = GuidedAddTargetOptions.Num() > 0 ? GuidedAddTargetOptions[0] : nullptr;
