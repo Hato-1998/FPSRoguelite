@@ -87,6 +87,11 @@ float AFPSRMissionActor::ResolveZoneRadius(float InRadius) const
 	return Override > 0.0f ? Override : InRadius;
 }
 
+const UFPSRMissionTuning* AFPSRMissionActor::GetTuningBase() const
+{
+	return MissionData ? MissionData->Tuning : nullptr;
+}
+
 void AFPSRMissionActor::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);

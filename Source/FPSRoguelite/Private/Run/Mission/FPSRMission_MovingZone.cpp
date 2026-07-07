@@ -2,6 +2,7 @@
 
 #include "Run/Mission/FPSRMission_MovingZone.h"
 #include "Run/Mission/FPSRMissionPointSet.h"
+#include "Run/Mission/FPSRMissionTuning.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/Pawn.h"
@@ -14,8 +15,18 @@ AFPSRMission_MovingZone::AFPSRMission_MovingZone()
 	SetReplicateMovement(true);
 }
 
+TSubclassOf<UFPSRMissionTuning> AFPSRMission_MovingZone::GetExpectedTuningClass() const
+{
+	return UFPSRMissionTuning_MovingZone::StaticClass();
+}
+
 void AFPSRMission_MovingZone::OnMissionActivated()
 {
+	// Tuning-or-fallback (§2-8-1), resolved once here rather than every tick.
+	const UFPSRMissionTuning_MovingZone* T = Cast<UFPSRMissionTuning_MovingZone>(GetTuningBase());
+	EffZoneRadius = T ? T->ZoneRadius : ZoneRadius;
+	EffRequiredHoldSeconds = T ? T->RequiredHoldSeconds : RequiredHoldSeconds;
+
 	Points.Reset();
 	if (PointSet)
 	{
@@ -44,7 +55,7 @@ void AFPSRMission_MovingZone::OnMissionTickServer(float DeltaSeconds)
 
 	// Occupancy: any player within ZoneRadius (2D) of the current point accumulates hold time.
 	const FVector ZoneLoc = GetActorLocation();
-	const float Radius = ResolveZoneRadius(ZoneRadius); // live-tunable via FPSR.Mission.ZoneRadius
+	const float Radius = ResolveZoneRadius(EffZoneRadius); // live-tunable via FPSR.Mission.ZoneRadius
 	bool bPlayerPresent = false;
 	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
 	{
@@ -64,7 +75,7 @@ void AFPSRMission_MovingZone::OnMissionTickServer(float DeltaSeconds)
 	if (bPlayerPresent)
 	{
 		HeldSeconds += DeltaSeconds;
-		if (HeldSeconds >= RequiredHoldSeconds)
+		if (HeldSeconds >= EffRequiredHoldSeconds)
 		{
 			// Point captured — instantly switch to the next point, or complete when the circuit is done.
 			++CurrentPoint;
@@ -83,7 +94,7 @@ void AFPSRMission_MovingZone::OnMissionTickServer(float DeltaSeconds)
 	}
 
 	// Overall progress across the whole circuit (captured points + current point's hold fraction).
-	const float PerPoint = FMath::Clamp(HeldSeconds / FMath::Max(RequiredHoldSeconds, 0.01f), 0.0f, 1.0f);
+	const float PerPoint = FMath::Clamp(HeldSeconds / FMath::Max(EffRequiredHoldSeconds, 0.01f), 0.0f, 1.0f);
 	SetMissionProgress(FMath::Clamp((CurrentPoint + PerPoint) / static_cast<float>(Points.Num()), 0.0f, 1.0f));
 
 #if ENABLE_DRAW_DEBUG

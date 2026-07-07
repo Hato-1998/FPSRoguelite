@@ -3,11 +3,17 @@
 #include "Run/Mission/FPSRMission_CollectOrbs.h"
 #include "Run/Mission/FPSRMissionOrb.h"
 #include "Run/Mission/FPSRMissionPointSet.h"
+#include "Run/Mission/FPSRMissionTuning.h"
 #include "Engine/World.h"
 
 AFPSRMission_CollectOrbs::AFPSRMission_CollectOrbs()
 {
 	PrimaryActorTick.TickInterval = 0.1f;
+}
+
+TSubclassOf<UFPSRMissionTuning> AFPSRMission_CollectOrbs::GetExpectedTuningClass() const
+{
+	return UFPSRMissionTuning_CollectOrbs::StaticClass();
 }
 
 void AFPSRMission_CollectOrbs::OnMissionActivated()
@@ -21,6 +27,11 @@ void AFPSRMission_CollectOrbs::OnMissionActivated()
 	SpawnedOrbs.Reset();
 	CollectedOrbs = 0;
 
+	// Tuning-or-fallback (§2-8-1): only used here (OnMissionActivated), so no need to cache to a member.
+	const UFPSRMissionTuning_CollectOrbs* T = Cast<UFPSRMissionTuning_CollectOrbs>(GetTuningBase());
+	const TSubclassOf<AFPSRMissionOrb> EffOrbClass = T ? T->OrbClass : OrbClass;
+	const TArray<FVector>& EffOrbRelativeLocations = T ? T->OrbRelativeLocations : OrbRelativeLocations;
+
 	// Spawn locations: a designer point set (world points) when assigned; otherwise fall back to relative
 	// offsets from the mission location (a default test set when none authored) so it works without placement.
 	TArray<FVector> SpawnLocations;
@@ -30,7 +41,7 @@ void AFPSRMission_CollectOrbs::OnMissionActivated()
 	}
 	if (SpawnLocations.Num() == 0)
 	{
-		TArray<FVector> Offsets = OrbRelativeLocations;
+		TArray<FVector> Offsets = EffOrbRelativeLocations;
 		if (Offsets.Num() == 0)
 		{
 			Offsets = { FVector(600.0f, 0.0f, 50.0f), FVector(0.0f, 600.0f, 50.0f), FVector(-600.0f, 0.0f, 50.0f) };
@@ -42,7 +53,7 @@ void AFPSRMission_CollectOrbs::OnMissionActivated()
 		}
 	}
 
-	UClass* SpawnClass = OrbClass ? OrbClass.Get() : AFPSRMissionOrb::StaticClass();
+	UClass* SpawnClass = EffOrbClass ? EffOrbClass.Get() : AFPSRMissionOrb::StaticClass();
 
 	FActorSpawnParameters Params;
 	Params.Owner = this;

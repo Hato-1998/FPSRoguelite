@@ -15,12 +15,16 @@ class FPSROGUELITE_API AFPSRMission_StandStill : public AFPSRMissionActor
 public:
 	AFPSRMission_StandStill();
 
+	/** fallback: Data->Tuning 미설정 시 사용(§2-8-1 소프트 마이그레이션, 콘텐츠 이관 후 제거 예정) */
 	UPROPERTY(EditDefaultsOnly, Category = "Mission|StandStill")
 	float RequiredStillSeconds = 15.0f;
 
-	/** Horizontal speed (cm/s) below which a player counts as still. */
+	/** Horizontal speed (cm/s) below which a player counts as still.
+	 *  fallback: Data->Tuning 미설정 시 사용(§2-8-1 소프트 마이그레이션, 콘텐츠 이관 후 제거 예정) */
 	UPROPERTY(EditDefaultsOnly, Category = "Mission|StandStill", meta = (ClampMin = "0.0"))
 	float StillSpeedThreshold = 50.0f;
+
+	virtual TSubclassOf<UFPSRMissionTuning> GetExpectedTuningClass() const override;
 
 protected:
 	virtual void OnMissionActivated() override;
@@ -28,4 +32,8 @@ protected:
 
 private:
 	float StillSeconds = 0.0f;
+
+	/** Effective tuning cached in OnMissionActivated (tuning-or-fallback resolved once, not per-tick). */
+	float EffRequiredStillSeconds = 15.0f;
+	float EffStillSpeedThreshold = 50.0f;
 };
