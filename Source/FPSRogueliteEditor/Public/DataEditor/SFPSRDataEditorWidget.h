@@ -102,6 +102,22 @@ private:
 	FReply OnGuidedAddMissionClicked();
 	FReply OnGuidedAddWeaponClicked();
 
+	/** Refilter the card guided-add target combo by the selected route (pool routes -> card pools, weapon routes ->
+	 *  weapons) so a card can only ever be wired into a route-consistent target. Called on route change + initial build. */
+	void RefreshCardTargetOptions();
+
+	/** Rebuild the mission guided-add window-index combo for the currently selected schedule WITHOUT tearing down the
+	 *  guided-add UI (a full rebuild would reset the schedule selection back to the first candidate). Called on
+	 *  schedule change + initial build. */
+	void RefreshMissionWindowOptions();
+
+	/** True if Route's membership array lives on a card pool (LevelUpGlobal / MissionClearNewWeapon) rather than a weapon. */
+	static bool RouteExpectsPool(EFPSRCardRoute Route);
+
+	/** IDetailsView finished-changing hook: tracks the edited object's package so a details-panel edit is actually
+	 *  saved by "Save Modified + Rescan" (the details view marks packages dirty but does not self-register them here). */
+	void OnDetailsPropertyChanged(const struct FPropertyChangedEvent& Event);
+
 	// --- State ------------------------------------------------------------------------------------------------
 
 	TSharedPtr<IDetailsView> DetailsView;
@@ -134,7 +150,9 @@ private:
 	TSharedPtr<EFPSRCardRoute> GuidedAddSelectedRoute;
 	TArray<TSharedPtr<FAssetData>> GuidedAddTargetOptions;
 	TSharedPtr<FAssetData> GuidedAddSelectedTarget;
+	TSharedPtr<SComboBox<TSharedPtr<FAssetData>>> GuidedAddTargetCombo;
 	TArray<TSharedPtr<int32>> GuidedAddWindowIndexOptions;
 	TSharedPtr<int32> GuidedAddSelectedWindowIndex;
+	TSharedPtr<SComboBox<TSharedPtr<int32>>> GuidedAddWindowCombo;
 	TSharedPtr<STextBlock> GuidedAddStatusText;
 };

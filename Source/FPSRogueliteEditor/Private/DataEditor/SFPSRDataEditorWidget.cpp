@@ -160,6 +160,10 @@ void SFPSRDataEditorWidget::Construct(const FArguments& InArgs)
 	DetailsViewArgs.NameAreaSettings = FDetailsViewArgs::ObjectsUseNameArea;
 	DetailsViewArgs.bHideSelectionTip = true;
 	DetailsView = PropertyEditorModule.CreateDetailView(DetailsViewArgs);
+	// The details view is the primary editing surface (all membership-array/property edits happen here). It marks the
+	// edited object's package dirty but does not register it with this tool's Save+Rescan tracking — hook its
+	// finished-changing event so a details-panel edit is actually saved and reflected in the stale status.
+	DetailsView->OnFinishedChangingProperties().AddSP(this, &SFPSRDataEditorWidget::OnDetailsPropertyChanged);
 
 	ChildSlot
 	[
@@ -674,6 +678,8 @@ void SFPSRDataEditorWidget::ClearGuidedAdd()
 	GuidedAddSelectedTarget.Reset();
 	GuidedAddWindowIndexOptions.Reset();
 	GuidedAddSelectedWindowIndex.Reset();
+	GuidedAddTargetCombo.Reset();
+	GuidedAddWindowCombo.Reset();
 	GuidedAddStatusText.Reset();
 	if (GuidedAddContainer.IsValid())
 	{
@@ -711,24 +717,11 @@ void SFPSRDataEditorWidget::RebuildGuidedAddForOrphan(UObject* Orphan)
 			}
 		}
 
-		// Target-anchor combo: card pools (for pool routes) or weapons (for weapon routes) — populated from the
-		// SAME anchor discovery the left panel uses, re-run here rather than reusing AnchorItems so a target class
-		// filter (weapon vs. pool) applies. Weapons aren't anchors themselves, so query them directly.
-		GuidedAddTargetOptions.Reset();
-		FARFilter Filter;
-		Filter.bRecursiveClasses = false;
-		Filter.ClassPaths.Add(UFPSRCardPoolDataAsset::StaticClass()->GetClassPathName());
-		Filter.ClassPaths.Add(UFPSRWeaponDataAsset::StaticClass()->GetClassPathName());
-		TArray<FAssetData> Candidates;
-		AssetRegistry.GetAssets(Filter, Candidates);
-		for (const FAssetData& Candidate : Candidates)
-		{
-			if (!FFPSRAnchoredValidationService::IsExcludedPath(Candidate.PackagePath))
-			{
-				GuidedAddTargetOptions.Add(MakeShared<FAssetData>(Candidate));
-			}
-		}
-		GuidedAddSelectedTarget = GuidedAddTargetOptions.Num() > 0 ? GuidedAddTargetOptions[0] : nullptr;
+		// Target-anchor combo is filtered by the SELECTED route (pool routes -> card pools, weapon routes -> weapons)
+		// so a card can only be wired into a route-consistent target (else a pool route + weapon target would silently
+		// write into the wrong membership array). Populate for the default route now — the combo handle is still null
+		// at this point, so RefreshCardTargetOptions just fills GuidedAddTargetOptions / GuidedAddSelectedTarget.
+		RefreshCardTargetOptions();
 
 		GuidedAddContainer->AddSlot().AutoHeight().Padding(4.0f)
 		[
@@ -749,6 +742,7 @@ void SFPSRDataEditorWidget::RebuildGuidedAddForOrphan(UObject* Orphan)
 				.OnSelectionChanged_Lambda([this](TSharedPtr<EFPSRCardRoute> NewSelection, ESelectInfo::Type)
 				{
 					GuidedAddSelectedRoute = NewSelection;
+					RefreshCardTargetOptions(); // refilter targets to the newly picked route (pool vs. weapon)
 				})
 				[
 					SNew(STextBlock).Text_Lambda([this]()
@@ -759,7 +753,7 @@ void SFPSRDataEditorWidget::RebuildGuidedAddForOrphan(UObject* Orphan)
 			]
 			+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 2.0f)
 			[
-				SNew(SComboBox<TSharedPtr<FAssetData>>)
+				SAssignNew(GuidedAddTargetCombo, SComboBox<TSharedPtr<FAssetData>>)
 				.OptionsSource(&GuidedAddTargetOptions)
 				.InitiallySelectedItem(GuidedAddSelectedTarget)
 				.OnGenerateWidget_Lambda([](TSharedPtr<FAssetData> Option)
@@ -806,15 +800,7 @@ void SFPSRDataEditorWidget::RebuildGuidedAddForOrphan(UObject* Orphan)
 		}
 		GuidedAddSelectedTarget = GuidedAddTargetOptions.Num() > 0 ? GuidedAddTargetOptions[0] : nullptr;
 
-		GuidedAddWindowIndexOptions.Reset();
-		if (const UFPSRRunScheduleDataAsset* Schedule = GuidedAddSelectedTarget.IsValid() ? Cast<UFPSRRunScheduleDataAsset>(GuidedAddSelectedTarget->GetAsset()) : nullptr)
-		{
-			for (int32 WindowIndex = 0; WindowIndex < Schedule->MissionWindows.Num(); ++WindowIndex)
-			{
-				GuidedAddWindowIndexOptions.Add(MakeShared<int32>(WindowIndex));
-			}
-		}
-		GuidedAddSelectedWindowIndex = GuidedAddWindowIndexOptions.Num() > 0 ? GuidedAddWindowIndexOptions[0] : nullptr;
+		RefreshMissionWindowOptions();
 
 		GuidedAddContainer->AddSlot().AutoHeight().Padding(4.0f)
 		[
@@ -835,18 +821,7 @@ void SFPSRDataEditorWidget::RebuildGuidedAddForOrphan(UObject* Orphan)
 				.OnSelectionChanged_Lambda([this](TSharedPtr<FAssetData> NewSelection, ESelectInfo::Type)
 				{
 					GuidedAddSelectedTarget = NewSelection;
-					// Defer the rebuild to the next tick rather than tearing down GuidedAddContainer's children
-					// (including this very combo box) synchronously from inside its own OnSelectionChanged —
-					// RegisterActiveTimer is the standard Slate-safe way to "rebuild my own UI from a child callback".
-					RegisterActiveTimer(0.0f, FWidgetActiveTimerDelegate::CreateLambda(
-						[this](double, float) -> EActiveTimerReturnType
-						{
-							if (UFPSRMissionDataAsset* PinnedMission = Cast<UFPSRMissionDataAsset>(GuidedAddOrphan.Get()))
-							{
-								RebuildGuidedAddForOrphan(PinnedMission); // re-derive the window-index list for the newly picked schedule
-							}
-							return EActiveTimerReturnType::Stop;
-						}));
+					RefreshMissionWindowOptions(); // refresh window list for the picked schedule (selection preserved, no teardown)
 				})
 				[
 					SNew(STextBlock).Text_Lambda([this]()
@@ -857,7 +832,7 @@ void SFPSRDataEditorWidget::RebuildGuidedAddForOrphan(UObject* Orphan)
 			]
 			+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 2.0f)
 			[
-				SNew(SComboBox<TSharedPtr<int32>>)
+				SAssignNew(GuidedAddWindowCombo, SComboBox<TSharedPtr<int32>>)
 				.OptionsSource(&GuidedAddWindowIndexOptions)
 				.InitiallySelectedItem(GuidedAddSelectedWindowIndex)
 				.OnGenerateWidget_Lambda([](TSharedPtr<int32> Option)
@@ -947,6 +922,81 @@ void SFPSRDataEditorWidget::RebuildGuidedAddForOrphan(UObject* Orphan)
 	// still lets a designer inspect/edit it, and IsDataValid/orphan discovery keep reporting it until it's referenced.
 }
 
+bool SFPSRDataEditorWidget::RouteExpectsPool(EFPSRCardRoute Route)
+{
+	return Route == EFPSRCardRoute::LevelUpGlobal || Route == EFPSRCardRoute::MissionClearNewWeapon;
+}
+
+void SFPSRDataEditorWidget::RefreshCardTargetOptions()
+{
+	// Filter the card guided-add target list by the selected route so a card can only be wired into a route-consistent
+	// target (pool routes -> card pools, weapon routes -> weapons). At initial build the combo handle is still null, so
+	// this just fills the options; on a route change the combo is valid, so refresh + reselect it.
+	GuidedAddTargetOptions.Reset();
+	if (GuidedAddSelectedRoute.IsValid())
+	{
+		IAssetRegistry& AssetRegistry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
+		FARFilter Filter;
+		Filter.bRecursiveClasses = false;
+		Filter.ClassPaths.Add((RouteExpectsPool(*GuidedAddSelectedRoute)
+			? UFPSRCardPoolDataAsset::StaticClass()
+			: UFPSRWeaponDataAsset::StaticClass())->GetClassPathName());
+		TArray<FAssetData> Candidates;
+		AssetRegistry.GetAssets(Filter, Candidates);
+		for (const FAssetData& Candidate : Candidates)
+		{
+			if (!FFPSRAnchoredValidationService::IsExcludedPath(Candidate.PackagePath))
+			{
+				GuidedAddTargetOptions.Add(MakeShared<FAssetData>(Candidate));
+			}
+		}
+	}
+	GuidedAddSelectedTarget = GuidedAddTargetOptions.Num() > 0 ? GuidedAddTargetOptions[0] : nullptr;
+	if (GuidedAddTargetCombo.IsValid())
+	{
+		GuidedAddTargetCombo->RefreshOptions();
+		GuidedAddTargetCombo->SetSelectedItem(GuidedAddSelectedTarget);
+	}
+}
+
+void SFPSRDataEditorWidget::RefreshMissionWindowOptions()
+{
+	// Rebuild the window-index list for the currently selected schedule WITHOUT tearing down the guided-add UI (a full
+	// RebuildGuidedAddForOrphan resets the schedule selection to the first candidate — the bug this avoids).
+	GuidedAddWindowIndexOptions.Reset();
+	if (const UFPSRRunScheduleDataAsset* Schedule = GuidedAddSelectedTarget.IsValid() ? Cast<UFPSRRunScheduleDataAsset>(GuidedAddSelectedTarget->GetAsset()) : nullptr)
+	{
+		for (int32 WindowIndex = 0; WindowIndex < Schedule->MissionWindows.Num(); ++WindowIndex)
+		{
+			GuidedAddWindowIndexOptions.Add(MakeShared<int32>(WindowIndex));
+		}
+	}
+	GuidedAddSelectedWindowIndex = GuidedAddWindowIndexOptions.Num() > 0 ? GuidedAddWindowIndexOptions[0] : nullptr;
+	if (GuidedAddWindowCombo.IsValid())
+	{
+		GuidedAddWindowCombo->RefreshOptions();
+		GuidedAddWindowCombo->SetSelectedItem(GuidedAddSelectedWindowIndex);
+	}
+}
+
+void SFPSRDataEditorWidget::OnDetailsPropertyChanged(const FPropertyChangedEvent& Event)
+{
+	// A details-panel edit marks the object's package dirty but does not register it with this tool's Save+Rescan
+	// tracking, so without this hook "Save Modified + Rescan" would save nothing while the stale status read "Up to
+	// date". Track every object the details view currently shows.
+	if (!DetailsView.IsValid())
+	{
+		return;
+	}
+	for (const TWeakObjectPtr<UObject>& WeakObject : DetailsView->GetSelectedObjects())
+	{
+		if (UObject* Object = WeakObject.Get())
+		{
+			TrackDirtyPackage(Object->GetPackage());
+		}
+	}
+}
+
 FReply SFPSRDataEditorWidget::OnGuidedAddCardClicked()
 {
 	UFPSRCardDataAsset* Card = Cast<UFPSRCardDataAsset>(GuidedAddOrphan.Get());
@@ -971,16 +1021,37 @@ FReply SFPSRDataEditorWidget::OnGuidedAddCardClicked()
 	UObject* TargetAsset = GuidedAddSelectedTarget->GetAsset();
 	bool bAdded = false;
 	UPackage* TargetPackage = nullptr;
-	if (UFPSRCardPoolDataAsset* Pool = Cast<UFPSRCardPoolDataAsset>(TargetAsset))
+	// Decide the destination array by the ROUTE (not by whatever the target happens to cast to), and require the
+	// selected target to be the route's matching kind — otherwise a pool route + weapon target (or vice-versa) would
+	// silently wire the card into the wrong membership array despite the route preflight passing.
+	if (RouteExpectsPool(Route))
 	{
-		const bool bUnlockArray = (Route == EFPSRCardRoute::MissionClearNewWeapon);
-		bAdded = FFPSRDataEditorHelpers::AddCardToPool(Pool, Card, bUnlockArray);
+		UFPSRCardPoolDataAsset* Pool = Cast<UFPSRCardPoolDataAsset>(TargetAsset);
+		if (!Pool)
+		{
+			if (GuidedAddStatusText.IsValid())
+			{
+				GuidedAddStatusText->SetText(LOCTEXT("RouteNeedsPool", "This route targets a Card Pool — pick a card pool as the target."));
+				GuidedAddStatusText->SetColorAndOpacity(FLinearColor(0.9f, 0.2f, 0.2f));
+			}
+			return FReply::Handled();
+		}
+		bAdded = FFPSRDataEditorHelpers::AddCardToPool(Pool, Card, /*bUnlockArray=*/Route == EFPSRCardRoute::MissionClearNewWeapon);
 		TargetPackage = Pool->GetPackage();
 	}
-	else if (UFPSRWeaponDataAsset* Weapon = Cast<UFPSRWeaponDataAsset>(TargetAsset))
+	else
 	{
-		const bool bUnlockableFeatures = (Route == EFPSRCardRoute::MissionClearWeaponFeature);
-		bAdded = FFPSRDataEditorHelpers::AddCardToWeapon(Weapon, Card, bUnlockableFeatures);
+		UFPSRWeaponDataAsset* Weapon = Cast<UFPSRWeaponDataAsset>(TargetAsset);
+		if (!Weapon)
+		{
+			if (GuidedAddStatusText.IsValid())
+			{
+				GuidedAddStatusText->SetText(LOCTEXT("RouteNeedsWeapon", "This route targets a Weapon — pick a weapon as the target."));
+				GuidedAddStatusText->SetColorAndOpacity(FLinearColor(0.9f, 0.2f, 0.2f));
+			}
+			return FReply::Handled();
+		}
+		bAdded = FFPSRDataEditorHelpers::AddCardToWeapon(Weapon, Card, /*bUnlockableFeatures=*/Route == EFPSRCardRoute::MissionClearWeaponFeature);
 		TargetPackage = Weapon->GetPackage();
 	}
 
