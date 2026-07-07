@@ -71,6 +71,22 @@ FText UFPSRCardEffect::GetDescription(ECardRarity Rarity, float Magnitude) const
 	return FText::GetEmpty();
 }
 
+#if WITH_EDITOR
+FText UFPSRCardEffect::GetEditorGridLabel() const
+{
+	// Base fallback: the effect subclass's own display name (meta = DisplayName on the UCLASS). Every concrete
+	// effect below overrides this with something more specific to the Data Editor's magnitude grid.
+	return GetClass()->GetDisplayNameText();
+}
+
+TArray<EFPSRCardRoute> UFPSRCardEffect::GetEditorEligibleRoutes() const
+{
+	// Base = no routes permitted. A brand-new effect subclass that forgets to override this is intentionally
+	// "blocked everywhere" rather than silently eligible for a route it was never designed for.
+	return {};
+}
+#endif
+
 // ---------------------------------------------------------------------------------------------------------------
 // UCardEffect_CharacterGE — applies a GameplayEffect to the player ASC (v1 Character scope, FPSRCardSubsystem.cpp:230).
 // ---------------------------------------------------------------------------------------------------------------
@@ -119,6 +135,18 @@ void UCardEffect_CharacterGE::ValidateEffect(FDataValidationContext& Context) co
 		Context.AddWarning(LOCTEXT("CharGENoEffect", "Character GE effect has no Effect (GameplayEffect) — it applies nothing."));
 	}
 }
+
+FText UCardEffect_CharacterGE::GetEditorGridLabel() const
+{
+	return FText::Format(LOCTEXT("GridLabel_CharacterGE", "Character GE{0}"),
+		bShowAsPercent ? FText::FromString(TEXT(" (%)")) : FText::GetEmpty());
+}
+
+TArray<EFPSRCardRoute> UCardEffect_CharacterGE::GetEditorEligibleRoutes() const
+{
+	// Character-scope GE — always lives in the level-up global pool (Pool.Cards).
+	return { EFPSRCardRoute::LevelUpGlobal };
+}
 #endif
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -165,6 +193,27 @@ bool UCardEffect_WeaponStat::CanApply(const FFPSRCardEffectContext& Context) con
 	}
 	return Context.PS != nullptr;
 }
+
+#if WITH_EDITOR
+FText UCardEffect_WeaponStat::GetEditorGridLabel() const
+{
+	// Mirrors GetDescription's stat-name resolution (StaticEnum lookup), but rarity-independent: this is an
+	// identity label for the grid's Summary column, not a rolled-value line.
+	const FString StatName = StaticEnum<EFPSRWeaponStat>()
+		? StaticEnum<EFPSRWeaponStat>()->GetDisplayNameTextByValue(static_cast<int64>(Stat)).ToString()
+		: FString(TEXT("Stat"));
+	const TCHAR* OpSuffix = (Op == EFPSRWeaponModOp::PercentMultiply) ? TEXT("%") : TEXT("+");
+	const FString ScopeSuffix = bThisWeaponOnly ? FString() : FString(TEXT(" (all weapons)"));
+	return FText::FromString(FString::Printf(TEXT("Weapon Stat: %s %s%s"), *StatName, OpSuffix, *ScopeSuffix));
+}
+
+TArray<EFPSRCardRoute> UCardEffect_WeaponStat::GetEditorEligibleRoutes() const
+{
+	// ThisWeapon-scope stat cards ride the weapon's own level-up pool; AllWeapons-scope cards ride the global
+	// level-up pool (same split ApplyCard uses at runtime — bThisWeaponOnly picks the instance vs. the PlayerState).
+	return { bThisWeaponOnly ? EFPSRCardRoute::LevelUpWeapon : EFPSRCardRoute::LevelUpGlobal };
+}
+#endif
 
 // ---------------------------------------------------------------------------------------------------------------
 // UCardEffect_WeaponBehavior — grants a behavior fragment (v1 ThisWeapon + GrantedFragment, FPSRCardSubsystem.cpp:270).
@@ -241,6 +290,21 @@ void UCardEffect_WeaponBehavior::ValidateEffect(FDataValidationContext& Context)
 		Context.AddError(LOCTEXT("BehaviorNoFragment", "Weapon behavior effect has no Fragment — it grants nothing."));
 	}
 }
+
+FText UCardEffect_WeaponBehavior::GetEditorGridLabel() const
+{
+	return FText::Format(LOCTEXT("GridLabel_WeaponBehavior", "Fragment: {0}"),
+		Fragment ? Fragment->DisplayName : LOCTEXT("GridLabel_WeaponBehavior_NoFragment", "(none)"));
+}
+
+TArray<EFPSRCardRoute> UCardEffect_WeaponBehavior::GetEditorEligibleRoutes() const
+{
+	// H2-ambiguous case: behavior fragments historically shipped as mission-reward-only (MissionClearWeaponFeature),
+	// but the same effect type is also valid as a level-up weapon card (LevelUpWeapon) — both are permitted here;
+	// the Data Editor's preflight (FFPSRDataEditorHelpers::CheckCardRoute) defaults to the mission-clear route and
+	// warns (not blocks) if a designer explicitly picks the level-up route.
+	return { EFPSRCardRoute::LevelUpWeapon, EFPSRCardRoute::MissionClearWeaponFeature };
+}
 #endif
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -279,6 +343,18 @@ void UCardEffect_GrantWeapon::ValidateEffect(FDataValidationContext& Context) co
 	{
 		Context.AddError(LOCTEXT("GrantWeaponNoWeapon", "GrantWeapon effect has no WeaponToGrant set."));
 	}
+}
+
+FText UCardEffect_GrantWeapon::GetEditorGridLabel() const
+{
+	return FText::Format(LOCTEXT("GridLabel_GrantWeapon", "Grant Weapon: {0}"),
+		WeaponToGrant ? WeaponToGrant->DisplayName : LOCTEXT("GridLabel_GrantWeapon_NoWeapon", "(none)"));
+}
+
+TArray<EFPSRCardRoute> UCardEffect_GrantWeapon::GetEditorEligibleRoutes() const
+{
+	// Weapon-unlock cards only ever live in the pool's WeaponUnlockCards array.
+	return { EFPSRCardRoute::MissionClearNewWeapon };
 }
 #endif
 
@@ -322,6 +398,17 @@ void UCardEffect_CharacterPassive::ValidateEffect(FDataValidationContext& Contex
 	{
 		Context.AddError(LOCTEXT("PassiveNoAbility", "Character passive effect has no PassiveAbility set — it grants nothing."));
 	}
+}
+
+FText UCardEffect_CharacterPassive::GetEditorGridLabel() const
+{
+	return LOCTEXT("GridLabel_CharacterPassive", "Character Passive");
+}
+
+TArray<EFPSRCardRoute> UCardEffect_CharacterPassive::GetEditorEligibleRoutes() const
+{
+	// Character-scope passive ability — always lives in the level-up global pool (Pool.Cards), like CharacterGE.
+	return { EFPSRCardRoute::LevelUpGlobal };
 }
 #endif
 

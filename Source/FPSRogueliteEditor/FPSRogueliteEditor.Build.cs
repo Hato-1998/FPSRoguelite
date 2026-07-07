@@ -27,7 +27,10 @@ public class FPSRogueliteEditor : ModuleRules
 			"AssetRegistry",
 			"DataValidation",   // UEditorValidatorBase (Engine/Plugins/Editor/DataValidation)
 			"DeveloperSettings",
-			"Projects"
+			"Projects",
+			"PropertyEditor",          // IDetailsView (P1 Data Editor — reuse the engine's property editing UI)
+			"WorkspaceMenuStructure",  // WorkspaceMenu::GetMenuStructure().GetToolsCategory() for the nomad tab group
+			"InputCore"                // EKeys::* referenced by SListView/SComboBox/SNumericEntryBox key-nav (link dep)
 		});
 	}
 }

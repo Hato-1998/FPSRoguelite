@@ -4,6 +4,7 @@
 #include "Modules/ModuleManager.h"
 
 #include "Validation/FPSRAnchoredValidationService.h"
+#include "DataEditor/SFPSRDataEditorWidget.h"
 #include "Editor.h"
 #include "EditorValidatorSubsystem.h"
 #include "Logging/MessageLog.h"
@@ -15,8 +16,14 @@
 #include "Misc/MessageDialog.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "AssetRegistry/IAssetRegistry.h"
+#include "Widgets/Docking/SDockTab.h"
+#include "Framework/Docking/TabManager.h"
+#include "WorkspaceMenuStructure.h"
+#include "WorkspaceMenuStructureModule.h"
 
 #define LOCTEXT_NAMESPACE "FPSRogueliteEditorModule"
+
+const FName FFPSRogueliteEditorModule::FPSRDataEditorTabName(TEXT("FPSRDataEditor"));
 
 // UEditorValidatorBase subclasses (UFPSRCardPoolValidator / UFPSRRunScheduleValidator / UFPSRLoadoutPoolValidator)
 // are auto-discovered by UEditorValidatorSubsystem — no manual registration needed here. This module only wires up
@@ -25,12 +32,19 @@
 void FFPSRogueliteEditorModule::StartupModule()
 {
 	UToolMenus::RegisterStartupCallback(FSimpleMulticastDelegate::FDelegate::CreateRaw(this, &FFPSRogueliteEditorModule::RegisterMenus));
+
+	// FPSR Data Editor (P1) nomad tab — same lifetime pattern as the engine's own tool tabs (register at startup,
+	// unregister at shutdown). Nomad = can be docked anywhere, not tied to a specific asset editor's tab layout.
+	FGlobalTabmanager::Get()->RegisterNomadTabSpawner(FPSRDataEditorTabName, FOnSpawnTab::CreateStatic(&FFPSRogueliteEditorModule::SpawnDataEditorTab))
+		.SetDisplayName(LOCTEXT("DataEditorTabTitle", "FPSR Data Editor"))
+		.SetGroup(WorkspaceMenu::GetMenuStructure().GetToolsCategory());
 }
 
 void FFPSRogueliteEditorModule::ShutdownModule()
 {
 	UToolMenus::UnRegisterStartupCallback(this);
 	UToolMenus::UnregisterOwner(this);
+	FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(FPSRDataEditorTabName);
 }
 
 void FFPSRogueliteEditorModule::RegisterMenus()
@@ -46,6 +60,27 @@ void FFPSRogueliteEditorModule::RegisterMenus()
 		FSlateIcon(FAppStyle::GetAppStyleSetName(), "DeveloperTools.MenuIcon"),
 		FUIAction(FExecuteAction::CreateStatic(&FFPSRogueliteEditorModule::OnValidateAnchoredDataMenuEntry))
 	);
+	Section.AddMenuEntry(
+		"FPSROpenDataEditor",
+		LOCTEXT("OpenDataEditorTitle", "Data Editor..."),
+		LOCTEXT("OpenDataEditorTooltip", "Open the FPSR Data Editor (wiring + card magnitude + schedule preview)."),
+		FSlateIcon(FAppStyle::GetAppStyleSetName(), "DeveloperTools.MenuIcon"),
+		FUIAction(FExecuteAction::CreateStatic(&FFPSRogueliteEditorModule::OnOpenDataEditorMenuEntry))
+	);
+}
+
+void FFPSRogueliteEditorModule::OnOpenDataEditorMenuEntry()
+{
+	FGlobalTabmanager::Get()->TryInvokeTab(FPSRDataEditorTabName);
+}
+
+TSharedRef<SDockTab> FFPSRogueliteEditorModule::SpawnDataEditorTab(const FSpawnTabArgs& Args)
+{
+	return SNew(SDockTab)
+		.TabRole(ETabRole::NomadTab)
+		[
+			SNew(SFPSRDataEditorWidget)
+		];
 }
 
 void FFPSRogueliteEditorModule::OnValidateAnchoredDataMenuEntry()
