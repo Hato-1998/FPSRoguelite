@@ -4,7 +4,17 @@
 > **작업 단계를 끝낼 때마다, 그리고 중단 전 반드시 이 파일을 갱신하고 커밋한다.**
 > 확정 설계·기획·코드구조·규칙은 `Game.md`(**SSOT 허브** → 도메인별 `Docs/SSOT/*.md`, 작업별 라우팅은 허브 §0-1), **완료 작업 상세는 `git log --oneline`**. 여기엔 *무엇을 했는지*만 요약한다.
 
-**최종 갱신: 2026-07-06**
+**최종 갱신: 2026-07-07**
+
+## 🔔 핸드오프 (2026-07-07 · #3 다중맵 **아키텍처 대전환 — 연속필드 "U(unified 단일 3×3 그리드)" 채택** — FPSRoguelite2·`phase/p8-multimap-tier0`) — 📐 **설계 수렴(자문). 다음 = D1 슬롯크기 저작(사용자) → SSOT 갱신 → U 구현 P-0**
+> **이 세션 = 설계 대전환(코드 무변경, 문서만)**. 앞선 전환 추적자(Tier1) 구현 커밋(`44f7b4f` feat/`9e025a1` docs) + 무기작업 main 머지(`4ef5779`) 위에서, 사용자가 **근본 재검토** 요청 → **멀티맵 pathing 아키텍처를 "연속 크로스도어 플로우필드"로 피벗**.
+> **왜 피벗**: 현 Tier0/1 = per-map 하드경계 + 전환 추적자(패치) + 맵간 갭 → "심리스 연속 추격"이 per-map 필드와 근본 충돌. 사용자 확정 토폴로지 = **3×3 그리드 9맵, 중앙 스타트, 사면 벽을 문 부숴 연결, per-run 테마 변주**. 목표 = 적이 특수처리 없이 부순 문 넘어 계속 추격.
+> **수렴 과정(2트랙)**: ①사내 멀티에이전트 워크플로(3렌즈 설계+적대 critique, 11에이전트) → **P(portal-seed per-map)** 수렴 ②`/plan-consult` Codex 3R 적대 교차검증(Deep Delta-Gated) → **P의 전제("3×3 단일그리드=768셀>캡"=맵당최대캡 가정, 미실측)를 깨고 U(unified 단일 그리드)로 전환**. **결정지원 리포트(완성 플랜) = [`Docs/Review/20260707-plan-continuous-field-arch.md`](Docs/Review/20260707-plan-continuous-field-arch.md)** — 이거 먼저 읽을 것.
+> **U 요지**: 고정 3×3 extent 프리사이즈 **단일 필드** + 맵별 stream-in 증분 bake(atomic) + **문 부수면 door셀 blocked→open stamp + 단일 RunBFS** → 적이 단일 필드 따라 seamless 크로스. MapId·portal·트래커·seam타이브레이크·per-map 전투게이트 **제거**. 신규 1차요구 = subregion atomic bake / door-cell stamping / origin-aware connectivity 전투게이트 / FrontId(열린문 연결포켓+근접가중 allocator) / trickle drain(front-pressure) / TopologyGeneration(late-join·freeze·reset).
+> **다음 코드작업(순서, 리포트 §2-4)**: **선행 = D1 결정**(아래) → **SSOT 3곳 갱신**(`RunFlow §2-1` front=FrontId·`Architecture §3-4` 단일그리드/제거목록·`Performance §5` 재계산예산/RepGraph) → **U 구현 P-0~P-H**: `P-0` 슬롯 셀상한 산술게이트(커맨드릿) → `P-A` 단일그리드+subregion bake(`FPSRFlowFieldComputer`/`FPSRFlowFieldSubsystem`) → `P-B` door-cell stamping(`FPSRDoor`) → `P-C` origin connectivity 전투게이트(`FPSRCombatStatics::CanAffectTarget` 시그니처변경) → `P-D` FrontId occupancy+allocator(`FPSREnemySpawnSubsystem`) → `P-E` trickle drain → `P-F` TopologyGeneration → **`P-G` 전환 추적자+per-map registry+갭 제거(마지막, 연속성 증명 후)** → `P-H` NetCull 재튜닝(RepGraph=별도).
+> **🙋 사용자 결정 상태**: **D1(KEY, U 유효조건)=미확정** — 전투 slot footprint를 ~132m/변(200cm 셀, 현 캡 기준) 이하로 잠글 수 있나. **사용자가 화이트박스 슬롯 1개 저작해 크기 정하기로**(→ 그 크기로 셀상한 판정; 캡은 상수라 상향/CellSize조정 가능). **D2=확정**: 전역(뚫린 맵 전역) 추격 + **거리비례 속도**(적 셀의 `DistField`=플레이어까지 경로거리 이미 계산됨 → 재사용, O(1) 공짜; 램프곡선=PIE튜닝). **D3=미정**: 클라 seam pop-in(NetCull 한계, RepGraph 전까지) 수용 여부 — 클라 시각 이슈지 로직버그 아님.
+> **주의**: ⚠️이 설계는 **자문(빌드/PIE 미검증)** — 채택 시 SSOT 먼저(원칙3). 전환 추적자(현 커밋)는 U의 P-G에서 제거 대상(폐기 아님, 문제 실증 역할 완료). 빌드=헤더변경 OOM/LC 주의([[build-header-change-oom-parallelism]]·[[build-livecoding-cross-clone-block]], `-MaxParallelActions=2`).
+> **미커밋 콘텐츠(사용자 존치)**: `Content/Maps/{L_MapA,L_MapB,L_RunPersistent}.umap` + 무기 머지분 외 세션 전 untracked Content/(내 것 아님). D1 슬롯 저작물도 여기 추가될 예정.
 
 ## 🔔 핸드오프 (2026-07-06 · #3 다중맵 **"전환 추적자"(Tier 1) C++ 구현 완료** — FPSRoguelite2·`phase/p8-multimap-tier0`) — ✅ 빌드+스모크+적대리뷰(P2 2건)+Codex게이트 CLEAN(P2 1건). **커밋 완료, 남은 게이트 = 콘텐츠/PIE → main 머지**
 > **이 세션 = 전환 추적자 C++ 구현**(서버권위 전투로직 = Opus 직접, 위임 없음 [[haiku-delegation-security-wiring]]). 코드만 4파일(`Source/Enemy/FPSREnemyBase.{h,cpp}`·`FPSREnemySpawnSubsystem.{h,cpp}`). 콘텐츠/PIE 없음. **신규 복제 0**(전부 서버전용 상태). 플랜 = [`plans/drifting-wobbling-planet.md`](../../.claude/plans/drifting-wobbling-planet.md)(사용자 승인).
