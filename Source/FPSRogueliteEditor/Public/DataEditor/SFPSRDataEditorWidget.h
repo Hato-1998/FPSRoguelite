@@ -7,6 +7,7 @@
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/Text/STextBlock.h"
 #include "Widgets/Views/SListView.h"
+#include "Widgets/Views/STreeView.h"
 #include "AssetRegistry/AssetData.h"
 #include "Card/FPSRCardTypes.h"
 
@@ -21,15 +22,18 @@ class UPackage;
 template <typename OptionType> class SComboBox;
 
 /**
- * FPSR Data Editor (P1 designer tool) — the whole tab body. Left: anchor/orphan discovery (reuses
- * FFPSRAnchoredValidationService, P0). Right: an engine IDetailsView for ALL property editing (per the over-design
- * gate, this tool hand-rolls exactly THREE custom widgets — this list panel's selection plumbing doesn't count as
- * one of the three; the three are: (1) this anchor/orphan list panel, (2) the card magnitude grid below, and
- * (3) SFPSRScheduleTimelineBar) — plus the card magnitude grid and the read-only mission schedule timeline.
+ * FPSR Data Editor (P1 designer tool) — the whole tab body. Left: a single categorized tree browser showing EVERY
+ * relevant data asset (weapon/card/card pool/mission/run schedule/loadout pool/fragment), grouped under category
+ * header nodes, with unreachable ("orphan", per FFPSRAnchoredValidationService, P0) leaves flagged inline. Right: an
+ * engine IDetailsView for ALL property editing (per the over-design gate, this tool hand-rolls exactly THREE custom
+ * widgets — this tree panel's selection plumbing doesn't count as one of the three; the three are: (1) this
+ * categorized asset tree, (2) the card magnitude grid below, and (3) SFPSRScheduleTimelineBar) — plus the card
+ * magnitude grid and the read-only mission schedule timeline.
  *
  * Everything that is just "edit a selected asset's properties" (including membership arrays like Pool->Cards) is
- * left to IDetailsView; this widget only adds the THREE things IDetailsView cannot do: cross-asset orphan/anchor
- * discovery, a per-rarity magnitude grid across a card's Instanced effects, and a read-only schedule timeline.
+ * left to IDetailsView; this widget only adds the THREE things IDetailsView cannot do: a categorized cross-asset
+ * browser with orphan flagging, a per-rarity magnitude grid across a card's Instanced effects, and a read-only
+ * schedule timeline.
  */
 class SFPSRDataEditorWidget : public SCompoundWidget
 {
@@ -42,8 +46,10 @@ public:
 private:
 	// --- Data refresh -------------------------------------------------------------------------------------------
 
-	/** Re-runs FFPSRAnchoredValidationService::FindAnchorAssets/FindOrphans and refreshes both list views. Guards
-	 *  on IAssetRegistry::IsLoadingAssets() first (mirrors FPSRogueliteEditorModule.cpp's menu-entry guard). */
+	/** Re-scans every category (weapon/card/card pool/mission/run schedule/loadout pool/fragment) via the asset
+	 *  registry, cross-references FFPSRAnchoredValidationService::FindOrphans() to flag unreachable leaves, and
+	 *  rebuilds TreeRoots + refreshes AssetTreeView. Guards on IAssetRegistry::IsLoadingAssets() first (mirrors
+	 *  FPSRogueliteEditorModule.cpp's menu-entry guard). */
 	void RefreshLists();
 
 	/** "Save Modified + Rescan": saves DirtyTrackedPackages via FFPSRDataEditorHelpers::SavePackages, clears the
@@ -57,12 +63,24 @@ private:
 	/** Text for the stale-status line ("N unsaved edit(s) — validation reflects last save" / "Up to date"). */
 	FText GetStaleStatusText() const;
 
-	// --- Anchor / orphan lists (custom widget #1: the list panel + its selection-driven side panels) -------------
+	// --- Categorized asset tree (custom widget #1: the tree panel + its selection-driven side panels) -------------
 
-	TSharedRef<class ITableRow> OnGenerateAnchorRow(TSharedPtr<FAssetData> Item, const TSharedRef<class STableViewBase>& OwnerTable);
-	TSharedRef<class ITableRow> OnGenerateOrphanRow(TSharedPtr<FAssetData> Item, const TSharedRef<class STableViewBase>& OwnerTable);
-	void OnAnchorSelectionChanged(TSharedPtr<FAssetData> Item, ESelectInfo::Type SelectInfo);
-	void OnOrphanSelectionChanged(TSharedPtr<FAssetData> Item, ESelectInfo::Type SelectInfo);
+	/** One row of the left-panel tree: EITHER a category header (bIsCategory=true, Label carries the "{name} (N)"
+	 *  count, Children = every asset of that type) OR a leaf asset row (Asset valid, bIsOrphan set from
+	 *  FFPSRAnchoredValidationService::FindOrphans()). Category nodes are always present (even at 0 children) so a
+	 *  designer can see at a glance which asset types exist and how many of each — not just the anchors/orphans. */
+	struct FFPSRDataEditorTreeItem
+	{
+		FText Label;
+		bool bIsCategory = false;
+		FAssetData Asset;
+		bool bIsOrphan = false;
+		TArray<TSharedPtr<FFPSRDataEditorTreeItem>> Children;
+	};
+
+	TSharedRef<class ITableRow> OnGenerateTreeRow(TSharedPtr<FFPSRDataEditorTreeItem> Item, const TSharedRef<class STableViewBase>& OwnerTable);
+	void OnGetTreeChildren(TSharedPtr<FFPSRDataEditorTreeItem> Item, TArray<TSharedPtr<FFPSRDataEditorTreeItem>>& OutChildren);
+	void OnTreeSelectionChanged(TSharedPtr<FFPSRDataEditorTreeItem> Item, ESelectInfo::Type SelectInfo);
 
 	/** Common selection handling: loads Item's asset, sets it on the details view, and rebuilds whichever
 	 *  auxiliary panel (magnitude grid / timeline / guided-add) applies to its class. bIsOrphan drives whether the
@@ -86,6 +104,11 @@ private:
 	void RebuildMagnitudeGridFromCard(UFPSRCardDataAsset* Card);
 	void ClearMagnitudeGrid();
 	TSharedRef<class ITableRow> OnGenerateMagnitudeGridRow(TSharedPtr<FMagnitudeGridRow> Item, const TSharedRef<class STableViewBase>& OwnerTable);
+
+	/** Builds the column-label header row shown above the magnitude grid's SListView (bold, same FillWidth
+	 *  proportions as OnGenerateMagnitudeGridRow so columns line up). Shared by both Rebuild* entry points
+	 *  (single-card selection and whole-pool selection) so the two grids stay visually identical. */
+	TSharedRef<SWidget> BuildMagnitudeGridHeaderRow() const;
 
 	/** Builds one rarity's SNumericEntryBox<float> cell for a magnitude grid row (disabled/blank if the effect has
 	 *  no tier for that rarity — see UFPSRCardDataAsset::SetEffectRarityMagnitude's "edit existing tier only" contract). */
@@ -130,10 +153,10 @@ private:
 	TWeakObjectPtr<UObject> SelectedAsset;
 	bool bSelectedIsOrphan = false;
 
-	TArray<TSharedPtr<FAssetData>> AnchorItems;
-	TArray<TSharedPtr<FAssetData>> OrphanItems;
-	TSharedPtr<SListView<TSharedPtr<FAssetData>>> AnchorListView;
-	TSharedPtr<SListView<TSharedPtr<FAssetData>>> OrphanListView;
+	/** Category header nodes (one per data-asset type, always present) — each Children array holds that category's
+	 *  leaf asset items. This IS the tree's root items source (bound via .TreeItemsSource(&TreeRoots)). */
+	TArray<TSharedPtr<FFPSRDataEditorTreeItem>> TreeRoots;
+	TSharedPtr<STreeView<TSharedPtr<FFPSRDataEditorTreeItem>>> AssetTreeView;
 
 	TSharedPtr<STextBlock> ScanStatusText;
 	TSharedPtr<STextBlock> StaleStatusText;
