@@ -109,6 +109,13 @@ bool FFPSRDataEditorMembershipRoundTripTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("RemoveCardFromPool succeeds"), FFPSRDataEditorHelpers::RemoveCardFromPool(Pool, Card, /*bUnlockArray=*/false));
 	TestEqual(TEXT("Pool->Cards is empty after remove"), Pool->Cards.Num(), 0);
 
+	// SetCardGroup round-trip (guided-add sets Group=Weapon for the LevelUpWeapon route so the draw targets the
+	// source weapon — FPSRCardSubsystem.cpp:603). No-op when already the target group.
+	Card->Group = ECardGroup::Character;
+	TestTrue(TEXT("SetCardGroup changes Character -> Weapon"), FFPSRDataEditorHelpers::SetCardGroup(Card, ECardGroup::Weapon));
+	TestTrue(TEXT("Group is now Weapon"), Card->Group == ECardGroup::Weapon);
+	TestFalse(TEXT("SetCardGroup is a no-op when already Weapon"), FFPSRDataEditorHelpers::SetCardGroup(Card, ECardGroup::Weapon));
+
 	return true;
 }
 

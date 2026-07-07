@@ -72,6 +72,12 @@ public:
 	 *  was written (see UFPSRCardDataAsset::SetEffectRarityMagnitude — does not create a new tier). */
 	static bool SetCardEffectMagnitude(UFPSRCardDataAsset* Card, int32 EffectIndex, ECardRarity Rarity, float NewMagnitude);
 
+	/** Set the card's Group (transactional). Makes a card wired into a weapon's level-up pool correct-by-construction:
+	 *  GatherCandidatePool only sets the draw's TargetWeapon when Group == Weapon (FPSRCardSubsystem.cpp:603), so a
+	 *  Character-group card in Weapon.WeaponCards would apply to the equipped weapon instead of its source. No-op (false)
+	 *  if Card is null or already NewGroup. */
+	static bool SetCardGroup(UFPSRCardDataAsset* Card, ECardGroup NewGroup);
+
 	/** Save the given (already dirty-tracked) packages via UEditorLoadingAndSavingUtils-equivalent (FEditorFileUtils::
 	 *  SavePackages, bOnlyDirty=true, no dialog prompt) so the AssetRegistry re-scans and FFPSRAnchoredValidationService
 	 *  recomputes orphans/reachability against the saved-on-disk state. Returns the number of packages actually saved. */

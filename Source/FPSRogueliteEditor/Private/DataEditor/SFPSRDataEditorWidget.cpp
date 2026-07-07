@@ -330,7 +330,20 @@ FReply SFPSRDataEditorWidget::OnSaveAndRescanClicked()
 		}
 	}
 	FFPSRDataEditorHelpers::SavePackages(Packages);
-	DirtyTrackedPackages.Reset();
+	// Keep any package that FAILED to save (still dirty) tracked so the stale status stays honest instead of falsely
+	// reading "Up to date" while an asset remains unsaved (read-only / source-controlled / disk error).
+	TSet<TWeakObjectPtr<UPackage>> StillDirty;
+	for (const TWeakObjectPtr<UPackage>& WeakPackage : DirtyTrackedPackages)
+	{
+		if (UPackage* Package = WeakPackage.Get())
+		{
+			if (Package->IsDirty())
+			{
+				StillDirty.Add(Package);
+			}
+		}
+	}
+	DirtyTrackedPackages = MoveTemp(StillDirty);
 
 	RefreshLists();
 	return FReply::Handled();
@@ -1050,6 +1063,16 @@ FReply SFPSRDataEditorWidget::OnGuidedAddCardClicked()
 				GuidedAddStatusText->SetColorAndOpacity(FLinearColor(0.9f, 0.2f, 0.2f));
 			}
 			return FReply::Handled();
+		}
+		// A card in a weapon's LEVEL-UP pool (WeaponCards) must be Group=Weapon, or GatherCandidatePool won't set the
+		// draw's TargetWeapon (FPSRCardSubsystem.cpp:603) and the offer would apply to the equipped weapon instead of
+		// the source weapon. Set it so the wiring is correct-by-construction (the card's own package is tracked too).
+		if (Route == EFPSRCardRoute::LevelUpWeapon && Card->Group != ECardGroup::Weapon)
+		{
+			if (FFPSRDataEditorHelpers::SetCardGroup(Card, ECardGroup::Weapon))
+			{
+				TrackDirtyPackage(Card->GetPackage());
+			}
 		}
 		bAdded = FFPSRDataEditorHelpers::AddCardToWeapon(Weapon, Card, /*bUnlockableFeatures=*/Route == EFPSRCardRoute::MissionClearWeaponFeature);
 		TargetPackage = Weapon->GetPackage();

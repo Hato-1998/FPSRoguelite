@@ -277,6 +277,22 @@ bool FFPSRDataEditorHelpers::SetCardEffectMagnitude(UFPSRCardDataAsset* Card, in
 	return Card->SetEffectRarityMagnitude(EffectIndex, Rarity, NewMagnitude);
 }
 
+bool FFPSRDataEditorHelpers::SetCardGroup(UFPSRCardDataAsset* Card, ECardGroup NewGroup)
+{
+	if (!Card || Card->Group == NewGroup)
+	{
+		return false;
+	}
+	const FScopedTransaction Transaction(LOCTEXT("Transaction_SetCardGroup", "Set Card Group"));
+	Card->Modify();
+	Card->Group = NewGroup;
+	FProperty* Prop = FindFProperty<FProperty>(UFPSRCardDataAsset::StaticClass(), GET_MEMBER_NAME_CHECKED(UFPSRCardDataAsset, Group));
+	FPropertyChangedEvent Evt(Prop, EPropertyChangeType::ValueSet);
+	Card->PostEditChangeProperty(Evt);
+	Card->MarkPackageDirty();
+	return true;
+}
+
 int32 FFPSRDataEditorHelpers::SavePackages(const TArray<UPackage*>& Packages)
 {
 	// Count only the actually-dirty subset up front (bOnlyDirty below silently skips clean packages), so the
