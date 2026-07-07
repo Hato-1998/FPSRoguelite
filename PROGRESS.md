@@ -6,6 +6,15 @@
 
 **최종 갱신: 2026-07-07**
 
+## 🔔 핸드오프 (2026-07-07 e · FPSR Data Editor **P2 후속 착수 = 새 세션 인계**, 컨텍스트 소진) — 🎯 **P1+UX후속 완료·머지(main `c4f31d5`). 새 세션이 P2를 플랜-우선으로 이어감. 착수 1순위 = magnitude 티어 생성/삭제+산술 bulk(블로커 없음). 미션타임라인편집=H3·자동라우팅검증=H2 선행(🙋사용자결정).**
+> **현 상태**: FPSR Data Editor(P1 배선/고아·카드 magnitude·미션 read-only 타임라인 + UX후속 카테고리 트리·전체 한국어화) main 머지 완료, 브랜치=main 단독. 사용자 툴 테스트 중(미커밋 `Content/Cards/Character/DA_Character_CardPool`·`Content/Weapons/DA_LoadoutPool` = 툴로 실배선한 사용자 콘텐츠 — **손대지 말 것**). ⚠️마지막 UI커밋 Codex게이트=2회 무응답 워치독 스킵(정합 무변경이라 저위험, 재시도 선택).
+> **P2 항목·블로커·권장순서** (상세=[`Docs/Review/20260707-data-tooling-p1.md`](Docs/Review/20260707-data-tooling-p1.md) §🙋 D1~4·§📌, TaskPrompts §E H2/H3/H4):
+> > **① magnitude 티어 생성/삭제 + 산술 bulk (1순위·블로커 없음)** — 현재 `UFPSRCardDataAsset::SetEffectRarityMagnitude`는 **존재 티어 in-place만**. P2=없는 rarity 티어 생성/삭제 + 셀/열 일괄연산(×N/+N). ⚠️**산술 bulk는 효과별 magnitude 의미(퍼센트배율 vs flat)가 달라 ×0.9가 flat에 오적용** → `UFPSRCardEffect`에 WITH_EDITOR 단위 시임 추가(예: `GetEditorMagnitudeUnit()`→Percent/Flat/None; 이미 CharacterGE엔 `bShowAsPercent` 있음, 일반화). 티어 생성=`OfferRarities` 재파생+IsDataValid(전 magnitude효과 동일 rarity 커버) 재검증 경유. 파일: `FPSRCardEffect.h/.cpp`(단위 가상)·`FPSRCardDataAsset.h/.cpp`(Create/DeleteEffectRarityTier)·`FPSRDataEditorHelpers`(bulk 헬퍼)·`SFPSRDataEditorWidget.cpp`(그리드 티어추가/삭제 버튼+일괄op) + 라운드트립 테스트.
+> > **② 자동 라우팅-누수 검증 (H2 선행)** — 🙋H2=카드 surface 라우팅 정합(행동프래그먼트/`UnlockableFeatures`/`WeaponUnlockCards`/`Cards`)을 코드(`FPSRCardSubsystem.cpp`)↔SSOT(`CombatWeaponCard §2-3-4`)↔메모리 [[card-pool-routing]] 확정(사용자결정+SSOT선행). 후=P1 preflight(`GetCardEligibleRoutes`) 재사용해 잘못된 배열 배치를 헤드리스 검증기로.
+> > **③ 미션 타임라인 편집 (H3 선행)** — H3=미션튜닝(ZoneRadius/HoldSeconds) BP CDO→DA-소유 통합 여부(RunFlow §2-8 SSOT 결정). 후=`SFPSRScheduleTimelineBar` read-only→편집(윈도우 드래그·MinTime/MaxTime·MissionPool)+미션튜닝 집약 패널(DA+BP CDO+스폰포인트).
+> > **④ 양방향 배선뷰 (보류)** — 좌:풀/우:카탈로그 대량이동. "반복 대량이동" 실사용 증거 시에만(P1.5+).
+> **절차(엄수)**: 새 세션 = PROGRESS 이 핸드오프 + Game.md §0-1 + 위 리포트 먼저 읽기. **①부터 착수**(플랜-우선→phase 브랜치 `phase/editor-tooling-p2-magnitude`→Sonnet 구현/Opus 검증→Codex 게이트→`--no-ff` 머지). ②③은 **먼저 사용자에게 H2/H3 결정 요청** 후. 신규 소스=에디터 종료→`-NoXGE` 빌드→재기동. 구현=Sonnet 위임/검증=Opus 직접. Content 미커밋(사용자 WIP) 손대지 말 것.
+
 ## 🔔 핸드오프 (2026-07-07 d · FPSR Data Editor UX 후속 = 좌측 카테고리 트리 + 전체 한국어화 → main 머지) — 🎯 **사용자 요청 2건 완료·머지(`7d5526d`). 다음 = 사용자 인터랙티브 테스트(에디터 재기동).**
 > **머지**: `phase/editor-tooling-p1b-ui-korean` → main `--no-ff`(`7d5526d`). ①좌측 패널 앵커+고아 2리스트 → **단일 `STreeView` 카테고리 브라우저**(무기/카드/카드풀/미션/런스케줄/로드아웃풀/프래그먼트 7분류, **전체 에셋** 표시 — 기존엔 배선된 무기·카드·미션 미표시가 버그였음; 고아=주황+"(미배선)" 인라인 태그, 카테고리 항상 표시+개수+기본 펼침). ②**UI 전체 한국어화**(위젯·헬퍼 라우트/사유·모듈 메뉴/탭·효과 그리드 라벨·언두 라벨, LOCTEXT 키 유지; magnitude 그리드 한국어 헤더행 추가, rarity명은 영어 유지).
 > **정합 보존**: 트리 선택→기존 `OnAssetSelected` 재사용, 정합-핵심 로직(Value_Lambda·RebuildAuxPanels·reachable 무기필터·SetCardGroup·저장실패추적·route add+타겟검증) 전부 무변경(문자열+좌측 discovery만).
