@@ -4,6 +4,8 @@
 #include "Validation/FPSRAnchoredValidationService.h"
 #include "Card/FPSRCardPoolDataAsset.h"
 #include "Card/FPSRCardDataAsset.h"
+#include "Card/FPSRCardTypes.h"
+#include "DataEditor/FPSRDataEditorHelpers.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "AssetRegistry/IAssetRegistry.h"
 #include "AssetRegistry/ARFilter.h"
@@ -76,6 +78,31 @@ EDataValidationResult UFPSRCardPoolValidator::ValidateCheapSelfChecks(const UFPS
 	};
 	CheckNulls(Pool->Cards, TEXT("Cards"));
 	CheckNulls(Pool->WeaponUnlockCards, TEXT("WeaponUnlockCards"));
+
+	// Routing (H2 = hard error): a card wired into a pool array whose route it isn't eligible for would be a silent
+	// no-op (or a semantically wrong offer) at draw time. Cheap — no registry scan, just the card's own Effects — so
+	// it runs on every save, not just the Manual/Commandlet/Script/PreSubmit cross-pool pass below.
+	auto CheckRouting = [&](const TArray<TObjectPtr<UFPSRCardDataAsset>>& List, const TCHAR* ArrayName, EFPSRCardRoute Route)
+	{
+		for (const TObjectPtr<UFPSRCardDataAsset>& Card : List)
+		{
+			if (!Card)
+			{
+				continue; // null entries are reported by CheckNulls above
+			}
+			FText Reason;
+			if (FFPSRDataEditorHelpers::CheckCardRoute(Card, Route, Reason) == EFPSRWiringVerdict::Blocked)
+			{
+				const FText CardLabel = Card->CardId.IsNone() ? FText::FromString(Card->GetName()) : FText::FromName(Card->CardId);
+				Context.AddError(FText::Format(
+					LOCTEXT("CardRoutingBlocked", "카드 '{0}' 가 풀 배열 '{1}'(라우트 {2})에 부적격 배선됨: {3}"),
+					CardLabel, FText::FromString(ArrayName), FFPSRDataEditorHelpers::GetRouteDisplayText(Route), Reason));
+				Result = EDataValidationResult::Invalid;
+			}
+		}
+	};
+	CheckRouting(Pool->Cards, TEXT("Cards"), EFPSRCardRoute::LevelUpGlobal);
+	CheckRouting(Pool->WeaponUnlockCards, TEXT("WeaponUnlockCards"), EFPSRCardRoute::MissionClearNewWeapon);
 
 	if (Pool->CommonWeight <= 0.0f && Pool->RareWeight <= 0.0f && Pool->EpicWeight <= 0.0f && Pool->LegendaryWeight <= 0.0f)
 	{
@@ -211,8 +238,6 @@ EDataValidationResult UFPSRCardPoolValidator::ValidateCrossPoolChecks(const UFPS
 				FText::FromString(RarityStr)));
 		}
 	}
-
-	// TODO(routing): add surface-leakage check after CombatWeaponCard §2-3-4 routing spec is locked.
 
 	return Result;
 }

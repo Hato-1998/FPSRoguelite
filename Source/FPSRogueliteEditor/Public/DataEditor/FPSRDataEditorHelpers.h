@@ -13,12 +13,11 @@ class UFPSRRunScheduleDataAsset;
 class UFPSRMissionDataAsset;
 class UPackage;
 
-/** Result of a card-route wiring preflight (FFPSRDataEditorHelpers::CheckCardRoute). */
+/** Result of a card-route wiring preflight (FFPSRDataEditorHelpers::CheckCardRoute). H2 = routing ambiguity is
+ *  resolved by hard error, not a warning — a route is either eligible (Allowed) or it isn't (Blocked). */
 enum class EFPSRWiringVerdict : uint8
 {
-	Allowed, // Route is one of the card's eligible routes (GetCardEligibleRoutes) with no caveats.
-	Warn,    // Route is technically eligible but not the recommended one (currently only the WeaponBehavior
-	         // H2-ambiguous LevelUpWeapon choice — MissionClearWeaponFeature is recommended instead).
+	Allowed, // Route is one of the card's eligible routes (GetCardEligibleRoutes).
 	Blocked  // Route is not in the card's eligible set at all — placing the card there would be a silent no-op
 	         // at draw/apply time (or worse, a semantically wrong offer).
 };
@@ -52,9 +51,9 @@ public:
 	 *  or effects that share no route, yields empty (nothing eligible). No effect-type switch here — pure iteration. */
 	static TArray<EFPSRCardRoute> GetCardEligibleRoutes(const UFPSRCardDataAsset* Card);
 
-	/** Preflight for placing Card into Route: Blocked if Route not in eligible set; Warn for the H2-ambiguous
-	 *  WeaponBehavior LevelUpWeapon choice (recommended = MissionClearWeaponFeature); else Allowed. OutReason set
-	 *  for Warn/Blocked (empty for Allowed). */
+	/** Preflight for placing Card into Route: Blocked if Route not in the card's eligible set (GetCardEligibleRoutes) —
+	 *  including the case where the eligible set itself is empty (a multi-effect card whose effects share no common
+	 *  route); else Allowed. OutReason set for Blocked (empty for Allowed). */
 	static EFPSRWiringVerdict CheckCardRoute(const UFPSRCardDataAsset* Card, EFPSRCardRoute Route, FText& OutReason);
 
 	// --- Membership add/remove (each type-safe, transaction-wrapped, reuses PostEditChangeProperty so the engine's

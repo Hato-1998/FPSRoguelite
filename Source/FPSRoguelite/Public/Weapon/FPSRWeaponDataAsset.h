@@ -78,8 +78,9 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|카드", meta = (DisplayName = "최대 프래그먼트 슬롯", ClampMin = "1"))
 	int32 MaxFragmentSlots = 3;
 
-	/** DEPRECATED (U18b): was the mission-reward fragment pool. Fragments moved to WeaponCards (level-up); feature
-	 *  unlocks now live in UnlockableFeatures. Retained only so the content resave can migrate off it — remove in a follow-up. */
+	/** DEPRECATED (U18b→U6): 구 미션보상 프래그먼트 풀. U6/H2 라우팅에서 행동 프래그먼트와 stat 피처 언락 모두
+	 *  UnlockableFeatures(미션/마일스톤)에 위치; 레벨업 무기 카드(WeaponCards)=순수 stat만. 콘텐츠 리세이브
+	 *  마이그레이션용으로만 잔존 — 후속에서 제거. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|카드", meta = (DisplayName = "모디파이어 풀(폐기예정)"))
 	TArray<TObjectPtr<UFPSRCardDataAsset>> AvailableModifiers;
 

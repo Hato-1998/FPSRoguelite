@@ -111,7 +111,8 @@ TArray<FFPSRCardDraw> UFPSRCardSubsystem::DrawCards(AController* ForPlayer, int3
 	const bool bHasWeapon = Inv && Inv->GetOwnedWeapons().Num() > 0;
 
 	// Flatten each eligible card into one weighted offer per OFFERED rarity. Excluded cards, behavior-fragment
-	// cards (mission-reward only), and weapon-targeting cards while the player owns no weapon are skipped.
+	// cards (U6/H2 routes them to UnlockableFeatures — mission/milestone only, never this level-up draw), and
+	// weapon-targeting cards while the player owns no weapon are skipped.
 	TArray<FFPSRCardDraw> Candidates;
 	TArray<float> CandidateWeights;
 	for (int32 CardIdx = 0; CardIdx < Cards.Num(); ++CardIdx)
@@ -128,22 +129,6 @@ TArray<FFPSRCardDraw> UFPSRCardSubsystem::DrawCards(AController* ForPlayer, int3
 			UE_LOG(LogFPSR, Warning, TEXT("[Card] '%s' has no Effects — skipped (configure at least one effect)."), *Card->GetName());
 			continue;
 		}
-		// Behavior-fragment cards now join the level-up draw (U18b routing). Stack gate: a fragment already maxed on its
-		// target weapon is no longer offered (ported from the old mission path). SourceWeapon picks the target instance.
-		UFPSRWeaponFragment* BehFrag = GetCardBehaviorFragment(Card);
-		if (BehFrag)
-		{
-			UFPSRWeaponInstance* Inst = (Inv && SourceWeapon) ? Inv->GetInstanceForWeapon(SourceWeapon)
-			                                                  : (Inv ? Inv->GetCurrentInstance() : nullptr);
-			const int32 Stacks = Inst ? Inst->GetFragmentStackCount(BehFrag) : 0;
-			// Skip a maxed-stack fragment, OR a new distinct fragment on a weapon already at its slot cap — the latter
-			// needs the (deferred) replacement UI to choose a drop, so a plain pick would bounce and strand the level-up
-			// freeze (mirrors DrawWeaponUnlockOffer; U6). Stacking an already-held fragment (Stacks > 0) is unaffected.
-			if (!Inst || Stacks >= FMath::Max(BehFrag->MaxStacks, 1) || (Stacks == 0 && Inst->IsAtFragmentSlotCap()))
-			{
-				continue;
-			}
-		}
 		// Weapon-targeting cards (this-weapon / all-weapons stat) join the pool only once a weapon is owned (v1 gate).
 		if (CardRequiresWeapon(Card) && !bHasWeapon)
 		{
@@ -151,26 +136,10 @@ TArray<FFPSRCardDraw> UFPSRCardSubsystem::DrawCards(AController* ForPlayer, int3
 		}
 		if (Card->OfferRarities.Num() == 0)
 		{
-			// Behavior-fragment cards carry no numeric tiers, so OfferRarities is empty — build a single Common offer
-			// (BuildSingleDraw parity) so a fragment re-routed to the level-up pool (U18b) still appears. A non-behavior
-			// card with no tiers is genuinely misconfigured and is skipped with a warning.
-			if (BehFrag)
-			{
-				const float Weight = GetEffectiveWeight(Card, ECardRarity::Common, Luck);
-				if (Weight > 0.0f)
-				{
-					FFPSRCardDraw Offer;
-					Offer.Card = Card;
-					Offer.Rarity = ECardRarity::Common;
-					Offer.TargetWeapon = SourceWeapon;
-					Candidates.Add(Offer);
-					CandidateWeights.Add(Weight);
-				}
-			}
-			else
-			{
-				UE_LOG(LogFPSR, Warning, TEXT("[Card] '%s' has no OfferRarities — skipped (give an effect at least one RarityTier)."), *Card->GetName());
-			}
+			// 티어가 없는 카드는 레벨업 오퍼를 만들 수 없다. 행동 프래그먼트 카드(티어 없음)는 미션/마일스톤 풀
+			// (Weapon.UnlockableFeatures)에 속한다(U6/H2 라우팅; 데이터 검증기가 레벨업 풀 배선을 에러로 잡음).
+			// 그 외 티어 없는 카드는 진짜 오설정이다. 어느 쪽이든 여기선 스킵+경고.
+			UE_LOG(LogFPSR, Warning, TEXT("[Card] '%s' has no OfferRarities — skipped (level-up cards need a RarityTier; behavior fragments belong in UnlockableFeatures)."), *Card->GetName());
 			continue;
 		}
 		for (const ECardRarity Rarity : Card->OfferRarities)

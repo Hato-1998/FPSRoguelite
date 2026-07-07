@@ -1546,16 +1546,8 @@ FReply SFPSRDataEditorWidget::OnGuidedAddCardClicked()
 	}
 	if (GuidedAddStatusText.IsValid())
 	{
-		if (Verdict == EFPSRWiringVerdict::Warn)
-		{
-			GuidedAddStatusText->SetText(bAdded ? FText::Format(LOCTEXT("AddedWithWarning", "추가됨(경고): {0}"), Reason) : Reason);
-			GuidedAddStatusText->SetColorAndOpacity(FLinearColor(0.9f, 0.7f, 0.2f));
-		}
-		else
-		{
-			GuidedAddStatusText->SetText(bAdded ? LOCTEXT("AddedOk", "추가됨.") : LOCTEXT("AddedNoop", "이미 있음 — 변경 없음"));
-			GuidedAddStatusText->SetColorAndOpacity(FLinearColor::White);
-		}
+		GuidedAddStatusText->SetText(bAdded ? LOCTEXT("AddedOk", "추가됨.") : LOCTEXT("AddedNoop", "이미 있음 — 변경 없음"));
+		GuidedAddStatusText->SetColorAndOpacity(FLinearColor::White);
 	}
 	if (bAdded)
 	{
