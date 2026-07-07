@@ -221,9 +221,15 @@ FText UCardEffect_WeaponStat::GetEditorGridLabel() const
 
 TArray<EFPSRCardRoute> UCardEffect_WeaponStat::GetEditorEligibleRoutes() const
 {
-	// ThisWeapon-scope stat cards ride the weapon's own level-up pool; AllWeapons-scope cards ride the global
-	// level-up pool (same split ApplyCard uses at runtime — bThisWeaponOnly picks the instance vs. the PlayerState).
-	return { bThisWeaponOnly ? EFPSRCardRoute::LevelUpWeapon : EFPSRCardRoute::LevelUpGlobal };
+	// this-weapon stat = eligible for the level-up weapon card pool OR a mission-clear stat feature unlock (Weapon.
+	// UnlockableFeatures) — DrawWeaponUnlockOffer Part B always offers stat-only features (FPSRCardSubsystem.cpp:446),
+	// so this-weapon stat cards routing there is a real, exercised path (H2). all-weapons stat cards stay in the
+	// global level-up pool only (matches ApplyCard's PlayerState-wide application at runtime).
+	if (bThisWeaponOnly)
+	{
+		return { EFPSRCardRoute::LevelUpWeapon, EFPSRCardRoute::MissionClearWeaponFeature };
+	}
+	return { EFPSRCardRoute::LevelUpGlobal };
 }
 
 EFPSREditorMagnitudeUnit UCardEffect_WeaponStat::GetEditorMagnitudeUnit() const
@@ -316,11 +322,9 @@ FText UCardEffect_WeaponBehavior::GetEditorGridLabel() const
 
 TArray<EFPSRCardRoute> UCardEffect_WeaponBehavior::GetEditorEligibleRoutes() const
 {
-	// H2-ambiguous case: behavior fragments historically shipped as mission-reward-only (MissionClearWeaponFeature),
-	// but the same effect type is also valid as a level-up weapon card (LevelUpWeapon) — both are permitted here;
-	// the Data Editor's preflight (FFPSRDataEditorHelpers::CheckCardRoute) defaults to the mission-clear route and
-	// warns (not blocks) if a designer explicitly picks the level-up route.
-	return { EFPSRCardRoute::LevelUpWeapon, EFPSRCardRoute::MissionClearWeaponFeature };
+	// 행동 프래그먼트 카드=미션/마일스톤 풀(Weapon.UnlockableFeatures)만. U6/H2로 레벨업 풀(WeaponCards) 배선은
+	// 금지 — 데이터 검증기(FPSRWeaponValidator/FPSRCardPoolValidator)가 이를 에러로 강제한다.
+	return { EFPSRCardRoute::MissionClearWeaponFeature };
 }
 #endif
 

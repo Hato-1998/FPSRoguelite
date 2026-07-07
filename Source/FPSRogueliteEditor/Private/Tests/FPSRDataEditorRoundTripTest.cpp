@@ -380,4 +380,139 @@ bool FFPSRDataEditorTierAndBulkTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFPSRDataEditorRoutingTest, "FPSRoguelite.Editor.DataEditor.Routing",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FFPSRDataEditorRoutingTest::RunTest(const FString& Parameters)
+{
+	// ---------------------------------------------------------------------------------------------------------
+	// 1. WeaponBehavior effect: eligible for MissionClearWeaponFeature ONLY (U6/H2 — behavior fragments never
+	//    live in the level-up weapon pool).
+	// ---------------------------------------------------------------------------------------------------------
+	{
+		UFPSRCardDataAsset* Card = NewObject<UFPSRCardDataAsset>();
+		TestNotNull(TEXT("Behavior card allocates"), Card);
+		if (!Card)
+		{
+			return false;
+		}
+		UCardEffect_WeaponBehavior* Effect = NewObject<UCardEffect_WeaponBehavior>(Card);
+		TestNotNull(TEXT("WeaponBehavior effect allocates"), Effect);
+		if (!Effect)
+		{
+			return false;
+		}
+		Card->Effects.Add(Effect);
+
+		const TArray<EFPSRCardRoute> Eligible = FFPSRDataEditorHelpers::GetCardEligibleRoutes(Card);
+		TestEqual(TEXT("WeaponBehavior eligible routes == {MissionClearWeaponFeature} only"), Eligible.Num(), 1);
+		TestTrue(TEXT("WeaponBehavior eligible contains MissionClearWeaponFeature"), Eligible.Contains(EFPSRCardRoute::MissionClearWeaponFeature));
+
+		FText Reason;
+		TestTrue(TEXT("CheckCardRoute(LevelUpWeapon) is Blocked for WeaponBehavior"),
+			FFPSRDataEditorHelpers::CheckCardRoute(Card, EFPSRCardRoute::LevelUpWeapon, Reason) == EFPSRWiringVerdict::Blocked);
+		TestTrue(TEXT("CheckCardRoute(MissionClearWeaponFeature) is Allowed for WeaponBehavior"),
+			FFPSRDataEditorHelpers::CheckCardRoute(Card, EFPSRCardRoute::MissionClearWeaponFeature, Reason) == EFPSRWiringVerdict::Allowed);
+		TestTrue(TEXT("CheckCardRoute(LevelUpGlobal) is Blocked for WeaponBehavior"),
+			FFPSRDataEditorHelpers::CheckCardRoute(Card, EFPSRCardRoute::LevelUpGlobal, Reason) == EFPSRWiringVerdict::Blocked);
+	}
+
+	// ---------------------------------------------------------------------------------------------------------
+	// 2. WeaponStat bThisWeaponOnly=true: eligible for {LevelUpWeapon, MissionClearWeaponFeature}.
+	// ---------------------------------------------------------------------------------------------------------
+	{
+		UFPSRCardDataAsset* Card = NewObject<UFPSRCardDataAsset>();
+		TestNotNull(TEXT("ThisWeapon stat card allocates"), Card);
+		if (!Card)
+		{
+			return false;
+		}
+		UCardEffect_WeaponStat* Effect = NewObject<UCardEffect_WeaponStat>(Card);
+		TestNotNull(TEXT("WeaponStat effect allocates"), Effect);
+		if (!Effect)
+		{
+			return false;
+		}
+		Effect->bThisWeaponOnly = true;
+		Card->Effects.Add(Effect);
+
+		const TArray<EFPSRCardRoute> Eligible = FFPSRDataEditorHelpers::GetCardEligibleRoutes(Card);
+		TestEqual(TEXT("ThisWeapon stat eligible routes == {LevelUpWeapon, MissionClearWeaponFeature}"), Eligible.Num(), 2);
+		TestTrue(TEXT("ThisWeapon stat eligible contains LevelUpWeapon"), Eligible.Contains(EFPSRCardRoute::LevelUpWeapon));
+		TestTrue(TEXT("ThisWeapon stat eligible contains MissionClearWeaponFeature"), Eligible.Contains(EFPSRCardRoute::MissionClearWeaponFeature));
+
+		FText Reason;
+		TestTrue(TEXT("CheckCardRoute(LevelUpWeapon) is Allowed for ThisWeapon stat"),
+			FFPSRDataEditorHelpers::CheckCardRoute(Card, EFPSRCardRoute::LevelUpWeapon, Reason) == EFPSRWiringVerdict::Allowed);
+		TestTrue(TEXT("CheckCardRoute(MissionClearWeaponFeature) is Allowed for ThisWeapon stat"),
+			FFPSRDataEditorHelpers::CheckCardRoute(Card, EFPSRCardRoute::MissionClearWeaponFeature, Reason) == EFPSRWiringVerdict::Allowed);
+		TestTrue(TEXT("CheckCardRoute(LevelUpGlobal) is Blocked for ThisWeapon stat"),
+			FFPSRDataEditorHelpers::CheckCardRoute(Card, EFPSRCardRoute::LevelUpGlobal, Reason) == EFPSRWiringVerdict::Blocked);
+	}
+
+	// ---------------------------------------------------------------------------------------------------------
+	// 3. WeaponStat bThisWeaponOnly=false: eligible for {LevelUpGlobal} only.
+	// ---------------------------------------------------------------------------------------------------------
+	{
+		UFPSRCardDataAsset* Card = NewObject<UFPSRCardDataAsset>();
+		TestNotNull(TEXT("AllWeapons stat card allocates"), Card);
+		if (!Card)
+		{
+			return false;
+		}
+		UCardEffect_WeaponStat* Effect = NewObject<UCardEffect_WeaponStat>(Card);
+		TestNotNull(TEXT("WeaponStat effect allocates"), Effect);
+		if (!Effect)
+		{
+			return false;
+		}
+		Effect->bThisWeaponOnly = false;
+		Card->Effects.Add(Effect);
+
+		const TArray<EFPSRCardRoute> Eligible = FFPSRDataEditorHelpers::GetCardEligibleRoutes(Card);
+		TestEqual(TEXT("AllWeapons stat eligible routes == {LevelUpGlobal} only"), Eligible.Num(), 1);
+		TestTrue(TEXT("AllWeapons stat eligible contains LevelUpGlobal"), Eligible.Contains(EFPSRCardRoute::LevelUpGlobal));
+
+		FText Reason;
+		TestTrue(TEXT("CheckCardRoute(LevelUpGlobal) is Allowed for AllWeapons stat"),
+			FFPSRDataEditorHelpers::CheckCardRoute(Card, EFPSRCardRoute::LevelUpGlobal, Reason) == EFPSRWiringVerdict::Allowed);
+		TestTrue(TEXT("CheckCardRoute(LevelUpWeapon) is Blocked for AllWeapons stat"),
+			FFPSRDataEditorHelpers::CheckCardRoute(Card, EFPSRCardRoute::LevelUpWeapon, Reason) == EFPSRWiringVerdict::Blocked);
+	}
+
+	// ---------------------------------------------------------------------------------------------------------
+	// 4. Multi-effect empty intersection: CharacterGE ({LevelUpGlobal}) + WeaponBehavior ({MissionClearWeaponFeature})
+	//    share no common route -> GetCardEligibleRoutes is empty, and CheckCardRoute is Blocked with a non-empty
+	//    reason for ANY route (H2: an empty intersection is a hard error everywhere, not just at the requested route).
+	// ---------------------------------------------------------------------------------------------------------
+	{
+		UFPSRCardDataAsset* Card = NewObject<UFPSRCardDataAsset>();
+		TestNotNull(TEXT("Mixed-effect card allocates"), Card);
+		if (!Card)
+		{
+			return false;
+		}
+		UCardEffect_CharacterGE* GEEffect = NewObject<UCardEffect_CharacterGE>(Card);
+		UCardEffect_WeaponBehavior* BehaviorEffect = NewObject<UCardEffect_WeaponBehavior>(Card);
+		TestNotNull(TEXT("CharacterGE effect allocates"), GEEffect);
+		TestNotNull(TEXT("WeaponBehavior effect allocates"), BehaviorEffect);
+		if (!GEEffect || !BehaviorEffect)
+		{
+			return false;
+		}
+		Card->Effects.Add(GEEffect);
+		Card->Effects.Add(BehaviorEffect);
+
+		const TArray<EFPSRCardRoute> Eligible = FFPSRDataEditorHelpers::GetCardEligibleRoutes(Card);
+		TestEqual(TEXT("Mixed CharacterGE+WeaponBehavior card has an EMPTY eligible-route intersection"), Eligible.Num(), 0);
+
+		FText Reason;
+		const EFPSRWiringVerdict Verdict = FFPSRDataEditorHelpers::CheckCardRoute(Card, EFPSRCardRoute::LevelUpGlobal, Reason);
+		TestTrue(TEXT("CheckCardRoute is Blocked for a card with no eligible routes"), Verdict == EFPSRWiringVerdict::Blocked);
+		TestFalse(TEXT("Blocked verdict for an empty intersection carries a non-empty reason"), Reason.IsEmpty());
+	}
+
+	return true;
+}
+
 #endif // WITH_AUTOMATION_TESTS

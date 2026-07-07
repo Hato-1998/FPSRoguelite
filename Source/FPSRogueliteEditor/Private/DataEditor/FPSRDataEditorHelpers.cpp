@@ -115,21 +115,21 @@ EFPSRWiringVerdict FFPSRDataEditorHelpers::CheckCardRoute(const UFPSRCardDataAss
 	}
 
 	const TArray<EFPSRCardRoute> Eligible = GetCardEligibleRoutes(Card);
+	if (Eligible.Num() == 0)
+	{
+		// Empty intersection: the card's effects don't share ANY common route (e.g. a CharacterGE effect — eligible
+		// only for LevelUpGlobal — mixed onto the same card as a WeaponBehavior effect — eligible only for
+		// MissionClearWeaponFeature). H2 = this is a hard error, never a warning: such a card cannot be wired
+		// anywhere without being a silent no-op or a semantically wrong offer.
+		OutReason = LOCTEXT("CheckRoute_EmptyIntersection", "이 카드의 효과들이 공통 라우트를 공유하지 않습니다(예: 레벨업 전용 효과와 미션 전용 효과가 한 카드에 섞임) — 어떤 풀에도 배선할 수 없습니다. 효과 구성을 확인하세요.");
+		return EFPSRWiringVerdict::Blocked;
+	}
 	if (!Eligible.Contains(Route))
 	{
 		OutReason = FText::Format(
 			LOCTEXT("CheckRoute_Blocked", "'{0}'은(는) 이 카드의 효과에 적격인 라우트가 아닙니다 — 여기 배선하면 드로우 시 무효(또는 의미상 잘못된 오퍼)가 됩니다."),
 			GetRouteDisplayText(Route));
 		return EFPSRWiringVerdict::Blocked;
-	}
-
-	// H2-ambiguous case (UCardEffect_WeaponBehavior): both LevelUpWeapon and MissionClearWeaponFeature are
-	// technically eligible, but the project convention is mission-clear for behavior fragments — warn (not block)
-	// if a designer explicitly wires one into the level-up weapon pool instead.
-	if (Route == EFPSRCardRoute::LevelUpWeapon && Eligible.Contains(EFPSRCardRoute::MissionClearWeaponFeature))
-	{
-		OutReason = LOCTEXT("CheckRoute_WarnBehaviorLevelUp", "이 카드는 '레벨업: 무기 카드'에 적격이지만, 행동 프래그먼트 카드는 관례상 '미션 클리어: 무기 피처'로 라우팅합니다. 의도한 경우에만 진행하세요.");
-		return EFPSRWiringVerdict::Warn;
 	}
 
 	return EFPSRWiringVerdict::Allowed;
