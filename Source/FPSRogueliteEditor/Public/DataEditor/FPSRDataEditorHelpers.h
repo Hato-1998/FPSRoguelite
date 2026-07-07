@@ -72,6 +72,12 @@ public:
 	static bool AddMissionToScheduleWindow(UFPSRRunScheduleDataAsset* Schedule, int32 WindowIndex, UFPSRMissionDataAsset* Mission);
 	static bool RemoveMissionFromScheduleWindow(UFPSRRunScheduleDataAsset* Schedule, int32 WindowIndex, UFPSRMissionDataAsset* Mission);
 
+	/** Set a schedule window's [MinTime,MaxTime] (transactional, drives the timeline bar's drag-to-edit). Clamps
+	 *  NewMinTime >= 0 and NewMaxTime >= NewMinTime (mirrors FFPSRMissionWindow's own ClampMin=0.0 meta + the
+	 *  MinTime<=MaxTime contract documented on the struct). No-op (false) on null Schedule/invalid WindowIndex, or
+	 *  when both clamped values already match the window's current MinTime/MaxTime (nothing to write). */
+	static bool SetScheduleWindowTime(UFPSRRunScheduleDataAsset* Schedule, int32 WindowIndex, float NewMinTime, float NewMaxTime);
+
 	// --- Misc --------------------------------------------------------------------------------------------------
 
 	/** Map a route to its display text (drives combo-box labels in the guided-add UI). Small closed table — the

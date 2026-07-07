@@ -248,6 +248,36 @@ bool FFPSRDataEditorHelpers::RemoveMissionFromScheduleWindow(UFPSRRunScheduleDat
 	return true;
 }
 
+bool FFPSRDataEditorHelpers::SetScheduleWindowTime(UFPSRRunScheduleDataAsset* Schedule, int32 WindowIndex, float NewMinTime, float NewMaxTime)
+{
+	if (!Schedule || !Schedule->MissionWindows.IsValidIndex(WindowIndex))
+	{
+		return false;
+	}
+
+	NewMinTime = FMath::Max(0.0f, NewMinTime);
+	NewMaxTime = FMath::Max(NewMinTime, NewMaxTime);
+
+	FFPSRMissionWindow& Window = Schedule->MissionWindows[WindowIndex];
+	if (FMath::IsNearlyEqual(Window.MinTime, NewMinTime) && FMath::IsNearlyEqual(Window.MaxTime, NewMaxTime))
+	{
+		return false; // no-op — both values already match (nothing to write, no transaction/dirty needed)
+	}
+
+	const FScopedTransaction Transaction(LOCTEXT("Transaction_SetScheduleWindowTime", "스케줄 윈도우 시간 조정"));
+	Schedule->Modify();
+	Window.MinTime = NewMinTime;
+	Window.MaxTime = NewMaxTime;
+
+	// Same rationale as AddMissionToScheduleWindow above: the mutated fields are on the struct element, but the
+	// outer MissionWindows property is what PostEditChangeProperty needs to key off of here.
+	FProperty* Prop = FindFProperty<FProperty>(UFPSRRunScheduleDataAsset::StaticClass(), GET_MEMBER_NAME_CHECKED(UFPSRRunScheduleDataAsset, MissionWindows));
+	FPropertyChangedEvent Evt(Prop, EPropertyChangeType::ValueSet);
+	Schedule->PostEditChangeProperty(Evt);
+	Schedule->MarkPackageDirty();
+	return true;
+}
+
 FText FFPSRDataEditorHelpers::GetRouteDisplayText(EFPSRCardRoute Route)
 {
 	// Closed table for a closed enum (EFPSRCardRoute is fixed by the C++ schema — see FPSRCardTypes.h) — a switch

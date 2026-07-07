@@ -5,6 +5,7 @@
 #include "Card/FPSRCardDataAsset.h"
 #include "Card/FPSRCardEffect.h"
 #include "Card/FPSRCardPoolDataAsset.h"
+#include "Run/FPSRRunScheduleDataAsset.h"
 
 #if WITH_AUTOMATION_TESTS
 
@@ -511,6 +512,55 @@ bool FFPSRDataEditorRoutingTest::RunTest(const FString& Parameters)
 		TestTrue(TEXT("CheckCardRoute is Blocked for a card with no eligible routes"), Verdict == EFPSRWiringVerdict::Blocked);
 		TestFalse(TEXT("Blocked verdict for an empty intersection carries a non-empty reason"), Reason.IsEmpty());
 	}
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFPSRDataEditorScheduleTimeTest, "FPSRoguelite.Editor.DataEditor.ScheduleTime",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FFPSRDataEditorScheduleTimeTest::RunTest(const FString& Parameters)
+{
+	// In-memory only (transient NewObject) — mirrors the timeline bar's drag-commit call, not a disk round-trip.
+	UFPSRRunScheduleDataAsset* Schedule = NewObject<UFPSRRunScheduleDataAsset>();
+	TestNotNull(TEXT("Schedule allocates"), Schedule);
+	if (!Schedule)
+	{
+		return false;
+	}
+
+	FFPSRMissionWindow Window;
+	Window.MinTime = 10.0f;
+	Window.MaxTime = 20.0f;
+	Schedule->MissionWindows.Add(Window);
+
+	// 1. Ordinary edit: both values change and are written verbatim.
+	TestTrue(TEXT("SetScheduleWindowTime(30,50) succeeds"),
+		FFPSRDataEditorHelpers::SetScheduleWindowTime(Schedule, 0, 30.0f, 50.0f));
+	TestEqual(TEXT("MinTime is now 30"), Schedule->MissionWindows[0].MinTime, 30.0f);
+	TestEqual(TEXT("MaxTime is now 50"), Schedule->MissionWindows[0].MaxTime, 50.0f);
+
+	// 2. Clamp: a negative MinTime is clamped to 0.
+	TestTrue(TEXT("SetScheduleWindowTime(-5,40) succeeds (still a real change)"),
+		FFPSRDataEditorHelpers::SetScheduleWindowTime(Schedule, 0, -5.0f, 40.0f));
+	TestEqual(TEXT("Negative MinTime clamps to 0"), Schedule->MissionWindows[0].MinTime, 0.0f);
+	TestEqual(TEXT("MaxTime is 40"), Schedule->MissionWindows[0].MaxTime, 40.0f);
+
+	// 3. Clamp: MaxTime dragged below MinTime clamps up to MinTime (both land at 60).
+	TestTrue(TEXT("SetScheduleWindowTime(60,40) succeeds"),
+		FFPSRDataEditorHelpers::SetScheduleWindowTime(Schedule, 0, 60.0f, 40.0f));
+	TestEqual(TEXT("MinTime is 60"), Schedule->MissionWindows[0].MinTime, 60.0f);
+	TestEqual(TEXT("MaxTime clamps up to MinTime (60)"), Schedule->MissionWindows[0].MaxTime, 60.0f);
+
+	// 4. No-op: re-setting the same (already-clamped) values changes nothing and reports false.
+	TestFalse(TEXT("Re-setting the same values is a no-op"),
+		FFPSRDataEditorHelpers::SetScheduleWindowTime(Schedule, 0, 60.0f, 60.0f));
+	TestEqual(TEXT("MinTime unchanged after the no-op"), Schedule->MissionWindows[0].MinTime, 60.0f);
+	TestEqual(TEXT("MaxTime unchanged after the no-op"), Schedule->MissionWindows[0].MaxTime, 60.0f);
+
+	// 5. Invalid index: no window at 99 — refused, no crash.
+	TestFalse(TEXT("Invalid WindowIndex is refused"),
+		FFPSRDataEditorHelpers::SetScheduleWindowTime(Schedule, 99, 0.0f, 10.0f));
 
 	return true;
 }

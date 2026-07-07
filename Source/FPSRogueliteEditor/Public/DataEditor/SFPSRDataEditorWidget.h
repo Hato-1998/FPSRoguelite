@@ -29,12 +29,13 @@ template <typename OptionType> class SComboBox;
  * engine IDetailsView for ALL property editing (per the over-design gate, this tool hand-rolls exactly THREE custom
  * widgets — this tree panel's selection plumbing doesn't count as one of the three; the three are: (1) this
  * categorized asset tree, (2) the card magnitude grid below, and (3) SFPSRScheduleTimelineBar) — plus the card
- * magnitude grid and the read-only mission schedule timeline.
+ * magnitude grid and the interactive (drag-to-edit) mission schedule timeline.
  *
- * Everything that is just "edit a selected asset's properties" (including membership arrays like Pool->Cards) is
- * left to IDetailsView; this widget only adds the THREE things IDetailsView cannot do: a categorized cross-asset
- * browser with orphan flagging, a per-rarity magnitude grid across a card's Instanced effects, and a read-only
- * schedule timeline.
+ * Everything that is just "edit a selected asset's properties" (including membership arrays like Pool->Cards, and
+ * typing exact MinTime/MaxTime values) is left to IDetailsView; this widget only adds the THREE things IDetailsView
+ * cannot do: a categorized cross-asset browser with orphan flagging, a per-rarity magnitude grid across a card's
+ * Instanced effects, and a schedule timeline whose window bars can be dragged (edges = resize, body = move) as a
+ * faster/visual alternative to typing times in the details panel.
  */
 class SFPSRDataEditorWidget : public SCompoundWidget
 {
@@ -132,6 +133,11 @@ private:
 
 	void RebuildScheduleTimeline(UFPSRRunScheduleDataAsset* Schedule);
 	void ClearScheduleTimeline();
+
+	/** SFPSRScheduleTimelineBar's OnEdited hook: fires once per completed drag (mouse-up that actually wrote a
+	 *  [MinTime,MaxTime] change). The bar re-paints itself from the live asset, so this only needs to dirty-track
+	 *  the schedule's package for "Save Modified + Rescan" — no rebuild of this tool's own widgets. */
+	void OnScheduleWindowEdited();
 
 	// --- Guided-add affordance (reuses engine SComboBox/SButton — not a counted custom widget) --------------------
 
