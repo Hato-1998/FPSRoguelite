@@ -34,28 +34,37 @@
 #include "Widgets/SLeafWidget.h"
 #include "Rendering/DrawElements.h"
 #include "Styling/AppStyle.h"
+#include "InputCoreTypes.h"
 
 #define LOCTEXT_NAMESPACE "SFPSRDataEditorWidget"
 
 // =====================================================================================================================
-// SFPSRScheduleTimelineBar — custom widget #3 of the hard-capped three. READ-ONLY: draws mission windows + boss time
-// on a horizontal time axis. No interaction, no state beyond what it's given each rebuild.
+// SFPSRScheduleTimelineBar — custom widget #3 of the hard-capped three. Draws mission windows + boss time on a
+// horizontal time axis and lets a designer DRAG a window's edges (resize MinTime/MaxTime) or body (move, preserving
+// width) to retime it. Commit is on mouse-up only (one transaction per drag, not per pixel); OnPaint previews the
+// in-flight drag from Pending{Min,Max} before the write lands.
 // =====================================================================================================================
 class SFPSRScheduleTimelineBar : public SLeafWidget
 {
 public:
 	SLATE_BEGIN_ARGS(SFPSRScheduleTimelineBar) {}
+		/** Fired once, on mouse-up, after a drag has committed a [MinTime,MaxTime] write via
+		 *  FFPSRDataEditorHelpers::SetScheduleWindowTime — lets the owner track the package as dirty. */
+		SLATE_EVENT(FSimpleDelegate, OnEdited)
 	SLATE_END_ARGS()
 
 	void Construct(const FArguments& InArgs, TWeakObjectPtr<UFPSRRunScheduleDataAsset> InSchedule)
 	{
 		Schedule = InSchedule;
+		OnEdited = InArgs._OnEdited;
 	}
 
 	virtual FVector2D ComputeDesiredSize(float) const override
 	{
 		return FVector2D(400.0f, 140.0f);
 	}
+
+	virtual bool SupportsKeyboardFocus() const override { return false; }
 
 	virtual int32 OnPaint(const FPaintArgs& Args, const FGeometry& AllottedGeometry, const FSlateRect& MyCullingRect, FSlateWindowElementList& OutDrawElements, int32 LayerId, const FWidgetStyle& InWidgetStyle, bool bParentEnabled) const override
 	{
@@ -71,17 +80,7 @@ public:
 			return LayerId;
 		}
 
-		// Time axis range: [0 .. max(BossTime, every window's MaxTime)]. Guard an all-zero/empty schedule so we
-		// never divide by zero below.
-		float MaxAxisTime = ScheduleAsset->BossTime;
-		for (const FFPSRMissionWindow& Window : ScheduleAsset->MissionWindows)
-		{
-			MaxAxisTime = FMath::Max(MaxAxisTime, Window.MaxTime);
-		}
-		if (MaxAxisTime <= 0.0f)
-		{
-			MaxAxisTime = 1.0f; // avoid div-by-zero on a degenerate/empty schedule; nothing meaningful to draw anyway
-		}
+		const float MaxAxisTime = ComputeMaxAxisTime(ScheduleAsset);
 
 		const FSlateBrush* WhiteBrush = FAppStyle::GetBrush("WhiteBrush");
 		const FSlateFontInfo Font = FAppStyle::GetFontStyle("PropertyWindow.NormalFont");
@@ -101,24 +100,30 @@ public:
 			FSlateDrawElement::MakeLines(OutDrawElements, Layer, AllottedGeometry.ToPaintGeometry(), AxisPoints, ESlateDrawEffect::None, FLinearColor(0.4f, 0.4f, 0.4f), true, 1.0f);
 		}
 
-		// One horizontal bar per mission window, stacked vertically so overlapping windows are still legible.
+		// One horizontal bar per mission window, stacked vertically so overlapping windows are still legible. The
+		// window currently being dragged is drawn from the PENDING (uncommitted) time range so the drag previews
+		// live; every other window reads its committed MinTime/MaxTime straight off the asset.
 		const float RowHeight = 20.0f;
 		const float TopPadding = 8.0f;
 		for (int32 WindowIndex = 0; WindowIndex < ScheduleAsset->MissionWindows.Num(); ++WindowIndex)
 		{
 			const FFPSRMissionWindow& Window = ScheduleAsset->MissionWindows[WindowIndex];
-			const float StartX = TimeToX(Window.MinTime);
-			const float EndX = FMath::Max(TimeToX(Window.MaxTime), StartX + 2.0f);
+			const bool bIsDragPreview = (WindowIndex == DragWindowIndex && DragMode != EDragMode::None);
+			const float MinTime = bIsDragPreview ? PendingMin : Window.MinTime;
+			const float MaxTime = bIsDragPreview ? PendingMax : Window.MaxTime;
+			const float StartX = TimeToX(MinTime);
+			const float EndX = FMath::Max(TimeToX(MaxTime), StartX + 2.0f);
 			const float RowY = TopPadding + WindowIndex * RowHeight;
 			if (RowY > LocalSize.Y - RowHeight)
 			{
-				break; // ran out of vertical room — read-only preview, not a scroll view; later windows are simply omitted
+				break; // ran out of vertical room — not a scroll view; later windows are simply omitted from the preview
 			}
 
+			const FLinearColor BarColor = bIsDragPreview ? FLinearColor(0.95f, 0.75f, 0.2f, 0.9f) : FLinearColor(0.2f, 0.5f, 0.8f, 0.85f);
 			const FPaintGeometry BarGeometry = AllottedGeometry.ToPaintGeometry(
 				FVector2D(EndX - StartX, RowHeight - 4.0f),
 				FSlateLayoutTransform(FVector2D(StartX, RowY)));
-			FSlateDrawElement::MakeBox(OutDrawElements, Layer, BarGeometry, WhiteBrush, ESlateDrawEffect::None, FLinearColor(0.2f, 0.5f, 0.8f, 0.85f));
+			FSlateDrawElement::MakeBox(OutDrawElements, Layer, BarGeometry, WhiteBrush, ESlateDrawEffect::None, BarColor);
 
 			const FString Label = FString::Printf(TEXT("윈도우 %d (미션 %d개)"), WindowIndex, Window.MissionPool.Num());
 			const FPaintGeometry LabelGeometry = AllottedGeometry.ToPaintGeometry(
@@ -144,8 +149,214 @@ public:
 		return Layer + 4;
 	}
 
+	virtual FReply OnMouseButtonDown(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override
+	{
+		const UFPSRRunScheduleDataAsset* ScheduleAsset = Schedule.Get();
+		if (!ScheduleAsset || !MouseEvent.IsMouseButtonDown(EKeys::LeftMouseButton))
+		{
+			return FReply::Unhandled();
+		}
+
+		const FVector2D LocalSize = MyGeometry.GetLocalSize();
+		if (LocalSize.X <= 0.0f || LocalSize.Y <= 0.0f)
+		{
+			return FReply::Unhandled();
+		}
+
+		const FVector2D LocalPos = MyGeometry.AbsoluteToLocal(MouseEvent.GetScreenSpacePosition());
+		const float MaxAxisTime = ComputeMaxAxisTime(ScheduleAsset);
+		const float MouseX = LocalPos.X;
+
+		int32 HitWindowIndex = INDEX_NONE;
+		EDragMode HitMode = EDragMode::None;
+		HitTest(ScheduleAsset, LocalSize, MaxAxisTime, LocalPos, HitWindowIndex, HitMode);
+
+		if (HitMode == EDragMode::None || !ScheduleAsset->MissionWindows.IsValidIndex(HitWindowIndex))
+		{
+			return FReply::Unhandled();
+		}
+
+		const FFPSRMissionWindow& Window = ScheduleAsset->MissionWindows[HitWindowIndex];
+		DragWindowIndex = HitWindowIndex;
+		DragMode = HitMode;
+		PendingMin = Window.MinTime;
+		PendingMax = Window.MaxTime;
+		DragStartMin = Window.MinTime;
+		DragStartMax = Window.MaxTime;
+		DragStartTime = (MouseX / LocalSize.X) * MaxAxisTime;
+
+		return FReply::Handled().CaptureMouse(SharedThis(this));
+	}
+
+	virtual FReply OnMouseMove(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override
+	{
+		if (!HasMouseCapture() || DragMode == EDragMode::None)
+		{
+			return FReply::Unhandled();
+		}
+
+		const UFPSRRunScheduleDataAsset* ScheduleAsset = Schedule.Get();
+		const FVector2D LocalSize = MyGeometry.GetLocalSize();
+		if (!ScheduleAsset || LocalSize.X <= 0.0f)
+		{
+			return FReply::Handled();
+		}
+
+		const float MaxAxisTime = ComputeMaxAxisTime(ScheduleAsset);
+		const FVector2D LocalPos = MyGeometry.AbsoluteToLocal(MouseEvent.GetScreenSpacePosition());
+		const float ClampedX = FMath::Clamp(LocalPos.X, 0.0f, LocalSize.X);
+		const float MouseTime = (ClampedX / LocalSize.X) * MaxAxisTime;
+
+		switch (DragMode)
+		{
+		case EDragMode::Min:
+			PendingMin = FMath::Clamp(MouseTime, 0.0f, PendingMax);
+			break;
+		case EDragMode::Max:
+			PendingMax = FMath::Max(MouseTime, PendingMin);
+			break;
+		case EDragMode::Move:
+		{
+			const float Delta = MouseTime - DragStartTime;
+			const float Width = DragStartMax - DragStartMin;
+			PendingMin = FMath::Max(0.0f, DragStartMin + Delta);
+			PendingMax = PendingMin + Width;
+			break;
+		}
+		default:
+			break;
+		}
+
+		return FReply::Handled();
+	}
+
+	virtual FReply OnMouseButtonUp(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override
+	{
+		if (DragMode != EDragMode::None)
+		{
+			if (UFPSRRunScheduleDataAsset* ScheduleAsset = Schedule.Get())
+			{
+				if (FFPSRDataEditorHelpers::SetScheduleWindowTime(ScheduleAsset, DragWindowIndex, PendingMin, PendingMax))
+				{
+					OnEdited.ExecuteIfBound();
+				}
+			}
+		}
+
+		DragMode = EDragMode::None;
+		DragWindowIndex = INDEX_NONE;
+
+		return FReply::Handled().ReleaseMouseCapture();
+	}
+
+	virtual FCursorReply OnCursorQuery(const FGeometry& MyGeometry, const FPointerEvent& CursorEvent) const override
+	{
+		const UFPSRRunScheduleDataAsset* ScheduleAsset = Schedule.Get();
+		const FVector2D LocalSize = MyGeometry.GetLocalSize();
+		if (!ScheduleAsset || LocalSize.X <= 0.0f || LocalSize.Y <= 0.0f)
+		{
+			return FCursorReply::Cursor(EMouseCursor::Default);
+		}
+
+		const float MaxAxisTime = ComputeMaxAxisTime(ScheduleAsset);
+		const FVector2D LocalPos = MyGeometry.AbsoluteToLocal(CursorEvent.GetScreenSpacePosition());
+
+		int32 HitWindowIndex = INDEX_NONE;
+		EDragMode HitMode = EDragMode::None;
+		HitTest(ScheduleAsset, LocalSize, MaxAxisTime, LocalPos, HitWindowIndex, HitMode);
+
+		if (HitMode == EDragMode::Min || HitMode == EDragMode::Max)
+		{
+			return FCursorReply::Cursor(EMouseCursor::ResizeLeftRight);
+		}
+		return FCursorReply::Cursor(EMouseCursor::Default);
+	}
+
 private:
+	enum class EDragMode : uint8 { None, Min, Max, Move };
+
+	/** Time axis range: [0 .. max(BossTime, every window's MaxTime)]. Guards an all-zero/empty schedule so callers
+	 *  never divide by zero. Shared by OnPaint and every mouse handler so hit-testing and drawing always agree. */
+	static float ComputeMaxAxisTime(const UFPSRRunScheduleDataAsset* ScheduleAsset)
+	{
+		float MaxAxisTime = ScheduleAsset->BossTime;
+		for (const FFPSRMissionWindow& Window : ScheduleAsset->MissionWindows)
+		{
+			MaxAxisTime = FMath::Max(MaxAxisTime, Window.MaxTime);
+		}
+		if (MaxAxisTime <= 0.0f)
+		{
+			MaxAxisTime = 1.0f;
+		}
+		return MaxAxisTime;
+	}
+
+	/** Shared hit-test used by both OnMouseButtonDown (to start a drag) and OnCursorQuery (to preview the cursor).
+	 *  Mirrors OnPaint's row layout exactly (RowHeight/TopPadding) so the hit area always matches what's drawn.
+	 *  Edge grab tolerance is +/-6px; anywhere else between the edges (but within the row) is a Move; outside every
+	 *  row's Y range is None. */
+	static void HitTest(const UFPSRRunScheduleDataAsset* ScheduleAsset, const FVector2D& LocalSize, float MaxAxisTime, const FVector2D& LocalPos, int32& OutWindowIndex, EDragMode& OutMode)
+	{
+		OutWindowIndex = INDEX_NONE;
+		OutMode = EDragMode::None;
+
+		const float RowHeight = 20.0f;
+		const float TopPadding = 8.0f;
+		const float EdgeTolerance = 6.0f;
+
+		auto TimeToX = [&LocalSize, MaxAxisTime](float Time) -> float
+		{
+			return (Time / MaxAxisTime) * LocalSize.X;
+		};
+
+		for (int32 WindowIndex = 0; WindowIndex < ScheduleAsset->MissionWindows.Num(); ++WindowIndex)
+		{
+			const FFPSRMissionWindow& Window = ScheduleAsset->MissionWindows[WindowIndex];
+			const float RowY = TopPadding + WindowIndex * RowHeight;
+			if (RowY > LocalSize.Y - RowHeight)
+			{
+				break; // matches OnPaint's early-out — rows beyond the visible area aren't interactive either
+			}
+			if (LocalPos.Y < RowY || LocalPos.Y > RowY + RowHeight)
+			{
+				continue;
+			}
+
+			const float StartX = TimeToX(Window.MinTime);
+			const float EndX = FMath::Max(TimeToX(Window.MaxTime), StartX + 2.0f);
+
+			// Edge grab: when the mouse is within tolerance of BOTH edges (a narrow window where StartX/EndX are
+			// closer than 2*EdgeTolerance), pick the CLOSEST edge — otherwise the left-edge check would always win
+			// and the right edge (Max) could never be resized on a narrow/exact window (Codex P2).
+			const float DistToStart = FMath::Abs(LocalPos.X - StartX);
+			const float DistToEnd = FMath::Abs(LocalPos.X - EndX);
+			const bool bNearStart = DistToStart <= EdgeTolerance;
+			const bool bNearEnd = DistToEnd <= EdgeTolerance;
+			if (bNearStart || bNearEnd)
+			{
+				OutWindowIndex = WindowIndex;
+				OutMode = (bNearStart && (!bNearEnd || DistToStart <= DistToEnd)) ? EDragMode::Min : EDragMode::Max;
+				return;
+			}
+			if (LocalPos.X > StartX && LocalPos.X < EndX)
+			{
+				OutWindowIndex = WindowIndex;
+				OutMode = EDragMode::Move;
+				return;
+			}
+		}
+	}
+
 	TWeakObjectPtr<UFPSRRunScheduleDataAsset> Schedule;
+	FSimpleDelegate OnEdited;
+
+	int32 DragWindowIndex = INDEX_NONE;
+	EDragMode DragMode = EDragMode::None;
+	float PendingMin = 0.0f;
+	float PendingMax = 0.0f;
+	float DragStartTime = 0.0f;
+	float DragStartMin = 0.0f;
+	float DragStartMax = 0.0f;
 };
 
 // =====================================================================================================================
@@ -1104,17 +1315,38 @@ void SFPSRDataEditorWidget::RebuildScheduleTimeline(UFPSRRunScheduleDataAsset* S
 	ScheduleTimelineContainer->AddSlot().AutoHeight()
 	[
 		SNew(SExpandableArea)
-		.AreaTitle(LOCTEXT("ScheduleTimelineTitle", "미션 스케줄 타임라인 (읽기 전용)"))
+		.AreaTitle(LOCTEXT("ScheduleTimelineTitle", "미션 스케줄 타임라인 (가장자리 드래그로 편집)"))
 		.InitiallyCollapsed(false)
 		.BodyContent()
 		[
-			SNew(SBox)
-			.HeightOverride(140.0f)
+			SNew(SVerticalBox)
+			+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 2.0f)
 			[
-				SNew(SFPSRScheduleTimelineBar, SelectedSchedule)
+				SNew(STextBlock)
+				.Text(LOCTEXT("ScheduleTimelineHint", "윈도우 가장자리를 드래그해 시간 조정"))
+				.Font(FAppStyle::GetFontStyle("PropertyWindow.NormalFont"))
+			]
+			+ SVerticalBox::Slot().AutoHeight()
+			[
+				SNew(SBox)
+				.HeightOverride(140.0f)
+				[
+					SNew(SFPSRScheduleTimelineBar, SelectedSchedule)
+					.OnEdited(FSimpleDelegate::CreateSP(this, &SFPSRDataEditorWidget::OnScheduleWindowEdited))
+				]
 			]
 		]
 	];
+}
+
+void SFPSRDataEditorWidget::OnScheduleWindowEdited()
+{
+	// The timeline bar reads SelectedSchedule's live MinTime/MaxTime every OnPaint, so no rebuild is needed here —
+	// only dirty-tracking so "Save Modified + Rescan" picks up the drag-committed write.
+	if (UFPSRRunScheduleDataAsset* Schedule = SelectedSchedule.Get())
+	{
+		TrackDirtyPackage(Schedule->GetPackage());
+	}
 }
 
 // ---------------------------------------------------------------------------------------------------------------
