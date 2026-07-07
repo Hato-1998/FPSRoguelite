@@ -102,7 +102,7 @@
 ### BALANCE — 콘텐츠 양산 튜닝(무기/카드/적/보스), G1 게이트 후
 | 툴 | 유형 | 공수 | 임팩트 | 왜 (병목) | 상태 |
 |---|---|---|---|---|---|
-| Card Catalog & Balance Matrix | 뷰어/저작 | M | high | 폴리모픽 카드 magnitude가 인라인 서브오브젝트에 묻힘 → 그리드+편집. §2-3-8 | ✅ P1(FPSR Data Editor 카드 magnitude 그리드=행(카드,효과) in-place 편집, `c4e0d77`). 딜리버리=EUW 아닌 **C++ Slate 하이브리드**로 정정. 티어생성/산술bulk·이상치뷰=P2 |
+| Card Catalog & Balance Matrix | 뷰어/저작 | M | high | 폴리모픽 카드 magnitude가 인라인 서브오브젝트에 묻힘 → 그리드+편집. §2-3-8 | ✅ P1(그리드 in-place, `c4e0d77`) + ✅ **P2①(티어 생성/삭제=카드레벨 per-rarity + 산술 일괄연산 ×N/+N, 효과별 단위시임으로 +N 혼합거부, `3fb7da6`)**. 딜리버리=EUW 아닌 **C++ Slate 하이브리드**. 이상치뷰=후속 |
 | Archetype TTK/DPS Matrix | 자동화 | M | high | 7 아키타입 DPS/STK/TTK vs 적 HP 커브 헤드리스 모델 → PIE 눈대중 대체(balance_dump/apply 확장) | 📋 |
 | 20-min Run Pacing Simulator | 자동화 | M | high | MissionWindows 랜덤 롤이라 20분 페이싱 저작만으론 안 보임 → 다수 시드 타임라인 분포 | 📋 |
 | FPSR.Balance.SimRun | 자동화 | M | med | 고 SetTimeScale 헤드리스 런→골든 CSV diff로 밸런스 변경 회귀(SeedReplay 결합) | 📋 |
@@ -111,7 +111,7 @@
 | Mission Content Scaffolder & Reward-Wiring Validator | 자동화 | M | med | 미션6종+DA+PointSet 저작 반복 → 새 미션 시드+보상카드가 해금풀 라우팅되는지(누수 방지) | 📋 |
 | Card/Fragment Synergy Matrix | 뷰어 | M | med | G2 대상. rarity×Group/Family×Fragment 상호작용 축으로 시너지/dead-card. §2-3-9·G2 판정 지원 | 📋 |
 | XP/Level-Up Curve & Freeze Tuner | 저작 | M | med | 레벨업 프리즈(bRunPaused)가 20분에 몇 번 끊나 XP곡선과 시각화. §2-2 후반 가팔라짐 타깃 | 📋 |
-| Run Schedule Timeline Editor | 저작 | M | med | MissionWindows+BossTime 타임라인. §2-8 | 🔨 P1 read-only 프리뷰 완료(FPSR Data Editor, RunSchedule 선택시 바). **편집(드래그/윈도우 수정)=P2**, H3(미션튜닝 DA-소유) 선행 |
+| Run Schedule Timeline Editor | 저작 | M | med | MissionWindows+BossTime 타임라인. §2-8 | 🔨 P1 read-only 프리뷰 완료(FPSR Data Editor, RunSchedule 선택시 바). **편집(드래그/윈도우 수정)=P2③(미착수)**. 🔒H3 결정(2026-07-07)=**미션튜닝 DA-소유 통합**(ZoneRadius/HoldSeconds→UFPSRMissionDataAsset+ServerActivate(Data)) → ③이 윈도우+튜닝 단일면. RunFlow §2-8 SSOT 갱신 선행 |
 | Data Wiring / Orphan Editor | 저작 | M | high | 고아(카드/미션/무기)를 앵커 배열에 배선=역참조 편집(내장 Reference Viewer는 읽기전용). route-인지 preflight | ✅ P1(FPSR Data Editor guided-add, 고아 3축, `c4e0d77`). P0 서비스 재사용 |
 | Card Description Snapshot Test | 검증 | S | med | GetDescription 자동생성이 효과/rarity 튜닝에 조용히 깨짐 → 골든 텍스트 diff | 📋 |
 | DataAsset→SSOT Doc Generator | 자동화 | S | med | 저작 실값→SSOT fenced 블록 자동갱신(Drift Sentinel write-back 짝, 밸런스 패스마다) | 📋 |
