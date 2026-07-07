@@ -184,7 +184,7 @@ public:
 
 /** Weapon-unlock effect (U18b): grants a brand-new weapon into a free inventory slot. */
 UCLASS(meta = (DisplayName = "Grant Weapon (Unlock)"))
-class UCardEffect_GrantWeapon : public UFPSRCardEffect
+class FPSROGUELITE_API UCardEffect_GrantWeapon : public UFPSRCardEffect
 {
 	GENERATED_BODY()
 public:
