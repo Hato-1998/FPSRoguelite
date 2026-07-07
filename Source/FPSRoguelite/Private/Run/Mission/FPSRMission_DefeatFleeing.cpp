@@ -2,6 +2,7 @@
 
 #include "Run/Mission/FPSRMission_DefeatFleeing.h"
 #include "Run/Mission/FPSRMissionFleeTarget.h"
+#include "Run/Mission/FPSRMissionTuning.h"
 #include "Enemy/FPSREnemyHealthComponent.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
@@ -12,6 +13,11 @@ AFPSRMission_DefeatFleeing::AFPSRMission_DefeatFleeing()
 	PrimaryActorTick.TickInterval = 0.05f;
 }
 
+TSubclassOf<UFPSRMissionTuning> AFPSRMission_DefeatFleeing::GetExpectedTuningClass() const
+{
+	return UFPSRMissionTuning_DefeatFleeing::StaticClass();
+}
+
 void AFPSRMission_DefeatFleeing::OnMissionActivated()
 {
 	UWorld* World = GetWorld();
@@ -20,7 +26,14 @@ void AFPSRMission_DefeatFleeing::OnMissionActivated()
 		return;
 	}
 
-	UClass* SpawnClass = TargetClass ? TargetClass.Get() : AFPSRMissionFleeTarget::StaticClass();
+	// Tuning-or-fallback (§2-8-1). FleeSpeed/FleeTriggerRange are read every tick, so cache them;
+	// TargetClass is only needed here at spawn time.
+	const UFPSRMissionTuning_DefeatFleeing* T = Cast<UFPSRMissionTuning_DefeatFleeing>(GetTuningBase());
+	EffFleeSpeed = T ? T->FleeSpeed : FleeSpeed;
+	EffFleeTriggerRange = T ? T->FleeTriggerRange : FleeTriggerRange;
+	const TSubclassOf<AFPSRMissionFleeTarget> EffTargetClass = T ? T->TargetClass : TargetClass;
+
+	UClass* SpawnClass = EffTargetClass ? EffTargetClass.Get() : AFPSRMissionFleeTarget::StaticClass();
 	FActorSpawnParameters Params;
 	Params.Owner = this;
 	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
@@ -65,14 +78,14 @@ void AFPSRMission_DefeatFleeing::OnMissionTickServer(float DeltaSeconds)
 	}
 
 	// Flee directly away from the nearest player while they are close (sweep so it does not tunnel walls).
-	if (Nearest && NearestDistSq <= FleeTriggerRange * FleeTriggerRange)
+	if (Nearest && NearestDistSq <= EffFleeTriggerRange * EffFleeTriggerRange)
 	{
 		FVector Away = TargetLoc - Nearest->GetActorLocation();
 		Away.Z = 0.0f;
 		if (Away.SizeSquared() > KINDA_SMALL_NUMBER)
 		{
 			const FVector Dir = Away.GetSafeNormal();
-			Target->AddActorWorldOffset(Dir * FleeSpeed * DeltaSeconds, true);
+			Target->AddActorWorldOffset(Dir * EffFleeSpeed * DeltaSeconds, true);
 			Target->SetActorRotation(Dir.Rotation());
 		}
 	}

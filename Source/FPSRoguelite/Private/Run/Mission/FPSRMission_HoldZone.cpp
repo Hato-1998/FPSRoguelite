@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Run/Mission/FPSRMission_HoldZone.h"
+#include "Run/Mission/FPSRMissionTuning.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/Pawn.h"
@@ -11,9 +12,20 @@ AFPSRMission_HoldZone::AFPSRMission_HoldZone()
 	PrimaryActorTick.TickInterval = 0.1f;
 }
 
+TSubclassOf<UFPSRMissionTuning> AFPSRMission_HoldZone::GetExpectedTuningClass() const
+{
+	return UFPSRMissionTuning_HoldZone::StaticClass();
+}
+
 void AFPSRMission_HoldZone::OnMissionActivated()
 {
 	HeldSeconds = 0.0f;
+
+	// Tuning-or-fallback (§2-8-1), resolved once here rather than every tick. Null/wrong-type Tuning falls back
+	// to the actor's own legacy fields — behavior is unchanged until a designer assigns a Tuning asset.
+	const UFPSRMissionTuning_HoldZone* T = Cast<UFPSRMissionTuning_HoldZone>(GetTuningBase());
+	EffZoneRadius = T ? T->ZoneRadius : ZoneRadius;
+	EffRequiredHoldSeconds = T ? T->RequiredHoldSeconds : RequiredHoldSeconds;
 }
 
 void AFPSRMission_HoldZone::OnMissionTickServer(float DeltaSeconds)
@@ -27,7 +39,7 @@ void AFPSRMission_HoldZone::OnMissionTickServer(float DeltaSeconds)
 	// Check if any player pawn is within the zone
 	bool bPlayerPresent = false;
 	FVector MissionLoc = GetActorLocation();
-	const float Radius = ResolveZoneRadius(ZoneRadius); // live-tunable via FPSR.Mission.ZoneRadius
+	const float Radius = ResolveZoneRadius(EffZoneRadius); // live-tunable via FPSR.Mission.ZoneRadius
 
 	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
 	{
@@ -50,9 +62,9 @@ void AFPSRMission_HoldZone::OnMissionTickServer(float DeltaSeconds)
 	if (bPlayerPresent)
 	{
 		HeldSeconds += DeltaSeconds;
-		SetMissionProgress(FMath::Clamp(HeldSeconds / FMath::Max(RequiredHoldSeconds, 0.01f), 0.0f, 1.0f));
+		SetMissionProgress(FMath::Clamp(HeldSeconds / FMath::Max(EffRequiredHoldSeconds, 0.01f), 0.0f, 1.0f));
 
-		if (HeldSeconds >= RequiredHoldSeconds)
+		if (HeldSeconds >= EffRequiredHoldSeconds)
 		{
 			CompleteMission();
 		}

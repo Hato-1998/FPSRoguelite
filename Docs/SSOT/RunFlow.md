@@ -57,6 +57,11 @@
 - **보스 실물**은 후속(P6).
 - **테스트 스케줄**: DataAsset 교체로 압축(예: 윈도우 50~120/240~300s·보스 300s). ⚠️ 압축값은 임시(프로덕션 전환 시 원복).
 
+#### 2-8-1. 미션 튜닝 = DA 소유 (H3 확정 2026-07-07, P2③)
+> **결정(H3)**: 미션 타입별 튜닝(HoldZone `ZoneRadius`/`RequiredHoldSeconds`, StandStill `RequiredStillSeconds`/`StillSpeedThreshold`, CarryNoHit `RequiredCarrySeconds`/`CarryHeight`, DefeatFleeing `FleeSpeed`/`FleeTriggerRange`, LimitedVision `RequiredSeconds`, CollectOrbs `OrbRelativeLocations` 등 + 타입별 클래스 바인딩 `OrbClass`/`TargetClass`)을 **미션 액터 BP CDO에서 `UFPSRMissionDataAsset`로 이관**한다. 근거: 미션 정의를 **DA 단일 편집면**으로 모아 기획자 저작 툴(FPSR Data Editor 타임라인 ③)에서 시간·풀·튜닝을 함께 다룬다.
+> **구조 = 폴리모픽 Instanced 튜닝 객체**: `UFPSRMissionTuning`(Abstract·EditInlineNew) 베이스 + 미션 타입별 서브클래스(`UFPSRMissionTuning_HoldZone` 등, 그 타입 파라미터 보유). DA에 `UPROPERTY(Instanced) UFPSRMissionTuning* Tuning` 1개. 미션 액터가 `ServerActivate(Data)` 시 `Data->Tuning`을 자기 타입으로 캐스트해 읽음. **새 미션 타입 = 튜닝 서브클래스 추가만, 중앙 0수정**(카드 효과 폴리모픽과 동일 패턴, 확장성-우선). IsDataValid가 튜닝 클래스↔미션 클래스 매칭 검증.
+> **마이그레이션 = 소프트(P2③a)**: 미션 액터의 기존 튜닝 필드는 **fallback으로 유지**(`Data->Tuning` null/타입불일치 시 사용) → 기존 BP CDO 값 무손실. ③b에서 각 미션 DA에 Tuning 저작 후 PIE 검증, 이후 fallback 필드 제거(후속). `FPSR.Mission.ZoneRadius` 콘솔 오버라이드(`ResolveZoneRadius`)는 유지.
+
 ### 2-11. 메타 프로그레션
 - `URogueliteSaveGame`(USaveGame) — 누적 재화, 업그레이드 트리 상태, 캐릭터/무기 해금
 - `UGameplayStatics::AsyncSaveGameToSlot`

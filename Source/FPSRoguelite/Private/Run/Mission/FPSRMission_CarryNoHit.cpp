@@ -2,6 +2,7 @@
 
 #include "Run/Mission/FPSRMission_CarryNoHit.h"
 #include "Run/Mission/FPSRMissionOrb.h"
+#include "Run/Mission/FPSRMissionTuning.h"
 #include "Core/FPSRPlayerState.h"
 #include "AbilitySystem/FPSRAbilitySystemComponent.h"
 #include "AbilitySystem/Attributes/FPSRHealthSet.h"
@@ -11,6 +12,11 @@
 AFPSRMission_CarryNoHit::AFPSRMission_CarryNoHit()
 {
 	PrimaryActorTick.TickInterval = 0.1f;
+}
+
+TSubclassOf<UFPSRMissionTuning> AFPSRMission_CarryNoHit::GetExpectedTuningClass() const
+{
+	return UFPSRMissionTuning_CarryNoHit::StaticClass();
 }
 
 void AFPSRMission_CarryNoHit::OnMissionActivated()
@@ -26,7 +32,14 @@ void AFPSRMission_CarryNoHit::OnMissionActivated()
 	LastCarrierHealth = -1.0f;
 	OrbHomeLocation = GetActorLocation();
 
-	UClass* SpawnClass = OrbClass ? OrbClass.Get() : AFPSRMissionOrb::StaticClass();
+	// Tuning-or-fallback (§2-8-1). RequiredCarrySeconds/CarryHeight are read every tick, so cache them;
+	// OrbClass is only needed here at spawn time.
+	const UFPSRMissionTuning_CarryNoHit* T = Cast<UFPSRMissionTuning_CarryNoHit>(GetTuningBase());
+	EffRequiredCarrySeconds = T ? T->RequiredCarrySeconds : RequiredCarrySeconds;
+	EffCarryHeight = T ? T->CarryHeight : CarryHeight;
+	const TSubclassOf<AFPSRMissionOrb> EffOrbClass = T ? T->OrbClass : OrbClass;
+
+	UClass* SpawnClass = EffOrbClass ? EffOrbClass.Get() : AFPSRMissionOrb::StaticClass();
 	FActorSpawnParameters Params;
 	Params.Owner = this;
 	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
@@ -69,7 +82,7 @@ void AFPSRMission_CarryNoHit::OnMissionTickServer(float DeltaSeconds)
 	}
 
 	// Keep the orb attached above the carrier.
-	Orb->SetActorLocation(CarrierPawn->GetActorLocation() + FVector(0.0f, 0.0f, CarryHeight));
+	Orb->SetActorLocation(CarrierPawn->GetActorLocation() + FVector(0.0f, 0.0f, EffCarryHeight));
 
 	// Any drop in the carrier's health counts as "being hit" and resets the streak. Health regen only raises
 	// the baseline, never resets.
@@ -84,8 +97,8 @@ void AFPSRMission_CarryNoHit::OnMissionTickServer(float DeltaSeconds)
 	}
 	LastCarrierHealth = CurrentHealth;
 
-	SetMissionProgress(FMath::Clamp(CarrySeconds / FMath::Max(RequiredCarrySeconds, 0.01f), 0.0f, 1.0f));
-	if (CarrySeconds >= RequiredCarrySeconds)
+	SetMissionProgress(FMath::Clamp(CarrySeconds / FMath::Max(EffRequiredCarrySeconds, 0.01f), 0.0f, 1.0f));
+	if (CarrySeconds >= EffRequiredCarrySeconds)
 	{
 		CompleteMission();
 	}

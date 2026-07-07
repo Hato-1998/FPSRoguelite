@@ -3,12 +3,14 @@
 #pragma once
 
 #include "GameFramework/Actor.h"
+#include "Templates/SubclassOf.h"
 #include "Run/Mission/FPSRMissionTypes.h"
 #include "FPSRMissionActor.generated.h"
 
 class AFPSRMissionActor;
 class UFPSRMissionDataAsset;
 class AFPSRMissionPointSet;
+class UFPSRMissionTuning;
 
 DECLARE_MULTICAST_DELEGATE_TwoParams(FOnMissionEndedNative, AFPSRMissionActor* /*Mission*/, bool /*bSuccess*/);
 
@@ -51,6 +53,11 @@ public:
 	/** Server: the director assigns the selected point set before ServerActivate (no-op by default). */
 	virtual void AssignPointSet(AFPSRMissionPointSet* InSet) {}
 
+	/** §2-8-1: the tuning subclass this mission type reads its parameters from (e.g. UFPSRMissionTuning_HoldZone).
+	 *  Called on the CDO by the mission DataAsset's IsDataValid to check Tuning's type. nullptr (base default) =
+	 *  this mission type has no tuning object (or hasn't been migrated yet). Override per mission subclass. */
+	virtual TSubclassOf<UFPSRMissionTuning> GetExpectedTuningClass() const { return nullptr; }
+
 	virtual void Tick(float DeltaSeconds) override;
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
@@ -70,6 +77,11 @@ protected:
 	/** Effective mission-zone radius: returns the `FPSR.Mission.ZoneRadius` console override when > 0, else InRadius.
 	 *  Lets designers live-tune hold/moving zone size during PIE (`FPSR.Mission.ZoneRadius 800`) without a recompile. */
 	float ResolveZoneRadius(float InRadius) const;
+
+	/** §2-8-1 soft migration: the DataAsset's polymorphic Tuning object (untyped), or nullptr if MissionData is
+	 *  unset or Tuning was never assigned. Subclasses Cast<> this to their own tuning subclass and fall back to
+	 *  their legacy fields on a null/failed cast — see each mission's tuning-or-fallback read sites. */
+	const UFPSRMissionTuning* GetTuningBase() const;
 
 	UFUNCTION()
 	void OnRep_MissionState();

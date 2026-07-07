@@ -1,6 +1,8 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Run/Mission/FPSRMissionDataAsset.h"
+#include "Run/Mission/FPSRMissionActor.h"
+#include "Run/Mission/FPSRMissionTuning.h"
 
 #if WITH_EDITOR
 #include "Misc/DataValidation.h"
@@ -16,6 +18,29 @@ EDataValidationResult UFPSRMissionDataAsset::IsDataValid(FDataValidationContext&
 	{
 		Context.AddError(LOCTEXT("NoMissionClass", "Mission has no MissionClass — no actor will be spawned. Set a mission actor class."));
 		Result = EDataValidationResult::Invalid;
+	}
+
+	// Tuning (§2-8-1 soft migration): if this mission type expects a tuning object (its CDO's
+	// GetExpectedTuningClass() is non-null), warn when Tuning is unset (fallback to the actor's legacy fields
+	// still works — nothing breaks) and error when Tuning is the wrong subclass for this mission type.
+	if (MissionClass)
+	{
+		if (const AFPSRMissionActor* MissionCDO = MissionClass->GetDefaultObject<AFPSRMissionActor>())
+		{
+			const TSubclassOf<UFPSRMissionTuning> ExpectedTuningClass = MissionCDO->GetExpectedTuningClass();
+			if (ExpectedTuningClass)
+			{
+				if (!Tuning)
+				{
+					Context.AddWarning(LOCTEXT("NoTuning", "이 미션 타입은 튜닝 객체가 필요합니다 — Tuning을 설정하세요(미설정 시 미션 액터 기본값 fallback). §2-8-1 마이그레이션"));
+				}
+				else if (!Tuning->IsA(ExpectedTuningClass))
+				{
+					Context.AddError(LOCTEXT("TuningTypeMismatch", "Tuning 타입이 미션 클래스와 불일치"));
+					Result = EDataValidationResult::Invalid;
+				}
+			}
+		}
 	}
 
 	// FGameplayTag::IsValid() only checks TagName != NAME_None — it does NOT confirm the tag is registered in the

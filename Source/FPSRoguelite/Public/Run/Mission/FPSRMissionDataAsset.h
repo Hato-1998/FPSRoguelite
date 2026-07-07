@@ -8,6 +8,7 @@
 
 class AFPSRMissionActor;
 class UFPSRCardDataAsset;
+class UFPSRMissionTuning;
 
 /** Data-driven mission definition (selected per-round from the run schedule). */
 UCLASS(BlueprintType)
@@ -37,6 +38,13 @@ public:
 	 *  Restricted to the Mission.Spawn.* root (DefaultGameplayTags.ini) so the picker only shows spawn-point tags. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Mission", meta = (Categories = "Mission.Spawn"))
 	FGameplayTag SpawnPointTag;
+
+	/** Polymorphic per-mission-type tuning (§2-8-1 soft migration). When set, its concrete subclass (matching
+	 *  MissionClass's GetExpectedTuningClass()) supplies the mission's numeric parameters; the mission actor
+	 *  falls back to its own legacy EditDefaultsOnly fields when this is null or the wrong subclass — so
+	 *  existing content keeps working unchanged until a designer migrates it to a Tuning asset. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Instanced, Category = "Mission")
+	TObjectPtr<UFPSRMissionTuning> Tuning = nullptr;
 
 #if WITH_EDITOR
 	/** Editor validation: MissionClass must be set; a non-empty SpawnPointTag must be a valid (registered) tag. */
