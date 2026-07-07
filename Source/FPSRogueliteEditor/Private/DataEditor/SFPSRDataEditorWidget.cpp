@@ -399,29 +399,30 @@ void SFPSRDataEditorWidget::OnOrphanSelectionChanged(TSharedPtr<FAssetData> Item
 
 void SFPSRDataEditorWidget::OnAssetSelected(const TSharedPtr<FAssetData>& Item, bool bIsOrphan)
 {
-	ClearMagnitudeGrid();
-	ClearScheduleTimeline();
-	ClearGuidedAdd();
-
-	if (!Item.IsValid())
-	{
-		if (DetailsView.IsValid())
-		{
-			DetailsView->SetObject(nullptr);
-		}
-		return;
-	}
-
-	UObject* Asset = Item->GetAsset();
+	UObject* Asset = Item.IsValid() ? Item->GetAsset() : nullptr;
 	if (DetailsView.IsValid())
 	{
 		DetailsView->SetObject(Asset);
 	}
+	SelectedAsset = Asset;
+	bSelectedIsOrphan = bIsOrphan;
+	RebuildAuxPanels();
+}
+
+void SFPSRDataEditorWidget::RebuildAuxPanels()
+{
+	// Rebuild the selection-driven side panels (magnitude grid / timeline / guided-add) from the CURRENT object shape.
+	// Called on selection change AND after a Details-view edit — the latter matters because editing the asset's Effects
+	// (remove/reorder) would otherwise leave grid rows keyed on a stale EffectIndex that writes to the wrong effect.
+	ClearMagnitudeGrid();
+	ClearScheduleTimeline();
+	ClearGuidedAdd();
+
+	UObject* Asset = SelectedAsset.Get();
 	if (!Asset)
 	{
 		return;
 	}
-
 	if (UFPSRCardPoolDataAsset* Pool = Cast<UFPSRCardPoolDataAsset>(Asset))
 	{
 		RebuildMagnitudeGridFromPool(Pool);
@@ -434,8 +435,7 @@ void SFPSRDataEditorWidget::OnAssetSelected(const TSharedPtr<FAssetData>& Item, 
 	{
 		RebuildScheduleTimeline(Schedule);
 	}
-
-	if (bIsOrphan)
+	if (bSelectedIsOrphan)
 	{
 		RebuildGuidedAddForOrphan(Asset);
 	}
@@ -617,12 +617,23 @@ TSharedRef<SWidget> SFPSRDataEditorWidget::BuildMagnitudeCell(TWeakObjectPtr<UFP
 
 	// Disabled/blank when this effect declares no tier for Rarity — SetEffectRarityMagnitude only edits an
 	// EXISTING tier (P1 scope), so there's nothing meaningful to commit into for a rarity this effect doesn't offer.
-	const TOptional<float> Value = Tier ? TOptional<float>(Tier->Magnitude) : TOptional<float>();
 	const bool bEnabled = Tier != nullptr;
 
+	// Value_Lambda RE-READS the tier each frame (not a one-time TOptional captured at build) so the cell reflects the
+	// committed value / any external change instead of snapping back to the build-time number after a commit or refresh.
 	return SNew(SNumericEntryBox<float>)
 		.IsEnabled(bEnabled)
-		.Value(Value)
+		.Value_Lambda([Card, EffectIndex, Rarity]() -> TOptional<float>
+		{
+			const UFPSRCardDataAsset* C = Card.Get();
+			if (!C || !C->Effects.IsValidIndex(EffectIndex) || !C->Effects[EffectIndex])
+			{
+				return TOptional<float>();
+			}
+			const FFPSRCardRarityTier* T = C->Effects[EffectIndex]->RarityTiers.FindByPredicate(
+				[Rarity](const FFPSRCardRarityTier& X) { return X.Rarity == Rarity; });
+			return T ? TOptional<float>(T->Magnitude) : TOptional<float>();
+		})
 		.UndeterminedString(LOCTEXT("NoTier", "--"))
 		.OnValueCommitted(this, &SFPSRDataEditorWidget::OnMagnitudeCommitted, Card, EffectIndex, Rarity);
 }
@@ -1008,6 +1019,10 @@ void SFPSRDataEditorWidget::OnDetailsPropertyChanged(const FPropertyChangedEvent
 			TrackDirtyPackage(Object->GetPackage());
 		}
 	}
+
+	// The edit may have reshaped the asset (removed/reordered a card effect, changed mission windows), so rebuild the
+	// aux panels — otherwise the magnitude grid keeps stale EffectIndex rows that would commit to the wrong effect.
+	RebuildAuxPanels();
 }
 
 FReply SFPSRDataEditorWidget::OnGuidedAddCardClicked()

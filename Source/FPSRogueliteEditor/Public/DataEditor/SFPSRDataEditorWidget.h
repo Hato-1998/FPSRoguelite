@@ -69,6 +69,10 @@ private:
 	 *  guided-add affordance is shown (only orphans get a "wire this in" prompt). */
 	void OnAssetSelected(const TSharedPtr<FAssetData>& Item, bool bIsOrphan);
 
+	/** Rebuild the selection-driven aux panels (magnitude grid / timeline / guided-add) for SelectedAsset. Shared by
+	 *  OnAssetSelected and OnDetailsPropertyChanged (a Details edit can reshape the asset's effect list / windows). */
+	void RebuildAuxPanels();
+
 	// --- Card magnitude grid (custom widget #2) -----------------------------------------------------------------
 
 	/** One row of the magnitude grid: a single (card, effect) pair with per-rarity numeric cells. */
@@ -121,6 +125,10 @@ private:
 	// --- State ------------------------------------------------------------------------------------------------
 
 	TSharedPtr<IDetailsView> DetailsView;
+	/** The asset currently shown in the details view + whether it came from the orphan list — remembered so a
+	 *  Details-view edit can rebuild the selection-driven aux panels (RebuildAuxPanels) for the reshaped object. */
+	TWeakObjectPtr<UObject> SelectedAsset;
+	bool bSelectedIsOrphan = false;
 
 	TArray<TSharedPtr<FAssetData>> AnchorItems;
 	TArray<TSharedPtr<FAssetData>> OrphanItems;
