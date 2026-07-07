@@ -18,6 +18,11 @@ class UFPSRWeaponInventoryComponent;
 class UFPSRWeaponDataAsset;
 #if WITH_EDITOR
 class FDataValidationContext;
+
+/** Editor-only magnitude unit classification for the Data Editor's bulk-arithmetic safety (P2). None = the effect
+ *  ignores its magnitude at runtime (grant/passive/behavior). Percent = a fractional multiplier (raw 0.05 = +5%);
+ *  Flat = a flat value. Additive bulk edits are only allowed across a unit-homogeneous selection (see helpers). */
+enum class EFPSREditorMagnitudeUnit : uint8 { None, Percent, Flat };
 #endif
 
 /** Server-side context for applying a card effect. Built on the server from the selecting player; never replicated
@@ -88,6 +93,11 @@ public:
 	 *  intersects this across a card's effects for its wiring preflight (a card in an ineligible route is blocked).
 	 *  Declared per subclass so a NEW effect type surfaces in the tool with zero central edits (OCP). Base = empty. */
 	virtual TArray<EFPSRCardRoute> GetEditorEligibleRoutes() const;
+
+	/** Editor-tool (P2): the unit this effect's RarityTiers magnitude is expressed in, for the Data Editor's bulk
+	 *  arithmetic safety (additive bulk edits require a unit-homogeneous selection). Base = None (magnitude-agnostic
+	 *  effect — grant/passive/behavior). Override per subclass that actually reads a numeric magnitude. */
+	virtual EFPSREditorMagnitudeUnit GetEditorMagnitudeUnit() const;
 #endif
 };
 
@@ -116,6 +126,7 @@ public:
 	virtual void ValidateEffect(FDataValidationContext& Context) const override;
 	virtual FText GetEditorGridLabel() const override;
 	virtual TArray<EFPSRCardRoute> GetEditorEligibleRoutes() const override;
+	virtual EFPSREditorMagnitudeUnit GetEditorMagnitudeUnit() const override;
 #endif
 };
 
@@ -145,6 +156,7 @@ public:
 #if WITH_EDITOR
 	virtual FText GetEditorGridLabel() const override;
 	virtual TArray<EFPSRCardRoute> GetEditorEligibleRoutes() const override;
+	virtual EFPSREditorMagnitudeUnit GetEditorMagnitudeUnit() const override;
 #endif
 };
 
@@ -172,7 +184,7 @@ public:
 
 /** Weapon-unlock effect (U18b): grants a brand-new weapon into a free inventory slot. */
 UCLASS(meta = (DisplayName = "Grant Weapon (Unlock)"))
-class UCardEffect_GrantWeapon : public UFPSRCardEffect
+class FPSROGUELITE_API UCardEffect_GrantWeapon : public UFPSRCardEffect
 {
 	GENERATED_BODY()
 public:

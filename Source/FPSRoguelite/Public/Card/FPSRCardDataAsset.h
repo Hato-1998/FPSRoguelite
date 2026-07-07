@@ -73,6 +73,17 @@ public:
 	 *  FScopedTransaction. Returns true if a tier was found and written. */
 	bool SetEffectRarityMagnitude(int32 EffectIndex, ECardRarity Rarity, float NewMagnitude);
 
+	/** Editor-tool: ensure every magnitude-bearing effect (GetEditorMagnitudeUnit()!=None) offers a tier for Rarity.
+	 *  Adds a tier only to effects that lack it, seeded from that effect's nearest existing tier (closest lower rarity
+	 *  preferred, else closest higher, else 0). Re-derives OfferRarities. Returns true if any tier was added (false if
+	 *  every magnitude effect already covers Rarity, or the card has no magnitude effect). Caller owns the transaction. */
+	bool CreateEffectRarityTier(ECardRarity Rarity);
+
+	/** Editor-tool: remove Rarity's tier from every magnitude-bearing effect. REFUSES (returns false, no change) if
+	 *  Rarity is the card's only offered rarity (a card must offer at least one). Re-derives OfferRarities. Returns true
+	 *  if any tier was removed. Caller owns the transaction. */
+	bool DeleteEffectRarityTier(ECardRarity Rarity);
+
 private:
 	/** Recompute OfferRarities from the first magnitude-bearing effect's tiers (IsDataValid enforces the rest match). */
 	void RefreshOfferRarities();
