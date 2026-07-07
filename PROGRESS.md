@@ -6,6 +6,13 @@
 
 **최종 갱신: 2026-07-07**
 
+## 🔔 핸드오프 (2026-07-07 c · P1 데이터 편집 툴 = FPSR Data Editor → main 머지 완료) — 🎯 **무기·미션·카드 데이터 편집 툴 P1 구현·빌드·라운드트립테스트·Codex 머지게이트(5R 클린)·main `--no-ff` 머지 완료(`c4e0d77`). 다음 = 사용자 인터랙티브 테스트(에디터 재기동→Tools>FPSR>Data Editor).**
+> **머지**: `phase/editor-tooling-p1-dataeditor` → main `--no-ff`(`c4e0d77`). P0 검증 시임 위 실제 편집 툴. **과설계 게이트 실증**(엔진소스): 무기 밸런스 그리드는 UE 내장 Property Matrix가 공짜 → 문서화(`Docs/PropertyMatrix_DataEditing.md`) 대체, 커스텀은 내장이 못 하는 **배선 멤버십**·**묻힌 per-rarity magnitude**에만.
+> **구현**: ①런타임 시임 = `EFPSRCardRoute` 닫힌 enum + `UFPSRCardEffect` WITH_EDITOR 가상(`GetEditorGridLabel`/`GetEditorEligibleRoutes`, 효과별 로컬선언=중앙 switch 0=OCP) + `UFPSRCardDataAsset::SetEffectRarityMagnitude`(존재 티어 in-place). ②에디터 툴 = `Tools>FPSR>Data Editor` 단일 도킹탭(`SFPSRDataEditorWidget`): 좌 앵커/고아(P0 `FFPSRAnchoredValidationService` 재사용)·우 `IDetailsView`(전 배열 편집)+카드 magnitude 그리드(행=(카드,효과))+미션 read-only 타임라인 바+route-인지 guided-add(3축 카드/미션/무기). `FFPSRDataEditorHelpers`(멤버십·magnitude·preflight·`SetCardGroup`·`SavePackages`). "Save Modified + Rescan"(디스크기준 stale 명시).
+> **검증**: -NoXGE 빌드 Succeeded + 라운드트립 자동테스트 2(magnitude/멤버십)+ModuleLoads Success + `validate-data` exit0(고아16 유지) + **Codex 머지게이트 5라운드 수렴**(발견 3→2→2→1→**0 클린**; 교정=배선/저장정합·Group 라우팅(`FPSRCardSubsystem.cpp:603`)·저장실패추적·magnitude 라이브 재조회·reachable 무기 필터). 구현=Sonnet 위임 / 검증·게이트교정=Opus 직접.
+> **미푸시**: 로컬 main만(원격 push=사용자 요청 시). 브랜치 삭제 완료. **사용자 Content WIP(MAK12 클론·PIE dirty)=무관, 미커밋 유지.** ⚠️빌드가 에디터 열린 채 진행되면 핫리로드 패치 DLL(`-000N`) 누적 → 최종은 에디터 종료 후 클린 재링크로 단일 베이스 DLL 정리함.
+> **다음/후속**: 사용자 인터랙티브 테스트(고아 배선→Save+Rescan→고아 감소 / magnitude 셀 편집). **P2 후속**(TaskPrompts §E, 결정대기): 미션 타임라인 *편집*(H3 미션튜닝 DA-소유 선행)·magnitude 티어 생성/산술 bulk·양방향 배선뷰. **H2**(라우팅 스펙 정합)=자동 라우팅-누수 검증 선행(툴 자체는 비차단). 리포트=[`Docs/Review/20260707-data-tooling-p1.md`](Docs/Review/20260707-data-tooling-p1.md), §E H4.
+
 ## 🔔 핸드오프 (2026-07-07 b · P1 데이터 편집 툴 = 새 세션 인계 — **플랜부터 수립**) — 🎯 **P0(검증 시임) 배포 완료. 사용자 지적: P0=검증≠편집. P1=실제 "수정을 편하게" 편집 툴. 새 세션에서 플랜 수립→Codex 5R 토론→보고(쟁점/구조/사용자결정+이유)→승인 후 구현. 이 세션=인계만.**
 > **P1 목표** = 무기·미션·카드 데이터 **편집(수정)을 편하게**(사용자 원 요청). `FPSRogueliteEditor` 모듈 + `FFPSRAnchoredValidationService` 재사용. P0가 찾은 **고아 16개**(미션6 스케줄미배선·Knife 로드아웃미배선·카드9 풀미배선)를 편집툴서 바로 배선할 수 있어야 즉통점 해결.
 > **후보 3**: (a)카탈로그·배선 편집기(멤버십 넣기/빼기, 고아 직결) (b)무기 밸런스 매트릭스(스탯 그리드) (c)미션 스케줄 타임라인.
