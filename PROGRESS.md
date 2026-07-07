@@ -6,6 +6,13 @@
 
 **최종 갱신: 2026-07-07**
 
+## 🔔 핸드오프 (2026-07-07 b · P1 데이터 편집 툴 = 새 세션 인계 — **플랜부터 수립**) — 🎯 **P0(검증 시임) 배포 완료. 사용자 지적: P0=검증≠편집. P1=실제 "수정을 편하게" 편집 툴. 새 세션에서 플랜 수립→Codex 5R 토론→보고(쟁점/구조/사용자결정+이유)→승인 후 구현. 이 세션=인계만.**
+> **P1 목표** = 무기·미션·카드 데이터 **편집(수정)을 편하게**(사용자 원 요청). `FPSRogueliteEditor` 모듈 + `FFPSRAnchoredValidationService` 재사용. P0가 찾은 **고아 16개**(미션6 스케줄미배선·Knife 로드아웃미배선·카드9 풀미배선)를 편집툴서 바로 배선할 수 있어야 즉통점 해결.
+> **후보 3**: (a)카탈로그·배선 편집기(멤버십 넣기/빼기, 고아 직결) (b)무기 밸런스 매트릭스(스탯 그리드) (c)미션 스케줄 타임라인.
+> **⚠️ 과설계 게이트(사용자 2회 지적)**: 커스텀 Slate 짓기 **전에** UE 내장 "Bulk Edit via Property Matrix"(에셋 다중선택→스프레드시트 편집)로 (b)가 얼마나 공짜인지 먼저 판단. 커스텀은 **내장이 못 하는 것**에만 — ①배선 멤버십 ②폴리모픽 카드의 묻힌 per-rarity magnitude ③미션 튜닝 DA↔BP CDO 분산.
+> **절차(엄수)**: ①현행 편집워크플로·내장수단 조사(추측금지) ②P1 플랜 ③Codex **≥5R** 수렴 토론(`Scripts/consult-codex.ps1`·ConsultLoop.md, 리포트 `Docs/Review/`) ④사용자 보고=쟁점/구조/**사용자 선택지(왜 나왔는지+각 선택 이유·트레이드오프)** ⑤승인 후 구현(구현=Sonnet/검증=Opus·phase 브랜치·신규파일=에디터종료→`-NoXGE`빌드→재기동).
+> **재개 프롬프트 = 이 핸드오프 아래 세션 채팅에 남긴 복붙 블록**(git log 이 커밋 메시지 참조 or 사용자 보관). P0 상세 = 아래 (2026-07-07 · P0) 핸드오프 + [`Docs/Review/20260707-data-tooling-p0.md`](Docs/Review/20260707-data-tooling-p0.md).
+
 ## 🔔 핸드오프 (2026-07-07 · P0 데이터 검증 시임 = FPSRogueliteEditor 에디터 모듈 신설 → main 머지) — 🎯 **무기·미션 데이터 편집 툴 P0(Codex 5R 수렴 설계) 구현·빌드·스모크·Codex 머지게이트·main `--no-ff` 머지 완료. 다음 = P1(미션 스케줄 타임라인 read-only) / P2(무기 밸런스 매트릭스), 둘 다 이 검증서비스 재사용.**
 > **머지**: `phase/editor-tooling-seam` → main `--no-ff`(`57270c5`). **프로젝트 첫 C++ 에디터 모듈 `FPSRogueliteEditor`**(Slate/편집UI 0 — P0는 검증 시임만). ⚠️ 신규 모듈이라 **에디터 재기동 필요**(빌드 반영).
 > **구현**: ①앵커 `UEditorValidatorBase` 3종(CardPool 전역CardId유일성[제외경로 준수]·오퍼성립성 / RunSchedule 얕은검증[보스/로스터 null=**경고**=문서화된 런타임 폴백] / LoadoutPool) — usecase 게이트(저장=싼검증 / 명시·커맨드릿=교차) ②`FFPSRAnchoredValidationService`(AssetRegistry 앵커발견+패키지 의존성 BFS reachable+고아, Dev/Test/_Scratch 제외) ③`UFPSRValidateAnchoredDataCommandlet`(NumInvalid>0 return1·앵커0=에러[false-green가드]·고아 경고 return0)+`Scripts/validate-data.ps1`(LASTEXITCODE 전달) ④`Tools>FPSR>Validate Anchored Data` 메뉴명령(창 아님) ⑤per-asset IsDataValid 보강(무기 죽는값 sanity·EnemyRoster 내부·미션 SpawnPointTag 등록검증).
