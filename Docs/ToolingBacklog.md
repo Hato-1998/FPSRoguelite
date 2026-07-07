@@ -112,7 +112,7 @@
 | Card/Fragment Synergy Matrix | 뷰어 | M | med | G2 대상. rarity×Group/Family×Fragment 상호작용 축으로 시너지/dead-card. §2-3-9·G2 판정 지원 | 📋 |
 | XP/Level-Up Curve & Freeze Tuner | 저작 | M | med | 레벨업 프리즈(bRunPaused)가 20분에 몇 번 끊나 XP곡선과 시각화. §2-2 후반 가팔라짐 타깃 | 📋 |
 | Run Schedule Timeline Editor | 저작 | M | med | MissionWindows+BossTime 타임라인. §2-8 | 🔨 P1 read-only 프리뷰 완료(FPSR Data Editor, RunSchedule 선택시 바). **편집(드래그/윈도우 수정)=P2③(미착수)**. 🔒H3 결정(2026-07-07)=**미션튜닝 DA-소유 통합**(ZoneRadius/HoldSeconds→UFPSRMissionDataAsset+ServerActivate(Data)) → ③이 윈도우+튜닝 단일면. RunFlow §2-8 SSOT 갱신 선행 |
-| Data Wiring / Orphan Editor | 저작 | M | high | 고아(카드/미션/무기)를 앵커 배열에 배선=역참조 편집(내장 Reference Viewer는 읽기전용). route-인지 preflight | ✅ P1(FPSR Data Editor guided-add, 고아 3축, `c4e0d77`). P0 서비스 재사용 |
+| Data Wiring / Orphan Editor | 저작 | M | high | 고아(카드/미션/무기)를 앵커 배열에 배선=역참조 편집(내장 Reference Viewer는 읽기전용). route-인지 preflight | ✅ P1(FPSR Data Editor guided-add, 고아 3축, `c4e0d77`) + ✅ **P2②(라우팅 누수 검증기: 카드 풀/무기 검증기가 부적격 배선을 H2 하드에러로 차단, `UFPSRWeaponValidator` 신설, 런타임 U18b 경로 제거). 첫 스모크서 실누수 1건 검출**. P0 서비스 재사용 |
 | Card Description Snapshot Test | 검증 | S | med | GetDescription 자동생성이 효과/rarity 튜닝에 조용히 깨짐 → 골든 텍스트 diff | 📋 |
 | DataAsset→SSOT Doc Generator | 자동화 | S | med | 저작 실값→SSOT fenced 블록 자동갱신(Drift Sentinel write-back 짝, 밸런스 패스마다) | 📋 |
 | Enemy Scaling-Curve Editor | 저작 | L | med | ScalingProfile/Roster HP/공격력 시간커브 편집+per-archetype TTK 라이브(TTK Matrix 연동, L이라 이후) | 📋 |
