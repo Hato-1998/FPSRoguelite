@@ -342,13 +342,22 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 		}
 		const FVector BestPlayerLocation = PlayerLocations[BestPlayerIndex];
 
-		// Distance LOD tier -> update stride + net update frequency (Game.MD §5).
+		// Distance LOD tier -> movement stride + attack stride + net update frequency (Game.MD §5).
+		// AttackStride throttles the per-enemy attack DECISION for distant tiers (F1) so the swarm's attack cost scales
+		// with the number of NEAR enemies, not the total active count. It is always <= UpdateStride (attack latency is
+		// more sensitive than movement) and the un-throttled band spans S0+S1: any enemy actually in combat is never
+		// throttled. INVARIANT: this holds only while every archetype's engage range stays within the S1 radius (sqrt
+		// TierS1RadiusSq = 3500) — melee AttackRange (150) and ranged RangedEngageRange (1400) both sit well inside it,
+		// so charging/contact always happens at AttackStride 1. If a future BP tunes an engage range past 3500, its
+		// charge/cooldown timing stays correct (DeltaSeconds is stride-scaled below) but its abort/warning cadence would
+		// lag by up to AttackStride frames — re-validate this band then (natural home: the F8 significance-radius SSOT).
 		int32 UpdateStride;
+		int32 AttackStride;
 		float NetFreq;
-		if (BestDistSq <= TierS0RadiusSq)      { UpdateStride = 1; NetFreq = 30.0f; }
-		else if (BestDistSq <= TierS1RadiusSq) { UpdateStride = 2; NetFreq = 10.0f; }
-		else if (BestDistSq <= TierS2RadiusSq) { UpdateStride = 4; NetFreq = 5.0f;  }
-		else                                   { UpdateStride = 8; NetFreq = 2.0f;  }
+		if (BestDistSq <= TierS0RadiusSq)      { UpdateStride = 1; AttackStride = 1; NetFreq = 30.0f; }
+		else if (BestDistSq <= TierS1RadiusSq) { UpdateStride = 2; AttackStride = 1; NetFreq = 10.0f; }
+		else if (BestDistSq <= TierS2RadiusSq) { UpdateStride = 4; AttackStride = 2; NetFreq = 5.0f;  }
+		else                                   { UpdateStride = 8; AttackStride = 4; NetFreq = 2.0f;  }
 
 		// Only push a net-update-frequency change when the LOD tier actually changed. AActor::SetNetUpdateFrequency
 		// (UE5.7) unconditionally broadcasts NetDriver->OnNetUpdateFrequencyChanged even when the value is unchanged,
@@ -358,26 +367,39 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 			Enemy->SetNetUpdateFrequency(NetFreq);
 		}
 
-		// Per-archetype attack decision: the subsystem owns the batch context (nearest ALIVE player, the freeze gate
-		// above, and the attack-token budgets); the enemy archetype owns the DECISION — melee contact for the base,
-		// ranged charge->fire for AFPSRRangedEnemyBase (it manages its own held token). The XY nearest test ignores
-		// Z, so compute the vertical gap (no through-floor melee) and pass it as a gate.
+		// Vertical (Z) gap to the nearest player — used BOTH by the attack gate (no through-floor melee) and by the
+		// movement stop-gate below (folded into the 3D stop distance for overlapping decks, U7), so it stays at loop-body
+		// scope rather than inside the throttled attack block.
 		const float AttackVertGap = FMath::Abs(EnemyLocation.Z - BestPlayerLocation.Z);
-		if (AFPSRCharacter* TargetChar = Cast<AFPSRCharacter>(PlayerPawns[BestPlayerIndex]))
+
+		// Attack decision, throttled by AttackStride (spread across frames by the enemy's stable id — same phase basis as
+		// the movement stride below). A skipped pass costs nothing: a distant idle enemy no longer pays its per-pass range
+		// check + token peek (+ conditional LOS trace) every frame; the cost now scales with NEAR enemies, not total count
+		// (F1). When it runs, DeltaSeconds carries the elapsed real time since this enemy's last decision (DeltaTime *
+		// AttackStride) so the ranged charge/cooldown accumulators stay wall-clock-correct. Freeze-pause is preserved: the
+		// whole pass early-returns while run-paused, so no attack delta accrues during a freeze.
+		if (((MovementFrameCounter + static_cast<int32>(Enemy->GetUniqueID())) % AttackStride) == 0)
 		{
-			FFPSRServerAttackContext AttackCtx;
-			AttackCtx.Now = Now;
-			AttackCtx.DeltaSeconds = DeltaTime;
-			AttackCtx.TargetChar = TargetChar;
-			AttackCtx.TargetController = Cast<AFPSRPlayerController>(TargetChar->GetController());
-			AttackCtx.TargetLocation = BestPlayerLocation;
-			AttackCtx.DistSqToTarget = BestDistSq;
-			AttackCtx.bVerticalInRange = (AttackVertGap <= AttackVerticalRange);
-			AttackCtx.ContactDamage = ContactDamage;
-			AttackCtx.bMeleeTokenAvailable = (AttackersThisPass[BestPlayerIndex] < AttackTokenLimit);
-			if (Enemy->ServerTickAttack(AttackCtx) == EFPSRServerAttackResult::MeleeAttacked)
+			// Per-archetype attack decision: the subsystem owns the batch context (nearest ALIVE player, the freeze gate
+			// above, and the attack-token budgets); the enemy archetype owns the DECISION — melee contact for the base,
+			// ranged charge->fire for AFPSRRangedEnemyBase (it manages its own held token). The XY nearest test ignores
+			// Z, so use the vertical gap (computed above, no through-floor melee) as a gate.
+			if (AFPSRCharacter* TargetChar = Cast<AFPSRCharacter>(PlayerPawns[BestPlayerIndex]))
 			{
-				++AttackersThisPass[BestPlayerIndex];
+				FFPSRServerAttackContext AttackCtx;
+				AttackCtx.Now = Now;
+				AttackCtx.DeltaSeconds = DeltaTime * AttackStride;
+				AttackCtx.TargetChar = TargetChar;
+				AttackCtx.TargetController = Cast<AFPSRPlayerController>(TargetChar->GetController());
+				AttackCtx.TargetLocation = BestPlayerLocation;
+				AttackCtx.DistSqToTarget = BestDistSq;
+				AttackCtx.bVerticalInRange = (AttackVertGap <= AttackVerticalRange);
+				AttackCtx.ContactDamage = ContactDamage;
+				AttackCtx.bMeleeTokenAvailable = (AttackersThisPass[BestPlayerIndex] < AttackTokenLimit);
+				if (Enemy->ServerTickAttack(AttackCtx) == EFPSRServerAttackResult::MeleeAttacked)
+				{
+					++AttackersThisPass[BestPlayerIndex];
+				}
 			}
 		}
 
