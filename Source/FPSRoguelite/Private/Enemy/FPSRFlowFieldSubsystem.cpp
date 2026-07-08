@@ -264,6 +264,43 @@ bool UFPSRFlowFieldSubsystem::BakeDiscoveredMap(const FGameplayTag& MapId)
 	return false;
 }
 
+void UFPSRFlowFieldSubsystem::NotifyDoorBroken(const AActor* Door)
+{
+	// Single-map (no unified field) / off-authority -> no-op. Pre-U, the closed seam already isolated the slots; there is no
+	// grid edge to open, so a plain room-gate door in a single-map level changes nothing here (no regression).
+	if (!HasServerAuthority() || !Door || !UnifiedComputer)
+	{
+		return;
+	}
+
+	// Door AABB from ALL components (not colliding-only): HandleBroken calls this BEFORE ApplyBrokenState, but be robust to
+	// the leaf's collision already being off.
+	FVector BoundsOrigin, BoundsExtent;
+	Door->GetActorBounds(/*bOnlyCollidingComponents*/ false, BoundsOrigin, BoundsExtent);
+	const FBox DoorAABB(BoundsOrigin - BoundsExtent, BoundsOrigin + BoundsExtent);
+
+	TArray<TPair<int32, int32>> Pairs;
+	UnifiedComputer->MapDoorSeamCellPairs(DoorAABB, Pairs);
+	if (Pairs.Num() == 0)
+	{
+		UE_LOG(LogFPSR, Warning,
+			TEXT("[FlowField] NotifyDoorBroken: door '%s' mapped to 0 seam cell-pairs (not on a seam / off-grid / degenerate bounds); grid unchanged."),
+			*Door->GetName());
+		return;
+	}
+
+	int32 OpenedEdges = 0;
+	for (const TPair<int32, int32>& Pair : Pairs)
+	{
+		OpenedEdges += UnifiedComputer->StampDoorEdgesOpen(Pair.Key, Pair.Value);
+	}
+	// Recompute NOW (not on the next 0.2s tick) so the opened seam's connectivity is live immediately for both swarm flow
+	// and the origin-aware combat gate — same immediacy contract as the streamed-slot bake (Codex R16).
+	RecomputeAllFields();
+	UE_LOG(LogFPSR, Log, TEXT("[FlowField] NotifyDoorBroken: door '%s' opened %d seam edge(s) across %d cell-pair(s); field recomputed."),
+		*Door->GetName(), OpenedEdges, Pairs.Num());
+}
+
 bool UFPSRFlowFieldSubsystem::IsMapFieldReady(const FGameplayTag& MapId) const
 {
 	const TObjectPtr<UFPSRFlowFieldComputer>* Slot = Computers.Find(MapId);

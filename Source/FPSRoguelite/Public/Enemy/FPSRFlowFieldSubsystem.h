@@ -6,6 +6,7 @@
 #include "GameplayTagContainer.h"
 #include "FPSRFlowFieldSubsystem.generated.h"
 
+class AActor;
 class UFPSRFlowFieldComputer;
 class AFPSRFlowFieldBoundsVolume;
 
@@ -51,6 +52,12 @@ public:
 	 *  from the volume's own box (a streamed sublevel need not contain a PlayerStart). Called by the MapStreamSubsystem
 	 *  once a streamed map's collision is registered (S3). Returns false if no volume with that MapId is loaded. */
 	bool BakeDiscoveredMap(const FGameplayTag& MapId);
+
+	/** U (P-B): a breakable seam door was destroyed (server) — open the unified grid's cross-seam edges the door spanned
+	 *  and recompute NOW so swarm flow + the origin-aware combat gate cross it immediately. No-op with no unified field
+	 *  (single-map / pre-content) or off authority — the closed seam kept the slots isolated, so nothing changes. Called by
+	 *  AFPSRDoor::HandleBroken; the door->cell mapping is UFPSRFlowFieldComputer::MapDoorSeamCellPairs. */
+	void NotifyDoorBroken(const AActor* Door);
 
 	/** Whether a baked, ready computer exists for MapId (used by the stream/allocator gate before spawning into a map). */
 	bool IsMapFieldReady(const FGameplayTag& MapId) const;

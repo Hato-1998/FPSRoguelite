@@ -2,6 +2,7 @@
 
 #include "Door/FPSRDoor.h"
 #include "Enemy/FPSREnemyHealthComponent.h"
+#include "Enemy/FPSRFlowFieldSubsystem.h"
 #include "Map/FPSRMapStreamSubsystem.h"
 #include "FPSRCollisionChannels.h"
 
@@ -136,6 +137,17 @@ void AFPSRDoor::HandleBroken(AActor* DeadActor, AActor* Killer)
 
 	bBroken = true;
 	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRDoor, bBroken, this);
+
+	// U (P-B): open the swarm flow field's seam this door was blocking so enemies cross + the origin-aware combat gate
+	// allows across immediately. BEFORE ApplyBrokenState so the leaf collision (door bounds) is still valid; no unified
+	// field (single-map) or off-authority makes the subsystem a no-op.
+	if (UWorld* World = GetWorld())
+	{
+		if (UFPSRFlowFieldSubsystem* Flow = World->GetSubsystem<UFPSRFlowFieldSubsystem>())
+		{
+			Flow->NotifyDoorBroken(this);
+		}
+	}
 
 	ApplyBrokenState(); // server: open the passage (collision off) + hide the leaves
 	OnDoorBroken();     // BP presentation (server)

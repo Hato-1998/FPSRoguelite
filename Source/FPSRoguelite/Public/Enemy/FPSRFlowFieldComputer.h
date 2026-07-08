@@ -124,6 +124,13 @@ public:
 	 *  connects surfaces an enemy could not actually step between (Codex R1 Q1). Returns the edges opened; invalidates. */
 	int32 StampDoorEdgesOpen(int32 CellA, int32 CellB);
 
+	/** Map a breakable seam door (its world-space AABB) to the cross-seam cell-pairs it should open on break. The door's
+	 *  THINNER horizontal axis is the seam normal; for every grid column the door spans along the seam, the pair of cells
+	 *  straddling the (cell-boundary-snapped) seam. Pure grid geometry (WorldToCellIndex + adjacency, no floor read); the
+	 *  FPSRDoor/subsystem wiring calls this on break, then StampDoorEdgesOpen(pair) for each + one recompute. Empty out =
+	 *  door not on a real seam / off-grid / degenerate bounds. Worldless (FPSRoguelite.FlowField.DoorMap). */
+	void MapDoorSeamCellPairs(const FBox& DoorWorldAABB, TArray<TPair<int32, int32>>& OutPairs) const;
+
 	// --- U origin-aware connectivity (P-C, 2026-07-07): open-grid connected components, so combat can gate "can damage
 	//     cross from the instigator's origin cell to the target's cell?" in O(1) — a closed door / wall = a DIFFERENT
 	//     component = no damage through it (replaces the MapId combat gate). Rebuilt by RunBFS, so it's fresh whenever the

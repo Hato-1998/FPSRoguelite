@@ -117,4 +117,66 @@ bool FFPSRFlowFieldDoorStampTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+// P-B door->cell mapping (② FPSRDoor wiring): MapDoorSeamCellPairs is pure grid geometry (WorldToCellIndex + adjacency,
+// no floor read), so it is proven worldless here; the actor-bounds source + StampDoorEdgesOpen + recompute is the
+// subsystem/FPSRDoor wiring, proven in-world (PIE). 6x3 grid, cell 100, origin (0,0,0): flat index = cy*6+cx.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFPSRFlowFieldDoorMapTest, "FPSRoguelite.FlowField.DoorMap",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FFPSRFlowFieldDoorMapTest::RunTest(const FString& Parameters)
+{
+	TStrongObjectPtr<UFPSRFlowFieldComputer> C(NewObject<UFPSRFlowFieldComputer>());
+	C->BuildEmptyGrid(6, 3, FVector(0, 0, 0), 100.0f);
+
+	auto HasPair = [](const TArray<TPair<int32, int32>>& Pairs, int32 A, int32 B)
+	{
+		for (const TPair<int32, int32>& P : Pairs)
+		{
+			if ((P.Key == A && P.Value == B) || (P.Key == B && P.Value == A)) { return true; }
+		}
+		return false;
+	};
+
+	// (1) X-cross door on the seam X=300 (col 2|3 boundary), spanning rows 0-2 -> one pair per row.
+	{
+		TArray<TPair<int32, int32>> Pairs;
+		C->MapDoorSeamCellPairs(FBox(FVector(290, 20, -10), FVector(310, 280, 10)), Pairs);
+		TestEqual(TEXT("X-cross door maps 3 pairs (one per spanned row)"), Pairs.Num(), 3);
+		TestTrue(TEXT("row0 pair (2,3)"), HasPair(Pairs, 2, 3));
+		TestTrue(TEXT("row1 pair (8,9)"), HasPair(Pairs, 8, 9));
+		TestTrue(TEXT("row2 pair (14,15)"), HasPair(Pairs, 14, 15));
+	}
+
+	// (2) Y-cross door on the seam Y=100 (row 0|1 boundary), spanning cols 0-2 -> one pair per col.
+	{
+		TArray<TPair<int32, int32>> Pairs;
+		C->MapDoorSeamCellPairs(FBox(FVector(20, 90, -10), FVector(280, 110, 10)), Pairs);
+		TestEqual(TEXT("Y-cross door maps 3 pairs (one per spanned col)"), Pairs.Num(), 3);
+		TestTrue(TEXT("col0 pair (0,6)"), HasPair(Pairs, 0, 6));
+		TestTrue(TEXT("col1 pair (1,7)"), HasPair(Pairs, 1, 7));
+		TestTrue(TEXT("col2 pair (2,8)"), HasPair(Pairs, 2, 8));
+	}
+
+	// (3) Off-grid door -> no pairs (the NotifyDoorBroken warn/no-op path).
+	{
+		TArray<TPair<int32, int32>> Pairs;
+		C->MapDoorSeamCellPairs(FBox(FVector(1000, 20, -10), FVector(1020, 280, 10)), Pairs);
+		TestEqual(TEXT("off-grid door maps 0 pairs"), Pairs.Num(), 0);
+	}
+
+	// (4) Every mapped pair is orthogonally adjacent (the StampDoorEdgesOpen precondition).
+	{
+		TArray<TPair<int32, int32>> Pairs;
+		C->MapDoorSeamCellPairs(FBox(FVector(290, 20, -10), FVector(310, 280, 10)), Pairs);
+		for (const TPair<int32, int32>& P : Pairs)
+		{
+			const int32 AX = P.Key % 6, AY = P.Key / 6, BX = P.Value % 6, BY = P.Value / 6;
+			const bool bAdj = (AY == BY && FMath::Abs(AX - BX) == 1) || (AX == BX && FMath::Abs(AY - BY) == 1);
+			TestTrue(TEXT("mapped pair is orthogonally adjacent"), bAdj);
+		}
+	}
+
+	return true;
+}
+
 #endif // WITH_AUTOMATION_TESTS

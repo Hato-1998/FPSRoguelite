@@ -384,6 +384,71 @@ int32 UFPSRFlowFieldComputer::StampDoorEdgesOpen(int32 CellA, int32 CellB)
 	return Opened;
 }
 
+void UFPSRFlowFieldComputer::MapDoorSeamCellPairs(const FBox& DoorWorldAABB, TArray<TPair<int32, int32>>& OutPairs) const
+{
+	OutPairs.Reset();
+	if (GridDimX <= 0 || GridDimY <= 0 || !DoorWorldAABB.IsValid || ActiveCellSize <= 0.0f)
+	{
+		return;
+	}
+
+	// A breakable door fills a gap in a slot-seam wall. Its THINNER horizontal axis is the cross-seam normal; the WIDER
+	// axis runs ALONG the seam. Snap the seam coordinate (door center on the thin axis) to the nearest cell boundary so the
+	// two probe points land in cells that straddle the boundary regardless of sub-cell door placement.
+	const FVector Size = DoorWorldAABB.GetSize();
+	const FVector Center = DoorWorldAABB.GetCenter();
+	const bool bCrossX = (Size.X <= Size.Y); // thinner in X -> seam runs along Y, the crossing is in X
+	const float Half = 0.5f * ActiveCellSize;
+
+	// Dedupe pairs (two probes can resolve to the same column) — canonical key = min<<32 | max.
+	TSet<uint64> Seen;
+	auto AddSeamPair = [&](const FVector& NearPt, const FVector& FarPt)
+	{
+		const int32 NearCell = WorldToCellIndex(NearPt);
+		const int32 FarCell = WorldToCellIndex(FarPt);
+		if (NearCell == INDEX_NONE || FarCell == INDEX_NONE)
+		{
+			return; // a column running off the grid edge has no cell on one side -> no seam pair
+		}
+		const int32 NX = NearCell % GridDimX, NY = NearCell / GridDimX;
+		const int32 FX = FarCell % GridDimX, FY = FarCell / GridDimX;
+		if (!((NY == FY && FMath::Abs(NX - FX) == 1) || (NX == FX && FMath::Abs(NY - FY) == 1)))
+		{
+			return; // not orthogonally adjacent (door off a real seam) — StampDoorEdgesOpen would reject it anyway
+		}
+		const uint64 Key = (static_cast<uint64>(FMath::Min(NearCell, FarCell)) << 32) | static_cast<uint32>(FMath::Max(NearCell, FarCell));
+		bool bAlready = false;
+		Seen.Add(Key, &bAlready);
+		if (!bAlready)
+		{
+			OutPairs.Emplace(NearCell, FarCell);
+		}
+	};
+
+	if (bCrossX)
+	{
+		const float SeamX = GridOrigin.X + FMath::RoundToFloat((Center.X - GridOrigin.X) / ActiveCellSize) * ActiveCellSize;
+		const int32 CY0 = FMath::FloorToInt((DoorWorldAABB.Min.Y - GridOrigin.Y) / ActiveCellSize);
+		const int32 CY1 = FMath::FloorToInt((DoorWorldAABB.Max.Y - GridOrigin.Y) / ActiveCellSize);
+		for (int32 CY = CY0; CY <= CY1; ++CY)
+		{
+			const float Y = GridOrigin.Y + (CY + 0.5f) * ActiveCellSize; // column center along the seam
+			AddSeamPair(FVector(SeamX - Half, Y, GridOrigin.Z), FVector(SeamX + Half, Y, GridOrigin.Z));
+		}
+	}
+	else
+	{
+		const float SeamY = GridOrigin.Y + FMath::RoundToFloat((Center.Y - GridOrigin.Y) / ActiveCellSize) * ActiveCellSize;
+		const int32 CX0 = FMath::FloorToInt((DoorWorldAABB.Min.X - GridOrigin.X) / ActiveCellSize);
+		const int32 CX1 = FMath::FloorToInt((DoorWorldAABB.Max.X - GridOrigin.X) / ActiveCellSize);
+		for (int32 CX = CX0; CX <= CX1; ++CX)
+		{
+			const float X = GridOrigin.X + (CX + 0.5f) * ActiveCellSize;
+			AddSeamPair(FVector(X, SeamY - Half, GridOrigin.Z), FVector(X, SeamY + Half, GridOrigin.Z));
+		}
+	}
+}
+
 // ======================================================================================
 //  U ORIGIN-AWARE CONNECTIVITY (P-C) — open-grid connected components for the combat gate.
 //  Worldless (exercised by FPSRoguelite.FlowField.Connectivity). Rebuilt by RunBFS.
