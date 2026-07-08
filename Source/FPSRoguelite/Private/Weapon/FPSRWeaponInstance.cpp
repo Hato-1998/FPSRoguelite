@@ -81,6 +81,7 @@ bool UFPSRWeaponInstance::AddFragment(UFPSRWeaponFragment* Fragment)
 	}
 	ActiveFragments.Add(Fragment);
 	MARK_PROPERTY_DIRTY_FROM_NAME(UFPSRWeaponInstance, ActiveFragments, this);
+	MarkResolvedDirty();
 	return true;
 }
 
@@ -94,6 +95,7 @@ void UFPSRWeaponInstance::RemoveFragment(UFPSRWeaponFragment* Fragment)
 	if (ActiveFragments.Remove(Fragment) > 0)
 	{
 		MARK_PROPERTY_DIRTY_FROM_NAME(UFPSRWeaponInstance, ActiveFragments, this);
+		MarkResolvedDirty();
 	}
 }
 
@@ -151,6 +153,11 @@ void UFPSRWeaponInstance::OnRep_Source()
 }
 
 void UFPSRWeaponInstance::OnRep_Modifiers()
+{
+	MarkResolvedDirty();
+}
+
+void UFPSRWeaponInstance::OnRep_ActiveFragments()
 {
 	MarkResolvedDirty();
 }
@@ -255,6 +262,16 @@ void UFPSRWeaponInstance::RecomputeResolved()
 			break;
 		default:
 			break;
+		}
+	}
+
+	// Behavior fragments may override the resolved fire mode (e.g. a Burst fragment flips FullAuto -> Burst). Applied
+	// after numeric stats so the fire component — which reads CachedResolved.FireMode/BurstCount — needs no extra wiring.
+	for (const TObjectPtr<UFPSRWeaponFragment>& Frag : ActiveFragments)
+	{
+		if (Frag)
+		{
+			Frag->ModifyFireMode(CachedResolved.FireMode, CachedResolved.BurstCount);
 		}
 	}
 }

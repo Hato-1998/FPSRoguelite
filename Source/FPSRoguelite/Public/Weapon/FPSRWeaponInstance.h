@@ -99,6 +99,11 @@ protected:
 	UFUNCTION()
 	void OnRep_Reloading();
 
+	/** Client notify: fragments changed (e.g. a Burst fragment flips the resolved fire mode). Invalidate the resolved
+	 *  cache so the next GetResolvedStats() recomputes with the new fragment set. */
+	UFUNCTION()
+	void OnRep_ActiveFragments();
+
 	void RecomputeResolved();
 
 	AFPSRPlayerState* ResolveOwningPlayerState() const;
@@ -111,7 +116,7 @@ protected:
 	FFPSRWeaponModContainer Modifiers;
 
 	/** Accumulated behavior fragments (references to shared, stateless fragment assets). */
-	UPROPERTY(Replicated)
+	UPROPERTY(ReplicatedUsing = OnRep_ActiveFragments)
 	TArray<TObjectPtr<UFPSRWeaponFragment>> ActiveFragments;
 
 	UPROPERTY(Replicated)

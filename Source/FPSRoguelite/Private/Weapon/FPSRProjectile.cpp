@@ -3,6 +3,7 @@
 #include "Weapon/FPSRProjectile.h"
 #include "Weapon/FPSRProjectileSubsystem.h"
 #include "Weapon/FPSRWeaponFragment.h"
+#include "Weapon/FPSRWeaponInstance.h"
 #include "Combat/FPSRCombatStatics.h"
 #include "Combat/FPSRWeakpointComponent.h"
 #include "FPSRCollisionChannels.h"
@@ -264,6 +265,7 @@ void AFPSRProjectile::OnSphereOverlap(UPrimitiveComponent* OverlappedComp, AActo
 	--PierceRemaining;
 	if (PierceRemaining < 0)
 	{
+		NotifyImpactFragments(GetActorLocation());
 		ReleaseToPool();
 	}
 }
@@ -348,6 +350,13 @@ void AFPSRProjectile::HandleImpact(const FVector& ImpactPoint)
 		}
 	}
 
+	// ExplosiveRounds-style fragments splash at a BULLET projectile's terminal impact. AOE projectiles already
+	// detonate here (their own blast IS the impact), so skip to avoid a second explosion.
+	if (Params.ExplosionRadius <= 0.0f)
+	{
+		NotifyImpactFragments(ImpactPoint);
+	}
+
 	// Always release after impact (release is idempotent via the bActive guard + subsystem dedup).
 	ReleaseToPool();
 }
@@ -406,6 +415,17 @@ bool AFPSRProjectile::TryDamageActor(AActor* Target, float WeakpointMultiplier, 
 	{
 		// Direct hit (single-target/piercing): never self-damage (bAllowSelf=false); the unified resolver applies
 		// the enemy/friendly rules (friendly is 0 when FF is off — already screened by IsHostileTarget above).
+		// Per-hit behavior fragments (parity with the hitscan ApplyToTarget path): OnHitActor may add flat/scaled
+		// bonus damage before the weakpoint multiplier. Server-only; the context is rebuilt from spawn params (the
+		// live fire ability ended at launch). Weak weapon ref no-ops the loop if the weapon was swapped/dropped.
+		if (UFPSRWeaponInstance* HitInstance = Params.WeaponInstance.Get())
+		{
+			const FFPSRFireContext HitCtx = MakeProjectileFireContext(Params, GetWorld());
+			for (const TObjectPtr<UFPSRWeaponFragment>& Frag : HitInstance->GetActiveFragments())
+			{
+				if (Frag) { Frag->OnHitActor(HitCtx, Target, FinalDamage); }
+			}
+		}
 		FinalDamage *= WeakpointMultiplier;
 		const float Resolved = FPSRCombat::ResolveDamage(Params.InstigatorActor, Target, FinalDamage, /*bAllowSelf*/ false, GetWorld());
 		if (Resolved > 0.0f)
@@ -454,6 +474,34 @@ void AFPSRProjectile::NotifyInstigatorHitMarker(bool bCrit, bool bWeak, bool bKi
 			: (bWeak ? EFPSRHitMarkerType::Weak
 			: (bCrit ? EFPSRHitMarkerType::Crit : EFPSRHitMarkerType::Hit));
 		OwnerPC->ClientNotifyHitMarker(MarkerType);
+	}
+}
+
+void AFPSRProjectile::NotifyImpactFragments(const FVector& ImpactPoint)
+{
+	if (!HasAuthority() || Params.Team != EFPSRProjectileTeam::Player)
+	{
+		return;
+	}
+	UFPSRWeaponInstance* Instance = Params.WeaponInstance.Get();
+	if (!Instance)
+	{
+		return;
+	}
+	const FFPSRFireContext Ctx = MakeProjectileFireContext(Params, GetWorld());
+	for (const TObjectPtr<UFPSRWeaponFragment>& Frag : Instance->GetActiveFragments())
+	{
+		if (!Frag)
+		{
+			continue;
+		}
+		bool bFragHitEnemy = false;
+		// bAllowSelf = the baked self-damage flag (NoSelfDamage card cleared it) — mirrors the hitscan bAllowSelfOnImpact.
+		Frag->OnImpact(Ctx, ImpactPoint, Params.bSelfDamage, bFragHitEnemy);
+		if (bFragHitEnemy)
+		{
+			bDealtEnemyDamage = true;
+		}
 	}
 }
 

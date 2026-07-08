@@ -73,6 +73,7 @@ void UFPSRGA_WeaponFire_Projectile::ActivateAbility(
 	float SpreadDegrees = 0.0f;
 	int32 ProjectilePierce = 0;
 	float KnockbackStrength = 0.0f;
+	int32 PelletCount = 1;
 	UFPSRWeaponInventoryComponent* Inventory = Avatar->FindComponentByClass<UFPSRWeaponInventoryComponent>();
 	UFPSRWeaponInstance* Instance = Inventory ? Inventory->GetCurrentInstance() : nullptr;
 	const FFPSRWeaponStatBlock* Stats = Instance ? &Instance->GetResolvedStats() : nullptr;
@@ -86,6 +87,7 @@ void UFPSRGA_WeaponFire_Projectile::ActivateAbility(
 		ProjectilePierce = FMath::Max(0, Stats->ProjectilePierce);
 		SpreadDegrees = Stats->SpreadDegrees;
 		KnockbackStrength = FMath::Max(0.0f, Stats->KnockbackStrength);
+		PelletCount = FMath::Clamp(Stats->PelletCount, 1, 32);
 	}
 
 	// Grow the dispersion cone with sustained-fire bloom (+ ADS multiplier), matching the hitscan weapons and the
@@ -198,54 +200,58 @@ void UFPSRGA_WeaponFire_Projectile::ActivateAbility(
 		if (ProjSub)
 		{
 			const float MuzzleOffset = 100.0f;
+			const int32 TotalProjectiles = NumRounds * PelletCount;
 			for (int32 Round = 0; Round < NumRounds; ++Round)
 			{
-				const FVector Dir = (SpreadDegrees > 0.0f)
-					? FMath::VRandCone(BaseDir, FMath::DegreesToRadians(SpreadDegrees))
-					: BaseDir;
-
-				FFPSRProjectileParams Params;
-				Params.InitialSpeed = ProjectileSpeed;
-				Params.GravityScale = GravityScale;
-				Params.Damage = Damage * DamageMultiplier;
-				Params.CritChance = CritChance;
-				Params.CritMultiplier = CritMultiplier;
-				Params.Lifetime = Lifetime;
-				Params.ExplosionRadius = AOERadius;
-				Params.Pierce = ProjectilePierce;
-				Params.KnockbackStrength = KnockbackStrength;
-				// Self-damage on unless the NoSelfDamage card suppressed it (PreFire). Knockback is independent —
-				// a self-no-damage rocket still launches the instigator (rocket jump).
-				Params.bSelfDamage = !FireCtx.bSuppressSelfDamage;
-				Params.Team = EFPSRProjectileTeam::Player;
-				Params.InstigatorActor = Avatar;
-				// Server-only weak back-ref so the projectile can fire the OnKill behavior hook at damage time (U18c).
-				Params.WeaponInstance = Instance;
-				// Per-activation OnMiss parity: only a single-projectile activation may fire the projectile miss hook
-				// (a multishot volley releases asynchronously and would otherwise refund per-projectile / on partial hits).
-				Params.bSingleProjectileActivation = (NumRounds == 1);
-
-				// Behavior fragments may adjust projectile params per spawn (speed / radius / lifetime / etc.).
-				if (Fragments)
+				for (int32 Pellet = 0; Pellet < PelletCount; ++Pellet)
 				{
-					for (const TObjectPtr<UFPSRWeaponFragment>& Frag : *Fragments)
+					const FVector Dir = (SpreadDegrees > 0.0f)
+						? FMath::VRandCone(BaseDir, FMath::DegreesToRadians(SpreadDegrees))
+						: BaseDir;
+
+					FFPSRProjectileParams Params;
+					Params.InitialSpeed = ProjectileSpeed;
+					Params.GravityScale = GravityScale;
+					Params.Damage = Damage * DamageMultiplier;
+					Params.CritChance = CritChance;
+					Params.CritMultiplier = CritMultiplier;
+					Params.Lifetime = Lifetime;
+					Params.ExplosionRadius = AOERadius;
+					Params.Pierce = ProjectilePierce;
+					Params.KnockbackStrength = KnockbackStrength;
+					// Self-damage on unless the NoSelfDamage card suppressed it (PreFire). Knockback is independent —
+					// a self-no-damage rocket still launches the instigator (rocket jump).
+					Params.bSelfDamage = !FireCtx.bSuppressSelfDamage;
+					Params.Team = EFPSRProjectileTeam::Player;
+					Params.InstigatorActor = Avatar;
+					// Server-only weak back-ref so the projectile can fire the OnKill behavior hook at damage time (U18c).
+					Params.WeaponInstance = Instance;
+					// Per-activation OnMiss parity: only a single-projectile activation may fire the projectile miss hook
+					// (a multishot volley releases asynchronously and would otherwise refund per-projectile / on partial hits).
+					Params.bSingleProjectileActivation = (TotalProjectiles == 1);
+
+					// Behavior fragments may adjust projectile params per spawn (speed / radius / lifetime / etc.).
+					if (Fragments)
 					{
-						if (Frag) { Frag->OnProjectileSpawn(FireCtx, Params); }
+						for (const TObjectPtr<UFPSRWeaponFragment>& Frag : *Fragments)
+						{
+							if (Frag) { Frag->OnProjectileSpawn(FireCtx, Params); }
+						}
 					}
-				}
 
-				// Clamp the muzzle-offset spawn to the near side of any wall between the camera and the muzzle:
-				// without this, firing point-blank into thin cover spawns the projectile past the wall and lets
-				// it damage enemies through it. Trace the weapon (Visibility) channel from the viewpoint.
-				FVector SpawnLocation = Start + Dir * MuzzleOffset;
-				FHitResult MuzzleHit;
-				FCollisionQueryParams MuzzleParams(SCENE_QUERY_STAT(FPSRProjectileMuzzle), false, Avatar);
-				if (World->LineTraceSingleByChannel(MuzzleHit, Start, SpawnLocation, ECC_Visibility, MuzzleParams))
-				{
-					SpawnLocation = MuzzleHit.Location; // spawn flush against the wall, on the near side
-				}
+					// Clamp the muzzle-offset spawn to the near side of any wall between the camera and the muzzle:
+					// without this, firing point-blank into thin cover spawns the projectile past the wall and lets
+					// it damage enemies through it. Trace the weapon (Visibility) channel from the viewpoint.
+					FVector SpawnLocation = Start + Dir * MuzzleOffset;
+					FHitResult MuzzleHit;
+					FCollisionQueryParams MuzzleParams(SCENE_QUERY_STAT(FPSRProjectileMuzzle), false, Avatar);
+					if (World->LineTraceSingleByChannel(MuzzleHit, Start, SpawnLocation, ECC_Visibility, MuzzleParams))
+					{
+						SpawnLocation = MuzzleHit.Location; // spawn flush against the wall, on the near side
+					}
 
-				ProjSub->AcquireProjectile(ProjClass, SpawnLocation, Dir, Params);
+					ProjSub->AcquireProjectile(ProjClass, SpawnLocation, Dir, Params);
+				}
 			}
 		}
 	}

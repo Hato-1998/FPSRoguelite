@@ -6,6 +6,7 @@
 #include "Misc/DataValidation.h"
 #include "Engine/SkeletalMesh.h"
 #include "Engine/StaticMesh.h"
+#include "AbilitySystem/Abilities/FPSRGA_WeaponFire_Projectile.h"
 
 #define LOCTEXT_NAMESPACE "FPSRWeaponDataAsset"
 
@@ -92,17 +93,33 @@ EDataValidationResult UFPSRWeaponDataAsset::IsDataValid(FDataValidationContext& 
 		Context.AddError(LOCTEXT("PelletCountNotPositive", "Shotgun has PelletCount <= 0 — firing would spawn no pellets at all. Set PelletCount > 0."));
 		Result = EDataValidationResult::Invalid;
 	}
-	if (Archetype == EFPSRWeaponArchetype::AOE || Archetype == EFPSRWeaponArchetype::Sniper)
+	// Projectile weapons are identified by their FireAbility (the Projectile GA), NOT the archetype — a FullAuto rifle
+	// or a Shotgun can now fire projectiles. Validate the projectile stats whenever the weapon uses the Projectile GA.
+	const bool bIsProjectileWeapon = FireAbility && FireAbility->IsChildOf(UFPSRGA_WeaponFire_Projectile::StaticClass());
+	if (bIsProjectileWeapon)
 	{
 		if (BaseStats.ProjectileSpeed <= 0.0f)
 		{
-			Context.AddError(LOCTEXT("ProjectileSpeedNotPositive", "Projectile archetype has ProjectileSpeed <= 0 — the projectile would never travel toward its target. Set ProjectileSpeed > 0."));
+			Context.AddError(LOCTEXT("ProjectileSpeedNotPositive", "Projectile weapon has ProjectileSpeed <= 0 — the projectile would never travel toward its target. Set ProjectileSpeed > 0."));
 			Result = EDataValidationResult::Invalid;
 		}
 		if (BaseStats.ProjectileLifetime <= 0.0f)
 		{
-			Context.AddError(LOCTEXT("ProjectileLifetimeNotPositive", "Projectile archetype has ProjectileLifetime <= 0 — the projectile would auto-release before it can ever hit anything. Set ProjectileLifetime > 0."));
+			Context.AddError(LOCTEXT("ProjectileLifetimeNotPositive", "Projectile weapon has ProjectileLifetime <= 0 — the projectile would auto-release before it can ever hit anything. Set ProjectileLifetime > 0."));
 			Result = EDataValidationResult::Invalid;
+		}
+		// Replicated-projectile budget guard (Game.MD §5, cap 64 with FIFO eviction). Peak in-flight per player for
+		// a sustained-fire projectile weapon ≈ FireRate × Lifetime × PelletCount. Warn when that alone could crowd the
+		// shared player cap (×4 players): a fast-firing weapon MUST use a SHORT lifetime + high speed so its rounds
+		// clear quickly. (The default Lifetime 5s is fine for a slow launcher but far too long for a rifle.)
+		const int32 Pellets = FMath::Max(1, BaseStats.PelletCount);
+		const float PeakInFlight = BaseStats.FireRate * FMath::Max(0.0f, BaseStats.ProjectileLifetime) * Pellets;
+		if (PeakInFlight > 12.0f)
+		{
+			Context.AddWarning(FText::Format(LOCTEXT("ProjectileBudgetHigh",
+				"Projectile weapon's estimated peak in-flight rounds (FireRate {0} × Lifetime {1}s × Pellets {2} ≈ {3}) is high — with 4 players this can hit the ≤64 replicated-projectile cap and FIFO-evict teammates' projectiles (Game.MD §5). Shorten ProjectileLifetime and/or raise ProjectileSpeed so rounds clear fast."),
+				FText::AsNumber(BaseStats.FireRate), FText::AsNumber(BaseStats.ProjectileLifetime),
+				FText::AsNumber(Pellets), FText::AsNumber(FMath::RoundToInt(PeakInFlight))));
 		}
 	}
 	if (Archetype == EFPSRWeaponArchetype::Melee)
