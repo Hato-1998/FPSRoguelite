@@ -92,6 +92,7 @@ void UFPSRFlowFieldComputer::BuildFromSurfaceData(const FFPSRFlowFieldSurfaceDat
 	DistField.Init(MAX_int32, NumSurf);
 	FlowField.Init(FVector2D::ZeroVector, NumSurf);
 	bFieldReady = false;
+	bConnectivityReady = false; // fresh/empty grid: connectivity labels are stale until the next RunBFS (Codex R15)
 }
 
 // ======================================================================================
@@ -125,6 +126,7 @@ void UFPSRFlowFieldComputer::BuildEmptyGrid(int32 InGridDimX, int32 InGridDimY, 
 	DistField.Init(MAX_int32, NumSurf);
 	FlowField.Init(FVector2D::ZeroVector, NumSurf);
 	bFieldReady = false;
+	bConnectivityReady = false; // fresh/empty grid: connectivity labels are stale until the next RunBFS (Codex R15)
 }
 
 bool UFPSRFlowFieldComputer::CommitSubregion(FIntPoint CellOffset, const FFPSRFlowFieldSurfaceData& SlotData)
@@ -216,7 +218,8 @@ bool UFPSRFlowFieldComputer::CommitSubregion(FIntPoint CellOffset, const FFPSRFl
 		}
 	}
 
-	bFieldReady = false; // topology changed -> invalidate; caller must RunBFS before enemies sample (Codex R1 Q2)
+	bFieldReady = false;        // topology changed -> invalidate flow;
+	bConnectivityReady = false; // ... and connectivity labels. Caller must RunBFS before enemies sample / combat gates (Codex R1 Q2, R15)
 	return true;
 }
 
@@ -265,7 +268,8 @@ void UFPSRFlowFieldComputer::ClearSubregion(FIntPoint CellOffset, FIntPoint Slot
 		for (int32 UX = X0; UX < X1; ++UX) { EdgeMask[((Y0 - 1) * GridDimX + UX) * 2 + 1] = 0; }
 	}
 
-	bFieldReady = false; // topology changed -> invalidate (Codex R1 Q2)
+	bFieldReady = false; // topology changed -> invalidate flow ...
+	bConnectivityReady = false; // ... and connectivity labels; next RunBFS refreshes both (Codex R1 Q2, R15)
 }
 
 void UFPSRFlowFieldComputer::SetSurfaceEdge(int32 CellA, int32 RankA, int32 CellB, int32 RankB, bool bOpen)
@@ -306,7 +310,8 @@ void UFPSRFlowFieldComputer::SetSurfaceEdge(int32 CellA, int32 RankA, int32 Cell
 	if (bOpen) { EdgeMask[EdgeIdx] |= Bit; }
 	else { EdgeMask[EdgeIdx] &= static_cast<uint8>(~Bit); }
 
-	bFieldReady = false; // topology changed -> invalidate (Codex R1 Q2)
+	bFieldReady = false; // topology changed -> invalidate flow ...
+	bConnectivityReady = false; // ... and connectivity labels; next RunBFS refreshes both (Codex R1 Q2, R15)
 }
 
 void UFPSRFlowFieldComputer::ExtractSurfaceData(FFPSRFlowFieldSurfaceData& OutData) const
@@ -338,7 +343,8 @@ void UFPSRFlowFieldComputer::StampCellBlocked(int32 Cell, int32 Rank, bool bBloc
 		return;
 	}
 	BlockedField[Surf] = bBlocked;
-	bFieldReady = false; // topology changed -> invalidate (Codex R1 Q2)
+	bFieldReady = false; // topology changed -> invalidate flow ...
+	bConnectivityReady = false; // ... and connectivity labels; next RunBFS refreshes both (Codex R1 Q2, R15)
 }
 
 int32 UFPSRFlowFieldComputer::StampDoorEdgesOpen(int32 CellA, int32 CellB)
@@ -451,10 +457,11 @@ void UFPSRFlowFieldComputer::RebuildConnectivity()
 
 bool UFPSRFlowFieldComputer::AreSurfacesConnected(int32 SurfA, int32 SurfB) const
 {
-	// Stale-topology guard (Codex R9): a door/slot mutation sets bFieldReady=false and leaves ComponentLabels stale until
-	// the next RunBFS rebuilds them. Fail-closed (no damage across an uncertain seam) until connectivity is refreshed — the
-	// subsystem runs RunBFS immediately after a door stamp, so this window is a single tick.
-	if (!bFieldReady)
+	// Stale-topology guard (Codex R9, R15): a mutation invalidates the connectivity labels until the next RunBFS rebuilds
+	// them. Gate on bConnectivityReady, NOT bFieldReady — connectivity is rebuilt every RunBFS regardless of flow sources,
+	// so a source-less field (no players snapped) still has valid connectivity for the combat gate; only a post-mutation
+	// pre-RunBFS query fails closed. The subsystem runs RunBFS right after a door stamp, so that window is a single tick.
+	if (!bConnectivityReady)
 	{
 		return false;
 	}
@@ -474,8 +481,28 @@ bool UFPSRFlowFieldComputer::AreWorldLocationsConnected(const FVector& A, const 
 	{
 		return false;
 	}
-	const int32 RankA = PickRankForFootZ(CellA, A.Z - EnemyStandOffset);
-	const int32 RankB = PickRankForFootZ(CellB, B.Z - EnemyStandOffset);
+	// Resolve each column to the SPECIFIC floor the pawn is on/over: the highest surface at or below its foot Z, else the
+	// lowest surface if it is below them all. UNBOUNDED downward (unlike PickRankForFootZ) so a rocket-jumped / knocked-back
+	// airborne pawn still maps to the floor beneath it (Codex R12) — but to the RIGHT floor, so damage never passes through a
+	// floor/ceiling in a multi-layer stack (Codex R13).
+	auto ColumnRank = [this](int32 Cell, float FootZ) -> int32
+	{
+		int32 Best = INDEX_NONE; float BestZ = -MAX_flt;
+		int32 Lowest = INDEX_NONE; float LowestZ = MAX_flt;
+		for (int32 R = 0; R < NumLayers; ++R)
+		{
+			const float Z = CellFloorZ[Cell * NumLayers + R];
+			if (Z == MAX_flt) { continue; }
+			if (Z <= FootZ && Z > BestZ) { BestZ = Z; Best = R; }
+			if (Z < LowestZ) { LowestZ = Z; Lowest = R; }
+		}
+		return (Best != INDEX_NONE) ? Best : Lowest;
+	};
+	// Use the RAW world Z (no pawn foot offset): a pawn's capsule-centre Z is already above its own floor and below the next
+	// storey (decks are storey-height by the U7 content contract), so "highest floor at/below Z" resolves its floor; and a
+	// raw blast/impact origin (explosion Center, projectile impact) maps to the floor it is ON, not the one below (Codex R14).
+	const int32 RankA = ColumnRank(CellA, A.Z);
+	const int32 RankB = ColumnRank(CellB, B.Z);
 	if (RankA == INDEX_NONE || RankB == INDEX_NONE)
 	{
 		return false;
@@ -488,6 +515,7 @@ void UFPSRFlowFieldComputer::RunBFS(const TArray<int32>& SourceSurfaces)
 	if (GridDimX <= 0 || GridDimY <= 0)
 	{
 		bFieldReady = false;
+		bConnectivityReady = false;
 		ComponentLabels.Reset();
 		return;
 	}
@@ -495,6 +523,7 @@ void UFPSRFlowFieldComputer::RunBFS(const TArray<int32>& SourceSurfaces)
 	// Connectivity is topology-based (source-independent), so refresh it here -> it's valid whenever the field is queried
 	// (the combat gate reads it right after the subsystem's post-mutation RunBFS, same freshness contract as the flow).
 	RebuildConnectivity();
+	bConnectivityReady = true; // labels valid now, INDEPENDENT of whether flow sources resolve below (Codex R15)
 
 	const int32 NumSurf = GridDimX * GridDimY * NumLayers;
 	for (int32 i = 0; i < NumSurf; ++i)

@@ -271,4 +271,9 @@ private:
 	TArray<int32> ComponentLabels;
 
 	bool bFieldReady = false;
+	// Connectivity labels are rebuilt by RebuildConnectivity() at the top of EVERY RunBFS, independent of whether flow
+	// sources resolve — so a source-less field (players airborne/unsnapped) still has valid connectivity for the combat
+	// gate. Distinct from bFieldReady (flow): a mutation invalidates both; a source-less RunBFS refreshes connectivity but
+	// leaves the flow not-ready. AreSurfacesConnected gates on THIS, not bFieldReady (Codex R15).
+	bool bConnectivityReady = false;
 };

@@ -120,6 +120,12 @@ void UFPSRFlowFieldSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 	InWorld.GetTimerManager().SetTimer(
 		RecomputeTimerHandle, this, &UFPSRFlowFieldSubsystem::RecomputeAllFields,
 		GFlowUpdateInterval, true);
+
+	// Recompute ONCE immediately (not only on the first 0.2s tick) so the connectivity labels are ready from t=0. Without
+	// this, the unified combat gate (AreWorldLocationsConnected) fails closed for every pawn until the first scheduled
+	// recompute, blocking all player damage during the world-begin window (Codex R16). Source-less is fine — it still
+	// rebuilds the labels; player flow sources are added by the timer once pawns are possessed.
+	RecomputeAllFields();
 }
 
 UFPSRFlowFieldComputer* UFPSRFlowFieldSubsystem::BakeMap(const FGameplayTag& MapId, const AFPSRFlowFieldBoundsVolume* BoundsVolume, float FloorZ)
@@ -242,7 +248,14 @@ bool UFPSRFlowFieldSubsystem::BakeDiscoveredMap(const FGameplayTag& MapId)
 				// U: swarm flow samples ONLY the unified field, so readiness = the unified slot bake succeeded. If it fails
 				// (misaligned / no floor / step mismatch) report NOT ready, so the stream subsystem keeps the boundary
 				// blockers up rather than letting players into a slot the swarm can't route through (Codex R10).
-				return BakeSlotIntoUnified(*World, *Volume);
+				const bool bBaked = BakeSlotIntoUnified(*World, *Volume);
+				if (bBaked)
+				{
+					// Recompute NOW so the newly-streamed slot's connectivity labels are ready immediately, not on the next
+					// 0.2s tick — otherwise the combat gate fails closed for every pawn in the meantime (Codex R16).
+					RecomputeAllFields();
+				}
+				return bBaked;
 			}
 			return true;
 		}

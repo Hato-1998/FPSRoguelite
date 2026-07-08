@@ -5,6 +5,8 @@
 #include "Combat/FPSRWeakpointComponent.h"
 #include "Enemy/FPSREnemyHealthComponent.h"
 #include "Enemy/FPSREnemyBase.h"
+#include "Enemy/FPSRFlowFieldSubsystem.h"
+#include "Enemy/FPSRFlowFieldComputer.h"
 #include "Hero/FPSRCharacter.h"
 #include "Core/FPSRGameState.h"
 #include "Core/FPSRPlayerController.h"
@@ -46,11 +48,35 @@ namespace FPSRCombat
 		return FGameplayTag();
 	}
 
-	bool CanAffectTarget(const AActor* Instigator, const AActor* Target)
+	bool CanAffectTarget(const UWorld* World, const AActor* Instigator, const AActor* Target, const FVector& OriginLocation)
 	{
+		if (Target && Target == Instigator)
+		{
+			return true; // self is always reachable; bAllowSelf (caller) decides actual self-damage/knockback (rocket jump)
+		}
+		// The reachability gate applies to PAWNS only (swarm enemies / players). A damageable DOOR is the wall itself — its
+		// actor sits on the seam / a blocked gap cell (not a walkable pawn surface), so connectivity would wrongly zero its
+		// damage and make streaming gates unbreakable (Codex R11). Non-pawn damageables bypass the gate — there is no "across
+		// a wall" concern when shooting the wall itself; ResolveDamage still resolves them.
+		if (!Target || !Target->IsA(APawn::StaticClass()))
+		{
+			return true;
+		}
+		if (const UFPSRFlowFieldSubsystem* FF = World ? World->GetSubsystem<UFPSRFlowFieldSubsystem>() : nullptr)
+		{
+			if (const UFPSRFlowFieldComputer* Unified = FF->GetUnifiedComputer())
+			{
+				// U (P-C): gate on ORIGIN<->TARGET open-grid connectivity — a closed door/wall between them blocks damage/AOE,
+				// an open door connects them. AreWorldLocationsConnected fails closed off-grid AND while connectivity is stale
+				// (post-mutation, pre-RunBFS) — but connectivity is rebuilt every RunBFS regardless of flow sources, so a
+				// source-less field (players airborne/unsnapped) still gates correctly instead of leaking through walls (R15).
+				return Unified->AreWorldLocationsConnected(OriginLocation, Target->GetActorLocation());
+			}
+		}
+		// Fallback (no unified grid: single-map / pre-content): the MapId cross-map gate. Cross-map only when BOTH are
+		// settled in a map and they differ; unset on either side allows (transition / default / boundary door).
 		const FGameplayTag A = GetActorMapId(Instigator);
 		const FGameplayTag B = GetActorMapId(Target);
-		// Cross-map only when BOTH are settled in a map and they differ. Unset on either side allows (transition/default).
 		return !(A.IsValid() && B.IsValid() && A != B);
 	}
 
@@ -72,7 +98,7 @@ namespace FPSRCombat
 		OutParams.AddObjectTypesToQuery(ECC_FPSRPlayerPawn);  // player characters (distinct object channel)
 	}
 
-	float ResolveDamage(const AActor* Instigator, const AActor* Target, float BaseDamage, bool bAllowSelf, const UWorld* World)
+	float ResolveDamage(const AActor* Instigator, const AActor* Target, float BaseDamage, bool bAllowSelf, const UWorld* World, const FVector* OriginOverride)
 	{
 		if (!Target || BaseDamage <= 0.0f)
 		{
@@ -85,9 +111,10 @@ namespace FPSRCombat
 			return bAllowSelf ? BaseDamage : 0.0f;
 		}
 
-		// Cross-map guard (multimap Tier 0): a shot can never damage across a streamed map boundary. Belt on the spatial
-		// offset contract; a no-op in single-map play (both maps unset). Self is exempt above (same map trivially).
-		if (!CanAffectTarget(Instigator, Target))
+		// Reachability guard (P-C): no damage across a closed door/wall (or, pre-U, a streamed map boundary). Origin = the
+		// blast Center (explosions pass OriginOverride) or the instigator's location (direct shots). Self is exempt above.
+		const FVector Origin = OriginOverride ? *OriginOverride : (Instigator ? Instigator->GetActorLocation() : FVector::ZeroVector);
+		if (!CanAffectTarget(World, Instigator, Target, Origin))
 		{
 			return 0.0f;
 		}
@@ -252,9 +279,9 @@ namespace FPSRCombat
 			}
 			Processed.Add(Target);
 
-			// Cross-map guard (multimap Tier 0): skip a target in a different map entirely — no damage AND no knockback
-			// across a streamed boundary (knockback below is independent of damage). No-op in single-map play. Self exempt.
-			if (!CanAffectTarget(Instigator, Target))
+			// Reachability guard (P-C): skip a target the blast can't reach — no damage AND no knockback across a closed
+			// door/wall (or, pre-U, a streamed boundary). Origin = the blast Center, NOT the instigator. Self exempt.
+			if (!CanAffectTarget(World, Instigator, Target, Center))
 			{
 				continue;
 			}
@@ -268,7 +295,7 @@ namespace FPSRCombat
 				bCrit = true;
 			}
 
-			const float FinalDamage = ResolveDamage(Instigator, Target, BaseDamage, bAllowSelf, World);
+			const float FinalDamage = ResolveDamage(Instigator, Target, BaseDamage, bAllowSelf, World, &Center);
 			FDamageResult Result;
 			if (FinalDamage > 0.0f)
 			{

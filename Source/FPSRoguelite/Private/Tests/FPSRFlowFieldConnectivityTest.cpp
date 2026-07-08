@@ -71,6 +71,10 @@ bool FFPSRFlowFieldConnectivityTest::RunTest(const FString& Parameters)
 	const FVector InA(150.0f, 150.0f, 95.0f); // cell (1,1)
 	const FVector InB(350.0f, 150.0f, 95.0f); // cell (3,1)
 	TestTrue(TEXT("world locations across the open door are connected"), C->AreWorldLocationsConnected(InA, InB));
+	// Z-tolerant (Codex R12): an AIRBORNE pawn (rocket-jump / knockback), far above its floor (> MaxLayerPickDrop), is still
+	// combat-reachable — connectivity uses the XY column, not the foot-Z rank pick that would find no surface and gate it.
+	const FVector InA_Air(150.0f, 150.0f, 95.0f + 600.0f); // cell (1,1), 6m airborne
+	TestTrue(TEXT("airborne pawn over a connected cell is still reachable"), C->AreWorldLocationsConnected(InA_Air, InB));
 	// Fail-closed: a location outside the grid is never connected (no damage across).
 	TestFalse(TEXT("outside-grid location not connected (fail-closed)"), C->AreWorldLocationsConnected(InA, FVector(99999.0f, 0.0f, 95.0f)));
 
@@ -99,6 +103,40 @@ bool FFPSRFlowFieldConnectivityTest::RunTest(const FString& Parameters)
 	TestFalse(TEXT("query fails-closed while the field is stale (mutated, pre-RunBFS)"), C->AreWorldLocationsConnected(InA, InB));
 	C->RunBFS({ SurfCn(A00, 0) });
 	TestTrue(TEXT("connectivity valid again after the RunBFS rebuild"), C->AreWorldLocationsConnected(InA, InB));
+
+	// R15 (Codex): connectivity is rebuilt every RunBFS INDEPENDENT of flow sources. A source-less RunBFS (all players
+	// airborne/unsnapped) leaves the flow field not-ready but connectivity VALID, so the combat gate still reports the true
+	// topology (open door -> connected; closed wall -> blocked) instead of falling back to a lenient allow that leaks.
+	C->RunBFS({}); // no player sources: door is still open
+	TestFalse(TEXT("source-less RunBFS leaves the flow field not ready"), C->IsFieldReady());
+	TestTrue(TEXT("connectivity valid across the OPEN door without flow sources"), C->AreWorldLocationsConnected(InA, InB));
+	C->SetSurfaceEdge(A21, 0, B31, 0, false); // close the door edge
+	C->RunBFS({});                             // still no sources
+	TestFalse(TEXT("closed wall still BLOCKS without flow sources (no leak, R15)"), C->AreWorldLocationsConnected(InA, InB));
+
+	// R13 (Codex): multi-layer floor precision — a GROUND origin must NOT reach a target on a DISCONNECTED UPPER DECK at the
+	// same XY (no through-floor/ceiling damage), while ground<->ground stays connected. The column resolves to its specific
+	// floor (highest surface at/below foot Z), so an any-rank match can't leak damage between separate vertical components.
+	{
+		FFPSRFlowFieldSurfaceData D;
+		D.GridDimX = 2; D.GridDimY = 1; D.GridOrigin = FVector::ZeroVector; D.CellSize = 100.0f;
+		D.CellFloorZ.Init(MAX_flt, 2 * NLC);
+		D.BlockedField.Init(false, 2 * NLC);
+		D.EdgeMask.Init(0, 2 * 2);
+		D.CellFloorZ[SurfCn(0, 0)] = 0.0f;   // cell 0 ground
+		D.CellFloorZ[SurfCn(0, 1)] = 300.0f; // cell 0 upper deck (no edges -> its own disconnected component)
+		D.CellFloorZ[SurfCn(1, 0)] = 0.0f;   // cell 1 ground
+		D.EdgeMask[0 * 2 + 0] |= (1u << 0);  // (0,0)r0 <-> (1,0)r0 ground edge open
+		TStrongObjectPtr<UFPSRFlowFieldComputer> C2(NewObject<UFPSRFlowFieldComputer>());
+		C2->BuildFromSurfaceData(D);
+		C2->RunBFS({ SurfCn(0, 0) });
+		const FVector Ground1(150.0f, 50.0f, 95.0f);       // cell 1, ground foot
+		const FVector Ground0(50.0f, 50.0f, 95.0f);        // cell 0, ground foot
+		const FVector Deck0(50.0f, 50.0f, 300.0f + 95.0f); // cell 0, upper-deck foot
+		TestTrue(TEXT("ground<->ground across the open edge connected"), C2->AreWorldLocationsConnected(Ground1, Ground0));
+		TestFalse(TEXT("ground origin does NOT reach a disconnected upper-deck target (no through-floor damage)"),
+			C2->AreWorldLocationsConnected(Ground1, Deck0));
+	}
 
 	return true;
 }

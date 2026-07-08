@@ -38,6 +38,11 @@ public:
 	 *  retries against the map whose grid actually contains it so flow stays continuous at the boundary. */
 	FVector SampleFlowDirection(const FGameplayTag& MapId, const FVector& WorldLocation) const;
 
+	/** U (P-C combat gate): the unified continuous field if one is active (a bUnifiedExtent volume is present), else null.
+	 *  FPSRCombat::CanAffectTarget uses it to gate damage/AOE on origin<->target open-grid connectivity (a closed door/wall
+	 *  between them = blocked). Null => callers fall back to the MapId gate (single-map / pre-content). Server-authoritative. */
+	const UFPSRFlowFieldComputer* GetUnifiedComputer() const { return UnifiedComputer; }
+
 	/** Get (creating + baking if needed) the computer for MapId over BoundsVolume, anchored at FloorZ. Server-only. Used
 	 *  at world begin (S1b) and by the MapStreamSubsystem on stream-in collision-ready (S3). Returns null off-authority. */
 	UFPSRFlowFieldComputer* BakeMap(const FGameplayTag& MapId, const AFPSRFlowFieldBoundsVolume* BoundsVolume, float FloorZ);
