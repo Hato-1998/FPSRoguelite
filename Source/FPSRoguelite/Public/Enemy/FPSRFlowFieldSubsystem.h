@@ -9,6 +9,7 @@
 class AActor;
 class UFPSRFlowFieldComputer;
 class AFPSRFlowFieldBoundsVolume;
+enum class EFPSRFieldQuery : uint8;
 
 /** Server-authoritative flow-field driver for swarm pathing (P2-B2, U7 multi-layer). Owns a per-map REGISTRY of
  *  UFPSRFlowFieldComputer instances keyed by MapId (multimap Tier 0) and drives their 0.2s recompute from a single
@@ -43,6 +44,15 @@ public:
 	 *  FPSRCombat::CanAffectTarget uses it to gate damage/AOE on origin<->target open-grid connectivity (a closed door/wall
 	 *  between them = blocked). Null => callers fall back to the MapId gate (single-map / pre-content). Server-authoritative. */
 	const UFPSRFlowFieldComputer* GetUnifiedComputer() const { return UnifiedComputer; }
+
+	/** U P-D: true if A and B are in the same open-grid connected component of the UNIFIED field (an open door connects them;
+	 *  a closed door/wall separates them). False when there is no unified field (single-map) — callers then keep same-map
+	 *  behavior (no regression). Server-authoritative, O(1) after RunBFS. */
+	bool AreLocationsConnected(const FVector& A, const FVector& B) const;
+
+	/** U P-D: path-distance (cells) from the nearest player to Loc on the unified field (front-chase range gate). OutStatus =
+	 *  NoGrid when no unified field; else the computer's OK/OffGrid/SourceLess/Unreachable. Returns MAX_int32 for non-OK. */
+	int32 GetFrontDistanceCells(const FVector& Loc, EFPSRFieldQuery& OutStatus) const;
 
 	/** Get (creating + baking if needed) the computer for MapId over BoundsVolume, anchored at FloorZ. Server-only. Used
 	 *  at world begin (S1b) and by the MapStreamSubsystem on stream-in collision-ready (S3). Returns null off-authority. */

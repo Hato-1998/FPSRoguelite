@@ -10,6 +10,17 @@
 class AFPSRFlowFieldBoundsVolume;
 class APlayerStart;
 
+/** Result status of a path-distance / front query (U P-D). Distinguishes the "no distance" reasons so the front-chase
+ *  gate acts correctly instead of conflating them into one MAX (Codex R2 #14). Plain C++ enum (server-side, not BP). */
+enum class EFPSRFieldQuery : uint8
+{
+	OK,           // a valid finite path-distance was returned
+	OffGrid,      // no grid cell / no walkable surface at this location's Z
+	SourceLess,   // grid exists but the last RunBFS had no sources (distances meaningless; connectivity still valid)
+	Unreachable,  // grid + sources exist but this surface is in a different connected component
+	NoGrid        // subsystem-level: no unified grid at all (single-map / pre-content)
+};
+
 /**
  * Baked, world-independent surface graph for one map's flow field (U7 multi-layer, NumLayers=2).
  * Produced either by the production world-trace bake (BuildFromWorldTrace) or, for headless unit tests,
@@ -150,6 +161,11 @@ public:
 
 	/** Convert a world location to a grid cell index (XY only). INDEX_NONE if outside the grid. */
 	int32 WorldToCellIndex(const FVector& WorldLocation) const;
+
+	/** U P-D: path-distance (cells, uniform-cost BFS steps) from the nearest flow source (player) to WorldLocation's surface
+	 *  (foot-Z rank pick), for the front-chase range gate. OutStatus distinguishes OK / OffGrid / SourceLess / Unreachable
+	 *  (returns MAX_int32 for every non-OK). O(1) array read after RunBFS. */
+	int32 GetPathDistanceCells(const FVector& WorldLocation, EFPSRFieldQuery& OutStatus) const;
 
 	/** Surface (cell, rank) flat index. Rank in [0, NumLayers). */
 	FORCEINLINE int32 SurfIndex(int32 Cell, int32 Rank) const { return Cell * NumLayers + Rank; }

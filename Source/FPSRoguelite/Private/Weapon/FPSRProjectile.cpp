@@ -435,7 +435,14 @@ bool AFPSRProjectile::TryDamageActor(AActor* Target, float WeakpointMultiplier, 
 		// Enemy-team projectiles damage players only (team-specific path retained until B1 generalizes it).
 		if (AFPSRCharacter* Character = Cast<AFPSRCharacter>(Target))
 		{
-			Character->ApplyContactDamage(FinalDamage, Params.InstigatorActor);
+			// U P-C/P-D: gate on open-grid connectivity from the IMPACT origin (the same reachability guard the player path
+			// gets via ResolveDamage) so an enemy projectile can't damage a player across a closed door/wall / reclosed seam
+			// it geometrically slipped behind. The projectile is still consumed on the physical hit — just no through-wall damage.
+			const FVector ImpactOrigin = GetActorLocation();
+			if (FPSRCombat::CanAffectTarget(GetWorld(), Params.InstigatorActor, Target, ImpactOrigin))
+			{
+				Character->ApplyContactDamage(FinalDamage, Params.InstigatorActor);
+			}
 			return true;
 		}
 	}

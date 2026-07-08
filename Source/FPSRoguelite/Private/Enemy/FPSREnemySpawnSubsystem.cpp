@@ -5,6 +5,7 @@
 #include "Enemy/FPSREnemySpawnPoint.h"
 #include "Enemy/FPSRSpawnRoom.h"
 #include "Enemy/FPSRFlowFieldSubsystem.h"
+#include "Enemy/FPSRFlowFieldComputer.h" // EFPSRFieldQuery (front-chase distance status, U P-D)
 #include "Enemy/FPSREnemyAllocator.h"
 #include "Enemy/FPSREnemyRosterDataAsset.h"
 #include "Hero/FPSRCharacter.h"
@@ -302,6 +303,9 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 	}
 
 	const UFPSRFlowFieldSubsystem* FlowField = World->GetSubsystem<UFPSRFlowFieldSubsystem>();
+	// U P-D: front-chase (connectivity targeting) is active ONLY when a unified continuous field exists; without it the
+	// enemy loop keeps the exact same-map + tracker behavior (single-map / pre-content = no regression, Codex R2).
+	const bool bUnified = FlowField && FlowField->GetUnifiedComputer() != nullptr;
 
 	// Build the per-pass agent arrays + uniform-grid spatial hash (all valid active enemies) for separation.
 	// Reuse the member scratch (Reset keeps capacity) so the 500-enemy batch doesn't realloc every frame (W1 P2-4).
@@ -347,15 +351,18 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 			}
 		}
 
-		// Nearest SAME-MAP player (committed occupancy, 2D). A cross-map player is invisible to this enemy for targeting,
-		// attack, LOD, and the flow beeline — so an enemy never chases or hits a player in another sublevel through a wall.
+		// Nearest SAME-MAP player (committed occupancy, 2D) — attack-eligible. The enemy can ALSO chase a player in a
+		// DIFFERENT slot that an opened door connects (front-chase, U P-D) — MOVE-ONLY, so a closed door / wall still blocks
+		// contact (the attack below stays gated to a same-map, connected target). MoveTarget = the chosen player (same-map or
+		// front); flow / facing / stop / LOD all reference it, consistent with the unified field's flow (Codex R2 #7).
+		bool bTargetSameMap = false;
 		float BestDistSq = TNumericLimits<float>::Max();
 		int32 BestPlayerIndex = INDEX_NONE;
 		for (int32 p = 0; p < PlayerLocations.Num(); ++p)
 		{
 			if (PlayerMapIds[p] != EnemyMap)
 			{
-				continue; // different map (committed) -> not a target for this enemy
+				continue; // different map (committed) -> not a SAME-MAP (attack) target (front-chase handled below)
 			}
 			const float DistSq = FVector::DistSquaredXY(PlayerLocations[p], EnemyLocation);
 			if (DistSq < BestDistSq)
@@ -364,12 +371,66 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 				BestPlayerIndex = p;
 			}
 		}
+		if (BestPlayerIndex != INDEX_NONE)
+		{
+			bTargetSameMap = true;
+			Enemy->ClearFrontChasing(); // a same-map target supersedes any front-chase (handoff -> no double-state, Codex R2)
+		}
+
+		// Front-chase (U P-D, UNIFIED only): with NO same-map player, chase the nearest player the unified field connects to
+		// (through an opened door) IF this enemy is within the front path-distance range (Schmitt via prior state). The unified
+		// field already flows toward the nearest player through open doors, so movement just follows it. MOVE-ONLY.
+		if (BestPlayerIndex == INDEX_NONE && bUnified)
+		{
+			const bool bWasChasing = Enemy->IsFrontChasing(Now);
+			EFPSRFieldQuery St = EFPSRFieldQuery::NoGrid;
+			const int32 EnemyFrontDist = FlowField->GetFrontDistanceCells(EnemyLocation, St);
+			bool bFrontEligible = false;
+			bool bRenew = false;
+			if (St == EFPSRFieldQuery::OK)
+			{
+				bFrontEligible = (EnemyFrontDist <= (bWasChasing ? ChaseExitCells : ChaseEnterCells));
+				bRenew = bFrontEligible; // a fresh in-range reading renews the hold
+			}
+			else if ((St == EFPSRFieldQuery::SourceLess || St == EFPSRFieldQuery::Unreachable) && bWasChasing)
+			{
+				// Source-less / transiently-stale field: HOLD an in-flight chaser (don't flip to idle) but do NOT renew, so a
+				// persistently source-less / departed field lets the tag expire (ChaseHoldSeconds) and the enemy drains (#5).
+				bFrontEligible = true;
+			}
+			if (bFrontEligible)
+			{
+				float FrontDistSq = TNumericLimits<float>::Max();
+				int32 FrontIndex = INDEX_NONE;
+				for (int32 p = 0; p < PlayerLocations.Num(); ++p)
+				{
+					if (!FlowField->AreLocationsConnected(EnemyLocation, PlayerLocations[p]))
+					{
+						continue; // a closed door / wall separates them -> not a front target
+					}
+					const float DistSq = FVector::DistSquaredXY(PlayerLocations[p], EnemyLocation);
+					if (DistSq < FrontDistSq)
+					{
+						FrontDistSq = DistSq;
+						FrontIndex = p;
+					}
+				}
+				if (FrontIndex != INDEX_NONE)
+				{
+					BestPlayerIndex = FrontIndex;
+					BestDistSq = FrontDistSq;
+					if (bRenew)
+					{
+						Enemy->SetFrontChasing(Now + ChaseHoldSeconds);
+					}
+				}
+			}
+		}
 		bool bHasTarget = (BestPlayerIndex != INDEX_NONE);
 
-		// Transition tracker (multimap Tier 1): an enemy with NO same-map target but a live designation to pursue a player
-		// who just crossed a boundary chases that (cross-map) player toward the door. MOVEMENT/LOD/flow only — the attack
-		// stays gated to same-map players below (bAttackEligible), so this never lands a hit through the boundary wall;
-		// contact damage re-enables naturally once the enemy crosses into the player's map (its MapId re-resolves, above).
+		// Transition tracker (multimap Tier 1, legacy) — runs ONLY when neither a same-map NOR a unified front target engaged
+		// (front-chase supersedes it; the tracker stays the no-unified fallback until P-G removes it, Codex R2 #9). MOVEMENT/
+		// LOD/flow only; the attack stays gated to same-map players below.
 		bool bTrackerChase = false;
 		FVector TrackerDoorLocation = FVector::ZeroVector;
 		FGameplayTag TrackerDepartedMap;
@@ -392,11 +453,13 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 			}
 		}
 
-		// Strict same-map target -> may deal contact damage. A transition tracker (cross-map by construction) may only
-		// MOVE toward its player, never attack it, until it crosses in and becomes same-map (then bHasTarget is set by the
-		// same-map loop above and bTrackerChase is false). This is the sole guard against through-boundary-wall melee
-		// (enemy contact damage bypasses FPSRCombat::CanAffectTarget — it calls ApplyContactDamage directly).
-		const bool bAttackEligible = bHasTarget && !bTrackerChase;
+		// Strict SAME-MAP + open-grid-CONNECTED target -> may deal contact damage. A front-chase (cross-slot, move-only) or a
+		// transition tracker never attacks (bTargetSameMap false). Even a same-map target is gated on connectivity when a
+		// unified field exists, so a same-MapId target behind an internal closed wall / reclosed seam (a DIFFERENT component)
+		// can't be hit through the wall — contact damage bypasses FPSRCombat::CanAffectTarget, so this is the melee guard
+		// (Codex R2 #6). No unified grid -> keep the exact same-map behavior (no regression).
+		const bool bAttackEligible = bHasTarget && bTargetSameMap && !bTrackerChase &&
+			(!bUnified || FlowField->AreLocationsConnected(EnemyLocation, PlayerLocations[BestPlayerIndex]));
 
 		// No target at all (an unoccupied map before the empty-map drain culls it, S2b) -> cheapest LOD, no attack, no
 		// player-directed movement (separation only).
@@ -676,7 +739,9 @@ int32 UFPSREnemySpawnSubsystem::DrainMapEnemies(const FGameplayTag& MapId, int32
 		AFPSREnemyBase* Enemy = EnemyPtr.Get();
 		// Skip enemies still pursuing a crossed player out of this map (Tier 1): don't recycle an active transition
 		// tracker mid-chase. It self-excludes once it crosses (its MapId changes), and becomes drainable again on expiry.
-		if (IsValid(Enemy) && Enemy->GetMapId() == MapId && !Enemy->IsCrossingTracker(Now))
+		// U P-D: also skip a live FRONT-CHASER — a door-near cohort chasing a player in a connected slot is a live front, not
+		// idle. Out-of-range enemies (no front tag) still drain; the tag is expiry-bounded so a departed cohort drains later.
+		if (IsValid(Enemy) && Enemy->GetMapId() == MapId && !Enemy->IsCrossingTracker(Now) && !Enemy->IsFrontChasing(Now))
 		{
 			ToRelease.Add(Enemy);
 			if (ToRelease.Num() >= MaxToRelease)

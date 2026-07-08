@@ -179,4 +179,44 @@ bool FFPSRFlowFieldDoorMapTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+// U P-D front-chase core: GetPathDistanceCells status + monotone path-distance + AreWorldLocationsConnected. Worldless
+// (the enemy movement/drain wiring that consumes these is proven in-world, PIE). 6x3 grid, cell 100, origin (0,0,0).
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFPSRFlowFieldFrontDistanceTest, "FPSRoguelite.FlowField.FrontDistance",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FFPSRFlowFieldFrontDistanceTest::RunTest(const FString& Parameters)
+{
+	// Two flat slots A(cols 0-2)/B(cols 3-5) @Z=0; seam CLOSED by default.
+	TStrongObjectPtr<UFPSRFlowFieldComputer> C(MakeTwoSlotGrid(0.0f, 0.0f));
+	EFPSRFieldQuery St = EFPSRFieldQuery::NoGrid;
+
+	// No sources -> distance meaningless = SourceLess (connectivity still valid). Cell centers use foot Z within layer pick.
+	C->RunBFS({});
+	C->GetPathDistanceCells(FVector(50, 50, 0), St);
+	TestEqual(TEXT("no sources -> SourceLess"), static_cast<int32>(St), static_cast<int32>(EFPSRFieldQuery::SourceLess));
+
+	// Source in A, door CLOSED: A cell OK (finite), B cell Unreachable (different component), outside = OffGrid, A/B disconnected.
+	C->RunBFS({ SurfD(0, 0) });
+	const int32 dA = C->GetPathDistanceCells(FVector(250, 50, 0), St); // (2,0) in A
+	TestEqual(TEXT("A reachable -> OK"), static_cast<int32>(St), static_cast<int32>(EFPSRFieldQuery::OK));
+	TestTrue(TEXT("A distance finite"), dA >= 0 && dA < MAX_int32);
+	C->GetPathDistanceCells(FVector(350, 50, 0), St); // (3,0) in B behind the closed seam
+	TestEqual(TEXT("B behind closed seam -> Unreachable"), static_cast<int32>(St), static_cast<int32>(EFPSRFieldQuery::Unreachable));
+	C->GetPathDistanceCells(FVector(9999, 50, 0), St);
+	TestEqual(TEXT("outside grid -> OffGrid"), static_cast<int32>(St), static_cast<int32>(EFPSRFieldQuery::OffGrid));
+	TestFalse(TEXT("A,B not connected while door closed"), C->AreWorldLocationsConnected(FVector(50, 50, 0), FVector(350, 50, 0)));
+
+	// Open the door (2,0)<->(3,0): B becomes OK and strictly farther from the source than A; A<->B now connected.
+	C->StampDoorEdgesOpen(2, 3);
+	C->RunBFS({ SurfD(0, 0) });
+	const int32 dA2 = C->GetPathDistanceCells(FVector(250, 50, 0), St);
+	TestEqual(TEXT("A still OK after open"), static_cast<int32>(St), static_cast<int32>(EFPSRFieldQuery::OK));
+	const int32 dB2 = C->GetPathDistanceCells(FVector(350, 50, 0), St);
+	TestEqual(TEXT("B reachable through open door -> OK"), static_cast<int32>(St), static_cast<int32>(EFPSRFieldQuery::OK));
+	TestTrue(TEXT("B farther than A (monotone path distance through the door)"), dB2 > dA2);
+	TestTrue(TEXT("A,B connected after door open"), C->AreWorldLocationsConnected(FVector(50, 50, 0), FVector(350, 50, 0)));
+
+	return true;
+}
+
 #endif // WITH_AUTOMATION_TESTS

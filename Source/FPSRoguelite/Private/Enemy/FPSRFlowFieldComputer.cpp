@@ -779,6 +779,39 @@ FVector UFPSRFlowFieldComputer::Sample(const FVector& WorldLocation) const
 	return FVector(F.X, F.Y, 0.0f);
 }
 
+int32 UFPSRFlowFieldComputer::GetPathDistanceCells(const FVector& WorldLocation, EFPSRFieldQuery& OutStatus) const
+{
+	if (GridDimX <= 0 || GridDimY <= 0)
+	{
+		OutStatus = EFPSRFieldQuery::OffGrid;
+		return MAX_int32;
+	}
+	const int32 Cell = WorldToCellIndex(WorldLocation);
+	if (Cell == INDEX_NONE)
+	{
+		OutStatus = EFPSRFieldQuery::OffGrid;
+		return MAX_int32;
+	}
+	const float FootZ = static_cast<float>(WorldLocation.Z) - EnemyStandOffset;
+	const int32 Rank = PickRankForFootZ(Cell, FootZ);
+	if (Rank == INDEX_NONE)
+	{
+		OutStatus = EFPSRFieldQuery::OffGrid; // no walkable surface at this column
+		return MAX_int32;
+	}
+	const int32 Dist = DistField[SurfIndex(Cell, Rank)];
+	if (Dist == MAX_int32)
+	{
+		// MAX with a ready field = a different connected component (unreachable from any source); MAX with a NON-ready field
+		// = the last RunBFS had no sources (all players unsnapped) so distances are meaningless — the front gate must HOLD,
+		// not flip, in that window (Codex R2 #5). Connectivity is rebuilt every RunBFS regardless, so it stays valid.
+		OutStatus = bFieldReady ? EFPSRFieldQuery::Unreachable : EFPSRFieldQuery::SourceLess;
+		return MAX_int32;
+	}
+	OutStatus = EFPSRFieldQuery::OK;
+	return Dist;
+}
+
 int32 UFPSRFlowFieldComputer::WorldToCellIndex(const FVector& WorldLocation) const
 {
 	if (GridDimX <= 0 || GridDimY <= 0)

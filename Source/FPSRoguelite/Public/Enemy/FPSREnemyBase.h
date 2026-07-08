@@ -157,6 +157,17 @@ public:
 	/** Server: the door/crossing location this tracker beelines to while still in its departed map (snapshot at designation). */
 	const FVector& GetCrossingTrackerDoorLocation() const { return CrossingTrackerDoorLocation; }
 
+	// --- Front-chase (multimap U P-D) — server-only, NOT replicated. The movement pass tags an enemy chasing a player in a
+	//     DIFFERENT open-grid-connected slot (through an opened door) via the unified flow field, within the front range.
+	//     Read by the empty-map drain (a front-chaser is a live cohort, exempt like a tracker) and by tracker mutual
+	//     exclusion. Expiry-bounded (ChaseHoldSeconds) so a stale/departed chaser eventually drains. Cleared on Activate. ---
+	/** Server: mark this enemy as a front-chaser until ExpireTime (world seconds). */
+	void SetFrontChasing(float ExpireTime) { FrontChaseExpireTime = ExpireTime; }
+	/** Server: true if this enemy holds a live front-chase tag at time Now. */
+	bool IsFrontChasing(float Now) const { return Now < FrontChaseExpireTime; }
+	/** Server: drop the front-chase tag (handoff to same-map target / pool reuse). */
+	void ClearFrontChasing() { FrontChaseExpireTime = -1.0f; }
+
 protected:
 	virtual void BeginPlay() override;
 
@@ -239,6 +250,10 @@ protected:
 	float CrossingTrackerExpireTime = -1.0f;
 	FGameplayTag CrossingTrackerDepartedMap;
 	FVector CrossingTrackerDoorLocation = FVector::ZeroVector;
+
+	/** Server-only (U P-D): world time until which this enemy is a live front-chaser (chasing a cross-slot connected player
+	 *  via the unified field). -1 = not front-chasing. See SetFrontChasing. Not replicated. */
+	float FrontChaseExpireTime = -1.0f;
 
 	/** Net-cull radius (cm) applied to NetCullDistanceSquared in the ctor (multimap Tier 0, Codex R5). Enemies spawn into
 	 *  the PERSISTENT level (always level-relevant to every connection), so distance is the SOLE lever that culls a

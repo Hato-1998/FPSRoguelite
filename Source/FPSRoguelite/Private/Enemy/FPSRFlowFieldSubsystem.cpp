@@ -324,6 +324,22 @@ bool UFPSRFlowFieldSubsystem::IsLocationInMap(const FGameplayTag& MapId, const F
 		WorldLocation.Y >= B.Min.Y - Margin && WorldLocation.Y < B.Max.Y + Margin;
 }
 
+bool UFPSRFlowFieldSubsystem::AreLocationsConnected(const FVector& A, const FVector& B) const
+{
+	// No unified field (single-map / pre-content) -> not "connected" in the front sense; callers fall back to same-map (no regression).
+	return UnifiedComputer ? UnifiedComputer->AreWorldLocationsConnected(A, B) : false;
+}
+
+int32 UFPSRFlowFieldSubsystem::GetFrontDistanceCells(const FVector& Loc, EFPSRFieldQuery& OutStatus) const
+{
+	if (!UnifiedComputer)
+	{
+		OutStatus = EFPSRFieldQuery::NoGrid;
+		return MAX_int32;
+	}
+	return UnifiedComputer->GetPathDistanceCells(Loc, OutStatus);
+}
+
 FGameplayTag UFPSRFlowFieldSubsystem::FindMapIdForLocation(const FVector& WorldLocation) const
 {
 	for (const TPair<FGameplayTag, TObjectPtr<UFPSRFlowFieldComputer>>& Pair : Computers)

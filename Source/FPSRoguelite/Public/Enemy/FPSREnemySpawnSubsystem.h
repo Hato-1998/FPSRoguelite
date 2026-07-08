@@ -293,6 +293,19 @@ private:
 	 *  return" drain grace); DrainMapEnemies skipping live trackers keeps the two independent. Tunable (PIE). */
 	static constexpr float TrackerGraceSeconds = 6.0f;
 
+	// --- Front-chase (multimap U P-D, server-only) — an enemy chases a player in a DIFFERENT open-grid-connected slot
+	//     (through an opened door) via the UNIFIED field, within a path-distance range. Generalizes the tracker cohort to
+	//     the whole connected front. Cells = uniform-cost BFS steps; kept < a slot's ~66-cell width so the front is
+	//     "near the door", not the entire adjacent slot (Codex R2 #11). Tunable (PIE). ---
+	/** Enter the front-chase state when the enemy's unified path-distance to the nearest player is <= this (cells). */
+	static constexpr int32 ChaseEnterCells = 40;
+	/** Stay front-chasing until path-distance exceeds this (cells) — Schmitt hysteresis (> ChaseEnterCells) so a boundary
+	 *  enemy doesn't chase/idle flip-flop every 0.2s recompute (Codex R2 #13). */
+	static constexpr int32 ChaseExitCells = 50;
+	/** How long a front-chase tag stays live after the last in-range pass (world seconds) — bounds a stale cohort so it
+	 *  drains once the player is gone or the field goes persistently source-less without renewal (Codex R2 #5). */
+	static constexpr float ChaseHoldSeconds = 2.0f;
+
 	/** A per-player record of the most recent map boundary the player crossed OUT of (multimap Tier 1). Recorded in
 	 *  ComputeOccupancy when an alive player's committed map changes away from a valid map; consumed by the director to
 	 *  elect trackers (once) and by the movement pass (DoorLocation beeline + DepartedMap handoff test). Server-only. */

@@ -127,6 +127,7 @@ void AFPSREnemyBase::Activate(const FVector& Location)
 	KnockbackVelocityXY = FVector::ZeroVector; // clear residual knockback from a prior life
 	ClearExitPath();                           // drop any leftover path; AcquireEnemy re-assigns it if this spawn point has one
 	ClearCrossingTracker();                    // drop any stale transition-tracker designation from a prior life (Tier 1)
+	ClearFrontChasing();                       // drop any stale front-chase tag from a prior life (U P-D)
 
 	// Reset the cosmetic animation state for the reused actor (U20). No-op when dormant / on a dedicated server. On a
 	// client the reused actor self-corrects on its first PostNetReceiveLocationAndRotation (it's alive, so movement
