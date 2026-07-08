@@ -6,6 +6,14 @@
 
 **최종 갱신: 2026-07-08**
 
+## 🔔 핸드오프 (2026-07-08 l · **반동 시스템 재설계: CrystalRecoil 플러그인 어댑터화**) — 🎯 **P0(플러그인 브링업)·P1(반동 어댑터 코드) 완료·빌드 통과. 브랜치 `phase/recoil-crystalrecoil`(미머지·미푸시). 남은 = P2 확산 단일소스 + P3 무기별 패턴 콘텐츠 + P4 정리/검증/머지.**
+> **요청**: 반동을 설계적으로 CrystalRecoil(https://github.com/CrystalVapor/UE5-CrystalRecoil, MIT)로 재작업. **사용자 결정**: ①반동+확산 전면 채택 ②절차적 반동 완전 대체(ChargeLaser 램프만 유지) ③**어댑터 방식**(Codex 토론 후 = 플러그인 커널 재사용하되 우리가 통합 경계 소유). **플랜게이트 순서 변경**: 초안→Codex 토론→사용자 승인([[plan-codex-comparison-gate]] 갱신).
+> **P0(커밋 `25ae32f`)**: 플러그인 벤더링(`Plugins/CrystalRecoil`, nested .git 제거)+.uproject 활성. 에디터 모듈 5.7 패치 2건(`CRRecoilUnitGraphBackgroundWidget`: MakeShared→MakeUnique[ZoomLevels=TUniquePtr], SetViewOffset 래퍼 추가[엔진 SNodePanel.h:1063/1066]). 빌드 Succeeded. **소스 확인**: `CRRecoilPattern.ConsumeShot`(데이터 API)·`ApplyInputToController`=컨트롤러 SetControlRotation(서버 조준 정합)·`SetRecoilStrength` 런타임 스칼라·`ProcessDelta*` virtual 훅·`GetCurrentSpreadAngle` 단일소스 → Codex 우려 대부분 해소.
+> **P1(커밋 `4a8db52`, 빌드 Succeeded)**: `UFPSRRecoilComponent : UCRRecoilSpreadComponent`(ProcessDeltaRecoil/Recovery 오버라이드=프리즈/DBNO 게이팅, ApplyShot public 재노출). FPSRCharacter가 생성. 무기 DA `RecoilPattern` 필드. FireComponent: ResolveRecoil(로컬 컨트롤러 바인딩)·OnWeaponEquipped=SetRecoilPattern·StartFiring=StartShooting·FireOneShot 비차지·비근접=SetRecoilStrength(ADS/힙×카드RecoilVertical 스케일, asset 불변)+ApplyShot. ChargeLaser 램프 유지. Build.cs+CrystalRecoil.
+> **⚠️ 현재 상태**: P1은 코드만 — 무기 패턴 미저작이라 **일반무기 반동 없음**(P3 콘텐츠서 복원). P1~P4 **묶어서 머지**(P1 단독 머지 금지).
+> **남은 작업**: **P2** 확산 단일소스 = 발사 GA(Hitscan/Projectile)+HUD가 `GetCurrentSpreadAngle()` 하나만 읽기(우리 bloom/ComputeSpreadDegrees 제거), 서버 accepted-shot시 heat 갱신(원격클라 패리티), OnHeatChanged→크로스헤어. **P3** 무기별 CRRecoilPattern+heat 곡선 저작(패턴 에디터, Rifle/SMG/LMG/Shotgun/Sniper/Bazooka; ChargeLaser 커스텀·Knife 무반동) + DA 배선. **P4** 스탯 필드 정리(레버용 RecoilVertical/SpreadDegrees 유지)·빌드·validate-data·PIE·Codex 머지게이트→`--no-ff` 머지.
+> **참고**: 무기 개편은 main 머지+origin push 완료(`3adc945`). 반동 브랜치는 그 위에서 분기. 미커밋 사용자 WIP(MI_XH_Cross·BP_EnemyMeleeBase·L_Sandbox·WBP_*·Font) 보존.
+
 ## 🔔 핸드오프 (2026-07-08 k · **무기 전면 개편: 점사무기 제거→점사 프래그먼트·유탄 제거·기관단총 추가·전면 투사체화**) — 🎯 **코드 인프라+콘텐츠 완료·검증. 브랜치 `phase/weapon-overhaul`(미머지). 남은 = 사용자 PIE 스모크 → Codex 머지게이트 → `--no-ff` 머지.**
 > **사용자 요청 4건**: ①점사 라이플 제거→라이플 점사 프래그먼트(미션 언락) ②유탄 발사기 제거 ③기관단총 추가(연사↑↑·데미지↓) ④차지레이저·근접 외 전 무기 투사체화. **사용자 결정**: 투사체 완전 패리티 / Burst=미션 언락 / 삭제 완전. **Codex 플랜게이트 8지적 반영**(발사체 예산·Sniper·§2-5·AOE이중폭발·OnHitActor범위·IsDataValid·삭제참조·RepNotify).
 > **코드(커밋 `36b583d`, 빌드 -NoXGE Succeeded)**: 발사체 패리티=Projectile GA 펠릿 팬아웃 + `FPSRProjectile` 직격 OnHitActor 훅·종단 OnImpact 훅(비-AOE 게이팅). FireMode 프래그먼트 시임=`UFPSRWeaponFragment::ModifyFireMode`+`UFPSRFragment_BurstFire`, `RecomputeResolved`서 적용, `ActiveFragments` ReplicatedUsing+MarkResolvedDirty. 발사체 필드 EditCondition 완화(근접·차지레이저 외). `IsDataValid` 발사체검증=FireAbility(Projectile GA)기준+예산경고(FR×Life×Pellet>12).
