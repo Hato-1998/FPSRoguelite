@@ -4,7 +4,14 @@
 > **작업 단계를 끝낼 때마다, 그리고 중단 전 반드시 이 파일을 갱신하고 커밋한다.**
 > 확정 설계·기획·코드구조·규칙은 `Game.md`(**SSOT 허브** → 도메인별 `Docs/SSOT/*.md`, 작업별 라우팅은 허브 §0-1), **완료 작업 상세는 `git log --oneline`**. 여기엔 *무엇을 했는지*만 요약한다.
 
-**최종 갱신: 2026-07-07**
+**최종 갱신: 2026-07-08**
+
+## 🔔 핸드오프 (2026-07-08 · #3 다중맵 U **④ L_U_Whitebox 콘텐츠 저작 + PIE(SIE) 그리드빌드 검증 PASS** — FPSRoguelite2·`phase/p8-multimap-tier0`) — ✅ near-cap 198×198 유니파이드 그리드 in-world 빌드 확인·커밋. **다음 = ③ 전투게이트 인터랙티브 PIE(사용자) + ② FPSRDoor 배선**
+> **이 세션 = ④ U-레이아웃 콘텐츠 저작(VibeUE MCP execute_python) + SIE 검증**. 코드 무변경. 커밋 = `Content/Maps/L_U_Whitebox.umap`(monolithic, 외부액터 없음) + `Config/DefaultGameplayTags.ini`(Map 3×3 그리드 태그 9개: Center/N/S/E/W/NE/NW/SE/SW) + 이 PROGRESS.
+> **저작(L_U_Whitebox)**: 사용자 결정 = **슬롯 최대치**(near-cap 상한 실동작 확인) + **3슬롯 L**. 통합 볼륨1(`bUnifiedExtent`, 원점(0,0), 396m=198셀/축) + 슬롯볼륨3(Center/North/East, 각 **132m=66셀**, MapId Map.Center/N/E) + 바닥3(WorldStatic 상면 Z=0) + seam벽4(각 600cm gap) + 외곽벽8(낙하방지) + 문2(`AFPSRDoor`, gap 배치, ② 후속 배선용) + 스폰12(슬롯당4, Z=바닥+100) + PlayerStart. **CellSize/step override 전부 0**(=200/45 균일) → CommitSubregion 무조건 통과. 좌표 전부 200 배수 정렬.
+> **✅ PIE(SIE) 검증**: 서버 로그 `[FlowField] U unified grid 198x198 cell=200 origin=(0,0,0) built` + `U: 3 slot(s) baked` + 3슬롯 각 66×66 **0/4356 no-floor** + 거부/봉인/예산 Warning 0 = **near-cap(39204셀, 캡40000 마진796) P-0 예산게이트 통과 + 정렬/바닥/CellSize/step 계약 전부 in-world 증명**. 헤드리스 벤치(4.9ms@39,204셀)와 동일 셀수 = in-world 대조. (SIE=Simulate라 서버 BeginPlay만; 플레이어/적/전투게이트는 풀 PIE 필요=아래.)
+> **🐛 저작 갓차 발견·수정**: PlayerStart를 슬롯 박스중심(19800,19800)에 두니 `DetectFloorZForVolume`의 WorldStatic **채널** 트레이스가 PlayerStart 캡슐(Z185)을 바닥(0) 대신 맞혀 통합+Center origin이 Z=185로 오앵커됨 → PlayerStart를 (17000,17000)로 비켜 재검증 = 전 슬롯 origin Z=0 클린. **교훈: 플로우필드 볼륨 박스중심에 콜리전 액터 두지 말 것.** 태그는 `GameplayTagService.add_tags`로 재시작 없이 라이브 등록([[vibeue-gameplaytag-import-text]] 갱신).
+> **⏭ 다음**: (1) **③ 전투게이트 인터랙티브 PIE(사용자, 풀 PIE)**: `FPSR.EnemyTarget 30`/`FPSR.SpawnEnemies N` → in-slot 추격 + **gap 너머 hitscan 사격=데미지0/넉백0**(BLOCK, Origin=슈터=닫힌 seam) + 같은슬롯=정상 타격(ALLOW). 로켓은 Origin=착탄점이라 중앙측 착탄시켜야 BLOCK. SIE는 플레이어 없어 이 테스트 불가. (2) **② FPSRDoor 배선**(문 파괴→door셀 `StampDoorEdgesOpen`+`StampCellBlocked`+즉시 recompute) → PIE 크로스도어 증명. 그담 P-G(registry/트래커 제거)~P-H. 플랜 `Docs/Review/20260707-plan-continuous-field-arch.md` §2-4.
 
 ## 🔔 핸드오프 (2026-07-08 · #3 다중맵 U **P-0~P-C 헤드리스 + 서브시스템 통합 ① + P-C 전투게이트 ③ 커밋 완료** — FPSRoguelite2·`phase/p8-multimap-tier0`) — ✅ 빌드+스모크 8/8+Codex R1~R17 CLEAN. **커밋 `f99666a`(P-0~P-C+서브시스템①) + `413bf85`(③ 전투게이트). 다음 = FPSRDoor 배선(②) + U-레이아웃 콘텐츠(④) = PIE 게이트**
 > **이 세션 = U 설계 채택 → SSOT 3곳 갱신 → P-0~P-C 구현 → 서브시스템 통합 ① → P-C 인월드 전투게이트 ③**(전부 헤드리스/서버권위=Opus 직접 [[haiku-delegation-security-wiring]]). **커밋 2개**: `f99666a`(SSOT 3 + `FPSRFlowFieldComputer.{h,cpp}` + `FPSRFlowFieldSubsystem.{h,cpp}` 통합배선 + `FPSRFlowFieldBoundsVolume.h` `bUnifiedExtent` + 테스트 4) / `413bf85`(③ `FPSRCombatStatics.{h,cpp}` CanAffectTarget origin 연결성 + `FPSRProjectile.cpp` impact 원점 + Subsystem 즉시 recompute + Connectivity 테스트 확장). 콘텐츠/PIE 없음.
