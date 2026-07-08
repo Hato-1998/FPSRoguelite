@@ -97,9 +97,9 @@ UFPSRRecoilComponent* UFPSRWeaponFireComponent::ResolveRecoil()
 	return CachedRecoil;
 }
 
-float UFPSRWeaponFireComponent::ComputeSpreadDegrees(const FFPSRWeaponStatBlock& Stats, float Bloom, bool bAiming)
+float UFPSRWeaponFireComponent::ComputeSpreadDegrees(const FFPSRWeaponStatBlock& Stats, float HeatSpread, bool bAiming)
 {
-	const float Base = Stats.SpreadDegrees + Bloom;
+	const float Base = Stats.SpreadDegrees + HeatSpread;
 	return (bAiming && Stats.bHasADS) ? Base * Stats.ADSSpreadMultiplier : Base;
 }
 
@@ -109,9 +109,13 @@ float UFPSRWeaponFireComponent::GetCurrentSpreadDegrees() const
 	UFPSRWeaponInstance* Inst = Inv ? Inv->GetCurrentInstance() : nullptr;
 	if (!Inst)
 	{
-		return CurrentBloom;
+		return 0.0f;
 	}
-	return ComputeSpreadDegrees(Inst->GetResolvedStats(), CurrentBloom, bIsAiming);
+	// Dynamic spread now comes from the recoil component's heat model (single source shared with the fire GAs).
+	const UFPSRRecoilComponent* Recoil = CachedRecoil ? CachedRecoil.Get()
+		: (GetOwner() ? GetOwner()->FindComponentByClass<UFPSRRecoilComponent>() : nullptr);
+	const float HeatSpread = Recoil ? Recoil->GetHeatSpread() : 0.0f;
+	return ComputeSpreadDegrees(Inst->GetResolvedStats(), HeatSpread, bIsAiming);
 }
 
 UMaterialInterface* UFPSRWeaponFireComponent::GetEquippedCrosshairMaterial() const
@@ -280,6 +284,20 @@ void UFPSRWeaponFireComponent::OnWeaponEquipped(float EquipCooldown)
 		UFPSRWeaponInstance* Inst = Inv ? Inv->GetCurrentInstance() : nullptr;
 		const UFPSRWeaponDataAsset* Weapon = Inst ? Inst->GetSource() : nullptr;
 		Recoil->SetRecoilPattern(Weapon ? Weapon->RecoilPattern : nullptr);
+		// Inject the equipped weapon's heat-spread profile (curves + max + cooldown delay). MUST run on swap even to a
+		// no-profile weapon: the plugin's SetRecoilPattern IGNORES null, so without an explicit clear the previous
+		// weapon's heat curves would bleed into melee / ChargeLaser / no-profile weapons and keep making spread.
+		// Runs on the server (EquipSlot) AND clients (OnRep) so both sides' heat model matches the equipped weapon.
+		if (Weapon)
+		{
+			Recoil->SetSpreadProfile(Weapon->ShotToHeatCurve, Weapon->HeatToSpreadAngleCurve,
+				Weapon->HeatToCooldownPerSecondCurve, Weapon->MaxRecoilHeat, Weapon->RecoilHeatCooldownDelay);
+		}
+		else
+		{
+			Recoil->ClearSpreadProfile();
+		}
+		Recoil->ResetHeat(); // fresh weapon starts cold
 	}
 }
 
@@ -392,26 +410,25 @@ void UFPSRWeaponFireComponent::FireOneShot()
 		}
 		else
 		{
-			// CrystalRecoil (P1): pattern weapons apply their per-shot recoil through the recoil component (owner-local,
-			// controller-driven so the server fire trace matches). Strength = ADS/hip vertical scale x the recoil-down
-			// CARD scale (resolved vs base RecoilVertical) — the casual-ization levers keep working WITHOUT mutating the
-			// shared pattern asset (§2-4-2). The authored pattern IS the spray now; the legacy sin ComputeShotRecoilDelta
-			// above only feeds the ChargeLaser ramp branch. No authored pattern = no recoil (guarded + plugin null-check).
-			if (Weapon->RecoilPattern)
+			// CrystalRecoil (P1/P2): the recoil component drives BOTH the per-shot kinematic kick (uplift/recovery,
+			// needs an authored RecoilPattern) AND the heat-based dynamic spread (needs authored heat curves) — the two
+			// are INDEPENDENT (a weapon may have spread with no pattern and vice versa), and the plugin null-guards each
+			// (base ApplyShot no-ops without a pattern; the spread heat only advances when curves exist). Strength =
+			// ADS/hip vertical scale x the recoil-down CARD scale (resolved vs base RecoilVertical) so the casual-ization
+			// levers keep working WITHOUT mutating the shared pattern asset (§2-4-2). Owner-local prediction/feel; the
+			// server accumulates its own heat per accepted shot (fire GA) for authoritative-trace parity.
+			if (UFPSRRecoilComponent* Recoil = ResolveRecoil())
 			{
-				if (UFPSRRecoilComponent* Recoil = ResolveRecoil())
+				if (Weapon->RecoilPattern || Recoil->HasSpreadCurves())
 				{
 					const float BaseRecoilVertical = Weapon->BaseStats.RecoilVertical;
 					const float CardScale = (BaseRecoilVertical > KINDA_SMALL_NUMBER) ? (Stats.RecoilVertical / BaseRecoilVertical) : 1.0f;
 					Recoil->SetRecoilStrength(FMath::Max(0.0f, CardScale * VScale));
-					Recoil->ApplyShot();
+					Recoil->ApplyShot(); // uplift (if pattern) + heat accumulation (if spread curves) — owner-local
 				}
 			}
 		}
 		++ShotsFiredThisSpray;
-
-		// Bloom grows with each shot.
-		CurrentBloom = FMath::Min(CurrentBloom + Stats.BloomPerShot, Stats.MaxBloom);
 	}
 }
 
@@ -603,12 +620,6 @@ void UFPSRWeaponFireComponent::TickComponent(float DeltaTime, ELevelTick TickTyp
 		const float Recover = FMath::Min(Stats.RecoilRecoveryRate * DeltaTime, RecoilDebtPitch);
 		OwnerPawn->AddControllerPitchInput(Recover); // positive = down
 		RecoilDebtPitch -= Recover;
-	}
-
-	// Bloom recovery.
-	if (CurrentBloom > 0.0f)
-	{
-		CurrentBloom = FMath::Max(0.0f, CurrentBloom - Stats.BloomRecoveryRate * DeltaTime);
 	}
 
 #if ENABLE_DRAW_DEBUG

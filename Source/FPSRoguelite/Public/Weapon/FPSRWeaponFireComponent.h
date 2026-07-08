@@ -32,10 +32,6 @@ public:
 	 *  the local recoil prediction stays in sync with the server. */
 	void OnWeaponEquipped(float EquipCooldown);
 
-	/** Extra spread (degrees) from sustained fire; read by the fire ability when tracing. */
-	UFUNCTION(BlueprintPure, Category = "FPSR|Weapon")
-	float GetCurrentBloom() const { return CurrentBloom; }
-
 	/** Total spread half-angle (deg) the fire trace uses = (resolved SpreadDegrees + bloom) x ADS.
 	 *  Single source of truth shared with the fire ability cone; the HUD crosshair gap reads this. */
 	UFUNCTION(BlueprintPure, Category = "FPSR|Weapon")
@@ -50,8 +46,9 @@ public:
 	bool GetEquippedCrosshairUsesDynamic() const;
 
 	/** Shared spread formula used by BOTH the fire ability cone and the HUD crosshair:
-	 *  (Stats.SpreadDegrees + Bloom) x (bAiming && Stats.bHasADS ? Stats.ADSSpreadMultiplier : 1). */
-	static float ComputeSpreadDegrees(const struct FFPSRWeaponStatBlock& Stats, float Bloom, bool bAiming);
+	 *  (Stats.SpreadDegrees + HeatSpread) x (bAiming && Stats.bHasADS ? Stats.ADSSpreadMultiplier : 1).
+	 *  HeatSpread = the recoil component's heat-based dynamic spread (UFPSRRecoilComponent::GetHeatSpread). */
+	static float ComputeSpreadDegrees(const struct FFPSRWeaponStatBlock& Stats, float HeatSpread, bool bAiming);
 
 	/** Owner-client + server (via RPC): set aim-down-sights state (FOV/recoil local, spread read by fire GA). */
 	void SetAiming(bool bNewAiming) { bIsAiming = bNewAiming; }
@@ -95,7 +92,6 @@ protected:
 	bool bWantsToFire = false;
 	float TimeSinceLastShot = 0.0f;
 	int32 BurstShotsRemaining = 0;
-	float CurrentBloom = 0.0f;
 
 	bool bReloadRequestPending = false; // guards against spamming the reload RPC each tick
 	float LastMeleeTime = -1000.0f; // world time of last melee attack (melee attack-rate cooldown)
