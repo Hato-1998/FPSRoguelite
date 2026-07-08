@@ -20,9 +20,9 @@ EDataValidationResult UFPSRMissionDataAsset::IsDataValid(FDataValidationContext&
 		Result = EDataValidationResult::Invalid;
 	}
 
-	// Tuning (§2-8-1 soft migration): if this mission type expects a tuning object (its CDO's
-	// GetExpectedTuningClass() is non-null), warn when Tuning is unset (fallback to the actor's legacy fields
-	// still works — nothing breaks) and error when Tuning is the wrong subclass for this mission type.
+	// Tuning (§2-8-1): if this mission type expects a tuning object (its CDO's GetExpectedTuningClass() is
+	// non-null), warn when Tuning is unset (the actor's GetTuning<T>() falls back to the tuning subclass's CDO
+	// defaults — nothing breaks) and error when Tuning is the wrong subclass for this mission type.
 	if (MissionClass)
 	{
 		if (const AFPSRMissionActor* MissionCDO = MissionClass->GetDefaultObject<AFPSRMissionActor>())
@@ -32,7 +32,7 @@ EDataValidationResult UFPSRMissionDataAsset::IsDataValid(FDataValidationContext&
 			{
 				if (!Tuning)
 				{
-					Context.AddWarning(LOCTEXT("NoTuning", "이 미션 타입은 튜닝 객체가 필요합니다 — Tuning을 설정하세요(미설정 시 미션 액터 기본값 fallback). §2-8-1 마이그레이션"));
+					Context.AddWarning(LOCTEXT("NoTuning", "이 미션 타입은 튜닝 객체가 필요합니다 — Tuning을 설정하세요(미설정 시 튜닝 기본값(CDO) fallback). §2-8-1 마이그레이션"));
 				}
 				else if (!Tuning->IsA(ExpectedTuningClass))
 				{

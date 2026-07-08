@@ -18,19 +18,6 @@ class FPSROGUELITE_API AFPSRMission_CarryNoHit : public AFPSRMissionActor
 public:
 	AFPSRMission_CarryNoHit();
 
-	/** fallback: Data->Tuning 미설정 시 사용(§2-8-1 소프트 마이그레이션, 콘텐츠 이관 후 제거 예정) */
-	UPROPERTY(EditDefaultsOnly, Category = "Mission|CarryNoHit")
-	TSubclassOf<AFPSRMissionOrb> OrbClass;
-
-	/** fallback: Data->Tuning 미설정 시 사용(§2-8-1 소프트 마이그레이션, 콘텐츠 이관 후 제거 예정) */
-	UPROPERTY(EditDefaultsOnly, Category = "Mission|CarryNoHit")
-	float RequiredCarrySeconds = 20.0f;
-
-	/** Height (cm) the carried orb floats above the carrier.
-	 *  fallback: Data->Tuning 미설정 시 사용(§2-8-1 소프트 마이그레이션, 콘텐츠 이관 후 제거 예정) */
-	UPROPERTY(EditDefaultsOnly, Category = "Mission|CarryNoHit")
-	float CarryHeight = 120.0f;
-
 	virtual TSubclassOf<UFPSRMissionTuning> GetExpectedTuningClass() const override;
 
 protected:

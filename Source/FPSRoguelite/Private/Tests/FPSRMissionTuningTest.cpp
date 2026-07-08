@@ -15,7 +15,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFPSRMissionTuningTest, "FPSRoguelite.Mission.T
 
 bool FFPSRMissionTuningTest::RunTest(const FString& Parameters)
 {
-	// 1. Each tuning subclass's default values match the legacy actor field defaults (§2-8-1 inventory) —
+	// 1. Each tuning subclass's default values match the §2-8-1 inventory defaults —
 	// a soft migration must never change a mission's out-of-the-box behavior.
 	UFPSRMissionTuning_HoldZone* HoldZone = NewObject<UFPSRMissionTuning_HoldZone>();
 	TestNotNull(TEXT("HoldZone tuning allocates"), HoldZone);
@@ -107,12 +107,12 @@ bool FFPSRMissionTuningTest::RunTest(const FString& Parameters)
 			const EDataValidationResult MismatchResult = Data->IsDataValid(MismatchContext);
 			TestEqual(TEXT("Mismatched Tuning subclass -> Invalid"), MismatchResult, EDataValidationResult::Invalid);
 
-			// 3c. Null tuning -> not Invalid (fallback to actor defaults works) but with at least one warning
+			// 3c. Null tuning -> not Invalid (fallback to tuning-subclass CDO defaults works) but with at least one warning
 			// (soft-migration fallback notice). Same NotValidated-vs-Valid note as 3a above.
 			Data->Tuning = nullptr;
 			FDataValidationContext NullContext;
 			const EDataValidationResult NullResult = Data->IsDataValid(NullContext);
-			TestTrue(TEXT("Null Tuning -> not Invalid (fallback to actor defaults)"), NullResult != EDataValidationResult::Invalid);
+			TestTrue(TEXT("Null Tuning -> not Invalid (fallback to tuning CDO defaults)"), NullResult != EDataValidationResult::Invalid);
 			TestTrue(TEXT("Null Tuning -> at least one warning"), NullContext.GetNumWarnings() > 0);
 		}
 	}
