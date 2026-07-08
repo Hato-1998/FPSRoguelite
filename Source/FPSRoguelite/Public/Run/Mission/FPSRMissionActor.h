@@ -78,10 +78,23 @@ protected:
 	 *  Lets designers live-tune hold/moving zone size during PIE (`FPSR.Mission.ZoneRadius 800`) without a recompile. */
 	float ResolveZoneRadius(float InRadius) const;
 
-	/** §2-8-1 soft migration: the DataAsset's polymorphic Tuning object (untyped), or nullptr if MissionData is
-	 *  unset or Tuning was never assigned. Subclasses Cast<> this to their own tuning subclass and fall back to
-	 *  their legacy fields on a null/failed cast — see each mission's tuning-or-fallback read sites. */
+	/** §2-8-1: the DataAsset's polymorphic Tuning object (untyped), or nullptr if MissionData is unset or Tuning
+	 *  was never assigned. Prefer the typed GetTuning<T>() below; this is its untyped primitive. */
 	const UFPSRMissionTuning* GetTuningBase() const;
+
+	/** §2-8-1: the authored tuning typed as T, or T's CDO (its C++ defaults) when the DataAsset's Tuning is null
+	 *  or a different subclass — a single source of defaults (the tuning subclass). Read sites use this instead of
+	 *  per-mission fallback fields, with no null checks. IsDataValid warns when a DataAsset leaves Tuning unset. */
+	template <typename T>
+	const T& GetTuning() const
+	{
+		static_assert(TPointerIsConvertibleFromTo<T, UFPSRMissionTuning>::Value, "T must derive from UFPSRMissionTuning");
+		if (const T* Authored = Cast<T>(GetTuningBase()))
+		{
+			return *Authored;
+		}
+		return *GetDefault<T>();
+	}
 
 	UFUNCTION()
 	void OnRep_MissionState();

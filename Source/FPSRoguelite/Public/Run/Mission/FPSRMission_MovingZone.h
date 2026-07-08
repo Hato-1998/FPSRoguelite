@@ -22,15 +22,6 @@ public:
 	virtual bool UsesPointSet() const override { return true; }
 	virtual void AssignPointSet(AFPSRMissionPointSet* InSet) override { PointSet = InSet; }
 
-	/** fallback: Data->Tuning 미설정 시 사용(§2-8-1 소프트 마이그레이션, 콘텐츠 이관 후 제거 예정) */
-	UPROPERTY(EditDefaultsOnly, Category = "Mission|MovingZone")
-	float ZoneRadius = 700.0f;
-
-	/** Hold time (seconds) required to capture EACH point in the route.
-	 *  fallback: Data->Tuning 미설정 시 사용(§2-8-1 소프트 마이그레이션, 콘텐츠 이관 후 제거 예정) */
-	UPROPERTY(EditDefaultsOnly, Category = "Mission|MovingZone")
-	float RequiredHoldSeconds = 30.0f;
-
 	virtual TSubclassOf<UFPSRMissionTuning> GetExpectedTuningClass() const override;
 
 protected:

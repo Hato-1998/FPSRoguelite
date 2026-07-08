@@ -22,10 +22,10 @@ TSubclassOf<UFPSRMissionTuning> AFPSRMission_MovingZone::GetExpectedTuningClass(
 
 void AFPSRMission_MovingZone::OnMissionActivated()
 {
-	// Tuning-or-fallback (§2-8-1), resolved once here rather than every tick.
-	const UFPSRMissionTuning_MovingZone* T = Cast<UFPSRMissionTuning_MovingZone>(GetTuningBase());
-	EffZoneRadius = T ? T->ZoneRadius : ZoneRadius;
-	EffRequiredHoldSeconds = T ? T->RequiredHoldSeconds : RequiredHoldSeconds;
+	// §2-8-1: read from the DataAsset's Tuning (or the tuning subclass's CDO defaults when unset).
+	const UFPSRMissionTuning_MovingZone& T = GetTuning<UFPSRMissionTuning_MovingZone>();
+	EffZoneRadius = T.ZoneRadius;
+	EffRequiredHoldSeconds = T.RequiredHoldSeconds;
 
 	Points.Reset();
 	if (PointSet)

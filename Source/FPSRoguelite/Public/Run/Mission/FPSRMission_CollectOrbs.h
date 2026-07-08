@@ -19,16 +19,6 @@ class FPSROGUELITE_API AFPSRMission_CollectOrbs : public AFPSRMissionActor
 public:
 	AFPSRMission_CollectOrbs();
 
-	/** Orb class to spawn (content BP for mesh/VFX). Falls back to the C++ base when unset.
-	 *  fallback: Data->Tuning 미설정 시 사용(§2-8-1 소프트 마이그레이션, 콘텐츠 이관 후 제거 예정) */
-	UPROPERTY(EditDefaultsOnly, Category = "Mission|CollectOrbs")
-	TSubclassOf<AFPSRMissionOrb> OrbClass;
-
-	/** Orb spawn offsets (cm) from the mission location. If empty, a small default set is used for testing.
-	 *  fallback: Data->Tuning 미설정 시 사용(§2-8-1 소프트 마이그레이션, 콘텐츠 이관 후 제거 예정) */
-	UPROPERTY(EditDefaultsOnly, Category = "Mission|CollectOrbs")
-	TArray<FVector> OrbRelativeLocations;
-
 	virtual bool UsesPointSet() const override { return true; }
 	virtual void AssignPointSet(AFPSRMissionPointSet* InSet) override { PointSet = InSet; }
 

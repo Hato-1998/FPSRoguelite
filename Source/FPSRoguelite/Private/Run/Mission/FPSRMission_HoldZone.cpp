@@ -21,11 +21,11 @@ void AFPSRMission_HoldZone::OnMissionActivated()
 {
 	HeldSeconds = 0.0f;
 
-	// Tuning-or-fallback (§2-8-1), resolved once here rather than every tick. Null/wrong-type Tuning falls back
-	// to the actor's own legacy fields — behavior is unchanged until a designer assigns a Tuning asset.
-	const UFPSRMissionTuning_HoldZone* T = Cast<UFPSRMissionTuning_HoldZone>(GetTuningBase());
-	EffZoneRadius = T ? T->ZoneRadius : ZoneRadius;
-	EffRequiredHoldSeconds = T ? T->RequiredHoldSeconds : RequiredHoldSeconds;
+	// §2-8-1: read from the DataAsset's Tuning (or the tuning subclass's CDO defaults when unset), resolved once
+	// here rather than every tick.
+	const UFPSRMissionTuning_HoldZone& T = GetTuning<UFPSRMissionTuning_HoldZone>();
+	EffZoneRadius = T.ZoneRadius;
+	EffRequiredHoldSeconds = T.RequiredHoldSeconds;
 }
 
 void AFPSRMission_HoldZone::OnMissionTickServer(float DeltaSeconds)

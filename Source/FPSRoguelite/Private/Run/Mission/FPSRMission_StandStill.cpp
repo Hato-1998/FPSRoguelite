@@ -20,10 +20,10 @@ void AFPSRMission_StandStill::OnMissionActivated()
 {
 	StillSeconds = 0.0f;
 
-	// Tuning-or-fallback (§2-8-1), resolved once here rather than every tick.
-	const UFPSRMissionTuning_StandStill* T = Cast<UFPSRMissionTuning_StandStill>(GetTuningBase());
-	EffRequiredStillSeconds = T ? T->RequiredStillSeconds : RequiredStillSeconds;
-	EffStillSpeedThreshold = T ? T->StillSpeedThreshold : StillSpeedThreshold;
+	// §2-8-1: read from the DataAsset's Tuning (or the tuning subclass's CDO defaults when unset).
+	const UFPSRMissionTuning_StandStill& T = GetTuning<UFPSRMissionTuning_StandStill>();
+	EffRequiredStillSeconds = T.RequiredStillSeconds;
+	EffStillSpeedThreshold = T.StillSpeedThreshold;
 }
 
 void AFPSRMission_StandStill::OnMissionTickServer(float DeltaSeconds)

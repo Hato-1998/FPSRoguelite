@@ -26,12 +26,12 @@ void AFPSRMission_DefeatFleeing::OnMissionActivated()
 		return;
 	}
 
-	// Tuning-or-fallback (§2-8-1). FleeSpeed/FleeTriggerRange are read every tick, so cache them;
-	// TargetClass is only needed here at spawn time.
-	const UFPSRMissionTuning_DefeatFleeing* T = Cast<UFPSRMissionTuning_DefeatFleeing>(GetTuningBase());
-	EffFleeSpeed = T ? T->FleeSpeed : FleeSpeed;
-	EffFleeTriggerRange = T ? T->FleeTriggerRange : FleeTriggerRange;
-	const TSubclassOf<AFPSRMissionFleeTarget> EffTargetClass = T ? T->TargetClass : TargetClass;
+	// §2-8-1: read from the DataAsset's Tuning (or the tuning subclass's CDO defaults when unset).
+	// FleeSpeed/FleeTriggerRange are read every tick, so cache them; TargetClass is only needed here at spawn.
+	const UFPSRMissionTuning_DefeatFleeing& T = GetTuning<UFPSRMissionTuning_DefeatFleeing>();
+	EffFleeSpeed = T.FleeSpeed;
+	EffFleeTriggerRange = T.FleeTriggerRange;
+	const TSubclassOf<AFPSRMissionFleeTarget> EffTargetClass = T.TargetClass;
 
 	UClass* SpawnClass = EffTargetClass ? EffTargetClass.Get() : AFPSRMissionFleeTarget::StaticClass();
 	FActorSpawnParameters Params;

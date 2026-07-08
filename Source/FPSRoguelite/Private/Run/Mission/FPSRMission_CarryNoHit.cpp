@@ -32,12 +32,12 @@ void AFPSRMission_CarryNoHit::OnMissionActivated()
 	LastCarrierHealth = -1.0f;
 	OrbHomeLocation = GetActorLocation();
 
-	// Tuning-or-fallback (§2-8-1). RequiredCarrySeconds/CarryHeight are read every tick, so cache them;
-	// OrbClass is only needed here at spawn time.
-	const UFPSRMissionTuning_CarryNoHit* T = Cast<UFPSRMissionTuning_CarryNoHit>(GetTuningBase());
-	EffRequiredCarrySeconds = T ? T->RequiredCarrySeconds : RequiredCarrySeconds;
-	EffCarryHeight = T ? T->CarryHeight : CarryHeight;
-	const TSubclassOf<AFPSRMissionOrb> EffOrbClass = T ? T->OrbClass : OrbClass;
+	// §2-8-1: read from the DataAsset's Tuning (or the tuning subclass's CDO defaults when unset).
+	// RequiredCarrySeconds/CarryHeight are read every tick, so cache them; OrbClass is only needed here at spawn.
+	const UFPSRMissionTuning_CarryNoHit& T = GetTuning<UFPSRMissionTuning_CarryNoHit>();
+	EffRequiredCarrySeconds = T.RequiredCarrySeconds;
+	EffCarryHeight = T.CarryHeight;
+	const TSubclassOf<AFPSRMissionOrb> EffOrbClass = T.OrbClass;
 
 	UClass* SpawnClass = EffOrbClass ? EffOrbClass.Get() : AFPSRMissionOrb::StaticClass();
 	FActorSpawnParameters Params;

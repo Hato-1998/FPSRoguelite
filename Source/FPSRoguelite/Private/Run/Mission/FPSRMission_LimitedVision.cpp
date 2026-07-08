@@ -19,9 +19,9 @@ void AFPSRMission_LimitedVision::OnMissionActivated()
 {
 	ElapsedSeconds = 0.0f;
 
-	// Tuning-or-fallback (§2-8-1), resolved once here rather than every tick.
-	const UFPSRMissionTuning_LimitedVision* T = Cast<UFPSRMissionTuning_LimitedVision>(GetTuningBase());
-	EffRequiredSeconds = T ? T->RequiredSeconds : RequiredSeconds;
+	// §2-8-1: read from the DataAsset's Tuning (or the tuning subclass's CDO defaults when unset).
+	const UFPSRMissionTuning_LimitedVision& T = GetTuning<UFPSRMissionTuning_LimitedVision>();
+	EffRequiredSeconds = T.RequiredSeconds;
 
 	SetVisionRestricted(true);
 }

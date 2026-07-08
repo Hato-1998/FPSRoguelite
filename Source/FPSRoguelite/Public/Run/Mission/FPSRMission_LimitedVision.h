@@ -16,10 +16,6 @@ class FPSROGUELITE_API AFPSRMission_LimitedVision : public AFPSRMissionActor
 public:
 	AFPSRMission_LimitedVision();
 
-	/** fallback: Data->Tuning 미설정 시 사용(§2-8-1 소프트 마이그레이션, 콘텐츠 이관 후 제거 예정) */
-	UPROPERTY(EditDefaultsOnly, Category = "Mission|LimitedVision", meta = (ClampMin = "0.0"))
-	float RequiredSeconds = 20.0f;
-
 	virtual TSubclassOf<UFPSRMissionTuning> GetExpectedTuningClass() const override;
 
 protected:
