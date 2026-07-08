@@ -87,6 +87,11 @@ protected:
 	/** Release this projectile back to the pool. */
 	void ReleaseToPool();
 
+	/** Fire the OnImpact behavior-fragment hook at the projectile's terminal point (server, player team only). Mirrors
+	 *  the hitscan NotifyImpact so ExplosiveRounds-style fragments splash at a projectile's final impact. Folds any
+	 *  enemy damage from the hook into bDealtEnemyDamage so a connecting splash isn't counted as a miss. */
+	void NotifyImpactFragments(const FVector& ImpactPoint);
+
 	/** True while the run is globally frozen for card selection (Game.MD §2-2). Impacts are gated on this so a
 	 *  projectile never lands damage during the freeze. */
 	bool IsRunFrozen() const;

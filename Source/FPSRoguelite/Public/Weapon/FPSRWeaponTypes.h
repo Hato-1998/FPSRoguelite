@@ -149,19 +149,19 @@ struct FPSROGUELITE_API FFPSRWeaponStatBlock
 
 	// --- Projectile (AOE explosion OR Sniper travel-time bullet; spawned by the projectile fire ability).
 	//     Bullet = AOERadius 0 (single-target) + Pierce (penetration) + high speed; AOE = AOERadius > 0. ---
-	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Projectile", meta = (EditConditionHides, EditCondition = "Archetype == EFPSRWeaponArchetype::AOE || Archetype == EFPSRWeaponArchetype::Sniper"))
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Projectile", meta = (EditConditionHides, EditCondition = "Archetype != EFPSRWeaponArchetype::Melee && Archetype != EFPSRWeaponArchetype::ChargeLaser"))
 	float ProjectileSpeed = 3000.0f; // initial velocity (cm/s)
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Projectile", meta = (EditConditionHides, EditCondition = "Archetype == EFPSRWeaponArchetype::AOE || Archetype == EFPSRWeaponArchetype::Sniper"))
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Projectile", meta = (EditConditionHides, EditCondition = "Archetype != EFPSRWeaponArchetype::Melee && Archetype != EFPSRWeaponArchetype::ChargeLaser"))
 	float ProjectileGravityScale = 0.0f; // 0 = straight (rocket); >0 = arc (grenade)
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Projectile", meta = (EditConditionHides, EditCondition = "Archetype == EFPSRWeaponArchetype::AOE || Archetype == EFPSRWeaponArchetype::Sniper"))
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Projectile", meta = (EditConditionHides, EditCondition = "Archetype != EFPSRWeaponArchetype::Melee && Archetype != EFPSRWeaponArchetype::ChargeLaser"))
 	float AOERadius = 0.0f; // >0 = radial explosion on impact; 0 = single-target
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Projectile", meta = (EditConditionHides, EditCondition = "Archetype == EFPSRWeaponArchetype::AOE || Archetype == EFPSRWeaponArchetype::Sniper"))
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Projectile", meta = (EditConditionHides, EditCondition = "Archetype != EFPSRWeaponArchetype::Melee && Archetype != EFPSRWeaponArchetype::ChargeLaser"))
 	float ProjectileLifetime = 5.0f; // seconds before auto-release
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Projectile", meta = (EditConditionHides, EditCondition = "Archetype == EFPSRWeaponArchetype::AOE || Archetype == EFPSRWeaponArchetype::Sniper"))
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Projectile", meta = (EditConditionHides, EditCondition = "Archetype != EFPSRWeaponArchetype::Melee && Archetype != EFPSRWeaponArchetype::ChargeLaser"))
 	int32 ProjectilePierce = 0; // extra pawns a single-hit projectile passes through (ignored if AOE)
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Projectile", meta = (EditConditionHides, EditCondition = "Archetype == EFPSRWeaponArchetype::AOE"))

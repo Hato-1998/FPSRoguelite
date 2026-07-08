@@ -4,6 +4,7 @@
 
 #include "Engine/DataAsset.h"
 #include "GameplayTagContainer.h"
+#include "Weapon/FPSRWeaponTypes.h"
 #include "FPSRWeaponFragment.generated.h"
 
 class APawn;
@@ -74,6 +75,11 @@ public:
 
 	/** Charge-time hook (ChargeLaser): adjust the seconds-to-full-charge before the charge alpha is computed. */
 	virtual void ModifyChargeTime(const FFPSRFireContext& Context, float& ChargeTimeInOut) const {}
+
+	/** Fire-mode hook: a fragment can change the RESOLVED fire mode / burst count (e.g. FullAuto -> Burst). Applied in
+	 *  UFPSRWeaponInstance::RecomputeResolved so the fire component (which reads resolved stats) picks it up with no
+	 *  extra wiring. Stateless; runs only on stat re-resolution, not on the hot per-hit path. */
+	virtual void ModifyFireMode(EFPSRFireMode& FireModeInOut, int32& BurstCountInOut) const {}
 
 	/** Hitscan impact hook (server-only): called at each terminal impact point of a hitscan pellet so a fragment can
 	 *  spawn an effect at the hit — e.g. ExplosiveRounds turns a rifle hit into a small AOE. bAllowSelf passes through
@@ -213,4 +219,24 @@ public:
 	bool bInstantRefill = true;
 
 	virtual void OnKill(const FFPSRFireContext& Context, AActor* KilledActor) const override;
+};
+
+/** Burst-fire fragment (task 1): converts the weapon's fire mode to Burst so one trigger pull fires BurstCount rounds.
+ *  Replaces the removed dedicated Burst-Rifle weapon — the rifle stays FullAuto by default and unlocks this as a
+ *  mission feature. Applied via ModifyFireMode during stat resolution; the fire component reads the resolved mode. */
+UCLASS()
+class FPSROGUELITE_API UFPSRFragment_BurstFire : public UFPSRWeaponFragment
+{
+	GENERATED_BODY()
+
+public:
+	/** Rounds fired per trigger pull once this fragment is active. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Fragment", meta = (ClampMin = "2"))
+	int32 BurstCount = 3;
+
+	virtual void ModifyFireMode(EFPSRFireMode& FireModeInOut, int32& BurstCountInOut) const override
+	{
+		FireModeInOut = EFPSRFireMode::Burst;
+		BurstCountInOut = FMath::Max(2, BurstCount);
+	}
 };

@@ -6,6 +6,14 @@
 
 **최종 갱신: 2026-07-08**
 
+## 🔔 핸드오프 (2026-07-08 k · **무기 전면 개편: 점사무기 제거→점사 프래그먼트·유탄 제거·기관단총 추가·전면 투사체화**) — 🎯 **코드 인프라+콘텐츠 완료·검증. 브랜치 `phase/weapon-overhaul`(미머지). 남은 = 사용자 PIE 스모크 → Codex 머지게이트 → `--no-ff` 머지.**
+> **사용자 요청 4건**: ①점사 라이플 제거→라이플 점사 프래그먼트(미션 언락) ②유탄 발사기 제거 ③기관단총 추가(연사↑↑·데미지↓) ④차지레이저·근접 외 전 무기 투사체화. **사용자 결정**: 투사체 완전 패리티 / Burst=미션 언락 / 삭제 완전. **Codex 플랜게이트 8지적 반영**(발사체 예산·Sniper·§2-5·AOE이중폭발·OnHitActor범위·IsDataValid·삭제참조·RepNotify).
+> **코드(커밋 `36b583d`, 빌드 -NoXGE Succeeded)**: 발사체 패리티=Projectile GA 펠릿 팬아웃 + `FPSRProjectile` 직격 OnHitActor 훅·종단 OnImpact 훅(비-AOE 게이팅). FireMode 프래그먼트 시임=`UFPSRWeaponFragment::ModifyFireMode`+`UFPSRFragment_BurstFire`, `RecomputeResolved`서 적용, `ActiveFragments` ReplicatedUsing+MarkResolvedDirty. 발사체 필드 EditCondition 완화(근접·차지레이저 외). `IsDataValid` 발사체검증=FireAbility(Projectile GA)기준+예산경고(FR×Life×Pellet>12).
+> **콘텐츠(커밋 `674649a`, 헤드리스 커맨드릿, validate-data exit0·0err)**: Rifle/LMG/Shotgun→Projectile GA+BP_Bullet(고속·단수명). Sniper/Bazooka 기존 투사체 유지. 신규 `DA_Fragment_Rifle_Burst`·`DA_CardModifiers_BurstFire`(→Rifle.UnlockableFeatures)·`DA_Weapon_SMG`(FR16/Dmg7/Mag40)·`DA_CardUnlock_SMG`(+로드아웃). 삭제=BurstRifle/Grenade DA+언락카드2+전용고아5(프리뷰메시2·사운드2·BP_Grenade); 공유자산(BP_Rocket·총구화염·크로스헤어) 보존.
+> **문서**: `CombatWeaponCard.md §2-4/§2-5`·`Performance.md §5`(발사체 예산 갱신) 반영.
+> **남은 검증(사용자)**: PIE 스모크 — 각 무기 발사/명중/처치, 샷건 펠릿, Burst 언락 후 점사 동작, ADS(발사체=콘), 발사체 카운트 피크(`GetActiveCount`, 캡64 여유). 통과 후 Codex 머지게이트→`--no-ff` 머지→origin push(질문). ⚠️원격클라 총알 시각예측=미구현(A3 후속, 호스트/싱글 즉발).
+> **미커밋 사용자 WIP**(무관, 보존): MI_XH_Cross·BP_EnemyMeleeBase·L_Sandbox·WBP_*(4)·Assets/Font.
+
 ## 🔔 핸드오프 (2026-07-08 j · **P2 ③b 미션 튜닝 콘텐츠 저작 + fallback 필드 제거 → main 머지. P2 ③(a·b·c)·①② 전부 완료**) — 🎯 **③b 콘텐츠(미션 DA 7종 Tuning 저작·PIE 통과) + fallback 제거(코드·빌드·테스트·Codex 클린·`--no-ff` 머지) 완료. 동작 무변경.**
 > **머지**: ③b 콘텐츠 = main `1c47cbd`(미션 DA 7종 Tuning). fallback 제거 = `phase/mission-tuning-fallback-cleanup`→main `--no-ff`(`a236e23`+`3231eda`). 브랜치 삭제 완료. **origin push 완료**(2026-07-08 사용자 '완전 마무리' 요청, main→origin/main FF).
 > **③b 저작**: 7 미션 DA에 `UFPSRMissionTuning_*` Instanced 저작 — 각 미션 BP CDO 현재값 그대로 이관(**HoldZone ZoneRadius=2000**[BP 오버라이드]·CollectOrbs/CarryNoHit **OrbClass=BP_Mission_Orb**·DefeatFleeing **TargetClass=BP_FleeTarget** 배선 복사; 나머지=C++ 기본값과 동일). 검증: IsDataValid VALID×7·디스크 기록·**사용자 PIE 통과**(HoldZone 반경/오브·타겟 스폰 이전과 동일).

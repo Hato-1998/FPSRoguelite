@@ -87,7 +87,8 @@
 ### 2-4. 무기 시스템
 - 최대 **3개 동시 보유** (기본 1 + 추가 2). 5렙/20렙 등에 무기 카드 등장
 - **무기 버림·교체 시스템 없음**(확정 2026-05-30) — 기존 무기로 시작해 슬롯 확장으로만 추가(최대 3). 환불/카드치환 보완 불필요
-- **아키타입 7종**: 연사총(FullAuto) / 점사총(Burst) / AOE(바주카·유탄) / 근접(Melee) / 차징 관통 레이저(ChargeLaser) / 단발 스나이퍼(Sniper) / 샷건(Shotgun)
+- **아키타입**: 연사총(FullAuto) / AOE(바주카) / 근접(Melee) / 차징 관통 레이저(ChargeLaser) / 단발 스나이퍼(Sniper) / 샷건(Shotgun). `EFPSRWeaponArchetype`의 `Burst`는 **직렬화 보존용으로만 잔존**(전용 무기 없음 — 아래 개편 참조).
+- **⚠️ 무기 개편 (2026-07-08)**: ① **점사총(Burst) 전용 무기 제거** → **점사는 라이플의 언락 프래그먼트**(`UFPSRFragment_BurstFire`, `Rifle.UnlockableFeatures`, 미션 언락)로 이동. 라이플 기본은 연사. ② **유탄 발사기 제거**(바주카는 유지). ③ **기관단총(SMG) 추가**(FullAuto·연사↑↑·데미지↓·투사체). ④ **전달 방식 = 발사체 통일**: **차지레이저(히트스캔)·근접 외 전 무기가 발사체**(연사총 포함). 발사체는 히트스캔과 데미지/약점/크리/처치/프래그먼트(OnHitActor·OnImpact) **패리티**. 연사 무기는 고속·단수명(§5 발사체 예산). **전달 방식 = 무기 DA `FireAbility`(GA)가 결정**(아키타입과 직교): Projectile GA / ChargeLaser GA / Melee GA.
 - **무기별 스탯 = WeaponInstance 스탯 블록(리플리케이트 struct, `FFPSRWeaponStatBlock`)**, 캐릭터 ASC와 분리
   - 스탯 예: Damage, FireMode, FireRate, BurstCount, Range, MagSize, Spread/Bloom, Recoil, MeleeRadius (+ 후속: ReloadTime, ProjectileSpeed, Pierce, AOERadius, ChargeTime, PelletCount). **예비 탄약은 무한**(ReserveAmmo 미사용 — §2-4-2)
 - **ADS**: 무기 DA에 `bHasADS`+FOV (스나이퍼/차징=정밀, 연사/샷건=약함, 근접=없음)
@@ -136,6 +137,7 @@
 - **구현 상태**: P1.5-A에서 FullAuto hold-to-fire 루프 + 반동(카메라 킥) + 확산/블룸을 `UFPSRWeaponFireComponent`에 구현. 탄약(MagSize/재장전, 예비 무한)/ADS는 P1.5-B 예정
 
 ### 2-5. 시작 캐릭터
-- 3종: **연사총 / 점사총 / 근접칼**
+- 시작 무기 = **로드아웃 풀(`DA_LoadoutPool.SelectableWeapons`)에서 1택**(로비 선택). **현재 = 연사총(라이플) / 기관단총(SMG)**(2026-07-08 개편: 점사총 전용 무기 제거→점사는 라이플 언락 프래그먼트로 대체, SMG 추가). 근접칼·기타 무기는 언락 카드(`UCardEffect_GrantWeapon`) 경로(현 풀 미배선=휴면).
+- ~~3종: 연사총 / 점사총 / 근접칼~~ (2026-07-08 개편으로 대체)
 - `UHeroDataAsset`(PawnData 개념) Base 구조 — DefaultWeapon, BaseAttribute, PassiveAbilitySet, FP팔/3P바디 메시
 - 데이터 드리븐. 고유 패시브가 무거워지면 그때만 GameFeature 플러그인으로 승격
