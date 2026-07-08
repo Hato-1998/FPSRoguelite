@@ -9,6 +9,7 @@
 class UGameplayAbility;
 class UFPSRCardDataAsset;
 class AFPSRProjectile;
+class UCRRecoilPattern;
 class USkeletalMesh;
 class UStaticMesh;
 class UAnimInstance;
@@ -63,6 +64,12 @@ public:
 	/** Projectile actor class (AOE archetypes). Content assigns a BP with mesh/VFX; null falls back to AFPSRProjectile base. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|발사체", meta = (DisplayName = "발사체 클래스"))
 	TSubclassOf<AFPSRProjectile> ProjectileClass;
+
+	/** CrystalRecoil recoil pattern (per-shot coordinate deltas + recovery tuning) applied by UFPSRRecoilComponent while
+	 *  this weapon is equipped (P1 adapter). Null = no pattern recoil — melee (no recoil) and ChargeLaser (uses its own
+	 *  charge-ramp recoil in the fire component) leave this unset. Authored in the CrystalRecoil pattern editor. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|반동", meta = (DisplayName = "반동 패턴(CrystalRecoil)"))
+	TObjectPtr<UCRRecoilPattern> RecoilPattern;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|카드", meta = (DisplayName = "무기 카드(레벨업 풀)"))
 	TArray<TObjectPtr<UFPSRCardDataAsset>> WeaponCards;

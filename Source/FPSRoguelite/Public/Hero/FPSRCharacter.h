@@ -14,6 +14,7 @@ class USkeletalMeshComponent;
 class UInputAction;
 class UFPSRWeaponInventoryComponent;
 class UFPSRWeaponFireComponent;
+class UFPSRRecoilComponent;
 class UFPSRWeaponDataAsset;
 class UMaterialInterface;
 class UFPSRPlayerFeedbackComponent;
@@ -234,6 +235,11 @@ protected:
 
 	UPROPERTY(VisibleAnywhere, Category = "FPSR|Weapon")
 	TObjectPtr<UFPSRWeaponFireComponent> WeaponFire;
+
+	/** Owner-local recoil + heat-spread driver (CrystalRecoil adapter, P1). Driven by WeaponFire (SetRecoilPattern on
+	 *  equip, StartShooting/ApplyShot on fire). Applies to the controller so the server fire trace matches on-screen recoil. */
+	UPROPERTY(VisibleAnywhere, Category = "FPSR|Weapon")
+	TObjectPtr<UFPSRRecoilComponent> RecoilComponent;
 
 	/** Co-op DBNO revive (U9 §2-13): server-authoritative proximity revive; replicates ReviveProgress for the HUD gauge. */
 	UPROPERTY(VisibleAnywhere, Category = "FPSR|Revive")

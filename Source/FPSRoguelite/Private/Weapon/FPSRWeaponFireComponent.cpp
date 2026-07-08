@@ -7,6 +7,7 @@
 #include "Weapon/FPSRCrosshairStyleDataAsset.h"
 #include "Weapon/FPSRWeaponTypes.h"
 #include "Weapon/FPSRWeaponFragment.h"
+#include "Weapon/FPSRRecoilComponent.h"
 #include "Hero/FPSRCharacter.h"
 #include "Core/FPSRGameState.h"
 #include "Core/FPSRLogChannels.h" // LogFPSR (was relied on transitively via unity — make the dependency explicit, IWYU)
@@ -66,6 +67,34 @@ void UFPSRWeaponFireComponent::NotifyPlayerPitchCompensation(float DownAmount)
 UFPSRWeaponInventoryComponent* UFPSRWeaponFireComponent::GetInventory() const
 {
 	return GetOwner() ? GetOwner()->FindComponentByClass<UFPSRWeaponInventoryComponent>() : nullptr;
+}
+
+UFPSRRecoilComponent* UFPSRWeaponFireComponent::ResolveRecoil()
+{
+	AActor* Owner = GetOwner();
+	if (!Owner)
+	{
+		return nullptr;
+	}
+	if (!CachedRecoil)
+	{
+		CachedRecoil = Owner->FindComponentByClass<UFPSRRecoilComponent>();
+	}
+	// Bind the recoil to the OWNING controller once it exists (explicit target so a listen-server host's own recoil
+	// component targets its own PC, not the plugin's GetFirstPlayerController fallback). Retried until the controller
+	// is available (possession can lag component init).
+	if (CachedRecoil && !bRecoilTargetSet)
+	{
+		if (const APawn* OwnerPawn = Cast<APawn>(Owner))
+		{
+			if (AController* OwningController = OwnerPawn->GetController())
+			{
+				CachedRecoil->SetTargetController(OwningController);
+				bRecoilTargetSet = true;
+			}
+		}
+	}
+	return CachedRecoil;
 }
 
 float UFPSRWeaponFireComponent::ComputeSpreadDegrees(const FFPSRWeaponStatBlock& Stats, float Bloom, bool bAiming)
@@ -203,6 +232,17 @@ void UFPSRWeaponFireComponent::StartFiring()
 		BurstShotsRemaining = FMath::Max(1, Stats.BurstCount);
 	}
 
+	// CrystalRecoil (P1): begin a new recoil sequence on trigger press (resets the pattern shot index + enables the
+	// recoil tick) for pattern weapons. ChargeLaser (bespoke charge-ramp recoil) and melee (no recoil) don't drive it.
+	if (WeaponSource && WeaponSource->GetArchetype() != EFPSRWeaponArchetype::Melee
+		&& WeaponSource->GetArchetype() != EFPSRWeaponArchetype::ChargeLaser)
+	{
+		if (UFPSRRecoilComponent* Recoil = ResolveRecoil())
+		{
+			Recoil->StartShooting();
+		}
+	}
+
 	// Immediate first shot on press.
 	FireOneShot();
 	if (Stats.FireMode == EFPSRFireMode::Burst && BurstShotsRemaining > 0)
@@ -230,6 +270,17 @@ void UFPSRWeaponFireComponent::OnWeaponEquipped(float EquipCooldown)
 	bChargeSequenceActive = false; // drop any in-progress ChargeLaser recoil ramp on a weapon swap
 	SpinupElapsed = 0.0f; // drop spin-up ramp on weapon swap (no spin banking across equip)
 	NextFireReadyTime = GetWorld()->GetTimeSeconds() + FMath::Max(0.0f, EquipCooldown);
+
+	// CrystalRecoil (P1): bind the equipped weapon's recoil pattern. A null pattern (melee / ChargeLaser) is ignored by
+	// the plugin's SetRecoilPattern — those weapons never call ApplyShot, so a prior weapon's pattern is never applied
+	// (FireOneShot also gates ApplyShot on the equipped weapon actually having a pattern).
+	if (UFPSRRecoilComponent* Recoil = ResolveRecoil())
+	{
+		const UFPSRWeaponInventoryComponent* Inv = GetInventory();
+		UFPSRWeaponInstance* Inst = Inv ? Inv->GetCurrentInstance() : nullptr;
+		const UFPSRWeaponDataAsset* Weapon = Inst ? Inst->GetSource() : nullptr;
+		Recoil->SetRecoilPattern(Weapon ? Weapon->RecoilPattern : nullptr);
+	}
 }
 
 void UFPSRWeaponFireComponent::FireOneShot()
@@ -341,8 +392,21 @@ void UFPSRWeaponFireComponent::FireOneShot()
 		}
 		else
 		{
-			if (KickPitch != 0.0f) { PendingRisePitch += KickPitch; }
-			if (KickYaw != 0.0f) { PendingRiseYaw += KickYaw; } // smoothed in Tick (was instant) to avoid jitter
+			// CrystalRecoil (P1): pattern weapons apply their per-shot recoil through the recoil component (owner-local,
+			// controller-driven so the server fire trace matches). Strength = ADS/hip vertical scale x the recoil-down
+			// CARD scale (resolved vs base RecoilVertical) — the casual-ization levers keep working WITHOUT mutating the
+			// shared pattern asset (§2-4-2). The authored pattern IS the spray now; the legacy sin ComputeShotRecoilDelta
+			// above only feeds the ChargeLaser ramp branch. No authored pattern = no recoil (guarded + plugin null-check).
+			if (Weapon->RecoilPattern)
+			{
+				if (UFPSRRecoilComponent* Recoil = ResolveRecoil())
+				{
+					const float BaseRecoilVertical = Weapon->BaseStats.RecoilVertical;
+					const float CardScale = (BaseRecoilVertical > KINDA_SMALL_NUMBER) ? (Stats.RecoilVertical / BaseRecoilVertical) : 1.0f;
+					Recoil->SetRecoilStrength(FMath::Max(0.0f, CardScale * VScale));
+					Recoil->ApplyShot();
+				}
+			}
 		}
 		++ShotsFiredThisSpray;
 

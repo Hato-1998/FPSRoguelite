@@ -25,7 +25,8 @@ public class FPSRoguelite : ModuleRules
 			"UMG",
 			"DeveloperSettings",
 			"OnlineSubsystem",
-			"OnlineSubsystemUtils"
+			"OnlineSubsystemUtils",
+			"CrystalRecoil"
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[]

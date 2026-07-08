@@ -10,6 +10,7 @@ class UFPSRWeaponInstance;
 class UTexture2D;
 class UMaterialInterface;
 class UCameraComponent;
+class UFPSRRecoilComponent;
 
 /** Owning-client component that drives fire cadence (fire rate / fire mode), camera recoil, and spread bloom.
  *  Each shot activates the equipped weapon's fire ability (trace + server-authoritative damage). */
@@ -81,6 +82,10 @@ public:
 protected:
 	void FireOneShot();
 
+	/** Lazily resolve the owner's CrystalRecoil-adapter recoil component and bind its target controller to the
+	 *  owning controller once (P1). Owner-local; returns null off the owning client / before the component exists. */
+	UFPSRRecoilComponent* ResolveRecoil();
+
 	/** True when the equipped weapon has ammo and is not reloading. */
 	bool CanFire() const;
 
@@ -100,6 +105,9 @@ protected:
 	bool bIsAiming = false;
 	TObjectPtr<UCameraComponent> CachedCamera; // resolved lazily for ADS FOV
 	float DefaultFOV = 0.0f;                    // captured from the camera on first resolve
+
+	TObjectPtr<UFPSRRecoilComponent> CachedRecoil; // CrystalRecoil-adapter recoil driver, resolved lazily (P1)
+	bool bRecoilTargetSet = false;                 // SetTargetController(owning controller) done once
 
 	// --- Recoil state (local feel only) ---
 	float RecoilDebtPitch = 0.0f;       // up-kick owed for downward recovery (raw input units)
