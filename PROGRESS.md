@@ -4,7 +4,16 @@
 > **작업 단계를 끝낼 때마다, 그리고 중단 전 반드시 이 파일을 갱신하고 커밋한다.**
 > 확정 설계·기획·코드구조·규칙은 `Game.md`(**SSOT 허브** → 도메인별 `Docs/SSOT/*.md`, 작업별 라우팅은 허브 §0-1), **완료 작업 상세는 `git log --oneline`**. 여기엔 *무엇을 했는지*만 요약한다.
 
-**최종 갱신: 2026-07-07**
+**최종 갱신: 2026-07-08**
+
+## 🔔 핸드오프 (2026-07-08 j · **P2 ③b 미션 튜닝 콘텐츠 저작 + fallback 필드 제거 → main 머지. P2 ③(a·b·c)·①② 전부 완료**) — 🎯 **③b 콘텐츠(미션 DA 7종 Tuning 저작·PIE 통과) + fallback 제거(코드·빌드·테스트·Codex 클린·`--no-ff` 머지) 완료. 동작 무변경.**
+> **머지**: ③b 콘텐츠 = main `1c47cbd`(미션 DA 7종 Tuning). fallback 제거 = `phase/mission-tuning-fallback-cleanup`→main `--no-ff`(`a236e23`+`3231eda`). **미푸시(로컬 main만)·브랜치 삭제 완료**.
+> **③b 저작**: 7 미션 DA에 `UFPSRMissionTuning_*` Instanced 저작 — 각 미션 BP CDO 현재값 그대로 이관(**HoldZone ZoneRadius=2000**[BP 오버라이드]·CollectOrbs/CarryNoHit **OrbClass=BP_Mission_Orb**·DefeatFleeing **TargetClass=BP_FleeTarget** 배선 복사; 나머지=C++ 기본값과 동일). 검증: IsDataValid VALID×7·디스크 기록·**사용자 PIE 통과**(HoldZone 반경/오브·타겟 스폰 이전과 동일).
+> **fallback 제거(코드)**: 베이스 `template<typename T> GetTuning<T>()` 추가 = 실린 Tuning or **튜닝 서브클래스 CDO 기본값(단일 출처, null 체크 제거)**. 7 액터 EditDefaultsOnly fallback UPROPERTY 삭제 + 읽기 지점 `T?T->X:X`→`GetTuning<T>().X`. Eff* 캐시·GetExpectedTuningClass·ResolveZoneRadius 콘솔 오버라이드 보존. DA IsDataValid 경고문/주석 stale 정정. **검증: -NoXGE 빌드 Succeeded·자동테스트 `FPSRoguelite.Mission.Tuning` Success·Codex 머지게이트 0건**. ⚠️미션 BP CDO(BP_Mission_HoldZone 등)의 삭제된 필드 오버라이드는 死값(UE 로드시 무시, 무해).
+> **② 카드 누수 수정(🔒사용자결정=전역서 제거만)**: `DA_Character_CardPool.Cards`에서 `DA_Card_FireRate_ThisWeapon` 중복 제거(이미 6무기 WeaponCards 배선=Bazooka/BurstRifle/Grenade/Knife/Rifle/Shotgun; ChargeLaser/LMG/Sniper 의도적 제외). IsDataValid **INVALID→VALID**. **디스크 저장했으나 미커밋**(카드풀=사용자 WIP 얽힘, 사용자 검토 후 커밋).
+> **③c 타임라인 드래그 UX**: 사용자 PIE **"정상작동"** 확인.
+> **미커밋 사용자 WIP(손대지 않음)**: `DA_Character_CardPool`(②수정 포함)·`DA_LoadoutPool`·`DA_Weapon_Rifle`·`BP_FPSRPlayer`·`L_Sandbox`·MAK12 메시/애니 8종.
+> **다음**: 마스터 로드맵(`Docs/TaskPrompts_Master.md`) 잔여 유닛. 카드풀·WIP 커밋은 사용자 판단.
 
 ## 🔔 핸드오프 (2026-07-08 i · **P2 ③c 미션 스케줄 타임라인 인터랙티브 편집 → main 머지. 남은 = ③b 콘텐츠(미션DA에 Tuning 저작+PIE)만**) — 🎯 **③c(에디터) 구현·빌드(28액션)·자동화 DataEditor5/5·Codex게이트(P2 1건 교정)·`--no-ff` 머지 완료. P2 ①②③(a·c) 코드 전부 완료 — 남은 건 ③b 콘텐츠 저작뿐.**
 > **③c 머지**: `phase/editor-tooling-p2c-timeline` → main `--no-ff`. 커밋 `7a0b715`(③c)+`65c0b60`(Codex P2: 좁은 윈도우 가장자리 히트테스트). **미푸시(로컬 main만)**.
