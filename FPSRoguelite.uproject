@@ -80,6 +80,10 @@
 			"Enabled": true
 		},
 		{
+			"Name": "CrystalRecoil",
+			"Enabled": true
+		},
+		{
 			"Name": "VibeUE",
 			"Enabled": true,
 			"Optional": true
