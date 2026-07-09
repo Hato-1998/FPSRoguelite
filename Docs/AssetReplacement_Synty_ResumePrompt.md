@@ -1,7 +1,16 @@
 # B — Synty 에셋 전체교체 (Path A) 새 세션 실행 프롬프트 (복붙용)
 
 > **근거**: 컨셉 피벗(2026-07-03) 에셋 방향 = Path A 통일 로우폴리 Synty(`Roadmap §8`·`Concept §1-C-9`). 검증된 슬롯별 추천 = **Artifact 구매 플랜**(`https://claude.ai/code/artifact/c9e1de4e-6766-49b0-8abd-c2cba057efc7`, 없으면 WebFetch로 열람) + 19-에이전트 소스 검증 서베이.
-> **디렉터 확정(2026-07-05)**: 획득=**SyntyPass**(상용 라이선스 확인됨) / **적 교체 확정**(Paragon→Synty, 교체 완료 후 Paragon 제거) / 총기=Infima 유지 / 플레이어(BroBot)=별도 트랙 / UI·오디오=별도 트랙(Synty 미커버).
+> **디렉터 확정(2026-07-05, 일부 폐기)**: 획득=**SyntyPass**(상용 라이선스 확인됨). ~~총기=Infima 유지~~ · ~~플레이어(BroBot)~~ · ~~UI=Synty 미커버~~ 는 아래 2026-07-10 재확정으로 **대체됨**.
+>
+> **🔄 재확정 (2026-07-10, 사용자 결정 — 아트 스택 대폭 개편, 조사 2회 워크플로 근거)**:
+> - **아트 = 전체 셀/툰(애니) 통일** — 월드·무기·캐릭터를 scene-wide 셀 아웃라인으로 묶는다. ⚠️ **렌더러 미정** — 결과물 시각검증 후 결정(후보 = Stylized Rendering System / Celes Anime Shader).
+> - **무기 = Synty POLYGON Military Pack 모듈 백본 + 사이버 리스킨**(Infima **교체** — 사이버펑크 부적합). 근거: Synty 사이버펑크 무기팩(Sci-Fi Worlds/Cyber City)은 전부 **통짜 융합 메시**이고, U15 모듈파츠(리시버/바렐/탄창/사이트)에 1:1 매핑되는 건 **Military(파츠92+어태치84+프리셋14)·Apocalypse뿐**. ChargeLaser(에너지)=Cyber City **Laser Gun 통짜 1개**로 보충.
+> - **캐릭터(플레이어/팀원) = 애니 셀 'Anime Girl Blu' 리스킨**. **적 스웜 = 별도 저코스트 트랙**(저폴리 VAT — **애니 캐릭터 리스킨 금지**, 제1원리 per-actor 최소). 엘리트/보스만 고피델리티 검토 가능.
+> - **FP 팔 = 애니 캐릭터(Blu) 팔 추출 + PWAS**(Procedural Weapon Animation System, **Fab 유료 ~$30-50**, UE5.1-5.7 네이티브·무기 비종속: Synty 무기 스태틱 메시에 LeftHandIK/Muzzle 소켓만 붙이면 반동/스웨이/ADS 절차 생성). 로봇팔(Cybernetic Arms) 폐기.
+> - **UI = Synty INTERFACE Sci-Fi Soldier HUD + 아이콘**(네이티브 UE5.3+ UMG 위젯 ~250·아이콘 600+, Cyber City/Space서 렌더=아트 일치; **메뉴 팩은 Unity 전용** → 스프라이트로 UMG 재작성). 기존 "UI=Synty 미커버" **정정**.
+> - **VFX = Synty POLYGON Particle FX Pack + Epic Niagara Examples(무료·UE5.7)** 보강. **오디오 = Synty 밖**(Sonniss GDC 무료·Kenney UI 무료·Fab Sci-Fi Weapons/Explosion·사이버펑크 음악).
+> - ⚠️ **제1원리 리스크(파일럿서 실측)**: ①셀 아웃라인 = **post-process/스크린스페이스**(inverted-hull 메시 아웃라인 금지 = 스웜 드로우콜 2배) ②셀셰이더 × VAT 스웜 정합 ③애니 고폴리를 200-300 스웜에 리스킨 금지 ④Synty 5.4→5.7 마이그레이션(스태틱+아틀라스라 저위험).
 > **어디서**: 활성 코드 클론 `E:\Git_Project\FPSRoguelite`(no-2). 이 문서/PM 클론(FPSRoguelite2) 아님. 에셋·PIE 작업이라 LFS 대용량.
 > 아래 코드블록을 새 세션에 붙여넣는다.
 
@@ -12,7 +21,7 @@ Game.md + PROGRESS.md 먼저 읽어. 그다음 이 계획의 근거를 읽는다
 - Docs/SSOT/Performance.md §5(적 200-300 예산·U7 플로우필드 ECC_WorldStatic 의존)
 - Synty 추천 리스트업(Artifact: https://claude.ai/code/artifact/c9e1de4e-6766-49b0-8abd-c2cba057efc7 — 슬롯별 검증 톱픽/가용성/가격)
 
-[작업] Path A(통일 로우폴리 Synty POLYGON)로 환경·적·프롭을 전체교체. 총기=Infima 유지, 플레이어(BroBot)·UI·오디오=별도 트랙(건드리지 않음). SyntyPass로 취득.
+[작업] (⚠️ 2026-07-10 재확정 — 위 헤더 블록 우선) 전체 셀/툰(애니) 통일 룩으로 아트 스택 개편: 환경=Synty Cyber City · 무기=Synty Military 모듈+사이버 리스킨(Infima 교체) · 캐릭터=애니 'Blu' 리스킨(플레이어/팀원) · 적=별도 저코스트 VAT · FP팔=Blu 추출+PWAS(Fab 유료) · UI=Synty Soldier HUD · VFX=Particle FX+Epic Niagara · 오디오=Synty 밖 · 렌더러=미정(결과물 검증). SyntyPass 보유.
 
 - 플랜모드 우선·승인 후 진행. 구현=Sonnet 위임 가능, 임포트/파일럿 판정=Opus 직접.
 - ⚠️ 통과 전엔 커밋 금지(파일럿은 throwaway). 채택분만 LFS 커밋(사용자 확인 후).
@@ -28,7 +37,8 @@ Game.md + PROGRESS.md 먼저 읽어. 그다음 이 계획의 근거를 읽는다
 - Map 1 사이버펑크 시티 = POLYGON Sci-Fi Cyber City / Map 2 숲 = POLYGON Nature Biomes S1(+Nature Pack) / Map 3 우주 = POLYGON Sci-Fi Space. (Artifact 톱픽.)
 - 각 맵은 #3 다중맵의 스트림 대상 레벨이 됨(Docs/MultiMap_Tier0_ResumePrompt.md와 합류) — 단, B는 에셋만, 다중맵 코드는 A(#3 Tier 0). B 단계에선 개별 맵을 authored 레벨로 구성.
 
-[Step 3 — 적 교체 (Paragon → Synty) ⚠️ U20 VAT 베이크 전에]
+[Step 3 — 적 교체 (별도 저코스트 트랙) ⚠️ U20 VAT 베이크 전에]
+- ⚠️ 2026-07-10: 적=**애니 'Blu' 리스킨 금지**(제1원리). 저폴리 VAT 저코스트 유지. 아래 Synty City Zombies 후보는 **저폴리 스웜용으로만** 검토 — 애니 'Blu'는 플레이어/팀원 전용.
 - 스웜 본체 = POLYGON City Zombies(50종, 공유 UE4-마네킹 스켈). 우주맵 적 = Sci-Fi Space 동봉(에일리언/병사/로봇). 숲 크리처/미니보스 = Fantasy Rivals(Fab 미이관=Epic Vault/Store).
 - **핵심 이점**: 전부 공유 UE4-마네킹 스켈 → Mixamo→마네킹→Synty 리타겟 1회로 **하나의 VAT/애니셋이 전 호드 구동**(제1원리 cheap-per-actor). ⚠️ 비균일 바디(Fantasy Rivals 골렘 등)는 개별 애니셋.
 - ⚠️ **시퀀싱**: U20 VAT 베이크 콘텐츠 저작을 **이 교체 후**에 해야 함(지금 Paragon으로 베이크하면 재베이크). 진행 중 애니 콘텐츠 트랙과 조율.
