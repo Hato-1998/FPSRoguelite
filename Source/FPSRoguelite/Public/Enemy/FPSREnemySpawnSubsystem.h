@@ -126,6 +126,14 @@ public:
 	/** Drain-clock elapsed clamp: Clamp(RawElapsed, 0, SpawnIntervalSeconds * DrainDtClampTicks) — bounds freeze-burst accrual (gate #4). */
 	static float ClampDrainDt(float RawElapsed, float SpawnIntervalSeconds);
 
+	/** U (P-H) net-cull radius (cm) for the unified multimap field, applied UNIFORMLY to every enemy at acquire. A symmetric
+	 *  distance cull can't do per-slot "seam-only" relevancy without RepGraph (deferred); a uniform engagement/weapon-range
+	 *  bubble — capped to the slot footprint — never undersizes a cross-slot chaser and bounds per-client relevancy. Pure /
+	 *  unit-testable (FPSRoguelite.Enemy.NetCull): R = max(WeaponRangeCm, min(WeaponRangeCm + SeamMarginCm, MaxSlotDiagonalCm +
+	 *  SeamMarginCm)). WeaponRangeCm is BOTH the bubble base and the shoot-ability floor (>= max authored weapon range, so an
+	 *  in-range enemy is always replicated); the footprint cap keeps R off the whole 3x3 grid and scales it with content. */
+	static float ComputeUnifiedNetCullRadius(float MaxSlotDiagonalCm, float WeaponRangeCm, float SeamMarginCm);
+
 private:
 	/** Director tick: spawn/release enemies to maintain TargetAliveCount. */
 	void TickDirector();
@@ -209,6 +217,16 @@ private:
 	static constexpr float TierS0RadiusSq = 1500.0f * 1500.0f; // S0: full update
 	static constexpr float TierS1RadiusSq = 3500.0f * 3500.0f; // S1
 	static constexpr float TierS2RadiusSq = 6000.0f * 6000.0f; // S2 (beyond = S3)
+
+	// --- Net-cull relevancy (multimap U P-H, server-only). In the unified field the swarm's net-cull radius is sized to an
+	//     engagement/weapon-range bubble capped to the slot footprint (ComputeUnifiedNetCullRadius) and applied UNIFORMLY at
+	//     acquire — a symmetric distance cull can't do per-slot seam-only relevancy without RepGraph (deferred). PIE-tunable. ---
+	/** Net-cull bubble base AND shoot-ability floor (cm): an enemy the server hitscan can reach is always replicated.
+	 *  Contract: >= the MAX authored weapon range (= the default hitscan Range, FPSRWeaponTypes.h Range=10000). Raise if a
+	 *  longer-range weapon is added, else a distant-but-in-range enemy would be culled on the client (alive-but-unshootable). */
+	static constexpr float NetCullWeaponRangeCm = 10000.0f; // cm (100m)
+	/** Across-seam lookahead (cm) added to the bubble so a cross-door chaser replicates a moment before it reaches the player. */
+	static constexpr float NetCullSeamMarginCm = 4000.0f; // cm (40m)
 
 	// Separation (anti-clumping) tuning. Cell size for the spatial hash == SeparationRadius so a 3x3
 	// neighbor scan covers the full radius.

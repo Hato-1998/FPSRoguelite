@@ -52,6 +52,11 @@ public:
 	 *  single-map run stays a strict no-op (no ack seal, combat allow-all) exactly as before P-G. Server-authoritative. */
 	const UFPSRFlowFieldComputer* GetMultiSlotUnifiedComputer() const { return bUnifiedMultiSlot ? UnifiedComputer : nullptr; }
 
+	/** U (P-H): the largest slot footprint DIAGONAL (cm, XY) across all baked slots — the footprint cap input for the swarm
+	 *  net-cull sizing (UFPSREnemySpawnSubsystem::ComputeUnifiedNetCullRadius), so the uniform net-cull radius never spans the
+	 *  whole 3x3 grid. 0 with no unified multi-slot field (single-map). Cached at bake. Server-authoritative. */
+	float GetMaxSlotFootprintDiagonal() const { return MaxSlotFootprintDiagonalCm; }
+
 	/** U P-D: true if A and B are in the same open-grid connected component of the UNIFIED field (an open door connects them;
 	 *  a closed door/wall separates them). False when there is no unified field (single-map) — callers then keep same-map
 	 *  behavior (no regression). Server-authoritative, O(1) after RunBFS. */
@@ -135,6 +140,10 @@ private:
 	 *  falling back to the box's world-min Z. */
 	float DetectFloorZForVolume(UWorld& InWorld, const AFPSRFlowFieldBoundsVolume& Volume) const;
 
+	/** U (P-H): XY footprint diagonal (cm) of a slot's world AABB (0 if the box is invalid) — the net-cull footprint cap
+	 *  accumulator (max'd into MaxSlotFootprintDiagonalCm at each slot bake). */
+	static float SlotFootprintDiagonalXY(const FBox& SlotBox);
+
 	/** U continuous field. P-G: ALWAYS built on the server — a real bUnifiedExtent grid (all MapId'd slots baked in), OR a
 	 *  single degenerate world-trace grid for a plain single-map. Swarm flow + combat connectivity sample THIS. */
 	UPROPERTY(Transient)
@@ -148,6 +157,10 @@ private:
 	 *  per-map registry as the source for FindMapIdForLocation / IsLocationInMap (which slot a location is in). Empty for a
 	 *  single-map degenerate grid (one map, unset). POD member (no GC / UPROPERTY); Reset() in Deinitialize. Server-only. */
 	TMap<FGameplayTag, FBox> SlotBounds;
+
+	/** U (P-H): cached max slot footprint diagonal (cm, XY) over SlotBounds — the net-cull footprint cap input. Recomputed
+	 *  (max) when a slot bakes in (BuildUnifiedField / BakeDiscoveredMap). 0 for a single-map degenerate grid. Server-only. */
+	float MaxSlotFootprintDiagonalCm = 0.0f;
 
 	FTimerHandle RecomputeTimerHandle;
 

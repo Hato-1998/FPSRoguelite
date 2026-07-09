@@ -122,11 +122,19 @@ public:
 	void ApplyKnockback(const FVector& Velocity);
 
 	/** The map this enemy belongs to (multimap Tier 0). Server-only (not replicated — cross-map relevancy is handled by
-	 *  NetCullDistance, not this tag). Assigned by the spawn subsystem from the selected spawn point at spawn, and refreshed
-	 *  by the movement pass (AABB) when the enemy crosses a map boundary. Unset = the Default single-map. Used to gate the
-	 *  enemy's nearest-player target / flow sample / attack to same-map players + the cross-map combat guard. */
+	 *  the distance net-cull (NetCullRadius / ApplyNetCullRadius), not this tag). Assigned by the spawn subsystem from the
+	 *  selected spawn point at spawn, and refreshed by the movement pass (AABB) when the enemy crosses a map boundary.
+	 *  Unset = the Default single-map. Used to gate the enemy's nearest-player target / flow sample / attack to same-map
+	 *  players + the cross-map combat guard. */
 	const FGameplayTag& GetMapId() const { return MapId; }
 	void SetMapId(const FGameplayTag& InMapId) { MapId = InMapId; }
+
+	/** Server (U P-H): set the actor's net-cull radius (cm) at spawn. In the unified multimap field the spawn subsystem calls
+	 *  this with the footprint-derived UNIFORM radius (UFPSREnemySpawnSubsystem::ComputeUnifiedNetCullRadius); a single-map run
+	 *  never calls it, so the ctor default (NetCullRadius) stands (byte no-regression). Applied AFTER Activate wakes net
+	 *  dormancy — the default net driver reads NetCullDistanceSquared live each relevancy pass, so a per-acquire change takes
+	 *  effect. Clamps ONLY a 0/negative/NaN caller (MinNetCullRadiusCm); the gameplay floor is owned by the compute helper. */
+	void ApplyNetCullRadius(float RadiusCm);
 
 	// --- Front-chase (multimap U P-D) — server-only, NOT replicated. The movement pass tags an enemy chasing a player in a
 	//     DIFFERENT open-grid-connected slot (through an opened door) via the unified flow field, within the front range.
@@ -244,12 +252,23 @@ protected:
 	bool bFrontSpawned = false;
 	float FrontCreditExpireTime = -1.0f;
 
-	/** Net-cull radius (cm) applied to NetCullDistanceSquared in the ctor (multimap Tier 0, Codex R5). Enemies spawn into
-	 *  the PERSISTENT level (always level-relevant to every connection), so distance is the SOLE lever that culls a
-	 *  cross-map enemy from a player in another sublevel. Sized >= same-map engagement range and < the inter-map world
-	 *  offset (content contract: offset >= max(NetCull, weapon range, audio, separation)). Designers can override the
-	 *  actor's NetCullDistanceSquared per BP. Boss is separately bAlwaysRelevant (must always replicate). */
-	static constexpr float NetCullDistance = 20000.0f; // cm (200m)
+	/** Server-tunable net-cull radius (cm) written to NetCullDistanceSquared in the ctor (single-map / archetype fallback).
+	 *  Enemies spawn into the PERSISTENT level (always level-relevant to every connection), so distance is the SOLE lever that
+	 *  culls a swarm enemy from a distant player (RepGraph — spatial grid relevancy — is the production fix, a separate phase).
+	 *  In the U unified multimap field the spawn subsystem OVERRIDES this per-acquire with a footprint-derived uniform radius
+	 *  (UFPSREnemySpawnSubsystem::ComputeUnifiedNetCullRadius — an engagement/weapon-range bubble capped to the slot footprint),
+	 *  so this default only applies to a plain single-map run (byte no-regression). Contract: >= the max authored weapon range,
+	 *  so an enemy the server hitscan can reach is always replicated (never alive-but-unshootable). A symmetric distance cull
+	 *  can't do per-slot "seam-only" relevancy without RepGraph, so a client sees far same-slot / cross-seam enemies pop in as
+	 *  they approach — an accepted Tier-0 visual limitation (D3), not a logic bug (the server chase is seamless). Boss is
+	 *  separately bAlwaysRelevant. Designers can raise this per-archetype in BP — honored via the BeginPlay re-derive (the ctor
+	 *  runs before BP defaults apply). See ApplyNetCullRadius. */
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Enemy|Network")
+	float NetCullRadius = 20000.0f; // cm (200m)
+
+	/** Tiny safety floor for ApplyNetCullRadius — defends ONLY against a caller passing 0 / negative / NaN. The gameplay
+	 *  net-cull floor (>= weapon range) is owned SOLELY by ComputeUnifiedNetCullRadius (single source), not re-imported here. */
+	static constexpr float MinNetCullRadiusCm = 100.0f; // cm (1m)
 
 	/** XP dropped on death (editor-tunable per enemy type / DataAsset). Balance value. */
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Enemy")

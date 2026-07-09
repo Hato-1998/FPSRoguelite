@@ -22,10 +22,12 @@ AFPSREnemyBase::AFPSREnemyBase()
 	bReplicates = true;
 	SetReplicateMovement(true);
 
-	// Multimap Tier 0 (Codex R5): distance net-cull is the SOLE cross-map relevancy lever (enemies spawn into the
-	// persistent level, which is always level-relevant to every connection, so level visibility never culls them). Sized
-	// >= same-map engagement and < the inter-map offset. Designers can override NetCullDistanceSquared per BP.
-	NetCullDistanceSquared = FMath::Square(NetCullDistance);
+	// Distance net-cull is the sole relevancy lever for the swarm (enemies live in the PERSISTENT, always-level-relevant
+	// level, so level visibility never culls them; RepGraph is the separate production fix). This ctor value is the
+	// single-map / archetype fallback — in the U unified multimap field the spawn subsystem overrides it per-acquire with a
+	// footprint-derived radius (UFPSREnemySpawnSubsystem::ComputeUnifiedNetCullRadius). Boss is separately bAlwaysRelevant.
+	// Set via the accessor (raw NetCullDistanceSquared access is UE_DEPRECATED(5.5)).
+	SetNetCullDistanceSquared(FMath::Square(NetCullRadius));
 
 	Capsule = CreateDefaultSubobject<UCapsuleComponent>(TEXT("Capsule"));
 	Capsule->InitCapsuleSize(40.0f, 90.0f);
@@ -52,9 +54,23 @@ AFPSREnemyBase::AFPSREnemyBase()
 	HealthComponent = CreateDefaultSubobject<UFPSREnemyHealthComponent>(TEXT("HealthComponent"));
 }
 
+void AFPSREnemyBase::ApplyNetCullRadius(float RadiusCm)
+{
+	// U P-H: clamp ONLY against a degenerate (0 / negative / NaN) caller — the gameplay floor (>= weapon range) is applied by
+	// the caller's ComputeUnifiedNetCullRadius (single owner), so it's not re-imported here. FMath::Max(NaN, Min) returns Min.
+	// Set via the accessor (raw NetCullDistanceSquared access is UE_DEPRECATED(5.5)); the net driver reads it live per pass.
+	SetNetCullDistanceSquared(FMath::Square(FMath::Max(RadiusCm, MinNetCullRadiusCm)));
+}
+
 void AFPSREnemyBase::BeginPlay()
 {
 	Super::BeginPlay();
+
+	// U P-H: re-derive the net-cull radius from NetCullRadius now that BP-applied class defaults are live (the ctor ran with
+	// the C++ NSDMI default only, so a BP per-archetype override wouldn't otherwise reach NetCullDistanceSquared). Single-map /
+	// fallback path. In the unified multi-slot field the spawn subsystem overrides this per-acquire (ApplyNetCullRadius), which
+	// runs on every Activate (after BeginPlay) and still wins. No-op vs the ctor when NetCullRadius is unchanged (no regression).
+	SetNetCullDistanceSquared(FMath::Square(NetCullRadius));
 
 	if (HealthComponent)
 	{

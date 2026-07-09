@@ -255,6 +255,20 @@ float UFPSREnemySpawnSubsystem::ClampDrainDt(float RawElapsed, float SpawnInterv
 	return FMath::Clamp(RawElapsed, 0.0f, SpawnIntervalSeconds * DrainDtClampTicks);
 }
 
+float UFPSREnemySpawnSubsystem::ComputeUnifiedNetCullRadius(float MaxSlotDiagonalCm, float WeaponRangeCm, float SeamMarginCm)
+{
+	// U P-H (Option A — engagement/weapon-range bubble, capped to the slot footprint). NetCull is a SYMMETRIC player<->enemy
+	// distance cull, so it cannot do per-slot "seam-only" relevancy (covering your own slot from any position => R >= the full
+	// slot diagonal => that same R bleeds a full slot into every neighbor). RepGraph (spatial grid relevancy) is the real fix
+	// (deferred). Tier-0: replicate the ENGAGEMENT/WEAPON bubble (what you can shoot / what's mechanically relevant) plus a
+	// cross-seam lookahead, capped to the slot footprint so a center player never pulls the whole 3x3 grid; the weapon range
+	// is ALSO the floor so an in-range enemy is never culled (alive-but-unshootable). Uniform across enemies (a cross-slot
+	// migrant is never undersized). Far same-slot / cross-seam enemies pop in as they approach (accepted D3 Tier-0 limit).
+	const float Bubble = WeaponRangeCm + SeamMarginCm;                // what must replicate to be shootable / seen
+	const float FootprintCap = MaxSlotDiagonalCm + SeamMarginCm;      // never span more than one slot (+lookahead)
+	return FMath::Max(WeaponRangeCm, FMath::Min(Bubble, FootprintCap)); // floor (weapon range) wins even for a tiny slot
+}
+
 void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 {
 	if (!HasServerAuthority())
@@ -1342,6 +1356,18 @@ AFPSREnemyBase* UFPSREnemySpawnSubsystem::AcquireEnemy(const FVector& Location, 
 	// Multimap Tier 0: inherit the spawn point's MapId (unset = Default single-map). Set explicitly on every acquire so a
 	// pooled enemy reused in a different map never carries a stale MapId; the movement pass keeps it synced as it moves.
 	Enemy->SetMapId(SpawnPoint ? SpawnPoint->GetMapId() : FGameplayTag());
+
+	// Multimap U P-H: in the unified multi-slot field, size the enemy's net-cull radius to a footprint-derived engagement/
+	// weapon-range bubble (ComputeUnifiedNetCullRadius) — applied UNIFORMLY (MapId-independent) on EVERY acquire, so a pooled
+	// reuse never carries a prior life's radius and a cross-slot chaser is never undersized. A single-map run never enters here
+	// (GetMultiSlotUnifiedComputer() == null), so its enemies keep the ctor default (byte no-regression). Set after Activate
+	// woke net dormancy; the default net driver reads NetCullDistanceSquared live each relevancy pass.
+	if (const UFPSRFlowFieldSubsystem* FlowField = World->GetSubsystem<UFPSRFlowFieldSubsystem>();
+		FlowField && FlowField->GetMultiSlotUnifiedComputer())
+	{
+		Enemy->ApplyNetCullRadius(ComputeUnifiedNetCullRadius(
+			FlowField->GetMaxSlotFootprintDiagonal(), NetCullWeaponRangeCm, NetCullSeamMarginCm));
+	}
 
 	// Multimap U P-E: tag a front-spawned enemy right after its MapId is set (Activate already cleared any stale tag), so
 	// the front pressure budget can keep counting it through its one-shot crossing credit. Marked here (not by the caller

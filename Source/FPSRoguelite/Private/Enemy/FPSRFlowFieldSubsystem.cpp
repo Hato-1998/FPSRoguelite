@@ -202,7 +202,9 @@ void UFPSRFlowFieldSubsystem::BuildUnifiedField(UWorld& InWorld, const AFPSRFlow
 		}
 		// P-G: record the slot's world AABB for occupancy / MapId resolution (FindMapIdForLocation), INDEPENDENT of the flow
 		// bake succeeding — a player standing in a sealed slot still resolves to it. Keyed by MapId (an untagged slot -> unset).
-		SlotBounds.Add(Slot->GetMapId(), Slot->GetWorldBounds());
+		const FBox SlotBox = Slot->GetWorldBounds();
+		SlotBounds.Add(Slot->GetMapId(), SlotBox);
+		MaxSlotFootprintDiagonalCm = FMath::Max(MaxSlotFootprintDiagonalCm, SlotFootprintDiagonalXY(SlotBox)); // P-H: net-cull footprint cap
 		if (BakeSlotIntoUnified(InWorld, *Slot))
 		{
 			++Baked;
@@ -215,6 +217,18 @@ void UFPSRFlowFieldSubsystem::BuildUnifiedField(UWorld& InWorld, const AFPSRFlow
 	// this closed-seam topology. Server-only; runs before GameMode::BeginPlay/StartRun (WorldSubsystem ordering, confirmed).
 	UnifiedComputer->ExtractSurfaceData(BakedBaseline);
 	bHasBaseline = true;
+}
+
+float UFPSRFlowFieldSubsystem::SlotFootprintDiagonalXY(const FBox& SlotBox)
+{
+	// U P-H: XY diagonal of a slot's world AABB — the footprint cap the swarm net-cull radius is bounded by. Invalid box -> 0
+	// (contributes nothing to the max), so a malformed slot can't inflate the cap.
+	if (!SlotBox.IsValid)
+	{
+		return 0.0f;
+	}
+	const FVector Size = SlotBox.GetSize();
+	return FMath::Sqrt(Size.X * Size.X + Size.Y * Size.Y);
 }
 
 bool UFPSRFlowFieldSubsystem::BakeSlotIntoUnified(UWorld& InWorld, const AFPSRFlowFieldBoundsVolume& Slot)
@@ -262,7 +276,9 @@ bool UFPSRFlowFieldSubsystem::BakeDiscoveredMap(const FGameplayTag& MapId)
 		if (Volume && Volume->GetMapId() == MapId)
 		{
 			// P-G: record the streamed slot's world AABB for occupancy / MapId resolution (independent of the flow bake).
-			SlotBounds.Add(MapId, Volume->GetWorldBounds());
+			const FBox SlotBox = Volume->GetWorldBounds();
+			SlotBounds.Add(MapId, SlotBox);
+			MaxSlotFootprintDiagonalCm = FMath::Max(MaxSlotFootprintDiagonalCm, SlotFootprintDiagonalXY(SlotBox)); // P-H: net-cull footprint cap
 			if (UnifiedComputer)
 			{
 				// U: swarm flow samples ONLY the unified field, so readiness = the unified slot bake succeeded. If it fails
@@ -405,6 +421,7 @@ void UFPSRFlowFieldSubsystem::Deinitialize()
 		}
 	}
 	SlotBounds.Reset();
+	MaxSlotFootprintDiagonalCm = 0.0f;
 	UnifiedComputer = nullptr;
 	bUnifiedMultiSlot = false;
 	Super::Deinitialize();
