@@ -6,7 +6,6 @@
 #include "Engine/World.h"
 #include "Net/UnrealNetwork.h"
 #include "Net/Core/PushModel/PushModel.h"
-#include "DrawDebugHelpers.h"
 
 AFPSRMissionOrb::AFPSRMissionOrb()
 {
@@ -14,7 +13,10 @@ AFPSRMissionOrb::AFPSRMissionOrb()
 	// Carry missions move the orb server-side every tick (it follows the carrier); replicate movement so clients
 	// see the objective at the right place. Harmless for static collect-orbs (they never move).
 	SetReplicateMovement(true);
-	PrimaryActorTick.bCanEverTick = true;
+	// No per-frame work: collection is overlap-event driven (OnSphereBeginOverlap) and carry-mission movement is
+	// driven by the owning mission actor (OnMissionTickServer), not this orb — so it stays tickless (avoids an idle
+	// per-frame dispatch on every live orb).
+	PrimaryActorTick.bCanEverTick = false;
 
 	Sphere = CreateDefaultSubobject<USphereComponent>(TEXT("Sphere"));
 	Sphere->InitSphereRadius(100.0f);
@@ -62,17 +64,4 @@ void AFPSRMissionOrb::OnSphereBeginOverlap(UPrimitiveComponent* OverlappedComp, 
 	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRMissionOrb, bCollected, this);
 	SetActorEnableCollision(false);
 	OnCollectedNative.Broadcast(this, Pawn);
-}
-
-void AFPSRMissionOrb::Tick(float DeltaSeconds)
-{
-	Super::Tick(DeltaSeconds);
-
-#if ENABLE_DRAW_DEBUG
-	if (!bCollected)
-	{
-		const float R = Sphere ? Sphere->GetScaledSphereRadius() : 100.0f;
-		DrawDebugSphere(GetWorld(), GetActorLocation(), R, 12, FColor::Yellow, false, 0.0f);
-	}
-#endif
 }

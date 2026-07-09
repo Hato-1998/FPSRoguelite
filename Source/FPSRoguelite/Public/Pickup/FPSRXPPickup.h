@@ -22,6 +22,7 @@ public:
 	void SetXPValue(int32 InValue) { XPValue = InValue; }
 
 protected:
+	virtual void BeginPlay() override;
 	virtual void Tick(float DeltaSeconds) override;
 
 	/** Read the given player's CombatSet PickupRadius multiplier (>=0.01), or 1.0 if unavailable. */

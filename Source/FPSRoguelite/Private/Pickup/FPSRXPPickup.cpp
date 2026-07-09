@@ -31,6 +31,20 @@ AFPSRXPPickup::AFPSRXPPickup()
 	SetRootComponent(Mesh);
 }
 
+void AFPSRXPPickup::BeginPlay()
+{
+	Super::BeginPlay();
+
+	// The magnet/collect/XP-grant pass runs only on the server (see Tick, which early-returns off-authority); clients
+	// merely receive the replicated transform. Disable the tick off-authority so the many concurrent client gems don't
+	// each wake a per-frame Tick just to early-return. The listen-server HOST keeps ticking (it is the authority);
+	// standalone is authority too. Gems are spawn-and-destroy (not pooled), so this one-time BeginPlay gate suffices.
+	if (!HasAuthority())
+	{
+		SetActorTickEnabled(false);
+	}
+}
+
 void AFPSRXPPickup::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
