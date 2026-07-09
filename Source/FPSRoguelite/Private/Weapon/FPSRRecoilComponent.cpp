@@ -88,6 +88,13 @@ void UFPSRRecoilComponent::ResetPattern()
 	CurrentShotIndex = 0;
 }
 
+void UFPSRRecoilComponent::ClearRecoilPattern()
+{
+	// RecoilPattern은 UCRRecoilComponent-protected. 플러그인 SetRecoilPattern은 null을 무시하므로 여기서 직접 해제 →
+	// base ApplyShot의 `!RecoilPattern` early-return이 살아 이전 무기 패턴의 stale 킥을 막는다.
+	RecoilPattern = nullptr;
+}
+
 void UFPSRRecoilComponent::AdvanceHeatForAcceptedShot()
 {
 	if (!HasSpreadCurves())

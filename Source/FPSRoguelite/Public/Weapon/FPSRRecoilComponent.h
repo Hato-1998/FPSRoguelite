@@ -54,6 +54,10 @@ public:
 	 *  진행 중 uplift/recovery·heat는 건드리지 않음. */
 	void ResetPattern();
 
+	/** 반동 패턴을 명시적으로 해제(null)한다. 플러그인 SetRecoilPattern(null)은 무시되므로, 패턴 없는 무기(근접·
+	 *  ChargeLaser·heat-only)로 스왑 시 이전 무기 패턴이 남아 ApplyShot base 경로가 잘못된 킥을 적용하는 것을 방지. */
+	void ClearRecoilPattern();
+
 	/** 서버 accepted-shot heat 갱신(발사 GA 서버 브랜치에서 원격 폰에만 호출) — 서버 authoritative 트레이스 확산이
 	 *  원격 클라의 예측 확산과 일치하도록. heat 누적 + LastFireTime 갱신(grace 후 냉각) + tick 활성화까지 처리. */
 	void AdvanceHeatForAcceptedShot();

@@ -284,11 +284,20 @@ void UFPSRWeaponFireComponent::OnWeaponEquipped(float EquipCooldown)
 		const UFPSRWeaponInventoryComponent* Inv = GetInventory();
 		UFPSRWeaponInstance* Inst = Inv ? Inv->GetCurrentInstance() : nullptr;
 		const UFPSRWeaponDataAsset* Weapon = Inst ? Inst->GetSource() : nullptr;
-		Recoil->SetRecoilPattern(Weapon ? Weapon->RecoilPattern : nullptr);
-		// Inject the equipped weapon's heat-spread profile (curves + max + cooldown delay). MUST run on swap even to a
-		// no-profile weapon: the plugin's SetRecoilPattern IGNORES null, so without an explicit clear the previous
-		// weapon's heat curves would bleed into melee / ChargeLaser / no-profile weapons and keep making spread.
-		// Runs on the server (EquipSlot) AND clients (OnRep) so both sides' heat model matches the equipped weapon.
+		// Recoil pattern + heat-spread profile MUST both be re-applied (or explicitly cleared) on every equip. The
+		// plugin's SetRecoilPattern IGNORES null, so a swap to a no-pattern / no-profile weapon (melee, ChargeLaser, or
+		// a heat-only weapon) would otherwise KEEP the previous weapon's pattern/curves — the heat-only case still calls
+		// ApplyShot (HasSpreadCurves true), whose base path would consume that STALE pattern and apply the wrong kick.
+		// Explicit ClearRecoilPattern/ClearSpreadProfile prevents the bleed. Runs on the server (EquipSlot) AND clients
+		// (OnRep_CurrentSlotIndex / OnRep_Slots) so both sides' recoil model matches the equipped weapon.
+		if (Weapon && Weapon->RecoilPattern)
+		{
+			Recoil->SetRecoilPattern(Weapon->RecoilPattern);
+		}
+		else
+		{
+			Recoil->ClearRecoilPattern();
+		}
 		if (Weapon)
 		{
 			Recoil->SetSpreadProfile(Weapon->ShotToHeatCurve, Weapon->HeatToSpreadAngleCurve,
