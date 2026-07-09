@@ -10,6 +10,7 @@ class UFPSRWeaponInstance;
 class UTexture2D;
 class UMaterialInterface;
 class UCameraComponent;
+class UFPSRRecoilComponent;
 
 /** Owning-client component that drives fire cadence (fire rate / fire mode), camera recoil, and spread bloom.
  *  Each shot activates the equipped weapon's fire ability (trace + server-authoritative damage). */
@@ -31,10 +32,6 @@ public:
 	 *  the local recoil prediction stays in sync with the server. */
 	void OnWeaponEquipped(float EquipCooldown);
 
-	/** Extra spread (degrees) from sustained fire; read by the fire ability when tracing. */
-	UFUNCTION(BlueprintPure, Category = "FPSR|Weapon")
-	float GetCurrentBloom() const { return CurrentBloom; }
-
 	/** Total spread half-angle (deg) the fire trace uses = (resolved SpreadDegrees + bloom) x ADS.
 	 *  Single source of truth shared with the fire ability cone; the HUD crosshair gap reads this. */
 	UFUNCTION(BlueprintPure, Category = "FPSR|Weapon")
@@ -49,8 +46,9 @@ public:
 	bool GetEquippedCrosshairUsesDynamic() const;
 
 	/** Shared spread formula used by BOTH the fire ability cone and the HUD crosshair:
-	 *  (Stats.SpreadDegrees + Bloom) x (bAiming && Stats.bHasADS ? Stats.ADSSpreadMultiplier : 1). */
-	static float ComputeSpreadDegrees(const struct FFPSRWeaponStatBlock& Stats, float Bloom, bool bAiming);
+	 *  (Stats.SpreadDegrees + HeatSpread) x (bAiming && Stats.bHasADS ? Stats.ADSSpreadMultiplier : 1).
+	 *  HeatSpread = the recoil component's heat-based dynamic spread (UFPSRRecoilComponent::GetHeatSpread). */
+	static float ComputeSpreadDegrees(const struct FFPSRWeaponStatBlock& Stats, float HeatSpread, bool bAiming);
 
 	/** Owner-client + server (via RPC): set aim-down-sights state (FOV/recoil local, spread read by fire GA). */
 	void SetAiming(bool bNewAiming) { bIsAiming = bNewAiming; }
@@ -81,6 +79,10 @@ public:
 protected:
 	void FireOneShot();
 
+	/** Lazily resolve the owner's CrystalRecoil-adapter recoil component and bind its target controller to the
+	 *  owning controller once (P1). Owner-local; returns null off the owning client / before the component exists. */
+	UFPSRRecoilComponent* ResolveRecoil();
+
 	/** True when the equipped weapon has ammo and is not reloading. */
 	bool CanFire() const;
 
@@ -90,9 +92,9 @@ protected:
 	bool bWantsToFire = false;
 	float TimeSinceLastShot = 0.0f;
 	int32 BurstShotsRemaining = 0;
-	float CurrentBloom = 0.0f;
 
 	bool bReloadRequestPending = false; // guards against spamming the reload RPC each tick
+	bool bWasReloading = false;         // owner-local reload edge tracker: restart the recoil spray pattern when a reload begins
 	float LastMeleeTime = -1000.0f; // world time of last melee attack (melee attack-rate cooldown)
 	float NextFireReadyTime = 0.0f; // world time the next ranged shot is allowed (per-weapon cadence + post-swap cooldown); gates the immediate press shot's recoil. Mirrors the server's ServerNextAllowedFireTime.
 	float SpinupElapsed = 0.0f; // seconds of continuous fire this trigger hold (spin-up ramp progress; client-local feel). Reset on StopFiring / equip; advances only while auto-firing and not run-paused.
@@ -101,10 +103,11 @@ protected:
 	TObjectPtr<UCameraComponent> CachedCamera; // resolved lazily for ADS FOV
 	float DefaultFOV = 0.0f;                    // captured from the camera on first resolve
 
+	TObjectPtr<UFPSRRecoilComponent> CachedRecoil; // CrystalRecoil-adapter recoil driver, resolved lazily (P1)
+	bool bRecoilTargetSet = false;                 // SetTargetController(owning controller) done once
+
 	// --- Recoil state (local feel only) ---
 	float RecoilDebtPitch = 0.0f;       // up-kick owed for downward recovery (raw input units)
-	float PendingRisePitch = 0.0f;      // not-yet-applied up-kick, smoothed in over time
-	float PendingRiseYaw = 0.0f;        // not-yet-applied horizontal recoil, smoothed in over time (no recovery)
 	float PlayerPitchCompensation = 0.0f; // player's downward look input this frame, consumes debt
 	int32 ShotsFiredThisSpray = 0;      // shot index within current trigger hold (horizontal pattern)
 

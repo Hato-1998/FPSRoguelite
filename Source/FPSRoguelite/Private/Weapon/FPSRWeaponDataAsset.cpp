@@ -136,6 +136,49 @@ EDataValidationResult UFPSRWeaponDataAsset::IsDataValid(FDataValidationContext& 
 		}
 	}
 
+	// --- 확산 heat 프로파일(P2): 3곡선은 all-or-nothing이다. 부분 저작(예: ShotToHeat만 있고 HeatToCooldown 없음)은
+	//     heat가 냉각 없이 상한에 붙어 확산이 최대로 고정되는 침묵 버그를 낳는다. 근접/ChargeLaser는 3곡선을 모두
+	//     비워 두는 것이 정상(동적 블룸 없음). FRuntimeFloatCurve::GetRichCurveConst()는 빈 곡선도 non-null이므로
+	//     키 개수로 저작 여부를 판정한다. ---
+	{
+		const int32 ShotKeys = ShotToHeatCurve.GetRichCurveConst()->GetNumKeys();
+		const int32 SpreadKeys = HeatToSpreadAngleCurve.GetRichCurveConst()->GetNumKeys();
+		const int32 CoolKeys = HeatToCooldownPerSecondCurve.GetRichCurveConst()->GetNumKeys();
+		const int32 Authored = (ShotKeys > 0 ? 1 : 0) + (SpreadKeys > 0 ? 1 : 0) + (CoolKeys > 0 ? 1 : 0);
+		if (Authored != 0 && Authored != 3)
+		{
+			Context.AddError(LOCTEXT("HeatProfilePartial", "확산 heat 프로파일은 3개 곡선(ShotToHeat / HeatToSpreadAngle / HeatToCooldownPerSecond)을 전부 채우거나 전부 비워야 합니다 — 일부만 채우면 heat가 냉각 없이 상한에 붙어 확산이 고장납니다."));
+			Result = EDataValidationResult::Invalid;
+		}
+		if (Authored == 3)
+		{
+			if (MaxRecoilHeat <= 0.0f)
+			{
+				Context.AddError(LOCTEXT("HeatProfileMaxZero", "확산 heat 프로파일이 있는데 MaxRecoilHeat <= 0 — heat가 항상 0으로 클램프되어 동적 확산이 발생하지 않습니다. MaxRecoilHeat > 0 으로 설정하세요."));
+				Result = EDataValidationResult::Invalid;
+			}
+			// heat=0 → spread=0 앵커: 무heat는 순수 base SpreadDegrees여야 한다(아니면 base 이중 계산).
+			const float SpreadAtZero = HeatToSpreadAngleCurve.GetRichCurveConst()->Eval(0.0f);
+			if (FMath::Abs(SpreadAtZero) > KINDA_SMALL_NUMBER)
+			{
+				Context.AddWarning(FText::Format(LOCTEXT("HeatProfileSpreadAnchor", "HeatToSpreadAngleCurve의 heat=0 값이 {0}° (0이 아님) — 발사 전에도 base SpreadDegrees에 더해져 확산이 넓어집니다. heat=0 → 0° 키를 앵커로 두세요."), FText::AsNumber(SpreadAtZero)));
+			}
+			// 음수 냉각은 heat를 오히려 증가시켜 폭주. 정의역을 샘플링 검사.
+			const FRichCurve* CoolCurve = HeatToCooldownPerSecondCurve.GetRichCurveConst();
+			bool bNegCooldown = false;
+			const float Step = FMath::Max(1.0f, MaxRecoilHeat * 0.1f);
+			for (float H = 0.0f; H <= MaxRecoilHeat + KINDA_SMALL_NUMBER; H += Step)
+			{
+				if (CoolCurve->Eval(H) < 0.0f) { bNegCooldown = true; break; }
+			}
+			if (bNegCooldown)
+			{
+				Context.AddError(LOCTEXT("HeatProfileNegCooldown", "HeatToCooldownPerSecondCurve가 음수 값을 가집니다 — 냉각이 heat를 오히려 증가시켜 확산이 폭주합니다. 전 구간 >= 0(권장 > 0)으로 설정하세요."));
+				Result = EDataValidationResult::Invalid;
+			}
+		}
+	}
+
 	// --- Socket / attach-point validation. A referenced socket that doesn't exist on the target mesh (a typo such as a
 	//     space instead of '_', or the wrong socket) makes the part / muzzle flash silently fall back to the mesh
 	//     origin — the exact class of bug that is invisible until you look at the assembled weapon in-game. Warnings

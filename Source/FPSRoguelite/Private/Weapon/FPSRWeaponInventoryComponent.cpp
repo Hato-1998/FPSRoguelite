@@ -251,8 +251,18 @@ void UFPSRWeaponInventoryComponent::OnRep_CurrentSlotIndex()
 
 void UFPSRWeaponInventoryComponent::OnRep_Slots()
 {
-	// On a remote owning client the instance subobjects can arrive after CurrentSlotIndex (whose OnRep then saw no
-	// weapon and cleared the meshes). Refresh again now that the slot instances + their Source are present.
+	// On a remote owning client the instance subobjects can arrive AFTER CurrentSlotIndex — whose OnRep then ran with a
+	// null instance and (a) cleared the meshes AND (b) ran OnWeaponEquipped, which set NO recoil pattern / heat profile
+	// (Weapon was null). Re-run BOTH now that the slot instances + their Source are present: refresh the visual AND
+	// re-apply the equip setup so the recoil pattern + heat-spread profile the early CurrentSlotIndex OnRep missed land
+	// (idempotent — a redundant call on the normal ordering just re-sets the same values).
+	if (AActor* Owner = GetOwner())
+	{
+		if (UFPSRWeaponFireComponent* FireComp = Owner->FindComponentByClass<UFPSRWeaponFireComponent>())
+		{
+			FireComp->OnWeaponEquipped(EquipFireCooldown);
+		}
+	}
 	if (AFPSRCharacter* Char = Cast<AFPSRCharacter>(GetOwner()))
 	{
 		Char->RefreshFirstPersonWeaponVisual();

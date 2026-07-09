@@ -7,6 +7,7 @@
 #include "Weapon/FPSRWeaponFragment.h"
 #include "Weapon/FPSRWeaponDataAsset.h"
 #include "Weapon/FPSRWeaponFireComponent.h"
+#include "Weapon/FPSRRecoilComponent.h"
 #include "Combat/FPSRCombatStatics.h"
 #include "Combat/FPSRWeakpointComponent.h"
 #include "Enemy/FPSREnemyHealthComponent.h"
@@ -110,14 +111,17 @@ void UFPSRGA_WeaponFire_Hitscan::ActivateAbility(
 	// deterministic) camera recoil pattern IS the learnable spray; the random cone is hip-fire only. Captured here
 	// (FireComp scope) and consumed at the trace below. Multi-pellet weapons (shotgun) keep a cone even in ADS
 	// (gated at the trace) so a single-line pattern doesn't collapse all pellets onto one ray.
+	// Dynamic spread now comes from the recoil component's heat model (single source: HUD + hitscan + projectile all
+	// read the SAME GetHeatSpread()). Resolved once here and reused below to advance server-side heat for accepted shots.
+	UFPSRRecoilComponent* Recoil = Avatar->FindComponentByClass<UFPSRRecoilComponent>();
 	bool bADSDeterministic = false;
 	if (UFPSRWeaponFireComponent* FireComp = Avatar->FindComponentByClass<UFPSRWeaponFireComponent>())
 	{
-		const float Bloom = FireComp->GetCurrentBloom();
+		const float HeatSpread = Recoil ? Recoil->GetHeatSpread() : 0.0f;
 		const bool bAiming = FireComp->IsAiming();
 		SpreadDegrees = Stats
-			? UFPSRWeaponFireComponent::ComputeSpreadDegrees(*Stats, Bloom, bAiming)
-			: SpreadDegrees + Bloom;
+			? UFPSRWeaponFireComponent::ComputeSpreadDegrees(*Stats, HeatSpread, bAiming)
+			: SpreadDegrees + HeatSpread;
 		bADSDeterministic = Stats && Stats->bHasADS && bAiming;
 	}
 
@@ -162,6 +166,17 @@ void UFPSRGA_WeaponFire_Hitscan::ActivateAbility(
 	if (FireCtx.bAuthority)
 	{
 		FPSRWeaponHooks::NotifyFire(FireCtx);
+	}
+
+	// Server accepted-shot spread parity: advance THIS pawn's server-side heat ONCE per accepted activation (not per
+	// round/pellet — mirrors one client FireOneShot = one ApplyShot) so the authoritative trace below reflects the same
+	// dynamic spread the owning client predicts. Placed AFTER the spread read above (read-then-accumulate, matching the
+	// client where the fire GA reads heat before FireOneShot's ApplyShot adds it). Skip locally-controlled pawns: the
+	// listen-server host / SP already accumulated heat owner-locally via FireOneShot->ApplyShot (double-count guard) —
+	// only remote clients (all pawns on a dedicated server) advance here. Heat is non-replicated (no bandwidth cost).
+	if (FireCtx.bAuthority && Recoil && !Avatar->IsLocallyControlled())
+	{
+		Recoil->AdvanceHeatForAcceptedShot();
 	}
 
 	// Crit/damage multipliers from the ASC are fetched once; crit is rolled per hit so each pellet / pierced

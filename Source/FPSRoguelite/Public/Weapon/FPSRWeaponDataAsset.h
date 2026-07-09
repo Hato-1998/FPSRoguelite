@@ -4,11 +4,13 @@
 
 #include "Engine/DataAsset.h"
 #include "Weapon/FPSRWeaponTypes.h"
+#include "Curves/CurveFloat.h"
 #include "FPSRWeaponDataAsset.generated.h"
 
 class UGameplayAbility;
 class UFPSRCardDataAsset;
 class AFPSRProjectile;
+class UCRRecoilPattern;
 class USkeletalMesh;
 class UStaticMesh;
 class UAnimInstance;
@@ -63,6 +65,36 @@ public:
 	/** Projectile actor class (AOE archetypes). Content assigns a BP with mesh/VFX; null falls back to AFPSRProjectile base. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|발사체", meta = (DisplayName = "발사체 클래스"))
 	TSubclassOf<AFPSRProjectile> ProjectileClass;
+
+	/** CrystalRecoil recoil pattern (per-shot coordinate deltas + recovery tuning) applied by UFPSRRecoilComponent while
+	 *  this weapon is equipped (P1 adapter). Null = no pattern recoil — melee (no recoil) and ChargeLaser (uses its own
+	 *  charge-ramp recoil in the fire component) leave this unset. Authored in the CrystalRecoil pattern editor. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|반동", meta = (DisplayName = "반동 패턴(CrystalRecoil)"))
+	TObjectPtr<UCRRecoilPattern> RecoilPattern;
+
+	/** 확산 heat 프로파일(P2) — 무기별 동적 확산. 레거시 스칼라 블룸(P4에서 제거됨)을 대체한다:
+	 *  수락된 발사마다 ShotToHeatCurve(X=현재 heat, Y=더할 heat)로 heat가 쌓이고, HeatToSpreadAngleCurve(X=heat,
+	 *  Y=확산 반각 도; heat=0→0으로 저작해 무heat=순수 base SpreadDegrees)로 동적 확산각을 만들고,
+	 *  HeatToCooldownPerSecondCurve(X=heat, Y=heat/초, >0)로 식는다. 장착 시 반동 컴포넌트에 주입된다.
+	 *  동적 블룸이 없는 무기(근접·ChargeLaser)는 3곡선 모두 비워 둔다. RecoilPattern(반동 kinematics)과 독립 —
+	 *  패턴 없이 확산만, 확산 없이 패턴만도 가능. ⚠️ X축은 '샷 인덱스'가 아니라 '현재 heat'(자기참조): 발당 고정
+	 *  증가를 원하면 ShotToHeat를 상수 곡선으로 저작. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|반동", meta = (DisplayName = "확산 heat: 발당 heat증가(X=현재heat, Y=증가량)"))
+	FRuntimeFloatCurve ShotToHeatCurve;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|반동", meta = (DisplayName = "확산 heat: heat→확산각(X=heat, Y=도, heat0→0 앵커)"))
+	FRuntimeFloatCurve HeatToSpreadAngleCurve;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|반동", meta = (DisplayName = "확산 heat: heat→냉각(X=heat, Y=heat/초, >0)"))
+	FRuntimeFloatCurve HeatToCooldownPerSecondCurve;
+
+	/** heat 상한(확산 곡선의 정의역 X=[0..이 값]). 동적 확산 프로파일을 쓸 때만 유효. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|반동", meta = (DisplayName = "확산 heat: 최대 heat", ClampMin = "0.0"))
+	float MaxRecoilHeat = 100.0f;
+
+	/** 마지막 발사 후 이 시간(초)이 지나야 heat 냉각이 시작된다(연사 중 확산 유지용 grace). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|반동", meta = (DisplayName = "확산 heat: 냉각 지연(초)", ClampMin = "0.0"))
+	float RecoilHeatCooldownDelay = 0.5f;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|카드", meta = (DisplayName = "무기 카드(레벨업 풀)"))
 	TArray<TObjectPtr<UFPSRCardDataAsset>> WeaponCards;
