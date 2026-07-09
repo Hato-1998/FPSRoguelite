@@ -128,35 +128,6 @@ public:
 	const FGameplayTag& GetMapId() const { return MapId; }
 	void SetMapId(const FGameplayTag& InMapId) { MapId = InMapId; }
 
-	// --- Transition tracker (multimap Tier 1) — server-only, NOT replicated. The spawn subsystem DESIGNATES a few
-	//     boundary enemies to keep pursuing a player who just crossed a map boundary, through the door, for a grace
-	//     window (SetCrossingTracker). The movement pass then lets this enemy TARGET/steer toward that (cross-map)
-	//     player until it physically crosses into the player's map (its MapId re-resolves) or the designation expires.
-	//     Movement-only: contact damage stays gated to same-map players in the movement pass, so this never enables a
-	//     through-boundary-wall hit. Cleared on Activate (pool reuse). ---
-
-	/** Server: designate this enemy to pursue crossing player Player until ExpireTime (world seconds), snapshotting the
-	 *  crossing's departed map + door location. The snapshot binds the beeline to THIS crossing so it survives the player
-	 *  later crossing ANOTHER boundary (which overwrites the shared per-player transition record) — the enemy no longer
-	 *  reads that record at all during pursuit. */
-	void SetCrossingTracker(APlayerController* Player, float ExpireTime, const FGameplayTag& DepartedMap, const FVector& DoorLocation);
-
-	/** Server: drop any crossing-tracker designation (pool reuse / caught up). */
-	void ClearCrossingTracker();
-
-	/** Server: the crossing player this enemy is designated to pursue at time Now, or null if none/expired/stale. */
-	APlayerController* GetCrossingTracker(float Now) const;
-
-	/** Server: true if this enemy holds a live (non-expired, non-stale) crossing-tracker designation at time Now. */
-	bool IsCrossingTracker(float Now) const;
-
-	/** Server: the map this tracker is crossing OUT of (snapshot at designation) — the beeline aims at the door while the
-	 *  enemy is still in this map, then at the player once it crosses out. Unset if not a tracker. */
-	const FGameplayTag& GetCrossingTrackerDepartedMap() const { return CrossingTrackerDepartedMap; }
-
-	/** Server: the door/crossing location this tracker beelines to while still in its departed map (snapshot at designation). */
-	const FVector& GetCrossingTrackerDoorLocation() const { return CrossingTrackerDoorLocation; }
-
 	// --- Front-chase (multimap U P-D) — server-only, NOT replicated. The movement pass tags an enemy chasing a player in a
 	//     DIFFERENT open-grid-connected slot (through an opened door) via the unified flow field, within the front range.
 	//     Read by the empty-map drain (a front-chaser is a live cohort, exempt like a tracker) and by tracker mutual
@@ -262,15 +233,6 @@ protected:
 
 	/** Server-only: this enemy's map (multimap Tier 0). See GetMapId. Not replicated. */
 	FGameplayTag MapId;
-
-	/** Server-only: the crossing player this enemy is designated to pursue across a map boundary (multimap Tier 1
-	 *  transition tracker), when the designation expires (world seconds), and a SNAPSHOT of the crossing's departed map +
-	 *  door location (so the beeline is bound to this crossing, not the shared per-player record that a later crossing
-	 *  would overwrite). Null/expired = normal same-map behavior. See SetCrossingTracker. Not replicated (server-only AI). */
-	TWeakObjectPtr<APlayerController> CrossingTrackerPlayer;
-	float CrossingTrackerExpireTime = -1.0f;
-	FGameplayTag CrossingTrackerDepartedMap;
-	FVector CrossingTrackerDoorLocation = FVector::ZeroVector;
 
 	/** Server-only (U P-D): world time until which this enemy is a live front-chaser (chasing a cross-slot connected player
 	 *  via the unified field). -1 = not front-chasing. See SetFrontChasing. Not replicated. */

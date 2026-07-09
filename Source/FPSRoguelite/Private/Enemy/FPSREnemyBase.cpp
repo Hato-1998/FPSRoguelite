@@ -126,7 +126,6 @@ void AFPSREnemyBase::Activate(const FVector& Location)
 	GroundRecheckTimer = 0.0f;
 	KnockbackVelocityXY = FVector::ZeroVector; // clear residual knockback from a prior life
 	ClearExitPath();                           // drop any leftover path; AcquireEnemy re-assigns it if this spawn point has one
-	ClearCrossingTracker();                    // drop any stale transition-tracker designation from a prior life (Tier 1)
 	ClearFrontChasing();                       // drop any stale front-chase tag from a prior life (U P-D)
 	ClearFrontSpawn();                         // drop any stale front-spawn attribution / crossing credit from a prior life (U P-E)
 
@@ -159,33 +158,6 @@ void AFPSREnemyBase::ClearExitPath()
 	bFollowingExitPath = false;
 }
 
-// Transition tracker (multimap Tier 1). Bodies live here (not inline in the header) because they touch a
-// TWeakObjectPtr<APlayerController>, whose assignment / Get() need the complete type (the header only forward-declares it).
-void AFPSREnemyBase::SetCrossingTracker(APlayerController* Player, float ExpireTime, const FGameplayTag& DepartedMap, const FVector& DoorLocation)
-{
-	CrossingTrackerPlayer = Player;
-	CrossingTrackerExpireTime = ExpireTime;
-	CrossingTrackerDepartedMap = DepartedMap;
-	CrossingTrackerDoorLocation = DoorLocation;
-}
-
-void AFPSREnemyBase::ClearCrossingTracker()
-{
-	CrossingTrackerPlayer = nullptr;
-	CrossingTrackerExpireTime = -1.0f;
-	CrossingTrackerDepartedMap = FGameplayTag();
-	CrossingTrackerDoorLocation = FVector::ZeroVector;
-}
-
-APlayerController* AFPSREnemyBase::GetCrossingTracker(float Now) const
-{
-	return (Now < CrossingTrackerExpireTime) ? CrossingTrackerPlayer.Get() : nullptr;
-}
-
-bool AFPSREnemyBase::IsCrossingTracker(float Now) const
-{
-	return (Now < CrossingTrackerExpireTime) && CrossingTrackerPlayer.IsValid();
-}
 
 bool AFPSREnemyBase::ConsumeExitPathSteering(const FVector& MyLocation, float ScaledDeltaSeconds, FVector& OutDir)
 {
