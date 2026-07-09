@@ -529,7 +529,15 @@ bool UFPSRFlowFieldSubsystem::ShouldRecomputeOnUnfreeze(bool bWasPaused, bool bN
 void UFPSRFlowFieldSubsystem::AdvanceTopologyGeneration()
 {
 	++TopologyGeneration;
-	// Stage 2 mirrors this to the replicated GameState here so remote clients OnRep and re-ack the new generation.
+	// Mirror to the replicated GameState so remote clients OnRep_TopologyGeneration and re-ack the new generation (P-F
+	// Stage 2). Server-only; SetTopologyGeneration self-guards on authority + change.
+	if (UWorld* World = GetWorld())
+	{
+		if (AFPSRGameState* GS = World->GetGameState<AFPSRGameState>())
+		{
+			GS->SetTopologyGeneration(TopologyGeneration);
+		}
+	}
 }
 
 void UFPSRFlowFieldSubsystem::ResetDoorTopologyToBaseline()

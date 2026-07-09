@@ -10,6 +10,8 @@
 #include "Weapon/FPSRWeaponDataAsset.h"
 #include "Hero/FPSRCharacter.h"
 #include "GameFramework/Pawn.h"
+#include "GameFramework/Controller.h" // U P-F: GetOwningController()->IsLocalController()/HasAuthority() for the ack gate
+#include "Core/FPSRLogChannels.h"      // U P-F: LogFPSR (topology ack fail-open diagnostic)
 #include "Net/UnrealNetwork.h"
 #include "Net/Core/PushModel/PushModel.h"
 
@@ -78,6 +80,66 @@ void AFPSRPlayerState::SetCurrentMapId(const FGameplayTag& NewMapId)
 	}
 	CurrentMapId = NewMapId;
 	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRPlayerState, CurrentMapId, this);
+}
+
+void AFPSRPlayerState::MarkTopologyJoin(int32 Gen, float Now)
+{
+	if (!HasAuthority() || JoinTopologyGeneration >= 0)
+	{
+		return; // idempotent: only the first sighting stamps the join generation + fail-open clock
+	}
+	JoinTopologyGeneration = Gen;
+	TopologyJoinTime = Now;
+}
+
+void AFPSRPlayerState::SetAckedTopologyGeneration(int32 Gen)
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+	AckedTopologyGeneration = FMath::Max(AckedTopologyGeneration, Gen); // monotone — an ack never regresses
+}
+
+bool AFPSRPlayerState::IsTopologyAckSatisfied(bool bLocalAuthority, int32 AckedGen, int32 JoinGen, float JoinTime, float Now, float Timeout)
+{
+	if (bLocalAuthority)
+	{
+		return true; // host/standalone owning controller IS the server — it authored the topology, no OnRep to ack against
+	}
+	if (JoinGen < 0)
+	{
+		return false; // not yet marked -> fail-closed (leading-edge seal: a just-arrived joiner doesn't participate yet)
+	}
+	return AckedGen >= JoinGen || (Now - JoinTime > Timeout); // acked, or fail-open past the timeout (RPC loss guard)
+}
+
+bool AFPSRPlayerState::HasAckedJoinTopology(float Now) const
+{
+	const AController* C = GetOwningController();
+	const bool bLocalAuthority = C && C->IsLocalController() && C->HasAuthority();
+	const bool bSatisfied = IsTopologyAckSatisfied(
+		bLocalAuthority, AckedTopologyGeneration, JoinTopologyGeneration, TopologyJoinTime, Now, TopologyAckTimeoutSeconds);
+
+	// Diagnose a fail-open (the timeout let the player through without the client's ack) once — a lost ack RPC / softlock
+	// is otherwise invisible. Only meaningful for a remote client that was marked but never acked its join generation.
+	if (bSatisfied && !bLocalAuthority && JoinTopologyGeneration >= 0
+		&& AckedTopologyGeneration < JoinTopologyGeneration && !bLoggedTopologyFailOpen)
+	{
+		bLoggedTopologyFailOpen = true;
+		UE_LOG(LogFPSR, Warning,
+			TEXT("[Topology] Ack fail-open for '%s': joined generation %d never acked within %.0fs (RPC loss?) — participating anyway."),
+			*GetPlayerName(), JoinTopologyGeneration, TopologyAckTimeoutSeconds);
+	}
+	return bSatisfied;
+}
+
+void AFPSRPlayerState::ResetTopologyAck()
+{
+	JoinTopologyGeneration = -1;
+	AckedTopologyGeneration = -1;
+	TopologyJoinTime = 0.0f;
+	bLoggedTopologyFailOpen = false;
 }
 
 bool AFPSRPlayerState::ConsumeRerollCharge()
@@ -340,6 +402,9 @@ void AFPSRPlayerState::ResetRunState()
 
 	// Multimap occupancy back to the Default (unset) map for a fresh run.
 	SetCurrentMapId(FGameplayTag());
+
+	// U (P-F): clear the topology late-join ack so a returning player re-marks + re-acks against the new run's topology.
+	ResetTopologyAck();
 
 	// Fresh-run ASC baseline (merge-gate P1): the ASC + attribute sets live on the PlayerState and survive the
 	// lobby<->run seamless travel, so a wiped/buffed player would otherwise start the next run at 0 HP (death

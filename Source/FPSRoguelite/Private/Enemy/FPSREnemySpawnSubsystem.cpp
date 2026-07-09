@@ -270,6 +270,13 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 
 	++MovementFrameCounter;
 
+	const float Now = World->GetTimeSeconds();
+
+	// U P-D/P-F: the unified continuous field drives front-chase targeting AND the topology late-join ack gate — both are
+	// active ONLY when a unified field exists (single-map / pre-content keeps the exact same-map behavior, no regression).
+	const UFPSRFlowFieldSubsystem* FlowField = World->GetSubsystem<UFPSRFlowFieldSubsystem>();
+	const bool bUnified = FlowField && FlowField->GetUnifiedComputer() != nullptr;
+
 	// Cache alive player pawn locations, pawns, controllers, and committed MapIds once for this pass.
 	TArray<APawn*, TInlineAllocator<4>> PlayerPawns;
 	TArray<FVector, TInlineAllocator<4>> PlayerLocations;
@@ -285,6 +292,15 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 				// drawing aggro and the swarm re-targets the living. (Downed players also take no contact damage.)
 				const AFPSRPlayerState* PS = PC->GetPlayerState<AFPSRPlayerState>();
 				if (PS && !PS->IsAlive())
+				{
+					continue;
+				}
+				// U (P-F): a late joiner that hasn't acked the current topology is excluded from the WHOLE movement+attack
+				// pass (targeting + contact/ranged damage in one choke) until its ack lands (or the fail-open timeout). Only
+				// with a unified field (multimap) — single-map has no topology to confirm, so it's a strict no-op there (no
+				// sub-RTT exclusion for a mid-combat single-map joiner). Host = local authority -> instantly satisfied.
+				// DBNO/Dead already excluded above; a revived player is already acked (marked long before), so it re-participates.
+				if (bUnified && PS && !PS->HasAckedJoinTopology(Now))
 				{
 					continue;
 				}
@@ -305,8 +321,6 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 	// Per-player attacker counters for this pass (attack token gating).
 	TArray<int32, TInlineAllocator<4>> AttackersThisPass;
 	AttackersThisPass.Init(0, PlayerPawns.Num());
-
-	const float Now = World->GetTimeSeconds();
 
 	const AFPSRGameState* GameState = World->GetGameState<AFPSRGameState>();
 	// Global freeze (card selection): enemies are frozen in place — skip the whole movement+attack pass.
@@ -332,11 +346,6 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 		const float Alpha = FMath::Clamp((RunClock - RampStart) / (RampEnd - RampStart), 0.0f, 1.0f);
 		ContactDamage = FMath::Lerp(25.0f, 50.0f, Alpha);
 	}
-
-	const UFPSRFlowFieldSubsystem* FlowField = World->GetSubsystem<UFPSRFlowFieldSubsystem>();
-	// U P-D: front-chase (connectivity targeting) is active ONLY when a unified continuous field exists; without it the
-	// enemy loop keeps the exact same-map + tracker behavior (single-map / pre-content = no regression, Codex R2).
-	const bool bUnified = FlowField && FlowField->GetUnifiedComputer() != nullptr;
 
 	// Build the per-pass agent arrays + uniform-grid spatial hash (all valid active enemies) for separation.
 	// Reuse the member scratch (Reset keeps capacity) so the 500-enemy batch doesn't realloc every frame (W1 P2-4).
@@ -687,6 +696,10 @@ void UFPSREnemySpawnSubsystem::ComputeOccupancy(TArray<FGameplayTag>& OutOccupie
 		return;
 	}
 	const UFPSRFlowFieldSubsystem* Flow = World->GetSubsystem<UFPSRFlowFieldSubsystem>();
+	// U (P-F): the topology late-join ack gate is meaningful ONLY when a unified continuous field exists (multimap) — a
+	// single-map run has no door topology to confirm, so the gate is a strict no-op there (avoids even a sub-RTT exclusion
+	// for a mid-combat single-map joiner: the "단일맵 무회귀" invariant).
+	const bool bUnified = Flow && Flow->GetUnifiedComputer() != nullptr;
 	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
 	{
 		APlayerController* PC = It->Get();
@@ -705,13 +718,23 @@ void UFPSREnemySpawnSubsystem::ComputeOccupancy(TArray<FGameplayTag>& OutOccupie
 		AFPSRPlayerState* PS = PC->GetPlayerState<AFPSRPlayerState>();
 		if (PS)
 		{
+			// U (P-F): stamp the topology generation this player entered the current topology at (first sighting; idempotent
+			// — MarkTopologyJoin no-ops once set). Starts the ack fail-open clock. Only with a unified field (multimap): a
+			// single-map run has no topology to confirm, so marking + gating are both inert there (strict no-op). The
+			// HasAckedJoinTopology gate below seals a late joiner out until it confirms this generation.
+			if (bUnified)
+			{
+				PS->MarkTopologyJoin(Flow->GetTopologyGeneration(), Now);
+			}
+
 			// Transition tracker (multimap Tier 1): if this ALIVE player's committed map is changing AWAY from a valid map,
 			// they just crossed a boundary — record the crossing (departed map + pawn location ~= the door) so the director
 			// can elect a few boundary enemies to follow them through. Recorded BEFORE the SetCurrentMapId commit (needs the
 			// old value). Single-map: the map never changes from unset, so this never fires. Downed players don't draw a
-			// tracker (they're filtered from targeting, B17), so only alive crossings are recorded.
+			// tracker (they're filtered from targeting, B17), so only alive crossings are recorded. Also gated on the topology
+			// ack (P-F, unified only): a not-yet-acked joiner mustn't spend tracker designations before it confirms the topology.
 			const FGameplayTag OldMap = PS->GetCurrentMapId();
-			if (PS->IsAlive() && OldMap.IsValid() && OldMap != Map)
+			if ((!bUnified || PS->HasAckedJoinTopology(Now)) && PS->IsAlive() && OldMap.IsValid() && OldMap != Map)
 			{
 				FMapTransitionRecord& Rec = PlayerTransitions.FindOrAdd(TObjectKey<APlayerController>(PC));
 				Rec.Player = PC;
@@ -721,13 +744,21 @@ void UFPSREnemySpawnSubsystem::ComputeOccupancy(TArray<FGameplayTag>& OutOccupie
 				Rec.bElected = false; // a fresh crossing: (re-)elect trackers for it this director tick
 			}
 			// Set CurrentMapId for ALL players with a pawn (a downed player is still physically in a map) so the combat
-			// cross-map gate + UI stay correct. Idempotent (low-churn: only dirties on a real map change).
+			// cross-map gate + UI stay correct. Idempotent (low-churn: only dirties on a real map change). Left ungated by
+			// the topology ack (P-F): committing the physical map is harmless and keeps the combat gate honest.
 			PS->SetCurrentMapId(Map);
 		}
 		// Allocation occupancy counts only LIVE participants — consistent with the movement pass, which excludes DBNO/dead
 		// from targeting. A map with only downed players isn't "occupied" for budget: it drains and the budget flows to
 		// living teammates elsewhere; it re-occupies when a living player (a reviver) arrives (Codex merge-gate P2).
 		if (PS && !PS->IsAlive())
+		{
+			continue;
+		}
+		// U (P-F): a not-yet-acked late joiner doesn't count toward occupancy — no spawn budget is apportioned to its map
+		// until it confirms the current topology (leading-edge seal). Cleared the instant its ack lands (or the fail-open
+		// timeout). Unified-field only: single-map has no topology to confirm -> strict no-op (host = local authority too).
+		if (bUnified && PS && !PS->HasAckedJoinTopology(Now))
 		{
 			continue;
 		}
@@ -1585,7 +1616,28 @@ void UFPSREnemySpawnSubsystem::ResetForNewRun()
 	// designations (those live on the enemy actor, cleared on Deactivate). A first run has none active (no-op).
 	ReleaseAllEnemies();
 
-	// Stage 2 also resets each connected PlayerState's topology ack here so a same-world re-run re-gates late joiners.
+	// U (P-F): reset each connected PlayerState's topology late-join ack so a same-world re-run re-marks + re-gates every
+	// player against the new run's topology. A first run's PlayerStates are already at the -1 default (no-op there), and a
+	// cross-world run reaches a fresh field (generation 0) — so on every CURRENTLY reachable path this is a no-op / correct.
+	// FUTURE NOTE (same-world re-run only, not yet reachable): this pairs with StartRun's ResetDoorTopologyToBaseline, which
+	// bumps the generation + replicates it (OnRep -> clients re-ack) WHEN the prior run opened a door. If a same-world re-run
+	// is ever added where the topology was NOT mutated (generation unchanged), there is no OnRep to restore Acked after this
+	// wipe, so a remote client would sit gated until the 5s fail-open (a benign but misleading "RPC loss?" log). Handle that
+	// case then by pairing the reset with an unconditional generation bump, or resetting only the Join marker (Acked is
+	// monotone within a world's generation space, so keeping it is safe).
+	if (UWorld* World = GetWorld())
+	{
+		if (const AGameStateBase* GS = World->GetGameState())
+		{
+			for (APlayerState* PS : GS->PlayerArray)
+			{
+				if (AFPSRPlayerState* FPS = Cast<AFPSRPlayerState>(PS))
+				{
+					FPS->ResetTopologyAck();
+				}
+			}
+		}
+	}
 }
 
 bool UFPSREnemySpawnSubsystem::IsRangedTokenAvailable(AFPSRPlayerController* TargetPC) const

@@ -158,6 +158,31 @@ public:
 	/** Server: set the committed occupancy map. Idempotent (low-churn); replicates to all. */
 	void SetCurrentMapId(const FGameplayTag& NewMapId);
 
+	// --- U (P-F) topology late-join ack (server-only, NOT replicated) — a client must confirm the current flow-field
+	//     topology generation before the swarm targets / the allocator counts it, so a late joiner (or a client mid door-
+	//     open) doesn't act on a topology it hasn't seen. Host/standalone owning controller is local authority = the server
+	//     itself, so it is instantly satisfied. Single-map: generation stays 0, so the gen-0 ack clears the gate at once. ---
+
+	/** Server: stamp the topology generation this player entered the current run's topology at (first sighting; idempotent
+	 *  — only sets when unset). Starts the fail-open clock. Server-only. */
+	void MarkTopologyJoin(int32 Gen, float Now);
+
+	/** Server: record the client's acknowledgement of topology generation Gen (monotone max — an ack never regresses). */
+	void SetAckedTopologyGeneration(int32 Gen);
+
+	/** Server: has this player acknowledged the generation it joined at? The gate the allocator/movement use to seal a
+	 *  late joiner out until it confirms the current topology. Not-yet-marked = fail-closed; else acked, or a logged
+	 *  fail-open past the timeout (a lost ack RPC must not softlock). Server-only. */
+	bool HasAckedJoinTopology(float Now) const;
+
+	/** Server: reset the topology ack state for a fresh / same-world re-run (StartRun / lobby entry). */
+	void ResetTopologyAck();
+
+	/** U (P-F) pure decision (unit-testable, headless via FPSRoguelite.Allocator): given the owning-controller local-
+	 *  authority flag, the acked/join generations, the join time, now, and the fail-open timeout — is the ack satisfied?
+	 *  local authority -> true; unmarked (JoinGen < 0) -> false (leading-edge seal); else AckedGen >= JoinGen OR timed out. */
+	static bool IsTopologyAckSatisfied(bool bLocalAuthority, int32 AckedGen, int32 JoinGen, float JoinTime, float Now, float Timeout);
+
 	/** Server: track a passive ability granted by a character-passive card (U18c), so the run-reset can clear it.
 	 *  bIsDamageEventListener bumps the DealtDamage listener count (drives the cheap ApplyDamage event-send gate so
 	 *  players without such a passive pay nothing on the hot damage path). Idempotent per handle is the caller's job. */
@@ -262,4 +287,23 @@ private:
 	/** Server-only: how many granted passives listen for the DealtDamage event (lifesteal). Gates the hot-path event
 	 *  send. Reset to 0 on ResetRunState. */
 	int32 DamageEventListenerCount = 0;
+
+	// --- U (P-F) topology ack state (server-only, NOT replicated — the client's confirmation rides the ServerAckTopology
+	//     RPC; only the server reads these in the allocator/movement gates). ---
+
+	/** Fail-open timeout (seconds): if a client's ack never lands within this, the player participates anyway (RPC loss /
+	 *  softlock guard) with a one-time diagnostic log. */
+	static constexpr float TopologyAckTimeoutSeconds = 5.0f;
+
+	/** The topology generation this player joined the current run at (-1 = not yet marked / fail-closed). */
+	int32 JoinTopologyGeneration = -1;
+
+	/** The highest topology generation this player's client has acked (-1 = none; monotone). */
+	int32 AckedTopologyGeneration = -1;
+
+	/** World time the player was first marked (the fail-open clock start). */
+	float TopologyJoinTime = 0.0f;
+
+	/** One-shot latch so the fail-open diagnostic logs at most once per player (mutable — HasAckedJoinTopology is const). */
+	mutable bool bLoggedTopologyFailOpen = false;
 };

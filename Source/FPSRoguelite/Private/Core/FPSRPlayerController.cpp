@@ -46,6 +46,11 @@ void AFPSRPlayerController::BeginPlay()
 		// Tell the server the local UI is up so it can issue the run-start opening seed. If the layout
 		// wasn't ready, ClientPresentCards lazily rebuilds it; the offer flow's abandon/retry covers the rest.
 		ServerNotifyClientReady();
+
+		// U (P-F): ack the current flow-field topology generation so the server clears this player's late-join gate. The
+		// GameState may not have replicated yet (gen reads 0); OnRep_TopologyGeneration re-acks the real value on arrival.
+		const AFPSRGameState* GS = GetWorld() ? GetWorld()->GetGameState<AFPSRGameState>() : nullptr;
+		ServerAckTopology(GS ? GS->GetTopologyGeneration() : 0);
 	}
 }
 
@@ -56,6 +61,51 @@ void AFPSRPlayerController::ServerNotifyClientReady_Implementation()
 		return;
 	}
 	BeginOpeningSeed(2);
+}
+
+void AFPSRPlayerController::ServerAckTopology_Implementation(int32 Gen)
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+	if (AFPSRPlayerState* PS = GetPlayerState<AFPSRPlayerState>())
+	{
+		PS->SetAckedTopologyGeneration(Gen); // monotone on the PS — a forged low/high value only advances this player's ack
+		// Low-frequency server diagnostic (fires on join + each OnRep after a door opens, not per-frame) so the late-join
+		// gate is observable in MP PIE: "acked -> the client now participates in targeting/occupancy" (P-F).
+		UE_LOG(LogFPSR, Log, TEXT("[Topology] Server recorded ack: '%s' -> generation %d."), *PS->GetPlayerName(), Gen);
+	}
+	else
+	{
+		// PlayerState not linked yet — buffer the highest gen; applied on link (InitPlayerState / OnRep_PlayerState).
+		PendingAckTopologyGeneration = FMath::Max(PendingAckTopologyGeneration, Gen);
+	}
+}
+
+void AFPSRPlayerController::InitPlayerState()
+{
+	Super::InitPlayerState();
+	ApplyPendingTopologyAck(); // server: a ServerAckTopology that landed before the PS was created
+}
+
+void AFPSRPlayerController::OnRep_PlayerState()
+{
+	Super::OnRep_PlayerState();
+	ApplyPendingTopologyAck(); // owning-client parity (harmless: the buffer is only ever populated server-side)
+}
+
+void AFPSRPlayerController::ApplyPendingTopologyAck()
+{
+	if (PendingAckTopologyGeneration < 0)
+	{
+		return;
+	}
+	if (AFPSRPlayerState* PS = GetPlayerState<AFPSRPlayerState>())
+	{
+		PS->SetAckedTopologyGeneration(PendingAckTopologyGeneration);
+		PendingAckTopologyGeneration = -1;
+	}
 }
 
 bool AFPSRPlayerController::EnsurePrimaryLayout()

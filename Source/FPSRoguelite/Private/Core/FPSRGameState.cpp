@@ -32,6 +32,7 @@ void AFPSRGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLi
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRGameState, ActiveMissionData, Params);
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRGameState, MissionProgress, Params);
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRGameState, RunScheduleAsset, Params);
+	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRGameState, TopologyGeneration, Params);
 }
 
 void AFPSRGameState::SetActiveBoss(AFPSRBossBase* InBoss)
@@ -66,6 +67,40 @@ void AFPSRGameState::SetActiveMission(UFPSRMissionDataAsset* InMission)
 void AFPSRGameState::OnRep_ActiveMission()
 {
 	OnActiveMissionChanged.Broadcast(ActiveMissionData);
+}
+
+void AFPSRGameState::SetTopologyGeneration(int32 NewGen)
+{
+	if (!HasAuthority() || TopologyGeneration == NewGen)
+	{
+		return;
+	}
+	TopologyGeneration = NewGen;
+	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRGameState, TopologyGeneration, this);
+	// No host broadcast: the listen-server host IS the server (local authority), so its own controller is instantly
+	// ack-satisfied (PlayerState::HasAckedJoinTopology short-circuits) and needs no OnRep. Only remote clients ack.
+}
+
+void AFPSRGameState::OnRep_TopologyGeneration()
+{
+	// Client: the server's topology generation changed (or arrived on late-join initial replication). Re-ack from every
+	// LOCAL controller so the server records this client's confirmation of the current topology. Iterate + IsLocalController
+	// (NOT GetFirstPlayerController — that can return a non-local proxy PC in some net configs / split-screen).
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+	{
+		if (AFPSRPlayerController* PC = Cast<AFPSRPlayerController>(It->Get()))
+		{
+			if (PC->IsLocalController())
+			{
+				PC->ServerAckTopology(TopologyGeneration);
+			}
+		}
+	}
 }
 
 void AFPSRGameState::SetMissionProgress(float NewProgress)
