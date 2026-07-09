@@ -168,6 +168,27 @@ public:
 	/** Server: drop the front-chase tag (handoff to same-map target / pool reuse). */
 	void ClearFrontChasing() { FrontChaseExpireTime = -1.0f; }
 
+	// --- Front-spawn attribution (multimap U P-E) — server-only, NOT replicated. An enemy the director spawns into a
+	//     front-active (open-door-connected, currently-unoccupied) slot is TAGGED here so the front pressure budget can keep
+	//     counting it for a bounded window even AFTER it crosses into the player's occupied slot (crossing credit), which
+	//     rate-limits the front's refill so an open door can't become an infinite conveyor (Codex P-E gate #4). The credit is
+	//     ONE-SHOT (stamped once at first crossing, never renewed) so a player round-tripping a door can't keep a cohort
+	//     drain-immune — attribution grants NO drain immunity (only IsFrontChasing / physical front-slot presence does).
+	//     Cleared on Activate (pool reuse), like the tracker / front-chase tags. ---
+	/** Server: mark this enemy as front-spawned (fresh attribution, uncredited). Called by the spawn subsystem right after
+	 *  the enemy's MapId is set, so a pooled reuse in a non-front slot never carries a stale tag. */
+	void MarkFrontSpawned() { bFrontSpawned = true; FrontCreditExpireTime = -1.0f; }
+	/** Server: is this enemy still attributed to a front (front-spawned and not yet released)? */
+	bool IsFrontSpawned() const { return bFrontSpawned; }
+	/** Server: whether this front-spawned enemy has had its one-shot crossing credit stamped yet (false = not crossed). */
+	bool HasFrontCreditStamp() const { return FrontCreditExpireTime >= 0.0f; }
+	/** Server: stamp the one-shot crossing credit (world seconds) as the enemy first enters an occupied slot. */
+	void StampFrontCredit(float ExpireTime) { FrontCreditExpireTime = ExpireTime; }
+	/** Server: is the crossing credit still live at time Now (only meaningful once stamped)? */
+	bool IsFrontCreditLive(float Now) const { return Now < FrontCreditExpireTime; }
+	/** Server: release front attribution (credit consumed / caught up) — the enemy becomes a normal slot enemy. */
+	void ClearFrontSpawn() { bFrontSpawned = false; FrontCreditExpireTime = -1.0f; }
+
 protected:
 	virtual void BeginPlay() override;
 
@@ -254,6 +275,12 @@ protected:
 	/** Server-only (U P-D): world time until which this enemy is a live front-chaser (chasing a cross-slot connected player
 	 *  via the unified field). -1 = not front-chasing. See SetFrontChasing. Not replicated. */
 	float FrontChaseExpireTime = -1.0f;
+
+	/** Server-only (U P-E): true while this enemy is attributed to a front (spawned into a front-active adjacent slot).
+	 *  FrontCreditExpireTime = the one-shot crossing-credit deadline; -1 = not yet crossed into an occupied slot. Both are
+	 *  reset on Activate (pool reuse). See MarkFrontSpawned. Not replicated (server-only AI budget accounting). */
+	bool bFrontSpawned = false;
+	float FrontCreditExpireTime = -1.0f;
 
 	/** Net-cull radius (cm) applied to NetCullDistanceSquared in the ctor (multimap Tier 0, Codex R5). Enemies spawn into
 	 *  the PERSISTENT level (always level-relevant to every connection), so distance is the SOLE lever that culls a

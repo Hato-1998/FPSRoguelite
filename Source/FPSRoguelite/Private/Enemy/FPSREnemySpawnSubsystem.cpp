@@ -224,6 +224,37 @@ void UFPSREnemySpawnSubsystem::SetTargetAliveCount(int32 InTarget)
 	TargetAliveCount = FMath::Clamp(InTarget, 0, MaxActiveEnemies);
 }
 
+// --- P-E pure helpers (unit-testable; no world). Single source of truth: the director calls these, and
+//     FPSRoguelite.Allocator regressions them headless (the exact formulas the Codex/Opus P-E gate hardened). ---
+
+int32 UFPSREnemySpawnSubsystem::ComputeFrontReserved(int32 FrontActiveSlots)
+{
+	if (FrontActiveSlots <= 0)
+	{
+		return 0;
+	}
+	return FMath::Min(FrontBudgetCeiling, PerFrontSlotBudget * FrontActiveSlots);
+}
+
+int32 UFPSREnemySpawnSubsystem::ComputePhysicalSteady(int32 TargetAliveCount, int32 FrontReserved)
+{
+	return FMath::Max(0, FMath::Min(TargetAliveCount, GlobalAliveCap - SeedReserve - FrontReserved));
+}
+
+bool UFPSREnemySpawnSubsystem::IsRearStatus(EFPSRFieldQuery Status, int32 Dist)
+{
+	if (Status == EFPSRFieldQuery::OK)
+	{
+		return Dist > ChaseExitCells; // a genuinely far OK reading (past the front-chase hysteresis band) is rear
+	}
+	return Status == EFPSRFieldQuery::Unreachable; // fully disconnected from every source; SourceLess/OffGrid/NoGrid = HOLD
+}
+
+float UFPSREnemySpawnSubsystem::ClampDrainDt(float RawElapsed, float SpawnIntervalSeconds)
+{
+	return FMath::Clamp(RawElapsed, 0.0f, SpawnIntervalSeconds * DrainDtClampTicks);
+}
+
 void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 {
 	if (!HasServerAuthority())
@@ -817,6 +848,225 @@ void UFPSREnemySpawnSubsystem::ElectTransitionTrackers(APlayerController* Player
 	}
 }
 
+bool UFPSREnemySpawnSubsystem::PassesCommonSpawnGates(const AFPSREnemySpawnPoint* Point, TConstArrayView<FVector> PlayerViewLocations) const
+{
+	if (Point == nullptr || !Point->IsEnabled())
+	{
+		return false;
+	}
+
+	// Zone (room) gate: an untagged point is always eligible; a tagged point only while its room is active. HasTag (not
+	// exact) so activating a parent zone would enable its child rooms (hierarchical, optional).
+	const FGameplayTag PointZone = Point->GetZoneTag();
+	if (PointZone.IsValid() && !ActiveSpawnZones.HasTag(PointZone))
+	{
+		return false;
+	}
+
+	// MinPlayerDistance gate (XY): keep spawns at least this far from the nearest player VIEW (no FOV test anymore).
+	if (Point->GetMinPlayerDistance() > 0.0f)
+	{
+		const FVector PointLocation = Point->GetSpawnLocation();
+		float NearestDistSq = TNumericLimits<float>::Max();
+		for (const FVector& PL : PlayerViewLocations)
+		{
+			NearestDistSq = FMath::Min(NearestDistSq, FVector::DistSquaredXY(PL, PointLocation));
+		}
+		if (NearestDistSq < FMath::Square(Point->GetMinPlayerDistance()))
+		{
+			return false;
+		}
+	}
+
+	return true;
+}
+
+void UFPSREnemySpawnSubsystem::ComputeFrontState(const TArray<FGameplayTag>& OccupiedMaps,
+	TMap<FGameplayTag, TArray<const AFPSREnemySpawnPoint*>>& OutFrontPointsByMap) const
+{
+	OutFrontPointsByMap.Reset();
+
+	const UWorld* World = GetWorld();
+	if (!World || SpawnPoints.Num() == 0)
+	{
+		return;
+	}
+	const UFPSRFlowFieldSubsystem* Flow = World->GetSubsystem<UFPSRFlowFieldSubsystem>();
+	if (!Flow || Flow->GetUnifiedComputer() == nullptr)
+	{
+		return; // no unified continuous field -> no front spawning (single-map / pre-content: no regression)
+	}
+
+	// Player VIEW locations for the shared MinPlayerDistance gate (same source as TrySelectSpawnPoint).
+	TArray<FVector, TInlineAllocator<4>> PlayerViewLocations;
+	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+	{
+		const APlayerController* PC = It->Get();
+		if (PC == nullptr || PC->GetPawn() == nullptr)
+		{
+			continue;
+		}
+		FVector CamLocation;
+		FRotator CamRotation;
+		PC->GetPlayerViewPoint(CamLocation, CamRotation);
+		PlayerViewLocations.Add(CamLocation);
+	}
+	if (PlayerViewLocations.Num() == 0)
+	{
+		return; // no players present -> no front
+	}
+
+	for (const TObjectPtr<AFPSREnemySpawnPoint>& PointPtr : SpawnPoints)
+	{
+		const AFPSREnemySpawnPoint* Point = PointPtr;
+		if (Point == nullptr)
+		{
+			continue;
+		}
+		// Only NON-occupied slots get front spawning (the physical apportionment already fills occupied slots).
+		const FGameplayTag SlotMap = Point->GetMapId();
+		if (OccupiedMaps.Contains(SlotMap))
+		{
+			continue;
+		}
+		if (!PassesCommonSpawnGates(Point, PlayerViewLocations))
+		{
+			continue;
+		}
+		// Front gate: the point's unified path-distance to the nearest player must be OK (=> open-door-connected + reachable,
+		// FPSRFlowFieldComputer::GetPathDistanceCells) AND within ChaseEnterCells (near-door). Bounding spawn range to the
+		// front-chase ENTER threshold means every front-spawned enemy immediately qualifies to front-chase (P-D) toward the
+		// player, so it starts moving through the door at once rather than sitting idle. SourceLess / Unreachable / OffGrid
+		// are NOT front-eligible (fail-closed — no spawning across a closed door or in a source-less window).
+		EFPSRFieldQuery St = EFPSRFieldQuery::NoGrid;
+		const int32 Dist = Flow->GetFrontDistanceCells(Point->GetSpawnLocation(), St);
+		if (St != EFPSRFieldQuery::OK || Dist > ChaseEnterCells)
+		{
+			continue;
+		}
+		OutFrontPointsByMap.FindOrAdd(SlotMap).Add(Point);
+	}
+}
+
+void UFPSREnemySpawnSubsystem::ComputeAliveAndFrontState(const TArray<FGameplayTag>& OccupiedMaps,
+	const TMap<FGameplayTag, TArray<const AFPSREnemySpawnPoint*>>& FrontPointsByMap, float Now,
+	TMap<FGameplayTag, int32>& OutAliveByMap, TMap<FGameplayTag, int32>& OutFrontAliveBySlot, int32& OutFrontCountedGlobal)
+{
+	OutAliveByMap.Reset();
+	OutFrontAliveBySlot.Reset();
+	OutFrontCountedGlobal = 0;
+
+	for (const TObjectPtr<AFPSREnemyBase>& EnemyPtr : ActiveEnemies)
+	{
+		AFPSREnemyBase* Enemy = EnemyPtr.Get();
+		if (!IsValid(Enemy))
+		{
+			continue;
+		}
+		const FGameplayTag M = Enemy->GetMapId();
+		++OutAliveByMap.FindOrAdd(M);
+
+		if (OccupiedMaps.Contains(M))
+		{
+			// A front-spawned enemy that has crossed into an occupied slot: run its ONE-SHOT crossing credit so the front
+			// keeps counting it for a bounded window (conveyor rate-limit, Codex P-E #4) without inflating that slot's own
+			// fill — it is already counted in OutAliveByMap above, which throttles the slot's native spawns. The credit is
+			// NEVER renewed, and grants NO drain immunity, so a player round-tripping a door can't leak a drain-immune cohort.
+			if (Enemy->IsFrontSpawned())
+			{
+				if (!Enemy->HasFrontCreditStamp())
+				{
+					Enemy->StampFrontCredit(Now + CrossingCreditSeconds); // first crossing -> start the single countdown
+				}
+				if (Enemy->IsFrontCreditLive(Now))
+				{
+					++OutFrontCountedGlobal;
+				}
+				else
+				{
+					Enemy->ClearFrontSpawn(); // credit consumed -> a normal occupied-slot enemy from now on
+				}
+			}
+		}
+		else if (FrontPointsByMap.Contains(M))
+		{
+			// Physically in a front-active (non-occupied) slot: counts toward that slot's front budget regardless of how it
+			// got there (a leftover of a just-vacated slot is legitimately part of the front now, so the front doesn't
+			// over-spawn on top of it).
+			++OutFrontAliveBySlot.FindOrAdd(M);
+			++OutFrontCountedGlobal;
+		}
+		// else: rear / non-front non-occupied -> only in OutAliveByMap (a candidate for the trickle drain).
+	}
+}
+
+int32 UFPSREnemySpawnSubsystem::DrainRearEnemies(const TArray<FGameplayTag>& OccupiedMaps,
+	const TMap<FGameplayTag, TArray<const AFPSREnemySpawnPoint*>>& FrontPointsByMap, int32 MaxToRelease, float Now)
+{
+	if (MaxToRelease <= 0)
+	{
+		return 0;
+	}
+	const UWorld* World = GetWorld();
+	const UFPSRFlowFieldSubsystem* Flow = World ? World->GetSubsystem<UFPSRFlowFieldSubsystem>() : nullptr;
+	if (!Flow)
+	{
+		return 0;
+	}
+
+	// Collect rear candidates (key = path-distance so the stalest drain first), then release — never mutate ActiveEnemies
+	// while iterating it.
+	TArray<TPair<int32, AFPSREnemyBase*>, TInlineAllocator<32>> Rear;
+	for (const TObjectPtr<AFPSREnemyBase>& EnemyPtr : ActiveEnemies)
+	{
+		AFPSREnemyBase* Enemy = EnemyPtr.Get();
+		if (!IsValid(Enemy))
+		{
+			continue;
+		}
+		const FGameplayTag M = Enemy->GetMapId();
+		if (OccupiedMaps.Contains(M) || FrontPointsByMap.Contains(M))
+		{
+			continue; // an occupied or front-active slot is never rear-drained (live crowd / live front)
+		}
+		if (Enemy->IsFrontChasing(Now) || Enemy->IsCrossingTracker(Now))
+		{
+			continue; // a live front-chaser / transition tracker is a live cohort (P-D / Tier 1), exempt
+		}
+		// Drain grace: a recently-vacated slot keeps its crowd for MapDrainGraceSeconds (no door-cross thrash).
+		const float* LastOcc = MapLastOccupiedTime.Find(M);
+		if (LastOcc && (Now - *LastOcc) < MapDrainGraceSeconds)
+		{
+			continue;
+		}
+		// Rear status: only a genuinely FAR OK distance (past the chase hysteresis band) or an Unreachable (a different
+		// open-grid component) is rear. A SourceLess / OffGrid reading is HOLD — the source-less window (players
+		// airborne/unsnapped) mustn't drain the near-door front (Codex P-E #6 / Opus P0-2). Same rule the unit test regresses.
+		EFPSRFieldQuery St = EFPSRFieldQuery::NoGrid;
+		const int32 Dist = Flow->GetFrontDistanceCells(Enemy->GetActorLocation(), St);
+		if (!IsRearStatus(St, Dist))
+		{
+			continue;
+		}
+		const int32 SortKey = (St == EFPSRFieldQuery::OK) ? Dist : MAX_int32; // Unreachable sorts as the stalest
+		Rear.Add(TPair<int32, AFPSREnemyBase*>(SortKey, Enemy));
+	}
+
+	if (Rear.Num() == 0)
+	{
+		return 0;
+	}
+	// Farthest-first (stalest rear drains first, ties -> arbitrary/stable).
+	Rear.Sort([](const TPair<int32, AFPSREnemyBase*>& A, const TPair<int32, AFPSREnemyBase*>& B) { return A.Key > B.Key; });
+
+	const int32 NumToRelease = FMath::Min(MaxToRelease, Rear.Num());
+	for (int32 i = 0; i < NumToRelease; ++i)
+	{
+		ReleaseEnemy(Rear[i].Value);
+	}
+	return NumToRelease;
+}
+
 void UFPSREnemySpawnSubsystem::RefreshSpawnPointCache()
 {
 	if (!HasServerAuthority())
@@ -841,25 +1091,60 @@ void UFPSREnemySpawnSubsystem::TickDirector()
 		return;
 	}
 
+	const float Now = World->GetTimeSeconds();
+
+	// Trickle-drain clock (U P-E): advance every tick INCLUDING the early return below, and clamp the elapsed to a couple of
+	// director intervals so a long freeze / pause can't accrue a burst of drain tokens that pops the whole rear on the first
+	// unfrozen tick (Codex P-E gate #4 / Opus P0-1). LastDirectorTime is stamped here unconditionally.
+	const float RawElapsed = (LastDirectorTime < 0.0f) ? 0.0f : (Now - LastDirectorTime);
+	const float DrainDt = ClampDrainDt(RawElapsed, SpawnInterval);
+	LastDirectorTime = Now;
+
 	const AFPSRGameState* GameState = World->GetGameState<AFPSRGameState>();
 	if (GameState && (GameState->IsRunPaused()
 		|| (!GameState->IsCombatPhase() && GameState->GetRunPhase() != ERunPhase::Boss)))
 	{
 		// Spawn during Combat AND Boss (the swarm persists + keeps ramping through the boss fight); never while
-		// frozen for card selection, and not in pre-combat/menu phases (Game.MD §2-2).
+		// frozen for card selection, and not in pre-combat/menu phases (Game.MD §2-2). The drain does NOT run here (no
+		// draining while frozen); LastDirectorTime is already stamped so the next live tick's DrainDt is one interval.
 		return;
 	}
 
-	const float Now = World->GetTimeSeconds();
-
 	// Map-aware allocator (multimap Tier 0). Occupancy (also commits each player's CurrentMapId + records boundary
-	// crossings for the Tier 1 transition tracker) + per-map alive counts.
+	// crossings for the Tier 1 transition tracker).
 	TArray<FGameplayTag> OccupiedMaps;
 	TArray<int32> PlayerCounts;
 	ComputeOccupancy(OccupiedMaps, PlayerCounts, Now);
 
+	// U P-E: front detection (unified continuous field ONLY). Front-active adjacent slots + their near-door eligible spawn
+	// points. Empty (and every P-E branch below dormant) when there is no unified field -> byte-identical to pre-P-E.
+	const UFPSRFlowFieldSubsystem* FlowField = World->GetSubsystem<UFPSRFlowFieldSubsystem>();
+	const bool bUnified = FlowField && FlowField->GetUnifiedComputer() != nullptr;
+	TMap<FGameplayTag, TArray<const AFPSREnemySpawnPoint*>> FrontPointsByMap;
+	if (bUnified)
+	{
+		ComputeFrontState(OccupiedMaps, FrontPointsByMap);
+	}
+	const int32 FrontActiveSlots = FrontPointsByMap.Num();
+
+	// U P-E: EXPLICIT front reserve carved out of the steady budget so the physical apportionment target stays honest —
+	// PhysicalSteady = Cap - SeedReserve - FrontReserved — the front never inflates / "steals" the physical target (Codex
+	// P-E gate #1). No unified field / no active front => FrontReserved 0 => PhysicalSteady == the pre-P-E steady (no regression).
+	const int32 FrontReserved = ComputeFrontReserved(FrontActiveSlots);
+
+	// Per-map alive counts (+ front pressure when unified). The unified pass also advances each front-spawned enemy's
+	// one-shot crossing credit.
 	TMap<FGameplayTag, int32> AliveByMap;
-	ComputeAliveByMap(AliveByMap);
+	TMap<FGameplayTag, int32> FrontAliveBySlot;
+	int32 FrontCountedGlobal = 0;
+	if (bUnified)
+	{
+		ComputeAliveAndFrontState(OccupiedMaps, FrontPointsByMap, Now, AliveByMap, FrontAliveBySlot, FrontCountedGlobal);
+	}
+	else
+	{
+		ComputeAliveByMap(AliveByMap);
+	}
 
 	// Transition tracker (multimap Tier 1): for each freshly-recorded crossing, elect a few boundary enemies (once) to
 	// pursue that player through the door; prune records that have aged out of the grace window or whose player is gone.
@@ -886,36 +1171,65 @@ void UFPSREnemySpawnSubsystem::TickDirector()
 		MapLastOccupiedTime.FindOrAdd(Map) = Now;
 	}
 
-	// Empty-map drain: any map holding enemies but NO players (and past its grace window) -> bounded release toward 0
-	// (reclaim budget). Occupied-map recycle is Tier 1; this only drains 0-player maps (pickups/XP/doors persist).
-	for (const TPair<FGameplayTag, int32>& Pair : AliveByMap)
+	// Split the global target across occupied maps (pure math, no side effects — computed here so the trickle drain below
+	// can read the per-map deficit for its burst gate). PhysicalSteady already reserves the front's share (above).
+	const int32 PhysicalSteady = ComputePhysicalSteady(TargetAliveCount, FrontReserved);
+	TArray<int32> PerMapTarget;
+	FPSREnemyAllocator::Apportion(PlayerCounts, PhysicalSteady, MapGroupBonus, PerMapTarget);
+
+	if (bUnified)
 	{
-		if (Pair.Value <= 0 || OccupiedMaps.Contains(Pair.Key))
+		// U P-E trickle drain (replaces the hard EmptyMapDrainPerTick pop): a time-based token bucket drains REAR enemies at
+		// an ambient rate, accelerating to a burst rate ONLY when the swarm is cap-bound AND a physical/front deficit exists
+		// (rear is eating the cap the live front needs). Rear = far / disconnected-from-front, past grace, not chasing; a
+		// source-less window never drains the front (DrainRearEnemies HOLDs SourceLess/OffGrid).
+		int32 PhysicalDeficit = 0;
+		for (int32 m = 0; m < OccupiedMaps.Num(); ++m)
 		{
-			continue;
+			PhysicalDeficit += FMath::Max(0, PerMapTarget[m] - AliveByMap.FindRef(OccupiedMaps[m]));
 		}
-		const float* LastOcc = MapLastOccupiedTime.Find(Pair.Key);
-		if (LastOcc && (Now - *LastOcc) < MapDrainGraceSeconds)
+		const bool bFrontDeficit = (FrontActiveSlots > 0) && (FrontCountedGlobal < FrontReserved);
+		const bool bCapBound = ActiveEnemies.Num() >= (GlobalAliveCap - CapBoundMargin);
+		const bool bDeficit = (PhysicalDeficit > 0) || bFrontDeficit;
+		const float DrainRate = (bCapBound && bDeficit) ? BurstDrainRatePerSec : BaseDrainRatePerSec;
+
+		DrainTokenBucket += DrainRate * DrainDt;
+		const int32 DrainRequested = FMath::FloorToInt(DrainTokenBucket);
+		if (DrainRequested > 0)
 		{
-			continue; // grace: recently vacated -> keep the crowd for a few seconds (no door-cross thrash)
+			const int32 Released = DrainRearEnemies(OccupiedMaps, FrontPointsByMap, DrainRequested, Now);
+			DrainTokenBucket -= Released;
+			if (Released < DrainRequested)
+			{
+				DrainTokenBucket = 0.0f; // rear pool exhausted this tick -> don't carry drain debt into the next
+			}
 		}
-		DrainMapEnemies(Pair.Key, EmptyMapDrainPerTick, Now);
+	}
+	else
+	{
+		// No unified field: the exact pre-P-E hard empty-map drain (byte-identical, no regression).
+		for (const TPair<FGameplayTag, int32>& Pair : AliveByMap)
+		{
+			if (Pair.Value <= 0 || OccupiedMaps.Contains(Pair.Key))
+			{
+				continue;
+			}
+			const float* LastOcc = MapLastOccupiedTime.Find(Pair.Key);
+			if (LastOcc && (Now - *LastOcc) < MapDrainGraceSeconds)
+			{
+				continue; // grace: recently vacated -> keep the crowd for a few seconds (no door-cross thrash)
+			}
+			DrainMapEnemies(Pair.Key, EmptyMapDrainPerTick, Now);
+		}
 	}
 
 	if (OccupiedMaps.Num() == 0)
 	{
-		return; // no players anywhere -> nothing to fill
+		return; // no players anywhere -> nothing to fill (the rear drain above still ran)
 	}
 
-	// Split the global target across occupied maps. The STEADY apportionment targets (Cap - SeedReserve) so the reserve
-	// stays as free headroom below the hard cap; the fill loop below hard-gates on the FULL cap so a newly-occupied map
-	// can seed immediately from that headroom (Codex R3 0-3s entry seed) while the total never exceeds GlobalAliveCap.
-	const int32 GlobalSteady = FMath::Max(0, FMath::Min(TargetAliveCount, GlobalAliveCap - SeedReserve));
-	TArray<int32> PerMapTarget;
-	FPSREnemyAllocator::Apportion(PlayerCounts, GlobalSteady, MapGroupBonus, PerMapTarget);
-
-	// Round-robin fill: at most one spawn per map per outer pass so a big map doesn't consume the whole per-tick budget
-	// before a smaller / newly-seeded map gets a turn. Every spawn is hard-gated on the GLOBAL cap.
+	// Physical round-robin fill: at most one spawn per map per outer pass so a big map doesn't consume the whole per-tick
+	// budget before a smaller / newly-seeded map gets a turn. Every spawn is hard-gated on the GLOBAL cap.
 	int32 SpawnedThisTick = 0;
 	bool bSpawnedAny = true;
 	while (bSpawnedAny && SpawnedThisTick < MaxSpawnPerTick && ActiveEnemies.Num() < GlobalAliveCap)
@@ -947,6 +1261,54 @@ void UFPSREnemySpawnSubsystem::TickDirector()
 			++Alive;
 			++SpawnedThisTick;
 			bSpawnedAny = true;
+		}
+	}
+
+	// U P-E: front round-robin fill (after physical). Per-front-slot cap (fair across open fronts) + the global FrontReserved
+	// + its OWN MaxFrontSpawnPerTick (so it never starves the physical fill's per-tick throughput, Codex P-E gate #B) + the
+	// shared hard cap. Front enemies are TAGGED (bFrontSpawned) so their one-shot crossing credit rate-limits the front's
+	// refill once they cross into the player's slot (no conveyor, #4).
+	if (bUnified && FrontActiveSlots > 0 && FrontReserved > 0)
+	{
+		TArray<FGameplayTag, TInlineAllocator<8>> FrontMaps;
+		for (const TPair<FGameplayTag, TArray<const AFPSREnemySpawnPoint*>>& Pair : FrontPointsByMap)
+		{
+			FrontMaps.Add(Pair.Key);
+		}
+		int32 FrontSpawnedThisTick = 0;
+		bool bFrontSpawnedAny = true;
+		while (bFrontSpawnedAny && FrontSpawnedThisTick < MaxFrontSpawnPerTick
+			&& FrontCountedGlobal < FrontReserved && ActiveEnemies.Num() < GlobalAliveCap)
+		{
+			bFrontSpawnedAny = false;
+			for (const FGameplayTag& FM : FrontMaps)
+			{
+				if (FrontSpawnedThisTick >= MaxFrontSpawnPerTick || FrontCountedGlobal >= FrontReserved
+					|| ActiveEnemies.Num() >= GlobalAliveCap)
+				{
+					break;
+				}
+				int32& SlotCount = FrontAliveBySlot.FindOrAdd(FM);
+				if (SlotCount >= PerFrontSlotBudget)
+				{
+					continue; // this front slot is at its per-front cap
+				}
+				const TArray<const AFPSREnemySpawnPoint*>& Pts = FrontPointsByMap[FM];
+				if (Pts.Num() == 0)
+				{
+					continue;
+				}
+				// Uniform pick among this front slot's near-door eligible points; keep the authored Z (no ground re-snap).
+				const AFPSREnemySpawnPoint* Chosen = Pts[FMath::RandRange(0, Pts.Num() - 1)];
+				if (AcquireEnemy(Chosen->GetSpawnLocation(), /*bSnapToGround*/false, Chosen, /*bFrontSpawned*/true) == nullptr)
+				{
+					continue;
+				}
+				++SlotCount;
+				++FrontCountedGlobal;
+				++FrontSpawnedThisTick;
+				bFrontSpawnedAny = true;
+			}
 		}
 	}
 }
@@ -1007,7 +1369,7 @@ bool UFPSREnemySpawnSubsystem::TrySelectSpawnPoint(const FGameplayTag& TargetMap
 	for (const TObjectPtr<AFPSREnemySpawnPoint>& PointPtr : SpawnPoints)
 	{
 		const AFPSREnemySpawnPoint* Point = PointPtr;
-		if (Point == nullptr || !Point->IsEnabled())
+		if (Point == nullptr)
 		{
 			continue;
 		}
@@ -1018,27 +1380,10 @@ bool UFPSREnemySpawnSubsystem::TrySelectSpawnPoint(const FGameplayTag& TargetMap
 			continue;
 		}
 
-		// Zone (room) gate: an untagged point is always eligible; a tagged point only while its room is active.
-		// HasTag (not exact) so activating a parent zone would enable its child rooms (hierarchical, optional).
-		const FGameplayTag PointZone = Point->GetZoneTag();
-		if (PointZone.IsValid() && !ActiveSpawnZones.HasTag(PointZone))
+		// Shared eligibility (enabled + active zone + MinPlayerDistance). Same gate the front selector reuses (U P-E).
+		if (!PassesCommonSpawnGates(Point, PlayerLocations))
 		{
 			continue;
-		}
-
-		// MinPlayerDistance gate (XY): keep spawns at least this far from the nearest player (no FOV test anymore).
-		if (Point->GetMinPlayerDistance() > 0.0f)
-		{
-			const FVector PointLocation = Point->GetSpawnLocation();
-			float NearestDistSq = TNumericLimits<float>::Max();
-			for (const FVector& PL : PlayerLocations)
-			{
-				NearestDistSq = FMath::Min(NearestDistSq, FVector::DistSquaredXY(PL, PointLocation));
-			}
-			if (NearestDistSq < FMath::Square(Point->GetMinPlayerDistance()))
-			{
-				continue;
-			}
 		}
 
 		Candidates.Add(Point);
@@ -1083,7 +1428,7 @@ FVector UFPSREnemySpawnSubsystem::SnapToGround(const FVector& Location) const
 	return Location; // no floor found (e.g. off-map): keep the original candidate
 }
 
-AFPSREnemyBase* UFPSREnemySpawnSubsystem::AcquireEnemy(const FVector& Location, bool bSnapToGround, const AFPSREnemySpawnPoint* SpawnPoint)
+AFPSREnemyBase* UFPSREnemySpawnSubsystem::AcquireEnemy(const FVector& Location, bool bSnapToGround, const AFPSREnemySpawnPoint* SpawnPoint, bool bFrontSpawned)
 {
 	UWorld* World = GetWorld();
 	if (!World || !HasServerAuthority())
@@ -1156,6 +1501,14 @@ AFPSREnemyBase* UFPSREnemySpawnSubsystem::AcquireEnemy(const FVector& Location, 
 	// Multimap Tier 0: inherit the spawn point's MapId (unset = Default single-map). Set explicitly on every acquire so a
 	// pooled enemy reused in a different map never carries a stale MapId; the movement pass keeps it synced as it moves.
 	Enemy->SetMapId(SpawnPoint ? SpawnPoint->GetMapId() : FGameplayTag());
+
+	// Multimap U P-E: tag a front-spawned enemy right after its MapId is set (Activate already cleared any stale tag), so
+	// the front pressure budget can keep counting it through its one-shot crossing credit. Marked here (not by the caller
+	// after return) so a future call site can't forget it. bFrontSpawned=false (physical / debug spawns) => normal enemy.
+	if (bFrontSpawned)
+	{
+		Enemy->MarkFrontSpawned();
+	}
 
 	// Structured spawner (C1): if this point authored an exit path, the enemy follows the waypoints OUT of the spawn
 	// structure (pipe/box) before flow-field player-chase takes over — so it never jams inside concave geometry the
