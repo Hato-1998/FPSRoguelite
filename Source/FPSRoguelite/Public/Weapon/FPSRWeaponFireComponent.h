@@ -94,6 +94,7 @@ protected:
 	int32 BurstShotsRemaining = 0;
 
 	bool bReloadRequestPending = false; // guards against spamming the reload RPC each tick
+	bool bWasReloading = false;         // owner-local reload edge tracker: restart the recoil spray pattern when a reload begins
 	float LastMeleeTime = -1000.0f; // world time of last melee attack (melee attack-rate cooldown)
 	float NextFireReadyTime = 0.0f; // world time the next ranged shot is allowed (per-weapon cadence + post-swap cooldown); gates the immediate press shot's recoil. Mirrors the server's ServerNextAllowedFireTime.
 	float SpinupElapsed = 0.0f; // seconds of continuous fire this trigger hold (spin-up ramp progress; client-local feel). Reset on StopFiring / equip; advances only while auto-firing and not run-paused.

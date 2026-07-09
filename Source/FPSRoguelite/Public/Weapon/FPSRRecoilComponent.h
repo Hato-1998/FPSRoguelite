@@ -50,6 +50,10 @@ public:
 	/** 누적 heat를 0으로(무기 스왑 시 새 무기가 차갑게 시작). */
 	void ResetHeat();
 
+	/** 반동 스프레이 패턴을 첫 발(ShotIndex 0)로 되돌린다(예: 재장전 시 새 탄창이 초반 패턴부터 다시 뿌리도록).
+	 *  진행 중 uplift/recovery·heat는 건드리지 않음. */
+	void ResetPattern();
+
 	/** 서버 accepted-shot heat 갱신(발사 GA 서버 브랜치에서 원격 폰에만 호출) — 서버 authoritative 트레이스 확산이
 	 *  원격 클라의 예측 확산과 일치하도록. heat 누적 + LastFireTime 갱신(grace 후 냉각) + tick 활성화까지 처리. */
 	void AdvanceHeatForAcceptedShot();

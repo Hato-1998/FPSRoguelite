@@ -450,6 +450,23 @@ void UFPSRWeaponFireComponent::TickComponent(float DeltaTime, ELevelTick TickTyp
 		return;
 	}
 
+	// Reload restart: when a reload BEGINS, restart the recoil spray pattern from shot 0 so the fresh magazine sprays the
+	// learnable pattern again. Holding fire through an (auto-)reload otherwise leaves the pattern's ShotIndex deep in its
+	// end-behavior (the "late" sustained pattern), because StartShooting only resets on a fresh trigger press. Detected on
+	// the replicated reloading edge (owner-local; this tick is IsLocallyControlled-gated). Melee/ChargeLaser drive no
+	// pattern. Spread heat needs no reset — it cools on its own during the no-fire reload window.
+	const bool bReloadingNow = Inventory->IsReloading();
+	if (bReloadingNow && !bWasReloading
+		&& Weapon->GetArchetype() != EFPSRWeaponArchetype::Melee
+		&& Weapon->GetArchetype() != EFPSRWeaponArchetype::ChargeLaser)
+	{
+		if (UFPSRRecoilComponent* Recoil = ResolveRecoil())
+		{
+			Recoil->ResetPattern();
+		}
+	}
+	bWasReloading = bReloadingNow;
+
 	const FFPSRWeaponStatBlock& Stats = Instance->GetResolvedStats();
 	const bool bSpinup = Weapon->BaseStats.bHasSpinup;
 	const float CadenceRate = bSpinup ? ComputeSpinupFireRate(Weapon->BaseStats, SpinupElapsed) : Stats.FireRate;

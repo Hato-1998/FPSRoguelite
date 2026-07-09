@@ -81,6 +81,13 @@ void UFPSRRecoilComponent::ResetHeat()
 	SetRecoilHeat(0.0f); // protected(UCRRecoilSpreadComponent) — 서브클래스 접근
 }
 
+void UFPSRRecoilComponent::ResetPattern()
+{
+	// 스프레이를 첫 발로 되돌린다(재장전 시 새 탄창이 초반 패턴부터). 진행 중 uplift/recovery·heat는 불변.
+	// CurrentShotIndex는 UCRRecoilComponent-protected → 서브클래스 접근. 다음 ApplyShot의 ConsumeShot이 0부터 소비.
+	CurrentShotIndex = 0;
+}
+
 void UFPSRRecoilComponent::AdvanceHeatForAcceptedShot()
 {
 	if (!HasSpreadCurves())

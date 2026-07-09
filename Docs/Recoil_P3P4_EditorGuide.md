@@ -52,7 +52,7 @@
 - **RepeatLast는 지양** — 큰 탄창에선 화면 밖으로 무한 상승. 연사총은 **RestartFromCustomIndex**(지속사격 구간 루프) 또는 **Random**(절차적 스프레이).
 - **업그레이드로 탄창이 커질수록 탄 대부분이 이 end-behavior 구간에 떨어지므로, 후반 루프/랜덤 튜닝이 late-game 손맛을 좌우합니다.** (초반 패턴은 "첫 몇 발 정체성")
 - 확산(heat)도 별개로 `MaxRecoilHeat`에서 상한 → 탄창 커져도 최대치까지만 벌어지고 유지.
-- 패턴은 **트리거를 새로 누를 때만** ShotIndex 0으로 리셋(연속 홀드·홀드 중 자동재장전 중엔 end-behavior 지속). "재장전 시 패턴 리셋"을 원하면 P4에서 추가 가능(요청 주세요).
+- 패턴은 **트리거를 새로 누를 때** + **재장전이 시작될 때** ShotIndex 0으로 리셋됩니다(✅ 구현됨). 즉 홀드 중 자동/수동 재장전을 거치면 새 탄창은 **초반 패턴부터 다시** 뿌립니다(end-behavior 지속 아님). 오너-로컬·전 무기 공통(근접/차지레이저 제외). 확산 heat는 재장전 무사격 구간에 알아서 식으므로 별도 리셋 불요.
 
 기타 회복(InitialRecoverySpeed 2 / MaxRecoverySpeed 10 / RecoveryAcceleration 40 / RecoveryCancelThreshold 0)은 기본값 시작.
 
