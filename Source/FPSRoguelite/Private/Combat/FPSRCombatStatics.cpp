@@ -28,26 +28,6 @@ namespace FPSRCombat
 	 *  jump / launch feel) instead of sliding them flat along the ground. */
 	static constexpr float KnockbackUpwardBias = 0.35f;
 
-	FGameplayTag GetActorMapId(const AActor* Actor)
-	{
-		if (!Actor)
-		{
-			return FGameplayTag();
-		}
-		if (const AFPSREnemyBase* Enemy = Cast<AFPSREnemyBase>(Actor))
-		{
-			return Enemy->GetMapId();
-		}
-		if (const APawn* Pawn = Cast<APawn>(Actor))
-		{
-			if (const AFPSRPlayerState* PS = Pawn->GetPlayerState<AFPSRPlayerState>())
-			{
-				return PS->GetCurrentMapId();
-			}
-		}
-		return FGameplayTag();
-	}
-
 	bool CanAffectTarget(const UWorld* World, const AActor* Instigator, const AActor* Target, const FVector& OriginLocation)
 	{
 		if (Target && Target == Instigator)
@@ -73,11 +53,10 @@ namespace FPSRCombat
 				return Unified->AreWorldLocationsConnected(OriginLocation, Target->GetActorLocation());
 			}
 		}
-		// Fallback (no unified grid: single-map / pre-content): the MapId cross-map gate. Cross-map only when BOTH are
-		// settled in a map and they differ; unset on either side allows (transition / default / boundary door).
-		const FGameplayTag A = GetActorMapId(Instigator);
-		const FGameplayTag B = GetActorMapId(Target);
-		return !(A.IsValid() && B.IsValid() && A != B);
+		// P-G: no MULTI-SLOT unified grid (single-map degenerate grid / pre-build / off-authority) -> allow. A single-map run
+		// has no cross-map walls to gate against (the connectivity gate is a multimap notion); this preserves the pre-P-G
+		// single-map "MapId allow-all" behavior exactly, without the per-actor MapId lookup.
+		return true;
 	}
 
 	bool IsFriendlyFireEnabled(const UWorld* World)

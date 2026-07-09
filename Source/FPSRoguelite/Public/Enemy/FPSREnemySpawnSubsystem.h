@@ -148,14 +148,6 @@ private:
 	 *  (parallel arrays, occupied maps only). Single-map: everyone resolves to the Default (unset) map. Now = world seconds. */
 	void ComputeOccupancy(TArray<FGameplayTag>& OutOccupiedMaps, TArray<int32>& OutPlayerCounts, float Now);
 
-	/** Count currently-active enemies per map (by each enemy's current MapId). Recomputed each director tick so map
-	 *  changes (an enemy crossing a boundary) stay consistent — O(alive), cheap at the 0.25s director cadence. */
-	void ComputeAliveByMap(TMap<FGameplayTag, int32>& OutAliveByMap) const;
-
-	/** Release up to MaxToRelease active enemies whose MapId == MapId back to the pool (bounded empty-map drain). Skips a
-	 *  live FRONT-CHASER (U P-D: a door-near cohort in a connected slot is a live front). Returns the number released. */
-	int32 DrainMapEnemies(const FGameplayTag& MapId, int32 MaxToRelease, float Now);
-
 	/** Server (U P-E): true if Point passes the shared spawn eligibility gates (enabled + active zone + MinPlayerDistance vs
 	 *  the given player VIEW locations). Extracted from TrySelectSpawnPoint so the front selector reuses the identical gate. */
 	bool PassesCommonSpawnGates(const AFPSREnemySpawnPoint* Point, TConstArrayView<FVector> PlayerViewLocations) const;
@@ -168,8 +160,9 @@ private:
 	void ComputeFrontState(const TArray<FGameplayTag>& OccupiedMaps,
 		TMap<FGameplayTag, TArray<const AFPSREnemySpawnPoint*>>& OutFrontPointsByMap) const;
 
-	/** Server (U P-E): one pass over alive enemies — bucket alive-by-map (like ComputeAliveByMap) AND compute the front
-	 *  pressure counts, updating each front-spawned enemy's ONE-SHOT crossing credit (stamped on first entry into an occupied
+	/** Server (U P-E): one pass over alive enemies — bucket alive-by-map AND compute the front pressure counts (P-G: the
+	 *  single alive-count path; single-map with no front degrades to a plain alive-by-map bucketing), updating each
+	 *  front-spawned enemy's ONE-SHOT crossing credit (stamped on first entry into an occupied
 	 *  slot; released when it expires). OutFrontAliveBySlot counts enemies physically in each front slot; OutFrontCountedGlobal
 	 *  additionally counts still-credited crossers (the conveyor rate-limit). Mutates enemy credit state -> non-const. */
 	void ComputeAliveAndFrontState(const TArray<FGameplayTag>& OccupiedMaps,
@@ -177,9 +170,8 @@ private:
 		TMap<FGameplayTag, int32>& OutAliveByMap, TMap<FGameplayTag, int32>& OutFrontAliveBySlot, int32& OutFrontCountedGlobal);
 
 	/** Server (U P-E): release up to MaxToRelease REAR enemies (far, not front-connected, past their map's drain grace, not
-	 *  chasing/tracking) back to the pool, farthest-first. Replaces the hard empty-map drain when a unified field exists. A
-	 *  SourceLess / OffGrid reading is treated as HOLD (never drained — the source-less window mustn't drain the front).
-	 *  Returns the number released. */
+	 *  chasing) back to the pool, farthest-first. P-G: the only drain path (multimap only). A SourceLess / OffGrid reading is
+	 *  treated as HOLD (never drained — the source-less window mustn't drain the front). Returns the number released. */
 	int32 DrainRearEnemies(const TArray<FGameplayTag>& OccupiedMaps,
 		const TMap<FGameplayTag, TArray<const AFPSREnemySpawnPoint*>>& FrontPointsByMap, int32 MaxToRelease, float Now);
 
@@ -304,10 +296,6 @@ private:
 	 *  weight = players + (players>=2 ? MapGroupBonus : 0). The content-aware allocator policy is Tier 1. */
 	static constexpr int32 MapGroupBonus = 1;
 
-	/** Max enemies drained from an UNOCCUPIED map per director tick (bounded, so an emptied map thins smoothly rather
-	 *  than popping the whole crowd at once). Occupied-map recycle is Tier 1 (this only drains 0-player maps). */
-	static constexpr int32 EmptyMapDrainPerTick = 4;
-
 	/** Grace after a map loses its last player before its enemies start draining (multimap Tier 0, server-only). A player
 	 *  who dips across a boundary and returns within this window finds the crowd intact — no drain thrash at the door. */
 	static constexpr float MapDrainGraceSeconds = 3.0f;
@@ -345,10 +333,10 @@ private:
 	 *  so a player round-tripping a door can't keep a cohort drain-immune (attribution grants NO drain immunity). */
 	static constexpr float CrossingCreditSeconds = 4.0f;
 
-	// --- Connectivity-aware trickle drain (multimap U P-E, server-only) — replaces the hard EmptyMapDrainPerTick pop with a
-	//     time-based token bucket: REAR (far, not front-connected) enemies drain at an ambient rate, accelerating only when
-	//     they're hogging the global cap and the front/physical targets can't fill (Codex P-E gate #3). Unified-field only;
-	//     single-map keeps the exact hard drain (no regression). ---
+	// --- Connectivity-aware trickle drain (multimap U P-E, server-only) — the ONLY drain path (P-G: the hard empty-map pop is
+	//     gone). A time-based token bucket: REAR (far, not front-connected) enemies drain at an ambient rate, accelerating only
+	//     when they're hogging the global cap and the front/physical targets can't fill (Codex P-E gate #3). Multimap only;
+	//     single-map (its one map is always occupied while a player lives) needs no drain. ---
 	/** Ambient rear-drain rate (enemies/sec) — a recently-vacated rear region thins gently. */
 	static constexpr float BaseDrainRatePerSec = 2.0f;
 	/** Burst rear-drain rate (enemies/sec) when the swarm is cap-bound AND a physical/front deficit exists (rear is eating

@@ -728,48 +728,6 @@ void UFPSREnemySpawnSubsystem::ComputeOccupancy(TArray<FGameplayTag>& OutOccupie
 	}
 }
 
-void UFPSREnemySpawnSubsystem::ComputeAliveByMap(TMap<FGameplayTag, int32>& OutAliveByMap) const
-{
-	OutAliveByMap.Reset();
-	for (const TObjectPtr<AFPSREnemyBase>& EnemyPtr : ActiveEnemies)
-	{
-		AFPSREnemyBase* Enemy = EnemyPtr.Get();
-		if (IsValid(Enemy))
-		{
-			++OutAliveByMap.FindOrAdd(Enemy->GetMapId());
-		}
-	}
-}
-
-int32 UFPSREnemySpawnSubsystem::DrainMapEnemies(const FGameplayTag& MapId, int32 MaxToRelease, float Now)
-{
-	if (MaxToRelease <= 0)
-	{
-		return 0;
-	}
-	// Collect first (ReleaseEnemy mutates ActiveEnemies — never mutate while iterating it).
-	TArray<AFPSREnemyBase*, TInlineAllocator<16>> ToRelease;
-	for (const TObjectPtr<AFPSREnemyBase>& EnemyPtr : ActiveEnemies)
-	{
-		AFPSREnemyBase* Enemy = EnemyPtr.Get();
-		// U P-D: skip a live FRONT-CHASER — a door-near cohort chasing a player in a connected slot is a live front, not idle.
-		// Out-of-range enemies (no front tag) still drain; the tag is expiry-bounded so a departed cohort drains later.
-		if (IsValid(Enemy) && Enemy->GetMapId() == MapId && !Enemy->IsFrontChasing(Now))
-		{
-			ToRelease.Add(Enemy);
-			if (ToRelease.Num() >= MaxToRelease)
-			{
-				break;
-			}
-		}
-	}
-	for (AFPSREnemyBase* Enemy : ToRelease)
-	{
-		ReleaseEnemy(Enemy);
-	}
-	return ToRelease.Num();
-}
-
 bool UFPSREnemySpawnSubsystem::PassesCommonSpawnGates(const AFPSREnemySpawnPoint* Point, TConstArrayView<FVector> PlayerViewLocations) const
 {
 	if (Point == nullptr || !Point->IsEnabled())
@@ -1054,19 +1012,12 @@ void UFPSREnemySpawnSubsystem::TickDirector()
 	// P-E gate #1). No unified field / no active front => FrontReserved 0 => PhysicalSteady == the pre-P-E steady (no regression).
 	const int32 FrontReserved = ComputeFrontReserved(FrontActiveSlots);
 
-	// Per-map alive counts (+ front pressure when unified). The unified pass also advances each front-spawned enemy's
-	// one-shot crossing credit.
+	// Per-map alive counts (+ front pressure). P-G: the single pass. Single-map (no front): FrontPointsByMap is empty and no
+	// enemy is front-spawned, so this degrades to a plain alive-by-map bucketing (byte-identical to the old per-map counter).
 	TMap<FGameplayTag, int32> AliveByMap;
 	TMap<FGameplayTag, int32> FrontAliveBySlot;
 	int32 FrontCountedGlobal = 0;
-	if (bUnified)
-	{
-		ComputeAliveAndFrontState(OccupiedMaps, FrontPointsByMap, Now, AliveByMap, FrontAliveBySlot, FrontCountedGlobal);
-	}
-	else
-	{
-		ComputeAliveByMap(AliveByMap);
-	}
+	ComputeAliveAndFrontState(OccupiedMaps, FrontPointsByMap, Now, AliveByMap, FrontAliveBySlot, FrontCountedGlobal);
 
 	// Grace: stamp each occupied map's last-seen time so a just-vacated map isn't drained for MapDrainGraceSeconds (a
 	// player dipping across a boundary and back finds the crowd intact). Server-only.
@@ -1083,7 +1034,7 @@ void UFPSREnemySpawnSubsystem::TickDirector()
 
 	if (bUnified)
 	{
-		// U P-E trickle drain (replaces the hard EmptyMapDrainPerTick pop): a time-based token bucket drains REAR enemies at
+		// U P-E trickle drain (P-G: the only drain path; the old hard empty-map pop is gone): a time-based token bucket drains REAR enemies at
 		// an ambient rate, accelerating to a burst rate ONLY when the swarm is cap-bound AND a physical/front deficit exists
 		// (rear is eating the cap the live front needs). Rear = far / disconnected-from-front, past grace, not chasing; a
 		// source-less window never drains the front (DrainRearEnemies HOLDs SourceLess/OffGrid).
@@ -1109,23 +1060,9 @@ void UFPSREnemySpawnSubsystem::TickDirector()
 			}
 		}
 	}
-	else
-	{
-		// No unified field: the exact pre-P-E hard empty-map drain (byte-identical, no regression).
-		for (const TPair<FGameplayTag, int32>& Pair : AliveByMap)
-		{
-			if (Pair.Value <= 0 || OccupiedMaps.Contains(Pair.Key))
-			{
-				continue;
-			}
-			const float* LastOcc = MapLastOccupiedTime.Find(Pair.Key);
-			if (LastOcc && (Now - *LastOcc) < MapDrainGraceSeconds)
-			{
-				continue; // grace: recently vacated -> keep the crowd for a few seconds (no door-cross thrash)
-			}
-			DrainMapEnemies(Pair.Key, EmptyMapDrainPerTick, Now);
-		}
-	}
+	// P-G: single-map (bUnified false) runs no drain — its one map is occupied whenever any alive player is present, so the
+	// old hard empty-map drain only ever fired at wipe/run-end (handled by ReleaseAllEnemies + the phase early-return above)
+	// and pit-fall recycle covers fallen enemies. (The multimap trickle drain above is the only drain path now.)
 
 	if (OccupiedMaps.Num() == 0)
 	{

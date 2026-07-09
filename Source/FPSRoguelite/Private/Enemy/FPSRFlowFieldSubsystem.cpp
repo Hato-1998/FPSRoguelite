@@ -84,8 +84,8 @@ void UFPSRFlowFieldSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 	}
 
 	// P-G: build ONE continuous field per world. Scan for the bUnifiedExtent volume (multimap) + a single untagged volume
-	// (single-map extent). MapId'd slot volumes are baked into the per-map registry (dead after the SlotBounds reroute below,
-	// removed in Stage C) — the registry is no longer the flow source.
+	// (single-map extent). MapId'd slot volumes are baked into the unified grid by BuildUnifiedField (their world AABBs go
+	// into SlotBounds for occupancy / MapId resolution); there is no longer a per-map flow registry.
 	bool bAnyMapIdVolume = false;
 	const AFPSRFlowFieldBoundsVolume* UnifiedVolume = nullptr;
 	const AFPSRFlowFieldBoundsVolume* UntaggedVolume = nullptr;
@@ -106,8 +106,7 @@ void UFPSRFlowFieldSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 			if (!UntaggedVolume) { UntaggedVolume = Volume; } // single-map extent -> the degenerate unified grid below
 			continue;
 		}
-		bAnyMapIdVolume = true;
-		BakeMap(Volume->GetMapId(), Volume, DetectFloorZForVolume(InWorld, *Volume)); // registry (removed in Stage C)
+		bAnyMapIdVolume = true; // a MapId'd slot -> baked into the unified grid by BuildUnifiedField (needs a bUnifiedExtent)
 	}
 
 	if (UnifiedVolume)
@@ -122,7 +121,10 @@ void UFPSRFlowFieldSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 		// (an untagged bounds volume, or the origin-centered fallback). Serves flow + connectivity; SlotBounds stays empty (no
 		// per-slot MapId partition) and bUnifiedMultiSlot stays false, so the multimap-only gates (ack / combat connectivity /
 		// front / trickle) are inert here — single-map is a strict no-op, exactly as before P-G.
-		const float FloorZ = UntaggedVolume ? DetectFloorZForVolume(InWorld, *UntaggedVolume) : DetectFloorZ(InWorld);
+		// Z anchor = the PlayerStart floor (DetectFloorZ) whether or not an untagged bounds volume is present — matching the
+		// pre-P-G Default field ("S1a parity"). The untagged volume only SIZES the grid; anchoring it at its box-center trace
+		// (DetectFloorZForVolume) would regress single-map GridOrigin.Z + re-introduce the volume-center mis-anchor gotcha.
+		const float FloorZ = DetectFloorZ(InWorld);
 		UnifiedComputer = NewObject<UFPSRFlowFieldComputer>(this);
 		UnifiedComputer->BuildFromWorldTrace(&InWorld, UntaggedVolume, FloorZ);
 		UnifiedComputer->ExtractSurfaceData(BakedBaseline);
@@ -150,27 +152,6 @@ void UFPSRFlowFieldSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 	RecomputeAllFields();
 }
 
-UFPSRFlowFieldComputer* UFPSRFlowFieldSubsystem::BakeMap(const FGameplayTag& MapId, const AFPSRFlowFieldBoundsVolume* BoundsVolume, float FloorZ)
-{
-	if (!HasServerAuthority())
-	{
-		return nullptr;
-	}
-	UWorld* World = GetWorld();
-	if (!World)
-	{
-		return nullptr;
-	}
-
-	TObjectPtr<UFPSRFlowFieldComputer>& Slot = Computers.FindOrAdd(MapId);
-	if (!Slot)
-	{
-		Slot = NewObject<UFPSRFlowFieldComputer>(this);
-	}
-	Slot->BuildFromWorldTrace(World, BoundsVolume, FloorZ); // once per map; re-bakeable if a map ever re-streams
-	return Slot;
-}
-
 void UFPSRFlowFieldSubsystem::BuildUnifiedField(UWorld& InWorld, const AFPSRFlowFieldBoundsVolume& UnifiedVolume)
 {
 	if (!HasServerAuthority())
@@ -191,13 +172,15 @@ void UFPSRFlowFieldSubsystem::BuildUnifiedField(UWorld& InWorld, const AFPSRFlow
 	const int32 DimY = FMath::Max(1, FMath::CeilToInt(Extent.GetSize().Y / CellSize));
 
 	// Enforce the P-0 cell budget BEFORE allocating (Codex R10): unlike BuildFromWorldTrace, BuildEmptyGrid does NOT coarsen,
-	// so an oversized bUnifiedExtent must fail here (leaving the per-map registry as the flow source) rather than allocate an
-	// over-budget grid with runaway recompute / memory. This is the P-0 gate applied to the actual authored extent.
+	// so an oversized bUnifiedExtent must fail here rather than allocate an over-budget grid with runaway recompute / memory.
+	// This is the runtime P-0 gate; the authored extent should already pass CheckUnifiedGridBudget at author time. P-G: there
+	// is NO per-map registry fallback anymore — a fail here leaves the multimap with no flow field (enemies only beeline,
+	// combat allow-all), so this is a hard content error. Fix the extent; do not ship an over-budget bUnifiedExtent.
 	if (DimX > UFPSRFlowFieldComputer::GetMaxGridDimPerAxis() || DimY > UFPSRFlowFieldComputer::GetMaxGridDimPerAxis() ||
 		static_cast<int64>(DimX) * DimY > UFPSRFlowFieldComputer::GetMaxTotalCells())
 	{
 		UE_LOG(LogFPSR, Error,
-			TEXT("[FlowField] U: unified extent %dx%d cells exceeds the budget (axis<=%d, total<=%d); NOT building the unified grid (per-map registry remains the flow source). Shrink the extent or raise the volume's CellSizeOverride (P-0 gate)."),
+			TEXT("[FlowField] U: unified extent %dx%d cells exceeds the budget (axis<=%d, total<=%d); NOT building the unified grid (multimap will have NO flow field — content error). Shrink the extent or raise the volume's CellSizeOverride (P-0 gate)."),
 			DimX, DimY, UFPSRFlowFieldComputer::GetMaxGridDimPerAxis(), UFPSRFlowFieldComputer::GetMaxTotalCells());
 		return;
 	}
@@ -280,7 +263,6 @@ bool UFPSRFlowFieldSubsystem::BakeDiscoveredMap(const FGameplayTag& MapId)
 		{
 			// P-G: record the streamed slot's world AABB for occupancy / MapId resolution (independent of the flow bake).
 			SlotBounds.Add(MapId, Volume->GetWorldBounds());
-			BakeMap(MapId, Volume, DetectFloorZForVolume(*World, *Volume));
 			if (UnifiedComputer)
 			{
 				// U: swarm flow samples ONLY the unified field, so readiness = the unified slot bake succeeded. If it fails
@@ -351,12 +333,6 @@ void UFPSRFlowFieldSubsystem::NotifyDoorBroken(const AActor* Door)
 		*Door->GetName(), OpenedEdges, Pairs.Num(), TopologyGeneration);
 }
 
-bool UFPSRFlowFieldSubsystem::IsMapFieldReady(const FGameplayTag& MapId) const
-{
-	const TObjectPtr<UFPSRFlowFieldComputer>* Slot = Computers.Find(MapId);
-	return Slot && *Slot && (*Slot)->IsFieldReady();
-}
-
 bool UFPSRFlowFieldSubsystem::IsLocationInMap(const FGameplayTag& MapId, const FVector& WorldLocation) const
 {
 	// P-G: resolve against the lightweight SlotBounds table (the per-map flow registry is gone). An EMPTY table means a
@@ -412,13 +388,6 @@ FGameplayTag UFPSRFlowFieldSubsystem::FindMapIdForLocation(const FVector& WorldL
 	return FGameplayTag();
 }
 
-bool UFPSRFlowFieldSubsystem::EvictMap(const FGameplayTag& MapId)
-{
-	// Tier 0 keeps maps loaded (LOD-cull only); this is an API stub for the S3 stream-out contract. The caller must have
-	// drained the map's enemies first (else a cached Computer* dangles — see the S3/allocator "no evict while alive" rule).
-	return Computers.Remove(MapId) > 0;
-}
-
 void UFPSRFlowFieldSubsystem::Deinitialize()
 {
 	if (UWorld* World = GetWorld())
@@ -435,7 +404,6 @@ void UFPSRFlowFieldSubsystem::Deinitialize()
 			bRunStateHandlerBound = false;
 		}
 	}
-	Computers.Reset();
 	SlotBounds.Reset();
 	UnifiedComputer = nullptr;
 	bUnifiedMultiSlot = false;
@@ -468,19 +436,11 @@ void UFPSRFlowFieldSubsystem::RecomputeAllFields()
 		}
 	}
 
-	// Single scheduler over the registry (Codex R2: no per-computer timers). Each computer seeds only from players
-	// physically inside ITS grid (WorldToCellIndex rejects out-of-grid pawns), so an empty map's recompute early-outs.
-	for (const TPair<FGameplayTag, TObjectPtr<UFPSRFlowFieldComputer>>& Pair : Computers)
-	{
-		if (Pair.Value)
-		{
-			Pair.Value->RecomputeFromWorld(World);
-		}
-	}
 	if (UnifiedComputer)
 	{
-		// U: single continuous field, seeded by every player physically inside its extent (also rebuilds connectivity for
-		// the origin-aware combat gate). This is the door-open-topology recompute the near-cap bench measured (~5ms @39k).
+		// P-G: the single continuous field (multimap unified grid OR single-map degenerate grid), seeded by every player
+		// physically inside its extent (also rebuilds connectivity for the origin-aware combat gate). This is the door-open-
+		// topology recompute the near-cap bench measured (~5ms @39k). No per-computer timers (Codex R2).
 		UnifiedComputer->RecomputeFromWorld(World);
 	}
 
@@ -502,12 +462,9 @@ void UFPSRFlowFieldSubsystem::RecomputeAllFields()
 				}
 			}
 		}
-		for (const TPair<FGameplayTag, TObjectPtr<UFPSRFlowFieldComputer>>& Pair : Computers)
+		if (UnifiedComputer)
 		{
-			if (Pair.Value)
-			{
-				Pair.Value->DebugDraw(World, PlayerLocs, GFlowUpdateInterval * 1.2f);
-			}
+			UnifiedComputer->DebugDraw(World, PlayerLocs, GFlowUpdateInterval * 1.2f);
 		}
 	}
 #endif
@@ -597,48 +554,13 @@ void UFPSRFlowFieldSubsystem::ResetDoorTopologyToBaseline()
 
 FVector UFPSRFlowFieldSubsystem::SampleFlowDirection(const FVector& WorldLocation) const
 {
-	if (UnifiedComputer)
-	{
-		return UnifiedComputer->Sample(WorldLocation); // U: single continuous field covers all slots
-	}
-	// By-location routing (S1b bridge): pick the computer whose grid AABB (XY) contains WorldLocation. Maps are spatially
-	// separated so at most one contains it. S2a replaces this with a MapId-keyed sample (enemy carries its map).
-	for (const TPair<FGameplayTag, TObjectPtr<UFPSRFlowFieldComputer>>& Pair : Computers)
-	{
-		if (!Pair.Value)
-		{
-			continue;
-		}
-		const FBox B = Pair.Value->GetGridBounds();
-		if (B.IsValid && WorldLocation.X >= B.Min.X && WorldLocation.X < B.Max.X &&
-			WorldLocation.Y >= B.Min.Y && WorldLocation.Y < B.Max.Y)
-		{
-			return Pair.Value->Sample(WorldLocation);
-		}
-	}
-	return FVector::ZeroVector;
+	// P-G: ONE continuous field (multimap unified grid OR single-map degenerate grid). ZeroVector off-authority / pre-build.
+	return UnifiedComputer ? UnifiedComputer->Sample(WorldLocation) : FVector::ZeroVector;
 }
 
 FVector UFPSRFlowFieldSubsystem::SampleFlowDirection(const FGameplayTag& MapId, const FVector& WorldLocation) const
 {
-	if (UnifiedComputer)
-	{
-		return UnifiedComputer->Sample(WorldLocation); // U: single field — the enemy's MapId is irrelevant (one grid)
-	}
-	if (const TObjectPtr<UFPSRFlowFieldComputer>* Slot = Computers.Find(MapId))
-	{
-		if (*Slot)
-		{
-			// If the location is inside the passed map's grid, sample it (even a zero at a source is correct).
-			const FBox B = (*Slot)->GetGridBounds();
-			if (B.IsValid && WorldLocation.X >= B.Min.X && WorldLocation.X < B.Max.X &&
-				WorldLocation.Y >= B.Min.Y && WorldLocation.Y < B.Max.Y)
-			{
-				return (*Slot)->Sample(WorldLocation);
-			}
-		}
-	}
-	// Mid-transition (enemy physically crossed into another map's region while still carrying its old MapId): retry
-	// against whichever map's grid actually contains the location so flow stays continuous at the door (Codex R2).
-	return SampleFlowDirection(WorldLocation);
+	// P-G: the enemy's MapId is irrelevant now (one grid). Kept as a distinct overload so the movement-pass call site (which
+	// passes the enemy's MapId) is unchanged.
+	return UnifiedComputer ? UnifiedComputer->Sample(WorldLocation) : FVector::ZeroVector;
 }

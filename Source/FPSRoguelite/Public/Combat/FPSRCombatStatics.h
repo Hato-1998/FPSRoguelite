@@ -64,15 +64,11 @@ namespace FPSRCombat
 		float WeakpointMultiplier = 1.0f;
 	};
 
-	/** The map an actor belongs to (multimap Tier 0): a swarm enemy -> its MapId; a player pawn -> its PlayerState's
-	 *  committed CurrentMapId; anything else (doors, world, projectiles) -> unset. Unset = the Default single-map. */
-	FPSROGUELITE_API FGameplayTag GetActorMapId(const AActor* Actor);
-
-	/** Combat reachability guard. U (P-C): when a unified continuous field is active, false when the ORIGIN cell and the
+	/** Combat reachability guard. U (P-C): when a MULTI-SLOT unified field is active, false when the ORIGIN cell and the
 	 *  TARGET cell are NOT in the same open-grid connected component — a closed door/wall blocks damage/AOE, an open door
 	 *  connects them (fail-closed off-grid / during the one-tick post-door-stamp window). OriginLocation is the blast Center
-	 *  for explosions, the instigator's location for direct shots. Fallback (no unified grid: single-map / pre-content): the
-	 *  MapId cross-map gate (false only when both are settled in DIFFERENT maps). Also covers explosion knockback (0-damage).
+	 *  for explosions, the instigator's location for direct shots. P-G: single-map degenerate grid / no field -> allow-all
+	 *  (no cross-map walls to gate; matches pre-P-G single-map). Also covers explosion knockback (0-damage).
 	 *  O(1): a precomputed component-label compare, off the swarm hot path. */
 	FPSROGUELITE_API bool CanAffectTarget(const UWorld* World, const AActor* Instigator, const AActor* Target, const FVector& OriginLocation);
 

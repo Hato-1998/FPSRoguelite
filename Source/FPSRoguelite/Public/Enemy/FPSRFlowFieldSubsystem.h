@@ -61,10 +61,6 @@ public:
 	 *  NoGrid when no unified field; else the computer's OK/OffGrid/SourceLess/Unreachable. Returns MAX_int32 for non-OK. */
 	int32 GetFrontDistanceCells(const FVector& Loc, EFPSRFieldQuery& OutStatus) const;
 
-	/** Get (creating + baking if needed) the computer for MapId over BoundsVolume, anchored at FloorZ. Server-only. Used
-	 *  at world begin (S1b) and by the MapStreamSubsystem on stream-in collision-ready (S3). Returns null off-authority. */
-	UFPSRFlowFieldComputer* BakeMap(const FGameplayTag& MapId, const AFPSRFlowFieldBoundsVolume* BoundsVolume, float FloorZ);
-
 	/** Discover the (now-loaded) bounds volume tagged MapId anywhere in the world and bake its per-map field, anchoring Z
 	 *  from the volume's own box (a streamed sublevel need not contain a PlayerStart). Called by the MapStreamSubsystem
 	 *  once a streamed map's collision is registered (S3). Returns false if no volume with that MapId is loaded. */
@@ -95,21 +91,14 @@ public:
 	 *  regressions it headless (the exact edge logic HandleRunStateChanged uses). */
 	static bool ShouldRecomputeOnUnfreeze(bool bWasPaused, bool bNowPaused, int32 TopologyGen, int32 LastRecomputedGen);
 
-	/** Whether a baked, ready computer exists for MapId (used by the stream/allocator gate before spawning into a map). */
-	bool IsMapFieldReady(const FGameplayTag& MapId) const;
-
-	/** True if WorldLocation is within MapId's grid (plus a small hysteresis margin, so an enemy near its own map's edge
+	/** True if WorldLocation is within MapId's slot AABB (plus a small hysteresis margin, so an enemy near its slot's edge
 	 *  doesn't flip-flop maps at the boundary). Used by the movement pass to fast-skip re-resolving an enemy's MapId while
-	 *  it's still in its map. Unset/absent MapId with no computer -> false. */
+	 *  it's still in its slot. P-G: resolved from SlotBounds — an EMPTY table (single-map degenerate grid) returns true. */
 	bool IsLocationInMap(const FGameplayTag& MapId, const FVector& WorldLocation) const;
 
-	/** The MapId whose grid strictly contains WorldLocation (spatially separated maps -> at most one), or unset if none.
-	 *  Used to re-resolve an enemy's MapId once it has left its previous map's grid (door crossing). */
+	/** The MapId whose slot AABB strictly contains WorldLocation (spatially separated slots -> at most one), or unset if none.
+	 *  Used to re-resolve an enemy's MapId once it has left its previous slot (door crossing). P-G: resolved from SlotBounds. */
 	FGameplayTag FindMapIdForLocation(const FVector& WorldLocation) const;
-
-	/** Remove a map's computer (stream-out). Tier 0 keeps maps loaded (LOD-cull only) so this is not exercised, but the
-	 *  registry supports it; callers must ensure the map has no active enemies before evicting (S3 contract). */
-	bool EvictMap(const FGameplayTag& MapId);
 
 private:
 	void RecomputeAllFields();
@@ -145,10 +134,6 @@ private:
 	/** Trace the floor Z under a bounds volume's box center (per-map Z anchor for a streamed sublevel with no PlayerStart),
 	 *  falling back to the box's world-min Z. */
 	float DetectFloorZForVolume(UWorld& InWorld, const AFPSRFlowFieldBoundsVolume& Volume) const;
-
-	/** The per-map flow-field computers, keyed by MapId (unset tag = Default single-map). Server-only. */
-	UPROPERTY(Transient)
-	TMap<FGameplayTag, TObjectPtr<UFPSRFlowFieldComputer>> Computers;
 
 	/** U continuous field. P-G: ALWAYS built on the server — a real bUnifiedExtent grid (all MapId'd slots baked in), OR a
 	 *  single degenerate world-trace grid for a plain single-map. Swarm flow + combat connectivity sample THIS. */
