@@ -4,7 +4,16 @@
 > **작업 단계를 끝낼 때마다, 그리고 중단 전 반드시 이 파일을 갱신하고 커밋한다.**
 > 확정 설계·기획·코드구조·규칙은 `Game.md`(**SSOT 허브** → 도메인별 `Docs/SSOT/*.md`, 작업별 라우팅은 허브 §0-1), **완료 작업 상세는 `git log --oneline`**. 여기엔 *무엇을 했는지*만 요약한다.
 
-**최종 갱신: 2026-07-09**
+**최종 갱신: 2026-07-10**
+
+## 🔔 핸드오프 (2026-07-10 · #3 다중맵 U **P-G 유니파이드 필드 수렴 완료 — per-map registry·MapId 게이트·갭·전환추적자 전부 제거** — FPSRoguelite2·`phase/p8-multimap-tier0`) — ✅ 빌드 exit0 · 헤드리스 17/17 · 제거심볼 grep 0 · 적대검증 15에이전트(2 confirmed 수정) · 사용자 PIE 단일맵+멀티맵 정상. **다음 = P-H(NetCull 재튜닝) — U 아크의 마지막**
+> **이 세션 = P-G 구현·PIE**(서버권위/복제 hot-path = Opus 직접, 위임 없음 [[haiku-delegation-security-wiring]]). **커밋 3개**: `1f30d1f`(A 전환추적자 전부 제거)+`49e1994`(B 유니파이드-항상+SlotBounds+bUnifiedMultiSlot)+`abd9624`(C 죽은 registry/gap-drain/MapId게이트 삭제). 전체 **-386줄 net**. 콘텐츠 무변경.
+> **핵심 설계(Plan 에이전트 압박테스트 채택)**: `UnifiedComputer`를 서버서 **항상** 빌드(멀티맵=BuildUnifiedField, 단일맵=degenerate 월드트레이스 1-슬롯) → 별도 predicate **`bUnifiedMultiSlot`**(진짜 bUnifiedExtent일 때만 true)로 멀티맵 전용 동작(late-join ack·combat 연결성·front·trickle 드레인)만 게이트 → **단일맵 엄격 무회귀**(literal always-unified면 ack seal·off-grid 데미지면역 회귀 = P-F 나쁜 클래스). `GetMultiSlotUnifiedComputer()`=게이트용, `GetUnifiedComputer()`=항상 non-null flow/연결성 코어.
+> **A(추적자)**: FMapTransitionRecord·PlayerTransitions·ElectTransitionTrackers·상수3·EnemyBase CrossingTracker* 전부 삭제(P-D front-chase가 이미 대체). **B(수렴 인프라)**: `SlotBounds`(TMap<MapId,FBox>)가 registry의 FindMapIdForLocation/IsLocationInMap 대체(`Num()==0`→단일맵 무재해석, 비어있지않은데 부재→seam갭 재해석). 소비자 5곳 predicate 전환. **C(삭제)**: Computers·BakeMap·IsMapFieldReady(호출자0)·EvictMap(호출자0)·ComputeAliveByMap·DrainMapEnemies·EmptyMapDrainPerTick·GetActorMapId·CanAffectTarget MapId폴백(→return true).
+> **✅ 적대검증(2 워크플로 15에이전트) 2 confirmed 수정**: [MAJOR] degenerate FloorZ를 DetectFloorZForVolume→**DetectFloorZ(PlayerStart)** — untagged 볼륨 단일맵(L_Sandbox) GridOrigin.Z 회귀 + volume-center mis-anchor 갓차 재도입 방지 [[flowfield-volume-center-collision-floortrace]]. [MINOR] over-budget Error/comment의 stale "per-map registry" 문구.
+> **불변식**: 단일맵 = 게이트 inert 무회귀(FloorZ 앵커 pre-P-G 일치) · 멀티맵 = SlotBounds 점유·연결성게이트·front·late-join ack 유지 · MapId(enemy+player)·allocator per-map 배분 존치(SSOT "enemy MapId sync 제거"=registry기반→SlotBounds 재해석). **알려진 델타(수용)**: 단일맵 0-플레이어 하드드레인 소멸(런종료시만·ReleaseAllEnemies 잔존) · over-budget bUnifiedExtent=flow없음(P-0 저작게이트가 방어, 콘텐츠 에러).
+> **⏭ 다음 P-H (U 아크 마지막)**: NetCull 재튜닝 — 적 `NetCullDistanceSquared`(AFPSREnemyBase, `grep NetCull`)를 실 footprint 기반 UPROPERTY/데이터드리븐으로 → seam 근처만 복제, 대역폭 PIE 실측. **RepGraph=별도 후속 페이즈**(범위 밖). 클라 seam pop-in=문서화된 한계(D3 수용). 플랜 `Docs/Review/20260707-plan-continuous-field-arch.md` §2-4(P-H행)·§4 D3.
+> **미커밋 콘텐츠(사용자 존치, 커밋 금지)**: `Content/Maps/L_U_Whitebox.umap`(M)·`L_MapA/B/RunPersistent.umap`·기타 untracked `Content/`(Assets/Input 등).
 
 ## 🔔 핸드오프 (2026-07-09 · #3 다중맵 U **P-F 구현 완료 — TopologyGeneration + freeze pre-unfreeze + ResetToBakedBaseline + late-join ack (2단계 커밋)** — FPSRoguelite2·`phase/p8-multimap-tier0`) — ✅ 빌드 exit0 · 헤드리스 **17/17**(신규 3) · SIE gen++ 확인 · 적대검증 8에이전트(1 nit 수정·1 rejected 문서화). **다음 = P-G(추적자·per-map registry·갭 제거) → P-H(NetCull)**
 > **이 세션 = P-F 구현**(서버권위/복제 hot-path = Opus 직접, 위임 없음 [[haiku-delegation-security-wiring]]). **커밋 2개**: `5d954b5`(스테이지1 서버-로컬) + `79d674e`(스테이지2 복제). 콘텐츠 무변경(`.umap` 미커밋 존치).
