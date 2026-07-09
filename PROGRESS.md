@@ -6,6 +6,11 @@
 
 **최종 갱신: 2026-07-08**
 
+## 🔔 핸드오프 (2026-07-09 p · **반동 CrystalRecoil 어댑터 P0~P4 완료 → main 머지**) — 🎯 **전 단계 완료·검증·`--no-ff` main 머지. 반동+확산 = CrystalRecoil 플러그인 어댑터로 전환 완료.**
+> **완료 요약(P0~P4)**: P0 플러그인 벤더링+5.7패치 / P1 어댑터 컴포넌트(`UFPSRRecoilComponent`)+파이어 배선 / P2 확산 단일소스(heat, `GetHeatSpread`)+서버 accepted-shot heat 패리티 / P3 무기별 heat곡선(6무기)+반동패턴(`RP_×6`, 사용자 비주얼 에디터 저작)+재장전 패턴리셋 / P4 死코드정리(레거시 `BloomPerShot/MaxBloom/BloomRecoveryRate/RecoilRiseRate`·`PendingRise*` 제거)·`FPSR.RecoilPreview` 실제 CRRecoilPattern 반영·Codex 머지게이트 2지적 교정(`OnRep_Slots` 복제순서 경합·`ClearRecoilPattern` stale 패턴). **빌드 -NoXGE Succeeded·validate-data exit0·PIE 정상(사용자)**.
+> **머지**: `phase/recoil-crystalrecoil`(P0~P4) → main `--no-ff`. **origin push = 사용자 확인 후**.
+> **잔여/이월(회귀 아님)**: 알려진 한계 — ADS 확산배수 bIsAiming RPC 지연(플릭샷 미세 불일치)·예측-거부 샷 클라 heat 드리프트(cooldown 흡수) = PvE 코스메틱. 레거시 블룸 필드 제거로 무기 DA에 orphaned 저장값 잔존(로드 시 무시·무해, 다음 전체 리세이브 시 정리). ChargeLaser=base-only 확산+커스텀 차징 램프 유지(의도). Shotgun/Bazooka=고정 확산(BloomPerShot 0, heat 프로파일 없음).
+
 ## 🔔 핸드오프 (2026-07-09 o · **반동 P3 완료(패턴 저작·배선) + 재장전 패턴리셋**) — 🎯 **무기 6종 CRRecoilPattern 저작·DA 배선 완료(사용자, 커밋 `5c9dd53`) + 재장전 시 패턴 초반 리셋(`92a882c`). 빌드·validate 통과. 남은 = 사용자 PIE 스모크 → P4(死코드정리·필드제거·Codex머지게이트·`--no-ff` 머지).**
 > **P3 완료**: heat 곡선(6무기, `19ef50c`) + 반동 패턴 `RP_<무기>`×6(비주얼 에디터, 사용자) → DA `RecoilPattern` 배선(`5c9dd53`). **일반 무기 반동 활성화**(P1 이후 휴면 해제). ChargeLaser/Knife 패턴 없음. validate-data exit0(validated21·invalid0·heat 프로파일 무결 — 사용자 에디터 작업이 heat 곡선 안 건드림 확인).
 > **재장전 패턴리셋(`92a882c`, 빌드 -NoXGE Succeeded)**: 홀드 사격 중 (자동/수동)재장전 시작 시 ShotIndex 0 리셋 → 새 탄창이 초반 패턴부터(기존: StartShooting이 트리거 프레스에만 리셋→홀드-재장전 시 후반 end-behavior 지속). `UFPSRRecoilComponent::ResetPattern()`(CurrentShotIndex=0) + FireComponent TickComponent가 replicated reloading **상승 엣지**에서 호출(오너-로컬, 근접/차지레이저 제외). 확산 heat는 재장전 무사격 구간 자연 냉각이라 별도 리셋 불요.
