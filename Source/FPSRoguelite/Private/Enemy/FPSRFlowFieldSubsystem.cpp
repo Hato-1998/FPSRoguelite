@@ -117,6 +117,11 @@ void UFPSRFlowFieldSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 		BuildUnifiedField(InWorld, *UnifiedVolume);
 	}
 
+	// U (P-F): subscribe to the GameState freeze/run-state so a door broken DURING a card-select freeze is recomputed the
+	// instant the freeze lifts (the 0.2s recompute no-ops while paused). Lazily re-bound in RecomputeAllFields if the
+	// GameState isn't up yet at world begin.
+	TryBindRunStateHandler();
+
 	InWorld.GetTimerManager().SetTimer(
 		RecomputeTimerHandle, this, &UFPSRFlowFieldSubsystem::RecomputeAllFields,
 		GFlowUpdateInterval, true);
@@ -196,6 +201,12 @@ void UFPSRFlowFieldSubsystem::BuildUnifiedField(UWorld& InWorld, const AFPSRFlow
 		}
 	}
 	UE_LOG(LogFPSR, Log, TEXT("[FlowField] U: %d slot(s) baked into the unified grid at world begin."), Baked);
+
+	// U (P-F): snapshot the just-baked unified surface graph (all seam doors still closed) as the new-run reset baseline.
+	// Captured AFTER every world-begin slot bakes but BEFORE any door opens, so ResetDoorTopologyToBaseline restores exactly
+	// this closed-seam topology. Server-only; runs before GameMode::BeginPlay/StartRun (WorldSubsystem ordering, confirmed).
+	UnifiedComputer->ExtractSurfaceData(BakedBaseline);
+	bHasBaseline = true;
 }
 
 bool UFPSRFlowFieldSubsystem::BakeSlotIntoUnified(UWorld& InWorld, const AFPSRFlowFieldBoundsVolume& Slot)
@@ -251,6 +262,11 @@ bool UFPSRFlowFieldSubsystem::BakeDiscoveredMap(const FGameplayTag& MapId)
 				const bool bBaked = BakeSlotIntoUnified(*World, *Volume);
 				if (bBaked)
 				{
+					// U (P-F): a slot streaming in grows the unified topology — bump the generation (mirrored to the
+					// GameState in Stage 2 so late joiners re-ack) and mark the field mutated so a new-run reset restores
+					// the pre-stream baseline.
+					bTopologyMutatedSinceBaseline = true;
+					AdvanceTopologyGeneration();
 					// Recompute NOW so the newly-streamed slot's connectivity labels are ready immediately, not on the next
 					// 0.2s tick — otherwise the combat gate fails closed for every pawn in the meantime (Codex R16).
 					RecomputeAllFields();
@@ -294,11 +310,17 @@ void UFPSRFlowFieldSubsystem::NotifyDoorBroken(const AActor* Door)
 	{
 		OpenedEdges += UnifiedComputer->StampDoorEdgesOpen(Pair.Key, Pair.Value);
 	}
+	// U (P-F): the seam topology changed — bump the generation (mirrored to the replicated GameState in Stage 2 so late
+	// joiners re-ack) and mark the field mutated so a new-run ResetDoorTopologyToBaseline restores the closed seam. Done
+	// BEFORE the recompute so RecomputeAllFields stamps LastRecomputedGeneration to the NEW generation (or, if a freeze is
+	// up, RecomputeAllFields no-ops and the pre-unfreeze handler catches up on the unpause edge).
+	bTopologyMutatedSinceBaseline = true;
+	AdvanceTopologyGeneration();
 	// Recompute NOW (not on the next 0.2s tick) so the opened seam's connectivity is live immediately for both swarm flow
 	// and the origin-aware combat gate — same immediacy contract as the streamed-slot bake (Codex R16).
 	RecomputeAllFields();
-	UE_LOG(LogFPSR, Log, TEXT("[FlowField] NotifyDoorBroken: door '%s' opened %d seam edge(s) across %d cell-pair(s); field recomputed."),
-		*Door->GetName(), OpenedEdges, Pairs.Num());
+	UE_LOG(LogFPSR, Log, TEXT("[FlowField] NotifyDoorBroken: door '%s' opened %d seam edge(s) across %d cell-pair(s); field recomputed (topology generation now %d)."),
+		*Door->GetName(), OpenedEdges, Pairs.Num(), TopologyGeneration);
 }
 
 bool UFPSRFlowFieldSubsystem::IsMapFieldReady(const FGameplayTag& MapId) const
@@ -370,6 +392,16 @@ void UFPSRFlowFieldSubsystem::Deinitialize()
 	if (UWorld* World = GetWorld())
 	{
 		World->GetTimerManager().ClearTimer(RecomputeTimerHandle);
+
+		// U (P-F): unbind the freeze/run-state handler (symmetric with TryBindRunStateHandler).
+		if (bRunStateHandlerBound)
+		{
+			if (AFPSRGameState* GS = World->GetGameState<AFPSRGameState>())
+			{
+				GS->OnRunStateChanged.RemoveDynamic(this, &UFPSRFlowFieldSubsystem::HandleRunStateChanged);
+			}
+			bRunStateHandlerBound = false;
+		}
 	}
 	Computers.Reset();
 	UnifiedComputer = nullptr;
@@ -388,7 +420,12 @@ void UFPSRFlowFieldSubsystem::RecomputeAllFields()
 		return;
 	}
 
+	// U (P-F): lazily bind the freeze/run-state handler if the GameState wasn't up at world begin (idempotent).
+	TryBindRunStateHandler();
+
 	// Skip the recompute during the global freeze (§2-2): enemy movement is gated off, so nothing samples the field.
+	// LastRecomputedGeneration is deliberately NOT stamped here — so if a door breaks mid-freeze, the field stays a
+	// generation behind and the pre-unfreeze handler (HandleRunStateChanged) recomputes on the unpause edge.
 	if (const AFPSRGameState* GS = World->GetGameState<AFPSRGameState>())
 	{
 		if (GS->IsRunPaused())
@@ -413,6 +450,10 @@ void UFPSRFlowFieldSubsystem::RecomputeAllFields()
 		UnifiedComputer->RecomputeFromWorld(World);
 	}
 
+	// U (P-F): the field now reflects the current topology — record which generation it was computed for so the freeze
+	// pre-unfreeze handler knows whether a mid-freeze door break left it stale. Only reached on a non-frozen recompute.
+	LastRecomputedGeneration = TopologyGeneration;
+
 #if !UE_BUILD_SHIPPING
 	if (CVarFlowFieldDebug.GetValueOnAnyThread() > 0)
 	{
@@ -436,6 +477,80 @@ void UFPSRFlowFieldSubsystem::RecomputeAllFields()
 		}
 	}
 #endif
+}
+
+void UFPSRFlowFieldSubsystem::TryBindRunStateHandler()
+{
+	if (bRunStateHandlerBound || !HasServerAuthority())
+	{
+		return;
+	}
+	UWorld* World = GetWorld();
+	AFPSRGameState* GS = World ? World->GetGameState<AFPSRGameState>() : nullptr;
+	if (!GS)
+	{
+		return; // GameState not up yet — RecomputeAllFields retries lazily.
+	}
+	GS->OnRunStateChanged.AddDynamic(this, &UFPSRFlowFieldSubsystem::HandleRunStateChanged);
+	// Seed the pause state at bind time so a bind that happens while ALREADY paused doesn't miss the first unpause edge.
+	bWasPaused = GS->IsRunPaused();
+	bRunStateHandlerBound = true;
+}
+
+void UFPSRFlowFieldSubsystem::HandleRunStateChanged()
+{
+	if (!HasServerAuthority())
+	{
+		return;
+	}
+	const UWorld* World = GetWorld();
+	const AFPSRGameState* GS = World ? World->GetGameState<AFPSRGameState>() : nullptr;
+	if (!GS)
+	{
+		return;
+	}
+	// OnRunStateChanged fires for many reasons (run clock, mission progress, freeze). Only the unpause edge with a
+	// topology change while frozen warrants an immediate recompute — the pure predicate isolates that (headless-tested).
+	const bool bNowPaused = GS->IsRunPaused();
+	if (ShouldRecomputeOnUnfreeze(bWasPaused, bNowPaused, TopologyGeneration, LastRecomputedGeneration))
+	{
+		RecomputeAllFields();
+	}
+	bWasPaused = bNowPaused;
+}
+
+bool UFPSRFlowFieldSubsystem::ShouldRecomputeOnUnfreeze(bool bWasPaused, bool bNowPaused, int32 TopologyGen, int32 LastRecomputedGen)
+{
+	// Unpause edge (was paused, now not) AND the field is a generation behind (a door broke while frozen). Any other
+	// transition — still paused, just-paused, or no topology change — is a no-op.
+	return bWasPaused && !bNowPaused && TopologyGen != LastRecomputedGen;
+}
+
+void UFPSRFlowFieldSubsystem::AdvanceTopologyGeneration()
+{
+	++TopologyGeneration;
+	// Stage 2 mirrors this to the replicated GameState here so remote clients OnRep and re-ack the new generation.
+}
+
+void UFPSRFlowFieldSubsystem::ResetDoorTopologyToBaseline()
+{
+	if (!HasServerAuthority() || !UnifiedComputer || !bHasBaseline)
+	{
+		return;
+	}
+	// First (unmutated) run: StartRun runs even then, so the dirty-flag guard makes this a no-op and the generation stays
+	// 0 — a fresh client's gen-0 ack is instantly satisfied. Only a same-world re-run after a door opened restores.
+	if (!bTopologyMutatedSinceBaseline)
+	{
+		return;
+	}
+	// Atomically restore the closed-seam baseline (a plain re-adopt of the baked surface graph — all opened doors close at
+	// once). BuildFromSurfaceData invalidates the field; the recompute below rebuilds flow + connectivity.
+	UnifiedComputer->BuildFromSurfaceData(BakedBaseline);
+	bTopologyMutatedSinceBaseline = false;
+	AdvanceTopologyGeneration();
+	RecomputeAllFields();
+	UE_LOG(LogFPSR, Log, TEXT("[FlowField] U P-F: door topology reset to baked baseline (generation now %d)."), TopologyGeneration);
 }
 
 FVector UFPSRFlowFieldSubsystem::SampleFlowDirection(const FVector& WorldLocation) const

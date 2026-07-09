@@ -4,12 +4,13 @@
 
 #include "Subsystems/WorldSubsystem.h"
 #include "GameplayTagContainer.h"
+#include "Enemy/FPSRFlowFieldComputer.h" // FFPSRFlowFieldSurfaceData (BakedBaseline by-value member, U P-F) + EFPSRFieldQuery
 #include "FPSRFlowFieldSubsystem.generated.h"
 
 class AActor;
 class UFPSRFlowFieldComputer;
 class AFPSRFlowFieldBoundsVolume;
-enum class EFPSRFieldQuery : uint8;
+class AFPSRGameState;
 
 /** Server-authoritative flow-field driver for swarm pathing (P2-B2, U7 multi-layer). Owns a per-map REGISTRY of
  *  UFPSRFlowFieldComputer instances keyed by MapId (multimap Tier 0) and drives their 0.2s recompute from a single
@@ -69,6 +70,25 @@ public:
 	 *  AFPSRDoor::HandleBroken; the door->cell mapping is UFPSRFlowFieldComputer::MapDoorSeamCellPairs. */
 	void NotifyDoorBroken(const AActor* Door);
 
+	/** U (P-F): server-authoritative topology generation — bumped every time the unified grid's connectivity changes
+	 *  (a seam door opens, a slot bakes in, or a new-run baseline reset). Late-join ack + the freeze pre-unfreeze
+	 *  recompute key off this. 0 with no unified field (single-map / pre-content) — it never changes there, so every
+	 *  client's gen-0 ack is instantly satisfied (no single-map regression). Server-only monotone counter. */
+	int32 GetTopologyGeneration() const { return TopologyGeneration; }
+
+	/** U (P-F): atomically restore the unified grid to its world-begin baked baseline (all seam doors closed) and bump
+	 *  the generation, for a same-world re-run (StartRun). No-op — generation preserved — if the topology was never
+	 *  mutated since the baseline (a first run: StartRun runs even then, so the dirty-flag guard keeps gen at 0) or with
+	 *  no unified field. Server-only. Currently a future-path safety net: a new run reloads the whole map (fresh field),
+	 *  so this only fires on a hypothetical in-place re-run — production structure, not dead code. */
+	void ResetDoorTopologyToBaseline();
+
+	/** U (P-F): pure predicate for the freeze pre-unfreeze recompute — true ONLY on the unpause edge (was paused, now
+	 *  not) AND when the topology changed while frozen (a door broke during the freeze, so the flow field is a
+	 *  generation behind). Any other run-state transition is a no-op. Static + worldless so FPSRoguelite.FlowField
+	 *  regressions it headless (the exact edge logic HandleRunStateChanged uses). */
+	static bool ShouldRecomputeOnUnfreeze(bool bWasPaused, bool bNowPaused, int32 TopologyGen, int32 LastRecomputedGen);
+
 	/** Whether a baked, ready computer exists for MapId (used by the stream/allocator gate before spawning into a map). */
 	bool IsMapFieldReady(const FGameplayTag& MapId) const;
 
@@ -88,6 +108,22 @@ public:
 private:
 	void RecomputeAllFields();
 	bool HasServerAuthority() const;
+
+	/** U (P-F): GameState OnRunStateChanged handler (server) — on the unpause edge, if a door broke during the freeze
+	 *  (the topology generation moved past the last recomputed generation), recompute the field NOW so the swarm + combat
+	 *  gate are correct the instant the freeze lifts, not on the next 0.2s tick. UFUNCTION for AddDynamic. (Tier-0 inert:
+	 *  a door can't break mid-freeze yet — future-proofing, but wired now.) */
+	UFUNCTION()
+	void HandleRunStateChanged();
+
+	/** U (P-F): bind HandleRunStateChanged to the GameState's OnRunStateChanged (idempotent). Called at world begin and
+	 *  lazily from RecomputeAllFields (the GameState may not exist yet at world begin). Seeds bWasPaused so an already-
+	 *  paused bind doesn't miss the first unpause. Server-only. */
+	void TryBindRunStateHandler();
+
+	/** U (P-F): bump the topology generation (server) and mirror it to the replicated GameState so remote clients OnRep
+	 *  and re-ack (Stage 2). Monotone (++ only). */
+	void AdvanceTopologyGeneration();
 
 	/** U (2026-07-07): build the single continuous grid from a bUnifiedExtent bounds volume and bake every currently-loaded
 	 *  MapId'd slot volume into it. Called at world begin when such a volume exists. Server-only. */
@@ -115,4 +151,31 @@ private:
 	TObjectPtr<UFPSRFlowFieldComputer> UnifiedComputer;
 
 	FTimerHandle RecomputeTimerHandle;
+
+	// --- U (P-F) topology generation + freeze pre-unfreeze + baked baseline (server-only; the replicated mirror lives on
+	//     the GameState, Stage 2). ---
+
+	/** Monotone server counter, bumped on every unified-grid connectivity change (seam open / slot bake / baseline reset). */
+	int32 TopologyGeneration = 0;
+
+	/** The generation the current flow field was last recomputed for (-1 = never). RecomputeAllFields stamps it on a
+	 *  successful (non-frozen) recompute; the freeze pre-unfreeze handler recomputes when it lags TopologyGeneration. */
+	int32 LastRecomputedGeneration = -1;
+
+	/** True once a seam door / slot bake has changed the topology away from the baked baseline. Gates the new-run reset
+	 *  to a no-op on a first (unmutated) run so the generation stays 0 (StartRun runs even on the first run). */
+	bool bTopologyMutatedSinceBaseline = false;
+
+	/** Whether BakedBaseline holds a valid world-begin snapshot (only captured when a unified field is built). */
+	bool bHasBaseline = false;
+
+	/** World-begin snapshot of the unified grid's surface graph (all seam doors closed), for ResetDoorTopologyToBaseline.
+	 *  Plain member (POD arrays, no UObject refs -> no GC concern); server-only. */
+	FFPSRFlowFieldSurfaceData BakedBaseline;
+
+	/** Last-seen pause state for the OnRunStateChanged unpause-edge detection (seeded at bind time). */
+	bool bWasPaused = false;
+
+	/** Whether HandleRunStateChanged is bound to the GameState delegate (idempotent bind guard). */
+	bool bRunStateHandlerBound = false;
 };

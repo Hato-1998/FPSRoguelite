@@ -11,6 +11,7 @@
 #include "Core/FPSRPlayerController.h"
 #include "Enemy/FPSREnemySpawnSubsystem.h"
 #include "Enemy/FPSREnemyRosterDataAsset.h"
+#include "Enemy/FPSRFlowFieldSubsystem.h" // U P-F: ResetDoorTopologyToBaseline on a same-world re-run
 #include "Boss/FPSRBossBase.h"
 #include "Boss/FPSRBossSpawnPoint.h"
 #include "Boss/FPSRBossDefinitionDataAsset.h"
@@ -97,6 +98,21 @@ void UFPSRRunDirectorSubsystem::StartRun()
 		// Re-run safety: restart the room-spawn accumulation from only the start room(s) (a same-world re-run would
 		// otherwise keep zones opened in the previous run). A fresh level load is already reset at world begin.
 		SpawnSub->ResetSpawnZones();
+		// U P-F: reset the director's transient run state (trickle clock, grace/tracker maps, active enemies). A first
+		// run starts empty, so this is a no-op there; it's the same-world-reset safety net (Stage 2 also re-gates acks).
+		SpawnSub->ResetForNewRun();
+	}
+
+	// U P-F: restore the unified flow field's door topology to its world-begin baked baseline (all seam doors closed) and
+	// bump the topology generation. No-op on a first (unmutated) run so the generation stays 0; the current path (new run
+	// = full map reload = fresh field) never mutates it, so this is the future same-world-reset safety net (production
+	// structure). Paired with SpawnSub->ResetForNewRun() above.
+	if (UWorld* World = GetWorld())
+	{
+		if (UFPSRFlowFieldSubsystem* Flow = World->GetSubsystem<UFPSRFlowFieldSubsystem>())
+		{
+			Flow->ResetDoorTopologyToBaseline();
+		}
 	}
 
 	// Size the per-window fired flags and roll each window's trigger time within its [MinTime, MaxTime] range

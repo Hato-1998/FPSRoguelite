@@ -51,6 +51,12 @@ public:
 	/** Release every active enemy back to the dormant pool (server). Used by mission/debug flows. */
 	void ReleaseAllEnemies();
 
+	/** Server (U P-F): reset the director's transient run state for a same-world re-run (StartRun) — drain the trickle
+	 *  token bucket, clear the director clock, empty the per-map grace + transition-tracker maps, and release every active
+	 *  enemy back to the pool. Stage 2 also resets each PlayerState's topology ack. A first run starts empty, so this is a
+	 *  no-op there (no regression); it's the same-world-reset safety net paired with FlowField::ResetDoorTopologyToBaseline. */
+	void ResetForNewRun();
+
 	/** Get the current number of alive enemies. */
 	int32 GetAliveCount() const { return ActiveEnemies.Num(); }
 

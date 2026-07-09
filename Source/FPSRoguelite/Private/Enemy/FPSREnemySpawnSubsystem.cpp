@@ -1566,6 +1566,28 @@ void UFPSREnemySpawnSubsystem::ReleaseAllEnemies()
 	RangedChargeCountByPlayer.Reset();
 }
 
+void UFPSREnemySpawnSubsystem::ResetForNewRun()
+{
+	if (!HasServerAuthority())
+	{
+		return;
+	}
+
+	// Director transient state for a same-world re-run: the trickle-drain clock/bucket (so a stale freeze burst can't pop
+	// the rear on the first tick), the per-map grace map, and the Tier-1 transition-tracker records. A first run starts
+	// with all of these empty, so this is a byte no-op there (no regression).
+	DrainTokenBucket = 0.0f;
+	LastDirectorTime = -1.0f;
+	MapLastOccupiedTime.Reset();
+	PlayerTransitions.Reset();
+
+	// Return every active enemy to the pool — this also clears their front attribution / crossing credit / tracker
+	// designations (those live on the enemy actor, cleared on Deactivate). A first run has none active (no-op).
+	ReleaseAllEnemies();
+
+	// Stage 2 also resets each connected PlayerState's topology ack here so a same-world re-run re-gates late joiners.
+}
+
 bool UFPSREnemySpawnSubsystem::IsRangedTokenAvailable(AFPSRPlayerController* TargetPC) const
 {
 	if (TargetPC == nullptr)
