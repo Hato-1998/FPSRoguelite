@@ -19,7 +19,7 @@
 | 저장 | SaveGame | |
 | 네트워크 | 리슨서버 P2P, Push Model | ❌ Iris 핵심 의존, ❌ Server-Side Rewind |
 | 무브먼트 | 표준 CMC + **충돌무시 대시(회피기)** | ❌ Bhop/Wall-run/Motion Matching |
-| 레벨 | 고정 authored 맵 · **다중맵 심리스**(문 파괴→인접맵 스트림-in, §2-1 · 피벗 2026-07-03) | ❌ PCG · ❌ WP 런타임 오픈월드 그리드(authored·bounded라 불요, 스트리밍=LoadStreamLevel/WP Data Layer) |
+| 레벨 | 고정 authored 맵 · **다중맵 심리스**(문 파괴→인접맵 스트림-in, §2-1 · 피벗 2026-07-03) · **U 연속필드**(고정 3×3 단일 flow 그리드, 2026-07-07 `Docs/Review/20260707-plan-continuous-field-arch.md`) | ❌ PCG · ❌ WP 런타임 오픈월드 그리드(authored·bounded라 불요, 스트리밍=LoadStreamLevel/WP Data Layer) |
 
 - **엔진 포함 플러그인(바로 enable)**: GameplayAbilities, EnhancedInput, ModularGameplay, GameFeatures, CommonUI, StateTree, GameplayStateTree, SignificanceManager, Iris(off)
 - **엔진에 없는 Lyra 출신 플러그인(P3+ 필요 시 경량 재구현/복사)**: CommonUser, CommonGame, ModularGameplayActors, GameplayMessageRouter
@@ -55,6 +55,7 @@ Source/FPSRoguelite/Public/
 - 무기별 스탯 → WeaponInstance 스탯 블록 (ASC 아님)
 - 하단 무기바 HUD: 가시성을 HUD State(GMS/Tag)에 바인딩 → ADS/카드UI/미션UI 시 숨김
 - **다중맵(#3, 설계 수렴 2026-07-05 `Docs/Review/20260705-multimap-budget-regroup.md`)**: 단일 `UFPSREnemySpawnSubsystem` → **map-aware allocator**(전역 공유 예산·점유맵 배분·빈 맵 드레인·"2인+ 맵 > 솔로 맵" 가중), U7 플로우필드 → **per-map 레지스트리**(`ULevel*` 키). `UFPSRRunDirectorSubsystem`은 단일·런클럭 전역 유지(미션/스폰만 대상맵 파라미터화). 다중맵 점유상태 중 복제 필요분=GameState/PlayerState(WorldSubsystem 복제 불가). 레벨 스트리밍=LoadStreamLevel(서브레벨) 우선. rally pad·split 감지·양성 인센티브=Tier 2(콘텐츠/밸런스). Tier 0 실행=`Docs/MultiMap_Tier0_ResumePrompt.md`.
+- **다중맵 U 대전환(#3, 2026-07-07 `/plan-consult` → `Docs/Review/20260707-plan-continuous-field-arch.md`)**: 위 per-map 레지스트리(`ULevel*` 키)가 심리스 연속 추격과 충돌 → **U(고정 3×3 world extent 프리사이즈 단일 `UFPSRFlowFieldComputer`)로 피벗**. 맵 stream-in 시 그 슬롯 셀 구간만 shared grid에 **증분 atomic bake**(staging commit), 미로드 슬롯=blocked. **문 부수면 door cells `blocked→open` stamp + 단일 `RunBFS` + generation bump** → 적이 단일 필드 O(1) 샘플로 열린 문 넘어 seamless 추격. **신규 1차요구**: subregion atomic bake(경계 양쪽 edge 클리어=ghost path 방지) · door-cell stamping(문 leaf=`ECC_FPSRPlayerPawn`·blocker=`WorldDynamic`이라 `WorldStatic` bake 미포집→명시 stamp) · **origin-aware connectivity 전투게이트**(`FPSRCombatStatics::CanAffectTarget`을 instigator 원점셀↔타겟셀 open-grid 연결로 대체, explosion=별도 `Center` 원점, **시그니처 계약변경**) · FrontId occupancy(→allocator, `RunFlow §2-1`) · TopologyGeneration(late-join ack·freeze pre-unfreeze RunBFS·reset baseline). **제거(연속성 증명 후 마지막=P-G)**: per-map 레지스트리(`Computers`/`BakeDiscoveredMap`/`EvictMap`) · movement same-map target gate · 전환 추적자 전부 · enemy MapId sync · combat MapId gate(→origin connectivity) · 맵간 갭. 구현 P-0~P-H = 리포트 §2-4. **D1 확정**: 슬롯 100~132m/변(near-cap). 재계산 예산=`Performance.md §5`.
 
 ### 4-2. 구현 클래스맵 (⚠️ P0~P1.5-A 시점 역사 스냅샷 — 현재 전체 구조는 §4-1 목표구조 + `git log`·`PROGRESS.md` 참조; 이후 Boss/·Card v2·Run/Mission/·Combat/·Pickup/·UI Menu·Lobby·Session 등 대폭 추가됨)
 ```

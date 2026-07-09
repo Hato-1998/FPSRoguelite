@@ -7,13 +7,16 @@
 #include "Templates/SubclassOf.h"
 #include "GameplayTagContainer.h"
 #include "UObject/ObjectKey.h"
+#include "Containers/ArrayView.h" // TConstArrayView (PassesCommonSpawnGates)
 #include "FPSREnemySpawnSubsystem.generated.h"
 
 class AFPSREnemyBase;
 class AFPSREnemySpawnPoint;
 class AFPSRSpawnRoom;
 class AFPSRPlayerController;
+class APlayerController;
 class UFPSREnemyRosterDataAsset;
+enum class EFPSRFieldQuery : uint8; // U P-E: front path-distance query status (IsRearStatus)
 
 /** Lightweight server-authoritative object pool + spawn director for swarm enemies (P2-A).
  *  Pooling reuses dormant actors; director keeps ~TargetAliveCount alive around players.
@@ -40,13 +43,19 @@ public:
 	 *  authoritative designer-placed point whose Z must be preserved exactly (Game.MD §1 fixed-map placement).
 	 *  SpawnPoint (optional): if it has authored exit-path waypoints, the enemy follows them out of its spawn
 	 *  structure before flow-field chase takes over (C1). */
-	AFPSREnemyBase* AcquireEnemy(const FVector& Location, bool bSnapToGround = true, const AFPSREnemySpawnPoint* SpawnPoint = nullptr);
+	AFPSREnemyBase* AcquireEnemy(const FVector& Location, bool bSnapToGround = true, const AFPSREnemySpawnPoint* SpawnPoint = nullptr, bool bFrontSpawned = false);
 
 	/** Release an enemy back to the dormant pool. */
 	void ReleaseEnemy(AFPSREnemyBase* Enemy);
 
 	/** Release every active enemy back to the dormant pool (server). Used by mission/debug flows. */
 	void ReleaseAllEnemies();
+
+	/** Server (U P-F): reset the director's transient run state for a same-world re-run (StartRun) — drain the trickle
+	 *  token bucket, clear the director clock, empty the per-map grace + transition-tracker maps, and release every active
+	 *  enemy back to the pool. Stage 2 also resets each PlayerState's topology ack. A first run starts empty, so this is a
+	 *  no-op there (no regression); it's the same-world-reset safety net paired with FlowField::ResetDoorTopologyToBaseline. */
+	void ResetForNewRun();
 
 	/** Get the current number of alive enemies. */
 	int32 GetAliveCount() const { return ActiveEnemies.Num(); }
@@ -76,6 +85,11 @@ public:
 	/** Set the target alive count (director will spawn/release to maintain this). */
 	void SetTargetAliveCount(int32 InTarget);
 
+	/** Re-scan designer spawn points + rooms (multimap Tier 0). Spawn points are cached ONCE at world begin, so a
+	 *  sublevel that streams in mid-run has none cached and would never spawn — the MapStreamSubsystem calls this on
+	 *  a map's collision-ready so the new map's points become selectable (Codex streaming BLOCKER fix). */
+	void RefreshSpawnPointCache();
+
 	/** Set the per-tick spawn cap = the swarm fill rate (schedule-driven; clamped to >=1). Lower = the swarm
 	 *  builds up gradually instead of snapping to the target count. */
 	void SetMaxSpawnPerTick(int32 InMax) { MaxSpawnPerTick = FMath::Max(1, InMax); }
@@ -99,6 +113,27 @@ public:
 	 *  room). Called at world begin and at StartRun so a re-run starts from only the start room (no leaked accumulation). */
 	void ResetSpawnZones();
 
+	// --- P-E pure helpers (unit-testable; no world) — the exact front-budget arithmetic + rear classification + drain-dt
+	//     clamp the director uses, exposed static so FPSRoguelite.Allocator can regression them headless (Codex/Opus P-E gate). ---
+	/** Total front reserve for N front-active slots: min(FrontBudgetCeiling, PerFrontSlotBudget*N), 0 for N<=0. */
+	static int32 ComputeFrontReserved(int32 FrontActiveSlots);
+	/** Honest physical steady target: max(0, min(Target, GlobalAliveCap - SeedReserve - FrontReserved)) — the front reserve
+	 *  is subtracted so the physical apportionment's own target never lies / "steals" the front's share (gate #1). */
+	static int32 ComputePhysicalSteady(int32 TargetAliveCount, int32 FrontReserved);
+	/** Rear-drain classification: true ONLY for a genuinely far OK reading (dist > ChaseExitCells) or an Unreachable one; a
+	 *  SourceLess / OffGrid / NoGrid reading is HOLD (false) so a source-less window never drains the near-door front (gate #6). */
+	static bool IsRearStatus(EFPSRFieldQuery Status, int32 Dist);
+	/** Drain-clock elapsed clamp: Clamp(RawElapsed, 0, SpawnIntervalSeconds * DrainDtClampTicks) — bounds freeze-burst accrual (gate #4). */
+	static float ClampDrainDt(float RawElapsed, float SpawnIntervalSeconds);
+
+	/** U (P-H) net-cull radius (cm) for the unified multimap field, applied UNIFORMLY to every enemy at acquire. A symmetric
+	 *  distance cull can't do per-slot "seam-only" relevancy without RepGraph (deferred); a uniform engagement/weapon-range
+	 *  bubble — capped to the slot footprint — never undersizes a cross-slot chaser and bounds per-client relevancy. Pure /
+	 *  unit-testable (FPSRoguelite.Enemy.NetCull): R = max(WeaponRangeCm, min(WeaponRangeCm + SeamMarginCm, MaxSlotDiagonalCm +
+	 *  SeamMarginCm)). WeaponRangeCm is BOTH the bubble base and the shoot-ability floor (>= max authored weapon range, so an
+	 *  in-range enemy is always replicated); the footprint cap keeps R off the whole 3x3 grid and scales it with content. */
+	static float ComputeUnifiedNetCullRadius(float MaxSlotDiagonalCm, float WeaponRangeCm, float SeamMarginCm);
+
 private:
 	/** Director tick: spawn/release enemies to maintain TargetAliveCount. */
 	void TickDirector();
@@ -114,7 +149,39 @@ private:
 	 *  and whose spawn zone is active (an untagged point is always eligible). No out-of-view (FOV) filter — enemies may
 	 *  spawn in view (user 2026-06-29). Returns false when none qualify (or none placed) — the director then skips
 	 *  spawning this tick (no fallback). OutPoint receives the chosen point (for its authored exit path, C1). */
-	bool TrySelectSpawnPoint(FVector& OutLocation, const AFPSREnemySpawnPoint*& OutPoint) const;
+	bool TrySelectSpawnPoint(const FGameplayTag& TargetMapId, FVector& OutLocation, const AFPSREnemySpawnPoint*& OutPoint) const;
+
+	/** Recompute per-map committed occupancy (server): for each player pawn, resolve the map its location is in (flow-field
+	 *  registry AABB) and set its PlayerState CurrentMapId (idempotent, low-churn). Fills OutOccupiedMaps + OutPlayerCounts
+	 *  (parallel arrays, occupied maps only). Single-map: everyone resolves to the Default (unset) map. Now = world seconds. */
+	void ComputeOccupancy(TArray<FGameplayTag>& OutOccupiedMaps, TArray<int32>& OutPlayerCounts, float Now);
+
+	/** Server (U P-E): true if Point passes the shared spawn eligibility gates (enabled + active zone + MinPlayerDistance vs
+	 *  the given player VIEW locations). Extracted from TrySelectSpawnPoint so the front selector reuses the identical gate. */
+	bool PassesCommonSpawnGates(const AFPSREnemySpawnPoint* Point, TConstArrayView<FVector> PlayerViewLocations) const;
+
+	/** Server (U P-E): find the front-active adjacent slots + their near-door eligible spawn points. A slot is front-active
+	 *  when it is NOT player-occupied yet holds >=1 spawn point whose UNIFIED path-distance to the nearest player is OK and
+	 *  <= ChaseEnterCells (open-door-connected + near — GetFrontDistanceCells OK already implies open-grid connectivity, and
+	 *  bounding to the chase-ENTER threshold means the spawned enemy immediately front-chases rather than sitting idle).
+	 *  Populates OutFrontPointsByMap (slot MapId -> its eligible points). Unified-field only; empty when none / off authority. */
+	void ComputeFrontState(const TArray<FGameplayTag>& OccupiedMaps,
+		TMap<FGameplayTag, TArray<const AFPSREnemySpawnPoint*>>& OutFrontPointsByMap) const;
+
+	/** Server (U P-E): one pass over alive enemies — bucket alive-by-map AND compute the front pressure counts (P-G: the
+	 *  single alive-count path; single-map with no front degrades to a plain alive-by-map bucketing), updating each
+	 *  front-spawned enemy's ONE-SHOT crossing credit (stamped on first entry into an occupied
+	 *  slot; released when it expires). OutFrontAliveBySlot counts enemies physically in each front slot; OutFrontCountedGlobal
+	 *  additionally counts still-credited crossers (the conveyor rate-limit). Mutates enemy credit state -> non-const. */
+	void ComputeAliveAndFrontState(const TArray<FGameplayTag>& OccupiedMaps,
+		const TMap<FGameplayTag, TArray<const AFPSREnemySpawnPoint*>>& FrontPointsByMap, float Now,
+		TMap<FGameplayTag, int32>& OutAliveByMap, TMap<FGameplayTag, int32>& OutFrontAliveBySlot, int32& OutFrontCountedGlobal);
+
+	/** Server (U P-E): release up to MaxToRelease REAR enemies (far, not front-connected, past their map's drain grace, not
+	 *  chasing) back to the pool, farthest-first. P-G: the only drain path (multimap only). A SourceLess / OffGrid reading is
+	 *  treated as HOLD (never drained — the source-less window mustn't drain the front). Returns the number released. */
+	int32 DrainRearEnemies(const TArray<FGameplayTag>& OccupiedMaps,
+		const TMap<FGameplayTag, TArray<const AFPSREnemySpawnPoint*>>& FrontPointsByMap, int32 MaxToRelease, float Now);
 
 	/** Batched server movement pass with distance LOD (replaces per-actor enemy Tick). */
 	void TickEnemyMovement(float DeltaTime);
@@ -129,7 +196,7 @@ private:
 	 *  when none qualify this tick — the swarm spawns ONLY at designer points (no player-proximity/ring fallback,
 	 *  removed 2026-06-24), so the director skips spawning until a point qualifies. Sets bOutSnapToGround=false (the
 	 *  designer point's Z is authoritative — no ground re-snap). */
-	bool ComputeSpawnLocation(FVector& OutLocation, bool& bOutSnapToGround, const AFPSREnemySpawnPoint*& OutPoint) const;
+	bool ComputeSpawnLocation(const FGameplayTag& TargetMapId, FVector& OutLocation, bool& bOutSnapToGround, const AFPSREnemySpawnPoint*& OutPoint) const;
 
 	/** Trace down to the static floor under Location and return a ground-snapped spawn point (feet on
 	 *  the floor). Decouples spawn Z from the player's jump height. Falls back to Location if no floor hit. */
@@ -150,6 +217,16 @@ private:
 	static constexpr float TierS0RadiusSq = 1500.0f * 1500.0f; // S0: full update
 	static constexpr float TierS1RadiusSq = 3500.0f * 3500.0f; // S1
 	static constexpr float TierS2RadiusSq = 6000.0f * 6000.0f; // S2 (beyond = S3)
+
+	// --- Net-cull relevancy (multimap U P-H, server-only). In the unified field the swarm's net-cull radius is sized to an
+	//     engagement/weapon-range bubble capped to the slot footprint (ComputeUnifiedNetCullRadius) and applied UNIFORMLY at
+	//     acquire — a symmetric distance cull can't do per-slot seam-only relevancy without RepGraph (deferred). PIE-tunable. ---
+	/** Net-cull bubble base AND shoot-ability floor (cm): an enemy the server hitscan can reach is always replicated.
+	 *  Contract: >= the MAX authored weapon range (= the default hitscan Range, FPSRWeaponTypes.h Range=10000). Raise if a
+	 *  longer-range weapon is added, else a distant-but-in-range enemy would be culled on the client (alive-but-unshootable). */
+	static constexpr float NetCullWeaponRangeCm = 10000.0f; // cm (100m)
+	/** Across-seam lookahead (cm) added to the bubble so a cross-door chaser replicates a moment before it reaches the player. */
+	static constexpr float NetCullSeamMarginCm = 4000.0f; // cm (40m)
 
 	// Separation (anti-clumping) tuning. Cell size for the spatial hash == SeparationRadius so a 3x3
 	// neighbor scan covers the full radius.
@@ -218,8 +295,82 @@ private:
 	/** Total enemies spawned (hard cap at MaxActiveEnemies). */
 	int32 TotalSpawned = 0;
 
-	/** Hard cap on active enemies (Game.MD §5). */
+	/** Hard cap on active enemies (Game.MD §5) — the pool ceiling / endless-fall backstop. */
 	static constexpr int32 MaxActiveEnemies = 500;
+
+	// --- Map-aware allocator (multimap Tier 0, Performance §5 / Codex consult 2026-07-06) ---
+
+	/** Global alive cap across ALL maps (the host worst-case budget — per-map caps are forbidden). The allocator splits
+	 *  this across occupied maps; the fill loop hard-gates every spawn on ActiveEnemies.Num() < GlobalAliveCap so the
+	 *  total never exceeds it. Tunable Tier-0 value = SSOT §5 잠정 200 (was previously un-enforced; schedule could reach 300). */
+	static constexpr int32 GlobalAliveCap = 200;
+
+	/** Headroom held below GlobalAliveCap so a newly-occupied map can seed enemies immediately even when the rest of the
+	 *  budget is saturated (Codex R3: the 0-3s entry-seed promise). = Clamp(ceil(200*0.04), 4, 10). The steady per-map
+	 *  apportionment targets GlobalAliveCap - SeedReserve; the reserve is the free headroom for entry seeding. */
+	static constexpr int32 SeedReserve = 8;
+
+	/** Temp Tier-0 weight bonus for a map with 2+ players (aggregate 2+ front > solo, without per-capita starvation).
+	 *  weight = players + (players>=2 ? MapGroupBonus : 0). The content-aware allocator policy is Tier 1. */
+	static constexpr int32 MapGroupBonus = 1;
+
+	/** Grace after a map loses its last player before its enemies start draining (multimap Tier 0, server-only). A player
+	 *  who dips across a boundary and returns within this window finds the crowd intact — no drain thrash at the door. */
+	static constexpr float MapDrainGraceSeconds = 3.0f;
+
+	/** Server-only: world time each map last had a player (grace source for the empty-map drain). Not replicated. */
+	TMap<FGameplayTag, float> MapLastOccupiedTime;
+
+	// --- Front-chase (multimap U P-D, server-only) — an enemy chases a player in a DIFFERENT open-grid-connected slot
+	//     (through an opened door) via the UNIFIED field, within a path-distance range. Generalizes the tracker cohort to
+	//     the whole connected front. Cells = uniform-cost BFS steps; kept < a slot's ~66-cell width so the front is
+	//     "near the door", not the entire adjacent slot (Codex R2 #11). Tunable (PIE). ---
+	/** Enter the front-chase state when the enemy's unified path-distance to the nearest player is <= this (cells). */
+	static constexpr int32 ChaseEnterCells = 40;
+	/** Stay front-chasing until path-distance exceeds this (cells) — Schmitt hysteresis (> ChaseEnterCells) so a boundary
+	 *  enemy doesn't chase/idle flip-flop every 0.2s recompute (Codex R2 #13). */
+	static constexpr int32 ChaseExitCells = 50;
+	/** How long a front-chase tag stays live after the last in-range pass (world seconds) — bounds a stale cohort so it
+	 *  drains once the player is gone or the field goes persistently source-less without renewal (Codex R2 #5). */
+	static constexpr float ChaseHoldSeconds = 2.0f;
+
+	// --- Front-spawn pressure (multimap U P-E, server-only) — an open door reads as ONE combat front spanning both slots:
+	//     the adjacent (open-door-connected, currently-unoccupied) slot also spawns a near-door cohort. Bounded by a SEPARATE
+	//     reserve carved EXPLICITLY out of the steady budget (PhysicalSteady = Cap - SeedReserve - FrontReserved) so it never
+	//     inflates the physical apportionment's own target (Codex P-E gate #1). Per-front-slot cap keeps one front from
+	//     monopolising the reserve in a 4-player split (#5). All PIE-tunable. ---
+	/** Max concurrent front-attributed enemies PHYSICALLY present per front-active slot (per-front cap; round-robin fair). */
+	static constexpr int32 PerFrontSlotBudget = 12;
+	/** Hard ceiling on the TOTAL front reserve across all fronts (bounds how much of the steady budget the front borrows). */
+	static constexpr int32 FrontBudgetCeiling = 36;
+	/** Max front enemies spawned per director tick (front FILL rate; separate from the physical MaxSpawnPerTick so front fill
+	 *  never starves the physical fill's per-tick throughput, Codex P-E gate #B). */
+	static constexpr int32 MaxFrontSpawnPerTick = 2;
+	/** One-shot crossing credit (world seconds): a front enemy that crosses into an occupied slot keeps counting against the
+	 *  front reserve for this long, so the front can't instantly re-manufacture (conveyor RATE-limit, #4). Never renewed —
+	 *  so a player round-tripping a door can't keep a cohort drain-immune (attribution grants NO drain immunity). */
+	static constexpr float CrossingCreditSeconds = 4.0f;
+
+	// --- Connectivity-aware trickle drain (multimap U P-E, server-only) — the ONLY drain path (P-G: the hard empty-map pop is
+	//     gone). A time-based token bucket: REAR (far, not front-connected) enemies drain at an ambient rate, accelerating only
+	//     when they're hogging the global cap and the front/physical targets can't fill (Codex P-E gate #3). Multimap only;
+	//     single-map (its one map is always occupied while a player lives) needs no drain. ---
+	/** Ambient rear-drain rate (enemies/sec) — a recently-vacated rear region thins gently. */
+	static constexpr float BaseDrainRatePerSec = 2.0f;
+	/** Burst rear-drain rate (enemies/sec) when the swarm is cap-bound AND a physical/front deficit exists (rear is eating
+	 *  the cap the live front needs). Deliberately aggressive so an all-open endgame doesn't starve the front. */
+	static constexpr float BurstDrainRatePerSec = 20.0f;
+	/** ActiveEnemies within this many of GlobalAliveCap counts as "cap-bound" for the burst-drain trigger. */
+	static constexpr int32 CapBoundMargin = 10;
+	/** Clamp on the drain clock's per-tick elapsed (in director intervals) so a long freeze/pause can't accrue a burst of
+	 *  drain tokens that pops the whole rear on the first unfrozen tick (Codex P-E gate #4 / Opus P0). */
+	static constexpr int32 DrainDtClampTicks = 2;
+
+	/** Server-only (U P-E): world time of the previous director tick, for the trickle-drain token clock. Stamped on EVERY
+	 *  TickDirector entry (incl. early returns) so a freeze can't make the next elapsed huge. -1 = not yet stamped. Not replicated. */
+	float LastDirectorTime = -1.0f;
+	/** Server-only (U P-E): accumulated fractional rear-drain tokens (enemies). Not replicated. */
+	float DrainTokenBucket = 0.0f;
 
 	/** Max enemies spawned per director tick = the swarm FILL RATE (x ~1/SpawnInterval per second). Lower = enemies
 	 *  trickle in and the crowd recovers gradually after a clear; higher = the swarm snaps to the target count fast.

@@ -61,6 +61,13 @@ public:
 	UFUNCTION(Server, Reliable)
 	void ServerNotifyClientReady();
 
+	/** Client intent (U P-F): acknowledge the current flow-field topology generation to the server, so the allocator /
+	 *  swarm stop gating this player out. Sent from BeginPlay (initial) and from GameState::OnRep_TopologyGeneration
+	 *  whenever it changes. Applied to the owning PlayerState (monotone); buffered if the server-side PlayerState isn't
+	 *  linked yet. Authority-gated; a forged early/high value only ever advances THIS player's own ack. */
+	UFUNCTION(Server, Reliable)
+	void ServerAckTopology(int32 Gen);
+
 	/** Server-only (NOT an RPC): if no offer is currently shown, present the next one this player needs
 	 *  (priority: opening seed > mission reward > level-up). Drives the freeze-time card flow. */
 	void PresentNextOfferIfNeeded();
@@ -162,6 +169,11 @@ protected:
 	virtual void OnPossess(APawn* InPawn) override;
 	virtual void AcknowledgePossession(APawn* P) override;
 
+	/** U (P-F): apply any topology ack buffered before the PlayerState was linked. InitPlayerState covers the server
+	 *  (where ServerAckTopology may land before the PS is set); OnRep_PlayerState covers the owning-client PS arrival. */
+	virtual void InitPlayerState() override;
+	virtual void OnRep_PlayerState() override;
+
 	/** Server-only: draw + cache an offer of the given type for this player and present it. */
 	void RequestCardOffer(EFPSROfferType OfferType);
 
@@ -224,4 +236,11 @@ private:
 
 	/** Server-only: the run-start opening seed has been issued for this player (one-time guard). */
 	bool bOpeningSeedIssued = false;
+
+	/** Server-only (U P-F): apply PendingAckTopologyGeneration to the PlayerState once it is linked (called from
+	 *  InitPlayerState / OnRep_PlayerState). No-op if nothing is buffered. */
+	void ApplyPendingTopologyAck();
+
+	/** Server-only (U P-F): a topology ack that arrived before the PlayerState was linked (-1 = none). Applied on link. */
+	int32 PendingAckTopologyGeneration = -1;
 };

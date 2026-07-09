@@ -2,10 +2,13 @@
 
 #include "Door/FPSRDoor.h"
 #include "Enemy/FPSREnemyHealthComponent.h"
+#include "Enemy/FPSRFlowFieldSubsystem.h"
+#include "Map/FPSRMapStreamSubsystem.h"
 #include "FPSRCollisionChannels.h"
 
 #include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Engine/World.h"
 #include "Net/UnrealNetwork.h"
 #include "Net/Core/PushModel/PushModel.h"
 
@@ -135,8 +138,33 @@ void AFPSRDoor::HandleBroken(AActor* DeadActor, AActor* Killer)
 	bBroken = true;
 	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRDoor, bBroken, this);
 
+	// U (P-B): open the swarm flow field's seam this door was blocking so enemies cross + the origin-aware combat gate
+	// allows across immediately. BEFORE ApplyBrokenState so the leaf collision (door bounds) is still valid; no unified
+	// field (single-map) or off-authority makes the subsystem a no-op.
+	if (UWorld* World = GetWorld())
+	{
+		if (UFPSRFlowFieldSubsystem* Flow = World->GetSubsystem<UFPSRFlowFieldSubsystem>())
+		{
+			Flow->NotifyDoorBroken(this);
+		}
+	}
+
 	ApplyBrokenState(); // server: open the passage (collision off) + hide the leaves
 	OnDoorBroken();     // BP presentation (server)
+
+	// Multimap Tier 0: a giant boundary door streams in the adjacent map when broken. The MapStreamSubsystem bakes the
+	// field / re-caches spawn points / drops the boundary blocker once the sublevel's collision is verified ready (S3).
+	// A plain (non-streaming) room gate leaves TargetMapId unset and this is a no-op. Client visibility is engine-replicated.
+	if (TargetMapId.IsValid() && !TargetLevelName.IsNone())
+	{
+		if (UWorld* World = GetWorld())
+		{
+			if (UFPSRMapStreamSubsystem* Stream = World->GetSubsystem<UFPSRMapStreamSubsystem>())
+			{
+				Stream->RequestStreamIn(TargetMapId, TargetLevelName);
+			}
+		}
+	}
 }
 
 void AFPSRDoor::OnRep_Broken()

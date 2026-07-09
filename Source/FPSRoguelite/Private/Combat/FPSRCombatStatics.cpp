@@ -5,6 +5,8 @@
 #include "Combat/FPSRWeakpointComponent.h"
 #include "Enemy/FPSREnemyHealthComponent.h"
 #include "Enemy/FPSREnemyBase.h"
+#include "Enemy/FPSRFlowFieldSubsystem.h"
+#include "Enemy/FPSRFlowFieldComputer.h"
 #include "Hero/FPSRCharacter.h"
 #include "Core/FPSRGameState.h"
 #include "Core/FPSRPlayerController.h"
@@ -26,6 +28,37 @@ namespace FPSRCombat
 	 *  jump / launch feel) instead of sliding them flat along the ground. */
 	static constexpr float KnockbackUpwardBias = 0.35f;
 
+	bool CanAffectTarget(const UWorld* World, const AActor* Instigator, const AActor* Target, const FVector& OriginLocation)
+	{
+		if (Target && Target == Instigator)
+		{
+			return true; // self is always reachable; bAllowSelf (caller) decides actual self-damage/knockback (rocket jump)
+		}
+		// The reachability gate applies to PAWNS only (swarm enemies / players). A damageable DOOR is the wall itself — its
+		// actor sits on the seam / a blocked gap cell (not a walkable pawn surface), so connectivity would wrongly zero its
+		// damage and make streaming gates unbreakable (Codex R11). Non-pawn damageables bypass the gate — there is no "across
+		// a wall" concern when shooting the wall itself; ResolveDamage still resolves them.
+		if (!Target || !Target->IsA(APawn::StaticClass()))
+		{
+			return true;
+		}
+		if (const UFPSRFlowFieldSubsystem* FF = World ? World->GetSubsystem<UFPSRFlowFieldSubsystem>() : nullptr)
+		{
+			if (const UFPSRFlowFieldComputer* Unified = FF->GetMultiSlotUnifiedComputer())
+			{
+				// U (P-C): gate on ORIGIN<->TARGET open-grid connectivity — a closed door/wall between them blocks damage/AOE,
+				// an open door connects them. AreWorldLocationsConnected fails closed off-grid AND while connectivity is stale
+				// (post-mutation, pre-RunBFS) — but connectivity is rebuilt every RunBFS regardless of flow sources, so a
+				// source-less field (players airborne/unsnapped) still gates correctly instead of leaking through walls (R15).
+				return Unified->AreWorldLocationsConnected(OriginLocation, Target->GetActorLocation());
+			}
+		}
+		// P-G: no MULTI-SLOT unified grid (single-map degenerate grid / pre-build / off-authority) -> allow. A single-map run
+		// has no cross-map walls to gate against (the connectivity gate is a multimap notion); this preserves the pre-P-G
+		// single-map "MapId allow-all" behavior exactly, without the per-actor MapId lookup.
+		return true;
+	}
+
 	bool IsFriendlyFireEnabled(const UWorld* World)
 	{
 		const AFPSRGameState* GS = World ? World->GetGameState<AFPSRGameState>() : nullptr;
@@ -44,7 +77,7 @@ namespace FPSRCombat
 		OutParams.AddObjectTypesToQuery(ECC_FPSRPlayerPawn);  // player characters (distinct object channel)
 	}
 
-	float ResolveDamage(const AActor* Instigator, const AActor* Target, float BaseDamage, bool bAllowSelf, const UWorld* World)
+	float ResolveDamage(const AActor* Instigator, const AActor* Target, float BaseDamage, bool bAllowSelf, const UWorld* World, const FVector* OriginOverride)
 	{
 		if (!Target || BaseDamage <= 0.0f)
 		{
@@ -55,6 +88,14 @@ namespace FPSRCombat
 		if (Target == Instigator)
 		{
 			return bAllowSelf ? BaseDamage : 0.0f;
+		}
+
+		// Reachability guard (P-C): no damage across a closed door/wall (or, pre-U, a streamed map boundary). Origin = the
+		// blast Center (explosions pass OriginOverride) or the instigator's location (direct shots). Self is exempt above.
+		const FVector Origin = OriginOverride ? *OriginOverride : (Instigator ? Instigator->GetActorLocation() : FVector::ZeroVector);
+		if (!CanAffectTarget(World, Instigator, Target, Origin))
+		{
+			return 0.0f;
 		}
 
 		// Swarm enemy (identified by its non-GAS health component): always full damage.
@@ -217,6 +258,13 @@ namespace FPSRCombat
 			}
 			Processed.Add(Target);
 
+			// Reachability guard (P-C): skip a target the blast can't reach — no damage AND no knockback across a closed
+			// door/wall (or, pre-U, a streamed boundary). Origin = the blast Center, NOT the instigator. Self exempt.
+			if (!CanAffectTarget(World, Instigator, Target, Center))
+			{
+				continue;
+			}
+
 			// Per-target crit roll, then self/friendly resolution (may be 0 = no damage but knockback can still apply).
 			float BaseDamage = Damage;
 			bool bCrit = false;
@@ -226,7 +274,7 @@ namespace FPSRCombat
 				bCrit = true;
 			}
 
-			const float FinalDamage = ResolveDamage(Instigator, Target, BaseDamage, bAllowSelf, World);
+			const float FinalDamage = ResolveDamage(Instigator, Target, BaseDamage, bAllowSelf, World, &Center);
 			FDamageResult Result;
 			if (FinalDamage > 0.0f)
 			{

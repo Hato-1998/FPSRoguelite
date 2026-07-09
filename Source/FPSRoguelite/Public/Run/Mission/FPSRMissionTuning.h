@@ -3,10 +3,12 @@
 #pragma once
 
 #include "UObject/Object.h"
+// Full includes (not fwd-decls): these actor types back TSubclassOf<> UPROPERTYs below, whose TSubclassOf::operator*
+// (Class->IsChildOf(T::StaticClass())) needs the COMPLETE type. A fwd-decl only compiled by luck of the unity-build
+// grouping (the merge of the multimap-U arc reshuffled it and surfaced the latent incomplete-type error). IWYU.
+#include "Run/Mission/FPSRMissionOrb.h"
+#include "Run/Mission/FPSRMissionFleeTarget.h"
 #include "FPSRMissionTuning.generated.h"
-
-class AFPSRMissionOrb;
-class AFPSRMissionFleeTarget;
 
 /**
  * Polymorphic mission tuning object (§2-8-1). A mission DataAsset owns one Instanced UFPSRMissionTuning; the

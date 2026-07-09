@@ -30,6 +30,12 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Enemy Spawn")
 	FGameplayTag ZoneTag;
 
+	/** Which map this spawn point belongs to (multimap Tier 0). Unset = the Default single-map (single-map content
+	 *  unchanged). The spawn subsystem caches points per MapId and only selects a map's points for that map's allocation;
+	 *  an enemy spawned here inherits this MapId. Distinct from ZoneTag (intra-map room gating). */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Enemy Spawn")
+	FGameplayTag MapId;
+
 	/** If > 0, this point is only eligible when the nearest player is at least this far away (cm). */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Enemy Spawn", meta = (ClampMin = "0.0"))
 	float MinPlayerDistance = 0.0f;
@@ -39,6 +45,7 @@ public:
 	bool bEnabled = true;
 
 	FGameplayTag GetZoneTag() const { return ZoneTag; }
+	const FGameplayTag& GetMapId() const { return MapId; }
 	float GetMinPlayerDistance() const { return MinPlayerDistance; }
 	bool IsEnabled() const { return bEnabled; }
 
