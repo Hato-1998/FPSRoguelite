@@ -6,6 +6,12 @@
 
 **최종 갱신: 2026-07-08**
 
+## 🔔 핸드오프 (2026-07-09 o · **반동 P3 완료(패턴 저작·배선) + 재장전 패턴리셋**) — 🎯 **무기 6종 CRRecoilPattern 저작·DA 배선 완료(사용자, 커밋 `5c9dd53`) + 재장전 시 패턴 초반 리셋(`92a882c`). 빌드·validate 통과. 남은 = 사용자 PIE 스모크 → P4(死코드정리·필드제거·Codex머지게이트·`--no-ff` 머지).**
+> **P3 완료**: heat 곡선(6무기, `19ef50c`) + 반동 패턴 `RP_<무기>`×6(비주얼 에디터, 사용자) → DA `RecoilPattern` 배선(`5c9dd53`). **일반 무기 반동 활성화**(P1 이후 휴면 해제). ChargeLaser/Knife 패턴 없음. validate-data exit0(validated21·invalid0·heat 프로파일 무결 — 사용자 에디터 작업이 heat 곡선 안 건드림 확인).
+> **재장전 패턴리셋(`92a882c`, 빌드 -NoXGE Succeeded)**: 홀드 사격 중 (자동/수동)재장전 시작 시 ShotIndex 0 리셋 → 새 탄창이 초반 패턴부터(기존: StartShooting이 트리거 프레스에만 리셋→홀드-재장전 시 후반 end-behavior 지속). `UFPSRRecoilComponent::ResetPattern()`(CurrentShotIndex=0) + FireComponent TickComponent가 replicated reloading **상승 엣지**에서 호출(오너-로컬, 근접/차지레이저 제외). 확산 heat는 재장전 무사격 구간 자연 냉각이라 별도 리셋 불요.
+> **남은**: **사용자 PIE 스모크**(가이드 `Docs/Recoil_P3P4_EditorGuide.md` 할 일 B — 반동 패턴 느낌·확산 벌어짐/회복·ADS·SpreadDegrees/반동↓ 카드레버·프리즈/DBNO·재장전 리셋·서버패리티 리슨2인+). 통과 후 **P4**(내 작업): 死코드(`PendingRise*` 스무드라이즈 블록[양수대입 없음=死]·데드 스탯; ChargeLaser `RecoilDebtPitch` 보존)·`FPSR.RecoilPreview` 실제 CRRecoilPattern 반영·레거시 `BloomPerShot/MaxBloom/BloomRecoveryRate` 필드 제거 → Codex 머지게이트 → `--no-ff` **P1~P4 묶어 머지**.
+> **⚠️ P4 필드제거는 PIE 확인 후**: 레거시 블룸 3필드는 heat 마이그레이션 검증용 참조라 PIE로 느낌 확인 뒤 제거(회귀 발견 시 재파생 대비).
+
 ## 🔔 핸드오프 (2026-07-09 n · **반동 P3 heat곡선 완료 + 패턴/PIE 사용자 가이드**) — 🎯 **원거리 6무기 heat 확산 곡선 헤드리스 저작·validate 통과·커밋 `19ef50c`. 남은 = 사용자 에디터 작업(무기별 `CRRecoilPattern` 저작 + PIE 스모크; 가이드 `Docs/Recoil_P3P4_EditorGuide.md`) → 그 후 P4(死코드정리·필드제거·Codex머지게이트·`--no-ff` 머지).**
 > **P3 heat(커밋 `19ef50c`, `Scripts/recoil_p3_heat_curves.py`, validate exit0·heat 무에러)**: `heat=확산 도(°)` 규약 1:1 마이그레이션(기존 BloomPerShot/MaxBloom/BloomRecoveryRate → Max/ShotToHeat상수/HeatToSpread항등/HeatToCool상수, Delay0.15). **Rifle**(실측 Max **1.5°** — P2 초저작이 기본값 4° 잘못 씀→교정)·**SMG**(1.5°)·**LMG**(4°)·**Sniper**(4°)=프로파일 저작. **Shotgun**(8° 고정콘)·**Bazooka**(4°)=BloomPerShot 0이라 **빈 프로파일**(무변경, 되돌림). ChargeLaser/Knife 제외.
 > **사용자 작업(가이드 = `Docs/Recoil_P3P4_EditorGuide.md`)**: ①무기별 `RP_<무기>`(CRRecoilPattern) **비주얼 에디터** 저작 → DA `RecoilPattern` 배선(권장 유닛 델타값 표 포함). ⚠️패턴은 **ADS 기준 shape**, 실제 킥 = 패턴 × Hip/ADSVerticalScale × 반동카드스케일 — `RecoilVertical`은 이제 세기 레버(카드 스케일 기준점). ②PIE 스모크(확산=지금 확인가능·반동=패턴 저작 후·프리즈/DBNO·서버패리티 리슨2인+). ChargeLaser(차징램프 유지)/Knife(무반동) 패턴 없음.
