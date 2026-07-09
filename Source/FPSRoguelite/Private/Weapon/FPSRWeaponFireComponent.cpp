@@ -8,6 +8,7 @@
 #include "Weapon/FPSRWeaponTypes.h"
 #include "Weapon/FPSRWeaponFragment.h"
 #include "Weapon/FPSRRecoilComponent.h"
+#include "Data/CRRecoilPattern.h"
 #include "Hero/FPSRCharacter.h"
 #include "Core/FPSRGameState.h"
 #include "Core/FPSRLogChannels.h" // LogFPSR (was relied on transitively via unity — make the dependency explicit, IWYU)
@@ -543,10 +544,10 @@ void UFPSRWeaponFireComponent::TickComponent(float DeltaTime, ELevelTick TickTyp
 		Char->UpdateAimDownSights(DeltaTime);
 	}
 
-	// 0) ChargeLaser charge-recoil ramp: spread the shot's up-kick across the charge so the view climbs gradually and
-	//    the rise FINISHES at the fire moment (charge complete). Applied directly here (the charge duration IS the
-	//    smoothing, so it bypasses the RecoilRiseRate path) and accumulates recovery debt so auto-recovery — gated off
-	//    while the ramp is active — pulls the view back down only after the climb finishes.
+	// ChargeLaser charge-recoil ramp: spread the shot's up-kick across the charge so the view climbs gradually and the
+	//    rise FINISHES at the fire moment (charge complete). The charge duration IS the smoothing (applied directly
+	//    here), and it accumulates recovery debt so auto-recovery — gated off while the ramp is active — pulls the view
+	//    back down only after the climb finishes.
 	if (bChargeSequenceActive)
 	{
 		const float Dur = FMath::Max(0.0001f, ChargeRecoilDuration);
@@ -574,49 +575,10 @@ void UFPSRWeaponFireComponent::TickComponent(float DeltaTime, ELevelTick TickTyp
 		}
 	}
 
-	// --- Recoil pitch handling (smoothed rise + debt-aware recovery + player compensation) ---
-	// During a reload, TRIM a large smoothed-rise backlog (from boosted rapid fire) so the view doesn't keep
-	// climbing through the reload — but KEEP up to a single shot's worth so the round that EMPTIED the magazine
-	// still kicks. Zeroing the queue here erased the last shot's recoil entirely: emptying the mag triggers an
-	// auto-reload within a frame of that shot, so IsReloading flips true before the smoothed rise (applied over
-	// ~RecoilVertical/RecoilRiseRate seconds) has played out — worst on a high-recoil single-shot sniper.
-	if (Inventory->IsReloading())
-	{
-		const float MaxRise = Stats.RecoilVertical * FMath::Max(Stats.HipVerticalScale, Stats.ADSVerticalScale);
-		PendingRisePitch = FMath::Min(PendingRisePitch, FMath::Max(0.0f, MaxRise));
-		const float MaxYaw = FMath::Abs(Stats.RecoilHorizontal) * 2.0f; // one shot incl. random-variance headroom
-		PendingRiseYaw = FMath::Clamp(PendingRiseYaw, -MaxYaw, MaxYaw);
-	}
+	// --- Recoil recovery (ChargeLaser ramp debt): the pattern weapons' uplift/recovery live in the CrystalRecoil
+	//     component; this path only services the ChargeLaser charge-ramp, which accumulates RecoilDebtPitch above. ---
 
-	// On fire release, drop the un-applied smoothed-rise backlog so the view does not keep climbing after the trigger
-	// is released. Sustained fire builds a PendingRise* queue (smoothed in over time); once the player stops firing
-	// (and stops compensating) any leftover would otherwise play out as an unwanted upward/lateral drift. Applies to
-	// ALL fire modes (user decision 2026-06-30) — recoil only rises WHILE the trigger is held. Note: a quick
-	// single-shot tap therefore delivers only the recoil applied before release; hold the button for the full kick.
-	if (!bWantsToFire)
-	{
-		PendingRisePitch = 0.0f;
-		PendingRiseYaw = 0.0f;
-	}
-
-	// 1) Smoothly apply any pending up-kick (snappy rise), accumulating recovery debt.
-	if (PendingRisePitch > 0.0f)
-	{
-		const float Apply = FMath::Min(Stats.RecoilRiseRate * DeltaTime, PendingRisePitch);
-		OwnerPawn->AddControllerPitchInput(-Apply); // negative = up
-		PendingRisePitch -= Apply;
-		RecoilDebtPitch += Apply;
-	}
-
-	// 1b) Smoothly apply pending horizontal recoil (signed; no debt — horizontal is not auto-recovered).
-	if (PendingRiseYaw != 0.0f)
-	{
-		const float ApplyYaw = FMath::Sign(PendingRiseYaw) * FMath::Min(Stats.RecoilRiseRate * DeltaTime, FMath::Abs(PendingRiseYaw));
-		OwnerPawn->AddControllerYawInput(ApplyYaw);
-		PendingRiseYaw -= ApplyYaw;
-	}
-
-	// 2) Player's manual downward compensation pays down the debt (it already moved the camera in
+	// 1) Player's manual downward compensation pays down the debt (it already moved the camera in
 	//    Input_Look) so auto-recovery does not stack on top of it and overshoot below the aim point.
 	if (PlayerPitchCompensation > 0.0f && RecoilDebtPitch > 0.0f)
 	{
@@ -625,10 +587,8 @@ void UFPSRWeaponFireComponent::TickComponent(float DeltaTime, ELevelTick TickTyp
 	}
 	PlayerPitchCompensation = 0.0f;
 
-	// 3) Auto-recover the remaining (un-compensated) debt downward when not firing.
-	//    Gated per weapon: Always = on, Never = off, Auto = on only for single-shot weapons
-	//    (snipers/railguns). Rapid-fire (FullAuto/Burst) does NOT auto-recover — the player pulls
-	//    the view back down manually, which feels right for sustained sprays.
+	// 2) Auto-recover the remaining (un-compensated) debt downward when not firing. Gated per weapon: Always = on,
+	//    Never = off, Auto = on only for single-shot weapons. (Only the ChargeLaser ramp sets RecoilDebtPitch now.)
 	const bool bAutoRecover =
 		(Stats.RecoilRecovery == ERecoilRecovery::Always) ||
 		(Stats.RecoilRecovery == ERecoilRecovery::Auto && Stats.FireMode == EFPSRFireMode::Single);
@@ -686,7 +646,13 @@ static FAutoConsoleCommandWithWorldAndArgs GFPSRRecoilPreviewCmd(
 			return;
 		}
 
-		const FFPSRWeaponStatBlock& Stats = Instance->GetResolvedStats();
+		UFPSRWeaponDataAsset* Weapon = Instance->GetSource();
+		UCRRecoilPattern* Pattern = Weapon ? Weapon->RecoilPattern : nullptr;
+		if (!Pattern)
+		{
+			UE_LOG(LogFPSR, Warning, TEXT("[Weapon] RecoilPreview: 장착 무기에 RecoilPattern 없음(ChargeLaser/근접/미저작) — 프리뷰할 패턴 없음."));
+			return;
+		}
 
 		// Camera basis.
 		FVector CamLoc = Player->GetActorLocation();
@@ -702,6 +668,7 @@ static FAutoConsoleCommandWithWorldAndArgs GFPSRRecoilPreviewCmd(
 		float CumPitch = 0.0f;
 		FVector PrevPoint = FVector::ZeroVector;
 		bool bHasPrev = false;
+		int32 PatternShotIdx = 0;
 
 		for (int32 i = 0; i < Shots; ++i)
 		{
@@ -718,9 +685,10 @@ static FAutoConsoleCommandWithWorldAndArgs GFPSRRecoilPreviewCmd(
 			PrevPoint = Point;
 			bHasPrev = true;
 
-			const FVector2D Delta = UFPSRWeaponFireComponent::ComputeShotRecoilDelta(Stats, i);
+			// 실제 CrystalRecoil 패턴의 발당 델타(X=yaw°, Y=up-pitch°, RecoilStrength 1.0 원본 shape).
+			const FVector2f Delta = Pattern->ConsumeShot(PatternShotIdx);
 			CumYaw += Delta.X;
-			CumPitch += Delta.Y * Stats.ADSVerticalScale;
+			CumPitch += Delta.Y;
 		}
 	}));
 

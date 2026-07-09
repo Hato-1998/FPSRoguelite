@@ -72,7 +72,7 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|반동", meta = (DisplayName = "반동 패턴(CrystalRecoil)"))
 	TObjectPtr<UCRRecoilPattern> RecoilPattern;
 
-	/** 확산 heat 프로파일(P2) — 무기별 동적 확산. 레거시 BloomPerShot/MaxBloom/BloomRecoveryRate 스칼라를 대체한다:
+	/** 확산 heat 프로파일(P2) — 무기별 동적 확산. 레거시 스칼라 블룸(P4에서 제거됨)을 대체한다:
 	 *  수락된 발사마다 ShotToHeatCurve(X=현재 heat, Y=더할 heat)로 heat가 쌓이고, HeatToSpreadAngleCurve(X=heat,
 	 *  Y=확산 반각 도; heat=0→0으로 저작해 무heat=순수 base SpreadDegrees)로 동적 확산각을 만들고,
 	 *  HeatToCooldownPerSecondCurve(X=heat, Y=heat/초, >0)로 식는다. 장착 시 반동 컴포넌트에 주입된다.

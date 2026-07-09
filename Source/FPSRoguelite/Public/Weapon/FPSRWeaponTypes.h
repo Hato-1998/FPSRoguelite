@@ -83,18 +83,9 @@ struct FPSROGUELITE_API FFPSRWeaponStatBlock
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Ammo")
 	float ReloadTime = 1.5f; // seconds; reserve ammo is infinite (always refills to MagSize)
 
-	// --- Spread / bloom ---
+	// --- Spread (base half-angle; dynamic bloom is now the per-weapon heat-spread profile on the weapon DA) ---
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Spread")
-	float SpreadDegrees = 1.0f; // base half-angle
-
-	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Spread")
-	float BloomPerShot = 0.3f; // added spread per shot
-
-	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Spread")
-	float MaxBloom = 4.0f;
-
-	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Spread")
-	float BloomRecoveryRate = 6.0f; // degrees per second
+	float SpreadDegrees = 1.0f; // base half-angle (casual-ization lever; card-modifiable)
 
 	// --- Recoil (camera kick, degrees) ---
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Recoil")
@@ -108,9 +99,6 @@ struct FPSROGUELITE_API FFPSRWeaponStatBlock
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Recoil")
 	float RecoilRecoveryRate = 10.0f; // degrees per second recovered when not firing
-
-	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Recoil")
-	float RecoilRiseRate = 25.0f; // how fast the per-shot up-kick is applied (deg/sec, snappy rise)
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Recoil")
 	float RecoilHorizontalPatternFreq = 0.6f; // horizontal pattern frequency (radians per shot)
