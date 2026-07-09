@@ -41,10 +41,16 @@ public:
 	 *  retries against the map whose grid actually contains it so flow stays continuous at the boundary. */
 	FVector SampleFlowDirection(const FGameplayTag& MapId, const FVector& WorldLocation) const;
 
-	/** U (P-C combat gate): the unified continuous field if one is active (a bUnifiedExtent volume is present), else null.
-	 *  FPSRCombat::CanAffectTarget uses it to gate damage/AOE on origin<->target open-grid connectivity (a closed door/wall
-	 *  between them = blocked). Null => callers fall back to the MapId gate (single-map / pre-content). Server-authoritative. */
+	/** The continuous flow field (P-G: ALWAYS built on the server — a real bUnifiedExtent multimap grid, OR a single
+	 *  degenerate world-trace grid for a plain single-map). Used for flow sampling + origin<->target open-grid connectivity
+	 *  (FPSRCombat::CanAffectTarget). Null only off-authority (clients never build it) / pre-build. Server-authoritative. */
 	const UFPSRFlowFieldComputer* GetUnifiedComputer() const { return UnifiedComputer; }
+
+	/** U (P-G): the unified computer ONLY when it is a real MULTI-SLOT field (a bUnifiedExtent volume with MapId'd slots) —
+	 *  null for a single-map degenerate grid. This is the "is this multimap?" predicate: multimap-only behaviors (the
+	 *  topology late-join ack gate, the combat connectivity gate, front-chase/spawn, the trickle drain) gate on THIS, so a
+	 *  single-map run stays a strict no-op (no ack seal, combat allow-all) exactly as before P-G. Server-authoritative. */
+	const UFPSRFlowFieldComputer* GetMultiSlotUnifiedComputer() const { return bUnifiedMultiSlot ? UnifiedComputer : nullptr; }
 
 	/** U P-D: true if A and B are in the same open-grid connected component of the UNIFIED field (an open door connects them;
 	 *  a closed door/wall separates them). False when there is no unified field (single-map) — callers then keep same-map
@@ -144,11 +150,19 @@ private:
 	UPROPERTY(Transient)
 	TMap<FGameplayTag, TObjectPtr<UFPSRFlowFieldComputer>> Computers;
 
-	/** U unified continuous field (2026-07-07): non-null when a bUnifiedExtent bounds volume is present -> ONE pre-sized grid
-	 *  covers all slots (each MapId'd slot baked into it). Swarm flow samples THIS when set; the per-map registry above
-	 *  coexists (still baked/recomputed for the allocator's IsMapFieldReady) but is unused for flow until removed in P-G. */
+	/** U continuous field. P-G: ALWAYS built on the server — a real bUnifiedExtent grid (all MapId'd slots baked in), OR a
+	 *  single degenerate world-trace grid for a plain single-map. Swarm flow + combat connectivity sample THIS. */
 	UPROPERTY(Transient)
 	TObjectPtr<UFPSRFlowFieldComputer> UnifiedComputer;
+
+	/** U (P-G): true only when UnifiedComputer is a real MULTI-SLOT bUnifiedExtent grid (false for the degenerate single-map
+	 *  grid). Gates the multimap-only behaviors (ack/combat-connectivity/front/trickle) via GetMultiSlotUnifiedComputer(). */
+	bool bUnifiedMultiSlot = false;
+
+	/** U (P-G): per-slot world AABB keyed by MapId, populated at bake (BuildUnifiedField / BakeDiscoveredMap). Replaces the
+	 *  per-map registry as the source for FindMapIdForLocation / IsLocationInMap (which slot a location is in). Empty for a
+	 *  single-map degenerate grid (one map, unset). POD member (no GC / UPROPERTY); Reset() in Deinitialize. Server-only. */
+	TMap<FGameplayTag, FBox> SlotBounds;
 
 	FTimerHandle RecomputeTimerHandle;
 

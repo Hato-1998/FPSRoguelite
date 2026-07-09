@@ -64,7 +64,7 @@ namespace FPSRCombat
 		}
 		if (const UFPSRFlowFieldSubsystem* FF = World ? World->GetSubsystem<UFPSRFlowFieldSubsystem>() : nullptr)
 		{
-			if (const UFPSRFlowFieldComputer* Unified = FF->GetUnifiedComputer())
+			if (const UFPSRFlowFieldComputer* Unified = FF->GetMultiSlotUnifiedComputer())
 			{
 				// U (P-C): gate on ORIGIN<->TARGET open-grid connectivity — a closed door/wall between them blocks damage/AOE,
 				// an open door connects them. AreWorldLocationsConnected fails closed off-grid AND while connectivity is stale

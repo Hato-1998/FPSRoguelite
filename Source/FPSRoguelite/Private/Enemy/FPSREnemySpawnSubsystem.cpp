@@ -272,10 +272,10 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 
 	const float Now = World->GetTimeSeconds();
 
-	// U P-D/P-F: the unified continuous field drives front-chase targeting AND the topology late-join ack gate — both are
-	// active ONLY when a unified field exists (single-map / pre-content keeps the exact same-map behavior, no regression).
+	// U P-D/P-F: the MULTI-SLOT unified field drives front-chase targeting AND the topology late-join ack gate — both are
+	// active ONLY for a real multimap grid (P-G: a single-map degenerate grid keeps the exact same-map behavior, no regression).
 	const UFPSRFlowFieldSubsystem* FlowField = World->GetSubsystem<UFPSRFlowFieldSubsystem>();
-	const bool bUnified = FlowField && FlowField->GetUnifiedComputer() != nullptr;
+	const bool bUnified = FlowField && FlowField->GetMultiSlotUnifiedComputer() != nullptr; // P-G: multimap only (single-map degenerate grid = false)
 
 	// Cache alive player pawn locations, pawns, and committed MapIds once for this pass.
 	TArray<APawn*, TInlineAllocator<4>> PlayerPawns;
@@ -668,7 +668,7 @@ void UFPSREnemySpawnSubsystem::ComputeOccupancy(TArray<FGameplayTag>& OutOccupie
 	// U (P-F): the topology late-join ack gate is meaningful ONLY when a unified continuous field exists (multimap) — a
 	// single-map run has no door topology to confirm, so the gate is a strict no-op there (avoids even a sub-RTT exclusion
 	// for a mid-combat single-map joiner: the "단일맵 무회귀" invariant).
-	const bool bUnified = Flow && Flow->GetUnifiedComputer() != nullptr;
+	const bool bUnified = Flow && Flow->GetMultiSlotUnifiedComputer() != nullptr; // P-G: multimap only (single-map degenerate grid = false)
 	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
 	{
 		APlayerController* PC = It->Get();
@@ -814,9 +814,9 @@ void UFPSREnemySpawnSubsystem::ComputeFrontState(const TArray<FGameplayTag>& Occ
 		return;
 	}
 	const UFPSRFlowFieldSubsystem* Flow = World->GetSubsystem<UFPSRFlowFieldSubsystem>();
-	if (!Flow || Flow->GetUnifiedComputer() == nullptr)
+	if (!Flow || Flow->GetMultiSlotUnifiedComputer() == nullptr)
 	{
-		return; // no unified continuous field -> no front spawning (single-map / pre-content: no regression)
+		return; // P-G: front spawning is multimap only (single-map degenerate grid / pre-content: no regression)
 	}
 
 	// Player VIEW locations for the shared MinPlayerDistance gate (same source as TrySelectSpawnPoint).
@@ -1041,7 +1041,7 @@ void UFPSREnemySpawnSubsystem::TickDirector()
 	// U P-E: front detection (unified continuous field ONLY). Front-active adjacent slots + their near-door eligible spawn
 	// points. Empty (and every P-E branch below dormant) when there is no unified field -> byte-identical to pre-P-E.
 	const UFPSRFlowFieldSubsystem* FlowField = World->GetSubsystem<UFPSRFlowFieldSubsystem>();
-	const bool bUnified = FlowField && FlowField->GetUnifiedComputer() != nullptr;
+	const bool bUnified = FlowField && FlowField->GetMultiSlotUnifiedComputer() != nullptr; // P-G: multimap only (single-map degenerate grid = false)
 	TMap<FGameplayTag, TArray<const AFPSREnemySpawnPoint*>> FrontPointsByMap;
 	if (bUnified)
 	{

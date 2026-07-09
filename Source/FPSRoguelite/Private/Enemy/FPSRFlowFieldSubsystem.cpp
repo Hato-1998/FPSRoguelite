@@ -83,11 +83,12 @@ void UFPSRFlowFieldSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 		return; // clients never build or recompute the field
 	}
 
-	// Bake every bounds volume present in the persistent world at begin play. Untagged volume (or none) -> Default field
-	// (PlayerStart floor anchor, S1a parity); a MapId'd volume -> its own per-map computer (own-box floor anchor). Streamed
-	// sublevels that arrive later are baked by the MapStreamSubsystem on collision-ready (S3).
-	bool bAnyVolume = false;
+	// P-G: build ONE continuous field per world. Scan for the bUnifiedExtent volume (multimap) + a single untagged volume
+	// (single-map extent). MapId'd slot volumes are baked into the per-map registry (dead after the SlotBounds reroute below,
+	// removed in Stage C) — the registry is no longer the flow source.
+	bool bAnyMapIdVolume = false;
 	const AFPSRFlowFieldBoundsVolume* UnifiedVolume = nullptr;
+	const AFPSRFlowFieldBoundsVolume* UntaggedVolume = nullptr;
 	for (TActorIterator<AFPSRFlowFieldBoundsVolume> It(&InWorld); It; ++It)
 	{
 		const AFPSRFlowFieldBoundsVolume* Volume = *It;
@@ -97,24 +98,40 @@ void UFPSRFlowFieldSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 		}
 		if (Volume->IsUnifiedExtent())
 		{
-			UnifiedVolume = Volume; // U extent — built below (not a per-map slot)
+			UnifiedVolume = Volume; // U extent — the multimap unified grid (built below)
 			continue;
 		}
-		bAnyVolume = true;
-		const FGameplayTag Map = Volume->GetMapId();
-		const float FloorZ = Map.IsValid() ? DetectFloorZForVolume(InWorld, *Volume) : DetectFloorZ(InWorld);
-		BakeMap(Map, Volume, FloorZ);
-	}
-	if (!bAnyVolume && !UnifiedVolume)
-	{
-		BakeMap(FGameplayTag(), nullptr, DetectFloorZ(InWorld)); // origin-centered fallback Default grid (existing maps)
+		if (!Volume->GetMapId().IsValid())
+		{
+			if (!UntaggedVolume) { UntaggedVolume = Volume; } // single-map extent -> the degenerate unified grid below
+			continue;
+		}
+		bAnyMapIdVolume = true;
+		BakeMap(Volume->GetMapId(), Volume, DetectFloorZForVolume(InWorld, *Volume)); // registry (removed in Stage C)
 	}
 
-	// U (2026-07-07): if a bUnifiedExtent volume is present, build the single continuous grid over it and bake each loaded
-	// slot into it. The per-map registry above still exists (allocator / IsMapFieldReady coexistence) until P-G removes it.
 	if (UnifiedVolume)
 	{
+		// Multimap: the pre-sized bUnifiedExtent grid with every MapId'd slot baked in (sets UnifiedComputer + SlotBounds +
+		// bUnifiedMultiSlot + the BakedBaseline snapshot).
 		BuildUnifiedField(InWorld, *UnifiedVolume);
+	}
+	else
+	{
+		// P-G auto-degenerate single-slot unified: the ONE world-trace grid IS the continuous field for a plain single-map
+		// (an untagged bounds volume, or the origin-centered fallback). Serves flow + connectivity; SlotBounds stays empty (no
+		// per-slot MapId partition) and bUnifiedMultiSlot stays false, so the multimap-only gates (ack / combat connectivity /
+		// front / trickle) are inert here — single-map is a strict no-op, exactly as before P-G.
+		const float FloorZ = UntaggedVolume ? DetectFloorZForVolume(InWorld, *UntaggedVolume) : DetectFloorZ(InWorld);
+		UnifiedComputer = NewObject<UFPSRFlowFieldComputer>(this);
+		UnifiedComputer->BuildFromWorldTrace(&InWorld, UntaggedVolume, FloorZ);
+		UnifiedComputer->ExtractSurfaceData(BakedBaseline);
+		bHasBaseline = true;
+		if (bAnyMapIdVolume)
+		{
+			UE_LOG(LogFPSR, Warning,
+				TEXT("[FlowField] U P-G: MapId'd slot volume(s) present without a bUnifiedExtent volume — built a single degenerate grid (multimap flow needs a bUnifiedExtent). Author one for multimap content."));
+		}
 	}
 
 	// U (P-F): subscribe to the GameState freeze/run-state so a door broken DURING a card-select freeze is recomputed the
@@ -187,6 +204,7 @@ void UFPSRFlowFieldSubsystem::BuildUnifiedField(UWorld& InWorld, const AFPSRFlow
 
 	UnifiedComputer = NewObject<UFPSRFlowFieldComputer>(this);
 	UnifiedComputer->BuildEmptyGrid(DimX, DimY, Origin, CellSize, Step);
+	bUnifiedMultiSlot = true; // P-G: a real bUnifiedExtent multimap grid -> the multimap-only gates apply
 	UE_LOG(LogFPSR, Log, TEXT("[FlowField] U unified grid %dx%d cell=%.0f origin=%s built from bUnifiedExtent volume."),
 		DimX, DimY, CellSize, *Origin.ToString());
 
@@ -195,7 +213,14 @@ void UFPSRFlowFieldSubsystem::BuildUnifiedField(UWorld& InWorld, const AFPSRFlow
 	for (TActorIterator<AFPSRFlowFieldBoundsVolume> It(&InWorld); It; ++It)
 	{
 		const AFPSRFlowFieldBoundsVolume* Slot = *It;
-		if (Slot && !Slot->IsUnifiedExtent() && BakeSlotIntoUnified(InWorld, *Slot))
+		if (!Slot || Slot->IsUnifiedExtent())
+		{
+			continue;
+		}
+		// P-G: record the slot's world AABB for occupancy / MapId resolution (FindMapIdForLocation), INDEPENDENT of the flow
+		// bake succeeding — a player standing in a sealed slot still resolves to it. Keyed by MapId (an untagged slot -> unset).
+		SlotBounds.Add(Slot->GetMapId(), Slot->GetWorldBounds());
+		if (BakeSlotIntoUnified(InWorld, *Slot))
 		{
 			++Baked;
 		}
@@ -253,6 +278,8 @@ bool UFPSRFlowFieldSubsystem::BakeDiscoveredMap(const FGameplayTag& MapId)
 		const AFPSRFlowFieldBoundsVolume* Volume = *It;
 		if (Volume && Volume->GetMapId() == MapId)
 		{
+			// P-G: record the streamed slot's world AABB for occupancy / MapId resolution (independent of the flow bake).
+			SlotBounds.Add(MapId, Volume->GetWorldBounds());
 			BakeMap(MapId, Volume, DetectFloorZForVolume(*World, *Volume));
 			if (UnifiedComputer)
 			{
@@ -282,9 +309,10 @@ bool UFPSRFlowFieldSubsystem::BakeDiscoveredMap(const FGameplayTag& MapId)
 
 void UFPSRFlowFieldSubsystem::NotifyDoorBroken(const AActor* Door)
 {
-	// Single-map (no unified field) / off-authority -> no-op. Pre-U, the closed seam already isolated the slots; there is no
-	// grid edge to open, so a plain room-gate door in a single-map level changes nothing here (no regression).
-	if (!HasServerAuthority() || !Door || !UnifiedComputer)
+	// Multimap (a real bUnifiedExtent grid with seams) only / off-authority -> no-op. A single-map degenerate grid has no
+	// seams, so a plain room-gate door there opens no cross-slot edge — gate on bUnifiedMultiSlot to keep it a strict no-op
+	// (P-G: UnifiedComputer is now always set, so the null-check no longer distinguishes single-map).
+	if (!HasServerAuthority() || !Door || !bUnifiedMultiSlot || !UnifiedComputer)
 	{
 		return;
 	}
@@ -331,30 +359,35 @@ bool UFPSRFlowFieldSubsystem::IsMapFieldReady(const FGameplayTag& MapId) const
 
 bool UFPSRFlowFieldSubsystem::IsLocationInMap(const FGameplayTag& MapId, const FVector& WorldLocation) const
 {
-	const TObjectPtr<UFPSRFlowFieldComputer>* Slot = Computers.Find(MapId);
-	if (!Slot || !*Slot)
+	// P-G: resolve against the lightweight SlotBounds table (the per-map flow registry is gone). An EMPTY table means a
+	// single-map degenerate grid (one map, no slots) -> every location is "in map", so the enemy MapId never re-resolves
+	// (matches the pre-P-G "Default grid contains everything" behavior). A MapId ABSENT from a NON-empty table -> false, so a
+	// seam-gap enemy (unset MapId between slots) keeps re-resolving until it re-enters a slot (Plan pressure-test correction 2).
+	if (SlotBounds.Num() == 0)
 	{
-		return false;
+		return true;
 	}
-	const FBox B = (*Slot)->GetGridBounds();
-	if (!B.IsValid)
+	const FBox* B = SlotBounds.Find(MapId);
+	if (!B || !B->IsValid)
 	{
 		return false;
 	}
 	constexpr float Margin = 200.0f; // hysteresis: stay in-map a cell past the edge so a boundary enemy doesn't flip-flop
-	return WorldLocation.X >= B.Min.X - Margin && WorldLocation.X < B.Max.X + Margin &&
-		WorldLocation.Y >= B.Min.Y - Margin && WorldLocation.Y < B.Max.Y + Margin;
+	return WorldLocation.X >= B->Min.X - Margin && WorldLocation.X < B->Max.X + Margin &&
+		WorldLocation.Y >= B->Min.Y - Margin && WorldLocation.Y < B->Max.Y + Margin;
 }
 
 bool UFPSRFlowFieldSubsystem::AreLocationsConnected(const FVector& A, const FVector& B) const
 {
-	// No unified field (single-map / pre-content) -> not "connected" in the front sense; callers fall back to same-map (no regression).
-	return UnifiedComputer ? UnifiedComputer->AreWorldLocationsConnected(A, B) : false;
+	// P-G: the front-sense connectivity is a MULTIMAP notion (cross-slot). A single-map degenerate grid -> not "connected" in
+	// the front sense (callers keep same-map behavior, no regression), so gate on bUnifiedMultiSlot (UnifiedComputer is now
+	// always set).
+	return (bUnifiedMultiSlot && UnifiedComputer) ? UnifiedComputer->AreWorldLocationsConnected(A, B) : false;
 }
 
 int32 UFPSRFlowFieldSubsystem::GetFrontDistanceCells(const FVector& Loc, EFPSRFieldQuery& OutStatus) const
 {
-	if (!UnifiedComputer)
+	if (!bUnifiedMultiSlot || !UnifiedComputer) // P-G: front distance is multimap only (single-map degenerate grid -> NoGrid)
 	{
 		OutStatus = EFPSRFieldQuery::NoGrid;
 		return MAX_int32;
@@ -364,13 +397,12 @@ int32 UFPSRFlowFieldSubsystem::GetFrontDistanceCells(const FVector& Loc, EFPSRFi
 
 FGameplayTag UFPSRFlowFieldSubsystem::FindMapIdForLocation(const FVector& WorldLocation) const
 {
-	for (const TPair<FGameplayTag, TObjectPtr<UFPSRFlowFieldComputer>>& Pair : Computers)
+	// P-G: the slot whose world AABB (XY) contains the location, from the lightweight SlotBounds table (the per-map flow
+	// registry is gone). Slots are spatially separated so at most one contains it. Empty table (single-map degenerate grid)
+	// or the inter-slot seam gap -> unset (the Default map), exactly as the per-map registry resolved before P-G.
+	for (const TPair<FGameplayTag, FBox>& Pair : SlotBounds)
 	{
-		if (!Pair.Value)
-		{
-			continue;
-		}
-		const FBox B = Pair.Value->GetGridBounds();
+		const FBox& B = Pair.Value;
 		if (B.IsValid && WorldLocation.X >= B.Min.X && WorldLocation.X < B.Max.X &&
 			WorldLocation.Y >= B.Min.Y && WorldLocation.Y < B.Max.Y)
 		{
@@ -404,7 +436,9 @@ void UFPSRFlowFieldSubsystem::Deinitialize()
 		}
 	}
 	Computers.Reset();
+	SlotBounds.Reset();
 	UnifiedComputer = nullptr;
+	bUnifiedMultiSlot = false;
 	Super::Deinitialize();
 }
 
