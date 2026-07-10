@@ -17,25 +17,6 @@
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
 
-namespace
-{
-	/** Derives the mount-socket name from a part's static mesh asset name: strips the pack's modular-part prefix
-	 *  and adds SOCKET_Mount_ (e.g. SM_Wep_Mod_A_Barrel_01 -> SOCKET_Mount_Barrel_01). Falls back to
-	 *  SOCKET_Mount_Part<Index> when the part reference is null (index supplied by the caller). */
-	FName MakeMountSocketName(const TSoftObjectPtr<UStaticMesh>& Part, int32 Index)
-	{
-		if (Part.IsNull())
-		{
-			return FName(*FString::Printf(TEXT("SOCKET_Mount_Part%d"), Index));
-		}
-
-		FString Name = Part.GetAssetName();
-		Name.RemoveFromStart(TEXT("SM_Wep_Mod_A_"));
-		Name.RemoveFromStart(TEXT("SM_Wep_Mod_"));
-		return FName(*FString::Printf(TEXT("SOCKET_Mount_%s"), *Name));
-	}
-}
-
 namespace FPSRWeaponAssemblerHelpers
 {
 	UFPSRWeaponDataAsset* GetSelectedWeaponDA()
@@ -118,10 +99,25 @@ namespace FPSRWeaponAssemblerHelpers
 			return 0;
 		}
 
-		const FName RootBone = Body->GetRefSkeleton().GetNum() > 0 ? Body->GetRefSkeleton().GetBoneName(0) : NAME_None;
+		const FReferenceSkeleton& RefSkel = Body->GetRefSkeleton();
+		const FName RootBone = RefSkel.GetNum() > 0 ? RefSkel.GetBoneName(0) : NAME_None;
+		// Sockets are BONE-relative. This pack's root bone carries a 90° roll, so convert the designer's component-
+		// space placement through the root bone's component-space transform (bone 0 ref pose) — else the captured part
+		// lands rotated at runtime.
+		const FTransform RootBoneCS = RefSkel.GetRefBonePose().Num() > 0 ? RefSkel.GetRefBonePose()[0] : FTransform::Identity;
 
 		Body->Modify();
 		DA->Modify();
+
+		// Clear the tool's previous sockets (it owns the SOCKET_Mount_* namespace) so a re-capture or a component
+		// rename replaces them instead of leaving orphans.
+		{
+			TArray<TObjectPtr<USkeletalMeshSocket>>& MeshSockets = Body->GetMeshOnlySocketList();
+			MeshSockets.RemoveAll([](const TObjectPtr<USkeletalMeshSocket>& S)
+			{
+				return S && S->SocketName.ToString().StartsWith(TEXT("SOCKET_Mount_"));
+			});
+		}
 
 		int32 n = 0;
 		const int32 Count = FMath::Min(Preview->PartComponents.Num(), DA->WeaponParts1P.Num());
@@ -133,26 +129,25 @@ namespace FPSRWeaponAssemblerHelpers
 				continue;
 			}
 
-			const FTransform Rel = PC->GetRelativeTransform(); // relative to BodyMesh (attach parent)
-			const FName SocketName = MakeMountSocketName(DA->WeaponParts1P[i].Part, i);
+			const FTransform Rel = PC->GetRelativeTransform();                 // component-space (parent = body root)
+			const FTransform SocketRel = Rel.GetRelativeTransform(RootBoneCS); // -> bone-relative
+			// Mount-socket name follows the (renameable) component name: one representative slot, no variant suffix.
+			const FName SocketName(*FString::Printf(TEXT("SOCKET_Mount_%s"), *PC->GetName()));
 
-			USkeletalMeshSocket* Socket = Body->FindSocket(SocketName);
-			if (!Socket)
-			{
-				Socket = NewObject<USkeletalMeshSocket>(Body);
-				Socket->SocketName = SocketName;
-				Body->AddSocket(Socket, false);
-			}
+			USkeletalMeshSocket* Socket = NewObject<USkeletalMeshSocket>(Body);
+			Socket->SocketName = SocketName;
 			Socket->BoneName = RootBone;
-			Socket->RelativeLocation = Rel.GetLocation();
-			Socket->RelativeRotation = Rel.GetRotation().Rotator();
+			Socket->RelativeLocation = SocketRel.GetLocation();
+			Socket->RelativeRotation = SocketRel.GetRotation().Rotator();
 			Socket->RelativeScale = FVector(1.0f);
+			Body->AddSocket(Socket, false);
 
 			DA->WeaponParts1P[i].Socket = SocketName;
 			DA->WeaponParts1P[i].Offset = FTransform::Identity;
 			++n;
 		}
 
+		Body->RebuildSocketMap();
 		Body->MarkPackageDirty();
 		DA->MarkPackageDirty();
 
