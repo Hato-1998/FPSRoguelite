@@ -1097,6 +1097,7 @@ void AFPSRCharacter::RefreshFirstPersonWeaponVisual()
 	CachedFireSound = Weapon->FireSound.IsNull() ? nullptr : Weapon->FireSound.LoadSynchronous();
 	CachedMuzzleFlash = Weapon->MuzzleFlash.IsNull() ? nullptr : Weapon->MuzzleFlash.LoadSynchronous();
 	CachedMuzzleSocket = Weapon->MuzzleSocket;
+	CachedMuzzleFlashRotationOffset = Weapon->MuzzleFlashRotationOffset;
 
 	// ADS params for the owner-local procedural aim-down-sights (UpdateAimDownSights).
 	CachedAimSocket = Weapon->AimSocket;
@@ -1418,7 +1419,7 @@ void AFPSRCharacter::PlayWeaponFireCosmetics()
 			// else the receiver. CachedMuzzleComponent is resolved per-equip in RefreshWeaponPartComponents.
 			UMeshComponent* MuzzleComp = CachedMuzzleComponent ? CachedMuzzleComponent : ActiveWeaponMesh;
 			UGameplayStatics::SpawnEmitterAttached(CachedMuzzleFlash, MuzzleComp, CachedMuzzleSocket,
-				FVector::ZeroVector, FRotator::ZeroRotator, FVector(MuzzleScale));
+				FVector::ZeroVector, CachedMuzzleFlashRotationOffset, FVector(MuzzleScale));
 		}
 	}
 }
@@ -1617,7 +1618,8 @@ void AFPSRCharacter::MulticastFireCosmetics_Implementation()
 			if (UParticleSystem* Muzzle = Weapon->MuzzleFlash.LoadSynchronous())
 			{
 				UMeshComponent* MuzzleComp = CachedMuzzleComponent ? CachedMuzzleComponent : ActiveWeaponMesh;
-				UGameplayStatics::SpawnEmitterAttached(Muzzle, MuzzleComp, Weapon->MuzzleSocket);
+				UGameplayStatics::SpawnEmitterAttached(Muzzle, MuzzleComp, Weapon->MuzzleSocket,
+					FVector::ZeroVector, Weapon->MuzzleFlashRotationOffset);
 			}
 		}
 		if (FirstPersonArms && !Weapon->FireMontage.IsNull())

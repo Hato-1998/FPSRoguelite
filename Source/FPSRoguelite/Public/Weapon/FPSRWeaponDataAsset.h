@@ -201,6 +201,13 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|발사 연출", meta = (DisplayName = "총구 소켓(화염 원점)"))
 	FName MuzzleSocket = NAME_None;
 
+	/** Rotation offset applied to the muzzle-flash emitter relative to the muzzle socket, so the flash fires down the
+	 *  barrel. This pack's weapon-forward is +Y (the same reason AimSocket needs ADSAimRotationOffset Yaw 90), and the
+	 *  emitter's authored forward axis may not match the socket's — tune this per weapon (commonly Yaw 90) until the
+	 *  flash points out the muzzle. Cosmetic only. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|발사 연출", meta = (DisplayName = "총구 화염 회전 오프셋"))
+	FRotator MuzzleFlashRotationOffset = FRotator::ZeroRotator;
+
 	/** Aim-down-sights (procedural ADS): socket whose transform is aligned to the camera's forward centre-line when aiming
 	 *  — the 1P arms offset/rotate so this socket sits on the view axis (the fixed capsule camera does not follow a head
 	 *  bone, so the sight is brought to the camera instead). Author it on the SIGHT PART (iron sight / optic) so swapping

@@ -404,6 +404,11 @@ protected:
 
 	FName CachedMuzzleSocket = NAME_None;
 
+	/** Rotation offset applied to the muzzle-flash emitter relative to the muzzle socket (owner-local cosmetic).
+	 *  This pack's weapon-forward is +Y, so the flash needs a yaw offset to fire down the barrel (same reason as
+	 *  ADSAimRotationOffset). Cached on equip from the weapon DA; designer-tuned per weapon. */
+	FRotator CachedMuzzleFlashRotationOffset = FRotator::ZeroRotator;
+
 	/** The weapon mesh currently shown (skeletal OR static — whichever the equipped weapon's DA provides). Fire
 	 *  cosmetics (fire sound) attach here so they track the active mesh. Null when no weapon is equipped. */
 	UPROPERTY(Transient)
