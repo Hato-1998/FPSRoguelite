@@ -80,5 +80,5 @@ PROGRESS.md '사용자 대기 작업' 참조. 요약: **BP 3종 생성 + 참조 
 >
 > **🔄 2026-07-10 아트 스택 재확정 (사용자 결정)** — 로우폴리 유지하되 **전체 셀/툰(애니) 통일 룩**으로 상향. 상세·임포트 리스트 = `Docs/AssetReplacement_Synty_ResumePrompt.md`(2026-07-10 갱신):
 > - **환경** Synty Cyber City(맵1) · **무기** Synty **Military Pack 모듈 백본 + 사이버 리스킨**(Infima 교체) · **캐릭터** 애니 셀 'Anime Girl Blu' 리스킨(플레이어/팀원) · **적 스웜** 별도 저코스트 VAT(애니 리스킨 금지) · **FP 팔** Blu 팔 추출 + **PWAS** 절차 애니 · **UI** Synty **Sci-Fi Soldier HUD** · **VFX** Synty Particle FX + Epic Niagara(무료) · **오디오** Synty 밖(Sonniss·Kenney·Fab).
-> - **렌더러 = 미정**(결과물 시각검증 후 결정; 후보 Stylized Rendering System / Celes Anime Shader).
+> - **✅ 렌더러 = SRS(Stylized Rendering System) 확정**(2026-07-10 파일럿 실측 합격). **통합 계약**: 셀/아웃라인 = per-mesh Custom Depth-Stencil 마스킹(효과 받을 메시 `render_custom_depth=True` + `r.CustomDepth=3`). **실측**: 적 300 스웜 커스텀뎁스 = Custom Depth 패스 1.33ms(예산 내) → 스웜 채택 OK. 불통 대안 = DIY 스크린스페이스 Sobel+포스터라이즈. 세부 룩 튜닝은 인게임 반복.
 > - ⚠️ **제1원리 리스크**: 셀 아웃라인=post-process(inverted-hull 금지=스웜 드로우콜 2배) · 셀×VAT 스웜 정합 실측 · 애니 고폴리를 스웜에 리스킨 금지 · Synty 5.4→5.7 마이그레이션.

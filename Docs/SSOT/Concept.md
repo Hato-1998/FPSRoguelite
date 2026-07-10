@@ -84,7 +84,7 @@
 - **근거(에셋 정합, 2026-07-03 원안)**: 기존 확보 에셋(Infima *Modern Guns* · BroBot 로봇 · Paragon 미니언)이 **판타지보다 사이버펑크/SF·자연 세팅과 정합**했다. ⚠️ **2026-07-10 아트 재확정으로 에셋 스택 대폭 변경**(무기 Infima→Synty Military · 캐릭터→애니 셀 · 아트→전체 셀/툰) — 아래 '아트 방향' 참조.
 - **⭐ 아트 불일치 → 기능 전환(핵심)**: 맵마다 테마가 달라도(사이버펑크 시티 ↔ 숲 ↔ 우주정거장) 이는 오류가 아니라 **"서로 다른 심에 다이빙한다"는 디제시스(diegetic) 장치** — 세계 이질감이 곧 픽션의 일부다. **통일 요소 = 각 맵 4방향 끝의 거대한 문**(일관 디자인): 문을 부수면 다음 심으로 심리스 전환(레벨 구조 = `RunFlow.md §2-1`).
 - **The Spell Brigade 포지셔닝 정합 노트**: 레퍼런스(The Spell Brigade)는 판타지 세팅이나, **USP(1인칭 정보비대칭 협동)는 세팅 독립**이다. 따라서 세팅 교체는 §1-C-5 경쟁 포지셔닝 표(시점/동시규모/협동성격 축)를 **바꾸지 않는다** — 차별점은 여전히 *"서바이버 스케일(수백 적) × 1인칭 협동 상호의존"*.
-- **아트 방향 (2026-07-10 확정, 사용자 결정)**: **전체 셀/툰(애니) 통일 룩** — 월드·무기·캐릭터를 scene-wide 셀 아웃라인으로 묶는다. ⚠️ **렌더러 미정** — 결과물 시각검증 후 결정(후보 = Stylized Rendering System / Celes Anime Shader).
+- **아트 방향 (2026-07-10 확정, 사용자 결정)**: **전체 셀/툰(애니) 통일 룩** — 월드·무기·캐릭터를 scene-wide 셀 아웃라인으로 묶는다. **✅ 렌더러 = SRS(Stylized Rendering System) 확정**(2026-07-10 파일럿 실측 합격). ⚠️ **SRS 통합 계약**: 셀/아웃라인은 순수 전역 PP가 아니라 **per-mesh Custom Depth-Stencil 마스킹** — 효과 받을 메시는 `render_custom_depth=True` + `r.CustomDepth=3`(Enabled with Stencil). **제1원리 실측**: 적 300 스웜(BroBot VAT)에 커스텀뎁스 켜도 Custom Depth 패스 **1.33ms**(예산 내, GPU 여유) → 스웜 채택 OK. 불통 시 대안 = DIY 스크린스페이스 Sobel+포스터라이즈(고정비용).
   - **환경** = Synty POLYGON Sci-Fi Cyber City(맵1 베이스, 로우폴리) + 셀 아웃라인. (2·3맵 Nature/Space = 다중맵 단계)
   - **무기** = Synty POLYGON Military Pack **모듈 백본 + 사이버 리스킨**(Infima 교체) · ChargeLaser = Cyber City Laser Gun.
   - **캐릭터(플레이어/팀원)** = 애니 셀 베이스('Anime Girl Blu') 리스킨.

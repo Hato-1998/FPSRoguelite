@@ -4,7 +4,7 @@
 > **디렉터 확정(2026-07-05, 일부 폐기)**: 획득=**SyntyPass**(상용 라이선스 확인됨). ~~총기=Infima 유지~~ · ~~플레이어(BroBot)~~ · ~~UI=Synty 미커버~~ 는 아래 2026-07-10 재확정으로 **대체됨**.
 >
 > **🔄 재확정 (2026-07-10, 사용자 결정 — 아트 스택 대폭 개편, 조사 2회 워크플로 근거)**:
-> - **아트 = 전체 셀/툰(애니) 통일** — 월드·무기·캐릭터를 scene-wide 셀 아웃라인으로 묶는다. ⚠️ **렌더러 미정** — 결과물 시각검증 후 결정(후보 = Stylized Rendering System / Celes Anime Shader).
+> - **아트 = 전체 셀/툰(애니) 통일** — 월드·무기·캐릭터를 scene-wide 셀 아웃라인으로 묶는다. **✅ 렌더러 = SRS(Stylized Rendering System) 확정**(2026-07-10 파일럿 실측). 셀/아웃라인 = per-mesh Custom Depth-Stencil(효과 메시 `render_custom_depth=True` + `r.CustomDepth=3`); 적 300 스웜 커스텀뎁스 = 1.33ms(예산 내).
 > - **무기 = Synty POLYGON Military Pack 모듈 백본 + 사이버 리스킨**(Infima **교체** — 사이버펑크 부적합). 근거: Synty 사이버펑크 무기팩(Sci-Fi Worlds/Cyber City)은 전부 **통짜 융합 메시**이고, U15 모듈파츠(리시버/바렐/탄창/사이트)에 1:1 매핑되는 건 **Military(파츠92+어태치84+프리셋14)·Apocalypse뿐**. ChargeLaser(에너지)=Cyber City **Laser Gun 통짜 1개**로 보충.
 > - **캐릭터(플레이어/팀원) = 애니 셀 'Anime Girl Blu' 리스킨**. **적 스웜 = 별도 저코스트 트랙**(저폴리 VAT — **애니 캐릭터 리스킨 금지**, 제1원리 per-actor 최소). 엘리트/보스만 고피델리티 검토 가능.
 > - **FP 팔 = 애니 캐릭터(Blu) 팔 추출 + PWAS**(Procedural Weapon Animation System, **Fab 유료 ~$30-50**, UE5.1-5.7 네이티브·무기 비종속: Synty 무기 스태틱 메시에 LeftHandIK/Muzzle 소켓만 붙이면 반동/스웨이/ADS 절차 생성). 로봇팔(Cybernetic Arms) 폐기.
