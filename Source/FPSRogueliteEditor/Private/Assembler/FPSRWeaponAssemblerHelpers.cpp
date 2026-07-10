@@ -2,98 +2,47 @@
 
 #include "Assembler/FPSRWeaponAssemblerHelpers.h"
 
-#include "Assembler/FPSRWeaponAssemblerActor.h"
 #include "Weapon/FPSRWeaponDataAsset.h"
 
-#include "ContentBrowserModule.h"
-#include "IContentBrowserSingleton.h"
-#include "AssetRegistry/AssetData.h"
-#include "Editor.h"
 #include "FileHelpers.h"   // UEditorLoadingAndSavingUtils::SavePackages (UnrealEd — avoids the EditorScriptingUtilities plugin)
-#include "EngineUtils.h"
-#include "Engine/World.h"
 #include "Engine/SkeletalMesh.h"
 #include "Engine/SkeletalMeshSocket.h"
-#include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
 
 namespace FPSRWeaponAssemblerHelpers
 {
-	UFPSRWeaponDataAsset* GetSelectedWeaponDA()
+	FString MakePartDisplayName(const TSoftObjectPtr<UStaticMesh>& Part, int32 Index)
 	{
-		FContentBrowserModule& ContentBrowser = FModuleManager::LoadModuleChecked<FContentBrowserModule>(TEXT("ContentBrowser"));
-		TArray<FAssetData> Selected;
-		ContentBrowser.Get().GetSelectedAssets(Selected);
-
-		for (const FAssetData& AssetData : Selected)
+		if (Part.IsNull())
 		{
-			if (UFPSRWeaponDataAsset* DA = Cast<UFPSRWeaponDataAsset>(AssetData.GetAsset()))
+			return FString::Printf(TEXT("Part%d"), Index);
+		}
+		FString Name = Part.GetAssetName();
+		Name.RemoveFromStart(TEXT("SM_Wep_Mod_A_"));
+		Name.RemoveFromStart(TEXT("SM_Wep_Mod_"));
+		int32 UnderscorePos = INDEX_NONE;
+		if (Name.FindLastChar(TEXT('_'), UnderscorePos))
+		{
+			const FString Tail = Name.Mid(UnderscorePos + 1);
+			if (!Tail.IsEmpty() && Tail.IsNumeric())
 			{
-				return DA;
+				Name = Name.Left(UnderscorePos);
 			}
 		}
-		return nullptr;
+		return Name.IsEmpty() ? FString::Printf(TEXT("Part%d"), Index) : Name;
 	}
 
-	AFPSRWeaponAssemblerActor* SpawnPreview(UFPSRWeaponDataAsset* DA)
+	FTransform RootBoneComponentSpace(const USkeletalMesh* Mesh)
 	{
-		if (!DA || !GEditor)
+		if (Mesh && Mesh->GetRefSkeleton().GetRefBonePose().Num() > 0)
 		{
-			return nullptr;
+			return Mesh->GetRefSkeleton().GetRefBonePose()[0];
 		}
-
-		UWorld* World = GEditor->GetEditorWorldContext().World();
-		if (!World)
-		{
-			return nullptr;
-		}
-
-		if (AFPSRWeaponAssemblerActor* Existing = FindPreview())
-		{
-			Existing->Destroy();
-		}
-
-		AFPSRWeaponAssemblerActor* A = World->SpawnActor<AFPSRWeaponAssemblerActor>(FVector(0.0f, 0.0f, 200.0f), FRotator::ZeroRotator);
-		if (!A)
-		{
-			return nullptr;
-		}
-
-		A->BuildFromDA(DA);
-		A->SetActorLabel(FString::Printf(TEXT("WeaponAssembler_%s"), *DA->GetName()));
-		GEditor->SelectActor(A, true, true);
-		return A;
+		return FTransform::Identity;
 	}
 
-	AFPSRWeaponAssemblerActor* FindPreview()
+	int32 BakeSockets(UFPSRWeaponDataAsset* DA, USkeletalMesh* Body, const TArray<UStaticMeshComponent*>& PartComps)
 	{
-		if (!GEditor)
-		{
-			return nullptr;
-		}
-
-		UWorld* World = GEditor->GetEditorWorldContext().World();
-		if (!World)
-		{
-			return nullptr;
-		}
-
-		for (TActorIterator<AFPSRWeaponAssemblerActor> It(World); It; ++It)
-		{
-			return *It;
-		}
-		return nullptr;
-	}
-
-	int32 CaptureToSockets(AFPSRWeaponAssemblerActor* Preview)
-	{
-		if (!Preview)
-		{
-			return 0;
-		}
-
-		UFPSRWeaponDataAsset* DA = Preview->SourceDA;
-		USkeletalMesh* Body = Preview->BodyMesh ? Preview->BodyMesh->GetSkeletalMeshAsset() : nullptr;
 		if (!DA || !Body)
 		{
 			return 0;
@@ -104,12 +53,12 @@ namespace FPSRWeaponAssemblerHelpers
 		// Sockets are BONE-relative. This pack's root bone carries a 90° roll, so convert the designer's component-
 		// space placement through the root bone's component-space transform (bone 0 ref pose) — else the captured part
 		// lands rotated at runtime.
-		const FTransform RootBoneCS = RefSkel.GetRefBonePose().Num() > 0 ? RefSkel.GetRefBonePose()[0] : FTransform::Identity;
+		const FTransform RootBoneCS = RootBoneComponentSpace(Body);
 
 		Body->Modify();
 		DA->Modify();
 
-		// Clear the tool's previous sockets (it owns the SOCKET_Mount_* namespace) so a re-capture or a component
+		// Clear the tool's previous sockets (it owns the SOCKET_Mount_* namespace) so a re-bake or a part-component
 		// rename replaces them instead of leaving orphans.
 		{
 			TArray<TObjectPtr<USkeletalMeshSocket>>& MeshSockets = Body->GetMeshOnlySocketList();
@@ -120,17 +69,20 @@ namespace FPSRWeaponAssemblerHelpers
 		}
 
 		int32 n = 0;
-		const int32 Count = FMath::Min(Preview->PartComponents.Num(), DA->WeaponParts1P.Num());
+		const int32 Count = FMath::Min(PartComps.Num(), DA->WeaponParts1P.Num());
 		for (int32 i = 0; i < Count; ++i)
 		{
-			UStaticMeshComponent* PC = Preview->PartComponents[i];
+			UStaticMeshComponent* PC = PartComps[i];
 			if (!PC)
 			{
 				continue;
 			}
 
-			const FTransform Rel = PC->GetRelativeTransform();                 // component-space (parent = body root)
-			const FTransform SocketRel = Rel.GetRelativeTransform(RootBoneCS); // -> bone-relative
+			// The preview scene places Body at identity with no parent, and each PartComp is likewise added to the
+			// scene unparented — so a PartComp's own relative transform (no attach parent) already equals its
+			// component-space transform relative to Body. Convert that into a BONE-relative socket transform.
+			const FTransform Rel = PC->GetRelativeTransform();
+			const FTransform SocketRel = Rel.GetRelativeTransform(RootBoneCS);
 			// Mount-socket name follows the (renameable) component name: one representative slot, no variant suffix.
 			const FName SocketName(*FString::Printf(TEXT("SOCKET_Mount_%s"), *PC->GetName()));
 

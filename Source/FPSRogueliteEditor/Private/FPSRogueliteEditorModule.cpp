@@ -5,9 +5,7 @@
 
 #include "Validation/FPSRAnchoredValidationService.h"
 #include "DataEditor/SFPSRDataEditorWidget.h"
-#include "Assembler/FPSRWeaponAssemblerActor.h"
-#include "Assembler/FPSRWeaponAssemblerHelpers.h"
-#include "Weapon/FPSRWeaponDataAsset.h"
+#include "Assembler/SFPSRWeaponAssemblerTab.h"
 #include "Editor.h"
 #include "EditorValidatorSubsystem.h"
 #include "Logging/MessageLog.h"
@@ -27,6 +25,7 @@
 #define LOCTEXT_NAMESPACE "FPSRogueliteEditorModule"
 
 const FName FFPSRogueliteEditorModule::FPSRDataEditorTabName(TEXT("FPSRDataEditor"));
+const FName FFPSRogueliteEditorModule::FPSRWeaponAssemblerTabName(TEXT("FPSRWeaponAssembler"));
 
 // UEditorValidatorBase subclasses (UFPSRCardPoolValidator / UFPSRRunScheduleValidator / UFPSRLoadoutPoolValidator)
 // are auto-discovered by UEditorValidatorSubsystem — no manual registration needed here. This module only wires up
@@ -41,6 +40,12 @@ void FFPSRogueliteEditorModule::StartupModule()
 	FGlobalTabmanager::Get()->RegisterNomadTabSpawner(FPSRDataEditorTabName, FOnSpawnTab::CreateStatic(&FFPSRogueliteEditorModule::SpawnDataEditorTab))
 		.SetDisplayName(LOCTEXT("DataEditorTabTitle", "FPSR 데이터 에디터"))
 		.SetGroup(WorkspaceMenu::GetMenuStructure().GetToolsCategory());
+
+	// Weapon Part Assembler — fully embedded-viewport tool tab (weapon DA picker + own 3D preview + parts list +
+	// gizmo + bake-to-socket button). Same lifetime pattern as the Data Editor tab above.
+	FGlobalTabmanager::Get()->RegisterNomadTabSpawner(FPSRWeaponAssemblerTabName, FOnSpawnTab::CreateStatic(&FFPSRogueliteEditorModule::SpawnWeaponAssemblerTab))
+		.SetDisplayName(LOCTEXT("WeaponAssemblerTabTitle", "무기 파츠 조립기"))
+		.SetGroup(WorkspaceMenu::GetMenuStructure().GetToolsCategory());
 }
 
 void FFPSRogueliteEditorModule::ShutdownModule()
@@ -48,6 +53,7 @@ void FFPSRogueliteEditorModule::ShutdownModule()
 	UToolMenus::UnRegisterStartupCallback(this);
 	UToolMenus::UnregisterOwner(this);
 	FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(FPSRDataEditorTabName);
+	FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(FPSRWeaponAssemblerTabName);
 }
 
 void FFPSRogueliteEditorModule::RegisterMenus()
@@ -71,18 +77,11 @@ void FFPSRogueliteEditorModule::RegisterMenus()
 		FUIAction(FExecuteAction::CreateStatic(&FFPSRogueliteEditorModule::OnOpenDataEditorMenuEntry))
 	);
 	Section.AddMenuEntry(
-		"FPSRSpawnWeaponAssembler",
-		LOCTEXT("SpawnAssemblerTitle", "무기 조립기: 프리뷰 스폰"),
-		LOCTEXT("SpawnAssemblerTooltip", "콘텐츠 브라우저에서 선택한 무기 DA로 파츠 조립 프리뷰를 현재 레벨에 스폰합니다. 각 파츠를 뷰포트 기즈모로 배치하세요(디테일 패널 Components)."),
+		"FPSROpenWeaponAssembler",
+		LOCTEXT("OpenWeaponAssemblerTitle", "무기 파츠 조립기…"),
+		LOCTEXT("OpenWeaponAssemblerTooltip", "무기 파츠 조립기 열기 (무기 DA 선택 + 3D 프리뷰 + 기즈모 배치 + 소켓 굽기·저장)."),
 		FSlateIcon(FAppStyle::GetAppStyleSetName(), "DeveloperTools.MenuIcon"),
-		FUIAction(FExecuteAction::CreateStatic(&FFPSRogueliteEditorModule::OnSpawnWeaponAssembler))
-	);
-	Section.AddMenuEntry(
-		"FPSRCaptureWeaponAssembler",
-		LOCTEXT("CaptureAssemblerTitle", "무기 조립기: 조립→소켓·DA 저장"),
-		LOCTEXT("CaptureAssemblerTooltip", "현재 프리뷰의 파츠 배치를 바디 메시 소켓으로 굽고 무기 DA에 배선한 뒤 저장합니다."),
-		FSlateIcon(FAppStyle::GetAppStyleSetName(), "DeveloperTools.MenuIcon"),
-		FUIAction(FExecuteAction::CreateStatic(&FFPSRogueliteEditorModule::OnCaptureWeaponAssembler))
+		FUIAction(FExecuteAction::CreateStatic(&FFPSRogueliteEditorModule::OnOpenWeaponAssemblerMenuEntry))
 	);
 }
 
@@ -100,33 +99,18 @@ TSharedRef<SDockTab> FFPSRogueliteEditorModule::SpawnDataEditorTab(const FSpawnT
 		];
 }
 
-void FFPSRogueliteEditorModule::OnSpawnWeaponAssembler()
+void FFPSRogueliteEditorModule::OnOpenWeaponAssemblerMenuEntry()
 {
-	UFPSRWeaponDataAsset* DA = FPSRWeaponAssemblerHelpers::GetSelectedWeaponDA();
-	if (!DA)
-	{
-		FMessageDialog::Open(EAppMsgType::Ok, LOCTEXT("NoWeaponDA", "콘텐츠 브라우저에서 무기 DataAsset(UFPSRWeaponDataAsset)을 하나 선택하세요."));
-		return;
-	}
-
-	AFPSRWeaponAssemblerActor* A = FPSRWeaponAssemblerHelpers::SpawnPreview(DA);
-	if (!A)
-	{
-		FMessageDialog::Open(EAppMsgType::Ok, LOCTEXT("SpawnFail", "프리뷰 스폰 실패 (에디터 월드 없음)."));
-	}
+	FGlobalTabmanager::Get()->TryInvokeTab(FPSRWeaponAssemblerTabName);
 }
 
-void FFPSRogueliteEditorModule::OnCaptureWeaponAssembler()
+TSharedRef<SDockTab> FFPSRogueliteEditorModule::SpawnWeaponAssemblerTab(const FSpawnTabArgs& Args)
 {
-	AFPSRWeaponAssemblerActor* A = FPSRWeaponAssemblerHelpers::FindPreview();
-	if (!A)
-	{
-		FMessageDialog::Open(EAppMsgType::Ok, LOCTEXT("NoPreview", "레벨에 무기 조립기 프리뷰가 없습니다. 먼저 프리뷰를 스폰하세요."));
-		return;
-	}
-
-	const int32 N = FPSRWeaponAssemblerHelpers::CaptureToSockets(A);
-	FMessageDialog::Open(EAppMsgType::Ok, FText::Format(LOCTEXT("CaptureDone", "소켓 {0}개 생성/갱신 + DA 배선·저장 완료. PIE로 조립을 확인하세요."), FText::AsNumber(N)));
+	return SNew(SDockTab)
+		.TabRole(ETabRole::NomadTab)
+		[
+			SNew(SFPSRWeaponAssemblerTab)
+		];
 }
 
 void FFPSRogueliteEditorModule::OnValidateAnchoredDataMenuEntry()
