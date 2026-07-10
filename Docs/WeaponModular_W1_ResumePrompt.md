@@ -3,6 +3,10 @@
 > 작성 2026-07-10. **에셋 적용 세션 마무리 핸드오프.** 다음 세션 = W-U1(모듈러 슬롯+선택기) 구현 착수.
 > **선행 필독**: `Game.md` + `PROGRESS.md` + **`Docs/WeaponModular_FragmentEvolution_Scope_Plan.md`(플랜 v3, 결정 잠금)** 전체 + 메모리 `weapon-modular-evolution-scope-plan`·`extensibility-first-designer-tooling`·`recoil-crystalrecoil-adapter`·`card-pool-routing`·`headless-gas-content-authoring`.
 
+## ⚠️ SUPERSEDED (2026-07-11) — W-U1 코드 완료
+> 이 프롬프트는 대부분 소진됐다. **§2 "모듈 파츠 조립 실패"는 오진·해결됨**(Synty 파츠=공유원점, `Socket=None+identity`가 곧 조립 — PROGRESS 2026-07-10 b 블록에서 정정). **W-U1 슬롯+선택기 코드는 완료**(커밋 `f3cd82b5`, 빌드·스모크 통과). 아래 §3 구현 범위는 실제로는 as-built로 조정됨(S1 드롭·규칙=UObject·C2 AllWeapons·C5 후속) — **현행 진실 = `Docs/WeaponModular_FragmentEvolution_Scope_Plan.md` 상단 "W-U1 as-built" 절 + PROGRESS.md 2026-07-11 블록.**
+> 남은 것 = **A트랙(팔 그립 수리→PIE 시각검증)** + 콘텐츠(라이플 DA 슬롯태그+PartRules 저작) + 후속 유닛(W-U2/W-U3/W-U1b).
+
 ## 1. 이번 세션(에셋 적용) 완료 상태
 - **P1 절차 무기모션 C++ 완료** (커밋됨): 빌드 -NoXGE **Succeeded** · 스모크 **ModuleLoads Success**. `FFPSRProceduralWeaponMotionProfile`(FPSRWeaponDataAsset.h)+힙 sway/bob/kick를 `AFPSRCharacter::UpdateAimDownSights`(단일 seam FPSRCharacter.cpp:1437)에 (1−ADSalpha) 페이드로 합성. idle 0오프셋·무기무관·owner-local·복제0. **PIE 필 검증만 남음**(그립이 되면 확인 가능).
 - **라이플 DA 배선**(`DA_Weapon_Rifle`): WeaponMesh1P=`SK_Wep_Mod_A_Body_01`(Synty Military 모듈 바디), WeaponParts1P=**7파츠**(`SM_Wep_Mod_A_` Barrel_01·Handguard_03·Stock_03·Mag_01·Grip_01·Trigger_01·Ironsight_Front_01, 전부 Socket=None·Offset=identity). WeaponAttachSocket=`SOCKET_Weapon`·AimSocket=`SOCKET_Aim`·MuzzleSocket=`SOCKET_Muzzle`. AG14W→Synty 전환(구 AnimBP·ADSAimRotationOffset 클리어).

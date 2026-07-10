@@ -2,6 +2,17 @@
 
 > v3 (2026-07-10, Codex 적대 게이트 R1·R2 수렴 반영). 3서브시스템 조사 + Codex 2R 근거. **자문/설계 — 승인 전 코드 무변경.** 채택 시 `Docs/SSOT/`(CombatWeaponCard §2-3~2-5, PlayerFeel §2-9/2-14) 먼저 갱신 후 구현. 구현=Sonnet / 검증=Opus. 원시 Codex=`Docs/Review/_raw/…weapon-modular-plan-r1/r2.md`. 관련: [[extensibility-first-designer-tooling]]·[[dataasset-conditional-field-visibility]]·[[card-pool-routing]].
 
+## ✅ W-U1 as-built (2026-07-11, 커밋 `f3cd82b5` — 빌드 -NoXGE Succeeded·스모크 validate-data exit0)
+구현 시 v3 대비 조정(=코드 진실, 적대검증 5렌즈로 4결함 사전교정). 아래 §3~9 원문은 설계 기록으로 보존하되 **실제 구현은 이 절이 우선**:
+- **S1 드롭**: `FFPSRWeaponPartAttachment`에 Slot **미추가** — 기존 `WeaponParts1P`(슬롯리스 구조파츠) 무수정=회귀0. Slot은 **규칙에만**(이중 필드 제거).
+- **S2a 규칙 = 폴리모픽 UObject** `UFPSRWeaponPartRule`(struct-중첩 Instanced는 리포 미검증 → UObject 직속 `UPROPERTY(Instanced) TArray<TObjectPtr<>>`, 카드 `UFPSRCardEffect` 동형). 조건(`UFPSRWeaponPartCondition`)은 규칙 내부 Instanced로 **합성**. 근거 메모리 `polymorphic-instanced-uobject-direct`.
+- **S2b `HasFragment` = 에셋 포인터 매칭**(선택적 `FragmentTag` 아님 — `ActiveFragments.Contains`+`MinStacks`, `UFPSRWeaponInstance::HasFragment` 동형).
+- **C2 통지 = ThisWeapon + AllWeapons 양쪽**: 인스턴스 5사이트(OnRep_Modifiers/OnRep_ActiveFragments/AddModifier/AddFragment/RemoveFragment) + **PlayerState 3사이트**(`AddAllWeaponsModifier`/`OnRep_AllWeaponsMods`/`ResetRunState`). equipped 게이트·데디서버 no-op·next-tick 코얼레스·`LastWeaponPartSignature`(캐릭터 transient 비복제). ← v3 §4 C2가 AllWeapons 절반 누락하던 것을 교정(blocker#1).
+- **캐시 리셋(blocker#2)**: 머즐/에임 컴포넌트 리셋을 `RebuildPartsFromSelection` 진입부로 이동(modifier-change 경로 댕글링 방지).
+- **C7 = 저작-타임 전용**(WITH_EDITOR): 빈 Slot=**ERROR**, 중복(Tier,Priority)·소켓오타=**WARNING**. **머지 게이트 아님**(빌드/스모크가 IsDataValid 미실행) — §9에서 C7 제외, 커맨드릿 배선은 후속(선택).
+- **C5 async = 후속 W-U1b 분리**: 현 동기로드=선택 부분집합(프리즈/장착 게이트로 히치 상한↓). 미드컴뱃 modifier 소스 생기면 승격.
+- 검증: PIE 시각검증만 A트랙(팔그립) 대기(B는 A 없이 빌드/스모크 통과).
+
 ## 0. 설계 의도
 1. **무기 모듈러 슬롯**: Synty Military 파츠(공유원점 조립)를 슬롯(`FGameplayTag`)으로, 같은 슬롯 상호배타(교체).
 2. **파츠 진화(순수 선택기)**: 무기 외형 파츠가 **해결스탯+획득능력을 읽어** 선택됨 — 연사↑→긴배럴·능력→스코프·배율↑→큰스코프. **파츠 시스템은 읽기전용 소비자**(카드/프래그먼트/세이브/복제를 절대 변경 안 함 — §2-A 격리계약).
@@ -61,7 +72,7 @@
 - **진화 전이 연출**(Codex Q4): owner 짧은 snap/scale/fade, remote 1회 flash. 무거운 Niagara 금지.
 
 ## 6. 단계
-- **W-U1 슬롯+선택기(1P 코어)**: S1+S2+S2a/b + C1 + C2(signature-diff) + C7. 검증=연사 카드로 스탯↑→긴 배럴 자동 교체·능력→스코프·슬롯 상호배타·조준선 이동.
+- **W-U1 슬롯+선택기(1P 코어)**: ✅ **코드 완료(2026-07-11, `f3cd82b5`, 빌드·스모크 통과)**. S2+S2a/b + C1 + C2(signature-diff, AllWeapons 포함) + C7(저작-타임). S1은 드롭(위 as-built). PIE 검증(연사 카드로 스탯↑→긴 배럴 자동 교체·능력→스코프·슬롯 상호배타·조준선 이동)=A트랙 팔그립 후.
 - **W-U2 저격 스코프**: S3(ScopeFOVOverride 인터림)+S4+C3+C4. 검증=저격 ADS→강줌+오버레이+총숨김, 재장전/해제 드롭·크로스헤어 통일.
 - **W-U3 3P 진화 가시성**: S5+C6(signature 재사용). 검증=원격 클라서 진화 파츠 보임.
 - **(보류) ADSZoom 축(S6)**: 카드가 실제 줌 수정 필요 확인 시. 그 전 ScopeFOVOverride로.
