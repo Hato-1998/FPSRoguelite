@@ -4,7 +4,14 @@
 > **작업 단계를 끝낼 때마다, 그리고 중단 전 반드시 이 파일을 갱신하고 커밋한다.**
 > 확정 설계·기획·코드구조·규칙은 `Game.md`(**SSOT 허브** → 도메인별 `Docs/SSOT/*.md`, 작업별 라우팅은 허브 §0-1), **완료 작업 상세는 `git log --oneline`**. 여기엔 *무엇을 했는지*만 요약한다.
 
-**최종 갱신: 2026-07-08**
+**최종 갱신: 2026-07-10**
+
+## 🔔 핸드오프 (2026-07-10 · **P1 절차 무기모션 완료 + 무기 모듈러/진화/스코프 플랜 v3 + Synty 무기 에셋 적용**) — 🎯 **다음 = W-U1 모듈러 슬롯+선택기 구현. 재개 = `Docs/WeaponModular_W1_ResumePrompt.md`.**
+> **활성 브랜치**: `phase/pwas-b-procedural-weapon-motion`(미푸시). 이번 세션 3커밋: `04a30b0e` feat P1 모션 / `3265c9ff` docs 플랜v3+프롬프트 / `e58062ea` content Synty DA+소켓.
+> **P1 절차 무기모션 완료**: `FFPSRProceduralWeaponMotionProfile`+힙 sway/bob/kick를 `UpdateAimDownSights` 단일seam(FPSRCharacter.cpp:1437)에 (1−ADSalpha) 합성. owner-local·복제0·idle 0오프셋·무기무관. 빌드 -NoXGE Succeeded·스모크 ModuleLoads Success. **PIE 필 검증만 남음**(그립 되면).
+> **무기 아트 = Synty Military 전환**: 라이플 DA→`SK_Wep_Mod_A_Body_01`(모듈 바디)+7파츠, 소켓 저작(팔 SOCKET_Weapon·배럴/사이트 SOCKET_Muzzle/Aim). AG14W(LowPoly) 폐기. ⚠️**모듈 파츠 "공유원점 identity 드롭인" 조립 실패(힙에서 뭉침)** → W-U1 선결 과제(프리셋 `SK_Wep_Preset_A_Rifle_01` 역산으로 per-part Offset 도출 유력). 프리셋 도피 금지.
+> **플랜 v3 확정**(`Docs/WeaponModular_FragmentEvolution_Scope_Plan.md`, 조사+Codex 적대게이트 R1·R2 수렴): 모듈러 슬롯(FGameplayTag)+규칙기반 진화(스탯/능력→외형, 폴리모픽 `UFPSRWeaponPartCondition`)+저격 스코프 오버레이(비PiP). 결정 잠금: 폴리모픽 조건·1P코어 먼저·**격리계약(파츠=읽기전용 소비자, 카드/세이브/복제 무변경)**. 단계 W-U1 슬롯+선택기 → W-U2 스코프 → W-U3 3P. 메모리 `weapon-modular-evolution-scope-plan`.
+> **미커밋(사전 작업, 이번 세션 무관)**: Blu 커미션·BP_FPSRPlayer 플레이스홀더·L_Sandbox·A_FP_Rifle_Pose.
 
 ## 🔔 핸드오프 (2026-07-09 p · **반동 CrystalRecoil 어댑터 P0~P4 완료 → main 머지**) — 🎯 **전 단계 완료·검증·`--no-ff` main 머지. 반동+확산 = CrystalRecoil 플러그인 어댑터로 전환 완료.**
 > **완료 요약(P0~P4)**: P0 플러그인 벤더링+5.7패치 / P1 어댑터 컴포넌트(`UFPSRRecoilComponent`)+파이어 배선 / P2 확산 단일소스(heat, `GetHeatSpread`)+서버 accepted-shot heat 패리티 / P3 무기별 heat곡선(6무기)+반동패턴(`RP_×6`, 사용자 비주얼 에디터 저작)+재장전 패턴리셋 / P4 死코드정리(레거시 `BloomPerShot/MaxBloom/BloomRecoveryRate/RecoilRiseRate`·`PendingRise*` 제거)·`FPSR.RecoilPreview` 실제 CRRecoilPattern 반영·Codex 머지게이트 2지적 교정(`OnRep_Slots` 복제순서 경합·`ClearRecoilPattern` stale 패턴). **빌드 -NoXGE Succeeded·validate-data exit0·PIE 정상(사용자)**.
