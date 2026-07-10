@@ -5,6 +5,9 @@
 
 #include "Validation/FPSRAnchoredValidationService.h"
 #include "DataEditor/SFPSRDataEditorWidget.h"
+#include "Assembler/FPSRWeaponAssemblerActor.h"
+#include "Assembler/FPSRWeaponAssemblerHelpers.h"
+#include "Weapon/FPSRWeaponDataAsset.h"
 #include "Editor.h"
 #include "EditorValidatorSubsystem.h"
 #include "Logging/MessageLog.h"
@@ -67,6 +70,20 @@ void FFPSRogueliteEditorModule::RegisterMenus()
 		FSlateIcon(FAppStyle::GetAppStyleSetName(), "DeveloperTools.MenuIcon"),
 		FUIAction(FExecuteAction::CreateStatic(&FFPSRogueliteEditorModule::OnOpenDataEditorMenuEntry))
 	);
+	Section.AddMenuEntry(
+		"FPSRSpawnWeaponAssembler",
+		LOCTEXT("SpawnAssemblerTitle", "무기 조립기: 프리뷰 스폰"),
+		LOCTEXT("SpawnAssemblerTooltip", "콘텐츠 브라우저에서 선택한 무기 DA로 파츠 조립 프리뷰를 현재 레벨에 스폰합니다. 각 파츠를 뷰포트 기즈모로 배치하세요(디테일 패널 Components)."),
+		FSlateIcon(FAppStyle::GetAppStyleSetName(), "DeveloperTools.MenuIcon"),
+		FUIAction(FExecuteAction::CreateStatic(&FFPSRogueliteEditorModule::OnSpawnWeaponAssembler))
+	);
+	Section.AddMenuEntry(
+		"FPSRCaptureWeaponAssembler",
+		LOCTEXT("CaptureAssemblerTitle", "무기 조립기: 조립→소켓·DA 저장"),
+		LOCTEXT("CaptureAssemblerTooltip", "현재 프리뷰의 파츠 배치를 바디 메시 소켓으로 굽고 무기 DA에 배선한 뒤 저장합니다."),
+		FSlateIcon(FAppStyle::GetAppStyleSetName(), "DeveloperTools.MenuIcon"),
+		FUIAction(FExecuteAction::CreateStatic(&FFPSRogueliteEditorModule::OnCaptureWeaponAssembler))
+	);
 }
 
 void FFPSRogueliteEditorModule::OnOpenDataEditorMenuEntry()
@@ -81,6 +98,35 @@ TSharedRef<SDockTab> FFPSRogueliteEditorModule::SpawnDataEditorTab(const FSpawnT
 		[
 			SNew(SFPSRDataEditorWidget)
 		];
+}
+
+void FFPSRogueliteEditorModule::OnSpawnWeaponAssembler()
+{
+	UFPSRWeaponDataAsset* DA = FPSRWeaponAssemblerHelpers::GetSelectedWeaponDA();
+	if (!DA)
+	{
+		FMessageDialog::Open(EAppMsgType::Ok, LOCTEXT("NoWeaponDA", "콘텐츠 브라우저에서 무기 DataAsset(UFPSRWeaponDataAsset)을 하나 선택하세요."));
+		return;
+	}
+
+	AFPSRWeaponAssemblerActor* A = FPSRWeaponAssemblerHelpers::SpawnPreview(DA);
+	if (!A)
+	{
+		FMessageDialog::Open(EAppMsgType::Ok, LOCTEXT("SpawnFail", "프리뷰 스폰 실패 (에디터 월드 없음)."));
+	}
+}
+
+void FFPSRogueliteEditorModule::OnCaptureWeaponAssembler()
+{
+	AFPSRWeaponAssemblerActor* A = FPSRWeaponAssemblerHelpers::FindPreview();
+	if (!A)
+	{
+		FMessageDialog::Open(EAppMsgType::Ok, LOCTEXT("NoPreview", "레벨에 무기 조립기 프리뷰가 없습니다. 먼저 프리뷰를 스폰하세요."));
+		return;
+	}
+
+	const int32 N = FPSRWeaponAssemblerHelpers::CaptureToSockets(A);
+	FMessageDialog::Open(EAppMsgType::Ok, FText::Format(LOCTEXT("CaptureDone", "소켓 {0}개 생성/갱신 + DA 배선·저장 완료. PIE로 조립을 확인하세요."), FText::AsNumber(N)));
 }
 
 void FFPSRogueliteEditorModule::OnValidateAnchoredDataMenuEntry()

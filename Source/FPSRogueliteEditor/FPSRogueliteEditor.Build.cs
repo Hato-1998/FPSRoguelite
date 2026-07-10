@@ -30,7 +30,8 @@ public class FPSRogueliteEditor : ModuleRules
 			"Projects",
 			"PropertyEditor",          // IDetailsView (P1 Data Editor — reuse the engine's property editing UI)
 			"WorkspaceMenuStructure",  // WorkspaceMenu::GetMenuStructure().GetToolsCategory() for the nomad tab group
-			"InputCore"                // EKeys::* referenced by SListView/SComboBox/SNumericEntryBox key-nav (link dep)
+			"InputCore",                // EKeys::* referenced by SListView/SComboBox/SNumericEntryBox key-nav (link dep)
+			"ContentBrowser"            // FContentBrowserModule::GetSelectedAssets (Weapon Part Assembler)
 		});
 	}
 }
