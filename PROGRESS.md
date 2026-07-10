@@ -4,7 +4,16 @@
 > **작업 단계를 끝낼 때마다, 그리고 중단 전 반드시 이 파일을 갱신하고 커밋한다.**
 > 확정 설계·기획·코드구조·규칙은 `Game.md`(**SSOT 허브** → 도메인별 `Docs/SSOT/*.md`, 작업별 라우팅은 허브 §0-1), **완료 작업 상세는 `git log --oneline`**. 여기엔 *무엇을 했는지*만 요약한다.
 
-**최종 갱신: 2026-07-10**
+**최종 갱신: 2026-07-11**
+
+## 🔔 핸드오프 (2026-07-11 · **W-U1 무기 모듈러 슬롯+선택기 코드 완료 — 빌드·스모크 통과, 적대검증 4결함 반영**) — 🎯 **다음 = (A트랙) 팔 그립 수리+PIE 시각검증 / (후속) W-U2 스코프·W-U3 3P·W-U1b async. 재개 = 이 블록.**
+> **활성 브랜치**: `phase/pwas-b-procedural-weapon-motion` 이어서. 이번 유닛 = **코드만**(콘텐츠/PIE 없음, 팔그립=별도 A트랙 미완이라 시각검증만 대기).
+> **검증(Opus 직접)**: 빌드 -NoXGE **`Result: Succeeded`**(0 err/0 warn, 양 모듈 링크) · 스모크(headless `validate-data.ps1`=전 모듈 CDO 로드+앵커 21자산) **exit0 `Success 0 error 32 warning`**(32경고=기존 고아, 신규 아님; 라이플 DA는 도달·검증됨 → PartRules 빈값이라 C7 no-op = **회귀0**).
+> **구현 범위(플랜 v3 §3~6, 구현=Sonnet/검증=Opus)**: **신규 6파일**(`FPSRWeaponPartCondition.{h,cpp}` 폴리모픽 조건 Always/StatThreshold/HasFragment · `FPSRWeaponPartRule.{h,cpp}` 규칙 UObject · `FPSRWeaponPartSelector.{h,cpp}` 순수 선택기) + **8수정**(WeaponTypes: `EFPSRStatCompare`+`FFPSRWeaponStatBlock::GetAxisValue` · WeaponDataAsset.h: `Instanced TArray<UFPSRWeaponPartRule*> PartRules`(WeaponParts1P **무수정**) · WeaponDataAsset.cpp: C7 IsDataValid · FPSRCharacter.h/.cpp: `RebuildPartsFromSelection`+`NotifyEquippedWeaponModifiersChanged`+`ProcessPendingWeaponPartsRebuild` · FPSRWeaponInstance.h/.cpp: `NotifyOwnerModifiersChanged` 5사이트 · FPSRPlayerState.cpp: AllWeapons 통지 3사이트).
+> **적대검증(Opus 6에이전트 5렌즈, 코드 무변경)로 4 확정결함 사전교정**: ①C2 통지가 resolved 스탯의 AllWeapons 절반 누락→PlayerState 3사이트(`AddAllWeaponsModifier`/`OnRep_AllWeaponsMods`/`ResetRunState`) 통지 추가 ②C2 경로가 머즐/에임 캐시 리셋 우회(파괴 컴포넌트 댕글링)→리셋을 `RebuildPartsFromSelection` 진입부로 이동 ③HasFragment 태그매칭 오작동→에셋 포인터 매칭 ④struct-중첩 Instanced 리포 미검증→규칙=폴리모픽 UObject(카드 동형).
+> **사용자 결정 3건**: 규칙=조건분리(합성, 별도 폴리모픽 조건) · C7=저작-타임 전용(WITH_EDITOR, 머지 게이트 제외) · C5 async=후속 W-U1b 분리(현 동기로드=선택 부분집합, 프리즈/장착 게이트로 히치상한 낮음).
+> **핵심 설계**: 선택기=슬롯리스 base 전부(WeaponParts1P 그대로=회귀0) + 슬롯별 승자(Tier↓·Priority↓·RuleIndex↑, 결정적) · signature-diff(캐릭터 transient `LastWeaponPartSignature` uint32, next-tick 코얼레스, equipped 게이트, 데디서버 no-op) · **격리계약 §2-A 전부 준수**(선택기/조건/캐릭터 `Card/` 미include · WeaponInstance 복제/세이브에 파츠상태 0 · 파츠=읽기전용 코스메틱).
+> **다음(2트랙)**: **A(콘텐츠·PIE, 사용자)** = 팔 그립 수리(`ArmsAnimInstanceClass`를 PWAS Manny용으로 교체, 구 AG14W 몽타주 정리) → PIE에서 라이플 조립·진화 시각검증(2026-07-10 b 블록 참조). **콘텐츠 저작** = 라이플 DA에 슬롯 태그+PartRules(사이트/배럴 진화규칙) 저작(헤드리스 python: `PartRules`=Instanced 배열, 조건=서브클래스 인스턴스). **후속** = W-U2 저격 스코프 · W-U3 3P 진화 가시성 · W-U1b 완전 async · C7 커맨드릿 게이트화(선택). 채택 시 `Docs/WeaponModular_FragmentEvolution_Scope_Plan.md` §3(S1 드롭=파츠 struct에 Slot 미추가, 규칙에만)·§4(blocker 교정) 갱신.
 
 ## 🔔 핸드오프 (2026-07-10 b · **W-U1 착수 前 read-only 조사 — "파츠 조립 실패" 진단 정정 + 진짜 블로커 = 팔 그립 애님 불일치**) — 🎯 **다음 = W-U1 선택기 코드(조립 규약은 이미 해결됨) + 별도 콘텐츠트랙 팔 그립 수리. 재개 = 이 블록 + `Docs/WeaponModular_W1_ResumePrompt.md` + `Docs/WeaponModular_FragmentEvolution_Scope_Plan.md`.**
 > **이 세션 = 코드 무변경**(read-only 헤드리스 덤프 3회로 조립 규약 규명). 커밋 = **PROGRESS.md만**. 미커밋 = 전부 `Content/` 사용자 자산(아래 목록) → 그대로 남김.

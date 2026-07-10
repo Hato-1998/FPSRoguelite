@@ -164,6 +164,21 @@ struct FPSROGUELITE_API FFPSRWeaponStatBlock
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Charge", meta = (EditConditionHides, EditCondition = "Archetype == EFPSRWeaponArchetype::ChargeLaser"))
 	float ChargeTickInterval = 0.12f; // seconds between warm-up ticks (clamped to a 0.02 minimum)
+
+	/** Read one resolved stat axis by enum (W-U1 part-rule conditions). Mirrors the axis→field mapping of
+	 *  UFPSRWeaponInstance::RecomputeResolved (write side). MagSize is returned as float. Unknown axis = 0. */
+	float GetAxisValue(EFPSRWeaponStat Axis) const;
+};
+
+/** Comparison operator for a stat-threshold weapon-part rule condition (W-U1). */
+UENUM(BlueprintType)
+enum class EFPSRStatCompare : uint8
+{
+	GreaterOrEqual UMETA(DisplayName = ">="),
+	Greater        UMETA(DisplayName = ">"),
+	LessOrEqual    UMETA(DisplayName = "<="),
+	Less           UMETA(DisplayName = "<"),
+	Equal          UMETA(DisplayName = "==")
 };
 
 /** Stat axis a weapon modifier targets. Maps 1:1 to an FFPSRWeaponStatBlock field (compile-checked switch in
@@ -179,6 +194,22 @@ enum class EFPSRWeaponStat : uint8
 	SpreadDegrees  UMETA(DisplayName = "Spread"),
 	ReloadTime     UMETA(DisplayName = "Reload Time")
 };
+
+/** Out-of-line: FFPSRWeaponStatBlock::GetAxisValue is declared above EFPSRWeaponStat (struct order in this header),
+ *  so its body lives here, after the enum it switches on (avoids a forward-reference compile error). */
+inline float FFPSRWeaponStatBlock::GetAxisValue(EFPSRWeaponStat Axis) const
+{
+	switch (Axis)
+	{
+	case EFPSRWeaponStat::MagSize:        return static_cast<float>(MagSize);
+	case EFPSRWeaponStat::FireRate:       return FireRate;
+	case EFPSRWeaponStat::RecoilVertical: return RecoilVertical;
+	case EFPSRWeaponStat::Damage:         return Damage;
+	case EFPSRWeaponStat::SpreadDegrees:  return SpreadDegrees;
+	case EFPSRWeaponStat::ReloadTime:     return ReloadTime;
+	default:                              return 0.0f;
+	}
+}
 
 /** How a modifier combines with the base stat. Resolution per axis = (base + Σadditive) × (1 + Σpercent). */
 UENUM(BlueprintType)

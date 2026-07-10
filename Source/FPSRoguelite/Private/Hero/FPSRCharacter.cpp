@@ -17,6 +17,7 @@
 #include "Weapon/FPSRWeaponFragment.h"
 #include "Weapon/FPSRWeaponDataAsset.h"
 #include "Weapon/FPSRWeaponAnimInstance.h"
+#include "Weapon/FPSRWeaponPartSelector.h"
 #include "Hero/FPSRPlayerFeedbackComponent.h"
 #include "Hero/FPSRBlindspotAudioComponent.h"
 #include "Hero/FPSRReviveComponent.h"
@@ -1147,7 +1148,29 @@ void AFPSRCharacter::RefreshFirstPersonWeaponVisual()
 
 void AFPSRCharacter::RefreshWeaponPartComponents(const UFPSRWeaponDataAsset* Weapon)
 {
-	// Tear down the previous weapon's parts (weapon swaps are infrequent, so a full rebuild is simpler than diffing).
+	// No weapon / non-skeletal: tear down and reset signature. Parts attach to the SKELETAL weapon mesh only —
+	// static/melee/preview weapons carry no modular parts, and the pack part sockets live on SKEL_LPAMG_<W>.
+	// ActiveWeaponMesh == WeaponMesh1P means a skeletal weapon is shown.
+	if (!Weapon || !WeaponMesh1P || ActiveWeaponMesh != WeaponMesh1P)
+	{
+		RebuildPartsFromSelection(TArray<FFPSRWeaponPartAttachment>());
+		LastWeaponPartSignature = 0;
+		return;
+	}
+
+	static const TArray<TObjectPtr<UFPSRWeaponFragment>> EmptyFragments;
+	UFPSRWeaponInstance* Inst = WeaponInventory ? WeaponInventory->GetCurrentInstance() : nullptr;
+	const FFPSRWeaponStatBlock& Resolved = Inst ? Inst->GetResolvedStats() : Weapon->BaseStats;
+	const TArray<TObjectPtr<UFPSRWeaponFragment>>& Frags = Inst ? Inst->GetActiveFragments() : EmptyFragments;
+	TArray<FFPSRWeaponPartAttachment> Selected;
+	FPSRWeaponPartSelector::SelectParts(*Weapon, Resolved, Frags, Selected);
+	RebuildPartsFromSelection(Selected);
+	LastWeaponPartSignature = FPSRWeaponPartSelector::ComputeSignature(Selected);
+}
+
+void AFPSRCharacter::RebuildPartsFromSelection(const TArray<FFPSRWeaponPartAttachment>& Selected)
+{
+	// Tear down previous parts (weapon swaps / slot evolutions are infrequent, so a full rebuild is simpler than diffing).
 	for (UStaticMeshComponent* Part : WeaponPartComponents1P)
 	{
 		if (Part)
@@ -1157,14 +1180,18 @@ void AFPSRCharacter::RefreshWeaponPartComponents(const UFPSRWeaponDataAsset* Wea
 	}
 	WeaponPartComponents1P.Reset();
 
-	// Parts attach to the SKELETAL weapon mesh only — static/melee/preview weapons carry no modular parts, and the
-	// pack part sockets live on SKEL_LPAMG_<W>. ActiveWeaponMesh == WeaponMesh1P means a skeletal weapon is shown.
-	if (!Weapon || !WeaponMesh1P || ActiveWeaponMesh != WeaponMesh1P)
+	// Reset the modular muzzle/aim source caches HERE (both equip + modifier-change paths share this invariant) so a
+	// slot swap that drops the socket-carrying part can't leave a dangling pointer to a destroyed component.
+	CachedMuzzleComponent = nullptr;
+	CachedAimComponent = nullptr;
+
+	// Parts attach to the skeletal weapon mesh only (guarded by the caller: ActiveWeaponMesh == WeaponMesh1P).
+	if (!WeaponMesh1P)
 	{
 		return;
 	}
 
-	for (const FFPSRWeaponPartAttachment& PartDef : Weapon->WeaponParts1P)
+	for (const FFPSRWeaponPartAttachment& PartDef : Selected)
 	{
 		if (PartDef.Part.IsNull())
 		{
@@ -1185,9 +1212,9 @@ void AFPSRCharacter::RefreshWeaponPartComponents(const UFPSRWeaponDataAsset* Wea
 		WeaponPartComponents1P.Add(PartComp);
 	}
 
-	// Modular muzzle source: the muzzle socket lives on a cosmetic part (barrel/forestock), so prefer the part
-	// component that carries CachedMuzzleSocket — swapping that part then moves the muzzle. When no part provides it,
-	// CachedMuzzleComponent stays null and the fire site falls back to the receiver (ActiveWeaponMesh). Convention-
+	// Re-resolve modular muzzle source: the muzzle socket lives on a cosmetic part (barrel/forestock), so prefer the
+	// part component that carries CachedMuzzleSocket — swapping that part then moves the muzzle. When no part provides
+	// it, CachedMuzzleComponent stays null and the fire site falls back to the receiver (ActiveWeaponMesh). Convention-
 	// based: the part whose mesh owns a socket named MuzzleSocket wins, so no extra DA field is needed.
 	if (!CachedMuzzleSocket.IsNone())
 	{
@@ -1201,9 +1228,10 @@ void AFPSRCharacter::RefreshWeaponPartComponents(const UFPSRWeaponDataAsset* Wea
 		}
 	}
 
-	// Modular aim source (same shape as the muzzle above): the AimSocket sits on the SIGHT part (iron sight / optic), so
-	// prefer the part component that carries CachedAimSocket — swapping the sight then moves the ADS reference. When no
-	// part provides it, CachedAimComponent stays null and UpdateAimDownSights falls back to the receiver (WeaponMesh1P).
+	// Re-resolve modular aim source (same shape as the muzzle above): the AimSocket sits on the SIGHT part (iron sight /
+	// optic), so prefer the part component that carries CachedAimSocket — swapping the sight then moves the ADS
+	// reference. When no part provides it, CachedAimComponent stays null and UpdateAimDownSights falls back to the
+	// receiver (WeaponMesh1P).
 	if (!CachedAimSocket.IsNone())
 	{
 		for (UStaticMeshComponent* Part : WeaponPartComponents1P)
@@ -1215,6 +1243,52 @@ void AFPSRCharacter::RefreshWeaponPartComponents(const UFPSRWeaponDataAsset* Wea
 			}
 		}
 	}
+}
+
+void AFPSRCharacter::NotifyEquippedWeaponModifiersChanged(const UFPSRWeaponInstance* ChangedInstance)
+{
+	// Parts are owner-local cosmetics — never rebuilt on a dedicated server (mirrors HandleReloadStateChanged).
+	if (GetNetMode() == NM_DedicatedServer)
+	{
+		return;
+	}
+	// Only the currently-equipped weapon's parts are shown; a non-equipped instance's change is irrelevant until swap.
+	if (!WeaponInventory || ChangedInstance != WeaponInventory->GetCurrentInstance())
+	{
+		return;
+	}
+	if (bWeaponPartsRebuildPending)
+	{
+		return; // coalesce a burst into one next-tick rebuild
+	}
+	bWeaponPartsRebuildPending = true;
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().SetTimerForNextTick(this, &AFPSRCharacter::ProcessPendingWeaponPartsRebuild);
+	}
+}
+
+void AFPSRCharacter::ProcessPendingWeaponPartsRebuild()
+{
+	bWeaponPartsRebuildPending = false; // clear first (Process may early-return)
+	const UFPSRWeaponDataAsset* Weapon = WeaponInventory ? WeaponInventory->GetCurrentWeapon() : nullptr;
+	if (!Weapon || !WeaponMesh1P || ActiveWeaponMesh != WeaponMesh1P)
+	{
+		return;
+	}
+	static const TArray<TObjectPtr<UFPSRWeaponFragment>> EmptyFragments;
+	UFPSRWeaponInstance* Inst = WeaponInventory->GetCurrentInstance();
+	const FFPSRWeaponStatBlock& Resolved = Inst ? Inst->GetResolvedStats() : Weapon->BaseStats;
+	const TArray<TObjectPtr<UFPSRWeaponFragment>>& Frags = Inst ? Inst->GetActiveFragments() : EmptyFragments;
+	TArray<FFPSRWeaponPartAttachment> Selected;
+	FPSRWeaponPartSelector::SelectParts(*Weapon, Resolved, Frags, Selected);
+	const uint32 NewSig = FPSRWeaponPartSelector::ComputeSignature(Selected);
+	if (NewSig == LastWeaponPartSignature)
+	{
+		return; // no visual change → no churn
+	}
+	RebuildPartsFromSelection(Selected);
+	LastWeaponPartSignature = NewSig;
 }
 
 void AFPSRCharacter::HandleReloadStateChanged(bool bIsReloading)

@@ -14,6 +14,7 @@ class UCameraComponent;
 class USkeletalMeshComponent;
 class UInputAction;
 class UFPSRWeaponInventoryComponent;
+class UFPSRWeaponInstance;
 class UFPSRWeaponFireComponent;
 class UFPSRRecoilComponent;
 class UFPSRWeaponDataAsset;
@@ -112,6 +113,12 @@ public:
 	 *  clients -> 3P body ReloadMontage3P. No-op when bIsReloading is false, during the level-up freeze, or when the
 	 *  equipped weapon has no reload montage. The play rate is scaled so the montage length matches the ReloadTime. */
 	void HandleReloadStateChanged(bool bIsReloading);
+
+	/** W-U1 signature-diff rebuild: the equipped weapon's stat modifiers / behavior fragments changed (parts may need
+	 *  to evolve). Coalesced to next tick, equipped-only, no-op on a dedicated server. Called from
+	 *  UFPSRWeaponInstance::NotifyOwnerModifiersChanged and the PlayerState's AllWeapons-mod sites (mirrors the
+	 *  cross-class notify pattern of HandleReloadStateChanged above). */
+	void NotifyEquippedWeaponModifiersChanged(const UFPSRWeaponInstance* ChangedInstance);
 
 	/** Server->all: play the spatialized fire SFX for REMOTE observers so teammates hear each other's weapon fire
 	 *  (B4). The owning client already played it locally (PlayWeaponFireCosmetics), so the implementation early-outs
@@ -476,9 +483,24 @@ protected:
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<UStaticMeshComponent>> WeaponPartComponents1P;
 
+	/** W-U1: pending next-tick parts rebuild flag (coalesces a burst of modifier/fragment OnReps into one rebuild). */
+	bool bWeaponPartsRebuildPending = false;
+	/** W-U1: hash of the last-applied selected part set; ProcessPendingWeaponPartsRebuild skips rebuild when unchanged.
+	 *  Transient, NOT replicated, NOT saved (§2-A gate②) — each machine recomputes from replicated stats/fragments. */
+	uint32 LastWeaponPartSignature = 0;
+
 	/** Destroy any existing modular part components and rebuild them from the equipped weapon's WeaponParts1P list
 	 *  (only when a SKELETAL weapon mesh is shown; static/melee/empty attach nothing). Called from the weapon refresh. */
 	void RefreshWeaponPartComponents(const UFPSRWeaponDataAsset* Weapon);
+
+	/** W-U1: rebuild the modular parts from an already-computed selection (shared by equip + modifier-change paths).
+	 *  Tears down existing part components, RESETS CachedMuzzle/AimComponent, attaches the selection, then re-resolves
+	 *  the muzzle/aim source components. */
+	void RebuildPartsFromSelection(const TArray<FFPSRWeaponPartAttachment>& Selected);
+
+	/** W-U1 signature-diff rebuild (next-tick coalesced half of NotifyEquippedWeaponModifiersChanged, see the public
+	 *  declaration above for the full contract). */
+	void ProcessPendingWeaponPartsRebuild();
 
 	/** Arms anim default captured at BeginPlay, so a weapon's per-weapon ArmsAnimInstanceClass override can be
 	 *  reverted when the next weapon has none. Only touched once an override has actually been applied

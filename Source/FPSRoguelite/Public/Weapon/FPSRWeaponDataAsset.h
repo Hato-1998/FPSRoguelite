@@ -19,6 +19,7 @@ class USoundBase;
 class UParticleSystem;
 class UTexture2D;
 class UMaterialInterface;
+class UFPSRWeaponPartRule;
 
 /** One modular cosmetic part attached to the 1P skeletal weapon mesh at a named socket (U15). Purely visual: the
  *  part is a static mesh (barrel / forestock / magazine / sight from the pack) child-attached to the equipped
@@ -337,6 +338,13 @@ public:
 	 *  weapons and empty lists attach nothing (null-safe). Parts inherit the weapon mesh's OnlyOwnerSee visibility. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|모듈 파츠", meta = (DisplayName = "모듈 파츠 목록(1P)"))
 	TArray<FFPSRWeaponPartAttachment> WeaponParts1P;
+
+	/** Modular part SELECTION rules (W-U1 evolution). Each rule competes for its Slot; the winner (highest Tier, then
+	 *  Priority, then rule order) whose Condition is met (null = Always) attaches its Part — swappable by resolved
+	 *  stats / behavior fragments. WeaponParts1P above stay ALWAYS-attached structural parts (slotless). Empty here =
+	 *  no evolution (WeaponParts1P only). Read-only cosmetic: never touches gameplay/cards/save/replication (§2-A). */
+	UPROPERTY(EditDefaultsOnly, Instanced, BlueprintReadOnly, Category = "무기|모듈 파츠", meta = (DisplayName = "파츠 선택 규칙"))
+	TArray<TObjectPtr<UFPSRWeaponPartRule>> PartRules;
 
 	/** Cascade muzzle-flash particle spawned at MuzzleSocket each shot (owner-client local). */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|발사 연출", meta = (DisplayName = "총구 화염 파티클"))

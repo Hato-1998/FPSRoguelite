@@ -184,6 +184,10 @@ void AFPSRPlayerState::AddAllWeaponsModifier(const FFPSRWeaponStatMod& Mod)
 		if (UFPSRWeaponInventoryComponent* Inv = Pawn->FindComponentByClass<UFPSRWeaponInventoryComponent>())
 		{
 			Inv->MarkAllInstancesResolvedDirty();
+			if (AFPSRCharacter* Char = Cast<AFPSRCharacter>(Pawn))
+			{
+				Char->NotifyEquippedWeaponModifiersChanged(Inv->GetCurrentInstance());
+			}
 		}
 	}
 }
@@ -234,6 +238,10 @@ void AFPSRPlayerState::OnRep_AllWeaponsMods()
 		if (UFPSRWeaponInventoryComponent* Inv = Pawn->FindComponentByClass<UFPSRWeaponInventoryComponent>())
 		{
 			Inv->MarkAllInstancesResolvedDirty();
+			if (AFPSRCharacter* Char = Cast<AFPSRCharacter>(Pawn))
+			{
+				Char->NotifyEquippedWeaponModifiersChanged(Inv->GetCurrentInstance());
+			}
 		}
 	}
 }
@@ -318,6 +326,10 @@ void AFPSRPlayerState::ResetRunState()
 		if (UFPSRWeaponInventoryComponent* Inv = Pawn->FindComponentByClass<UFPSRWeaponInventoryComponent>())
 		{
 			Inv->MarkAllInstancesResolvedDirty();
+			if (AFPSRCharacter* Char = Cast<AFPSRCharacter>(Pawn))
+			{
+				Char->NotifyEquippedWeaponModifiersChanged(Inv->GetCurrentInstance());
+			}
 		}
 	}
 

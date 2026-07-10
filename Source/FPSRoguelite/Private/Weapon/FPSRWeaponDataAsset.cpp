@@ -7,6 +7,7 @@
 #include "Engine/SkeletalMesh.h"
 #include "Engine/StaticMesh.h"
 #include "AbilitySystem/Abilities/FPSRGA_WeaponFire_Projectile.h"
+#include "Weapon/FPSRWeaponPartRule.h"
 
 #define LOCTEXT_NAMESPACE "FPSRWeaponDataAsset"
 
@@ -197,6 +198,55 @@ EDataValidationResult UFPSRWeaponDataAsset::IsDataValid(FDataValidationContext& 
 			Context.AddWarning(FText::Format(LOCTEXT("PartSocketMissing",
 				"WeaponParts1P part '{0}' references socket '{1}' that does not exist on WeaponMesh1P — it will attach at the mesh origin. Check for a typo (e.g. a space instead of '_')."),
 				FText::FromString(Part.Part.GetAssetName()), FText::FromName(Part.Socket)));
+		}
+	}
+
+	// --- W-U1 modular part-rule validation (author-time). Slot empty = ERROR (breaks selector determinism / intent);
+	//     duplicate (slot, tier, priority) = WARNING (mutually-exclusive conditions are legal — RuleIndex still makes
+	//     the runtime deterministic). Rule-part socket typo = WARNING (parity with the base-part check above). The
+	//     always-on aim/muzzle ANCHOR guarantee is enforced by the existing receiver+WeaponParts1P checks below —
+	//     rule parts are DELIBERATELY excluded from that search so the anchor stays always-attached. ---
+	for (int32 i = 0; i < PartRules.Num(); ++i)
+	{
+		const UFPSRWeaponPartRule* Rule = PartRules[i];
+		if (!Rule)
+		{
+			continue;
+		}
+		if (!Rule->Slot.IsValid())
+		{
+			Context.AddError(FText::Format(LOCTEXT("PartRuleNoSlot", "PartRules[{0}] has an empty Slot — a slotless rule can never compete for selection. Assign a Slot gameplay tag."), FText::AsNumber(i)));
+			Result = EDataValidationResult::Invalid;
+		}
+		if (!Rule->Part.Part.IsNull() && !Rule->Part.Socket.IsNone())
+		{
+			if (const UStaticMesh* PartMesh = Rule->Part.Part.LoadSynchronous())
+			{
+				if (PartMesh->FindSocket(Rule->Part.Socket) == nullptr)
+				{
+					Context.AddWarning(FText::Format(LOCTEXT("PartRuleSocketMissing", "PartRules[{0}] part references socket '{1}' that does not exist on its mesh — it will attach at the mesh origin."), FText::AsNumber(i), FText::FromName(Rule->Part.Socket)));
+				}
+			}
+		}
+	}
+	for (int32 i = 0; i < PartRules.Num(); ++i)
+	{
+		const UFPSRWeaponPartRule* A = PartRules[i];
+		if (!A || !A->Slot.IsValid())
+		{
+			continue;
+		}
+		for (int32 j = i + 1; j < PartRules.Num(); ++j)
+		{
+			const UFPSRWeaponPartRule* B = PartRules[j];
+			if (!B || B->Slot != A->Slot)
+			{
+				continue;
+			}
+			if (B->Tier == A->Tier && B->Priority == A->Priority)
+			{
+				Context.AddWarning(FText::Format(LOCTEXT("PartRuleAmbiguous", "PartRules[{0}] and [{1}] share Slot '{2}' with identical Tier/Priority — the winner is decided only by rule order. Differentiate Tier or Priority to make the intent explicit."), FText::AsNumber(i), FText::AsNumber(j), FText::FromName(A->Slot.GetTagName())));
+			}
 		}
 	}
 
