@@ -5,6 +5,7 @@
 #include "GameFramework/Character.h"
 #include "AbilitySystemInterface.h"
 #include "GameplayTagContainer.h"
+#include "Weapon/FPSRWeaponDataAsset.h"
 #include "FPSRCharacter.generated.h"
 
 class UAbilitySystemComponent;
@@ -453,6 +454,22 @@ protected:
 	/** Smoothed 0..1 movement factor gating the ADS idle sway: 0 when the pawn is standing still (steady aim), ramps
 	 *  to 1 with planar speed (relative to BaseWalkSpeed) so the handheld sway only lives while moving. Owner-local. */
 	float ADSSwayMoveAlpha = 0.0f;
+
+	// --- Hip-space procedural weapon motion (owner-local cosmetic; P1: look-sway + walk-bob + fire-kick) ---
+	/** Control rotation captured last frame, to derive the per-frame aim delta that drives look-sway. Reset on equip
+	 *  and initialised in BeginPlay so the first frame's delta isn't a huge jump. */
+	FRotator PreviousControlRotation = FRotator::ZeroRotator;
+	/** Interpolated look-sway (yaw/pitch degrees) the weapon lags behind the aim by; eases back to zero when the aim stops. */
+	FRotator CurrentHipLookSway = FRotator::ZeroRotator;
+	/** Accumulated walk-bob phase (cycles), advanced by dt * frequency * movement factor (frame-rate independent). */
+	float HipBobPhase = 0.0f;
+	/** Decaying per-shot hip fire-kick alpha (0..1). Bumped to 1 on each local shot (PlayWeaponFireCosmetics), settled
+	 *  toward 0 each frame; scales the kick offset/pitch. */
+	float HipFireKickAlpha = 0.0f;
+	/** Equipped weapon's hip procedural-motion profile, cached on equip. */
+	FFPSRProceduralWeaponMotionProfile CachedHipMotion;
+	/** True when the cached profile has any non-zero amplitude (skip the whole hip block otherwise). */
+	bool bCachedHasHipMotion = false;
 
 	/** Runtime-created modular weapon-part components (U15), child-attached to WeaponMesh1P and rebuilt on each
 	 *  weapon change. Owner-only-visible (match the 1P weapon mesh). Empty for static/melee/partless weapons. */

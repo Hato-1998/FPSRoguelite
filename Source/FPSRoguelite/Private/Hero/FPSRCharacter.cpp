@@ -183,6 +183,7 @@ void AFPSRCharacter::BeginPlay()
 		BaseArmsRelRot = FirstPersonArms->GetRelativeRotation();
 		ADSAimLoc = BaseArmsRelLoc;
 		ADSAimRot = BaseArmsRelRot;
+		PreviousControlRotation = GetControlRotation();
 	}
 }
 
@@ -992,6 +993,9 @@ void AFPSRCharacter::RefreshFirstPersonWeaponVisual()
 	CachedADSAimRotationOffset = FRotator::ZeroRotator;
 	bCachedSuppressFireMontagesWhileADS = true;
 
+	// Reset hip procedural weapon motion (owner-local cosmetic); no weapon = no hip motion until the next equip.
+	bCachedHasHipMotion = false;
+
 	if (!Weapon)
 	{
 		// No weapon: hide all meshes (1P + 3P) and drop any modular parts.
@@ -1109,6 +1113,21 @@ void AFPSRCharacter::RefreshFirstPersonWeaponVisual()
 	CachedADSSwayYawDegrees = Weapon->ADSSwayYawDegrees;
 	CachedADSSwayPitchDegrees = Weapon->ADSSwayPitchDegrees;
 	CachedADSSwaySpeed = Weapon->ADSSwaySpeed;
+
+	// Hip procedural weapon motion (owner-local cosmetic): cache the profile and reset per-weapon runtime state so a
+	// weapon swap doesn't carry over the previous weapon's sway/bob/kick or a stale control-rotation delta.
+	CachedHipMotion = Weapon->ProceduralWeaponMotion;
+	bCachedHasHipMotion =
+		CachedHipMotion.LookSwayAmount > 0.0f || CachedHipMotion.WalkBobHorizontal > 0.0f ||
+		CachedHipMotion.WalkBobVertical > 0.0f || CachedHipMotion.FireKickPitchDegrees > 0.0f ||
+		CachedHipMotion.FireKickBackwardCm > 0.0f || CachedHipMotion.FireKickUpCm > 0.0f;
+	CurrentHipLookSway = FRotator::ZeroRotator;
+	HipBobPhase = 0.0f;
+	HipFireKickAlpha = 0.0f;
+	if (IsLocallyControlled())
+	{
+		PreviousControlRotation = GetControlRotation();
+	}
 
 	// Rebuild modular cosmetic parts on the (skeletal) weapon mesh from the weapon's part list.
 	RefreshWeaponPartComponents(Weapon);
@@ -1298,6 +1317,14 @@ void AFPSRCharacter::PlayWeaponFireCosmetics()
 		ADSFireKickPitch = FMath::Max(ADSFireKickPitch, CachedADSFireKickDegrees);
 	}
 
+	// Hip procedural fire kick: refresh to full each shot (Max, not accumulate) so sustained fire holds a steady kick;
+	// decayed each frame in UpdateAimDownSights and faded by (1-ADSalpha) there, so it reads only at hip. Owner-local.
+	if (bCachedHasHipMotion &&
+		(CachedHipMotion.FireKickPitchDegrees > 0.0f || CachedHipMotion.FireKickBackwardCm > 0.0f || CachedHipMotion.FireKickUpCm > 0.0f))
+	{
+		HipFireKickAlpha = FMath::Max(HipFireKickAlpha, 1.0f);
+	}
+
 	// Fire sound + muzzle flash attach to the ACTIVE weapon mesh (skeletal firearm or static preview) so they track
 	// whichever mesh the equipped weapon shows. CachedMuzzleSocket is a socket on that mesh (NAME_None = mesh origin).
 	if (ActiveWeaponMesh)
@@ -1433,6 +1460,53 @@ void AFPSRCharacter::UpdateAimDownSights(float DeltaTime)
 		}
 	}
 	ADSFireKickPitch = FMath::FInterpTo(ADSFireKickPitch, 0.0f, DeltaTime, CachedADSFireKickRecoveryRate);
+
+	// --- Hip-space procedural weapon motion (owner-local cosmetic) ---
+	// Faded OUT as ADS engages (weight = 1-alpha), composed additively into the SAME single write below (no extra
+	// SetRelative* call). State is advanced from INVARIANT sources only (control-rotation delta, velocity, accumulated
+	// phase, decaying kick) — never from the arms' own transform — so there is no feedback loop. Translation is added in
+	// camera space (NewLoc is arms-relative-to-camera: +X forward, +Y right, +Z up → screen-space bob/kick); sway/kick
+	// rotation is composed about the arms origin. Fixed order: base → ADS blend (above) → hip additive → write once.
+	if (bCachedHasHipMotion)
+	{
+		// Cosmetic interp uses a clamped dt so a frame spike (or low FPS) can't snap FInterpTo to target (dt*Speed>=1).
+		const float HipDt = FMath::Min(DeltaTime, 1.0f / 30.0f);
+
+		// Look-sway: the weapon lags the aim. Target = opposite the per-frame control-rotation delta, clamped; eased so it
+		// leans into a turn and recenters when the aim stops. Delta is clamped to reject teleport/respawn jumps.
+		const FRotator ControlRot = GetControlRotation();
+		FRotator AimDelta = (ControlRot - PreviousControlRotation).GetNormalized();
+		PreviousControlRotation = ControlRot;
+		const float MaxDelta = 25.0f;
+		const float DeltaYaw = FMath::Clamp(AimDelta.Yaw, -MaxDelta, MaxDelta);
+		const float DeltaPitch = FMath::Clamp(AimDelta.Pitch, -MaxDelta, MaxDelta);
+		FRotator SwayTarget(
+			FMath::Clamp(-DeltaPitch * CachedHipMotion.LookSwayAmount, -CachedHipMotion.LookSwayMaxDegrees, CachedHipMotion.LookSwayMaxDegrees),
+			FMath::Clamp(-DeltaYaw * CachedHipMotion.LookSwayAmount, -CachedHipMotion.LookSwayMaxDegrees, CachedHipMotion.LookSwayMaxDegrees),
+			0.0f);
+		CurrentHipLookSway = FMath::RInterpTo(CurrentHipLookSway, SwayTarget, HipDt, CachedHipMotion.LookSwayReturnSpeed);
+
+		// Walk/run bob: velocity-gated figure-8. Reuse the smoothed 0..1 movement factor computed above (ADSSwayMoveAlpha).
+		// Phase accumulates with dt (frame-rate independent); vertical runs at 2x the horizontal frequency.
+		HipBobPhase += HipDt * CachedHipMotion.WalkBobFrequency * ADSSwayMoveAlpha;
+		HipBobPhase = FMath::Fmod(HipBobPhase, 1024.0f);
+		const float BobH = FMath::Sin(HipBobPhase * 2.0f * PI) * CachedHipMotion.WalkBobHorizontal * ADSSwayMoveAlpha;
+		const float BobV = FMath::Sin(HipBobPhase * 4.0f * PI) * CachedHipMotion.WalkBobVertical * ADSSwayMoveAlpha;
+
+		// Fire kick: decay the per-shot alpha (bumped to 1 in PlayWeaponFireCosmetics), then scale the kick offset/pitch.
+		HipFireKickAlpha = FMath::FInterpTo(HipFireKickAlpha, 0.0f, HipDt, CachedHipMotion.FireKickRecoverySpeed);
+		const float KickPitch = HipFireKickAlpha * CachedHipMotion.FireKickPitchDegrees;
+		const FVector KickOffset(-HipFireKickAlpha * CachedHipMotion.FireKickBackwardCm, 0.0f, HipFireKickAlpha * CachedHipMotion.FireKickUpCm);
+
+		// Compose, weighted by (1-alpha) so it vanishes as you aim (ADS sight-glue owns the pose there).
+		const float HipWeight = 1.0f - CurrentADSAlpha;
+		if (HipWeight > KINDA_SMALL_NUMBER)
+		{
+			NewLoc += HipWeight * (FVector(0.0f, BobH, BobV) + KickOffset);
+			const FRotator HipRot(CurrentHipLookSway.Pitch + KickPitch, CurrentHipLookSway.Yaw, 0.0f);
+			NewRot = (HipRot * HipWeight).Quaternion() * NewRot;
+		}
+	}
 
 	FirstPersonArms->SetRelativeLocationAndRotation(NewLoc, NewRot);
 }

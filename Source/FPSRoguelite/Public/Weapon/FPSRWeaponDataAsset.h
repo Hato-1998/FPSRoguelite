@@ -41,6 +41,55 @@ struct FFPSRWeaponPartAttachment
 	FTransform Offset;
 };
 
+/** 1P 절차 무기 모션(힙) 프로파일 — 정적 무기도 "살아있게" 만드는 owner-local 코스메틱 모션 파라미터 묶음(P1).
+ *  룩스웨이(조준 지연)·걷기밥(속도 게이트)·발사킥. 값은 AFPSRCharacter::UpdateAimDownSights에서 힙 레이어로
+ *  합성되며 ADS 진입 시 (1-알파)로 페이드아웃한다. 트레이스/조준에 영향 없음(순수 시각). */
+USTRUCT(BlueprintType)
+struct FFPSRProceduralWeaponMotionProfile
+{
+	GENERATED_BODY()
+
+	/** 룩스웨이 강도: 프레임당 조준 회전 델타(도) 1도당 무기가 반대로 기우는 정도(도). 0 = 룩스웨이 없음. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "힙 절차모션|룩스웨이", meta = (DisplayName = "룩스웨이 강도", ClampMin = "0.0"))
+	float LookSwayAmount = 0.35f;
+
+	/** 룩스웨이 누적 최대각(도) — 빠르게 돌려도 이 각을 넘지 않는다. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "힙 절차모션|룩스웨이", meta = (DisplayName = "룩스웨이 최대각(도)", ClampMin = "0.0"))
+	float LookSwayMaxDegrees = 5.0f;
+
+	/** 룩스웨이 복귀속도(FInterpTo) — 클수록 덜 지연되고 빨리 중앙 복귀. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "힙 절차모션|룩스웨이", meta = (DisplayName = "룩스웨이 복귀속도", ClampMin = "0.1"))
+	float LookSwayReturnSpeed = 9.0f;
+
+	/** 걷기밥 좌우 진폭(cm) — 이동 중 무기가 화면 좌우로 흔들리는 폭. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "힙 절차모션|걷기밥", meta = (DisplayName = "걷기밥 좌우(cm)", ClampMin = "0.0"))
+	float WalkBobHorizontal = 1.2f;
+
+	/** 걷기밥 상하 진폭(cm) — 좌우의 2배 주파수로 흔들려 8자 궤적을 만든다. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "힙 절차모션|걷기밥", meta = (DisplayName = "걷기밥 상하(cm)", ClampMin = "0.0"))
+	float WalkBobVertical = 0.8f;
+
+	/** 걷기밥 주파수(사이클/초, 최대속도 기준) — 이동속도 0..1로 게이트된다. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "힙 절차모션|걷기밥", meta = (DisplayName = "걷기밥 주파수", ClampMin = "0.0"))
+	float WalkBobFrequency = 1.2f;
+
+	/** 발사킥 피치(도) — 발사마다 총구가 순간적으로 위로 튀는 각(감쇠). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "힙 절차모션|발사킥", meta = (DisplayName = "발사킥 피치(도)", ClampMin = "0.0"))
+	float FireKickPitchDegrees = 2.5f;
+
+	/** 발사킥 후퇴(cm) — 발사마다 총이 카메라 쪽(-X)으로 밀리는 거리(감쇠). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "힙 절차모션|발사킥", meta = (DisplayName = "발사킥 후퇴(cm)", ClampMin = "0.0"))
+	float FireKickBackwardCm = 2.0f;
+
+	/** 발사킥 상승(cm) — 발사마다 총이 살짝 위로(+Z) 뜨는 거리(감쇠). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "힙 절차모션|발사킥", meta = (DisplayName = "발사킥 상승(cm)", ClampMin = "0.0"))
+	float FireKickUpCm = 0.5f;
+
+	/** 발사킥 복귀속도(FInterpTo) — 발사킥이 0으로 가라앉는 속도. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "힙 절차모션|발사킥", meta = (DisplayName = "발사킥 복귀속도", ClampMin = "0.1"))
+	float FireKickRecoverySpeed = 11.0f;
+};
+
 /** Data-driven weapon definition. */
 UCLASS(BlueprintType)
 class FPSROGUELITE_API UFPSRWeaponDataAsset : public UPrimaryDataAsset
@@ -234,6 +283,10 @@ public:
 	 *  full size. Only affects ADS weapons while aiming. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|조준(ADS)", meta = (DisplayName = "조준 중 총구화염 크기(0=끔)", ClampMin = "0.0", ClampMax = "1.0"))
 	float ADSMuzzleFlashScale = 0.35f;
+
+	/** 1P 절차 무기 모션(힙) — 살아있는 총 코스메틱(룩스웨이·걷기밥·발사킥). ADS 진입 시 페이드아웃. owner-local·복제0. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|1인칭 절차 무기모션(힙)", meta = (DisplayName = "힙 절차 무기모션 프로파일"))
+	FFPSRProceduralWeaponMotionProfile ProceduralWeaponMotion;
 
 	/** Optional montage played on the arms when this weapon is equipped. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|애니 몽타주", meta = (DisplayName = "장착 몽타주(팔)"))
