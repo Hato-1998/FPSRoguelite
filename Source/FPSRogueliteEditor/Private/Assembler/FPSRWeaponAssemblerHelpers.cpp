@@ -115,4 +115,41 @@ namespace FPSRWeaponAssemblerHelpers
 		UEditorLoadingAndSavingUtils::SavePackages(PackagesToSave, /*bOnlyDirty=*/false);
 		return n;
 	}
+
+	float ComputeFloorOffsetToRest(const USkeletalMeshComponent* BodyComp, const TArray<UStaticMeshComponent*>& PartComps)
+	{
+		// Accumulate a world-space box over the body + every part. CalcBounds() computes on-demand from the component's
+		// current transform, so this doesn't depend on the cached Bounds being finalized right after AddComponent.
+		FBox AssemblyBox(ForceInit);
+		auto Accumulate = [&AssemblyBox](const UPrimitiveComponent* Comp)
+		{
+			if (Comp)
+			{
+				AssemblyBox += Comp->CalcBounds(Comp->GetComponentTransform()).GetBox();
+			}
+		};
+
+		if (BodyComp && BodyComp->GetSkeletalMeshAsset())
+		{
+			Accumulate(BodyComp);
+		}
+		for (const UStaticMeshComponent* PC : PartComps)
+		{
+			if (PC && PC->GetStaticMesh())
+			{
+				Accumulate(PC);
+			}
+		}
+
+		if (!AssemblyBox.IsValid)
+		{
+			return 0.0f;
+		}
+
+		// Floor mesh sits at Z = -(offset). We want it at the assembly's minimum Z (its underside), i.e.
+		// Center.Z - Extent.Z, so offset = -Center.Z + Extent.Z. Matches SStaticMeshEditorViewport / SMaterialEditorViewport.
+		const FVector Center = AssemblyBox.GetCenter();
+		const FVector Extent = AssemblyBox.GetExtent();
+		return static_cast<float>(-Center.Z + Extent.Z);
+	}
 }

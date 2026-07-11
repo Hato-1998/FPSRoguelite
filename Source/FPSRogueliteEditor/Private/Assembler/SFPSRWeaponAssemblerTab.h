@@ -84,6 +84,26 @@ private:
 	 *  current-part is selected, reports a "먼저 선택하세요" status instead and performs no swap. */
 	void OnAvailPartActivated(TSharedPtr<FAvailPartRow> Item);
 
+	/** Single-click selection handler for the catalog list: remembers the picked row in SelectedAvailPart so the
+	 *  explicit "교체" button (OnSwapClicked / IsSwapEnabled) knows what to swap to. */
+	void OnAvailSelectionChanged(TSharedPtr<FAvailPartRow> Item, ESelectInfo::Type SelectInfo);
+
+	/** Shared swap path used by both the catalog double-click and the explicit "교체" button. Validates a current
+	 *  part is selected and the mesh loads, swaps it (preview + in-memory DA .Part), then updates ONLY the affected
+	 *  current-part row label IN PLACE (reusing the same FPartRow shared pointer) so the SListView selection — and
+	 *  therefore the client's SelectedPart / gizmo target / isolate visibility — is preserved. Rebuilding the whole
+	 *  list would drop the selection: gizmo jumps to origin and, with "선택만 보기" on, the swapped part is hidden. */
+	void PerformSwap(TSharedPtr<FAvailPartRow> AvailItem);
+
+	/** "→ 선택 파츠 교체" 버튼: 위 '현재 파츠' 슬롯을 아래에서 고른 메시로 교체(PerformSwap 위임). */
+	FReply OnSwapClicked();
+
+	/** 교체 버튼 활성 조건: 현재 파츠가 선택돼 있고, 사용 가능 파츠도 하나 골라져 있을 때만 true. */
+	bool IsSwapEnabled() const;
+
+	/** '<슬롯명>  ·  <현재 메시명>' 형태의 현재-파츠 행 라벨. 교체 시 이 라벨만 제자리 갱신해 선택을 잃지 않는다. */
+	FText MakePartRowLabel(int32 Index) const;
+
 	// --- Toolbar --------------------------------------------------------------------------------------------------
 
 	/** "조립→저장": bakes the current part placement into the body mesh's sockets + wires/saves the weapon DA via
@@ -111,6 +131,9 @@ private:
 
 	TArray<TSharedPtr<FAvailPartRow>> AvailPartRows;
 	TSharedPtr<SListView<TSharedPtr<FAvailPartRow>>> AvailPartListView;
+
+	/** The catalog row currently single-click-selected (drives the "교체" button + IsSwapEnabled). Reset on weapon change. */
+	TSharedPtr<FAvailPartRow> SelectedAvailPart;
 
 	TSharedPtr<STextBlock> StatusText;
 };

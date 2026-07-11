@@ -126,7 +126,8 @@ void FFPSRWeaponAssemblerViewportClient::SetWidgetMode(UE::Widget::EWidgetMode I
 
 void FFPSRWeaponAssemblerViewportClient::SwapSelectedPartMesh(UStaticMesh* NewMesh)
 {
-	if (!PartComps.IsValidIndex(SelectedPart) || !WeaponDA || !WeaponDA->WeaponParts1P.IsValidIndex(SelectedPart))
+	// Null NewMesh ignored — a failed catalog load must never blank the selected part (the caller reports the failure).
+	if (!NewMesh || !PartComps.IsValidIndex(SelectedPart) || !WeaponDA || !WeaponDA->WeaponParts1P.IsValidIndex(SelectedPart))
 	{
 		return;
 	}

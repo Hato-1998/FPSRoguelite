@@ -33,4 +33,10 @@ namespace FPSRWeaponAssemblerHelpers
 	 *  네임스페이스의 구 소켓은 굽기 전에 전부 제거해 재구울때마다 고아가 남지 않게 한다. 생성/갱신한 소켓 수를 반환
 	 *  (DA/BodyComp/메시 없으면 0). */
 	int32 BakeSockets(UFPSRWeaponDataAsset* DA, USkeletalMeshComponent* BodyComp, const TArray<UStaticMeshComponent*>& PartComps);
+
+	/** 조립품(바디+파츠) 전체의 월드 바운드 밑면을 프리뷰 바닥에 맞추기 위한 FAdvancedPreviewScene::SetFloorOffset 인자.
+	 *  무기가 원점에 절반 파묻히지 않고 바닥에 얹혀 보이게 한다(엔진 SStaticMeshEditorViewport/SMaterialEditorViewport와
+	 *  동일 관용구: -Origin.Z + Extent.Z → 바닥이 조립품 밑면에 놓임). 순수 프리뷰 프레이밍용이며 소켓 베이크(바디 상대)와
+	 *  무관하다. 유효 바운드가 없으면 0(바닥 원점 유지)을 반환한다. */
+	float ComputeFloorOffsetToRest(const USkeletalMeshComponent* BodyComp, const TArray<UStaticMeshComponent*>& PartComps);
 }

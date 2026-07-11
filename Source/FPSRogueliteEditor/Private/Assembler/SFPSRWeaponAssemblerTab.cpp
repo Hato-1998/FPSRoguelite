@@ -152,8 +152,19 @@ void SFPSRWeaponAssemblerTab::Construct(const FArguments& InArgs)
 						SAssignNew(AvailPartListView, SListView<TSharedPtr<FAvailPartRow>>)
 						.ListItemsSource(&AvailPartRows)
 						.OnGenerateRow(this, &SFPSRWeaponAssemblerTab::OnGenerateAvailRow)
+						.OnSelectionChanged(this, &SFPSRWeaponAssemblerTab::OnAvailSelectionChanged)
 						.OnMouseButtonDoubleClick(this, &SFPSRWeaponAssemblerTab::OnAvailPartActivated)
 						.SelectionMode(ESelectionMode::Single)
+					]
+
+					+ SVerticalBox::Slot().AutoHeight().Padding(2.0f)
+					[
+						SNew(SButton)
+						.HAlign(HAlign_Center)
+						.Text(LOCTEXT("SwapButton", "→ 선택 파츠 교체"))
+						.ToolTipText(LOCTEXT("SwapButtonTooltip", "위 '현재 파츠'에서 고른 슬롯을, 여기서 고른 메시로 교체합니다(더블클릭도 동일). '조립→저장'을 눌러야 DA에 저장됩니다."))
+						.IsEnabled(this, &SFPSRWeaponAssemblerTab::IsSwapEnabled)
+						.OnClicked(this, &SFPSRWeaponAssemblerTab::OnSwapClicked)
 					]
 				]
 			]
@@ -188,7 +199,15 @@ void SFPSRWeaponAssemblerTab::OnWeaponAssetChanged(const FAssetData& AssetData)
 	UFPSRWeaponDataAsset* DA = Cast<UFPSRWeaponDataAsset>(AssetData.GetAsset());
 	if (Viewport.IsValid() && Viewport->GetAssemblerClient().IsValid())
 	{
-		Viewport->GetAssemblerClient()->SetWeapon(DA);
+		TSharedPtr<FFPSRWeaponAssemblerViewportClient> Client = Viewport->GetAssemblerClient();
+		Client->SetWeapon(DA);
+
+		// Drop the preview floor to the freshly-built assembly's underside so the weapon rests on the floor instead of
+		// being half-buried at the origin (engine idiom — SStaticMeshEditorViewport uses SetFloorOffset the same way).
+		if (PreviewScene.IsValid())
+		{
+			PreviewScene->SetFloorOffset(FPSRWeaponAssemblerHelpers::ComputeFloorOffsetToRest(Client->GetBodyComp(), Client->GetPartComps()));
+		}
 	}
 
 	RefreshPartsList();
@@ -216,8 +235,8 @@ void SFPSRWeaponAssemblerTab::RefreshPartsList()
 			if (PartComps[i])
 			{
 				TSharedPtr<FPartRow> Row = MakeShared<FPartRow>();
-				Row->Label = FText::FromString(PartComps[i]->GetName());
 				Row->Index = i;
+				Row->Label = MakePartRowLabel(i);
 				PartRows.Add(Row);
 			}
 		}
@@ -253,6 +272,7 @@ void SFPSRWeaponAssemblerTab::OnPartSelectionChanged(TSharedPtr<FPartRow> Item, 
 void SFPSRWeaponAssemblerTab::RefreshAvailableParts()
 {
 	AvailPartRows.Reset();
+	SelectedAvailPart.Reset();
 
 	UFPSRWeaponDataAsset* DA = (Viewport.IsValid() && Viewport->GetAssemblerClient().IsValid())
 		? Viewport->GetAssemblerClient()->GetWeaponDA()
@@ -278,8 +298,13 @@ void SFPSRWeaponAssemblerTab::RefreshAvailableParts()
 
 			FARFilter Filter;
 			Filter.ClassPaths.Add(UStaticMesh::StaticClass()->GetClassPathName());
+			// The weapon's own part folder (e.g. .../Modular/Weapon_A) holds its structural variants; its sibling
+			// "Attachments" folder (.../Modular/Attachments, incl. a Scopes/ subfolder) holds sights, grips, muzzle
+			// devices, lasers, etc. Scan both — recursively so Attachments/Scopes is picked up too. The weapon folder
+			// itself has no subfolders, so recursing it adds nothing. A missing Attachments path simply returns nothing.
 			Filter.PackagePaths.Add(FName(*Folder));
-			Filter.bRecursivePaths = false;
+			Filter.PackagePaths.Add(FName(*(FPackageName::GetLongPackagePath(Folder) / TEXT("Attachments"))));
+			Filter.bRecursivePaths = true;
 
 			TArray<FAssetData> FoundAssets;
 			AssetRegistry.GetAssets(Filter, FoundAssets);
@@ -316,28 +341,104 @@ TSharedRef<ITableRow> SFPSRWeaponAssemblerTab::OnGenerateAvailRow(TSharedPtr<FAv
 
 void SFPSRWeaponAssemblerTab::OnAvailPartActivated(TSharedPtr<FAvailPartRow> Item)
 {
-	if (!Item.IsValid())
+	PerformSwap(Item);
+}
+
+void SFPSRWeaponAssemblerTab::OnAvailSelectionChanged(TSharedPtr<FAvailPartRow> Item, ESelectInfo::Type SelectInfo)
+{
+	SelectedAvailPart = Item;
+}
+
+void SFPSRWeaponAssemblerTab::PerformSwap(TSharedPtr<FAvailPartRow> AvailItem)
+{
+	if (!AvailItem.IsValid())
 	{
 		return;
 	}
 
 	TSharedPtr<FFPSRWeaponAssemblerViewportClient> Client = Viewport.IsValid() ? Viewport->GetAssemblerClient() : nullptr;
-	if (!Client.IsValid() || Client->GetSelectedPart() == INDEX_NONE)
+	if (!Client.IsValid())
+	{
+		return;
+	}
+
+	const int32 Sel = Client->GetSelectedPart();
+	if (Sel == INDEX_NONE)
 	{
 		if (StatusText.IsValid())
 		{
-			StatusText->SetText(LOCTEXT("SwapNoSelection", "먼저 좌측에서 교체할 파츠를 선택하세요."));
+			StatusText->SetText(LOCTEXT("SwapNoSelection", "먼저 위 '현재 파츠'에서 교체할 슬롯을 선택하세요."));
 		}
 		return;
 	}
 
-	Client->SwapSelectedPartMesh(Cast<UStaticMesh>(Item->MeshPath.TryLoad()));
-	RefreshPartsList();
+	UStaticMesh* NewMesh = Cast<UStaticMesh>(AvailItem->MeshPath.TryLoad());
+	if (!NewMesh)
+	{
+		if (StatusText.IsValid())
+		{
+			StatusText->SetText(FText::Format(LOCTEXT("SwapLoadFail", "메시를 불러오지 못했습니다: {0}"), AvailItem->Label));
+		}
+		return;
+	}
+
+	Client->SwapSelectedPartMesh(NewMesh);
+
+	// Update ONLY the affected current-part row label, reusing the same FPartRow shared pointer so the SListView
+	// selection (and thus the client's SelectedPart / gizmo target / isolate visibility) is preserved. Calling
+	// RefreshPartsList() here would rebuild the rows and drop the selection — the "part vanishes to origin" bug.
+	for (const TSharedPtr<FPartRow>& Row : PartRows)
+	{
+		if (Row.IsValid() && Row->Index == Sel)
+		{
+			Row->Label = MakePartRowLabel(Sel);
+			break;
+		}
+	}
+	if (PartListView.IsValid())
+	{
+		PartListView->RequestListRefresh();
+	}
 
 	if (StatusText.IsValid())
 	{
-		StatusText->SetText(LOCTEXT("SwapDone", "파츠 교체됨"));
+		StatusText->SetText(FText::Format(
+			LOCTEXT("SwapDone", "파츠를 {0}(으)로 교체했습니다. '조립→저장'을 눌러야 DA에 저장됩니다."),
+			AvailItem->Label));
 	}
+}
+
+FReply SFPSRWeaponAssemblerTab::OnSwapClicked()
+{
+	PerformSwap(SelectedAvailPart);
+	return FReply::Handled();
+}
+
+bool SFPSRWeaponAssemblerTab::IsSwapEnabled() const
+{
+	const bool bHasCurrent = Viewport.IsValid() && Viewport->GetAssemblerClient().IsValid()
+		&& Viewport->GetAssemblerClient()->GetSelectedPart() != INDEX_NONE;
+	return bHasCurrent && SelectedAvailPart.IsValid();
+}
+
+FText SFPSRWeaponAssemblerTab::MakePartRowLabel(int32 Index) const
+{
+	TSharedPtr<FFPSRWeaponAssemblerViewportClient> Client = Viewport.IsValid() ? Viewport->GetAssemblerClient() : nullptr;
+	if (!Client.IsValid())
+	{
+		return FText::GetEmpty();
+	}
+
+	const TArray<UStaticMeshComponent*>& PartComps = Client->GetPartComps();
+	if (!PartComps.IsValidIndex(Index) || !PartComps[Index])
+	{
+		return FText::GetEmpty();
+	}
+
+	const FString Slot = PartComps[Index]->GetName();
+	const UStaticMesh* Mesh = PartComps[Index]->GetStaticMesh();
+	const FString MeshName = Mesh ? Mesh->GetName() : TEXT("(없음)");
+	return FText::FromString(FString::Printf(TEXT("%s  ·  %s"), *Slot, *MeshName));
 }
 
 // ---------------------------------------------------------------------------------------------------------------
