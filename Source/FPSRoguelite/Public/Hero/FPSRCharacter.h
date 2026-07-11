@@ -98,10 +98,18 @@ public:
 	UFUNCTION(BlueprintPure, Category = "FPSR|Weapon")
 	float GetADSAlpha() const { return CurrentADSAlpha; }
 
-	/** True while the owner-local ADS visual is active (alpha past the visual threshold). Reload-aware (the blend
-	 *  lowers during a reload). Unified trigger for scope overlay / weapon-hide / crosshair-hide. (W-U2) */
+	/** True while the owner-local ADS visual is active (procedural-sight blend alpha past the visual threshold — needs
+	 *  an AimSocket). Reload-aware. Gates the scope overlay + weapon-hide (a scope IS a sight, so requiring the socket
+	 *  is correct here). For the crosshair use IsADSFOVActive instead. (W-U2) */
 	UFUNCTION(BlueprintPure, Category = "FPSR|Weapon")
 	bool IsADSVisualActive() const;
+
+	/** True while the weapon is visually committing to ADS (FOV zoom / sight): aiming an ADS weapon and not reloading.
+	 *  AimSocket-INDEPENDENT (unlike IsADSVisualActive) so a bHasADS weapon without a procedural sight still reads as
+	 *  aiming — it tracks the same commit the FOV zoom uses, so the crosshair-hide can't desync from the zoom.
+	 *  Reload-aware. Owner-local. (W-U2) */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Weapon")
+	bool IsADSFOVActive() const;
 
 	/** True while a full-screen SCOPE is visually active: ADS visual active AND the currently-active sight part carries
 	 *  a scope-overlay descriptor. Owner-local. (W-U2) */

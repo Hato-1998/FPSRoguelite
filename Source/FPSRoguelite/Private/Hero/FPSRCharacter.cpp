@@ -386,6 +386,18 @@ bool AFPSRCharacter::IsScopeVisualActive() const
 	return IsADSVisualActive() && CachedScopeDescriptor.bScopeOverlay;
 }
 
+bool AFPSRCharacter::IsADSFOVActive() const
+{
+	// The ADS FOV-zoom commit itself: aiming an ADS weapon and not reloading. AimSocket-independent (bCachedHasADS,
+	// not the procedural-sight blend), so a bHasADS weapon with no sight still reads as aiming — the crosshair-hide
+	// then tracks the same commit the FOV zoom uses (ResolveADSTargetFOV) and can't desync from it. Owner-local.
+	if (!bCachedHasADS || !WeaponFire || !WeaponFire->IsAiming())
+	{
+		return false;
+	}
+	return !(WeaponInventory && WeaponInventory->IsReloading());
+}
+
 float AFPSRCharacter::ResolveADSTargetFOV(float DefaultFOV, float BaseADSFOV, bool bBaseWantsADS) const
 {
 	// Non-scope weapons: preserve the existing simple ADS-FOV behavior EXACTLY (zoom whenever aiming, no reload gate).

@@ -74,9 +74,11 @@ void UFPSRRunHUDWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTim
 		return;
 	}
 
-	// Hide the crosshair while the ADS visual is active (reload-aware — it reappears during a reload so the screen
-	// isn't left with neither reticle nor crosshair). Iron sights / scope take over. Falls back to raw IsAiming.
-	const bool bADSVisual = OwningChar ? OwningChar->IsADSVisualActive() : FireComp->IsAiming();
+	// Hide the crosshair while the weapon is committing to ADS (reload-aware — it reappears during a reload so the
+	// screen isn't left with neither reticle nor crosshair). IsADSFOVActive tracks the FOV-zoom commit itself (not the
+	// procedural-sight blend), so an ADS weapon without an AimSocket still hides the crosshair — the crosshair-hide can
+	// never desync from the zoom. Iron sights / scope take over. Falls back to raw IsAiming off a character.
+	const bool bADSVisual = OwningChar ? OwningChar->IsADSFOVActive() : FireComp->IsAiming();
 	if (bADSVisual)
 	{
 		CrosshairImage->SetVisibility(ESlateVisibility::Collapsed);
