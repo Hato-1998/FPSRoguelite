@@ -7,6 +7,7 @@
 
 class UFPSRWeaponDataAsset;
 class USkeletalMesh;
+class USkeletalMeshComponent;
 class UStaticMesh;
 class UStaticMeshComponent;
 
@@ -25,10 +26,11 @@ namespace FPSRWeaponAssemblerHelpers
 	 *  런타임과 동일한 위치가 나온다. */
 	FTransform RootBoneComponentSpace(const USkeletalMesh* Mesh);
 
-	/** PartComps[i]의 (Body 대비) 상대 트랜스폼을 바디 메시 소켓으로 굽고, DA의 WeaponParts1P[i].Socket/Offset을
-	 *  배선한 뒤 Body/DA 둘 다 저장한다. 조립기 프리뷰 씬에서는 Body가 identity로 배치되므로(부모 없음) 각
-	 *  PartComp의 컴포넌트-공간(=world) 트랜스폼이 곧 Body-상대 트랜스폼이다. 소켓명은 PartComp->GetName()(변종번호
-	 *  제거된 대표명)에서 유도한다. 이 툴이 소유하는 SOCKET_Mount_* 네임스페이스의 구 소켓은 굽기 전에 전부 제거해
-	 *  재구울때마다 고아가 남지 않게 한다. 생성/갱신한 소켓 수를 반환(DA/Body 없으면 0). */
-	int32 BakeSockets(UFPSRWeaponDataAsset* DA, USkeletalMesh* Body, const TArray<UStaticMeshComponent*>& PartComps);
+	/** PartComps[i]의 (BodyComp 대비) 상대 트랜스폼을 바디 메시 소켓으로 굽고, DA의 WeaponParts1P[i].Socket/Offset을
+	 *  배선한 뒤 Body/DA 둘 다 저장한다. 각 PartComp의 (BodyComp 기준) 상대 트랜스폼을 루트본(90° roll) 기준으로
+	 *  변환해 소켓에 넣으므로, 바디가 identity가 아니어도(예: "전체 이동"으로 조립품을 통째로 옮겼어도) 결과가
+	 *  정합한다. 소켓명은 PartComp->GetName()(변종번호 제거된 대표명)에서 유도한다. 이 툴이 소유하는 SOCKET_Mount_*
+	 *  네임스페이스의 구 소켓은 굽기 전에 전부 제거해 재구울때마다 고아가 남지 않게 한다. 생성/갱신한 소켓 수를 반환
+	 *  (DA/BodyComp/메시 없으면 0). */
+	int32 BakeSockets(UFPSRWeaponDataAsset* DA, USkeletalMeshComponent* BodyComp, const TArray<UStaticMeshComponent*>& PartComps);
 }

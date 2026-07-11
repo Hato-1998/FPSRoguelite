@@ -368,7 +368,7 @@ FReply SFPSRWeaponAssemblerTab::OnBakeClicked()
 		return FReply::Handled();
 	}
 
-	const int32 N = FPSRWeaponAssemblerHelpers::BakeSockets(DA, BodyMesh, Client->GetPartComps());
+	const int32 N = FPSRWeaponAssemblerHelpers::BakeSockets(DA, BodyComp, Client->GetPartComps());
 	if (StatusText.IsValid())
 	{
 		StatusText->SetText(FText::Format(LOCTEXT("BakeDone", "소켓 {0}개 생성/갱신 + DA 배선·저장 완료."), FText::AsNumber(N)));

@@ -150,8 +150,15 @@ FVector FFPSRWeaponAssemblerViewportClient::GetWidgetLocation() const
 {
 	if (bMoveAll)
 	{
+		// Whole-assembly pivot = average of the body + every part (all move together, so the gizmo sits at the group
+		// centre).
 		FVector Sum = FVector::ZeroVector;
 		int32 ValidCount = 0;
+		if (BodyComp)
+		{
+			Sum += BodyComp->GetComponentLocation();
+			++ValidCount;
+		}
 		for (const UStaticMeshComponent* PartComp : PartComps)
 		{
 			if (PartComp)
@@ -179,7 +186,11 @@ bool FFPSRWeaponAssemblerViewportClient::InputWidgetDelta(FViewport* InViewport,
 
 	if (bMoveAll)
 	{
-		// Translate every part first...
+		// Move the WHOLE assembly — body + every part — together. Translate first...
+		if (BodyComp)
+		{
+			BodyComp->AddWorldOffset(Drag);
+		}
 		for (UStaticMeshComponent* PartComp : PartComps)
 		{
 			if (PartComp)
@@ -188,16 +199,24 @@ bool FFPSRWeaponAssemblerViewportClient::InputWidgetDelta(FViewport* InViewport,
 			}
 		}
 
-		// ...then rotate every part around the (now-translated) group pivot, so a combined drag+rotate on the widget
-		// doesn't fight itself: GetWidgetLocation() picks up the post-translate average.
+		// ...then rotate everything around the (now-translated) group pivot, so a combined drag+rotate on the widget
+		// doesn't fight itself: GetWidgetLocation() picks up the post-translate average (body included).
 		const FVector Pivot = GetWidgetLocation();
+		auto RotateAboutPivot = [&Pivot, &Rot](USceneComponent* Comp)
+		{
+			const FVector L = Comp->GetComponentLocation();
+			Comp->SetWorldLocation(Pivot + Rot.RotateVector(L - Pivot));
+			Comp->AddWorldRotation(Rot);
+		};
+		if (BodyComp)
+		{
+			RotateAboutPivot(BodyComp);
+		}
 		for (UStaticMeshComponent* PartComp : PartComps)
 		{
 			if (PartComp)
 			{
-				const FVector L = PartComp->GetComponentLocation();
-				PartComp->SetWorldLocation(Pivot + Rot.RotateVector(L - Pivot));
-				PartComp->AddWorldRotation(Rot);
+				RotateAboutPivot(PartComp);
 			}
 		}
 

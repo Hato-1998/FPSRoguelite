@@ -7,6 +7,7 @@
 #include "FileHelpers.h"   // UEditorLoadingAndSavingUtils::SavePackages (UnrealEd — avoids the EditorScriptingUtilities plugin)
 #include "Engine/SkeletalMesh.h"
 #include "Engine/SkeletalMeshSocket.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
 
 namespace FPSRWeaponAssemblerHelpers
@@ -41,12 +42,17 @@ namespace FPSRWeaponAssemblerHelpers
 		return FTransform::Identity;
 	}
 
-	int32 BakeSockets(UFPSRWeaponDataAsset* DA, USkeletalMesh* Body, const TArray<UStaticMeshComponent*>& PartComps)
+	int32 BakeSockets(UFPSRWeaponDataAsset* DA, USkeletalMeshComponent* BodyComp, const TArray<UStaticMeshComponent*>& PartComps)
 	{
+		USkeletalMesh* Body = BodyComp ? BodyComp->GetSkeletalMeshAsset() : nullptr;
 		if (!DA || !Body)
 		{
 			return 0;
 		}
+
+		// The body's world transform in the preview scene — parts are captured RELATIVE TO THIS (not the world
+		// origin), so the bake stays correct even when the whole assembly was dragged via "전체 이동".
+		const FTransform BodyWorld = BodyComp->GetComponentTransform();
 
 		const FReferenceSkeleton& RefSkel = Body->GetRefSkeleton();
 		const FName RootBone = RefSkel.GetNum() > 0 ? RefSkel.GetBoneName(0) : NAME_None;
@@ -78,11 +84,10 @@ namespace FPSRWeaponAssemblerHelpers
 				continue;
 			}
 
-			// The preview scene places Body at identity with no parent, and each PartComp is likewise added to the
-			// scene unparented — so a PartComp's own relative transform (no attach parent) already equals its
-			// component-space transform relative to Body. Convert that into a BONE-relative socket transform.
-			const FTransform Rel = PC->GetRelativeTransform();
-			const FTransform SocketRel = Rel.GetRelativeTransform(RootBoneCS);
+			// Part transform relative to the BODY COMPONENT (robust to the body being moved — was previously the
+			// part's world transform, which only matched when the body sat at the world origin). Then bone-relative.
+			const FTransform PartRelBody = PC->GetComponentTransform().GetRelativeTransform(BodyWorld);
+			const FTransform SocketRel = PartRelBody.GetRelativeTransform(RootBoneCS);
 			// Mount-socket name follows the (renameable) component name: one representative slot, no variant suffix.
 			const FName SocketName(*FString::Printf(TEXT("SOCKET_Mount_%s"), *PC->GetName()));
 
