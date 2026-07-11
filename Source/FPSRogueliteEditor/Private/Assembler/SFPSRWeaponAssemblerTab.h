@@ -104,6 +104,18 @@ private:
 	/** '<슬롯명>  ·  <현재 메시명>' 형태의 현재-파츠 행 라벨. 교체 시 이 라벨만 제자리 갱신해 선택을 잃지 않는다. */
 	FText MakePartRowLabel(int32 Index) const;
 
+	/** "＋ 파츠 추가" 버튼: 아래 '사용 가능 파츠'에서 고른 부착물을 무기에 새 파츠로 추가(client AddPart) → 목록 갱신·
+	 *  새 파츠 선택·바닥 재적합. DA 저장은 '조립→저장'이 담당. */
+	FReply OnAddPartClicked();
+	/** 추가 버튼 활성 조건: 무기 DA가 있고 사용 가능 파츠가 하나 골라져 있을 때만. */
+	bool IsAddPartEnabled() const;
+
+	/** "− 선택 파츠 제거" 버튼: 위 '현재 파츠'에서 고른 파츠를 무기에서 제거(client RemoveSelectedPart) → 목록·바닥 갱신.
+	 *  재베이크 시 소켓도 정리된다. */
+	FReply OnRemovePartClicked();
+	/** 제거 버튼 활성 조건: 현재 파츠가 선택돼 있을 때만. */
+	bool IsRemovePartEnabled() const;
+
 	// --- Toolbar --------------------------------------------------------------------------------------------------
 
 	/** "조립→저장": bakes the current part placement into the body mesh's sockets + wires/saves the weapon DA via

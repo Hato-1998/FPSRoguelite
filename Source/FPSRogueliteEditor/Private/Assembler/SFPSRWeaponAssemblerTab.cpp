@@ -135,6 +135,16 @@ void SFPSRWeaponAssemblerTab::Construct(const FArguments& InArgs)
 						.OnSelectionChanged(this, &SFPSRWeaponAssemblerTab::OnPartSelectionChanged)
 						.SelectionMode(ESelectionMode::Single)
 					]
+
+					+ SVerticalBox::Slot().AutoHeight().Padding(2.0f)
+					[
+						SNew(SButton)
+						.HAlign(HAlign_Center)
+						.Text(LOCTEXT("RemovePartButton", "− 선택 파츠 제거"))
+						.ToolTipText(LOCTEXT("RemovePartButtonTooltip", "위에서 선택한 파츠를 무기에서 제거합니다. '조립→저장' 시 소켓도 함께 정리됩니다."))
+						.IsEnabled(this, &SFPSRWeaponAssemblerTab::IsRemovePartEnabled)
+						.OnClicked(this, &SFPSRWeaponAssemblerTab::OnRemovePartClicked)
+					]
 				]
 
 				+ SSplitter::Slot()
@@ -165,6 +175,16 @@ void SFPSRWeaponAssemblerTab::Construct(const FArguments& InArgs)
 						.ToolTipText(LOCTEXT("SwapButtonTooltip", "위 '현재 파츠'에서 고른 슬롯을, 여기서 고른 메시로 교체합니다(더블클릭도 동일). '조립→저장'을 눌러야 DA에 저장됩니다."))
 						.IsEnabled(this, &SFPSRWeaponAssemblerTab::IsSwapEnabled)
 						.OnClicked(this, &SFPSRWeaponAssemblerTab::OnSwapClicked)
+					]
+
+					+ SVerticalBox::Slot().AutoHeight().Padding(2.0f, 0.0f, 2.0f, 2.0f)
+					[
+						SNew(SButton)
+						.HAlign(HAlign_Center)
+						.Text(LOCTEXT("AddPartButton", "＋ 파츠 추가"))
+						.ToolTipText(LOCTEXT("AddPartButtonTooltip", "아래에서 고른 부착물을 무기에 '새 파츠'로 추가합니다(교체가 아니라 추가). 기즈모로 위치를 잡고 '조립→저장'을 누르세요."))
+						.IsEnabled(this, &SFPSRWeaponAssemblerTab::IsAddPartEnabled)
+						.OnClicked(this, &SFPSRWeaponAssemblerTab::OnAddPartClicked)
 					]
 				]
 			]
@@ -439,6 +459,85 @@ FText SFPSRWeaponAssemblerTab::MakePartRowLabel(int32 Index) const
 	const UStaticMesh* Mesh = PartComps[Index]->GetStaticMesh();
 	const FString MeshName = Mesh ? Mesh->GetName() : TEXT("(없음)");
 	return FText::FromString(FString::Printf(TEXT("%s  ·  %s"), *Slot, *MeshName));
+}
+
+FReply SFPSRWeaponAssemblerTab::OnAddPartClicked()
+{
+	TSharedPtr<FFPSRWeaponAssemblerViewportClient> Client = Viewport.IsValid() ? Viewport->GetAssemblerClient() : nullptr;
+	if (!Client.IsValid() || !SelectedAvailPart.IsValid())
+	{
+		return FReply::Handled();
+	}
+	if (!Client->GetWeaponDA())
+	{
+		if (StatusText.IsValid())
+		{
+			StatusText->SetText(LOCTEXT("AddNoWeapon", "먼저 무기 DA를 선택하세요."));
+		}
+		return FReply::Handled();
+	}
+
+	UStaticMesh* NewMesh = Cast<UStaticMesh>(SelectedAvailPart->MeshPath.TryLoad());
+	if (!NewMesh)
+	{
+		if (StatusText.IsValid())
+		{
+			StatusText->SetText(FText::Format(LOCTEXT("AddLoadFail", "메시를 불러오지 못했습니다: {0}"), SelectedAvailPart->Label));
+		}
+		return FReply::Handled();
+	}
+
+	Client->AddPart(NewMesh);
+	RefreshPartsList();
+	// Select the newly-added (last) part so the gizmo targets it immediately.
+	if (PartListView.IsValid() && PartRows.Num() > 0)
+	{
+		PartListView->SetSelection(PartRows.Last());
+	}
+	// The assembly bounds changed — refit the preview floor.
+	if (PreviewScene.IsValid())
+	{
+		PreviewScene->SetFloorOffset(FPSRWeaponAssemblerHelpers::ComputeFloorOffsetToRest(Client->GetBodyComp(), Client->GetPartComps()));
+	}
+	if (StatusText.IsValid())
+	{
+		StatusText->SetText(FText::Format(LOCTEXT("AddDone", "파츠 추가: {0}. 기즈모로 위치를 잡고 '조립→저장'을 누르세요."), SelectedAvailPart->Label));
+	}
+	return FReply::Handled();
+}
+
+bool SFPSRWeaponAssemblerTab::IsAddPartEnabled() const
+{
+	const bool bHasWeapon = Viewport.IsValid() && Viewport->GetAssemblerClient().IsValid()
+		&& Viewport->GetAssemblerClient()->GetWeaponDA() != nullptr;
+	return bHasWeapon && SelectedAvailPart.IsValid();
+}
+
+FReply SFPSRWeaponAssemblerTab::OnRemovePartClicked()
+{
+	TSharedPtr<FFPSRWeaponAssemblerViewportClient> Client = Viewport.IsValid() ? Viewport->GetAssemblerClient() : nullptr;
+	if (!Client.IsValid() || Client->GetSelectedPart() == INDEX_NONE)
+	{
+		return FReply::Handled();
+	}
+
+	Client->RemoveSelectedPart();
+	RefreshPartsList();
+	if (PreviewScene.IsValid())
+	{
+		PreviewScene->SetFloorOffset(FPSRWeaponAssemblerHelpers::ComputeFloorOffsetToRest(Client->GetBodyComp(), Client->GetPartComps()));
+	}
+	if (StatusText.IsValid())
+	{
+		StatusText->SetText(LOCTEXT("RemoveDone", "선택 파츠를 제거했습니다. '조립→저장'을 누르면 소켓도 정리됩니다."));
+	}
+	return FReply::Handled();
+}
+
+bool SFPSRWeaponAssemblerTab::IsRemovePartEnabled() const
+{
+	return Viewport.IsValid() && Viewport->GetAssemblerClient().IsValid()
+		&& Viewport->GetAssemblerClient()->GetSelectedPart() != INDEX_NONE;
 }
 
 // ---------------------------------------------------------------------------------------------------------------

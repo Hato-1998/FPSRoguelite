@@ -141,6 +141,54 @@ void FFPSRWeaponAssemblerViewportClient::SwapSelectedPartMesh(UStaticMesh* NewMe
 	Invalidate();
 }
 
+void FFPSRWeaponAssemblerViewportClient::AddPart(UStaticMesh* Mesh)
+{
+	if (!WeaponDA || !Mesh)
+	{
+		return;
+	}
+
+	// Append a new modular part to the DA (in-memory; DA save is BakeSockets'/"조립→저장"'s job): Socket None, identity
+	// Offset. The designer positions it with the gizmo, then a bake creates its SOCKET_Mount_<name> socket.
+	FFPSRWeaponPartAttachment NewAttach;
+	NewAttach.Part = Mesh;
+	const int32 NewIndex = WeaponDA->WeaponParts1P.Add(NewAttach);
+
+	// Preview component named after the mesh (same convention as SetWeapon), spawned at the body's transform so it
+	// starts on the weapon and framed; the designer then drags it into place.
+	const FName CompName = MakeUniqueObjectName(GetTransientPackage(), UStaticMeshComponent::StaticClass(), FName(*FPSRWeaponAssemblerHelpers::MakePartDisplayName(NewAttach.Part, NewIndex)));
+	UStaticMeshComponent* PartComp = NewObject<UStaticMeshComponent>(GetTransientPackage(), CompName, RF_Transient);
+	PartComp->SetStaticMesh(Mesh);
+	PartComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	const FTransform Init = BodyComp ? BodyComp->GetComponentTransform() : FTransform::Identity;
+	PreviewScene.AddComponent(PartComp, Init);
+	PartComps.Add(PartComp);
+
+	SelectedPart = PartComps.Num() - 1;
+	UpdatePartVisibility();
+	Invalidate();
+}
+
+void FFPSRWeaponAssemblerViewportClient::RemoveSelectedPart()
+{
+	if (!PartComps.IsValidIndex(SelectedPart) || !WeaponDA || !WeaponDA->WeaponParts1P.IsValidIndex(SelectedPart))
+	{
+		return;
+	}
+
+	if (UStaticMeshComponent* PartComp = PartComps[SelectedPart])
+	{
+		PreviewScene.RemoveComponent(PartComp);
+		RetireTransientComponent(PartComp);
+	}
+	PartComps.RemoveAt(SelectedPart);
+	WeaponDA->WeaponParts1P.RemoveAt(SelectedPart);
+
+	SelectedPart = INDEX_NONE;
+	UpdatePartVisibility();
+	Invalidate();
+}
+
 void FFPSRWeaponAssemblerViewportClient::AddReferencedObjects(FReferenceCollector& Collector)
 {
 	FEditorViewportClient::AddReferencedObjects(Collector);

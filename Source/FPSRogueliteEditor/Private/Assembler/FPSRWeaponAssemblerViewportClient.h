@@ -61,6 +61,15 @@ public:
 	 *  없으면 아무 것도 하지 않는다. */
 	void SwapSelectedPartMesh(UStaticMesh* NewMesh);
 
+	/** 새 파츠를 무기에 추가: DA의 WeaponParts1P에 (Mesh, Socket=None, Offset=identity) 항목을 append하고 프리뷰
+	 *  컴포넌트를 바디 위치에 생성·선택한다(인메모리만; DA 저장은 "조립→저장"이 담당). 디자이너가 기즈모로 위치를 잡은
+	 *  뒤 베이크하면 소켓이 구워진다. DA/메시가 없으면 아무 것도 하지 않는다. */
+	void AddPart(UStaticMesh* Mesh);
+
+	/** 선택된 파츠를 제거: 프리뷰 컴포넌트와 DA의 WeaponParts1P[SelectedPart]를 함께 제거하고 선택을 해제한다(인덱스
+	 *  정합 유지). 소켓 정리는 재베이크가 담당(BakeSockets가 SOCKET_Mount_*를 전부 지우고 다시 굽는다). */
+	void RemoveSelectedPart();
+
 	const TArray<UStaticMeshComponent*>& GetPartComps() const { return PartComps; }
 	USkeletalMeshComponent* GetBodyComp() const { return BodyComp; }
 	UFPSRWeaponDataAsset* GetWeaponDA() const { return WeaponDA; }
