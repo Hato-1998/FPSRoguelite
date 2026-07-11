@@ -6,6 +6,15 @@
 
 **최종 갱신: 2026-07-11**
 
+## 🔔 핸드오프 (2026-07-11 b · **A트랙: 팔그립 수리 + 무기 파츠 조립기 툴 신설 + 머즐플래시 방향 + 조립규약 정정**) — 🎯 **다음 = 사용자 에디터: 조립기로 라이플 조립·베이크 → 머즐 오프셋 튜닝 → PIE로 W-U1 진화 시각검증. 재개 = 이 블록.**
+> **활성 브랜치**: `phase/pwas-b-procedural-weapon-motion`(미푸시). **이번 세션 커밋 8개**: `f3cd82b5` W-U1코드 · `e32bc6e3` W-U1문서 / `006fe461`+`5ab3feed` 조립기(메뉴판)+루트본보정 / `f456ccb7` 조립기 임베디드창 / `7e40189b` 머즐플래시오프셋 / `4540b39e` 조립기 3기능 / `59ca731e` 전체이동 바디버그. **push/머지 = 승인 대기.** 검증 = 각 커밋 빌드 -NoXGE `Result: Succeeded`(0err/0warn).
+> **① 팔 그립 수리(PIE 확인됨)**: DA `ArmsAnimInstanceClass`를 스켈 불일치 `ABP_Arms_AG14W`(SKEL_LPAMG_Character) → **`ABP_FPChar`(PWAS, S_Mannequin = 팔 메시 `SK_FP_Manny_Simple`와 일치)** 교체 + 구 AG14W Equip/Fire/Reload 몽타주 클리어. **DA 저장(콘텐츠, 미커밋).** 팔·총기몸체 정상.
+> **② 조립규약 정정**: ~~"Synty 파츠=공유원점, identity 부착=조립"~~ **오진**. 에디터 스샷 대조로 뭉침/어긋남 실증 → per-part 위치 필요. **핵심 원인 = 바디 루트본 roll 90°**(소켓은 본기준인데 컴포넌트기준 값 넣으면 90° 어긋남). 메모리 `synty-modular-parts-shared-origin` 정정. Synty는 조립 데이터(BP/DataTable/소켓) 미제공.
+> **③ 무기 파츠 조립기 툴 신설(FPSRogueliteEditor)** — `Tools>FPSR>무기 파츠 조립기…` 전용 임베디드 뷰포트 nomad 탭(레벨 스폰 X): DA 피커 + 프리뷰 뷰포트(`FAdvancedPreviewScene`) + 파츠 리스트(선택→기즈모 이동/회전) + **전체이동·선택만보기(isolate)·파츠교체**(현재/사용가능 2리스트, 더블클릭 스왑, 파츠폴더 자동스캔) + `조립→저장`. 저장 = 바디에 **슬롯 소켓 생성**(`SOCKET_Mount_<대표명>`, 루트본90° 보정, **바디컴포넌트 기준**이라 전체이동해도 정합, 구 SOCKET_Mount_* 정리) + DA `WeaponParts1P[i].Socket` 배선·저장. **런타임 무변경**(W-U1 `RebuildPartsFromSelection`이 Socket 부착 그대로 소비). 핵심파일=`FFPSRWeaponAssemblerViewportClient`·`SFPSRWeaponAssemblerViewport`·`SFPSRWeaponAssemblerTab`·helpers `BakeSockets`. 소켓명=컴포넌트명(변종번호 제거)이라 리네임으로 슬롯 제어·변종 소켓 공유.
+> **④ 머즐플래시 방향** — 무기 DA에 **`MuzzleFlashRotationOffset`(FRotator)** 신설, 머즐플래시 스폰 2곳(오너 로컬 + 원격 멀티캐스트) 적용(`ADSAimRotationOffset` 동형, 무기 forward=+Y). 배럴 조립방향 종속이라 **조립 후 PIE에서 튜닝(대개 Yaw 90)**.
+> **다음(사용자·PIE)**: 조립기 창 열기 → `DA_Weapon_Rifle` → 파츠 배치(전체이동/isolate/교체 활용) → `조립→저장` → PIE 조립 확인. 머즐 오프셋 튜닝. 연사 스탯카드로 파츠 진화(W-U1) 시각검증. 파츠 배치 재조정 시 조립기 다시 열기.
+> **⚠️ 재로드**: 신규 UCLASS/UPROPERTY(조립기 클래스·머즐 필드)라 **에디터 재시작** 필요(함수 본문 수정은 Live Coding 가능하나 신규 타입은 불가). 콘텐츠 미커밋(DA 그립/조립 소켓·배선 = 사용자 저장물). MCP(VibeUE) 연결 시 Opus가 직접 조립·튜닝·검증 가능.
+
 ## 🔔 핸드오프 (2026-07-11 · **W-U1 무기 모듈러 슬롯+선택기 코드 완료 — 빌드·스모크 통과, 적대검증 4결함 반영**) — 🎯 **다음 = (A트랙) 팔 그립 수리+PIE 시각검증 / (후속) W-U2 스코프·W-U3 3P·W-U1b async. 재개 = 이 블록.**
 > **활성 브랜치**: `phase/pwas-b-procedural-weapon-motion` 이어서. 이번 유닛 = **코드만**(콘텐츠/PIE 없음, 팔그립=별도 A트랙 미완이라 시각검증만 대기).
 > **검증(Opus 직접)**: 빌드 -NoXGE **`Result: Succeeded`**(0 err/0 warn, 양 모듈 링크) · 스모크(headless `validate-data.ps1`=전 모듈 CDO 로드+앵커 21자산) **exit0 `Success 0 error 32 warning`**(32경고=기존 고아, 신규 아님; 라이플 DA는 도달·검증됨 → PartRules 빈값이라 C7 no-op = **회귀0**).
