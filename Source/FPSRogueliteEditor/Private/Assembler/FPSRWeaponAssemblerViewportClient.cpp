@@ -11,6 +11,7 @@
 #include "Components/StaticMeshComponent.h"
 #include "Engine/SkeletalMesh.h"
 #include "Engine/SkeletalMeshSocket.h"
+#include "Engine/StaticMesh.h"
 #include "Engine/World.h"
 
 namespace
@@ -106,18 +107,36 @@ void FFPSRWeaponAssemblerViewportClient::SetWeapon(UFPSRWeaponDataAsset* DA)
 		PartComps.Add(PartComp);
 	}
 
+	UpdatePartVisibility();
 	Invalidate();
 }
 
 void FFPSRWeaponAssemblerViewportClient::SetSelectedPart(int32 Index)
 {
 	SelectedPart = PartComps.IsValidIndex(Index) ? Index : INDEX_NONE;
+	UpdatePartVisibility();
 	Invalidate();
 }
 
 void FFPSRWeaponAssemblerViewportClient::SetWidgetMode(UE::Widget::EWidgetMode InMode)
 {
 	WidgetMode = InMode;
+	Invalidate();
+}
+
+void FFPSRWeaponAssemblerViewportClient::SwapSelectedPartMesh(UStaticMesh* NewMesh)
+{
+	if (!PartComps.IsValidIndex(SelectedPart) || !WeaponDA || !WeaponDA->WeaponParts1P.IsValidIndex(SelectedPart))
+	{
+		return;
+	}
+
+	// Component name (= the mount-socket BakeSockets derives it from) stays untouched — this is a variant swap on
+	// the same slot, not a slot reassignment. DA save is BakeSockets'/"조립→저장"'s job; this only updates the
+	// in-memory preview + the DA's part reference so a subsequent bake/save picks it up.
+	PartComps[SelectedPart]->SetStaticMesh(NewMesh);
+	WeaponDA->WeaponParts1P[SelectedPart].Part = NewMesh;
+
 	Invalidate();
 }
 
@@ -129,6 +148,21 @@ void FFPSRWeaponAssemblerViewportClient::AddReferencedObjects(FReferenceCollecto
 
 FVector FFPSRWeaponAssemblerViewportClient::GetWidgetLocation() const
 {
+	if (bMoveAll)
+	{
+		FVector Sum = FVector::ZeroVector;
+		int32 ValidCount = 0;
+		for (const UStaticMeshComponent* PartComp : PartComps)
+		{
+			if (PartComp)
+			{
+				Sum += PartComp->GetComponentLocation();
+				++ValidCount;
+			}
+		}
+		return ValidCount > 0 ? (Sum / ValidCount) : FVector::ZeroVector;
+	}
+
 	if (PartComps.IsValidIndex(SelectedPart) && PartComps[SelectedPart])
 	{
 		return PartComps[SelectedPart]->GetComponentLocation();
@@ -138,7 +172,40 @@ FVector FFPSRWeaponAssemblerViewportClient::GetWidgetLocation() const
 
 bool FFPSRWeaponAssemblerViewportClient::InputWidgetDelta(FViewport* InViewport, EAxisList::Type CurrentAxis, FVector& Drag, FRotator& Rot, FVector& Scale)
 {
-	if (CurrentAxis != EAxisList::None && PartComps.IsValidIndex(SelectedPart))
+	if (CurrentAxis == EAxisList::None)
+	{
+		return FEditorViewportClient::InputWidgetDelta(InViewport, CurrentAxis, Drag, Rot, Scale);
+	}
+
+	if (bMoveAll)
+	{
+		// Translate every part first...
+		for (UStaticMeshComponent* PartComp : PartComps)
+		{
+			if (PartComp)
+			{
+				PartComp->AddWorldOffset(Drag);
+			}
+		}
+
+		// ...then rotate every part around the (now-translated) group pivot, so a combined drag+rotate on the widget
+		// doesn't fight itself: GetWidgetLocation() picks up the post-translate average.
+		const FVector Pivot = GetWidgetLocation();
+		for (UStaticMeshComponent* PartComp : PartComps)
+		{
+			if (PartComp)
+			{
+				const FVector L = PartComp->GetComponentLocation();
+				PartComp->SetWorldLocation(Pivot + Rot.RotateVector(L - Pivot));
+				PartComp->AddWorldRotation(Rot);
+			}
+		}
+
+		Invalidate();
+		return true;
+	}
+
+	if (PartComps.IsValidIndex(SelectedPart))
 	{
 		if (UStaticMeshComponent* PartComp = PartComps[SelectedPart])
 		{
@@ -172,4 +239,24 @@ void FFPSRWeaponAssemblerViewportClient::Tick(float DeltaSeconds)
 	{
 		World->Tick(LEVELTICK_All, DeltaSeconds);
 	}
+}
+
+void FFPSRWeaponAssemblerViewportClient::UpdatePartVisibility()
+{
+	for (int32 i = 0; i < PartComps.Num(); ++i)
+	{
+		if (PartComps[i])
+		{
+			PartComps[i]->SetVisibility(!bIsolate || i == SelectedPart);
+		}
+	}
+}
+
+UStaticMesh* FFPSRWeaponAssemblerViewportClient::GetSelectedPartMesh() const
+{
+	if (PartComps.IsValidIndex(SelectedPart) && PartComps[SelectedPart])
+	{
+		return PartComps[SelectedPart]->GetStaticMesh();
+	}
+	return nullptr;
 }

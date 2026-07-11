@@ -5,6 +5,10 @@
 #include "CoreMinimal.h"
 #include "Widgets/SCompoundWidget.h"
 #include "Widgets/Views/SListView.h"
+#include "Widgets/Input/SCheckBox.h"
+#include "AssetRegistry/AssetRegistryModule.h"
+#include "Engine/StaticMesh.h"
+#include "UObject/SoftObjectPath.h"
 
 class FAdvancedPreviewScene;
 class SFPSRWeaponAssemblerViewport;
@@ -41,13 +45,22 @@ private:
 		int32 Index = INDEX_NONE;
 	};
 
+	/** One row of the "사용 가능 파츠(교체)" catalog list below the current-parts list: a StaticMesh asset found in the
+	 *  current weapon's part folder (see RefreshAvailableParts). Double-clicking a row swaps the currently-selected
+	 *  current-part (left-top list) to this mesh. */
+	struct FAvailPartRow
+	{
+		FText Label;
+		FSoftObjectPath MeshPath;
+	};
+
 	// --- Weapon DA picker (SObjectPropertyEntryBox) --------------------------------------------------------------
 
 	/** ObjectPath attribute: the currently-loaded weapon DA's full path, or empty if none selected. */
 	FString GetWeaponObjectPath() const;
 
 	/** OnObjectChanged: rebuilds the viewport's body+parts from the newly-picked DA (or clears the preview on
-	 *  "None") and refreshes the parts list to match. */
+	 *  "None") and refreshes both the current-parts list and the available-parts catalog to match. */
 	void OnWeaponAssetChanged(const FAssetData& AssetData);
 
 	// --- Parts list (SListView<FPartRow>) -------------------------------------------------------------------------
@@ -58,6 +71,19 @@ private:
 	TSharedRef<class ITableRow> OnGeneratePartRow(TSharedPtr<FPartRow> Item, const TSharedRef<class STableViewBase>& OwnerTable);
 	void OnPartSelectionChanged(TSharedPtr<FPartRow> Item, ESelectInfo::Type SelectInfo);
 
+	// --- Available parts catalog (SListView<FAvailPartRow>) --------------------------------------------------------
+
+	/** Rebuilds AvailPartRows: takes the folder of the current weapon DA's first non-null WeaponParts1P[].Part and
+	 *  asset-registry-scans that folder (non-recursive) for UStaticMesh assets. No weapon / no non-null part =>
+	 *  empty list. Called from OnWeaponAssetChanged so the catalog always matches the loaded weapon. */
+	void RefreshAvailableParts();
+	TSharedRef<class ITableRow> OnGenerateAvailRow(TSharedPtr<FAvailPartRow> Item, const TSharedRef<class STableViewBase>& OwnerTable);
+
+	/** Double-click handler for a catalog row: swaps the currently-selected current-part (left-top list) to this
+	 *  row's mesh via the viewport client's SwapSelectedPartMesh, then reports the result in StatusText. If no
+	 *  current-part is selected, reports a "먼저 선택하세요" status instead and performs no swap. */
+	void OnAvailPartActivated(TSharedPtr<FAvailPartRow> Item);
+
 	// --- Toolbar --------------------------------------------------------------------------------------------------
 
 	/** "조립→저장": bakes the current part placement into the body mesh's sockets + wires/saves the weapon DA via
@@ -65,6 +91,13 @@ private:
 	FReply OnBakeClicked();
 	FReply OnTranslateModeClicked();
 	FReply OnRotateModeClicked();
+
+	/** "전체 이동"/"선택만 보기" 툴바 체크박스 — 뷰포트 클라이언트의 SetMoveAll/SetIsolate로 위임하고, 체크 상태는
+	 *  클라이언트의 IsMoveAll/IsIsolate를 그대로 되비춘다(체크박스 자체는 상태를 갖지 않음). */
+	void OnMoveAllChanged(ECheckBoxState NewState);
+	void OnIsolateChanged(ECheckBoxState NewState);
+	ECheckBoxState IsMoveAllChecked() const;
+	ECheckBoxState IsIsolateChecked() const;
 
 	// --- State ------------------------------------------------------------------------------------------------
 
@@ -75,6 +108,9 @@ private:
 
 	TArray<TSharedPtr<FPartRow>> PartRows;
 	TSharedPtr<SListView<TSharedPtr<FPartRow>>> PartListView;
+
+	TArray<TSharedPtr<FAvailPartRow>> AvailPartRows;
+	TSharedPtr<SListView<TSharedPtr<FAvailPartRow>>> AvailPartListView;
 
 	TSharedPtr<STextBlock> StatusText;
 };

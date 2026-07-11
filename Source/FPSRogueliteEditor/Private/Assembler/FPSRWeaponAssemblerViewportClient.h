@@ -9,6 +9,7 @@ class FPreviewScene;
 class SFPSRWeaponAssemblerViewport;
 class UFPSRWeaponDataAsset;
 class USkeletalMeshComponent;
+class UStaticMesh;
 class UStaticMeshComponent;
 
 /** Viewport client for the Weapon Part Assembler tool (Tools > FPSR > "무기 파츠 조립기…", see SFPSRWeaponAssemblerTab).
@@ -34,7 +35,8 @@ public:
 	void SetWeapon(UFPSRWeaponDataAsset* DA);
 
 	/** Selects PartComps[Index] as the gizmo target. INDEX_NONE (or an out-of-range index) clears the selection —
-	 *  GetWidgetLocation then returns the origin and the gizmo effectively has nothing to grab. */
+	 *  GetWidgetLocation then returns the origin and the gizmo effectively has nothing to grab. Also refreshes part
+	 *  visibility (isolate mode follows the selection). */
 	void SetSelectedPart(int32 Index);
 	int32 GetSelectedPart() const { return SelectedPart; }
 
@@ -42,6 +44,22 @@ public:
 	 *  SetWidgetMode (which routes through FEditorModeTools) since this client owns WidgetMode/GetWidgetMode()
 	 *  itself and never touches ModeTools — see the class comment. */
 	virtual void SetWidgetMode(UE::Widget::EWidgetMode InMode) override;
+
+	/** "전체 이동" 토글(탭 툴바 체크박스). true면 선택 파츠 대신 모든 파츠가 동시에 기즈모를 따라간다: GetWidgetLocation()은
+	 *  전체 파츠 위치의 평균을, InputWidgetDelta()는 그 평균을 피벗으로 삼아 전체 파츠를 이동/회전시킨다. */
+	void SetMoveAll(bool bIn) { bMoveAll = bIn; Invalidate(); }
+	bool IsMoveAll() const { return bMoveAll; }
+
+	/** "선택만 보기" 토글(탭 툴바 체크박스). true면 선택된 파츠만 보이고 나머지 파츠는 숨겨진다(바디는 항상 보임,
+	 *  건드리지 않음). */
+	void SetIsolate(bool bIn) { bIsolate = bIn; UpdatePartVisibility(); Invalidate(); }
+	bool IsIsolate() const { return bIsolate; }
+
+	/** 선택된 파츠(PartComps[SelectedPart])의 스태틱 메시를 NewMesh로 교체 — 프리뷰 컴포넌트와 DA의
+	 *  WeaponParts1P[SelectedPart].Part를 함께 갱신한다(인메모리만; DA 저장은 "조립→저장"(BakeSockets)이 담당).
+	 *  컴포넌트 이름(=슬롯/소켓명)은 그대로 유지되므로 변종 교체이지 슬롯 재배치가 아니다. 선택 파츠가 없거나 DA가
+	 *  없으면 아무 것도 하지 않는다. */
+	void SwapSelectedPartMesh(UStaticMesh* NewMesh);
 
 	const TArray<UStaticMeshComponent*>& GetPartComps() const { return PartComps; }
 	USkeletalMeshComponent* GetBodyComp() const { return BodyComp; }
@@ -65,6 +83,14 @@ public:
 	virtual void Tick(float DeltaSeconds) override;
 
 private:
+	/** Applies bIsolate to part visibility: bIsolate=false shows every part, true shows only PartComps[SelectedPart]
+	 *  and hides the rest (BodyComp is never touched). Called from SetSelectedPart, SetIsolate, and SetWeapon (after
+	 *  rebuilding the part components) so all three paths that can change "what should be visible" stay in sync. */
+	void UpdatePartVisibility();
+
+	/** The currently-selected part's static mesh, or null if nothing is selected. */
+	UStaticMesh* GetSelectedPartMesh() const;
+
 	/** The tab's shared preview scene (owns the render world BodyComp/PartComps live in). Reference, not pointer —
 	 *  outlives this client (the tab constructs the scene before the viewport/client). */
 	FPreviewScene& PreviewScene;
@@ -84,4 +110,10 @@ private:
 	int32 SelectedPart = INDEX_NONE;
 
 	UE::Widget::EWidgetMode WidgetMode = UE::Widget::WM_Translate;
+
+	/** "전체 이동" 토글 상태. See SetMoveAll. */
+	bool bMoveAll = false;
+
+	/** "선택만 보기" 토글 상태. See SetIsolate/UpdatePartVisibility. */
+	bool bIsolate = false;
 };

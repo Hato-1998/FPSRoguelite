@@ -11,13 +11,20 @@
 #include "PreviewScene.h"
 #include "PropertyCustomizationHelpers.h"
 #include "AssetRegistry/AssetData.h"
+#include "AssetRegistry/ARFilter.h"
+#include "AssetRegistry/AssetRegistryModule.h"
+#include "AssetRegistry/IAssetRegistry.h"
 
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/SkeletalMesh.h"
+#include "Engine/StaticMesh.h"
+#include "Misc/PackageName.h"
+#include "Modules/ModuleManager.h"
 
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/Input/SButton.h"
+#include "Widgets/Input/SCheckBox.h"
 #include "Widgets/Text/STextBlock.h"
 #include "Widgets/Views/STableRow.h"
 #include "Widgets/Layout/SSplitter.h"
@@ -62,6 +69,28 @@ void SFPSRWeaponAssemblerTab::Construct(const FArguments& InArgs)
 				.OnClicked(this, &SFPSRWeaponAssemblerTab::OnRotateModeClicked)
 			]
 
+			+ SHorizontalBox::Slot().AutoWidth().Padding(8.0f, 0.0f, 2.0f, 0.0f).VAlign(VAlign_Center)
+			[
+				SNew(SCheckBox)
+				.IsChecked(this, &SFPSRWeaponAssemblerTab::IsMoveAllChecked)
+				.OnCheckStateChanged(this, &SFPSRWeaponAssemblerTab::OnMoveAllChanged)
+				.ToolTipText(LOCTEXT("MoveAllTooltip", "켜면 선택 파츠가 아니라 모든 파츠가 함께 이동/회전합니다(회전은 전체 파츠 위치의 평균을 기준으로 돕니다)."))
+				[
+					SNew(STextBlock).Text(LOCTEXT("MoveAll", "전체 이동"))
+				]
+			]
+
+			+ SHorizontalBox::Slot().AutoWidth().Padding(2.0f, 0.0f).VAlign(VAlign_Center)
+			[
+				SNew(SCheckBox)
+				.IsChecked(this, &SFPSRWeaponAssemblerTab::IsIsolateChecked)
+				.OnCheckStateChanged(this, &SFPSRWeaponAssemblerTab::OnIsolateChanged)
+				.ToolTipText(LOCTEXT("IsolateTooltip", "켜면 왼쪽에서 선택한 파츠만 보이고 나머지 파츠는 숨겨집니다(바디는 항상 보임)."))
+				[
+					SNew(STextBlock).Text(LOCTEXT("Isolate", "선택만 보기"))
+				]
+			]
+
 			+ SHorizontalBox::Slot().AutoWidth().Padding(8.0f, 0.0f, 0.0f, 0.0f)
 			[
 				SNew(SButton)
@@ -85,11 +114,48 @@ void SFPSRWeaponAssemblerTab::Construct(const FArguments& InArgs)
 			+ SSplitter::Slot()
 			.Value(0.22f)
 			[
-				SAssignNew(PartListView, SListView<TSharedPtr<FPartRow>>)
-				.ListItemsSource(&PartRows)
-				.OnGenerateRow(this, &SFPSRWeaponAssemblerTab::OnGeneratePartRow)
-				.OnSelectionChanged(this, &SFPSRWeaponAssemblerTab::OnPartSelectionChanged)
-				.SelectionMode(ESelectionMode::Single)
+				SNew(SSplitter)
+				.Orientation(Orient_Vertical)
+
+				+ SSplitter::Slot()
+				.Value(0.5f)
+				[
+					SNew(SVerticalBox)
+
+					+ SVerticalBox::Slot().AutoHeight().Padding(2.0f)
+					[
+						SNew(STextBlock).Text(LOCTEXT("CurrentPartsHeader", "현재 파츠"))
+					]
+
+					+ SVerticalBox::Slot().FillHeight(1.0f)
+					[
+						SAssignNew(PartListView, SListView<TSharedPtr<FPartRow>>)
+						.ListItemsSource(&PartRows)
+						.OnGenerateRow(this, &SFPSRWeaponAssemblerTab::OnGeneratePartRow)
+						.OnSelectionChanged(this, &SFPSRWeaponAssemblerTab::OnPartSelectionChanged)
+						.SelectionMode(ESelectionMode::Single)
+					]
+				]
+
+				+ SSplitter::Slot()
+				.Value(0.5f)
+				[
+					SNew(SVerticalBox)
+
+					+ SVerticalBox::Slot().AutoHeight().Padding(2.0f)
+					[
+						SNew(STextBlock).Text(LOCTEXT("AvailablePartsHeader", "사용 가능 파츠(교체)"))
+					]
+
+					+ SVerticalBox::Slot().FillHeight(1.0f)
+					[
+						SAssignNew(AvailPartListView, SListView<TSharedPtr<FAvailPartRow>>)
+						.ListItemsSource(&AvailPartRows)
+						.OnGenerateRow(this, &SFPSRWeaponAssemblerTab::OnGenerateAvailRow)
+						.OnMouseButtonDoubleClick(this, &SFPSRWeaponAssemblerTab::OnAvailPartActivated)
+						.SelectionMode(ESelectionMode::Single)
+					]
+				]
 			]
 
 			+ SSplitter::Slot()
@@ -126,6 +192,7 @@ void SFPSRWeaponAssemblerTab::OnWeaponAssetChanged(const FAssetData& AssetData)
 	}
 
 	RefreshPartsList();
+	RefreshAvailableParts();
 
 	if (StatusText.IsValid())
 	{
@@ -176,6 +243,100 @@ void SFPSRWeaponAssemblerTab::OnPartSelectionChanged(TSharedPtr<FPartRow> Item, 
 	if (Viewport.IsValid() && Viewport->GetAssemblerClient().IsValid())
 	{
 		Viewport->GetAssemblerClient()->SetSelectedPart(Item.IsValid() ? Item->Index : INDEX_NONE);
+	}
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Available parts catalog
+// ---------------------------------------------------------------------------------------------------------------
+
+void SFPSRWeaponAssemblerTab::RefreshAvailableParts()
+{
+	AvailPartRows.Reset();
+
+	UFPSRWeaponDataAsset* DA = (Viewport.IsValid() && Viewport->GetAssemblerClient().IsValid())
+		? Viewport->GetAssemblerClient()->GetWeaponDA()
+		: nullptr;
+
+	if (DA)
+	{
+		// Every modular variant of this weapon's parts lives alongside the wired ones in the same content folder
+		// (e.g. all of /Game/.../Weapon_A) — so the first non-null part's folder locates the whole catalog.
+		FString Folder;
+		for (const FFPSRWeaponPartAttachment& Part : DA->WeaponParts1P)
+		{
+			if (!Part.Part.IsNull())
+			{
+				Folder = FPackageName::GetLongPackagePath(Part.Part.GetLongPackageName());
+				break;
+			}
+		}
+
+		if (!Folder.IsEmpty())
+		{
+			IAssetRegistry& AssetRegistry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
+
+			FARFilter Filter;
+			Filter.ClassPaths.Add(UStaticMesh::StaticClass()->GetClassPathName());
+			Filter.PackagePaths.Add(FName(*Folder));
+			Filter.bRecursivePaths = false;
+
+			TArray<FAssetData> FoundAssets;
+			AssetRegistry.GetAssets(Filter, FoundAssets);
+
+			for (const FAssetData& Found : FoundAssets)
+			{
+				TSharedPtr<FAvailPartRow> Row = MakeShared<FAvailPartRow>();
+				Row->Label = FText::FromName(Found.AssetName);
+				Row->MeshPath = Found.GetSoftObjectPath();
+				AvailPartRows.Add(Row);
+			}
+
+			AvailPartRows.Sort([](const TSharedPtr<FAvailPartRow>& A, const TSharedPtr<FAvailPartRow>& B)
+			{
+				return A->Label.CompareTo(B->Label) < 0;
+			});
+		}
+	}
+
+	if (AvailPartListView.IsValid())
+	{
+		AvailPartListView->RequestListRefresh();
+	}
+}
+
+TSharedRef<ITableRow> SFPSRWeaponAssemblerTab::OnGenerateAvailRow(TSharedPtr<FAvailPartRow> Item, const TSharedRef<STableViewBase>& OwnerTable)
+{
+	return SNew(STableRow<TSharedPtr<FAvailPartRow>>, OwnerTable)
+		[
+			SNew(STextBlock)
+			.Text(Item.IsValid() ? Item->Label : FText::GetEmpty())
+		];
+}
+
+void SFPSRWeaponAssemblerTab::OnAvailPartActivated(TSharedPtr<FAvailPartRow> Item)
+{
+	if (!Item.IsValid())
+	{
+		return;
+	}
+
+	TSharedPtr<FFPSRWeaponAssemblerViewportClient> Client = Viewport.IsValid() ? Viewport->GetAssemblerClient() : nullptr;
+	if (!Client.IsValid() || Client->GetSelectedPart() == INDEX_NONE)
+	{
+		if (StatusText.IsValid())
+		{
+			StatusText->SetText(LOCTEXT("SwapNoSelection", "먼저 좌측에서 교체할 파츠를 선택하세요."));
+		}
+		return;
+	}
+
+	Client->SwapSelectedPartMesh(Cast<UStaticMesh>(Item->MeshPath.TryLoad()));
+	RefreshPartsList();
+
+	if (StatusText.IsValid())
+	{
+		StatusText->SetText(LOCTEXT("SwapDone", "파츠 교체됨"));
 	}
 }
 
@@ -231,6 +392,34 @@ FReply SFPSRWeaponAssemblerTab::OnRotateModeClicked()
 		Viewport->GetAssemblerClient()->SetWidgetMode(UE::Widget::WM_Rotate);
 	}
 	return FReply::Handled();
+}
+
+void SFPSRWeaponAssemblerTab::OnMoveAllChanged(ECheckBoxState NewState)
+{
+	if (Viewport.IsValid() && Viewport->GetAssemblerClient().IsValid())
+	{
+		Viewport->GetAssemblerClient()->SetMoveAll(NewState == ECheckBoxState::Checked);
+	}
+}
+
+void SFPSRWeaponAssemblerTab::OnIsolateChanged(ECheckBoxState NewState)
+{
+	if (Viewport.IsValid() && Viewport->GetAssemblerClient().IsValid())
+	{
+		Viewport->GetAssemblerClient()->SetIsolate(NewState == ECheckBoxState::Checked);
+	}
+}
+
+ECheckBoxState SFPSRWeaponAssemblerTab::IsMoveAllChecked() const
+{
+	const bool bChecked = Viewport.IsValid() && Viewport->GetAssemblerClient().IsValid() && Viewport->GetAssemblerClient()->IsMoveAll();
+	return bChecked ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
+}
+
+ECheckBoxState SFPSRWeaponAssemblerTab::IsIsolateChecked() const
+{
+	const bool bChecked = Viewport.IsValid() && Viewport->GetAssemblerClient().IsValid() && Viewport->GetAssemblerClient()->IsIsolate();
+	return bChecked ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
 }
 
 #undef LOCTEXT_NAMESPACE
