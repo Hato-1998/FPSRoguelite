@@ -73,7 +73,7 @@
 
 ## 6. 단계
 - **W-U1 슬롯+선택기(1P 코어)**: ✅ **코드 완료(2026-07-11, `f3cd82b5`, 빌드·스모크 통과)**. S2+S2a/b + C1 + C2(signature-diff, AllWeapons 포함) + C7(저작-타임). S1은 드롭(위 as-built). PIE 검증(연사 카드로 스탯↑→긴 배럴 자동 교체·능력→스코프·슬롯 상호배타·조준선 이동)=A트랙 팔그립 후.
-- **W-U2 저격 스코프**: S3(ScopeFOVOverride 인터림)+S4+C3+C4. 검증=저격 ADS→강줌+오버레이+총숨김, 재장전/해제 드롭·크로스헤어 통일.
+- **W-U2 저격 스코프**: ✅ **코드 완료(2026-07-12, `967a475d`+`8574e265`, 빌드·스모크·적대리뷰 통과)**. S3(스코프 디스크립터=`FFPSRWeaponScopeDescriptor` on `FFPSRWeaponPartAttachment.Scope`, ScopeFieldOfView 필드)+S4(`GetADSAlpha`/`IsADSVisualActive`[스코프전용,AimSocket필요]/`IsADSFOVActive`[크로스헤어전용,AimSocket무관]/`IsScopeVisualActive`)+C3(`ResolveADSTargetFOV` 비스코프 동작보존·스코프만 강줌+재장전 시 줌해제, `UpdateScopeWeaponVisibility` 총숨김)+C4(HUD `OnScopeStateChanged` BP이벤트 seam·크로스헤어 `IsADSFOVActive`로 교정). 런타임 활성사이트 디스크립터 캡처=`RebuildPartsFromSelection`. 격리계약 리뷰 재확인(ScopeFOV=카메라만, 트레이스 무영향). **콘텐츠 미저작**(디스크립터 값·WBP 오버레이 아트·사이트/라이플 AimSocket)·PIE 시각검증=사용자. 미확정 후속(리뷰 #4)=프리즈서 조준 미해제 봉합(옵션). 검증=저격 ADS→강줌+오버레이+총숨김, 재장전/해제 드롭·크로스헤어 통일.
 - **W-U3 3P 진화 가시성**: S5+C6(signature 재사용). 검증=원격 클라서 진화 파츠 보임.
 - **(보류) ADSZoom 축(S6)**: 카드가 실제 줌 수정 필요 확인 시. 그 전 ScopeFOVOverride로.
 - **콘텐츠 트랙(병행·사용자)**: 소켓·무기/파츠 슬롯·규칙·스코프 아트·전이 연출.

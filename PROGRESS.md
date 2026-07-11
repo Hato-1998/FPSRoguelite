@@ -4,7 +4,15 @@
 > **작업 단계를 끝낼 때마다, 그리고 중단 전 반드시 이 파일을 갱신하고 커밋한다.**
 > 확정 설계·기획·코드구조·규칙은 `Game.md`(**SSOT 허브** → 도메인별 `Docs/SSOT/*.md`, 작업별 라우팅은 허브 §0-1), **완료 작업 상세는 `git log --oneline`**. 여기엔 *무엇을 했는지*만 요약한다.
 
-**최종 갱신: 2026-07-11**
+**최종 갱신: 2026-07-12**
+
+## 🔔 핸드오프 (2026-07-12 · **조립기 파츠 교체버그·바닥·부착물 수정 + 조립기 파츠 추가/제거 + W-U2 저격 스코프 코드**) — 🎯 **다음 = 사용자 콘텐츠 저작: 조립기로 스코프/사이트 파츠 배치·베이크 → DA 스코프 디스크립터 값 + 라이플 AimSocket 설정 → WBP_GameHUD 스코프 오버레이 아트(리티클/비네트 + OnScopeStateChanged 바인딩) → PIE 저격 스코프·W-U1 진화 시각검증. 재개 = 이 블록.**
+> **활성 브랜치**: `phase/pwas-b-procedural-weapon-motion`(미푸시). **이번 세션 커밋 4개**: `06c30118` 조립기 3건 수정(교체 선택유실 버그·프리뷰 바닥높이·부착물 카탈로그 Attachments 재귀스캔) / `967a475d` W-U2 저격스코프 런타임 / `6211a2db` 조립기 파츠 추가/제거 / `8574e265` W-U2 크로스헤어 desync 수정. **push/머지 = 승인 대기.** 검증 = 각 빌드 -NoXGE `Result: Succeeded`(0/0) + 스모크 validate-data exit0(invalid=0) + 적대적 리뷰(Opus 3렌즈+검증관).
+> **① 조립기 3건 수정(사용자 PIE 확인됨)**: (a)파츠 교체 후 목록 전체재생성이 SListView 선택을 날려 기즈모 원점튐+"선택만보기"서 파츠숨김 → 행 라벨만 제자리갱신해 선택유지 + null가드 + 명시적 "→교체" 버튼 + 슬롯·메시명 라벨. (b)프리뷰 바닥을 조립품 밑면으로(엔진 SetFloorOffset 관용구, 베이크 무관). (c)사용가능 파츠가 형제 `Attachments/`(+`Scopes/`) 재귀스캔.
+> **② 조립기 파츠 추가/제거 신설**: `AddPart(Mesh)`(DA WeaponParts1P에 새 항목+프리뷰 컴포넌트, 인메모리; 저장은 조립→저장)·`RemoveSelectedPart()`(컴포넌트+DA 함께, 인덱스정합). 탭 "＋파츠 추가"/"−선택 파츠 제거" 버튼. 이걸로 스코프/그립/사이트를 무기에 얹어 배치·베이크.
+> **③ W-U2 저격 스코프 코드(계획서 S3/S4/C3/C4)**: 소유자-로컬 코스메틱(복제0·서버권위 무변경). 스코프 디스크립터(`FFPSRWeaponScopeDescriptor` on 사이트 파츠) + 활성사이트 런타임 캐시 + 강줌 FOV(비스코프 동작보존, 재장전 시 줌해제) + 1P총숨김 + HUD 오버레이 seam(`OnScopeStateChanged` BP이벤트) + 크로스헤어 재장전-인지 교정. **콘텐츠 미저작**(디스크립터 값·WBP 아트·사이트 AimSocket·라이플 AimSocket). 상세=메모리 `weapon-modular-evolution-scope-plan`.
+> **다음(사용자·콘텐츠+PIE)**: (1)조립기로 라이플/스나이퍼에 스코프 메시 추가·위치·베이크 (2)그 파츠에 `Scope.bScopeOverlay`=true·`ScopeFieldOfView`(~20)·`ScopeReticle` 설정 + 사이트 메시가 DA `AimSocket`명 소켓 보유 (3)`DA_Weapon_Rifle` AimSocket 설정(현 미설정=ADS FOV줌만) (4)`WBP_GameHUD`에 리티클 UImage+비네트 추가하고 `OnScopeStateChanged(bScoped,Reticle,bVignette)` 바인딩 (5)PIE: ADS→강줌+총숨김+오버레이+크로스헤어off, 재장전→스코프해제·총보임·크로스헤어on, 2클라 팀원 줌 안샘. **후속(리뷰 미확정)**: 프리즈서 조준 미해제 봉합(옵션).
+> **⚠️ 에디터 반영**: 신규 UCLASS/UPROPERTY(스코프 디스크립터·게터) 있어 **에디터 재시작 필요**(빌드 완료, `.modules`가 기준 DLL 지목). 콘텐츠 미커밋.
 
 ## 🔔 핸드오프 (2026-07-11 b · **A트랙: 팔그립 수리 + 무기 파츠 조립기 툴 신설 + 머즐플래시 방향 + 조립규약 정정**) — 🎯 **다음 = 사용자 에디터: 조립기로 라이플 조립·베이크 → 머즐 오프셋 튜닝 → PIE로 W-U1 진화 시각검증. 재개 = 이 블록.**
 > **활성 브랜치**: `phase/pwas-b-procedural-weapon-motion`(미푸시). **이번 세션 커밋 8개**: `f3cd82b5` W-U1코드 · `e32bc6e3` W-U1문서 / `006fe461`+`5ab3feed` 조립기(메뉴판)+루트본보정 / `f456ccb7` 조립기 임베디드창 / `7e40189b` 머즐플래시오프셋 / `4540b39e` 조립기 3기능 / `59ca731e` 전체이동 바디버그. **push/머지 = 승인 대기.** 검증 = 각 커밋 빌드 -NoXGE `Result: Succeeded`(0err/0warn).
