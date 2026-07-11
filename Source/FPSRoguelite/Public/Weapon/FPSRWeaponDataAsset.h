@@ -21,6 +21,37 @@ class UTexture2D;
 class UMaterialInterface;
 class UFPSRWeaponPartRule;
 
+/** Sniper-scope descriptor (W-U2) for a SIGHT part. Purely OWNER-LOCAL cosmetic: when this sight is active and the
+ *  player aims, it drives a full-screen scope — strong FOV zoom + HUD reticle/vignette overlay + 1P weapon hidden.
+ *  Only meaningful on the part whose mesh carries the weapon's AimSocket. Never touches trace/damage/replication/save
+ *  (§2-A isolation contract). */
+USTRUCT(BlueprintType)
+struct FFPSRWeaponScopeDescriptor
+{
+	GENERATED_BODY()
+
+	/** Master switch: aiming with this sight active drives the full-screen scope. false = ordinary ADS (iron sight / reddot). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "스코프", meta = (DisplayName = "스코프 오버레이 사용"))
+	bool bScopeOverlay = false;
+
+	/** Scoped camera FOV (deg) — the strong zoom while active. <=0 falls back to BaseStats.ADSFieldOfView (no extra
+	 *  zoom). Owner-local camera FOV only; never affects trace/spread (trace origin stays the camera). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "스코프", meta = (DisplayName = "스코프 FOV(도, ≤0=기본 ADS)", EditCondition = "bScopeOverlay", EditConditionHides, ClampMin = "0.0"))
+	float ScopeFieldOfView = 25.0f;
+
+	/** Reticle texture drawn centred in the full-screen overlay (content WBP binds it). Null = the WBP's default reticle. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "스코프", meta = (DisplayName = "스코프 리티클 텍스처", EditCondition = "bScopeOverlay", EditConditionHides))
+	TSoftObjectPtr<UTexture2D> ScopeReticle;
+
+	/** Show the dark scope-edge vignette around the reticle while scoped. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "스코프", meta = (DisplayName = "스코프 비네트", EditCondition = "bScopeOverlay", EditConditionHides))
+	bool bScopeVignette = true;
+
+	/** Hide the 1P weapon/arms while this scope is active (non-PiP full-screen scope). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "스코프", meta = (DisplayName = "스코프 시 1P총 숨김", EditCondition = "bScopeOverlay", EditConditionHides))
+	bool bHideWeaponWhileScoped = true;
+};
+
 /** One modular cosmetic part attached to the 1P skeletal weapon mesh at a named socket (U15). Purely visual: the
  *  part is a static mesh (barrel / forestock / magazine / sight from the pack) child-attached to the equipped
  *  skeletal weapon. Null Part = skipped (null-safe). Static/melee weapons and empty lists attach nothing. */
@@ -40,6 +71,11 @@ struct FFPSRWeaponPartAttachment
 	/** Relative transform applied after attach (fine-tune the part's placement on the socket). */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|모듈 파츠", meta = (DisplayName = "오프셋(상대 트랜스폼)"))
 	FTransform Offset;
+
+	/** Sniper-scope descriptor — only meaningful when this part is the active sight (its mesh owns the weapon's
+	 *  AimSocket). bScopeOverlay=false (default) = an ordinary structural part / iron sight, no scope. (W-U2) */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|모듈 파츠", meta = (DisplayName = "스코프(사이트 파츠)"))
+	FFPSRWeaponScopeDescriptor Scope;
 };
 
 /** 1P 절차 무기 모션(힙) 프로파일 — 정적 무기도 "살아있게" 만드는 owner-local 코스메틱 모션 파라미터 묶음(P1).

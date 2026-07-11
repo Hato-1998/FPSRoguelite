@@ -8,6 +8,7 @@
 #include "Materials/MaterialInterface.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Weapon/FPSRWeaponFireComponent.h"
+#include "Hero/FPSRCharacter.h"
 #include "GameFramework/Pawn.h"
 #include "Settings/FPSRGameUserSettings.h"
 #include "Blueprint/WidgetLayoutLibrary.h"
@@ -52,6 +53,17 @@ void UFPSRRunHUDWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTim
 {
 	Super::NativeTick(MyGeometry, InDeltaTime);
 
+	// W-U2 scope overlay: drive the content WBP on the scoped edge (runs even without a crosshair image).
+	AFPSRCharacter* OwningChar = ResolveOwningCharacter();
+	const bool bScoped = OwningChar && OwningChar->IsScopeVisualActive();
+	if (bScoped != bLastScoped)
+	{
+		bLastScoped = bScoped;
+		UTexture2D* Reticle = (bScoped && OwningChar) ? OwningChar->GetActiveScopeReticle() : nullptr;
+		const bool bVignette = bScoped && OwningChar && OwningChar->IsScopeVignetteEnabled();
+		OnScopeStateChanged(bScoped, Reticle, bVignette);
+	}
+
 	if (!CrosshairImage)
 	{
 		return;
@@ -62,8 +74,10 @@ void UFPSRRunHUDWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTim
 		return;
 	}
 
-	// Hide the crosshair while aiming down sights — the iron sights / scope take over.
-	if (FireComp->IsAiming())
+	// Hide the crosshair while the ADS visual is active (reload-aware — it reappears during a reload so the screen
+	// isn't left with neither reticle nor crosshair). Iron sights / scope take over. Falls back to raw IsAiming.
+	const bool bADSVisual = OwningChar ? OwningChar->IsADSVisualActive() : FireComp->IsAiming();
+	if (bADSVisual)
 	{
 		CrosshairImage->SetVisibility(ESlateVisibility::Collapsed);
 		return;
@@ -119,6 +133,22 @@ UFPSRWeaponFireComponent* UFPSRRunHUDWidget::ResolveFireComponent()
 		CachedFireComp = OwningPawn->FindComponentByClass<UFPSRWeaponFireComponent>();
 	}
 	return CachedFireComp.Get();
+}
+
+AFPSRCharacter* UFPSRRunHUDWidget::ResolveOwningCharacter()
+{
+	if (CachedOwningChar.IsValid())
+	{
+		return CachedOwningChar.Get();
+	}
+	CachedOwningChar = Cast<AFPSRCharacter>(GetOwningPlayerPawn());
+	return CachedOwningChar.Get();
+}
+
+bool UFPSRRunHUDWidget::IsScopeActive() const
+{
+	const AFPSRCharacter* Char = Cast<AFPSRCharacter>(GetOwningPlayerPawn());
+	return Char && Char->IsScopeVisualActive();
 }
 
 void UFPSRRunHUDWidget::HandleCrosshairSettingsChanged()

@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Hero/FPSRCharacter.h"
+#include "Engine/Texture2D.h"
 #include "Core/FPSRPlayerController.h"
 #include "Core/FPSRPlayerState.h"
 #include "Core/FPSRGameMode.h"
@@ -370,6 +371,72 @@ bool AFPSRCharacter::IsAiming() const
 	// Owner-local aim state lives on the weapon-fire component (set by Input_ADS* + ServerSetAiming). Exposed here as a
 	// BlueprintPure so the 1P arms AnimBP can read a live, self-resetting aiming flag to drive its ADS pose/transitions.
 	return WeaponFire && WeaponFire->IsAiming();
+}
+
+bool AFPSRCharacter::IsADSVisualActive() const
+{
+	// Owner-local ADS blend crossing the visual threshold. Reload-aware for free: a reload makes UpdateAimDownSights
+	// treat the weapon as not-aiming, so CurrentADSAlpha interps back toward 0 and this drops during the reload. Only
+	// updated on the locally-controlled client (server/remote keep it 0) — gates owner-local scope cosmetics only.
+	return CurrentADSAlpha >= 0.5f;
+}
+
+bool AFPSRCharacter::IsScopeVisualActive() const
+{
+	return IsADSVisualActive() && CachedScopeDescriptor.bScopeOverlay;
+}
+
+float AFPSRCharacter::ResolveADSTargetFOV(float DefaultFOV, float BaseADSFOV, bool bBaseWantsADS) const
+{
+	// Non-scope weapons: preserve the existing simple ADS-FOV behavior EXACTLY (zoom whenever aiming, no reload gate).
+	if (!CachedScopeDescriptor.bScopeOverlay)
+	{
+		return bBaseWantsADS ? BaseADSFOV : DefaultFOV;
+	}
+
+	// Scope weapons: drop the zoom during a reload (design decision — show the weapon + reload animation), else apply
+	// the strong scope FOV. Owner-local; reads the replicated reload edge via IsReloading(). ScopeFieldOfView <= 0
+	// falls back to the weapon's normal ADS FOV.
+	const bool bReloading = WeaponInventory && WeaponInventory->IsReloading();
+	if (!bBaseWantsADS || bReloading)
+	{
+		return DefaultFOV;
+	}
+	return CachedScopeDescriptor.ScopeFieldOfView > 0.0f ? CachedScopeDescriptor.ScopeFieldOfView : BaseADSFOV;
+}
+
+void AFPSRCharacter::UpdateScopeWeaponVisibility()
+{
+	// Hide the 1P arms (propagate to children: weapon mesh + parts) while a full-screen scope is active, so the scope
+	// overlay reads without the gun in the way. Toggle only on change. Owner-local: the caller (weapon-fire tick)
+	// already no-ops for non-local pawns, and the arms are OnlyOwnerSee regardless. Auto-restores when the scope drops
+	// (release / reload / weapon swap) because IsScopeVisualActive() then returns false.
+	const bool bShouldHide = IsScopeVisualActive() && CachedScopeDescriptor.bHideWeaponWhileScoped;
+	if (bShouldHide == bWeaponHiddenForScope)
+	{
+		return;
+	}
+	bWeaponHiddenForScope = bShouldHide;
+	if (FirstPersonArms)
+	{
+		FirstPersonArms->SetVisibility(!bShouldHide, /*bPropagateToChildren=*/true);
+	}
+}
+
+UTexture2D* AFPSRCharacter::GetActiveScopeReticle() const
+{
+	// Loaded only when a scope is actually active — the HUD calls this on the scoped edge (not per frame), so the
+	// synchronous soft-ptr load happens at most once per scope-in. Null (WBP default reticle) when none authored.
+	if (!IsScopeVisualActive())
+	{
+		return nullptr;
+	}
+	return CachedScopeDescriptor.ScopeReticle.LoadSynchronous();
+}
+
+bool AFPSRCharacter::IsScopeVignetteEnabled() const
+{
+	return IsScopeVisualActive() && CachedScopeDescriptor.bScopeVignette;
 }
 
 bool AFPSRCharacter::IsIncapacitatedLocal() const
@@ -1185,12 +1252,17 @@ void AFPSRCharacter::RebuildPartsFromSelection(const TArray<FFPSRWeaponPartAttac
 	// slot swap that drops the socket-carrying part can't leave a dangling pointer to a destroyed component.
 	CachedMuzzleComponent = nullptr;
 	CachedAimComponent = nullptr;
+	CachedScopeDescriptor = FFPSRWeaponScopeDescriptor();
 
 	// Parts attach to the skeletal weapon mesh only (guarded by the caller: ActiveWeaponMesh == WeaponMesh1P).
 	if (!WeaponMesh1P)
 	{
 		return;
 	}
+
+	// Parallel to WeaponPartComponents1P (both appended together in the loop): each attached part's scope descriptor,
+	// so the aim-resolution below can capture the ACTIVE sight's descriptor by index. (W-U2)
+	TArray<FFPSRWeaponScopeDescriptor> AddedScopeDescriptors;
 
 	for (const FFPSRWeaponPartAttachment& PartDef : Selected)
 	{
@@ -1211,6 +1283,7 @@ void AFPSRCharacter::RebuildPartsFromSelection(const TArray<FFPSRWeaponPartAttac
 		PartComp->AttachToComponent(WeaponMesh1P, FAttachmentTransformRules::KeepRelativeTransform, PartDef.Socket);
 		PartComp->SetRelativeTransform(PartDef.Offset);
 		WeaponPartComponents1P.Add(PartComp);
+		AddedScopeDescriptors.Add(PartDef.Scope);
 	}
 
 	// Re-resolve modular muzzle source: the muzzle socket lives on a cosmetic part (barrel/forestock), so prefer the
@@ -1235,11 +1308,18 @@ void AFPSRCharacter::RebuildPartsFromSelection(const TArray<FFPSRWeaponPartAttac
 	// receiver (WeaponMesh1P).
 	if (!CachedAimSocket.IsNone())
 	{
-		for (UStaticMeshComponent* Part : WeaponPartComponents1P)
+		for (int32 i = 0; i < WeaponPartComponents1P.Num(); ++i)
 		{
+			UStaticMeshComponent* Part = WeaponPartComponents1P[i];
 			if (Part && Part->DoesSocketExist(CachedAimSocket))
 			{
 				CachedAimComponent = Part;
+				// Capture the active sight's scope descriptor (W-U2) so the owner-local ADS visual path can drive the
+				// full-screen scope. AddedScopeDescriptors is index-aligned with WeaponPartComponents1P.
+				if (AddedScopeDescriptors.IsValidIndex(i))
+				{
+					CachedScopeDescriptor = AddedScopeDescriptors[i];
+				}
 				break;
 			}
 		}

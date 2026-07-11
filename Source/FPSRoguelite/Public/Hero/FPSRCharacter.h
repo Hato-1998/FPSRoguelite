@@ -25,6 +25,7 @@ class UFPSRBlindspotAudioComponent;
 struct FInputActionValue;
 class UStaticMeshComponent;
 class UMeshComponent;
+class UTexture2D;
 class UAnimInstance;
 class UAnimMontage;
 class USoundBase;
@@ -92,6 +93,38 @@ public:
 	 *  (Input_ADSReleased -> SetAiming(false)), so an aim state driven by this reverts cleanly to hip when leaving ADS. */
 	UFUNCTION(BlueprintPure, Category = "FPSR|Weapon")
 	bool IsAiming() const;
+
+	/** Owner-local ADS blend alpha (0 = hip, 1 = fully aimed). Only updated on the locally-controlled client. (W-U2) */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Weapon")
+	float GetADSAlpha() const { return CurrentADSAlpha; }
+
+	/** True while the owner-local ADS visual is active (alpha past the visual threshold). Reload-aware (the blend
+	 *  lowers during a reload). Unified trigger for scope overlay / weapon-hide / crosshair-hide. (W-U2) */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Weapon")
+	bool IsADSVisualActive() const;
+
+	/** True while a full-screen SCOPE is visually active: ADS visual active AND the currently-active sight part carries
+	 *  a scope-overlay descriptor. Owner-local. (W-U2) */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Weapon")
+	bool IsScopeVisualActive() const;
+
+	/** Owner-local: resolve the effective camera FOV target for the ADS/scope interp (called from the weapon-fire tick).
+	 *  Non-scope weapons return the passed base target unchanged; scope weapons apply the strong scope FOV and drop the
+	 *  zoom during a reload (per design). bBaseWantsADS = the caller's existing (bIsAiming && Stats.bHasADS). (W-U2) */
+	float ResolveADSTargetFOV(float DefaultFOV, float BaseADSFOV, bool bBaseWantsADS) const;
+
+	/** Owner-local: hide/show the 1P arms (and their child weapon + parts) based on whether a full-screen scope is
+	 *  active. Called each frame from the weapon-fire tick (which already no-ops for non-local pawns). (W-U2) */
+	void UpdateScopeWeaponVisibility();
+
+	/** Active scope's reticle texture (loaded) while a scope is visually active, else null. For the HUD scope overlay;
+	 *  call on the scoped edge (not per frame) — it loads the soft ref synchronously. (W-U2) */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Weapon")
+	UTexture2D* GetActiveScopeReticle() const;
+
+	/** True while a scope is active AND its descriptor requests the edge vignette. For the HUD scope overlay. (W-U2) */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Weapon")
+	bool IsScopeVignetteEnabled() const;
 
 	/** Owner-client: refresh the first-person weapon mesh + arms anim when the equipped weapon changes
 	 *  (called from the inventory's server EquipSlot + client OnRep). No-op on non-locally-controlled pawns. */
@@ -427,6 +460,15 @@ protected:
 	 *  Convention-based: the part that owns a socket named AimSocket wins (first in WeaponParts1P order). */
 	UPROPERTY(Transient)
 	TObjectPtr<UMeshComponent> CachedAimComponent;
+
+	/** Scope descriptor of the currently-active sight part (the one carrying CachedAimSocket), captured alongside
+	 *  CachedAimComponent in RebuildPartsFromSelection. Default (bScopeOverlay=false) when no scope sight is active.
+	 *  Owner-local cosmetic; not replicated/saved. (W-U2) */
+	FFPSRWeaponScopeDescriptor CachedScopeDescriptor;
+
+	/** Tracks whether UpdateScopeWeaponVisibility currently has the 1P arms hidden for a scope, so it only toggles
+	 *  visibility on change (and only ever manages the scope-hide state). Owner-local. (W-U2) */
+	bool bWeaponHiddenForScope = false;
 
 	// --- Procedural aim-down-sights (owner-local) ---
 	/** FirstPersonArms relative-to-camera transform captured on BeginPlay (the "hip" base the ADS interps to/from). */

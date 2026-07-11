@@ -10,6 +10,8 @@ class UImage;
 class UFPSRWeaponFireComponent;
 class UMaterialInterface;
 class UMaterialInstanceDynamic;
+class AFPSRCharacter;
+class UTexture2D;
 
 /** Passive run-state HUD base (Game layer). Exposes replicated run state (GameState) to WBP via BlueprintPure
  *  getters and fires OnRunStateUpdated whenever it changes. Event-driven: binds GameState OnRunStateChanged,
@@ -31,6 +33,15 @@ protected:
 	/** WBP refresh hook: fired on construct and whenever run state changes. */
 	UFUNCTION(BlueprintImplementableEvent, Category = "FPSR|HUD")
 	void OnRunStateUpdated();
+
+	/** W-U2 scope overlay hook: fired on the scoped edge. The content WBP shows/hides its full-screen reticle +
+	 *  vignette; Reticle is the active sight's texture (null = WBP default), bVignette requests the edge vignette. */
+	UFUNCTION(BlueprintImplementableEvent, Category = "FPSR|HUD")
+	void OnScopeStateChanged(bool bScoped, UTexture2D* Reticle, bool bVignette);
+
+	/** BlueprintPure mirror of the owner's scope-active state (for WBP visibility bindings). (W-U2) */
+	UFUNCTION(BlueprintPure, Category = "FPSR|HUD")
+	bool IsScopeActive() const;
 
 	/** Replicated survival seconds (pauses during freeze / after boss). */
 	UFUNCTION(BlueprintPure, Category = "FPSR|HUD")
@@ -89,6 +100,9 @@ private:
 	/** Resolve (and cache) the owning pawn's fire component. */
 	UFPSRWeaponFireComponent* ResolveFireComponent();
 
+	/** Resolve (and cache) the owning pawn as an AFPSRCharacter (for ADS/scope visual state). (W-U2) */
+	AFPSRCharacter* ResolveOwningCharacter();
+
 	/** Re-apply crosshair appearance (color / thickness) when the local player changes it in settings (live). */
 	UFUNCTION()
 	void HandleCrosshairSettingsChanged();
@@ -103,6 +117,12 @@ private:
 
 	UPROPERTY(Transient)
 	TWeakObjectPtr<UFPSRWeaponFireComponent> CachedFireComp;
+
+	/** Cached owning character (for the reload-aware ADS/scope visual state). (W-U2) */
+	TWeakObjectPtr<AFPSRCharacter> CachedOwningChar;
+
+	/** Last scoped state pushed to the WBP, so OnScopeStateChanged fires only on the edge. (W-U2) */
+	bool bLastScoped = false;
 
 	/** Source material currently on the brush; the dynamic instance is rebuilt only when this changes (weapon swap). */
 	UPROPERTY(Transient)

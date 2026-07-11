@@ -306,6 +306,22 @@ EDataValidationResult UFPSRWeaponDataAsset::IsDataValid(FDataValidationContext& 
 		}
 	}
 
+	// W-U2: a scope-overlay sight only ever activates through ADS (the scope shows while aiming with that sight active).
+	// A scope part on a weapon with no ADS / no AimSocket can never trigger — warn.
+	for (const FFPSRWeaponPartAttachment& Part : WeaponParts1P)
+	{
+		if (!Part.Scope.bScopeOverlay)
+		{
+			continue;
+		}
+		if (!BaseStats.bHasADS || AimSocket.IsNone())
+		{
+			Context.AddWarning(FText::Format(LOCTEXT("ScopeNoADS",
+				"WeaponParts1P part '{0}' enables the scope overlay, but the weapon has no ADS / no AimSocket — the scope can never activate (it triggers only while aiming with the sight active). Set BaseStats.bHasADS and AimSocket."),
+				FText::FromString(Part.Part.GetAssetName())));
+		}
+	}
+
 	// The fire-part recoil bone (bolt / charging handle driven by UFPSRWeaponAnimInstance) must exist on the weapon mesh
 	// — a typo means the AnimBP's ModifyBone targets nothing and the part never kicks. Only validate when a bone is set
 	// (None = no moving part = no-op).
