@@ -4,6 +4,7 @@
 #include "Core/FPSRGameState.h"
 #include "Engine/World.h"
 #include "Components/Image.h"
+#include "Blueprint/UserWidget.h"
 #include "Components/CanvasPanelSlot.h"
 #include "Materials/MaterialInterface.h"
 #include "Materials/MaterialInstanceDynamic.h"
@@ -62,6 +63,7 @@ void UFPSRRunHUDWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTim
 		UTexture2D* Reticle = (bScoped && OwningChar) ? OwningChar->GetActiveScopeReticle() : nullptr;
 		const bool bVignette = bScoped && OwningChar && OwningChar->IsScopeVignetteEnabled();
 		OnScopeStateChanged(bScoped, Reticle, bVignette);
+		UpdateScopeOverlay(bScoped);
 	}
 
 	if (!CrosshairImage)
@@ -147,6 +149,28 @@ AFPSRCharacter* UFPSRRunHUDWidget::ResolveOwningCharacter()
 	return CachedOwningChar.Get();
 }
 
+void UFPSRRunHUDWidget::UpdateScopeOverlay(bool bScoped)
+{
+	// Lazily create the overlay the first time a scope activates, then just toggle its visibility. Owner-local: this
+	// HUD widget exists only on the local player's screen, so the overlay is never seen by teammates. Null class =
+	// no reticle art (the scope still zooms + hides the weapon).
+	if (bScoped && !ScopeOverlayInstance)
+	{
+		if (TSubclassOf<UUserWidget> Cls = ScopeOverlayWidgetClass.LoadSynchronous())
+		{
+			ScopeOverlayInstance = CreateWidget<UUserWidget>(GetOwningPlayer(), Cls);
+			if (ScopeOverlayInstance)
+			{
+				ScopeOverlayInstance->AddToViewport(5); // above the HUD content, below modal UI
+			}
+		}
+	}
+	if (ScopeOverlayInstance)
+	{
+		ScopeOverlayInstance->SetVisibility(bScoped ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
+	}
+}
+
 bool UFPSRRunHUDWidget::IsScopeActive() const
 {
 	const AFPSRCharacter* Char = Cast<AFPSRCharacter>(GetOwningPlayerPawn());
@@ -212,6 +236,12 @@ void UFPSRRunHUDWidget::NativeDestruct()
 	if (UFPSRGameUserSettings* Settings = UFPSRGameUserSettings::Get())
 	{
 		Settings->OnCrosshairSettingsChanged.RemoveDynamic(this, &UFPSRRunHUDWidget::HandleCrosshairSettingsChanged);
+	}
+
+	if (ScopeOverlayInstance)
+	{
+		ScopeOverlayInstance->RemoveFromParent();
+		ScopeOverlayInstance = nullptr;
 	}
 
 	Super::NativeDestruct();
