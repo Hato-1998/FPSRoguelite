@@ -950,6 +950,16 @@ void AFPSRCharacter::HandleRunStateChanged_Vision()
 		return;
 	}
 
+	// Clear ADS when the run enters a freeze (card selection / global freeze). The freeze UI can capture the
+	// ADS-release input, otherwise leaving the owner latched in ADS behind the card modal — with W-U2 that means a
+	// stuck scope zoom + hidden 1P weapon. Same clear the settings menu (Input_Menu) and the down state
+	// (OnRep_LifeState) already do; idempotent (input is gated during freeze so aim can't restart). Owner-local + RPC.
+	if (GS->IsRunPaused() && WeaponFire && WeaponFire->IsAiming())
+	{
+		WeaponFire->SetAiming(false);
+		ServerSetAiming(false);
+	}
+
 	const bool bRestricted = GS->IsVisionRestricted();
 	if (bRestricted != bVisionRestrictionApplied)
 	{
