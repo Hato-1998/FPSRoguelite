@@ -218,15 +218,12 @@ EDataValidationResult UFPSRWeaponDataAsset::IsDataValid(FDataValidationContext& 
 			Context.AddError(FText::Format(LOCTEXT("PartRuleNoSlot", "PartRules[{0}] has an empty Slot — a slotless rule can never compete for selection. Assign a Slot gameplay tag."), FText::AsNumber(i)));
 			Result = EDataValidationResult::Invalid;
 		}
-		if (!Rule->Part.Part.IsNull() && !Rule->Part.Socket.IsNone())
+		// The part attaches to the WEAPON mesh (WeaponMesh1P) at Part.Socket — same as WeaponParts1P and the runtime
+		// (RebuildPartsFromSelection: AttachToComponent(WeaponMesh1P, ..., Part.Socket)). Validate the socket against the
+		// weapon mesh, NOT the part's own static mesh (parts-on-parts is unsupported; every part attaches to the receiver).
+		if (!Rule->Part.Part.IsNull() && !Rule->Part.Socket.IsNone() && SkelWeapon && !SkeletalMeshHasAttachPoint(SkelWeapon, Rule->Part.Socket))
 		{
-			if (const UStaticMesh* PartMesh = Rule->Part.Part.LoadSynchronous())
-			{
-				if (PartMesh->FindSocket(Rule->Part.Socket) == nullptr)
-				{
-					Context.AddWarning(FText::Format(LOCTEXT("PartRuleSocketMissing", "PartRules[{0}] part references socket '{1}' that does not exist on its mesh — it will attach at the mesh origin."), FText::AsNumber(i), FText::FromName(Rule->Part.Socket)));
-				}
-			}
+			Context.AddWarning(FText::Format(LOCTEXT("PartRuleSocketMissing", "PartRules[{0}] part references socket '{1}' that does not exist on WeaponMesh1P — it will attach at the mesh origin. Bake it with the assembler or check for a typo."), FText::AsNumber(i), FText::FromName(Rule->Part.Socket)));
 		}
 	}
 	for (int32 i = 0; i < PartRules.Num(); ++i)
