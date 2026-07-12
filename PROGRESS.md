@@ -13,8 +13,8 @@
 > **📋 작업지시서(에디터에서, 순서대로)**:
 > 1. **각 사이트 메시에 `SOCKET_Aim` 소켓** 추가(Static Mesh 에디터): 조준 아이라인(스코프 관통 지점), +X 앞·+Z 위. Reddot_01·Scope_01·Scope_09 등.
 > 2. **위치잡기**: 조립기(`Tools>FPSR>무기 파츠 조립기`)로 사이트를 총 위 레일에 놓고 소켓/오프셋 확보(진화 사이트는 최종적으로 PartRules로 옮김).
-> 3. **`DA_Weapon_Rifle`→`무기\|모듈 파츠`→`파츠 선택 규칙`(PartRules)에 3규칙**(Slot=`Weapon.Slot.Sight`): Tier0 조건=Always→Reddot(Scope: 조준배율FOV=75≈1.2x, 오버레이 off) / Tier1 조건=HasFragment(프래그먼트)→Scope_01(FOV=30≈3x) / Tier2 조건=HasFragment(`DA_Fragment_Rifle_Burst` 데모)→Scope_09(FOV=15≈6x, 오버레이 on).
-> 4. **전용 카드**: ✅ 마커 클래스 `UFPSRFragment_Marker` 추가 완료(`fe117ff8`, 동작 없음, **신규 UCLASS라 에디터 재시작 후 사용**) → 재시작 후 그 클래스로 `Fragment_저격스코프` 에셋 생성 + `UnlockableFeatures`에 `UCardEffect_WeaponBehavior`(Fragment=그것) 카드 → Tier1/2 HasFragment 조건에 그 마커 지정.
+> 3. **`DA_Weapon_Rifle`→`무기\|모듈 파츠`→`파츠 선택 규칙`(PartRules)에 규칙 추가**(Slot=`Weapon.Slot.Sight`, **에디터 GUI로 — EditDefaultsOnly 벽은 파이썬 스크립트에만 적용, GUI 편집은 정상**): Tier0 조건=Always→Reddot(Scope: 조준배율FOV=75≈1.2x, 오버레이 off) / Tier2 조건=HasFragment(`DA_Fragment_Rifle_SniperScope`)→Scope_09(FOV=15≈6x, 오버레이 on). (선택 중간티어: Tier1 저배율 Scope_01 FOV30 — 별도 프래그먼트/카드 복제.)
+> 4. ✅ **전용 카드 체인 완료(MCP 저작, 콘텐츠 미커밋)**: 마커 클래스 `UFPSRFragment_Marker`(`fe117ff8`) + `/Game/Cards/Weapons/Modifiers/DA_Fragment_Rifle_SniperScope`(마커 에셋 "저격 스코프 언락") + `DA_CardModifiers_SniperScope`(그걸 부여, **라이플 `UnlockableFeatures`에 추가됨**) 생성·저장. **남은 소비자 = 3단계의 Tier2 규칙 조건 `HasFragment(DA_Fragment_Rifle_SniperScope)`**. 미커밋 콘텐츠: `DA_Fragment_Rifle_SniperScope`·`DA_CardModifiers_SniperScope`(신규) + `DA_Weapon_Rifle`(UF 추가, 세션 前 사용자 변경도 포함).
 > 5. **PIE**: 레드닷 1.2x → (해당 카드 획득) → 저격 6x+풀스크린. 재장전 시 저격만 해제.
 > 배율↔FOV: 배율=무기기본FOV(≈90)÷AimFieldOfView. (1.2x≈75·2x=45·3x=30·4x≈22·6x=15·8x≈11)
 
