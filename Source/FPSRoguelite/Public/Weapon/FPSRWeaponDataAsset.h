@@ -34,10 +34,12 @@ struct FFPSRWeaponScopeDescriptor
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "스코프", meta = (DisplayName = "스코프 오버레이 사용"))
 	bool bScopeOverlay = false;
 
-	/** Scoped camera FOV (deg) — the strong zoom while active. <=0 falls back to BaseStats.ADSFieldOfView (no extra
-	 *  zoom). Owner-local camera FOV only; never affects trace/spread (trace origin stays the camera). */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "스코프", meta = (DisplayName = "스코프 FOV(도, ≤0=기본 ADS)", EditCondition = "bScopeOverlay", EditConditionHides, ClampMin = "0.0"))
-	float ScopeFieldOfView = 25.0f;
+	/** This sight's ADS magnification — the camera FOV (deg) it zooms to while aiming. Applies to ANY sight (iron /
+	 *  reddot / low-power scope / sniper scope), so each sight part carries its own zoom. <=0 = use the weapon's
+	 *  BaseStats.ADSFieldOfView (this sight adds no extra zoom). Owner-local camera FOV only; never affects
+	 *  trace/spread (trace origin stays the camera). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "스코프", meta = (DisplayName = "조준 배율 FOV(도, ≤0=무기 기본)", ClampMin = "0.0"))
+	float AimFieldOfView = 0.0f;
 
 	/** Reticle texture drawn centred in the full-screen overlay (content WBP binds it). Null = the WBP's default reticle. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "스코프", meta = (DisplayName = "스코프 리티클 텍스처", EditCondition = "bScopeOverlay", EditConditionHides))

@@ -400,21 +400,23 @@ bool AFPSRCharacter::IsADSFOVActive() const
 
 float AFPSRCharacter::ResolveADSTargetFOV(float DefaultFOV, float BaseADSFOV, bool bBaseWantsADS) const
 {
-	// Non-scope weapons: preserve the existing simple ADS-FOV behavior EXACTLY (zoom whenever aiming, no reload gate).
-	if (!CachedScopeDescriptor.bScopeOverlay)
-	{
-		return bBaseWantsADS ? BaseADSFOV : DefaultFOV;
-	}
-
-	// Scope weapons: drop the zoom during a reload (design decision — show the weapon + reload animation), else apply
-	// the strong scope FOV. Owner-local; reads the replicated reload edge via IsReloading(). ScopeFieldOfView <= 0
-	// falls back to the weapon's normal ADS FOV.
-	const bool bReloading = WeaponInventory && WeaponInventory->IsReloading();
-	if (!bBaseWantsADS || bReloading)
+	if (!bBaseWantsADS)
 	{
 		return DefaultFOV;
 	}
-	return CachedScopeDescriptor.ScopeFieldOfView > 0.0f ? CachedScopeDescriptor.ScopeFieldOfView : BaseADSFOV;
+
+	// A fullscreen scope drops the zoom during a reload (design decision — show the weapon + reload animation);
+	// non-scope sights keep their zoom through the reload (existing behavior). Owner-local; reads the replicated
+	// reload edge via IsReloading().
+	if (CachedScopeDescriptor.bScopeOverlay && WeaponInventory && WeaponInventory->IsReloading())
+	{
+		return DefaultFOV;
+	}
+
+	// Per-sight magnification: the ACTIVE sight's own AimFieldOfView (iron / reddot / scope each carry their own zoom),
+	// falling back to the weapon's default ADS FOV when this sight authors none (<=0). No active sight descriptor =>
+	// AimFieldOfView 0 => weapon default, so weapons without an authored sight are unchanged.
+	return CachedScopeDescriptor.AimFieldOfView > 0.0f ? CachedScopeDescriptor.AimFieldOfView : BaseADSFOV;
 }
 
 void AFPSRCharacter::UpdateScopeWeaponVisibility()
