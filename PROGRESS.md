@@ -4,7 +4,19 @@
 > **작업 단계를 끝낼 때마다, 그리고 중단 전 반드시 이 파일을 갱신하고 커밋한다.**
 > 확정 설계·기획·코드구조·규칙은 `Game.md`(**SSOT 허브** → 도메인별 `Docs/SSOT/*.md`, 작업별 라우팅은 허브 §0-1), **완료 작업 상세는 `git log --oneline`**. 여기엔 *무엇을 했는지*만 요약한다.
 
-**최종 갱신: 2026-07-12**
+**최종 갱신: 2026-07-13**
+
+## 🔔 핸드오프 (2026-07-13 · **라이플 사이트 진화 콘텐츠 = 에디터 작업지시서(코드 전부 완료, 저작만 남음)**) — 🎯 **다음 = 에디터에서 사이트 저작(아래 작업지시서). MCP는 연결됨(조사 완료)이나 저작은 시각작업(위치·소켓)이라 인계.**
+> **활성 브랜치**: `phase/pwas-b-procedural-weapon-motion`. **이번 추가 커밋**: `33600c3a`(사이트별 배율=AimFieldOfView 모든 사이트 적용) · `<이 커밋>`(gameplay 태그 `Weapon.Slot.Sight` 등록 + 본 핸드오프). W-U2 코드 6커밋(스코프 런타임→크로스헤어→프리즈→사이트별배율)+조립기 3커밋 **전부 검증 완료**(빌드·스모크·적대리뷰).
+> **✅ MCP 조사로 확인(실행 중 에디터, 신규 스코프 코드 로드됨)**: 라이플 `AimSocket=SOCKET_Aim` **이미 설정** · 파츠 7개·규칙 0개 · 사이트 메시 존재(`/Game/PolygonMilitary/Meshes/Weapons/Modular/Attachments/Scopes/` 하위 `SM_Wep_Mod_Reddot_01`·`SM_Wep_Mod_Scope_01/05/09/10`) · base ADS FOV 55 · **기존 프래그먼트 카드 `DA_CardModifiers_BurstFire`→`/Game/Cards/Weapons/Modifiers/DA_Fragment_Rifle_Burst`**(HasFragment 데모 트리거로 재사용 가능) · `Weapon.Slot.Sight` 태그 등록됨.
+> **⚠️ blind 저작 불가 이유(=인계 사유)**: ①규칙/파츠 속성이 **`EditDefaultsOnly`** → 파이썬 `set_editor_property` 거부("cannot be edited on instances"), 우회는 취약한 `import_text`(폴리모픽 Instanced+중첩구조). ②**사이트가 작동하려면 각 사이트 메시에 `SOCKET_Aim` 소켓 + 무기 위 위치잡기(조립기)** 필요 = 본질적 시각작업. 규칙만 blind로 넣어봐야 위치·활성사이트 인식 안 돼 **작동 안 하는 껍데기**. ③전용 "저격줌 강화카드"는 마커 프래그먼트 concrete 클래스 필요(=소코드, `UFPSRWeaponFragment` Abstract).
+> **📋 작업지시서(에디터에서, 순서대로)**:
+> 1. **각 사이트 메시에 `SOCKET_Aim` 소켓** 추가(Static Mesh 에디터): 조준 아이라인(스코프 관통 지점), +X 앞·+Z 위. Reddot_01·Scope_01·Scope_09 등.
+> 2. **위치잡기**: 조립기(`Tools>FPSR>무기 파츠 조립기`)로 사이트를 총 위 레일에 놓고 소켓/오프셋 확보(진화 사이트는 최종적으로 PartRules로 옮김).
+> 3. **`DA_Weapon_Rifle`→`무기\|모듈 파츠`→`파츠 선택 규칙`(PartRules)에 3규칙**(Slot=`Weapon.Slot.Sight`): Tier0 조건=Always→Reddot(Scope: 조준배율FOV=75≈1.2x, 오버레이 off) / Tier1 조건=HasFragment(프래그먼트)→Scope_01(FOV=30≈3x) / Tier2 조건=HasFragment(`DA_Fragment_Rifle_Burst` 데모)→Scope_09(FOV=15≈6x, 오버레이 on).
+> 4. **전용 카드**(선택): 마커 프래그먼트 클래스 추가(소코드) + `UnlockableFeatures`에 `UCardEffect_WeaponBehavior`(Fragment=그 마커) 카드 → HasFragment 조건에 그 마커 지정.
+> 5. **PIE**: 레드닷 1.2x → (해당 카드 획득) → 저격 6x+풀스크린. 재장전 시 저격만 해제.
+> 배율↔FOV: 배율=무기기본FOV(≈90)÷AimFieldOfView. (1.2x≈75·2x=45·3x=30·4x≈22·6x=15·8x≈11)
 
 ## 🔔 핸드오프 (2026-07-12 · **조립기 파츠 교체버그·바닥·부착물 수정 + 조립기 파츠 추가/제거 + W-U2 저격 스코프 코드**) — 🎯 **다음 = 사용자 콘텐츠 저작: 조립기로 스코프/사이트 파츠 배치·베이크 → DA 스코프 디스크립터 값 + 라이플 AimSocket 설정 → WBP_GameHUD 스코프 오버레이 아트(리티클/비네트 + OnScopeStateChanged 바인딩) → PIE 저격 스코프·W-U1 진화 시각검증. 재개 = 이 블록.**
 > **활성 브랜치**: `phase/pwas-b-procedural-weapon-motion`(미푸시). **이번 세션 커밋 4개**: `06c30118` 조립기 3건 수정(교체 선택유실 버그·프리뷰 바닥높이·부착물 카탈로그 Attachments 재귀스캔) / `967a475d` W-U2 저격스코프 런타임 / `6211a2db` 조립기 파츠 추가/제거 / `8574e265` W-U2 크로스헤어 desync 수정. **push/머지 = 승인 대기.** 검증 = 각 빌드 -NoXGE `Result: Succeeded`(0/0) + 스모크 validate-data exit0(invalid=0) + 적대적 리뷰(Opus 3렌즈+검증관).
