@@ -33,7 +33,8 @@ public class FPSRogueliteEditor : ModuleRules
 			"InputCore",                // EKeys::* referenced by SListView/SComboBox/SNumericEntryBox key-nav (link dep)
 			"ContentBrowser",           // no longer used by the Weapon Part Assembler (now an embedded-viewport tool with
 			                            // its own DA picker), kept for potential future content-browser integrations
-			"AdvancedPreviewScene"      // FAdvancedPreviewScene — the Weapon Part Assembler's embedded 3D preview viewport
+			"AdvancedPreviewScene",     // FAdvancedPreviewScene — the Weapon Part Assembler's embedded 3D preview viewport
+			"EditorWidgets"             // SEnumComboBox — 진화 단계 트리거/스탯 콤보(Assembler evolution authoring panel)
 		});
 	}
 }

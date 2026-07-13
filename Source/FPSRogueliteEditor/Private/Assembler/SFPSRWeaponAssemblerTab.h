@@ -148,9 +148,43 @@ private:
 	FReply OnRemoveStageClicked();
 	bool IsRemoveStageEnabled() const;
 
-	/** 단계 행 스핀박스 값/커밋(선택 슬롯 Stages[StageIndex] 기준). */
+	/** 단계 행 스핀박스 값/커밋(선택 슬롯 Stages[StageIndex] 기준). "선택 단계" 소폼의 스택 스핀박스도 이걸 재사용(인덱스는
+	 *  GetSelectedStageIndex()로 넘긴다). */
 	int32 GetStageMinStacks(int32 StageIndex) const;
 	void OnStageMinStacksChanged(int32 NewValue, int32 StageIndex);
+
+	// --- "선택 단계" 소폼 (트리거 종류 + 스택/스탯 필드 + 순서 이동, 우선순위가 명시적으로 보이도록) ------------------------------
+
+	/** 진화 단계 목록에서 현재 선택된 단계의 인덱스(SelectedStageRow->StageIndex, 없으면 INDEX_NONE). */
+	int32 GetSelectedStageIndex() const;
+
+	/** 단계 행 요약 텍스트: "N. [트리거요약] 메시명" (N=StageIndex+1). 트리거요약 = 스택 조건("스택 ≥{N}") 또는
+	 *  스탯 조건("{축} {비교} {기준값}") — 우선순위(목록 아래일수록 우선)가 한눈에 보이도록. */
+	FText MakeStageRowSummary(int32 StageIndex) const;
+
+	/** 선택 단계의 트리거 종류 콤보(SEnumComboBox) 값/변경. */
+	int32 GetSelectedStageTriggerValue() const;
+	void OnSelectedStageTriggerChanged(int32 NewValue, ESelectInfo::Type SelectInfo);
+
+	/** 선택 단계의 스탯 임계 필드(축/비교/기준값) getter/setter. */
+	int32 GetSelectedStageStatAxisValue() const;
+	void OnSelectedStageStatAxisChanged(int32 NewValue, ESelectInfo::Type SelectInfo);
+	int32 GetSelectedStageStatCompareValue() const;
+	void OnSelectedStageStatCompareChanged(int32 NewValue, ESelectInfo::Type SelectInfo);
+	TOptional<float> GetSelectedStageStatValue() const;
+	void OnSelectedStageStatValueChanged(float NewValue);
+
+	/** "선택 단계" 소폼 표시/활성 제어: 스택 필드=Trigger==FragmentStacks, 스탯 필드=Trigger==StatThreshold,
+	 *  소폼 전체=선택 단계가 유효할 때만. */
+	EVisibility GetStackFieldVisibility() const;
+	EVisibility GetStatFieldVisibility() const;
+	bool IsStageSelected() const;
+
+	/** "▲ 위로"/"▼ 아래로": 선택 단계를 Stages 배열에서 이웃과 스왑(우선순위 재배치), 선택 유지. */
+	FReply OnStageMoveUpClicked();
+	bool IsStageMoveUpEnabled() const;
+	FReply OnStageMoveDownClicked();
+	bool IsStageMoveDownEnabled() const;
 
 	// --- Toolbar --------------------------------------------------------------------------------------------------
 

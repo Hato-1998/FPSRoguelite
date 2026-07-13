@@ -28,9 +28,11 @@
 #include "Widgets/Input/SCheckBox.h"
 #include "Widgets/Input/SEditableTextBox.h"
 #include "Widgets/Input/SSpinBox.h"
+#include "Widgets/Input/SNumericEntryBox.h"
 #include "Widgets/Text/STextBlock.h"
 #include "Widgets/Views/STableRow.h"
 #include "Widgets/Layout/SSplitter.h"
+#include "SEnumCombo.h" // SEnumComboBox — 진화 단계 트리거/스탯 콤보 (EditorWidgets 모듈, 헤더는 SEnumCombo.h)
 
 #define LOCTEXT_NAMESPACE "SFPSRWeaponAssemblerTab"
 
@@ -201,7 +203,7 @@ void SFPSRWeaponAssemblerTab::Construct(const FArguments& InArgs)
 
 					+ SVerticalBox::Slot().AutoHeight().Padding(2.0f, 4.0f, 2.0f, 2.0f)
 					[
-						SNew(STextBlock).Text(LOCTEXT("StageListHeader", "진화 단계 (스택 오름차순):"))
+						SNew(STextBlock).Text(LOCTEXT("StageListHeader", "진화 단계 (아래일수록 우선 · 조건 충족 시 가장 아래 단계 적용):"))
 					]
 
 					+ SVerticalBox::Slot().FillHeight(1.0f)
@@ -211,6 +213,140 @@ void SFPSRWeaponAssemblerTab::Construct(const FArguments& InArgs)
 						.OnGenerateRow(this, &SFPSRWeaponAssemblerTab::OnGenerateStageRow)
 						.OnSelectionChanged(this, &SFPSRWeaponAssemblerTab::OnStageSelectionChanged)
 						.SelectionMode(ESelectionMode::Single)
+					]
+
+					+ SVerticalBox::Slot().AutoHeight().Padding(2.0f, 0.0f, 2.0f, 2.0f)
+					[
+						SNew(SHorizontalBox)
+
+						+ SHorizontalBox::Slot().FillWidth(1.0f).Padding(0.0f, 0.0f, 1.0f, 0.0f)
+						[
+							SNew(SButton)
+							.HAlign(HAlign_Center)
+							.Text(LOCTEXT("StageMoveUpButton", "▲ 위로"))
+							.ToolTipText(LOCTEXT("StageMoveUpButtonTooltip", "선택한 단계를 목록에서 한 칸 위(우선순위 낮음)로 옮깁니다."))
+							.IsEnabled(this, &SFPSRWeaponAssemblerTab::IsStageMoveUpEnabled)
+							.OnClicked(this, &SFPSRWeaponAssemblerTab::OnStageMoveUpClicked)
+						]
+
+						+ SHorizontalBox::Slot().FillWidth(1.0f).Padding(1.0f, 0.0f, 0.0f, 0.0f)
+						[
+							SNew(SButton)
+							.HAlign(HAlign_Center)
+							.Text(LOCTEXT("StageMoveDownButton", "▼ 아래로"))
+							.ToolTipText(LOCTEXT("StageMoveDownButtonTooltip", "선택한 단계를 목록에서 한 칸 아래(우선순위 높음)로 옮깁니다."))
+							.IsEnabled(this, &SFPSRWeaponAssemblerTab::IsStageMoveDownEnabled)
+							.OnClicked(this, &SFPSRWeaponAssemblerTab::OnStageMoveDownClicked)
+						]
+					]
+
+					+ SVerticalBox::Slot().AutoHeight().Padding(2.0f)
+					[
+						SNew(SVerticalBox)
+						.IsEnabled(this, &SFPSRWeaponAssemblerTab::IsStageSelected)
+
+						+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 1.0f)
+						[
+							SNew(STextBlock).Text(LOCTEXT("SelectedStageHeader", "선택 단계:"))
+						]
+
+						+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 1.0f)
+						[
+							SNew(SHorizontalBox)
+
+							+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 4.0f, 0.0f)
+							[
+								SNew(STextBlock).Text(LOCTEXT("StageTriggerPrompt", "트리거 종류:"))
+							]
+
+							+ SHorizontalBox::Slot().FillWidth(1.0f)
+							[
+								SNew(SEnumComboBox, StaticEnum<EFPSRPartStageTrigger>())
+								.CurrentValue(this, &SFPSRWeaponAssemblerTab::GetSelectedStageTriggerValue)
+								.OnEnumSelectionChanged(this, &SFPSRWeaponAssemblerTab::OnSelectedStageTriggerChanged)
+							]
+						]
+
+						+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 1.0f)
+						[
+							SNew(SHorizontalBox)
+							.Visibility(this, &SFPSRWeaponAssemblerTab::GetStackFieldVisibility)
+
+							+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 4.0f, 0.0f)
+							[
+								SNew(STextBlock).Text(LOCTEXT("StageStacksFieldPrompt", "필요 스택:"))
+							]
+
+							+ SHorizontalBox::Slot().FillWidth(1.0f)
+							[
+								SNew(SSpinBox<int32>)
+								.MinValue(1)
+								.MinSliderValue(1)
+								.MaxSliderValue(10)
+								.Value_Lambda([this]() { return GetStageMinStacks(GetSelectedStageIndex()); })
+								.OnValueChanged_Lambda([this](int32 NewValue) { OnStageMinStacksChanged(NewValue, GetSelectedStageIndex()); })
+							]
+						]
+
+						+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 1.0f)
+						[
+							SNew(SVerticalBox)
+							.Visibility(this, &SFPSRWeaponAssemblerTab::GetStatFieldVisibility)
+
+							+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 1.0f)
+							[
+								SNew(SHorizontalBox)
+
+								+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 4.0f, 0.0f)
+								[
+									SNew(STextBlock).Text(LOCTEXT("StageStatAxisPrompt", "스탯 축:"))
+								]
+
+								+ SHorizontalBox::Slot().FillWidth(1.0f)
+								[
+									SNew(SEnumComboBox, StaticEnum<EFPSRWeaponStat>())
+									.CurrentValue(this, &SFPSRWeaponAssemblerTab::GetSelectedStageStatAxisValue)
+									.OnEnumSelectionChanged(this, &SFPSRWeaponAssemblerTab::OnSelectedStageStatAxisChanged)
+								]
+							]
+
+							+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 1.0f)
+							[
+								SNew(SHorizontalBox)
+
+								+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 4.0f, 0.0f)
+								[
+									SNew(STextBlock).Text(LOCTEXT("StageStatComparePrompt", "비교:"))
+								]
+
+								+ SHorizontalBox::Slot().FillWidth(1.0f)
+								[
+									SNew(SEnumComboBox, StaticEnum<EFPSRStatCompare>())
+									.CurrentValue(this, &SFPSRWeaponAssemblerTab::GetSelectedStageStatCompareValue)
+									.OnEnumSelectionChanged(this, &SFPSRWeaponAssemblerTab::OnSelectedStageStatCompareChanged)
+								]
+							]
+
+							+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 1.0f)
+							[
+								SNew(SHorizontalBox)
+
+								+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 4.0f, 0.0f)
+								[
+									SNew(STextBlock).Text(LOCTEXT("StageStatValuePrompt", "기준값:"))
+								]
+
+								+ SHorizontalBox::Slot().FillWidth(1.0f)
+								[
+									SNew(SNumericEntryBox<float>)
+									.AllowSpin(true)
+									.MinSliderValue(0.0f)
+									.MaxSliderValue(100.0f)
+									.Value(this, &SFPSRWeaponAssemblerTab::GetSelectedStageStatValue)
+									.OnValueChanged(this, &SFPSRWeaponAssemblerTab::OnSelectedStageStatValueChanged)
+								]
+							]
+						]
 					]
 
 					+ SVerticalBox::Slot().AutoHeight().Padding(2.0f)
@@ -768,45 +904,10 @@ TSharedRef<ITableRow> SFPSRWeaponAssemblerTab::OnGenerateStageRow(TSharedPtr<FSt
 {
 	const int32 StageIndex = Item.IsValid() ? Item->StageIndex : INDEX_NONE;
 
-	// 단계 메시 표시명(Stages[idx].Mesh 자산명 — 로드 없이 소프트경로에서만 뽑는다; null이면 "(메시 없음)").
-	FText MeshLabel = LOCTEXT("StageMeshNone", "(메시 없음)");
-	{
-		TSharedPtr<FFPSRWeaponAssemblerViewportClient> Client = Viewport.IsValid() ? Viewport->GetAssemblerClient() : nullptr;
-		UFPSRWeaponDataAsset* DA = Client.IsValid() ? Client->GetWeaponDA() : nullptr;
-		const int32 Sel = Client.IsValid() ? Client->GetSelectedPart() : INDEX_NONE;
-		if (DA && DA->WeaponParts1P.IsValidIndex(Sel) && DA->WeaponParts1P[Sel].Stages.IsValidIndex(StageIndex))
-		{
-			const TSoftObjectPtr<UStaticMesh>& StageMesh = DA->WeaponParts1P[Sel].Stages[StageIndex].Mesh;
-			if (!StageMesh.IsNull())
-			{
-				MeshLabel = FText::FromString(StageMesh.GetAssetName());
-			}
-		}
-	}
-
 	return SNew(STableRow<TSharedPtr<FStageRow>>, OwnerTable)
 		[
-			SNew(SHorizontalBox)
-
-			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 4.0f, 0.0f)
-			[
-				SNew(STextBlock).Text(LOCTEXT("StageStacksPrompt", "스택:"))
-			]
-
-			+ SHorizontalBox::Slot().AutoWidth().Padding(0.0f, 0.0f, 4.0f, 0.0f)
-			[
-				SNew(SSpinBox<int32>)
-				.MinValue(1)
-				.MinSliderValue(1)
-				.MaxSliderValue(10)
-				.Value_Lambda([this, StageIndex]() { return GetStageMinStacks(StageIndex); })
-				.OnValueChanged_Lambda([this, StageIndex](int32 NewValue) { OnStageMinStacksChanged(NewValue, StageIndex); })
-			]
-
-			+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
-			[
-				SNew(STextBlock).Text(MeshLabel)
-			]
+			SNew(STextBlock)
+			.Text_Lambda([this, StageIndex]() { return MakeStageRowSummary(StageIndex); })
 		];
 }
 
@@ -938,6 +1039,277 @@ void SFPSRWeaponAssemblerTab::OnStageMinStacksChanged(int32 NewValue, int32 Stag
 		DA->MarkPackageDirty();
 		// 스핀박스가 값을 소유(Value_Lambda가 즉시 되읽음) — 리스트 리프레시 불요.
 	}
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// "선택 단계" 소폼 (트리거 종류 + 스택/스탯 필드 + 순서 이동)
+// ---------------------------------------------------------------------------------------------------------------
+
+int32 SFPSRWeaponAssemblerTab::GetSelectedStageIndex() const
+{
+	return SelectedStageRow.IsValid() ? SelectedStageRow->StageIndex : INDEX_NONE;
+}
+
+FText SFPSRWeaponAssemblerTab::MakeStageRowSummary(int32 StageIndex) const
+{
+	TSharedPtr<FFPSRWeaponAssemblerViewportClient> Client = Viewport.IsValid() ? Viewport->GetAssemblerClient() : nullptr;
+	UFPSRWeaponDataAsset* DA = Client.IsValid() ? Client->GetWeaponDA() : nullptr;
+	const int32 Sel = Client.IsValid() ? Client->GetSelectedPart() : INDEX_NONE;
+	if (!DA || !DA->WeaponParts1P.IsValidIndex(Sel) || !DA->WeaponParts1P[Sel].Stages.IsValidIndex(StageIndex))
+	{
+		return FText::GetEmpty();
+	}
+
+	const FFPSRWeaponPartStage& Stage = DA->WeaponParts1P[Sel].Stages[StageIndex];
+
+	FText TriggerSummary;
+	if (Stage.Trigger == EFPSRPartStageTrigger::FragmentStacks)
+	{
+		TriggerSummary = FText::Format(LOCTEXT("StageTriggerStacksSummary", "스택 ≥{0}"), FText::AsNumber(Stage.MinStacks));
+	}
+	else
+	{
+		const FText AxisName = StaticEnum<EFPSRWeaponStat>()->GetDisplayNameTextByValue((int64)Stage.StatAxis);
+		const FText CompareSymbol = StaticEnum<EFPSRStatCompare>()->GetDisplayNameTextByValue((int64)Stage.StatCompare);
+		TriggerSummary = FText::Format(LOCTEXT("StageTriggerStatSummary", "{0} {1} {2}"), AxisName, CompareSymbol, FText::AsNumber(Stage.StatValue));
+	}
+
+	const FText MeshLabel = Stage.Mesh.IsNull()
+		? LOCTEXT("StageMeshNone", "(메시 없음)")
+		: FText::FromString(Stage.Mesh.GetAssetName());
+
+	return FText::Format(LOCTEXT("StageRowSummary", "{0}. [{1}] {2}"), FText::AsNumber(StageIndex + 1), TriggerSummary, MeshLabel);
+}
+
+int32 SFPSRWeaponAssemblerTab::GetSelectedStageTriggerValue() const
+{
+	TSharedPtr<FFPSRWeaponAssemblerViewportClient> Client = Viewport.IsValid() ? Viewport->GetAssemblerClient() : nullptr;
+	UFPSRWeaponDataAsset* DA = Client.IsValid() ? Client->GetWeaponDA() : nullptr;
+	const int32 Sel = Client.IsValid() ? Client->GetSelectedPart() : INDEX_NONE;
+	const int32 StageIndex = GetSelectedStageIndex();
+	if (DA && DA->WeaponParts1P.IsValidIndex(Sel) && DA->WeaponParts1P[Sel].Stages.IsValidIndex(StageIndex))
+	{
+		return (int32)DA->WeaponParts1P[Sel].Stages[StageIndex].Trigger;
+	}
+	return (int32)EFPSRPartStageTrigger::FragmentStacks;
+}
+
+void SFPSRWeaponAssemblerTab::OnSelectedStageTriggerChanged(int32 NewValue, ESelectInfo::Type SelectInfo)
+{
+	TSharedPtr<FFPSRWeaponAssemblerViewportClient> Client = Viewport.IsValid() ? Viewport->GetAssemblerClient() : nullptr;
+	UFPSRWeaponDataAsset* DA = Client.IsValid() ? Client->GetWeaponDA() : nullptr;
+	const int32 Sel = Client.IsValid() ? Client->GetSelectedPart() : INDEX_NONE;
+	const int32 StageIndex = GetSelectedStageIndex();
+	if (DA && DA->WeaponParts1P.IsValidIndex(Sel) && DA->WeaponParts1P[Sel].Stages.IsValidIndex(StageIndex))
+	{
+		DA->WeaponParts1P[Sel].Stages[StageIndex].Trigger = (EFPSRPartStageTrigger)NewValue;
+		DA->MarkPackageDirty();
+		if (StageListView.IsValid())
+		{
+			StageListView->RequestListRefresh();
+		}
+	}
+}
+
+int32 SFPSRWeaponAssemblerTab::GetSelectedStageStatAxisValue() const
+{
+	TSharedPtr<FFPSRWeaponAssemblerViewportClient> Client = Viewport.IsValid() ? Viewport->GetAssemblerClient() : nullptr;
+	UFPSRWeaponDataAsset* DA = Client.IsValid() ? Client->GetWeaponDA() : nullptr;
+	const int32 Sel = Client.IsValid() ? Client->GetSelectedPart() : INDEX_NONE;
+	const int32 StageIndex = GetSelectedStageIndex();
+	if (DA && DA->WeaponParts1P.IsValidIndex(Sel) && DA->WeaponParts1P[Sel].Stages.IsValidIndex(StageIndex))
+	{
+		return (int32)DA->WeaponParts1P[Sel].Stages[StageIndex].StatAxis;
+	}
+	return (int32)EFPSRWeaponStat::FireRate;
+}
+
+void SFPSRWeaponAssemblerTab::OnSelectedStageStatAxisChanged(int32 NewValue, ESelectInfo::Type SelectInfo)
+{
+	TSharedPtr<FFPSRWeaponAssemblerViewportClient> Client = Viewport.IsValid() ? Viewport->GetAssemblerClient() : nullptr;
+	UFPSRWeaponDataAsset* DA = Client.IsValid() ? Client->GetWeaponDA() : nullptr;
+	const int32 Sel = Client.IsValid() ? Client->GetSelectedPart() : INDEX_NONE;
+	const int32 StageIndex = GetSelectedStageIndex();
+	if (DA && DA->WeaponParts1P.IsValidIndex(Sel) && DA->WeaponParts1P[Sel].Stages.IsValidIndex(StageIndex))
+	{
+		DA->WeaponParts1P[Sel].Stages[StageIndex].StatAxis = (EFPSRWeaponStat)NewValue;
+		DA->MarkPackageDirty();
+		if (StageListView.IsValid())
+		{
+			StageListView->RequestListRefresh();
+		}
+	}
+}
+
+int32 SFPSRWeaponAssemblerTab::GetSelectedStageStatCompareValue() const
+{
+	TSharedPtr<FFPSRWeaponAssemblerViewportClient> Client = Viewport.IsValid() ? Viewport->GetAssemblerClient() : nullptr;
+	UFPSRWeaponDataAsset* DA = Client.IsValid() ? Client->GetWeaponDA() : nullptr;
+	const int32 Sel = Client.IsValid() ? Client->GetSelectedPart() : INDEX_NONE;
+	const int32 StageIndex = GetSelectedStageIndex();
+	if (DA && DA->WeaponParts1P.IsValidIndex(Sel) && DA->WeaponParts1P[Sel].Stages.IsValidIndex(StageIndex))
+	{
+		return (int32)DA->WeaponParts1P[Sel].Stages[StageIndex].StatCompare;
+	}
+	return (int32)EFPSRStatCompare::GreaterOrEqual;
+}
+
+void SFPSRWeaponAssemblerTab::OnSelectedStageStatCompareChanged(int32 NewValue, ESelectInfo::Type SelectInfo)
+{
+	TSharedPtr<FFPSRWeaponAssemblerViewportClient> Client = Viewport.IsValid() ? Viewport->GetAssemblerClient() : nullptr;
+	UFPSRWeaponDataAsset* DA = Client.IsValid() ? Client->GetWeaponDA() : nullptr;
+	const int32 Sel = Client.IsValid() ? Client->GetSelectedPart() : INDEX_NONE;
+	const int32 StageIndex = GetSelectedStageIndex();
+	if (DA && DA->WeaponParts1P.IsValidIndex(Sel) && DA->WeaponParts1P[Sel].Stages.IsValidIndex(StageIndex))
+	{
+		DA->WeaponParts1P[Sel].Stages[StageIndex].StatCompare = (EFPSRStatCompare)NewValue;
+		DA->MarkPackageDirty();
+		if (StageListView.IsValid())
+		{
+			StageListView->RequestListRefresh();
+		}
+	}
+}
+
+TOptional<float> SFPSRWeaponAssemblerTab::GetSelectedStageStatValue() const
+{
+	TSharedPtr<FFPSRWeaponAssemblerViewportClient> Client = Viewport.IsValid() ? Viewport->GetAssemblerClient() : nullptr;
+	UFPSRWeaponDataAsset* DA = Client.IsValid() ? Client->GetWeaponDA() : nullptr;
+	const int32 Sel = Client.IsValid() ? Client->GetSelectedPart() : INDEX_NONE;
+	const int32 StageIndex = GetSelectedStageIndex();
+	if (DA && DA->WeaponParts1P.IsValidIndex(Sel) && DA->WeaponParts1P[Sel].Stages.IsValidIndex(StageIndex))
+	{
+		return DA->WeaponParts1P[Sel].Stages[StageIndex].StatValue;
+	}
+	return 0.0f;
+}
+
+void SFPSRWeaponAssemblerTab::OnSelectedStageStatValueChanged(float NewValue)
+{
+	TSharedPtr<FFPSRWeaponAssemblerViewportClient> Client = Viewport.IsValid() ? Viewport->GetAssemblerClient() : nullptr;
+	UFPSRWeaponDataAsset* DA = Client.IsValid() ? Client->GetWeaponDA() : nullptr;
+	const int32 Sel = Client.IsValid() ? Client->GetSelectedPart() : INDEX_NONE;
+	const int32 StageIndex = GetSelectedStageIndex();
+	if (DA && DA->WeaponParts1P.IsValidIndex(Sel) && DA->WeaponParts1P[Sel].Stages.IsValidIndex(StageIndex))
+	{
+		DA->WeaponParts1P[Sel].Stages[StageIndex].StatValue = NewValue;
+		DA->MarkPackageDirty();
+		if (StageListView.IsValid())
+		{
+			StageListView->RequestListRefresh();
+		}
+	}
+}
+
+EVisibility SFPSRWeaponAssemblerTab::GetStackFieldVisibility() const
+{
+	return GetSelectedStageTriggerValue() == (int32)EFPSRPartStageTrigger::FragmentStacks ? EVisibility::Visible : EVisibility::Collapsed;
+}
+
+EVisibility SFPSRWeaponAssemblerTab::GetStatFieldVisibility() const
+{
+	return GetSelectedStageTriggerValue() == (int32)EFPSRPartStageTrigger::StatThreshold ? EVisibility::Visible : EVisibility::Collapsed;
+}
+
+bool SFPSRWeaponAssemblerTab::IsStageSelected() const
+{
+	return GetSelectedStageIndex() != INDEX_NONE;
+}
+
+FReply SFPSRWeaponAssemblerTab::OnStageMoveUpClicked()
+{
+	TSharedPtr<FFPSRWeaponAssemblerViewportClient> Client = Viewport.IsValid() ? Viewport->GetAssemblerClient() : nullptr;
+	UFPSRWeaponDataAsset* DA = Client.IsValid() ? Client->GetWeaponDA() : nullptr;
+	const int32 Sel = Client.IsValid() ? Client->GetSelectedPart() : INDEX_NONE;
+	const int32 StageIndex = GetSelectedStageIndex();
+	if (!DA || !DA->WeaponParts1P.IsValidIndex(Sel))
+	{
+		return FReply::Handled();
+	}
+
+	TArray<FFPSRWeaponPartStage>& Stages = DA->WeaponParts1P[Sel].Stages;
+	if (!Stages.IsValidIndex(StageIndex) || StageIndex <= 0)
+	{
+		return FReply::Handled();
+	}
+
+	// Stages 배열을 건드리기 전에 이전 단계 미리보기를 캡처·종료(스왑 후 스테일 인덱스로 엉뚱한 단계에 쓰는 것 방지).
+	if (Client.IsValid())
+	{
+		Client->EndStagePreview();
+	}
+
+	Stages.Swap(StageIndex, StageIndex - 1);
+	DA->MarkPackageDirty();
+
+	RefreshStageList();
+	if (StageListView.IsValid() && StageRows.IsValidIndex(StageIndex - 1))
+	{
+		StageListView->SetSelection(StageRows[StageIndex - 1]);
+	}
+
+	if (StatusText.IsValid())
+	{
+		StatusText->SetText(LOCTEXT("StageMoveDone", "단계 순서를 변경했습니다. '조립→저장'을 눌러야 저장됩니다."));
+	}
+	return FReply::Handled();
+}
+
+bool SFPSRWeaponAssemblerTab::IsStageMoveUpEnabled() const
+{
+	return GetSelectedStageIndex() > 0;
+}
+
+FReply SFPSRWeaponAssemblerTab::OnStageMoveDownClicked()
+{
+	TSharedPtr<FFPSRWeaponAssemblerViewportClient> Client = Viewport.IsValid() ? Viewport->GetAssemblerClient() : nullptr;
+	UFPSRWeaponDataAsset* DA = Client.IsValid() ? Client->GetWeaponDA() : nullptr;
+	const int32 Sel = Client.IsValid() ? Client->GetSelectedPart() : INDEX_NONE;
+	const int32 StageIndex = GetSelectedStageIndex();
+	if (!DA || !DA->WeaponParts1P.IsValidIndex(Sel))
+	{
+		return FReply::Handled();
+	}
+
+	TArray<FFPSRWeaponPartStage>& Stages = DA->WeaponParts1P[Sel].Stages;
+	if (!Stages.IsValidIndex(StageIndex) || StageIndex >= Stages.Num() - 1)
+	{
+		return FReply::Handled();
+	}
+
+	// Stages 배열을 건드리기 전에 이전 단계 미리보기를 캡처·종료(스왑 후 스테일 인덱스로 엉뚱한 단계에 쓰는 것 방지).
+	if (Client.IsValid())
+	{
+		Client->EndStagePreview();
+	}
+
+	Stages.Swap(StageIndex, StageIndex + 1);
+	DA->MarkPackageDirty();
+
+	RefreshStageList();
+	if (StageListView.IsValid() && StageRows.IsValidIndex(StageIndex + 1))
+	{
+		StageListView->SetSelection(StageRows[StageIndex + 1]);
+	}
+
+	if (StatusText.IsValid())
+	{
+		StatusText->SetText(LOCTEXT("StageMoveDone", "단계 순서를 변경했습니다. '조립→저장'을 눌러야 저장됩니다."));
+	}
+	return FReply::Handled();
+}
+
+bool SFPSRWeaponAssemblerTab::IsStageMoveDownEnabled() const
+{
+	TSharedPtr<FFPSRWeaponAssemblerViewportClient> Client = Viewport.IsValid() ? Viewport->GetAssemblerClient() : nullptr;
+	UFPSRWeaponDataAsset* DA = Client.IsValid() ? Client->GetWeaponDA() : nullptr;
+	const int32 Sel = Client.IsValid() ? Client->GetSelectedPart() : INDEX_NONE;
+	const int32 StageIndex = GetSelectedStageIndex();
+	if (!DA || !DA->WeaponParts1P.IsValidIndex(Sel))
+	{
+		return false;
+	}
+	return StageIndex != INDEX_NONE && StageIndex < DA->WeaponParts1P[Sel].Stages.Num() - 1;
 }
 
 // ---------------------------------------------------------------------------------------------------------------
