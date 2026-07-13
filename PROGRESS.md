@@ -6,7 +6,7 @@
 
 **최종 갱신: 2026-07-13 (c)**
 
-## 🔔 핸드오프 (2026-07-13 c · **무기 조립 툴 개편 = 코드 전부 완료(A/B/C1/C2 커밋·빌드검증), 남은 것=사용자 콘텐츠 재저작+PIE**) — 🎯 **다음(사용자·코드 아님) = 새 조립기로 라이플 저격 진화 재저작 + PIE. 재개=이 블록.**
+## 🔔 핸드오프 (2026-07-13 c · **무기 조립 툴 개편 = 코드 전부 완료·빌드검증·✅사용자 정상작동 확인**: A/B/C1/C2 + 스탯트리거(SC-A/B) + 스코프디테일(SC-C) + 스코프위젯화(`49c73dff`)) — 🎯 **남은 것(사용자·코드 아님) = 새 조립기로 라이플 저격 진화 재저작 + 사이트별 스코프 WBP 저작 + 전체 PIE. 재개=이 블록.**
 > **활성 브랜치**: `phase/pwas-b-procedural-weapon-motion`(미푸시). **커밋**: `ee9c475f`(A 스키마/셀렉터/검증) · `8190b664`(B 고정소켓+표시라벨) · `497e25f6`(C1 진화저작패널) · `dc95b95f`(C2 단계 뷰포트배치). 각 빌드 -NoXGE `Result: Succeeded`.
 > **✅ 재설계(사용자 결정+Codex 2R 수렴, `Docs/Review/20260713-plan-weapon-assembler-evolution.md`)**: 폴리모픽 PartRules 폐기 → **파츠별 스택 진화(순수 struct)**. `FFPSRWeaponPartAttachment`에 `EvolutionFragment`+`Stages`(각 `{MinStacks, Mesh, Offset, Scope}`). 파츠당 카드 1개, 먹은 스택 수로 단계 결정(최고 MinStacks 승자), 최종=카드 MaxStacks라 자동 소진(기존 카드풀 로직). 소켓=고정 안정 id(`SOCKET_Mount_<hex>`, 메시 바뀌어도 불변), 사용자는 DisplayLabel(표시용)만 입력. `UFPSRWeaponPartRule`/`UFPSRWeaponPartCondition`/`Weapon.Slot.*` 삭제. 런타임 `RebuildPartsFromSelection`·W-U2 스코프 코드 무변경. `ComputeSignature`를 Offset/Scope/Socket 포함으로 확장(진화/역진화 stale 잠재버그 수정). IsDataValid: MinStacks<1/중복=ERROR, 진화 사이트 슬롯 각 단계 메시 AimSocket 보유 검사=ERROR(조준감 회귀 차단).
 > **✅ 조립기 신 UI**(Tools>FPSR>무기 파츠 조립기): 슬롯 "이름" 편집(표시 라벨) + "진화(선택 슬롯)" 패널(카드 피커 + 단계 목록 + ＋단계추가/−단계제거) + 단계 선택 시 뷰포트 미리보기·기존 기즈모로 배치(미리보기 종료 시 오프셋 자동 캡처).
