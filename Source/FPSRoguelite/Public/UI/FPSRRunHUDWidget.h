@@ -11,7 +11,6 @@ class UFPSRWeaponFireComponent;
 class UMaterialInterface;
 class UMaterialInstanceDynamic;
 class AFPSRCharacter;
-class UTexture2D;
 
 /** Passive run-state HUD base (Game layer). Exposes replicated run state (GameState) to WBP via BlueprintPure
  *  getters and fires OnRunStateUpdated whenever it changes. Event-driven: binds GameState OnRunStateChanged,
@@ -34,10 +33,11 @@ protected:
 	UFUNCTION(BlueprintImplementableEvent, Category = "FPSR|HUD")
 	void OnRunStateUpdated();
 
-	/** W-U2 scope overlay hook: fired on the scoped edge. The content WBP shows/hides its full-screen reticle +
-	 *  vignette; Reticle is the active sight's texture (null = WBP default), bVignette requests the edge vignette. */
+	/** W-U2 scope overlay hook: fired on the scoped edge. The content WBP shows/hides its full-screen vignette;
+	 *  bVignette requests the edge vignette. The reticle art itself now lives in a per-site scope overlay widget
+	 *  (see UpdateScopeOverlay) rather than a texture passed here. */
 	UFUNCTION(BlueprintImplementableEvent, Category = "FPSR|HUD")
-	void OnScopeStateChanged(bool bScoped, UTexture2D* Reticle, bool bVignette);
+	void OnScopeStateChanged(bool bScoped, bool bVignette);
 
 	/** BlueprintPure mirror of the owner's scope-active state (for WBP visibility bindings). (W-U2) */
 	UFUNCTION(BlueprintPure, Category = "FPSR|HUD")
@@ -98,8 +98,9 @@ protected:
 
 	// --- W-U2 full-screen scope overlay (owner-local) ---
 
-	/** Full-screen scope-overlay widget shown while a scope is visually active (e.g. the Synty sniper-reticle WBP
-	 *  HUD_SciFiSoldier_Reticle_SniperRifle_01). Created lazily + added to the local player's viewport, its visibility
+	/** Fallback full-screen scope-overlay widget used when the active sight doesn't specify its own
+	 *  (UFPSRWeaponDataAsset / FFPSRWeaponPartStage Scope.ScopeOverlayWidgetClass) — e.g. the Synty sniper-reticle WBP
+	 *  HUD_SciFiSoldier_Reticle_SniperRifle_01. Created lazily + added to the local player's viewport, its visibility
 	 *  toggled by scope state. Null = no reticle art (the scope still zooms + hides the weapon). Owner-local: this HUD
 	 *  widget lives only on the local player's screen, so the overlay never reaches teammates. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Scope")

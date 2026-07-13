@@ -25,11 +25,11 @@ class UFPSRBlindspotAudioComponent;
 struct FInputActionValue;
 class UStaticMeshComponent;
 class UMeshComponent;
-class UTexture2D;
 class UAnimInstance;
 class UAnimMontage;
 class USoundBase;
 class UParticleSystem;
+class UUserWidget;
 
 /** Base player character: first-person camera + Separated-Arms meshes + Enhanced Input + weapon inventory/firing. ASC lives on PlayerState. */
 UCLASS()
@@ -125,10 +125,10 @@ public:
 	 *  active. Called each frame from the weapon-fire tick (which already no-ops for non-local pawns). (W-U2) */
 	void UpdateScopeWeaponVisibility();
 
-	/** Active scope's reticle texture (loaded) while a scope is visually active, else null. For the HUD scope overlay;
-	 *  call on the scoped edge (not per frame) — it loads the soft ref synchronously. (W-U2) */
+	/** 활성 사이트의 스코프 오버레이 위젯 클래스(스코프 시각 활성 시). 없으면 null(HUD가 폴백 사용). 호출은 스코프
+	 *  진입 엣지에서(프레임마다 아님) — 소프트 참조를 동기 로드한다. (스코프 위젯화) */
 	UFUNCTION(BlueprintPure, Category = "FPSR|Weapon")
-	UTexture2D* GetActiveScopeReticle() const;
+	TSubclassOf<UUserWidget> GetActiveScopeOverlayWidgetClass() const;
 
 	/** True while a scope is active AND its descriptor requests the edge vignette. For the HUD scope overlay. (W-U2) */
 	UFUNCTION(BlueprintPure, Category = "FPSR|Weapon")

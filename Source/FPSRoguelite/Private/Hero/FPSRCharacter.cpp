@@ -1,7 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Hero/FPSRCharacter.h"
-#include "Engine/Texture2D.h"
+#include "Blueprint/UserWidget.h"
 #include "Core/FPSRPlayerController.h"
 #include "Core/FPSRPlayerState.h"
 #include "Core/FPSRGameMode.h"
@@ -437,15 +437,15 @@ void AFPSRCharacter::UpdateScopeWeaponVisibility()
 	}
 }
 
-UTexture2D* AFPSRCharacter::GetActiveScopeReticle() const
+TSubclassOf<UUserWidget> AFPSRCharacter::GetActiveScopeOverlayWidgetClass() const
 {
 	// Loaded only when a scope is actually active — the HUD calls this on the scoped edge (not per frame), so the
-	// synchronous soft-ptr load happens at most once per scope-in. Null (WBP default reticle) when none authored.
+	// synchronous soft-ptr load happens at most once per scope-in. Null (HUD falls back to its own class) when none authored.
 	if (!IsScopeVisualActive())
 	{
 		return nullptr;
 	}
-	return CachedScopeDescriptor.ScopeReticle.LoadSynchronous();
+	return CachedScopeDescriptor.ScopeOverlayWidgetClass.LoadSynchronous();
 }
 
 bool AFPSRCharacter::IsScopeVignetteEnabled() const

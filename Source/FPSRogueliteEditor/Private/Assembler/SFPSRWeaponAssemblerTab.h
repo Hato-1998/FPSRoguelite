@@ -196,9 +196,9 @@ private:
 	TOptional<float> GetSelectedStageAimFOV() const;
 	void OnSelectedStageAimFOVChanged(float NewValue);
 
-	/** 선택 단계 Scope.ScopeReticle(소프트 텍스처) getter/setter. */
-	FString GetSelectedStageReticlePath() const;
-	void OnSelectedStageReticleChanged(const FAssetData& AssetData);
+	/** 선택 단계 Scope.ScopeOverlayWidgetClass(소프트 위젯 클래스) getter/setter. */
+	const UClass* GetSelectedStageScopeWidgetClass() const;
+	void OnSelectedStageScopeWidgetChanged(const UClass* NewClass);
 
 	/** 선택 단계 Scope.bScopeVignette getter/setter. */
 	ECheckBoxState GetSelectedStageScopeVignette() const;
@@ -208,7 +208,7 @@ private:
 	ECheckBoxState GetSelectedStageHideWeapon() const;
 	void OnSelectedStageHideWeaponChanged(ECheckBoxState NewState);
 
-	/** 리티클/비네트/총 숨김 서브필드 표시 조건: 선택 단계가 유효하고 Scope.bScopeOverlay일 때만 Visible. */
+	/** 스코프 위젯(WBP)/비네트/총 숨김 서브필드 표시 조건: 선택 단계가 유효하고 Scope.bScopeOverlay일 때만 Visible. */
 	EVisibility GetScopeOverlaySubFieldVisibility() const;
 
 	// --- Toolbar --------------------------------------------------------------------------------------------------

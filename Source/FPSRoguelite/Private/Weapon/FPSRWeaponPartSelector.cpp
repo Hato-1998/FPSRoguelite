@@ -109,7 +109,7 @@ uint32 FPSRWeaponPartSelector::ComputeSignature(const TArray<FFPSRWeaponPartAtta
 		Hash = HashCombine(Hash, GetTypeHash(P.Offset.GetScale3D()));
 		Hash = HashCombine(Hash, GetTypeHash(P.Scope.bScopeOverlay));
 		Hash = HashCombine(Hash, GetTypeHash(P.Scope.AimFieldOfView));
-		Hash = HashCombine(Hash, GetTypeHash(P.Scope.ScopeReticle.ToSoftObjectPath()));
+		Hash = HashCombine(Hash, GetTypeHash(P.Scope.ScopeOverlayWidgetClass.ToSoftObjectPath()));
 		Hash = HashCombine(Hash, GetTypeHash(P.Scope.bScopeVignette));
 		Hash = HashCombine(Hash, GetTypeHash(P.Scope.bHideWeaponWhileScoped));
 	}

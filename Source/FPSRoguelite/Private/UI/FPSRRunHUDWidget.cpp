@@ -60,9 +60,8 @@ void UFPSRRunHUDWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTim
 	if (bScoped != bLastScoped)
 	{
 		bLastScoped = bScoped;
-		UTexture2D* Reticle = (bScoped && OwningChar) ? OwningChar->GetActiveScopeReticle() : nullptr;
 		const bool bVignette = bScoped && OwningChar && OwningChar->IsScopeVignetteEnabled();
-		OnScopeStateChanged(bScoped, Reticle, bVignette);
+		OnScopeStateChanged(bScoped, bVignette);
 		UpdateScopeOverlay(bScoped);
 	}
 
@@ -151,18 +150,32 @@ AFPSRCharacter* UFPSRRunHUDWidget::ResolveOwningCharacter()
 
 void UFPSRRunHUDWidget::UpdateScopeOverlay(bool bScoped)
 {
-	// Lazily create the overlay the first time a scope activates, then just toggle its visibility. Owner-local: this
-	// HUD widget exists only on the local player's screen, so the overlay is never seen by teammates. Null class =
-	// no reticle art (the scope still zooms + hides the weapon).
-	if (bScoped && !ScopeOverlayInstance)
+	// 원하는 오버레이 클래스: 활성 사이트가 지정한 위젯 우선, 없으면 이 HUD의 폴백(ScopeOverlayWidgetClass).
+	TSubclassOf<UUserWidget> DesiredClass = nullptr;
+	if (bScoped)
 	{
-		if (TSubclassOf<UUserWidget> Cls = ScopeOverlayWidgetClass.LoadSynchronous())
+		if (AFPSRCharacter* Char = ResolveOwningCharacter())
 		{
-			ScopeOverlayInstance = CreateWidget<UUserWidget>(GetOwningPlayer(), Cls);
-			if (ScopeOverlayInstance)
-			{
-				ScopeOverlayInstance->AddToViewport(5); // above the HUD content, below modal UI
-			}
+			DesiredClass = Char->GetActiveScopeOverlayWidgetClass();
+		}
+		if (!DesiredClass)
+		{
+			DesiredClass = ScopeOverlayWidgetClass.LoadSynchronous();
+		}
+	}
+	// 스코프 해제됐거나 원하는 클래스가 현재 인스턴스와 다르면(사이트 교체) 기존 인스턴스 파괴.
+	if (ScopeOverlayInstance && (!bScoped || ScopeOverlayInstance->GetClass() != DesiredClass))
+	{
+		ScopeOverlayInstance->RemoveFromParent();
+		ScopeOverlayInstance = nullptr;
+	}
+	// 필요 시 원하는 클래스로 생성.
+	if (bScoped && DesiredClass && !ScopeOverlayInstance)
+	{
+		ScopeOverlayInstance = CreateWidget<UUserWidget>(GetOwningPlayer(), DesiredClass);
+		if (ScopeOverlayInstance)
+		{
+			ScopeOverlayInstance->AddToViewport(5); // HUD 컨텐츠 위, 모달 UI 아래
 		}
 	}
 	if (ScopeOverlayInstance)

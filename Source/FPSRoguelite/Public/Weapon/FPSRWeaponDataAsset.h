@@ -17,9 +17,9 @@ class UAnimInstance;
 class UAnimMontage;
 class USoundBase;
 class UParticleSystem;
-class UTexture2D;
 class UMaterialInterface;
 class UFPSRWeaponFragment;
+class UUserWidget;
 
 /** Sniper-scope descriptor (W-U2) for a SIGHT part. Purely OWNER-LOCAL cosmetic: when this sight is active and the
  *  player aims, it drives a full-screen scope — strong FOV zoom + HUD reticle/vignette overlay + 1P weapon hidden.
@@ -41,9 +41,10 @@ struct FFPSRWeaponScopeDescriptor
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "스코프", meta = (DisplayName = "조준 배율 FOV(도, ≤0=무기 기본)", ClampMin = "0.0"))
 	float AimFieldOfView = 0.0f;
 
-	/** Reticle texture drawn centred in the full-screen overlay (content WBP binds it). Null = the WBP's default reticle. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "스코프", meta = (DisplayName = "스코프 리티클 텍스처", EditCondition = "bScopeOverlay", EditConditionHides))
-	TSoftObjectPtr<UTexture2D> ScopeReticle;
+	/** 이 사이트가 활성일 때 HUD가 켜는 풀스크린 스코프 오버레이 위젯 BP(사이트/단계별). null = HUD 폴백
+	 *  (UFPSRRunHUDWidget::ScopeOverlayWidgetClass) 사용. 오너-로컬 코스메틱(복제0). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "스코프", meta = (DisplayName = "스코프 오버레이 위젯(WBP)", EditCondition = "bScopeOverlay", EditConditionHides))
+	TSoftClassPtr<UUserWidget> ScopeOverlayWidgetClass;
 
 	/** Show the dark scope-edge vignette around the reticle while scoped. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "스코프", meta = (DisplayName = "스코프 비네트", EditCondition = "bScopeOverlay", EditConditionHides))

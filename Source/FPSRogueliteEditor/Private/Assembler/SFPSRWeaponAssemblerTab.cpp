@@ -16,11 +16,11 @@
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "AssetRegistry/IAssetRegistry.h"
 
+#include "Blueprint/UserWidget.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/SkeletalMesh.h"
 #include "Engine/StaticMesh.h"
-#include "Engine/Texture2D.h"
 #include "Misc/PackageName.h"
 #include "Modules/ModuleManager.h"
 
@@ -396,16 +396,18 @@ void SFPSRWeaponAssemblerTab::Construct(const FArguments& InArgs)
 
 								+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 4.0f, 0.0f)
 								[
-									SNew(STextBlock).Text(LOCTEXT("StageReticlePrompt", "리티클 텍스처:"))
+									SNew(STextBlock).Text(LOCTEXT("StageScopeWidgetPrompt", "스코프 위젯(WBP):"))
 								]
 
 								+ SHorizontalBox::Slot().FillWidth(1.0f)
 								[
-									SNew(SObjectPropertyEntryBox)
-									.AllowedClass(UTexture2D::StaticClass())
-									.ObjectPath(this, &SFPSRWeaponAssemblerTab::GetSelectedStageReticlePath)
-									.OnObjectChanged(this, &SFPSRWeaponAssemblerTab::OnSelectedStageReticleChanged)
-									.AllowClear(true)
+									SNew(SClassPropertyEntryBox)
+									.MetaClass(UUserWidget::StaticClass())
+									.AllowAbstract(false)
+									.IsBlueprintBaseOnly(true)
+									.AllowNone(true)
+									.SelectedClass(this, &SFPSRWeaponAssemblerTab::GetSelectedStageScopeWidgetClass)
+									.OnSetClass(this, &SFPSRWeaponAssemblerTab::OnSelectedStageScopeWidgetChanged)
 								]
 							]
 
@@ -1362,7 +1364,7 @@ void SFPSRWeaponAssemblerTab::OnSelectedStageAimFOVChanged(float NewValue)
 	}
 }
 
-FString SFPSRWeaponAssemblerTab::GetSelectedStageReticlePath() const
+const UClass* SFPSRWeaponAssemblerTab::GetSelectedStageScopeWidgetClass() const
 {
 	TSharedPtr<FFPSRWeaponAssemblerViewportClient> Client = Viewport.IsValid() ? Viewport->GetAssemblerClient() : nullptr;
 	UFPSRWeaponDataAsset* DA = Client.IsValid() ? Client->GetWeaponDA() : nullptr;
@@ -1370,12 +1372,13 @@ FString SFPSRWeaponAssemblerTab::GetSelectedStageReticlePath() const
 	const int32 StageIndex = GetSelectedStageIndex();
 	if (DA && DA->WeaponParts1P.IsValidIndex(Sel) && DA->WeaponParts1P[Sel].Stages.IsValidIndex(StageIndex))
 	{
-		return DA->WeaponParts1P[Sel].Stages[StageIndex].Scope.ScopeReticle.ToSoftObjectPath().ToString();
+		// LoadSynchronous()는 내부적으로 Get()을 먼저 시도하므로 이미 로드돼 있으면 추가 로드 없이 반환된다.
+		return DA->WeaponParts1P[Sel].Stages[StageIndex].Scope.ScopeOverlayWidgetClass.LoadSynchronous();
 	}
-	return FString();
+	return nullptr;
 }
 
-void SFPSRWeaponAssemblerTab::OnSelectedStageReticleChanged(const FAssetData& AssetData)
+void SFPSRWeaponAssemblerTab::OnSelectedStageScopeWidgetChanged(const UClass* NewClass)
 {
 	TSharedPtr<FFPSRWeaponAssemblerViewportClient> Client = Viewport.IsValid() ? Viewport->GetAssemblerClient() : nullptr;
 	UFPSRWeaponDataAsset* DA = Client.IsValid() ? Client->GetWeaponDA() : nullptr;
@@ -1383,8 +1386,8 @@ void SFPSRWeaponAssemblerTab::OnSelectedStageReticleChanged(const FAssetData& As
 	const int32 StageIndex = GetSelectedStageIndex();
 	if (DA && DA->WeaponParts1P.IsValidIndex(Sel) && DA->WeaponParts1P[Sel].Stages.IsValidIndex(StageIndex))
 	{
-		// AssetData가 비어 있으면(AllowClear로 지운 경우) GetAsset()이 null이라 ScopeReticle도 함께 정리된다.
-		DA->WeaponParts1P[Sel].Stages[StageIndex].Scope.ScopeReticle = Cast<UTexture2D>(AssetData.GetAsset());
+		// NewClass가 nullptr이면(AllowNone으로 지운 경우) ScopeOverlayWidgetClass도 함께 정리된다.
+		DA->WeaponParts1P[Sel].Stages[StageIndex].Scope.ScopeOverlayWidgetClass = NewClass;
 		DA->MarkPackageDirty();
 		if (StageListView.IsValid())
 		{
