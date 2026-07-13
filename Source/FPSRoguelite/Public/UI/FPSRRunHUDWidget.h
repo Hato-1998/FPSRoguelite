@@ -137,6 +137,10 @@ private:
 	/** Last scoped state pushed to the WBP, so OnScopeStateChanged fires only on the edge. (W-U2) */
 	bool bLastScoped = false;
 
+	/** Last vignette state pushed to the WBP, so OnScopeStateChanged also refires when the active sight's vignette
+	 *  flag changes mid-scope (sight evolution). Paired with bLastScoped. */
+	bool bLastVignette = false;
+
 	/** The live scope-overlay widget instance (created lazily from ScopeOverlayWidgetClass on first scope-in). (W-U2) */
 	UPROPERTY(Transient)
 	TObjectPtr<UUserWidget> ScopeOverlayInstance;

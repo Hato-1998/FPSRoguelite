@@ -54,16 +54,21 @@ void UFPSRRunHUDWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTim
 {
 	Super::NativeTick(MyGeometry, InDeltaTime);
 
-	// W-U2 scope overlay: drive the content WBP on the scoped edge (runs even without a crosshair image).
+	// W-U2 scope overlay. UpdateScopeOverlay runs EVERY tick while relevant (not only on the scoped edge) so a
+	// mid-scope sight evolution — e.g. a stat-threshold stage that swaps the sight's ScopeOverlayWidgetClass while the
+	// player stays aimed — actually switches the overlay widget instead of leaving the previous one stale. The BP
+	// event (OnScopeStateChanged) still fires only on a meaningful change (scoped edge or vignette change) to avoid
+	// per-frame Blueprint churn.
 	AFPSRCharacter* OwningChar = ResolveOwningCharacter();
 	const bool bScoped = OwningChar && OwningChar->IsScopeVisualActive();
-	if (bScoped != bLastScoped)
+	const bool bVignette = bScoped && OwningChar && OwningChar->IsScopeVignetteEnabled();
+	if (bScoped != bLastScoped || bVignette != bLastVignette)
 	{
 		bLastScoped = bScoped;
-		const bool bVignette = bScoped && OwningChar && OwningChar->IsScopeVignetteEnabled();
+		bLastVignette = bVignette;
 		OnScopeStateChanged(bScoped, bVignette);
-		UpdateScopeOverlay(bScoped);
 	}
+	UpdateScopeOverlay(bScoped);
 
 	if (!CrosshairImage)
 	{

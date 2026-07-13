@@ -211,6 +211,15 @@ EDataValidationResult UFPSRWeaponDataAsset::IsDataValid(FDataValidationContext& 
 		UFPSRWeaponFragment* Frag = Entry.EvolutionFragment.LoadSynchronous();
 		bool bHasFragmentStackStage = false;
 
+		// Broken evolution-card reference: the soft path is set but the asset failed to load (deleted / renamed). The
+		// selector then silently treats it as 0 stacks (base only), so surface it as a content error here.
+		if (!Entry.EvolutionFragment.IsNull() && !Frag)
+		{
+			Context.AddWarning(FText::Format(LOCTEXT("PartStageFragmentLoadFail",
+				"파츠 슬롯 [{0}]의 진화 카드(EvolutionFragment) 참조를 로드할 수 없습니다 — 삭제되었거나 깨진 참조입니다. 스택 진화가 동작하지 않습니다."),
+				FText::AsNumber(i)));
+		}
+
 		for (int32 s = 0; s < Entry.Stages.Num(); ++s)
 		{
 			const FFPSRWeaponPartStage& Stage = Entry.Stages[s];
@@ -246,9 +255,21 @@ EDataValidationResult UFPSRWeaponDataAsset::IsDataValid(FDataValidationContext& 
 
 			if (Stage.Mesh.IsNull())
 			{
-				Context.AddWarning(FText::Format(LOCTEXT("PartStageMeshMissing",
-					"파츠 슬롯 [{0}] 단계 [{1}]에 메시가 없습니다 — 이 단계가 선택되면 파츠가 사라집니다."),
-					FText::AsNumber(i), FText::AsNumber(s)));
+				if (Stage.Scope.bScopeOverlay)
+				{
+					// A scope-overlay stage IS the sight — with no mesh there is nothing to carry the AimSocket, so the
+					// scope + ADS can never activate. That is a hard error, not just a missing cosmetic.
+					Context.AddError(FText::Format(LOCTEXT("PartStageScopeNoMesh",
+						"파츠 슬롯 [{0}] 단계 [{1}]은 스코프 오버레이를 켜지만 메시가 없습니다 — 사이트 메시(AimSocket 보유)가 없으면 스코프·조준이 활성화되지 않습니다."),
+						FText::AsNumber(i), FText::AsNumber(s)));
+					Result = EDataValidationResult::Invalid;
+				}
+				else
+				{
+					Context.AddWarning(FText::Format(LOCTEXT("PartStageMeshMissing",
+						"파츠 슬롯 [{0}] 단계 [{1}]에 메시가 없습니다 — 이 단계가 선택되면 파츠가 사라집니다."),
+						FText::AsNumber(i), FText::AsNumber(s)));
+				}
 			}
 		}
 
