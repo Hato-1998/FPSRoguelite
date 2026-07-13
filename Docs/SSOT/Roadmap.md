@@ -21,8 +21,8 @@
 - **P1.5-A** 사격 코어 — `UFPSRWeaponFireComponent`: FullAuto 연사 루프 + 반동(카메라 킥) + 확산/블룸. 하드코딩 경로 제거(BP 참조 패턴) 리팩터 완료
 - **빌드 성공 + 헤드리스 부팅·스모크 통과**(Fatal 0)
 
-### 7-2. PIE 테스트 대기 / 사용자 BP 셋업 (블로킹)
-PROGRESS.md '사용자 대기 작업' 참조. 요약: **BP 3종 생성 + 참조 할당** 필요
+### 7-2. (역사 스냅샷) P1 초기 PIE / 사용자 BP 셋업 — ✅ 완료
+> ⚠️ P1 슬라이스(2026-06) 당시의 초기 BP 셋업 블로킹 기록. **전부 완료됨**(§7-3 P1 ✅). 아래는 역사 참조용.
 - `BP_FPSRGameMode`(**반드시 `/Game/Core/`**, 부모 `FPSRGameMode`): DefaultPawnClass / PlayerControllerClass
 - `BP_FPSRCharacter`(부모 `FPSRCharacter`): IA 8개 + DefaultPrimary/SecondaryWeapon(DA_Weapon_Rifle/Knife)
 - `BP_FPSRPlayerController`(부모 `FPSRPlayerController`): DefaultMappingContext=`IMC_Default`

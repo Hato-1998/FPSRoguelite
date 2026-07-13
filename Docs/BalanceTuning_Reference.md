@@ -78,10 +78,10 @@
 | 반동회복 모드/속도 | Auto / 10 | :98·101 | |
 | 수평패턴빈도 / Hip 수직배율 | 0.6 / 0.4 | :104·107 | |
 | **반동 패턴 = CrystalRecoil `RP_*`** (무기별 비주얼 에디터 저작·재장전 초반 리셋) | — | 무기 DA `RecoilPattern`(`UCRRecoilPattern`) | |
-| 근접 반경 / 공격딜레이 | 175cm / 0.5s | :132·135 | (Knife) |
-| ADS 사용 / FOV / 확산배율 / 보간속도 | false / 55 / 0.4 / 14 | :139~148 | (Sniper·Charge) |
-| 투사체 속도/중력/AOE반경/수명/관통/넉백 | 3000 / 0 / 0 / 5s / 0 / 0 | :153~168 | (Bazooka·Grenade·Sniper) |
-| 차징 시간/틱뎀/틱간격 | 0 / 2.0 / 0.12s | :172~178 | (ChargeLaser) |
+| 근접 반경 / 공격딜레이 | 175cm / 0.5s | :120·123 | (Knife) |
+| ADS 사용 / FOV / 확산배율 | false / 55 / 0.4 | :127·129·133 | (Sniper·Charge) |
+| 투사체 속도/AOE반경/수명/관통 | 3000 / 0 / 5s / 0 | :141~153 | (Bazooka·Sniper) |
+| 차징 시간/틱뎀/틱간격 | 0 / 2.0 / 0.12s | :160~166 | (ChargeLaser) |
 | 무기교체 쿨다운 EquipFireCooldown | 0.2s | InvComp.h:29 | |
 | 최대 무기 슬롯 MaxSlots | 3 | InvComp.h:23 (const) | |
 
@@ -175,8 +175,8 @@
 | 접촉피해 무적시간 i-frame | 0.25s | h:239 |
 | 크릿확률 / 크릿배수 / 데미지배수 | 5% / ×2.0 / ×1.0 | CombatSet.cpp:11~13 (카드 GE 가산) |
 | Luck / 픽업반경 / XP획득 / 이속배수 | 0 / ×1.0 / ×1.0 / ×1.0 | CombatSet.cpp:14~17 |
-| **친선사격 배율 FriendlyFireDamageScale** | **0.5 (50%)** | C++ (GameState.h:170) BP-override · ⚠️SSOT의 10%는 stale |
-| 친선사격 활성 기본 | false (OFF) | GameState.h:166 |
+| **친선사격 배율 FriendlyFireDamageScale** | **0.5 (50%)** | C++ (FPSRGameState.h:272) BP-override · ⚠️GameConfirm의 10%는 stale |
+| 친선사격 활성 기본 | false (OFF) | FPSRGameState.h:242 |
 | 폭발 넉백 상향바이어스 | 0.35 | C++ const (CombatStatics.cpp:27) |
 | 비전제한 비네트 강도 | 1.4 | C++ (FPSRCharacter.h:139) |
 | **DBNO 부활(반경/시간/블리드아웃)** | **미구현(U9)** | — 현재 즉사 처리만 |

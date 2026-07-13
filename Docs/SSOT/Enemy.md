@@ -26,7 +26,7 @@
 - **파괴 장벽(`AFPSRDoor`) = 비-적 데미지 대상**: `UFPSREnemyHealthComponent`를 가져 **데미지 브릿지로 전 무기 경로 자동 피격**(신규 데미지 코드 0). 콜리전 오브젝트타입 = `ECC_FPSRPlayerPawn`(플레이어·적 모두 차단 + 대시로 통과 불가 + 모든 무기 오브젝트쿼리에 포함). **`bCountsAsKill=false`** → 부숴도 킬 크레딧·on-kill 프래그먼트·흡혈(on-damage GAS 이벤트) 미발동(데미지/`DamageDealt`/파괴는 정상; `FPSRCombat::ApplyDamage` 게이트). 메시는 BP 지정(C++ 하드코딩 금지), 파괴 연출=`OnDoorBroken`(BlueprintImplementableEvent). 문틀은 `FrameMesh`(WorldStatic=무기쿼리 비대상=무반응 벽). XP는 `AFPSREnemyBase::HandleDeath` 전용이라 문은 자동 0.
 
 ### 2-10. 발사체 / 네트워크
-- 발사체: **클라 예측 + 서버 검증**
+- 발사체: **서버권위 spawn·복제**(결정적 PMC 이동; 클라 cosmetic 예측 = 후속·미구현, A3)
   - **차지레이저 = 히트스캔, 근접 = 구체 오버랩, 그 외 전 플레이어 무기 = 복제 발사체**(무기 전면 투사체화 2026-07-08 `3adc945`; 샷건=펠릿 다발, 스나이퍼=관통 탄환, 바주카=AOE, 연사총 포함. 유탄런처 제거). 발사체 예산·팀별 캡·회수 = `Performance.md §5`.
 - 데미지: **플레이어 GAS 계산 → 적 HealthComponent.ApplyDamage 브릿지** (적 ASC 없음)
 - **아군 오사(Friendly Fire)**(확정 2026-05-30 · **기본 ON 설계확정 2026-07-01 = 코어 협동 정체성**, Concept §1-C-6): FF **기본 ON · 치사(lethal)** — 아군 적중 = **몬스터 데미지의 50%**(`FriendlyFireDamageScale=0.5f`, 크리 없음; **아군 다운(HP 0)까지 가능, HP 클램프 없음**). 사선 관리가 코어 협동 긴장·실력 축; **공개 매칭 미고려(솔로+친구 협동)라 트롤 안전장치 불요**(Codex '비치명' 권고=공개매칭 전제, 무관). 호스트가 세션 설정에서 **OFF 토글** 가능(`SetFriendlyFireEnabled`/디버그 `FPSR.SetFriendlyFire`). ⚠️ **코드 후속**: 현재 `bFriendlyFireEnabled=false`(OFF) → 기본 ON 전환 = 코드 기본값 flip 필요(활성 클론). 데미지 브릿지 팀/FF 배율=`FPSRCombatStatics`. 자폭(폭발)·넉백은 FF 플래그와 독립. **협동 카드 시임**: FF 데미지를 아군 회복으로 전환하는 카드 등(CombatWeaponCard, 콘텐츠).

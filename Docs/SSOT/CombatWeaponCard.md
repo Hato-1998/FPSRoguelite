@@ -90,7 +90,7 @@
 - **아키타입**: 연사총(FullAuto) / AOE(바주카) / 근접(Melee) / 차징 관통 레이저(ChargeLaser) / 단발 스나이퍼(Sniper) / 샷건(Shotgun). `EFPSRWeaponArchetype`의 `Burst`는 **직렬화 보존용으로만 잔존**(전용 무기 없음 — 아래 개편 참조).
 - **⚠️ 무기 개편 (2026-07-08)**: ① **점사총(Burst) 전용 무기 제거** → **점사는 라이플의 언락 프래그먼트**(`UFPSRFragment_BurstFire`, `Rifle.UnlockableFeatures`, 미션 언락)로 이동. 라이플 기본은 연사. ② **유탄 발사기 제거**(바주카는 유지). ③ **기관단총(SMG) 추가**(FullAuto·연사↑↑·데미지↓·투사체). ④ **전달 방식 = 발사체 통일**: **차지레이저(히트스캔)·근접 외 전 무기가 발사체**(연사총 포함). 발사체는 히트스캔과 데미지/약점/크리/처치/프래그먼트(OnHitActor·OnImpact) **패리티**. 연사 무기는 고속·단수명(§5 발사체 예산). **전달 방식 = 무기 DA `FireAbility`(GA)가 결정**(아키타입과 직교): Projectile GA / ChargeLaser GA / Melee GA.
 - **무기별 스탯 = WeaponInstance 스탯 블록(리플리케이트 struct, `FFPSRWeaponStatBlock`)**, 캐릭터 ASC와 분리
-  - 스탯 예: Damage, FireMode, FireRate, BurstCount, Range, MagSize, Spread/Bloom, Recoil, MeleeRadius (+ 후속: ReloadTime, ProjectileSpeed, Pierce, AOERadius, ChargeTime, PelletCount). **예비 탄약은 무한**(ReserveAmmo 미사용 — §2-4-2)
+  - 스탯 예: Damage, FireMode, FireRate, BurstCount, Range, MagSize, Spread(동적확산=heat §2-4-2), Recoil, MeleeRadius (+ 후속: ReloadTime, ProjectileSpeed, Pierce, AOERadius, ChargeTime, PelletCount). **예비 탄약은 무한**(ReserveAmmo 미사용 — §2-4-2)
 - **ADS**: 무기 DA에 `bHasADS`+FOV (스나이퍼/차징=정밀, 연사/샷건=약함, 근접=없음)
 - **무기 교체 입력**: 숫자키 **1/2/3** 직접 슬롯 선택 (`IA_EquipSlot1/2/3`, 마우스휠 미사용)
 
