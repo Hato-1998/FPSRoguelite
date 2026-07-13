@@ -25,6 +25,7 @@
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SCheckBox.h"
+#include "Widgets/Input/SEditableTextBox.h"
 #include "Widgets/Text/STextBlock.h"
 #include "Widgets/Views/STableRow.h"
 #include "Widgets/Layout/SSplitter.h"
@@ -134,6 +135,25 @@ void SFPSRWeaponAssemblerTab::Construct(const FArguments& InArgs)
 						.OnGenerateRow(this, &SFPSRWeaponAssemblerTab::OnGeneratePartRow)
 						.OnSelectionChanged(this, &SFPSRWeaponAssemblerTab::OnPartSelectionChanged)
 						.SelectionMode(ESelectionMode::Single)
+					]
+
+					+ SVerticalBox::Slot().AutoHeight().Padding(2.0f)
+					[
+						SNew(SHorizontalBox)
+
+						+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 4.0f, 0.0f)
+						[
+							SNew(STextBlock).Text(LOCTEXT("SlotLabelPrompt", "슬롯 이름:"))
+						]
+
+						+ SHorizontalBox::Slot().FillWidth(1.0f)
+						[
+							SNew(SEditableTextBox)
+							.Text(this, &SFPSRWeaponAssemblerTab::GetSelectedSlotLabelText)
+							.HintText(LOCTEXT("SlotLabelHint", "예: 조준경, 총열, 총구"))
+							.IsEnabled(this, &SFPSRWeaponAssemblerTab::IsRemovePartEnabled)
+							.OnTextCommitted(this, &SFPSRWeaponAssemblerTab::OnSlotLabelCommitted)
+						]
 					]
 
 					+ SVerticalBox::Slot().AutoHeight().Padding(2.0f)
@@ -455,10 +475,71 @@ FText SFPSRWeaponAssemblerTab::MakePartRowLabel(int32 Index) const
 		return FText::GetEmpty();
 	}
 
-	const FString Slot = PartComps[Index]->GetName();
+	// 슬롯 표시명 = 사용자 지정 DisplayLabel 우선, 비었으면 메시 유도명(컴포넌트 이름, 내부 식별용).
+	UFPSRWeaponDataAsset* DA = Client->GetWeaponDA();
+	FString SlotName;
+	if (DA && DA->WeaponParts1P.IsValidIndex(Index) && !DA->WeaponParts1P[Index].DisplayLabel.IsEmpty())
+	{
+		SlotName = DA->WeaponParts1P[Index].DisplayLabel.ToString();
+	}
+	else
+	{
+		SlotName = PartComps[Index]->GetName();
+	}
 	const UStaticMesh* Mesh = PartComps[Index]->GetStaticMesh();
 	const FString MeshName = Mesh ? Mesh->GetName() : TEXT("(없음)");
-	return FText::FromString(FString::Printf(TEXT("%s  ·  %s"), *Slot, *MeshName));
+	return FText::FromString(FString::Printf(TEXT("%s  ·  %s"), *SlotName, *MeshName));
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Slot display label (DisplayLabel) editor
+// ---------------------------------------------------------------------------------------------------------------
+
+FText SFPSRWeaponAssemblerTab::GetSelectedSlotLabelText() const
+{
+	TSharedPtr<FFPSRWeaponAssemblerViewportClient> Client = Viewport.IsValid() ? Viewport->GetAssemblerClient() : nullptr;
+	UFPSRWeaponDataAsset* DA = Client.IsValid() ? Client->GetWeaponDA() : nullptr;
+	const int32 Sel = Client.IsValid() ? Client->GetSelectedPart() : INDEX_NONE;
+	if (!DA || !DA->WeaponParts1P.IsValidIndex(Sel))
+	{
+		return FText::GetEmpty();
+	}
+	return DA->WeaponParts1P[Sel].DisplayLabel;
+}
+
+void SFPSRWeaponAssemblerTab::OnSlotLabelCommitted(const FText& InText, ETextCommit::Type CommitType)
+{
+	TSharedPtr<FFPSRWeaponAssemblerViewportClient> Client = Viewport.IsValid() ? Viewport->GetAssemblerClient() : nullptr;
+	UFPSRWeaponDataAsset* DA = Client.IsValid() ? Client->GetWeaponDA() : nullptr;
+	const int32 Sel = Client.IsValid() ? Client->GetSelectedPart() : INDEX_NONE;
+	if (!DA || !DA->WeaponParts1P.IsValidIndex(Sel))
+	{
+		return;
+	}
+
+	DA->WeaponParts1P[Sel].DisplayLabel = InText;
+	DA->MarkPackageDirty();
+
+	// PerformSwap과 동일 패턴: 해당 행 라벨만 제자리 갱신(전체 리빌드 금지 — 선택 유실 방지).
+	for (const TSharedPtr<FPartRow>& Row : PartRows)
+	{
+		if (Row.IsValid() && Row->Index == Sel)
+		{
+			Row->Label = MakePartRowLabel(Sel);
+			break;
+		}
+	}
+	if (PartListView.IsValid())
+	{
+		PartListView->RequestListRefresh();
+	}
+
+	if (StatusText.IsValid())
+	{
+		StatusText->SetText(FText::Format(
+			LOCTEXT("SlotLabelDone", "슬롯 이름을 '{0}'(으)로 변경했습니다. '조립→저장'을 눌러야 저장됩니다."),
+			InText));
+	}
 }
 
 FReply SFPSRWeaponAssemblerTab::OnAddPartClicked()

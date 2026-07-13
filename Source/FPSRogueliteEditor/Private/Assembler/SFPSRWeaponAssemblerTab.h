@@ -104,6 +104,13 @@ private:
 	/** '<슬롯명>  ·  <현재 메시명>' 형태의 현재-파츠 행 라벨. 교체 시 이 라벨만 제자리 갱신해 선택을 잃지 않는다. */
 	FText MakePartRowLabel(int32 Index) const;
 
+	// --- Slot display label (DisplayLabel) editor ----------------------------------------------------------------
+
+	/** 선택 슬롯의 표시 라벨(DisplayLabel) — 편집 박스 Text 어트리뷰트. 선택 없으면 빈 텍스트. */
+	FText GetSelectedSlotLabelText() const;
+	/** 편집 박스 커밋: 선택 슬롯의 DisplayLabel을 갱신하고 해당 행 라벨을 제자리 갱신(선택 유지). DA 저장은 '조립→저장'. */
+	void OnSlotLabelCommitted(const FText& InText, ETextCommit::Type CommitType);
+
 	/** "＋ 파츠 추가" 버튼: 아래 '사용 가능 파츠'에서 고른 부착물을 무기에 새 파츠로 추가(client AddPart) → 목록 갱신·
 	 *  새 파츠 선택·바닥 재적합. DA 저장은 '조립→저장'이 담당. */
 	FReply OnAddPartClicked();

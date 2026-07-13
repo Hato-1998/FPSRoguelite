@@ -9,6 +9,7 @@
 #include "Engine/SkeletalMeshSocket.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Misc/Guid.h"
 
 namespace FPSRWeaponAssemblerHelpers
 {
@@ -88,8 +89,14 @@ namespace FPSRWeaponAssemblerHelpers
 			// part's world transform, which only matched when the body sat at the world origin). Then bone-relative.
 			const FTransform PartRelBody = PC->GetComponentTransform().GetRelativeTransform(BodyWorld);
 			const FTransform SocketRel = PartRelBody.GetRelativeTransform(RootBoneCS);
-			// Mount-socket name follows the (renameable) component name: one representative slot, no variant suffix.
-			const FName SocketName(*FString::Printf(TEXT("SOCKET_Mount_%s"), *PC->GetName()));
+			// 안정·메시무관 소켓 id: 슬롯에 이미 구운 소켓이 있으면 그대로 재사용(재베이크/메시 스왑이 마운트를 리네임하지
+			// 않음). 없으면 SOCKET_Mount_<hex>를 GUID로 새로 만든다. 사용자는 DisplayLabel(표시용)로 슬롯을 명명하고,
+			// 소켓 id는 파츠 메시와 분리된다(옛 "소켓명이 메시를 따라감" 동작 수정).
+			FName SocketName = DA->WeaponParts1P[i].Socket;
+			if (SocketName.IsNone() || !SocketName.ToString().StartsWith(TEXT("SOCKET_Mount_")))
+			{
+				SocketName = FName(*FString::Printf(TEXT("SOCKET_Mount_%s"), *FGuid::NewGuid().ToString(EGuidFormats::Base36Encoded)));
+			}
 
 			USkeletalMeshSocket* Socket = NewObject<USkeletalMeshSocket>(Body);
 			Socket->SocketName = SocketName;

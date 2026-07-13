@@ -16,9 +16,8 @@ class UStaticMeshComponent;
  *  all the UObject/preview-scene state; these are plain statics shared by both. */
 namespace FPSRWeaponAssemblerHelpers
 {
-	/** 변종번호 제거한 대표 파츠명 (SM_Wep_Mod_A_Barrel_01 -> Barrel). Part가 null이면 Part<Index>. 이 이름이 곧
-	 *  BakeSockets가 굽는 소켓명(SOCKET_Mount_<이름>)이 되므로, 디자이너가 프리뷰 파츠 컴포넌트를 리네임해 슬롯을
-	 *  제어할 수 있다(예: 배럴 변형들을 같은 소켓으로 합치기). */
+	/** 변종번호 제거한 대표 파츠명 (SM_Wep_Mod_A_Barrel_01 -> Barrel). Part가 null이면 Part<Index>. 프리뷰 뷰포트의
+	 *  파츠 컴포넌트 이름(내부 식별용)에만 쓰인다 — 소켓명(BakeSockets)은 이제 이 이름과 무관한 안정 id다. */
 	FString MakePartDisplayName(const TSoftObjectPtr<UStaticMesh>& Part, int32 Index);
 
 	/** 스켈레탈 메시 루트본(bone0 ref pose)의 컴포넌트-공간 트랜스폼. 이 팩의 무기 바디 루트본은 90° roll을 가지므로,
@@ -29,8 +28,10 @@ namespace FPSRWeaponAssemblerHelpers
 	/** PartComps[i]의 (BodyComp 대비) 상대 트랜스폼을 바디 메시 소켓으로 굽고, DA의 WeaponParts1P[i].Socket/Offset을
 	 *  배선한 뒤 Body/DA 둘 다 저장한다. 각 PartComp의 (BodyComp 기준) 상대 트랜스폼을 루트본(90° roll) 기준으로
 	 *  변환해 소켓에 넣으므로, 바디가 identity가 아니어도(예: "전체 이동"으로 조립품을 통째로 옮겼어도) 결과가
-	 *  정합한다. 소켓명은 PartComp->GetName()(변종번호 제거된 대표명)에서 유도한다. 이 툴이 소유하는 SOCKET_Mount_*
-	 *  네임스페이스의 구 소켓은 굽기 전에 전부 제거해 재구울때마다 고아가 남지 않게 한다. 생성/갱신한 소켓 수를 반환
+	 *  정합한다. 소켓명은 메시/컴포넌트명과 무관한 안정 id — 슬롯에 이미 구운 소켓이 있으면 재사용, 없으면
+	 *  SOCKET_Mount_<GUID>로 새로 발급한다(메시를 교체해도 소켓이 리네임되지 않음; 사용자 표시명은 DisplayLabel이
+	 *  담당). 이 툴이 소유하는 SOCKET_Mount_* 네임스페이스의 구 소켓은 굽기 전에 전부 제거해 재구울때마다 고아가
+	 *  남지 않게 한다(단, 안정 id라 재베이크 시 같은 이름으로 재생성됨). 생성/갱신한 소켓 수를 반환
 	 *  (DA/BodyComp/메시 없으면 0). */
 	int32 BakeSockets(UFPSRWeaponDataAsset* DA, USkeletalMeshComponent* BodyComp, const TArray<UStaticMeshComponent*>& PartComps);
 
