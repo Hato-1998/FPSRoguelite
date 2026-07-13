@@ -9,6 +9,7 @@
 ## 7. 현재 구현 상태 & 로드맵
 
 ### 7-1. 완료 (커밋·빌드 검증됨)
+> ⚠️ 아래는 **P0~P1.5-A 초기 스냅샷**이다. 이후 P2~P8 전 구간 + 2차 트랙(U5~U20)·다중맵 U 아크·반동 CrystalRecoil·무기 전면개편·FPSR Data Editor가 **모두 main 머지됨**(§7-3 표 + `PROGRESS.md` '완료 이력'이 최신).
 - **P0** 경량 C++ 스캐폴드 (UE5.7, 플러그인 enable, GameplayTags 초안, 빌드 OK, 스모크 테스트)
 - **P1-0** 코어 프레임워크 / **P1-1** 플레이어 GAS 글로벌 속성(`UFPSRHealthSet`/`UFPSRCombatSet`)
 - **P1-2** EnhancedInput(이동·시점·점프 PIE 확인) / **P1-3** 1인칭 카메라 + Separated Arms
@@ -20,8 +21,8 @@
 - **P1.5-A** 사격 코어 — `UFPSRWeaponFireComponent`: FullAuto 연사 루프 + 반동(카메라 킥) + 확산/블룸. 하드코딩 경로 제거(BP 참조 패턴) 리팩터 완료
 - **빌드 성공 + 헤드리스 부팅·스모크 통과**(Fatal 0)
 
-### 7-2. PIE 테스트 대기 / 사용자 BP 셋업 (블로킹)
-PROGRESS.md '사용자 대기 작업' 참조. 요약: **BP 3종 생성 + 참조 할당** 필요
+### 7-2. (역사 스냅샷) P1 초기 PIE / 사용자 BP 셋업 — ✅ 완료
+> ⚠️ P1 슬라이스(2026-06) 당시의 초기 BP 셋업 블로킹 기록. **전부 완료됨**(§7-3 P1 ✅). 아래는 역사 참조용.
 - `BP_FPSRGameMode`(**반드시 `/Game/Core/`**, 부모 `FPSRGameMode`): DefaultPawnClass / PlayerControllerClass
 - `BP_FPSRCharacter`(부모 `FPSRCharacter`): IA 8개 + DefaultPrimary/SecondaryWeapon(DA_Weapon_Rifle/Knife)
 - `BP_FPSRPlayerController`(부모 `FPSRPlayerController`): DefaultMappingContext=`IMC_Default`
@@ -32,14 +33,15 @@ PROGRESS.md '사용자 대기 작업' 참조. 요약: **BP 3종 생성 + 참조 
 | Phase | 산출물 |
 |---|---|
 | **P0** ✅ | 경량 C++ 스캐폴드 + Git/LFS + 플러그인 + GameplayTags + 빌드 OK + 스모크 |
-| **P1** (마무리중) | Net-aware 1P 캐릭터(Separated Arms) + 무기 2종 + 적 1종 + 데미지 브릿지 |
-| **P1.5** | 사격/이동 감각 (A: 연사/반동/확산 ✅, B: **MagSize+재장전(예비 무한)**/ADS) |
-| P2 | SpawnDirector + Flow-Field + Pooling + Significance (적 300+ 안정) + **적 이속 ±10% 편차** + **적 근접 데미지·공격토큰 baseline** + **충돌무시 대시** |
-| P3 | 공유XP + 파티레벨 + **레벨업 스택(프리즈 폐지)** + **정비시간 RunPhase** + **오프닝 카드 시드** + Card UI + 동적 카드풀 + Rarity + 리롤 |
-| P4 | **P4-A**(재설계) 런 디렉터(시간 미션 스케줄+보스타임) + 확장형 미션 프레임워크+스폰포인트 + **레벨업/미션클리어 전역 프리즈**(라운드제 폐지)+레퍼런스 미션 1종+오프닝시드 / **P4-B** Weapon Modifier Fragment+weapon-scope 카드+미션 보상 실적용 / **P4-C** 무기 7종 / **P4-D** 게임필(히트마커·핑·위협 인디케이터·사각 오디오)+PickupRadius/XPGain+HUD위젯. (+원거리 적 규격·공격토큰 확장) |
+| **P1** ✅ | Net-aware 1P 캐릭터(Separated Arms) + 무기 2종 + 적 1종 + 데미지 브릿지 |
+| **P1.5** ✅ | 사격/이동 감각 (A: 연사/반동/확산, B: MagSize+재장전(예비 무한)/ADS) — 이후 반동/확산=CrystalRecoil heat 모델로 이관(`6f1a981`) |
+| **P2** ✅ | SpawnDirector + Flow-Field + Pooling + Significance (적 300+ 안정) + **적 이속 ±10% 편차** + **적 근접 데미지·공격토큰 baseline** + **충돌무시 대시** |
+| **P3** ✅ | 공유XP + 파티레벨 + **레벨업 스택(프리즈 폐지)** + **정비시간 RunPhase** + **오프닝 카드 시드** + Card UI + 동적 카드풀 + Rarity + 리롤 |
+| **P4** ✅ | **P4-A**(재설계) 런 디렉터(시간 미션 스케줄+보스타임) + 확장형 미션 프레임워크+스폰포인트 + **레벨업/미션클리어 전역 프리즈**(라운드제 폐지)+레퍼런스 미션 1종+오프닝시드 / **P4-B** Weapon Modifier Fragment+weapon-scope 카드+미션 보상 실적용 / **P4-C** 무기 7종 / **P4-D** 게임필(히트마커·핑·위협 인디케이터·사각 오디오)+PickupRadius/XPGain+HUD위젯. (+원거리 적 규격·공격토큰 확장) |
 | **P5** ✅ | 4인 협동 + 세션(Steam, 2-PC E2E) + **아군 오사(50%, 기본 ON 설계확정 2026-07-01·호스트 OFF 토글; 기본값 ON 전환=코드 후속)** + **수동 부활(DBNO=근접 자동부활)** — 완료 / Iris 평가=**비채택**(Push Model 유지)·NetProfiler(적500 정량)=**U14 이월** |
-| P6 | 메타 프로그레션 + 보스 + 클리어 플로우 |
-| P7 | CommonUI 폴리시 + **오디오/이펙트(게임필) 폴리시** + Insights + README + 빌드 |
+| **P6** ✅ | 메타 프로그레션(U10 SaveGame) + 보스(U4) + 클리어 플로우(P6-A 셸) |
+| **P7** (부분) | CommonUI ✅ · 오디오 MVP ✅ / Insights·README·빌드 폴리시 = 잔여 |
+| **P8** ✅ | 다중맵 심리스 **U 연속필드**(P-0~P-H `34b5eea`) + 반동 **CrystalRecoil** 어댑터(`6f1a981`) + **무기 전면개편**(투사체화·SMG·유탄런처 제거 `3adc945`) + **FPSR Data Editor** P0~P2 + 통합 애니 패스 인프라 · U5~U20 2차 트랙 — 전부 main 머지(상세 `PROGRESS.md` 완료 이력) |
 
 ### 7-4. P0/P1 잔여 연결 항목 (착수 전 확인)
 - 기본 맵/GameMode config 연결(OpenWorld 템플릿 기본값 제거), `GlobalDefaultGameMode` 지정 검토
@@ -53,7 +55,7 @@ PROGRESS.md '사용자 대기 작업' 참조. 요약: **BP 3종 생성 + 참조 
   - **시점**: 무기 8종(P4-C + U16) 도달이라 표본 충족. **현 로드맵(보스 U3/U4 + 로비 U11a) 진행 후 착수**(사용자 결정 2026-06-16 = 현 로드맵 유지). G1 판정 *전*에 **프리즈 하이브리드 최소 프로토**를 넣어 전역프리즈 baseline vs 하이브리드를 A/B 동시 판정(아니면 이미 아는 페이싱 리스크 재확인에 그침).
   - **판정 항목**: ① 스웜 사격 손맛(타격감·반동·학살 쾌감, §2-4-2) ② 프리즈/하이브리드 페이싱 수용성(§2-2 — 일반 수치카드 비동기 Q/E 전환 필요성 판단) ③ 1인칭 사각 위협 체감(§2-14 사각 오디오) ④ 적 300~500 체감 성능(§5).
   - **통과 = 콘텐츠 양산(무기/카드/적/미션) 개시 허용**. 불합격 = 다음 콘텐츠 전 §2-2(프리즈)/§2-4(사격)/§5(성능) 재설계 우선.
-  - **▶ 판정 결과 (2026-06-30) = ✅ G1 합격** (사용자 결정): ① 스웜손맛·② 프리즈(**B안 baseline-only**, 하이브리드 미평가)·③ 사각(V1)·④ 적500 체감 합격. ⑤ 카드 빌드분기 = G2 보류 유지. **⚠️ §5 적500 정량 측정은 미실시(보류)** → 하드캡 잠정값 유지, 콘텐츠밸런싱/U14 perf 패스로 이월(Performance §5). **U1 양산 해금 → 2차 트랙(U5/U6/U7/U8/U10/U15) 개시 허용.** 판정 시트 = [`Docs/U1_GateSheet.md`](../U1_GateSheet.md) §D.
+  - **▶ 판정 결과 (2026-06-30) = ✅ G1 합격** (사용자 결정): ① 스웜손맛·② 프리즈(**B안 baseline-only**, 하이브리드 미평가)·③ 사각(V1)·④ 적500 체감 합격. ⑤ 카드 빌드분기 = G2 보류 유지. **⚠️ §5 적500 정량 측정은 미실시(보류)** → 하드캡 잠정값 유지, 콘텐츠밸런싱/U14 perf 패스로 이월(Performance §5). **U1 양산 해금 → 2차 트랙(U5/U6/U7/U8/U10/U15) 개시 허용.** 판정 시트 = [`Docs/Archive/gates/U1_GateSheet.md`](../Archive/gates/U1_GateSheet.md) §D.
 - **G2 — 빌드 다양성 / 시너지**
   - **시점**: 경량 적 상태이상 서브시스템 + 상태축 2~3개(Burn/Shock/Frost/Rupture 중) 프로토 구현 *후*.
   - **판정 항목**: ⑤ 카드 선택의 의미(빌드가 달라지는 체감, §2-3 시너지) ⑥ Fragment × 상태축 물림(상호작용 시너지).

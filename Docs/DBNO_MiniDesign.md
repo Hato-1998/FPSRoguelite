@@ -1,6 +1,6 @@
 # DBNO 미니설계 (U9 / Phase 1B) — 사망 모델 = 정식 다운(Down But Not Out)
 
-> **상태: APPROVED (2026-06-29) — §6 추천 디폴트 전부 채택·확정. SSOT `PlayerFeel.md` §2-13 반영 완료.** 이 문서는 `U1_PostGate_Fixes.md` 결정("사망 모델 = 정식 DBNO 당겨옴, 서버권위 = Phase 1B, **DBNO 미니설계 선행 필요**")의 선행 산출물이다.
+> **상태: APPROVED (2026-06-29) — §6 추천 디폴트 전부 채택·확정. SSOT `PlayerFeel.md` §2-13 반영 완료.** 이 문서는 `Docs/Archive/gates/U1_PostGate_Fixes.md` 결정("사망 모델 = 정식 DBNO 당겨옴, 서버권위 = Phase 1B, **DBNO 미니설계 선행 필요**")의 선행 산출물이다.
 >
 > **구현 진행 (브랜치 `phase/p1b-dbno`, 빌드+스모크 검증):**
 > - ✅ **증분1**(`b01f76f`): `EFPSRLifeState{Alive,DBNO,Dead}` 상태기계(PlayerState, 복제·OnRep 입력게이트). 순수 리팩토링(거동 무변경).
