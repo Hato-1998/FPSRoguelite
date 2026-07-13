@@ -3,23 +3,25 @@
 #pragma once
 
 #include "Subsystems/WorldSubsystem.h"
+#include "GameplayTagContainer.h"
+#include "Enemy/FPSRFlowFieldComputer.h" // FFPSRFlowFieldSurfaceData (BakedBaseline by-value member, U P-F) + EFPSRFieldQuery
 #include "FPSRFlowFieldSubsystem.generated.h"
 
-/** Server-authoritative flow-field for swarm pathing (P2-B2). A fixed-map 2D grid is periodically
- *  recomputed via multi-source BFS (all alive players are sources); each cell stores a flow direction
- *  pointing along the shortest path toward the nearest player. Enemies sample it in O(1). On an
- *  obstacle-free map the field points roughly straight at the nearest player, but it amortizes the
- *  per-enemy nearest-player search into one grid pass and lays the groundwork for obstacle support.
+class AActor;
+class UFPSRFlowFieldComputer;
+class AFPSRFlowFieldBoundsVolume;
+class AFPSRGameState;
+
+/** Server-authoritative flow-field driver for swarm pathing (P2-B2, U7 multi-layer). Owns a per-map REGISTRY of
+ *  UFPSRFlowFieldComputer instances keyed by MapId (multimap Tier 0) and drives their 0.2s recompute from a single
+ *  scheduler. Enemies sample the field in O(1).
  *
- *  U7 multi-layer (bounded 2-layer surface graph): each XY cell holds up to NumLayers vertically-stacked
- *  walkable SURFACES (rank 0 = lowest, rank 1 = above), so an upper deck / mezzanine overlapping the ground
- *  floor at the same XY is its own routable layer and the swarm chases a player UP a connecting stair. All
- *  per-cell data becomes per-surface (Surf(Cell,Rank) = Cell*NumLayers + Rank); connectivity is surface->surface
- *  (a staircase transitively lifts rank across cells, no explicit inter-layer edge). All height/trace cost stays
- *  ONE-TIME in BuildObstacleMask; the 0.2s recompute + per-enemy sample remain pure array math (Performance §5-2).
+ *  Refactor (Codex consult 2026-07-06): the grid/BFS/flow algorithm lives in UFPSRFlowFieldComputer (worldless core
+ *  unit-tested by FPSRoguelite.FlowField.Unit). This subsystem owns discovery (bounds volume / floor Z), the recompute
+ *  timer, and routing. An unset MapId is the "Default" single-map field, so an untagged L_Sandbox is unchanged.
  *
- *  Grid bounds are data-driven: a designer-placed AFPSRFlowFieldBoundsVolume sizes the grid to the playable
- *  region (Performance §5-2). With no volume the grid falls back to an origin-centered HalfExtentFallback. */
+ *  S1b: registry + per-map bake/sample built here; the actual streamed-map bake is TRIGGERED by the MapStreamSubsystem
+ *  on collision-ready (S3). At world begin, every bounds volume present in the persistent world is baked immediately. */
 UCLASS()
 class FPSROGUELITE_API UFPSRFlowFieldSubsystem : public UWorldSubsystem
 {
@@ -30,167 +32,162 @@ public:
 	virtual void OnWorldBeginPlay(UWorld& InWorld) override;
 	virtual void Deinitialize() override;
 
-	/** Returns the normalized flow direction (XY, Z=0) at WorldLocation, or ZeroVector if outside the grid /
-	 *  field not ready / no reachable surface. The caller passes the enemy's ACTOR location; this picks the
-	 *  walkable SURFACE (layer) the enemy stands on from its Z (WorldLocation.Z - EnemyStandOffset) with pure
-	 *  arithmetic — so an enemy on an upper deck samples the deck's flow, not the ground below it (U7). Callers
-	 *  should fall back to a direct-to-player direction on ZeroVector. */
+	/** Flow direction at WorldLocation, routed to the computer whose grid contains it (S1b bridge — used until enemies
+	 *  carry a MapId in S2a). ZeroVector if no map covers the location / field not ready. */
 	FVector SampleFlowDirection(const FVector& WorldLocation) const;
 
+	/** Flow direction at WorldLocation from the given map's computer (S2a caller — the enemy passes its own MapId). An
+	 *  unset MapId uses the Default field. If the location is outside the passed map's grid (mid-transition across a door),
+	 *  retries against the map whose grid actually contains it so flow stays continuous at the boundary. */
+	FVector SampleFlowDirection(const FGameplayTag& MapId, const FVector& WorldLocation) const;
+
+	/** The continuous flow field (P-G: ALWAYS built on the server — a real bUnifiedExtent multimap grid, OR a single
+	 *  degenerate world-trace grid for a plain single-map). Used for flow sampling + origin<->target open-grid connectivity
+	 *  (FPSRCombat::CanAffectTarget). Null only off-authority (clients never build it) / pre-build. Server-authoritative. */
+	const UFPSRFlowFieldComputer* GetUnifiedComputer() const { return UnifiedComputer; }
+
+	/** U (P-G): the unified computer ONLY when it is a real MULTI-SLOT field (a bUnifiedExtent volume with MapId'd slots) —
+	 *  null for a single-map degenerate grid. This is the "is this multimap?" predicate: multimap-only behaviors (the
+	 *  topology late-join ack gate, the combat connectivity gate, front-chase/spawn, the trickle drain) gate on THIS, so a
+	 *  single-map run stays a strict no-op (no ack seal, combat allow-all) exactly as before P-G. Server-authoritative. */
+	const UFPSRFlowFieldComputer* GetMultiSlotUnifiedComputer() const { return bUnifiedMultiSlot ? UnifiedComputer : nullptr; }
+
+	/** U (P-H): the largest slot footprint DIAGONAL (cm, XY) across all baked slots — the footprint cap input for the swarm
+	 *  net-cull sizing (UFPSREnemySpawnSubsystem::ComputeUnifiedNetCullRadius), so the uniform net-cull radius never spans the
+	 *  whole 3x3 grid. 0 with no unified multi-slot field (single-map). Cached at bake. Server-authoritative. */
+	float GetMaxSlotFootprintDiagonal() const { return MaxSlotFootprintDiagonalCm; }
+
+	/** U P-D: true if A and B are in the same open-grid connected component of the UNIFIED field (an open door connects them;
+	 *  a closed door/wall separates them). False when there is no unified field (single-map) — callers then keep same-map
+	 *  behavior (no regression). Server-authoritative, O(1) after RunBFS. */
+	bool AreLocationsConnected(const FVector& A, const FVector& B) const;
+
+	/** U P-D: path-distance (cells) from the nearest player to Loc on the unified field (front-chase range gate). OutStatus =
+	 *  NoGrid when no unified field; else the computer's OK/OffGrid/SourceLess/Unreachable. Returns MAX_int32 for non-OK. */
+	int32 GetFrontDistanceCells(const FVector& Loc, EFPSRFieldQuery& OutStatus) const;
+
+	/** Discover the (now-loaded) bounds volume tagged MapId anywhere in the world and bake its per-map field, anchoring Z
+	 *  from the volume's own box (a streamed sublevel need not contain a PlayerStart). Called by the MapStreamSubsystem
+	 *  once a streamed map's collision is registered (S3). Returns false if no volume with that MapId is loaded. */
+	bool BakeDiscoveredMap(const FGameplayTag& MapId);
+
+	/** U (P-B): a breakable seam door was destroyed (server) — open the unified grid's cross-seam edges the door spanned
+	 *  and recompute NOW so swarm flow + the origin-aware combat gate cross it immediately. No-op with no unified field
+	 *  (single-map / pre-content) or off authority — the closed seam kept the slots isolated, so nothing changes. Called by
+	 *  AFPSRDoor::HandleBroken; the door->cell mapping is UFPSRFlowFieldComputer::MapDoorSeamCellPairs. */
+	void NotifyDoorBroken(const AActor* Door);
+
+	/** U (P-F): server-authoritative topology generation — bumped every time the unified grid's connectivity changes
+	 *  (a seam door opens, a slot bakes in, or a new-run baseline reset). Late-join ack + the freeze pre-unfreeze
+	 *  recompute key off this. 0 with no unified field (single-map / pre-content) — it never changes there, so every
+	 *  client's gen-0 ack is instantly satisfied (no single-map regression). Server-only monotone counter. */
+	int32 GetTopologyGeneration() const { return TopologyGeneration; }
+
+	/** U (P-F): atomically restore the unified grid to its world-begin baked baseline (all seam doors closed) and bump
+	 *  the generation, for a same-world re-run (StartRun). No-op — generation preserved — if the topology was never
+	 *  mutated since the baseline (a first run: StartRun runs even then, so the dirty-flag guard keeps gen at 0) or with
+	 *  no unified field. Server-only. Currently a future-path safety net: a new run reloads the whole map (fresh field),
+	 *  so this only fires on a hypothetical in-place re-run — production structure, not dead code. */
+	void ResetDoorTopologyToBaseline();
+
+	/** U (P-F): pure predicate for the freeze pre-unfreeze recompute — true ONLY on the unpause edge (was paused, now
+	 *  not) AND when the topology changed while frozen (a door broke during the freeze, so the flow field is a
+	 *  generation behind). Any other run-state transition is a no-op. Static + worldless so FPSRoguelite.FlowField
+	 *  regressions it headless (the exact edge logic HandleRunStateChanged uses). */
+	static bool ShouldRecomputeOnUnfreeze(bool bWasPaused, bool bNowPaused, int32 TopologyGen, int32 LastRecomputedGen);
+
+	/** True if WorldLocation is within MapId's slot AABB (plus a small hysteresis margin, so an enemy near its slot's edge
+	 *  doesn't flip-flop maps at the boundary). Used by the movement pass to fast-skip re-resolving an enemy's MapId while
+	 *  it's still in its slot. P-G: resolved from SlotBounds — an EMPTY table (single-map degenerate grid) returns true. */
+	bool IsLocationInMap(const FGameplayTag& MapId, const FVector& WorldLocation) const;
+
+	/** The MapId whose slot AABB strictly contains WorldLocation (spatially separated slots -> at most one), or unset if none.
+	 *  Used to re-resolve an enemy's MapId once it has left its previous slot (door crossing). P-G: resolved from SlotBounds. */
+	FGameplayTag FindMapIdForLocation(const FVector& WorldLocation) const;
+
 private:
-	void RecomputeField();
+	void RecomputeAllFields();
 	bool HasServerAuthority() const;
 
-	/** Build the static-obstacle mask once at level start: per XY cell, collect up to NumLayers stacked walkable
-	 *  SURFACES and mark a surface blocked if static geometry occupies it at play height, so the BFS routes flow
-	 *  AROUND walls/buildings (and between layers via stairs) instead of straight through them. Fixed map → computed
-	 *  once. (Game.MD §5-2 obstacle + height support.) */
-	void BuildObstacleMask();
+	/** U (P-F): GameState OnRunStateChanged handler (server) — on the unpause edge, if a door broke during the freeze
+	 *  (the topology generation moved past the last recomputed generation), recompute the field NOW so the swarm + combat
+	 *  gate are correct the instant the freeze lifts, not on the next 0.2s tick. UFUNCTION for AddDynamic. (Tier-0 inert:
+	 *  a door can't break mid-freeze yet — future-proofing, but wired now.) */
+	UFUNCTION()
+	void HandleRunStateChanged();
 
-	/** Convert a world location to a grid cell index (XY only). Returns INDEX_NONE if outside the grid. */
-	int32 WorldToCellIndex(const FVector& WorldLocation) const;
+	/** U (P-F): bind HandleRunStateChanged to the GameState's OnRunStateChanged (idempotent). Called at world begin and
+	 *  lazily from RecomputeAllFields (the GameState may not exist yet at world begin). Seeds bWasPaused so an already-
+	 *  paused bind doesn't miss the first unpause. Server-only. */
+	void TryBindRunStateHandler();
 
-	/** Surface (cell, layer/rank) flat index into the per-surface arrays. Rank in [0, NumLayers). */
-	FORCEINLINE int32 SurfIndex(int32 Cell, int32 Rank) const { return Cell * NumLayers + Rank; }
+	/** U (P-F): bump the topology generation (server) and mirror it to the replicated GameState so remote clients OnRep
+	 *  and re-ack (Stage 2). Monotone (++ only). */
+	void AdvanceTopologyGeneration();
 
-	/** Pick the walkable-surface RANK at Cell whose floor best matches a pawn's foot Z, or INDEX_NONE if the cell
-	 *  has no valid surface. Pure array reads (no world query). Rule (matches AFPSREnemyBase::ApplyGravity snapping):
-	 *  the LOWEST valid rank within GroundSnapTolerance of FootZ (deterministic on a degenerate <snap stack → no
-	 *  frame-to-frame oscillation); else the HIGHEST valid rank at-or-below FootZ (the surface it stands on / is
-	 *  falling toward); else the lowest valid rank. */
-	int32 PickRankForFootZ(int32 Cell, float FootZ) const;
+	/** U (2026-07-07): build the single continuous grid from a bUnifiedExtent bounds volume and bake every currently-loaded
+	 *  MapId'd slot volume into it. Called at world begin when such a volume exists. Server-only. */
+	void BuildUnifiedField(UWorld& InWorld, const AFPSRFlowFieldBoundsVolume& UnifiedVolume);
 
-	/** True if an agent can cross from surface (CellA,RankA) to the orthogonally-adjacent surface (CellB,RankB): the
-	 *  baked rank-pairing bit for that shared boundary is set (no wall, height change within the step/grade allowance).
-	 *  Canonicalizes to the lower-index cell's +X/+Y EdgeMask byte; the reverse direction swaps the rank bit-index so
-	 *  both directions read the same entry. Built once in BuildObstacleMask; the BFS + flow passes consult it. */
-	bool IsSurfaceEdgeTraversable(int32 CellA, int32 RankA, int32 CellB, int32 RankB) const;
+	/** U: bake one slot volume into the unified grid at its computed cell offset (BakeSlotIntoUnifiedGrid). No-op if the
+	 *  unified grid isn't built. Used at world begin and when a slot streams in (BakeDiscoveredMap). Returns bake success. */
+	bool BakeSlotIntoUnified(UWorld& InWorld, const AFPSRFlowFieldBoundsVolume& Slot);
 
-	/** Nearest non-blocked SURFACE (ring search up to SourceSearchRadius) to (FromCell, FromRank), preferring one with
-	 *  clear line-of-sight from PlayerLocation and at a similar height (same layer), or the nearest open surface as a
-	 *  fallback, or INDEX_NONE. Moves a player source out of a surface the coarse mask marked blocked (player standing
-	 *  next to geometry) so the BFS expands from walkable ground. Returns a Surf index. */
-	int32 FindNearestOpenSurface(int32 FromCell, int32 FromRank, const FVector& PlayerLocation) const;
+	/** Trace the floor Z under the first PlayerStart (Default grid Z anchor), or the start's Z / origin. */
+	float DetectFloorZ(UWorld& InWorld) const;
 
-	// --- Grid config ---
-	// Default cell size + fallback half-extent (origin-centered grid) used when no AFPSRFlowFieldBoundsVolume is
-	// placed; with a bounds volume the grid is sized to its world AABB (data-driven, Performance §5-2).
-	static constexpr float DefaultCellSize = 200.0f;      // cm per cell
-	static constexpr float HalfExtentFallback = 14000.0f; // cm; origin-centered fallback half-extent (no volume)
-	static constexpr float FlowUpdateInterval = 0.2f;     // seconds between recomputes
+	/** Trace the floor Z under a bounds volume's box center (per-map Z anchor for a streamed sublevel with no PlayerStart),
+	 *  falling back to the box's world-min Z. */
+	float DetectFloorZForVolume(UWorld& InWorld, const AFPSRFlowFieldBoundsVolume& Volume) const;
 
-	// U7 multi-layer: bounded count of vertically-stacked walkable surfaces per XY cell. Rank 0 = lowest surface.
-	// Sparse in the map (a mezzanine is a small fraction), but stored dense so the hot path stays a flat-array read.
-	static constexpr int32 NumLayers = 2;
-	static_assert(NumLayers == 2,
-		"EdgeMask packs NumLayers*NumLayers connectivity bits into a uint8 (4 bits for 2 layers). Widen EdgeMask "
-		"to uint16 (>=3 layers needs 9 bits) before raising NumLayers.");
+	/** U (P-H): XY footprint diagonal (cm) of a slot's world AABB (0 if the box is invalid) — the net-cull footprint cap
+	 *  accumulator (max'd into MaxSlotFootprintDiagonalCm at each slot bake). */
+	static float SlotFootprintDiagonalXY(const FBox& SlotBox);
 
-	// The enemy actor origin sits EnemyStandOffset ABOVE its walking surface (AFPSREnemyBase: capsule HalfHeight 90 +
-	// GroundRestClearance 5). SampleFlowDirection subtracts it to convert the actor Z to the surface it stands on and
-	// pick the layer with pure arithmetic — no world query. Documented invariant like MaxClimbableStepHeight ==
-	// GroundSnapTolerance below; keep in sync with AFPSREnemyBase if those change.
-	static constexpr float EnemyStandOffset = 95.0f;
+	/** U continuous field. P-G: ALWAYS built on the server — a real bUnifiedExtent grid (all MapId'd slots baked in), OR a
+	 *  single degenerate world-trace grid for a plain single-map. Swarm flow + combat connectivity sample THIS. */
+	UPROPERTY(Transient)
+	TObjectPtr<UFPSRFlowFieldComputer> UnifiedComputer;
 
-	// Perf budget: the per-tick BFS + steepest-descent passes scan every cell, so cap the TOTAL cell count. If a
-	// bounds volume would exceed it, the cell size is GROWN (coarser grid) to preserve full coverage rather than
-	// clamping the dimensions (which would silently truncate the playable region). The per-axis cap guards a
-	// degenerate long thin strip from a single oversized axis. NOTE (U7): this is a BASE-cell cap; the multi-layer
-	// arrays scan up to MaxTotalCells*NumLayers SURFACE slots, but empty upper-layer slots (CellFloorZ==MAX_flt) hit a
-	// one-branch early-out, so the flat-map cost is unchanged. Re-measure the 2x worst case at the U14 perf pass.
-	static constexpr int32 MaxGridDimPerAxis = 256;
-	static constexpr int32 MaxTotalCells = 40000; // ~ the 140x140 fallback grid (19600) with headroom
+	/** U (P-G): true only when UnifiedComputer is a real MULTI-SLOT bUnifiedExtent grid (false for the degenerate single-map
+	 *  grid). Gates the multimap-only behaviors (ack/combat-connectivity/front/trickle) via GetMultiSlotUnifiedComputer(). */
+	bool bUnifiedMultiSlot = false;
 
-	// Obstacle probe: box overlap ABOVE each surface's own floor (so the flat ground isn't flagged) to catch walls/buildings.
-	static constexpr float ObstacleProbeZ = 120.0f;         // cm above a surface's floor Z (knee/wall height)
-	static constexpr float ObstacleProbeHalfHeight = 60.0f; // cm; box half-height for the overlap test
-	static constexpr int32 SourceSearchRadius = 4;          // cells; snap a blocked player source to open ground
+	/** U (P-G): per-slot world AABB keyed by MapId, populated at bake (BuildUnifiedField / BakeDiscoveredMap). Replaces the
+	 *  per-map registry as the source for FindMapIdForLocation / IsLocationInMap (which slot a location is in). Empty for a
+	 *  single-map degenerate grid (one map, unset). POD member (no GC / UPROPERTY); Reset() in Deinitialize. Server-only. */
+	TMap<FGameplayTag, FBox> SlotBounds;
 
-	// Clearance-aware probing (Part B): the occupancy probe and the per-edge tests use the enemy capsule's footprint
-	// radius (AFPSREnemyBase InitCapsuleSize(40,90)) instead of the full cell, so a passage a capsule fits stays open
-	// while a per-edge box overlap still catches thin boundary walls (no through-wall leak). Keep in sync with the
-	// capsule; a future per-archetype radius could read this from the enemy CDO (out of scope here).
-	static constexpr float AgentFootprintRadius = 40.0f;    // cm; = AFPSREnemyBase capsule radius
+	/** U (P-H): cached max slot footprint diagonal (cm, XY) over SlotBounds — the net-cull footprint cap input. Recomputed
+	 *  (max) when a slot bakes in (BuildUnifiedField / BakeDiscoveredMap). 0 for a single-map degenerate grid. Server-only. */
+	float MaxSlotFootprintDiagonalCm = 0.0f;
 
-	// --- Part A: 2.5D per-surface ground-height (U7) — sampled ONCE in BuildObstacleMask so the 0.2s RecomputeField and
-	// the per-enemy SampleFlowDirection stay pure O(1) array reads (NO height/trace in the swarm hot path). ---
-
-	// An inter-cell floor-height step <= this is a walkable step (stairs/curb/gentle rise); a larger delta is a
-	// cliff/wall and that edge is closed. Mirrors UCharacterMovementComponent::MaxStepHeight (UE 5.7 default 45cm).
-	// INVARIANT: keep <= AFPSREnemyBase::GroundSnapTolerance (60) — the field only routes across steps the per-enemy
-	// ground-snap can actually climb, so ApplyGravity needs no change. A bounds volume can override per map.
-	static constexpr float DefaultClimbableStepHeight = 45.0f;
-
-	// Hard cap on the (flat-step) climbable height, enforced over any bounds-volume override: a FLAT ledge taller than
-	// the enemy's per-recheck ground snap (AFPSREnemyBase::GroundSnapTolerance = 60) can be opened by the field but not
-	// actually climbed by ApplyGravity, jamming enemies. Keep == GroundSnapTolerance. (Ramps are climbed incrementally,
-	// so the larger ramp allowance is not bound by this — only single vertical steps are.) Also the sample layer-pick's
-	// snap window (PickRankForFootZ) — it mirrors GroundSnapTolerance so the picked layer matches what ApplyGravity snaps to.
-	static constexpr float MaxClimbableStepHeight = 60.0f; // = AFPSREnemyBase::GroundSnapTolerance
-
-	// Max drop below the enemy's foot that PickRankForFootZ's "highest surface at-or-below" fallback accepts as the
-	// surface it stands on. Guards the multi-layer case: an enemy at deck height (-550) in a cell whose only surface is
-	// the ground a storey below (-1000) must NOT resolve to that ground rank and follow ground flow while up on the deck
-	// (it would walk to the rim / stall / fall — U7 PIE). Beyond this, the pick returns INDEX_NONE and the mover falls
-	// back to direct-to-player. Kept well below a storey (~450cm) but above any real ledge/stair the enemy stands on.
-	static constexpr float MaxLayerPickDrop = 200.0f; // cm
-
-	// Min up-facing normal Z for a per-cell floor sample to count as walkable (rejects ceiling undersides / near-vertical
-	// faces). Set to the ENEMY's actual traversal limit, NOT the UE player default (0.71 = 44.8deg): a swarm Pawn climbs
-	// a slope incrementally (swept slide + per-recheck ground snap up to GroundSnapTolerance) so it can ascend steeper
-	// grades than a walking player — up to ~58deg for MoveSpeed 250 / recheck 0.15s. 0.573 = cos 55deg gives margin and
-	// accepts common steep-stair simple-collision ramps (e.g. a 50deg staircase collider) that 0.71 would reject as a wall.
-	static constexpr float WalkableNormalZ = 0.573f;
-
-	// Per-cell floor probe: a downward re-tracing probe starts at (GridOrigin.Z + ActiveProbeApexAboveOrigin) and collects
-	// every stacked walkable surface below it (see MaxColumnSurfaces). The apex must sit ABOVE the highest walkable floor
-	// (e.g. an upper storey / raised platform) or that floor is never sampled and reads as blocked. It may sit above a
-	// solid roof safely: the Z-step re-trace passes THROUGH the roof to the floors below, and the ground-height flood seed
-	// never selects the disconnected roof surface. Default 2000cm covers several storeys; a bounds volume can raise it.
-	static constexpr float DefaultProbeApexAboveOrigin = 2000.0f; // cm above GridOrigin.Z (floor) to start the down-trace
-	static constexpr float MaxProbeDrop = 6000.0f;                // cm total downward trace length (reaches sunken floors below a high apex)
-
-	// A single object-type trace stops at the first blocking hit (engine: "only the single closest blocking result will
-	// be generated"), which would hide a floor UNDER a bridge/ceiling. So the per-cell probe re-traces DOWN, restarting
-	// just below each hit, to collect every stacked walkable surface — even when the upper surface and the floor are the
-	// SAME merged static mesh. Capped at MaxColumnSurfaces iterations; each restart drops at least SurfaceProbeSkip so a
-	// thick slab is stepped through and the loop always terminates. One-time on the fixed map.
-	static constexpr int32 MaxColumnSurfaces = 16;   // max downward re-traces per column (stacked levels + slab step-through)
-	static constexpr float SurfaceProbeSkip = 20.0f; // cm the next trace restarts below the last hit; also the cluster-merge epsilon
-
-	/** Active cell size (cm): DefaultCellSize, a volume's CellSizeOverride, or grown to fit the perf budget. */
-	float ActiveCellSize = DefaultCellSize;
-	/** Active climbable step height (cm): DefaultClimbableStepHeight or a bounds volume's ClimbableStepHeightOverride. */
-	float ActiveClimbableStepHeight = DefaultClimbableStepHeight;
-	/** Active floor-probe apex (cm above GridOrigin.Z): DefaultProbeApexAboveOrigin or a bounds volume override. */
-	float ActiveProbeApexAboveOrigin = DefaultProbeApexAboveOrigin;
-	/** Grid dimensions (cells per axis; non-square when a bounds volume's AABB is non-square). Cell index = CY*GridDimX + CX. */
-	int32 GridDimX = 0;
-	int32 GridDimY = 0;
-	/** Min corner (world) of cell (0,0). */
-	FVector GridOrigin = FVector::ZeroVector;
-
-	// --- Per-SURFACE state (sized GridDimX*GridDimY*NumLayers, indexed by SurfIndex(Cell,Rank)). U7 multi-layer. ---
-	/** Integration field: BFS distance (in cells) to nearest player; INT32_MAX = unreachable. */
-	TArray<int32> DistField;
-	/** Flow field: per-surface normalized 2D direction toward the nearest player (zero if none). */
-	TArray<FVector2D> FlowField;
-	/** Static-obstacle mask (true = a real surface exists here but is occupancy-blocked; built once, fixed map). */
-	TArray<bool> BlockedField;
-	/** Per-surface REACHABLE walking-surface Z (world), computed ONCE in BuildObstacleMask: candidate up-facing surfaces
-	 *  are clustered into ranks then flood-filled from the ground floor accepting only one-climbable-step/grade changes,
-	 *  so ramps/stairs climb onto platforms/decks but a disconnected wall/ceiling top is never mistaken for floor.
-	 *  MAX_flt = no reachable surface at this (cell,rank) → treated as absent/blocked. BUILD-TIME writes ONLY; the 0.2s
-	 *  BFS + 500-enemy sample only READ it (pure array), never re-trace. */
-	TArray<float> CellFloorZ;
-
-	/** Per-cell edge rank-pairing mask, sized GridDimX*GridDimY*2 ([cell*2+0] = +X edge, [cell*2+1] = +Y edge). Each byte
-	 *  packs NumLayers*NumLayers bits: bit (ra*NumLayers + rb) set = an agent can cross from THIS (lower-index) cell's
-	 *  surface rank `ra` to the neighbour's rank `rb`. Built once with BlockedField. Default 0 = all pairs blocked (safe:
-	 *  a forgotten/edge-of-grid entry never leaks flow). Lets a 1-cell-wide doorway stay open while a thin boundary wall
-	 *  still blocks, AND encodes stair transitions that change layer (ground rank of A → deck rank of B). */
-	TArray<uint8> EdgeMask;
-
-	bool bFieldReady = false;
 	FTimerHandle RecomputeTimerHandle;
+
+	// --- U (P-F) topology generation + freeze pre-unfreeze + baked baseline (server-only; the replicated mirror lives on
+	//     the GameState, Stage 2). ---
+
+	/** Monotone server counter, bumped on every unified-grid connectivity change (seam open / slot bake / baseline reset). */
+	int32 TopologyGeneration = 0;
+
+	/** The generation the current flow field was last recomputed for (-1 = never). RecomputeAllFields stamps it on a
+	 *  successful (non-frozen) recompute; the freeze pre-unfreeze handler recomputes when it lags TopologyGeneration. */
+	int32 LastRecomputedGeneration = -1;
+
+	/** True once a seam door / slot bake has changed the topology away from the baked baseline. Gates the new-run reset
+	 *  to a no-op on a first (unmutated) run so the generation stays 0 (StartRun runs even on the first run). */
+	bool bTopologyMutatedSinceBaseline = false;
+
+	/** Whether BakedBaseline holds a valid world-begin snapshot (only captured when a unified field is built). */
+	bool bHasBaseline = false;
+
+	/** World-begin snapshot of the unified grid's surface graph (all seam doors closed), for ResetDoorTopologyToBaseline.
+	 *  Plain member (POD arrays, no UObject refs -> no GC concern); server-only. */
+	FFPSRFlowFieldSurfaceData BakedBaseline;
+
+	/** Last-seen pause state for the OnRunStateChanged unpause-edge detection (seeded at bind time). */
+	bool bWasPaused = false;
+
+	/** Whether HandleRunStateChanged is bound to the GameState delegate (idempotent bind guard). */
+	bool bRunStateHandlerBound = false;
 };

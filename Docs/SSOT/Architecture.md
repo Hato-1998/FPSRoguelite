@@ -19,7 +19,7 @@
 | 저장 | SaveGame | |
 | 네트워크 | 리슨서버 P2P, Push Model | ❌ Iris 핵심 의존, ❌ Server-Side Rewind |
 | 무브먼트 | 표준 CMC + **충돌무시 대시(회피기)** | ❌ Bhop/Wall-run/Motion Matching |
-| 레벨 | 고정 authored 맵 · **다중맵 심리스**(문 파괴→인접맵 스트림-in, §2-1 · 피벗 2026-07-03) | ❌ PCG · ❌ WP 런타임 오픈월드 그리드(authored·bounded라 불요, 스트리밍=LoadStreamLevel/WP Data Layer) |
+| 레벨 | 고정 authored 맵 · **다중맵 심리스**(문 파괴→인접맵 스트림-in, §2-1 · 피벗 2026-07-03) · **U 연속필드**(고정 3×3 단일 flow 그리드, 2026-07-07 `Docs/Review/20260707-plan-continuous-field-arch.md`) | ❌ PCG · ❌ WP 런타임 오픈월드 그리드(authored·bounded라 불요, 스트리밍=LoadStreamLevel/WP Data Layer) |
 
 - **엔진 포함 플러그인(바로 enable)**: GameplayAbilities, EnhancedInput, ModularGameplay, GameFeatures, CommonUI, StateTree, GameplayStateTree, SignificanceManager, Iris(off)
 - **엔진에 없는 Lyra 출신 플러그인(P3+ 필요 시 경량 재구현/복사)**: CommonUser, CommonGame, ModularGameplayActors, GameplayMessageRouter
@@ -48,13 +48,14 @@ Source/FPSRoguelite/Public/
 ├── Audio/            **UFPSRAudioSubsystem**(UWorldSubsystem, OnWorldBeginPlay 마스터볼륨 재적용=SetSoundMixClassOverride+PushSoundMixModifier; 콘솔 FPSR.SetMasterVolume)
 └── UI/               HUD(공유XP바/하단 무기바), CardSelect, MissionUI, MetaUI, **FPSRSettingsWidget**(CommonActivatableWidget 공용 설정 오버레이=메뉴 push/인게임 논-포즈 GameMenu push)
 ```
-- 사운드 설정(마스터 볼륨, MVP): 영속=`UFPSRGameUserSettings`(GameUserSettings.ini), 적용=`UFPSRAudioSubsystem`(SoundClass+SoundMix 표준), 라우팅 에셋=`UFPSRAudioSettings` soft ref(DefaultGame.ini). 확장(SFX/Music/UI)=자식 SoundClass+필드 추가(중앙 0수정). 설계 상세 `Docs/SoundSettings_Handoff.md`.
+- 사운드 설정(마스터 볼륨, MVP): 영속=`UFPSRGameUserSettings`(GameUserSettings.ini), 적용=`UFPSRAudioSubsystem`(SoundClass+SoundMix 표준), 라우팅 에셋=`UFPSRAudioSettings` soft ref(DefaultGame.ini). 확장(SFX/Music/UI)=자식 SoundClass+필드 추가(중앙 0수정).
 - 크로스헤어 크기 설정(U17): 영속=`UFPSRGameUserSettings.CrosshairScale`(GameUserSettings.ini, Clamp 0.5~2.5, 기본 1.0), 조절=`FPSRSettingsWidget` 슬라이더(**GUS 직접**·크로스헤어 서브시스템 無 — 오디오와 달리 world-scoped 적용 없음), 실시간 반영=`UFPSRRunHUDWidget`이 `OnCrosshairSettingsChanged` 구독→`CrosshairImage` RenderScale. **비대칭 근거=소비자(HUD)가 라이브**라 델리게이트 필요(볼륨은 즉시 적용이라 불요). 고아 `WBP_BasicCrosshair`(V3 잔재)는 미사용.
 - 글로벌 스탯(Luck, GlobalCrit, CritMult, MoveSpeed, MaxHealth, HealthRegen, PickupRadius, XPGain) → Character ASC AttributeSet
   - ※ Luck = 광역 행운(카드 등급 가중 + 향후 드랍품질·희귀스폰 등). RarityBonus는 Luck으로 통합·폐지(2026-06-02). PickupRadius·XPGain·MoveSpeed·HealthRegen은 미구현(필요 단계에서 추가)
 - 무기별 스탯 → WeaponInstance 스탯 블록 (ASC 아님)
 - 하단 무기바 HUD: 가시성을 HUD State(GMS/Tag)에 바인딩 → ADS/카드UI/미션UI 시 숨김
-- **다중맵(#3, 설계 수렴 2026-07-05 `Docs/Review/20260705-multimap-budget-regroup.md`)**: 단일 `UFPSREnemySpawnSubsystem` → **map-aware allocator**(전역 공유 예산·점유맵 배분·빈 맵 드레인·"2인+ 맵 > 솔로 맵" 가중), U7 플로우필드 → **per-map 레지스트리**(`ULevel*` 키). `UFPSRRunDirectorSubsystem`은 단일·런클럭 전역 유지(미션/스폰만 대상맵 파라미터화). 다중맵 점유상태 중 복제 필요분=GameState/PlayerState(WorldSubsystem 복제 불가). 레벨 스트리밍=LoadStreamLevel(서브레벨) 우선. rally pad·split 감지·양성 인센티브=Tier 2(콘텐츠/밸런스). Tier 0 실행=`Docs/MultiMap_Tier0_ResumePrompt.md`.
+- **다중맵(#3) — U 연속필드 단일 그리드 (구현 완료·`--no-ff` main 머지 `34b5eea`, 설계 `Docs/Review/20260707-plan-continuous-field-arch.md`)**: 단일 `UFPSREnemySpawnSubsystem` + **FrontId occupancy allocator**(전역 공유 예산·전선별 배분·"2인+ 전선 > 솔로" 가중, `RunFlow §2-1`), 길찾기 = **고정 3×3 world extent 프리사이즈 단일 `UFPSRFlowFieldComputer`**(맵 stream-in 시 그 슬롯 셀 구간만 shared grid에 증분 atomic bake=경계 양쪽 edge 클리어; 미로드 슬롯=blocked). **문 부수면 door cells `blocked→open` stamp**(문 leaf=`ECC_FPSRPlayerPawn`·blocker=`WorldDynamic`이라 `WorldStatic` bake 미포집→명시 stamp) **+ 단일 `RunBFS` + generation bump** → 적이 O(1) 샘플로 열린 문 넘어 seamless 추격. **origin-aware connectivity 전투게이트**(`FPSRCombatStatics::CanAffectTarget`=instigator 원점셀↔타겟셀 open-grid 연결, explosion=`Center` 원점). late-join = `GameState.TopologyGeneration` ack + freeze pre-unfreeze RunBFS + reset baseline. Tier-0 복제 = 대칭 거리컬 교전버블 NetCull(Option A); 진짜 공간 relevancy=RepGraph 후속. `UFPSRRunDirectorSubsystem`은 단일·런클럭 전역(미션/스폰만 대상슬롯 파라미터화). 슬롯 100~132m/변(near-cap, D1). 재계산 예산=`Performance.md §5`.
+  - **(폐기된 중간설계, 2026-07-05)**: per-map `ULevel*`-키 플로우필드 레지스트리 + map-aware allocator는 심리스 연속 추격과 충돌해 U로 피벗·제거(`Computers`/`EvictMap`·전환추적자·enemy MapId sync·combat MapId gate 삭제 `abd9624`; ⚠️`BakeDiscoveredMap`은 삭제 아님 — U slot bake 진입점으로 존치·재용도). 원 설계 근거=`Docs/Review/20260705-multimap-budget-regroup.md`. rally pad·split 감지·양성 인센티브=Tier 2 후속.
 
 ### 4-2. 구현 클래스맵 (⚠️ P0~P1.5-A 시점 역사 스냅샷 — 현재 전체 구조는 §4-1 목표구조 + `git log`·`PROGRESS.md` 참조; 이후 Boss/·Card v2·Run/Mission/·Combat/·Pickup/·UI Menu·Lobby·Session 등 대폭 추가됨)
 ```

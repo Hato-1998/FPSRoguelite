@@ -64,6 +64,14 @@ namespace FPSRCombat
 		float WeakpointMultiplier = 1.0f;
 	};
 
+	/** Combat reachability guard. U (P-C): when a MULTI-SLOT unified field is active, false when the ORIGIN cell and the
+	 *  TARGET cell are NOT in the same open-grid connected component — a closed door/wall blocks damage/AOE, an open door
+	 *  connects them (fail-closed off-grid / during the one-tick post-door-stamp window). OriginLocation is the blast Center
+	 *  for explosions, the instigator's location for direct shots. P-G: single-map degenerate grid / no field -> allow-all
+	 *  (no cross-map walls to gate; matches pre-P-G single-map). Also covers explosion knockback (0-damage).
+	 *  O(1): a precomputed component-label compare, off the swarm hot path. */
+	FPSROGUELITE_API bool CanAffectTarget(const UWorld* World, const AActor* Instigator, const AActor* Target, const FVector& OriginLocation);
+
 	/** Host friendly-fire toggle from the run's GameState (false if unavailable). */
 	FPSROGUELITE_API bool IsFriendlyFireEnabled(const UWorld* World);
 
@@ -79,9 +87,12 @@ namespace FPSRCombat
 	 *   - Target is a swarm enemy -> BaseDamage                    (always full)
 	 *   - Target is another player -> FF on ? BaseDamage * scale : 0
 	 *   - anything else           -> 0
+	 *  Also runs the CanAffectTarget reachability gate. OriginOverride = the connectivity origin: nullptr (default) uses the
+	 *  instigator's location (direct shots); explosions pass the blast Center so a wall-splashed target gates on the blast,
+	 *  not the shooter's position.
 	 */
 	FPSROGUELITE_API float ResolveDamage(const AActor* Instigator, const AActor* Target, float BaseDamage,
-		bool bAllowSelf, const UWorld* World);
+		bool bAllowSelf, const UWorld* World, const FVector* OriginOverride = nullptr);
 
 	/** Bridge FinalDamage to the receiver that matches Target's kind (enemy health component vs player GAS) and
 	 *  report what happened. No-op (bApplied=false) for FinalDamage <= 0 or an unrecognized target. */

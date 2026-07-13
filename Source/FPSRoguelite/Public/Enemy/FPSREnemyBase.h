@@ -3,6 +3,7 @@
 #pragma once
 
 #include "GameFramework/Pawn.h"
+#include "GameplayTagContainer.h"
 #include "Enemy/FPSRVATAnimParams.h"
 #include "FPSREnemyBase.generated.h"
 
@@ -12,6 +13,7 @@ class UFPSREnemyHealthComponent;
 class UWidgetComponent;
 class AFPSRCharacter;
 class AFPSRPlayerController;
+class APlayerController;
 class UFPSREnemyAnimProfile;
 class UMaterialInstanceDynamic;
 
@@ -119,6 +121,53 @@ public:
 	 *  falls back. Lightweight (velocity add, no physics) — cheap at swarm scale. */
 	void ApplyKnockback(const FVector& Velocity);
 
+	/** The map this enemy belongs to (multimap Tier 0). Server-only (not replicated — cross-map relevancy is handled by
+	 *  the distance net-cull (NetCullRadius / ApplyNetCullRadius), not this tag). Assigned by the spawn subsystem from the
+	 *  selected spawn point at spawn, and refreshed by the movement pass (AABB) when the enemy crosses a map boundary.
+	 *  Unset = the Default single-map. Used to gate the enemy's nearest-player target / flow sample / attack to same-map
+	 *  players + the cross-map combat guard. */
+	const FGameplayTag& GetMapId() const { return MapId; }
+	void SetMapId(const FGameplayTag& InMapId) { MapId = InMapId; }
+
+	/** Server (U P-H): set the actor's net-cull radius (cm) at spawn. In the unified multimap field the spawn subsystem calls
+	 *  this with the footprint-derived UNIFORM radius (UFPSREnemySpawnSubsystem::ComputeUnifiedNetCullRadius); a single-map run
+	 *  never calls it, so the ctor default (NetCullRadius) stands (byte no-regression). Applied AFTER Activate wakes net
+	 *  dormancy — the default net driver reads NetCullDistanceSquared live each relevancy pass, so a per-acquire change takes
+	 *  effect. Clamps ONLY a 0/negative/NaN caller (MinNetCullRadiusCm); the gameplay floor is owned by the compute helper. */
+	void ApplyNetCullRadius(float RadiusCm);
+
+	// --- Front-chase (multimap U P-D) — server-only, NOT replicated. The movement pass tags an enemy chasing a player in a
+	//     DIFFERENT open-grid-connected slot (through an opened door) via the unified flow field, within the front range.
+	//     Read by the empty-map drain (a front-chaser is a live cohort, exempt like a tracker) and by tracker mutual
+	//     exclusion. Expiry-bounded (ChaseHoldSeconds) so a stale/departed chaser eventually drains. Cleared on Activate. ---
+	/** Server: mark this enemy as a front-chaser until ExpireTime (world seconds). */
+	void SetFrontChasing(float ExpireTime) { FrontChaseExpireTime = ExpireTime; }
+	/** Server: true if this enemy holds a live front-chase tag at time Now. */
+	bool IsFrontChasing(float Now) const { return Now < FrontChaseExpireTime; }
+	/** Server: drop the front-chase tag (handoff to same-map target / pool reuse). */
+	void ClearFrontChasing() { FrontChaseExpireTime = -1.0f; }
+
+	// --- Front-spawn attribution (multimap U P-E) — server-only, NOT replicated. An enemy the director spawns into a
+	//     front-active (open-door-connected, currently-unoccupied) slot is TAGGED here so the front pressure budget can keep
+	//     counting it for a bounded window even AFTER it crosses into the player's occupied slot (crossing credit), which
+	//     rate-limits the front's refill so an open door can't become an infinite conveyor (Codex P-E gate #4). The credit is
+	//     ONE-SHOT (stamped once at first crossing, never renewed) so a player round-tripping a door can't keep a cohort
+	//     drain-immune — attribution grants NO drain immunity (only IsFrontChasing / physical front-slot presence does).
+	//     Cleared on Activate (pool reuse), like the tracker / front-chase tags. ---
+	/** Server: mark this enemy as front-spawned (fresh attribution, uncredited). Called by the spawn subsystem right after
+	 *  the enemy's MapId is set, so a pooled reuse in a non-front slot never carries a stale tag. */
+	void MarkFrontSpawned() { bFrontSpawned = true; FrontCreditExpireTime = -1.0f; }
+	/** Server: is this enemy still attributed to a front (front-spawned and not yet released)? */
+	bool IsFrontSpawned() const { return bFrontSpawned; }
+	/** Server: whether this front-spawned enemy has had its one-shot crossing credit stamped yet (false = not crossed). */
+	bool HasFrontCreditStamp() const { return FrontCreditExpireTime >= 0.0f; }
+	/** Server: stamp the one-shot crossing credit (world seconds) as the enemy first enters an occupied slot. */
+	void StampFrontCredit(float ExpireTime) { FrontCreditExpireTime = ExpireTime; }
+	/** Server: is the crossing credit still live at time Now (only meaningful once stamped)? */
+	bool IsFrontCreditLive(float Now) const { return Now < FrontCreditExpireTime; }
+	/** Server: release front attribution (credit consumed / caught up) — the enemy becomes a normal slot enemy. */
+	void ClearFrontSpawn() { bFrontSpawned = false; FrontCreditExpireTime = -1.0f; }
+
 protected:
 	virtual void BeginPlay() override;
 
@@ -189,6 +238,37 @@ protected:
 
 	/** Server-only: world time of last attack (init far in the past so the first attack is allowed). */
 	float LastAttackTime = -1000.0f;
+
+	/** Server-only: this enemy's map (multimap Tier 0). See GetMapId. Not replicated. */
+	FGameplayTag MapId;
+
+	/** Server-only (U P-D): world time until which this enemy is a live front-chaser (chasing a cross-slot connected player
+	 *  via the unified field). -1 = not front-chasing. See SetFrontChasing. Not replicated. */
+	float FrontChaseExpireTime = -1.0f;
+
+	/** Server-only (U P-E): true while this enemy is attributed to a front (spawned into a front-active adjacent slot).
+	 *  FrontCreditExpireTime = the one-shot crossing-credit deadline; -1 = not yet crossed into an occupied slot. Both are
+	 *  reset on Activate (pool reuse). See MarkFrontSpawned. Not replicated (server-only AI budget accounting). */
+	bool bFrontSpawned = false;
+	float FrontCreditExpireTime = -1.0f;
+
+	/** Server-tunable net-cull radius (cm) written to NetCullDistanceSquared in the ctor (single-map / archetype fallback).
+	 *  Enemies spawn into the PERSISTENT level (always level-relevant to every connection), so distance is the SOLE lever that
+	 *  culls a swarm enemy from a distant player (RepGraph — spatial grid relevancy — is the production fix, a separate phase).
+	 *  In the U unified multimap field the spawn subsystem OVERRIDES this per-acquire with a footprint-derived uniform radius
+	 *  (UFPSREnemySpawnSubsystem::ComputeUnifiedNetCullRadius — an engagement/weapon-range bubble capped to the slot footprint),
+	 *  so this default only applies to a plain single-map run (byte no-regression). Contract: >= the max authored weapon range,
+	 *  so an enemy the server hitscan can reach is always replicated (never alive-but-unshootable). A symmetric distance cull
+	 *  can't do per-slot "seam-only" relevancy without RepGraph, so a client sees far same-slot / cross-seam enemies pop in as
+	 *  they approach — an accepted Tier-0 visual limitation (D3), not a logic bug (the server chase is seamless). Boss is
+	 *  separately bAlwaysRelevant. Designers can raise this per-archetype in BP — honored via the BeginPlay re-derive (the ctor
+	 *  runs before BP defaults apply). See ApplyNetCullRadius. */
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Enemy|Network")
+	float NetCullRadius = 20000.0f; // cm (200m)
+
+	/** Tiny safety floor for ApplyNetCullRadius — defends ONLY against a caller passing 0 / negative / NaN. The gameplay
+	 *  net-cull floor (>= weapon range) is owned SOLELY by ComputeUnifiedNetCullRadius (single source), not re-imported here. */
+	static constexpr float MinNetCullRadiusCm = 100.0f; // cm (1m)
 
 	/** XP dropped on death (editor-tunable per enemy type / DataAsset). Balance value. */
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Enemy")

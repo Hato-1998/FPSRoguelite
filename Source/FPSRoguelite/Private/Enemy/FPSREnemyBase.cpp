@@ -22,6 +22,13 @@ AFPSREnemyBase::AFPSREnemyBase()
 	bReplicates = true;
 	SetReplicateMovement(true);
 
+	// Distance net-cull is the sole relevancy lever for the swarm (enemies live in the PERSISTENT, always-level-relevant
+	// level, so level visibility never culls them; RepGraph is the separate production fix). This ctor value is the
+	// single-map / archetype fallback — in the U unified multimap field the spawn subsystem overrides it per-acquire with a
+	// footprint-derived radius (UFPSREnemySpawnSubsystem::ComputeUnifiedNetCullRadius). Boss is separately bAlwaysRelevant.
+	// Set via the accessor (raw NetCullDistanceSquared access is UE_DEPRECATED(5.5)).
+	SetNetCullDistanceSquared(FMath::Square(NetCullRadius));
+
 	Capsule = CreateDefaultSubobject<UCapsuleComponent>(TEXT("Capsule"));
 	Capsule->InitCapsuleSize(40.0f, 90.0f);
 	Capsule->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
@@ -47,9 +54,23 @@ AFPSREnemyBase::AFPSREnemyBase()
 	HealthComponent = CreateDefaultSubobject<UFPSREnemyHealthComponent>(TEXT("HealthComponent"));
 }
 
+void AFPSREnemyBase::ApplyNetCullRadius(float RadiusCm)
+{
+	// U P-H: clamp ONLY against a degenerate (0 / negative / NaN) caller — the gameplay floor (>= weapon range) is applied by
+	// the caller's ComputeUnifiedNetCullRadius (single owner), so it's not re-imported here. FMath::Max(NaN, Min) returns Min.
+	// Set via the accessor (raw NetCullDistanceSquared access is UE_DEPRECATED(5.5)); the net driver reads it live per pass.
+	SetNetCullDistanceSquared(FMath::Square(FMath::Max(RadiusCm, MinNetCullRadiusCm)));
+}
+
 void AFPSREnemyBase::BeginPlay()
 {
 	Super::BeginPlay();
+
+	// U P-H: re-derive the net-cull radius from NetCullRadius now that BP-applied class defaults are live (the ctor ran with
+	// the C++ NSDMI default only, so a BP per-archetype override wouldn't otherwise reach NetCullDistanceSquared). Single-map /
+	// fallback path. In the unified multi-slot field the spawn subsystem overrides this per-acquire (ApplyNetCullRadius), which
+	// runs on every Activate (after BeginPlay) and still wins. No-op vs the ctor when NetCullRadius is unchanged (no regression).
+	SetNetCullDistanceSquared(FMath::Square(NetCullRadius));
 
 	if (HealthComponent)
 	{
@@ -121,6 +142,8 @@ void AFPSREnemyBase::Activate(const FVector& Location)
 	GroundRecheckTimer = 0.0f;
 	KnockbackVelocityXY = FVector::ZeroVector; // clear residual knockback from a prior life
 	ClearExitPath();                           // drop any leftover path; AcquireEnemy re-assigns it if this spawn point has one
+	ClearFrontChasing();                       // drop any stale front-chase tag from a prior life (U P-D)
+	ClearFrontSpawn();                         // drop any stale front-spawn attribution / crossing credit from a prior life (U P-E)
 
 	// Reset the cosmetic animation state for the reused actor (U20). No-op when dormant / on a dedicated server. On a
 	// client the reused actor self-corrects on its first PostNetReceiveLocationAndRotation (it's alive, so movement
@@ -150,6 +173,7 @@ void AFPSREnemyBase::ClearExitPath()
 	ExitPathElapsed = 0.0f;
 	bFollowingExitPath = false;
 }
+
 
 bool AFPSREnemyBase::ConsumeExitPathSteering(const FVector& MyLocation, float ScaledDeltaSeconds, FVector& OutDir)
 {

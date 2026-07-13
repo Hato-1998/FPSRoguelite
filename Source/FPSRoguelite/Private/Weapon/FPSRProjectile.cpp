@@ -427,7 +427,11 @@ bool AFPSRProjectile::TryDamageActor(AActor* Target, float WeakpointMultiplier, 
 			}
 		}
 		FinalDamage *= WeakpointMultiplier;
-		const float Resolved = FPSRCombat::ResolveDamage(Params.InstigatorActor, Target, FinalDamage, /*bAllowSelf*/ false, GetWorld());
+		// P-C reachability origin = the projectile's IMPACT location, NOT the shooter: a slow projectile may cross an open
+		// door that then closes (or the shooter moves) before impact, and a valid hit beside the target must still land
+		// (Codex R13). Instantaneous paths (hitscan / melee / charge) keep the default instigator origin.
+		const FVector ImpactOrigin = GetActorLocation();
+		const float Resolved = FPSRCombat::ResolveDamage(Params.InstigatorActor, Target, FinalDamage, /*bAllowSelf*/ false, GetWorld(), &ImpactOrigin);
 		if (Resolved > 0.0f)
 		{
 			const FPSRCombat::FDamageResult Result = FPSRCombat::ApplyDamage(Target, Resolved, Params.InstigatorActor);
@@ -451,7 +455,14 @@ bool AFPSRProjectile::TryDamageActor(AActor* Target, float WeakpointMultiplier, 
 		// Enemy-team projectiles damage players only (team-specific path retained until B1 generalizes it).
 		if (AFPSRCharacter* Character = Cast<AFPSRCharacter>(Target))
 		{
-			Character->ApplyContactDamage(FinalDamage, Params.InstigatorActor);
+			// U P-C/P-D: gate on open-grid connectivity from the IMPACT origin (the same reachability guard the player path
+			// gets via ResolveDamage) so an enemy projectile can't damage a player across a closed door/wall / reclosed seam
+			// it geometrically slipped behind. The projectile is still consumed on the physical hit — just no through-wall damage.
+			const FVector ImpactOrigin = GetActorLocation();
+			if (FPSRCombat::CanAffectTarget(GetWorld(), Params.InstigatorActor, Target, ImpactOrigin))
+			{
+				Character->ApplyContactDamage(FinalDamage, Params.InstigatorActor);
+			}
 			return true;
 		}
 	}

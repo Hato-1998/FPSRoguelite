@@ -35,7 +35,7 @@ Game.md + PROGRESS.md 먼저 읽어. 그다음 이 계획의 근거를 읽는다
 
 [Step 2 — 환경 3맵 적용 (파일럿 통과 후)]
 - Map 1 사이버펑크 시티 = POLYGON Sci-Fi Cyber City / Map 2 숲 = POLYGON Nature Biomes S1(+Nature Pack) / Map 3 우주 = POLYGON Sci-Fi Space. (Artifact 톱픽.)
-- 각 맵은 #3 다중맵의 스트림 대상 레벨이 됨(Docs/MultiMap_Tier0_ResumePrompt.md와 합류) — 단, B는 에셋만, 다중맵 코드는 A(#3 Tier 0). B 단계에선 개별 맵을 authored 레벨로 구성.
+- 각 맵은 #3 다중맵의 스트림 대상 레벨이 됨(다중맵 U 연속필드 아크 = 구현·머지 완료 `34b5eea`, `Docs/SSOT/Architecture.md §4-1`; 현 화이트박스 L_U_Whitebox 대체 대상) — 단, B는 에셋만, 다중맵 코드는 완료. B 단계에선 개별 맵을 authored 레벨로 구성.
 
 [Step 3 — 적 교체 (별도 저코스트 트랙) ⚠️ U20 VAT 베이크 전에]
 - ⚠️ 2026-07-10: 적=**애니 'Blu' 리스킨 금지**(제1원리). 저폴리 VAT 저코스트 유지. 아래 Synty City Zombies 후보는 **저폴리 스웜용으로만** 검토 — 애니 'Blu'는 플레이어/팀원 전용.

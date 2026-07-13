@@ -175,6 +175,17 @@ public:
 	/** Server: set the run schedule reference (called by the run director at StartRun). Replicates to all. */
 	void SetRunSchedule(UFPSRRunScheduleDataAsset* InSchedule);
 
+	/** U (P-F): replicated mirror of the flow field's server topology generation — bumped whenever the unified grid's
+	 *  connectivity changes (a seam door opens / slot bakes / new-run reset). A remote client OnRep_TopologyGeneration
+	 *  re-acks it so a late joiner (or an existing player after a door opens) confirms the topology before the swarm
+	 *  targets / spawns against it. 0 with no unified field (single-map) — never changes, so every gen-0 ack is instant. */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Run")
+	int32 GetTopologyGeneration() const { return TopologyGeneration; }
+
+	/** Server: mirror the flow field's topology generation (called by UFPSRFlowFieldSubsystem::AdvanceTopologyGeneration).
+	 *  Push-Model replicated; the OnRep drives each remote client's re-ack. Idempotent (no-op if unchanged). */
+	void SetTopologyGeneration(int32 NewGen);
+
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 protected:
@@ -186,6 +197,9 @@ protected:
 
 	UFUNCTION()
 	void OnRep_ActiveMission();
+
+	UFUNCTION()
+	void OnRep_TopologyGeneration();
 
 	/** XP required to advance from level 1; each level adds XPPerLevel (linear curve placeholder —
 	 *  a UCurveFloat data-driven curve is a follow-up, Game.MD §2-8). Editor-tunable. */
@@ -246,6 +260,12 @@ protected:
 	 *  the timeline bar. Hard ref like ActiveMissionData (always-loaded primary asset). Set by the run director. */
 	UPROPERTY(ReplicatedUsing = OnRep_RunState)
 	TObjectPtr<UFPSRRunScheduleDataAsset> RunScheduleAsset = nullptr;
+
+	/** U (P-F): replicated flow-field topology generation (see GetTopologyGeneration). Own OnRep (not OnRep_RunState) so
+	 *  it triggers the per-client re-ack path only when the generation actually changes. UE fires the OnRep on late-join
+	 *  initial replication when the value differs from the client default (0), so a non-zero gen converges the ack too. */
+	UPROPERTY(ReplicatedUsing = OnRep_TopologyGeneration)
+	int32 TopologyGeneration = 0;
 
 	/** Friendly-player damage multiplier while friendly fire is on (editor-tunable; 0.5 = half). */
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Run")
