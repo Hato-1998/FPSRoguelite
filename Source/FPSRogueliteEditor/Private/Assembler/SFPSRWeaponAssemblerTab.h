@@ -186,6 +186,31 @@ private:
 	FReply OnStageMoveDownClicked();
 	bool IsStageMoveDownEnabled() const;
 
+	// --- "선택 단계" 소폼 하단 "스코프(사이트 단계)" 섹션 (선택 단계 Scope 필드, GetSelectedStageIndex() 대상) ------------------------
+
+	/** 선택 단계 Scope.bScopeOverlay getter/setter. */
+	ECheckBoxState GetSelectedStageScopeOverlay() const;
+	void OnSelectedStageScopeOverlayChanged(ECheckBoxState NewState);
+
+	/** 선택 단계 Scope.AimFieldOfView getter/setter(모든 사이트에 적용, 항상 표시). */
+	TOptional<float> GetSelectedStageAimFOV() const;
+	void OnSelectedStageAimFOVChanged(float NewValue);
+
+	/** 선택 단계 Scope.ScopeReticle(소프트 텍스처) getter/setter. */
+	FString GetSelectedStageReticlePath() const;
+	void OnSelectedStageReticleChanged(const FAssetData& AssetData);
+
+	/** 선택 단계 Scope.bScopeVignette getter/setter. */
+	ECheckBoxState GetSelectedStageScopeVignette() const;
+	void OnSelectedStageScopeVignetteChanged(ECheckBoxState NewState);
+
+	/** 선택 단계 Scope.bHideWeaponWhileScoped getter/setter. */
+	ECheckBoxState GetSelectedStageHideWeapon() const;
+	void OnSelectedStageHideWeaponChanged(ECheckBoxState NewState);
+
+	/** 리티클/비네트/총 숨김 서브필드 표시 조건: 선택 단계가 유효하고 Scope.bScopeOverlay일 때만 Visible. */
+	EVisibility GetScopeOverlaySubFieldVisibility() const;
+
 	// --- Toolbar --------------------------------------------------------------------------------------------------
 
 	/** "조립→저장": bakes the current part placement into the body mesh's sockets + wires/saves the weapon DA via

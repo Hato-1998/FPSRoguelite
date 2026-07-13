@@ -20,6 +20,7 @@
 #include "Components/StaticMeshComponent.h"
 #include "Engine/SkeletalMesh.h"
 #include "Engine/StaticMesh.h"
+#include "Engine/Texture2D.h"
 #include "Misc/PackageName.h"
 #include "Modules/ModuleManager.h"
 
@@ -344,6 +345,87 @@ void SFPSRWeaponAssemblerTab::Construct(const FArguments& InArgs)
 									.MaxSliderValue(100.0f)
 									.Value(this, &SFPSRWeaponAssemblerTab::GetSelectedStageStatValue)
 									.OnValueChanged(this, &SFPSRWeaponAssemblerTab::OnSelectedStageStatValueChanged)
+								]
+							]
+						]
+
+						// --- 스코프(사이트 단계): 트리거 종류와 무관하게 항상(선택 단계 있으면) 표시 -----------------------------
+						+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 4.0f, 0.0f, 1.0f)
+						[
+							SNew(STextBlock).Text(LOCTEXT("StageScopeHeader", "스코프 (사이트 단계)"))
+						]
+
+						+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 1.0f)
+						[
+							SNew(SCheckBox)
+							.IsChecked(this, &SFPSRWeaponAssemblerTab::GetSelectedStageScopeOverlay)
+							.OnCheckStateChanged(this, &SFPSRWeaponAssemblerTab::OnSelectedStageScopeOverlayChanged)
+							[
+								SNew(STextBlock).Text(LOCTEXT("StageScopeOverlayLabel", "스코프 오버레이 사용"))
+							]
+						]
+
+						+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 1.0f)
+						[
+							SNew(SHorizontalBox)
+
+							+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 4.0f, 0.0f)
+							[
+								SNew(STextBlock).Text(LOCTEXT("StageAimFOVPrompt", "조준 배율 FOV(도, 0=무기 기본):"))
+							]
+
+							+ SHorizontalBox::Slot().FillWidth(1.0f)
+							[
+								SNew(SNumericEntryBox<float>)
+								.AllowSpin(true)
+								.MinSliderValue(0.0f)
+								.MaxSliderValue(120.0f)
+								.Value(this, &SFPSRWeaponAssemblerTab::GetSelectedStageAimFOV)
+								.OnValueChanged(this, &SFPSRWeaponAssemblerTab::OnSelectedStageAimFOVChanged)
+							]
+						]
+
+						+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 1.0f)
+						[
+							SNew(SVerticalBox)
+							.Visibility(this, &SFPSRWeaponAssemblerTab::GetScopeOverlaySubFieldVisibility)
+
+							+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 1.0f)
+							[
+								SNew(SHorizontalBox)
+
+								+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 4.0f, 0.0f)
+								[
+									SNew(STextBlock).Text(LOCTEXT("StageReticlePrompt", "리티클 텍스처:"))
+								]
+
+								+ SHorizontalBox::Slot().FillWidth(1.0f)
+								[
+									SNew(SObjectPropertyEntryBox)
+									.AllowedClass(UTexture2D::StaticClass())
+									.ObjectPath(this, &SFPSRWeaponAssemblerTab::GetSelectedStageReticlePath)
+									.OnObjectChanged(this, &SFPSRWeaponAssemblerTab::OnSelectedStageReticleChanged)
+									.AllowClear(true)
+								]
+							]
+
+							+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 1.0f)
+							[
+								SNew(SCheckBox)
+								.IsChecked(this, &SFPSRWeaponAssemblerTab::GetSelectedStageScopeVignette)
+								.OnCheckStateChanged(this, &SFPSRWeaponAssemblerTab::OnSelectedStageScopeVignetteChanged)
+								[
+									SNew(STextBlock).Text(LOCTEXT("StageScopeVignetteLabel", "스코프 비네트"))
+								]
+							]
+
+							+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 1.0f)
+							[
+								SNew(SCheckBox)
+								.IsChecked(this, &SFPSRWeaponAssemblerTab::GetSelectedStageHideWeapon)
+								.OnCheckStateChanged(this, &SFPSRWeaponAssemblerTab::OnSelectedStageHideWeaponChanged)
+								[
+									SNew(STextBlock).Text(LOCTEXT("StageHideWeaponLabel", "스코프 시 1P총 숨김"))
 								]
 							]
 						]
@@ -1214,6 +1296,174 @@ EVisibility SFPSRWeaponAssemblerTab::GetStatFieldVisibility() const
 bool SFPSRWeaponAssemblerTab::IsStageSelected() const
 {
 	return GetSelectedStageIndex() != INDEX_NONE;
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// "선택 단계" 소폼 하단 "스코프(사이트 단계)" 섹션 (선택 단계 Scope 필드)
+// ---------------------------------------------------------------------------------------------------------------
+
+ECheckBoxState SFPSRWeaponAssemblerTab::GetSelectedStageScopeOverlay() const
+{
+	TSharedPtr<FFPSRWeaponAssemblerViewportClient> Client = Viewport.IsValid() ? Viewport->GetAssemblerClient() : nullptr;
+	UFPSRWeaponDataAsset* DA = Client.IsValid() ? Client->GetWeaponDA() : nullptr;
+	const int32 Sel = Client.IsValid() ? Client->GetSelectedPart() : INDEX_NONE;
+	const int32 StageIndex = GetSelectedStageIndex();
+	if (DA && DA->WeaponParts1P.IsValidIndex(Sel) && DA->WeaponParts1P[Sel].Stages.IsValidIndex(StageIndex))
+	{
+		return DA->WeaponParts1P[Sel].Stages[StageIndex].Scope.bScopeOverlay ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
+	}
+	return ECheckBoxState::Unchecked;
+}
+
+void SFPSRWeaponAssemblerTab::OnSelectedStageScopeOverlayChanged(ECheckBoxState NewState)
+{
+	TSharedPtr<FFPSRWeaponAssemblerViewportClient> Client = Viewport.IsValid() ? Viewport->GetAssemblerClient() : nullptr;
+	UFPSRWeaponDataAsset* DA = Client.IsValid() ? Client->GetWeaponDA() : nullptr;
+	const int32 Sel = Client.IsValid() ? Client->GetSelectedPart() : INDEX_NONE;
+	const int32 StageIndex = GetSelectedStageIndex();
+	if (DA && DA->WeaponParts1P.IsValidIndex(Sel) && DA->WeaponParts1P[Sel].Stages.IsValidIndex(StageIndex))
+	{
+		DA->WeaponParts1P[Sel].Stages[StageIndex].Scope.bScopeOverlay = (NewState == ECheckBoxState::Checked);
+		DA->MarkPackageDirty();
+		if (StageListView.IsValid())
+		{
+			StageListView->RequestListRefresh();
+		}
+	}
+}
+
+TOptional<float> SFPSRWeaponAssemblerTab::GetSelectedStageAimFOV() const
+{
+	TSharedPtr<FFPSRWeaponAssemblerViewportClient> Client = Viewport.IsValid() ? Viewport->GetAssemblerClient() : nullptr;
+	UFPSRWeaponDataAsset* DA = Client.IsValid() ? Client->GetWeaponDA() : nullptr;
+	const int32 Sel = Client.IsValid() ? Client->GetSelectedPart() : INDEX_NONE;
+	const int32 StageIndex = GetSelectedStageIndex();
+	if (DA && DA->WeaponParts1P.IsValidIndex(Sel) && DA->WeaponParts1P[Sel].Stages.IsValidIndex(StageIndex))
+	{
+		return DA->WeaponParts1P[Sel].Stages[StageIndex].Scope.AimFieldOfView;
+	}
+	return 0.0f;
+}
+
+void SFPSRWeaponAssemblerTab::OnSelectedStageAimFOVChanged(float NewValue)
+{
+	TSharedPtr<FFPSRWeaponAssemblerViewportClient> Client = Viewport.IsValid() ? Viewport->GetAssemblerClient() : nullptr;
+	UFPSRWeaponDataAsset* DA = Client.IsValid() ? Client->GetWeaponDA() : nullptr;
+	const int32 Sel = Client.IsValid() ? Client->GetSelectedPart() : INDEX_NONE;
+	const int32 StageIndex = GetSelectedStageIndex();
+	if (DA && DA->WeaponParts1P.IsValidIndex(Sel) && DA->WeaponParts1P[Sel].Stages.IsValidIndex(StageIndex))
+	{
+		DA->WeaponParts1P[Sel].Stages[StageIndex].Scope.AimFieldOfView = NewValue;
+		DA->MarkPackageDirty();
+		if (StageListView.IsValid())
+		{
+			StageListView->RequestListRefresh();
+		}
+	}
+}
+
+FString SFPSRWeaponAssemblerTab::GetSelectedStageReticlePath() const
+{
+	TSharedPtr<FFPSRWeaponAssemblerViewportClient> Client = Viewport.IsValid() ? Viewport->GetAssemblerClient() : nullptr;
+	UFPSRWeaponDataAsset* DA = Client.IsValid() ? Client->GetWeaponDA() : nullptr;
+	const int32 Sel = Client.IsValid() ? Client->GetSelectedPart() : INDEX_NONE;
+	const int32 StageIndex = GetSelectedStageIndex();
+	if (DA && DA->WeaponParts1P.IsValidIndex(Sel) && DA->WeaponParts1P[Sel].Stages.IsValidIndex(StageIndex))
+	{
+		return DA->WeaponParts1P[Sel].Stages[StageIndex].Scope.ScopeReticle.ToSoftObjectPath().ToString();
+	}
+	return FString();
+}
+
+void SFPSRWeaponAssemblerTab::OnSelectedStageReticleChanged(const FAssetData& AssetData)
+{
+	TSharedPtr<FFPSRWeaponAssemblerViewportClient> Client = Viewport.IsValid() ? Viewport->GetAssemblerClient() : nullptr;
+	UFPSRWeaponDataAsset* DA = Client.IsValid() ? Client->GetWeaponDA() : nullptr;
+	const int32 Sel = Client.IsValid() ? Client->GetSelectedPart() : INDEX_NONE;
+	const int32 StageIndex = GetSelectedStageIndex();
+	if (DA && DA->WeaponParts1P.IsValidIndex(Sel) && DA->WeaponParts1P[Sel].Stages.IsValidIndex(StageIndex))
+	{
+		// AssetData가 비어 있으면(AllowClear로 지운 경우) GetAsset()이 null이라 ScopeReticle도 함께 정리된다.
+		DA->WeaponParts1P[Sel].Stages[StageIndex].Scope.ScopeReticle = Cast<UTexture2D>(AssetData.GetAsset());
+		DA->MarkPackageDirty();
+		if (StageListView.IsValid())
+		{
+			StageListView->RequestListRefresh();
+		}
+	}
+}
+
+ECheckBoxState SFPSRWeaponAssemblerTab::GetSelectedStageScopeVignette() const
+{
+	TSharedPtr<FFPSRWeaponAssemblerViewportClient> Client = Viewport.IsValid() ? Viewport->GetAssemblerClient() : nullptr;
+	UFPSRWeaponDataAsset* DA = Client.IsValid() ? Client->GetWeaponDA() : nullptr;
+	const int32 Sel = Client.IsValid() ? Client->GetSelectedPart() : INDEX_NONE;
+	const int32 StageIndex = GetSelectedStageIndex();
+	if (DA && DA->WeaponParts1P.IsValidIndex(Sel) && DA->WeaponParts1P[Sel].Stages.IsValidIndex(StageIndex))
+	{
+		return DA->WeaponParts1P[Sel].Stages[StageIndex].Scope.bScopeVignette ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
+	}
+	return ECheckBoxState::Unchecked;
+}
+
+void SFPSRWeaponAssemblerTab::OnSelectedStageScopeVignetteChanged(ECheckBoxState NewState)
+{
+	TSharedPtr<FFPSRWeaponAssemblerViewportClient> Client = Viewport.IsValid() ? Viewport->GetAssemblerClient() : nullptr;
+	UFPSRWeaponDataAsset* DA = Client.IsValid() ? Client->GetWeaponDA() : nullptr;
+	const int32 Sel = Client.IsValid() ? Client->GetSelectedPart() : INDEX_NONE;
+	const int32 StageIndex = GetSelectedStageIndex();
+	if (DA && DA->WeaponParts1P.IsValidIndex(Sel) && DA->WeaponParts1P[Sel].Stages.IsValidIndex(StageIndex))
+	{
+		DA->WeaponParts1P[Sel].Stages[StageIndex].Scope.bScopeVignette = (NewState == ECheckBoxState::Checked);
+		DA->MarkPackageDirty();
+		if (StageListView.IsValid())
+		{
+			StageListView->RequestListRefresh();
+		}
+	}
+}
+
+ECheckBoxState SFPSRWeaponAssemblerTab::GetSelectedStageHideWeapon() const
+{
+	TSharedPtr<FFPSRWeaponAssemblerViewportClient> Client = Viewport.IsValid() ? Viewport->GetAssemblerClient() : nullptr;
+	UFPSRWeaponDataAsset* DA = Client.IsValid() ? Client->GetWeaponDA() : nullptr;
+	const int32 Sel = Client.IsValid() ? Client->GetSelectedPart() : INDEX_NONE;
+	const int32 StageIndex = GetSelectedStageIndex();
+	if (DA && DA->WeaponParts1P.IsValidIndex(Sel) && DA->WeaponParts1P[Sel].Stages.IsValidIndex(StageIndex))
+	{
+		return DA->WeaponParts1P[Sel].Stages[StageIndex].Scope.bHideWeaponWhileScoped ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
+	}
+	return ECheckBoxState::Unchecked;
+}
+
+void SFPSRWeaponAssemblerTab::OnSelectedStageHideWeaponChanged(ECheckBoxState NewState)
+{
+	TSharedPtr<FFPSRWeaponAssemblerViewportClient> Client = Viewport.IsValid() ? Viewport->GetAssemblerClient() : nullptr;
+	UFPSRWeaponDataAsset* DA = Client.IsValid() ? Client->GetWeaponDA() : nullptr;
+	const int32 Sel = Client.IsValid() ? Client->GetSelectedPart() : INDEX_NONE;
+	const int32 StageIndex = GetSelectedStageIndex();
+	if (DA && DA->WeaponParts1P.IsValidIndex(Sel) && DA->WeaponParts1P[Sel].Stages.IsValidIndex(StageIndex))
+	{
+		DA->WeaponParts1P[Sel].Stages[StageIndex].Scope.bHideWeaponWhileScoped = (NewState == ECheckBoxState::Checked);
+		DA->MarkPackageDirty();
+		if (StageListView.IsValid())
+		{
+			StageListView->RequestListRefresh();
+		}
+	}
+}
+
+EVisibility SFPSRWeaponAssemblerTab::GetScopeOverlaySubFieldVisibility() const
+{
+	TSharedPtr<FFPSRWeaponAssemblerViewportClient> Client = Viewport.IsValid() ? Viewport->GetAssemblerClient() : nullptr;
+	UFPSRWeaponDataAsset* DA = Client.IsValid() ? Client->GetWeaponDA() : nullptr;
+	const int32 Sel = Client.IsValid() ? Client->GetSelectedPart() : INDEX_NONE;
+	const int32 StageIndex = GetSelectedStageIndex();
+	if (DA && DA->WeaponParts1P.IsValidIndex(Sel) && DA->WeaponParts1P[Sel].Stages.IsValidIndex(StageIndex))
+	{
+		return DA->WeaponParts1P[Sel].Stages[StageIndex].Scope.bScopeOverlay ? EVisibility::Visible : EVisibility::Collapsed;
+	}
+	return EVisibility::Collapsed;
 }
 
 FReply SFPSRWeaponAssemblerTab::OnStageMoveUpClicked()
