@@ -4,7 +4,14 @@
 > **작업 단계를 끝낼 때마다, 그리고 중단 전 반드시 이 파일을 갱신하고 커밋한다.**
 > 확정 설계·기획·코드구조·규칙은 `Game.md`(**SSOT 허브** → 도메인별 `Docs/SSOT/*.md`, 작업별 라우팅은 허브 §0-1), **완료 작업 상세는 `git log --oneline`**. 여기엔 *무엇을 했는지*만 요약한다.
 
-**최종 갱신: 2026-07-13 (b)**
+**최종 갱신: 2026-07-13 (c)**
+
+## 🔔 핸드오프 (2026-07-13 c · **무기 조립 툴 개편 = 코드 전부 완료(A/B/C1/C2 커밋·빌드검증), 남은 것=사용자 콘텐츠 재저작+PIE**) — 🎯 **다음(사용자·코드 아님) = 새 조립기로 라이플 저격 진화 재저작 + PIE. 재개=이 블록.**
+> **활성 브랜치**: `phase/pwas-b-procedural-weapon-motion`(미푸시). **커밋**: `ee9c475f`(A 스키마/셀렉터/검증) · `8190b664`(B 고정소켓+표시라벨) · `497e25f6`(C1 진화저작패널) · `dc95b95f`(C2 단계 뷰포트배치). 각 빌드 -NoXGE `Result: Succeeded`.
+> **✅ 재설계(사용자 결정+Codex 2R 수렴, `Docs/Review/20260713-plan-weapon-assembler-evolution.md`)**: 폴리모픽 PartRules 폐기 → **파츠별 스택 진화(순수 struct)**. `FFPSRWeaponPartAttachment`에 `EvolutionFragment`+`Stages`(각 `{MinStacks, Mesh, Offset, Scope}`). 파츠당 카드 1개, 먹은 스택 수로 단계 결정(최고 MinStacks 승자), 최종=카드 MaxStacks라 자동 소진(기존 카드풀 로직). 소켓=고정 안정 id(`SOCKET_Mount_<hex>`, 메시 바뀌어도 불변), 사용자는 DisplayLabel(표시용)만 입력. `UFPSRWeaponPartRule`/`UFPSRWeaponPartCondition`/`Weapon.Slot.*` 삭제. 런타임 `RebuildPartsFromSelection`·W-U2 스코프 코드 무변경. `ComputeSignature`를 Offset/Scope/Socket 포함으로 확장(진화/역진화 stale 잠재버그 수정). IsDataValid: MinStacks<1/중복=ERROR, 진화 사이트 슬롯 각 단계 메시 AimSocket 보유 검사=ERROR(조준감 회귀 차단).
+> **✅ 조립기 신 UI**(Tools>FPSR>무기 파츠 조립기): 슬롯 "이름" 편집(표시 라벨) + "진화(선택 슬롯)" 패널(카드 피커 + 단계 목록[스택 스핀박스] + ＋단계추가/−단계제거) + 단계 선택 시 뷰포트 미리보기·기존 기즈모로 배치(미리보기 종료 시 오프셋 자동 캡처).
+> **🎯 남은 것(사용자, 코드 아님)**: (a) `DA_Weapon_Rifle`에 옛 PartRules 서브오브젝트(삭제된 클래스) 잔존 → 링커 경고. **저격 진화를 새 조립기로 재저작**하면 해소. 워크플로: 라이플 열기 → 기본 사이트(Reddot) 배치·"조립→저장"(소켓 구움) → 그 슬롯 "진화 카드"=`DA_Fragment_Rifle_SniperScope` 지정 → "＋단계 추가"(사용가능 파츠에서 Scope 메시 선택, 스택1) → 뷰포트에서 스코프 위치 잡기 → 각 단계 Scope에 `bScopeOverlay`/`AimFieldOfView` 설정(Details 패널) → "조립→저장". (b) PIE: 저격 카드 스택 오를수록 사이트 진화, ADS 강줌+오버레이, 재장전 해제.
+> **⚠️ 주의**: 스모크(validate-data)는 위 (a) 옛 서브오브젝트 때문에 exit1(에러1)—재저작 시 해소, **Phase A 코드 결함 아님**(IsDataValid는 크래시 없이 22자산 검증 완료). 각 단계 Scope 필드(bScopeOverlay/AimFieldOfView 등)는 Details 패널 편집(툴은 메시/스택/위치까지). 미커밋 콘텐츠(라이플·맵 등)=사용자 소유, 커밋 금지.
 
 ## 🔔 핸드오프 (2026-07-13 b · **W-U2 저격 스코프 = 코드+콘텐츠 완성, WBP 필드 1개 + PIE만 남음**) — 🎯 **다음(사용자·코드 아님) = `WBP_RunHUD` Class Defaults에 스코프 오버레이 위젯 지정 → PIE. W-U2 코드는 전부 완료. 재개 = 이 블록.**
 > **활성 브랜치**: `phase/pwas-b-procedural-weapon-motion`(미푸시). **코드 전부 커밋·검증 완료**(각 빌드 -NoXGE `Result: Succeeded` 0/0 + 스모크 + 적대리뷰). **핵심 커밋**: `fa32ee19` 스코프 오버레이 위젯 자동표시 · `a3665635` PartRules 소켓검증 오탐수정 · `fe117ff8` 마커 프래그먼트 · `33600c3a` 사이트별 배율 · `8574e265` 크로스헤어 desync · `23dfc54e` 프리즈 조준해제 · `967a475d` W-U2 스코프 런타임 · `6211a2db` 조립기 add/remove · `06c30118` 조립기 3수정. (전체 git log)
