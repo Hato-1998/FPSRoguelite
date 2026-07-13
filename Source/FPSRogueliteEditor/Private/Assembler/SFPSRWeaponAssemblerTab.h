@@ -123,6 +123,35 @@ private:
 	/** 제거 버튼 활성 조건: 현재 파츠가 선택돼 있을 때만. */
 	bool IsRemovePartEnabled() const;
 
+	// --- Evolution authoring panel (선택 슬롯의 진화 카드 + 진화 단계 목록, W-U1b 저작 UI) --------------------------------
+
+	/** 진화 단계 리스트뷰의 한 행: 선택 슬롯(DA->WeaponParts1P[Sel]) Stages 배열의 인덱스만 들고 있는 얇은 미러. */
+	struct FStageRow
+	{
+		int32 StageIndex = INDEX_NONE;
+	};
+
+	/** 진화 카드 피커 ObjectPath — 선택 슬롯의 EvolutionFragment 경로(없으면 빈 문자열). */
+	FString GetEvolutionFragmentPath() const;
+	/** 진화 카드 변경 — 선택 슬롯의 EvolutionFragment 갱신 + MarkPackageDirty. */
+	void OnEvolutionFragmentChanged(const FAssetData& AssetData);
+
+	/** 선택 슬롯의 Stages로 StageRows 재구성 + 리스트 갱신. 슬롯 미선택이면 비운다. OnPartSelectionChanged/무기 변경 시 호출. */
+	void RefreshStageList();
+	TSharedRef<class ITableRow> OnGenerateStageRow(TSharedPtr<FStageRow> Item, const TSharedRef<class STableViewBase>& OwnerTable);
+	void OnStageSelectionChanged(TSharedPtr<FStageRow> Item, ESelectInfo::Type SelectInfo);
+
+	/** "＋ 단계 추가": 사용 가능 파츠에서 고른 메시를 선택 슬롯의 새 진화 단계로 추가. */
+	FReply OnAddStageClicked();
+	bool IsAddStageEnabled() const;
+	/** "− 단계 제거": 선택된 진화 단계를 제거. */
+	FReply OnRemoveStageClicked();
+	bool IsRemoveStageEnabled() const;
+
+	/** 단계 행 스핀박스 값/커밋(선택 슬롯 Stages[StageIndex] 기준). */
+	int32 GetStageMinStacks(int32 StageIndex) const;
+	void OnStageMinStacksChanged(int32 NewValue, int32 StageIndex);
+
 	// --- Toolbar --------------------------------------------------------------------------------------------------
 
 	/** "조립→저장": bakes the current part placement into the body mesh's sockets + wires/saves the weapon DA via
@@ -153,6 +182,12 @@ private:
 
 	/** The catalog row currently single-click-selected (drives the "교체" button + IsSwapEnabled). Reset on weapon change. */
 	TSharedPtr<FAvailPartRow> SelectedAvailPart;
+
+	/** 선택 슬롯(DA->WeaponParts1P[Sel].Stages)의 미러 — RefreshStageList가 재구성. */
+	TArray<TSharedPtr<FStageRow>> StageRows;
+	TSharedPtr<SListView<TSharedPtr<FStageRow>>> StageListView;
+	/** 진화 단계 리스트에서 현재 선택된 행("− 단계 제거" 활성 조건). */
+	TSharedPtr<FStageRow> SelectedStageRow;
 
 	TSharedPtr<STextBlock> StatusText;
 };

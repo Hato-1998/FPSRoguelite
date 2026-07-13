@@ -6,6 +6,7 @@
 #include "Assembler/FPSRWeaponAssemblerViewportClient.h"
 #include "Assembler/FPSRWeaponAssemblerHelpers.h"
 #include "Weapon/FPSRWeaponDataAsset.h"
+#include "Weapon/FPSRWeaponFragment.h"
 
 #include "AdvancedPreviewScene.h"
 #include "PreviewScene.h"
@@ -26,6 +27,7 @@
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SCheckBox.h"
 #include "Widgets/Input/SEditableTextBox.h"
+#include "Widgets/Input/SSpinBox.h"
 #include "Widgets/Text/STextBlock.h"
 #include "Widgets/Views/STableRow.h"
 #include "Widgets/Layout/SSplitter.h"
@@ -119,7 +121,7 @@ void SFPSRWeaponAssemblerTab::Construct(const FArguments& InArgs)
 				.Orientation(Orient_Vertical)
 
 				+ SSplitter::Slot()
-				.Value(0.5f)
+				.Value(0.33f)
 				[
 					SNew(SVerticalBox)
 
@@ -168,7 +170,77 @@ void SFPSRWeaponAssemblerTab::Construct(const FArguments& InArgs)
 				]
 
 				+ SSplitter::Slot()
-				.Value(0.5f)
+				.Value(0.34f)
+				[
+					SNew(SVerticalBox)
+
+					+ SVerticalBox::Slot().AutoHeight().Padding(2.0f)
+					[
+						SNew(STextBlock).Text(LOCTEXT("EvolutionHeader", "진화 (선택 슬롯)"))
+					]
+
+					+ SVerticalBox::Slot().AutoHeight().Padding(2.0f)
+					[
+						SNew(SHorizontalBox)
+
+						+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 4.0f, 0.0f)
+						[
+							SNew(STextBlock).Text(LOCTEXT("EvolutionFragmentPrompt", "진화 카드:"))
+						]
+
+						+ SHorizontalBox::Slot().FillWidth(1.0f)
+						[
+							SNew(SObjectPropertyEntryBox)
+							.AllowedClass(UFPSRWeaponFragment::StaticClass())
+							.ObjectPath(this, &SFPSRWeaponAssemblerTab::GetEvolutionFragmentPath)
+							.OnObjectChanged(this, &SFPSRWeaponAssemblerTab::OnEvolutionFragmentChanged)
+							.AllowClear(true)
+							.IsEnabled(this, &SFPSRWeaponAssemblerTab::IsRemovePartEnabled)
+						]
+					]
+
+					+ SVerticalBox::Slot().AutoHeight().Padding(2.0f, 4.0f, 2.0f, 2.0f)
+					[
+						SNew(STextBlock).Text(LOCTEXT("StageListHeader", "진화 단계 (스택 오름차순):"))
+					]
+
+					+ SVerticalBox::Slot().FillHeight(1.0f)
+					[
+						SAssignNew(StageListView, SListView<TSharedPtr<FStageRow>>)
+						.ListItemsSource(&StageRows)
+						.OnGenerateRow(this, &SFPSRWeaponAssemblerTab::OnGenerateStageRow)
+						.OnSelectionChanged(this, &SFPSRWeaponAssemblerTab::OnStageSelectionChanged)
+						.SelectionMode(ESelectionMode::Single)
+					]
+
+					+ SVerticalBox::Slot().AutoHeight().Padding(2.0f)
+					[
+						SNew(SHorizontalBox)
+
+						+ SHorizontalBox::Slot().FillWidth(1.0f).Padding(0.0f, 0.0f, 1.0f, 0.0f)
+						[
+							SNew(SButton)
+							.HAlign(HAlign_Center)
+							.Text(LOCTEXT("AddStageButton", "＋ 단계 추가"))
+							.ToolTipText(LOCTEXT("AddStageButtonTooltip", "아래 '사용 가능 파츠'에서 고른 메시를 이 슬롯의 진화 단계로 추가합니다. 필요 스택은 자동 증가하며, 각 단계의 스택 수는 목록에서 조정하세요."))
+							.IsEnabled(this, &SFPSRWeaponAssemblerTab::IsAddStageEnabled)
+							.OnClicked(this, &SFPSRWeaponAssemblerTab::OnAddStageClicked)
+						]
+
+						+ SHorizontalBox::Slot().FillWidth(1.0f).Padding(1.0f, 0.0f, 0.0f, 0.0f)
+						[
+							SNew(SButton)
+							.HAlign(HAlign_Center)
+							.Text(LOCTEXT("RemoveStageButton", "− 단계 제거"))
+							.ToolTipText(LOCTEXT("RemoveStageButtonTooltip", "선택한 진화 단계를 제거합니다."))
+							.IsEnabled(this, &SFPSRWeaponAssemblerTab::IsRemoveStageEnabled)
+							.OnClicked(this, &SFPSRWeaponAssemblerTab::OnRemoveStageClicked)
+						]
+					]
+				]
+
+				+ SSplitter::Slot()
+				.Value(0.33f)
 				[
 					SNew(SVerticalBox)
 
@@ -286,6 +358,9 @@ void SFPSRWeaponAssemblerTab::RefreshPartsList()
 	{
 		PartListView->RequestListRefresh();
 	}
+
+	// 파츠 목록이 바뀌면(무기 교체/추가/제거) 진화 패널도 선택 슬롯 기준으로 다시 맞춘다(선택 없으면 자동으로 빈다).
+	RefreshStageList();
 }
 
 TSharedRef<ITableRow> SFPSRWeaponAssemblerTab::OnGeneratePartRow(TSharedPtr<FPartRow> Item, const TSharedRef<STableViewBase>& OwnerTable)
@@ -303,6 +378,9 @@ void SFPSRWeaponAssemblerTab::OnPartSelectionChanged(TSharedPtr<FPartRow> Item, 
 	{
 		Viewport->GetAssemblerClient()->SetSelectedPart(Item.IsValid() ? Item->Index : INDEX_NONE);
 	}
+
+	// 슬롯이 바뀌면 진화 패널(카드 피커+단계 목록)이 새 슬롯을 따라가도록 다시 구성.
+	RefreshStageList();
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -619,6 +697,223 @@ bool SFPSRWeaponAssemblerTab::IsRemovePartEnabled() const
 {
 	return Viewport.IsValid() && Viewport->GetAssemblerClient().IsValid()
 		&& Viewport->GetAssemblerClient()->GetSelectedPart() != INDEX_NONE;
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Evolution authoring panel (선택 슬롯의 진화 카드 + 진화 단계 목록, W-U1b 저작 UI — 뷰포트 3D 미리보기는 C2)
+// ---------------------------------------------------------------------------------------------------------------
+
+FString SFPSRWeaponAssemblerTab::GetEvolutionFragmentPath() const
+{
+	TSharedPtr<FFPSRWeaponAssemblerViewportClient> Client = Viewport.IsValid() ? Viewport->GetAssemblerClient() : nullptr;
+	UFPSRWeaponDataAsset* DA = Client.IsValid() ? Client->GetWeaponDA() : nullptr;
+	const int32 Sel = Client.IsValid() ? Client->GetSelectedPart() : INDEX_NONE;
+	if (!DA || !DA->WeaponParts1P.IsValidIndex(Sel))
+	{
+		return FString();
+	}
+	return DA->WeaponParts1P[Sel].EvolutionFragment.ToSoftObjectPath().ToString();
+}
+
+void SFPSRWeaponAssemblerTab::OnEvolutionFragmentChanged(const FAssetData& AssetData)
+{
+	TSharedPtr<FFPSRWeaponAssemblerViewportClient> Client = Viewport.IsValid() ? Viewport->GetAssemblerClient() : nullptr;
+	UFPSRWeaponDataAsset* DA = Client.IsValid() ? Client->GetWeaponDA() : nullptr;
+	const int32 Sel = Client.IsValid() ? Client->GetSelectedPart() : INDEX_NONE;
+	if (!DA || !DA->WeaponParts1P.IsValidIndex(Sel))
+	{
+		return;
+	}
+
+	// AssetData가 비어 있으면(AllowClear로 지운 경우) GetAsset()이 null이라 EvolutionFragment도 함께 정리된다(진화 없음).
+	DA->WeaponParts1P[Sel].EvolutionFragment = Cast<UFPSRWeaponFragment>(AssetData.GetAsset());
+	DA->MarkPackageDirty();
+
+	if (StatusText.IsValid())
+	{
+		StatusText->SetText(LOCTEXT("EvolutionFragmentDone", "진화 카드를 설정했습니다. '조립→저장'을 눌러야 저장됩니다."));
+	}
+}
+
+void SFPSRWeaponAssemblerTab::RefreshStageList()
+{
+	StageRows.Reset();
+	SelectedStageRow.Reset();
+
+	TSharedPtr<FFPSRWeaponAssemblerViewportClient> Client = Viewport.IsValid() ? Viewport->GetAssemblerClient() : nullptr;
+	UFPSRWeaponDataAsset* DA = Client.IsValid() ? Client->GetWeaponDA() : nullptr;
+	const int32 Sel = Client.IsValid() ? Client->GetSelectedPart() : INDEX_NONE;
+	if (DA && DA->WeaponParts1P.IsValidIndex(Sel))
+	{
+		const TArray<FFPSRWeaponPartStage>& Stages = DA->WeaponParts1P[Sel].Stages;
+		for (int32 s = 0; s < Stages.Num(); ++s)
+		{
+			TSharedPtr<FStageRow> Row = MakeShared<FStageRow>();
+			Row->StageIndex = s;
+			StageRows.Add(Row);
+		}
+	}
+
+	if (StageListView.IsValid())
+	{
+		StageListView->RequestListRefresh();
+	}
+}
+
+TSharedRef<ITableRow> SFPSRWeaponAssemblerTab::OnGenerateStageRow(TSharedPtr<FStageRow> Item, const TSharedRef<STableViewBase>& OwnerTable)
+{
+	const int32 StageIndex = Item.IsValid() ? Item->StageIndex : INDEX_NONE;
+
+	// 단계 메시 표시명(Stages[idx].Mesh 자산명 — 로드 없이 소프트경로에서만 뽑는다; null이면 "(메시 없음)").
+	FText MeshLabel = LOCTEXT("StageMeshNone", "(메시 없음)");
+	{
+		TSharedPtr<FFPSRWeaponAssemblerViewportClient> Client = Viewport.IsValid() ? Viewport->GetAssemblerClient() : nullptr;
+		UFPSRWeaponDataAsset* DA = Client.IsValid() ? Client->GetWeaponDA() : nullptr;
+		const int32 Sel = Client.IsValid() ? Client->GetSelectedPart() : INDEX_NONE;
+		if (DA && DA->WeaponParts1P.IsValidIndex(Sel) && DA->WeaponParts1P[Sel].Stages.IsValidIndex(StageIndex))
+		{
+			const TSoftObjectPtr<UStaticMesh>& StageMesh = DA->WeaponParts1P[Sel].Stages[StageIndex].Mesh;
+			if (!StageMesh.IsNull())
+			{
+				MeshLabel = FText::FromString(StageMesh.GetAssetName());
+			}
+		}
+	}
+
+	return SNew(STableRow<TSharedPtr<FStageRow>>, OwnerTable)
+		[
+			SNew(SHorizontalBox)
+
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 4.0f, 0.0f)
+			[
+				SNew(STextBlock).Text(LOCTEXT("StageStacksPrompt", "스택:"))
+			]
+
+			+ SHorizontalBox::Slot().AutoWidth().Padding(0.0f, 0.0f, 4.0f, 0.0f)
+			[
+				SNew(SSpinBox<int32>)
+				.MinValue(1)
+				.MinSliderValue(1)
+				.MaxSliderValue(10)
+				.Value_Lambda([this, StageIndex]() { return GetStageMinStacks(StageIndex); })
+				.OnValueChanged_Lambda([this, StageIndex](int32 NewValue) { OnStageMinStacksChanged(NewValue, StageIndex); })
+			]
+
+			+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
+			[
+				SNew(STextBlock).Text(MeshLabel)
+			]
+		];
+}
+
+void SFPSRWeaponAssemblerTab::OnStageSelectionChanged(TSharedPtr<FStageRow> Item, ESelectInfo::Type SelectInfo)
+{
+	SelectedStageRow = Item;
+}
+
+FReply SFPSRWeaponAssemblerTab::OnAddStageClicked()
+{
+	TSharedPtr<FFPSRWeaponAssemblerViewportClient> Client = Viewport.IsValid() ? Viewport->GetAssemblerClient() : nullptr;
+	UFPSRWeaponDataAsset* DA = Client.IsValid() ? Client->GetWeaponDA() : nullptr;
+	const int32 Sel = Client.IsValid() ? Client->GetSelectedPart() : INDEX_NONE;
+	if (!DA || !DA->WeaponParts1P.IsValidIndex(Sel))
+	{
+		if (StatusText.IsValid())
+		{
+			StatusText->SetText(LOCTEXT("AddStageNoSelection", "먼저 위 '현재 파츠'에서 슬롯을 선택하세요."));
+		}
+		return FReply::Handled();
+	}
+
+	FFPSRWeaponPartAttachment& Slot = DA->WeaponParts1P[Sel];
+
+	// 사용 가능 파츠에서 고른 메시를 새 단계로(없으면 null-safe로 빈 단계). 필요 스택은 목록 끝에 자동 이어붙인다.
+	FFPSRWeaponPartStage NewStage;
+	NewStage.Mesh = SelectedAvailPart.IsValid() ? Cast<UStaticMesh>(SelectedAvailPart->MeshPath.TryLoad()) : nullptr;
+	NewStage.MinStacks = Slot.Stages.Num() + 1;
+	Slot.Stages.Add(NewStage);
+	DA->MarkPackageDirty();
+
+	RefreshStageList();
+	if (StageListView.IsValid() && StageRows.Num() > 0)
+	{
+		StageListView->SetSelection(StageRows.Last());
+	}
+
+	if (StatusText.IsValid())
+	{
+		StatusText->SetText(FText::Format(
+			LOCTEXT("AddStageDone", "진화 단계 추가(스택 {0}). 스택 수는 목록에서 조정. C2에서 위치 배치 예정. '조립→저장'을 눌러야 저장됩니다."),
+			FText::AsNumber(NewStage.MinStacks)));
+	}
+	return FReply::Handled();
+}
+
+bool SFPSRWeaponAssemblerTab::IsAddStageEnabled() const
+{
+	return Viewport.IsValid() && Viewport->GetAssemblerClient().IsValid()
+		&& Viewport->GetAssemblerClient()->GetSelectedPart() != INDEX_NONE;
+}
+
+FReply SFPSRWeaponAssemblerTab::OnRemoveStageClicked()
+{
+	if (!SelectedStageRow.IsValid())
+	{
+		return FReply::Handled();
+	}
+
+	TSharedPtr<FFPSRWeaponAssemblerViewportClient> Client = Viewport.IsValid() ? Viewport->GetAssemblerClient() : nullptr;
+	UFPSRWeaponDataAsset* DA = Client.IsValid() ? Client->GetWeaponDA() : nullptr;
+	const int32 Sel = Client.IsValid() ? Client->GetSelectedPart() : INDEX_NONE;
+	if (!DA || !DA->WeaponParts1P.IsValidIndex(Sel))
+	{
+		return FReply::Handled();
+	}
+
+	TArray<FFPSRWeaponPartStage>& Stages = DA->WeaponParts1P[Sel].Stages;
+	if (Stages.IsValidIndex(SelectedStageRow->StageIndex))
+	{
+		Stages.RemoveAt(SelectedStageRow->StageIndex);
+		DA->MarkPackageDirty();
+	}
+
+	RefreshStageList();
+
+	if (StatusText.IsValid())
+	{
+		StatusText->SetText(LOCTEXT("RemoveStageDone", "선택한 진화 단계를 제거했습니다. '조립→저장'을 눌러야 저장됩니다."));
+	}
+	return FReply::Handled();
+}
+
+bool SFPSRWeaponAssemblerTab::IsRemoveStageEnabled() const
+{
+	return SelectedStageRow.IsValid();
+}
+
+int32 SFPSRWeaponAssemblerTab::GetStageMinStacks(int32 StageIndex) const
+{
+	TSharedPtr<FFPSRWeaponAssemblerViewportClient> Client = Viewport.IsValid() ? Viewport->GetAssemblerClient() : nullptr;
+	UFPSRWeaponDataAsset* DA = Client.IsValid() ? Client->GetWeaponDA() : nullptr;
+	const int32 Sel = Client.IsValid() ? Client->GetSelectedPart() : INDEX_NONE;
+	if (DA && DA->WeaponParts1P.IsValidIndex(Sel) && DA->WeaponParts1P[Sel].Stages.IsValidIndex(StageIndex))
+	{
+		return DA->WeaponParts1P[Sel].Stages[StageIndex].MinStacks;
+	}
+	return 1;
+}
+
+void SFPSRWeaponAssemblerTab::OnStageMinStacksChanged(int32 NewValue, int32 StageIndex)
+{
+	TSharedPtr<FFPSRWeaponAssemblerViewportClient> Client = Viewport.IsValid() ? Viewport->GetAssemblerClient() : nullptr;
+	UFPSRWeaponDataAsset* DA = Client.IsValid() ? Client->GetWeaponDA() : nullptr;
+	const int32 Sel = Client.IsValid() ? Client->GetSelectedPart() : INDEX_NONE;
+	if (DA && DA->WeaponParts1P.IsValidIndex(Sel) && DA->WeaponParts1P[Sel].Stages.IsValidIndex(StageIndex))
+	{
+		DA->WeaponParts1P[Sel].Stages[StageIndex].MinStacks = FMath::Max(1, NewValue);
+		DA->MarkPackageDirty();
+		// 스핀박스가 값을 소유(Value_Lambda가 즉시 되읽음) — 리스트 리프레시 불요.
+	}
 }
 
 // ---------------------------------------------------------------------------------------------------------------
