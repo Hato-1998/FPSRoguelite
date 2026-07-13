@@ -19,7 +19,7 @@ class USoundBase;
 class UParticleSystem;
 class UTexture2D;
 class UMaterialInterface;
-class UFPSRWeaponPartRule;
+class UFPSRWeaponFragment;
 
 /** Sniper-scope descriptor (W-U2) for a SIGHT part. Purely OWNER-LOCAL cosmetic: when this sight is active and the
  *  player aims, it drives a full-screen scope — strong FOV zoom + HUD reticle/vignette overlay + 1P weapon hidden.
@@ -54,19 +54,48 @@ struct FFPSRWeaponScopeDescriptor
 	bool bHideWeaponWhileScoped = true;
 };
 
-/** One modular cosmetic part attached to the 1P skeletal weapon mesh at a named socket (U15). Purely visual: the
+/** One evolution stage of a part slot (W-U1b 재설계): when the slot's EvolutionFragment reaches MinStacks copies,
+ *  this stage's mesh/offset/scope replaces the slot's base part — sharing the slot's FIXED socket. Winner among met
+ *  stages = the HIGHEST MinStacks satisfied (author stages base→강한 순, 스택 오름차순). 순수 데이터: 폴리모픽 조건
+ *  없이 '단일 프래그먼트 스택 임계'만으로 진화(§2-A 격리계약 유지 — 파츠는 스택을 읽기만 함). */
+USTRUCT(BlueprintType)
+struct FFPSRWeaponPartStage
+{
+	GENERATED_BODY()
+
+	/** 이 단계가 켜지는 최소 스택(슬롯 EvolutionFragment 기준). 1 이상. Base(0단계)는 슬롯의 Part 필드. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|모듈 파츠", meta = (DisplayName = "필요 스택", ClampMin = "1"))
+	int32 MinStacks = 1;
+
+	/** 이 단계에서 교체되는 파츠 메시. null = 이 단계 선택 시 파츠 사라짐(null-safe). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|모듈 파츠", meta = (DisplayName = "단계 메시"))
+	TSoftObjectPtr<UStaticMesh> Mesh;
+
+	/** 슬롯 고정 소켓 기준 상대 트랜스폼(Synty 파츠는 비공유원점이라 단계마다 오프셋이 다를 수 있음). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|모듈 파츠", meta = (DisplayName = "오프셋(상대 트랜스폼)"))
+	FTransform Offset;
+
+	/** 이 단계가 사이트일 때의 스코프 디스크립터(예: 저격 스코프 단계는 bScopeOverlay=true). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|모듈 파츠", meta = (DisplayName = "스코프(사이트 단계)"))
+	FFPSRWeaponScopeDescriptor Scope;
+};
+
+/** One modular cosmetic part slot attached to the 1P skeletal weapon mesh at a named socket (U15). Purely visual: the
  *  part is a static mesh (barrel / forestock / magazine / sight from the pack) child-attached to the equipped
- *  skeletal weapon. Null Part = skipped (null-safe). Static/melee weapons and empty lists attach nothing. */
+ *  skeletal weapon. Null Part = skipped (null-safe). Static/melee weapons and empty lists attach nothing. A slot may
+ *  be purely structural (no evolution) or may evolve (W-U1b): the base Part below is stage 0, and Stages lists
+ *  higher stack-gated replacements — the slot's Socket stays FIXED across every stage. */
 USTRUCT(BlueprintType)
 struct FFPSRWeaponPartAttachment
 {
 	GENERATED_BODY()
 
-	/** Static mesh of the part (soft ref; null = this entry is skipped). */
+	/** Static mesh of the part (soft ref; null = this entry is skipped). Base/stage-0 mesh when this slot evolves. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|모듈 파츠", meta = (DisplayName = "파츠 메시"))
 	TSoftObjectPtr<UStaticMesh> Part;
 
-	/** Socket on the WEAPON mesh (SKEL_LPAMG_<W>) the part attaches to. NAME_None = weapon mesh root. */
+	/** Socket on the WEAPON mesh (SKEL_LPAMG_<W>) the part attaches to. NAME_None = weapon mesh root. FIXED mount —
+	 *  the tool bakes this as a stable SOCKET_Mount_<자동id> and it stays unchanged even as the slot evolves. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|모듈 파츠", meta = (DisplayName = "부착 소켓"))
 	FName Socket = NAME_None;
 
@@ -78,6 +107,19 @@ struct FFPSRWeaponPartAttachment
 	 *  AimSocket). bScopeOverlay=false (default) = an ordinary structural part / iron sight, no scope. (W-U2) */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|모듈 파츠", meta = (DisplayName = "스코프(사이트 파츠)"))
 	FFPSRWeaponScopeDescriptor Scope;
+
+	/** 슬롯 표시 이름(툴/Details 표시용, 사용자 지정). 실제 소켓명이 아님 — 소켓은 위 Socket(툴이 안정 id로 관리). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|모듈 파츠", meta = (DisplayName = "슬롯 이름(표시용)"))
+	FText DisplayLabel;
+
+	/** 이 슬롯을 진화시키는 프래그먼트(카드) — 이 프래그먼트의 획득 스택 수가 Stages의 단계를 결정한다. null = 순수
+	 *  구조 파츠(진화 없음). 최종 단계 MinStacks = 프래그먼트 MaxStacks로 두면 카드가 자동 소진된다(기존 카드풀 로직). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|모듈 파츠", meta = (DisplayName = "진화 프래그먼트(카드)"))
+	TSoftObjectPtr<UFPSRWeaponFragment> EvolutionFragment;
+
+	/** 진화 단계 목록(스택 오름차순 권장). 조건 만족 중 최고 MinStacks 단계가 기본 Part를 교체. 빈 목록 = 기본만. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|모듈 파츠", meta = (DisplayName = "진화 단계"))
+	TArray<FFPSRWeaponPartStage> Stages;
 };
 
 /** 1P 절차 무기 모션(힙) 프로파일 — 정적 무기도 "살아있게" 만드는 owner-local 코스메틱 모션 파라미터 묶음(P1).
@@ -379,17 +421,13 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|발사파츠 반동", meta = (DisplayName = "반동 커브"))
 	FName FirePartRecoilCurve = FName("CHRecoil");
 
-	/** Optional modular cosmetic parts child-attached to the 1P skeletal weapon mesh on equip (U15). Static/melee
-	 *  weapons and empty lists attach nothing (null-safe). Parts inherit the weapon mesh's OnlyOwnerSee visibility. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|모듈 파츠", meta = (DisplayName = "모듈 파츠 목록(1P)"))
+	/** Optional modular cosmetic part slots child-attached to the 1P skeletal weapon mesh on equip (U15, W-U1b 재설계).
+	 *  Static/melee weapons and empty lists attach nothing (null-safe). Parts inherit the weapon mesh's OnlyOwnerSee
+	 *  visibility. Each slot is either purely structural (no EvolutionFragment) or evolves in place (스택 진화 —
+	 *  FFPSRWeaponPartAttachment.Stages) while its Socket stays fixed. Read-only cosmetic: never touches
+	 *  gameplay/cards/save/replication (§2-A). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|모듈 파츠", meta = (DisplayName = "1P 파츠 슬롯(구조/진화)"))
 	TArray<FFPSRWeaponPartAttachment> WeaponParts1P;
-
-	/** Modular part SELECTION rules (W-U1 evolution). Each rule competes for its Slot; the winner (highest Tier, then
-	 *  Priority, then rule order) whose Condition is met (null = Always) attaches its Part — swappable by resolved
-	 *  stats / behavior fragments. WeaponParts1P above stay ALWAYS-attached structural parts (slotless). Empty here =
-	 *  no evolution (WeaponParts1P only). Read-only cosmetic: never touches gameplay/cards/save/replication (§2-A). */
-	UPROPERTY(EditDefaultsOnly, Instanced, BlueprintReadOnly, Category = "무기|모듈 파츠", meta = (DisplayName = "파츠 선택 규칙"))
-	TArray<TObjectPtr<UFPSRWeaponPartRule>> PartRules;
 
 	/** Cascade muzzle-flash particle spawned at MuzzleSocket each shot (owner-client local). */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|발사 연출", meta = (DisplayName = "총구 화염 파티클"))

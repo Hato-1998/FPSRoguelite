@@ -1,8 +1,20 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Weapon/FPSRWeaponPartSelector.h"
-#include "Weapon/FPSRWeaponPartRule.h"
-#include "Weapon/FPSRWeaponPartCondition.h"
+#include "Weapon/FPSRWeaponFragment.h"
+
+namespace
+{
+	/** FRotator has no engine GetTypeHash overload (unlike FVector) — hash it component-wise so ComputeSignature can
+	 *  detect an offset ROTATION change (not just translation/scale) across an evolution-stage swap. */
+	uint32 GetRotatorTypeHash(const FRotator& R)
+	{
+		uint32 Hash = GetTypeHash(R.Pitch);
+		Hash = HashCombine(Hash, GetTypeHash(R.Yaw));
+		Hash = HashCombine(Hash, GetTypeHash(R.Roll));
+		return Hash;
+	}
+}
 
 void FPSRWeaponPartSelector::SelectParts(const UFPSRWeaponDataAsset& Weapon,
 	const FFPSRWeaponStatBlock& Resolved,
@@ -11,48 +23,46 @@ void FPSRWeaponPartSelector::SelectParts(const UFPSRWeaponDataAsset& Weapon,
 {
 	OutSelected.Reset();
 
-	// Slotless structural parts (WeaponParts1P) are always-attached — unchanged from the pre-W-U1 behavior. Null-part
-	// filtering happens at attach time (RebuildPartsFromSelection), so every entry passes through here.
-	for (const FFPSRWeaponPartAttachment& P : Weapon.WeaponParts1P)
+	// One resolved attachment per WeaponParts1P slot, in DA order (W-U1b 재설계 — 폴리모픽 규칙 폐기, 파츠별 스택 진화).
+	// Null-part filtering still happens at attach time (RebuildPartsFromSelection), so every entry passes through here.
+	for (const FFPSRWeaponPartAttachment& Entry : Weapon.WeaponParts1P)
 	{
-		OutSelected.Add(P);
-	}
+		// Base (stage 0): the slot's own Part/Offset/Scope — what a purely-structural slot always resolves to.
+		TSoftObjectPtr<UStaticMesh> WinMesh = Entry.Part;
+		FTransform WinOffset = Entry.Offset;
+		FFPSRWeaponScopeDescriptor WinScope = Entry.Scope;
 
-	// Per-slot winner: highest Tier, then highest Priority, then lowest rule index (deterministic total order).
-	struct FWinner { const FFPSRWeaponPartAttachment* Part = nullptr; int32 Tier = 0; int32 Priority = 0; int32 RuleIndex = 0; };
-	TMap<FGameplayTag, FWinner> Winners;
-	for (int32 i = 0; i < Weapon.PartRules.Num(); ++i)
-	{
-		const UFPSRWeaponPartRule* Rule = Weapon.PartRules[i];
-		if (!Rule || !Rule->Slot.IsValid())
+		if (UFPSRWeaponFragment* Frag = Entry.EvolutionFragment.LoadSynchronous())
 		{
-			continue; // slotless/null rule ignored (IsDataValid errors)
+			// Stack count = same asset-pointer-identity match as UFPSRWeaponInstance::HasFragment.
+			int32 Stacks = 0;
+			for (const TObjectPtr<UFPSRWeaponFragment>& F : Fragments)
+			{
+				if (F == Frag)
+				{
+					++Stacks;
+				}
+			}
+			// Winner among met stages = the HIGHEST MinStacks satisfied by the current stack count.
+			int32 BestMinStacks = 0;
+			for (const FFPSRWeaponPartStage& Stage : Entry.Stages)
+			{
+				if (Stage.MinStacks <= Stacks && Stage.MinStacks > BestMinStacks)
+				{
+					BestMinStacks = Stage.MinStacks;
+					WinMesh = Stage.Mesh;
+					WinOffset = Stage.Offset;
+					WinScope = Stage.Scope;
+				}
+			}
 		}
-		const bool bMet = Rule->Condition ? Rule->Condition->IsMet(Resolved, Fragments) : true;
-		if (!bMet)
-		{
-			continue;
-		}
-		FWinner Cand{ &Rule->Part, Rule->Tier, Rule->Priority, i };
-		FWinner* Cur = Winners.Find(Rule->Slot);
-		// higher Tier wins; equal → higher Priority; equal → LOWER RuleIndex (deterministic total order)
-		const bool bBeats = !Cur
-			|| Cand.Tier > Cur->Tier
-			|| (Cand.Tier == Cur->Tier && Cand.Priority > Cur->Priority)
-			|| (Cand.Tier == Cur->Tier && Cand.Priority == Cur->Priority && Cand.RuleIndex < Cur->RuleIndex);
-		if (bBeats)
-		{
-			Winners.Add(Rule->Slot, Cand);
-		}
-	}
 
-	// Append winners in lexical slot order so the selected set (and its signature) is order-stable across runs.
-	TArray<FGameplayTag> Slots;
-	Winners.GetKeys(Slots);
-	Slots.Sort([](const FGameplayTag& A, const FGameplayTag& B) { return A.GetTagName().Compare(B.GetTagName()) < 0; });
-	for (const FGameplayTag& S : Slots)
-	{
-		OutSelected.Add(*Winners[S].Part);
+		FFPSRWeaponPartAttachment ResolvedEntry;
+		ResolvedEntry.Part = WinMesh;
+		ResolvedEntry.Socket = Entry.Socket; // FIXED mount — never changes across evolution stages
+		ResolvedEntry.Offset = WinOffset;
+		ResolvedEntry.Scope = WinScope;
+		OutSelected.Add(ResolvedEntry);
 	}
 }
 
@@ -61,7 +71,18 @@ uint32 FPSRWeaponPartSelector::ComputeSignature(const TArray<FFPSRWeaponPartAtta
 	uint32 Hash = 0;
 	for (const FFPSRWeaponPartAttachment& P : Selected)
 	{
+		// Full resolved-attachment fingerprint — not just the mesh — so an evolution stage swap that keeps the same
+		// mesh but changes offset/scope (or a socket change) still churns a rebuild (fixes a pre-existing under-hash).
 		Hash = HashCombine(Hash, GetTypeHash(P.Part.ToSoftObjectPath()));
+		Hash = HashCombine(Hash, GetTypeHash(P.Socket));
+		Hash = HashCombine(Hash, GetTypeHash(P.Offset.GetLocation()));
+		Hash = HashCombine(Hash, GetRotatorTypeHash(P.Offset.Rotator()));
+		Hash = HashCombine(Hash, GetTypeHash(P.Offset.GetScale3D()));
+		Hash = HashCombine(Hash, GetTypeHash(P.Scope.bScopeOverlay));
+		Hash = HashCombine(Hash, GetTypeHash(P.Scope.AimFieldOfView));
+		Hash = HashCombine(Hash, GetTypeHash(P.Scope.ScopeReticle.ToSoftObjectPath()));
+		Hash = HashCombine(Hash, GetTypeHash(P.Scope.bScopeVignette));
+		Hash = HashCombine(Hash, GetTypeHash(P.Scope.bHideWeaponWhileScoped));
 	}
 	return Hash;
 }

@@ -7,7 +7,7 @@
 #include "Engine/SkeletalMesh.h"
 #include "Engine/StaticMesh.h"
 #include "AbilitySystem/Abilities/FPSRGA_WeaponFire_Projectile.h"
-#include "Weapon/FPSRWeaponPartRule.h"
+#include "Weapon/FPSRWeaponFragment.h"
 
 #define LOCTEXT_NAMESPACE "FPSRWeaponDataAsset"
 
@@ -196,53 +196,80 @@ EDataValidationResult UFPSRWeaponDataAsset::IsDataValid(FDataValidationContext& 
 		if (SkelWeapon && !SkeletalMeshHasAttachPoint(SkelWeapon, Part.Socket))
 		{
 			Context.AddWarning(FText::Format(LOCTEXT("PartSocketMissing",
-				"WeaponParts1P part '{0}' references socket '{1}' that does not exist on WeaponMesh1P — it will attach at the mesh origin. Check for a typo (e.g. a space instead of '_')."),
+				"파츠 슬롯 '{0}' references socket '{1}' that does not exist on WeaponMesh1P — it will attach at the mesh origin. Check for a typo (e.g. a space instead of '_')."),
 				FText::FromString(Part.Part.GetAssetName()), FText::FromName(Part.Socket)));
 		}
 	}
 
-	// --- W-U1 modular part-rule validation (author-time). Slot empty = ERROR (breaks selector determinism / intent);
-	//     duplicate (slot, tier, priority) = WARNING (mutually-exclusive conditions are legal — RuleIndex still makes
-	//     the runtime deterministic). Rule-part socket typo = WARNING (parity with the base-part check above). The
-	//     always-on aim/muzzle ANCHOR guarantee is enforced by the existing receiver+WeaponParts1P checks below —
-	//     rule parts are DELIBERATELY excluded from that search so the anchor stays always-attached. ---
-	for (int32 i = 0; i < PartRules.Num(); ++i)
+	// --- W-U1b 파츠별 스택 진화 검증(폴리모픽 PartRules 대체). 단계 메시는 슬롯의 고정 소켓(Entry.Socket)에 그대로
+	//     붙으므로 별도 소켓검사는 불필요하다 — 위 WeaponParts1P 소켓검사가 슬롯당 1회로 이미 커버한다. Stages 항목은
+	//     '데이터'일 뿐이라 순수 struct — 조건 없이 MinStacks 하나로만 승자가 갈린다(§2-A: 파츠는 스택을 읽기만 함). ---
+	for (int32 i = 0; i < WeaponParts1P.Num(); ++i)
 	{
-		const UFPSRWeaponPartRule* Rule = PartRules[i];
-		if (!Rule)
+		const FFPSRWeaponPartAttachment& Entry = WeaponParts1P[i];
+		if (!Entry.EvolutionFragment.IsNull() && Entry.Stages.Num() == 0)
 		{
-			continue;
+			Context.AddWarning(FText::Format(LOCTEXT("PartStageNoStages",
+				"파츠 슬롯 [{0}]에 진화 프래그먼트가 지정됐지만 진화 단계(Stages)가 비어 있습니다 — 항상 기본 파츠만 표시됩니다."),
+				FText::AsNumber(i)));
 		}
-		if (!Rule->Slot.IsValid())
+
+		UFPSRWeaponFragment* Frag = Entry.EvolutionFragment.LoadSynchronous();
+		TArray<int32> SeenMinStacks;
+		for (int32 s = 0; s < Entry.Stages.Num(); ++s)
 		{
-			Context.AddError(FText::Format(LOCTEXT("PartRuleNoSlot", "PartRules[{0}] has an empty Slot — a slotless rule can never compete for selection. Assign a Slot gameplay tag."), FText::AsNumber(i)));
-			Result = EDataValidationResult::Invalid;
-		}
-		// The part attaches to the WEAPON mesh (WeaponMesh1P) at Part.Socket — same as WeaponParts1P and the runtime
-		// (RebuildPartsFromSelection: AttachToComponent(WeaponMesh1P, ..., Part.Socket)). Validate the socket against the
-		// weapon mesh, NOT the part's own static mesh (parts-on-parts is unsupported; every part attaches to the receiver).
-		if (!Rule->Part.Part.IsNull() && !Rule->Part.Socket.IsNone() && SkelWeapon && !SkeletalMeshHasAttachPoint(SkelWeapon, Rule->Part.Socket))
-		{
-			Context.AddWarning(FText::Format(LOCTEXT("PartRuleSocketMissing", "PartRules[{0}] part references socket '{1}' that does not exist on WeaponMesh1P — it will attach at the mesh origin. Bake it with the assembler or check for a typo."), FText::AsNumber(i), FText::FromName(Rule->Part.Socket)));
+			const FFPSRWeaponPartStage& Stage = Entry.Stages[s];
+			if (Stage.MinStacks < 1)
+			{
+				Context.AddError(FText::Format(LOCTEXT("PartStageMinStacksInvalid",
+					"파츠 슬롯 [{0}] 단계 [{1}]의 필요 스택이 {2} — 1 이상이어야 합니다(0/음수는 기본 파츠를 항상 가립니다)."),
+					FText::AsNumber(i), FText::AsNumber(s), FText::AsNumber(Stage.MinStacks)));
+				Result = EDataValidationResult::Invalid;
+			}
+			else if (SeenMinStacks.Contains(Stage.MinStacks))
+			{
+				Context.AddError(FText::Format(LOCTEXT("PartStageDuplicateMinStacks",
+					"파츠 슬롯 [{0}]에 필요 스택 {1}인 단계가 중복됩니다 — 승자가 결정되지 않습니다. 하나만 남기거나 필요 스택을 다르게 하세요."),
+					FText::AsNumber(i), FText::AsNumber(Stage.MinStacks)));
+				Result = EDataValidationResult::Invalid;
+			}
+			else
+			{
+				SeenMinStacks.Add(Stage.MinStacks);
+			}
+
+			if (Stage.Mesh.IsNull())
+			{
+				Context.AddWarning(FText::Format(LOCTEXT("PartStageMeshMissing",
+					"파츠 슬롯 [{0}] 단계 [{1}]에 메시가 없습니다 — 이 단계가 선택되면 파츠가 사라집니다."),
+					FText::AsNumber(i), FText::AsNumber(s)));
+			}
+
+			if (Frag && Stage.MinStacks > Frag->MaxStacks)
+			{
+				Context.AddWarning(FText::Format(LOCTEXT("PartStageUnreachable",
+					"파츠 슬롯 [{0}] 단계 [{1}]의 필요 스택({2})이 프래그먼트 '{3}'의 MaxStacks({4})보다 큽니다 — 이 단계는 절대 도달할 수 없습니다."),
+					FText::AsNumber(i), FText::AsNumber(s), FText::AsNumber(Stage.MinStacks),
+					Frag->DisplayName, FText::AsNumber(Frag->MaxStacks)));
+			}
 		}
 	}
-	for (int32 i = 0; i < PartRules.Num(); ++i)
+
+	// 소켓 중복: 서로 다른 슬롯이 같은(None 아닌) 소켓을 쓰면 두 파츠가 같은 지점에 겹쳐 붙는다.
+	for (int32 i = 0; i < WeaponParts1P.Num(); ++i)
 	{
-		const UFPSRWeaponPartRule* A = PartRules[i];
-		if (!A || !A->Slot.IsValid())
+		if (WeaponParts1P[i].Socket.IsNone())
 		{
 			continue;
 		}
-		for (int32 j = i + 1; j < PartRules.Num(); ++j)
+		for (int32 j = i + 1; j < WeaponParts1P.Num(); ++j)
 		{
-			const UFPSRWeaponPartRule* B = PartRules[j];
-			if (!B || B->Slot != A->Slot)
+			if (WeaponParts1P[j].Socket == WeaponParts1P[i].Socket)
 			{
-				continue;
-			}
-			if (B->Tier == A->Tier && B->Priority == A->Priority)
-			{
-				Context.AddWarning(FText::Format(LOCTEXT("PartRuleAmbiguous", "PartRules[{0}] and [{1}] share Slot '{2}' with identical Tier/Priority — the winner is decided only by rule order. Differentiate Tier or Priority to make the intent explicit."), FText::AsNumber(i), FText::AsNumber(j), FText::FromName(A->Slot.GetTagName())));
+				Context.AddError(FText::Format(LOCTEXT("PartSlotDuplicateSocket",
+					"파츠 슬롯 [{0}]과 [{1}]이 같은 소켓 '{2}'을 사용합니다 — 두 파츠가 같은 지점에 겹쳐 붙습니다. 서로 다른 소켓을 지정하세요."),
+					FText::AsNumber(i), FText::AsNumber(j), FText::FromName(WeaponParts1P[i].Socket)));
+				Result = EDataValidationResult::Invalid;
 			}
 		}
 	}
@@ -258,13 +285,29 @@ EDataValidationResult UFPSRWeaponDataAsset::IsDataValid(FDataValidationContext& 
 			{
 				break;
 			}
-			if (Part.Part.IsNull())
+			if (!Part.Part.IsNull())
 			{
-				continue;
+				if (const UStaticMesh* PartMesh = Part.Part.LoadSynchronous())
+				{
+					bMuzzleFound = PartMesh->FindSocket(MuzzleSocket) != nullptr;
+				}
 			}
-			if (const UStaticMesh* PartMesh = Part.Part.LoadSynchronous())
+			// A muzzle-carrying variant may only appear once the slot has evolved (e.g. an evolved barrel stage) —
+			// scan the slot's stage meshes too so the search matches SelectParts' actual resolved output.
+			for (const FFPSRWeaponPartStage& Stage : Part.Stages)
 			{
-				bMuzzleFound = PartMesh->FindSocket(MuzzleSocket) != nullptr;
+				if (bMuzzleFound)
+				{
+					break;
+				}
+				if (Stage.Mesh.IsNull())
+				{
+					continue;
+				}
+				if (const UStaticMesh* StageMesh = Stage.Mesh.LoadSynchronous())
+				{
+					bMuzzleFound = StageMesh->FindSocket(MuzzleSocket) != nullptr;
+				}
 			}
 		}
 		if (!bMuzzleFound)
@@ -286,13 +329,29 @@ EDataValidationResult UFPSRWeaponDataAsset::IsDataValid(FDataValidationContext& 
 			{
 				break;
 			}
-			if (Part.Part.IsNull())
+			if (!Part.Part.IsNull())
 			{
-				continue;
+				if (const UStaticMesh* PartMesh = Part.Part.LoadSynchronous())
+				{
+					bAimFound = PartMesh->FindSocket(AimSocket) != nullptr;
+				}
 			}
-			if (const UStaticMesh* PartMesh = Part.Part.LoadSynchronous())
+			// A sight-carrying variant may only appear once the slot has evolved — scan the slot's stage meshes too
+			// so this "does an aim socket exist ANYWHERE" search matches SelectParts' actual resolved output.
+			for (const FFPSRWeaponPartStage& Stage : Part.Stages)
 			{
-				bAimFound = PartMesh->FindSocket(AimSocket) != nullptr;
+				if (bAimFound)
+				{
+					break;
+				}
+				if (Stage.Mesh.IsNull())
+				{
+					continue;
+				}
+				if (const UStaticMesh* StageMesh = Stage.Mesh.LoadSynchronous())
+				{
+					bAimFound = StageMesh->FindSocket(AimSocket) != nullptr;
+				}
 			}
 		}
 		if (!bAimFound)
@@ -303,19 +362,82 @@ EDataValidationResult UFPSRWeaponDataAsset::IsDataValid(FDataValidationContext& 
 		}
 	}
 
-	// W-U2: a scope-overlay sight only ever activates through ADS (the scope shows while aiming with that sight active).
-	// A scope part on a weapon with no ADS / no AimSocket can never trigger — warn.
-	for (const FFPSRWeaponPartAttachment& Part : WeaponParts1P)
+	// --- W-U1b 조준감 회귀 차단(중요): 슬롯이 진화로 사이트가 '될 수 있으면'(베이스 또는 임의 단계 메시가 AimSocket을
+	//     보유하거나, 베이스/단계 스코프 중 하나라도 bScopeOverlay=true) 베이스 + 모든 non-null 단계 메시가 전부
+	//     AimSocket을 보유해야 한다 — 하나라도 없으면 그 스택으로 진화한 순간 조준이 힙으로 회귀한다(ERROR). ---
+	if (BaseStats.bHasADS && !AimSocket.IsNone())
 	{
-		if (!Part.Scope.bScopeOverlay)
+		for (int32 i = 0; i < WeaponParts1P.Num(); ++i)
+		{
+			const FFPSRWeaponPartAttachment& Entry = WeaponParts1P[i];
+			const UStaticMesh* BaseMesh = Entry.Part.IsNull() ? nullptr : Entry.Part.LoadSynchronous();
+
+			bool bMightBeSight = Entry.Scope.bScopeOverlay || (BaseMesh && BaseMesh->FindSocket(AimSocket) != nullptr);
+			for (int32 s = 0; !bMightBeSight && s < Entry.Stages.Num(); ++s)
+			{
+				const FFPSRWeaponPartStage& Stage = Entry.Stages[s];
+				if (Stage.Scope.bScopeOverlay)
+				{
+					bMightBeSight = true;
+					break;
+				}
+				const UStaticMesh* StageMesh = Stage.Mesh.IsNull() ? nullptr : Stage.Mesh.LoadSynchronous();
+				if (StageMesh && StageMesh->FindSocket(AimSocket) != nullptr)
+				{
+					bMightBeSight = true;
+				}
+			}
+			if (!bMightBeSight)
+			{
+				continue;
+			}
+
+			bool bAllVariantsHaveAim = (BaseMesh == nullptr) || BaseMesh->FindSocket(AimSocket) != nullptr;
+			for (int32 s = 0; bAllVariantsHaveAim && s < Entry.Stages.Num(); ++s)
+			{
+				const UStaticMesh* StageMesh = Entry.Stages[s].Mesh.IsNull() ? nullptr : Entry.Stages[s].Mesh.LoadSynchronous();
+				if (StageMesh == nullptr)
+				{
+					continue; // null stage mesh already warned separately (PartStageMeshMissing)
+				}
+				bAllVariantsHaveAim = StageMesh->FindSocket(AimSocket) != nullptr;
+			}
+			if (!bAllVariantsHaveAim)
+			{
+				Context.AddError(FText::Format(LOCTEXT("PartStageAimSocketRegression",
+					"파츠 슬롯 [{0}]이 진화로 사이트가 될 수 있는데(스코프 오버레이 또는 AimSocket 보유) 일부 단계 메시에 AimSocket '{1}'이 없습니다 — 그 단계로 진화하면 조준이 힙으로 회귀합니다. 모든 단계 메시에 같은 AimSocket을 부여하세요."),
+					FText::AsNumber(i), FText::FromName(AimSocket)));
+				Result = EDataValidationResult::Invalid;
+			}
+		}
+	}
+
+	// W-U2: a scope-overlay sight only ever activates through ADS (the scope shows while aiming with that sight active).
+	// A scope part (base OR any evolution stage) on a weapon with no ADS / no AimSocket can never trigger — warn.
+	for (int32 i = 0; i < WeaponParts1P.Num(); ++i)
+	{
+		const FFPSRWeaponPartAttachment& Part = WeaponParts1P[i];
+		bool bHasScope = Part.Scope.bScopeOverlay;
+		if (!bHasScope)
+		{
+			for (const FFPSRWeaponPartStage& Stage : Part.Stages)
+			{
+				if (Stage.Scope.bScopeOverlay)
+				{
+					bHasScope = true;
+					break;
+				}
+			}
+		}
+		if (!bHasScope)
 		{
 			continue;
 		}
 		if (!BaseStats.bHasADS || AimSocket.IsNone())
 		{
 			Context.AddWarning(FText::Format(LOCTEXT("ScopeNoADS",
-				"WeaponParts1P part '{0}' enables the scope overlay, but the weapon has no ADS / no AimSocket — the scope can never activate (it triggers only while aiming with the sight active). Set BaseStats.bHasADS and AimSocket."),
-				FText::FromString(Part.Part.GetAssetName())));
+				"파츠 슬롯 [{0}](기본 또는 진화 단계)이 스코프 오버레이를 사용하지만, 무기에 ADS/AimSocket이 없어 스코프가 절대 켜지지 않습니다 — 스코프는 그 사이트로 조준할 때만 활성화됩니다. BaseStats.bHasADS와 AimSocket을 설정하세요."),
+				FText::AsNumber(i)));
 		}
 	}
 

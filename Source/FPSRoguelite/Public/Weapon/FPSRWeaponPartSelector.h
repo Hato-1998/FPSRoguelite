@@ -11,9 +11,11 @@ struct FFPSRWeaponStatBlock;
 
 namespace FPSRWeaponPartSelector
 {
-	/** Deterministic, pure. OutSelected = all slotless structural WeaponParts1P (in DA order) + the winning rule Part
-	 *  for each slot (slots iterated in lexical order). Winner per slot = met rules ranked Tier↓, Priority↓, ruleIndex↑
-	 *  (ruleIndex = global index into Weapon.PartRules → unique → total order). Null Condition = Always. */
+	/** Deterministic, pure. OutSelected = one resolved FFPSRWeaponPartAttachment per WeaponParts1P slot, in DA order
+	 *  (W-U1b 재설계 — 폴리모픽 규칙 폐기, 파츠별 스택 진화). For each slot: winner = base Part (stage 0) unless the
+	 *  slot's EvolutionFragment is held and a Stage's MinStacks is met, in which case the HIGHEST met MinStacks stage's
+	 *  Mesh/Offset/Scope replaces it — the slot's Socket (fixed mount) never changes. No EvolutionFragment = always
+	 *  the base Part (pure structural slot). */
 	FPSROGUELITE_API void SelectParts(const UFPSRWeaponDataAsset& Weapon,
 		const FFPSRWeaponStatBlock& Resolved,
 		const TArray<TObjectPtr<UFPSRWeaponFragment>>& Fragments,

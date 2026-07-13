@@ -242,10 +242,10 @@ public:
 };
 
 /** Behavior-less MARKER fragment (W-U2): adds NO fire behavior — every base hook stays a no-op. It exists ONLY to be
- *  detected by a read-only fragment check, i.e. a HasFragment part-rule condition (UFPSRPartCondition_HasFragment):
- *  an unlock card (UCardEffect_WeaponBehavior) grants this marker, and the weapon's PartRules then swap the sight to a
- *  scope while it is held — a "저격줌 강화" unlock. Keeps the §2-A isolation contract (parts read fragments read-only;
- *  this fragment never touches gameplay/fire). Author DisplayName per use (e.g. "저격 스코프 언락"). */
+ *  detected by a read-only stack count, i.e. a part slot's EvolutionFragment (FFPSRWeaponPartAttachment): an unlock
+ *  card (UCardEffect_WeaponBehavior) grants this marker, and the weapon's part evolution(스택 진화) then swaps the
+ *  sight to a scope while it is held — a "저격줌 강화" unlock. Keeps the §2-A isolation contract (parts read fragments
+ *  read-only; this fragment never touches gameplay/fire). Author DisplayName per use (e.g. "저격 스코프 언락"). */
 UCLASS()
 class FPSROGUELITE_API UFPSRFragment_Marker : public UFPSRWeaponFragment
 {
