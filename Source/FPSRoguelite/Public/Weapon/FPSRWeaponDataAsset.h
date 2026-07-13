@@ -54,18 +54,42 @@ struct FFPSRWeaponScopeDescriptor
 	bool bHideWeaponWhileScoped = true;
 };
 
-/** One evolution stage of a part slot (W-U1b 재설계): when the slot's EvolutionFragment reaches MinStacks copies,
- *  this stage's mesh/offset/scope replaces the slot's base part — sharing the slot's FIXED socket. Winner among met
- *  stages = the HIGHEST MinStacks satisfied (author stages base→강한 순, 스택 오름차순). 순수 데이터: 폴리모픽 조건
- *  없이 '단일 프래그먼트 스택 임계'만으로 진화(§2-A 격리계약 유지 — 파츠는 스택을 읽기만 함). */
+/** 진화 단계 트리거 종류: 슬롯 프래그먼트의 스택 수 / 무기 해결스탯 임계. */
+UENUM(BlueprintType)
+enum class EFPSRPartStageTrigger : uint8
+{
+	FragmentStacks UMETA(DisplayName = "프래그먼트 스택"),
+	StatThreshold  UMETA(DisplayName = "스탯 임계"),
+};
+
+/** One evolution stage of a part slot (W-U1b 재설계): when the slot's trigger condition is met, this stage's
+ *  mesh/offset/scope replaces the slot's base part — sharing the slot's FIXED socket. Winner among met stages =
+ *  the LAST one satisfied in list order (author stages base→강한 순). 순수 데이터: 폴리모픽 조건 없이 '단일
+ *  프래그먼트 스택 임계' 또는 '무기 해결스탯 임계'만으로 진화(§2-A 격리계약 유지 — 파츠는 스택/스탯을 읽기만 함). */
 USTRUCT(BlueprintType)
 struct FFPSRWeaponPartStage
 {
 	GENERATED_BODY()
 
-	/** 이 단계가 켜지는 최소 스택(슬롯 EvolutionFragment 기준). 1 이상. Base(0단계)는 슬롯의 Part 필드. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|모듈 파츠", meta = (DisplayName = "필요 스택", ClampMin = "1"))
+	/** 이 단계를 켜는 조건 종류. 기본=프래그먼트 스택(기존 동작). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|모듈 파츠", meta = (DisplayName = "트리거 종류"))
+	EFPSRPartStageTrigger Trigger = EFPSRPartStageTrigger::FragmentStacks;
+
+	/** 이 단계가 켜지는 최소 스택(슬롯 EvolutionFragment 기준). 1 이상. Base(0단계)는 슬롯의 Part 필드. Trigger=프래그먼트 스택일 때만 사용. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|모듈 파츠", meta = (DisplayName = "필요 스택", ClampMin = "1", EditCondition = "Trigger == EFPSRPartStageTrigger::FragmentStacks", EditConditionHides))
 	int32 MinStacks = 1;
+
+	/** 스탯 임계 트리거: 비교할 무기 해결스탯 축. Trigger=스탯 임계일 때만 사용. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|모듈 파츠", meta = (DisplayName = "스탯 축", EditCondition = "Trigger == EFPSRPartStageTrigger::StatThreshold", EditConditionHides))
+	EFPSRWeaponStat StatAxis = EFPSRWeaponStat::FireRate;
+
+	/** 스탯 임계 트리거: 비교 연산자. Trigger=스탯 임계일 때만 사용. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|모듈 파츠", meta = (DisplayName = "비교", EditCondition = "Trigger == EFPSRPartStageTrigger::StatThreshold", EditConditionHides))
+	EFPSRStatCompare StatCompare = EFPSRStatCompare::GreaterOrEqual;
+
+	/** 스탯 임계 트리거: 비교 기준값. Trigger=스탯 임계일 때만 사용. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|모듈 파츠", meta = (DisplayName = "기준값", EditCondition = "Trigger == EFPSRPartStageTrigger::StatThreshold", EditConditionHides))
+	float StatValue = 0.0f;
 
 	/** 이 단계에서 교체되는 파츠 메시. null = 이 단계 선택 시 파츠 사라짐(null-safe). */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|모듈 파츠", meta = (DisplayName = "단계 메시"))
@@ -117,7 +141,8 @@ struct FFPSRWeaponPartAttachment
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|모듈 파츠", meta = (DisplayName = "진화 프래그먼트(카드)"))
 	TSoftObjectPtr<UFPSRWeaponFragment> EvolutionFragment;
 
-	/** 진화 단계 목록(스택 오름차순 권장). 조건 만족 중 최고 MinStacks 단계가 기본 Part를 교체. 빈 목록 = 기본만. */
+	/** 진화 단계 목록(약→강 순 권장). 목록 순서상 마지막으로 조건이 충족된 단계가 기본 Part를 교체(스택 트리거와
+	 *  스탯 임계 트리거를 한 목록에 섞어도 됨). 빈 목록 = 기본만. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|모듈 파츠", meta = (DisplayName = "진화 단계"))
 	TArray<FFPSRWeaponPartStage> Stages;
 };

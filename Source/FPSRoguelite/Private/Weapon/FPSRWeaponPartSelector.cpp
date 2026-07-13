@@ -14,6 +14,20 @@ namespace
 		Hash = HashCombine(Hash, GetTypeHash(R.Roll));
 		return Hash;
 	}
+
+	/** StatThreshold 단계 트리거 비교. */
+	bool CompareStat(float V, EFPSRStatCompare Cmp, float Value)
+	{
+		switch (Cmp)
+		{
+		case EFPSRStatCompare::GreaterOrEqual: return V >= Value;
+		case EFPSRStatCompare::Greater:        return V > Value;
+		case EFPSRStatCompare::LessOrEqual:    return V <= Value;
+		case EFPSRStatCompare::Less:           return V < Value;
+		case EFPSRStatCompare::Equal:          return FMath::IsNearlyEqual(V, Value);
+		default:                               return false;
+		}
+	}
 }
 
 void FPSRWeaponPartSelector::SelectParts(const UFPSRWeaponDataAsset& Weapon,
@@ -32,28 +46,43 @@ void FPSRWeaponPartSelector::SelectParts(const UFPSRWeaponDataAsset& Weapon,
 		FTransform WinOffset = Entry.Offset;
 		FFPSRWeaponScopeDescriptor WinScope = Entry.Scope;
 
+		// Stack count for FragmentStacks-trigger stages = same asset-pointer-identity match as
+		// UFPSRWeaponInstance::HasFragment. StatThreshold-trigger stages need no fragment at all, so this is
+		// evaluated regardless of whether the slot even has an EvolutionFragment assigned.
+		int32 FragStacks = 0;
 		if (UFPSRWeaponFragment* Frag = Entry.EvolutionFragment.LoadSynchronous())
 		{
-			// Stack count = same asset-pointer-identity match as UFPSRWeaponInstance::HasFragment.
-			int32 Stacks = 0;
 			for (const TObjectPtr<UFPSRWeaponFragment>& F : Fragments)
 			{
 				if (F == Frag)
 				{
-					++Stacks;
+					++FragStacks;
 				}
 			}
-			// Winner among met stages = the HIGHEST MinStacks satisfied by the current stack count.
-			int32 BestMinStacks = 0;
-			for (const FFPSRWeaponPartStage& Stage : Entry.Stages)
+		}
+
+		// Winner among met stages = the LAST one satisfied in list order (author base→강한 순). Mixing both trigger
+		// kinds in one Stages list is fine — each stage is evaluated independently against its own trigger.
+		for (const FFPSRWeaponPartStage& Stage : Entry.Stages)
+		{
+			bool bMet = false;
+			switch (Stage.Trigger)
 			{
-				if (Stage.MinStacks <= Stacks && Stage.MinStacks > BestMinStacks)
-				{
-					BestMinStacks = Stage.MinStacks;
-					WinMesh = Stage.Mesh;
-					WinOffset = Stage.Offset;
-					WinScope = Stage.Scope;
-				}
+			case EFPSRPartStageTrigger::FragmentStacks:
+				bMet = !Entry.EvolutionFragment.IsNull() && FragStacks >= Stage.MinStacks;
+				break;
+			case EFPSRPartStageTrigger::StatThreshold:
+				bMet = CompareStat(Resolved.GetAxisValue(Stage.StatAxis), Stage.StatCompare, Stage.StatValue);
+				break;
+			default:
+				break;
+			}
+
+			if (bMet)
+			{
+				WinMesh = Stage.Mesh;
+				WinOffset = Stage.Offset;
+				WinScope = Stage.Scope;
 			}
 		}
 

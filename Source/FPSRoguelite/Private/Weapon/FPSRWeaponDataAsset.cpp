@@ -201,42 +201,48 @@ EDataValidationResult UFPSRWeaponDataAsset::IsDataValid(FDataValidationContext& 
 		}
 	}
 
-	// --- W-U1b 파츠별 스택 진화 검증(폴리모픽 PartRules 대체). 단계 메시는 슬롯의 고정 소켓(Entry.Socket)에 그대로
-	//     붙으므로 별도 소켓검사는 불필요하다 — 위 WeaponParts1P 소켓검사가 슬롯당 1회로 이미 커버한다. Stages 항목은
-	//     '데이터'일 뿐이라 순수 struct — 조건 없이 MinStacks 하나로만 승자가 갈린다(§2-A: 파츠는 스택을 읽기만 함). ---
+	// --- W-U1b 파츠별 스택 진화 검증(폴리모픽 PartRules 대체) + 스탯 임계 트리거 검증. 단계 메시는 슬롯의 고정
+	//     소켓(Entry.Socket)에 그대로 붙으므로 별도 소켓검사는 불필요하다 — 위 WeaponParts1P 소켓검사가 슬롯당 1회로
+	//     이미 커버한다. Stages 항목은 '데이터'일 뿐이라 순수 struct — 목록 순서상 마지막으로 조건이 충족된 단계가
+	//     승자다(§2-A: 파츠는 스택/스탯을 읽기만 함, 이제 승자 결정에 중복 검사가 불필요하다). ---
 	for (int32 i = 0; i < WeaponParts1P.Num(); ++i)
 	{
 		const FFPSRWeaponPartAttachment& Entry = WeaponParts1P[i];
-		if (!Entry.EvolutionFragment.IsNull() && Entry.Stages.Num() == 0)
-		{
-			Context.AddWarning(FText::Format(LOCTEXT("PartStageNoStages",
-				"파츠 슬롯 [{0}]에 진화 프래그먼트가 지정됐지만 진화 단계(Stages)가 비어 있습니다 — 항상 기본 파츠만 표시됩니다."),
-				FText::AsNumber(i)));
-		}
-
 		UFPSRWeaponFragment* Frag = Entry.EvolutionFragment.LoadSynchronous();
-		TArray<int32> SeenMinStacks;
+		bool bHasFragmentStackStage = false;
+
 		for (int32 s = 0; s < Entry.Stages.Num(); ++s)
 		{
 			const FFPSRWeaponPartStage& Stage = Entry.Stages[s];
-			if (Stage.MinStacks < 1)
+
+			if (Stage.Trigger == EFPSRPartStageTrigger::FragmentStacks)
 			{
-				Context.AddError(FText::Format(LOCTEXT("PartStageMinStacksInvalid",
-					"파츠 슬롯 [{0}] 단계 [{1}]의 필요 스택이 {2} — 1 이상이어야 합니다(0/음수는 기본 파츠를 항상 가립니다)."),
-					FText::AsNumber(i), FText::AsNumber(s), FText::AsNumber(Stage.MinStacks)));
-				Result = EDataValidationResult::Invalid;
+				bHasFragmentStackStage = true;
+
+				if (Stage.MinStacks < 1)
+				{
+					Context.AddError(FText::Format(LOCTEXT("PartStageMinStacksInvalid",
+						"파츠 슬롯 [{0}] 단계 [{1}]의 필요 스택이 {2} — 1 이상이어야 합니다(0/음수는 기본 파츠를 항상 가립니다)."),
+						FText::AsNumber(i), FText::AsNumber(s), FText::AsNumber(Stage.MinStacks)));
+					Result = EDataValidationResult::Invalid;
+				}
+
+				if (Entry.EvolutionFragment.IsNull())
+				{
+					Context.AddError(FText::Format(LOCTEXT("PartStageStackTriggerNoFragment",
+						"파츠 슬롯 [{0}] 단계 [{1}]은 스택 트리거인데 진화 카드(EvolutionFragment)가 지정되지 않았습니다 — 이 단계는 절대 켜지지 않습니다."),
+						FText::AsNumber(i), FText::AsNumber(s)));
+					Result = EDataValidationResult::Invalid;
+				}
+				else if (Frag && Stage.MinStacks > Frag->MaxStacks)
+				{
+					Context.AddWarning(FText::Format(LOCTEXT("PartStageUnreachable",
+						"파츠 슬롯 [{0}] 단계 [{1}]의 필요 스택({2})이 프래그먼트 '{3}'의 MaxStacks({4})보다 큽니다 — 이 단계는 절대 도달할 수 없습니다."),
+						FText::AsNumber(i), FText::AsNumber(s), FText::AsNumber(Stage.MinStacks),
+						Frag->DisplayName, FText::AsNumber(Frag->MaxStacks)));
+				}
 			}
-			else if (SeenMinStacks.Contains(Stage.MinStacks))
-			{
-				Context.AddError(FText::Format(LOCTEXT("PartStageDuplicateMinStacks",
-					"파츠 슬롯 [{0}]에 필요 스택 {1}인 단계가 중복됩니다 — 승자가 결정되지 않습니다. 하나만 남기거나 필요 스택을 다르게 하세요."),
-					FText::AsNumber(i), FText::AsNumber(Stage.MinStacks)));
-				Result = EDataValidationResult::Invalid;
-			}
-			else
-			{
-				SeenMinStacks.Add(Stage.MinStacks);
-			}
+			// StatThreshold 단계는 진화 카드가 필요 없다 — 추가 검증 없음.
 
 			if (Stage.Mesh.IsNull())
 			{
@@ -244,14 +250,13 @@ EDataValidationResult UFPSRWeaponDataAsset::IsDataValid(FDataValidationContext& 
 					"파츠 슬롯 [{0}] 단계 [{1}]에 메시가 없습니다 — 이 단계가 선택되면 파츠가 사라집니다."),
 					FText::AsNumber(i), FText::AsNumber(s)));
 			}
+		}
 
-			if (Frag && Stage.MinStacks > Frag->MaxStacks)
-			{
-				Context.AddWarning(FText::Format(LOCTEXT("PartStageUnreachable",
-					"파츠 슬롯 [{0}] 단계 [{1}]의 필요 스택({2})이 프래그먼트 '{3}'의 MaxStacks({4})보다 큽니다 — 이 단계는 절대 도달할 수 없습니다."),
-					FText::AsNumber(i), FText::AsNumber(s), FText::AsNumber(Stage.MinStacks),
-					Frag->DisplayName, FText::AsNumber(Frag->MaxStacks)));
-			}
+		if (!Entry.EvolutionFragment.IsNull() && !bHasFragmentStackStage)
+		{
+			Context.AddWarning(FText::Format(LOCTEXT("PartStageNoStages",
+				"파츠 슬롯 [{0}]에 진화 카드(EvolutionFragment)가 지정됐지만 스택 트리거 단계가 없습니다 — 이 카드는 이 슬롯에서 아무 효과가 없습니다."),
+				FText::AsNumber(i)));
 		}
 	}
 
