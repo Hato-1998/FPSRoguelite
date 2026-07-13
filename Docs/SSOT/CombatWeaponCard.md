@@ -127,14 +127,14 @@
 - **발사 모드** `EFPSRFireMode`: Single / Burst(N발) / FullAuto
 - **연사속도** FireRate (shots/sec) — FullAuto는 hold 시 이 주기로 반복 발사
 - **반동(Recoil)**: 발당 VerticalKick(상하)·HorizontalKick(좌우), 회복 속도/곡선
-- **반동 패턴**: 샷 인덱스별 정형 스프레이 패턴 (UCurveVector 또는 오프셋 배열)
-- **확산(Spread/Bloom)**: 기본 확산각 + 발당 블룸 증가 + 최대 블룸 + 회복. 트레이스를 확산 콘 내 랜덤화
+- **반동 패턴**: 샷 인덱스별 정형 스프레이 패턴(CrystalRecoil `UCRRecoilPattern`, 무기별 `RP_*` 비주얼 에디터 저작·재장전 시 초반 리셋)
+- **확산(Spread) — heat 단일소스 모델**(반동→CrystalRecoil 어댑터 마이그레이션 2026-07-08 `6f1a981`): 사격 누적 heat가 확산각 구동(`GetHeatSpread`, 발당 heat↑ + 무사격 냉각), 트레이스를 확산 콘 내 랜덤화. 레거시 발당-블룸/최대블룸 필드는 heat로 1:1 마이그레이션·제거. Shotgun/Bazooka=고정 확산
 - **탄약**: MagSize / ReloadTime / 재장전 어빌리티(R), 빈 탄창 시 발사 차단. **예비 탄약 무한**(ReserveAmmo 미사용, 확정 2026-05-30) — 스웜 상대 탄약고갈 스트레스 제거, 장전 타이밍 긴장만 유지
 - **ADS(조준)**: 우클릭, FOV/확산/반동 배율 (무기별 `bHasADS`)
 - (선택) 거리 데미지 감쇠
 - 절차적 반동/스웨이(스프링)는 Tier3 / P4 "게임필" 연계
 - **권장 시점**: P1.5(전투 슬라이스 직후, P2 전). 슈팅 감각 튜닝 반복이 많아 일찍 확립 권장
-- **구현 상태**: P1.5-A에서 FullAuto hold-to-fire 루프 + 반동(카메라 킥) + 확산/블룸을 `UFPSRWeaponFireComponent`에 구현. 탄약(MagSize/재장전, 예비 무한)/ADS는 P1.5-B 예정
+- **구현 상태**: FullAuto hold-to-fire 루프 = `UFPSRWeaponFireComponent`. **반동·확산 = CrystalRecoil 플러그인 어댑터**(`UFPSRRecoilComponent` 서브클래스, heat 단일소스 + `RP_*` 패턴, P0~P4 머지 `6f1a981`). 탄약(MagSize/재장전, 예비 무한)/ADS 구현됨. 조절가능 전수치 카탈로그 = `Docs/BalanceTuning_Reference.md §2`
 
 ### 2-5. 시작 캐릭터
 - 시작 무기 = **로드아웃 풀(`DA_LoadoutPool.SelectableWeapons`)에서 1택**(로비 선택). **현재 = 연사총(라이플) / 기관단총(SMG)**(2026-07-08 개편: 점사총 전용 무기 제거→점사는 라이플 언락 프래그먼트로 대체, SMG 추가). 근접칼·기타 무기는 언락 카드(`UCardEffect_GrantWeapon`) 경로(현 풀 미배선=휴면).

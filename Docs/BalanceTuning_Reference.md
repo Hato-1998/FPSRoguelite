@@ -71,15 +71,13 @@
 | 사거리 Range (cm) | 10000 | :78 | |
 | 탄창 MagSize | 30 | :81 | ✅ MagSize |
 | 재장전 ReloadTime (s) | 1.5 | :84 | ✅ ReloadTime |
-| 기본 확산 SpreadDegrees | 1.0 | :88 | ✅ Spread |
-| 발당 블룸 BloomPerShot | 0.3 | :91 | |
-| 최대 블룸 MaxBloom | 4.0 | :94 | |
-| 블룸 회복 BloomRecoveryRate (deg/s) | 6.0 | :97 | |
-| 수직반동 RecoilVertical | 1.0 | :101 | ✅ RecoilVertical |
-| 수평반동 RecoilHorizontal | 0.3 | :104 | |
-| 반동회복 모드/속도 | Auto / 10 | :107·110 | |
-| 반동 상승속도 RecoilRiseRate | 25 | :113 | |
-| 수평패턴 빈도 / Hip·ADS 수직배율 / Hip·ADS 수평랜덤 | 0.6 / 0.4·1.0 / 0.9·0.15 | :116~128 | |
+| 기본 확산 SpreadDegrees (base half-angle) | 1.0 | :88 | ✅ Spread |
+| **동적 확산 = heat 모델** (CrystalRecoil 이관 `6f1a981`; 레거시 Bloom* 필드 제거 `2c91ab7`) | MaxRecoilHeat 100 · CooldownDelay 0.5s · heat→spread 커브 | `Plugins/CrystalRecoil/…/CRRecoilSpreadComponent.h:82~94` + 무기별 heat 곡선(DA) | |
+| 수직반동 RecoilVertical | 1.0 | :92 | ✅ RecoilVertical |
+| 수평반동 RecoilHorizontal | 0.3 | :95 | |
+| 반동회복 모드/속도 | Auto / 10 | :98·101 | |
+| 수평패턴빈도 / Hip 수직배율 | 0.6 / 0.4 | :104·107 | |
+| **반동 패턴 = CrystalRecoil `RP_*`** (무기별 비주얼 에디터 저작·재장전 초반 리셋) | — | 무기 DA `RecoilPattern`(`UCRRecoilPattern`) | |
 | 근접 반경 / 공격딜레이 | 175cm / 0.5s | :132·135 | (Knife) |
 | ADS 사용 / FOV / 확산배율 / 보간속도 | false / 55 / 0.4 / 14 | :139~148 | (Sniper·Charge) |
 | 투사체 속도/중력/AOE반경/수명/관통/넉백 | 3000 / 0 / 0 / 5s / 0 / 0 | :153~168 | (Bazooka·Grenade·Sniper) |
@@ -87,7 +85,7 @@
 | 무기교체 쿨다운 EquipFireCooldown | 0.2s | InvComp.h:29 | |
 | 최대 무기 슬롯 MaxSlots | 3 | InvComp.h:23 (const) | |
 
-**크로스헤어 (WBP_RunHUD 저작):** 크기 96px · 블룸→푸시 SpreadToPush 0.25 · 최대확산 0.18 · `bUseDynamicCrosshair` true(per-weapon DA).
+**크로스헤어 (WBP_RunHUD 저작):** 크기 96px · 동적 확산 푸시 SpreadToPush 0.25 · 최대확산 0.18. 스타일 = **U12 진실 크로스헤어 시스템**(파라메트릭, per-weapon; 레거시 `bUseDynamicCrosshair` 대체, `PlayerFeel §2-14`).
 
 **행동 Fragment (DA_Frag_*/DA_CardModifiers_* 저작🔲):** MultiShot 추가발수 1 · OnHitBonus +10뎀 · ExplosiveRounds 반경150/뎀20/넉백0 · AmmoOnMiss 리필1 · ReloadOnKill 즉시충전 · 공통 MaxStacks 1.
 
