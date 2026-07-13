@@ -155,6 +155,14 @@ Plugins/VibeUE/
 Content/_SyntyPilot/
 
 # =============================================================================
+# PWAS Demo 레벨 external actors/objects (데모 맵 열람 시 UE가 자동 재생성 —
+#   게임 산출물 아님, umap 무변경인데 OFPA 잡파일만 생김. FirstPersonMap.umap은
+#   애니 프리뷰 참조용으로 추적 유지하되 그 external actors/objects는 무시)
+# =============================================================================
+Content/__ExternalActors__/ProceduralWeaponAnimationSystem/Demo/
+Content/__ExternalObjects__/ProceduralWeaponAnimationSystem/Demo/
+
+# =============================================================================
 # 원본 아트 소스 파일 (UE는 임포트된 .uasset만 사용 — 원본은 대용량 bloat, 커밋 금지)
 # =============================================================================
 *.rar
