@@ -17,28 +17,184 @@ class UAnimInstance;
 class UAnimMontage;
 class USoundBase;
 class UParticleSystem;
-class UTexture2D;
 class UMaterialInterface;
+class UFPSRWeaponFragment;
+class UUserWidget;
 
-/** One modular cosmetic part attached to the 1P skeletal weapon mesh at a named socket (U15). Purely visual: the
+/** Sniper-scope descriptor (W-U2) for a SIGHT part. Purely OWNER-LOCAL cosmetic: when this sight is active and the
+ *  player aims, it drives a full-screen scope — strong FOV zoom + HUD reticle/vignette overlay + 1P weapon hidden.
+ *  Only meaningful on the part whose mesh carries the weapon's AimSocket. Never touches trace/damage/replication/save
+ *  (§2-A isolation contract). */
+USTRUCT(BlueprintType)
+struct FFPSRWeaponScopeDescriptor
+{
+	GENERATED_BODY()
+
+	/** Master switch: aiming with this sight active drives the full-screen scope. false = ordinary ADS (iron sight / reddot). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "스코프", meta = (DisplayName = "스코프 오버레이 사용"))
+	bool bScopeOverlay = false;
+
+	/** This sight's ADS magnification — the camera FOV (deg) it zooms to while aiming. Applies to ANY sight (iron /
+	 *  reddot / low-power scope / sniper scope), so each sight part carries its own zoom. <=0 = use the weapon's
+	 *  BaseStats.ADSFieldOfView (this sight adds no extra zoom). Owner-local camera FOV only; never affects
+	 *  trace/spread (trace origin stays the camera). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "스코프", meta = (DisplayName = "조준 배율 FOV(도, ≤0=무기 기본)", ClampMin = "0.0"))
+	float AimFieldOfView = 0.0f;
+
+	/** 이 사이트가 활성일 때 HUD가 켜는 풀스크린 스코프 오버레이 위젯 BP(사이트/단계별). null = HUD 폴백
+	 *  (UFPSRRunHUDWidget::ScopeOverlayWidgetClass) 사용. 오너-로컬 코스메틱(복제0). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "스코프", meta = (DisplayName = "스코프 오버레이 위젯(WBP)", EditCondition = "bScopeOverlay", EditConditionHides))
+	TSoftClassPtr<UUserWidget> ScopeOverlayWidgetClass;
+
+	/** Show the dark scope-edge vignette around the reticle while scoped. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "스코프", meta = (DisplayName = "스코프 비네트", EditCondition = "bScopeOverlay", EditConditionHides))
+	bool bScopeVignette = true;
+
+	/** Hide the 1P weapon/arms while this scope is active (non-PiP full-screen scope). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "스코프", meta = (DisplayName = "스코프 시 1P총 숨김", EditCondition = "bScopeOverlay", EditConditionHides))
+	bool bHideWeaponWhileScoped = true;
+};
+
+/** 진화 단계 트리거 종류: 슬롯 프래그먼트의 스택 수 / 무기 해결스탯 임계. */
+UENUM(BlueprintType)
+enum class EFPSRPartStageTrigger : uint8
+{
+	FragmentStacks UMETA(DisplayName = "프래그먼트 스택"),
+	StatThreshold  UMETA(DisplayName = "스탯 임계"),
+};
+
+/** One evolution stage of a part slot (W-U1b 재설계): when the slot's trigger condition is met, this stage's
+ *  mesh/offset/scope replaces the slot's base part — sharing the slot's FIXED socket. Winner among met stages =
+ *  the LAST one satisfied in list order (author stages base→강한 순). 순수 데이터: 폴리모픽 조건 없이 '단일
+ *  프래그먼트 스택 임계' 또는 '무기 해결스탯 임계'만으로 진화(§2-A 격리계약 유지 — 파츠는 스택/스탯을 읽기만 함). */
+USTRUCT(BlueprintType)
+struct FFPSRWeaponPartStage
+{
+	GENERATED_BODY()
+
+	/** 이 단계를 켜는 조건 종류. 기본=프래그먼트 스택(기존 동작). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|모듈 파츠", meta = (DisplayName = "트리거 종류"))
+	EFPSRPartStageTrigger Trigger = EFPSRPartStageTrigger::FragmentStacks;
+
+	/** 이 단계가 켜지는 최소 스택(슬롯 EvolutionFragment 기준). 1 이상. Base(0단계)는 슬롯의 Part 필드. Trigger=프래그먼트 스택일 때만 사용. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|모듈 파츠", meta = (DisplayName = "필요 스택", ClampMin = "1", EditCondition = "Trigger == EFPSRPartStageTrigger::FragmentStacks", EditConditionHides))
+	int32 MinStacks = 1;
+
+	/** 스탯 임계 트리거: 비교할 무기 해결스탯 축. Trigger=스탯 임계일 때만 사용. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|모듈 파츠", meta = (DisplayName = "스탯 축", EditCondition = "Trigger == EFPSRPartStageTrigger::StatThreshold", EditConditionHides))
+	EFPSRWeaponStat StatAxis = EFPSRWeaponStat::FireRate;
+
+	/** 스탯 임계 트리거: 비교 연산자. Trigger=스탯 임계일 때만 사용. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|모듈 파츠", meta = (DisplayName = "비교", EditCondition = "Trigger == EFPSRPartStageTrigger::StatThreshold", EditConditionHides))
+	EFPSRStatCompare StatCompare = EFPSRStatCompare::GreaterOrEqual;
+
+	/** 스탯 임계 트리거: 비교 기준값. Trigger=스탯 임계일 때만 사용. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|모듈 파츠", meta = (DisplayName = "기준값", EditCondition = "Trigger == EFPSRPartStageTrigger::StatThreshold", EditConditionHides))
+	float StatValue = 0.0f;
+
+	/** 이 단계에서 교체되는 파츠 메시. null = 이 단계 선택 시 파츠 사라짐(null-safe). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|모듈 파츠", meta = (DisplayName = "단계 메시"))
+	TSoftObjectPtr<UStaticMesh> Mesh;
+
+	/** 슬롯 고정 소켓 기준 상대 트랜스폼(Synty 파츠는 비공유원점이라 단계마다 오프셋이 다를 수 있음). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|모듈 파츠", meta = (DisplayName = "오프셋(상대 트랜스폼)"))
+	FTransform Offset;
+
+	/** 이 단계가 사이트일 때의 스코프 디스크립터(예: 저격 스코프 단계는 bScopeOverlay=true). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|모듈 파츠", meta = (DisplayName = "스코프(사이트 단계)"))
+	FFPSRWeaponScopeDescriptor Scope;
+};
+
+/** One modular cosmetic part slot attached to the 1P skeletal weapon mesh at a named socket (U15). Purely visual: the
  *  part is a static mesh (barrel / forestock / magazine / sight from the pack) child-attached to the equipped
- *  skeletal weapon. Null Part = skipped (null-safe). Static/melee weapons and empty lists attach nothing. */
+ *  skeletal weapon. Null Part = skipped (null-safe). Static/melee weapons and empty lists attach nothing. A slot may
+ *  be purely structural (no evolution) or may evolve (W-U1b): the base Part below is stage 0, and Stages lists
+ *  higher stack-gated replacements — the slot's Socket stays FIXED across every stage. */
 USTRUCT(BlueprintType)
 struct FFPSRWeaponPartAttachment
 {
 	GENERATED_BODY()
 
-	/** Static mesh of the part (soft ref; null = this entry is skipped). */
+	/** Static mesh of the part (soft ref; null = this entry is skipped). Base/stage-0 mesh when this slot evolves. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|모듈 파츠", meta = (DisplayName = "파츠 메시"))
 	TSoftObjectPtr<UStaticMesh> Part;
 
-	/** Socket on the WEAPON mesh (SKEL_LPAMG_<W>) the part attaches to. NAME_None = weapon mesh root. */
+	/** Socket on the WEAPON mesh (SKEL_LPAMG_<W>) the part attaches to. NAME_None = weapon mesh root. FIXED mount —
+	 *  the tool bakes this as a stable SOCKET_Mount_<자동id> and it stays unchanged even as the slot evolves. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|모듈 파츠", meta = (DisplayName = "부착 소켓"))
 	FName Socket = NAME_None;
 
 	/** Relative transform applied after attach (fine-tune the part's placement on the socket). */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|모듈 파츠", meta = (DisplayName = "오프셋(상대 트랜스폼)"))
 	FTransform Offset;
+
+	/** Sniper-scope descriptor — only meaningful when this part is the active sight (its mesh owns the weapon's
+	 *  AimSocket). bScopeOverlay=false (default) = an ordinary structural part / iron sight, no scope. (W-U2) */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|모듈 파츠", meta = (DisplayName = "스코프(사이트 파츠)"))
+	FFPSRWeaponScopeDescriptor Scope;
+
+	/** 슬롯 표시 이름(툴/Details 표시용, 사용자 지정). 실제 소켓명이 아님 — 소켓은 위 Socket(툴이 안정 id로 관리). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|모듈 파츠", meta = (DisplayName = "슬롯 이름(표시용)"))
+	FText DisplayLabel;
+
+	/** 이 슬롯을 진화시키는 프래그먼트(카드) — 이 프래그먼트의 획득 스택 수가 Stages의 단계를 결정한다. null = 순수
+	 *  구조 파츠(진화 없음). 최종 단계 MinStacks = 프래그먼트 MaxStacks로 두면 카드가 자동 소진된다(기존 카드풀 로직). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|모듈 파츠", meta = (DisplayName = "진화 프래그먼트(카드)"))
+	TSoftObjectPtr<UFPSRWeaponFragment> EvolutionFragment;
+
+	/** 진화 단계 목록(약→강 순 권장). 목록 순서상 마지막으로 조건이 충족된 단계가 기본 Part를 교체(스택 트리거와
+	 *  스탯 임계 트리거를 한 목록에 섞어도 됨). 빈 목록 = 기본만. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|모듈 파츠", meta = (DisplayName = "진화 단계"))
+	TArray<FFPSRWeaponPartStage> Stages;
+};
+
+/** 1P 절차 무기 모션(힙) 프로파일 — 정적 무기도 "살아있게" 만드는 owner-local 코스메틱 모션 파라미터 묶음(P1).
+ *  룩스웨이(조준 지연)·걷기밥(속도 게이트)·발사킥. 값은 AFPSRCharacter::UpdateAimDownSights에서 힙 레이어로
+ *  합성되며 ADS 진입 시 (1-알파)로 페이드아웃한다. 트레이스/조준에 영향 없음(순수 시각). */
+USTRUCT(BlueprintType)
+struct FFPSRProceduralWeaponMotionProfile
+{
+	GENERATED_BODY()
+
+	/** 룩스웨이 강도: 프레임당 조준 회전 델타(도) 1도당 무기가 반대로 기우는 정도(도). 0 = 룩스웨이 없음. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "힙 절차모션|룩스웨이", meta = (DisplayName = "룩스웨이 강도", ClampMin = "0.0"))
+	float LookSwayAmount = 0.35f;
+
+	/** 룩스웨이 누적 최대각(도) — 빠르게 돌려도 이 각을 넘지 않는다. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "힙 절차모션|룩스웨이", meta = (DisplayName = "룩스웨이 최대각(도)", ClampMin = "0.0"))
+	float LookSwayMaxDegrees = 5.0f;
+
+	/** 룩스웨이 복귀속도(FInterpTo) — 클수록 덜 지연되고 빨리 중앙 복귀. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "힙 절차모션|룩스웨이", meta = (DisplayName = "룩스웨이 복귀속도", ClampMin = "0.1"))
+	float LookSwayReturnSpeed = 9.0f;
+
+	/** 걷기밥 좌우 진폭(cm) — 이동 중 무기가 화면 좌우로 흔들리는 폭. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "힙 절차모션|걷기밥", meta = (DisplayName = "걷기밥 좌우(cm)", ClampMin = "0.0"))
+	float WalkBobHorizontal = 1.2f;
+
+	/** 걷기밥 상하 진폭(cm) — 좌우의 2배 주파수로 흔들려 8자 궤적을 만든다. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "힙 절차모션|걷기밥", meta = (DisplayName = "걷기밥 상하(cm)", ClampMin = "0.0"))
+	float WalkBobVertical = 0.8f;
+
+	/** 걷기밥 주파수(사이클/초, 최대속도 기준) — 이동속도 0..1로 게이트된다. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "힙 절차모션|걷기밥", meta = (DisplayName = "걷기밥 주파수", ClampMin = "0.0"))
+	float WalkBobFrequency = 1.2f;
+
+	/** 발사킥 피치(도) — 발사마다 총구가 순간적으로 위로 튀는 각(감쇠). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "힙 절차모션|발사킥", meta = (DisplayName = "발사킥 피치(도)", ClampMin = "0.0"))
+	float FireKickPitchDegrees = 2.5f;
+
+	/** 발사킥 후퇴(cm) — 발사마다 총이 카메라 쪽(-X)으로 밀리는 거리(감쇠). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "힙 절차모션|발사킥", meta = (DisplayName = "발사킥 후퇴(cm)", ClampMin = "0.0"))
+	float FireKickBackwardCm = 2.0f;
+
+	/** 발사킥 상승(cm) — 발사마다 총이 살짝 위로(+Z) 뜨는 거리(감쇠). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "힙 절차모션|발사킥", meta = (DisplayName = "발사킥 상승(cm)", ClampMin = "0.0"))
+	float FireKickUpCm = 0.5f;
+
+	/** 발사킥 복귀속도(FInterpTo) — 발사킥이 0으로 가라앉는 속도. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "힙 절차모션|발사킥", meta = (DisplayName = "발사킥 복귀속도", ClampMin = "0.1"))
+	float FireKickRecoverySpeed = 11.0f;
 };
 
 /** Data-driven weapon definition. */
@@ -151,6 +307,13 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|발사 연출", meta = (DisplayName = "총구 소켓(화염 원점)"))
 	FName MuzzleSocket = NAME_None;
 
+	/** Rotation offset applied to the muzzle-flash emitter relative to the muzzle socket, so the flash fires down the
+	 *  barrel. This pack's weapon-forward is +Y (the same reason AimSocket needs ADSAimRotationOffset Yaw 90), and the
+	 *  emitter's authored forward axis may not match the socket's — tune this per weapon (commonly Yaw 90) until the
+	 *  flash points out the muzzle. Cosmetic only. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|발사 연출", meta = (DisplayName = "총구 화염 회전 오프셋"))
+	FRotator MuzzleFlashRotationOffset = FRotator::ZeroRotator;
+
 	/** Aim-down-sights (procedural ADS): socket whose transform is aligned to the camera's forward centre-line when aiming
 	 *  — the 1P arms offset/rotate so this socket sits on the view axis (the fixed capsule camera does not follow a head
 	 *  bone, so the sight is brought to the camera instead). Author it on the SIGHT PART (iron sight / optic) so swapping
@@ -235,6 +398,10 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|조준(ADS)", meta = (DisplayName = "조준 중 총구화염 크기(0=끔)", ClampMin = "0.0", ClampMax = "1.0"))
 	float ADSMuzzleFlashScale = 0.35f;
 
+	/** 1P 절차 무기 모션(힙) — 살아있는 총 코스메틱(룩스웨이·걷기밥·발사킥). ADS 진입 시 페이드아웃. owner-local·복제0. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|1인칭 절차 무기모션(힙)", meta = (DisplayName = "힙 절차 무기모션 프로파일"))
+	FFPSRProceduralWeaponMotionProfile ProceduralWeaponMotion;
+
 	/** Optional montage played on the arms when this weapon is equipped. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|애니 몽타주", meta = (DisplayName = "장착 몽타주(팔)"))
 	TSoftObjectPtr<UAnimMontage> EquipMontage;
@@ -280,9 +447,12 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|발사파츠 반동", meta = (DisplayName = "반동 커브"))
 	FName FirePartRecoilCurve = FName("CHRecoil");
 
-	/** Optional modular cosmetic parts child-attached to the 1P skeletal weapon mesh on equip (U15). Static/melee
-	 *  weapons and empty lists attach nothing (null-safe). Parts inherit the weapon mesh's OnlyOwnerSee visibility. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|모듈 파츠", meta = (DisplayName = "모듈 파츠 목록(1P)"))
+	/** Optional modular cosmetic part slots child-attached to the 1P skeletal weapon mesh on equip (U15, W-U1b 재설계).
+	 *  Static/melee weapons and empty lists attach nothing (null-safe). Parts inherit the weapon mesh's OnlyOwnerSee
+	 *  visibility. Each slot is either purely structural (no EvolutionFragment) or evolves in place (스택 진화 —
+	 *  FFPSRWeaponPartAttachment.Stages) while its Socket stays fixed. Read-only cosmetic: never touches
+	 *  gameplay/cards/save/replication (§2-A). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|모듈 파츠", meta = (DisplayName = "1P 파츠 슬롯(구조/진화)"))
 	TArray<FFPSRWeaponPartAttachment> WeaponParts1P;
 
 	/** Cascade muzzle-flash particle spawned at MuzzleSocket each shot (owner-client local). */

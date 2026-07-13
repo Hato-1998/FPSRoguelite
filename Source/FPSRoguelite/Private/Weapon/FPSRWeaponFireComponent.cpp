@@ -542,7 +542,14 @@ void UFPSRWeaponFireComponent::TickComponent(float DeltaTime, ELevelTick TickTyp
 	}
 	if (CachedCamera)
 	{
-		const float TargetFOV = (bIsAiming && Stats.bHasADS) ? Stats.ADSFieldOfView : DefaultFOV;
+		const bool bBaseWantsADS = bIsAiming && Stats.bHasADS;
+		// The character resolves the effective ADS/scope target FOV (scope override + reload-aware scope drop). Non-
+		// scope weapons pass through unchanged. Fall back to the base target when the owner isn't a character.
+		float TargetFOV = bBaseWantsADS ? Stats.ADSFieldOfView : DefaultFOV;
+		if (AFPSRCharacter* Char = Cast<AFPSRCharacter>(OwnerPawn))
+		{
+			TargetFOV = Char->ResolveADSTargetFOV(DefaultFOV, Stats.ADSFieldOfView, bBaseWantsADS);
+		}
 		CachedCamera->FieldOfView = FMath::FInterpTo(CachedCamera->FieldOfView, TargetFOV, DeltaTime, FMath::Max(0.01f, Stats.ADSInterpSpeed));
 	}
 
@@ -551,6 +558,7 @@ void UFPSRWeaponFireComponent::TickComponent(float DeltaTime, ELevelTick TickTyp
 	if (AFPSRCharacter* Char = Cast<AFPSRCharacter>(OwnerPawn))
 	{
 		Char->UpdateAimDownSights(DeltaTime);
+		Char->UpdateScopeWeaponVisibility();
 	}
 
 	// ChargeLaser charge-recoil ramp: spread the shot's up-kick across the charge so the view climbs gradually and the

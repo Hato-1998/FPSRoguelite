@@ -136,6 +136,15 @@
 - **권장 시점**: P1.5(전투 슬라이스 직후, P2 전). 슈팅 감각 튜닝 반복이 많아 일찍 확립 권장
 - **구현 상태**: P1.5-A에서 FullAuto hold-to-fire 루프 + 반동(카메라 킥) + 확산/블룸을 `UFPSRWeaponFireComponent`에 구현. 탄약(MagSize/재장전, 예비 무한)/ADS는 P1.5-B 예정
 
+#### 2-4-3. 무기 모듈러 파츠 진화 (W-U1, 구현 2026-07-11 · 상세 `Docs/WeaponModular_FragmentEvolution_Scope_Plan.md`)
+무기 외형 파츠(배럴·사이트 등)가 **해결스탯(`GetResolvedStats()`)+획득 프래그먼트(`ActiveFragments`)를 읽어 자동 교체**된다(연사↑→긴배럴, 능력→스코프). 규칙 기반·데이터 드리븐.
+- **슬롯(`FGameplayTag`)**: 같은 슬롯 상호배타(하나만 부착). 슬롯 없는 `WeaponParts1P`=항상 부착 구조 파츠(불변, 회귀0).
+- **규칙 = 폴리모픽 UObject** `UFPSRWeaponPartRule`(무기 DA `Instanced TArray`): `{Slot, Part, Tier, Priority, Condition}`. **조건 = 폴리모픽** `UFPSRWeaponPartCondition`(`Always`/`StatThreshold`/`HasFragment`=에셋 포인터 매칭, 새 조건=서브클래스 1개). 슬롯별 승자 = Tier↓·Priority↓·규칙순↑(결정적).
+- **★격리 계약(§2-A)**: 파츠 시스템 = **순수 읽기전용 코스메틱 소비자** — 카드효과/프래그먼트/세이브/복제를 **절대 변경 안 함**, 복제 0(각 머신이 복제된 스탯/프래그먼트로 로컬 재계산). 파츠 규칙이 없어도(빈 `PartRules`) 사격·프래그먼트·세이브·카드·ADS 전부 정상. 사이트 파츠는 ADS `AimSocket` 앵커만 제공(gameplay 소스로 안 읽음, 트레이스=카메라 고정).
+- **churn 방지**: 스탯/프래그먼트 변경 통지(ThisWeapon+AllWeapons 양쪽) → 선택 signature 바뀔 때만 next-tick 1회 리빌드(equipped 한정·데디서버 no-op).
+- **검증 게이트**: 저작-타임 `IsDataValid`(빈 Slot=ERROR, 중복 Tier/Priority·소켓오타=WARNING; WITH_EDITOR 전용=빌드/스모크 머지게이트 아님).
+- **범위**: W-U1=1P 슬롯+선택기(완료, 빌드·스모크 통과, PIE 시각검증만 대기). **후속** — W-U2 저격 스코프(사이트파츠 오버레이+총숨김), W-U3 3P 진화 가시성, W-U1b 완전 async 로드.
+
 ### 2-5. 시작 캐릭터
 - 시작 무기 = **로드아웃 풀(`DA_LoadoutPool.SelectableWeapons`)에서 1택**(로비 선택). **현재 = 연사총(라이플) / 기관단총(SMG)**(2026-07-08 개편: 점사총 전용 무기 제거→점사는 라이플 언락 프래그먼트로 대체, SMG 추가). 근접칼·기타 무기는 언락 카드(`UCardEffect_GrantWeapon`) 경로(현 풀 미배선=휴면).
 - ~~3종: 연사총 / 점사총 / 근접칼~~ (2026-07-08 개편으로 대체)

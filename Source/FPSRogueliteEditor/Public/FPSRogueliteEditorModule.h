@@ -30,10 +30,22 @@ private:
 	/** Menu command handler (P1): opens (or focuses) the FPSR Data Editor nomad tab. */
 	static void OnOpenDataEditorMenuEntry();
 
+	/** Menu command handler: opens (or focuses) the Weapon Part Assembler nomad tab — a fully embedded-viewport
+	 *  tool (weapon DA picker + own 3D preview + parts list + gizmo + bake-to-socket button). Nothing is ever
+	 *  spawned into an editor level. */
+	static void OnOpenWeaponAssemblerMenuEntry();
+
 	/** Nomad tab spawner for the FPSR Data Editor (P1) — registered in StartupModule, unregistered in
 	 *  ShutdownModule. Returns a dock tab hosting a single SFPSRDataEditorWidget. */
 	static TSharedRef<class SDockTab> SpawnDataEditorTab(const class FSpawnTabArgs& Args);
 
+	/** Nomad tab spawner for the Weapon Part Assembler — registered in StartupModule, unregistered in
+	 *  ShutdownModule. Returns a dock tab hosting a single SFPSRWeaponAssemblerTab. */
+	static TSharedRef<class SDockTab> SpawnWeaponAssemblerTab(const class FSpawnTabArgs& Args);
+
 	/** Tab identifier for the FPSR Data Editor nomad tab (RegisterNomadTabSpawner / TryInvokeTab both key off this). */
 	static const FName FPSRDataEditorTabName;
+
+	/** Tab identifier for the Weapon Part Assembler nomad tab (RegisterNomadTabSpawner / TryInvokeTab both key off this). */
+	static const FName FPSRWeaponAssemblerTabName;
 };

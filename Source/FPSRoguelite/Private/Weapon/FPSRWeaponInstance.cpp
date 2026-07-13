@@ -36,6 +36,7 @@ void UFPSRWeaponInstance::AddModifier(const FFPSRWeaponStatMod& Mod)
 	Modifiers.Mods.Add(Mod);
 	MARK_PROPERTY_DIRTY_FROM_NAME(UFPSRWeaponInstance, Modifiers, this);
 	MarkResolvedDirty();
+	NotifyOwnerModifiersChanged();
 }
 
 bool UFPSRWeaponInstance::HasFragment(const UFPSRWeaponFragment* Fragment) const
@@ -82,6 +83,7 @@ bool UFPSRWeaponInstance::AddFragment(UFPSRWeaponFragment* Fragment)
 	ActiveFragments.Add(Fragment);
 	MARK_PROPERTY_DIRTY_FROM_NAME(UFPSRWeaponInstance, ActiveFragments, this);
 	MarkResolvedDirty();
+	NotifyOwnerModifiersChanged();
 	return true;
 }
 
@@ -96,6 +98,7 @@ void UFPSRWeaponInstance::RemoveFragment(UFPSRWeaponFragment* Fragment)
 	{
 		MARK_PROPERTY_DIRTY_FROM_NAME(UFPSRWeaponInstance, ActiveFragments, this);
 		MarkResolvedDirty();
+		NotifyOwnerModifiersChanged();
 	}
 }
 
@@ -155,11 +158,13 @@ void UFPSRWeaponInstance::OnRep_Source()
 void UFPSRWeaponInstance::OnRep_Modifiers()
 {
 	MarkResolvedDirty();
+	NotifyOwnerModifiersChanged();
 }
 
 void UFPSRWeaponInstance::OnRep_ActiveFragments()
 {
 	MarkResolvedDirty();
+	NotifyOwnerModifiersChanged();
 }
 
 void UFPSRWeaponInstance::OnRep_Reloading()
@@ -190,6 +195,15 @@ AFPSRPlayerState* UFPSRWeaponInstance::ResolveOwningPlayerState() const
 	const UFPSRWeaponInventoryComponent* Comp = Cast<UFPSRWeaponInventoryComponent>(GetOuter());
 	const APawn* Pawn = Comp ? Cast<APawn>(Comp->GetOwner()) : nullptr;
 	return Pawn ? Pawn->GetPlayerState<AFPSRPlayerState>() : nullptr;
+}
+
+void UFPSRWeaponInstance::NotifyOwnerModifiersChanged()
+{
+	const UFPSRWeaponInventoryComponent* Comp = Cast<UFPSRWeaponInventoryComponent>(GetOuter());
+	if (AFPSRCharacter* Char = Comp ? Cast<AFPSRCharacter>(Comp->GetOwner()) : nullptr)
+	{
+		Char->NotifyEquippedWeaponModifiersChanged(this);
+	}
 }
 
 void UFPSRWeaponInstance::RecomputeResolved()

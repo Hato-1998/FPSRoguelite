@@ -4,10 +4,12 @@
 #include "Core/FPSRGameState.h"
 #include "Engine/World.h"
 #include "Components/Image.h"
+#include "Blueprint/UserWidget.h"
 #include "Components/CanvasPanelSlot.h"
 #include "Materials/MaterialInterface.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Weapon/FPSRWeaponFireComponent.h"
+#include "Hero/FPSRCharacter.h"
 #include "GameFramework/Pawn.h"
 #include "Settings/FPSRGameUserSettings.h"
 #include "Blueprint/WidgetLayoutLibrary.h"
@@ -52,6 +54,22 @@ void UFPSRRunHUDWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTim
 {
 	Super::NativeTick(MyGeometry, InDeltaTime);
 
+	// W-U2 scope overlay. UpdateScopeOverlay runs EVERY tick while relevant (not only on the scoped edge) so a
+	// mid-scope sight evolution — e.g. a stat-threshold stage that swaps the sight's ScopeOverlayWidgetClass while the
+	// player stays aimed — actually switches the overlay widget instead of leaving the previous one stale. The BP
+	// event (OnScopeStateChanged) still fires only on a meaningful change (scoped edge or vignette change) to avoid
+	// per-frame Blueprint churn.
+	AFPSRCharacter* OwningChar = ResolveOwningCharacter();
+	const bool bScoped = OwningChar && OwningChar->IsScopeVisualActive();
+	const bool bVignette = bScoped && OwningChar && OwningChar->IsScopeVignetteEnabled();
+	if (bScoped != bLastScoped || bVignette != bLastVignette)
+	{
+		bLastScoped = bScoped;
+		bLastVignette = bVignette;
+		OnScopeStateChanged(bScoped, bVignette);
+	}
+	UpdateScopeOverlay(bScoped);
+
 	if (!CrosshairImage)
 	{
 		return;
@@ -62,8 +80,12 @@ void UFPSRRunHUDWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTim
 		return;
 	}
 
-	// Hide the crosshair while aiming down sights — the iron sights / scope take over.
-	if (FireComp->IsAiming())
+	// Hide the crosshair while the weapon is committing to ADS (reload-aware — it reappears during a reload so the
+	// screen isn't left with neither reticle nor crosshair). IsADSFOVActive tracks the FOV-zoom commit itself (not the
+	// procedural-sight blend), so an ADS weapon without an AimSocket still hides the crosshair — the crosshair-hide can
+	// never desync from the zoom. Iron sights / scope take over. Falls back to raw IsAiming off a character.
+	const bool bADSVisual = OwningChar ? OwningChar->IsADSFOVActive() : FireComp->IsAiming();
+	if (bADSVisual)
 	{
 		CrosshairImage->SetVisibility(ESlateVisibility::Collapsed);
 		return;
@@ -119,6 +141,58 @@ UFPSRWeaponFireComponent* UFPSRRunHUDWidget::ResolveFireComponent()
 		CachedFireComp = OwningPawn->FindComponentByClass<UFPSRWeaponFireComponent>();
 	}
 	return CachedFireComp.Get();
+}
+
+AFPSRCharacter* UFPSRRunHUDWidget::ResolveOwningCharacter()
+{
+	if (CachedOwningChar.IsValid())
+	{
+		return CachedOwningChar.Get();
+	}
+	CachedOwningChar = Cast<AFPSRCharacter>(GetOwningPlayerPawn());
+	return CachedOwningChar.Get();
+}
+
+void UFPSRRunHUDWidget::UpdateScopeOverlay(bool bScoped)
+{
+	// 원하는 오버레이 클래스: 활성 사이트가 지정한 위젯 우선, 없으면 이 HUD의 폴백(ScopeOverlayWidgetClass).
+	TSubclassOf<UUserWidget> DesiredClass = nullptr;
+	if (bScoped)
+	{
+		if (AFPSRCharacter* Char = ResolveOwningCharacter())
+		{
+			DesiredClass = Char->GetActiveScopeOverlayWidgetClass();
+		}
+		if (!DesiredClass)
+		{
+			DesiredClass = ScopeOverlayWidgetClass.LoadSynchronous();
+		}
+	}
+	// 스코프 해제됐거나 원하는 클래스가 현재 인스턴스와 다르면(사이트 교체) 기존 인스턴스 파괴.
+	if (ScopeOverlayInstance && (!bScoped || ScopeOverlayInstance->GetClass() != DesiredClass))
+	{
+		ScopeOverlayInstance->RemoveFromParent();
+		ScopeOverlayInstance = nullptr;
+	}
+	// 필요 시 원하는 클래스로 생성.
+	if (bScoped && DesiredClass && !ScopeOverlayInstance)
+	{
+		ScopeOverlayInstance = CreateWidget<UUserWidget>(GetOwningPlayer(), DesiredClass);
+		if (ScopeOverlayInstance)
+		{
+			ScopeOverlayInstance->AddToViewport(5); // HUD 컨텐츠 위, 모달 UI 아래
+		}
+	}
+	if (ScopeOverlayInstance)
+	{
+		ScopeOverlayInstance->SetVisibility(bScoped ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
+	}
+}
+
+bool UFPSRRunHUDWidget::IsScopeActive() const
+{
+	const AFPSRCharacter* Char = Cast<AFPSRCharacter>(GetOwningPlayerPawn());
+	return Char && Char->IsScopeVisualActive();
 }
 
 void UFPSRRunHUDWidget::HandleCrosshairSettingsChanged()
@@ -180,6 +254,12 @@ void UFPSRRunHUDWidget::NativeDestruct()
 	if (UFPSRGameUserSettings* Settings = UFPSRGameUserSettings::Get())
 	{
 		Settings->OnCrosshairSettingsChanged.RemoveDynamic(this, &UFPSRRunHUDWidget::HandleCrosshairSettingsChanged);
+	}
+
+	if (ScopeOverlayInstance)
+	{
+		ScopeOverlayInstance->RemoveFromParent();
+		ScopeOverlayInstance = nullptr;
 	}
 
 	Super::NativeDestruct();

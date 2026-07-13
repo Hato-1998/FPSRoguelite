@@ -7,6 +7,7 @@
 #include "Engine/SkeletalMesh.h"
 #include "Engine/StaticMesh.h"
 #include "AbilitySystem/Abilities/FPSRGA_WeaponFire_Projectile.h"
+#include "Weapon/FPSRWeaponFragment.h"
 
 #define LOCTEXT_NAMESPACE "FPSRWeaponDataAsset"
 
@@ -195,8 +196,107 @@ EDataValidationResult UFPSRWeaponDataAsset::IsDataValid(FDataValidationContext& 
 		if (SkelWeapon && !SkeletalMeshHasAttachPoint(SkelWeapon, Part.Socket))
 		{
 			Context.AddWarning(FText::Format(LOCTEXT("PartSocketMissing",
-				"WeaponParts1P part '{0}' references socket '{1}' that does not exist on WeaponMesh1P — it will attach at the mesh origin. Check for a typo (e.g. a space instead of '_')."),
+				"파츠 슬롯 '{0}' references socket '{1}' that does not exist on WeaponMesh1P — it will attach at the mesh origin. Check for a typo (e.g. a space instead of '_')."),
 				FText::FromString(Part.Part.GetAssetName()), FText::FromName(Part.Socket)));
+		}
+	}
+
+	// --- W-U1b 파츠별 스택 진화 검증(폴리모픽 PartRules 대체) + 스탯 임계 트리거 검증. 단계 메시는 슬롯의 고정
+	//     소켓(Entry.Socket)에 그대로 붙으므로 별도 소켓검사는 불필요하다 — 위 WeaponParts1P 소켓검사가 슬롯당 1회로
+	//     이미 커버한다. Stages 항목은 '데이터'일 뿐이라 순수 struct — 목록 순서상 마지막으로 조건이 충족된 단계가
+	//     승자다(§2-A: 파츠는 스택/스탯을 읽기만 함, 이제 승자 결정에 중복 검사가 불필요하다). ---
+	for (int32 i = 0; i < WeaponParts1P.Num(); ++i)
+	{
+		const FFPSRWeaponPartAttachment& Entry = WeaponParts1P[i];
+		UFPSRWeaponFragment* Frag = Entry.EvolutionFragment.LoadSynchronous();
+		bool bHasFragmentStackStage = false;
+
+		// Broken evolution-card reference: the soft path is set but the asset failed to load (deleted / renamed). The
+		// selector then silently treats it as 0 stacks (base only), so surface it as a content error here.
+		if (!Entry.EvolutionFragment.IsNull() && !Frag)
+		{
+			Context.AddWarning(FText::Format(LOCTEXT("PartStageFragmentLoadFail",
+				"파츠 슬롯 [{0}]의 진화 카드(EvolutionFragment) 참조를 로드할 수 없습니다 — 삭제되었거나 깨진 참조입니다. 스택 진화가 동작하지 않습니다."),
+				FText::AsNumber(i)));
+		}
+
+		for (int32 s = 0; s < Entry.Stages.Num(); ++s)
+		{
+			const FFPSRWeaponPartStage& Stage = Entry.Stages[s];
+
+			if (Stage.Trigger == EFPSRPartStageTrigger::FragmentStacks)
+			{
+				bHasFragmentStackStage = true;
+
+				if (Stage.MinStacks < 1)
+				{
+					Context.AddError(FText::Format(LOCTEXT("PartStageMinStacksInvalid",
+						"파츠 슬롯 [{0}] 단계 [{1}]의 필요 스택이 {2} — 1 이상이어야 합니다(0/음수는 기본 파츠를 항상 가립니다)."),
+						FText::AsNumber(i), FText::AsNumber(s), FText::AsNumber(Stage.MinStacks)));
+					Result = EDataValidationResult::Invalid;
+				}
+
+				if (Entry.EvolutionFragment.IsNull())
+				{
+					Context.AddError(FText::Format(LOCTEXT("PartStageStackTriggerNoFragment",
+						"파츠 슬롯 [{0}] 단계 [{1}]은 스택 트리거인데 진화 카드(EvolutionFragment)가 지정되지 않았습니다 — 이 단계는 절대 켜지지 않습니다."),
+						FText::AsNumber(i), FText::AsNumber(s)));
+					Result = EDataValidationResult::Invalid;
+				}
+				else if (Frag && Stage.MinStacks > Frag->MaxStacks)
+				{
+					Context.AddWarning(FText::Format(LOCTEXT("PartStageUnreachable",
+						"파츠 슬롯 [{0}] 단계 [{1}]의 필요 스택({2})이 프래그먼트 '{3}'의 MaxStacks({4})보다 큽니다 — 이 단계는 절대 도달할 수 없습니다."),
+						FText::AsNumber(i), FText::AsNumber(s), FText::AsNumber(Stage.MinStacks),
+						Frag->DisplayName, FText::AsNumber(Frag->MaxStacks)));
+				}
+			}
+			// StatThreshold 단계는 진화 카드가 필요 없다 — 추가 검증 없음.
+
+			if (Stage.Mesh.IsNull())
+			{
+				if (Stage.Scope.bScopeOverlay)
+				{
+					// A scope-overlay stage IS the sight — with no mesh there is nothing to carry the AimSocket, so the
+					// scope + ADS can never activate. That is a hard error, not just a missing cosmetic.
+					Context.AddError(FText::Format(LOCTEXT("PartStageScopeNoMesh",
+						"파츠 슬롯 [{0}] 단계 [{1}]은 스코프 오버레이를 켜지만 메시가 없습니다 — 사이트 메시(AimSocket 보유)가 없으면 스코프·조준이 활성화되지 않습니다."),
+						FText::AsNumber(i), FText::AsNumber(s)));
+					Result = EDataValidationResult::Invalid;
+				}
+				else
+				{
+					Context.AddWarning(FText::Format(LOCTEXT("PartStageMeshMissing",
+						"파츠 슬롯 [{0}] 단계 [{1}]에 메시가 없습니다 — 이 단계가 선택되면 파츠가 사라집니다."),
+						FText::AsNumber(i), FText::AsNumber(s)));
+				}
+			}
+		}
+
+		if (!Entry.EvolutionFragment.IsNull() && !bHasFragmentStackStage)
+		{
+			Context.AddWarning(FText::Format(LOCTEXT("PartStageNoStages",
+				"파츠 슬롯 [{0}]에 진화 카드(EvolutionFragment)가 지정됐지만 스택 트리거 단계가 없습니다 — 이 카드는 이 슬롯에서 아무 효과가 없습니다."),
+				FText::AsNumber(i)));
+		}
+	}
+
+	// 소켓 중복: 서로 다른 슬롯이 같은(None 아닌) 소켓을 쓰면 두 파츠가 같은 지점에 겹쳐 붙는다.
+	for (int32 i = 0; i < WeaponParts1P.Num(); ++i)
+	{
+		if (WeaponParts1P[i].Socket.IsNone())
+		{
+			continue;
+		}
+		for (int32 j = i + 1; j < WeaponParts1P.Num(); ++j)
+		{
+			if (WeaponParts1P[j].Socket == WeaponParts1P[i].Socket)
+			{
+				Context.AddError(FText::Format(LOCTEXT("PartSlotDuplicateSocket",
+					"파츠 슬롯 [{0}]과 [{1}]이 같은 소켓 '{2}'을 사용합니다 — 두 파츠가 같은 지점에 겹쳐 붙습니다. 서로 다른 소켓을 지정하세요."),
+					FText::AsNumber(i), FText::AsNumber(j), FText::FromName(WeaponParts1P[i].Socket)));
+				Result = EDataValidationResult::Invalid;
+			}
 		}
 	}
 
@@ -211,13 +311,29 @@ EDataValidationResult UFPSRWeaponDataAsset::IsDataValid(FDataValidationContext& 
 			{
 				break;
 			}
-			if (Part.Part.IsNull())
+			if (!Part.Part.IsNull())
 			{
-				continue;
+				if (const UStaticMesh* PartMesh = Part.Part.LoadSynchronous())
+				{
+					bMuzzleFound = PartMesh->FindSocket(MuzzleSocket) != nullptr;
+				}
 			}
-			if (const UStaticMesh* PartMesh = Part.Part.LoadSynchronous())
+			// A muzzle-carrying variant may only appear once the slot has evolved (e.g. an evolved barrel stage) —
+			// scan the slot's stage meshes too so the search matches SelectParts' actual resolved output.
+			for (const FFPSRWeaponPartStage& Stage : Part.Stages)
 			{
-				bMuzzleFound = PartMesh->FindSocket(MuzzleSocket) != nullptr;
+				if (bMuzzleFound)
+				{
+					break;
+				}
+				if (Stage.Mesh.IsNull())
+				{
+					continue;
+				}
+				if (const UStaticMesh* StageMesh = Stage.Mesh.LoadSynchronous())
+				{
+					bMuzzleFound = StageMesh->FindSocket(MuzzleSocket) != nullptr;
+				}
 			}
 		}
 		if (!bMuzzleFound)
@@ -239,13 +355,29 @@ EDataValidationResult UFPSRWeaponDataAsset::IsDataValid(FDataValidationContext& 
 			{
 				break;
 			}
-			if (Part.Part.IsNull())
+			if (!Part.Part.IsNull())
 			{
-				continue;
+				if (const UStaticMesh* PartMesh = Part.Part.LoadSynchronous())
+				{
+					bAimFound = PartMesh->FindSocket(AimSocket) != nullptr;
+				}
 			}
-			if (const UStaticMesh* PartMesh = Part.Part.LoadSynchronous())
+			// A sight-carrying variant may only appear once the slot has evolved — scan the slot's stage meshes too
+			// so this "does an aim socket exist ANYWHERE" search matches SelectParts' actual resolved output.
+			for (const FFPSRWeaponPartStage& Stage : Part.Stages)
 			{
-				bAimFound = PartMesh->FindSocket(AimSocket) != nullptr;
+				if (bAimFound)
+				{
+					break;
+				}
+				if (Stage.Mesh.IsNull())
+				{
+					continue;
+				}
+				if (const UStaticMesh* StageMesh = Stage.Mesh.LoadSynchronous())
+				{
+					bAimFound = StageMesh->FindSocket(AimSocket) != nullptr;
+				}
 			}
 		}
 		if (!bAimFound)
@@ -253,6 +385,85 @@ EDataValidationResult UFPSRWeaponDataAsset::IsDataValid(FDataValidationContext& 
 			Context.AddWarning(FText::Format(LOCTEXT("AimSocketMissing",
 				"AimSocket '{0}' is not found on WeaponMesh1P or any modular part — procedural ADS will not align (it stays at hip). Put the aim socket on the sight part (iron sight / optic) or the weapon mesh (+X forward, +Z up), and check for typos (e.g. a space instead of '_')."),
 				FText::FromName(AimSocket)));
+		}
+	}
+
+	// --- W-U1b 조준감 회귀 차단(중요): 슬롯이 진화로 사이트가 '될 수 있으면'(베이스 또는 임의 단계 메시가 AimSocket을
+	//     보유하거나, 베이스/단계 스코프 중 하나라도 bScopeOverlay=true) 베이스 + 모든 non-null 단계 메시가 전부
+	//     AimSocket을 보유해야 한다 — 하나라도 없으면 그 스택으로 진화한 순간 조준이 힙으로 회귀한다(ERROR). ---
+	if (BaseStats.bHasADS && !AimSocket.IsNone())
+	{
+		for (int32 i = 0; i < WeaponParts1P.Num(); ++i)
+		{
+			const FFPSRWeaponPartAttachment& Entry = WeaponParts1P[i];
+			const UStaticMesh* BaseMesh = Entry.Part.IsNull() ? nullptr : Entry.Part.LoadSynchronous();
+
+			bool bMightBeSight = Entry.Scope.bScopeOverlay || (BaseMesh && BaseMesh->FindSocket(AimSocket) != nullptr);
+			for (int32 s = 0; !bMightBeSight && s < Entry.Stages.Num(); ++s)
+			{
+				const FFPSRWeaponPartStage& Stage = Entry.Stages[s];
+				if (Stage.Scope.bScopeOverlay)
+				{
+					bMightBeSight = true;
+					break;
+				}
+				const UStaticMesh* StageMesh = Stage.Mesh.IsNull() ? nullptr : Stage.Mesh.LoadSynchronous();
+				if (StageMesh && StageMesh->FindSocket(AimSocket) != nullptr)
+				{
+					bMightBeSight = true;
+				}
+			}
+			if (!bMightBeSight)
+			{
+				continue;
+			}
+
+			bool bAllVariantsHaveAim = (BaseMesh == nullptr) || BaseMesh->FindSocket(AimSocket) != nullptr;
+			for (int32 s = 0; bAllVariantsHaveAim && s < Entry.Stages.Num(); ++s)
+			{
+				const UStaticMesh* StageMesh = Entry.Stages[s].Mesh.IsNull() ? nullptr : Entry.Stages[s].Mesh.LoadSynchronous();
+				if (StageMesh == nullptr)
+				{
+					continue; // null stage mesh already warned separately (PartStageMeshMissing)
+				}
+				bAllVariantsHaveAim = StageMesh->FindSocket(AimSocket) != nullptr;
+			}
+			if (!bAllVariantsHaveAim)
+			{
+				Context.AddError(FText::Format(LOCTEXT("PartStageAimSocketRegression",
+					"파츠 슬롯 [{0}]이 진화로 사이트가 될 수 있는데(스코프 오버레이 또는 AimSocket 보유) 일부 단계 메시에 AimSocket '{1}'이 없습니다 — 그 단계로 진화하면 조준이 힙으로 회귀합니다. 모든 단계 메시에 같은 AimSocket을 부여하세요."),
+					FText::AsNumber(i), FText::FromName(AimSocket)));
+				Result = EDataValidationResult::Invalid;
+			}
+		}
+	}
+
+	// W-U2: a scope-overlay sight only ever activates through ADS (the scope shows while aiming with that sight active).
+	// A scope part (base OR any evolution stage) on a weapon with no ADS / no AimSocket can never trigger — warn.
+	for (int32 i = 0; i < WeaponParts1P.Num(); ++i)
+	{
+		const FFPSRWeaponPartAttachment& Part = WeaponParts1P[i];
+		bool bHasScope = Part.Scope.bScopeOverlay;
+		if (!bHasScope)
+		{
+			for (const FFPSRWeaponPartStage& Stage : Part.Stages)
+			{
+				if (Stage.Scope.bScopeOverlay)
+				{
+					bHasScope = true;
+					break;
+				}
+			}
+		}
+		if (!bHasScope)
+		{
+			continue;
+		}
+		if (!BaseStats.bHasADS || AimSocket.IsNone())
+		{
+			Context.AddWarning(FText::Format(LOCTEXT("ScopeNoADS",
+				"파츠 슬롯 [{0}](기본 또는 진화 단계)이 스코프 오버레이를 사용하지만, 무기에 ADS/AimSocket이 없어 스코프가 절대 켜지지 않습니다 — 스코프는 그 사이트로 조준할 때만 활성화됩니다. BaseStats.bHasADS와 AimSocket을 설정하세요."),
+				FText::AsNumber(i)));
 		}
 	}
 

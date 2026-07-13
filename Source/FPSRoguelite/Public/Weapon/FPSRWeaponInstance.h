@@ -108,6 +108,9 @@ protected:
 
 	AFPSRPlayerState* ResolveOwningPlayerState() const;
 
+	/** W-U1: route a modifier/fragment change to the owning character so it can re-evaluate modular part selection. */
+	void NotifyOwnerModifiersChanged();
+
 	UPROPERTY(ReplicatedUsing = OnRep_Source)
 	TObjectPtr<UFPSRWeaponDataAsset> Source;
 

@@ -28,9 +28,14 @@ public class FPSRogueliteEditor : ModuleRules
 			"DataValidation",   // UEditorValidatorBase (Engine/Plugins/Editor/DataValidation)
 			"DeveloperSettings",
 			"Projects",
-			"PropertyEditor",          // IDetailsView (P1 Data Editor — reuse the engine's property editing UI)
+			"PropertyEditor",          // IDetailsView (P1 Data Editor), SObjectPropertyEntryBox (Weapon Part Assembler DA picker)
 			"WorkspaceMenuStructure",  // WorkspaceMenu::GetMenuStructure().GetToolsCategory() for the nomad tab group
-			"InputCore"                // EKeys::* referenced by SListView/SComboBox/SNumericEntryBox key-nav (link dep)
+			"InputCore",                // EKeys::* referenced by SListView/SComboBox/SNumericEntryBox key-nav (link dep)
+			"ContentBrowser",           // no longer used by the Weapon Part Assembler (now an embedded-viewport tool with
+			                            // its own DA picker), kept for potential future content-browser integrations
+			"AdvancedPreviewScene",     // FAdvancedPreviewScene — the Weapon Part Assembler's embedded 3D preview viewport
+			"EditorWidgets",            // SEnumComboBox — 진화 단계 트리거/스탯 콤보(Assembler evolution authoring panel)
+			"UMG"                       // UUserWidget::StaticClass() — 진화 단계 스코프 오버레이 위젯 BP 피커(SClassPropertyEntryBox)
 		});
 	}
 }

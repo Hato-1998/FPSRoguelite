@@ -5,6 +5,7 @@
 #include "GameFramework/Character.h"
 #include "AbilitySystemInterface.h"
 #include "GameplayTagContainer.h"
+#include "Weapon/FPSRWeaponDataAsset.h"
 #include "FPSRCharacter.generated.h"
 
 class UAbilitySystemComponent;
@@ -13,6 +14,7 @@ class UCameraComponent;
 class USkeletalMeshComponent;
 class UInputAction;
 class UFPSRWeaponInventoryComponent;
+class UFPSRWeaponInstance;
 class UFPSRWeaponFireComponent;
 class UFPSRRecoilComponent;
 class UFPSRWeaponDataAsset;
@@ -27,6 +29,7 @@ class UAnimInstance;
 class UAnimMontage;
 class USoundBase;
 class UParticleSystem;
+class UUserWidget;
 
 /** Base player character: first-person camera + Separated-Arms meshes + Enhanced Input + weapon inventory/firing. ASC lives on PlayerState. */
 UCLASS()
@@ -91,6 +94,46 @@ public:
 	UFUNCTION(BlueprintPure, Category = "FPSR|Weapon")
 	bool IsAiming() const;
 
+	/** Owner-local ADS blend alpha (0 = hip, 1 = fully aimed). Only updated on the locally-controlled client. (W-U2) */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Weapon")
+	float GetADSAlpha() const { return CurrentADSAlpha; }
+
+	/** True while the owner-local ADS visual is active (procedural-sight blend alpha past the visual threshold — needs
+	 *  an AimSocket). Reload-aware. Gates the scope overlay + weapon-hide (a scope IS a sight, so requiring the socket
+	 *  is correct here). For the crosshair use IsADSFOVActive instead. (W-U2) */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Weapon")
+	bool IsADSVisualActive() const;
+
+	/** True while the weapon is visually committing to ADS (FOV zoom / sight): aiming an ADS weapon and not reloading.
+	 *  AimSocket-INDEPENDENT (unlike IsADSVisualActive) so a bHasADS weapon without a procedural sight still reads as
+	 *  aiming — it tracks the same commit the FOV zoom uses, so the crosshair-hide can't desync from the zoom.
+	 *  Reload-aware. Owner-local. (W-U2) */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Weapon")
+	bool IsADSFOVActive() const;
+
+	/** True while a full-screen SCOPE is visually active: ADS visual active AND the currently-active sight part carries
+	 *  a scope-overlay descriptor. Owner-local. (W-U2) */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Weapon")
+	bool IsScopeVisualActive() const;
+
+	/** Owner-local: resolve the effective camera FOV target for the ADS/scope interp (called from the weapon-fire tick).
+	 *  Non-scope weapons return the passed base target unchanged; scope weapons apply the strong scope FOV and drop the
+	 *  zoom during a reload (per design). bBaseWantsADS = the caller's existing (bIsAiming && Stats.bHasADS). (W-U2) */
+	float ResolveADSTargetFOV(float DefaultFOV, float BaseADSFOV, bool bBaseWantsADS) const;
+
+	/** Owner-local: hide/show the 1P arms (and their child weapon + parts) based on whether a full-screen scope is
+	 *  active. Called each frame from the weapon-fire tick (which already no-ops for non-local pawns). (W-U2) */
+	void UpdateScopeWeaponVisibility();
+
+	/** 활성 사이트의 스코프 오버레이 위젯 클래스(스코프 시각 활성 시). 없으면 null(HUD가 폴백 사용). 호출은 스코프
+	 *  진입 엣지에서(프레임마다 아님) — 소프트 참조를 동기 로드한다. (스코프 위젯화) */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Weapon")
+	TSubclassOf<UUserWidget> GetActiveScopeOverlayWidgetClass() const;
+
+	/** True while a scope is active AND its descriptor requests the edge vignette. For the HUD scope overlay. (W-U2) */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Weapon")
+	bool IsScopeVignetteEnabled() const;
+
 	/** Owner-client: refresh the first-person weapon mesh + arms anim when the equipped weapon changes
 	 *  (called from the inventory's server EquipSlot + client OnRep). No-op on non-locally-controlled pawns. */
 	void RefreshFirstPersonWeaponVisual();
@@ -111,6 +154,12 @@ public:
 	 *  clients -> 3P body ReloadMontage3P. No-op when bIsReloading is false, during the level-up freeze, or when the
 	 *  equipped weapon has no reload montage. The play rate is scaled so the montage length matches the ReloadTime. */
 	void HandleReloadStateChanged(bool bIsReloading);
+
+	/** W-U1 signature-diff rebuild: the equipped weapon's stat modifiers / behavior fragments changed (parts may need
+	 *  to evolve). Coalesced to next tick, equipped-only, no-op on a dedicated server. Called from
+	 *  UFPSRWeaponInstance::NotifyOwnerModifiersChanged and the PlayerState's AllWeapons-mod sites (mirrors the
+	 *  cross-class notify pattern of HandleReloadStateChanged above). */
+	void NotifyEquippedWeaponModifiersChanged(const UFPSRWeaponInstance* ChangedInstance);
 
 	/** Server->all: play the spatialized fire SFX for REMOTE observers so teammates hear each other's weapon fire
 	 *  (B4). The owning client already played it locally (PlayWeaponFireCosmetics), so the implementation early-outs
@@ -396,6 +445,11 @@ protected:
 
 	FName CachedMuzzleSocket = NAME_None;
 
+	/** Rotation offset applied to the muzzle-flash emitter relative to the muzzle socket (owner-local cosmetic).
+	 *  This pack's weapon-forward is +Y, so the flash needs a yaw offset to fire down the barrel (same reason as
+	 *  ADSAimRotationOffset). Cached on equip from the weapon DA; designer-tuned per weapon. */
+	FRotator CachedMuzzleFlashRotationOffset = FRotator::ZeroRotator;
+
 	/** The weapon mesh currently shown (skeletal OR static — whichever the equipped weapon's DA provides). Fire
 	 *  cosmetics (fire sound) attach here so they track the active mesh. Null when no weapon is equipped. */
 	UPROPERTY(Transient)
@@ -414,6 +468,15 @@ protected:
 	 *  Convention-based: the part that owns a socket named AimSocket wins (first in WeaponParts1P order). */
 	UPROPERTY(Transient)
 	TObjectPtr<UMeshComponent> CachedAimComponent;
+
+	/** Scope descriptor of the currently-active sight part (the one carrying CachedAimSocket), captured alongside
+	 *  CachedAimComponent in RebuildPartsFromSelection. Default (bScopeOverlay=false) when no scope sight is active.
+	 *  Owner-local cosmetic; not replicated/saved. (W-U2) */
+	FFPSRWeaponScopeDescriptor CachedScopeDescriptor;
+
+	/** Tracks whether UpdateScopeWeaponVisibility currently has the 1P arms hidden for a scope, so it only toggles
+	 *  visibility on change (and only ever manages the scope-hide state). Owner-local. (W-U2) */
+	bool bWeaponHiddenForScope = false;
 
 	// --- Procedural aim-down-sights (owner-local) ---
 	/** FirstPersonArms relative-to-camera transform captured on BeginPlay (the "hip" base the ADS interps to/from). */
@@ -454,14 +517,45 @@ protected:
 	 *  to 1 with planar speed (relative to BaseWalkSpeed) so the handheld sway only lives while moving. Owner-local. */
 	float ADSSwayMoveAlpha = 0.0f;
 
+	// --- Hip-space procedural weapon motion (owner-local cosmetic; P1: look-sway + walk-bob + fire-kick) ---
+	/** Control rotation captured last frame, to derive the per-frame aim delta that drives look-sway. Reset on equip
+	 *  and initialised in BeginPlay so the first frame's delta isn't a huge jump. */
+	FRotator PreviousControlRotation = FRotator::ZeroRotator;
+	/** Interpolated look-sway (yaw/pitch degrees) the weapon lags behind the aim by; eases back to zero when the aim stops. */
+	FRotator CurrentHipLookSway = FRotator::ZeroRotator;
+	/** Accumulated walk-bob phase (cycles), advanced by dt * frequency * movement factor (frame-rate independent). */
+	float HipBobPhase = 0.0f;
+	/** Decaying per-shot hip fire-kick alpha (0..1). Bumped to 1 on each local shot (PlayWeaponFireCosmetics), settled
+	 *  toward 0 each frame; scales the kick offset/pitch. */
+	float HipFireKickAlpha = 0.0f;
+	/** Equipped weapon's hip procedural-motion profile, cached on equip. */
+	FFPSRProceduralWeaponMotionProfile CachedHipMotion;
+	/** True when the cached profile has any non-zero amplitude (skip the whole hip block otherwise). */
+	bool bCachedHasHipMotion = false;
+
 	/** Runtime-created modular weapon-part components (U15), child-attached to WeaponMesh1P and rebuilt on each
 	 *  weapon change. Owner-only-visible (match the 1P weapon mesh). Empty for static/melee/partless weapons. */
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<UStaticMeshComponent>> WeaponPartComponents1P;
 
+	/** W-U1: pending next-tick parts rebuild flag (coalesces a burst of modifier/fragment OnReps into one rebuild). */
+	bool bWeaponPartsRebuildPending = false;
+	/** W-U1: hash of the last-applied selected part set; ProcessPendingWeaponPartsRebuild skips rebuild when unchanged.
+	 *  Transient, NOT replicated, NOT saved (§2-A gate②) — each machine recomputes from replicated stats/fragments. */
+	uint32 LastWeaponPartSignature = 0;
+
 	/** Destroy any existing modular part components and rebuild them from the equipped weapon's WeaponParts1P list
 	 *  (only when a SKELETAL weapon mesh is shown; static/melee/empty attach nothing). Called from the weapon refresh. */
 	void RefreshWeaponPartComponents(const UFPSRWeaponDataAsset* Weapon);
+
+	/** W-U1: rebuild the modular parts from an already-computed selection (shared by equip + modifier-change paths).
+	 *  Tears down existing part components, RESETS CachedMuzzle/AimComponent, attaches the selection, then re-resolves
+	 *  the muzzle/aim source components. */
+	void RebuildPartsFromSelection(const TArray<FFPSRWeaponPartAttachment>& Selected);
+
+	/** W-U1 signature-diff rebuild (next-tick coalesced half of NotifyEquippedWeaponModifiersChanged, see the public
+	 *  declaration above for the full contract). */
+	void ProcessPendingWeaponPartsRebuild();
 
 	/** Arms anim default captured at BeginPlay, so a weapon's per-weapon ArmsAnimInstanceClass override can be
 	 *  reverted when the next weapon has none. Only touched once an override has actually been applied
