@@ -46,6 +46,12 @@ FFPSRWeaponAssemblerViewportClient::FFPSRWeaponAssemblerViewportClient(FPreviewS
 
 void FFPSRWeaponAssemblerViewportClient::SetWeapon(UFPSRWeaponDataAsset* DA)
 {
+	// 무기 자체가 바뀌므로 단계 미리보기는 캡처 없이 그냥 리셋한다 — EndStagePreview()를 부르면 옛 DA(WeaponDA, 곧 교체될)에
+	// 오프셋을 써버리는 꼴이라 잘못됐다. 프리뷰 컴포넌트도 바로 아래서 전부 재생성되므로 base 메시 참조도 의미가 없다.
+	PreviewStageSlot = INDEX_NONE;
+	PreviewStageIndex = INDEX_NONE;
+	PreviewStageBaseMesh = nullptr;
+
 	if (BodyComp)
 	{
 		PreviewScene.RemoveComponent(BodyComp);
@@ -171,6 +177,9 @@ void FFPSRWeaponAssemblerViewportClient::AddPart(UStaticMesh* Mesh)
 
 void FFPSRWeaponAssemblerViewportClient::RemoveSelectedPart()
 {
+	// 제거 전 단계 미리보기 중이면 정리(스테일 인덱스로 남는 것 방지 — 특히 지워질 슬롯을 미리보던 중이었을 경우).
+	EndStagePreview();
+
 	if (!PartComps.IsValidIndex(SelectedPart) || !WeaponDA || !WeaponDA->WeaponParts1P.IsValidIndex(SelectedPart))
 	{
 		return;
@@ -189,10 +198,77 @@ void FFPSRWeaponAssemblerViewportClient::RemoveSelectedPart()
 	Invalidate();
 }
 
+void FFPSRWeaponAssemblerViewportClient::BeginStagePreview(int32 SlotIndex, int32 StageIndex)
+{
+	// 이미 다른 단계를 미리보는 중이면 먼저 그 오프셋을 캡처·복원(순서 보장 — 미리보기는 한 번에 하나만).
+	if (PreviewStageSlot != INDEX_NONE)
+	{
+		EndStagePreview();
+	}
+
+	if (!PartComps.IsValidIndex(SlotIndex) || !PartComps[SlotIndex] || !WeaponDA
+		|| !WeaponDA->WeaponParts1P.IsValidIndex(SlotIndex) || !WeaponDA->WeaponParts1P[SlotIndex].Stages.IsValidIndex(StageIndex))
+	{
+		return;
+	}
+
+	UStaticMeshComponent* PC = PartComps[SlotIndex];
+
+	// base 캡처(복원용) — 현재 컴포넌트 월드 트랜스폼이 stage.Offset의 기준 프레임이 된다.
+	PreviewStageBaseXf = PC->GetComponentTransform();
+	PreviewStageBaseMesh = PC->GetStaticMesh();
+
+	const FFPSRWeaponPartStage& St = WeaponDA->WeaponParts1P[SlotIndex].Stages[StageIndex];
+	UStaticMesh* StageMesh = St.Mesh.IsNull() ? nullptr : St.Mesh.LoadSynchronous();
+	PC->SetStaticMesh(StageMesh); // null 허용 — "이 단계 선택 시 파츠 사라짐"과 동일 규약(FFPSRWeaponPartStage 주석)
+
+	// 배치: 자식월드 = stage.Offset * base월드(기존 SetWeapon의 Init = P.Offset * (SocketRel * RootBoneCS)와 동일 규약).
+	PC->SetWorldTransform(St.Offset * PreviewStageBaseXf);
+
+	PreviewStageSlot = SlotIndex;
+	PreviewStageIndex = StageIndex;
+	SelectedPart = SlotIndex;
+
+	UpdatePartVisibility();
+	Invalidate();
+}
+
+void FFPSRWeaponAssemblerViewportClient::EndStagePreview()
+{
+	if (PreviewStageSlot == INDEX_NONE)
+	{
+		return;
+	}
+
+	if (PartComps.IsValidIndex(PreviewStageSlot) && PartComps[PreviewStageSlot] && WeaponDA
+		&& WeaponDA->WeaponParts1P.IsValidIndex(PreviewStageSlot) && WeaponDA->WeaponParts1P[PreviewStageSlot].Stages.IsValidIndex(PreviewStageIndex))
+	{
+		UStaticMeshComponent* PC = PartComps[PreviewStageSlot];
+
+		// 캡처: stage.Offset = 현재(기즈모로 옮겨진) 자식월드를 base월드 기준 상대로 환산(GetRelativeTransform:
+		// this = Result * Other → Result = this.GetRelativeTransform(Other)).
+		const FTransform NewOffset = PC->GetComponentTransform().GetRelativeTransform(PreviewStageBaseXf);
+		WeaponDA->WeaponParts1P[PreviewStageSlot].Stages[PreviewStageIndex].Offset = NewOffset;
+		WeaponDA->MarkPackageDirty();
+
+		// base 메시/위치 복원.
+		PC->SetStaticMesh(PreviewStageBaseMesh);
+		PC->SetWorldTransform(PreviewStageBaseXf);
+	}
+
+	PreviewStageSlot = INDEX_NONE;
+	PreviewStageIndex = INDEX_NONE;
+	PreviewStageBaseMesh = nullptr;
+
+	UpdatePartVisibility();
+	Invalidate();
+}
+
 void FFPSRWeaponAssemblerViewportClient::AddReferencedObjects(FReferenceCollector& Collector)
 {
 	FEditorViewportClient::AddReferencedObjects(Collector);
 	Collector.AddReferencedObject(WeaponDA);
+	Collector.AddReferencedObject(PreviewStageBaseMesh);
 }
 
 FVector FFPSRWeaponAssemblerViewportClient::GetWidgetLocation() const

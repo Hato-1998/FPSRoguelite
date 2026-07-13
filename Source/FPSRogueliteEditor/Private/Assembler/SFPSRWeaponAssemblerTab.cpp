@@ -376,6 +376,8 @@ void SFPSRWeaponAssemblerTab::OnPartSelectionChanged(TSharedPtr<FPartRow> Item, 
 {
 	if (Viewport.IsValid() && Viewport->GetAssemblerClient().IsValid())
 	{
+		// 슬롯이 바뀌기 전에 이전 단계 미리보기를 캡처·종료(스테일 인덱스로 다른 슬롯에 쓰는 것 방지).
+		Viewport->GetAssemblerClient()->EndStagePreview();
 		Viewport->GetAssemblerClient()->SetSelectedPart(Item.IsValid() ? Item->Index : INDEX_NONE);
 	}
 
@@ -680,6 +682,8 @@ FReply SFPSRWeaponAssemblerTab::OnRemovePartClicked()
 		return FReply::Handled();
 	}
 
+	// 슬롯 제거 전 단계 미리보기 정리(RemoveSelectedPart 내부에도 있지만 탭에서도 명시적으로 — 중복 호출은 no-op).
+	Client->EndStagePreview();
 	Client->RemoveSelectedPart();
 	RefreshPartsList();
 	if (PreviewScene.IsValid())
@@ -809,6 +813,20 @@ TSharedRef<ITableRow> SFPSRWeaponAssemblerTab::OnGenerateStageRow(TSharedPtr<FSt
 void SFPSRWeaponAssemblerTab::OnStageSelectionChanged(TSharedPtr<FStageRow> Item, ESelectInfo::Type SelectInfo)
 {
 	SelectedStageRow = Item;
+
+	TSharedPtr<FFPSRWeaponAssemblerViewportClient> Client = Viewport.IsValid() ? Viewport->GetAssemblerClient() : nullptr;
+	const int32 Sel = Client.IsValid() ? Client->GetSelectedPart() : INDEX_NONE;
+	if (Client.IsValid() && Item.IsValid() && Sel != INDEX_NONE)
+	{
+		// 뷰포트에서 이 단계를 미리본다: 슬롯 컴포넌트 메시를 stage 메시로 바꾸고 base 기준 stage.Offset만큼 배치,
+		// 기즈모를 그 슬롯에 맞춘다(BeginStagePreview가 이전 미리보기가 있으면 알아서 먼저 캡처·종료한다).
+		Client->BeginStagePreview(Sel, Item->StageIndex);
+	}
+	else if (Client.IsValid())
+	{
+		// 선택 해제(빈 클릭 등) — 미리보기 중이었다면 캡처·복원.
+		Client->EndStagePreview();
+	}
 }
 
 FReply SFPSRWeaponAssemblerTab::OnAddStageClicked()
@@ -824,6 +842,9 @@ FReply SFPSRWeaponAssemblerTab::OnAddStageClicked()
 		}
 		return FReply::Handled();
 	}
+
+	// Stages 배열을 건드리기 전에 이전 단계 미리보기를 캡처·종료(스테일 인덱스 방지).
+	Client->EndStagePreview();
 
 	FFPSRWeaponPartAttachment& Slot = DA->WeaponParts1P[Sel];
 
@@ -869,6 +890,9 @@ FReply SFPSRWeaponAssemblerTab::OnRemoveStageClicked()
 	{
 		return FReply::Handled();
 	}
+
+	// Stages 배열을 건드리기 전에 이전 단계 미리보기를 캡처·종료(스테일 인덱스 방지).
+	Client->EndStagePreview();
 
 	TArray<FFPSRWeaponPartStage>& Stages = DA->WeaponParts1P[Sel].Stages;
 	if (Stages.IsValidIndex(SelectedStageRow->StageIndex))
@@ -923,6 +947,13 @@ void SFPSRWeaponAssemblerTab::OnStageMinStacksChanged(int32 NewValue, int32 Stag
 FReply SFPSRWeaponAssemblerTab::OnBakeClicked()
 {
 	TSharedPtr<FFPSRWeaponAssemblerViewportClient> Client = Viewport.IsValid() ? Viewport->GetAssemblerClient() : nullptr;
+
+	// 단계 메시가 base로 구워지는 것 방지 — base 복원 후 굽는다(캡처된 오프셋은 Stages[].Offset에 남아 있으니 손실 없음).
+	if (Client.IsValid())
+	{
+		Client->EndStagePreview();
+	}
+
 	UFPSRWeaponDataAsset* DA = Client.IsValid() ? Client->GetWeaponDA() : nullptr;
 	if (!DA)
 	{

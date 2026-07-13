@@ -70,6 +70,16 @@ public:
 	 *  정합 유지). 소켓 정리는 재베이크가 담당(BakeSockets가 SOCKET_Mount_*를 전부 지우고 다시 굽는다). */
 	void RemoveSelectedPart();
 
+	/** 슬롯 SlotIndex의 진화 단계 StageIndex를 뷰포트에서 미리본다: 그 슬롯 컴포넌트의 메시를 stage 메시로 바꾸고
+	 *  base 위치(현재 컴포넌트 트랜스폼) 기준 stage.Offset 만큼 배치, 기즈모를 그 슬롯에 맞춘다. 이미 다른 단계를
+	 *  미리보는 중이면 먼저 EndStagePreview()로 이전 오프셋을 캡처·복원한다. 인덱스 무효면 아무 것도 안 함. */
+	void BeginStagePreview(int32 SlotIndex, int32 StageIndex);
+
+	/** 단계 미리보기 종료: 현재 기즈모 위치를 stage.Offset으로 캡처(base 기준 상대) 후 base 메시/위치 복원. 미리보기
+	 *  중이 아니면 no-op. */
+	void EndStagePreview();
+	bool IsPreviewingStage() const { return PreviewStageSlot != INDEX_NONE; }
+
 	const TArray<UStaticMeshComponent*>& GetPartComps() const { return PartComps; }
 	USkeletalMeshComponent* GetBodyComp() const { return BodyComp; }
 	UFPSRWeaponDataAsset* GetWeaponDA() const { return WeaponDA; }
@@ -125,4 +135,13 @@ private:
 
 	/** "선택만 보기" 토글 상태. See SetIsolate/UpdatePartVisibility. */
 	bool bIsolate = false;
+
+	/** 단계 미리보기 중인 슬롯(PartComps/WeaponParts1P 인덱스). INDEX_NONE = 미리보기 중이 아님. See BeginStagePreview/EndStagePreview. */
+	int32 PreviewStageSlot = INDEX_NONE;
+	/** PreviewStageSlot의 진화 단계 인덱스(WeaponParts1P[PreviewStageSlot].Stages 기준). */
+	int32 PreviewStageIndex = INDEX_NONE;
+	/** 미리보기 시작 시 캡처한 base 컴포넌트의 월드 트랜스폼 — stage.Offset은 이 프레임 기준 상대값이다. */
+	FTransform PreviewStageBaseXf = FTransform::Identity;
+	/** 미리보기 시작 시 슬롯 컴포넌트에 물려 있던 base 메시(복원용). */
+	TObjectPtr<UStaticMesh> PreviewStageBaseMesh = nullptr;
 };
