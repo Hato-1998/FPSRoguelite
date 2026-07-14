@@ -20,6 +20,8 @@ public class FPSRogueliteEditor : ModuleRules
 		PrivateDependencyModuleNames.AddRange(new string[]
 		{
 			"UnrealEd",
+			"EditorFramework",          // FEditorModeInfo / FEditorModeID — the blockout viewport placement UEdMode
+			"LevelEditor",              // GLevelEditorModeTools() — activate the placement mode from the tab button
 			"Slate",
 			"SlateCore",
 			"EditorSubsystem",

@@ -1,0 +1,40 @@
+// Copyright Epic Games, Inc. All Rights Reserved.
+
+#pragma once
+
+#include "CoreMinimal.h"
+#include "Engine/DeveloperSettings.h"
+#include "UObject/SoftObjectPath.h"   // FDirectoryPath
+#include "FPSRBlockoutSettings.generated.h"
+
+/**
+ * Blockout tool configuration (editor-only). Holds the roster of content folders the FPSR Blockout palette scans for
+ * placeable modular pieces (Slice ① backbone; the actual scan lands in Slice ②). Config = Editor + DefaultConfig so
+ * the roster lives in Config/DefaultEditor.ini — checked in and shared by all designers, and (per decision K1) new
+ * palette folders are added here in Project Settings with NO C++ rebuild. Editor module only: nothing here is read at
+ * runtime. Editable in Project Settings > FPSR > FPSR Blockout.
+ */
+UCLASS(Config = Editor, DefaultConfig, meta = (DisplayName = "FPSR Blockout"))
+class UFPSRBlockoutSettings : public UDeveloperSettings
+{
+	GENERATED_BODY()
+
+public:
+	UFPSRBlockoutSettings();
+
+	/** Groups this under the "FPSR" section in Project Settings, alongside the runtime FPSR settings. */
+	virtual FName GetCategoryName() const override;
+
+	/** Content folders the palette scans for placeable modular meshes/actors. Add folders here (no rebuild) to make a
+	 *  new Synty pack — CyberCity / Nature / Space — available in the blockout palette. The ContentDir meta shows a
+	 *  content-folder picker; picked values are stored as /Game/... long package paths. The default seeds the imported
+	 *  CyberCity meshes so the tool has something to show on first open; change/extend freely in Project Settings
+	 *  (this is a config default, not a runtime path dependency). */
+	UPROPERTY(EditAnywhere, Config, Category = "Palette", meta = (ContentDir))
+	TArray<FDirectoryPath> PaletteFolders;
+
+	/** Grid snap size (cm) for the viewport placement mode (city-builder ghost). The cursor floor-hit is snapped to
+	 *  this grid in X/Y before the ghost/placement lands. 0 = no snap (free placement). */
+	UPROPERTY(EditAnywhere, Config, Category = "Placement", meta = (ClampMin = "0.0"))
+	float PlacementGridSize = 100.0f;
+};

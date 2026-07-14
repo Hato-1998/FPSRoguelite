@@ -1,0 +1,131 @@
+// Copyright Epic Games, Inc. All Rights Reserved.
+
+#pragma once
+
+#include "CoreMinimal.h"
+#include "Widgets/SCompoundWidget.h"
+#include "Widgets/Views/STileView.h"   // brings SListView too
+#include "AssetRegistry/AssetData.h"
+
+class STextBlock;
+class ITableRow;
+class STableViewBase;
+class FAssetThumbnail;
+class FAssetThumbnailPool;
+
+/** Per-asset collision-suitability status for the palette badge (slice ⑧). Unknown until "상태 검사" loads + inspects.
+ *  Pass = has WorldStatic-blocking collision (the flow-field obstacle mask will see a placed piece); Fail = none. */
+enum class EBlockoutAssetStatus : uint8
+{
+	Unknown,
+	Pass,
+	Fail,
+};
+
+/**
+ * FPSR Blockout tool (Tools > FPSR > "블록아웃 툴…") — config-driven modular map palette + blockout guardrails.
+ *
+ * Two-pane browser: LEFT = a list of the configured palette's folders (categories); clicking a folder fills the RIGHT
+ * pane with that folder's assets as a CARD GRID (STileView, large thumbnail + type/collision badge + name). Scans BOTH
+ * UStaticMeshes and actor Blueprints. Double-click a card (or "선택 배치") spawns it into the current editor world: a
+ * mesh as a WorldStatic "BlockAll" AStaticMeshActor (tool-owned collision + overlap preflight), an actor Blueprint AS-IS
+ * from its generated class (no collision auto-mod — Codex P1; if a BP won't block, the designer fixes it, the tool never
+ * rewrites vendor BPs). "상태 검사" loads every cached asset on demand and fills the ✓/✗ badges. "레벨 검증" runs the
+ * guardrail pass (FFPSRBlockoutValidator) into the FPSRBlockout message log. Config folders: Project Settings > FPSR.
+ */
+class SFPSRBlockoutTab : public SCompoundWidget
+{
+public:
+	SLATE_BEGIN_ARGS(SFPSRBlockoutTab) {}
+	SLATE_END_ARGS()
+
+	void Construct(const FArguments& InArgs);
+
+private:
+	/** One row of the LEFT folder list: a configured-palette folder (package path) + its filtered asset count. */
+	struct FBlockoutFolderItem
+	{
+		FName PackagePath;
+		FText Label;   // "{folder}  ({N})"
+		int32 Count = 0;
+	};
+
+	/** One card of the RIGHT tile grid: a placeable asset (UStaticMesh or actor Blueprint) in the selected folder. */
+	struct FBlockoutAssetItem
+	{
+		FAssetData Asset;
+		FText Label;
+		/** Lazy asset thumbnail — created on first tile-generate (slice ⑦), shares the tab's pooled render targets. */
+		TSharedPtr<FAssetThumbnail> Thumbnail;
+	};
+
+	/** Re-reads UFPSRBlockoutSettings::PaletteFolders, recursively asset-registry-scans each for UStaticMesh + actor
+	 *  Blueprints (non-actor BPs filtered out), caches the results, then rebuilds the folder list. Guards on IsLoading. */
+	void RefreshPalette();
+
+	/** Rebuilds FolderList from CachedAssets (folders that contain a name-filter match), refreshes the left list, and
+	 *  re-selects the previously selected folder (or the first) so the right pane stays populated. */
+	void RebuildFolderList();
+
+	/** Fills CurrentFolderAssets from CachedAssets in SelectedFolderPath (name-filtered), refreshes the right tile grid,
+	 *  and clears the tile selection. */
+	void PopulateCurrentFolder();
+
+	FReply OnRefreshClicked();
+	void OnSearchTextChanged(const FText& NewText);
+
+	// --- Left folder list -------------------------------------------------------------------------------------------
+	TSharedRef<ITableRow> OnGenerateFolderRow(TSharedPtr<FBlockoutFolderItem> Item, const TSharedRef<STableViewBase>& OwnerTable);
+	void OnFolderSelectionChanged(TSharedPtr<FBlockoutFolderItem> Item, ESelectInfo::Type SelectInfo);
+
+	// --- Right asset card grid --------------------------------------------------------------------------------------
+	TSharedRef<ITableRow> OnGenerateTile(TSharedPtr<FBlockoutAssetItem> Item, const TSharedRef<STableViewBase>& OwnerTable);
+	void OnAssetSelectionChanged(TSharedPtr<FBlockoutAssetItem> Item, ESelectInfo::Type SelectInfo);
+	void OnTileDoubleClicked(TSharedPtr<FBlockoutAssetItem> Item);
+
+	// --- Placement / actions ----------------------------------------------------------------------------------------
+	FReply OnPlaceClicked();
+	/** "뷰포트 배치" button — activates the city-builder placement UEdMode and hands it the selected asset (ghost +
+	 *  cursor-to-floor + grid snap + left-click to place). Enabled when a card is selected (IsPlaceEnabled). */
+	FReply OnEnterPlacementModeClicked();
+	/** Toolbar grid-size numeric box getter/handler — pushes the live snap size to the active placement mode. */
+	TOptional<float> GetGridSizeValue() const;
+	void OnGridSizeChanged(float NewValue);
+	bool IsPlaceEnabled() const;
+	FReply OnValidateClicked();
+	FReply OnInspectStatusClicked();
+
+	/** Places AssetData into the current editor world: a UStaticMesh spawns as a WorldStatic "BlockAll" AStaticMeshActor
+	 *  (tool-owned collision + mesh-only overlap preflight); an actor Blueprint spawns AS-IS from its generated class
+	 *  (no auto-collision). Undo transaction, asset-name label, "Blockout" outliner folder, selected. */
+	void PlaceAsset(const FAssetData& AssetData);
+	FVector ComputeSpawnLocation() const;
+
+	static bool IsBlueprintAsset(const FAssetData& AssetData);
+	static bool IsActorBlueprint(const FAssetData& AssetData);
+	static EBlockoutAssetStatus InspectAssetStatus(const FAssetData& AssetData);
+
+	// --- State ------------------------------------------------------------------------------------------------------
+	/** Full scan result (all placeable assets across all configured folders), cached so filtering is a pure rebuild. */
+	TArray<FAssetData> CachedAssets;
+
+	TArray<TSharedPtr<FBlockoutFolderItem>> FolderList;
+	TSharedPtr<SListView<TSharedPtr<FBlockoutFolderItem>>> FolderListView;
+
+	TArray<TSharedPtr<FBlockoutAssetItem>> CurrentFolderAssets;
+	TSharedPtr<STileView<TSharedPtr<FBlockoutAssetItem>>> AssetTileView;
+
+	/** The folder currently selected in the left list (NAME_None if none). */
+	FName SelectedFolderPath;
+	/** The card currently selected in the right grid (drives "선택 배치"). Reset on folder change / rebuild. */
+	TSharedPtr<FBlockoutAssetItem> SelectedAsset;
+
+	FString CurrentFilter;
+	/** Collision-status cache keyed by asset path — survives filter/folder changes; filled by OnInspectStatusClicked. */
+	TMap<FSoftObjectPath, EBlockoutAssetStatus> StatusByAsset;
+	/** Live grid-snap size (cm) for the viewport placement mode; edited via the toolbar box, seeded from settings. */
+	float PlacementGridSize = 100.0f;
+	/** Shared pool backing the lazy card thumbnails (slice ⑦); an FTickableEditorObject, so it renders itself. */
+	TSharedPtr<FAssetThumbnailPool> ThumbnailPool;
+	TSharedPtr<STextBlock> StatusText;
+};
