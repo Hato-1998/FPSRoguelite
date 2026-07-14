@@ -6,6 +6,7 @@
 #include "Validation/FPSRAnchoredValidationService.h"
 #include "DataEditor/SFPSRDataEditorWidget.h"
 #include "Assembler/SFPSRWeaponAssemblerTab.h"
+#include "Blockout/SFPSRBlockoutTab.h"
 #include "Editor.h"
 #include "EditorValidatorSubsystem.h"
 #include "Logging/MessageLog.h"
@@ -26,6 +27,7 @@
 
 const FName FFPSRogueliteEditorModule::FPSRDataEditorTabName(TEXT("FPSRDataEditor"));
 const FName FFPSRogueliteEditorModule::FPSRWeaponAssemblerTabName(TEXT("FPSRWeaponAssembler"));
+const FName FFPSRogueliteEditorModule::FPSRBlockoutTabName(TEXT("FPSRBlockout"));
 
 // UEditorValidatorBase subclasses (UFPSRCardPoolValidator / UFPSRRunScheduleValidator / UFPSRLoadoutPoolValidator)
 // are auto-discovered by UEditorValidatorSubsystem — no manual registration needed here. This module only wires up
@@ -46,6 +48,12 @@ void FFPSRogueliteEditorModule::StartupModule()
 	FGlobalTabmanager::Get()->RegisterNomadTabSpawner(FPSRWeaponAssemblerTabName, FOnSpawnTab::CreateStatic(&FFPSRogueliteEditorModule::SpawnWeaponAssemblerTab))
 		.SetDisplayName(LOCTEXT("WeaponAssemblerTabTitle", "무기 파츠 조립기"))
 		.SetGroup(WorkspaceMenu::GetMenuStructure().GetToolsCategory());
+
+	// FPSR Blockout tool — config-driven modular map palette (Slice ① = empty shell + UDeveloperSettings backbone).
+	// Same nomad-tab lifetime pattern as the two tabs above.
+	FGlobalTabmanager::Get()->RegisterNomadTabSpawner(FPSRBlockoutTabName, FOnSpawnTab::CreateStatic(&FFPSRogueliteEditorModule::SpawnBlockoutTab))
+		.SetDisplayName(LOCTEXT("BlockoutTabTitle", "블록아웃 툴"))
+		.SetGroup(WorkspaceMenu::GetMenuStructure().GetToolsCategory());
 }
 
 void FFPSRogueliteEditorModule::ShutdownModule()
@@ -54,6 +62,7 @@ void FFPSRogueliteEditorModule::ShutdownModule()
 	UToolMenus::UnregisterOwner(this);
 	FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(FPSRDataEditorTabName);
 	FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(FPSRWeaponAssemblerTabName);
+	FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(FPSRBlockoutTabName);
 }
 
 void FFPSRogueliteEditorModule::RegisterMenus()
@@ -83,6 +92,13 @@ void FFPSRogueliteEditorModule::RegisterMenus()
 		FSlateIcon(FAppStyle::GetAppStyleSetName(), "DeveloperTools.MenuIcon"),
 		FUIAction(FExecuteAction::CreateStatic(&FFPSRogueliteEditorModule::OnOpenWeaponAssemblerMenuEntry))
 	);
+	Section.AddMenuEntry(
+		"FPSROpenBlockout",
+		LOCTEXT("OpenBlockoutTitle", "블록아웃 툴…"),
+		LOCTEXT("OpenBlockoutTooltip", "FPSR 블록아웃 툴 열기 (config 기반 모듈러 맵 팔레트 + 블록아웃 가드레일). 팔레트 폴더는 Project Settings > FPSR > FPSR Blockout 에서 설정."),
+		FSlateIcon(FAppStyle::GetAppStyleSetName(), "DeveloperTools.MenuIcon"),
+		FUIAction(FExecuteAction::CreateStatic(&FFPSRogueliteEditorModule::OnOpenBlockoutMenuEntry))
+	);
 }
 
 void FFPSRogueliteEditorModule::OnOpenDataEditorMenuEntry()
@@ -110,6 +126,20 @@ TSharedRef<SDockTab> FFPSRogueliteEditorModule::SpawnWeaponAssemblerTab(const FS
 		.TabRole(ETabRole::NomadTab)
 		[
 			SNew(SFPSRWeaponAssemblerTab)
+		];
+}
+
+void FFPSRogueliteEditorModule::OnOpenBlockoutMenuEntry()
+{
+	FGlobalTabmanager::Get()->TryInvokeTab(FPSRBlockoutTabName);
+}
+
+TSharedRef<SDockTab> FFPSRogueliteEditorModule::SpawnBlockoutTab(const FSpawnTabArgs& Args)
+{
+	return SNew(SDockTab)
+		.TabRole(ETabRole::NomadTab)
+		[
+			SNew(SFPSRBlockoutTab)
 		];
 }
 

@@ -35,6 +35,10 @@ private:
 	 *  spawned into an editor level. */
 	static void OnOpenWeaponAssemblerMenuEntry();
 
+	/** Menu command handler: opens (or focuses) the FPSR Blockout tool nomad tab — a config-driven modular map
+	 *  palette (Tools > FPSR > "블록아웃 툴…"). */
+	static void OnOpenBlockoutMenuEntry();
+
 	/** Nomad tab spawner for the FPSR Data Editor (P1) — registered in StartupModule, unregistered in
 	 *  ShutdownModule. Returns a dock tab hosting a single SFPSRDataEditorWidget. */
 	static TSharedRef<class SDockTab> SpawnDataEditorTab(const class FSpawnTabArgs& Args);
@@ -43,9 +47,16 @@ private:
 	 *  ShutdownModule. Returns a dock tab hosting a single SFPSRWeaponAssemblerTab. */
 	static TSharedRef<class SDockTab> SpawnWeaponAssemblerTab(const class FSpawnTabArgs& Args);
 
+	/** Nomad tab spawner for the FPSR Blockout tool — registered in StartupModule, unregistered in ShutdownModule.
+	 *  Returns a dock tab hosting a single SFPSRBlockoutTab. */
+	static TSharedRef<class SDockTab> SpawnBlockoutTab(const class FSpawnTabArgs& Args);
+
 	/** Tab identifier for the FPSR Data Editor nomad tab (RegisterNomadTabSpawner / TryInvokeTab both key off this). */
 	static const FName FPSRDataEditorTabName;
 
 	/** Tab identifier for the Weapon Part Assembler nomad tab (RegisterNomadTabSpawner / TryInvokeTab both key off this). */
 	static const FName FPSRWeaponAssemblerTabName;
+
+	/** Tab identifier for the FPSR Blockout tool nomad tab (RegisterNomadTabSpawner / TryInvokeTab both key off this). */
+	static const FName FPSRBlockoutTabName;
 };
