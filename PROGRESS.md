@@ -6,25 +6,32 @@
 
 **최종 갱신: 2026-07-15**
 
-## 🔔 현재 상태 (2026-07-15 · Synty 아트 파일럿 **실행 중** — S1 후속 · 브랜치 `phase/s4-readability-metrics`)
+## 🔔 현재 상태 (2026-07-15 · Synty 아트 파일럿 **실행 중** — S4 계측 브랜치 **main 머지·푸시 완료**)
 
-> ⚠️ 브랜치 = **`phase/s4-readability-metrics`** (main 미머지, 코드 2커밋). `main`은 `origin/main` **1 앞섬**(문서 머지 `5e3f2a88`, 미푸시).
-> 작업트리 = **사용자 콘텐츠만 미커밋**(아래 §미커밋 콘텐츠). 코드 미커밋 0.
+> **`phase/s4-readability-metrics` → main `--no-ff` 머지 + `origin/main` 푸시 완료.** 코드 미커밋 0.
+> 작업트리 = **사용자 콘텐츠만 미커밋**(아래 §미커밋 콘텐츠).
+> **S3 육안 판정 · S4 성능 실측 = 사용자가 직접 진행**(2026-07-15 사용자 결정. 종전 "재캡처 후 머지" 선행조건은 해제 — 아래 §③).
 
-### ① 이 세션에서 한 일 (`phase/s4-readability-metrics`)
-- `5e3f2a88` **merge**: `origin/main` 문서(스코프축소 재개 프롬프트 + CityBuildGuide) ← 맵 커밋과 1-1 분기였음, 충돌 0.
-- `9059af12` **feat(perf)**: S4 가독성 5지표 계측 = **`UFPSREnemyMetricsSubsystem`**(신규). ②③④는 "플레이어 한 명이 겪는 것"이라 **서버 아닌 각 클라가 자기 로컬 폰/뷰 기준**으로 집계 → CSV 커스텀 스탯 5개(`FPSREnemy/ServerAlive|RelevantAlive|VisibleFrustum|VisibleRendered|Near15m`). 신규 순회 0·월드쿼리 0·shipping 생성 거부(`CSV_PROFILER_STATS`). 빌드 `Result: Succeeded`.
-- `e198f668` **fix(perf)**: ③b가 **그림자 패스에 오염**돼 있던 것 수정(`AActor::WasRecentlyRendered`→`GetLastRenderTimeOnScreen`). 첫 실캡처에서 ③b>③a 불변식 위반 **47.9%** 로 발각. 리센시 창도 초→**프레임 기준**(fps 독립). 빌드 통과.
+### ① 이 세션에서 한 일 (S4 계측 아크 = 머지 완료)
+- `9059af12` **feat(perf)**: S4 가독성 5지표 계측 = **`UFPSREnemyMetricsSubsystem`**(신규). ②③④는 "플레이어 한 명이 겪는 것"이라 **서버 아닌 각 클라가 자기 로컬 폰/뷰 기준**으로 집계 → CSV 커스텀 스탯 5개(`FPSREnemy/ServerAlive|RelevantAlive|VisibleFrustum|VisibleRendered|Near15m`). 신규 순회 0·월드쿼리 0·shipping 생성 거부(`CSV_PROFILER_STATS`).
+- `e198f668` **fix(perf)**: ③b **그림자 패스 오염** 수정(`AActor::WasRecentlyRendered`→`GetLastRenderTimeOnScreen`). 첫 실캡처 위반 **47.87%**(3930/8210, 재확인)로 발각. **엔진 소스로 진단 확정**: `PrimitiveSceneInfoData.cpp:12/19-22`가 액터 스탬프를 무조건 씀 — Epic이 `bCastWhenHidden` 때문에 **의도적으로** 그렇게 함(`ShadowSetup.cpp:2056-2061`). 리센시 창도 초→**프레임 기준**.
+- `19e1065d` **fix(perf)**: ⚠️ **위 수정만으론 불변식이 안 지켜졌음** — ③a는 액터 원점 40cm 구를 재는데 렌더러는 **메시 바운드**로 컬링(`SceneVisibility.cpp:599-622`). 근접 적 메시 AABB = 액터기준 Z ∈ [-98.87, +58.00](~157cm) vs 구 [-40,+40] → 위쪽 프러스텀 평면에 **58.9cm 밴드** = 버그 0으로 `③b>③a`. **→ ③a도 `EnemyMesh->Bounds` 테스트 = 구조적 상위집합**(렌더러가 동일 바운드를 sphere 테스트 후 box·occlusion 추가) → 불변식이 **설계로** 성립. + 프러스텀 없는 프레임의 **가짜 위반 제조** 차단, **엔진 소스와 반대로 틀린 주석 2건 교정 + 1건 삭제**(RT 50m 거리게이트·Nanite `IsAlwaysVisible` 게터 단축·PIE 멀티뷰).
+- 검증 = 빌드 `Result: Succeeded` · 스모크 `FPSRoguelite.Smoke.ModuleLoads Result={Success}` · Opus 직접 엔진소스 재확인(9에이전트 워크플로 + 적대 검증 3렌즈).
 
 ### ② 다음 코드 작업 (구체)
-1. **`phase/s4-readability-metrics` → main `--no-ff` 머지** — 단, **선행 조건 = CSV 재캡처로 `③b ≤ ③a` 불변식 확인**(수정이 실제로 먹었는지 미검증. 첫 캡처는 수정 전 데이터). 검증 = PIE `csvprofile start`/`stop` → `Saved/Profiling/CSV/*.csv` 열 비교. Codex 머지게이트도 이때.
-2. **U20 적 애니 계약 교정**(별건, 코드+콘텐츠) — `FPSREnemyAnimProfile.cpp`의 `UFPSREnemyAnimProfile_VAT::ApplyAnimState`가 쓰는 파라미터명이 **실제 머티리얼과 불일치**: `AnimationIndex`(머티리얼에 **없음** → 클립 선택은 `StartFrame`/`EndFrame`), `Phase`(**없음** → `TimeOffset`), `PlayRate`(OK, `Playrate`와 FName 매칭). `FPSRVATAnimParams.h:20`이 이미 "PLACEHOLDER contract — MUST be verified in-editor"라 예고해둠. + 적 BP 3종(Melee/Ranged/Boss) 전부 `AnimProfile`=null(드라이버 dormant) → 배선 필요. **에셋 제약: BroBot에 Idle/Walk/Run만 있고 Attack/Death 애니가 프로젝트 전체에 없음**(Paragon은 트리밍돼 Idle 1개, Synty는 ThirdPerson 4종뿐) → 3상태가 상한.
-3. **보스 HUD 바 clear 경로 누락**(별건, spawn_task `task_2092b9b5`) — `SetActiveBoss(nullptr)` 호출처가 **전 프로젝트 0건**. 대조군 `SetActiveMission`은 set(`FPSRRunDirectorSubsystem.cpp:401`)+clear(`:449`) 둘 다 있음 = 오버사이트. 주석이 이미 계약을 약속(`FPSRGameState.h:138/247`).
+1. **보스 HUD 바 clear 경로 누락** ← **다음 착수**(파일럿과 독립·HOLD 아님). **재개 프롬프트 = `Docs/BossHUDClear_ResumePrompt.md`**(자족). 요지: `SetActiveBoss(nullptr)` 호출처 **전 프로젝트 0건**(set만 `FPSRRunDirectorSubsystem.cpp:513`), 대조군 `SetActiveMission`은 set(`:401`)+clear(`:449`) 둘 다. 계약은 `FPSRGameState.h:138/141-142/247`이 3곳에서 약속. **결정적 근거 = `StartRun`(`:67-100`)이 "Re-run safety" 주석까지 달고 same-world 재런을 대비하면서 `bRunActive`/`RunClock`/`bBossStarted`/`MissionProgress`/`ResetSpawnZones`를 리셋하는데 `ActiveBoss`만 안 리셋** → 같은 월드 재런 시 죽은 보스의 바가 남음. ⚠️ 착수 전 확인 = 보스 처치는 항상 런을 끝내므로(`FPSRGameMode.cpp:236` → `EndRun(Victory)`) **트래블로 GameState가 새로 생기면 관측 불가**할 수 있음 → **"실제 재현되는가"를 먼저 판정**할 것(과대평가 금지).
+2. **U20 적 애니 계약 교정** — ⚠️ **문서 충돌**: 여기선 "다음 작업"이었으나 `TaskPrompts_Master.md §B` DAG는 **U15/U19/U20 = HOLD("U21 아트정체성 결정 전 착수 금지")**. 근거도 명시적 — **적 VAT 베이크는 U22 적 교체 이후라야 재베이크를 안 함**. 지금 `M_BroBot_VAT` 기준으로 계약을 맞추면 Synty 적 교체 시 버려짐. **→ DAG(HOLD) 채택, U21 게이트 후로 이월.** (사실관계: `FPSREnemyAnimProfile.cpp:52`가 `AnimationIndex`를 쓰는데 머티리얼엔 없음[클립선택=`StartFrame`/`EndFrame`], `Phase`→`TimeOffset`, `PlayRate`는 OK. 적 BP 3종 `AnimProfile`=null. 에셋 제약 = BroBot에 Idle/Walk/Run만, Attack/Death 애니가 프로젝트 전체에 없음 → 3상태 상한.)
 
 ### ③ 블로커 / 주의
-- **S3(외곽선×VAT 정합성) 미판정 = 파일럿 게이트 잔여.** 이제 애니가 도니 판정 가능. 판정 = PIE 육안("걷는 몸을 외곽선이 따라가나").
-- **S4 실측 미완.** 실전 상한은 **192**(`GlobalAliveCap 200 − SeedReserve 8`), 200~300 불가. `FPSR.EnemyTarget`은 런 중 **0.25초마다 디렉터가 덮어씀**(무용) → 밀도 실측은 **`FPSR.SpawnEnemies N`**(캡 우회·플레이어 6m 링). 264m 확산으로 ③④가 헐겁게 통과할 위험(메모리 `enemy-swarm-measurement-gotchas`).
-- **톤다운 값 미정**(사용자 판단 대기). 노브 22개를 `PP_Synthwave_Grade` 한 곳에 집약해둠(값은 현행 유지 = 화면 무변화). 주범 = 자동노출 `min 0.03 / max 8.0` + `bias 1.0` 자기증폭 + `bloom_intensity 1.6`(기본 0.675의 2.4배). 권고 = min/max 1.0 고정 · bias 0 · bloom 0.7~0.8 · (필요시) `film_shoulder 0.26→0.35`.
+- **S3(외곽선×VAT 정합성) · S4 성능 실측 = 사용자 직접 진행**(2026-07-15 결정). Claude측 계측 인프라는 완료.
+  - ⚠️ **S3 판정 순서 주의**: 지금 셀 아웃라인을 **자동노출 최대 66배 + 블룸 2.37배**를 통과시켜 보고 있음 = 아웃라인이 아니라 그레이드를 보는 것. **톤다운 먼저 → 그 다음 아웃라인 판정**(안 그러면 아웃라인을 과하게 두껍게 만들고 나중에 그레이드 고치면 흉해짐).
+  - ⚠️ **PIE 창이 640×480**(`EditorPerProjectUserSettings.ini:91-92`). 화면 크기가 곧 ③이라 이대로 잰 숫자는 무의미 → **1920×1080**으로.
+  - ⚠️ **불변식 합격선 = 위반율 <5% + 최대 초과 ≤2**(0%는 달성 불가 — ③b는 과거 1~3프레임 스탬프, ③a는 현재라 카메라 회전 시 전환프레임 위반이 물리적으로 남음). 진짜 버그(47.9%·초과 최대 59)와는 이 기준으로 갈림.
+  - **실전 상한 192**(`GlobalAliveCap 200 − SeedReserve 8 − FrontReserved`, 단일맵이라 FrontReserved=0). `FPSR.EnemyTarget`은 런 중 **0.25초마다 디렉터가 덮어씀**(무용) → 밀도 실측은 **`FPSR.SpawnEnemies N`**(캡 우회·6m 링). ⚠️ **밀도는 시간이 아니라 파티 레벨로 오름** → `FPSR.AddXP`로 올릴 것. ⚠️ **`DA_RunSchedule`의 `AliveCountByLevel` 마지막 앵커가 실질 상한**(`FPSRRunDirectorSubsystem.cpp:162`가 앵커 있으면 시간램프 무시) — **이 값 확인 필수**(이전 캡처가 100에서 멈춘 이유일 가능성). 메모리 `enemy-swarm-measurement-gotchas`.
+  - 캡처는 **`csvprofile start`/`stop` 대신 `csvprofile frames=N`** — 엔진이 스스로 EndCapture하므로 0바이트가 구조적으로 불가(`CsvProfiler.cpp:3785-3792`). **CSV 프로파일러는 월드가 아니라 엔진 전역이라 PIE를 꺼도 캡처가 안 멈춤** = `Profile(20260715_140507).csv` 0바이트의 정체.
+  - **분석 스크립트 = `Scripts/s4-check-capture.py`**(인자=CSV 경로, 불변식 위반 시 non-zero exit).
+- **계측 잔여(의도적 미착수, 회귀 아님)**: `RenderRecencyFrames` 3→2 · 히칭 시 시간창 폭발 클램프(200ms 프레임→600ms 창) · `Near15m`가 3D인데 tier 패스는 2D(`DistSquaredXY`)라 U7 2층서 불일치 · **4인 PIE CSV 컬럼 충돌**(`CSV_CUSTOM_STAT` 키에 월드 구분자가 없어 호스트+클라3이 같은 열을 덮어씀 → 4인 게이트 시 **필수 선결**, 수정=스탯명에 `GetPlayInEditorID()` 접미사 or 클라별 별도 프로세스) · 캡처 시 `r.AllowOcclusionQueries` 검증(0이면 ③b가 조용히 그냥 프러스텀 카운트가 됨).
+- **톤다운 값 미정**(사용자 판단 대기). 노브 22개를 `PP_Synthwave_Grade` 한 곳에 집약해둠(값 보존 = 화면 무변화). **⚠️ 엔진 소스 대조 결과 용의자 4개 중 3개는 순정 UE5.7 기본값**(`0.03`/`8.0`/`bias 1.0`/`shoulder 0.26` — `Scene.cpp:500,501,445`, `SceneView.cpp:180-182`). **실제 저작된 과잉값은 `BloomIntensity 1.6` 하나**(기본 0.675의 2.37배). Extended Luminance Range = **꺼짐 확정** → Min/Max는 EV100 아닌 생 휘도. 권고 = **bias 1.0→0**(min==max 고정 경로에서 리셋 안 됨 = 영구 2배 과노출, `Scene.cpp:490/506/513/545`) · **min/max→1.0**(엔진 공인 "fake manual", `Scene.cpp:724`) · **bloom 1.6→0.7** · **`AutoExposureMethod`는 Histogram 유지**(Manual로 바꾸면 `GreyMult` 0.18→1.0으로 **5.56배** 튐, `Scene.cpp:500`) · shoulder는 **그대로**(기본값·범인 아님). **적용 전 `showflag.VisualizeHDR 1`로 클램프 방향 10초 확인 필수** — min에 붙었으면 1.0 고정=어두워짐(해결), max면 **더 밝아짐(악화)**. 고정 후 밝기 조절은 auto를 다시 열지 말고 **min==max 유지한 채 W만** 조절(`ExposureScale=1/W`).
 - ⚠️ **`FPSRCharacter.h`의 S2a 잔재(BlueprintReadOnly 3줄)가 이 세션 중 사라짐**(워킹트리·HEAD 양쪽 0). `BP_FPSRPlayer.uasset`은 여전히 미커밋 수정 상태 → **그 BP가 저 노출에 의존했다면 컴파일 실패 가능**. 확인 필요(LFS 바이너리라 코드로 검증 불가).
 - 파일럿 규칙("아트 통과 전 콘텐츠 커밋 0")은 이미 깨진 상태 — `b25db2ab`가 `L_GameFloor.umap` + DevBlockout 머티리얼을 main에 커밋했고 throwaway 격리 경로(`_SyntyPilot/`)도 아님.
 
