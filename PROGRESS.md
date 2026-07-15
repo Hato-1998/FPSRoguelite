@@ -4,20 +4,57 @@
 > **작업 단계를 끝낼 때마다, 그리고 중단 전 반드시 이 파일을 갱신하고 커밋한다.**
 > 확정 설계·기획·코드구조·규칙은 `Game.md`(**SSOT 허브** → 도메인별 `Docs/SSOT/*.md`, 작업별 라우팅은 허브 §0-1), **완료 작업 상세는 `git log --oneline`**. 여기엔 *무엇을 했는지*만 요약한다.
 
-**최종 갱신: 2026-07-14**
+**최종 갱신: 2026-07-15**
 
-## 🔔 현재 상태 (2026-07-14 · 무기 조립툴 개편 아크 머지 → 3아크 종결, 다음 = Synty 아트 파일럿)
+## 🔔 현재 상태 (2026-07-15 · Synty 아트 파일럿 **실행 중** — S1 후속 · 브랜치 `phase/s4-readability-metrics`)
 
-> 작업트리 = 사용자 콘텐츠만 미커밋(저격 재저작 등) · 미머지 `phase/*` 브랜치 0 · `main` = `origin/main` (푸시 완료).
+> ⚠️ 브랜치 = **`phase/s4-readability-metrics`** (main 미머지, 코드 2커밋). `main`은 `origin/main` **1 앞섬**(문서 머지 `5e3f2a88`, 미푸시).
+> 작업트리 = **사용자 콘텐츠만 미커밋**(아래 §미커밋 콘텐츠). 코드 미커밋 0.
+
+### ① 이 세션에서 한 일 (`phase/s4-readability-metrics`)
+- `5e3f2a88` **merge**: `origin/main` 문서(스코프축소 재개 프롬프트 + CityBuildGuide) ← 맵 커밋과 1-1 분기였음, 충돌 0.
+- `9059af12` **feat(perf)**: S4 가독성 5지표 계측 = **`UFPSREnemyMetricsSubsystem`**(신규). ②③④는 "플레이어 한 명이 겪는 것"이라 **서버 아닌 각 클라가 자기 로컬 폰/뷰 기준**으로 집계 → CSV 커스텀 스탯 5개(`FPSREnemy/ServerAlive|RelevantAlive|VisibleFrustum|VisibleRendered|Near15m`). 신규 순회 0·월드쿼리 0·shipping 생성 거부(`CSV_PROFILER_STATS`). 빌드 `Result: Succeeded`.
+- `e198f668` **fix(perf)**: ③b가 **그림자 패스에 오염**돼 있던 것 수정(`AActor::WasRecentlyRendered`→`GetLastRenderTimeOnScreen`). 첫 실캡처에서 ③b>③a 불변식 위반 **47.9%** 로 발각. 리센시 창도 초→**프레임 기준**(fps 독립). 빌드 통과.
+
+### ② 다음 코드 작업 (구체)
+1. **`phase/s4-readability-metrics` → main `--no-ff` 머지** — 단, **선행 조건 = CSV 재캡처로 `③b ≤ ③a` 불변식 확인**(수정이 실제로 먹었는지 미검증. 첫 캡처는 수정 전 데이터). 검증 = PIE `csvprofile start`/`stop` → `Saved/Profiling/CSV/*.csv` 열 비교. Codex 머지게이트도 이때.
+2. **U20 적 애니 계약 교정**(별건, 코드+콘텐츠) — `FPSREnemyAnimProfile.cpp`의 `UFPSREnemyAnimProfile_VAT::ApplyAnimState`가 쓰는 파라미터명이 **실제 머티리얼과 불일치**: `AnimationIndex`(머티리얼에 **없음** → 클립 선택은 `StartFrame`/`EndFrame`), `Phase`(**없음** → `TimeOffset`), `PlayRate`(OK, `Playrate`와 FName 매칭). `FPSRVATAnimParams.h:20`이 이미 "PLACEHOLDER contract — MUST be verified in-editor"라 예고해둠. + 적 BP 3종(Melee/Ranged/Boss) 전부 `AnimProfile`=null(드라이버 dormant) → 배선 필요. **에셋 제약: BroBot에 Idle/Walk/Run만 있고 Attack/Death 애니가 프로젝트 전체에 없음**(Paragon은 트리밍돼 Idle 1개, Synty는 ThirdPerson 4종뿐) → 3상태가 상한.
+3. **보스 HUD 바 clear 경로 누락**(별건, spawn_task `task_2092b9b5`) — `SetActiveBoss(nullptr)` 호출처가 **전 프로젝트 0건**. 대조군 `SetActiveMission`은 set(`FPSRRunDirectorSubsystem.cpp:401`)+clear(`:449`) 둘 다 있음 = 오버사이트. 주석이 이미 계약을 약속(`FPSRGameState.h:138/247`).
+
+### ③ 블로커 / 주의
+- **S3(외곽선×VAT 정합성) 미판정 = 파일럿 게이트 잔여.** 이제 애니가 도니 판정 가능. 판정 = PIE 육안("걷는 몸을 외곽선이 따라가나").
+- **S4 실측 미완.** 실전 상한은 **192**(`GlobalAliveCap 200 − SeedReserve 8`), 200~300 불가. `FPSR.EnemyTarget`은 런 중 **0.25초마다 디렉터가 덮어씀**(무용) → 밀도 실측은 **`FPSR.SpawnEnemies N`**(캡 우회·플레이어 6m 링). 264m 확산으로 ③④가 헐겁게 통과할 위험(메모리 `enemy-swarm-measurement-gotchas`).
+- **톤다운 값 미정**(사용자 판단 대기). 노브 22개를 `PP_Synthwave_Grade` 한 곳에 집약해둠(값은 현행 유지 = 화면 무변화). 주범 = 자동노출 `min 0.03 / max 8.0` + `bias 1.0` 자기증폭 + `bloom_intensity 1.6`(기본 0.675의 2.4배). 권고 = min/max 1.0 고정 · bias 0 · bloom 0.7~0.8 · (필요시) `film_shoulder 0.26→0.35`.
+- ⚠️ **`FPSRCharacter.h`의 S2a 잔재(BlueprintReadOnly 3줄)가 이 세션 중 사라짐**(워킹트리·HEAD 양쪽 0). `BP_FPSRPlayer.uasset`은 여전히 미커밋 수정 상태 → **그 BP가 저 노출에 의존했다면 컴파일 실패 가능**. 확인 필요(LFS 바이너리라 코드로 검증 불가).
+- 파일럿 규칙("아트 통과 전 콘텐츠 커밋 0")은 이미 깨진 상태 — `b25db2ab`가 `L_GameFloor.umap` + DevBlockout 머티리얼을 main에 커밋했고 throwaway 격리 경로(`_SyntyPilot/`)도 아님.
+
+### ④ 미커밋 콘텐츠 (= 사용자 작업으로 남김, 커밋하지 않음)
+```
+ M Config/DefaultEditor.ini                                (S0 블록아웃 툴 설정)
+ M Content/Assets/Characters/BroBot/VAT/M_BroBot_VAT.uasset  ★ VAT A포즈 버그 수정 (아래)
+ M Content/Character/Enemy/BP_EnemyMeleeBase.uasset
+ M Content/Character/Player/BP_FPSRPlayer.uasset
+ M Content/Game/Data/DA_EnemyRoster.uasset
+ M Content/Game/Data/DA_RunSchedule.uasset
+ M Content/Maps/L_GameFloor.umap                            ★ 엠블럼 충돌 제거 + 톤다운 노브 집약
+ M Content/Weapons/DataTable/DA_Weapon_Rifle.uasset
+```
+
+### ⑤ 이 세션 콘텐츠 수정 2건 (내가 MCP로 한 것 — 커밋은 사용자 판단)
+- **`M_BroBot_VAT`: VAT A포즈 고착 근본 수정.** `bUseMaterialAttributes=True`인데 `MF_BoneAnimation.Result`가 루트 **MaterialAttributes 핀이 아닌 BaseColor 핀**에 연결돼 있었음 → `Material.cpp:7134`가 MA 핀만 컴파일하므로 **WPO가 상수 0** → 정점셰이더 死코드 제거 → 스태틱 메시가 베이크된 A포즈 그대로. **수정 = Result→MP_MATERIAL_ATTRIBUTES**. 검산: MI **VS instr 148→572, 정점텍스처 샘플 6→20**(Epic 정상본 894/23). 사용자 PIE 확인 = 걷기 시작 + BodyColor 빨강 정상 출력. 되돌리기 `git checkout HEAD -- Content/Assets/Characters/BroBot/VAT/M_BroBot_VAT.uasset`. (BaseColor 핀은 연결 잔존 — Python에 해제 API 없음, MA 모드라 컴파일러가 안 읽어 무해)
+- **`L_GameFloor`**: ① `Plaza_Emblem` 충돌 제거 → 플로우필드 바닥앵커가 47(엠블럼)→**40(dais)**로 교정, 지면(0)·슬래브(10)·dais(40)·커버(40) **전부 직접 지면시드 통과**, 지면↔dais가 "경사로 오인" 우연통과가 아닌 **진짜 40cm 단차**로 열림. ② `PP_Synthwave_Grade` 톤다운 노브 22개 오버라이드 ON(값 보존).
 
 **완료·머지·푸시 (3개 아크 종결)**
 - **무기 조립툴 개편 + 파츠 스택/스탯 진화 + 저격 스코프 위젯 아크** — `--no-ff` main 머지 `fd5ed792`(→ origin/main과 통합 머지), Codex 머지리뷰 통과+교정 `6999ff3c`, `phase/pwas-b-procedural-weapon-motion` 삭제. 폴리모픽 PartRules→**파츠별 스택 진화(순수 struct)** + **스탯 임계 트리거**, 조립툴(고정소켓 안정id·진화패널·단계 뷰포트배치·트리거/스탯/스코프 편집·순서이동), **스코프 오버레이=사이트별 위젯 BP**(리티클 텍스처 폐지). 사용자 정상작동 확인. **남은=사용자 콘텐츠**: 라이플 저격 진화 재저작(옛 PartRules 서브오브젝트 링커경고 해소) + 사이트별 스코프 WBP 저작 + PIE. 후속(pre-existing)=데디서버 파츠 게이팅(Codex F3, spawn_task). 상세=메모리 `weapon-modular-evolution-scope-plan`.
 - **P8 U 연속필드 다중맵 아크 (P-0~P-H)** — `--no-ff` main 머지 `34b5eea`, L_U_Whitebox 콘텐츠 `1906d56`, `phase/p8-multimap-tier0` 삭제. Tier-0 NetCull = 대칭 거리컬 교전버블 한계까지(Option A, `NetCull` 균일 사이징); 진짜 공간 relevancy(seam pop-in 제거) = RepGraph 별도 후속.
 - **반동 CrystalRecoil 어댑터 아크 (P0~P4)** — `--no-ff` main 머지 `6f1a981`, 死코드 정리 `2c91ab7`·머지게이트 교정 `afa73dc`, `phase/recoil-crystalrecoil` 삭제. 확산 = 단일소스 heat 모델(`GetHeatSpread`), 무기별 `RP_*` 반동 패턴 저작.
 
-**⏭ 다음 (착수 대기) = Synty 셀/툰 아트 파일럿 게이트**
-- 실행 프롬프트 `Docs/SyntyArtPilot_ResumePrompt.md`(`db5ee41`) · 아트스택 재확정 `c2dc91d` · 계획 of record `Docs/AssetReplacement_Synty_ResumePrompt.md`.
-- 임포트(Cyber City·Military·Blu·PWAS) → 무기 모듈 조립(U15)·FP팔+PWAS·셀툰 렌더러 육안평가(무료 우선)·스웜 200-300 성능게이트 → 렌더러 확정 후 PM이 SSOT 반영. **아직 미실행**(어댑션 콘텐츠 커밋 0).
+**⏭ Synty 셀/툰 아트 파일럿 = 실행 중 (스코프 축소판)**
+- **읽을 것**: `Docs/SyntyArtPilot_Scoped_ResumePrompt.md`(전체 상태·결정) + `Docs/SyntyArtPilot_S1_CityBuildGuide.md`(§7 MapId 함정). ⚠️ 구 `Docs/SyntyArtPilot_ResumePrompt.md`·`Docs/AssetReplacement_Synty_ResumePrompt.md`는 **폐기본**(SRS를 "최후 폴백 유료옵션"이라 하는 등 SSOT와 모순) — Scoped 판이 최신.
+- 순서 `S2a✅ → S0✅ → S1✅ → S3(진행) → S4(최종 게이트)`.
+- **S1 완료**: `L_GameFloor` 264m 2×2 섹터(볼륨 1개 (0,0,0)·264m·**132×132=17,424셀**, 상한 40,000 대비 여유). ① 단차 walkability **통과**(사용자 확인).
+- **S3 = SRS 이미 배치됨**(BP_StylizedRenderingSystem, `unbound=True`, 블렌더블 2: 셀 `MI_SRS_BASE_CelShader` + 아웃라인 `M_SRS_Outline01`). ⚠️ **셀은 stencil 1~255를 요구하는데 맵에 stencil≥1인 프리미티브가 0개** → 셀이 사실상 아무 데도 안 걸림. 아웃라인은 stencil 0~0이라 **적만** 받음(적 Mesh `renderCustomDepth=True, stencil=0`). 셀↔아웃라인이 stencil 0에서 **상호배타** — 둘 다 받으려면 적 stencil을 1로 올리고 아웃라인 마스크도 1~255로. **잔여 판정 = 외곽선이 VAT 애니를 따라가나**(이제 애니 정상화돼 판정 가능).
+- **S4 = 최종 게이트**. 계측 인프라 이번 세션 완성(위 §① 참조). 실측 미완.
 
 **📌 살아있는 백로그 / 이월 (회귀 아님)**
 - **RepGraph spatial-grid relevancy** — 별도 후속 페이즈(per-acquire NetCull 반경으로 적 재-bucket). plan `Docs/Review/20260707-plan-continuous-field-arch.md` §2-4/§4 D3 · Performance §5. 클라 seam pop-in = 문서화된 Tier-0 한계(D3 수용).
@@ -25,7 +62,8 @@
 - **애니메이션 콘텐츠 저작 (진행 중)** — U15(1P무기)/U19(3P팀원)/U20(적VAT) 코드 인프라 ✅, 콘텐츠 미저작. 가이드 `Docs/AnimationPass_ContentGuide.md`. ⚠️ Synty Blu+PWAS 피벗이 손저작 AnimBP를 대체할 수 있음 → 파일럿 결과 후 확정.
 - **반동 잔여 (PvE 코스메틱)**: ADS 확산배수 `bIsAiming`(ServerSetAiming RPC 지연) 플릭샷 미세 불일치 · 예측거부 샷 클라 heat 드리프트(cooldown 흡수) · 레거시 블룸 orphaned 저장값(로드 시 무시, 무해) · Shotgun/Bazooka 고정 확산 · ChargeLaser base-only + 커스텀 차징 램프(의도).
 - **원거리 적 / 피드백 후속**: 원격 클라 총알 시각예측 미구현(A3) · 원거리 경고 생산자(`ClientNotifyRangedTarget`) 배선 미완(B1, 현재 디버그 `FPSR.TestRangedWarn`만).
-- **성능 정량**: §5 적500 정량 측정 보류 → 하드캡 잠정값 유지(Performance §5).
+- **성능 정량**: §5 적500 정량 측정 보류 → 하드캡 잠정값 유지(Performance §5). **계측 수단은 2026-07-15 확보**(`UFPSREnemyMetricsSubsystem` + `csvprofile start/stop` → CSV 열에서 P50/P90). 종전 "측정 코드 전무"는 해소.
+- **플로우필드 콘텐츠 계약 (2026-07-15 실측 확립, 맵 저작 시 필독)**: 장애물 판정 박스가 **셀바닥+60cm부터** 시작(`ObstacleProbeZ=120`/`HalfHeight=60`) → **60cm 미만 물체는 플로우필드가 못 봄**. 통행 게이트는 `ClimbableStepHeight=45`. 따라서 **≤45=밟고 넘음 / ≥60=돌아감 / 45~60=함정**(못 오르는데 장애물로도 안 잡혀 적이 낌). **커버로 스웜을 쪼개려면 ≥60cm 필수** — 현 `Cover_0~3`은 40cm(발목)이라 엄폐 기능 0. 메모리 `flowfield-cover-height-45-60-band`.
 
 ---
 
