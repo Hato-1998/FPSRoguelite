@@ -22,8 +22,23 @@
 1. ~~**보스 HUD 바 clear 경로 누락**~~ → ✅ **완료·main 머지**(2026-07-15, 아래 §④). 판정 = **재현 불가(잠재 계약 갭)** — "버그 수정" 아님. 재개 문서 `Docs/BossHUDClear_ResumePrompt.md`는 **폐기**(전제가 틀렸음, §④ 참조).
 2. **U20 적 애니 계약 교정** — ⚠️ **문서 충돌**: 여기선 "다음 작업"이었으나 `TaskPrompts_Master.md §B` DAG는 **U15/U19/U20 = HOLD("U21 아트정체성 결정 전 착수 금지")**. 근거도 명시적 — **적 VAT 베이크는 U22 적 교체 이후라야 재베이크를 안 함**. 지금 `M_BroBot_VAT` 기준으로 계약을 맞추면 Synty 적 교체 시 버려짐. **→ DAG(HOLD) 채택, U21 게이트 후로 이월.** (사실관계: `FPSREnemyAnimProfile.cpp:52`가 `AnimationIndex`를 쓰는데 머티리얼엔 없음[클립선택=`StartFrame`/`EndFrame`], `Phase`→`TimeOffset`, `PlayRate`는 OK. 적 BP 3종 `AnimProfile`=null. 에셋 제약 = BroBot에 Idle/Walk/Run만, Attack/Death 애니가 프로젝트 전체에 없음 → 3상태 상한.)
 
-### ④ 보스 HUD clear (2026-07-15 · `phase/boss-hud-clear` → main `--no-ff`)
-**판정 = 재현 불가(잠재 계약 갭). "버그 수정" 아님.** 재개 문서 `Docs/BossHUDClear_ResumePrompt.md`의 **핵심 전제가 틀렸으므로 그 문서는 폐기**한다.
+### ④ 보스 HUD 바 (2026-07-15 · 두 건 = 별개 문제, 둘 다 main 머지)
+
+> ⚠️ **먼저 읽을 것 — 이 절의 초판은 틀렸다.** 초판은 "재현 불가"로 단정했으나, **사용자 스크린샷으로 실제 버그가 발각**됐다(런 시작하자마자 BOSS 바가 꽉 찬 채로 표시). 원인은 **④-2**이고, 조사가 그걸 놓친 이유는 **재개 문서의 프레임("보스가 죽은 뒤 stale")을 그대로 물려받아 "보스가 생기기 전"을 아예 묻지 않았기 때문**이다. 게다가 그걸 잡을 유일한 차원(`hud-consumer` = 바가 null일 때 뭘 하나)이 **사용량 한도로 죽은 상태에서 결론을 냈다**(교훈: 조사가 죽으면 "모른다"고 할 것).
+> **두 건은 별개다**: ④-1 = 잠재(계약), ④-2 = **실제 유저 버그**(고침). ④-1의 수정은 ④-2를 고치지 못한다.
+
+#### ④-2. 🐛 실제 버그 — 런 시작에 BOSS 바가 뜸 (콘텐츠, `WBP_BossHUDBar`)
+**증상**: 런 시작(Lv1·보스 없음)부터 상단에 BOSS 바가 `Percent=1.0`로 표시. **사용자 PIE 확인으로 수정 검증 완료.**
+- **원인**: `WBP_BossHUDBar` EventGraph의 **Construct 초기 동기화가 `IsValid` 게이트 뒤에 갇혀 있었음**.
+  `Bind → [IsValid(GetActiveBoss())] ─Is Valid→ OnBossChangedEvent(보스)` / **`Is Not Valid` 핀은 미연결(빈 핀)**.
+  → 런 시작엔 보스가 null이라 `Is Not Valid`로 빠지고 **이벤트가 아예 호출되지 않음** → 숨김 분기가 실행될 기회가 없음 → 위젯이 **디자이너 기본값(`SelfHitTestInvisible` + `Percent=1.0`)** 그대로 화면에 남음.
+- **`OnBossChangedEvent` 자체는 원래부터 정상**: `IsValid(Boss)` → 유효=`SelfHitTestInvisible`(표시) / 무효=언바인드 후 `Collapsed`(숨김). **로직이 아니라 호출이 안 되던 것.**
+- **수정**: Construct 쪽 `IsValid` 매크로 노드 삭제 + `Bind.then → OnBossChangedEvent.execute` 직결(= **무조건 초기 동기화**, 이벤트가 알아서 분기). 이벤트 내부의 `IsValid`는 **그대로 둠**(그게 show/hide 본체).
+- **교훈(일반화)**: 이벤트 구동 UMG 위젯은 **① 델리게이트 구독(변화) + ② Construct에서 현재 상태 무조건 반영(초기값)** 둘 다 필요하다. ②를 "값이 있을 때만"으로 게이트하면 **빈 상태가 디자이너 기본값으로 새어나온다.** 관련 메모리 `umg-event-widget-initial-sync`.
+- **검증**: 배선 되읽기(무조건 호출·데이터핀 유지·IsValid 1개만 잔존) · 컴파일 OK · 디스크 변경 = `WBP_BossHUDBar.uasset` 단일(컨테이너 `WBP_GameHUD` 무변경) · **사용자 PIE 확인 완료**.
+
+#### ④-1. 잠재 계약 갭 — `SetActiveBoss(nullptr)` 호출처 0건 (코드, `phase/boss-hud-clear` → main `--no-ff`)
+**판정 = 현재 재현 불가(잠재). "버그 수정" 아님 — ④-2와 무관하며 ④-2를 고치지 못한다.** 재개 문서 `Docs/BossHUDClear_ResumePrompt.md`의 **핵심 전제가 틀렸으므로 그 문서는 폐기**한다.
 
 - ❌ **문서의 틀린 전제**: "보스가 파괴되면 GC가 `TObjectPtr`를 조용히 null로 만드는데 `OnActiveBossChanged`는 발화 안 함". → **보스는 파괴되지 않는다**(`FPSRBossBase.cpp:155` HandleDeath가 결과 연출용으로 **의도적 존치**: "No XP drop / pooling / Destroy... keeps it visible during the result beat"). 실제 상태는 GC-null이 아니라 **"체력 0인 유효한 보스를 가리키는 멀쩡한 포인터"**.
 - ✅ **관측 불가 근거 3개(각각 독립 성립)**:
