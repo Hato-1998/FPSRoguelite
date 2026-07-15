@@ -1,6 +1,6 @@
 # Synty 셀/툰 아트 파일럿 (스코프 축소판) — 재개 프롬프트
 
-> **갱신 2026-07-14b (S1 검증·스폰 디버그 세션 — MCP 연결됨).** S2a + S0 완료. **S1 레벨 검증 통과**(VibeUE MCP 라이브 재현, 6종 중 5통과 + ⑥ 무해 경고=볼륨 바닥 minZ). **스폰 버그 해결**: L_GameFloor가 WhiteBox(3슬롯 멀티맵) 복제라 볼륨·스폰이 `Map.Center` 태그를 물려받아 단일맵에서 스폰 0였음 → **볼륨+스폰4 `map_id` Default 언태그**로 수정, **적 정상 스폰 확인**(로그 grid `66x66 (bounds volume)`, 디그너릿 경고 소거). 아레나 스코프 = **A안(132m 단일슬롯)**: 사용자가 North/East 잔재 12/16 삭제(마커 4개 PeriN_W/PeriE_* 잔존=무해). 함정 상세 = CityBuildGuide §7 / 메모리 `mapid-tag-single-map-spawn-block`. **다음 = 적이 건물 우회 추격 육안확인(② 마무리) → S3(SRS 셀) → S4(스웜 perf).**
+> **갱신 2026-07-15 (S1 완성 + 264m 섹터 확장 + 신스웨이브 라이팅 + 중앙광장 세션).** S1 완료(레벨검증·스폰픽스·건물 우회추격 확인). **맵을 264m 2×2 단일 섹터로 확장**(Area_1을 ×4 타일링, 플로우필드 단일볼륨 17,424셀) + 폴더 체계화(Area_1~4/Setting/CenterHub) + **신스웨이브 다크나이트 라이팅**(볼류메트릭 포그) + **중앙 원형 광장 허브**(4인 코옵스폰·글로우엠블럼·**걷기단차 +40cm**·홀로전광판 GAME START·공원트리·방사인도·네온). 스폰픽스=`map_id` Default 언태그(단일맵, 함정 = CityBuildGuide §7 / 메모리 `mapid-tag-single-map-spawn-block`). 커밋: 맵→`pilot/s1-cybercity-sector` 브랜치(FPSRoguelite), 문서→origin/main. **다음 = 단차 walkability PIE검증 → S4 스웜 perf 실측(264m, 적 200~300, 가독성 5지표).**
 > 파일럿 = throwaway 콘텐츠는 통과 전 커밋 금지. **단, S0 블록아웃 툴은 아트 채택과 무관한 실 에디터 인프라라 이미 main 커밋·푸시**(§2b).
 
 ---
@@ -13,17 +13,18 @@ Synty 아트 파일럿(스코프 축소) 이어서 진행. 먼저 읽어라:
 - Docs/SyntyArtPilot_S1_CityBuildGuide.md (S1 도시 제작 가이드 + 검증 뉘앙스 6건)
 - Game.md + PROGRESS.md · Docs/SSOT/Performance.md §5
 
-[상태] S2a + S0(main 4692f9b2) 완료. **S1 레벨 검증 통과 + 스폰 정상화 완료**(VibeUE MCP 라이브). L_GameFloor(WhiteBox=3슬롯 멀티맵 복제) = 132m 단일슬롯 아레나(A안). 6종 가드레일 5통과+⑥무해. **스폰 버그**: 볼륨·스폰이 `Map.Center` 태그 물려받아 단일맵에서 스폰 0 → **map_id Default 언태그로 수정, 적 정상 스폰 확인**(로그 grid `66x66 (bounds volume)`, 디그너릿 경고 소거). 실행 클론 = E:\Git_Project\FPSRoguelite. 에디터/PIE·맵제작=사용자, 코드/해석=Claude.
-✅ **이 세션 Unreal/VibeUE MCP 연결됨** → 라이브 월드 인스펙션·로그·프로퍼티 편집 가능(트레이스/HitResult=`to_tuple`, 태그=`tag_name`, 편집=`set_editor_property`+`modify()`). 메모리 `vibeue-python-trace-hitresult`.
+[상태] S1 완료 + **맵 264m 2×2 섹터 확장 완료**(VibeUE MCP 라이브). L_GameFloor = Area_1~4 타일링(각 132m·총 264m, 플로우필드 단일볼륨 17,424셀) + Setting(글로벌)/CenterHub(중앙광장) 폴더. 라이팅=**신스웨이브 다크나이트 + 볼류메트릭 포그**. 중앙=4인 코옵스폰·플라자 글로우엠블럼·**단차 +40cm(≤45 walkable)**·홀로전광판(GAME START 텍스트)·공원트리·방사인도·네온. 스폰픽스=`map_id` Default 언태그(단일맵). **git**: 맵=`FPSRoguelite` 로컬 `main`(`b25db2ab`, 원격 백업 `origin/pilot/s1-cybercity-sector`) / 문서=`origin/main`(`a5f91207`). ⚠️로컬 main엔 맵·origin/main엔 문서라 **분기 상태** — 맵을 origin/main에 올리려면 문서커밋과 병합(force 금지). S2a 잔재 6개(FPSRCharacter.h·DA_* 등)는 워킹트리 미커밋으로 남김.
+맵 `L_GameFloor`는 `E:\Git_Project\FPSRoguelite`에 있음(참고). 재개 프롬프트 항상 채팅 표시.
 
-[다음] ① **적이 건물 우회 추격 육안확인**(② 마무리 = 플로우필드 장애물 인식; 스폰되니 금방 보임). no-floor 41%라 도로/플라자 여유 확인. ② 통과 후 **S3(SRS 셀 렌더 실측) → S4(스웜 perf)**. ⚠️**다음 CyberCity 맵은 WhiteBox 아니라 단일맵 베이스에서 복제**(MapId 함정 원천차단, CityBuildGuide §7 / 메모리 `mapid-tag-single-map-spawn-block`). 런북 = §5-S1.
+[다음] ① **단차 walkability PIE 검증**(적이 +40cm 단·커버 위로 올라오는지 = FlowField 스텝 통과 확인; 안 걸리면 램프 추가/30cm로 낮춤). ② **S4 스웜 perf 실측**(264m 섹터, `FPSR.EnemyTarget 200~300`, `stat unit`/`stat SceneRendering` + 가독성 5지표: 화면내 P50≤40·P90≤70, 15m위협 P90≤25, 20분 무크래시). ③ 폴리시: 전광판 실기능(UMG-GameState 바인딩), Blu 캐릭터 4벌 정리, `pilot` 브랜치 머지/PR 판단. **파일럿 최종 게이트 = S4.** (다음 CyberCity 맵은 WhiteBox 아니라 단일맵 베이스에서 복제 — MapId 함정 차단, CityBuildGuide §7)
 ```
 
 ---
 
 ## 0. 파일럿 개요 / 어디서
 - **파일럿:** 스코프 축소 Synty 아트 스택 검증 = 단일 CyberCity 화이트박스 + 작업된 라이플 + 스웜 200 + **SRS 셀 렌더 실측**. 대량 채택 전 성능·룩 게이트. **채택분(아트 콘텐츠)만 LFS 커밋(사용자 확인), 아트 통과 전 콘텐츠 커밋 0.**
-- **실행 클론 = `E:\Git_Project\FPSRoguelite`** (모든 에셋·코드·빌드·PIE). 이 세션 cwd는 `FPSRoguelite2`(doc)였고 절대경로로 FPSRoguelite 조작.
+- **맵 `L_GameFloor`의 위치** = `E:\Git_Project\FPSRoguelite`(참고 사실). 코드(`Source/`)는 두 클론 동일. **재개/핸드오프 프롬프트는 항상 채팅에 표시.**
+- **라이브 에디터 작업엔 VibeUE MCP 연결이 필요** = UE 에디터를 VibeUE 플러그인과 함께 띄운 상태여야 MCP 툴이 세션에 로드됨. 에디터가 닫혀 있으면 MCP 미연결 → 라이브 맵/PIE 작업 불가(코드 정적분석·문서는 무관하게 진행 가능).
 - **분담:** 에디터·PIE·육안판정·**맵 제작(S1)**=사용자 / C++·런북·수치해석·PM보고=Claude.
 
 ## 1. 전체 순서 (plan of record v5)
