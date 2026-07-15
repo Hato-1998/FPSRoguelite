@@ -52,8 +52,8 @@
 
 | ID | 유닛 | 구분 | 선행/게이트 | 상태 | 실행 프롬프트 |
 |---|---|---|---|---|---|
-| **U21** | Synty 아트 파일럿 게이트 (셀/툰 렌더러·무기모듈·Blu팔+PWAS·스웜 200-300 perf, throwaway). **산출에 아트 정체성 결정 포함** = Infima 유지 vs Synty Military 전환 vs Blu+PWAS 손저작 AnimBP 대체 | 에셋/PIE | — (**다음 착수**) | 착수 대기 | `Docs/SyntyArtPilot_ResumePrompt.md`(자족) |
-| **U22** | Synty Path A 에셋 전체교체 (환경 3맵·무기 Synty Military·캐릭터 Blu·적 저코스트 VAT·UI/VFX) | 에셋 | U21 통과 | 대기 | `Docs/AssetReplacement_Synty_ResumePrompt.md`(자족) |
+| **U21** | Synty 아트 파일럿 게이트 (셀/툰 렌더러·무기모듈·Blu팔+PWAS·스웜 200-300 perf, throwaway). **산출에 아트 정체성 결정 포함** = Infima 유지 vs Synty Military 전환 vs Blu+PWAS 손저작 AnimBP 대체 | 에셋/PIE | — | **실행 중**(S2a✅ S0✅ S1✅ → S3/S4 = 사용자 직접 판정) | `Docs/SyntyArtPilot_Scoped_ResumePrompt.md` + `Docs/SyntyArtPilot_S1_CityBuildGuide.md` |
+| **U22** | Synty Path A 에셋 전체교체 (환경 3맵·무기 Synty Military·캐릭터 Blu·적 저코스트 VAT·UI/VFX) | 에셋 | U21 통과 | 대기 | ⚠️ 프롬프트 **재작성 필요**(구 `AssetReplacement_Synty_ResumePrompt.md` = 폐기본) |
 | **U15/U19/U20** | 통합 애니 콘텐츠 저작 (A 1P무기·B 3P팀원·C 적VAT+보스스켈). 코드 인프라 ✅, 콘텐츠 미저작 | 콘텐츠 | **⚠️HOLD**: U21 아트정체성 결정 (U20 VAT 베이크 = U22 적교체 후) | HOLD | `Docs/AnimationPass_ContentGuide.md`(자족 A/B/C) |
 | **U12** | UI/필 잔여 (카드 아이콘 콘텐츠 · 무기별 팔 AnimBP=U15 흡수 · 서버권위 bloom=장기백로그) | 콘텐츠 | — | 잔여 hold | §C U12(잔여) |
 | **U23** | 메타 프로그레션 콘텐츠 (P0-③): U10 인프라 위 실 메타필드/재화/언락트리 + §D6 세이브 테스트갭 2건 | C++/콘텐츠 | U10 ✅ (스키마 P0-③ 확정 선행) | 대기 | §C U23(신규) |
@@ -121,7 +121,8 @@
 
 ### U21 — Synty 아트 파일럿 게이트
 
-> **실행 프롬프트 원본(자족) = [`Docs/SyntyArtPilot_ResumePrompt.md`](SyntyArtPilot_ResumePrompt.md)** — 그 문서를 새 세션에 붙여넣는다(여기 중복 안 함, SSOT 분리).
+> **실행 프롬프트 원본(자족) = [`Docs/SyntyArtPilot_Scoped_ResumePrompt.md`](SyntyArtPilot_Scoped_ResumePrompt.md)**(+ 맵 작업 시 [`Docs/SyntyArtPilot_S1_CityBuildGuide.md`](SyntyArtPilot_S1_CityBuildGuide.md)) — 그 문서를 새 세션에 붙여넣는다(여기 중복 안 함, SSOT 분리).
+> ⚠️ **구 `Docs/SyntyArtPilot_ResumePrompt.md` = 폐기본**(SRS를 "최후 폴백 유료옵션"이라 하는 등 SSOT와 모순) — 읽지 말 것. **Scoped 판이 최신**(스코프 축소 = 단일 CyberCity 화이트박스 + 라이플 + 스웜 200 + SRS 셀 실측).
 
 - **목적**: 대량 채택·콘텐츠 저작 **전에** 셀/툰 아트 스택이 제1원리(적 200-300 싸게)를 지키는지 + 룩을 실측/육안 게이트. throwaway 파일럿, 통과분만 LFS 커밋.
 - **범위**: Step A 무기 모듈 조립(U15 검증)·Step B FP팔+PWAS·Step C 셀/툰 렌더러 육안(무료 우선)·Step D 스웜 200-300 perf(아웃라인 고정비용 실증).
@@ -131,7 +132,7 @@
 
 ### U22 — Synty Path A 에셋 전체교체
 
-> **실행 프롬프트/계획 of record(자족) = [`Docs/AssetReplacement_Synty_ResumePrompt.md`](AssetReplacement_Synty_ResumePrompt.md)** — 2026-07-10 재확정 헤더 블록 우선.
+> ⚠️ **실행 프롬프트 = 재작성 필요.** 구 `Docs/AssetReplacement_Synty_ResumePrompt.md`는 **폐기본**(SSOT와 모순, 읽지 말 것). U22는 **U21 파일럿의 아트 정체성 결정이 나온 뒤** 그 결정을 반영해 새로 작성한다(결정 없이 착수 = 중복 저작).
 
 - **목적**: 전체 셀/툰 통일 룩으로 아트 스택 개편(환경 3맵·무기 Synty Military 모듈+사이버 리스킨·캐릭터 Blu·적 저코스트 VAT·UI Synty Soldier HUD·VFX).
 - **선행**: U21 파일럿 통과(렌더러·아트정체성 확정).

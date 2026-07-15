@@ -104,6 +104,13 @@ public:
 	UFUNCTION(BlueprintPure, Category = "FPSR|Enemy")
 	UFPSREnemyHealthComponent* GetHealthComponent() const { return HealthComponent; }
 
+	/** The enemy's visual mesh — exposed read-only so the S4 readability metrics (UFPSREnemyMetricsSubsystem) can read
+	 *  this primitive's GetLastRenderTimeOnScreen(). The actor-level AActor::WasRecentlyRendered is NOT usable there:
+	 *  it reads AActor::LastRenderTime, which the SHADOW passes also stamp (ShadowSetup.cpp calls
+	 *  UpdateComponentLastRenderTime with bUpdateLastRenderTimeOnScreen=false), so an enemy BEHIND the player that
+	 *  merely casts a shadow into view would count as "on screen" (measured: it over-reported on 48% of frames). */
+	const UStaticMeshComponent* GetMesh() const { return Mesh; }
+
 	/** Server: true if the attack cooldown has elapsed at time Now. */
 	bool CanAttack(float Now) const { return (Now - LastAttackTime) >= AttackInterval; }
 
@@ -170,6 +177,12 @@ public:
 
 protected:
 	virtual void BeginPlay() override;
+
+	/** S4: unregister from the enemy readability-metrics registry (UFPSREnemyMetricsSubsystem). Pooled enemies are
+	 *  hidden/DORM_DormantAll, never destroyed (see Deactivate) — EndPlay only fires once per actor's real lifetime
+	 *  (level teardown / PIE end), mirroring BeginPlay's once-per-lifetime Register. CSV-gated (see .cpp); a no-op
+	 *  in Shipping. */
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 	/** Server: ground-follow + gravity each movement update — a single down-trace snaps the enemy to the floor
 	 *  (slopes/steps within GroundSnapTolerance) or lets it fall under gravity off a ledge / after a high spawn,
