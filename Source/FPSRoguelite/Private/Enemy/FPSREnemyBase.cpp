@@ -4,6 +4,7 @@
 #include "Enemy/FPSREnemyHealthComponent.h"
 #include "Enemy/FPSREnemySpawnSubsystem.h"
 #include "Enemy/FPSREnemyAnimProfile.h"
+#include "Enemy/FPSREnemyMetricsSubsystem.h" // S4 readability metrics registry (CSV-gated, see below)
 #include "Hero/FPSRCharacter.h"
 #include "Pickup/FPSRPickupSubsystem.h"
 #include "Core/FPSRLogChannels.h"
@@ -14,6 +15,7 @@
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
+#include "ProfilingDebugging/CsvProfiler.h" // CSV_PROFILER_STATS gate for the metrics registry calls below
 #include "UObject/ConstructorHelpers.h"
 
 AFPSREnemyBase::AFPSREnemyBase()
@@ -86,6 +88,36 @@ void AFPSREnemyBase::BeginPlay()
 	// Bind the world-space health bar / floating-damage widget to the health component once (server + clients).
 	// Pooling-safe: the actor + widget persist across dormancy, so this single bind survives every reuse.
 	InitHealthBarWidget();
+
+	// S4 readability metrics: register with the per-client registry (all net modes — the metrics subsystem reads
+	// from each LOCAL client's own POV, not just the server). Once per actor lifetime, like the widget bind above
+	// (pooled reuse never re-enters BeginPlay — see Deactivate). Compiled out entirely in Shipping (CSV_PROFILER_STATS).
+#if CSV_PROFILER_STATS
+	if (UWorld* World = GetWorld())
+	{
+		if (UFPSREnemyMetricsSubsystem* Metrics = World->GetSubsystem<UFPSREnemyMetricsSubsystem>())
+		{
+			Metrics->RegisterEnemy(this);
+		}
+	}
+#endif
+}
+
+void AFPSREnemyBase::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	// S4 readability metrics: symmetric unregister (see the BeginPlay registration above for why this is once-per-
+	// actor-lifetime, not once-per-Deactivate).
+#if CSV_PROFILER_STATS
+	if (UWorld* World = GetWorld())
+	{
+		if (UFPSREnemyMetricsSubsystem* Metrics = World->GetSubsystem<UFPSREnemyMetricsSubsystem>())
+		{
+			Metrics->UnregisterEnemy(this);
+		}
+	}
+#endif
+
+	Super::EndPlay(EndPlayReason);
 }
 
 void AFPSREnemyBase::InitHealthBarWidget()

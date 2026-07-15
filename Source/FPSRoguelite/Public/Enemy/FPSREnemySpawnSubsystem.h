@@ -60,6 +60,12 @@ public:
 	/** Get the current number of alive enemies. */
 	int32 GetAliveCount() const { return ActiveEnemies.Num(); }
 
+	/** S4 readability metrics: read-only accessor for TierS0RadiusSq (15m S0 significance radius, squared cm) so
+	 *  UFPSREnemyMetricsSubsystem's "Near15m" gate reuses the SAME 15m definition as the movement LOD tier pass
+	 *  (Game.MD §5/§5-1) instead of duplicating the magic constant. Mirrors UFPSRFlowFieldComputer::GetMaxTotalCells's
+	 *  accessor pattern. Does not expose write access — the tier pass (TickEnemyMovement) stays the sole owner. */
+	static constexpr float GetTierS0RadiusSq() { return TierS0RadiusSq; }
+
 	/** Set the actor class to spawn for swarm enemies (designer-configured BP child of AFPSREnemyBase).
 	 *  Falls back to AFPSREnemyBase if unset. Set this from trusted server config (e.g. GameMode). Used as the
 	 *  fallback when no EnemyRoster is set (or the roster yields nothing). */

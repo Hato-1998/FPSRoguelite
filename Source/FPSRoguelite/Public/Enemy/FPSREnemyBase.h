@@ -171,6 +171,12 @@ public:
 protected:
 	virtual void BeginPlay() override;
 
+	/** S4: unregister from the enemy readability-metrics registry (UFPSREnemyMetricsSubsystem). Pooled enemies are
+	 *  hidden/DORM_DormantAll, never destroyed (see Deactivate) — EndPlay only fires once per actor's real lifetime
+	 *  (level teardown / PIE end), mirroring BeginPlay's once-per-lifetime Register. CSV-gated (see .cpp); a no-op
+	 *  in Shipping. */
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+
 	/** Server: ground-follow + gravity each movement update — a single down-trace snaps the enemy to the floor
 	 *  (slopes/steps within GroundSnapTolerance) or lets it fall under gravity off a ledge / after a high spawn,
 	 *  so enemies never float and rooftop-spawned enemies drop down before chasing. */
