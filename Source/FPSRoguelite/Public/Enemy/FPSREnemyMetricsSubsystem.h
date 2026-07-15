@@ -19,9 +19,10 @@ class AFPSREnemyBase;
  *  would silently report the wrong number for ④ in a 4-player game.
  *
  *  ③a vs ③b: VisibleFrustum ignores occlusion (strict upper bound); VisibleRendered honours it. ③b <= ③a is an
- *  INVARIANT — if a capture ever violates it, ③b's source is wrong, not the map (that check is what caught ③b
- *  originally reading a shadow-polluted actor stamp). Read ③b for the §5 gate: this map controls readability by
- *  breaking sightlines with buildings, which only the occlusion-aware number can see.
+ *  INVARIANT, and BY CONSTRUCTION now — both test the same mesh bounds the renderer culls with, and the renderer
+ *  only additionally box- and occlusion-tests those bounds, so anything it draws necessarily passes ③a too. Read ③b
+ *  for the §5 gate: this map controls readability by breaking sightlines with buildings, which only the
+ *  occlusion-aware number can see.
  *
  *  WHY IsHidden(), NOT BeginPlay/EndPlay COUNTING: the enemy pool never destroys actors — Deactivate() only hides
  *  them and sets DORM_DormantAll (see AFPSREnemyBase::Activate/Deactivate) — so BeginPlay/EndPlay each fire exactly
@@ -66,12 +67,6 @@ private:
 	 *  the normal Deactivate path can't dangle — Tick() drops stale (!IsValid) entries opportunistically. Not a
 	 *  UPROPERTY: TWeakObjectPtr needs no GC tracing, and this registry must NOT keep enemies alive. */
 	TArray<TWeakObjectPtr<AFPSREnemyBase>> Registry;
-
-	/** Approximate enemy collision radius (cm) for the ③a frustum sphere test. A NAMED CONSTANT rather than reaching
-	 *  into AFPSREnemyBase's protected Capsule component — this subsystem is a read-only OBSERVER and must not couple
-	 *  to enemy internals (AFPSREnemyBase is a 200-300 actor hot path; kept change-isolated per the task brief).
-	 *  Mirrors AFPSREnemyBase's ctor InitCapsuleSize(40, 90) radius — update together if that ever changes. */
-	static constexpr float EnemyApproxRadiusCm = 40.0f;
 
 	/** ③b recency window, in FRAMES rather than seconds. The renderer stamps LastRenderTimeOnScreen from the render
 	 *  thread, which trails the game thread, so "on screen now" must tolerate a small lag — but the window has to

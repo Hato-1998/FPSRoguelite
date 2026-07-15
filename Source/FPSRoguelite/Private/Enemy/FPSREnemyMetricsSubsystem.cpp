@@ -123,33 +123,69 @@ void UFPSREnemyMetricsSubsystem::Tick(float DeltaTime)
 			++Near15mCount;
 		}
 
-		if (bHaveFrustum && Frustum.IntersectSphere(EnemyLocation, EnemyApproxRadiusCm))
-		{
-			++VisibleFrustumCount;
-		}
-
-		// ③b VisibleRendered (occlusion-aware): the mesh's ON-SCREEN render stamp, NOT AActor::WasRecentlyRendered.
-		// That actor-level helper reads AActor::LastRenderTime, which the shadow passes also stamp (ShadowSetup.cpp
-		// calls UpdateComponentLastRenderTime with bUpdateLastRenderTimeOnScreen=false) — so an enemy behind the
-		// player casting a shadow into view counted as "on screen", and ③b came out ABOVE ③a (its own frustum upper
-		// bound) on 48% of frames in the first real capture. GetLastRenderTimeOnScreen is stamped only by the
-		// on-screen visibility pass (SceneVisibility.cpp), which is the signal ③ actually means.
-		// CAVEAT: in a single-process PIE with several local views (4-player listen-server test) this stamp is still
-		// per-primitive, so ANY local view seeing the enemy sets it — it over-reports for THIS client. Read ③a
-		// (VisibleFrustum) for a multi-client single-process capture, or run each client as its own process.
+		// ③a and ③b BOTH measure the MESH, so they must resolve it once and share it. ③a used to frustum-test a
+		// hardcoded 40cm sphere at the ACTOR ORIGIN, which is NOT the volume the renderer culls with: SceneVisibility.cpp:599-622
+		// (IsPrimitiveVisible) tests Bounds.BoxSphereBounds — an optional IntersectSphere pre-test on those bounds, then
+		// IntersectBox on them. The melee mesh's AABB spans actor-relative Z ∈ [-98.87, +58.00] (~157cm) vs the sphere's
+		// [-40, +40], so an enemy just above the top frustum plane had its body drawn (stamping ③b) while its origin sphere
+		// sat outside (③a not counting it) — ③b > ③a with no bug anywhere. Testing the renderer's own bounds makes ③a a
+		// STRUCTURAL superset of ③b: the renderer sphere-tests these identical bounds and then additionally box- and
+		// occlusion-tests, so anything it draws necessarily passes this test. The invariant becomes a property of the
+		// design rather than a hope. It also stops tracking BP overrides by hand — the old constant claimed to mirror the
+		// C++ ctor's InitCapsuleSize(40, 90), but BP_EnemyMeleeBase overrides the capsule to 30/80 and the mesh transform
+		// too, so a content-only edit could silently break the invariant with no code diff.
 		if (const UPrimitiveComponent* EnemyMesh = Enemy->GetMesh())
 		{
-			if (World->TimeSince(EnemyMesh->GetLastRenderTimeOnScreen()) <= RenderRecencyTolerance)
+			// No frustum means there is no ③a this frame. Counting ③b anyway would emit ③a=0 alongside ③b=N — a fabricated
+			// invariant violation indistinguishable in the CSV from a real one, which is exactly the signal ③ exists to give.
+			// Skip both; the emit below drops the pair for this frame rather than reporting a false zero.
+			if (bHaveFrustum)
 			{
-				++VisibleRenderedCount;
+				const FBoxSphereBounds MeshBounds = EnemyMesh->Bounds;
+				if (Frustum.IntersectSphere(MeshBounds.Origin, MeshBounds.SphereRadius))
+				{
+					++VisibleFrustumCount;
+				}
+
+				// ③b VisibleRendered (occlusion-aware): the mesh's ON-SCREEN render stamp, NOT AActor::WasRecentlyRendered.
+				// That actor-level helper reads AActor::LastRenderTime, which the shadow passes also stamp (ShadowSetup.cpp
+				// calls UpdateComponentLastRenderTime with bUpdateLastRenderTimeOnScreen=false) — so an enemy behind the
+				// player casting a shadow into view counted as "on screen", and ③b came out ABOVE ③a (its own frustum upper
+				// bound) on 48% of frames in the first real capture. GetLastRenderTimeOnScreen is NOT stamped only by the
+				// on-screen visibility pass, though: UpdateComponentLastRenderTime has exactly FOUR engine call sites. Two
+				// write the on-screen stamp — SceneVisibility.cpp:2108 (the legitimate on-screen pass) and RayTracing.cpp:1146,
+				// the latter gated ONLY on DistanceToView < LastRenderTimeUpdateDistance (cvar default 5000.0f = 50m,
+				// RayTracing.cpp:38-41), with NO frustum and NO occlusion test — so if ray tracing is ever enabled, ③b
+				// silently degrades into "enemies within 50m", the same class of bug as the shadow pollution above, from a
+				// second source. Currently inert: r.RayTracing defaults 0 and is ECVF_ReadOnly (DeferredShadingRenderer.cpp:
+				// 212-218), and this project's Config/DefaultEngine.ini [/Script/Engine.RendererSettings] sets only
+				// r.AllowStaticLighting=False and r.CustomDepth=3 — but flag it as a landmine for the cel/toon art pivot
+				// (enabling Lumen HW RT or RT shadows/reflections would trip it). The other two call sites (ShadowSetup.cpp:
+				// 2060, :2289) pass false and stamp only the actor, which is why AActor::LastRenderTime is unsafe above.
+				// SEPARATELY: this project calls the COMPONENT getter, and UPrimitiveComponent::GetLastRenderTimeOnScreen
+				// (PrimitiveComponent.cpp:5050-5057) short-circuits — `if (IsAlwaysVisible()) { return
+				// GetWorld()->GetTimeSeconds(); }` — so if the mesh ever becomes Nanite (bIsAlwaysVisible is set true only by
+				// Nanite proxies, NaniteSceneProxy.h:275/292), the getter synthesizes "rendered right now" for EVERY enemy and
+				// ③b reads RelevantAlive: maximal over-report, not zero. Currently inert (SM_BroBot_VAT has Nanite disabled)
+				// but the art pivot is actively replacing this mesh.
+				if (World->TimeSince(EnemyMesh->GetLastRenderTimeOnScreen()) <= RenderRecencyTolerance)
+				{
+					++VisibleRenderedCount;
+				}
 			}
 		}
 	}
 
 	CSV_CUSTOM_STAT(FPSREnemy, RelevantAlive, RelevantAliveCount, ECsvCustomStatOp::Set);
 	CSV_CUSTOM_STAT(FPSREnemy, Near15m, Near15mCount, ECsvCustomStatOp::Set);
-	CSV_CUSTOM_STAT(FPSREnemy, VisibleFrustum, VisibleFrustumCount, ECsvCustomStatOp::Set);
-	CSV_CUSTOM_STAT(FPSREnemy, VisibleRendered, VisibleRenderedCount, ECsvCustomStatOp::Set);
+
+	// A frame with no view (bHaveFrustum false) produces no ③ reading at all — honest, rather than emitting a false
+	// zero that would drag the CSV's P50/P90 down for a frame that was never actually measured.
+	if (bHaveFrustum)
+	{
+		CSV_CUSTOM_STAT(FPSREnemy, VisibleFrustum, VisibleFrustumCount, ECsvCustomStatOp::Set);
+		CSV_CUSTOM_STAT(FPSREnemy, VisibleRendered, VisibleRenderedCount, ECsvCustomStatOp::Set);
+	}
 #endif // CSV_PROFILER_STATS
 }
 
