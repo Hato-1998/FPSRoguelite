@@ -85,6 +85,21 @@ void UFPSRRunDirectorSubsystem::StartRun()
 		GS->SetMissionProgress(0.0f);
 	}
 
+	// Re-run safety: drop the previous run's boss — hide the HUD boss bar on every client, then tear the actor down
+	// (HandleDeath deliberately leaves the defeated boss standing for the result beat, so a same-world re-run would
+	// otherwise start with a dead boss still occupying the level). Order matters: clear the replicated ref FIRST —
+	// once the actor is garbage that ref self-nulls, and the setter's ActiveBoss == InBoss early-out would then
+	// swallow the broadcast the HUD needs. No-op on a first run (nothing spawned yet).
+	if (AFPSRGameState* GS = GetGS())
+	{
+		GS->SetActiveBoss(nullptr);
+	}
+	if (ActiveBoss)
+	{
+		ActiveBoss->Destroy();
+		ActiveBoss = nullptr;
+	}
+
 	// Push schedule-driven spawn pacing to the spawn subsystem (the swarm fill rate — how fast it builds toward the
 	// target alive count). Both the per-tick batch (MaxSpawnPerTick) and the tick interval (SpawnIntervalSeconds) are
 	// tunable on DA_RunSchedule without further code changes; together they set the per-second spawn pace.
