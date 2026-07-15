@@ -19,8 +19,22 @@
 - 검증 = 빌드 `Result: Succeeded` · 스모크 `FPSRoguelite.Smoke.ModuleLoads Result={Success}` · Opus 직접 엔진소스 재확인(9에이전트 워크플로 + 적대 검증 3렌즈).
 
 ### ② 다음 코드 작업 (구체)
-1. **보스 HUD 바 clear 경로 누락** ← **다음 착수**(파일럿과 독립·HOLD 아님). **재개 프롬프트 = `Docs/BossHUDClear_ResumePrompt.md`**(자족). 요지: `SetActiveBoss(nullptr)` 호출처 **전 프로젝트 0건**(set만 `FPSRRunDirectorSubsystem.cpp:513`), 대조군 `SetActiveMission`은 set(`:401`)+clear(`:449`) 둘 다. 계약은 `FPSRGameState.h:138/141-142/247`이 3곳에서 약속. **결정적 근거 = `StartRun`(`:67-100`)이 "Re-run safety" 주석까지 달고 same-world 재런을 대비하면서 `bRunActive`/`RunClock`/`bBossStarted`/`MissionProgress`/`ResetSpawnZones`를 리셋하는데 `ActiveBoss`만 안 리셋** → 같은 월드 재런 시 죽은 보스의 바가 남음. ⚠️ 착수 전 확인 = 보스 처치는 항상 런을 끝내므로(`FPSRGameMode.cpp:236` → `EndRun(Victory)`) **트래블로 GameState가 새로 생기면 관측 불가**할 수 있음 → **"실제 재현되는가"를 먼저 판정**할 것(과대평가 금지).
+1. ~~**보스 HUD 바 clear 경로 누락**~~ → ✅ **완료·main 머지**(2026-07-15, 아래 §④). 판정 = **재현 불가(잠재 계약 갭)** — "버그 수정" 아님. 재개 문서 `Docs/BossHUDClear_ResumePrompt.md`는 **폐기**(전제가 틀렸음, §④ 참조).
 2. **U20 적 애니 계약 교정** — ⚠️ **문서 충돌**: 여기선 "다음 작업"이었으나 `TaskPrompts_Master.md §B` DAG는 **U15/U19/U20 = HOLD("U21 아트정체성 결정 전 착수 금지")**. 근거도 명시적 — **적 VAT 베이크는 U22 적 교체 이후라야 재베이크를 안 함**. 지금 `M_BroBot_VAT` 기준으로 계약을 맞추면 Synty 적 교체 시 버려짐. **→ DAG(HOLD) 채택, U21 게이트 후로 이월.** (사실관계: `FPSREnemyAnimProfile.cpp:52`가 `AnimationIndex`를 쓰는데 머티리얼엔 없음[클립선택=`StartFrame`/`EndFrame`], `Phase`→`TimeOffset`, `PlayRate`는 OK. 적 BP 3종 `AnimProfile`=null. 에셋 제약 = BroBot에 Idle/Walk/Run만, Attack/Death 애니가 프로젝트 전체에 없음 → 3상태 상한.)
+
+### ④ 보스 HUD clear (2026-07-15 · `phase/boss-hud-clear` → main `--no-ff`)
+**판정 = 재현 불가(잠재 계약 갭). "버그 수정" 아님.** 재개 문서 `Docs/BossHUDClear_ResumePrompt.md`의 **핵심 전제가 틀렸으므로 그 문서는 폐기**한다.
+
+- ❌ **문서의 틀린 전제**: "보스가 파괴되면 GC가 `TObjectPtr`를 조용히 null로 만드는데 `OnActiveBossChanged`는 발화 안 함". → **보스는 파괴되지 않는다**(`FPSRBossBase.cpp:155` HandleDeath가 결과 연출용으로 **의도적 존치**: "No XP drop / pooling / Destroy... keeps it visible during the result beat"). 실제 상태는 GC-null이 아니라 **"체력 0인 유효한 보스를 가리키는 멀쩡한 포인터"**.
+- ✅ **관측 불가 근거 3개(각각 독립 성립)**:
+  1. **트래블에서 런 GameState가 죽음** — 2홉(런→`L_Transition`→로비). `AGameModeBase::GetSeamlessTravelActorList`가 GameState를 **`bToTransition`일 때만** 넘김(`GameModeBase.cpp:548-553`) → 둘째 홉에서 버려지고 로비는 `ActiveBoss=null`인 새 GameState를 만듦. HUD 소유자(런 PC)도 클래스가 달라 `SwapPlayerControllers`가 파괴.
+  2. **같은 월드 재런 = 도달 불가** — `StartRun` 호출처는 `FPSRGameMode.cpp:76`(BeginPlay) **단 하나**이고 **UFUNCTION이 아니라 BP/콘솔에서 도달 불가**. 게다가 **`bRunActive`는 어디서도 해제되지 않는 일방 래치**(선언 `.h:99` · 읽기 `.cpp:69` · set-true `:74`가 census 전부) → 두 번째 호출은 조용한 no-op. **즉 `StartRun`의 "Re-run safety" 형제 리셋들(`ResetSpawnZones`·`ResetForNewRun`·`ResetDoorTopologyToBaseline`)도 지금은 전부 도달 불가**. 코드 주석도 동의: `FPSREnemySpawnSubsystem.cpp:1479` **"FUTURE NOTE (same-world re-run only, not yet reachable)"**.
+  3. 유일 관측 구간 = 결과 화면 뒤 `PostRunTravelDelay`(~3초)뿐이고 그건 **의도된 연출**.
+- ✅ **그래도 고친 이유**: 계약이 이미 3곳에서 약속됨(`FPSRGameState.h:138/141-142/247`) + **보스 2페이즈(보스 사망≠런 종료)나 같은 월드 재런이 도입되면 그 시점에 즉시 관측 가능**해짐(보스가 파괴되지 않으므로 죽은 보스 바가 다음 보스까지 ~300초 유지).
+- **구현**(`74e63137`, `FPSRRunDirectorSubsystem.cpp` StartRun 재런 안전 블록): `GS->SetActiveBoss(nullptr)` **→ 그 다음** `ActiveBoss->Destroy()`. ⚠️ **순서가 제약**: 액터가 garbage가 되면 복제 ref가 자가-null되어 세터의 `ActiveBoss == InBoss` 조기 반환(`FPSRGameState.cpp:40`)이 HUD에 필요한 broadcast를 **삼킨다**. 액터 파괴까지 하는 이유 = 포인터만 비우면 죽은 보스가 레벨에 그대로 서 있음. 첫 런은 전부 no-op.
+- **멀티**: 세터 경유라 Push Model `MARK_PROPERTY_DIRTY` + 리슨서버 호스트 직접 broadcast(호스트는 OnRep 없음) 대칭 그대로 성립.
+- **검증**: 빌드 `Result: Succeeded` · 스모크 `Result={Success}` · Codex 게이트 통과("safely clears the replicated boss reference before destroying the prior boss actor... without introducing an obvious regression"). **PIE 미실시 — 현재 도달 불가 경로라 재현 시나리오 자체가 없음**(보스 2페이즈/재런 도입 시 그때 PIE 필요).
+- 📌 **미해결 인접 사실**: `StartRun`은 `GS->SetActiveMission(nullptr)`도 안 부르고 디렉터의 `ActiveMission`도 안 비운다(진행도만 0으로). 같은 재런 시나리오에서 **미션도 동일 갭** — 이번 스코프 밖, 재런이 실제로 도입될 때 같이 볼 것.
 
 ### ③ 블로커 / 주의
 - **S3(외곽선×VAT 정합성) · S4 성능 실측 = 사용자 직접 진행**(2026-07-15 결정). Claude측 계측 인프라는 완료.
