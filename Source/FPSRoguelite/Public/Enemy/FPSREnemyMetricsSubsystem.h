@@ -18,6 +18,11 @@ class AFPSREnemyBase;
  *  different question: "is any enemy near ANY player", used for movement/net LOD, Game.MD §5/§5-1). Mixing the two
  *  would silently report the wrong number for ④ in a 4-player game.
  *
+ *  ③a vs ③b: VisibleFrustum ignores occlusion (strict upper bound); VisibleRendered honours it. ③b <= ③a is an
+ *  INVARIANT — if a capture ever violates it, ③b's source is wrong, not the map (that check is what caught ③b
+ *  originally reading a shadow-polluted actor stamp). Read ③b for the §5 gate: this map controls readability by
+ *  breaking sightlines with buildings, which only the occlusion-aware number can see.
+ *
  *  WHY IsHidden(), NOT BeginPlay/EndPlay COUNTING: the enemy pool never destroys actors — Deactivate() only hides
  *  them and sets DORM_DormantAll (see AFPSREnemyBase::Activate/Deactivate) — so BeginPlay/EndPlay each fire exactly
  *  ONCE per pooled actor's real lifetime, not once per activation. Registry membership is therefore "this actor
@@ -68,8 +73,10 @@ private:
 	 *  Mirrors AFPSREnemyBase's ctor InitCapsuleSize(40, 90) radius — update together if that ever changes. */
 	static constexpr float EnemyApproxRadiusCm = 40.0f;
 
-	/** How far back a render still counts as "on screen now" for ③b (seconds). Deliberately tighter than the engine's
-	 *  0.2 default: at 60fps that default would hold an enemy 'visible' for ~12 frames after it left view, smearing the
-	 *  P50/P90 the §5 gate reads. One tenth of a second still absorbs a dropped frame without inventing visibility. */
-	static constexpr float RenderRecencyToleranceSec = 0.1f;
+	/** ③b recency window, in FRAMES rather than seconds. The renderer stamps LastRenderTimeOnScreen from the render
+	 *  thread, which trails the game thread, so "on screen now" must tolerate a small lag — but the window has to
+	 *  scale with the frame rate, not the wall clock: a fixed 0.1s is ~3 frames at 30fps yet ~12 at 120fps, so the
+	 *  same constant would smear the P50/P90 differently on every machine that runs the §5 gate. Three frames covers
+	 *  the render-thread trail plus a dropped frame without inventing visibility. */
+	static constexpr float RenderRecencyFrames = 3.0f;
 };

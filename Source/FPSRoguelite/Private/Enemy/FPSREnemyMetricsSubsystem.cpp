@@ -6,6 +6,7 @@
 
 #include "ConvexVolume.h"
 #include "Engine/Engine.h"
+#include "Components/PrimitiveComponent.h"
 #include "Engine/GameViewportClient.h"
 #include "Engine/LocalPlayer.h"
 #include "Engine/World.h"
@@ -65,8 +66,8 @@ void UFPSREnemyMetricsSubsystem::Tick(float DeltaTime)
 	}
 
 	// ③a VisibleFrustum: build the local player's view frustum ONCE per tick (not once per enemy below). Occlusion
-	// is ignored, so this is an upper bound on what could be seen — the class header documents ③b (WasRecentlyRendered)
-	// as the occlusion-aware counterpart, with its own single-process-PIE caveat.
+	// is ignored, so this is a strict upper bound on what could be seen — ③b below is the occlusion-aware counterpart
+	// and must always come out <= this (that invariant is what caught the shadow-pass bug; see ③b).
 	bool bHaveFrustum = false;
 	FConvexVolume Frustum;
 	if (const ULocalPlayer* LocalPlayer = PC->GetLocalPlayer())
@@ -81,6 +82,9 @@ void UFPSREnemyMetricsSubsystem::Tick(float DeltaTime)
 			}
 		}
 	}
+
+	// ③b window, sized in frames (see RenderRecencyFrames) so the gate reads the same on a 30fps and a 120fps machine.
+	const float RenderRecencyTolerance = RenderRecencyFrames * FMath::Max(DeltaTime, UE_KINDA_SMALL_NUMBER);
 
 	const FVector LocalPawnLocation = LocalPawn->GetActorLocation();
 	// ④ Near15m reuses the movement LOD pass's own 15m S0 tier radius (single source — see GetTierS0RadiusSq's doc
@@ -124,13 +128,21 @@ void UFPSREnemyMetricsSubsystem::Tick(float DeltaTime)
 			++VisibleFrustumCount;
 		}
 
-		// ③b VisibleRendered (occlusion-aware). CAVEAT: in a single-process PIE with multiple local views (4-player
-		// listen-server test), WasRecentlyRendered reads true if ANY view rendered the actor, not just this client's
-		// — it will over-report for THIS client. Read ③a (VisibleFrustum) instead for a multi-client PIE capture, or
-		// run each client as a separate process (Game.MD: reason in multiplayer terms).
-		if (Enemy->WasRecentlyRendered(RenderRecencyToleranceSec))
+		// ③b VisibleRendered (occlusion-aware): the mesh's ON-SCREEN render stamp, NOT AActor::WasRecentlyRendered.
+		// That actor-level helper reads AActor::LastRenderTime, which the shadow passes also stamp (ShadowSetup.cpp
+		// calls UpdateComponentLastRenderTime with bUpdateLastRenderTimeOnScreen=false) — so an enemy behind the
+		// player casting a shadow into view counted as "on screen", and ③b came out ABOVE ③a (its own frustum upper
+		// bound) on 48% of frames in the first real capture. GetLastRenderTimeOnScreen is stamped only by the
+		// on-screen visibility pass (SceneVisibility.cpp), which is the signal ③ actually means.
+		// CAVEAT: in a single-process PIE with several local views (4-player listen-server test) this stamp is still
+		// per-primitive, so ANY local view seeing the enemy sets it — it over-reports for THIS client. Read ③a
+		// (VisibleFrustum) for a multi-client single-process capture, or run each client as its own process.
+		if (const UPrimitiveComponent* EnemyMesh = Enemy->GetMesh())
 		{
-			++VisibleRenderedCount;
+			if (World->TimeSince(EnemyMesh->GetLastRenderTimeOnScreen()) <= RenderRecencyTolerance)
+			{
+				++VisibleRenderedCount;
+			}
 		}
 	}
 
