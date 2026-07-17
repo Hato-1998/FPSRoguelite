@@ -461,6 +461,10 @@ void AFPSRPlayerState::CopyProperties(APlayerState* PlayerState)
 	// Run-progression fields are deliberately NOT copied — they are reset on lobby entry regardless.
 	if (AFPSRPlayerState* PS = Cast<AFPSRPlayerState>(PlayerState))
 	{
+		// Raw copy (not SetSelectedWeapon — travel state hand-off must not run the setter's SetReady/broadcast side
+		// effects), but still mark the push-model property dirty so the new PlayerState replicates the loadout, matching
+		// every other mutation of this field.
 		PS->SelectedWeapon = SelectedWeapon;
+		MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRPlayerState, SelectedWeapon, PS);
 	}
 }

@@ -52,8 +52,11 @@ struct FFPSRServerAttackContext
 	bool bMeleeTokenAvailable = false;
 };
 
-/** Lightweight swarm enemy (P1 test version: manual chase steering, engine cube placeholder).
- *  P2 replaces movement with flow-field + pooling. NOT GAS-based. */
+/** Lightweight server-authoritative swarm enemy — a cheap pooled APawn (NOT GAS-based), designed to run hundreds at
+ *  once. Movement is the spawn subsystem's batched flow-field + separation pass (TickServerMovement), not per-actor AI;
+ *  pooling reuses actors across lives (Activate/Deactivate with net dormancy). Also carries exit-path following,
+ *  knockback, ranged-attack dispatch, front-chase / front-spawn credit, and VAT death/anim cosmetic state. The visual
+ *  mesh comes from the content BP (VAT); the C++ base only falls back to a config placeholder mesh (Game.md §6-2). */
 UCLASS()
 class FPSROGUELITE_API AFPSREnemyBase : public APawn
 {
@@ -61,6 +64,10 @@ class FPSROGUELITE_API AFPSREnemyBase : public APawn
 
 public:
 	AFPSREnemyBase();
+
+	/** Capsule half-height (cm) the swarm enemy is built with. Shared so tooling (e.g. the editor blockout validator's
+	 *  spawn-clearance check) reads the real value instead of re-declaring the magic number. */
+	static constexpr float DefaultCapsuleHalfHeight = 90.0f;
 
 	/** Server: reactivate a pooled enemy at Location (unhide, enable collision, reset health, randomize move speed).
 	 *  Virtual so archetypes (e.g. ranged) can reset their own per-life state on reuse. */

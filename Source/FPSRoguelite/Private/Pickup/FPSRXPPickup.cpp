@@ -12,7 +12,7 @@
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/Pawn.h"
-#include "UObject/ConstructorHelpers.h"
+#include "Settings/FPSRPlaceholderVisualSettings.h"
 
 AFPSRXPPickup::AFPSRXPPickup()
 {
@@ -23,17 +23,27 @@ AFPSRXPPickup::AFPSRXPPickup()
 	Mesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("Mesh"));
 	Mesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	Mesh->SetRelativeScale3D(FVector(0.3f, 0.3f, 0.3f));
-	static ConstructorHelpers::FObjectFinder<UStaticMesh> SphereMesh(TEXT("/Engine/BasicShapes/Sphere.Sphere"));
-	if (SphereMesh.Succeeded())
-	{
-		Mesh->SetStaticMesh(SphereMesh.Object);
-	}
+	// Placeholder mesh is resolved in BeginPlay from config (Game.md §6-2: no hard-coded asset path in C++), on every
+	// machine (cosmetic — clients need it too). A content BP that assigns its own mesh wins (the fallback is skipped).
 	SetRootComponent(Mesh);
 }
 
 void AFPSRXPPickup::BeginPlay()
 {
 	Super::BeginPlay();
+
+	// Resolve the placeholder gem mesh from config if the content BP left it unset (runs on all machines — cosmetic).
+	// LoadSynchronous is the cached fast-path once the (engine BasicShapes) mesh is in memory, so per-gem cost is nil.
+	if (Mesh && Mesh->GetStaticMesh() == nullptr)
+	{
+		if (const UFPSRPlaceholderVisualSettings* Settings = GetDefault<UFPSRPlaceholderVisualSettings>())
+		{
+			if (UStaticMesh* GemMesh = Settings->XPGemMesh.LoadSynchronous())
+			{
+				Mesh->SetStaticMesh(GemMesh);
+			}
+		}
+	}
 
 	// The magnet/collect/XP-grant pass runs only on the server (see Tick, which early-returns off-authority); clients
 	// merely receive the replicated transform. Disable the tick off-authority so the many concurrent client gems don't

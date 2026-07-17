@@ -10,6 +10,7 @@
 #include "HAL/IConsoleManager.h"
 #include "Blueprint/UserWidget.h"
 #include "CommonActivatableWidget.h"
+#include "UI/FPSRUITags.h"
 #include "Core/FPSRLogChannels.h"
 #include "Core/FPSRFlowLog.h"
 #include "Core/FPSRPlayerState.h"
@@ -131,7 +132,7 @@ bool AFPSRPlayerController::EnsurePrimaryLayout()
 
 	if (GameHUDWidgetClass)
 	{
-		PrimaryLayout->PushWidgetToLayer(FGameplayTag::RequestGameplayTag(FName("UI.Layer.Game")), GameHUDWidgetClass);
+		PrimaryLayout->PushWidgetToLayer(FPSRUITags::TAG_UI_Layer_Game.GetTag(), GameHUDWidgetClass);
 	}
 
 	return true;
@@ -339,7 +340,7 @@ void AFPSRPlayerController::ClientPresentCards_Implementation(int32 OfferId, con
 	if (!ActiveCardWidget)
 	{
 		UCommonActivatableWidget* Pushed =
-			PrimaryLayout->PushWidgetToLayer(FGameplayTag::RequestGameplayTag(FName("UI.Layer.Modal")), CardSelectWidgetClass);
+			PrimaryLayout->PushWidgetToLayer(FPSRUITags::TAG_UI_Layer_Modal.GetTag(), CardSelectWidgetClass);
 		ActiveCardWidget = Cast<UFPSRCardSelectWidget>(Pushed);
 	}
 
@@ -474,7 +475,7 @@ void AFPSRPlayerController::OpenSettingsOverlay()
 	// GameMenu layer = non-pause overlay above the HUD. The run keeps running (4-player coop, §2-2 freeze is
 	// card-select only and unrelated).
 	UCommonActivatableWidget* Pushed =
-		PrimaryLayout->PushWidgetToLayer(FGameplayTag::RequestGameplayTag(FName("UI.Layer.GameMenu")), SettingsWidgetClass);
+		PrimaryLayout->PushWidgetToLayer(FPSRUITags::TAG_UI_Layer_GameMenu.GetTag(), SettingsWidgetClass);
 	ActiveSettingsWidget = Pushed;
 
 	if (Pushed)
@@ -565,7 +566,7 @@ void AFPSRPlayerController::ClientShowRunResult_Implementation(EFPSRRunOutcome O
 	}
 
 	UCommonActivatableWidget* Pushed =
-		PrimaryLayout->PushWidgetToLayer(FGameplayTag::RequestGameplayTag(FName("UI.Layer.Menu")), ResultWidgetClass);
+		PrimaryLayout->PushWidgetToLayer(FPSRUITags::TAG_UI_Layer_Menu.GetTag(), ResultWidgetClass);
 
 	if (UFPSRResultWidget* ResultWidget = Cast<UFPSRResultWidget>(Pushed))
 	{
@@ -593,30 +594,6 @@ void AFPSRPlayerController::ClientCommitMetaSave_Implementation(EFPSRRunOutcome 
 		if (UFPSRSaveGameSubsystem* Saves = GI->GetSubsystem<UFPSRSaveGameSubsystem>())
 		{
 			Saves->RequestSave(EFPSRSaveReason::RunEnd);
-		}
-	}
-}
-
-void AFPSRPlayerController::ServerRequestReturnToMenu_Implementation(EFPSRRunOutcome Outcome)
-{
-	if (!HasAuthority())
-	{
-		return;
-	}
-
-	// Gate on the run-ended latch so a client can't force a mid-run menu travel (W1 P2-3). This RPC is a P6-A
-	// holdover (the result screen now returns to the lobby); the guard hardens the legacy path.
-	const AFPSRGameMode* GM = GetWorld() ? GetWorld()->GetAuthGameMode<AFPSRGameMode>() : nullptr;
-	if (!GM || !GM->IsRunEnded())
-	{
-		return;
-	}
-
-	if (UGameInstance* GI = GetGameInstance())
-	{
-		if (UFPSRGameFlowSubsystem* Flow = GI->GetSubsystem<UFPSRGameFlowSubsystem>())
-		{
-			Flow->ReturnToMenu(Outcome);
 		}
 	}
 }

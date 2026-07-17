@@ -15,9 +15,10 @@
  * mission actor casts it to its own tuning subclass and reads parameters from it. Mirrors the UFPSRCardEffect
  * pattern (Card/FPSRCardEffect.h) — a NEW mission type = one tuning subclass, zero central edits (OCP).
  *
- * Soft migration: every mission actor still carries its legacy EditDefaultsOnly fields as a fallback. When
- * Data->Tuning is null (or the wrong subclass), the actor reads its own field instead — so existing content
- * (BP CDOs already authored with these values) keeps working unchanged until a designer assigns a Tuning asset.
+ * Fallback: when Data->Tuning is null (or the wrong subclass), AFPSRMissionActor::GetTuning<T>() returns the
+ * tuning subclass's own compiled-in CDO defaults (*GetDefault<T>()) — so a mission with no Tuning asset assigned
+ * still runs on sensible defaults. The mission subclasses no longer carry per-actor legacy tuning fields; each
+ * caches its resolved values from GetTuning<T>() at activation.
  */
 UCLASS(Abstract, EditInlineNew, DefaultToInstanced, CollapseCategories)
 class FPSROGUELITE_API UFPSRMissionTuning : public UObject

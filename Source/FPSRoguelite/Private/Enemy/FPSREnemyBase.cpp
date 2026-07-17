@@ -16,7 +16,7 @@
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
 #include "ProfilingDebugging/CsvProfiler.h" // CSV_PROFILER_STATS gate for the metrics registry calls below
-#include "UObject/ConstructorHelpers.h"
+#include "Settings/FPSRPlaceholderVisualSettings.h"
 
 AFPSREnemyBase::AFPSREnemyBase()
 {
@@ -32,7 +32,7 @@ AFPSREnemyBase::AFPSREnemyBase()
 	SetNetCullDistanceSquared(FMath::Square(NetCullRadius));
 
 	Capsule = CreateDefaultSubobject<UCapsuleComponent>(TEXT("Capsule"));
-	Capsule->InitCapsuleSize(40.0f, 90.0f);
+	Capsule->InitCapsuleSize(40.0f, DefaultCapsuleHalfHeight);
 	Capsule->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 	Capsule->SetCollisionObjectType(ECC_Pawn);
 	Capsule->SetCollisionResponseToAllChannels(ECR_Block);
@@ -47,11 +47,8 @@ AFPSREnemyBase::AFPSREnemyBase()
 	Mesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	Mesh->SetRelativeLocation(FVector(0.0f, 0.0f, -90.0f));
 	Mesh->SetRelativeScale3D(FVector(0.8f, 0.8f, 1.8f));
-	static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeMesh(TEXT("/Engine/BasicShapes/Cube.Cube"));
-	if (CubeMesh.Succeeded())
-	{
-		Mesh->SetStaticMesh(CubeMesh.Object);
-	}
+	// Placeholder mesh is resolved in BeginPlay from config (Game.md §6-2: no hard-coded asset path in C++). Normal
+	// enemy BPs assign their own (VAT) mesh, so the fallback only fires for the raw-C++ spawn (unconfigured roster).
 
 	HealthComponent = CreateDefaultSubobject<UFPSREnemyHealthComponent>(TEXT("HealthComponent"));
 }
@@ -73,6 +70,19 @@ void AFPSREnemyBase::BeginPlay()
 	// fallback path. In the unified multi-slot field the spawn subsystem overrides this per-acquire (ApplyNetCullRadius), which
 	// runs on every Activate (after BeginPlay) and still wins. No-op vs the ctor when NetCullRadius is unchanged (no regression).
 	SetNetCullDistanceSquared(FMath::Square(NetCullRadius));
+
+	// Fallback placeholder mesh from config only when no content BP mesh was assigned (Game.md §6-2 — no hard-coded
+	// path in C++). Normal enemy BPs carry a VAT mesh, so the guard skips the load; only the raw-C++ spawn hits it.
+	if (Mesh && Mesh->GetStaticMesh() == nullptr)
+	{
+		if (const UFPSRPlaceholderVisualSettings* Settings = GetDefault<UFPSRPlaceholderVisualSettings>())
+		{
+			if (UStaticMesh* PlaceholderMesh = Settings->EnemyPlaceholderMesh.LoadSynchronous())
+			{
+				Mesh->SetStaticMesh(PlaceholderMesh);
+			}
+		}
+	}
 
 	if (HealthComponent)
 	{

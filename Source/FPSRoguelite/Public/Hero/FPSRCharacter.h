@@ -303,7 +303,8 @@ protected:
 	UPROPERTY(VisibleAnywhere, Category = "FPSR|Feedback")
 	TObjectPtr<UFPSRBlindspotAudioComponent> BlindspotAudio;
 
-	/** Starting weapons granted on possession (slot order). Set via ConstructorHelpers (P1) / HeroDataAsset (later). */
+	/** Starting weapons granted on possession (slot order). Assigned per-character in the BP class defaults
+	 *  (EditDefaultsOnly); later folded into a HeroDataAsset. No hard-coded weapon paths in C++ (Game.md §6-2). */
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Weapon")
 	TObjectPtr<UFPSRWeaponDataAsset> DefaultPrimaryWeapon;
 

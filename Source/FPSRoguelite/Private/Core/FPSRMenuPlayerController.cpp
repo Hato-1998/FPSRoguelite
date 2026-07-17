@@ -2,6 +2,7 @@
 
 #include "Core/FPSRMenuPlayerController.h"
 #include "UI/FPSRPrimaryGameLayout.h"
+#include "UI/FPSRUITags.h"
 #include "CommonActivatableWidget.h"
 #include "GameplayTagContainer.h"
 #include "Core/FPSRLogChannels.h"
@@ -37,7 +38,7 @@ void AFPSRMenuPlayerController::BeginPlay()
 	}
 
 	UCommonActivatableWidget* MenuWidget =
-		PrimaryLayout->PushWidgetToLayer(FGameplayTag::RequestGameplayTag(FName("UI.Layer.Menu")), MainMenuWidgetClass);
+		PrimaryLayout->PushWidgetToLayer(FPSRUITags::TAG_UI_Layer_Menu.GetTag(), MainMenuWidgetClass);
 
 	if (!MenuWidget)
 	{
