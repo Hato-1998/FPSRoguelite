@@ -6,10 +6,19 @@
 
 **최종 갱신: 2026-07-18**
 
-## 🔔 현재 상태 (2026-07-18 · U21 Synty 아트 파일럿 **✅완료** — 다음 프론티어 = U22 전체교체)
+## 🔔 현재 상태 (2026-07-18 · W2-A 코드 품질 그라인딩 **✅완료·main 머지** — 다음 프론티어 = U22 전체교체)
 
-> **U21 파일럿 게이트 통과**(사용자 판정 2026-07-18): S1 단차 walkability ✅ · S3 셀 아웃라인×VAT 정합 ✅ · S4 성능 실측 ✅("다음 유닛 넘어갈 만한 퍼포먼스"). 아트 방향 = 사전확정 셀/툰 피벗(메모리 `synty-anime-cel-art-pivot`)이 **파일럿으로 검증됨** → U22(전체교체) 게이트 해제. ⚠️미확정 하위결정(U22 착수 시) = 무기 백본(Infima 유지 vs Synty Military)·캐릭터 애님(Blu+PWAS vs 손저작 AnimBP).
+> **U21 파일럿 게이트 통과**(사용자 판정 2026-07-18): S1 단차 walkability ✅ · S3 셀 아웃라인×VAT 정합 ✅ · S4 성능 실측 ✅("다음 유닛 넘어갈 만한 퍼포먼스"). 아트 방향 = 사전확정 셀/툰 피벗(메모리 `synty-anime-cel-art-pivot`)이 **파일럿으로 검증됨** → U22(전체교체) 게이트 해제. **✅하위결정 2건 확정(2026-07-18)**: ① 무기 백본 = **Synty Military 전환**(→ 나중에 SF 무기로 리스킨/변환) ② 캐릭터 애님 = **3인칭 Blu · 1인칭 PWAS**(손저작 AnimBP 대체 → U15 1P·U19 3P 손저작 계획은 이 파이프라인에 흡수, U20 적 VAT만 별도로 U22 적교체 후 베이크).
 > **추가 수정 = SRS 아웃라인 거리 헤이즈**(아래 §⑥). 코드 미커밋 0. 작업트리 = **사용자 콘텐츠만 미커밋**(아래 §미커밋 콘텐츠 — SRS 수정은 `L_GameFloor.umap` 인스턴스에 포함).
+
+### ⑦ W2-A 코드 품질·기술부채 그라인딩 = ✅완료·main 머지 (2026-07-18)
+> U21 완료 후 "전체 프로젝트 그라인딩"의 **코드축** — U22와 무관하게 살아남는 C++ 로직/구조만 대상(콘텐츠·임시값[U14]·성능[U25]·정확성버그[W2-B] 제외). 6 도메인 감사(파인더 Sonnet) → Opus 검증 → Codex 적대 토론 → 재작업.
+- **감사**: 런타임 223 + 에디터 35 = 258 파일 전수. 원시 findings 28 → **P1 없음, 전부 P2/P3**(그라인딩 성격 확인). 문서 = `Docs/codex-reviews/w2a-code-quality-20260718.md`(gitignore).
+- **수정 20건**(`0a8cc495` + cook fix `4a6c7b1b`): ① 주석 드리프트 9(적/플로우필드/미션/투사체/무기타입/시작무기 코드-모순) ② §6-2 하드코딩 3(XP젬/적/보스 placeholder 메시 `ConstructorHelpers`→config `FPSRPlaceholderVisualSettings` BeginPlay fallback) ③ dead code 2(`ServerRequestReturnToMenu` RPC·`ContentBrowser` 에디터 의존) ④ UI.Layer 태그 SSOT 네이티브화(`FPSRUITags`, 11사이트, ini 중복 제거) ⑤ `CopyProperties` Push Model dirty-mark(seamless travel 복제 정합) ⑥ 데이터드리븐 4(투사체 머즐오프셋 DA·rarity LOCTEXT·Assembler 폴더명 config·적 캡슐반높이 공유상수).
+- **Codex 합의 DEFER**: `DownedMoveScale`(BP참조 grep불가)·PelletCount EditCondition(의도적 설계)·`AvailableModifiers`(직렬화 필드→U22 재저장 시)·크로스헤어 프리셋(UI 구조변경 동반)·enum 중간값 제거(직렬화 리스크, 값 보존·주석만)·저가치 백로그(IsMapReady·미션 DrawDebug cvar).
+- **판정 핵심**: re-run-safety 계열(`ResetForNewRun` 등, `bRunActive` 래치 뒤)은 **의도적 전방 인프라 → 보존**(파인더 오탐 없이 방어). enum 중간값은 **제거 대신 주석**(직렬화/BP핀 안전).
+- **검증**: 빌드 `Result: Succeeded`(-WaitMutex 풀빌드, UHT WarningsAsErrors) · 스모크 `ModuleLoads Result={Success}` · Codex 머지게이트 = P2 1건(패키지 cook)만 → `4a6c7b1b`로 해소.
+- **⚠️ 후속(사용자 판단)**: cook 규칙(`/Engine/BasicShapes` DirectoriesToAlwaysCook)은 **패키지 빌드 미검증**(현 세션 빌드/스모크만) — 실 패키지 시 XP젬 가시성 확인 권장. 단 dev 스캐폴딩이라 U22서 실메시 교체되면 무의미.
 
 ### ⑥ 적 "뿌연 구름" = 진단·수정 완료 (2026-07-18, 콘텐츠 = `L_GameFloor` 인스턴스)
 **증상**: 런 시작 후 적 swarm(만)에 반투명 회색 헤이즈. 멀수록 심하고 가까이 오면 옅어짐. 건물은 쨍.
