@@ -9,7 +9,7 @@
 
 ---
 
-## §A 현황 스냅샷 (2026-07-13)
+## §A 현황 스냅샷 (2026-07-18)
 
 ### 완료 (main 머지 — 상세 = `PROGRESS.md` 완료 이력 + `git log`)
 - **코드 로드맵 V0~U20 전부 머지 완료** — 1P 슬라이스·사격감·적 스웜(풀500·플로우필드)·공유XP/카드 v2·런디렉터·무기/Fragment·FF·보스 스캐폴드+콘텐츠·로비/세션/트래블·DBNO·원거리 적·GMS·SaveGame 인프라·크로스헤어/설정·통합 애니 코드 인프라. 요약 = §B 완료 아카이브 인덱스.
@@ -17,8 +17,8 @@
 - **검증 게이트** — U1 재미 게이트(§7-5 G1) + V2 2-client = ✅합격(2026-06-30). ⚠️**§5 적500 정량 측정은 미실시(보류)** → 라이브 U25로 승격(아래).
 
 ### 열린 유닛 / 진행
-- **다음 프론티어 = U21 Synty 아트 파일럿 게이트**(미착수, 어댑션 커밋 0). 통과 후 U22 전체교체.
-- content-pending = U12(잔여)·U15/U19/U20(애니 콘텐츠, HOLD). 열린 출시 유닛 = U13·U14. (전부 §B 라이브 표.)
+- **U21 Synty 아트 파일럿 = ✅완료**(2026-07-18 사용자 판정): S1 단차 walkability·S3 셀 아웃라인×VAT 정합·S4 성능 실측 전부 통과 + **SRS 아웃라인 거리 헤이즈 수정**. 아트 방향 = 사전확정 셀/툰 피벗(메모리 `synty-anime-cel-art-pivot`)이 **파일럿으로 검증됨** → U22 게이트 해제. ⚠️미확정 하위결정(U22 착수 시 확정) = 무기 백본(Infima 유지 vs Synty Military)·캐릭터 애님(Blu+PWAS vs 손저작 AnimBP).
+- **다음 프론티어 = U22 Synty 전체교체**(게이트 해제). content-pending = U12(잔여)·U15/U19/U20(애니 콘텐츠, HOLD — 이제 U22에 종속). 열린 출시 유닛 = U13·U14. (전부 §B 라이브 표.)
 
 ### 임시 테스트값 (미원복 — U14에서 원복)
 - `DA_RunSchedule.MissionWindows` 윈도우 시간(테스트 압축값) + `BossTime 300s` → 프로덕션 = 미션 300/600/900s·보스 1200s(≈20분 런). 메모리 `p4a-temp-test-values`.
@@ -52,8 +52,8 @@
 
 | ID | 유닛 | 구분 | 선행/게이트 | 상태 | 실행 프롬프트 |
 |---|---|---|---|---|---|
-| **U21** | Synty 아트 파일럿 게이트 (셀/툰 렌더러·무기모듈·Blu팔+PWAS·스웜 200-300 perf, throwaway). **산출에 아트 정체성 결정 포함** = Infima 유지 vs Synty Military 전환 vs Blu+PWAS 손저작 AnimBP 대체 | 에셋/PIE | — | **실행 중**(S2a✅ S0✅ S1✅ → S3/S4 = 사용자 직접 판정) | `Docs/SyntyArtPilot_Scoped_ResumePrompt.md` + `Docs/SyntyArtPilot_S1_CityBuildGuide.md` |
-| **U22** | Synty Path A 에셋 전체교체 (환경 3맵·무기 Synty Military·캐릭터 Blu·적 저코스트 VAT·UI/VFX) | 에셋 | U21 통과 | 대기 | ⚠️ 프롬프트 **재작성 필요**(구 `AssetReplacement_Synty_ResumePrompt.md` = 폐기본) |
+| **U21** | Synty 아트 파일럿 게이트 (셀/툰 렌더러·무기모듈·Blu팔+PWAS·스웜 200-300 perf, throwaway). **산출에 아트 정체성 결정 포함** = Infima 유지 vs Synty Military 전환 vs Blu+PWAS 손저작 AnimBP 대체 | 에셋/PIE | — | ✅**완료**(2026-07-18 사용자 판정: S1/S3/S4 통과·perf OK·SRS 아웃라인 헤이즈 수정. 하위결정 2건은 U22 착수 시 확정) | `Docs/SyntyArtPilot_Scoped_ResumePrompt.md` + `Docs/SyntyArtPilot_S1_CityBuildGuide.md` |
+| **U22** | Synty Path A 에셋 전체교체 (환경 3맵·무기 Synty Military·캐릭터 Blu·적 저코스트 VAT·UI/VFX) | 에셋 | U21 ✅통과 | **다음 프론티어**(게이트 해제) | ⚠️ 프롬프트 **재작성 필요**(구 `AssetReplacement_Synty_ResumePrompt.md` = 폐기본) |
 | **U15/U19/U20** | 통합 애니 콘텐츠 저작 (A 1P무기·B 3P팀원·C 적VAT+보스스켈). 코드 인프라 ✅, 콘텐츠 미저작 | 콘텐츠 | **⚠️HOLD**: U21 아트정체성 결정 (U20 VAT 베이크 = U22 적교체 후) | HOLD | `Docs/AnimationPass_ContentGuide.md`(자족 A/B/C) |
 | **U12** | UI/필 잔여 (카드 아이콘 콘텐츠 · 무기별 팔 AnimBP=U15 흡수 · 서버권위 bloom=장기백로그) | 콘텐츠 | — | 잔여 hold | §C U12(잔여) |
 | **U23** | 메타 프로그레션 콘텐츠 (P0-③): U10 인프라 위 실 메타필드/재화/언락트리 + §D6 세이브 테스트갭 2건 | C++/콘텐츠 | U10 ✅ (스키마 P0-③ 확정 선행) | 대기 | §C U23(신규) |

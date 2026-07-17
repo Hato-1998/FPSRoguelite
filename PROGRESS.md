@@ -4,13 +4,20 @@
 > **작업 단계를 끝낼 때마다, 그리고 중단 전 반드시 이 파일을 갱신하고 커밋한다.**
 > 확정 설계·기획·코드구조·규칙은 `Game.md`(**SSOT 허브** → 도메인별 `Docs/SSOT/*.md`, 작업별 라우팅은 허브 §0-1), **완료 작업 상세는 `git log --oneline`**. 여기엔 *무엇을 했는지*만 요약한다.
 
-**최종 갱신: 2026-07-15**
+**최종 갱신: 2026-07-18**
 
-## 🔔 현재 상태 (2026-07-15 · Synty 아트 파일럿 **실행 중** — S4 계측 브랜치 **main 머지·푸시 완료**)
+## 🔔 현재 상태 (2026-07-18 · U21 Synty 아트 파일럿 **✅완료** — 다음 프론티어 = U22 전체교체)
 
-> **`phase/s4-readability-metrics` → main `--no-ff` 머지 + `origin/main` 푸시 완료.** 코드 미커밋 0.
-> 작업트리 = **사용자 콘텐츠만 미커밋**(아래 §미커밋 콘텐츠).
-> **S3 육안 판정 · S4 성능 실측 = 사용자가 직접 진행**(2026-07-15 사용자 결정. 종전 "재캡처 후 머지" 선행조건은 해제 — 아래 §③).
+> **U21 파일럿 게이트 통과**(사용자 판정 2026-07-18): S1 단차 walkability ✅ · S3 셀 아웃라인×VAT 정합 ✅ · S4 성능 실측 ✅("다음 유닛 넘어갈 만한 퍼포먼스"). 아트 방향 = 사전확정 셀/툰 피벗(메모리 `synty-anime-cel-art-pivot`)이 **파일럿으로 검증됨** → U22(전체교체) 게이트 해제. ⚠️미확정 하위결정(U22 착수 시) = 무기 백본(Infima 유지 vs Synty Military)·캐릭터 애님(Blu+PWAS vs 손저작 AnimBP).
+> **추가 수정 = SRS 아웃라인 거리 헤이즈**(아래 §⑥). 코드 미커밋 0. 작업트리 = **사용자 콘텐츠만 미커밋**(아래 §미커밋 콘텐츠 — SRS 수정은 `L_GameFloor.umap` 인스턴스에 포함).
+
+### ⑥ 적 "뿌연 구름" = 진단·수정 완료 (2026-07-18, 콘텐츠 = `L_GameFloor` 인스턴스)
+**증상**: 런 시작 후 적 swarm(만)에 반투명 회색 헤이즈. 멀수록 심하고 가까이 오면 옅어짐. 건물은 쨍.
+- **격리(콘솔 사다리)**: 모션블러 OFF(`r.MotionBlurQuality=0`)·`showflag.Fog 0`·`showflag.Atmosphere 0`·`r.TSR.Enable 0`·`showflag.Bloom 0` = **전부 변화 없음** → `showflag.PostProcessing 0`에서만 정상 = **포스트프로세스 머티리얼**이 범인(엔진 하이트포그/대기/TSR/블룸 전부 아님).
+- **진범 = `BP_SRS_Fog`의 `M_Fog`** (⚠️초기 "SRS 아웃라인" 가설은 **철회**). `Only on Custom Depth=1` + 회색 `Fog Color(0.18,0.20,0.22)` + `Camera Distance Scale=1000` → **커스텀뎁스 물체(=적, `renderCustomDepth=True`)에만 거리비례 회색 안개**. 그래서 적만 뿌옇고 건물 쨍·멀수록 심함. **`showflag.Fog 0`이 안 통한 이유** = M_Fog는 **PP 머티리얼 blendable**이지 엔진 하이트포그가 아님(그래서 `showflag.PostProcessing 0`에서만 걷힘).
+- **수정 = `BP_SRS_Fog` 인스턴스 `Enable Fog=False`**(사용자 별도 MCP 세션, 저장됨). 아웃라인·셀은 무변경(셀/툰 룩 유지).
+- **검증**: 사용자 PIE 육안 + git(`L_GameFloor.umap` 수정, `BP_SRS_Fog`는 레벨 배치 액터라 인스턴스 오버라이드로 정합).
+- **교훈**: 거리감쇠 헤이즈 ≠ 항상 엔진 안개. PP가 **적(커스텀뎁스)에만** 끼면 아웃라인으로 단정 말고 **레벨의 모든 PostProcessComponent/Volume blendable 전수 열거** + `Only on Custom Depth`/`Fog Color` 확인. `showflag.PostProcessing 0`은 "PP가 범인"까지만 말해줌. 상세 메모리 `srs-postprocess-stack-fog-haze`.
 
 ### ① 이 세션에서 한 일 (S4 계측 아크 = 머지 완료)
 - `9059af12` **feat(perf)**: S4 가독성 5지표 계측 = **`UFPSREnemyMetricsSubsystem`**(신규). ②③④는 "플레이어 한 명이 겪는 것"이라 **서버 아닌 각 클라가 자기 로컬 폰/뷰 기준**으로 집계 → CSV 커스텀 스탯 5개(`FPSREnemy/ServerAlive|RelevantAlive|VisibleFrustum|VisibleRendered|Near15m`). 신규 순회 0·월드쿼리 0·shipping 생성 거부(`CSV_PROFILER_STATS`).
@@ -52,7 +59,7 @@
 - 📌 **미해결 인접 사실**: `StartRun`은 `GS->SetActiveMission(nullptr)`도 안 부르고 디렉터의 `ActiveMission`도 안 비운다(진행도만 0으로). 같은 재런 시나리오에서 **미션도 동일 갭** — 이번 스코프 밖, 재런이 실제로 도입될 때 같이 볼 것.
 
 ### ③ 블로커 / 주의
-- **S3(외곽선×VAT 정합성) · S4 성능 실측 = 사용자 직접 진행**(2026-07-15 결정). Claude측 계측 인프라는 완료.
+- ✅**S3(외곽선×VAT 정합성) · S4 성능 실측 = 통과**(사용자 판정 2026-07-18). Claude측 계측 인프라 완료. **아래 튜닝 노트는 후속 조정 시 참고용으로 보존**(S3 톤다운·불변식 합격선·밀도 측정 함정 등).
   - ⚠️ **S3 판정 순서 주의**: 지금 셀 아웃라인을 **자동노출 최대 66배 + 블룸 2.37배**를 통과시켜 보고 있음 = 아웃라인이 아니라 그레이드를 보는 것. **톤다운 먼저 → 그 다음 아웃라인 판정**(안 그러면 아웃라인을 과하게 두껍게 만들고 나중에 그레이드 고치면 흉해짐).
   - ⚠️ **PIE 창이 640×480**(`EditorPerProjectUserSettings.ini:91-92`). 화면 크기가 곧 ③이라 이대로 잰 숫자는 무의미 → **1920×1080**으로.
   - ⚠️ **불변식 합격선 = 위반율 <5% + 최대 초과 ≤2**(0%는 달성 불가 — ③b는 과거 1~3프레임 스탬프, ③a는 현재라 카메라 회전 시 전환프레임 위반이 물리적으로 남음). 진짜 버그(47.9%·초과 최대 59)와는 이 기준으로 갈림.
