@@ -5,6 +5,7 @@
 #include "Enemy/FPSRFlowFieldBoundsVolume.h"
 #include "Enemy/FPSREnemySpawnPoint.h"
 #include "Enemy/FPSRFlowFieldComputer.h"
+#include "Enemy/FPSREnemyBase.h" // AFPSREnemyBase::DefaultCapsuleHalfHeight (shared spawn-clearance constant)
 
 #include "Engine/StaticMeshActor.h"
 #include "Components/StaticMeshComponent.h"
@@ -178,10 +179,11 @@ int32 FFPSRBlockoutValidator::ValidateLevel(UWorld* World)
 		if (TraceWorldStaticDown(World, SpawnLoc.X, SpawnLoc.Y, SpawnLoc.Z + 50.0f, SpawnLoc.Z - 5000.0f, FloorZ, FloorActor))
 		{
 			const float Height = SpawnLoc.Z - FloorZ;
-			if (Height < 90.0f)
+			if (Height < AFPSREnemyBase::DefaultCapsuleHalfHeight)
 			{
-				Log.Warning(FText::Format(LOCTEXT("SpawnTooLow", "{0}: 스폰 지점이 지면보다 {1}cm 높습니다 (권장 ~100cm; 캡슐 반높이 90 미만이면 적이 바닥을 뚫고 낙하)."),
-					FText::FromString(ActorLabelSafe(SpawnPoint)), FText::AsNumber(FMath::RoundToInt(Height))));
+				Log.Warning(FText::Format(LOCTEXT("SpawnTooLow", "{0}: 스폰 지점이 지면보다 {1}cm 높습니다 (권장 ~100cm; 캡슐 반높이 {2} 미만이면 적이 바닥을 뚫고 낙하)."),
+					FText::FromString(ActorLabelSafe(SpawnPoint)), FText::AsNumber(FMath::RoundToInt(Height)),
+					FText::AsNumber(FMath::RoundToInt(AFPSREnemyBase::DefaultCapsuleHalfHeight))));
 				++FindingCount;
 			}
 		}

@@ -10,7 +10,10 @@ class UFPSRWeaponDataAsset;
 
 /** v2 card group (§2-3-2): the draw pool / trigger / UI filter a card belongs to. Orthogonal to per-effect
  *  application scope (UCardEffect_WeaponStat::bThisWeaponOnly). Character = character + all-weapons effects
- *  (no target weapon). Weapon = this-weapon stat / behavior cards (TargetWeapon set). WeaponUnlock = reserved (U18b). */
+ *  (no target weapon). Weapon = this-weapon stat / behavior cards (TargetWeapon set). WeaponUnlock = declared
+ *  but currently unused — U18b's weapon-unlock routing ships via UFPSRCardPoolDataAsset::WeaponUnlockCards +
+ *  EFPSROfferType::WeaponUnlock, not this ECardGroup value. Kept to preserve enum ordinals/serialized values;
+ *  do not author cards with this group. */
 UENUM(BlueprintType)
 enum class ECardGroup : uint8
 {

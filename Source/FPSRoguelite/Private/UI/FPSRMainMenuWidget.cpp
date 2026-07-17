@@ -6,6 +6,7 @@
 #include "Core/FPSRLogChannels.h"
 #include "Core/FPSRFlowLog.h"
 #include "UI/FPSRPrimaryGameLayout.h"
+#include "UI/FPSRUITags.h"
 #include "CommonActivatableWidget.h"
 #include "CommonButtonBase.h"
 #include "CommonInputModeTypes.h"
@@ -76,7 +77,7 @@ void UFPSRMainMenuWidget::HandleSettingsClicked()
 	}
 
 	// Push onto the Menu layer (above the main menu); the settings widget's Back action pops back to the menu.
-	Layout->PushWidgetToLayer(FGameplayTag::RequestGameplayTag(FName("UI.Layer.Menu")), SettingsWidgetClass);
+	Layout->PushWidgetToLayer(FPSRUITags::TAG_UI_Layer_Menu.GetTag(), SettingsWidgetClass);
 }
 
 void UFPSRMainMenuWidget::HandleQuitClicked()
