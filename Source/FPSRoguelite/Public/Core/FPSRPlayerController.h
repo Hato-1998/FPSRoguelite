@@ -78,6 +78,13 @@ public:
 	/** Server-only: whether an offer is currently cached/presented (don't replace a mid-selection offer). */
 	bool HasActiveOffer() const { return CachedOffer.Num() > 0; }
 
+	/** Server-only: pull back an offer this player can no longer act on (they went DBNO/Dead). RefreshPauseState
+	 *  skips non-Alive players, so without this their modal would linger over live gameplay and they could still
+	 *  accept the stale offer. The PICK is not consumed — clearing the cache lets PresentNextOfferIfNeeded re-draw
+	 *  and re-present it on revive, so nothing is lost. Also closes the stale-selection window: HandleCardSelection
+	 *  validates the index against CachedOffer, which is now empty. */
+	void WithdrawActiveOffer();
+
 	/** Server-only: whether this player's run-start opening seed has been issued (used by the director's
 	 *  pre-combat hold so spawning waits until the opening-seed flow has at least begun). */
 	bool HasStartedOpeningSeed() const { return bOpeningSeedIssued; }

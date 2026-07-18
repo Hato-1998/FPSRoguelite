@@ -888,11 +888,17 @@ void AFPSRCharacter::HandleOutOfHealth()
 		GM->NotifyPlayerDefeated();
 	}
 
-	// Card-select freeze: RefreshPauseState skips non-Alive players, so going down while still owing a pick must
-	// re-run it or the freeze stays pinned on a player who can no longer choose. Deliberately AFTER the wipe check:
-	// on a wipe EndRunFreeze has latched bRunEnded and this is a no-op, keeping the world frozen behind the result
-	// screen. Off a wipe it is also a no-op unless a pick was actually outstanding (SetRunPaused early-outs on an
-	// unchanged value). Same pull-recompute gap the GameMode's Logout hook closes for disconnects.
+	// Card-select freeze. Order matters: withdraw this player's offer BEFORE recomputing. RefreshPauseState skips
+	// non-Alive players, so the recompute can resume the run — and a still-presented offer would then sit over live
+	// gameplay on a downed player who is no longer part of the selection, still acceptable by them. Withdrawing keeps
+	// the pick (it is only consumed on apply), so the revive path re-presents it. Without the recompute the freeze
+	// instead stays pinned on someone who can no longer choose — the same pull-recompute gap the GameMode's Logout
+	// hook closes for disconnects. On a wipe the recompute is a no-op: EndRunFreeze has already latched bRunEnded,
+	// so the world stays frozen behind the result screen.
+	if (AFPSRPlayerController* FPSRPC = Cast<AFPSRPlayerController>(GetController()))
+	{
+		FPSRPC->WithdrawActiveOffer();
+	}
 	if (AFPSRGameState* GS = GetWorld() ? GetWorld()->GetGameState<AFPSRGameState>() : nullptr)
 	{
 		GS->RefreshPauseState();
