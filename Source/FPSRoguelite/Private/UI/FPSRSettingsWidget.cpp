@@ -156,16 +156,21 @@ void UFPSRSettingsWidget::BuildColorPresetButtons()
 {
 	const int32 PresetCount = ColorPresets ? ColorPresets->Presets.Num() : 0;
 
+	// The swatch row needs TWO content-authored halves: a preset asset on this WBP and a container to parent the
+	// generated buttons into. Warn loudly for either gap — a silently empty row is indistinguishable from "the
+	// crosshair colour setting was removed", so a half-migrated WBP must be obvious in the log during content work.
+	if (!ColorPresets)
+	{
+		UE_LOG(LogFPSR, Warning,
+			TEXT("[Settings] %s has no ColorPresets asset assigned — crosshair colour swatches are disabled."),
+			*GetClass()->GetName());
+	}
+
 	if (!ColorPresetContainer)
 	{
-		// The WBP has no swatch container yet. Warn (rather than silently dropping the whole colour row) so a
-		// half-migrated WBP is obvious during content work — presets authored but nowhere to show them.
-		if (PresetCount > 0)
-		{
-			UE_LOG(LogFPSR, Warning,
-				TEXT("[Settings] %d crosshair colour preset(s) authored but the WBP binds no ColorPresetContainer — swatches not shown."),
-				PresetCount);
-		}
+		UE_LOG(LogFPSR, Warning,
+			TEXT("[Settings] WBP binds no ColorPresetContainer — %d authored crosshair colour preset(s) cannot be shown."),
+			PresetCount);
 		return;
 	}
 
