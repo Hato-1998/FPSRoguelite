@@ -88,7 +88,8 @@ void AFPSREnemyBase::BeginPlay()
 	{
 		HealthComponent->OnDeath.AddDynamic(this, &AFPSREnemyBase::HandleDeath);
 		// Client-side death cosmetic (U20): OnDeathCosmetic fires from OnRep_bDead on clients (the authority drives
-		// death cosmetics from its own path). Enters the Death animation state. Harmless when no AnimProfile is set.
+		// death cosmetics from its own path — HandleDeath calls HandleDeathCosmetic directly, since OnRep does not
+		// run on the server). Enters the Death animation state. Harmless when no AnimProfile is set.
 		HealthComponent->OnDeathCosmetic.AddDynamic(this, &AFPSREnemyBase::HandleDeathCosmetic);
 	}
 
@@ -144,6 +145,13 @@ void AFPSREnemyBase::InitHealthBarWidget()
 
 void AFPSREnemyBase::HandleDeath(AActor* DeadActor, AActor* Killer)
 {
+	// Death cosmetics for the listen-server host / standalone: OnDeathCosmetic only fires from OnRep_bDead, which
+	// never runs on authority, so without this the host is the one machine that never plays the death state (remote
+	// clients do). Mirrors AFPSRBossBase::HandleDeath. Currently invisible on BOTH sides because ReleaseEnemy below
+	// hides the actor in the same frame (the known Stage-3 death-dwell dependency documented on HandleDeathCosmetic);
+	// calling it here means Stage-3 lands with host/client parity instead of regressing the host only.
+	HandleDeathCosmetic();
+
 	if (UWorld* World = GetWorld())
 	{
 		if (UFPSRPickupSubsystem* Pickups = World->GetSubsystem<UFPSRPickupSubsystem>())

@@ -297,11 +297,15 @@ void AFPSRPlayerState::OnRep_LifeState()
 		}
 	}
 
-	// Mirror the server's downed locomotion on clients so movement prediction matches: crawl speed while DBNO,
+	// Mirror the server's downed locomotion on clients so movement prediction matches: locked while not Alive,
 	// normal (combat-mult) speed once revived back to Alive. (Mirrors the move-speed-multiplier client sync path.)
+	// Test !Alive (not ==DBNO): the DBNO->Dead transition on a team wipe (GameMode::NotifyPlayerDefeated) goes
+	// through SetLifeState alone with no direct ApplyDownedLocomotion call, so ==DBNO would restore walk speed on
+	// remote clients while the listen-server host — which gets no OnRep — keeps it locked. HandleOutOfHealth passes
+	// true and PerformRevive passes false, so !Alive is the consistent predicate across all three paths.
 	if (AFPSRCharacter* OwnerChar = Cast<AFPSRCharacter>(GetPawn()))
 	{
-		OwnerChar->ApplyDownedLocomotion(LifeState == EFPSRLifeState::DBNO);
+		OwnerChar->ApplyDownedLocomotion(LifeState != EFPSRLifeState::Alive);
 	}
 }
 
