@@ -8,7 +8,8 @@
 class USlider;
 class UCommonTextBlock;
 class UCommonButtonBase;
-class UButton;
+class UPanelWidget;
+class UFPSRCrosshairColorPresetDataAsset;
 
 /** Shared settings overlay (MVP = master volume). Pushed to the Menu layer from the main menu and to the
  *  GameMenu layer in-game (non-pause overlay — 4-player coop never stops the server). The slider drives
@@ -47,21 +48,15 @@ protected:
 	UPROPERTY(meta = (BindWidgetOptional))
 	TObjectPtr<UCommonTextBlock> CrosshairThicknessValueText;
 
-	/** Crosshair color preset buttons (each sets a fixed color). All optional so the WBP wires whichever it has. */
+	/** Panel the crosshair colour swatches are generated into — one button per entry in ColorPresets, built at
+	 *  init. Optional so a WBP that predates the data-driven presets still binds (the row is then just absent). */
 	UPROPERTY(meta = (BindWidgetOptional))
-	TObjectPtr<UButton> ColorPresetWhite;
+	TObjectPtr<UPanelWidget> ColorPresetContainer;
 
-	UPROPERTY(meta = (BindWidgetOptional))
-	TObjectPtr<UButton> ColorPresetGreen;
-
-	UPROPERTY(meta = (BindWidgetOptional))
-	TObjectPtr<UButton> ColorPresetCyan;
-
-	UPROPERTY(meta = (BindWidgetOptional))
-	TObjectPtr<UButton> ColorPresetRed;
-
-	UPROPERTY(meta = (BindWidgetOptional))
-	TObjectPtr<UButton> ColorPresetYellow;
+	/** Designer-authored crosshair colour swatches. Adding/removing/re-colouring a preset is a pure data edit —
+	 *  no C++ and no UMG change (the buttons are generated from this list). */
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Crosshair")
+	TObjectPtr<UFPSRCrosshairColorPresetDataAsset> ColorPresets;
 
 	/** Optional explicit Back/Close button (CommonUI Back also closes). */
 	UPROPERTY(meta = (BindWidgetOptional))
@@ -84,12 +79,11 @@ private:
 	UFUNCTION()
 	void HandleCrosshairThicknessCommitted();
 
-	/** Color preset button handlers — each applies + persists a fixed crosshair color. */
-	UFUNCTION() void HandleColorPresetWhite();
-	UFUNCTION() void HandleColorPresetGreen();
-	UFUNCTION() void HandleColorPresetCyan();
-	UFUNCTION() void HandleColorPresetRed();
-	UFUNCTION() void HandleColorPresetYellow();
+	/** Generate one swatch button per entry in ColorPresets into ColorPresetContainer (called once at init). */
+	void BuildColorPresetButtons();
+
+	/** Apply + persist the crosshair colour of the preset at Index (bound per generated swatch). */
+	void ApplyPresetByIndex(int32 Index);
 
 	UFUNCTION()
 	void HandleBackClicked();

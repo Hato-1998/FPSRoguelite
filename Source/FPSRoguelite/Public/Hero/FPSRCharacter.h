@@ -373,10 +373,6 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Movement")
 	float BaseWalkSpeed = 600.0f;
 
-	/** Downed (DBNO) crawl speed as a fraction of the normal walk speed (Game.MD §2-13). Balance value. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Movement", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-	float DownedMoveScale = 0.3f;
-
 	/** Server-only: world time of last dash (init far in the past so the first dash is allowed). */
 	float LastDashTime = -1000.0f;
 

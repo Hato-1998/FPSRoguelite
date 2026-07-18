@@ -5,14 +5,12 @@
 #include "CoreMinimal.h"
 #include "FPSRWeaponTypes.generated.h"
 
-/** Weapon firing archetypes (drive stat EditConditionHides + the fire ability). All are live EXCEPT Burst, which is
- *  currently unused — burst fire ships via UFPSRFragment_BurstFire + EFPSRFireMode::Burst, not this archetype value.
- *  Burst is kept only to preserve enum ordinals/serialized data; do not author a weapon with Archetype = Burst. */
+/** Weapon firing archetypes (drive stat EditConditionHides + the fire ability). Burst is intentionally absent —
+ *  burst fire ships as UFPSRFragment_BurstFire driving EFPSRFireMode::Burst, not as an archetype. */
 UENUM(BlueprintType)
 enum class EFPSRWeaponArchetype : uint8
 {
 	FullAuto,
-	Burst,
 	AOE,
 	Melee,
 	ChargeLaser,
