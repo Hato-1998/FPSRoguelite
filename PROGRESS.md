@@ -6,7 +6,22 @@
 
 **최종 갱신: 2026-07-18**
 
-## 🔔 현재 상태 (2026-07-18 · W2-A 코드 품질 그라인딩 **✅완료·main 머지** — 다음 프론티어 = U22 전체교체)
+## 🔔 현재 상태 (2026-07-18 · W2-B 정확성 감사 **✅수정 완료·검증 통과 → 사용자 검토/PIE 대기** · 브랜치 `phase/w2b-correctness` — 다음 프론티어 = U22 전체교체)
+
+### ⑧ W2-B 런타임 정확성 전수 감사 = ✅수정·검증 완료, **머지 전 사용자 PIE 대기** (2026-07-18, `phase/w2b-correctness`)
+> W2-A(코드 품질)의 짝인 **정확성축**. 서버권위·복제/Push Model·MP 엣지·프리즈 게이트·생명주기·레이스·안티치트만 대상(성능 U25 / 스타일 W2-A / 콘텐츠·밸런스 제외). **전부 4인 협동+리슨서버 기준.**
+> 방법 = 6 도메인 파인더(Sonnet) → **도메인별 적대 검증 2렌즈(Opus, refute-by-default)** → Opus 직접 소스 교차검증 → Codex 머지게이트 3라운드. 에이전트 12개(§6-5-1 상한 준수).
+- **감사**: 원시 findings 14 → **적대검증 생존 9 / REJECTED 5**. 문서 = `Docs/codex-reviews/w2b-correctness-20260718.md`(gitignore).
+- **🚨 P1 2건 = 근본원인 1개** (`93c4e3b5`): **런 맵 `AFPSRGameMode`에 `Logout` 오버라이드가 없었음.** 와이프 판정(`NotifyPlayerDefeated`)과 카드 프리즈(`GameState::RefreshPauseState`)가 **둘 다 pull 방식**인데 접속 종료가 어느 쪽도 트리거하지 않음 → ① 마지막 생존자 이탈 시 `EndRun(Defeat)` 영원히 미선언 ② 픽 대기자 이탈 시 프리즈 영구 고착. ②는 **자기봉인 데드락**(프리즈가 디렉터·스폰·XP를 멈춰 재계산 이벤트 자체가 발생 불가) + `FPSR.Pause`가 시핑 제외라 **출시 빌드 복구 불가**. 수정 = 로비 GM과 동일한 **다음 틱 지연** 재평가(`Super::Logout`이 `CleanupPlayerState`보다 먼저 돌아 즉시 재평가하면 이탈자를 아직 셈).
+- **P2 2건** (`93c4e3b5`): ① `ServerTryConsumeFireInterval`이 다음 허용시각을 **도착시각에 재앵커**해 관용 25%가 매 발 누적 → 지속 간격 `0.75×`로 수렴 = **무기 4계열 전부 영구 +33% 연사**(수정 = `FMath::Max(Now, Next) + MinInterval`, 관용은 1회성으로 유지). ② `EquipSlot` **동일 슬롯 재입력**이 부분탄창 재장전을 취소하고 재개 안 함(재개는 탄약 0일 때만) + `CurrentSlotIndex`가 자기 값으로 쓰여 **OnRep 미발화 → 원격 클라만 쿨다운 미적용 = 유령 발사**(호스트엔 없는 비대칭).
+- **P3 2건** (`93c4e3b5`, 각 1줄): `FPSREnemyBase::HandleDeath`가 `HandleDeathCosmetic` 직접 호출(보스와 동일 — 호스트는 OnRep이 없어 사망 상태 미적용, **Stage-3 death-dwell 착수 시 호스트만 회귀하는 것 사전 차단**) · `OnRep_LifeState` 이동잠금 조건을 `!= Alive`로 통일(DBNO→Dead 비대칭 제거).
+- **Codex 머지게이트가 내 수정의 후속 결함 2건 적발**(3라운드): ① 부활 시 프리즈 재계산 누락 → `PerformRevive`에 `RefreshPauseState` 추가(`04c6d10b`) ② 다운된 플레이어의 **stale 카드 오퍼가 남아 전투 중 수락 가능** → `AFPSRPlayerController::WithdrawActiveOffer` 신설(`192dc793`). **픽은 소모하지 않아 부활 시 재제시 = 손실 없음**(`RequestCardOffer`는 뽑을 때 소모하지 않고 `ApplyCard`가 적용 시 소모). 3라운드 = "no discrete, actionable correctness issues" **통과**.
+- **REJECTED 5건**(적대 검증이 반박 성공, 억지 버그 제조 없음): 적 풀 이중반납(호출처 4곳 전부 구조적 불가) · AliveCount 누수(서브시스템 없는데 ActiveEnemies에 있는 상태 = 논리적 구성 불가) · **2층 타깃팅**(흐름장은 `SampleFlowDirection(MapId, 위치)`라 타깃 좌표를 아예 안 씀 = 인과 자체가 틀림) · 부활/와이프 레이스(게이지 1.0과 `PerformRevive`가 같은 문장 블록 동기 호출이라 대기 창 없음) · 투사체 포인터(반환값 역참조처 0).
+- **이월**(수정 안 함): 투사체 cap eviction의 `NotifyMiss` 우회(P3, 해제경로 통합 필요·도달난이도 매우 높음) · 적 발사체 `InstigatorActor` stale(P3, 피격방향 표시기 좌표만 = 코스메틱) · **런 중 재접속 진행도 복원(P3 = 버그 아닌 미구현 기능 — 복원 구현은 식별자 스푸핑 안티치트 표면을 새로 만듦, 사용자 설계 결정 필요)** · `ReleaseEnemy` 1줄 방어 하드닝.
+- **검증**: 빌드 `Result: Succeeded` ×3 · 스모크 `ModuleLoads Result={Success}` ×3 · Codex 게이트 3라운드 통과 · Opus 직접 소스 교차검증(P1/P2 전 항목).
+- **⏳ 머지 전 남은 것 = 사용자 PIE**: **F1이 핵심** — 2인 이상 PIE에서 ① 카드 프리즈 중 한 명 강제 종료 → 나머지 프리즈 해제되는지 ② 마지막 생존자 이탈 → Defeat 선언되는지. F3(부분탄창 재장전 중 같은 슬롯 키 재입력) 실측 권장. F2/F4/F5는 수식·경로 확정이라 빌드+스모크로 충분.
+
+### ⑦ W2-A 코드 품질·기술부채 그라인딩 = ✅완료·main 머지 (2026-07-18)
 
 > **U21 파일럿 게이트 통과**(사용자 판정 2026-07-18): S1 단차 walkability ✅ · S3 셀 아웃라인×VAT 정합 ✅ · S4 성능 실측 ✅("다음 유닛 넘어갈 만한 퍼포먼스"). 아트 방향 = 사전확정 셀/툰 피벗(메모리 `synty-anime-cel-art-pivot`)이 **파일럿으로 검증됨** → U22(전체교체) 게이트 해제. **✅하위결정 2건 확정(2026-07-18)**: ① 무기 백본 = **Synty Military 전환**(→ 나중에 SF 무기로 리스킨/변환) ② 캐릭터 애님 = **3인칭 Blu · 1인칭 PWAS**(손저작 AnimBP 대체 → U15 1P·U19 3P 손저작 계획은 이 파이프라인에 흡수, U20 적 VAT만 별도로 U22 적교체 후 베이크).
 > **추가 수정 = SRS 아웃라인 거리 헤이즈**(아래 §⑥). 코드 미커밋 0. 작업트리 = **사용자 콘텐츠만 미커밋**(아래 §미커밋 콘텐츠 — SRS 수정은 `L_GameFloor.umap` 인스턴스에 포함).
