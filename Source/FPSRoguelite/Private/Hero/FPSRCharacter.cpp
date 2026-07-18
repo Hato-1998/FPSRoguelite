@@ -492,7 +492,6 @@ void AFPSRCharacter::ApplyDownedLocomotion(bool bDowned)
 	{
 		// Stationary: DBNO no longer crawls — the player stays where it fell and spectates an ally (§2-13). Movement
 		// input is also gated for !Alive (Input_Move*), so this is belt-and-suspenders against residual slide.
-		// (DownedMoveScale is now unused — kept for a possible future crawl toggle.)
 		MoveComp->MaxWalkSpeed = 0.0f;
 	}
 	else

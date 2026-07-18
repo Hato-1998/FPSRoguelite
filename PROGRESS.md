@@ -20,6 +20,15 @@
 - **검증**: 빌드 `Result: Succeeded`(-WaitMutex 풀빌드, UHT WarningsAsErrors) · 스모크 `ModuleLoads Result={Success}` · Codex 머지게이트 = P2 1건(패키지 cook)만 → `4a6c7b1b`로 해소.
 - **⚠️ 후속(사용자 판단)**: cook 규칙(`/Engine/BasicShapes` DirectoriesToAlwaysCook)은 **패키지 빌드 미검증**(현 세션 빌드/스모크만) — 실 패키지 시 XP젬 가시성 확인 권장. 단 dev 스캐폴딩이라 U22서 실메시 교체되면 무의미.
 
+### ⑧ W2-A 후속 = 보류항목 4건 처리 (2026-07-18, `phase/w2a-deferred-cleanup` → main)
+> W2-A에서 DEFER했던 것을 **사용자 판단으로 지금 처리**("일부러 터뜨려 지금 잡아둬야 나중에 편해" — 호환 껍데기/리다이렉트 없이).
+- **제거 3건**: `DownedMoveScale`(죽은 UPROPERTY) · `AvailableModifiers`(폐기 필드) · `EFPSRWeaponArchetype::Burst`(미사용 아키타입). **콘텐츠 스캔으로 영향 에셋 0건 사전 확인**.
+- **`ECardGroup::WeaponUnlock`은 보존(판정 번복)**: 제거 시도 중 **7개 해금 카드 에셋(`DA_CardUnlock_*`)이 실제로 이 값을 분류로 사용** 중임을 발견 — 종전 "미사용" 판정은 **C++ 한정 조사의 누락**이었음. dead CODE이지 dead DATA가 아니므로 값 유지 + "Weapon으로 재태깅하면 `TargetWeapon`이 설정돼 실동작이 바뀐다"는 경고를 주석에 명시.
+- **크로스헤어 색 프리셋 데이터에셋화**: `UFPSRCrosshairColorPresetDataAsset`(이름+색 배열) 신설, 설정 위젯이 프리셋 수만큼 스와치 버튼을 **런타임 생성**(고정 버튼 5·핸들러 5·하드코딩 색 5 제거). `UFPSRColorPresetButton`(UButton 파생)이 자기 인덱스를 네이티브 델리게이트로 실어 보내 **별도 버튼 WBP 없이** 동적 생성 가능.
+- **Codex 리뷰**: P2(프리셋 미배선 시 색 설정 사라짐) = 수용, 단 fallback 복구 대신 **경고 로그 2종**으로 표면화. **P1(Burst 제거가 뒤 enum ordinal을 밀어 무기 DA 깨짐) = 오탐 판정·미적용** — UE tagged 직렬화는 enum을 이름으로 저장하며 `DA_Weapon_Bazooka/ChargeLaser/Knife/Shotgun/Sniper`가 `"EFPSRWeaponArchetype::<값>"` 문자열을 그대로 보유함을 실증(FullAuto 무기가 목록에 없는 것도 기본값 미직렬화와 정합).
+- **검증**: 빌드 `Result: Succeeded`(⚠️XGE가 `C1076` 힙고갈로 실패 → 메모리 처방대로 `-NoXGE` 전환) · 스모크 `ModuleLoads Result={Success}`(신규 DLL 기준 재실행 — 실패 빌드의 구 DLL로 돈 결과는 폐기).
+- **⚠️ 사용자 에디터 작업 필요(이거 안 하면 크로스헤어 색 설정이 안 보임)**: ① `UFPSRCrosshairColorPresetDataAsset` 에셋 생성 + 프리셋 저작(구값: White/Green(0.1,1,0.1)/Cyan(0.1,1,1)/Red(1,0.1,0.1)/Yellow(1,1,0.1)) ② `WBP_Settings`에 스와치 컨테이너(가로 박스) 추가 → `ColorPresetContainer`로 바인드 + **옛 버튼 5개 삭제** ③ 위젯 `ColorPresets`에 ①의 에셋 할당. 누락 시 로그에 경고가 뜸.
+
 ### ⑥ 적 "뿌연 구름" = 진단·수정 완료 (2026-07-18, 콘텐츠 = `L_GameFloor` 인스턴스)
 **증상**: 런 시작 후 적 swarm(만)에 반투명 회색 헤이즈. 멀수록 심하고 가까이 오면 옅어짐. 건물은 쨍.
 - **격리(콘솔 사다리)**: 모션블러 OFF(`r.MotionBlurQuality=0`)·`showflag.Fog 0`·`showflag.Atmosphere 0`·`r.TSR.Enable 0`·`showflag.Bloom 0` = **전부 변화 없음** → `showflag.PostProcessing 0`에서만 정상 = **포스트프로세스 머티리얼**이 범인(엔진 하이트포그/대기/TSR/블룸 전부 아님).

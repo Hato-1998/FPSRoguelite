@@ -1,10 +1,14 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "UI/FPSRSettingsWidget.h"
+#include "UI/FPSRColorPresetButton.h"
+#include "UI/FPSRCrosshairColorPresetDataAsset.h"
 #include "Audio/FPSRAudioSubsystem.h"
+#include "Core/FPSRLogChannels.h"
 #include "Settings/FPSRGameUserSettings.h"
+#include "Blueprint/WidgetTree.h"
+#include "Components/PanelWidget.h"
 #include "Components/Slider.h"
-#include "Components/Button.h"
 #include "CommonTextBlock.h"
 #include "CommonButtonBase.h"
 #include "CommonInputModeTypes.h"
@@ -47,27 +51,8 @@ void UFPSRSettingsWidget::NativeOnInitialized()
 		BackButton->OnClicked().AddUObject(this, &UFPSRSettingsWidget::HandleBackClicked);
 	}
 
-	// Color presets — each is a fixed-color CommonButton. Bind the same way as BackButton (native event).
-	if (ColorPresetWhite)
-	{
-		ColorPresetWhite->OnClicked.AddDynamic(this, &UFPSRSettingsWidget::HandleColorPresetWhite);
-	}
-	if (ColorPresetGreen)
-	{
-		ColorPresetGreen->OnClicked.AddDynamic(this, &UFPSRSettingsWidget::HandleColorPresetGreen);
-	}
-	if (ColorPresetCyan)
-	{
-		ColorPresetCyan->OnClicked.AddDynamic(this, &UFPSRSettingsWidget::HandleColorPresetCyan);
-	}
-	if (ColorPresetRed)
-	{
-		ColorPresetRed->OnClicked.AddDynamic(this, &UFPSRSettingsWidget::HandleColorPresetRed);
-	}
-	if (ColorPresetYellow)
-	{
-		ColorPresetYellow->OnClicked.AddDynamic(this, &UFPSRSettingsWidget::HandleColorPresetYellow);
-	}
+	// Colour swatches are generated from the preset DataAsset (no fixed per-colour buttons/handlers in C++ or UMG).
+	BuildColorPresetButtons();
 }
 
 void UFPSRSettingsWidget::NativeOnActivated()
@@ -167,11 +152,60 @@ void UFPSRSettingsWidget::ApplyColorPreset(const FLinearColor& Color)
 	}
 }
 
-void UFPSRSettingsWidget::HandleColorPresetWhite()  { ApplyColorPreset(FLinearColor(1.0f, 1.0f, 1.0f, 1.0f)); }
-void UFPSRSettingsWidget::HandleColorPresetGreen()  { ApplyColorPreset(FLinearColor(0.10f, 1.0f, 0.10f, 1.0f)); }
-void UFPSRSettingsWidget::HandleColorPresetCyan()   { ApplyColorPreset(FLinearColor(0.10f, 1.0f, 1.0f, 1.0f)); }
-void UFPSRSettingsWidget::HandleColorPresetRed()    { ApplyColorPreset(FLinearColor(1.0f, 0.10f, 0.10f, 1.0f)); }
-void UFPSRSettingsWidget::HandleColorPresetYellow() { ApplyColorPreset(FLinearColor(1.0f, 1.0f, 0.10f, 1.0f)); }
+void UFPSRSettingsWidget::BuildColorPresetButtons()
+{
+	const int32 PresetCount = ColorPresets ? ColorPresets->Presets.Num() : 0;
+
+	// The swatch row needs TWO content-authored halves: a preset asset on this WBP and a container to parent the
+	// generated buttons into. Warn loudly for either gap — a silently empty row is indistinguishable from "the
+	// crosshair colour setting was removed", so a half-migrated WBP must be obvious in the log during content work.
+	if (!ColorPresets)
+	{
+		UE_LOG(LogFPSR, Warning,
+			TEXT("[Settings] %s has no ColorPresets asset assigned — crosshair colour swatches are disabled."),
+			*GetClass()->GetName());
+	}
+
+	if (!ColorPresetContainer)
+	{
+		UE_LOG(LogFPSR, Warning,
+			TEXT("[Settings] WBP binds no ColorPresetContainer — %d authored crosshair colour preset(s) cannot be shown."),
+			PresetCount);
+		return;
+	}
+
+	// Rebuildable: clear first so this is safe if it ever runs more than once.
+	ColorPresetContainer->ClearChildren();
+
+	for (int32 Index = 0; Index < PresetCount; ++Index)
+	{
+		const FFPSRCrosshairColorPreset& Preset = ColorPresets->Presets[Index];
+
+		UFPSRColorPresetButton* Swatch = WidgetTree
+			? WidgetTree->ConstructWidget<UFPSRColorPresetButton>(UFPSRColorPresetButton::StaticClass())
+			: nullptr;
+		if (!Swatch)
+		{
+			continue;
+		}
+
+		// The button IS the swatch: its background carries the preset colour, the tooltip carries the label.
+		Swatch->SetBackgroundColor(Preset.Color);
+		Swatch->SetToolTipText(Preset.DisplayName);
+		Swatch->InitPresetButton(Index);
+		Swatch->OnPresetClicked.AddUObject(this, &UFPSRSettingsWidget::ApplyPresetByIndex);
+
+		ColorPresetContainer->AddChild(Swatch);
+	}
+}
+
+void UFPSRSettingsWidget::ApplyPresetByIndex(int32 Index)
+{
+	if (ColorPresets && ColorPresets->Presets.IsValidIndex(Index))
+	{
+		ApplyColorPreset(ColorPresets->Presets[Index].Color);
+	}
+}
 
 void UFPSRSettingsWidget::UpdateThicknessValueText(float Value)
 {
