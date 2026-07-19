@@ -57,7 +57,7 @@
 | ID | 유닛 | 구분 | 선행/게이트 | 상태 | 실행 프롬프트 |
 |---|---|---|---|---|---|
 | **U21** | Synty 아트 파일럿 게이트 (셀/툰 렌더러·무기모듈·Blu팔+PWAS·스웜 200-300 perf, throwaway). **산출에 아트 정체성 결정 포함** = Infima 유지 vs Synty Military 전환 vs Blu+PWAS 손저작 AnimBP 대체 | 에셋/PIE | — | ✅**완료**(2026-07-18 사용자 판정: S1/S3/S4 통과·perf OK·SRS 아웃라인 헤이즈 수정. **하위결정 2건도 같은 날 확정** = 무기 백본 Synty Military 전환 / 캐릭터 3P Blu·1P PWAS — 상세 §A. ⚠️S4는 **정성 판정만** 남고 정량 수치는 리포 어디에도 없음 → U22 전후 비교 기준선 부재, U22 첫 단계에서 현 상태 캡처 필요) | `Docs/SyntyArtPilot_Scoped_ResumePrompt.md` + `Docs/SyntyArtPilot_S1_CityBuildGuide.md` |
-| **U22a** | Synty 에셋교체 ① **환경 = 맵1 CyberCity만**(맵2 숲·맵3 우주는 범위 밖) | 에셋 | U21 ✅통과 | **다음 착수** | [`Docs/U22_AssetReplacement_Prompt.md`](U22_AssetReplacement_Prompt.md) §3 |
+| **U22a** | Synty 에셋교체 ① **환경 = 맵1 CyberCity만**(맵2 숲·맵3 우주는 범위 밖) + **맵 승격**(`L_GameFloor`→`L_Map_Center`, `RunMap` 전환, `L_Sandbox` 제거) | 에셋 | U21 ✅통과 | **다음 착수** | [`Docs/U22_AssetReplacement_Prompt.md`](U22_AssetReplacement_Prompt.md) §3 |
 | **U22b** | Synty 에셋교체 ② 무기 7정·캐릭터(3P Blu/1P PWAS)·적 저코스트 VAT·UI 리스킨·VFX | 에셋 | **U22a 사용자 육안 게이트** | 대기 | 같은 문서 §4 |
 | **U15/U19/U20** | 통합 애니 콘텐츠 저작 (A 1P무기·B 3P팀원·C 적VAT+보스스켈). 코드 인프라 ✅, 콘텐츠 미저작 | 콘텐츠 | **⚠️HOLD**: U21 아트정체성 결정 (U20 VAT 베이크 = U22 적교체 후) | HOLD | `Docs/AnimationPass_ContentGuide.md`(자족 A/B/C) |
 | **U12** | UI/필 잔여 (카드 아이콘 콘텐츠 · 무기별 팔 AnimBP=U15 흡수 · 서버권위 bloom=장기백로그) | 콘텐츠 | — | 잔여 hold | §C U12(잔여) |
