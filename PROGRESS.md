@@ -4,9 +4,36 @@
 > **작업 단계를 끝낼 때마다, 그리고 중단 전 반드시 이 파일을 갱신하고 커밋한다.**
 > 확정 설계·기획·코드구조·규칙은 `Game.md`(**SSOT 허브** → 도메인별 `Docs/SSOT/*.md`, 작업별 라우팅은 허브 §0-1), **완료 작업 상세는 `git log --oneline`**. 여기엔 *무엇을 했는지*만 요약한다.
 
-**최종 갱신: 2026-07-18**
+**최종 갱신: 2026-07-19**
 
-## 🔔 현재 상태 (2026-07-18 · W2-A 코드 품질 그라인딩 **✅완료·main 머지** — 다음 프론티어 = U22 전체교체)
+## 🔔 현재 상태 (2026-07-19 · W2-B 정확성 감사 **✅완료·PIE 2인 검증 통과** — 다음 = ⑨ 메뉴/세션 권위 결함 3건 or U22 전체교체)
+
+### ⑧ W2-B 런타임 정확성 전수 감사 = ✅수정·검증 완료, **머지 전 사용자 PIE 대기** (2026-07-18, `phase/w2b-correctness`)
+> W2-A(코드 품질)의 짝인 **정확성축**. 서버권위·복제/Push Model·MP 엣지·프리즈 게이트·생명주기·레이스·안티치트만 대상(성능 U25 / 스타일 W2-A / 콘텐츠·밸런스 제외). **전부 4인 협동+리슨서버 기준.**
+> 방법 = 6 도메인 파인더(Sonnet) → **도메인별 적대 검증 2렌즈(Opus, refute-by-default)** → Opus 직접 소스 교차검증 → Codex 머지게이트 3라운드. 에이전트 12개(§6-5-1 상한 준수).
+- **감사**: 원시 findings 14 → **적대검증 생존 9 / REJECTED 5**. 문서 = `Docs/codex-reviews/w2b-correctness-20260718.md`(gitignore).
+- **🚨 P1 2건 = 근본원인 1개** (`93c4e3b5`): **런 맵 `AFPSRGameMode`에 `Logout` 오버라이드가 없었음.** 와이프 판정(`NotifyPlayerDefeated`)과 카드 프리즈(`GameState::RefreshPauseState`)가 **둘 다 pull 방식**인데 접속 종료가 어느 쪽도 트리거하지 않음 → ① 마지막 생존자 이탈 시 `EndRun(Defeat)` 영원히 미선언 ② 픽 대기자 이탈 시 프리즈 영구 고착. ②는 **자기봉인 데드락**(프리즈가 디렉터·스폰·XP를 멈춰 재계산 이벤트 자체가 발생 불가) + `FPSR.Pause`가 시핑 제외라 **출시 빌드 복구 불가**. 수정 = 로비 GM과 동일한 **다음 틱 지연** 재평가(`Super::Logout`이 `CleanupPlayerState`보다 먼저 돌아 즉시 재평가하면 이탈자를 아직 셈).
+- **P2 2건** (`93c4e3b5`): ① `ServerTryConsumeFireInterval`이 다음 허용시각을 **도착시각에 재앵커**해 관용 25%가 매 발 누적 → 지속 간격 `0.75×`로 수렴 = **무기 4계열 전부 영구 +33% 연사**(수정 = `FMath::Max(Now, Next) + MinInterval`, 관용은 1회성으로 유지). ② `EquipSlot` **동일 슬롯 재입력**이 부분탄창 재장전을 취소하고 재개 안 함(재개는 탄약 0일 때만) + `CurrentSlotIndex`가 자기 값으로 쓰여 **OnRep 미발화 → 원격 클라만 쿨다운 미적용 = 유령 발사**(호스트엔 없는 비대칭).
+- **P3 2건** (`93c4e3b5`, 각 1줄): `FPSREnemyBase::HandleDeath`가 `HandleDeathCosmetic` 직접 호출(보스와 동일 — 호스트는 OnRep이 없어 사망 상태 미적용, **Stage-3 death-dwell 착수 시 호스트만 회귀하는 것 사전 차단**) · `OnRep_LifeState` 이동잠금 조건을 `!= Alive`로 통일(DBNO→Dead 비대칭 제거).
+- **Codex 머지게이트가 내 수정의 후속 결함 2건 적발**(3라운드): ① 부활 시 프리즈 재계산 누락 → `PerformRevive`에 `RefreshPauseState` 추가(`04c6d10b`) ② 다운된 플레이어의 **stale 카드 오퍼가 남아 전투 중 수락 가능** → `AFPSRPlayerController::WithdrawActiveOffer` 신설(`192dc793`). **픽은 소모하지 않아 부활 시 재제시 = 손실 없음**(`RequestCardOffer`는 뽑을 때 소모하지 않고 `ApplyCard`가 적용 시 소모). 3라운드 = "no discrete, actionable correctness issues" **통과**.
+- **REJECTED 5건**(적대 검증이 반박 성공, 억지 버그 제조 없음): 적 풀 이중반납(호출처 4곳 전부 구조적 불가) · AliveCount 누수(서브시스템 없는데 ActiveEnemies에 있는 상태 = 논리적 구성 불가) · **2층 타깃팅**(흐름장은 `SampleFlowDirection(MapId, 위치)`라 타깃 좌표를 아예 안 씀 = 인과 자체가 틀림) · 부활/와이프 레이스(게이지 1.0과 `PerformRevive`가 같은 문장 블록 동기 호출이라 대기 창 없음) · 투사체 포인터(반환값 역참조처 0).
+- **이월**(수정 안 함): 투사체 cap eviction의 `NotifyMiss` 우회(P3, 해제경로 통합 필요·도달난이도 매우 높음) · 적 발사체 `InstigatorActor` stale(P3, 피격방향 표시기 좌표만 = 코스메틱) · **런 중 재접속 진행도 복원(P3 = 버그 아닌 미구현 기능 — 복원 구현은 식별자 스푸핑 안티치트 표면을 새로 만듦, 사용자 설계 결정 필요)** · `ReleaseEnemy` 1줄 방어 하드닝.
+- **검증**: 빌드 `Result: Succeeded` ×3 · 스모크 `ModuleLoads Result={Success}` ×3 · Codex 게이트 3라운드 통과 · Opus 직접 소스 교차검증(P1/P2 전 항목).
+- **✅ 사용자 PIE 2인 검증 통과(2026-07-19)**: ① 카드 프리즈 중 클라 이탈 → 나머지 프리즈 해제 ✅ ② 마지막 생존자 이탈 → Defeat 선언 ✅. **P1 수정이 실측으로 확인됨** → 머지 조건 충족.
+  - **PIE 2인 테스트 레시피(재사용)**: 메뉴에서 시작하면 안 됨(아래 §⑨) → **`L_Lobby`를 열고 ▶ Play**(PIE_ListenServer·2 clients) → 준비 → 런 시작(로비 GM `bUseSeamlessTravel=true`라 클라 동반) → 게임 맵에서 2인.
+  - **이탈 시뮬레이션 = 클라 창 콘솔(`~`)에 엔진 내장 `disconnect`**. PIE에서 ESC는 플레이 종료라 설정 오버레이를 못 여는 반면, `disconnect`는 그 창 연결만 끊어 서버 `Logout`을 정상 발화시킨다(`UnrealEngine.cpp:15130-15155` = `SetClientTravel("?closed")`). 프로세스를 안 죽여 호스트 화면을 계속 관찰 가능.
+- **부수 산출물**: ESC 설정 오버레이에 **게임 종료 버튼**(`dfcbe833`) — 오버레이는 프리즈·다운 중에도 열리므로 패키지 빌드에서 클라가 아무 때나 이탈하는 수단. UMG는 기존 `WBP_QuitButton` 인스턴스 재사용(신규 에셋 0). 패키지 = `Packaged/26_7_19_BuildTest_1/`(BUILD_INFO에 T1~T4 절차).
+
+### ⑨ 🔴 메뉴/세션 경로 서버권위 결함 3건 = **미수정, 별도 아크** (2026-07-19 발각)
+> W2-B PIE 검증 중 **PIE 메인메뉴에서 Play를 누르면 에디터가 하드 크래시**하는 것을 계기로 발각. W2-B 감사 범위가 "런 중 게임플레이"라 메뉴/세션 경로를 안 본 **범위의 빈틈**. 조사 = 4에이전트 워크플로(적대 반박 + 권위 census + 테스트경로) + Opus 직접 엔진소스 대조. **W2-B 브랜치와 무관**(`git diff main --stat` = 메뉴/세션/로비 파일 0개, 세 GameMode는 전부 `AGameModeBase`에서 독립 파생).
+- **⑨-1 `HostSession` 세션 자폭 (가장 심각·배포 영향)**: `HostSession`은 진입 즉시 같은 이름의 기존 세션을 파괴하는데(`FPSRSessionSubsystem.cpp:78-92`), **조인 경로도 같은 이름으로 등록**한다(`:282`, 상수 `:19` = `NAME_GameSession`). → Steam으로 조인해 로비에 있는 클라가 어떤 경로로든 `HostSession`에 들어오면 **자기가 참가 중인 세션을 스스로 파괴**. PIE에서 안 보인 이유 = NULL OSS라 조인 자체가 없어 `GetNamedSession`이 null.
+- **⑨-2 클라에서 Play → 하드 크래시**: `HandlePlayClicked`(`FPSRMainMenuWidget.cpp:48-59`)·`HandleCreateSessionComplete`(`FPSRSessionSubsystem.cpp:152-158`) 둘 다 넷모드 검사 0 → 클라 월드에 `ServerTravel("...?listen")`. 엔진(`World.cpp:9389-9406`)은 `GetAuthGameMode()==nullptr`이라 검사를 건너뛰고 `NextURL`만 세팅 → `EditorEngine.cpp:2142`가 넷모드 구분 없이 모든 PIE 컨텍스트를 틱 → `LoadMap`이 클라 자기 넷드라이버를 파괴하고 `?listen`으로 이미 점유된 포트에 바인드 시도. **재현 3/3**(FlowLog 3개가 전부 `[Client] ServerTravel` 줄에서 종료, 서버 경로는 4/4 정상 = 반례 0). 콜스택은 확보 못 함(덤프 없음·UE 로그 버퍼 유실).
+  - **수정 시 함정 3개**(검증자 지적): ⓐ 판정은 **`NM_Client` 차단**이어야 함 — "Standalone만 허용"으로 짜면 **PIE 서버 창(메뉴가 `NM_ListenServer`)까지 막혀** 테스트 불가(`FPSRFlowLog.cpp:49-64` 태그 매핑으로 실측). ⓑ 가드는 **`HostSession` 진입 최상단**(세션 파괴 분기 `:78`보다 **앞**) — `ServerTravel` 직전에 넣으면 고아 세션·오염된 로비코드가 남고 ⑨-1도 못 막음. ⓒ 조기 반환 시 **`OnHostComplete.Broadcast(false)` 필수**(기존 실패 경로 5곳이 전부 지킴, 안 하면 UI 영구 대기).
+- **⑨-3 `AFPSRMenuGameMode`만 `bUseSeamlessTravel` 누락**: 런(`FPSRGameMode.cpp:51`)·로비(`FPSRLobbyGameMode.cpp:26`)는 `true`인데 메뉴 GM 생성자엔 없음 → 메뉴→로비 트래블이 non-seamless라 **접속된 클라를 끊어버림**(실측 `[NETFAIL] Host closed the connection` → 클라가 `Standalone`으로 메뉴 복귀 → 별개 로비 2개 생성). **배포에서는 무해**(각자 메뉴는 Standalone이라 끊길 연결이 없고 타인은 Steam 조인). **PIE 2인 테스트만 막는다** → 위 레시피(`L_Lobby` 시작)로 우회 중. `TransitionMap`은 이미 설정됨(`DefaultEngine.ini:6`).
+- **비버그로 확정**: PIE에서 코드 조인 실패(0 candidate)는 **버그 아님** — Steam이 안 붙어 OSS가 NULL로 폴백되고(로그 `:338-341`) NULL의 `FindSessions`는 LAN 브로드캐스트 전용(`OnlineSessionInterfaceNull.cpp:513-582`). `Docs/P7-U11a_UserContent_Guide.md §7.1/§7.2`에 이미 문서화돼 있었음.
+- **별건 백로그**: `NAME_GameSession` 프로세스 전역 상수 1개를 PIE 두 창이 공유(`:19`) · `GameFlowSubsystem::StartRun/ReturnToMenu`가 헤더엔 "authority-only"라 적고 본문엔 가드 없음(`FPSRGameFlowSubsystem.cpp:8-27`/`:29-48`, 둘 다 BlueprintCallable).
+
+### ⑦ W2-A 코드 품질·기술부채 그라인딩 = ✅완료·main 머지 (2026-07-18)
 
 > **U21 파일럿 게이트 통과**(사용자 판정 2026-07-18): S1 단차 walkability ✅ · S3 셀 아웃라인×VAT 정합 ✅ · S4 성능 실측 ✅("다음 유닛 넘어갈 만한 퍼포먼스"). 아트 방향 = 사전확정 셀/툰 피벗(메모리 `synty-anime-cel-art-pivot`)이 **파일럿으로 검증됨** → U22(전체교체) 게이트 해제. **✅하위결정 2건 확정(2026-07-18)**: ① 무기 백본 = **Synty Military 전환**(→ 나중에 SF 무기로 리스킨/변환) ② 캐릭터 애님 = **3인칭 Blu · 1인칭 PWAS**(손저작 AnimBP 대체 → U15 1P·U19 3P 손저작 계획은 이 파이프라인에 흡수, U20 적 VAT만 별도로 U22 적교체 후 베이크).
 > **추가 수정 = SRS 아웃라인 거리 헤이즈**(아래 §⑥). 코드 미커밋 0. 작업트리 = **사용자 콘텐츠만 미커밋**(아래 §미커밋 콘텐츠 — SRS 수정은 `L_GameFloor.umap` 인스턴스에 포함).

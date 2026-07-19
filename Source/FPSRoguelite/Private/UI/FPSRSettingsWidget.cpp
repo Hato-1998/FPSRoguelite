@@ -13,6 +13,7 @@
 #include "CommonButtonBase.h"
 #include "CommonInputModeTypes.h"
 #include "Engine/World.h"
+#include "Kismet/KismetSystemLibrary.h"
 
 UFPSRSettingsWidget::UFPSRSettingsWidget()
 {
@@ -49,6 +50,11 @@ void UFPSRSettingsWidget::NativeOnInitialized()
 	{
 		// UCommonButtonBase::OnClicked() is a native event — bind with AddUObject (see FPSRMainMenuWidget).
 		BackButton->OnClicked().AddUObject(this, &UFPSRSettingsWidget::HandleBackClicked);
+	}
+
+	if (QuitButton)
+	{
+		QuitButton->OnClicked().AddUObject(this, &UFPSRSettingsWidget::HandleQuitClicked);
 	}
 
 	// Colour swatches are generated from the preset DataAsset (no fixed per-colour buttons/handlers in C++ or UMG).
@@ -109,6 +115,14 @@ void UFPSRSettingsWidget::HandleMasterVolumeCommitted()
 void UFPSRSettingsWidget::HandleBackClicked()
 {
 	DeactivateWidget(); // pops this widget off its layer stack
+}
+
+void UFPSRSettingsWidget::HandleQuitClicked()
+{
+	// Quit to desktop — same call as the main menu's quit (UFPSRMainMenuWidget::HandleQuitClicked). No confirmation
+	// prompt yet: add one here if playtests show accidental clicks. As a client this closes the connection, which is
+	// what drives the server's Logout handling; as the listen-server host it ends the session for everyone.
+	UKismetSystemLibrary::QuitGame(this, GetOwningPlayer(), EQuitPreference::Quit, false);
 }
 
 UFPSRAudioSubsystem* UFPSRSettingsWidget::GetAudioSubsystem() const

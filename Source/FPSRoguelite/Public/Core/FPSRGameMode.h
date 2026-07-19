@@ -22,6 +22,14 @@ public:
 
 	virtual void BeginPlay() override;
 
+	/** A participant left mid-run. The two run-state predicates that read PlayerArray — the wipe check
+	 *  (NotifyPlayerDefeated) and the card-select freeze (GameState::RefreshPauseState) — are both PULL-based: they
+	 *  only recompute when something calls them, and a disconnect calls neither on its own. Without this hook the
+	 *  party soft-locks: the last survivor leaving never declares Defeat, and a leaver who still owed a card pick
+	 *  freezes the run forever (the freeze stops the director/spawner/XP, so no later level-up or mission clear can
+	 *  ever re-trigger the recompute — it seals itself). Mirrors AFPSRLobbyGameMode::Logout. */
+	virtual void Logout(AController* Exiting) override;
+
 	/** Called when the run ends (victory or defeat). Authority-only.
 	 *  Notifies all players with their individual result (ClientShowRunResult RPC). */
 	UFUNCTION(BlueprintCallable, Category = "FPSR|Flow")

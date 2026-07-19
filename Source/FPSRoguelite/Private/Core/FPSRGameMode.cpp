@@ -85,6 +85,37 @@ void AFPSRGameMode::BeginPlay()
 	}
 }
 
+void AFPSRGameMode::Logout(AController* Exiting)
+{
+	Super::Logout(Exiting);
+	FPSRFlowLog::Event(this, TEXT("RUN-GM"), FString::Printf(TEXT("Logout: %s"), Exiting ? *Exiting->GetName() : TEXT("null")));
+
+	// DEFER to next tick: Super::Logout runs BEFORE AController::Destroyed calls CleanupPlayerState, so the exiting
+	// PlayerState is still in GameState->PlayerArray right now. Recomputing here would still count the leaver — the
+	// wipe check would miss the wipe and the freeze would stay pinned. Same reason (and same pattern) as
+	// AFPSRLobbyGameMode::Logout. Re-check authority + GameState inside the callback: a Logout can be part of a
+	// travel/shutdown, by which point either may be gone.
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().SetTimerForNextTick(FTimerDelegate::CreateWeakLambda(this, [this]()
+		{
+			if (!HasAuthority())
+			{
+				return;
+			}
+			// Wipe: the leaver may have been the last survivor. AreAllPlayersDead's participants>0 guard keeps an
+			// emptied PlayerArray (everyone left) from reading as a defeat.
+			NotifyPlayerDefeated();
+			// Freeze: the leaver may have been the last player still owing a card pick. RefreshPauseState skips
+			// PlayerStates with no owning controller, so it is safe regardless of teardown ordering.
+			if (AFPSRGameState* GS = GetGameState<AFPSRGameState>())
+			{
+				GS->RefreshPauseState();
+			}
+		}));
+	}
+}
+
 void AFPSRGameMode::HandlePostRunTravel()
 {
 	if (!HasAuthority())

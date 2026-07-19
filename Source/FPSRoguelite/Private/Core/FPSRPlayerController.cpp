@@ -259,6 +259,19 @@ void AFPSRPlayerController::PresentNextOfferIfNeeded()
 	ClientDismissCardUI();
 }
 
+void AFPSRPlayerController::WithdrawActiveOffer()
+{
+	if (!HasAuthority() || CachedOffer.Num() == 0)
+	{
+		return;
+	}
+	// Drop the server-side offer FIRST: HandleCardSelection applies from CachedOffer and validates the client's index
+	// against it, so an empty cache rejects any selection still in flight. The pending pick counter is deliberately
+	// untouched (RequestCardOffer draws without consuming; ApplyCard consumes) — the player keeps what they are owed.
+	CachedOffer.Reset();
+	ClientDismissCardUI();
+}
+
 void AFPSRPlayerController::NotifyPauseStateDirty()
 {
 	if (AFPSRGameState* GS = GetWorld() ? GetWorld()->GetGameState<AFPSRGameState>() : nullptr)
