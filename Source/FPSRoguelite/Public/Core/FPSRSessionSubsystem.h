@@ -121,6 +121,12 @@ private:
 	/** True while a stale session is being destroyed before (re)hosting — the destroy callback then creates. */
 	bool bHostAfterDestroy = false;
 
+	/** Did WE create the currently registered session, or did we join someone else's? Hosted and joined sessions
+	 *  register under the same name (GFPSRSessionName), so the name alone can't tell them apart — and HostSession's
+	 *  "tear down the stale session first" step would otherwise drop us out of a game we had joined. Set on
+	 *  create-complete, cleared on join-complete and destroy-complete. */
+	bool bLocalSessionIsHosted = false;
+
 	/** This host's generated lobby code (empty on a pure client — read GetLobbyCode from the joined session there). */
 	FString CurrentLobbyCode;
 

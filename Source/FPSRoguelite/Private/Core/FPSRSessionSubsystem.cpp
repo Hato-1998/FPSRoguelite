@@ -62,10 +62,39 @@ IOnlineSessionPtr UFPSRSessionSubsystem::GetSessionInterface() const
 void UFPSRSessionSubsystem::HostSession(int32 MaxPlayers)
 {
 	FPSRFlowLog::Event(this, TEXT("SESSION"), FString::Printf(TEXT("HostSession requested (MaxPlayers=%d)"), MaxPlayers));
+
+	// Hosting is a server-only act, and this is the earliest place to say so: everything below (stale-session
+	// teardown, CreateSession, the ServerTravel in HandleCreateSessionComplete) is wrong on a machine that is
+	// already someone else's client. Blocking here rather than at the travel keeps a client from leaving an
+	// advertised orphan session behind and from overwriting CurrentLobbyCode with a code nobody can join.
+	// Gate on NM_Client specifically, NOT "Standalone only": the shipping main menu is NM_Standalone but a PIE
+	// listen-server window's menu is NM_ListenServer, and both are legitimate hosts.
+	const UWorld* World = GetGameInstance() ? GetGameInstance()->GetWorld() : nullptr;
+	if (!World || World->GetNetMode() == NM_Client)
+	{
+		UE_LOG(LogFPSR, Warning, TEXT("[Session] HostSession ignored — this instance is a client (NetMode=%d)."),
+			World ? static_cast<int32>(World->GetNetMode()) : -1);
+		FPSRFlowLog::Event(this, TEXT("SESSION"), TEXT("HostSession BLOCKED (client)"));
+		OnHostComplete.Broadcast(false);   // every other failure path broadcasts; silence would hang a waiting UI
+		return;
+	}
+
 	IOnlineSessionPtr Sessions = GetSessionInterface();
 	if (!Sessions.IsValid())
 	{
 		UE_LOG(LogFPSR, Error, TEXT("[Session] HostSession: no session interface (Steam not initialized)."));
+		OnHostComplete.Broadcast(false);
+		return;
+	}
+
+	// A registered session we did NOT create is one we JOINED — tearing it down below would silently drop us out of
+	// somebody else's game (the join path registers under the same GFPSRSessionName, see JoinSearchResult). The
+	// NetMode gate above catches this once we have travelled to the host, but not in the window between
+	// JoinSession succeeding and ClientTravel completing, so key the decision on ownership rather than timing.
+	if (Sessions->GetNamedSession(GFPSRSessionName) != nullptr && !bLocalSessionIsHosted)
+	{
+		UE_LOG(LogFPSR, Warning, TEXT("[Session] HostSession refused — already joined a session we did not host. Leave it first."));
+		FPSRFlowLog::Event(this, TEXT("SESSION"), TEXT("HostSession REFUSED (joined session, not ours)"));
 		OnHostComplete.Broadcast(false);
 		return;
 	}
@@ -148,11 +177,22 @@ void UFPSRSessionSubsystem::HandleCreateSessionComplete(FName SessionName, bool 
 		return;
 	}
 
+	// This registered session is OURS — a later HostSession may tear it down as stale, and a later Join must not
+	// mistake it for someone else's (see the ownership gate in HostSession).
+	bLocalSessionIsHosted = true;
+
 	// Travel the listen server into the lobby hub (every run, solo or co-op, starts here — user-confirmed).
 	UWorld* World = GetGameInstance() ? GetGameInstance()->GetWorld() : nullptr;
 	const UFPSRGameFlowSettings* Settings = GetDefault<UFPSRGameFlowSettings>();
 	const FName LobbyPackage = Settings ? Settings->GetLevelPackageName(Settings->LobbyMap) : NAME_None;
-	if (World && LobbyPackage != NAME_None)
+	// Defence in depth: HostSession already refuses on a client, so reaching a client here would mean a new caller
+	// bypassed it. ServerTravel is the call that actually corrupts a client (World.cpp sets NextURL with no
+	// authority check, and the client then tries to become a second listen server in-process), so re-check.
+	if (World && World->GetNetMode() == NM_Client)
+	{
+		UE_LOG(LogFPSR, Error, TEXT("[Session] Hosted on a client — refusing ServerTravel (would hijack this client's connection)."));
+	}
+	else if (World && LobbyPackage != NAME_None)
 	{
 		FPSRFlowLog::Event(this, TEXT("SESSION"), FString::Printf(TEXT("ServerTravel -> lobby (%s)"), *LobbyPackage.ToString()));
 		World->ServerTravel(LobbyPackage.ToString() + TEXT("?listen"));
@@ -295,6 +335,12 @@ void UFPSRSessionSubsystem::HandleJoinSessionComplete(FName SessionName, EOnJoin
 	}
 
 	const bool bSuccess = (Result == EOnJoinSessionCompleteResult::Success);
+	if (bSuccess)
+	{
+		// Registered under the same name as a hosted session, but this one belongs to the host — HostSession must
+		// refuse to "clean it up as stale", which would drop us out of their game without telling anyone.
+		bLocalSessionIsHosted = false;
+	}
 	UE_LOG(LogFPSR, Log, TEXT("[Session] JoinSession '%s' — %s"), *SessionName.ToString(), LexToString(Result));
 	FPSRFlowLog::Event(this, TEXT("JOIN"), FString::Printf(TEXT("JoinSession complete: %s"), LexToString(Result)));
 	OnJoinComplete.Broadcast(bSuccess);
@@ -343,8 +389,10 @@ void UFPSRSessionSubsystem::HandleDestroySessionComplete(FName SessionName, bool
 	UE_LOG(LogFPSR, Log, TEXT("[Session] DestroySession '%s' %s"), *SessionName.ToString(), bWasSuccessful ? TEXT("OK") : TEXT("FAILED"));
 	FPSRFlowLog::Event(this, TEXT("SESSION"), FString::Printf(TEXT("DestroySession complete: %s"), bWasSuccessful ? TEXT("OK") : TEXT("FAILED")));
 
-	// Our session is gone — drop the host code (a fresh one is generated if we re-host below).
+	// Our session is gone — drop the host code (a fresh one is generated if we re-host below) and the ownership
+	// claim with it, so the next HostSession sees a clean slate rather than a stale "we hosted this" flag.
 	CurrentLobbyCode.Reset();
+	bLocalSessionIsHosted = false;
 
 	// Host flow: this destroy was a pre-host teardown of a stale session — now create the new one.
 	if (bHostAfterDestroy)
