@@ -62,6 +62,13 @@ protected:
 	UPROPERTY(meta = (BindWidgetOptional))
 	TObjectPtr<UCommonButtonBase> BackButton;
 
+	/** Optional "Quit game" button — exits to desktop. The overlay is reachable during the card-select freeze and
+	 *  while downed (see AFPSRCharacter's menu input), so this is also the in-game way for a client to leave a
+	 *  listen-server session at any moment: the process closes, the connection drops, and the server runs its
+	 *  Logout path (wipe / freeze recompute). */
+	UPROPERTY(meta = (BindWidgetOptional))
+	TObjectPtr<UCommonButtonBase> QuitButton;
+
 private:
 	/** Live drag: apply without a disk write, refresh the readout. */
 	UFUNCTION()
@@ -87,6 +94,10 @@ private:
 
 	UFUNCTION()
 	void HandleBackClicked();
+
+	/** Quit to desktop (same call the main menu's quit uses). */
+	UFUNCTION()
+	void HandleQuitClicked();
 
 	/** Push the subsystem's current volume into the slider + text (called on activate). */
 	void SyncFromSettings();
