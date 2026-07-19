@@ -4,9 +4,9 @@
 > **작업 단계를 끝낼 때마다, 그리고 중단 전 반드시 이 파일을 갱신하고 커밋한다.**
 > 확정 설계·기획·코드구조·규칙은 `Game.md`(**SSOT 허브** → 도메인별 `Docs/SSOT/*.md`, 작업별 라우팅은 허브 §0-1), **완료 작업 상세는 `git log --oneline`**. 여기엔 *무엇을 했는지*만 요약한다.
 
-**최종 갱신: 2026-07-18**
+**최종 갱신: 2026-07-19**
 
-## 🔔 현재 상태 (2026-07-18 · W2-B 정확성 감사 **✅수정 완료·검증 통과 → 사용자 검토/PIE 대기** · 브랜치 `phase/w2b-correctness` — 다음 프론티어 = U22 전체교체)
+## 🔔 현재 상태 (2026-07-19 · W2-B 정확성 감사 **✅완료·PIE 2인 검증 통과** — 다음 = ⑨ 메뉴/세션 권위 결함 3건 or U22 전체교체)
 
 ### ⑧ W2-B 런타임 정확성 전수 감사 = ✅수정·검증 완료, **머지 전 사용자 PIE 대기** (2026-07-18, `phase/w2b-correctness`)
 > W2-A(코드 품질)의 짝인 **정확성축**. 서버권위·복제/Push Model·MP 엣지·프리즈 게이트·생명주기·레이스·안티치트만 대상(성능 U25 / 스타일 W2-A / 콘텐츠·밸런스 제외). **전부 4인 협동+리슨서버 기준.**
@@ -19,7 +19,19 @@
 - **REJECTED 5건**(적대 검증이 반박 성공, 억지 버그 제조 없음): 적 풀 이중반납(호출처 4곳 전부 구조적 불가) · AliveCount 누수(서브시스템 없는데 ActiveEnemies에 있는 상태 = 논리적 구성 불가) · **2층 타깃팅**(흐름장은 `SampleFlowDirection(MapId, 위치)`라 타깃 좌표를 아예 안 씀 = 인과 자체가 틀림) · 부활/와이프 레이스(게이지 1.0과 `PerformRevive`가 같은 문장 블록 동기 호출이라 대기 창 없음) · 투사체 포인터(반환값 역참조처 0).
 - **이월**(수정 안 함): 투사체 cap eviction의 `NotifyMiss` 우회(P3, 해제경로 통합 필요·도달난이도 매우 높음) · 적 발사체 `InstigatorActor` stale(P3, 피격방향 표시기 좌표만 = 코스메틱) · **런 중 재접속 진행도 복원(P3 = 버그 아닌 미구현 기능 — 복원 구현은 식별자 스푸핑 안티치트 표면을 새로 만듦, 사용자 설계 결정 필요)** · `ReleaseEnemy` 1줄 방어 하드닝.
 - **검증**: 빌드 `Result: Succeeded` ×3 · 스모크 `ModuleLoads Result={Success}` ×3 · Codex 게이트 3라운드 통과 · Opus 직접 소스 교차검증(P1/P2 전 항목).
-- **⏳ 머지 전 남은 것 = 사용자 PIE**: **F1이 핵심** — 2인 이상 PIE에서 ① 카드 프리즈 중 한 명 강제 종료 → 나머지 프리즈 해제되는지 ② 마지막 생존자 이탈 → Defeat 선언되는지. F3(부분탄창 재장전 중 같은 슬롯 키 재입력) 실측 권장. F2/F4/F5는 수식·경로 확정이라 빌드+스모크로 충분.
+- **✅ 사용자 PIE 2인 검증 통과(2026-07-19)**: ① 카드 프리즈 중 클라 이탈 → 나머지 프리즈 해제 ✅ ② 마지막 생존자 이탈 → Defeat 선언 ✅. **P1 수정이 실측으로 확인됨** → 머지 조건 충족.
+  - **PIE 2인 테스트 레시피(재사용)**: 메뉴에서 시작하면 안 됨(아래 §⑨) → **`L_Lobby`를 열고 ▶ Play**(PIE_ListenServer·2 clients) → 준비 → 런 시작(로비 GM `bUseSeamlessTravel=true`라 클라 동반) → 게임 맵에서 2인.
+  - **이탈 시뮬레이션 = 클라 창 콘솔(`~`)에 엔진 내장 `disconnect`**. PIE에서 ESC는 플레이 종료라 설정 오버레이를 못 여는 반면, `disconnect`는 그 창 연결만 끊어 서버 `Logout`을 정상 발화시킨다(`UnrealEngine.cpp:15130-15155` = `SetClientTravel("?closed")`). 프로세스를 안 죽여 호스트 화면을 계속 관찰 가능.
+- **부수 산출물**: ESC 설정 오버레이에 **게임 종료 버튼**(`dfcbe833`) — 오버레이는 프리즈·다운 중에도 열리므로 패키지 빌드에서 클라가 아무 때나 이탈하는 수단. UMG는 기존 `WBP_QuitButton` 인스턴스 재사용(신규 에셋 0). 패키지 = `Packaged/26_7_19_BuildTest_1/`(BUILD_INFO에 T1~T4 절차).
+
+### ⑨ 🔴 메뉴/세션 경로 서버권위 결함 3건 = **미수정, 별도 아크** (2026-07-19 발각)
+> W2-B PIE 검증 중 **PIE 메인메뉴에서 Play를 누르면 에디터가 하드 크래시**하는 것을 계기로 발각. W2-B 감사 범위가 "런 중 게임플레이"라 메뉴/세션 경로를 안 본 **범위의 빈틈**. 조사 = 4에이전트 워크플로(적대 반박 + 권위 census + 테스트경로) + Opus 직접 엔진소스 대조. **W2-B 브랜치와 무관**(`git diff main --stat` = 메뉴/세션/로비 파일 0개, 세 GameMode는 전부 `AGameModeBase`에서 독립 파생).
+- **⑨-1 `HostSession` 세션 자폭 (가장 심각·배포 영향)**: `HostSession`은 진입 즉시 같은 이름의 기존 세션을 파괴하는데(`FPSRSessionSubsystem.cpp:78-92`), **조인 경로도 같은 이름으로 등록**한다(`:282`, 상수 `:19` = `NAME_GameSession`). → Steam으로 조인해 로비에 있는 클라가 어떤 경로로든 `HostSession`에 들어오면 **자기가 참가 중인 세션을 스스로 파괴**. PIE에서 안 보인 이유 = NULL OSS라 조인 자체가 없어 `GetNamedSession`이 null.
+- **⑨-2 클라에서 Play → 하드 크래시**: `HandlePlayClicked`(`FPSRMainMenuWidget.cpp:48-59`)·`HandleCreateSessionComplete`(`FPSRSessionSubsystem.cpp:152-158`) 둘 다 넷모드 검사 0 → 클라 월드에 `ServerTravel("...?listen")`. 엔진(`World.cpp:9389-9406`)은 `GetAuthGameMode()==nullptr`이라 검사를 건너뛰고 `NextURL`만 세팅 → `EditorEngine.cpp:2142`가 넷모드 구분 없이 모든 PIE 컨텍스트를 틱 → `LoadMap`이 클라 자기 넷드라이버를 파괴하고 `?listen`으로 이미 점유된 포트에 바인드 시도. **재현 3/3**(FlowLog 3개가 전부 `[Client] ServerTravel` 줄에서 종료, 서버 경로는 4/4 정상 = 반례 0). 콜스택은 확보 못 함(덤프 없음·UE 로그 버퍼 유실).
+  - **수정 시 함정 3개**(검증자 지적): ⓐ 판정은 **`NM_Client` 차단**이어야 함 — "Standalone만 허용"으로 짜면 **PIE 서버 창(메뉴가 `NM_ListenServer`)까지 막혀** 테스트 불가(`FPSRFlowLog.cpp:49-64` 태그 매핑으로 실측). ⓑ 가드는 **`HostSession` 진입 최상단**(세션 파괴 분기 `:78`보다 **앞**) — `ServerTravel` 직전에 넣으면 고아 세션·오염된 로비코드가 남고 ⑨-1도 못 막음. ⓒ 조기 반환 시 **`OnHostComplete.Broadcast(false)` 필수**(기존 실패 경로 5곳이 전부 지킴, 안 하면 UI 영구 대기).
+- **⑨-3 `AFPSRMenuGameMode`만 `bUseSeamlessTravel` 누락**: 런(`FPSRGameMode.cpp:51`)·로비(`FPSRLobbyGameMode.cpp:26`)는 `true`인데 메뉴 GM 생성자엔 없음 → 메뉴→로비 트래블이 non-seamless라 **접속된 클라를 끊어버림**(실측 `[NETFAIL] Host closed the connection` → 클라가 `Standalone`으로 메뉴 복귀 → 별개 로비 2개 생성). **배포에서는 무해**(각자 메뉴는 Standalone이라 끊길 연결이 없고 타인은 Steam 조인). **PIE 2인 테스트만 막는다** → 위 레시피(`L_Lobby` 시작)로 우회 중. `TransitionMap`은 이미 설정됨(`DefaultEngine.ini:6`).
+- **비버그로 확정**: PIE에서 코드 조인 실패(0 candidate)는 **버그 아님** — Steam이 안 붙어 OSS가 NULL로 폴백되고(로그 `:338-341`) NULL의 `FindSessions`는 LAN 브로드캐스트 전용(`OnlineSessionInterfaceNull.cpp:513-582`). `Docs/P7-U11a_UserContent_Guide.md §7.1/§7.2`에 이미 문서화돼 있었음.
+- **별건 백로그**: `NAME_GameSession` 프로세스 전역 상수 1개를 PIE 두 창이 공유(`:19`) · `GameFlowSubsystem::StartRun/ReturnToMenu`가 헤더엔 "authority-only"라 적고 본문엔 가드 없음(`FPSRGameFlowSubsystem.cpp:8-27`/`:29-48`, 둘 다 BlueprintCallable).
 
 ### ⑦ W2-A 코드 품질·기술부채 그라인딩 = ✅완료·main 머지 (2026-07-18)
 
