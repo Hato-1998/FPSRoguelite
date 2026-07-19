@@ -389,10 +389,16 @@ void UFPSRSessionSubsystem::HandleDestroySessionComplete(FName SessionName, bool
 	UE_LOG(LogFPSR, Log, TEXT("[Session] DestroySession '%s' %s"), *SessionName.ToString(), bWasSuccessful ? TEXT("OK") : TEXT("FAILED"));
 	FPSRFlowLog::Event(this, TEXT("SESSION"), FString::Printf(TEXT("DestroySession complete: %s"), bWasSuccessful ? TEXT("OK") : TEXT("FAILED")));
 
-	// Our session is gone — drop the host code (a fresh one is generated if we re-host below) and the ownership
-	// claim with it, so the next HostSession sees a clean slate rather than a stale "we hosted this" flag.
+	// Our session is gone — drop the host code (a fresh one is generated if we re-host below).
 	CurrentLobbyCode.Reset();
-	bLocalSessionIsHosted = false;
+
+	// Surrender the ownership claim ONLY on a successful destroy. A failed destroy leaves our own session still
+	// registered, and clearing the bit there would make the next HostSession read it as somebody else's joined
+	// session and refuse to host — a permanent lockout with no way back. (Codex merge gate P2)
+	if (bWasSuccessful)
+	{
+		bLocalSessionIsHosted = false;
+	}
 
 	// Host flow: this destroy was a pre-host teardown of a stale session — now create the new one.
 	if (bHostAfterDestroy)
