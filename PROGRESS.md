@@ -153,12 +153,15 @@
 - **P8 U 연속필드 다중맵 아크 (P-0~P-H)** — `--no-ff` main 머지 `34b5eea`, L_U_Whitebox 콘텐츠 `1906d56`, `phase/p8-multimap-tier0` 삭제. Tier-0 NetCull = 대칭 거리컬 교전버블 한계까지(Option A, `NetCull` 균일 사이징); 진짜 공간 relevancy(seam pop-in 제거) = RepGraph 별도 후속.
 - **반동 CrystalRecoil 어댑터 아크 (P0~P4)** — `--no-ff` main 머지 `6f1a981`, 死코드 정리 `2c91ab7`·머지게이트 교정 `afa73dc`, `phase/recoil-crystalrecoil` 삭제. 확산 = 단일소스 heat 모델(`GetHeatSpread`), 무기별 `RP_*` 반동 패턴 저작.
 
-**⏭ Synty 셀/툰 아트 파일럿 = 실행 중 (스코프 축소판)**
-- **읽을 것**: `Docs/SyntyArtPilot_Scoped_ResumePrompt.md`(전체 상태·결정) + `Docs/SyntyArtPilot_S1_CityBuildGuide.md`(§7 MapId 함정). ⚠️ 구 `Docs/SyntyArtPilot_ResumePrompt.md`·`Docs/AssetReplacement_Synty_ResumePrompt.md`는 **폐기본**(SRS를 "최후 폴백 유료옵션"이라 하는 등 SSOT와 모순) — Scoped 판이 최신.
-- 순서 `S2a✅ → S0✅ → S1✅ → S3(진행) → S4(최종 게이트)`.
-- **S1 완료**: `L_GameFloor` 264m 2×2 섹터(볼륨 1개 (0,0,0)·264m·**132×132=17,424셀**, 상한 40,000 대비 여유). ① 단차 walkability **통과**(사용자 확인).
-- **S3 = SRS 이미 배치됨**(BP_StylizedRenderingSystem, `unbound=True`, 블렌더블 2: 셀 `MI_SRS_BASE_CelShader` + 아웃라인 `M_SRS_Outline01`). ⚠️ **셀은 stencil 1~255를 요구하는데 맵에 stencil≥1인 프리미티브가 0개** → 셀이 사실상 아무 데도 안 걸림. 아웃라인은 stencil 0~0이라 **적만** 받음(적 Mesh `renderCustomDepth=True, stencil=0`). 셀↔아웃라인이 stencil 0에서 **상호배타** — 둘 다 받으려면 적 stencil을 1로 올리고 아웃라인 마스크도 1~255로. **잔여 판정 = 외곽선이 VAT 애니를 따라가나**(이제 애니 정상화돼 판정 가능).
-- **S4 = 최종 게이트**. 계측 인프라 이번 세션 완성(위 §① 참조). 실측 미완.
+**✅ Synty 셀/툰 아트 파일럿(U21) = 완료** (사용자 판정 2026-07-18 · `S2a→S0→S1→S3→S4` 전 단계 통과)
+- **읽을 것**: `Docs/SyntyArtPilot_Scoped_ResumePrompt.md` + `Docs/SyntyArtPilot_S1_CityBuildGuide.md`(§7 MapId 함정). ⚠️ 구 `Docs/SyntyArtPilot_ResumePrompt.md`·`Docs/AssetReplacement_Synty_ResumePrompt.md`는 **폐기본**(SRS를 "최후 폴백 유료옵션"이라 하는 등 SSOT와 모순).
+- **S1**: `L_GameFloor` 264m 2×2 섹터(볼륨 1개 (0,0,0)·264m·**132×132=17,424셀**, 상한 40,000 대비 여유). 단차 walkability 통과.
+- **S4**: 사용자 정성 판정("다음 유닛 넘어갈 만한 퍼포먼스")으로 통과. ⚠️**정량 수치는 리포 어디에도 기록되지 않았다** — 남은 유일한 perf 수치는 파일럿 이전의 "Custom Depth 패스 1.33ms"(2026-07-10)뿐. **U22 전후 회귀 판정 기준선이 없다** → U22 첫 단계 = 현 상태 캡처(계측 인프라 `UFPSREnemyMetricsSubsystem` + CSV 5스탯은 이미 있음).
+
+**⚠️ U21에서 U22로 이월된 미결 제약 (파일럿 산출이 아니라 다음 유닛의 선결조건)**
+- **SRS stencil 규약 미확정**: 셀 `MI_SRS_BASE_CelShader`는 stencil **1~255**를 요구하는데 맵에 stencil≥1인 프리미티브가 **0개**(`L_GameFloor.umap`에 `CustomDepthStencilValue` 0회 = 실측). 아웃라인 `M_SRS_Outline01`은 stencil **0~0**이라 **적만** 받는다(적 Mesh `renderCustomDepth=True, stencil=0`). 즉 **셀↔아웃라인이 stencil 0에서 상호배타** — 둘 다 받으려면 적 stencil을 1로 올리고 아웃라인 마스크도 1~255로 넓혀야 한다. `r.CustomDepth=3`(`DefaultEngine.ini:33`)은 이미 켜져 있음.
+- 🚨 **이것이 U22 공수를 지배한다**: 규약을 먼저 확정하지 않고 환경 메시 수백 개에 `render_custom_depth`/stencil을 일괄 적용하면 **전량 재작업**이다. U22 순서 = **stencil 규약 확정 → 그 다음 물량**.
+- **톤다운 값도 여전히 미결**(아래 §③ 참조) — 룩 기준선 없이 맵을 저작하면 첫 맵부터 재작업 후보.
 
 **📌 살아있는 백로그 / 이월 (회귀 아님)**
 - **사이트별 스코프 오버레이 WBP 미저작**(콘텐츠 1건) — 무기 조립툴 아크의 유일한 잔여. 코드 시임 ✅(`FPSRRunHUDWidget.cpp:156` `UpdateScopeOverlay` = 사이트 지정 클래스 → HUD 폴백). 없어도 조준 확대는 정상, 오버레이 그림만 안 뜸. ⚠️**U22에서 무기가 Synty Military로 교체되므로 사이트 에셋이 바뀐다 → U22 이후 저작이 재작업 없음**.
