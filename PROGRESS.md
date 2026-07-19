@@ -70,7 +70,7 @@
 - **크로스헤어 색 프리셋 데이터에셋화**: `UFPSRCrosshairColorPresetDataAsset`(이름+색 배열) 신설, 설정 위젯이 프리셋 수만큼 스와치 버튼을 **런타임 생성**(고정 버튼 5·핸들러 5·하드코딩 색 5 제거). `UFPSRColorPresetButton`(UButton 파생)이 자기 인덱스를 네이티브 델리게이트로 실어 보내 **별도 버튼 WBP 없이** 동적 생성 가능.
 - **Codex 리뷰**: P2(프리셋 미배선 시 색 설정 사라짐) = 수용, 단 fallback 복구 대신 **경고 로그 2종**으로 표면화. **P1(Burst 제거가 뒤 enum ordinal을 밀어 무기 DA 깨짐) = 오탐 판정·미적용** — UE tagged 직렬화는 enum을 이름으로 저장하며 `DA_Weapon_Bazooka/ChargeLaser/Knife/Shotgun/Sniper`가 `"EFPSRWeaponArchetype::<값>"` 문자열을 그대로 보유함을 실증(FullAuto 무기가 목록에 없는 것도 기본값 미직렬화와 정합).
 - **검증**: 빌드 `Result: Succeeded`(⚠️XGE가 `C1076` 힙고갈로 실패 → 메모리 처방대로 `-NoXGE` 전환) · 스모크 `ModuleLoads Result={Success}`(신규 DLL 기준 재실행 — 실패 빌드의 구 DLL로 돈 결과는 폐기).
-- **⚠️ 사용자 에디터 작업 필요(이거 안 하면 크로스헤어 색 설정이 안 보임)**: ① `UFPSRCrosshairColorPresetDataAsset` 에셋 생성 + 프리셋 저작(구값: White/Green(0.1,1,0.1)/Cyan(0.1,1,1)/Red(1,0.1,0.1)/Yellow(1,1,0.1)) ② `WBP_Settings`에 스와치 컨테이너(가로 박스) 추가 → `ColorPresetContainer`로 바인드 + **옛 버튼 5개 삭제** ③ 위젯 `ColorPresets`에 ①의 에셋 할당. 누락 시 로그에 경고가 뜸.
+- **✅ 사용자 에디터 작업 = 완료·커밋·푸시**(`86691340`, 2026-07-19): `Content/UI/Data/DA_Crosshair_ColorPreset.uasset` 신규 + `WBP_Settings.uasset` 스와치 배선이 **같은 커밋에 동반**. 종전 여기 적혀 있던 "⚠️ 사용자 에디터 작업 필요(①에셋 생성 ②스와치 컨테이너 바인드 ③에셋 할당)" 항목은 **그때 전부 처리됐는데 이 줄만 안 지워져 있었다** → 2026-07-19 세션에서 stale 판정·정정(그 문구를 그대로 믿고 "미완"으로 보고한 오류 1회 발생).
 
 ### ⑥ 적 "뿌연 구름" = 진단·수정 완료 (2026-07-18, 콘텐츠 = `L_GameFloor` 인스턴스)
 **증상**: 런 시작 후 적 swarm(만)에 반투명 회색 헤이즈. 멀수록 심하고 가까이 오면 옅어짐. 건물은 쨍.
@@ -149,7 +149,7 @@
 - **`L_GameFloor`**: ① `Plaza_Emblem` 충돌 제거 → 플로우필드 바닥앵커가 47(엠블럼)→**40(dais)**로 교정, 지면(0)·슬래브(10)·dais(40)·커버(40) **전부 직접 지면시드 통과**, 지면↔dais가 "경사로 오인" 우연통과가 아닌 **진짜 40cm 단차**로 열림. ② `PP_Synthwave_Grade` 톤다운 노브 22개 오버라이드 ON(값 보존).
 
 **완료·머지·푸시 (3개 아크 종결)**
-- **무기 조립툴 개편 + 파츠 스택/스탯 진화 + 저격 스코프 위젯 아크** — `--no-ff` main 머지 `fd5ed792`(→ origin/main과 통합 머지), Codex 머지리뷰 통과+교정 `6999ff3c`, `phase/pwas-b-procedural-weapon-motion` 삭제. 폴리모픽 PartRules→**파츠별 스택 진화(순수 struct)** + **스탯 임계 트리거**, 조립툴(고정소켓 안정id·진화패널·단계 뷰포트배치·트리거/스탯/스코프 편집·순서이동), **스코프 오버레이=사이트별 위젯 BP**(리티클 텍스처 폐지). 사용자 정상작동 확인. **남은=사용자 콘텐츠**: 라이플 저격 진화 재저작(옛 PartRules 서브오브젝트 링커경고 해소) + 사이트별 스코프 WBP 저작 + PIE. 후속(pre-existing)=데디서버 파츠 게이팅(Codex F3, spawn_task). 상세=메모리 `weapon-modular-evolution-scope-plan`.
+- **무기 조립툴 개편 + 파츠 스택/스탯 진화 + 저격 스코프 위젯 아크** — `--no-ff` main 머지 `fd5ed792`(→ origin/main과 통합 머지), Codex 머지리뷰 통과+교정 `6999ff3c`, `phase/pwas-b-procedural-weapon-motion` 삭제. 폴리모픽 PartRules→**파츠별 스택 진화(순수 struct)** + **스탯 임계 트리거**, 조립툴(고정소켓 안정id·진화패널·단계 뷰포트배치·트리거/스탯/스코프 편집·순서이동), **스코프 오버레이=사이트별 위젯 BP**(리티클 텍스처 폐지). 사용자 정상작동 확인. **남은=사용자 콘텐츠 → 대부분 완료(2026-07-19 재확인)**: ✅라이플 저격 진화 재저작 = 커밋·푸시(`ce1181ff` — `DA_Fragment_Rifle_SniperScope`·`DA_CardModifiers_SniperScope` 신규) / ❌**사이트별 스코프 오버레이 WBP만 미저작**(`Content/UI/` 전체에 스코프 오버레이 위젯 0건 확인). 코드는 `FPSRRunHUDWidget.cpp:156` `UpdateScopeOverlay`가 사이트 지정 클래스 → HUD 폴백 순으로 찾으므로 **위젯이 없어도 조준 확대는 정상, 오버레이 그림만 안 뜸**(회귀 아님). 후속(pre-existing)=데디서버 파츠 게이팅(Codex F3, spawn_task). 상세=메모리 `weapon-modular-evolution-scope-plan`.
 - **P8 U 연속필드 다중맵 아크 (P-0~P-H)** — `--no-ff` main 머지 `34b5eea`, L_U_Whitebox 콘텐츠 `1906d56`, `phase/p8-multimap-tier0` 삭제. Tier-0 NetCull = 대칭 거리컬 교전버블 한계까지(Option A, `NetCull` 균일 사이징); 진짜 공간 relevancy(seam pop-in 제거) = RepGraph 별도 후속.
 - **반동 CrystalRecoil 어댑터 아크 (P0~P4)** — `--no-ff` main 머지 `6f1a981`, 死코드 정리 `2c91ab7`·머지게이트 교정 `afa73dc`, `phase/recoil-crystalrecoil` 삭제. 확산 = 단일소스 heat 모델(`GetHeatSpread`), 무기별 `RP_*` 반동 패턴 저작.
 
@@ -161,6 +161,7 @@
 - **S4 = 최종 게이트**. 계측 인프라 이번 세션 완성(위 §① 참조). 실측 미완.
 
 **📌 살아있는 백로그 / 이월 (회귀 아님)**
+- **사이트별 스코프 오버레이 WBP 미저작**(콘텐츠 1건) — 무기 조립툴 아크의 유일한 잔여. 코드 시임 ✅(`FPSRRunHUDWidget.cpp:156` `UpdateScopeOverlay` = 사이트 지정 클래스 → HUD 폴백). 없어도 조준 확대는 정상, 오버레이 그림만 안 뜸. ⚠️**U22에서 무기가 Synty Military로 교체되므로 사이트 에셋이 바뀐다 → U22 이후 저작이 재작업 없음**.
 - **RepGraph spatial-grid relevancy** — 별도 후속 페이즈(per-acquire NetCull 반경으로 적 재-bucket). plan `Docs/Review/20260707-plan-continuous-field-arch.md` §2-4/§4 D3 · Performance §5. 클라 seam pop-in = 문서화된 Tier-0 한계(D3 수용).
 - **NetCull 튜너블**: `NetCullWeaponRangeCm=10000`(무기사거리 floor)·`NetCullSeamMarginCm=4000`. 단일맵 = pre-P-H 200m 바이트동일.
 - **애니메이션 콘텐츠 저작 (진행 중)** — U15(1P무기)/U19(3P팀원)/U20(적VAT) 코드 인프라 ✅, 콘텐츠 미저작. 가이드 `Docs/AnimationPass_ContentGuide.md`. ⚠️ Synty Blu+PWAS 피벗이 손저작 AnimBP를 대체할 수 있음 → 파일럿 결과 후 확정.
