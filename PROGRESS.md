@@ -32,7 +32,7 @@
 - **+ `GameFlowSubsystem::StartRun/ReturnToMenu`** 트래블 권위 가드(헤더의 authority-only 약속을 코드로 강제).
 - **Codex가 내 수정의 버그를 잡음**: destroy **실패** 시에도 소유권 플래그를 지워 다음 호스팅이 자기 세션을 남의 것으로 오인 → **영구 잠금**. `bWasSuccessful`일 때만 해제로 교정(`28d08a98`).
 - **검증**: 빌드 `Result: Succeeded` ×2 · 스모크 **4/4 Success** ×2 · Codex 게이트 2라운드(마지막 = "No discrete correctness, replication, or build issues").
-- **⏳ 사용자 실측 남음**: ⑨-3 덕에 **메인메뉴에서 시작해 2인 테스트가 되는지**, ⑨-2로 **클라 창 Play가 크래시 대신 조용히 무시되는지**(로그 `HostSession BLOCKED (client)`). ⑨-1은 Steam 2-PC라야 실측 가능(PIE는 NULL OSS라 조인 자체가 없음) → 코드·리뷰 검증까지만.
+- **✅ 사용자 실측(2026-07-19)**: **Play 정상 작동 확인** — ⑨-3(메뉴 GM seamless) 반영 후 메뉴 흐름이 회귀 없이 동작. **정직 표기**: 아래 둘은 이번 확인에 **포함되지 않았다** → ① 클라 창에서 Play를 눌렀을 때 크래시 대신 무시되는지(기대 로그 `HostSession BLOCKED (client)`) ② **⑨-1 세션 자폭은 PIE로 검증 불가**(NULL OSS라 조인 분기 자체에 도달 안 함) → **Steam 2-PC 검증 시 확인할 것**. 코드·Codex 리뷰 검증까지는 완료.
 - **비버그로 확정**: PIE 코드 조인 실패(0 candidate)는 버그 아님 — Steam 미접속 → OSS가 NULL 폴백 → NULL의 `FindSessions`는 LAN 브로드캐스트 전용(`OnlineSessionInterfaceNull.cpp:513-582`). `Docs/P7-U11a_UserContent_Guide.md §7.1/§7.2`에 기존 문서화.
 - **남은 별건 백로그**: `NAME_GameSession` 프로세스 전역 상수 1개를 PIE 두 창이 공유(`FPSRSessionSubsystem.cpp:19`) — 이번 크래시 원인은 아님(클라 단독 클릭으로도 재현), 별건.
 
