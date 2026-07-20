@@ -8,6 +8,13 @@
 #include "Validation/FPSRAnchoredValidationService.h"
 #include "EditorModeManager.h"
 
+// --- Packed Prefab authoring (P2+P3 병합) --------------------------------------------------------------------------
+#include "LevelInstance/LevelInstanceSubsystem.h"
+#include "LevelInstance/LevelInstanceTypes.h"
+#include "LevelInstance/LevelInstanceInterface.h"
+#include "PackedLevelActor/PackedLevelActor.h"
+#include "Selection.h"
+
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "AssetRegistry/IAssetRegistry.h"
 #include "AssetRegistry/ARFilter.h"
@@ -33,6 +40,7 @@
 #include "Widgets/SNullWidget.h"
 #include "Widgets/Text/STextBlock.h"
 #include "Widgets/Input/SButton.h"
+#include "Widgets/Input/SEditableTextBox.h"
 #include "Widgets/Input/SSearchBox.h"
 #include "Widgets/Input/SNumericEntryBox.h"
 #include "Widgets/Input/SSegmentedControl.h"
@@ -175,6 +183,48 @@ void SFPSRBlockoutTab::Construct(const FArguments& InArgs)
 			]
 		]
 
+		// Packed Prefab toolbar (P2+P3 병합) — 선택 액터 → 재사용 가능한 ISM-패킹 BPP_* 프리팹. 기존 툴바 additive, 배치는
+		// 기존 팔레트 경로(더블클릭/'선택 배치'/뷰포트 배치) 그대로 재사용한다(RefreshPalette 가 스캔 폴더에 추가하면 끝).
+		+ SVerticalBox::Slot()
+		.AutoHeight()
+		.Padding(8.0f, 0.0f, 8.0f, 8.0f)
+		[
+			SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot()
+			.AutoWidth()
+			.VAlign(VAlign_Center)
+			.Padding(0.0f, 0.0f, 4.0f, 0.0f)
+			[
+				SNew(STextBlock)
+				.Text(LOCTEXT("PrefabLabel", "프리팹 이름"))
+			]
+			+ SHorizontalBox::Slot()
+			.AutoWidth()
+			.VAlign(VAlign_Center)
+			[
+				SNew(SBox)
+				.WidthOverride(160.0f)
+				[
+					SNew(SEditableTextBox)
+					.HintText(LOCTEXT("PrefabNameHint", "예: Bld_CornerA"))
+					.Text(this, &SFPSRBlockoutTab::GetPendingPrefabNameText)
+					.OnTextChanged(this, &SFPSRBlockoutTab::OnPendingPrefabNameChanged)
+					.ToolTipText(LOCTEXT("PrefabNameTip", "새 프리팹의 이름. Project Settings 의 프리팹 저장 폴더 아래 L_<이름>_Sub 서브레벨과 BPP_L_<이름>_Sub 블루프린트로 저장됩니다."))
+				]
+			]
+			+ SHorizontalBox::Slot()
+			.AutoWidth()
+			.Padding(4.0f, 0.0f, 0.0f, 0.0f)
+			[
+				SNew(SButton)
+				.Text(LOCTEXT("CreatePrefab", "선택→Packed 프리팹"))
+				.ToolTipText(LOCTEXT("CreatePrefabTip", "레벨에서 선택한 액터들을 하나의 재사용 가능한 ISM-패킹 프리팹(BPP_*)으로 묶습니다. 결과 BPP_* 는 팔레트에 카드로 나타나 다시 저렴하게 배치할 수 있습니다 (Ctrl+Z 로 취소)."))
+				.OnClicked(this, &SFPSRBlockoutTab::OnCreatePrefabClicked)
+			]
+			// 프리팹 재패킹(서브레벨 수정 후)은 엔진 기본 UI 사용: 우클릭 "Update Packed Blueprint" 또는 Build > Pack Level
+			// Actors. FPackedLevelActorUtils 는 export(LEVELINSTANCEEDITOR_API) 가 없어 외부 모듈에서 링크 불가라 전용 버튼 미제공.
+		]
+
 		// Two-pane browser: LEFT folder list | RIGHT asset card grid
 		+ SVerticalBox::Slot()
 		.FillHeight(1.0f)
@@ -305,6 +355,12 @@ void SFPSRBlockoutTab::RefreshPalette()
 		{
 			Filter.PackagePaths.Add(FName(*Folder.Path));
 		}
+	}
+	// Packed Prefab 저장 폴더도 스캔 대상에 추가 — 새로 만든 BPP_* 가 PaletteFolders 에 수동 등록 없이도 바로 카드로 보이도록
+	// 한다(생성된 서브레벨 .umap 은 UWorld 라 ClassPaths 필터에 안 걸려 카드로 새지 않는다).
+	if (!Settings->PrefabSaveFolder.Path.IsEmpty())
+	{
+		Filter.PackagePaths.AddUnique(FName(*Settings->PrefabSaveFolder.Path));
 	}
 
 	if (Filter.PackagePaths.Num() > 0)
@@ -800,6 +856,107 @@ FReply SFPSRBlockoutTab::OnInspectStatusClicked()
 			FText::AsNumber(PassCount), FText::AsNumber(FailCount), FText::AsNumber(CachedAssets.Num())));
 	}
 	return FReply::Handled();
+}
+
+FText SFPSRBlockoutTab::GetPendingPrefabNameText() const
+{
+	return FText::FromString(PendingPrefabName);
+}
+
+void SFPSRBlockoutTab::OnPendingPrefabNameChanged(const FText& NewText)
+{
+	PendingPrefabName = NewText.ToString();
+}
+
+FReply SFPSRBlockoutTab::OnCreatePrefabClicked()
+{
+	CreatePrefabFromSelection();
+	return FReply::Handled();
+}
+
+void SFPSRBlockoutTab::CreatePrefabFromSelection()
+{
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	if (!World)
+	{
+		if (StatusText.IsValid())
+		{
+			StatusText->SetText(LOCTEXT("PrefabNoWorld", "편집 가능한 에디터 월드가 없습니다 (PIE 중이면 종료 후 시도)."));
+		}
+		return;
+	}
+
+	TArray<AActor*> ActorsToMove;
+	if (USelection* Selection = GEditor->GetSelectedActors())
+	{
+		Selection->GetSelectedObjects<AActor>(ActorsToMove);
+	}
+	if (ActorsToMove.Num() == 0)
+	{
+		if (StatusText.IsValid())
+		{
+			StatusText->SetText(LOCTEXT("PrefabNoSelection", "선택된 액터가 없습니다."));
+		}
+		return;
+	}
+
+	if (PendingPrefabName.IsEmpty())
+	{
+		if (StatusText.IsValid())
+		{
+			StatusText->SetText(LOCTEXT("PrefabNoName", "프리팹 이름을 입력하세요."));
+		}
+		return;
+	}
+
+	const UFPSRBlockoutSettings* Settings = GetDefault<UFPSRBlockoutSettings>();
+	const FString BaseFolder = Settings->PrefabSaveFolder.Path.IsEmpty() ? TEXT("/Game/CityPrefabs") : Settings->PrefabSaveFolder.Path;
+
+	ULevelInstanceSubsystem* Sub = World->GetSubsystem<ULevelInstanceSubsystem>();
+	if (!Sub)
+	{
+		if (StatusText.IsValid())
+		{
+			StatusText->SetText(LOCTEXT("PrefabNoSubsystem", "ULevelInstanceSubsystem 을 찾을 수 없습니다."));
+		}
+		return;
+	}
+
+	FText Reason;
+	if (!Sub->CanCreateLevelInstanceFrom(ActorsToMove, &Reason))
+	{
+		if (StatusText.IsValid())
+		{
+			StatusText->SetText(FText::Format(LOCTEXT("PrefabGateFail", "프리팹 생성 불가: {0}"), Reason));
+		}
+		return;
+	}
+
+	FNewLevelInstanceParams CreationParams;
+	CreationParams.Type = ELevelInstanceCreationType::PackedLevelActor;
+	CreationParams.LevelInstanceClass = APackedLevelActor::StaticClass();
+	CreationParams.LevelPackageName = BaseFolder / (TEXT("L_") + PendingPrefabName + TEXT("_Sub"));
+	CreationParams.PivotType = ELevelInstancePivotType::CenterMinZ;
+	// bEnableStreaming 은 기본값(false) 유지 — 프리팹 서브레벨은 임베드(Embedded), 별도 스트리밍 레벨로 안 늘린다.
+
+	const FScopedTransaction Transaction(LOCTEXT("CreatePrefabTx", "블록아웃 Packed 프리팹 생성"));
+	ILevelInstanceInterface* NewLI = Sub->CreateLevelInstanceFrom(ActorsToMove, CreationParams);
+	if (!NewLI)
+	{
+		if (StatusText.IsValid())
+		{
+			StatusText->SetText(LOCTEXT("PrefabCreateFail", "프리팹 생성 실패."));
+		}
+		return;
+	}
+
+	// 새 BPP_* 가 팔레트 스캔 폴더(PrefabSaveFolder)에 즉시 나타나도록 재스캔.
+	RefreshPalette();
+
+	if (StatusText.IsValid())
+	{
+		StatusText->SetText(FText::Format(LOCTEXT("PrefabCreated", "프리팹 생성: {0}"), FText::FromString(PendingPrefabName)));
+	}
 }
 
 void SFPSRBlockoutTab::PlaceAsset(const FAssetData& AssetData)

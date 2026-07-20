@@ -42,4 +42,11 @@ public:
 	 *  (and next spawn's) yaw. 0 is not meaningful (no-op) — keep the 90° default. */
 	UPROPERTY(EditAnywhere, Config, Category = "Placement", meta = (ClampMin = "0.0"))
 	float RotationSnapDegrees = 90.0f;
+
+	/** Where "선택→Packed 프리팹" saves the result: the BPP_* Packed Level Actor Blueprint + its private sub-level
+	 *  (both auto-named by the engine's ULevelInstanceSubsystem::CreateLevelInstanceFrom from the designer-entered
+	 *  prefab name). This folder is also added to the palette's scanned paths (RefreshPalette) so new prefabs show up
+	 *  as cards immediately — no need to add it to PaletteFolders by hand. */
+	UPROPERTY(EditAnywhere, Config, Category = "Prefab", meta = (ContentDir))
+	FDirectoryPath PrefabSaveFolder;
 };
