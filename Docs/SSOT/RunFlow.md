@@ -63,6 +63,15 @@
 > **구조 = 폴리모픽 Instanced 튜닝 객체**: `UFPSRMissionTuning`(Abstract·EditInlineNew) 베이스 + 미션 타입별 서브클래스(`UFPSRMissionTuning_HoldZone` 등, 그 타입 파라미터 보유). DA에 `UPROPERTY(Instanced) UFPSRMissionTuning* Tuning` 1개. 미션 액터가 `ServerActivate(Data)` 시 `Data->Tuning`을 자기 타입으로 캐스트해 읽음. **새 미션 타입 = 튜닝 서브클래스 추가만, 중앙 0수정**(카드 효과 폴리모픽과 동일 패턴, 확장성-우선). IsDataValid가 튜닝 클래스↔미션 클래스 매칭 검증.
 > **마이그레이션 = 소프트(P2③a)**: 미션 액터의 기존 튜닝 필드는 **fallback으로 유지**(`Data->Tuning` null/타입불일치 시 사용) → 기존 BP CDO 값 무손실. ③b에서 각 미션 DA에 Tuning 저작 후 PIE 검증, 이후 fallback 필드 제거(후속). `FPSR.Mission.ZoneRadius` 콘솔 오버라이드(`ResolveZoneRadius`)는 유지.
 
+#### 2-8-2. 폐루프 "이야기꾼" 디렉터 (설계 채택 2026-07-20 · 미구현 · 상세 `Docs/Review/20260720-plan-closed-loop-director.md`)
+> 기존 **개루프** `UFPSRRunDirectorSubsystem`(적 수 = 파티레벨 XOR 시간만, 플레이어 상태 안 봄)을 **RimWorld 이야기꾼/L4D AI 디렉터식 폐루프**로 진화. 레퍼런스 8종 조사+plan-consult(Codex 4R) 수렴.
+- **계층 분리 = 계측/판단**: P0 센서(**측정만**, 중립명·통계변환·confidence) → 디렉터(난이도 **판단/결정**) → 액추에이터(스폰 위치/양·구성/미션). 센서 수정이 난이도 패치가 되지 않게 구조적으로 분리.
+- **단계**: P0 센서 → P1 공간선택(MAX거리·고립압박 넛지+상한) → P2 양·구성(밀도승수+로스터룰 확장+스폰포인트 per-biome) → P3 미션(도달밴드·행동트리거) → P4 아키타입(공중/방패) → P5 완급FSM+위협비트 예고.
+- **센서** = 신규 `UFPSRDirectorSensorSubsystem`(서버로컬 `TMap<WeakPtr<PS>>`, **복제0**). **3단 슬라이스** P0a-0(배관 워킹스켈레톤, 신호5)→P0a-1(계산기+훅, 이원게이트)→P0a-2(승격). 신호세트 = `-p0-signal-selection.md`(P0a 40개). 첫 실행 = `-p0a0-exec-prompt.md`.
+- **완급/집계**: 경량 상태(긴장/휴식, **휴식=적0 아닌 트리클 바닥**) · **MAX 집계**(제일 힘든 플레이어 기준) · 전역1벌 + per-Front 압력원장(**승계는 Front버킷만**, per-player 히스토리는 플레이어 따라감) · stress=enemy/boss 데미지만.
+- **미션 게이트** = `DueButGated`(시간 도달해도 게이트 off면 fired 미소모). **보스는 루프 밖**(기존 고정 BossTime 유지).
+- **사용자 결정**: 적 진폭(`UEnemyScalingProfile`)·성격 프로파일(카산드라/피비/랜디식)·미션게이트 튜닝 = **P5 이연**.
+
 ### 2-11. 메타 프로그레션
 - `URogueliteSaveGame`(USaveGame) — 누적 재화, 업그레이드 트리 상태, 캐릭터/무기 해금
 - `UGameplayStatics::AsyncSaveGameToSlot`
@@ -72,3 +81,4 @@
 
 ### 2-12. 난이도 압박 수단 (이속 불변 유지)
 스폰 밀도↑ / 원거리 적 비율↑ / 특수 적 패턴 / 미션 목표 압박 / 보스 phase pressure.
+> **폐루프 디렉터가 이 압박수단을 플레이어 상태 반응으로 구동**(설계 채택 2026-07-20, 미구현): 밀도·구성·미션·스폰위치를 정량신호로 조절. 상세 §2-8-2.
