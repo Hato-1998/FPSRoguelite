@@ -507,6 +507,13 @@ void AFPSRCharacter::ApplyDownedLocomotion(bool bDowned)
 		}
 		MoveComp->MaxWalkSpeed = BaseWalkSpeed * Mult;
 	}
+
+	// Downed body should not physically block / get pushed by the swarm (mirror of the dash/grace pass-through).
+	// Recompute through the shared collision helper so it composes with any active dash/grace window and, being
+	// keyed off the (already-updated) LifeState, restores enemy blocking on revive. This runs on the server
+	// (HandleOutOfHealth), the owning client (OnRep_LifeState) and revive (PerformRevive) — the same symmetric hook
+	// — so the DBNO pass-through is server+client symmetric with no extra RPC/OnRep.
+	RefreshPawnCollisionResponse();
 }
 
 void AFPSRCharacter::Input_MoveForward(const FInputActionValue& Value)
@@ -763,7 +770,11 @@ void AFPSRCharacter::RefreshPawnCollisionResponse()
 	// ends first doesn't restore enemy blocking while the other is still active.
 	const bool bDashing = (Now - LastDashTime) < DashDuration;
 	const bool bGrace = Now < GraceUntil;
-	Capsule->SetCollisionResponseToChannel(ECC_Pawn, (bDashing || bGrace) ? ECR_Ignore : ECR_Block);
+	// DBNO/Dead: the downed body passes through the swarm (no physical block/push), matching the damage i-frames
+	// (IsIncapacitatedLocal gates contact damage too). Reads the replicated LifeState, so it is valid on server and
+	// the owning client, and composes with the dash/grace windows exactly like they compose with each other.
+	const bool bDowned = IsIncapacitatedLocal();
+	Capsule->SetCollisionResponseToChannel(ECC_Pawn, (bDashing || bGrace || bDowned) ? ECR_Ignore : ECR_Block);
 }
 
 void AFPSRCharacter::BeginGraceWindow(float Seconds)
