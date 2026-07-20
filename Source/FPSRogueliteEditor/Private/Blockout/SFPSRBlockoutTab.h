@@ -112,17 +112,17 @@ private:
 	FReply OnValidateClicked();
 	FReply OnInspectStatusClicked();
 
-	// --- Packed Prefab authoring (P2+P3 병합: 선택 액터 → 재사용 가능한 ISM-패킹 BPP_* 프리팹) -----------------------------
+	// --- 프리팹 저작 (P2+P3 병합, R1서 경량 Blueprint 하베스트로 교체: 선택 액터 → 재사용 가능한 BP_* 프리팹, 서브레벨 없음) -----
 	/** SEditableTextBox 의 .Text 바인딩 — PendingPrefabName 을 FText 로 반환. */
 	FText GetPendingPrefabNameText() const;
 	/** SEditableTextBox 의 .OnTextChanged — PendingPrefabName 갱신. */
 	void OnPendingPrefabNameChanged(const FText& NewText);
 	FReply OnCreatePrefabClicked();
-	/** 현재 레벨 선택 액터들을 ULevelInstanceSubsystem::CreateLevelInstanceFrom 으로 Packed Level Actor(BPP_*)로 묶는다.
-	 *  실패(월드 없음/선택 없음/이름 없음/게이트 실패/생성 실패) 시 StatusText 에 사유를 표시하고 조용히 리턴 — 크래시 없음.
-	 *  성공 시 RefreshPalette() 로 팔레트에 새 BPP_* 카드가 즉시 보이게 한다. Undo 가능(FScopedTransaction).
-	 *  프리팹 수정 후 재패킹은 엔진 기본 UI 사용(우클릭 "Update Packed Blueprint" 또는 Build > Pack Level Actors) —
-	 *  FPackedLevelActorUtils 는 LEVELINSTANCEEDITOR_API export 가 없어 외부 모듈에서 링크 불가라 전용 버튼은 두지 않는다. */
+	/** 현재 레벨 선택 액터들을 FKismetEditorUtilities::HarvestBlueprintFromActors 로 컴포넌트만 흡수한 경량 BP_* 프리팹
+	 *  (서브레벨 없음, bReplaceActors=true 로 선택 액터를 즉시 새 BP 인스턴스로 치환) 하나로 묶는다. 실패(월드 없음/선택
+	 *  없음/이름 없음/하베스트 실패) 시 StatusText 에 사유를 표시하고 조용히 리턴 — 크래시 없음. 성공 시 RefreshPalette() 로
+	 *  팔레트에 새 BP_* 카드가 즉시 보이게 한다(생성된 BP 는 액터 BP 라 IsActorBlueprint 필터를 통과, 기존 배치 경로 그대로
+	 *  재사용). Undo 가능(FScopedTransaction). */
 	void CreatePrefabFromSelection();
 
 	/** Places AssetData into the current editor world: a UStaticMesh spawns as a WorldStatic "BlockAll" AStaticMeshActor
@@ -162,7 +162,7 @@ private:
 	TMap<FSoftObjectPath, EBlockoutAssetStatus> StatusByAsset;
 	/** Live grid-snap size (cm) for the viewport placement mode; edited via the toolbar box, seeded from settings. */
 	float PlacementGridSize = 100.0f;
-	/** Designer-entered name for "선택→Packed 프리팹" (drives L_<Name>_Sub / BPP_<Name-derived> asset naming). */
+	/** Designer-entered name for "선택→프리팹" (drives BP_<Name> asset naming, no sub-level). */
 	FString PendingPrefabName;
 	/** Shared pool backing the lazy card thumbnails (slice ⑦); an FTickableEditorObject, so it renders itself. */
 	TSharedPtr<FAssetThumbnailPool> ThumbnailPool;

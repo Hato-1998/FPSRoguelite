@@ -8,11 +8,8 @@
 #include "Validation/FPSRAnchoredValidationService.h"
 #include "EditorModeManager.h"
 
-// --- Packed Prefab authoring (P2+P3 병합) --------------------------------------------------------------------------
-#include "LevelInstance/LevelInstanceSubsystem.h"
-#include "LevelInstance/LevelInstanceTypes.h"
-#include "LevelInstance/LevelInstanceInterface.h"
-#include "PackedLevelActor/PackedLevelActor.h"
+// --- 프리팹 저작 (P2+P3 병합, R1서 Packed Level Actor→경량 Blueprint 하베스트로 교체: 서브레벨 없음) ------------------------
+#include "Kismet2/KismetEditorUtilities.h"
 #include "Selection.h"
 
 #include "AssetRegistry/AssetRegistryModule.h"
@@ -183,8 +180,9 @@ void SFPSRBlockoutTab::Construct(const FArguments& InArgs)
 			]
 		]
 
-		// Packed Prefab toolbar (P2+P3 병합) — 선택 액터 → 재사용 가능한 ISM-패킹 BPP_* 프리팹. 기존 툴바 additive, 배치는
-		// 기존 팔레트 경로(더블클릭/'선택 배치'/뷰포트 배치) 그대로 재사용한다(RefreshPalette 가 스캔 폴더에 추가하면 끝).
+		// 프리팹 저작 툴바 (P2+P3 병합, R1서 경량 Blueprint 하베스트로 교체) — 선택 액터 → 재사용 가능한 BP_* 프리팹
+		// (서브레벨 없음). 기존 툴바 additive, 배치는 기존 팔레트 경로(더블클릭/'선택 배치'/뷰포트 배치) 그대로 재사용한다
+		// (RefreshPalette 가 스캔 폴더에 추가하면 끝).
 		+ SVerticalBox::Slot()
 		.AutoHeight()
 		.Padding(8.0f, 0.0f, 8.0f, 8.0f)
@@ -209,7 +207,7 @@ void SFPSRBlockoutTab::Construct(const FArguments& InArgs)
 					.HintText(LOCTEXT("PrefabNameHint", "예: Bld_CornerA"))
 					.Text(this, &SFPSRBlockoutTab::GetPendingPrefabNameText)
 					.OnTextChanged(this, &SFPSRBlockoutTab::OnPendingPrefabNameChanged)
-					.ToolTipText(LOCTEXT("PrefabNameTip", "새 프리팹의 이름. Project Settings 의 프리팹 저장 폴더 아래 L_<이름>_Sub 서브레벨과 BPP_L_<이름>_Sub 블루프린트로 저장됩니다."))
+					.ToolTipText(LOCTEXT("PrefabNameTip", "새 프리팹의 이름. Project Settings 의 프리팹 저장 폴더 아래 BP_<이름> 블루프린트로 저장됩니다(서브레벨 없음)."))
 				]
 			]
 			+ SHorizontalBox::Slot()
@@ -217,12 +215,10 @@ void SFPSRBlockoutTab::Construct(const FArguments& InArgs)
 			.Padding(4.0f, 0.0f, 0.0f, 0.0f)
 			[
 				SNew(SButton)
-				.Text(LOCTEXT("CreatePrefab", "선택→Packed 프리팹"))
-				.ToolTipText(LOCTEXT("CreatePrefabTip", "레벨에서 선택한 액터들을 하나의 재사용 가능한 ISM-패킹 프리팹(BPP_*)으로 묶습니다. 결과 BPP_* 는 팔레트에 카드로 나타나 다시 저렴하게 배치할 수 있습니다 (Ctrl+Z 로 취소)."))
+				.Text(LOCTEXT("CreatePrefab", "선택→프리팹"))
+				.ToolTipText(LOCTEXT("CreatePrefabTip", "레벨에서 선택한 액터들을 하나의 재사용 가능한 경량 블루프린트(BP_*, 서브레벨 없음)로 묶습니다. 결과 BP_* 는 팔레트에 카드로 나타나 다시 배치할 수 있습니다 (Ctrl+Z 로 취소)."))
 				.OnClicked(this, &SFPSRBlockoutTab::OnCreatePrefabClicked)
 			]
-			// 프리팹 재패킹(서브레벨 수정 후)은 엔진 기본 UI 사용: 우클릭 "Update Packed Blueprint" 또는 Build > Pack Level
-			// Actors. FPackedLevelActorUtils 는 export(LEVELINSTANCEEDITOR_API) 가 없어 외부 모듈에서 링크 불가라 전용 버튼 미제공.
 		]
 
 		// Two-pane browser: LEFT folder list | RIGHT asset card grid
@@ -356,8 +352,8 @@ void SFPSRBlockoutTab::RefreshPalette()
 			Filter.PackagePaths.Add(FName(*Folder.Path));
 		}
 	}
-	// Packed Prefab 저장 폴더도 스캔 대상에 추가 — 새로 만든 BPP_* 가 PaletteFolders 에 수동 등록 없이도 바로 카드로 보이도록
-	// 한다(생성된 서브레벨 .umap 은 UWorld 라 ClassPaths 필터에 안 걸려 카드로 새지 않는다).
+	// 프리팹 저장 폴더도 스캔 대상에 추가 — 새로 만든 BP_* 는 ClassPaths(UBlueprint) 필터는 통과하지만, PackagePaths
+	// 필터가 PaletteFolders 로만 좁혀져 있어 그 폴더가 PaletteFolders 에 수동 등록되지 않으면 스캔 자체에서 빠진다.
 	if (!Settings->PrefabSaveFolder.Path.IsEmpty())
 	{
 		Filter.PackagePaths.AddUnique(FName(*Settings->PrefabSaveFolder.Path));
@@ -911,37 +907,18 @@ void SFPSRBlockoutTab::CreatePrefabFromSelection()
 
 	const UFPSRBlockoutSettings* Settings = GetDefault<UFPSRBlockoutSettings>();
 	const FString BaseFolder = Settings->PrefabSaveFolder.Path.IsEmpty() ? TEXT("/Game/CityPrefabs") : Settings->PrefabSaveFolder.Path;
+	const FString Path = BaseFolder / (TEXT("BP_") + PendingPrefabName);
 
-	ULevelInstanceSubsystem* Sub = World->GetSubsystem<ULevelInstanceSubsystem>();
-	if (!Sub)
-	{
-		if (StatusText.IsValid())
-		{
-			StatusText->SetText(LOCTEXT("PrefabNoSubsystem", "ULevelInstanceSubsystem 을 찾을 수 없습니다."));
-		}
-		return;
-	}
+	// R1: 사용자 결정 — 서브레벨(.umap) 없는 경량 프리팹. HarvestBlueprintFromActors 가 선택 액터들의 컴포넌트를 통짜
+	// Blueprint 하나로 흡수한다(Packed Level Actor 방식 대비 서브레벨 0개). bReplaceActors=true 로 선택 액터를 즉시
+	// 새 BP 인스턴스로 치환, bOpenBlueprint=false 로 BP 에디터가 모달로 뜨지 않게(비대화식 배치 워크플로 유지).
+	FKismetEditorUtilities::FHarvestBlueprintFromActorsParams Params;
+	Params.bReplaceActors = true;
+	Params.bOpenBlueprint = false;
 
-	FText Reason;
-	if (!Sub->CanCreateLevelInstanceFrom(ActorsToMove, &Reason))
-	{
-		if (StatusText.IsValid())
-		{
-			StatusText->SetText(FText::Format(LOCTEXT("PrefabGateFail", "프리팹 생성 불가: {0}"), Reason));
-		}
-		return;
-	}
-
-	FNewLevelInstanceParams CreationParams;
-	CreationParams.Type = ELevelInstanceCreationType::PackedLevelActor;
-	CreationParams.LevelInstanceClass = APackedLevelActor::StaticClass();
-	CreationParams.LevelPackageName = BaseFolder / (TEXT("L_") + PendingPrefabName + TEXT("_Sub"));
-	CreationParams.PivotType = ELevelInstancePivotType::CenterMinZ;
-	// bEnableStreaming 은 기본값(false) 유지 — 프리팹 서브레벨은 임베드(Embedded), 별도 스트리밍 레벨로 안 늘린다.
-
-	const FScopedTransaction Transaction(LOCTEXT("CreatePrefabTx", "블록아웃 Packed 프리팹 생성"));
-	ILevelInstanceInterface* NewLI = Sub->CreateLevelInstanceFrom(ActorsToMove, CreationParams);
-	if (!NewLI)
+	const FScopedTransaction Transaction(LOCTEXT("CreatePrefabTx", "블록아웃 프리팹 생성"));
+	UBlueprint* BP = FKismetEditorUtilities::HarvestBlueprintFromActors(Path, ActorsToMove, Params);
+	if (!BP)
 	{
 		if (StatusText.IsValid())
 		{
@@ -950,7 +927,7 @@ void SFPSRBlockoutTab::CreatePrefabFromSelection()
 		return;
 	}
 
-	// 새 BPP_* 가 팔레트 스캔 폴더(PrefabSaveFolder)에 즉시 나타나도록 재스캔.
+	// 새 BP_* 가 팔레트 스캔 폴더(PrefabSaveFolder)에 즉시 나타나도록 재스캔.
 	RefreshPalette();
 
 	if (StatusText.IsValid())

@@ -7,12 +7,11 @@
 #include "Editor.h"                       // GEditor, GLevelEditorModeTools, GLevelEditorModeToolsIsValid
 #include "EditorModeManager.h"            // FEditorModeTools::DeactivateMode
 #include "EditorViewportClient.h"         // FEditorViewportClient, FViewportCursorLocation, FViewportClick
-#include "Editor/ActorPositioning.h"      // FActorPositioning::TraceWorldForPosition
 #include "SceneView.h"                    // FSceneView / FSceneViewFamilyContext
 #include "SceneManagement.h"              // FPrimitiveDrawInterface::DrawLine, SDPG_*
 #include "PrimitiveDrawingUtils.h"        // DrawWireBox (moved out of SceneManagement.h in UE5)
 #include "ScopedTransaction.h"
-#include "CollisionQueryParams.h"         // FCollisionQueryParams / SCENE_QUERY_STAT (floor down-trace)
+#include "CollisionQueryParams.h"         // FCollisionQueryParams / SCENE_QUERY_STAT (cursor-ray ghost trace)
 #include "Textures/SlateIcon.h"
 #include "InputCoreTypes.h"               // EKeys
 
@@ -91,15 +90,6 @@ void UFPSRBlockoutPlacementMode::RebuildGhost()
 	}
 }
 
-FVector UFPSRBlockoutPlacementMode::SnapLocation(const FVector& In) const
-{
-	if (GridSize <= 0.0f)
-	{
-		return In;
-	}
-	return FVector(FMath::GridSnap(In.X, GridSize), FMath::GridSnap(In.Y, GridSize), In.Z);
-}
-
 bool UFPSRBlockoutPlacementMode::MouseMove(FEditorViewportClient* ViewportClient, FViewport* Viewport, int32 x, int32 y)
 {
 	if (!ViewportClient || !Viewport)
@@ -107,8 +97,7 @@ bool UFPSRBlockoutPlacementMode::MouseMove(FEditorViewportClient* ViewportClient
 		return false;
 	}
 
-	// Canonical mode deproject pattern (mirrors FEdModeFoliage::MouseMove): build a scene view, wrap the cursor, then
-	// use the editor's own placement trace to find the floor position (+ surface normal).
+	// Canonical mode deproject pattern (mirrors FEdModeFoliage::MouseMove): build a scene view, wrap the cursor.
 	FSceneViewFamilyContext ViewFamily(FSceneViewFamily::ConstructionValues(
 		Viewport, ViewportClient->GetScene(), ViewportClient->EngineShowFlags).SetRealtimeUpdate(ViewportClient->IsRealtime()));
 	FSceneView* View = ViewportClient->CalcSceneView(&ViewFamily);
@@ -119,59 +108,73 @@ bool UFPSRBlockoutPlacementMode::MouseMove(FEditorViewportClient* ViewportClient
 
 	FViewportCursorLocation Cursor(View, ViewportClient, x, y);
 
-	TArray<AActor*> IgnoreActors;
-	if (GhostActor.IsValid())
+	UWorld* World = GetEditorWorld();
+	AActor* Ghost = GhostActor.Get();
+	if (!World || !Ghost)
 	{
-		IgnoreActors.Add(GhostActor.Get());
+		bHasHit = false;
+		ViewportClient->Invalidate();
+		return false;
 	}
 
-	// 1) Cursor ray → the surface the cursor points at (which floor/static, and roughly where).
-	const FActorPositionTraceResult Trace = FActorPositioning::TraceWorldForPosition(Cursor, *View, &IgnoreActors);
-	bHasHit = (Trace.State == FActorPositionTraceResult::HitSuccess);
-	if (bHasHit)
+	// 1) Manual line trace along the cursor ray — a Minecraft-style "snap to the pointed SURFACE" needs the actual hit
+	//    actor + face normal (FActorPositioning::TraceWorldForPosition only ever returns a floor point, never who/where
+	//    on a wall was hit), so we trace ourselves instead of using the editor's placement-trace helper.
+	FHitResult Hit;
+	FCollisionQueryParams TraceParams(SCENE_QUERY_STAT(FPSRBlockoutGhostTrace), /*bTraceComplex=*/false);
+	TraceParams.AddIgnoredActor(Ghost);
+	const FVector TraceStart = Cursor.GetOrigin();
+	const FVector TraceEnd = TraceStart + Cursor.GetDirection() * 1000000.0f;
+	bHasHit = World->LineTraceSingleByChannel(Hit, TraceStart, TraceEnd, ECC_WorldStatic, TraceParams);
+	if (!bHasHit)
 	{
-		// 2) Grid-snap X/Y (Z passthrough).
-		FVector Target = SnapLocation(Trace.Location);
-
-		// 3) Re-trace straight DOWN at the snapped X/Y to find the true floor Z there, so a grid-snapped piece sits on
-		//    the floor beneath its cell (END-key style) rather than at the slightly-off cursor Z. Falls back to the
-		//    cursor hit Z if the down-trace finds nothing (e.g. snapped over a gap).
-		float FloorZ = Trace.Location.Z;
-		if (UWorld* World = GetEditorWorld())
-		{
-			FHitResult DownHit;
-			const FVector DownStart(Target.X, Target.Y, Trace.Location.Z + 100000.0f);
-			const FVector DownEnd(Target.X, Target.Y, Trace.Location.Z - 100000.0f);
-			FCollisionQueryParams DownParams(SCENE_QUERY_STAT(FPSRBlockoutGhostFloor), /*bTraceComplex=*/false);
-			if (GhostActor.IsValid())
-			{
-				DownParams.AddIgnoredActor(GhostActor.Get());
-			}
-			if (World->LineTraceSingleByChannel(DownHit, DownStart, DownEnd, ECC_WorldStatic, DownParams))
-			{
-				FloorZ = DownHit.ImpactPoint.Z;
-			}
-		}
-		Target.Z = FloorZ;
-
-		// 4) Lift so the ghost's (visual) bounding-box BOTTOM rests on the floor, not its pivot — a center-pivot mesh
-		//    would otherwise sink halfway into the floor. bOnlyCollidingComponents=false so the ghost's disabled
-		//    collision doesn't zero the bounds.
-		if (AActor* Ghost = GhostActor.Get())
-		{
-			// Rotate BEFORE the bounds read so a yawed ghost's (rotated) bounding box is what the bottom-lift math
-			// below uses — otherwise a rotated non-square piece would lift by the wrong (un-rotated) amount.
-			Ghost->SetActorRotation(CurrentRotation);
-			Ghost->SetActorLocation(Target);
-			FVector BoundsOrigin, BoundsExtent;
-			Ghost->GetActorBounds(/*bOnlyCollidingComponents=*/false, BoundsOrigin, BoundsExtent);
-			const float BottomZ = BoundsOrigin.Z - BoundsExtent.Z;
-			Target.Z += (FloorZ - BottomZ);
-			Ghost->SetActorLocation(Target);
-		}
-
-		CurrentLocation = Target;
+		ViewportClient->Invalidate();
+		return false;
 	}
+
+	// 2) Rotate FIRST, then read the ghost's WORLD AABB at a KNOWN location (origin) so GhostExtent / PivotToCenter
+	//    below are rotation-correct but position-invariant (Synty pieces have corner/edge pivots, not center pivots —
+	//    e.g. SM_Bld_Base_Wall_01 pivots at its X-min end — so the raw hit point can't be used as the spawn pivot).
+	Ghost->SetActorRotation(CurrentRotation);
+	Ghost->SetActorLocation(FVector::ZeroVector);
+	FVector BoundsOrigin, GhostExtent;
+	Ghost->GetActorBounds(/*bOnlyCollidingComponents=*/false, BoundsOrigin, GhostExtent);
+	const FVector PivotToCenter = BoundsOrigin; // pivot(origin) → bbox center offset, world space, this rotation
+
+	// 3) Dominant surface axis from the hit normal — which face got hit (floor/ceiling = Z, wall = X or Y).
+	const FVector N = Hit.ImpactNormal;
+	int32 Axis = 0;
+	if (FMath::Abs(N.Y) > FMath::Abs(N[Axis])) { Axis = 1; }
+	if (FMath::Abs(N.Z) > FMath::Abs(N[Axis])) { Axis = 2; }
+	const float Sign = FMath::Sign(N[Axis]);
+
+	// 4) Target bbox CENTER: flush against the surface along the normal axis; grid-snap the two TANGENTIAL axes so
+	//    same-size pieces tile edge-to-edge (snap the bbox MIN edge, not the pivot/cursor point — Minecraft-style).
+	FVector TargetCenter = Hit.ImpactPoint;
+	TargetCenter[Axis] = Hit.ImpactPoint[Axis] + Sign * GhostExtent[Axis];
+	for (int32 T = 0; T < 3; ++T)
+	{
+		if (T == Axis || GridSize <= 0.0f)
+		{
+			continue;
+		}
+		const float MinEdge = Hit.ImpactPoint[T] - GhostExtent[T];
+		TargetCenter[T] = FMath::GridSnap(MinEdge, GridSize) + GhostExtent[T];
+	}
+
+	// 5) Wall face (Axis == X/Y): grid-snapping Z (done above as a tangential axis) would float the piece off the
+	//    ground. Override it instead — rest the ghost's bbox BOTTOM on the hit actor's bbox BOTTOM so wall pieces line
+	//    up vertically with their neighbor rather than floating at cursor height.
+	if (Axis != 2)
+	{
+		const float NeighborBottomZ = Hit.GetActor() ? Hit.GetActor()->GetComponentsBoundingBox().Min.Z : Hit.ImpactPoint.Z;
+		TargetCenter.Z = NeighborBottomZ + GhostExtent.Z;
+	}
+
+	// 6) bbox center → pivot, then place.
+	const FVector TargetPivot = TargetCenter - PivotToCenter;
+	Ghost->SetActorLocation(TargetPivot);
+	CurrentLocation = TargetPivot;
 
 	ViewportClient->Invalidate();
 	return false; // don't consume — let camera navigation keep working

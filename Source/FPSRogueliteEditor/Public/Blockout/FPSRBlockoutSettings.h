@@ -43,10 +43,10 @@ public:
 	UPROPERTY(EditAnywhere, Config, Category = "Placement", meta = (ClampMin = "0.0"))
 	float RotationSnapDegrees = 90.0f;
 
-	/** Where "선택→Packed 프리팹" saves the result: the BPP_* Packed Level Actor Blueprint + its private sub-level
-	 *  (both auto-named by the engine's ULevelInstanceSubsystem::CreateLevelInstanceFrom from the designer-entered
-	 *  prefab name). This folder is also added to the palette's scanned paths (RefreshPalette) so new prefabs show up
-	 *  as cards immediately — no need to add it to PaletteFolders by hand. */
+	/** Where "선택→프리팹" saves the result: a lightweight BP_<name> Blueprint (FKismetEditorUtilities::
+	 *  HarvestBlueprintFromActors harvests the selected actors' components into one plain actor Blueprint — no sub-level,
+	 *  unlike the earlier Packed Level Actor approach). This folder is also added to the palette's scanned paths
+	 *  (RefreshPalette) so new prefabs show up as cards immediately — no need to add it to PaletteFolders by hand. */
 	UPROPERTY(EditAnywhere, Config, Category = "Prefab", meta = (ContentDir))
 	FDirectoryPath PrefabSaveFolder;
 };

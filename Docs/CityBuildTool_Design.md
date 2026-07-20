@@ -69,4 +69,19 @@
   - ⚠️ **발견**: `FPackedLevelActorUtils`는 `LEVELINSTANCEEDITOR_API` export 없음 → 외부모듈 링크 불가(LNK2019). Repack 버튼 철회, 엔진 기본 UI(우클릭 Update Packed BP / Build>Pack Level Actors)로 대체. `CreateLevelInstanceFrom`=ENGINE_API라 핵심은 정상.
 - ⏸️ **P4 보류** (사용자 결정 2026-07-20): 재질 리컬러는 **레벨 지속성 문제**(MID는 저장 안 됨 → MIC 에셋 관리 필요=큰 작업) + **스웜 슈터라 개별 조각 리컬러 가치 낮음**(네온 룩=SRS 셀+emissive+밀도가 담당). 필요해지면 그때 구현.
 - ⏳ **에디터 기능 테스트 대기**: 배치·회전·필터=사용자 GUI / 프리팹 생성·콜리전=Claude Python 프로토타입(조사가 경고한 heavy API 검증). 헤드리스 빌드는 컴파일만 보장.
-  - ⚠️ **DDC 주의**: P2/P3 스모크 1회차가 `DerivedDataBackends.cpp:208` "no writable nodes"로 실패(디스크는 넉넉=일시적 락). `-DDC-ForceMemoryCache`로 우회 통과. GUI 에디터가 같은 오류로 안 뜨면 같은 플래그로 실행.
+  - ⚠️ **DDC 주의**: P2/P3 스모크 1회차가 `DerivedDataBackends.cpp:208` "no writable nodes"로 실패. **진짜 원인 = Riot Client(8558) vs ZenServer(8558) 포트 충돌**(일시적 락 아님). `[Zen.AutoLaunch] DesiredPort=8560`으로 이동 해결(커밋 `4e02017a`).
+
+## 6. 🔄 방향 전환 (2026-07-20, 사용자 에디터 테스트 후)
+
+사용자가 L_GameFloor에서 실제 배치·프리팹을 테스트 → **두 가지 근본 피드백**:
+1. **"프리팹마다 Map(.umap)이 생기는 게 불편"** — Packed Level Actor는 UE 설계상 서브레벨 백엔드. 작은 걸 많이 만들 워크플로에 부적합.
+2. **"Minecraft처럼 옆에 딱딱 맞춰야 하는데 부족"** — P1 그리드 스냅이 **커서(피벗)만** 스냅. Synty 조각 피벗이 **코너/모서리**(실측: `SM_Bld_Base_Wall_01` 250폭·피벗 X끝 / `Block_2x2x2` 피벗 코너)라 회전 시 딴 사분면으로 튀어 어긋남.
+
+**사용자 결정 2건**:
+- **프리팹 = 가벼운 BP(레벨 X)** — Packed Level Actor 폐기. `FKismetEditorUtilities::HarvestBlueprintFromActors`(UNREALED_API=링크 OK)로 여러 액터→일반 BP 1개(컴포넌트 하베스트, 서브레벨 없음). 팔레트/SpawnPiece로 그대로 배치.
+- **스냅 = 진짜 Minecraft(면/이웃 스냅)** — ①그리드 셀 스냅(피벗·회전 보정=바운딩박스가 그리드 타일링) ②면 스냅(가리키는 조각 면에 flush 부착).
+
+**재작업**:
+- **R1**: P2/P3 Packed 코드 제거 → `HarvestBlueprintFromActors` BP 프리팹으로 교체.
+- **R2**: `UFPSRBlockoutPlacementMode` 스냅 로직 개편(SnapLocation/MouseMove) — 피벗·회전 보정 그리드 셀 + 트레이스 노멀 기반 면 스냅.
+- ⚠️ 스냅 기하는 **에디터 육안 검증 필수**(조각이 실제로 타일링되는지).

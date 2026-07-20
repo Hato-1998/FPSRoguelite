@@ -19,11 +19,13 @@ class HHitProxy;
 /**
  * City-builder style viewport placement mode for the blockout tool (the K8 "cursor raycast + grid + ghost" follow-up).
  * Activated from the blockout tab's "뷰포트 배치" button, which also calls SetAssetToPlace with the selected card's asset.
- * While active: the cursor is traced to the floor (FActorPositioning), the hit is grid-snapped, a live GHOST actor of
- * the asset follows there, Render draws the snap box + grid, LEFT-CLICK spawns a real actor at the snapped spot (mesh =
- * WorldStatic BlockAll, actor BP = as-is), and ESC exits. Placement is repeatable (the ghost stays for the next click).
- * A modern UEdMode (auto-registered by the asset-editor subsystem — the ctor just sets Info); UBaseLegacyWidgetEdMode
- * supplies the widget-interface plumbing so this only overrides the input + render handlers it needs.
+ * While active: a manual line trace along the cursor ray finds the pointed SURFACE (hit actor + normal), the ghost is
+ * placed flush against that surface and grid-snapped TANGENTIALLY so same-size pieces tile edge-to-edge Minecraft-style
+ * (Synty pieces have corner/edge pivots, not center pivots — pivot-snapping alone leaves gaps/overlaps). Render draws
+ * the snap box + grid, LEFT-CLICK spawns a real actor at the snapped spot (mesh = WorldStatic BlockAll, actor BP =
+ * as-is), and ESC exits. Placement is repeatable (the ghost stays for the next click). A modern UEdMode (auto-registered
+ * by the asset-editor subsystem — the ctor just sets Info); UBaseLegacyWidgetEdMode supplies the widget-interface
+ * plumbing so this only overrides the input + render handlers it needs.
  */
 UCLASS()
 class UFPSRBlockoutPlacementMode : public UBaseLegacyWidgetEdMode
@@ -59,8 +61,6 @@ private:
 	/** (Re)spawns the transient ghost actor for AssetToPlace (destroyed + rebuilt on asset change / mode enter). */
 	void RebuildGhost();
 	void DestroyGhost();
-	/** Snaps X/Y to GridSize (Z untouched); no-op if GridSize <= 0. */
-	FVector SnapLocation(const FVector& In) const;
 	/** Spawns the real (non-transient) actor at CurrentLocation inside an undo transaction. */
 	void SpawnAtCurrent();
 
