@@ -97,14 +97,25 @@ private:
 
 	// --- Right asset card grid --------------------------------------------------------------------------------------
 	TSharedRef<ITableRow> OnGenerateTile(TSharedPtr<FBlockoutAssetItem> Item, const TSharedRef<STableViewBase>& OwnerTable);
+	/** R3a: a USER selection (mouse click / key press — NOT the programmatic ESelectInfo::Direct re-selection that
+	 *  RefreshPalette/RebuildFolderList issue while restoring the previous pick) auto-arms placement mode via
+	 *  ArmPlacementForSelectedAsset(), so picking a card is enough to start snapping without an extra button click. */
 	void OnAssetSelectionChanged(TSharedPtr<FBlockoutAssetItem> Item, ESelectInfo::Type SelectInfo);
 	void OnTileDoubleClicked(TSharedPtr<FBlockoutAssetItem> Item);
 
 	// --- Placement / actions ----------------------------------------------------------------------------------------
 	FReply OnPlaceClicked();
 	/** "뷰포트 배치" button — activates the city-builder placement UEdMode and hands it the selected asset (ghost +
-	 *  cursor-to-floor + grid snap + left-click to place). Enabled when a card is selected (IsPlaceEnabled). */
+	 *  cursor-to-floor + grid snap + left-click to place). Enabled when a card is selected (IsPlaceEnabled). Kept
+	 *  alongside the R3a auto-arm-on-select behavior as an explicit, harmless re-entry point (also routes through
+	 *  ArmPlacementForSelectedAsset — one code path). */
 	FReply OnEnterPlacementModeClicked();
+	/** R3a shared helper (OnEnterPlacementModeClicked + the auto-arm branch of OnAssetSelectionChanged): activates the
+	 *  placement UEdMode if it isn't already active, then pushes SelectedAsset + PlacementGridSize into it. If the mode
+	 *  is ALREADY active, only the asset/grid size are pushed (no re-activation — avoids re-running Enter() and
+	 *  resetting the designer's in-progress rotation while they're just switching which piece they're placing).
+	 *  No-op if no valid card is selected. */
+	void ArmPlacementForSelectedAsset();
 	/** Toolbar grid-size numeric box getter/handler — pushes the live snap size to the active placement mode. */
 	TOptional<float> GetGridSizeValue() const;
 	void OnGridSizeChanged(float NewValue);

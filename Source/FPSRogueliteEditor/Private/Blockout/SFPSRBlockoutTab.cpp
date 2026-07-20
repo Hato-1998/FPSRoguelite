@@ -683,6 +683,15 @@ TSharedRef<ITableRow> SFPSRBlockoutTab::OnGenerateTile(TSharedPtr<FBlockoutAsset
 void SFPSRBlockoutTab::OnAssetSelectionChanged(TSharedPtr<FBlockoutAssetItem> Item, ESelectInfo::Type SelectInfo)
 {
 	SelectedAsset = Item;
+
+	// R3a: 카드를 고르면 바로 배치 모드가 켜진다 — 단, 사용자가 직접 고른 경우만. RefreshPalette/RebuildFolderList 가
+	// 이전 선택을 복원할 때(ESelectInfo::Direct, 프로그램적 재선택)는 배치 모드를 건드리지 않는다(새로고침할 때마다
+	// 모드가 멋대로 켜지면 안 됨).
+	if (Item.IsValid() && Item->Asset.IsValid() &&
+		(SelectInfo == ESelectInfo::OnMouseClick || SelectInfo == ESelectInfo::OnKeyPress))
+	{
+		ArmPlacementForSelectedAsset();
+	}
 }
 
 void SFPSRBlockoutTab::OnTileDoubleClicked(TSharedPtr<FBlockoutAssetItem> Item)
@@ -704,23 +713,40 @@ FReply SFPSRBlockoutTab::OnPlaceClicked()
 
 FReply SFPSRBlockoutTab::OnEnterPlacementModeClicked()
 {
-	if (SelectedAsset.IsValid() && SelectedAsset->Asset.IsValid())
-	{
-		// The level editor (and its mode manager) exists whenever this tab is interactable, so call directly (the
-		// GLevelEditorModeToolsIsValid() guard is deprecated / unnecessary here).
-		GLevelEditorModeTools().ActivateMode(UFPSRBlockoutPlacementMode::EM_BlockoutPlacement);
-		if (UFPSRBlockoutPlacementMode* Mode = Cast<UFPSRBlockoutPlacementMode>(
-				GLevelEditorModeTools().GetActiveScriptableMode(UFPSRBlockoutPlacementMode::EM_BlockoutPlacement)))
-		{
-			Mode->SetAssetToPlace(SelectedAsset->Asset);
-			Mode->SetGridSize(PlacementGridSize);
-		}
-		if (StatusText.IsValid())
-		{
-			StatusText->SetText(LOCTEXT("EnterPlaceMode", "뷰포트 배치 모드: 커서로 바닥 지정 · 좌클릭 배치 · ESC 종료."));
-		}
-	}
+	ArmPlacementForSelectedAsset();
 	return FReply::Handled();
+}
+
+void SFPSRBlockoutTab::ArmPlacementForSelectedAsset()
+{
+	if (!SelectedAsset.IsValid() || !SelectedAsset->Asset.IsValid())
+	{
+		return;
+	}
+
+	// The level editor (and its mode manager) exists whenever this tab is interactable, so call directly (the
+	// GLevelEditorModeToolsIsValid() guard is deprecated / unnecessary here). Only activate if not ALREADY active —
+	// ActivateMode() on an already-active mode is a documented no-op, but staying explicit here keeps the intent clear
+	// (R3a: switching which card is selected while already in placement mode must NOT re-run Enter() and reset the
+	// designer's in-progress rotation).
+	UFPSRBlockoutPlacementMode* Mode = Cast<UFPSRBlockoutPlacementMode>(
+		GLevelEditorModeTools().GetActiveScriptableMode(UFPSRBlockoutPlacementMode::EM_BlockoutPlacement));
+	if (!Mode)
+	{
+		GLevelEditorModeTools().ActivateMode(UFPSRBlockoutPlacementMode::EM_BlockoutPlacement);
+		Mode = Cast<UFPSRBlockoutPlacementMode>(
+			GLevelEditorModeTools().GetActiveScriptableMode(UFPSRBlockoutPlacementMode::EM_BlockoutPlacement));
+	}
+	if (Mode)
+	{
+		Mode->SetAssetToPlace(SelectedAsset->Asset);
+		Mode->SetGridSize(PlacementGridSize);
+	}
+
+	if (StatusText.IsValid())
+	{
+		StatusText->SetText(LOCTEXT("EnterPlaceMode", "뷰포트 배치 모드: 커서로 바닥 지정 · 좌클릭 배치 · ESC 종료."));
+	}
 }
 
 TOptional<float> SFPSRBlockoutTab::GetGridSizeValue() const

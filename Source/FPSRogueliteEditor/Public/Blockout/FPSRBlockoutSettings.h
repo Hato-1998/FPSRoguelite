@@ -7,6 +7,8 @@
 #include "UObject/SoftObjectPath.h"   // FDirectoryPath
 #include "FPSRBlockoutSettings.generated.h"
 
+class UMaterialInterface;
+
 /**
  * Blockout tool configuration (editor-only). Holds the roster of content folders the FPSR Blockout palette scans for
  * placeable modular pieces (Slice ① backbone; the actual scan lands in Slice ②). Config = Editor + DefaultConfig so
@@ -42,6 +44,18 @@ public:
 	 *  (and next spawn's) yaw. 0 is not meaningful (no-op) — keep the 90° default. */
 	UPROPERTY(EditAnywhere, Config, Category = "Placement", meta = (ClampMin = "0.0"))
 	float RotationSnapDegrees = 90.0f;
+
+	/** Magnetic proximity snap radius (cm, R3b) — how close the cursor needs to be to an ALREADY-PLACED Blockout piece
+	 *  for the ghost to snap onto that piece's face, even when the cursor ray itself is pointing at open floor nearby.
+	 *  0 = use PlacementGridSize as the radius. Read once at mode Enter (same pattern as GridSize/RotationSnapDegrees). */
+	UPROPERTY(EditAnywhere, Config, Category = "Placement", meta = (ClampMin = "0.0"))
+	float SnapRadius = 0.0f;
+
+	/** Translucent preview material (R3c) applied to every material slot of the viewport-placement ghost actor, so the
+	 *  designer sees a see-through preview instead of an opaque stand-in. Unset = solid ghost fallback (the piece's own
+	 *  materials, pre-R3c behavior). Editor-only, no runtime impact. */
+	UPROPERTY(EditAnywhere, Config, Category = "Placement", meta = (AllowedClasses = "/Script/Engine.MaterialInterface"))
+	TSoftObjectPtr<UMaterialInterface> GhostMaterial;
 
 	/** Where "선택→프리팹" saves the result: a lightweight BP_<name> Blueprint (FKismetEditorUtilities::
 	 *  HarvestBlueprintFromActors harvests the selected actors' components into one plain actor Blueprint — no sub-level,
