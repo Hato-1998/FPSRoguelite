@@ -179,8 +179,9 @@ namespace FPSRCombat
 
 		if (AFPSRCharacter* Character = Cast<AFPSRCharacter>(Target))
 		{
-			// Player death (DBNO) is a later phase and isn't reported back here, so bKilled stays false — friendly
-			// knockback therefore always lands (intended: allies get launched).
+			// Player death (DBNO) is a later phase and isn't reported back here, so bKilled stays false. FF is
+			// damage-only: the friendly-player check in ApplyExplosion's knockback loop suppresses the ally launch,
+			// so bKilled being false no longer means an ally gets moved (only that the corpse-skip doesn't apply).
 			Character->ApplyContactDamage(FinalDamage, Instigator, DamageType);
 			Result.bApplied = true;
 			return Result;
@@ -296,9 +297,12 @@ namespace FPSRCombat
 				Outcome.KilledEnemies.Add(Target); // freshly killed (alive->dead this blast) — drives the weapon OnKill bridge
 			}
 
-			// Knockback is INDEPENDENT of damage: it applies even at 0 damage (FF-off ally, self-no-damage), and is
-			// only skipped for a pawn this blast just killed (avoid launching a ragdolling/despawning corpse).
-			if (KnockbackStrength > 0.0f && !Result.bKilled)
+			// Knockback is INDEPENDENT of damage (it can apply at 0 damage, e.g. self-no-damage), but FF is DAMAGE-ONLY:
+			// a friendly ally (another player) is never launched by a teammate's blast — FF damage still lands, only the
+			// movement is suppressed. Self-knockback (rocket jump, Target == Instigator) and enemy knockback are
+			// unaffected. Also skip a pawn this blast just killed (avoid launching a ragdolling/despawning corpse).
+			const bool bFriendlyPlayer = (Target != Instigator) && Target->IsA(AFPSRCharacter::StaticClass());
+			if (KnockbackStrength > 0.0f && !Result.bKilled && !bFriendlyPlayer)
 			{
 				const FVector TargetLoc = Target->GetActorLocation();
 				const float Dist = FVector::Dist(Center, TargetLoc);

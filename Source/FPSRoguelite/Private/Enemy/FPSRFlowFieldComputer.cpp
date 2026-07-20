@@ -3,6 +3,7 @@
 #include "Enemy/FPSRFlowFieldComputer.h"
 #include "Enemy/FPSRFlowFieldBoundsVolume.h"
 #include "Core/FPSRLogChannels.h"
+#include "Core/FPSRPlayerState.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/Pawn.h"
@@ -1377,6 +1378,14 @@ void UFPSRFlowFieldComputer::RecomputeFromWorld(UWorld* World, const TArray<FVec
 		{
 			if (const APlayerController* PC = It->Get())
 			{
+				// B17 (U9 DBNO): a downed/dead player must NOT seed the swarm flow field — otherwise enemies path
+				// toward the crawling body even though target selection (FPSREnemySpawnSubsystem.cpp:307) and occupancy
+				// (:743) already exclude it. Same IsAlive() predicate, applied to the seed the gradient is built from.
+				const AFPSRPlayerState* PS = PC->GetPlayerState<AFPSRPlayerState>();
+				if (PS && !PS->IsAlive())
+				{
+					continue;
+				}
 				if (const APawn* PlayerPawn = PC->GetPawn())
 				{
 					float FootOffset = EnemyStandOffset;
