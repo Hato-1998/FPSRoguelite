@@ -22,6 +22,17 @@ enum class EBlockoutAssetStatus : uint8
 	Fail,
 };
 
+/** RIGHT 타일 그리드의 카테고리 필터(슬라이스 P1b) — 배치·스폰·회전·설정 클래스는 건드리지 않는 순수 UX 필터. 기본값 All.
+ *  분류는 IsStructureAsset() 휴리스틱 하나로만 판정하며 필터는 비대칭이다: All = 전부 표시, Structure = Structure로
+ *  분류된 것만, Dressing = Structure가 "아닌" 전부(장식 + 관례를 벗어나 분류 안 되는 자산 포함) — 어떤 자산도 세 필터
+ *  전부에서 숨겨지는 일이 없도록 하는 설계(휴리스틱이 놓친 자산이 Dressing 밑에서라도 항상 보이게). */
+enum class EFPSRBlockoutCategoryFilter : uint8
+{
+	All,
+	Structure,
+	Dressing,
+};
+
 /**
  * FPSR Blockout tool (Tools > FPSR > "블록아웃 툴…") — config-driven modular map palette + blockout guardrails.
  *
@@ -74,6 +85,12 @@ private:
 	FReply OnRefreshClicked();
 	void OnSearchTextChanged(const FText& NewText);
 
+	// --- Category filter toggle (P1b, 순수 UX 필터: 전체/구조/장식) ------------------------------------------------------
+	/** SSegmentedControl 의 .Value 바인딩 — 현재 선택된 필터를 반환. */
+	EFPSRBlockoutCategoryFilter GetCategoryFilter() const;
+	/** SSegmentedControl 의 .OnValueChanged — 필터를 갱신하고 오른쪽 타일 소스를 다시 빌드(PopulateCurrentFolder). */
+	void OnCategoryFilterChanged(EFPSRBlockoutCategoryFilter NewFilter);
+
 	// --- Left folder list -------------------------------------------------------------------------------------------
 	TSharedRef<ITableRow> OnGenerateFolderRow(TSharedPtr<FBlockoutFolderItem> Item, const TSharedRef<STableViewBase>& OwnerTable);
 	void OnFolderSelectionChanged(TSharedPtr<FBlockoutFolderItem> Item, ESelectInfo::Type SelectInfo);
@@ -104,6 +121,11 @@ private:
 	static bool IsBlueprintAsset(const FAssetData& AssetData);
 	static bool IsActorBlueprint(const FAssetData& AssetData);
 	static EBlockoutAssetStatus InspectAssetStatus(const FAssetData& AssetData);
+	/** 카테고리 필터(P1b) 분류 휴리스틱 — 패키지 경로에 "/Buildings"·"/Base" 포함 또는 자산명이 "SM_Bld_"로 시작하면
+	 *  Structure(벽/바닥/건물)로 판정. Dressing(소품/환경, 경로 "/Props"·"/Environment" 또는 이름 "SM_Prop_"·"SM_Env_")은
+	 *  별도 판정 함수를 두지 않는다 — 필터가 비대칭 설계(EFPSRBlockoutCategoryFilter 주석 참고)라 "Structure가 아니면
+	 *  Dressing 뷰에 표시"로 충분하기 때문. 실제 태그가 아닌 경로/이름 관례 기반이므로 어디까지나 휴리스틱. */
+	static bool IsStructureAsset(const FAssetData& AssetData);
 
 	// --- State ------------------------------------------------------------------------------------------------------
 	/** Full scan result (all placeable assets across all configured folders), cached so filtering is a pure rebuild. */
@@ -121,6 +143,8 @@ private:
 	TSharedPtr<FBlockoutAssetItem> SelectedAsset;
 
 	FString CurrentFilter;
+	/** 오른쪽 타일 그리드 카테고리 필터(P1b) — LEFT 폴더 목록/카운트에는 적용하지 않고 PopulateCurrentFolder 에서만 사용. */
+	EFPSRBlockoutCategoryFilter CurrentCategoryFilter = EFPSRBlockoutCategoryFilter::All;
 	/** Collision-status cache keyed by asset path — survives filter/folder changes; filled by OnInspectStatusClicked. */
 	TMap<FSoftObjectPath, EBlockoutAssetStatus> StatusByAsset;
 	/** Live grid-snap size (cm) for the viewport placement mode; edited via the toolbar box, seeded from settings. */

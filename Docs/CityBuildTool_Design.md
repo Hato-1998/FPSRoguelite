@@ -26,7 +26,10 @@
 | `SFPSRBlockoutTab` 팔레트 | 폴더+타일 2단 | + Structure/Dressing 분류 |
 | 등록 | 3단 패턴(module.cpp:30/54/96) | 재질 패널 탭 추가 시 동일 패턴 |
 
-**그리드 단위(cm) = 미확정**. `SM_Bld_Block_NxNxN` 명명 + 플로우필드 셀 200cm → **200 추정**이나 코드 전 확정 불가(에디터 `GetBounds()` 필요). 대응: config 기본값 200으로 두고 **에디터 테스트에서 확정**(스냅은 config 구동이라 코드 재작성 불요).
+**그리드 단위(cm) = 250 확정** (2026-07-20 에디터 `GetBounds()` 실측):
+- **Base 키트**(실제 kitbash 벽/바닥/천장): `SM_Bld_Base_Floor/Ceiling` = **250×250cm** → base 단위 250.
+- **Block 덩어리**(통짜 건물): `SM_Bld_Block_1x1x1`=1500cm, 명명=높이×폭×깊이, 단위 **1500 = 6×250**(250 그리드에 정합).
+- ⚠️ 종전 "200 추정"은 **틀림**(200=플로우필드 셀 단위이지 건물 단위 아님). `DefaultEditor.ini` PlacementGridSize=100→**250** + 헤더 기본값 200→250. ini가 최종 override.
 
 ## 3. 단계 (P1~P4, 사용자 승인)
 

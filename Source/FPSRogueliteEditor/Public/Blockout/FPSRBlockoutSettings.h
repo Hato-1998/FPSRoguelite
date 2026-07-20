@@ -36,7 +36,7 @@ public:
 	/** Grid snap size (cm) for the viewport placement mode (city-builder ghost). The cursor floor-hit is snapped to
 	 *  this grid in X/Y before the ghost/placement lands. 0 = no snap (free placement). */
 	UPROPERTY(EditAnywhere, Config, Category = "Placement", meta = (ClampMin = "0.0"))
-	float PlacementGridSize = 200.0f; // 200 = inferred Synty base unit; confirm via GetBounds in editor
+	float PlacementGridSize = 250.0f; // 250 = Synty CyberCity Base 키트 실측(Floor/Ceiling 250×250cm; Block 1500=6×250). 2026-07-20 GetBounds 확정. ini(DefaultEditor)가 최종 override.
 
 	/** Rotation snap step (degrees) for the viewport placement mode's [ / ] quick-rotate keys. Applied to the ghost's
 	 *  (and next spawn's) yaw. 0 is not meaningful (no-op) — keep the 90° default. */

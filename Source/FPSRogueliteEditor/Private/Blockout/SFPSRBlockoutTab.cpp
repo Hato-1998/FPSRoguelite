@@ -35,6 +35,7 @@
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SSearchBox.h"
 #include "Widgets/Input/SNumericEntryBox.h"
+#include "Widgets/Input/SSegmentedControl.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SSplitter.h"
@@ -204,14 +205,40 @@ void SFPSRBlockoutTab::Construct(const FArguments& InArgs)
 				.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
 				.Padding(2.0f)
 				[
-					SAssignNew(AssetTileView, STileView<TSharedPtr<FBlockoutAssetItem>>)
-					.ListItemsSource(&CurrentFolderAssets)
-					.OnGenerateTile(this, &SFPSRBlockoutTab::OnGenerateTile)
-					.OnSelectionChanged(this, &SFPSRBlockoutTab::OnAssetSelectionChanged)
-					.OnMouseButtonDoubleClick(this, &SFPSRBlockoutTab::OnTileDoubleClicked)
-					.ItemWidth(112.0f)
-					.ItemHeight(150.0f)
-					.SelectionMode(ESelectionMode::Single)
+					SNew(SVerticalBox)
+
+					// 카테고리 필터 토글(P1b) — 배치/스폰에는 영향 없는 순수 UX 필터. 전체=무필터, 구조=Structure만,
+					// 장식=Structure가 "아닌" 전부(비대칭 설계, 헤더의 EFPSRBlockoutCategoryFilter 주석 참고).
+					+ SVerticalBox::Slot()
+					.AutoHeight()
+					.Padding(0.0f, 0.0f, 0.0f, 4.0f)
+					[
+						SNew(SSegmentedControl<EFPSRBlockoutCategoryFilter>)
+						.Value(this, &SFPSRBlockoutTab::GetCategoryFilter)
+						.OnValueChanged(this, &SFPSRBlockoutTab::OnCategoryFilterChanged)
+
+						+ SSegmentedControl<EFPSRBlockoutCategoryFilter>::Slot(EFPSRBlockoutCategoryFilter::All)
+						.Text(LOCTEXT("CategoryAll", "전체"))
+
+						+ SSegmentedControl<EFPSRBlockoutCategoryFilter>::Slot(EFPSRBlockoutCategoryFilter::Structure)
+						.Text(LOCTEXT("CategoryStructure", "구조"))
+
+						+ SSegmentedControl<EFPSRBlockoutCategoryFilter>::Slot(EFPSRBlockoutCategoryFilter::Dressing)
+						.Text(LOCTEXT("CategoryDressing", "장식"))
+					]
+
+					+ SVerticalBox::Slot()
+					.FillHeight(1.0f)
+					[
+						SAssignNew(AssetTileView, STileView<TSharedPtr<FBlockoutAssetItem>>)
+						.ListItemsSource(&CurrentFolderAssets)
+						.OnGenerateTile(this, &SFPSRBlockoutTab::OnGenerateTile)
+						.OnSelectionChanged(this, &SFPSRBlockoutTab::OnAssetSelectionChanged)
+						.OnMouseButtonDoubleClick(this, &SFPSRBlockoutTab::OnTileDoubleClicked)
+						.ItemWidth(112.0f)
+						.ItemHeight(150.0f)
+						.SelectionMode(ESelectionMode::Single)
+					]
 				]
 			]
 		]
@@ -236,6 +263,18 @@ bool SFPSRBlockoutTab::IsActorBlueprint(const FAssetData& AssetData)
 		return NativeParent && NativeParent->IsChildOf(AActor::StaticClass());
 	}
 	return false;
+}
+
+bool SFPSRBlockoutTab::IsStructureAsset(const FAssetData& AssetData)
+{
+	// 카테고리 필터(P1b) 분류 휴리스틱 — 실제 태그/메타데이터가 아니라 폴더 경로·명명 관례에 의존한다. 관례를 벗어난
+	// 자산(위 두 조건 모두 미해당)은 여기서 false 를 반환하고 "장식" 필터 아래로 새어나간다(비대칭 설계, 헤더 주석 참고).
+	const FString PackagePathStr = AssetData.PackagePath.ToString();
+	if (PackagePathStr.Contains(TEXT("/Buildings")) || PackagePathStr.Contains(TEXT("/Base")))
+	{
+		return true;
+	}
+	return AssetData.AssetName.ToString().StartsWith(TEXT("SM_Bld_"));
 }
 
 void SFPSRBlockoutTab::RefreshPalette()
@@ -406,6 +445,17 @@ void SFPSRBlockoutTab::PopulateCurrentFolder()
 		{
 			continue;
 		}
+		// 카테고리 필터(P1b) — LEFT 폴더 목록/카운트는 그대로 두고 여기(오른쪽 타일 소스)에만 적용. 비대칭 설계:
+		// Structure 는 Structure로 분류된 것만, Dressing 은 Structure가 "아닌" 전부(관례를 벗어난 자산도 여기서 보임).
+		if (CurrentCategoryFilter != EFPSRBlockoutCategoryFilter::All)
+		{
+			const bool bIsStructure = IsStructureAsset(Asset);
+			const bool bWantStructure = (CurrentCategoryFilter == EFPSRBlockoutCategoryFilter::Structure);
+			if (bIsStructure != bWantStructure)
+			{
+				continue;
+			}
+		}
 		TSharedPtr<FBlockoutAssetItem> AssetItem = MakeShared<FBlockoutAssetItem>();
 		AssetItem->Asset = Asset;
 		AssetItem->Label = FText::FromName(Asset.AssetName);
@@ -432,6 +482,18 @@ void SFPSRBlockoutTab::OnSearchTextChanged(const FText& NewText)
 {
 	CurrentFilter = NewText.ToString();
 	RebuildFolderList();
+}
+
+EFPSRBlockoutCategoryFilter SFPSRBlockoutTab::GetCategoryFilter() const
+{
+	return CurrentCategoryFilter;
+}
+
+void SFPSRBlockoutTab::OnCategoryFilterChanged(EFPSRBlockoutCategoryFilter NewFilter)
+{
+	CurrentCategoryFilter = NewFilter;
+	// LEFT 폴더 목록은 이름검색만 반영(RebuildFolderList 미호출) — 오른쪽 타일 소스만 다시 빌드.
+	PopulateCurrentFolder();
 }
 
 TSharedRef<ITableRow> SFPSRBlockoutTab::OnGenerateFolderRow(TSharedPtr<FBlockoutFolderItem> Item, const TSharedRef<STableViewBase>& OwnerTable)
