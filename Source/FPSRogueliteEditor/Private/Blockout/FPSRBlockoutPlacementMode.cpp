@@ -174,7 +174,7 @@ bool UFPSRBlockoutPlacementMode::MouseMove(FEditorViewportClient* ViewportClient
 	//    directly at one of its faces. Only tool-placed pieces count (outliner "Blockout" folder) — floor/vendor
 	//    geometry never magnet-snaps. SnapRadius 0 (unset in settings) falls back to GridSize as the search radius.
 	const float EffectiveSnapRadius = SnapRadius > 0.0f ? SnapRadius : FMath::Max(GridSize, 1.0f);
-	AStaticMeshActor* NeighborActor = nullptr;
+	AActor* NeighborActor = nullptr;
 	FBox NeighborBox;
 	{
 		TArray<FOverlapResult> Overlaps;
@@ -186,12 +186,19 @@ bool UFPSRBlockoutPlacementMode::MouseMove(FEditorViewportClient* ViewportClient
 			float BestDistSq = TNumericLimits<float>::Max();
 			for (const FOverlapResult& Overlap : Overlaps)
 			{
-				AStaticMeshActor* Candidate = Cast<AStaticMeshActor>(Overlap.GetActor());
+				// 배치도구가 만든 조각만 자석 스냅 대상(바닥/벤더 지오메트리 제외). AStaticMeshActor뿐 아니라 하베스트된
+				// BP_* 프리팹(AActor 파생, StaticMeshActor 아님)도 포함 — SpawnPiece가 둘 다 "Blockout" 폴더에 넣으므로
+				// 클래스가 아니라 폴더로 판정한다(Codex P2: 캐스트가 BP 프리팹을 놓쳐 자석 스냅 대상서 빠지던 문제).
+				AActor* Candidate = Overlap.GetActor();
 				if (!Candidate || !Candidate->GetFolderPath().ToString().StartsWith(TEXT("Blockout")))
 				{
-					continue; // 배치도구가 만든 조각만 자석 스냅 대상(바닥/벤더 지오메트리 제외)
+					continue;
 				}
 				const FBox CandidateBox = Candidate->GetComponentsBoundingBox();
+				if (!CandidateBox.IsValid)
+				{
+					continue; // 메시 바운드가 없는 액터(순수 볼륨 등)는 자석 대상 아님
+				}
 				const float DistSq = FVector::DistSquared(CandidateBox.GetCenter(), CursorHit.ImpactPoint);
 				if (DistSq < BestDistSq)
 				{
@@ -209,10 +216,12 @@ bool UFPSRBlockoutPlacementMode::MouseMove(FEditorViewportClient* ViewportClient
 		// 4) Magnetic face-snap: which SIDE of the neighbor the cursor is on decides the attach face — the dominant
 		//    axis of the cursor→neighbor-center vector. This reads more robustly than the raw ray normal when the
 		//    cursor is near-but-not-on the neighbor (the whole point of magnetic snapping).
+		// 자석 스냅은 "이웃 옆에 붙이는"(커서가 이웃 근처 바닥을 가리키는) 제스처라 붙일 면은 항상 HORIZONTAL 측면 —
+		// 지배축을 X/Y 중에서만 고르고 Z는 배제한다. 안 그러면 높은 이웃(벽은 중심이 바닥보다 한참 위)에서 |Dir.Z|가
+		// 이겨 조각이 옆이 아니라 위/아래로 붙는다(Codex P2). 위에 쌓기는 아래 direct-hit 경로(커서 레이가 윗면 히트
+		// → 노멀 +Z)가 담당하지, 자석 경로가 아니다.
 		const FVector Dir = CursorHit.ImpactPoint - NeighborBox.GetCenter();
-		int32 Axis = 0;
-		if (FMath::Abs(Dir.Y) > FMath::Abs(Dir[Axis])) { Axis = 1; }
-		if (FMath::Abs(Dir.Z) > FMath::Abs(Dir[Axis])) { Axis = 2; }
+		const int32 Axis = (FMath::Abs(Dir.Y) > FMath::Abs(Dir.X)) ? 1 : 0;
 		const float Sign = FMath::Sign(Dir[Axis]);
 
 		const float NeighborFace = (Sign > 0.0f) ? NeighborBox.Max[Axis] : NeighborBox.Min[Axis];
