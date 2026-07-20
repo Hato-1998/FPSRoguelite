@@ -4,6 +4,7 @@
 #include "Blockout/FPSRBlockoutSettings.h"
 #include "Blockout/FPSRBlockoutValidator.h"
 #include "Blockout/FPSRBlockoutPlacementMode.h"
+#include "Blockout/FPSRBlockoutSpawn.h"
 #include "Validation/FPSRAnchoredValidationService.h"
 #include "EditorModeManager.h"
 
@@ -18,7 +19,6 @@
 #include "Engine/BlueprintGeneratedClass.h"
 #include "Engine/SimpleConstructionScript.h"
 #include "Engine/SCS_Node.h"
-#include "Components/StaticMeshComponent.h"
 #include "Components/PrimitiveComponent.h"
 #include "PhysicsEngine/BodySetup.h"
 #include "GameFramework/Actor.h"
@@ -769,9 +769,7 @@ void SFPSRBlockoutTab::PlaceAsset(const FAssetData& AssetData)
 		}
 
 		const FScopedTransaction Transaction(LOCTEXT("PlaceBPTx", "블록아웃 BP 배치"));
-		FActorSpawnParameters SpawnParams;
-		SpawnParams.ObjectFlags |= RF_Transactional;
-		AActor* NewActor = World->SpawnActor<AActor>(BP->GeneratedClass, SpawnLocation, FRotator::ZeroRotator, SpawnParams);
+		AActor* NewActor = FFPSRBlockoutSpawn::SpawnPiece(World, AssetData, FTransform(FRotator::ZeroRotator, SpawnLocation), /*bTransientGhost=*/false);
 		if (!NewActor)
 		{
 			if (StatusText.IsValid())
@@ -780,9 +778,6 @@ void SFPSRBlockoutTab::PlaceAsset(const FAssetData& AssetData)
 			}
 			return;
 		}
-		NewActor->Modify();
-		NewActor->SetActorLabel(AssetData.AssetName.ToString());
-		NewActor->SetFolderPath(TEXT("Blockout"));
 
 		GEditor->SelectNone(/*bNoteSelectionChange=*/false, /*bDeselectBSPSurfs=*/true);
 		GEditor->SelectActor(NewActor, /*bInSelected=*/true, /*bNotify=*/true);
@@ -834,10 +829,7 @@ void SFPSRBlockoutTab::PlaceAsset(const FAssetData& AssetData)
 	}
 
 	const FScopedTransaction Transaction(LOCTEXT("PlaceMeshTx", "블록아웃 메시 배치"));
-
-	FActorSpawnParameters SpawnParams;
-	SpawnParams.ObjectFlags |= RF_Transactional;
-	AStaticMeshActor* NewActor = World->SpawnActor<AStaticMeshActor>(SpawnLocation, FRotator::ZeroRotator, SpawnParams);
+	AActor* NewActor = FFPSRBlockoutSpawn::SpawnPiece(World, AssetData, FTransform(FRotator::ZeroRotator, SpawnLocation), /*bTransientGhost=*/false);
 	if (!NewActor)
 	{
 		if (StatusText.IsValid())
@@ -846,20 +838,6 @@ void SFPSRBlockoutTab::PlaceAsset(const FAssetData& AssetData)
 		}
 		return;
 	}
-	NewActor->Modify();
-
-	if (UStaticMeshComponent* MeshComp = NewActor->GetStaticMeshComponent())
-	{
-		MeshComp->Modify();
-		MeshComp->SetStaticMesh(Mesh);
-		// K4=B / K14 guardrail: placed blockout meshes are WorldStatic + block-all so the flow-field's obstacle mask
-		// (BuildObstacleMask ECC_WorldStatic downtrace) treats them as obstacles. The engine's standard "BlockAll"
-		// profile is exactly WorldStatic object type + QueryAndPhysics + block-all responses (BaseEngine.ini).
-		MeshComp->SetCollisionProfileName(TEXT("BlockAll"));
-	}
-
-	NewActor->SetActorLabel(AssetData.AssetName.ToString());
-	NewActor->SetFolderPath(TEXT("Blockout"));
 
 	GEditor->SelectNone(/*bNoteSelectionChange=*/false, /*bDeselectBSPSurfs=*/true);
 	GEditor->SelectActor(NewActor, /*bInSelected=*/true, /*bNotify=*/true);

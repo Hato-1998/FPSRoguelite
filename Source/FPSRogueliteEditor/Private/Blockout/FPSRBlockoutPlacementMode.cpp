@@ -2,6 +2,7 @@
 
 #include "Blockout/FPSRBlockoutPlacementMode.h"
 #include "Blockout/FPSRBlockoutSettings.h"
+#include "Blockout/FPSRBlockoutSpawn.h"
 
 #include "Editor.h"                       // GEditor, GLevelEditorModeTools, GLevelEditorModeToolsIsValid
 #include "EditorModeManager.h"            // FEditorModeTools::DeactivateMode
@@ -16,10 +17,6 @@
 #include "InputCoreTypes.h"               // EKeys
 
 #include "Engine/World.h"
-#include "Engine/StaticMesh.h"
-#include "Engine/StaticMeshActor.h"
-#include "Engine/Blueprint.h"
-#include "Components/StaticMeshComponent.h"
 #include "GameFramework/Actor.h"
 
 #define LOCTEXT_NAMESPACE "FPSRBlockoutPlacementMode"
@@ -46,6 +43,8 @@ void UFPSRBlockoutPlacementMode::Enter()
 	Super::Enter();
 	const UFPSRBlockoutSettings* Settings = GetDefault<UFPSRBlockoutSettings>();
 	GridSize = Settings ? Settings->PlacementGridSize : 100.0f;
+	RotationSnapDegrees = Settings ? Settings->RotationSnapDegrees : 90.0f;
+	CurrentRotation = FRotator::ZeroRotator;
 	RebuildGhost();
 }
 
@@ -83,38 +82,11 @@ void UFPSRBlockoutPlacementMode::RebuildGhost()
 		return;
 	}
 
-	FActorSpawnParameters SpawnParams;
-	SpawnParams.ObjectFlags |= RF_Transient;
-	SpawnParams.bTemporaryEditorActor = true;   // excluded from outliner / save
-
-	AActor* Ghost = nullptr;
-	const bool bIsBP = (AssetToPlace.AssetClassPath == UBlueprint::StaticClass()->GetClassPathName());
-	if (bIsBP)
-	{
-		UBlueprint* BP = Cast<UBlueprint>(AssetToPlace.GetAsset());
-		if (BP && BP->GeneratedClass && BP->GeneratedClass->IsChildOf(AActor::StaticClass()))
-		{
-			Ghost = World->SpawnActor<AActor>(BP->GeneratedClass, FVector::ZeroVector, FRotator::ZeroRotator, SpawnParams);
-		}
-	}
-	else
-	{
-		UStaticMesh* Mesh = Cast<UStaticMesh>(AssetToPlace.GetAsset());
-		if (Mesh)
-		{
-			AStaticMeshActor* MeshActor = World->SpawnActor<AStaticMeshActor>(FVector::ZeroVector, FRotator::ZeroRotator, SpawnParams);
-			if (MeshActor && MeshActor->GetStaticMeshComponent())
-			{
-				MeshActor->GetStaticMeshComponent()->SetStaticMesh(Mesh);
-			}
-			Ghost = MeshActor;
-		}
-	}
-
+	// FVector::ZeroVector here — MouseMove positions the ghost on the next tick; CurrentRotation carries over so a
+	// rebuild (e.g. asset change) mid-placement doesn't reset the yaw the designer already dialed in.
+	AActor* Ghost = FFPSRBlockoutSpawn::SpawnPiece(World, AssetToPlace, FTransform(CurrentRotation, FVector::ZeroVector), /*bTransientGhost=*/true);
 	if (Ghost)
 	{
-		Ghost->bIsEditorPreviewActor = true;
-		Ghost->SetActorEnableCollision(false);
 		GhostActor = Ghost;
 	}
 }
@@ -187,6 +159,9 @@ bool UFPSRBlockoutPlacementMode::MouseMove(FEditorViewportClient* ViewportClient
 		//    collision doesn't zero the bounds.
 		if (AActor* Ghost = GhostActor.Get())
 		{
+			// Rotate BEFORE the bounds read so a yawed ghost's (rotated) bounding box is what the bottom-lift math
+			// below uses — otherwise a rotated non-square piece would lift by the wrong (un-rotated) amount.
+			Ghost->SetActorRotation(CurrentRotation);
 			Ghost->SetActorLocation(Target);
 			FVector BoundsOrigin, BoundsExtent;
 			Ghost->GetActorBounds(/*bOnlyCollidingComponents=*/false, BoundsOrigin, BoundsExtent);
@@ -211,6 +186,23 @@ bool UFPSRBlockoutPlacementMode::InputKey(FEditorViewportClient* ViewportClient,
 		GLevelEditorModeTools().DeactivateMode(EM_BlockoutPlacement);
 		return true;
 	}
+
+	if (Event == IE_Pressed && (Key == EKeys::RightBracket || Key == EKeys::LeftBracket))
+	{
+		// SimCity-style quick-rotate: [ / ] step the ghost's (and next spawn's) yaw by RotationSnapDegrees.
+		CurrentRotation.Yaw += (Key == EKeys::RightBracket) ? RotationSnapDegrees : -RotationSnapDegrees;
+		CurrentRotation.Yaw = FRotator::NormalizeAxis(CurrentRotation.Yaw);
+		if (AActor* Ghost = GhostActor.Get())
+		{
+			Ghost->SetActorRotation(CurrentRotation);
+		}
+		if (ViewportClient)
+		{
+			ViewportClient->Invalidate();
+		}
+		return true;
+	}
+
 	return false;
 }
 
@@ -232,46 +224,8 @@ void UFPSRBlockoutPlacementMode::SpawnAtCurrent()
 		return;
 	}
 
-	const bool bIsBP = (AssetToPlace.AssetClassPath == UBlueprint::StaticClass()->GetClassPathName());
-
 	const FScopedTransaction Transaction(LOCTEXT("PlaceTx", "블록아웃 배치(뷰포트)"));
-
-	FActorSpawnParameters SpawnParams;
-	SpawnParams.ObjectFlags |= RF_Transactional;
-
-	AActor* NewActor = nullptr;
-	if (bIsBP)
-	{
-		UBlueprint* BP = Cast<UBlueprint>(AssetToPlace.GetAsset());
-		if (!BP || !BP->GeneratedClass || !BP->GeneratedClass->IsChildOf(AActor::StaticClass()))
-		{
-			return;
-		}
-		NewActor = World->SpawnActor<AActor>(BP->GeneratedClass, CurrentLocation, FRotator::ZeroRotator, SpawnParams);
-	}
-	else
-	{
-		UStaticMesh* Mesh = Cast<UStaticMesh>(AssetToPlace.GetAsset());
-		if (!Mesh)
-		{
-			return;
-		}
-		AStaticMeshActor* MeshActor = World->SpawnActor<AStaticMeshActor>(CurrentLocation, FRotator::ZeroRotator, SpawnParams);
-		if (MeshActor && MeshActor->GetStaticMeshComponent())
-		{
-			MeshActor->GetStaticMeshComponent()->Modify();
-			MeshActor->GetStaticMeshComponent()->SetStaticMesh(Mesh);
-			MeshActor->GetStaticMeshComponent()->SetCollisionProfileName(TEXT("BlockAll")); // WorldStatic (K4=B / K14)
-		}
-		NewActor = MeshActor;
-	}
-
-	if (NewActor)
-	{
-		NewActor->Modify();
-		NewActor->SetActorLabel(AssetToPlace.AssetName.ToString());
-		NewActor->SetFolderPath(TEXT("Blockout"));
-	}
+	FFPSRBlockoutSpawn::SpawnPiece(World, AssetToPlace, FTransform(CurrentRotation, CurrentLocation), /*bTransientGhost=*/false);
 }
 
 void UFPSRBlockoutPlacementMode::Render(const FSceneView* View, FViewport* Viewport, FPrimitiveDrawInterface* PDI)

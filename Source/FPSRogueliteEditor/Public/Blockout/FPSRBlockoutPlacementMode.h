@@ -72,4 +72,8 @@ private:
 	FVector CurrentLocation = FVector::ZeroVector;
 	bool bHasHit = false;
 	float GridSize = 100.0f;
+	/** Live yaw applied to the ghost + next spawn; reset on Enter, stepped by [ / ] in RotationSnapDegrees increments. */
+	FRotator CurrentRotation = FRotator::ZeroRotator;
+	/** [ / ] rotate step (degrees), pushed from UFPSRBlockoutSettings on Enter (same pattern as GridSize). */
+	float RotationSnapDegrees = 90.0f;
 };

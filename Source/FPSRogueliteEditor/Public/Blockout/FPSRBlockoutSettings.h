@@ -36,5 +36,10 @@ public:
 	/** Grid snap size (cm) for the viewport placement mode (city-builder ghost). The cursor floor-hit is snapped to
 	 *  this grid in X/Y before the ghost/placement lands. 0 = no snap (free placement). */
 	UPROPERTY(EditAnywhere, Config, Category = "Placement", meta = (ClampMin = "0.0"))
-	float PlacementGridSize = 100.0f;
+	float PlacementGridSize = 200.0f; // 200 = inferred Synty base unit; confirm via GetBounds in editor
+
+	/** Rotation snap step (degrees) for the viewport placement mode's [ / ] quick-rotate keys. Applied to the ghost's
+	 *  (and next spawn's) yaw. 0 is not meaningful (no-op) — keep the 90° default. */
+	UPROPERTY(EditAnywhere, Config, Category = "Placement", meta = (ClampMin = "0.0"))
+	float RotationSnapDegrees = 90.0f;
 };
