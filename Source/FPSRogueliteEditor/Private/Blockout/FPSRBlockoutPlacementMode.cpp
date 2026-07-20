@@ -2,24 +2,24 @@
 
 #include "Blockout/FPSRBlockoutPlacementMode.h"
 #include "Blockout/FPSRBlockoutSettings.h"
+#include "Blockout/FPSRBlockoutSpawn.h"
 
 #include "Editor.h"                       // GEditor, GLevelEditorModeTools, GLevelEditorModeToolsIsValid
 #include "EditorModeManager.h"            // FEditorModeTools::DeactivateMode
 #include "EditorViewportClient.h"         // FEditorViewportClient, FViewportCursorLocation, FViewportClick
-#include "Editor/ActorPositioning.h"      // FActorPositioning::TraceWorldForPosition
 #include "SceneView.h"                    // FSceneView / FSceneViewFamilyContext
 #include "SceneManagement.h"              // FPrimitiveDrawInterface::DrawLine, SDPG_*
 #include "PrimitiveDrawingUtils.h"        // DrawWireBox (moved out of SceneManagement.h in UE5)
 #include "ScopedTransaction.h"
-#include "CollisionQueryParams.h"         // FCollisionQueryParams / SCENE_QUERY_STAT (floor down-trace)
+#include "CollisionQueryParams.h"         // FCollisionQueryParams / SCENE_QUERY_STAT (cursor-ray ghost trace + magnetic overlap)
+#include "Engine/OverlapResult.h"         // FOverlapResult (magnetic neighbor sphere-overlap, R3b)
 #include "Textures/SlateIcon.h"
 #include "InputCoreTypes.h"               // EKeys
 
 #include "Engine/World.h"
-#include "Engine/StaticMesh.h"
-#include "Engine/StaticMeshActor.h"
-#include "Engine/Blueprint.h"
-#include "Components/StaticMeshComponent.h"
+#include "Engine/StaticMeshActor.h"       // AStaticMeshActor (magnetic neighbor filter, R3b)
+#include "Components/MeshComponent.h"     // UMeshComponent (ghost material override, R3c)
+#include "Materials/MaterialInterface.h"  // UMaterialInterface (ghost material override, R3c)
 #include "GameFramework/Actor.h"
 
 #define LOCTEXT_NAMESPACE "FPSRBlockoutPlacementMode"
@@ -46,6 +46,9 @@ void UFPSRBlockoutPlacementMode::Enter()
 	Super::Enter();
 	const UFPSRBlockoutSettings* Settings = GetDefault<UFPSRBlockoutSettings>();
 	GridSize = Settings ? Settings->PlacementGridSize : 100.0f;
+	RotationSnapDegrees = Settings ? Settings->RotationSnapDegrees : 90.0f;
+	SnapRadius = Settings ? Settings->SnapRadius : 0.0f;
+	CurrentRotation = FRotator::ZeroRotator;
 	RebuildGhost();
 }
 
@@ -83,49 +86,36 @@ void UFPSRBlockoutPlacementMode::RebuildGhost()
 		return;
 	}
 
-	FActorSpawnParameters SpawnParams;
-	SpawnParams.ObjectFlags |= RF_Transient;
-	SpawnParams.bTemporaryEditorActor = true;   // excluded from outliner / save
-
-	AActor* Ghost = nullptr;
-	const bool bIsBP = (AssetToPlace.AssetClassPath == UBlueprint::StaticClass()->GetClassPathName());
-	if (bIsBP)
+	// FVector::ZeroVector here — MouseMove positions the ghost on the next tick; CurrentRotation carries over so a
+	// rebuild (e.g. asset change) mid-placement doesn't reset the yaw the designer already dialed in.
+	AActor* Ghost = FFPSRBlockoutSpawn::SpawnPiece(World, AssetToPlace, FTransform(CurrentRotation, FVector::ZeroVector), /*bTransientGhost=*/true);
+	if (!Ghost)
 	{
-		UBlueprint* BP = Cast<UBlueprint>(AssetToPlace.GetAsset());
-		if (BP && BP->GeneratedClass && BP->GeneratedClass->IsChildOf(AActor::StaticClass()))
-		{
-			Ghost = World->SpawnActor<AActor>(BP->GeneratedClass, FVector::ZeroVector, FRotator::ZeroRotator, SpawnParams);
-		}
+		return;
 	}
-	else
+	GhostActor = Ghost;
+
+	// R3c: translucent preview material — override every material slot on every mesh component so the ghost reads as
+	// a see-through preview instead of an opaque stand-in. Unset GhostMaterial (designer hasn't authored one yet, or
+	// doesn't want the override) = leave the piece's own materials untouched (solid ghost, pre-R3c behavior).
+	const UFPSRBlockoutSettings* Settings = GetDefault<UFPSRBlockoutSettings>();
+	UMaterialInterface* GhostMaterial = Settings ? Settings->GhostMaterial.LoadSynchronous() : nullptr;
+	if (GhostMaterial)
 	{
-		UStaticMesh* Mesh = Cast<UStaticMesh>(AssetToPlace.GetAsset());
-		if (Mesh)
+		TArray<UMeshComponent*> MeshComponents;
+		Ghost->GetComponents<UMeshComponent>(MeshComponents);
+		for (UMeshComponent* MeshComp : MeshComponents)
 		{
-			AStaticMeshActor* MeshActor = World->SpawnActor<AStaticMeshActor>(FVector::ZeroVector, FRotator::ZeroRotator, SpawnParams);
-			if (MeshActor && MeshActor->GetStaticMeshComponent())
+			if (!MeshComp)
 			{
-				MeshActor->GetStaticMeshComponent()->SetStaticMesh(Mesh);
+				continue;
 			}
-			Ghost = MeshActor;
+			for (int32 SlotIndex = 0; SlotIndex < MeshComp->GetNumMaterials(); ++SlotIndex)
+			{
+				MeshComp->SetMaterial(SlotIndex, GhostMaterial);
+			}
 		}
 	}
-
-	if (Ghost)
-	{
-		Ghost->bIsEditorPreviewActor = true;
-		Ghost->SetActorEnableCollision(false);
-		GhostActor = Ghost;
-	}
-}
-
-FVector UFPSRBlockoutPlacementMode::SnapLocation(const FVector& In) const
-{
-	if (GridSize <= 0.0f)
-	{
-		return In;
-	}
-	return FVector(FMath::GridSnap(In.X, GridSize), FMath::GridSnap(In.Y, GridSize), In.Z);
 }
 
 bool UFPSRBlockoutPlacementMode::MouseMove(FEditorViewportClient* ViewportClient, FViewport* Viewport, int32 x, int32 y)
@@ -135,8 +125,7 @@ bool UFPSRBlockoutPlacementMode::MouseMove(FEditorViewportClient* ViewportClient
 		return false;
 	}
 
-	// Canonical mode deproject pattern (mirrors FEdModeFoliage::MouseMove): build a scene view, wrap the cursor, then
-	// use the editor's own placement trace to find the floor position (+ surface normal).
+	// Canonical mode deproject pattern (mirrors FEdModeFoliage::MouseMove): build a scene view, wrap the cursor.
 	FSceneViewFamilyContext ViewFamily(FSceneViewFamily::ConstructionValues(
 		Viewport, ViewportClient->GetScene(), ViewportClient->EngineShowFlags).SetRealtimeUpdate(ViewportClient->IsRealtime()));
 	FSceneView* View = ViewportClient->CalcSceneView(&ViewFamily);
@@ -147,56 +136,152 @@ bool UFPSRBlockoutPlacementMode::MouseMove(FEditorViewportClient* ViewportClient
 
 	FViewportCursorLocation Cursor(View, ViewportClient, x, y);
 
-	TArray<AActor*> IgnoreActors;
-	if (GhostActor.IsValid())
+	UWorld* World = GetEditorWorld();
+	AActor* Ghost = GhostActor.Get();
+	if (!World || !Ghost)
 	{
-		IgnoreActors.Add(GhostActor.Get());
+		bHasHit = false;
+		ViewportClient->Invalidate();
+		return false;
 	}
 
-	// 1) Cursor ray → the surface the cursor points at (which floor/static, and roughly where).
-	const FActorPositionTraceResult Trace = FActorPositioning::TraceWorldForPosition(Cursor, *View, &IgnoreActors);
-	bHasHit = (Trace.State == FActorPositionTraceResult::HitSuccess);
-	if (bHasHit)
+	// 1) Manual line trace along the cursor ray — a Minecraft-style "snap to the pointed SURFACE" needs the actual hit
+	//    actor + face normal (FActorPositioning::TraceWorldForPosition only ever returns a floor point, never who/where
+	//    on a wall was hit), so we trace ourselves instead of using the editor's placement-trace helper.
+	FHitResult CursorHit;
+	FCollisionQueryParams TraceParams(SCENE_QUERY_STAT(FPSRBlockoutGhostTrace), /*bTraceComplex=*/false);
+	TraceParams.AddIgnoredActor(Ghost);
+	const FVector TraceStart = Cursor.GetOrigin();
+	const FVector TraceEnd = TraceStart + Cursor.GetDirection() * 1000000.0f;
+	bHasHit = World->LineTraceSingleByChannel(CursorHit, TraceStart, TraceEnd, ECC_WorldStatic, TraceParams);
+	if (!bHasHit)
 	{
-		// 2) Grid-snap X/Y (Z passthrough).
-		FVector Target = SnapLocation(Trace.Location);
-
-		// 3) Re-trace straight DOWN at the snapped X/Y to find the true floor Z there, so a grid-snapped piece sits on
-		//    the floor beneath its cell (END-key style) rather than at the slightly-off cursor Z. Falls back to the
-		//    cursor hit Z if the down-trace finds nothing (e.g. snapped over a gap).
-		float FloorZ = Trace.Location.Z;
-		if (UWorld* World = GetEditorWorld())
-		{
-			FHitResult DownHit;
-			const FVector DownStart(Target.X, Target.Y, Trace.Location.Z + 100000.0f);
-			const FVector DownEnd(Target.X, Target.Y, Trace.Location.Z - 100000.0f);
-			FCollisionQueryParams DownParams(SCENE_QUERY_STAT(FPSRBlockoutGhostFloor), /*bTraceComplex=*/false);
-			if (GhostActor.IsValid())
-			{
-				DownParams.AddIgnoredActor(GhostActor.Get());
-			}
-			if (World->LineTraceSingleByChannel(DownHit, DownStart, DownEnd, ECC_WorldStatic, DownParams))
-			{
-				FloorZ = DownHit.ImpactPoint.Z;
-			}
-		}
-		Target.Z = FloorZ;
-
-		// 4) Lift so the ghost's (visual) bounding-box BOTTOM rests on the floor, not its pivot — a center-pivot mesh
-		//    would otherwise sink halfway into the floor. bOnlyCollidingComponents=false so the ghost's disabled
-		//    collision doesn't zero the bounds.
-		if (AActor* Ghost = GhostActor.Get())
-		{
-			Ghost->SetActorLocation(Target);
-			FVector BoundsOrigin, BoundsExtent;
-			Ghost->GetActorBounds(/*bOnlyCollidingComponents=*/false, BoundsOrigin, BoundsExtent);
-			const float BottomZ = BoundsOrigin.Z - BoundsExtent.Z;
-			Target.Z += (FloorZ - BottomZ);
-			Ghost->SetActorLocation(Target);
-		}
-
-		CurrentLocation = Target;
+		ViewportClient->Invalidate();
+		return false;
 	}
+
+	// 2) Rotate FIRST, then read the ghost's WORLD AABB at a KNOWN location (origin) so GhostExtent / PivotToCenter
+	//    below are rotation-correct but position-invariant (Synty pieces have corner/edge pivots, not center pivots —
+	//    e.g. SM_Bld_Base_Wall_01 pivots at its X-min end — so the raw hit point can't be used as the spawn pivot).
+	Ghost->SetActorRotation(CurrentRotation);
+	Ghost->SetActorLocation(FVector::ZeroVector);
+	FVector BoundsOrigin, GhostExtent;
+	Ghost->GetActorBounds(/*bOnlyCollidingComponents=*/false, BoundsOrigin, GhostExtent);
+	const FVector PivotToCenter = BoundsOrigin; // pivot(origin) → bbox center offset, world space, this rotation
+
+	// 3) MAGNETIC neighbor search (R3b) — sphere-overlap around the cursor hit point looking for an ALREADY-PLACED
+	//    Blockout piece to snap against, even when the cursor ray is pointing at open floor NEAR the piece rather than
+	//    directly at one of its faces. Only tool-placed pieces count (outliner "Blockout" folder) — floor/vendor
+	//    geometry never magnet-snaps. SnapRadius 0 (unset in settings) falls back to GridSize as the search radius.
+	const float EffectiveSnapRadius = SnapRadius > 0.0f ? SnapRadius : FMath::Max(GridSize, 1.0f);
+	AActor* NeighborActor = nullptr;
+	FBox NeighborBox;
+	{
+		TArray<FOverlapResult> Overlaps;
+		FCollisionQueryParams OverlapParams(SCENE_QUERY_STAT(FPSRBlockoutGhostSnapOverlap), /*bTraceComplex=*/false);
+		OverlapParams.AddIgnoredActor(Ghost);
+		if (World->OverlapMultiByChannel(Overlaps, CursorHit.ImpactPoint, FQuat::Identity, ECC_WorldStatic,
+				FCollisionShape::MakeSphere(EffectiveSnapRadius), OverlapParams))
+		{
+			float BestDistSq = TNumericLimits<float>::Max();
+			for (const FOverlapResult& Overlap : Overlaps)
+			{
+				// 배치도구가 만든 조각만 자석 스냅 대상(바닥/벤더 지오메트리 제외). AStaticMeshActor뿐 아니라 하베스트된
+				// BP_* 프리팹(AActor 파생, StaticMeshActor 아님)도 포함 — SpawnPiece가 둘 다 "Blockout" 폴더에 넣으므로
+				// 클래스가 아니라 폴더로 판정한다(Codex P2: 캐스트가 BP 프리팹을 놓쳐 자석 스냅 대상서 빠지던 문제).
+				AActor* Candidate = Overlap.GetActor();
+				if (!Candidate || !Candidate->GetFolderPath().ToString().StartsWith(TEXT("Blockout")))
+				{
+					continue;
+				}
+				const FBox CandidateBox = Candidate->GetComponentsBoundingBox();
+				if (!CandidateBox.IsValid)
+				{
+					continue; // 메시 바운드가 없는 액터(순수 볼륨 등)는 자석 대상 아님
+				}
+				const float DistSq = FVector::DistSquared(CandidateBox.GetCenter(), CursorHit.ImpactPoint);
+				if (DistSq < BestDistSq)
+				{
+					BestDistSq = DistSq;
+					NeighborActor = Candidate;
+					NeighborBox = CandidateBox;
+				}
+			}
+		}
+	}
+
+	FVector TargetCenter;
+	if (NeighborActor)
+	{
+		// 4) Magnetic face-snap: which SIDE of the neighbor the cursor is on decides the attach face — the dominant
+		//    axis of the cursor→neighbor-center vector. This reads more robustly than the raw ray normal when the
+		//    cursor is near-but-not-on the neighbor (the whole point of magnetic snapping).
+		// 자석 스냅은 "이웃 옆에 붙이는"(커서가 이웃 근처 바닥을 가리키는) 제스처라 붙일 면은 항상 HORIZONTAL 측면 —
+		// 지배축을 X/Y 중에서만 고르고 Z는 배제한다. 안 그러면 높은 이웃(벽은 중심이 바닥보다 한참 위)에서 |Dir.Z|가
+		// 이겨 조각이 옆이 아니라 위/아래로 붙는다(Codex P2). 위에 쌓기는 아래 direct-hit 경로(커서 레이가 윗면 히트
+		// → 노멀 +Z)가 담당하지, 자석 경로가 아니다.
+		const FVector Dir = CursorHit.ImpactPoint - NeighborBox.GetCenter();
+		const int32 Axis = (FMath::Abs(Dir.Y) > FMath::Abs(Dir.X)) ? 1 : 0;
+		const float Sign = FMath::Sign(Dir[Axis]);
+
+		const float NeighborFace = (Sign > 0.0f) ? NeighborBox.Max[Axis] : NeighborBox.Min[Axis];
+		TargetCenter = CursorHit.ImpactPoint;
+		TargetCenter[Axis] = NeighborFace + Sign * GhostExtent[Axis];
+
+		// Tangential axes: grid-snap the ghost bbox MIN edge using the cursor hit as reference (same Minecraft-style
+		// tiling as the floor-snap fallback below).
+		for (int32 T = 0; T < 3; ++T)
+		{
+			if (T == Axis || GridSize <= 0.0f)
+			{
+				continue;
+			}
+			const float MinEdge = CursorHit.ImpactPoint[T] - GhostExtent[T];
+			TargetCenter[T] = FMath::GridSnap(MinEdge, GridSize) + GhostExtent[T];
+		}
+
+		// Horizontal attach face (wall-to-wall, Axis == X/Y): grid-snapping Z as a tangential axis would float the
+		// piece off the ground. Override it — rest the ghost's bbox BOTTOM on the neighbor's bbox BOTTOM so wall
+		// pieces line up vertically with their neighbor instead of floating at cursor height.
+		if (Axis != 2)
+		{
+			TargetCenter.Z = NeighborBox.Min.Z + GhostExtent.Z;
+		}
+	}
+	else
+	{
+		// 4-Fallback) No Blockout neighbor within SnapRadius — flush/grid snap on whatever surface the cursor ray
+		//    actually hit (floor, vendor geometry, …), exactly as before magnetic snapping existed.
+		const FVector N = CursorHit.ImpactNormal;
+		int32 Axis = 0;
+		if (FMath::Abs(N.Y) > FMath::Abs(N[Axis])) { Axis = 1; }
+		if (FMath::Abs(N.Z) > FMath::Abs(N[Axis])) { Axis = 2; }
+		const float Sign = FMath::Sign(N[Axis]);
+
+		TargetCenter = CursorHit.ImpactPoint;
+		TargetCenter[Axis] = CursorHit.ImpactPoint[Axis] + Sign * GhostExtent[Axis];
+		for (int32 T = 0; T < 3; ++T)
+		{
+			if (T == Axis || GridSize <= 0.0f)
+			{
+				continue;
+			}
+			const float MinEdge = CursorHit.ImpactPoint[T] - GhostExtent[T];
+			TargetCenter[T] = FMath::GridSnap(MinEdge, GridSize) + GhostExtent[T];
+		}
+
+		if (Axis != 2)
+		{
+			const float NeighborBottomZ = CursorHit.GetActor() ? CursorHit.GetActor()->GetComponentsBoundingBox().Min.Z : CursorHit.ImpactPoint.Z;
+			TargetCenter.Z = NeighborBottomZ + GhostExtent.Z;
+		}
+	}
+
+	// 5) bbox center → pivot, then place.
+	const FVector TargetPivot = TargetCenter - PivotToCenter;
+	Ghost->SetActorLocation(TargetPivot);
+	CurrentLocation = TargetPivot;
+	bHasHit = true;
 
 	ViewportClient->Invalidate();
 	return false; // don't consume — let camera navigation keep working
@@ -211,6 +296,23 @@ bool UFPSRBlockoutPlacementMode::InputKey(FEditorViewportClient* ViewportClient,
 		GLevelEditorModeTools().DeactivateMode(EM_BlockoutPlacement);
 		return true;
 	}
+
+	if (Event == IE_Pressed && (Key == EKeys::RightBracket || Key == EKeys::LeftBracket))
+	{
+		// SimCity-style quick-rotate: [ / ] step the ghost's (and next spawn's) yaw by RotationSnapDegrees.
+		CurrentRotation.Yaw += (Key == EKeys::RightBracket) ? RotationSnapDegrees : -RotationSnapDegrees;
+		CurrentRotation.Yaw = FRotator::NormalizeAxis(CurrentRotation.Yaw);
+		if (AActor* Ghost = GhostActor.Get())
+		{
+			Ghost->SetActorRotation(CurrentRotation);
+		}
+		if (ViewportClient)
+		{
+			ViewportClient->Invalidate();
+		}
+		return true;
+	}
+
 	return false;
 }
 
@@ -232,46 +334,8 @@ void UFPSRBlockoutPlacementMode::SpawnAtCurrent()
 		return;
 	}
 
-	const bool bIsBP = (AssetToPlace.AssetClassPath == UBlueprint::StaticClass()->GetClassPathName());
-
 	const FScopedTransaction Transaction(LOCTEXT("PlaceTx", "블록아웃 배치(뷰포트)"));
-
-	FActorSpawnParameters SpawnParams;
-	SpawnParams.ObjectFlags |= RF_Transactional;
-
-	AActor* NewActor = nullptr;
-	if (bIsBP)
-	{
-		UBlueprint* BP = Cast<UBlueprint>(AssetToPlace.GetAsset());
-		if (!BP || !BP->GeneratedClass || !BP->GeneratedClass->IsChildOf(AActor::StaticClass()))
-		{
-			return;
-		}
-		NewActor = World->SpawnActor<AActor>(BP->GeneratedClass, CurrentLocation, FRotator::ZeroRotator, SpawnParams);
-	}
-	else
-	{
-		UStaticMesh* Mesh = Cast<UStaticMesh>(AssetToPlace.GetAsset());
-		if (!Mesh)
-		{
-			return;
-		}
-		AStaticMeshActor* MeshActor = World->SpawnActor<AStaticMeshActor>(CurrentLocation, FRotator::ZeroRotator, SpawnParams);
-		if (MeshActor && MeshActor->GetStaticMeshComponent())
-		{
-			MeshActor->GetStaticMeshComponent()->Modify();
-			MeshActor->GetStaticMeshComponent()->SetStaticMesh(Mesh);
-			MeshActor->GetStaticMeshComponent()->SetCollisionProfileName(TEXT("BlockAll")); // WorldStatic (K4=B / K14)
-		}
-		NewActor = MeshActor;
-	}
-
-	if (NewActor)
-	{
-		NewActor->Modify();
-		NewActor->SetActorLabel(AssetToPlace.AssetName.ToString());
-		NewActor->SetFolderPath(TEXT("Blockout"));
-	}
+	FFPSRBlockoutSpawn::SpawnPiece(World, AssetToPlace, FTransform(CurrentRotation, CurrentLocation), /*bTransientGhost=*/false);
 }
 
 void UFPSRBlockoutPlacementMode::Render(const FSceneView* View, FViewport* Viewport, FPrimitiveDrawInterface* PDI)
