@@ -62,5 +62,11 @@
 - **VibeUE 컨테이너 위젯 위험**(메모리): 재질 패널은 append-only, 컨테이너 재구조화 금지.
 - **검증기가 계약 게이트**: 각 P 산출은 `FFPSRBlockoutValidator::ValidateLevel` 통과 보장(WorldStatic·바운드볼륨1·셀예산).
 
-## 5. 진행 로그
-- (P1) 착수 2026-07-20 — 브랜치 `phase/citytool-blockout`.
+## 5. 진행 로그 (2026-07-20, 브랜치 `phase/citytool-blockout`)
+- ✅ **P1a** (`cf7c93b5`): 공용 스폰 헬퍼 `FFPSRBlockoutSpawn`(3중복 제거) + 회전(`[`/`]`) + config. 빌드·스모크 그린.
+- ✅ **P1b** (`ab4d808a`): 팔레트 카테고리 필터(전체/구조/장식, SSegmentedControl) + **그리드 단위 250 확정**(에디터 GetBounds: Base Floor 250×250 / Block 1500=6×250). 빌드 그린.
+- ✅ **P2+P3 병합** (`e3ad165a`): "선택→Packed 프리팹" = `CreateLevelInstanceFrom(Type=PackedLevelActor)` → `BPP_*`(재사용+ISM밀도+콜리전보존). 기존 팔레트/SpawnPiece로 배치. 빌드·스모크 그린.
+  - ⚠️ **발견**: `FPackedLevelActorUtils`는 `LEVELINSTANCEEDITOR_API` export 없음 → 외부모듈 링크 불가(LNK2019). Repack 버튼 철회, 엔진 기본 UI(우클릭 Update Packed BP / Build>Pack Level Actors)로 대체. `CreateLevelInstanceFrom`=ENGINE_API라 핵심은 정상.
+- ⏸️ **P4 보류** (사용자 결정 2026-07-20): 재질 리컬러는 **레벨 지속성 문제**(MID는 저장 안 됨 → MIC 에셋 관리 필요=큰 작업) + **스웜 슈터라 개별 조각 리컬러 가치 낮음**(네온 룩=SRS 셀+emissive+밀도가 담당). 필요해지면 그때 구현.
+- ⏳ **에디터 기능 테스트 대기**: 배치·회전·필터=사용자 GUI / 프리팹 생성·콜리전=Claude Python 프로토타입(조사가 경고한 heavy API 검증). 헤드리스 빌드는 컴파일만 보장.
+  - ⚠️ **DDC 주의**: P2/P3 스모크 1회차가 `DerivedDataBackends.cpp:208` "no writable nodes"로 실패(디스크는 넉넉=일시적 락). `-DDC-ForceMemoryCache`로 우회 통과. GUI 에디터가 같은 오류로 안 뜨면 같은 플래그로 실행.
