@@ -22,6 +22,7 @@
 #include "Hero/FPSRPlayerFeedbackComponent.h"
 #include "Hero/FPSRBlindspotAudioComponent.h"
 #include "Hero/FPSRReviveComponent.h"
+#include "Director/FPSRDirectorSensorSubsystem.h"
 #include "FPSRCollisionChannels.h"
 
 #include "Camera/CameraComponent.h"
@@ -822,6 +823,17 @@ void AFPSRCharacter::ApplyContactDamage(float DamageAmount, AActor* DamageInstig
 	}
 	LastDamagedTime = Now;
 
+	// Closed-loop director sensor (P0a-0): record the ACCEPTED incoming hit for IncomingDamageRate. Server-only;
+	// the sensor classifies the source from DamageInstigator (enemy/boss counted; FF/self/door/mission/env
+	// excluded) — the damage-bridge signature is unchanged. (RunFlow §2-8-2)
+	if (World)
+	{
+		if (UFPSRDirectorSensorSubsystem* Sensor = World->GetSubsystem<UFPSRDirectorSensorSubsystem>())
+		{
+			Sensor->NotifyPlayerDamageTaken(this, DamageAmount, DamageInstigator);
+		}
+	}
+
 	if (UAbilitySystemComponent* ASC = GetAbilitySystemComponent())
 	{
 		ASC->ApplyModToAttribute(UFPSRHealthSet::GetHealthAttribute(), EGameplayModOp::Additive, -DamageAmount);
@@ -852,6 +864,16 @@ void AFPSRCharacter::HandleOutOfHealth()
 			return; // already processed (idempotent: already DBNO or Dead)
 		}
 		PS->SetLifeState(EFPSRLifeState::DBNO);
+
+		// Closed-loop director sensor (P0a-0): record the Alive->DBNO edge for DownedRecent. Server-only,
+		// fires exactly once per down (the IsAlive guard above). (RunFlow §2-8-2)
+		if (UWorld* SensorWorld = GetWorld())
+		{
+			if (UFPSRDirectorSensorSubsystem* Sensor = SensorWorld->GetSubsystem<UFPSRDirectorSensorSubsystem>())
+			{
+				Sensor->NotifyPlayerDowned(PS);
+			}
+		}
 	}
 
 	// Stop firing and cancel any in-progress ability (e.g. the server-only ChargeLaser charge sequence) so a downed
