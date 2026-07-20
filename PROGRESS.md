@@ -6,12 +6,12 @@
 
 **최종 갱신: 2026-07-20**
 
-> 🔀 **2026-07-20 핸드오프 (이 브랜치 `phase/u22a-environment` = U22a-D 대기)**:
-> - **도시 빌드 툴 완료·`main` 머지됨**(`bf17ab38`, Trinity 참조 블록아웃 확장 + ZenServer 포트픽스). 전체 요약은 **`main`의 PROGRESS + `Docs/CityBuildTool_Design.md`**.
-> - **이 브랜치(u22a) 잔여 = D**: 에디터로 **Map_CyberCity PIE 런 1회 완주**(미션스폰·룸개방·보스) → 통과 시 **L_Sandbox 삭제**(⚠️먼저 `L_MainMenu.umap`의 L_Sandbox 참조 1건 확인) → 패키지 쿡 1회 → **u22a → main `--no-ff` 머지**. 절차 상세=`Docs/U22_AssetReplacement_Prompt.md §3` A-6/A-7.
->   - ✅이미 완료(이 브랜치): 맵 리네임·RunMap전환·MapsToCook정리·A-6 헤드리스검증 3종·네온글로우 룩(미확정 롤백가능).
->   - ⚠️**D는 PIE 테스트라 재빌드 불요** — u22a 소스엔 도시툴 C++이 없으니(main에만) **u22a에서 빌드/Live Coding 하지 말 것**(툴 DLL 회귀). D 후 u22a→main 머지하면 툴이 합쳐짐.
-> - **그다음 = A(도시 밀도 저작)**: main(툴+맵)에서 **절차적 건물 생성기**로 CyberCity를 채운다(사용자 착안: 건물=모듈조각 패턴→AI 자동생성). 스크립트 생성기 / 툴 "건물생성" 버튼 / UE PCG.
+> 🔀 **2026-07-20 핸드오프 (이 브랜치 `phase/u22a-environment` = U22a-A 착수: PCG 도시 밀도)**:
+> - **방향 재설정(사용자 결정 2026-07-20)**: U22a = **환경(건물) 먼저 → 지형 확정 후 게임플레이 레이어 이식 → D**. 화이트박스 지형은 **최종 아님**(건물이 걷는 공간을 바꿈). **A 생성 방식 = UE PCG**(Python 스크립트/툴버튼 검토 후 채택). 건물 소스 = `Content/PolygonScifi/`(187M·883 에셋, 사이버펑크 시티 킷, **미커밋**).
+> - 🔴 **Map_CyberCity에 게임플레이 레이어 0개**(실측: 룸/미션스폰/문/스폰존 전부 0, 적스폰28·플로우필드4·SRS20만) = 리네임된 `L_GameFloor`. **지금 PIE 런은 보스까지 안 감**(미션스폰 지점 0 → `FPSRRunDirectorSubsystem.cpp:631`의 `TActorIterator<AFPSRMissionSpawnPoint>`). **정상·미결** — 이식은 **A(환경) 완료 후**. ⚠️ 종전 핸드오프가 A-3 step2 "게임플레이 레이어 이식"을 건너뛴 상태였음(이 세션 실측 확인, "D 대기"는 오판이었음).
+> - ✅ **step 0 완료(이 세션, 에디터 닫고)**: `main`→`u22a` 머지(`db31d6a9` — 도시툴 C++ 10파일+M_BlockoutGhost+config+director/SSOT 문서, **소스=main+주석2줄**) + **PCG 플러그인 활성**(`312e5df9`, `.uproject`). → u22a 빌드/재빌드 안전(툴 소스 포함). **검증 빌드 `Result: Succeeded`**(`FPSRogueliteEditor Win64 Development`, 0 에러, 신선 바이너리 → 새 세션 에디터 재빌드 불요).
+> - **재개 = `Docs/U22a-A_PCG_ResumePrompt.md`** — 새 세션을 **에디터 연결 상태로** 시작해 PCG 그래프 저작: perf 베이스라인 → 맵 설계(2계층: 스카이라인 배경 + 아레나 구조) → PCGGraph(StaticMeshSpawner=ISM+WorldStatic 콜리전+스트리트 마스크) → 생성 → **플로우필드/검증기/육안 검증**. 최대 리스크 **R1 = PCG ISM 콜리전 ↔ 런타임 플로우필드 다운트레이스 정합**.
+> - 도시 빌드 툴(수동 배치)= `bf17ab38` main 완료(`Docs/CityBuildTool_Design.md`). **PCG와 별개**(수동 터치업 병용 가능).
 
 ## 🔔 (2026-07-19) 현재 상태 (W2-B 정확성 감사 ✅완료·PIE 2인 검증 통과 · W2-C 메뉴/세션 권위 ✅완료 — 그 후 U22a 착수)
 
