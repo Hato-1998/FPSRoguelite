@@ -139,6 +139,17 @@ void UFPSRWeaponInventoryComponent::EquipSlot(int32 SlotIndex)
 	{
 		return;
 	}
+	// Re-pressing the slot key of the ALREADY equipped weapon is not a swap — bail before the swap side effects.
+	// Falling through would (a) cancel an in-progress reload and then decline to resume it (the resume below only
+	// fires on an empty magazine, so a partial-mag reload is silently lost) and (b) impose EquipFireCooldown for a
+	// swap that never happened. It also desyncs remote clients: CurrentSlotIndex is written with its own value, so
+	// the changelist sees no change and OnRep_CurrentSlotIndex never runs — the owning client never applies the
+	// cooldown the server just imposed and predicts shots (recoil/bloom) the server then rejects. The listen-server
+	// host is unaffected (it applies the cooldown locally), so this would be a host/remote asymmetry too.
+	if (SlotIndex == CurrentSlotIndex)
+	{
+		return;
+	}
 
 	// Switching weapons cancels any in-progress reload, remembering the slot so it resumes on re-equip.
 	if (UFPSRWeaponInstance* Current = GetCurrentInstance())
@@ -426,6 +437,12 @@ bool UFPSRWeaponInventoryComponent::ServerTryConsumeFireInterval(float MinInterv
 		return false;
 	}
 
-	ServerNextAllowedFireTime = Now + MinInterval;
+	// Advance from the SCHEDULE, not from the arrival time. Re-anchoring on Now would let the tolerance compound:
+	// a client that always fires at the earliest accepted instant (Now = Next - Tolerance) would push the next slot
+	// to Next + (MinInterval - Tolerance) every shot, converging on a sustained interval of 0.75 * MinInterval —
+	// a permanent +33% rate of fire on every weapon family, not the one-off jitter absorption this gate intends.
+	// Taking Max keeps the tolerance one-shot (an early round spends the credit instead of banking it) while an
+	// idle gap still re-anchors to Now so the schedule can't accumulate a backlog of owed shots.
+	ServerNextAllowedFireTime = FMath::Max(Now, ServerNextAllowedFireTime) + MinInterval;
 	return true;
 }

@@ -91,10 +91,10 @@ void UFPSRCardEntryWidget::UpdateDisplay()
 		{
 			switch (CachedDraw.Rarity)
 			{
-				case ECardRarity::Common: RarityText->SetText(FText::FromString(TEXT("Common"))); break;
-				case ECardRarity::Rare: RarityText->SetText(FText::FromString(TEXT("Rare"))); break;
-				case ECardRarity::Epic: RarityText->SetText(FText::FromString(TEXT("Epic"))); break;
-				case ECardRarity::Legendary: RarityText->SetText(FText::FromString(TEXT("Legendary"))); break;
+				case ECardRarity::Common: RarityText->SetText(NSLOCTEXT("FPSRCardEntry", "Rarity_Common", "Common")); break;
+				case ECardRarity::Rare: RarityText->SetText(NSLOCTEXT("FPSRCardEntry", "Rarity_Rare", "Rare")); break;
+				case ECardRarity::Epic: RarityText->SetText(NSLOCTEXT("FPSRCardEntry", "Rarity_Epic", "Epic")); break;
+				case ECardRarity::Legendary: RarityText->SetText(NSLOCTEXT("FPSRCardEntry", "Rarity_Legendary", "Legendary")); break;
 				default: RarityText->SetText(FText::FromString(TEXT("?"))); break;
 			}
 		}

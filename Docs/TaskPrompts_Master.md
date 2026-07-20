@@ -9,16 +9,20 @@
 
 ---
 
-## §A 현황 스냅샷 (2026-07-13)
+## §A 현황 스냅샷 (2026-07-19)
 
 ### 완료 (main 머지 — 상세 = `PROGRESS.md` 완료 이력 + `git log`)
 - **코드 로드맵 V0~U20 전부 머지 완료** — 1P 슬라이스·사격감·적 스웜(풀500·플로우필드)·공유XP/카드 v2·런디렉터·무기/Fragment·FF·보스 스캐폴드+콘텐츠·로비/세션/트래블·DBNO·원거리 적·GMS·SaveGame 인프라·크로스헤어/설정·통합 애니 코드 인프라. 요약 = §B 완료 아카이브 인덱스.
 - **최근 2아크 종결** — 다중맵 U 연속필드(P-0~P-H, `34b5eea`)·반동 CrystalRecoil(P0~P4, `6f1a981`).
+- **W2 전수 그라인딩 3아크 종결(2026-07-18~19)** — 유닛 번호를 안 붙인 품질/정확성 감사축이라 아래 라이브 표엔 없다(U 표는 기능 유닛 전용). 상세 = `PROGRESS.md` §⑦⑧⑨.
+  - **W2-A 코드 품질**(`f940ed7e`) + 후속 보류정리 4건(`637a56f0`) — 주석 드리프트·§6-2 하드코딩·dead code·태그 SSOT·데이터드리븐.
+  - **W2-B 런타임 정확성**(`73f4caa7`) — 원시 14 → 적대검증 생존 9. **P1 = 런 GameMode `Logout` 부재**(마지막 생존자 이탈 시 패배 미선언 + 카드 프리즈 영구 고착 = 시핑 복구불가 데드락). 사용자 PIE 2인 검증 통과.
+  - **W2-C 메뉴/세션 서버권위**(`1077eb50`) — 세션 자폭(배포 영향)·클라 Play 하드크래시·메뉴 GM `bUseSeamlessTravel` 누락·GameFlow 트래블 가드. ⚠️**미검증 2건은 Steam 2-PC 때 확인**(⑨-1 세션 자폭은 PIE로 검증 불가 = NULL OSS라 조인 분기 미도달).
 - **검증 게이트** — U1 재미 게이트(§7-5 G1) + V2 2-client = ✅합격(2026-06-30). ⚠️**§5 적500 정량 측정은 미실시(보류)** → 라이브 U25로 승격(아래).
 
 ### 열린 유닛 / 진행
-- **다음 프론티어 = U21 Synty 아트 파일럿 게이트**(미착수, 어댑션 커밋 0). 통과 후 U22 전체교체.
-- content-pending = U12(잔여)·U15/U19/U20(애니 콘텐츠, HOLD). 열린 출시 유닛 = U13·U14. (전부 §B 라이브 표.)
+- **U21 Synty 아트 파일럿 = ✅완료**(2026-07-18 사용자 판정): S1 단차 walkability·S3 셀 아웃라인×VAT 정합·S4 성능 실측 전부 통과 + **SRS 아웃라인 거리 헤이즈 수정**. 아트 방향 = 사전확정 셀/툰 피벗(메모리 `synty-anime-cel-art-pivot`)이 **파일럿으로 검증됨** → U22 게이트 해제. ✅**하위결정 2건도 확정됨**(2026-07-18, 근거 `PROGRESS.md` §⑦ 머리말): ① 무기 백본 = **Synty Military 전환**(→ 후에 SF 무기로 리스킨) ② 캐릭터 애님 = **3인칭 Blu · 1인칭 PWAS**(손저작 AnimBP 대체 → U15 1P·U19 3P 계획이 이 파이프라인에 흡수, U20 적 VAT만 U22 적교체 후 별도 베이크). *(종전 이 줄은 "미확정"이라 적혀 있어 PROGRESS와 모순 — 2026-07-19 정정.)*
+- **다음 프론티어 = U22 Synty 전체교체**(게이트 해제). content-pending = U12(잔여)·U15/U19/U20(애니 콘텐츠, HOLD — 이제 U22에 종속). 열린 출시 유닛 = U13·U14. (전부 §B 라이브 표.)
 
 ### 임시 테스트값 (미원복 — U14에서 원복)
 - `DA_RunSchedule.MissionWindows` 윈도우 시간(테스트 압축값) + `BossTime 300s` → 프로덕션 = 미션 300/600/900s·보스 1200s(≈20분 런). 메모리 `p4a-temp-test-values`.
@@ -52,8 +56,9 @@
 
 | ID | 유닛 | 구분 | 선행/게이트 | 상태 | 실행 프롬프트 |
 |---|---|---|---|---|---|
-| **U21** | Synty 아트 파일럿 게이트 (셀/툰 렌더러·무기모듈·Blu팔+PWAS·스웜 200-300 perf, throwaway). **산출에 아트 정체성 결정 포함** = Infima 유지 vs Synty Military 전환 vs Blu+PWAS 손저작 AnimBP 대체 | 에셋/PIE | — (**다음 착수**) | 착수 대기 | `Docs/SyntyArtPilot_ResumePrompt.md`(자족) |
-| **U22** | Synty Path A 에셋 전체교체 (환경 3맵·무기 Synty Military·캐릭터 Blu·적 저코스트 VAT·UI/VFX) | 에셋 | U21 통과 | 대기 | `Docs/AssetReplacement_Synty_ResumePrompt.md`(자족) |
+| **U21** | Synty 아트 파일럿 게이트 (셀/툰 렌더러·무기모듈·Blu팔+PWAS·스웜 200-300 perf, throwaway). **산출에 아트 정체성 결정 포함** = Infima 유지 vs Synty Military 전환 vs Blu+PWAS 손저작 AnimBP 대체 | 에셋/PIE | — | ✅**완료**(2026-07-18 사용자 판정: S1/S3/S4 통과·perf OK·SRS 아웃라인 헤이즈 수정. **하위결정 2건도 같은 날 확정** = 무기 백본 Synty Military 전환 / 캐릭터 3P Blu·1P PWAS — 상세 §A. ⚠️S4는 **정성 판정만** 남고 정량 수치는 리포 어디에도 없음 → U22 전후 비교 기준선 부재, U22 첫 단계에서 현 상태 캡처 필요) | `Docs/SyntyArtPilot_Scoped_ResumePrompt.md` + `Docs/SyntyArtPilot_S1_CityBuildGuide.md` |
+| **U22a** | Synty 에셋교체 ① **환경 = 맵1 CyberCity만**(맵2 숲·맵3 우주는 범위 밖) + **맵 승격**(`L_GameFloor`→`L_Map_Center`, `RunMap` 전환, `L_Sandbox` 제거) | 에셋 | U21 ✅통과 | **다음 착수** | [`Docs/U22_AssetReplacement_Prompt.md`](U22_AssetReplacement_Prompt.md) §3 |
+| **U22b** | Synty 에셋교체 ② 무기 7정·캐릭터(3P Blu/1P PWAS)·적 저코스트 VAT·UI 리스킨·VFX | 에셋 | **U22a 사용자 육안 게이트** | 대기 | 같은 문서 §4 |
 | **U15/U19/U20** | 통합 애니 콘텐츠 저작 (A 1P무기·B 3P팀원·C 적VAT+보스스켈). 코드 인프라 ✅, 콘텐츠 미저작 | 콘텐츠 | **⚠️HOLD**: U21 아트정체성 결정 (U20 VAT 베이크 = U22 적교체 후) | HOLD | `Docs/AnimationPass_ContentGuide.md`(자족 A/B/C) |
 | **U12** | UI/필 잔여 (카드 아이콘 콘텐츠 · 무기별 팔 AnimBP=U15 흡수 · 서버권위 bloom=장기백로그) | 콘텐츠 | — | 잔여 hold | §C U12(잔여) |
 | **U23** | 메타 프로그레션 콘텐츠 (P0-③): U10 인프라 위 실 메타필드/재화/언락트리 + §D6 세이브 테스트갭 2건 | C++/콘텐츠 | U10 ✅ (스키마 P0-③ 확정 선행) | 대기 | §C U23(신규) |
@@ -121,7 +126,8 @@
 
 ### U21 — Synty 아트 파일럿 게이트
 
-> **실행 프롬프트 원본(자족) = [`Docs/SyntyArtPilot_ResumePrompt.md`](SyntyArtPilot_ResumePrompt.md)** — 그 문서를 새 세션에 붙여넣는다(여기 중복 안 함, SSOT 분리).
+> **실행 프롬프트 원본(자족) = [`Docs/SyntyArtPilot_Scoped_ResumePrompt.md`](SyntyArtPilot_Scoped_ResumePrompt.md)**(+ 맵 작업 시 [`Docs/SyntyArtPilot_S1_CityBuildGuide.md`](SyntyArtPilot_S1_CityBuildGuide.md)) — 그 문서를 새 세션에 붙여넣는다(여기 중복 안 함, SSOT 분리).
+> ⚠️ **구 `Docs/SyntyArtPilot_ResumePrompt.md` = 폐기본**(SRS를 "최후 폴백 유료옵션"이라 하는 등 SSOT와 모순) — 읽지 말 것. **Scoped 판이 최신**(스코프 축소 = 단일 CyberCity 화이트박스 + 라이플 + 스웜 200 + SRS 셀 실측).
 
 - **목적**: 대량 채택·콘텐츠 저작 **전에** 셀/툰 아트 스택이 제1원리(적 200-300 싸게)를 지키는지 + 룩을 실측/육안 게이트. throwaway 파일럿, 통과분만 LFS 커밋.
 - **범위**: Step A 무기 모듈 조립(U15 검증)·Step B FP팔+PWAS·Step C 셀/툰 렌더러 육안(무료 우선)·Step D 스웜 200-300 perf(아웃라인 고정비용 실증).
@@ -129,15 +135,17 @@
 - **착수 게이트**: 다음 착수 유닛(선행 없음). **산출에 아트 정체성 결정 필수** = Infima 유지 / Synty Military 전환 / Blu+PWAS 손저작 AnimBP 대체 — 이 결정이 U22·U15/U19/U20 HOLD 해제 조건.
 - **완료 시**: 파일럿 수치·채택 렌더러·채택 에셋을 PM 보고 → PM이 SSOT 갱신(렌더러 확정: `Concept §1-C-9`·`Roadmap §8`) + 채택분 LFS 커밋.
 
-### U22 — Synty Path A 에셋 전체교체
+### U22a / U22b — Synty 셀/툰 에셋 교체
 
-> **실행 프롬프트/계획 of record(자족) = [`Docs/AssetReplacement_Synty_ResumePrompt.md`](AssetReplacement_Synty_ResumePrompt.md)** — 2026-07-10 재확정 헤더 블록 우선.
+> **실행 프롬프트(자족) = [`Docs/U22_AssetReplacement_Prompt.md`](U22_AssetReplacement_Prompt.md)** — 그 문서를 새 세션에 붙여넣는다(여기 중복 안 함, SSOT 분리). 2026-07-19 작성, 7에이전트 조사 + 적대 검증(주장 13건 반박·정정) 기반.
+> ⚠️ 구 `Docs/AssetReplacement_Synty_ResumePrompt.md` = **폐기본**(SSOT와 모순) — 읽지 말 것.
 
-- **목적**: 전체 셀/툰 통일 룩으로 아트 스택 개편(환경 3맵·무기 Synty Military 모듈+사이버 리스킨·캐릭터 Blu·적 저코스트 VAT·UI Synty Soldier HUD·VFX).
-- **선행**: U21 파일럿 통과(렌더러·아트정체성 확정).
-- **⚠️ 시퀀싱(핵심)**: **Step 3 적 교체 → U20 VAT 베이크 선행**(지금 Paragon으로 베이크하면 재베이크). 적 교체 완료 후 Paragon 미니언 제거.
-- **함정**: U7 플로우필드 `BuildObstacleMask`=ECC_WorldStatic 다운트레이스 → Synty 임포트 콜리전 확인. Nanite OFF. 다중맵 상주 메모리 측정(맵 언로드 안 함). 통과 전 커밋 금지, 채택분만 LFS.
-- **완료 시**: 파일럿/채택 목록 PM 보고 → PM이 `Roadmap §8` 확정 스택 기록.
+- **분할**(사용자 결정 2026-07-19): **U22a 환경 → 사용자 육안 게이트 → U22b 나머지**. 아트 판정이 전부 사용자 육안이라 유닛 끝 1회 판정으로 두면 룩이 어긋났을 때 전량 재작업이 된다.
+- **범위 결정**(같은 날): 맵 = **맵1 CyberCity만** · 레거시 삭제 = **`ModularSciFiStation`(1.4G, 참조 0건)만** · UI = **스타일 리스킨**(구조 재작성 금지).
+- **⚠️ 재작업 방지 순서 4건** — 전부 "먼저 규약, 나중 물량": ① **SRS stencil 규약 확정 → 환경 메시 물량**(셀 1~255 vs 아웃라인 0~0이 현재 상호배타, 미확정 = U22a 공수를 지배) ② **소켓 명명 규약 확정 → 무기 7정 조립**(현재 Rifle `SOCKET_Mount_*` vs SMG `SOCKET_Forestock` 규약 분열) ③ **Blu 리타겟 파이프라인 확정 → 3P 애님 저작** ④ **적 메시 교체 → VAT 베이크**(종전부터 유일하게 문서화돼 있던 순서).
+- **⚠️ 기준선 부재**: U21 S4가 정성 판정만 남겨 perf 정량 수치가 리포에 없다 → **U22a 첫 작업 = 교체 전 캡처**. 안 하면 이후 측정이 회귀인지 원래 그런지 판별 불가.
+- **함정**: 플로우필드 장애물 마스크 = 다운트레이스 → Synty 임포트 콜리전 확인 · 높이 45/60 규칙 · 셀 상한 40,000 · Nanite OFF · **LPAMG 삭제 금지**(무기 8종 사운드가 아직 참조, U13 선행) · 컨테이너 WBP 프로그래매틱 재구조화 = 크래시/손상 전례.
+- **완료 시**: 채택 목록 PM 보고 → `Roadmap §8` 확정 스택 기록 + **perf 수치를 반드시 문서에 남길 것**.
 
 ### U15/U19/U20 — 통합 애니메이션 콘텐츠 저작 (⚠️HOLD)
 

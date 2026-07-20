@@ -6,6 +6,7 @@
 #include "Core/FPSRGameFlowSettings.h"
 #include "Core/FPSRLogChannels.h"
 #include "UI/FPSRPrimaryGameLayout.h"
+#include "UI/FPSRUITags.h"
 #include "Weapon/FPSRLoadoutPoolDataAsset.h"
 #include "Weapon/FPSRWeaponDataAsset.h"
 #include "CommonActivatableWidget.h"
@@ -43,7 +44,7 @@ void AFPSRLobbyPlayerController::BeginPlay()
 	PrimaryLayout->AddToViewport();
 
 	// Lobby UI lives on the Menu layer (menu-like, no gameplay HUD).
-	if (!PrimaryLayout->PushWidgetToLayer(FGameplayTag::RequestGameplayTag(FName("UI.Layer.Menu")), LobbyWidgetClass))
+	if (!PrimaryLayout->PushWidgetToLayer(FPSRUITags::TAG_UI_Layer_Menu.GetTag(), LobbyWidgetClass))
 	{
 		UE_LOG(LogFPSR, Error, TEXT("[Lobby] Failed to push LobbyWidget to Menu layer"));
 	}

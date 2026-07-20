@@ -74,6 +74,7 @@ void UFPSRGA_WeaponFire_Projectile::ActivateAbility(
 	float SpreadDegrees = 0.0f;
 	int32 ProjectilePierce = 0;
 	float KnockbackStrength = 0.0f;
+	float MuzzleOffset = 100.0f; // cm ahead of the view point; data-driven per weapon (default = prior hardcoded value)
 	int32 PelletCount = 1;
 	UFPSRWeaponInventoryComponent* Inventory = Avatar->FindComponentByClass<UFPSRWeaponInventoryComponent>();
 	UFPSRWeaponInstance* Instance = Inventory ? Inventory->GetCurrentInstance() : nullptr;
@@ -88,6 +89,7 @@ void UFPSRGA_WeaponFire_Projectile::ActivateAbility(
 		ProjectilePierce = FMath::Max(0, Stats->ProjectilePierce);
 		SpreadDegrees = Stats->SpreadDegrees;
 		KnockbackStrength = FMath::Max(0.0f, Stats->KnockbackStrength);
+		MuzzleOffset = FMath::Max(0.0f, Stats->ProjectileMuzzleOffset);
 		PelletCount = FMath::Clamp(Stats->PelletCount, 1, 32);
 	}
 
@@ -183,8 +185,9 @@ void UFPSRGA_WeaponFire_Projectile::ActivateAbility(
 	if (FireCtx.bAuthority)
 	{
 		// Global damage multiplier + crit (chance/multiplier) baked at spawn; the projectile rolls crit per impact
-		// server-authoritatively and notifies the owner's hit-marker. (OnHitActor fragments on projectiles remain
-		// a follow-up needing a projectile->fragment callback.)
+		// server-authoritatively and notifies the owner's hit-marker. Per-hit OnHitActor fragments already fire for
+		// direct-hit/piercing projectiles (see AFPSRProjectile::TryDamageActor); only the AOE splash path
+		// (FPSRCombatStatics::ApplyExplosion) does not yet run per-target OnHitActor hooks.
 		float DamageMultiplier = 1.0f;
 		float CritChance = 0.0f;
 		float CritMultiplier = 1.0f;
@@ -200,7 +203,6 @@ void UFPSRGA_WeaponFire_Projectile::ActivateAbility(
 		TSubclassOf<AFPSRProjectile> ProjClass = Weapon ? Weapon->ProjectileClass : nullptr;
 		if (ProjSub)
 		{
-			const float MuzzleOffset = 100.0f;
 			const int32 TotalProjectiles = NumRounds * PelletCount;
 			for (int32 Round = 0; Round < NumRounds; ++Round)
 			{

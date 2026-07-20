@@ -12,9 +12,10 @@ class UFPSRFlowFieldComputer;
 class AFPSRFlowFieldBoundsVolume;
 class AFPSRGameState;
 
-/** Server-authoritative flow-field driver for swarm pathing (P2-B2, U7 multi-layer). Owns a per-map REGISTRY of
- *  UFPSRFlowFieldComputer instances keyed by MapId (multimap Tier 0) and drives their 0.2s recompute from a single
- *  scheduler. Enemies sample the field in O(1).
+/** Server-authoritative flow-field driver for swarm pathing (P2-B2, U7 multi-layer). Owns a single per-world
+ *  UnifiedComputer (a multi-slot unified grid when bUnifiedMultiSlot, else a degenerate single-map grid) and drives
+ *  its 0.2s recompute from one scheduler; SlotBounds resolves a location's MapId per slot. (P-G replaced the former
+ *  per-map UFPSRFlowFieldComputer registry with this one unified computer.)
  *
  *  Refactor (Codex consult 2026-07-06): the grid/BFS/flow algorithm lives in UFPSRFlowFieldComputer (worldless core
  *  unit-tested by FPSRoguelite.FlowField.Unit). This subsystem owns discovery (bounds volume / floor Z), the recompute

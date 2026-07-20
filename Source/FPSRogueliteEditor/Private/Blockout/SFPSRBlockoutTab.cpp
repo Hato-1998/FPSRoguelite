@@ -4,8 +4,13 @@
 #include "Blockout/FPSRBlockoutSettings.h"
 #include "Blockout/FPSRBlockoutValidator.h"
 #include "Blockout/FPSRBlockoutPlacementMode.h"
+#include "Blockout/FPSRBlockoutSpawn.h"
 #include "Validation/FPSRAnchoredValidationService.h"
 #include "EditorModeManager.h"
+
+// --- 프리팹 저작 (P2+P3 병합, R1서 Packed Level Actor→경량 Blueprint 하베스트로 교체: 서브레벨 없음) ------------------------
+#include "Kismet2/KismetEditorUtilities.h"
+#include "Selection.h"
 
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "AssetRegistry/IAssetRegistry.h"
@@ -18,7 +23,6 @@
 #include "Engine/BlueprintGeneratedClass.h"
 #include "Engine/SimpleConstructionScript.h"
 #include "Engine/SCS_Node.h"
-#include "Components/StaticMeshComponent.h"
 #include "Components/PrimitiveComponent.h"
 #include "PhysicsEngine/BodySetup.h"
 #include "GameFramework/Actor.h"
@@ -33,8 +37,10 @@
 #include "Widgets/SNullWidget.h"
 #include "Widgets/Text/STextBlock.h"
 #include "Widgets/Input/SButton.h"
+#include "Widgets/Input/SEditableTextBox.h"
 #include "Widgets/Input/SSearchBox.h"
 #include "Widgets/Input/SNumericEntryBox.h"
+#include "Widgets/Input/SSegmentedControl.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SSplitter.h"
@@ -174,6 +180,47 @@ void SFPSRBlockoutTab::Construct(const FArguments& InArgs)
 			]
 		]
 
+		// 프리팹 저작 툴바 (P2+P3 병합, R1서 경량 Blueprint 하베스트로 교체) — 선택 액터 → 재사용 가능한 BP_* 프리팹
+		// (서브레벨 없음). 기존 툴바 additive, 배치는 기존 팔레트 경로(더블클릭/'선택 배치'/뷰포트 배치) 그대로 재사용한다
+		// (RefreshPalette 가 스캔 폴더에 추가하면 끝).
+		+ SVerticalBox::Slot()
+		.AutoHeight()
+		.Padding(8.0f, 0.0f, 8.0f, 8.0f)
+		[
+			SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot()
+			.AutoWidth()
+			.VAlign(VAlign_Center)
+			.Padding(0.0f, 0.0f, 4.0f, 0.0f)
+			[
+				SNew(STextBlock)
+				.Text(LOCTEXT("PrefabLabel", "프리팹 이름"))
+			]
+			+ SHorizontalBox::Slot()
+			.AutoWidth()
+			.VAlign(VAlign_Center)
+			[
+				SNew(SBox)
+				.WidthOverride(160.0f)
+				[
+					SNew(SEditableTextBox)
+					.HintText(LOCTEXT("PrefabNameHint", "예: Bld_CornerA"))
+					.Text(this, &SFPSRBlockoutTab::GetPendingPrefabNameText)
+					.OnTextChanged(this, &SFPSRBlockoutTab::OnPendingPrefabNameChanged)
+					.ToolTipText(LOCTEXT("PrefabNameTip", "새 프리팹의 이름. Project Settings 의 프리팹 저장 폴더 아래 BP_<이름> 블루프린트로 저장됩니다(서브레벨 없음)."))
+				]
+			]
+			+ SHorizontalBox::Slot()
+			.AutoWidth()
+			.Padding(4.0f, 0.0f, 0.0f, 0.0f)
+			[
+				SNew(SButton)
+				.Text(LOCTEXT("CreatePrefab", "선택→프리팹"))
+				.ToolTipText(LOCTEXT("CreatePrefabTip", "레벨에서 선택한 액터들을 하나의 재사용 가능한 경량 블루프린트(BP_*, 서브레벨 없음)로 묶습니다. 결과 BP_* 는 팔레트에 카드로 나타나 다시 배치할 수 있습니다 (Ctrl+Z 로 취소)."))
+				.OnClicked(this, &SFPSRBlockoutTab::OnCreatePrefabClicked)
+			]
+		]
+
 		// Two-pane browser: LEFT folder list | RIGHT asset card grid
 		+ SVerticalBox::Slot()
 		.FillHeight(1.0f)
@@ -204,14 +251,40 @@ void SFPSRBlockoutTab::Construct(const FArguments& InArgs)
 				.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
 				.Padding(2.0f)
 				[
-					SAssignNew(AssetTileView, STileView<TSharedPtr<FBlockoutAssetItem>>)
-					.ListItemsSource(&CurrentFolderAssets)
-					.OnGenerateTile(this, &SFPSRBlockoutTab::OnGenerateTile)
-					.OnSelectionChanged(this, &SFPSRBlockoutTab::OnAssetSelectionChanged)
-					.OnMouseButtonDoubleClick(this, &SFPSRBlockoutTab::OnTileDoubleClicked)
-					.ItemWidth(112.0f)
-					.ItemHeight(150.0f)
-					.SelectionMode(ESelectionMode::Single)
+					SNew(SVerticalBox)
+
+					// 카테고리 필터 토글(P1b) — 배치/스폰에는 영향 없는 순수 UX 필터. 전체=무필터, 구조=Structure만,
+					// 장식=Structure가 "아닌" 전부(비대칭 설계, 헤더의 EFPSRBlockoutCategoryFilter 주석 참고).
+					+ SVerticalBox::Slot()
+					.AutoHeight()
+					.Padding(0.0f, 0.0f, 0.0f, 4.0f)
+					[
+						SNew(SSegmentedControl<EFPSRBlockoutCategoryFilter>)
+						.Value(this, &SFPSRBlockoutTab::GetCategoryFilter)
+						.OnValueChanged(this, &SFPSRBlockoutTab::OnCategoryFilterChanged)
+
+						+ SSegmentedControl<EFPSRBlockoutCategoryFilter>::Slot(EFPSRBlockoutCategoryFilter::All)
+						.Text(LOCTEXT("CategoryAll", "전체"))
+
+						+ SSegmentedControl<EFPSRBlockoutCategoryFilter>::Slot(EFPSRBlockoutCategoryFilter::Structure)
+						.Text(LOCTEXT("CategoryStructure", "구조"))
+
+						+ SSegmentedControl<EFPSRBlockoutCategoryFilter>::Slot(EFPSRBlockoutCategoryFilter::Dressing)
+						.Text(LOCTEXT("CategoryDressing", "장식"))
+					]
+
+					+ SVerticalBox::Slot()
+					.FillHeight(1.0f)
+					[
+						SAssignNew(AssetTileView, STileView<TSharedPtr<FBlockoutAssetItem>>)
+						.ListItemsSource(&CurrentFolderAssets)
+						.OnGenerateTile(this, &SFPSRBlockoutTab::OnGenerateTile)
+						.OnSelectionChanged(this, &SFPSRBlockoutTab::OnAssetSelectionChanged)
+						.OnMouseButtonDoubleClick(this, &SFPSRBlockoutTab::OnTileDoubleClicked)
+						.ItemWidth(112.0f)
+						.ItemHeight(150.0f)
+						.SelectionMode(ESelectionMode::Single)
+					]
 				]
 			]
 		]
@@ -236,6 +309,18 @@ bool SFPSRBlockoutTab::IsActorBlueprint(const FAssetData& AssetData)
 		return NativeParent && NativeParent->IsChildOf(AActor::StaticClass());
 	}
 	return false;
+}
+
+bool SFPSRBlockoutTab::IsStructureAsset(const FAssetData& AssetData)
+{
+	// 카테고리 필터(P1b) 분류 휴리스틱 — 실제 태그/메타데이터가 아니라 폴더 경로·명명 관례에 의존한다. 관례를 벗어난
+	// 자산(위 두 조건 모두 미해당)은 여기서 false 를 반환하고 "장식" 필터 아래로 새어나간다(비대칭 설계, 헤더 주석 참고).
+	const FString PackagePathStr = AssetData.PackagePath.ToString();
+	if (PackagePathStr.Contains(TEXT("/Buildings")) || PackagePathStr.Contains(TEXT("/Base")))
+	{
+		return true;
+	}
+	return AssetData.AssetName.ToString().StartsWith(TEXT("SM_Bld_"));
 }
 
 void SFPSRBlockoutTab::RefreshPalette()
@@ -266,6 +351,12 @@ void SFPSRBlockoutTab::RefreshPalette()
 		{
 			Filter.PackagePaths.Add(FName(*Folder.Path));
 		}
+	}
+	// 프리팹 저장 폴더도 스캔 대상에 추가 — 새로 만든 BP_* 는 ClassPaths(UBlueprint) 필터는 통과하지만, PackagePaths
+	// 필터가 PaletteFolders 로만 좁혀져 있어 그 폴더가 PaletteFolders 에 수동 등록되지 않으면 스캔 자체에서 빠진다.
+	if (!Settings->PrefabSaveFolder.Path.IsEmpty())
+	{
+		Filter.PackagePaths.AddUnique(FName(*Settings->PrefabSaveFolder.Path));
 	}
 
 	if (Filter.PackagePaths.Num() > 0)
@@ -406,6 +497,17 @@ void SFPSRBlockoutTab::PopulateCurrentFolder()
 		{
 			continue;
 		}
+		// 카테고리 필터(P1b) — LEFT 폴더 목록/카운트는 그대로 두고 여기(오른쪽 타일 소스)에만 적용. 비대칭 설계:
+		// Structure 는 Structure로 분류된 것만, Dressing 은 Structure가 "아닌" 전부(관례를 벗어난 자산도 여기서 보임).
+		if (CurrentCategoryFilter != EFPSRBlockoutCategoryFilter::All)
+		{
+			const bool bIsStructure = IsStructureAsset(Asset);
+			const bool bWantStructure = (CurrentCategoryFilter == EFPSRBlockoutCategoryFilter::Structure);
+			if (bIsStructure != bWantStructure)
+			{
+				continue;
+			}
+		}
 		TSharedPtr<FBlockoutAssetItem> AssetItem = MakeShared<FBlockoutAssetItem>();
 		AssetItem->Asset = Asset;
 		AssetItem->Label = FText::FromName(Asset.AssetName);
@@ -432,6 +534,18 @@ void SFPSRBlockoutTab::OnSearchTextChanged(const FText& NewText)
 {
 	CurrentFilter = NewText.ToString();
 	RebuildFolderList();
+}
+
+EFPSRBlockoutCategoryFilter SFPSRBlockoutTab::GetCategoryFilter() const
+{
+	return CurrentCategoryFilter;
+}
+
+void SFPSRBlockoutTab::OnCategoryFilterChanged(EFPSRBlockoutCategoryFilter NewFilter)
+{
+	CurrentCategoryFilter = NewFilter;
+	// LEFT 폴더 목록은 이름검색만 반영(RebuildFolderList 미호출) — 오른쪽 타일 소스만 다시 빌드.
+	PopulateCurrentFolder();
 }
 
 TSharedRef<ITableRow> SFPSRBlockoutTab::OnGenerateFolderRow(TSharedPtr<FBlockoutFolderItem> Item, const TSharedRef<STableViewBase>& OwnerTable)
@@ -569,6 +683,15 @@ TSharedRef<ITableRow> SFPSRBlockoutTab::OnGenerateTile(TSharedPtr<FBlockoutAsset
 void SFPSRBlockoutTab::OnAssetSelectionChanged(TSharedPtr<FBlockoutAssetItem> Item, ESelectInfo::Type SelectInfo)
 {
 	SelectedAsset = Item;
+
+	// R3a: 카드를 고르면 바로 배치 모드가 켜진다 — 단, 사용자가 직접 고른 경우만. RefreshPalette/RebuildFolderList 가
+	// 이전 선택을 복원할 때(ESelectInfo::Direct, 프로그램적 재선택)는 배치 모드를 건드리지 않는다(새로고침할 때마다
+	// 모드가 멋대로 켜지면 안 됨).
+	if (Item.IsValid() && Item->Asset.IsValid() &&
+		(SelectInfo == ESelectInfo::OnMouseClick || SelectInfo == ESelectInfo::OnKeyPress))
+	{
+		ArmPlacementForSelectedAsset();
+	}
 }
 
 void SFPSRBlockoutTab::OnTileDoubleClicked(TSharedPtr<FBlockoutAssetItem> Item)
@@ -590,23 +713,40 @@ FReply SFPSRBlockoutTab::OnPlaceClicked()
 
 FReply SFPSRBlockoutTab::OnEnterPlacementModeClicked()
 {
-	if (SelectedAsset.IsValid() && SelectedAsset->Asset.IsValid())
-	{
-		// The level editor (and its mode manager) exists whenever this tab is interactable, so call directly (the
-		// GLevelEditorModeToolsIsValid() guard is deprecated / unnecessary here).
-		GLevelEditorModeTools().ActivateMode(UFPSRBlockoutPlacementMode::EM_BlockoutPlacement);
-		if (UFPSRBlockoutPlacementMode* Mode = Cast<UFPSRBlockoutPlacementMode>(
-				GLevelEditorModeTools().GetActiveScriptableMode(UFPSRBlockoutPlacementMode::EM_BlockoutPlacement)))
-		{
-			Mode->SetAssetToPlace(SelectedAsset->Asset);
-			Mode->SetGridSize(PlacementGridSize);
-		}
-		if (StatusText.IsValid())
-		{
-			StatusText->SetText(LOCTEXT("EnterPlaceMode", "뷰포트 배치 모드: 커서로 바닥 지정 · 좌클릭 배치 · ESC 종료."));
-		}
-	}
+	ArmPlacementForSelectedAsset();
 	return FReply::Handled();
+}
+
+void SFPSRBlockoutTab::ArmPlacementForSelectedAsset()
+{
+	if (!SelectedAsset.IsValid() || !SelectedAsset->Asset.IsValid())
+	{
+		return;
+	}
+
+	// The level editor (and its mode manager) exists whenever this tab is interactable, so call directly (the
+	// GLevelEditorModeToolsIsValid() guard is deprecated / unnecessary here). Only activate if not ALREADY active —
+	// ActivateMode() on an already-active mode is a documented no-op, but staying explicit here keeps the intent clear
+	// (R3a: switching which card is selected while already in placement mode must NOT re-run Enter() and reset the
+	// designer's in-progress rotation).
+	UFPSRBlockoutPlacementMode* Mode = Cast<UFPSRBlockoutPlacementMode>(
+		GLevelEditorModeTools().GetActiveScriptableMode(UFPSRBlockoutPlacementMode::EM_BlockoutPlacement));
+	if (!Mode)
+	{
+		GLevelEditorModeTools().ActivateMode(UFPSRBlockoutPlacementMode::EM_BlockoutPlacement);
+		Mode = Cast<UFPSRBlockoutPlacementMode>(
+			GLevelEditorModeTools().GetActiveScriptableMode(UFPSRBlockoutPlacementMode::EM_BlockoutPlacement));
+	}
+	if (Mode)
+	{
+		Mode->SetAssetToPlace(SelectedAsset->Asset);
+		Mode->SetGridSize(PlacementGridSize);
+	}
+
+	if (StatusText.IsValid())
+	{
+		StatusText->SetText(LOCTEXT("EnterPlaceMode", "뷰포트 배치 모드: 커서로 바닥 지정 · 좌클릭 배치 · ESC 종료."));
+	}
 }
 
 TOptional<float> SFPSRBlockoutTab::GetGridSizeValue() const
@@ -740,6 +880,88 @@ FReply SFPSRBlockoutTab::OnInspectStatusClicked()
 	return FReply::Handled();
 }
 
+FText SFPSRBlockoutTab::GetPendingPrefabNameText() const
+{
+	return FText::FromString(PendingPrefabName);
+}
+
+void SFPSRBlockoutTab::OnPendingPrefabNameChanged(const FText& NewText)
+{
+	PendingPrefabName = NewText.ToString();
+}
+
+FReply SFPSRBlockoutTab::OnCreatePrefabClicked()
+{
+	CreatePrefabFromSelection();
+	return FReply::Handled();
+}
+
+void SFPSRBlockoutTab::CreatePrefabFromSelection()
+{
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	if (!World)
+	{
+		if (StatusText.IsValid())
+		{
+			StatusText->SetText(LOCTEXT("PrefabNoWorld", "편집 가능한 에디터 월드가 없습니다 (PIE 중이면 종료 후 시도)."));
+		}
+		return;
+	}
+
+	TArray<AActor*> ActorsToMove;
+	if (USelection* Selection = GEditor->GetSelectedActors())
+	{
+		Selection->GetSelectedObjects<AActor>(ActorsToMove);
+	}
+	if (ActorsToMove.Num() == 0)
+	{
+		if (StatusText.IsValid())
+		{
+			StatusText->SetText(LOCTEXT("PrefabNoSelection", "선택된 액터가 없습니다."));
+		}
+		return;
+	}
+
+	if (PendingPrefabName.IsEmpty())
+	{
+		if (StatusText.IsValid())
+		{
+			StatusText->SetText(LOCTEXT("PrefabNoName", "프리팹 이름을 입력하세요."));
+		}
+		return;
+	}
+
+	const UFPSRBlockoutSettings* Settings = GetDefault<UFPSRBlockoutSettings>();
+	const FString BaseFolder = Settings->PrefabSaveFolder.Path.IsEmpty() ? TEXT("/Game/CityPrefabs") : Settings->PrefabSaveFolder.Path;
+	const FString Path = BaseFolder / (TEXT("BP_") + PendingPrefabName);
+
+	// R1: 사용자 결정 — 서브레벨(.umap) 없는 경량 프리팹. HarvestBlueprintFromActors 가 선택 액터들의 컴포넌트를 통짜
+	// Blueprint 하나로 흡수한다(Packed Level Actor 방식 대비 서브레벨 0개). bReplaceActors=true 로 선택 액터를 즉시
+	// 새 BP 인스턴스로 치환, bOpenBlueprint=false 로 BP 에디터가 모달로 뜨지 않게(비대화식 배치 워크플로 유지).
+	FKismetEditorUtilities::FHarvestBlueprintFromActorsParams Params;
+	Params.bReplaceActors = true;
+	Params.bOpenBlueprint = false;
+
+	const FScopedTransaction Transaction(LOCTEXT("CreatePrefabTx", "블록아웃 프리팹 생성"));
+	UBlueprint* BP = FKismetEditorUtilities::HarvestBlueprintFromActors(Path, ActorsToMove, Params);
+	if (!BP)
+	{
+		if (StatusText.IsValid())
+		{
+			StatusText->SetText(LOCTEXT("PrefabCreateFail", "프리팹 생성 실패."));
+		}
+		return;
+	}
+
+	// 새 BP_* 가 팔레트 스캔 폴더(PrefabSaveFolder)에 즉시 나타나도록 재스캔.
+	RefreshPalette();
+
+	if (StatusText.IsValid())
+	{
+		StatusText->SetText(FText::Format(LOCTEXT("PrefabCreated", "프리팹 생성: {0}"), FText::FromString(PendingPrefabName)));
+	}
+}
+
 void SFPSRBlockoutTab::PlaceAsset(const FAssetData& AssetData)
 {
 	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
@@ -769,9 +991,7 @@ void SFPSRBlockoutTab::PlaceAsset(const FAssetData& AssetData)
 		}
 
 		const FScopedTransaction Transaction(LOCTEXT("PlaceBPTx", "블록아웃 BP 배치"));
-		FActorSpawnParameters SpawnParams;
-		SpawnParams.ObjectFlags |= RF_Transactional;
-		AActor* NewActor = World->SpawnActor<AActor>(BP->GeneratedClass, SpawnLocation, FRotator::ZeroRotator, SpawnParams);
+		AActor* NewActor = FFPSRBlockoutSpawn::SpawnPiece(World, AssetData, FTransform(FRotator::ZeroRotator, SpawnLocation), /*bTransientGhost=*/false);
 		if (!NewActor)
 		{
 			if (StatusText.IsValid())
@@ -780,9 +1000,6 @@ void SFPSRBlockoutTab::PlaceAsset(const FAssetData& AssetData)
 			}
 			return;
 		}
-		NewActor->Modify();
-		NewActor->SetActorLabel(AssetData.AssetName.ToString());
-		NewActor->SetFolderPath(TEXT("Blockout"));
 
 		GEditor->SelectNone(/*bNoteSelectionChange=*/false, /*bDeselectBSPSurfs=*/true);
 		GEditor->SelectActor(NewActor, /*bInSelected=*/true, /*bNotify=*/true);
@@ -834,10 +1051,7 @@ void SFPSRBlockoutTab::PlaceAsset(const FAssetData& AssetData)
 	}
 
 	const FScopedTransaction Transaction(LOCTEXT("PlaceMeshTx", "블록아웃 메시 배치"));
-
-	FActorSpawnParameters SpawnParams;
-	SpawnParams.ObjectFlags |= RF_Transactional;
-	AStaticMeshActor* NewActor = World->SpawnActor<AStaticMeshActor>(SpawnLocation, FRotator::ZeroRotator, SpawnParams);
+	AActor* NewActor = FFPSRBlockoutSpawn::SpawnPiece(World, AssetData, FTransform(FRotator::ZeroRotator, SpawnLocation), /*bTransientGhost=*/false);
 	if (!NewActor)
 	{
 		if (StatusText.IsValid())
@@ -846,20 +1060,6 @@ void SFPSRBlockoutTab::PlaceAsset(const FAssetData& AssetData)
 		}
 		return;
 	}
-	NewActor->Modify();
-
-	if (UStaticMeshComponent* MeshComp = NewActor->GetStaticMeshComponent())
-	{
-		MeshComp->Modify();
-		MeshComp->SetStaticMesh(Mesh);
-		// K4=B / K14 guardrail: placed blockout meshes are WorldStatic + block-all so the flow-field's obstacle mask
-		// (BuildObstacleMask ECC_WorldStatic downtrace) treats them as obstacles. The engine's standard "BlockAll"
-		// profile is exactly WorldStatic object type + QueryAndPhysics + block-all responses (BaseEngine.ini).
-		MeshComp->SetCollisionProfileName(TEXT("BlockAll"));
-	}
-
-	NewActor->SetActorLabel(AssetData.AssetName.ToString());
-	NewActor->SetFolderPath(TEXT("Blockout"));
 
 	GEditor->SelectNone(/*bNoteSelectionChange=*/false, /*bDeselectBSPSurfs=*/true);
 	GEditor->SelectActor(NewActor, /*bInSelected=*/true, /*bNotify=*/true);

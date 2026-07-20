@@ -5,12 +5,12 @@
 #include "CoreMinimal.h"
 #include "FPSRWeaponTypes.generated.h"
 
-/** Weapon firing archetypes. P1 uses FullAuto and Melee; others are placeholders for later phases. */
+/** Weapon firing archetypes (drive stat EditConditionHides + the fire ability). Burst is intentionally absent —
+ *  burst fire ships as UFPSRFragment_BurstFire driving EFPSRFireMode::Burst, not as an archetype. */
 UENUM(BlueprintType)
 enum class EFPSRWeaponArchetype : uint8
 {
 	FullAuto,
-	Burst,
 	AOE,
 	Melee,
 	ChargeLaser,
@@ -38,7 +38,8 @@ enum class ERecoilRecovery : uint8
 	Never
 };
 
-/** Per-weapon stats. In P1 these come straight from the weapon DataAsset (no per-instance modifiers yet). */
+/** Per-weapon base stats, authored on the weapon DataAsset. Per-instance card modifiers are layered on top at
+ *  runtime — the resolved values come from UFPSRWeaponInstance::GetResolvedStats(). */
 USTRUCT(BlueprintType)
 struct FPSROGUELITE_API FFPSRWeaponStatBlock
 {
@@ -154,6 +155,9 @@ struct FPSROGUELITE_API FFPSRWeaponStatBlock
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Projectile", meta = (EditConditionHides, EditCondition = "Archetype == EFPSRWeaponArchetype::AOE"))
 	float KnockbackStrength = 0.0f; // AOE radial knockback impulse (cm/s) baked into the projectile; 0 = none
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Projectile", meta = (EditConditionHides, EditCondition = "Archetype != EFPSRWeaponArchetype::Melee && Archetype != EFPSRWeaponArchetype::ChargeLaser"))
+	float ProjectileMuzzleOffset = 100.0f; // cm the projectile spawns ahead of the view point (also the wall-clamp trace length); default preserves the prior hardcoded value
 
 	// --- Charge (ChargeLaser archetype; one click -> auto charge sequence: warm-up ticks, then a full-power beam) ---
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Charge", meta = (EditConditionHides, EditCondition = "Archetype == EFPSRWeaponArchetype::ChargeLaser"))

@@ -14,7 +14,7 @@
 #include "Animation/AnimInstance.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
-#include "UObject/ConstructorHelpers.h"
+#include "Settings/FPSRPlaceholderVisualSettings.h"
 
 AFPSRBossBase::AFPSRBossBase()
 {
@@ -36,16 +36,12 @@ AFPSRBossBase::AFPSRBossBase()
 		Capsule->SetCollisionResponseToChannel(ECC_Pawn, ECR_Ignore);
 	}
 
-	// Visible placeholder cube (no collision — the capsule is the hit volume). Designers replace it in the boss BP.
+	// Visible placeholder body (no collision — the capsule is the hit volume). Designers replace it in the boss BP;
+	// the mesh is resolved in BeginPlay from config (Game.md §6-2 — no hard-coded path in C++), fallback only.
 	BodyMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("BodyMesh"));
 	BodyMesh->SetupAttachment(GetCapsuleComponent());
 	BodyMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	BodyMesh->SetRelativeScale3D(FVector(2.4f, 2.4f, 4.0f)); // ~fill the capsule (cube is 100^3)
-	static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeMesh(TEXT("/Engine/BasicShapes/Cube.Cube"));
-	if (CubeMesh.Succeeded())
-	{
-		BodyMesh->SetStaticMesh(CubeMesh.Object);
-	}
 
 	// Stationary scaffold: kill gravity so the boss never falls off its spawn point (real boss re-enables movement).
 	if (UCharacterMovementComponent* Move = GetCharacterMovement())
@@ -60,6 +56,19 @@ AFPSRBossBase::AFPSRBossBase()
 void AFPSRBossBase::BeginPlay()
 {
 	Super::BeginPlay();
+
+	// Fallback placeholder body mesh from config only when the boss BP assigned none (Game.md §6-2 — no hard-coded
+	// path in C++). Runs on all machines (cosmetic). A designer-authored boss BP mesh wins (guard skips the load).
+	if (BodyMesh && BodyMesh->GetStaticMesh() == nullptr)
+	{
+		if (const UFPSRPlaceholderVisualSettings* Settings = GetDefault<UFPSRPlaceholderVisualSettings>())
+		{
+			if (UStaticMesh* PlaceholderMesh = Settings->BossPlaceholderMesh.LoadSynchronous())
+			{
+				BodyMesh->SetStaticMesh(PlaceholderMesh);
+			}
+		}
+	}
 
 	// The boss's health is shown ONLY by the dedicated screen-space HUD bar (A3 — WBP_BossHUDBar, driven by the
 	// GameState's replicated ActiveBoss + this HealthComponent). It must NOT also carry the swarm-style world-space

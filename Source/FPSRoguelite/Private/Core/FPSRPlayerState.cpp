@@ -297,11 +297,15 @@ void AFPSRPlayerState::OnRep_LifeState()
 		}
 	}
 
-	// Mirror the server's downed locomotion on clients so movement prediction matches: crawl speed while DBNO,
+	// Mirror the server's downed locomotion on clients so movement prediction matches: locked while not Alive,
 	// normal (combat-mult) speed once revived back to Alive. (Mirrors the move-speed-multiplier client sync path.)
+	// Test !Alive (not ==DBNO): the DBNO->Dead transition on a team wipe (GameMode::NotifyPlayerDefeated) goes
+	// through SetLifeState alone with no direct ApplyDownedLocomotion call, so ==DBNO would restore walk speed on
+	// remote clients while the listen-server host — which gets no OnRep — keeps it locked. HandleOutOfHealth passes
+	// true and PerformRevive passes false, so !Alive is the consistent predicate across all three paths.
 	if (AFPSRCharacter* OwnerChar = Cast<AFPSRCharacter>(GetPawn()))
 	{
-		OwnerChar->ApplyDownedLocomotion(LifeState == EFPSRLifeState::DBNO);
+		OwnerChar->ApplyDownedLocomotion(LifeState != EFPSRLifeState::Alive);
 	}
 }
 
@@ -461,6 +465,10 @@ void AFPSRPlayerState::CopyProperties(APlayerState* PlayerState)
 	// Run-progression fields are deliberately NOT copied — they are reset on lobby entry regardless.
 	if (AFPSRPlayerState* PS = Cast<AFPSRPlayerState>(PlayerState))
 	{
+		// Raw copy (not SetSelectedWeapon — travel state hand-off must not run the setter's SetReady/broadcast side
+		// effects), but still mark the push-model property dirty so the new PlayerState replicates the loadout, matching
+		// every other mutation of this field.
 		PS->SelectedWeapon = SelectedWeapon;
+		MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRPlayerState, SelectedWeapon, PS);
 	}
 }

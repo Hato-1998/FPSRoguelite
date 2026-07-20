@@ -54,8 +54,10 @@ struct FFPSRFlowFieldSurfaceData
 };
 
 /**
- * One map's flow-field computer. A UObject shell around flat TArrays — created and owned by
- * UFPSRFlowFieldSubsystem (server-only), one per map (keyed by MapId in the subsystem registry).
+ * One flow-field computer: a UObject shell around flat TArrays, created and owned by UFPSRFlowFieldSubsystem
+ * (server-only). There is one long-lived UnifiedComputer per world (plus short-lived instances used only to
+ * isolation-bake a single slot in BakeSlotIntoUnifiedGrid) — no longer one instance per map (P-G removed the
+ * per-map registry).
  *
  * Split (Codex consult 2026-07-06): the WORLDLESS CORE (BuildFromSurfaceData / RunBFS / Sample / the pure
  * index helpers) touches no world and is exercised by FPSRoguelite.FlowField.Unit with synthetic surface

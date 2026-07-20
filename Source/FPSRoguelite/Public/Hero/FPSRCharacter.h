@@ -303,7 +303,8 @@ protected:
 	UPROPERTY(VisibleAnywhere, Category = "FPSR|Feedback")
 	TObjectPtr<UFPSRBlindspotAudioComponent> BlindspotAudio;
 
-	/** Starting weapons granted on possession (slot order). Set via ConstructorHelpers (P1) / HeroDataAsset (later). */
+	/** Starting weapons granted on possession (slot order). Assigned per-character in the BP class defaults
+	 *  (EditDefaultsOnly); later folded into a HeroDataAsset. No hard-coded weapon paths in C++ (Game.md §6-2). */
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Weapon")
 	TObjectPtr<UFPSRWeaponDataAsset> DefaultPrimaryWeapon;
 
@@ -371,10 +372,6 @@ protected:
 	/** Baseline walk speed before MoveSpeedMultiplier. Designers may tune per-hero. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Movement")
 	float BaseWalkSpeed = 600.0f;
-
-	/** Downed (DBNO) crawl speed as a fraction of the normal walk speed (Game.MD §2-13). Balance value. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Movement", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-	float DownedMoveScale = 0.3f;
 
 	/** Server-only: world time of last dash (init far in the past so the first dash is allowed). */
 	float LastDashTime = -1000.0f;

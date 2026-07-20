@@ -78,6 +78,13 @@ public:
 	/** Server-only: whether an offer is currently cached/presented (don't replace a mid-selection offer). */
 	bool HasActiveOffer() const { return CachedOffer.Num() > 0; }
 
+	/** Server-only: pull back an offer this player can no longer act on (they went DBNO/Dead). RefreshPauseState
+	 *  skips non-Alive players, so without this their modal would linger over live gameplay and they could still
+	 *  accept the stale offer. The PICK is not consumed — clearing the cache lets PresentNextOfferIfNeeded re-draw
+	 *  and re-present it on revive, so nothing is lost. Also closes the stale-selection window: HandleCardSelection
+	 *  validates the index against CachedOffer, which is now empty. */
+	void WithdrawActiveOffer();
+
 	/** Server-only: whether this player's run-start opening seed has been issued (used by the director's
 	 *  pre-combat hold so spawning waits until the opening-seed flow has at least begun). */
 	bool HasStartedOpeningSeed() const { return bOpeningSeedIssued; }
@@ -141,10 +148,6 @@ public:
 	 *  across the travel. At U10 this persists the versioned scaffold; P0-③ folds run rewards into the save first. */
 	UFUNCTION(Client, Reliable)
 	void ClientCommitMetaSave(EFPSRRunOutcome Outcome);
-
-	/** Server (host/authority): return to the menu with the given outcome (called by result widget on non-authority clients). */
-	UFUNCTION(Server, Reliable)
-	void ServerRequestReturnToMenu(EFPSRRunOutcome Outcome);
 
 	/** Server (host/authority): return to the lobby hub now (non-authority result widget path). Mirrors the GameMode's
 	 *  automatic post-run lobby travel but fires immediately on the player's Return click instead of after the delay

@@ -10,7 +10,14 @@ class UFPSRWeaponDataAsset;
 
 /** v2 card group (§2-3-2): the draw pool / trigger / UI filter a card belongs to. Orthogonal to per-effect
  *  application scope (UCardEffect_WeaponStat::bThisWeaponOnly). Character = character + all-weapons effects
- *  (no target weapon). Weapon = this-weapon stat / behavior cards (TargetWeapon set). WeaponUnlock = reserved (U18b). */
+ *  (no target weapon). Weapon = this-weapon stat / behavior cards (TargetWeapon set).
+ *
+ *  WeaponUnlock = the weapon-unlock cards (DA_CardUnlock_*). No C++ branch reads this value — the unlock flow is
+ *  routed by UFPSRCardPoolDataAsset::WeaponUnlockCards + EFPSROfferType::WeaponUnlock — but it IS the authored
+ *  classification on those assets, so it is deliberately kept (it is dead CODE, not dead DATA).
+ *  ⚠️ Do NOT "tidy" an unlock card to Weapon: GatherCandidatePool only sets a draw's TargetWeapon when
+ *  Group == Weapon (FPSRCardSubsystem.cpp), so re-tagging would change real behaviour. Character/WeaponUnlock
+ *  both mean "no target weapon" to the code; WeaponUnlock additionally says *why*. */
 UENUM(BlueprintType)
 enum class ECardGroup : uint8
 {

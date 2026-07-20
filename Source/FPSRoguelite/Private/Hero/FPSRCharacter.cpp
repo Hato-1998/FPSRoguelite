@@ -492,7 +492,6 @@ void AFPSRCharacter::ApplyDownedLocomotion(bool bDowned)
 	{
 		// Stationary: DBNO no longer crawls — the player stays where it fell and spectates an ally (§2-13). Movement
 		// input is also gated for !Alive (Input_Move*), so this is belt-and-suspenders against residual slide.
-		// (DownedMoveScale is now unused — kept for a possible future crawl toggle.)
 		MoveComp->MaxWalkSpeed = 0.0f;
 	}
 	else
@@ -887,6 +886,22 @@ void AFPSRCharacter::HandleOutOfHealth()
 	if (AFPSRGameMode* GM = GetWorld() ? GetWorld()->GetAuthGameMode<AFPSRGameMode>() : nullptr)
 	{
 		GM->NotifyPlayerDefeated();
+	}
+
+	// Card-select freeze. Order matters: withdraw this player's offer BEFORE recomputing. RefreshPauseState skips
+	// non-Alive players, so the recompute can resume the run — and a still-presented offer would then sit over live
+	// gameplay on a downed player who is no longer part of the selection, still acceptable by them. Withdrawing keeps
+	// the pick (it is only consumed on apply), so the revive path re-presents it. Without the recompute the freeze
+	// instead stays pinned on someone who can no longer choose — the same pull-recompute gap the GameMode's Logout
+	// hook closes for disconnects. On a wipe the recompute is a no-op: EndRunFreeze has already latched bRunEnded,
+	// so the world stays frozen behind the result screen.
+	if (AFPSRPlayerController* FPSRPC = Cast<AFPSRPlayerController>(GetController()))
+	{
+		FPSRPC->WithdrawActiveOffer();
+	}
+	if (AFPSRGameState* GS = GetWorld() ? GetWorld()->GetGameState<AFPSRGameState>() : nullptr)
+	{
+		GS->RefreshPauseState();
 	}
 }
 

@@ -162,6 +162,18 @@ void UFPSRReviveComponent::PerformRevive()
 	RestoreOwnView();
 
 	SetReviveProgress(0.0f);
+
+	// Re-arm the card-select freeze: the mirror of HandleOutOfHealth's refresh. Going down drops the player out of
+	// RefreshPauseState's Alive-only scan (so an outstanding pick stops blocking everyone), but the pick itself is
+	// never cleared — coming back Alive must re-present it and re-pause, or the revived player keeps a pending
+	// selection with no offer on screen until some unrelated event (the next level-up) happens to recompute.
+	if (UWorld* World = GetWorld())
+	{
+		if (AFPSRGameState* GS = World->GetGameState<AFPSRGameState>())
+		{
+			GS->RefreshPauseState();
+		}
+	}
 }
 
 void UFPSRReviveComponent::UpdateDownedSpectate()

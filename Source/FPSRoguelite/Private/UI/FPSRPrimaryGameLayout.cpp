@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "UI/FPSRPrimaryGameLayout.h"
+#include "UI/FPSRUITags.h"
 #include "Widgets/CommonActivatableWidgetContainer.h"
 #include "CommonActivatableWidget.h"
 
@@ -10,19 +11,19 @@ void UFPSRPrimaryGameLayout::NativeOnInitialized()
 
 	if (Layer_Game)
 	{
-		RegisterLayer(FGameplayTag::RequestGameplayTag(FName("UI.Layer.Game")), Layer_Game);
+		RegisterLayer(FPSRUITags::TAG_UI_Layer_Game.GetTag(), Layer_Game);
 	}
 	if (Layer_GameMenu)
 	{
-		RegisterLayer(FGameplayTag::RequestGameplayTag(FName("UI.Layer.GameMenu")), Layer_GameMenu);
+		RegisterLayer(FPSRUITags::TAG_UI_Layer_GameMenu.GetTag(), Layer_GameMenu);
 	}
 	if (Layer_Menu)
 	{
-		RegisterLayer(FGameplayTag::RequestGameplayTag(FName("UI.Layer.Menu")), Layer_Menu);
+		RegisterLayer(FPSRUITags::TAG_UI_Layer_Menu.GetTag(), Layer_Menu);
 	}
 	if (Layer_Modal)
 	{
-		RegisterLayer(FGameplayTag::RequestGameplayTag(FName("UI.Layer.Modal")), Layer_Modal);
+		RegisterLayer(FPSRUITags::TAG_UI_Layer_Modal.GetTag(), Layer_Modal);
 	}
 }
 

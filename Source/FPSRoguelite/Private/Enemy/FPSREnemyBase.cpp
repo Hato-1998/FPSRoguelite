@@ -4,6 +4,7 @@
 #include "Enemy/FPSREnemyHealthComponent.h"
 #include "Enemy/FPSREnemySpawnSubsystem.h"
 #include "Enemy/FPSREnemyAnimProfile.h"
+#include "Enemy/FPSREnemyMetricsSubsystem.h" // S4 readability metrics registry (CSV-gated, see below)
 #include "Hero/FPSRCharacter.h"
 #include "Pickup/FPSRPickupSubsystem.h"
 #include "Core/FPSRLogChannels.h"
@@ -14,7 +15,8 @@
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
-#include "UObject/ConstructorHelpers.h"
+#include "ProfilingDebugging/CsvProfiler.h" // CSV_PROFILER_STATS gate for the metrics registry calls below
+#include "Settings/FPSRPlaceholderVisualSettings.h"
 
 AFPSREnemyBase::AFPSREnemyBase()
 {
@@ -30,7 +32,7 @@ AFPSREnemyBase::AFPSREnemyBase()
 	SetNetCullDistanceSquared(FMath::Square(NetCullRadius));
 
 	Capsule = CreateDefaultSubobject<UCapsuleComponent>(TEXT("Capsule"));
-	Capsule->InitCapsuleSize(40.0f, 90.0f);
+	Capsule->InitCapsuleSize(40.0f, DefaultCapsuleHalfHeight);
 	Capsule->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 	Capsule->SetCollisionObjectType(ECC_Pawn);
 	Capsule->SetCollisionResponseToAllChannels(ECR_Block);
@@ -45,11 +47,8 @@ AFPSREnemyBase::AFPSREnemyBase()
 	Mesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	Mesh->SetRelativeLocation(FVector(0.0f, 0.0f, -90.0f));
 	Mesh->SetRelativeScale3D(FVector(0.8f, 0.8f, 1.8f));
-	static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeMesh(TEXT("/Engine/BasicShapes/Cube.Cube"));
-	if (CubeMesh.Succeeded())
-	{
-		Mesh->SetStaticMesh(CubeMesh.Object);
-	}
+	// Placeholder mesh is resolved in BeginPlay from config (Game.md §6-2: no hard-coded asset path in C++). Normal
+	// enemy BPs assign their own (VAT) mesh, so the fallback only fires for the raw-C++ spawn (unconfigured roster).
 
 	HealthComponent = CreateDefaultSubobject<UFPSREnemyHealthComponent>(TEXT("HealthComponent"));
 }
@@ -72,11 +71,25 @@ void AFPSREnemyBase::BeginPlay()
 	// runs on every Activate (after BeginPlay) and still wins. No-op vs the ctor when NetCullRadius is unchanged (no regression).
 	SetNetCullDistanceSquared(FMath::Square(NetCullRadius));
 
+	// Fallback placeholder mesh from config only when no content BP mesh was assigned (Game.md §6-2 — no hard-coded
+	// path in C++). Normal enemy BPs carry a VAT mesh, so the guard skips the load; only the raw-C++ spawn hits it.
+	if (Mesh && Mesh->GetStaticMesh() == nullptr)
+	{
+		if (const UFPSRPlaceholderVisualSettings* Settings = GetDefault<UFPSRPlaceholderVisualSettings>())
+		{
+			if (UStaticMesh* PlaceholderMesh = Settings->EnemyPlaceholderMesh.LoadSynchronous())
+			{
+				Mesh->SetStaticMesh(PlaceholderMesh);
+			}
+		}
+	}
+
 	if (HealthComponent)
 	{
 		HealthComponent->OnDeath.AddDynamic(this, &AFPSREnemyBase::HandleDeath);
 		// Client-side death cosmetic (U20): OnDeathCosmetic fires from OnRep_bDead on clients (the authority drives
-		// death cosmetics from its own path). Enters the Death animation state. Harmless when no AnimProfile is set.
+		// death cosmetics from its own path — HandleDeath calls HandleDeathCosmetic directly, since OnRep does not
+		// run on the server). Enters the Death animation state. Harmless when no AnimProfile is set.
 		HealthComponent->OnDeathCosmetic.AddDynamic(this, &AFPSREnemyBase::HandleDeathCosmetic);
 	}
 
@@ -86,6 +99,36 @@ void AFPSREnemyBase::BeginPlay()
 	// Bind the world-space health bar / floating-damage widget to the health component once (server + clients).
 	// Pooling-safe: the actor + widget persist across dormancy, so this single bind survives every reuse.
 	InitHealthBarWidget();
+
+	// S4 readability metrics: register with the per-client registry (all net modes — the metrics subsystem reads
+	// from each LOCAL client's own POV, not just the server). Once per actor lifetime, like the widget bind above
+	// (pooled reuse never re-enters BeginPlay — see Deactivate). Compiled out entirely in Shipping (CSV_PROFILER_STATS).
+#if CSV_PROFILER_STATS
+	if (UWorld* World = GetWorld())
+	{
+		if (UFPSREnemyMetricsSubsystem* Metrics = World->GetSubsystem<UFPSREnemyMetricsSubsystem>())
+		{
+			Metrics->RegisterEnemy(this);
+		}
+	}
+#endif
+}
+
+void AFPSREnemyBase::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	// S4 readability metrics: symmetric unregister (see the BeginPlay registration above for why this is once-per-
+	// actor-lifetime, not once-per-Deactivate).
+#if CSV_PROFILER_STATS
+	if (UWorld* World = GetWorld())
+	{
+		if (UFPSREnemyMetricsSubsystem* Metrics = World->GetSubsystem<UFPSREnemyMetricsSubsystem>())
+		{
+			Metrics->UnregisterEnemy(this);
+		}
+	}
+#endif
+
+	Super::EndPlay(EndPlayReason);
 }
 
 void AFPSREnemyBase::InitHealthBarWidget()
@@ -102,6 +145,13 @@ void AFPSREnemyBase::InitHealthBarWidget()
 
 void AFPSREnemyBase::HandleDeath(AActor* DeadActor, AActor* Killer)
 {
+	// Death cosmetics for the listen-server host / standalone: OnDeathCosmetic only fires from OnRep_bDead, which
+	// never runs on authority, so without this the host is the one machine that never plays the death state (remote
+	// clients do). Mirrors AFPSRBossBase::HandleDeath. Currently invisible on BOTH sides because ReleaseEnemy below
+	// hides the actor in the same frame (the known Stage-3 death-dwell dependency documented on HandleDeathCosmetic);
+	// calling it here means Stage-3 lands with host/client parity instead of regressing the host only.
+	HandleDeathCosmetic();
+
 	if (UWorld* World = GetWorld())
 	{
 		if (UFPSRPickupSubsystem* Pickups = World->GetSubsystem<UFPSRPickupSubsystem>())

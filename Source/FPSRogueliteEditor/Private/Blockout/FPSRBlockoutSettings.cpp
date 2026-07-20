@@ -9,6 +9,8 @@ UFPSRBlockoutSettings::UFPSRBlockoutSettings()
 	FDirectoryPath DefaultFolder;
 	DefaultFolder.Path = TEXT("/Game/PolygonCyberCity/Meshes");
 	PaletteFolders.Add(DefaultFolder);
+
+	PrefabSaveFolder.Path = TEXT("/Game/CityPrefabs");
 }
 
 FName UFPSRBlockoutSettings::GetCategoryName() const

@@ -5,6 +5,7 @@
 #include "Assembler/SFPSRWeaponAssemblerViewport.h"
 #include "Assembler/FPSRWeaponAssemblerViewportClient.h"
 #include "Assembler/FPSRWeaponAssemblerHelpers.h"
+#include "Assembler/FPSRWeaponAssemblerSettings.h"
 #include "Weapon/FPSRWeaponDataAsset.h"
 #include "Weapon/FPSRWeaponFragment.h"
 
@@ -639,11 +640,13 @@ void SFPSRWeaponAssemblerTab::RefreshAvailableParts()
 			FARFilter Filter;
 			Filter.ClassPaths.Add(UStaticMesh::StaticClass()->GetClassPathName());
 			// The weapon's own part folder (e.g. .../Modular/Weapon_A) holds its structural variants; its sibling
-			// "Attachments" folder (.../Modular/Attachments, incl. a Scopes/ subfolder) holds sights, grips, muzzle
+			// attachments folder (.../Modular/Attachments, incl. a Scopes/ subfolder) holds sights, grips, muzzle
 			// devices, lasers, etc. Scan both — recursively so Attachments/Scopes is picked up too. The weapon folder
-			// itself has no subfolders, so recursing it adds nothing. A missing Attachments path simply returns nothing.
+			// itself has no subfolders, so recursing it adds nothing. A missing attachments path simply returns nothing.
+			// The sibling folder name is a config value (no C++ hardcode) so a content reorg needs no rebuild.
+			const FString AttachmentsFolderName = GetDefault<UFPSRWeaponAssemblerSettings>()->AttachmentsFolderName;
 			Filter.PackagePaths.Add(FName(*Folder));
-			Filter.PackagePaths.Add(FName(*(FPackageName::GetLongPackagePath(Folder) / TEXT("Attachments"))));
+			Filter.PackagePaths.Add(FName(*(FPackageName::GetLongPackagePath(Folder) / AttachmentsFolderName)));
 			Filter.bRecursivePaths = true;
 
 			TArray<FAssetData> FoundAssets;

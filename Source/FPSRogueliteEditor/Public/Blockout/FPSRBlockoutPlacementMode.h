@@ -18,12 +18,17 @@ class HHitProxy;
 
 /**
  * City-builder style viewport placement mode for the blockout tool (the K8 "cursor raycast + grid + ghost" follow-up).
- * Activated from the blockout tab's "뷰포트 배치" button, which also calls SetAssetToPlace with the selected card's asset.
- * While active: the cursor is traced to the floor (FActorPositioning), the hit is grid-snapped, a live GHOST actor of
- * the asset follows there, Render draws the snap box + grid, LEFT-CLICK spawns a real actor at the snapped spot (mesh =
- * WorldStatic BlockAll, actor BP = as-is), and ESC exits. Placement is repeatable (the ghost stays for the next click).
- * A modern UEdMode (auto-registered by the asset-editor subsystem — the ctor just sets Info); UBaseLegacyWidgetEdMode
- * supplies the widget-interface plumbing so this only overrides the input + render handlers it needs.
+ * Activated from the blockout tab's "뷰포트 배치" button (or automatically on card selection, R3a), which also calls
+ * SetAssetToPlace with the selected card's asset. While active: a manual line trace along the cursor ray finds the
+ * pointed SURFACE (hit actor + normal); MAGNETIC snapping (R3b) then sphere-overlaps around that hit point for a NEARBY
+ * already-placed Blockout piece and, if found, snaps the ghost onto that piece's face even when the cursor itself is
+ * pointing at open floor near it — falling back to flush/grid snap on the raw hit surface when no neighbor is in range.
+ * Same-size pieces tile edge-to-edge Minecraft-style (Synty pieces have corner/edge pivots, not center pivots —
+ * pivot-snapping alone leaves gaps/overlaps). The ghost renders translucent when UFPSRBlockoutSettings::GhostMaterial
+ * is set (R3c). Render draws the snap box + grid, LEFT-CLICK spawns a real actor at the snapped spot (mesh = WorldStatic
+ * BlockAll, actor BP = as-is), and ESC exits. Placement is repeatable (the ghost stays for the next click). A modern
+ * UEdMode (auto-registered by the asset-editor subsystem — the ctor just sets Info); UBaseLegacyWidgetEdMode supplies
+ * the widget-interface plumbing so this only overrides the input + render handlers it needs.
  */
 UCLASS()
 class UFPSRBlockoutPlacementMode : public UBaseLegacyWidgetEdMode
@@ -59,8 +64,6 @@ private:
 	/** (Re)spawns the transient ghost actor for AssetToPlace (destroyed + rebuilt on asset change / mode enter). */
 	void RebuildGhost();
 	void DestroyGhost();
-	/** Snaps X/Y to GridSize (Z untouched); no-op if GridSize <= 0. */
-	FVector SnapLocation(const FVector& In) const;
 	/** Spawns the real (non-transient) actor at CurrentLocation inside an undo transaction. */
 	void SpawnAtCurrent();
 
@@ -72,4 +75,11 @@ private:
 	FVector CurrentLocation = FVector::ZeroVector;
 	bool bHasHit = false;
 	float GridSize = 100.0f;
+	/** Live yaw applied to the ghost + next spawn; reset on Enter, stepped by [ / ] in RotationSnapDegrees increments. */
+	FRotator CurrentRotation = FRotator::ZeroRotator;
+	/** [ / ] rotate step (degrees), pushed from UFPSRBlockoutSettings on Enter (same pattern as GridSize). */
+	float RotationSnapDegrees = 90.0f;
+	/** Magnetic proximity snap-search radius (cm, R3b), pushed from UFPSRBlockoutSettings on Enter (same pattern as
+	 *  GridSize). 0 = sentinel — MouseMove falls back to GridSize as the effective radius at use-time. */
+	float SnapRadius = 0.0f;
 };
