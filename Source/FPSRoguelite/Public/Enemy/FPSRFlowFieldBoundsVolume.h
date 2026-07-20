@@ -28,7 +28,7 @@ public:
 	FBox GetWorldBounds() const;
 
 	/** Which map this volume's grid belongs to (multimap Tier 0). An unset tag = the Default single-map field, so an
-	 *  untagged L_Sandbox keeps its single grid unchanged. In multimap content, each streaming sublevel's volume carries
+	 *  untagged Map_CyberCity keeps its single grid unchanged. In multimap content, each streaming sublevel's volume carries
 	 *  a distinct MapId that keys its per-map flow-field computer + spawn points + occupancy (§3 Tier 0). */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "FPSR|Flow Field")
 	FGameplayTag MapId;

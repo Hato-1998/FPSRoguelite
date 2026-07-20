@@ -19,7 +19,7 @@ class AFPSRGameState;
  *
  *  Refactor (Codex consult 2026-07-06): the grid/BFS/flow algorithm lives in UFPSRFlowFieldComputer (worldless core
  *  unit-tested by FPSRoguelite.FlowField.Unit). This subsystem owns discovery (bounds volume / floor Z), the recompute
- *  timer, and routing. An unset MapId is the "Default" single-map field, so an untagged L_Sandbox is unchanged.
+ *  timer, and routing. An unset MapId is the "Default" single-map field, so an untagged Map_CyberCity is unchanged.
  *
  *  S1b: registry + per-map bake/sample built here; the actual streamed-map bake is TRIGGERED by the MapStreamSubsystem
  *  on collision-ready (S3). At world begin, every bounds volume present in the persistent world is baked immediately. */
