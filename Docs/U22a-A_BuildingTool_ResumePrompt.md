@@ -51,6 +51,27 @@
 
 ## §2 ▶ 다음 작업
 
+### ⓪ 🔴 첫 실행 결과 (2026-07-21 세션 끝, **여기서 이어서 시작**)
+**진전**: `Collect` ✅ 동작 — Kit `Facades`에 **11종**이 썸네일까지 정상 수집(`Wall_Window_01~06,08` · `Old_Single_01` · `Base_Wall_Window_01/Double_01/Half_01`).
+`Preview` ✅ 실행됨 — **벽이 층별로 정렬돼 쌓임 = 조립 로직 자체는 동작**(사용자 스크린샷).
+
+**증상**: 미리보기 건물 **위에 불투명한 회색 직육면체 덩어리**가 얹혀 있어 형태를 가린다.
+
+**의심 1순위 = 사이징 박스가 안 치워짐**(코드 근거): `preview_from_config()`는 박스를 **삭제도 숨김도 하지 않는다**
+(구 `generate_from_selection()`은 생성 후 `destroy_actor(box)`로 소비했음). `place_sizing_box()`가 만드는 것은
+`/Engine/BasicShapes/Cube`(기본 회색 머티리얼, 750×750×1200) → **회색 덩어리의 색·형태와 일치**.
+
+**⚠️ 단, 미확인이다**(에디터 미연결로 실측 못 함). 2순위 후보 = `RoofFloors`에 두꺼운/큰 메시가 뽑혀
+`P(rooffloor, ix*125, iy*125, zr, 0)` 격자로 겹쳐 쌓인 것. **먼저 아래 3개를 확인한 뒤 고칠 것**:
+1. 회색 덩어리를 **클릭 → Outliner에서 액터 이름** 확인 (`SizingBox`인가, `Building_Cfg_*`의 자식인가)
+2. **Output Log에서 `[CityGen]`** 줄 — `생성: WxDxF, 조각 N` + `제외:` 경고 목록
+3. Kit의 **`Corners` / `CorniceTrims` / `RoofFloors`** 배열에 각각 몇 개가 들어왔는지(0개면 검증 기준이 과한 것)
+
+**대기 중인 수정(Python 전용 — 재빌드 불요, 리로드만 하면 적용)**:
+`preview_from_config()`에서 사용한 사이징 박스를 `box.set_is_temporarily_hidden_in_editor(True)`로 숨기고,
+`clear_preview()`/`confirm_preview()`에서 다시 보이게 되돌린다(라벨 `SizingBox*` 대상). 헬퍼 `_set_sizing_boxes_hidden(hidden)` 하나로.
+→ 숨김이라 Clear하면 박스가 돌아와 크기를 다시 조절할 수 있다(삭제보다 나음).
+
 ### ① DA 인스턴스 2개 생성 (각 10초 · 콘텐츠 브라우저)
 **우클릭 → Miscellaneous → Data Asset** → 클래스 선택 → 이름 지정. 위치는 둘 다 **`/Game/Tools/CityGen/`**
 (툴 에셋은 `/Game/Tools/` 아래로 모으는 규칙 — 사용자 결정 2026-07-21).
