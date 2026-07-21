@@ -88,8 +88,20 @@
 ### ① EUW 배선 (사용자 수작업 — 셸은 생성됨)
 **`/Game/Tools/CityGen/EUW_CityGen`** = 빈 EditorUtilityWidget. **생성·저장 완료.**
 
-🔴 **왜 셸만인가**: 이 세션의 VibeUE 프록시엔 위젯 도구가 없고, `unreal.WidgetTree`는 Python에
-**메서드·프로퍼티가 0개** 노출이라 버튼 하나 넣을 수 없다. 배선은 UMG 에디터에서 손으로 해야 한다.
+🔴 **왜 셸만인가 — Python 자동 배선은 불가능하다(2026-07-21 실측 확정, 재시도 금지)**
+| 시도 | 결과 |
+|---|---|
+| `bp.get_editor_property('WidgetTree')` | ❌ `protected and cannot be read` |
+| `unreal.load_object(bp, "WidgetTree")` | ✅ **WidgetTree 객체는 얻어진다** |
+| `unreal.new_object(unreal.VerticalBox/Button, outer=wt)` | ✅ **위젯 객체 생성도 된다** |
+| `wt.set_editor_property('RootWidget', vb)` | ❌ `protected and cannot be set` |
+| `wt.call_method('SetRootWidget', ...)` | ❌ 그런 UFUNCTION 없음 |
+→ 위젯을 만들어도 **트리의 루트로 지정할 방법이 없어 화면에 나오지 않는다.** 게다가 버튼 `On Clicked`
+그래프 배선은 노드 생성 API 자체가 없다(`BlueprintEditorLibrary`엔 `compile_blueprint`·`find_event_graph`는
+있지만 노드 추가는 없음). **크래시는 나지 않았고, 디스크 에셋도 그대로다**(만든 객체는 트리 미등록 고아).
+
+💡 **손으로 할 때 요령**: 버튼 1개 + `Execute Python Command` 노드 1개만 제대로 만들면, Designer의 버튼도
+Graph의 노드 묶음도 **Ctrl+C/V로 복제**된다. 복제 후 Python Command 문자열만 아래 표대로 바꾸면 된다.
 
 **배선 순서**
 1. `EUW_CityGen` 더블클릭 → Designer에서 `Vertical Box` 안에 `Button` + `Text` 배치(원하는 만큼)
