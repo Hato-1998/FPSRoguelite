@@ -63,6 +63,13 @@ DEFAULT_CONFIG = {
     ],
     # 셋백(위층을 좁힘) 기본 OFF — 실제 빌딩은 직사각형이 기본이고, 켜면 항아리 모양이 된다(사용자 판정 2026-07-21).
     'setback': False,
+    # 벽을 무엇 단위로 고정할지: column=칸별(위로 쭉 같은 창문, 기본) / floor=층별 / building=건물 하나 / random=칸마다 무작위
+    'facade_mode': 'column',
+    # 블록(거리) 생성: 박스 하나를 폭·높이가 제각각인 여러 채로 나눠 '늘어선 거리'를 만든다.
+    # 기본은 OFF = 박스 하나에 건물 한 채(한 채씩 놓아가며 거리를 만드는 방식). 켜면 한 번에 여러 채.
+    'block': False,
+    'block_min_width': 2, 'block_max_width': 4,   # 채당 폭(칸)
+    'floors_min': 0, 'floors_max': 0,             # 0 = 박스 높이에서 유도(절반~전체 사이에서 무작위)
     'roofprop_count': 2,
     'width': 0, 'depth': 0, 'floors': 0,  # 0 = 사이징 박스 바운드에서 유도
 }
@@ -150,71 +157,54 @@ def _validate(cat, m):
         return False, f"피벗이 밑변왼쪽 아님(minX={m['min_x']:.1f},minZ={m['min_z']:.1f})"
     return True, ""
 
-def generate_from_config(box_actor, config=None, seed=None):
-    """설정 딕셔너리(DataAsset 매핑, config)로 모듈 건물을 생성.
-    box_actor=None이면 cfg의 width/depth/floors만으로 크기 결정(0이면 3x3x4)."""
-    eas = _eas()
-    cfg = dict(DEFAULT_CONFIG)
-    for k, v in (config or {}).items():
-        if v not in (None, [], ''):  # 절반만 채운 config도 동작하도록 빈 값은 기본값 유지
-            cfg[k] = v
-
-    if seed is None:
-        seed = (box_actor.get_name().__hash__() & 0xffff) if box_actor is not None else 0
-    rnd = random.Random(seed)
-
-    if box_actor is not None:
-        o, e = box_actor.get_actor_bounds(False)
-        minc = unreal.Vector(o.x - e.x, o.y - e.y, o.z - e.z)
-        W = max(1, round(2 * e.x / CELL)); D = max(1, round(2 * e.y / CELL)); floors = max(1, round(2 * e.z / FH))
-    else:
-        minc = unreal.Vector(0, 0, 0)
-        W = D = floors = 0
-    if cfg['width'] > 0: W = cfg['width']
-    if cfg['depth'] > 0: D = cfg['depth']
-    if cfg['floors'] > 0: floors = cfg['floors']
-    if box_actor is None:
-        W = W or 3; D = D or 3; floors = floors or 4
-
-    def _pool(cfg_key, category):
-        """cfg[cfg_key]의 메시를 로드→규약 검증. 벗어난 메시는 경고 후 제외(무음 드롭 금지),
-        결과가 비면 DEFAULT_CONFIG로 폴백(역시 검증)."""
-        def _validated(paths):
-            out = []
-            for m in _load_list(paths):
-                ok, reason = _validate(category, _measure(m))
-                if ok:
-                    out.append(m)
-                else:
-                    unreal.log_warning(f"[CityGen] 제외: {m.get_name()} — {reason}")
-            return out
-        pool = _validated(cfg.get(cfg_key))
-        if not pool:
-            pool = _validated(DEFAULT_CONFIG[cfg_key])
-        return pool
-
-    facades = _pool('facades', 'facades')
-    corners = _pool('corners', 'corners')
-    doors = _pool('doors', 'doors')
-    rooffloors = _pool('rooffloors', 'rooffloors')
-    cornices = _pool('cornices', 'cornices')
-    roofprops = _pool('roofprops', 'roofprops')
-
-    # 코너/도어/코니스/루프바닥은 건물 하나당 한 번만 뽑아 일관된 외관을 유지(파사드/루프소품은 배치마다 랜덤)
-    corner = rnd.choice(corners) if corners else None
-    door = rnd.choice(doors) if doors else None
-    rooffloor = rnd.choice(rooffloors) if rooffloors else None
-    cornice = rnd.choice(cornices) if cornices else None
-    if not facades: unreal.log_warning("[CityGen] 파사드 풀이 비어있음 — 벽을 배치할 수 없습니다.")
-    if not corners: unreal.log_warning("[CityGen] 코너 풀이 비어있음 — 코너를 배치하지 않습니다.")
-    if not doors: unreal.log_warning("[CityGen] 도어 풀이 비어있음 — 도어를 배치하지 않습니다.")
-    if not rooffloors: unreal.log_warning("[CityGen] 루프바닥 풀이 비어있음 — 루프바닥을 배치하지 않습니다.")
-    if not cornices: unreal.log_warning("[CityGen] 코니스 풀이 비어있음 — 코니스를 배치하지 않습니다.")
-    if cfg['roofprop_count'] > 0 and not roofprops:
+def _load_pools(cfg):
+    """cfg의 6개 카테고리를 로드→규약 검증해 풀 dict로 만든다.
+    규격 밖은 경고 후 제외(무음 드롭 금지), 결과가 비면 DEFAULT_CONFIG로 폴백(역시 검증)."""
+    def _validated(paths, category):
+        out = []
+        for m in _load_list(paths):
+            ok, reason = _validate(category, _measure(m))
+            if ok:
+                out.append(m)
+            else:
+                unreal.log_warning(f"[CityGen] 제외: {m.get_name()} — {reason}")
+        return out
+    pools = {}
+    for c in _CATS:
+        p = _validated(cfg.get(c), c)
+        if not p:
+            p = _validated(DEFAULT_CONFIG[c], c)
+        pools[c] = p
+    for c, label in (('facades', '파사드'), ('corners', '코너'), ('doors', '도어'),
+                     ('rooffloors', '루프바닥'), ('cornices', '코니스')):
+        if not pools[c]:
+            unreal.log_warning(f"[CityGen] {label} 풀이 비어있음 — 배치하지 않습니다.")
+    if cfg['roofprop_count'] > 0 and not pools['roofprops']:
         unreal.log_warning("[CityGen] 루프소품 풀이 비어있음 — 루프소품을 배치하지 않습니다.")
+    return pools
+
+def _build_one(minc, W, D, floors, pools, cfg, seed, label, skip_w=0, skip_e=0):
+    """건물 한 채를 조립하고 부모 액터를 반환.
+
+    seed는 이 채 전용이다(공유 Random을 넘기지 않는다) — 같은 seed면 같은 조합이 그대로 재현되므로
+    편집 도구가 '룩은 그대로 두고 층수만 바꾸기'를 할 수 있다.
+
+    skip_w/skip_e = **그 층수 미만에서는 서/동 면의 벽·코니스·코너를 만들지 않는다.** 도시 블록은
+    건물이 맞붙어 있어 이웃과 닿는 면은 어차피 보이지 않는다 — 안 만들면 그만큼 조각(=드로우콜)이
+    준다(적 200~300 예산이 우선인 프로젝트라 중요). 코너까지 빼는 이유는, 맞붙은 두 채의 코너 기둥이
+    월드에서 **같은 자리**라 남겨두면 그대로 z-fighting이 나기 때문이다.
+    이웃보다 높이 솟은 층은 하늘에 노출되므로 그 위로는 정상적으로 벽을 만든다."""
+    eas = _eas()
+    rnd = random.Random(seed)
+    facades = pools['facades']; roofprops = pools['roofprops']
+    # 코너/도어/코니스/루프바닥은 한 채당 한 번만 뽑아 그 건물 안에서는 일관되게 쓴다
+    corner = rnd.choice(pools['corners']) if pools['corners'] else None
+    door = rnd.choice(pools['doors']) if pools['doors'] else None
+    rooffloor = rnd.choice(pools['rooffloors']) if pools['rooffloors'] else None
+    cornice = rnd.choice(pools['cornices']) if pools['cornices'] else None
 
     parent = eas.spawn_actor_from_class(unreal.Actor, minc)
-    parent.set_actor_label(f"Building_Cfg_{seed}")
+    parent.set_actor_label(label)
     parent.set_folder_path("Buildings")
     parent.root_component.set_editor_property('mobility', MOV)
     fol = f"Buildings/{parent.get_actor_label()}"
@@ -233,12 +223,35 @@ def generate_from_config(box_actor, config=None, seed=None):
         a.attach_to_actor(parent, "", KW, KW, KW, False)
         a.set_folder_path(fol)
 
-    def wall(x, y, z, yaw, ground=False):
+    # ---- 파사드 배치 규칙 ----
+    # ① 지상층 분리: Synty 규약상 이름에 'Base_'가 붙은 벽은 1층용 디자인이다(도어도 전부 Base_ 계열).
+    #    상층에 섞이면 건물이 뒤죽박죽으로 보인다. 한쪽이 비면 나누지 않고 전체 풀을 쓴다.
+    # ② 수직 일관: 실제 빌딩은 같은 자리의 창문이 위로 쭉 이어진다. 칸마다 새로 뽑으면 층마다 제각각이
+    #    되어 건물로 안 보인다. facade_mode로 '무엇을 고정할지'를 고른다.
+    ground_facades = [m for m in facades if '_base_' in m.get_name().lower()]
+    upper_facades = [m for m in facades if m not in ground_facades]
+    if not ground_facades or not upper_facades:
+        ground_facades = upper_facades = facades
+    mode = cfg.get('facade_mode', 'column')
+    _fpick = {}
+
+    def pick_facade(pool, tag, key):
+        """같은 key에는 항상 같은 벽을 돌려준다(mode='random'이면 매번 새로 뽑는다)."""
+        if not pool:
+            return None
+        if mode == 'random':
+            return rnd.choice(pool)
+        ck = (tag, key)
+        if ck not in _fpick:
+            _fpick[ck] = rnd.choice(pool)
+        return _fpick[ck]
+
+    def wall(x, y, z, yaw, floor_i, col, ground=False):
         # door가 없으면 그 칸을 비우지 말고 파사드로 메운다(1층 정면에 구멍이 뚫리는 것보다 낫다)
         if ground and abs(x - di * CELL) < 1 and y == 0 and door:
             P(door, x, y, z, yaw); return
-        if facades:
-            P(rnd.choice(facades), x, y, z, yaw)
+        key = col if mode == 'column' else (floor_i if mode == 'floor' else 0)
+        P(pick_facade(ground_facades if ground else upper_facades, 'g' if ground else 'u', key), x, y, z, yaw)
 
     top_w, top_d, top_ox, top_oy = W, D, 0, 0
     for f in range(floors):
@@ -248,16 +261,26 @@ def generate_from_config(box_actor, config=None, seed=None):
         # (양쪽 대칭으로 들이고 싶으면 sb=2 · ox=oy=CELL로 확장 — 그때도 아래 지붕이 top_* 를 따라간다.)
         w = W - sb; d = D - sb; ox = 0; oy = 0; z = f * FH; g = (f == 0)
         top_w, top_d, top_ox, top_oy = w, d, ox, oy
-        for i in range(w): wall(ox + i * CELL, oy, z, 0, g)
-        for j in range(d): wall(ox + w * CELL, oy + j * CELL, z, 90)
-        for i in range(w): wall(ox + (i + 1) * CELL, oy + d * CELL, z, 180)
-        for j in range(d): wall(ox, oy + (j + 1) * CELL, z, 270)
-        for cx, cy, cyaw in [(0, 0, 0), (w * CELL, 0, 90), (w * CELL, d * CELL, 180), (0, d * CELL, 270)]:
-            P(corner, ox + cx, oy + cy, z, cyaw)
+        # col=(면, 칸번호) — 이 값이 같은 칸은 층이 달라도 같은 벽이 온다(수직 일관).
+        # g(지상층)는 네 면 모두에 넘긴다 — 1층은 건물 전체가 지상층 디자인이어야 한다.
+        # 도어는 wall() 안에서 '정면(y=0) 가운데 칸'으로 한 번 더 좁히므로 옆·뒷면에는 생기지 않는다.
+        # 이웃과 맞닿은 면은 이 층에서 통째로 생략한다(벽·코니스·그 쪽 코너 2개)
+        hide_e = f < skip_e; hide_w = f < skip_w
+        for i in range(w): wall(ox + i * CELL, oy, z, 0, f, ('S', i), g)
+        for i in range(w): wall(ox + (i + 1) * CELL, oy + d * CELL, z, 180, f, ('N', i), g)
+        if not hide_e:
+            for j in range(d): wall(ox + w * CELL, oy + j * CELL, z, 90, f, ('E', j), g)
+        if not hide_w:
+            for j in range(d): wall(ox, oy + (j + 1) * CELL, z, 270, f, ('W', j), g)
+        for cx, cy, cyaw, hidden in [(0, 0, 0, hide_w), (w * CELL, 0, 90, hide_e),
+                                     (w * CELL, d * CELL, 180, hide_e), (0, d * CELL, 270, hide_w)]:
+            if not hidden: P(corner, ox + cx, oy + cy, z, cyaw)
         for i in range(w):
             P(cornice, ox + i * CELL, oy, z, 0); P(cornice, ox + (i + 1) * CELL, oy + d * CELL, z, 180)
-        for j in range(d):
-            P(cornice, ox + w * CELL, oy + j * CELL, z, 90); P(cornice, ox, oy + (j + 1) * CELL, z, 270)
+        if not hide_e:
+            for j in range(d): P(cornice, ox + w * CELL, oy + j * CELL, z, 90)
+        if not hide_w:
+            for j in range(d): P(cornice, ox, oy + (j + 1) * CELL, z, 270)
     zr = floors * FH
     if rooffloor:
         # 타일 간격은 고정값이 아니라 **뽑힌 메시의 실측 크기**여야 한다. 125로 못박으면 250짜리 바닥
@@ -275,11 +298,99 @@ def generate_from_config(box_actor, config=None, seed=None):
         if roofprops:
             P(rnd.choice(roofprops), top_ox + rnd.randint(30, max(31, top_w * CELL - 30)),
               top_oy + rnd.randint(30, max(31, top_d * CELL - 30)), zr, 0)
+    # 크기와 시드를 부모 태그에 남긴다 — 편집 도구(다시 굴리기·층수 조절)가 이 값으로 같은 자리에
+    # 같은 크기로 재생성한다. 자식 조각의 바운드로 역산하면 셋백·지붕 때문에 부정확하다.
+    meta = parent.get_editor_property('tags')
+    meta.append(unreal.Name(f"CityGenSize:{W}x{D}x{floors}"))
+    meta.append(unreal.Name(f"CityGenSeed:{seed}"))
+    parent.set_editor_property('tags', meta)
     unreal.log(f"[CityGen] {parent.get_actor_label()} 생성: {W}x{D}x{floors}, 조각 {len(parent.get_attached_actors())}")
     return parent
 
+def _merge_cfg(config):
+    """DEFAULT_CONFIG 위에 config를 얹는다. 빈 값은 기본값을 유지해 절반만 채운 설정도 동작하게 한다."""
+    cfg = dict(DEFAULT_CONFIG)
+    for k, v in (config or {}).items():
+        if v not in (None, [], ''):
+            cfg[k] = v
+    return cfg
+
+def _read_meta(actor):
+    """건물 부모 태그에 기록해 둔 (W, D, floors, seed)를 읽는다. 건물이 아니면 None."""
+    size = seed = None
+    for t in actor.tags:
+        s = str(t)
+        if s.startswith("CityGenSize:"):
+            try:
+                w, d, f = s.split(':', 1)[1].split('x')
+                size = (int(w), int(d), int(f))
+            except Exception:
+                pass
+        elif s.startswith("CityGenSeed:"):
+            try:
+                seed = int(s.split(':', 1)[1])
+            except Exception:
+                pass
+    return (size[0], size[1], size[2], seed) if size else None
+
+def generate_from_config(box_actor, config=None, seed=None):
+    """설정으로 건물을 만든다. 반환 = 생성한 부모 액터 **리스트**.
+
+    기본은 **박스 하나 = 건물 한 채**다(한 채씩 놓아가며 거리를 만드는 방식).
+    cfg['block']을 켜면 박스 폭(X)을 따라 폭·높이가 제각각인 여러 채로 나눠 거리를 한 번에 만든다.
+    어느 쪽이든 **채마다 부모 액터가 따로** 생기고 조각도 각각 별개 액터라, 생성한 뒤에 건물 단위로
+    옮기거나 지우고 조각 단위로 메시를 바꿀 수 있다.
+    box_actor=None이면 cfg의 width/depth/floors만으로 크기 결정(0이면 3x3x4)."""
+    cfg = _merge_cfg(config)
+    if seed is None:
+        seed = (box_actor.get_name().__hash__() & 0xffff) if box_actor is not None else 0
+    rnd = random.Random(seed)
+
+    if box_actor is not None:
+        o, e = box_actor.get_actor_bounds(False)
+        minc = unreal.Vector(o.x - e.x, o.y - e.y, o.z - e.z)
+        W = max(1, round(2 * e.x / CELL)); D = max(1, round(2 * e.y / CELL)); floors = max(1, round(2 * e.z / FH))
+    else:
+        minc = unreal.Vector(0, 0, 0)
+        W = D = floors = 0
+    if cfg['width'] > 0: W = cfg['width']
+    if cfg['depth'] > 0: D = cfg['depth']
+    if cfg['floors'] > 0: floors = cfg['floors']
+    if box_actor is None:
+        W = W or 3; D = D or 3; floors = floors or 4
+
+    pools = _load_pools(cfg)
+    wmin = max(1, int(cfg['block_min_width'])); wmax = max(wmin, int(cfg['block_max_width']))
+    if not cfg['block'] or W < wmin * 2:
+        return [_build_one(minc, W, D, floors, pools, cfg, seed, f"Building_Cfg_{seed}")]
+
+    # 폭을 따라 채를 자른다. 남은 폭이 최소폭보다 작아지면 그 채가 흡수한다(한 칸짜리 자투리 방지).
+    widths = []; left = W
+    while left > 0:
+        w = min(rnd.randint(wmin, wmax), left)
+        if left - w < wmin:
+            w = left
+        widths.append(w); left -= w
+    fmin = int(cfg['floors_min']) or max(2, floors // 2)
+    fmax = int(cfg['floors_max']) or floors
+    fmin = min(fmin, fmax)
+    heights = [rnd.randint(fmin, fmax) for _ in widths]
+
+    made = []; x = 0
+    for i, w in enumerate(widths):
+        # 이웃과 맞닿아 보이지 않는 층까지만 옆면을 생략(이웃보다 솟은 층은 하늘에 노출되므로 벽을 만든다)
+        skip_w = min(heights[i], heights[i - 1]) if i > 0 else 0
+        skip_e = min(heights[i], heights[i + 1]) if i < len(widths) - 1 else 0
+        made.append(_build_one(minc + unreal.Vector(x * CELL, 0, 0), w, D, heights[i], pools, cfg,
+                               rnd.randrange(1 << 30), f"Building_Cfg_{seed}_{i}", skip_w, skip_e))
+        x += w
+    unreal.log(f"[CityGen] 블록 {len(made)}채 — 폭 {widths}, 층 {heights}, "
+               f"조각 합계 {sum(len(p.get_attached_actors()) for p in made)}")
+    return made
+
 def generate_building(box_actor, preset='resi', seed=None):
-    """(호환용 shim) 프리셋은 폐지됨 — preset 인자는 무시되고 config(DEFAULT_CONFIG)로 생성."""
+    """(호환용 shim) 프리셋은 폐지됨 — preset 인자는 무시되고 config(DEFAULT_CONFIG)로 생성.
+    반환은 generate_from_config와 같은 **리스트**."""
     return generate_from_config(box_actor, None, seed)
 
 def _selected():
@@ -293,8 +404,7 @@ def generate_from_selection(preset='resi'):
         return
     made = []
     for box in sel:
-        p = generate_building(box, preset)
-        made.append(p); eas.destroy_actor(box)
+        made.extend(generate_building(box, preset)); eas.destroy_actor(box)
     eas.set_selected_level_actors(made)
 
 def place_sizing_box():
@@ -368,6 +478,91 @@ def bake_selection():
     for a in _selected():
         if a.get_attached_actors():
             bake_building(a)
+
+# ---------------- 편집 도구 (생성한 뒤 마음에 들 때까지 다듬기) ----------------
+def _regen(actor, pools, cfg, W, D, floors, seed):
+    """건물 액터를 지우고 같은 자리에 다시 만든다(라벨·폴더·미리보기 태그는 그대로 유지)."""
+    eas = _eas()
+    label = actor.get_actor_label(); folder = actor.get_folder_path()
+    loc = actor.get_actor_location()
+    was_preview = PREVIEW_TAG in [str(t) for t in actor.tags]
+    for c in list(actor.get_attached_actors()):
+        eas.destroy_actor(c)
+    eas.destroy_actor(actor)
+    p = _build_one(loc, W, D, floors, pools, cfg, seed, label)
+    if was_preview:
+        t = p.get_editor_property('tags'); t.append(unreal.Name(PREVIEW_TAG))
+        p.set_editor_property('tags', t)
+    p.set_folder_path(folder)
+    return p
+
+def _selected_buildings():
+    """선택된 액터 중 CityGen이 만든 건물 부모만 (액터, W, D, floors, seed)로 돌려준다."""
+    out = []
+    for a in _selected():
+        meta = _read_meta(a)
+        if meta:
+            out.append((a,) + meta)
+    return out
+
+def _editing_context():
+    """편집 도구가 공통으로 쓰는 (cfg, pools)."""
+    cfg = _merge_cfg(load_config_from_dataasset())
+    return cfg, _load_pools(cfg)
+
+def reroll_selected():
+    """선택한 건물을 같은 자리·같은 크기로 다시 굴린다(창문·코너·지붕 조합만 새로 뽑는다).
+    마음에 드는 조합이 나올 때까지 반복해서 누르면 된다."""
+    tgt = _selected_buildings()
+    if not tgt:
+        unreal.log_warning("[CityGen] 다시 굴릴 건물을 선택하세요(조각이 아니라 건물 액터).")
+        return
+    cfg, pools = _editing_context()
+    made = [_regen(a, pools, cfg, W, D, fl, random.randrange(1 << 30)) for a, W, D, fl, _ in tgt]
+    _eas().set_selected_level_actors(made)
+    unreal.log(f"[CityGen] {len(made)}채 다시 굴림")
+
+def change_floors(delta):
+    """선택한 건물의 층수를 delta만큼 바꾼다.
+    **시드를 유지**하므로 창문 조합은 그대로고 높이만 달라진다(층수만 손보고 싶을 때)."""
+    tgt = _selected_buildings()
+    if not tgt:
+        unreal.log_warning("[CityGen] 층수를 바꿀 건물을 선택하세요.")
+        return
+    cfg, pools = _editing_context()
+    made = []
+    for a, W, D, floors, seed in tgt:
+        lbl = a.get_actor_label(); nf = max(1, floors + delta)
+        made.append(_regen(a, pools, cfg, W, D, nf, seed if seed is not None else random.randrange(1 << 30)))
+        unreal.log(f"[CityGen] {lbl}: {floors}층 → {nf}층")
+    _eas().set_selected_level_actors(made)
+
+def cycle_piece_mesh(step=1):
+    """선택한 조각의 메시를 같은 카테고리의 다음 후보로 바꾼다(창문 A → B → C).
+    카테고리는 지금 붙어 있는 메시 이름으로 판정하고, 후보는 Config에 남겨 둔 목록을 쓴다
+    — 그래서 Config를 프루닝해 두면 '내가 남긴 것들 안에서만' 돌아간다."""
+    cfg, pools = _editing_context()
+    n = 0
+    for a in _selected():
+        if not isinstance(a, unreal.StaticMeshActor):
+            continue
+        smc = a.static_mesh_component; cur = smc.static_mesh
+        if not cur:
+            continue
+        cat = _classify(cur.get_name())
+        pool = pools.get(cat) or []
+        if len(pool) < 2:
+            unreal.log_warning(f"[CityGen] {cur.get_name()}: 바꿀 후보가 없습니다"
+                               f"(카테고리 {cat}) — Config에 후보를 2개 이상 남겨두세요.")
+            continue
+        names = [m.get_path_name() for m in pool]
+        try:
+            i = names.index(cur.get_path_name())
+        except ValueError:
+            i = -1  # 풀 밖의 메시였다면 첫 번째부터
+        smc.set_static_mesh(pool[(i + step) % len(pool)])
+        n += 1
+    unreal.log(f"[CityGen] 조각 {n}개 메시 교체")
 
 # ---------------- DataAsset 브릿지 + 미리보기 라이프사이클 ----------------
 def _snake(s):
@@ -555,15 +750,16 @@ def preview_from_config():
             if len(boxes) > 1:
                 unreal.log_warning(
                     f"[CityGen] 사이징 박스 {len(boxes)}개 중 선택된 것이 없어 '{box.get_actor_label()}'을 사용합니다.")
-    parent = generate_from_config(box, cfg)
+    parents = generate_from_config(box, cfg)
     if box is not None:
         _set_sizing_boxes_hidden(True, [box])  # 회색 큐브가 미리보기를 가리지 않게 숨김(Clear/Confirm 시 복원)
-    t = parent.get_editor_property('tags')
-    t.append(unreal.Name(PREVIEW_TAG))
-    parent.set_editor_property('tags', t)
-    parent.set_folder_path(PREVIEW_FOLDER)
-    parent.set_actor_label(parent.get_actor_label() + "_Preview")
-    _eas().set_selected_level_actors([parent])
+    for parent in parents:
+        t = parent.get_editor_property('tags')
+        t.append(unreal.Name(PREVIEW_TAG))
+        parent.set_editor_property('tags', t)
+        parent.set_folder_path(PREVIEW_FOLDER)
+        parent.set_actor_label(parent.get_actor_label() + "_Preview")
+    _eas().set_selected_level_actors(parents)
     unreal.log("[CityGen] Preview 생성 — Confirm/Bake로 확정")
 
 def confirm_preview():
@@ -607,5 +803,9 @@ def register_menu():
     entry("ConfirmPreview", "6. Confirm Preview", "import fpsr_citygen; fpsr_citygen.confirm_preview()")
     entry("ClearPreview", "7. Clear Preview", "import fpsr_citygen; fpsr_citygen.clear_preview()")
     entry("Bake", "8. Bake Selected (merge ISM)", "import fpsr_citygen; fpsr_citygen.bake_selection()")
+    entry("Reroll", "9. 건물 다시 굴리기 (선택 건물)", "import fpsr_citygen; fpsr_citygen.reroll_selected()")
+    entry("FloorUp", "10. 층 +1 (선택 건물)", "import fpsr_citygen; fpsr_citygen.change_floors(1)")
+    entry("FloorDown", "11. 층 -1 (선택 건물)", "import fpsr_citygen; fpsr_citygen.change_floors(-1)")
+    entry("CyclePiece", "12. 조각 메시 바꾸기 (선택 조각)", "import fpsr_citygen; fpsr_citygen.cycle_piece_mesh(1)")
     menus.refresh_all_widgets()
     unreal.log("[CityGen] 메뉴 등록: Tools > FPSR CityGen")
