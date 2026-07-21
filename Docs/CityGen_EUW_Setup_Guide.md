@@ -66,12 +66,19 @@
 
 ## 3. 버튼 1개 만들기
 
-1. 팔레트 검색창에 **`Button`** 입력 → 나온 **`Button`** 을 끌어서
+1. 팔레트 검색창에 **`Button`** 입력 → **`COMMON` 항목 아래의 `Editor Utility Button`** 을 끌어서
    계층 구조의 **`Vertical Box` 위에 떨어뜨립니다.**
-2. 팔레트 검색창에 **`Text`** 입력 → 나온 **`Text`** 를 끌어서
-   방금 만든 **`Button` 위에 떨어뜨립니다.** (버튼 안에 글자가 들어갑니다)
-3. 계층 구조에서 방금 넣은 **`Text`** 를 클릭 → 오른쪽 **디테일** 패널에서
+2. 팔레트 검색창에 **`Text`** 입력 → 나온 **`Text Block`** 을 끌어서
+   방금 만든 **버튼 위에 떨어뜨립니다.** (버튼 안에 글자가 들어갑니다)
+3. 계층 구조에서 방금 넣은 **`Text Block`** 을 클릭 → 오른쪽 **디테일** 패널에서
    **`Text`** 칸에 **`미리보기`** 라고 입력합니다.
+
+> ⚠️ **"그냥 `Button`은 목록에 없는데요?"** — 맞습니다. **Editor Utility Widget을 편집할 때는
+> 팔레트가 에디터 전용 버전인 `Editor Utility Button`을 대신 보여줍니다.**
+> 이건 일반 `Button`을 **그대로 상속한 것**이라(`EditorUtilityButton → Button`) 기능이 100% 같고,
+> `On Clicked`도 똑같이 있습니다. 그냥 쓰시면 됩니다.
+> 참고로 **버튼만** 이렇습니다 — 글자·세로상자·설정패널은 에디터용 대체본이 아예 없어서
+> `Text Block` / `Vertical Box` / `Details View` 원래 이름 그대로 나옵니다.
 
 ✅ 가운데 미리보기 화면에 "미리보기"라고 쓰인 버튼이 보이면 성공입니다.
 
@@ -209,6 +216,8 @@ import fpsr_citygen; fpsr_citygen.preview_from_config()
 | 명령은 도는데 건물이 안 생김 | 출력 로그에서 `[CityGen]` 로 시작하는 줄을 읽어보기 (풀이 비었다는 경고가 있을 수 있음) |
 | `Execute Python Command` 검색 안 됨 | 검색창 옆 **`상황에 맞는 항목만`(Context Sensitive)** 체크 해제 |
 | 창은 뜨는데 버튼이 안 보임 | `Vertical Box` **안에** 버튼이 들어갔는지 계층 구조에서 확인 |
+| 팔레트에 그냥 `Button`이 없음 | 정상입니다. **`Editor Utility Button`** 을 쓰세요(일반 Button을 상속한 같은 물건) |
+| 팔레트에 그냥 `Text`가 없음 | **`Text Block`** 이 맞는 이름입니다 |
 | 바꿨는데 반영이 안 됨 | **컴파일**을 눌렀는지 확인 (저장만으로는 반영 안 됩니다) |
 | 파이썬 코드를 고친 뒤 반영 안 됨 | 아래 "파이썬을 고쳤을 때" 참고 |
 
@@ -228,7 +237,7 @@ import importlib, fpsr_citygen; importlib.reload(fpsr_citygen); fpsr_citygen.reg
 ```
 1. EUW_CityGen 더블클릭
 2. 디자이너 탭 → 팔레트에서 Vertical Box 를 계층 구조 맨 위로 끌기
-3. Button 을 Vertical Box 안으로, Text 를 Button 안으로 끌기
+3. Editor Utility Button 을 Vertical Box 안으로, Text Block 을 그 버튼 안으로 끌기
 4. 버튼 선택 → 디테일 맨 아래 On Clicked 의 [+] 클릭
 5. 그래프에서 화살표 끌어 Execute Python Command 추가
 6. Python Command 칸에 명령문 붙여넣기
