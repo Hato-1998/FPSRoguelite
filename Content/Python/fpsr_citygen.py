@@ -17,7 +17,7 @@
 Kit(DA_CityGenKit)=자동수집한 원본 풀, Config(DA_CityGenConfig)=사용자가 프루닝한 실사용 풀
 — 둘 다 같은 6종 배열(Facades/Corners/Doors/RoofFloors/CorniceTrims/RoofProps)을 갖는다.
 """
-import unreal, random, re
+import unreal, random, re, math
 
 BLD  = "/Game/PolygonCyberCity/Meshes/Buildings/"
 BASE = "/Game/PolygonCyberCity/Meshes/Base/"
@@ -61,7 +61,8 @@ DEFAULT_CONFIG = {
         PROP + "SM_Prop_Antenna_02.SM_Prop_Antenna_02",
         PROP + "SM_Prop_Antenna_04.SM_Prop_Antenna_04",
     ],
-    'setback': True,
+    # 셋백(위층을 좁힘) 기본 OFF — 실제 빌딩은 직사각형이 기본이고, 켜면 항아리 모양이 된다(사용자 판정 2026-07-21).
+    'setback': False,
     'roofprop_count': 2,
     'width': 0, 'depth': 0, 'floors': 0,  # 0 = 사이징 박스 바운드에서 유도
 }
@@ -84,7 +85,10 @@ def _measure(mesh):
 def _classify(name):
     """에셋 이름(대소문자 무시)으로 카테고리를 추정. 규약 밖 잡부품은 None."""
     n = name.lower()
-    for excl in ('_glass', 'beams', 'shutter', 'blockout'):
+    # _arm_/_dish_/_wing_ = Satellite_01의 분해 부품. 단독 배치하면 옥상에 날개만 떠 있게 된다
+    # (실측 2026-07-21: SM_Prop_Satellite_02_Wing_06이 실제로 미리보기 옥상에 홀로 배치됨).
+    # _45_ = 45도로 잘린 코너 전용 조각. 평평한 타일이 아니라 지붕 격자에 깔면 사선으로 어긋난다.
+    for excl in ('_glass', 'beams', 'shutter', 'blockout', '_arm_', '_dish_', '_wing_', '_45_'):
         if excl in n:
             return None
     if 'wall_window' in n or 'wall_shop' in n:
@@ -104,11 +108,13 @@ def _classify(name):
 def _validate(cat, m):
     """카테고리별 모듈 규약 검증. (ok, 실패사유 한글문자열) 반환 — 성공 시 사유는 빈 문자열.
 
-    ⚠️ 카테고리마다 기준이 다르다. 파사드/도어는 **벽 한 칸(250)을 통째로 차지**하므로 폭이 250 배수여야
-    하지만, 코너·코니스는 모서리/가장자리에 붙는 **얇은 장식 조각**이라 폭이 250이 아니다
-    (여기에 250 배수 규칙을 걸면 지금 잘 쓰고 있는 Corner_Trim_01·Ceiling_Trim_01조차 전부 탈락한다).
-    → 코너/코니스는 "한 칸 안에 들어가고 바닥에 앉는가"만 본다. 첫 Collect 로그의 실측값을 보고
-    필요하면 기준을 조이는 것이 정상 절차(실측 전 과한 제약 금지)."""
+    ⚠️ 카테고리마다 기준이 다르다(2026-07-21 첫 Collect 실측으로 확정):
+      - 파사드/도어 = 벽 한 칸(250)을 통째로 차지 → 폭 250 + 피벗 밑변왼쪽.
+      - 코니스 = 벽 한 칸에 붙는 **가로 띠 장식**이라 X 규약은 파사드와 같고(실측: 전부 폭 250·minX 0)
+        **Z 오프셋만 자유**다. Ceiling_Trim_01의 minZ=261.2는 '층 천장에 붙는다'는 뜻이라 정상이므로,
+        여기에 바닥 조건을 걸면 진짜 코니스가 오히려 탈락한다(실측 전 기준의 오류였음).
+      - 코너 = 모서리에 세우는 **중앙 피벗 기둥**(실측: minX 음수) → 한 칸 안 + 바닥에서 시작 + 층높이(300).
+        Pillar_Half_*(높이 150 = 반 층)는 층마다 기둥이 절반만 차서 규격 밖이다."""
     if cat == 'roofprops':
         return True, ""  # 장식이라 규격 무관
     if cat == 'rooffloors':
@@ -118,11 +124,19 @@ def _validate(cat, m):
         if not (_mult125(m['size_x']) and _mult125(m['size_y'])):
             return False, f"바닥 125 배수 아님(W={m['size_x']:.1f}, D={m['size_y']:.1f})"
         return True, ""
-    if cat in ('corners', 'cornices'):
+    if cat == 'cornices':
+        if abs(m['size_x'] - CELL) > TOL:
+            return False, f"폭이 한 칸(250)이 아님(W={m['size_x']:.1f})"
+        if abs(m['min_x']) > TOL:
+            return False, f"피벗 X가 왼쪽 끝이 아님(minX={m['min_x']:.1f})"
+        return True, ""
+    if cat == 'corners':
         if m['size_x'] > CELL + TOL or m['size_y'] > CELL + TOL:
             return False, f"한 칸(250)을 넘음(W={m['size_x']:.1f}, D={m['size_y']:.1f})"
         if abs(m['min_z']) > TOL:
             return False, f"바닥에 앉지 않음(minZ={m['min_z']:.1f})"
+        if abs(m['size_z'] - FH) > TOL:
+            return False, f"높이가 층높이(300) 아님(H={m['size_z']:.1f}) — 층마다 빈틈이 생김"
         return True, ""
     # facades / doors — 벽 한 칸을 통째로 차지하므로 폭·피벗 모두 엄격
     cells = round(m['size_x'] / CELL)
@@ -226,9 +240,14 @@ def generate_from_config(box_actor, config=None, seed=None):
         if facades:
             P(rnd.choice(facades), x, y, z, yaw)
 
+    top_w, top_d, top_ox, top_oy = W, D, 0, 0
     for f in range(floors):
         sb = 1 if (cfg['setback'] and f >= floors - 2 and W > 2 and D > 2) else 0
-        w = W - sb; d = D - sb; ox = sb * CELL // 2; oy = sb * CELL // 2; z = f * FH; g = (f == 0)
+        # 들여쓰기는 0 — 종전엔 반 칸(125)을 밀어 중앙정렬했는데, 그러면 아래층 벽 격자(0/250/500)와
+        # 어긋나 층 사이가 어색해진다. 한 칸 단위로 두 면만 들이는 편이 모듈 격자와 맞다.
+        # (양쪽 대칭으로 들이고 싶으면 sb=2 · ox=oy=CELL로 확장 — 그때도 아래 지붕이 top_* 를 따라간다.)
+        w = W - sb; d = D - sb; ox = 0; oy = 0; z = f * FH; g = (f == 0)
+        top_w, top_d, top_ox, top_oy = w, d, ox, oy
         for i in range(w): wall(ox + i * CELL, oy, z, 0, g)
         for j in range(d): wall(ox + w * CELL, oy + j * CELL, z, 90)
         for i in range(w): wall(ox + (i + 1) * CELL, oy + d * CELL, z, 180)
@@ -240,11 +259,22 @@ def generate_from_config(box_actor, config=None, seed=None):
         for j in range(d):
             P(cornice, ox + w * CELL, oy + j * CELL, z, 90); P(cornice, ox, oy + (j + 1) * CELL, z, 270)
     zr = floors * FH
-    for ix in range(W * 2):
-        for iy in range(D * 2):
-            P(rooffloor, ix * 125, iy * 125, zr, 0)
+    if rooffloor:
+        # 타일 간격은 고정값이 아니라 **뽑힌 메시의 실측 크기**여야 한다. 125로 못박으면 250짜리 바닥
+        # (Base_Floor/Base_45_Floor 등)이 X·Y 각 2배씩, 즉 4겹으로 겹쳐 깔리고 건물 밖으로도 삐져나온다
+        # (실측 2026-07-21: 250 타일을 125 간격 6x6=36장 → 실제 필요 9장, 커버 875 vs 건물 750).
+        # 범위는 W/D가 아니라 **최상층 크기**(top_*) 기준 — 셋백으로 좁아진 층 위에 원래 폭으로 깔면
+        # 사방으로 튀어나온 처마가 된다.
+        rm = _measure(rooffloor)
+        sx = max(1, int(round(rm['size_x']))); sy = max(1, int(round(rm['size_y'])))
+        for ix in range(max(1, math.ceil(top_w * CELL / sx))):
+            for iy in range(max(1, math.ceil(top_d * CELL / sy))):
+                P(rooffloor, top_ox + ix * sx, top_oy + iy * sy, zr, 0)
     for _ in range(cfg['roofprop_count']):
-        if roofprops: P(rnd.choice(roofprops), rnd.randint(30, W * 250 - 30), rnd.randint(30, D * 250 - 30), zr, 0)
+        # 지붕 타일과 같은 이유로 범위는 top_* 기준 — W/D로 뿌리면 좁아진 옥상 바깥 허공에 소품이 뜬다.
+        if roofprops:
+            P(rnd.choice(roofprops), top_ox + rnd.randint(30, max(31, top_w * CELL - 30)),
+              top_oy + rnd.randint(30, max(31, top_d * CELL - 30)), zr, 0)
     unreal.log(f"[CityGen] {parent.get_actor_label()} 생성: {W}x{D}x{floors}, 조각 {len(parent.get_attached_actors())}")
     return parent
 
@@ -278,6 +308,30 @@ def place_sizing_box():
     box.set_folder_path("Buildings/_SizingBoxes")
     eas.set_selected_level_actors([box])
     unreal.log("[CityGen] SizingBox 배치됨 — 크기 조절 후 Generate.")
+
+def _find_sizing_boxes():
+    """레벨에 있는 사이징 박스(라벨이 SizingBox로 시작)를 모두 찾는다."""
+    out = []
+    for a in _eas().get_all_level_actors():
+        if not a:
+            continue
+        try:
+            if a.get_actor_label().startswith("SizingBox"):
+                out.append(a)
+        except Exception:
+            pass
+    return out
+
+def _set_sizing_boxes_hidden(hidden, boxes=None):
+    """사이징 박스를 뷰포트에서 숨기거나(True) 되돌린다(False). boxes=None이면 레벨 전체 대상.
+
+    미리보기 건물은 박스 안쪽에 생성되므로, 숨기지 않으면 박스의 기본 회색 큐브가 건물을 통째로 가린다
+    (2026-07-21 실측: 750x750x2500 박스가 3x3x8 건물을 완전히 감싸 '회색 덩어리'로 보임).
+    삭제가 아니라 숨김이라 Clear/Confirm하면 박스가 그대로 돌아와 크기를 다시 조절할 수 있다."""
+    tgt = _find_sizing_boxes() if boxes is None else boxes
+    for a in tgt:
+        a.set_is_temporarily_hidden_in_editor(hidden)
+    return len(tgt)
 
 def bake_building(parent):
     """건물 부모의 자식 조각들을 메시별 병합 ISM(Static)으로 굳혀 드로우콜을 낮춘다."""
@@ -474,6 +528,7 @@ def _clear_actors_by_tag(tag):
 
 def clear_preview():
     n = _clear_actors_by_tag(PREVIEW_TAG)
+    _set_sizing_boxes_hidden(False)  # 미리보기가 없어졌으니 박스를 되돌려 크기를 다시 조절할 수 있게 한다
     unreal.log(f"[CityGen] Preview {n}개 제거")
 
 def preview_from_config():
@@ -491,7 +546,18 @@ def preview_from_config():
         for a in sel:
             if isinstance(a, unreal.StaticMeshActor):
                 box = a; break
+    if box is None:  # 3순위: 선택이 아예 없으면 레벨의 사이징 박스를 자동으로 찾는다.
+        # 미리보기 중에는 박스를 숨기고 부모를 대신 선택하므로 박스 선택이 풀린다 → 이 폴백이 없으면
+        # Preview를 두 번째 돌릴 때 조용히 기본 크기(3x3x4)로 떨어진다.
+        boxes = _find_sizing_boxes()
+        if boxes:
+            box = boxes[0]
+            if len(boxes) > 1:
+                unreal.log_warning(
+                    f"[CityGen] 사이징 박스 {len(boxes)}개 중 선택된 것이 없어 '{box.get_actor_label()}'을 사용합니다.")
     parent = generate_from_config(box, cfg)
+    if box is not None:
+        _set_sizing_boxes_hidden(True, [box])  # 회색 큐브가 미리보기를 가리지 않게 숨김(Clear/Confirm 시 복원)
     t = parent.get_editor_property('tags')
     t.append(unreal.Name(PREVIEW_TAG))
     parent.set_editor_property('tags', t)
@@ -513,6 +579,7 @@ def confirm_preview():
         if lbl.endswith("_Preview"):
             a.set_actor_label(lbl[:-len("_Preview")])
         n += 1
+    _set_sizing_boxes_hidden(False)  # 확정했으니 박스를 되돌린다(다음 건물에 재사용)
     unreal.log(f"[CityGen] Preview {n}개 확정(Confirm)")
 
 # ---------------- 메뉴 등록 ----------------
