@@ -103,6 +103,9 @@
 💡 **손으로 할 때 요령**: 버튼 1개 + `Execute Python Command` 노드 1개만 제대로 만들면, Designer의 버튼도
 Graph의 노드 묶음도 **Ctrl+C/V로 복제**된다. 복제 후 Python Command 문자열만 아래 표대로 바꾸면 된다.
 
+📘 **초보자용 상세 따라하기 = [`Docs/CityGen_EUW_Setup_Guide.md`](CityGen_EUW_Setup_Guide.md)**
+(화면 구조 설명·복사붙여넣기 요령·문제 해결표 포함. 아래는 요약)
+
 **배선 순서**
 1. `EUW_CityGen` 더블클릭 → Designer에서 `Vertical Box` 안에 `Button` + `Text` 배치(원하는 만큼)
 2. 각 버튼 선택 → Details 하단 `On Clicked` **+** → Graph에 이벤트 생성
