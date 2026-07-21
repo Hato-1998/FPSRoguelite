@@ -6,7 +6,17 @@
 
 **최종 갱신: 2026-07-21**
 
-> 🔀 **2026-07-21 핸드오프 (U22a-A 건물 생성 툴 = "에셋 선택 + 미리보기", Phase 1 ✅완료)**:
+> 🔀 **2026-07-21 핸드오프 ② (U22a-A 건물 툴 = 실행 검증까지 ✅완료 · EUW 패널 가동 · Bake 리스크 해소)**:
+> - **커밋**: `be36b78d`(결함 8건) → `779c8bf5`(창문 규칙+편집도구) → `7a6ffe44`(EUW 셸+문서) → `c47c6852`(EUW 자동배선 불가 확정) → `6f7abb15`(초보자 가이드) → `06bcb584`(팔레트 명칭 정정) → `d3a68609`(EUW 배선, 사용자 저작). **상세 = `Docs/U22a-A_BuildingTool_ResumePrompt.md`(3차 갱신)**.
+> - ✅ **첫 실행 결함 8건 수정**: 회색 덩어리=SizingBox가 건물을 감쌈(→Preview 중 숨김) · 항아리 모양=셋백이 반 칸(125) 들여 격자 어긋남(→**셋백 기본 OFF**) · 지붕 타일 간격 125 고정이라 250 타일이 **4겹 중첩·875 돌출**(→메시 실측 크기로 산출, 36→9장) · 코니스 검증이 진짜 코니스를 탈락시킴(`Ceiling_Trim`의 `minZ=261`은 "층 천장"이라 정상 → **코니스를 코너와 분리**, 3→8종) · 반층 기둥(150) 채택(→높이 300 조건, 13→8종) · 위성 분해 부품/45도 코너 조각 혼입(→`_arm_`·`_dish_`·`_wing_`·`_45_` 제외).
+> - ✅ **창문 배치 규칙**(사용자 판정 "층마다 뒤죽박죽이라 건물로 안 보임"): **수직 일관**(칸 위치를 키로 고정 → 같은 자리는 위로 쭉 같은 창문, `facade_mode`=column/floor/building/random) + **지상층 분리**(`Base_` 붙은 벽=1층용, 도어도 전부 `Base_` 계열). 부수 발견: `ground` 플래그를 **정면에만** 넘겨 1층인데 옆·뒷면은 상층 벽을 쓰고 있었음 → 네 면 전달.
+> - ✅ **편집 도구 3종**(사용자 결정: **한 채씩 놓아가며 거리 조성** → 다듬기가 핵심): 생성 시 부모 태그에 `CityGenSize:WxDxF`·`CityGenSeed:N` 기록 → `reroll_selected()`(같은 자리·크기, 조합만 새로) / `change_floors(±1)`(**시드 유지**라 창문 그대로, 높이만) / `cycle_piece_mesh(±1)`(조각을 같은 카테고리 다음 후보로). `_build_one`이 공유 Random이 아니라 **자기 시드**를 받게 리팩터한 것이 토대.
+> - ✅ **EUW 패널 가동**: `/Game/Tools/CityGen/EUW_CityGen` — 셸은 AI 생성, **버튼 배치·배선은 사용자가 수작업**(정상 동작 확인). 🔴 **Python 자동 배선은 불가 확정**(재시도 금지): `load_object(bp,"WidgetTree")`로 트리와 위젯 객체는 만들 수 있으나 **`WidgetTree.RootWidget`이 읽기/쓰기 모두 protected**·`SetRootWidget` UFUNCTION 부재라 루트 지정 불가 + 노드 생성 API도 없음. 초보자 가이드 = **`Docs/CityGen_EUW_Setup_Guide.md`**(EUW 편집 중엔 팔레트가 `Editor Utility Button`을 대신 보여줌 — 일반 `Button` 상속이라 동일).
+> - ✅ **Bake(ISM) 콜리전 = 최대 리스크 해소**(실측): 플로우필드와 **동일 쿼리**(`FPSRFlowFieldComputer.cpp:1006` `ECC_WorldStatic` ObjectType)로 벽 관통 트레이스를 Bake 전/후 같은 좌표에 3발 → **전후 모두 블로킹 O, 충돌 지점 y=-11 동일**. ISM 14개 전부 `BlockAll`·`ECR_BLOCK`·`QUERY_AND_PHYSICS`·`ECC_WORLD_STATIC`, **인스턴스 합계 66 = 조각 66(누락 0)**. 드로우콜 66→14(4.7배, ISM 수는 **메시 종류 수**에 비례해 건물이 클수록 이득). 남은 것 = PIE 최종 확인.
+> - **사용자 결정 3건**: ①거리 조성 = **한 채씩**(블록 일괄 생성 코드는 넣되 **기본 OFF**, 켜면 맞닿는 면 벽/코니스/코너를 층 단위 생략) ②**간판은 사용자가 직접 배치**(자동배치 코드 넣었다가 되돌림. 짝 규약만 문서에 남김: `sign`이 `backing` 안쪽 12.5 묻힘) ③뷰포트가 밝은 회색인 건 조명이 아니라 **Unlit 모드**.
+> - **다음**: 사용자가 툴로 거리 조성 → 게임플레이 레이어 이식(룸·미션·문) → D(런 완주 → 쿡 → main 머지). ⚠️ `Map_CyberCity`는 여전히 **게임플레이 레이어 0**(미션스폰 0 → PIE 런이 보스까지 안 감).
+
+> 🔀 **2026-07-21 핸드오프 ① (U22a-A 건물 생성 툴 = "에셋 선택 + 미리보기", Phase 1 ✅완료)**:
 > - **방향(사용자 결정 2026-07-21)**: 프리셋 폐기 → **사용자가 종류별 에셋을 직접 고르는 툴**(창문벽 여러개·코너기둥·문·바닥/지붕·코니스·옥상프롭). 설정 그릇 = **C++ DataAsset**(사용자 결정: "C++ 작업·재빌드 코스트를 크게 여기지 말고 지금 단계에 가장 적합한 걸").
 > - ✅ **Phase 1 완료·커밋 `40679a86`**: ① C++ **`UFPSRCityGenConfig`**(`UPrimaryDataAsset`, `Source/FPSRoguelite/{Public,Private}/CityGen/`) — `Facades[]`/`Corner`/`Door`/`RoofFloor`/`CorniceTrim`/`RoofProps[]`/`RoofPropCount`/`Width`/`Depth`/`Floors`/`bSetback`, **각 필드가 곧 내장 에셋 피커(썸네일)** = "보여주고 고르는" UI를 공짜로 획득. ② `fpsr_citygen.py` **config 기반 리팩터**(`generate_from_config` + `load_config_from_dataasset`[이름 정규화 견고화] + `preview`/`confirm`/`clear` + 메뉴 6종), `DEFAULT_CONFIG` 폴백이라 **빈 설정으로도 미리보기 동작**. **빌드 `Result: Succeeded`**(FPSRogueliteEditor Win64 Development).
 > - 🔴 **왜 C++로 갔나(재조사 방지)**: `UDataAsset`/`UPrimaryDataAsset`은 **Blueprintable이 아니어서** BP로 DataAsset 하위클래스를 만들 수 없다 — VibeUE `create_blueprint`가 DataAsset 부모에서 계속 행/실패한 진짜 원인. 프로젝트에 blueprintable DataAsset 베이스도 없음 → **C++이 유일한 정공법**.

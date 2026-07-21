@@ -132,10 +132,27 @@ Graph의 노드 묶음도 **Ctrl+C/V로 복제**된다. 복제 후 Python Comman
 ([[vibeue-render-target-gpu-hazard]]). 손으로 하는 건 안전하지만, 다음 세션의 AI가 이 위젯을
 자동 편집하려 들지 않도록 주의.
 
-### ② Confirm / Bake 검증 (Phase 1 스모크의 마지막)
-`6. Confirm Preview` → `8. Bake Selected` (로그 `ISM N개`) 확인.
-🔴 **최대 리스크 = Bake 후 ISM 콜리전**: 적 플로우필드가 `ECC_WorldStatic`을 읽으므로 ISM에 콜리전이
-살아있지 않으면 적이 건물을 통과한다. Bake 후 반드시 PIE로 실증할 것.
+### ② ✅ Confirm / Bake 검증 — **완료 (2026-07-21 실측)**
+"최대 리스크"였던 **Bake 후 ISM 콜리전**은 **문제 없음**으로 확정됐다.
+
+**검증 방법**: 플로우필드가 실제로 쓰는 것과 **동일한 쿼리**로 재봤다
+(`FPSRFlowFieldComputer.cpp:1006` = `AddObjectTypesToQuery(ECC_WorldStatic)` + `LineTraceSingleByObjectType`).
+테스트 건물(2×2×3, 조각 66)의 벽을 관통하는 트레이스를 **Bake 전/후 같은 좌표로** 3발씩.
+
+| | z=100 | z=400 | z=700 | 충돌 지점 |
+|---|---|---|---|---|
+| Bake 전 | 블로킹 O | O | O | y=-11 |
+| **Bake 후** | **O** | **O** | **O** | **y=-11 (동일)** |
+
+**ISM 설정**(14개 전부 동일): 프로파일 `BlockAll` · WorldStatic 응답 `ECR_BLOCK` ·
+콜리전 `QUERY_AND_PHYSICS` · 오브젝트타입 `ECC_WORLD_STATIC` → ObjectType 쿼리·채널 트레이스 양쪽에 잡힌다.
+**인스턴스 합계 66 = 원래 조각 66개**(누락 0).
+
+**드로우콜**: 조각 66개 → **ISM 14개**(4.7배 감소). ISM 수는 **메시 종류 수**에 비례하므로
+건물이 클수록 이득이 커진다(3×3×8이면 235조각 → 종류 수는 비슷 = 약 16배).
+→ 💡 Config에서 창문 종류를 줄이면 ISM이 더 준다(룩 다양성 ↔ 드로우콜 트레이드오프).
+
+⚠️ 남은 확인: 위는 **에디터 월드 트레이스 실증**이다. 실제 적 이동은 §4-1 PIE에서 최종 확인.
 
 ### ③ 간판·벽면 디테일 = **사용자가 직접 배치**(사용자 결정 2026-07-21)
 자동 배치는 넣지 않기로 했다. 팩 보유분(참고): `Billboard_Clean/Damaged_Sign_01~03`(1313×438) ·
