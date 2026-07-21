@@ -6,22 +6,50 @@
 #include "Misc/DataValidation.h"
 #include "Engine/StaticMesh.h"
 
+namespace
+{
+	int32 CountValid(const TArray<TObjectPtr<UStaticMesh>>& Meshes)
+	{
+		int32 Count = 0;
+		for (const TObjectPtr<UStaticMesh>& Mesh : Meshes)
+		{
+			if (Mesh)
+			{
+				++Count;
+			}
+		}
+		return Count;
+	}
+}
+
 EDataValidationResult UFPSRCityGenConfig::IsDataValid(FDataValidationContext& Context) const
 {
 	EDataValidationResult Result = Super::IsDataValid(Context);
-	// 파사드가 하나도 없으면 벽 없는 건물이 나오므로 최소 하나는 경고(툴은 DEFAULT_CONFIG로 폴백하나, 의도 확인용).
-	int32 ValidFacades = 0;
-	for (const TObjectPtr<UStaticMesh>& Mesh : Facades)
+
+	// 비어 있어도 툴이 기본 메시로 폴백하므로 에러가 아니라 경고 — "왜 내가 고른 게 안 나오지"를 막는 안내용.
+	const TPair<const TCHAR*, int32> Categories[] = {
+		{ TEXT("Facades"),      CountValid(Facades)      },
+		{ TEXT("Corners"),      CountValid(Corners)      },
+		{ TEXT("Doors"),        CountValid(Doors)        },
+		{ TEXT("RoofFloors"),   CountValid(RoofFloors)   },
+		{ TEXT("CorniceTrims"), CountValid(CorniceTrims) },
+	};
+	for (const TPair<const TCHAR*, int32>& Category : Categories)
 	{
-		if (Mesh)
+		if (Category.Value == 0)
 		{
-			++ValidFacades;
+			Context.AddWarning(FText::FromString(FString::Printf(
+				TEXT("CityGenConfig: %s is empty - the tool will fall back to its built-in default mesh."),
+				Category.Key)));
 		}
 	}
-	if (ValidFacades == 0)
+
+	if (RoofPropCount > 0 && CountValid(RoofProps) == 0)
 	{
-		Context.AddWarning(FText::FromString(TEXT("CityGenConfig: Facades is empty - the tool will fall back to default walls.")));
+		Context.AddWarning(FText::FromString(TEXT(
+			"CityGenConfig: RoofPropCount > 0 but RoofProps is empty - default antennas will be used.")));
 	}
+
 	return Result;
 }
 #endif
