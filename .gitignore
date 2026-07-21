@@ -176,3 +176,9 @@ Content/__ExternalObjects__/ProceduralWeaponAnimationSystem/Demo/
 Content/Assets/Anime_Girl_Character_-_Blu-6ccdbbe7/**/*.png
 Content/Assets/Anime_Girl_Character_-_Blu-6ccdbbe7/**/metadata
 Content/Assets/Anime_Girl_Character_-_Blu-6ccdbbe7/**/thumbnail.jpeg
+
+# =============================================================================
+# Python 에디터 툴 캐시 (Content/Python/*.py 는 추적, 컴파일 캐시는 무시)
+# =============================================================================
+__pycache__/
+*.pyc
