@@ -16,39 +16,62 @@
 
 ---
 
-## §1 ✅ 완료 (커밋 `40679a86`, 브랜치 `phase/u22a-environment`)
+## §1 ✅ 완료 (커밋 `40679a86` → `5562dd54` → **`ec54e5a3`**, 브랜치 `phase/u22a-environment`)
 
-**방향**: 통짜 빌딩 메시 ❌ → 모듈 조각 조립 ✅ → **프리셋 폐기, 사용자가 에셋 직접 선택** ✅.
+**방향**: 통짜 빌딩 메시 ❌ → 모듈 조각 조립 ✅ → 프리셋 폐기, 사용자가 에셋 직접 선택 ✅
+→ **에셋 피커가 모든 메시를 보여줘 규격 밖을 고르면 건물이 어긋나던 문제**를 **수집기(Kit) + 배열 프루닝**으로 차단 ✅(2026-07-21 개편).
 
-- ✅ **C++ 설정 클래스 `UFPSRCityGenConfig`** (`Source/FPSRoguelite/{Public,Private}/CityGen/`)
-  - `UPrimaryDataAsset` 파생 · `FPSROGUELITE_API` · 기존 프로젝트 DataAsset 규약 준수 · `IsDataValid` 경고(파사드 빔).
-  - 필드 = `Facades[]`(창문벽 여러 개) · `Corner`(코너 기둥) · `Door` · `RoofFloor`(지붕 슬래브) · `CorniceTrim` · `RoofProps[]` · `RoofPropCount` · `Width`/`Depth`/`Floors`(0=박스에서 유도) · `bSetback`.
-  - 각 필드가 곧 **에디터 내장 에셋 피커(썸네일)** = "보여주고 고르는" UI. 새 카테고리 추가 = 필드 1개 + Python 매핑 1줄.
-  - **빌드 검증 완료**: `FPSRogueliteEditor Win64 Development` → `Result: Succeeded`.
-- ✅ **`Content/Python/fpsr_citygen.py` config 기반 리팩터**
-  - `generate_from_config(box, config, seed)` — 프리셋(`STYLES`) 폐기. `DEFAULT_CONFIG` 폴백이 있어 **빈 설정으로도 미리보기가 나온다**.
-  - `load_config_from_dataasset()` — DA → config dict. `get_editor_property` 이름 정규화(원본/snake/`b`제거)를 **모두 시도**해 견고.
-  - `preview_from_config()` / `confirm_preview()` / `clear_preview()` — 미리보기는 태그 `CityGenPreview` + 폴더 `Buildings/_Preview`, 라벨 `_Preview` 접미. Confirm=태그/폴더/라벨 정리(굽지 않음), Bake=병합 ISM.
-  - **메뉴 6종** `Tools > FPSR CityGen`: 1 Place Sizing Box / 2 Open Config / 3 Preview from Config / 4 Confirm Preview / 5 Clear Preview / 6 Bake Selected.
-- ✅ 기존 규약 유지: 모듈 **250 가로 × 300 층높이**, 피벗 밑변 왼쪽 +X, 콜리전 **BlockAll**(플로우필드 `ECC_WorldStatic`) + `custom_depth_stencil=1`(셀룩), 250폭 벽만(260 초과 자동 제외).
+- ✅ **C++ 2클래스** (`Source/FPSRoguelite/{Public,Private}/CityGen/`, `UPrimaryDataAsset`·`FPSROGUELITE_API`)
+  - **`UFPSRCityGenKit`**(신규) = **자동 수집 목록**. 6종 배열 `Facades`/`Corners`/`Doors`/`RoofFloors`/`CorniceTrims`/`RoofProps`. 손으로 안 채운다.
+  - **`UFPSRCityGenConfig`** = **이 건물에 쓸 것**. 같은 6종 **배열** + `Kit` 참조 + `RoofPropCount`/`Width`/`Depth`/`Floors`(0=박스에서 유도)/`bSetback`. `IsDataValid`가 빈 카테고리를 이름 찍어 경고.
+  - **왜 Kit과 Config를 나눴나**: 재수집해도 사용자 프루닝이 안 날아가게(사용자 결정 2026-07-21).
+  - **왜 전부 배열인가**: 여러 개 남기면 섞여 나오고, 하나만 남기면 고정. 단일 값이면 규격 밖을 아무거나 고를 수 있었다.
+  - **동작 규칙**: 파사드·옥상소품 = **칸/개수마다 무작위**, 코너·문·코니스·지붕 = **건물당 하나 뽑아 일관되게**.
+- ✅ **`Content/Python/fpsr_citygen.py`**
+  - `_measure`(로컬 바운드 실측) / `_classify`(이름→카테고리) / `_validate`(카테고리별 규약 검증).
+  - `collect_modular_meshes()` — `SCAN_FOLDERS` 재귀 스캔 → 분류·검증 → **Kit에 기록** + **채택/탈락 사유 로그**.
+  - `fill_config_from_kit()` — Kit 6배열 → Config 복사(+`Kit` 참조 설정). 이후 사용자가 프루닝.
+  - `generate_from_config()` — 생성 시 풀 재검증, 규격 밖은 `제외: <이름> — <사유>` 로그 후 제외(**무음 드롭 폐지**).
+  - `find_config_asset()`/`find_kit_asset()` — 경로 우선, 실패 시 **클래스로 전역 검색 폴백**(폴더 옮겨도 안 깨짐).
+  - `preview_from_config()`/`confirm_preview()`/`clear_preview()` — 태그 `CityGenPreview`·폴더 `Buildings/_Preview`·라벨 `_Preview` 접미.
+  - **메뉴 8종** `Tools > FPSR CityGen`: 1 Collect / 2 Fill Config from Kit / 3 Open Config / 4 Place Sizing Box / 5 Preview / 6 Confirm / 7 Clear / 8 Bake.
+- 🔎 **검증 기준(카테고리별 — 실측 전이라 일부러 느슨함)**
+  | 카테고리 | 기준 |
+  |---|---|
+  | facades / doors | 폭 **정확히 1칸(250)** + 피벗 밑변왼쪽. 500폭(2칸)은 `멀티칸 미지원` 사유로 제외 |
+  | corners / cornices | **한 칸(250) 안에 들어가고 바닥에 앉을 것**만. ⚠️250 배수 규칙을 걸면 얇은 장식이라 **전멸**(기본값조차) |
+  | rooffloors | 가로·세로 **125 배수** |
+  | roofprops | 검사 없음(장식) |
+  → **첫 Collect 로그가 이 메시들의 최초 실측 데이터**다. 기준이 현실과 안 맞으면 그 숫자 보고 `TOL`/규칙을 조정하는 게 정상 절차(실측 전 과한 제약 금지).
+- ✅ 기존 규약 유지: 모듈 **250 가로 × 300 층높이**, 피벗 밑변 왼쪽 +X, 콜리전 **BlockAll**(플로우필드 `ECC_WorldStatic`) + `custom_depth_stencil=1`(셀룩).
+- ✅ **빌드 검증 2회**: `FPSRogueliteEditor Win64 Development` → `Result: Succeeded`.
 - ✅ **A-0 perf 베이스라인**: `Saved/Profiling/CSV/Profile(20260720_194245).csv` — 드로우콜 **920**·GPUTime 12ms·적200중 VisibleRendered **196**.
 
 ---
 
 ## §2 ▶ 다음 작업
 
-### ① DA 인스턴스 생성 (아직 없으면 · 10초)
-콘텐츠 브라우저 → **우클릭 → Miscellaneous → Data Asset** → 클래스 **`FPSRCityGenConfig`** 선택 → 이름 **`DA_CityGenConfig`** → 위치 **`/Game/Tools/CityGen/`**(폴더 없으면 생성. 툴 에셋은 `/Game/Tools/` 아래로 모으는 규칙 — 사용자 결정 2026-07-21).
-기본 경로 = Python 상수 `fpsr_citygen.CONFIG_DA`(`/Game/Tools/CityGen/DA_CityGenConfig.DA_CityGenConfig`).
-⚠️ 경로가 달라도 **`find_config_asset()`이 `FPSRCityGenConfig` 클래스로 전역 검색해 폴백**하므로 폴더를 옮겨도 툴은 계속 동작한다(다만 상수를 맞춰두는 게 정석).
-(설정을 비워둬도 `DEFAULT_CONFIG`로 미리보기는 나온다 — DA는 "직접 고르기" 용도.)
+### ① DA 인스턴스 2개 생성 (각 10초 · 콘텐츠 브라우저)
+**우클릭 → Miscellaneous → Data Asset** → 클래스 선택 → 이름 지정. 위치는 둘 다 **`/Game/Tools/CityGen/`**
+(툴 에셋은 `/Game/Tools/` 아래로 모으는 규칙 — 사용자 결정 2026-07-21).
 
-### ② 스모크 테스트 (Phase 1 검증)
-1. `2. Open Config` → 창문벽 몇 개·코너·문·지붕·코니스·옥상 프롭 지정.
-2. `1. Place Sizing Box` → 뷰포트에서 크기 조절(가로 250·층 300 단위로 반올림됨).
-3. 박스 **선택한 채** `3. Preview from Config` → 로그 `[CityGen] Building_Cfg_* 생성: WxDxF, 조각 N` 확인.
-4. 조각 개별 이동/교체 가능한지 확인 → `4. Confirm Preview` → 필요시 `6. Bake Selected`(로그 `ISM N개`).
-5. 실패 시 확인 포인트: DA 경로 오타 / 벽이 500폭(자동 제외됨) / 박스 미선택(→ cfg의 W·D·Floors 또는 3×3×4).
+| 클래스 | 에셋 이름 | 용도 |
+|---|---|---|
+| `FPSRCityGenKit` | **`DA_CityGenKit`** | 수집기가 채움(**신규 — 아직 없음, 꼭 만들 것**) |
+| `FPSRCityGenConfig` | **`DA_CityGenConfig`** | 실제 사용할 것(이미 생성됨, 커밋 `055b0733`) |
+
+⚠️ 경로가 달라도 `find_kit_asset()`/`find_config_asset()`이 **클래스로 전역 검색해 폴백**하므로 폴더를 옮겨도 동작한다(상수는 맞춰두는 게 정석).
+
+### ② 스모크 테스트 (Phase 1 검증) — 🔴 실행 검증 미완, 여기부터가 첫 실제 실행
+1. **`1. Collect Modular Meshes`** → 로그를 **꼼꼼히 읽는다**(이게 최초 실측 데이터):
+   - 카테고리별 채택 수 + 예시 메시의 실제 size
+   - `제외` 목록과 사유 — 기준이 현실과 안 맞으면(예: 코너가 0개, 파사드가 몇 개뿐) **여기서 `_validate`/`TOL`을 조정**하고 재수집. 재수집은 Kit만 덮으므로 안전.
+2. `2. Fill Config from Kit` → Config에 후보가 채워짐.
+3. `3. Open Config` → **안 쓸 메시를 삭제**(프루닝). 코너/문/코니스/지붕은 하나만 남기면 고정.
+4. `4. Place Sizing Box` → 크기 조절(가로 250·층 300 단위로 반올림).
+5. 박스 **선택한 채** `5. Preview from Config` → 로그 `[CityGen] Building_Cfg_* 생성: WxDxF, 조각 N` 확인 + `제외:` 경고 확인.
+6. 조각 개별 이동/교체 확인 → `6. Confirm Preview` → 필요시 `8. Bake Selected`(로그 `ISM N개`).
+7. 실패 시 확인 포인트: **Kit 에셋 미생성**(수집기가 경고함) / 박스 미선택(→ cfg의 W·D·Floors 또는 3×3×4) / 파이썬 리로드 안 함(§0-4).
 
 ### ③ Phase 2 = EUW 플로팅 패널 (남은 본 작업)
 **`EUW_CityGen`** = 얇은 셸: **DetailsView(`DA_CityGenConfig` 바인딩)** + 버튼 `[Place Box][Preview][Confirm][Bake]`.
