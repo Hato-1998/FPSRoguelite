@@ -22,7 +22,9 @@ KW  = unreal.AttachmentRule.KEEP_WORLD
 MOV = unreal.ComponentMobility.MOVABLE
 STA = unreal.ComponentMobility.STATIC
 
-CONFIG_DA = "/Game/_CityGen/DA_CityGenConfig.DA_CityGenConfig"
+# 툴 에셋은 /Game/Tools/ 아래로 모은다. 경로가 또 바뀌어도 find_config_asset()이 클래스로 찾아낸다.
+CONFIG_DA = "/Game/Tools/CityGen/DA_CityGenConfig.DA_CityGenConfig"
+CONFIG_CLASS = ("/Script/FPSRoguelite", "FPSRCityGenConfig")
 PREVIEW_FOLDER = "Buildings/_Preview"
 PREVIEW_TAG = "CityGenPreview"
 
@@ -211,13 +213,29 @@ def bake_selection():
 def _snake(s):
     return re.sub(r'(?<!^)(?=[A-Z])', '_', s).lower()
 
+def find_config_asset(da_path=CONFIG_DA):
+    """설정 DataAsset을 찾는다: ①CONFIG_DA 경로 ②실패 시 클래스로 전역 검색(폴더 재정리 대비)."""
+    da = unreal.EditorAssetLibrary.load_asset(da_path)
+    if da:
+        return da
+    try:
+        ar = unreal.AssetRegistryHelpers.get_asset_registry()
+        found = ar.get_assets_by_class(unreal.TopLevelAssetPath(*CONFIG_CLASS), True)
+        if found:
+            p = str(found[0].package_name)
+            unreal.log_warning(f"[CityGen] {da_path} 없음 → 클래스로 찾은 설정 사용: {p}")
+            return unreal.EditorAssetLibrary.load_asset(p)
+    except Exception as e:
+        unreal.log_warning(f"[CityGen] 설정 클래스 검색 실패: {e}")
+    return None
+
 def load_config_from_dataasset(da_path=CONFIG_DA):
-    """DA_CityGenConfig(UFPSRCityGenConfig)를 config dict로 변환. 로드 실패 시 None.
+    """DA_CityGenConfig(UFPSRCityGenConfig)를 config dict로 변환. 못 찾으면 None.
     UE Python의 get_editor_property는 스네이크/불린 b-접두 제거 등 이름을 정규화할 수 있으므로
     C++ 프로퍼티명의 여러 표기(원본·snake·b제거)를 순서대로 시도한다."""
-    da = unreal.EditorAssetLibrary.load_asset(da_path)
+    da = find_config_asset(da_path)
     if not da:
-        unreal.log_warning(f"[CityGen] DataAsset 로드 실패: {da_path} — DEFAULT_CONFIG로 진행")
+        unreal.log_warning(f"[CityGen] 설정 DataAsset을 못 찾음({da_path}) — DEFAULT_CONFIG로 진행")
         return None
     missing = object()
     def _prop(name):
@@ -313,7 +331,7 @@ def register_menu():
     entry("PlaceBox", "1. Place Sizing Box", "import fpsr_citygen; fpsr_citygen.place_sizing_box()")
     entry("OpenConfig", "2. Open Config (DA_CityGenConfig)",
           "import fpsr_citygen, unreal\n"
-          "_da = unreal.EditorAssetLibrary.load_asset(fpsr_citygen.CONFIG_DA)\n"
+          "_da = fpsr_citygen.find_config_asset()\n"
           "unreal.get_editor_subsystem(unreal.AssetEditorSubsystem).open_editor_for_assets([_da]) if _da else "
           "unreal.log_warning('[CityGen] DA_CityGenConfig 없음 — 먼저 생성하세요: ' + fpsr_citygen.CONFIG_DA)")
     entry("PreviewCfg", "3. Preview from Config", "import fpsr_citygen; fpsr_citygen.preview_from_config()")

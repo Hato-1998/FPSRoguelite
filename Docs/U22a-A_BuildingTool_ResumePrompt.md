@@ -38,8 +38,9 @@
 ## §2 ▶ 다음 작업
 
 ### ① DA 인스턴스 생성 (아직 없으면 · 10초)
-콘텐츠 브라우저 → **우클릭 → Miscellaneous → Data Asset** → 클래스 **`FPSRCityGenConfig`** 선택 → 이름 **`DA_CityGenConfig`** → 위치 **`/Game/_CityGen/`**(폴더 없으면 생성).
-경로가 Python 상수 `fpsr_citygen.CONFIG_DA`(`/Game/_CityGen/DA_CityGenConfig.DA_CityGenConfig`)와 **정확히 일치**해야 함.
+콘텐츠 브라우저 → **우클릭 → Miscellaneous → Data Asset** → 클래스 **`FPSRCityGenConfig`** 선택 → 이름 **`DA_CityGenConfig`** → 위치 **`/Game/Tools/CityGen/`**(폴더 없으면 생성. 툴 에셋은 `/Game/Tools/` 아래로 모으는 규칙 — 사용자 결정 2026-07-21).
+기본 경로 = Python 상수 `fpsr_citygen.CONFIG_DA`(`/Game/Tools/CityGen/DA_CityGenConfig.DA_CityGenConfig`).
+⚠️ 경로가 달라도 **`find_config_asset()`이 `FPSRCityGenConfig` 클래스로 전역 검색해 폴백**하므로 폴더를 옮겨도 툴은 계속 동작한다(다만 상수를 맞춰두는 게 정석).
 (설정을 비워둬도 `DEFAULT_CONFIG`로 미리보기는 나온다 — DA는 "직접 고르기" 용도.)
 
 ### ② 스모크 테스트 (Phase 1 검증)
