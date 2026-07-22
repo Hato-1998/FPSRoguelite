@@ -10,7 +10,8 @@
      - 조각은 부모 "Building_Cfg_*" 액터에 attach(그룹) → 부모 이동=통째 이동 / 자식=개별 편집·교체
      - 규격(250x300) 벗어난 메시는 이 시점에 자동 검증되어 경고 후 제외(무음 드롭 없음)
   6) 마음에 들면 6. Confirm Preview(확정) / 다시 하려면 7. Clear Preview
-  7) 완성 후 성능 최적화: 건물(부모) 선택 → 8. Bake Selected → 조각을 병합 ISM(Static)으로 굳힘
+  7) 완성 후 성능 최적화: 건물(부모) 선택 → 8. Bake Selected → 선택 전체를 ISM(Static) 홀더 **하나**로 병합
+     (여러 채를 한꺼번에 선택해도 드로우콜은 홀더 1개분. 도시 전체는 13. Bake All → 사분면 4홀더로 나눠 병합)
 
 규약: 모듈 250(가로) x 300(층높이), 피벗 밑변 왼쪽 +X. 콜리전 BlockAll(플로우필드) + stencil 1(셀룩).
 프리셋(STYLES)은 폐지 — 이제 DataAsset 기반 설정(config dict)만 사용. generate_building()은 구코드 호환용 shim.
@@ -72,7 +73,27 @@ DEFAULT_CONFIG = {
     'floors_min': 0, 'floors_max': 0,             # 0 = 박스 높이에서 유도(절반~전체 사이에서 무작위)
     'roofprop_count': 2,
     'width': 0, 'depth': 0, 'floors': 0,  # 0 = 사이징 박스 바운드에서 유도
+    # 지상층(1층) 분류 판별 문자열 — 이름에 하나라도 포함되면 지상층 파사드로 취급(S0-2).
+    # '_shop_'을 빠뜨리면 SM_Bld_Wall_Shop_01~04(상가 파사드=명백히 1층용)가 상층으로 올라간다(실측).
+    'ground_markers': ['_base_', '_shop_'],
+    # 코니스 배치 모드(S0-3): all=매 층(구 기본) / cap=지상층+최상층만(신규 기본) / top=최상층만 / none.
+    # ⚠️줄어드는 것은 **조각(액터) 수 · 인스턴스 수 · 삼각형**이지 Bake 후 드로우콜이 아니다
+    #   (코니스 메시는 몇 개를 놓든 종류가 1이라 ISM도 1개다). 3x3x6 건물 기준 코니스 72개 → 24개.
+    #   그래도 기본을 'cap'으로 둔다: Bake 전 뷰포트가 가벼워지고 폴리곤 예산이 줄기 때문.
+    'cornice_mode': 'cap',
+    # 옥상 소품 콜리전. 기본 False(NoCollision) — 안테나·위성 같은 장식이 BlockAll이면 멀티레이어
+    # 플로우필드(U7, 2층)의 장애물 프로브에 잡혀 옥상 경로가 망가진다. 벽·코너·도어·바닥은 BlockAll 유지.
+    'roofprop_collide': False,
+    # Bake 시 ISM에 걸 거리 컬링(유닛). 0=컬링 없음(기존 동작 유지).
+    'ism_cull_start': 0, 'ism_cull_end': 0,
+    # 여섯 풀 전체의 고유 메시 개수 상한(S0-4). Bake 후 프리미티브 수 ≈ (홀더 수) x (고유 (메시,콜리전) 쌍)
+    # 이고, 여기에 커스텀뎁스·그림자 패스가 더 곱해진다 — "메시 종류 = 드로우콜"은 어림값일 뿐이다.
+    # 기본 16 = 이 모듈 자체 기본 풀(고유 11종)이 상시 경고를 띄우지 않는 선. 넘어도 막지 않고 경고만.
+    'max_mesh_types': 16,
 }
+# ⚠️ 아래 키들은 **아직 C++ DataAsset(UFPSRCityGenConfig)에 없어 파이썬 기본값 전용**이다:
+#    ground_markers · cornice_mode · roofprop_collide · ism_cull_start/end · max_mesh_types.
+#    에디터에서 조절하려면 UPROPERTY 추가 + load_config_from_dataasset 매핑 등록이 선행돼야 한다(C++ 빌드).
 
 def _eas():
     return unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
@@ -181,6 +202,16 @@ def _load_pools(cfg):
             unreal.log_warning(f"[CityGen] {label} 풀이 비어있음 — 배치하지 않습니다.")
     if cfg['roofprop_count'] > 0 and not pools['roofprops']:
         unreal.log_warning("[CityGen] 루프소품 풀이 비어있음 — 루프소품을 배치하지 않습니다.")
+    # S0-4: 드로우콜은 메시 '종류' 수에 비례한다(Bake로 병합해도 종류가 많으면 안 줄어듦).
+    # 여섯 풀 전체의 고유 메시 개수를 세어 상한을 넘으면 경고만 한다(막지는 않음, 판단은 사용자 몫).
+    all_paths = {m.get_path_name() for c in _CATS for m in pools[c]}
+    total = len(all_paths)
+    max_types = int(cfg.get('max_mesh_types', 16))
+    per_cat = ", ".join(f"{c}={len(pools[c])}" for c in _CATS)
+    if total > max_types:
+        unreal.log_warning(f"[CityGen] 메시 종류 {total}개 > 상한 {max_types} — 드로우콜은 메시 종류 수에 비례(Bake해도 안 줄어듦). {per_cat}")
+    else:
+        unreal.log(f"[CityGen] 메시 종류 {total}개(상한 {max_types} 이내). {per_cat}")
     return pools
 
 def _build_one(minc, W, D, floors, pools, cfg, seed, label, skip_w=0, skip_e=0):
@@ -210,13 +241,15 @@ def _build_one(minc, W, D, floors, pools, cfg, seed, label, skip_w=0, skip_e=0):
     fol = f"Buildings/{parent.get_actor_label()}"
     di = W // 2
 
-    def P(mesh, x, y, z, yaw):
+    def P(mesh, x, y, z, yaw, collide=True):
+        # collide=False는 옥상 소품 전용. 장식이 BlockAll이면 멀티레이어 플로우필드의 장애물 프로브에
+        # 잡혀 옥상 경로가 막힌다. Bake의 ISM 키가 (메시, 콜리전)이라 여기서 갈라 놔야 실제로 분리된다.
         if not mesh:
             return
         a = eas.spawn_actor_from_class(unreal.StaticMeshActor, minc + unreal.Vector(x, y, z))
         a.static_mesh_component.set_static_mesh(mesh)
         a.static_mesh_component.set_editor_property('mobility', MOV)
-        a.static_mesh_component.set_collision_profile_name('BlockAll')
+        a.static_mesh_component.set_collision_profile_name('BlockAll' if collide else 'NoCollision')
         a.static_mesh_component.set_editor_property('render_custom_depth', True)
         a.static_mesh_component.set_editor_property('custom_depth_stencil_value', 1)
         a.set_actor_rotation(unreal.Rotator(yaw=yaw), False)
@@ -224,15 +257,18 @@ def _build_one(minc, W, D, floors, pools, cfg, seed, label, skip_w=0, skip_e=0):
         a.set_folder_path(fol)
 
     # ---- 파사드 배치 규칙 ----
-    # ① 지상층 분리: Synty 규약상 이름에 'Base_'가 붙은 벽은 1층용 디자인이다(도어도 전부 Base_ 계열).
-    #    상층에 섞이면 건물이 뒤죽박죽으로 보인다. 한쪽이 비면 나누지 않고 전체 풀을 쓴다.
+    # ① 지상층 분리: 이름에 ground_markers(기본 '_base_'/'_shop_') 중 하나라도 들어가면 1층용 디자인으로
+    #    본다(도어도 전부 Base_ 계열, 상가 파사드 Wall_Shop_*도 명백히 1층용 — S0-2). 상층에 섞이면
+    #    건물이 뒤죽박죽으로 보인다. 한쪽이 비면 나누지 않고 전체 풀을 쓴다.
     # ② 수직 일관: 실제 빌딩은 같은 자리의 창문이 위로 쭉 이어진다. 칸마다 새로 뽑으면 층마다 제각각이
     #    되어 건물로 안 보인다. facade_mode로 '무엇을 고정할지'를 고른다.
-    ground_facades = [m for m in facades if '_base_' in m.get_name().lower()]
+    markers = [s.lower() for s in cfg.get('ground_markers', ['_base_', '_shop_'])]
+    ground_facades = [m for m in facades if any(mk in m.get_name().lower() for mk in markers)]
     upper_facades = [m for m in facades if m not in ground_facades]
     if not ground_facades or not upper_facades:
         ground_facades = upper_facades = facades
     mode = cfg.get('facade_mode', 'column')
+    mode_c = cfg.get('cornice_mode', 'cap')  # 코니스 배치 모드(S0-3) — 아래 층 루프에서 f/floors로 판정
     _fpick = {}
 
     def pick_facade(pool, tag, key):
@@ -275,12 +311,18 @@ def _build_one(minc, W, D, floors, pools, cfg, seed, label, skip_w=0, skip_e=0):
         for cx, cy, cyaw, hidden in [(0, 0, 0, hide_w), (w * CELL, 0, 90, hide_e),
                                      (w * CELL, d * CELL, 180, hide_e), (0, d * CELL, 270, hide_w)]:
             if not hidden: P(corner, ox + cx, oy + cy, z, cyaw)
-        for i in range(w):
-            P(cornice, ox + i * CELL, oy, z, 0); P(cornice, ox + (i + 1) * CELL, oy + d * CELL, z, 180)
-        if not hide_e:
-            for j in range(d): P(cornice, ox + w * CELL, oy + j * CELL, z, 90)
-        if not hide_w:
-            for j in range(d): P(cornice, ox, oy + (j + 1) * CELL, z, 270)
+        # 코니스는 매 층 x 둘레 전체면 6층 건물만으로도 조각(=드로우콜)이 폭증한다(S0-3).
+        # cornice_mode로 어느 층에 두를지 고르고, hide_w/hide_e(맞닿은 면 생략)는 그 안에서 그대로 적용한다
+        # — 둘 중 하나라도 걸리면 그 면엔 코니스를 붙이지 않는다.
+        cornice_here = (mode_c == 'all') or (mode_c == 'top' and f == floors - 1) or \
+                       (mode_c == 'cap' and (f == 0 or f == floors - 1))
+        if cornice_here:
+            for i in range(w):
+                P(cornice, ox + i * CELL, oy, z, 0); P(cornice, ox + (i + 1) * CELL, oy + d * CELL, z, 180)
+            if not hide_e:
+                for j in range(d): P(cornice, ox + w * CELL, oy + j * CELL, z, 90)
+            if not hide_w:
+                for j in range(d): P(cornice, ox, oy + (j + 1) * CELL, z, 270)
     zr = floors * FH
     if rooffloor:
         # 타일 간격은 고정값이 아니라 **뽑힌 메시의 실측 크기**여야 한다. 125로 못박으면 250짜리 바닥
@@ -297,7 +339,8 @@ def _build_one(minc, W, D, floors, pools, cfg, seed, label, skip_w=0, skip_e=0):
         # 지붕 타일과 같은 이유로 범위는 top_* 기준 — W/D로 뿌리면 좁아진 옥상 바깥 허공에 소품이 뜬다.
         if roofprops:
             P(rnd.choice(roofprops), top_ox + rnd.randint(30, max(31, top_w * CELL - 30)),
-              top_oy + rnd.randint(30, max(31, top_d * CELL - 30)), zr, 0)
+              top_oy + rnd.randint(30, max(31, top_d * CELL - 30)), zr, 0,
+              collide=cfg.get('roofprop_collide', False))
     # 크기와 시드를 부모 태그에 남긴다 — 편집 도구(다시 굴리기·층수 조절)가 이 값으로 같은 자리에
     # 같은 크기로 재생성한다. 자식 조각의 바운드로 역산하면 셋백·지붕 때문에 부정확하다.
     meta = parent.get_editor_property('tags')
@@ -443,41 +486,123 @@ def _set_sizing_boxes_hidden(hidden, boxes=None):
         a.set_is_temporarily_hidden_in_editor(hidden)
     return len(tgt)
 
-def bake_building(parent):
-    """건물 부모의 자식 조각들을 메시별 병합 ISM(Static)으로 굳혀 드로우콜을 낮춘다."""
+def bake_buildings(parents, label='CityBaked', cull_start=None, cull_end=None, holder=None):
+    """여러 건물 부모를 홀더 액터 **하나**로 병합해 드로우콜을 낮춘다(S0-1: 구 bake_building의 다건 확장).
+
+    종전엔 건물 한 채당 홀더가 하나씩 생겨 ISM 세트도 채마다 따로였다 — 드로우콜이 채 수에 비례해서
+    64채=드로우콜 400~500, 380채면 2,000+로 예산(160 이하)이 붕괴했다. 이제 여러 부모를 한 번에 넘기면
+    ISM 맵(키=(메시 경로, 콜리전 여부))을 홀더 하나가 공유해, 같은 메시를 쓰는 조각이면 건물이
+    몇 채든 인스턴스 하나로 합쳐진다(=드로우콜 = 메시 '종류' 수, S0-4 참고).
+
+    홀더 위치는 항상 원점(0,0,0)으로 둔다 — 부모마다 위치가 제각각인데 홀더를 그중 하나 위치에 두면
+    world_space=True로 넣는 다른 부모의 인스턴스가 그 홀더 기준으로 다시 계산돼 어긋난다.
+    컴포넌트 클래스는 기존과 동일하게 InstancedStaticMeshComponent를 쓴다(HISM 아님 — 2026-07-21
+    플로우필드 콜리전 쿼리로 ISM이 이미 실증 검증됐다)."""
     eas = _eas()
     sds = unreal.get_engine_subsystem(unreal.SubobjectDataSubsystem)
-    kids = list(parent.get_attached_actors())
-    if not kids:
-        unreal.log_warning("[CityGen] Bake: 자식 조각이 없습니다(이미 baked?)."); return
-    holder = eas.spawn_actor_from_class(unreal.Actor, parent.get_actor_location())
-    holder.set_actor_label(parent.get_actor_label() + "_Baked"); holder.set_folder_path("Buildings")
-    root = sds.k2_gather_subobject_data_for_instance(holder)[0]
+    parents = [p for p in (parents or []) if p and p.get_attached_actors()]
+    if not parents:
+        unreal.log_warning("[CityGen] Bake: 자식 조각이 있는 건물이 없습니다(이미 baked?)."); return None
+    cfg = _merge_cfg(load_config_from_dataasset())
+    # 컬링은 홀더마다 다르게 걸 수 있어야 의미가 있다(먼 지구만 안 그리기) → 인자 우선, 없으면 cfg 기본값.
+    cull_start = int(cfg.get('ism_cull_start', 0) or 0) if cull_start is None else int(cull_start)
+    cull_end = int(cfg.get('ism_cull_end', 0) or 0) if cull_end is None else int(cull_end)
+    # holder를 넘기면 **기존 홀더에 이어붙인다**. 도시 전체를 한 번에 만들면 액터 수만 수만 개가 돼
+    # 에디터가 버티지 못하므로, 줄 단위로 짓고 바로 구워 넣는 방식이 필요하다(그래야 홀더가 하나로 유지된다).
+    # ISM 키 = (메시, 콜리전, **머티리얼 시그니처**). 조각에 머티리얼 오버라이드(건물별 테마)가 걸려 있으면
+    # 같은 메시라도 머티리얼이 다르면 다른 ISM으로 나눠야 룩이 보존된다(ISM은 컴포넌트 전체가 한 머티리얼셋).
     ism_map = {}
-    def get_ism(mesh, collide):
-        key = (mesh.get_path_name(), collide)
+    def _matsig(smc):
+        out = []
+        for i in range(smc.get_num_materials()):
+            mi = smc.get_material(i)
+            out.append(mi.get_path_name() if mi else "")
+        return tuple(out)
+    if holder is None:
+        holder = eas.spawn_actor_from_class(unreal.Actor, unreal.Vector(0, 0, 0))
+        holder.set_actor_label(label); holder.set_folder_path("Buildings")
+    else:
+        for c in holder.get_components_by_class(unreal.InstancedStaticMeshComponent):
+            m = c.static_mesh
+            if m:
+                ism_map[(m.get_path_name(), c.get_collision_profile_name() == 'BlockAll', _matsig(c))] = c
+    root = sds.k2_gather_subobject_data_for_instance(holder)[0]
+    def get_ism(mesh, collide, src_smc):
+        key = (mesh.get_path_name(), collide, _matsig(src_smc))
         if key in ism_map: return ism_map[key]
         h, _ = sds.add_new_subobject(unreal.AddNewSubobjectParams(parent_handle=root, new_class=unreal.InstancedStaticMeshComponent))
         c = unreal.SubobjectDataBlueprintFunctionLibrary.get_object(sds.k2_find_subobject_data_from_handle(h))
         c.set_editor_property('mobility', STA)
         c.set_static_mesh(mesh)
+        # 조각의 머티리얼 오버라이드를 ISM에 그대로 복사(테마 보존)
+        for i in range(src_smc.get_num_materials()):
+            mi = src_smc.get_material(i)
+            if mi:
+                c.set_material(i, mi)
         c.set_collision_profile_name('BlockAll' if collide else 'NoCollision')
         c.set_editor_property('render_custom_depth', True); c.set_editor_property('custom_depth_stencil_value', 1)
+        if cull_start > 0:
+            c.set_editor_property('instance_start_cull_distance', cull_start)
+        if cull_end > 0:
+            c.set_editor_property('instance_end_cull_distance', cull_end)
         ism_map[key] = c; return c
-    for k in kids:
-        smc = k.static_mesh_component; mesh = smc.static_mesh
-        if not mesh: continue
-        collide = smc.get_collision_profile_name() == 'BlockAll'
-        get_ism(mesh, collide).add_instance(k.get_actor_transform(), True)
-    for k in kids: eas.destroy_actor(k)
-    eas.destroy_actor(parent)
-    unreal.log(f"[CityGen] Bake 완료: {holder.get_actor_label()} — ISM {len(ism_map)}개(=드로우콜)")
+    kid_total = 0
+    for parent in parents:
+        kids = list(parent.get_attached_actors())
+        for k in kids:
+            smc = k.static_mesh_component; mesh = smc.static_mesh
+            if not mesh: continue
+            collide = smc.get_collision_profile_name() == 'BlockAll'
+            get_ism(mesh, collide, smc).add_instance(k.get_actor_transform(), True)
+        kid_total += len(kids)
+        for k in kids: eas.destroy_actor(k)
+        eas.destroy_actor(parent)
+    unreal.log(f"[CityGen] Bake 완료: {holder.get_actor_label()} — 건물 {len(parents)}채, 조각 {kid_total}개 "
+               f"→ ISM {len(ism_map)}개 / 홀더 1개. ⚠️실제 드로우콜은 여기에 커스텀뎁스·그림자 패스가 "
+               f"더 곱해진다 — 확정 수치는 PIE에서 stat rhi로 볼 것")
     return holder
 
+def bake_building(parent):
+    """(호환 래퍼) 건물 한 채만 병합. 여러 채를 드로우콜 하나로 묶으려면 bake_buildings()/bake_all()을 써라."""
+    return bake_buildings([parent], parent.get_actor_label() + "_Baked")
+
 def bake_selection():
-    for a in _selected():
-        if a.get_attached_actors():
-            bake_building(a)
+    """선택한 건물 전부를 홀더 **하나**로 합쳐 Bake한다.
+    ⚠️동작 변경(S0-1): 종전엔 선택 건물마다 개별 홀더가 생겨 드로우콜이 건물 수에 비례했다.
+    이제 선택 전체가 ISM 세트 하나를 공유한다 — 적 동시 최대 192마리가 제1원리라 환경 드로우콜은
+    최대한 아껴야 한다."""
+    sel = [a for a in _selected() if a.get_attached_actors()]
+    if not sel:
+        unreal.log_warning("[CityGen] Bake: 자식 조각이 있는 건물을 선택하세요.")
+        return
+    return bake_buildings(sel, "CityBaked")
+
+def bake_all(districts=False):
+    """레벨의 CityGen **확정** 건물(태그 CityGenSize: 보유, 미리보기 제외)을 전부 찾아 Bake한다.
+
+    기본은 **홀더 하나**다. 홀더를 늘리면 그만큼 프리미티브가 곱해지므로, 나누는 데는 그만한 이유가
+    있어야 한다.
+    districts=True로 사분면(위치 X·Y 부호) 4홀더로 나눌 수 있지만 **지금은 권장하지 않는다**:
+      - 나누는 목적인 '먼 지구만 안 그리기'는 홀더마다 **다른 컬링 거리**를 걸어야 성립하는데,
+        ism_cull_start/end가 아직 C++ DataAsset에 없어 항상 0이다(= 컬링이 아예 안 걸린다).
+      - 게다가 분할 기준이 월드 축 부호라 도시가 원점에 안 걸치면 4분할이 무의미해진다.
+      → 컬링을 DataAsset에 배선하고 지구 경계를 실제 블록 기준으로 잡은 뒤에 켤 것.
+    미리보기(CityGenPreview 태그)는 제외한다 — 확정 전 건물까지 구워 버리면 되돌릴 수 없다."""
+    buildings = [a for a in _eas().get_all_level_actors()
+                 if a and _read_meta(a) is not None and PREVIEW_TAG not in [str(t) for t in a.tags]]
+    if not buildings:
+        unreal.log_warning("[CityGen] Bake All: 확정된 CityGen 건물을 찾지 못했습니다(미리보기는 제외됩니다)."); return []
+    if not districts:
+        holder = bake_buildings(buildings, "CityBaked")
+        return [holder] if holder else []
+    unreal.log_warning("[CityGen] Bake All: districts=True — 컬링이 배선되기 전이라 홀더만 4배로 늘어납니다.")
+    quads = {'NE': [], 'NW': [], 'SE': [], 'SW': []}
+    for a in buildings:
+        loc = a.get_actor_location()
+        quads[('N' if loc.y >= 0 else 'S') + ('E' if loc.x >= 0 else 'W')].append(a)
+    holders = [h for q in ('NE', 'NW', 'SE', 'SW') for h in [bake_buildings(quads[q], f"CityBaked_{q}")] if h]
+    unreal.log(f"[CityGen] Bake All 완료 — 건물 {len(buildings)}채 → 홀더 {len(holders)}개")
+    return holders
 
 # ---------------- 편집 도구 (생성한 뒤 마음에 들 때까지 다듬기) ----------------
 def _regen(actor, pools, cfg, W, D, floors, seed):
@@ -807,5 +932,6 @@ def register_menu():
     entry("FloorUp", "10. 층 +1 (선택 건물)", "import fpsr_citygen; fpsr_citygen.change_floors(1)")
     entry("FloorDown", "11. 층 -1 (선택 건물)", "import fpsr_citygen; fpsr_citygen.change_floors(-1)")
     entry("CyclePiece", "12. 조각 메시 바꾸기 (선택 조각)", "import fpsr_citygen; fpsr_citygen.cycle_piece_mesh(1)")
+    entry("BakeAll", "13. Bake All (확정 건물 전체 → 홀더 1개)", "import fpsr_citygen; fpsr_citygen.bake_all()")
     menus.refresh_all_widgets()
     unreal.log("[CityGen] 메뉴 등록: Tools > FPSR CityGen")

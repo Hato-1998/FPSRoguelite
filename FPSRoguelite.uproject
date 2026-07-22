@@ -84,10 +84,6 @@
 			"Enabled": true
 		},
 		{
-			"Name": "PCG",
-			"Enabled": true
-		},
-		{
 			"Name": "VibeUE",
 			"Enabled": true,
 			"Optional": true
