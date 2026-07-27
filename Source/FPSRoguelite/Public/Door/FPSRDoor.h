@@ -77,7 +77,8 @@ protected:
 
 	/** Breakable door leaves (상·하단). Object type ECC_FPSRPlayerPawn: gathered by EVERY weapon object-query so all
 	 *  weapon types damage it via HealthComponent (no new code), blocked by players AND enemies (both block the
-	 *  player channel), and dash-proof (dash only ignores ECC_Pawn). Designer assigns the mesh(es) in BP; attach
+	 *  player channel), and immune to the ECC_Pawn pass-through windows (grace / downed only ignore ECC_Pawn, so a
+	 *  player can never walk through a door leaf). Designer assigns the mesh(es) in BP; attach
 	 *  the top/bottom leaves under this so a single break hides them together (and OnDoorBroken can animate each). */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "FPSR|Door")
 	TObjectPtr<UStaticMeshComponent> DoorMesh;

@@ -180,7 +180,7 @@ protected:
 	/** True while the run is globally frozen for card selection (Game.MD §2-2) — gates player input. */
 	bool IsRunFrozen() const;
 
-	/** True when this player can't ACT (fire / dash / swap / reload / ADS) — i.e. NOT alive (DBNO downed, or Dead).
+	/** True when this player can't ACT (fire / swap / reload / ADS) — i.e. NOT alive (DBNO downed, or Dead).
 	 *  Gates actions + contact damage like IsRunFrozen. DBNO still crawls/looks — those gate on IsTrulyDeadLocal. */
 	bool IsIncapacitatedLocal() const;
 
@@ -198,8 +198,8 @@ protected:
 	UFUNCTION()
 	void HandleRunStateChanged_Vision();
 
-	/** Server (authority): on the run-freeze (§2-2) halt residual locomotion — notably an in-flight dash impulse —
-	 *  and cancel any in-progress dash so the player can't drift across the frozen card screen. CMC replicates the stop. */
+	/** Server (authority): on the run-freeze (§2-2) halt residual locomotion (e.g. an in-progress fall) so the player
+	 *  can't drift across the frozen card screen. CMC replicates the stop. */
 	UFUNCTION()
 	void HandleRunStateChanged_Movement();
 
@@ -221,7 +221,6 @@ protected:
 	void Input_Reload(const FInputActionValue& Value);
 	void Input_ADSPressed(const FInputActionValue& Value);
 	void Input_ADSReleased(const FInputActionValue& Value);
-	void Input_Dash(const FInputActionValue& Value);
 	/** Esc: open the settings overlay (delegates to the owning PC; non-pause overlay). */
 	void Input_Menu(const FInputActionValue& Value);
 
@@ -236,10 +235,6 @@ protected:
 	/** Server: sync aim-down-sights state so the fire GA applies ADS spread server-side. */
 	UFUNCTION(Server, Reliable)
 	void ServerSetAiming(bool bNewAiming);
-
-	/** Server: perform a collision-ignoring dash in DashDirection (input is client-side; dash is server-authoritative). */
-	UFUNCTION(Server, Reliable)
-	void ServerDash(FVector DashDirection);
 
 	UPROPERTY()
 	TObjectPtr<UFPSRAbilitySystemComponent> AbilitySystemComponent;
@@ -341,43 +336,21 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Input")
 	TObjectPtr<UInputAction> ADSAction;
 
-	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Input")
-	TObjectPtr<UInputAction> DashAction;
-
 	/** Esc — opens the settings overlay (non-pause). */
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Input")
 	TObjectPtr<UInputAction> MenuAction;
 
-	/** Server: end the dash collision-ignore window (recomputes the enemy-pawn response — it may stay ignored if a
-	 *  grace window is still active). */
-	void EndDash();
-
 	/** Server: end the grace collision-ignore window (recomputes the enemy-pawn response). */
 	void EndGraceWindow();
 
-	/** Server: recompute the capsule's response to enemy pawns (ECC_Pawn) — ignore while dashing OR within a grace
-	 *  window (both derive from server timestamps, so an overlap composes correctly), block otherwise. Shared by dash
-	 *  + grace window so neither restores blocking while the other is still active. */
+	/** Server: recompute the capsule's response to enemy pawns (ECC_Pawn) — ignore while within a grace window or
+	 *  while downed (DBNO/Dead), block otherwise. Shared by the grace window + the downed state so neither restores
+	 *  blocking while the other is still active. */
 	void RefreshPawnCollisionResponse();
-
-	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Dash")
-	float DashSpeed = 2000.0f;
-
-	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Dash")
-	float DashDuration = 0.2f;
-
-	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Dash")
-	float DashCooldown = 2.0f;
 
 	/** Baseline walk speed before MoveSpeedMultiplier. Designers may tune per-hero. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Movement")
 	float BaseWalkSpeed = 600.0f;
-
-	/** Server-only: world time of last dash (init far in the past so the first dash is allowed). */
-	float LastDashTime = -1000.0f;
-
-	/** Server-only: timer to end the dash collision-ignore window. */
-	FTimerHandle DashEndTimerHandle;
 
 	/** Invulnerability window (seconds) after taking contact damage; further hits within it are ignored.
 	 *  Prevents a swarm from melting the player in one frame. Balance-tunable. */

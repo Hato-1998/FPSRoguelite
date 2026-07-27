@@ -320,7 +320,8 @@ void AFPSRProjectile::HandleImpact(const FVector& ImpactPoint)
 			else
 			{
 				// Enemy-team AOE (B1 follow-up): existing radial loop damages players only via TryDamageActor. Query
-				// pawns by OBJECT TYPE (both channels) so a dashing player — Pawn-response Ignore — is still found.
+				// pawns by OBJECT TYPE (both channels) so a player in a pass-through window (grace / downed) —
+				// Pawn-response Ignore — is still found.
 				const FCollisionShape Sphere = FCollisionShape::MakeSphere(Params.ExplosionRadius);
 				FCollisionObjectQueryParams ObjectParams;
 				FPSRCombat::AddDamageablePawnObjectTypes(ObjectParams);

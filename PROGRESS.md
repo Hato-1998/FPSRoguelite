@@ -4,7 +4,18 @@
 > **작업 단계를 끝낼 때마다, 그리고 중단 전 반드시 이 파일을 갱신하고 커밋한다.**
 > 확정 설계·기획·코드구조·규칙은 `Game.md`(**SSOT 허브** → 도메인별 `Docs/SSOT/*.md`, 작업별 라우팅은 허브 §0-1), **완료 작업 상세는 `git log --oneline`**. 여기엔 *무엇을 했는지*만 요약한다.
 
-**최종 갱신: 2026-07-27**
+**최종 갱신: 2026-07-28**
+
+## 🧱 플레이어 이동 구조 재설계 = ✅ADR 0001 확정 + 대시 폐기 (2026-07-28, `refactor/character`)
+> 구조 재설계 트랙의 **첫 결정**. 참조 = 사용자 제공 Apex 사격훈련장 영상(달리기→슬라이드→벽 매달리기/등반→공중→사격→ADS→장전)을 60fps 프레임·탄약 카운터로 실측 분해. 결정 기록 = **`Docs/Architecture/0001-player-movement-state-ownership.md`**(이 리포 첫 ADR, 인덱스 `Docs/Architecture/README.md`).
+- **채택**: 이동 상태의 주인 = **신규 `UFPSRCharacterMovementComponent`**(아직 미구현). GAS 는 쿨다운·무적·카드 수치만. 사격/애님BP/HUD 는 `CanFireInCurrentState()`·`GetSpreadMultiplier()`·`IsSliding()`·`IsOnWall()` 로 **질의만** 한다.
+- **불변식 9개** 확정(문서 §불변식). 핵심 = ①상태 주인 하나 ②클라 예측+서버 확인(서버 응답 대기형 이동 금지) ③수치는 GAS 어트리뷰트로 복제 ④사격은 상태를 모름 ⑤확산 주인은 heat 하나 ⑥애니메이션이 상태를 소유하지 않음 ⑦탈출 불가 상태 금지 ⑧프리즈/DBNO는 진행 중인 이동도 정지 ⑨수치는 데이터에.
+- **기각**: GAS 어빌리티가 상태 전이 결정(서버 보정 되감기 때 어빌리티는 안 되감겨 상태 주인이 둘로 갈라짐) · 현행 대시식 서버 RPC 확장(ping 46ms 러버밴딩).
+- **비목표**(사용자 확정): 월런 없음 · 움직이는 벽 매달리기 없음(바로 떨어짐) · **카드 확장은 수치·조건까지만**(새 이동 상태 추가 금지 — 이단점프/공중대시는 전부 수치·조건 범위).
+- **미결(구현 시점 연기)**: 슬라이드를 걷기모드 확장 vs `MOVE_Custom` — `저렴` 등급이고 외부 인터페이스가 축과 무관해 나중에 뒤집어도 파급 0.
+- **⚠️ 대시 폐기 완료**(사용자 결정 "나중에 불변식에 맞춰 재제작"): C++ 전용 코드 전체 + `Ability.Movement.Dash` 태그(참조 0건) 제거. **`RefreshPawnCollisionResponse` 는 함수 유지·`bDashing` 항만 제거** — `bGrace`(부활/프리즈 무적)·`bDowned`(DBNO 통과)가 계속 쓰므로 함수째 지웠다면 둘 다 깨졌음. `HandleRunStateChanged_Movement` 도 함수·`StopMovementImmediately()` 유지(낙하 중 프리즈 + 향후 슬라이드). `IA_Dash`+`IMC_Default` 키 매핑은 **유지**(재사용 예정, 현재 무동작). 기획은 유효 = `Docs/SSOT/PlayerFeel.md §2-13` 에 폐기사유·재제작 방침 기록.
+- **검증**: 빌드 `Result: Succeeded`(FPSRogueliteEditor Win64 Development, 링크까지) + `git diff` 재검토(변경 9파일, 의도 외 변경 0). **⏳ 남은 = PIE 사용자 확인 — 부활 후 무적/DBNO 통과가 그대로 동작하는지**(대시 제거가 공유 헬퍼를 건드렸으므로).
+- **다음** = 신규 `UFPSRCharacterMovementComponent` 구현(축 1 결정 포함) 또는 사용자가 지정하는 다음 구조 논의.
 
 ## 🔀 브랜치 전면 통합 = ✅완료 (2026-07-27) — 구조 재설계 착수
 > **사용자 결정**: 가장 기초 구조부터 다시 설계한다(**플레이어 캐릭터**부터). 흩어져 있던 작업 브랜치를 전부 `main` 으로 모으고, 재설계 브랜치 `refactor/character` 를 분기한다.

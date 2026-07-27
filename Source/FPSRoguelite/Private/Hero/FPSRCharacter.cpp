@@ -343,10 +343,6 @@ void AFPSRCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompo
 		EIC->BindAction(ADSAction, ETriggerEvent::Started, this, &AFPSRCharacter::Input_ADSPressed);
 		EIC->BindAction(ADSAction, ETriggerEvent::Completed, this, &AFPSRCharacter::Input_ADSReleased);
 	}
-	if (DashAction)
-	{
-		EIC->BindAction(DashAction, ETriggerEvent::Started, this, &AFPSRCharacter::Input_Dash);
-	}
 	if (MenuAction)
 	{
 		EIC->BindAction(MenuAction, ETriggerEvent::Started, this, &AFPSRCharacter::Input_Menu);
@@ -456,7 +452,7 @@ bool AFPSRCharacter::IsScopeVignetteEnabled() const
 
 bool AFPSRCharacter::IsIncapacitatedLocal() const
 {
-	// Not a live participant: DBNO (downed) OR Dead. Gates actions (fire/dash/swap/reload/ADS) + contact damage.
+	// Not a live participant: DBNO (downed) OR Dead. Gates actions (fire/swap/reload/ADS) + contact damage.
 	const AFPSRPlayerState* PS = GetPlayerState<AFPSRPlayerState>();
 	return !PS || !PS->IsAlive();
 }
@@ -509,8 +505,8 @@ void AFPSRCharacter::ApplyDownedLocomotion(bool bDowned)
 		MoveComp->MaxWalkSpeed = BaseWalkSpeed * Mult;
 	}
 
-	// Downed body should not physically block / get pushed by the swarm (mirror of the dash/grace pass-through).
-	// Recompute through the shared collision helper so it composes with any active dash/grace window and, being
+	// Downed body should not physically block / get pushed by the swarm (mirror of the grace-window pass-through).
+	// Recompute through the shared collision helper so it composes with any active grace window and, being
 	// keyed off the (already-updated) LifeState, restores enemy blocking on revive. This runs on the server
 	// (HandleOutOfHealth), the owning client (OnRep_LifeState) and revive (PerformRevive) — the same symmetric hook
 	// — so the DBNO pass-through is server+client symmetric with no extra RPC/OnRep.
@@ -614,22 +610,6 @@ void AFPSRCharacter::Input_ADSReleased(const FInputActionValue& Value)
 	ServerSetAiming(false);
 }
 
-void AFPSRCharacter::Input_Dash(const FInputActionValue& Value)
-{
-	if (IsRunFrozen() || IsIncapacitatedLocal())
-	{
-		return; // no dashing during the card-selection freeze
-	}
-	FVector Direction = GetLastMovementInputVector();
-	Direction.Z = 0.0f;
-	if (Direction.IsNearlyZero())
-	{
-		Direction = GetActorForwardVector();
-		Direction.Z = 0.0f;
-	}
-	ServerDash(Direction.GetSafeNormal());
-}
-
 void AFPSRCharacter::Input_Menu(const FInputActionValue& Value)
 {
 	// Release any held fire/ADS before opening the menu. The settings overlay is a NON-PAUSE Menu overlay, so once
@@ -676,7 +656,7 @@ void AFPSRCharacter::ServerReload_Implementation()
 
 void AFPSRCharacter::ServerSetAiming_Implementation(bool bNewAiming)
 {
-	// Mirror the ServerEquipSlot/ServerDash server gate: reject an in-flight ADS RPC during the freeze so the OnAim
+	// Mirror the ServerEquipSlot server gate: reject an in-flight ADS RPC during the freeze so the OnAim
 	// behavior hook can't fire while the run is globally stopped (W1 P3-3). Input_ADS already gates client-side.
 	if (IsRunFrozen() || IsIncapacitatedLocal()) { return; }
 	if (WeaponFire)
@@ -702,62 +682,6 @@ void AFPSRCharacter::ServerSetAiming_Implementation(bool bNewAiming)
 	}
 }
 
-void AFPSRCharacter::ServerDash_Implementation(FVector DashDirection)
-{
-	UWorld* World = GetWorld();
-	if (!World)
-	{
-		return;
-	}
-
-	// No dashing during the card-selection freeze (mirror the ServerEquipSlot server gate).
-	// Input_Dash already gates client-side, but a dash RPC in flight when the freeze replicates must be rejected
-	// on the server too, or the run is no longer globally stopped.
-	if (IsRunFrozen() || IsIncapacitatedLocal())
-	{
-		return;
-	}
-
-	// Cooldown gate (server-authoritative).
-	const float Now = World->GetTimeSeconds();
-	if ((Now - LastDashTime) < DashCooldown)
-	{
-		return;
-	}
-
-	FVector Direction = DashDirection;
-	Direction.Z = 0.0f;
-	if (Direction.IsNearlyZero())
-	{
-		Direction = GetActorForwardVector();
-		Direction.Z = 0.0f;
-	}
-	Direction = Direction.GetSafeNormal();
-	if (Direction.IsNearlyZero())
-	{
-		return;
-	}
-
-	LastDashTime = Now;
-
-	// Ignore other pawns (enemies + allies) for the dash window so the player can pass through a surround. Routed
-	// through the shared helper so it composes with a post-revive grace window (RefreshPawnCollisionResponse derives
-	// "dashing" from LastDashTime + DashDuration, just set above).
-	RefreshPawnCollisionResponse();
-
-	// Launch along the dash direction (keep current vertical velocity so air dashes feel natural).
-	LaunchCharacter(Direction * DashSpeed, true, false);
-
-	// End the collision-ignore window after DashDuration.
-	World->GetTimerManager().SetTimer(DashEndTimerHandle, this, &AFPSRCharacter::EndDash, FMath::Max(0.01f, DashDuration), false);
-}
-
-void AFPSRCharacter::EndDash()
-{
-	// Recompute rather than unconditionally block — a grace window may still want enemy pass-through.
-	RefreshPawnCollisionResponse();
-}
-
 void AFPSRCharacter::RefreshPawnCollisionResponse()
 {
 	UCapsuleComponent* Capsule = GetCapsuleComponent();
@@ -767,15 +691,14 @@ void AFPSRCharacter::RefreshPawnCollisionResponse()
 	}
 	const UWorld* World = GetWorld();
 	const float Now = World ? World->GetTimeSeconds() : 0.0f;
-	// Both windows derive from server timestamps so an overlapping dash + grace window compose correctly — whichever
-	// ends first doesn't restore enemy blocking while the other is still active.
-	const bool bDashing = (Now - LastDashTime) < DashDuration;
+	// The grace window derives from a server timestamp, so it composes with the downed state below — whichever ends
+	// first doesn't restore enemy blocking while the other is still active.
 	const bool bGrace = Now < GraceUntil;
 	// DBNO/Dead: the downed body passes through the swarm (no physical block/push), matching the damage i-frames
 	// (IsIncapacitatedLocal gates contact damage too). Reads the replicated LifeState, so it is valid on server and
-	// the owning client, and composes with the dash/grace windows exactly like they compose with each other.
+	// the owning client, and composes with the grace window exactly like the grace window composes with it.
 	const bool bDowned = IsIncapacitatedLocal();
-	Capsule->SetCollisionResponseToChannel(ECC_Pawn, (bDashing || bGrace || bDowned) ? ECR_Ignore : ECR_Block);
+	Capsule->SetCollisionResponseToChannel(ECC_Pawn, (bGrace || bDowned) ? ECR_Ignore : ECR_Block);
 }
 
 void AFPSRCharacter::BeginGraceWindow(float Seconds)
@@ -787,16 +710,16 @@ void AFPSRCharacter::BeginGraceWindow(float Seconds)
 	}
 	GraceUntil = World->GetTimeSeconds() + Seconds;
 
-	// Pass through enemy pawns for the grace window (mirrors the dash collision-ignore) so the player can walk out of a
-	// surround — the swarm that downed them (post-revive) or that closed in during the card freeze (post-freeze). The
-	// shared helper composes this with any active dash window.
+	// Pass through enemy pawns for the grace window so the player can walk out of a surround — the swarm that downed
+	// them (post-revive) or that closed in during the card freeze (post-freeze). The shared helper composes this with
+	// the downed (DBNO/Dead) pass-through.
 	RefreshPawnCollisionResponse();
 	World->GetTimerManager().SetTimer(GraceTimerHandle, this, &AFPSRCharacter::EndGraceWindow, Seconds, false);
 }
 
 void AFPSRCharacter::EndGraceWindow()
 {
-	// Recompute rather than unconditionally block — a dash may still be in its own collision-ignore window.
+	// Recompute rather than unconditionally block — the player may still be downed (DBNO/Dead pass-through).
 	RefreshPawnCollisionResponse();
 }
 
@@ -962,7 +885,7 @@ void AFPSRCharacter::TryBindVisionDelegate()
 	}
 
 	// Bind both run-state reactions together (lifecycle shared, gated by bVisionDelegateBound): the local-only vision
-	// PP and the authority-only movement halt (§2-2 freeze must stop an in-flight dash, not just gate new input).
+	// PP and the authority-only movement halt (§2-2 freeze must stop residual velocity, not just gate new input).
 	GS->OnRunStateChanged.AddDynamic(this, &AFPSRCharacter::HandleRunStateChanged_Vision);
 	GS->OnRunStateChanged.AddDynamic(this, &AFPSRCharacter::HandleRunStateChanged_Movement);
 	bVisionDelegateBound = true;
@@ -1020,10 +943,9 @@ void AFPSRCharacter::HandleRunStateChanged_Vision()
 void AFPSRCharacter::HandleRunStateChanged_Movement()
 {
 	// §2-2 freeze is a STATE gate (not time dilation), so the CharacterMovement keeps integrating while the run is
-	// paused. Input-driven moves already gate on IsRunFrozen, but a dash is an impulse (ServerDash -> LaunchCharacter)
-	// whose velocity — and its collision-ignore window — would otherwise carry the player across the frozen card screen
-	// (the sibling fire/equip/dash-INITIATION gates don't cover an already-launched dash). Run on the authority (the
-	// server owns every pawn here; CMC replicates the stop) and halt residual locomotion + cancel any live dash.
+	// paused. Input-driven moves already gate on IsRunFrozen, but residual velocity that isn't input-driven (an
+	// in-progress fall, and later any non-input locomotion state) would otherwise carry the player across the frozen
+	// card screen. Run on the authority (the server owns every pawn here; CMC replicates the stop) and halt it.
 	if (!HasAuthority())
 	{
 		return;
@@ -1043,17 +965,10 @@ void AFPSRCharacter::HandleRunStateChanged_Movement()
 
 	if (!bPaused)
 	{
-		return; // only act on entering the freeze; resume restores normal input-driven control (dash was cancelled)
+		return; // only act on entering the freeze; resume restores normal input-driven control
 	}
 
-	GetCharacterMovement()->StopMovementImmediately(); // kill the dash impulse / residual slide so the player is stopped
-	FTimerManager& TimerManager = World->GetTimerManager();
-	if (TimerManager.IsTimerActive(DashEndTimerHandle))
-	{
-		// Cancel the in-flight dash cleanly: drop the pending end-timer and restore pawn-collision blocking now.
-		TimerManager.ClearTimer(DashEndTimerHandle);
-		EndDash();
-	}
+	GetCharacterMovement()->StopMovementImmediately(); // kill residual velocity so the player is stopped
 }
 
 void AFPSRCharacter::ApplyVisionRestriction(bool bRestricted)
