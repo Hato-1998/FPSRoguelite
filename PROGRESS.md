@@ -4,9 +4,15 @@
 > **작업 단계를 끝낼 때마다, 그리고 중단 전 반드시 이 파일을 갱신하고 커밋한다.**
 > 확정 설계·기획·코드구조·규칙은 `Game.md`(**SSOT 허브** → 도메인별 `Docs/SSOT/*.md`, 작업별 라우팅은 허브 §0-1), **완료 작업 상세는 `git log --oneline`**. 여기엔 *무엇을 했는지*만 요약한다.
 
-**최종 갱신: 2026-07-20**
+**최종 갱신: 2026-07-27**
 
-## 🧭 폐루프 디렉터 P0a-0 센서 = ✅코드+헤드리스 골든 완료 · **PIE 2-client 사용자검증 대기** (2026-07-20, `phase/director-p0a0`, 미머지)
+## 🔀 브랜치 전면 통합 = ✅완료 (2026-07-27) — 구조 재설계 착수
+> **사용자 결정**: 가장 기초 구조부터 다시 설계한다(**플레이어 캐릭터**부터). 흩어져 있던 작업 브랜치를 전부 `main` 으로 모으고, 재설계 브랜치 `refactor/character` 를 분기한다.
+> - 통합(`--no-ff`, 4건) = `feat/neonv-fp-arms`(NEON-V 1인칭 팔·LPAMG 팩 제거) · `tooling/vibeue-proxy` · `phase/director-p0a0`(`fix/dbno-ff-hardening` 포함) · `phase/u22a-environment`(U22a 환경·CityGen 툴). `pilot/s1-cybercity-sector` 는 이미 main 에 포함돼 있어 제외.
+> - **아래 항목들의 "미머지" 표기는 이 통합으로 전부 해소**됐다. 각 항목에 남은 것은 **PIE 사용자 검증**뿐이다.
+> - 아키텍처 논의·결정 기록 방법론 = 스킬 `architecture-review`(결정문서는 `Docs/Architecture/NNNN-*.md`).
+
+## 🧭 폐루프 디렉터 P0a-0 센서 = ✅코드+헤드리스 골든 완료 · **PIE 2-client 사용자검증 대기** (2026-07-20, `phase/director-p0a0` → main 통합 2026-07-27)
 > 폐루프 "이야기꾼" 디렉터의 **첫 수직 슬라이스**(센서 워킹 스켈레톤). 목적 = "값이 맞나"가 아니라 **배관 불변식(생명주기 누수0·프리즈중 미진행·주입→출력 결정성·Front 매핑·enemy/boss 게이팅)**을 골든으로 잠그는 것. 설계 잠금 = `Docs/Review/20260720-plan-closed-loop-director.md §8·§9` + `20260720-p0a0-exec-prompt.md`. SSOT = `RunFlow §2-8-2`.
 - **구현(Opus 직접 — 서버권위·프리즈대칭·생명주기·훅 = 위임 카브아웃)**: 신규 `UFPSRDirectorSensorSubsystem`(서버전용 `UWorldSubsystem`, `HasServerAuthority()` 게이트, **복제 0**) + `FFPSRPlayerTelemetry`(고정크기 plain struct, 서버로컬 `TMap<TWeakObjectPtr<AFPSRPlayerState>,…>`). **신호 5개만**: HealthPct · IncomingDamageRate[Enemy]/[Boss] · DownedRecent01(B3) · MovementConfinement01(C1, 7필드 앵커) · FrontId. 순수 헬퍼(`ClassifyDamageSource`·`AdvanceConfinement`·`StepEwmaRate`·`ComputeDownedRecent01`·`ShouldAdvance`·`PruneInvalidTelemetry`) = 단일 진실원, 월드리스 골든으로 잠금.
 - **훅(각 1~2줄, 브릿지 시그니처 불변)**: `Hero/FPSRCharacter.cpp` — `ApplyContactDamage`(수락 히트 커밋 직후→IncomingRate, **source=Instigator 파생** enemy/boss만) + `HandleOutOfHealth`(→DownedRecent, 다운당 1회). `Core/FPSRGameMode.cpp` — `BeginPlay`(StartRun)·`Logout`(즉시 정리, PS 유효 시점). **FrontId = read-only `PS->GetCurrentMapId()` 점유 스냅샷**(`ComputeOccupancy` 무호출 → 액추에이터와 정합, 부작용 0).
@@ -14,12 +20,32 @@
 - **검증(Opus 직접)**: 빌드 `Result: Succeeded`(에디터 닫고 풀빌드, 새 UCLASS, UHT `-WarningsAsErrors` 통과) · 헤드리스 골든 `FPSRoguelite.Telemetry.*` 6종(SourceGating·Confinement·RateDowned·Determinism·FreezeNoProgress·Lifecycle) + `Smoke.ModuleLoads` = **7/7 Success, Queue Empty**. (Lifecycle 초판이 `NewObject<UObject>()` ensure로 Fail → 구체 UObject `UFPSRFlowFieldComputer` 키로 교정 후 통과.) **Codex 머지게이트 = codex CLI PATH 부재 → 규칙대로 패스, Opus 자체 적대검토로 대체(FrontId 정합·tombstone 구조검증 등 반영).**
 - **⏳ 남은 = PIE 2-client 라이브훅 게이트(사용자 스모크, 이원게이트의 나머지 반)**: 실제 DBNO→DownedRecent · 실제 적 데미지→IncomingRate · FF/자해 제외 · 문 넘어 FrontId 매핑·per-player 승계. 서버 콘솔 `FPSR.Telemetry.Dump`로 스냅샷/CSV 확인. **통과 시 `--no-ff` main 머지 → 다음 = P0a-1(계산기+훅 신호, 이원게이트)**. (레시피 = `L_Lobby` ▶Play 2-client, §⑧ PIE 레시피 재사용.)
 
-## 🔔 현재 상태 (2026-07-20 · 도시 빌드 툴 ✅완료·main 머지 · U22a 환경 진행중[D 대기] — **다음 세션 = D→A**)
+> 🔀 **2026-07-21 핸드오프 ② (U22a-A 건물 툴 = 실행 검증까지 ✅완료 · EUW 패널 가동 · Bake 리스크 해소)**:
+> - **커밋**: `be36b78d`(결함 8건) → `779c8bf5`(창문 규칙+편집도구) → `7a6ffe44`(EUW 셸+문서) → `c47c6852`(EUW 자동배선 불가 확정) → `6f7abb15`(초보자 가이드) → `06bcb584`(팔레트 명칭 정정) → `d3a68609`(EUW 배선, 사용자 저작). **상세 = `Docs/U22a-A_BuildingTool_ResumePrompt.md`(3차 갱신)**.
+> - ✅ **첫 실행 결함 8건 수정**: 회색 덩어리=SizingBox가 건물을 감쌈(→Preview 중 숨김) · 항아리 모양=셋백이 반 칸(125) 들여 격자 어긋남(→**셋백 기본 OFF**) · 지붕 타일 간격 125 고정이라 250 타일이 **4겹 중첩·875 돌출**(→메시 실측 크기로 산출, 36→9장) · 코니스 검증이 진짜 코니스를 탈락시킴(`Ceiling_Trim`의 `minZ=261`은 "층 천장"이라 정상 → **코니스를 코너와 분리**, 3→8종) · 반층 기둥(150) 채택(→높이 300 조건, 13→8종) · 위성 분해 부품/45도 코너 조각 혼입(→`_arm_`·`_dish_`·`_wing_`·`_45_` 제외).
+> - ✅ **창문 배치 규칙**(사용자 판정 "층마다 뒤죽박죽이라 건물로 안 보임"): **수직 일관**(칸 위치를 키로 고정 → 같은 자리는 위로 쭉 같은 창문, `facade_mode`=column/floor/building/random) + **지상층 분리**(`Base_` 붙은 벽=1층용, 도어도 전부 `Base_` 계열). 부수 발견: `ground` 플래그를 **정면에만** 넘겨 1층인데 옆·뒷면은 상층 벽을 쓰고 있었음 → 네 면 전달.
+> - ✅ **편집 도구 3종**(사용자 결정: **한 채씩 놓아가며 거리 조성** → 다듬기가 핵심): 생성 시 부모 태그에 `CityGenSize:WxDxF`·`CityGenSeed:N` 기록 → `reroll_selected()`(같은 자리·크기, 조합만 새로) / `change_floors(±1)`(**시드 유지**라 창문 그대로, 높이만) / `cycle_piece_mesh(±1)`(조각을 같은 카테고리 다음 후보로). `_build_one`이 공유 Random이 아니라 **자기 시드**를 받게 리팩터한 것이 토대.
+> - ✅ **EUW 패널 가동**: `/Game/Tools/CityGen/EUW_CityGen` — 셸은 AI 생성, **버튼 배치·배선은 사용자가 수작업**(정상 동작 확인). 🔴 **Python 자동 배선은 불가 확정**(재시도 금지): `load_object(bp,"WidgetTree")`로 트리와 위젯 객체는 만들 수 있으나 **`WidgetTree.RootWidget`이 읽기/쓰기 모두 protected**·`SetRootWidget` UFUNCTION 부재라 루트 지정 불가 + 노드 생성 API도 없음. 초보자 가이드 = **`Docs/CityGen_EUW_Setup_Guide.md`**(EUW 편집 중엔 팔레트가 `Editor Utility Button`을 대신 보여줌 — 일반 `Button` 상속이라 동일).
+> - ✅ **Bake(ISM) 콜리전 = 최대 리스크 해소**(실측): 플로우필드와 **동일 쿼리**(`FPSRFlowFieldComputer.cpp:1006` `ECC_WorldStatic` ObjectType)로 벽 관통 트레이스를 Bake 전/후 같은 좌표에 3발 → **전후 모두 블로킹 O, 충돌 지점 y=-11 동일**. ISM 14개 전부 `BlockAll`·`ECR_BLOCK`·`QUERY_AND_PHYSICS`·`ECC_WORLD_STATIC`, **인스턴스 합계 66 = 조각 66(누락 0)**. 드로우콜 66→14(4.7배, ISM 수는 **메시 종류 수**에 비례해 건물이 클수록 이득). 남은 것 = PIE 최종 확인.
+> - **사용자 결정 3건**: ①거리 조성 = **한 채씩**(블록 일괄 생성 코드는 넣되 **기본 OFF**, 켜면 맞닿는 면 벽/코니스/코너를 층 단위 생략) ②**간판은 사용자가 직접 배치**(자동배치 코드 넣었다가 되돌림. 짝 규약만 문서에 남김: `sign`이 `backing` 안쪽 12.5 묻힘) ③뷰포트가 밝은 회색인 건 조명이 아니라 **Unlit 모드**.
+> - **다음**: 사용자가 툴로 거리 조성 → 게임플레이 레이어 이식(룸·미션·문) → D(런 완주 → 쿡 → main 머지). ⚠️ `Map_CyberCity`는 여전히 **게임플레이 레이어 0**(미션스폰 0 → PIE 런이 보스까지 안 감).
 
-> **⚠️ 브랜치 상황(중요)**: 두 워크스트림이 갈려 있다.
-> - **`main`**: 도시 빌드 툴 완료·머지됨(`bf17ab38`) + ZenServer 포트픽스. **U22a 맵/룩은 아직 없음**.
-> - **`phase/u22a-environment`**: U22a 환경(L_GameFloor→Map_CyberCity 리네임·RunMap 전환·config·네온글로우 룩). **미머지** — D(런 완주 검증·L_Sandbox 삭제) 대기. **다음 세션 시작점**.
-> - A(도시 밀도 저작)는 툴+맵 둘 다 필요 → **D로 u22a를 main에 머지한 뒤** 착수.
+> 🔀 **2026-07-21 핸드오프 ① (U22a-A 건물 생성 툴 = "에셋 선택 + 미리보기", Phase 1 ✅완료)**:
+> - **방향(사용자 결정 2026-07-21)**: 프리셋 폐기 → **사용자가 종류별 에셋을 직접 고르는 툴**(창문벽 여러개·코너기둥·문·바닥/지붕·코니스·옥상프롭). 설정 그릇 = **C++ DataAsset**(사용자 결정: "C++ 작업·재빌드 코스트를 크게 여기지 말고 지금 단계에 가장 적합한 걸").
+> - ✅ **Phase 1 완료·커밋 `40679a86`**: ① C++ **`UFPSRCityGenConfig`**(`UPrimaryDataAsset`, `Source/FPSRoguelite/{Public,Private}/CityGen/`) — `Facades[]`/`Corner`/`Door`/`RoofFloor`/`CorniceTrim`/`RoofProps[]`/`RoofPropCount`/`Width`/`Depth`/`Floors`/`bSetback`, **각 필드가 곧 내장 에셋 피커(썸네일)** = "보여주고 고르는" UI를 공짜로 획득. ② `fpsr_citygen.py` **config 기반 리팩터**(`generate_from_config` + `load_config_from_dataasset`[이름 정규화 견고화] + `preview`/`confirm`/`clear` + 메뉴 6종), `DEFAULT_CONFIG` 폴백이라 **빈 설정으로도 미리보기 동작**. **빌드 `Result: Succeeded`**(FPSRogueliteEditor Win64 Development).
+> - 🔴 **왜 C++로 갔나(재조사 방지)**: `UDataAsset`/`UPrimaryDataAsset`은 **Blueprintable이 아니어서** BP로 DataAsset 하위클래스를 만들 수 없다 — VibeUE `create_blueprint`가 DataAsset 부모에서 계속 행/실패한 진짜 원인. 프로젝트에 blueprintable DataAsset 베이스도 없음 → **C++이 유일한 정공법**.
+> - 🔴 **하드 교훈(재발 방지)**: **VibeUE MCP는 세션 도중 에디터를 껐다 켜면 그 세션에 다시 안 붙는다**(실측: 빌드하려 종료 → 빌드 성공 → 재기동했으나 도구 전부 소실, ToolSearch no match). → **C++ 빌드가 끼는 에디터 작업은 반드시 2세션으로 계획**(세션A=코드+빌드+커밋+재개프롬프트 / 세션B=에디터 켠 채 시작해 저작).
+> - ✅ **2차 개편·커밋 `ec54e5a3` — 모듈 수집기 + Kit/Config 분리**(사용자 지적: "에셋 피커가 다른 메시도 다 보여줘서 규격 다른 걸 고르면 건물이 안 만들어진다 → 모듈러인 것만 수집해두고 그중에서만 고르게"): ① **`UFPSRCityGenKit`**(신규 C++) = 자동 수집 목록, **`UFPSRCityGenConfig`** = 단일값 4개를 **배열로** + `Kit` 참조. **분리 이유 = 재수집해도 사용자 프루닝이 안 날아가게.** ② Python `_measure`/`_classify`/`_validate` + `collect_modular_meshes`(스캔→실측→분류→검증→Kit 기록, **채택/탈락 사유 로그**) + `fill_config_from_kit` + 생성 시 풀 재검증(**무음 드롭 폐지**). 메뉴 8종. ③ **검증 기준은 카테고리별로 다름**: 파사드/도어=1칸(250)+피벗 엄격 / **코너·코니스=한 칸 내+바닥안착만**(250 배수 규칙 걸면 얇은 장식이라 기본값조차 전멸 — 내가 위임 결과에서 잡아낸 결함) / 루프바닥=125 배수 / 옥상소품=무검사. 500폭은 `멀티칸 미지원` 사유로 제외(구 260 무음가드 대체). ④ **빌드 `Result: Succeeded`**(2회차). 🔴 **실행 검증은 아직 0** — 이 메시들의 실제 치수/피벗을 한 번도 잰 적이 없어, **첫 Collect 로그가 최초 실측**이고 기준 조정은 그걸 보고 하는 게 순서.
+> - **남은 것 = `Docs/U22a-A_BuildingTool_ResumePrompt.md` §2**: ① **`DA_CityGenKit`(클래스 `FPSRCityGenKit`) 생성 — 아직 없음, 꼭 만들 것** + `DA_CityGenConfig`는 생성됨(`055b0733`). 둘 다 **`/Game/Tools/CityGen/`**(툴 에셋은 `/Game/Tools/` 아래로 모으는 규칙 — 사용자 결정 2026-07-21, 폴더 난립 정리). 경로가 달라도 `find_kit_asset()`/`find_config_asset()`이 클래스로 폴백 검색함 ② 스모크 테스트(Open Config→Place Box→Preview→Confirm/Bake) ③ **Phase 2 = EUW 플로팅 패널**(DetailsView(DA)+버튼 4개; 컨테이너 위젯 프로그래매틱 저작 = 크래시/손상 위험 주의). **새 세션은 반드시 에디터 켠 상태로 시작.**
+
+> 🔀 **2026-07-20 핸드오프 (이 브랜치 `phase/u22a-environment` = U22a-A 착수: PCG 도시 밀도)**:
+> - **방향 재설정(사용자 결정 2026-07-20)**: U22a = **환경(건물) 먼저 → 지형 확정 후 게임플레이 레이어 이식 → D**. 화이트박스 지형은 **최종 아님**(건물이 걷는 공간을 바꿈). **A 생성 방식 = UE PCG**(Python 스크립트/툴버튼 검토 후 채택). 건물 소스 = `Content/PolygonScifi/`(187M·883 에셋, 사이버펑크 시티 킷, **미커밋**).
+> - 🔴 **Map_CyberCity에 게임플레이 레이어 0개**(실측: 룸/미션스폰/문/스폰존 전부 0, 적스폰28·플로우필드4·SRS20만) = 리네임된 `L_GameFloor`. **지금 PIE 런은 보스까지 안 감**(미션스폰 지점 0 → `FPSRRunDirectorSubsystem.cpp:631`의 `TActorIterator<AFPSRMissionSpawnPoint>`). **정상·미결** — 이식은 **A(환경) 완료 후**. ⚠️ 종전 핸드오프가 A-3 step2 "게임플레이 레이어 이식"을 건너뛴 상태였음(이 세션 실측 확인, "D 대기"는 오판이었음).
+> - ✅ **step 0 완료(이 세션, 에디터 닫고)**: `main`→`u22a` 머지(`db31d6a9` — 도시툴 C++ 10파일+M_BlockoutGhost+config+director/SSOT 문서, **소스=main+주석2줄**) + **PCG 플러그인 활성**(`312e5df9`, `.uproject`). → u22a 빌드/재빌드 안전(툴 소스 포함). **검증 빌드 `Result: Succeeded`**(`FPSRogueliteEditor Win64 Development`, 0 에러, 신선 바이너리 → 새 세션 에디터 재빌드 불요).
+> - **재개 = `Docs/U22a-A_PCG_ResumePrompt.md`** — 새 세션을 **에디터 연결 상태로** 시작해 PCG 그래프 저작: perf 베이스라인 → 맵 설계(2계층: 스카이라인 배경 + 아레나 구조) → PCGGraph(StaticMeshSpawner=ISM+WorldStatic 콜리전+스트리트 마스크) → 생성 → **플로우필드/검증기/육안 검증**. 최대 리스크 **R1 = PCG ISM 콜리전 ↔ 런타임 플로우필드 다운트레이스 정합**.
+> - 도시 빌드 툴(수동 배치)= `bf17ab38` main 완료(`Docs/CityBuildTool_Design.md`). **PCG와 별개**(수동 터치업 병용 가능).
+
+## 🗄️ (이전) 현재 상태 (2026-07-20 · 도시 빌드 툴 ✅완료·main 머지 — U22a 최신 상황은 위 2026-07-21 핸드오프 ② 참조)
 
 ### 🏙️ 도시 빌드 툴 = ✅완료·main 머지 (2026-07-20, `phase/citytool-blockout`→main `bf17ab38`)
 > Trinity Building Editor(Steam) 참조. 목적 = U22a A-4 밀도 저작 가속. **기존 블록아웃 툴 확장**(새 모듈 X, 설계=`Docs/CityBuildTool_Design.md`). Tools > FPSR > 블록아웃 툴.
