@@ -6,6 +6,14 @@
 
 **최종 갱신: 2026-07-20**
 
+## 🧭 폐루프 디렉터 P0a-0 센서 = ✅코드+헤드리스 골든 완료 · **PIE 2-client 사용자검증 대기** (2026-07-20, `phase/director-p0a0`, 미머지)
+> 폐루프 "이야기꾼" 디렉터의 **첫 수직 슬라이스**(센서 워킹 스켈레톤). 목적 = "값이 맞나"가 아니라 **배관 불변식(생명주기 누수0·프리즈중 미진행·주입→출력 결정성·Front 매핑·enemy/boss 게이팅)**을 골든으로 잠그는 것. 설계 잠금 = `Docs/Review/20260720-plan-closed-loop-director.md §8·§9` + `20260720-p0a0-exec-prompt.md`. SSOT = `RunFlow §2-8-2`.
+- **구현(Opus 직접 — 서버권위·프리즈대칭·생명주기·훅 = 위임 카브아웃)**: 신규 `UFPSRDirectorSensorSubsystem`(서버전용 `UWorldSubsystem`, `HasServerAuthority()` 게이트, **복제 0**) + `FFPSRPlayerTelemetry`(고정크기 plain struct, 서버로컬 `TMap<TWeakObjectPtr<AFPSRPlayerState>,…>`). **신호 5개만**: HealthPct · IncomingDamageRate[Enemy]/[Boss] · DownedRecent01(B3) · MovementConfinement01(C1, 7필드 앵커) · FrontId. 순수 헬퍼(`ClassifyDamageSource`·`AdvanceConfinement`·`StepEwmaRate`·`ComputeDownedRecent01`·`ShouldAdvance`·`PruneInvalidTelemetry`) = 단일 진실원, 월드리스 골든으로 잠금.
+- **훅(각 1~2줄, 브릿지 시그니처 불변)**: `Hero/FPSRCharacter.cpp` — `ApplyContactDamage`(수락 히트 커밋 직후→IncomingRate, **source=Instigator 파생** enemy/boss만) + `HandleOutOfHealth`(→DownedRecent, 다운당 1회). `Core/FPSRGameMode.cpp` — `BeginPlay`(StartRun)·`Logout`(즉시 정리, PS 유효 시점). **FrontId = read-only `PS->GetCurrentMapId()` 점유 스냅샷**(`ComputeOccupancy` 무호출 → 액추에이터와 정합, 부작용 0).
+- **결정적 시계·프리즈**: 0.5s `FTimerManager` 타이머, `GS->IsRunPaused()` 중 early-return(unpaused fixed-step → SensorClock·EWMA·confinement 윈도우 미진행). 테스트는 `Advance(dt)` 직접 호출. 주입 하네스 = `FPSR.Telemetry.*`(`#if !UE_BUILD_SHIPPING`) + `DumpSnapshot`(CSV `logs/TelemetrySnapshot.csv`). **의미판단(Score) 없음 · per-enemy tick 0 · 파생/정규화/그룹핑 전부 P0a-1↑**.
+- **검증(Opus 직접)**: 빌드 `Result: Succeeded`(에디터 닫고 풀빌드, 새 UCLASS, UHT `-WarningsAsErrors` 통과) · 헤드리스 골든 `FPSRoguelite.Telemetry.*` 6종(SourceGating·Confinement·RateDowned·Determinism·FreezeNoProgress·Lifecycle) + `Smoke.ModuleLoads` = **7/7 Success, Queue Empty**. (Lifecycle 초판이 `NewObject<UObject>()` ensure로 Fail → 구체 UObject `UFPSRFlowFieldComputer` 키로 교정 후 통과.) **Codex 머지게이트 = codex CLI PATH 부재 → 규칙대로 패스, Opus 자체 적대검토로 대체(FrontId 정합·tombstone 구조검증 등 반영).**
+- **⏳ 남은 = PIE 2-client 라이브훅 게이트(사용자 스모크, 이원게이트의 나머지 반)**: 실제 DBNO→DownedRecent · 실제 적 데미지→IncomingRate · FF/자해 제외 · 문 넘어 FrontId 매핑·per-player 승계. 서버 콘솔 `FPSR.Telemetry.Dump`로 스냅샷/CSV 확인. **통과 시 `--no-ff` main 머지 → 다음 = P0a-1(계산기+훅 신호, 이원게이트)**. (레시피 = `L_Lobby` ▶Play 2-client, §⑧ PIE 레시피 재사용.)
+
 ## 🔔 현재 상태 (2026-07-20 · 도시 빌드 툴 ✅완료·main 머지 · U22a 환경 진행중[D 대기] — **다음 세션 = D→A**)
 
 > **⚠️ 브랜치 상황(중요)**: 두 워크스트림이 갈려 있다.

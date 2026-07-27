@@ -63,7 +63,7 @@
 > **구조 = 폴리모픽 Instanced 튜닝 객체**: `UFPSRMissionTuning`(Abstract·EditInlineNew) 베이스 + 미션 타입별 서브클래스(`UFPSRMissionTuning_HoldZone` 등, 그 타입 파라미터 보유). DA에 `UPROPERTY(Instanced) UFPSRMissionTuning* Tuning` 1개. 미션 액터가 `ServerActivate(Data)` 시 `Data->Tuning`을 자기 타입으로 캐스트해 읽음. **새 미션 타입 = 튜닝 서브클래스 추가만, 중앙 0수정**(카드 효과 폴리모픽과 동일 패턴, 확장성-우선). IsDataValid가 튜닝 클래스↔미션 클래스 매칭 검증.
 > **마이그레이션 = 소프트(P2③a)**: 미션 액터의 기존 튜닝 필드는 **fallback으로 유지**(`Data->Tuning` null/타입불일치 시 사용) → 기존 BP CDO 값 무손실. ③b에서 각 미션 DA에 Tuning 저작 후 PIE 검증, 이후 fallback 필드 제거(후속). `FPSR.Mission.ZoneRadius` 콘솔 오버라이드(`ResolveZoneRadius`)는 유지.
 
-#### 2-8-2. 폐루프 "이야기꾼" 디렉터 (설계 채택 2026-07-20 · 미구현 · 상세 `Docs/Review/20260720-plan-closed-loop-director.md`)
+#### 2-8-2. 폐루프 "이야기꾼" 디렉터 (설계 채택 2026-07-20 · **P0a-0 센서 구현**·나머지 미구현 · 상세 `Docs/Review/20260720-plan-closed-loop-director.md`)
 > 기존 **개루프** `UFPSRRunDirectorSubsystem`(적 수 = 파티레벨 XOR 시간만, 플레이어 상태 안 봄)을 **RimWorld 이야기꾼/L4D AI 디렉터식 폐루프**로 진화. 레퍼런스 8종 조사+plan-consult(Codex 4R) 수렴.
 - **계층 분리 = 계측/판단**: P0 센서(**측정만**, 중립명·통계변환·confidence) → 디렉터(난이도 **판단/결정**) → 액추에이터(스폰 위치/양·구성/미션). 센서 수정이 난이도 패치가 되지 않게 구조적으로 분리.
 - **단계**: P0 센서 → P1 공간선택(MAX거리·고립압박 넛지+상한) → P2 양·구성(밀도승수+로스터룰 확장+스폰포인트 per-biome) → P3 미션(도달밴드·행동트리거) → P4 아키타입(공중/방패) → P5 완급FSM+위협비트 예고.
@@ -71,6 +71,7 @@
 - **완급/집계**: 경량 상태(긴장/휴식, **휴식=적0 아닌 트리클 바닥**) · **MAX 집계**(제일 힘든 플레이어 기준) · 전역1벌 + per-Front 압력원장(**승계는 Front버킷만**, per-player 히스토리는 플레이어 따라감) · stress=enemy/boss 데미지만.
 - **미션 게이트** = `DueButGated`(시간 도달해도 게이트 off면 fired 미소모). **보스는 루프 밖**(기존 고정 BossTime 유지).
 - **사용자 결정**: 적 진폭(`UEnemyScalingProfile`)·성격 프로파일(카산드라/피비/랜디식)·미션게이트 튜닝 = **P5 이연**.
+- **구현 상태 — P0a-0 센서 워킹 스켈레톤 = ✅코드+헤드리스 골든 완료 · PIE 2-client 사용자검증 대기** (2026-07-20, `phase/director-p0a0`): 신규 **`UFPSRDirectorSensorSubsystem`**(서버전용 `UWorldSubsystem`, `HasServerAuthority()` 게이트, **복제 0**, 서버로컬 `TMap<TWeakObjectPtr<AFPSRPlayerState>, FFPSRPlayerTelemetry>` 고정크기). **신호 5개만**: HealthPct · IncomingDamageRate[Enemy]/[Boss] · DownedRecent01(B3) · MovementConfinement01(C1, 7필드 앵커+deadband/반경/히스테리시스) · FrontId. **배관 불변식(골든으로 잠금)**: StartRun/EndRun/Logout 명시 정리 + 매 집계 invalid WeakPtr prune(tombstone 0) · unpaused 결정적 `Advance(dt)`(0.5s 타이머, `GS->IsRunPaused()` 중 미진행) · 데미지 훅=`AFPSRCharacter::ApplyContactDamage`(source=Instigator 파생, **enemy/boss만** 카운트, 브릿지 시그니처 불변) · 다운 훅=`HandleOutOfHealth` · **FrontId = read-only `PS->GetCurrentMapId()` 점유 스냅샷**(`ComputeOccupancy` 무호출, 액추에이터와 정합) · 주입 하네스 `FPSR.Telemetry.*`(`#if !UE_BUILD_SHIPPING`) + `DumpSnapshot`(CSV). **의미판단(Score) 없음 · per-enemy tick 0 · 파생/정규화/그룹핑 전부 P0a-1↑**. 골든 6종(`FPSRoguelite.Telemetry.*` = SourceGating·Confinement·RateDowned·Determinism·FreezeNoProgress·Lifecycle) 통과. **다음 = P0a-1(계산기+훅 신호, 이원게이트)**.
 
 ### 2-11. 메타 프로그레션
 - `URogueliteSaveGame`(USaveGame) — 누적 재화, 업그레이드 트리 상태, 캐릭터/무기 해금

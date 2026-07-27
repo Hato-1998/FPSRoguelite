@@ -13,6 +13,7 @@
 #include "Card/FPSRCardPoolDataAsset.h"
 #include "Run/FPSRRunDirectorSubsystem.h"
 #include "Enemy/FPSREnemySpawnSubsystem.h"
+#include "Director/FPSRDirectorSensorSubsystem.h"
 #include "Engine/World.h"
 #include "GameFramework/GameStateBase.h"
 #include "TimerManager.h"
@@ -75,6 +76,13 @@ void AFPSRGameMode::BeginPlay()
 			RunDirector->SetActiveSchedule(RunSchedule);
 			RunDirector->StartRun();
 		}
+
+		// Closed-loop director sensor (P0a-0): fresh per-player telemetry baseline + arm the aggregation clock.
+		// (RunFlow §2-8-2). It observes run end via GameState->OnRunEnded on its own.
+		if (UFPSRDirectorSensorSubsystem* DirectorSensor = World->GetSubsystem<UFPSRDirectorSensorSubsystem>())
+		{
+			DirectorSensor->StartRun();
+		}
 	}
 
 	// Close the loop: when the run ends (EndRunFreeze, victory or defeat) travel back to the lobby. Subscribing
@@ -89,6 +97,17 @@ void AFPSRGameMode::Logout(AController* Exiting)
 {
 	Super::Logout(Exiting);
 	FPSRFlowLog::Event(this, TEXT("RUN-GM"), FString::Printf(TEXT("Logout: %s"), Exiting ? *Exiting->GetName() : TEXT("null")));
+
+	// Closed-loop director sensor (P0a-0): drop the leaver's telemetry NOW (the PlayerState is still valid here,
+	// before CleanupPlayerState). A freeze halts the lazy prune, so we can't defer this; reconnect = new baseline.
+	// (RunFlow §2-8-2)
+	if (UWorld* World = GetWorld())
+	{
+		if (UFPSRDirectorSensorSubsystem* DirectorSensor = World->GetSubsystem<UFPSRDirectorSensorSubsystem>())
+		{
+			DirectorSensor->OnPlayerLogout(Exiting);
+		}
+	}
 
 	// DEFER to next tick: Super::Logout runs BEFORE AController::Destroyed calls CleanupPlayerState, so the exiting
 	// PlayerState is still in GameState->PlayerArray right now. Recomputing here would still count the leaver — the

@@ -22,6 +22,7 @@
 #include "Hero/FPSRPlayerFeedbackComponent.h"
 #include "Hero/FPSRBlindspotAudioComponent.h"
 #include "Hero/FPSRReviveComponent.h"
+#include "Director/FPSRDirectorSensorSubsystem.h"
 #include "FPSRCollisionChannels.h"
 
 #include "Camera/CameraComponent.h"
@@ -507,6 +508,13 @@ void AFPSRCharacter::ApplyDownedLocomotion(bool bDowned)
 		}
 		MoveComp->MaxWalkSpeed = BaseWalkSpeed * Mult;
 	}
+
+	// Downed body should not physically block / get pushed by the swarm (mirror of the dash/grace pass-through).
+	// Recompute through the shared collision helper so it composes with any active dash/grace window and, being
+	// keyed off the (already-updated) LifeState, restores enemy blocking on revive. This runs on the server
+	// (HandleOutOfHealth), the owning client (OnRep_LifeState) and revive (PerformRevive) — the same symmetric hook
+	// — so the DBNO pass-through is server+client symmetric with no extra RPC/OnRep.
+	RefreshPawnCollisionResponse();
 }
 
 void AFPSRCharacter::Input_MoveForward(const FInputActionValue& Value)
@@ -763,7 +771,11 @@ void AFPSRCharacter::RefreshPawnCollisionResponse()
 	// ends first doesn't restore enemy blocking while the other is still active.
 	const bool bDashing = (Now - LastDashTime) < DashDuration;
 	const bool bGrace = Now < GraceUntil;
-	Capsule->SetCollisionResponseToChannel(ECC_Pawn, (bDashing || bGrace) ? ECR_Ignore : ECR_Block);
+	// DBNO/Dead: the downed body passes through the swarm (no physical block/push), matching the damage i-frames
+	// (IsIncapacitatedLocal gates contact damage too). Reads the replicated LifeState, so it is valid on server and
+	// the owning client, and composes with the dash/grace windows exactly like they compose with each other.
+	const bool bDowned = IsIncapacitatedLocal();
+	Capsule->SetCollisionResponseToChannel(ECC_Pawn, (bDashing || bGrace || bDowned) ? ECR_Ignore : ECR_Block);
 }
 
 void AFPSRCharacter::BeginGraceWindow(float Seconds)
@@ -822,6 +834,17 @@ void AFPSRCharacter::ApplyContactDamage(float DamageAmount, AActor* DamageInstig
 	}
 	LastDamagedTime = Now;
 
+	// Closed-loop director sensor (P0a-0): record the ACCEPTED incoming hit for IncomingDamageRate. Server-only;
+	// the sensor classifies the source from DamageInstigator (enemy/boss counted; FF/self/door/mission/env
+	// excluded) — the damage-bridge signature is unchanged. (RunFlow §2-8-2)
+	if (World)
+	{
+		if (UFPSRDirectorSensorSubsystem* Sensor = World->GetSubsystem<UFPSRDirectorSensorSubsystem>())
+		{
+			Sensor->NotifyPlayerDamageTaken(this, DamageAmount, DamageInstigator);
+		}
+	}
+
 	if (UAbilitySystemComponent* ASC = GetAbilitySystemComponent())
 	{
 		ASC->ApplyModToAttribute(UFPSRHealthSet::GetHealthAttribute(), EGameplayModOp::Additive, -DamageAmount);
@@ -852,6 +875,16 @@ void AFPSRCharacter::HandleOutOfHealth()
 			return; // already processed (idempotent: already DBNO or Dead)
 		}
 		PS->SetLifeState(EFPSRLifeState::DBNO);
+
+		// Closed-loop director sensor (P0a-0): record the Alive->DBNO edge for DownedRecent. Server-only,
+		// fires exactly once per down (the IsAlive guard above). (RunFlow §2-8-2)
+		if (UWorld* SensorWorld = GetWorld())
+		{
+			if (UFPSRDirectorSensorSubsystem* Sensor = SensorWorld->GetSubsystem<UFPSRDirectorSensorSubsystem>())
+			{
+				Sensor->NotifyPlayerDowned(PS);
+			}
+		}
 	}
 
 	// Stop firing and cancel any in-progress ability (e.g. the server-only ChargeLaser charge sequence) so a downed
