@@ -541,6 +541,11 @@ void UFPSRCharacterMovementComponent::UpdateCharacterStateBeforeMovement(float D
 		SlideCooldownRemaining = FMath::Max(0.0f, SlideCooldownRemaining - DeltaSeconds);
 	}
 
+	// Stance weights. Advanced here rather than on a tick of their own because this runs on every role — the engine
+	// calls it from PerformMovement for the owning client and the server AND from SimulateMovement for remote proxies —
+	// so one place keeps the camera, the speed cap and (later) every player's animation on the same clock.
+	AdvanceStanceBlends(DeltaSeconds);
+
 	// Wall hang. Sliding is ground-only and hanging is air-only, so this and the slide block below can never both be
 	// active — but the budget does have to be refreshed on the ground, which is the one moment both are quiet.
 	if (IsMovingOnGround())
@@ -700,25 +705,85 @@ void UFPSRCharacterMovementComponent::RemapGroundAccelForStanceChange()
 	}
 }
 
+float UFPSRCharacterMovementComponent::GetStanceTransitionProgress() const
+{
+	const float Target = IsCrouching() ? 1.0f : 0.0f;
+	const float Span = FMath::Abs(Target - StanceBlendStart);
+	if (Span <= KINDA_SMALL_NUMBER)
+	{
+		return 1.0f; // nothing to travel — the blend was already sitting where it is headed
+	}
+	return FMath::Clamp(FMath::Abs(StanceBlend - StanceBlendStart) / Span, 0.0f, 1.0f);
+}
+
+void UFPSRCharacterMovementComponent::BeginStanceTransition(float SpeedBeforeChange)
+{
+	// Restart the progress clock from wherever the blend currently is, NOT from the far end. Crouching and standing
+	// back up immediately then costs only the distance actually covered, and neither the camera nor the speed cap
+	// jumps at the moment the change reverses.
+	StanceBlendStart = StanceBlend;
+
+	// A slide owns its speed cap outright (GetMaxSpeed returns early while sliding), so there is nothing to ease away
+	// from — capturing the slide ceiling here would leave it in hand for a moment after the slide ended.
+	StanceSpeedFrom = bIsSliding ? 0.0f : FMath::Max(0.0f, SpeedBeforeChange);
+}
+
+namespace
+{
+	/** Step toward Target at a constant 1/Duration per second: a full 0 -> 1 change takes exactly Duration, and a
+	 *  partial one takes proportionally less. Fixing the RATE rather than the duration is what stops a barely-started
+	 *  change from taking as long to undo as a complete one. */
+	float AdvanceBlendTowards(float Current, float Target, float Duration, float DeltaSeconds)
+	{
+		if (Duration <= 0.0f)
+		{
+			return Target; // blending switched off
+		}
+		return FMath::FInterpConstantTo(Current, Target, DeltaSeconds, 1.0f / Duration);
+	}
+}
+
+void UFPSRCharacterMovementComponent::AdvanceStanceBlends(float DeltaSeconds)
+{
+	// IsCrouching() reads the replicated bIsCrouched, so remote players' stance weights are correct too. bIsSliding is
+	// local-only, which is why the slide weight carries the caveat documented on GetSlideBlend().
+	StanceBlend = AdvanceBlendTowards(StanceBlend, IsCrouching() ? 1.0f : 0.0f, StanceBlendDuration, DeltaSeconds);
+	SlideBlend = AdvanceBlendTowards(SlideBlend, bIsSliding ? 1.0f : 0.0f, SlideBlendDuration, DeltaSeconds);
+
+	// Retire the transition once it has settled so GetMaxSpeed goes straight back to the plain stance cap.
+	if (StanceSpeedFrom > 0.0f && GetStanceTransitionProgress() >= 1.0f)
+	{
+		StanceSpeedFrom = 0.0f;
+	}
+}
+
 void UFPSRCharacterMovementComponent::Crouch(bool bClientSimulation)
 {
 	const bool bWasCrouched = CharacterOwner && CharacterOwner->bIsCrouched;
+	// Sampled BEFORE Super flips the stance, so it is the cap the player actually had — including one still easing
+	// from an earlier change, which is what keeps a crouch/stand/crouch flicker continuous.
+	const float SpeedBeforeStanceChange = GetMaxSpeed();
+
 	Super::Crouch(bClientSimulation);
 	// Only on an actual transition — Crouch() no-ops when the capsule can't change, and remapping then would move the
 	// timer for a stance the character never entered.
 	if (CharacterOwner && CharacterOwner->bIsCrouched != bWasCrouched)
 	{
 		RemapGroundAccelForStanceChange();
+		BeginStanceTransition(SpeedBeforeStanceChange);
 	}
 }
 
 void UFPSRCharacterMovementComponent::UnCrouch(bool bClientSimulation)
 {
 	const bool bWasCrouched = CharacterOwner && CharacterOwner->bIsCrouched;
+	const float SpeedBeforeStanceChange = GetMaxSpeed();
+
 	Super::UnCrouch(bClientSimulation);
 	if (CharacterOwner && CharacterOwner->bIsCrouched != bWasCrouched)
 	{
 		RemapGroundAccelForStanceChange();
+		BeginStanceTransition(SpeedBeforeStanceChange);
 	}
 }
 
@@ -872,6 +937,22 @@ float UFPSRCharacterMovementComponent::GetMaxSpeed() const
 	{
 		MaxSpeed *= BackwardSpeedMultiplier;
 	}
+
+	// Stance change: ease from the cap in force when the stance flipped to the one it flipped to, on the same clock the
+	// camera uses, so the body slows down over the window the view sinks instead of in a couple of frames.
+	//
+	// Done by easing the RESULT rather than by blending MaxWalkSpeed against MaxWalkSpeedCrouched up front, because the
+	// latter also feeds FindCurveTimeForSpeed's normalisation: standing up would then land the ramp at half its curve
+	// against a still-crouched reference, and the cap would drop to 150 instead of holding at 300. Applying it here
+	// leaves the curve remap — and its "carry the speed across the stance change" behaviour — untouched.
+	if (StanceSpeedFrom > 0.0f && IsMovingOnGround())
+	{
+		const float TransitionProgress = GetStanceTransitionProgress();
+		if (TransitionProgress < 1.0f)
+		{
+			MaxSpeed = FMath::Lerp(StanceSpeedFrom, MaxSpeed, TransitionProgress);
+		}
+	}
 	return MaxSpeed;
 }
 
@@ -970,6 +1051,12 @@ FString UFPSRCharacterMovementComponent::GetLocomotionStateName() const
 	{
 		StateName += TEXT("  (wall used)");
 	}
+	// Only while it is actually moving: settled at 0 or 1 it says nothing, but mid-transition it separates "the blend
+	// is running" from "the blend already finished and the speed still looks wrong".
+	if (StanceBlend > KINDA_SMALL_NUMBER && StanceBlend < 1.0f - KINDA_SMALL_NUMBER)
+	{
+		StateName += FString::Printf(TEXT("  stance %.2f"), StanceBlend);
+	}
 	return StateName;
 }
 
@@ -1038,6 +1125,11 @@ void FSavedMove_FPSR::Clear()
 	SavedWallSlipElapsed = 0.0f;
 	SavedWallNormal = FVector::ZeroVector;
 	SavedWallEntryVelocity = FVector::ZeroVector;
+
+	SavedStanceBlend = 0.0f;
+	SavedStanceBlendStart = 0.0f;
+	SavedStanceSpeedFrom = 0.0f;
+	SavedSlideBlend = 0.0f;
 }
 
 bool FSavedMove_FPSR::CanCombineWith(const FSavedMovePtr& NewMove, ACharacter* InCharacter, float MaxDelta) const
@@ -1064,6 +1156,16 @@ bool FSavedMove_FPSR::CanCombineWith(const FSavedMovePtr& NewMove, ACharacter* I
 		{
 			return false;
 		}
+
+		// A stance change in flight is easing the speed cap every frame, and folding two of those moves would replay
+		// the whole span at one cap instead of the two the client used. Super's own guard (MaxSpeed differing by more
+		// than MaxSpeedThresholdCombine = 10) happens to catch this at 60fps, where the cap moves ~33 cm/s per frame —
+		// but that margin shrinks with framerate and with a longer StanceBlendDuration, so don't lean on it. The window
+		// is 0.15s, so refusing outright costs nothing measurable.
+		if (SavedStanceSpeedFrom > 0.0f || Other->SavedStanceSpeedFrom > 0.0f)
+		{
+			return false;
+		}
 	}
 	return Super::CanCombineWith(NewMove, InCharacter, MaxDelta);
 }
@@ -1087,6 +1189,11 @@ void FSavedMove_FPSR::SetMoveFor(ACharacter* C, float InDeltaTime, FVector const
 		SavedWallSlipElapsed = Movement->WallSlipElapsed;
 		SavedWallNormal = Movement->WallNormal;
 		SavedWallEntryVelocity = Movement->WallEntryVelocity;
+
+		SavedStanceBlend = Movement->StanceBlend;
+		SavedStanceBlendStart = Movement->StanceBlendStart;
+		SavedStanceSpeedFrom = Movement->StanceSpeedFrom;
+		SavedSlideBlend = Movement->SlideBlend;
 	}
 }
 
@@ -1114,6 +1221,15 @@ void FSavedMove_FPSR::PrepMoveFor(ACharacter* C)
 		Movement->WallSlipElapsed = SavedWallSlipElapsed;
 		Movement->WallNormal = SavedWallNormal;
 		Movement->WallEntryVelocity = SavedWallEntryVelocity;
+
+		// The stance weight feeds the walk-speed cap, so a replay has to resume from the same point on the blend or it
+		// re-simulates at a different speed. The slide weight rides along for a lesser reason: a replay re-runs time
+		// that was already simulated, so without this it would advance twice over that span and the pose would land
+		// early.
+		Movement->StanceBlend = SavedStanceBlend;
+		Movement->StanceBlendStart = SavedStanceBlendStart;
+		Movement->StanceSpeedFrom = SavedStanceSpeedFrom;
+		Movement->SlideBlend = SavedSlideBlend;
 	}
 }
 

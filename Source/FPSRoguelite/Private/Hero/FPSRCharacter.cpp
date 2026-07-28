@@ -54,11 +54,9 @@ AFPSRCharacter::AFPSRCharacter(const FObjectInitializer& ObjectInitializer)
 	// player character gets it, including any Blueprint subclass, without per-asset wiring that could be forgotten.
 	: Super(ObjectInitializer.SetDefaultSubobjectClass<UFPSRCharacterMovementComponent>(ACharacter::CharacterMovementComponentName))
 {
-#if ENABLE_DRAW_DEBUG
-	PrimaryActorTick.bCanEverTick = true; // debug-only: on-screen health readout (replaced by HUD in P3)
-#else
-	PrimaryActorTick.bCanEverTick = false;
-#endif
+	// Needed in every build now: the stance camera blend has to keep moving the eye height after the stance itself has
+	// flipped. Four player pawns, so this is unrelated to the per-actor budget the 200-300 enemies are held to.
+	PrimaryActorTick.bCanEverTick = true;
 
 	GetCapsuleComponent()->InitCapsuleSize(34.0f, 88.0f);
 	// Player uses a distinct object channel so enemies can block the player while ignoring EACH OTHER (the swarm
@@ -181,10 +179,15 @@ void AFPSRCharacter::DrawMovementDebug(UCanvas* Canvas, APlayerController* PC)
 	Canvas->DrawText(Font, StateText, Canvas->SizeX - LineWidth - RightMargin, 24.0f + LineHeight + 2.0f);
 }
 
+#endif
+
 void AFPSRCharacter::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
 
+	UpdateStanceCamera();
+
+#if ENABLE_DRAW_DEBUG
 	// Debug scaffolding (replaced by HUD in P3): on-screen health / dead readout for the local player.
 	if (GEngine && IsLocallyControlled())
 	{
@@ -211,12 +214,18 @@ void AFPSRCharacter::Tick(float DeltaSeconds)
 			GEngine->AddOnScreenDebugMessage((uint64)(UPTRINT)this + 1, 0.0f, FColor::Cyan, RunMsg);
 		}
 	}
-}
 #endif
+}
 
 void AFPSRCharacter::BeginPlay()
 {
 	Super::BeginPlay();
+
+	// Tick after the movement component so CachedCameraWorldZ is the eye position movement actually left behind this
+	// frame. Without it the next stance change would hold the view to a position one movement step stale, and the
+	// blend would start from slightly the wrong place.
+	AddTickPrerequisiteComponent(GetCharacterMovement());
+	CachedCameraWorldZ = FirstPersonCamera ? FirstPersonCamera->GetComponentLocation().Z : 0.0f;
 
 #if ENABLE_DRAW_DEBUG
 	// Movement readout. Registered for every pawn (the draw itself early-outs on non-local ones) because
@@ -521,26 +530,86 @@ bool AFPSRCharacter::IsScopeVignetteEnabled() const
 	return IsScopeVisualActive() && CachedScopeDescriptor.bScopeVignette;
 }
 
-void AFPSRCharacter::ApplyEyeHeightToCamera()
+float AFPSRCharacter::GetStanceEyeTravel() const
 {
-	if (FirstPersonCamera)
+	const ACharacter* DefaultCharacter = GetDefault<ACharacter>(GetClass());
+	const UCharacterMovementComponent* MoveComp = GetCharacterMovement();
+	if (!DefaultCharacter || !MoveComp)
 	{
-		FVector CameraRelative = FirstPersonCamera->GetRelativeLocation();
-		CameraRelative.Z = BaseEyeHeight;
+		return 0.0f;
+	}
+	// Both measured from the feet, so the difference is exactly how far the view drops between the two stances.
+	const float StandingEye = GetDefaultHalfHeight() + DefaultCharacter->BaseEyeHeight;
+	const float CrouchedEye = MoveComp->GetCrouchedHalfHeight() + CrouchedEyeHeight;
+	return FMath::Abs(StandingEye - CrouchedEye);
+}
+
+void AFPSRCharacter::BeginStanceCameraBlend()
+{
+	if (!FirstPersonCamera)
+	{
+		return;
+	}
+
+	// Where the camera would sit right now with nothing held back: the movement component has already resized and moved
+	// the capsule, and Super has already switched BaseEyeHeight, so this is the new stance's finished position.
+	const float NominalWorldZ = GetCapsuleComponent()->GetComponentLocation().Z + BaseEyeHeight;
+
+	// Hold the view exactly where it ended last frame and let UpdateStanceCamera ease it from there. Measuring the jump
+	// rather than predicting it is what makes this right in every case — on the ground the capsule is re-anchored at the
+	// feet, in the air at its centre, and on a remote proxy (DBNO spectating a team-mate) it is not moved at all.
+	// The bound only exists so a respawn or teleport landing on the same frame can't strand the camera; it is not a
+	// tuning value.
+	const float SanityLimit = FMath::Max(GetStanceEyeTravel(), 1.0f) * 2.0f;
+	CameraEyeOffsetStart = FMath::Clamp(CachedCameraWorldZ - NominalWorldZ, -SanityLimit, SanityLimit);
+}
+
+void AFPSRCharacter::UpdateStanceCamera()
+{
+	if (!FirstPersonCamera)
+	{
+		return;
+	}
+
+	float EyeOffset = 0.0f;
+	if (!FMath::IsNearlyZero(CameraEyeOffsetStart))
+	{
+		// The clock belongs to the movement component, which owns the stance (invariant 1). Sharing it is what makes the
+		// view, the walk-speed cap and — once it is authored — the stance animation finish on the same frame.
+		const UFPSRCharacterMovementComponent* FPSRMovement = GetFPSRMovement();
+		const float Progress = FPSRMovement ? FPSRMovement->GetStanceTransitionProgress() : 1.0f;
+
+		// Eased rather than linear: a constant-rate drop stops dead at the end and reads as a clunk.
+		EyeOffset = CameraEyeOffsetStart * (1.0f - FMath::SmoothStep(0.0f, 1.0f, Progress));
+		if (FMath::IsNearlyZero(EyeOffset))
+		{
+			CameraEyeOffsetStart = 0.0f; // settled
+			EyeOffset = 0.0f;
+		}
+	}
+
+	FVector CameraRelative = FirstPersonCamera->GetRelativeLocation();
+	const float DesiredRelativeZ = BaseEyeHeight + EyeOffset;
+	if (!FMath::IsNearlyEqual(CameraRelative.Z, DesiredRelativeZ))
+	{
+		CameraRelative.Z = DesiredRelativeZ;
 		FirstPersonCamera->SetRelativeLocation(CameraRelative);
 	}
+
+	// Recorded after the move, so the next stance change has this frame's finished eye position to hold on to.
+	CachedCameraWorldZ = FirstPersonCamera->GetComponentLocation().Z;
 }
 
 void AFPSRCharacter::OnStartCrouch(float HalfHeightAdjust, float ScaledHalfHeightAdjust)
 {
 	Super::OnStartCrouch(HalfHeightAdjust, ScaledHalfHeightAdjust); // refreshes BaseEyeHeight -> CrouchedEyeHeight
-	ApplyEyeHeightToCamera();
+	BeginStanceCameraBlend();
 }
 
 void AFPSRCharacter::OnEndCrouch(float HalfHeightAdjust, float ScaledHalfHeightAdjust)
 {
 	Super::OnEndCrouch(HalfHeightAdjust, ScaledHalfHeightAdjust); // restores BaseEyeHeight from the class default
-	ApplyEyeHeightToCamera();
+	BeginStanceCameraBlend();
 }
 
 UFPSRCharacterMovementComponent* AFPSRCharacter::GetFPSRMovement() const

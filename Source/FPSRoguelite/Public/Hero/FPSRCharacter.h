@@ -68,9 +68,11 @@ public:
 	 *  locally-controlled owner keeps the default camera-component path. */
 	virtual void CalcCamera(float DeltaTime, struct FMinimalViewInfo& OutResult) override;
 
-#if ENABLE_DRAW_DEBUG
+	/** Drives the stance camera blend (and, in debug builds, the on-screen readouts). Ticks after the movement
+	 *  component so the cached eye position is the one movement actually left behind this frame. */
 	virtual void Tick(float DeltaSeconds) override;
 
+#if ENABLE_DRAW_DEBUG
 	/** Top-right movement readout (speed + locomotion state), drawn through the engine's debug-draw service because
 	 *  AddOnScreenDebugMessage can only stack at the top LEFT, where the existing HP/run debug already lives. Registered
 	 *  for the local player only; toggle with FPSR.Movement.Debug. */
@@ -197,8 +199,17 @@ public:
 	void MulticastFireCosmetics();
 
 protected:
-	/** Put the first-person camera at the current BaseEyeHeight (capsule-relative). Shared by the crouch overrides. */
-	void ApplyEyeHeightToCamera();
+	/** Place the first-person camera for this frame: the current BaseEyeHeight plus whatever is left of the stance
+	 *  transition's held-back offset. Runs every frame from Tick — the eye height has to keep moving after the stance
+	 *  itself has already flipped. */
+	void UpdateStanceCamera();
+
+	/** Called from the crouch overrides once the capsule and BaseEyeHeight have already changed. Measures how far the
+	 *  view was about to jump and holds it back by exactly that much, so UpdateStanceCamera can ease it away. */
+	void BeginStanceCameraBlend();
+
+	/** Full distance the eye travels between standing and crouching, in cm. Only used to bound the held-back offset. */
+	float GetStanceEyeTravel() const;
 
 	void InitAbilitySystem();
 
@@ -499,6 +510,15 @@ protected:
 	bool bWeaponHiddenForScope = false;
 
 	// --- Procedural aim-down-sights (owner-local) ---
+	/** Height (cm) the camera is currently held back from its nominal eye position, measured at the instant the stance
+	 *  changed. Eased to 0 across the stance transition; 0 means no blend in flight. Owner-local presentation. */
+	float CameraEyeOffsetStart = 0.0f;
+
+	/** World Z the camera ended last frame at. The reference the next stance change holds the view to — measuring the
+	 *  jump beats predicting it, because the capsule is re-anchored at the feet on the ground, at its centre in the
+	 *  air, and not moved at all on a remote proxy. */
+	float CachedCameraWorldZ = 0.0f;
+
 	/** FirstPersonArms relative-to-camera transform captured on BeginPlay (the "hip" base the ADS interps to/from). */
 	FVector BaseArmsRelLoc = FVector::ZeroVector;
 	FRotator BaseArmsRelRot = FRotator::ZeroRotator;

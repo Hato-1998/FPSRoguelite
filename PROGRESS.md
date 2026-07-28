@@ -36,6 +36,14 @@
 - **트레이스 = 프레임당 1회**. 진입 프로브는 **가슴 높이**(무릎 높이 상자를 안 잡게), 유지 프로브는 **발 근처**(발이 벽 꼭대기를 넘는 순간 미스 = 등반 완료 판정이 공짜, 벽 파괴도 같은 미스 = **불변식 7 자동 충족**).
 - **턱 넘김 부스트**(`WallTopBoostForward/Up`) = 등반 중 벽을 잃으면 앞·위로 가속. **없으면 기능이 성립 안 함**(다 올라가도 캡슐이 벽 위로 못 올라타 도로 떨어짐). 사용자 승인 후 추가.
 - **재부착 = 공중 체공 1회당 1번**(`bWallHangConsumed`, 착지 시 해제). 쿨다운만 두면 "등반 1.5s(≈390cm) → 쿨다운 0.5s 낙하(≈120cm)"가 순증이라 임의 높이 벽을 무한 사다리로 오를 수 있다.
+- **✅ 자세 전환 블렌딩(2026-07-29, 2차 PIE 피드백)** — 앉기↔슬라이드↔서기가 "뚝뚝 끊긴다" → **카메라 눈높이 · 걷기 속도 상한 · 애님BP용 블렌드 값**이 **하나의 시계**(`StanceBlendDuration` 0.15s)로 움직인다. **상태 전환 자체(캡슐·`bIsCrouched`·슬라이드 진입)는 즉시 유지**(사용자 결정 — 조작 반응 희생 없음).
+  - **주인 = 무브먼트 컴포넌트**: `GetStanceBlend()`(0서기↔1앉기) · `GetSlideBlend()` · `GetStanceTransitionProgress()`. 갱신은 `UpdateCharacterStateBeforeMovement` 한 곳 — 엔진이 `PerformMovement`(소유클라·서버) **와 `SimulateMovement`(원격 프록시) 양쪽에서** 부르므로 모든 역할이 커버된다.
+  - **등속 블렌딩**(`FInterpConstantTo`): 완전 전환 = 정확히 Duration, **중간에 뒤집으면 간 거리만큼만** 되돌아온다(0.05s 끊으면 복귀도 0.05s). 시간 고정이면 연타 시 흐물거린다.
+  - **카메라 = "직전 프레임 위치를 붙잡고 이완"**. `StanceBlend`로 눈높이를 직접 계산하지 **않는** 이유 = 캡슐 리사이즈 기준점이 상황마다 다르다(지상=발 고정 / 공중=중심 고정 / **원격 프록시는 캡슐이 아예 안 움직임** — 엔진에서 그 `MoveComponent`가 `!bClientSimulation` 안). 튄 거리를 **재서** 흡수하면 원인과 무관하게 맞고 DBNO 관전에서도 맞다. 진행도만 `StanceBlend`에서 받는다 → 셋이 같은 프레임에 끝난다.
+  - **속도**: 앉을 때 600→300이 **0.03초(2프레임)** 였다(실효 마찰 8×2=16 + 감속 2048). 이제 0.15초. 단순히 `Lerp(MaxWalkSpeed, MaxWalkSpeedCrouched, StanceBlend)`로 하면 **`FindCurveTimeForSpeed`의 정규화 기준이 같이 흔들려 일어설 때 300→150으로 오히려 더 떨어진다** → 커브 로직은 그대로 두고 **결과값을 이완**(`StanceSpeedFrom`). 일어설 때 기존 커브 램프(300→600 이어서 가속)가 그대로 살아있다.
+  - **`AFPSRCharacter` 액터 틱 상시화**(종전 디버그 빌드 전용) + `AddTickPrerequisiteComponent(무브먼트)` — 카메라 참조 위치가 한 무브먼트 스텝 낡지 않게. 플레이어 폰 4개라 적 200~300 예산과 무관.
+  - **예측**: `StanceBlend`가 속도 상한에 쓰이므로 `FSavedMove_FPSR`에 저장(+`StanceBlendStart`·`StanceSpeedFrom`·`SlideBlend`). **전환 중 무브 조합 금지** — 엔진의 `MaxSpeedThresholdCombine`(10)이 60fps에선 우연히 막아주지만(프레임당 33cm/s) 고프레임에선 통과한다(Codex 지적).
+  - ⚠️ **원격 플레이어의 `IsSliding()`/`GetSlideBlend()`는 신뢰 불가** — 슬라이드 상태가 복제되지 않고 `bWantsToCrouch`가 프록시에 없다. **애니메이션 배선 시점에 결정 필요**(복제 비트 / 커스텀 플래그 / 애님BP 추정). `GetStanceBlend()`는 복제되는 `bIsCrouched` 기반이라 프록시에서도 정확.
 - **진입 모멘텀 + 조준되는 벽점프**(1차 PIE 피드백 반영, 사용자 결정): ①붙는 순간 속도를 `WallEntryMomentumDuration`(0.25s) 동안 살린다 — 벽면을 따라 **실제로 미끄러지고**(진입 속도의 벽면 성분), 그 안에 점프하면 **진입 속도 전체 크기**가 벽점프에 얹힌다(정면 충돌도 보상됨, `WallJumpMaxSpeed` 1200으로 상한). 종전엔 진입 즉시 속도를 0으로 지워 `WallLateralSpeed`(120)+`WallStickSpeed`(60)=**정확히 134**로 죽었다. ②벽점프 방향 = **시선 + 벽 법선 반반**(`WallJumpAimBlend` 0.5, 0=벽수직·1=시선). 벽을 마주본 채 점프해도 다시 처박히지 않도록 `WallJumpMinOutward`(0.35)로 **바깥 성분 최소 보장**. ③`WallJumpUpSpeed`(기본 0=일반 점프 높이) 추가. 디버그 STATE에 남은 모멘텀 `+숫자` 표시.
 
 ### 엔진 함정 / 결정 (전부 근거 있음)

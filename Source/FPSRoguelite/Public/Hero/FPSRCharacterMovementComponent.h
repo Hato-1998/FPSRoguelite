@@ -71,6 +71,28 @@ public:
 	UFUNCTION(BlueprintPure, Category = "FPSR|Movement")
 	bool IsSliding() const { return bIsSliding; }
 
+	/** Stance as a weight rather than a switch: 0 fully standing, 1 fully crouched, moving between them at a constant
+	 *  rate over StanceBlendDuration. The camera, the walk-speed cap and (later) the AnimBP's stance poses all read
+	 *  THIS, which is what keeps the view, the body and the animation on one clock instead of three.
+	 *  Raw and linear on purpose — shaping belongs to whoever consumes it.
+	 *  Invariant 6: this is a weight to blend WITH, never a state to decide FROM. "Is the player crouched" is
+	 *  IsCrouching(); a half-finished blend is not a stance. */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Movement")
+	float GetStanceBlend() const { return StanceBlend; }
+
+	/** Same idea for the slide pose: 0 not sliding, 1 fully sliding, over SlideBlendDuration.
+	 *  NOTE for animation work: this follows bIsSliding, which is derived locally and NOT replicated — it is only
+	 *  trustworthy on the owning client and the server, not for remote players. GetStanceBlend() has no such limit
+	 *  (bIsCrouched is replicated). */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Movement")
+	float GetSlideBlend() const { return SlideBlend; }
+
+	/** How far the CURRENT stance change has run, 0 at the moment it started to 1 when it settles. Distinct from
+	 *  GetStanceBlend(): a change interrupted halfway restarts this at 0 from wherever the blend had reached, which is
+	 *  what lets the camera and the speed cap ease from their present values instead of jumping to a fresh curve. */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Movement")
+	float GetStanceTransitionProgress() const;
+
 	/** True while hanging on a wall. Derived from the movement mode rather than kept in a flag of its own: the engine
 	 *  already ships the mode in every move packet and restores it on a correction, so a second copy could only ever
 	 *  drift out of agreement with it. */
@@ -256,6 +278,20 @@ protected:
 	 *  speed — which is what the design asks for. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Movement|Air", meta = (ClampMin = "0.0"))
 	float MaxFallSpeed = 0.0f;
+
+	// --- Stance blending (presentation + the walk-speed cap; the stance itself still changes instantly) ---
+
+	/** How long a full stand <-> crouch change takes to settle. The stance, the capsule and the slide entry all still
+	 *  flip on the input frame — this only governs how long the camera, the walk-speed cap and the AnimBP take to
+	 *  catch up, so the controls stay as responsive as they are today.
+	 *  The rate is constant, so a change interrupted a third of the way through takes a third of this to undo. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Movement|Stance", meta = (ClampMin = "0.0"))
+	float StanceBlendDuration = 0.15f;
+
+	/** Same for the slide pose weight. Separate from the stance because entering a slide should read as a sharper
+	 *  commitment than simply crouching. Presentation only — it feeds no speed or capsule decision. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Movement|Stance", meta = (ClampMin = "0.0"))
+	float SlideBlendDuration = 0.12f;
 
 	// --- Wall hang (ADR 0001: one state, three exits — climb / slip off / jump off) ---
 
@@ -458,6 +494,31 @@ protected:
 	/** Move GroundAccelElapsed onto the equivalent point of the stance's curve. No-op without a curve. */
 	void RemapGroundAccelForStanceChange();
 
+	// --- Stance blending ---
+
+	/** Step both blend weights toward the stance the player is actually in, and retire a finished transition. */
+	void AdvanceStanceBlends(float DeltaSeconds);
+
+	/** Open a new stance transition, remembering the speed cap in force a moment ago so GetMaxSpeed can ease away from
+	 *  it rather than dropping to the new stance's cap in a couple of frames. */
+	void BeginStanceTransition(float SpeedBeforeChange);
+
+	/** Stance weight, 0 standing .. 1 crouched. Saved for replay because the walk-speed cap reads it — it stopped
+	 *  being presentation-only the moment it could change where the player ends up (invariant 2). */
+	float StanceBlend = 0.0f;
+
+	/** StanceBlend at the instant the current transition began; the denominator of GetStanceTransitionProgress(). */
+	float StanceBlendStart = 0.0f;
+
+	/** Ground speed cap at that same instant, or 0 when no transition is in flight. GetMaxSpeed eases from here to
+	 *  the stance's normal cap, which is what turns the old two-frame drop into a full StanceBlendDuration. */
+	float StanceSpeedFrom = 0.0f;
+
+	/** Slide pose weight, 0 .. 1. Nothing physical reads it, but it is saved alongside the stance weights all the same:
+	 *  a correction replays moves whose time has already been simulated once, so an unsaved weight would advance twice
+	 *  over that span and the slide pose would arrive early. Cheap to keep the animation clock honest. */
+	float SlideBlend = 0.0f;
+
 	// --- Wall hang ---
 
 	/** One sphere sweep straight ahead, starting at HeightAboveCapsuleBottom cm up the capsule and reaching
@@ -556,6 +617,13 @@ public:
 	float SavedWallSlipElapsed = 0.0f;
 	FVector SavedWallNormal = FVector::ZeroVector;
 	FVector SavedWallEntryVelocity = FVector::ZeroVector;
+
+	//~ Stance blending. The first three drive the walk-speed cap; the slide weight rides along so a replay can't run the
+	//~ animation clock at double speed over the span it re-simulates.
+	float SavedStanceBlend = 0.0f;
+	float SavedStanceBlendStart = 0.0f;
+	float SavedStanceSpeedFrom = 0.0f;
+	float SavedSlideBlend = 0.0f;
 };
 
 /** Client prediction data that allocates FSavedMove_FPSR instead of the stock saved move. */
