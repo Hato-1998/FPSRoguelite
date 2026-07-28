@@ -160,26 +160,6 @@ void AFPSRCharacter::DrawMovementDebug(UCanvas* Canvas, APlayerController* PC)
 
 	const FString SpeedText = FString::Printf(TEXT("SPEED %.0f"), FPSRMovement->GetPlanarSpeed());
 	const FString StateText = FString::Printf(TEXT("STATE %s"), *FPSRMovement->GetLocomotionStateName());
-	// Jump diagnostics: pressed / CanJump passes / engine's crouch-jump gate / jumps used / vertical velocity.
-	// Enough to tell "input never arrived" from "input arrived but a gate refused it" without attaching a debugger.
-	const FString JumpText = FString::Printf(TEXT("JUMP press:%d can:%d gate:%d n:%d velZ:%.0f  crouched:%d"),
-		bPressedJump ? 1 : 0,
-		CanJump() ? 1 : 0,
-		FPSRMovement->CanAttemptJump() ? 1 : 0,
-		JumpCurrentCount,
-		GetVelocity().Z,
-		bIsCrouched ? 1 : 0);
-
-	// CanJump() is an AND of two independent things: ACharacter's own rules, and this class's incapacitated gate.
-	// Split them out — "gate:1 but can:0" is only actionable once you can see WHICH of the two said no.
-	// ACharacter:: qualifies the call so it reads the engine rules directly rather than re-entering our override.
-	const FString GateText = FString::Printf(TEXT("GATE engine:%d incap:%d frozen:%d maxN:%d wasJump:%d hold:%.2f"),
-		ACharacter::CanJumpInternal_Implementation() ? 1 : 0,
-		IsIncapacitatedLocal() ? 1 : 0,
-		IsRunFrozen() ? 1 : 0,
-		JumpMaxCount,
-		bWasJumping ? 1 : 0,
-		GetJumpMaxHoldTime());
 
 	UFont* Font = GEngine ? GEngine->GetMediumFont() : nullptr;
 	if (!Font)
@@ -197,16 +177,8 @@ void AFPSRCharacter::DrawMovementDebug(UCanvas* Canvas, APlayerController* PC)
 	Canvas->DrawText(Font, SpeedText, Canvas->SizeX - LineWidth - RightMargin, 24.0f);
 
 	Canvas->StrLen(Font, StateText, LineWidth, LineHeight);
-	Canvas->SetDrawColor(FPSRMovement->IsSliding() ? FColor::Orange : FColor::White);
+	Canvas->SetDrawColor(FPSRMovement->IsOnWall() ? FColor::Cyan : (FPSRMovement->IsSliding() ? FColor::Orange : FColor::White));
 	Canvas->DrawText(Font, StateText, Canvas->SizeX - LineWidth - RightMargin, 24.0f + LineHeight + 2.0f);
-
-	Canvas->StrLen(Font, JumpText, LineWidth, LineHeight);
-	Canvas->SetDrawColor(FColor::Silver);
-	Canvas->DrawText(Font, JumpText, Canvas->SizeX - LineWidth - RightMargin, 24.0f + (LineHeight + 2.0f) * 2.0f);
-
-	Canvas->StrLen(Font, GateText, LineWidth, LineHeight);
-	Canvas->SetDrawColor(FColor::Silver);
-	Canvas->DrawText(Font, GateText, Canvas->SizeX - LineWidth - RightMargin, 24.0f + (LineHeight + 2.0f) * 3.0f);
 }
 
 void AFPSRCharacter::Tick(float DeltaSeconds)
@@ -1157,12 +1129,13 @@ void AFPSRCharacter::HandleRunStateChanged_Movement()
 
 	GetCharacterMovement()->StopMovementImmediately(); // kill residual velocity so the player is stopped
 
-	// Invariant 8: gating the START of special locomotion is not enough — a slide already in progress has to end too,
-	// or it carries the player across the frozen card screen. (The movement component also self-exits on the same
-	// gate, so this is belt-and-braces for the authority side, which is the one that matters for position.)
+	// Invariant 8: gating the START of special locomotion is not enough — a slide or a wall hang already in progress
+	// has to end too, or it carries the player across the frozen card screen. (The movement component also self-exits
+	// on the same gate, so this is belt-and-braces for the authority side, which is the one that matters for position.)
 	if (UFPSRCharacterMovementComponent* FPSRMovement = GetFPSRMovement())
 	{
 		FPSRMovement->StopSliding();
+		FPSRMovement->StopWallHang();
 	}
 }
 

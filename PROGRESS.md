@@ -23,9 +23,34 @@
   - **디버그**: 우측 상단 `SPEED`/`STATE`(+슬라이드 쿨다운) — 엔진 DebugDrawService(좌상단 `AddOnScreenDebugMessage`는 기존 HP/런 디버그가 점유). 토글 `FPSR.Movement.Debug 0`.
   - **검증**: 빌드 `Result: Succeeded`(UHT `-WarningsAsErrors` 포함) + 커브 값 읽기 대조(`CURVE OK`×2). ⏳ **PIE = 사용자**(예측 정합성은 원리상 헤드리스로 검증 불가 — 2-client 필요). 작업 맵 = **`Content/Maps/TestWorld.umap`**(리팩토링 기간 작업 맵, 사용자 결정).
 - **✅ 2단계 후속 전부 완료(2026-07-28, 사용자 PIE 확인 완료)** — 아래 ⑨ 핸드오프 참조.
-- **다음** = **벽 매달리기·등반·벽점프(3단계)** / GAS 어트리뷰트 연결(카드→이동 수치, 불변식 3) / `GetSpreadMultiplier()`의 heat 시스템 소비 배선 / 대시 재제작. **무기 DataAsset을 `Content/Config/Weapon/`으로 이동 = 무기 작업 착수 시점에**(사용자 결정 2026-07-28, 에디터에서 이동+Fix Up Redirectors 필요).
+- **✅ 3단계 = 벽 매달리기 코드 완료(2026-07-28)** — `CMOVE_WallHang`(`MOVE_Custom`) + `PhysCustom()` 직접 구현. **상태 1개·출구 3개**(W 유지→등반 / W 해제→미끄러진 뒤 낙하 / 점프→벽 법선 방향으로 튕김) + 안전 출구 4개(벽 소실·시간 상한·프리즈/DBNO·바닥 착지). `IsOnWall()`은 **무브먼트 모드에서 파생**(별도 복제 bool 없음 — 엔진이 이미 이동 패킷에 싣고 보정 시 복원). 빌드 `Result: Succeeded`. ⏳ **PIE = 사용자**. 아래 ⑨ 핸드오프 참조.
+- **다음** = GAS 어트리뷰트 연결(카드→이동 수치, 불변식 3) / `GetSpreadMultiplier()`의 heat 시스템 소비 배선 / 대시 재제작. **무기 DataAsset을 `Content/Config/Weapon/`으로 이동 = 무기 작업 착수 시점에**(사용자 결정 2026-07-28, 에디터에서 이동+Fix Up Redirectors 필요).
 
-## ⑨ 핸드오프 (2026-07-28, `refactor/character`) — 슬라이드/앉기/점프 완료 · **다음 = 벽 매달리기 3단계**
+## ⑩ 핸드오프 (2026-07-28, `refactor/character`) — **벽 매달리기(3단계) 코드 완료 · PIE 사용자 확인 대기**
+
+> 빌드 `Result: Succeeded`(UHT `-WarningsAsErrors` 포함, 링크까지). 변경 3파일 = 무브먼트 컴포넌트 `.h/.cpp` + `FPSRCharacter.cpp`(프리즈 훅 1줄 + 디버그 readout). 콘텐츠 산출물 없음.
+
+### 구현 요약
+- **`CMOVE_WallHang`**(`EFPSRCustomMovementMode`) + `PhysCustom()` = 엔진 `PhysFlying` 구조를 그대로 따름(중력 없음·`CalcVelocity` 미호출 → 입력이 벽에서 밀어내지 못함). `IsOnWall()`은 **무브먼트 모드에서 파생**.
+- **새 예측 상태 4종**(`FSavedMove_FPSR`, 전부 로컬 재생용 = **전송 0**): `WallHangElapsed` · `WallSlipElapsed` · `bWallHangConsumed` · `WallNormal`. `CanCombineWith`는 **매달리는 동안 무브 조합을 아예 금지**(엔진 `FSavedMove_Character::CanCombineWith`가 packed movement mode를 비교하지 않음 — 엔진 소스 확인).
+- **트레이스 = 프레임당 1회**. 진입 프로브는 **가슴 높이**(무릎 높이 상자를 안 잡게), 유지 프로브는 **발 근처**(발이 벽 꼭대기를 넘는 순간 미스 = 등반 완료 판정이 공짜, 벽 파괴도 같은 미스 = **불변식 7 자동 충족**).
+- **턱 넘김 부스트**(`WallTopBoostForward/Up`) = 등반 중 벽을 잃으면 앞·위로 가속. **없으면 기능이 성립 안 함**(다 올라가도 캡슐이 벽 위로 못 올라타 도로 떨어짐). 사용자 승인 후 추가.
+- **재부착 = 공중 체공 1회당 1번**(`bWallHangConsumed`, 착지 시 해제). 쿨다운만 두면 "등반 1.5s(≈390cm) → 쿨다운 0.5s 낙하(≈120cm)"가 순증이라 임의 높이 벽을 무한 사다리로 오를 수 있다.
+
+### 엔진 함정 / 결정 (전부 근거 있음)
+1. **`CanAttemptJump()`가 `IsMovingOnGround() || IsFalling()`** — 매달리기는 둘 다 아니라 **벽점프가 원천 봉쇄**. `|| IsOnWall()` 추가.
+2. **`JumpIsAllowedInternal()`의 점프 예산** — `JumpMaxCount=1`이면 점프해서 벽에 붙는 순간 예산이 0이라 벽점프 불가. 벽 진입 시 `JumpCurrentCount = Min(현재, MaxCount-1)`로 **딱 한 번치만 환급**(0으로 리셋하면 이단점프 카드에서 공중 점프가 순증 — Codex 지적). ⚠️ 환급이 **진입 시점**인 이유 = `CheckJumpInput`이 `DoJump` **전에** `CanJump()`(예산)를 본다. 부작용 = 벽점프 안 하고 미끄러져도 점프 1회가 남는다(공중 1회로 상한).
+3. **`ProcessLanded()`를 직접 부르면 안 된다** — `SetPostLandedPhysics`가 `if (IsFalling())`로 감싸여 있어 `MOVE_Custom`에서 부르면 **모드 전환이 통째로 스킵**돼 벽 모드에 갇힌다. 바닥 착지는 `MOVE_Falling`으로 넘겨 다음 틱의 `PhysFalling`이 정상 착지시킨다(`Landed` 알림만 1프레임 늦음).
+4. **`SlideAlongSurface`가 `FHitResult&`를 덮어쓴다** — 두 번째 스윕 결과로 바뀌므로 바닥 판정은 **호출 전에** 읽어야 한다(아니면 아래로 미끄러져 바닥에 닿는 걸 놓친다).
+5. **벽이 사라진 프레임의 점프** — 재프로브 실패 시 `Super::DoJump`로 흘려보내면 "없는 벽에서 수직 점프"가 승인된다. `StopWallHang(); return false;`로 그 프레임엔 점프를 만들지 않는다(Codex 지적).
+
+### ⚠️ PIE에서 가장 먼저 볼 것 (설계 판단 필요)
+- 🔴 **슬라이드로 벽에 부딪히는 흐름은 지금 작동하지 않는다.** 진입 조건이 **`IsFalling()`(공중)** 이라 지상에서 벽으로 돌진하면 그냥 멈춘다. 이건 핸드오프 §"진입 = 공중 + 벽 충돌 + W 유지"와 승인된 플랜을 그대로 따른 결과지만, **ADR 0001의 "정상 흐름"은 `달리기 → 슬라이드 → 벽 접촉 → 매달리기`** 라 서로 어긋난다. 지상 진입을 열려면 조건이 하나 더 필요하다(예: 슬라이드 중이거나 최소 속도 이상일 때만) — 안 그러면 **벽 보고 W만 눌러도 계속 붙는다**. → **사용자 결정 필요.**
+- 프리즈(카드 선택) 중 벽에 매달려 있으면 **손을 놓고 떨어진다**(공중에 있던 플레이어가 프리즈 중에도 중력으로 떨어지는 기존 동작과 동일). 벽에 **핀으로 고정**해두는 쪽이 나으면 별도 처리가 필요하다.
+- 가슴 프로브는 맞고 발 프로브는 빗나가는 지형(가슴 높이 난간)은 붙자마자 턱 넘김으로 넘어간다 — 결과가 "난간을 타 넘음"이라 자연스럽긴 하나 의도한 건 아니다.
+- 수치 16개(`FPSR|Movement|Wall`)는 **뼈대 값**이다. 감각 조정은 BP 디폴트에서.
+
+## ⑨ 핸드오프 (2026-07-28, `refactor/character`) — 슬라이드/앉기/점프 완료
 
 > 컨텍스트 소진으로 세션 인계. **코드+콘텐츠 모두 커밋·푸시됨**(커브·BP·맵은 이번 작업 산출물이라 동반 커밋 — 사용자 승인). 빌드 `Result: Succeeded`, PIE 사용자 확인 완료.
 
@@ -42,18 +67,9 @@
 
 **구조**: 커브를 **정규화(0~1)로 전환** — `GetSpeedCurveScale()`·기준속도 중복·빠른진입 분기가 전부 소멸. 곱하는 기준 = 서기 `MaxWalkSpeed` / 앉기 `MaxWalkSpeedCrouched` / 슬라이드 **진입속도**. 무브먼트 프로퍼티 전부 **`FPSR|Movement|{Ground,Slide,Air,Spread}`** 로 묶음.
 
-### 다음에 할 코드 작업 (3단계 = 벽 매달리기)
-ADR 0001 이 이미 정해둔 것: **벽 매달리기는 `MOVE_Custom`**(중력·바닥이 없어 `PhysWalking` 에서 재사용할 게 없음). 슬라이드와 달리 `PhysCustom()` 을 직접 구현해야 한다(엔진 기본은 빈 함수).
-- `UFPSRCharacterMovementComponent` 에 `CMOVE_WallHang` 커스텀 모드 + `PhysCustom()` 구현.
-- 상태 1개 + **출구 3개**: W 유지→등반 / W 해제→미끄러져 낙하 / 점프→벽에서 튕겨나감. 등반 중 **제한적 좌우 이동** 허용(사용자 확정).
-- 진입 = 공중 + 벽 충돌 + W 유지. **불변식 7**: 벽이 파괴돼도 빠져나올 수 있어야 함 → **매 프레임 벽 존재 확인**(등반이 어차피 벽 위치를 필요로 하므로 추가 비용 아님).
-- `IsOnWall()` 은 이미 선언돼 있고 지금은 `return false` — 여기를 채우면 애님BP/HUD 배선 불요.
-- **매달리기 중 사격 불가**가 유일한 `CanFireInCurrentState()` false 케이스(영상 실측: 무기가 화면에서 사라짐).
-- 새 예측 상태는 `FSavedMove_FPSR` 에 저장/복원 필수(기존 6개와 같은 패턴).
-
-### 주의 / 블로커
+### 주의 / 블로커 (⑩에도 그대로 유효)
 - **Live Coding 락**: 에디터가 켜져 있으면 빌드가 `Unable to build while Live Coding is active` 로 실패한다(코드 문제 아님). 빌드 전 에디터 종료.
-- **디버그 4줄 유지 중**(`SPEED`/`STATE`/`JUMP`/`GATE`, 우측 상단). 사용자 지시로 **벽 매달리기 작업 후 `JUMP`/`GATE` 2줄 삭제**. 토글 `FPSR.Movement.Debug 0`.
+- **디버그 = `SPEED`/`STATE` 2줄**(우측 상단). ⑩에서 사용자 지시대로 `JUMP`/`GATE` 2줄 삭제 완료. 토글 `FPSR.Movement.Debug 0`.
 - 커브 생성 시 **시작·끝 2키만** 만들 것(사용자 지시). 중간 키를 채우면 편집 불가 상태가 된다.
 - `MaxFallSpeed` 는 기본 0(비활성) 유지 — 사용자가 값 미정.
 - **미완**: 불변식 3(GAS 어트리뷰트로 이동 수치 변경) · `GetSpreadMultiplier()` 를 heat 시스템이 실제 소비하는 배선(현재 값만 제공, 소비자 없음) · 대시 재제작.
