@@ -22,7 +22,41 @@
   - **속도 곡선 = 절대값**(사용자 결정): `/Game/Config/Character/Curve_GroundSpeed`(X=초,Y=0→600) · `Curve_SlideSpeed`(X=초,Y=900→300, **진입속도로 상한**). 헤드리스 생성(CSV 임포트 경로 — `UCurveFloat::FloatCurve`는 파이썬 미노출) + 값 읽어서 검증. 카드로 MaxWalkSpeed 상승 시 `SpeedCurveReferenceSpeed` 대비 자동 스케일. **미할당 시 등가속/등감속 폴백**.
   - **디버그**: 우측 상단 `SPEED`/`STATE`(+슬라이드 쿨다운) — 엔진 DebugDrawService(좌상단 `AddOnScreenDebugMessage`는 기존 HP/런 디버그가 점유). 토글 `FPSR.Movement.Debug 0`.
   - **검증**: 빌드 `Result: Succeeded`(UHT `-WarningsAsErrors` 포함) + 커브 값 읽기 대조(`CURVE OK`×2). ⏳ **PIE = 사용자**(예측 정합성은 원리상 헤드리스로 검증 불가 — 2-client 필요). 작업 맵 = **`Content/Maps/TestWorld.umap`**(리팩토링 기간 작업 맵, 사용자 결정).
-- **다음** = 벽 매달리기·등반·벽점프(3단계) / GAS 어트리뷰트 연결(카드→이동 수치, 불변식 3) / `GetSpreadMultiplier()`의 heat 시스템 소비 배선 / 대시 재제작. **무기 DataAsset을 `Content/Config/Weapon/`으로 이동 = 무기 작업 착수 시점에**(사용자 결정 2026-07-28, 에디터에서 이동+Fix Up Redirectors 필요).
+- **✅ 2단계 후속 전부 완료(2026-07-28, 사용자 PIE 확인 완료)** — 아래 ⑨ 핸드오프 참조.
+- **다음** = **벽 매달리기·등반·벽점프(3단계)** / GAS 어트리뷰트 연결(카드→이동 수치, 불변식 3) / `GetSpreadMultiplier()`의 heat 시스템 소비 배선 / 대시 재제작. **무기 DataAsset을 `Content/Config/Weapon/`으로 이동 = 무기 작업 착수 시점에**(사용자 결정 2026-07-28, 에디터에서 이동+Fix Up Redirectors 필요).
+
+## ⑨ 핸드오프 (2026-07-28, `refactor/character`) — 슬라이드/앉기/점프 완료 · **다음 = 벽 매달리기 3단계**
+
+> 컨텍스트 소진으로 세션 인계. **코드+콘텐츠 모두 커밋·푸시됨**(커브·BP·맵은 이번 작업 산출물이라 동반 커밋 — 사용자 승인). 빌드 `Result: Succeeded`, PIE 사용자 확인 완료.
+
+### 이번 세션에서 한 일
+**엔진 함정 6건 발견·수정**(전부 PIE 없이는 안 보이는 것들):
+1. `ACharacter::CanJumpInternal_Implementation` = `!IsCrouched() && JumpIsAllowedInternal()` — 크라우치 차단이 `CanAttemptJump` 말고 **여기에도** 있어 앉기/슬라이드 중 점프가 원천 불가. **두 곳 다** 풀어야 했다.
+2. 슬라이드 중 `GetMaxAcceleration()=0` 으로 막았더니 `Acceleration = GetMaxAcceleration() * InputVector` 라 **입력 방향 벡터까지 0** → WASD 조향이 무시되고 시선만 따라감. 가속 차단 위치를 `CalcVelocity`(Super 미호출)로 옮겨 해결.
+3. `PhysWalking` 이 `GroundFriction`(8)×`BrakingFrictionFactor`(2)=**실효 16** 을 브레이킹에 넘겨 900→250이 **0.08초** — 슬라이드가 순간정지로 보임.
+4. `CanCrouchInCurrentState()` 가 `IsFalling()` 도 허용 → 공중 앉기/슬라이드 가능했음.
+5. `SlideMaxDuration`(1.6s)이 커브 길이보다 짧아 커브 하강 구간이 **실행된 적 없음**. 종료 후 크라우치 걷기 상한(`MaxWalkSpeedCrouched`=300)이 "커브가 300으로 급락"처럼 보였다. → 커브 있으면 **커브 길이 = 지속시간**.
+6. 진입 부스트 상한이 `SlideMaxSpeed`(1400) 하나뿐이라 **점프-슬라이드 반복으로 900→1350→1400 계단식 누적**. → `SlideMaxEntrySpeed`(900) 분리, 단 "올려주기만 하고 깎지 않음"(내리막 관성 보존).
+
+**기능**: 슬라이드 조향(WASD / 무입력 시 시선 추종, `SlideTurnRateDegrees`) · **경사 슬라이드**(법선 수평성분=내리막방향·크기=sin θ → 내리막 가속 + 커브 시간 지연, 오르막 반대) · 뒷걸음 감속 0.75(걷기=입력방향 / 슬라이드=**헤딩** 기준) · 앉기 속도 커브 + **자세 전환 시 커브 시간 재매핑**(300→600 이어서 가속) · `MaxFallSpeed`(기본 0=비활성) · `AirControl` 0.05→**0.4**.
+
+**구조**: 커브를 **정규화(0~1)로 전환** — `GetSpeedCurveScale()`·기준속도 중복·빠른진입 분기가 전부 소멸. 곱하는 기준 = 서기 `MaxWalkSpeed` / 앉기 `MaxWalkSpeedCrouched` / 슬라이드 **진입속도**. 무브먼트 프로퍼티 전부 **`FPSR|Movement|{Ground,Slide,Air,Spread}`** 로 묶음.
+
+### 다음에 할 코드 작업 (3단계 = 벽 매달리기)
+ADR 0001 이 이미 정해둔 것: **벽 매달리기는 `MOVE_Custom`**(중력·바닥이 없어 `PhysWalking` 에서 재사용할 게 없음). 슬라이드와 달리 `PhysCustom()` 을 직접 구현해야 한다(엔진 기본은 빈 함수).
+- `UFPSRCharacterMovementComponent` 에 `CMOVE_WallHang` 커스텀 모드 + `PhysCustom()` 구현.
+- 상태 1개 + **출구 3개**: W 유지→등반 / W 해제→미끄러져 낙하 / 점프→벽에서 튕겨나감. 등반 중 **제한적 좌우 이동** 허용(사용자 확정).
+- 진입 = 공중 + 벽 충돌 + W 유지. **불변식 7**: 벽이 파괴돼도 빠져나올 수 있어야 함 → **매 프레임 벽 존재 확인**(등반이 어차피 벽 위치를 필요로 하므로 추가 비용 아님).
+- `IsOnWall()` 은 이미 선언돼 있고 지금은 `return false` — 여기를 채우면 애님BP/HUD 배선 불요.
+- **매달리기 중 사격 불가**가 유일한 `CanFireInCurrentState()` false 케이스(영상 실측: 무기가 화면에서 사라짐).
+- 새 예측 상태는 `FSavedMove_FPSR` 에 저장/복원 필수(기존 6개와 같은 패턴).
+
+### 주의 / 블로커
+- **Live Coding 락**: 에디터가 켜져 있으면 빌드가 `Unable to build while Live Coding is active` 로 실패한다(코드 문제 아님). 빌드 전 에디터 종료.
+- **디버그 4줄 유지 중**(`SPEED`/`STATE`/`JUMP`/`GATE`, 우측 상단). 사용자 지시로 **벽 매달리기 작업 후 `JUMP`/`GATE` 2줄 삭제**. 토글 `FPSR.Movement.Debug 0`.
+- 커브 생성 시 **시작·끝 2키만** 만들 것(사용자 지시). 중간 키를 채우면 편집 불가 상태가 된다.
+- `MaxFallSpeed` 는 기본 0(비활성) 유지 — 사용자가 값 미정.
+- **미완**: 불변식 3(GAS 어트리뷰트로 이동 수치 변경) · `GetSpreadMultiplier()` 를 heat 시스템이 실제 소비하는 배선(현재 값만 제공, 소비자 없음) · 대시 재제작.
 
 ## 🔀 브랜치 전면 통합 = ✅완료 (2026-07-27) — 구조 재설계 착수
 > **사용자 결정**: 가장 기초 구조부터 다시 설계한다(**플레이어 캐릭터**부터). 흩어져 있던 작업 브랜치를 전부 `main` 으로 모으고, 재설계 브랜치 `refactor/character` 를 분기한다.

@@ -11,6 +11,10 @@ UFPSRCharacterMovementComponent::UFPSRCharacterMovementComponent()
 	// Crouch is engine-native (bWantsToCrouch is already predicted and already in the move packet), so the slide can
 	// ride on it without a custom flag — but it only works if crouching is actually enabled on the component.
 	NavAgentProps.bCanCrouch = true;
+
+	// The engine default of 0.05 leaves essentially no air steering, which doesn't fit a design where the player
+	// jumps out of slides, fights mid-air and lands into cover. Overridable per-hero in the Blueprint.
+	AirControl = 0.4f;
 }
 
 bool UFPSRCharacterMovementComponent::IsSpecialMovementAllowed() const
@@ -50,11 +54,21 @@ void UFPSRCharacterMovementComponent::StartSliding()
 {
 	bIsSliding = true;
 	SlideElapsed = 0.0f;
+	SlideSlopeSpeedBonus = 0.0f;
 
 	// Entry impulse ("순간 가속"): scale the existing planar velocity and keep the vertical component untouched so a
 	// slide started while settling onto the floor doesn't cancel the landing.
 	const FVector PlanarVelocity = FVector(Velocity.X, Velocity.Y, 0.0f);
-	const float BoostedSpeed = FMath::Min(PlanarVelocity.Size() * SlideEnterSpeedMultiplier, SlideMaxSpeed);
+	const float CurrentSpeed = PlanarVelocity.Size();
+
+	// The impulse may only LIFT speed toward SlideMaxEntrySpeed, never pull it down. Capping the boosted value alone
+	// would make a fast entry (downhill momentum carried through a jump) slower than just walking into the slide;
+	// taking the max with the incoming speed keeps that momentum. Meanwhile re-sliding at or above the entry cap gains
+	// nothing, which is what stops jump-slide cycles from ratcheting speed upward.
+	const float BoostedSpeed = FMath::Min(
+		FMath::Max(CurrentSpeed, FMath::Min(CurrentSpeed * SlideEnterSpeedMultiplier, SlideMaxEntrySpeed)),
+		SlideMaxSpeed);
+
 	const FVector SlideDirection = PlanarVelocity.GetSafeNormal();
 	if (!SlideDirection.IsNearlyZero())
 	{
@@ -77,15 +91,17 @@ void UFPSRCharacterMovementComponent::StopSliding()
 	bIsSliding = false;
 	SlideElapsed = 0.0f;
 	SlideEntrySpeed = 0.0f;
+	SlideSlopeSpeedBonus = 0.0f;
 	// Charged on EVERY exit path, so jump-cancelling isn't a way to dodge the anti-spam lockout.
 	SlideCooldownRemaining = SlideCooldown;
 
 	// Hand the run ramp back at its END, not at zero. A slide exits faster than running speed, so resuming the curve
 	// from t=0 would make GetMaxSpeed collapse and slam the player to a halt; from the end, the excess simply decays.
-	if (GroundSpeedCurve)
+	// Whichever ramp the player is about to be on — a slide usually ends with the crouch key still held.
+	if (const UCurveFloat* ResumeCurve = GetActiveGroundSpeedCurve())
 	{
 		float CurveMinTime = 0.0f, CurveMaxTime = 0.0f;
-		GroundSpeedCurve->GetTimeRange(CurveMinTime, CurveMaxTime);
+		ResumeCurve->GetTimeRange(CurveMinTime, CurveMaxTime);
 		GroundAccelElapsed = CurveMaxTime;
 	}
 }
@@ -108,22 +124,64 @@ void UFPSRCharacterMovementComponent::UpdateCharacterStateBeforeMovement(float D
 
 	if (bIsSliding)
 	{
-		SlideElapsed += DeltaSeconds;
+		// Slope, sampled once and used for both effects below. Positive downhill, negative uphill.
+		const float SlopeAlignment = ComputeSlopeAlignment();
 
-		// Authored decay: drive the speed straight off the curve so the shape lands exactly as drawn. Direction is
-		// whatever the slide currently has, so this scales the slide without steering it.
-		if (SlideSpeedCurve)
+		// (1) Slope stretches or compresses the curve's timeline. Downhill the decay plays in slow motion, so the slide
+		// lasts as long as the hill does rather than expiring at the curve's authored length; uphill it runs out early.
+		const float SlopeTimeScale = FMath::Max(0.0f, 1.0f - (SlopeAlignment * SlopeTimeInfluence));
+		SlideElapsed += DeltaSeconds * SlopeTimeScale;
+
+		// (2) Slope also feeds real acceleration: g * sin(angle) along the direction of travel. Accumulated separately
+		// from the curve because the curve is recomputed each frame and would wipe it out.
+		if (SlopeAccelerationScale > 0.0f && !FMath::IsNearlyZero(SlopeAlignment))
 		{
-			// Capped by the entry speed: a slow entry keeps its own speed instead of snapping up to the curve's
-			// opening value, while a full-speed entry follows the curve exactly.
-			const float CurveSpeed = FMath::Max(0.0f, SlideSpeedCurve->GetFloatValue(SlideElapsed)) * GetSpeedCurveScale();
-			const float TargetSpeed = FMath::Min(CurveSpeed, SlideEntrySpeed);
-			const FVector SlideDirection = Velocity.GetSafeNormal2D();
-			if (!SlideDirection.IsNearlyZero())
+			const float GravityMagnitude = FMath::Abs(GetGravityZ());
+			SlideSlopeSpeedBonus += GravityMagnitude * SlopeAlignment * SlopeAccelerationScale * DeltaSeconds;
+			// Bounded both ways: downhill tops out at the slide ceiling instead of accelerating without limit, and
+			// uphill can't drive the total below zero.
+			SlideSlopeSpeedBonus = FMath::Clamp(SlideSlopeSpeedBonus, -SlideMaxSpeed, SlideMaxSpeed);
+		}
+
+		// Speed and heading are handled separately: the curve (or the braking deceleration) owns HOW FAST, this owns
+		// WHICH WAY. Steering through input acceleration instead would fight whatever the curve just set.
+		const FVector SlideHeading = ComputeSlideHeading(DeltaSeconds);
+		if (!SlideHeading.IsNearlyZero())
+		{
+			// A slide steered backwards pays the same penalty as walking backwards.
+			const bool bPenalizeBackward = (BackwardSpeedMultiplier < 1.0f) && IsDirectionBackward(SlideHeading);
+
+			float TargetSpeed;
+			if (SlideSpeedCurve)
 			{
-				Velocity.X = SlideDirection.X * TargetSpeed;
-				Velocity.Y = SlideDirection.Y * TargetSpeed;
+				// Curve is a NORMALIZED decay shape (1.0 at entry, falling toward 0), so the slide always decays from the
+				// speed actually carried in — fast entries aren't clamped down and slow ones aren't snapped up. Values above
+				// 1.0 are allowed and simply overshoot the entry speed.
+				TargetSpeed = SlideEntrySpeed * FMath::Max(0.0f, SlideSpeedCurve->GetFloatValue(SlideElapsed));
+
+				// Safe to multiply: the curve is re-read from scratch each frame, so this can't compound.
+				if (bPenalizeBackward)
+				{
+					TargetSpeed *= BackwardSpeedMultiplier;
+				}
 			}
+			else
+			{
+				// No curve: the magnitude is whatever braking has left it at, so multiplying would compound every
+				// frame (900 -> 675 -> 506 -> ...) and stop the slide almost instantly. Clamp instead.
+				TargetSpeed = Velocity.Size2D();
+				if (bPenalizeBackward)
+				{
+					TargetSpeed = FMath::Min(TargetSpeed, SlideEntrySpeed * BackwardSpeedMultiplier);
+				}
+			}
+
+			// Slope contribution rides on top, then the whole thing is capped — a long descent reaches the slide's
+			// terminal speed rather than growing indefinitely.
+			TargetSpeed = FMath::Clamp(TargetSpeed + SlideSlopeSpeedBonus, 0.0f, SlideMaxSpeed);
+
+			Velocity.X = SlideHeading.X * TargetSpeed;
+			Velocity.Y = SlideHeading.Y * TargetSpeed;
 		}
 
 		// Exits, in the order they matter. The elapsed-time bound is invariant 7's guarantee: a downhill slide that
@@ -131,7 +189,7 @@ void UFPSRCharacterMovementComponent::UpdateCharacterStateBeforeMovement(float D
 		const bool bReleasedCrouch = !bWantsToCrouch;
 		const bool bLeftGround = !IsMovingOnGround();
 		const bool bTooSlow = Velocity.SizeSquared2D() < FMath::Square(SlideMinSpeed);
-		const bool bTimedOut = SlideElapsed >= SlideMaxDuration;
+		const bool bTimedOut = SlideElapsed >= GetEffectiveSlideMaxDuration();
 		const bool bGateClosed = !IsSpecialMovementAllowed();
 
 		if (bReleasedCrouch || bLeftGround || bTooSlow || bTimedOut || bGateClosed)
@@ -149,12 +207,196 @@ void UFPSRCharacterMovementComponent::UpdateCharacterStateBeforeMovement(float D
 	Super::UpdateCharacterStateBeforeMovement(DeltaSeconds);
 }
 
-float UFPSRCharacterMovementComponent::GetSpeedCurveScale() const
+const UCurveFloat* UFPSRCharacterMovementComponent::GetActiveGroundSpeedCurve() const
 {
-	// The curves store literal cm/s authored against SpeedCurveReferenceSpeed. Rescale by however far MaxWalkSpeed has
-	// been moved from that reference (cards raise it), so a +30% move-speed card really is +30% at every point of the
-	// ramp instead of being clipped at the authored ceiling.
-	return (SpeedCurveReferenceSpeed > KINDA_SMALL_NUMBER) ? (MaxWalkSpeed / SpeedCurveReferenceSpeed) : 1.0f;
+	return IsCrouching() ? CrouchSpeedCurve.Get() : GroundSpeedCurve.Get();
+}
+
+float UFPSRCharacterMovementComponent::FindCurveTimeForSpeed(const UCurveFloat* Curve, float TargetSpeed) const
+{
+	if (!Curve)
+	{
+		return 0.0f;
+	}
+
+	float MinTime = 0.0f, MaxTime = 0.0f;
+	Curve->GetTimeRange(MinTime, MaxTime);
+	if (MaxTime <= MinTime)
+	{
+		return MinTime;
+	}
+
+	// Curve values are fractions of the stance's max speed, so convert the real-world speed the same way.
+	const float StanceMaxSpeed = Super::GetMaxSpeed();
+	const float NormalizedTarget = (StanceMaxSpeed > KINDA_SMALL_NUMBER) ? (TargetSpeed / StanceMaxSpeed) : 0.0f;
+
+	// Walk forward and take the first sample that reaches the target. A fixed sample count keeps the cost flat and
+	// bounded, and it runs once per stance change rather than per frame. 32 steps is ~0.03s resolution on a 1s ramp —
+	// far finer than the acceleration can act on anyway.
+	constexpr int32 NumSamples = 32;
+	const float Step = (MaxTime - MinTime) / static_cast<float>(NumSamples);
+	for (int32 Index = 0; Index <= NumSamples; ++Index)
+	{
+		const float SampleTime = MinTime + (Step * Index);
+		if (Curve->GetFloatValue(SampleTime) >= NormalizedTarget)
+		{
+			return SampleTime;
+		}
+	}
+	return MaxTime; // already faster than this curve goes — start at the top
+}
+
+void UFPSRCharacterMovementComponent::RemapGroundAccelForStanceChange()
+{
+	if (const UCurveFloat* StanceCurve = GetActiveGroundSpeedCurve())
+	{
+		GroundAccelElapsed = FindCurveTimeForSpeed(StanceCurve, Velocity.Size2D());
+	}
+}
+
+void UFPSRCharacterMovementComponent::Crouch(bool bClientSimulation)
+{
+	const bool bWasCrouched = CharacterOwner && CharacterOwner->bIsCrouched;
+	Super::Crouch(bClientSimulation);
+	// Only on an actual transition — Crouch() no-ops when the capsule can't change, and remapping then would move the
+	// timer for a stance the character never entered.
+	if (CharacterOwner && CharacterOwner->bIsCrouched != bWasCrouched)
+	{
+		RemapGroundAccelForStanceChange();
+	}
+}
+
+void UFPSRCharacterMovementComponent::UnCrouch(bool bClientSimulation)
+{
+	const bool bWasCrouched = CharacterOwner && CharacterOwner->bIsCrouched;
+	Super::UnCrouch(bClientSimulation);
+	if (CharacterOwner && CharacterOwner->bIsCrouched != bWasCrouched)
+	{
+		RemapGroundAccelForStanceChange();
+	}
+}
+
+float UFPSRCharacterMovementComponent::GetEffectiveSlideMaxDuration() const
+{
+	// An assigned curve defines the whole slide, so its length IS the duration. Otherwise a curve authored longer than
+	// SlideMaxDuration would be cut off partway with no indication of why — which is exactly how a 5s decay curve ends
+	// up looking like an instant drop: the slide ends early, and the still-crouched player is capped by
+	// MaxWalkSpeedCrouched from that moment on.
+	if (SlideSpeedCurve)
+	{
+		float CurveMinTime = 0.0f, CurveMaxTime = 0.0f;
+		SlideSpeedCurve->GetTimeRange(CurveMinTime, CurveMaxTime);
+		if (CurveMaxTime > 0.0f)
+		{
+			return CurveMaxTime;
+		}
+	}
+	return SlideMaxDuration;
+}
+
+void UFPSRCharacterMovementComponent::PhysFalling(float deltaTime, int32 Iterations)
+{
+	Super::PhysFalling(deltaTime, Iterations);
+
+	// Applied after the engine's integration so it caps the result rather than fighting gravity mid-step. Clamping a
+	// predicted value deterministically, so client and server land on the same velocity.
+	if (MaxFallSpeed > 0.0f && Velocity.Z < -MaxFallSpeed)
+	{
+		Velocity.Z = -MaxFallSpeed;
+	}
+}
+
+FVector UFPSRCharacterMovementComponent::ComputeSlideHeading(float DeltaSeconds) const
+{
+	const FVector CurrentHeading = Velocity.GetSafeNormal2D();
+	if (CurrentHeading.IsNearlyZero())
+	{
+		return FVector::ZeroVector; // nothing to rotate; the too-slow exit will end the slide anyway
+	}
+
+	// Steer toward the movement input; with no input, toward where the pawn is facing — that is what keeps a
+	// hands-off slide tracking the camera as the player looks around.
+	FVector DesiredHeading = Acceleration.GetSafeNormal2D();
+	if (DesiredHeading.IsNearlyZero() && UpdatedComponent)
+	{
+		DesiredHeading = UpdatedComponent->GetForwardVector().GetSafeNormal2D();
+	}
+	if (DesiredHeading.IsNearlyZero() || SlideTurnRateDegrees <= 0.0f)
+	{
+		return CurrentHeading;
+	}
+
+	const float MaxTurnDegrees = SlideTurnRateDegrees * DeltaSeconds;
+	const float CosAngle = FMath::Clamp(FVector::DotProduct(CurrentHeading, DesiredHeading), -1.0f, 1.0f);
+	const float AngleDegrees = FMath::RadiansToDegrees(FMath::Acos(CosAngle));
+	if (AngleDegrees <= MaxTurnDegrees)
+	{
+		return DesiredHeading; // close enough to snap without overshooting
+	}
+
+	// Rotate about world up by the allowed amount. The cross product's sign picks the shorter way round; at exactly
+	// 180 degrees it is zero and the >= makes the choice deterministic, which prediction requires.
+	const float CrossZ = (CurrentHeading.X * DesiredHeading.Y) - (CurrentHeading.Y * DesiredHeading.X);
+	const float TurnDirection = (CrossZ >= 0.0f) ? 1.0f : -1.0f;
+	return CurrentHeading.RotateAngleAxis(MaxTurnDegrees * TurnDirection, FVector::UpVector).GetSafeNormal2D();
+}
+
+bool UFPSRCharacterMovementComponent::IsDirectionBackward(const FVector& Direction) const
+{
+	if (!UpdatedComponent)
+	{
+		return false;
+	}
+	const FVector Normalized = Direction.GetSafeNormal2D();
+	if (Normalized.IsNearlyZero())
+	{
+		return false;
+	}
+	// Compare against the cosine of the threshold angle: at the default 90 degrees this is 0, so only genuinely
+	// rearward motion counts and pure strafing keeps full speed.
+	const FVector Facing = UpdatedComponent->GetForwardVector().GetSafeNormal2D();
+	const float CosThreshold = FMath::Cos(FMath::DegreesToRadians(BackwardAngleThresholdDegrees));
+	return FVector::DotProduct(Normalized, Facing) < CosThreshold;
+}
+
+bool UFPSRCharacterMovementComponent::IsMovingBackward() const
+{
+	return IsDirectionBackward(Acceleration);
+}
+
+float UFPSRCharacterMovementComponent::ComputeSlopeAlignment() const
+{
+	if (!CurrentFloor.IsWalkableFloor())
+	{
+		return 0.0f;
+	}
+
+	// A surface normal tilts away from vertical toward the DOWNHILL side, and the length of that horizontal part is
+	// exactly sin(slope angle) — so one vector gives both the downhill direction and the steepness.
+	const FVector FloorNormal = CurrentFloor.HitResult.ImpactNormal;
+	const FVector DownhillVector(FloorNormal.X, FloorNormal.Y, 0.0f);
+	const float SinSlope = DownhillVector.Size();
+	if (SinSlope < KINDA_SMALL_NUMBER)
+	{
+		return 0.0f; // flat
+	}
+
+	const FVector Heading = Velocity.GetSafeNormal2D();
+	if (Heading.IsNearlyZero())
+	{
+		return 0.0f;
+	}
+
+	// Project the heading onto the downhill direction and scale by steepness: heading straight down a 30-degree slope
+	// gives 0.5, straight up gives -0.5, and moving across it gives ~0.
+	return FVector::DotProduct(Heading, DownhillVector / SinSlope) * SinSlope;
+}
+
+bool UFPSRCharacterMovementComponent::IsSlidingBackward() const
+{
+	// Heading, not input: once a slide has been steered around, releasing the key doesn't stop it travelling backwards,
+	// so testing the input would drop the penalty exactly while the player is still sliding in reverse.
+	return bIsSliding && IsDirectionBackward(Velocity);
 }
 
 float UFPSRCharacterMovementComponent::GetMaxSpeed() const
@@ -162,46 +404,50 @@ float UFPSRCharacterMovementComponent::GetMaxSpeed() const
 	if (bIsSliding)
 	{
 		// Flat ceiling while sliding: with SlideSpeedCurve assigned the curve writes the speed outright each frame
-		// (UpdateCharacterStateBeforeMovement), so this only has to stay out of its way.
+		// (UpdateCharacterStateBeforeMovement), so this only has to stay out of its way. A slide holds its committed
+		// direction, so the backpedal penalty deliberately does not apply here.
 		return SlideMaxSpeed;
 	}
 
-	if (GroundSpeedCurve && IsMovingOnGround() && !IsCrouching())
-	{
-		// Authored standing -> running ramp. Returning it as the max speed (rather than writing Velocity) keeps
-		// knockback, slopes and other external forces behaving normally.
-		return FMath::Max(0.0f, GroundSpeedCurve->GetFloatValue(GroundAccelElapsed)) * GetSpeedCurveScale();
-	}
-	return Super::GetMaxSpeed();
-}
+	// Engine speed for this stance: MaxWalkSpeed standing, MaxWalkSpeedCrouched crouched — and already carrying any
+	// card multiplier, which is why the normalized curve needs no scaling of its own.
+	float MaxSpeed = Super::GetMaxSpeed();
 
-float UFPSRCharacterMovementComponent::GetMaxAcceleration() const
-{
-	// A slide is committed movement: input acceleration is replaced by SlideSteerAcceleration (0 by default) so the
-	// player can't simply crouch-run at slide speed.
-	return bIsSliding ? SlideSteerAcceleration : Super::GetMaxAcceleration();
-}
-
-float UFPSRCharacterMovementComponent::GetMaxBrakingDeceleration() const
-{
-	if (bIsSliding)
+	// Applying the ramp as a MAX SPEED (rather than writing Velocity) keeps knockback, slopes and other external
+	// forces behaving normally.
+	const UCurveFloat* ActiveSpeedCurve = GetActiveGroundSpeedCurve();
+	if (ActiveSpeedCurve && IsMovingOnGround())
 	{
-		// With a curve assigned the speed is written directly each frame; leaving braking on top of that would fight
-		// the authored shape.
-		return SlideSpeedCurve ? 0.0f : SlideBrakingDeceleration;
+		MaxSpeed *= FMath::Max(0.0f, ActiveSpeedCurve->GetFloatValue(GroundAccelElapsed));
 	}
-	return Super::GetMaxBrakingDeceleration();
+
+	// Backpedal penalty last, so it stacks on whatever the ramp (and any card scaling) produced.
+	if (BackwardSpeedMultiplier < 1.0f && IsMovingBackward())
+	{
+		MaxSpeed *= BackwardSpeedMultiplier;
+	}
+	return MaxSpeed;
 }
 
 void UFPSRCharacterMovementComponent::CalcVelocity(float DeltaTime, float Friction, bool bFluid, float BrakingDeceleration)
 {
-	// PhysWalking hands us GroundFriction, and the braking path multiplies it by BrakingFrictionFactor. Left alone that
-	// is an effective friction of 16, which kills a slide in well under a tenth of a second — the slide would read as an
-	// instant stop rather than a slide. Swap in the slide's own (near-zero) friction so SlideBrakingDeceleration is what
-	// actually shapes the decay.
 	if (bIsSliding)
 	{
-		Friction = SlideGroundFriction;
+		// A slide owns both its speed and its heading (UpdateCharacterStateBeforeMovement), so Super must not run:
+		// it would add input acceleration on top and push the player off whatever the curve just set.
+		//
+		// Critically, this is also why MaxAcceleration is NOT forced to zero during a slide. Acceleration is built as
+		// `GetMaxAcceleration() * InputVector`, so a zero max produces a zero vector — and then ComputeSlideHeading has
+		// no WASD direction left to steer by, which silently reduced steering to "always face the camera".
+		//
+		// Without a curve the magnitude is still braking-driven, so apply just that. SlideGroundFriction stays near
+		// zero on purpose: PhysWalking would otherwise hand us GroundFriction (8), which BrakingFrictionFactor doubles
+		// to an effective 16 and ends the slide in under a tenth of a second.
+		if (!SlideSpeedCurve)
+		{
+			ApplyVelocityBraking(DeltaTime, SlideGroundFriction, SlideBrakingDeceleration);
+		}
+		return;
 	}
 	Super::CalcVelocity(DeltaTime, Friction, bFluid, BrakingDeceleration);
 }
@@ -214,13 +460,16 @@ bool UFPSRCharacterMovementComponent::CanCrouchInCurrentState() const
 
 bool UFPSRCharacterMovementComponent::CanAttemptJump() const
 {
-	if (bIsSliding)
-	{
-		// Super's middle term is !bWantsToCrouch, which a slide always trips (the slide IS the crouch intent). Drop
-		// exactly that term and keep the rest verbatim, so jump-count and hold-time rules stay engine-governed.
-		return IsJumpAllowed() && (IsMovingOnGround() || IsFalling());
-	}
-	return Super::CanAttemptJump();
+	// Super's middle term is !bWantsToCrouch: the engine refuses to jump while the crouch key is held and expects the
+	// player to un-crouch first. This design wants jump to break OUT of both crouch and slide immediately, so that one
+	// term is dropped and everything else (jump count, hold time) stays engine-governed.
+	//
+	// Gating this on bIsSliding alone was not enough: the crouch key is usually still held when the slide ends, which
+	// left the player in a plain crouch that could never jump.
+	//
+	// Standing back up is the engine's job and stays safe — going airborne makes CanCrouchInCurrentState() false, which
+	// triggers UnCrouch, and that keeps the crouched capsule if a ceiling is in the way.
+	return IsJumpAllowed() && (IsMovingOnGround() || IsFalling());
 }
 
 float UFPSRCharacterMovementComponent::GetPlanarSpeed() const
@@ -232,10 +481,20 @@ FString UFPSRCharacterMovementComponent::GetLocomotionStateName() const
 {
 	FString StateName;
 	if (IsFalling())        { StateName = TEXT("Air"); }
-	else if (bIsSliding)    { StateName = TEXT("Slide"); }
+	else if (bIsSliding)
+	{
+		// Show elapsed / limit: without it, "the curve isn't being followed" and "the slide ended early" look identical.
+		StateName = FString::Printf(TEXT("Slide %.2f/%.2fs  slope%+.2f %+.0f"),
+			SlideElapsed, GetEffectiveSlideMaxDuration(), ComputeSlopeAlignment(), SlideSlopeSpeedBonus);
+	}
 	else if (IsCrouching()) { StateName = TEXT("Crouch"); }
 	else                    { StateName = TEXT("Run"); }
 
+	// While sliding the penalty follows the heading, so report the same thing the speed code used.
+	if (bIsSliding ? IsSlidingBackward() : IsMovingBackward())
+	{
+		StateName += TEXT("  BACK");
+	}
 	// Surface the slide lockout too — otherwise "crouch did nothing" is indistinguishable from "too slow to slide".
 	if (!bIsSliding && SlideCooldownRemaining > 0.0f)
 	{
@@ -297,6 +556,7 @@ void FSavedMove_FPSR::Clear()
 	SavedSlideEntrySpeed = 0.0f;
 	SavedSlideCooldownRemaining = 0.0f;
 	SavedGroundAccelElapsed = 0.0f;
+	SavedSlideSlopeSpeedBonus = 0.0f;
 }
 
 bool FSavedMove_FPSR::CanCombineWith(const FSavedMovePtr& NewMove, ACharacter* InCharacter, float MaxDelta) const
@@ -322,6 +582,7 @@ void FSavedMove_FPSR::SetMoveFor(ACharacter* C, float InDeltaTime, FVector const
 		SavedSlideEntrySpeed = Movement->SlideEntrySpeed;
 		SavedSlideCooldownRemaining = Movement->SlideCooldownRemaining;
 		SavedGroundAccelElapsed = Movement->GroundAccelElapsed;
+		SavedSlideSlopeSpeedBonus = Movement->SlideSlopeSpeedBonus;
 	}
 }
 
@@ -338,6 +599,7 @@ void FSavedMove_FPSR::PrepMoveFor(ACharacter* C)
 		Movement->SlideEntrySpeed = SavedSlideEntrySpeed;
 		Movement->SlideCooldownRemaining = SavedSlideCooldownRemaining;
 		Movement->GroundAccelElapsed = SavedGroundAccelElapsed;
+		Movement->SlideSlopeSpeedBonus = SavedSlideSlopeSpeedBonus;
 	}
 }
 

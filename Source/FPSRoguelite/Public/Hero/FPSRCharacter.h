@@ -252,11 +252,20 @@ protected:
 	void Input_Reload(const FInputActionValue& Value);
 	void Input_ADSPressed(const FInputActionValue& Value);
 	void Input_ADSReleased(const FInputActionValue& Value);
-	/** Crouch input. Held = crouch; pressing it while running fast enough starts a SLIDE instead (the movement
-	 *  component decides — see UFPSRCharacterMovementComponent::CanEnterSlide). This only forwards intent: the engine
-	 *  already ships bWantsToCrouch in every move packet, so no extra RPC and no custom flag is needed. */
-	void Input_CrouchPressed(const FInputActionValue& Value);
+	/** Crouch input, bound to Triggered (every frame the key is held) rather than Started. Held = crouch; pressing it
+	 *  while running fast enough starts a SLIDE instead (the movement component decides — see
+	 *  UFPSRCharacterMovementComponent::CanEnterSlide). This only forwards intent: the engine already ships
+	 *  bWantsToCrouch in every move packet, so no extra RPC and no custom flag is needed.
+	 *  Per-frame because Input_Jump CLEARS the crouch intent — a once-only Started binding could never restore it while
+	 *  the key stayed down, so the player would land from a slide-jump and never crouch again until they let go. */
+	void Input_CrouchHeld(const FInputActionValue& Value);
 	void Input_CrouchReleased(const FInputActionValue& Value);
+
+	/** Jump input. Drops the crouch/slide intent before jumping: crouch is a HELD state, so jumping without clearing it
+	 *  leaves the intent set — the engine stands the player up mid-air, then re-crouches them the instant they land,
+	 *  and every following jump is swallowed. Treating a jump press as "let go of crouch" is what makes slide-jump and
+	 *  crouch-jump work while the key is still down. */
+	void Input_Jump(const FInputActionValue& Value);
 	/** Esc: open the settings overlay (delegates to the owning PC; non-pause overlay). */
 	void Input_Menu(const FInputActionValue& Value);
 
@@ -389,8 +398,9 @@ protected:
 	void RefreshPawnCollisionResponse();
 
 	/** Baseline walk speed before MoveSpeedMultiplier. Designers may tune per-hero. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Movement")
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Movement")
 	float BaseWalkSpeed = 600.0f;
+
 
 	/** Invulnerability window (seconds) after taking contact damage; further hits within it are ignored.
 	 *  Prevents a swarm from melting the player in one frame. Balance-tunable. */

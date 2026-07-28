@@ -160,6 +160,26 @@ void AFPSRCharacter::DrawMovementDebug(UCanvas* Canvas, APlayerController* PC)
 
 	const FString SpeedText = FString::Printf(TEXT("SPEED %.0f"), FPSRMovement->GetPlanarSpeed());
 	const FString StateText = FString::Printf(TEXT("STATE %s"), *FPSRMovement->GetLocomotionStateName());
+	// Jump diagnostics: pressed / CanJump passes / engine's crouch-jump gate / jumps used / vertical velocity.
+	// Enough to tell "input never arrived" from "input arrived but a gate refused it" without attaching a debugger.
+	const FString JumpText = FString::Printf(TEXT("JUMP press:%d can:%d gate:%d n:%d velZ:%.0f  crouched:%d"),
+		bPressedJump ? 1 : 0,
+		CanJump() ? 1 : 0,
+		FPSRMovement->CanAttemptJump() ? 1 : 0,
+		JumpCurrentCount,
+		GetVelocity().Z,
+		bIsCrouched ? 1 : 0);
+
+	// CanJump() is an AND of two independent things: ACharacter's own rules, and this class's incapacitated gate.
+	// Split them out — "gate:1 but can:0" is only actionable once you can see WHICH of the two said no.
+	// ACharacter:: qualifies the call so it reads the engine rules directly rather than re-entering our override.
+	const FString GateText = FString::Printf(TEXT("GATE engine:%d incap:%d frozen:%d maxN:%d wasJump:%d hold:%.2f"),
+		ACharacter::CanJumpInternal_Implementation() ? 1 : 0,
+		IsIncapacitatedLocal() ? 1 : 0,
+		IsRunFrozen() ? 1 : 0,
+		JumpMaxCount,
+		bWasJumping ? 1 : 0,
+		GetJumpMaxHoldTime());
 
 	UFont* Font = GEngine ? GEngine->GetMediumFont() : nullptr;
 	if (!Font)
@@ -179,6 +199,14 @@ void AFPSRCharacter::DrawMovementDebug(UCanvas* Canvas, APlayerController* PC)
 	Canvas->StrLen(Font, StateText, LineWidth, LineHeight);
 	Canvas->SetDrawColor(FPSRMovement->IsSliding() ? FColor::Orange : FColor::White);
 	Canvas->DrawText(Font, StateText, Canvas->SizeX - LineWidth - RightMargin, 24.0f + LineHeight + 2.0f);
+
+	Canvas->StrLen(Font, JumpText, LineWidth, LineHeight);
+	Canvas->SetDrawColor(FColor::Silver);
+	Canvas->DrawText(Font, JumpText, Canvas->SizeX - LineWidth - RightMargin, 24.0f + (LineHeight + 2.0f) * 2.0f);
+
+	Canvas->StrLen(Font, GateText, LineWidth, LineHeight);
+	Canvas->SetDrawColor(FColor::Silver);
+	Canvas->DrawText(Font, GateText, Canvas->SizeX - LineWidth - RightMargin, 24.0f + (LineHeight + 2.0f) * 3.0f);
 }
 
 void AFPSRCharacter::Tick(float DeltaSeconds)
@@ -390,7 +418,8 @@ void AFPSRCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompo
 	if (LookAction)        { EIC->BindAction(LookAction, ETriggerEvent::Triggered, this, &AFPSRCharacter::Input_Look); }
 	if (JumpAction)
 	{
-		EIC->BindAction(JumpAction, ETriggerEvent::Started, this, &ACharacter::Jump);
+		// Routed through Input_Jump (not ACharacter::Jump directly) so a jump press clears the crouch/slide intent.
+		EIC->BindAction(JumpAction, ETriggerEvent::Started, this, &AFPSRCharacter::Input_Jump);
 		EIC->BindAction(JumpAction, ETriggerEvent::Completed, this, &ACharacter::StopJumping);
 	}
 	if (FireAction)
@@ -409,7 +438,8 @@ void AFPSRCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompo
 	}
 	if (CrouchAction)
 	{
-		EIC->BindAction(CrouchAction, ETriggerEvent::Started, this, &AFPSRCharacter::Input_CrouchPressed);
+		// Triggered (per-frame while held), not Started — see Input_CrouchHeld.
+		EIC->BindAction(CrouchAction, ETriggerEvent::Triggered, this, &AFPSRCharacter::Input_CrouchHeld);
 		EIC->BindAction(CrouchAction, ETriggerEvent::Completed, this, &AFPSRCharacter::Input_CrouchReleased);
 	}
 	if (MenuAction)
@@ -570,7 +600,16 @@ bool AFPSRCharacter::IsTrulyDeadLocal() const
 bool AFPSRCharacter::CanJumpInternal_Implementation() const
 {
 	// No jumping while downed (DBNO) or dead.
-	return Super::CanJumpInternal_Implementation() && !IsIncapacitatedLocal();
+	if (IsIncapacitatedLocal())
+	{
+		return false;
+	}
+
+	// Engine default is `!IsCrouched() && JumpIsAllowedInternal()`. That leading crouch term is a SECOND, separate
+	// block from the one inside CanAttemptJump — clearing only the latter still leaves this one refusing every jump
+	// made from a crouch or a slide. Drop just this term and keep JumpIsAllowedInternal, so jump count and hold-time
+	// rules stay entirely engine-governed (CanAttemptJump, which we also override, is called from inside it).
+	return JumpIsAllowedInternal();
 }
 
 void AFPSRCharacter::ApplyMoveSpeedMultiplier(float Mult)
@@ -713,7 +752,7 @@ void AFPSRCharacter::Input_ADSReleased(const FInputActionValue& Value)
 	ServerSetAiming(false);
 }
 
-void AFPSRCharacter::Input_CrouchPressed(const FInputActionValue& Value)
+void AFPSRCharacter::Input_CrouchHeld(const FInputActionValue& Value)
 {
 	// Intent only — whether this becomes a crouch or a slide is the movement component's call (it owns the state, and
 	// it needs to reach the same conclusion on the server, which never sees this function).
@@ -721,7 +760,34 @@ void AFPSRCharacter::Input_CrouchPressed(const FInputActionValue& Value)
 	{
 		return;
 	}
-	Crouch();
+	// Don't re-assert the intent while a jump is pending. Enhanced Input does not guarantee the order two actions fire
+	// in within a frame, so without this the handler can run AFTER Input_Jump and restore the crouch it just cleared —
+	// on the same frame, before the jump is even processed. bPressedJump stays set until StopJumping, so this also
+	// covers the frames between the press and the character actually leaving the ground.
+	if (bPressedJump)
+	{
+		return;
+	}
+	// Never re-assert the intent in mid-air either. Airborne crouch/slide is forbidden by design anyway, and since this
+	// runs every frame it would otherwise undo Input_Jump's clear and re-block jumping.
+	const UCharacterMovementComponent* MoveComp = GetCharacterMovement();
+	if (MoveComp && MoveComp->IsFalling())
+	{
+		return;
+	}
+	Crouch(); // no-op once already crouched; on landing this is what restores the crouch while the key is still held
+}
+
+void AFPSRCharacter::Input_Jump(const FInputActionValue& Value)
+{
+	if (IsRunFrozen() || IsIncapacitatedLocal())
+	{
+		return;
+	}
+	// Read a jump press as "let go of crouch" (see the header). Order matters: clearing the intent first means the
+	// jump check later this frame already sees an un-crouched player.
+	UnCrouch();
+	Jump();
 }
 
 void AFPSRCharacter::Input_CrouchReleased(const FInputActionValue& Value)

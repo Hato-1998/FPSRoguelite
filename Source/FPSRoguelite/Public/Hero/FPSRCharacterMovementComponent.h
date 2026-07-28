@@ -70,19 +70,29 @@ public:
 	//~UCharacterMovementComponent
 	virtual class FNetworkPredictionData_Client* GetPredictionData_Client() const override;
 	virtual float GetMaxSpeed() const override;
-	virtual float GetMaxAcceleration() const override;
-	virtual float GetMaxBrakingDeceleration() const override;
+
+	/** Takes over velocity entirely while sliding — see the implementation for why MaxAcceleration is deliberately
+	 *  left alone instead of being zeroed. */
 	virtual void CalcVelocity(float DeltaTime, float Friction, bool bFluid, float BrakingDeceleration) override;
 	virtual void UpdateCharacterStateBeforeMovement(float DeltaSeconds) override;
+
+	/** Clamps descent to MaxFallSpeed after the engine's falling step. */
+	virtual void PhysFalling(float deltaTime, int32 Iterations) override;
 
 	/** Ground-only crouch. The engine's version also allows crouching while FALLING; this design forbids crouch and
 	 *  slide in the air, and returning false here additionally makes the engine un-crouch automatically the moment the
 	 *  player leaves the ground (so jumping out of a crouch stands you up instead of keeping a crouched capsule). */
 	virtual bool CanCrouchInCurrentState() const override;
 
-	/** Allow jumping OUT of a slide. The engine refuses to jump whenever bWantsToCrouch is set, and a slide is entered
-	 *  from the crouch intent — so without this a slide could never be jump-cancelled. Only the crouch term is lifted;
-	 *  jump count and hold-time rules stay exactly as the engine defines them. */
+	//~ Both stances read the same GroundAccelElapsed timer but off DIFFERENT curves, so a stance change has to move the
+	//~ timer to the equivalent point on the new curve — otherwise standing up from a long crouch-walk lands at the far
+	//~ end of the standing curve and the speed cap jumps straight to maximum.
+	virtual void Crouch(bool bClientSimulation = false) override;
+	virtual void UnCrouch(bool bClientSimulation = false) override;
+
+	/** Allow jumping OUT of a crouch or a slide. The engine refuses to jump whenever bWantsToCrouch is set and expects
+	 *  the player to un-crouch first; this design wants jump to break out of both immediately. Only the crouch term is
+	 *  lifted — jump count and hold-time rules stay exactly as the engine defines them. */
 	virtual bool CanAttemptJump() const override;
 	//~End UCharacterMovementComponent
 
@@ -95,83 +105,157 @@ protected:
 	// --- Slide tuning (invariant 9: data, not C++ constants — designers tune these per-hero in the BP defaults) ---
 
 	/** Minimum planar speed required to ENTER a slide. Below this, the crouch input is just a crouch. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Slide", meta = (ClampMin = "0.0"))
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Movement|Slide", meta = (ClampMin = "0.0"))
 	float SlideMinEnterSpeed = 450.0f;
 
 	/** Planar speed at which an ongoing slide ends (it has decayed into a crouch-walk). Kept strictly below
 	 *  SlideMinEnterSpeed so a slide can't immediately re-trigger the instant it ends while crouch is still held. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Slide", meta = (ClampMin = "0.0"))
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Movement|Slide", meta = (ClampMin = "0.0"))
 	float SlideMinSpeed = 250.0f;
 
 	/** Entry impulse: current planar speed is multiplied by this on the frame the slide starts. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Slide", meta = (ClampMin = "1.0"))
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Movement|Slide", meta = (ClampMin = "1.0"))
 	float SlideEnterSpeedMultiplier = 1.5f;
 
-	/** Hard ceiling on slide speed, applied to the entry impulse and to the per-frame max speed. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Slide", meta = (ClampMin = "0.0"))
+	/** How fast the ENTRY IMPULSE alone may take the player. Deliberately lower than SlideMaxSpeed: with a single
+	 *  ceiling, jump-cancelling and re-sliding kept re-applying the multiplier and ratcheted the speed up every cycle
+	 *  (900 -> 1350 -> cap) for free. This only ever RAISES speed toward the limit — entering already faster than it
+	 *  (downhill momentum carried through a jump) keeps the higher speed rather than being cut down to it. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Movement|Slide", meta = (ClampMin = "0.0"))
+	float SlideMaxEntrySpeed = 900.0f;
+
+	/** Hard ceiling on slide speed from ANY source (entry impulse, slope acceleration, carried momentum). Speeds above
+	 *  SlideMaxEntrySpeed have to be earned — typically by accelerating down a slope. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Movement|Slide", meta = (ClampMin = "0.0"))
 	float SlideMaxSpeed = 1400.0f;
 
 	/** Deceleration (cm/s²) applied while sliding. This is the "속도 감소 곡선" in its simplest form; assign
 	 *  SlideSpeedCurve below for a shaped decay instead. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Slide", meta = (ClampMin = "0.0"))
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Movement|Slide", meta = (ClampMin = "0.0"))
 	float SlideBrakingDeceleration = 900.0f;
 
 	/** Ground friction while sliding. MUST stay low or there is no slide to see: PhysWalking feeds GroundFriction
 	 *  (engine default 8) into the braking math, where BrakingFrictionFactor doubles it — an effective 16, which decays
 	 *  900 -> 250 cm/s in roughly 0.08s. At 0 the engine switches to constant deceleration, so SlideBrakingDeceleration
 	 *  alone shapes the decay and the numbers become predictable (900 -> 250 at 900 cm/s² = ~0.72s). */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Slide", meta = (ClampMin = "0.0"))
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Movement|Slide", meta = (ClampMin = "0.0"))
 	float SlideGroundFriction = 0.0f;
+
+	/** How strongly a slope speeds up (downhill) or slows down (uphill) a slide, as a fraction of real gravity.
+	 *  1.0 = the physical value, g * sin(angle); 0 disables slope influence entirely. One formula covers both
+	 *  directions — travelling uphill simply produces a negative contribution — so no separate uphill friction rule is
+	 *  needed. The result is still bounded by SlideMaxSpeed, matching how a slide tops out rather than accelerating
+	 *  forever down a long hill. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Movement|Slide", meta = (ClampMin = "0.0"))
+	float SlopeAccelerationScale = 1.0f;
+
+	/** How strongly a slope stretches (downhill) or compresses (uphill) the slide's sense of time. The speed curve is
+	 *  advanced by DeltaTime * (1 - slope * this), so a downhill slide decays in slow motion and keeps going for as
+	 *  long as the hill lasts, while an uphill one runs through the curve early and ends sooner. 0 disables it and the
+	 *  slide always lasts exactly the curve's length. Needed alongside SlopeAccelerationScale because acceleration
+	 *  alone can't extend a slide past its time limit. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Movement|Slide", meta = (ClampMin = "0.0"))
+	float SlopeTimeInfluence = 1.0f;
 
 	/** Lockout after a slide ENDS before another may start. Without it, tapping crouch repeatedly re-triggers the entry
 	 *  impulse over and over and the player rides a permanent speed boost. Applied on EVERY exit (released, too slow,
 	 *  timed out, jumped, gate closed) so no exit route dodges it. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Slide", meta = (ClampMin = "0.0"))
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Movement|Slide", meta = (ClampMin = "0.0"))
 	float SlideCooldown = 0.8f;
 
-	/** Steering authority during a slide (cm/s²). 0 = fully committed (no course correction). Small values let the
-	 *  player nudge the slide without turning it into a crouch-run. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Slide", meta = (ClampMin = "0.0"))
-	float SlideSteerAcceleration = 0.0f;
+	/** How fast a slide can be steered, in degrees per second. The slide turns toward the movement input (WASD), or —
+	 *  with no input — toward wherever the pawn is facing, so it keeps tracking the camera as you look around. Only
+	 *  the DIRECTION is steered; speed stays owned by SlideSpeedCurve / SlideBrakingDeceleration, which is why this is
+	 *  a turn rate and not an acceleration. 0 = fully committed to the entry direction. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Movement|Slide", meta = (ClampMin = "0.0"))
+	float SlideTurnRateDegrees = 270.0f;
 
 	/** Hard time limit on a single slide (invariant 7: every state needs a time bound or an unconditional exit).
-	 *  Without this a downhill slide that keeps regaining speed would never satisfy the speed-based exit. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Slide", meta = (ClampMin = "0.1"))
+	 *  Without this a downhill slide that keeps regaining speed would never satisfy the speed-based exit.
+	 *  IGNORED when SlideSpeedCurve is assigned — the curve's own length becomes the limit instead, so that drawing a
+	 *  5-second decay really gives a 5-second slide rather than being silently cut off here. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Movement|Slide", meta = (ClampMin = "0.1"))
 	float SlideMaxDuration = 1.6f;
 
-	/** Slide speed over time, in cm/s. X = seconds since the slide started, Y = the actual speed (e.g. 900 -> 300).
-	 *  The curve is CAPPED BY THE ENTRY SPEED, so sliding in slower than the curve's opening value starts from that
-	 *  slower speed instead of snapping up to it; a full-speed entry follows the curve exactly. When assigned this
-	 *  drives the speed directly and SlideBrakingDeceleration is bypassed, so the shape lands as authored instead of
-	 *  being approximated by a braking force. Null (the default) = constant deceleration via SlideBrakingDeceleration —
-	 *  the curve is a designer refinement, never a requirement, so an unassigned asset can never break locomotion. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Slide")
+	/** Slide decay shape. X = seconds since the slide started, Y = 0..1 as a FRACTION OF THE ENTRY SPEED (so Y=1 at
+	 *  X=0 holds the speed the slide began with, and it falls off from there). Normalizing against the entry speed is
+	 *  what lets a fast entry — downhill speed carried through a jump — decay from ITS OWN speed instead of being
+	 *  clamped to a fixed opening value, while a slow entry still can't snap upward. Values above 1 overshoot.
+	 *  When assigned this drives the speed directly and SlideBrakingDeceleration is bypassed, so the shape lands as
+	 *  authored instead of being approximated by a braking force. Null (the default) = constant deceleration via
+	 *  SlideBrakingDeceleration — the curve is a refinement, never a requirement. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Movement|Slide")
 	TObjectPtr<UCurveFloat> SlideSpeedCurve = nullptr;
 
-	/** Standing -> running speed ramp, in cm/s. X = seconds of continuous ground movement input, Y = the actual speed
-	 *  (e.g. 0 -> 600). Drives the max speed each frame, so the character accelerates along the authored shape. Null =
-	 *  the engine's flat MaxWalkSpeed with constant acceleration. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Ground")
+	/** Standing -> running speed ramp. X = seconds of continuous ground movement input, Y =
+	 *  0..1 as a FRACTION of MaxWalkSpeed (0 = standstill, 1 = full speed). Normalized rather than literal cm/s so the
+	 *  same shape survives any speed change — a move-speed card raises MaxWalkSpeed and the whole ramp follows with no
+	 *  edit. Values above 1 are allowed and overshoot. Null = the engine's flat MaxWalkSpeed. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Movement|Ground")
 	TObjectPtr<UCurveFloat> GroundSpeedCurve = nullptr;
 
-	/** The max walk speed the speed curves above were AUTHORED against. Both curves hold literal cm/s values, so when
-	 *  a card raises MaxWalkSpeed (600 -> 780) their values are scaled by MaxWalkSpeed / this (x1.3) instead of
-	 *  capping the player at the authored numbers. Keep it equal to the character's BaseWalkSpeed. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Ground", meta = (ClampMin = "1.0"))
-	float SpeedCurveReferenceSpeed = 600.0f;
+	/** Same idea while CROUCHED: Y = 0..1 as a fraction of MaxWalkSpeedCrouched. Without it a crouch-walk snaps
+	 *  straight to that flat value and never ramps. Because both curves are normalized, this can point at the SAME
+	 *  asset as GroundSpeedCurve to share one shape — each stance just multiplies by its own max speed.
+	 *  Null = the engine's flat MaxWalkSpeedCrouched (previous behaviour).
+	 *  Shares GroundAccelElapsed with the standing ramp, so crouching mid-run doesn't restart the acceleration. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Movement|Ground")
+	TObjectPtr<UCurveFloat> CrouchSpeedCurve = nullptr;
+
+	/** Speed multiplier while moving BACKWARDS (0.75 = 450 cm/s against the default 600). Applied on top of whatever
+	 *  the ground ramp produced, so it scales with cards too. Also applies to a slide that has been steered backwards.
+	 *  1.0 disables it. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Movement|Ground", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float BackwardSpeedMultiplier = 0.75f;
+
+	/** How far off the pawn's facing the movement input must point to count as backpedalling, in degrees.
+	 *  90 (default) = the rear half only, so pure strafing keeps full speed. LOWER widens it — 60 also penalises
+	 *  diagonal-back input. Higher narrows it toward straight-back only. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Movement|Ground", meta = (ClampMin = "0.0", ClampMax = "180.0"))
+	float BackwardAngleThresholdDegrees = 90.0f;
+
+	/** Terminal fall speed in cm/s; 0 = no extra limit (the physics volume's own TerminalVelocity, engine default
+	 *  4000, still applies). Exists because that volume value is per-VOLUME, so it can't express a per-character fall
+	 *  speed — which is what the design asks for. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Movement|Air", meta = (ClampMin = "0.0"))
+	float MaxFallSpeed = 0.0f;
+
+	/** True when the given world direction points behind the pawn, per BackwardAngleThresholdDegrees. */
+	bool IsDirectionBackward(const FVector& Direction) const;
+
+	/** True when the movement INPUT points behind the pawn — the walking backpedal test. Reads Acceleration (already
+	 *  predicted) against the pawn's facing, so server and client agree. */
+	bool IsMovingBackward() const;
+
+	/** True when a slide is currently travelling backwards. Judged on the slide's actual heading rather than the input,
+	 *  because a slide steered around keeps going that way after the key is released. */
+	bool IsSlidingBackward() const;
+
+	/** Slope component along the current heading: sin(slope angle) projected onto the direction of travel.
+	 *  POSITIVE downhill, NEGATIVE uphill, 0 on flat ground or with no heading. Derived from the walkable floor's
+	 *  impact normal — its horizontal part points downhill and its length is sin(angle) — so no extra trace is needed.
+	 *  Reads the floor found during the PREVIOUS move, which is a frame behind but identically so on client and
+	 *  server, keeping prediction consistent. */
+	float ComputeSlopeAlignment() const;
+
+	/** Slide heading for this frame: the current heading rotated toward the steer target by at most
+	 *  SlideTurnRateDegrees * DeltaSeconds. Target = movement input when there is any, otherwise the pawn's facing.
+	 *  Every input (velocity, acceleration, control rotation) is already part of the predicted move, so client and
+	 *  server derive the same heading. Returns a zero vector when there is no heading to rotate. */
+	FVector ComputeSlideHeading(float DeltaSeconds) const;
 
 	// --- Spread multipliers by locomotion state (invariant 5: multipliers only) ---
 
 	/** Spread multiplier while crouching (design: ×0.8 — steadier). */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Spread", meta = (ClampMin = "0.0"))
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Movement|Spread", meta = (ClampMin = "0.0"))
 	float CrouchSpreadMultiplier = 0.8f;
 
 	/** Spread multiplier while airborne (design: ×1.6 — LESS accurate; spread scales up). */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Spread", meta = (ClampMin = "0.0"))
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Movement|Spread", meta = (ClampMin = "0.0"))
 	float AirborneSpreadMultiplier = 1.6f;
 
 	/** Spread multiplier while sliding. Firing mid-slide is allowed by design; this is the cost. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Spread", meta = (ClampMin = "0.0"))
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Movement|Spread", meta = (ClampMin = "0.0"))
 	float SlideSpreadMultiplier = 1.3f;
 
 	/** Evaluate the slide entry conditions for THIS frame. Pure read of already-predicted state (crouch intent, ground
@@ -202,13 +286,31 @@ protected:
 	 *  SlideElapsed, and saved/restored so a replay can't hand the player a free re-entry. */
 	float SlideCooldownRemaining = 0.0f;
 
+	/** Speed (cm/s) the slope has added to (downhill) or taken from (uphill) the current slide so far. Kept apart from
+	 *  the curve because the curve is re-read from scratch every frame — this is the part that has to accumulate. */
+	float SlideSlopeSpeedBonus = 0.0f;
+
 	/** Seconds of continuous ground movement input — the X axis of GroundSpeedCurve. Held (not reset) while airborne
 	 *  so a jump mid-sprint doesn't drop the player back to a standing start on landing, and pushed to the end of the
 	 *  curve when a slide ends so the faster-than-running slide speed decays instead of being slammed down. */
 	float GroundAccelElapsed = 0.0f;
 
-	/** Scale applied to the authored speed curves so card-raised move speed still works. See SpeedCurveReferenceSpeed. */
-	float GetSpeedCurveScale() const;
+	/** Time limit actually enforced on a slide: the curve's length when one is assigned, otherwise SlideMaxDuration.
+	 *  Always finite, so invariant 7 (no inescapable state) holds either way. */
+	float GetEffectiveSlideMaxDuration() const;
+
+	/** Ground speed ramp for the current stance: CrouchSpeedCurve while crouched, GroundSpeedCurve otherwise.
+	 *  Null when that stance has no curve assigned. */
+	const UCurveFloat* GetActiveGroundSpeedCurve() const;
+
+	/** Earliest time on Curve whose value reaches TargetSpeed (cm/s), accounting for the card scale. Used to carry
+	 *  momentum across a stance change: 300 cm/s maps to wherever the standing curve first hits 300, and acceleration
+	 *  resumes from there instead of restarting or jumping to the end. Assumes a rising ramp; returns the curve's end
+	 *  when the current speed already exceeds everything it describes. */
+	float FindCurveTimeForSpeed(const UCurveFloat* Curve, float TargetSpeed) const;
+
+	/** Move GroundAccelElapsed onto the equivalent point of the stance's curve. No-op without a curve. */
+	void RemapGroundAccelForStanceChange();
 
 	friend class FSavedMove_FPSR;
 };
@@ -237,6 +339,7 @@ public:
 	float SavedSlideEntrySpeed = 0.0f;
 	float SavedSlideCooldownRemaining = 0.0f;
 	float SavedGroundAccelElapsed = 0.0f;
+	float SavedSlideSlopeSpeedBonus = 0.0f;
 };
 
 /** Client prediction data that allocates FSavedMove_FPSR instead of the stock saved move. */
