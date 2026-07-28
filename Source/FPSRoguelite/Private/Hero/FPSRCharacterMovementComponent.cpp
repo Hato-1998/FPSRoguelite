@@ -300,11 +300,17 @@ void UFPSRCharacterMovementComponent::OnMovementModeChanged(EMovementMode Previo
 
 	if (bOnWallNow)
 	{
-		// The grab arrests the fall — carrying the plunge into the hang would drag the player down the wall the moment
-		// they caught it.
-		Velocity = FVector::ZeroVector;
+		// Remember what the player arrived with BEFORE anything is thrown away — this is the whole basis of the entry
+		// momentum, and after this frame the incoming velocity is gone.
+		WallEntryVelocity = FVector(Velocity.X, Velocity.Y, 0.0f);
 		WallHangElapsed = 0.0f;
 		WallSlipElapsed = 0.0f;
+
+		// The grab arrests the FALL — carrying the plunge into the hang would drag the player straight back down the
+		// moment they caught the wall. What survives is the part that runs ALONG the wall, which is what the glide then
+		// bleeds off over WallEntryMomentumDuration. Killing the horizontal too was what made a fast approach read as
+		// hitting a brick wall.
+		Velocity = FVector::VectorPlaneProject(WallEntryVelocity, WallNormal);
 
 		if (CharacterOwner)
 		{
@@ -333,7 +339,57 @@ void UFPSRCharacterMovementComponent::OnMovementModeChanged(EMovementMode Previo
 		WallHangElapsed = 0.0f;
 		WallSlipElapsed = 0.0f;
 		WallNormal = FVector::ZeroVector;
+		WallEntryVelocity = FVector::ZeroVector;
 	}
+}
+
+float UFPSRCharacterMovementComponent::GetWallEntryMomentumAlpha() const
+{
+	if (WallEntryMomentumDuration <= 0.0f)
+	{
+		return 0.0f;
+	}
+	return FMath::Clamp(1.0f - (WallHangElapsed / WallEntryMomentumDuration), 0.0f, 1.0f);
+}
+
+FVector UFPSRCharacterMovementComponent::ComputeWallJumpDirection(const FVector& InWallNormal) const
+{
+	const FVector OutwardDirection = InWallNormal.GetSafeNormal2D();
+	if (OutwardDirection.IsNearlyZero())
+	{
+		return FVector::ZeroVector;
+	}
+
+	// Where the player is looking. Reading it off the pawn rather than the controller keeps this on the same footing as
+	// the slide's steering: the pawn's rotation is part of the replicated move, so client and server agree.
+	const FVector FacingDirection = UpdatedComponent ? UpdatedComponent->GetForwardVector().GetSafeNormal2D() : FVector::ZeroVector;
+
+	FVector JumpDirection = (FacingDirection * WallJumpAimBlend) + (OutwardDirection * (1.0f - WallJumpAimBlend));
+	JumpDirection = JumpDirection.GetSafeNormal2D();
+	if (JumpDirection.IsNearlyZero())
+	{
+		// Looking exactly into the wall at a 50/50 blend cancels the two terms out entirely.
+		return OutwardDirection;
+	}
+
+	// Guarantee a minimum push away from the surface. Split the blended direction into its along-the-wall and
+	// away-from-the-wall parts, raise only the second, and re-normalize — this preserves as much of the player's aim as
+	// the floor allows instead of snapping the whole jump back to the normal.
+	const float OutwardAmount = FVector::DotProduct(JumpDirection, OutwardDirection);
+	if (OutwardAmount >= WallJumpMinOutward)
+	{
+		return JumpDirection;
+	}
+
+	// Rebuilt from unit parts rather than by adding the shortfall on: the two components of a unit vector are
+	// sin and cos of the same angle, so this lands on exactly WallJumpMinOutward instead of near it.
+	const FVector AlongWall = FVector::VectorPlaneProject(JumpDirection, OutwardDirection).GetSafeNormal2D();
+	if (AlongWall.IsNearlyZero())
+	{
+		return OutwardDirection; // aimed straight at (or straight out of) the wall — nothing sideways to preserve
+	}
+	const float OutwardShare = FMath::Clamp(WallJumpMinOutward, 0.0f, 1.0f);
+	return ((AlongWall * FMath::Sqrt(1.0f - (OutwardShare * OutwardShare))) + (OutwardDirection * OutwardShare)).GetSafeNormal2D();
 }
 
 void UFPSRCharacterMovementComponent::PhysCustom(float deltaTime, int32 Iterations)
@@ -369,6 +425,16 @@ void UFPSRCharacterMovementComponent::PhysCustom(float deltaTime, int32 Iteratio
 		if (!InputDirection.IsNearlyZero())
 		{
 			LateralVelocity = FVector::VectorPlaneProject(InputDirection, WallNormal).GetSafeNormal2D() * WallLateralSpeed;
+		}
+
+		// Entry momentum: for a moment after the grab the player keeps sliding along the wall at the speed they came in
+		// with, then it hands over to the ordinary lateral speed. Crossfading rather than adding keeps the result
+		// bounded by whichever of the two is larger, so a fast entry can never stack on top of the steering.
+		const float MomentumAlpha = GetWallEntryMomentumAlpha();
+		if (MomentumAlpha > 0.0f)
+		{
+			const FVector GlideVelocity = FVector::VectorPlaneProject(WallEntryVelocity, WallNormal);
+			LateralVelocity = FMath::Lerp(LateralVelocity, GlideVelocity, MomentumAlpha);
 		}
 
 		// The pull toward the wall is what keeps the capsule in contact, and contact is what keeps the hold probe
@@ -436,15 +502,33 @@ bool UFPSRCharacterMovementComponent::DoJump(bool bReplayingMoves, float DeltaTi
 		return false;
 	}
 
+	// Read the momentum before Super::DoJump, which changes the movement mode and clears it along with the rest.
+	const float CarriedSpeed = WallEntryVelocity.Size() * GetWallEntryMomentumAlpha();
+	const FVector JumpDirection = ComputeWallJumpDirection(PushNormal);
+
 	if (!Super::DoJump(bReplayingMoves, DeltaTime))
 	{
 		return false;
 	}
 
-	// Kick straight out of the wall. The into-wall component (the stick that held the capsule on) is removed first or
-	// it would eat part of the push. PushNormal is horizontal, so the engine's jump velocity is untouched.
-	Velocity -= FVector::DotProduct(Velocity, PushNormal) * PushNormal;
-	Velocity += PushNormal * WallJumpPushSpeed;
+	// The jump OWNS the horizontal velocity rather than adding to it. Adding would leave the glide, the stick that held
+	// the capsule to the wall, and the push all fighting over the direction; writing it outright means the player goes
+	// exactly where ComputeWallJumpDirection says, at exactly the speed below.
+	if (!JumpDirection.IsNearlyZero())
+	{
+		// Speed still in hand from the approach rides on top of the base push, so reacting fast to a fast impact pays
+		// out — capped so a full-speed slide into a wall can't launch beyond the rest of the movement set.
+		const float JumpSpeed = FMath::Min(WallJumpPushSpeed + CarriedSpeed, WallJumpMaxSpeed);
+		Velocity.X = JumpDirection.X * JumpSpeed;
+		Velocity.Y = JumpDirection.Y * JumpSpeed;
+	}
+
+	// Super already set Z to the character's ordinary jump height; only override when the wall jump has been given a
+	// height of its own.
+	if (WallJumpUpSpeed > 0.0f)
+	{
+		Velocity.Z = WallJumpUpSpeed;
+	}
 	return true;
 }
 
@@ -851,6 +935,14 @@ FString UFPSRCharacterMovementComponent::GetLocomotionStateName() const
 		// ran out" look the same on screen otherwise.
 		StateName = FString::Printf(TEXT("Wall %s %.2f/%.2fs"),
 			IsInputIntoWall() ? TEXT("climb") : TEXT("slip"), WallHangElapsed, WallHangMaxDuration);
+
+		// How much launch speed is still on the table. Without it the entry-momentum window is invisible, and "I jumped
+		// too late" looks identical to "the momentum isn't working".
+		const float CarriedSpeed = WallEntryVelocity.Size() * GetWallEntryMomentumAlpha();
+		if (CarriedSpeed > 0.0f)
+		{
+			StateName += FString::Printf(TEXT("  +%.0f"), CarriedSpeed);
+		}
 	}
 	else if (IsFalling())   { StateName = TEXT("Air"); }
 	else if (bIsSliding)
@@ -945,6 +1037,7 @@ void FSavedMove_FPSR::Clear()
 	SavedWallHangElapsed = 0.0f;
 	SavedWallSlipElapsed = 0.0f;
 	SavedWallNormal = FVector::ZeroVector;
+	SavedWallEntryVelocity = FVector::ZeroVector;
 }
 
 bool FSavedMove_FPSR::CanCombineWith(const FSavedMovePtr& NewMove, ACharacter* InCharacter, float MaxDelta) const
@@ -993,6 +1086,7 @@ void FSavedMove_FPSR::SetMoveFor(ACharacter* C, float InDeltaTime, FVector const
 		SavedWallHangElapsed = Movement->WallHangElapsed;
 		SavedWallSlipElapsed = Movement->WallSlipElapsed;
 		SavedWallNormal = Movement->WallNormal;
+		SavedWallEntryVelocity = Movement->WallEntryVelocity;
 	}
 }
 
@@ -1019,6 +1113,7 @@ void FSavedMove_FPSR::PrepMoveFor(ACharacter* C)
 		Movement->WallHangElapsed = SavedWallHangElapsed;
 		Movement->WallSlipElapsed = SavedWallSlipElapsed;
 		Movement->WallNormal = SavedWallNormal;
+		Movement->WallEntryVelocity = SavedWallEntryVelocity;
 	}
 }
 

@@ -323,10 +323,38 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Movement|Wall", meta = (ClampMin = "0.0"))
 	float WallSlipMaxDuration = 0.35f;
 
-	/** Speed (cm/s) of the push straight out along the wall normal when jumping off. The upward part stays whatever
-	 *  JumpZVelocity is, so a jump-height card scales the wall jump too. */
+	/** How long the speed carried into the wall survives the grab. During this window the player keeps gliding along
+	 *  the wall at the speed they arrived with, and a wall jump taken inside it launches with that speed added on top —
+	 *  so hitting a wall fast and reacting fast is rewarded instead of being a full stop. Both effects fade linearly to
+	 *  nothing across the window. 0 disables it and the grab kills all momentum outright. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Movement|Wall", meta = (ClampMin = "0.0"))
+	float WallEntryMomentumDuration = 0.25f;
+
+	/** Base speed (cm/s) of the push when jumping off. Entry momentum still in hand is added to this. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Movement|Wall", meta = (ClampMin = "0.0"))
 	float WallJumpPushSpeed = 520.0f;
+
+	/** Where a wall jump goes: 0 = straight out along the wall normal, 1 = wherever the player is looking, 0.5 = an
+	 *  even blend of the two. Looking is what makes the exit feel aimed rather than scripted; the wall's share is what
+	 *  stops a player facing the wall from jumping back into it. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Movement|Wall", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float WallJumpAimBlend = 0.5f;
+
+	/** Smallest share of the wall jump that must point AWAY from the wall, regardless of where the player looks
+	 *  (0 = along the wall face, 1 = straight out). Without a floor here, looking directly into the wall cancels the
+	 *  blend and the jump either goes nowhere or drives straight back into the surface. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Movement|Wall", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float WallJumpMinOutward = 0.35f;
+
+	/** Ceiling on the horizontal speed a wall jump can produce (push + carried momentum). Stops a fast slide into a
+	 *  wall from converting into a launch far beyond anything else in the movement set. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Movement|Wall", meta = (ClampMin = "0.0"))
+	float WallJumpMaxSpeed = 1200.0f;
+
+	/** Upward speed (cm/s) of a wall jump. 0 = use the character's normal JumpZVelocity, so a jump-height card scales
+	 *  the wall jump too; set it above 0 to give the wall jump its own height independent of the ordinary jump. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Movement|Wall", meta = (ClampMin = "0.0"))
+	float WallJumpUpSpeed = 0.0f;
 
 	/** Forward speed (cm/s) granted when a climb clears the top of the wall. Without it the capsule is still beside
 	 *  the wall when the probe loses it and simply falls back down — the climb could never actually get anywhere. */
@@ -457,6 +485,15 @@ protected:
 	/** Advance the hang: timers, the three exits, and the per-frame wall re-check. */
 	void UpdateWallHang(float DeltaSeconds);
 
+	/** How much of the speed carried into the wall is still in hand: 1 at the moment of the grab, falling linearly to
+	 *  0 over WallEntryMomentumDuration. Drives both the glide and the wall jump's bonus speed off one number, so the
+	 *  two can't disagree about how much momentum is left. */
+	float GetWallEntryMomentumAlpha() const;
+
+	/** Direction a wall jump travels: the pawn's facing and the wall normal mixed per WallJumpAimBlend, then re-aimed
+	 *  if needed so at least WallJumpMinOutward of it still points away from the wall. Horizontal. */
+	FVector ComputeWallJumpDirection(const FVector& InWallNormal) const;
+
 	/** Derived state, NOT replicated — same reasoning as the slide: both machines compute it from the same predicted
 	 *  inputs, and it rides in FSavedMove_FPSR so a correction replay restores it rather than re-deriving it.
 	 *  (Whether we are on a wall at all is NOT here — that is the movement mode, which the engine already owns.) */
@@ -468,6 +505,11 @@ protected:
 	/** Outward normal of the wall being held, horizontal. Saved and restored because the jump exit reads it from
 	 *  CheckJumpInput, which runs BEFORE the frame's wall probe — a replay would otherwise read a stale or empty one. */
 	FVector WallNormal = FVector::ZeroVector;
+
+	/** Planar velocity the player arrived at the wall with, captured on the grab. Its along-the-wall part becomes the
+	 *  glide and its full LENGTH becomes the wall jump's bonus — keeping the length is what makes a head-on impact,
+	 *  whose along-the-wall part is nearly zero, still pay out on the jump. Saved for the same reason as WallNormal. */
+	FVector WallEntryVelocity = FVector::ZeroVector;
 
 	/** True once this airborne period's single wall grab has been spent; cleared on landing. A cooldown alone would
 	 *  not do: climbing for WallHangMaxDuration gains more height than the cooldown's fall loses it, so any wall could
@@ -513,6 +555,7 @@ public:
 	float SavedWallHangElapsed = 0.0f;
 	float SavedWallSlipElapsed = 0.0f;
 	FVector SavedWallNormal = FVector::ZeroVector;
+	FVector SavedWallEntryVelocity = FVector::ZeroVector;
 };
 
 /** Client prediction data that allocates FSavedMove_FPSR instead of the stock saved move. */
