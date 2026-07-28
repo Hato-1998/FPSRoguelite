@@ -15,7 +15,14 @@
 - **미결(구현 시점 연기)**: 슬라이드를 걷기모드 확장 vs `MOVE_Custom` — `저렴` 등급이고 외부 인터페이스가 축과 무관해 나중에 뒤집어도 파급 0.
 - **⚠️ 대시 폐기 완료**(사용자 결정 "나중에 불변식에 맞춰 재제작"): C++ 전용 코드 전체 + `Ability.Movement.Dash` 태그(참조 0건) 제거. **`RefreshPawnCollisionResponse` 는 함수 유지·`bDashing` 항만 제거** — `bGrace`(부활/프리즈 무적)·`bDowned`(DBNO 통과)가 계속 쓰므로 함수째 지웠다면 둘 다 깨졌음. `HandleRunStateChanged_Movement` 도 함수·`StopMovementImmediately()` 유지(낙하 중 프리즈 + 향후 슬라이드). `IA_Dash`+`IMC_Default` 키 매핑은 **유지**(재사용 예정, 현재 무동작). 기획은 유효 = `Docs/SSOT/PlayerFeel.md §2-13` 에 폐기사유·재제작 방침 기록.
 - **검증**: 빌드 `Result: Succeeded`(FPSRogueliteEditor Win64 Development, 링크까지) + `git diff` 재검토(변경 9파일, 의도 외 변경 0). **⏳ 남은 = PIE 사용자 확인 — 부활 후 무적/DBNO 통과가 그대로 동작하는지**(대시 제거가 공유 헬퍼를 건드렸으므로).
-- **다음** = 신규 `UFPSRCharacterMovementComponent` 구현(축 1 결정 포함) 또는 사용자가 지정하는 다음 구조 논의.
+- **✅ 1·2단계 구현 완료(2026-07-28)** = 신규 **`UFPSRCharacterMovementComponent`**(예측 배관 `FSavedMove_FPSR` + 앉기 + **슬라이드**) + 캐릭터 배선. **축 1 해소 = 혼합**(슬라이드는 `MOVE_Walking` 유지·속도/마찰 훅만 오버라이드 / 벽 매달리기는 예정대로 `MOVE_Custom`) — `PhysCustom()`이 빈 함수라 커스텀 모드로 가면 바닥추종·계단·경사·벽미끄러짐을 전부 재구현해야 하기 때문.
+  - **커스텀 네트워크 슬롯 0개**(ADR 예상 1개에서 정정): 진입 의도 = 엔진 `bWantsToCrouch` 재사용, 파생 상태 5종은 `FSavedMove_FPSR` **로컬 재생용**(전송 0) → 스톡 CMC 대비 대역폭 증가 없음.
+  - **엔진 함정 3건 발견·처리**: ①`CanCrouchInCurrentState()`가 `IsFalling()` 허용 → 공중 앉기/슬라이드 됨(지면 전용으로 좁힘, 부수효과로 앉은 채 점프 시 자동 기립) ②`PhysWalking`이 `GroundFriction`(8)×`BrakingFrictionFactor`(2)=**실효 16**을 브레이킹에 적용 → 900→250이 **0.08초**에 끝나 슬라이드가 순간정지로 보임(슬라이드 마찰 0으로 대체=등감속 경로) ③`CanAttemptJump()`의 `!bWantsToCrouch`가 **슬라이드 중 점프를 원천 차단**(크라우치 항만 제외).
+  - **슬라이드 사양**: 진입=달리기+앉기입력+최소속도 450(×1.5 부스트) / 종료=키해제·250미달·1.6s상한·공중이탈·프리즈·DBNO / **모든 종료에 쿨다운 0.8s**(무한 슬라이드 방지) / 슬라이드 중 **사격 가능**(확산×1.3)·**점프 취소 가능**(속도 유지).
+  - **속도 곡선 = 절대값**(사용자 결정): `/Game/Config/Character/Curve_GroundSpeed`(X=초,Y=0→600) · `Curve_SlideSpeed`(X=초,Y=900→300, **진입속도로 상한**). 헤드리스 생성(CSV 임포트 경로 — `UCurveFloat::FloatCurve`는 파이썬 미노출) + 값 읽어서 검증. 카드로 MaxWalkSpeed 상승 시 `SpeedCurveReferenceSpeed` 대비 자동 스케일. **미할당 시 등가속/등감속 폴백**.
+  - **디버그**: 우측 상단 `SPEED`/`STATE`(+슬라이드 쿨다운) — 엔진 DebugDrawService(좌상단 `AddOnScreenDebugMessage`는 기존 HP/런 디버그가 점유). 토글 `FPSR.Movement.Debug 0`.
+  - **검증**: 빌드 `Result: Succeeded`(UHT `-WarningsAsErrors` 포함) + 커브 값 읽기 대조(`CURVE OK`×2). ⏳ **PIE = 사용자**(예측 정합성은 원리상 헤드리스로 검증 불가 — 2-client 필요). 작업 맵 = **`Content/Maps/TestWorld.umap`**(리팩토링 기간 작업 맵, 사용자 결정).
+- **다음** = 벽 매달리기·등반·벽점프(3단계) / GAS 어트리뷰트 연결(카드→이동 수치, 불변식 3) / `GetSpreadMultiplier()`의 heat 시스템 소비 배선 / 대시 재제작. **무기 DataAsset을 `Content/Config/Weapon/`으로 이동 = 무기 작업 착수 시점에**(사용자 결정 2026-07-28, 에디터에서 이동+Fix Up Redirectors 필요).
 
 ## 🔀 브랜치 전면 통합 = ✅완료 (2026-07-27) — 구조 재설계 착수
 > **사용자 결정**: 가장 기초 구조부터 다시 설계한다(**플레이어 캐릭터**부터). 흩어져 있던 작업 브랜치를 전부 `main` 으로 모으고, 재설계 브랜치 `refactor/character` 를 분기한다.

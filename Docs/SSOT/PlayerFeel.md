@@ -20,6 +20,12 @@
   - **폐기 사유**: 구 구현(`Input_Dash` → `ServerDash` RPC → `LaunchCharacter`)이 [ADR 0001](../Architecture/0001-player-movement-state-ownership.md) **불변식 2(클라 예측 + 서버 확인)를 위반** — 서버 응답을 기다렸다 움직이므로 ping 46ms 기준 러버밴딩. 지속 상태(슬라이드 등)로 확장 불가.
   - **재제작 예정**: 신규 `UFPSRCharacterMovementComponent` 위에서 커스텀 플래그 + 예측 방식으로 다시 만든다. 대시의 **적·아군 통과 창(collision-ignore)** 자체는 부활/프리즈 후 grace 및 DBNO와 `RefreshPawnCollisionResponse`를 공유하던 구조라, 재제작 시 같은 헬퍼에 항을 다시 추가하면 된다.
   - **폐기 시 남긴 것**: `Content/Input/IA_Dash` + `IMC_Default` 키 매핑(재사용 예정, 현재는 눌러도 무동작). **제거한 것**: C++ 전체 · `Ability.Movement.Dash` 게임플레이 태그(참조 0건이었음).
+- **플레이어 이동 = `UFPSRCharacterMovementComponent` 단일 소유 (구조 확정 2026-07-28)** — 구조·불변식 9개·기각안 상세 = [ADR 0001](../Architecture/0001-player-movement-state-ownership.md). 요지: 이동 상태의 주인은 무브먼트 컴포넌트 하나이고, 사격/애님BP/HUD는 `CanFireInCurrentState()`·`GetSpreadMultiplier()`·`IsSliding()`·`IsOnWall()` 4개로 **질의만** 한다(새 이동 상태가 무기 코드로 번지지 않게). 모든 상태는 **클라 예측 + 서버 재시뮬**(서버 응답 대기형 이동 금지). 수치는 전부 `EditDefaultsOnly`/커브 에셋.
+  - **구현 완료(1·2단계)**: 앉기(엔진 `bWantsToCrouch` 재사용) · **슬라이드** · 사격 확산 배수 제공. **커스텀 네트워크 슬롯 0개**(진입 의도=크라우치 플래그 재사용, 파생 상태는 `FSavedMove_FPSR` 로컬 재생용) → 스톡 CMC 대비 대역폭 증가 없음.
+  - **슬라이드 규칙**: 달리기 중 앉기 입력 + 최소속도(기본 450) 이상 → 진입(속도 ×1.5 부스트). 종료 = 키 해제 / 최소속도(250) 미달 / 시간상한(1.6s) / 공중 이탈 / 프리즈·DBNO. **모든 종료 경로에 쿨다운**(기본 0.8s, 무한 슬라이드 방지). 슬라이드 중 **사격 가능**(확산 ×1.3) · **점프로 취소 가능**(속도 유지 — 공중 마찰/감속이 엔진 기본 0). **공중에서는 앉기·슬라이드 불가**(엔진은 허용하지만 설계상 금지).
+  - **속도 곡선(선택)** = `/Game/Config/Character/Curve_GroundSpeed`(X=초, Y=0→600 cm/s) · `Curve_SlideSpeed`(X=초, Y=900→300 cm/s, **실제 진입속도로 상한**). 값은 literal cm/s이며 카드로 `MaxWalkSpeed`가 오르면 `SpeedCurveReferenceSpeed` 대비 비율로 곡선 전체가 스케일된다. 미할당 시 등가속·등감속 폴백(곡선은 정제 수단이지 필수 아님).
+  - **확산 배수**(§2-14 heat 시스템이 소비 — 배선은 후속): 앉기 ×0.8 / 공중 ×1.6 / 슬라이드 ×1.3. 상태는 곱하지 않고 **배타 선택**(공중 > 슬라이드 > 앉기).
+  - **후속**: 벽 매달리기·등반·벽점프(3단계) · GAS 어트리뷰트 연결(카드로 이동 수치 변경) · `GetSpreadMultiplier()`의 heat 시스템 소비 배선 · 대시 재제작.
 - **최대체력 증가 = 즉시 회복(확정 2026-06-02)**: `MaxHealth`가 증가하면(체력 카드 등) **증가분만큼 현재 `Health`도 함께 증가**(서버 권위, `UFPSRHealthSet::PostAttributeChange`에서 처리·새 최대치로 clamp). +체력 업그레이드 선택의 즉각적 체감. 감소 시는 다음 Health 변경 때 clamp로 캡.
 
 ### 2-14. 게임필 / 피드백 / 공간 지각 (확정 2026-05-30)

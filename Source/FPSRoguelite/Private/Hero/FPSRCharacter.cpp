@@ -21,11 +21,14 @@
 #include "Weapon/FPSRWeaponPartSelector.h"
 #include "Hero/FPSRPlayerFeedbackComponent.h"
 #include "Hero/FPSRBlindspotAudioComponent.h"
+#include "Hero/FPSRCharacterMovementComponent.h"
 #include "Hero/FPSRReviveComponent.h"
 #include "Director/FPSRDirectorSensorSubsystem.h"
 #include "FPSRCollisionChannels.h"
 
 #include "Camera/CameraComponent.h"
+#include "Debug/DebugDrawService.h"
+#include "Engine/Canvas.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -46,7 +49,10 @@
 #include "InputAction.h"
 #include "InputActionValue.h"
 
-AFPSRCharacter::AFPSRCharacter()
+AFPSRCharacter::AFPSRCharacter(const FObjectInitializer& ObjectInitializer)
+	// ADR 0001: locomotion state lives in one place. Installing the component here (rather than in a BP) means every
+	// player character gets it, including any Blueprint subclass, without per-asset wiring that could be forgotten.
+	: Super(ObjectInitializer.SetDefaultSubobjectClass<UFPSRCharacterMovementComponent>(ACharacter::CharacterMovementComponentName))
 {
 #if ENABLE_DRAW_DEBUG
 	PrimaryActorTick.bCanEverTick = true; // debug-only: on-screen health readout (replaced by HUD in P3)
@@ -71,7 +77,9 @@ AFPSRCharacter::AFPSRCharacter()
 
 	FirstPersonCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("FirstPersonCamera"));
 	FirstPersonCamera->SetupAttachment(GetCapsuleComponent());
-	FirstPersonCamera->SetRelativeLocation(FVector(0.0f, 0.0f, 64.0f));
+	// Drive the eye height off the inherited BaseEyeHeight rather than a literal, so the crouch overrides
+	// (OnStartCrouch/OnEndCrouch) and this initial placement can't drift apart.
+	FirstPersonCamera->SetRelativeLocation(FVector(0.0f, 0.0f, BaseEyeHeight));
 	FirstPersonCamera->bUsePawnControlRotation = true;
 	// Motion blur off on the player view: the camera-parented 1P weapon gets a large world-space velocity during camera
 	// recoil / the ADS fire kick and would smear (ghost) even while screen-static, and a fast swarm reads better crisp.
@@ -132,6 +140,47 @@ AFPSRCharacter::AFPSRCharacter()
 }
 
 #if ENABLE_DRAW_DEBUG
+static TAutoConsoleVariable<int32> CVarMovementDebug(
+	TEXT("FPSR.Movement.Debug"),
+	1,
+	TEXT("Show the top-right movement readout (planar speed + locomotion state) for the local player. 1 = on (default), 0 = off."),
+	ECVF_Cheat);
+
+void AFPSRCharacter::DrawMovementDebug(UCanvas* Canvas, APlayerController* PC)
+{
+	if (!Canvas || !IsLocallyControlled() || CVarMovementDebug.GetValueOnGameThread() == 0)
+	{
+		return;
+	}
+	const UFPSRCharacterMovementComponent* FPSRMovement = GetFPSRMovement();
+	if (!FPSRMovement)
+	{
+		return;
+	}
+
+	const FString SpeedText = FString::Printf(TEXT("SPEED %.0f"), FPSRMovement->GetPlanarSpeed());
+	const FString StateText = FString::Printf(TEXT("STATE %s"), *FPSRMovement->GetLocomotionStateName());
+
+	UFont* Font = GEngine ? GEngine->GetMediumFont() : nullptr;
+	if (!Font)
+	{
+		return;
+	}
+
+	// Right-align: measure each line and offset from the canvas width so the text stays anchored to the top-right
+	// corner at any resolution.
+	const float RightMargin = 24.0f;
+	float LineWidth = 0.0f, LineHeight = 0.0f;
+
+	Canvas->StrLen(Font, SpeedText, LineWidth, LineHeight);
+	Canvas->SetDrawColor(FColor::Yellow);
+	Canvas->DrawText(Font, SpeedText, Canvas->SizeX - LineWidth - RightMargin, 24.0f);
+
+	Canvas->StrLen(Font, StateText, LineWidth, LineHeight);
+	Canvas->SetDrawColor(FPSRMovement->IsSliding() ? FColor::Orange : FColor::White);
+	Canvas->DrawText(Font, StateText, Canvas->SizeX - LineWidth - RightMargin, 24.0f + LineHeight + 2.0f);
+}
+
 void AFPSRCharacter::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
@@ -169,6 +218,13 @@ void AFPSRCharacter::BeginPlay()
 {
 	Super::BeginPlay();
 
+#if ENABLE_DRAW_DEBUG
+	// Movement readout. Registered for every pawn (the draw itself early-outs on non-local ones) because
+	// IsLocallyControlled() isn't reliable yet at BeginPlay on a remote client's own pawn.
+	MovementDebugDrawHandle = UDebugDrawService::Register(
+		TEXT("Game"), FDebugDrawDelegate::CreateUObject(this, &AFPSRCharacter::DrawMovementDebug));
+#endif
+
 	// Bind regardless of local-control state: BeginPlay can run before the controller ref replicates on a remote
 	// client's own pawn, so gating the bind on IsLocallyControlled() here would permanently miss it. The GameState
 	// delegate is the trigger; the camera PP is only APPLIED for the locally controlled pawn (checked at apply time,
@@ -192,6 +248,14 @@ void AFPSRCharacter::BeginPlay()
 
 void AFPSRCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+#if ENABLE_DRAW_DEBUG
+	if (MovementDebugDrawHandle.IsValid())
+	{
+		UDebugDrawService::Unregister(MovementDebugDrawHandle);
+		MovementDebugDrawHandle.Reset();
+	}
+#endif
+
 	if (UWorld* World = GetWorld())
 	{
 		World->GetTimerManager().ClearTimer(VisionBindRetryTimerHandle);
@@ -343,6 +407,11 @@ void AFPSRCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompo
 		EIC->BindAction(ADSAction, ETriggerEvent::Started, this, &AFPSRCharacter::Input_ADSPressed);
 		EIC->BindAction(ADSAction, ETriggerEvent::Completed, this, &AFPSRCharacter::Input_ADSReleased);
 	}
+	if (CrouchAction)
+	{
+		EIC->BindAction(CrouchAction, ETriggerEvent::Started, this, &AFPSRCharacter::Input_CrouchPressed);
+		EIC->BindAction(CrouchAction, ETriggerEvent::Completed, this, &AFPSRCharacter::Input_CrouchReleased);
+	}
 	if (MenuAction)
 	{
 		EIC->BindAction(MenuAction, ETriggerEvent::Started, this, &AFPSRCharacter::Input_Menu);
@@ -448,6 +517,40 @@ TSubclassOf<UUserWidget> AFPSRCharacter::GetActiveScopeOverlayWidgetClass() cons
 bool AFPSRCharacter::IsScopeVignetteEnabled() const
 {
 	return IsScopeVisualActive() && CachedScopeDescriptor.bScopeVignette;
+}
+
+void AFPSRCharacter::ApplyEyeHeightToCamera()
+{
+	if (FirstPersonCamera)
+	{
+		FVector CameraRelative = FirstPersonCamera->GetRelativeLocation();
+		CameraRelative.Z = BaseEyeHeight;
+		FirstPersonCamera->SetRelativeLocation(CameraRelative);
+	}
+}
+
+void AFPSRCharacter::OnStartCrouch(float HalfHeightAdjust, float ScaledHalfHeightAdjust)
+{
+	Super::OnStartCrouch(HalfHeightAdjust, ScaledHalfHeightAdjust); // refreshes BaseEyeHeight -> CrouchedEyeHeight
+	ApplyEyeHeightToCamera();
+}
+
+void AFPSRCharacter::OnEndCrouch(float HalfHeightAdjust, float ScaledHalfHeightAdjust)
+{
+	Super::OnEndCrouch(HalfHeightAdjust, ScaledHalfHeightAdjust); // restores BaseEyeHeight from the class default
+	ApplyEyeHeightToCamera();
+}
+
+UFPSRCharacterMovementComponent* AFPSRCharacter::GetFPSRMovement() const
+{
+	return Cast<UFPSRCharacterMovementComponent>(GetCharacterMovement());
+}
+
+bool AFPSRCharacter::CanPerformSpecialMovement() const
+{
+	// Both terms read replicated state (GameState run-paused, PlayerState life state), so the server and the owning
+	// client agree — the movement component gates the slide on this and prediction needs both to match.
+	return !IsRunFrozen() && !IsIncapacitatedLocal();
 }
 
 bool AFPSRCharacter::IsIncapacitatedLocal() const
@@ -608,6 +711,24 @@ void AFPSRCharacter::Input_ADSReleased(const FInputActionValue& Value)
 {
 	if (WeaponFire) { WeaponFire->SetAiming(false); }
 	ServerSetAiming(false);
+}
+
+void AFPSRCharacter::Input_CrouchPressed(const FInputActionValue& Value)
+{
+	// Intent only — whether this becomes a crouch or a slide is the movement component's call (it owns the state, and
+	// it needs to reach the same conclusion on the server, which never sees this function).
+	if (IsRunFrozen() || IsIncapacitatedLocal())
+	{
+		return;
+	}
+	Crouch();
+}
+
+void AFPSRCharacter::Input_CrouchReleased(const FInputActionValue& Value)
+{
+	// Deliberately NOT gated: a release must always land. If the freeze or a down happened while the key was held,
+	// swallowing the release would leave bWantsToCrouch stuck on and the player permanently crouched.
+	UnCrouch();
 }
 
 void AFPSRCharacter::Input_Menu(const FInputActionValue& Value)
@@ -969,6 +1090,14 @@ void AFPSRCharacter::HandleRunStateChanged_Movement()
 	}
 
 	GetCharacterMovement()->StopMovementImmediately(); // kill residual velocity so the player is stopped
+
+	// Invariant 8: gating the START of special locomotion is not enough — a slide already in progress has to end too,
+	// or it carries the player across the frozen card screen. (The movement component also self-exits on the same
+	// gate, so this is belt-and-braces for the authority side, which is the one that matters for position.)
+	if (UFPSRCharacterMovementComponent* FPSRMovement = GetFPSRMovement())
+	{
+		FPSRMovement->StopSliding();
+	}
 }
 
 void AFPSRCharacter::ApplyVisionRestriction(bool bRestricted)

@@ -10,6 +10,7 @@
 
 class UAbilitySystemComponent;
 class UFPSRAbilitySystemComponent;
+class UFPSRCharacterMovementComponent;
 class UCameraComponent;
 class USkeletalMeshComponent;
 class UInputAction;
@@ -38,7 +39,20 @@ class FPSROGUELITE_API AFPSRCharacter : public ACharacter, public IAbilitySystem
 	GENERATED_BODY()
 
 public:
-	AFPSRCharacter();
+	/** Takes an FObjectInitializer so the character's movement component can be swapped to
+	 *  UFPSRCharacterMovementComponent (ADR 0001: that component is the single owner of locomotion state). */
+	AFPSRCharacter(const FObjectInitializer& ObjectInitializer);
+
+	/** The locomotion component, already typed. Never null in practice (the ctor installs it), but callers should
+	 *  still null-check — a Blueprint subclass can technically override the component class. */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Movement")
+	UFPSRCharacterMovementComponent* GetFPSRMovement() const;
+
+	/** True when this pawn may START or CONTINUE special locomotion (slide today, wall-hang later). False during the
+	 *  card-selection freeze and while downed. Reads replicated state (GameState run-paused + PlayerState life state)
+	 *  so the server and the owning client agree — the movement component gates on this, and prediction requires both
+	 *  machines to reach the same answer. Public because the movement component is a separate class. */
+	bool CanPerformSpecialMovement() const;
 
 	virtual void PossessedBy(AController* NewController) override;
 	virtual void OnRep_PlayerState() override;
@@ -56,7 +70,21 @@ public:
 
 #if ENABLE_DRAW_DEBUG
 	virtual void Tick(float DeltaSeconds) override;
+
+	/** Top-right movement readout (speed + locomotion state), drawn through the engine's debug-draw service because
+	 *  AddOnScreenDebugMessage can only stack at the top LEFT, where the existing HP/run debug already lives. Registered
+	 *  for the local player only; toggle with FPSR.Movement.Debug. */
+	void DrawMovementDebug(class UCanvas* Canvas, class APlayerController* PC);
+	FDelegateHandle MovementDebugDrawHandle;
 #endif
+
+	/** Drop / raise the first-person camera with the crouch capsule. Without this the camera keeps its standing offset
+	 *  and pokes out the TOP of the crouched capsule (standing eye 152cm vs crouched capsule 80cm tall), which lets the
+	 *  view clip through geometry the capsule is still blocked by. Super updates BaseEyeHeight for us — the engine
+	 *  derives CrouchedEyeHeight from the movement component's crouched half-height — so both overrides just push the
+	 *  refreshed value onto the camera. Reacting to a state the movement component owns; not owning it (invariant 1). */
+	virtual void OnStartCrouch(float HalfHeightAdjust, float ScaledHalfHeightAdjust) override;
+	virtual void OnEndCrouch(float HalfHeightAdjust, float ScaledHalfHeightAdjust) override;
 
 	//~IAbilitySystemInterface
 	virtual UAbilitySystemComponent* GetAbilitySystemComponent() const override;
@@ -169,6 +197,9 @@ public:
 	void MulticastFireCosmetics();
 
 protected:
+	/** Put the first-person camera at the current BaseEyeHeight (capsule-relative). Shared by the crouch overrides. */
+	void ApplyEyeHeightToCamera();
+
 	void InitAbilitySystem();
 
 	/** Server-authoritative run-start seam (U10): meta-progression stat effects are applied here, right after the ASC
@@ -221,6 +252,11 @@ protected:
 	void Input_Reload(const FInputActionValue& Value);
 	void Input_ADSPressed(const FInputActionValue& Value);
 	void Input_ADSReleased(const FInputActionValue& Value);
+	/** Crouch input. Held = crouch; pressing it while running fast enough starts a SLIDE instead (the movement
+	 *  component decides — see UFPSRCharacterMovementComponent::CanEnterSlide). This only forwards intent: the engine
+	 *  already ships bWantsToCrouch in every move packet, so no extra RPC and no custom flag is needed. */
+	void Input_CrouchPressed(const FInputActionValue& Value);
+	void Input_CrouchReleased(const FInputActionValue& Value);
 	/** Esc: open the settings overlay (delegates to the owning PC; non-pause overlay). */
 	void Input_Menu(const FInputActionValue& Value);
 
@@ -335,6 +371,10 @@ protected:
 
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Input")
 	TObjectPtr<UInputAction> ADSAction;
+
+	/** Crouch / slide (one key — see Input_CrouchPressed). */
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Input")
+	TObjectPtr<UInputAction> CrouchAction;
 
 	/** Esc — opens the settings overlay (non-pause). */
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Input")
