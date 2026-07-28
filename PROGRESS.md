@@ -23,12 +23,40 @@
   - **디버그**: 우측 상단 `SPEED`/`STATE`(+슬라이드 쿨다운) — 엔진 DebugDrawService(좌상단 `AddOnScreenDebugMessage`는 기존 HP/런 디버그가 점유). 토글 `FPSR.Movement.Debug 0`.
   - **검증**: 빌드 `Result: Succeeded`(UHT `-WarningsAsErrors` 포함) + 커브 값 읽기 대조(`CURVE OK`×2). ⏳ **PIE = 사용자**(예측 정합성은 원리상 헤드리스로 검증 불가 — 2-client 필요). 작업 맵 = **`Content/Maps/TestWorld.umap`**(리팩토링 기간 작업 맵, 사용자 결정).
 - **✅ 2단계 후속 전부 완료(2026-07-28, 사용자 PIE 확인 완료)** — 아래 ⑨ 핸드오프 참조.
-- **✅ 3단계 = 벽 매달리기 코드 완료(2026-07-28)** — `CMOVE_WallHang`(`MOVE_Custom`) + `PhysCustom()` 직접 구현. **상태 1개·출구 3개**(W 유지→등반 / W 해제→미끄러진 뒤 낙하 / 점프→벽 법선 방향으로 튕김) + 안전 출구 4개(벽 소실·시간 상한·프리즈/DBNO·바닥 착지). `IsOnWall()`은 **무브먼트 모드에서 파생**(별도 복제 bool 없음 — 엔진이 이미 이동 패킷에 싣고 보정 시 복원). 빌드 `Result: Succeeded`. ⏳ **PIE = 사용자**. 아래 ⑨ 핸드오프 참조.
+- **✅ 3단계 = 벽 매달리기 코드 완료(2026-07-28)** — `CMOVE_WallHang`(`MOVE_Custom`) + `PhysCustom()` 직접 구현. **상태 1개·출구 3개**(W 유지→등반 / W 해제→미끄러진 뒤 낙하 / 점프→벽 법선 방향으로 튕김) + 안전 출구 4개(벽 소실·시간 상한·프리즈/DBNO·바닥 착지). `IsOnWall()`은 **무브먼트 모드에서 파생**(별도 복제 bool 없음 — 엔진이 이미 이동 패킷에 싣고 보정 시 복원). 빌드 `Result: Succeeded`. **✅ PIE 사용자 확인 완료(2026-07-29)** — 진입 모멘텀·조준 벽점프·자세 전환 블렌딩까지 전부 이상 없음. 아래 ⑩ 핸드오프 참조.
 - **다음** = GAS 어트리뷰트 연결(카드→이동 수치, 불변식 3) / `GetSpreadMultiplier()`의 heat 시스템 소비 배선 / 대시 재제작. **무기 DataAsset을 `Content/Config/Weapon/`으로 이동 = 무기 작업 착수 시점에**(사용자 결정 2026-07-28, 에디터에서 이동+Fix Up Redirectors 필요).
 
-## ⑩ 핸드오프 (2026-07-28, `refactor/character`) — **벽 매달리기(3단계) 코드 완료 · PIE 사용자 확인 대기**
+## ⌨️ 키 바인딩 2개씩 + 재바인딩 배관 = ✅완료 (2026-07-29, `refactor/character`)
+> 사용자 요청 = "각 액션에 키 2개씩(예: 점프 Space + 마우스 휠 위), **추후 설정에서 재바인딩도 필요**".
+> 사용자 결정 = **배관만** 이번에 (실제 2번 키·설정 UI는 나중).
+- **코드 변경 0건.** 한 액션에 키 여러 개 = Enhanced Input 기본 기능이고, 재바인딩도 엔진
+  `UEnhancedInputUserSettings`(UE 5.3+)가 전부 제공한다(`MapPlayerKey`/`SaveSettings` 전부 BP 호출 가능 →
+  **설정 UI는 UMG만으로** 가능). 커스텀 시스템 만들 필요 없음.
+- **핵심 발견**: **1번키/2번키 슬롯은 IMC 행 순서로 자동 배정**된다(같은 매핑 이름이 나올 때마다 슬롯 +1 —
+  `EnhancedInputUserSettings.cpp` 1708·1747·1762행). 단 **매핑 이름(`PlayerMappableKeySettings`)이 없는 행은
+  등록에서 통째로 스킵**(1680행, `IsPlayerMappable()`=설정객체 유무). 프로젝트엔 이름이 0개였고
+  `bEnableUserSettings`도 꺼져 있어 **재바인딩 시스템이 아예 안 돌고 있었다.**
+- **한 일**: ① `Config/DefaultInput.ini` 에 `[/Script/EnhancedInput.EnhancedInputDeveloperSettings] bEnableUserSettings=True`
+  ② **버튼 액션 9종은 IA 에셋에** 이름 부여(`Jump`/`Crouch`/`Fire`/`ADS`/`Reload`/`EquipSlot1~3`/`Menu`) —
+  그 액션의 모든 IMC 행이 물려받아 행 순서대로 슬롯이 된다 ③ **이동(축) 4행은 IMC 행마다** 따로
+  (`MoveForward`/`MoveBackward`/`MoveLeft`/`MoveRight`) — W/S가 같은 `IA_MoveForward`+Negate라 IA에 붙이면
+  **S가 "앞으로 가기의 2번 키"로 잡힌다**. ④ `IA_Look`(시점=재바인딩 대상 아님)·`IA_Dash`(폐기, 무동작) 제외.
+- **⚠️ `Name`은 세이브 키다** — 배포 후 바꾸면 플레이어 저장 바인딩이 고아가 된다. 표시명은 나중에 바꿔도 안전.
+- **검증(헤드리스, 슬롯까지 실측)**: 16행 중 **14행 매핑 가능**(Look·Dash만 제외), 이름 13종,
+  **`Jump`가 슬롯 2개** — 사용자가 에디터에서 넣어둔 휠 행이 자동으로 슬롯 2가 되면서 **배관 전체가 끝까지 증명**됐다.
+- **⚠️ 남은 것 = 그 휠 행의 키 종류**: `MouseWheelAxis`(축 키)로 들어가 있다. `IA_Jump`는 Boolean이고
+  `FInputActionValue::IsNonZero()`가 크기만 보므로 **휠을 아래로 굴려도 점프한다**. "휠 위"만 원하면
+  `MouseScrollUp`으로 바꿔야 한다(1행). **사용자에게 보고함 — 이번엔 그대로 유지**(바꾸려면 그 한 행만).
+- 저장 위치 = 엔진 기본 `Saved/SaveGames/`(SaveGame). 기존 `UFPSRGameUserSettings`(오디오·크로스헤어,
+  `GameUserSettings.ini`)와 **별도 경로** — 합치지 않음(이득 없음).
+- **✅ PIE 사용자 확인 완료(2026-07-29)** — 기존 조작 전부 이상 없음.
 
-> 빌드 `Result: Succeeded`(UHT `-WarningsAsErrors` 포함, 링크까지). 변경 3파일 = 무브먼트 컴포넌트 `.h/.cpp` + `FPSRCharacter.cpp`(프리즈 훅 1줄 + 디버그 readout). 콘텐츠 산출물 없음.
+## ⑩ 핸드오프 (2026-07-29, `refactor/character`) — **벽 매달리기(3단계) + 자세 전환 블렌딩 · ✅PIE 확인 완료**
+
+> 빌드 `Result: Succeeded`(UHT `-WarningsAsErrors` 포함, 링크까지). **✅ PIE 사용자 확인 완료(2026-07-29) — 이상 없음. 전부 커밋·푸시됨.**
+> **다음 = GAS 어트리뷰트 연결(카드→이동 수치, 불변식 3) / `GetSpreadMultiplier()` heat 소비 배선 / 대시 재제작 / 애니메이션 배선.**
+> ⚠️ 애니메이션 배선 시 결정 필요 = 원격 플레이어의 `IsSliding()`/`GetSlideBlend()` 신뢰 불가(슬라이드 미복제 + `bWantsToCrouch` 부재).
+> ⚠️ 벽 매달리기 진입이 **공중 전용**이라 ADR "정상 흐름"의 `슬라이드 → 벽 접촉` 이 아직 안 된다(이 절 아래 "PIE에서 가장 먼저 볼 것" 참조).
 
 ### 구현 요약
 - **`CMOVE_WallHang`**(`EFPSRCustomMovementMode`) + `PhysCustom()` = 엔진 `PhysFlying` 구조를 그대로 따름(중력 없음·`CalcVelocity` 미호출 → 입력이 벽에서 밀어내지 못함). `IsOnWall()`은 **무브먼트 모드에서 파생**.
