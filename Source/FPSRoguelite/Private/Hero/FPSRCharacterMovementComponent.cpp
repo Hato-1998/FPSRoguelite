@@ -1017,7 +1017,79 @@ void UFPSRCharacterMovementComponent::CalcVelocity(float DeltaTime, float Fricti
 		}
 		return;
 	}
+
+	if (IsFalling())
+	{
+		ApplyAirStrafeVelocity(DeltaTime);
+		return;
+	}
+
 	Super::CalcVelocity(DeltaTime, Friction, bFluid, BrakingDeceleration);
+}
+
+void UFPSRCharacterMovementComponent::ApplyAirStrafeVelocity(float DeltaTime)
+{
+	// PhysFalling zeroes Velocity.Z around this call and applies gravity separately, so everything here is lateral.
+	//
+	// Super's version accelerates the WHOLE velocity vector toward the input and then clamps the total, which is why
+	// turning in mid-air costs speed today: any input that disagrees with the current heading subtracts from it. This
+	// is the Quake-family model instead — add along the input direction only as much as the player is NOT already
+	// travelling that way. Sideways, that pushes perpendicular to travel, which ROTATES the velocity while barely
+	// changing its length; forwards, there is nothing left to add. Free turns, no free speed.
+	const FVector WishDirection = Acceleration.GetSafeNormal2D();
+	if (WishDirection.IsNearlyZero())
+	{
+		return; // no input: coast. Air friction stays at zero on purpose — carried momentum is the whole point.
+	}
+
+	FVector LateralVelocity(Velocity.X, Velocity.Y, 0.0f);
+
+	// How much of the current speed already points where the player is asking to go. Near zero when strafing across
+	// the direction of travel, which is what keeps the full allowance available for the turn.
+	const float SpeedAlongWish = FVector::DotProduct(LateralVelocity, WishDirection);
+	const float AddSpeed = AirStrafeWishSpeed - SpeedAlongWish;
+	if (AddSpeed <= 0.0f)
+	{
+		return; // already moving that way at least this fast — holding forward in the air must not accelerate
+	}
+
+	// Note this function can run MORE THAN ONCE per frame (the falling step sub-steps, and re-runs after a mid-air
+	// collision). It holds no state and the AddSpeed test bounds the total speed along any one direction, so repeat
+	// calls converge instead of compounding — don't add anything here that assumes one call per frame.
+	const float AccelSpeed = FMath::Min(AirStrafeAcceleration * DeltaTime, AddSpeed);
+	const float SpeedBefore = LateralVelocity.Size();
+	LateralVelocity += WishDirection * AccelSpeed;
+
+	// The CEILING only ever raises toward AirStrafeMaxSpeed and never cuts speed carried in above it — a slide jump
+	// arriving faster than the ceiling keeps every bit of it (same rule as SlideMaxEntrySpeed).
+	//
+	// That is a statement about the clamp, not about the whole step: input pointing AGAINST the direction of travel
+	// still subtracts, because the push above is a vector addition. That is deliberate — holding the back key is how
+	// a player sheds momentum in the air. Nothing takes speed away on its own; only the player can.
+	LateralVelocity = LateralVelocity.GetClampedToMaxSize(FMath::Max(SpeedBefore, AirStrafeMaxSpeed));
+
+	Velocity.X = LateralVelocity.X;
+	Velocity.Y = LateralVelocity.Y;
+}
+
+FVector UFPSRCharacterMovementComponent::GetFallingLateralAcceleration(float DeltaTime)
+{
+	// Root motion owns the movement outright; leave the engine's handling of it alone.
+	if (HasAnimRootMotion())
+	{
+		return Super::GetFallingLateralAcceleration(DeltaTime);
+	}
+
+	// Super scales the input by AirControl and clamps it to MaxAcceleration. Both are replaced here, so those two
+	// properties (and the AirControlBoost pair) stop having any effect while falling — documented on the air-strafe
+	// properties in the header.
+	//
+	// The magnitude matters even though ApplyAirStrafeVelocity only reads the direction: after a mid-air wall hit the
+	// engine feeds this same vector to LimitAirControl() as the re-acceleration to apply. Returning the raw
+	// Acceleration (sized by MaxAcceleration, 2048) would make grazing a wall shove the player far harder than the
+	// strafe model ever does.
+	const FVector WishDirection = Acceleration.GetSafeNormal2D();
+	return WishDirection.IsNearlyZero() ? FVector::ZeroVector : (WishDirection * AirStrafeAcceleration);
 }
 
 bool UFPSRCharacterMovementComponent::CanCrouchInCurrentState() const

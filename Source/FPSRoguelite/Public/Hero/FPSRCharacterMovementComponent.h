@@ -145,6 +145,12 @@ public:
 	/** Clamps descent to MaxFallSpeed after the engine's falling step. */
 	virtual void PhysFalling(float deltaTime, int32 Iterations) override;
 
+	/** Hands the falling step the AIR-STRAFE acceleration instead of the engine's AirControl-scaled one. The engine
+	 *  does not only use this to reach CalcVelocity — after a mid-air wall hit it feeds the same vector to
+	 *  LimitAirControl() as the re-acceleration magnitude, so returning the raw (MaxAcceleration-sized) input here
+	 *  would make grazing a wall accelerate the player far harder than the model intends. */
+	virtual FVector GetFallingLateralAcceleration(float DeltaTime) override;
+
 	/** Wall-hang physics. The engine's PhysCustom only fires a Blueprint event, so a custom mode has to move the
 	 *  capsule itself; this follows PhysFlying's shape (no gravity, no floor) rather than PhysWalking's. */
 	virtual void PhysCustom(float deltaTime, int32 Iterations) override;
@@ -320,6 +326,42 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Movement|Air", meta = (ClampMin = "0.0"))
 	float MaxFallSpeed = 0.0f;
 
+	//~ Air strafing — turning in mid-air WITHOUT paying for it in speed.
+	//~
+	//~ The engine accelerates the whole velocity vector toward the input and then clamps the total, so any input that
+	//~ disagrees with where you are already going SUBTRACTS speed; you cannot round a corner in the air without
+	//~ arriving slower. These three replace that with the Quake-family model: a push is added along the input
+	//~ direction only to the extent the player is NOT already travelling that way. Pushed sideways, that rotates the
+	//~ velocity instead of fighting it — the magnitude barely changes, so the turn is free. Pushed forwards, there is
+	//~ nothing left to add, so holding W in the air buys nothing. That asymmetry IS the technique.
+	//~
+	//~ Consequence to know: while falling, AirControl, AirControlBoostMultiplier and AirControlBoostVelocityThreshold
+	//~ no longer do anything (they still show in the details panel), and MaxWalkSpeed no longer caps air speed —
+	//~ AirStrafeMaxSpeed does.
+
+	/** How much speed may be gained toward a direction the player is NOT already moving in. This is the difficulty
+	 *  dial, and it reads directly as "how far the heading turns on the movement keys alone, with no mouse": at
+	 *  600 cm/s, 120 gives about 11 degrees (authentic Quake — the mouse does the work), 300 about 30, 400 about 42
+	 *  (near-automatic, and speed starts growing rather than being preserved). Turning further than this is always
+	 *  possible by sweeping the mouse to keep the input perpendicular to travel — skill extends it, but is not
+	 *  required to get the basic turn. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Movement|Air", meta = (ClampMin = "0.0"))
+	float AirStrafeWishSpeed = 300.0f;
+
+	/** How fast that allowance is spent (cm/s²) — the responsiveness of an air turn, and of braking with the back
+	 *  key. Comparable to ground acceleration (2048), which is why it is an absolute rate rather than the Quake
+	 *  formula's multiplier on the wish speed: there, changing the wish speed would silently change this too. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Movement|Air", meta = (ClampMin = "0.0"))
+	float AirStrafeAcceleration = 2000.0f;
+
+	/** Ceiling on the speed air strafing may BUILD. Speed carried in above it (a fast slide jump) is not cut by the
+	 *  ceiling — the same "only ever raises, never lowers" rule as SlideMaxEntrySpeed. It can still be spent by
+	 *  steering against the direction of travel, which is how a player brakes in the air; nothing bleeds it off on its
+	 *  own. Kept equal to SlideMaxSpeed and WallJumpMaxSpeed so the game has one top speed rather than three that
+	 *  drift apart. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Movement|Air", meta = (ClampMin = "0.0"))
+	float AirStrafeMaxSpeed = 1400.0f;
+
 	// --- Stance blending (presentation + the walk-speed cap; the stance itself still changes instantly) ---
 
 	/** How long a full stand <-> crouch change takes to settle. The stance, the capsule and the slide entry all still
@@ -423,10 +465,11 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Movement|Wall", meta = (ClampMin = "0.0", ClampMax = "1.0"))
 	float WallJumpMinOutward = 0.35f;
 
-	/** Ceiling on the horizontal speed a wall jump can produce (push + carried momentum). Stops a fast slide into a
-	 *  wall from converting into a launch far beyond anything else in the movement set. */
+	/** Ceiling on the horizontal speed a wall jump can produce (push + carried momentum). Held equal to SlideMaxSpeed
+	 *  and AirStrafeMaxSpeed on purpose: a player who built speed by air strafing and then jumps off a wall should not
+	 *  silently lose it at the wall, so the game has ONE top speed rather than three that disagree. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Movement|Wall", meta = (ClampMin = "0.0"))
-	float WallJumpMaxSpeed = 1200.0f;
+	float WallJumpMaxSpeed = 1400.0f;
 
 	/** Upward speed (cm/s) of a wall jump. 0 = use the character's normal JumpZVelocity, so a jump-height card scales
 	 *  the wall jump too; set it above 0 to give the wall jump its own height independent of the ordinary jump. */
@@ -534,6 +577,10 @@ protected:
 
 	/** Move GroundAccelElapsed onto the equivalent point of the stance's curve. No-op without a curve. */
 	void RemapGroundAccelForStanceChange();
+
+	/** The air-strafe step, run in place of Super::CalcVelocity while falling. Lateral only — the falling step zeroes
+	 *  Velocity.Z around the call and applies gravity itself. */
+	void ApplyAirStrafeVelocity(float DeltaTime);
 
 	// --- Walk-speed layers (invariant 1 applied to the NUMBER, not just the state) ---
 

@@ -6,6 +6,23 @@
 
 **최종 갱신: 2026-07-29**
 
+## 🌬️ 에어 스트레이프 = ✅코드 완료 / ⏳PIE 대기 (2026-07-29, `refactor/character`)
+> 사용자 요청 = "체공 상태 조작이 거의 안 된다" → 대화 중 목표가 **에어 스트레이프**(FPS 유저 기술)로 특정됨.
+> 시나리오 = 슬라이드 → 점프 → 공중에서 **W 떼고 D 유지 + 마우스 오른쪽** → **속도를 보존한 채** 코너를 돈다.
+- **처음 세운 "공중 가속을 올린다" 안은 폐기했다.** 그걸론 성립하지 않는다 — 엔진 `CalcVelocity`는 **속도 벡터 전체를 입력 쪽으로 가속하고 총합을 클램프**해서, 진행 방향과 어긋나는 입력이 **속도를 깎는다**(`CharacterMovementComponent.cpp:3863-3865`). 가속을 아무리 올려도 "속도를 잃지 않고 돈다"가 안 나온다. **알고리즘 자체가 다르다.**
+- **채택 = Quake 계열 공중 가속 모델**. `AddSpeed = WishSpeed − dot(횡속도, WishDir)` 만큼만 입력 방향으로 더한다. **수직 입력이면 크기는 그대로 방향만 회전**(|v+εp|≈|v|)하고 예산이 가득 남아 계속 돌아간다. **진행 방향 입력이면 예산이 0** → W를 눌러도 공중 가속이 없다. **이 비대칭이 기술의 전부.**
+- **확장 지점 = `CalcVelocity()`의 `IsFalling()` 분기**(기존 슬라이드 분기와 같은 자리·같은 방식) + `GetFallingLateralAcceleration()` 오버라이드. 낙하 진입 시 **Z는 이미 0**이고 중력은 뒤에 따로 적용돼 횡성분만 다루면 된다.
+  - ⚠️ `GetFallingLateralAcceleration()`이 넘기는 벡터는 **방향 전달용만이 아니다** — 벽 충돌 후 `LimitAirControl()`이 그 **크기를 재가속 값으로 그대로 쓴다**(엔진 5033·5095). 원시 `Acceleration`(=MaxAcceleration 2048)을 넘기면 벽 스치기 후 가속이 2.5배로 튄다 → 우리 값(`AirStrafeAcceleration`)을 곱해 넘긴다. (Codex 지적)
+  - ⚠️ `CalcVelocity`는 **한 프레임에 여러 번** 불린다(서브스텝 + 충돌 후 재호출, 엔진 5018·5024). `AddSpeed`가 그 방향 총속도를 묶어 **반복 호출에 수렴**한다 — 프레임당 1회를 가정하는 코드 금지.
+- **수치**(전부 `FPSR|Movement|Air`, EditDefaultsOnly): `AirStrafeWishSpeed` **300** · `AirStrafeAcceleration` 2000 · `AirStrafeMaxSpeed` 1400.
+  - `AirStrafeWishSpeed` = **난이도 다이얼**(사용자 결정 = **대중적 난이도**). 곧 "마우스 안 돌리고 방향키만 유지했을 때 도는 각도"다 — 속도 600 기준 120≈11°(정통 Quake) / **300≈30°(채택)** / 400≈42°(거의 자동). 더 돌리려면 마우스를 같이 돌리면 된다 — **잘하면 더 잘 되지만 못해도 된다.**
+  - Quake 원식은 가속 항이 `wishspeed`에 묶여 있으나 **절대값(cm/s²)으로 분리**했다 — 원식대로면 WishSpeed를 만질 때마다 가속 반응성이 같이 흔들려 두 다이얼이 독립 튜닝되지 않는다.
+- **`WallJumpMaxSpeed` 1200 → 1400**(사용자 결정) → `SlideMaxSpeed`·`AirStrafeMaxSpeed`와 통일 = **최고 이동속도 상한이 1400 하나**. ⚠️ C++ 기본값이라 **BP에 오버라이드가 있으면 BP가 이긴다** — PIE에서 실제 1400 확인 필요.
+- **상한 규칙**: `Ceiling = max(현재 횡속도, AirStrafeMaxSpeed)` — 들고 온 속도를 **클램프가 깎지 않는다**. 단 **진행 방향과 반대되는 입력은 깎는다**(벡터 덧셈이므로) — 그게 공중 브레이크다. "저절로 사라지지 않고 플레이어만 버릴 수 있다"가 정확한 표현(Codex가 초안의 과장 문구를 잡아냄).
+- **부수 효과(의도)**: 공중에서 **`MaxWalkSpeed` 상한이 사라진다**(낙하 중 `GetMaxSpeed()` 미사용) — 이 기능의 전제. 덕분에 `GetMaxSpeed()`의 **뒷걸음 감속 공중 누수**(지상 게이트 누락, 공중 후진 450)도 공중에선 무의미해졌다(지상은 그대로). **엔진 공중 노브 3개 무동작**: `AirControl`·`AirControlBoostMultiplier`·`AirControlBoostVelocityThreshold`(디테일 패널엔 계속 보임).
+- **예측**: `Acceleration`·`Velocity`·상수만 읽음 → **`FSavedMove_FPSR` 추가 상태 0개**.
+- **검증**: 빌드 `Result: Succeeded`×2(UHT `-WarningsAsErrors` 포함) + `git diff` 재검토(2파일, 의도 외 변경 0). Codex 게이트 플랜 2회·diff 1회(결함 5건 반영). ⏳ **PIE = 사용자**.
+
 ## 🔪 근접 전용 3번 슬롯 + 무기별 이동속도 = ✅코드 완료 / ⏳콘텐츠·PIE 대기 (2026-07-29, `refactor/character`)
 > 사용자 요청 = "근접무기를 다른 무기와 섞지 말고 3번 슬롯 전용으로. 근접무기가 없어도 3번을 누르면 맨손 상태로 클릭 가능하고, 이동속도를 더 준다(600→700, 슬라이드 900→1000)."
 > 플랜 = Codex 적대 검토 4라운드 수렴본(원문 `Docs/Review/_raw/20260729-09*-melee-slot3*.md`). 설계 근거는 `Docs/SSOT/CombatWeaponCard.md §2-4` · `Docs/SSOT/PlayerFeel.md §2-13` · ADR 0001 "걷기 속도 상한의 단일 기록자" 절.
