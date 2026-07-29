@@ -218,6 +218,16 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|기본", meta = (DisplayName = "발사 어빌리티(GA)"))
 	TSubclassOf<UGameplayAbility> FireAbility;
 
+	/** 이 무기를 든 동안의 걷기 속도 상한(cm/s). **0 = 캐릭터 기본값**(`AFPSRCharacter::BaseWalkSpeed`, 600).
+	 *  근접/맨손이 700인 것이 이 필드의 첫 용도다. 카드 이동속도 배수는 이 값에 곱해지므로, 무기 속도를 준다고
+	 *  카드가 무효화되지 않는다(합성은 `UFPSRCharacterMovementComponent::RefreshWalkSpeedCap`).
+	 *
+	 *  ⚠️ 슬라이드 속도는 여기서 저작하지 않는다 — 슬라이드 진입 임펄스가 *그 순간 속도 × 1.5*에서 파생되므로
+	 *  걷기 600이면 900, 700이면 1000이 자동으로 나온다. 따로 두면 두 값을 계속 맞춰야 하고, 진입 속도가
+	 *  "장착이 언제 복제됐나"에 좌우돼 재현 안 되는 편차가 생긴다. (`PlayerFeel §2-13`) */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|이동", meta = (DisplayName = "걷기 속도(0=기본 600)", ClampMin = "0.0"))
+	float WalkSpeed = 0.0f;
+
 	/** Projectile actor class (AOE archetypes). Content assigns a BP with mesh/VFX; null falls back to AFPSRProjectile base. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|발사체", meta = (DisplayName = "발사체 클래스"))
 	TSubclassOf<AFPSRProjectile> ProjectileClass;
@@ -251,6 +261,14 @@ public:
 	/** 마지막 발사 후 이 시간(초)이 지나야 heat 냉각이 시작된다(연사 중 확산 유지용 grace). */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|반동", meta = (DisplayName = "확산 heat: 냉각 지연(초)", ClampMin = "0.0"))
 	float RecoilHeatCooldownDelay = 0.5f;
+
+	/** 이 무기를 "보유 무기"로 세지 않는다 — 슬롯의 **기본 무기(맨손)** 전용 플래그.
+	 *  맨손은 플레이어가 획득한 무기가 아니라 빈 칸을 막는 기본값이라, 보유 목록에 섞이면
+	 *  ① 맨손을 대상으로 한 무기 카드가 풀에 뜨고 ② 아무 무기도 안 주웠는데 "무기 보유"로 판정되고
+	 *  ③ 로비 시작 무기 후보로 고를 수 있게 된다. `GetOwnedWeapons()`가 여기서 걸러 낸다.
+	 *  일반 무기는 절대 켜지 말 것. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|카드", meta = (DisplayName = "진행(카드/해금)에서 제외 — 맨손 전용"))
+	bool bExcludeFromProgression = false;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|카드", meta = (DisplayName = "무기 카드(레벨업 풀)"))
 	TArray<TObjectPtr<UFPSRCardDataAsset>> WeaponCards;

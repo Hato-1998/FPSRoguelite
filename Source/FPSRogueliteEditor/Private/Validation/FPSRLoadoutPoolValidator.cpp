@@ -44,6 +44,14 @@ EDataValidationResult UFPSRLoadoutPoolValidator::ValidateLoadedAsset_Implementat
 			AssetFails(InAsset, FText::Format(LOCTEXT("DupEntry", "SelectableWeapons[{0}] '{1}' is a duplicate entry."), FText::AsNumber(Index), FText::FromString(Weapon->GetName())));
 			Result = EDataValidationResult::Invalid;
 		}
+		// A slot's default weapon (bare hands) is a placeholder that keeps a slot from being empty, not something the
+		// player chooses. Nothing else stops it being dropped into this list, and a run started with it would begin
+		// with no real weapon at all.
+		if (Weapon->bExcludeFromProgression)
+		{
+			AssetFails(InAsset, FText::Format(LOCTEXT("ExcludedEntry", "SelectableWeapons[{0}] '{1}' is marked 'exclude from progression' — that flag is for a slot's default weapon (bare hands), which must not be offered as a starting weapon."), FText::AsNumber(Index), FText::FromString(Weapon->GetName())));
+			Result = EDataValidationResult::Invalid;
+		}
 		Seen.Add(Weapon);
 	}
 

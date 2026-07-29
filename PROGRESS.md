@@ -4,7 +4,28 @@
 > **작업 단계를 끝낼 때마다, 그리고 중단 전 반드시 이 파일을 갱신하고 커밋한다.**
 > 확정 설계·기획·코드구조·규칙은 `Game.md`(**SSOT 허브** → 도메인별 `Docs/SSOT/*.md`, 작업별 라우팅은 허브 §0-1), **완료 작업 상세는 `git log --oneline`**. 여기엔 *무엇을 했는지*만 요약한다.
 
-**최종 갱신: 2026-07-28**
+**최종 갱신: 2026-07-29**
+
+## 🔪 근접 전용 3번 슬롯 + 무기별 이동속도 = ✅코드 완료 / ⏳콘텐츠·PIE 대기 (2026-07-29, `refactor/character`)
+> 사용자 요청 = "근접무기를 다른 무기와 섞지 말고 3번 슬롯 전용으로. 근접무기가 없어도 3번을 누르면 맨손 상태로 클릭 가능하고, 이동속도를 더 준다(600→700, 슬라이드 900→1000)."
+> 플랜 = Codex 적대 검토 4라운드 수렴본(원문 `Docs/Review/_raw/20260729-09*-melee-slot3*.md`). 설계 근거는 `Docs/SSOT/CombatWeaponCard.md §2-4` · `Docs/SSOT/PlayerFeel.md §2-13` · ADR 0001 "걷기 속도 상한의 단일 기록자" 절.
+
+- **핵심 판단 ① 맨손 = 빈 슬롯이 아니라 무기 DataAsset**(`DA_Weapon_Unarmed`, Archetype=Melee, 메시 없음). 슬롯이 애초에 안 비므로 `EquipSlot`·`RefreshEquippedAbility`·`FireOneShot`·`RefreshFirstPersonWeaponVisual`에 "무기 없음" 분기가 **한 줄도 안 들어갔다**. 공격은 기존 `UFPSRGA_WeaponMelee` 재사용.
+- **핵심 판단 ② 슬롯 규칙 = 데이터**. `FFPSRWeaponSlotDefinition{AcceptedArchetypes, DefaultWeapon}` 배열(`SlotDefinitions`, 기본 3칸·마지막 칸이 `Melee` 전용 선언). **명시 목록=전역 전용 / 빈 목록=나머지 담당 / 슬롯 순서 무관.** `EWeaponSlotKind` enum 대안은 기각(아키타입→kind 매핑=새 아키타입마다 중앙 switch 수정).
+- **핵심 판단 ③ 슬라이드 값은 저작하지 않는다**. 진입 임펄스가 `min(max(V, min(V×1.5, SlideMaxEntrySpeed)), SlideMaxSpeed)`로 **그 순간 속도 V에서 파생** → `SlideMaxEntrySpeed`를 **900→1000 한 값만** 올리면 걷기 600=900(무변화)·700=1000. 무기 DA엔 `WalkSpeed` 하나만 둔다. 부수효과로 "3번 누르자마자 앉으면 가끔 슬라이드가 덜 나감"(장착 복제 타이밍 의존) 버그 클래스가 원천 소멸.
+  - ⚠️ **영향 구간 = V ∈ (600, 1000)**: 속도 카드·내리막 모멘텀·벽점프 착지로 이 구간에서 슬라이드하면 진입속도가 오른다(V=650이면 900→975). 되돌리려면 `SlideMaxEntrySpeed` 한 값만 900으로.
+- **`MaxWalkSpeed` 기록자 4개 → 1개**(`UFPSRCharacterMovementComponent::RefreshWalkSpeedCap`). 층 = 저작 기본값(캐릭터 `BaseWalkSpeed`, **프로퍼티는 안 옮김** — BP값·hip sway 기준·GE 참조 보존) × 장비 `WalkSpeed`(0=기본) × 카드 `MoveSpeedMultiplier` × 다운(`DownedWalkSpeed`). **기존 버그 동반 수정**: DBNO 중 속도 카드가 들어오면 `MaxWalkSpeed`가 0에서 되살아나 쓰러진 플레이어가 움직이던 문제.
+- **장비 속도는 예측 안 함**(서버 `EquipSlot` + 클라 `OnRep_CurrentSlotIndex`/`OnRep_Slots`에서만). 클라 선적용은 서버가 장착을 거절했을 때(프리즈/다운) 아무것도 복제되지 않아 클라가 빠른 속도에 고착되는 구멍이 있다. 남는 건 걷기 상한의 1 RTT 지연뿐이고, 상한은 가속 램프가 접근하는 값이라 체감 없음으로 판정.
+- **막은 함정 4건**(Codex 검토 산물): ①`ServerSeedDefaultSlots`는 **null 칸만** 채움(멱등) — 재빙의/seamless travel이 칼을 맨손으로 되돌리지 못한다 ②`SetSlotWeapon` 단일 지점에서 `RemoveReplicatedSubObject` → 교체된 맨손 인스턴스가 등록 목록에 안 남는다 ③무기 해금 카드 후보를 **아키타입별로** 판정(`HasFreeSlotFor`) — 원거리 칸만 꽉 찬 상태에서 라이플 카드가 떠서 뽑아도 `AddWeapon`이 `INDEX_NONE`을 돌려 카드가 증발하던 경로 ④`FPSRLoadoutPoolValidator`가 맨손(`bExcludeFromProgression`)의 로비 시작무기 등재를 에러 처리.
+- **구현 중 추가 발견**: 3번(맨손)을 **든 채로** 근접 해금 카드를 먹으면 슬롯 번호가 안 바뀌어 `EquipSlot`이 early-return → 발사 GA·1P 메시·이동속도·반동 프로필이 맨손인 채 남는다. `SetSlotWeapon`에 "장착 중인 칸의 내용물 교체" 분기 추가.
+- **검증**: 빌드 `Result: Succeeded`×3(UHT `-WarningsAsErrors` 포함, 링크까지) + `git diff` 재검토(13파일, 의도 외 변경 0, 디버그 로그 0 — 추가된 `UE_LOG`는 슬롯 수 오저작용 에러 1건).
+- **✅ 콘텐츠 완료(헤드리스 커맨드렛, 에디터 미기동)**: ①**`DA_Weapon_Unarmed` 신규**(`/Game/Weapons/DataTable/`, Archetype=Melee / FireAbility=`FPSRGA_WeaponMelee`(칼과 동일) / 메시 없음 / Damage 25·MeleeRadius 130·MeleeAttackDelay 0.6 = 칼(90/175/0.5)보다 약하고 느리게 / FireRate 8(검증 통과용 무의미값) / `WalkSpeed=700` / `bExcludeFromProgression=true`) ②`DA_Weapon_Knife.WalkSpeed=700` ③`BP_FPSRPlayer` → `WeaponInventory.SlotDefinitions[2].DefaultWeapon = DA_Weapon_Unarmed`.
+  - **사전 확인 2건 통과**: BP `SlideEnterSpeedMultiplier=1.5`(슬라이드 표 유효) / BP CharacterMovement `MaxWalkSpeed=600`으로 `BaseWalkSpeed`와 동일 → **이관할 BP 오버라이드 없음**.
+  - **검증**: `Scripts/validate-data.ps1` = **0 error**(36 warning은 전부 기존 "anchor 도달 불가", 칼도 동일) + 에디터 검증기 직접 호출로 `DA_Weapon_Unarmed`·`DA_Weapon_Knife`·`DA_LoadoutPool`·`BP_FPSRPlayer`·`WeaponInventory 컴포넌트` 전부 `VALID`(신규 슬롯 검증 규칙 오탐 0).
+  - **함정 1건**: `FFPSRWeaponSlotDefinition` 멤버를 `EditDefaultsOnly`로 두면 파이썬이 루즈 struct를 "인스턴스"로 보고 `DisableEditOnInstance` 필드 쓰기를 거부한다 → 멤버만 `EditAnywhere`로(컨테이너 `SlotDefinitions`가 `EditDefaultsOnly`라 편집 가능 범위는 불변).
+- **⏳ 남은 콘텐츠 = 맨손 손맛 세트**(실제 에셋 필요, 코드 0): 1P 팔 공격 몽타주(`FireMontage`) + 휘두름/히트 사운드(`FireSound`) + 명중 VFX. **현재 칼도 이 3개가 전부 비어 있다** — 즉 근접 공격은 지금 데미지만 들어가고 화면·소리 반응이 0이라 "무기 없음 버그"로 읽힌다.
+- **⏳ PIE(사용자, 2인 `L_Lobby`)**: 3번=팔만 보임 / 맨손 클릭 공격 / `SPEED` 700 / 슬라이드 피크 1000 / 1번 복귀 600·900 / 3번 든 채 속도카드=700×배수 / DBNO 완전정지 / 근접 해금이 맨손만 대체 / 원거리 2칸 찬 뒤 원거리 카드 미출현 / 클라 창 3번 연타 러버밴딩 없음.
+- **후속 인입 후보**: HUD 3번 슬롯 아이콘(주먹/칼 — 없으면 빈 칸인지 맨손인지 안 읽힘) · 맨손 vs 칼 속도 차등(밸런스: 맨손이 제일 빠르면 "총 버리고 도망"이 최적해가 될 수 있음) · 필요 시 엄격 예측.
 
 ## 🧱 플레이어 이동 구조 재설계 = ✅ADR 0001 확정 + 대시 폐기 (2026-07-28, `refactor/character`)
 > 구조 재설계 트랙의 **첫 결정**. 참조 = 사용자 제공 Apex 사격훈련장 영상(달리기→슬라이드→벽 매달리기/등반→공중→사격→ADS→장전)을 60fps 프레임·탄약 카운터로 실측 분해. 결정 기록 = **`Docs/Architecture/0001-player-movement-state-ownership.md`**(이 리포 첫 ADR, 인덱스 `Docs/Architecture/README.md`).

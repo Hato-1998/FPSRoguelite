@@ -305,6 +305,11 @@ void AFPSRCharacter::PossessedBy(AController* NewController)
 
 	if (HasAuthority() && WeaponInventory)
 	{
+		// Fill each slot's authored default (bare hands on the melee slot) BEFORE granting the starting weapon. The
+		// order matters: seeding never equips, so the granted weapon below still finds nothing equipped and becomes
+		// the one in hand. Seeding afterwards would leave the melee slot empty until the first melee pickup.
+		WeaponInventory->ServerSeedDefaultSlots();
+
 		// Lobby loadout pick (P7 §3-8): the chosen weapon is the single weapon for the run. Only when no pick
 		// was made (e.g. debug FPSR.TravelGame straight into gameplay, bypassing the lobby) do we fall back to
 		// the character BP's default loadout, so direct-to-gameplay testing still spawns armed.

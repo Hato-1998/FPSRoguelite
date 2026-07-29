@@ -354,7 +354,10 @@ bool UCardEffect_GrantWeapon::CanApply(const FFPSRCardEffectContext& Context) co
 	{
 		return false;
 	}
-	return Context.Inventory->HasFreeSlot() && !Context.Inventory->GetOwnedWeapons().Contains(WeaponToGrant);
+	// Archetype-aware: slots are typed (ranged 1-2, melee 3), so "some slot is free" is not enough — offering a rifle
+	// when only the melee slot is open would grant nothing and burn the player's pick.
+	return Context.Inventory->HasFreeSlotFor(WeaponToGrant->GetArchetype())
+		&& !Context.Inventory->GetOwnedWeapons().Contains(WeaponToGrant);
 }
 
 #if WITH_EDITOR
