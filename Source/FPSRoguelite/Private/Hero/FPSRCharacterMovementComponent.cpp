@@ -17,6 +17,47 @@ UFPSRCharacterMovementComponent::UFPSRCharacterMovementComponent()
 	// The engine default of 0.05 leaves essentially no air steering, which doesn't fit a design where the player
 	// jumps out of slides, fights mid-air and lands into cover. Overridable per-hero in the Blueprint.
 	AirControl = 0.4f;
+
+	// Seed the cap from the layers rather than leaving the engine's own MaxWalkSpeed default in place, so the
+	// composition below owns the value from the very first frame.
+	RefreshWalkSpeedCap();
+}
+
+void UFPSRCharacterMovementComponent::SetAuthoredBaseWalkSpeed(float InSpeed)
+{
+	AuthoredBaseWalkSpeed = FMath::Max(0.0f, InSpeed);
+	RefreshWalkSpeedCap();
+}
+
+void UFPSRCharacterMovementComponent::SetLoadoutWalkSpeed(float InSpeed)
+{
+	LoadoutWalkSpeed = FMath::Max(0.0f, InSpeed);
+	RefreshWalkSpeedCap();
+}
+
+void UFPSRCharacterMovementComponent::SetMoveSpeedMultiplier(float InMultiplier)
+{
+	MoveSpeedMultiplier = FMath::Max(0.0f, InMultiplier);
+	RefreshWalkSpeedCap();
+}
+
+void UFPSRCharacterMovementComponent::SetDownedLocomotion(bool bInDowned)
+{
+	bDownedLocomotion = bInDowned;
+	RefreshWalkSpeedCap();
+}
+
+void UFPSRCharacterMovementComponent::RefreshWalkSpeedCap()
+{
+	// Downed wins outright — it is a hard stop, not something the other layers may scale back up. The loadout
+	// baseline then takes precedence over the authored one when the equipped weapon states a speed of its own
+	// (0 = "no opinion"), and the card multiplier scales whichever baseline won so a speed card keeps working on
+	// the melee slot instead of dropping the player back to the authored 600.
+	const float Baseline = bDownedLocomotion
+		? DownedWalkSpeed
+		: ((LoadoutWalkSpeed > 0.0f) ? LoadoutWalkSpeed : AuthoredBaseWalkSpeed);
+
+	MaxWalkSpeed = Baseline * MoveSpeedMultiplier;
 }
 
 bool UFPSRCharacterMovementComponent::IsSpecialMovementAllowed() const

@@ -70,7 +70,13 @@ AFPSRCharacter::AFPSRCharacter(const FObjectInitializer& ObjectInitializer)
 	if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
 	{
 		MoveComp->bOrientRotationToMovement = false;
-		MoveComp->MaxWalkSpeed = BaseWalkSpeed;
+	}
+	// Hand the authored baseline to the movement component instead of writing MaxWalkSpeed here: that value is
+	// composed from four layers (authored / equipped weapon / card multiplier / downed) and the component owns the
+	// composition. Writing it directly from any one of them erases the others (ADR 0001, walk-speed single writer).
+	if (UFPSRCharacterMovementComponent* FPSRMovement = GetFPSRMovement())
+	{
+		FPSRMovement->SetAuthoredBaseWalkSpeed(BaseWalkSpeed);
 	}
 
 	FirstPersonCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("FirstPersonCamera"));
@@ -226,6 +232,15 @@ void AFPSRCharacter::BeginPlay()
 	// blend would start from slightly the wrong place.
 	AddTickPrerequisiteComponent(GetCharacterMovement());
 	CachedCameraWorldZ = FirstPersonCamera ? FirstPersonCamera->GetComponentLocation().Z : 0.0f;
+
+	// Push the authored baseline AGAIN here, not only from the constructor: a Blueprint subclass's override of
+	// BaseWalkSpeed is deserialized from the archetype AFTER the C++ constructor has run, so the constructor only ever
+	// sees the C++ default. (The old code wrote MaxWalkSpeed straight from the constructor and had the same blind
+	// spot — a BP that raised BaseWalkSpeed silently kept walking at 600.)
+	if (UFPSRCharacterMovementComponent* FPSRMovement = GetFPSRMovement())
+	{
+		FPSRMovement->SetAuthoredBaseWalkSpeed(BaseWalkSpeed);
+	}
 
 #if ENABLE_DRAW_DEBUG
 	// Movement readout. Registered for every pawn (the draw itself early-outs on non-local ones) because
@@ -655,37 +670,25 @@ bool AFPSRCharacter::CanJumpInternal_Implementation() const
 
 void AFPSRCharacter::ApplyMoveSpeedMultiplier(float Mult)
 {
-	if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
+	// One layer of the walk-speed composition; the movement component owns the result (ADR 0001).
+	if (UFPSRCharacterMovementComponent* FPSRMovement = GetFPSRMovement())
 	{
-		MoveComp->MaxWalkSpeed = BaseWalkSpeed * Mult;
+		FPSRMovement->SetMoveSpeedMultiplier(Mult);
 	}
 }
 
 void AFPSRCharacter::ApplyDownedLocomotion(bool bDowned)
 {
-	UCharacterMovementComponent* MoveComp = GetCharacterMovement();
-	if (!MoveComp)
+	// Stationary while downed: DBNO no longer crawls — the player stays where it fell and spectates an ally (§2-13).
+	// Movement input is also gated for !Alive (Input_Move*), so this is belt-and-suspenders against residual slide.
+	//
+	// Pushed as a LAYER rather than written straight to MaxWalkSpeed. The old code set 0 here and recomputed
+	// BaseWalkSpeed * multiplier on revive, which meant a speed card landing WHILE downed went through
+	// ApplyMoveSpeedMultiplier, overwrote the 0 and let a downed player walk. Composing the layers makes that
+	// impossible: the downed layer wins for as long as it is set, whatever else changes underneath it.
+	if (UFPSRCharacterMovementComponent* FPSRMovement = GetFPSRMovement())
 	{
-		return;
-	}
-	if (bDowned)
-	{
-		// Stationary: DBNO no longer crawls — the player stays where it fell and spectates an ally (§2-13). Movement
-		// input is also gated for !Alive (Input_Move*), so this is belt-and-suspenders against residual slide.
-		MoveComp->MaxWalkSpeed = 0.0f;
-	}
-	else
-	{
-		// Restore to the combat-multiplier-driven speed (revive / re-enter Alive). Default 1.0 if the set isn't ready.
-		float Mult = 1.0f;
-		if (const AFPSRPlayerState* FPSRPS = GetPlayerState<AFPSRPlayerState>())
-		{
-			if (const UFPSRCombatSet* CombatSet = FPSRPS->GetCombatSet())
-			{
-				Mult = CombatSet->GetMoveSpeedMultiplier();
-			}
-		}
-		MoveComp->MaxWalkSpeed = BaseWalkSpeed * Mult;
+		FPSRMovement->SetDownedLocomotion(bDowned);
 	}
 
 	// Downed body should not physically block / get pushed by the swarm (mirror of the grace-window pass-through).

@@ -106,6 +106,33 @@ public:
 	/** Short name of the current locomotion state ("Run" / "Crouch" / "Slide" / "Air"). Debug readout only. */
 	FString GetLocomotionStateName() const;
 
+	//~ Walk-speed layers. Everything that wants to affect how fast the player walks PUSHES its layer in through one of
+	//~ these; RefreshWalkSpeedCap() is the ONLY thing that ever writes MaxWalkSpeed (see its comment for why). This
+	//~ mirrors the direction GAS already pushes numbers in (ADR 0001 module boundary) — the component still knows
+	//~ nothing about weapons, cards or the DBNO state, only about the numbers they hand it.
+
+	/** The character's authored baseline (AFPSRCharacter::BaseWalkSpeed). Pushed once on construction; the property
+	 *  deliberately stays on the character so its Blueprint override, the ADS sway reference and any GameplayEffect
+	 *  referencing it are untouched — owning the WRITE is what invariant 1 asks for, not owning the field. */
+	void SetAuthoredBaseWalkSpeed(float InSpeed);
+
+	/** Baseline contributed by the equipped weapon (its DataAsset's WalkSpeed); 0 = use the authored baseline.
+	 *  Pushed by the inventory on every equip, on the server and on each client's OnRep alike. */
+	void SetLoadoutWalkSpeed(float InSpeed);
+
+	/** Card/meta multiplier, from the CombatSet's MoveSpeedMultiplier attribute. Multiplies whichever baseline is in
+	 *  force, so a speed card scales the equipped weapon's speed rather than reverting it to the authored one. */
+	void SetMoveSpeedMultiplier(float InMultiplier);
+
+	/** Downed (DBNO) locomotion override — clamps to DownedWalkSpeed regardless of the other layers. Being a LAYER
+	 *  rather than a direct write is what stops a speed card landing mid-DBNO from standing the player back up. */
+	void SetDownedLocomotion(bool bInDowned);
+
+	/** The authored baseline as last pushed. For callers that need the un-multiplied reference speed (e.g. the ADS
+	 *  sway's "am I moving" normalisation) rather than the current cap. */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Movement")
+	float GetBaseWalkSpeed() const { return AuthoredBaseWalkSpeed; }
+
 	//~UCharacterMovementComponent
 	virtual class FNetworkPredictionData_Client* GetPredictionData_Client() const override;
 	virtual float GetMaxSpeed() const override;
@@ -179,9 +206,17 @@ protected:
 	/** How fast the ENTRY IMPULSE alone may take the player. Deliberately lower than SlideMaxSpeed: with a single
 	 *  ceiling, jump-cancelling and re-sliding kept re-applying the multiplier and ratcheted the speed up every cycle
 	 *  (900 -> 1350 -> cap) for free. This only ever RAISES speed toward the limit — entering already faster than it
-	 *  (downhill momentum carried through a jump) keeps the higher speed rather than being cut down to it. */
+	 *  (downhill momentum carried through a jump) keeps the higher speed rather than being cut down to it.
+	 *
+	 *  This is a CEILING, not the slide speed: the impulse is (current speed x SlideEnterSpeedMultiplier), so what a
+	 *  slide actually starts at is derived from how fast the player was already going. That is why the per-weapon
+	 *  loadout only authors a WALK speed — 600 walk gives 900 either way (600 x 1.5 never reaches this), and a 700
+	 *  walk gives 1000. Authoring a second per-weapon number would mean two values to keep in agreement, and would
+	 *  make the slide depend on WHEN the equip replicated instead of on the velocity both machines already agree on.
+	 *  Raised 900 -> 1000 on 2026-07-29 for that reason; note it also lengthens slides entered between 600 and 1000
+	 *  cm/s (speed cards, downhill momentum, a wall-jump landing). */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Movement|Slide", meta = (ClampMin = "0.0"))
-	float SlideMaxEntrySpeed = 900.0f;
+	float SlideMaxEntrySpeed = 1000.0f;
 
 	/** Hard ceiling on slide speed from ANY source (entry impulse, slope acceleration, carried momentum). Speeds above
 	 *  SlideMaxEntrySpeed have to be earned — typically by accelerating down a slope. */
@@ -272,6 +307,12 @@ protected:
 	 *  diagonal-back input. Higher narrows it toward straight-back only. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Movement|Ground", meta = (ClampMin = "0.0", ClampMax = "180.0"))
 	float BackwardAngleThresholdDegrees = 90.0f;
+
+	/** Walk-speed cap while downed (DBNO). 0 = the downed player cannot move at all, which is the design (§2-13: a
+	 *  downed player holds position and spectates an ally). Exists as a tunable rather than a literal so a future
+	 *  "crawl while downed" is a data change. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Movement|Ground", meta = (ClampMin = "0.0"))
+	float DownedWalkSpeed = 0.0f;
 
 	/** Terminal fall speed in cm/s; 0 = no extra limit (the physics volume's own TerminalVelocity, engine default
 	 *  4000, still applies). Exists because that volume value is per-VOLUME, so it can't express a per-character fall
@@ -493,6 +534,31 @@ protected:
 
 	/** Move GroundAccelElapsed onto the equivalent point of the stance's curve. No-op without a curve. */
 	void RemapGroundAccelForStanceChange();
+
+	// --- Walk-speed layers (invariant 1 applied to the NUMBER, not just the state) ---
+
+	/** The ONLY place MaxWalkSpeed is ever written. Four separate writers used to exist (the character's constructor,
+	 *  the move-speed multiplier, and the DBNO down/revive branches); each knew only its own layer and overwrote the
+	 *  whole value, so they erased one another. Adding the equipped weapon as a fifth would have made "pick up a speed
+	 *  card while holding the melee slot and lose its bonus" a certainty. Composing all four layers here instead means
+	 *  each caller only has to state ITS layer and the order can't be gotten wrong.
+	 *
+	 *  It also removed a live bug: a speed card applied while downed used to revive MaxWalkSpeed from 0 and let a
+	 *  downed player walk. The downed layer is part of the composition now, so that is impossible by construction. */
+	void RefreshWalkSpeedCap();
+
+	/** Authored baseline pushed from the character (its BaseWalkSpeed). The literal only exists so a component used
+	 *  without a character still moves; the character overwrites it on construction. */
+	float AuthoredBaseWalkSpeed = 600.0f;
+
+	/** Equipped weapon's baseline; 0 = fall back to AuthoredBaseWalkSpeed. */
+	float LoadoutWalkSpeed = 0.0f;
+
+	/** Card/meta multiplier applied on top of whichever baseline wins. */
+	float MoveSpeedMultiplier = 1.0f;
+
+	/** True while the owner is downed (DBNO). */
+	bool bDownedLocomotion = false;
 
 	// --- Stance blending ---
 

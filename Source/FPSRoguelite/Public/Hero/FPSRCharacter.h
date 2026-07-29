@@ -98,11 +98,13 @@ public:
 	/** Server: apply contact damage from an enemy to this character's Health (clamped via HealthSet). */
 	void ApplyContactDamage(float DamageAmount, AActor* DamageInstigator, FGameplayTag DamageType = FGameplayTag());
 
-	/** Set MaxWalkSpeed = BaseWalkSpeed * Mult. Called by UFPSRCombatSet when MoveSpeedMultiplier changes (server + client). */
+	/** Push the card/meta move-speed multiplier layer into the movement component. Called by UFPSRCombatSet when
+	 *  MoveSpeedMultiplier changes (server + client). The resulting MaxWalkSpeed is composed there, not here. */
 	void ApplyMoveSpeedMultiplier(float Mult);
 
-	/** Set MaxWalkSpeed for the downed (crawl) vs normal state (U9 DBNO). Called server-side on DBNO/revive and on the
-	 *  owning client from AFPSRPlayerState::OnRep_LifeState so movement prediction matches (mirrors ApplyMoveSpeedMultiplier). */
+	/** Push the downed (DBNO) locomotion layer + refresh enemy-pawn collision (U9 DBNO). Called server-side on
+	 *  DBNO/revive and on the owning client from AFPSRPlayerState::OnRep_LifeState so movement prediction matches
+	 *  (mirrors ApplyMoveSpeedMultiplier). */
 	void ApplyDownedLocomotion(bool bDowned);
 
 	/** Server: start a grace window of Seconds — i-frames in ApplyContactDamage + the capsule passes through enemy
