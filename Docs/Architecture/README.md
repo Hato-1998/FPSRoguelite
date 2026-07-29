@@ -15,3 +15,4 @@
 | 번호 | 제목 | 상태 | 되돌리기 비용 | 날짜 |
 |---|---|---|---|---|
 | [0001](0001-player-movement-state-ownership.md) | 플레이어 이동 상태의 소유와 예측 구조 | 채택 | 비쌈 | 2026-07-28 |
+| [0002](0002-true-first-person-shared-animation.md) | True First Person + 3P 애니메이션 단일화 | 채택 | 비쌈 | 2026-07-29 |
