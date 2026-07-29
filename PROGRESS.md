@@ -6,6 +6,44 @@
 
 **최종 갱신: 2026-07-29**
 
+## 🎯 True First Person 전환 = ⏳A단계 완료 / **B·C·4단계 인계** (2026-07-29, `refactor/character`)
+> **설계 = [ADR 0002](Docs/Architecture/0002-true-first-person-shared-animation.md)** — 새 세션은 **ADR 0002 전문을 먼저 읽을 것**(불변식 10개 + 실측 + 기각안이 전부 거기 있다). 아래는 진행 상태만.
+> 목표 = 1인칭·3인칭을 **3P 애니 팩 한 벌**(`Content/Rifle_01`)로 덮기. 1P 전용 팔 + PWAS 폐기.
+
+### 완료 (커밋 4개)
+| 커밋 | 내용 |
+|---|---|
+| `ab9fede3` | ADR 0002 작성 — 축 4개 결정(시각 회전 분리 / 눈 앵커 / ADS 혼합 / 관전자 소유 리그) + 불변식 10 |
+| `f678ba10` | Rifle_01 팩(310MB, LFS) + IK Rig 2개 + Retargeter + 리타게팅 4종. **무기 스케일 85% 확정** |
+| `ffe45a21` | **A단계** — 무기 DA 1P/3P 필드 통합, `WeaponAttachScale`·`LeftHandSocket` 추가, 3P 블록 삭제. 빌드 통과 |
+| `11d8db05` | ADR 갱신 — 1인칭 실측으로 **ADS 정렬 방식 재결정**(아래) |
+
+### ⚠️ 다음 세션이 알아야 할 반전 하나
+**축 3의 "ADS = 애니 포즈 + 잔여 오차 보정"은 폐기됐다.** 실제 눈 위치에서 재보니 조준경이 **가로 +29.7° / 세로 −27.1°** 로 ADS 화면(±27.5°/±16°) **밖**이다. 보정이 아니라 재배치가 필요하다.
+→ **ADS 중 무기를 카메라 기준으로 재배치**(사용자 안 채택). 기존 `UpdateAimDownSights` 역산 수식을 그대로 쓰고 **대상만 팔 → 무기**로 바꾼다. 원격은 변화 없음(`hand_R` + 조준 애니). **두 손 모두 ADS 화면 밖이라 손 숨김 불필요.**
+→ 불변식 4에 예외 명시됨(ADS 중 무기 부착점만 로컬이 다름). **예외를 두 번째로 늘리려 하면 불변식 4 자체를 다시 볼 것.**
+
+### 다음 코드 작업 = B+C (한 커밋. 분리 불가 — 팔을 지우면 `UpdateAimDownSights`가 컴파일 안 됨)
+`Source/FPSRoguelite/{Public,Private}/Hero/FPSRCharacter.{h,cpp}` 중심:
+1. **컴포넌트 단일화** — `FirstPersonArms`·`WeaponMesh1P`·`WeaponMeshStatic1P` 제거 → 단일 `WeaponMesh`/`WeaponMeshStatic`. 부착 = `GetMesh()`의 **`SOCKET_Weapon`**(Blu 스켈레톤에 저작 완료), `WeaponAttachScale`(라이플 0.85) 적용. 현재 부착 규칙이 `SnapToTargetNotIncludingScale`라 소켓 스케일은 무시된다
+2. **가시성** — 바디 `SetOwnerNoSee(true)` 제거 · 파츠 컴포넌트 `SetOnlyOwnerSee(true)`(`FPSRCharacter.cpp:1473` 부근) 제거 · **`HideBoneByName("head")`** 로 로컬만 머리 숨김. 조건은 "로컬 플레이어인가"가 아니라 **"이 폰의 눈으로 보고 있는가"**(불변식 5, `CalcCamera`의 `IsLocallyControlled()` 분기와 같은 판정). 본 이름은 코드에 박지 말 것(불변식 9)
+3. **`UpdateAimDownSights`** — 상태 기계(ADS 알파·스웨이 위상·킥 감쇠·바브 위상)는 **그대로 보존**, 마지막 `FirstPersonArms->SetRelativeLocationAndRotation` 한 줄만 무기 대상으로 교체. 적용 지점을 한 곳으로 모아둘 것(㉰-a 무기 ↔ ㉰-b `hand_R`+양팔 IK 전환이 한 줄이 되게)
+4. **왼손 IK 이음매** — `LeftHandSocket`을 가진 파츠를 런타임에 찾는다. **기존 `CachedAimSocket`/`CachedAimComponent` 해석 로직(`RefreshWeaponPartComponents`)을 그대로 미러링**하면 된다 + BlueprintPure getter (4단계 AnimBP가 소비)
+
+**그다음 = 4단계 AnimBP**(하체 요 오프셋 + Aim Offset + 왼손 Two Bone IK + 슬라이드). 3단계(나머지 애니 리타게팅)는 `Root_Motion` 348개 제외하고 실사용분만.
+
+### 블로커 / 주의
+- **빌드 1회 ≈ 10분.** `-NoXGE` 사용. 에디터 떠 있으면 Live Coding 락으로 실패 → 먼저 종료
+- **모듈이 둘이다.** `Source/FPSRoguelite`(게임) + `Source/FPSRogueliteEditor`(무기 조립 툴). grep은 `Source/` 전체에 걸 것 — A단계 1차 빌드가 이걸 놓쳐 실패했다
+- **VibeUE Python에서 레벨 전환 API(`new_level`/`load_level`) 호출 금지** — 에디터 즉사(2회 실증). 열린 레벨에 스폰하고 끝나면 지운다. 자동 저장이 꺼져 있을 수 있으니 에셋은 `save_asset` 명시 호출
+- `unreal.Rotator(a,b,c)` = **(roll, pitch, yaw)** 순. 이 세션에서 두 번 틀렸다
+- 본 가시성(`hide_bone_by_name`) 변경 직후 같은 프레임에 렌더하면 **갱신 전 화면**이 나온다
+- `Weapon_B`(불펍) 핸드가드 12종에는 `SOCKET_LeftHand`가 없다 → 왼손 IK는 **null-safe로 꺼지게** 만들 것
+
+### 미커밋 콘텐츠 (사용자 작업 영역 — 커밋하지 않음)
+- `Content/Maps/L_MainMenu.umap` · `Content/Maps/TestWorld.umap` — 둘 다 **커밋본과 내용 동일**(크기 일치, 프리뷰 액터 잔재 0 확인). UE 재저장 바이너리 churn만 남음. 되돌리려면 에디터 종료 후 `git checkout -- Content/Maps/`
+- **사용자 남은 콘텐츠 작업**: 무기 DA 9개에 `WeaponAttachScale`(라이플 0.85)·`LeftHandSocket`(`SOCKET_LeftHand`) 채우기 + PWAS 참조 비우기(`DA_Weapon_Rifle`/`SMG`의 `WeaponAnimInstanceClass`·`ReloadMontage`) → 그 뒤 `Content/ProceduralWeaponAnimationSystem` 폴더 삭제 (순서 중요: DA 먼저)
+
 ## 🌬️ 에어 스트레이프 = ✅코드 완료 / ⏳PIE 대기 (2026-07-29, `refactor/character`)
 > 사용자 요청 = "체공 상태 조작이 거의 안 된다" → 대화 중 목표가 **에어 스트레이프**(FPS 유저 기술)로 특정됨.
 > 시나리오 = 슬라이드 → 점프 → 공중에서 **W 떼고 D 유지 + 마우스 오른쪽** → **속도를 보존한 채** 코너를 돈다.
