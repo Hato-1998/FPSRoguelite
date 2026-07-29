@@ -83,8 +83,12 @@ AFPSRCharacter::AFPSRCharacter(const FObjectInitializer& ObjectInitializer)
 	FirstPersonCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("FirstPersonCamera"));
 	FirstPersonCamera->SetupAttachment(GetCapsuleComponent());
 	// Drive the eye height off the inherited BaseEyeHeight rather than a literal, so the crouch overrides
-	// (OnStartCrouch/OnEndCrouch) and this initial placement can't drift apart.
-	FirstPersonCamera->SetRelativeLocation(FVector(0.0f, 0.0f, BaseEyeHeight));
+	// (OnStartCrouch/OnEndCrouch) and this initial placement can't drift apart. The forward correction is included so the
+	// BP viewport preview shows roughly where the camera actually ends up; the authoritative placement is
+	// UpdateStanceCamera every frame, which also applies the capsule clamp (and sees the BP's overridden values, which
+	// are deserialized after this constructor has run).
+	FirstPersonCamera->SetRelativeLocation(
+		FirstPersonCameraOffset + FVector(0.0f, 0.0f, BaseEyeHeight));
 	FirstPersonCamera->bUsePawnControlRotation = true;
 	// Motion blur off on the player view: the camera-parented 1P weapon gets a large world-space velocity during camera
 	// recoil / the ADS fire kick and would smear (ghost) even while screen-static, and a fast swarm reads better crisp.
@@ -169,6 +173,16 @@ void AFPSRCharacter::DrawMovementDebug(UCanvas* Canvas, APlayerController* PC)
 	Canvas->StrLen(Font, StateText, LineWidth, LineHeight);
 	Canvas->SetDrawColor(FPSRMovement->IsOnWall() ? FColor::Cyan : (FPSRMovement->IsSliding() ? FColor::Orange : FColor::White));
 	Canvas->DrawText(Font, StateText, Canvas->SizeX - LineWidth - RightMargin, 24.0f + LineHeight + 2.0f);
+
+	// Only when it fires. A clamp that quietly eats an authored FirstPersonCameraOffset reads as "the value does nothing"
+	// from the BP side; saying how much was cut turns that into a number the designer can act on.
+	if (LastCameraClampAmount > KINDA_SMALL_NUMBER)
+	{
+		const FString ClampText = FString::Printf(TEXT("CAM CLAMPED %.1fcm"), LastCameraClampAmount);
+		Canvas->StrLen(Font, ClampText, LineWidth, LineHeight);
+		Canvas->SetDrawColor(FColor::Red);
+		Canvas->DrawText(Font, ClampText, Canvas->SizeX - LineWidth - RightMargin, 24.0f + (LineHeight + 2.0f) * 2.0f);
+	}
 }
 
 #endif
@@ -611,6 +625,42 @@ float AFPSRCharacter::GetStanceEyeTravel() const
 	return FMath::Abs(StandingEye - CrouchedEye);
 }
 
+FVector AFPSRCharacter::ClampPointInsideCapsule(const FVector& CapsuleSpacePoint, float& OutClampedAmount) const
+{
+	OutClampedAmount = 0.0f;
+	const UCapsuleComponent* Capsule = GetCapsuleComponent();
+	if (!Capsule)
+	{
+		return CapsuleSpacePoint;
+	}
+
+	// LATERAL ONLY, against the capsule RADIUS — not the cross-section at the camera's height, and Z is not touched.
+	//
+	// The height is the stance system's, not this function's. UpdateStanceCamera holds the view ABOVE the crouched
+	// capsule on purpose while a crouch eases in (relative Z ~81 inside a 40-tall capsule), so clamping Z would truncate
+	// that blend into a snap, and a cross-section computed at that height would be zero — collapsing the forward offset
+	// the instant the player crouches and restoring it a moment later. Both are regressions, and neither buys anything:
+	//
+	// What the clamp is actually for is the wall case (ADR 0002 실패 흐름 ①) — the shooting origin IS this camera, so a
+	// camera that reaches past a wall means bullets that come from past it. Walls are vertical, and the capsule can never
+	// bring its axis closer than Radius to one. So "never further from the axis than Radius" already makes reaching past
+	// a wall impossible, at every height, with no dependence on stance. Strict capsule containment would only add
+	// something for ceilings and floors, which the stance system already bounds and which nobody shoots through.
+	const float MaxLateral = FMath::Max(0.0f, Capsule->GetScaledCapsuleRadius() - FMath::Max(0.0f, CameraCapsuleClampMargin));
+
+	const FVector2D Lateral(CapsuleSpacePoint.X, CapsuleSpacePoint.Y);
+	const float LateralSize = Lateral.Size();
+	if (LateralSize <= MaxLateral)
+	{
+		return CapsuleSpacePoint;
+	}
+
+	// Scale rather than cut per-axis, so an offset that uses both X and Y keeps its direction.
+	const FVector2D Scaled = (LateralSize > KINDA_SMALL_NUMBER) ? (Lateral / LateralSize * MaxLateral) : FVector2D::ZeroVector;
+	OutClampedAmount = LateralSize - MaxLateral;
+	return FVector(Scaled.X, Scaled.Y, CapsuleSpacePoint.Z);
+}
+
 void AFPSRCharacter::BeginStanceCameraBlend()
 {
 	if (!FirstPersonCamera)
@@ -620,7 +670,9 @@ void AFPSRCharacter::BeginStanceCameraBlend()
 
 	// Where the camera would sit right now with nothing held back: the movement component has already resized and moved
 	// the capsule, and Super has already switched BaseEyeHeight, so this is the new stance's finished position.
-	const float NominalWorldZ = GetCapsuleComponent()->GetComponentLocation().Z + BaseEyeHeight;
+	// FirstPersonCameraOffset.Z has to be in here — CachedCameraWorldZ below already carries it, so leaving it out would
+	// bias every stance change by exactly that much and start the blend from a view that was never there.
+	const float NominalWorldZ = GetCapsuleComponent()->GetComponentLocation().Z + BaseEyeHeight + FirstPersonCameraOffset.Z;
 
 	// Hold the view exactly where it ended last frame and let UpdateStanceCamera ease it from there. Measuring the jump
 	// rather than predicting it is what makes this right in every case — on the ground the capsule is re-anchored at the
@@ -655,12 +707,26 @@ void AFPSRCharacter::UpdateStanceCamera()
 		}
 	}
 
-	FVector CameraRelative = FirstPersonCamera->GetRelativeLocation();
-	const float DesiredRelativeZ = BaseEyeHeight + EyeOffset;
-	if (!FMath::IsNearlyEqual(CameraRelative.Z, DesiredRelativeZ))
+	// The whole camera position, composed here and nowhere else (invariant 10 — one writer per frame). The layers are
+	// stance base -> fixed correction -> capsule clamp. ADR 0002's eye anchor adds one more between the correction and
+	// the clamp (a damped head-bone deviation); it is deliberately absent until the body AnimBP has weapon poses worth
+	// following, and it will feed the SAME clamp when it arrives.
+	// FirstPersonCameraOffset is in capsule space, and the capsule's yaw IS the control yaw, so its X is "forward along
+	// the way you're looking" — which is what keeps the camera out in front of the chest instead of inside it.
+	const FVector DesiredRelative(
+		FirstPersonCameraOffset.X,
+		FirstPersonCameraOffset.Y,
+		BaseEyeHeight + FirstPersonCameraOffset.Z + EyeOffset);
+
+	float ClampedAmount = 0.0f;
+	const FVector ClampedRelative = ClampPointInsideCapsule(DesiredRelative, ClampedAmount);
+#if ENABLE_DRAW_DEBUG
+	LastCameraClampAmount = ClampedAmount;
+#endif
+
+	if (!FirstPersonCamera->GetRelativeLocation().Equals(ClampedRelative))
 	{
-		CameraRelative.Z = DesiredRelativeZ;
-		FirstPersonCamera->SetRelativeLocation(CameraRelative);
+		FirstPersonCamera->SetRelativeLocation(ClampedRelative);
 	}
 
 	// Recorded after the move, so the next stance change has this frame's finished eye position to hold on to.

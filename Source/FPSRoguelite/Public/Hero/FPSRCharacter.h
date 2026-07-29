@@ -248,6 +248,14 @@ protected:
 	/** Full distance the eye travels between standing and crouching, in cm. Only used to bound the held-back offset. */
 	float GetStanceEyeTravel() const;
 
+	/** Hold a capsule-space point within the capsule's RADIUS (minus CameraCapsuleClampMargin), laterally only — the
+	 *  height belongs to the stance system, which deliberately parks the view outside the capsule mid-crouch. This is
+	 *  where invariant 2 is enforced: the shooting origin IS the camera, and the capsule can never bring its axis closer
+	 *  than Radius to a wall, so bounding the camera to that radius makes "shot from past a wall you're pressed against"
+	 *  structurally impossible instead of a value someone has to remember to keep small. Returns the held point;
+	 *  OutClampedAmount gets how far it had to move (0 = untouched) for the debug readout. */
+	FVector ClampPointInsideCapsule(const FVector& CapsuleSpacePoint, float& OutClampedAmount) const;
+
 	void InitAbilitySystem();
 
 	/** Server-authoritative run-start seam (U10): meta-progression stat effects are applied here, right after the ASC
@@ -334,6 +342,30 @@ protected:
 
 	UPROPERTY(VisibleAnywhere, Category = "FPSR|Camera")
 	TObjectPtr<UCameraComponent> FirstPersonCamera;
+
+	/** Fixed camera correction in CAPSULE space (X = forward, Y = right, Z = up), applied on top of BaseEyeHeight.
+	 *
+	 *  Not "where the eyes are" — it is the correction this CHARACTER + this CAPSULE need, which is why the name doesn't
+	 *  promise anatomy. Without it the camera sits on the capsule's centre axis at neck height: looking forward is fine
+	 *  (the body is behind and below the frustum), but looking DOWN aims the frustum straight into your own chest from
+	 *  zero distance and you see its inside instead of its surface. Pushing the camera forward puts the chest behind and
+	 *  below it, which is the whole fix — height is not what's wrong (ADR 0002 축 2).
+	 *
+	 *  BUDGET: UpdateStanceCamera holds the lateral result within the capsule radius (invariant 2 — the shooting origin
+	 *  is this camera, so a camera reaching past a wall is a shot from past it). Capsule radius is 34, so X+Y together
+	 *  have ~32cm to spend after the margin. Z is unbounded here because the stance system owns it.
+	 *
+	 *  Tune this on the BP CLASS DEFAULTS, not on a PIE instance — server and clients each compute the camera from their
+	 *  own copy of this value, so a per-instance tweak makes them disagree about where shots start. */
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Camera")
+	FVector FirstPersonCameraOffset = FVector(10.0f, 0.0f, 0.0f);
+
+	/** Safety inset (cm) kept between the clamped camera and the capsule surface. Small on purpose: the project runs
+	 *  NearClipPlane=1.0 (Config/DefaultEngine.ini, engine default is 10) so a couple of cm is enough to keep the near
+	 *  plane on the inside. Raising the near plane instead would clip the first-person weapon too, which is why it was
+	 *  lowered in the first place. */
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Camera", meta = (ClampMin = "0.0"))
+	float CameraCapsuleClampMargin = 2.0f;
 
 	/** Optional post-process material for the LimitedVision mission (tunnel/radial mask). When unset, a built-in
 	 *  vignette fallback is used so the effect works without content. Assigned in the BP subclass (no hardcoded path). */
@@ -565,6 +597,12 @@ protected:
 	 *  jump beats predicting it, because the capsule is re-anchored at the feet on the ground, at its centre in the
 	 *  air, and not moved at all on a remote proxy. */
 	float CachedCameraWorldZ = 0.0f;
+
+#if ENABLE_DRAW_DEBUG
+	/** How far the capsule clamp had to pull the camera back this frame (cm, 0 = untouched). Surfaced in the movement
+	 *  readout so an authored FirstPersonCameraOffset that is being silently cut reads as "cut", not as "ignored". */
+	float LastCameraClampAmount = 0.0f;
+#endif
 
 	/** Runtime ADS blend state: interpolated alpha (0 = hip, 1 = fully aimed) + the EXACT aim-pose WEAPON transform
 	 *  (relative to the camera), recomputed each aiming frame. Blending hip<->aim by alpha (instead of chasing the live
