@@ -76,7 +76,7 @@ void FFPSRWeaponAssemblerViewportClient::SetWeapon(UFPSRWeaponDataAsset* DA)
 		return;
 	}
 
-	USkeletalMesh* Body = DA->WeaponMesh1P.IsNull() ? nullptr : DA->WeaponMesh1P.LoadSynchronous();
+	USkeletalMesh* Body = DA->WeaponMesh.IsNull() ? nullptr : DA->WeaponMesh.LoadSynchronous();
 	BodyComp = NewObject<USkeletalMeshComponent>(GetTransientPackage(), NAME_None, RF_Transient);
 	BodyComp->SetSkeletalMeshAsset(Body);
 	BodyComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
@@ -84,9 +84,9 @@ void FFPSRWeaponAssemblerViewportClient::SetWeapon(UFPSRWeaponDataAsset* DA)
 
 	const FTransform RootBoneCS = FPSRWeaponAssemblerHelpers::RootBoneComponentSpace(Body);
 
-	for (int32 i = 0; i < DA->WeaponParts1P.Num(); ++i)
+	for (int32 i = 0; i < DA->WeaponParts.Num(); ++i)
 	{
-		const FFPSRWeaponPartAttachment& P = DA->WeaponParts1P[i];
+		const FFPSRWeaponPartAttachment& P = DA->WeaponParts[i];
 		UStaticMesh* M = P.Part.IsNull() ? nullptr : P.Part.LoadSynchronous();
 
 		// Name the component after its part (variant-stripped) so the designer can tell parts apart in the parts
@@ -133,7 +133,7 @@ void FFPSRWeaponAssemblerViewportClient::SetWidgetMode(UE::Widget::EWidgetMode I
 void FFPSRWeaponAssemblerViewportClient::SwapSelectedPartMesh(UStaticMesh* NewMesh)
 {
 	// Null NewMesh ignored — a failed catalog load must never blank the selected part (the caller reports the failure).
-	if (!NewMesh || !PartComps.IsValidIndex(SelectedPart) || !WeaponDA || !WeaponDA->WeaponParts1P.IsValidIndex(SelectedPart))
+	if (!NewMesh || !PartComps.IsValidIndex(SelectedPart) || !WeaponDA || !WeaponDA->WeaponParts.IsValidIndex(SelectedPart))
 	{
 		return;
 	}
@@ -142,7 +142,7 @@ void FFPSRWeaponAssemblerViewportClient::SwapSelectedPartMesh(UStaticMesh* NewMe
 	// the same slot, not a slot reassignment. DA save is BakeSockets'/"조립→저장"'s job; this only updates the
 	// in-memory preview + the DA's part reference so a subsequent bake/save picks it up.
 	PartComps[SelectedPart]->SetStaticMesh(NewMesh);
-	WeaponDA->WeaponParts1P[SelectedPart].Part = NewMesh;
+	WeaponDA->WeaponParts[SelectedPart].Part = NewMesh;
 
 	Invalidate();
 }
@@ -158,7 +158,7 @@ void FFPSRWeaponAssemblerViewportClient::AddPart(UStaticMesh* Mesh)
 	// Offset. The designer positions it with the gizmo, then a bake creates its SOCKET_Mount_<name> socket.
 	FFPSRWeaponPartAttachment NewAttach;
 	NewAttach.Part = Mesh;
-	const int32 NewIndex = WeaponDA->WeaponParts1P.Add(NewAttach);
+	const int32 NewIndex = WeaponDA->WeaponParts.Add(NewAttach);
 
 	// Preview component named after the mesh (same convention as SetWeapon), spawned at the body's transform so it
 	// starts on the weapon and framed; the designer then drags it into place.
@@ -180,7 +180,7 @@ void FFPSRWeaponAssemblerViewportClient::RemoveSelectedPart()
 	// 제거 전 단계 미리보기 중이면 정리(스테일 인덱스로 남는 것 방지 — 특히 지워질 슬롯을 미리보던 중이었을 경우).
 	EndStagePreview();
 
-	if (!PartComps.IsValidIndex(SelectedPart) || !WeaponDA || !WeaponDA->WeaponParts1P.IsValidIndex(SelectedPart))
+	if (!PartComps.IsValidIndex(SelectedPart) || !WeaponDA || !WeaponDA->WeaponParts.IsValidIndex(SelectedPart))
 	{
 		return;
 	}
@@ -191,7 +191,7 @@ void FFPSRWeaponAssemblerViewportClient::RemoveSelectedPart()
 		RetireTransientComponent(PartComp);
 	}
 	PartComps.RemoveAt(SelectedPart);
-	WeaponDA->WeaponParts1P.RemoveAt(SelectedPart);
+	WeaponDA->WeaponParts.RemoveAt(SelectedPart);
 
 	SelectedPart = INDEX_NONE;
 	UpdatePartVisibility();
@@ -207,7 +207,7 @@ void FFPSRWeaponAssemblerViewportClient::BeginStagePreview(int32 SlotIndex, int3
 	}
 
 	if (!PartComps.IsValidIndex(SlotIndex) || !PartComps[SlotIndex] || !WeaponDA
-		|| !WeaponDA->WeaponParts1P.IsValidIndex(SlotIndex) || !WeaponDA->WeaponParts1P[SlotIndex].Stages.IsValidIndex(StageIndex))
+		|| !WeaponDA->WeaponParts.IsValidIndex(SlotIndex) || !WeaponDA->WeaponParts[SlotIndex].Stages.IsValidIndex(StageIndex))
 	{
 		return;
 	}
@@ -218,7 +218,7 @@ void FFPSRWeaponAssemblerViewportClient::BeginStagePreview(int32 SlotIndex, int3
 	PreviewStageBaseXf = PC->GetComponentTransform();
 	PreviewStageBaseMesh = PC->GetStaticMesh();
 
-	const FFPSRWeaponPartStage& St = WeaponDA->WeaponParts1P[SlotIndex].Stages[StageIndex];
+	const FFPSRWeaponPartStage& St = WeaponDA->WeaponParts[SlotIndex].Stages[StageIndex];
 	UStaticMesh* StageMesh = St.Mesh.IsNull() ? nullptr : St.Mesh.LoadSynchronous();
 	PC->SetStaticMesh(StageMesh); // null 허용 — "이 단계 선택 시 파츠 사라짐"과 동일 규약(FFPSRWeaponPartStage 주석)
 
@@ -241,14 +241,14 @@ void FFPSRWeaponAssemblerViewportClient::EndStagePreview()
 	}
 
 	if (PartComps.IsValidIndex(PreviewStageSlot) && PartComps[PreviewStageSlot] && WeaponDA
-		&& WeaponDA->WeaponParts1P.IsValidIndex(PreviewStageSlot) && WeaponDA->WeaponParts1P[PreviewStageSlot].Stages.IsValidIndex(PreviewStageIndex))
+		&& WeaponDA->WeaponParts.IsValidIndex(PreviewStageSlot) && WeaponDA->WeaponParts[PreviewStageSlot].Stages.IsValidIndex(PreviewStageIndex))
 	{
 		UStaticMeshComponent* PC = PartComps[PreviewStageSlot];
 
 		// 캡처: stage.Offset = 현재(기즈모로 옮겨진) 자식월드를 base월드 기준 상대로 환산(GetRelativeTransform:
 		// this = Result * Other → Result = this.GetRelativeTransform(Other)).
 		const FTransform NewOffset = PC->GetComponentTransform().GetRelativeTransform(PreviewStageBaseXf);
-		WeaponDA->WeaponParts1P[PreviewStageSlot].Stages[PreviewStageIndex].Offset = NewOffset;
+		WeaponDA->WeaponParts[PreviewStageSlot].Stages[PreviewStageIndex].Offset = NewOffset;
 		WeaponDA->MarkPackageDirty();
 
 		// base 메시/위치 복원.

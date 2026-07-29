@@ -76,7 +76,7 @@ namespace FPSRWeaponAssemblerHelpers
 		}
 
 		int32 n = 0;
-		const int32 Count = FMath::Min(PartComps.Num(), DA->WeaponParts1P.Num());
+		const int32 Count = FMath::Min(PartComps.Num(), DA->WeaponParts.Num());
 		for (int32 i = 0; i < Count; ++i)
 		{
 			UStaticMeshComponent* PC = PartComps[i];
@@ -92,7 +92,7 @@ namespace FPSRWeaponAssemblerHelpers
 			// 안정·메시무관 소켓 id: 슬롯에 이미 구운 소켓이 있으면 그대로 재사용(재베이크/메시 스왑이 마운트를 리네임하지
 			// 않음). 없으면 SOCKET_Mount_<hex>를 GUID로 새로 만든다. 사용자는 DisplayLabel(표시용)로 슬롯을 명명하고,
 			// 소켓 id는 파츠 메시와 분리된다(옛 "소켓명이 메시를 따라감" 동작 수정).
-			FName SocketName = DA->WeaponParts1P[i].Socket;
+			FName SocketName = DA->WeaponParts[i].Socket;
 			if (SocketName.IsNone() || !SocketName.ToString().StartsWith(TEXT("SOCKET_Mount_")))
 			{
 				SocketName = FName(*FString::Printf(TEXT("SOCKET_Mount_%s"), *FGuid::NewGuid().ToString(EGuidFormats::Base36Encoded)));
@@ -106,8 +106,8 @@ namespace FPSRWeaponAssemblerHelpers
 			Socket->RelativeScale = FVector(1.0f);
 			Body->AddSocket(Socket, false);
 
-			DA->WeaponParts1P[i].Socket = SocketName;
-			DA->WeaponParts1P[i].Offset = FTransform::Identity;
+			DA->WeaponParts[i].Socket = SocketName;
+			DA->WeaponParts[i].Offset = FTransform::Identity;
 			++n;
 		}
 

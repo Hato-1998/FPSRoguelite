@@ -25,7 +25,7 @@ namespace FPSRWeaponAssemblerHelpers
 	 *  런타임과 동일한 위치가 나온다. */
 	FTransform RootBoneComponentSpace(const USkeletalMesh* Mesh);
 
-	/** PartComps[i]의 (BodyComp 대비) 상대 트랜스폼을 바디 메시 소켓으로 굽고, DA의 WeaponParts1P[i].Socket/Offset을
+	/** PartComps[i]의 (BodyComp 대비) 상대 트랜스폼을 바디 메시 소켓으로 굽고, DA의 WeaponParts[i].Socket/Offset을
 	 *  배선한 뒤 Body/DA 둘 다 저장한다. 각 PartComp의 (BodyComp 기준) 상대 트랜스폼을 루트본(90° roll) 기준으로
 	 *  변환해 소켓에 넣으므로, 바디가 identity가 아니어도(예: "전체 이동"으로 조립품을 통째로 옮겼어도) 결과가
 	 *  정합한다. 소켓명은 메시/컴포넌트명과 무관한 안정 id — 슬롯에 이미 구운 소켓이 있으면 재사용, 없으면

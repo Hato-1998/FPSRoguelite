@@ -183,7 +183,7 @@ public:
 
 	/** Play reload cosmetics on a server-confirmed reload-start edge (called from UFPSRWeaponInstance::OnRep_Reloading,
 	 *  which fires on every client holding the replicated instance). Owner client -> 1P arms ReloadMontage; remote
-	 *  clients -> 3P body ReloadMontage3P. No-op when bIsReloading is false, during the level-up freeze, or when the
+	 *  clients -> body ReloadMontage. No-op when bIsReloading is false, during the level-up freeze, or when the
 	 *  equipped weapon has no reload montage. The play rate is scaled so the montage length matches the ReloadTime. */
 	void HandleReloadStateChanged(bool bIsReloading);
 
@@ -320,11 +320,6 @@ protected:
 	/** First-person weapon static mesh (e.g. melee), owner-only. Mesh set from the equipped weapon's DataAsset. */
 	UPROPERTY(VisibleAnywhere, Category = "FPSR|Mesh")
 	TObjectPtr<UStaticMeshComponent> WeaponMeshStatic1P;
-
-	/** Third-person weapon skeletal mesh (U19), attached to the 3P body mesh and visible to REMOTE observers only
-	 *  (SetOwnerNoSee — the exact inverse of WeaponMesh1P's SetOnlyOwnerSee). Mesh set per-equip from the weapon DA. */
-	UPROPERTY(VisibleAnywhere, Category = "FPSR|Mesh")
-	TObjectPtr<USkeletalMeshComponent> WeaponMesh3P;
 
 	/** Socket on FirstPersonArms the weapon meshes attach to (pack default "SOCKET_Weapon"). C++-created component
 	 *  sockets can't be edited in the BP, so this exposes the default here; the design-time preview attaches to it,
@@ -498,7 +493,7 @@ protected:
 	/** Component the procedural-ADS AimSocket is read from. Like the muzzle, the sight (iron sight / optic) is a modular
 	 *  PART, so RefreshWeaponPartComponents resolves this to whichever part component carries CachedAimSocket — swapping
 	 *  the sight then moves the ADS reference — falling back to the receiver (WeaponMesh1P) when no part provides it.
-	 *  Convention-based: the part that owns a socket named AimSocket wins (first in WeaponParts1P order). */
+	 *  Convention-based: the part that owns a socket named AimSocket wins (first in WeaponParts order). */
 	UPROPERTY(Transient)
 	TObjectPtr<UMeshComponent> CachedAimComponent;
 
@@ -586,7 +581,7 @@ protected:
 	 *  Transient, NOT replicated, NOT saved (§2-A gate②) — each machine recomputes from replicated stats/fragments. */
 	uint32 LastWeaponPartSignature = 0;
 
-	/** Destroy any existing modular part components and rebuild them from the equipped weapon's WeaponParts1P list
+	/** Destroy any existing modular part components and rebuild them from the equipped weapon's WeaponParts list
 	 *  (only when a SKELETAL weapon mesh is shown; static/melee/empty attach nothing). Called from the weapon refresh. */
 	void RefreshWeaponPartComponents(const UFPSRWeaponDataAsset* Weapon);
 
@@ -599,11 +594,4 @@ protected:
 	 *  declaration above for the full contract). */
 	void ProcessPendingWeaponPartsRebuild();
 
-	/** Arms anim default captured at BeginPlay, so a weapon's per-weapon ArmsAnimInstanceClass override can be
-	 *  reverted when the next weapon has none. Only touched once an override has actually been applied
-	 *  (bArmsAnimOverridden), so weapons that never set an override leave the BP-authored arms anim untouched. */
-	bool bArmsAnimOverridden = false;
-	bool bDefaultArmsUsesBlueprint = false;
-	UPROPERTY(Transient)
-	TSubclassOf<UAnimInstance> DefaultArmsAnimClass;
 };

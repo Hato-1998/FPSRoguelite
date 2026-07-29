@@ -624,7 +624,7 @@ void SFPSRWeaponAssemblerTab::RefreshAvailableParts()
 		// Every modular variant of this weapon's parts lives alongside the wired ones in the same content folder
 		// (e.g. all of /Game/.../Weapon_A) — so the first non-null part's folder locates the whole catalog.
 		FString Folder;
-		for (const FFPSRWeaponPartAttachment& Part : DA->WeaponParts1P)
+		for (const FFPSRWeaponPartAttachment& Part : DA->WeaponParts)
 		{
 			if (!Part.Part.IsNull())
 			{
@@ -781,9 +781,9 @@ FText SFPSRWeaponAssemblerTab::MakePartRowLabel(int32 Index) const
 	// 슬롯 표시명 = 사용자 지정 DisplayLabel 우선, 비었으면 메시 유도명(컴포넌트 이름, 내부 식별용).
 	UFPSRWeaponDataAsset* DA = Client->GetWeaponDA();
 	FString SlotName;
-	if (DA && DA->WeaponParts1P.IsValidIndex(Index) && !DA->WeaponParts1P[Index].DisplayLabel.IsEmpty())
+	if (DA && DA->WeaponParts.IsValidIndex(Index) && !DA->WeaponParts[Index].DisplayLabel.IsEmpty())
 	{
-		SlotName = DA->WeaponParts1P[Index].DisplayLabel.ToString();
+		SlotName = DA->WeaponParts[Index].DisplayLabel.ToString();
 	}
 	else
 	{
@@ -803,11 +803,11 @@ FText SFPSRWeaponAssemblerTab::GetSelectedSlotLabelText() const
 	TSharedPtr<FFPSRWeaponAssemblerViewportClient> Client = Viewport.IsValid() ? Viewport->GetAssemblerClient() : nullptr;
 	UFPSRWeaponDataAsset* DA = Client.IsValid() ? Client->GetWeaponDA() : nullptr;
 	const int32 Sel = Client.IsValid() ? Client->GetSelectedPart() : INDEX_NONE;
-	if (!DA || !DA->WeaponParts1P.IsValidIndex(Sel))
+	if (!DA || !DA->WeaponParts.IsValidIndex(Sel))
 	{
 		return FText::GetEmpty();
 	}
-	return DA->WeaponParts1P[Sel].DisplayLabel;
+	return DA->WeaponParts[Sel].DisplayLabel;
 }
 
 void SFPSRWeaponAssemblerTab::OnSlotLabelCommitted(const FText& InText, ETextCommit::Type CommitType)
@@ -815,12 +815,12 @@ void SFPSRWeaponAssemblerTab::OnSlotLabelCommitted(const FText& InText, ETextCom
 	TSharedPtr<FFPSRWeaponAssemblerViewportClient> Client = Viewport.IsValid() ? Viewport->GetAssemblerClient() : nullptr;
 	UFPSRWeaponDataAsset* DA = Client.IsValid() ? Client->GetWeaponDA() : nullptr;
 	const int32 Sel = Client.IsValid() ? Client->GetSelectedPart() : INDEX_NONE;
-	if (!DA || !DA->WeaponParts1P.IsValidIndex(Sel))
+	if (!DA || !DA->WeaponParts.IsValidIndex(Sel))
 	{
 		return;
 	}
 
-	DA->WeaponParts1P[Sel].DisplayLabel = InText;
+	DA->WeaponParts[Sel].DisplayLabel = InText;
 	DA->MarkPackageDirty();
 
 	// PerformSwap과 동일 패턴: 해당 행 라벨만 제자리 갱신(전체 리빌드 금지 — 선택 유실 방지).
@@ -935,11 +935,11 @@ FString SFPSRWeaponAssemblerTab::GetEvolutionFragmentPath() const
 	TSharedPtr<FFPSRWeaponAssemblerViewportClient> Client = Viewport.IsValid() ? Viewport->GetAssemblerClient() : nullptr;
 	UFPSRWeaponDataAsset* DA = Client.IsValid() ? Client->GetWeaponDA() : nullptr;
 	const int32 Sel = Client.IsValid() ? Client->GetSelectedPart() : INDEX_NONE;
-	if (!DA || !DA->WeaponParts1P.IsValidIndex(Sel))
+	if (!DA || !DA->WeaponParts.IsValidIndex(Sel))
 	{
 		return FString();
 	}
-	return DA->WeaponParts1P[Sel].EvolutionFragment.ToSoftObjectPath().ToString();
+	return DA->WeaponParts[Sel].EvolutionFragment.ToSoftObjectPath().ToString();
 }
 
 void SFPSRWeaponAssemblerTab::OnEvolutionFragmentChanged(const FAssetData& AssetData)
@@ -947,13 +947,13 @@ void SFPSRWeaponAssemblerTab::OnEvolutionFragmentChanged(const FAssetData& Asset
 	TSharedPtr<FFPSRWeaponAssemblerViewportClient> Client = Viewport.IsValid() ? Viewport->GetAssemblerClient() : nullptr;
 	UFPSRWeaponDataAsset* DA = Client.IsValid() ? Client->GetWeaponDA() : nullptr;
 	const int32 Sel = Client.IsValid() ? Client->GetSelectedPart() : INDEX_NONE;
-	if (!DA || !DA->WeaponParts1P.IsValidIndex(Sel))
+	if (!DA || !DA->WeaponParts.IsValidIndex(Sel))
 	{
 		return;
 	}
 
 	// AssetData가 비어 있으면(AllowClear로 지운 경우) GetAsset()이 null이라 EvolutionFragment도 함께 정리된다(진화 없음).
-	DA->WeaponParts1P[Sel].EvolutionFragment = Cast<UFPSRWeaponFragment>(AssetData.GetAsset());
+	DA->WeaponParts[Sel].EvolutionFragment = Cast<UFPSRWeaponFragment>(AssetData.GetAsset());
 	DA->MarkPackageDirty();
 
 	if (StatusText.IsValid())
@@ -970,9 +970,9 @@ void SFPSRWeaponAssemblerTab::RefreshStageList()
 	TSharedPtr<FFPSRWeaponAssemblerViewportClient> Client = Viewport.IsValid() ? Viewport->GetAssemblerClient() : nullptr;
 	UFPSRWeaponDataAsset* DA = Client.IsValid() ? Client->GetWeaponDA() : nullptr;
 	const int32 Sel = Client.IsValid() ? Client->GetSelectedPart() : INDEX_NONE;
-	if (DA && DA->WeaponParts1P.IsValidIndex(Sel))
+	if (DA && DA->WeaponParts.IsValidIndex(Sel))
 	{
-		const TArray<FFPSRWeaponPartStage>& Stages = DA->WeaponParts1P[Sel].Stages;
+		const TArray<FFPSRWeaponPartStage>& Stages = DA->WeaponParts[Sel].Stages;
 		for (int32 s = 0; s < Stages.Num(); ++s)
 		{
 			TSharedPtr<FStageRow> Row = MakeShared<FStageRow>();
@@ -1022,7 +1022,7 @@ FReply SFPSRWeaponAssemblerTab::OnAddStageClicked()
 	TSharedPtr<FFPSRWeaponAssemblerViewportClient> Client = Viewport.IsValid() ? Viewport->GetAssemblerClient() : nullptr;
 	UFPSRWeaponDataAsset* DA = Client.IsValid() ? Client->GetWeaponDA() : nullptr;
 	const int32 Sel = Client.IsValid() ? Client->GetSelectedPart() : INDEX_NONE;
-	if (!DA || !DA->WeaponParts1P.IsValidIndex(Sel))
+	if (!DA || !DA->WeaponParts.IsValidIndex(Sel))
 	{
 		if (StatusText.IsValid())
 		{
@@ -1034,7 +1034,7 @@ FReply SFPSRWeaponAssemblerTab::OnAddStageClicked()
 	// Stages 배열을 건드리기 전에 이전 단계 미리보기를 캡처·종료(스테일 인덱스 방지).
 	Client->EndStagePreview();
 
-	FFPSRWeaponPartAttachment& Slot = DA->WeaponParts1P[Sel];
+	FFPSRWeaponPartAttachment& Slot = DA->WeaponParts[Sel];
 
 	// 사용 가능 파츠에서 고른 메시를 새 단계로(없으면 null-safe로 빈 단계). 필요 스택은 목록 끝에 자동 이어붙인다.
 	FFPSRWeaponPartStage NewStage;
@@ -1074,7 +1074,7 @@ FReply SFPSRWeaponAssemblerTab::OnRemoveStageClicked()
 	TSharedPtr<FFPSRWeaponAssemblerViewportClient> Client = Viewport.IsValid() ? Viewport->GetAssemblerClient() : nullptr;
 	UFPSRWeaponDataAsset* DA = Client.IsValid() ? Client->GetWeaponDA() : nullptr;
 	const int32 Sel = Client.IsValid() ? Client->GetSelectedPart() : INDEX_NONE;
-	if (!DA || !DA->WeaponParts1P.IsValidIndex(Sel))
+	if (!DA || !DA->WeaponParts.IsValidIndex(Sel))
 	{
 		return FReply::Handled();
 	}
@@ -1082,7 +1082,7 @@ FReply SFPSRWeaponAssemblerTab::OnRemoveStageClicked()
 	// Stages 배열을 건드리기 전에 이전 단계 미리보기를 캡처·종료(스테일 인덱스 방지).
 	Client->EndStagePreview();
 
-	TArray<FFPSRWeaponPartStage>& Stages = DA->WeaponParts1P[Sel].Stages;
+	TArray<FFPSRWeaponPartStage>& Stages = DA->WeaponParts[Sel].Stages;
 	if (Stages.IsValidIndex(SelectedStageRow->StageIndex))
 	{
 		Stages.RemoveAt(SelectedStageRow->StageIndex);
@@ -1108,9 +1108,9 @@ int32 SFPSRWeaponAssemblerTab::GetStageMinStacks(int32 StageIndex) const
 	TSharedPtr<FFPSRWeaponAssemblerViewportClient> Client = Viewport.IsValid() ? Viewport->GetAssemblerClient() : nullptr;
 	UFPSRWeaponDataAsset* DA = Client.IsValid() ? Client->GetWeaponDA() : nullptr;
 	const int32 Sel = Client.IsValid() ? Client->GetSelectedPart() : INDEX_NONE;
-	if (DA && DA->WeaponParts1P.IsValidIndex(Sel) && DA->WeaponParts1P[Sel].Stages.IsValidIndex(StageIndex))
+	if (DA && DA->WeaponParts.IsValidIndex(Sel) && DA->WeaponParts[Sel].Stages.IsValidIndex(StageIndex))
 	{
-		return DA->WeaponParts1P[Sel].Stages[StageIndex].MinStacks;
+		return DA->WeaponParts[Sel].Stages[StageIndex].MinStacks;
 	}
 	return 1;
 }
@@ -1120,9 +1120,9 @@ void SFPSRWeaponAssemblerTab::OnStageMinStacksChanged(int32 NewValue, int32 Stag
 	TSharedPtr<FFPSRWeaponAssemblerViewportClient> Client = Viewport.IsValid() ? Viewport->GetAssemblerClient() : nullptr;
 	UFPSRWeaponDataAsset* DA = Client.IsValid() ? Client->GetWeaponDA() : nullptr;
 	const int32 Sel = Client.IsValid() ? Client->GetSelectedPart() : INDEX_NONE;
-	if (DA && DA->WeaponParts1P.IsValidIndex(Sel) && DA->WeaponParts1P[Sel].Stages.IsValidIndex(StageIndex))
+	if (DA && DA->WeaponParts.IsValidIndex(Sel) && DA->WeaponParts[Sel].Stages.IsValidIndex(StageIndex))
 	{
-		DA->WeaponParts1P[Sel].Stages[StageIndex].MinStacks = FMath::Max(1, NewValue);
+		DA->WeaponParts[Sel].Stages[StageIndex].MinStacks = FMath::Max(1, NewValue);
 		DA->MarkPackageDirty();
 		// 스핀박스가 값을 소유(Value_Lambda가 즉시 되읽음) — 리스트 리프레시 불요.
 	}
@@ -1142,12 +1142,12 @@ FText SFPSRWeaponAssemblerTab::MakeStageRowSummary(int32 StageIndex) const
 	TSharedPtr<FFPSRWeaponAssemblerViewportClient> Client = Viewport.IsValid() ? Viewport->GetAssemblerClient() : nullptr;
 	UFPSRWeaponDataAsset* DA = Client.IsValid() ? Client->GetWeaponDA() : nullptr;
 	const int32 Sel = Client.IsValid() ? Client->GetSelectedPart() : INDEX_NONE;
-	if (!DA || !DA->WeaponParts1P.IsValidIndex(Sel) || !DA->WeaponParts1P[Sel].Stages.IsValidIndex(StageIndex))
+	if (!DA || !DA->WeaponParts.IsValidIndex(Sel) || !DA->WeaponParts[Sel].Stages.IsValidIndex(StageIndex))
 	{
 		return FText::GetEmpty();
 	}
 
-	const FFPSRWeaponPartStage& Stage = DA->WeaponParts1P[Sel].Stages[StageIndex];
+	const FFPSRWeaponPartStage& Stage = DA->WeaponParts[Sel].Stages[StageIndex];
 
 	FText TriggerSummary;
 	if (Stage.Trigger == EFPSRPartStageTrigger::FragmentStacks)
@@ -1174,9 +1174,9 @@ int32 SFPSRWeaponAssemblerTab::GetSelectedStageTriggerValue() const
 	UFPSRWeaponDataAsset* DA = Client.IsValid() ? Client->GetWeaponDA() : nullptr;
 	const int32 Sel = Client.IsValid() ? Client->GetSelectedPart() : INDEX_NONE;
 	const int32 StageIndex = GetSelectedStageIndex();
-	if (DA && DA->WeaponParts1P.IsValidIndex(Sel) && DA->WeaponParts1P[Sel].Stages.IsValidIndex(StageIndex))
+	if (DA && DA->WeaponParts.IsValidIndex(Sel) && DA->WeaponParts[Sel].Stages.IsValidIndex(StageIndex))
 	{
-		return (int32)DA->WeaponParts1P[Sel].Stages[StageIndex].Trigger;
+		return (int32)DA->WeaponParts[Sel].Stages[StageIndex].Trigger;
 	}
 	return (int32)EFPSRPartStageTrigger::FragmentStacks;
 }
@@ -1187,9 +1187,9 @@ void SFPSRWeaponAssemblerTab::OnSelectedStageTriggerChanged(int32 NewValue, ESel
 	UFPSRWeaponDataAsset* DA = Client.IsValid() ? Client->GetWeaponDA() : nullptr;
 	const int32 Sel = Client.IsValid() ? Client->GetSelectedPart() : INDEX_NONE;
 	const int32 StageIndex = GetSelectedStageIndex();
-	if (DA && DA->WeaponParts1P.IsValidIndex(Sel) && DA->WeaponParts1P[Sel].Stages.IsValidIndex(StageIndex))
+	if (DA && DA->WeaponParts.IsValidIndex(Sel) && DA->WeaponParts[Sel].Stages.IsValidIndex(StageIndex))
 	{
-		DA->WeaponParts1P[Sel].Stages[StageIndex].Trigger = (EFPSRPartStageTrigger)NewValue;
+		DA->WeaponParts[Sel].Stages[StageIndex].Trigger = (EFPSRPartStageTrigger)NewValue;
 		DA->MarkPackageDirty();
 		if (StageListView.IsValid())
 		{
@@ -1204,9 +1204,9 @@ int32 SFPSRWeaponAssemblerTab::GetSelectedStageStatAxisValue() const
 	UFPSRWeaponDataAsset* DA = Client.IsValid() ? Client->GetWeaponDA() : nullptr;
 	const int32 Sel = Client.IsValid() ? Client->GetSelectedPart() : INDEX_NONE;
 	const int32 StageIndex = GetSelectedStageIndex();
-	if (DA && DA->WeaponParts1P.IsValidIndex(Sel) && DA->WeaponParts1P[Sel].Stages.IsValidIndex(StageIndex))
+	if (DA && DA->WeaponParts.IsValidIndex(Sel) && DA->WeaponParts[Sel].Stages.IsValidIndex(StageIndex))
 	{
-		return (int32)DA->WeaponParts1P[Sel].Stages[StageIndex].StatAxis;
+		return (int32)DA->WeaponParts[Sel].Stages[StageIndex].StatAxis;
 	}
 	return (int32)EFPSRWeaponStat::FireRate;
 }
@@ -1217,9 +1217,9 @@ void SFPSRWeaponAssemblerTab::OnSelectedStageStatAxisChanged(int32 NewValue, ESe
 	UFPSRWeaponDataAsset* DA = Client.IsValid() ? Client->GetWeaponDA() : nullptr;
 	const int32 Sel = Client.IsValid() ? Client->GetSelectedPart() : INDEX_NONE;
 	const int32 StageIndex = GetSelectedStageIndex();
-	if (DA && DA->WeaponParts1P.IsValidIndex(Sel) && DA->WeaponParts1P[Sel].Stages.IsValidIndex(StageIndex))
+	if (DA && DA->WeaponParts.IsValidIndex(Sel) && DA->WeaponParts[Sel].Stages.IsValidIndex(StageIndex))
 	{
-		DA->WeaponParts1P[Sel].Stages[StageIndex].StatAxis = (EFPSRWeaponStat)NewValue;
+		DA->WeaponParts[Sel].Stages[StageIndex].StatAxis = (EFPSRWeaponStat)NewValue;
 		DA->MarkPackageDirty();
 		if (StageListView.IsValid())
 		{
@@ -1234,9 +1234,9 @@ int32 SFPSRWeaponAssemblerTab::GetSelectedStageStatCompareValue() const
 	UFPSRWeaponDataAsset* DA = Client.IsValid() ? Client->GetWeaponDA() : nullptr;
 	const int32 Sel = Client.IsValid() ? Client->GetSelectedPart() : INDEX_NONE;
 	const int32 StageIndex = GetSelectedStageIndex();
-	if (DA && DA->WeaponParts1P.IsValidIndex(Sel) && DA->WeaponParts1P[Sel].Stages.IsValidIndex(StageIndex))
+	if (DA && DA->WeaponParts.IsValidIndex(Sel) && DA->WeaponParts[Sel].Stages.IsValidIndex(StageIndex))
 	{
-		return (int32)DA->WeaponParts1P[Sel].Stages[StageIndex].StatCompare;
+		return (int32)DA->WeaponParts[Sel].Stages[StageIndex].StatCompare;
 	}
 	return (int32)EFPSRStatCompare::GreaterOrEqual;
 }
@@ -1247,9 +1247,9 @@ void SFPSRWeaponAssemblerTab::OnSelectedStageStatCompareChanged(int32 NewValue, 
 	UFPSRWeaponDataAsset* DA = Client.IsValid() ? Client->GetWeaponDA() : nullptr;
 	const int32 Sel = Client.IsValid() ? Client->GetSelectedPart() : INDEX_NONE;
 	const int32 StageIndex = GetSelectedStageIndex();
-	if (DA && DA->WeaponParts1P.IsValidIndex(Sel) && DA->WeaponParts1P[Sel].Stages.IsValidIndex(StageIndex))
+	if (DA && DA->WeaponParts.IsValidIndex(Sel) && DA->WeaponParts[Sel].Stages.IsValidIndex(StageIndex))
 	{
-		DA->WeaponParts1P[Sel].Stages[StageIndex].StatCompare = (EFPSRStatCompare)NewValue;
+		DA->WeaponParts[Sel].Stages[StageIndex].StatCompare = (EFPSRStatCompare)NewValue;
 		DA->MarkPackageDirty();
 		if (StageListView.IsValid())
 		{
@@ -1264,9 +1264,9 @@ TOptional<float> SFPSRWeaponAssemblerTab::GetSelectedStageStatValue() const
 	UFPSRWeaponDataAsset* DA = Client.IsValid() ? Client->GetWeaponDA() : nullptr;
 	const int32 Sel = Client.IsValid() ? Client->GetSelectedPart() : INDEX_NONE;
 	const int32 StageIndex = GetSelectedStageIndex();
-	if (DA && DA->WeaponParts1P.IsValidIndex(Sel) && DA->WeaponParts1P[Sel].Stages.IsValidIndex(StageIndex))
+	if (DA && DA->WeaponParts.IsValidIndex(Sel) && DA->WeaponParts[Sel].Stages.IsValidIndex(StageIndex))
 	{
-		return DA->WeaponParts1P[Sel].Stages[StageIndex].StatValue;
+		return DA->WeaponParts[Sel].Stages[StageIndex].StatValue;
 	}
 	return 0.0f;
 }
@@ -1277,9 +1277,9 @@ void SFPSRWeaponAssemblerTab::OnSelectedStageStatValueChanged(float NewValue)
 	UFPSRWeaponDataAsset* DA = Client.IsValid() ? Client->GetWeaponDA() : nullptr;
 	const int32 Sel = Client.IsValid() ? Client->GetSelectedPart() : INDEX_NONE;
 	const int32 StageIndex = GetSelectedStageIndex();
-	if (DA && DA->WeaponParts1P.IsValidIndex(Sel) && DA->WeaponParts1P[Sel].Stages.IsValidIndex(StageIndex))
+	if (DA && DA->WeaponParts.IsValidIndex(Sel) && DA->WeaponParts[Sel].Stages.IsValidIndex(StageIndex))
 	{
-		DA->WeaponParts1P[Sel].Stages[StageIndex].StatValue = NewValue;
+		DA->WeaponParts[Sel].Stages[StageIndex].StatValue = NewValue;
 		DA->MarkPackageDirty();
 		if (StageListView.IsValid())
 		{
@@ -1313,9 +1313,9 @@ ECheckBoxState SFPSRWeaponAssemblerTab::GetSelectedStageScopeOverlay() const
 	UFPSRWeaponDataAsset* DA = Client.IsValid() ? Client->GetWeaponDA() : nullptr;
 	const int32 Sel = Client.IsValid() ? Client->GetSelectedPart() : INDEX_NONE;
 	const int32 StageIndex = GetSelectedStageIndex();
-	if (DA && DA->WeaponParts1P.IsValidIndex(Sel) && DA->WeaponParts1P[Sel].Stages.IsValidIndex(StageIndex))
+	if (DA && DA->WeaponParts.IsValidIndex(Sel) && DA->WeaponParts[Sel].Stages.IsValidIndex(StageIndex))
 	{
-		return DA->WeaponParts1P[Sel].Stages[StageIndex].Scope.bScopeOverlay ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
+		return DA->WeaponParts[Sel].Stages[StageIndex].Scope.bScopeOverlay ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
 	}
 	return ECheckBoxState::Unchecked;
 }
@@ -1326,9 +1326,9 @@ void SFPSRWeaponAssemblerTab::OnSelectedStageScopeOverlayChanged(ECheckBoxState 
 	UFPSRWeaponDataAsset* DA = Client.IsValid() ? Client->GetWeaponDA() : nullptr;
 	const int32 Sel = Client.IsValid() ? Client->GetSelectedPart() : INDEX_NONE;
 	const int32 StageIndex = GetSelectedStageIndex();
-	if (DA && DA->WeaponParts1P.IsValidIndex(Sel) && DA->WeaponParts1P[Sel].Stages.IsValidIndex(StageIndex))
+	if (DA && DA->WeaponParts.IsValidIndex(Sel) && DA->WeaponParts[Sel].Stages.IsValidIndex(StageIndex))
 	{
-		DA->WeaponParts1P[Sel].Stages[StageIndex].Scope.bScopeOverlay = (NewState == ECheckBoxState::Checked);
+		DA->WeaponParts[Sel].Stages[StageIndex].Scope.bScopeOverlay = (NewState == ECheckBoxState::Checked);
 		DA->MarkPackageDirty();
 		if (StageListView.IsValid())
 		{
@@ -1343,9 +1343,9 @@ TOptional<float> SFPSRWeaponAssemblerTab::GetSelectedStageAimFOV() const
 	UFPSRWeaponDataAsset* DA = Client.IsValid() ? Client->GetWeaponDA() : nullptr;
 	const int32 Sel = Client.IsValid() ? Client->GetSelectedPart() : INDEX_NONE;
 	const int32 StageIndex = GetSelectedStageIndex();
-	if (DA && DA->WeaponParts1P.IsValidIndex(Sel) && DA->WeaponParts1P[Sel].Stages.IsValidIndex(StageIndex))
+	if (DA && DA->WeaponParts.IsValidIndex(Sel) && DA->WeaponParts[Sel].Stages.IsValidIndex(StageIndex))
 	{
-		return DA->WeaponParts1P[Sel].Stages[StageIndex].Scope.AimFieldOfView;
+		return DA->WeaponParts[Sel].Stages[StageIndex].Scope.AimFieldOfView;
 	}
 	return 0.0f;
 }
@@ -1356,9 +1356,9 @@ void SFPSRWeaponAssemblerTab::OnSelectedStageAimFOVChanged(float NewValue)
 	UFPSRWeaponDataAsset* DA = Client.IsValid() ? Client->GetWeaponDA() : nullptr;
 	const int32 Sel = Client.IsValid() ? Client->GetSelectedPart() : INDEX_NONE;
 	const int32 StageIndex = GetSelectedStageIndex();
-	if (DA && DA->WeaponParts1P.IsValidIndex(Sel) && DA->WeaponParts1P[Sel].Stages.IsValidIndex(StageIndex))
+	if (DA && DA->WeaponParts.IsValidIndex(Sel) && DA->WeaponParts[Sel].Stages.IsValidIndex(StageIndex))
 	{
-		DA->WeaponParts1P[Sel].Stages[StageIndex].Scope.AimFieldOfView = NewValue;
+		DA->WeaponParts[Sel].Stages[StageIndex].Scope.AimFieldOfView = NewValue;
 		DA->MarkPackageDirty();
 		if (StageListView.IsValid())
 		{
@@ -1373,10 +1373,10 @@ const UClass* SFPSRWeaponAssemblerTab::GetSelectedStageScopeWidgetClass() const
 	UFPSRWeaponDataAsset* DA = Client.IsValid() ? Client->GetWeaponDA() : nullptr;
 	const int32 Sel = Client.IsValid() ? Client->GetSelectedPart() : INDEX_NONE;
 	const int32 StageIndex = GetSelectedStageIndex();
-	if (DA && DA->WeaponParts1P.IsValidIndex(Sel) && DA->WeaponParts1P[Sel].Stages.IsValidIndex(StageIndex))
+	if (DA && DA->WeaponParts.IsValidIndex(Sel) && DA->WeaponParts[Sel].Stages.IsValidIndex(StageIndex))
 	{
 		// LoadSynchronous()는 내부적으로 Get()을 먼저 시도하므로 이미 로드돼 있으면 추가 로드 없이 반환된다.
-		return DA->WeaponParts1P[Sel].Stages[StageIndex].Scope.ScopeOverlayWidgetClass.LoadSynchronous();
+		return DA->WeaponParts[Sel].Stages[StageIndex].Scope.ScopeOverlayWidgetClass.LoadSynchronous();
 	}
 	return nullptr;
 }
@@ -1387,10 +1387,10 @@ void SFPSRWeaponAssemblerTab::OnSelectedStageScopeWidgetChanged(const UClass* Ne
 	UFPSRWeaponDataAsset* DA = Client.IsValid() ? Client->GetWeaponDA() : nullptr;
 	const int32 Sel = Client.IsValid() ? Client->GetSelectedPart() : INDEX_NONE;
 	const int32 StageIndex = GetSelectedStageIndex();
-	if (DA && DA->WeaponParts1P.IsValidIndex(Sel) && DA->WeaponParts1P[Sel].Stages.IsValidIndex(StageIndex))
+	if (DA && DA->WeaponParts.IsValidIndex(Sel) && DA->WeaponParts[Sel].Stages.IsValidIndex(StageIndex))
 	{
 		// NewClass가 nullptr이면(AllowNone으로 지운 경우) ScopeOverlayWidgetClass도 함께 정리된다.
-		DA->WeaponParts1P[Sel].Stages[StageIndex].Scope.ScopeOverlayWidgetClass = NewClass;
+		DA->WeaponParts[Sel].Stages[StageIndex].Scope.ScopeOverlayWidgetClass = NewClass;
 		DA->MarkPackageDirty();
 		if (StageListView.IsValid())
 		{
@@ -1405,9 +1405,9 @@ ECheckBoxState SFPSRWeaponAssemblerTab::GetSelectedStageScopeVignette() const
 	UFPSRWeaponDataAsset* DA = Client.IsValid() ? Client->GetWeaponDA() : nullptr;
 	const int32 Sel = Client.IsValid() ? Client->GetSelectedPart() : INDEX_NONE;
 	const int32 StageIndex = GetSelectedStageIndex();
-	if (DA && DA->WeaponParts1P.IsValidIndex(Sel) && DA->WeaponParts1P[Sel].Stages.IsValidIndex(StageIndex))
+	if (DA && DA->WeaponParts.IsValidIndex(Sel) && DA->WeaponParts[Sel].Stages.IsValidIndex(StageIndex))
 	{
-		return DA->WeaponParts1P[Sel].Stages[StageIndex].Scope.bScopeVignette ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
+		return DA->WeaponParts[Sel].Stages[StageIndex].Scope.bScopeVignette ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
 	}
 	return ECheckBoxState::Unchecked;
 }
@@ -1418,9 +1418,9 @@ void SFPSRWeaponAssemblerTab::OnSelectedStageScopeVignetteChanged(ECheckBoxState
 	UFPSRWeaponDataAsset* DA = Client.IsValid() ? Client->GetWeaponDA() : nullptr;
 	const int32 Sel = Client.IsValid() ? Client->GetSelectedPart() : INDEX_NONE;
 	const int32 StageIndex = GetSelectedStageIndex();
-	if (DA && DA->WeaponParts1P.IsValidIndex(Sel) && DA->WeaponParts1P[Sel].Stages.IsValidIndex(StageIndex))
+	if (DA && DA->WeaponParts.IsValidIndex(Sel) && DA->WeaponParts[Sel].Stages.IsValidIndex(StageIndex))
 	{
-		DA->WeaponParts1P[Sel].Stages[StageIndex].Scope.bScopeVignette = (NewState == ECheckBoxState::Checked);
+		DA->WeaponParts[Sel].Stages[StageIndex].Scope.bScopeVignette = (NewState == ECheckBoxState::Checked);
 		DA->MarkPackageDirty();
 		if (StageListView.IsValid())
 		{
@@ -1435,9 +1435,9 @@ ECheckBoxState SFPSRWeaponAssemblerTab::GetSelectedStageHideWeapon() const
 	UFPSRWeaponDataAsset* DA = Client.IsValid() ? Client->GetWeaponDA() : nullptr;
 	const int32 Sel = Client.IsValid() ? Client->GetSelectedPart() : INDEX_NONE;
 	const int32 StageIndex = GetSelectedStageIndex();
-	if (DA && DA->WeaponParts1P.IsValidIndex(Sel) && DA->WeaponParts1P[Sel].Stages.IsValidIndex(StageIndex))
+	if (DA && DA->WeaponParts.IsValidIndex(Sel) && DA->WeaponParts[Sel].Stages.IsValidIndex(StageIndex))
 	{
-		return DA->WeaponParts1P[Sel].Stages[StageIndex].Scope.bHideWeaponWhileScoped ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
+		return DA->WeaponParts[Sel].Stages[StageIndex].Scope.bHideWeaponWhileScoped ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
 	}
 	return ECheckBoxState::Unchecked;
 }
@@ -1448,9 +1448,9 @@ void SFPSRWeaponAssemblerTab::OnSelectedStageHideWeaponChanged(ECheckBoxState Ne
 	UFPSRWeaponDataAsset* DA = Client.IsValid() ? Client->GetWeaponDA() : nullptr;
 	const int32 Sel = Client.IsValid() ? Client->GetSelectedPart() : INDEX_NONE;
 	const int32 StageIndex = GetSelectedStageIndex();
-	if (DA && DA->WeaponParts1P.IsValidIndex(Sel) && DA->WeaponParts1P[Sel].Stages.IsValidIndex(StageIndex))
+	if (DA && DA->WeaponParts.IsValidIndex(Sel) && DA->WeaponParts[Sel].Stages.IsValidIndex(StageIndex))
 	{
-		DA->WeaponParts1P[Sel].Stages[StageIndex].Scope.bHideWeaponWhileScoped = (NewState == ECheckBoxState::Checked);
+		DA->WeaponParts[Sel].Stages[StageIndex].Scope.bHideWeaponWhileScoped = (NewState == ECheckBoxState::Checked);
 		DA->MarkPackageDirty();
 		if (StageListView.IsValid())
 		{
@@ -1465,9 +1465,9 @@ EVisibility SFPSRWeaponAssemblerTab::GetScopeOverlaySubFieldVisibility() const
 	UFPSRWeaponDataAsset* DA = Client.IsValid() ? Client->GetWeaponDA() : nullptr;
 	const int32 Sel = Client.IsValid() ? Client->GetSelectedPart() : INDEX_NONE;
 	const int32 StageIndex = GetSelectedStageIndex();
-	if (DA && DA->WeaponParts1P.IsValidIndex(Sel) && DA->WeaponParts1P[Sel].Stages.IsValidIndex(StageIndex))
+	if (DA && DA->WeaponParts.IsValidIndex(Sel) && DA->WeaponParts[Sel].Stages.IsValidIndex(StageIndex))
 	{
-		return DA->WeaponParts1P[Sel].Stages[StageIndex].Scope.bScopeOverlay ? EVisibility::Visible : EVisibility::Collapsed;
+		return DA->WeaponParts[Sel].Stages[StageIndex].Scope.bScopeOverlay ? EVisibility::Visible : EVisibility::Collapsed;
 	}
 	return EVisibility::Collapsed;
 }
@@ -1478,12 +1478,12 @@ FReply SFPSRWeaponAssemblerTab::OnStageMoveUpClicked()
 	UFPSRWeaponDataAsset* DA = Client.IsValid() ? Client->GetWeaponDA() : nullptr;
 	const int32 Sel = Client.IsValid() ? Client->GetSelectedPart() : INDEX_NONE;
 	const int32 StageIndex = GetSelectedStageIndex();
-	if (!DA || !DA->WeaponParts1P.IsValidIndex(Sel))
+	if (!DA || !DA->WeaponParts.IsValidIndex(Sel))
 	{
 		return FReply::Handled();
 	}
 
-	TArray<FFPSRWeaponPartStage>& Stages = DA->WeaponParts1P[Sel].Stages;
+	TArray<FFPSRWeaponPartStage>& Stages = DA->WeaponParts[Sel].Stages;
 	if (!Stages.IsValidIndex(StageIndex) || StageIndex <= 0)
 	{
 		return FReply::Handled();
@@ -1522,12 +1522,12 @@ FReply SFPSRWeaponAssemblerTab::OnStageMoveDownClicked()
 	UFPSRWeaponDataAsset* DA = Client.IsValid() ? Client->GetWeaponDA() : nullptr;
 	const int32 Sel = Client.IsValid() ? Client->GetSelectedPart() : INDEX_NONE;
 	const int32 StageIndex = GetSelectedStageIndex();
-	if (!DA || !DA->WeaponParts1P.IsValidIndex(Sel))
+	if (!DA || !DA->WeaponParts.IsValidIndex(Sel))
 	{
 		return FReply::Handled();
 	}
 
-	TArray<FFPSRWeaponPartStage>& Stages = DA->WeaponParts1P[Sel].Stages;
+	TArray<FFPSRWeaponPartStage>& Stages = DA->WeaponParts[Sel].Stages;
 	if (!Stages.IsValidIndex(StageIndex) || StageIndex >= Stages.Num() - 1)
 	{
 		return FReply::Handled();
@@ -1561,11 +1561,11 @@ bool SFPSRWeaponAssemblerTab::IsStageMoveDownEnabled() const
 	UFPSRWeaponDataAsset* DA = Client.IsValid() ? Client->GetWeaponDA() : nullptr;
 	const int32 Sel = Client.IsValid() ? Client->GetSelectedPart() : INDEX_NONE;
 	const int32 StageIndex = GetSelectedStageIndex();
-	if (!DA || !DA->WeaponParts1P.IsValidIndex(Sel))
+	if (!DA || !DA->WeaponParts.IsValidIndex(Sel))
 	{
 		return false;
 	}
-	return StageIndex != INDEX_NONE && StageIndex < DA->WeaponParts1P[Sel].Stages.Num() - 1;
+	return StageIndex != INDEX_NONE && StageIndex < DA->WeaponParts[Sel].Stages.Num() - 1;
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -1598,7 +1598,7 @@ FReply SFPSRWeaponAssemblerTab::OnBakeClicked()
 	{
 		if (StatusText.IsValid())
 		{
-			StatusText->SetText(LOCTEXT("BakeNoBodyMesh", "이 무기 DA에 1인칭 스켈레탈 메시(WeaponMesh1P)가 없어 소켓을 구울 수 없습니다."));
+			StatusText->SetText(LOCTEXT("BakeNoBodyMesh", "이 무기 DA에 1인칭 스켈레탈 메시(WeaponMesh)가 없어 소켓을 구울 수 없습니다."));
 		}
 		return FReply::Handled();
 	}

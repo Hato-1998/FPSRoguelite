@@ -56,17 +56,17 @@ public:
 	bool IsIsolate() const { return bIsolate; }
 
 	/** 선택된 파츠(PartComps[SelectedPart])의 스태틱 메시를 NewMesh로 교체 — 프리뷰 컴포넌트와 DA의
-	 *  WeaponParts1P[SelectedPart].Part를 함께 갱신한다(인메모리만; DA 저장은 "조립→저장"(BakeSockets)이 담당).
+	 *  WeaponParts[SelectedPart].Part를 함께 갱신한다(인메모리만; DA 저장은 "조립→저장"(BakeSockets)이 담당).
 	 *  컴포넌트 이름(=슬롯/소켓명)은 그대로 유지되므로 변종 교체이지 슬롯 재배치가 아니다. 선택 파츠가 없거나 DA가
 	 *  없으면 아무 것도 하지 않는다. */
 	void SwapSelectedPartMesh(UStaticMesh* NewMesh);
 
-	/** 새 파츠를 무기에 추가: DA의 WeaponParts1P에 (Mesh, Socket=None, Offset=identity) 항목을 append하고 프리뷰
+	/** 새 파츠를 무기에 추가: DA의 WeaponParts에 (Mesh, Socket=None, Offset=identity) 항목을 append하고 프리뷰
 	 *  컴포넌트를 바디 위치에 생성·선택한다(인메모리만; DA 저장은 "조립→저장"이 담당). 디자이너가 기즈모로 위치를 잡은
 	 *  뒤 베이크하면 소켓이 구워진다. DA/메시가 없으면 아무 것도 하지 않는다. */
 	void AddPart(UStaticMesh* Mesh);
 
-	/** 선택된 파츠를 제거: 프리뷰 컴포넌트와 DA의 WeaponParts1P[SelectedPart]를 함께 제거하고 선택을 해제한다(인덱스
+	/** 선택된 파츠를 제거: 프리뷰 컴포넌트와 DA의 WeaponParts[SelectedPart]를 함께 제거하고 선택을 해제한다(인덱스
 	 *  정합 유지). 소켓 정리는 재베이크가 담당(BakeSockets가 SOCKET_Mount_*를 전부 지우고 다시 굽는다). */
 	void RemoveSelectedPart();
 
@@ -121,7 +121,7 @@ private:
 	/** Preview body (SkeletalMeshComponent), added to the preview scene at identity with no attach parent. */
 	USkeletalMeshComponent* BodyComp = nullptr;
 
-	/** Index-aligned to WeaponDA->WeaponParts1P: one unparented StaticMeshComponent per part, added to the preview
+	/** Index-aligned to WeaponDA->WeaponParts: one unparented StaticMeshComponent per part, added to the preview
 	 *  scene at the part's initial world transform (component-space == Body-relative, since Body sits at identity). */
 	TArray<UStaticMeshComponent*> PartComps;
 
@@ -136,9 +136,9 @@ private:
 	/** "선택만 보기" 토글 상태. See SetIsolate/UpdatePartVisibility. */
 	bool bIsolate = false;
 
-	/** 단계 미리보기 중인 슬롯(PartComps/WeaponParts1P 인덱스). INDEX_NONE = 미리보기 중이 아님. See BeginStagePreview/EndStagePreview. */
+	/** 단계 미리보기 중인 슬롯(PartComps/WeaponParts 인덱스). INDEX_NONE = 미리보기 중이 아님. See BeginStagePreview/EndStagePreview. */
 	int32 PreviewStageSlot = INDEX_NONE;
-	/** PreviewStageSlot의 진화 단계 인덱스(WeaponParts1P[PreviewStageSlot].Stages 기준). */
+	/** PreviewStageSlot의 진화 단계 인덱스(WeaponParts[PreviewStageSlot].Stages 기준). */
 	int32 PreviewStageIndex = INDEX_NONE;
 	/** 미리보기 시작 시 캡처한 base 컴포넌트의 월드 트랜스폼 — stage.Offset은 이 프레임 기준 상대값이다. */
 	FTransform PreviewStageBaseXf = FTransform::Identity;

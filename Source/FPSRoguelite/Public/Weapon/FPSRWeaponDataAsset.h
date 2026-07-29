@@ -291,29 +291,42 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|카드", meta = (DisplayName = "전체무기 카드 제외 스탯"))
 	TArray<EFPSRWeaponStat> AllWeaponsStatExclusions;
 
-	// --- 1P visual / cosmetic (Game.MD §2-9, V0) — all soft refs, null = no visual (no gameplay effect) ---
+	// --- Weapon visual / cosmetic (ADR 0002 True First Person) — all soft refs, null = no visual (no gameplay effect).
+	//     ONE set of meshes serves both the owner and remote observers: the weapon hangs off the single body mesh at
+	//     WeaponAttachSocket, so there is no 1P/3P duplication to keep in sync (the old 3P block was never authored). ---
 
-	/** First-person weapon skeletal mesh (firearms). Attached to the character's FirstPersonArms on equip. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|1인칭 메시", meta = (DisplayName = "1P 무기 메시(스켈)"))
-	TSoftObjectPtr<USkeletalMesh> WeaponMesh1P;
+	/** Weapon skeletal mesh (firearms). Attached to the body mesh at WeaponAttachSocket on equip. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|메시", meta = (DisplayName = "무기 메시(스켈)"))
+	TSoftObjectPtr<USkeletalMesh> WeaponMesh;
 
-	/** First-person weapon static mesh (e.g. melee knife). Used when WeaponMesh1P is unset. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|1인칭 메시", meta = (DisplayName = "1P 무기 메시(스태틱/근접)"))
-	TSoftObjectPtr<UStaticMesh> WeaponMeshStatic1P;
+	/** Weapon static mesh (e.g. melee knife). Used when WeaponMesh is unset. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|메시", meta = (DisplayName = "무기 메시(스태틱/근접)"))
+	TSoftObjectPtr<UStaticMesh> WeaponMeshStatic;
 
-	/** Optional per-weapon arms anim instance applied to FirstPersonArms on equip (the pack has per-weapon arm anims). */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|1인칭 메시", meta = (DisplayName = "팔 AnimBP"))
-	TSoftClassPtr<UAnimInstance> ArmsAnimInstanceClass;
-
-	/** Optional per-weapon anim instance applied to the 1P WEAPON mesh (WeaponMesh1P) on equip. The weapon has its OWN
-	 *  skeleton (SKEL_LPAMG_<W>), so its bolt/magazine (A_FP_WEP_<W>_*) needs its own AnimBP to play WeaponFire/
-	 *  ReloadMontage below. Only applied to skeletal weapons; null = no bolt animation (null-safe). */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|1인칭 메시", meta = (DisplayName = "무기 AnimBP"))
+	/** Optional per-weapon anim instance applied to the WEAPON mesh on equip. The weapon has its OWN skeleton, so its
+	 *  bolt/magazine animation needs its own AnimBP to play WeaponFire/ReloadMontage below. Only applied to skeletal
+	 *  weapons; null = no bolt animation (null-safe). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|메시", meta = (DisplayName = "무기 AnimBP"))
 	TSoftClassPtr<UAnimInstance> WeaponAnimInstanceClass;
 
-	/** Socket on FirstPersonArms the weapon mesh attaches to (NAME_None = arms component root). */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|1인칭 메시", meta = (DisplayName = "무기 부착 소켓(팔)"))
+	/** Socket on the BODY skeleton the weapon attaches to (NAME_None = body mesh root). Authored on the character's
+	 *  skeleton at the grip hand — see ADR 0002 (Blu: SOCKET_Weapon on hand_R). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|메시", meta = (DisplayName = "무기 부착 소켓(바디)"))
 	FName WeaponAttachSocket = NAME_None;
+
+	/** Uniform scale applied to the weapon when attached to the body. The animation pack is authored for realistic
+	 *  human proportions, so a stylised character needs the weapon shrunk to stay in reach of BOTH hands — the value is
+	 *  a property of the weapon/character pairing, not of the mesh (ADR 0002: Blu + Synty rifle = 0.85, measured against
+	 *  the tightest animation). 1.0 = no scaling. The attach uses SnapToTargetNotIncludingScale, so the socket's own
+	 *  scale is ignored and this is the single place the size is decided. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|메시", meta = (DisplayName = "무기 부착 스케일", ClampMin = "0.1", ClampMax = "3.0"))
+	float WeaponAttachScale = 1.0f;
+
+	/** Socket marking where the LEFT hand grips this weapon (left-hand IK). Like AimSocket it may live on a PART (the
+	 *  handguard) rather than the receiver, so the character resolves whichever part carries it — swapping the handguard
+	 *  then moves the grip with it. NAME_None = no left-hand IK for this weapon (melee / one-handed / unarmed). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|메시", meta = (DisplayName = "왼손 그립 소켓"))
+	FName LeftHandSocket = NAME_None;
 
 	/** Socket on the WEAPON mesh used as the muzzle-flash origin (cosmetic only; trace origin stays the camera). */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|발사 연출", meta = (DisplayName = "총구 소켓(화염 원점)"))
@@ -422,7 +435,7 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|애니 몽타주", meta = (DisplayName = "발사 몽타주(팔)"))
 	TSoftObjectPtr<UAnimMontage> FireMontage;
 
-	/** Optional montage played on the WEAPON mesh (WeaponMesh1P) each shot — the bolt/action cycle (A_FP_WEP_<W>_Fire).
+	/** Optional montage played on the WEAPON mesh (WeaponMesh) each shot — the bolt/action cycle (A_FP_WEP_<W>_Fire).
 	 *  Played on the same fire hook as FireMontage so the bolt syncs with the arm recoil. Needs WeaponAnimInstanceClass
 	 *  set. Null = no bolt animation (null-safe). */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|애니 몽타주", meta = (DisplayName = "발사 몽타주(무기/노리쇠)"))
@@ -433,7 +446,7 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|애니 몽타주", meta = (DisplayName = "재장전 몽타주(팔)"))
 	TSoftObjectPtr<UAnimMontage> ReloadMontage;
 
-	/** Optional montage played on the WEAPON mesh (WeaponMesh1P) on reload — the magazine/bolt action (A_FP_WEP_<W>_
+	/** Optional montage played on the WEAPON mesh (WeaponMesh) on reload — the magazine/bolt action (A_FP_WEP_<W>_
 	 *  Reload). Played on the same reload hook as ReloadMontage, rate-scaled to the ReloadTime. Needs
 	 *  WeaponAnimInstanceClass set. Null = no weapon reload animation (null-safe). */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|애니 몽타주", meta = (DisplayName = "재장전 몽타주(무기)"))
@@ -459,36 +472,24 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|발사파츠 반동", meta = (DisplayName = "반동 커브"))
 	FName FirePartRecoilCurve = FName("CHRecoil");
 
-	/** Optional modular cosmetic part slots child-attached to the 1P skeletal weapon mesh on equip (U15, W-U1b 재설계).
-	 *  Static/melee weapons and empty lists attach nothing (null-safe). Parts inherit the weapon mesh's OnlyOwnerSee
-	 *  visibility. Each slot is either purely structural (no EvolutionFragment) or evolves in place (스택 진화 —
-	 *  FFPSRWeaponPartAttachment.Stages) while its Socket stays fixed. Read-only cosmetic: never touches
+	/** Optional modular cosmetic part slots child-attached to the skeletal weapon mesh on equip (U15, W-U1b 재설계).
+	 *  Static/melee weapons and empty lists attach nothing (null-safe). Parts are visible to everyone, same as the
+	 *  weapon they hang off (ADR 0002 — they used to be OnlyOwnerSee). Each slot is either purely structural (no
+	 *  EvolutionFragment) or evolves in place (스택 진화 — FFPSRWeaponPartAttachment.Stages) while its Socket stays
+	 *  fixed. A part may also carry AimSocket / LeftHandSocket, which is why swapping a sight or a handguard moves the
+	 *  ADS reference and the left-hand grip with it. Read-only cosmetic: never touches
 	 *  gameplay/cards/save/replication (§2-A). */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|모듈 파츠", meta = (DisplayName = "1P 파츠 슬롯(구조/진화)"))
-	TArray<FFPSRWeaponPartAttachment> WeaponParts1P;
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|모듈 파츠", meta = (DisplayName = "파츠 슬롯(구조/진화)"))
+	TArray<FFPSRWeaponPartAttachment> WeaponParts;
 
 	/** Cascade muzzle-flash particle spawned at MuzzleSocket each shot (owner-client local). */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|발사 연출", meta = (DisplayName = "총구 화염 파티클"))
 	TSoftObjectPtr<UParticleSystem> MuzzleFlash;
 
-	// --- 3P visual / cosmetic (U19 — teammate co-op visibility) — all soft refs, null = no 3P visual (no gameplay
-	//     effect). Rendered on the 3P body mesh (GetMesh(), SetOwnerNoSee) for REMOTE observers; the owner sees only 1P. ---
-
-	/** Third-person weapon skeletal mesh, attached to the 3P body hand socket on equip. Null = no 3P weapon. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|3인칭", meta = (DisplayName = "3P 무기 메시"))
-	TSoftObjectPtr<USkeletalMesh> WeaponMesh3P;
-
-	/** Socket on the 3P BODY skeleton the WeaponMesh3P attaches to (NAME_None = body mesh root). */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|3인칭", meta = (DisplayName = "3P 부착 소켓(바디)"))
-	FName WeaponAttachSocket3P = NAME_None;
-
-	/** Montage played on the 3P body each shot for remote observers (MulticastFireCosmetics remote branch). Null = none. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|3인칭", meta = (DisplayName = "3P 발사 몽타주"))
-	TSoftObjectPtr<UAnimMontage> FireMontage3P;
-
-	/** Montage played on the 3P body on reload start for remote observers (OnRep_Reloading remote branch). Null = none. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|3인칭", meta = (DisplayName = "3P 재장전 몽타주"))
-	TSoftObjectPtr<UAnimMontage> ReloadMontage3P;
+	// --- The old 3P visual block (U19: WeaponMesh3P / WeaponAttachSocket3P / FireMontage3P / ReloadMontage3P) is gone.
+	//     ADR 0002 unified it into the block above: everyone sees the same mesh and the same montages, so the owner and
+	//     remote observers can no longer drift apart. Nothing was lost — a survey of all 9 weapon DataAssets found the
+	//     3P fields had never been authored (which is why teammates' weapons were invisible until now). ---
 
 	/** Crosshair style (preferred). When set, this style's Material + dynamic flag drive the HUD crosshair,
 	 *  overriding the legacy CrosshairMaterial / bUseDynamicCrosshair below (those remain as a fallback used

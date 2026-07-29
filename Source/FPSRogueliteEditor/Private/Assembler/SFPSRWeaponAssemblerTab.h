@@ -38,7 +38,7 @@ public:
 
 private:
 	/** One row of the left-panel parts list: the representative (variant-stripped) part name shown to the designer,
-	 *  index-aligned to the viewport client's PartComps / the weapon DA's WeaponParts1P. */
+	 *  index-aligned to the viewport client's PartComps / the weapon DA's WeaponParts. */
 	struct FPartRow
 	{
 		FText Label;
@@ -73,7 +73,7 @@ private:
 
 	// --- Available parts catalog (SListView<FAvailPartRow>) --------------------------------------------------------
 
-	/** Rebuilds AvailPartRows: takes the folder of the current weapon DA's first non-null WeaponParts1P[].Part and
+	/** Rebuilds AvailPartRows: takes the folder of the current weapon DA's first non-null WeaponParts[].Part and
 	 *  asset-registry-scans that folder (non-recursive) for UStaticMesh assets. No weapon / no non-null part =>
 	 *  empty list. Called from OnWeaponAssetChanged so the catalog always matches the loaded weapon. */
 	void RefreshAvailableParts();
@@ -125,7 +125,7 @@ private:
 
 	// --- Evolution authoring panel (선택 슬롯의 진화 카드 + 진화 단계 목록, W-U1b 저작 UI) --------------------------------
 
-	/** 진화 단계 리스트뷰의 한 행: 선택 슬롯(DA->WeaponParts1P[Sel]) Stages 배열의 인덱스만 들고 있는 얇은 미러. */
+	/** 진화 단계 리스트뷰의 한 행: 선택 슬롯(DA->WeaponParts[Sel]) Stages 배열의 인덱스만 들고 있는 얇은 미러. */
 	struct FStageRow
 	{
 		int32 StageIndex = INDEX_NONE;
@@ -242,7 +242,7 @@ private:
 	/** The catalog row currently single-click-selected (drives the "교체" button + IsSwapEnabled). Reset on weapon change. */
 	TSharedPtr<FAvailPartRow> SelectedAvailPart;
 
-	/** 선택 슬롯(DA->WeaponParts1P[Sel].Stages)의 미러 — RefreshStageList가 재구성. */
+	/** 선택 슬롯(DA->WeaponParts[Sel].Stages)의 미러 — RefreshStageList가 재구성. */
 	TArray<TSharedPtr<FStageRow>> StageRows;
 	TSharedPtr<SListView<TSharedPtr<FStageRow>>> StageListView;
 	/** 진화 단계 리스트에서 현재 선택된 행("− 단계 제거" 활성 조건). */
