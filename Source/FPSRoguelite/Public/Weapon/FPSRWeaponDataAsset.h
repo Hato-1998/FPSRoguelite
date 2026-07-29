@@ -367,11 +367,13 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|조준(ADS)", meta = (DisplayName = "조준 정렬 회전 오프셋", EditConditionHides, EditCondition = "bADSAlignRotation"))
 	FRotator ADSAimRotationOffset = FRotator::ZeroRotator;
 
-	/** While aiming, suppress the fire recoil montages (arm kick + weapon bolt): they animate the arms/weapon and fight
-	 *  the procedural ADS sight-centering (UpdateAimDownSights re-solves each frame), reading as sight shake. The shot
-	 *  still reads via muzzle flash + sound + camera recoil. Default true. Only affects ADS weapons (BaseStats.bHasADS)
-	 *  while aiming — hip fire and non-ADS weapons keep the full recoil montage. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|조준(ADS)", meta = (DisplayName = "조준 중 발사몽타주 억제(팔)"))
+	/** While aiming, suppress the BODY fire recoil montage for the owner. Under the old camera-parented arms this was a
+	 *  correctness fix (the montage moved the sight); since ADR 0002 places the weapon against the camera in ADS, upper-
+	 *  body recoil can no longer disturb the reticle, so this is now purely "do I want to watch my own body buck while
+	 *  aiming". Owner-local — remote observers always see the recoil, so false is the setting that matches them. The
+	 *  shot still reads via muzzle flash + sound + camera recoil. Only affects ADS weapons (BaseStats.bHasADS) while
+	 *  aiming — hip fire and non-ADS weapons keep the full recoil montage. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|조준(ADS)", meta = (DisplayName = "조준 중 발사몽타주 억제(바디)"))
 	bool bSuppressFireMontagesWhileADS = true;
 
 	/** ADS stabilization knob: how much of the aim pose's animated positional bob is allowed through while aiming.
@@ -384,7 +386,7 @@ public:
 
 	/** While aiming, suppress the WEAPON bolt/action montage too. Default false: the bolt keeps cycling in ADS as fire
 	 *  feedback (it animates the bolt bone, not the sight, so the reticle holds). Set true only for a weapon whose bolt
-	 *  montage visibly disturbs the aimed sight. Independent of bSuppressFireMontagesWhileADS (which gates the ARM montage). */
+	 *  montage visibly disturbs the aimed sight. Independent of bSuppressFireMontagesWhileADS (which gates the BODY montage). */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|조준(ADS)", meta = (DisplayName = "조준 중 노리쇠몽타주 억제"))
 	bool bSuppressWeaponBoltWhileADS = false;
 
@@ -423,27 +425,31 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|조준(ADS)", meta = (DisplayName = "조준 중 총구화염 크기(0=끔)", ClampMin = "0.0", ClampMax = "1.0"))
 	float ADSMuzzleFlashScale = 0.35f;
 
-	/** 1P 절차 무기 모션(힙) — 살아있는 총 코스메틱(룩스웨이·걷기밥·발사킥). ADS 진입 시 페이드아웃. owner-local·복제0. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|1인칭 절차 무기모션(힙)", meta = (DisplayName = "힙 절차 무기모션 프로파일"))
+	/** 절차 무기 모션(힙) — 살아있는 총 코스메틱(룩스웨이·걷기밥·발사킥). ADS 진입 시 페이드아웃. owner-local·복제0.
+	 *  ⚠ True First Person(ADR 0002) 이후: 이 레이어는 무기만 움직이고 무기를 쥔 손은 안 움직인다 → 값이 크면 총이 손에서
+	 *  뜬다. 힙 움직임은 바디 애니가 맡는 것이 원칙. 기본값(전부 0) = 이 레이어 없음. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|절차 무기모션(힙)", meta = (DisplayName = "힙 절차 무기모션 프로파일"))
 	FFPSRProceduralWeaponMotionProfile ProceduralWeaponMotion;
 
-	/** Optional montage played on the arms when this weapon is equipped. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|애니 몽타주", meta = (DisplayName = "장착 몽타주(팔)"))
+	/** Optional montage played on the BODY when this weapon is equipped. Plays on every machine (one mesh, one anim
+	 *  graph — ADR 0002 invariant 4), so remote observers see the swap too. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|애니 몽타주", meta = (DisplayName = "장착 몽타주(바디)"))
 	TSoftObjectPtr<UAnimMontage> EquipMontage;
 
-	/** Optional montage played on the arms each shot (owner-client local feel). */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|애니 몽타주", meta = (DisplayName = "발사 몽타주(팔)"))
+	/** Optional montage played on the BODY each shot. Owner plays it locally (PlayWeaponFireCosmetics, subject to
+	 *  bSuppressFireMontagesWhileADS); remote observers get the same montage via MulticastFireCosmetics. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|애니 몽타주", meta = (DisplayName = "발사 몽타주(바디)"))
 	TSoftObjectPtr<UAnimMontage> FireMontage;
 
 	/** Optional montage played on the WEAPON mesh (WeaponMesh) each shot — the bolt/action cycle (A_FP_WEP_<W>_Fire).
-	 *  Played on the same fire hook as FireMontage so the bolt syncs with the arm recoil. Needs WeaponAnimInstanceClass
+	 *  Played on the same fire hook as FireMontage so the bolt syncs with the body recoil. Needs WeaponAnimInstanceClass
 	 *  set. Null = no bolt animation (null-safe). */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|애니 몽타주", meta = (DisplayName = "발사 몽타주(무기/노리쇠)"))
 	TSoftObjectPtr<UAnimMontage> WeaponFireMontage;
 
-	/** Optional montage played on the arms on reload start (owner-client 1P). Driven by UFPSRWeaponInstance's
+	/** Optional montage played on the BODY on reload start, for owner and remotes alike. Driven by UFPSRWeaponInstance's
 	 *  OnRep_Reloading (server-confirmed edge), scaled so its play length matches the resolved ReloadTime. Null = none. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|애니 몽타주", meta = (DisplayName = "재장전 몽타주(팔)"))
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|애니 몽타주", meta = (DisplayName = "재장전 몽타주(바디)"))
 	TSoftObjectPtr<UAnimMontage> ReloadMontage;
 
 	/** Optional montage played on the WEAPON mesh (WeaponMesh) on reload — the magazine/bolt action (A_FP_WEP_<W>_

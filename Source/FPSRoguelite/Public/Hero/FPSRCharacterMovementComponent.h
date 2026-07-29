@@ -26,7 +26,7 @@ enum EFPSRCustomMovementMode : uint8
  * Player locomotion component — the SINGLE OWNER of the player's movement state (ADR 0001 invariant 1).
  *
  * Nothing outside this component decides what locomotion state the player is in. The character forwards INPUT INTENT
- * (crouch pressed/released) and everything else — firing, the arms AnimBP, the HUD — only QUERIES this component
+ * (crouch pressed/released) and everything else — firing, the body AnimBP, the HUD — only QUERIES this component
  * through the small read-only surface below. That one-way dependency is what keeps a new locomotion state from
  * rippling into the weapon code (invariant 4).
  *
@@ -67,7 +67,7 @@ public:
 	UFUNCTION(BlueprintPure, Category = "FPSR|Movement")
 	float GetSpreadMultiplier() const;
 
-	/** True while sliding. For the arms AnimBP and the HUD — presentation only; nothing may drive state off this. */
+	/** True while sliding. For the body AnimBP and the HUD — presentation only; nothing may drive state off this. */
 	UFUNCTION(BlueprintPure, Category = "FPSR|Movement")
 	bool IsSliding() const { return bIsSliding; }
 

@@ -6,31 +6,38 @@
 
 **최종 갱신: 2026-07-29**
 
-## 🎯 True First Person 전환 = ⏳A단계 완료 / **B·C·4단계 인계** (2026-07-29, `refactor/character`)
+## 🎯 True First Person 전환 = ⏳A·B·C 코드 완료 / **3·4단계 인계** (2026-07-29, `refactor/character`)
 > **설계 = [ADR 0002](Docs/Architecture/0002-true-first-person-shared-animation.md)** — 새 세션은 **ADR 0002 전문을 먼저 읽을 것**(불변식 10개 + 실측 + 기각안이 전부 거기 있다). 아래는 진행 상태만.
 > 목표 = 1인칭·3인칭을 **3P 애니 팩 한 벌**(`Content/Rifle_01`)로 덮기. 1P 전용 팔 + PWAS 폐기.
 
-### 완료 (커밋 4개)
+### 완료 (커밋 5개)
 | 커밋 | 내용 |
 |---|---|
 | `ab9fede3` | ADR 0002 작성 — 축 4개 결정(시각 회전 분리 / 눈 앵커 / ADS 혼합 / 관전자 소유 리그) + 불변식 10 |
 | `f678ba10` | Rifle_01 팩(310MB, LFS) + IK Rig 2개 + Retargeter + 리타게팅 4종. **무기 스케일 85% 확정** |
 | `ffe45a21` | **A단계** — 무기 DA 1P/3P 필드 통합, `WeaponAttachScale`·`LeftHandSocket` 추가, 3P 블록 삭제. 빌드 통과 |
 | `11d8db05` | ADR 갱신 — 1인칭 실측으로 **ADS 정렬 방식 재결정**(아래) |
+| (이 커밋) | **B+C단계** — 무기 컴포넌트 단일화 + 머리 숨김 + ADS 무기-to-카메라 + 왼손 IK 이음매. 빌드 3회 통과 · Codex 1건 반영 |
 
-### ⚠️ 다음 세션이 알아야 할 반전 하나
+### ⚠️ 알아야 할 반전 하나 (B+C가 이걸 구현했다)
 **축 3의 "ADS = 애니 포즈 + 잔여 오차 보정"은 폐기됐다.** 실제 눈 위치에서 재보니 조준경이 **가로 +29.7° / 세로 −27.1°** 로 ADS 화면(±27.5°/±16°) **밖**이다. 보정이 아니라 재배치가 필요하다.
-→ **ADS 중 무기를 카메라 기준으로 재배치**(사용자 안 채택). 기존 `UpdateAimDownSights` 역산 수식을 그대로 쓰고 **대상만 팔 → 무기**로 바꾼다. 원격은 변화 없음(`hand_R` + 조준 애니). **두 손 모두 ADS 화면 밖이라 손 숨김 불필요.**
+→ **ADS 중 무기를 카메라 기준으로 재배치**(사용자 안 채택). 기존 `UpdateAimDownSights` 역산 수식을 그대로 쓰고 **대상만 팔 → 무기**로 바꿨다. 원격은 변화 없음(`hand_R` + 조준 애니). **두 손 모두 ADS 화면 밖이라 손 숨김 불필요.**
 → 불변식 4에 예외 명시됨(ADS 중 무기 부착점만 로컬이 다름). **예외를 두 번째로 늘리려 하면 불변식 4 자체를 다시 볼 것.**
 
-### 다음 코드 작업 = B+C (한 커밋. 분리 불가 — 팔을 지우면 `UpdateAimDownSights`가 컴파일 안 됨)
-`Source/FPSRoguelite/{Public,Private}/Hero/FPSRCharacter.{h,cpp}` 중심:
-1. **컴포넌트 단일화** — `FirstPersonArms`·`WeaponMesh1P`·`WeaponMeshStatic1P` 제거 → 단일 `WeaponMesh`/`WeaponMeshStatic`. 부착 = `GetMesh()`의 **`SOCKET_Weapon`**(Blu 스켈레톤에 저작 완료), `WeaponAttachScale`(라이플 0.85) 적용. 현재 부착 규칙이 `SnapToTargetNotIncludingScale`라 소켓 스케일은 무시된다
-2. **가시성** — 바디 `SetOwnerNoSee(true)` 제거 · 파츠 컴포넌트 `SetOnlyOwnerSee(true)`(`FPSRCharacter.cpp:1473` 부근) 제거 · **`HideBoneByName("head")`** 로 로컬만 머리 숨김. 조건은 "로컬 플레이어인가"가 아니라 **"이 폰의 눈으로 보고 있는가"**(불변식 5, `CalcCamera`의 `IsLocallyControlled()` 분기와 같은 판정). 본 이름은 코드에 박지 말 것(불변식 9)
-3. **`UpdateAimDownSights`** — 상태 기계(ADS 알파·스웨이 위상·킥 감쇠·바브 위상)는 **그대로 보존**, 마지막 `FirstPersonArms->SetRelativeLocationAndRotation` 한 줄만 무기 대상으로 교체. 적용 지점을 한 곳으로 모아둘 것(㉰-a 무기 ↔ ㉰-b `hand_R`+양팔 IK 전환이 한 줄이 되게)
-4. **왼손 IK 이음매** — `LeftHandSocket`을 가진 파츠를 런타임에 찾는다. **기존 `CachedAimSocket`/`CachedAimComponent` 해석 로직(`RefreshWeaponPartComponents`)을 그대로 미러링**하면 된다 + BlueprintPure getter (4단계 AnimBP가 소비)
+### B+C단계에서 실제로 한 것 (`FPSRCharacter.{h,cpp}` 중심 + 무기 4파일)
+1. **컴포넌트 단일화** — `FirstPersonArms`·`WeaponMesh1P`·`WeaponMeshStatic1P` → `WeaponMesh`/`WeaponMeshStatic` 2개. 부착 = `GetMesh()`의 `SOCKET_Weapon`, **`SnapToTargetNotIncludingScale` + `SetRelativeScale3D(WeaponAttachScale)`**(스케일 규칙이 KeepWorld라 부착만으론 크기가 안 붙는다 — 명시 호출이 필요). 그림자 끄기 삭제(이제 월드 오브젝트). `RefreshFirstPersonWeaponVisual` → **`RefreshEquippedWeaponVisual`로 개명**(더는 1인칭 전용이 아님)
+2. **가시성** — 바디 `SetOwnerNoSee` · 파츠 `SetOnlyOwnerSee` 제거. 신규 `UpdateFirstPersonBodyVisibility()`(캐릭터 Tick)가 **뷰 타겟 == this 일 때만** `HideBoneByName`. 본 이름 = `HeadBoneName`(EditDefaultsOnly, 기본 `head`) + **없는 본이면 경고 로그**(엔진은 조용히 무시한다 — 불변식 9의 함정을 실제로 막음)
+3. **`UpdateAimDownSights`** — 상태 기계 전부 보존, 대상만 무기로. 힙 기준이 "BeginPlay에 캡처한 팔 자세" → **매 프레임 읽는 그립 소켓**으로 바뀌었고, 모든 프레임 계산을 **스케일 제거(RigidFrame)** 후에 한다(0.85가 소켓 오프셋까지 줄여서 조준경이 덜 나가는 것 방지). 마지막 쓰기 1줄 = `SetWorldLocationAndRotation`(부모가 움직이는 손이라 상대 쓰기는 손 흔들림이 다시 섞인다). **㉰-b(hand_R+양팔 IK)로 갈아타는 건 이 1줄의 대상만 바꾸면 된다**
+4. **왼손 IK 이음매** — `CachedLeftHandSocket`/`CachedLeftHandComponent`(파츠 해석은 AimSocket과 동일 형태) + `GetLeftHandGripTransform(FTransform& Out) → bool`(BlueprintPure, **월드 공간**, 소켓 없으면 false = 불펍 null-safe)
+5. **곁다리(단일화의 직접 결과)** — 몽타주가 전부 바디 1벌로 합쳐짐(장착·발사·재장전, 소유자/원격 동일). `MulticastFireCosmetics`의 **총구 화염·노리쇠 몽타주 관전자 전용 게이트 해제** — "1P 무기가 원격에 안 보여서 아군 머릿속에 화염이 뜬다"는 이유가 사라졌다(이제 아군 사격이 보인다)
 
-**그다음 = 4단계 AnimBP**(하체 요 오프셋 + Aim Offset + 왼손 Two Bone IK + 슬라이드). 3단계(나머지 애니 리타게팅)는 `Root_Motion` 348개 제외하고 실사용분만.
+### 🚨 4단계 전에 반드시 먼저 할 것 (Codex 지적, 이번 커밋에선 주석으로만 막아둠)
+**`IsAiming()`은 소유 클라 + 서버에서만 참이다.** `WeaponFire->bIsAiming`은 `ServerSetAiming`까지만 가고 **다른 클라로 복제되지 않는다**. 팔 AnimBP(소유자 전용)일 때는 무해했지만, **바디 AnimBP는 모든 머신에서 돈다** → 이걸로 조준 포즈를 몰면 **원격 플레이어는 영원히 조준을 안 한 몸**이 된다(불변식 4가 금지하는 바로 그 어긋남).
+→ **4단계에서 조준 포즈를 배선하기 전에 표현용 조준 비트를 복제할 것**(Push Model + `COND_SkipOwner` 권장, 컴포넌트 복제를 켜야 함 = 새 복제 프로퍼티라 승인 대상). 이번 커밋은 범위(B+C) 밖이라 **헤더 경고 주석만** 넣었다.
+
+### 3·4단계 (다음)
+- **3단계** = 나머지 애니 리타게팅(`Root_Motion` 348개 제외, 실사용분만)
+- **4단계** = AnimBP(하체 요 오프셋 + Aim Offset + 왼손 Two Bone IK + 슬라이드). 위 조준 복제가 선행
 
 ### 블로커 / 주의
 - **빌드 1회 ≈ 10분.** `-NoXGE` 사용. 에디터 떠 있으면 Live Coding 락으로 실패 → 먼저 종료
@@ -43,6 +50,8 @@
 ### 미커밋 콘텐츠 (사용자 작업 영역 — 커밋하지 않음)
 - `Content/Maps/L_MainMenu.umap` · `Content/Maps/TestWorld.umap` — 둘 다 **커밋본과 내용 동일**(크기 일치, 프리뷰 액터 잔재 0 확인). UE 재저장 바이너리 churn만 남음. 되돌리려면 에디터 종료 후 `git checkout -- Content/Maps/`
 - **사용자 남은 콘텐츠 작업**: 무기 DA 9개에 `WeaponAttachScale`(라이플 0.85)·`LeftHandSocket`(`SOCKET_LeftHand`) 채우기 + PWAS 참조 비우기(`DA_Weapon_Rifle`/`SMG`의 `WeaponAnimInstanceClass`·`ReloadMontage`) → 그 뒤 `Content/ProceduralWeaponAnimationSystem` 폴더 삭제 (순서 중요: DA 먼저)
+  - ⚠ **PWAS 참조 비우기가 B+C 이후 더 급해졌다**: `ReloadMontage`(PWAS 팔 스켈레톤용)가 이제 **Blu 바디 메시에서 재생**된다 → 스켈레톤 불일치로 재생 거부 + 경고 로그(크래시는 아님). `WeaponAnimInstanceClass`(PWAS 팔 ABP)도 무기 메시에 얹혀 같은 형태로 실패한다
+- **에디터 첫 실행 시 예상되는 것**: `BP_FPSRPlayer`에 `FirstPersonArms`·`WeaponMesh1P`·`WeaponMeshStatic1P` **고아 컴포넌트 기록**이 남아 경고가 뜬다(A단계의 `WeaponMesh3P`와 같은 형태 — 무해, BP 재저장하면 정리됨). 새 `WeaponMesh`/`WeaponMeshStatic`은 C++ 기본값으로 시작하니 **BP에서 손으로 맞췄던 옛 상대 트랜스폼은 사라진다**(의도 — 정렬 주체가 이제 `SOCKET_Weapon`이다). 폐기 에셋 `Content/Character/FPArms`(+`SK_FP_Manny_Simple`)는 참조가 0이 되므로 정리 대상
 
 ## 🌬️ 에어 스트레이프 = ✅코드 완료 / ⏳PIE 대기 (2026-07-29, `refactor/character`)
 > 사용자 요청 = "체공 상태 조작이 거의 안 된다" → 대화 중 목표가 **에어 스트레이프**(FPS 유저 기술)로 특정됨.

@@ -553,7 +553,7 @@ void UFPSRWeaponFireComponent::TickComponent(float DeltaTime, ELevelTick TickTyp
 		CachedCamera->FieldOfView = FMath::FInterpTo(CachedCamera->FieldOfView, TargetFOV, DeltaTime, FMath::Max(0.01f, Stats.ADSInterpSpeed));
 	}
 
-	// Procedural aim-down-sights arm offset (owner-local) — the character owns the 1P arms; drive it from this tick
+	// Procedural aim-down-sights weapon placement (owner-local) — the character owns the weapon meshes; drive it from this tick
 	// (the character's own Tick is debug-only / disabled in shipping). Mirrors the FOV interp above.
 	if (AFPSRCharacter* Char = Cast<AFPSRCharacter>(OwnerPawn))
 	{

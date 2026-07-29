@@ -13,7 +13,7 @@ void UFPSRWeaponAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 {
 	Super::NativeUpdateAnimation(DeltaSeconds);
 
-	// Data-driven fire-part recoil: the weapon fire montage (played on WeaponMesh1P by PlayWeaponFireCosmetics) carries
+	// Data-driven fire-part recoil: the weapon fire montage (played on WeaponMesh by PlayWeaponFireCosmetics) carries
 	// the recoil curve; scale the injected axis by curve x distance so the AnimBP's ModifyBone kicks the part back per
 	// shot. No curve / zero distance = no-op (offset stays zero) for weapons with no moving fire part.
 	if (FirePartRecoilCurveName.IsNone() || FMath::IsNearlyZero(FirePartRecoilDistanceCm))

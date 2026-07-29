@@ -223,7 +223,7 @@ void UFPSRWeaponInventoryComponent::SetSlotWeapon(int32 SlotIndex, UFPSRWeaponDa
 		}
 		if (AFPSRCharacter* Char = Cast<AFPSRCharacter>(GetOwner()))
 		{
-			Char->RefreshFirstPersonWeaponVisual();
+			Char->RefreshEquippedWeaponVisual();
 		}
 		if (const UWorld* World = GetWorld())
 		{
@@ -338,7 +338,7 @@ void UFPSRWeaponInventoryComponent::EquipSlot(int32 SlotIndex)
 
 	if (AFPSRCharacter* Char = Cast<AFPSRCharacter>(GetOwner()))
 	{
-		Char->RefreshFirstPersonWeaponVisual();
+		Char->RefreshEquippedWeaponVisual();
 	}
 
 	// Impose a minimum post-swap cooldown before the next shot. A reset to 0 would let a rapid A->B->A swap re-fire
@@ -431,7 +431,7 @@ void UFPSRWeaponInventoryComponent::OnRep_CurrentSlotIndex()
 
 	if (AFPSRCharacter* Char = Cast<AFPSRCharacter>(GetOwner()))
 	{
-		Char->RefreshFirstPersonWeaponVisual();
+		Char->RefreshEquippedWeaponVisual();
 	}
 
 	// Apply the equipped weapon's walk speed on this machine too. This is the ONLY point a client changes it — the
@@ -456,7 +456,7 @@ void UFPSRWeaponInventoryComponent::OnRep_Slots()
 	}
 	if (AFPSRCharacter* Char = Cast<AFPSRCharacter>(GetOwner()))
 	{
-		Char->RefreshFirstPersonWeaponVisual();
+		Char->RefreshEquippedWeaponVisual();
 	}
 	// Same late-arrival reason as the visual above: CurrentSlotIndex's OnRep may have run while the instance (and so
 	// its Source, which carries WalkSpeed) was still null, leaving the client on the character's default speed.
