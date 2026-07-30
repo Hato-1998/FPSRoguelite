@@ -25,6 +25,7 @@
 | `9edf528d` | **무기 85% 결정의 구멍** — 전량 실측으로 그립 이동안(B) 부활 |
 | `a7fab2e5` | 에임오프셋 포즈 48개를 Mesh Space 애디티브로 선처리 |
 | `324972df` | **AimOffset 4개 도입 + 대각 좌표 16개 정정**(내가 준 좌표표가 틀렸다 — 아래) |
+| `7d5fe569` | **4단계 선행** — 조준 상태 복제(Push Model + `COND_SkipOwner`) + 프리즈 래치 결함 수정. 빌드 3회 통과 · Codex 4회 |
 
 ### ✅ PIE 1차 결과 (사용자)
 - **정상**: 앞뒤좌우 시야 · 머리 숨김 · ADS(조준경이 화면 중앙)
@@ -58,9 +59,14 @@
 
 **보류 이유** = 지금 팔이 옆구리에 내려가 있어(`Blu_ABP_Unarmed`) 몸통이 시야를 다 덮는다. 4단계에서 팔이 가슴 앞으로 올라온 뒤 다시 보고 저작 여부 결정 → 헛된 Blender 작업 방지.
 
-### 🚨 4단계 전에 반드시 먼저 할 것 (Codex 지적, 이번 커밋에선 주석으로만 막아둠)
-**`IsAiming()`은 소유 클라 + 서버에서만 참이다.** `WeaponFire->bIsAiming`은 `ServerSetAiming`까지만 가고 **다른 클라로 복제되지 않는다**. 팔 AnimBP(소유자 전용)일 때는 무해했지만, **바디 AnimBP는 모든 머신에서 돈다** → 이걸로 조준 포즈를 몰면 **원격 플레이어는 영원히 조준을 안 한 몸**이 된다(불변식 4가 금지하는 바로 그 어긋남).
-→ **4단계에서 조준 포즈를 배선하기 전에 표현용 조준 비트를 복제할 것**(Push Model + `COND_SkipOwner` 권장, 컴포넌트 복제를 켜야 함 = 새 복제 프로퍼티라 승인 대상). 이번 커밋은 범위(B+C) 밖이라 **헤더 경고 주석만** 넣었다.
+### ✅ 4단계 선행 = 조준 상태 복제 완료 (`bIsAiming` → Push Model + `COND_SkipOwner`)
+`IsAiming()`이 **이제 모든 머신에서 유효하다** — 4단계 AnimBP가 이걸로 조준 포즈를 몰아도 원격 플레이어의 몸이 조준한다. 설계 근거·감수사항·트립와이어 전문 = **[ADR 0002 "조준 비트 복제 — 4단계 선행"](Docs/Architecture/0002-true-first-person-shared-animation.md)**. 요지 4개:
+1. **새 변수 없이 `bIsAiming` 자체를 복제**했다(별 변수 + mux 안 기각 — mux는 SkipOwner가 이미 하는 일이고 진실원천만 2개가 된다). 안전 근거 = 행동 소비자 전수조사에서 **프록시에서 반응하는 코드가 0**(`UpdateAimDownSights`는 이중 게이트, FOV는 무기 tick, GA는 서버·오너, HUD는 로컬).
+2. 대신 **쓰기를 구조적으로 차단** — `SetAiming`이 권위·로컬컨트롤 아닌 호출을 거부한다. 가상의 위험이 아니었다: **`AFPSRPlayerState::OnRep_LifeState`가 "Owning client"라고 적힌 채 프록시에서도 돌고 있었다**(그 가드도 같이 넣음).
+3. **같이 고친 잠재 결함** — 프리즈 클리어 경로가 *이미 프리즈가 켜진 뒤* `SetAiming(false)`를 보내는데 서버가 그걸 거부하고 있었다 → 서버 조준이 true로 래치. 복제 전엔 확산만 틀렸지만 복제 후엔 **원격 바디가 조준 포즈로 굳는다**. 수정 = 게이트를 방향성으로(**조준 ON만 막고 해제는 항상 통과** — 리포 선례 `Input_CrouchReleased`). `OnAim` 훅 게이트는 W1 P3-3 보장 때문에 **원래대로 보존**.
+4. **감수** = 서버가 조준 ON을 거부하면 오너 교정이 안 간다(SkipOwner). 최대 1 RTT이고 **그 낡음을 만든 OnRep이 그대로 클리어를 실행한다**. `COND_None`은 빠른 탭에서 오너 ADS가 깜빡여서 기각.
+
+⚠️ **PIE에서 확인할 것** = `BeginPlay` 방어 로그(`component replication is DISABLED`)가 뜨는지. 뜨면 `BP_FPSRPlayer`의 WeaponFire 컴포넌트에 `Component Replicates` 오버라이드가 저장돼 있다는 뜻이고, 켜 줘야 한다(`bReplicates`는 `EditDefaultsOnly`라 BP가 C++ 기본값을 이긴다).
 
 ### ✅ 3단계 완료 — Rifle_01 426개 Blu 리타게팅 (`d719e6c0`)
 `Content/Characters/Blu/Anims/W2_Rifle/` **426개**(106MB, LFS) = In-Place 346 + Aim_Offset 48 + Holster_Reload_Fire 32. 제외 = Root_Motion 348(ADR 확정)·Split_Jumps 108(보류)·Legacy 11. 기존 97개(`Blu_MF/MM_Rifle_*`)는 접두사가 달라 **무손상**, `_Spike` 4개는 정식본이 생겨 삭제.
@@ -93,15 +99,9 @@
 > **에디터에서 그리드 위 미리보기는 `Ctrl`을 눌러야 움직인다**(엔진 상태바 문구 그대로). 안 움직인다고 에셋 문제로 오판하지 말 것.
 
 ### 🎯 4단계 (다음) = 바디 AnimBP — 여기서부터 시작
-**⛔ 선행 = 조준 상태 복제(위 🚨). 코드이고 새 복제 프로퍼티라 승인 게이트다. 이걸 먼저.**
+**선행(조준 복제)은 위에서 끝났다.** 이제 조준 포즈를 `AFPSRCharacter::IsAiming()`(BlueprintPure)에 그대로 물려도 된다.
 
-선행 작업 구체안(`Source/FPSRoguelite/`):
-- `Public/Weapon/FPSRWeaponFireComponent.h` — `bIsAiming`(현재 평범한 bool, `SetAiming`/`IsAiming` 인라인)을 복제 프로퍼티로. Push Model(`MARK_PROPERTY_DIRTY_FROM_NAME`) + `COND_SkipOwner`(오너는 예측하므로 되돌려받을 필요 없음) + 컴포넌트 복제 켜기(`SetIsReplicatedByDefault(true)`) + `GetLifetimeReplicatedProps` 신설(이 컴포넌트엔 아직 없다)
-- 서버 기입 지점은 이미 있다 — `AFPSRCharacter::ServerSetAiming`(`Private/Hero/FPSRCharacter.cpp`). 오너 로컬 기입은 `Input_ADSPressed/Released`
-- 소비자 = `AFPSRCharacter::IsAiming()`(`FPSRCharacter.cpp` ~456행, **헤더에 경고 주석 있음** — 고치면 그 주석도 갱신)
-- 불변식 8("애니 상태는 복제하지 않는다")과 충돌하지 않는다: 복제하는 건 애니 산출물이 아니라 **입력/게임플레이 상태**이고, 각 클라가 그걸로 자기 포즈를 계산한다
-
-그다음 AnimBP 본체(에디터 작업, 아직 설계 안 됨 — **플랜 필요**):
+AnimBP 본체(에디터 작업, 아직 설계 안 됨 — **플랜 필요**):
 1. **하체 요 오프셋**(ADR 축 1 ㉰) — 캡슐 요는 그대로, 메시 상대 요를 AnimBP가 반대로 돌린다. 제자리 회전 애니(`Blu_W2_Stand_Aim_Turn_In_Place_L/R_Loop_IPC` + `_L/R_45/90/135/180_IPC`)가 이 각도 오차를 소비. **`RootYawOffset` 소유권을 AnimBP에 두고 복제하지 않는다**(불변식 8)
 2. **Aim Offset 배선** — 위 4개를 자세(Stand/Crouch) × 조준여부(Aim/Relaxed)로 분기. 입력은 `GetBaseAimRotation() − ActorRotation`
 3. **왼손 Two Bone IK** — `AFPSRCharacter::GetLeftHandGripTransform(FTransform&)`(BlueprintPure, **월드 공간**, false면 IK 끔) 소비. ⚠️ **게임 스레드 전용** — `NativeUpdateAnimation`에서 멤버로 복사해서 쓸 것
