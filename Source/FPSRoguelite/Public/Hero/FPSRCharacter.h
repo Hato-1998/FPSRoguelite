@@ -124,11 +124,11 @@ public:
 	 *  BlueprintReadable, so an AnimBP can't reach it directly — hence this accessor). Resets to false the instant ADS is
 	 *  released (Input_ADSReleased -> SetAiming(false)), so an aim state driven by this reverts cleanly to hip.
 	 *
-	 *  ⚠ VALID ON THE OWNING CLIENT AND THE SERVER ONLY. The flag travels owner -> server (ServerSetAiming) and stops
-	 *  there; it is not replicated onward, so on a NON-owning client this reads false for a teammate who is aiming. That
-	 *  was harmless while it fed an owner-only arms AnimBP, but the shared body AnimBP (ADR 0002 step 4) runs on every
-	 *  machine: driving an ADS pose off this would leave every remote player permanently un-aimed — the exact owner/remote
-	 *  divergence invariant 4 forbids. Replicate a presentation aim bit BEFORE step 4 wires an aim pose to it. */
+	 *  VALID ON EVERY MACHINE — this is what the shared body AnimBP reads for the aim pose (ADR 0002 step 4). The owner
+	 *  and the server write it directly (input edge / ServerSetAiming); non-owning clients receive it replicated
+	 *  (COND_SkipOwner, push model). One accepted asymmetry: if the server REJECTS an aim-on (freeze / downed) the owner
+	 *  is not sent a correction, so it can read true there for up to a round trip — the same OnRep that made the client's
+	 *  view stale is what clears it. See UFPSRWeaponFireComponent::SetAiming + GetLifetimeReplicatedProps. */
 	UFUNCTION(BlueprintPure, Category = "FPSR|Weapon")
 	bool IsAiming() const;
 

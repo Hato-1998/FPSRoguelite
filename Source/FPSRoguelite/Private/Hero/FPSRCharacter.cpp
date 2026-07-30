@@ -338,6 +338,11 @@ void AFPSRCharacter::PossessedBy(AController* NewController)
 		}
 	}
 
+	// NOTE (aim state): deliberately NOT cleared here. A fresh pawn is already un-aimed on every machine, and clearing
+	// on the authority only bites on re-possession of a LIVE pawn — where it would make the server say hip while the
+	// owner, which COND_SkipOwner sends no correction to, keeps its predicted ADS. That is the divergence, not the fix.
+	// See ADR 0002 "조준 비트 복제" before adding one.
+
 	// Reflect the current MoveSpeedMultiplier once (attribute may have replicated before this pawn existed,
 	// or the pawn was possessed after the attribute was already set). Safe default 1.0 if the set isn't ready.
 	if (const AFPSRPlayerState* FPSRPS = GetPlayerState<AFPSRPlayerState>())
@@ -467,9 +472,9 @@ bool AFPSRCharacter::IsRunFrozen() const
 
 bool AFPSRCharacter::IsAiming() const
 {
-	// Aim state lives on the weapon-fire component (set by Input_ADS* on the owner + ServerSetAiming on the server), so
-	// this answers correctly on those two machines and returns false on every other client — see the header's warning
-	// before wiring it to the shared body AnimBP.
+	// Aim state lives on the weapon-fire component (Input_ADS* on the owner + ServerSetAiming on the server, replicated
+	// from there to the other clients), so this answers on every machine — that is what lets the shared body AnimBP
+	// pose the aim for teammates too. See the header for the one accepted asymmetry (rejected aim-on on the owner).
 	return WeaponFire && WeaponFire->IsAiming();
 }
 
@@ -1005,13 +1010,23 @@ void AFPSRCharacter::ServerReload_Implementation()
 
 void AFPSRCharacter::ServerSetAiming_Implementation(bool bNewAiming)
 {
-	// Mirror the ServerEquipSlot server gate: reject an in-flight ADS RPC during the freeze so the OnAim
-	// behavior hook can't fire while the run is globally stopped (W1 P3-3). Input_ADS already gates client-side.
-	if (IsRunFrozen() || IsIncapacitatedLocal()) { return; }
+	// Mirror the ServerEquipSlot server gate: don't let an in-flight ADS RPC start an aim (or fire the OnAim behavior
+	// hook) while the run is globally stopped (W1 P3-3). Input_ADS already gates client-side.
+	//
+	// The gate is DIRECTIONAL: a clear must always land, like Input_CrouchReleased's. The freeze-clear path
+	// (HandleRunStateChanged_Vision) sends SetAiming(false) *after* the pause is already active, so gating the clear
+	// too left the server latched in ADS with nothing to re-send it afterwards — invisible while this flag only fed
+	// spread, but with the flag replicated it freezes a remote player's body in the aim pose for good.
+	const bool bBlocked = IsRunFrozen() || IsIncapacitatedLocal();
+	if (bNewAiming && bBlocked) { return; }
 	if (WeaponFire)
 	{
 		WeaponFire->SetAiming(bNewAiming);
 	}
+	// The hook keeps its original gate, so the "no behavior hooks during a freeze" guarantee is unchanged. That is
+	// only safe while OnAim is fire-only (below): a STATEFUL aim hook would need the suppressed false edge to clean
+	// up, so making it stateful means revisiting this line, not just the hook.
+	if (bBlocked) { return; }
 
 	// OnAim behavior trigger (server): fire after the authoritative aiming state is set. Aiming is weapon-agnostic,
 	// but the hooks live on the equipped weapon's fragments, so build a minimal FireContext from it (§2-3-5). This
