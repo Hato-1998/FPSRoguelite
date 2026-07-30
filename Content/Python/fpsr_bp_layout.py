@@ -7,11 +7,14 @@
 성공을 반환하면서 노드를 하나도 옮기지 않고, 작동하는 그래프에서는 교차를 오히려 늘렸다.
 (WBP_RunHUD 48노드 → 0개 이동 / WBP_BossHUDBar 교차 1 → 20)
 
-실행:
-    import sys; sys.path.insert(0, "E:/Git_Project/FPSRoguelite/Scripts")
-    import bp_graph_layout as L
-    L.run(L.TARGETS, apply=False)   # 먼저 비적용으로 수치만 본다
-    L.run(L.TARGETS, apply=True)    # 통과한 그래프만 저장
+에디터에서 쓰는 법: **Tools > FPSR BP 노드 정리** (init_unreal.py가 등록한다).
+콘텐츠 브라우저에서 블루프린트나 폴더를 고르고 메뉴를 누르면 된다.
+되돌리기(Ctrl+Z)가 되고, 저장은 하지 않으니 결과를 보고 Ctrl+S 하면 된다.
+
+스크립트로 쓰는 법:
+    import fpsr_bp_layout as L
+    L.tidy(["/Game/UI/HUD/WBP_RunHUD"], dry=True)   # 수치만 본다
+    L.tidy(["/Game/UI/HUD/WBP_RunHUD"])             # 배치 + 게터 복제
 """
 
 import collections
@@ -20,6 +23,7 @@ import math
 import unreal
 
 S = unreal.BlueprintService
+A = unreal.AnimGraphService
 EAL = unreal.EditorAssetLibrary
 
 TAG = "LAY"
@@ -685,8 +689,10 @@ def duplicate_getters(bp, graph, g):
         for sp, t, tp in sorted(cons)[1:]:
             nid = S.add_get_variable_node(bp, graph, vname, g["pos0"][src][0], g["pos0"][src][1])
             if not nid:
-                print("%s   게터 복제 실패: %s %s/%s" % (TAG, vname, bp.split("/")[-1], graph))
-                continue
+                # 함수의 로컬 변수 게터가 여기 걸린다 — `add_get_variable_node` 는 멤버 변수만 만든다.
+                print("%s   게터 복제 불가(멤버 변수가 아님): %s  %s/%s"
+                      % (TAG, vname, bp.split("/")[-1], graph))
+                break
             if _relink(bp, graph, _links_into(g, t, tp), t, tp, (src, sp, nid, sp)):
                 made += 1
             else:
@@ -1071,10 +1077,19 @@ def _log(rec):
 
 def graphs_of(bp, extra=()):
     """정리 대상 그래프 이름 목록. 이름이 겹치는 그래프는 개별 주소 지정이 안 되므로 뺀다."""
-    names, seen = [], collections.Counter()
+    names = []
     for cand in ["EventGraph"] + list(extra):
         if cand not in names:
             names.append(cand)
+    # AnimBP면 애님 그래프도 가져온다. `Transition` 처럼 같은 이름이 여러 개인 것은
+    # API가 이름으로만 주소를 잡아 개별 지정이 불가능하므로 뺀다(각 2~3노드라 정리 가치도 없다).
+    try:
+        dup = collections.Counter(str(x.graph_name) for x in (A.list_graphs(bp) or []))
+        for n, c in sorted(dup.items()):
+            if c == 1 and n not in names:
+                names.append(n)
+    except Exception:
+        pass
     try:
         for f in (S.list_functions(bp) or []):
             fn = str(f.function_name)
@@ -1148,6 +1163,140 @@ def run(targets, apply=False, save=True):
             print("%s SAVED %s -> %s" % (TAG, bp, save_asset(bp)))
     _summary(results)
     return results
+
+
+# ============================================================ 에디터 툴 (Tools 메뉴)
+
+EXTERNAL_PACKS = ("/Game/PolygonCyberCity", "/Game/PolygonMilitary", "/Game/PolygonScifi",
+                  "/Game/PolygonParticleFX", "/Game/PolygonNature", "/Game/StylizedRenderingSystem",
+                  "/Game/Rifle_01", "/Game/ProceduralWeaponAnimationSystem", "/Game/Synty",
+                  "/Game/Assets/", "/Game/Characters/Mannequins", "/Game/LevelPrototyping")
+
+
+def _is_ours(path):
+    """자작 콘텐츠만 대상으로 삼는다. 외부 팩은 건드리면 팩 갱신 때 충돌하고 diff만 는다."""
+    return path.startswith("/Game/") and not any(path.startswith(e) for e in EXTERNAL_PACKS)
+
+
+def selected_blueprints():
+    """콘텐츠 브라우저 선택 → 블루프린트 경로 목록. 폴더를 골랐으면 그 안을 훑는다."""
+    EUL = unreal.EditorUtilityLibrary
+    out = []
+    for a in (EUL.get_selected_asset_data() or []):
+        cls = str(a.asset_class_path.asset_name)
+        if cls in ("Blueprint", "AnimBlueprint", "WidgetBlueprint"):
+            out.append(str(a.package_name))
+    if not out:
+        ar = unreal.AssetRegistryHelpers.get_asset_registry()
+        for folder in (EUL.get_selected_folder_paths() or []):
+            folder = str(folder)
+            if folder.startswith("/All"):
+                folder = folder[4:]
+            for a in (ar.get_assets_by_path(folder, recursive=True) or []):
+                cls = str(a.asset_class_path.asset_name)
+                if cls in ("Blueprint", "AnimBlueprint", "WidgetBlueprint"):
+                    out.append(str(a.package_name))
+    return sorted(set(p for p in out if _is_ours(p)))
+
+
+def tidy(paths, getters=True, reroutes=False, dry=False):
+    """블루프린트를 정리한다. 저장은 하지 않는다 — 결과를 보고 직접 Ctrl+S 하면 된다.
+
+    되돌리기(Ctrl+Z)가 되도록 트랜잭션으로 감싼다.
+    """
+    if not paths:
+        _notify("정리할 블루프린트를 콘텐츠 브라우저에서 고르세요 (폴더도 됩니다).")
+        return []
+
+    aes = unreal.get_editor_subsystem(unreal.AssetEditorSubsystem)
+    recs = []
+
+    def _work():
+        for bp in paths:
+            obj = EAL.load_asset(bp)
+            if obj is None:
+                continue
+            if not dry:
+                aes.close_all_editors_for_asset(obj)   # 열린 탭의 옛 상태가 덮어쓰지 않게
+            for gname in graphs_of(bp):
+                r = enhance_graph(bp, gname, apply=not dry,
+                                  do_getters=getters, do_reroutes=reroutes)
+                if r["status"] not in ("no-edges", "skip-state-machine"):
+                    recs.append(r)
+
+    if dry:
+        _work()
+    else:
+        with unreal.ScopedEditorTransaction("BP 노드 정리"):
+            _work()
+
+    done = [r for r in recs if r["status"] in ("enhanced", "dry")]
+    b = a = None
+    for r in done:
+        if b is None:
+            b = dict((k, 0) for k in ("over", "cross", "overlap", "back"))
+            a = dict(b)
+        for k in b:
+            b[k] += r["before"][k]
+            a[k] += r.get("after", r["before"])[k]
+    head = "수치만 봄 (바꾸지 않음)" if dry else "정리 완료 — 저장하려면 Ctrl+S"
+    if b:
+        msg = ("%s\n\n에셋 %d개 / 그래프 %d개 (그중 %d개는 이미 깔끔해 원본 유지)\n"
+               "선이 노드를 지나감  %d → %d\n선 교차            %d → %d\n노드 겹침          %d → %d\n"
+               "게터 복제          +%d") % (
+            head, len(paths), len(recs), len(recs) - len(done),
+            b["over"], a["over"], b["cross"], a["cross"], b["overlap"], a["overlap"],
+            sum(r.get("getters", 0) for r in recs))
+    else:
+        msg = "%s\n\n정리할 것이 없었습니다 (에셋 %d개)." % (head, len(paths))
+    print("%s %s" % (TAG, msg.replace("\n", " | ")))
+    _notify(msg)
+    return recs
+
+
+def _notify(msg):
+    unreal.log("[BP 노드 정리] " + msg.replace("\n", " "))
+    try:
+        unreal.EditorDialog.show_message(unreal.Text("BP 노드 정리"), unreal.Text(msg),
+                                         unreal.AppMsgType.OK)
+    except Exception:
+        pass                                   # 헤드리스면 로그만 남긴다
+
+
+def register_menu():
+    menus = unreal.ToolMenus.get()
+    tools = menus.find_menu("LevelEditor.MainMenu.Tools")
+    if not tools:
+        unreal.log_warning("[BP 노드 정리] Tools 메뉴를 못 찾음")
+        return
+    tools.add_sub_menu("FPSRBPLayout", "FPSR", "FPSRBPLayout", "FPSR BP 노드 정리",
+                       "블루프린트 그래프의 노드 배치를 정리한다 (로직·배선은 안 바뀜)")
+    sub = menus.find_menu("LevelEditor.MainMenu.Tools.FPSRBPLayout")
+
+    def entry(name, label, code, tip=""):
+        e = unreal.ToolMenuEntry(name=name, type=unreal.MultiBlockType.MENU_ENTRY)
+        e.set_label(label)
+        if tip:
+            e.set_tool_tip(tip)
+        e.set_string_command(unreal.ToolMenuStringCommandType.PYTHON, "", string=code)
+        sub.add_menu_entry("BPLayout", e)
+
+    entry("Tidy", "1. 선택한 블루프린트 정리 (배치 + 게터 복제)",
+          "import fpsr_bp_layout as L; L.tidy(L.selected_blueprints())",
+          "여러 곳으로 나가는 변수 게터를 소비 노드마다 하나씩으로 쪼개고 배치를 정리합니다. "
+          "저장은 하지 않으니 확인 후 Ctrl+S 하세요. Ctrl+Z로 되돌릴 수 있습니다.")
+    entry("TidyLayoutOnly", "2. 배치만 정리 (노드를 늘리지 않음)",
+          "import fpsr_bp_layout as L; L.tidy(L.selected_blueprints(), getters=False)",
+          "노드를 추가하지 않고 좌표만 옮깁니다.")
+    entry("Measure", "3. 수치만 보기 (바꾸지 않음)",
+          "import fpsr_bp_layout as L; L.tidy(L.selected_blueprints(), dry=True)",
+          "얼마나 지저분한지만 재서 보여줍니다. 에셋을 바꾸지 않습니다.")
+    entry("TidyReroute", "4. reroute 노드까지 넣기 (실험적)",
+          "import fpsr_bp_layout as L; L.tidy(L.selected_blueprints(), reroutes=True)",
+          "선이 노드를 지나가면 reroute(knot)로 돌립니다. 실측상 교차를 늘리는 경우가 많아 "
+          "품질 게이트에서 대부분 되돌아갑니다. 손으로 놓은 reroute는 보존됩니다.")
+    menus.refresh_all_widgets()
+    unreal.log("[BP 노드 정리] 메뉴 등록: Tools > FPSR BP 노드 정리")
 
 
 def _summary(results):

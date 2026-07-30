@@ -151,9 +151,36 @@
   - ⚠ **PWAS 참조 비우기가 B+C 이후 더 급해졌다**: `ReloadMontage`(PWAS 팔 스켈레톤용)가 이제 **Blu 바디 메시에서 재생**된다 → 스켈레톤 불일치로 재생 거부 + 경고 로그(크래시는 아님). `WeaponAnimInstanceClass`(PWAS 팔 ABP)도 무기 메시에 얹혀 같은 형태로 실패한다
 - **에디터 첫 실행 시 예상되는 것**: `BP_FPSRPlayer`에 `FirstPersonArms`·`WeaponMesh1P`·`WeaponMeshStatic1P` **고아 컴포넌트 기록**이 남아 경고가 뜬다(A단계의 `WeaponMesh3P`와 같은 형태 — 무해, BP 재저장하면 정리됨). 새 `WeaponMesh`/`WeaponMeshStatic`은 C++ 기본값으로 시작하니 **BP에서 손으로 맞췄던 옛 상대 트랜스폼은 사라진다**(의도 — 정렬 주체가 이제 `SOCKET_Weapon`이다). 폐기 에셋 `Content/Character/FPArms`(+`SK_FP_Manny_Simple`)는 참조가 0이 되므로 정리 대상
 
-## 🧹 BP 그래프 배치 정리 = ✅완료 / ⏳눈으로 확인 대기 (2026-07-30, `refactor/character`)
-> 요청 = `Docs/BPGraphLayout_ResumePrompt.md`. **좌표만 옮기고 로직·배선·값은 안 건드린다.**
-> 커밋 6개(`ef11412e` UI/HUD → `80c9800a` 스크립트). 스크립트 = `Scripts/bp_graph_layout.py`.
+## 🧹 BP 그래프 정리 = ✅완료 + **에디터 툴화** / ⏳눈으로 확인 대기 (2026-07-30, `refactor/character`)
+> 요청 = `Docs/BPGraphLayout_ResumePrompt.md` → 이후 사용자 추가 요청(게터 복제·reroute·툴화).
+> **로직·배선·값은 안 바뀐다.** 엔진 = `Content/Python/fpsr_bp_layout.py`.
+
+### 🛠 앞으로는 에디터에서: **Tools > FPSR BP 노드 정리**
+콘텐츠 브라우저에서 BP나 폴더를 고르고 메뉴를 누른다. 되돌리기(Ctrl+Z) 되고, **저장은 안 하니 확인 후 Ctrl+S**.
+1. 선택한 블루프린트 정리(배치 + 게터 복제) / 2. 배치만 / 3. 수치만 보기 / 4. reroute까지(실험적)
+- 그래프는 자동 인식(AnimBP 상태머신 포함). 외부 팩(`Polygon*`·`Synty`·`Rifle_01` 등)은 자동 제외.
+- ⚠️ VibeUE 플러그인의 `BlueprintService`에 의존한다(`.uproject`에 Optional로 등록됨). 없으면 메뉴만 조용히 실패.
+
+### 2차 — 게터 복제 (사용자 추가 요청)
+- 여러 곳으로 뻗던 순수 변수 게터를 **소비 노드마다 하나씩**으로 쪼갬(29개 추가). 커밋 `391ab3a4`.
+  순수 게터는 UE가 컴파일 때 어차피 소비처마다 다시 평가하므로 **의미·성능 동일**.
+- **교차 146 → 111.** 큰 것 = `ABL_Blu_W2_Rifle`의 Ground·ApplyWeaponAimOffset·GetWeaponLocomotionPose 각각 **8 → 0**
+  (`Get Speed`/`Direction`/`AimYaw`/`AimPitch`가 4갈래씩 뻗던 것).
+- 검증 = **논리적 연결**(knot 관통해 접고 게터는 변수명으로 치환) 전 그래프 동일 · 재실행 시 무변화(멱등).
+- 한계: 함수의 **로컬 변수** 게터는 복제 불가(`add_get_variable_node`가 멤버 변수만 만든다). `WBP_Lobby/RefreshPlayer` 1건.
+
+### reroute(knot) = ❌ 채택 안 함 (사용자 판정 "애매")
+기구는 됨(`create_node_by_key(bp, graph, "NODE K2Node_Knot", x, y)`, 핀 = `InputPin`/`OutputPin`).
+하지만 파일럿에서 **4번 중 3번이 품질 게이트에 걸려 되돌아갔다** — 교차를 크게 늘린다(BP_LobbyDisplayPawn 4→15).
+메뉴 4번에 실험적으로 남겨둠. **사용자가 손으로 놓은 reroute는 어떤 경우에도 보존**된다.
+
+### ⚠️ 측정 기준 정정 (내가 두 번 틀렸다)
+"노드 위를 지나가는 선"은 **63/761 = 8.3%**(상태머신 제외)가 맞다.
+처음 보고한 38%는 선을 노드 **원점**끼리 이어 잰 값, 그다음 12%는 오염된 에디터 상태에서 잰 값이라 둘 다 틀렸다.
+지금은 **출발 노드 오른쪽 가장자리의 출력핀 → 도착 노드 왼쪽 가장자리의 입력핀**으로 잰다(`endpoints()`).
+
+### 1차 — 배치만 (좌표)
+> 커밋 `ef11412e` UI/HUD → `5b9e0231` 문서.
 
 - **작업 전 프롬프트의 전제 하나가 틀렸다** — 엔진 `BlueprintService.auto_layout_graph`는 **쓸 수 없다.**
   노드 많은 그래프에서 성공을 반환하면서 **0개 이동**(RunHUD 48노드·Lobby 77노드·BP_Door 29노드·DownedOverlay 45노드),

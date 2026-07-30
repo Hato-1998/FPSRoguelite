@@ -12,3 +12,10 @@ try:
 except Exception as e:
     import unreal
     unreal.log_warning(f"[CityLayout] init 실패: {e}")
+
+try:
+    import fpsr_bp_layout
+    fpsr_bp_layout.register_menu()
+except Exception as e:
+    import unreal
+    unreal.log_warning(f"[BP 노드 정리] init 실패: {e}")
