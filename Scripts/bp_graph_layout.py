@@ -58,6 +58,7 @@ def read_graph(bp, graph):
 
     ids, pos0, title, ntype, height, width = [], {}, {}, {}, {}, {}
     in_pin_index = {}   # (node_id, pin_name) -> 입력핀 순번
+    out_pin_index = {}  # (node_id, pin_name) -> 출력핀 순번
     pin_names = {}
     has_exec = {}
 
@@ -81,14 +82,18 @@ def read_graph(bp, graph):
                 ins += 1
                 in_len = max(in_len, len(pname))
             else:
+                out_pin_index[(k, pname)] = outs
                 outs += 1
                 out_len = max(out_len, len(pname))
         pin_names[k] = tuple(sorted(names))
         has_exec[k] = exec_seen
-        height[k] = HEAD_H + PIN_H * max(1, max(ins, outs))
-        title_w = CHAR_W * max(len(ln) for ln in title[k].split("\n"))
-        pin_w = PIN_CHAR_W * (in_len + out_len)
-        width[k] = min(NODE_W_MAX, max(NODE_W_MIN, max(title_w, pin_w) + NODE_W_PAD))
+        if ntype[k] == KNOT_TYPE:
+            height[k] = width[k] = 24.0          # reroute는 점으로 그려진다
+        else:
+            height[k] = HEAD_H + PIN_H * max(1, max(ins, outs))
+            title_w = CHAR_W * max(len(ln) for ln in title[k].split("\n"))
+            pin_w = PIN_CHAR_W * (in_len + out_len)
+            width[k] = min(NODE_W_MAX, max(NODE_W_MIN, max(title_w, pin_w) + NODE_W_PAD))
 
     edges = []
     for c in cs:
@@ -104,14 +109,44 @@ def read_graph(bp, graph):
     return {
         "bp": bp, "graph": graph, "ids": ids, "pos0": pos0, "edges": edges,
         "title": title, "type": ntype, "height": height, "width": width,
-        "pure": pure, "in_pin_index": in_pin_index, "pin_names": pin_names,
+        "pure": pure, "in_pin_index": in_pin_index, "out_pin_index": out_pin_index,
+        "pin_names": pin_names,
     }
 
 
+def endpoints(g, pos, edge):
+    """선이 실제로 그려지는 두 점 — 출발 노드의 **오른쪽 가장자리 출력핀**에서
+    도착 노드의 **왼쪽 가장자리 입력핀**으로 간다. 원점끼리 이으면 판정이 어긋난다."""
+    s, sp, t, tp = edge
+    sx, sy = pos[s]
+    tx, ty = pos[t]
+    if g["type"].get(s) == KNOT_TYPE:
+        a = (sx + g["width"][s], sy + g["height"][s] / 2.0)
+    else:
+        a = (sx + g["width"][s], sy + HEAD_H + PIN_H * (g["out_pin_index"].get((s, sp), 0) + 0.5))
+    if g["type"].get(t) == KNOT_TYPE:
+        b = (tx, ty + g["height"][t] / 2.0)
+    else:
+        b = (tx, ty + HEAD_H + PIN_H * (g["in_pin_index"].get((t, tp), 0) + 0.5))
+    return a, b
+
+
 def layout_view(g):
-    """배치 대상만 남긴 축약 뷰. 상태머신이면 상태 노드만 옮기고 전이 노드는 뺀다."""
+    """배치 대상만 남긴 축약 뷰.
+
+    - 상태머신: 상태 노드만 옮기고 전이 노드는 뺀다(엔진이 선 위에 그린다).
+    - reroute(knot): 계층 계산에서 빼고 간선을 관통해 접는다. 배치가 끝난 뒤
+      ``reposition_knots`` 가 빈 차선으로 다시 놓는다. 손으로 놓은 reroute도 같은 규칙을 탄다.
+    """
     if not any(g["type"][k] == TRANSITION_TYPE for k in g["ids"]):
-        return g
+        knots = set(k for k in g["ids"] if g["type"][k] == KNOT_TYPE)
+        if not knots:
+            return g
+        v = dict(g)
+        v["ids"] = [k for k in g["ids"] if k not in knots]
+        v["edges"] = _fold_knots(g)
+        v["pure"] = set(k for k in g["pure"] if k not in knots)
+        return v
 
     trans = set(k for k in g["ids"] if g["type"][k] == TRANSITION_TYPE)
     states = [k for k in g["ids"] if k not in trans]
@@ -144,6 +179,62 @@ def layout_view(g):
     return v
 
 
+KNOT_TYPE = "K2Node_Knot"
+KNOT_IN, KNOT_OUT = "InputPin", "OutputPin"
+AUTO_TAG = "auto-reroute"
+
+
+def _var_name(g, k):
+    """변수 게터가 읽는 변수 이름. 게터가 아니면 None."""
+    if g["type"].get(k) != "K2Node_VariableGet":
+        return None
+    d = S.get_node_details(g["bp"], g["graph"], k)
+    return str(d.variable_name) if d else None
+
+
+def _fold_knots(g):
+    """knot을 관통해 (진짜 출발핀 → 도착핀)만 남긴 간선 목록."""
+    knots = set(k for k in g["ids"] if g["type"].get(k) == KNOT_TYPE)
+    if not knots:
+        return list(g["edges"])
+    src_of = {}
+    for s, sp, t, _tp in g["edges"]:
+        if t in knots:
+            src_of[t] = (s, sp)
+    out = []
+    for s, sp, t, tp in g["edges"]:
+        if t in knots:
+            continue                      # 사슬 중간 — 도착 쪽에서 따라간다
+        seen = set()
+        while s in knots and s not in seen:
+            seen.add(s)
+            s, sp = src_of.get(s, (s, sp))
+        if s in knots:
+            continue                      # 출처가 끊긴 knot — 접을 수 없다
+        out.append((s, sp, t, tp))
+    return out
+
+
+def logical_fingerprint(g):
+    """게터 복제·knot 삽입에도 변하지 않아야 하는 '논리적 연결' 지문.
+
+    - knot은 관통해서 접는다(순수 통과 노드라 의미가 없다).
+    - 변수 게터는 노드 정체 대신 **읽는 변수 이름**으로 본다(복제해도 같은 것을 읽으므로).
+    - 그 외 노드는 node_id로 본다(이 변환들은 그런 노드를 만들거나 지우지 않는다).
+    """
+    edges = _fold_knots(g)
+    inbound = collections.Counter()
+    for _s, _sp, t, _tp in g["edges"]:
+        inbound[t] += 1
+    out = []
+    for s, sp, t, tp in edges:
+        vn = _var_name(g, s)
+        # 입력이 연결된 게터는 출처가 달라질 수 있어 변수명만으로 동일시하지 않는다
+        src = ("VAR", vn, sp) if (vn is not None and inbound[s] == 0) else ("NODE", s, sp)
+        out.append((src, t, tp))
+    return tuple(sorted(out))
+
+
 def fingerprint(g):
     """배선 지문. id 기반과 id 무관(제목 기반) 양쪽을 만든다."""
     by_id = tuple(sorted((k, g["title"][k], g["type"][k], g["pin_names"][k]) for k in g["ids"]))
@@ -163,8 +254,17 @@ def _crosses(a, b, c, d):
     return o1 != o2 and o3 != o4
 
 
+def _seg_hits_box(a, b, x, y, w, h):
+    for i in range(1, 32):
+        f = i / 32.0
+        if x <= a[0] + (b[0] - a[0]) * f <= x + w and y <= a[1] + (b[1] - a[1]) * f <= y + h:
+            return True
+    return False
+
+
 def metrics(g, pos):
-    segs = [(pos[s], pos[t]) for s, _sp, t, _tp in g["edges"] if s != t]
+    live = [e for e in g["edges"] if e[0] != e[2] and e[0] in pos and e[2] in pos]
+    segs = [endpoints(g, pos, e) for e in live]
     lens = [math.hypot(b[0] - a[0], b[1] - a[1]) for a, b in segs]
 
     cross = 0
@@ -190,8 +290,18 @@ def metrics(g, pos):
             if (xi < xj + wj and xj < xi + wi) and (yi < yj + hj and yj < yi + hi):
                 ov += 1
 
+    # 선이 다른 노드의 상자를 지나가는 수 — 2단계(reroute)의 주 지표
+    over = 0
+    for e, (a, b) in zip(live, segs):
+        for k in ks:
+            if k in (e[0], e[2]):
+                continue
+            if _seg_hits_box(a, b, pos[k][0], pos[k][1], g["width"][k], g["height"][k]):
+                over += 1
+                break
+
     return {
-        "cross": cross, "back": back, "overlap": ov,
+        "cross": cross, "back": back, "overlap": ov, "over": over,
         "avglen": (sum(lens) / len(lens)) if lens else 0.0,
         "maxlen": max(lens) if lens else 0.0,
         "edges": len(segs), "nodes": len(ks),
@@ -527,6 +637,229 @@ def best_layout(g):
 
 # ------------------------------------------------------------------ 적용/검증
 
+def _relink(bp, graph, edges_at_pin, target, pin, new_source):
+    """도착 핀의 링크 하나만 갈아끼운다.
+
+    ``disconnect_pin`` 은 그 핀의 링크를 **전부** 끊는다(실행 입력핀은 여러 개가 들어올 수 있다).
+    그래서 원래 걸려 있던 링크를 모두 기억했다가, 바꿀 하나만 빼고 되살린다.
+    """
+    if not S.disconnect_pin(bp, graph, target, pin):
+        return False
+    ok = True
+    # 바꿀 대상(old)을 제외한 나머지를 원래대로 복구
+    old_s, old_sp, new_s, new_sp = new_source
+    for s, sp in edges_at_pin:
+        if (s, sp) == (old_s, old_sp):
+            continue
+        ok = S.connect_nodes(bp, graph, s, sp, target, pin) and ok
+    ok = S.connect_nodes(bp, graph, new_s, new_sp, target, pin) and ok
+    return ok
+
+
+def _links_into(g, target, pin):
+    return [(s, sp) for s, sp, t, tp in g["edges"] if t == target and tp == pin]
+
+
+def duplicate_getters(bp, graph, g):
+    """여러 곳으로 나가는 순수 변수 게터를 소비처마다 하나씩으로 쪼갠다 (질문 ③).
+
+    순수 변수 게터는 UE가 컴파일할 때 어차피 소비처마다 다시 평가하므로, 복제해도
+    의미·성능이 동일하다. 첫 소비처는 원본을 그대로 두고 나머지만 새로 만든다.
+    """
+    outgoing = collections.defaultdict(list)
+    for s, sp, t, tp in g["edges"]:
+        if g["type"].get(s) == "K2Node_VariableGet" and s != t:
+            outgoing[s].append((sp, t, tp))
+
+    made = 0
+    for src, cons in sorted(outgoing.items()):
+        if len(cons) < 2:
+            continue
+        vname = _var_name(g, src)
+        if not vname:
+            continue
+        inputs = [(s, sp, tp) for s, sp, t, tp in g["edges"] if t == src]   # 게터 자신의 입력
+        for sp, t, tp in sorted(cons)[1:]:
+            nid = S.add_get_variable_node(bp, graph, vname, g["pos0"][src][0], g["pos0"][src][1])
+            if not nid:
+                print("%s   게터 복제 실패: %s %s" % (TAG, vname, graph))
+                continue
+            for s2, sp2, tp2 in inputs:                                     # 입력도 같이 복제
+                S.connect_nodes(bp, graph, s2, sp2, nid, tp2)
+            if _relink(bp, graph, _links_into(g, t, tp), t, tp, (src, sp, nid, sp)):
+                made += 1
+            else:
+                S.delete_node(bp, graph, nid)
+    return made
+
+
+def knot_chains(g):
+    """(진짜 출발노드, [knot…], 진짜 도착노드) 목록. 손으로 놓은 것도 함께 잡힌다."""
+    knots = set(k for k in g["ids"] if g["type"].get(k) == KNOT_TYPE)
+    if not knots:
+        return []
+    src_of, nxt = {}, collections.defaultdict(list)
+    for s, _sp, t, _tp in g["edges"]:
+        if t in knots:
+            src_of[t] = s
+        if s in knots:
+            nxt[s].append(t)
+    chains = []
+    for k in sorted(knots):
+        if src_of.get(k) in knots or k not in src_of:
+            continue                                   # 사슬의 시작만 잡는다
+        chain, cur, guard = [k], k, 0
+        while guard < 32:
+            guard += 1
+            step = [x for x in nxt.get(cur, []) if x in knots]
+            if not step:
+                break
+            cur = step[0]
+            chain.append(cur)
+        ends = [x for x in nxt.get(chain[-1], []) if x not in knots]
+        if ends:
+            chains.append((src_of[k], chain, ends[0]))
+    return chains
+
+
+def _collapse_knots(bp, graph, g, victims):
+    """지정한 knot들을 걷어내고 관통 연결을 되살린다."""
+    victims = set(victims)
+    folded = _fold_knots(g)
+    for k in victims:
+        S.delete_node(bp, graph, k)
+    cur = read_graph(bp, graph)
+    have = set(cur["edges"])
+    for s, sp, t, tp in folded:
+        if s in victims or t in victims:
+            continue
+        if (s, sp, t, tp) not in have:
+            S.connect_nodes(bp, graph, s, sp, t, tp)
+    return len(victims)
+
+
+def reposition_knots(bp, graph, g):
+    """reroute를 출발·도착 사이의 빈 가로 차선에 다시 놓는다."""
+    moved = 0
+    for src, chain, dst in knot_chains(g):
+        if src not in g["pos0"] or dst not in g["pos0"]:
+            continue
+        x1 = g["pos0"][src][0] + g["width"][src] + LANE_PAD
+        x2 = g["pos0"][dst][0] - LANE_PAD
+        if x2 <= x1:
+            x1, x2 = sorted((x1, x2))
+            x2 = x1 + LANE_PAD
+        lane = _find_lane(g, x1, x2, (g["pos0"][src][1] + g["pos0"][dst][1]) / 2.0, skip=(src, dst))
+        if lane is None:
+            continue
+        n = len(chain)
+        for i, k in enumerate(chain):
+            x = x1 if n == 1 else x1 + (x2 - x1) * i / float(n - 1)
+            if S.set_node_position(bp, graph, k, float(x), float(lane)):
+                moved += 1
+    return moved
+
+
+LANE_PAD = 70.0     # 차선이 노드 위아래로 띄우는 여백
+LANE_HALF = 18.0    # 선이 지나가는 띠의 반두께
+
+
+def _find_lane(g, x_lo, x_hi, want_y, skip):
+    """x 구간 [x_lo, x_hi]를 가로지르는 동안 어떤 노드 상자도 안 건드리는 가로 차선의 y.
+
+    노드 위/아래, 그리고 노드 띠 사이의 틈을 후보로 두고 원래 선 높이에 가장 가까운 것을 고른다.
+    없으면 None.
+    """
+    pos, W, H = g["pos0"], g["width"], g["height"]
+    band = [k for k in g["ids"]
+            if k not in skip and pos[k][0] < x_hi and pos[k][0] + W[k] > x_lo]
+    if not band:
+        return want_y
+    boxes = sorted((pos[k][1], pos[k][1] + H[k]) for k in band)
+    cands = [boxes[0][0] - LANE_PAD]
+    for i in range(len(boxes) - 1):
+        lo, hi = boxes[i][1], boxes[i + 1][0]
+        if hi - lo > 2 * LANE_HALF + 20.0:
+            cands.append((lo + hi) / 2.0)
+    cands.append(max(b[1] for b in boxes) + LANE_PAD)
+
+    def clear(y):
+        return all(not (lo < y + LANE_HALF and y - LANE_HALF < hi) for lo, hi in boxes)
+
+    ok = [y for y in cands if clear(y)]
+    return min(ok, key=lambda y: abs(y - want_y)) if ok else None
+
+
+def insert_reroutes(bp, graph, g, limit_ratio=1.5):
+    """노드 위를 지나가는 선에 reroute(knot)를 넣어 돌린다 (질문 ②).
+
+    열을 건너뛰기만 하는 선은 놔두고, **실제로 노드 상자를 지나가는 선**에만 넣는다.
+    """
+    pos, W = g["pos0"], g["width"]
+
+    def blocked_by(edge):
+        a, b = endpoints(g, pos, edge)
+        for k in g["ids"]:
+            if k in (edge[0], edge[2]):
+                continue
+            if _seg_hits_box(a, b, pos[k][0], pos[k][1], W[k], g["height"][k]):
+                return True
+        return False
+
+    # 이미 reroute를 지나는 선은 건드리지 않는다 → 다시 돌려도 knot이 쌓이지 않는다(멱등).
+    knots = set(k for k in g["ids"] if g["type"].get(k) == KNOT_TYPE)
+    jobs = []
+    for s, sp, t, tp in g["edges"]:
+        if s in knots or t in knots:
+            continue
+        if s != t and s in pos and t in pos and blocked_by((s, sp, t, tp)):
+            jobs.append((-abs(pos[t][0] - pos[s][0]), s, sp, t, tp))
+    jobs.sort()
+
+    cap = int(len(g["ids"]) * limit_ratio)
+    made, skipped, nolane = 0, 0, 0
+    for _neg, s, sp, t, tp in jobs:
+        if made + 2 > cap:
+            skipped += 1
+            continue
+        # 출발 상자 오른쪽 ~ 도착 상자 왼쪽 사이를 가로지를 빈 차선을 찾는다
+        x1 = pos[s][0] + W[s] + LANE_PAD
+        x2 = pos[t][0] - LANE_PAD
+        if x2 - x1 < LANE_PAD:
+            nolane += 1
+            continue
+        lane = _find_lane(g, x1, x2, (pos[s][1] + pos[t][1]) / 2.0, skip=(s, t))
+        if lane is None:
+            nolane += 1
+            continue
+
+        chain = []
+        for kx in (x1, x2):
+            nid = S.create_node_by_key(bp, graph, "NODE " + KNOT_TYPE, float(kx), float(lane))
+            if not nid:
+                break
+            S.configure_node(bp, graph, nid, "NodeComment", AUTO_TAG)
+            chain.append(nid)
+        if len(chain) != 2:
+            for nid in chain:
+                S.delete_node(bp, graph, nid)
+            continue
+
+        prev, prev_pin = s, sp
+        for nid in chain:
+            S.connect_nodes(bp, graph, prev, prev_pin, nid, KNOT_IN)
+            prev, prev_pin = nid, KNOT_OUT
+        if _relink(bp, graph, _links_into(g, t, tp), t, tp, (s, sp, prev, prev_pin)):
+            made += 2
+        else:
+            for nid in chain:
+                S.delete_node(bp, graph, nid)
+    if skipped or nolane:
+        print("%s   %s/%s: knot 미삽입 — 상한(%d) %d개 / 빈 차선 없음 %d개"
+              % (TAG, bp.split("/")[-1], graph, cap, skipped, nolane))
+    return made
+
+
 def _apply(bp, graph, pos):
     ok = True
     for k, (x, y) in pos.items():
@@ -600,6 +933,115 @@ def process_graph(bp, graph, apply=True, verbose=True):
     if verbose:
         _log(rec)
     return rec
+
+
+def _score2(m):
+    """2단계 판정 점수. 낮을수록 좋다.
+
+    선이 노드를 지나가면 그 노드 이름이 가려지므로 교차보다 2배로 본다.
+    노드끼리 겹치는 건 1단계와 같이 3배.
+    """
+    return 3.0 * m["overlap"] + 2.0 * m["over"] + 1.0 * m["cross"] + 0.5 * m["back"]
+
+
+def enhance_graph(bp, graph, apply=True, verbose=True, do_getters=True, do_reroutes=True):
+    """게터 복제 + reroute 삽입까지 하는 2단계 처리.
+
+    논리적 연결(``logical_fingerprint``)이 달라지면 그 그래프를 통째로 되돌린다.
+    좌표만 바꾸는 1단계는 ``process_graph`` 를 쓴다.
+    """
+    g0 = read_graph(bp, graph)
+    if g0 is None or not g0["edges"]:
+        return {"bp": bp, "graph": graph, "status": "no-edges"}
+    if any(g0["type"].get(k) == TRANSITION_TYPE for k in g0["ids"]):
+        return {"bp": bp, "graph": graph, "status": "skip-state-machine"}
+
+    lf0 = logical_fingerprint(g0)
+    m0 = metrics(g0, g0["pos0"])
+    rec = {"bp": bp, "graph": graph, "before": m0, "status": "?", "getters": 0, "knots": 0}
+    if not apply:
+        rec["status"] = "dry"
+        rec["after"] = m0
+        if verbose:
+            _log2(rec)
+        return rec
+
+    undo_pos = dict(g0["pos0"])
+    try:
+        # --- ① 게터 복제 + 배치. 나빠지면 통째로 되돌린다 ---
+        if do_getters:
+            rec["getters"] = duplicate_getters(bp, graph, read_graph(bp, graph))
+        cur = read_graph(bp, graph)
+        new, _m = best_layout(layout_view(cur))   # reroute는 접어서 계층 계산에서 뺀다
+        if new:
+            _apply(bp, graph, new)
+        reposition_knots(bp, graph, read_graph(bp, graph))
+
+        stage1 = read_graph(bp, graph)
+        m1 = metrics(stage1, stage1["pos0"])
+        if _score2(m1) > _score2(m0):
+            _revert(bp, graph, g0, stage1, undo_pos)
+            rec["status"] = "keep-original"
+            rec["getters"] = 0
+            rec["after"] = metrics(read_graph(bp, graph), undo_pos)
+            if verbose:
+                _log2(rec)
+            return rec
+
+        # --- ② reroute. 나빠지면 방금 넣은 knot만 걷어낸다 ---
+        if do_reroutes:
+            n = insert_reroutes(bp, graph, stage1)
+            post = read_graph(bp, graph)
+            m2 = metrics(post, post["pos0"])
+            if n and _score2(m2) >= _score2(m1):
+                added = [k for k in post["ids"] if k not in stage1["pos0"]]
+                _collapse_knots(bp, graph, post, added)
+                rec["knots"] = 0
+                rec["detail"] = "reroute 되돌림(선위 %d→%d 교차 %d→%d 겹침 %d→%d)" % (
+                    m1["over"], m2["over"], m1["cross"], m2["cross"], m1["overlap"], m2["overlap"])
+            else:
+                rec["knots"] = n
+
+        g1 = read_graph(bp, graph)
+        lf1 = logical_fingerprint(g1)
+        if lf0 != lf1:
+            rec["status"] = "REVERTED-logic-changed"
+            rec["detail"] = "논리연결 +%d -%d" % (len(set(lf1) - set(lf0)), len(set(lf0) - set(lf1)))
+            _revert(bp, graph, g0, g1, undo_pos)
+            rec["after"] = metrics(read_graph(bp, graph), undo_pos)
+        else:
+            rec["status"] = "enhanced"
+            rec["after"] = metrics(g1, g1["pos0"])
+    except Exception as exc:
+        rec["status"] = "ERROR"
+        rec["detail"] = str(exc)[:160]
+        rec["after"] = m0
+    if verbose:
+        _log2(rec)
+    return rec
+
+
+def _revert(bp, graph, g0, g1, undo_pos):
+    """추가된 노드를 지우고 원래 연결·좌표로 되돌린다."""
+    added = [k for k in g1["ids"] if k not in g0["pos0"]]
+    for k in added:
+        S.delete_node(bp, graph, k)
+    cur = read_graph(bp, graph)
+    have = set(cur["edges"])
+    for s, sp, t, tp in g0["edges"]:
+        if (s, sp, t, tp) not in have:
+            S.connect_nodes(bp, graph, s, sp, t, tp)
+    for k, (x, y) in undo_pos.items():
+        S.set_node_position(bp, graph, k, x, y)
+
+
+def _log2(rec):
+    b, a = rec["before"], rec.get("after", rec["before"])
+    print("%s %-24s|%-26s n=%3d->%3d  선위노드 %3d->%3d  교차 %3d->%3d  겹침 %2d->%2d  게터+%d knot+%d  %s%s"
+          % (TAG, rec["bp"].split("/")[-1], rec["graph"], b["nodes"], a["nodes"],
+             b["over"], a["over"], b["cross"], a["cross"], b["overlap"], a["overlap"],
+             rec.get("getters", 0), rec.get("knots", 0), rec["status"],
+             (" | " + rec["detail"]) if rec.get("detail") else ""))
 
 
 def _fp_diff(a, b):
