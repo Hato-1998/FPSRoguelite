@@ -185,6 +185,10 @@ def layout_view(g):
 
 KNOT_TYPE = "K2Node_Knot"
 KNOT_IN, KNOT_OUT = "InputPin", "OutputPin"
+# 자동 생성한 reroute에 사람이 알아보라고 붙이는 이름표. **판별에는 못 쓴다** —
+# `NodeComment` 를 다시 읽어올 API가 없다(`get_node_details` 는 항상 "Reroute Node"를 준다).
+# 그래서 멱등성은 "이미 knot을 지나는 선은 건드리지 않는다"로 잡았고, 손으로 놓은 reroute도
+# 같은 규칙으로 자연히 보존된다.
 AUTO_TAG = "auto-reroute"
 
 
