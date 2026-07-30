@@ -13,11 +13,28 @@
 - **Blender 8포즈 저작·조정** (`C:\Users\koras\Desktop\작업\개발작업\블랜더\NeonV_locomotion.blend` — **별도 Blender repo**). 벽 4(hang/slip/climb/topout)·슬라이드 4(enter/loop/exit_crouch/exit_stand). wall_hang·slide_loop = 사용자 확정 기준, 나머지는 그 기준에 pose_ref 동기화. 쿼터니언 스핀 비파괴 정리. 조정 가이드 3종(그 repo `Docs/`).
 - **UE 반영** = glTF 왕복(export→커맨드렛 임포트→새 스켈레톤 8애님, 포즈 정확·본명 underscore=Blu 호환) → **트랙 복사로 Blu 스켈레톤 재생성**. 최종(미추적, 이 커밋): `Content/Characters/Blu/Anims/W2_Rifle/Blu_W2_Slide_{Enter,Loop,Exit_Crouch,Exit_Stand}` + `Content/Characters/Blu/Anims/Blu_Wall_{Slip,Hang,Climb,TopOut}`. 108본·포즈검증(slide_loop foot z59·head z114=Blender 일치)·테스트폴더 정리.
 
-**⚠️ 확인 필요(Persona):** `wall_slip`=1프레임(허우적 루프 붕괴 — Blender에서 키 복구 후 그 하나만 재복사) · `slide_exit_crouch`=15프레임(저작 12과 다름) · **슬라이드 4개 팔은 아직 T자**(상체 미그래프트 — 다음 단계에서 입힘).
+**✅ 상체 그래프트 완료** (3a-1, 미커밋) — 슬라이드 4클립의 **상체 98본**(spine 아래 전부: 척추·가슴·목·머리·어깨·팔·손·손가락 + 머리카락/얼굴/Rope)을 `Blu_W2_Crouch_Aim_Idle_IPC` 프레임 0으로 덮어씀. 하체 10본은 손 안 댐. 벽 4개는 맨손 유지. 스크립트 = `Scripts/slide_upper_graft.py` + `_verify.py`(**멱등**, 되돌리기 = `git checkout -- .../Blu_W2_Slide_*`).
+- **방식 결정 근거(실측)**: 조준 아이들은 60프레임 동안 손이 0.30cm만 움직임 → 프레임 0 한 장으로 충분 / 슬라이드 골반이 조준 자세와 **11.5°** 차이뿐 → 로컬 트랙 그대로 복사해도 총 방향 오차 **7.7°** → **스파인 역보정 불필요**.
+- **검증(별도 프로세스 재로드)**: 하체 드리프트 **0.0000cm**(재압축에도 안 흔들림) · 상체 = 소스와 완전 일치 · 양손 간격 20.72cm 유지 · 발 높이 무변화 · `upper_arm_R` 81.6°(T자 해소). 포즈 그림 = `Saved/NeonV/anim/pose_preview.svg`(`Scripts/anim_stickfigure_svg.py` — **에디터 없이 포즈 눈으로 확인하는 도구**).
+- **함정 2개 기록**: ① `AO_Crouch_Aim`의 애디티브 **기준 포즈는 `Blu_W2_Crouch_Aim_Point_Center`**다(아래 AimOffset 표의 "미리보기 베이스"는 *다른 필드*). 다만 두 포즈는 **0.02cm·0.0° 동일**이라 결과는 같음 — 스크립트는 이름이 아니라 **포즈를 비교**해서 게이트한다. ② `get_bone_track_names()`는 `unreal.Name`이고 스켈레톤과 **대소문자가 다르다**(`lower_leg_r` vs `lower_leg_R`). `str()`로 바꿔 비교하면 다리 본이 상체로 새어 들어간다 → 비교는 전부 소문자로.
+
+**⚠️ 확인 필요(Persona):** `wall_slip`=1프레임(허우적 루프 붕괴 — Blender에서 키 복구 후 그 하나만 재복사) · `slide_exit_crouch`=15프레임(저작 12과 다름).
+
+**🚨 슬라이드 하체가 바닥을 뚫는다 (그래프트와 무관, 저작 문제 — 다음 단계 전에 판단 필요)**
+기준(`Crouch_Aim_Idle` 발끝 −0.0/+0.5 · `Stand_Aim_Idle` +5.7/+6.0)과 대조한 발·발끝 최저 z:
+
+| 클립 | 발끝 최저 z | 판정 |
+|---|---|---|
+| `Slide_Enter` | **−11.9** | 바닥 아래 12cm |
+| `Slide_Loop` | **−12.9** | 바닥 아래 13cm |
+| `Slide_Exit_Crouch` | **−34.3** (발목도 −20.7, 마지막 프레임·좌우 비대칭) | **명백히 깨짐** |
+| `Slide_Exit_Stand` | +0.7 | 정상(끝 프레임 발 높이가 서있는 아이들과 **정확히 일치** 15.1) |
+
+→ **2번(exit 끝점 정합)은 "마지막 프레임만 맞추기"로 안 끝날 수 있다.** `Exit_Crouch`는 Blender 재작업이 유력.
 
 **⏭️ 다음 = UE 3a 나머지** (에디터 종료 상태 헤드리스 커맨드렛, 레시피=메모리):
-1. **슬라이드 상체 그래프트** — `Blu_W2_Slide_*`의 상체 본(spine/chest/neck/shoulder/arm/hand/손가락)을 `Blu_W2_Crouch_Aim_Idle_IPC`(조준)로 덮어씀. 벽 4개는 **맨손 유지**(안 건드림). 같은 스켈레톤이라 프레임별 상체 트랙 복사(하체는 슬라이드 값 유지).
-2. **exit 끝점 정합(A안)** — `Slide_Exit_Crouch` 마지막 프레임 = `Crouch_Aim_Idle` 포즈 / `Slide_Exit_Stand` 마지막 = 서있는 아이들. 게임 전이 팝 방지.
+1. ~~슬라이드 상체 그래프트~~ ✅
+2. **exit 끝점 정합(A안)** — `Slide_Exit_Crouch` 마지막 프레임 = `Crouch_Aim_Idle` 포즈 / `Slide_Exit_Stand` 마지막 = 서있는 아이들. 게임 전이 팝 방지. **위 바닥 관통 먼저 판단**.
 3. **`BS_Wall_Vertical`** 1D BlendSpace 생성(축=WallVerticalAxis −1..1, 샘플 Slip/Hang/Climb).
 그 뒤 **3b 코드**(CMC 3 + AnimInstance 4 + 무기가시성, 빌드필요) · **3c `ABP_Blu_Body` 상태기계 배선**(에디터+수동).
 
