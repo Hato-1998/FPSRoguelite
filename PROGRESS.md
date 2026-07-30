@@ -151,6 +151,26 @@
   - ⚠ **PWAS 참조 비우기가 B+C 이후 더 급해졌다**: `ReloadMontage`(PWAS 팔 스켈레톤용)가 이제 **Blu 바디 메시에서 재생**된다 → 스켈레톤 불일치로 재생 거부 + 경고 로그(크래시는 아님). `WeaponAnimInstanceClass`(PWAS 팔 ABP)도 무기 메시에 얹혀 같은 형태로 실패한다
 - **에디터 첫 실행 시 예상되는 것**: `BP_FPSRPlayer`에 `FirstPersonArms`·`WeaponMesh1P`·`WeaponMeshStatic1P` **고아 컴포넌트 기록**이 남아 경고가 뜬다(A단계의 `WeaponMesh3P`와 같은 형태 — 무해, BP 재저장하면 정리됨). 새 `WeaponMesh`/`WeaponMeshStatic`은 C++ 기본값으로 시작하니 **BP에서 손으로 맞췄던 옛 상대 트랜스폼은 사라진다**(의도 — 정렬 주체가 이제 `SOCKET_Weapon`이다). 폐기 에셋 `Content/Character/FPArms`(+`SK_FP_Manny_Simple`)는 참조가 0이 되므로 정리 대상
 
+## 🧹 BP 그래프 배치 정리 = ✅완료 / ⏳눈으로 확인 대기 (2026-07-30, `refactor/character`)
+> 요청 = `Docs/BPGraphLayout_ResumePrompt.md`. **좌표만 옮기고 로직·배선·값은 안 건드린다.**
+> 커밋 6개(`ef11412e` UI/HUD → `80c9800a` 스크립트). 스크립트 = `Scripts/bp_graph_layout.py`.
+
+- **작업 전 프롬프트의 전제 하나가 틀렸다** — 엔진 `BlueprintService.auto_layout_graph`는 **쓸 수 없다.**
+  노드 많은 그래프에서 성공을 반환하면서 **0개 이동**(RunHUD 48노드·Lobby 77노드·BP_Door 29노드·DownedOverlay 45노드),
+  작동하는 그래프에선 교차를 **되레 늘린다**(BossHUDBar 1→20, ApplyWeaponAimOffset 13→25).
+  → 계층 배치를 직접 구현했다(약연결 덩어리 세로 분리 + 최장경로 계층화 + 게터를 소비 노드 핀 높이로 + barycenter 스윕).
+- **결과(잰 값)**: 정리한 33개 그래프 합계 **교차 237→98 · 노드 겹침 97→0 · 역방향 선 61→8**.
+  큰 것: WBP_Lobby EventGraph 22→1, WBP_RunHUD 41→11, ApplyBand 52→16, WBP_DownedOverlay 39→8.
+  나머지 17개 그래프는 이미 깔끔해 **원본 유지**(품질 게이트 탈락).
+- **안전**: 그래프마다 배선 지문(노드 구성 + 간선 전체 목록)을 전후 대조해 다르면 되돌린다. **되돌린 건 0건.**
+  작업 후 39개 그래프 노드/간선 수를 작업 전 실측치와 재대조 → **불일치 0**. 전체 재실행 시 전부 keep-original(멱등).
+- **컴파일은 부르지 않았다.** 좌표는 컴파일 결과에 안 들어가고, 자식 WBP를 품은 위젯을 프로그래매틱으로
+  컴파일하면 재인스턴싱 중 에디터가 죽은 전례가 있다(2026-06-24). 저장은 `save_packages`(비모달).
+- **⚠️ 별건 발견 — `ABP_Blu_Body`에 죽은 상태머신이 있다.** 출력에 연결된 건 `Locomotion2`인데
+  이전 `Locomotion`(19노드)이 어디에도 연결되지 않은 채 남아 있고, 딸린 `Transition` 그래프가 **42개**,
+  `Ground`가 **3개**로 불어나 있다. 4a 저작 스크립트가 두 번 돈 흔적. **배선을 바꾸는 일이라 손대지 않았다** — 별도 승인·별도 커밋 대상.
+- **남은 확인**: 에디터에서 `WBP_Lobby`·`WBP_RunHUD`·`BP_Door`·`ABL_Blu_W2_Rifle`을 열어 눈으로 보기 + 애님은 PIE로 로코모션 동일한지.
+
 ## 🌬️ 에어 스트레이프 = ✅코드 완료 / ⏳PIE 대기 (2026-07-29, `refactor/character`)
 > 사용자 요청 = "체공 상태 조작이 거의 안 된다" → 대화 중 목표가 **에어 스트레이프**(FPS 유저 기술)로 특정됨.
 > 시나리오 = 슬라이드 → 점프 → 공중에서 **W 떼고 D 유지 + 마우스 오른쪽** → **속도를 보존한 채** 코너를 돈다.
