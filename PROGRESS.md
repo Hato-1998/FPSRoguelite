@@ -126,7 +126,9 @@
 4a 직후 판단 3개: **오너 ADS 왼팔 과신전 여부 → 85% vs 그립 이동**(알파로 덮지 말고 **계측**할 것 — 덮으면 판단 근거가 사라진다) · **힙 총 가시성**(F8 Eject) · **"팔만 보이게" 저작 여부**(위 ⏸)
 
 ### 블로커 / 주의
-- **빌드 1회 ≈ 10분.** `-NoXGE` 사용. 에디터 떠 있으면 Live Coding 락으로 실패 → 먼저 종료
+- **빌드 1회 ≈ 10분**(증분은 15~25초). `-NoXGE` 사용.
+- 🚨 **에디터가 떠 있으면 빌드하지 말 것 — "실패한다"가 아니라 "성공해 버리고 에디터를 죽인다".** 이 줄의 원문은 *"Live Coding 락으로 실패"* 였는데 **틀렸다**(2026-07-30 실증: 락이 안 걸리고 `Result: Succeeded` 후 에디터 크래시, 미저장 작업 유실). 빌드 전에 **프로세스를 실제로 확인**할 것:
+  `Get-Process | Where-Object { $_.ProcessName -match 'UnrealEditor' }` → 비어 있어야 빌드
 - **모듈이 둘이다.** `Source/FPSRoguelite`(게임) + `Source/FPSRogueliteEditor`(무기 조립 툴). grep은 `Source/` 전체에 걸 것 — A단계 1차 빌드가 이걸 놓쳐 실패했다
 - **VibeUE Python에서 레벨 전환 API(`new_level`/`load_level`) 호출 금지** — 에디터 즉사(2회 실증). 열린 레벨에 스폰하고 끝나면 지운다. 자동 저장이 꺼져 있을 수 있으니 에셋은 `save_asset` 명시 호출
 - `unreal.Rotator(a,b,c)` = **(roll, pitch, yaw)** 순. 이 세션에서 두 번 틀렸다

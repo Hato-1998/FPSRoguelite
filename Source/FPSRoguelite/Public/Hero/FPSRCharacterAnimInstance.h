@@ -60,9 +60,28 @@ public:
 	UPROPERTY(BlueprintReadOnly, Category = "FPSR|Anim")
 	float StanceBlend = 0.0f;
 
-	// NOTE: no bIsSliding / SlideBlend yet. The slide pose is a later step (no slide animation exists in the project at
-	// all), and whether the movement component's slide state reads correctly on a SIMULATED PROXY is unverified — that
-	// is the first thing to check when the slide pose lands, since this graph runs on every machine.
+	/** True while a slide is in progress. Presentation only — invariant 3 forbids driving movement state off it.
+	 *  Published now even though no slide animation exists in the project yet: if the slide step had to publish this
+	 *  itself, that step would become a CODE change during a content phase.
+	 *  NOT yet verified on a SIMULATED PROXY — the movement component owns the flag and this graph runs on every
+	 *  machine, so confirm a teammate's slide reads true before trusting it for the slide pose. */
+	UPROPERTY(BlueprintReadOnly, Category = "FPSR|Anim")
+	bool bIsSliding = false;
+
+	/** 0 not sliding .. 1 fully sliding, eased over the movement component's SlideBlendDuration. Same proxy caveat. */
+	UPROPERTY(BlueprintReadOnly, Category = "FPSR|Anim")
+	float SlideBlend = 0.0f;
+
+	/** True while the player is actively pushing a movement input. Derived from acceleration, not velocity — the 8-way
+	 *  start/stop transitions need to know where the player is STEERING, which is not where a decelerating character is
+	 *  still travelling. Published now so wiring those transitions stays content work. */
+	UPROPERTY(BlueprintReadOnly, Category = "FPSR|Anim")
+	bool bHasMovementInput = false;
+
+	/** Input direction, -180..180, RootYawOffset-compensated exactly like Direction. Falls back to Direction while
+	 *  there is no input, so a stop transition doesn't snap to zero the moment the stick is released. */
+	UPROPERTY(BlueprintReadOnly, Category = "FPSR|Anim")
+	float InputDirection = 0.0f;
 
 	// --- Aim ---
 
@@ -103,6 +122,11 @@ public:
 	UPROPERTY(BlueprintReadOnly, Category = "FPSR|Anim")
 	FTransform LeftHandGripWorld;
 
+	/** Same grip as a bare WORLD location — bind this straight to Two Bone IK's EffectorLocation, which takes a vector
+	 *  rather than a transform. Zero while bHasLeftHandGrip is false. */
+	UPROPERTY(BlueprintReadOnly, Category = "FPSR|Anim")
+	FVector LeftHandGripLocation = FVector::ZeroVector;
+
 	/** False when this weapon authors no left-hand grip (melee / unarmed / the pack's bullpup handguards have no
 	 *  SOCKET_LeftHand). Gate the IK alpha on it — there is no target to reach for. */
 	UPROPERTY(BlueprintReadOnly, Category = "FPSR|Anim")
@@ -112,6 +136,18 @@ public:
 	 *  weapon can release the IK. 1 when the curve is absent, which is what locomotion wants. */
 	UPROPERTY(BlueprintReadOnly, Category = "FPSR|Anim")
 	float LeftHandIKWeight = 1.0f;
+
+	/** Elbow pole for the left-hand Two Bone IK, WORLD space — bind to its JointTargetLocation. Defaults to the elbow's
+	 *  OWN current position, which preserves the arm's existing bend plane; a Two Bone IK left without a usable joint
+	 *  target is where elbow flipping comes from. Steer it with LeftElbowPoleOffset below — no code change needed. */
+	UPROPERTY(BlueprintReadOnly, Category = "FPSR|Anim")
+	FVector LeftHandJointTargetLocation = FVector::ZeroVector;
+
+	/** The value to bind to Two Bone IK's Alpha — grip present, not downed, times the montage curve. Folded here rather
+	 *  than assembled from three pins in the graph: the graph is a consumer, and an alpha that silently reads 1 because
+	 *  someone rewired a Select node is the kind of bug that only shows up as an arm stuck to a missing weapon. */
+	UPROPERTY(BlueprintReadOnly, Category = "FPSR|Anim")
+	float LeftHandIKAlpha = 0.0f;
 
 	// --- Life state ---
 
@@ -160,6 +196,18 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Anim")
 	FName LeftHandIKWeightCurve = FName(TEXT("LeftHandIKWeight"));
 
+	/** Bone the left-hand IK's elbow pole is measured from. Data rather than a literal for the same reason every other
+	 *  bone name here is: this project has already changed characters twice (invariant 9).
+	 *  None, or a name the skeleton doesn't have, DISABLES the left-hand IK (LeftHandIKAlpha goes to 0) — a world-space
+	 *  IK with no pole aims the elbow at the world origin, so off is the only safe failure. */
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Anim")
+	FName LeftElbowBoneName = FName(TEXT("lower_arm_L"));
+
+	/** Component-space nudge added to the elbow pole. Zero leaves the pole on the elbow itself, i.e. the current bend is
+	 *  preserved — the safe default. Dial it here if a weapon's grip needs the elbow steered out or down. */
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Anim")
+	FVector LeftElbowPoleOffset = FVector::ZeroVector;
+
 private:
 	/** True on the character's own AnimBP instance, false on a linked anim layer. Decided in
 	 *  NativeInitializeAnimation by asking the mesh which instance is ITS anim instance — the engine assigns that member
@@ -169,6 +217,9 @@ private:
 	/** Actor yaw last frame, for the RootYawOffset accumulation. */
 	float PreviousActorYaw = 0.0f;
 	bool bHasPreviousActorYaw = false;
+
+	/** So a missing elbow bone is reported once, not every frame. */
+	bool bWarnedMissingElbowBone = false;
 
 	/** Frame the values were last published, so the two hooks above can't both run. Sentinel = "never". */
 	uint64 LastPublishedFrame = TNumericLimits<uint64>::Max();
@@ -183,4 +234,7 @@ private:
 	void PushToLinkedLayers() const;
 
 	void UpdateRootYawOffset(const AFPSRCharacter& Character, float DeltaSeconds);
+
+	/** Resolve the left-hand IK's elbow pole from the elbow bone plus the authored offset. Main instance only. */
+	void UpdateLeftElbowPole(const AFPSRCharacter& Character);
 };

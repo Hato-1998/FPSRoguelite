@@ -4,6 +4,7 @@
 #include "Hero/FPSRCharacter.h"
 #include "Hero/FPSRCharacterMovementComponent.h"
 #include "Core/FPSRPlayerState.h"
+#include "Core/FPSRLogChannels.h" // LogFPSR — explicit, not relied on transitively via unity (IWYU)
 
 #include "Components/SkeletalMeshComponent.h"
 
@@ -89,6 +90,20 @@ void UFPSRCharacterAnimInstance::UpdateFromCharacter(AFPSRCharacter& Character, 
 	bIsFalling = Move && Move->IsFalling();
 	bIsOnWall = Move && Move->IsOnWall();
 	StanceBlend = Move ? Move->GetStanceBlend() : 0.0f;
+	bIsSliding = Move && Move->IsSliding();
+	SlideBlend = Move ? Move->GetSlideBlend() : 0.0f;
+
+	// Steering intent, where it exists. Acceleration is NOT replicated — the engine ships
+	// p.EnableCharacterAccelerationReplication = 0 (Character.cpp) — and a simulated proxy rebuilds it from velocity
+	// (CharacterMovementComponent.cpp: Acceleration = Velocity.GetSafeNormal()). So asking a proxy for acceleration
+	// returns a worse copy of Direction while looking like input.
+	// Input intent is therefore owner/server-authoritative BY NATURE, and a proxy approximates from travel. That is the
+	// right model, not a stopgap: the owner needs the input frame for responsiveness, and no remote observer can tell.
+	// Do NOT "fix" this by enabling acceleration replication — it is a global CVar and this game runs 200-300 enemy
+	// characters through the same class (project principle 1).
+	const bool bHasRealInput = Character.IsLocallyControlled() || Character.HasAuthority();
+	const FVector InputAccel = (bHasRealInput && Move) ? Move->GetCurrentAcceleration() : FVector::ZeroVector;
+	bHasMovementInput = bHasRealInput ? !InputAccel.IsNearlyZero() : bIsMoving;
 
 	bIsAiming = Character.IsAiming();
 
@@ -106,10 +121,14 @@ void UFPSRCharacterAnimInstance::UpdateFromCharacter(AFPSRCharacter& Character, 
 	// body keeps facing the crosshair. Get the sign wrong and BOTH compensate backwards at once.
 	AimYaw = FRotator::NormalizeAxis(FRotator::NormalizeAxis(AimRotation.Yaw - ActorRotation.Yaw) - RootYawOffset);
 	Direction = FRotator::NormalizeAxis(CalculatePlanarDirection(Velocity, ActorRotation) - RootYawOffset);
+	InputDirection = (bHasRealInput && bHasMovementInput)
+		? FRotator::NormalizeAxis(CalculatePlanarDirection(InputAccel, ActorRotation) - RootYawOffset)
+		: Direction;
 
 	// Game thread only (it walks component attachment state) — the reason only the main instance computes at all.
 	// Downed drops it so the IK can't drag a collapsed body's arm toward a weapon.
 	bHasLeftHandGrip = !bIsDowned && Character.GetLeftHandGripTransform(LeftHandGripWorld);
+	LeftHandGripLocation = bHasLeftHandGrip ? LeftHandGripWorld.GetLocation() : FVector::ZeroVector;
 
 	// A reload / equip that legitimately takes the hand off the weapon authors this curve to 0. No curve = 1, which is
 	// what locomotion wants, so an unauthored montage keeps the hand on the grip instead of silently dropping it.
@@ -117,6 +136,44 @@ void UFPSRCharacterAnimInstance::UpdateFromCharacter(AFPSRCharacter& Character, 
 	LeftHandIKWeight = (!LeftHandIKWeightCurve.IsNone() && GetCurveValue(LeftHandIKWeightCurve, CurveValue))
 		? CurveValue
 		: 1.0f;
+
+	LeftHandIKAlpha = bHasLeftHandGrip ? FMath::Clamp(LeftHandIKWeight, 0.0f, 1.0f) : 0.0f;
+
+	UpdateLeftElbowPole(Character);
+}
+
+void UFPSRCharacterAnimInstance::UpdateLeftElbowPole(const AFPSRCharacter& Character)
+{
+	// No usable pole means no safe solve, so the IK goes OFF rather than running with a bad target. A world-space
+	// effector chain with a zeroed joint target aims the elbow at the world origin — an arm folded across the body,
+	// which reads as a rig bug rather than as a misconfiguration. Failing quiet-and-wrong is worse than failing off.
+	const USkeletalMeshComponent* OwningMesh = GetOwningComponent();
+	const bool bPoleResolvable = OwningMesh
+		&& !LeftElbowBoneName.IsNone()
+		&& OwningMesh->GetBoneIndex(LeftElbowBoneName) != INDEX_NONE;
+
+	if (!bPoleResolvable)
+	{
+		LeftHandJointTargetLocation = FVector::ZeroVector;
+		LeftHandIKAlpha = 0.0f;
+
+		// HideBoneByName taught this project that the engine fails bone lookups silently (invariant 9). Say it once.
+		if (!bWarnedMissingElbowBone && OwningMesh && !LeftElbowBoneName.IsNone())
+		{
+			bWarnedMissingElbowBone = true;
+			UE_LOG(LogFPSR, Warning,
+				TEXT("[Anim] %s: elbow bone '%s' is not on the body skeleton — left-hand IK disabled (no joint target). Set LeftElbowBoneName on the AnimBP."),
+				*GetNameSafe(&Character), *LeftElbowBoneName.ToString());
+		}
+		return;
+	}
+
+	// Pole on the elbow itself = the arm's current bend plane, which is the non-flipping default. The offset is the
+	// content-side dial for the cases that need steering.
+	const FVector ElbowWorld = OwningMesh->GetBoneLocation(LeftElbowBoneName);
+	LeftHandJointTargetLocation = LeftElbowPoleOffset.IsNearlyZero()
+		? ElbowWorld
+		: ElbowWorld + OwningMesh->GetComponentRotation().RotateVector(LeftElbowPoleOffset);
 }
 
 void UFPSRCharacterAnimInstance::UpdateRootYawOffset(const AFPSRCharacter& Character, float DeltaSeconds)
@@ -194,6 +251,10 @@ void UFPSRCharacterAnimInstance::PushToLinkedLayers() const
 		Layer->bIsFalling = bIsFalling;
 		Layer->bIsOnWall = bIsOnWall;
 		Layer->StanceBlend = StanceBlend;
+		Layer->bIsSliding = bIsSliding;
+		Layer->SlideBlend = SlideBlend;
+		Layer->bHasMovementInput = bHasMovementInput;
+		Layer->InputDirection = InputDirection;
 		Layer->bIsAiming = bIsAiming;
 		Layer->AimPitch = AimPitch;
 		Layer->AimYaw = AimYaw;
@@ -201,8 +262,11 @@ void UFPSRCharacterAnimInstance::PushToLinkedLayers() const
 		Layer->bTurningInPlace = bTurningInPlace;
 		Layer->TurnDirection = TurnDirection;
 		Layer->LeftHandGripWorld = LeftHandGripWorld;
+		Layer->LeftHandGripLocation = LeftHandGripLocation;
+		Layer->LeftHandJointTargetLocation = LeftHandJointTargetLocation;
 		Layer->bHasLeftHandGrip = bHasLeftHandGrip;
 		Layer->LeftHandIKWeight = LeftHandIKWeight;
+		Layer->LeftHandIKAlpha = LeftHandIKAlpha;
 		Layer->bIsDowned = bIsDowned;
 		Layer->bIsDead = bIsDead;
 	}
