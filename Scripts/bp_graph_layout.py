@@ -678,14 +678,15 @@ def duplicate_getters(bp, graph, g):
         vname = _var_name(g, src)
         if not vname:
             continue
-        inputs = [(s, sp, tp) for s, sp, t, tp in g["edges"] if t == src]   # 게터 자신의 입력
+        # 입력이 연결된 게터 = 다른 객체의 멤버를 읽는 것. `add_get_variable_node` 는
+        # 이 블루프린트 자신의 변수만 만들 수 있어 복제할 수 없다(실측: WBP_RunHUD/MissionWindows).
+        if any(t == src for _s, _sp, t, _tp in g["edges"]):
+            continue
         for sp, t, tp in sorted(cons)[1:]:
             nid = S.add_get_variable_node(bp, graph, vname, g["pos0"][src][0], g["pos0"][src][1])
             if not nid:
-                print("%s   게터 복제 실패: %s %s" % (TAG, vname, graph))
+                print("%s   게터 복제 실패: %s %s/%s" % (TAG, vname, bp.split("/")[-1], graph))
                 continue
-            for s2, sp2, tp2 in inputs:                                     # 입력도 같이 복제
-                S.connect_nodes(bp, graph, s2, sp2, nid, tp2)
             if _relink(bp, graph, _links_into(g, t, tp), t, tp, (src, sp, nid, sp)):
                 made += 1
             else:
