@@ -309,6 +309,17 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|메시", meta = (DisplayName = "무기 AnimBP"))
 	TSoftClassPtr<UAnimInstance> WeaponAnimInstanceClass;
 
+	/** 이 무기를 들었을 때 바디에 링크되는 애니 레이어(ADR 0002 4단계). 바디 AnimBP는 하나뿐이고, 무기별로 달라지는
+	 *  포즈(로코모션·에임오프셋)만 이 레이어가 담당한다 — 루트 요 오프셋·왼손 IK·몽타주 슬롯은 무기와 무관하므로
+	 *  바디 쪽에 남는다. 같은 애니 세트를 쓰는 무기들은 같은 레이어를 가리키면 되고, 그때 코드는 건드리지 않는다.
+	 *  null = 레이어 없음(바디 기본 포즈만) — 리타게팅된 애니가 아직 없는 무기의 정상 상태다.
+	 *  ⚠ 반드시 `UFPSRCharacterAnimInstance` 파생이어야 한다. 그게 아니면 링크는 되지만 로코모션·조준·IK 값을 받지
+	 *  못해 기본값으로 렌더된다(런타임이 그 타입으로만 값을 밀어 넣는다). 그래서 피커를 경로 메타로 제한했다 —
+	 *  타입으로 제한하면 이 헤더가 AnimInstance 헤더를 끌고 와 전 프로젝트 컴파일이 무거워진다. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|메시",
+		meta = (DisplayName = "바디 애니 레이어", MetaClass = "/Script/FPSRoguelite.FPSRCharacterAnimInstance"))
+	TSoftClassPtr<UAnimInstance> BodyAnimLayerClass;
+
 	/** Socket on the BODY skeleton the weapon attaches to (NAME_None = body mesh root). Authored on the character's
 	 *  skeleton at the grip hand — see ADR 0002 (Blu: SOCKET_Weapon on hand_R). */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|메시", meta = (DisplayName = "무기 부착 소켓(바디)"))

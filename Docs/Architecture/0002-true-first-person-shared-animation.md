@@ -112,7 +112,11 @@
 
 #### 안 ㉰ — 시각 회전 분리 **[채택]**
 
-캡슐 요는 시선에 즉시 붙여 두고(현행 그대로), **하체 지연은 메시 컴포넌트의 상대 요를 AnimBP가 반대로 돌려서** 만든다. 상체는 Aim Offset이 시선 정렬.
+캡슐 요는 시선에 즉시 붙여 두고(현행 그대로), **하체 지연은 AnimBP가 포즈를 반대로 돌려서** 만든다. 상체는 Aim Offset이 시선 정렬.
+
+> **구현 시 문구 정정(4a)** — 원문은 *"메시 컴포넌트의 상대 요"* 였으나 실제 구현은 애님 그래프의
+> **`Rotate Root Bone` 노드**다. 시각 결과는 같고, 애님 그래프가 컴포넌트 트랜스폼을 건드리는 부작용이 없다
+> (스레드 안전 · 소켓/부착 일관). 상세 = 아래 "바디 AnimBP 4a".
 
 `일반적 패턴` — Lyra·ALS의 `RootYawOffset` 방식. 이 엔진 버전에서 직접 대조하지는 않았다.
 
@@ -767,6 +771,91 @@ W1 P3-3의 "프리즈 중 행동 훅 미발화" 보장을 깨지 않는다 — �
 
 → **해제하지 않는 쪽이 맞다.** 다시 넣으려면 오너 측 클리어(클라 소유 알림)를 같이 넣어야 한다.
 폰을 컨트롤러 간에 넘기는 기능은 이 프로젝트에 없다 — 생기면 옛 오너의 예측값도 같이 지워야 한다.
+
+## 바디 AnimBP 4a — 코어 (2026-07-30, 8차)
+
+4단계를 셋으로 쪼갰다(사용자 결정). **4a = 코어**(이 절) / 4b = 8방향 시작·정지 전환(클립 40개+) /
+4c = 슬라이드. 구조는 **애니 레이어 인터페이스**(사용자 결정).
+
+### 상태 계산은 C++ 한 곳, 포즈는 레이어
+
+`UFPSRCharacterAnimInstance`(신규, `Hero/`)가 이동·조준·생존 상태를 프레임당 한 번 계산해 평범한 값으로
+발행하고, 애님 그래프는 그것만 읽는다. 그래프가 게임플레이 객체를 직접 캐묻는 경로를 만들지 않는다.
+`UFPSRWeaponAnimInstance`(무기 메시용)가 이미 세워둔 선례를 바디 쪽에 채운 것이고, CMC는 이미
+`GetStanceBlend`·`GetPlanarSpeed`·`IsOnWall`을 *"For the body AnimBP … presentation only"* 주석과 함께
+노출해 두었다. **새 인프라가 아니라 비어 있던 자리다.**
+
+- 바디 ABP 1개(무기 무관) + **무기별 레이어**(무기 DA `BodyAnimLayerClass` → `LinkAnimClassLayers`)
+- 레이어 = 무기 종속(로코모션 · 에임오프셋) / 바디 = 무기 무관(루트 요 · 왼손 IK · 몽타주 슬롯)
+- 같은 애니 세트를 쓰는 무기는 같은 레이어를 가리키면 끝 — **중앙 코드 0수정**
+- 링크 훅 = `RefreshEquippedWeaponVisual`(모든 머신에서 도는 것이 이미 보장돼 있다). null 레이어는
+  정상 상태(리타게팅된 애니가 없는 무기) → 바디 기본 포즈로 폴백
+
+### 데이터 흐름 = 메인이 레이어로 **밀어 넣는다** (계획을 뒤집은 지점)
+
+플랜은 "메인을 레이어에 주입하고 레이어가 당겨 읽는다"였다. **엔진 업데이트 순서가 그걸 무효로 만든다** —
+`USkeletalMeshComponent::TickAnimInstances`는 **링크된 인스턴스를 메인보다 먼저** 업데이트한다.
+당겨 읽으면 레이어의 상태기계가 *지난 프레임* 값으로 전이한다.
+→ 엔진이 이 목적으로 둔 훅 `PreUpdateLinkedInstances`(*"Called on the game thread before UpdateAnimation is
+called on linked instances"*)에서 계산하고 밀어 넣는다. 메인이 있으면 레이어 유무와 무관하게 매 프레임 불린다.
+`NativeUpdateAnimation`은 프레임 가드를 건 폴백으로만 남긴다(두 훅이 겹치면 요 누산기가 두 배로 돈다).
+
+부수 이득: **주입 단계가 사라져** "레이어 함수 2개가 같은 group이 아니면 인스턴스가 갈려 한쪽만 주입된다"는
+함정이 통째로 없어졌다. 메인은 `GetLinkedAnimInstances()`의 우리 타입 전부에 밀어 넣는다.
+
+메인/레이어 판별 = `GetOwningComponent()->GetAnimInstance() == this`. 엔진이 `AnimScriptInstance`를 **대입한 뒤**
+`InitializeAnimation()`을 부르므로 `NativeInitializeAnimation`에서 이미 답이 나온다.
+**게임스레드 전용인 `GetLeftHandGripTransform`은 메인만 호출** — 코드로 강제된다.
+
+### 노드 순서 3제약 (바꾸면 조용히 반쯤 동작한다)
+
+```
+Layer.로코모션 → Slot('DefaultSlot') → Layer.에임오프셋 → RotateRootBone → TwoBoneIK(hand_L, World) → Output
+```
+- **Slot을 앞에** — 몽타주(발사·재장전·장착)가 로코모션 포즈를 대체해야 한다
+- **에임오프셋을 Slot 뒤에** — AimOffset 4개가 전부 Mesh Space **애디티브**다. 몽타주 위에 얹는 것이 정상이고,
+  그래야 발사·재장전 중에도 조준 pitch가 산다. (그래서 레이어 함수를 **2개**로 쪼갰다 — 단일 함수면
+  에임오프셋이 Slot 앞에 갇힌다)
+- **IK를 RotateRootBone 뒤에** — 이펙터가 월드 공간이라 루트 회전이 뒤에 오면 손이 목표에서 떨어진다
+
+`TwoBoneIK`는 `bAllowStretching=false` + **JointTarget(팔꿈치 폴) 필수**(없으면 elbow flip).
+알파 = 그립 있음 × `LeftHandIKWeight` 커브(없으면 1) × 다운/사망 아님. **몽타주 이름 문자열 판정 금지** —
+재장전·장착 몽타주가 커브로 0을 저작한다.
+
+### `RootYawOffset` 상한 = AimOffset의 yaw 범위 (±90)
+
+하체가 상체보다 더 밀리면 **상쇄가 클램프되어 조준이 눈에 보이게 크로스헤어를 따라오지 못한다.**
+그래서 하체 지연 한계를 상체 보상 한계에 묶는다(`RootYawOffsetMax` 기본 90 = AO yaw 범위).
+넓히려면 **더 넓은 AimOffset을 먼저 저작**해야 한다. (팩의 135/180 회전 클립은 4b 소관)
+
+**오프셋 소비는 코드가 한다** — 팩의 제자리회전 클립은 In-Place 변환본이라 루트모션이 없고, 소비할 것이 없다.
+`TurnInPlaceRateDegPerSec`로 0을 향해 감쇠하고 클립은 시각만 담당한다(소유권이 C++ = 불변식 8 정합).
+
+보정 수식(부호를 한 번 틀리면 **AO와 이동 블렌드가 동시에** 반대로 보정된다 → PIE 좌/우 ±90 필수 검증):
+`Direction = 평면방향 − RootYawOffset` · `AimYaw = (시선요 − 액터요) − RootYawOffset`,
+둘 다 **그 프레임에 실제로 `RotateRootBone`에 들어가는**(감쇠·클램프 적용 후) 값을 쓴다.
+
+### 공짜로 맞는 것 하나 — 프록시 조준 pitch
+
+`AimPitch`는 추가 복제가 **0**이다. 엔진이 이미 `APawn::RemoteViewPitch16`을 `COND_SkipOwner`로 복제하고
+`GetBaseAimRotation()`이 그것을 접어 넣는다 — 우리 조준 비트와 같은 패턴을 엔진이 먼저 쓰고 있었다.
+
+### 콘텐츠 구멍 2개 (4a가 임시로 덮는다)
+
+- **슬라이드 애니가 리포에 0개다**(팩·Blu 양쪽 확인). 저작 선행 → 4c. 그래서 4a는 `bIsSliding`/`SlideBlend`를
+  **노출조차 하지 않는다.** 착수 시 먼저 확인할 것 = *그 값이 시뮬레이티드 프록시에서 맞는가*(이 그래프는
+  모든 머신에서 돈다)
+- **점프가 통짜 클립뿐이다** — 팩의 `Split_Jumps` 108개는 리타게팅 제외였고, 통짜 클립은 가변 체공에
+  성립하지 않는다. 4a는 Blu 자체의 **이미 3분할된** `Blu_MM_Jump`/`Fall_Loop`/`Land`를 하체에 쓰고
+  spine 이상은 라이플 조준 아이들을 섞어 파지를 지킨다(맨손 낙하 위에 라이플 AO만 얹으면 애디티브 기준
+  포즈가 달라 어깨·오른손이 틀어진다). `bIsOnWall`도 4a에서는 이 상태로 보낸다 — 벽 상태가 지상 로코모션으로
+  남는 것이 가장 눈에 띈다. 제대로 = Split_Jumps 리타게팅(4b)
+
+### 금지 (명문화)
+
+- **AnimNotify가 이동/게임플레이 상태를 쓰지 않는다** (불변식 3·7)
+- **제자리회전이 캡슐 요를 만지지 않는다** (불변식 1)
+- **`RootYawOffset`은 복제하지 않는다** (불변식 8) — 각 머신이 자기 액터 회전에서 누산
 
 ## 영향받는 기존 결정
 

@@ -245,6 +245,13 @@ protected:
 	 *  the receiver. Null when this weapon authors no left-hand grip. Shared by the AnimBP getter. */
 	UMeshComponent* ResolveLeftHandGripComponent() const;
 
+	/** Swap the body's per-weapon anim layer to the equipped weapon's (ADR 0002 step 4). Called from
+	 *  RefreshEquippedWeaponVisual, so it runs on every machine — the layer decides the POSE, and a client that skipped
+	 *  it would show a teammate holding a rifle in an unarmed stance. Passing null (or a weapon with no authored layer)
+	 *  unlinks back to the body's own base pose, which is the correct state for a weapon whose animations don't exist
+	 *  yet. Idempotent: re-linking the same class is skipped. */
+	void RefreshBodyAnimLayer(const class UFPSRWeaponDataAsset* Weapon);
+
 	/** Full distance the eye travels between standing and crouching, in cm. Only used to bound the held-back offset. */
 	float GetStanceEyeTravel() const;
 
@@ -544,6 +551,11 @@ protected:
 	TObjectPtr<UParticleSystem> CachedMuzzleFlash;
 
 	FName CachedMuzzleSocket = NAME_None;
+
+	/** The per-weapon body anim layer currently linked to GetMesh() (ADR 0002 step 4). Kept so the next equip knows what
+	 *  to unlink — LinkAnimClassLayers has no "replace" and layering a second set on top would leave both running. */
+	UPROPERTY(Transient)
+	TSubclassOf<UAnimInstance> LinkedBodyAnimLayerClass;
 
 	/** Rotation offset applied to the muzzle-flash emitter relative to the muzzle socket (owner-local cosmetic).
 	 *  This pack's weapon-forward is +Y, so the flash needs a yaw offset to fire down the barrel (same reason as

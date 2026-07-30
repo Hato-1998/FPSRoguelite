@@ -1386,6 +1386,50 @@ void AFPSRCharacter::ApplyVisionRestriction(bool bRestricted)
 	bVisionRestrictionApplied = bRestricted;
 }
 
+void AFPSRCharacter::RefreshBodyAnimLayer(const UFPSRWeaponDataAsset* Weapon)
+{
+	USkeletalMeshComponent* BodyMesh = GetMesh();
+	if (!BodyMesh)
+	{
+		return;
+	}
+
+	// No authored layer is a NORMAL state, not an error: only the rifle animation set has been retargeted so far, and a
+	// weapon without one correctly falls back to the body's own base pose.
+	UClass* DesiredLayer = nullptr;
+	if (Weapon && !Weapon->BodyAnimLayerClass.IsNull())
+	{
+		DesiredLayer = Weapon->BodyAnimLayerClass.LoadSynchronous();
+		if (!DesiredLayer)
+		{
+			UE_LOG(LogFPSR, Warning,
+				TEXT("[Anim] %s: body anim layer '%s' failed to load — falling back to the base body pose."),
+				*GetNameSafe(Weapon), *Weapon->BodyAnimLayerClass.ToString());
+		}
+	}
+
+	// RefreshEquippedWeaponVisual runs on far more than archetype changes (every equip, every parts rebuild), and
+	// re-linking tears down and recreates the layer instance — which would restart its state machine mid-stride.
+	if (LinkedBodyAnimLayerClass.Get() == DesiredLayer)
+	{
+		return;
+	}
+
+	// LinkAnimClassLayers has no "replace": linking a second set without unlinking the first leaves both running.
+	if (LinkedBodyAnimLayerClass)
+	{
+		BodyMesh->UnlinkAnimClassLayers(LinkedBodyAnimLayerClass);
+	}
+	LinkedBodyAnimLayerClass = DesiredLayer;
+	if (DesiredLayer)
+	{
+		BodyMesh->LinkAnimClassLayers(DesiredLayer);
+	}
+
+	// No main->layer injection step: UFPSRCharacterAnimInstance's main instance pushes its computed values into every
+	// linked layer each frame (see its header). That also means this doesn't care how the layer functions are grouped.
+}
+
 void AFPSRCharacter::RefreshEquippedWeaponVisual()
 {
 	// Runs on EVERY machine. One weapon mesh serves the owner, a spectating downed teammate (§2-13 DBNO), and ordinary
@@ -1398,6 +1442,10 @@ void AFPSRCharacter::RefreshEquippedWeaponVisual()
 	}
 
 	const UFPSRWeaponDataAsset* Weapon = WeaponInventory->GetCurrentWeapon();
+
+	// Before the no-weapon early-out below, deliberately: it has to run for the null case too. The layer decides the
+	// POSE, so a stale rifle layer left linked after unequipping keeps a teammate posed around a gun that isn't there.
+	RefreshBodyAnimLayer(Weapon);
 
 	// Reset cached fire cosmetics; repopulated below when a weapon is equipped.
 	CachedFireMontage = nullptr;
