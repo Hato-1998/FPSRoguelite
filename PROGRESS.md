@@ -25,7 +25,8 @@
 | `9edf528d` | **무기 85% 결정의 구멍** — 전량 실측으로 그립 이동안(B) 부활 |
 | `a7fab2e5` | 에임오프셋 포즈 48개를 Mesh Space 애디티브로 선처리 |
 | `324972df` | **AimOffset 4개 도입 + 대각 좌표 16개 정정**(내가 준 좌표표가 틀렸다 — 아래) |
-| `7d5fe569` | **4단계 선행** — 조준 상태 복제(Push Model + `COND_SkipOwner`) + 프리즈 래치 결함 수정. 빌드 3회 통과 · Codex 4회 |
+| `7d5fe569` | **4단계 선행** — 조준 상태 복제(Push Model + `COND_SkipOwner`) + 프리즈 래치 결함 수정. 빌드 3회 통과 · Codex 4회 · ✅PIE |
+| `1d41ddb7` | **4a-1 코드** — `UFPSRCharacterAnimInstance` + 무기별 애니 레이어 링크(무기 DA `BodyAnimLayerClass`). 빌드 2회 · Codex 4회 |
 
 ### ✅ PIE 1차 결과 (사용자)
 - **정상**: 앞뒤좌우 시야 · 머리 숨김 · ADS(조준경이 화면 중앙)
@@ -66,7 +67,7 @@
 3. **같이 고친 잠재 결함** — 프리즈 클리어 경로가 *이미 프리즈가 켜진 뒤* `SetAiming(false)`를 보내는데 서버가 그걸 거부하고 있었다 → 서버 조준이 true로 래치. 복제 전엔 확산만 틀렸지만 복제 후엔 **원격 바디가 조준 포즈로 굳는다**. 수정 = 게이트를 방향성으로(**조준 ON만 막고 해제는 항상 통과** — 리포 선례 `Input_CrouchReleased`). `OnAim` 훅 게이트는 W1 P3-3 보장 때문에 **원래대로 보존**.
 4. **감수** = 서버가 조준 ON을 거부하면 오너 교정이 안 간다(SkipOwner). 최대 1 RTT이고 **그 낡음을 만든 OnRep이 그대로 클리어를 실행한다**. `COND_None`은 빠른 탭에서 오너 ADS가 깜빡여서 기각.
 
-⚠️ **PIE에서 확인할 것** = `BeginPlay` 방어 로그(`component replication is DISABLED`)가 뜨는지. 뜨면 `BP_FPSRPlayer`의 WeaponFire 컴포넌트에 `Component Replicates` 오버라이드가 저장돼 있다는 뜻이고, 켜 줘야 한다(`bReplicates`는 `EditDefaultsOnly`라 BP가 C++ 기본값을 이긴다).
+**✅ PIE 확인 완료**(사용자, 2026-07-30) — 오너 ADS 감각 회귀 없음, 방어 로그(`component replication is DISABLED`) 미발생 = `BP_FPSRPlayer`에 오버라이드 없음. 조준 **포즈**는 4a-2 이후에 보인다.
 
 ### ✅ 3단계 완료 — Rifle_01 426개 Blu 리타게팅 (`d719e6c0`)
 `Content/Characters/Blu/Anims/W2_Rifle/` **426개**(106MB, LFS) = In-Place 346 + Aim_Offset 48 + Holster_Reload_Fire 32. 제외 = Root_Motion 348(ADR 확정)·Split_Jumps 108(보류)·Legacy 11. 기존 97개(`Blu_MF/MM_Rifle_*`)는 접두사가 달라 **무손상**, `_Spike` 4개는 정식본이 생겨 삭제.
@@ -98,17 +99,31 @@
 >
 > **에디터에서 그리드 위 미리보기는 `Ctrl`을 눌러야 움직인다**(엔진 상태바 문구 그대로). 안 움직인다고 에셋 문제로 오판하지 말 것.
 
-### 🎯 4단계 (다음) = 바디 AnimBP — 여기서부터 시작
-**선행(조준 복제)은 위에서 끝났다.** 이제 조준 포즈를 `AFPSRCharacter::IsAiming()`(BlueprintPure)에 그대로 물려도 된다.
+### 🎯 4단계 = 4a/4b/4c로 쪼갬 (사용자 결정) — **4a 코드 완료 / 4a 콘텐츠가 다음**
+**4a = 코어**(아래) · **4b** = 8방향 시작·정지 전환(클립 40개+) + Split_Jumps 108 리타게팅 · **4c** = 슬라이드.
+구조 = **애니 레이어 인터페이스**(사용자 결정): 바디 ABP 1개 + 무기별 레이어, 무기 DA `BodyAnimLayerClass`.
+설계 전문 = **[ADR 0002 "바디 AnimBP 4a"](Docs/Architecture/0002-true-first-person-shared-animation.md)**.
 
-AnimBP 본체(에디터 작업, 아직 설계 안 됨 — **플랜 필요**):
-1. **하체 요 오프셋**(ADR 축 1 ㉰) — 캡슐 요는 그대로, 메시 상대 요를 AnimBP가 반대로 돌린다. 제자리 회전 애니(`Blu_W2_Stand_Aim_Turn_In_Place_L/R_Loop_IPC` + `_L/R_45/90/135/180_IPC`)가 이 각도 오차를 소비. **`RootYawOffset` 소유권을 AnimBP에 두고 복제하지 않는다**(불변식 8)
-2. **Aim Offset 배선** — 위 4개를 자세(Stand/Crouch) × 조준여부(Aim/Relaxed)로 분기. 입력은 `GetBaseAimRotation() − ActorRotation`
-3. **왼손 Two Bone IK** — `AFPSRCharacter::GetLeftHandGripTransform(FTransform&)`(BlueprintPure, **월드 공간**, false면 IK 끔) 소비. ⚠️ **게임 스레드 전용** — `NativeUpdateAnimation`에서 멤버로 복사해서 쓸 것
-4. **슬라이드** — 몽타주 아님, AnimBP 상태로(불변식 3). 진입/루프/이탈 3분할은 저작 필요
-5. 8방향 시작/정지 전환 = `Blu_W2_Stand_Aim_To_Jog_Aim_{L,R}{45,90,135,180}_Fwd_IPC` / `Blu_W2_Jog_Aim_*_to_Stand_Aim_*`
+#### ✅ 4a-1 코드 완료 (`1d41ddb7`)
+`UFPSRCharacterAnimInstance`(신규 `Hero/`)가 이동·조준·생존 상태를 프레임당 한 번 계산해 발행하고, 그래프는 그것만 읽는다. 알아야 할 4개:
+1. **데이터 흐름은 메인 → 레이어 푸시**(플랜의 "주입 후 당겨 읽기"를 뒤집었다). `TickAnimInstances`가 **링크된 인스턴스를 메인보다 먼저** 업데이트하므로 당겨 읽으면 레이어 상태기계가 지난 프레임 값으로 전이한다. 엔진 훅 `PreUpdateLinkedInstances`에서 계산·푸시하고 `NativeUpdateAnimation`은 프레임 가드 폴백. 덕분에 "레이어 함수가 같은 group이 아니면 한쪽만 주입" 함정도 소멸
+2. **`RootYawOffsetMax` = AimOffset yaw 범위(±90)에 묶임** — 하체가 상체보다 더 밀리면 상쇄가 클램프되어 조준이 크로스헤어를 못 따라온다. 넓히려면 **AO를 먼저 더 넓게 저작**
+3. **오프셋 소비는 코드가 한다**(`TurnInPlaceRateDegPerSec`) — 팩 회전 클립은 In-Place 변환본이라 루트모션이 없다. 클립은 시각만
+4. **`bIsSliding`/`SlideBlend`는 노출조차 안 했다** — 4c이고, 그 값이 시뮬레이티드 프록시에서 맞는지 미검증(이 그래프는 모든 머신에서 돈다). **슬라이드 착수 시 그것부터 확인**
 
-4단계 중/직후에 판단할 것 3개: **힙 총 가시성**(라이플 포즈가 들어가면 팔이 가슴 앞으로) · **"팔만 보이게" 저작 여부**(위 ⏸) · **85% vs 그립 이동**(위 🚨, 왼손 IK 붙인 직후)
+#### ⏳ 4a-2 콘텐츠 = 다음 (에디터 필요)
+**노드 순서 3제약을 지킬 것**(바꾸면 조용히 반쯤 동작한다 — ADR에 근거 있음):
+`Layer.로코모션 → Slot('DefaultSlot') → Layer.에임오프셋 → RotateRootBone → TwoBoneIK(hand_L, **World**) → Output`
+1. **BlendSpace 4개** 신규(Stand/Crouch × Aim/Relaxed, Direction × Speed). 재료 = `Walk_Aim`·`Jog_Aim`·`CrouchWalk_Aim` 8방향
+2. **라이플 레이어 ABP** — 상태기계 Idle / Move / TurnInPlace / Air. 인터페이스 함수 **2개**(`GetWeaponLocomotionPose` + `ApplyWeaponAimOffset`) — 단일 함수면 에임오프셋이 Slot 앞에 갇혀 몽타주가 조준 pitch를 죽인다. Idle은 `StanceBlend`(0~1 **연속**)로 블렌드, bool 스냅 금지
+3. **Air 임시 브릿지** — 하체 `Blu_MM_Jump`/`Fall_Loop`/`Land`(Blu 자체, **이미 3분할**) + spine 이상은 라이플 조준 아이들(맨손 낙하 위에 라이플 AO만 얹으면 애디티브 기준 포즈가 달라 어깨·오른손이 틀어진다). `bIsOnWall`도 여기로
+4. **베이스 ABP** — `UFPSRCharacterAnimInstance` 파생. `TwoBoneIK`는 `bAllowStretching=false` + **JointTarget(팔꿈치 폴) 필수**(없으면 elbow flip)
+5. **재장전·장착 몽타주에 `LeftHandIKWeight` 커브 0 저작** — 몽타주 이름 문자열 판정 금지
+6. `BP_FPSRPlayer`의 AnimBP 교체 + `DA_Weapon_Rifle`에 레이어 클래스(피커가 `UFPSRCharacterAnimInstance` 파생만 보여준다)
+
+**PIE 최우선 = 부호 검증**(좌/우 ±90 제자리회전). 틀리면 **AO와 이동 블렌드가 동시에** 반대로 보정된다.
+
+4a 직후 판단 3개: **오너 ADS 왼팔 과신전 여부 → 85% vs 그립 이동**(알파로 덮지 말고 **계측**할 것 — 덮으면 판단 근거가 사라진다) · **힙 총 가시성**(F8 Eject) · **"팔만 보이게" 저작 여부**(위 ⏸)
 
 ### 블로커 / 주의
 - **빌드 1회 ≈ 10분.** `-NoXGE` 사용. 에디터 떠 있으면 Live Coding 락으로 실패 → 먼저 종료
