@@ -89,6 +89,7 @@ void UFPSRCharacterAnimInstance::UpdateFromCharacter(AFPSRCharacter& Character, 
 	bIsMoving = Speed > MovingSpeedThreshold;
 	bIsFalling = Move && Move->IsFalling();
 	bIsOnWall = Move && Move->IsOnWall();
+	bIsAirborne = bIsFalling || bIsOnWall;
 	StanceBlend = Move ? Move->GetStanceBlend() : 0.0f;
 	bIsSliding = Move && Move->IsSliding();
 	SlideBlend = Move ? Move->GetSlideBlend() : 0.0f;
@@ -250,6 +251,7 @@ void UFPSRCharacterAnimInstance::PushToLinkedLayers() const
 		Layer->bIsMoving = bIsMoving;
 		Layer->bIsFalling = bIsFalling;
 		Layer->bIsOnWall = bIsOnWall;
+		Layer->bIsAirborne = bIsAirborne;
 		Layer->StanceBlend = StanceBlend;
 		Layer->bIsSliding = bIsSliding;
 		Layer->SlideBlend = SlideBlend;

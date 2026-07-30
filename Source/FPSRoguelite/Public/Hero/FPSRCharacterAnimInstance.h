@@ -55,6 +55,14 @@ public:
 	UPROPERTY(BlueprintReadOnly, Category = "FPSR|Anim")
 	bool bIsOnWall = false;
 
+	/** Falling OR wall-hung — i.e. "not on the ground", which is the question the locomotion state machine actually asks.
+	 *  Combined HERE rather than in the graph because a state-machine transition rule can only read ONE variable: the
+	 *  ground/air pair needs `bIsFalling || bIsOnWall` on the way out and the negation of BOTH on the way back, and the
+	 *  negation is not expressible as two separate transitions. Without this, a wall-hung player keeps a grounded idle
+	 *  (bIsFalling is false in a custom movement mode) — the most visible way this graph can be wrong. */
+	UPROPERTY(BlueprintReadOnly, Category = "FPSR|Anim")
+	bool bIsAirborne = false;
+
 	/** 0 fully standing .. 1 fully crouched. Continuous on purpose — blend the stance with it instead of switching on a
 	 *  bool, or the body snaps while the camera's own stance blend is still easing (UpdateStanceCamera). */
 	UPROPERTY(BlueprintReadOnly, Category = "FPSR|Anim")
