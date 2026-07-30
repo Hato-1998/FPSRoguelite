@@ -4,9 +4,9 @@
 > **작업 단계를 끝낼 때마다, 그리고 중단 전 반드시 이 파일을 갱신하고 커밋한다.**
 > 확정 설계·기획·코드구조·규칙은 `Game.md`(**SSOT 허브** → 도메인별 `Docs/SSOT/*.md`, 작업별 라우팅은 허브 §0-1), **완료 작업 상세는 `git log --oneline`**. 여기엔 *무엇을 했는지*만 요약한다.
 
-**최종 갱신: 2026-07-29**
+**최종 갱신: 2026-07-30**
 
-## 🎯 True First Person 전환 = ⏳A·B·C 코드 완료 / **3·4단계 인계** (2026-07-29, `refactor/character`)
+## 🎯 True First Person 전환 = ✅A·B·C 코드 + ✅3단계 애니 완료 / **4단계 AnimBP 인계** (2026-07-30, `refactor/character`)
 > **설계 = [ADR 0002](Docs/Architecture/0002-true-first-person-shared-animation.md)** — 새 세션은 **ADR 0002 전문을 먼저 읽을 것**(불변식 10개 + 실측 + 기각안이 전부 거기 있다). 아래는 진행 상태만.
 > 목표 = 1인칭·3인칭을 **3P 애니 팩 한 벌**(`Content/Rifle_01`)로 덮기. 1P 전용 팔 + PWAS 폐기.
 
@@ -19,7 +19,12 @@
 | `11d8db05` | ADR 갱신 — 1인칭 실측으로 **ADS 정렬 방식 재결정**(아래) |
 | `0a05baa6` | **B+C단계** — 무기 컴포넌트 단일화 + 머리 숨김 + ADS 무기-to-카메라 + 왼손 IK 이음매. 빌드 3회 통과 · Codex 1건 반영 |
 | `a4ad0ddd` | 대응 콘텐츠 — `BP_FPSRPlayer` 재저장(고아 컴포넌트 정리 + `Blu_ABP_Unarmed` 배정), `DA_Weapon_Rifle` 저작(스케일·왼손소켓·PWAS 제거) |
-| (이 커밋) | **축 2 눈 앵커 = 고정 항** — 카메라를 가슴 앞으로 + 반지름 클램프. ADR 축 2 공식 2곳 수정 |
+| `258501be` | **축 2 눈 앵커 = 고정 항** — 카메라를 가슴 앞으로(`FirstPersonCameraOffset`) + 반지름 클램프. ADR 축 2 공식 2곳 수정 |
+| `76b272c0` | "팔만 보이게"(Apex식) 조사 — 지금 데이터로는 불가, 4단계 후 재판단 |
+| `d719e6c0` | **3단계** — Rifle_01 **426개** Blu 리타게팅(106MB LFS). 재발방지 검증 통과 |
+| `9edf528d` | **무기 85% 결정의 구멍** — 전량 실측으로 그립 이동안(B) 부활 |
+| `a7fab2e5` | 에임오프셋 포즈 48개를 Mesh Space 애디티브로 선처리 |
+| `324972df` | **AimOffset 4개 도입 + 대각 좌표 16개 정정**(내가 준 좌표표가 틀렸다 — 아래) |
 
 ### ✅ PIE 1차 결과 (사용자)
 - **정상**: 앞뒤좌우 시야 · 머리 숨김 · ADS(조준경이 화면 중앙)
@@ -67,43 +72,65 @@
 **ADR의 85%는 애니 4개를, 그것도 사실상 프레임 0(정지 포즈)에서 잰 값이었다.** 186개 양손 파지 조준 애니를 전 프레임으로 재니 **54개가 음수, 최악 −3.11cm**. 같은 애니가 프레임0 **+2.42** ↔ 전체 **−2.34**. 계측은 ADR 자신의 수치(리치 41.54·간격 18.92·발 15.1)로 교정 확인됨. 상세 = [ADR 0002 "무기 85% 결정의 구멍"](Docs/Architecture/0002-true-first-person-shared-animation.md).
 → ADR이 *"85%면 충분하니 불필요"* 로 기각했던 **안 B(그립을 매거진웰로 이동)가 되살아난다.** 스케일만으로 덮으면 ~73%(장난감), **그립 이동은 그것만으로 최악을 덮는다**(요구간격 −3.4cm@85%). **4단계에서 왼손 IK를 붙인 직후 판단** — `SOCKET_LeftHand` 위치는 콘텐츠 결정이다.
 
-### ⏳ 사용자 콘텐츠 작업 — AimOffset 4개 (헤드리스 불가)
-헤드리스 불가 근거: `blend_parameters`가 `FixedArray`라 Python 기입이 **반영되지 않고**(실증), `sample_data`만 써도 런타임 그리드가 안 만들어진다. 기존 `Blu_AO_Rifle`은 샘플 3개짜리 피치 전용 스텁이라 템플릿도 못 된다. → **에디터에서 드래그로 만든다.**
+### ✅ AimOffset 4개 완료 (`324972df`) — 위치가 예상과 다르니 주의
+**`Content/Rifle_01/AimOffset/`** 에 있다(`W2_Rifle/` 아님):
 
-> ✅ **애디티브 설정 48개는 이미 끝냈다**(`a7fab2e5`) — 다시 하지 말 것. 각 포즈가 자기 그룹 `Center` 기준 `AAT_ROTATION_OFFSET_MESH_SPACE` + `ABPT_ANIM_FRAME`(frame 0). 이걸 안 하고 AimOffset을 만들면 오프셋이 아니라 전체 포즈로 블렌드돼 캐릭터가 튄다.
+| 에셋 | 재료 | 샘플 | 미리보기 베이스 |
+|---|---|---|---|
+| `AO_Stand_Aim` | `Blu_W2_Stand_Aim_Point_*` | 17 | `Blu_W2_Stand_Aim_Idle_IPC` |
+| `AO_Crouch_Aim` | `Blu_W2_Crouch_Aim_Point_*` | 13 | `Blu_W2_Crouch_Aim_Idle_IPC` |
+| `AO_Stand_Relaxed_Look` | `Blu_W2_Stand_Relaxed_Look_*` | 9 | `Blu_W2_Stand_Relaxed_Idle_IPC` |
+| `AO_Crouch_Look` | `Blu_W2_Crouch_Look_*` | 9 | `Blu_W2_Crouch_Idle_IPC` |
 
-재료는 리타게팅 완료 상태:
+전부 Blu 스켈레톤 · 축 Yaw/Pitch −90..90 grid 4 · 전 샘플 Mesh Space 애디티브(`a7fab2e5`에서 선처리) · `interpolate_using_grid=False`(삼각분할 직접 보간).
 
-| 만들 것 | 재료(`W2_Rifle/` 안) | 개수 |
-|---|---|---|
-| `AO_Blu_W2_Stand_Aim` | `Blu_W2_Stand_Aim_Point_*` | 17 |
-| `AO_Blu_W2_Crouch_Aim` | `Blu_W2_Crouch_Aim_Point_*` | 13 |
-| `AO_Blu_W2_Stand_Relaxed_Look` | `Blu_W2_Stand_Relaxed_Look_*` | 9 |
-| `AO_Blu_W2_Crouch_Look` | `Blu_W2_Crouch_Look_*` | 9 |
+> ⚠️ **좌표 규칙 — 이름의 숫자는 Yaw가 아니다.** 앞 세션이 명명 규칙을 *추론*해 틀린 표를 줬고, 팩 포즈를 실측해 정정했다(머리 시선축의 방위·고도를 `Center` 대비로 측정).
+> - `L45/L90/R45/R90` → **숫자 = Yaw**, Pitch 0 (실측 dYaw −45.0/−90.0/+45.0/+89.9)
+> - `U45/U90/D45/D90` → **숫자 = Pitch**, Yaw 0 (실측 dPitch +51.7/+103.3)
+> - `LU45·LD45·RU45·RD45` → **Yaw는 항상 ±90**, 숫자 = Pitch (실측 dYaw −91.2/+88.6, dPitch ±44.8)
+> - `LU90·LD90·RU90·RD90` → (±90, ±90)
+>
+> **에디터에서 그리드 위 미리보기는 `Ctrl`을 눌러야 움직인다**(엔진 상태바 문구 그대로). 안 움직인다고 에셋 문제로 오판하지 말 것.
 
-격자 Yaw −90..90 / Pitch −90..90. 이름의 `L/R/U/D`+`45/90`이 그대로 좌표, `Center`가 원점.
+### 🎯 4단계 (다음) = 바디 AnimBP — 여기서부터 시작
+**⛔ 선행 = 조준 상태 복제(위 🚨). 코드이고 새 복제 프로퍼티라 승인 게이트다. 이걸 먼저.**
 
-### 4단계 (다음) = 바디 AnimBP
-하체 요 오프셋(축 1) + Aim Offset 배선 + 왼손 Two Bone IK + 슬라이드. **선행 2개**:
-1. **조준 상태 복제** (위 🚨) — 새 복제 프로퍼티라 승인 대상
-2. **AimOffset 4개** (위 ⏳) — 사용자 에디터 작업
+선행 작업 구체안(`Source/FPSRoguelite/`):
+- `Public/Weapon/FPSRWeaponFireComponent.h` — `bIsAiming`(현재 평범한 bool, `SetAiming`/`IsAiming` 인라인)을 복제 프로퍼티로. Push Model(`MARK_PROPERTY_DIRTY_FROM_NAME`) + `COND_SkipOwner`(오너는 예측하므로 되돌려받을 필요 없음) + 컴포넌트 복제 켜기(`SetIsReplicatedByDefault(true)`) + `GetLifetimeReplicatedProps` 신설(이 컴포넌트엔 아직 없다)
+- 서버 기입 지점은 이미 있다 — `AFPSRCharacter::ServerSetAiming`(`Private/Hero/FPSRCharacter.cpp`). 오너 로컬 기입은 `Input_ADSPressed/Released`
+- 소비자 = `AFPSRCharacter::IsAiming()`(`FPSRCharacter.cpp` ~456행, **헤더에 경고 주석 있음** — 고치면 그 주석도 갱신)
+- 불변식 8("애니 상태는 복제하지 않는다")과 충돌하지 않는다: 복제하는 건 애니 산출물이 아니라 **입력/게임플레이 상태**이고, 각 클라가 그걸로 자기 포즈를 계산한다
 
-- **힙에서 총이 안 보이던 것**도 여기서 풀린다 — 바디가 `Blu_ABP_Unarmed`(로코모션 전용, 무기 포즈 없음)를 재생해 팔이 옆구리에 있어서다. 라이플 포즈를 물면 팔이 가슴 앞으로 올라온다
-- 그 상태를 보고 **"팔만 보이게"(Apex식)** 저작 여부도 판단(위 ⏸)
-- 왼손 IK를 붙인 직후 **85% vs 그립 이동**을 결정(위 🚨)
-- 정정: `Blu_AO_Rifle`을 "에임오프셋 완성품"으로 적었으나 **실제로는 샘플 3개(피치 전용) 스텁**이다. 템플릿으로 못 쓴다
+그다음 AnimBP 본체(에디터 작업, 아직 설계 안 됨 — **플랜 필요**):
+1. **하체 요 오프셋**(ADR 축 1 ㉰) — 캡슐 요는 그대로, 메시 상대 요를 AnimBP가 반대로 돌린다. 제자리 회전 애니(`Blu_W2_Stand_Aim_Turn_In_Place_L/R_Loop_IPC` + `_L/R_45/90/135/180_IPC`)가 이 각도 오차를 소비. **`RootYawOffset` 소유권을 AnimBP에 두고 복제하지 않는다**(불변식 8)
+2. **Aim Offset 배선** — 위 4개를 자세(Stand/Crouch) × 조준여부(Aim/Relaxed)로 분기. 입력은 `GetBaseAimRotation() − ActorRotation`
+3. **왼손 Two Bone IK** — `AFPSRCharacter::GetLeftHandGripTransform(FTransform&)`(BlueprintPure, **월드 공간**, false면 IK 끔) 소비. ⚠️ **게임 스레드 전용** — `NativeUpdateAnimation`에서 멤버로 복사해서 쓸 것
+4. **슬라이드** — 몽타주 아님, AnimBP 상태로(불변식 3). 진입/루프/이탈 3분할은 저작 필요
+5. 8방향 시작/정지 전환 = `Blu_W2_Stand_Aim_To_Jog_Aim_{L,R}{45,90,135,180}_Fwd_IPC` / `Blu_W2_Jog_Aim_*_to_Stand_Aim_*`
+
+4단계 중/직후에 판단할 것 3개: **힙 총 가시성**(라이플 포즈가 들어가면 팔이 가슴 앞으로) · **"팔만 보이게" 저작 여부**(위 ⏸) · **85% vs 그립 이동**(위 🚨, 왼손 IK 붙인 직후)
 
 ### 블로커 / 주의
 - **빌드 1회 ≈ 10분.** `-NoXGE` 사용. 에디터 떠 있으면 Live Coding 락으로 실패 → 먼저 종료
 - **모듈이 둘이다.** `Source/FPSRoguelite`(게임) + `Source/FPSRogueliteEditor`(무기 조립 툴). grep은 `Source/` 전체에 걸 것 — A단계 1차 빌드가 이걸 놓쳐 실패했다
 - **VibeUE Python에서 레벨 전환 API(`new_level`/`load_level`) 호출 금지** — 에디터 즉사(2회 실증). 열린 레벨에 스폰하고 끝나면 지운다. 자동 저장이 꺼져 있을 수 있으니 에셋은 `save_asset` 명시 호출
 - `unreal.Rotator(a,b,c)` = **(roll, pitch, yaw)** 순. 이 세션에서 두 번 틀렸다
+- **VibeUE `execute_python_code`는 30초 타임아웃**이다(2026-07-30 실측). 넘으면 툴은 에러를 주지만 **에디터 쪽 작업은 계속 진행돼 결과가 남는다** — 재시도 전에 반드시 현재 상태를 조회할 것. 배치는 30초 안에 끝나는 크기로 쪼개고(리타게팅 0.23초/개 → 80개가 20초), **이미 만들어진 건 건너뛰게** 짜면 크래시·타임아웃에도 이어서 갈 수 있다
+- **Bash 툴의 작업 디렉터리는 호출 간에 유지된다.** 이 세션에서 `cd Content/Rifle_01/Animation` 한 뒤 몇 턴 뒤 `find Content/...`가 "No such directory"로 나와 파일이 사라진 줄 알았다. 상대경로 쓰기 전에 `cd /e/Git_Project/FPSRoguelite &&` 를 붙일 것
+- **본 애니 계측 API 함정**: `AnimationLibrary.get_bone_pose_for_frame(a,b,f,X)`의 4번째 인자는 `extract_root_motion`이며 **로컬 공간**을 돌려준다(컴포넌트 공간 아님). 컴포넌트 공간이 필요하면 `find_bone_path_to_root`로 체인을 합성해야 한다. 또 `get_animation_track_names`는 **애니되는 본을 다 나열하지 않는다**(`neck`·`spine`·`head`가 목록에 없는데 움직였다) — 트랙 목록으로 "안 넘어왔다"를 판정하면 오진한다
 - 본 가시성(`hide_bone_by_name`) 변경 직후 같은 프레임에 렌더하면 **갱신 전 화면**이 나온다
 - `Weapon_B`(불펍) 핸드가드 12종에는 `SOCKET_LeftHand`가 없다 → 왼손 IK는 **null-safe로 꺼지게** 만들 것
 
-### 미커밋 콘텐츠 (사용자 작업 영역 — 커밋하지 않음)
-- `Content/Maps/L_MainMenu.umap` · `Content/Maps/TestWorld.umap` — 둘 다 **커밋본과 내용 동일**(크기 일치, 프리뷰 액터 잔재 0 확인). UE 재저장 바이너리 churn만 남음. 되돌리려면 에디터 종료 후 `git checkout -- Content/Maps/`
-- **사용자 남은 콘텐츠 작업**: 무기 DA 9개에 `WeaponAttachScale`(라이플 0.85)·`LeftHandSocket`(`SOCKET_LeftHand`) 채우기 + PWAS 참조 비우기(`DA_Weapon_Rifle`/`SMG`의 `WeaponAnimInstanceClass`·`ReloadMontage`) → 그 뒤 `Content/ProceduralWeaponAnimationSystem` 폴더 삭제 (순서 중요: DA 먼저)
+### 미커밋 콘텐츠
+**없다 — 2026-07-30 인계 시점 작업 트리 완전 클린.** 이 세션의 콘텐츠(리타게팅 426 · 애디티브 48 · AimOffset 4)는 사용자 확인을 거쳐 전부 커밋됨.
+
+### 남은 사용자 콘텐츠 작업
+- **PWAS 정리 (아직 안 됨, 순서 중요)**: `DA_Weapon_SMG`를 열고 저장 → `Content/ProceduralWeaponAnimationSystem` 삭제 → `Content/Character/FPArms` 삭제. SMG가 유일하게 아직 PWAS(`ABP_FPChar`)를 가리키는데, 그 필드는 A단계에서 클래스에서 사라져 **로드 시 이미 버려진다**(동작 문제 없음). 다만 `.uasset` 안의 참조 기록은 재저장해야 지워진다. `FPArms` 9개는 바깥에서 참조 0건 확인됨(Characters·Weapons·Maps·UI·Cards·Actors·Game·Blockout·Mission 스캔)
+- **무기 DA 나머지 8개**: `WeaponAttachScale`·`LeftHandSocket`은 `DA_Weapon_Rifle`만 채워졌다. 나머지는 해당 무기를 쓸 때 채우면 됨(A단계 CoreRedirects 3줄이 메시·파츠 값을 지켜주고 있다 — `Config/DefaultEngine.ini:123`)
+- (참고) 이전 세션의 `Content/Maps` churn은 `a4ad0ddd`에서 커밋되어 정리됨
+
+### (이력) 무기 DA 초기 작업 메모
+- 무기 DA 9개에 `WeaponAttachScale`(라이플 0.85)·`LeftHandSocket`(`SOCKET_LeftHand`) 채우기 + PWAS 참조 비우기(`DA_Weapon_Rifle`/`SMG`의 `WeaponAnimInstanceClass`·`ReloadMontage`) → 그 뒤 `Content/ProceduralWeaponAnimationSystem` 폴더 삭제 (순서 중요: DA 먼저)
   - ⚠ **PWAS 참조 비우기가 B+C 이후 더 급해졌다**: `ReloadMontage`(PWAS 팔 스켈레톤용)가 이제 **Blu 바디 메시에서 재생**된다 → 스켈레톤 불일치로 재생 거부 + 경고 로그(크래시는 아님). `WeaponAnimInstanceClass`(PWAS 팔 ABP)도 무기 메시에 얹혀 같은 형태로 실패한다
 - **에디터 첫 실행 시 예상되는 것**: `BP_FPSRPlayer`에 `FirstPersonArms`·`WeaponMesh1P`·`WeaponMeshStatic1P` **고아 컴포넌트 기록**이 남아 경고가 뜬다(A단계의 `WeaponMesh3P`와 같은 형태 — 무해, BP 재저장하면 정리됨). 새 `WeaponMesh`/`WeaponMeshStatic`은 C++ 기본값으로 시작하니 **BP에서 손으로 맞췄던 옛 상대 트랜스폼은 사라진다**(의도 — 정렬 주체가 이제 `SOCKET_Weapon`이다). 폐기 에셋 `Content/Character/FPArms`(+`SK_FP_Manny_Simple`)는 참조가 0이 되므로 정리 대상
 
