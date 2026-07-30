@@ -321,16 +321,16 @@ def _order_layers(layers, dsucc, dpred, g):
         if s != t:
             tgt_pin.setdefault((t, s), g["in_pin_index"].get((t, tp), 99))
     for r in rs:
-        order = layers[r]
-        place = dict((n, i) for i, n in enumerate(order))
-        for t in set(x for x in g["ids"]):
-            group = [n for n in order if (t, n) in tgt_pin]
+        order = set(layers[r])
+        place = dict((n, i) for i, n in enumerate(layers[r]))
+        for t in set(g["ids"]):
+            group = [n for n in layers[r] if (t, n) in tgt_pin]
             if len(group) < 2:
                 continue
             slots = sorted(place[n] for n in group)
             for n, slot in zip(sorted(group, key=lambda m: tgt_pin[(t, m)]), slots):
                 place[n] = slot
-        layers[r] = [n for n, _i in sorted(place.items(), key=lambda kv: kv[1]) if n in set(order)]
+        layers[r] = [n for n, _i in sorted(place.items(), key=lambda kv: kv[1]) if n in order]
     return layers
 
 
@@ -564,8 +564,9 @@ def process_graph(bp, graph, apply=True, verbose=True):
     if new is None:
         return {"bp": bp, "graph": graph, "status": "layout-failed"}
 
-    rec = {"bp": bp, "graph": graph, "before": m0, "after": m1, "status": "?"}
-    if view.get("is_state_machine"):
+    rec = {"bp": bp, "graph": graph, "before": m0, "after": m1, "status": "?",
+           "is_sm": bool(view.get("is_state_machine"))}
+    if rec["is_sm"]:
         rec["graph"] = graph + " (상태머신)"
 
     is_sm = bool(view.get("is_state_machine"))
@@ -719,7 +720,7 @@ def _summary(results):
         ao = sum(r["after"]["overlap"] for r in done)
         bb = sum(r["before"]["back"] for r in done)
         ab = sum(r["after"]["back"] for r in done)
-        bs = sum(_score(r["before"]) for r in done)
-        as_ = sum(_score(r["after"]) for r in done)
+        bs = sum(_score(r["before"], r.get("is_sm")) for r in done)
+        as_ = sum(_score(r["after"], r.get("is_sm")) for r in done)
         print("%s   교차 합계 %d -> %d / 겹침 %d -> %d / 역방향 %d -> %d / 점수 %.0f -> %.0f (그래프 %d개)"
               % (TAG, bc, ac, bo, ao, bb, ab, bs, as_, len(done)))
