@@ -6,6 +6,21 @@
 
 **최종 갱신: 2026-07-30**
 
+## 🛝 4c 슬라이드·벽 애니 = ✅Blender 8포즈 + ✅UE 반영(Blu 스켈레톤) / **다음=상체 그래프트** (2026-07-30, `refactor/character`)
+> **저작 레시피·함정 전부 = 메모리 `blender-locomotion-anim-authoring`** (헤드리스 AnimSequence 저작 API·glTF 왕복·IK 미러폴 플립 등 하드-won). 새 세션은 그것부터 읽을 것.
+
+**✅ 완료:**
+- **Blender 8포즈 저작·조정** (`C:\Users\koras\Desktop\작업\개발작업\블랜더\NeonV_locomotion.blend` — **별도 Blender repo**). 벽 4(hang/slip/climb/topout)·슬라이드 4(enter/loop/exit_crouch/exit_stand). wall_hang·slide_loop = 사용자 확정 기준, 나머지는 그 기준에 pose_ref 동기화. 쿼터니언 스핀 비파괴 정리. 조정 가이드 3종(그 repo `Docs/`).
+- **UE 반영** = glTF 왕복(export→커맨드렛 임포트→새 스켈레톤 8애님, 포즈 정확·본명 underscore=Blu 호환) → **트랙 복사로 Blu 스켈레톤 재생성**. 최종(미추적, 이 커밋): `Content/Characters/Blu/Anims/W2_Rifle/Blu_W2_Slide_{Enter,Loop,Exit_Crouch,Exit_Stand}` + `Content/Characters/Blu/Anims/Blu_Wall_{Slip,Hang,Climb,TopOut}`. 108본·포즈검증(slide_loop foot z59·head z114=Blender 일치)·테스트폴더 정리.
+
+**⚠️ 확인 필요(Persona):** `wall_slip`=1프레임(허우적 루프 붕괴 — Blender에서 키 복구 후 그 하나만 재복사) · `slide_exit_crouch`=15프레임(저작 12과 다름) · **슬라이드 4개 팔은 아직 T자**(상체 미그래프트 — 다음 단계에서 입힘).
+
+**⏭️ 다음 = UE 3a 나머지** (에디터 종료 상태 헤드리스 커맨드렛, 레시피=메모리):
+1. **슬라이드 상체 그래프트** — `Blu_W2_Slide_*`의 상체 본(spine/chest/neck/shoulder/arm/hand/손가락)을 `Blu_W2_Crouch_Aim_Idle_IPC`(조준)로 덮어씀. 벽 4개는 **맨손 유지**(안 건드림). 같은 스켈레톤이라 프레임별 상체 트랙 복사(하체는 슬라이드 값 유지).
+2. **exit 끝점 정합(A안)** — `Slide_Exit_Crouch` 마지막 프레임 = `Crouch_Aim_Idle` 포즈 / `Slide_Exit_Stand` 마지막 = 서있는 아이들. 게임 전이 팝 방지.
+3. **`BS_Wall_Vertical`** 1D BlendSpace 생성(축=WallVerticalAxis −1..1, 샘플 Slip/Hang/Climb).
+그 뒤 **3b 코드**(CMC 3 + AnimInstance 4 + 무기가시성, 빌드필요) · **3c `ABP_Blu_Body` 상태기계 배선**(에디터+수동).
+
 ## 🎯 True First Person 전환 = ✅A·B·C 코드 + ✅3단계 애니 완료 / **4단계 AnimBP 인계** (2026-07-30, `refactor/character`)
 > **설계 = [ADR 0002](Docs/Architecture/0002-true-first-person-shared-animation.md)** — 새 세션은 **ADR 0002 전문을 먼저 읽을 것**(불변식 10개 + 실측 + 기각안이 전부 거기 있다). 아래는 진행 상태만.
 > 목표 = 1인칭·3인칭을 **3P 애니 팩 한 벌**(`Content/Rifle_01`)로 덮기. 1P 전용 팔 + PWAS 폐기.
