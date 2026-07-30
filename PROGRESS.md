@@ -4,13 +4,27 @@
 > **작업 단계를 끝낼 때마다, 그리고 중단 전 반드시 이 파일을 갱신하고 커밋한다.**
 > 확정 설계·기획·코드구조·규칙은 `Game.md`(**SSOT 허브** → 도메인별 `Docs/SSOT/*.md`, 작업별 라우팅은 허브 §0-1), **완료 작업 상세는 `git log --oneline`**. 여기엔 *무엇을 했는지*만 요약한다.
 
-**최종 갱신: 2026-07-30**
+**최종 갱신: 2026-07-31**
 
-## 🛝 4c 슬라이드·벽 애니 = ✅Blender 8포즈 + ✅UE 반영(Blu 스켈레톤) / **다음=상체 그래프트** (2026-07-30, `refactor/character`)
+## 🛝 4c 슬라이드·벽 애니 = ✅Blender 수리 완료(관통 0) / **다음=UE 재반영** (2026-07-31, `refactor/character`)
 > **저작 레시피·함정 전부 = 메모리 `blender-locomotion-anim-authoring`** (헤드리스 AnimSequence 저작 API·glTF 왕복·IK 미러폴 플립 등 하드-won). 새 세션은 그것부터 읽을 것.
 
-**✅ 완료:**
-- **Blender 8포즈 저작·조정** (`C:\Users\koras\Desktop\작업\개발작업\블랜더\NeonV_locomotion.blend` — **별도 Blender repo**). 벽 4(hang/slip/climb/topout)·슬라이드 4(enter/loop/exit_crouch/exit_stand). wall_hang·slide_loop = 사용자 확정 기준, 나머지는 그 기준에 pose_ref 동기화. 쿼터니언 스핀 비파괴 정리. 조정 가이드 3종(그 repo `Docs/`).
+### 🚨 2026-07-31 정정 — 아래 "8포즈 저작 ✅완료"는 사실이 아니었다
+계측해 보니 **8개 중 4개가 깨진 채 UE로 넘어갔다.** 앞 세션이 완료로 적었을 뿐 확인한 적이 없다.
+1. **"저자세 동기화"가 멀쩡한 클립 3개를 망가뜨렸다.** `slide_low_reference.json`을 **`slide_loop` f0에서 캡처**했는데 그 프레임이 *공중에 뜬 앉은 자세*(발이 지면 **위 50cm**)였다. 그 포즈가 `slide_enter` f9 · `slide_exit_crouch` f0 · `slide_exit_stand` f0으로 퍼졌다 — 동기화 **전** 백업(19:41)에는 세 곳 다 −26.0(진짜 슬라이드 포즈)으로 정상이었다. `slide_exit_crouch`는 끝 포즈까지 −19.5 → **−41.6**으로 악화되고 길이도 12 → 15로 바뀌었다.
+2. **발이 바닥을 뚫는 건 원래부터 미수정.** 저작 가이드가 *"foot.L을 위로 젖혀 발바닥이 바닥에 닿게"* 라고 지적했던 그대로 남아 있었다. 발목 높이는 멀쩡했고(z 5~7) **발이 발끝-아래로 회전**된 게 원인 — 오른발은 자기 발목보다 **33cm 아래**를 향하고 있었다.
+3. **`wall_slip`은 1프레임.** 백업 **3개 전부** 1프레임 = 나중에 깨진 게 아니라 **처음부터 저작이 안 됐다**(스펙은 0..24 루프).
+4. `slide_loop` f0은 어느 버전에서도 공중 포즈였다 → **루프가 닫힌 적이 없다**(f0 ≠ f15).
+> **교훈**: 포즈 참조 JSON을 뜰 때 **그 프레임이 멀쩡한지 먼저 재라.** 그리고 애니는 숫자만으로 완료 판정하지 말 것 — 바닥면 넣은 렌더 한 장이 넷 다 잡아냈다.
+
+**✅ 완료(2026-07-31 수리):** 도구 4종 = Blender repo `NeonV_scripts/anim_{probe_state,diag_render,ground_feet,build_wall_slip}.py`. 작업 전 백업 = `NeonV_locomotion_preslidefix2_backup.blend`.
+- **A. 앵커 복구** — `slide_enter`·`slide_exit_crouch`·`slide_exit_stand`를 19:41 백업에서 통째로 되살림(재저작 아님) + `slide_loop` f0 := f15로 **루프 닫음**. 앵커 4곳 −26.02로 일치 확인.
+- **B. 발 접지** — 발목을 돌려 **sole 벡터(발목→발끝)를 수평으로** 보냄. 회전은 탐색이 아니라 정확해(축=외적·각=사잇각, `pose_bone.matrix`로 월드 적용). ⚠️ 초안은 *로컬 축 하나를 골라 이분탐색*했는데 오른발을 아예 못 눕혀(−3.4cm에서 바닥) **골반을 27cm 들어올려** 저자세를 뭉갰다 — 축 추정 금지. 결과 **hips 57.0 → 57.8**(저자세 보존), 발목 회전 L 49° / R **81°**.
+- **C. `wall_slip` 재저작** — 프레시 IK 금지(팔·다리 플립 전례)라 **검증된 포즈만 섞었다**: 팔 = `wall_climb` 양 극단(좌우 교대) / 다리 = rest 쪽으로 0.8 신전 + 0.15 교대(스크래핑) / 나머지 = `wall_hang`. hips는 안 건드림(in-place).
+- **검증(전 프레임)**: 8액션 **관통 0**, 최저 +0.3cm. 벽 3종(hang/climb/topout) 무변경 대조 확인. `wall_slip` 루프 닫힘 오차 **0.0000cm** · 팔 교대 ±26/28cm · 다리 12~17cm 신전.
+- **부수**: 중간 프레임이 파고드는 구간은 발목만으론 못 잡아(발목 자체가 바닥 아래) **소량 리프트 키가 추가**됐다 — `slide_exit_crouch` f3~8 · `slide_exit_stand` f2~5. 그 구간을 다시 손보면 이 키들이 있다는 걸 알 것.
+
+- **(이력) Blender 8포즈 저작** (`C:\Users\koras\Desktop\작업\개발작업\블랜더\NeonV_locomotion.blend` — **별도 Blender repo**). 벽 4(hang/slip/climb/topout)·슬라이드 4(enter/loop/exit_crouch/exit_stand). wall_hang·slide_loop = 사용자 확정 기준. 쿼터니언 스핀 비파괴 정리. 조정 가이드 3종(그 repo `Docs/`).
 - **UE 반영** = glTF 왕복(export→커맨드렛 임포트→새 스켈레톤 8애님, 포즈 정확·본명 underscore=Blu 호환) → **트랙 복사로 Blu 스켈레톤 재생성**. 최종(미추적, 이 커밋): `Content/Characters/Blu/Anims/W2_Rifle/Blu_W2_Slide_{Enter,Loop,Exit_Crouch,Exit_Stand}` + `Content/Characters/Blu/Anims/Blu_Wall_{Slip,Hang,Climb,TopOut}`. 108본·포즈검증(slide_loop foot z59·head z114=Blender 일치)·테스트폴더 정리.
 
 **✅ 상체 그래프트 완료** (3a-1, 미커밋) — 슬라이드 4클립의 **상체 98본**(spine 아래 전부: 척추·가슴·목·머리·어깨·팔·손·손가락 + 머리카락/얼굴/Rope)을 `Blu_W2_Crouch_Aim_Idle_IPC` 프레임 0으로 덮어씀. 하체 10본은 손 안 댐. 벽 4개는 맨손 유지. 스크립트 = `Scripts/slide_upper_graft.py` + `_verify.py`(**멱등**, 되돌리기 = `git checkout -- .../Blu_W2_Slide_*`).
@@ -18,25 +32,14 @@
 - **검증(별도 프로세스 재로드)**: 하체 드리프트 **0.0000cm**(재압축에도 안 흔들림) · 상체 = 소스와 완전 일치 · 양손 간격 20.72cm 유지 · 발 높이 무변화 · `upper_arm_R` 81.6°(T자 해소). 포즈 그림 = `Saved/NeonV/anim/pose_preview.svg`(`Scripts/anim_stickfigure_svg.py` — **에디터 없이 포즈 눈으로 확인하는 도구**).
 - **함정 2개 기록**: ① `AO_Crouch_Aim`의 애디티브 **기준 포즈는 `Blu_W2_Crouch_Aim_Point_Center`**다(아래 AimOffset 표의 "미리보기 베이스"는 *다른 필드*). 다만 두 포즈는 **0.02cm·0.0° 동일**이라 결과는 같음 — 스크립트는 이름이 아니라 **포즈를 비교**해서 게이트한다. ② `get_bone_track_names()`는 `unreal.Name`이고 스켈레톤과 **대소문자가 다르다**(`lower_leg_r` vs `lower_leg_R`). `str()`로 바꿔 비교하면 다리 본이 상체로 새어 들어간다 → 비교는 전부 소문자로.
 
-**⚠️ 확인 필요(Persona):** `wall_slip`=1프레임(허우적 루프 붕괴 — Blender에서 키 복구 후 그 하나만 재복사) · `slide_exit_crouch`=15프레임(저작 12과 다름).
-
-**🚨 슬라이드 하체가 바닥을 뚫는다 (그래프트와 무관, 저작 문제 — 다음 단계 전에 판단 필요)**
-기준(`Crouch_Aim_Idle` 발끝 −0.0/+0.5 · `Stand_Aim_Idle` +5.7/+6.0)과 대조한 발·발끝 최저 z:
-
-| 클립 | 발끝 최저 z | 판정 |
-|---|---|---|
-| `Slide_Enter` | **−11.9** | 바닥 아래 12cm |
-| `Slide_Loop` | **−12.9** | 바닥 아래 13cm |
-| `Slide_Exit_Crouch` | **−34.3** (발목도 −20.7, 마지막 프레임·좌우 비대칭) | **명백히 깨짐** |
-| `Slide_Exit_Stand` | +0.7 | 정상(끝 프레임 발 높이가 서있는 아이들과 **정확히 일치** 15.1) |
-
-→ **2번(exit 끝점 정합)은 "마지막 프레임만 맞추기"로 안 끝날 수 있다.** `Exit_Crouch`는 Blender 재작업이 유력.
-
-**⏭️ 다음 = UE 3a 나머지** (에디터 종료 상태 헤드리스 커맨드렛, 레시피=메모리):
-1. ~~슬라이드 상체 그래프트~~ ✅
-2. **exit 끝점 정합(A안)** — `Slide_Exit_Crouch` 마지막 프레임 = `Crouch_Aim_Idle` 포즈 / `Slide_Exit_Stand` 마지막 = 서있는 아이들. 게임 전이 팝 방지. **위 바닥 관통 먼저 판단**.
-3. **`BS_Wall_Vertical`** 1D BlendSpace 생성(축=WallVerticalAxis −1..1, 샘플 Slip/Hang/Climb).
+**⏭️ 다음 = UE 재반영** (에디터 **종료** 상태 헤드리스 커맨드렛, 레시피=메모리 `blender-locomotion-anim-authoring`):
+1. **8액션 glTF 재export → 임포트 → 트랙 복사로 Blu 스켈레톤 재생성.** 현재 UE에 있는 `Blu_W2_Slide_*`·`Blu_Wall_*`은 **깨진 Blender 상태에서 나온 것이라 전부 갈아엎어야 한다**(부분 갱신 금지 — 앵커가 4클립에 걸쳐 있다).
+2. **상체 그래프트 재실행** — `Scripts/slide_upper_graft.py`(멱등). 재반영하면 상체가 다시 T자로 돌아오므로 **반드시 다시 돌릴 것**.
+3. **exit 끝점 정합** = `Slide_Exit_Crouch` 끝 하체를 **`Blu_W2_Crouch_Aim_Idle_IPC`로 그래프트**(사용자 결정 2026-07-31). 게임이 슬라이드 종료 후 그 포즈로 이어지므로 전이 팝이 원천 소멸한다. **UE 쪽에서 한다** — 상체 그래프트가 이미 도는 자리라 공짜로 얹히고, UE→Blender 포즈 역변환(좌표계·쿼터니언 규약)이라는 미검증 경로를 안 열어도 된다. 마지막 1프레임만 스냅하면 끊기니 **끝 몇 프레임을 램프로 수렴**시킬 것.
+4. **`BS_Wall_Vertical`** 1D BlendSpace 생성(축=WallVerticalAxis −1..1, 샘플 Slip/Hang/Climb).
 그 뒤 **3b 코드**(CMC 3 + AnimInstance 4 + 무기가시성, 빌드필요) · **3c `ABP_Blu_Body` 상태기계 배선**(에디터+수동).
+
+**⏳ 사용자 확인 대기(Blender)**: 발목 교정이 큰 편이라(오른발 **81°**) 눈으로 볼 것 — 원본이 그만큼 처박혀 있었다는 뜻이고 렌더상 신발은 정상으로 얹혔다. `wall_slip`은 **내가 만든 구성**이므로(검증된 포즈 조합) 포즈 확정권자 확인 필요.
 
 ## 🎯 True First Person 전환 = ✅A·B·C 코드 + ✅3단계 애니 완료 / **4단계 AnimBP 인계** (2026-07-30, `refactor/character`)
 > **설계 = [ADR 0002](Docs/Architecture/0002-true-first-person-shared-animation.md)** — 새 세션은 **ADR 0002 전문을 먼저 읽을 것**(불변식 10개 + 실측 + 기각안이 전부 거기 있다). 아래는 진행 상태만.
