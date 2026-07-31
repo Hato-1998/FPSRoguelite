@@ -6,7 +6,7 @@
 
 **최종 갱신: 2026-07-31**
 
-## 🛝 4c 슬라이드·벽 애니 = ✅Blender 수리 완료(관통 0) / **다음=UE 재반영** (2026-07-31, `refactor/character`)
+## 🛝 4c 슬라이드·벽 애니 = ✅구조 수리(앵커·루프·wall_slip) / **⏳포즈는 사용자 재저작 대기** (2026-07-31, `refactor/character`)
 > **저작 레시피·함정 전부 = 메모리 `blender-locomotion-anim-authoring`** (헤드리스 AnimSequence 저작 API·glTF 왕복·IK 미러폴 플립 등 하드-won). 새 세션은 그것부터 읽을 것.
 
 ### 🚨 2026-07-31 정정 — 아래 "8포즈 저작 ✅완료"는 사실이 아니었다
@@ -17,12 +17,29 @@
 4. `slide_loop` f0은 어느 버전에서도 공중 포즈였다 → **루프가 닫힌 적이 없다**(f0 ≠ f15).
 > **교훈**: 포즈 참조 JSON을 뜰 때 **그 프레임이 멀쩡한지 먼저 재라.** 그리고 애니는 숫자만으로 완료 판정하지 말 것 — 바닥면 넣은 렌더 한 장이 넷 다 잡아냈다.
 
-**✅ 완료(2026-07-31 수리):** 도구 4종 = Blender repo `NeonV_scripts/anim_{probe_state,diag_render,ground_feet,build_wall_slip}.py`. 작업 전 백업 = `NeonV_locomotion_preslidefix2_backup.blend`.
+**✅ 완료(2026-07-31, 구조만):** 도구 = Blender repo `NeonV_scripts/anim_{probe_state,diag_render,ground_feet,build_wall_slip,sheet_render,export,add_ingame_refs}.py`. 작업 전 백업 = `NeonV_locomotion_preslidefix2_backup.blend`.
 - **A. 앵커 복구** — `slide_enter`·`slide_exit_crouch`·`slide_exit_stand`를 19:41 백업에서 통째로 되살림(재저작 아님) + `slide_loop` f0 := f15로 **루프 닫음**. 앵커 4곳 −26.02로 일치 확인.
-- **B. 발 접지** — 발목을 돌려 **sole 벡터(발목→발끝)를 수평으로** 보냄. 회전은 탐색이 아니라 정확해(축=외적·각=사잇각, `pose_bone.matrix`로 월드 적용). ⚠️ 초안은 *로컬 축 하나를 골라 이분탐색*했는데 오른발을 아예 못 눕혀(−3.4cm에서 바닥) **골반을 27cm 들어올려** 저자세를 뭉갰다 — 축 추정 금지. 결과 **hips 57.0 → 57.8**(저자세 보존), 발목 회전 L 49° / R **81°**.
+- **B. 발 접지 = ❌ 되돌림(내 버그).** 발목을 돌려 sole 벡터를 수평으로 보냈더니 **오른발이 뒤를 향했다**(dy −33.4 = 발끝이 발목 뒤). 원인: 원본 오른발이 거의 수직(dz −33.0)이라 **수평 성분이 +5.4cm(뒤쪽) 노이즈뿐**이었는데 그걸 발 길이만큼 증폭했다. 왼발은 수평 성분이 뚜렷해(−21.7) 정상이었다. → 슬라이드 4클립을 사용자 원본 발로 되돌림(관통은 다시 −26~−29.5). **도구는 고쳐 뒀다** — 수평 성분이 발 길이의 35% 미만이거나 다리 방향과 반대면 **다리 방향(엉덩이→발목)으로 폴백**하고 로그를 남긴다.
+  > **교훈**: 벡터를 "수평으로 눕힌다"는 연산은 그 벡터가 거의 수직일 때 **방향이 노이즈**다. 크기만 보지 말고 방향의 신뢰도를 게이트할 것.
 - **C. `wall_slip` 재저작** — 프레시 IK 금지(팔·다리 플립 전례)라 **검증된 포즈만 섞었다**: 팔 = `wall_climb` 양 극단(좌우 교대) / 다리 = rest 쪽으로 0.8 신전 + 0.15 교대(스크래핑) / 나머지 = `wall_hang`. hips는 안 건드림(in-place).
-- **검증(전 프레임)**: 8액션 **관통 0**, 최저 +0.3cm. 벽 3종(hang/climb/topout) 무변경 대조 확인. `wall_slip` 루프 닫힘 오차 **0.0000cm** · 팔 교대 ±26/28cm · 다리 12~17cm 신전.
-- **부수**: 중간 프레임이 파고드는 구간은 발목만으론 못 잡아(발목 자체가 바닥 아래) **소량 리프트 키가 추가**됐다 — `slide_exit_crouch` f3~8 · `slide_exit_stand` f2~5. 그 구간을 다시 손보면 이 키들이 있다는 걸 알 것.
+- **검증**: 앵커 4곳 일치 · `wall_slip` 루프 닫힘 오차 **0.0000cm** · 팔 교대 ±26/28cm · 다리 12~17cm 신전 · 벽 3종(hang/climb/topout) 무변경 대조 확인.
+- **D. 인게임 충돌 형상을 .blend에 참조로 넣음** (사용자 요청) — `REF_InGame` 컬렉션에 `REF_Wall_InGame`(y=**−0.34**)·`REF_Floor_InGame`(z=0)·`REF_Capsule_InGame`(r 0.34, 높이 1.62). 전부 와이어·`hide_select`·`hide_render`. **export 3중 차단**: 이름 `REF_` 필터(`anim_export.py`) + hide_select + 실제 export 후 glb에 `REF_` 문자열 **0건** 확인.
+  - **벽 y=−0.34 근거**: `PhysCustom`이 매 프레임 `Velocity -= WallNormal * WallStickSpeed`로 캡슐을 벽에 밀어붙이므로 정지 거리 = **캡슐 반지름 34cm**(ADR 0002). 리그가 −Y를 보므로 y=−0.34.
+
+**🚨 벽 포즈 4개 전부 실제 벽보다 ~25cm 밖에서 저작됐다** (2026-07-31 발견). 벽을 진짜 위치(−34)에 놓고 재니:
+
+| 부위 | y | 벽 안으로 |
+|---|---|---|
+| 신발 앞코(`foot.L`) | −58.9 | **24.9cm** |
+| 손끝(`ring_distal.R`) | −50.5 | **16.5cm** |
+| 소매(`hand.L`) | −49.2 | 15.2cm |
+| 손목 뼈 | −39.7 | 5.7cm |
+
+**손 안 댄 `wall_hang`(사용자 확정본)·`wall_climb`도 동일**하므로 내 `wall_slip`만의 문제가 아니다. 캡슐이 몸을 벽에서 34cm 안쪽으로 못 들어가게 막으므로 **팔을 더 뻗는 게 아니라 접어야** 손이 벽면에 닿는다 — 그래서 `REF_Capsule_InGame`을 같이 넣었다.
+
+**⏳ 사용자 재저작 대기 (포즈 확정권자)**
+1. **슬라이드 저자세** — 사용자 판정 *"전혀 앉아있지도 않다"*. 골반 57.8cm(서기 97 = 60%)라 런지에 가깝다. 재저작 후 알려주시면 관통 재계측 + 렌더 확인.
+2. **벽 4포즈** — 손·발을 위 표만큼 뒤로. `REF_Wall_InGame` 보면서 작업하면 된다.
 
 - **(이력) Blender 8포즈 저작** (`C:\Users\koras\Desktop\작업\개발작업\블랜더\NeonV_locomotion.blend` — **별도 Blender repo**). 벽 4(hang/slip/climb/topout)·슬라이드 4(enter/loop/exit_crouch/exit_stand). wall_hang·slide_loop = 사용자 확정 기준. 쿼터니언 스핀 비파괴 정리. 조정 가이드 3종(그 repo `Docs/`).
 - **UE 반영** = glTF 왕복(export→커맨드렛 임포트→새 스켈레톤 8애님, 포즈 정확·본명 underscore=Blu 호환) → **트랙 복사로 Blu 스켈레톤 재생성**. 최종(미추적, 이 커밋): `Content/Characters/Blu/Anims/W2_Rifle/Blu_W2_Slide_{Enter,Loop,Exit_Crouch,Exit_Stand}` + `Content/Characters/Blu/Anims/Blu_Wall_{Slip,Hang,Climb,TopOut}`. 108본·포즈검증(slide_loop foot z59·head z114=Blender 일치)·테스트폴더 정리.
