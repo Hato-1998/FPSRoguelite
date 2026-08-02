@@ -23,23 +23,32 @@
   > **교훈**: 벡터를 "수평으로 눕힌다"는 연산은 그 벡터가 거의 수직일 때 **방향이 노이즈**다. 크기만 보지 말고 방향의 신뢰도를 게이트할 것.
 - **C. `wall_slip` 재저작** — 프레시 IK 금지(팔·다리 플립 전례)라 **검증된 포즈만 섞었다**: 팔 = `wall_climb` 양 극단(좌우 교대) / 다리 = rest 쪽으로 0.8 신전 + 0.15 교대(스크래핑) / 나머지 = `wall_hang`. hips는 안 건드림(in-place).
 - **검증**: 앵커 4곳 일치 · `wall_slip` 루프 닫힘 오차 **0.0000cm** · 팔 교대 ±26/28cm · 다리 12~17cm 신전 · 벽 3종(hang/climb/topout) 무변경 대조 확인.
-- **D. 인게임 충돌 형상을 .blend에 참조로 넣음** (사용자 요청) — `REF_InGame` 컬렉션에 `REF_Wall_InGame`(y=**−0.34**)·`REF_Floor_InGame`(z=0)·`REF_Capsule_InGame`(r 0.34, 높이 1.62). 전부 와이어·`hide_select`·`hide_render`. **export 3중 차단**: 이름 `REF_` 필터(`anim_export.py`) + hide_select + 실제 export 후 glb에 `REF_` 문자열 **0건** 확인.
-  - **벽 y=−0.34 근거**: `PhysCustom`이 매 프레임 `Velocity -= WallNormal * WallStickSpeed`로 캡슐을 벽에 밀어붙이므로 정지 거리 = **캡슐 반지름 34cm**(ADR 0002). 리그가 −Y를 보므로 y=−0.34.
+- **D. 인게임 충돌 형상을 .blend에 참조로 넣음** (사용자 요청) — `REF_InGame` 컬렉션에 `REF_Wall_InGame`(y=**−0.386**)·`REF_Floor_InGame`(z=0)·`REF_Capsule_InGame`(r 0.386, 높이 1.84). 전부 와이어·`hide_select`·`hide_render`. **export 3중 차단**: 이름 `REF_`/`FP_` 필터(`anim_export.py`) + hide_select + 실제 export 후 glb에 문자열 **0건** 확인.
 
-**🚨 벽 포즈 4개 전부 실제 벽보다 ~25cm 밖에서 저작됐다** (2026-07-31 발견). 벽을 진짜 위치(−34)에 놓고 재니:
+### 🚨🚨 2026-08-02 최중요 정정 — Blender 1cm ≠ UE 1cm (`CharacterMesh0` scale **0.8806**)
+리그는 Blender에서 **키 184.0cm**인데 UE는 `CharacterMesh0`를 **0.8806배**로 넣어 162cm를 만든다(Blender repo `Docs/HANDOFF_NEONV_FPARMS_RESULT.md`, 2026-07-25 "신장 162cm 통일"). **게임 값을 Blender로 옮길 땐 0.8806으로 나눠야 한다.** 교차검증: 캡슐 162cm(UE) ÷ 0.8806 = 184cm = 리그 키와 정확히 일치.
+- 이걸 놓쳐 **두 번 틀렸다**: ①벽을 34cm에 놓음(정답 **38.6**) ②1인칭 눈높이를 150.7cm에 놓음(정답 **171.1** — 20cm 낮아 카메라가 옷깃 속에 파묻혔고, 거기서 나온 "몸이 시야를 45~60% 덮는다"는 **가짜 결론**이었다).
+- **함정의 근원**: ADR 0002의 *"head 본은 발에서 155.1cm"* 는 **스케일 적용 전 스켈레톤 값**이라 Blender와 그냥 일치한다. 그래서 스케일 불일치가 안 잡혔다 → **게임 월드 값과 스켈레톤 값을 섞어 쓰지 말 것.**
 
-| 부위 | y | 벽 안으로 |
-|---|---|---|
-| 신발 앞코(`foot.L`) | −58.9 | **24.9cm** |
-| 손끝(`ring_distal.R`) | −50.5 | **16.5cm** |
-| 소매(`hand.L`) | −49.2 | 15.2cm |
-| 손목 뼈 | −39.7 | 5.7cm |
+**✅ 올바른 벽(38.6cm) 기준 재계측 — 사용자 저작본은 정확하다**
 
-**손 안 댄 `wall_hang`(사용자 확정본)·`wall_climb`도 동일**하므로 내 `wall_slip`만의 문제가 아니다. 캡슐이 몸을 벽에서 34cm 안쪽으로 못 들어가게 막으므로 **팔을 더 뻗는 게 아니라 접어야** 손이 벽면에 닿는다 — 그래서 `REF_Capsule_InGame`을 같이 넣었다.
+| 클립 | 벽 기준 |
+|---|---|
+| `wall_hang` | 0.3cm 앞 (거의 정확히 닿음) |
+| `wall_slip` | 0.5cm 안 |
+| `wall_climb` f0/f15 | 0.0 / 0.1cm |
+| `wall_topout` f0 / f12 | 20.3 / 39.9cm 안 (**미수정**. f12는 벽을 넘어가는 동작이라 의도적일 수 있음 — 판단 필요) |
+
+**✅ 1인칭 팔 메시 = 3인칭 애니와 완전 호환(실증)** — `shoulder.L/R` 이하만 남겨 자른 팔이 3인칭 애니를 **오차 0.000000cm**로 따라온다(5액션 7프레임). UE 측은 **UE 5.5+ 정식 기능**: 팔 `FirstPersonPrimitiveType=FirstPerson` / 바디 `WorldSpaceRepresentation`(그림자 담당, `bOwnerNoSee`·`bCastHiddenShadow` 엔진이 자동 설정) + `LeaderPoseComponent`. **ADR 0002가 걱정한 그림자 문제는 엔진이 해결했다.**
+- ⚠️ **다만 가림 해소 효과는 작다**(올바른 눈높이 재계측): 수평 시선 **0%**, 아래 40° 33.2%→24.1%, 아래 60° 57.7%→**49.3%**(8%p). 내려다볼 때 보이는 게 대부분 팔이라서다. → 팔 메시의 가치는 가림이 아니라 **"내 다리·몸이 안 보이는 Apex식 룩"** 취향 선택.
+- ⚠️ 자동 컷(주 가중치 기준)은 엣지루프가 아니라 **너덜한 경계**를 만든다 → 실제 저작은 손으로. 팔 실루엣은 거의 전부 `Jacket`(소매), `Body`는 손·손가락만.
+
+**📁 Blender repo 정리 완료(2026-08-02, 185MB→76MB)** — 작업 파일 **2개로 분리**: `NeonV_locomotion.blend`(3P 애니, **액션 8개의 진실원천**) · `NeonV_fp_arms.blend`(1인칭 팔). 둘 다 아마추어+액션을 갖지만 **액션 편집은 locomotion에서만**(안 그러면 조용히 갈라진다). `[완성본]/` = 원본 리그·`NeonV_work.blend`·`Textures/`(⚠️`Blu - *.blend`가 텍스처를 상대경로로 참조해 같은 폴더여야 함). 백업·중간산물 68개 삭제.
 
 **⏳ 사용자 재저작 대기 (포즈 확정권자)**
 1. **슬라이드 저자세** — 사용자 판정 *"전혀 앉아있지도 않다"*. 골반 57.8cm(서기 97 = 60%)라 런지에 가깝다. 재저작 후 알려주시면 관통 재계측 + 렌더 확인.
-2. **벽 4포즈** — 손·발을 위 표만큼 뒤로. `REF_Wall_InGame` 보면서 작업하면 된다.
+2. **`wall_topout`** — f0(20.3cm)은 아직 벽에 매달린 시점이라 당겨야 하고, f12는 넘어가는 동작이라 판단 필요.
+3. **1인칭 팔 컷** — 자동 컷은 출발점일 뿐, `Jacket` 어깨 엣지루프로 손 컷 필요.
 
 - **(이력) Blender 8포즈 저작** (`C:\Users\koras\Desktop\작업\개발작업\블랜더\NeonV_locomotion.blend` — **별도 Blender repo**). 벽 4(hang/slip/climb/topout)·슬라이드 4(enter/loop/exit_crouch/exit_stand). wall_hang·slide_loop = 사용자 확정 기준. 쿼터니언 스핀 비파괴 정리. 조정 가이드 3종(그 repo `Docs/`).
 - **UE 반영** = glTF 왕복(export→커맨드렛 임포트→새 스켈레톤 8애님, 포즈 정확·본명 underscore=Blu 호환) → **트랙 복사로 Blu 스켈레톤 재생성**. 최종(미추적, 이 커밋): `Content/Characters/Blu/Anims/W2_Rifle/Blu_W2_Slide_{Enter,Loop,Exit_Crouch,Exit_Stand}` + `Content/Characters/Blu/Anims/Blu_Wall_{Slip,Hang,Climb,TopOut}`. 108본·포즈검증(slide_loop foot z59·head z114=Blender 일치)·테스트폴더 정리.
