@@ -91,8 +91,45 @@ void UFPSRCharacterAnimInstance::UpdateFromCharacter(AFPSRCharacter& Character, 
 	bIsOnWall = Move && Move->IsOnWall();
 	bIsAirborne = bIsFalling || bIsOnWall;
 	StanceBlend = Move ? Move->GetStanceBlend() : 0.0f;
-	bIsSliding = Move && Move->IsSliding();
-	SlideBlend = Move ? Move->GetSlideBlend() : 0.0f;
+
+	// IsSlidingForDisplay, not IsSliding: this graph runs on every machine and a teammate's slide is not derivable
+	// locally. On top of that, a slide can be shorter than the interval between net updates (jump-cancel), so the
+	// replicated flag alone can arrive already false. The serial catches that case — a value we have not seen before
+	// means a slide happened — and holds the pose for SlideVisualMinDuration so it is actually visible.
+	const bool bSlidingNow = Move && Move->IsSlidingForDisplay();
+	// Proxies only. The owner and the server hold the exact flag, so the minimum-display hold could only ever ADD a
+	// slide they are not in — most visibly as a 0.2s tail after a correction cancels one.
+	const bool bHasExactSlide = Character.HasAuthority() || Character.IsLocallyControlled();
+	if (Move && !bHasExactSlide)
+	{
+		const uint8 Serial = Move->GetSlideVisualSerial();
+		if (bHasSlideSerial && Serial != LastSlideVisualSerial)
+		{
+			SlideVisualHold = SlideVisualMinDuration;
+		}
+		LastSlideVisualSerial = Serial;
+		bHasSlideSerial = true;
+	}
+	else
+	{
+		SlideVisualHold = 0.0f;
+		bHasSlideSerial = false;
+	}
+	SlideVisualHold = FMath::Max(0.0f, SlideVisualHold - DeltaSeconds);
+	bIsSliding = bSlidingNow || (SlideVisualHold > 0.0f);
+
+	// The blend is eased locally on every machine rather than replicated: it is a ramp over a known duration, so a
+	// receiver that knows when the slide started can reproduce it without spending bandwidth on the curve.
+	if (Move && bHasExactSlide)
+	{
+		SlideBlend = Move->GetSlideBlend();
+	}
+	else
+	{
+		const float Target = bIsSliding ? 1.0f : 0.0f;
+		const float Rate = (SlideVisualBlendDuration > KINDA_SMALL_NUMBER) ? (1.0f / SlideVisualBlendDuration) : 1.0f;
+		SlideBlend = FMath::FInterpConstantTo(SlideBlend, Target, DeltaSeconds, Rate);
+	}
 
 	// Steering intent, where it exists. Acceleration is NOT replicated — the engine ships
 	// p.EnableCharacterAccelerationReplication = 0 (Character.cpp) — and a simulated proxy rebuilds it from velocity
@@ -188,8 +225,50 @@ void UFPSRCharacterAnimInstance::UpdateRootYawOffset(const AFPSRCharacter& Chara
 	const float DeltaYaw = FRotator::NormalizeAxis(ActorYaw - PreviousActorYaw);
 	PreviousActorYaw = ActorYaw;
 
+	// Downed first: a dead or downed body has no business holding a turn or a wall.
+	if (bIsDowned)
+	{
+		RootYawOffset = 0.0f;
+		bTurningInPlace = false;
+		TurnDirection = 0.0f;
+		return;
+	}
+
+	// Wall BEFORE the moving/airborne reset, and this ordering is load-bearing. Nothing turns the capsule toward the
+	// wall (bUseControllerRotationYaw means it follows the view), so the pose has to be turned instead, and a wall hold
+	// keeps sliding or climbing along the surface — which makes bIsMoving true. Put this after the reset below and the
+	// wall alignment is wiped every single frame while looking correct in the code.
+	if (bIsOnWall)
+	{
+		const UFPSRCharacterMovementComponent* Move = Character.GetFPSRMovement();
+		if (Move)
+		{
+			// The clip stands side-on to the wall, so the body's target is the wall's facing turned by the authored
+			// side angle, on the side latched when the hold began.
+			// The angle lives on the movement component, which is also what latched the side. One number, read by
+			// both, so they cannot drift apart and pick opposite shoulders.
+			const float TargetBodyYaw =
+				Move->GetWallYawForDisplay() + (Move->GetWallSideSign() * Move->GetWallPoseSideAngle());
+			// Rotate Root Bone takes the correction from the capsule's yaw to where the body should be.
+			const float Desired = FRotator::NormalizeAxis(TargetBodyYaw - ActorYaw);
+			// The same clamp as turn-in-place, for the same reason: past it the upper body cannot twist far enough to
+			// bring the aim back to the crosshair. A side-on pose spends most of that budget just standing, so this
+			// clamp is reached whenever the player looks the other way along the wall — the known cost of one clip.
+			const float Clamped = FMath::Clamp(Desired, -RootYawOffsetMax, RootYawOffsetMax);
+			const float Rate = (WallAlignBlendDuration > KINDA_SMALL_NUMBER)
+				? (RootYawOffsetMax * 2.0f / WallAlignBlendDuration) : 0.0f;
+			// Eased rather than snapped so grabbing a wall turns the body into place instead of teleporting it.
+			RootYawOffset = (Rate > 0.0f)
+				? FMath::FInterpConstantTo(RootYawOffset, Clamped, DeltaSeconds, Rate)
+				: Clamped;
+		}
+		bTurningInPlace = false;
+		TurnDirection = 0.0f;
+		return;
+	}
+
 	// Moving, airborne or downed: the legs belong under the capsule, so there is no lag to hold.
-	if (bIsDowned || bIsMoving || bIsFalling)
+	if (bIsMoving || bIsFalling)
 	{
 		RootYawOffset = 0.0f;
 		bTurningInPlace = false;

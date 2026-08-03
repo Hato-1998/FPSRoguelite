@@ -57,6 +57,11 @@ public:
 
 	virtual void PossessedBy(AController* NewController) override;
 	virtual void OnRep_PlayerState() override;
+
+	/** Weapon visibility follows the movement mode (hidden while holding a wall — that clip is bare-handed). Hooked on
+	 *  the character rather than in the movement component so the movement component keeps being something others only
+	 *  query, per ADR 0001. */
+	virtual void OnMovementModeChanged(EMovementMode PrevMovementMode, uint8 PreviousCustomMode = 0) override;
 	virtual void SetupPlayerInputComponent(UInputComponent* PlayerInputComponent) override;
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
@@ -163,6 +168,13 @@ public:
 	 *  Called each frame from the weapon-fire tick (which already no-ops for non-local pawns). Component visibility is a
 	 *  local render flag, not replicated, so this only clears the OWNER's view — teammates still see the gun. (W-U2) */
 	void UpdateScopeWeaponVisibility();
+
+	/** Single owner of "is the weapon drawn". Composes every reason to hide it (scope, wall) so the reasons cannot
+	 *  cancel each other out. Idempotent — safe to call from spawn, possession, equip and movement-mode paths.
+	 *  @param bForce  Re-apply to the components even when the composed answer has not changed. Required after the
+	 *                 meshes are re-pointed or re-attached: that restores them to visible while this class's latch
+	 *                 still says "hidden", so a plain call would early-out and leave a wall-hung player holding a gun. */
+	void RefreshWeaponVisibility(bool bForce = false);
 
 	/** 활성 사이트의 스코프 오버레이 위젯 클래스(스코프 시각 활성 시). 없으면 null(HUD가 폴백 사용). 호출은 스코프
 	 *  진입 엣지에서(프레임마다 아님) — 소프트 참조를 동기 로드한다. (스코프 위젯화) */
@@ -592,9 +604,10 @@ protected:
 	 *  Owner-local cosmetic; not replicated/saved. (W-U2) */
 	FFPSRWeaponScopeDescriptor CachedScopeDescriptor;
 
-	/** Tracks whether UpdateScopeWeaponVisibility currently has the weapon hidden for a scope, so it only toggles
-	 *  visibility on change (and only ever manages the scope-hide state). Owner-local. (W-U2) */
-	bool bWeaponHiddenForScope = false;
+	/** Whether RefreshWeaponVisibility currently has the weapon meshes hidden, so it only toggles on change.
+	 *  Not "hidden for a scope" any more: the wall pose hides it too, and a per-reason latch is exactly how the two
+	 *  reasons would start undoing each other. */
+	bool bWeaponHidden = false;
 
 	/** Tracks the last head-visibility decision so UpdateFirstPersonBodyVisibility only touches bone visibility when the
 	 *  view target actually changes (the steady state is a pointer compare). Local render state; never replicated. */

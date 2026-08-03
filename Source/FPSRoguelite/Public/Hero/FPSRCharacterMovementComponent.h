@@ -82,10 +82,55 @@ public:
 
 	/** Same idea for the slide pose: 0 not sliding, 1 fully sliding, over SlideBlendDuration.
 	 *  NOTE for animation work: this follows bIsSliding, which is derived locally and NOT replicated — it is only
-	 *  trustworthy on the owning client and the server, not for remote players. GetStanceBlend() has no such limit
-	 *  (bIsCrouched is replicated). */
+	 *  trustworthy on the owning client and the server, not for remote players. Use IsSlidingForDisplay() when the
+	 *  answer has to be right on a simulated proxy too. GetStanceBlend() has no such limit (bIsCrouched is replicated). */
 	UFUNCTION(BlueprintPure, Category = "FPSR|Movement")
 	float GetSlideBlend() const { return SlideBlend; }
+
+	/** "Is this character sliding" answered correctly on EVERY machine, unlike IsSliding().
+	 *
+	 *  bIsSliding is derived locally and, worse, is rewound by FSavedMove_FPSR::PrepMoveFor during a correction replay,
+	 *  so it is the wrong thing to hand to the network. bSlidingVisual is a separate server-authored copy that exists
+	 *  only to be looked at. Invariant 1 is intact: the movement component still owns the state; this is a picture of
+	 *  it, and nothing is allowed to decide movement from it. */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Movement")
+	bool IsSlidingForDisplay() const;
+
+	/** Bumped once per slide ENTRY, replicated alongside the flag.
+	 *
+	 *  Replication sends the value that is current at each net update, so a slide that starts and ends between two
+	 *  updates (a jump-cancel is two frames) collapses to no visible change and a teammate never sees it at all. The
+	 *  serial survives that: the receiver sees a number it has not seen before and knows a slide happened even though
+	 *  the flag it was carrying is already false again. */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Movement")
+	uint8 GetSlideVisualSerial() const { return SlideVisualSerial; }
+
+	/** Outward wall normal for the wall the character is holding. Local physics value: valid on the owner and the
+	 *  server, zero on a simulated proxy. For animation use GetWallYawForDisplay(). */
+	FVector GetWallNormal() const { return WallNormal; }
+
+	/** Wall facing as a yaw in degrees, valid on every machine.
+	 *
+	 *  A proxy receives the custom movement mode (so IsOnWall() works there) but nothing that says WHICH wall, and the
+	 *  normal cannot be recovered from the mode. Quantised to a byte: 1.4 degrees per step, under a degree of error
+	 *  after rounding, which is far below what the pose itself is authored to.
+	 *  Deliberately NOT fed back into WallNormal — the physics keeps its exact local value, because letting a
+	 *  quantised number into the wall-stick would need its own correctness pass. */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Movement")
+	float GetWallYawForDisplay() const;
+
+	/** Which shoulder the wall pose presents to the wall: +1 or -1, chosen once when the hold begins.
+	 *
+	 *  The wall clip is authored side-on, so the body's target yaw is the wall yaw plus or minus that authored angle.
+	 *  Picking the nearer side every frame would flip the whole body whenever the player's view crosses the midpoint,
+	 *  so the choice is latched at entry and replicated with the yaw. */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Movement")
+	float GetWallSideSign() const { return (WallSideSign < 0) ? -1.0f : 1.0f; }
+
+	/** The authored side angle of the wall pose. Exposed because the AnimBP needs the SAME number this component used
+	 *  to latch the side — two copies would eventually disagree and put the body on the wrong shoulder. */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Movement")
+	float GetWallPoseSideAngle() const { return WallPoseSideAngle; }
 
 	/** How far the CURRENT stance change has run, 0 at the moment it started to 1 when it settles. Distinct from
 	 *  GetStanceBlend(): a change interrupted halfway restarts this at 0 from wherever the blend had reached, which is
@@ -192,6 +237,17 @@ public:
 	/** Force the wall-hang to end now, dropping into a normal fall. Used by the global run-freeze for the same reason
 	 *  as StopSliding (invariant 8 — gating the START of a state is not enough). Safe to call when not on a wall. */
 	void StopWallHang();
+
+	/** How far the wall clip's body is turned from facing the wall, degrees. The shipped pose stands side-on, so the
+	 *  body's target is the wall yaw plus this (times the latched side sign) rather than the wall yaw itself.
+	 *  ⚠️ Bounded by the AnimBP's RootYawOffsetMax (90): at 86 the upper body has almost no twist budget left, so a
+	 *  player looking the other way along the wall clamps. Raising this makes that worse, not better. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Movement|Wall",
+		meta = (ClampMin = "-90.0", ClampMax = "90.0"))
+	float WallPoseSideAngle = 86.0f;
+
+	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
+	virtual void OnMovementUpdated(float DeltaSeconds, const FVector& OldLocation, const FVector& OldVelocity) override;
 
 protected:
 	// --- Slide tuning (invariant 9: data, not C++ constants — designers tune these per-hero in the BP defaults) ---
@@ -539,6 +595,33 @@ protected:
 	/** Derived state, NOT replicated: both machines compute it from the same predicted inputs, and it rides in
 	 *  FSavedMove_FPSR so a correction replay restores it exactly instead of re-deriving it across a float boundary. */
 	bool bIsSliding = false;
+
+	// --- Replicated PICTURE of the state above, for machines that cannot derive it (simulated proxies) ---
+	// Written by the server only, in OnMovementUpdated, from the post-move truth. Kept apart from bIsSliding because
+	// that one is rewound by PrepMoveFor on a correction replay; a replicated property must not be rewound under the
+	// networking layer's feet.
+
+	/** Server's view of "sliding", replicated to everyone but the owner (who derives it, exactly, itself). */
+	UPROPERTY(Transient, Replicated)
+	uint8 bSlidingVisual : 1;
+
+	/** Incremented on every slide entry so a slide shorter than the net update interval still registers. Wrapping is
+	 *  fine and intended — the receiver compares against the last value it saw, never against zero. */
+	UPROPERTY(Transient, Replicated)
+	uint8 SlideVisualSerial = 0;
+
+	/** Wall facing, quantised to 1/256 of a turn. Refreshed only when the quantised value actually changes: the
+	 *  underlying normal is re-probed every frame, and marking a replicated property dirty at that rate is churn the
+	 *  correction path does not need. */
+	UPROPERTY(Transient, Replicated)
+	uint8 WallYawByte = 0;
+
+	/** Latched side the body presents to the wall, +1 / -1. See GetWallSideSign(). */
+	UPROPERTY(Transient, Replicated)
+	int8 WallSideSign = 1;
+
+	/** Server-side: push the three values above into agreement with the real state. Called after movement. */
+	void RefreshReplicatedVisualState();
 
 	/** Seconds elapsed in the current slide. Accumulated from the movement delta (never from world time — server and
 	 *  client clocks differ), and likewise saved/restored for replay. */

@@ -270,6 +270,11 @@ void AFPSRCharacter::BeginPlay()
 	// captured "arms rest pose" to seed the ADS blend from — the hip end of that blend is the grip socket, read fresh
 	// every frame in UpdateAimDownSights.
 	PreviousControlRotation = GetControlRotation();
+
+	// Establish the weapon's visibility from the state we actually spawned in, rather than assuming "visible" and
+	// waiting for something to change. A pawn possessed mid-air onto a wall, or re-created by seamless travel, has no
+	// movement-mode edge coming to fix it up.
+	RefreshWeaponVisibility();
 }
 
 void AFPSRCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -526,19 +531,33 @@ float AFPSRCharacter::ResolveADSTargetFOV(float DefaultFOV, float BaseADSFOV, bo
 
 void AFPSRCharacter::UpdateScopeWeaponVisibility()
 {
-	// Hide the weapon meshes (propagate to children: modular parts) while a full-screen scope is active, so the scope
-	// overlay reads without the gun in the way. Toggle only on change. Owner-local: the caller (weapon-fire tick)
-	// already no-ops for non-local pawns, and component visibility is a LOCAL render flag — teammates keep seeing the
-	// gun on their own machines. Auto-restores when the scope drops (release / reload / weapon swap) because
-	// IsScopeVisualActive() then returns false.
-	// The hands holding it stay visible (there is no arms component to hide with it any more). ADR 0002 leaves that to
-	// PIE: measure whether the hands are even inside the ADS frustum before reaching for HideBoneByName on the arms.
-	const bool bShouldHide = IsScopeVisualActive() && CachedScopeDescriptor.bHideWeaponWhileScoped;
-	if (bShouldHide == bWeaponHiddenForScope)
+	RefreshWeaponVisibility();
+}
+
+void AFPSRCharacter::RefreshWeaponVisibility(bool bForce)
+{
+	// ONE place decides whether the weapon meshes are drawn, because there is more than one reason to hide them and
+	// two independent togglers would each undo the other: a scope released while on a wall, or a wall released while
+	// scoped, would leave the gun in whichever state ran last.
+	//
+	// The two reasons do not have the same scope, which is the whole reason this needs care:
+	//  - SCOPE is owner-local. Component visibility is a LOCAL render flag, and teammates are supposed to keep seeing
+	//    the gun while its owner is looking down a scope. Gated on IsLocallyControlled so that a call arriving from a
+	//    non-local path (a movement mode change on a proxy) cannot hide someone else's weapon.
+	//  - WALL is every machine. The wall clip is bare-handed on all of them, so a gun still parented to hand_R would
+	//    float beside the hand for everyone watching, not just the owner.
+	const bool bHideForScope = IsLocallyControlled()
+		&& IsScopeVisualActive() && CachedScopeDescriptor.bHideWeaponWhileScoped;
+
+	const UFPSRCharacterMovementComponent* Move = GetFPSRMovement();
+	const bool bHideForWall = Move && Move->IsOnWall();
+
+	const bool bShouldHide = bHideForScope || bHideForWall;
+	if (bShouldHide == bWeaponHidden && !bForce)
 	{
-		return;
+		return; // toggle only on change, unless the components were rebuilt under us
 	}
-	bWeaponHiddenForScope = bShouldHide;
+	bWeaponHidden = bShouldHide;
 	if (WeaponMesh)
 	{
 		WeaponMesh->SetVisibility(!bShouldHide, /*bPropagateToChildren=*/true);
@@ -547,6 +566,16 @@ void AFPSRCharacter::UpdateScopeWeaponVisibility()
 	{
 		WeaponMeshStatic->SetVisibility(!bShouldHide, /*bPropagateToChildren=*/true);
 	}
+}
+
+void AFPSRCharacter::OnMovementModeChanged(EMovementMode PrevMovementMode, uint8 PreviousCustomMode)
+{
+	Super::OnMovementModeChanged(PrevMovementMode, PreviousCustomMode);
+
+	// Event-driven rather than polled in Tick, and hooked HERE rather than in the movement component: letting the
+	// movement component reach into weapon rendering would blur ADR 0001's rule that everything else only QUERIES it.
+	// Fires on simulated proxies too — the engine's ApplyNetworkMovementMode goes through SetMovementMode.
+	RefreshWeaponVisibility();
 }
 
 void AFPSRCharacter::UpdateFirstPersonBodyVisibility()
@@ -1603,6 +1632,11 @@ void AFPSRCharacter::RefreshEquippedWeaponVisual()
 			}
 		}
 	}
+
+	// The meshes above were just re-pointed and re-attached, which restores them to visible. Forced, because the latch
+	// may already read "hidden" from the wall the character is on — an equip arriving after the wall (they replicate
+	// on different paths and can land in either order) would otherwise leave the gun visible for the whole hold.
+	RefreshWeaponVisibility(/*bForce=*/true);
 }
 
 void AFPSRCharacter::RefreshWeaponPartComponents(const UFPSRWeaponDataAsset* Weapon)

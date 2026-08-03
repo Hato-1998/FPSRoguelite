@@ -7,9 +7,17 @@
 #include "Engine/World.h"
 #include "GameFramework/Character.h"
 #include "Hero/FPSRCharacter.h"
+#include "Net/UnrealNetwork.h"
+#include "Net/Core/PushModel/PushModel.h"
 
 UFPSRCharacterMovementComponent::UFPSRCharacterMovementComponent()
 {
+	// The shared body AnimBP runs on every machine, so a teammate's slide and the wall they are holding have to reach
+	// the machines that cannot derive them. Movement itself still travels in the move packets — this carries only the
+	// handful of bytes that are pure presentation. Same reason UFPSRWeaponFireComponent replicates bIsAiming.
+	SetIsReplicatedByDefault(true);
+	bSlidingVisual = 0;
+
 	// Crouch is engine-native (bWantsToCrouch is already predicted and already in the move packet), so the slide can
 	// ride on it without a custom flag — but it only works if crouching is actually enabled on the component.
 	NavAgentProps.bCanCrouch = true;
@@ -91,6 +99,100 @@ bool UFPSRCharacterMovementComponent::CanEnterSlide() const
 	// the max makes a mistuned pair merely hard to trigger instead of visibly broken.
 	const float EnterThreshold = FMath::Max(SlideMinEnterSpeed, SlideMinSpeed);
 	return Velocity.SizeSquared2D() >= FMath::Square(EnterThreshold);
+}
+
+void UFPSRCharacterMovementComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+
+	// SkipOwner throughout: the owning client derives every one of these from its own predicted move, exactly, and a
+	// late server copy would only fight that. Non-owning clients have no way to derive them at all.
+	FDoRepLifetimeParams Params;
+	Params.bIsPushBased = true;
+	Params.Condition = COND_SkipOwner;
+	DOREPLIFETIME_WITH_PARAMS_FAST(UFPSRCharacterMovementComponent, bSlidingVisual, Params);
+	DOREPLIFETIME_WITH_PARAMS_FAST(UFPSRCharacterMovementComponent, SlideVisualSerial, Params);
+	DOREPLIFETIME_WITH_PARAMS_FAST(UFPSRCharacterMovementComponent, WallYawByte, Params);
+	DOREPLIFETIME_WITH_PARAMS_FAST(UFPSRCharacterMovementComponent, WallSideSign, Params);
+}
+
+void UFPSRCharacterMovementComponent::OnMovementUpdated(float DeltaSeconds, const FVector& OldLocation,
+	const FVector& OldVelocity)
+{
+	Super::OnMovementUpdated(DeltaSeconds, OldLocation, OldVelocity);
+
+	// After the move, so what is read here is the settled result rather than a mid-replay intermediate. Simulated
+	// proxies never reach this (they go through SimulateMovement), which is exactly right: they are the ones being
+	// told.
+	RefreshReplicatedVisualState();
+}
+
+void UFPSRCharacterMovementComponent::RefreshReplicatedVisualState()
+{
+	const ACharacter* Owner = CharacterOwner;
+	if (!Owner)
+	{
+		return;
+	}
+	// AUTHORITY ONLY. The owning client must not touch these: they are not carried in FSavedMove_FPSR, so a correction
+	// replay would re-run a past slide entry and bump the serial again, and the owner would then play a slide it had
+	// just been corrected out of. The owner has no use for them anyway — IsSlidingForDisplay() hands it the exact
+	// local value, never this copy.
+	const bool bAuthority = Owner->HasAuthority();
+	if (!bAuthority)
+	{
+		return;
+	}
+
+	if (bIsSliding != (bSlidingVisual != 0))
+	{
+		bSlidingVisual = bIsSliding ? 1 : 0;
+		if (bIsSliding)
+		{
+			// Wraps, deliberately: the receiver only ever asks "is this different from the last one I saw".
+			++SlideVisualSerial;
+			MARK_PROPERTY_DIRTY_FROM_NAME(UFPSRCharacterMovementComponent, SlideVisualSerial, this);
+		}
+		MARK_PROPERTY_DIRTY_FROM_NAME(UFPSRCharacterMovementComponent, bSlidingVisual, this);
+	}
+
+	if (IsOnWall())
+	{
+		const FVector Normal2D = WallNormal.GetSafeNormal2D();
+		if (!Normal2D.IsNearlyZero())
+		{
+			const float WallYaw = FMath::RadiansToDegrees(FMath::Atan2(Normal2D.Y, Normal2D.X));
+			const uint8 NewByte = FRotator::CompressAxisToByte(WallYaw);
+			if (NewByte != WallYawByte)
+			{
+				WallYawByte = NewByte;
+				MARK_PROPERTY_DIRTY_FROM_NAME(UFPSRCharacterMovementComponent, WallYawByte, this);
+			}
+		}
+	}
+}
+
+bool UFPSRCharacterMovementComponent::IsSlidingForDisplay() const
+{
+	// Anywhere the exact value exists, use it — bSlidingVisual is a network copy and is by definition at best as fresh.
+	const ACharacter* Owner = CharacterOwner;
+	if (Owner && (Owner->HasAuthority() || Owner->IsLocallyControlled()))
+	{
+		return bIsSliding;
+	}
+	return bSlidingVisual != 0;
+}
+
+float UFPSRCharacterMovementComponent::GetWallYawForDisplay() const
+{
+	// The exact normal where it exists, the quantised copy where it does not. The two differ by well under a degree,
+	// so nobody sees a different body angle depending on whose screen it is.
+	const FVector Normal2D = WallNormal.GetSafeNormal2D();
+	if (!Normal2D.IsNearlyZero())
+	{
+		return FMath::RadiansToDegrees(FMath::Atan2(Normal2D.Y, Normal2D.X));
+	}
+	return FRotator::DecompressAxisFromByte(WallYawByte);
 }
 
 void UFPSRCharacterMovementComponent::StartSliding()
@@ -256,6 +358,32 @@ void UFPSRCharacterMovementComponent::StartWallHang(const FVector& InWallNormal)
 	// Set before the mode change: OnMovementModeChanged does the rest of the entry bookkeeping and the wall is the one
 	// piece it can't derive for itself.
 	WallNormal = InWallNormal;
+
+	// Latch which shoulder goes to the wall, ONCE, here. The clip is authored side-on, so there are two ways to stand
+	// against any wall; picking the nearer one every frame would spin the whole body through 172 degrees the moment
+	// the player's view crossed the midpoint. Choosing at entry means the body is committed for the length of the
+	// hold, which is at most WallHangMaxDuration.
+	const FVector Normal2D = WallNormal.GetSafeNormal2D();
+	if (CharacterOwner && !Normal2D.IsNearlyZero())
+	{
+		const float WallYaw = FMath::RadiansToDegrees(FMath::Atan2(Normal2D.Y, Normal2D.X));
+		const float ActorYaw = CharacterOwner->GetActorRotation().Yaw;
+		const float ErrPlus = FMath::Abs(FRotator::NormalizeAxis((WallYaw + WallPoseSideAngle) - ActorYaw));
+		const float ErrMinus = FMath::Abs(FRotator::NormalizeAxis((WallYaw - WallPoseSideAngle) - ActorYaw));
+		const int8 NewSign = (ErrPlus <= ErrMinus) ? 1 : -1;
+		WallSideSign = NewSign;
+		// Dirty the yaw HERE as well as in RefreshReplicatedVisualState. The movement mode travels in the move packet
+		// while these travel as properties, so they can never be made truly atomic — but marking them on the entry
+		// frame is what keeps the gap to at most one update instead of leaving a proxy turning the body to the
+		// PREVIOUS wall's angle until the next time the quantised value happens to change.
+		WallYawByte = FRotator::CompressAxisToByte(WallYaw);
+		if (CharacterOwner->HasAuthority())
+		{
+			MARK_PROPERTY_DIRTY_FROM_NAME(UFPSRCharacterMovementComponent, WallSideSign, this);
+			MARK_PROPERTY_DIRTY_FROM_NAME(UFPSRCharacterMovementComponent, WallYawByte, this);
+		}
+	}
+
 	SetMovementMode(MOVE_Custom, CMOVE_WallHang);
 }
 

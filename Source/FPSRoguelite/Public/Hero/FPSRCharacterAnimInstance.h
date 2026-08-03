@@ -50,8 +50,8 @@ public:
 	UPROPERTY(BlueprintReadOnly, Category = "FPSR|Anim")
 	bool bIsFalling = false;
 
-	/** Wall-hang (CMOVE_WallHang). No wall animation exists yet: the layer routes this to the air state so a wall-hung
-	 *  player is not left running a grounded locomotion pose. */
+	/** Wall-hang (CMOVE_WallHang). Derived from the movement mode, so it is already correct on a simulated proxy.
+	 *  While this is true the body is turned to face the wall via RootYawOffset — see UpdateRootYawOffset. */
 	UPROPERTY(BlueprintReadOnly, Category = "FPSR|Anim")
 	bool bIsOnWall = false;
 
@@ -69,14 +69,15 @@ public:
 	float StanceBlend = 0.0f;
 
 	/** True while a slide is in progress. Presentation only — invariant 3 forbids driving movement state off it.
-	 *  Published now even though no slide animation exists in the project yet: if the slide step had to publish this
-	 *  itself, that step would become a CODE change during a content phase.
-	 *  NOT yet verified on a SIMULATED PROXY — the movement component owns the flag and this graph runs on every
-	 *  machine, so confirm a teammate's slide reads true before trusting it for the slide pose. */
+	 *  Valid on EVERY machine: fed by UFPSRCharacterMovementComponent::IsSlidingForDisplay (a replicated copy on
+	 *  proxies, the exact local value elsewhere) and held for SlideVisualMinDuration when the slide serial says a
+	 *  slide happened too fast to survive the gap between net updates. ⏳ Still wants a 2-client PIE pass. */
 	UPROPERTY(BlueprintReadOnly, Category = "FPSR|Anim")
 	bool bIsSliding = false;
 
-	/** 0 not sliding .. 1 fully sliding, eased over the movement component's SlideBlendDuration. Same proxy caveat. */
+	/** 0 not sliding .. 1 fully sliding. The owner and the server take the movement component's own blend; a proxy has
+	 *  only the replicated flag, so it eases its own over SlideVisualBlendDuration rather than spending bandwidth on
+	 *  a curve that is just a ramp of known length. */
 	UPROPERTY(BlueprintReadOnly, Category = "FPSR|Anim")
 	float SlideBlend = 0.0f;
 
@@ -189,6 +190,20 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Anim", meta = (ClampMin = "0.0"))
 	float TurnInPlaceStartAngle = 45.0f;
 
+	/** Seconds for the body to turn into the wall alignment on grabbing, instead of snapping there. */
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Anim|Wall", meta = (ClampMin = "0.0"))
+	float WallAlignBlendDuration = 0.15f;
+
+	/** Shortest time a slide is shown for once the serial says one happened. A slide can be over in two frames
+	 *  (jump-cancel); without a floor the pose would flicker or never appear at all on a teammate's screen. */
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Anim|Slide", meta = (ClampMin = "0.0"))
+	float SlideVisualMinDuration = 0.2f;
+
+	/** Seconds the slide weight takes to ease in/out on a machine that only has the replicated flag. Mirrors the
+	 *  movement component's own SlideBlendDuration, which is what the owner and server use directly. */
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Anim|Slide", meta = (ClampMin = "0.0"))
+	float SlideVisualBlendDuration = 0.15f;
+
 	/** How fast a turn in place eats the offset, degrees/sec. The pack's turn loops are in-place conversions with the
 	 *  root motion stripped, so there is no root delta to consume the offset — this does it instead, which also keeps
 	 *  the offset's owner in one place (invariant 8). */
@@ -225,6 +240,15 @@ private:
 	/** Actor yaw last frame, for the RootYawOffset accumulation. */
 	float PreviousActorYaw = 0.0f;
 	bool bHasPreviousActorYaw = false;
+
+	/** Remaining seconds of the enforced slide display. See SlideVisualMinDuration. */
+	float SlideVisualHold = 0.0f;
+
+	/** Last slide serial seen from the movement component; a change means a slide began, even one already over.
+	 *  bHasSlideSerial keeps the FIRST value from counting as a change — otherwise every spawn, and every proxy that
+	 *  joins mid-slide, would play a slide it never actually saw start. */
+	uint8 LastSlideVisualSerial = 0;
+	bool bHasSlideSerial = false;
 
 	/** So a missing elbow bone is reported once, not every frame. */
 	bool bWarnedMissingElbowBone = false;
