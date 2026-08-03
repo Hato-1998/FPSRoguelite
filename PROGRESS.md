@@ -152,10 +152,27 @@
 - 🚨 **무기는 태깅하지 않는다**(설계 결정, 엔진 소스 근거). `PrimitiveSceneProxy.cpp:620` — `bIsFirstPerson`이면 `bCastDynamicShadow/Static/Volumetric/Far`가 **전부 강제 off**. 그리고 렌더러는 FirstPerson 프리미티브를 뷰별로 거르지 않는다(오너 전용은 `bOnlyOwnerSee`의 별개 일). 공용 무기 1벌(ADR 0002)을 태깅하면 **동료 화면에서도 총 그림자가 사라진다.**
 - **ADS 정렬 리스크는 엔진 소스로 닫았다** — FP 패스의 별도 FOV·스케일은 `UCameraComponent::bEnableFirstPersonFieldOfView`/`bEnableFirstPersonScale`로 켜는 옵션이고 **둘 다 기본 false**(`CameraComponent.cpp:97-98`), 꺼져 있으면 `FirstPersonFOV = FOV` / `FirstPersonScale = 1.0`(`:475-476`)이라 **태깅이 렌더 위치를 안 바꾼다** → `UpdateAimDownSights`의 월드 정렬 그대로 유효. **이 둘은 건드리지 않는 게 결정사항**이고, 총이 벽에 파고드는 걸 없애려 켜게 되면 ADS 정렬을 다시 재야 한다.
 
-### ⏳ P2 = Blender 맨팔 저작 (사용자) → 스왑
-- 🚨 **본은 지우지 말고 메시(버텍스)만 자를 것.** `LeaderPoseComponent`는 팔이 **바디와 같은 스켈레톤**이어야 동작한다. 임포트는 기존 `Blu_-_Rigged_Non_Constraint_Skeleton`에(새 스켈레톤 만들지 말 것).
-- 어깨 **단면 캡 필수**(안 씌우면 아래 볼 때 뚫려 보인다, ADR 지적) · export는 **FBX**([[glb-import-crash-use-fbx]])
-- 스왑 후에도 **미검증으로 남아 있는 것 4개**(바디 통짜 플레이스홀더로는 화면이 몸통으로 꽉 차 확인 불가였다): **ADS 조준선 정렬**(가장 중요) · 동료 화면의 내 몸 · 내 그림자 풀바디 · F8/DBNO 관전
+### ✅ P2 팔 메시 완료 — 저작·검증·임포트 (2026-08-03)
+`Blu_FP_Arms` = `/Game/Characters/Blu/SkeletalMeshes/Blu_FP_Arms/SkeletalMeshes/`. **재킷 제거 후 맨팔만**(사용자 결정 — 소매가 팔 실루엣의 거의 전부라 별도 메시가 맞다).
+- **검증(헤드리스 Blender 계측)**: 구멍 0 · 논매니폴드 0 · 미웨이트 버텍스 0 · 느슨한 지오메트리 0 · 본 108 · 머티리얼 `Body` 하나 · 바운드 x±72.4 z136~147(=팔만). GLB `Saved/NeonV/fp_arms/Blu_FP_Arms.glb`.
+- 🚨 **export는 반드시 glTF(GLB)** — `NeonV_scripts/fp_arms_export.py` 첫 줄 경고: *"FBX 는 쓰지 않는다 — 뼈가 미터/메시가 cm 로 잡혀 회전 시 팔이 원뿔로 붕괴한다. rest 포즈만 보면 멀쩡해 보인다."* ([[glb-import-crash-use-fbx]] 메모리는 *에디터 자동임포트* 사례라 여기 해당 없음)
+- 🚨 **본 이름 변환은 export 세션 안에서만** 한다. Blender는 점(`upper_arm.L`), UE Blu 스켈레톤은 언더바(`upper_arm_L`) — 점→언더바 치환이 **108개 전수 일치**(`.uasset` 이름테이블 grep 대조). `.blend`에서 바꾸면 `NeonV_locomotion.blend`(액션 진실원천)와 조용히 갈라진다.
+- **export 대상 정리 필요**: 이 씬에 카메라 10 · 라이트 12 · `REF_*` 메시 3이 있는데 `fp_arms_export.py`는 전체 선택이라 다 딸려간다. `glTF_not_exported` 컬렉션으로 옮기거나 export 스크립트에서 제외할 것.
+- 💥 **스켈레톤 사고 1회(복구됨)** — 임포트 소스를 잘못 잡고(마네킹 1인칭 팔) Skeleton에 Blu를 지정했더니 **Blu 스켈레톤이 108본 → 65본(마네킹)으로 통째로 교체**됐다. 541개 에셋이 참조하는 에셋이다. "Skeleton Conflicts" 창은 **소스 파일이 틀렸다**는 신호였는데 무시하고 Done을 눌러 발생. 복구 = 에디터 닫고 `git checkout`(바이트 단위 복원 확인). 상세·재발방지 = 메모리 [[ue-import-overwrites-target-skeleton]].
+
+### 🚨 P3 막힘 — 로코모션 레이어가 본체 스텁으로 떨어진다 (다음 세션의 단 하나의 표적)
+**1인칭 팔 자체는 완전히 정상이다**(실측: `LeaderPoseComponent`=CharacterMesh0 · 팔=`FirstPerson` · 바디=`WorldSpaceRepresentation` · 바디↔팔 본 오차 **0.00cm** · 프록시 무영향 · ADS 조준소켓 좌우 `yaw 0.0°`). **바디가 잘못된 포즈를 재생하는 게 문제**이고 이건 1인칭 팔과 무관한 별건이다.
+
+**실측**: `bIsAiming=True` · `StanceBlend=1.0`(완전히 앉음) · `Speed=0` 인데 나오는 포즈가 `Stand_Relaxed_Idle`과 **0.1°**, `Crouch_Aim_Idle`과 **1029.8°**. 조준·스탠스·속도 **어떤 입력에도 반응하지 않고 늘 한 클립**이며, 그 클립이 `ABP_Blu_Body`의 **폴백 스텁**에 넣어둔 것이다. 값 전달은 정상(메인·레이어 양쪽 `bIsAiming=True`, `StanceBlend=1.0` 확인).
+
+**기각된 가설 3개(전부 실측으로)**: ①`BlendListByBool` 반전 — 엔진 소스가 `BlendPose_0`=True로 못박음(`AnimNode_BlendListByBool.cpp:12`), 그래프도 Aim이 0번에 물려 있다 ②BlendSpace 그리드 — 오늘 구워 저장 완료, 그리고 스텁 클립이 나오는 건 블렌드스페이스로 설명 불가 ③`SetLeaderPoseComponent`가 링크를 깼다 — 런타임에서 `unlink→link` 재실행해도 그대로.
+
+**남은 가설(다음 세션이 검증할 것)**: **`LinkAnimClassLayers`가 상태기계 상태 안의 레이어 노드를 대상으로 안 잡는다.** 지금 두 노드의 유일한 차이가 위치다 — `ApplyWeaponAimOffset`은 루트 `AnimGraph`에 있어 **붙고**, `GetWeaponLocomotionPose`는 2026-08-03 아침에 `Locomote` 상태 안으로 옮겨서 **안 붙는다**.
+- **검증법**: 그 노드를 루트 `AnimGraph`로 되돌려 Slot에 직결(상태기계 우회)하고 PIE. 조준/앉기에 포즈가 반응하면 가설 확정.
+- 확정 시 재설계 방향: 로코모션 포즈를 **상태기계 밖**에서 만들고, 상태기계는 Slide/Wall/Air/Down/Turn 같은 특수 상태만 덮어쓰는 구조(`Blend Poses by bool`로 합성). 캐시포즈 경유는 이미 죽은 걸 확인했으므로 되돌리지 말 것.
+- ⚠️ 아침에 "정상 작동"으로 확인된 뒤 바뀐 건 **폴백 스텁 클립 교체 + 그때의 BP 재컴파일**뿐이다. 재컴파일이 노드 목록을 다시 만들며 갈렸을 가능성이 있으니, 검증 시 **컴파일 직후/재시작 후를 각각** 재볼 것.
+
+**진단 레시피(오늘 확립)**: 상태를 사용자 입력으로 만들면 표본 시점이 어긋난다 — **앉기는 토글이라 유지**되므로 앉은 상태로 재는 게 확실하다. 판정은 라이브 본 로컬 회전을 후보 클립들과 **각도 거리**로 비교(가장 가까운 것이 재생 중인 클립).
 
 ### ⏭️ 다음
 1. **4b** — 8방향 시작·정지 전환(클립 40개+) + Split_Jumps 108 리타게팅.
