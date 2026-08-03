@@ -192,7 +192,7 @@
 **진단 레시피**: 판정은 라이브 본 로컬 회전을 후보 클립들과 **각도 거리**로 비교(가장 가까운 것이 재생 중인 클립).
 </details>
 
-## 🔄 1인칭 표현 방식 재결정 — **ADR 0003 필요** (2026-08-03, 사용자 판정)
+## 🔄 1인칭 표현 방식 재결정 — ✅**[ADR 0003](Docs/Architecture/0003-first-person-arms-camera-anchored.md) 작성 완료** / ⏳배선 대기 (2026-08-03)
 **사용자 실플레이 판정: "3인칭 애니를 1인칭으로 쓰니 부자연스럽다."** 이게 ADR 0002의 핵심 전제(*"3P 애니가 PWAS 역할을 차지한다"*)를 뒤집는다. 오늘 나온 증상 3개가 전부 같은 뿌리다 — 팔이 카메라 기준으로 낮음 · 근접 클립면(10cm)을 뚫어 생기는 쐐기 · 시선과 몸 방향 어긋남.
 
 **결정: 안 나-1 = PWAS 유지 + 팔 메시만 NeonV 룩** (사용자 2026-08-03).
@@ -210,12 +210,27 @@
 - **Blu로 리타게팅(안 다)은 비싸다**: 기존 리타게터 2개(`RTG_UE4Man_to_Blu`=Rifle_01이 쓴 것, `RTG_Manny_to_Blu`)가 `S_Mannequin`을 안 덮고, 무엇보다 **커널이 마네킹 본 이름에 묶여 있다**(`clavicle_l`→`shoulder_L`, `upperarm_l`→`upper_arm_L`, `lowerarm_l`→`lower_arm_L`). 안 나-1은 이걸 전부 우회한다.
 - ℹ️ Blu 손가락은 **5개 다 있다**(`little_*`/`middle_*` 명명이라 검색에서 놓치기 쉬움 — 같은 착오가 FPARMS_RESULT에도 기록돼 있다).
 
-### ⏭️ 남은 배선 (다음 세션)
-1. `FirstPersonArms` 메시 → `NeonV_FPArms` · `LeaderPoseComponent` 해제 · **팔을 카메라에 부착**(현재 바디)
-2. 팔 AnimBP = `ABP_FPChar`(PWAS) 자체 구동
-3. 무기 이중화 복원(1P 카메라측 + 3P 월드) · 무기 DA `ArmsAnimInstanceClass`·FP 재장전 몽타주 필드 복원
-4. **ADR 0003** — ADR 0002의 축 2개(1인칭 표현·무기 단일화)가 뒤집힘
-5. 이번 세션에 만든 `Blu_FP_Arms`(Blu 스켈레톤·자동컷)는 **폐기 대상**
+### ✅ ADR 0003 확정 (2026-08-03) — 설계는 끝났다. 코드는 아직 안 건드렸다
+> **구현 전 [ADR 0003](Docs/Architecture/0003-first-person-arms-camera-anchored.md) 전문을 읽을 것.** 불변식 4개 + 함정 6개 + 기각안이 전부 거기 있다.
+
+**결정**: 축1 = **포즈 에셋만**(PWAS 커널 미사용) / 축2 = **단일 무기 · 머신별 부착** / 축3 = 로컬 바디 계속 숨김.
+사용자 확정 3건 — ①카메라 반동은 `UFPSRRecoilComponent`(CrystalRecoil)가 계속 소유 ②조준점 완전 고정 유지 ③로컬 바디 숨김 유지.
+
+**🚨 착수 전 세션이 적어둔 것 중 3개가 틀렸다** (실제 파일로 검증):
+1. **근평면은 10cm가 아니라 1.0cm다** — `Config/DefaultEngine.ini:22` `NearClipPlane=1.0`(엔진이 `UEngine::Init`에서 읽음). 인용됐던 `CoreGlobals.cpp:260`의 10.0f는 **config 읽기 전 초기값**. 그러니 4~5.5cm 본은 안 잘린다 → 쐐기꼴의 원인은 **팔이 카메라를 감싸는 것**. *"근평면을 더 낮추면 된다"는 헛수고*
+2. **`UpdateAimDownSights`는 이미 카메라 공간에서 푼다** — 마지막 한 줄만 월드. 힙 기준도 `GetAttachParent()`로 일반적. **ADS 전환 비용 ≈ 0**(대상 한 줄)
+3. **DA에 `ArmsAnimInstanceClass`는 이미 없다** — "복원"이 아니라 신규 3필드(`ArmsAnimLayerClass`·`ArmsReloadMontage`·`ArmsEquipMontage`)
+
+**🚨 PWAS 커널을 쓰면 안 되는 이유**(uasset 덤프로 확인): `ABP_FPChar`가 `BP_FPCharacter`(데모 폰)로 **캐스트**한다 → 우리 폰에 꽂으면 값 전부 0. `AC_ProceduralWeaponAnimationSystem`(4.2MB)이 **카메라 반동·ADS 알파·스웨이·크라우치 스프링·자체 무기 프리셋 DA**를 소유 → 우리 C++ 3개와 정면 충돌.
+
+**🪤 PWAS 폴더를 지우면 안 된다** — `NeonV_FPArms`의 스켈레톤이 `/Game/ProceduralWeaponAnimationSystem/Demo/FPManny/S_Mannequin` **바로 그 에셋**이다. ADR 0002의 "PWAS 폐기 순서" 절은 무효.
+
+### ⏭️ 남은 배선 (다음 세션 — 전부 미착수)
+1. `FirstPersonArms`를 **카메라에 부착**(현재 바디) · `SetLeaderPoseComponent` 해제 · 메시 = `NeonV_FPArms`
+2. 팔 AnimBP 신규 저작 — 4노드(무기군 포즈 → Slot → 왼손 IK → Output). **PWAS `ABP_FPChar`는 안 쓴다**
+3. 무기 DA 3필드 추가 + `RefreshEquippedWeaponVisual` 부착 대상 = **"팔이 켜져 있는가"**(불변식 14 — `IsLocallyControlled()`로 걸면 안 된다)
+4. `UpdateAimDownSights` 마지막 한 줄의 대상 = 무기 → **팔 컴포넌트**
+5. `Content/Characters/Blu/SkeletalMeshes/Blu_FP_Arms/` **폐기** — 참조 0 확인 후
 
 ### ⏭️ 다음
 1. **1인칭 팔 메시 모양** — 뼈가 살아난 지금도 팔이 구겨진 종이처럼 뾰족하게 보이면 스키닝/웨이트 별건(P2 산출물). 포즈는 이제 정상이므로 순수 메시 문제로 좁혀졌다.
