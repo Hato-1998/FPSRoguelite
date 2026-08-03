@@ -25,8 +25,8 @@
 - **등급/수치 모델**: 추첨이 카드당 **등급 1회 roll**(`OfferRarities`, 등급 기본가중치×Luck) → 각 효과가 굴린 등급에서 자기 `RarityTiers`의 `Magnitude` 조회. **수치 주입=`SetByCaller`**(GE 효과; 태그 `SetByCaller.CardMagnitude`). **"모든 등급 1에셋"**(등급당 1티어) 유지 — 등급별 별도 에셋 불필요.
   - ⚠️ **rarity 커버리지 강제**(Codex 게이트 P1): magnitude를 갖는 모든 효과는 카드 `OfferRarities` **전부에 대해 티어 보유 필수**(`IsDataValid` 에러). 누락 시 부분/무음 적용 회귀 → 금지.
 - **확장성/보안**: 효과는 always-loaded 카드 asset의 inline 서브오브젝트 → **와이어 미통과**. 서버권위 인덱스-선택(클라=`Index`+`OfferId`만, `ServerSelectCard`) 불변. `ApplyCard`는 서버에서 `Effects[i]->Apply()` 루프(효과타입-무지, 새 타입에 무수정).
-- **Instanced 결정 + 폴백**: `EditInlineNew`/`Instanced` 서브오브젝트 on DataAsset = UE5.7/Lyra 표준 데이터드리븐 확장(인라인 저작 = 최선의 기획자 UX, 에셋 폭증 없음). ⚠️ 단 *cook/load/network 스모크를 U18a 첫 커밋의 통과 조건으로 고정*(기존 `UFPSRWeaponFragment`는 *공유 asset ref*지 instanced 서브오브젝트가 아니므로 별도 검증). **스모크 실패 시 폴백 = 효과를 공유 asset ref(`UPrimaryDataAsset`)로**(Fragment와 동일 모델, 에셋 수↑ 대가).
-- **제1원리 3줄**: ① directive=OCP(확장 개방/수정 폐쇄) 그 자체 — enum+switch는 효과당 5레이어 결합(~58줄·5파일), 폴리모픽은 서브클래스 1파일·중앙 0. ② Instanced UObject on DataAsset = UE/Lyra 표준(컨텍스트 이펙트·코스트/쿨다운) — 단 cook/load는 스모크로 증명(Fragment "공유 ref"를 근거로 쓰지 말 것). ③ SetByCaller·서버권위 인덱스선택·`FFPSRCardRarityTier`·Luck 보존.
+- **Instanced 결정 + 폴백**: `EditInlineNew`/`Instanced` 서브오브젝트 on DataAsset = 데이터드리븐 확장(인라인 저작 = 최선의 기획자 UX, 에셋 폭증 없음). ⚠️ 단 *cook/load/network 스모크를 U18a 첫 커밋의 통과 조건으로 고정*(기존 `UFPSRWeaponFragment`는 *공유 asset ref*지 instanced 서브오브젝트가 아니므로 별도 검증). **스모크 실패 시 폴백 = 효과를 공유 asset ref(`UPrimaryDataAsset`)로**(Fragment와 동일 모델, 에셋 수↑ 대가).
+- **제1원리 3줄**: ① directive=OCP(확장 개방/수정 폐쇄) 그 자체 — enum+switch는 효과당 5레이어 결합(~58줄·5파일), 폴리모픽은 서브클래스 1파일·중앙 0. ② Instanced UObject on DataAsset = 컨텍스트 이펙트·코스트/쿨다운을 데이터로 붙이는 경로 — 단 cook/load는 스모크로 증명(Fragment "공유 ref"를 근거로 쓰지 말 것). ③ SetByCaller·서버권위 인덱스선택·`FFPSRCardRarityTier`·Luck 보존.
 
 #### 2-3-2. 3 카드군 — `ECardGroup` ⟂ 효과별 범위
 - **`ECardGroup`{Character, Weapon, WeaponUnlock}** = 추첨 **풀 + 트리거 + UI 필터**(= 사양의 "카드군"). 효과 적용 **범위**는 **효과별**(`UCardEffect_WeaponStat.bThisWeaponOnly`) — 카드 전역 `ECardScope` 폐지(효과별이 더 표현적).
