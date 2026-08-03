@@ -4,7 +4,7 @@
 > **작업 단계를 끝낼 때마다, 그리고 중단 전 반드시 이 파일을 갱신하고 커밋한다.**
 > 확정 설계·기획·코드구조·규칙은 `Game.md`(**SSOT 허브** → 도메인별 `Docs/SSOT/*.md`, 작업별 라우팅은 허브 §0-1), **완료 작업 상세는 `git log --oneline`**. 여기엔 *무엇을 했는지*만 요약한다.
 
-**최종 갱신: 2026-07-31**
+**최종 갱신: 2026-08-03**
 
 ## 🛝 4c 슬라이드·벽 애니 = ✅구조 수리(앵커·루프·wall_slip) / **⏳포즈는 사용자 재저작 대기** (2026-07-31, `refactor/character`)
 > **저작 레시피·함정 전부 = 메모리 `blender-locomotion-anim-authoring`** (헤드리스 AnimSequence 저작 API·glTF 왕복·IK 미러폴 플립 등 하드-won). 새 세션은 그것부터 읽을 것.
@@ -93,36 +93,59 @@
 - **`RotateRootBone` + `Get RootYawOffset`은 이미 AnimGraph에 연결돼 있었다**(4a-2 콘텐츠 작업 산출물) — 3b가 계산만 벽 기준으로 바꿨으므로 배선 추가 불요.
 - **검증**: 컴파일 **0 에러·0 워닝** · `validate_state_machine` = 7 states / 20 transitions / 에러 0 · 저장 후 재조회로 스테이트·그래프 수 재확인.
 
-### ✅ 2인 PIE 결과 (사용자, 2026-08-03) — 4개 중 3개 통과, 1개 실패
-| 항목 | 결과 |
-|---|---|
-| ① 동료 화면에 슬라이드가 보이는가 | ✅ 정상 |
-| ② 점프 캔슬 슬라이드도 보이는가 | ✅ 정상 (serial + 최소 표시시간이 일한다) |
-| ③ 벽에서 몸이 벽 기준으로 서는가 | ❌ **실패** — 들어오는 각도에 따라 몸 방향이 달라진다 |
-| ④ 벽에서 총이 사라지는가 | ✅ 정상 |
+### ✅ 2인 PIE 결과 (사용자, 2026-08-03)
+| 항목 | 1차 | 클램프 수정 + 애님 수정 후 |
+|---|---|---|
+| ① 동료 화면에 슬라이드가 보이는가 | ✅ 정상 | — |
+| ② 점프 캔슬 슬라이드도 보이는가 | ✅ 정상 (serial + 최소 표시시간이 일한다) | — |
+| ③ 벽에서 몸이 벽 기준으로 서는가 | ❌ 실패 — 들어오는 각도에 따라 몸 방향이 달라진다 | ✅ **사용자 확인 완료** |
+| ④ 벽에서 총이 사라지는가 | ✅ 정상 | — |
+| ⑤ 로코모션·ADS 포즈 (콜드 로드) | ❌ T자 | ✅ **사용자 확인 완료** |
 
-### 🚨 ③ 원인 = **내가 건 클램프**. 고칠 곳은 한 군데
-벽 분기가 `RootYawOffset`을 `±RootYawOffsetMax`(90)로 자르는데 목표각이 **86°**다:
+### ✅ ③ 벽 클램프 제거 완료 (C++, 2026-08-03)
+벽 분기가 `RootYawOffset`을 `±RootYawOffsetMax`(90)로 자르는데 목표각이 **86°**였다:
 
-| 시선 | 필요값 | 실제 |
+| 시선 | 필요값 | 클램프 시 |
 |---|---|---|
 | 벽 정면 | 86 | 86 ✅ |
 | 30° 비껴서 | 116 | **90으로 잘림 → 26° 어긋남** |
 | 벽 따라 옆 | 176 | **90으로 잘림 → 86° 어긋남** |
 
-**→ 벽 분기에서는 클램프를 걸지 말 것.** 클램프의 존재 이유는 *"상체가 크로스헤어를 따라잡을 여유를 남긴다"* 인데 **벽에서는 애초에 사격이 불가능**하다 — `CanFireInCurrentState()`가 벽에서만 false이고 그 주석이 *"both hands are on the wall"* 이다. 지킬 예산이 없는데 자르고 있었다. 고칠 위치 = `UFPSRCharacterAnimInstance::UpdateRootYawOffset`의 `if (bIsOnWall)` 블록에서 `FMath::Clamp(Desired, ...)` → `Desired` 그대로.
-- 부수: 상체가 시선을 안 따라간다(고개가 안 돌아감). 벽에서 못 쏘므로 게임플레이 영향 0. 거슬리면 그때 미러본.
-- ⚠️ C++ 수정 → **빌드 필요 = 에디터 닫아야 함**.
+클램프의 존재 이유는 *"상체가 크로스헤어를 따라잡을 여유를 남긴다"* 인데 **벽에서는 애초에 사격이 불가능**하다(`CanFireInCurrentState()`가 벽에서만 false, 주석이 *"both hands are on the wall"*). 지킬 예산이 없는데 자르고 있었다. → `UpdateRootYawOffset`의 `if (bIsOnWall)`에서 클램프 삭제, `Desired` 그대로 사용.
+- 🚨 **클램프를 빼면 새 버그가 생긴다 — 같이 막았다.** `FInterpConstantTo`는 각도를 각도로 모른다. 클램프가 있을 땐 값이 ±90에 갇혀 문제가 없었지만, 원 전체를 쓰게 되면 목표가 **±180을 넘길 때마다 몸이 반대로 한 바퀴 돈다**(179 → −179 = 실제 2°인데 358° 이동). `FRotator::NormalizeAxis`로 **최단호 스텝**으로 바꿨다. 속도 상수도 `RootYawOffsetMax*2`(이제 벽과 무관) → `180.0f`로 — 기본값에선 1200°/s로 수치 동일, 의미만 "최악의 경우 `WallAlignBlendDuration` 안에 정렬"로 정확해진다.
+- 부수(수용): 벽에서 상체가 시선을 안 따라간다(못 쏘므로 영향 0) · 벽을 놓는 순간 오프셋 스냅 폭이 최대 90 → 176°가 될 수 있으나 같은 프레임에 낙하 포즈로 갈아치워져 가려진다.
 
-### 🚨 별건 발견 — **기본 IDLE이 T자인 건 4a-2가 미완성이라서**(내 작업과 무관)
-`ABL_Blu_W2_Rifle`(라이플 레이어) 조회 결과 **`get_used_anim_sequences` = `[]`** — 그래프 뼈대(`GetWeaponLocomotionPose`·`ApplyWeaponAimOffset`·`Ground`·`AnimGraph`)만 있고 **애니 에셋이 하나도 배정돼 있지 않다.** 그래서 레이어가 **레퍼런스 포즈(T자)** 를 내보내고 그 위에 에임오프셋 애디티브가 얹혀 팔이 옆으로 뻗는다. "오른쪽 아래를 볼 때 순간 정상"은 그 방향에서 애디티브가 우연히 그럴듯해 보이는 것.
-- 레이어 **링크 자체는 정상**(런타임에 `ABL_Blu_W2_Rifle_C_0` 인스턴스 확인) · `DA_Weapon_Rifle.BodyAnimLayerClass` 배정됨 · `RootYawOffset`도 −1.4로 정상. **포즈 소스만 비어 있다.**
+### 🚨🚨 IDLE T자 = **버그 두 개가 서로를 가리고 있었다** (2026-08-03 해결)
+> 앞 세션이 적은 *"4a-2가 미완성이라 애니가 하나도 없다"* 는 **오진이었다.** BlendSpace 4개도 레이어 그래프도 이미 다 만들어져 있었다(`e47909d5`). 근거였던 `get_used_anim_sequences = []` 는 그 함수가 **AnimSequence만 세기 때문**이고, 살아있는 경로의 포즈 소스는 전부 **BlendSpace**라 원래 안 잡힌다. **빈 목록은 "비었다"의 증거가 아니다.**
 
-> **🔑 진단이 갈린 지점**: "요가 90°에 붙어 굳었다"는 내 가설은 **런타임 값을 읽어보니 −1.4로 멀쩡해서 기각**됐다. 애님 문제는 그래프를 읽으려 하지 말고(서비스 API가 애님 그래프 핀·연결을 안 준다 — `get_connections`·`get_node_pins`·`get_graph_definition` 전부 빈값) **PIE 중인 AnimInstance를 파이썬으로 직접 읽어라**: `unreal.get_editor_subsystem(unreal.UnrealEditorSubsystem).get_game_world()` → `GameplayStatics.get_all_actors_of_class(gw, unreal.Character)` → `mesh.get_anim_instance()` → `get_editor_property(...)`.
+**두 버그가 겹쳐 있었다. 하나만 고치면 증상이 그대로라 서로를 가렸다.**
 
-### ⏭️ 다음 세션 = 4a-2 전체 (사용자 결정 2026-08-03) + 벽 클램프 수정
-1. **라이플 레이어 채우기** — BlendSpace 4개(Stand/Crouch × Aim/Relaxed, Direction×Speed, 재료 = `Blu_W2_{Walk,Jog,CrouchWalk}_Aim` 8방향) + 상태기계 Idle/Move/TurnInPlace/Air. 도구 = VibeUE `AnimGraphService`(3c에서 검증됨).
-2. **벽 클램프 제거** + 빌드 1회 → PIE 재확인(③).
+**버그 1 — `Save Cached Pose` 가지가 평가되지 않았다.**
+`AnimGraph`의 `LinkedAnimLayer(GetWeaponLocomotionPose) → Save cached pose 'WeaponLocomotion'` → `Locomote` 상태의 `Use cached pose`. 이 경로로는 **무엇을 물려도 레퍼런스 포즈**가 나왔다(ABL 레이어도, 본체 자기 스텁에 넣은 시퀀스 플레이어도). 캐시 쌍을 지원 API로 **새로 만들어 봐도 동일**.
+- → **캐시를 걷어내고 `Locomote` 안에 `Linked Anim Layer` 노드를 직결**해서 해결. `ApplyWeaponAimOffset`(정상 동작하던 쪽)과 똑같은 모양이 된다.
+- 실증: 직결 후 런타임에 `unlink_anim_class_layers` 하니 본체 폴백 스텁 포즈가 **오차 0.2°로 정확히** 나왔다. 캐시 경유일 땐 그것조차 안 나왔다.
+
+**버그 2 — BlendSpace 4개의 구워진 그리드가 디스크에 없었다.** ← 진짜 T자의 원인
+`BS_W2_{Stand,Crouch}_{Aim,Relaxed}`는 헤드리스로 만들어져 **샘플 데이터만 있고 내부 그리드(삼각분할)가 통째로 비어 있었다.** 그래서 로드할 때마다 조용히 레퍼런스 포즈를 냈다.
+- **"에디터에서 열면 고쳐지고 재시작하면 돌아온다"** 가 결정적 단서였다 — 여는 순간 메모리에서만 구워지고 저장이 안 된다.
+- 고치는 법 = **다시 굽기 + 저장**. 축 Max를 바꿨다 되돌려 `PostEditChangeProperty`를 태우고 `save_asset`. 단순히 열기만 하면 dirty가 안 되어 Ctrl+S가 아무것도 안 한다.
+- 증거: 저장 후 파일이 **13.9KB → 39.0KB**(Stand), **11.0KB → 22.5KB**(Crouch)로 커졌다. 비어 있던 게 그만큼이다.
+- 같은 시기 헤드리스 AimOffset 4개(`/Game/Rifle_01/AimOffset/*`)는 **콜드 로드에서 정상 동작 실측** — 이 배치만 안 구워진 채 저장됐다. **앞으로 헤드리스로 만든 BlendSpace는 콜드 로드로 검증할 것.**
+
+> **🔑 진단 도구**: 애님 문제는 그래프를 읽으려 하지 말고 **PIE 중인 AnimInstance를 파이썬으로 직접 읽어라** — `unreal.get_editor_subsystem(unreal.UnrealEditorSubsystem).get_game_world()` → `GameplayStatics.get_all_actors_of_class(gw, unreal.Character)` → `mesh.get_anim_instance()` → `get_editor_property(...)`.
+> **포즈 판정은 본 로컬 회전 숫자로 한다**: `get_socket_transform(bone, RTS_COMPONENT)`를 부모 대비로 환산(`MathLibrary.make_relative_transform`)해 `AnimationLibrary.get_bone_pose_for_frame(clip, bone, 0, False)`와 대조. "어느 클립이 재생 중인가"를 각도 거리로 가른다 — 이번에 상태기계가 `Locomote`에 있음을 다른 6개 상태 클립과의 거리(최소 224.7°)로 배제 증명했다.
+> ⚠️ **PIE 중에는 `AnimGraphService`·`BlueprintService`가 죽는다**(`Failed to load AnimBlueprint`). 그래프 조회는 PIE 끄고.
+> ⚠️ **`BlueprintService.get_nodes_in_graph` + `get_node_details`는 애님 그래프에서도 핀·연결을 다 준다**(앞 세션의 "서비스 API가 핀을 안 준다"는 `get_connections`·`get_graph_definition`에만 해당). 연결 추적은 이걸로.
+
+### 💥 에디터 크래시 1회 — `create_node_by_key`로 애님 노드 만들지 말 것
+`BlueprintService.create_node_by_key(..., "NODE AnimGraphNode_LinkedAnimLayer", ...)`가 `Interface=None, Layer=""` 인 **빈 껍데기**를 만들었고 다음 틱에 **하드 크래시**(assert 없이 로그가 끊긴다). 더 나쁜 건 **저장한 적 없는 그 노드가 디스크에 남아** 재시작 후에도 존재했다는 것.
+- → **애님 노드는 `AnimGraphService`의 타입별 `add_*`만 쓴다**(`add_sequence_player`·`add_save_cached_pose`·`add_use_cached_pose` 등, 초기화된 노드를 만든다).
+- → **사용자 지시(2026-08-03): BP·애님그래프 노드 편집은 사용자가 직접 한다.** Claude는 조회·진단·단계 가이드까지.
+
+### ⏭️ 다음
+1. **4b** — 8방향 시작·정지 전환(클립 40개+) + Split_Jumps 108 리타게팅.
+2. 무기 DA 나머지 8개에 `BodyAnimLayerClass` 미배정 → 나이프·맨손은 본체 폴백(`ABP_Blu_Body`의 `GetWeaponLocomotionPose` = `Blu_W2_Stand_Relaxed_Idle_IPC` 단일 클립)으로 선다. 무기별 레이어가 필요해지면 그때 만든다.
+3. (미해결 잔여) `wall_topout` f0/f12 포즈 판단 · 1인칭 팔 컷 채택 여부.
 
 
 ### 🔧 (근거) 루트 요를 벽 법선에 맞추는 이유 (사용자 승인 2026-08-02)
