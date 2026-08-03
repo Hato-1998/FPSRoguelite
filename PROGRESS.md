@@ -63,7 +63,7 @@
   - **내린 양의 교차검증**: 슬라이드 중엔 캡슐이 앉은 크기(반높이 36.8 + 앉은 눈높이 29.5 = 바닥에서 **66.3cm**)이고, 66.3 ÷ 0.8806 = 75.3cm인데 내린 뒤 머리 뼈가 **75.5cm** — 0.2cm 차이로 카메라가 정확히 머리에 온다.
 - **파이프라인**: `anim_export.py`(glTF, `REF_`·`FP_` 제외) → 커맨드렛 임포트 → `ue_copy_to_blu.py`로 트랙 복사 → `slide_upper_graft.py`. 검증 = Blender 대비 **최대 0.38cm**, 그래프트 별도 프로세스 재검증 **ALLPASS**(하체 드리프트 0.0000 · 상체 소스 일치 · 양손 간격 20.72cm · `upper_arm_R` 81.6°).
 - 🪤 **커맨드렛이 exit 3으로 죽지만 작업은 끝나 있다** — 임포트/저장 완료 후 **콘텐츠 브라우저가 결과를 UI에 표시하려다** `Assertion failed: CurrentApplication.IsValid()`(Slate 없음). 로그에서 `CP ALLDONE`/`ALLPASS` 같은 완료 마커를 확인할 것이지 종료코드로 판단하지 말 것.
-- ⏳ **`Slide_Enter`·`Slide_Exit_*`·`Wall_Hang`·`Wall_Climb`·`Wall_TopOut` 6개는 미사용인데 깨진 소스에서 나온 채 남아 있다** — 삭제할지 사용자 판단 대기(git 커밋돼 있어 복구 가능).
+- ✅ **미사용 6개 삭제**(`Slide_Enter`·`Slide_Exit_Crouch`·`Slide_Exit_Stand`·`Wall_Hang`·`Wall_Climb`·`Wall_TopOut`, 사용자 결정 2026-08-03). 지우기 전 **참조 0개 확인**(참조가 하나라도 있으면 전체 중단하게 짜서 돌림). 깨진 소스에서 나온 것들이라 남겨두면 나중에 신뢰하게 된다. 되살리려면 `git checkout 50d0d686 -- <경로>`. **이제 UE의 4c 애니는 `Blu_W2_Slide_Loop`·`Blu_Wall_Slip` 둘뿐이다.**
 - ~~exit 끝점 정합~~ **소멸** — exit 클립 자체가 없어져 상태기계가 슬라이드 포즈 → 앉기 아이들로 바로 블렌드한다.
 4. ~~**`BS_Wall_Vertical`** 1D BlendSpace~~ **폐기**(사용자 결정 2026-08-02) — **벽 관련은 `wall_slip` 애니 하나로 통일**한다. 매달리기·등반·미끄러짐·**턱 넘기까지 전부** 이 하나(사용자 확정 2026-08-03). 최대 1.5초(`WallHangMaxDuration`)짜리 동작이라 감수.
    - **따라서 `wall_hang`·`wall_climb`·`wall_topout` 3개는 미사용**이 된다. `.blend`에는 남겨 두되(비용 0, 참고·폴백용) UE로는 `wall_slip` 하나만 반영한다.
