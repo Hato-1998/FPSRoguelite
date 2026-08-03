@@ -81,7 +81,19 @@
    - ⚠️ 모드는 이동 패킷, yaw/sign은 프로퍼티라 **원자적으로 못 온다** → 진입 프레임에 같이 더티 처리해 간극을 1업데이트로 제한.
 3. **무기 가시성 = 단일 컴포저** `RefreshWeaponVisibility(bForce)` — `스코프(오너로컬) || 벽(모든 머신) || 무기없음`. 훅은 `AFPSRCharacter::OnMovementModeChanged`(CMC가 무기 렌더를 만지면 ADR 0001 "질의만" 경계가 흐려짐). `BeginPlay`·장착 갱신에서 멱등 호출, **장착 갱신은 `bForce=true`**(메시 재부착이 컴포넌트를 다시 보이게 만드는데 래치는 "숨김"이라 그냥 부르면 early-out).
 
-**⏳ 남은 것 = 3c 배선(에디터 수동) + 2인 PIE 검증** — 프록시 슬라이드가 실제로 보이는지, 벽 정렬 부호가 맞는지는 원리상 헤드리스로 확인 불가.
+### ✅ 3c 배선 완료 (2026-08-03) — VibeUE `AnimGraphService` 로 전부 프로그래매틱
+**컴퓨터 제어(마우스)는 안 썼다.** 그래프를 마우스로 끄는 건 API보다 몇 배 느리고 좌표가 어긋나면 엉뚱한 핀에 붙는데, `AnimGraphService`에 `add_state`·`set_state_animation`·`set_transition_rule_from_bool(invert)`·`set_transition_blend`·`set_transition_priority`·**`validate_state_machine`**이 다 있어 결정적이고 검증까지 API로 된다.
+- **죽은 상태머신 제거** — `BlueprintEditorLibrary.remove_graph`가 답이었다(`BlueprintService.delete_function`은 애님 그래프에 **안 먹는다**, False 반환). 죽은 `Locomotion` 하나를 지우니 **자식까지 딸려가 그래프 60 → 23(고아 37개 제거)**. 살아있는 `Locomotion2`는 무손상(validate 통과).
+  - 죽은 그래프의 정체 = `AnimGraph.AnimGraphNode_StateMachine_0.Locomotion` — AnimGraph의 **노드 배열에서는 빠졌지만 outer로 매달려** 살아 있던 것. 그래서 `list_state_machines`에는 안 잡히고 `list_graphs`에는 잡혔다.
+- **`Slide` 스테이트** = `Blu_W2_Slide_Loop`(루프). `Locomote →(bIsSliding)→ Slide` · `Slide →(!bIsSliding)→ Locomote` · `Slide →(bIsAirborne)→ Airborne` · `Slide →(bIsDowned)→ Down`.
+  - ⚠️ **`Slide → Airborne` 우선순위 0**(나머지 1) — 점프 캔슬은 `bIsSliding` false와 `bIsAirborne` true가 **같은 프레임**에 오므로 `→Locomote`와 동시 성립한다. 공중이 이겨야 한다.
+- **`Wall` 스테이트** = `Blu_Wall_Slip`(1프레임 정지 포즈). `Airborne →(bIsOnWall)→ Wall` · `Wall →(!bIsOnWall)→ Airborne` · `Wall →(bIsDowned)→ Down`.
+  - 벽 진입이 **공중 전용이 사양**이라 `Locomote → Wall` 직행은 만들지 않았다. `Locomote → Airborne`(bIsAirborne, 벽 포함) → `Airborne → Wall`로 한 프레임 거쳐 간다.
+  - 벽에서 손을 놓으면 `MOVE_Falling`이 되어 `Wall → Airborne`이 받고, 착지는 기존 `Airborne → Locomote`가 받는다 → `Wall → Locomote` 직행 불필요.
+- **`RotateRootBone` + `Get RootYawOffset`은 이미 AnimGraph에 연결돼 있었다**(4a-2 콘텐츠 작업 산출물) — 3b가 계산만 벽 기준으로 바꿨으므로 배선 추가 불요.
+- **검증**: 컴파일 **0 에러·0 워닝** · `validate_state_machine` = 7 states / 20 transitions / 에러 0 · 저장 후 재조회로 스테이트·그래프 수 재확인.
+
+**⏳ 남은 것 = 사용자 눈 확인 + 2인 PIE** — 프록시 슬라이드가 실제로 보이는지, 벽 정렬 부호(86° 좌우)가 맞는지는 **원리상 헤드리스로 확인 불가**.
 
 ### 🔧 (근거) 루트 요를 벽 법선에 맞추는 이유 (사용자 승인 2026-08-02)
 **지금은 `bUseControllerRotationYaw = true`라 캡슐(=메시) 방향 = 플레이어 시선이고, `StartWallHang`도 `PhysCustom`도 캐릭터를 벽 쪽으로 돌리지 않는다**(`WallNormal`을 저장만 함). 그래서 어떤 각도로 저작하든 인게임에서 벽과의 관계가 매번 달라진다 → **루트 요를 벽 법선에 정렬**해야 포즈에 박힌 각도가 "벽 기준 상대 각도"로 확정된다. 그러면 왼쪽/오른쪽/뒤쪽 어느 벽이든 동일하게 나오고 **미러 버전은 불필요**.
