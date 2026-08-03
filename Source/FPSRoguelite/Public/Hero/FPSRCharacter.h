@@ -12,6 +12,7 @@ class UAbilitySystemComponent;
 class UFPSRAbilitySystemComponent;
 class UFPSRCharacterMovementComponent;
 class UCameraComponent;
+class USkeletalMesh;
 class USkeletalMeshComponent;
 class UInputAction;
 class UFPSRWeaponInventoryComponent;
@@ -175,6 +176,12 @@ public:
 	 *                 meshes are re-pointed or re-attached: that restores them to visible while this class's latch
 	 *                 still says "hidden", so a plain call would early-out and leave a wall-hung player holding a gun. */
 	void RefreshWeaponVisibility(bool bForce = false);
+
+	/** Single owner of the first-person body/arms split, for the same reason RefreshWeaponVisibility exists: several
+	 *  lifecycle paths decide it (spawn, possession, controller replication) and two independent togglers would undo
+	 *  each other. Idempotent. Runs on every machine but only ever splits the LOCALLY CONTROLLED pawn — a proxy that
+	 *  hid its own body would erase a teammate from the screen. */
+	void RefreshFirstPersonRendering();
 
 	/** 활성 사이트의 스코프 오버레이 위젯 클래스(스코프 시각 활성 시). 없으면 null(HUD가 폴백 사용). 호출은 스코프
 	 *  진입 엣지에서(프레임마다 아님) — 소프트 참조를 동기 로드한다. (스코프 위젯화) */
@@ -403,6 +410,16 @@ protected:
 	/** Weapon static mesh (e.g. melee), same grip socket + same visibility as WeaponMesh above. */
 	UPROPERTY(VisibleAnywhere, Category = "FPSR|Mesh")
 	TObjectPtr<UStaticMeshComponent> WeaponMeshStatic;
+
+	/** The owner's own arms: the SAME pose as the body (LeaderPoseComponent), on a mesh cut at the shoulders, drawn
+	 *  only for the owner. Exists so looking down shows arms instead of a torso, without a second anim graph. */
+	UPROPERTY(VisibleAnywhere, Category = "FPSR|Mesh")
+	TObjectPtr<USkeletalMeshComponent> FirstPersonArms;
+
+	/** Mesh for the component above. Data, not a literal (ADR 0002 invariant 9). **Unset = the whole first-person
+	 *  split stays off** — see RefreshFirstPersonRendering for why that is the safe default rather than a bug. */
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Mesh")
+	TSoftObjectPtr<USkeletalMesh> FirstPersonArmsMesh;
 
 	/** Socket on the BODY skeleton the weapon meshes attach to (authored on the grip hand — Blu: "SOCKET_Weapon" on
 	 *  hand_R). C++-created component sockets can't be edited in the BP, so this exposes the default here; the

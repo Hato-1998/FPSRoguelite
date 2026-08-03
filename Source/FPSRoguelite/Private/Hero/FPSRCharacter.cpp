@@ -117,6 +117,16 @@ AFPSRCharacter::AFPSRCharacter(const FObjectInitializer& ObjectInitializer)
 	// 1P mesh hid from them; with one mesh serving both there is nothing left to mirror — and a survey of all 9 weapon
 	// DataAssets found its mesh field had never been authored, so teammates' weapons were invisible the whole time.
 
+	// The owner's arms. Attached to the BODY (not the capsule) so it inherits the body's transform AND its scale —
+	// LeaderPoseComponent shares the POSE, not the component transform, so an arms component parked anywhere else
+	// would play the right pose in the wrong place. Owner-only: without this the arms render on top of the body for
+	// everyone else. Starts hidden and untagged; RefreshFirstPersonRendering turns it on once a mesh is authored.
+	FirstPersonArms = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("FirstPersonArms"));
+	FirstPersonArms->SetupAttachment(GetMesh());
+	FirstPersonArms->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	FirstPersonArms->SetOnlyOwnerSee(true);
+	FirstPersonArms->SetVisibility(false);
+
 	WeaponInventory = CreateDefaultSubobject<UFPSRWeaponInventoryComponent>(TEXT("WeaponInventory"));
 	WeaponFire = CreateDefaultSubobject<UFPSRWeaponFireComponent>(TEXT("WeaponFire"));
 	RecoilComponent = CreateDefaultSubobject<UFPSRRecoilComponent>(TEXT("RecoilComponent"));
@@ -275,6 +285,11 @@ void AFPSRCharacter::BeginPlay()
 	// waiting for something to change. A pawn possessed mid-air onto a wall, or re-created by seamless travel, has no
 	// movement-mode edge coming to fix it up.
 	RefreshWeaponVisibility();
+
+	// Same reasoning for the first-person split: a listen-server host is already locally controlled here, so it must
+	// not wait for a controller-change edge that will never arrive. A remote client's pawn is NOT locally controlled
+	// yet at this point — NotifyControllerChanged catches that one.
+	RefreshFirstPersonRendering();
 }
 
 void AFPSRCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -566,6 +581,52 @@ void AFPSRCharacter::RefreshWeaponVisibility(bool bForce)
 	{
 		WeaponMeshStatic->SetVisibility(!bShouldHide, /*bPropagateToChildren=*/true);
 	}
+}
+
+void AFPSRCharacter::RefreshFirstPersonRendering()
+{
+	USkeletalMeshComponent* BodyMesh = GetMesh();
+	if (!BodyMesh || !FirstPersonArms)
+	{
+		return;
+	}
+
+	// The split gates on an AUTHORED arms mesh, and that is the load-bearing part of this function. Flipping the body
+	// to WorldSpaceRepresentation makes the engine set bOwnerNoSee — so doing it without arms to put in their place
+	// leaves the owner staring at an empty screen. Same rule as the left-hand IK: with nothing valid to point at, the
+	// feature turns OFF rather than running wrong (invariant 9's spirit — content decides, code fails safe).
+	USkeletalMesh* ArmsMesh = FirstPersonArmsMesh.LoadSynchronous();
+	const bool bSplit = (ArmsMesh != nullptr) && IsLocallyControlled();
+
+	if (bSplit && FirstPersonArms->GetSkeletalMeshAsset() != ArmsMesh)
+	{
+		FirstPersonArms->SetSkeletalMeshAsset(ArmsMesh);
+		// The arms do not evaluate anything: they replay the body's bone transforms. One anim graph, one evaluation,
+		// for the owner and every observer alike (ADR 0002 invariant 4). Set AFTER the mesh — the leader link is
+		// dropped when the skinned asset changes.
+		FirstPersonArms->SetLeaderPoseComponent(BodyMesh);
+	}
+
+	FirstPersonArms->SetVisibility(bSplit, /*bPropagateToChildren=*/true);
+
+	// FirstPerson: drawn in the first-person pass and, per the engine, with every shadow flag forced off
+	// (PrimitiveSceneProxy.cpp — bIsFirstPerson clears bCastDynamicShadow/Static/Volumetric/Far). That is what we
+	// want: the body below still casts the full-body shadow, so tagging the arms keeps it from being cast twice.
+	FirstPersonArms->SetFirstPersonPrimitiveType(
+		bSplit ? EFirstPersonPrimitiveType::FirstPerson : EFirstPersonPrimitiveType::None);
+
+	// WorldSpaceRepresentation is what hides the body from its owner: the engine sets bOwnerNoSee=true and
+	// bCastHiddenShadow=false internally so the special first-person shadow path in VSM picks it up instead of the
+	// regular one. Teammates are unaffected — bOwnerNoSee is per-view, so they keep seeing a whole body.
+	BodyMesh->SetFirstPersonPrimitiveType(
+		bSplit ? EFirstPersonPrimitiveType::WorldSpaceRepresentation : EFirstPersonPrimitiveType::None);
+
+	// The WEAPON is deliberately left alone. Tagging it FirstPerson would strip its shadow for EVERY viewer, not just
+	// the owner, because that flag lives on the primitive rather than on the view — and it would buy nothing while the
+	// camera's bEnableFirstPersonScale / bEnableFirstPersonFieldOfView stay off (both default false), since with them
+	// off the first-person pass renders at the same FOV and scale as the world pass. Turning them on to stop the gun
+	// clipping into walls would move where the sight RENDERS versus where UpdateAimDownSights puts it in the world, so
+	// that is a separate decision with its own measurement, not a free extra.
 }
 
 void AFPSRCharacter::OnMovementModeChanged(EMovementMode PrevMovementMode, uint8 PreviousCustomMode)
@@ -1300,6 +1361,10 @@ void AFPSRCharacter::NotifyControllerChanged()
 		TryBindVisionDelegate();   // ensure bound (no-op if already)
 		HandleRunStateChanged_Vision();
 	}
+
+	// Outside the IsLocallyControlled branch on purpose: this hook also fires when a pawn STOPS being locally
+	// controlled, and the split has to be undone then or an unpossessed body stays invisible to its old owner.
+	RefreshFirstPersonRendering();
 }
 
 void AFPSRCharacter::HandleRunStateChanged_Vision()

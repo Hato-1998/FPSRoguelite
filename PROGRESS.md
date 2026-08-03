@@ -142,6 +142,21 @@
 - → **애님 노드는 `AnimGraphService`의 타입별 `add_*`만 쓴다**(`add_sequence_player`·`add_save_cached_pose`·`add_use_cached_pose` 등, 초기화된 노드를 만든다).
 - → **사용자 지시(2026-08-03): BP·애님그래프 노드 편집은 사용자가 직접 한다.** Claude는 조회·진단·단계 가이드까지.
 
+## 🖐 1인칭 팔 메시 = **채택 확정** (사용자 결정 2026-08-03) — P1 코드 완료 / ⏳P2 Blender 대기
+**방식 = B(별도 팔 메시)**, 사용자 결정: *"재킷 소매 때문이라도 아예 다른 걸 써야"*. ADR 0002가 적어둔 안(같은 메시 + 머티리얼 슬롯 분리)은 소매를 몸통에서 떼는 손 작업이 결국 같은데 **바디 메시까지 재임포트**해야 해서 기각. 대신 팔 에셋을 계속 유지하는 비용을 받는다(의상·스킨 바뀌면 재추출).
+**P2 플레이스홀더는 재킷을 아예 빼고 맨팔만**(사용자 수정).
+
+### ✅ P1 UE 배선 완료 (빌드 Succeeded, UHT `-WarningsAsErrors` 포함 0에러·0워닝)
+`AFPSRCharacter`에 `FirstPersonArms`(바디에 attach → 스케일 0.8806 상속, `OnlyOwnerSee`) + `FirstPersonArmsMesh`(소프트 참조, **BP에서 지정**) + 단일 컴포저 `RefreshFirstPersonRendering()`. 훅 = `BeginPlay`(리슨서버 호스트) + `NotifyControllerChanged`(클라 + 빙의 해제. `PossessedBy`가 이걸 부르므로 별도 훅 불요).
+- **메시가 비어 있으면 분리를 아예 안 켠다** — `WorldSpaceRepresentation`은 엔진이 `bOwnerNoSee=true`를 걸어버리므로, 팔 없이 켜면 오너 화면이 빈다. 왼손 IK가 그립 없을 때 꺼지는 것과 같은 규칙.
+- 🚨 **무기는 태깅하지 않는다**(설계 결정, 엔진 소스 근거). `PrimitiveSceneProxy.cpp:620` — `bIsFirstPerson`이면 `bCastDynamicShadow/Static/Volumetric/Far`가 **전부 강제 off**. 그리고 렌더러는 FirstPerson 프리미티브를 뷰별로 거르지 않는다(오너 전용은 `bOnlyOwnerSee`의 별개 일). 공용 무기 1벌(ADR 0002)을 태깅하면 **동료 화면에서도 총 그림자가 사라진다.**
+- **ADS 정렬 리스크는 엔진 소스로 닫았다** — FP 패스의 별도 FOV·스케일은 `UCameraComponent::bEnableFirstPersonFieldOfView`/`bEnableFirstPersonScale`로 켜는 옵션이고 **둘 다 기본 false**(`CameraComponent.cpp:97-98`), 꺼져 있으면 `FirstPersonFOV = FOV` / `FirstPersonScale = 1.0`(`:475-476`)이라 **태깅이 렌더 위치를 안 바꾼다** → `UpdateAimDownSights`의 월드 정렬 그대로 유효. **이 둘은 건드리지 않는 게 결정사항**이고, 총이 벽에 파고드는 걸 없애려 켜게 되면 ADS 정렬을 다시 재야 한다.
+
+### ⏳ P2 = Blender 맨팔 저작 (사용자) → 스왑
+- 🚨 **본은 지우지 말고 메시(버텍스)만 자를 것.** `LeaderPoseComponent`는 팔이 **바디와 같은 스켈레톤**이어야 동작한다. 임포트는 기존 `Blu_-_Rigged_Non_Constraint_Skeleton`에(새 스켈레톤 만들지 말 것).
+- 어깨 **단면 캡 필수**(안 씌우면 아래 볼 때 뚫려 보인다, ADR 지적) · export는 **FBX**([[glb-import-crash-use-fbx]])
+- 스왑 후에도 **미검증으로 남아 있는 것 4개**(바디 통짜 플레이스홀더로는 화면이 몸통으로 꽉 차 확인 불가였다): **ADS 조준선 정렬**(가장 중요) · 동료 화면의 내 몸 · 내 그림자 풀바디 · F8/DBNO 관전
+
 ### ⏭️ 다음
 1. **4b** — 8방향 시작·정지 전환(클립 40개+) + Split_Jumps 108 리타게팅.
 2. 무기 DA 나머지 8개에 `BodyAnimLayerClass` 미배정 → 나이프·맨손은 본체 폴백(`ABP_Blu_Body`의 `GetWeaponLocomotionPose` = `Blu_W2_Stand_Relaxed_Idle_IPC` 단일 클립)으로 선다. 무기별 레이어가 필요해지면 그때 만든다.
