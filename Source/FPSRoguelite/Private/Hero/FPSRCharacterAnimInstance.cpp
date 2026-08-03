@@ -251,16 +251,24 @@ void UFPSRCharacterAnimInstance::UpdateRootYawOffset(const AFPSRCharacter& Chara
 				Move->GetWallYawForDisplay() + (Move->GetWallSideSign() * Move->GetWallPoseSideAngle());
 			// Rotate Root Bone takes the correction from the capsule's yaw to where the body should be.
 			const float Desired = FRotator::NormalizeAxis(TargetBodyYaw - ActorYaw);
-			// The same clamp as turn-in-place, for the same reason: past it the upper body cannot twist far enough to
-			// bring the aim back to the crosshair. A side-on pose spends most of that budget just standing, so this
-			// clamp is reached whenever the player looks the other way along the wall — the known cost of one clip.
-			const float Clamped = FMath::Clamp(Desired, -RootYawOffsetMax, RootYawOffsetMax);
+			// Deliberately NOT clamped to RootYawOffsetMax. That budget buys the upper body room to twist back to the
+			// crosshair, and a wall hold has no aim to protect — CanFireInCurrentState() is false for its whole
+			// duration precisely because both hands are on the wall. Clamping here destroyed the alignment it was
+			// meant to protect: the side-on clip spends 86 of the 90 degrees just standing, so every view even
+			// slightly off the wall's facing hit the limit and the body froze there (2-client PIE 2026-08-03 —
+			// 30 degrees off the wall left the body 26 degrees wrong, along the wall 86).
+			// Full circle, so WallAlignBlendDuration is measured against the worst case the offset can now travel.
 			const float Rate = (WallAlignBlendDuration > KINDA_SMALL_NUMBER)
-				? (RootYawOffsetMax * 2.0f / WallAlignBlendDuration) : 0.0f;
-			// Eased rather than snapped so grabbing a wall turns the body into place instead of teleporting it.
-			RootYawOffset = (Rate > 0.0f)
-				? FMath::FInterpConstantTo(RootYawOffset, Clamped, DeltaSeconds, Rate)
-				: Clamped;
+				? (180.0f / WallAlignBlendDuration) : 0.0f;
+			// Eased rather than snapped so grabbing a wall turns the body into place instead of teleporting it — and
+			// eased along the SHORT arc, which only matters now that the clamp is gone. Stepping the offset as a
+			// plain number sends the body the long way round every time the target crosses +-180: 179 to -179 is two
+			// degrees of turn and 358 degrees of travel. FInterpConstantTo cannot know it is holding an angle.
+			const float ToTarget = FRotator::NormalizeAxis(Desired - RootYawOffset);
+			const float Step = Rate * DeltaSeconds;
+			RootYawOffset = (Rate > 0.0f && FMath::Abs(ToTarget) > Step)
+				? FRotator::NormalizeAxis(RootYawOffset + (FMath::Sign(ToTarget) * Step))
+				: Desired;
 		}
 		bTurningInPlace = false;
 		TurnDirection = 0.0f;
