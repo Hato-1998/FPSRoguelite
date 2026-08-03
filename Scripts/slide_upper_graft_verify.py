@@ -12,6 +12,9 @@ import traceback
 W2 = "/Game/Characters/Blu/Anims/W2_Rifle/"
 AIM_NAME = "Blu_W2_Crouch_Aim_Idle_IPC"
 SLIDES = ["Blu_W2_Slide_Enter", "Blu_W2_Slide_Loop", "Blu_W2_Slide_Exit_Crouch", "Blu_W2_Slide_Exit_Stand"]
+# Mirror slide_upper_graft.py: verify exactly the clips that were grafted.
+if os.environ.get("FPSR_GRAFT_SLIDES"):
+    SLIDES = [s.strip() for s in os.environ["FPSR_GRAFT_SLIDES"].split(",") if s.strip()]
 SNAPSHOT = os.path.join(
     unreal.Paths.convert_relative_path_to_full(unreal.Paths.project_saved_dir()),
     "NeonV", "anim", "pre_graft_snapshot.json")

@@ -25,6 +25,10 @@ W2 = "/Game/Characters/Blu/Anims/W2_Rifle/"
 AIM_NAME = "Blu_W2_Crouch_Aim_Idle_IPC"
 AO_ASSET = "/Game/Rifle_01/AimOffset/AO_Crouch_Aim"
 SLIDES = ["Blu_W2_Slide_Enter", "Blu_W2_Slide_Loop", "Blu_W2_Slide_Exit_Crouch", "Blu_W2_Slide_Exit_Stand"]
+# The slide states were collapsed onto a single clip (user decision 2026-08-03), so a re-reflection
+# only needs to graft that one. Narrow it with FPSR_GRAFT_SLIDES to keep the diff to what changed.
+if os.environ.get("FPSR_GRAFT_SLIDES"):
+    SLIDES = [s.strip() for s in os.environ["FPSR_GRAFT_SLIDES"].split(",") if s.strip()]
 
 # Everything else in the 108-bone Blu skeleton is upper body (spine and below it in the hierarchy).
 LOWER = ["root", "hips", "upper_leg_L", "upper_leg_R", "lower_leg_L", "lower_leg_R",
