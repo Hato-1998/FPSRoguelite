@@ -192,6 +192,31 @@
 **진단 레시피**: 판정은 라이브 본 로컬 회전을 후보 클립들과 **각도 거리**로 비교(가장 가까운 것이 재생 중인 클립).
 </details>
 
+## 🔄 1인칭 표현 방식 재결정 — **ADR 0003 필요** (2026-08-03, 사용자 판정)
+**사용자 실플레이 판정: "3인칭 애니를 1인칭으로 쓰니 부자연스럽다."** 이게 ADR 0002의 핵심 전제(*"3P 애니가 PWAS 역할을 차지한다"*)를 뒤집는다. 오늘 나온 증상 3개가 전부 같은 뿌리다 — 팔이 카메라 기준으로 낮음 · 근접 클립면(10cm)을 뚫어 생기는 쐐기 · 시선과 몸 방향 어긋남.
+
+**결정: 안 나-1 = PWAS 유지 + 팔 메시만 NeonV 룩** (사용자 2026-08-03).
+
+### 🎁 그런데 산출물이 이미 있다 — Blender 재작업 불필요
+`Content/Character/FPArms/NeonV_FPArms` (커밋 `2d6f57ac`, 2026-07-26, HEAD 조상 — ADR 0002가 폐기했지만 **파일은 안 지워졌다**).
+- 스켈레톤 = **`S_Mannequin`**(PWAS와 동일) · 본 **161** · 섹션 3(Body/Jacket/Accessoris) · 소매를 손목 10cm 위 절단
+- 바운드 extent (55.22, 21.80, 31.97) vs `SK_FP_Manny_Simple` (55.44, 19.90, 31.20) → **rest pose가 뼈 단위로 맞춰져 있다**
+- 현재 참조자 = 자기 PhysicsAsset뿐(놀고 있음)
+- 저작 이력·함정 = Blender repo `Docs/HANDOFF_NEONV_FPARMS_RESULT.md`
+  > ★ **UE는 스켈레톤을 공유하면 레퍼런스 포즈도 공유한다.** 메시 바인드 포즈가 스켈레톤 ref pose와 다르면 그 부위가 강제로 늘어난다(실측: 48.8cm 메시가 에디터에 **157cm**). 스켈레톤을 공유할 거면 rest pose를 뼈 하나까지 맞출 것.
+
+### PWAS 실측 (2026-08-03)
+`Content/ProceduralWeaponAnimationSystem` **145 에셋** 생존 — 무기군 6종 포즈 · FP 재장전 몽타주 · 절차 커널(`ABP_FPChar`: AnimGraph 22 / F_ProceduralAnimations 15 / EventGraph 38) · 프리셋 DA. 전부 `S_Mannequin` 기준.
+- **Blu로 리타게팅(안 다)은 비싸다**: 기존 리타게터 2개(`RTG_UE4Man_to_Blu`=Rifle_01이 쓴 것, `RTG_Manny_to_Blu`)가 `S_Mannequin`을 안 덮고, 무엇보다 **커널이 마네킹 본 이름에 묶여 있다**(`clavicle_l`→`shoulder_L`, `upperarm_l`→`upper_arm_L`, `lowerarm_l`→`lower_arm_L`). 안 나-1은 이걸 전부 우회한다.
+- ℹ️ Blu 손가락은 **5개 다 있다**(`little_*`/`middle_*` 명명이라 검색에서 놓치기 쉬움 — 같은 착오가 FPARMS_RESULT에도 기록돼 있다).
+
+### ⏭️ 남은 배선 (다음 세션)
+1. `FirstPersonArms` 메시 → `NeonV_FPArms` · `LeaderPoseComponent` 해제 · **팔을 카메라에 부착**(현재 바디)
+2. 팔 AnimBP = `ABP_FPChar`(PWAS) 자체 구동
+3. 무기 이중화 복원(1P 카메라측 + 3P 월드) · 무기 DA `ArmsAnimInstanceClass`·FP 재장전 몽타주 필드 복원
+4. **ADR 0003** — ADR 0002의 축 2개(1인칭 표현·무기 단일화)가 뒤집힘
+5. 이번 세션에 만든 `Blu_FP_Arms`(Blu 스켈레톤·자동컷)는 **폐기 대상**
+
 ### ⏭️ 다음
 1. **1인칭 팔 메시 모양** — 뼈가 살아난 지금도 팔이 구겨진 종이처럼 뾰족하게 보이면 스키닝/웨이트 별건(P2 산출물). 포즈는 이제 정상이므로 순수 메시 문제로 좁혀졌다.
 2. **4b** — 8방향 시작·정지 전환(클립 40개+) + Split_Jumps 108 리타게팅.
