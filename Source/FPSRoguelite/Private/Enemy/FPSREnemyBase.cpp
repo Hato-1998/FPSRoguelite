@@ -5,6 +5,7 @@
 #include "Enemy/FPSREnemySpawnSubsystem.h"
 #include "Enemy/FPSREnemyAnimProfile.h"
 #include "Enemy/FPSREnemyMetricsSubsystem.h" // S4 readability metrics registry (CSV-gated, see below)
+#include "Enemy/FPSREnemyShadowLODSubsystem.h" // per-viewer dynamic-shadow band (see BeginPlay/EndPlay)
 #include "Hero/FPSRCharacter.h"
 #include "Pickup/FPSRPickupSubsystem.h"
 #include "Core/FPSRLogChannels.h"
@@ -112,6 +113,17 @@ void AFPSREnemyBase::BeginPlay()
 		}
 	}
 #endif
+
+	// Shadow LOD registry — same shape and lifetime as the metrics registration above, and for the same reason: the
+	// decision is made from each LOCAL viewer's POV, so this runs on every net mode, not just the server. Absent on a
+	// dedicated server (and when the feature is off), where GetSubsystem returns null and this is a no-op.
+	if (UWorld* World = GetWorld())
+	{
+		if (UFPSREnemyShadowLODSubsystem* ShadowLOD = World->GetSubsystem<UFPSREnemyShadowLODSubsystem>())
+		{
+			ShadowLOD->RegisterEnemy(this);
+		}
+	}
 }
 
 void AFPSREnemyBase::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -128,7 +140,25 @@ void AFPSREnemyBase::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	}
 #endif
 
+	// Shadow LOD registry: symmetric unregister (the pass also compacts stale weak entries, so a missed call during
+	// teardown is survivable rather than fatal — this is the tidy path, not the only one).
+	if (UWorld* World = GetWorld())
+	{
+		if (UFPSREnemyShadowLODSubsystem* ShadowLOD = World->GetSubsystem<UFPSREnemyShadowLODSubsystem>())
+		{
+			ShadowLOD->UnregisterEnemy(this);
+		}
+	}
+
 	Super::EndPlay(EndPlayReason);
+}
+
+void AFPSREnemyBase::SetShadowCasting(bool bEnabled)
+{
+	if (Mesh)
+	{
+		Mesh->SetCastShadow(bEnabled);
+	}
 }
 
 void AFPSREnemyBase::InitHealthBarWidget()
