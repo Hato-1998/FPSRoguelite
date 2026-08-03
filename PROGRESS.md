@@ -93,7 +93,37 @@
 - **`RotateRootBone` + `Get RootYawOffset`은 이미 AnimGraph에 연결돼 있었다**(4a-2 콘텐츠 작업 산출물) — 3b가 계산만 벽 기준으로 바꿨으므로 배선 추가 불요.
 - **검증**: 컴파일 **0 에러·0 워닝** · `validate_state_machine` = 7 states / 20 transitions / 에러 0 · 저장 후 재조회로 스테이트·그래프 수 재확인.
 
-**⏳ 남은 것 = 사용자 눈 확인 + 2인 PIE** — 프록시 슬라이드가 실제로 보이는지, 벽 정렬 부호(86° 좌우)가 맞는지는 **원리상 헤드리스로 확인 불가**.
+### ✅ 2인 PIE 결과 (사용자, 2026-08-03) — 4개 중 3개 통과, 1개 실패
+| 항목 | 결과 |
+|---|---|
+| ① 동료 화면에 슬라이드가 보이는가 | ✅ 정상 |
+| ② 점프 캔슬 슬라이드도 보이는가 | ✅ 정상 (serial + 최소 표시시간이 일한다) |
+| ③ 벽에서 몸이 벽 기준으로 서는가 | ❌ **실패** — 들어오는 각도에 따라 몸 방향이 달라진다 |
+| ④ 벽에서 총이 사라지는가 | ✅ 정상 |
+
+### 🚨 ③ 원인 = **내가 건 클램프**. 고칠 곳은 한 군데
+벽 분기가 `RootYawOffset`을 `±RootYawOffsetMax`(90)로 자르는데 목표각이 **86°**다:
+
+| 시선 | 필요값 | 실제 |
+|---|---|---|
+| 벽 정면 | 86 | 86 ✅ |
+| 30° 비껴서 | 116 | **90으로 잘림 → 26° 어긋남** |
+| 벽 따라 옆 | 176 | **90으로 잘림 → 86° 어긋남** |
+
+**→ 벽 분기에서는 클램프를 걸지 말 것.** 클램프의 존재 이유는 *"상체가 크로스헤어를 따라잡을 여유를 남긴다"* 인데 **벽에서는 애초에 사격이 불가능**하다 — `CanFireInCurrentState()`가 벽에서만 false이고 그 주석이 *"both hands are on the wall"* 이다. 지킬 예산이 없는데 자르고 있었다. 고칠 위치 = `UFPSRCharacterAnimInstance::UpdateRootYawOffset`의 `if (bIsOnWall)` 블록에서 `FMath::Clamp(Desired, ...)` → `Desired` 그대로.
+- 부수: 상체가 시선을 안 따라간다(고개가 안 돌아감). 벽에서 못 쏘므로 게임플레이 영향 0. 거슬리면 그때 미러본.
+- ⚠️ C++ 수정 → **빌드 필요 = 에디터 닫아야 함**.
+
+### 🚨 별건 발견 — **기본 IDLE이 T자인 건 4a-2가 미완성이라서**(내 작업과 무관)
+`ABL_Blu_W2_Rifle`(라이플 레이어) 조회 결과 **`get_used_anim_sequences` = `[]`** — 그래프 뼈대(`GetWeaponLocomotionPose`·`ApplyWeaponAimOffset`·`Ground`·`AnimGraph`)만 있고 **애니 에셋이 하나도 배정돼 있지 않다.** 그래서 레이어가 **레퍼런스 포즈(T자)** 를 내보내고 그 위에 에임오프셋 애디티브가 얹혀 팔이 옆으로 뻗는다. "오른쪽 아래를 볼 때 순간 정상"은 그 방향에서 애디티브가 우연히 그럴듯해 보이는 것.
+- 레이어 **링크 자체는 정상**(런타임에 `ABL_Blu_W2_Rifle_C_0` 인스턴스 확인) · `DA_Weapon_Rifle.BodyAnimLayerClass` 배정됨 · `RootYawOffset`도 −1.4로 정상. **포즈 소스만 비어 있다.**
+
+> **🔑 진단이 갈린 지점**: "요가 90°에 붙어 굳었다"는 내 가설은 **런타임 값을 읽어보니 −1.4로 멀쩡해서 기각**됐다. 애님 문제는 그래프를 읽으려 하지 말고(서비스 API가 애님 그래프 핀·연결을 안 준다 — `get_connections`·`get_node_pins`·`get_graph_definition` 전부 빈값) **PIE 중인 AnimInstance를 파이썬으로 직접 읽어라**: `unreal.get_editor_subsystem(unreal.UnrealEditorSubsystem).get_game_world()` → `GameplayStatics.get_all_actors_of_class(gw, unreal.Character)` → `mesh.get_anim_instance()` → `get_editor_property(...)`.
+
+### ⏭️ 다음 세션 = 4a-2 전체 (사용자 결정 2026-08-03) + 벽 클램프 수정
+1. **라이플 레이어 채우기** — BlendSpace 4개(Stand/Crouch × Aim/Relaxed, Direction×Speed, 재료 = `Blu_W2_{Walk,Jog,CrouchWalk}_Aim` 8방향) + 상태기계 Idle/Move/TurnInPlace/Air. 도구 = VibeUE `AnimGraphService`(3c에서 검증됨).
+2. **벽 클램프 제거** + 빌드 1회 → PIE 재확인(③).
+
 
 ### 🔧 (근거) 루트 요를 벽 법선에 맞추는 이유 (사용자 승인 2026-08-02)
 **지금은 `bUseControllerRotationYaw = true`라 캡슐(=메시) 방향 = 플레이어 시선이고, `StartWallHang`도 `PhysCustom`도 캐릭터를 벽 쪽으로 돌리지 않는다**(`WallNormal`을 저장만 함). 그래서 어떤 각도로 저작하든 인게임에서 벽과의 관계가 매번 달라진다 → **루트 요를 벽 법선에 정렬**해야 포즈에 박힌 각도가 "벽 기준 상대 각도"로 확정된다. 그러면 왼쪽/오른쪽/뒤쪽 어느 벽이든 동일하게 나오고 **미러 버전은 불필요**.
