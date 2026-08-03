@@ -160,7 +160,24 @@
 - **export 대상 정리 필요**: 이 씬에 카메라 10 · 라이트 12 · `REF_*` 메시 3이 있는데 `fp_arms_export.py`는 전체 선택이라 다 딸려간다. `glTF_not_exported` 컬렉션으로 옮기거나 export 스크립트에서 제외할 것.
 - 💥 **스켈레톤 사고 1회(복구됨)** — 임포트 소스를 잘못 잡고(마네킹 1인칭 팔) Skeleton에 Blu를 지정했더니 **Blu 스켈레톤이 108본 → 65본(마네킹)으로 통째로 교체**됐다. 541개 에셋이 참조하는 에셋이다. "Skeleton Conflicts" 창은 **소스 파일이 틀렸다**는 신호였는데 무시하고 Done을 눌러 발생. 복구 = 에디터 닫고 `git checkout`(바이트 단위 복원 확인). 상세·재발방지 = 메모리 [[ue-import-overwrites-target-skeleton]].
 
-### 🚨 P3 막힘 — 로코모션 레이어가 본체 스텁으로 떨어진다 (다음 세션의 단 하나의 표적)
+### ✅ P3 해결 — 애님 그래프는 무죄였다, 1인칭 팔이 만든 회귀 (2026-08-03)
+**증상**: 로코모션 완전 정지. 원인은 **뼈 갱신(Evaluate)이 아예 안 돌고 있었던 것**이고, 애님 그래프·레이어 링크·BlendSpace는 전부 정상이었다.
+1. `ACharacter` 생성자가 바디 메시를 `AlwaysTickPose`로 둔다(`Character.cpp:124`, **엔진 기본값**).
+2. P1/P2가 바디를 `WorldSpaceRepresentation`으로 태그 → 오너 화면 일반 패스에서 안 그려짐 → **`bRecentlyRendered=false`**(실측).
+3. `ShouldUpdateTransform()`은 정확히 그것만 본다 — `SkinnedMeshComponent.cpp:1617`: `bRecentlyRendered || option==AlwaysTickPoseAndRefreshBones` → **false → `RefreshBoneTransforms` 스킵.**
+4. `AlwaysTickPose`라 **그래프 Update는 계속 돈다** → Speed 1400·Direction·bIsAiming이 메인/레이어 양쪽에 멀쩡히 도착한다. **평가만 안 돈다.**
+5. 뼈가 마지막 평가 결과(스폰 직후 Speed=0 아이들)에 고정. 1인칭 팔은 `LeaderPoseComponent`로 바디 뼈를 쓰므로 같이 언다.
+
+**수정** = `AFPSRCharacter` 생성자 1줄 — `GetMesh()->VisibilityBasedAnimTickOption = AlwaysTickPoseAndRefreshBones`. 무조건(사용자 결정 2026-08-03): 플레이어는 최대 4명이라 예산과 무관하고, 적은 자기 설정을 유지한다.
+
+**검증(실측, 달리는 중)**: 본 Z 스팬 **0.00cm(3024프레임) → foot 37.3/46.4 · hand_r 94.9 · upper_arm_l 89.5cm(300프레임)**. 바디↔팔 수치 완전 일치 · `WorldSpaceRepresentation`·`recently_rendered=false` 유지(분리는 살아 있음) · 빌드 `Result: Succeeded` · 스모크 `Result={Success}` · BP CDO 상속 확인.
+
+> 🪤 **함정 3개 — 앞 세션 오진의 정체**
+> 1. **"값이 정상"은 애니가 도는 증거가 아니다.** `AlwaysTickPose`는 Update만 돌린다. Speed/bIsAiming 프로브가 전부 초록이어도 포즈는 얼어 있을 수 있다 → **판정은 뼈 좌표의 시간 변화(span)로, 그리고 반드시 움직이는 상태에서.**
+> 2. **폴백 스텁 클립과 BlendSpace의 Speed=0 샘플이 같은 애셋이면 둘을 구분할 수 없다.** 여기선 둘 다 `Blu_W2_Stand_Relaxed_Idle_IPC`였고, 그래서 "스텁이 재생 중"이라는 오진이 나왔다. 앉은 채 idle로 잰 것이 결정적 실수.
+> 3. **`LinkedAnimLayer`는 그래프 위치와 무관하다.** `LinkedAnimLayerNodeProperties`는 생성 클래스의 모든 해당 프로퍼티를 훑어 담는다(`AnimBlueprintGeneratedClass.cpp:498-511`). "상태기계 안이라 안 붙는다"는 메커니즘은 엔진에 없다 — 그 가설로 노드를 옮기지 말 것.
+
+<details><summary>(이력) 앞 세션이 남긴 오진 기록</summary>
 **1인칭 팔 자체는 완전히 정상이다**(실측: `LeaderPoseComponent`=CharacterMesh0 · 팔=`FirstPerson` · 바디=`WorldSpaceRepresentation` · 바디↔팔 본 오차 **0.00cm** · 프록시 무영향 · ADS 조준소켓 좌우 `yaw 0.0°`). **바디가 잘못된 포즈를 재생하는 게 문제**이고 이건 1인칭 팔과 무관한 별건이다.
 
 **실측**: `bIsAiming=True` · `StanceBlend=1.0`(완전히 앉음) · `Speed=0` 인데 나오는 포즈가 `Stand_Relaxed_Idle`과 **0.1°**, `Crouch_Aim_Idle`과 **1029.8°**. 조준·스탠스·속도 **어떤 입력에도 반응하지 않고 늘 한 클립**이며, 그 클립이 `ABP_Blu_Body`의 **폴백 스텁**에 넣어둔 것이다. 값 전달은 정상(메인·레이어 양쪽 `bIsAiming=True`, `StanceBlend=1.0` 확인).
@@ -172,12 +189,14 @@
 - 확정 시 재설계 방향: 로코모션 포즈를 **상태기계 밖**에서 만들고, 상태기계는 Slide/Wall/Air/Down/Turn 같은 특수 상태만 덮어쓰는 구조(`Blend Poses by bool`로 합성). 캐시포즈 경유는 이미 죽은 걸 확인했으므로 되돌리지 말 것.
 - ⚠️ 아침에 "정상 작동"으로 확인된 뒤 바뀐 건 **폴백 스텁 클립 교체 + 그때의 BP 재컴파일**뿐이다. 재컴파일이 노드 목록을 다시 만들며 갈렸을 가능성이 있으니, 검증 시 **컴파일 직후/재시작 후를 각각** 재볼 것.
 
-**진단 레시피(오늘 확립)**: 상태를 사용자 입력으로 만들면 표본 시점이 어긋난다 — **앉기는 토글이라 유지**되므로 앉은 상태로 재는 게 확실하다. 판정은 라이브 본 로컬 회전을 후보 클립들과 **각도 거리**로 비교(가장 가까운 것이 재생 중인 클립).
+**진단 레시피**: 판정은 라이브 본 로컬 회전을 후보 클립들과 **각도 거리**로 비교(가장 가까운 것이 재생 중인 클립).
+</details>
 
 ### ⏭️ 다음
-1. **4b** — 8방향 시작·정지 전환(클립 40개+) + Split_Jumps 108 리타게팅.
-2. 무기 DA 나머지 8개에 `BodyAnimLayerClass` 미배정 → 나이프·맨손은 본체 폴백(`ABP_Blu_Body`의 `GetWeaponLocomotionPose` = `Blu_W2_Stand_Relaxed_Idle_IPC` 단일 클립)으로 선다. 무기별 레이어가 필요해지면 그때 만든다.
-3. (미해결 잔여) `wall_topout` f0/f12 포즈 판단 · 1인칭 팔 컷 채택 여부.
+1. **1인칭 팔 메시 모양** — 뼈가 살아난 지금도 팔이 구겨진 종이처럼 뾰족하게 보이면 스키닝/웨이트 별건(P2 산출물). 포즈는 이제 정상이므로 순수 메시 문제로 좁혀졌다.
+2. **4b** — 8방향 시작·정지 전환(클립 40개+) + Split_Jumps 108 리타게팅.
+3. 무기 DA 나머지 8개에 `BodyAnimLayerClass` 미배정 → 나이프·맨손은 본체 폴백(`ABP_Blu_Body`의 `GetWeaponLocomotionPose` = `Blu_W2_Stand_Relaxed_Idle_IPC` 단일 클립)으로 선다. 무기별 레이어가 필요해지면 그때 만든다. ⚠️ 스텁 클립은 **BlendSpace의 idle 샘플과 다른 클립**으로 둘 것(위 함정 2).
+4. (미해결 잔여) `wall_topout` f0/f12 포즈 판단 · 1인칭 팔 컷 채택 여부.
 
 
 ### 🔧 (근거) 루트 요를 벽 법선에 맞추는 이유 (사용자 승인 2026-08-02)

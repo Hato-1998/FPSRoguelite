@@ -127,6 +127,15 @@ AFPSRCharacter::AFPSRCharacter(const FObjectInitializer& ObjectInitializer)
 	FirstPersonArms->SetOnlyOwnerSee(true);
 	FirstPersonArms->SetVisibility(false);
 
+	// The body has to EVALUATE its pose every frame, not merely tick its graph. RefreshFirstPersonRendering tags the body
+	// WorldSpaceRepresentation, which takes it out of the owner's main render pass, and ShouldUpdateTransform() gates
+	// RefreshBoneTransforms on exactly that ("was I recently rendered"). ACharacter's constructor default is
+	// AlwaysTickPose, so the graph keeps UPDATING while it never EVALUATES: Speed and every other input stay live while
+	// the pose stays frozen on the last frame that happened to be drawn — and the arms, which replay the body's bones
+	// through LeaderPoseComponent, freeze with it. Unconditional: this is the player, of whom there are at most 4. The
+	// per-actor budget this project is built around is about enemies, and they keep their own setting.
+	GetMesh()->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
+
 	WeaponInventory = CreateDefaultSubobject<UFPSRWeaponInventoryComponent>(TEXT("WeaponInventory"));
 	WeaponFire = CreateDefaultSubobject<UFPSRWeaponFireComponent>(TEXT("WeaponFire"));
 	RecoilComponent = CreateDefaultSubobject<UFPSRRecoilComponent>(TEXT("RecoilComponent"));
