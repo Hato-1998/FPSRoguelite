@@ -23,12 +23,21 @@ import unreal
 MESH_ASSET = "/Game/Character/FPArms/SK_NeonV_FPArms"
 SKELETON = "/Game/Character/FPArms/SK_NeonV_FPArms_Skeleton"
 PHYSICS = "/Game/Character/FPArms/SK_NeonV_FPArms_PhysicsAsset"
-OLD_MESH = "/Game/Character/FPArms/NeonV_FPArms"       # S_Mannequin 컨폼 — 옛 축을 재는 용도
+BODY_MESH = "/Game/Characters/Blu/SkeletalMeshes/Blu_-_Rigged_Non_Constraint"   # 파지 규약 정답지
 
 SOCKET_NAME = "SOCKET_Weapon"
 SOCKET_BONE = "hand_r"
-PALM_TIP = "middle_01_r"                                # 손바닥 방향을 정하는 끝점
-OLD_SOCKET = unreal.Vector(-5.45, 0.75, 2.45)           # 옛 손 기준 실측(UE hand_r 로컬, cm)
+# 해부 기준틀을 만들 본 (손목, 중지뿌리, 검지뿌리, 새끼뿌리) — 리그마다 이름이 다르다
+BODY_HAND = ("hand_R", "middle_proximal_R", "index_proximal_R", "little_proximal_R")
+ARMS_HAND = ("hand_r", "middle_01_r", "index_01_r", "pinky_01_r")
+
+# 🚨 이 값은 **계산이 아니라 사용자가 눈으로 확정한 것**이다. 자동 산출하려던 두 시도가 다 틀렸다:
+#   ① 옛 팔 소켓(-5.45, 0.75, 2.45)을 손바닥 길이비로 이동  -> 그 옛 값 자체가 회전 identity
+#      상태에서 잰 것이라 전제가 깨져 있었다(총이 90도 꺾여 나옴)
+#   ② 바디 소켓을 해부 기준틀로 이식             -> 총이 더 꺾였다(원인 미규명, 아래 참고 로그)
+# 손잡이 굵기·파지감은 수치로 안 나온다. **눈이 최종 판정자다.**
+SOCKET_LOC = unreal.Vector(-8.07, 2.82, 4.34)
+SOCKET_ROT = unreal.Rotator(0.0, 0.0, 90.0)      # Rotator(roll, pitch, yaw)
 
 # Blender 에서 hand_r 로컬로 잰 랜드마크(cm). UE 는 Y 부호가 뒤집혀 나와야 정상이다.
 EXPECT_LOCAL_BLENDER = {
@@ -96,28 +105,64 @@ if worst > MAX_AXIS_CM:
     raise SystemExit(1)
 log("   (x,-y,z) 로 일치 — 두 리그의 hand_r 축이 대응한다")
 
-# ---------------------------------------------------------------- 소켓 값 산출 (전부 UE 공간)
-log("=== 소켓 값 산출 ===")
-old_obj = unreal.EditorAssetLibrary.load_asset(OLD_MESH)
-if old_obj is None:
-    fail("옛 메시 %s 가 없다 — 옛 손바닥 축을 못 잰다" % OLD_MESH)
-    for a in actors:
-        unreal.EditorLevelLibrary.destroy_actor(a)
-    raise SystemExit(1)
-old_axis = palm_local(spawn(old_obj), PALM_TIP)
-new_axis = palm_local(comp, PALM_TIP)
-old_len, new_len = old_axis.length(), new_axis.length()
-log("   손바닥 길이(손목->%s): 옛 %.2f -> 새 %.2f cm (비 %.3f)"
-    % (PALM_TIP, old_len, new_len, new_len / old_len))
+# ---------------------------------------------------------------- 소켓 값 산출
+#
+# 🚨 옛 팔 소켓(`S_Mannequin` 의 것)에서 값을 끌어오면 안 된다. 그건 **회전이 identity** 였고,
+#    바디 소켓과 비교해 보면 100도 넘게 틀어져 있었다. 그 상태에서 잰 "손잡이가 손바닥에서
+#    6.03cm 뜬다" 도 전제가 깨진 수치다. 그걸 비례 이동해 썼다가 총이 90도 꺾여 나왔다.
+#
+# 정답지는 **바디(3인칭) 소켓**이다. 거기선 총이 제대로 잡혀 있고, 무엇보다 1인칭과 3인칭이
+# 같은 무기 데이터 한 벌을 쓰므로 **두 소켓이 같은 파지 규약을 가져야** 동료 화면과 내 화면이
+# 어긋나지 않는다.
+#
+# 두 리그(Blu 바디 / Manny 이름의 팔)는 뼈 로컬 축 규약이 다르므로 값을 그대로 못 옮긴다.
+# 대신 **손 모양으로 해부 기준틀**을 만들어 옮긴다 — 축 규약과 무관해진다.
+#   X = 손목->중지뿌리(손바닥 방향) · Z = 손바닥 법선 · Y = Z x X
+log("=== 소켓 값 (사용자 시각 검증값) ===")
+log("   ★ 위치 %s · 회전 %s" % (SOCKET_LOC, SOCKET_ROT))
+log("   아래는 참고용 계산일 뿐 — 값을 덮지 않는다")
+body_obj = unreal.EditorAssetLibrary.load_asset(BODY_MESH)
+if body_obj is None:
+    log("   (바디 메시가 없어 참고 계산 생략)")
+    body = None
+else:
+    body = spawn(body_obj, "body")
 
-ou, nu = old_axis / old_len, new_axis / new_len
-along = OLD_SOCKET.dot(ou)
-perp = OLD_SOCKET - ou * along
-SOCKET_LOC = nu * (along * new_len / old_len) + perp
-log("   옛 소켓 (%.2f, %.2f, %.2f) = 손바닥방향 %.2f + 나머지 %.2f"
-    % (OLD_SOCKET.x, OLD_SOCKET.y, OLD_SOCKET.z, along, perp.length()))
-log("   ★ 새 소켓 (%.2f, %.2f, %.2f)  — 손목에서 %.2fcm (옛 %.2fcm)"
-    % (SOCKET_LOC.x, SOCKET_LOC.y, SOCKET_LOC.z, SOCKET_LOC.length(), OLD_SOCKET.length()))
+
+def head(c, n):
+    return c.get_socket_transform(n, unreal.RelativeTransformSpace.RTS_COMPONENT).translation
+
+
+def anat_frame(c, wrist, mid, idx, pky):
+    o = head(c, wrist)
+    x = head(c, mid) - o
+    x = x / x.length()
+    z = (head(c, idx) - o).cross(head(c, pky) - o)
+    z = z / z.length()
+    y = z.cross(x)
+    y = y / y.length()
+    z = x.cross(y)
+    return unreal.Matrix(unreal.Plane(x.x, x.y, x.z, 0.0), unreal.Plane(y.x, y.y, y.z, 0.0),
+                         unreal.Plane(z.x, z.y, z.z, 0.0),
+                         unreal.Plane(o.x, o.y, o.z, 1.0)).transform()
+
+
+if body is not None and body.does_socket_exist(SOCKET_NAME):
+    Fb = anat_frame(body, *BODY_HAND)
+    Fa = anat_frame(comp, *ARMS_HAND)
+    bl = (head(body, BODY_HAND[1]) - head(body, BODY_HAND[0])).length()
+    al = (head(comp, ARMS_HAND[1]) - head(comp, ARMS_HAND[0])).length()
+    log("   [참고] 손바닥 길이: 바디 %.2f / 팔 %.2f cm — 같은 캐릭터라 일치해야 정상" % (bl, al))
+    Sb = body.get_socket_transform(SOCKET_NAME, unreal.RelativeTransformSpace.RTS_COMPONENT)
+    Sa = Sb.multiply(Fb.inverse()).multiply(Fa)
+    hand = comp.get_socket_transform(SOCKET_BONE, unreal.RelativeTransformSpace.RTS_COMPONENT)
+    gl = hand.inverse_transform_location(Sa.translation)
+    gr = (hand.rotation.inversed() * Sa.rotation).rotator()
+    log("   [참고] 바디에서 이식하면 위치 (%.2f, %.2f, %.2f) 회전 p%.1f y%.1f r%.1f"
+        % (gl.x, gl.y, gl.z, gr.pitch, gr.yaw, gr.roll))
+    log("   [참고] 위 값은 **눈으로 확인했을 때 총이 더 꺾였다**(2026-08-04). 쓰지 말 것.")
+    log("          원인 미규명 — 프레임 수식 버그이거나, 바디 쪽 총이 원래 틀어져 있거나.")
+    log("          바디(3인칭) 무기 방향은 PIE 로 확인된 적이 없다. 그것부터 봐야 한다.")
 
 for a in actors:
     unreal.EditorLevelLibrary.destroy_actor(a)
@@ -145,8 +190,7 @@ else:
     log("   기존 소켓 갱신")
 sock.set_socket_parent(mesh, SOCKET_BONE)
 sock.set_socket_local_transform(
-    unreal.Transform(location=SOCKET_LOC, rotation=unreal.Rotator(0, 0, 0),
-                     scale=unreal.Vector(1, 1, 1)))
+    unreal.Transform(location=SOCKET_LOC, rotation=SOCKET_ROT, scale=unreal.Vector(1, 1, 1)))
 sock.set_editor_property("force_always_animated", True)
 
 names = [str(mesh.get_socket_by_index(i).get_editor_property("socket_name"))

@@ -13,7 +13,7 @@ SKELETON = "/Game/Character/FPArms/SK_NeonV_FPArms_Skeleton"
 ANIMS = ("/Game/Character/FPArms/Anims/FP_Rifle_Idle",
          "/Game/Character/FPArms/Anims/FP_Rifle_ADS")
 SOCKET = "SOCKET_Weapon"
-EXPECT_SOCKET = unreal.Vector(-4.37, 0.52, 3.34)
+EXPECT_SOCKET = unreal.Vector(0.89, -0.45, 1.65)      # 바디 파지 규약을 해부 이식한 값
 
 fails = []
 
