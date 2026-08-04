@@ -128,7 +128,19 @@
 **해결**: 지오메트리 ×100 굽기 + 최상위 오브젝트 스케일 0.01 + `FBX_SCALE_NONE`(블랜더 repo `e8f329a`에서 이미 검증된 우회법 — 이 프로젝트 두 번째 사례). 상세 = `Docs/Troubleshooting.md` **F1-b**.
 → `FirstPersonArms` 스케일은 **1**이 정답.
 
-### 🔴 지금 할 것
+### 🔴🔴 트랙 전환 (2026-08-04) — 팔에 **자체 스켈레톤**을 준다 ([ADR 0004](Docs/Architecture/0004-first-person-arms-own-skeleton.md))
+**사용자 결정**: *"애니메이션을 안 쓰려고 지금 애니메이션도 다시 저작하려는 것"* — PWAS 포즈를 그대로 재생하지 않으므로 `S_Mannequin` 에 묶일 이유가 사라졌다. ADR 0003 이 예고한 재검토 조건에 도달했고, 그 ADR 자신이 스켈레톤을 불변식에서 제외해 뒀다.
+
+**묶여 있던 대가 = 손 왜곡**(실측): 손바닥 **+9~21%** · 손가락 **−7~10%** · 손 폭 +9%. Manny 는 손바닥 안에 손허리뼈가 있어 손가락 뿌리가 1.0~1.6cm 더 멀고, rebuild 가 메시를 그만큼 늘렸다. **포즈로는 못 고친다.**
+
+**방향을 뒤집는다** — 메시를 뼈에 맞추던 것을, **뼈를 메시에 맞추는** 쪽으로. 본 이름·계층은 Manny 65본 그대로, 위치만 NEON-V 해부로.
+
+> 🚨 **착수 전 결정 하나**: 팔까지 되돌리면 **소총을 두 손으로 못 잡는다**(도달 41.5cm vs 그립이 43cm 앞). 권장 = **손만 되돌리기**. 상세 = ADR 0004 "미결".
+
+**➡️ 새 세션은 [`Docs/FPArms_OwnSkeleton_ResumePrompt.md`](Docs/FPArms_OwnSkeleton_ResumePrompt.md) 하나만 읽으면 된다.**
+
+<details><summary>전환 전까지 끝내둔 것 (참고용)</summary>
+
 1. **팔 메시 재임포트 — `Saved/NeonV/NeonV_FPArms_v5.fbx`** (사용자, 에디터에서)
    재킷·어깨장식을 뺀 **몸만** 버전(섹션 3→1). 1인칭에서 소매가 시야를 가려 사용자 결정(2026-08-04).
    되살리려면 export 인자만 빼고 다시 내보내면 된다 — `.blend`는 셋을 다 들고 있어 앞 단계 재실행 불필요.
@@ -139,7 +151,10 @@
 되돌리기: 옛 `Saved/NeonV/NeonV_FPArms.fbx` 재임포트, 또는 에디터 닫고 `git checkout` (에셋은 커밋 `839abef0`).
 
 ### ⏭️ 남은 것 — 왼손 손가락 포즈
-그립 오프셋은 손목 **위치**만 고친다. Two Bone IK는 손가락을 안 건드리므로, 손가락이 펴진 채 핸드가드 아래에 놓인다. "쥔 모양"은 `A_FP_Rifle_Pose`의 왼손 손가락을 핸드가드 굵기에 맞춰 말아주는 **포즈 저작**(Blender)이 필요하다.
+그립 오프셋은 손목 **위치**만 고친다. Two Bone IK는 손가락을 안 건드리므로, 손가락이 펴진 채 핸드가드 아래에 놓인다. "쥔 모양"은 왼손 손가락을 핸드가드 굵기에 맞춰 말아주는 **포즈 저작**(Blender)이 필요하다.
+> ⏸️ **손 모양이 바뀌므로 자체 스켈레톤 전환 뒤로 미룬다.**
+
+</details>
 
 ### ⏳ 팔 AnimBP `ABP_FirstPerson` (`/Game/Character/Player/`) — 사용자 저작 중
 `포즈 → Slot('DefaultSlot') → Two Bone IK(hand_l) → Output`. 부모 = `FPSRFirstPersonArmsAnimInstance` ✅
