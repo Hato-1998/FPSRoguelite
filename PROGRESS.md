@@ -82,14 +82,28 @@
 4. (미해결 잔여) `wall_topout` f0/f12 포즈 판단 · 1인칭 팔 컷 채택 여부.
 
 
-### 🚨 지금 막힌 곳 — 팔 메시 레퍼런스 포즈가 Y축 반전 (2026-08-04)
-애니는 재생되는데 **메시가 늘어나고 꼬인다.** `NeonV_FPArms`의 rest pose가 `S_Mannequin` ref pose 대비
-**Y 부호가 통째로 반대**다(잔차 0.0001cm로 확정, 대조군 0.0000cm). 이 스켈레톤은 좌우가 X축이라
-**Y = 앞뒤** → 팔이 앞이 아니라 **뒤를 향한 rest pose**다(Manny `hand_l` Y +15.70 ↔ NeonV −15.70).
-- **고칠 곳 = Blender.** 미러는 회전이 아니라 UE 임포트 옵션(180° yaw)으로 못 고친다
-- 손등뼈 8개(`*_metacarpal_l/r`)는 Y 보정 후에도 5.6~6.1cm 별도 오차 — 같이 봐야 한다
-- **완료 판정 = `SK_FP_Manny_Simple` 대비 전 본 잔차 0.** 바운드로 판정 금지(미러는 extent를 안 바꾼다)
-- 계측 레시피·경위 = `Docs/Troubleshooting.md` + 메모리 `refpose-mirror-not-caught-by-bounds`
+### 🩺 팔 메시 = **결함 4개였다. 3개 해결, 웨이트 1개 남음** (2026-08-04)
+증상 *"애니는 도는데 메시가 늘어나고 꼬인다"* 의 원인이 하나가 아니었다. **전부 실측으로 갈랐다.**
+
+| # | 결함 | 원인 | 상태 |
+|---|---|---|---|
+| 1 | rest pose **Y축 통째 반전** | 옛 `fp_arms_retarget.py`가 UE 좌표를 Blender 좌표로 그대로 씀 | ✅ 2026-07-26 `fp_arms_rebuild.py`가 이미 고쳤는데 **GLB가 UE에 안 들어가 있었다**(에셋 커밋 14:24 / GLB 14:58) |
+| 2 | 전 본 **롤 90°** | **UE의 glTF 임포터**가 FBX 임포터와 본 축 규약이 다름 | ✅ **FBX로 내보내 해결** |
+| 3 | 본 **66개**(65+1) | Blender FBX가 아마추어 오브젝트를 본으로 씀 | ✅ 아마추어를 `root`로 개명 + 기존 `root` 본 삭제 |
+| 4 | **스킨 웨이트 미완성** | 웨이트 전이가 덜 됨 | ❌ **Blender 작업 — 다음 세션** |
+
+**현재 에셋 = `SK_FP_Manny_Simple` 대비 위치 중앙 0.0001cm · 회전 중앙 0.0002° · 어긋난 본 0/65.**
+스켈레톤 `S_Mannequin` 무손상. **뼈는 끝났다.**
+
+**남은 4번** — 같은 애님그래프에서 PWAS 팔은 멀쩡한데 이 메시만 깨지는 것으로 확정:
+- `Jacket_FPArm`(소매 1296정점)이 **뼈 6개**(`clavicle`·`upperarm`·`lowerarm` ×2)에만 강체 바인딩 → 굽히면 판때기로 찢어짐
+- `Body_FPArm`의 **`pinky_02/03` 좌우 무가중** = 새끼손가락 실종
+- **`Icosphere` 42정점 쓰레기**가 export에 섞여 있음
+- 상세·레시피·함정 = **[`Docs/FPArms_Weights_ResumePrompt.md`](Docs/FPArms_Weights_ResumePrompt.md)** (다음 세션은 이것만 읽으면 된다)
+
+> 🔑 **이번에 가장 값어치 있던 것**: 대조군(같은 메시 두 번 재기)과 **A/B(같은 그래프에 PWAS 팔 넣기)**.
+> 둘 다 없었으면 롤을 Blender roll로 고치려다 계속 헛돌았고(±90° 넣으니 120°가 나와 축이 다름이 드러났다),
+> 웨이트가 범인인 것도 못 갈랐다. **바운드·눈대중으로는 넷 다 안 잡힌다.**
 
 ### ⏳ 팔 AnimBP `ABP_FirstPerson` (`/Game/Character/Player/`) — 사용자 저작 중
 `포즈 → Slot('DefaultSlot') → Two Bone IK(hand_l) → Output`. 부모 = `FPSRFirstPersonArmsAnimInstance` ✅

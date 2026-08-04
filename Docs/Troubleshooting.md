@@ -38,6 +38,21 @@
 
 **해결**: DCC(Blender)에서 rest pose를 고쳐 재익스포트. **미러는 회전이 아니므로 UE 임포트의 180° yaw로 못 고친다**(X·Y를 둘 다 뒤집는다).
 
+### A1-b. 위치는 맞는데 전 본이 정확히 90° 돌아 있다 → **glTF로 넣지 마라**
+`확인됨` **UE의 glTF 임포터는 FBX 임포터와 본 축 규약이 다르다.** 같은 메시를 glTF로 넣으면 FBX로 들어온 기준 메시 대비 **전 본이 균일하게 90°**(축 = 본 로컬 +X, 편차 0) 어긋난다. 위치는 완벽해서 rest 포즈는 멀쩡해 보이고 **애니를 재생할 때만 살이 뒤틀린다**.
+
+- **Blender의 `edit_bone.roll`로는 못 고친다** — ±90°를 넣으면 120°가 나온다(두 회전축이 다르다는 뜻). Blender에서 자유로운 본 방향 파라미터는 roll 하나뿐이므로 **Blender 쪽 수정으로는 닿지 않는 문제**다.
+- **해결 = FBX로 내보낸다.** 본 축 옵션은 **기본값이 정답**이다(`primary_bone_axis='X'` 류를 주면 180°/120°로 더 어긋난다).
+- ⚠️ Blender FBX는 **아마추어 오브젝트를 본 하나로 추가**한다(65 → 66). 스켈레톤에 없는 본이 생기므로 위험하다 → 아마추어 오브젝트 이름을 `root`로 바꾸고 **기존 `root` 본을 삭제**하면 자식(`pelvis`·`ik_hand_root`)이 최상위가 되어 계층이 정확히 같아진다.
+- 검증된 export 옵션 전문 = `Docs/FPArms_Weights_ResumePrompt.md`.
+
+### A1-c. 뼈는 완벽한데 포즈만 무너진다 → 스킨 웨이트를 세라
+본 단위 잔차가 **0/65인데도** 애니에서 메시가 조각나면 남은 건 **정점이 어느 본에 물렸는가**다. 실사고: `Jacket_FPArm`(소매 1296정점)이 **뼈 6개**에만 강체 바인딩되어 팔을 굽히는 순간 판때기로 찢어졌고, `pinky_02/03`은 무가중이라 새끼손가락이 사라져 보였다.
+
+**가르는 법 = A/B.** 같은 애님그래프의 프리뷰 메시를 **정상 메시**(여기선 `SK_FP_Manny_Simple`)로 바꿔 본다. 그쪽이 멀쩡하면 메시 유죄, 같이 깨지면 그래프/포즈 유죄. 10초면 갈린다.
+
+**감사 방법**(Blender, 읽기 전용): 메시별로 `vertex_groups`를 돌며 **본별 물린 정점 수**를 찍는다. 물린 본이 한 자릿수면 강체 바인딩이고, 특정 말단 본이 0이면 그 부위가 안 따라간다. 웨이트 합·미가중 정점이 0이어도 **"전이가 덜 된 것"** 은 못 잡히니 반드시 **본 목록**으로 볼 것.
+
 ### A2. 값은 전부 정상인데 포즈가 얼어 있다
 **원인**: `AlwaysTickPose`는 **그래프 Update만** 돌린다. `ShouldUpdateTransform()`이 `bRecentlyRendered`만 보므로(`SkinnedMeshComponent.cpp:1617`), 메시가 일반 패스에서 안 그려지면(`WorldSpaceRepresentation` 태그 등) **평가(Evaluate)가 스킵**된다. Speed·bIsAiming 프로브는 전부 초록인데 뼈만 마지막 평가에 고정.
 
@@ -114,6 +129,10 @@ Riot Client가 **8558 포트**를 점유해 ZenServer가 못 뜬 것. Riot을 �
 - **레벨 전환 API 호출** — `LevelEditorSubsystem.new_level()` / `load_level()`은 **에디터 즉사**다(2회 실증). 임시 레벨을 만들지 말고 **이미 열린 레벨에 스폰하고 끝나면 지운다.**
 - **`create_node_by_key`로 애님 노드 생성** — `Interface=None, Layer=""`인 빈 껍데기가 다음 틱에 하드 크래시. 더 나쁜 건 **저장한 적 없는 그 노드가 디스크에 남는다.** 애님 노드는 `AnimGraphService`의 타입별 `add_*`만 쓸 것.
 - **컨테이너 위젯(자식 WBP 임베드)을 프로그래매틱으로 compile/save** — 모달 행·크래시·저장 중단 시 `.uasset` 손상.
+
+### D1-b. 커맨드렛에서 에셋을 임포트하면 끝나자마자 죽는다
+`AssetTools.import_asset_tasks`는 임포트를 **완료한 뒤** 콘텐츠 브라우저를 동기화하는데, 커맨드렛엔 Slate가 없어 거기서 죽는다 — 콜스택이 `AssetTools → ContentBrowser → Slate`, `Assertion failed: CurrentApplication.IsValid()`.
+→ **`InterchangeManager.get_interchange_manager_scripted().import_asset(dest, source_data, params)`** 를 직접 쓰면 그 경로를 안 탄다(실증: 같은 GLB가 크래시 없이 들어옴).
 
 ### D2. `execute_python_code`가 타임아웃 났다
 **30초 타임아웃**이다. 툴은 에러를 주지만 **에디터 쪽 작업은 계속 진행돼 결과가 남는다.**
