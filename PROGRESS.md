@@ -82,6 +82,8 @@
 4. (미해결 잔여) `wall_topout` f0/f12 포즈 판단 · 1인칭 팔 컷 채택 여부.
 
 
+<details><summary>전환 전 경위 — 결함 5개 + 단위 함정 (끝난 일 · <code>Docs/WorkLog.md</code>로 내려감)</summary>
+
 ### 🩺 팔 메시 = **결함 5개였다. Blender 쪽은 전부 끝. UE 임포트만 남음** (2026-08-04)
 증상 *"애니는 도는데 메시가 늘어나고 꼬인다"* 의 원인이 하나가 아니었다. **전부 실측으로 갈랐다.**
 
@@ -128,16 +130,22 @@
 **해결**: 지오메트리 ×100 굽기 + 최상위 오브젝트 스케일 0.01 + `FBX_SCALE_NONE`(블랜더 repo `e8f329a`에서 이미 검증된 우회법 — 이 프로젝트 두 번째 사례). 상세 = `Docs/Troubleshooting.md` **F1-b**.
 → `FirstPersonArms` 스케일은 **1**이 정답.
 
-### 🔴🔴 트랙 전환 (2026-08-04) — 팔에 **자체 스켈레톤**을 준다 ([ADR 0004](Docs/Architecture/0004-first-person-arms-own-skeleton.md))
-**사용자 결정**: *"애니메이션을 안 쓰려고 지금 애니메이션도 다시 저작하려는 것"* — PWAS 포즈를 그대로 재생하지 않으므로 `S_Mannequin` 에 묶일 이유가 사라졌다. ADR 0003 이 예고한 재검토 조건에 도달했고, 그 ADR 자신이 스켈레톤을 불변식에서 제외해 뒀다.
+</details>
 
-**묶여 있던 대가 = 손 왜곡**(실측): 손바닥 **+9~21%** · 손가락 **−7~10%** · 손 폭 +9%. Manny 는 손바닥 안에 손허리뼈가 있어 손가락 뿌리가 1.0~1.6cm 더 멀고, rebuild 가 메시를 그만큼 늘렸다. **포즈로는 못 고친다.**
+### ✅ 자체 스켈레톤 전환 **완료** (2026-08-04) — 안 A′ ([ADR 0004](Docs/Architecture/0004-first-person-arms-own-skeleton.md))
+Blender 파이프라인 뒤집기 → UE 임포트 → 소켓 → 아이들/ADS 포즈까지 **전부 끝나고 게이트 15개 통과**. 경위·실측치는 ADR 0004 "실행 결과", 함정은 `Docs/Troubleshooting.md` **A7~A10**.
 
-**방향을 뒤집는다** — 메시를 뼈에 맞추던 것을, **뼈를 메시에 맞추는** 쪽으로. 본 이름·계층은 Manny 65본 그대로, 위치만 NEON-V 해부로.
+**손 왜곡 소멸**(손목→손가락 뿌리가 원본값으로 정확 복귀): 엄지 4.08 · 검지 8.43 · 중지 7.88 · 약지 8.15 · 새끼 8.16.
+**팔도 개선**: 도달 55.02cm 유지한 채 상완/전완이 **같은 배율**(x1.325)로 — 옛 타깃은 x1.396/x1.259 불균일이었다.
 
-> 🚨 **착수 전 결정 하나**: 팔까지 되돌리면 **소총을 두 손으로 못 잡는다**(도달 41.5cm vs 그립이 43cm 앞). 권장 = **손만 되돌리기**. 상세 = ADR 0004 "미결".
+| 산출물 | |
+|---|---|
+| 메시·스켈레톤 | `Content/Character/FPArms/SK_NeonV_FPArms{,_Skeleton,_PhysicsAsset}` |
+| 포즈 | `Content/Character/FPArms/Anims/FP_Rifle_{Idle,ADS}` |
+| 소켓 | `SOCKET_Weapon` = **메시** 소유 · `hand_r` 로컬 `(-4.37, 0.52, 3.34)` = 손바닥 |
+| 되돌리기 | 옛 `NeonV_FPArms` 를 **안 지웠다**. 배선만 되돌리면 즉시 복귀 |
 
-**➡️ 새 세션은 [`Docs/FPArms_OwnSkeleton_ResumePrompt.md`](Docs/FPArms_OwnSkeleton_ResumePrompt.md) 하나만 읽으면 된다.**
+> 🔑 이번에 처음 잰 것 — 그동안의 "본 잔차 0/65" 는 **FBX 왕복을 증명한 적이 없었다**(스켈레톤을 공유하면 `get_socket_transform` 이 메시가 아니라 ref pose 를 돌려준다). 자체 스켈레톤이 되어서야 쟀고, 회전 **0.00089°** / 위치 **0.00016cm**.
 
 <details><summary>전환 전까지 끝내둔 것 (참고용)</summary>
 
@@ -156,13 +164,22 @@
 
 </details>
 
-### ⏳ 팔 AnimBP `ABP_FirstPerson` (`/Game/Character/Player/`) — 사용자 저작 중
-`포즈 → Slot('DefaultSlot') → Two Bone IK(hand_l) → Output`. 부모 = `FPSRFirstPersonArmsAnimInstance` ✅
-- ⚠️ **`Effector Location Space` = World Space 확인 필요** — 엔진 기본값이 `BCS_ComponentSpace`인데
-  연결한 `LeftHandGripLocation`은 **월드 좌표**다. 그대로 두면 손이 맵 밖으로 날아간다
-- ⚠️ `Joint Target Location`이 (0,0,0) = 팔꿈치 그 자체 → 폴 방향이 없어 팔꿈치가 뒤집힐 수 있다.
-  ABP 프리뷰에선 폰 오너가 없어 `LeftHandIKAlpha`=0이라 **IK가 아예 안 돈다** → PIE에서 맞출 것
-- 무기군 포즈는 최종적으로 **레이어(무기 DA `ArmsAnimLayerClass`)** 로 뺀다(지금은 `A_FP_Rifle_Pose` 직결)
+### 🔴 남은 것 = **배선 + PIE** (사용자 · 에디터에서)
+코드·에셋은 끝났다. 여기부터는 눈으로 봐야 하는 것만 남았다.
+
+1. **`BP_FPSRPlayer` → `FirstPersonArms`** 메시를 `SK_NeonV_FPArms` 로. **스케일 1** (컴포넌트 슬롯이 진실원천)
+2. **`ABP_FirstPerson`** 을 새 스켈레톤 대상으로. 본 이름이 같으니 리타게팅이 되지만, 그래프가 작아(`포즈 → Slot → Two Bone IK(hand_l) → Output`) 새로 만드는 쪽이 깨끗할 수 있다 — 에디터에서 판단
+   - 포즈 입력을 `A_FP_Rifle_Pose`(PWAS) → **`FP_Rifle_Idle`**(우리 것)로 교체. 이걸 바꿔야 PWAS 의존이 실제로 끊긴다
+   - ⚠️ `Effector Location Space` = **World Space**(엔진 기본은 ComponentSpace인데 연결값은 월드다) · `Joint Target Location`이 (0,0,0)이면 팔꿈치가 뒤집힌다 → PIE에서
+3. **소켓 눈 확인** — `SOCKET_Weapon (-4.37, 0.52, 3.34)`은 **계산으로 낸 시작점**이다(손바닥 길이비 0.828로 옛 값을 옮긴 것). 손잡이 굵기·파지감은 수치로 안 나오니 총을 물려 확정할 것
+4. **`LeftHandGripOffset (1,3,5)`** 은 옛 손 기준 → 재조정 대상
+5. PIE 7항목 — 소매·손목·새끼 3증상 + 왼손 그립 + 내 그림자 왼팔 + 동료 화면 무기 + 다운→관전
+
+### ⏸️ 뒤로 미룬 것
+- **왼손 손가락 "쥔 모양" 포즈** — Two Bone IK는 손목 **위치**만 고친다. 손가락을 핸드가드 굵기에 맞춰 마는 건 별도 저작이고, **소켓이 확정된 뒤**라야 헛수고가 안 된다
+- **저작 씬 재조립**(`fp_arms_make_authoring.py`) — 총·카메라·그립 타깃을 새 팔에 다시 물리는 도구. 조립된 총 FBX를 UE에서 다시 뽑아야 하고, `GRIP_IN_ARMS_UE` 상수도 새 소켓 기준으로 갱신해야 한다
+- **무기군 포즈를 레이어로**(무기 DA `ArmsAnimLayerClass`) — 지금은 단일 포즈 직결이 정상. 무기가 늘면 그때
+- **PhysicsAsset** — 파이썬에 바디 목록 프로퍼티가 아예 없어 헤드리스로 못 만졌다. 충돌은 어차피 컴포넌트에서 끈다(`FPSRCharacter.cpp:129` `NoCollision`)이라 무관하고, 남는 영향은 **바운드뿐**. PIE에서 팔이 사라지는 일이 없으면 그대로 둔다
 
 ---
 
