@@ -164,16 +164,22 @@ Blender 파이프라인 뒤집기 → UE 임포트 → 소켓 → 아이들/ADS 
 
 </details>
 
-### 🔴 남은 것 = **배선 + PIE** (사용자 · 에디터에서)
-코드·에셋은 끝났다. 여기부터는 눈으로 봐야 하는 것만 남았다.
+### ✅ 배선 완료 (2026-08-04) — **남은 것 = PIE 하나**
+- **`ABP_FPArms`** 신규(`/Game/Character/Player/`) — 스켈레톤 `SK_NeonV_FPArms_Skeleton` · 부모 `FPSRFirstPersonArmsAnimInstance` · 그래프는 옛 `ABP_FirstPerson` 에서 복사(본 이름이 같아 Two Bone IK 설정이 그대로 산다) · 포즈 = `FP_Rifle_Idle`
+- **`BP_FPSRPlayer` → `FirstPersonArms`** = `SK_NeonV_FPArms` + `ABP_FPArms_C`, 스케일 1. 레스트 트랜스폼 `(-14, 0, -165)` yaw −90 은 **사용자 조정값이라 안 건드렸다**
 
-1. **`BP_FPSRPlayer` → `FirstPersonArms`** 메시를 `SK_NeonV_FPArms` 로. **스케일 1** (컴포넌트 슬롯이 진실원천)
-2. **`ABP_FirstPerson`** 을 새 스켈레톤 대상으로. 본 이름이 같으니 리타게팅이 되지만, 그래프가 작아(`포즈 → Slot → Two Bone IK(hand_l) → Output`) 새로 만드는 쪽이 깨끗할 수 있다 — 에디터에서 판단
-   - 포즈 입력을 `A_FP_Rifle_Pose`(PWAS) → **`FP_Rifle_Idle`**(우리 것)로 교체. 이걸 바꿔야 PWAS 의존이 실제로 끊긴다
-   - ⚠️ `Effector Location Space` = **World Space**(엔진 기본은 ComponentSpace인데 연결값은 월드다) · `Joint Target Location`이 (0,0,0)이면 팔꿈치가 뒤집힌다 → PIE에서
-3. **소켓 눈 확인** — `SOCKET_Weapon (-4.37, 0.52, 3.34)`은 **계산으로 낸 시작점**이다(손바닥 길이비 0.828로 옛 값을 옮긴 것). 손잡이 굵기·파지감은 수치로 안 나오니 총을 물려 확정할 것
-4. **`LeftHandGripOffset (1,3,5)`** 은 옛 손 기준 → 재조정 대상
-5. PIE 7항목 — 소매·손목·새끼 3증상 + 왼손 그립 + 내 그림자 왼팔 + 동료 화면 무기 + 다운→관전
+> 🔑 **`BP_FPSRPlayer` 의 PWAS 참조 = 0개.** 플레이어 체인이 `ProceduralWeaponAnimationSystem` 에서 완전히 떨어졌다. 옛 `NeonV_FPArms` 를 참조하는 것도 자기 PhysicsAsset 하나뿐이라 폐기 가능하지만 **PIE 통과까지는 롤백용으로 남긴다.**
+>
+> 🪤 AnimBP 를 새로 만들 때 **포즈 노드의 애니 교체를 빠뜨리기 쉽다** — 복사해 온 노드가 `A_FP_Rifle_Pose`(다른 스켈레톤)를 그대로 물고 있어도 UE 가 조용히 컴파일·저장한다. 눈으로는 정상으로 보인다. **판정은 애셋 참조 목록으로** 하라(실제로 한 번 놓쳤다).
+
+**⏳ PIE 확인 목록**
+1. 팔이 A자(레퍼런스 포즈)가 아니라 **소총 자세**로 서는가 — 아니면 포즈 노드가 안 붙은 것
+2. 손·손가락이 늘어나 보이지 않는가 (이번 작업의 목적)
+3. 소매·손목 이음매 · 새끼손가락
+4. **왼손 그립** — `Joint Target Location` 이 (0,0,0)이면 팔꿈치가 뒤집힌다. `Effector Location Space` = World Space 확인
+5. 총이 손바닥에 잡히는가 — `SOCKET_Weapon (-4.37, 0.52, 3.34)` 은 계산으로 낸 **시작점**이라 여기서 확정한다
+6. `LeftHandGripOffset (1,3,5)` 재조정 (옛 손 기준이었다)
+7. 내 그림자 왼팔 · 동료 화면 무기 · 다운→관전
 
 ### ⏸️ 뒤로 미룬 것
 - **왼손 손가락 "쥔 모양" 포즈** — Two Bone IK는 손목 **위치**만 고친다. 손가락을 핸드가드 굵기에 맞춰 마는 건 별도 저작이고, **소켓이 확정된 뒤**라야 헛수고가 안 된다
