@@ -2039,7 +2039,13 @@ bool AFPSRCharacter::GetLeftHandGripTransform(const USceneComponent* ForMesh, FT
 		return false;
 	}
 
-	OutGripWorld = GripComp->GetSocketTransform(CachedLeftHandSocket, RTS_World);
+	// LeftHandGripOffset is applied in the grip component's space — the space a socket's RelativeLocation is authored
+	// in — so a value found by nudging the socket in the editor can be moved here unchanged. Composing to world after
+	// the nudge (rather than offsetting the world result) keeps it rotating with the weapon, which is what "1cm toward
+	// the trigger" has to mean when the gun is canted during ADS.
+	FTransform Grip = GripComp->GetSocketTransform(CachedLeftHandSocket, RTS_Component);
+	Grip.AddToTranslation(LeftHandGripOffset);
+	OutGripWorld = Grip * GripComp->GetComponentTransform();
 	return true;
 }
 

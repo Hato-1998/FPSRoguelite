@@ -477,6 +477,17 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Mesh")
 	FName WeaponAttachSocketName = FName(TEXT("SOCKET_Weapon"));
 
+	/** Nudge applied to the left-hand IK target after resolving the weapon's LeftHandSocket. The socket marks the grip
+	 *  LINE on the gun; the hand BONE sits a hand's thickness off that contact point, so aiming the IK straight at the
+	 *  socket drives the fingers through the handguard. That difference comes from the arms, not the weapon — it is the
+	 *  same for every gun and every handguard part — so it is authored once here instead of being baked into each
+	 *  weapon's socket, which is also what keeps a swapped handguard from needing its own correction.
+	 *  Applied in the grip component's space (what a socket's RelativeLocation is authored in), so a value measured by
+	 *  nudging the socket in the editor transfers verbatim. Zero by default: this is a tuning value, and a literal here
+	 *  would make the next adjustment a code change (ADR 0002 invariant 9). */
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Mesh")
+	FVector LeftHandGripOffset = FVector::ZeroVector;
+
 	/** Bone hidden while looking through this pawn's eyes (Blu: "head"; its children — hair, eyes, glasses — go with it,
 	 *  engine: BVS_HiddenByParent). Data for the same reason as WeaponAttachSocketName: HideBoneByName does NOTHING and
 	 *  logs NOTHING for a name the skeleton lacks, and this project has already swapped the player mesh twice. None
