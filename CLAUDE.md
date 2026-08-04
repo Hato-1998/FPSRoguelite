@@ -1,6 +1,9 @@
 # FPSRoguelite — 프로젝트 지침 (Claude 자동 로드)
 
 > **작업 시작 전 반드시 `Game.md`(SSOT 허브)와 `PROGRESS.md`(진행 현황)를 먼저 읽을 것.**
+> `PROGRESS.md`에는 **진행 중인 것만** 있다. 끝난 작업 = `Docs/WorkLog.md`(최신순, 원문 보존) ·
+> 증상→원인→해결 = **`Docs/Troubleshooting.md`**(막히면 여기부터) · 구조 결정 = `Docs/Architecture/*.md`.
+> 작업을 끝내면 해당 항목을 `PROGRESS.md`에서 **지우고 `Docs/WorkLog.md` 맨 위로 옮긴다.**
 > 기획·설계·기술스택·코드구조·환경경로·빌드/검증법·모델정책은 `Game.md` 허브의 라우팅 가이드(§0-1)를 따라 **작업에 해당하는 `Docs/SSOT/*.md`** 만 읽는다(문서 분할, 섹션번호 보존).
 
 ## ⛔ 절대 금지 / 핵심 4원칙
