@@ -320,6 +320,17 @@ public:
 		meta = (DisplayName = "바디 애니 레이어", MetaClass = "/Script/FPSRoguelite.FPSRCharacterAnimInstance"))
 	TSoftClassPtr<UAnimInstance> BodyAnimLayerClass;
 
+	/** 이 무기를 들었을 때 **1인칭 팔**에 링크되는 애니 레이어(ADR 0003). 바디 레이어와 같은 구조·같은 이유지만
+	 *  **완전히 별개**다 — 팔은 카메라에 붙어 자기 스켈레톤에서 자기 그래프를 돌린다(3인칭 애니를 눈높이에서 재생하면
+	 *  팔이 낮고 카메라를 감싼다는 것이 이 분리의 출발점이다). 이쪽이 담당하는 것은 무기군별 포즈뿐이고, 몽타주 슬롯과
+	 *  왼손 IK는 무기와 무관하므로 팔 본체 그래프에 남는다.
+	 *  null = 레이어 없음(팔 기본 포즈) — 팔 애니가 아직 없는 무기의 정상 상태다.
+	 *  ⚠ 반드시 `UFPSRFirstPersonArmsAnimInstance` 파생이어야 한다(바디 레이어와 같은 이유 — 런타임이 그 타입으로만
+	 *  값을 밀어 넣는다). 바디 레이어를 여기에 넣으면 링크는 되지만 값을 못 받는다. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|메시",
+		meta = (DisplayName = "1인칭 팔 애니 레이어", MetaClass = "/Script/FPSRoguelite.FPSRFirstPersonArmsAnimInstance"))
+	TSoftClassPtr<UAnimInstance> ArmsAnimLayerClass;
+
 	/** Socket on the BODY skeleton the weapon attaches to (NAME_None = body mesh root). Authored on the character's
 	 *  skeleton at the grip hand — see ADR 0002 (Blu: SOCKET_Weapon on hand_R). */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|메시", meta = (DisplayName = "무기 부착 소켓(바디)"))
@@ -468,6 +479,16 @@ public:
 	 *  WeaponAnimInstanceClass set. Null = no weapon reload animation (null-safe). */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|애니 몽타주", meta = (DisplayName = "재장전 몽타주(무기)"))
 	TSoftObjectPtr<UAnimMontage> WeaponReloadMontage;
+
+	/** 위 두 몽타주의 **1인칭 팔** 버전(ADR 0003). 바디 몽타주와 값이 겹치는 게 아니라 **스켈레톤이 달라 물리적으로 다른
+	 *  에셋**이다(팔=`S_Mannequin`, 바디=Blu) — 같은 값을 두 번 저작하게 만드는 필드가 아니므로 "무기 데이터는 한 벌"
+	 *  원칙(ADR 0003 불변식 13)에 걸리지 않는다. 오너 화면에만 재생된다(팔은 오너 머신에만 존재).
+	 *  null = 팔 애니 없음(null-safe) — 바디 쪽은 그대로 재생된다. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|애니 몽타주", meta = (DisplayName = "장착 몽타주(1인칭 팔)"))
+	TSoftObjectPtr<UAnimMontage> ArmsEquipMontage;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|애니 몽타주", meta = (DisplayName = "재장전 몽타주(1인칭 팔)"))
+	TSoftObjectPtr<UAnimMontage> ArmsReloadMontage;
 
 	/** --- Fire-part recoil (bolt / charging handle), data-driven via UFPSRWeaponAnimInstance ---
 	 *  The bone the weapon AnimBP's ModifyBone targets (bolt / charging handle). None = no moving fire part (no-op).

@@ -225,12 +225,32 @@
 
 **🪤 PWAS 폴더를 지우면 안 된다** — `NeonV_FPArms`의 스켈레톤이 `/Game/ProceduralWeaponAnimationSystem/Demo/FPManny/S_Mannequin` **바로 그 에셋**이다. ADR 0002의 "PWAS 폐기 순서" 절은 무효.
 
-### ⏭️ 남은 배선 (다음 세션 — 전부 미착수)
-1. `FirstPersonArms`를 **카메라에 부착**(현재 바디) · `SetLeaderPoseComponent` 해제 · 메시 = `NeonV_FPArms`
-2. 팔 AnimBP 신규 저작 — 4노드(무기군 포즈 → Slot → 왼손 IK → Output). **PWAS `ABP_FPChar`는 안 쓴다**
-3. 무기 DA 3필드 추가 + `RefreshEquippedWeaponVisual` 부착 대상 = **"팔이 켜져 있는가"**(불변식 14 — `IsLocallyControlled()`로 걸면 안 된다)
-4. `UpdateAimDownSights` 마지막 한 줄의 대상 = 무기 → **팔 컴포넌트**
-5. `Content/Characters/Blu/SkeletalMeshes/Blu_FP_Arms/` **폐기** — 참조 0 확인 후
+### ✅ C++ 배선 완료 (2026-08-03) — 빌드 2회 Succeeded(경고 0) · 스모크 Success
+| # | 변경 | 핵심 |
+|---|---|---|
+| 1 | 팔을 **카메라에 부착** · `LeaderPoseComponent` 제거 · `FirstPersonArmsAnimClass`로 자체 구동 | 바디의 `AlwaysTickPoseAndRefreshBones`는 **유지**(근거가 "팔이 따라오니까"→"그림자가 본을 요구하니까"로 바뀜) |
+| 2 | 분할 판정 = `IsLocallyControlled() && IsViewedThroughOwnEyes()` | 머리 숨김과 **같은 질문**을 공유(`IsViewedThroughOwnEyes()` 추출). 팔 미저작·DBNO 관전·관전 블렌드가 한 번에 맞는다 |
+| 3 | `AttachWeaponMeshes()` 추출 — 대상 = 팔/바디, `FirstPersonPrimitiveType`, `RefreshWeaponVisibility(bForce)` | **모듈러 파츠도 태그**해야 한다(태그는 부착 체인으로 안 내려간다) — 생성 시점 + 분할 전환 시점 양쪽 |
+| 4 | ADS 솔브 대상 = 팔, **상대 트랜스폼**으로 쓰기 | 수식 무변경. 상대로 쓰는 이유 = 카메라 회전이 **post-tick**(`GetCameraView`→`SetWorldRotation`)이라 월드로 쓰면 한 프레임 낡은 카메라에 팔이 고정 |
+| 5 | `GetLeftHandGripTransform(ForMesh, Out)` + `IsAttachedTo` 가드 | 없으면 **내 그림자의 왼팔이 카메라로 끌려간다**. BP 호출 0개 확인 후 시그니처 변경 |
+| 6 | `UFPSRFirstPersonArmsAnimInstance` 신규 + DA 3필드 + `RefreshArmsAnimLayer` + 팔 몽타주 | 바디와 **완전 대칭**, 서로를 참조하지 않음(불변식 11). `AFPSRCharacter::IsReloading()` 파사드 추가 |
+
+### 🔑 저작 지점 = **컴포넌트 슬롯 하나** (2026-08-03 사용자 결정)
+처음엔 `FirstPersonArmsMesh`·`FirstPersonArmsAnimClass` 두 필드를 두고 코드가 컴포넌트를 **덮어쓰게** 짰다. 실제로 사고가 났다 — 사용자가 컴포넌트에 `NeonV_FPArms`를 넣었는데 필드는 폐기 대상 `Blu_FP_Arms`(Blu 스켈레톤)를 가리키고 있어, **PIE를 눌렀으면 포즈가 하나도 안 붙는 팔이 나왔을 것**이다.
+> **사용자 지침: 컴포넌트로 넣을 수 있는 건 컴포넌트 슬롯이 진실원천.** 코드가 컴포넌트를 덮어쓰는 형태는 다른 작업에서도 고친다.
+- **두 필드 삭제.** 분할 게이트 = `FirstPersonArms->GetSkeletalMeshAsset() != nullptr`. 메시·애님클래스·레스트 트랜스폼 전부 BP 컴포넌트에서 저작
+- **전수 조사 결과 위반은 이 한 곳뿐이었다** — `AFPSREnemyBase`·`AFPSRXPPickup`·`AFPSRBossBase`는 이미 `if (GetStaticMesh() == nullptr)`로 **컴포넌트가 이기고 config는 폴백**. 무기 메시/파츠는 런타임 교체라 DA가 소스인 게 정당. 에디터 모듈은 프리뷰 툴
+
+**⏳ 다음 = 콘텐츠 (사용자 작업)**
+1. ✅ 컴포넌트에 `NeonV_FPArms` + 레스트 트랜스폼 `(-10, 0, -160)` 지정 완료(헤드리스 검증)
+2. **팔 AnimBP `ABP_FirstPerson`** (`/Game/Character/Player/`, 작업 중) — 🚨 **부모 클래스가 `AnimInstance`로 되어 있다. `FPSRFirstPersonArmsAnimInstance`로 리페어런트해야** 값(`bIsAiming`·`LeftHandGripWorld`·`LeftHandIKAlpha`)과 레이어 push가 산다
+   - 🚨 IK는 **`IK Rig` 노드가 아니라 `Two Bone IK`** — IK Rig는 Rig Definition 에셋을 요구하고(현재 경고), 월드 이펙터를 변수로 못 받는다. Two Bone IK = `hand_l` + `LeftHandGripWorld`(World Space) + 알파 `LeftHandIKAlpha` + **JointTarget 필수**(없으면 팔꿈치 플립)
+   - 무기군 포즈는 최종적으로 **레이어(`ArmsAnimLayerClass`)** 로 빼야 무기 추가 시 중앙 수정이 0이 된다(지금은 `A_FP_Rifle_Pose` 직결 = 1단계로는 정상)
+3. 레스트 트랜스폼 **재조정은 그래프가 들어온 뒤에** — 지금 값은 A포즈 기준이라 소총 포즈가 오면 체감이 달라진다
+4. PIE 검증 7항목 — 특히 ④ 내 그림자 왼팔 · ⑥ 동료 화면 무기 · ⑦ 다운→관전 시 무기가 바디 손으로
+5. `Content/Characters/Blu/SkeletalMeshes/Blu_FP_Arms/` **폐기**(참조 0 확인 후 — 이제 코드 참조는 끊겼다)
+
+⚠️ **`WeaponAttachScale` 0.85는 Blu 팔 기준**이다(마네킹 팔은 27.5% 길다). 1P에서 총이 작아 보이면 그때 판단 — 지금 필드를 만드는 건 추측.
 
 ### ⏭️ 다음
 1. **1인칭 팔 메시 모양** — 뼈가 살아난 지금도 팔이 구겨진 종이처럼 뾰족하게 보이면 스키닝/웨이트 별건(P2 산출물). 포즈는 이제 정상이므로 순수 메시 문제로 좁혀졌다.

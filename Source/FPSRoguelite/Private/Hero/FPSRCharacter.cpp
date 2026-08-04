@@ -117,12 +117,15 @@ AFPSRCharacter::AFPSRCharacter(const FObjectInitializer& ObjectInitializer)
 	// 1P mesh hid from them; with one mesh serving both there is nothing left to mirror — and a survey of all 9 weapon
 	// DataAssets found its mesh field had never been authored, so teammates' weapons were invisible the whole time.
 
-	// The owner's arms. Attached to the BODY (not the capsule) so it inherits the body's transform AND its scale —
-	// LeaderPoseComponent shares the POSE, not the component transform, so an arms component parked anywhere else
-	// would play the right pose in the wrong place. Owner-only: without this the arms render on top of the body for
-	// everyone else. Starts hidden and untagged; RefreshFirstPersonRendering turns it on once a mesh is authored.
+	// The owner's arms. Attached to the CAMERA (ADR 0003): they no longer replay the body's pose, they run their own
+	// graph on their own skeleton, so what they need from a parent is the VIEW — not the body's transform. Being a
+	// camera child also means the arms inherit the view rotation the engine applies post-tick
+	// (UCameraComponent::GetCameraView -> SetWorldRotation), which is why UpdateAimDownSights writes them in RELATIVE
+	// space; see the note there. Owner-only: without this the arms render on top of the body for everyone else.
+	// Mesh, anim class and rest transform are all authored on this component in the BP — nothing here overwrites them.
+	// Hidden by default so a BP that authors no arms mesh never flashes them; RefreshFirstPersonRendering owns it after.
 	FirstPersonArms = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("FirstPersonArms"));
-	FirstPersonArms->SetupAttachment(GetMesh());
+	FirstPersonArms->SetupAttachment(FirstPersonCamera);
 	FirstPersonArms->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	FirstPersonArms->SetOnlyOwnerSee(true);
 	FirstPersonArms->SetVisibility(false);
@@ -131,9 +134,10 @@ AFPSRCharacter::AFPSRCharacter(const FObjectInitializer& ObjectInitializer)
 	// WorldSpaceRepresentation, which takes it out of the owner's main render pass, and ShouldUpdateTransform() gates
 	// RefreshBoneTransforms on exactly that ("was I recently rendered"). ACharacter's constructor default is
 	// AlwaysTickPose, so the graph keeps UPDATING while it never EVALUATES: Speed and every other input stay live while
-	// the pose stays frozen on the last frame that happened to be drawn — and the arms, which replay the body's bones
-	// through LeaderPoseComponent, freeze with it. Unconditional: this is the player, of whom there are at most 4. The
-	// per-actor budget this project is built around is about enemies, and they keep their own setting.
+	// the pose stays frozen on the last frame that happened to be drawn. The arms no longer share that fate (they have
+	// their own graph, ADR 0003) but the BODY still owes the owner a full-body SHADOW, and a shadow needs live bones —
+	// so this stays. Unconditional: this is the player, of whom there are at most 4. The per-actor budget this project
+	// is built around is about enemies, and they keep their own setting.
 	GetMesh()->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
 
 	WeaponInventory = CreateDefaultSubobject<UFPSRWeaponInventoryComponent>(TEXT("WeaponInventory"));
@@ -253,14 +257,23 @@ void AFPSRCharacter::BeginPlay()
 	AddTickPrerequisiteComponent(GetCharacterMovement());
 	CachedCameraWorldZ = FirstPersonCamera ? FirstPersonCamera->GetComponentLocation().Z : 0.0f;
 
-	// Same class of reason, one layer down: UpdateAimDownSights (driven from the weapon-fire tick) now solves the
-	// weapon's pose against the BODY's grip socket, so it has to run after the body pose exists this frame. Reading a
-	// stale socket would make the gun trail the hand by a frame during fast movement — the arms version never had this
-	// dependency because it hung off the camera. Note the pose may still be finalized by the parallel-animation
-	// completion task at the END of the tick group; if PIE shows residual lag this is the first thing to measure.
-	if (WeaponFire && GetMesh())
+	// Same class of reason, one layer down: UpdateAimDownSights (driven from the weapon-fire tick) solves against the
+	// grip socket of whichever mesh currently holds the weapon, so it has to run after THAT mesh's pose exists this
+	// frame. Reading a stale socket would make the gun trail the hand by a frame during fast movement. Both are
+	// registered unconditionally rather than following the split: the prerequisite is a tick-graph edge, re-registering
+	// it every time the player goes down and comes back would be churn for no gain, and the mesh that isn't holding the
+	// weapon costs nothing but an ordering constraint that was already true. Note the pose may still be finalized by the
+	// parallel-animation completion task at the END of the tick group; if PIE shows residual lag, measure here first.
+	if (WeaponFire)
 	{
-		WeaponFire->AddTickPrerequisiteComponent(GetMesh());
+		if (GetMesh())
+		{
+			WeaponFire->AddTickPrerequisiteComponent(GetMesh());
+		}
+		if (FirstPersonArms)
+		{
+			WeaponFire->AddTickPrerequisiteComponent(FirstPersonArms);
+		}
 	}
 
 	// Push the authored baseline AGAIN here, not only from the constructor: a Blueprint subclass's override of
@@ -285,10 +298,18 @@ void AFPSRCharacter::BeginPlay()
 	// when controller state is stable). Binding on proxies / server-side pawns is a cheap no-op.
 	TryBindVisionDelegate();
 
-	// Seed the look-sway reference so the first frame's control-rotation delta isn't a huge jump. There is no longer a
-	// captured "arms rest pose" to seed the ADS blend from — the hip end of that blend is the grip socket, read fresh
-	// every frame in UpdateAimDownSights.
+	// Seed the look-sway reference so the first frame's control-rotation delta isn't a huge jump.
 	PreviousControlRotation = GetControlRotation();
+
+	// Capture the arms' AUTHORED placement before anything writes to the component. This is the hip end of the ADS
+	// blend when the arms hold the weapon, and it must be a snapshot: UpdateAimDownSights overwrites the relative
+	// transform every frame, so a live read would feed last frame's solve back in. Taken here rather than in the
+	// constructor because a BP subclass's override of the component transform is deserialized after the C++ constructor
+	// runs — the same blind spot that made BaseWalkSpeed have to be re-pushed above.
+	if (FirstPersonArms)
+	{
+		ArmsHipRelativeTransform = FirstPersonArms->GetRelativeTransform();
+	}
 
 	// Establish the weapon's visibility from the state we actually spawned in, rather than assuming "visible" and
 	// waiting for something to change. A pawn possessed mid-air onto a wall, or re-created by seamless travel, has no
@@ -507,6 +528,13 @@ bool AFPSRCharacter::IsAiming() const
 	return WeaponFire && WeaponFire->IsAiming();
 }
 
+bool AFPSRCharacter::IsReloading() const
+{
+	// The flag lives on the replicated weapon INSTANCE (the inventory forwards to the equipped one), so like IsAiming
+	// this answers on every machine. Same facade reason: the component is not reachable from an AnimBP.
+	return WeaponInventory && WeaponInventory->IsReloading();
+}
+
 bool AFPSRCharacter::IsADSVisualActive() const
 {
 	// Owner-local ADS blend crossing the visual threshold. Reload-aware for free: a reload makes UpdateAimDownSights
@@ -604,17 +632,21 @@ void AFPSRCharacter::RefreshFirstPersonRendering()
 	// to WorldSpaceRepresentation makes the engine set bOwnerNoSee — so doing it without arms to put in their place
 	// leaves the owner staring at an empty screen. Same rule as the left-hand IK: with nothing valid to point at, the
 	// feature turns OFF rather than running wrong (invariant 9's spirit — content decides, code fails safe).
-	USkeletalMesh* ArmsMesh = FirstPersonArmsMesh.LoadSynchronous();
-	const bool bSplit = (ArmsMesh != nullptr) && IsLocallyControlled();
-
-	if (bSplit && FirstPersonArms->GetSkeletalMeshAsset() != ArmsMesh)
-	{
-		FirstPersonArms->SetSkeletalMeshAsset(ArmsMesh);
-		// The arms do not evaluate anything: they replay the body's bone transforms. One anim graph, one evaluation,
-		// for the owner and every observer alike (ADR 0002 invariant 4). Set AFTER the mesh — the leader link is
-		// dropped when the skinned asset changes.
-		FirstPersonArms->SetLeaderPoseComponent(BodyMesh);
-	}
+	//
+	// "Authored" is read straight off the COMPONENT. This code sets neither the mesh nor the anim class: both are slots
+	// the Blueprint already owns, and a data field that overwrote them would make those slots a lie — you assign one,
+	// the viewport agrees, and the runtime quietly swaps in something else. (That is not hypothetical: the field this
+	// replaced was still pointing at a deprecated arms mesh on a different skeleton, so PIE would have shown the wrong
+	// arms with none of the poses applying.) The rest of this project already keeps the component authoritative —
+	// AFPSREnemyBase and AFPSRXPPickup only fall back to config when the slot is empty.
+	//
+	// The other half of the gate is "are we LOOKING THROUGH this pawn", not "is this pawn locally controlled" — the same
+	// question head hiding already asks (ADR 0002 invariant 5), and the two must agree or the owner ends up watching a
+	// teammate with their own arms floating over the picture. It also settles where the weapon hangs while downed: with
+	// the arms gone the gun goes back to the body's hand, so a spectated corpse is not empty-handed (ADR 0003 inv. 14).
+	// IsLocallyControlled stays in front of it because only the local pawn owns any of this render state at all.
+	const bool bSplit = (FirstPersonArms->GetSkeletalMeshAsset() != nullptr)
+		&& IsLocallyControlled() && IsViewedThroughOwnEyes();
 
 	FirstPersonArms->SetVisibility(bSplit, /*bPropagateToChildren=*/true);
 
@@ -630,12 +662,91 @@ void AFPSRCharacter::RefreshFirstPersonRendering()
 	BodyMesh->SetFirstPersonPrimitiveType(
 		bSplit ? EFirstPersonPrimitiveType::WorldSpaceRepresentation : EFirstPersonPrimitiveType::None);
 
-	// The WEAPON is deliberately left alone. Tagging it FirstPerson would strip its shadow for EVERY viewer, not just
-	// the owner, because that flag lives on the primitive rather than on the view — and it would buy nothing while the
-	// camera's bEnableFirstPersonScale / bEnableFirstPersonFieldOfView stay off (both default false), since with them
-	// off the first-person pass renders at the same FOV and scale as the world pass. Turning them on to stop the gun
-	// clipping into walls would move where the sight RENDERS versus where UpdateAimDownSights puts it in the world, so
-	// that is a separate decision with its own measurement, not a free extra.
+	// The weapon follows the hand that is actually on screen, so it moves with this decision (ADR 0003 invariant 14).
+	// Only on a CHANGE: this function runs from several lifecycle paths and re-attaching every time would fight the
+	// per-frame ADS solve. AttachWeaponMeshes is deliberately narrower than RefreshEquippedWeaponVisual — the full
+	// refresh replays the equip montage, which would fire every time the player is downed or comes back.
+	if (bFirstPersonSplitActive != bSplit)
+	{
+		bFirstPersonSplitActive = bSplit;
+		AttachWeaponMeshes();
+	}
+
+	// NOTE on bEnableFirstPersonScale / bEnableFirstPersonFieldOfView (both engine-default false, and left that way):
+	// turning them on would render first-person primitives at their own FOV and scale, which is the usual fix for a gun
+	// clipping into walls — but it moves where the sight RENDERS versus where UpdateAimDownSights puts it, and this
+	// project pins the sight to the view centre-line. That is a separate decision with its own measurement (ADR 0003).
+}
+
+EFirstPersonPrimitiveType AFPSRCharacter::GetWeaponFirstPersonPrimitiveType() const
+{
+	return bFirstPersonSplitActive ? EFirstPersonPrimitiveType::FirstPerson : EFirstPersonPrimitiveType::None;
+}
+
+bool AFPSRCharacter::IsViewedThroughOwnEyes() const
+{
+	// "Are we looking through THIS pawn's eyes" — the single question behind head hiding, the arms split, and which hand
+	// the weapon hangs off. Polling the view target beats edge-detecting SetViewTargetWithBlend: the 0.3s spectate blend
+	// has no single "switched" instant. Callers all guard on a change latch, so the steady state is one pointer compare.
+	const APlayerController* LocalPC = GetWorld() ? GetWorld()->GetFirstPlayerController() : nullptr;
+	return LocalPC && LocalPC->GetViewTarget() == this;
+}
+
+void AFPSRCharacter::AttachWeaponMeshes()
+{
+	// Which hand is on screen decides which hand holds the gun (ADR 0003 invariant 14). Attachment is per-component
+	// LOCAL state — the engine only replicates the actor's root attachment — so every machine answers this for itself:
+	// the owner sees the gun in their first-person arms, everyone else sees it in the body's hand, from one component
+	// and one weapon DataAsset. That is what keeps the "two sets of weapon fields, one of them never authored" bug
+	// (ADR 0002) from coming back as "two sets of weapon COMPONENTS".
+	USkeletalMeshComponent* GripMesh = bFirstPersonSplitActive && FirstPersonArms ? FirstPersonArms.Get() : GetMesh();
+	if (!GripMesh)
+	{
+		return;
+	}
+
+	// Per-weapon DA socket overrides the character default. The same name has to resolve on BOTH skeletons, which it
+	// does: SOCKET_Weapon is authored on the body's grip hand and on the arms' (S_Mannequin).
+	const UFPSRWeaponDataAsset* Weapon = WeaponInventory ? WeaponInventory->GetCurrentWeapon() : nullptr;
+	const FName AttachSocket = (Weapon && !Weapon->WeaponAttachSocket.IsNone()) ? Weapon->WeaponAttachSocket : WeaponAttachSocketName;
+	const float AttachScale = Weapon ? Weapon->WeaponAttachScale : 1.0f;
+
+	// Snap (not KeepRelative) so the weapon sits exactly where the skeleton's grip socket was authored.
+	// SnapToTargetNotIncludingScale leaves scale alone (engine: its scale rule is KeepWorld), which is what lets the
+	// explicit scale below be the single place the weapon's size is decided.
+	//
+	// FirstPerson tags a primitive as drawn in the first-person pass with every shadow flag forced off
+	// (PrimitiveSceneProxy.cpp — bIsFirstPerson clears bCastDynamicShadow/Static/Volumetric/Far). Riding the arms, the
+	// gun lives in CAMERA space, so a shadow from it would be cast from the viewer's eye into the world — the accepted
+	// cost of ADR 0003 axis 2 is "no gun in your own shadow", not "a gun-shaped smear beside you". On the body it keeps
+	// its shadow, because there it IS a world object.
+	auto AttachOne = [GripMesh, AttachSocket, AttachScale, this](UMeshComponent* Comp)
+	{
+		if (!Comp)
+		{
+			return;
+		}
+		Comp->AttachToComponent(GripMesh, FAttachmentTransformRules::SnapToTargetNotIncludingScale, AttachSocket);
+		Comp->SetRelativeScale3D(FVector(AttachScale));
+		Comp->SetFirstPersonPrimitiveType(GetWeaponFirstPersonPrimitiveType());
+	};
+	AttachOne(WeaponMesh);
+	AttachOne(WeaponMeshStatic);
+
+	// The modular parts ride the weapon mesh, so they need no re-attach — but the render tag does NOT propagate down an
+	// attachment chain, and a barrel left untagged in camera space casts exactly the stray shadow the tag above exists
+	// to remove. Parts created later pick this up at creation (RebuildPartsFromSelection).
+	for (UStaticMeshComponent* Part : WeaponPartComponents)
+	{
+		if (Part)
+		{
+			Part->SetFirstPersonPrimitiveType(GetWeaponFirstPersonPrimitiveType());
+		}
+	}
+
+	// Re-attaching restores the components to visible, while this class's hidden latch still says "hidden" — so a plain
+	// call would early-out and hand a wall-hung (or scoped) player their gun back. Forced, same as after an equip.
+	RefreshWeaponVisibility(/*bForce=*/true);
 }
 
 void AFPSRCharacter::OnMovementModeChanged(EMovementMode PrevMovementMode, uint8 PreviousCustomMode)
@@ -659,11 +770,8 @@ void AFPSRCharacter::UpdateFirstPersonBodyVisibility()
 	// ADR 0002 invariant 5: hide the head when we are looking THROUGH this pawn's eyes, NOT when this pawn is "the local
 	// player". The two answers differ in both directions — a DBNO teammate spectating this pawn (§2-13) sees through
 	// this pawn's camera and would otherwise be inside its skull, while the later spectator/debug 3P rig becomes the
-	// view target itself and must get the head back. Polling the view target each frame beats edge-detecting
-	// SetViewTargetWithBlend: the 0.3s spectate blend has no single "switched" instant, and the change guard below makes
-	// the steady state one pointer compare.
-	const APlayerController* LocalPC = GetWorld() ? GetWorld()->GetFirstPlayerController() : nullptr;
-	const bool bViewedThroughOwnEyes = LocalPC && LocalPC->GetViewTarget() == this;
+	// view target itself and must get the head back. The change guard below makes the steady state one pointer compare.
+	const bool bViewedThroughOwnEyes = IsViewedThroughOwnEyes();
 	if (bViewedThroughOwnEyes == bHeadHiddenForOwnView)
 	{
 		return;
@@ -671,6 +779,12 @@ void AFPSRCharacter::UpdateFirstPersonBodyVisibility()
 	// Latch the decision BEFORE the data checks below, so a mis-authored bone name warns once per view-target change
 	// instead of once per frame.
 	bHeadHiddenForOwnView = bViewedThroughOwnEyes;
+
+	// The arms split answers to the same question (ADR 0003), and this is the only place that notices the view target
+	// moved — the lifecycle hooks (spawn, possession) cannot see a spectate transition. Ordering does not matter: the
+	// two touch different components, and RefreshFirstPersonRendering re-reads the view target rather than trusting a
+	// latch, so it is correct whether it runs before or after the head work below.
+	RefreshFirstPersonRendering();
 
 	if (HeadBoneName.IsNone())
 	{
@@ -1533,6 +1647,45 @@ void AFPSRCharacter::RefreshBodyAnimLayer(const UFPSRWeaponDataAsset* Weapon)
 	// linked layer each frame (see its header). That also means this doesn't care how the layer functions are grouped.
 }
 
+void AFPSRCharacter::RefreshArmsAnimLayer(const UFPSRWeaponDataAsset* Weapon)
+{
+	// The arms' half of the same mechanism as RefreshBodyAnimLayer — deliberately a separate function over a separate
+	// component with a separate DataAsset field, because the two graphs are independent by design (ADR 0003 invariant
+	// 11). Merging them would be the first step back toward one pose serving both cameras, which is what this whole
+	// change undid. Owner-machine only: on every other machine FirstPersonArms carries no mesh and no graph.
+	if (!FirstPersonArms)
+	{
+		return;
+	}
+
+	UClass* DesiredLayer = nullptr;
+	if (Weapon && !Weapon->ArmsAnimLayerClass.IsNull())
+	{
+		DesiredLayer = Weapon->ArmsAnimLayerClass.LoadSynchronous();
+		if (!DesiredLayer)
+		{
+			UE_LOG(LogFPSR, Warning,
+				TEXT("[Anim] %s: first-person arms layer '%s' failed to load — falling back to the arms' base pose."),
+				*GetNameSafe(Weapon), *Weapon->ArmsAnimLayerClass.ToString());
+		}
+	}
+
+	if (LinkedArmsAnimLayerClass.Get() == DesiredLayer)
+	{
+		return; // re-linking tears down and recreates the layer instance, restarting its state machine mid-stride
+	}
+
+	if (LinkedArmsAnimLayerClass)
+	{
+		FirstPersonArms->UnlinkAnimClassLayers(LinkedArmsAnimLayerClass);
+	}
+	LinkedArmsAnimLayerClass = DesiredLayer;
+	if (DesiredLayer)
+	{
+		FirstPersonArms->LinkAnimClassLayers(DesiredLayer);
+	}
+}
+
 void AFPSRCharacter::RefreshEquippedWeaponVisual()
 {
 	// Runs on EVERY machine. One weapon mesh serves the owner, a spectating downed teammate (§2-13 DBNO), and ordinary
@@ -1546,15 +1699,17 @@ void AFPSRCharacter::RefreshEquippedWeaponVisual()
 
 	const UFPSRWeaponDataAsset* Weapon = WeaponInventory->GetCurrentWeapon();
 
-	// Before the no-weapon early-out below, deliberately: it has to run for the null case too. The layer decides the
+	// Before the no-weapon early-out below, deliberately: they have to run for the null case too. The layer decides the
 	// POSE, so a stale rifle layer left linked after unequipping keeps a teammate posed around a gun that isn't there.
 	RefreshBodyAnimLayer(Weapon);
+	RefreshArmsAnimLayer(Weapon);
 
 	// Reset cached fire cosmetics; repopulated below when a weapon is equipped.
 	CachedFireMontage = nullptr;
 	CachedReloadMontage = nullptr;
 	CachedWeaponFireMontage = nullptr;
 	CachedWeaponReloadMontage = nullptr;
+	CachedArmsReloadMontage = nullptr;
 	CachedFireSound = nullptr;
 	CachedMuzzleFlash = nullptr;
 	CachedMuzzleSocket = NAME_None;
@@ -1584,35 +1739,18 @@ void AFPSRCharacter::RefreshEquippedWeaponVisual()
 		return;
 	}
 
-	// Per-weapon DA socket overrides the character default (SOCKET_Weapon on the body's grip hand).
-	const FName AttachSocket = Weapon->WeaponAttachSocket.IsNone() ? WeaponAttachSocketName : Weapon->WeaponAttachSocket;
-
 	// Skeletal weapon mesh (firearms) takes priority; static mesh (melee) is the fallback.
 	USkeletalMesh* SkelMesh = Weapon->WeaponMesh.IsNull() ? nullptr : Weapon->WeaponMesh.LoadSynchronous();
 	UStaticMesh* StaticMesh = (SkelMesh == nullptr && !Weapon->WeaponMeshStatic.IsNull())
 		? Weapon->WeaponMeshStatic.LoadSynchronous() : nullptr;
 
-	// Snap (not KeepRelative) so the weapon sits exactly where the skeleton's grip socket was authored — the alignment
-	// is now the socket's job, not a BP-viewport nudge on a camera-parented component. SnapToTargetNotIncludingScale
-	// leaves scale alone (engine: its scale rule is KeepWorld), which is what lets WeaponAttachScale below be the single
-	// place the size is decided: the animation pack assumes realistic human proportions, so a stylised character needs
-	// the gun shrunk to stay inside BOTH hands' reach (ADR 0002 measured 0.85 for Blu + the Synty rifle).
 	USkeletalMeshComponent* BodyMesh = GetMesh();
-	auto AttachAtGrip = [BodyMesh, AttachSocket, Weapon](USceneComponent* Comp)
-	{
-		if (BodyMesh)
-		{
-			Comp->AttachToComponent(BodyMesh, FAttachmentTransformRules::SnapToTargetNotIncludingScale, AttachSocket);
-		}
-		Comp->SetRelativeScale3D(FVector(Weapon->WeaponAttachScale));
-	};
 
 	if (WeaponMesh)
 	{
 		// SetSkeletalMeshAsset is the engine's documented setter (calls SetSkeletalMesh(NewMesh, false)) — UE5.7.
 		// The weapon mesh has its OWN skeleton (SKEL_LPAMG_<W>), independent of the body skeleton it hangs off.
 		WeaponMesh->SetSkeletalMeshAsset(SkelMesh);
-		AttachAtGrip(WeaponMesh);
 		// Per-weapon WEAPON-mesh AnimBP so the bolt/magazine montages (A_FP_WEP_<W>_*) can play on the weapon's own
 		// skeleton. Only a skeletal weapon has one; clear it otherwise so a static/next weapon keeps no stale bolt anim.
 		if (SkelMesh && !Weapon->WeaponAnimInstanceClass.IsNull())
@@ -1636,8 +1774,11 @@ void AFPSRCharacter::RefreshEquippedWeaponVisual()
 	if (WeaponMeshStatic)
 	{
 		WeaponMeshStatic->SetStaticMesh(StaticMesh);
-		AttachAtGrip(WeaponMeshStatic);
 	}
+
+	// Hand, socket, scale and render tag in one place — shared with the path that runs when the arms come up or go away
+	// without the weapon changing (ADR 0003). Note this also re-forces weapon visibility, which the re-attach undoes.
+	AttachWeaponMeshes();
 
 	// Track which mesh is actually shown so fire cosmetics attach to it (skeletal firearm vs static melee/preview).
 	ActiveWeaponMesh = SkelMesh ? Cast<UMeshComponent>(WeaponMesh)
@@ -1652,6 +1793,7 @@ void AFPSRCharacter::RefreshEquippedWeaponVisual()
 	CachedReloadMontage = Weapon->ReloadMontage.IsNull() ? nullptr : Weapon->ReloadMontage.LoadSynchronous();
 	CachedWeaponFireMontage = Weapon->WeaponFireMontage.IsNull() ? nullptr : Weapon->WeaponFireMontage.LoadSynchronous();
 	CachedWeaponReloadMontage = Weapon->WeaponReloadMontage.IsNull() ? nullptr : Weapon->WeaponReloadMontage.LoadSynchronous();
+	CachedArmsReloadMontage = Weapon->ArmsReloadMontage.IsNull() ? nullptr : Weapon->ArmsReloadMontage.LoadSynchronous();
 	CachedFireSound = Weapon->FireSound.IsNull() ? nullptr : Weapon->FireSound.LoadSynchronous();
 	CachedMuzzleFlash = Weapon->MuzzleFlash.IsNull() ? nullptr : Weapon->MuzzleFlash.LoadSynchronous();
 	CachedMuzzleSocket = Weapon->MuzzleSocket;
@@ -1703,6 +1845,19 @@ void AFPSRCharacter::RefreshEquippedWeaponVisual()
 			if (UAnimInstance* AnimInst = BodyMesh->GetAnimInstance())
 			{
 				AnimInst->Montage_Play(EquipM);
+			}
+		}
+	}
+
+	// The same swap on the first-person arms, for the one machine that has them. Separate asset, separate skeleton —
+	// see ArmsEquipMontage in the DataAsset for why that is not a duplicated field.
+	if (bFirstPersonSplitActive && FirstPersonArms && !Weapon->ArmsEquipMontage.IsNull())
+	{
+		if (UAnimMontage* ArmsEquipM = Weapon->ArmsEquipMontage.LoadSynchronous())
+		{
+			if (UAnimInstance* ArmsAnimInst = FirstPersonArms->GetAnimInstance())
+			{
+				ArmsAnimInst->Montage_Play(ArmsEquipM);
 			}
 		}
 	}
@@ -1781,6 +1936,9 @@ void AFPSRCharacter::RebuildPartsFromSelection(const TArray<FFPSRWeaponPartAttac
 		// No visibility override (ADR 0002): parts are visible to whoever can see the weapon they hang off, which is now
 		// everyone. The old SetOnlyOwnerSee(true) existed only to match an owner-only 1P weapon mesh.
 		PartComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		// Match the weapon it hangs off: the render tag isn't inherited through attachment, so a part created while the
+		// first-person arms are up would otherwise cast a world shadow from camera space (ADR 0003).
+		PartComp->SetFirstPersonPrimitiveType(GetWeaponFirstPersonPrimitiveType());
 		PartComp->RegisterComponent();
 		PartComp->AttachToComponent(WeaponMesh, FAttachmentTransformRules::KeepRelativeTransform, PartDef.Socket);
 		PartComp->SetRelativeTransform(PartDef.Offset);
@@ -1862,7 +2020,7 @@ UMeshComponent* AFPSRCharacter::ResolveLeftHandGripComponent() const
 	return nullptr;
 }
 
-bool AFPSRCharacter::GetLeftHandGripTransform(FTransform& OutGripWorld) const
+bool AFPSRCharacter::GetLeftHandGripTransform(const USceneComponent* ForMesh, FTransform& OutGripWorld) const
 {
 	const UMeshComponent* GripComp = ResolveLeftHandGripComponent();
 	if (!GripComp)
@@ -1870,6 +2028,17 @@ bool AFPSRCharacter::GetLeftHandGripTransform(FTransform& OutGripWorld) const
 		OutGripWorld = FTransform::Identity;
 		return false;
 	}
+
+	// Only answer for the mesh the grip is actually ON. The weapon lives in CAMERA space while the first-person arms
+	// hold it, and a body that reached for it anyway would swing its left arm toward the camera — which the owner sees,
+	// because that body is casting their shadow. Asking "is it attached to me" keeps each graph ignorant of the other
+	// (ADR 0003 invariant 11): neither mesh has to know the split exists, only whether it is the one holding the gun.
+	if (!ForMesh || !GripComp->IsAttachedTo(ForMesh))
+	{
+		OutGripWorld = FTransform::Identity;
+		return false;
+	}
+
 	OutGripWorld = GripComp->GetSocketTransform(CachedLeftHandSocket, RTS_World);
 	return true;
 }
@@ -1977,6 +2146,18 @@ void AFPSRCharacter::HandleReloadStateChanged(bool bIsReloading)
 			: (Weapon->WeaponReloadMontage.IsNull() ? nullptr : Weapon->WeaponReloadMontage.LoadSynchronous());
 		PlayScaledReload(WeaponMesh->GetAnimInstance(), WeaponReloadM);
 	}
+
+	// FIRST-PERSON ARMS reload, on the same edge and the same rate scale. Gated on the split rather than on the
+	// component: with the arms down (spectating, or none authored) there is no owner watching them, and playing into a
+	// hidden graph would leave a montage running when they come back. This asset is separate from the body's because
+	// the two meshes have different skeletons, not because the reload is authored twice (ADR 0003 invariant 13).
+	if (bFirstPersonSplitActive && FirstPersonArms)
+	{
+		UAnimMontage* ArmsReloadM = CachedArmsReloadMontage
+			? CachedArmsReloadMontage.Get()
+			: (Weapon->ArmsReloadMontage.IsNull() ? nullptr : Weapon->ArmsReloadMontage.LoadSynchronous());
+		PlayScaledReload(FirstPersonArms->GetAnimInstance(), ArmsReloadM);
+	}
 }
 
 void AFPSRCharacter::PlayWeaponFireCosmetics()
@@ -2069,12 +2250,24 @@ void AFPSRCharacter::UpdateAimDownSights(float DeltaTime)
 	}
 
 	// Nothing equipped, nothing to place. ActiveWeaponMesh is whichever mesh the weapon actually shows (skeletal firearm
-	// or static melee), and it is also the CARRIER the solve below moves.
+	// or static melee).
 	UMeshComponent* WeaponCarrier = ActiveWeaponMesh;
 	if (!WeaponCarrier)
 	{
 		return;
 	}
+
+	// WHAT the solve moves. With the first-person arms up the weapon is in their hand, so moving the gun alone would
+	// slide it out of the grip — the arms are the rigid body that has to travel, and the gun rides along. That is the
+	// original shape of this function (it moved the arms before ADR 0002 removed them), which is why the maths below
+	// needed no change: ADR 0002 left this as "a change to the target, not to the solve".
+	// With no arms, the weapon hangs off an animated hand and moving it alone is the only option available.
+	USceneComponent* SolveTarget = WeaponCarrier;
+	if (bFirstPersonSplitActive && FirstPersonArms)
+	{
+		SolveTarget = FirstPersonArms;
+	}
+	const bool bSolvingArms = (SolveTarget != WeaponCarrier);
 
 	// The AimSocket may live on a SIGHT part (iron sight / optic) or the weapon itself — CachedAimComponent resolves to
 	// the part that owns it (RefreshWeaponPartComponents), else fall back to the carrier.
@@ -2101,55 +2294,67 @@ void AFPSRCharacter::UpdateAimDownSights(float DeltaTime)
 
 	const FTransform CamFrame = RigidFrame(FirstPersonCamera->GetComponentTransform());
 
-	// The HIP end of the blend is the grip socket itself, re-read every frame. The attach uses SnapToTarget, so at rest
-	// the weapon's rotation and location ARE its parent socket's and only the scale is ours — reading the parent instead
-	// of the weapon is what keeps this an independent reference rather than a feedback of last frame's write. Reading it
-	// through the attachment (not a cached socket name) means a designer re-parenting the weapon can't desync the hip
-	// pose from where the weapon actually hangs.
-	const USceneComponent* GripParent = WeaponCarrier->GetAttachParent();
-	if (!GripParent)
+	// The HIP end of the blend: where the solve target rests when NOT aiming. It has to be an INDEPENDENT reference —
+	// read the target's own transform and last frame's write feeds straight back in and the pose walks away.
+	//  - Arms: their authored placement relative to the camera, snapshotted once in BeginPlay. Constant by nature; the
+	//    camera is not animated, so there is nothing to re-read each frame.
+	//  - Weapon: its parent grip socket, re-read every frame because that parent IS an animated hand. The attach uses
+	//    SnapToTarget, so at rest the weapon's rotation and location ARE the socket's and only the scale is ours.
+	//    Reading it through the attachment rather than a cached socket name means a designer re-parenting the weapon
+	//    cannot desync the hip pose from where the weapon actually hangs.
+	FTransform HipRelCam;
+	if (bSolvingArms)
 	{
-		// The weapon isn't hanging off anything, so there is no independent hip reference. Bail rather than fall back to
-		// the weapon's own transform — that would feed last frame's write straight back in and let the pose drift.
-		return;
+		HipRelCam = RigidFrame(ArmsHipRelativeTransform);
 	}
-	const FTransform HipRelCam =
-		RigidFrame(GripParent->GetSocketTransform(WeaponCarrier->GetAttachSocketName(), RTS_World)).GetRelativeTransform(CamFrame);
+	else
+	{
+		const USceneComponent* GripParent = WeaponCarrier->GetAttachParent();
+		if (!GripParent)
+		{
+			// The weapon isn't hanging off anything, so there is no independent hip reference. Bail rather than fall back
+			// to the weapon's own transform — that would feed last frame's write back in and let the pose drift.
+			return;
+		}
+		HipRelCam =
+			RigidFrame(GripParent->GetSocketTransform(WeaponCarrier->GetAttachSocketName(), RTS_World)).GetRelativeTransform(CamFrame);
+	}
 
-	// When aiming, recompute the EXACT weapon transform (relative to the camera) that lands the AimSocket on the
+	// When aiming, recompute the EXACT target transform (relative to the camera) that lands the AimSocket on the
 	// camera's forward centre-line at ADSSightDistance THIS frame, and store it. The camera doesn't chase the gun; the
 	// gun is brought to the camera — which is the whole point of the ADS re-decision (the retargeted aim pose puts the
 	// sight ~30 deg off-screen, far past anything a residual correction could absorb).
 	if (bAiming)
 	{
-		// AimSocket transform RELATIVE TO THE WEAPON. The sight part rides the weapon rigidly, so this is invariant to
-		// where the weapon currently sits (it cancels out below) — no feedback loop — yet recomputed each frame so it
-		// tracks part swaps and any animation (bolt montage) that moves the socket.
-		const FTransform WeaponFrame = RigidFrame(WeaponCarrier->GetComponentTransform());
+		// AimSocket transform RELATIVE TO THE SOLVE TARGET. The sight part rides the weapon rigidly and (when solving the
+		// arms) the weapon rides the hand rigidly, so this is invariant to where the target currently sits — it cancels
+		// out below, no feedback loop — yet it is recomputed each frame so it tracks part swaps and any animation that
+		// moves the socket (a bolt montage on the weapon, or the arms' own graph moving the hand).
+		const FTransform TargetFrame = RigidFrame(SolveTarget->GetComponentTransform());
 		// Pre-compose the designer's aim rotation offset in the socket's LOCAL frame (identical to authoring that rotation
 		// onto the socket) so full-frame alignment points the gun forward for packs whose socket axes are off-forward
 		// (this pack's weapon-forward is +Y → ADSAimRotationOffset Yaw 90). Zero offset = use the socket frame as-authored.
-		const FTransform SocketRelWeapon = FTransform(CachedADSAimRotationOffset)
-			* RigidFrame(AimComp->GetSocketTransform(CachedAimSocket, RTS_World)).GetRelativeTransform(WeaponFrame);
+		const FTransform SocketRelTarget = FTransform(CachedADSAimRotationOffset)
+			* RigidFrame(AimComp->GetSocketTransform(CachedAimSocket, RTS_World)).GetRelativeTransform(TargetFrame);
 
 		if (bCachedADSAlignRotation)
 		{
 			// Full-frame alignment: level the socket frame to the camera (identity rotation) AND place it on the centre-
-			// line, so the authored hip cant is removed and the sight reads straight. Solve weapon-rel-camera from the
-			// desired socket-rel-camera: SocketRelWeapon * WeaponRelCam == Desired (UE composes child * parent), hence
-			// WeaponRelCam = SocketRelWeapon^-1 * Desired.
+			// line, so the authored hip cant is removed and the sight reads straight. Solve target-rel-camera from the
+			// desired socket-rel-camera: SocketRelTarget * TargetRelCam == Desired (UE composes child * parent), hence
+			// TargetRelCam = SocketRelTarget^-1 * Desired.
 			const FTransform DesiredSocketRelCam(FRotator::ZeroRotator, FVector(CachedADSSightDistance, 0.0f, 0.0f));
-			const FTransform TargetWeaponRelCam = SocketRelWeapon.Inverse() * DesiredSocketRelCam;
-			ADSAimLoc = TargetWeaponRelCam.GetLocation();
-			ADSAimRot = TargetWeaponRelCam.Rotator();
+			const FTransform TargetRelCam = SocketRelTarget.Inverse() * DesiredSocketRelCam;
+			ADSAimLoc = TargetRelCam.GetLocation();
+			ADSAimRot = TargetRelCam.Rotator();
 		}
 		else
 		{
 			// Translation-only ADS (escape hatch): keep the hip rotation and only slide so the socket sits on the centre-
-			// line. Socket position under the hip pose is HipRot.Rotate(socket-loc-rel-weapon) + weapon-loc, so solve
-			// weapon-loc for a socket at (D, 0, 0).
+			// line. Socket position under the hip pose is HipRot.Rotate(socket-loc-rel-target) + target-loc, so solve
+			// target-loc for a socket at (D, 0, 0).
 			ADSAimRot = HipRelCam.Rotator();
-			ADSAimLoc = FVector(CachedADSSightDistance, 0.0f, 0.0f) - ADSAimRot.RotateVector(SocketRelWeapon.GetLocation());
+			ADSAimLoc = FVector(CachedADSSightDistance, 0.0f, 0.0f) - ADSAimRot.RotateVector(SocketRelTarget.GetLocation());
 		}
 	}
 
@@ -2214,10 +2419,10 @@ void AFPSRCharacter::UpdateAimDownSights(float DeltaTime)
 	// Translation is added in camera space (NewLoc is weapon-relative-to-camera: +X forward, +Y right, +Z up →
 	// screen-space bob/kick); sway/kick rotation is composed about the weapon origin. Fixed order: base → ADS blend
 	// (above) → hip additive → write once.
-	// NOTE (True First Person): at hip this layer now moves the gun WITHOUT moving the hand that holds it, so any
-	// non-zero amplitude reads as the weapon floating off the grip. It is authored per weapon (ProceduralWeaponMotion),
-	// defaults to no motion, and the body animation is meant to own hip movement from here on — kept because ADR 0002
-	// preserves the state machine and zeroing content is the designer's call, not this refactor's.
+	// NOTE: what this layer moves follows the same target as the ADS solve above. With the first-person arms up it moves
+	// the ARMS, so the gun and the hand holding it travel together — the shape this was written for. Without them it
+	// moves the gun alone, which reads as the weapon floating off the grip at any non-zero amplitude; that is why
+	// ProceduralWeaponMotion is authored per weapon and defaults to no motion.
 	if (bCachedHasHipMotion)
 	{
 		// Cosmetic interp uses a clamped dt so a frame spike (or low FPS) can't snap FInterpTo to target (dt*Speed>=1).
@@ -2259,15 +2464,25 @@ void AFPSRCharacter::UpdateAimDownSights(float DeltaTime)
 		}
 	}
 
-	// The one write, and the ONE place the solved pose is applied. Everything above produces a camera-relative transform;
-	// only this line decides what receives it. That is deliberate — ADR 0002 left "move the weapon" vs "move hand_R and
-	// let both arms follow by IK" open until PIE, and switching to the latter is a change to this line's target, not to
-	// the solve.
-	// Compose the camera-relative pose back to world and push it in WORLD space: the weapon's parent is an animated grip
-	// socket, so writing a RELATIVE transform would re-mix the hand's motion into a pose that was solved against the
-	// camera — exactly the sight shake this whole path exists to remove. Scale is untouched, so WeaponAttachScale lives.
-	const FTransform NewWorld = FTransform(NewRot, NewLoc) * CamFrame;
-	WeaponCarrier->SetWorldLocationAndRotation(NewWorld.GetTranslation(), NewWorld.GetRotation());
+	// The one write, and the ONE place the solved pose is applied. Everything above produced a camera-relative transform;
+	// only this decides what receives it, and in which space.
+	if (bSolvingArms)
+	{
+		// The arms ARE a camera child, so the solved transform is already expressed in their parent's space — write it
+		// straight in. This is not merely shorter: the engine applies the view rotation to the camera component POST-tick
+		// (UCameraComponent::GetCameraView -> SetWorldRotation, CameraComponent.cpp), so a child inherits the rotation the
+		// frame is actually RENDERED with, while a world write would pin the arms to the camera frame as it stood during
+		// the tick — one frame stale, and visible as the arms lagging a fast turn.
+		SolveTarget->SetRelativeLocationAndRotation(NewLoc, NewRot);
+	}
+	else
+	{
+		// The weapon's parent is an animated grip socket, so a relative write would re-mix the hand's motion into a pose
+		// that was solved against the camera — exactly the sight shake this whole path exists to remove. Compose back to
+		// world instead. Scale is untouched either way, so WeaponAttachScale lives.
+		const FTransform NewWorld = FTransform(NewRot, NewLoc) * CamFrame;
+		SolveTarget->SetWorldLocationAndRotation(NewWorld.GetTranslation(), NewWorld.GetRotation());
+	}
 }
 
 void AFPSRCharacter::MulticastFireCosmetics_Implementation()

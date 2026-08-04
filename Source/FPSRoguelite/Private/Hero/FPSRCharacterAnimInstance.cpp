@@ -164,8 +164,10 @@ void UFPSRCharacterAnimInstance::UpdateFromCharacter(AFPSRCharacter& Character, 
 		: Direction;
 
 	// Game thread only (it walks component attachment state) — the reason only the main instance computes at all.
-	// Downed drops it so the IK can't drag a collapsed body's arm toward a weapon.
-	bHasLeftHandGrip = !bIsDowned && Character.GetLeftHandGripTransform(LeftHandGripWorld);
+	// Downed drops it so the IK can't drag a collapsed body's arm toward a weapon. Asking for THIS mesh (rather than
+	// "the weapon, wherever it is") is what stops the body reaching into camera space when the owner's first-person
+	// arms are the ones holding the gun — this graph never needs to know those arms exist (ADR 0003 invariant 11).
+	bHasLeftHandGrip = !bIsDowned && Character.GetLeftHandGripTransform(GetOwningComponent(), LeftHandGripWorld);
 	LeftHandGripLocation = bHasLeftHandGrip ? LeftHandGripWorld.GetLocation() : FVector::ZeroVector;
 
 	// A reload / equip that legitimately takes the hand off the weapon authors this curve to 0. No curve = 1, which is

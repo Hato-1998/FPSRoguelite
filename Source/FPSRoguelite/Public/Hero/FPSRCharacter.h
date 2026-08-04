@@ -138,6 +138,12 @@ public:
 	UFUNCTION(BlueprintPure, Category = "FPSR|Weapon")
 	bool IsAiming() const;
 
+	/** Whether the equipped weapon is mid-reload. The same facade role as IsAiming above: the inventory component is not
+	 *  Blueprint-readable from an AnimBP, and the reload flag is per-weapon-instance replicated state, so graphs read it
+	 *  through here. VALID ON EVERY MACHINE (the flag replicates on the weapon instance). */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Weapon")
+	bool IsReloading() const;
+
 	/** Owner-local ADS blend alpha (0 = hip, 1 = fully aimed). Only updated on the locally-controlled client. (W-U2) */
 	UFUNCTION(BlueprintPure, Category = "FPSR|Weapon")
 	float GetADSAlpha() const { return CurrentADSAlpha; }
@@ -178,10 +184,21 @@ public:
 	void RefreshWeaponVisibility(bool bForce = false);
 
 	/** Single owner of the first-person body/arms split, for the same reason RefreshWeaponVisibility exists: several
-	 *  lifecycle paths decide it (spawn, possession, controller replication) and two independent togglers would undo
-	 *  each other. Idempotent. Runs on every machine but only ever splits the LOCALLY CONTROLLED pawn — a proxy that
-	 *  hid its own body would erase a teammate from the screen. */
+	 *  lifecycle paths decide it (spawn, possession, controller replication, view-target changes) and two independent
+	 *  togglers would undo each other. Idempotent. Runs on every machine but only ever splits the pawn we are LOOKING
+	 *  THROUGH — a proxy that hid its own body would erase a teammate from the screen. */
 	void RefreshFirstPersonRendering();
+
+	/** True while the owner is being shown first-person arms instead of their own body. The one answer that decides
+	 *  which hand the weapon hangs off (ADR 0003 invariant 14), which component the ADS solve moves, and whether the
+	 *  body's left-hand IK has anything to point at. Local render state — never replicated, never a gameplay input. */
+	bool IsFirstPersonSplitActive() const { return bFirstPersonSplitActive; }
+
+	/** Re-attach the weapon meshes to whichever hand is currently VISIBLE (arms when the split is on, body otherwise)
+	 *  and re-apply the first-person render tag that goes with it. Split out of RefreshEquippedWeaponVisual because the
+	 *  split can flip without the weapon changing (going down, spectating, coming back) — and re-running the full equip
+	 *  refresh for that would replay the equip montage every time. Idempotent. */
+	void AttachWeaponMeshes();
 
 	/** 활성 사이트의 스코프 오버레이 위젯 클래스(스코프 시각 활성 시). 없으면 null(HUD가 폴백 사용). 호출은 스코프
 	 *  진입 엣지에서(프레임마다 아님) — 소프트 참조를 동기 로드한다. (스코프 위젯화) */
@@ -200,8 +217,10 @@ public:
 	/** Owner-client: play the equipped weapon's per-shot cosmetics (fire montage + sound + muzzle flash). */
 	void PlayWeaponFireCosmetics();
 
-	/** Owner-client per-frame procedural aim-down-sights: place the WEAPON (relative to the camera) so its AimSocket sits
-	 *  on the camera's forward centre-line when aiming, interpolated by the weapon's ADSInterpSpeed. Called from
+	/** Owner-client per-frame procedural aim-down-sights: place the ARMS (or, with no first-person arms authored, the
+	 *  WEAPON itself) relative to the camera so the weapon's AimSocket sits on the camera's forward centre-line when
+	 *  aiming, interpolated by the weapon's ADSInterpSpeed. Moving the arms is what keeps the gun in the hand that holds
+	 *  it (ADR 0003); the solve is identical either way — only the target and the write space differ. Called from
 	 *  UFPSRWeaponFireComponent::TickComponent (which already ticks + owns the aim state). No-op on remote pawns /
 	 *  weapons without ADS or an AimSocket. Interpolates location AND rotation: when the weapon's bADSAlignRotation is
 	 *  set it aligns the AimSocket frame to the camera, removing the authored hip cant so the sight reads level (else
@@ -214,15 +233,21 @@ public:
 	 *  invariant 4 itself. */
 	void UpdateAimDownSights(float DeltaTime);
 
-	/** Left-hand grip anchor for the body AnimBP's two-bone IK (ADR 0002 step 4): the WORLD transform of the equipped
+	/** Left-hand grip anchor for a skeletal mesh's two-bone IK (ADR 0002 step 4): the WORLD transform of the equipped
 	 *  weapon's LeftHandSocket, resolved to whichever modular part carries it (handguard) or the receiver. Returns false
 	 *  when this weapon authors no left-hand grip (melee / one-handed / unarmed) or the socket is missing — the pack's
 	 *  bullpup handguards have no SOCKET_LeftHand, so the AnimBP must branch on this rather than assume a target.
 	 *  Set the Two Bone IK node's effector space to World Space.
+	 *
+	 *  @param ForMesh  The mesh that wants to reach for it. Answers false unless the grip is actually attached to that
+	 *                  mesh, which is what keeps the two graphs independent (ADR 0003 invariant 11): with the arms up,
+	 *                  the weapon hangs in CAMERA space, and a body that still reached for it would drag its left arm
+	 *                  toward the camera — visible to the owner as a mangled arm in their own shadow. Neither caller
+	 *                  has to know the other exists; each only asks "is it on me?".
 	 *  GAME THREAD ONLY: read it from NativeUpdateAnimation / BlueprintUpdateAnimation into a member, not from a
 	 *  thread-safe update (it walks component attachment state). */
 	UFUNCTION(BlueprintPure, Category = "FPSR|Weapon")
-	bool GetLeftHandGripTransform(FTransform& OutGripWorld) const;
+	bool GetLeftHandGripTransform(const USceneComponent* ForMesh, FTransform& OutGripWorld) const;
 
 	/** Play reload cosmetics on a server-confirmed reload-start edge (called from UFPSRWeaponInstance::OnRep_Reloading,
 	 *  which fires on every client holding the replicated instance). One body mesh, one montage, owner and remotes alike
@@ -260,6 +285,16 @@ protected:
 	 *  the view target instead (head must come back). Local render state only; never replicated. */
 	void UpdateFirstPersonBodyVisibility();
 
+	/** "Is the local viewer looking through THIS pawn's eyes." One question, three consumers (head hiding, the arms
+	 *  split, which hand holds the weapon) — they have to agree, so they share the answer rather than each deriving it.
+	 *  False on a dedicated server and on every remote pawn. Cheap: a pointer compare behind two null checks. */
+	bool IsViewedThroughOwnEyes() const;
+
+	/** Render tag the weapon meshes and their modular parts carry right now: FirstPerson while they ride the camera-space
+	 *  arms (the engine then forces every shadow flag off), None while they ride the body. One accessor so the meshes,
+	 *  the parts rebuilt on an equip, and the parts already attached can never disagree. */
+	EFirstPersonPrimitiveType GetWeaponFirstPersonPrimitiveType() const;
+
 	/** Resolve which mesh carries the equipped weapon's LeftHandSocket — the modular part that owns it (handguard) or
 	 *  the receiver. Null when this weapon authors no left-hand grip. Shared by the AnimBP getter. */
 	UMeshComponent* ResolveLeftHandGripComponent() const;
@@ -270,6 +305,12 @@ protected:
 	 *  unlinks back to the body's own base pose, which is the correct state for a weapon whose animations don't exist
 	 *  yet. Idempotent: re-linking the same class is skipped. */
 	void RefreshBodyAnimLayer(const class UFPSRWeaponDataAsset* Weapon);
+
+	/** The same swap on the FIRST-PERSON ARMS (ADR 0003), from the weapon's ArmsAnimLayerClass. A separate function over
+	 *  a separate component with a separate field, because the two graphs are independent by design (invariant 11) —
+	 *  merging them is the first step back toward one pose serving both cameras. Null unlinks to the arms' base pose,
+	 *  the correct state for a weapon whose first-person animations don't exist yet. Idempotent. */
+	void RefreshArmsAnimLayer(const class UFPSRWeaponDataAsset* Weapon);
 
 	/** Full distance the eye travels between standing and crouching, in cm. Only used to bound the held-back offset. */
 	float GetStanceEyeTravel() const;
@@ -411,15 +452,23 @@ protected:
 	UPROPERTY(VisibleAnywhere, Category = "FPSR|Mesh")
 	TObjectPtr<UStaticMeshComponent> WeaponMeshStatic;
 
-	/** The owner's own arms: the SAME pose as the body (LeaderPoseComponent), on a mesh cut at the shoulders, drawn
-	 *  only for the owner. Exists so looking down shows arms instead of a torso, without a second anim graph. */
+	/** The owner's own arms, hanging off the CAMERA and running their OWN anim graph on their own skeleton (ADR 0003).
+	 *  Third-person animation is authored to look right from a third-person camera; replayed at eye height it puts the
+	 *  arms low and wrapped around the view, which is why these no longer follow the body's pose. Owner-only.
+	 *
+	 *  AUTHOR EVERYTHING ON THIS COMPONENT IN THE BLUEPRINT — mesh, anim class, and relative transform. There is no
+	 *  parallel "arms mesh" data field: a field that overwrote the slot would make the slot a lie (you set it, it looks
+	 *  right in the viewport, and the runtime silently swaps in something else). The rest of this project already keeps
+	 *  the component authoritative and treats config only as a fallback for the never-authored case
+	 *  (AFPSREnemyBase / AFPSRXPPickup both do `if (GetStaticMesh() == nullptr)`); the player is always a content BP,
+	 *  so it needs no fallback at all.
+	 *
+	 *  **No mesh = the whole first-person split stays off**, which is the safe default rather than a bug — see
+	 *  RefreshFirstPersonRendering. The relative transform is the arms' REST pose and BeginPlay snapshots it as the
+	 *  hip end of the ADS blend, so it is load-bearing, not a viewport nicety. Visibility is runtime-decided (the
+	 *  split owns it); tick it here only to preview in the Blueprint viewport. */
 	UPROPERTY(VisibleAnywhere, Category = "FPSR|Mesh")
 	TObjectPtr<USkeletalMeshComponent> FirstPersonArms;
-
-	/** Mesh for the component above. Data, not a literal (ADR 0002 invariant 9). **Unset = the whole first-person
-	 *  split stays off** — see RefreshFirstPersonRendering for why that is the safe default rather than a bug. */
-	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Mesh")
-	TSoftObjectPtr<USkeletalMesh> FirstPersonArmsMesh;
 
 	/** Socket on the BODY skeleton the weapon meshes attach to (authored on the grip hand — Blu: "SOCKET_Weapon" on
 	 *  hand_R). C++-created component sockets can't be edited in the BP, so this exposes the default here; the
@@ -573,6 +622,11 @@ protected:
 	UPROPERTY(Transient)
 	TObjectPtr<UAnimMontage> CachedWeaponReloadMontage;
 
+	/** Cached hard ref for the FIRST-PERSON ARMS reload montage (ADR 0003). Separate from the body's because the two
+	 *  meshes have different skeletons — a montage is bound to one of them and cannot be shared. */
+	UPROPERTY(Transient)
+	TObjectPtr<UAnimMontage> CachedArmsReloadMontage;
+
 	UPROPERTY(Transient)
 	TObjectPtr<USoundBase> CachedFireSound;
 
@@ -585,6 +639,11 @@ protected:
 	 *  to unlink — LinkAnimClassLayers has no "replace" and layering a second set on top would leave both running. */
 	UPROPERTY(Transient)
 	TSubclassOf<UAnimInstance> LinkedBodyAnimLayerClass;
+
+	/** Same, for the first-person arms (ADR 0003). Tracked separately because the two components link independently and
+	 *  a weapon may author one layer without the other. */
+	UPROPERTY(Transient)
+	TSubclassOf<UAnimInstance> LinkedArmsAnimLayerClass;
 
 	/** Rotation offset applied to the muzzle-flash emitter relative to the muzzle socket (owner-local cosmetic).
 	 *  This pack's weapon-forward is +Y, so the flash needs a yaw offset to fire down the barrel (same reason as
@@ -629,6 +688,17 @@ protected:
 	/** Tracks the last head-visibility decision so UpdateFirstPersonBodyVisibility only touches bone visibility when the
 	 *  view target actually changes (the steady state is a pointer compare). Local render state; never replicated. */
 	bool bHeadHiddenForOwnView = false;
+
+	/** Latched result of RefreshFirstPersonRendering — see IsFirstPersonSplitActive(). Starts false so a pawn that is
+	 *  mid-spawn, mid-possession, or authored without an arms mesh behaves exactly as it did before ADR 0003. */
+	bool bFirstPersonSplitActive = false;
+
+	/** The arms' AUTHORED transform relative to the camera, snapshotted once at BeginPlay. This is the hip end of the
+	 *  ADS blend, and it has to be a snapshot rather than a live read: UpdateAimDownSights overwrites the component's
+	 *  relative transform every frame, so reading the component back would feed last frame's solve into this one and
+	 *  let the pose walk away. (The weapon path reads its parent socket instead, for the same "independent reference"
+	 *  reason — there the parent is an animated hand, here it is the camera and the rest pose is authored data.) */
+	FTransform ArmsHipRelativeTransform = FTransform::Identity;
 
 	// --- Procedural aim-down-sights (owner-local) ---
 	/** Height (cm) the camera is currently held back from its nominal eye position, measured at the instant the stance
