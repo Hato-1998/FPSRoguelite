@@ -1,90 +1,89 @@
-# 재개 프롬프트 — 1인칭 팔 스킨 웨이트 수리 (Blender)
+# 1인칭 팔 (NEON-V) — Blender 파이프라인 · 확정판
 
-> 작성 2026-08-04 · 브랜치 `refactor/character`
-> **이 문서 하나만 읽고 시작할 수 있게 썼다.** 배경이 더 필요하면 `Docs/Architecture/0003-*.md`.
+> 갱신 2026-08-04 · 브랜치 `refactor/character`
+> 앞선 판(스킨 웨이트 재개 프롬프트)은 **완료됐고, 그 문서가 적어둔 진단 하나가 틀려서** 이 문서로 대체한다.
+> 증상→원인 색인은 `Docs/Troubleshooting.md` A1 · A1-b · A1-c · A1-d.
 
 ## 한 줄
 
-**팔 메시의 뼈는 이제 기준과 완전히 일치한다(0/65). 남은 결함은 스킨 웨이트 하나뿐이고, Blender에서 고쳐야 한다.**
+**팔은 완성됐다.** `Saved/NeonV/NeonV_FPArms_v2.fbx` — 뼈 0/65 · 웨이트 완전 · 새끼손가락 복구.
+남은 것은 UE 재임포트 하나이고, 그건 **사용자가 에디터에서** 한다(아래 §4).
 
-## 지금 상태
+## 1. 결함은 5개였다
 
-UE 쪽 배선·에셋은 끝났다. `Content/Character/FPArms/NeonV_FPArms`는 `SK_FP_Manny_Simple` 대비
-**위치 중앙 0.0001cm · 회전 중앙 0.0002° · 어긋난 본 0/65**. 스켈레톤은 `S_Mannequin` 그대로다.
-
-그런데 애니를 재생하면 **소매가 조각으로 갈라지고, 손목이 돌아가고, 새끼손가락이 사라져 보인다.**
-같은 애님그래프에 `SK_FP_Manny_Simple`(PWAS 자체 팔)을 넣으면 **멀쩡하다** — 즉 메시 문제다.
-
-## 실측 — 웨이트가 미완성이다
-
-`Saved/NeonV/NeonV_FPArms.glb` 감사 결과:
-
-| 메시 | 정점 | 물린 본 | 문제 |
+| # | 결함 | 원인 | 해결 |
 |---|---|---|---|
-| `Jacket_FPArm` (소매) | 1296 | **6** — `clavicle`·`upperarm`·`lowerarm` ×2 | **`hand`도 twist도 없다.** 팔당 뼈 3개에 딱딱하게 물려 굽히면 판때기로 찢어진다 |
-| `Body_FPArm` (맨살·손) | 2656 | 34 | **`pinky_02_l/r`·`pinky_03_l/r` 무가중** = 새끼손가락 끝 2마디가 아무 본도 안 따라감. 손등뼈 8개·twist 8개도 0 |
-| `Accessoris_FPArm` | 197 | 4 | 장식이라 정상 |
-| **`Icosphere`** | 42 | **0** | **쓰레기 지오메트리가 export에 섞였다** |
+| 1 | rest pose Y축 통째 반전 | 옛 `fp_arms_retarget.py`가 UE 좌표를 Blender에 그대로 씀 | `fp_arms_rebuild.py`가 Manny 아마추어를 **그대로** 쓰도록 재작성 |
+| 2 | 전 본 롤 90° | **UE의 glTF 임포터**가 FBX와 본 축 규약이 다름 | **FBX로 내보낸다**(Blender roll로는 못 고친다 — 임포터가 다시 넣는다) |
+| 3 | 본 66개(65+1) | Blender FBX가 아마추어 오브젝트를 노드로 씀 → UE가 본으로 읽음 | 아마추어를 `root`로 개명 + 기존 `root` 본 삭제 |
+| 4 | 스킨 웨이트 미완성 | `rebuild.py` Phase 3이 버텍스 그룹 **이름만** 바꾼다 → Blu에 없는 본은 빈칸 | 기준 메시에서 **통째 전이**(`fp_arms_reweight.py`) |
+| 5 | 새끼손가락 실종 | `fp_arms_extract.py` 접두사에 `pinky`(Manny 이름)를 적음 — **Blu는 `little`** | 접두사에 `little` 추가 + 파이프라인 재실행 |
 
-> 웨이트 합·미가중 정점은 0이라 "깨진 웨이트"가 아니라 **애초에 전이가 덜 된 것**이다.
+**4번이 왜 컸나** — Manny 리그는 팔뚝 표면을 **주로 twist가 굴린다**. 기준 메시에서 `upperarm_twist_02`가 2307정점으로 `lowerarm`(1372)보다 많다. 우리 팔은 twist 8개·metacarpal 8개가 전부 0이었고, 게다가 소매·팔·장식 **1385정점이 `clavicle` 하나에 통짜로** 물려 있었다(= "소매가 조각으로 갈라진다"의 정체).
 
-## 할 일
+**5번이 왜 안 잡혔나** — "본이 무가중" 이라 웨이트 문제로 읽었다. 실제로는 **살이 없었다.** 손을 한 장 렌더했으면 즉시 보였다(손가락이 3개였다).
 
-1. **`Jacket_FPArm` 재웨이트** — `hand_*`와 twist 본까지 포함. 자동 웨이트 또는 원본 NEON-V 메시에서 전이.
-   뼈 3개짜리 강체 바인딩이 소매 파열의 직접 원인이다
-2. **`Body_FPArm`의 `pinky_02_l/r`·`pinky_03_l/r`에 웨이트 부여**
-   (손등뼈·twist는 부모 `hand`/`lowerarm`이 대신 받고 있어 급하지 않다)
-3. **`Icosphere` 제거** + `fp_arms_export.py`가 씬 전체를 선택하는 문제 정리
-   (핸드오프에도 *"카메라 10·라이트 12·`REF_*` 3이 다 딸려간다"* 로 적혀 있다)
-4. **원인 추적** — 웨이트 전이 단계(`NeonV_scripts/fp_arms_rebind.py`)를 읽어 어디서 빠졌는지 확인.
-   안 고치면 다음 재추출(의상·스킨 변경 시 예정된 일)에서 그대로 재발한다
+## 2. 파이프라인 — 이 순서 그대로
 
-## 내보내기 — **반드시 FBX로**
+Blender = `F:\Blender\blender.exe` (5.1.2) · 스크립트 = `C:\Users\koras\Desktop\작업\개발작업\블랜더\NeonV_scripts\`
+작업 디렉터리 = 그 상위(`블랜더\`). 원본 = `[완성본]\NeonV_work.blend`.
 
-glTF로 내보내면 **UE의 glTF 임포터가 전 본에 90° 롤을 넣는다**(FBX 임포터와 규약이 다름).
-검증된 레시피(`Saved/NeonV/NeonV_FPArms.fbx`를 만든 방법):
+```bash
+B="F:/Blender/blender.exe"; S="NeonV_scripts"
+J="E:/Git_Project/FPSRoguelite/Saved/NeonV/fparms_skeleton.json"
+D="C:/Users/koras/Desktop/작업/개발작업/발주/_Delivery_FPArm_Blu/Placeholder_FPArms_SK_FP_Manny_Simple.fbx"
 
-```python
-# 1) 아마추어 오브젝트가 UE에서 본 하나로 잡히는 걸 막는다 (65 -> 66 방지)
-arm.name = "root"; arm.data.name = "root"
-#    기존 root 본은 지운다 — 자식(pelvis, ik_hand_root)이 최상위가 되어 계층이 같아진다
-bpy.ops.export_scene.fbx(
-    filepath=OUT, use_selection=True,
-    apply_unit_scale=True, apply_scale_options="FBX_SCALE_NONE", global_scale=1.0,
-    add_leaf_bones=False, object_types={"ARMATURE", "MESH"},
-    bake_anim=False, mesh_smooth_type="FACE")
-#    본 축 옵션은 건드리지 않는다(기본값이 정답). X/Y 나 X/-Y 로 주면 180°/120° 어긋난다
+"$B" -b "[완성본]/NeonV_work.blend"  -P "$S/fp_arms_extract.py"     -- NeonV_FPArms_01_extract.blend
+"$B" -b NeonV_FPArms_01_extract.blend -P "$S/fp_arms_rebuild.py"    -- "[완성본]/SKM_Manny_Simple.FBX" "$J" NeonV_FPArms_02_rebuild.blend
+"$B" -b NeonV_FPArms_02_rebuild.blend -P "$S/fp_arms_trim_sleeve.py" -- NeonV_FPArms_03_trim.blend 10
+"$B" -b NeonV_FPArms_03_trim.blend    -P "$S/fp_arms_reweight.py"   -- "$D" NeonV_FPArms_manny.blend
+"$B" -b NeonV_FPArms_manny.blend      -P "$S/fp_arms_export_fbx.py" -- "E:/Git_Project/FPSRoguelite/Saved/NeonV/NeonV_FPArms_v2.fbx"
 ```
 
-Blender = `F:\Blender\blender.exe` (5.1.2), 헤드리스 `-b -P <script> -- <args>`.
+- **소매 트림 오프셋 = 10**(손목에서 10cm 팔쪽). 지금 에셋에서 역산한 값이다
+- **`fp_arms_reweight.py`를 빼먹지 마라.** rebuild만으로는 twist·metacarpal이 빈 채로 나간다
+- **`fp_arms_rebind.py`는 옛 경로다**(rebuild가 대체). 쓰지 말 것
+- ⚠️ 출력 이름에 `NeonV_fp_arms.blend`를 쓰지 마라 — `anim_make_fp_arms.py`(로코모션 FP뷰 렌더용, **Blu 아마추어 108본짜리 별개 계보**)가 같은 이름을 쓴다. 실제로 한 번 덮어써서 이 계보의 소스를 잃었다
 
-## 검증 — 눈으로 하지 말 것
+**웨이트 공여 메시** `Placeholder_FPArms_SK_FP_Manny_Simple.fbx` = `SK_FP_Manny_Simple`을 FBX로 뽑은 것. 애니가 저작된 바로 그 웨이트라 이걸 옮기는 게 정답이다. 전이가 잘 먹히는 이유는 rebuild Phase 2가 NEON-V 지오메트리를 **Manny 뼈 비율에 맞춰 구워 놓기** 때문(실측: 본 잔차 0.001cm, 맨살 표면거리 중앙 0.36cm).
 
-UE에 넣은 뒤 **`SK_FP_Manny_Simple` 대비 본 단위 잔차**를 잰다. 목표 = **0/65**.
-레시피는 `Docs/Troubleshooting.md` A1/G1. 요지:
+## 3. 검증 — 눈으로 하지 않는다
 
-- 임시 `SkeletalMeshActor` 2개를 **열린 레벨에** 스폰(`set_mobility(MOVABLE)` → `set_skeletal_mesh_asset`)
-  → `get_socket_transform(bone, RTS_COMPONENT)` 비교 → `destroy_actor`
-- **언등록 컴포넌트는 트랜스폼이 전부 0**이라 반드시 스폰해야 한다
-- **대조군(같은 메시 두 번)을 같이 재서 0이 나오는지 먼저 확인** — 안 하면 계측 오류를 결함으로 오독한다
-- **바운드로 판정 금지** — 미러도 웨이트 결함도 extent를 안 바꾼다
+| 게이트 | 방법 | 통과 기준 |
+|---|---|---|
+| 본 정합 | `reweight.py`가 자동으로 잰다 | 잔차 최대 < 0.5cm (실제 0.001) |
+| 웨이트 | 메시별 **물린 본 목록** + 정점 수 | 무가중 0 · 합 1 · twist 8/8 · metacarpal 8/8 · `pinky_01/02/03` 물림 |
+| 포즈 이탈량 | 기준 팔과 우리 팔에 **같은 월드 회전** → rest의 최근접 기준 삼각형을 `barycentric_transform`으로 예측 → 실제와 비교 | **대조군(기준 자신) = 0.00** 먼저 확인. 손·손가락 < 0.1cm, 소매 < 2cm |
+| 재현 충실도 | 옛 메시 정점마다 새 메시 최근접 거리(KDTree) | 기존 부분 ~0 · 늘어난 정점은 전부 의도한 부위 |
+| 지오메트리 | 경계 엣지·구멍·비매니폴드 카운트 | 소매 비매니폴드 0 |
+| 손가락 개수 | **손등 쪽에서 렌더 한 장** | 엄지+4 |
 
-웨이트 감사는 Blender 쪽에서: 메시별 **물린 본 목록 + 정점 수**를 찍어 위 표와 대조한다.
+**UE 쪽 본 잔차**(웨이트만 바꿨으면 0/65가 유지돼야 한다): 임시 `SkeletalMeshActor` 2개를 **열린 레벨에** 스폰(`set_mobility(MOVABLE)` → `set_skeletal_mesh_asset`) → `get_socket_transform(bone, RTS_COMPONENT)` 비교 → `destroy_actor`. **언등록 컴포넌트는 트랜스폼이 전부 0**이라 반드시 스폰해야 한다. 대조군(같은 메시 두 번)을 같이 잴 것.
+
+## 4. UE 임포트 — 사용자가 에디터에서
+
+`S_Mannequin`을 대상으로 하는 임포트라 **헤드리스로 하지 않는다.** 헤드리스엔 "Skeleton Conflicts" 창이 없어서 소스가 틀려도 조용히 스켈레톤을 덮어쓴다(541개 에셋이 물린 전례).
+
+1. `Saved/NeonV/NeonV_FPArms_v2.fbx` → `Content/Character/FPArms/NeonV_FPArms` 재임포트
+2. **"Skeleton Conflicts" 창이 뜨면 Done 금지** — 소스가 틀렸다는 신호다. 안 뜨면 **저장**(안 하면 에디터 닫을 때 통째로 날아간다)
+3. 본 잔차 0/65 재측정 + `git status`로 `S_Mannequin` 무결 확인
+4. PIE에서 소매·손목·새끼 3증상 확인
+
+**되돌리기**: 옛 `Saved/NeonV/NeonV_FPArms.fbx` 재임포트, 또는 에디터 닫고 `git checkout`(에셋은 커밋 `839abef0`).
 
 ## 🪤 이미 당한 것
 
-1. **바운드가 맞으면 rest pose가 맞다** — 틀렸다. Y축이 통째로 반전된 채 9일을 갔다
-2. **커맨드렛에서 `AssetTools.import_asset_tasks`** — 임포트를 끝내고 콘텐츠 브라우저를 동기화하다 죽는다
-   (`Assertion: CurrentApplication.IsValid()`). `InterchangeManager.import_asset`를 직접 쓸 것
-3. **"Skeleton Conflicts" 창이 뜨면 Done 금지** — 소스가 틀렸다는 신호다. 헤드리스 임포트엔 이 창이 없으니
-   `S_Mannequin`을 대상으로 한 임포트는 **에디터에서** 하고, 끝나면 `git status`로 스켈레톤 무결을 확인한다
-4. **재임포트 후 저장을 잊지 말 것** — 에디터를 닫으면 통째로 날아간다
+1. **바운드가 맞으면 rest pose가 맞다** — 틀렸다. 바운드는 미러에 불변이라 Y축 반전을 못 잡는다. 9일을 갔다
+2. **"무가중 본" = 웨이트 결함** — 틀렸다. 살이 없을 수도 있다(§1 결함 5). **본 자리에 정점이 있는지부터 세라**
+3. **커맨드렛에서 `AssetTools.import_asset_tasks`** — 임포트를 끝내고 콘텐츠 브라우저를 동기화하다 죽는다(`Assertion: CurrentApplication.IsValid()`). `InterchangeManager.import_asset`를 직접 쓸 것
+4. **재임포트 후 저장을 잊지 말 것**
+5. **`use_triangles=True`로 내보내지 마라** — 소매 단면 n-gon을 Blender가 삼각화하면 비매니폴드 엣지 9개가 생긴다(실측). n-gon 그대로 두고 UE 임포터에 맡기는 쪽이 깨끗하다
 
 ## 참고 파일
 
 | | |
 |---|---|
-| 현재 소스(뼈는 정답, 웨이트 미완성) | `Saved/NeonV/NeonV_FPArms.glb` · `Saved/NeonV/NeonV_FPArms.fbx` |
-| Blender 파이프라인 | `C:\Users\koras\Desktop\작업\개발작업\블랜더\NeonV_scripts\fp_arms_*.py` |
-| 저작 이력·함정 | 같은 repo `Docs\HANDOFF_NEONV_FPARMS_RESULT.md` |
+| 최종 산출물 | `Saved/NeonV/NeonV_FPArms_v2.fbx` (옛 것 = `NeonV_FPArms.fbx`, 롤백용으로 남겨둠) |
+| Blender 체인 | `블랜더\NeonV_FPArms_0{1,2,3}_*.blend` → `NeonV_FPArms_manny.blend` |
+| 원본 캐릭터 | `블랜더\[완성본]\NeonV_work.blend` |
 | 설계 | `Docs/Architecture/0003-first-person-arms-camera-anchored.md` |
