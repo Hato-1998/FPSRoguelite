@@ -21,7 +21,38 @@
 
 **손 왜곡은 사라졌다** — 손목→손가락 뿌리가 원본 NEON-V 값으로 정확히 복귀(엄지 4.08 · 검지 8.43 · 중지 7.88 · 약지 8.15 · 새끼 8.16).
 
-## 할 일 (전부 에디터 · 사용자)
+## ✅ UE 배선 끝났다 (2026-08-04) — 지금은 **Blender 손가락 포즈 저작** 차례
+
+배선·시각 확정값(사용자 눈으로 잡음, 커밋 `d1c3986e` 까지):
+
+| | |
+|---|---|
+| `FirstPersonArms` | loc **(-21, 10, -165)** · rot yaw **-95** · scale 1 |
+| `SOCKET_Weapon` (팔 메시 소유) | loc **(-8.07, 2.82, 4.34)** · rot **yaw 90** |
+| `LeftHandGripOffset` | **(-5, -5, 3)** |
+| `WeaponMesh` / `WeaponMeshStatic` | **identity 유지** — 여기 오프셋을 주면 바디에 붙을 때도 먹어서 동료 화면·내 그림자의 총이 이중 보정된다 |
+| `ABP_FPArms` | 새 스켈레톤 · 포즈 `FP_Rifle_Idle` · `BP_FPSRPlayer` 의 PWAS 참조 **0개** |
+
+**여기서 멈춘 이유**: 왼손 손가락이 핸드가드를 감싸지 않아 그립 값의 "맞다"를 판정할 기준이 없다. Two Bone IK 는 손목만 옮긴다. **손가락 포즈부터 저작해야 그 다음 조정이 의미를 갖는다**(사용자 판단).
+
+### 저작 씬은 만들어져 있다 — `NeonV_FPArms_authoring_own.blend`
+
+```bash
+# 1) UE 에서 팔+조립총을 한 FBX 로 (Scripts/fparms_export_arms_with_weapon.py, 에디터에서 실행 가능)
+#    -> Saved/NeonV/refpose/FPArms_with_Rifle.fbx
+# 2) 저작 씬 조립
+"$B" -b NeonV_FPArms_own.blend -P "$S/fp_arms_make_authoring.py" \
+     -- "E:/.../Saved/NeonV/refpose/FPArms_with_Rifle.fbx" NeonV_FPArms_authoring_own.blend
+```
+실측: 총 바운딩 32×36×23cm · 총 원점↔`hand_r` 9.59cm · `SOCKET_LeftHand`↔`hand_r` **29.59cm**(팔 도달 55cm 안) · rest 에서 `hand_l`↔그립 106.5cm.
+
+### ⏭️ 바로 다음 = 포즈 얹기
+
+**저작 씬은 지금 rest(A자)라 인게임 카메라로 렌더하면 화면이 빈다** — 정상이다. `fp_arms_pose_from_ref.py` 로 견본 회전을 얹어야 1인칭 구도가 나온다. 그 스크립트는 이 저작 씬(`REF_FPCamera`·`REF_LeftHandGrip`·`REF_Rifle`)을 전제로 쓰여 있다.
+
+그 뒤 순서: ①1인칭 구도 렌더 → 사용자가 "총이 화면에 이만큼" 판정 ②왼손 손가락을 핸드가드 굵기에 맞춰 말기 ③UE 로 되보내 `LeftHandGripOffset`·소켓 재확정.
+
+## (참고) 배선 당시 절차 — 다시 할 일이 생기면
 
 1. **`BP_FPSRPlayer` → `FirstPersonArms`** 메시를 `SK_NeonV_FPArms` 로. **스케일 1**
 2. **`ABP_FirstPerson`** 을 새 스켈레톤 대상으로 (`포즈 → Slot → Two Bone IK(hand_l) → Output`)
