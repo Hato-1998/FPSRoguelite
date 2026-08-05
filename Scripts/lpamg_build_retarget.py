@@ -138,33 +138,44 @@ if rtg is None:
 rc = unreal.IKRetargeterController.get_controller(rtg)
 rc.set_ik_rig(unreal.RetargetSourceOrTarget.SOURCE, src_rig)
 rc.set_ik_rig(unreal.RetargetSourceOrTarget.TARGET, tgt_rig)
-rc.auto_map_chains(unreal.AutoMapChainType.EXACT, True)
+
+# 🚨 **체인 매핑은 op 에 속한다.** `auto_map_chains(..., InOpName)` 의 op 이름을 안 주면
+#    (기본 NAME_None) 기본 `FK Chains` op 에 **안 붙는다** — 그런데 크래시도 경고도 없고,
+#    내보내기는 멀쩡히 돌아서 **정적 포즈만 찍힌다**(실측: Idle/ADS/Reload 세 개가 전부
+#    같은 값 -56.65/-0.34/111.68 · 서로 다른 애니의 압축 DDC 해시까지 동일).
+#    새 리타게터에는 기본 op 6개가 이미 들어 있다(Pelvis Motion / FK Chains / Retarget IK
+#    Goals / Run IK Rig / Root Motion / Remap Curves) — **op 을 더 넣지 말고 그걸 찾아 쓴다.**
+n_ops = rc.get_num_retarget_ops()
+ops = [str(rc.get_op_name(i)) for i in range(n_ops)]
+log("기본 op %d개: %s" % (n_ops, ops))
+report["ops"] = ops
+fk = next((o for o in ops if o.lower().startswith("fk chains")), None)
+if not fk:
+    fail("FK Chains op 이 없다 — 팔이 안 움직인다")
+else:
+    # 🚨 `auto_map_chains` 는 스크립트에서 **아무것도 매핑하지 않는다**(실측 0/15 — 체인
+    #    이름이 양쪽 완전히 같은데도). 크래시도 경고도 없어서, 매핑이 빈 채로 내보내면
+    #    정적 포즈만 나온다. 그러니 **이름으로 직접 건다**. 이름이 같은 것끼리라 안전하다.
+    rc.auto_map_chains(unreal.AutoMapChainType.EXACT, True, fk)   # 되면 좋고
+    common = sorted(set(src_chains) & set(tgt_chains))
+    for cname in common:
+        rc.set_source_chain(cname, cname, fk)
+    # 🔑 매핑 결과를 **읽어서 게이트로 건다** — 이번 사고의 재발 방지선이다.
+    mapped = []
+    for cname in common:
+        got = rc.get_source_chain(cname, fk)
+        if got is not None and str(got) == cname:
+            mapped.append(cname)
+    log("체인 매핑 %d/%d (op '%s')" % (len(mapped), len(common), fk))
+    report["mapped_chains"] = mapped
+    if len(mapped) != len(common):
+        fail("체인 매핑이 %d/%d 밖에 안 됐다 — 이대로 내보내면 정적 포즈가 나온다"
+             % (len(mapped), len(common)))
+report["num_ops"] = n_ops
 unreal.EditorAssetLibrary.save_loaded_asset(rtg)
-log("리타게터 생성 · 체인 자동매핑(EXACT)")
 
-# --- 애니 3개 복제+리타게팅 ---
-ar = unreal.AssetRegistryHelpers.get_asset_registry()
-assets = []
-for p in ANIMS:
-    d = ar.get_asset_by_object_path(p + "." + p.rsplit("/", 1)[-1])
-    if d is None or not d.is_valid():
-        fail("애니 %s 를 못 찾았다" % p)
-        continue
-    assets.append(d)
-log("리타게팅 대상 %d개" % len(assets))
-
-made = unreal.IKRetargetBatchOperation.duplicate_and_retarget(
-    assets, src_mesh, tgt_mesh, rtg,
-    search="", replace="", prefix="", suffix="_LPAMG",
-    include_referenced_assets=False, overwrite_existing_files=True)
-names = [str(a.package_name) for a in made] if made else []
-report["created"] = names
-log("생성된 애니 %d개" % len(names))
-for n in names:
-    log("   %s" % n)
-if len(names) < len(assets):
-    fail("리타게팅 결과가 대상보다 적다 (%d/%d)" % (len(names), len(assets)))
-
+# 🪤 내보내기는 여기서 안 한다 — `DuplicateAndRetarget` 은 Slate 를 요구해 커맨드렛에서 죽는다.
+#    `Scripts/lpamg_export_retargeted_anims.py` 를 정식 에디터로 돌린다.
 os.makedirs(os.path.dirname(REPORT), exist_ok=True)
 report["fails"] = fails
 with open(REPORT, "w", encoding="utf-8") as f:

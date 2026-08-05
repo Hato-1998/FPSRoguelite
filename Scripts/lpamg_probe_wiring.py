@@ -13,7 +13,7 @@ import unreal
 
 OUT = "E:/Git_Project/FPSRoguelite/Saved/NeonV/lpamg_wiring_probe.json"
 PLAYER = "/Game/Character/Player/BP_FPSRPlayer"
-ANIMBPS = ["/Game/Character/Player/ABP_FPArms", "/Game/Character/Player/ABP_FirstPerson"]
+ANIMBPS = ["/Game/Character/Player/ABP_FP_Base", "/Game/Character/Player/ABP_FPArms"]
 IKS = ["/Game/Characters/Retarget/IK_UE4Mannequin", "/Game/Characters/Retarget/IK_Blu",
        "/Game/Characters/Blu/IK_MannySrc", "/Game/Characters/Blu/IK_Blu"]
 RTGS = ["/Game/Characters/Retarget/RTG_UE4Man_to_Blu", "/Game/Characters/Blu/RTG_Manny_to_Blu"]
