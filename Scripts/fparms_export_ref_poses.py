@@ -20,6 +20,9 @@ OUT_DIR = "E:/Git_Project/FPSRoguelite/Saved/NeonV/refpose"
 POSES = {
     "A_FP_Rifle_Pose": "/Game/ProceduralWeaponAnimationSystem/Animations/Poses/Rifle/A_FP_Rifle_Pose",
     "A_FP_Rifle_AimPose": "/Game/ProceduralWeaponAnimationSystem/Animations/Poses/Rifle/A_FP_Rifle_AimPose",
+    # 재장전은 포즈가 아니라 여러 프레임짜리 애니지만 내보내는 방법은 같다(AnimSequenceExporterFBX).
+    # Reload 저작의 손 궤적 견본으로 쓴다 — 우리는 손 위치만 가져가고 팔 체인은 안 쓴다(ADR 0005).
+    "A_FP_RifleReload": "/Game/ProceduralWeaponAnimationSystem/Animations/Reload/A_FP_RifleReload",
 }
 
 os.makedirs(OUT_DIR, exist_ok=True)

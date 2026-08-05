@@ -17,6 +17,7 @@
 실행: UnrealEditor-Cmd.exe <uproject> -run=pythonscript -script="<이 파일>" -unattended -nopause
       (또는 열린 에디터에서 실행 — 내보내기는 임포트와 달리 데드락을 안 낸다)
 """
+import json
 import os
 
 import unreal
@@ -24,6 +25,10 @@ import unreal
 ARMS = "/Game/Character/FPArms/SK_NeonV_FPArms"
 WEAPON_DA = "/Game/Weapons/DataTable/DA_Weapon_Rifle"
 OUT = "E:/Git_Project/FPSRoguelite/Saved/NeonV/refpose/FPArms_with_Rifle.fbx"
+# 사이드카 — Blender 조립 게이트가 **파츠 이름을 스스로 알 수 있게** 한다.
+# FBX 노드 이름은 액터 라벨을 따라가서 전부 TEMP_* 로 뭉개진다(실측). 그래서 이름·소켓·
+# 리시버 기준 트랜스폼을 여기 적어 내보낸다 — Blender 쪽에 파츠 목록을 하드코딩하지 않기 위해서다.
+MANIFEST = OUT.replace(".fbx", ".parts.json")
 
 fails = []
 
@@ -39,10 +44,20 @@ def fail(m):
 
 os.makedirs(os.path.dirname(OUT), exist_ok=True)
 eas = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
-les = unreal.get_editor_subsystem(unreal.LevelEditorSubsystem)
-if les.is_in_play_in_editor():
-    fail("PIE 실행 중이면 에셋을 못 연다. 멈추고 다시 실행할 것")
-    raise SystemExit(1)
+
+# 🪤 `LevelEditorSubsystem.is_in_play_in_editor()` 는 **커맨드렛에서 즉사한다**(실측 2026-08-05:
+#    EXCEPTION_ACCESS_VIOLATION, 콜스택 최상단 UnrealEditor-LevelEditor.dll). 구현이
+#    `GUnrealEd->IsPlayingSessionInEditor()` 인데(LevelEditorSubsystem.cpp:284) 커맨드렛에는
+#    레벨 에디터가 없다. 파이썬 예외가 아니라 프로세스 종료라 try/except 로도 못 막는다.
+#    그래서 **부르기 전에** 커맨드렛인지 가른다. 커맨드렛이면 PIE 가 있을 수 없으므로 검사도 불필요.
+IS_COMMANDLET = "-run=" in unreal.SystemLibrary.get_command_line().lower()
+if IS_COMMANDLET:
+    log("커맨드렛 실행 — PIE 검사 건너뜀")
+else:
+    les = unreal.get_editor_subsystem(unreal.LevelEditorSubsystem)
+    if les.is_in_play_in_editor():
+        fail("PIE 실행 중이면 에셋을 못 연다. 멈추고 다시 실행할 것")
+        raise SystemExit(1)
 
 arms_mesh = unreal.EditorAssetLibrary.load_asset(ARMS)
 da = unreal.EditorAssetLibrary.load_asset(WEAPON_DA)
@@ -98,7 +113,20 @@ gun_actor.set_actor_scale3d(unreal.Vector(scale, scale, scale))
 log("리시버 부착: %s (스케일 %.2f)" % (body_mesh.get_name(), scale))
 
 # --- 파츠를 각 마운트 소켓에 ---
-made, grip_comp = 0, None
+def v3(v):
+    return [round(v.x, 4), round(v.y, 4), round(v.z, 4)]
+
+
+def in_receiver(world_t):
+    """월드 트랜스폼을 리시버 컴포넌트 공간(cm, 부착 스케일 반영 전)으로."""
+    return world_t.multiply(gun.get_world_transform().inverse())
+
+
+manifest = {"weapon_da": WEAPON_DA, "arms_mesh": ARMS,
+            "attach_socket": socket, "attach_scale": scale,
+            "receiver": {"asset": body_mesh.get_name()},
+            "parts": []}
+made, grip_comp, grip_part_name = 0, None, None
 for p in parts:
     part = p.get_editor_property("part")
     sock = str(p.get_editor_property("socket"))
@@ -108,8 +136,20 @@ for p in parts:
         fail("리시버에 %s 가 없다 (%s)" % (sock, part.get_name()))
         continue
     _, c = add_actor(unreal.StaticMeshActor, part, "static_mesh", gun_actor, sock)
+    st = gun.get_socket_transform(sock, unreal.RelativeTransformSpace.RTS_COMPONENT)
+    bb = part.get_bounding_box()          # FBox (StaticMesh.h:2182, BlueprintPure)
+    bmin, bmax = bb.min, bb.max
+    manifest["parts"].append({
+        "asset": part.get_name(), "socket": sock,
+        "socket_in_receiver_cm": v3(st.translation),
+        "socket_rot_rpy": [round(st.rotation.rotator().roll, 3),
+                           round(st.rotation.rotator().pitch, 3),
+                           round(st.rotation.rotator().yaw, 3)],
+        "mesh_bounds_min": v3(bmin), "mesh_bounds_max": v3(bmax),
+        "has_left_hand_socket": bool(c.does_socket_exist("SOCKET_LeftHand")),
+    })
     if c.does_socket_exist("SOCKET_LeftHand"):
-        grip_comp = c
+        grip_comp, grip_part_name = c, part.get_name()
     made += 1
 log("파츠 %d/%d 부착" % (made, len(parts)))
 
@@ -119,8 +159,20 @@ if grip_comp:
     h = arms_comp.get_socket_transform("hand_r", unreal.RelativeTransformSpace.RTS_WORLD)
     log("SOCKET_LeftHand 월드 %s · hand_r 에서 %.2f cm"
         % (g.translation, (g.translation - h.translation).length()))
+    manifest["left_hand_socket"] = {
+        "owner_part": grip_part_name,
+        "in_receiver_cm": v3(in_receiver(g).translation),
+        "dist_from_hand_r_cm": round((g.translation - h.translation).length(), 3),
+    }
 else:
     fail("핸드가드에서 SOCKET_LeftHand 를 못 찾았다")
+
+# 팔 소켓(총이 붙는 자리) — Blender 가 두 리그의 hand_r 를 포갤 때 쓰는 값의 출처
+sw = arms_comp.get_socket_transform(socket, unreal.RelativeTransformSpace.RTS_COMPONENT)
+hw = arms_comp.get_socket_transform("hand_r", unreal.RelativeTransformSpace.RTS_COMPONENT)
+manifest["arms"] = {"socket_weapon_in_component_cm": v3(sw.translation),
+                    "hand_r_in_component_cm": v3(hw.translation),
+                    "socket_from_hand_r_cm": round((sw.translation - hw.translation).length(), 3)}
 
 # --- 내보내기 ---
 eas.set_selected_level_actors(spawned)
@@ -143,6 +195,11 @@ size = os.path.getsize(OUT) / 1024.0 if os.path.exists(OUT) else 0.0
 log("내보냄 %s -> %s (%.0f KB)" % (ok, OUT, size))
 if not ok or size <= 0:
     fail("FBX 내보내기 실패")
+
+manifest["fbx_kb"] = round(size, 1)
+with open(MANIFEST, "w", encoding="utf-8") as f:
+    json.dump(manifest, f, ensure_ascii=False, indent=1)
+log("사이드카 -> %s (파츠 %d)" % (MANIFEST, len(manifest["parts"])))
 
 # --- 임시 액터 제거 (남으면 레벨에 저장된다) ---
 for a in reversed(spawned):
