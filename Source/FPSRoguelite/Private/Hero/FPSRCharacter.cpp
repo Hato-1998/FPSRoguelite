@@ -215,6 +215,7 @@ void AFPSRCharacter::Tick(float DeltaSeconds)
 	Super::Tick(DeltaSeconds);
 
 	UpdateStanceCamera();
+	UpdateCameraFieldOfView(DeltaSeconds);
 	UpdateFirstPersonBodyVisibility();
 
 #if ENABLE_DRAW_DEBUG
@@ -256,6 +257,13 @@ void AFPSRCharacter::BeginPlay()
 	// blend would start from slightly the wrong place.
 	AddTickPrerequisiteComponent(GetCharacterMovement());
 	CachedCameraWorldZ = FirstPersonCamera ? FirstPersonCamera->GetComponentLocation().Z : 0.0f;
+
+	// The authored FOV becomes the base every camera offset is expressed against. Taken here, before the first
+	// UpdateCameraFieldOfView writes anything, so it is the BP's value and not something this class already moved.
+	if (FirstPersonCamera)
+	{
+		BaseFieldOfView = FirstPersonCamera->FieldOfView;
+	}
 
 	// Same class of reason, one layer down: UpdateAimDownSights (driven from the weapon-fire tick) solves against the
 	// grip socket of whichever mesh currently holds the weapon, so it has to run after THAT mesh's pose exists this
@@ -560,11 +568,11 @@ bool AFPSRCharacter::IsADSFOVActive() const
 	return !(WeaponInventory && WeaponInventory->IsReloading());
 }
 
-float AFPSRCharacter::ResolveADSTargetFOV(float DefaultFOV, float BaseADSFOV, bool bBaseWantsADS) const
+float AFPSRCharacter::ResolveADSTargetFOV(float HipTargetFOV, float BaseADSFOV, bool bBaseWantsADS) const
 {
 	if (!bBaseWantsADS)
 	{
-		return DefaultFOV;
+		return HipTargetFOV;
 	}
 
 	// A fullscreen scope drops the zoom during a reload (design decision — show the weapon + reload animation);
@@ -572,7 +580,7 @@ float AFPSRCharacter::ResolveADSTargetFOV(float DefaultFOV, float BaseADSFOV, bo
 	// reload edge via IsReloading().
 	if (CachedScopeDescriptor.bScopeOverlay && WeaponInventory && WeaponInventory->IsReloading())
 	{
-		return DefaultFOV;
+		return HipTargetFOV;
 	}
 
 	// Per-sight magnification: the ACTIVE sight's own AimFieldOfView (iron / reddot / scope each carry their own zoom),
@@ -949,6 +957,62 @@ void AFPSRCharacter::UpdateStanceCamera()
 
 	// Recorded after the move, so the next stance change has this frame's finished eye position to hold on to.
 	CachedCameraWorldZ = FirstPersonCamera->GetComponentLocation().Z;
+}
+
+void AFPSRCharacter::SetBaseFieldOfView(float NewBaseFieldOfView)
+{
+	// Bounded rather than trusted: this is a settings entry point, and a 0 or negative FOV is not a preference, it is a
+	// broken projection. The bound is authored data (BaseFieldOfViewRange), so the slider that will call this can read
+	// the same numbers instead of carrying its own copy.
+	BaseFieldOfView = FMath::Clamp(NewBaseFieldOfView, BaseFieldOfViewRange.X, BaseFieldOfViewRange.Y);
+}
+
+void AFPSRCharacter::UpdateCameraFieldOfView(float DeltaSeconds)
+{
+	// Owner-local. On a remote pawn the camera keeps its authored FOV, and that is deliberate: a DBNO teammate
+	// spectating this pawn renders through this very component (CalcCamera), so writing OUR slide/ADS state here would
+	// show up on THEIR screen.
+	if (!FirstPersonCamera || !IsLocallyControlled())
+	{
+		return;
+	}
+
+	// The movement component owns the state; this only reads it (ADR 0001 invariant 1). Tick already runs after the
+	// movement component (AddTickPrerequisiteComponent in BeginPlay), so this is what the move actually settled on
+	// this frame rather than last frame's answer.
+	const UFPSRCharacterMovementComponent* FPSRMovement = GetFPSRMovement();
+	const bool bSliding = FPSRMovement && FPSRMovement->IsSliding();
+
+	// Eased, never snapped — and eased on the OFFSET rather than on the final FOV, so that starting a slide, aiming
+	// mid-slide and ending the slide are all just target changes with nothing to sequence.
+	SlideFOVOffsetCurrent = FMath::FInterpTo(
+		SlideFOVOffsetCurrent,
+		bSliding ? SlideFieldOfViewOffset : 0.0f,
+		DeltaSeconds,
+		FMath::Max(0.01f, SlideFieldOfViewInterpSpeed));
+
+	// Base (settings) + stance offsets = where the view sits when NOT aiming. Everything is relative to
+	// BaseFieldOfView, which is why a future FOV slider needs no other change than SetBaseFieldOfView.
+	const float HipTargetFOV = BaseFieldOfView + SlideFOVOffsetCurrent;
+
+	float TargetFOV = HipTargetFOV;
+	// Fallback speed for the no-weapon case (unarmed, or between equips). The offset is already eased above, so this
+	// only shapes how the camera chases a base-FOV change.
+	float InterpSpeed = SlideFieldOfViewInterpSpeed;
+
+	UFPSRWeaponInstance* Instance = WeaponInventory ? WeaponInventory->GetCurrentInstance() : nullptr;
+	if (Instance)
+	{
+		const FFPSRWeaponStatBlock& Stats = Instance->GetResolvedStats();
+		const bool bBaseWantsADS = WeaponFire && WeaponFire->IsAiming() && Stats.bHasADS;
+		// REPLACES the hip target rather than adding to it: while aiming, the sight's magnification is the whole point
+		// and a stance offset stacked on top of a ~30 degree scope would read as the zoom changing.
+		TargetFOV = ResolveADSTargetFOV(HipTargetFOV, Stats.ADSFieldOfView, bBaseWantsADS);
+		InterpSpeed = Stats.ADSInterpSpeed;
+	}
+
+	FirstPersonCamera->FieldOfView = FMath::FInterpTo(
+		FirstPersonCamera->FieldOfView, TargetFOV, DeltaSeconds, FMath::Max(0.01f, InterpSpeed));
 }
 
 void AFPSRCharacter::OnStartCrouch(float HalfHeightAdjust, float ScaledHalfHeightAdjust)

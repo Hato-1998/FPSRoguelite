@@ -9,6 +9,31 @@
 
 ---
 
+## 🎥 슬라이드 중 화각 +5도 — 카메라 FOV를 **단일 기록자**로 (2026-08-05, `refactor/character`)
+> 구조 근거 = **[ADR 0001 「카메라 FOV의 단일 기록자」](Architecture/0001-player-movement-state-ownership.md)**.
+
+**요청의 전제를 먼저 뒤집었다.** "FOV를 5 빼서 주변을 더 보이게"는 서로 반대다 — UE `FieldOfView`는 화각(도)이라
+값이 **커야** 넓어진다. 사용자 확인 후 **+5(넓게)** 로 확정. 슬라이드·스프린트에서 화각을 넓히는 건 Apex/타이탄폴/CoD의
+속도감 연출 방식이기도 하다.
+
+**얹으려던 자리가 잘못돼 있었다.** FOV를 쓰는 코드가 무기 발사 컴포넌트 틱 안이라, 거기 슬라이드를 넣으면
+무기가 `IsSliding()`을 묻게 된다(불변식 4 위반). `AFPSRCharacter::UpdateCameraFieldOfView()`로 옮겨
+**FieldOfView 기록자를 하나로** 만들었다. 부수 효과로 **맨손일 때 FOV가 갱신 안 되던 문제**가 사라졌다
+(옛 틱은 장착 무기가 없으면 먼저 `return`했다).
+
+| 값 | 기본 | 뜻 |
+|---|---|---|
+| `SlideFieldOfViewOffset` | `+5.0` | 슬라이드 중 기준 FOV에 더할 각도(양수=넓게) |
+| `SlideFieldOfViewInterpSpeed` | `8.0` | 보정치가 들고 나는 속도 |
+| `BaseFieldOfViewRange` | `(60, 130)` | 나중 FOV 슬라이더가 읽을 허용 범위 |
+
+**조준 중엔 보정이 빠진다** — `ResolveADSTargetFOV`가 힙 목표값을 ADS/스코프 FOV로 **대체**한다. 더했다면
+FOV 30도짜리 스코프에서 5도가 17% 배율 변화로 보인다. **기준값이 바뀌어도 따라온다** — 보정을 절대값이 아니라
+`BaseFieldOfView` 위의 차이값으로 표현했고, 설정 메뉴는 `SetBaseFieldOfView()` 하나만 부르면 된다.
+
+**부드러움은 2단**: 보정치가 한 번(8), 카메라 FOV가 다시 한 번(무기 `ADSInterpSpeed`=14) 지수 보간 → 시작·끝이
+모두 완만한 S자(체감 ~0.2초). 슬라이드 도중 조준을 켜고 꺼도 목표값만 바뀌어 끊기는 지점이 없다.
+
 ## 🖐️ 1인칭 팔 = **자체 스켈레톤(안 A′)** + 아이들/ADS 포즈 (2026-08-04, `refactor/character`)
 > 결정 근거·게이트 실측치 = **[ADR 0004](Architecture/0004-first-person-arms-own-skeleton.md)** · 함정 = `Troubleshooting.md` **A7~A10**.
 

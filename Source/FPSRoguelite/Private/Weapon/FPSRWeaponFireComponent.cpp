@@ -23,7 +23,6 @@
 #include "DrawDebugHelpers.h"
 #include "GameFramework/PlayerController.h"
 #include "Camera/PlayerCameraManager.h"
-#include "Camera/CameraComponent.h"
 #include "Net/UnrealNetwork.h"
 #include "Net/Core/PushModel/PushModel.h"
 
@@ -597,30 +596,15 @@ void UFPSRWeaponFireComponent::TickComponent(float DeltaTime, ELevelTick TickTyp
 	// Auto-reload when the magazine empties while the player is still firing.
 	MaybeAutoReload();
 
-	// ADS: smoothly interpolate camera FOV toward the aim target (owner-local feel).
-	if (!CachedCamera)
-	{
-		CachedCamera = OwnerPawn->FindComponentByClass<UCameraComponent>();
-		if (CachedCamera)
-		{
-			DefaultFOV = CachedCamera->FieldOfView;
-		}
-	}
-	if (CachedCamera)
-	{
-		const bool bBaseWantsADS = bIsAiming && Stats.bHasADS;
-		// The character resolves the effective ADS/scope target FOV (scope override + reload-aware scope drop). Non-
-		// scope weapons pass through unchanged. Fall back to the base target when the owner isn't a character.
-		float TargetFOV = bBaseWantsADS ? Stats.ADSFieldOfView : DefaultFOV;
-		if (AFPSRCharacter* Char = Cast<AFPSRCharacter>(OwnerPawn))
-		{
-			TargetFOV = Char->ResolveADSTargetFOV(DefaultFOV, Stats.ADSFieldOfView, bBaseWantsADS);
-		}
-		CachedCamera->FieldOfView = FMath::FInterpTo(CachedCamera->FieldOfView, TargetFOV, DeltaTime, FMath::Max(0.01f, Stats.ADSInterpSpeed));
-	}
+	// NOTE: the ADS camera FOV interp used to live here. It now belongs to AFPSRCharacter::UpdateCameraFieldOfView,
+	// which is the single writer of FieldOfView — it composes this weapon's ADS/scope zoom with camera offsets the
+	// weapon has no business knowing about (the slide widening, ADR 0001 invariant 4), and it keeps working with no
+	// weapon equipped, which this tick cannot (it returns early above). This component still owns the ADS INTENT
+	// (bIsAiming) and the ADS numbers on the stat block; the character reads both.
 
-	// Procedural aim-down-sights weapon placement (owner-local) — the character owns the weapon meshes; drive it from this tick
-	// (the character's own Tick is debug-only / disabled in shipping). Mirrors the FOV interp above.
+	// Procedural aim-down-sights weapon placement (owner-local) — the character owns the weapon meshes; drive it from this
+	// tick because it solves against the RESOLVED stats of the weapon currently equipped, so it has nothing to do without
+	// one. (The FOV above is the opposite case, which is why it moved to the character's Tick.)
 	if (AFPSRCharacter* Char = Cast<AFPSRCharacter>(OwnerPawn))
 	{
 		Char->UpdateAimDownSights(DeltaTime);

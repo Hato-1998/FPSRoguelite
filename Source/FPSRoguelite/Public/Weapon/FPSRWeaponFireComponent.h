@@ -9,7 +9,6 @@ class UFPSRWeaponInventoryComponent;
 class UFPSRWeaponInstance;
 class UTexture2D;
 class UMaterialInterface;
-class UCameraComponent;
 class UFPSRRecoilComponent;
 
 /** Owning-client component that drives fire cadence (fire rate / fire mode), camera recoil, and spread bloom.
@@ -109,9 +108,6 @@ protected:
 	// Blueprint access on purpose: SetAiming is the single write path, and that is what keeps a proxy from writing it.
 	UPROPERTY(Replicated)
 	bool bIsAiming = false;
-
-	TObjectPtr<UCameraComponent> CachedCamera; // resolved lazily for ADS FOV
-	float DefaultFOV = 0.0f;                    // captured from the camera on first resolve
 
 	TObjectPtr<UFPSRRecoilComponent> CachedRecoil; // CrystalRecoil-adapter recoil driver, resolved lazily (P1)
 	bool bRecoilTargetSet = false;                 // SetTargetController(owning controller) done once

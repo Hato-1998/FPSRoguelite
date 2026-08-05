@@ -166,10 +166,29 @@ public:
 	UFUNCTION(BlueprintPure, Category = "FPSR|Weapon")
 	bool IsScopeVisualActive() const;
 
-	/** Owner-local: resolve the effective camera FOV target for the ADS/scope interp (called from the weapon-fire tick).
-	 *  Non-scope weapons return the passed base target unchanged; scope weapons apply the strong scope FOV and drop the
-	 *  zoom during a reload (per design). bBaseWantsADS = the caller's existing (bIsAiming && Stats.bHasADS). (W-U2) */
-	float ResolveADSTargetFOV(float DefaultFOV, float BaseADSFOV, bool bBaseWantsADS) const;
+	/** Owner-local: resolve the effective camera FOV target for the ADS/scope interp (called from UpdateCameraFieldOfView).
+	 *  Non-scope weapons return the passed hip target unchanged; scope weapons apply the strong scope FOV and drop the
+	 *  zoom during a reload (per design). bBaseWantsADS = the caller's existing (bIsAiming && Stats.bHasADS).
+	 *  HipTargetFOV is the UNAIMED target the caller composed (base FOV plus any stance offset), so returning it is what
+	 *  makes an aiming weapon REPLACE those offsets rather than stack with them — a scope sits near 30 degrees, where a
+	 *  few degrees of stance offset would be a visible change of magnification. (W-U2) */
+	float ResolveADSTargetFOV(float HipTargetFOV, float BaseADSFOV, bool bBaseWantsADS) const;
+
+	/** The unaimed camera FOV this character composes everything else on top of — captured from the camera component's
+	 *  authored value at BeginPlay, and the single value a future settings menu has to move. */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Camera")
+	float GetBaseFieldOfView() const { return BaseFieldOfView; }
+
+	/** Point a settings menu at this. The camera is not snapped: UpdateCameraFieldOfView eases to the new base on its
+	 *  own, and every offset (slide, and whatever follows) is expressed relative to it, so they all follow for free.
+	 *  Clamped to GetBaseFieldOfViewRange. Owner-local presentation — never replicated. */
+	UFUNCTION(BlueprintCallable, Category = "FPSR|Camera")
+	void SetBaseFieldOfView(float NewBaseFieldOfView);
+
+	/** Legal span for the base FOV, as (min, max) degrees. Bind a settings slider's range to THIS rather than to its
+	 *  own numbers — otherwise the slider can offer a value SetBaseFieldOfView silently clamps away. */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Camera")
+	FVector2D GetBaseFieldOfViewRange() const { return BaseFieldOfViewRange; }
 
 	/** Owner-local: hide/show the weapon meshes (and their child parts) based on whether a full-screen scope is active.
 	 *  Called each frame from the weapon-fire tick (which already no-ops for non-local pawns). Component visibility is a
@@ -274,6 +293,18 @@ protected:
 	 *  transition's held-back offset. Runs every frame from Tick — the eye height has to keep moving after the stance
 	 *  itself has already flipped. */
 	void UpdateStanceCamera();
+
+	/** Set the first-person camera's FOV for this frame. The SINGLE writer of FieldOfView, for the same reason
+	 *  UpdateStanceCamera is the single writer of the camera's position (ADR 0001 invariant 10): the value is composed
+	 *  from layers that each know nothing about the others — the settings base, the slide offset, and the weapon's ADS
+	 *  or scope zoom — and any second writer would simply erase whichever layers it doesn't know about.
+	 *
+	 *  Lives on the character rather than the weapon because the camera is the character's, and because ADR 0001
+	 *  invariant 4 keeps the fire/ADS path from knowing the movement state at all: the weapon supplies a zoom target,
+	 *  this asks the movement component whether we are sliding. Running from Tick (not the weapon-fire tick) is also
+	 *  what keeps the FOV alive with no weapon equipped. Owner-local; a remote pawn keeps its authored FOV, which is
+	 *  what a DBNO teammate spectating it renders through (CalcCamera). */
+	void UpdateCameraFieldOfView(float DeltaSeconds);
 
 	/** Called from the crouch overrides once the capsule and BaseEyeHeight have already changed. Measures how far the
 	 *  view was about to jump and holds it back by exactly that much, so UpdateStanceCamera can ease it away. */
@@ -433,6 +464,24 @@ protected:
 	 *  lowered in the first place. */
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Camera", meta = (ClampMin = "0.0"))
 	float CameraCapsuleClampMargin = 2.0f;
+
+	/** Degrees added to the base FOV while sliding. POSITIVE WIDENS the view (FieldOfView is an angle), which is the
+	 *  point — a slide should show more of what is beside you and read as fast. An offset rather than an absolute FOV
+	 *  so that whatever the player later picks as their base FOV, the slide still widens it by this much.
+	 *  Does not apply while aiming: an ADS or scope zoom replaces the hip target instead of stacking with it. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Camera")
+	float SlideFieldOfViewOffset = 5.0f;
+
+	/** How fast the slide FOV offset eases in and out (FInterpTo speed; higher = snappier). Kept independent of the
+	 *  movement component's SlideBlendDuration, which is the ANIMATION pose blend — tuning how the body drops into the
+	 *  slide should not silently retune how the view breathes. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Camera", meta = (ClampMin = "0.01"))
+	float SlideFieldOfViewInterpSpeed = 8.0f;
+
+	/** (min, max) degrees a player may set the base FOV to. Lives here rather than in the settings widget so the clamp
+	 *  and the slider cannot disagree — the widget reads it through GetBaseFieldOfViewRange. */
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Camera")
+	FVector2D BaseFieldOfViewRange = FVector2D(60.0f, 130.0f);
 
 	/** Optional post-process material for the LimitedVision mission (tunnel/radial mask). When unset, a built-in
 	 *  vignette fallback is used so the effect works without content. Assigned in the BP subclass (no hardcoded path). */
@@ -720,6 +769,18 @@ protected:
 	 *  jump beats predicting it, because the capsule is re-anchored at the feet on the ground, at its centre in the
 	 *  air, and not moved at all on a remote proxy. */
 	float CachedCameraWorldZ = 0.0f;
+
+	/** Unaimed FOV everything else is composed on top of. Captured at BeginPlay from the camera component's authored
+	 *  value, so the BP class default IS the base until a settings menu calls SetBaseFieldOfView. Captured there and
+	 *  not lazily mid-tick because UpdateCameraFieldOfView starts writing FieldOfView on the first frame — a later
+	 *  read would sample a value this class had already moved.
+	 *  The initializer only covers the (impossible) no-camera case and mirrors UCameraComponent's own default. */
+	float BaseFieldOfView = 90.0f;
+
+	/** Slide FOV offset actually applied this frame, eased toward SlideFieldOfViewOffset / 0 as the slide starts and
+	 *  ends. Held as its own value rather than driven off the movement component's SlideBlend so the camera keeps its
+	 *  own timing, and so entering and leaving a slide are symmetrical without any edge handling. Owner-local. */
+	float SlideFOVOffsetCurrent = 0.0f;
 
 #if ENABLE_DRAW_DEBUG
 	/** How far the capsule clamp had to pull the camera back this frame (cm, 0 = untouched). Surfaced in the movement
