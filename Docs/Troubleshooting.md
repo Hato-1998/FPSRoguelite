@@ -114,6 +114,31 @@
 월드 좌표뿐 아니라 **`hand_r` 로컬 오프셋 같은 뼈 로컬 값도** `(x, -y, z)`다. 실측: `middle_01_r`이 Blender `(-7.56, +1.40, 1.74)` / UE `(-7.56, **-1.40**, 1.74)` — X·Z는 소수점까지 같다.
 **UE에서 잰 값(예: 옛 소켓 오프셋)을 Blender 축으로 분해하면 조용히 섞인다.** 소켓 값을 그렇게 냈다가 Y가 0.5cm 틀렸다. **계산은 한쪽 공간에서 끝내고**, 넘길 때만 변환하라. 검증법 = 같은 랜드마크를 양쪽에서 재서 `(x,-y,z)`로 맞는지 본다.
 
+### A11. 리타게팅한 애니가 전부 **똑같은 정적 포즈**다 (에러도 경고도 없이)
+
+**증상** — IK 리타게터로 뽑은 Idle/ADS/Reload 셋이 소수점까지 같은 값을 낸다. 서로 다른 두 애니의
+**압축 DDC 해시까지 동일**하다. 시점을 바꿔 재도 값이 안 변한다. 그런데 어느 단계에서도 실패가 안 났다 —
+리그 생성·op·매핑 호출·내보내기·압축까지 전부 "성공"으로 끝난다.
+
+**원인** — UE 5.7 리타게터는 **op 스택**이고 **체인 매핑이 op 안에 산다.** 세 겹이었다:
+1. `auto_map_chains()` 를 **op 이름 없이** 부르면 기본 `FK Chains` op 에 안 붙는다
+2. op 이름을 주고 `set_source_chain()` 을 직접 걸어도 붙지 않는다 —
+   `ChainMapping->HasChain(Target)` 이 false 면 조용히 `continue` (`IKRetargeterController.cpp:1022`)
+3. 그 false 의 진짜 이유: **op 의 `IKRig Asset` 슬롯이 None.** op 이 타깃 리그를 모르니 체인 목록이
+   0줄이고, 0줄이라 UI 의 `Auto-Map Chains` 버튼도 **회색으로 비활성**된다
+
+**해결** — 에디터에서 `Op Stack > FK Chains` 선택 → `Details > Retarget Chains Settings > IKRig Asset` 에
+타깃 IK Rig 지정 → 그러면 체인 목록이 채워지고 `Auto-Map Chains > Exact` 가 살아난다.
+`GetTargetIKRigForOp` 는 **게터만** 노출돼 있어 이 슬롯은 스크립트로 못 채운다.
+
+**판정** — `Scripts/lpamg_probe_mapping.py` 로 매핑을 되읽어 15/15 인지 본다. 빌드 스크립트
+(`lpamg_build_retarget.py`)가 이걸 게이트로 걸어 아니면 `RTG_FAIL` 로 중단한다.
+
+> 🪤 **트랙 개수·핵심 본 존재 검사로는 이 사고를 못 잡는다.** 실제로 트랙 79개가 다 있고 핵심 본
+> 12개도 다 있는데 값만 정적이었다. `lpamg_verify_pose_values.py` 처럼 **값**을 봐야 한다. 그리고
+> "리타게팅이 고장난 것"과 "측정 도구가 고장난 것"을 가르려면 **대조군**이 필요하다 —
+> `lpamg_control_test.py` 는 원본 애니가 시점마다 변하는지 먼저 확인한다(G7·G8 참조).
+
 ---
 
 ## B. 렌더 · 카메라
@@ -200,6 +225,37 @@ Riot Client가 **8558 포트**를 점유해 ZenServer가 못 뜬 것. Riot을 �
 
 ---
 
+### D7. 커맨드렛이 콜스택만 남기고 즉사한다 — **에디터 UI를 건드리는 API**
+
+파이썬 예외가 아니라 **프로세스 종료**라 `try/except` 로 못 막는다. 부르기 **전에** 갈라야 한다.
+이 프로젝트에서 실제로 당한 둘:
+
+| API | 증상 | 이유 |
+|---|---|---|
+| `LevelEditorSubsystem.is_in_play_in_editor()` | `EXCEPTION_ACCESS_VIOLATION`, 콜스택 최상단 `UnrealEditor-LevelEditor.dll` | 구현이 `GUnrealEd->IsPlayingSessionInEditor()`(`LevelEditorSubsystem.cpp:284`). 커맨드렛엔 레벨 에디터가 없다 |
+| `IKRetargetBatchOperation.duplicate_and_retarget()` | `Assertion failed: CurrentApplication.IsValid()` (`SlateApplication.h:321`) | 진행 대화상자가 Slate 를 요구한다. **계산은 끝나고 압축까지 갔는데 저장 직전에 죽어** 결과가 안 남는다 |
+
+**해결** — ①커맨드렛인지 먼저 가른다: `"-run=" in unreal.SystemLibrary.get_command_line().lower()`
+(커맨드렛이면 PIE 가 있을 수 없으므로 검사 자체가 불필요) ②Slate 가 필요한 것은 **정식 에디터**로 돌린다:
+`UnrealEditor.exe <uproject> -ExecutePythonScript="<파일>" -nosplash -unattended`
+
+### D8. 파이썬 커맨드렛에 인자가 안 들어온다
+
+`-run=pythonscript -script="x.py" -- apply` 로 줘도 `sys.argv` 에 안 온다 — `-script=` 는 경로만 읽는다.
+**엔진 커맨드라인에서 직접 읽어라**: `unreal.SystemLibrary.get_command_line()` 에 스위치가 그대로 있다.
+
+### D9. 파이썬에 없는 API 셋 (실측)
+
+| 기대한 것 | 실제 |
+|---|---|
+| `SkeletalMeshComponent.get_bone_names()` | 없다. `get_num_bones()` + `get_bone_name(i)` (`SkinnedMeshComponent.h:1066/1087`) |
+| `SkeletalMeshComponent.tick_animation()` | 없다. 포즈 샘플링은 `AnimationLibrary.get_bone_pose_for_time()` 으로 부모 체인을 곱해라 |
+| `AnimBlueprint.get_editor_property("parent_class")` | 없다. `generated_class()` 에서 올라가라 |
+| `IKRigController.get_retarget_chain_names()` | 없다. `get_retarget_chains()` (`IKRigController.h:346`) |
+
+> 🪤 조회 API 이름을 틀린 채 `try/except` 로 감싸면 **"없다"와 "못 읽었다"가 구분되지 않는다.**
+> 실제로 체인이 15개 멀쩡히 있는데 0개로 오판해 엉뚱한 곳을 팠다.
+
 ## E. 데이터 · 컴포넌트 · BP
 
 ### E1. 컴포넌트 슬롯에 넣은 값이 런타임에 다른 것으로 바뀐다
@@ -281,3 +337,15 @@ A1의 Y축 반전이 2026-07-26부터 잠복할 수 있었던 이유가 정확�
 
 ### G6. 문서를 출발점으로만 쓸 것
 한 세션에 문서를 믿었다가 세 번 틀렸다 — P3 "상태기계 가설"(엔진 소스가 부정) · "3P 애니가 PWAS를 대체한다"(실플레이가 부정) · "1인칭 팔을 새로 저작해야 한다"(이미 있었다). 전부 **실제 파일을 열어보니 다른 얘기**였다.
+
+### G7. 결과가 안 변할 때 **대조군 없이** 원인을 단정하지 말 것
+리타게팅한 재장전이 시점마다 값이 안 변했다. "리타게팅이 고장났다"로 바로 갈 뻔했는데,
+**원본 재장전을 같은 도구로 먼저 재보니**(t=0 −11.32 → t=1.0 −9.64) 도구는 멀쩡했다.
+그제서야 결과가 정적인 게 진짜라고 단정할 수 있었다.
+→ "안 변한다"는 관측은 **측정 도구가 고장난 경우와 구분되지 않는다.** 변해야 하는 것을
+먼저 재라. `Scripts/lpamg_control_test.py` 가 그 대조군이다.
+
+### G8. "있다" 검사는 "맞다" 검사가 아니다
+리타게팅 결과를 트랙 개수(79개)·핵심 본 존재(12/12)로 검증하고 통과시켰다.
+**전부 있는데 값만 정적이었다.** 존재 검사는 이 사고를 구조적으로 못 잡는다 —
+값을 읽어 **서로 달라야 할 것이 실제로 다른지** 봐야 한다(Idle ≠ ADS ≠ Reload).

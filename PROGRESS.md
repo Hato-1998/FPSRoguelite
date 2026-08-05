@@ -7,185 +7,60 @@
 > **작업을 끝낼 때마다, 그리고 중단 전 반드시 이 파일을 갱신하고 커밋한다.**
 > 한 항목이 완료되면 **여기서 지우고 `Docs/WorkLog.md` 맨 위로 옮긴다.**
 
-**최종 갱신: 2026-08-04 · 브랜치 `refactor/character`**
+**최종 갱신: 2026-08-05 · 브랜치 `refactor/character`**
 
 ---
 
-# 🔴 현재 트랙 — 1인칭 팔을 카메라 부착 + 자체 애님그래프 (ADR 0003)
+# 🔴 현재 트랙 — 1인칭 팔 = **구매 리그(LPAMG) + PWAS 리타게팅** ([ADR 0006](Docs/Architecture/0006-first-person-arms-purchased-rig-retargeted.md))
 
-## 🔄 1인칭 표현 방식 재결정 — ✅**[ADR 0003](Docs/Architecture/0003-first-person-arms-camera-anchored.md) 작성 완료** / ⏳배선 대기 (2026-08-03)
-**사용자 실플레이 판정: "3인칭 애니를 1인칭으로 쓰니 부자연스럽다."** 이게 ADR 0002의 핵심 전제(*"3P 애니가 PWAS 역할을 차지한다"*)를 뒤집는다. 증상 3개가 전부 같은 뿌리다 — 팔이 카메라 기준으로 낮음 · 팔이 카메라를 **감싸서** 생기는 쐐기 · 시선과 몸 방향 어긋남.
-> 🔧 정정: 쐐기의 원인을 처음엔 "근접 클립면 10cm"로 적었으나 **이 프로젝트의 근평면은 1.0cm다**(`Config/DefaultEngine.ini`). 근평면을 낮추는 방향은 헛수고다 — `Docs/Troubleshooting.md` B1.
+> **먼저 읽을 것**: [ADR 0006](Docs/Architecture/0006-first-person-arms-purchased-rig-retargeted.md)(0004·0005 대체) ·
+> 경위 전문은 `Docs/WorkLog.md` 최상단 · 함정은 `Docs/Troubleshooting.md` **A11 · D7~D9 · G7~G8**.
 
-**결정: 안 나-1 = PWAS 유지 + 팔 메시만 NeonV 룩** (사용자 2026-08-03).
+**자체 스켈레톤 트랙(ADR 0004/0005)은 접었다.** 사용자 실플레이 판정으로 NEON-V 팔을 버리고,
+LPAMG 팩의 1인칭 팔로 갈아탔다. **에셋은 안 지웠다** — 배선만 되돌리면 복귀한다.
 
-### 🎁 그런데 산출물이 이미 있다 — Blender 재작업 불필요
-`Content/Character/FPArms/NeonV_FPArms` (커밋 `2d6f57ac`, 2026-07-26, HEAD 조상 — ADR 0002가 폐기했지만 **파일은 안 지워졌다**).
-- 스켈레톤 = **`S_Mannequin`**(PWAS와 동일, 스켈레톤 **161본** / 이 메시가 쓰는 본은 **65**) · 섹션 3(Body/Jacket/Accessoris) · 소매를 손목 10cm 위 절단
-- ~~바운드 extent (55.22, 21.80, 31.97) ≈ `SK_FP_Manny_Simple` (55.44, 19.90, 31.20) → rest pose가 뼈 단위로 맞춰져 있다~~
-  > 🚨 **이 결론은 틀렸다**(2026-08-04 반증). **바운드는 미러에 대해 불변**이라 Y축 반전을 못 잡는다 — 실제로는 rest pose의 Y 부호가 통째로 반대였다. 아래 "지금 막힌 곳" 참조.
-- 현재 참조자 = 자기 PhysicsAsset뿐(놀고 있음)
-- 저작 이력·함정 = Blender repo `Docs/HANDOFF_NEONV_FPARMS_RESULT.md`
-  > ★ **UE는 스켈레톤을 공유하면 레퍼런스 포즈도 공유한다.** 메시 바인드 포즈가 스켈레톤 ref pose와 다르면 그 부위가 강제로 늘어난다(실측: 48.8cm 메시가 에디터에 **157cm**). 스켈레톤을 공유할 거면 rest pose를 뼈 하나까지 맞출 것.
+## ✅ 지금 돌아가는 것 (전부 실측 검증됨)
 
-### PWAS 실측 (2026-08-03)
-`Content/ProceduralWeaponAnimationSystem` **145 에셋** 생존 — 무기군 6종 포즈 · FP 재장전 몽타주 · 절차 커널(`ABP_FPChar`: AnimGraph 22 / F_ProceduralAnimations 15 / EventGraph 38) · 프리셋 DA. 전부 `S_Mannequin` 기준.
-- **Blu로 리타게팅(안 다)은 비싸다**: 기존 리타게터 2개(`RTG_UE4Man_to_Blu`=Rifle_01이 쓴 것, `RTG_Manny_to_Blu`)가 `S_Mannequin`을 안 덮고, 무엇보다 **커널이 마네킹 본 이름에 묶여 있다**(`clavicle_l`→`shoulder_L`, `upperarm_l`→`upper_arm_L`, `lowerarm_l`→`lower_arm_L`). 안 나-1은 이걸 전부 우회한다.
-- ℹ️ Blu 손가락은 **5개 다 있다**(`little_*`/`middle_*` 명명이라 검색에서 놓치기 쉬움 — 같은 착오가 FPARMS_RESULT에도 기록돼 있다).
-
-### ✅ ADR 0003 확정 (2026-08-03) — 설계는 끝났다. 코드는 아직 안 건드렸다
-> **구현 전 [ADR 0003](Docs/Architecture/0003-first-person-arms-camera-anchored.md) 전문을 읽을 것.** 불변식 4개 + 함정 6개 + 기각안이 전부 거기 있다.
-
-**결정**: 축1 = **포즈 에셋만**(PWAS 커널 미사용) / 축2 = **단일 무기 · 머신별 부착** / 축3 = 로컬 바디 계속 숨김.
-사용자 확정 3건 — ①카메라 반동은 `UFPSRRecoilComponent`(CrystalRecoil)가 계속 소유 ②조준점 완전 고정 유지 ③로컬 바디 숨김 유지.
-
-**🚨 착수 전 세션이 적어둔 것 중 3개가 틀렸다** (실제 파일로 검증):
-1. **근평면은 10cm가 아니라 1.0cm다** — `Config/DefaultEngine.ini:22` `NearClipPlane=1.0`(엔진이 `UEngine::Init`에서 읽음). 인용됐던 `CoreGlobals.cpp:260`의 10.0f는 **config 읽기 전 초기값**. 그러니 4~5.5cm 본은 안 잘린다 → 쐐기꼴의 원인은 **팔이 카메라를 감싸는 것**. *"근평면을 더 낮추면 된다"는 헛수고*
-2. **`UpdateAimDownSights`는 이미 카메라 공간에서 푼다** — 마지막 한 줄만 월드. 힙 기준도 `GetAttachParent()`로 일반적. **ADS 전환 비용 ≈ 0**(대상 한 줄)
-3. **DA에 `ArmsAnimInstanceClass`는 이미 없다** — "복원"이 아니라 신규 3필드(`ArmsAnimLayerClass`·`ArmsReloadMontage`·`ArmsEquipMontage`)
-
-**🚨 PWAS 커널을 쓰면 안 되는 이유**(uasset 덤프로 확인): `ABP_FPChar`가 `BP_FPCharacter`(데모 폰)로 **캐스트**한다 → 우리 폰에 꽂으면 값 전부 0. `AC_ProceduralWeaponAnimationSystem`(4.2MB)이 **카메라 반동·ADS 알파·스웨이·크라우치 스프링·자체 무기 프리셋 DA**를 소유 → 우리 C++ 3개와 정면 충돌.
-
-**🪤 PWAS 폴더를 지우면 안 된다** — `NeonV_FPArms`의 스켈레톤이 `/Game/ProceduralWeaponAnimationSystem/Demo/FPManny/S_Mannequin` **바로 그 에셋**이다. ADR 0002의 "PWAS 폐기 순서" 절은 무효.
-
-### ✅ C++ 배선 완료 (2026-08-03) — 빌드 2회 Succeeded(경고 0) · 스모크 Success
-| # | 변경 | 핵심 |
-|---|---|---|
-| 1 | 팔을 **카메라에 부착** · `LeaderPoseComponent` 제거 · `FirstPersonArmsAnimClass`로 자체 구동 | 바디의 `AlwaysTickPoseAndRefreshBones`는 **유지**(근거가 "팔이 따라오니까"→"그림자가 본을 요구하니까"로 바뀜) |
-| 2 | 분할 판정 = `IsLocallyControlled() && IsViewedThroughOwnEyes()` | 머리 숨김과 **같은 질문**을 공유(`IsViewedThroughOwnEyes()` 추출). 팔 미저작·DBNO 관전·관전 블렌드가 한 번에 맞는다 |
-| 3 | `AttachWeaponMeshes()` 추출 — 대상 = 팔/바디, `FirstPersonPrimitiveType`, `RefreshWeaponVisibility(bForce)` | **모듈러 파츠도 태그**해야 한다(태그는 부착 체인으로 안 내려간다) — 생성 시점 + 분할 전환 시점 양쪽 |
-| 4 | ADS 솔브 대상 = 팔, **상대 트랜스폼**으로 쓰기 | 수식 무변경. 상대로 쓰는 이유 = 카메라 회전이 **post-tick**(`GetCameraView`→`SetWorldRotation`)이라 월드로 쓰면 한 프레임 낡은 카메라에 팔이 고정 |
-| 5 | `GetLeftHandGripTransform(ForMesh, Out)` + `IsAttachedTo` 가드 | 없으면 **내 그림자의 왼팔이 카메라로 끌려간다**. BP 호출 0개 확인 후 시그니처 변경 |
-| 6 | `UFPSRFirstPersonArmsAnimInstance` 신규 + DA 3필드 + `RefreshArmsAnimLayer` + 팔 몽타주 | 바디와 **완전 대칭**, 서로를 참조하지 않음(불변식 11). `AFPSRCharacter::IsReloading()` 파사드 추가 |
-
-### 🔑 저작 지점 = **컴포넌트 슬롯 하나** (2026-08-03 사용자 결정)
-처음엔 `FirstPersonArmsMesh`·`FirstPersonArmsAnimClass` 두 필드를 두고 코드가 컴포넌트를 **덮어쓰게** 짰다. 실제로 사고가 났다 — 사용자가 컴포넌트에 `NeonV_FPArms`를 넣었는데 필드는 폐기 대상 `Blu_FP_Arms`(Blu 스켈레톤)를 가리키고 있어, **PIE를 눌렀으면 포즈가 하나도 안 붙는 팔이 나왔을 것**이다.
-> **사용자 지침: 컴포넌트로 넣을 수 있는 건 컴포넌트 슬롯이 진실원천.** 코드가 컴포넌트를 덮어쓰는 형태는 다른 작업에서도 고친다.
-- **두 필드 삭제.** 분할 게이트 = `FirstPersonArms->GetSkeletalMeshAsset() != nullptr`. 메시·애님클래스·레스트 트랜스폼 전부 BP 컴포넌트에서 저작
-- **전수 조사 결과 위반은 이 한 곳뿐이었다** — `AFPSREnemyBase`·`AFPSRXPPickup`·`AFPSRBossBase`는 이미 `if (GetStaticMesh() == nullptr)`로 **컴포넌트가 이기고 config는 폴백**. 무기 메시/파츠는 런타임 교체라 DA가 소스인 게 정당. 에디터 모듈은 프리뷰 툴
-
-**⏳ 다음 = 콘텐츠 (사용자 작업)**
-1. ✅ 컴포넌트에 `NeonV_FPArms` + 레스트 트랜스폼 `(-10, 0, -160)` 지정 완료(헤드리스 검증)
-2. **팔 AnimBP `ABP_FirstPerson`** (`/Game/Character/Player/`, 작업 중) — 🚨 **부모 클래스가 `AnimInstance`로 되어 있다. `FPSRFirstPersonArmsAnimInstance`로 리페어런트해야** 값(`bIsAiming`·`LeftHandGripWorld`·`LeftHandIKAlpha`)과 레이어 push가 산다
-   - 🚨 IK는 **`IK Rig` 노드가 아니라 `Two Bone IK`** — IK Rig는 Rig Definition 에셋을 요구하고(현재 경고), 월드 이펙터를 변수로 못 받는다. Two Bone IK = `hand_l` + `LeftHandGripWorld`(World Space) + 알파 `LeftHandIKAlpha` + **JointTarget 필수**(없으면 팔꿈치 플립)
-   - 무기군 포즈는 최종적으로 **레이어(`ArmsAnimLayerClass`)** 로 빼야 무기 추가 시 중앙 수정이 0이 된다(지금은 `A_FP_Rifle_Pose` 직결 = 1단계로는 정상)
-3. 레스트 트랜스폼 **재조정은 그래프가 들어온 뒤에** — 지금 값은 A포즈 기준이라 소총 포즈가 오면 체감이 달라진다
-4. PIE 검증 7항목 — 특히 ④ 내 그림자 왼팔 · ⑥ 동료 화면 무기 · ⑦ 다운→관전 시 무기가 바디 손으로
-5. `Content/Characters/Blu/SkeletalMeshes/Blu_FP_Arms/` **폐기**(참조 0 확인 후 — 이제 코드 참조는 끊겼다)
-
-⚠️ **`WeaponAttachScale` 0.85는 Blu 팔 기준**이다(마네킹 팔은 27.5% 길다). 1P에서 총이 작아 보이면 그때 판단 — 지금 필드를 만드는 건 추측.
-
-### ⏭️ 다음
-1. **1인칭 팔 메시 모양** — 뼈가 살아난 지금도 팔이 구겨진 종이처럼 뾰족하게 보이면 스키닝/웨이트 별건(P2 산출물). 포즈는 이제 정상이므로 순수 메시 문제로 좁혀졌다.
-2. **4b** — 8방향 시작·정지 전환(클립 40개+) + Split_Jumps 108 리타게팅.
-3. 무기 DA 나머지 8개에 `BodyAnimLayerClass` 미배정 → 나이프·맨손은 본체 폴백(`ABP_Blu_Body`의 `GetWeaponLocomotionPose` = `Blu_W2_Stand_Relaxed_Idle_IPC` 단일 클립)으로 선다. 무기별 레이어가 필요해지면 그때 만든다. ⚠️ 스텁 클립은 **BlendSpace의 idle 샘플과 다른 클립**으로 둘 것(위 함정 2).
-4. (미해결 잔여) `wall_topout` f0/f12 포즈 판단 · 1인칭 팔 컷 채택 여부.
-
-
-<details><summary>전환 전 경위 — 결함 5개 + 단위 함정 (끝난 일 · <code>Docs/WorkLog.md</code>로 내려감)</summary>
-
-### 🩺 팔 메시 = **결함 5개였다. Blender 쪽은 전부 끝. UE 임포트만 남음** (2026-08-04)
-증상 *"애니는 도는데 메시가 늘어나고 꼬인다"* 의 원인이 하나가 아니었다. **전부 실측으로 갈랐다.**
-
-| # | 결함 | 원인 | 상태 |
-|---|---|---|---|
-| 1 | rest pose **Y축 통째 반전** | 옛 `fp_arms_retarget.py`가 UE 좌표를 Blender 좌표로 그대로 씀 | ✅ 2026-07-26 `fp_arms_rebuild.py`가 이미 고쳤는데 **GLB가 UE에 안 들어가 있었다** |
-| 2 | 전 본 **롤 90°** | **UE의 glTF 임포터**가 FBX 임포터와 본 축 규약이 다름 | ✅ **FBX로 내보내 해결** |
-| 3 | 본 **66개**(65+1) | Blender FBX가 아마추어 오브젝트를 본으로 씀 | ✅ 아마추어를 `root`로 개명 + 기존 `root` 본 삭제 |
-| 4 | **스킨 웨이트 미완성** | `fp_arms_rebuild.py` Phase 3이 **이름만** 바꿔서 Blu에 없는 본이 빈칸 | ✅ **기준 메시에서 통째 전이**(`fp_arms_reweight.py` 신규) |
-| 5 | **새끼손가락 실종** | `fp_arms_extract.py`가 팔 뼈 목록에 `pinky`를 적었는데 **Blu는 `little`이라 부른다** → 추출 첫 단계에서 양손 482정점이 몸통에 남음 | ✅ 접두사 수정 + 파이프라인 전체 재실행 |
-
-**본 정합은 그대로 유지** — `SK_FP_Manny_Simple` 대비 어긋난 본 0/65, 스켈레톤 `S_Mannequin` 무손상.
-
-**4번이 왜 컸나**: Manny 리그는 팔뚝 표면을 **주로 twist 본이 굴린다**(기준 메시에서 `upperarm_twist_02`가 2307정점으로 `lowerarm` 1372보다 많다). 우리 팔은 그 twist 8개·metacarpal 8개가 전부 0이었다. 게다가 소매·팔·장식 **1385정점이 `clavicle` 하나에 통짜로 물려** 있어서, 위팔에 물린 부분과의 경계가 접히며 갈라졌다.
-
-**산출물** `Saved/NeonV/NeonV_FPArms_v2.fbx` (`Saved/`는 gitignore — Blender 체인은 `블랜더/NeonV_FPArms_0{1,2,3}_*.blend` → `NeonV_FPArms_manny.blend`)
-
-| 검증 | 결과 |
+| | |
 |---|---|
-| 재현 충실도 (옛 메시 대비) | 기존 정점 2656개가 **최대 0.0002cm** 오차로 동일 · 늘어난 484개 중 **482개(100%)가 새끼 뼈 5cm 안** |
-| 포즈 이탈량 (기준 팔 대비, 대조군 0.00) | 소매 전완 4.76→**1.67**cm · 맨살 손목 3.85→**0.52** · 손등 0.60→**0.07** · 새끼 1.56(4정점)→**0.02**(460정점) |
-| 웨이트 | 무가중 정점 0 · 합 1 · twist 8/8 · metacarpal 8/8 · `pinky_01/02/03` 양손 물림 |
-| 지오메트리 | `Icosphere` 제거 · 소매 비매니폴드 엣지 11→**0** · 새끼 마디별 106/133/80정점(검지 75/105/56과 동급) |
+| 팔 | `SK_LPAMG_Arms_Base_Smooth` · `SKEL_LPAMG_Character` 79본(UE4 마네킹 규약) · `SOCKET_Weapon` 있음 |
+| 리타게팅 | `IK_PWASManny` + `IK_LPAMGArms` → `RTG_PWAS_to_LPAMG` (체인 **15/15** 매핑) |
+| 애니 | `Content/Character/FPArms/Anims_LPAMG/FP_Rifle_{Idle,ADS,Reload}` ← PWAS 원본에서 리타게팅 |
+| 배선 | `ABP_FP_Base`(부모 `FPSRFirstPersonArmsAnimInstance`, 그래프 = 시퀀스→Slot→Root) → `BP_FPSRPlayer.FirstPersonArms` |
+| 툴 | 무기 어셈블러에 **`팔 보기`** 토글 + **`손 위치 저장`** 버튼 (`Tools > FPSR > 무기 파츠 조립기…`) |
 
-**✅ UE 재임포트 완료·검증 통과 (2026-08-04 12:56)** — 남은 것은 **PIE 눈 확인 하나**.
+**검증 결과** — Idle(−23.07, 28.43, 149.70) · ADS(−12.72, 24.57, 154.64) · Reload@1.0s(−21.07, 29.45, 147.98).
+Idle→ADS 변화 방향이 원본과 세 축 모두 일치. 재장전도 시점마다 원본과 같은 방향으로 변한다.
+> 🪤 **"트랙이 있다"로 리타게팅을 검증하지 마라.** 트랙 79개가 다 있는데 값만 정적인 사고를 실제로 냈다.
+> 재검증은 `Scripts/lpamg_control_test.py`(대조군) + `lpamg_verify_pose_values.py`(값)로.
 
-| UE 쪽 확인 | 결과 |
-|---|---|
-| 기록된 소스 | `Saved/NeonV/NeonV_FPArms_v2.fbx` |
-| 메시 | 정점 5055 · 섹션 3 (Body/Jacket/Accessoris) |
-| 본 잔차 vs `SK_FP_Manny_Simple` | 회전 중앙 **0.0002°**(최대 0.0055) · 위치 중앙 **0.0000cm**(최대 0.0002) · **어긋난 본 0/65** |
-| 대조군 (기준 vs 기준) | 0.0000° / 0.0000cm / 0/65 — 계측 유효 |
-| 스켈레톤 무결 | `Content/ProceduralWeaponAnimationSystem/` git 변경 **0** |
+## ⏭️ 다음 (순서대로)
 
-> 🔑 **이번에 가장 값어치 있던 것**: 대조군(같은 메시 두 번 재기)과 **A/B(같은 그래프에 PWAS 팔 넣기)**.
-> 둘 다 없었으면 롤을 Blender roll로 고치려다 계속 헛돌았고(±90° 넣으니 120°가 나와 축이 다름이 드러났다),
-> 웨이트가 범인인 것도 못 갈랐다. **바운드·눈대중으로는 다섯 다 안 잡힌다.**
-> 새끼손가락도 "무가중이니 웨이트 문제"로 적혀 있었지만 **실제로는 살이 없었다** — 렌더 한 장이 갈랐다.
+1. **어셈블러 툴에 애니 선택 UI** ← 사용자 요청(2026-08-05). 지금은 프리뷰 포즈를
+   `Config/DefaultEditor.ini` 의 `PreviewArmsPose` 로만 지정한다. 툴바에서 고를 수 있어야 한다.
+   - ⚠️ 지금 구조는 **정지 포즈 전제**다(무기를 손에 얹는 배치가 토글/무기변경 시점에 한 번만 일어남).
+     움직이는 애니를 고를 수 있게 하려면 "기즈모 편집을 유지한 채 손을 따라가는" 방식이 필요하다 —
+     소켓 기준 **오프셋**으로 들고 매 틱 재적용하는 식. 설계부터 해야 한다
+2. **`SOCKET_Weapon` 조정** — 지금 값은 LPAMG 총 기준이라 Synty 모듈러 소총과 안 맞을 가능성이 크다.
+   위 툴에서 `팔 보기` + `전체 이동` 으로 잡고 `손 위치 저장`
+3. **구도** — `FirstPersonArms` rest `(-21, 10, -165)` yaw −95 는 **옛 NeonV 팔 기준**이다. 팔 비율이
+   달라 어긋날 가능성이 크다. 이건 툴이 아니라 PIE/렌더로 봐야 한다
+4. **PIE 검증** — 팔이 소총 자세로 서는가 / 손가락이 늘어나 보이지 않는가(리타게터가 비율을 흡수하지만
+   **아직 눈으로 확인 안 했다**) / 내 그림자 왼팔 / 동료 화면 무기 / 다운→관전
 
-### 🩹 결함 6 — **FBX 메시가 UE에서 100배 작게 들어왔다** (2026-08-04, 해결)
-임포트 후 팔이 점만 하게 보여 BP에서 `FirstPersonArms` 스케일을 100으로 보정해 놓은 상태였다.
-**원인**: UE는 metre→cm ×100 변환을 지오메트리가 아니라 **아마추어 스케일**로 얹는데, 기존 스켈레톤(`S_Mannequin`)에 붙이면 **그 스케일이 통째로 버려진다.**
-**🪤 본 잔차 0/65 검증이 이걸 구조적으로 못 잡는다** — 스켈레톤을 공유하면 `get_socket_transform`이 메시가 아니라 스켈레톤 ref pose를 돌려주기 때문. 판정 지표는 **`Approx Size`** 하나였다(4,445×5,080×8,438 → 고친 뒤 114×58×97, 기준 116×42×64).
-**해결**: 지오메트리 ×100 굽기 + 최상위 오브젝트 스케일 0.01 + `FBX_SCALE_NONE`(블랜더 repo `e8f329a`에서 이미 검증된 우회법 — 이 프로젝트 두 번째 사례). 상세 = `Docs/Troubleshooting.md` **F1-b**.
-→ `FirstPersonArms` 스케일은 **1**이 정답.
+## 🧹 정리 대상 (알고 남겨 둔 것)
 
-</details>
+- `BP_FPSRPlayer.WeaponMeshStatic` 에 **옛 PWAS 데모총 `SM_M4`** 가 박혀 있다. Synty 모듈러로 갈아탄 뒤
+  잔재. 지금은 `WeaponMesh`(스켈레탈)가 쓰이므로 화면엔 안 나올 가능성이 크지만 확인 필요
+- `Content/Character/Player/ABP_FPArms` 가 **ObjectRedirector** 로 남아 있다 (Fix Up Redirectors 대상)
+- 옛 자체 스켈레톤 에셋 — `Content/Character/FPArms/SK_NeonV_FPArms*` · `NeonV_FPArms*` ·
+  `Anims/FP_Rifle_{Idle,ADS}`(죽은 스켈레톤). **롤백용으로 의도적으로 남김.** 확정되면 정리
+- `Anims_LPAMG` 폴더명 — 내용은 PWAS 애니라 오해를 부른다(실제로 한 번 물어봄). `Anims/` 로 합칠지 결정 필요
 
-### ✅ 자체 스켈레톤 전환 **완료** (2026-08-04) — 안 A′ ([ADR 0004](Docs/Architecture/0004-first-person-arms-own-skeleton.md))
-Blender 파이프라인 뒤집기 → UE 임포트 → 소켓 → 아이들/ADS 포즈까지 **전부 끝나고 게이트 15개 통과**. 경위·실측치는 ADR 0004 "실행 결과", 함정은 `Docs/Troubleshooting.md` **A7~A10**.
+## ⚠️ 되돌리기 비용이 다른 것 하나
 
-**손 왜곡 소멸**(손목→손가락 뿌리가 원본값으로 정확 복귀): 엄지 4.08 · 검지 8.43 · 중지 7.88 · 약지 8.15 · 새끼 8.16.
-**팔도 개선**: 도달 55.02cm 유지한 채 상완/전완이 **같은 배율**(x1.325)로 — 옛 타깃은 x1.396/x1.259 불균일이었다.
-
-| 산출물 | |
-|---|---|
-| 메시·스켈레톤 | `Content/Character/FPArms/SK_NeonV_FPArms{,_Skeleton,_PhysicsAsset}` |
-| 포즈 | `Content/Character/FPArms/Anims/FP_Rifle_{Idle,ADS}` |
-| 소켓 | `SOCKET_Weapon` = **메시** 소유 · `hand_r` 로컬 `(-4.37, 0.52, 3.34)` = 손바닥 |
-| 되돌리기 | 옛 `NeonV_FPArms` 를 **안 지웠다**. 배선만 되돌리면 즉시 복귀 |
-
-> 🔑 이번에 처음 잰 것 — 그동안의 "본 잔차 0/65" 는 **FBX 왕복을 증명한 적이 없었다**(스켈레톤을 공유하면 `get_socket_transform` 이 메시가 아니라 ref pose 를 돌려준다). 자체 스켈레톤이 되어서야 쟀고, 회전 **0.00089°** / 위치 **0.00016cm**.
-
-<details><summary>전환 전까지 끝내둔 것 (참고용)</summary>
-
-1. **팔 메시 재임포트 — `Saved/NeonV/NeonV_FPArms_v5.fbx`** (사용자, 에디터에서)
-   재킷·어깨장식을 뺀 **몸만** 버전(섹션 3→1). 1인칭에서 소매가 시야를 가려 사용자 결정(2026-08-04).
-   되살리려면 export 인자만 빼고 다시 내보내면 된다 — `.blend`는 셋을 다 들고 있어 앞 단계 재실행 불필요.
-2. **BP `BP_FPSRPlayer` → `Left Hand Grip Offset` = `(1, 3, 5)`** (사용자)
-   왼손이 핸드가드를 뚫고 잡던 것 보정. C++ 기본값은 0 — 조정값을 코드에 박으면 다음 조정이 코드 수정이 된다.
-3. PIE 확인 — 소매·손목·새끼손가락 3증상 + 왼손 그립
-
-되돌리기: 옛 `Saved/NeonV/NeonV_FPArms.fbx` 재임포트, 또는 에디터 닫고 `git checkout` (에셋은 커밋 `839abef0`).
-
-### ⏭️ 남은 것 — 왼손 손가락 포즈
-그립 오프셋은 손목 **위치**만 고친다. Two Bone IK는 손가락을 안 건드리므로, 손가락이 펴진 채 핸드가드 아래에 놓인다. "쥔 모양"은 왼손 손가락을 핸드가드 굵기에 맞춰 말아주는 **포즈 저작**(Blender)이 필요하다.
-> ⏸️ **손 모양이 바뀌므로 자체 스켈레톤 전환 뒤로 미룬다.**
-
-</details>
-
-### ✅ 배선 완료 (2026-08-04) — **남은 것 = PIE 하나**
-- **`ABP_FPArms`** 신규(`/Game/Character/Player/`) — 스켈레톤 `SK_NeonV_FPArms_Skeleton` · 부모 `FPSRFirstPersonArmsAnimInstance` · 그래프는 옛 `ABP_FirstPerson` 에서 복사(본 이름이 같아 Two Bone IK 설정이 그대로 산다) · 포즈 = `FP_Rifle_Idle`
-- **`BP_FPSRPlayer` → `FirstPersonArms`** = `SK_NeonV_FPArms` + `ABP_FPArms_C`, 스케일 1. 레스트 트랜스폼 `(-14, 0, -165)` yaw −90 은 **사용자 조정값이라 안 건드렸다**
-
-> 🔑 **`BP_FPSRPlayer` 의 PWAS 참조 = 0개.** 플레이어 체인이 `ProceduralWeaponAnimationSystem` 에서 완전히 떨어졌다. 옛 `NeonV_FPArms` 를 참조하는 것도 자기 PhysicsAsset 하나뿐이라 폐기 가능하지만 **PIE 통과까지는 롤백용으로 남긴다.**
->
-> 🪤 AnimBP 를 새로 만들 때 **포즈 노드의 애니 교체를 빠뜨리기 쉽다** — 복사해 온 노드가 `A_FP_Rifle_Pose`(다른 스켈레톤)를 그대로 물고 있어도 UE 가 조용히 컴파일·저장한다. 눈으로는 정상으로 보인다. **판정은 애셋 참조 목록으로** 하라(실제로 한 번 놓쳤다).
-
-**⏳ PIE 확인 목록**
-1. 팔이 A자(레퍼런스 포즈)가 아니라 **소총 자세**로 서는가 — 아니면 포즈 노드가 안 붙은 것
-2. 손·손가락이 늘어나 보이지 않는가 (이번 작업의 목적)
-3. 소매·손목 이음매 · 새끼손가락
-4. **왼손 그립** — `Joint Target Location` 이 (0,0,0)이면 팔꿈치가 뒤집힌다. `Effector Location Space` = World Space 확인
-5. 총이 손바닥에 잡히는가 — `SOCKET_Weapon (-4.37, 0.52, 3.34)` 은 계산으로 낸 **시작점**이라 여기서 확정한다
-6. `LeftHandGripOffset (1,3,5)` 재조정 (옛 손 기준이었다)
-7. 내 그림자 왼팔 · 동료 화면 무기 · 다운→관전
-
-### ⏸️ 뒤로 미룬 것
-- **왼손 손가락 "쥔 모양" 포즈** — Two Bone IK는 손목 **위치**만 고친다. 손가락을 핸드가드 굵기에 맞춰 마는 건 별도 저작이고, **소켓이 확정된 뒤**라야 헛수고가 안 된다
-- **저작 씬 재조립**(`fp_arms_make_authoring.py`) — 총·카메라·그립 타깃을 새 팔에 다시 물리는 도구. 조립된 총 FBX를 UE에서 다시 뽑아야 하고, `GRIP_IN_ARMS_UE` 상수도 새 소켓 기준으로 갱신해야 한다
-- **무기군 포즈를 레이어로**(무기 DA `ArmsAnimLayerClass`) — 지금은 단일 포즈 직결이 정상. 무기가 늘면 그때
-- **PhysicsAsset** — 파이썬에 바디 목록 프로퍼티가 아예 없어 헤드리스로 못 만졌다. 충돌은 어차피 컴포넌트에서 끈다(`FPSRCharacter.cpp:129` `NoCollision`)이라 무관하고, 남는 영향은 **바운드뿐**. PIE에서 팔이 사라지는 일이 없으면 그대로 둔다
+**LPAMG 팩은 git 미추적으로 들어왔다.** 정리하며 지운 2,261개는 **git 으로 복구가 안 된다**(팩 재다운로드).
+남긴 팔 40개는 커밋에 넣어 뒀다. 나머지 팩은 전부 추적 중이라 `git checkout` 으로 복구된다.
 
 ---
 

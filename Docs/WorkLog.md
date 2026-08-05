@@ -9,6 +9,85 @@
 
 ---
 
+## 🦾 1인칭 팔을 **구매 리그(LPAMG)** 로 갈아탐 + PWAS 리타게팅 (2026-08-05, `refactor/character`)
+> 구조 근거 = **[ADR 0006](Architecture/0006-first-person-arms-purchased-rig-retargeted.md)** (0004·0005 대체).
+
+**자체 스켈레톤 트랙을 접었다.** 사용자 실플레이 판정: *"모든 걸 다 해봤는데 내 기준에 도달하지 못했어.
+모델링은 근본부터 수정할게."* 잠깐 **"1인칭은 총만 보인다"** 로 갔다가, 사용자가 LPAMG 팩의 1인칭 팔을
+임포트하면서 뒤집혔다.
+
+| | |
+|---|---|
+| 팔 | `SK_LPAMG_Arms_Base_Smooth` · `SKEL_LPAMG_Character` **79본, UE4 마네킹 규약** · 소켓 92개 |
+| 애니 | PWAS(`S_Mannequin`, UE5) → `RTG_PWAS_to_LPAMG` → `Anims_LPAMG/FP_Rifle_{Idle,ADS,Reload}` |
+| 배선 | `ABP_FP_Base`(부모 `FPSRFirstPersonArmsAnimInstance`) → `BP_FPSRPlayer.FirstPersonArms` (사용자 작업) |
+
+**두 스켈레톤 차이 실측** — 이름 규약은 같고 계층만 다르다. 마네킹에만 있는 본 14개(메타카팔 8 ·
+`lowerarm/upperarm_twist_02` 4 · `spine_04/05`), 이름은 같은데 **부모가 다른 본 10개**(`clavicle` =
+spine_05 vs spine_03, 손가락 `01` = 메타카팔 경유 여부). 그래서 그냥 못 틀고 리타게팅이 필요했다.
+**`SOCKET_Weapon` 이 이 팔에 이미 있어** 무기 부착 규약은 그대로 맞았다.
+
+### 🩺 리타게팅이 **정적 포즈만 찍던 사고** — 3단 원인
+증상: Idle/ADS/Reload 셋이 소수점까지 같은 값(−56.65, −0.34, 111.68). 서로 다른 두 애니의 **압축 DDC
+해시까지 동일**. 그런데 **어느 단계에서도 에러가 안 났다** — 리그 생성·op·매핑 호출·내보내기·압축까지
+전부 "성공".
+
+1. UE 5.7 리타게터는 **op 스택**이고 **체인 매핑이 op 안에 산다** → `auto_map_chains()` 를 op 이름 없이
+   부르면 안 붙는다
+2. op 이름을 주고 `set_source_chain()` 을 직접 걸어도 0/15 — `ChainMapping->HasChain(Target)` 이
+   false 면 조용히 `continue`(`IKRetargeterController.cpp:1022`)
+3. 그 false 의 진짜 이유: **FK Chains op 의 `IKRig Asset` 슬롯이 None**. op 이 타깃 리그를 모르니
+   체인 목록이 0줄이고, 0줄이라 UI 의 `Auto-Map Chains` 도 회색이었다.
+   `GetTargetIKRigForOp` 는 **게터만** 노출돼 있어 스크립트로 못 채운다 → 사용자가 에디터에서 지정
+
+**대조군이 진단을 갈랐다.** "안 변한다"는 관측만으로는 *측정 도구가 고장난 경우*와 구분되지 않는다.
+원본 재장전을 같은 도구로 먼저 재서(t=0 −11.32 → t=1.0 −9.64) 도구가 멀쩡함을 확인하고서야 단정했다.
+
+**내 첫 게이트가 이 사고를 못 잡았다** — 트랙 79개·핵심 본 12/12 가 다 있는데 값만 정적이었다.
+"있다" 검사는 "맞다" 검사가 아니다. 값 게이트(`lpamg_verify_pose_values.py`)와 매핑 게이트를 추가했다.
+
+**최종 검증**: Idle(−23.07, 28.43, 149.70) · ADS(−12.72, 24.57, 154.64) · Reload@1.0s(−21.07, 29.45,
+147.98). Idle→ADS 변화 방향이 원본과 **세 축 모두 일치**. 재장전도 시점마다 원본과 같은 방향으로 변한다.
+
+### 🧹 미사용 에셋 8,117개 정리 — **4,988MB → 1,609MB**
+판정은 문자열 검색이 아니라 **에셋 레지스트리 의존성 폐포**로 했다(루트 = 맵 + 우리가 만든 폴더).
+지운 범위(사용자 승인): ModularSciFiStation 289 · LPAMG 2,261 · Rifle_01 926 · PolygonCyberCity 1,537 ·
+PolygonScifi 871 · PolygonMilitary 2,228 · Blu 중복본 31 · _SyntyPilot 5.
+안 건드림: Synty · Characters(Blu) · StylizedRenderingSystem · PWAS · PolygonParticleFX.
+
+- **"폴더만 남긴다"로 자르면 안 된다** — 무기 메시는 머티리얼·텍스처를 다른 폴더에서 물고 있어서,
+  명시 보관도 **의존성 폐포까지** 확장했다. 그래서 PolygonMilitary 는 도달 57 이 아니라 **363개**가 남는다
+- **도시 빌드 툴은 `/Game/PolygonCyberCity` 를 폴더째 스캔한다**(`get_assets_by_path`) — 레지스트리
+  판정으로는 "미사용"이지만 지우면 팔레트가 108개로 준다. 사용자가 알고 승인했다
+- 검증: 재스캔 후 남은 4,295 패키지 전수 검사 → **이번 정리가 만든 끊어진 참조 0**. 남은 39건은 정리
+  전부터 있던 것. 검증이 `Rifle_01/Character/Mesh/SK_Mannequin` 끊김을 잡아냈고, 참조자가
+  `IK_UE4Mannequin`·`RTG_UE4Man_to_Blu` 라 되살렸다 — LPAMG 가 UE4 마네킹 규약이라 앞으로 쓸 리그다
+
+### 🔧 무기 어셈블러에 1인칭 팔 프리뷰 추가
+BP 뷰포트로는 총이 안 보인다(실측: `WeaponMesh` 비어 있음 · 파츠 7개 런타임 생성 ·
+`WeaponMeshStatic` 에는 옛 PWAS 데모총 `SM_M4` 잔재). 그래서 그립을 원점에 뜬 총으로 판정하고 있었다.
+
+기존 인프라 위에 얹었다 — `BakeSockets` 가 *"바디가 identity 가 아니어도 정합"* 하도록 이미 짜여 있어
+조립품을 손에 얹어도 기존 베이크가 산다. **기즈모도 새로 안 만들었다**(기존 `전체 이동` 재사용),
+**저장 대상만** 갈랐다: `조립→저장`=무기 바디 / `손 위치 저장`=팔 메시. 순수 추가 323줄.
+
+- 🚨 **스케일은 소켓에 굽지 않는다** — 런타임이 `SnapToTargetNotIncludingScale` 후
+  `SetRelativeScale3D(WeaponAttachScale)` 를 따로 걸어서, 소켓에도 넣으면 0.85가 두 번 곱해진다
+- 🪤 소켓이 없으면 **만들지 않고 실패**한다(어느 뼈에 달지는 추측 대상이 아니다)
+- 🪤 프리뷰 포즈는 **정지 포즈**여야 한다(매 틱 따라가면 기즈모 편집이 매 틱 덮인다)
+
+### 🪤 커맨드렛 함정 3종 (전부 실측 → `Docs/Troubleshooting.md` D7~D9)
+- `LevelEditorSubsystem.is_in_play_in_editor()` → **커맨드렛에서 즉사**(`GUnrealEd` 없음). 파이썬 예외가
+  아니라 프로세스 종료라 try/except 로 못 막는다 → 부르기 전에 커맨드렛인지 가른다
+- `IKRetargetBatchOperation.duplicate_and_retarget()` → **Slate assertion**. 계산은 끝나고 압축까지
+  갔는데 **저장 직전에 죽어** 결과가 안 남는다 → 정식 에디터(`-ExecutePythonScript`)로 분리
+- 파이썬 커맨드렛은 `sys.argv` 로 인자를 못 받는다 → `SystemLibrary.get_command_line()` 에서 읽는다
+
+**커밋**: `31fee185`(정리) · `6cac5d62`(도구) · `45de6b54`(리타게팅) · `0c68e02c`(이름) ·
+`bcc62d1b`(리타게팅 수정) · `50e6f300`(어셈블러 팔 프리뷰)
+
+---
+
 ## 🎥 슬라이드 중 화각 +5도 — 카메라 FOV를 **단일 기록자**로 (2026-08-05, `refactor/character`)
 > 구조 근거 = **[ADR 0001 「카메라 FOV의 단일 기록자」](Architecture/0001-player-movement-state-ownership.md)**.
 
