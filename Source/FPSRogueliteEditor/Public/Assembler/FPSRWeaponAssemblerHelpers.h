@@ -40,4 +40,18 @@ namespace FPSRWeaponAssemblerHelpers
 	 *  동일 관용구: -Origin.Z + Extent.Z → 바닥이 조립품 밑면에 놓임). 순수 프리뷰 프레이밍용이며 소켓 베이크(바디 상대)와
 	 *  무관하다. 유효 바운드가 없으면 0(바닥 원점 유지)을 반환한다. */
 	float ComputeFloorOffsetToRest(const USkeletalMeshComponent* BodyComp, const TArray<UStaticMeshComponent*>& PartComps);
+
+	/** "손 위치 저장" — 프리뷰에서 손에 얹어 둔 조립품의 위치를 **팔 메시의 무기 부착 소켓**에 굽고 저장한다.
+	 *  BakeSockets 가 파츠->바디를 굽는 것과 대칭이고, 굽는 **대상 메시가 다르다**(무기 바디가 아니라 팔).
+	 *
+	 *  🚨 스케일은 굽지 않는다. 런타임은 `SnapToTargetNotIncludingScale` 로 붙인 뒤 `SetRelativeScale3D(WeaponAttachScale)`
+	 *     를 따로 건다(FPSRCharacter::AttachWeaponMeshes). 소켓에 스케일까지 넣으면 **두 번 곱해져** 총이 0.72배로
+	 *     작아진다. 그래서 위치·회전만 쓰고 소켓 스케일은 1로 둔다.
+	 *
+	 *  🪤 소켓이 없으면 **만들지 않고 실패**한다 — 어느 뼈에 달지는 추측할 수 없다(손이 여럿이고, 이 프로젝트의 팔
+	 *     스켈레톤은 이미 두 번 갈렸다). 있으면 그 소켓의 BoneName 을 그대로 기준 프레임으로 쓴다.
+	 *
+	 *  성공 시 true. ArmsComp 의 현재 **포즈된** 뼈 트랜스폼을 기준으로 재므로, 팔이 소총 자세로 서 있는 상태에서
+	 *  불러야 인게임과 같은 값이 나온다. */
+	bool BakeWeaponSocket(USkeletalMeshComponent* ArmsComp, const USkeletalMeshComponent* BodyComp, FName SocketName, FString& OutMessage);
 }

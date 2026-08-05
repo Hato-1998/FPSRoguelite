@@ -105,6 +105,26 @@ void SFPSRWeaponAssemblerTab::Construct(const FArguments& InArgs)
 				.ToolTipText(LOCTEXT("BakeTooltip", "현재 파츠 배치를 바디 메시 소켓으로 굽고 무기 DA에 배선한 뒤 저장합니다."))
 				.OnClicked(this, &SFPSRWeaponAssemblerTab::OnBakeClicked)
 			]
+
+			+ SHorizontalBox::Slot().AutoWidth().Padding(16.0f, 0.0f, 2.0f, 0.0f).VAlign(VAlign_Center)
+			[
+				SNew(SCheckBox)
+				.IsChecked(this, &SFPSRWeaponAssemblerTab::IsShowArmsChecked)
+				.OnCheckStateChanged(this, &SFPSRWeaponAssemblerTab::OnShowArmsChanged)
+				.ToolTipText(LOCTEXT("ShowArmsTooltip", "1인칭 팔을 세우고 무기를 손에 얹습니다 — 그립을 '손에 든 상태'로 볼 수 있습니다. 팔 메시·포즈는 프로젝트 설정 > FPSR > FPSR Weapon Assembler 에서 지정합니다(비어 있으면 켜지지 않습니다)."))
+				[
+					SNew(STextBlock).Text(LOCTEXT("ShowArms", "팔 보기"))
+				]
+			]
+
+			+ SHorizontalBox::Slot().AutoWidth().Padding(2.0f, 0.0f, 0.0f, 0.0f)
+			[
+				SNew(SButton)
+				.Text(LOCTEXT("BakeHand", "손 위치 저장"))
+				.IsEnabled(this, &SFPSRWeaponAssemblerTab::IsShowArmsEnabled)
+				.ToolTipText(LOCTEXT("BakeHandTooltip", "'전체 이동'으로 잡은 무기 위치를 팔 메시의 무기 부착 소켓에 굽고 저장합니다. ⚠ 저장 대상이 무기가 아니라 '팔 메시'입니다."))
+				.OnClicked(this, &SFPSRWeaponAssemblerTab::OnBakeHandClicked)
+			]
 		]
 
 		+ SVerticalBox::Slot().AutoHeight().Padding(4.0f, 0.0f, 4.0f, 4.0f)
@@ -1655,6 +1675,58 @@ ECheckBoxState SFPSRWeaponAssemblerTab::IsIsolateChecked() const
 {
 	const bool bChecked = Viewport.IsValid() && Viewport->GetAssemblerClient().IsValid() && Viewport->GetAssemblerClient()->IsIsolate();
 	return bChecked ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
+}
+
+void SFPSRWeaponAssemblerTab::OnShowArmsChanged(ECheckBoxState NewState)
+{
+	if (!Viewport.IsValid() || !Viewport->GetAssemblerClient().IsValid())
+	{
+		return;
+	}
+	const bool bWanted = NewState == ECheckBoxState::Checked;
+	TSharedPtr<FFPSRWeaponAssemblerViewportClient> Client = Viewport->GetAssemblerClient();
+	Client->SetShowArms(bWanted);
+
+	// 클라이언트가 거부할 수 있다(설정에 팔 메시가 없을 때). 체크박스는 IsShowArmsChecked 로 실제 상태를 되비추므로
+	// 저절로 원복되지만, **왜** 안 켜졌는지는 여기서 알려 줘야 사용자가 설정을 찾아갈 수 있다.
+	if (bWanted && !Client->IsShowArms() && StatusText.IsValid())
+	{
+		StatusText->SetText(LOCTEXT("ShowArmsNoMesh",
+			"팔 프리뷰용 메시가 지정되지 않았습니다 — 프로젝트 설정 > FPSR > FPSR Weapon Assembler 의 'Preview Arms Mesh' 를 지정하세요."));
+	}
+}
+
+ECheckBoxState SFPSRWeaponAssemblerTab::IsShowArmsChecked() const
+{
+	const bool bChecked = Viewport.IsValid() && Viewport->GetAssemblerClient().IsValid() && Viewport->GetAssemblerClient()->IsShowArms();
+	return bChecked ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
+}
+
+bool SFPSRWeaponAssemblerTab::IsShowArmsEnabled() const
+{
+	return Viewport.IsValid() && Viewport->GetAssemblerClient().IsValid() && Viewport->GetAssemblerClient()->IsShowArms();
+}
+
+FReply SFPSRWeaponAssemblerTab::OnBakeHandClicked()
+{
+	if (!Viewport.IsValid() || !Viewport->GetAssemblerClient().IsValid())
+	{
+		return FReply::Handled();
+	}
+	TSharedPtr<FFPSRWeaponAssemblerViewportClient> Client = Viewport->GetAssemblerClient();
+	const UFPSRWeaponDataAsset* DA = Client->GetWeaponDA();
+
+	FString Message;
+	const bool bOk = FPSRWeaponAssemblerHelpers::BakeWeaponSocket(
+		Client->GetArmsComp(), Client->GetBodyComp(), DA ? DA->WeaponAttachSocket : NAME_None, Message);
+
+	if (StatusText.IsValid())
+	{
+		StatusText->SetText(bOk
+			? FText::Format(LOCTEXT("BakeHandDone", "손 위치를 저장했습니다 — {0}. ⚠ 저장된 것은 무기가 아니라 팔 메시입니다."), FText::FromString(Message))
+			: FText::Format(LOCTEXT("BakeHandFail", "손 위치 저장 실패 — {0}"), FText::FromString(Message)));
+	}
+	return FReply::Handled();
 }
 
 #undef LOCTEXT_NAMESPACE

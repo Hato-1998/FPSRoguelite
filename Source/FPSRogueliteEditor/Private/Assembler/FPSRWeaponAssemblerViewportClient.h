@@ -80,8 +80,18 @@ public:
 	void EndStagePreview();
 	bool IsPreviewingStage() const { return PreviewStageSlot != INDEX_NONE; }
 
+	/** "팔 보기" 토글(탭 툴바 체크박스). 켜면 설정(UFPSRWeaponAssemblerSettings)의 1인칭 팔을 프리뷰 씬에 세우고,
+	 *  조립품 전체를 팔의 무기 부착 소켓 자리로 옮긴다 — 그립을 **손에 든 상태**로 판정하기 위해서다. 끄면 팔을
+	 *  걷어내고 조립품을 원점으로 되돌린다(툴의 원래 동작).
+	 *
+	 *  설정에 팔 메시가 비어 있으면 아무 일도 안 한다(false 로 되돌아감) — 콘텐츠가 없는 프로젝트에서 툴이 깨지지
+	 *  않게. IsShowArms() 로 실제 상태를 되읽을 것. */
+	void SetShowArms(bool bIn);
+	bool IsShowArms() const { return bShowArms; }
+
 	const TArray<UStaticMeshComponent*>& GetPartComps() const { return PartComps; }
 	USkeletalMeshComponent* GetBodyComp() const { return BodyComp; }
+	USkeletalMeshComponent* GetArmsComp() const { return ArmsComp; }
 	UFPSRWeaponDataAsset* GetWeaponDA() const { return WeaponDA; }
 
 	// FGCObject interface (FEditorViewportClient already derives FGCObject) — see the class comment above for why
@@ -102,6 +112,20 @@ public:
 	virtual void Tick(float DeltaSeconds) override;
 
 private:
+	/** 조립품(바디+파츠)을 팔의 무기 부착 소켓 자리로 통째로 옮긴다. 파츠는 **바디 상대 배치를 유지**한 채 따라간다
+	 *  — 그래야 기존 BakeSockets(파츠를 바디 기준으로 굽는다)가 그대로 유효하다.
+	 *
+	 *  🚨 바디 스케일을 무기 DA 의 WeaponAttachScale 로 맞춘다. 런타임이 그렇게 붙이기 때문(FPSRCharacter::
+	 *     AttachWeaponMeshes)이고, 프리뷰가 1.0 이면 화면에서 총이 인게임보다 커 보여 그립 판정이 어긋난다.
+	 *     파츠는 바디 상대라 스케일이 자동으로 따라온다.
+	 *
+	 *  팔/바디/소켓 중 하나라도 없으면 아무 것도 안 한다. */
+	void PlaceAssemblyAtHand();
+
+	/** 팔 프리뷰를 끌 때 조립품을 원래 자리(바디=항등)로 되돌린다. PlaceAssemblyAtHand 의 역이며, 파츠의 바디 상대
+	 *  배치는 여기서도 유지된다. */
+	void ResetAssemblyToOrigin();
+
 	/** Applies bIsolate to part visibility: bIsolate=false shows every part, true shows only PartComps[SelectedPart]
 	 *  and hides the rest (BodyComp is never touched). Called from SetSelectedPart, SetIsolate, and SetWeapon (after
 	 *  rebuilding the part components) so all three paths that can change "what should be visible" stay in sync. */
@@ -120,6 +144,13 @@ private:
 
 	/** Preview body (SkeletalMeshComponent), added to the preview scene at identity with no attach parent. */
 	USkeletalMeshComponent* BodyComp = nullptr;
+
+	/** 1인칭 팔 프리뷰. 씬에 등록되므로 BodyComp/PartComps 와 같은 이유로 별도 GC 항목이 필요 없다(클래스 주석 참조).
+	 *  null = "팔 보기" 꺼짐. */
+	USkeletalMeshComponent* ArmsComp = nullptr;
+
+	/** "팔 보기" 토글 상태. See SetShowArms. */
+	bool bShowArms = false;
 
 	/** Index-aligned to WeaponDA->WeaponParts: one unparented StaticMeshComponent per part, added to the preview
 	 *  scene at the part's initial world transform (component-space == Body-relative, since Body sits at identity). */

@@ -4,8 +4,10 @@
 
 #include "Assembler/SFPSRWeaponAssemblerViewport.h"
 #include "Assembler/FPSRWeaponAssemblerHelpers.h"
+#include "Assembler/FPSRWeaponAssemblerSettings.h"
 #include "Weapon/FPSRWeaponDataAsset.h"
 
+#include "Animation/AnimationAsset.h"
 #include "PreviewScene.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -111,6 +113,13 @@ void FFPSRWeaponAssemblerViewportClient::SetWeapon(UFPSRWeaponDataAsset* DA)
 
 		PreviewScene.AddComponent(PartComp, Init);
 		PartComps.Add(PartComp);
+	}
+
+	// 무기를 바꿔도 팔에 든 상태를 유지한다 — 위에서 바디/파츠를 항등 기준으로 새로 세웠으므로 다시 얹어야 한다.
+	// (부착 소켓·스케일은 무기 DA 마다 다를 수 있어 여기서 새 DA 기준으로 다시 계산된다.)
+	if (bShowArms)
+	{
+		PlaceAssemblyAtHand();
 	}
 
 	UpdatePartVisibility();
@@ -382,6 +391,122 @@ void FFPSRWeaponAssemblerViewportClient::Tick(float DeltaSeconds)
 	if (UWorld* World = PreviewScene.GetWorld())
 	{
 		World->Tick(LEVELTICK_All, DeltaSeconds);
+	}
+}
+
+void FFPSRWeaponAssemblerViewportClient::SetShowArms(bool bIn)
+{
+	if (bIn == bShowArms)
+	{
+		return;
+	}
+
+	if (!bIn)
+	{
+		if (ArmsComp)
+		{
+			PreviewScene.RemoveComponent(ArmsComp);
+			RetireTransientComponent(ArmsComp);
+			ArmsComp = nullptr;
+		}
+		bShowArms = false;
+		ResetAssemblyToOrigin();
+		Invalidate();
+		return;
+	}
+
+	// 팔 메시는 **설정에서** 온다 — 경로를 C++ 에 박지 않는다(이 프로젝트는 이미 팔을 두 번 갈았다).
+	const UFPSRWeaponAssemblerSettings* Settings = GetDefault<UFPSRWeaponAssemblerSettings>();
+	USkeletalMesh* Arms = Settings && !Settings->PreviewArmsMesh.IsNull() ? Settings->PreviewArmsMesh.LoadSynchronous() : nullptr;
+	if (!Arms)
+	{
+		// 콘텐츠가 없으면 조용히 꺼진 채로 둔다 — 탭이 IsShowArms() 로 되읽어 체크박스를 원복한다.
+		bShowArms = false;
+		return;
+	}
+
+	ArmsComp = NewObject<USkeletalMeshComponent>(GetTransientPackage(), NAME_None, RF_Transient);
+	ArmsComp->SetSkeletalMeshAsset(Arms);
+	ArmsComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+
+	// 🚨 레퍼런스 포즈로 판정하면 안 된다 — 팔이 벌어진 채로 서서 총이 인게임과 전혀 다른 자리에 온다.
+	//    포즈를 물려야 "소총 자세로 든 손" 을 기준으로 그립을 볼 수 있다. Tick 이 프리뷰 월드를 돌리므로 재생된다.
+	if (UAnimationAsset* Pose = Settings->PreviewArmsPose.IsNull() ? nullptr : Settings->PreviewArmsPose.LoadSynchronous())
+	{
+		if (Pose->GetSkeleton() == Arms->GetSkeleton())
+		{
+			ArmsComp->SetAnimationMode(EAnimationMode::AnimationSingleNode);
+			ArmsComp->SetAnimation(Pose);
+			ArmsComp->Play(true);
+		}
+	}
+
+	PreviewScene.AddComponent(ArmsComp, FTransform::Identity);
+	bShowArms = true;
+
+	// 포즈가 한 프레임이라도 평가돼야 소켓이 제자리에 온다 — 안 그러면 첫 배치가 레퍼런스 포즈 기준이 된다.
+	ArmsComp->RefreshBoneTransforms();
+	PlaceAssemblyAtHand();
+	Invalidate();
+}
+
+void FFPSRWeaponAssemblerViewportClient::PlaceAssemblyAtHand()
+{
+	if (!ArmsComp || !BodyComp || !WeaponDA)
+	{
+		return;
+	}
+	const FName Sock = WeaponDA->WeaponAttachSocket;
+	if (Sock.IsNone() || !ArmsComp->DoesSocketExist(Sock))
+	{
+		return;
+	}
+
+	// 파츠의 **바디 상대** 배치를 먼저 떠 둔다 — 이걸 유지해야 기존 BakeSockets(파츠를 바디 기준으로 굽는다)가
+	// 그대로 유효하다.
+	const FTransform OldBody = BodyComp->GetComponentTransform();
+	TArray<FTransform> PartRelBody;
+	PartRelBody.Reserve(PartComps.Num());
+	for (const UStaticMeshComponent* PC : PartComps)
+	{
+		PartRelBody.Add(PC ? PC->GetComponentTransform().GetRelativeTransform(OldBody) : FTransform::Identity);
+	}
+
+	FTransform Target = ArmsComp->GetSocketTransform(Sock, RTS_World);
+	Target.SetScale3D(FVector(WeaponDA->WeaponAttachScale));   // 런타임과 같은 크기로 — 헤더 주석 참조
+	BodyComp->SetWorldTransform(Target);
+
+	const FTransform NewBody = BodyComp->GetComponentTransform();
+	for (int32 i = 0; i < PartComps.Num(); ++i)
+	{
+		if (PartComps[i])
+		{
+			PartComps[i]->SetWorldTransform(PartRelBody[i] * NewBody);
+		}
+	}
+}
+
+void FFPSRWeaponAssemblerViewportClient::ResetAssemblyToOrigin()
+{
+	if (!BodyComp)
+	{
+		return;
+	}
+	const FTransform OldBody = BodyComp->GetComponentTransform();
+	TArray<FTransform> PartRelBody;
+	PartRelBody.Reserve(PartComps.Num());
+	for (const UStaticMeshComponent* PC : PartComps)
+	{
+		PartRelBody.Add(PC ? PC->GetComponentTransform().GetRelativeTransform(OldBody) : FTransform::Identity);
+	}
+
+	BodyComp->SetWorldTransform(FTransform::Identity);
+	for (int32 i = 0; i < PartComps.Num(); ++i)
+	{
+		if (PartComps[i])
+		{
+			PartComps[i]->SetWorldTransform(PartRelBody[i]);
+		}
 	}
 }
 

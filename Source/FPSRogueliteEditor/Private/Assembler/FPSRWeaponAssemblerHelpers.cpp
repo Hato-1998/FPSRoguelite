@@ -123,6 +123,51 @@ namespace FPSRWeaponAssemblerHelpers
 		return n;
 	}
 
+	bool BakeWeaponSocket(USkeletalMeshComponent* ArmsComp, const USkeletalMeshComponent* BodyComp, FName SocketName, FString& OutMessage)
+	{
+		USkeletalMesh* Arms = ArmsComp ? ArmsComp->GetSkeletalMeshAsset() : nullptr;
+		if (!Arms || !BodyComp)
+		{
+			OutMessage = TEXT("팔 또는 무기 프리뷰가 없다");
+			return false;
+		}
+		if (SocketName.IsNone())
+		{
+			OutMessage = TEXT("무기 DA 의 WeaponAttachSocket 이 비어 있다");
+			return false;
+		}
+
+		USkeletalMeshSocket* Socket = Arms->FindSocket(SocketName);
+		if (!Socket)
+		{
+			// 만들지 않는다 — 어느 뼈에 달지는 추측 대상이 아니다. 헤더 주석 참조.
+			OutMessage = FString::Printf(TEXT("팔 메시 '%s' 에 소켓 '%s' 가 없다 — 스켈레톤 트리에서 먼저 만들어라"),
+				*Arms->GetName(), *SocketName.ToString());
+			return false;
+		}
+
+		// 기준 프레임 = 소켓이 달린 **뼈**의 현재(포즈된) 월드 트랜스폼. 소켓 자신을 기준으로 삼으면 지금 값이
+		// 상쇄돼 항상 항등이 나온다.
+		const FTransform BoneWorld = ArmsComp->GetSocketTransform(Socket->BoneName, RTS_World);
+		const FTransform Rel = BodyComp->GetComponentTransform().GetRelativeTransform(BoneWorld);
+
+		Arms->Modify();
+		Socket->RelativeLocation = Rel.GetLocation();
+		Socket->RelativeRotation = Rel.GetRotation().Rotator();
+		Socket->RelativeScale = FVector(1.0f);   // 스케일은 런타임의 WeaponAttachScale 이 소유한다 — 헤더 주석 참조
+		Arms->RebuildSocketMap();
+		Arms->MarkPackageDirty();
+
+		TArray<UPackage*> PackagesToSave;
+		PackagesToSave.Add(Arms->GetOutermost());
+		UEditorLoadingAndSavingUtils::SavePackages(PackagesToSave, /*bOnlyDirty=*/false);
+
+		OutMessage = FString::Printf(TEXT("%s (뼈 %s) <- 위치 %s / 회전 %s · %s 저장됨"),
+			*SocketName.ToString(), *Socket->BoneName.ToString(),
+			*Socket->RelativeLocation.ToString(), *Socket->RelativeRotation.ToString(), *Arms->GetName());
+		return true;
+	}
+
 	float ComputeFloorOffsetToRest(const USkeletalMeshComponent* BodyComp, const TArray<UStaticMeshComponent*>& PartComps)
 	{
 		// Accumulate a world-space box over the body + every part. CalcBounds() computes on-demand from the component's

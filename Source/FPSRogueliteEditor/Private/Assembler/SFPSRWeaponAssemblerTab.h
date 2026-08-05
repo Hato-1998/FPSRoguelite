@@ -226,6 +226,18 @@ private:
 	ECheckBoxState IsMoveAllChecked() const;
 	ECheckBoxState IsIsolateChecked() const;
 
+	/** "팔 보기" 토글 — 1인칭 팔을 세우고 무기를 손에 얹는다. 클라이언트가 설정의 팔 메시가 비면 켜지길 거부하므로,
+	 *  체크 상태는 요청값이 아니라 **클라이언트의 실제 상태**(IsShowArms)를 되비춘다. 그때 StatusText로 이유를 알린다. */
+	void OnShowArmsChanged(ECheckBoxState NewState);
+	ECheckBoxState IsShowArmsChecked() const;
+
+	/** "손 위치 저장" 버튼은 팔이 실제로 서 있을 때만 누를 수 있다 — 팔이 없으면 구울 기준 프레임이 없다. */
+	bool IsShowArmsEnabled() const;
+
+	/** "손 위치 저장": '전체 이동'으로 잡은 무기 위치를 **팔 메시**의 무기 부착 소켓으로 굽는다
+	 *  (FPSRWeaponAssemblerHelpers::BakeWeaponSocket). 저장 대상이 무기가 아니라 팔이라는 점을 StatusText에 명시한다. */
+	FReply OnBakeHandClicked();
+
 	// --- State ------------------------------------------------------------------------------------------------
 
 	/** This tool's own preview scene — shared by the viewport widget below and never anything spawned into an
