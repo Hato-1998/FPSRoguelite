@@ -225,6 +225,20 @@ public:
 	 *  여기 한 곳에 둔다 — 규칙이 갈리면 툴에서 구운 소켓과 게임이 실제로 붙는 소켓이 서로 달라진다. */
 	FName ResolveWeaponAttachSocket(const UFPSRWeaponDataAsset* Weapon) const;
 
+	/** 1인칭 구도 = **카메라가 팔에 대해 어디에 있는가** + 그 카메라의 FOV. 무기 어셈블러(에디터 툴)가 프리뷰
+	 *  카메라를 이 값에 놓아 "플레이어 눈에 총이 어떻게 걸리는가"를 재현하는 데 쓴다 — 자유 시점으로는 그립을
+	 *  판정할 수 없다는 지적에서 나온 기능이다.
+	 *
+	 *  🚨 **부착 위상을 가정하지 않는다.** 팔이 카메라에 붙어 있든, 둘 다 캡슐에 붙어 있든, 사이에 무엇이 끼든
+	 *  실제 컴포넌트 월드 트랜스폼끼리 상대를 구하므로 배선이 바뀌어도 값이 따라간다. 그래서 상수로 박지 말고
+	 *  이걸 부를 것.
+	 *  🚨 **CDO 가 아니라 스폰된 인스턴스에서 불러야 한다** — 등록되지 않은 CDO 컴포넌트의 월드 트랜스폼은
+	 *  의미가 없다. 에디터 툴은 프리뷰 씬에 잠깐 스폰해서 읽고 파괴한다(엔진도 FBlueprintEditor 가 프리뷰 씬에
+	 *  BP 를 스폰한다 — BlueprintEditor.cpp). 프리뷰 월드는 BeginPlay 를 걸지 않으므로 게임플레이 초기화는 안 돈다.
+	 *
+	 *  두 컴포넌트 중 하나라도 없으면 false 를 반환하고 출력값은 건드리지 않는다. */
+	bool GetFirstPersonViewSetup(FTransform& OutCameraRelativeToArms, float& OutFieldOfView) const;
+
 	/** 활성 사이트의 스코프 오버레이 위젯 클래스(스코프 시각 활성 시). 없으면 null(HUD가 폴백 사용). 호출은 스코프
 	 *  진입 엣지에서(프레임마다 아님) — 소프트 참조를 동기 로드한다. (스코프 위젯화) */
 	UFUNCTION(BlueprintPure, Category = "FPSR|Weapon")

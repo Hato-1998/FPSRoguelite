@@ -544,6 +544,18 @@ void SFPSRWeaponAssemblerTab::Construct(const FArguments& InArgs)
 
 				+ SVerticalBox::Slot().AutoHeight().Padding(2.0f)
 				[
+					SNew(SCheckBox)
+					.IsChecked(this, &SFPSRWeaponAssemblerTab::IsFirstPersonViewChecked)
+					.OnCheckStateChanged(this, &SFPSRWeaponAssemblerTab::OnFirstPersonViewChanged)
+					.IsEnabled(this, &SFPSRWeaponAssemblerTab::IsFirstPersonViewEnabled)
+					.ToolTipText(LOCTEXT("FirstPersonViewTooltip", "카메라를 플레이어 눈 위치·FOV 에 고정하고 화면 중앙에 조준 축 기준선을 그립니다 — 그립을 '1인칭 화면 기준'으로 판정하기 위한 것입니다. 구도는 프로젝트 설정 > FPSR > 무기 어셈블러 의 '프리뷰 캐릭터 클래스'에서 읽어옵니다(비어 있으면 켜지지 않습니다). 켜져 있는 동안 카메라 조작은 잠깁니다."))
+					[
+						SNew(STextBlock).Text(LOCTEXT("FirstPersonView", "1인칭 뷰"))
+					]
+				]
+
+				+ SVerticalBox::Slot().AutoHeight().Padding(2.0f)
+				[
 					SNew(SHorizontalBox)
 
 					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 4.0f, 0.0f)
@@ -1914,6 +1926,41 @@ ECheckBoxState SFPSRWeaponAssemblerTab::IsIsolateChecked() const
 {
 	const bool bChecked = Viewport.IsValid() && Viewport->GetAssemblerClient().IsValid() && Viewport->GetAssemblerClient()->IsIsolate();
 	return bChecked ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
+}
+
+void SFPSRWeaponAssemblerTab::OnFirstPersonViewChanged(ECheckBoxState NewState)
+{
+	if (!Viewport.IsValid() || !Viewport->GetAssemblerClient().IsValid())
+	{
+		return;
+	}
+	const bool bWanted = NewState == ECheckBoxState::Checked;
+	TSharedPtr<FFPSRWeaponAssemblerViewportClient> Client = Viewport->GetAssemblerClient();
+	Client->SetFirstPersonView(bWanted);
+
+	// 팔 보기와 같은 규약(OnShowArmsChanged 참조): 체크박스는 실제 상태를 되비추므로 저절로 원복되지만, **왜**
+	// 안 켜졌는지는 알려 줘야 사용자가 설정을 찾아갈 수 있다. 사유는 클라이언트가 남긴 문구를 그대로 쓴다.
+	if (bWanted && !Client->IsFirstPersonView() && StatusText.IsValid())
+	{
+		const FString Issue = Client->GetArmsStatusMessage();
+		StatusText->SetText(Issue.IsEmpty()
+			? LOCTEXT("FirstPersonViewFailed", "1인칭 뷰를 켜지 못했습니다.")
+			: FText::FromString(Issue));
+	}
+}
+
+ECheckBoxState SFPSRWeaponAssemblerTab::IsFirstPersonViewChecked() const
+{
+	TSharedPtr<FFPSRWeaponAssemblerViewportClient> Client = Viewport.IsValid() ? Viewport->GetAssemblerClient() : nullptr;
+	return (Client.IsValid() && Client->IsFirstPersonView()) ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
+}
+
+bool SFPSRWeaponAssemblerTab::IsFirstPersonViewEnabled() const
+{
+	TSharedPtr<FFPSRWeaponAssemblerViewportClient> Client = Viewport.IsValid() ? Viewport->GetAssemblerClient() : nullptr;
+	// 이미 켜져 있으면 끌 수는 있어야 한다 — 팔을 끄는 등으로 조건이 사라져도 체크박스가 잠겨 못 끄는 상태가
+	// 되면 카메라가 잠긴 채 갇힌다.
+	return Client.IsValid() && (Client->IsFirstPersonView() || Client->CanUseFirstPersonView());
 }
 
 void SFPSRWeaponAssemblerTab::OnShowArmsChanged(ECheckBoxState NewState)

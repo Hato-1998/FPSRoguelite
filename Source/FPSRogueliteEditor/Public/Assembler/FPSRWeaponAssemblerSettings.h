@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Engine/DeveloperSettings.h"
+#include "Hero/FPSRCharacter.h"   // TSoftClassPtr<AFPSRCharacter> — 1인칭 구도를 읽어올 프리뷰 캐릭터
 #include "FPSRWeaponAssemblerSettings.generated.h"
 
 /**
@@ -45,4 +46,16 @@ public:
 	 *  재생/스크럽하며 애니가 진행되는 동안 그립이 미끄러지지 않는지 눈으로 판정하는 것이 오히려 이 필드의 목적. */
 	UPROPERTY(EditAnywhere, Config, Category = "First Person Preview", meta = (AllowedClasses = "/Script/Engine.AnimationAsset"))
 	TSoftObjectPtr<UAnimationAsset> PreviewArmsPose;
+
+	/** "1인칭 뷰" 모드가 구도를 읽어올 플레이어 캐릭터 BP. 자유 시점으로는 "플레이어 눈에 총이 어떻게 걸리는가"를
+	 *  판정할 수 없다는 지적에서 나온 기능이다(사용자 요청 2026-08-05·08-06).
+	 *
+	 *  툴은 이 클래스를 프리뷰 씬에 **잠깐 스폰해서** AFPSRCharacter::GetFirstPersonViewSetup 으로 카메라↔팔 상대
+	 *  트랜스폼과 FOV 를 읽고 **곧바로 파괴한다**. 상수로 박지 않는 이유는 부착 위상·수치가 BP 쪽에서 바뀔 수 있기
+	 *  때문이고, 근사(역행렬 계산)를 쓰지 않는 이유는 그게 "팔이 카메라에 직접 붙어 있다"는 가정을 안고 있기
+	 *  때문이다 — 에디터 툴은 정확성이 우선이다(사용자 지시).
+	 *
+	 *  비어 있으면 "1인칭 뷰" 토글이 켜지지 않고 툴은 자유 시점 그대로 동작한다. */
+	UPROPERTY(EditAnywhere, Config, Category = "First Person Preview")
+	TSoftClassPtr<AFPSRCharacter> PreviewCharacterClass;
 };

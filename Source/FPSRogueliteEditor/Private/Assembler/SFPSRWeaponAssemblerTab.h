@@ -245,6 +245,13 @@ private:
 	 *  그러면 "뼈가 없어 비활성 → 비활성이라 뼈를 못 고름"으로 잠긴다. */
 	bool IsShowArmsEnabled() const;
 
+	/** "1인칭 뷰" 체크박스 — 카메라를 플레이어 눈 위치/FOV 에 고정하고 조준 축 기준선을 그린다. 자유 시점으로는
+	 *  그립을 판정할 수 없다는 지적에서 나온 기능. 팔 보기와 같은 규약으로, 체크 상태는 요청값이 아니라 클라이언트의
+	 *  실제 상태(IsFirstPersonView)를 되비추고 못 켠 사유는 StatusText 로 알린다. */
+	void OnFirstPersonViewChanged(ECheckBoxState NewState);
+	ECheckBoxState IsFirstPersonViewChecked() const;
+	bool IsFirstPersonViewEnabled() const;
+
 	// --- 팔 메시/애니 피커(SObjectPropertyEntryBox, C2) — 값은 UFPSRWeaponAssemblerSettings에 직접 읽고 쓴다(진실원천
 	//     하나, 에셋 경로를 C++에 박지 않는다 — ADR 0006 I4). -------------------------------------------------------
 
