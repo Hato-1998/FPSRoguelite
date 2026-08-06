@@ -1,6 +1,6 @@
 # PlanConsultLoop — 플랜 특화 컨설트 프로토콜 (plan-first 델타)
 
-> **이 문서는 ConsultLoop의 plan-first 델타다.** 공유 골격(**호출 적용 범위 §0-1**, **역할·페르소나 §1**, **종료 권한 §3-1**, read-only 원칙, 라운드 호출법, `Docs/Review/` 산출·`_raw/` 보관, 자문 전용, SSOT/PROGRESS 선독)은 [`Docs/ConsultLoop.md`](ConsultLoop.md)가 소유한다. **같은 규칙이 양쪽에 있으면 여기서 지우고 ConsultLoop을 링크하라.** 여기엔 `/consult`와 다른 것만 적는다.
+> **이 문서는 ConsultLoop의 plan-first 델타다.** 공유 골격(**호출 적용 범위 §0-1**, **역할·페르소나 §1**, **종료 권한 §3-1**, read-only 원칙, 라운드 호출법, `Docs/Review/` 산출·`_raw/` 보관, 자문 전용, SSOT/PM 보드 선독)은 [`Docs/ConsultLoop.md`](ConsultLoop.md)가 소유한다. **같은 규칙이 양쪽에 있으면 여기서 지우고 ConsultLoop을 링크하라.** 여기엔 `/consult`와 다른 것만 적는다.
 >
 > Shared Contract: ConsultLoop v2 · Plan Delta: PlanConsult v1.1
 
@@ -18,7 +18,7 @@ IN이면 아래 무게 판정으로 넘어간다.
 
 목적: 절차 무게를 작업 위험에 맞춘다(가벼운 도구로 생존). **문턱은 "큰 작업"이 아니라 "잘못된 계획의 되돌리기 비용이 큰 작업".**
 - **NO-GO** — 요구가 불명확(먼저 사용자에게 1회 질문), 또는 HIGH_RISK 승인·SSOT 갱신·사용자 결정이 선행돼야 함. → 루프를 돌리지 말고 그 선행을 먼저 처리.
-- **LIGHT (기본)** — 작지만 사소하진 않은 작업. 10줄 이내 초안 + Codex 1라운드(질문 최대 2개) + 라운드 변화 3줄 요약 + `Exit Check` 1줄. 산출은 작업 플랜 또는 `PROGRESS.md` 하단. 30–45분 상한(넘으면 FULL 승격 또는 종료).
+- **LIGHT (기본)** — 작지만 사소하진 않은 작업. 10줄 이내 초안 + Codex 1라운드(질문 최대 2개) + 라운드 변화 3줄 요약 + `Exit Check` 1줄. 산출은 작업 플랜 또는 해당 **보드 행 페이지**(§6-9). 30–45분 상한(넘으면 FULL 승격 또는 종료).
 - **FULL** — 하드트리거 해당 또는 결정축 다수. 전체 절차 + `Docs/Review/` 저장.
 - **하드트리거(내용 무관 FULL)**: 서버권위/복제/RPC/Push Model/맵 이동/SaveGame 관여, 대량 적 성능경로(스폰·AI tick·pathing·대량 VFX) 변경, 데이터 마이그레이션, phase 경계를 흔드는 구조 변경, 결정축 3개 이상.
 - (참고: 정량 intake 점수표는 v1 미채택 — gate만 쓰고 본 루프를 안 쓰게 만드는 대표적 과설계. 실제 필요가 보이면 후속에서 추가. §7.)
@@ -39,7 +39,7 @@ R0에서 `plan_type`을 판정하고 **판정 근거(읽은 파일·task 키워�
 
 ## §3 절차 (6 스텝)
 1. 범위 판정(ConsultLoop §0-1) → Intake 판정(§1).
-2. 최소 컨텍스트 로드(`Game.md`·`PROGRESS.md`·해당 SSOT) + `plan_type`/공격 축 우선순위 결정(§2).
+2. 최소 컨텍스트 로드(`Game.md`·PM 보드·해당 SSOT) + `plan_type`/공격 축 우선순위 결정(§2).
 3. 초안 플랜 작성(목표·제약·proposed plan·사용자 결정지점·검증법). 코드/에셋 변경 없음.
 4. Codex 적대 리뷰(ConsultLoop §4 호출법 재사용). 질문은 좁힌다: "이 플랜이 과설계인가 / 실행을 막는 결함이 있나 / 사용자가 결정해야 할 쟁점은?".
 5. 수렴 — Codex 지적을 `수용 / 기각 / 사용자 결정 필요`로 분류. 라운드 정책(§4)에 따라 반복·종료.

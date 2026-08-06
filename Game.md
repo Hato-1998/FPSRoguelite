@@ -1,7 +1,7 @@
 # Game.md — FPSRoguelite SSOT 허브 (구조도 + 라우팅 가이드)
 
 > **이 문서는 SSOT(Single Source of Truth)의 허브다.** 장르 정체성·문서 체계·빠른 참조만 본문에 두고, **도메인 상세는 `Docs/SSOT/`로 분할**했다(문서 비대화 방지). 작업에 맞는 파일만 읽어라(아래 §0-1 라우팅).
-> 작업 시작 전 **이 허브(Game.md) + `PROGRESS.md`(라이브 진행현황) + 해당 도메인 파일**을 읽는다. 설계 변경은 **해당 도메인 파일(또는 이 허브)을 먼저 갱신**한 뒤 코드/에셋을 수정한다.
+> 작업 시작 전 **이 허브(Game.md) + Notion PM 보드(작업 현황 SSOT, `Docs/SSOT/Workflow.md` §6-9) + 해당 도메인 파일**을 본다. 설계 변경은 **해당 도메인 파일(또는 이 허브)을 먼저 갱신**한 뒤 코드/에셋을 수정한다.
 > 엔진: **UE 5.7** (`D:\UnrealEngine\UE_5.7`) / 최종 확정일 기준: 2026-05-30 / 설계 잠금 버전: v6(Locked) · **적 동시규모 실측 갱신 2026-07-01(~200-300)**
 > ⚠️ **섹션 번호(§1, §2-4-1, §5-2 …)는 분할 후에도 보존**된다. 소스 주석·교차참조의 "§x"는 아래 라우팅으로 해당 파일을 찾는다.
 
@@ -14,14 +14,15 @@
 | **Game.md** (이 문서) | SSOT 허브 = 장르 정체성(§1) + 문서 체계(§0) + 빠른 참조(§9) + **라우팅 가이드** | 우리(세션) |
 | **`Docs/SSOT/*.md`** | 도메인별 SSOT 본문(기획·기술·구조·성능·규칙·로드맵). 섹션번호 보존 | 우리(세션) |
 | **`Docs/Specs/*.md`** | **코어/구조 작업의 헤더 수준 설계 명세**(Fable 작성 → Sonnet이 그대로 구현 → Fable이 이 문서와 대조해 판정). 템플릿 `_TEMPLATE.md`, 절차 `Docs/SSOT/Workflow.md` §6-5-2 | Fable(설계 세션) |
-| **PROGRESS.md** | 휘발성 진행현황·핸드오프(완료/진행중/다음순서/검증법) | 우리(세션) |
-| `CLAUDE.md` / `AGENTS.md` | 진입 포인터(≤10줄). "Game.md·PROGRESS.md 읽기" + 절대금지 3줄 | 거의 불변 |
+| **Notion PM 보드** | **작업 현황·우선순위·선행관계·핸드오프의 SSOT**(2026-08-07 전면 이관). 프로토콜·URL = `Docs/SSOT/Workflow.md` §6-9. 보드 클레임 없이 작업 착수 금지(하드 게이트) | 모든 세션 + 사용자(PM) |
+| PROGRESS.md | 보드로 안내하는 **포인터 전용**(이관 전 내용은 git 히스토리) | 거의 불변 |
+| `CLAUDE.md` / `AGENTS.md` | 진입 포인터(≤10줄). "Game.md·PM 보드 보기" + 절대금지 3줄 | 거의 불변 |
 | `GameConfirm.md` | **다른 AI가 작성**하는 리뷰/추가제안 문서. 우리는 만들지 않음(§10, `Docs/SSOT/Workflow.md`) | 외부 AI |
 | `Docs/ConsultLoop.md` | **Codex 협업 프로토콜** — §0-1 호출 적용 범위(코어/구조만) + 안건(Claude)×적대 레드팀(Codex) 라이브 토론. 트리거 `/consult <주제>`·`/plan-consult <작업>`, 산출 `Docs/Review/`(프롬프트 매니저 인입원, §10) | 우리(세션) |
 | `Docs/InternalRedTeamReview.md` | **머지 게이트 레드팀 프라이머 원문**(내부 Fable 서브에이전트) — P1/P2/P3 리뷰 하네스 포함. 절차 = `Workflow.md` §6-6-1. 설명문 추가 금지 | 거의 불변 |
 | `Docs/CodexRedTeamPersona.md` | **Codex 역할 프라이머 원문**(웹/앱 적대 레드팀, **토론 채널 전용**) — 래퍼가 프롬프트에 그대로 싣는다. 설명문 추가 금지 | 거의 불변 |
 
-→ **AI가 읽는 본문 = 이 허브 + PROGRESS.md + 작업 관련 `Docs/SSOT/` 파일.**
+→ **AI가 보는 본문 = 이 허브 + Notion PM 보드(§6-9) + 작업 관련 `Docs/SSOT/` 파일.**
 
 ### 0-1. 🧭 라우팅 가이드 (작업 → 읽을 파일)
 
@@ -34,7 +35,7 @@
 | 카메라·생존(DBNO)·대시·게임필/피드백·HUD | [`Docs/SSOT/PlayerFeel.md`](Docs/SSOT/PlayerFeel.md) | §2-9, §2-13, §2-14 |
 | 신규 클래스·모듈·폴더 구조·기술 채택 | [`Docs/SSOT/Architecture.md`](Docs/SSOT/Architecture.md) | §3, §4(+4-1·4-2) |
 | 성능·복제 예산·Significance·플로우필드 | [`Docs/SSOT/Performance.md`](Docs/SSOT/Performance.md) | §5(+5-1·5-2) |
-| **모든 코드 작업(필독)** — 환경·빌드·브랜치·모델정책·리뷰 | [`Docs/SSOT/Workflow.md`](Docs/SSOT/Workflow.md) | §6(+6-1~6-8), §10 |
+| **모든 코드 작업(필독)** — 환경·빌드·브랜치·모델정책·**PM 보드**·리뷰 | [`Docs/SSOT/Workflow.md`](Docs/SSOT/Workflow.md) | §6(+6-1~6-9), §10 |
 | **코어·구조 설계·리팩토링** — Fable 주도 4단계 + 명세 양식 | [`Docs/SSOT/Workflow.md`](Docs/SSOT/Workflow.md) §6-5-2 + [`Docs/Specs/_TEMPLATE.md`](Docs/Specs/_TEMPLATE.md) | §6-5, §6-5-2 |
 | 진행상황·로드맵·재미 게이트·플레이스홀더 전환 | [`Docs/SSOT/Roadmap.md`](Docs/SSOT/Roadmap.md) | §7(+7-1~7-5), §8 |
 
