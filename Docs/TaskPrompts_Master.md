@@ -96,7 +96,7 @@
 1. main에서 phase/<유닛-브랜치> 분기 (§6-7)
 2. 플랜 확정(사용자 승인) → 구현(Sonnet 위임)/검증(Opus 직접)
 3. 자체 빌드(-WaitMutex) + 헤드리스 스모크 통과   ← 이게 "완료"의 정의. 미검증 머지 금지
-4. 사용자 검토: 코드 = diff 또는 Codex 머지게이트(codex-review.ps1 -Base main) / 콘텐츠 = PIE
+4. 사용자 검토: 코드 = diff 또는 레드팀 머지게이트(§6-6-1, 코어 갈래일 때) / 콘텐츠 = PIE
 5. 승인 → --no-ff main 머지 + PROGRESS·TaskPrompts §B 갱신 + 콘텐츠 동반 커밋 질문 → 브랜치 삭제
 6. 다음 유닛으로 (1부터 반복)
 ```
@@ -110,7 +110,7 @@
 
 ## §C 유닛별 실행 프롬프트
 
-> 공통 전제(프롬프트에도 내장): `Game.md`+`PROGRESS.md` 선행 독해 → 해당 도메인 SSOT만 추가 독해(§0-1 라우팅) / `phase/` 브랜치 분기(§6-7) / 플랜모드 우선·승인 후 진행 / 구현=Sonnet 위임·검증=Opus 직접(§6-5) / **완료 = 자체 빌드(`-WaitMutex`)+헤드리스 스모크 통과 후 사용자 검토·머지(§B-3). 미검증 머지 금지** / Codex 머지게이트(`Scripts/codex-review.ps1 -Base main`) / 승인 후 PROGRESS 갱신+`--no-ff` 머지+브랜치 삭제+콘텐츠 동반 커밋 여부 질문.
+> 공통 전제(프롬프트에도 내장): `Game.md`+`PROGRESS.md` 선행 독해 → 해당 도메인 SSOT만 추가 독해(§0-1 라우팅) / `phase/` 브랜치 분기(§6-7) / 플랜모드 우선·승인 후 진행 / 구현=Sonnet 위임·검증=Opus 직접(§6-5) / **완료 = 자체 빌드(`-WaitMutex`)+헤드리스 스모크 통과 후 사용자 검토·머지(§B-3). 미검증 머지 금지** / **레드팀 머지게이트**(`Workflow.md` §6-6-1 — 코어/구조 유닛일 때만, Fable 서브에이전트에 diff+명세만 전달) / 승인 후 PROGRESS 갱신+`--no-ff` 머지+브랜치 삭제+콘텐츠 동반 커밋 여부 질문.
 
 ### 완료 유닛 아카이브 인덱스 (V0~U20 — 프롬프트 본문 트림됨)
 완료 유닛의 실행 프롬프트 본문은 **재사용 안 됨(stale)**이라 §C에서 제거하고 아래에 보존한다:
@@ -188,7 +188,7 @@ Game.md + PROGRESS.md 먼저 읽어. Docs/TaskPrompts_Master.md의 유닛 U23을
 - U17 GameUserSettings(로컬설정)·U18b WeaponUnlockMilestones(런레벨 언락, config)와 혼동 금지 — 메타 아님.
 - 임시·미루기 스키마 금지 — 확정된 P0-③ 필드만 커밋, 미정 필드 지어내기 금지.
 
-[검증] 빌드+스모크 + 세이브/로드/버전 마이그레이션 + 손상/다운그레이드 방어 자동화 테스트 → 사용자 PIE(런 완료→재화 적립→언락 소비→세션영속) → codex-review.ps1 -Base main → PROGRESS 갱신+✅+--no-ff 머지.
+[검증] 빌드+스모크 + 세이브/로드/버전 마이그레이션 + 손상/다운그레이드 방어 자동화 테스트 → 사용자 PIE(런 완료→재화 적립→언락 소비→세션영속) → 레드팀 게이트(§6-6-1) → PROGRESS 갱신+✅+--no-ff 머지.
 ```
 
 ### U24 — RepGraph 공간그리드 relevancy (다중맵 U 아크 후속 페이즈)
@@ -217,7 +217,7 @@ Game.md + PROGRESS.md 먼저 읽어. Docs/TaskPrompts_Master.md의 유닛 U24를
 - Iris는 1순위 아님(§3 디폴트 OFF) — RepGraph로 충분한지 먼저 판정, 부족 시에만 Iris 평가.
 - 범위 밖(리포트 §2-5): World Partition Data Layers, 프로시저럴 맵 생성.
 
-[검증] 빌드+스모크 → 2-client 이상 PIE(seam 근처 적 팝인 제거 확인) + 대역폭 실측(NetProfiler, RepGraph 전후) → codex-review.ps1 -Base main → PROGRESS 갱신+✅+--no-ff 머지. **정량 프레임/대역폭 = U25 성능 게이트와 연계**.
+[검증] 빌드+스모크 → 2-client 이상 PIE(seam 근처 적 팝인 제거 확인) + 대역폭 실측(NetProfiler, RepGraph 전후) → 레드팀 게이트(§6-6-1) → PROGRESS 갱신+✅+--no-ff 머지. **정량 프레임/대역폭 = U25 성능 게이트와 연계**.
 ```
 
 ### U25 — §5 성능 정량 게이트
@@ -275,7 +275,7 @@ Game.md + PROGRESS.md 먼저 읽어. Docs/TaskPrompts_Master.md의 유닛 U13을
 - ChargeLaser 차징 중 프리즈 = 타이머 계속+데미지만 스킵(의도적 단순화) — PauseTimer로 "고치지" 마라.
 - ⚠️ **[U8 GMS 핫패스 후속 — 산출물 3 배선 전 필독]** `FPSRGameplayMessageSubsystem::BroadcastMessageInternal`(cpp:37)이 재진입 안전용으로 **브로드캐스트마다 리스너 `TArray`를 통복사**한다. U8은 무publisher라 현재 무해하나, **U13(핑/Gibs)이 적 사망(`NotifyKill`/HealthComponent death)에 상주 리스너를 붙이는 순간** 적 사망 ×수백/프레임에서 이 복사가 §5 "발행 핫패스 힙할당 금지"를 **위반**한다(U20 적 애님도 동일 소비처=같은 breach — 먼저 리스너 붙이는 쪽이 GMS 수정 소유). → **상주 리스너 배선 전에 GMS 통복사를 재진입 가드 in-place 순회 또는 예약 스크래치 버퍼로 교체** + 채널 단위 early-out 검토.
 
-[검증] 빌드+스모크 → PIE(+2-client에서 Finding A 해소 확인: 원격 클라 차징 표시/빔 정합) → codex-review.ps1 -Base main → PROGRESS 갱신+✅+--no-ff 머지.
+[검증] 빌드+스모크 → PIE(+2-client에서 Finding A 해소 확인: 원격 클라 차징 표시/빔 정합) → 레드팀 게이트(§6-6-1) → PROGRESS 갱신+✅+--no-ff 머지.
 ```
 
 ### U14 — 임시값 원복 + §8 플레이스홀더 전환 + 폴리시/패키지 빌드
@@ -298,7 +298,7 @@ Game.md + PROGRESS.md + Docs/SSOT/Roadmap.md §8(플레이스홀더 인벤토리
 - shipping 게이트 후 스모크/패키지에서 디버그 의존 코드 컴파일 깨짐 주의(에디터 전용 분리).
 - 패키지 빌드에서 LFS 에셋 쿠킹 시간/용량 — 미사용 폴더(Demo 등) 쿠킹 제외 설정 검토.
 
-[검증] 빌드+스모크+패키지 빌드 성공+패키지 실행 E2E(메뉴→런→보스→결과) → codex-review.ps1 -Base main → PROGRESS 갱신+✅+--no-ff 머지.
+[검증] 빌드+스모크+패키지 빌드 성공+패키지 실행 E2E(메뉴→런→보스→결과) → 레드팀 게이트(§6-6-1) → PROGRESS 갱신+✅+--no-ff 머지.
 ```
 
 ---
