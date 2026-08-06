@@ -4,8 +4,10 @@
 
 #include "CoreMinimal.h"
 #include "UObject/SoftObjectPtr.h"
+#include "Camera/CameraTypes.h"   // FMinimalViewInfo — 1인칭 구도는 FOV 하나가 아니라 뷰인포 통째로 다룬다(FFPSRFirstPersonSetup)
 
 class UFPSRWeaponDataAsset;
+class UWorld;
 class USkeletalMesh;
 class USkeletalMeshComponent;
 class USkeletalMeshSocket;
@@ -107,4 +109,53 @@ namespace FPSRWeaponAssemblerHelpers
 	 *  저장됐다"가 핵심(불변식 I-E). */
 	FBakeHandResult BakeWeaponSocket(USkeletalMeshComponent* ArmsComp, const USkeletalMeshComponent* BodyComp,
 	                                 FName SocketName, FName BoneName);
+
+	// --- 1인칭 구도 -----------------------------------------------------------------------------------------------
+
+	/** 플레이어 캐릭터에서 읽어온 1인칭 구도. "카메라가 팔에 대해 어디에 있는가" + 그 카메라의 뷰인포 전부. */
+	struct FFPSRFirstPersonSetup
+	{
+		/** AFPSRCharacter::GetFirstPersonViewSetup 이 준 값. 프리뷰 씬의 팔 월드에 곱하면 카메라를 놓을 자리가 된다.
+		 *  🚩 부호 주의: 이건 **카메라 기준이 아니라 팔 기준**이다(= BP 의 팔 상대 트랜스폼의 역행렬). BP 에 적힌
+		 *     팔 값 (-21, 10, -165)/yaw −95 를 그대로 기대하면 안 된다 — 그 역인 (8.13, 21.79, 165)/yaw +95 가 맞다. */
+		FTransform CameraRelativeToArms = FTransform::Identity;
+
+		/** 캐릭터 카메라의 뷰인포(FOV·AspectRatio·축 제약·1인칭 파라미터). 게임과 같은 호출로 채워진다. */
+		FMinimalViewInfo View;
+	};
+
+	/** 설정(UFPSRWeaponAssemblerSettings::PreviewCharacterClass)의 캐릭터를 World 에 **잠깐 스폰해서** 1인칭 구도를
+	 *  읽고 곧바로 파괴한다. 성공하면 true. 실패 사유는 OutIssue 에 한국어 한 줄.
+	 *
+	 *  🚨 CDO 가 아니라 인스턴스라야 컴포넌트 월드 트랜스폼이 의미를 갖는다(엔진도 FBlueprintEditor 가 프리뷰 씬에
+	 *  BP 를 스폰한다). World 는 **프리뷰 씬의 월드**를 넘길 것 — 에디터 레벨에 스폰하면 레벨이 더러워진다. */
+	bool ReadFirstPersonSetup(UWorld* World, FFPSRFirstPersonSetup& OutSetup, FString& OutIssue);
+
+	/** 목표 종횡비에서 **게임과 같은 구도**가 나오도록 가로 FOV 를 다시 구한다.
+	 *
+	 *  🚨 종횡비만 바꾸면 틀린다. 에디터 뷰포트에서 종횡비를 고정하는 유일한 경로(bConstrainAspectRatio)는 켜지는
+	 *  순간 축 제약을 **무시하고** FOV+AspectRatio 로 직접 투영을 만든다(CameraStackTypes.cpp:263). 반면 게임은
+	 *  축 제약(기본 MaintainYFOV — BaseEngine.ini `[/Script/Engine.LocalPlayer]`)에 따라 **세로 FOV 를 유지**하며
+	 *  가로를 넓힌다. 그래서 세로를 고정한 채 가로를 다시 계산해야 21:9 플레이어가 실제로 보는 화면이 나온다
+	 *  (예: 세로 58.72° 고정 → 21:9 의 가로는 90 이 아니라 105.4).
+	 *
+	 *  게임이 가로를 고정하는 설정(MaintainXFOV, 또는 가로가 긴 화면에서의 MajorAxisFOV)이면 재계산 없이 원본
+	 *  FOV 를 그대로 돌려준다 — 그때는 그게 게임의 동작이기 때문이다(CameraStackTypes.cpp:287).
+	 *
+	 *  @param View          캐릭터 카메라 뷰인포(원본 FOV·원본 종횡비·카메라가 축 제약을 덮었는지)
+	 *  @param TargetAspect  프리셋 종횡비
+	 *  @return 그 종횡비에서 쓸 가로 FOV(도). 16:9 원본을 16:9 로 맞추면 정확히 원본 값이 나온다(자기검증). */
+	float DeriveFOVForAspect(const FMinimalViewInfo& View, float TargetAspect);
+
+	/** 가로 FOV + 종횡비 → 세로 FOV(도). 화면에 "지금 세로로 몇 도를 보고 있는가"를 숫자로 띄우는 용도. */
+	float ComputeVerticalFOV(float HorizontalFOVDegrees, float Aspect);
+
+	/** 프리뷰 월드를 **프레임당 한 번만** 틱한다. 이미 이 프레임에 누가 틱했으면 아무것도 안 하고 false.
+	 *
+	 *  🚨 왜 필요한가: 조립기 탭과 1인칭 탭은 **같은 프리뷰 씬을 공유**하고, 뷰포트 클라이언트는 각자 Tick 에서
+	 *  월드를 돌린다(FAdvancedPreviewScene::Tick 은 캡처/라이팅만 갱신하지 월드를 안 돌린다). 두 탭을 나란히
+	 *  띄우는 게 이 기능의 정상 사용법인데, 그러면 한 프레임에 월드가 두 번 돌아 **팔 애니가 2배속**이 된다.
+	 *  그렇다고 한쪽만 틱하게 하면 그 탭이 가려지거나 닫혔을 때 다른 쪽 애니가 멈춘다 — 그래서 "누구든 먼저,
+	 *  단 한 번" 규칙으로 둔다. */
+	bool TickPreviewWorldOnce(UWorld* World, float DeltaSeconds);
 }

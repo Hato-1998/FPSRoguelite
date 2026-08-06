@@ -8,6 +8,25 @@
 #include "FPSRWeaponAssemblerSettings.generated.h"
 
 /**
+ * 1인칭 뷰 탭의 화면비 프리셋 한 줄. **표시는 해상도 이름으로, 동작은 종횡비로** 묶는다 — 1920×1080 과 2560×1440 은
+ * 둘 다 16:9 라 구도가 완전히 같다(가장자리 구도를 바꾸는 건 해상도가 아니라 종횡비다). 해상도를 따로 안 받는 이유도
+ * 그것이다: 픽셀 크기는 구도에 영향을 주지 않는다.
+ */
+USTRUCT()
+struct FFPSRAssemblerAspectPreset
+{
+	GENERATED_BODY()
+
+	/** 콤보 박스에 뜨는 이름. 같은 종횡비를 쓰는 해상도를 한 줄에 몰아 적어 두면 디자이너가 헷갈리지 않는다. */
+	UPROPERTY(EditAnywhere, Config)
+	FString Label;
+
+	/** 가로/세로. 16:9 = 1.777778. 이 값 하나가 구도를 결정한다. */
+	UPROPERTY(EditAnywhere, Config, meta = (ClampMin = "0.1", UIMin = "0.5", UIMax = "4.0"))
+	float AspectRatio = 1.777778f;
+};
+
+/**
  * Weapon Part Assembler tool configuration (editor-only). Config = Editor + DefaultConfig so the value lives in
  * Config/DefaultEditor.ini — checked in, shared by designers, and changeable in Project Settings > FPSR with NO C++
  * rebuild. The default mirrors the current content layout; a later content reorg (e.g. U22 Synty) can repoint it
@@ -58,4 +77,13 @@ public:
 	 *  비어 있으면 "1인칭 뷰" 토글이 켜지지 않고 툴은 자유 시점 그대로 동작한다. */
 	UPROPERTY(EditAnywhere, Config, Category = "First Person Preview")
 	TSoftClassPtr<AFPSRCharacter> PreviewCharacterClass;
+
+	/** 1인칭 뷰 탭의 화면비 프리셋 목록(콤보 박스 항목). 여기 값을 고치면 재빌드 없이 반영된다.
+	 *
+	 *  기본값은 아래 생성자에서 채운다 — 코드에 박아 두는 게 아니라 "처음 한 번의 시드"이고, ini 에 항목이 있으면
+	 *  그쪽이 이긴다. 새 종횡비(예: 폴더블·세로 모니터)는 여기에 한 줄 추가하면 끝이고 C++ 은 손대지 않는다. */
+	UPROPERTY(EditAnywhere, Config, Category = "First Person Preview")
+	TArray<FFPSRAssemblerAspectPreset> AspectPresets;
+
+	UFPSRWeaponAssemblerSettings();
 };

@@ -707,7 +707,7 @@ FName AFPSRCharacter::ResolveWeaponAttachSocket(const UFPSRWeaponDataAsset* Weap
 	return (Weapon && !Weapon->WeaponAttachSocket.IsNone()) ? Weapon->WeaponAttachSocket : WeaponAttachSocketName;
 }
 
-bool AFPSRCharacter::GetFirstPersonViewSetup(FTransform& OutCameraRelativeToArms, float& OutFieldOfView) const
+bool AFPSRCharacter::GetFirstPersonViewSetup(FTransform& OutCameraRelativeToArms, FMinimalViewInfo& OutViewInfo) const
 {
 	if (!FirstPersonCamera || !FirstPersonArms)
 	{
@@ -717,7 +717,10 @@ bool AFPSRCharacter::GetFirstPersonViewSetup(FTransform& OutCameraRelativeToArms
 	// 위상 무관 — 두 컴포넌트의 실제 월드 트랜스폼끼리 상대를 구한다(헤더 주석 참조). 팔을 항등에 세운 프리뷰
 	// 씬에서는 이 값이 그대로 카메라를 놓을 자리가 된다.
 	OutCameraRelativeToArms = FirstPersonCamera->GetComponentTransform().GetRelativeTransform(FirstPersonArms->GetComponentTransform());
-	OutFieldOfView = FirstPersonCamera->FieldOfView;
+
+	// 게임이 매 프레임 부르는 그 함수 그대로(ULocalPlayer::CalcSceneView -> 뷰타깃 -> UCameraComponent::GetCameraView).
+	// FOV/AspectRatio/bConstrainAspectRatio/1인칭 파라미터/PP 가 한 번에 채워지므로 툴이 필드를 베낄 필요가 없다.
+	FirstPersonCamera->GetCameraView(0.0f, OutViewInfo);
 	return true;
 }
 

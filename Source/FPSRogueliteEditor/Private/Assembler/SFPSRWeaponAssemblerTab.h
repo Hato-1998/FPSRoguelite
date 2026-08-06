@@ -11,6 +11,7 @@
 #include "UObject/SoftObjectPath.h"
 
 class FAdvancedPreviewScene;
+class FFPSRWeaponAssemblerViewportClient;
 class SEditableTextBox;
 class SFPSRWeaponAssemblerViewport;
 class STextBlock;
@@ -38,6 +39,17 @@ public:
 	SLATE_END_ARGS()
 
 	void Construct(const FArguments& InArgs);
+
+	/** 이 탭이 소유한 프리뷰 씬. **1인칭 뷰 탭(SFPSRWeaponAssemblerFPTab)이 이걸 공동 소유해서** 같은 무기·같은
+	 *  팔을 다른 카메라로 그린다 — 그래서 조립기에서 기즈모로 만진 결과가 1인칭 창에 바로 보인다.
+	 *
+	 *  🚨 반환형이 참조가 아니라 TSharedPtr 인 것이 중요하다: 이 탭은 노매드 탭이라 사용자가 먼저 닫을 수 있는데,
+	 *  FEditorViewportClient 는 씬을 raw 참조로 들기 때문에 빌려 간 쪽이 **공동 소유**하지 않으면 매달린다. */
+	TSharedPtr<FAdvancedPreviewScene> GetPreviewScene() const { return PreviewScene; }
+
+	/** 뷰포트 클라이언트(팔 컴포넌트·무기 DA 등 프리뷰 상태의 주인). 뷰포트가 아직 구성되기 전이면 null.
+	 *  1인칭 뷰 탭이 팔 컴포넌트를 가져가는 통로다. */
+	TSharedPtr<FFPSRWeaponAssemblerViewportClient> GetAssemblerViewportClient() const;
 
 private:
 	/** One row of the left-panel parts list: the representative (variant-stripped) part name shown to the designer,
@@ -245,12 +257,12 @@ private:
 	 *  그러면 "뼈가 없어 비활성 → 비활성이라 뼈를 못 고름"으로 잠긴다. */
 	bool IsShowArmsEnabled() const;
 
-	/** "1인칭 뷰" 체크박스 — 카메라를 플레이어 눈 위치/FOV 에 고정하고 조준 축 기준선을 그린다. 자유 시점으로는
-	 *  그립을 판정할 수 없다는 지적에서 나온 기능. 팔 보기와 같은 규약으로, 체크 상태는 요청값이 아니라 클라이언트의
-	 *  실제 상태(IsFirstPersonView)를 되비추고 못 켠 사유는 StatusText 로 알린다. */
-	void OnFirstPersonViewChanged(ECheckBoxState NewState);
-	ECheckBoxState IsFirstPersonViewChecked() const;
-	bool IsFirstPersonViewEnabled() const;
+	/** "1인칭 뷰 열기" 버튼 — 별도 탭(SFPSRWeaponAssemblerFPTab)을 띄운다.
+	 *
+	 *  🚩 예전엔 이 자리에 체크박스가 있어 **이 뷰포트의** 카메라를 눈 위치로 옮겼다. 그 방식은 화면비를 게임과
+	 *  맞출 수 없어서 폐기했다 — 도킹된 뷰포트의 화면비는 레이아웃이 정하는 값이라, FOV 가 같아도 세로로 보이는
+	 *  범위가 게임과 다르다(실측 82.3° vs 58.7°). 별도 탭이라야 창 비율을 원하는 대로 줄 수 있다. */
+	FReply OnOpenFirstPersonViewClicked();
 
 	// --- 팔 메시/애니 피커(SObjectPropertyEntryBox, C2) — 값은 UFPSRWeaponAssemblerSettings에 직접 읽고 쓴다(진실원천
 	//     하나, 에셋 경로를 C++에 박지 않는다 — ADR 0006 I4). -------------------------------------------------------

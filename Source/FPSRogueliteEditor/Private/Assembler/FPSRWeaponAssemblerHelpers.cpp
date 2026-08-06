@@ -2,7 +2,12 @@
 
 #include "Assembler/FPSRWeaponAssemblerHelpers.h"
 
+#include "Assembler/FPSRWeaponAssemblerSettings.h"
+#include "Hero/FPSRCharacter.h"   // GetFirstPersonViewSetup — 구도 규칙은 캐릭터가 갖고 툴이 그걸 부른다
 #include "Weapon/FPSRWeaponDataAsset.h"
+
+#include "Engine/LocalPlayer.h"   // ULocalPlayer::AspectRatioAxisConstraint — 게임이 실제로 쓰는 축 제약(상수로 박지 않는다)
+#include "Engine/World.h"
 
 #include "FileHelpers.h"   // UEditorLoadingAndSavingUtils::SavePackages (UnrealEd — avoids the EditorScriptingUtilities plugin)
 #include "Engine/SkeletalMesh.h"
@@ -348,5 +353,114 @@ namespace FPSRWeaponAssemblerHelpers
 		const FVector Center = AssemblyBox.GetCenter();
 		const FVector Extent = AssemblyBox.GetExtent();
 		return static_cast<float>(-Center.Z + Extent.Z);
+	}
+
+	// --- 1인칭 구도 -----------------------------------------------------------------------------------------------
+
+	bool ReadFirstPersonSetup(UWorld* World, FFPSRFirstPersonSetup& OutSetup, FString& OutIssue)
+	{
+		const UFPSRWeaponAssemblerSettings* Settings = GetDefault<UFPSRWeaponAssemblerSettings>();
+		if (!Settings || Settings->PreviewCharacterClass.IsNull())
+		{
+			OutIssue = TEXT("프로젝트 설정 > FPSR > 무기 어셈블러 에 '프리뷰 캐릭터 클래스'가 비어 있어 1인칭 구도를 읽을 수 없습니다.");
+			return false;
+		}
+
+		UClass* CharClass = Settings->PreviewCharacterClass.LoadSynchronous();
+		if (!CharClass || !World)
+		{
+			OutIssue = TEXT("프리뷰 캐릭터 클래스를 불러오지 못했습니다.");
+			return false;
+		}
+
+		// 🚨 CDO 가 아니라 **인스턴스**라야 컴포넌트 월드 트랜스폼이 의미를 갖는다. 엔진도 FBlueprintEditor 가
+		// 프리뷰 씬에 BP 를 그대로 스폰한다(BlueprintEditor.cpp). 프리뷰 월드는 BeginPlay 를 걸지 않으므로
+		// AFPSRCharacter::BeginPlay/PossessedBy 같은 게임플레이 초기화는 돌지 않는다 — 값만 읽고 즉시 파괴한다.
+		FActorSpawnParameters SpawnParams;
+		SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+		SpawnParams.ObjectFlags |= RF_Transient;
+		AFPSRCharacter* Probe = World->SpawnActor<AFPSRCharacter>(CharClass, FTransform::Identity, SpawnParams);
+		if (!Probe)
+		{
+			OutIssue = TEXT("프리뷰 캐릭터를 프리뷰 씬에 스폰하지 못했습니다.");
+			return false;
+		}
+
+		const bool bOk = Probe->GetFirstPersonViewSetup(OutSetup.CameraRelativeToArms, OutSetup.View);
+		Probe->Destroy();
+
+		if (!bOk)
+		{
+			OutIssue = TEXT("프리뷰 캐릭터에 1인칭 카메라 또는 1인칭 팔 컴포넌트가 없어 구도를 읽지 못했습니다.");
+		}
+		return bOk;
+	}
+
+	float ComputeVerticalFOV(float HorizontalFOVDegrees, float Aspect)
+	{
+		const float HalfX = FMath::DegreesToRadians(FMath::Max(0.001f, HorizontalFOVDegrees) * 0.5f);
+		const float HalfY = FMath::Atan(FMath::Tan(HalfX) / FMath::Max(UE_KINDA_SMALL_NUMBER, Aspect));
+		return FMath::RadiansToDegrees(HalfY * 2.0f);
+	}
+
+	bool TickPreviewWorldOnce(UWorld* World, float DeltaSeconds)
+	{
+		if (!World)
+		{
+			return false;
+		}
+
+		// 월드별 "마지막으로 틱한 프레임". 씬은 보통 하나뿐이지만, 조립기 탭을 닫았다 열면 새 씬이 생기고 옛 씬이
+		// 잠시 남을 수 있어 월드를 키로 둔다. 죽은 월드의 항목은 그때그때 걷어낸다(표가 커질 일이 없다).
+		static TMap<TWeakObjectPtr<UWorld>, uint64> LastTickedFrame;
+		for (auto It = LastTickedFrame.CreateIterator(); It; ++It)
+		{
+			if (!It.Key().IsValid())
+			{
+				It.RemoveCurrent();
+			}
+		}
+
+		if (const uint64* Found = LastTickedFrame.Find(World))
+		{
+			if (*Found == GFrameCounter)
+			{
+				return false;   // 이 프레임엔 이미 다른 탭이 돌렸다
+			}
+		}
+		LastTickedFrame.Add(World, GFrameCounter);
+
+		World->Tick(LEVELTICK_All, DeltaSeconds);
+		return true;
+	}
+
+	float DeriveFOVForAspect(const FMinimalViewInfo& View, float TargetAspect)
+	{
+		const float SourceFOV = FMath::Max(0.001f, View.FOV);
+		const float SourceAspect = View.AspectRatio;
+		TargetAspect = FMath::Max(UE_KINDA_SMALL_NUMBER, TargetAspect);
+
+		// 게임이 실제로 쓰는 축 제약. 카메라가 덮었으면(bOverrideAspectRatioAxisConstraint) 그 값이,
+		// 아니면 ULocalPlayer 의 config 기본값이 진짜다 — 상수로 박지 않는다(BaseEngine.ini 를 프로젝트가 덮을 수 있다).
+		const EAspectRatioAxisConstraint GameConstraint =
+			View.AspectRatioAxisConstraint.Get(GetDefault<ULocalPlayer>()->AspectRatioAxisConstraint);
+
+		// CameraStackTypes.cpp:287 과 같은 판정. MajorAxisFOV 는 "긴 축을 고정"이므로 가로가 긴 프리셋에선 가로 고정.
+		const bool bGameMaintainsX =
+			(GameConstraint == AspectRatio_MaintainXFOV) ||
+			(GameConstraint == AspectRatio_MajorAxisFOV && TargetAspect >= 1.0f);
+
+		if (bGameMaintainsX || SourceAspect <= UE_KINDA_SMALL_NUMBER)
+		{
+			// 게임이 가로를 고정하는 설정이면 종횡비가 바뀌어도 가로 FOV 는 그대로다 — 재계산하면 오히려 틀린다.
+			return SourceFOV;
+		}
+
+		// 세로 고정(MaintainYFOV): 원본 종횡비에서 세로 FOV 를 구해 그대로 유지하고, 목표 종횡비의 가로를 되푼다.
+		// CameraStackTypes.cpp:329-331 의 역연산이다.
+		const float HalfX = FMath::DegreesToRadians(SourceFOV * 0.5f);
+		const float HalfY = FMath::Atan(FMath::Tan(HalfX) / SourceAspect);
+		const float NewHalfX = FMath::Atan(FMath::Tan(HalfY) * TargetAspect);
+		return FMath::RadiansToDegrees(NewHalfX * 2.0f);
 	}
 }

@@ -1,15 +1,15 @@
-# 인계 — 무기 어셈블러 1인칭 트랙 (2026-08-06 갱신)
+# 인계 — 무기 어셈블러 1인칭 트랙 (2026-08-06 갱신 2)
 
 브랜치 `refactor/character`.
 
 ## 지금 상태 한 줄
 
-**검증 트랙은 끝났다**(커밋 `9977af8a`). **1인칭 뷰 v1 은 코드·빌드까지 됐지만 에디터 검증을 안 했다.**
-그리고 사용자가 v1 을 보고 **"별도 창 + 게임과 같은 화면비"** 를 요청했다 — 그 설계가 아래 §3 에 다 적혀 있다.
+**1인칭 뷰가 별도 도킹 탭 + 화면비 고정으로 교체됐다(빌드 통과, ⚠️ 에디터 미검증).**
+그 전 단계인 **v1 의 구도 계산은 검증이 끝났다** — 다만 v1 자체는 이 교체로 제거됐다.
 
-## 1. 끝난 것 (커밋 `9977af8a`)
+## 1. 끝난 것
 
-에디터 실측으로 4항목 전부 통과. **판정은 전부 숫자로 했고 매번 대조군을 뒀다.**
+### 1-A. 어셈블러 팔 프리뷰 (커밋 `9977af8a`) — 에디터 실측 검증 완료
 
 | 항목 | 결과 |
 |---|---|
@@ -18,76 +18,95 @@
 | 애니 중 그립 불변 | `hand_r` 월드가 움직여도 그립 6칸 비트 고정 |
 | 파츠 베이크 왕복 | 드리프트 **0.00004** |
 
-검증 중 발견해 같이 고친 결함 4건은 커밋 메시지에 전문이 있다(애디티브 애니 · 공유 소켓 덮어쓰기 ·
-그립 저장 누적 · 설정이 디스크에 안 남던 것).
+### 1-B. 1인칭 구도 값 — 검증 완료 (2026-08-06, 대조군 2경로)
 
-## 2. 커밋했지만 **에디터 검증 안 한 것** — 1인칭 뷰 v1
+에디터 파이썬으로 **툴과 무관한 경로**에서 재고, 툴과 같은 알고리즘으로 또 재서 대조했다.
 
-빌드는 통과했다. 에디터에서 한 번도 값을 확인하지 않았다.
+| | 값 |
+|---|---|
+| 팔 → 카메라 (BP 에 적힌 값) | `(-21, 10, -165)` / yaw **−95** / scale 1 |
+| **카메라 → 팔** (`GetFirstPersonViewSetup` 반환값) | **`(8.1317, 21.7916, 165.0)` / yaw +95** |
+| FOV / 종횡비 / 축제약 | **90** / 1.7778 / `bConstrainAspectRatio=False` |
+| 팔 메시 · 애님 | `SK_LPAMG_Arms_Base_Smooth` · `ABP_FP_Base_C` |
 
-- 런타임: `AFPSRCharacter::GetFirstPersonViewSetup(FTransform& OutCameraRelativeToArms, float& OutFOV)`
-  두 컴포넌트의 **실제 월드 트랜스폼끼리** 상대를 구한다 — 부착 위상을 가정하지 않는다.
-  🚨 **CDO 가 아니라 스폰된 인스턴스에서 불러야** 컴포넌트 월드가 의미를 갖는다.
-- 에디터: 설정 `PreviewCharacterClass`(기본 `BP_FPSRPlayer`, `Config/DefaultEditor.ini` 에 넣어 둠) ·
-  "1인칭 뷰" 체크박스 · 프리뷰 씬에 **스폰 → 읽기 → 즉시 파괴** · 카메라 잠금(매 프레임 되돌리기) ·
-  캔버스 조준 기준선.
+- **대조군 A**(툴과 같은 방식: 스폰 인스턴스의 두 컴포넌트 **월드**끼리 상대) ↔ **대조군 B**(무관한 방식:
+  팔 **상대** 트랜스폼의 역행렬) → **차이 0.000000**. 측정 도구가 고장난 게 아니라는 것까지 확인됐다.
+- 스폰 인스턴스 값 = BP 값 → **컨스트럭션 스크립트는 팔을 안 건드린다.**
+- 🚩 **"LPAMG 팔로 갈아탔으니 값이 달라졌을 것"은 아니었다.** 팔 메시는 이미 LPAMG 인데 배치값은 그대로다.
+  납득도 된다 — LPAMG 팔은 79본 **전신 스켈레톤**이라 루트가 발밑이고, 카메라가 팔 루트보다 165cm 위에 앉는 게 맞다.
 
-**첫 검증 때 볼 것**: 읽어온 카메라↔팔 상대값을 실측 기대치 `(-21, 10, -165)`/yaw −95, FOV 90 과 대조.
-🚩 그 기대치는 **옛 NeonV 팔 기준**이라 지금 LPAMG 팔과 다를 수 있다 — 다르면 그 자체가 발견이다.
+### 1-C. v1 에디터 확인 (스크린샷 판정)
 
-## 3. 다음 작업 — 1인칭 뷰를 **별도 도킹 탭 + 화면비 고정**으로 (사용자 요청, 설계 확정)
+체크박스가 켜진 채 유지(= 프리뷰 씬 스폰·읽기 성공) · 카메라 잠금 작동(드래그 무반응) · 기준선 정중앙 ·
+구도가 규약대로(카메라가 눈높이. 규약이 뒤집혔으면 팔 루트보다 165cm **아래** = 바닥 밑이라 즉시 티가 났을 것).
 
-> 원문: *"이런식의 뷰말고 따로 뷰포트 창을 열어서 보여줘야할거같네 실제 인 게임화면과 동일해야 맞출수
-> 있으니까 해상도에 맞게 QHD, FHD 식으로 화면 비율에 맞게 설정할수있게 작업 뷰포트도 따로 만들고"*
+## 2. 이번에 한 것 — 1인칭 뷰 = 별도 탭 + 화면비 고정 (⚠️ 에디터 미검증)
 
-이유: 도킹된 뷰포트는 화면비가 게임과 달라 **FOV 가 같아도 가장자리 기준 구도가 다르다.**
+`Tools > FPSR > 무기 1인칭 뷰…`, 또는 조립기 탭의 **`1인칭 뷰 열기`** 버튼(예전 체크박스 자리).
+조립기 탭의 프리뷰 씬을 **그대로 공유**하므로 조립기에서 기즈모로 만진 결과가 이 창에 즉시 보인다.
 
-### 핵심 메커니즘 (엔진 소스 확인 완료)
+신규 4 = `FFPSRWeaponAssemblerFPViewportClient` · `SFPSRWeaponAssemblerFPViewport` · `SFPSRWeaponAssemblerFPTab` ·
+`FPSRWeaponAssemblerSettings.cpp`(프리셋 시드) / 수정 = 헬퍼·모듈·조립기 탭·조립기 클라이언트·`AFPSRCharacter`.
 
-에디터 뷰포트가 종횡비를 고정하는 **유일한** 경로는 "제어 액터 뷰인포"다:
+### 🚨 인계문서(이전판) 가 틀렸던 것 3건 — 엔진 소스로 확인
 
-```cpp
-// EditorViewportClient.cpp:1158
-bool bConstrainAspectRatio = bUseControllingActorViewInfo && ControllingActorViewInfo.bConstrainAspectRatio;
-// EditorViewportClient.cpp:1190 부근 — 투영행렬이 여기서 만들어진다
-FMinimalViewInfo::CalculateProjectionMatrixGivenView(ControllingActorViewInfo, AspectRatioAxisConstraint, Viewport, ViewInitOptions);
+**① "화면비 고정이 매 프레임 카메라 되돌리기도 대체한다" = 거짓.**
+엔진은 뷰 위치·회전을 **뷰포트 자기 트랜스폼**에서 읽고(`EditorViewportClient.cpp:1081-1082`, ViewOrigin 은 1109),
+우리가 넣은 `ControllingActorViewInfo.Location/Rotation` 을 매 프레임 **거꾸로 덮어쓴다**(1102-1106).
+→ **되돌리기는 유지해야 한다.** 안 그러면 처음엔 정상으로 보이다 드래그하면 무너지는 형태로 깨진다.
+
+**② 프리셋을 종횡비만 바꾸면 16:9 말고는 전부 틀린 구도가 된다.**
+게임은 **세로 FOV 유지**(`BaseEngine.ini:2917` `[/Script/Engine.LocalPlayer]` = `MaintainYFOV`, 프로젝트 오버라이드 없음).
+그런데 `bConstrainAspectRatio` 를 켜면 엔진이 축 제약을 **아예 무시**하고 `FOV`+`AspectRatio` 로 직접 투영을
+만든다(`CameraStackTypes.cpp:263`). → 세로를 고정한 채 가로 FOV 를 다시 구해야 한다
+(`FPSRWeaponAssemblerHelpers::DeriveFOVForAspect`). 16:9 에서 정확히 90.000 이 나오는 게 자기검증이다.
+
+**③ 축 제약을 안 채우면 구도가 사람마다 달라진다.**
+`EditorViewportClient.cpp:1168` 은 그 값을 **사용자 에디터 환경설정**에서 가져온다
+(`BaseEditorPerProjectUserSettings.ini` = `MaintainXFOV` — 게임과 **반대**). 그래서 명시로 채워 둔다.
+
+### 확인해 둔 엔진 사실
+
+- 레터박스는 엔진이 그린다(`EditorViewportClient.cpp:4746` `Canvas->Clear(Black)`), 제약 사각형은 **가운데 정렬**
+  (`UnrealClient.cpp:2204`). 기준선은 뷰포트 중앙이 아니라 `FSceneView::CameraConstrainedViewRect` 중앙에 그린다.
+- UE 5.7 네이티브 1인칭 렌더 파라미터(`EditorViewportClient.cpp:1536`)는 **지금 안 쓴다**
+  (팔 메시 `FirstPersonPrimitiveType::NONE`, `FirstPersonScale=1.0`). 그래도 값을 손으로 베끼지 않으려고
+  `AFPSRCharacter::GetFirstPersonViewSetup` 이 `UCameraComponent::GetCameraView` 로 **뷰인포를 통째** 넘긴다
+  — 나중에 켜면 툴이 저절로 따라간다.
+- 프리뷰 월드를 두 탭이 각자 틱하면 **애니가 2배속**이 된다 → `TickPreviewWorldOnce` 로 프레임당 1회 문지기.
+
+## 3. 다음 — 에디터 검증 (아직 안 함)
+
+계기가 탭 상단에 숫자로 뜬다(v1 엔 이게 없어서 매번 툴 밖에서 따로 재야 했다).
+
+```
+카메라(팔 기준) 위치 (8.13, 21.79, 165.00) · 회전 (p 0.00, y 95.00, r 0.00)
+원본 FOV 90.00° @ 1.7778
 ```
 
-→ `bUseControllingActorViewInfo = true` + `ControllingActorViewInfo` 에 Location/Rotation/FOV/AspectRatio/
-`bConstrainAspectRatio = true` 를 채우면 엔진이 레터박스까지 넣어 준다. **v1 의 "매 프레임 카메라
-되돌리기"보다 정확하고 카메라 잠금도 이걸로 자연히 된다** — v1 의 그 방식은 이걸로 교체할 것.
+| 화면비 | 적용 FOV | **세로** |
+|---|---|---|
+| 16:9 | 90.00° | **58.72°** |
+| 16:10 | 83.97° | **58.72°** |
+| 21:9 (3440×1440) | 106.69° | **58.72°** |
+| 32:9 | 126.87° | **58.72°** |
+| 4:3 | 73.74° | **58.72°** |
 
-### 🚩 먼저 알 것: FHD 와 QHD 는 구도가 같다
+**판정 핵심 = 세로 열.** 프리셋을 바꿔도 58.72 에서 안 움직여야 게임과 같은 구도다. 따라 줄어들면(21:9 에서
+46.40 등) FOV 재계산이 안 걸린 것 = 위 정정 ② 를 놓친 상태.
 
-1920×1080 과 2560×1440 은 **둘 다 16:9** 라 구도가 완전히 동일하다. 가장자리 구도를 바꾸는 건 해상도가
-아니라 **종횡비**다. 프리셋은 해상도 이름으로 보여주되 **동작은 종횡비로 묶을 것**
-(16:9 = FHD·QHD·4K / 21:9 울트라와이드 / 16:10). 해상도 자체는 픽셀 단위 크기를 볼 때만 의미가 있다.
-
-### 파일 구성 (신규 4 + 수정 3)
-
-- `FPSRWeaponAssemblerHelpers` 에 `ReadFirstPersonSetup(UWorld*, FTransform&, float&, FString&)` **추출**
-  (지금은 `FFPSRWeaponAssemblerViewportClient::ReadFirstPersonSetupFromCharacter` 에 있다) — 두 클라이언트가 공유
-- `FFPSRWeaponAssemblerFPViewportClient` — 종횡비 고정 + 조준 기준선 전담
-- `SFPSRWeaponAssemblerFPViewport` / `SFPSRWeaponAssemblerFPTab` — 뷰포트 + 종횡비 콤보
-- 모듈(`FPSRogueliteEditorModule.cpp`)에 **두 번째 노매드 탭** 등록 + `Tools > FPSR` 메뉴 항목
-
-### 🚨 수명주기 — 여기가 제일 위험하다
-
-프리뷰 씬은 `SFPSRWeaponAssemblerTab` 이 `TSharedPtr<FAdvancedPreviewScene>` 로 소유한다(`.h:346`).
-`FEditorViewportClient` 는 씬을 **raw 포인터**로 받으므로 씬이 먼저 죽으면 매달린다.
-
-- 1인칭 탭이 씬을 **공동 소유(`TSharedPtr`)** → 매달림 원천 차단
-- 조립기 탭 자체는 **`TWeakPtr`** 로 참조
-- 🚩 조립기 탭은 노매드 탭이라 닫았다 다시 열면 **새 씬**이 생긴다. 1인칭 탭은 자기가 쥔 씬이 현재
-  조립기 탭의 씬과 다르면 안내 문구를 띄우고 렌더를 멈출 것(스테일 빈 씬을 보여주면 안 된다)
+같이 볼 것: 드래그해도 안 움직이는지(정정 ①) · 조립기 기즈모 조작이 즉시 반영되는지 ·
+**조립기 탭을 닫으면** 검은 화면이 아니라 "연결 끊김 + [다시 연결]" 이 뜨는지 · 두 탭을 나란히 띄우고
+`FP_Rifle_Reload` 재생 시 2배속이 아닌지.
 
 ## 4. 그 뒤 순서
 
-1. **`SOCKET_Weapon` 실제 저작** — 현재 `(-13, 4, 1)/(p-10,y60,r-15)` 은 **임시**(저장 경로 검증용).
-   1인칭 뷰가 제대로 된 뒤 다시 잡는다. ⚠️ 전용 소켓이 없는 무기 **전부**가 공유하는 소켓이다.
+1. **`SOCKET_Weapon` 실제 저작** — 현재 `(-13, 4, 1)/(p−10, y60, r−15)` 은 **임시**(저장 경로 검증용).
+   스크린샷에서 총이 오른쪽 아래로 치우쳐 보이는 건 **툴 결함이 아니라 이 임시값을 정확히 재현한 것**이다.
+   ⚠️ 전용 소켓이 없는 무기 **전부**가 공유하는 소켓이다.
 2. **왼손 IK** — 정지 소총 자세에서 `hand_l` ↔ 무기 `SOCKET_LeftHand` **28.13cm**(실측).
-   🚩 **1번을 먼저 끝내야 한다** — 소켓은 무기에 달렸고 무기는 오른손에 매달리므로, 오른손 그립이
-   틀어지면 왼손 소켓도 통째로 끌려간다. 남은 것: `Maintain Effector Rel Rot` 켜기(Details → `IK` 섹션,
+   🚩 **1번을 먼저 끝내야 한다** — 소켓은 무기에 달렸고 무기는 오른손에 매달리므로, 오른손 그립이 틀어지면
+   왼손 소켓도 통째로 끌려간다. 남은 것: `Maintain Effector Rel Rot` 켜기(Details → `IK` 섹션,
    `Allow Stretching` 바로 아래 / `Allow Twist` 바로 위) · Joint Target 축 · 손가락 포즈 ·
    `LeftHandIKWeight` 커브(없어서 코드가 1.0 폴백 → 지금 `NOT bIsReloading` 곱셈으로 우회 중)
 3. **PIE 교차확인** — 툴 그립 = 인게임 그립인지, 총 크기가 두 번 곱해지지 않았는지
@@ -102,12 +121,17 @@ FMinimalViewInfo::CalculateProjectionMatrixGivenView(ControllingActorViewInfo, A
    (`AnimSingleNodeInstanceProxy.h:55,79` / `AnimPreviewInstance.h:39,48`). → `UDebugSkelMeshComponent`
    + `EnablePreview` 로 해결됨. 🚨 그 뒤 `SetAnimationMode(AnimationSingleNode)` 를 부르면 원상복구되니 금지.
 3. **`FP_Rifle_Idle`/`ADS` 는 2프레임(0.033초)** 이라 재생해도 안 움직인다. 동작 확인은 `FP_Rifle_Reload`(2.5초).
+   → 1인칭 뷰가 "사진처럼 멈춰 보인다"는 것도 대개 이것 + 카메라 잠금이지 뷰포트가 죽은 게 아니다
+   (두 뷰포트 모두 `SetRealtime(true)`).
 4. **트랙 79개가 다 있어도 아무것도 증명 못 한다** — 애셋을 의심하기 전에 `additive_anim_type` 부터 읽고,
    "클립에서 계산한 값" ↔ "라이브 프리뷰 값"을 대조하면 애니 문제인지 툴 문제인지 즉시 갈린다.
 5. **파츠 소켓은 무기 7종이 공유한다**(같은 바디 메시 + 같은 소켓 이름). 이제 베이크가 기존 소켓을
    안 건드리고 차이를 DA 의 `Offset` 에 쓰므로 안전하지만, **소켓을 직접 고치는 코드를 새로 쓰면 다시 터진다.**
 6. **`DefaultConfig` 설정은 `SaveConfig()` 로 저장되지 않는다** → `TryUpdateDefaultConfigFile()`.
    (부작용: ini 주석이 지워진다. 설명은 UPROPERTY 주석에 둘 것.)
+7. 🚩 **"카메라↔팔"은 부호 규약이 둘이다.** BP 에 적힌 팔 값 `(-21, 10, -165)`/yaw −95 와, 툴이 쓰는
+   `CameraRelativeToArms` `(8.13, 21.79, 165)`/yaw +95 는 **서로 역행렬**이다. 규약을 안 갈라 놓고 대조하면
+   "안 맞는다 → 발견이다"로 잘못 결론 난다(이전판 인계문서가 실제로 이 상태였다).
 
 ## 6. 규명 못 한 채 남긴 것
 
@@ -123,9 +147,13 @@ FMinimalViewInfo::CalculateProjectionMatrixGivenView(ControllingActorViewInfo, A
 
 `ABP_FPArms` · `ABP_FP_Base`(신규) · `BP_FPSRPlayer` · `L_MainMenu` · `TestWorld` ·
 `ABP_FirstPerson` 삭제. 사용자 결정으로 **어셈블러 관련 애셋만** 먼저 커밋했다(`9977af8a`).
+🚩 다만 `BP_FPSRPlayer` 의 팔 배치값과 `ABP_FP_Base` 배선은 위 1-B 에서 **읽어서 확인**은 됐다
+(값이 맞는지가 아니라, 코드가 읽는 값이 무엇인지가 확인된 것).
 
 ## 8. 잡건
 
 - `dev/null/` 은 Git LFS 훅이 잘못된 경로에 설치된 쓰레기다(`>dev/null` 리다이렉트 흔적). 지워도 된다.
 - 작업 지침: **에디터·툴 작업은 정확성 우선**(비용을 근거로 덜 정확한 안을 고르지 말 것).
   트레이드오프 논의는 인게임 영향이 있을 때만. — 사용자 지시 2026-08-06
+- 화면비 프리셋은 **설정 데이터**다(`프로젝트 설정 > FPSR > 무기 어셈블러 > Aspect Presets`).
+  새 종횡비는 C++ 이 아니라 거기에 한 줄 추가한다.

@@ -164,20 +164,10 @@ public:
 	 *  움직이면 안 된다는 불변식이고, 안 지키면 저장을 누를 때마다 값이 누적된다(바디가 지금 굽는 그 소켓의 자식이라
 	 *  소켓이 움직이면 같이 끌려가고, 다음 베이크가 그 끌려간 자리를 다시 굽는다). */
 
-	// --- 1인칭 뷰 ---------------------------------------------------------------------------------------------------
-
-	/** "1인칭 뷰" 토글. 켜면 프리뷰 카메라를 **플레이어 눈 위치**에 놓고 FOV 를 맞춘 뒤 카메라 조작을 잠근다 —
-	 *  자유 시점으로는 "플레이어 눈에 총이 어떻게 걸리는가"를 판정할 수 없어서다(사용자 요청).
-	 *
-	 *  구도는 상수가 아니라 설정의 PreviewCharacterClass 를 프리뷰 씬에 **잠깐 스폰해서** 읽는다
-	 *  (AFPSRCharacter::GetFirstPersonViewSetup → 카메라↔팔 상대 + FOV) 후 곧바로 파괴한다. 부착 위상을 가정하지
-	 *  않으므로 BP 배선이 바뀌어도 따라간다. 읽기에 실패하면 켜지지 않고 사유를 GetArmsStatusMessage() 에 남긴다.
-	 *
-	 *  🚨 카메라를 잠그는 이유: 안 잠그면 드래그하는 순간 구도가 무너져 판정이 다시 불가능해진다. */
-	void SetFirstPersonView(bool bIn);
-	bool IsFirstPersonView() const { return bFirstPersonView; }
-	/** 1인칭 뷰를 켤 수 있는 상태인가(설정에 PreviewCharacterClass 가 있고 팔이 서 있는가). UI 활성화 판정용. */
-	bool CanUseFirstPersonView() const;
+	// 🚩 1인칭 뷰는 **별도 탭**으로 옮겼다(SFPSRWeaponAssemblerFPTab / FFPSRWeaponAssemblerFPViewportClient).
+	//    예전엔 이 클라이언트가 자기 카메라를 눈 위치로 옮기는 토글을 갖고 있었는데, 도킹된 뷰포트는 화면비가
+	//    레이아웃에 좌우돼 게임과 같은 세로 구도를 만들 수 없었다(실측 82.3° vs 58.7°). 그쪽 탭이 이 클라이언트의
+	//    프리뷰 씬과 팔(GetArmsComp)을 그대로 빌려 가므로, 여기서 기즈모로 만진 결과가 그 창에 즉시 보인다.
 
 	const TArray<UStaticMeshComponent*>& GetPartComps() const { return PartComps; }
 	USkeletalMeshComponent* GetBodyComp() const { return BodyComp; }
@@ -202,11 +192,6 @@ public:
 	virtual void TrackingStarted(const FInputEventState& InInputState, bool bIsDraggingWidget, bool bNudge) override;
 	virtual void TrackingStopped() override;
 	virtual void Tick(float DeltaSeconds) override;
-	/** 1인칭 뷰일 때 화면 중앙에 **조준 축 기준선**을 그린다(십자 + 중심 점).
-	 *  🚨 게임의 크로스헤어 위젯/UI 머티리얼을 렌더타깃에 그리지 않는다 — 이 프로젝트는 UI 머티리얼을 렌더타깃에
-	 *  반복 렌더하다 GPU 가 물린 전례가 있다. 그립 판정에 필요한 정보는 "화면 중앙 = 조준 축"뿐이라 캔버스 선분
-	 *  몇 개로 충분하고, 실제 크로스헤어가 아니라 기준선임을 라벨로 명시한다. */
-	virtual void DrawCanvas(FViewport& InViewport, FSceneView& View, FCanvas& Canvas) override;
 
 private:
 	/** 바디를 팔의 무기 부착 소켓/뼈에 **실제로 attach** 한다(P3 해결 — 예전엔 한 번 스냅만 하고 그 뒤 월드에 떠
@@ -271,29 +256,6 @@ private:
 
 	/** "팔 보기" 토글 상태. See SetShowArms. */
 	bool bShowArms = false;
-
-	/** "1인칭 뷰" 토글 상태. See SetFirstPersonView. */
-	bool bFirstPersonView = false;
-
-	/** 1인칭 뷰가 유지해야 할 카메라(월드) + FOV. Tick 이 매 프레임 이 값으로 되돌린다 — 아래 이유 참조. */
-	FTransform FirstPersonCameraWorld = FTransform::Identity;
-	float FirstPersonFOV = 90.0f;
-
-	/** 1인칭 뷰를 못 켠 사유(설정 비어 있음/스폰 실패/컴포넌트 없음). GetArmsStatusMessage() 로 노출된다. */
-	FString FirstPersonIssue;
-
-	/** 저장해 둔 1인칭 카메라/FOV 를 지금 뷰포트에 건다. Tick 이 매 프레임 부른다 — 구현부 주석에 이유. */
-	void ApplyFirstPersonCamera();
-
-	/** 1인칭 뷰를 켜기 직전의 카메라(위치/회전/FOV) — 끄면 그대로 되돌려 준다. 자유 시점에서 잡아 둔 각도를
-	 *  1인칭 한 번 봤다고 잃어버리면 저작 흐름이 끊긴다. */
-	FVector SavedViewLocation = FVector::ZeroVector;
-	FRotator SavedViewRotation = FRotator::ZeroRotator;
-	float SavedViewFOV = 90.0f;
-
-	/** 설정의 PreviewCharacterClass 를 프리뷰 씬에 잠깐 스폰해 1인칭 구도를 읽는다(스폰 → 읽기 → 파괴).
-	 *  성공하면 true 이고 출력값이 채워진다. 실패 사유는 OutIssue 에 한국어 한 줄로 남긴다. */
-	bool ReadFirstPersonSetupFromCharacter(FTransform& OutCameraRelativeToArms, float& OutFOV, FString& OutIssue) const;
 
 	/** 그립의 현재 기준 뼈 — AttachAssemblyToHand/SetGripBone 참조. NAME_None = 아직 해석된 적 없음(팔이 꺼져 있거나,
 	 *  부착 기준을 못 찾음). */

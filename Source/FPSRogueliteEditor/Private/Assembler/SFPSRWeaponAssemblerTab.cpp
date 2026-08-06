@@ -6,6 +6,8 @@
 #include "Assembler/FPSRWeaponAssemblerViewportClient.h"
 #include "Assembler/FPSRWeaponAssemblerHelpers.h"
 #include "Assembler/FPSRWeaponAssemblerSettings.h"
+#include "FPSRogueliteEditorModule.h"   // 1인칭 뷰 탭 식별자 — "1인칭 뷰 열기" 버튼
+#include "Framework/Docking/TabManager.h"
 #include "Weapon/FPSRWeaponDataAsset.h"
 #include "Weapon/FPSRWeaponFragment.h"
 
@@ -544,14 +546,11 @@ void SFPSRWeaponAssemblerTab::Construct(const FArguments& InArgs)
 
 				+ SVerticalBox::Slot().AutoHeight().Padding(2.0f)
 				[
-					SNew(SCheckBox)
-					.IsChecked(this, &SFPSRWeaponAssemblerTab::IsFirstPersonViewChecked)
-					.OnCheckStateChanged(this, &SFPSRWeaponAssemblerTab::OnFirstPersonViewChanged)
-					.IsEnabled(this, &SFPSRWeaponAssemblerTab::IsFirstPersonViewEnabled)
-					.ToolTipText(LOCTEXT("FirstPersonViewTooltip", "카메라를 플레이어 눈 위치·FOV 에 고정하고 화면 중앙에 조준 축 기준선을 그립니다 — 그립을 '1인칭 화면 기준'으로 판정하기 위한 것입니다. 구도는 프로젝트 설정 > FPSR > 무기 어셈블러 의 '프리뷰 캐릭터 클래스'에서 읽어옵니다(비어 있으면 켜지지 않습니다). 켜져 있는 동안 카메라 조작은 잠깁니다."))
-					[
-						SNew(STextBlock).Text(LOCTEXT("FirstPersonView", "1인칭 뷰"))
-					]
+					SNew(SButton)
+					.HAlign(HAlign_Center)
+					.Text(LOCTEXT("OpenFirstPersonView", "1인칭 뷰 열기"))
+					.ToolTipText(LOCTEXT("OpenFirstPersonViewTooltip", "플레이어 눈 시점으로, 게임과 같은 화면비로 보는 별도 창을 엽니다. 이 뷰포트에서 그립을 만지면 그 창에 바로 반영됩니다.\n\n창을 따로 띄우는 이유: 여기 붙어 있는 뷰포트는 가로세로 비율이 레이아웃에 따라 정해져서, 시야각이 같아도 세로로 보이는 범위가 게임과 달라집니다.\n\n먼저 위의 '팔 보기'를 켜세요 — 1인칭 구도는 팔을 기준으로 잡힙니다."))
+					.OnClicked(this, &SFPSRWeaponAssemblerTab::OnOpenFirstPersonViewClicked)
 				]
 
 				+ SVerticalBox::Slot().AutoHeight().Padding(2.0f)
@@ -1928,39 +1927,24 @@ ECheckBoxState SFPSRWeaponAssemblerTab::IsIsolateChecked() const
 	return bChecked ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
 }
 
-void SFPSRWeaponAssemblerTab::OnFirstPersonViewChanged(ECheckBoxState NewState)
+TSharedPtr<FFPSRWeaponAssemblerViewportClient> SFPSRWeaponAssemblerTab::GetAssemblerViewportClient() const
 {
-	if (!Viewport.IsValid() || !Viewport->GetAssemblerClient().IsValid())
-	{
-		return;
-	}
-	const bool bWanted = NewState == ECheckBoxState::Checked;
-	TSharedPtr<FFPSRWeaponAssemblerViewportClient> Client = Viewport->GetAssemblerClient();
-	Client->SetFirstPersonView(bWanted);
-
-	// 팔 보기와 같은 규약(OnShowArmsChanged 참조): 체크박스는 실제 상태를 되비추므로 저절로 원복되지만, **왜**
-	// 안 켜졌는지는 알려 줘야 사용자가 설정을 찾아갈 수 있다. 사유는 클라이언트가 남긴 문구를 그대로 쓴다.
-	if (bWanted && !Client->IsFirstPersonView() && StatusText.IsValid())
-	{
-		const FString Issue = Client->GetArmsStatusMessage();
-		StatusText->SetText(Issue.IsEmpty()
-			? LOCTEXT("FirstPersonViewFailed", "1인칭 뷰를 켜지 못했습니다.")
-			: FText::FromString(Issue));
-	}
+	return Viewport.IsValid() ? Viewport->GetAssemblerClient() : nullptr;
 }
 
-ECheckBoxState SFPSRWeaponAssemblerTab::IsFirstPersonViewChecked() const
+FReply SFPSRWeaponAssemblerTab::OnOpenFirstPersonViewClicked()
 {
-	TSharedPtr<FFPSRWeaponAssemblerViewportClient> Client = Viewport.IsValid() ? Viewport->GetAssemblerClient() : nullptr;
-	return (Client.IsValid() && Client->IsFirstPersonView()) ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
-}
+	// 이미 열려 있으면 그 탭으로 포커스가 간다(TryInvokeTab 규약). 1인칭 탭은 열리면서 지금 살아 있는 조립기
+	// 탭 — 즉 이 위젯 — 의 프리뷰 씬을 스스로 찾아 붙는다(FFPSRogueliteEditorModule::GetLiveWeaponAssemblerTab).
+	FGlobalTabmanager::Get()->TryInvokeTab(FFPSRogueliteEditorModule::GetWeaponAssemblerFPTabName());
 
-bool SFPSRWeaponAssemblerTab::IsFirstPersonViewEnabled() const
-{
-	TSharedPtr<FFPSRWeaponAssemblerViewportClient> Client = Viewport.IsValid() ? Viewport->GetAssemblerClient() : nullptr;
-	// 이미 켜져 있으면 끌 수는 있어야 한다 — 팔을 끄는 등으로 조건이 사라져도 체크박스가 잠겨 못 끄는 상태가
-	// 되면 카메라가 잠긴 채 갇힌다.
-	return Client.IsValid() && (Client->IsFirstPersonView() || Client->CanUseFirstPersonView());
+	// 팔이 꺼져 있으면 1인칭 창이 기준 없이 뜬다 — 여기서 미리 알려 주는 편이 저쪽에서 빈 화면을 보는 것보다 낫다.
+	const TSharedPtr<FFPSRWeaponAssemblerViewportClient> Client = GetAssemblerViewportClient();
+	if (StatusText.IsValid() && (!Client.IsValid() || !Client->IsShowArms()))
+	{
+		StatusText->SetText(LOCTEXT("FPViewNeedsArms", "1인칭 뷰를 열었습니다. 위의 '팔 보기'를 켜야 실제 화면과 같은 구도가 됩니다 — 구도는 팔을 기준으로 잡힙니다."));
+	}
+	return FReply::Handled();
 }
 
 void SFPSRWeaponAssemblerTab::OnShowArmsChanged(ECheckBoxState NewState)

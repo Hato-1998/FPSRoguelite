@@ -25,6 +25,7 @@ class UFPSRPlayerFeedbackComponent;
 class UFPSRReviveComponent;
 class UFPSRBlindspotAudioComponent;
 struct FInputActionValue;
+struct FMinimalViewInfo;
 class UStaticMeshComponent;
 class UMeshComponent;
 class UAnimInstance;
@@ -225,7 +226,7 @@ public:
 	 *  여기 한 곳에 둔다 — 규칙이 갈리면 툴에서 구운 소켓과 게임이 실제로 붙는 소켓이 서로 달라진다. */
 	FName ResolveWeaponAttachSocket(const UFPSRWeaponDataAsset* Weapon) const;
 
-	/** 1인칭 구도 = **카메라가 팔에 대해 어디에 있는가** + 그 카메라의 FOV. 무기 어셈블러(에디터 툴)가 프리뷰
+	/** 1인칭 구도 = **카메라가 팔에 대해 어디에 있는가** + 그 카메라의 뷰 정보. 무기 어셈블러(에디터 툴)가 프리뷰
 	 *  카메라를 이 값에 놓아 "플레이어 눈에 총이 어떻게 걸리는가"를 재현하는 데 쓴다 — 자유 시점으로는 그립을
 	 *  판정할 수 없다는 지적에서 나온 기능이다.
 	 *
@@ -236,8 +237,15 @@ public:
 	 *  의미가 없다. 에디터 툴은 프리뷰 씬에 잠깐 스폰해서 읽고 파괴한다(엔진도 FBlueprintEditor 가 프리뷰 씬에
 	 *  BP 를 스폰한다 — BlueprintEditor.cpp). 프리뷰 월드는 BeginPlay 를 걸지 않으므로 게임플레이 초기화는 안 돈다.
 	 *
+	 *  🚨 FOV 하나가 아니라 **FMinimalViewInfo 통째**로 준다. 종횡비(AspectRatio)·bConstrainAspectRatio·
+	 *  AspectRatioAxisConstraint 가 있어야 "이 종횡비의 플레이어가 실제로 보는 구도"를 계산할 수 있고
+	 *  (CameraStackTypes.cpp:263,287 — 축 제약에 따라 세로/가로 중 무엇이 고정되는지가 갈린다), UE 5.7 의 1인칭
+	 *  렌더 파라미터(FirstPersonFOV/FirstPersonScale)도 여기 실려 온다. 게임이 쓰는 것과 **같은 호출**
+	 *  (UCameraComponent::GetCameraView)로 채우므로 카메라 설정이 바뀌면 툴이 저절로 따라간다 — 필드를 손으로
+	 *  베끼면 그때부터 갈린다.
+	 *
 	 *  두 컴포넌트 중 하나라도 없으면 false 를 반환하고 출력값은 건드리지 않는다. */
-	bool GetFirstPersonViewSetup(FTransform& OutCameraRelativeToArms, float& OutFieldOfView) const;
+	bool GetFirstPersonViewSetup(FTransform& OutCameraRelativeToArms, FMinimalViewInfo& OutViewInfo) const;
 
 	/** 활성 사이트의 스코프 오버레이 위젯 클래스(스코프 시각 활성 시). 없으면 null(HUD가 폴백 사용). 호출은 스코프
 	 *  진입 엣지에서(프레임마다 아님) — 소프트 참조를 동기 로드한다. (스코프 위젯화) */

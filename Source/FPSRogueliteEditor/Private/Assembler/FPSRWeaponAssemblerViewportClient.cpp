@@ -12,10 +12,6 @@
 #include "Animation/AnimSequence.h"          // 애디티브 여부/기준 포즈 참조 검사(RefreshArmsFromSettings)
 #include "Animation/AnimSingleNodeInstance.h"
 #include "Animation/DebugSkelMeshComponent.h"   // 팔 프리뷰 컴포넌트 — 애디티브 기준 포즈를 까는 UAnimPreviewInstance 를 단다
-#include "CanvasItem.h"          // FCanvasLineItem / FCanvasTextItem — 1인칭 조준 축 기준선
-#include "CanvasTypes.h"
-#include "Engine/Canvas.h"
-#include "Engine/Engine.h"       // GEngine->GetTinyFont()
 #include "PreviewScene.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -422,16 +418,9 @@ void FFPSRWeaponAssemblerViewportClient::Tick(float DeltaSeconds)
 	// Tick the preview world so the skeletal mesh component (ref pose) and any attached ticking state stay current
 	// (FAdvancedPreviewScene::Tick only handles capture/lighting-rig updates, not the world itself — see
 	// FStaticMeshEditorViewportClient::Tick for the same pattern).
-	if (UWorld* World = PreviewScene.GetWorld())
-	{
-		World->Tick(LEVELTICK_All, DeltaSeconds);
-	}
-
-	// 1인칭 구도는 한 번만 어긋나도 판정이 무의미해지므로 매 프레임 되돌린다 — ApplyFirstPersonCamera 주석 참조.
-	if (bFirstPersonView)
-	{
-		ApplyFirstPersonCamera();
-	}
+	// 🚩 프레임당 한 번으로 문지기를 둔다 — 1인칭 뷰 탭이 **같은 씬**을 공유하며 자기 Tick 에서도 돌리므로,
+	//    둘 다 띄우면 월드가 한 프레임에 두 번 돌아 애니가 2배속이 된다(TickPreviewWorldOnce 주석 참조).
+	FPSRWeaponAssemblerHelpers::TickPreviewWorldOnce(PreviewScene.GetWorld(), DeltaSeconds);
 }
 
 void FFPSRWeaponAssemblerViewportClient::SetShowArms(bool bIn)
@@ -443,9 +432,8 @@ void FFPSRWeaponAssemblerViewportClient::SetShowArms(bool bIn)
 
 	if (!bIn)
 	{
-		// 1인칭 구도는 팔 기준 상대값이라 팔이 사라지면 의미가 없다. 무엇보다 켜진 채로 두면 카메라가 잠긴 채
-		// 남아 자유 시점으로 돌아갈 수 없다 — 먼저 끈다(SetFirstPersonView(false)가 이전 카메라를 복원한다).
-		SetFirstPersonView(false);
+		// 팔이 사라지면 1인칭 뷰 탭도 기준을 잃지만, 그쪽은 매 Tick 팔을 다시 확인해 스스로 "팔 없음"으로
+		// 넘어가므로(FFPSRWeaponAssemblerFPViewportClient::Tick) 여기서 따로 알릴 것이 없다.
 
 		// I-D: 자식(바디, 그리고 바디에 매달린 파츠 전체)을 먼저 떼고 팔(부모)을 제거한다. 파츠는 바디의 자식일
 		// 뿐 팔과는 직접 관계가 없으므로 바디만 떼면 충분하다(DetachAssemblyFromHand). ArmsComp는 무기가 바뀌어도
@@ -576,7 +564,7 @@ void FFPSRWeaponAssemblerViewportClient::RefreshArmsFromSettings()
 
 const FString& FFPSRWeaponAssemblerViewportClient::GetArmsStatusMessage() const
 {
-	// 부착/포즈/1인칭 사유는 서로 독립적인 문제라 하나가 다른 하나를 덮어쓰면 안 된다 — 매 호출 재조합한다.
+	// 부착 사유와 포즈 사유는 서로 독립적인 문제라 하나가 다른 하나를 덮어쓰면 안 된다 — 매 호출 재조합한다.
 	CachedArmsStatusMessage.Reset();
 	auto Append = [this](const FString& Issue)
 	{
@@ -591,7 +579,6 @@ const FString& FFPSRWeaponAssemblerViewportClient::GetArmsStatusMessage() const
 	};
 	Append(ArmsAttachIssue);
 	Append(ArmsPoseIssue);
-	Append(FirstPersonIssue);
 	return CachedArmsStatusMessage;
 }
 
@@ -828,150 +815,6 @@ void FFPSRWeaponAssemblerViewportClient::SetWeaponAttachSocketName(FName NewName
 	WeaponDA->WeaponAttachSocket = NewName;
 	WeaponDA->MarkPackageDirty();
 	AttachAssemblyToHand(); // 인메모리 재부착 — 애셋 저장은 여느 편집처럼 "조립→저장"이 담당(헤더 주석 참조).
-	Invalidate();
-}
-
-// --- 1인칭 뷰 -------------------------------------------------------------------------------------------------------
-
-bool FFPSRWeaponAssemblerViewportClient::ReadFirstPersonSetupFromCharacter(FTransform& OutCameraRelativeToArms, float& OutFOV, FString& OutIssue) const
-{
-	const UFPSRWeaponAssemblerSettings* Settings = GetDefault<UFPSRWeaponAssemblerSettings>();
-	if (!Settings || Settings->PreviewCharacterClass.IsNull())
-	{
-		OutIssue = TEXT("프로젝트 설정 > FPSR > 무기 어셈블러 에 '프리뷰 캐릭터 클래스'가 비어 있어 1인칭 구도를 읽을 수 없습니다.");
-		return false;
-	}
-
-	UClass* CharClass = Settings->PreviewCharacterClass.LoadSynchronous();
-	UWorld* World = PreviewScene.GetWorld();
-	if (!CharClass || !World)
-	{
-		OutIssue = TEXT("프리뷰 캐릭터 클래스를 불러오지 못했습니다.");
-		return false;
-	}
-
-	// 🚨 CDO 가 아니라 **인스턴스**라야 컴포넌트 월드 트랜스폼이 의미를 갖는다. 엔진도 FBlueprintEditor 가
-	// 프리뷰 씬에 BP 를 그대로 스폰한다(BlueprintEditor.cpp). 프리뷰 월드는 BeginPlay 를 걸지 않으므로
-	// AFPSRCharacter::BeginPlay/PossessedBy 같은 게임플레이 초기화는 돌지 않는다 — 값만 읽고 즉시 파괴한다.
-	FActorSpawnParameters SpawnParams;
-	SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-	SpawnParams.ObjectFlags |= RF_Transient;
-	AFPSRCharacter* Probe = World->SpawnActor<AFPSRCharacter>(CharClass, FTransform::Identity, SpawnParams);
-	if (!Probe)
-	{
-		OutIssue = TEXT("프리뷰 캐릭터를 프리뷰 씬에 스폰하지 못했습니다.");
-		return false;
-	}
-
-	const bool bOk = Probe->GetFirstPersonViewSetup(OutCameraRelativeToArms, OutFOV);
-	Probe->Destroy();
-
-	if (!bOk)
-	{
-		OutIssue = TEXT("프리뷰 캐릭터에 1인칭 카메라 또는 1인칭 팔 컴포넌트가 없어 구도를 읽지 못했습니다.");
-	}
-	return bOk;
-}
-
-void FFPSRWeaponAssemblerViewportClient::DrawCanvas(FViewport& InViewport, FSceneView& View, FCanvas& Canvas)
-{
-	FEditorViewportClient::DrawCanvas(InViewport, View, Canvas);
-
-	if (!bFirstPersonView)
-	{
-		return;
-	}
-
-	// 화면 중앙 = 카메라의 조준 축. 뷰 크기에서 직접 구한다(하드코딩한 해상도를 쓰면 뷰포트를 리사이즈하는
-	// 순간 기준선이 축에서 벗어나 판정이 조용히 틀어진다).
-	const float CX = Canvas.GetRenderTarget()->GetSizeXY().X * 0.5f;
-	const float CY = Canvas.GetRenderTarget()->GetSizeXY().Y * 0.5f;
-	const FLinearColor LineColor(1.0f, 0.35f, 0.0f, 0.9f);
-	const float Gap = 4.0f;    // 중심을 비워 둬야 총구가 축에 겹칠 때 가려지지 않는다
-	const float Len = 12.0f;
-
-	FCanvasLineItem Line;
-	Line.SetColor(LineColor);
-	Line.LineThickness = 1.0f;
-	auto DrawSeg = [&Canvas, &Line](float X0, float Y0, float X1, float Y1)
-	{
-		Line.Origin = FVector(X0, Y0, 0.0f);
-		Line.EndPos = FVector(X1, Y1, 0.0f);
-		Canvas.DrawItem(Line);
-	};
-	DrawSeg(CX - Gap - Len, CY, CX - Gap, CY);
-	DrawSeg(CX + Gap, CY, CX + Gap + Len, CY);
-	DrawSeg(CX, CY - Gap - Len, CX, CY - Gap);
-	DrawSeg(CX, CY + Gap, CX, CY + Gap + Len);
-	DrawSeg(CX, CY, CX + 1.0f, CY);   // 중심 점
-
-	// 실제 게임 크로스헤어가 아니라는 것을 화면에 명시한다 — 이걸로 크로스헤어 모양/크기를 판정하면 안 된다.
-	FCanvasTextItem Label(FVector2D(CX + Gap + Len + 6.0f, CY - 7.0f),
-		NSLOCTEXT("FPSRWeaponAssembler", "AimAxisGuide", "조준 축 기준선 (실제 크로스헤어 아님)"),
-		GEngine->GetTinyFont(), LineColor);
-	Label.EnableShadow(FLinearColor::Black);
-	Canvas.DrawItem(Label);
-}
-
-void FFPSRWeaponAssemblerViewportClient::ApplyFirstPersonCamera()
-{
-	// 🚨 잠금 방식: 입력 경로를 막는 대신 **매 프레임 되돌린다.** 에디터 뷰포트에서 카메라를 움직이는 경로는
-	// 궤도/팬/돌리/북마크/포커스 등 여러 갈래라 하나씩 막으면 반드시 새는 길이 남는데, 1인칭 구도는 한 번만
-	// 어긋나도 그립 판정이 무의미해진다(이 기능 자체가 "자유 시점으로는 판정이 안 된다"는 지적에서 나왔다).
-	// 기즈모 드래그는 카메라를 건드리지 않으므로 이 방식으로도 파츠·그립 편집은 그대로 된다.
-	SetViewLocation(FirstPersonCameraWorld.GetLocation());
-	SetViewRotation(FirstPersonCameraWorld.GetRotation().Rotator());
-	ViewFOV = FirstPersonFOV;
-}
-
-bool FFPSRWeaponAssemblerViewportClient::CanUseFirstPersonView() const
-{
-	const UFPSRWeaponAssemblerSettings* Settings = GetDefault<UFPSRWeaponAssemblerSettings>();
-	// 팔이 서 있어야 의미가 있다 — 1인칭 구도는 "팔 기준" 상대값이라, 팔이 없으면 놓을 기준 자체가 없다.
-	return bShowArms && ArmsComp && Settings && !Settings->PreviewCharacterClass.IsNull();
-}
-
-void FFPSRWeaponAssemblerViewportClient::SetFirstPersonView(bool bIn)
-{
-	if (bIn == bFirstPersonView)
-	{
-		return;
-	}
-
-	if (!bIn)
-	{
-		// 켜기 직전의 자유 시점을 그대로 되돌려 준다 — 1인칭 한 번 봤다고 잡아 둔 각도를 잃으면 저작이 끊긴다.
-		bFirstPersonView = false;
-		SetViewLocation(SavedViewLocation);
-		SetViewRotation(SavedViewRotation);
-		ViewFOV = SavedViewFOV;
-		Invalidate();
-		return;
-	}
-
-	FTransform CameraRelArms;
-	float FOV = 90.0f;
-	FString Issue;
-	if (!ReadFirstPersonSetupFromCharacter(CameraRelArms, FOV, Issue))
-	{
-		// 조용히 꺼진 채로 둔다 — 탭이 IsFirstPersonView() 로 되읽어 체크박스를 원복하고, 사유는 상태줄에 뜬다.
-		FirstPersonIssue = Issue;
-		bFirstPersonView = false;
-		return;
-	}
-	FirstPersonIssue.Reset();
-
-	SavedViewLocation = GetViewLocation();
-	SavedViewRotation = GetViewRotation();
-	SavedViewFOV = ViewFOV;
-
-	// 팔은 프리뷰 씬에서 항등에 서 있지만(RefreshArmsFromSettings 의 AddComponent), 그 전제에 기대지 않고 실제
-	// 월드를 곱한다 — 팔 배치가 나중에 바뀌어도 구도가 따라가야 한다.
-	FirstPersonCameraWorld = ArmsComp ? CameraRelArms * ArmsComp->GetComponentTransform() : CameraRelArms;
-	FirstPersonFOV = FOV;
-
-	bFirstPersonView = true;
-	ApplyFirstPersonCamera();
 	Invalidate();
 }
 
