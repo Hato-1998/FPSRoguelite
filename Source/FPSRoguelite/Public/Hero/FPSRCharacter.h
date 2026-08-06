@@ -219,6 +219,12 @@ public:
 	 *  refresh for that would replay the equip montage every time. Idempotent. */
 	void AttachWeaponMeshes();
 
+	/** 이 무기가 붙을 소켓 이름. DA 쪽에 WeaponAttachSocket 이 있으면 그것, 없으면 캐릭터 기본(WeaponAttachSocketName)
+	 *  으로 폴백한다. WeaponAttachSocketName 은 protected 라 이 클래스 밖(에디터의 무기 어셈블러 툴)에서 직접 읽을
+	 *  수 없어서, 런타임(AttachWeaponMeshes)과 에디터 툴이 소켓 이름에 대해 **같은 규칙**을 쓰도록 그 규칙 자체를
+	 *  여기 한 곳에 둔다 — 규칙이 갈리면 툴에서 구운 소켓과 게임이 실제로 붙는 소켓이 서로 달라진다. */
+	FName ResolveWeaponAttachSocket(const UFPSRWeaponDataAsset* Weapon) const;
+
 	/** 활성 사이트의 스코프 오버레이 위젯 클래스(스코프 시각 활성 시). 없으면 null(HUD가 폴백 사용). 호출은 스코프
 	 *  진입 엣지에서(프레임마다 아님) — 소프트 참조를 동기 로드한다. (스코프 위젯화) */
 	UFUNCTION(BlueprintPure, Category = "FPSR|Weapon")

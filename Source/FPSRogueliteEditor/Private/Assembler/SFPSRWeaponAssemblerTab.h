@@ -11,10 +11,13 @@
 #include "UObject/SoftObjectPath.h"
 
 class FAdvancedPreviewScene;
+class SEditableTextBox;
 class SFPSRWeaponAssemblerViewport;
 class STextBlock;
 class UFPSRWeaponDataAsset;
 struct FAssetData;
+struct FReferenceSkeleton;
+struct FSlateColor;
 
 /**
  * FPSR Weapon Part Assembler (Tools > FPSR > "무기 파츠 조립기…") — a fully self-contained, fully embedded-viewport
@@ -226,16 +229,107 @@ private:
 	ECheckBoxState IsMoveAllChecked() const;
 	ECheckBoxState IsIsolateChecked() const;
 
-	/** "팔 보기" 토글 — 1인칭 팔을 세우고 무기를 손에 얹는다. 클라이언트가 설정의 팔 메시가 비면 켜지길 거부하므로,
+	// --- 1인칭 팔 패널 (뷰포트 오른쪽 사이드 패널) ---------------------------------------------------------------------
+	// SetShowArms/RefreshArmsFromSettings/GetArmsStatusMessage, 재생(SetPreviewPlaying 등), 그립(HasGripFrame/
+	// GetGripTransform/SetGripTransform/GetGripBone/SetGripBone), 소켓(GetResolvedAttachSocketName/
+	// IsUsingSharedDefaultSocket/SetWeaponAttachSocketName)은 전부 클라이언트(FFPSRWeaponAssemblerViewportClient)가
+	// 소유한다 — 이 탭은 그 값을 그리고 위임만 한다. BakeWeaponSocket(FBakeHandResult 반환)도 마찬가지로 헬퍼가 소유.
+
+	/** "팔 보기" 체크박스 — 1인칭 팔을 세우고 무기를 손에 얹는다. 클라이언트가 설정의 팔 메시가 비면 켜지길 거부하므로,
 	 *  체크 상태는 요청값이 아니라 **클라이언트의 실제 상태**(IsShowArms)를 되비춘다. 그때 StatusText로 이유를 알린다. */
 	void OnShowArmsChanged(ECheckBoxState NewState);
 	ECheckBoxState IsShowArmsChecked() const;
 
-	/** "손 위치 저장" 버튼은 팔이 실제로 서 있을 때만 누를 수 있다 — 팔이 없으면 구울 기준 프레임이 없다. */
+	/** 뼈 피커(SBoneSelectionWidget) 활성 조건 — 팔이 서 있어야 물어볼 스켈레톤이 있다. HasGripFrame()보다 일부러 약한
+	 *  조건이다: 아직 뼈가 안 잡혀 HasGripFrame()이 false여도 뼈 피커 자체는 계속 눌러 고칠 수 있어야 한다 — 안
+	 *  그러면 "뼈가 없어 비활성 → 비활성이라 뼈를 못 고름"으로 잠긴다. */
 	bool IsShowArmsEnabled() const;
 
-	/** "손 위치 저장": '전체 이동'으로 잡은 무기 위치를 **팔 메시**의 무기 부착 소켓으로 굽는다
-	 *  (FPSRWeaponAssemblerHelpers::BakeWeaponSocket). 저장 대상이 무기가 아니라 팔이라는 점을 StatusText에 명시한다. */
+	// --- 팔 메시/애니 피커(SObjectPropertyEntryBox, C2) — 값은 UFPSRWeaponAssemblerSettings에 직접 읽고 쓴다(진실원천
+	//     하나, 에셋 경로를 C++에 박지 않는다 — ADR 0006 I4). -------------------------------------------------------
+
+	FString GetArmsMeshObjectPath() const;
+	/** 팔 메시 변경 — 설정에 대입 후 SaveConfig, 클라이언트에 RefreshArmsFromSettings로 반영. */
+	void OnArmsMeshAssetChanged(const FAssetData& AssetData);
+	FString GetArmsPoseObjectPath() const;
+	/** 팔 애니(포즈) 변경 — 위와 동일 경로. */
+	void OnArmsPoseAssetChanged(const FAssetData& AssetData);
+	/** 애니 피커 필터 — 팔 메시의 스켈레톤과 호환되는 애니만 보이게(USkeleton::ShouldFilterAsset를 그대로 물린다 —
+	 *  엔진이 바로 이 용도로 제공하는 래퍼). 팔 메시가 없으면 걸러낼 기준이 없으므로 필터하지 않는다(전부 통과). */
+	bool OnShouldFilterArmsPoseAsset(const FAssetData& AssetData) const;
+
+	// --- 재생 컨트롤 (C6) ------------------------------------------------------------------------------------------
+
+	FReply OnPreviewPlayPauseClicked();
+	FText GetPreviewPlayPauseLabel() const;
+	/** 시간 슬라이더 값 — SSlider의 Value는 0..1 정규화 규약이라 Position/Length로 직접 정규화한다(길이 0=애니 없음이면 0). */
+	float GetPreviewSliderFraction() const;
+	void OnPreviewSliderFractionChanged(float NewFraction);
+	/** "0.42 / 1.83 s" 표시 텍스트. */
+	FText GetPreviewTimeLabel() const;
+	ECheckBoxState IsPreviewLoopingChecked() const;
+	void OnPreviewLoopingChanged(ECheckBoxState NewState);
+	/** 재생버튼/슬라이더/루프 공통 활성 조건 — GetPreviewLength()가 0(애니 없음)이면 전부 비활성. */
+	bool IsPreviewControlsEnabled() const;
+
+	// --- 그립(= 구워질 값, 뼈 상대) 위치/회전 숫자 필드 (C4) --------------------------------------------------------
+
+	/** 그립 소폼(위치/회전) + "손 위치 저장" 버튼 공통 활성 조건 — 클라이언트의 HasGripFrame()을 그대로 되비춘다(팔이
+	 *  서 있고 부착 기준이 잡혀 있어야 굽는 값이 의미 있다). */
+	bool HasGripFrame() const;
+
+	// SVectorInputBox/SRotatorInputBox는 컴포넌트별 float 어트리뷰트(X/Y/Z, Roll/Pitch/Yaw)라 6개로 나뉜다. FVector/
+	// FRotator는 LWC(double 저장)라 위젯의 float 경계에서 명시적으로 좁히고/넓힌다(.cpp 참고).
+	TOptional<float> GetGripLocationX() const;
+	TOptional<float> GetGripLocationY() const;
+	TOptional<float> GetGripLocationZ() const;
+	void OnGripLocationXChanged(float NewValue);
+	void OnGripLocationYChanged(float NewValue);
+	void OnGripLocationZChanged(float NewValue);
+	/** 🪤 Rotator()로 뽑아 한 축만 고친 뒤 Quaternion()으로 되넣는 왕복은, 짐벌 부근(Pitch ±90° 근접)에서 건드리지
+	 *  않은 다른 두 축이 튀어 보일 수 있는 알려진 한계다(엔진 Details 패널은 이를 피하려 FRotator를 별도 캐시한다).
+	 *  그립 회전은 손으로 쥐는 각도라 짐벌 부근에 놓일 일이 거의 없어 실사용 리스크가 낮고, 이 툴 범위에서 캐시(무효화
+	 *  시점 관리 필요)를 추가하는 비용이 이득보다 크다고 판단해 단순 왕복으로 남긴다. */
+	TOptional<float> GetGripRotationRoll() const;
+	TOptional<float> GetGripRotationPitch() const;
+	TOptional<float> GetGripRotationYaw() const;
+	void OnGripRotationRollChanged(float NewValue);
+	void OnGripRotationPitchChanged(float NewValue);
+	void OnGripRotationYawChanged(float NewValue);
+
+	// --- 뼈 피커 (SBoneSelectionWidget, C5 — IEditableSkeleton 불필요, 델리게이트 3개뿐) -------------------------------
+
+	const FReferenceSkeleton& GetArmsReferenceSkeletonForBonePicker() const;
+	FName GetGripBoneForBonePicker(bool& bMultipleValues) const;
+	void OnGripBonePicked(FName NewBone);
+
+	// --- 손 소켓 이름 + 공용/전용 배지 (C3, 🚨 공용 기본 소켓 사고 방지가 이 패널에서 가장 중요) --------------------------
+
+	/** 무기가 바뀌거나 "이 무기 전용 소켓 만들기"가 성공한 뒤 입력 박스를 현재 결정된 소켓 이름으로 재동기화한다. 라이브
+	 *  Attribute로 .Text를 바인딩하지 않는 이유: 그러면 박스가 포커스를 잃는 순간(=버튼을 누르려 클릭하는 순간) 아직
+	 *  DA에 쓰이지 않은 입력값이 결정된 이름으로 되돌아가 버려, 버튼이 읽어야 할 "입력값"이 사라진다. */
+	void RefreshGripSocketNameBox();
+	FText GetGripSocketBadgeText() const;
+	FSlateColor GetGripSocketBadgeColor() const;
+	/** 공용 기본일 때만 경고 문구, 전용이면 빈 텍스트(줄 자체는 GetGripSocketWarningVisibility로 접는다). */
+	FText GetGripSocketWarningText() const;
+	EVisibility GetGripSocketWarningVisibility() const;
+
+	/** "이 무기 전용 소켓 만들기": 입력 박스의 현재 텍스트를 DA->WeaponAttachSocket에 쓴다(SetWeaponAttachSocketName).
+	 *  순수 데이터 선언이라 팔이 서 있지 않아도 눌러도 된다(HasGripFrame 게이트 없음). */
+	FReply OnMakeDedicatedSocketClicked();
+
+	/** "손 위치로 리셋 (0,0,0)" — 그립 위치/회전을 항등으로 되돌려 무기를 기준 뼈에 정확히 겹친다. 뼈를 바꾼 직후
+	 *  무기가 옛 기준의 (쓸모없는) 자리에 남아 있을 때의 출발점. 프리뷰만 바꾸고 저장은 하지 않는다. */
+	FReply OnResetGripClicked();
+	/** 활성 조건: 무기 DA가 있고, 현재 공용 기본을 쓰는 중이고(이미 전용이면 할 일이 없다), 입력 텍스트가 비어있지
+	 *  않을 때만. */
+	bool IsMakeDedicatedSocketEnabled() const;
+
+	/** "손 위치 저장": '전체 이동'으로 잡은 무기 위치를 **팔 메시**의 무기 부착 소켓(GetResolvedAttachSocketName)에,
+	 *  뼈 피커가 가리키는 뼈(GetGripBone) 기준으로 굽는다(FPSRWeaponAssemblerHelpers::BakeWeaponSocket). 공용 기본
+	 *  소켓을 고치는 중이면(IsUsingSharedDefaultSocket) 확인 대화상자로 한 번 더 묻는다 — 전용 소켓이 없는 무기
+	 *  전부가 함께 움직이기 때문(계약 C3). 결과(FBakeHandResult)의 실제 저장 패키지를 StatusText에 밝힌다. */
 	FReply OnBakeHandClicked();
 
 	// --- State ------------------------------------------------------------------------------------------------
@@ -259,6 +353,10 @@ private:
 	TSharedPtr<SListView<TSharedPtr<FStageRow>>> StageListView;
 	/** 진화 단계 리스트에서 현재 선택된 행("− 단계 제거" 활성 조건). */
 	TSharedPtr<FStageRow> SelectedStageRow;
+
+	/** "손 소켓" 패널의 소켓 이름 입력 박스 — 위젯이 직접 소유(GetText()로 직접 읽는다; 이유는 RefreshGripSocketNameBox
+	 *  주석 참고). */
+	TSharedPtr<SEditableTextBox> GripSocketNameBox;
 
 	TSharedPtr<STextBlock> StatusText;
 };

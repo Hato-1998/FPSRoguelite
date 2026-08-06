@@ -700,6 +700,13 @@ bool AFPSRCharacter::IsViewedThroughOwnEyes() const
 	return LocalPC && LocalPC->GetViewTarget() == this;
 }
 
+FName AFPSRCharacter::ResolveWeaponAttachSocket(const UFPSRWeaponDataAsset* Weapon) const
+{
+	// One rule, read from both this class's own runtime attach path (AttachWeaponMeshes, right below) and the weapon-
+	// assembler editor tool — see the header comment for why this had to move out of AttachWeaponMeshes itself.
+	return (Weapon && !Weapon->WeaponAttachSocket.IsNone()) ? Weapon->WeaponAttachSocket : WeaponAttachSocketName;
+}
+
 void AFPSRCharacter::AttachWeaponMeshes()
 {
 	// Which hand is on screen decides which hand holds the gun (ADR 0003 invariant 14). Attachment is per-component
@@ -716,7 +723,7 @@ void AFPSRCharacter::AttachWeaponMeshes()
 	// Per-weapon DA socket overrides the character default. The same name has to resolve on BOTH skeletons, which it
 	// does: SOCKET_Weapon is authored on the body's grip hand and on the arms' (S_Mannequin).
 	const UFPSRWeaponDataAsset* Weapon = WeaponInventory ? WeaponInventory->GetCurrentWeapon() : nullptr;
-	const FName AttachSocket = (Weapon && !Weapon->WeaponAttachSocket.IsNone()) ? Weapon->WeaponAttachSocket : WeaponAttachSocketName;
+	const FName AttachSocket = ResolveWeaponAttachSocket(Weapon);
 	const float AttachScale = Weapon ? Weapon->WeaponAttachScale : 1.0f;
 
 	// Snap (not KeepRelative) so the weapon sits exactly where the skeleton's grip socket was authored.
