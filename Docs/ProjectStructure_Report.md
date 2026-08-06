@@ -38,7 +38,7 @@
 | GAS는 플레이어 + **보스/엘리트**에 | 플레이어는 맞다. **보스는 GAS가 없다** — `FPSRBossBase.h:23` 이 "no ASC/GAS is attached" 라고 명시. 엘리트 클래스는 C++에 아예 없다 | ⚠️ **문서가 앞서감** (§8-D1) |
 | 길찾기 = Flow-Field 사전계산 | `UFPSRFlowFieldComputer` — 월드 쿼리 없는 순수 배열 BFS. 2층(`NumLayers=2`) 유계 멀티레이어 | ✅ 일치 |
 | 복제 = Push Model | 에디터에선 맞다. **패키지 빌드에선 꺼진다** (§7-1) | ⚠️ **출시 빌드에서 불일치** |
-| 적 동시 ~200-300, 하드캡 500 | **실효 상한은 200**. `GlobalAliveCap=200`이 모든 스폰을 무조건 막는다(단일맵은 예약분 8 빼고 **192**) | ⚠️ **문서가 과대** (§8-D8) |
+| 적 동시 규모 | 실제 게이트는 `GlobalAliveCap`(모든 스폰 경로를 무조건 통과시켜야 함) · `MaxAliveCount`(스케줄 클램프) · `MaxActiveEnemies`(풀 액터 수 상한) **3층 구조**다 — 셋의 역할이 다르다 | 📌 사용자가 `Game.md` 서술을 직접 정리 중 |
 
 ---
 
@@ -245,7 +245,7 @@ C++에 에셋 경로 하드코딩 금지 원칙(`Workflow.md §6-2`)이 잘 지�
 
 ---
 
-## 8. 문서 ↔ 코드 어긋난 곳 13건 (목록만 — 문서는 안 고쳤다)
+## 8. 문서 ↔ 코드 어긋난 곳 12건 (목록만 — 문서는 안 고쳤다)
 
 > SSOT가 통치 문서이므로 어긋남은 실제 유지보수 결함이다. **어느 쪽이 옳은지 판정하지 않고 둘 다 인용**했다.
 > 고치는 것은 사용자 결정 사항 — 문서를 코드에 맞출지, 코드를 문서에 맞출지가 각각 다르다.
@@ -259,7 +259,6 @@ C++에 에셋 경로 하드코딩 금지 원칙(`Workflow.md §6-2`)이 잘 지�
 | D5 | `Architecture.md:52`·`PlayerFeel.md:61` "크로스헤어 크기 설정 `CrosshairScale`" | **0 hits**. `FPSRGameUserSettings.h:21-22` 가 *"크로스헤어 크기는 의도적으로 설정이 아니다 — 크로스헤어는 정직하다(퍼짐 = 실제 탄퍼짐이 화면에 투영된 것)"* 라고 명시. 영속 값은 `MasterVolume`(`:65`)·`CrosshairColor`(`:69`) **둘뿐** | **코드** (2026-08-06 커밋이 최신). 게다가 새로 생긴 2층 크로스헤어는 **어느 SSOT에도 없다** |
 | D6 | `PlayerFeel.md:13` "1P 전용 팔 메시 폐기" | 코드가 `FirstPersonArms` 를 만들고 `RefreshFirstPersonRendering()` 로 1인칭 분리를 구현. `PROGRESS.md` 의 **현재 트랙이 정반대**(ADR 0006) | **코드 + PROGRESS** (ADR 0006이 0002를 대체했는데 §2-9 갱신 누락) |
 | D7 | `Enemy.md:35`·`Concept.md:62` "FF 기본 ON" | `FPSRGameState.h:242` `bFriendlyFireEnabled = false` | **문서**(설계 결정) — 코드 플립 대기. 문서가 스스로 "코드 후속"이라 표시함 |
-| D8 | 🔴 `Game.md:46` "동시 ~200-300, 코드 폴백캡 300, 하드캡 500" | **실효 상한 200**. `GlobalAliveCap=200` 이 모든 스폰을 무조건 게이트(단일맵은 −예약8 = **192**). `MaxAliveCount=300` 은 도달 불가능한 스케줄 클램프, `MaxActiveEnemies=500` 은 *풀 액터 수* 상한이지 동시 생존수가 아님 | **코드** (헤더 주석에도 그렇게 적혀 있음) |
 | D9 | `Architecture.md:36`·`CombatWeaponCard.md:157` "`UHeroDataAsset`" | 없는 클래스. `FPSRCharacter.h:600` 에 *"나중에 HeroDataAsset 으로 접을 것"* 이라는 주석만 | **코드** (문서가 계획을 현재형으로 씀) |
 | D10 | `Architecture.md:54` "PickupRadius·XPGain·MoveSpeed·HealthRegen 미구현" | 앞의 **3개는 구현·사용 중**. `HealthRegen` 만 진짜 없음 | **코드** |
 | D11 | `Enemy.md:28` "방패 아키타입 `UFPSRShieldComponent`" · `:27` "공중 아키타입" | 둘 다 **0 hits**. 적 아키타입은 근접·원거리 2종뿐 | 문서가 계획을 🟢로 표시해 오해 소지 |
