@@ -18,7 +18,8 @@
 | `CLAUDE.md` / `AGENTS.md` | 진입 포인터(≤10줄). "Game.md·PROGRESS.md 읽기" + 절대금지 3줄 | 거의 불변 |
 | `GameConfirm.md` | **다른 AI가 작성**하는 리뷰/추가제안 문서. 우리는 만들지 않음(§10, `Docs/SSOT/Workflow.md`) | 외부 AI |
 | `Docs/ConsultLoop.md` | **Codex 협업 프로토콜** — §0-1 호출 적용 범위(코어/구조만) + 안건(Claude)×적대 레드팀(Codex) 라이브 토론. 트리거 `/consult <주제>`·`/plan-consult <작업>`, 산출 `Docs/Review/`(프롬프트 매니저 인입원, §10) | 우리(세션) |
-| `Docs/CodexRedTeamPersona.md` | **Codex 역할 프라이머 원문**(웹/앱 적대 레드팀) — 래퍼가 프롬프트에 그대로 싣는다. 설명문 추가 금지 | 거의 불변 |
+| `Docs/InternalRedTeamReview.md` | **머지 게이트 레드팀 프라이머 원문**(내부 Fable 서브에이전트) — P1/P2/P3 리뷰 하네스 포함. 절차 = `Workflow.md` §6-6-1. 설명문 추가 금지 | 거의 불변 |
+| `Docs/CodexRedTeamPersona.md` | **Codex 역할 프라이머 원문**(웹/앱 적대 레드팀, **토론 채널 전용**) — 래퍼가 프롬프트에 그대로 싣는다. 설명문 추가 금지 | 거의 불변 |
 
 → **AI가 읽는 본문 = 이 허브 + PROGRESS.md + 작업 관련 `Docs/SSOT/` 파일.**
 

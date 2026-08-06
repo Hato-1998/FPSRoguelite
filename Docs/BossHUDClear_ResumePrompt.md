@@ -121,7 +121,7 @@ clear(:449) 둘 다 있음. 헤더 주석이 3곳에서 "set/clear" 계약을 �
 - 스모크: `UnrealEditor-Cmd.exe <uproject> -unattended -nopause -nullrhi -nosplash -nosound -ExecCmds="Automation RunTests FPSRoguelite.Smoke.ModuleLoads" -TestExit="Automation Test Queue Empty" -abslog=...` → `Result={Success}`
 - ⚠️ **에디터 열려 있으면**: 빌드는 되지만 `-0001.dll` 핫리로드 변형이 나옴 → PIE 실동작 확인 전엔 **에디터 끄고 재빌드**. 머지는 `.uasset`을 안 건드리면 안 막힘(메모리 `ue-editor-file-locks-block-git`)
 - PIE 확인 = 사용자(§3에서 재현 경로가 확정된 경우에만 의미 있음)
-- Codex 머지게이트: `powershell -File Scripts\codex-review.ps1 -Base main`
+- 머지게이트: 레드팀 리뷰(`Workflow.md` §6-6-1 — Fable 서브에이전트에 브랜치 diff만 전달). 코어/구조 변경일 때만
 
 ## 6. 관련 메모리
-`freeze-gate-client-server-symmetry` · `reason-in-multiplayer-terms` · `architecture-decision-first-principles` · `production-structure-first` · `shared-worktree-branch-collision`(커밋 전 `git branch --show-current` 필수) · `ue-editor-file-locks-block-git` · `codex-review-gate`
+`freeze-gate-client-server-symmetry` · `reason-in-multiplayer-terms` · `architecture-decision-first-principles` · `production-structure-first` · `shared-worktree-branch-collision`(커밋 전 `git branch --show-current` 필수) · `ue-editor-file-locks-block-git` · `review-gate-internal-redteam`

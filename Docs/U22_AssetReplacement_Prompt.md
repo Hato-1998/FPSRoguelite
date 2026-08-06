@@ -314,7 +314,7 @@ Game.md + PROGRESS.md + Docs/U22_AssetReplacement_Prompt.md 먼저 읽어. U22b�
 빌드   : "D:\UnrealEngine\UE_5.7\Engine\Build\BatchFiles\Build.bat" FPSRogueliteEditor Win64 Development
          -Project="<빌드 클론>\FPSRoguelite.uproject" -WaitMutex     (에디터 닫고 / 클론 = FPSRoguelite2)
 스모크 : UnrealEditor-Cmd.exe <uproject> -unattended -nullrhi -ExecCmds="Automation RunTests FPSRoguelite.Smoke.ModuleLoads"
-Codex  : powershell -File Scripts\codex-review.ps1 -Base main
+리뷰   : 레드팀 게이트(Workflow.md §6-6-1) — 코어/구조 변경일 때만. 에셋 교체는 대상 아님
 ```
 
 - XGE가 간헐적으로 `C1076`(힙 고갈)로 실패한다 → **`-NoXGE`로 재빌드**. 판정은 래퍼 exit 코드가 아니라 **로그의 `Result:`** 로 한다.
