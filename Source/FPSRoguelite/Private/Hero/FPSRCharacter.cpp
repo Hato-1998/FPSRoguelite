@@ -16,7 +16,6 @@
 #include "Weapon/FPSRWeaponFireComponent.h"
 #include "Weapon/FPSRRecoilComponent.h"
 #include "Weapon/FPSRWeaponFragment.h"
-#include "Weapon/FPSRWeaponDataAsset.h"
 #include "Weapon/FPSRWeaponAnimInstance.h"
 #include "Weapon/FPSRWeaponPartSelector.h"
 #include "Hero/FPSRPlayerFeedbackComponent.h"
@@ -2007,6 +2006,7 @@ void AFPSRCharacter::RebuildPartsFromSelection(const TArray<FFPSRWeaponPartAttac
 	// Parallel to WeaponPartComponents (both appended together in the loop): each attached part's scope descriptor,
 	// so the aim-resolution below can capture the ACTIVE sight's descriptor by index. (W-U2)
 	TArray<FFPSRWeaponScopeDescriptor> AddedScopeDescriptors;
+	AddedScopeDescriptors.Reserve(Selected.Num());
 
 	for (const FFPSRWeaponPartAttachment& PartDef : Selected)
 	{

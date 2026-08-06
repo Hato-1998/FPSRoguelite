@@ -335,6 +335,7 @@ void AFPSRProjectile::HandleImpact(const FVector& ImpactPoint)
 				World->OverlapMultiByObjectType(Overlaps, ImpactPoint, FQuat::Identity, ObjectParams, Sphere, QueryParams);
 
 				TArray<AActor*> Damaged;
+				Damaged.Reserve(Overlaps.Num());
 				for (const FOverlapResult& Overlap : Overlaps)
 				{
 					AActor* Target = Overlap.GetActor();

@@ -3,7 +3,6 @@
 #include "DataEditor/SFPSRDataEditorWidget.h"
 
 #include "Validation/FPSRAnchoredValidationService.h"
-#include "DataEditor/FPSRDataEditorHelpers.h"
 
 #include "Card/FPSRCardDataAsset.h"
 #include "Card/FPSRCardEffect.h"

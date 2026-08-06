@@ -484,6 +484,7 @@ bool UFPSRWeaponInventoryComponent::IsReloading() const
 TArray<UFPSRWeaponDataAsset*> UFPSRWeaponInventoryComponent::GetOwnedWeapons() const
 {
 	TArray<UFPSRWeaponDataAsset*> Result;
+	Result.Reserve(Slots.Num());
 	for (const TObjectPtr<UFPSRWeaponInstance>& Instance : Slots)
 	{
 		UFPSRWeaponDataAsset* Source = Instance ? Instance->GetSource() : nullptr;

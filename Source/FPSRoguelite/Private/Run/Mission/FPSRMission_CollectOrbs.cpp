@@ -47,6 +47,7 @@ void AFPSRMission_CollectOrbs::OnMissionActivated()
 			Offsets = { FVector(600.0f, 0.0f, 50.0f), FVector(0.0f, 600.0f, 50.0f), FVector(-600.0f, 0.0f, 50.0f) };
 		}
 		const FVector Origin = GetActorLocation();
+		SpawnLocations.Reserve(Offsets.Num());
 		for (const FVector& Offset : Offsets)
 		{
 			SpawnLocations.Add(Origin + Offset);

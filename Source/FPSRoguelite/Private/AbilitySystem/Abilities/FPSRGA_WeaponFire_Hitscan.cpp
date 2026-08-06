@@ -287,6 +287,12 @@ void UFPSRGA_WeaponFire_Hitscan::ActivateAbility(
 		}
 	};
 
+	// Hoisted out of the pellet loop so a shotgun blast doesn't heap-allocate two arrays per pellet; both are
+	// Reset() at the point of use below rather than reallocated. DedupePawnHitsByActor APPENDS without clearing,
+	// so ResolvedHits must be reset explicitly or a pellet would re-damage the previous pellet's targets.
+	TArray<FHitResult> PawnHits;
+	TArray<FPSRCombat::FResolvedHit> ResolvedHits;
+
 	// Nested loop: outer over rounds (each costs 1 ammo), inner over pellets per round.
 	for (int32 Round = 0; Round < NumRounds; ++Round)
 	{
@@ -305,7 +311,7 @@ void UFPSRGA_WeaponFire_Hitscan::ActivateAbility(
 			// ray, then find the wall (Visibility) cutoff ignoring those pawns so a pawn never masquerades as the
 			// wall. Query-only dynamics that ignore Visibility (in-flight projectiles) don't count as walls.
 			FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(FPSRWeaponFire), false, Avatar);
-			TArray<FHitResult> PawnHits;
+			PawnHits.Reset();
 			World->LineTraceMultiByObjectType(PawnHits, Start, End, PawnObjParams, QueryParams);
 
 			FCollisionQueryParams WallParams(SCENE_QUERY_STAT(FPSRWeaponFireWall), false, Avatar);
@@ -329,7 +335,7 @@ void UFPSRGA_WeaponFire_Hitscan::ActivateAbility(
 
 			// Collapse to one entry per actor (nearest kept, max weakpoint multiplier) so body+weakpoint hits
 			// on the same enemy never double-damage or double-spend penetration (U3a).
-			TArray<FPSRCombat::FResolvedHit> ResolvedHits;
+			ResolvedHits.Reset(); // mandatory: DedupePawnHitsByActor appends, it does not clear
 			FPSRCombat::DedupePawnHitsByActor(PawnHits, ResolvedHits);
 
 			int32 PenetrationCount = 0;

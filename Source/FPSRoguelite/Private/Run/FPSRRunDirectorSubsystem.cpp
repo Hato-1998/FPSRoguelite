@@ -1,7 +1,6 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Run/FPSRRunDirectorSubsystem.h"
-#include "Run/FPSRRunScheduleDataAsset.h"
 #include "Run/Mission/FPSRMissionActor.h"
 #include "Run/Mission/FPSRMissionDataAsset.h"
 #include "Run/Mission/FPSRMissionSpawnPoint.h"
@@ -650,6 +649,7 @@ FTransform UFPSRRunDirectorSubsystem::SelectMissionSpawnTransform(const UFPSRMis
 
 	// Prefer points that satisfy MinPlayerDistance (weighted-random among them).
 	TArray<const FCandidate*> FarEnough;
+	FarEnough.Reserve(TagMatched.Num());
 	float TotalWeight = 0.0f;
 	for (const FCandidate& C : TagMatched)
 	{
@@ -755,6 +755,7 @@ AFPSRMissionPointSet* UFPSRRunDirectorSubsystem::SelectMissionPointSet(const UFP
 
 	// Prefer point sets whose first point satisfies MinPlayerDistance (weighted-random among them).
 	TArray<const FPointSetCandidate*> FarEnough;
+	FarEnough.Reserve(TagMatched.Num());
 	float TotalWeight = 0.0f;
 	for (const FPointSetCandidate& C : TagMatched)
 	{

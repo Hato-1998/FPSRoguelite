@@ -1,7 +1,6 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "UI/FPSRRunHUDWidget.h"
-#include "Core/FPSRGameState.h"
 #include "Engine/World.h"
 #include "Components/Image.h"
 #include "Blueprint/UserWidget.h"

@@ -161,6 +161,7 @@ TArray<FFPSRCardDraw> UFPSRCardSubsystem::DrawCards(AController* ForPlayer, int3
 	// Weighted sampling without replacement. Once an offer is picked, every remaining offer of the same card
 	// (all its tiers) and same family is removed, so a card never appears twice and families stay exclusive.
 	TArray<FFPSRCardDraw> Result;
+	Result.Reserve(Count);
 	for (int32 i = 0; i < Count && Candidates.Num() > 0; ++i)
 	{
 		float TotalWeight = 0.0f;
@@ -389,6 +390,7 @@ TArray<FFPSRCardDraw> UFPSRCardSubsystem::DrawWeaponUnlockOffer(AController* For
 	if (bHasAnyFreeSlot)
 	{
 		TArray<UFPSRWeaponDataAsset*> GrantedSeen;
+		GrantedSeen.Reserve(ActivePool->WeaponUnlockCards.Num());
 		for (const TObjectPtr<UFPSRCardDataAsset>& Card : ActivePool->WeaponUnlockCards)
 		{
 			if (!Card)

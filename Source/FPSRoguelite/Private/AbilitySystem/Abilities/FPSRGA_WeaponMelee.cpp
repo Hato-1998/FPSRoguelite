@@ -160,6 +160,7 @@ void UFPSRGA_WeaponMelee::ActivateAbility(
 		if (bAny)
 		{
 			TSet<AActor*> Processed;
+			Processed.Reserve(Overlaps.Num());
 			for (const FOverlapResult& Overlap : Overlaps)
 			{
 				AActor* HitActor = Overlap.GetActor();

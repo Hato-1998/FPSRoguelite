@@ -246,6 +246,7 @@ namespace FPSRCombat
 			ObjectParams, FCollisionShape::MakeSphere(Radius), QueryParams);
 
 		TSet<AActor*> Processed;
+		Processed.Reserve(Overlaps.Num());
 		bool bAnyEnemyHit = false;
 		bool bAnyCrit = false;
 		bool bAnyKill = false;
@@ -374,6 +375,7 @@ namespace FPSRCombat
 		// InHits is distance-sorted (LineTraceMulti). First time we see an actor we record its nearest hit; later
 		// hits on the same actor only raise the weakpoint multiplier. Output order = nearest-first insertion order.
 		TMap<const AActor*, int32> ActorToIndex;
+		ActorToIndex.Reserve(InHits.Num());
 		for (const FHitResult& Hit : InHits)
 		{
 			AActor* HitActor = Hit.GetActor();
