@@ -1,0 +1,121 @@
+# `Docs/Specs/` — Fable 설계 명세 템플릿
+
+> **이 폴더는 무엇인가**: 코어/구조/리팩토링 작업에서 **Fable이 만든 헤더 수준 설계 명세**를 모아둔다.
+> Sonnet은 여기 적힌 대로만 구현하고, Fable은 검증 단계에서 **이 문서와 실제 코드를 대조해 통과/반려를 판정**한다.
+> 절차 전문 = **`Docs/SSOT/Workflow.md` §6-5-2**.
+>
+> **파일명**: `<유닛ID>_<키워드>.md` (예: `P8_HealthComponent.md`, `RC1_CharacterBase.md`)
+> **`.cpp` 본문은 이 문서에 쓰지 않는다.** 선언·계약·제약까지가 명세의 범위다.
+> 아래 12개 항목은 **전부 채운다.** 해당 없으면 지우지 말고 `해당 없음 — <이유>`라고 적는다(빈칸과 "없음"은 다르다).
+
+---
+
+## 1. 메타
+
+| 항목 | 값 |
+|---|---|
+| 유닛 ID / 이름 | |
+| 브랜치 | `phase/...` |
+| 작성 모델 | `claude-fable-5` (폴백 시 실제 모델과 그 이유) |
+| 작성일 / 최종 갱신 | |
+| 상태 | `초안` / `확정` / `구현완료` / `폐기` |
+| 관련 SSOT | `Docs/SSOT/*.md` §x |
+| 관련 메모리 | `[[...]]` |
+
+## 2. 목표 / 비목표
+
+**목표** — 이 유닛이 끝나면 무엇이 가능해지는가 (동작 기준으로, 구현 방식이 아니라).
+
+**비목표(Non-goals)** — 일부러 하지 않는 것. *구현자가 "친절하게" 채워 넣는 것을 막는 칸이다.*
+
+## 3. 제1원리 3줄 (핵심원칙 4)
+
+1. **제1원리 근거** — 이 게임의 제약(적 동시 ~200-300 싸게 / 액터당 비용 최소화 / 4인 협동 서버권위)에서 이 구조가 어떻게 나오는가
+2. **엔진 기본값·기존 인프라와의 관계** — 그대로 쓰는가 / 덮는가 / 덮는다면 왜 (엔진 소스 대조 결과를 인용)
+3. **프로젝트 제약과의 정합** — 다음 단계 확장성, 유지보수, 기존 코드와의 충돌 여부
+
+## 4. 파일 목록
+
+| 경로 | 신규/수정 | 한 줄 설명 |
+|---|---|---|
+| `Source/FPSRoguelite/Public/.../X.h` | 신규 | |
+| `Source/FPSRoguelite/Private/.../X.cpp` | 신규 | |
+
+## 5. 인터페이스 선언 (헤더 스케치)
+
+`UCLASS`/`USTRUCT`/`UENUM` 선언, `UPROPERTY`/`UFUNCTION` 지정자, 함수 시그니처를 **그대로 복사해 쓸 수 있는 형태**로.
+지정자에는 **선택 이유를 주석으로** 단다(`EditDefaultsOnly` vs `EditAnywhere`, `Instanced`, `Transient`, `Replicated` 등).
+
+```cpp
+// 예시 — 실제 명세로 교체할 것
+UCLASS(ClassGroup=(FPSR), meta=(BlueprintSpawnableComponent))
+class FPSROGUELITE_API UExampleComponent : public UActorComponent
+{
+    GENERATED_BODY()
+public:
+    // 콘텐츠가 BP/DataAsset에서 조정 — 인스턴스별 편차 불필요하므로 EditDefaultsOnly
+    UPROPERTY(EditDefaultsOnly, Category="Example")
+    float SomeTunable = 1.0f;
+
+    /** 서버 권위. 클라 호출은 no-op. */
+    void DoThing(float Amount);
+};
+```
+
+## 6. 함수별 계약
+
+| 함수 | 권위 | 호출자 | 전제조건 | 실패 시 동작 |
+|---|---|---|---|---|
+| `DoThing()` | 서버 전용 | `AFPSRWeapon::Fire()` | `IsValid(Owner)` | `ensure` 후 조기 반환 |
+
+## 7. 복제표 (§6-3 서버권위 + Push Model)
+
+| 프로퍼티 / RPC | 종류 | Push Model | 신뢰성 | 조건 | 비고 |
+|---|---|---|---|---|---|
+| `Health` | `Replicated` | `MARK_PROPERTY_DIRTY` 지점 명시 | — | `COND_None` | `GetLifetimeReplicatedProps` 등록 |
+| `Server_Fire()` | `Server, Reliable, WithValidation` | — | Reliable | — | 검증 함수에서 무엇을 막는가 |
+
+> ⚠️ 패키지 빌드에서는 Push Model이 꺼진다(에디터/PIE 전용). 복제 정합성은 **Push Model이 꺼진 상태에서도** 성립해야 한다.
+
+## 8. 수명주기 · 소유권
+
+- **생성 / 등록**: 어디서 만들고 어디에 등록하는가 (`BeginPlay`? 서브시스템 `Initialize`? 서버만?)
+- **해제 / 등록 해제**: `EndPlay`·`Deinitialize`에서 무엇을 되돌리는가
+- **GC 소유**: 어떤 `UPROPERTY`가 참조를 살려두는가 (raw 포인터로 새는 곳은 없는가)
+- **델리게이트**: 구독 지점과 **해제 지점이 1:1 대칭인가**
+- **초기 동기화**: 델리게이트 구독만으로 부족한 곳(위젯 `Construct` 등)에서 현재 상태를 어떻게 반영하는가
+
+## 9. 데이터드리븐 경계 (핵심원칙 2)
+
+C++에 남는 것 = **안 바뀌는 구조**. 조정값은 전부 밖으로 뺀다.
+
+| 값 | 나가는 곳 | 기본값 | 비고 |
+|---|---|---|---|
+| | DataAsset / `DefaultGame.ini` / BP 기본값 | | |
+
+> **에셋 경로를 C++에 하드코딩 금지**(`ConstructorHelpers` 지양). 다음 단계에서 쓸 값을 "미검증"이라며 미루지 않는다 — 미루면 그 단계가 코드 수정 단계가 된다.
+
+## 10. 성능 예산 (핵심원칙 1)
+
+- **틱**: 매 프레임 도는가? 도는 주체는 몇 개인가? (액터당? 서브시스템 1개?)
+- **액터당 비용**: 적 스웜(동시 ~200-300, 캡 500)에 붙는 구조인가 — 붙는다면 개체당 추가 비용은?
+- **복제 대역**: 개체당 복제되는 바이트/빈도
+- **완화**: 배치 처리 / Significance / 갱신 주기 분할 중 무엇을 쓰는가
+
+## 11. 미결정 항목 · 명세 갭 처리
+
+**미결정** — Fable이 일부러 열어둔 것과, 그 결정을 누가 언제 하는가.
+
+**갭 처리 규칙(고정)**: 구현 중 명세에 없는 판단이 필요해지면 **추측해서 채우지 말고 멈추고 "명세 갭"으로 보고**한다.
+갭은 C1(설계)으로 돌아가 Fable이 명세를 고친 뒤 재개한다.
+
+## 12. 검증 기준 (무엇을 통과라 부르는가)
+
+| # | 검사 | 통과 조건 |
+|---|---|---|
+| 1 | 명세 대조 | 5·6·7항의 선언·시그니처·복제 설정이 코드와 1:1 일치 |
+| 2 | 빌드 | `Build.bat FPSRogueliteEditor Win64 Development ...` **Succeeded** (include 변경 시 `-DisableUnity` 필수 — 일반 빌드는 유니티 블롭이 누락을 가려준다) |
+| 3 | 헤드리스 스모크 | `Automation RunTests FPSRoguelite.Smoke.ModuleLoads` 통과 |
+| 4 | Codex 게이트 | `Scripts/codex-review.ps1 -Base main` — 지적 판독·처리 완료 |
+| 5 | 회귀 | (이 유닛이 건드리는 기존 동작) 변화 0 |
+| 6 | PIE / 사용자 스모크 | 사용자가 확인할 항목을 **구체적으로** 나열 (Claude는 에디터를 직접 실행할 수 없다) |

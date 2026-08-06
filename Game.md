@@ -13,6 +13,7 @@
 |---|---|---|
 | **Game.md** (이 문서) | SSOT 허브 = 장르 정체성(§1) + 문서 체계(§0) + 빠른 참조(§9) + **라우팅 가이드** | 우리(세션) |
 | **`Docs/SSOT/*.md`** | 도메인별 SSOT 본문(기획·기술·구조·성능·규칙·로드맵). 섹션번호 보존 | 우리(세션) |
+| **`Docs/Specs/*.md`** | **코어/구조 작업의 헤더 수준 설계 명세**(Fable 작성 → Sonnet이 그대로 구현 → Fable이 이 문서와 대조해 판정). 템플릿 `_TEMPLATE.md`, 절차 `Docs/SSOT/Workflow.md` §6-5-2 | Fable(설계 세션) |
 | **PROGRESS.md** | 휘발성 진행현황·핸드오프(완료/진행중/다음순서/검증법) | 우리(세션) |
 | `CLAUDE.md` / `AGENTS.md` | 진입 포인터(≤10줄). "Game.md·PROGRESS.md 읽기" + 절대금지 3줄 | 거의 불변 |
 | `GameConfirm.md` | **다른 AI가 작성**하는 리뷰/추가제안 문서. 우리는 만들지 않음(§10, `Docs/SSOT/Workflow.md`) | 외부 AI |
@@ -31,7 +32,8 @@
 | 카메라·생존(DBNO)·대시·게임필/피드백·HUD | [`Docs/SSOT/PlayerFeel.md`](Docs/SSOT/PlayerFeel.md) | §2-9, §2-13, §2-14 |
 | 신규 클래스·모듈·폴더 구조·기술 채택 | [`Docs/SSOT/Architecture.md`](Docs/SSOT/Architecture.md) | §3, §4(+4-1·4-2) |
 | 성능·복제 예산·Significance·플로우필드 | [`Docs/SSOT/Performance.md`](Docs/SSOT/Performance.md) | §5(+5-1·5-2) |
-| **모든 코드 작업(필독)** — 환경·빌드·브랜치·모델정책·리뷰 | [`Docs/SSOT/Workflow.md`](Docs/SSOT/Workflow.md) | §6(+6-1~6-7), §10 |
+| **모든 코드 작업(필독)** — 환경·빌드·브랜치·모델정책·리뷰 | [`Docs/SSOT/Workflow.md`](Docs/SSOT/Workflow.md) | §6(+6-1~6-8), §10 |
+| **코어·구조 설계·리팩토링** — Fable 주도 4단계 + 명세 양식 | [`Docs/SSOT/Workflow.md`](Docs/SSOT/Workflow.md) §6-5-2 + [`Docs/Specs/_TEMPLATE.md`](Docs/Specs/_TEMPLATE.md) | §6-5, §6-5-2 |
 | 진행상황·로드맵·재미 게이트·플레이스홀더 전환 | [`Docs/SSOT/Roadmap.md`](Docs/SSOT/Roadmap.md) | §7(+7-1~7-5), §8 |
 
 > 빠른 규칙: **어떤 코드 작업이든 `Workflow.md`(§6)는 먼저** 본다. 그 외엔 위 표에서 작업에 해당하는 1~2개만 읽는다.
