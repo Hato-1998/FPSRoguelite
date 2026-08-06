@@ -18,21 +18,17 @@ bool FFPSRCrosshairSettingsTest::RunTest(const FString& Parameters)
 		return false;
 	}
 
-	// 1. Default thickness is 1.0.
-	TestEqual(TEXT("Default crosshair thickness is 1.0"), Settings->GetCrosshairThickness(), 1.0f);
+	// No assertion on the DEFAULT colour: CrosshairColor is a UPROPERTY(config), so even a fresh NewObject is seeded
+	// from whatever the local GameUserSettings.ini holds. Asserting white here passes only on a machine that never
+	// changed it — measured: it came back (1, 0.1, 0.1, 1) on a machine with a saved red crosshair.
 
-	// 2. Clamp to [0.5, 2.0].
-	Settings->SetCrosshairThickness(0.1f, /*bSave=*/false);
-	TestEqual(TEXT("Below-min clamps to 0.5"), Settings->GetCrosshairThickness(), 0.5f);
-	Settings->SetCrosshairThickness(9.0f, /*bSave=*/false);
-	TestEqual(TEXT("Above-max clamps to 2.0"), Settings->GetCrosshairThickness(), 2.0f);
-	Settings->SetCrosshairThickness(1.5f, /*bSave=*/false);
-	TestEqual(TEXT("In-range value passes through"), Settings->GetCrosshairThickness(), 1.5f);
-
-	// 3. Color round-trips (bSave=false so disk is never touched).
+	// Colour round-trips (bSave=false so disk is never touched) — config-independent, which is the point.
 	const FLinearColor TestColor(0.1f, 1.0f, 0.1f, 1.0f);
 	Settings->SetCrosshairColor(TestColor, /*bSave=*/false);
 	TestEqual(TEXT("Crosshair color round-trips"), Settings->GetCrosshairColor(), TestColor);
+
+	// Thickness is intentionally absent: it stopped being a player setting (line weight is authored per style on the
+	// crosshair material instances). If a thickness accessor ever reappears here, that decision was reverted.
 
 	return true;
 }

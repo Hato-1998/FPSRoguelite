@@ -7,7 +7,6 @@ UFPSRGameUserSettings::UFPSRGameUserSettings()
 {
 	MasterVolume = 1.0f;
 	CrosshairColor = FLinearColor::White;
-	CrosshairThickness = 1.0f;
 }
 
 UFPSRGameUserSettings* UFPSRGameUserSettings::Get()
@@ -37,13 +36,3 @@ void UFPSRGameUserSettings::SetCrosshairColor(FLinearColor InColor, bool bSave)
 	}
 }
 
-void UFPSRGameUserSettings::SetCrosshairThickness(float InThickness, bool bSave)
-{
-	CrosshairThickness = FMath::Clamp(InThickness, 0.5f, 2.0f);
-	// Broadcast unconditionally so a live drag re-applies to the HUD crosshair before persistence.
-	OnCrosshairSettingsChanged.Broadcast();
-	if (bSave)
-	{
-		SaveSettings();
-	}
-}

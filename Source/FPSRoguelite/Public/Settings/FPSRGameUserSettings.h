@@ -49,17 +49,13 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "FPSR|Crosshair")
 	void SetCrosshairColor(FLinearColor InColor, bool bSave = true);
 
-	/** Current crosshair thickness multiplier (0.5 .. 2.0, 1.0 = default). */
-	UFUNCTION(BlueprintPure, Category = "FPSR|Crosshair")
-	float GetCrosshairThickness() const { return CrosshairThickness; }
+	// Crosshair THICKNESS is deliberately not a player setting. Line weight is authored per style on the crosshair
+	// material instances (M_XH_* expose a Thickness parameter), so it belongs to the designer alongside the shape
+	// itself — a player-facing multiplier on top of that only ever fought the authored look, and on the always-on
+	// base dot it also handed the dot's apparent size back to the player (see UFPSRRunHUDWidget::BaseDotSizePx).
 
-	/** Set + persist the crosshair thickness multiplier (clamped 0.5..2.0). ALWAYS broadcasts
-	 *  OnCrosshairSettingsChanged so a live drag re-applies to the HUD; bSave=false skips the disk write. */
-	UFUNCTION(BlueprintCallable, Category = "FPSR|Crosshair")
-	void SetCrosshairThickness(float InThickness, bool bSave = true);
-
-	/** Fires on every crosshair appearance change (color / thickness, live preview included). BlueprintAssignable
-	 *  for BP/content consumers. */
+	/** Fires on every crosshair appearance change (color; live preview included). BlueprintAssignable for BP/content
+	 *  consumers. */
 	UPROPERTY(BlueprintAssignable, Category = "FPSR|Crosshair")
 	FOnCrosshairSettingsChanged OnCrosshairSettingsChanged;
 
@@ -71,8 +67,4 @@ protected:
 	/** Crosshair fill color (RGBA), default opaque white. Persisted to GameUserSettings.ini. */
 	UPROPERTY(config)
 	FLinearColor CrosshairColor = FLinearColor::White;
-
-	/** Crosshair thickness multiplier, 0.5 (thin) .. 2.0 (thick), 1.0 = default. Persisted to GameUserSettings.ini. */
-	UPROPERTY(config)
-	float CrosshairThickness = 1.0f;
 };

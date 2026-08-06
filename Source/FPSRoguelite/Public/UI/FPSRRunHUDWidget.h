@@ -72,19 +72,52 @@ protected:
 
 	// --- Dynamic crosshair (owner-client cosmetic; §2-14) ---
 
-	/** Centered crosshair image. Bind a UImage named "CrosshairImage" in the WBP (optional — HUD still works without it). */
+	/** WEAPON layer of the crosshair — the equipped weapon's own style, drawn ON TOP of the base dot below. Only
+	 *  visible when the weapon actually defines a style: "no style" is a normal state (melee / unarmed), not a case
+	 *  to substitute a generic crosshair for. Bind a UImage named "CrosshairImage" in the WBP (optional). */
 	UPROPERTY(meta = (BindWidgetOptional))
 	TObjectPtr<UImage> CrosshairImage;
 
-	/** Fallback crosshair material instance used when the equipped weapon defines none (set to MI_Crosshair_Default). */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Crosshair")
-	TSoftObjectPtr<UMaterialInterface> DefaultCrosshairMaterial;
+	/** BASE layer — a centre dot that is always present regardless of weapon or movement state. The weapon layer
+	 *  above ADDS to it rather than replacing it, so a melee weapon shows the dot alone simply because it carries no
+	 *  style of its own, and a future melee weapon WITH a style would show dot + style together.
+	 *  Bind a UImage named "DotCrosshairImage" in the WBP (optional — HUD still works without it). */
+	UPROPERTY(meta = (BindWidgetOptional))
+	TObjectPtr<UImage> DotCrosshairImage;
 
-	/** On-screen size (logical px) of the square crosshair image. This is the projection reference: the truthful
+	/** Style used for the always-on base dot (set to DA_XH_Dot). Data, not a literal: the path stays out of C++ so a
+	 *  restyle is an asset swap. Its material must expose FillColor/Thickness or the player's colour setting cannot
+	 *  reach it — M_XH_Dot does, the old generic M_DynamicCrosshair does NOT (which is why that fallback is gone). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Crosshair")
+	TSoftObjectPtr<class UFPSRCrosshairStyleDataAsset> BaseDotCrosshairStyle;
+
+	/** On-screen size (logical px) of the square WEAPON crosshair image. This is the projection reference: the truthful
 	 *  spread cone is mapped into this box, so it must be large enough to fit the widest dispersion without
 	 *  clipping (the image is mostly transparent — only the thin SDF shapes draw). NOT a user size setting. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Crosshair")
 	float CrosshairSizePx = 600.0f;
+
+	/** On-screen size (logical px) of the square BASE DOT image — deliberately its own value, not CrosshairSizePx.
+	 *  That one is sized to fit the widest dispersion cone, and the dot has no dispersion to fit: sharing the box made
+	 *  the dot render at spread-projection scale, which is far too big. The dot's material draws its shape as a
+	 *  fraction of this box, so this is what actually sets the dot's apparent size.
+	 *
+	 *  Design-time data, NOT a player setting — it stays off UFPSRGameUserSettings so it can never reach the settings
+	 *  menu (colour and thickness are the player's; the dot's footprint is the designer's). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Crosshair", meta = (ClampMin = "1.0", UIMin = "8.0", UIMax = "256.0"))
+	float BaseDotSizePx = 64.0f;
+
+	/** Situations that dim the crosshair (reload, and anything else added later). Authored inline; each entry carries
+	 *  its own opacity. Empty = never fades, which is the old behaviour. Lowest opacity among the active entries wins,
+	 *  so the result never depends on the order they are listed in. See UFPSRCrosshairFadeCondition — a new situation
+	 *  is a subclass or a Blueprint child, never an edit to this widget. */
+	UPROPERTY(EditDefaultsOnly, Instanced, Category = "FPSR|Crosshair")
+	TArray<TObjectPtr<class UFPSRCrosshairFadeCondition>> CrosshairFadeConditions;
+
+	/** How fast the crosshair eases toward the target opacity (per second). A hard cut on a reload reads as a glitch,
+	 *  so this is interpolated rather than snapped. 0 = snap instantly. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Crosshair", meta = (ClampMin = "0.0"))
+	float CrosshairFadeInterpSpeed = 8.0f;
 
 	/** Optional floor on the projected spread (UV radius, 0..1) so a very accurate weapon's crosshair is still
 	 *  visible at rest. 0 = pure truthful (crosshair tracks the exact cone). Raise if it reads too small. */
@@ -120,8 +153,31 @@ private:
 	UFUNCTION()
 	void HandleCrosshairSettingsChanged();
 
-	/** Push the persisted crosshair color + thickness into the current dynamic material instance. */
+	/** Push the persisted crosshair color + thickness into BOTH dynamic material instances (weapon layer + base dot),
+	 *  which is what keeps the dot's colour identical to the weapon crosshair's without a second setting. */
 	void ApplyCrosshairAppearance();
+
+	/** Force one crosshair layer's canvas slot to screen centre at SizePx, independent of the designer's slot setup.
+	 *  Each layer passes its OWN size — the weapon layer needs a box big enough for the projected spread cone, the dot
+	 *  only needs to be a dot — while the shared centre anchoring keeps the two aligned. */
+	void CenterCrosshairSlot(UImage* Image, int32 ZOrder, float SizePx) const;
+
+	/** Rebuild (only on style change) and show the always-on base dot. Spread is never pushed here — dispersion is a
+	 *  weapon-layer concept and the dot has to stay a fixed reference. */
+	void UpdateBaseDotLayer();
+
+	/** Shared visibility setter: HitTestInvisible when shown, Collapsed when not. Null-safe (the WBP may bind neither
+	 *  image). */
+	static void SetLayerVisible(UImage* Image, bool bVisible);
+
+	/** Evaluate CrosshairFadeConditions, ease both layers toward the resulting opacity, and apply it. Called once per
+	 *  visible frame; skipped entirely while the crosshair is collapsed (ADS) since nothing is on screen to fade. */
+	void UpdateCrosshairFade(float DeltaSeconds);
+
+	/** Current eased opacity per layer, so the fade survives across frames (the target is recomputed every frame but
+	 *  the value has to carry). Start fully opaque. */
+	float CurrentWeaponOpacity = 1.0f;
+	float CurrentDotOpacity = 1.0f;
 
 	/** Project a weapon spread half-angle (deg) to the material's Spread parameter (UV radius, 0..1) so the
 	 *  crosshair truthfully bounds the actual dispersion cone (accounts for camera FOV, viewport, image size,
@@ -151,4 +207,10 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UMaterialInstanceDynamic> CrosshairDMI;
+
+	/** Base dot's dynamic instance. No paired "current source" field like the weapon layer above: the dot's style is
+	 *  an EditDefaultsOnly asset reference, so it is resolved and built exactly once and this pointer's existence IS
+	 *  the "already built" flag. */
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInstanceDynamic> DotCrosshairDMI;
 };
