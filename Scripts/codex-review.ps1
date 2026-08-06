@@ -1,12 +1,22 @@
-<#
+﻿<#
 .SYNOPSIS
-  FPSRoguelite 코드 검증용 Codex(gpt-5.5) 비대화형 리뷰 래퍼.
+  FPSRoguelite 코드 검증용 Codex(gpt-5.5) 비대화형 diff 리뷰 래퍼.
 .DESCRIPTION
   Claude 검증 단계의 최종 게이트. 비대화(approval=never)로 자동 실행한다.
-  프로젝트 원칙은 리포의 AGENTS.md(핵심 3원칙) + Game.md/PROGRESS.md를 Codex가 자동 로드해 적용한다.
+  프로젝트 원칙은 리포의 AGENTS.md(Codex 자동 로드)로 전달된다.
+  ⚠️ 이 게이트에는 레드팀 페르소나를 **넣을 수 없다**(2026-08-07 실증, 두 경로 모두 실패):
+    ① 인자 주입 = 아래 scope 플래그 충돌로 CLI가 거부.
+    ② AGENTS.md 안내 줄 = 대조군(`--commit 5f496e4f`)에서 codex review 가 자체 리뷰 형식을 유지했고
+       프라이머의 출력 계약(`[확정]`/`[가설]` 태그·공격 축 선언)이 나오지 않았다.
+  → 게이트 결과를 "레드팀 검증됨"으로 표기하지 말 것. 레드팀 페르소나는 토론 채널(consult-codex.ps1)에서만 실효.
   결과는 stdout 출력 + Docs/codex-reviews/ 에 타임스탬프 md(UTF-8) 저장(gitignore됨; Docs/Review 컨설팅 폴더와 분리).
+  ※ 호출 여부 자체는 Docs\ConsultLoop.md §0-1 적용 범위 게이트를 먼저 판정할 것
+     (코어/구조/리팩토링 = Workflow.md §6-5-2 T1~T5 에 걸릴 때만. 콘텐츠·수치·BP배선·에셋은 호출하지 않는다).
   주의:
-    - codex review 는 scope 플래그(--base/--uncommitted/--commit)와 커스텀 프롬프트를 동시에 쓸 수 없다.
+    - `codex review` 는 scope 플래그(--base/--uncommitted/--commit)와 커스텀 프롬프트를 **동시에 쓸 수 없다**.
+      `--help` 의 사용법 줄은 `codex review [OPTIONS] [PROMPT]` 라 양립하는 것처럼 보이지만 실제로는 거부된다:
+      `error: the argument '--base <BRANCH>' cannot be used with '[PROMPT]'` (3개 플래그 전부 동일, v0.130.0-alpha.5 실측 2026-08-07).
+      → 토론 채널(consult-codex.ps1)은 `codex exec` 라 이 제약이 없다(프롬프트에 페르소나를 직접 싣는다).
     - Windows에서 codex review 는 자체적으로 workspace-write 샌드박스로 동작한다(-s read-only 미반영 관찰됨).
       리뷰 에이전트는 읽기 분석 전용이나 워크스페이스 쓰기 권한이 있으므로 신뢰하는 로컬 리포에서만 사용할 것.
 .EXAMPLE
@@ -47,7 +57,7 @@ if (-not $CodexExe) {
 
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 
-# review 서브커맨드 인자 (scope 플래그만 — 커스텀 프롬프트와 양립 불가)
+# review 서브커맨드 인자 (scope 플래그만 — 커스텀 프롬프트와 양립 불가, 위 .DESCRIPTION 참고)
 $reviewArgs = @('review')
 switch ($PSCmdlet.ParameterSetName) {
     'Uncommitted' { $reviewArgs += '--uncommitted' }
@@ -67,7 +77,7 @@ $prevOut = [Console]::OutputEncoding
 Write-Host "▶ codex $($codexArgs -join ' ')" -ForegroundColor Cyan
 
 # 네이티브 호출: codex는 시작 배너를 stderr로 출력 → PS5.1에서 Stop이면 종료성 에러가 되므로 Continue로 격리.
-# 리뷰 본문은 stdout으로 나오며, stderr(배너/진행)는 콘솔로 흘려보낸다.
+# 리뷰 본문은 stdout으로 나오며, stderr(배너/진행/인자 에러)는 콘솔로 흘려보낸다 — 삼키면 조용한 실패가 된다.
 $prevEAP = $ErrorActionPreference
 $ErrorActionPreference = 'Continue'
 try {
@@ -82,6 +92,14 @@ finally {
 $clean = ($output -split "`r?`n" | Where-Object { $_ -notmatch '^SUCCESS: The process with PID \d+' }) -join "`n"
 
 Write-Host $clean
+
+# 빈 출력 가드: codex가 인자 에러·인증 실패로 죽으면 stdout이 비고 exit 0으로 보일 수 있다.
+# 그대로 저장하면 빈 리뷰 파일이 "게이트 통과"로 오독된다(2026-08-07 실사고).
+if ([string]::IsNullOrWhiteSpace($clean)) {
+    Write-Warning "리뷰 본문이 비었습니다 — 위 stderr(인자 에러/인증/사용량 한도)를 확인하세요. 게이트 통과로 간주하지 마십시오."
+    if (-not $NoSave) { Write-Warning "빈 결과는 저장하지 않습니다." }
+    exit 1
+}
 
 if (-not $NoSave) {
     # Docs\codex-reviews (Docs\Review 컨설팅 폴더와 Windows 대소문자 충돌 회피). gitignore됨.

@@ -68,7 +68,8 @@
 ## 6. 현재 프로젝트 스냅샷 포인터 (세션마다 git으로 갱신 확인)
 
 - 마스터 계획: `Docs/TaskPrompts_Master.md` (§A 현황 / §B DAG·표 / §B-3 프로토콜 / §C 유닛 프롬프트 / §D 문서 정합 메모 / **§E ConsultLoop 결과 인입 표**)
-- 컨설팅 토론 인입원: `Docs/Review/`(백엔드×클라 토론 리포트, 추적) — 프로토콜 `Docs/ConsultLoop.md`, 트리거 `/consult <주제>`. 신규 리포트 → §E 등재 → 유닛 반영(§1.4).
+- 컨설팅 토론 인입원: `Docs/Review/`(안건 Claude × 적대 레드팀 Codex 토론 리포트, 추적) — 프로토콜 `Docs/ConsultLoop.md`, 트리거 `/consult <주제>`·`/plan-consult <작업>`. 신규 리포트 → §E 등재 → 유닛 반영(§1.4).
+- ⚠️ **Codex 호출은 조건부**(ConsultLoop §0-1): 코어·리팩토링·설계/구조(§6-5-2 `T1~T5`) 유닛에만. 콘텐츠·수치·BP배선·에셋 유닛은 Codex 없이 진행하며, 프롬프트에 그 사실을 명시한다.
 - 진행: `PROGRESS.md` 상단 "마스터 작업 분해" 절의 순서 문자열이 현재 순서.
 - 검증/빌드 상세: `Docs/SSOT/Workflow.md` §6, `Scripts/codex-review.ps1`.
 - ⚠️ 이 절의 구체 유닛 상태는 빠르게 stale된다 — **항상 git log + TaskPrompts §B로 실확인** 후 말한다.

@@ -1,15 +1,21 @@
-<#
+﻿<#
 .SYNOPSIS
-  ConsultLoop용 Codex(클라이언트/콘텐츠 렌즈) 비대화 토론 래퍼 — `codex exec`.
+  ConsultLoop용 Codex(웹/앱 적대 레드팀) 비대화 토론 래퍼 — `codex exec`.
 .DESCRIPTION
-  백엔드(Claude)×클라이언트(Codex) 컨설팅 루프에서 Codex 측 입장·반론을 받는다(Docs/ConsultLoop.md).
+  Claude가 안건을 내고 Codex가 적대 반례를 공급하는 컨설팅 루프의 Codex 측 호출(Docs/ConsultLoop.md).
   코드 diff 게이트인 codex-review.ps1(`codex review`)과 다르다 — 이쪽은 임의 프롬프트 토론(`codex exec`).
-  Codex는 리포의 AGENTS.md(장르 정체성·핵심 3원칙)를 자동 로드한다. 프롬프트는 stdin으로 전달.
+  Codex는 리포의 AGENTS.md(장르 정체성·핵심 4원칙)를 자동 로드한다. 프롬프트는 stdin으로 전달.
+  역할 프라이머(페르소나)는 기본으로 Docs\CodexRedTeamPersona.md 를 프롬프트 앞에 붙인다 —
+  라운드마다 손으로 다시 쓰지 않게 해 문구 드리프트를 막는다. -NoPersona 로 끄고,
+  -Persona <경로> 로 다른 렌즈 파일을 지정한다(스크립트 수정 불요).
+  ※ 호출 여부 자체는 ConsultLoop §0-1 적용 범위 게이트를 먼저 판정할 것(코어/리팩토링/설계·구조만).
   read-only 샌드박스 · 비대화. 결과는 stdout 반환 + (옵션) Docs/Review/_raw/ 에 타임스탬프 저장.
   주의: workspace 쓰기 없는 read-only지만 신뢰 로컬 리포 전용으로 쓸 것.
 .EXAMPLE
   Scripts\consult-codex.ps1 -PromptFile .\round1.txt
   Scripts\consult-codex.ps1 -Prompt "스폰 디렉터 복제 모델 한 줄 의견" -DryRun
+  Scripts\consult-codex.ps1 -PromptFile r.txt -Persona Docs\<렌즈파일>.md   # 다른 렌즈로(파일 복제해 추가)
+  Scripts\consult-codex.ps1 -PromptFile r.txt -NoPersona                    # 프라이머 없이
   $env:CODEX_EXE = 'D:\tools\codex.exe'; Scripts\consult-codex.ps1 -PromptFile r.txt   # 경로 강제
 #>
 [CmdletBinding(DefaultParameterSetName = 'File')]
@@ -20,6 +26,8 @@ param(
     [string]$Prompt,
     [string]$Model,
     [string]$Title,
+    [string]$Persona,
+    [switch]$NoPersona,
     [switch]$DryRun,
     [switch]$NoSave
 )
@@ -54,6 +62,18 @@ else {
     $PromptText = $Prompt
 }
 
+# --- 역할 프라이머(페르소나) prepend ---
+# 기본 = 웹/앱 적대 레드팀. 라운드 프롬프트에 손으로 다시 쓰지 않게 해 문구 드리프트를 막는다(ConsultLoop §4).
+if (-not $NoPersona) {
+    $PersonaPath = if ($Persona) { $Persona } else { Join-Path $RepoRoot 'Docs\CodexRedTeamPersona.md' }
+    if (-not (Test-Path $PersonaPath)) {
+        Write-Error "Persona 파일 없음: $PersonaPath (다른 렌즈는 -Persona <경로>, 생략은 -NoPersona)"
+        exit 1
+    }
+    $PersonaText = Get-Content -Path $PersonaPath -Raw -Encoding UTF8
+    $PromptText = $PersonaText.TrimEnd() + "`n`n===== 여기부터 이번 라운드 안건 =====`n`n" + $PromptText
+}
+
 # --- codex exec 인자 (전역 -C 루트 + read-only, 프롬프트는 stdin '-') ---
 # ⚠️ 인코딩: npm codex.ps1 셸로 한글을 파이프하면 $input 재인코딩으로 mojibake가 된다(스모크로 확인).
 # 따라서 프롬프트를 UTF-8(no BOM) 파일에 쓰고 .cmd 런처에 Start-Process -RedirectStandardInput 로 raw 바이트 전달한다.
@@ -65,8 +85,11 @@ $argStr += " -"
 $Launcher = if ($Codex -match '\.ps1$') { [IO.Path]::ChangeExtension($Codex, 'cmd') } else { $Codex }
 if (-not (Test-Path $Launcher)) { $Launcher = $Codex }
 
+$PersonaLabel = if ($NoPersona) { '(없음 — -NoPersona)' } else { $PersonaPath }
+
 if ($DryRun) {
     Write-Host "▶ [DryRun] 런처: $Launcher" -ForegroundColor Cyan
+    Write-Host "▶ [DryRun] 페르소나: $PersonaLabel" -ForegroundColor Cyan
     Write-Host "▶ [DryRun] 명령: codex $argStr" -ForegroundColor Cyan
     Write-Host "▶ [DryRun] stdin 프롬프트 (호출 안 함):" -ForegroundColor Cyan
     Write-Host "----------------------------------------"
@@ -82,7 +105,7 @@ $tmpOut = [IO.Path]::GetTempFileName()
 $tmpErr = [IO.Path]::GetTempFileName()
 [IO.File]::WriteAllText($tmpPrompt, $PromptText, $utf8)
 
-Write-Host "▶ codex $argStr  (런처: $Launcher)" -ForegroundColor Cyan
+Write-Host "▶ codex $argStr  (런처: $Launcher · 페르소나: $PersonaLabel)" -ForegroundColor Cyan
 
 try {
     Start-Process -FilePath $Launcher -ArgumentList $argStr `

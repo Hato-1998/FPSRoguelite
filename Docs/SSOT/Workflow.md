@@ -129,7 +129,10 @@
   `UnrealEditor-Cmd.exe <uproject> -unattended -nopause -nullrhi -nosplash -nosound -ExecCmds="Automation RunTests FPSRoguelite.Smoke.ModuleLoads" -TestExit="Automation Test Queue Empty" -abslog=...`
 - 새 UCLASS 다수면 Live Coding 불가 → 풀빌드(에디터 닫아야 함). 입력 IA 생성은 `Scripts/gen_input_assets.py`
 - **MCP(unreal) 인증 실패로 미사용** → UBT 빌드 + 헤드리스 자동화로 검증
-- **Codex 코드리뷰 게이트**: 단계 완료·커밋 직전 `Scripts/codex-review.ps1` 실행 → 외부 AI(Codex gpt-5.5)가 Game.md 원칙 기준으로 diff 리뷰. 기본 `-Base main`(브랜치 diff) / `-Uncommitted`(작업트리). 비대화(approval never; Windows codex review는 workspace-write 샌드박스 → 신뢰 로컬 리포 전용). 결과 `Docs/codex-reviews/`(gitignore; 컨설팅 `Docs/Review/`와 Windows 대소문자 충돌 회피용 분리). 호출·판독은 Opus가 직접
+- **Codex 코드리뷰 게이트**(조건부): **§6-5-2 코어 갈래(T1~T5)일 때만** 머지 직전 `Scripts/codex-review.ps1` 실행 → 외부 AI(Codex gpt-5.5)가 `AGENTS.md` 원칙 기준으로 diff 리뷰. **그 외 갈래(콘텐츠·수치·BP배선·에셋·국지 버그수정)는 게이트를 건너뛰고** 빌드 + 헤드리스 스모크 + `git diff` 자기비판으로 끝낸다(범위 규칙 SSOT = `Docs/ConsultLoop.md` §0-1, 2026-08-07 사용자 결정).
+  - 기본 `-Base main`(브랜치 diff) / `-Uncommitted`(작업트리) / `-Commit <sha>`. 비대화(approval never; Windows codex review는 workspace-write 샌드박스 → 신뢰 로컬 리포 전용). 결과 `Docs/codex-reviews/`(gitignore; 컨설팅 `Docs/Review/`와 Windows 대소문자 충돌 회피용 분리). 호출·판독·판정 주체 = §6-5 표(코어=Fable / 그 외=Opus)
+  - ⚠️ **이 게이트엔 레드팀 페르소나가 안 들어간다**(2026-08-07 실증): ①`codex review`는 scope 플래그와 커스텀 프롬프트를 동시에 못 받고(`error: the argument '--base <BRANCH>' cannot be used with '[PROMPT]'`, 3개 플래그 전부) ②`AGENTS.md` 안내 줄도 대조군에서 리뷰 형식을 바꾸지 못했다. **게이트 결과를 "레드팀 검증됨"으로 표기하지 말 것** — 적대 페르소나는 토론 채널(`consult-codex.ps1`)에서만 실효(§10)
+  - ⚠️ **빈 출력 = 통과 아님.** 인자 에러·인증 실패·사용량 한도면 stdout이 비고 exit 0처럼 보인다. 래퍼가 빈 결과를 저장하지 않고 exit 1로 경고한다(2026-08-07 실사고). **5분 워치독** — 무출력 5분이면 종료·스킵
 
 ### 6-7. 브랜치 전략 (Phase 단위 워크플로)
 로드맵(§7-3)의 각 **P 단계**는 `main`에 직접 커밋하지 않고 **전용 브랜치에서 작업 → 검증 통과 후 `main`에 머지**한다. (도입 2026-05-30. 이전 main 히스토리는 소급 적용하지 않음.)
@@ -141,7 +144,7 @@
 라이프사이클:
 1. **분기** — `git checkout main` → `git checkout -b phase/<단계>-<키워드>` → `git push -u origin phase/<단계>-<키워드>`
 2. **작업** — 해당 phase 구현·문서를 이 브랜치에서만 커밋(모델 배분 = §6-5. **코어/구조/리팩토링이면 §6-5-2 Fable 주도 4단계**)
-3. **검증(머지 전 필수)** — 빌드(§6-6) → 헤드리스 스모크 → `Scripts/codex-review.ps1 -Base main`(브랜치 diff 리뷰). 검증 없이 머지 금지(§6-3). **통과/반려 판정 주체 = §6-5 표**(코어=Fable / 그 외=Opus) — 하위 모델 위임 금지
+3. **검증(머지 전 필수)** — 빌드(§6-6) → 헤드리스 스모크 → **(코어 갈래일 때만)** `Scripts/codex-review.ps1 -Base main`(브랜치 diff 리뷰). 그 외 갈래는 Codex 게이트 대신 `git diff` 자기비판으로 대체(§6-6). 검증 없이 머지 금지(§6-3). **통과/반려 판정 주체 = §6-5 표**(코어=Fable / 그 외=Opus) — 하위 모델 위임 금지
 4. **핸드오프** — phase 완료/세션 중단 전 `PROGRESS.md` 갱신·커밋(활성 브랜치명 명시, §6-4)
 5. **머지** — `git checkout main` → `git merge --no-ff phase/<단계>-<키워드> -m "merge(phase): <단계> <요약> — 검증 통과"` → `git push origin main`
 6. **정리** — `git push origin --delete phase/<단계>-<키워드>` + `git branch -d phase/<단계>-<키워드>`
@@ -179,5 +182,8 @@
 ## 10. 리뷰 루프 (외부 AI 협업)
 - 사용자 + 다른 AI가 이 문서를 읽고 추가/수정점을 **`GameConfirm.md`**(다른 AI 작성, **우리는 만들지 않음**)에 정리
 - 이후 세션이 `GameConfirm.md`를 불러와 현재 프로젝트와 비교 → (a) 타당한 추가/보완은 문서 갱신 + 작업계획 반영, (b) 사용자 판단·결정 필요한 것은 사용자에게 정리 보고
-- **코드 리뷰(Codex CLI)**: 문서 리뷰와 별개로, 구현 검증 단계에서 `Scripts/codex-review.ps1`로 Codex(gpt-5.5)에 diff 코드리뷰를 받는다(§6-6). 지적은 Opus가 판독해 수정 여부 결정. **분리 원칙: 문서 제안=`GameConfirm.md`(외부 AI 작성) / 코드 리뷰=`Docs/codex-reviews/`(Codex 산출) / 컨설팅 토론=`Docs/Review/`.**
-- **컨설팅 토론(제3 채널, ConsultLoop)**: 위 둘과 별개로, 사용자가 주제를 지목하면 백엔드(Claude)×클라이언트(Codex) **라이브 토론**으로 설계/콘텐츠를 자문받는다. 프로토콜=`Docs/ConsultLoop.md`, 호출=`Scripts/consult-codex.ps1`(`codex exec`), 트리거=`/consult <주제>`, 산출=`Docs/Review/`(추적, **프롬프트 매니저 `TaskPrompts_Master.md` §E가 읽어 백로그 인입**). **자문 전용**(코드 무변경) — 채택 설계는 이 문서/도메인 SSOT를 먼저 갱신 후 구현(§6-4). ※ 코드리뷰 덤프 저장폴더는 `Docs/codex-reviews/`로 분리(Windows 대소문자 충돌 회피).
+> **⚠️ Codex 호출은 전부 조건부다** — 코어/리팩토링/설계·구조(§6-5-2 `T1~T5`) 사안에만 부른다. 범위 규칙 SSOT = `Docs/ConsultLoop.md` §0-1(2026-08-07 사용자 결정). 아래 두 채널 다 이 게이트를 먼저 통과해야 한다.
+
+- **코드 리뷰(Codex CLI)**: 문서 리뷰와 별개로, 구현 검증 단계에서 `Scripts/codex-review.ps1`로 Codex(gpt-5.5)에 diff 코드리뷰를 받는다(§6-6). 지적은 §6-5 판정 주체(코어=Fable / 그 외=Opus)가 판독해 수정 여부 결정. **분리 원칙: 문서 제안=`GameConfirm.md`(외부 AI 작성) / 코드 리뷰=`Docs/codex-reviews/`(Codex 산출) / 컨설팅 토론=`Docs/Review/`.**
+- **컨설팅 토론(제3 채널, ConsultLoop)**: 위 둘과 별개로, 사용자가 주제를 지목하면 **안건 소유자(Claude) × 웹/앱 적대 레드팀(Codex)** 라이브 토론으로 설계·구조를 자문받는다. 프로토콜=`Docs/ConsultLoop.md`, 페르소나 원문=`Docs/CodexRedTeamPersona.md`, 호출=`Scripts/consult-codex.ps1`(`codex exec` — 래퍼가 페르소나를 자동 prepend), 트리거=`/consult <주제>`·`/plan-consult <작업>`, 산출=`Docs/Review/`(추적, **프롬프트 매니저 `TaskPrompts_Master.md` §E가 읽어 백로그 인입**).
+  **최종 결정권은 안건 소유자(Claude)** — 언제든 토론을 끝낼 수 있으나 `종료 사유` + `기각 원장`(근거 = 제1원리 조항/코드 인용/실측치)을 남겨야 성립(ConsultLoop §3-1). **자문 전용**(코드 무변경) — 채택 설계는 이 문서/도메인 SSOT를 먼저 갱신 후 구현(§6-4)하며, HIGH_RISK는 여전히 사용자 승인 뒤. ※ 코드리뷰 덤프 저장폴더는 `Docs/codex-reviews/`로 분리(Windows 대소문자 충돌 회피).
