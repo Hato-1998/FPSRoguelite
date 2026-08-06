@@ -7,7 +7,12 @@
 > **작업을 끝낼 때마다, 그리고 중단 전 반드시 이 파일을 갱신하고 커밋한다.**
 > 한 항목이 완료되면 **여기서 지우고 `Docs/WorkLog.md` 맨 위로 옮긴다.**
 
-**최종 갱신: 2026-08-06 · 브랜치 `refactor/character` (+ 리팩토링 1회차는 `refactor/mechanical-cleanup`)**
+**최종 갱신: 2026-08-07 · 브랜치 `refactor/character` (= `main` 과 동일 지점 `8fcf7bba`)**
+
+> 📌 2026-08-07: 캐릭터 재설계 트랙(103커밋) + 기계적 리팩토링 1회차(3커밋)를
+> **`main` 에 `--no-ff` 머지·푸시 완료**(`8fcf7bba`). `refactor/mechanical-cleanup` 브랜치는 삭제했고
+> `refactor/character` 는 다시 `main` 과 같은 지점에서 이어간다.
+> ⚠️ **머지했다고 검증된 건 아니다** — 빌드만 통과했고 아래 미검증 항목은 그대로 남아 있다.
 
 ---
 
@@ -15,7 +20,6 @@
 
 > 전문 = **[`Docs/Refactor_20260806_Report.md`](Docs/Refactor_20260806_Report.md) §7** ·
 > 전체 구조 지도 = **[`Docs/ProjectStructure_Report.md`](Docs/ProjectStructure_Report.md)**
-> 브랜치 `refactor/mechanical-cleanup`(커밋 `5f496e4f`)은 **검증 통과 상태로 머지 대기**.
 
 코드 수정분(18파일, 동작 변경 0)은 끝났고 `-DisableUnity` 풀빌드로 검증했다.
 남은 것은 **판단이 필요해서 일부러 안 고친 것들**이다. 우선순위 순:
