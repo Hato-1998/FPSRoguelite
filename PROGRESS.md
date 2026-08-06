@@ -7,7 +7,31 @@
 > **작업을 끝낼 때마다, 그리고 중단 전 반드시 이 파일을 갱신하고 커밋한다.**
 > 한 항목이 완료되면 **여기서 지우고 `Docs/WorkLog.md` 맨 위로 옮긴다.**
 
-**최종 갱신: 2026-08-06 · 브랜치 `refactor/character`**
+**최종 갱신: 2026-08-06 · 브랜치 `refactor/character` (+ 리팩토링 1회차는 `refactor/mechanical-cleanup`)**
+
+---
+
+# 🟠 대기 — 리팩토링 1회차가 올린 **사용자 결정 9건**
+
+> 전문 = **[`Docs/Refactor_20260806_Report.md`](Docs/Refactor_20260806_Report.md) §7** ·
+> 전체 구조 지도 = **[`Docs/ProjectStructure_Report.md`](Docs/ProjectStructure_Report.md)**
+> 브랜치 `refactor/mechanical-cleanup`(커밋 `5f496e4f`)은 **검증 통과 상태로 머지 대기**.
+
+코드 수정분(18파일, 동작 변경 0)은 끝났고 `-DisableUnity` 풀빌드로 검증했다.
+남은 것은 **판단이 필요해서 일부러 안 고친 것들**이다. 우선순위 순:
+
+1. 🔴 **패키지 빌드에서 Push Model 이 꺼진다** — 소스 엔진 빌드로 갈지 결정 (`FPSRoguelite.Target.cs`)
+2. 🔴 **아무 클라가 파티 전원을 로비로 강제 이동** — 게이트를 무엇으로 할지 (`ServerRequestReturnToLobby`)
+3. `ServerAckTopology` 상한 없는 단조 증가 — 클램프/무시/킥 정책
+4. Server RPC 12개 `WithValidation` 없음 — "조용히 무시" ↔ "연결 끊기" 정책
+5. `CachedRecoil` 반사 구멍 — `UPROPERTY` vs `TWeakObjectPtr`
+6. 적 `bDead` 복제 — 계약을 문자 그대로 볼지
+7. `GameplayMessageSubsystem` 브로드캐스트 배열 복사 — 재설계할지
+8. `GetOwnedWeapons()` 로 스칼라 질문 2곳 — 새 헬퍼 추가할지
+9. 매직 넘버 승격 후보 — 특히 `GlobalAliveCap=200`
+
+**그리고 문서↔코드 드리프트 13건**(리포트 §8). 가장 시급 = `Game.md §1` 의 적 상한 서술이
+실제(**200 / 단일맵 192**)와 다른 것. 문서를 코드에 맞출지 코드를 문서에 맞출지가 건마다 달라서 일괄 처리 불가.
 
 ---
 

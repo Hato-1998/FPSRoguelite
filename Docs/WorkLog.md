@@ -9,6 +9,48 @@
 
 ---
 
+## 🧹 기계적 리팩토링 1회차 + 전체 구조 리포트 (2026-08-06, `refactor/mechanical-cleanup`)
+> 산출물 = **[`ProjectStructure_Report.md`](ProjectStructure_Report.md)**(전체 구조) ·
+> **[`Refactor_20260806_Report.md`](Refactor_20260806_Report.md)**(결과 + **사용자 결정 필요 9건**).
+> 커밋 `5f496e4f` · 베이스라인 태그 `refactor-baseline-20260806`.
+
+외부 프롬프트(`REFACTOR_LOOP_PROMPT.md`, PHASE 0~6)를 기준으로 착수했으나
+**실측에서 프롬프트의 전제 3개가 무너졌다.** 이 코드베이스는 겨냥된 축에서 이미 깨끗했다.
+
+| 프롬프트 전제 | 실측 |
+|---|---|
+| 헤더가 무거울 것 | 헤더 146개에 include **총 417줄**, 그중 **115개가 3줄 이하**. 상위 include는 부모 UCLASS·`FGameplayTagContainer`(둘 다 전방선언 불가) |
+| 값 복사가 널려 있을 것 | 컨테이너 값 전달 **0건**, 범위 for 값복사 **0건** (240개 중 223개가 이미 `const auto&`) |
+| dirty 마킹이 빠져 있을 것 | 선언 **54** ↔ 등록 **54** 불일치 0, write 사이트 68곳 중 누락 1곳(그나마 복제 등록 전 실행이라 결함 아님) |
+
+**수정한 것(18파일, 동작 변경 0)**: 중복 include 12건(`.cpp`↔자기 `.h` 양쪽에 있던 것만) ·
+샷건 펠릿 루프의 `TArray` 2개 호이스팅 · `Reserve()` 11건(상한이 루프 헤더 `.Num()` 으로 확정된 곳만).
+적 계열은 **손댈 게 없었다** — 이미 전부 `TInlineAllocator`/`Reserve` 가 걸려 있다.
+
+### 🪤 호이스팅에 있던 함정 (실제로 걸릴 뻔함)
+`FPSRCombat::DedupePawnHitsByActor` 는 `OutHits` 를 **비우지 않고 `Add` 만 한다**.
+배열만 루프 밖으로 올리고 `Reset()` 을 빼먹으면 **펠릿마다 앞 펠릿의 대상이 다시 맞아 샷건 데미지가
+조용히 중복된다.** 두 배열 모두 사용 지점에서 명시적으로 `Reset()` 하고 이유를 주석에 남겼다.
+
+### 📏 빌드 실측 — 프롬프트 추정이 크게 빗나갔다
+`-DisableUnity` **풀빌드 = 66.99초**(384 액션, 프로젝트 `.cpp` **145/146 개별 TU**, 유니티 소스 블롭 0, 에러/경고 0).
+프롬프트는 이걸 "회당 20~60분"으로 가정해 검증 주기를 나눴는데 그럴 필요가 없었다.
+⚠️ **일반 빌드로는 include 제거를 검증했다고 말할 수 없다** — 에디터 모듈이 유니티 블롭으로 묶여 컴파일된다.
+앞으로 include 를 건드리면 `-DisableUnity` 를 쓸 것(67초면 싸다).
+
+### 🔴 조사 중 새로 나온 것 2건 (수정 안 함 — 판단 필요)
+1. **패키지 빌드에서 Push Model 이 통째로 꺼진다.** `TargetRules.bWithPushModel` 기본값이
+   `(Type == TargetType.Editor)`(`TargetRules.cs:1420`)인데 `FPSRogueliteTarget` 은 `TargetType.Game` 이고
+   오버라이드가 없다. 에디터/PIE 에서만 켜져 있다. 켜려면 `[RequiresUniqueBuildEnvironment]` 때문에
+   **소스 엔진 빌드 전환**이 필요(현재 Installed Build).
+2. **아무 클라이언트나 파티 전원을 로비로 강제 이동시킬 수 있다.**
+   `ServerRequestReturnToLobby` 에 런 상태 게이트도 호스트 전용 게이트도 없다.
+
+문서↔코드 드리프트 **13건**도 목록화했다(문서는 안 고침). 가장 시급 = 적 실효 상한이
+**200(단일맵 192)** 인데 `Game.md` 는 300/500 이라 적혀 있는 것.
+
+---
+
 ## 🦾 1인칭 팔을 **구매 리그(LPAMG)** 로 갈아탐 + PWAS 리타게팅 (2026-08-05, `refactor/character`)
 > 구조 근거 = **[ADR 0006](Architecture/0006-first-person-arms-purchased-rig-retargeted.md)** (0004·0005 대체).
 
