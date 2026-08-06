@@ -23,7 +23,8 @@ AFPSRDoor::AFPSRDoor()
 	SetRootComponent(Root);
 
 	// Breakable leaves — the weapon target + barrier. ECC_FPSRPlayerPawn (see header): gathered by every weapon
-	// object-query (-> auto damage via HealthComponent), blocks players + enemies, dash-proof. QueryOnly is enough
+	// object-query (-> auto damage via HealthComponent), blocks players + enemies, and is immune to the ECC_Pawn
+	// pass-through windows (grace / downed). QueryOnly is enough
 	// (movement sweeps + weapon queries are all query-based; no physics simulation needed).
 	DoorMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("DoorMesh"));
 	DoorMesh->SetupAttachment(Root);

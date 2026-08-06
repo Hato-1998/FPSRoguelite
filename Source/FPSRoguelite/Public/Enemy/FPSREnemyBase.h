@@ -118,6 +118,13 @@ public:
 	 *  merely casts a shadow into view would count as "on screen" (measured: it over-reported on 48% of frames). */
 	const UStaticMeshComponent* GetMesh() const { return Mesh; }
 
+	/** Cosmetic, local-machine only (UFPSREnemyShadowLODSubsystem): drive this enemy's dynamic shadow from a distance
+	 *  band instead of leaving it at UMeshComponent's constructor default of always-on. Exposed as a purpose-named
+	 *  setter rather than a mutable GetMesh so the mesh stays read-only to everyone else. No local guard is needed —
+	 *  UPrimitiveComponent::SetCastShadow already early-outs when the value is unchanged, so it never redundantly
+	 *  dirties the render state. */
+	void SetShadowCasting(bool bEnabled);
+
 	/** Server: true if the attack cooldown has elapsed at time Now. */
 	bool CanAttack(float Now) const { return (Now - LastAttackTime) >= AttackInterval; }
 

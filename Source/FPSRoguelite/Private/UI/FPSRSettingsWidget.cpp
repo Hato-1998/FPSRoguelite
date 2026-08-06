@@ -37,15 +37,6 @@ void UFPSRSettingsWidget::NativeOnInitialized()
 		MasterVolumeSlider->OnControllerCaptureEnd.AddDynamic(this, &UFPSRSettingsWidget::HandleMasterVolumeCommitted);
 	}
 
-	if (CrosshairThicknessSlider)
-	{
-		CrosshairThicknessSlider->SetMinValue(0.5f);
-		CrosshairThicknessSlider->SetMaxValue(2.0f);
-		CrosshairThicknessSlider->OnValueChanged.AddDynamic(this, &UFPSRSettingsWidget::HandleCrosshairThicknessChanged);
-		CrosshairThicknessSlider->OnMouseCaptureEnd.AddDynamic(this, &UFPSRSettingsWidget::HandleCrosshairThicknessCommitted);
-		CrosshairThicknessSlider->OnControllerCaptureEnd.AddDynamic(this, &UFPSRSettingsWidget::HandleCrosshairThicknessCommitted);
-	}
-
 	if (BackButton)
 	{
 		// UCommonButtonBase::OnClicked() is a native event — bind with AddUObject (see FPSRMainMenuWidget).
@@ -82,16 +73,6 @@ void UFPSRSettingsWidget::SyncFromSettings()
 		MasterVolumeSlider->SetValue(Volume);
 	}
 	UpdateValueText(Volume);
-
-	if (UFPSRGameUserSettings* Settings = UFPSRGameUserSettings::Get())
-	{
-		const float Thickness = Settings->GetCrosshairThickness();
-		if (CrosshairThicknessSlider)
-		{
-			CrosshairThicknessSlider->SetValue(Thickness);
-		}
-		UpdateThicknessValueText(Thickness);
-	}
 }
 
 void UFPSRSettingsWidget::HandleMasterVolumeChanged(float Value)
@@ -137,24 +118,6 @@ void UFPSRSettingsWidget::UpdateValueText(float Value)
 	{
 		const int32 Percent = FMath::RoundToInt(FMath::Clamp(Value, 0.0f, 1.0f) * 100.0f);
 		MasterVolumeValueText->SetText(FText::FromString(FString::Printf(TEXT("%d%%"), Percent)));
-	}
-}
-
-void UFPSRSettingsWidget::HandleCrosshairThicknessChanged(float Value)
-{
-	if (UFPSRGameUserSettings* Settings = UFPSRGameUserSettings::Get())
-	{
-		Settings->SetCrosshairThickness(Value, /*bSave=*/false); // live apply (broadcasts to HUD), no per-frame disk write
-	}
-	UpdateThicknessValueText(Value);
-}
-
-void UFPSRSettingsWidget::HandleCrosshairThicknessCommitted()
-{
-	const float Value = CrosshairThicknessSlider ? CrosshairThicknessSlider->GetValue() : 1.0f;
-	if (UFPSRGameUserSettings* Settings = UFPSRGameUserSettings::Get())
-	{
-		Settings->SetCrosshairThickness(Value, /*bSave=*/true); // persist on release
 	}
 }
 
@@ -218,13 +181,5 @@ void UFPSRSettingsWidget::ApplyPresetByIndex(int32 Index)
 	if (ColorPresets && ColorPresets->Presets.IsValidIndex(Index))
 	{
 		ApplyColorPreset(ColorPresets->Presets[Index].Color);
-	}
-}
-
-void UFPSRSettingsWidget::UpdateThicknessValueText(float Value)
-{
-	if (CrosshairThicknessValueText)
-	{
-		CrosshairThicknessValueText->SetText(FText::FromString(FString::Printf(TEXT("%.2fx"), Value)));
 	}
 }

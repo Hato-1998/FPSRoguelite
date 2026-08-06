@@ -95,7 +95,7 @@ protected:
 
 	/** Client notify on the (already-replicated) reload flag — no new replication, just a RepNotify. Routes the
 	 *  edge to the owning character's reload cosmetics: owner client plays the 1P arms ReloadMontage, remote
-	 *  clients play the 3P body ReloadMontage3P (event-driven; replaces per-frame AnimBP polling). */
+	 *  clients play the body ReloadMontage (event-driven; replaces per-frame AnimBP polling). */
 	UFUNCTION()
 	void OnRep_Reloading();
 

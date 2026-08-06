@@ -1,7 +1,6 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Enemy/FPSREnemyRosterDataAsset.h"
-#include "Enemy/FPSREnemyBase.h"
 
 #if WITH_EDITOR
 #include "Misc/DataValidation.h"

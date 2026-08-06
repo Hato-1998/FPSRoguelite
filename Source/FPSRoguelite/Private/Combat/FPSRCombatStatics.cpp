@@ -234,8 +234,9 @@ namespace FPSRCombat
 		}
 
 		// Query pawns by OBJECT TYPE (both enemy and player channels), NOT a trace channel: a target that has set
-		// its Pawn response to Ignore (e.g. a dashing player) is still found, so the blast can't be dodged by a
-		// transient response change. Do NOT ignore the instigator — self-damage/self-knockback are resolved below.
+		// its Pawn response to Ignore (e.g. a player in a post-revive grace window, or a downed one) is still found,
+		// so the blast can't be dodged by a transient response change. Do NOT ignore the instigator —
+		// self-damage/self-knockback are resolved below.
 		FCollisionObjectQueryParams ObjectParams;
 		AddDamageablePawnObjectTypes(ObjectParams);
 		FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(FPSRExplosion), false, nullptr);
@@ -245,6 +246,7 @@ namespace FPSRCombat
 			ObjectParams, FCollisionShape::MakeSphere(Radius), QueryParams);
 
 		TSet<AActor*> Processed;
+		Processed.Reserve(Overlaps.Num());
 		bool bAnyEnemyHit = false;
 		bool bAnyCrit = false;
 		bool bAnyKill = false;
@@ -373,6 +375,7 @@ namespace FPSRCombat
 		// InHits is distance-sorted (LineTraceMulti). First time we see an actor we record its nearest hit; later
 		// hits on the same actor only raise the weakpoint multiplier. Output order = nearest-first insertion order.
 		TMap<const AActor*, int32> ActorToIndex;
+		ActorToIndex.Reserve(InHits.Num());
 		for (const FHitResult& Hit : InHits)
 		{
 			AActor* HitActor = Hit.GetActor();

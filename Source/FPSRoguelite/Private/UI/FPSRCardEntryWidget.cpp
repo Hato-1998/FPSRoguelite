@@ -58,6 +58,7 @@ void UFPSRCardEntryWidget::UpdateDisplay()
 	// effect carries a magnitude. A card whose effects carry no magnitude (pure behavior/fragment) shows a category
 	// label in the rarity slot — matching v1's fragment-card display — while value cards show the rolled rarity.
 	TArray<FText> EffectLines;
+	EffectLines.Reserve(CardAsset->Effects.Num());
 	bool bAnyMagnitude = false;
 	for (const TObjectPtr<UFPSRCardEffect>& Effect : CardAsset->Effects)
 	{

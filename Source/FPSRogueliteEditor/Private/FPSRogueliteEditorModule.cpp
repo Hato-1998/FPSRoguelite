@@ -6,6 +6,7 @@
 #include "Validation/FPSRAnchoredValidationService.h"
 #include "DataEditor/SFPSRDataEditorWidget.h"
 #include "Assembler/SFPSRWeaponAssemblerTab.h"
+#include "Assembler/SFPSRWeaponAssemblerFPTab.h"
 #include "Blockout/SFPSRBlockoutTab.h"
 #include "Editor.h"
 #include "EditorValidatorSubsystem.h"
@@ -28,6 +29,14 @@
 const FName FFPSRogueliteEditorModule::FPSRDataEditorTabName(TEXT("FPSRDataEditor"));
 const FName FFPSRogueliteEditorModule::FPSRWeaponAssemblerTabName(TEXT("FPSRWeaponAssembler"));
 const FName FFPSRogueliteEditorModule::FPSRBlockoutTabName(TEXT("FPSRBlockout"));
+const FName FFPSRogueliteEditorModule::FPSRWeaponAssemblerFPTabName(TEXT("FPSRWeaponAssemblerFP"));
+
+TWeakPtr<SFPSRWeaponAssemblerTab> FFPSRogueliteEditorModule::LiveWeaponAssemblerTab;
+
+FName FFPSRogueliteEditorModule::GetWeaponAssemblerFPTabName()
+{
+	return FPSRWeaponAssemblerFPTabName;
+}
 
 // UEditorValidatorBase subclasses (UFPSRCardPoolValidator / UFPSRRunScheduleValidator / UFPSRLoadoutPoolValidator)
 // are auto-discovered by UEditorValidatorSubsystem — no manual registration needed here. This module only wires up
@@ -49,6 +58,13 @@ void FFPSRogueliteEditorModule::StartupModule()
 		.SetDisplayName(LOCTEXT("WeaponAssemblerTabTitle", "무기 파츠 조립기"))
 		.SetGroup(WorkspaceMenu::GetMenuStructure().GetToolsCategory());
 
+	// Weapon Assembler — first-person view. A SECOND tab on purpose: a docked viewport's aspect ratio is whatever the
+	// layout gives it, so the vertical framing differs from the game even at the same FOV (measured: 82.3° vs 58.7°).
+	// Its own tab can be floated/resized freely and pins the aspect with letterboxing.
+	FGlobalTabmanager::Get()->RegisterNomadTabSpawner(FPSRWeaponAssemblerFPTabName, FOnSpawnTab::CreateStatic(&FFPSRogueliteEditorModule::SpawnWeaponAssemblerFPTab))
+		.SetDisplayName(LOCTEXT("WeaponAssemblerFPTabTitle", "무기 1인칭 뷰"))
+		.SetGroup(WorkspaceMenu::GetMenuStructure().GetToolsCategory());
+
 	// FPSR Blockout tool — config-driven modular map palette (Slice ① = empty shell + UDeveloperSettings backbone).
 	// Same nomad-tab lifetime pattern as the two tabs above.
 	FGlobalTabmanager::Get()->RegisterNomadTabSpawner(FPSRBlockoutTabName, FOnSpawnTab::CreateStatic(&FFPSRogueliteEditorModule::SpawnBlockoutTab))
@@ -62,6 +78,7 @@ void FFPSRogueliteEditorModule::ShutdownModule()
 	UToolMenus::UnregisterOwner(this);
 	FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(FPSRDataEditorTabName);
 	FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(FPSRWeaponAssemblerTabName);
+	FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(FPSRWeaponAssemblerFPTabName);
 	FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(FPSRBlockoutTabName);
 }
 
@@ -93,6 +110,13 @@ void FFPSRogueliteEditorModule::RegisterMenus()
 		FUIAction(FExecuteAction::CreateStatic(&FFPSRogueliteEditorModule::OnOpenWeaponAssemblerMenuEntry))
 	);
 	Section.AddMenuEntry(
+		"FPSROpenWeaponAssemblerFP",
+		LOCTEXT("OpenWeaponAssemblerFPTitle", "무기 1인칭 뷰…"),
+		LOCTEXT("OpenWeaponAssemblerFPTooltip", "무기 파츠 조립기의 프리뷰를 '플레이어 눈' 시점 + 게임과 같은 화면비로 보여주는 창을 엽니다. 조립기 탭에서 그립을 만지면 이 창에 바로 반영됩니다 (조립기 탭이 먼저 열려 있어야 합니다)."),
+		FSlateIcon(FAppStyle::GetAppStyleSetName(), "DeveloperTools.MenuIcon"),
+		FUIAction(FExecuteAction::CreateStatic(&FFPSRogueliteEditorModule::OnOpenWeaponAssemblerFPMenuEntry))
+	);
+	Section.AddMenuEntry(
 		"FPSROpenBlockout",
 		LOCTEXT("OpenBlockoutTitle", "블록아웃 툴…"),
 		LOCTEXT("OpenBlockoutTooltip", "FPSR 블록아웃 툴 열기 (config 기반 모듈러 맵 팔레트 + 블록아웃 가드레일). 팔레트 폴더는 Project Settings > FPSR > FPSR Blockout 에서 설정."),
@@ -122,10 +146,29 @@ void FFPSRogueliteEditorModule::OnOpenWeaponAssemblerMenuEntry()
 
 TSharedRef<SDockTab> FFPSRogueliteEditorModule::SpawnWeaponAssemblerTab(const FSpawnTabArgs& Args)
 {
+	// 1인칭 뷰 탭이 이 위젯의 프리뷰 씬을 찾아갈 수 있도록 등록해 둔다(약참조 — 헤더의 GetLiveWeaponAssemblerTab 주석).
+	// 재열기면 여기서 새 위젯으로 갈리고, 1인칭 탭은 Tick 에서 씬이 바뀐 걸 감지해 렌더를 멈춘다.
+	TSharedRef<SFPSRWeaponAssemblerTab> AssemblerWidget = SNew(SFPSRWeaponAssemblerTab);
+	LiveWeaponAssemblerTab = AssemblerWidget;
+
 	return SNew(SDockTab)
 		.TabRole(ETabRole::NomadTab)
 		[
-			SNew(SFPSRWeaponAssemblerTab)
+			AssemblerWidget
+		];
+}
+
+void FFPSRogueliteEditorModule::OnOpenWeaponAssemblerFPMenuEntry()
+{
+	FGlobalTabmanager::Get()->TryInvokeTab(FPSRWeaponAssemblerFPTabName);
+}
+
+TSharedRef<SDockTab> FFPSRogueliteEditorModule::SpawnWeaponAssemblerFPTab(const FSpawnTabArgs& Args)
+{
+	return SNew(SDockTab)
+		.TabRole(ETabRole::NomadTab)
+		[
+			SNew(SFPSRWeaponAssemblerFPTab)
 		];
 }
 

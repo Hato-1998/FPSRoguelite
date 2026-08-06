@@ -161,6 +161,7 @@ TArray<FFPSRCardDraw> UFPSRCardSubsystem::DrawCards(AController* ForPlayer, int3
 	// Weighted sampling without replacement. Once an offer is picked, every remaining offer of the same card
 	// (all its tiers) and same family is removed, so a card never appears twice and families stay exclusive.
 	TArray<FFPSRCardDraw> Result;
+	Result.Reserve(Count);
 	for (int32 i = 0; i < Count && Candidates.Num() > 0; ++i)
 	{
 		float TotalWeight = 0.0f;
@@ -376,7 +377,9 @@ TArray<FFPSRCardDraw> UFPSRCardSubsystem::DrawWeaponUnlockOffer(AController* For
 		return Result;
 	}
 
-	const bool bHasFreeSlot = Inv->HasFreeSlot();
+	// Cheap early-out only. Whether a SPECIFIC weapon fits is decided per candidate below, because slots are typed
+	// (ranged 1-2, melee 3) — "a slot is free" and "this rifle has somewhere to go" are different questions.
+	const bool bHasAnyFreeSlot = Inv->HasAnyFreeSlot();
 	const TArray<UFPSRWeaponDataAsset*> Owned = Inv->GetOwnedWeapons();
 
 	// Parallel candidate arrays: TargetWeapon is null for brand-new-weapon cards, the owned weapon for feature unlocks.
@@ -384,9 +387,10 @@ TArray<FFPSRCardDraw> UFPSRCardSubsystem::DrawWeaponUnlockOffer(AController* For
 	TArray<UFPSRWeaponDataAsset*> CandidateWeapons;
 
 	// Part A — new-weapon candidates (WeaponUnlockCards): free slot + not already owned, de-duped by granted weapon.
-	if (bHasFreeSlot)
+	if (bHasAnyFreeSlot)
 	{
 		TArray<UFPSRWeaponDataAsset*> GrantedSeen;
+		GrantedSeen.Reserve(ActivePool->WeaponUnlockCards.Num());
 		for (const TObjectPtr<UFPSRCardDataAsset>& Card : ActivePool->WeaponUnlockCards)
 		{
 			if (!Card)
@@ -403,6 +407,13 @@ TArray<FFPSRCardDraw> UFPSRCardSubsystem::DrawWeaponUnlockOffer(AController* For
 				}
 			}
 			if (!Granted || Owned.Contains(Granted) || GrantedSeen.Contains(Granted))
+			{
+				continue;
+			}
+			// Per-candidate slot test, not the outer one: with both ranged slots full and only the melee slot open,
+			// a rifle unlock would otherwise be offered and then grant nothing (AddWeapon returns INDEX_NONE),
+			// silently costing the player their pick.
+			if (!Inv->HasFreeSlotFor(Granted->GetArchetype()))
 			{
 				continue;
 			}

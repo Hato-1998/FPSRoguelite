@@ -23,7 +23,8 @@
 #include "DrawDebugHelpers.h"
 #include "GameFramework/PlayerController.h"
 #include "Camera/PlayerCameraManager.h"
-#include "Camera/CameraComponent.h"
+#include "Net/UnrealNetwork.h"
+#include "Net/Core/PushModel/PushModel.h"
 
 #if ENABLE_DRAW_DEBUG
 // Console toggle for all weapon debug draws (fire/laser trace lines, melee hit sphere, on-screen ammo). Default off; enable with `FPSR.Debug.WeaponDraw 1`.
@@ -37,6 +38,70 @@ static TAutoConsoleVariable<int32> CVarFPSRWeaponDebugDraw(
 UFPSRWeaponFireComponent::UFPSRWeaponFireComponent()
 {
 	PrimaryComponentTick.bCanEverTick = true;
+	// Needed for bIsAiming: the shared body AnimBP runs on every machine, so a teammate's aim state has to reach the
+	// non-owning clients (ADR 0002 step 4). The owning actor (AFPSRCharacter) already replicates.
+	SetIsReplicatedByDefault(true);
+}
+
+void UFPSRWeaponFireComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+
+	FDoRepLifetimeParams Params;
+	Params.bIsPushBased = true;
+	// SkipOwner: the owner already wrote this on its own input edge (prediction), so an echo can only arrive a round
+	// trip late — on a quick aim tap that flickers the owner's ADS FOV and weapon alignment back on for one RTT. Same
+	// condition, same reason as the engine's own remote-aim presentation state (APawn::RemoteViewPitch16, Pawn.cpp).
+	// The price is that a server-REJECTED aim-on is not corrected on the owner; see SetAiming for why that self-heals.
+	Params.Condition = COND_SkipOwner;
+	DOREPLIFETIME_WITH_PARAMS_FAST(UFPSRWeaponFireComponent, bIsAiming, Params);
+}
+
+void UFPSRWeaponFireComponent::BeginPlay()
+{
+	Super::BeginPlay();
+
+	// bReplicates is EditDefaultsOnly ("Component Replicates" in the details panel), so a Blueprint that recorded an
+	// override on this inherited component beats the constructor above — and the failure is silent: aim would look
+	// right to the owner and simply never reach a teammate's body AnimBP (invariant 9's trap class).
+	// Repair it rather than only reporting it, so the aim state cannot be switched off by a stale asset. The log stays
+	// because the asset still needs fixing — this component has no other networked state, so there is no legitimate
+	// reason for the override to exist.
+	if (!GetIsReplicated())
+	{
+		UE_LOG(LogFPSR, Error,
+			TEXT("[Weapon] %s: 'Component Replicates' is OFF on WeaponFire in the character Blueprint — the aim state could not reach remote clients (their body AnimBP would never aim). Re-enabled at runtime; clear the override in the asset."),
+			*GetNameSafe(GetOwner()));
+		SetIsReplicated(true);
+	}
+}
+
+void UFPSRWeaponFireComponent::SetAiming(bool bNewAiming)
+{
+	// Writable ONLY where the decision is made: the authority, or the owning client (which predicts its own ADS so the
+	// FOV/alignment react without a round trip). On a simulated proxy the value arrives by replication alone, and a
+	// local write there would be PERMANENT — push-model replication resends nothing while the server's value stays
+	// unchanged, so the teammate's body would stay stuck in (or out of) the aim pose. Blocked structurally, because
+	// call sites drift: AFPSRPlayerState::OnRep_LifeState already ran on proxies while believing it was owner-only.
+	const AActor* Owner = GetOwner();
+	const APawn* OwnerPawn = Cast<APawn>(Owner);
+	if (!Owner || (!Owner->HasAuthority() && !(OwnerPawn && OwnerPawn->IsLocallyControlled())))
+	{
+		return;
+	}
+	if (bIsAiming == bNewAiming)
+	{
+		return;
+	}
+	bIsAiming = bNewAiming;
+
+	// The server is the only writer that replicates. Player pawns are never dormant (only projectiles and enemies
+	// use SetNetDormancy); if that ever changes, marking a property dirty does NOT wake a dormant actor and this
+	// needs FlushNetDormancy() beside it.
+	if (Owner->HasAuthority())
+	{
+		MARK_PROPERTY_DIRTY_FROM_NAME(UFPSRWeaponFireComponent, bIsAiming, this);
+	}
 }
 
 FVector2D UFPSRWeaponFireComponent::ComputeShotRecoilDelta(const FFPSRWeaponStatBlock& Stats, int32 ShotIndex)
@@ -531,30 +596,15 @@ void UFPSRWeaponFireComponent::TickComponent(float DeltaTime, ELevelTick TickTyp
 	// Auto-reload when the magazine empties while the player is still firing.
 	MaybeAutoReload();
 
-	// ADS: smoothly interpolate camera FOV toward the aim target (owner-local feel).
-	if (!CachedCamera)
-	{
-		CachedCamera = OwnerPawn->FindComponentByClass<UCameraComponent>();
-		if (CachedCamera)
-		{
-			DefaultFOV = CachedCamera->FieldOfView;
-		}
-	}
-	if (CachedCamera)
-	{
-		const bool bBaseWantsADS = bIsAiming && Stats.bHasADS;
-		// The character resolves the effective ADS/scope target FOV (scope override + reload-aware scope drop). Non-
-		// scope weapons pass through unchanged. Fall back to the base target when the owner isn't a character.
-		float TargetFOV = bBaseWantsADS ? Stats.ADSFieldOfView : DefaultFOV;
-		if (AFPSRCharacter* Char = Cast<AFPSRCharacter>(OwnerPawn))
-		{
-			TargetFOV = Char->ResolveADSTargetFOV(DefaultFOV, Stats.ADSFieldOfView, bBaseWantsADS);
-		}
-		CachedCamera->FieldOfView = FMath::FInterpTo(CachedCamera->FieldOfView, TargetFOV, DeltaTime, FMath::Max(0.01f, Stats.ADSInterpSpeed));
-	}
+	// NOTE: the ADS camera FOV interp used to live here. It now belongs to AFPSRCharacter::UpdateCameraFieldOfView,
+	// which is the single writer of FieldOfView — it composes this weapon's ADS/scope zoom with camera offsets the
+	// weapon has no business knowing about (the slide widening, ADR 0001 invariant 4), and it keeps working with no
+	// weapon equipped, which this tick cannot (it returns early above). This component still owns the ADS INTENT
+	// (bIsAiming) and the ADS numbers on the stat block; the character reads both.
 
-	// Procedural aim-down-sights arm offset (owner-local) — the character owns the 1P arms; drive it from this tick
-	// (the character's own Tick is debug-only / disabled in shipping). Mirrors the FOV interp above.
+	// Procedural aim-down-sights weapon placement (owner-local) — the character owns the weapon meshes; drive it from this
+	// tick because it solves against the RESOLVED stats of the weapon currently equipped, so it has nothing to do without
+	// one. (The FOV above is the opposite case, which is why it moved to the character's Tick.)
 	if (AFPSRCharacter* Char = Cast<AFPSRCharacter>(OwnerPawn))
 	{
 		Char->UpdateAimDownSights(DeltaTime);

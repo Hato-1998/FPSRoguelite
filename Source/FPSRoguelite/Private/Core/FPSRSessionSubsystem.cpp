@@ -6,7 +6,6 @@
 #include "Core/FPSRFlowLog.h"
 #include "OnlineSubsystem.h"
 #include "OnlineSubsystemUtils.h"
-#include "OnlineSessionSettings.h"
 #include "Online/OnlineSessionNames.h"   // SEARCH_LOBBIES
 #include "Interfaces/OnlineExternalUIInterface.h"
 #include "Engine/GameInstance.h"

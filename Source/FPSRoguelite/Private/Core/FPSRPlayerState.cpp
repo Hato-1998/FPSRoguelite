@@ -281,13 +281,19 @@ void AFPSRPlayerState::SetLifeState(EFPSRLifeState NewState)
 void AFPSRPlayerState::OnRep_LifeState()
 {
 	// Owning client: stop the local fire loop immediately on death so a held trigger doesn't keep
-	// auto-firing until the input gate catches up next frame, and clear the local (non-replicated) ADS
-	// state so the camera can't stay zoom-latched if the result UI swallows the ADS-release input.
+	// auto-firing until the input gate catches up next frame, and clear the ADS latch so the camera can't
+	// stay zoom-latched if the result UI swallows the ADS-release input.
 	// Server-side cancellation/aim-clear is handled in AFPSRCharacter::HandleOutOfHealth (CancelAllAbilities).
 	// Fires for DBNO and Dead alike (both are not-Alive) so a downed player also drops the local fire/ADS latch.
+	//
+	// OWNER-GATED, unlike the locomotion mirror below: this OnRep runs on every client that sees this PlayerState,
+	// and GetPawn() is valid there too, so without the check it also ran where the pawn is a simulated proxy. Both
+	// latches are owner-side state — and the aim one is now a replicated property, where a proxy write would stick
+	// permanently (see UFPSRWeaponFireComponent::SetAiming, which also refuses it).
 	if (LifeState != EFPSRLifeState::Alive)
 	{
-		if (APawn* OwnerPawn = GetPawn())
+		APawn* OwnerPawn = GetPawn();
+		if (OwnerPawn && OwnerPawn->IsLocallyControlled())
 		{
 			if (UFPSRWeaponFireComponent* Fire = OwnerPawn->FindComponentByClass<UFPSRWeaponFireComponent>())
 			{

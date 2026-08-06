@@ -9,7 +9,6 @@ class UFPSRWeaponInventoryComponent;
 class UFPSRWeaponInstance;
 class UTexture2D;
 class UMaterialInterface;
-class UCameraComponent;
 class UFPSRRecoilComponent;
 
 /** Owning-client component that drives fire cadence (fire rate / fire mode), camera recoil, and spread bloom.
@@ -50,8 +49,10 @@ public:
 	 *  HeatSpread = the recoil component's heat-based dynamic spread (UFPSRRecoilComponent::GetHeatSpread). */
 	static float ComputeSpreadDegrees(const struct FFPSRWeaponStatBlock& Stats, float HeatSpread, bool bAiming);
 
-	/** Owner-client + server (via RPC): set aim-down-sights state (FOV/recoil local, spread read by fire GA). */
-	void SetAiming(bool bNewAiming) { bIsAiming = bNewAiming; }
+	/** Set aim-down-sights state (FOV/recoil local, spread read by fire GA, aim pose read by the body AnimBP).
+	 *  Callable ONLY on the authority or the owning client — a simulated proxy gets this by replication and a local
+	 *  write there would stick permanently. The guard is in the .cpp; read it before adding a call site. */
+	void SetAiming(bool bNewAiming);
 
 	UFUNCTION(BlueprintPure, Category = "FPSR|Weapon")
 	bool IsAiming() const { return bIsAiming; }
@@ -75,8 +76,11 @@ public:
 	UFPSRWeaponInventoryComponent* GetInventory() const;
 
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 protected:
+	virtual void BeginPlay() override;
+
 	void FireOneShot();
 
 	/** Lazily resolve the owner's CrystalRecoil-adapter recoil component and bind its target controller to the
@@ -99,9 +103,11 @@ protected:
 	float NextFireReadyTime = 0.0f; // world time the next ranged shot is allowed (per-weapon cadence + post-swap cooldown); gates the immediate press shot's recoil. Mirrors the server's ServerNextAllowedFireTime.
 	float SpinupElapsed = 0.0f; // seconds of continuous fire this trigger hold (spin-up ramp progress; client-local feel). Reset on StopFiring / equip; advances only while auto-firing and not run-paused.
 
+	// ADS input latch. Replicated to NON-owning clients (COND_SkipOwner) so the shared body AnimBP poses the aim on
+	// every machine (ADR 0002 invariant 4 — local and remote see the same anim graph). Stays protected with no
+	// Blueprint access on purpose: SetAiming is the single write path, and that is what keeps a proxy from writing it.
+	UPROPERTY(Replicated)
 	bool bIsAiming = false;
-	TObjectPtr<UCameraComponent> CachedCamera; // resolved lazily for ADS FOV
-	float DefaultFOV = 0.0f;                    // captured from the camera on first resolve
 
 	TObjectPtr<UFPSRRecoilComponent> CachedRecoil; // CrystalRecoil-adapter recoil driver, resolved lazily (P1)
 	bool bRecoilTargetSet = false;                 // SetTargetController(owning controller) done once

@@ -37,9 +37,9 @@ void FPSRWeaponPartSelector::SelectParts(const UFPSRWeaponDataAsset& Weapon,
 {
 	OutSelected.Reset();
 
-	// One resolved attachment per WeaponParts1P slot, in DA order (W-U1b 재설계 — 폴리모픽 규칙 폐기, 파츠별 스택 진화).
+	// One resolved attachment per WeaponParts slot, in DA order (W-U1b 재설계 — 폴리모픽 규칙 폐기, 파츠별 스택 진화).
 	// Null-part filtering still happens at attach time (RebuildPartsFromSelection), so every entry passes through here.
-	for (const FFPSRWeaponPartAttachment& Entry : Weapon.WeaponParts1P)
+	for (const FFPSRWeaponPartAttachment& Entry : Weapon.WeaponParts)
 	{
 		// Base (stage 0): the slot's own Part/Offset/Scope — what a purely-structural slot always resolves to.
 		TSoftObjectPtr<UStaticMesh> WinMesh = Entry.Part;

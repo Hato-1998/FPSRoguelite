@@ -8,21 +8,21 @@
 
 ## 3. 확정 기술 스택
 
-| 레이어 | 채택 | 비채택(편향) |
-|---|---|---|
-| 베이스 | 경량 커스텀 C++ 모듈 + 엔진 플러그인 체리픽 | ❌ Lyra 풀 fork |
-| 플레이어 | GAS · EnhancedInput · CommonUI · Push Model | |
-| 적 스웜 | 경량 풀액터 + Flow-Field + Significance + 인스턴싱 | ❌ GAS, ❌ MassEntity, ❌ 적별 StateTree/NavMesh |
-| 보스/엘리트 | 일반 Actor + StateTree (+GAS) | |
-| 메시징 | GameplayMessageSubsystem (경량 재구현/Lyra 복사) | |
-| UI | CommonUI + Activatable Widget Stack | |
-| 저장 | SaveGame | |
-| 네트워크 | 리슨서버 P2P, Push Model | ❌ Iris 핵심 의존, ❌ Server-Side Rewind |
-| 무브먼트 | 표준 CMC + **충돌무시 대시(회피기)** | ❌ Bhop/Wall-run/Motion Matching |
-| 레벨 | 고정 authored 맵 · **다중맵 심리스**(문 파괴→인접맵 스트림-in, §2-1 · 피벗 2026-07-03) · **U 연속필드**(고정 3×3 단일 flow 그리드, 2026-07-07 `Docs/Review/20260707-plan-continuous-field-arch.md`) | ❌ PCG · ❌ WP 런타임 오픈월드 그리드(authored·bounded라 불요, 스트리밍=LoadStreamLevel/WP Data Layer) |
+| 레이어 | 채택 |
+|---|---|
+| 베이스 | 경량 커스텀 C++ 모듈 + 엔진 플러그인 체리픽 |
+| 플레이어 | GAS · EnhancedInput · CommonUI · Push Model |
+| 적 스웜 | 경량 풀액터 + Flow-Field(길찾기) + 스티어링(AI) + Significance + 인스턴싱 · 체력 = 경량 `UHealthComponent` + 비-GE 데미지 |
+| 보스/엘리트 | 일반 Actor + StateTree (+GAS) |
+| 메시징 | GameplayMessageSubsystem (경량 재구현) |
+| UI | CommonUI + Activatable Widget Stack |
+| 저장 | SaveGame |
+| 네트워크 | 리슨서버 P2P, Push Model |
+| 무브먼트 | 표준 CMC + **충돌무시 대시(회피기)** |
+| 레벨 | 고정 authored 맵 · **다중맵 심리스**(문 파괴→인접맵 스트림-in, §2-1 · 피벗 2026-07-03) · **U 연속필드**(고정 3×3 단일 flow 그리드, 2026-07-07 `Docs/Review/20260707-plan-continuous-field-arch.md`) · 스트리밍 = LoadStreamLevel / WP Data Layer |
 
 - **엔진 포함 플러그인(바로 enable)**: GameplayAbilities, EnhancedInput, ModularGameplay, GameFeatures, CommonUI, StateTree, GameplayStateTree, SignificanceManager, Iris(off)
-- **엔진에 없는 Lyra 출신 플러그인(P3+ 필요 시 경량 재구현/복사)**: CommonUser, CommonGame, ModularGameplayActors, GameplayMessageRouter
+- **엔진에 없는 플러그인(P3+ 필요 시 경량 재구현)**: CommonUser, CommonGame, ModularGameplayActors, GameplayMessageRouter
 - **Build.cs 의존성**: Phase별 실제 사용 시점에 추가(CommonUI/CommonInput/StateTreeModule/GameplayStateTreeModule/SignificanceManager, 필요 시 ReplicationGraph). 미사용 모듈 선등록 지양
 
 ---

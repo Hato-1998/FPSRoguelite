@@ -1,7 +1,6 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "UI/FPSRRunHUDWidget.h"
-#include "Core/FPSRGameState.h"
 #include "Engine/World.h"
 #include "Components/Image.h"
 #include "Blueprint/UserWidget.h"
@@ -9,7 +8,10 @@
 #include "Materials/MaterialInterface.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Weapon/FPSRWeaponFireComponent.h"
+#include "Weapon/FPSRCrosshairStyleDataAsset.h"
+#include "UI/FPSRCrosshairFadeCondition.h"
 #include "Hero/FPSRCharacter.h"
+#include "Hero/FPSRCharacterMovementComponent.h"
 #include "GameFramework/Pawn.h"
 #include "Settings/FPSRGameUserSettings.h"
 #include "Blueprint/WidgetLayoutLibrary.h"
@@ -29,18 +31,11 @@ void UFPSRRunHUDWidget::NativeConstruct()
 
 	OnRunStateUpdated();
 
-	// Center the crosshair image in its canvas slot (idempotent; independent of the designer's slot setup).
-	if (CrosshairImage)
-	{
-		if (UCanvasPanelSlot* CanvasSlot = Cast<UCanvasPanelSlot>(CrosshairImage->Slot))
-		{
-			CanvasSlot->SetAnchors(FAnchors(0.5f, 0.5f));
-			CanvasSlot->SetAlignment(FVector2D(0.5f, 0.5f));
-			CanvasSlot->SetSize(FVector2D(CrosshairSizePx, CrosshairSizePx));
-			CanvasSlot->SetPosition(FVector2D::ZeroVector);
-			CanvasSlot->SetZOrder(10);
-		}
-	}
+	// Center both crosshair layers in their canvas slots (idempotent; independent of the designer's slot setup).
+	// The dot sits UNDER the weapon layer: the weapon style is the thing the player reads for dispersion, so it wins
+	// any overlap. Sizes are per-layer on purpose — see BaseDotSizePx.
+	CenterCrosshairSlot(DotCrosshairImage, 9, BaseDotSizePx);
+	CenterCrosshairSlot(CrosshairImage, 10, CrosshairSizePx);
 
 	// Subscribe for live crosshair appearance updates (color / thickness) from the settings overlay. The values
 	// are pushed onto the material instance in NativeTick once it exists (and on every weapon swap).
@@ -70,7 +65,7 @@ void UFPSRRunHUDWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTim
 	}
 	UpdateScopeOverlay(bScoped);
 
-	if (!CrosshairImage)
+	if (!CrosshairImage && !DotCrosshairImage)
 	{
 		return;
 	}
@@ -84,24 +79,40 @@ void UFPSRRunHUDWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTim
 	// screen isn't left with neither reticle nor crosshair). IsADSFOVActive tracks the FOV-zoom commit itself (not the
 	// procedural-sight blend), so an ADS weapon without an AimSocket still hides the crosshair — the crosshair-hide can
 	// never desync from the zoom. Iron sights / scope take over. Falls back to raw IsAiming off a character.
+	// The base dot goes with it: aiming down sights replaces the screen-centre reference with the sight picture.
 	const bool bADSVisual = OwningChar ? OwningChar->IsADSFOVActive() : FireComp->IsAiming();
 	if (bADSVisual)
 	{
-		CrosshairImage->SetVisibility(ESlateVisibility::Collapsed);
+		SetLayerVisible(DotCrosshairImage, false);
+		SetLayerVisible(CrosshairImage, false);
 		return;
 	}
-	CrosshairImage->SetVisibility(ESlateVisibility::HitTestInvisible);
 
-	// Per-weapon crosshair material instance, or the HUD default fallback.
-	UMaterialInterface* SourceMat = FireComp->GetEquippedCrosshairMaterial();
+	// Base layer first — it is on for every non-ADS state, whatever the weapon is doing.
+	UpdateBaseDotLayer();
+
+	// Situational fade (reload etc.). Runs only here, i.e. only on frames where something is actually on screen.
+	UpdateCrosshairFade(InDeltaTime);
+
+	// Weapon layer. Wall-hanging takes the gun out of the player's hands (AFPSRCharacter::RefreshWeaponVisibility
+	// hides the mesh on exactly this condition, and UFPSRCharacterMovementComponent::CanFireInCurrentState() is false),
+	// so the weapon's crosshair has nothing to describe and drops out — leaving the base dot alone.
+	const UFPSRCharacterMovementComponent* Move = OwningChar ? OwningChar->GetFPSRMovement() : nullptr;
+	const bool bWeaponInHand = !(Move && Move->IsOnWall());
+
+	// Per-weapon crosshair material. No style is a NORMAL state (melee / unarmed): the base dot already covers the
+	// screen centre, so there is no generic fallback to substitute — the layer simply doesn't draw.
+	UMaterialInterface* SourceMat = bWeaponInHand ? FireComp->GetEquippedCrosshairMaterial() : nullptr;
 	if (!SourceMat)
 	{
-		SourceMat = DefaultCrosshairMaterial.LoadSynchronous();
+		SetLayerVisible(CrosshairImage, false);
+		return;
 	}
-	if (!SourceMat)
+	if (!CrosshairImage)
 	{
 		return;
 	}
+	SetLayerVisible(CrosshairImage, true);
 
 	// Rebuild the dynamic instance only on weapon swap (source material change), not every frame; push the
 	// player's appearance (color / thickness) onto the fresh instance.
@@ -202,17 +213,127 @@ void UFPSRRunHUDWidget::HandleCrosshairSettingsChanged()
 
 void UFPSRRunHUDWidget::ApplyCrosshairAppearance()
 {
-	if (!CrosshairDMI)
+	const UFPSRGameUserSettings* Settings = UFPSRGameUserSettings::Get();
+	if (!Settings)
 	{
 		return;
 	}
-	if (const UFPSRGameUserSettings* Settings = UFPSRGameUserSettings::Get())
+
+	// FillColor + Thickness are per-style material parameters; the SDF crosshairs read them (color tints the
+	// shape, thickness scales the line/arm/ring/box/dot weight). Orthogonal to the per-frame Spread update.
+
+	// COLOUR is shared by both layers, from the one setting — that is what makes the base dot the same colour as the
+	// weapon crosshair by construction, instead of a second value that could drift out of sync.
+	const FLinearColor Color = Settings->GetCrosshairColor();
+	for (UMaterialInstanceDynamic* DMI : { ToRawPtr(CrosshairDMI), ToRawPtr(DotCrosshairDMI) })
 	{
-		// FillColor + Thickness are per-style material parameters; the SDF crosshairs read them (color tints the
-		// shape, thickness scales the line/arm/ring/box/dot weight). Orthogonal to the per-frame Spread update.
-		CrosshairDMI->SetVectorParameterValue(TEXT("FillColor"), Settings->GetCrosshairColor());
-		CrosshairDMI->SetScalarParameterValue(TEXT("Thickness"), Settings->GetCrosshairThickness());
+		if (DMI)
+		{
+			DMI->SetVectorParameterValue(TEXT("FillColor"), Color);
+		}
 	}
+
+	// THICKNESS is not pushed at all any more — it is no longer a player setting. Each style's material instance
+	// (M_XH_* Thickness parameter) carries its own authored line weight, so leaving the parameter untouched is what
+	// lets the designer own it. See UFPSRGameUserSettings for why it stopped being player-facing.
+}
+
+void UFPSRRunHUDWidget::CenterCrosshairSlot(UImage* Image, int32 ZOrder, float SizePx) const
+{
+	if (!Image || SizePx <= 0.0f)
+	{
+		return;
+	}
+	if (UCanvasPanelSlot* CanvasSlot = Cast<UCanvasPanelSlot>(Image->Slot))
+	{
+		CanvasSlot->SetAnchors(FAnchors(0.5f, 0.5f));
+		CanvasSlot->SetAlignment(FVector2D(0.5f, 0.5f));
+		CanvasSlot->SetSize(FVector2D(SizePx, SizePx));
+		CanvasSlot->SetPosition(FVector2D::ZeroVector);
+		CanvasSlot->SetZOrder(ZOrder);
+	}
+}
+
+void UFPSRRunHUDWidget::SetLayerVisible(UImage* Image, bool bVisible)
+{
+	if (Image)
+	{
+		Image->SetVisibility(bVisible ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
+	}
+}
+
+void UFPSRRunHUDWidget::UpdateCrosshairFade(float DeltaSeconds)
+{
+	// Type-agnostic loop: this function never asks what kind of condition it is holding, which is what keeps a new
+	// situation from becoming an edit here (see UFPSRCrosshairFadeCondition).
+	AFPSRCharacter* OwningChar = ResolveOwningCharacter();
+	float TargetWeapon = 1.0f;
+	float TargetDot = 1.0f;
+	for (const UFPSRCrosshairFadeCondition* Condition : CrosshairFadeConditions)
+	{
+		if (!Condition || !Condition->IsActive(OwningChar))
+		{
+			continue;
+		}
+		// Most restrictive wins, so the outcome is independent of the order the designer listed them in.
+		TargetWeapon = FMath::Min(TargetWeapon, Condition->Opacity);
+		if (Condition->bAffectsBaseDot)
+		{
+			TargetDot = FMath::Min(TargetDot, Condition->Opacity);
+		}
+	}
+
+	if (CrosshairFadeInterpSpeed > 0.0f)
+	{
+		CurrentWeaponOpacity = FMath::FInterpTo(CurrentWeaponOpacity, TargetWeapon, DeltaSeconds, CrosshairFadeInterpSpeed);
+		CurrentDotOpacity = FMath::FInterpTo(CurrentDotOpacity, TargetDot, DeltaSeconds, CrosshairFadeInterpSpeed);
+	}
+	else
+	{
+		CurrentWeaponOpacity = TargetWeapon;
+		CurrentDotOpacity = TargetDot;
+	}
+
+	// Render opacity rather than a material parameter: this works on every crosshair style, including ones authored
+	// later, without each material having to expose an opacity input.
+	if (CrosshairImage)
+	{
+		CrosshairImage->SetRenderOpacity(CurrentWeaponOpacity);
+	}
+	if (DotCrosshairImage)
+	{
+		DotCrosshairImage->SetRenderOpacity(CurrentDotOpacity);
+	}
+}
+
+void UFPSRRunHUDWidget::UpdateBaseDotLayer()
+{
+	if (!DotCrosshairImage)
+	{
+		return;
+	}
+
+	// Built once, not per frame. Unlike the weapon layer — whose material follows whatever is equipped and so has to be
+	// re-read every tick — this style is an EditDefaultsOnly asset reference that cannot change after construction,
+	// so resolving the soft pointer again each frame would be pure waste.
+	if (!DotCrosshairDMI)
+	{
+		const UFPSRCrosshairStyleDataAsset* Style = BaseDotCrosshairStyle.LoadSynchronous();
+		UMaterialInterface* SourceMat = Style ? Style->Material.LoadSynchronous() : nullptr;
+		if (!SourceMat)
+		{
+			// Unauthored style = no dot rather than a wrong dot. Collapsed (not hidden) so it costs no layout either.
+			SetLayerVisible(DotCrosshairImage, false);
+			return;
+		}
+		DotCrosshairImage->SetBrushFromMaterial(SourceMat);
+		DotCrosshairDMI = DotCrosshairImage->GetDynamicMaterial();
+		ApplyCrosshairAppearance();
+	}
+
+	// Deliberately no Spread push: dispersion belongs to the weapon layer, and a dot that bloomed with it would stop
+	// being the fixed screen-centre reference this layer exists to provide.
+	SetLayerVisible(DotCrosshairImage, true);
 }
 
 float UFPSRRunHUDWidget::ComputeSpreadUV(float SpreadHalfAngleDeg) const

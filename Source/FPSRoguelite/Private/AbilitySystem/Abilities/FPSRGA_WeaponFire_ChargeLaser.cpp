@@ -4,7 +4,6 @@
 #include "AbilitySystem/Attributes/FPSRCombatSet.h"
 #include "Weapon/FPSRWeaponInventoryComponent.h"
 #include "Weapon/FPSRWeaponInstance.h"
-#include "Weapon/FPSRWeaponFragment.h"
 #include "Combat/FPSRCombatStatics.h"
 #include "Combat/FPSRWeakpointComponent.h"
 #include "Core/FPSRGameState.h"

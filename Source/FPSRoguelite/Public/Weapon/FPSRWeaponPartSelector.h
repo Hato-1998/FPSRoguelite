@@ -11,7 +11,7 @@ struct FFPSRWeaponStatBlock;
 
 namespace FPSRWeaponPartSelector
 {
-	/** Deterministic, pure. OutSelected = one resolved FFPSRWeaponPartAttachment per WeaponParts1P slot, in DA order
+	/** Deterministic, pure. OutSelected = one resolved FFPSRWeaponPartAttachment per WeaponParts slot, in DA order
 	 *  (W-U1b 재설계 — 폴리모픽 규칙 폐기, 파츠별 스택 진화 + 스탯 임계 트리거). For each slot: winner = base Part
 	 *  (stage 0) unless a Stage's trigger condition is met (FragmentStacks = slot's EvolutionFragment stack count
 	 *  reaches MinStacks; StatThreshold = Resolved's stat axis passes the comparison — no EvolutionFragment needed),

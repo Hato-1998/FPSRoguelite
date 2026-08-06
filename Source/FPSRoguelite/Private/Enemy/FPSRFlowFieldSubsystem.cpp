@@ -1,7 +1,6 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Enemy/FPSRFlowFieldSubsystem.h"
-#include "Enemy/FPSRFlowFieldComputer.h"
 #include "Enemy/FPSRFlowFieldBoundsVolume.h"
 #include "Core/FPSRGameState.h"
 #include "Core/FPSRLogChannels.h"

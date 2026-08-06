@@ -184,10 +184,10 @@ EDataValidationResult UFPSRWeaponDataAsset::IsDataValid(FDataValidationContext& 
 	//     space instead of '_', or the wrong socket) makes the part / muzzle flash silently fall back to the mesh
 	//     origin — the exact class of bug that is invisible until you look at the assembled weapon in-game. Warnings
 	//     (not errors): the game still runs, but the visual is wrong. ---
-	USkeletalMesh* SkelWeapon = WeaponMesh1P.IsNull() ? nullptr : WeaponMesh1P.LoadSynchronous();
+	USkeletalMesh* SkelWeapon = WeaponMesh.IsNull() ? nullptr : WeaponMesh.LoadSynchronous();
 
-	// Modular cosmetic parts attach to the skeletal weapon mesh (WeaponMesh1P) at their Socket.
-	for (const FFPSRWeaponPartAttachment& Part : WeaponParts1P)
+	// Modular cosmetic parts attach to the skeletal weapon mesh (WeaponMesh) at their Socket.
+	for (const FFPSRWeaponPartAttachment& Part : WeaponParts)
 	{
 		if (Part.Part.IsNull() || Part.Socket.IsNone())
 		{
@@ -196,18 +196,18 @@ EDataValidationResult UFPSRWeaponDataAsset::IsDataValid(FDataValidationContext& 
 		if (SkelWeapon && !SkeletalMeshHasAttachPoint(SkelWeapon, Part.Socket))
 		{
 			Context.AddWarning(FText::Format(LOCTEXT("PartSocketMissing",
-				"파츠 슬롯 '{0}' references socket '{1}' that does not exist on WeaponMesh1P — it will attach at the mesh origin. Check for a typo (e.g. a space instead of '_')."),
+				"파츠 슬롯 '{0}' references socket '{1}' that does not exist on WeaponMesh — it will attach at the mesh origin. Check for a typo (e.g. a space instead of '_')."),
 				FText::FromString(Part.Part.GetAssetName()), FText::FromName(Part.Socket)));
 		}
 	}
 
 	// --- W-U1b 파츠별 스택 진화 검증(폴리모픽 PartRules 대체) + 스탯 임계 트리거 검증. 단계 메시는 슬롯의 고정
-	//     소켓(Entry.Socket)에 그대로 붙으므로 별도 소켓검사는 불필요하다 — 위 WeaponParts1P 소켓검사가 슬롯당 1회로
+	//     소켓(Entry.Socket)에 그대로 붙으므로 별도 소켓검사는 불필요하다 — 위 WeaponParts 소켓검사가 슬롯당 1회로
 	//     이미 커버한다. Stages 항목은 '데이터'일 뿐이라 순수 struct — 목록 순서상 마지막으로 조건이 충족된 단계가
 	//     승자다(§2-A: 파츠는 스택/스탯을 읽기만 함, 이제 승자 결정에 중복 검사가 불필요하다). ---
-	for (int32 i = 0; i < WeaponParts1P.Num(); ++i)
+	for (int32 i = 0; i < WeaponParts.Num(); ++i)
 	{
-		const FFPSRWeaponPartAttachment& Entry = WeaponParts1P[i];
+		const FFPSRWeaponPartAttachment& Entry = WeaponParts[i];
 		UFPSRWeaponFragment* Frag = Entry.EvolutionFragment.LoadSynchronous();
 		bool bHasFragmentStackStage = false;
 
@@ -282,19 +282,19 @@ EDataValidationResult UFPSRWeaponDataAsset::IsDataValid(FDataValidationContext& 
 	}
 
 	// 소켓 중복: 서로 다른 슬롯이 같은(None 아닌) 소켓을 쓰면 두 파츠가 같은 지점에 겹쳐 붙는다.
-	for (int32 i = 0; i < WeaponParts1P.Num(); ++i)
+	for (int32 i = 0; i < WeaponParts.Num(); ++i)
 	{
-		if (WeaponParts1P[i].Socket.IsNone())
+		if (WeaponParts[i].Socket.IsNone())
 		{
 			continue;
 		}
-		for (int32 j = i + 1; j < WeaponParts1P.Num(); ++j)
+		for (int32 j = i + 1; j < WeaponParts.Num(); ++j)
 		{
-			if (WeaponParts1P[j].Socket == WeaponParts1P[i].Socket)
+			if (WeaponParts[j].Socket == WeaponParts[i].Socket)
 			{
 				Context.AddError(FText::Format(LOCTEXT("PartSlotDuplicateSocket",
 					"파츠 슬롯 [{0}]과 [{1}]이 같은 소켓 '{2}'을 사용합니다 — 두 파츠가 같은 지점에 겹쳐 붙습니다. 서로 다른 소켓을 지정하세요."),
-					FText::AsNumber(i), FText::AsNumber(j), FText::FromName(WeaponParts1P[i].Socket)));
+					FText::AsNumber(i), FText::AsNumber(j), FText::FromName(WeaponParts[i].Socket)));
 				Result = EDataValidationResult::Invalid;
 			}
 		}
@@ -302,10 +302,10 @@ EDataValidationResult UFPSRWeaponDataAsset::IsDataValid(FDataValidationContext& 
 
 	// The muzzle socket may live on the weapon mesh OR on a modular part (barrel / forestock carry SOCKET_Muzzle in
 	// this pack). Only validate for firearms (a skeletal weapon mesh or at least one part is present).
-	if (!MuzzleSocket.IsNone() && (SkelWeapon != nullptr || WeaponParts1P.Num() > 0))
+	if (!MuzzleSocket.IsNone() && (SkelWeapon != nullptr || WeaponParts.Num() > 0))
 	{
 		bool bMuzzleFound = SkeletalMeshHasAttachPoint(SkelWeapon, MuzzleSocket) && SkelWeapon != nullptr;
-		for (const FFPSRWeaponPartAttachment& Part : WeaponParts1P)
+		for (const FFPSRWeaponPartAttachment& Part : WeaponParts)
 		{
 			if (bMuzzleFound)
 			{
@@ -339,17 +339,17 @@ EDataValidationResult UFPSRWeaponDataAsset::IsDataValid(FDataValidationContext& 
 		if (!bMuzzleFound)
 		{
 			Context.AddWarning(FText::Format(LOCTEXT("MuzzleSocketMissing",
-				"MuzzleSocket '{0}' is not found on WeaponMesh1P or any modular part — the muzzle flash will spawn at the mesh origin. Put the muzzle socket on the barrel/forestock part (or the weapon mesh) and check for typos."),
+				"MuzzleSocket '{0}' is not found on WeaponMesh or any modular part — the muzzle flash will spawn at the mesh origin. Put the muzzle socket on the barrel/forestock part (or the weapon mesh) and check for typos."),
 				FText::FromName(MuzzleSocket)));
 		}
 	}
 
 	// The procedural-ADS AimSocket may live on the weapon receiver OR on a sight part (iron sight / optic), same as the
 	// muzzle. A typo makes DoesSocketExist fail at runtime (ADS silently stays at hip). Validate across receiver + parts.
-	if (BaseStats.bHasADS && !AimSocket.IsNone() && (SkelWeapon != nullptr || WeaponParts1P.Num() > 0))
+	if (BaseStats.bHasADS && !AimSocket.IsNone() && (SkelWeapon != nullptr || WeaponParts.Num() > 0))
 	{
 		bool bAimFound = SkelWeapon != nullptr && SkeletalMeshHasAttachPoint(SkelWeapon, AimSocket);
-		for (const FFPSRWeaponPartAttachment& Part : WeaponParts1P)
+		for (const FFPSRWeaponPartAttachment& Part : WeaponParts)
 		{
 			if (bAimFound)
 			{
@@ -383,7 +383,7 @@ EDataValidationResult UFPSRWeaponDataAsset::IsDataValid(FDataValidationContext& 
 		if (!bAimFound)
 		{
 			Context.AddWarning(FText::Format(LOCTEXT("AimSocketMissing",
-				"AimSocket '{0}' is not found on WeaponMesh1P or any modular part — procedural ADS will not align (it stays at hip). Put the aim socket on the sight part (iron sight / optic) or the weapon mesh (+X forward, +Z up), and check for typos (e.g. a space instead of '_')."),
+				"AimSocket '{0}' is not found on WeaponMesh or any modular part — procedural ADS will not align (it stays at hip). Put the aim socket on the sight part (iron sight / optic) or the weapon mesh (+X forward, +Z up), and check for typos (e.g. a space instead of '_')."),
 				FText::FromName(AimSocket)));
 		}
 	}
@@ -393,9 +393,9 @@ EDataValidationResult UFPSRWeaponDataAsset::IsDataValid(FDataValidationContext& 
 	//     AimSocket을 보유해야 한다 — 하나라도 없으면 그 스택으로 진화한 순간 조준이 힙으로 회귀한다(ERROR). ---
 	if (BaseStats.bHasADS && !AimSocket.IsNone())
 	{
-		for (int32 i = 0; i < WeaponParts1P.Num(); ++i)
+		for (int32 i = 0; i < WeaponParts.Num(); ++i)
 		{
-			const FFPSRWeaponPartAttachment& Entry = WeaponParts1P[i];
+			const FFPSRWeaponPartAttachment& Entry = WeaponParts[i];
 			const UStaticMesh* BaseMesh = Entry.Part.IsNull() ? nullptr : Entry.Part.LoadSynchronous();
 
 			bool bMightBeSight = Entry.Scope.bScopeOverlay || (BaseMesh && BaseMesh->FindSocket(AimSocket) != nullptr);
@@ -440,9 +440,9 @@ EDataValidationResult UFPSRWeaponDataAsset::IsDataValid(FDataValidationContext& 
 
 	// W-U2: a scope-overlay sight only ever activates through ADS (the scope shows while aiming with that sight active).
 	// A scope part (base OR any evolution stage) on a weapon with no ADS / no AimSocket can never trigger — warn.
-	for (int32 i = 0; i < WeaponParts1P.Num(); ++i)
+	for (int32 i = 0; i < WeaponParts.Num(); ++i)
 	{
-		const FFPSRWeaponPartAttachment& Part = WeaponParts1P[i];
+		const FFPSRWeaponPartAttachment& Part = WeaponParts[i];
 		bool bHasScope = Part.Scope.bScopeOverlay;
 		if (!bHasScope)
 		{
@@ -473,7 +473,7 @@ EDataValidationResult UFPSRWeaponDataAsset::IsDataValid(FDataValidationContext& 
 	if (!FirePartRecoilBone.IsNone() && SkelWeapon != nullptr && !SkeletalMeshHasAttachPoint(SkelWeapon, FirePartRecoilBone))
 	{
 		Context.AddWarning(FText::Format(LOCTEXT("FirePartRecoilBoneMissing",
-			"FirePartRecoilBone '{0}' does not exist on WeaponMesh1P — the fire-part recoil (bolt / charging handle) will drive nothing. Check the bone name for typos."),
+			"FirePartRecoilBone '{0}' does not exist on WeaponMesh — the fire-part recoil (bolt / charging handle) will drive nothing. Check the bone name for typos."),
 			FText::FromName(FirePartRecoilBone)));
 	}
 

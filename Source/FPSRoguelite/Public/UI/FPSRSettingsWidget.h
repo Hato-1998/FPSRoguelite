@@ -40,14 +40,6 @@ protected:
 	UPROPERTY(meta = (BindWidgetOptional))
 	TObjectPtr<UCommonTextBlock> MasterVolumeValueText;
 
-	/** Crosshair thickness slider (0.5..2.0). Optional so a WBP that predates it still binds. */
-	UPROPERTY(meta = (BindWidgetOptional))
-	TObjectPtr<USlider> CrosshairThicknessSlider;
-
-	/** Optional "N.NNx" readout next to the thickness slider. */
-	UPROPERTY(meta = (BindWidgetOptional))
-	TObjectPtr<UCommonTextBlock> CrosshairThicknessValueText;
-
 	/** Panel the crosshair colour swatches are generated into — one button per entry in ColorPresets, built at
 	 *  init. Optional so a WBP that predates the data-driven presets still binds (the row is then just absent). */
 	UPROPERTY(meta = (BindWidgetOptional))
@@ -78,14 +70,6 @@ private:
 	UFUNCTION()
 	void HandleMasterVolumeCommitted();
 
-	/** Live drag: apply thickness to the settings singleton (broadcasts to HUD), no disk write, refresh readout. */
-	UFUNCTION()
-	void HandleCrosshairThicknessChanged(float Value);
-
-	/** Drag released: persist the current crosshair thickness. */
-	UFUNCTION()
-	void HandleCrosshairThicknessCommitted();
-
 	/** Generate one swatch button per entry in ColorPresets into ColorPresetContainer (called once at init). */
 	void BuildColorPresetButtons();
 
@@ -110,7 +94,4 @@ private:
 
 	/** Shared: apply + persist a crosshair color preset. */
 	void ApplyColorPreset(const FLinearColor& Color);
-
-	/** Format a crosshair thickness multiplier as an "N.NNx" string into the readout. */
-	void UpdateThicknessValueText(float Value);
 };

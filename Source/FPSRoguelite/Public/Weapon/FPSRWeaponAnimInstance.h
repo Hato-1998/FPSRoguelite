@@ -8,12 +8,12 @@
 
 /**
  * Owner-local 1P weapon-mesh AnimInstance base. Turns a per-shot anim curve (played by the weapon's fire montage on
- * WeaponMesh1P) into a data-driven "fire part" recoil offset that the weapon AnimBP's ModifyBone consumes — so the
+ * WeaponMesh) into a data-driven "fire part" recoil offset that the weapon AnimBP's ModifyBone consumes — so the
  * bolt / charging-handle kickback is authored once per weapon in the DataAsset (curve x distance x axis) instead of
  * being hardcoded into each AnimBP. Purely cosmetic; no replication (the fire montage that drives the curve already
  * plays owner-locally and on spectators via the fire-cosmetics path).
  *
- * Wiring: AFPSRCharacter::RefreshFirstPersonWeaponVisual injects the DataAsset params on equip (SetFirePartRecoilParams).
+ * Wiring: AFPSRCharacter::RefreshEquippedWeaponVisual injects the DataAsset params on equip (SetFirePartRecoilParams).
  * The weapon AnimBP (reparented to this class) binds a ModifyBone Translation pin to FirePartRecoilOffset. Distance 0 /
  * no curve = zero offset = no-op for weapons with no moving fire part.
  */
@@ -37,7 +37,7 @@ protected:
 	virtual void NativeUpdateAnimation(float DeltaSeconds) override;
 
 private:
-	/** Injected params (RefreshFirstPersonWeaponVisual). CurveName None or DistanceCm ~0 = disabled. */
+	/** Injected params (RefreshEquippedWeaponVisual). CurveName None or DistanceCm ~0 = disabled. */
 	FName FirePartRecoilCurveName = NAME_None;
 	float FirePartRecoilDistanceCm = 0.0f;
 	FVector FirePartRecoilAxis = FVector::ZeroVector;
