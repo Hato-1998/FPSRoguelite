@@ -19,5 +19,5 @@ UFPSRGunMotionSettings::UFPSRGunMotionSettings()
 
 	// 증보 v2 §7 기본값.
 	PreviewWeaponMesh = TSoftObjectPtr<UStaticMesh>(FSoftObjectPath(
-		TEXT("/Game/Weapons/Meshes/Modular/Weapon_A/SM_Wep_Mod_A_Body_01.SM_Wep_Mod_A_Body_01")));
+		TEXT("/Game/PolygonMilitary/Meshes/Weapons/Modular/Weapon_A/SM_Wep_Mod_A_Body_01.SM_Wep_Mod_A_Body_01")));
 }
