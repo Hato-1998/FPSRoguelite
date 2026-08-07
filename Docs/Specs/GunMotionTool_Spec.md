@@ -182,3 +182,40 @@ SetBoneTrackKeys("hand_r", ...) — 하나의 bracket, 패키지 dirty.
    A포즈면 UDebugSkelMeshComponent 미사용 버그).
 2. 기즈모로 총을 끌고 놓으면 키가 생기고, 스크럽하면 키 사이가 보간된다.
 3. 저장 후 PIE 재생으로 인게임 결과 = 프리뷰 결과(카메라 기준 오프셋 실측 대조).
+
+---
+
+# 증보 v2.1 — 인게임 구도 캡처 + 자유시점 (2026-08-08 사용자 피드백)
+
+> 실사용 피드백: 프리뷰 1인칭 구도가 실제 인게임과 다르다. 원인 = 프로브 스폰(BeginPlay 없음)의
+> 구도는 **CDO 저작 배치**라 런타임 보정(시선 높이/스탠스 카메라 등)이 빠진다. 캐릭터를 통째로
+> 프리뷰에 스폰해도 BeginPlay·빙의 없인 같은 값이다 — 그래서 스폰이 아니라 **실측 캡처**로 푼다.
+
+## 11. [PIE 구도 캡처]
+
+- 설정 추가(`FPSRGunMotionSettings`, Config):
+  `FTransform CapturedCameraRelativeToArms` · `float CapturedFOV = 0` · `bool bHasCapturedComposition = false`
+- 탭 버튼 **[PIE 구도 캡처]**: PIE 월드(GEditor->GetPIEWorldContext)의 로컬 `AFPSRCharacter` 에서
+  `FirstPersonCamera`/`FirstPersonArms` 컴포넌트의 **실제 월드 트랜스폼**으로
+  `CamRelArms = CamWorld.GetRelativeTransform(ArmsWorld)` 와 `GetCameraView(0, ...)` 의 FOV 를 읽어
+  설정에 저장 → **`TryUpdateDefaultConfigFile()`** (🚨 `SaveConfig()` 금지 — CDO 메모리만 바뀌고 ini 에
+  안 남는다, 프로젝트 실사고. 반환 bool 확인·실패 시 토스트) → 뷰포트 즉시 재적용.
+- `RefreshCameraComposition` 분기: `bHasCapturedComposition` 이면 캡처값 사용, 아니면 기존 프로브 경로
+  (최초 사용 전 폴백). 상태줄에 어느 소스인지 표시("캡처 구도" / "기본(BP) 구도 — PIE 캡처 권장").
+- PIE 가 없으면 사유 토스트(기존 [PIE에서 재생] 버튼과 같은 처리).
+
+## 12. 자유시점 토글
+
+- 뷰포트 툴바 체크박스 + 단축키 **F**: ON 이면 `ApplyCameraComposition` 스킵(구도 잠금 해제, 표준
+  에디터 뷰포트 네비게이션 — 회전/이동/줌), OFF 면 저장된 구도로 재잠금.
+- ON 진입 시 현재 구도 카메라 위치에서 시작(뷰가 튀지 않게), OFF 복귀는 구도 값으로 스냅.
+- 기즈모/키프레이밍은 두 모드 모두 동작(§9 역산의 `CamRot` 은 **잠금 구도의 카메라 회전**을 쓴다 —
+  자유시점에서 끌어도 키는 인게임 카메라 기준으로 저장되어야 한다. 자유시점 뷰 회전을 쓰면 같은
+  드래그가 뷰마다 다른 키를 낳는다).
+
+## 13. v2.1 검증 (Fable)
+
+1. PIE 켜고 캡처 → 설정 ini 에 값 실림(TryUpdate 반환 true + 파일 diff) → 프리뷰 구도가 PIE 화면과
+   일치(카메라-팔 상대 트랜스폼 수치 대조).
+2. F 토글로 자유시점 진입/복귀, 복귀 시 구도 정확 복원.
+3. 자유시점에서 기즈모 드래그 → 키가 잠금 구도 카메라 기준으로 저장되는지 수치 확인.
