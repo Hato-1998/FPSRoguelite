@@ -193,6 +193,25 @@ Tracks", `AnimationEditorCommands.cpp:20`) — 애디티브 레이어 트랙이�
 (스냅샷: 애님 변수 전부 0 + 위치 복제는 정상이면 그래프가 아니라 업데이트 정지다). 라이브 편집
 세션 뒤에는 BP 컴포넌트 기본값 diff 를 의심할 것 — [[dirty-flag-cleared-means-saved-not-reverted]] 계열 사고.
 
+### A16. 애디티브 클립에서 특정 뼈만 "움직이지 않게" 만들기 (총 고정 장전, 2026-08-07)
+
+**증상** — 총-앵커 구조에서 장전 몽타주를 틀면 총이 통째로 이동(실측 23~31cm).
+CopyBone(hand_r→ik_hand_gun)이 클립의 오른팔 모션을 총에 그대로 실어 나른다.
+
+**함정 2개** (둘 다 실측으로 걸러냄):
+1. **트랙 삭제 ≠ 델타 0.** 트랙이 없으면 그 뼈의 클립 포즈가 스켈레톤 refpose로 떨어져
+   델타 = refpose − base 라는 **큰 상수 오염**이 들어간다(hand_r 회전 32°→82°로 악화).
+2. **베이스 시퀀스를 AnimPose로 직접 샘플한 값도 틀리다** — 런타임 애디티브 추출과
+   리타게팅 경로가 달라 몇 cm/수십 도 어긋난다.
+
+**정답** — 같은 클립의 **delta와 raw를 같은 평가기(AnimPose)로 뽑아 base를 역산**한다:
+`base_rot = delta_rot⁻¹ * raw_rot`, `base_t = raw_t − delta_t`
+(엔진 `FAnimationRuntime::ConvertTransformToAdditive` 정의 대조). 이 base를 해당 뼈들의
+**상수 키**로 다시 쓰면 델타가 정확히 0 — 판정은 AnimPose 델타 재계측(0.000cm/0.00°) +
+PIE 대조군(원본 클립 드리프트 재현). 사례 = `FP_Rifle_Reload_GunLocked`(`dc4b13bd`).
+🚨 몽타주의 `SlotAnimTracks`는 파이썬 보호 속성 — 세그먼트 교체는 **동일 경로 재생성**으로
+(DA 소프트 참조는 경로만 같으면 유지된다).
+
 ---
 
 ## B. 렌더 · 카메라
