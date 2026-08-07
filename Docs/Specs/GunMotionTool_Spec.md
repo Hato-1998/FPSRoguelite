@@ -119,3 +119,66 @@ SetBoneTrackKeys("hand_r", ...) — 하나의 bracket, 패키지 dirty.
 3. 더미 사본 클립: 고정화 → AnimPose 델타 재계측 우측 체인 0.000 · 굽기 → 장전 1호와 동일 키 재현
    (파이썬 산출물과 clip_t/clip_rot 수치 대조).
 4. PIE 재생 버튼 → 총 이동 실측(카메라 기준) 후 0 복귀.
+
+---
+
+# 증보 v2 — 비주얼 저작: 1인칭 뷰포트 + 기즈모 키프레이밍 (2026-08-08 사용자 결정)
+
+> 사용자 요구: "인게임 1인칭 뷰 가져온 다음, 각 프레임마다 총기의 위치를 기즈모로 잡고 그 사이를 보간".
+> 숫자 키 목록(§4-4)은 미세조정용으로 유지 — 같은 `Keys` 데이터를 두 UI 가 편집한다.
+
+## 7. 프리뷰 씬 (탭이 단독 소유)
+
+- `FAdvancedPreviewScene` 을 **이 탭이 생성·단독 소유**한다. 어셈블러 씬 공유 금지 —
+  `SFPSRWeaponAssemblerFPTab` 헤더의 수명주기 지뢰(낡은 씬 렌더) 주석 참조. 공유할 이유도 없다(저작
+  대상이 무기 조립이 아니라 클립).
+- 팔 = **`UDebugSkelMeshComponent`** (🚨 일반 SkeletalMeshComponent 금지 — 애디티브 프리뷰는
+  `UAnimPreviewInstance`(bCanProcessAdditiveAnimations)라야 기준 포즈 위에 올바로 얹힌다. 이 프로젝트
+  실사고: 단일노드 인스턴스는 A포즈 위에 차분을 얹었다). 메시 = 설정 `TargetCharacterBP` CDO 의
+  `ArmsComponentName` 컴포넌트가 물고 있는 SkeletalMeshAsset.
+- 무기 = 설정 신규 항목 `PreviewWeaponMesh`(`TSoftObjectPtr<UStaticMesh>`, 기본
+  `/Game/Weapons/Meshes/Modular/Weapon_A/SM_Wep_Mod_A_Body_01`) + `PreviewWeaponAttachSocket`(기본
+  `SOCKET_Weapon`) — 팔 메시의 그 소켓에 어태치. 게임의 gun-anchor 경로(ik_hand_gun)와 다르지만
+  등가다: CopyBone(hand_r→ik_hand_gun)이 항등이 되는 조건에서 총은 hand_r 을 강체로 따라가므로,
+  프리뷰에서 hand_r 소켓 부착 = 인게임 결과와 같은 상대 배치.
+- 카메라: `AFPSRCharacter::GetFirstPersonViewSetup`(위상 무관 카메라-팔 상대 트랜스폼 + FOV) —
+  `SFPSRWeaponAssemblerFPTab`/`FPSRWeaponAssemblerFPViewportClient` 가 쓰는 그 경로를 답습. 화면비
+  고정 로직 포함(어셈블러 FP 탭의 프레이밍 코드 참조, 화면비 콤보는 생략하고 16:9 고정으로 시작).
+
+## 8. 프리뷰 재생 모델 — "항상 구운 결과를 본다"
+
+- 탭은 편집 세션 시작 시(클립 선택 시) 원본 클립을 **transient 패키지에 복제**(`DuplicateObject`)한
+  "프리뷰 클립"을 만들고, DebugSkelMeshComp 의 PreviewInstance 에 그것을 튼다.
+- **키가 바뀔 때마다**(기즈모 드래그 종료·숫자 편집·키 추가/삭제) `BakeGunMotion(프리뷰 클립, Keys)` 를
+  다시 실행한다(1,500키 굽기는 ms 단위 — 실측 기준 부담 없음). 프리뷰는 언제나 "구운 결과"를 보여준다 —
+  근사 시각화 금지(WYSIWYG 가 이 증보의 존재 이유).
+- 타임라인: 스크럽 슬라이더(0..PlayLength) + [재생/정지] 토글 + 키 시각 마커. 스크럽 중에는
+  PreviewInstance 를 해당 시각에 고정(SetPosition, 재생 정지). 엔진 사용례(Persona 계열)를 grep 해
+  UAnimPreviewInstance 의 정확한 API(SetAnimationAsset/SetPosition/SetPlaying)를 확인 후 사용.
+- [클립에 굽기] = 실제 에셋에 §3-2 실행(기존 그대로). 프리뷰 클립은 커밋과 무관한 스크래치.
+
+## 9. 기즈모 키프레이밍
+
+- 뷰포트 클라이언트는 `FFPSRWeaponAssemblerViewportClient` 의 기즈모 스택 패턴을 답습:
+  `GetWidgetLocation`/`GetWidgetMode`/`SetWidgetMode`/`InputWidgetDelta`/`TrackingStarted(+Stopped)`
+  오버라이드, ModeTools 미경유(같은 이유 — 그 파일 주석 참조). 대상은 항상 무기 컴포넌트 하나.
+- **베이스라인 캐시**: 오프셋 0 상태(= Keys 를 전부 0 으로 한 임시 굽기 또는 고정화 직후)에서 무기
+  컴포넌트의 월드 트랜스폼 `GunBase` 를 1회 캐시. 우측 체인이 상수라 시각 무관 상수다.
+- 드래그 중: 무기 컴포넌트에 델타를 즉시 반영(시각 피드백). **드래그 종료(TrackingStopped) 시** 현재 무기
+  월드 트랜스폼 `GunNow` 에서 카메라 공간 오프셋을 역산해 현재 스크럽 시각의 키로 저장:
+  ```
+  CamRot   = 프리뷰 카메라의 월드 회전(FQuat)
+  O_cam_t  = CamRot⁻¹ ⊗ (GunNow.T − GunBase.T)
+  O_cam_q  = CamRot⁻¹ * (GunNow.R * GunBase.R⁻¹) * CamRot     (정규화)
+  ```
+  같은 시각(±1프레임)의 키가 있으면 갱신, 없으면 추가. 그 뒤 §8 재굽기 → 컴포넌트 임시 델타 해제(구운
+  포즈가 대신한다).
+- 키 편집 후 `FScopedTransaction` 으로 AssetUserData 반영(기존 §4-4 와 동일 규칙).
+- 툴바: 이동/회전 토글(W/E 키 바인딩은 어셈블러 뷰포트 관례 따름), [현재 시각에 키]/[키 삭제].
+
+## 10. v2 검증 (Fable)
+
+1. 탭에 1인칭 구도 뷰포트가 뜨고 클립 스크럽으로 팔 포즈가 움직인다(애디티브가 idle 위에 얹혀 보임 —
+   A포즈면 UDebugSkelMeshComponent 미사용 버그).
+2. 기즈모로 총을 끌고 놓으면 키가 생기고, 스크럽하면 키 사이가 보간된다.
+3. 저장 후 PIE 재생으로 인게임 결과 = 프리뷰 결과(카메라 기준 오프셋 실측 대조).
