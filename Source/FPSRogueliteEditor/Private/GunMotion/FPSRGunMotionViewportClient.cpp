@@ -18,6 +18,7 @@
 #include "Engine/SkeletalMesh.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
+#include "InputCoreTypes.h"   // EKeys — §12 F 키(FPSRBlockoutPlacementMode.cpp 의 InputKey 오버라이드와 같은 include)
 #include "PreviewScene.h"
 
 namespace
@@ -162,6 +163,27 @@ void FFPSRGunMotionViewportClient::RefreshCameraComposition()
 {
 	bHasComposition = false;
 	const UFPSRGunMotionSettings* Settings = GetDefault<UFPSRGunMotionSettings>();
+
+	// §11 분기: bHasCapturedComposition 이면 [PIE 구도 캡처]가 저장한 실측값을 쓴다(캡처가 실행 중인 PIE 캐릭터에서
+	// 읽은 값이라 프로브 스폰의 CDO 저작 배치와 달리 런타임 보정이 반영돼 있다). 아니면 기존 프로브 경로로 폴백
+	// (§11 "최초 사용 전 폴백").
+	if (Settings && Settings->bHasCapturedComposition)
+	{
+		CameraRelativeToArms = Settings->CapturedCameraRelativeToArms;
+
+		CameraView = FMinimalViewInfo();
+		CameraView.FOV = Settings->CapturedFOV;
+		// ApplyCameraComposition 은 DeriveFOVForAspect(CameraView, GFixedAspect) 를 부른다 — 그 함수는 Source==Target
+		// 종횡비일 때 축 제약과 무관하게 항등이 된다(대수적으로 SourceFOV 를 그대로 반환). 캡처값은 이미 실제 PIE
+		// 화면의 가로 FOV 이므로(원본 종횡비를 저장하지 않는다, §11 스펙 그대로 float 하나만) 재유도할 근거 자체가
+		// 없다 — AspectRatio 를 GFixedAspect 와 맞춰서 그 재유도를 항등으로 만들고 CapturedFOV 를 그대로 통과시킨다.
+		CameraView.AspectRatio = GFixedAspect;
+
+		Issue.Reset();
+		bHasComposition = true;
+		return;
+	}
+
 	bHasComposition = ReadGunMotionCameraSetup(GetWorld(), Settings, CameraRelativeToArms, CameraView, Issue);
 }
 
@@ -336,11 +358,12 @@ void FFPSRGunMotionViewportClient::TrackingStopped()
 {
 	if (WeaponComp && bHasGunBase)
 	{
-		// §9 역산식(축자):
-		//   CamRot   = 프리뷰 카메라의 월드 회전
+		// §9 역산식(축자), §12: CamRot 은 자유시점 여부와 무관하게 항상 "잠금 구도"의 카메라 회전이다 — 자유시점
+		// 뷰 회전(GetViewRotation())을 쓰면 같은 드래그가 뷰마다 다른 키를 낳는다(§12 스펙 원문).
+		//   CamRot   = 잠금 구도 카메라의 월드 회전
 		//   O_cam_t  = CamRot⁻¹ ⊗ (GunNow.T − GunBase.T)
 		//   O_cam_q  = CamRot⁻¹ * (GunNow.R * GunBase.R⁻¹) * CamRot (정규화)
-		const FQuat CamRot = GetViewRotation().Quaternion();
+		const FQuat CamRot = GetLockedCompositionCameraRotation();
 		const FTransform GunNow = WeaponComp->GetComponentTransform();
 
 		const FVector OCamT = CamRot.Inverse().RotateVector(GunNow.GetLocation() - GunBase.GetLocation());
@@ -360,7 +383,50 @@ void FFPSRGunMotionViewportClient::Tick(float DeltaSeconds)
 	// 그대로 재사용해도 안전하다(FPSRWeaponAssemblerHelpers 헤더 주석 참조).
 	FPSRWeaponAssemblerHelpers::TickPreviewWorldOnce(PreviewScene.GetWorld(), DeltaSeconds);
 
-	ApplyCameraComposition();
+	// §12: 자유시점 ON 이면 구도 재적용을 건너뛴다 — 그래야 표준 에디터 뷰포트 네비게이션(회전/이동/줌)이 매 프레임
+	// 덮어써지지 않는다. bFreeLook 을 끄는 쪽(SetFreeLook)이 스냅을 직접 처리하므로 여기선 그냥 스킵만 한다.
+	if (!bFreeLook)
+	{
+		ApplyCameraComposition();
+	}
+}
+
+FQuat FFPSRGunMotionViewportClient::GetLockedCompositionCameraRotation() const
+{
+	if (!bHasComposition)
+	{
+		return GetViewRotation().Quaternion();
+	}
+	// ApplyCameraComposition 이 잠금 모드에서 카메라 월드를 만드는 것과 같은 합성 — bFreeLook/GetViewRotation() 과
+	// 무관하게 항상 다시 계산한다(§12).
+	const FTransform ArmsWorld = ArmsComp ? ArmsComp->GetComponentTransform() : FTransform::Identity;
+	const FTransform CameraWorld = CameraRelativeToArms * ArmsWorld;
+	return CameraWorld.GetRotation();
+}
+
+void FFPSRGunMotionViewportClient::SetFreeLook(bool bEnable)
+{
+	if (bFreeLook == bEnable)
+	{
+		return;
+	}
+	bFreeLook = bEnable;
+	if (!bFreeLook)
+	{
+		// §12: "OFF 복귀는 구도 값으로 스냅" — 다음 Tick 을 기다리지 않고 즉시 되돌린다.
+		ApplyCameraComposition();
+	}
+	Invalidate();
+}
+
+bool FFPSRGunMotionViewportClient::InputKey(const FInputKeyEventArgs& EventArgs)
+{
+	if (EventArgs.Key == EKeys::F && EventArgs.Event == IE_Pressed)
+	{
+		SetFreeLook(!bFreeLook);
+		return true;
+	}
+	return FEditorViewportClient::InputKey(EventArgs);
 }
 
 void FFPSRGunMotionViewportClient::ApplyCameraComposition()

@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Widgets/SCompoundWidget.h"
+#include "Types/SlateEnums.h"   // ECheckBoxState — §12 자유시점 체크박스
 
 class UAnimSequence;
 class UFPSRGunMotionAuthoringData;
@@ -129,6 +130,19 @@ private:
 	/** "키 삭제" — 현재 스크럽 시각에 가장 가까운 키를 지운다(±1프레임 이내). 없으면 무동작. */
 	FReply OnDeleteKeyAtCurrentTimeClicked();
 
+	// --- 증보 v2.1 §11-§12: PIE 구도 캡처 + 자유시점 --------------------------------------------------------------
+
+	/** [PIE 구도 캡처] — PIE 의 로컬 캐릭터에서 FirstPersonCamera/FirstPersonArms 의 실제 월드 트랜스폼과
+	 *  GetCameraView 의 FOV 를 읽어 설정에 저장하고(TryUpdateDefaultConfigFile), 뷰포트 구도를 즉시 재적용한다(§11). */
+	FReply OnCaptureCompositionClicked();
+
+	/** 자유시점 체크박스(§12) — 뷰포트 클라이언트의 bFreeLook 을 그대로 비춘다. */
+	ECheckBoxState GetFreeLookState() const;
+	void OnFreeLookStateChanged(ECheckBoxState NewState);
+
+	/** 상태줄 — 지금 구도가 캡처값인지 폴백(BP 프로브)인지(§11 "상태줄에 어느 소스인지 표시"). */
+	FText GetCompositionSourceText() const;
+
 	TWeakObjectPtr<UAnimSequence> SelectedSequence;
 
 	TSharedPtr<STextBlock> StatusText;
@@ -152,4 +166,7 @@ private:
 	TSharedPtr<SSlider> ScrubSlider;
 	/** 타임라인 아래 키 시각 마커 줄(§8). RebuildTimelineMarkers 가 채운다. */
 	TSharedPtr<SHorizontalBox> KeyMarkerContainer;
+
+	/** §11: 지금 구도가 캡처값인지 폴백인지 표시하는 상태줄(GetCompositionSourceText). */
+	TSharedPtr<STextBlock> CompositionStatusText;
 };

@@ -62,5 +62,23 @@ public:
 	UPROPERTY(EditAnywhere, Config, Category = "Gun Motion Preview")
 	FName PreviewWeaponAttachSocket = TEXT("SOCKET_Weapon");
 
+	// --- 증보 v2.1 §11: PIE 구도 캡처 -----------------------------------------------------------------------------
+	// 프로브 스폰(BeginPlay 없음)의 구도는 CDO 저작 배치라 런타임 보정(시선 높이/스탠스 카메라 등)이 빠진다 —
+	// [PIE 구도 캡처] 버튼이 실행 중인 PIE 캐릭터에서 실측해 여기 저장한다(§11 배경 설명).
+
+	/** [PIE 구도 캡처]가 저장한 카메라↔팔 상대 트랜스폼 — PIE 의 FirstPersonCamera/FirstPersonArms 실제 월드
+	 *  트랜스폼으로 `CamWorld.GetRelativeTransform(ArmsWorld)` 를 계산한 값(§11). */
+	UPROPERTY(EditAnywhere, Config, Category = "Gun Motion Composition Capture")
+	FTransform CapturedCameraRelativeToArms = FTransform::Identity;
+
+	/** [PIE 구도 캡처]가 저장한 FirstPersonCamera::GetCameraView 의 가로 FOV(도, §11). */
+	UPROPERTY(EditAnywhere, Config, Category = "Gun Motion Composition Capture")
+	float CapturedFOV = 0.0f;
+
+	/** 위 두 값이 실제로 캡처됐는가. false 면 RefreshCameraComposition 이 기존 프로브 경로(CDO 스폰, §7)로
+	 *  폴백한다(§11 "최초 사용 전 폴백"). */
+	UPROPERTY(EditAnywhere, Config, Category = "Gun Motion Composition Capture")
+	bool bHasCapturedComposition = false;
+
 	UFPSRGunMotionSettings();
 };

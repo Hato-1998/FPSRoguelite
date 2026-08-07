@@ -43,6 +43,11 @@ public:
 	/** 팔/카메라/무기 준비 상태에 대한 마지막 사유(없으면 정상). */
 	const FString& GetIssue() const { return Issue; }
 
+	/** 증보 v2.1 §11: [PIE 구도 캡처] 버튼이 설정(UFPSRGunMotionSettings)에 값을 쓴 뒤 호출 — bHasCapturedComposition
+	 *  이면 캡처값을, 아니면 기존 프로브 경로(§7, CDO 스폰)로 구도를 다시 읽는다. 생성자도 이걸 호출한다(원래
+	 *  private 였던 §7 경로를 이번 증보에서 재사용 가능하도록 public 으로 올렸다). */
+	void RefreshCameraComposition();
+
 	// --- 타임라인(§8) — FFPSRWeaponAssemblerViewportClient의 B4 래퍼와 동일한 근거(GetSingleNodeInstance 기반). ---
 	void SetPreviewPlaying(bool bPlay);
 	bool IsPreviewPlaying() const;
@@ -54,6 +59,14 @@ public:
 	// --- 기즈모(§9) ---
 	virtual void SetWidgetMode(UE::Widget::EWidgetMode InMode) override;
 	FOnFPSRGunMotionGizmoCommit& OnGizmoCommit() { return GizmoCommitDelegate; }
+
+	// --- 증보 v2.1 §12: 자유시점 토글 ------------------------------------------------------------------------------
+
+	/** ON 이면 Tick 이 ApplyCameraComposition 을 건너뛴다(표준 에디터 뷰포트 네비게이션 — 회전/이동/줌). 카메라
+	 *  자체는 건드리지 않고 스위치만 바꾸므로 진입 시 지금 구도 위치에서 그대로 시작한다(§12 "뷰가 튀지 않게").
+	 *  OFF 로 돌아오면 다음 Tick 을 기다리지 않고 즉시 구도로 스냅한다. */
+	void SetFreeLook(bool bEnable);
+	bool IsFreeLook() const { return bFreeLook; }
 
 	// FEditorViewportClient interface — 무기 컴포넌트 하나만을 대상으로 하는 기즈모. ModeTools 를 경유하지 않는다
 	// (FFPSRWeaponAssemblerViewportClient 와 같은 이유 — 그 클래스 헤더 클래스 주석 참조: 단일 대상 기즈모에 별도
@@ -67,6 +80,10 @@ public:
 	virtual void TrackingStopped() override;
 	virtual void Tick(float DeltaSeconds) override;
 
+	/** §12: F 키로 자유시점 토글(SCSEditorViewportClient::InputKey 와 같은 오버라이드 패턴 — 이 프로젝트 뷰포트
+	 *  클라이언트 중 InputKey 를 직접 잡는 첫 사례. F 는 FEditorViewportClient 기본 구현이 소비하지 않는다). */
+	virtual bool InputKey(const FInputKeyEventArgs& EventArgs) override;
+
 	virtual void AddReferencedObjects(FReferenceCollector& Collector) override;
 	virtual FString GetReferencerName() const override { return TEXT("FFPSRGunMotionViewportClient"); }
 
@@ -79,14 +96,14 @@ private:
 	 *  우측 체인이 상수라(총 고정화) 시각 무관 상수이므로 클립 선택 시 한 번만 계산하면 된다. */
 	void RecomputeGunBase();
 
-	/** §7 카메라: TargetCharacterBP 를 프리뷰 씬에 잠깐 스폰해 GetFirstPersonViewSetup 을 읽고 파괴한다
-	 *  (FPSRWeaponAssemblerHelpers::ReadFirstPersonSetup 과 같은 패턴 — 설정 소스가 달라(TSoftObjectPtr<UBlueprint>
-	 *  vs TSoftClassPtr<AFPSRCharacter>) 그 함수를 직접 재사용하지 않고 이 파일에 자체 구현한다). */
-	void RefreshCameraComposition();
-
 	/** 종횡비 고정 + FOV 파생 + 카메라 월드 되돌리기. 매 Tick 호출(엔진이 ControllingActorViewInfo 를 뷰포트 상태로
 	 *  되쓰기 때문 — FFPSRWeaponAssemblerFPViewportClient 헤더 주석과 같은 근거). */
 	void ApplyCameraComposition();
+
+	/** §9 역산의 CamRot 원본 — 항상 "잠금 구도"의 카메라 회전이다(§12: 자유시점 여부와 무관). GetViewRotation() 은
+	 *  자유시점일 때 그 자유 카메라 회전을 돌려주므로 여기선 쓰지 않고, ApplyCameraComposition 이 잠금 모드에서
+	 *  카메라에 넣는 것과 같은 식(CameraRelativeToArms * ArmsWorld)을 항상 다시 계산한다. */
+	FQuat GetLockedCompositionCameraRotation() const;
 
 	FPreviewScene& PreviewScene;
 
@@ -106,6 +123,9 @@ private:
 	bool bHasGunBase = false;
 
 	UE::Widget::EWidgetMode WidgetMode = UE::Widget::WM_Translate;
+
+	/** §12: ON 이면 Tick 이 ApplyCameraComposition 을 건너뛴다(표준 에디터 뷰포트 네비게이션). */
+	bool bFreeLook = false;
 
 	/** §7 카메라 구도 캐시. */
 	FTransform CameraRelativeToArms = FTransform::Identity;

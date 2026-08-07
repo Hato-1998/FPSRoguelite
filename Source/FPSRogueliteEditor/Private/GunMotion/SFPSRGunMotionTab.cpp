@@ -13,6 +13,8 @@
 #include "Animation/AnimSequence.h"
 #include "Animation/AnimData/IAnimationDataModel.h"
 #include "Animation/AnimInstance.h"
+#include "Camera/CameraComponent.h"   // §11 [PIE 구도 캡처] — FirstPersonCamera::GetCameraView
+#include "Camera/CameraTypes.h"       // FMinimalViewInfo
 #include "Components/SkeletalMeshComponent.h"
 #include "GameFramework/PlayerController.h"
 
@@ -31,6 +33,7 @@
 #include "AssetRegistry/AssetData.h"
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/Input/SButton.h"
+#include "Widgets/Input/SCheckBox.h"   // §12 자유시점 체크박스
 #include "Widgets/Input/SNumericEntryBox.h"
 #include "Widgets/Input/SSlider.h"
 #include "Widgets/Layout/SBox.h"
@@ -42,17 +45,20 @@
 
 namespace
 {
-	/** PIE 재생(§4-6)이 FirstPersonArms 를 찾는 데 쓴다 — AFPSRCharacter::FirstPersonArms 는 protected 라 직접
-	 *  멤버 접근이 안 되므로, GetCamToCompRotation 과 같은 방식(설정의 컴포넌트 이름으로 조회)을 재사용한다. */
-	USkeletalMeshComponent* FindSkeletalMeshComponentByName(AActor* Actor, FName ComponentName)
+	/** PIE 재생(§4-6)이 FirstPersonArms 를, [PIE 구도 캡처](§11)가 FirstPersonArms/FirstPersonCamera 를 찾는 데
+	 *  쓴다 — AFPSRCharacter 의 그 멤버들은 protected 라 직접 접근이 안 되므로, GetCamToCompRotation 과 같은 방식
+	 *  (설정의 컴포넌트 이름으로 조회)을 재사용한다. 템플릿화한 이유 = §11 에서 USkeletalMeshComponent(팔) 뿐 아니라
+	 *  UCameraComponent(카메라)도 같은 방식으로 찾아야 하기 때문. */
+	template <typename TComponent>
+	TComponent* FindComponentByName(AActor* Actor, FName ComponentName)
 	{
 		if (!Actor)
 		{
 			return nullptr;
 		}
-		TArray<USkeletalMeshComponent*> Components;
-		Actor->GetComponents<USkeletalMeshComponent>(Components);
-		for (USkeletalMeshComponent* Comp : Components)
+		TArray<TComponent*> Components;
+		Actor->GetComponents<TComponent>(Components);
+		for (TComponent* Comp : Components)
 		{
 			if (Comp && Comp->GetFName() == ComponentName)
 			{
@@ -145,13 +151,41 @@ void SFPSRGunMotionTab::Construct(const FArguments& InArgs)
 				.ToolTipText(LOCTEXT("KeyAtCurrentTimeTooltip", "지금 스크럽 시각에 키가 없으면 새로 추가합니다."))
 				.OnClicked(this, &SFPSRGunMotionTab::OnKeyAtCurrentTimeClicked)
 			]
-			+ SHorizontalBox::Slot().AutoWidth()
+			+ SHorizontalBox::Slot().AutoWidth().Padding(0.0f, 0.0f, 8.0f, 0.0f)
 			[
 				SNew(SButton)
 				.Text(LOCTEXT("DeleteKeyAtCurrentTime", "키 삭제"))
 				.ToolTipText(LOCTEXT("DeleteKeyAtCurrentTimeTooltip", "지금 스크럽 시각에 가장 가까운 키(±1프레임)를 삭제합니다."))
 				.OnClicked(this, &SFPSRGunMotionTab::OnDeleteKeyAtCurrentTimeClicked)
 			]
+
+			// --- 증보 v2.1 §11: [PIE 구도 캡처] ---
+			+ SHorizontalBox::Slot().AutoWidth().Padding(0.0f, 0.0f, 2.0f, 0.0f)
+			[
+				SNew(SButton)
+				.Text(LOCTEXT("CaptureCompositionButton", "PIE 구도 캡처"))
+				.ToolTipText(LOCTEXT("CaptureCompositionTooltip", "PIE 의 로컬 캐릭터에서 카메라-팔 구도를 실측해 저장하고 뷰포트에 즉시 반영합니다."))
+				.OnClicked(this, &SFPSRGunMotionTab::OnCaptureCompositionClicked)
+			]
+
+			// --- 증보 v2.1 §12: 자유시점 토글(뷰포트 툴바 체크박스 + 단축키 F) ---
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(4.0f, 0.0f, 0.0f, 0.0f)
+			[
+				SNew(SCheckBox)
+				.IsChecked(this, &SFPSRGunMotionTab::GetFreeLookState)
+				.OnCheckStateChanged(this, &SFPSRGunMotionTab::OnFreeLookStateChanged)
+				.ToolTipText(LOCTEXT("FreeLookTooltip", "켜면 뷰포트가 표준 에디터 네비게이션(회전/이동/줌)으로 바뀝니다 — 단축키 F. 꺼지면 저장된 구도로 스냅합니다."))
+				[
+					SNew(STextBlock).Text(LOCTEXT("FreeLookLabel", "자유시점 (F)"))
+				]
+			]
+		]
+
+		// --- §11 상태줄: 지금 구도가 캡처값인지 폴백인지 ---
+		+ SVerticalBox::Slot().AutoHeight().Padding(2.0f, 0.0f, 2.0f, 4.0f)
+		[
+			SAssignNew(CompositionStatusText, STextBlock)
+			.Text(this, &SFPSRGunMotionTab::GetCompositionSourceText)
 		]
 
 		// --- 기존 UI(§4) 그대로 — 숫자 키 목록은 미세조정용으로 유지, 뷰포트 기즈모와 같은 Keys 데이터를 편집한다 ---
@@ -551,7 +585,7 @@ FReply SFPSRGunMotionTab::OnPlayInPIEClicked()
 	}
 
 	const UFPSRGunMotionSettings* Settings = GetDefault<UFPSRGunMotionSettings>();
-	USkeletalMeshComponent* Arms = FindSkeletalMeshComponentByName(Character, Settings->ArmsComponentName);
+	USkeletalMeshComponent* Arms = FindComponentByName<USkeletalMeshComponent>(Character, Settings->ArmsComponentName);
 	UAnimInstance* AnimInstance = Arms ? Arms->GetAnimInstance() : nullptr;
 	if (!AnimInstance)
 	{
@@ -1138,6 +1172,96 @@ FReply SFPSRGunMotionTab::OnDeleteKeyAtCurrentTimeClicked()
 	RebuildKeyRows();
 	RebakeViewportPreview();
 	return FReply::Handled();
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// 증보 v2.1 §11-§12: PIE 구도 캡처 + 자유시점
+// ---------------------------------------------------------------------------------------------------------------
+
+FReply SFPSRGunMotionTab::OnCaptureCompositionClicked()
+{
+	// §11: PIE 월드가 없으면 사유 토스트(기존 [PIE에서 재생] 버튼과 같은 처리).
+	FWorldContext* PIEWorldContext = GEditor ? GEditor->GetPIEWorldContext() : nullptr;
+	UWorld* PIEWorld = PIEWorldContext ? PIEWorldContext->World() : nullptr;
+	if (!PIEWorld)
+	{
+		SetStatus(LOCTEXT("NoPIEForCapture", "PIE 가 실행 중이 아닙니다."));
+		return FReply::Handled();
+	}
+
+	APlayerController* PC = PIEWorld->GetFirstPlayerController();
+	AFPSRCharacter* Character = PC ? Cast<AFPSRCharacter>(PC->GetPawn()) : nullptr;
+	if (!Character)
+	{
+		SetStatus(LOCTEXT("NoCharacterForCapture", "PIE 에서 로컬 플레이어 캐릭터를 찾지 못했습니다."));
+		return FReply::Handled();
+	}
+
+	const UFPSRGunMotionSettings* Settings = GetDefault<UFPSRGunMotionSettings>();
+	USkeletalMeshComponent* Arms = FindComponentByName<USkeletalMeshComponent>(Character, Settings->ArmsComponentName);
+	UCameraComponent* Camera = FindComponentByName<UCameraComponent>(Character, Settings->CameraComponentName);
+	if (!Arms || !Camera)
+	{
+		SetStatus(LOCTEXT("NoArmsOrCameraForCapture", "PIE 캐릭터에서 팔/카메라 컴포넌트를 찾지 못했습니다."));
+		return FReply::Handled();
+	}
+
+	// §11: "실제 월드 트랜스폼" — 프로브 스폰(CDO 저작 배치)이 아니라 실행 중인 PIE 캐릭터라 런타임 보정
+	// (시선 높이/스탠스 카메라 등)이 이미 반영돼 있다.
+	const FTransform ArmsWorld = Arms->GetComponentTransform();
+	const FTransform CameraWorld = Camera->GetComponentTransform();
+	const FTransform CamRelArms = CameraWorld.GetRelativeTransform(ArmsWorld);
+
+	FMinimalViewInfo View;
+	Camera->GetCameraView(0.0f, View);
+
+	UFPSRGunMotionSettings* MutableSettings = GetMutableDefault<UFPSRGunMotionSettings>();
+	MutableSettings->CapturedCameraRelativeToArms = CamRelArms;
+	MutableSettings->CapturedFOV = View.FOV;
+	MutableSettings->bHasCapturedComposition = true;
+
+	// 🚨 SaveConfig() 금지 — CDO 메모리만 바뀌고 체크인되는 ini 엔 안 남는다(프로젝트 실사고). 반환값을 확인한다.
+	const bool bSaved = MutableSettings->TryUpdateDefaultConfigFile();
+	SetStatus(bSaved
+		? LOCTEXT("CaptureSaved", "PIE 구도를 캡처해 설정 파일에 저장했습니다.")
+		: LOCTEXT("CaptureSaveFailed", "구도를 캡처했지만 설정 파일 저장에 실패했습니다(읽기 전용일 수 있습니다)."));
+
+	// §11: "뷰포트 즉시 재적용".
+	if (Viewport.IsValid())
+	{
+		if (const TSharedPtr<FFPSRGunMotionViewportClient> Client = Viewport->GetGunMotionClient())
+		{
+			Client->RefreshCameraComposition();
+		}
+	}
+	return FReply::Handled();
+}
+
+ECheckBoxState SFPSRGunMotionTab::GetFreeLookState() const
+{
+	const TSharedPtr<FFPSRGunMotionViewportClient> Client = Viewport.IsValid() ? Viewport->GetGunMotionClient() : nullptr;
+	return (Client.IsValid() && Client->IsFreeLook()) ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
+}
+
+void SFPSRGunMotionTab::OnFreeLookStateChanged(ECheckBoxState NewState)
+{
+	if (Viewport.IsValid())
+	{
+		if (const TSharedPtr<FFPSRGunMotionViewportClient> Client = Viewport->GetGunMotionClient())
+		{
+			Client->SetFreeLook(NewState == ECheckBoxState::Checked);
+		}
+	}
+}
+
+FText SFPSRGunMotionTab::GetCompositionSourceText() const
+{
+	const UFPSRGunMotionSettings* Settings = GetDefault<UFPSRGunMotionSettings>();
+	if (Settings && Settings->bHasCapturedComposition)
+	{
+		return LOCTEXT("CompositionSourceCaptured", "구도: 캡처 구도(PIE 실측)");
+	}
+	return LOCTEXT("CompositionSourceFallback", "구도: 기본(BP) 구도 — PIE 캡처 권장");
 }
 
 #undef LOCTEXT_NAMESPACE
