@@ -54,19 +54,37 @@ void UFPSRFirstPersonArmsAnimInstance::UpdateAndPublish(float DeltaSeconds)
 	bIsAiming = Character->IsAiming();
 	bIsReloading = Character->IsReloading();
 
-	// Game thread only (it walks component attachment state). Asking for THIS component is what makes the answer false
-	// whenever the weapon is in the body's hand instead — going down, spectating, or simply no arms authored — so the
-	// IK turns off rather than reaching across the map at a gun that isn't here (ADR 0003 invariant 11).
-	bHasLeftHandGrip = Character->GetLeftHandGripTransform(GetOwningComponent(), LeftHandGripWorld);
-	LeftHandGripLocation = bHasLeftHandGrip ? LeftHandGripWorld.GetLocation() : FVector::ZeroVector;
+	// Gun-anchor IK (fparms-gunanchor-ik): read the grip frame in ik_hand_gun BONE SPACE, not world. A world-space
+	// effector read the weapon component's transform, which attachment only refreshes BEFORE this frame's animation
+	// update runs — a structural one-frame lag (visible as the grip "swimming" on a fast camera turn). The gun-frame
+	// value only changes when the equipped weapon/parts change (AFPSRCharacter caches it there, not per frame), so
+	// there is no per-frame source left to lag behind. Game thread only, same reason as before (it walks component
+	// attachment state on the cache-refresh path) — asking for THIS component is what makes the answer false whenever
+	// the weapon is in the body's hand instead, so the IK turns off rather than reaching for a gun that isn't here
+	// (ADR 0003 invariant 11).
+	FTransform RightGripInGun;
+	bHasRightHandGrip = Character->GetRightHandGripInGunFrame(GetOwningComponent(), RightGripInGun);
+	RightGripInGunLocation = bHasRightHandGrip ? RightGripInGun.GetLocation() : FVector::ZeroVector;
+	RightGripInGunRotation = bHasRightHandGrip ? RightGripInGun.Rotator() : FRotator::ZeroRotator;
 
-	// A reload / equip that legitimately takes the hand off the weapon authors this curve to 0. No curve = 1, which is
+	FTransform LeftGripInGun;
+	bHasLeftHandGrip = Character->GetLeftHandGripInGunFrame(GetOwningComponent(), LeftGripInGun);
+	LeftGripInGunLocation = bHasLeftHandGrip ? LeftGripInGun.GetLocation() : FVector::ZeroVector;
+	LeftGripInGunRotation = bHasLeftHandGrip ? LeftGripInGun.Rotator() : FRotator::ZeroRotator;
+
+	// A reload / equip that legitimately takes a hand off the weapon authors its curve to 0. No curve = 1, which is
 	// what an ordinary pose wants, so an unauthored montage keeps the hand on the grip instead of silently dropping it.
-	float CurveValue = 0.0f;
-	const float Weight = (!LeftHandIKWeightCurve.IsNone() && GetCurveValue(LeftHandIKWeightCurve, CurveValue))
-		? CurveValue
+	float LeftCurveValue = 0.0f;
+	const float LeftWeight = (!LeftHandIKWeightCurve.IsNone() && GetCurveValue(LeftHandIKWeightCurve, LeftCurveValue))
+		? LeftCurveValue
 		: 1.0f;
-	LeftHandIKAlpha = bHasLeftHandGrip ? FMath::Clamp(Weight, 0.0f, 1.0f) : 0.0f;
+	LeftHandIKAlpha = bHasLeftHandGrip ? FMath::Clamp(LeftWeight, 0.0f, 1.0f) : 0.0f;
+
+	float RightCurveValue = 0.0f;
+	const float RightWeight = (!RightHandIKWeightCurve.IsNone() && GetCurveValue(RightHandIKWeightCurve, RightCurveValue))
+		? RightCurveValue
+		: 1.0f;
+	RightHandIKAlpha = bHasRightHandGrip ? FMath::Clamp(RightWeight, 0.0f, 1.0f) : 0.0f;
 
 	PushToLinkedLayers();
 }
@@ -92,8 +110,12 @@ void UFPSRFirstPersonArmsAnimInstance::PushToLinkedLayers() const
 		Layer->bIsAiming = bIsAiming;
 		Layer->bIsReloading = bIsReloading;
 		Layer->bHasLeftHandGrip = bHasLeftHandGrip;
-		Layer->LeftHandGripWorld = LeftHandGripWorld;
-		Layer->LeftHandGripLocation = LeftHandGripLocation;
+		Layer->bHasRightHandGrip = bHasRightHandGrip;
+		Layer->RightGripInGunLocation = RightGripInGunLocation;
+		Layer->RightGripInGunRotation = RightGripInGunRotation;
+		Layer->LeftGripInGunLocation = LeftGripInGunLocation;
+		Layer->LeftGripInGunRotation = LeftGripInGunRotation;
 		Layer->LeftHandIKAlpha = LeftHandIKAlpha;
+		Layer->RightHandIKAlpha = RightHandIKAlpha;
 	}
 }

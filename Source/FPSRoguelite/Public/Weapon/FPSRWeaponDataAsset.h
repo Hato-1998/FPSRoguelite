@@ -350,6 +350,12 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|메시", meta = (DisplayName = "왼손 그립 소켓"))
 	FName LeftHandSocket = NAME_None;
 
+	/** Socket marking where the RIGHT hand grips this weapon (right-hand IK) — same convention as LeftHandSocket above:
+	 *  it may live on a PART rather than the receiver, so the character resolves whichever part carries it. NAME_None =
+	 *  no right-hand IK for this weapon (the animation pose stands as authored, unmodified). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|메시", meta = (DisplayName = "오른손 그립 소켓"))
+	FName RightHandSocket = NAME_None;
+
 	/** Socket on the WEAPON mesh used as the muzzle-flash origin (cosmetic only; trace origin stays the camera). */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|발사 연출", meta = (DisplayName = "총구 소켓(화염 원점)"))
 	FName MuzzleSocket = NAME_None;

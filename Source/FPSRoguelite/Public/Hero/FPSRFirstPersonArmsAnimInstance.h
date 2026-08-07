@@ -15,8 +15,14 @@
  *
  * Deliberately thin. The arms' procedural motion — ADS glue, sway, bob, fire kick — is NOT computed here: it lives in
  * AFPSRCharacter::UpdateAimDownSights and is applied to the whole component's transform. That is the reason this graph
- * only needs a weapon-group pose, a montage slot and a left-hand IK target (ADR 0003 axis 1: the pack's poses are
- * adopted, its procedural kernel is not — this project already owns recoil and sight alignment).
+ * only needs a weapon-group pose, a montage slot and the two-hand grip IK targets (ADR 0003 axis 1: the pack's poses
+ * are adopted, its procedural kernel is not — this project already owns recoil and sight alignment).
+ *
+ * Grip IK (fparms-gunanchor-ik): both hands read a grip frame in ik_hand_gun BONE SPACE, not world — the weapon is
+ * anchored to the ik_hand_gun bone (AFPSRCharacter::AttachWeaponMeshes), which sits OUTSIDE the arm's FK chain, so the
+ * hand IK reaching for it can no longer drag it around. Feed RightGripInGunLocation/Rotation and
+ * LeftGripInGunLocation/Rotation into Transform (Modify) Bone nodes on ik_hand_r / ik_hand_l with Bone Space = Parent
+ * Bone Space.
  *
  * Runs on the OWNER'S MACHINE ONLY and never feeds a gameplay decision (ADR 0003 invariant 12). Nothing here is
  * replicated; the state it reads (aiming, reloading) is replicated elsewhere by its owner.
@@ -48,23 +54,54 @@ public:
 	UPROPERTY(BlueprintReadOnly, Category = "FPSR|Arms")
 	bool bHasLeftHandGrip = false;
 
-	/** World transform of that grip. Set the Two Bone IK / FABRIK effector space to World Space. Meaningless when
-	 *  bHasLeftHandGrip is false (identity). */
+	/** Right-hand mirror of bHasLeftHandGrip above. Every weapon has SOME right-hand grip in practice, but this is
+	 *  still gated the same way (false whenever the grip isn't actually resolved on these arms — e.g. no weapon
+	 *  equipped) rather than assumed true. */
 	UPROPERTY(BlueprintReadOnly, Category = "FPSR|Arms")
-	FTransform LeftHandGripWorld = FTransform::Identity;
+	bool bHasRightHandGrip = false;
 
-	/** Location half of the above, for graphs that only take a vector effector. */
+	/** Grip frame in ik_hand_gun BONE SPACE (gun-anchor refactor, ADR: fparms-gunanchor-ik) — feed straight into the
+	 *  TransformBone node on ik_hand_r / ik_hand_l with Bone Space = "Parent Bone Space" (ik_hand_gun IS that parent
+	 *  in the retarget rig: ik_hand_root > ik_hand_gun > ik_hand_l/r).
+	 *
+	 *  This replaces a WORLD-space effector on purpose: the world version read the weapon component's transform,
+	 *  which is only refreshed by attachment BEFORE this frame's animation update runs — a structural one-frame lag,
+	 *  most visible as the grip "swimming" during fast camera turns. The gun-frame value is a CONSTANT between
+	 *  equip/part changes (AFPSRCharacter caches it there, not per frame — see GetRightHandGripInGunFrame), so there
+	 *  is no per-frame source to lag behind in the first place.
+	 *
+	 *  Rotator, not FTransform/FQuat, because that is what TransformBone's pins take. Meaningless (zero) when the
+	 *  matching bHas*HandGrip is false. */
 	UPROPERTY(BlueprintReadOnly, Category = "FPSR|Arms")
-	FVector LeftHandGripLocation = FVector::ZeroVector;
+	FVector RightGripInGunLocation = FVector::ZeroVector;
+
+	UPROPERTY(BlueprintReadOnly, Category = "FPSR|Arms")
+	FRotator RightGripInGunRotation = FRotator::ZeroRotator;
+
+	/** Left-hand mirror of RightGripInGunLocation/RightGripInGunRotation above — same ik_hand_gun bone space, same
+	 *  reason, feeds ik_hand_l instead of ik_hand_r. */
+	UPROPERTY(BlueprintReadOnly, Category = "FPSR|Arms")
+	FVector LeftGripInGunLocation = FVector::ZeroVector;
+
+	UPROPERTY(BlueprintReadOnly, Category = "FPSR|Arms")
+	FRotator LeftGripInGunRotation = FRotator::ZeroRotator;
 
 	/** Final IK alpha: the grip weight curve, zeroed when there is no grip to reach for. Feed the IK node's alpha. */
 	UPROPERTY(BlueprintReadOnly, Category = "FPSR|Arms")
 	float LeftHandIKAlpha = 0.0f;
 
+	/** Right-hand mirror of LeftHandIKAlpha above. */
+	UPROPERTY(BlueprintReadOnly, Category = "FPSR|Arms")
+	float RightHandIKAlpha = 0.0f;
+
 	/** Curve a montage authors to take the left hand OFF the weapon (reload, equip). Absent = 1, which is what an
 	 *  ordinary pose wants — an unauthored montage keeps the hand on the grip instead of silently dropping it. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Arms")
 	FName LeftHandIKWeightCurve = FName(TEXT("LeftHandIKWeight"));
+
+	/** Right-hand mirror of LeftHandIKWeightCurve above. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Arms")
+	FName RightHandIKWeightCurve = FName(TEXT("RightHandIKWeight"));
 
 protected:
 	virtual void NativeInitializeAnimation() override;

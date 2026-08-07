@@ -592,9 +592,11 @@ void FFPSRWeaponAssemblerViewportClient::AttachAssemblyToHand()
 		return;
 	}
 
-	// 우선순위 1: AFPSRCharacter 가 이 무기에 대해 해석하는 소켓(런타임 AttachWeaponMeshes와 동일 규칙을 CDO로
-	// 조회 — P2 해결: 예전엔 DA->WeaponAttachSocket 만 봐서 그 값이 박힌 무기 1종(Rifle) 외엔 팔 보기를 켜도 총이
-	// 원점에 남았다). 소켓이 실제로 이 팔 메시에 있을 때만 채택하고, GripBone을 그 소켓의 소유 뼈로 맞춘다.
+	// 우선순위 1: AFPSRCharacter 가 이 무기에 대해 해석하는 소켓 "이름"(ResolveWeaponAttachSocket, CDO로 조회 —
+	// 이름 해석 규칙은 런타임과 동일하다. P2 해결: 예전엔 DA->WeaponAttachSocket 만 봐서 그 값이 박힌 무기 1종
+	// (Rifle) 외엔 팔 보기를 켜도 총이 원점에 남았다). 소켓이 실제로 이 팔 메시에 있을 때만 채택하고, GripBone을
+	// 그 소켓의 소유 뼈로 맞춘다. 그 이름에 실제로 "붙이는" 방식 자체는 런타임과 다르다 — 바로 아래
+	// SnapToTargetNotIncludingScale 주석 참조.
 	//    단, 디자이너가 뼈 피커로 뼈를 직접 고른 뒤(bGripBoneUserSet)라면 그 선택이 이긴다 — 소켓의 뼈를 **옮기려는**
 	//    중이기 때문이다(BakeWeaponSocket 의 bMovedBone 경로). 여기서 소켓 뼈로 되돌려 버리면 피커가 영영 무동작이 된다.
 	FName AttachName = NAME_None;
@@ -626,9 +628,14 @@ void FFPSRWeaponAssemblerViewportClient::AttachAssemblyToHand()
 		return;
 	}
 
-	// 🚨 SnapToTargetNotIncludingScale + 명시적 SetRelativeScale3D — 런타임(FPSRCharacter::AttachWeaponMeshes)과
-	// 정확히 같은 규약이라야 프리뷰 크기가 인게임과 일치한다. 소켓 자체엔 스케일을 굽지 않는다(불변식 I-B) — 크기는
-	// 여기 하나(WeaponAttachScale)에서만 결정된다. 파츠는 바디의 자식이라(B2) 이 스케일을 자동으로 상속한다.
+	// 🚨 SnapToTargetNotIncludingScale + 명시적 SetRelativeScale3D — 런타임 AttachWeaponMeshes 의 **소켓-부착
+	// 폴백** 경로와 정확히 같은 규약이라야 프리뷰 크기가 인게임과 일치한다(gun-anchor 전용 규약이 아니다 — 런타임이
+	// gun-anchor 2-스킴이 된 뒤로 이 툴은 그중 폴백 쪽만 재현한다, fparms-gunanchor-ik). 소켓 자체엔 스케일을 굽지
+	// 않는다(불변식 I-B) — 크기는 여기 하나(WeaponAttachScale)에서만 결정된다. 파츠는 바디의 자식이라(B2) 이
+	// 스케일을 자동으로 상속한다.
+	// gun-anchor 경로(ik_hand_gun 뼈 앵커)와는 부착 메커니즘 자체가 다르다 — 이 프리뷰가 그 경로의 실제 인게임
+	// 결과와 같아지는 건 ABP 의 CopyBone(ik_hand_gun := hand_r) 이 실제로 성립하는 동안뿐이며(배선 전에는 다르게
+	// 보일 수 있다), 그 등가성은 애님그래프 쪽이라 이 파일에서 강제하거나 검증할 수 없다.
 	BodyComp->AttachToComponent(ArmsComp, FAttachmentTransformRules::SnapToTargetNotIncludingScale, AttachName);
 	BodyComp->SetRelativeScale3D(FVector(WeaponDA->WeaponAttachScale));
 
