@@ -43,7 +43,7 @@
 | FPSR.Save.MigrationMatrix | 검증 | S | high | 버전드 세이브 조용한 필드 유실=메타 진행도 손실 → 전 SaveVersion+다운그레이드 무손실 단언(P6 확장 전 차단) | 📋 |
 | Handoff/PROGRESS Auto-Sync + Guard | 자동화 | M | high | phase diff→PROGRESS/커밋 초안 + -A 스테이징/LFS smudge/doc-bleed 하드블록(문서클론 LFS 손상 실이력) | 📋 |
 | Consult→§E Ingestion Autopiler | 자동화 | M | med | Docs/Review 미인입 리포트→§E 행+§C draft 자동전사(자문전용) → PM 수작업 제거 | 📋 |
-| Codex-Review Batching Gate | 자동화 | S | med | 대형 diff 서브시스템별 청크→병렬 codex-review→병합(대형 phase 머지마다) | 📋 |
+| 레드팀 Batching Gate | 자동화 | S | med | 대형 diff 서브시스템별 청크→병렬 레드팀 서브에이전트→병합(대형 phase 머지마다). ⚠️`codex-review.ps1`은 2026-08-07 삭제됨 — 이제 §6-6-1 내부 레드팀 위에 설계할 것. 개수 상한=§6-5-1 | 📋 |
 | FPSR.AttackToken.Debug | 계측 | S | med | 이원 토큰(근접 10/원거리 3, placeholder)이 200-300 스웜서 실제 상한 걸리는지 오버레이(BALANCE 재사용) | 📋 |
 | FPSR.Content.AnimNullCheck | 검증 | M | med | VAT ClipIndex=0.0f(DEAD)서 적 애니 무크래시/null=휴면 CI 단언(Synty 베이크 전 회귀 방지) | 📋 |
 
@@ -143,7 +143,7 @@
 2. **allocator가 심장 — 오버레이(눈)→불변식 하네스(게이트)→togetherness(검증) 3단** — R6: 그룹 버프 전면 폐기로 "뭉치면 효율"은 오직 content-aware allocator가 미션/보스/엘리트를 2인+ 그룹에 집중시키는 것으로만 성립. `FPSR.Alloc.Debug`+`AllocatorProbe/ContentAllocatorSim/RecyclePolicyProbe`+`Co-op Togetherness Meter`가 다중맵 전 티어를 관통하는 최대 단일 레버 체인.
 3. **§5 적500 perf는 한 번도 측정 안 됨 — 램프 하네스가 Synty 채택·하드캡·출시를 태운다** — ~200-300/캡500·NetUpdateFreq·미구현 NetCull은 전부 가정. `FPSR.Perf.SwarmHarness`가 SyntyPilotBench 백본·§5 P7 종결·양산 회귀 벤치를 태우고, Significance/Net.Relevancy/FrameBudget.HUD/Insights.Enemy500Pass가 리슨호스트 최악 케이스를 실 코드경로에 귀속.
 4. **죽어있는 VAT 파이프라인 = Synty 적 재저작 전체의 빠진 Stage-3** — 적 애니 C++ 완전 배선인데 `ClipIndex_*=0.0f`(TODO Stage3=DEAD)로 무동작. `MixamoRetargetBatch`(입력)→`VATBakePipeline`(베이크)→`VATMaterialParamValidator`/`AnimNullCheck`(no-op·크래시 가드)가 한 체인으로 죽은 적을 살린다.
-5. **재발명 말고 얇게 확장 — 기존 하네스가 최고 ROI** — headless `-run=pythonscript`(u10/balance_dump·apply)·`FPSRoguelite.Smoke.*`·cvar 오버레이(`FPSR.FlowField.Debug`)·`GameplayMessageSubsystem` 스파인·`codex-review/consult-codex.ps1`이 이미 존재. 다수 S/M 툴(Scaffolder·Snapshot·SimRun·Telemetry·Batching Gate·Drift Sentinel)이 이 인프라의 얇은 확장으로 near-zero 비용·고레버리지.
+5. **재발명 말고 얇게 확장 — 기존 하네스가 최고 ROI** — headless `-run=pythonscript`(u10/balance_dump·apply)·`FPSRoguelite.Smoke.*`·cvar 오버레이(`FPSR.FlowField.Debug`)·`GameplayMessageSubsystem` 스파인·레드팀 게이트(§6-6-1)·`consult-codex.ps1`이 이미 존재. 다수 S/M 툴(Scaffolder·Snapshot·SimRun·Telemetry·Batching Gate·Drift Sentinel)이 이 인프라의 얇은 확장으로 near-zero 비용·고레버리지.
 
 ---
 
