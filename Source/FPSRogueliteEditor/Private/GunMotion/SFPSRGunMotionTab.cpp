@@ -4,6 +4,8 @@
 
 #include "GunMotion/FPSRGunMotionSettings.h"
 #include "GunMotion/FPSRGunMotionBaker.h"
+#include "GunMotion/FPSRGunMotionViewportClient.h"
+#include "GunMotion/SFPSRGunMotionViewport.h"
 #include "Anim/FPSRGunMotionAuthoringData.h"
 #include "Core/FPSRLogChannels.h"
 #include "Hero/FPSRCharacter.h"
@@ -14,6 +16,8 @@
 #include "Components/SkeletalMeshComponent.h"
 #include "GameFramework/PlayerController.h"
 
+#include "AdvancedPreviewScene.h"   // §7: 이 탭이 단독 소유하는 프리뷰 씬
+#include "PreviewScene.h"          // FPreviewScene::ConstructionValues
 #include "Editor.h"
 #include "FileHelpers.h"   // UEditorLoadingAndSavingUtils::SavePackages (UnrealEd) — 이 프로젝트가 기존에 EditorScriptingUtilities
                             // 플러그인(비활성)을 피해 온 관례를 그대로 따른다(FPSRWeaponAssemblerHelpers.cpp 주석 참조).
@@ -28,8 +32,10 @@
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SNumericEntryBox.h"
+#include "Widgets/Input/SSlider.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SScrollBox.h"
+#include "Widgets/Layout/SSpacer.h"
 #include "Widgets/Text/STextBlock.h"
 
 #define LOCTEXT_NAMESPACE "SFPSRGunMotionTab"
@@ -55,19 +61,109 @@ namespace
 		}
 		return nullptr;
 	}
+
+	/** 1프레임 길이(초) — §9 "같은 시각(±1프레임)의 키" 판정 허용오차. 데이터 모델을 못 읽으면 30fps 로 폴백한다. */
+	float FrameToleranceSeconds(const UAnimSequence* Seq)
+	{
+		const IAnimationDataModel* Model = Seq ? Seq->GetDataModel() : nullptr;
+		const double Fps = Model ? Model->GetFrameRate().AsDecimal() : 0.0;
+		return (Fps > 0.0) ? static_cast<float>(1.0 / Fps) : (1.0f / 30.0f);
+	}
 }
 
 void SFPSRGunMotionTab::Construct(const FArguments& InArgs)
 {
+	// §7: 이 탭이 단독 소유하는 프리뷰 씬 — 어셈블러 씬과 공유하지 않는다(저작 대상이 무기 조립이 아니라 클립이라
+	// 공유할 이유가 없다. SFPSRWeaponAssemblerFPTab 의 공동소유/약참조 수명주기 지뢰도 여기엔 없다).
+	PreviewScene = MakeShared<FAdvancedPreviewScene>(FPreviewScene::ConstructionValues());
+
 	ChildSlot
 	[
-		SNew(SScrollBox)
+		SNew(SVerticalBox)
 
-		+ SScrollBox::Slot().Padding(4.0f)
+		// --- §7 뷰포트 ---
+		+ SVerticalBox::Slot().AutoHeight().Padding(2.0f)
 		[
-			SNew(SVerticalBox)
+			SNew(SBox).HeightOverride(360.0f)
+			[
+				SAssignNew(Viewport, SFPSRGunMotionViewport, PreviewScene.ToSharedRef())
+			]
+		]
 
-			// --- 1. 클립 선택(§4-1) ---
+		// --- §8 타임라인: 재생/정지 + 스크럽 슬라이더 ---
+		+ SVerticalBox::Slot().AutoHeight().Padding(2.0f, 4.0f, 2.0f, 0.0f)
+		[
+			SNew(SHorizontalBox)
+
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 4.0f, 0.0f)
+			[
+				SNew(SButton)
+				.Text(this, &SFPSRGunMotionTab::GetPlayPauseLabel)
+				.OnClicked(this, &SFPSRGunMotionTab::OnPlayPauseClicked)
+			]
+
+			+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
+			[
+				SAssignNew(ScrubSlider, SSlider)
+				.MinValue(0.0f)
+				.MaxValue(1.0f)
+				.Value(this, &SFPSRGunMotionTab::GetScrubPosition)
+				.OnMouseCaptureBegin(this, &SFPSRGunMotionTab::OnScrubCaptureBegin)
+				.OnValueChanged(this, &SFPSRGunMotionTab::OnScrubPositionChanged)
+			]
+		]
+
+		// --- §8 키 시각 마커 줄 ---
+		+ SVerticalBox::Slot().AutoHeight().Padding(2.0f, 0.0f, 2.0f, 4.0f)
+		[
+			SAssignNew(KeyMarkerContainer, SHorizontalBox)
+		]
+
+		// --- §9 기즈모 툴바: 이동/회전 + 현재 시각에 키/삭제 ---
+		+ SVerticalBox::Slot().AutoHeight().Padding(2.0f, 0.0f, 2.0f, 4.0f)
+		[
+			SNew(SHorizontalBox)
+
+			+ SHorizontalBox::Slot().AutoWidth().Padding(0.0f, 0.0f, 2.0f, 0.0f)
+			[
+				SNew(SButton)
+				.Text(LOCTEXT("GizmoMoveMode", "이동"))
+				.ToolTipText(LOCTEXT("GizmoMoveModeTooltip", "기즈모를 이동 모드로 전환합니다."))
+				.OnClicked(this, &SFPSRGunMotionTab::OnTranslateModeClicked)
+			]
+			+ SHorizontalBox::Slot().AutoWidth().Padding(0.0f, 0.0f, 8.0f, 0.0f)
+			[
+				SNew(SButton)
+				.Text(LOCTEXT("GizmoRotateMode", "회전"))
+				.ToolTipText(LOCTEXT("GizmoRotateModeTooltip", "기즈모를 회전 모드로 전환합니다."))
+				.OnClicked(this, &SFPSRGunMotionTab::OnRotateModeClicked)
+			]
+			+ SHorizontalBox::Slot().AutoWidth().Padding(0.0f, 0.0f, 2.0f, 0.0f)
+			[
+				SNew(SButton)
+				.Text(LOCTEXT("KeyAtCurrentTime", "현재 시각에 키"))
+				.ToolTipText(LOCTEXT("KeyAtCurrentTimeTooltip", "지금 스크럽 시각에 키가 없으면 새로 추가합니다."))
+				.OnClicked(this, &SFPSRGunMotionTab::OnKeyAtCurrentTimeClicked)
+			]
+			+ SHorizontalBox::Slot().AutoWidth()
+			[
+				SNew(SButton)
+				.Text(LOCTEXT("DeleteKeyAtCurrentTime", "키 삭제"))
+				.ToolTipText(LOCTEXT("DeleteKeyAtCurrentTimeTooltip", "지금 스크럽 시각에 가장 가까운 키(±1프레임)를 삭제합니다."))
+				.OnClicked(this, &SFPSRGunMotionTab::OnDeleteKeyAtCurrentTimeClicked)
+			]
+		]
+
+		// --- 기존 UI(§4) 그대로 — 숫자 키 목록은 미세조정용으로 유지, 뷰포트 기즈모와 같은 Keys 데이터를 편집한다 ---
+		+ SVerticalBox::Slot().FillHeight(1.0f)
+		[
+			SNew(SScrollBox)
+
+			+ SScrollBox::Slot().Padding(4.0f)
+			[
+				SNew(SVerticalBox)
+
+				// --- 1. 클립 선택(§4-1) ---
 			+ SVerticalBox::Slot().AutoHeight().Padding(2.0f)
 			[
 				SNew(SHorizontalBox)
@@ -235,7 +331,19 @@ void SFPSRGunMotionTab::Construct(const FArguments& InArgs)
 				.AutoWrapText(true)
 			]
 		]
+		]
 	];
+
+	// §7-§9: 뷰포트 클라이언트는 SFPSRGunMotionViewport::Construct 내부(SEditorViewport::Construct →
+	// MakeEditorViewportClient)에서 이미 위 ChildSlot 대입 도중 동기적으로 만들어졌다 — 어셈블러 탭이 같은 순서로
+	// FPViewport->GetFPClient() 를 곧바로 쓰는 것과 같은 근거(SFPSRWeaponAssemblerFPTab::RebuildViewport 참조).
+	if (Viewport.IsValid())
+	{
+		if (const TSharedPtr<FFPSRGunMotionViewportClient> Client = Viewport->GetGunMotionClient())
+		{
+			Client->OnGizmoCommit().BindSP(this, &SFPSRGunMotionTab::OnGizmoKeyCommitted);
+		}
+	}
 
 	RebuildKeyRows();
 }
@@ -259,6 +367,7 @@ void SFPSRGunMotionTab::OnSequenceChanged(const FAssetData& AssetData)
 {
 	SelectedSequence = Cast<UAnimSequence>(AssetData.GetAsset());
 	RebuildKeyRows();
+	RebuildViewportPreview();
 }
 
 UFPSRGunMotionAuthoringData* SFPSRGunMotionTab::GetOrCreateAuthoringData(bool bCreateIfMissing)
@@ -364,6 +473,10 @@ FReply SFPSRGunMotionTab::OnSanitizeClicked()
 	{
 		UE_LOG(LogFPSR, Log, TEXT("[GunMotion] SanitizeRightChain 성공: %s"), *Seq->GetName());
 		SetStatus(LOCTEXT("SanitizeOk", "총 고정화 완료."));
+
+		// §8: 이전에 복제해 둔 프리뷰 클립은 고정화 이전 상태로 고정된 채라(bSanitized=false 로 복제됨) 재사용할 수
+		// 없다 — 원본 클립을 다시 복제해 베이스라인부터 새로 잡는다.
+		RebuildViewportPreview();
 	}
 	else
 	{
@@ -479,6 +592,7 @@ FReply SFPSRGunMotionTab::OnAddKeyClicked()
 
 	Seq->MarkPackageDirty();
 	RebuildKeyRows();
+	RebakeViewportPreview();
 	return FReply::Handled();
 }
 
@@ -497,6 +611,7 @@ FReply SFPSRGunMotionTab::OnRemoveKeyClicked(int32 KeyIndex)
 
 	Seq->MarkPackageDirty();
 	RebuildKeyRows();
+	RebakeViewportPreview();
 	return FReply::Handled();
 }
 
@@ -542,6 +657,7 @@ FReply SFPSRGunMotionTab::OnApplyDefaultTemplateClicked()
 
 	Seq->MarkPackageDirty();
 	RebuildKeyRows();
+	RebakeViewportPreview();
 	SetStatus(LOCTEXT("TemplateApplied", "기본 템플릿을 적용했습니다."));
 	return FReply::Handled();
 }
@@ -645,6 +761,9 @@ void SFPSRGunMotionTab::MutateKey(int32 KeyIndex, const FText& TransactionText, 
 	AuthData->Modify();
 	Mutator(AuthData->Keys[KeyIndex]);
 	Seq->MarkPackageDirty();
+
+	// §7 헤더: "같은 Keys 데이터를 두 UI 가 편집한다" — 숫자 입력으로 고친 값도 뷰포트가 즉시 반영해야 한다(§8).
+	RebakeViewportPreview();
 }
 
 float SFPSRGunMotionTab::GetKeyTime(int32 KeyIndex) const
@@ -722,6 +841,303 @@ float SFPSRGunMotionTab::GetKeyRoll(int32 KeyIndex) const
 void SFPSRGunMotionTab::SetKeyRoll(int32 KeyIndex, float NewValue)
 {
 	MutateKey(KeyIndex, LOCTEXT("EditKeyRollTransaction", "총 모션 키 Roll 편집"), [NewValue](FFPSRGunMotionKey& Key) { Key.CamRotation.Roll = NewValue; });
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// 증보 v2 §7-§9: 뷰포트 프리뷰 / 타임라인 / 기즈모
+// ---------------------------------------------------------------------------------------------------------------
+
+void SFPSRGunMotionTab::RebuildViewportPreview()
+{
+	if (!Viewport.IsValid())
+	{
+		return;
+	}
+	const TSharedPtr<FFPSRGunMotionViewportClient> Client = Viewport->GetGunMotionClient();
+	if (!Client.IsValid())
+	{
+		return;
+	}
+
+	UAnimSequence* Seq = GetSequence();
+	const UFPSRGunMotionAuthoringData* AuthData = Seq ? Seq->GetAssetUserData<UFPSRGunMotionAuthoringData>() : nullptr;
+	const TArray<FFPSRGunMotionKey> Keys = AuthData ? AuthData->Keys : TArray<FFPSRGunMotionKey>();
+
+	Client->SetSourceClip(Seq, Keys);
+
+	if (ScrubSlider.IsValid())
+	{
+		const float Length = Client->GetPreviewLength();
+		ScrubSlider->SetMinAndMaxValues(0.0f, FMath::Max(UE_KINDA_SMALL_NUMBER, Length));
+	}
+
+	RebuildTimelineMarkers();
+
+	if (!Client->GetIssue().IsEmpty())
+	{
+		SetStatus(FText::FromString(Client->GetIssue()));
+	}
+}
+
+void SFPSRGunMotionTab::RebakeViewportPreview()
+{
+	if (!Viewport.IsValid())
+	{
+		return;
+	}
+	const TSharedPtr<FFPSRGunMotionViewportClient> Client = Viewport->GetGunMotionClient();
+	if (!Client.IsValid() || !Client->HasPreviewClip())
+	{
+		return;
+	}
+
+	UAnimSequence* Seq = GetSequence();
+	const UFPSRGunMotionAuthoringData* AuthData = Seq ? Seq->GetAssetUserData<UFPSRGunMotionAuthoringData>() : nullptr;
+	const TArray<FFPSRGunMotionKey> Keys = AuthData ? AuthData->Keys : TArray<FFPSRGunMotionKey>();
+
+	Client->RebakePreview(Keys);
+	RebuildTimelineMarkers();
+}
+
+int32 SFPSRGunMotionTab::FindKeyIndexNearTime(float Time, float ToleranceSeconds) const
+{
+	UAnimSequence* Seq = GetSequence();
+	const UFPSRGunMotionAuthoringData* AuthData = Seq ? Seq->GetAssetUserData<UFPSRGunMotionAuthoringData>() : nullptr;
+	if (!AuthData)
+	{
+		return INDEX_NONE;
+	}
+
+	int32 BestIndex = INDEX_NONE;
+	float BestDelta = ToleranceSeconds;
+	for (int32 Index = 0; Index < AuthData->Keys.Num(); ++Index)
+	{
+		const float Delta = FMath::Abs(AuthData->Keys[Index].Time - Time);
+		if (Delta <= BestDelta)
+		{
+			BestDelta = Delta;
+			BestIndex = Index;
+		}
+	}
+	return BestIndex;
+}
+
+void SFPSRGunMotionTab::OnGizmoKeyCommitted(float Time, FVector CamOffset, FRotator CamRotation)
+{
+	UAnimSequence* Seq = GetSequence();
+	if (!Seq)
+	{
+		return;
+	}
+
+	const FScopedTransaction Transaction(LOCTEXT("GizmoKeyCommitTransaction", "총 모션 키(기즈모)"));
+	UFPSRGunMotionAuthoringData* AuthData = GetOrCreateAuthoringData(/*bCreateIfMissing=*/true);
+	if (!AuthData)
+	{
+		SetStatus(LOCTEXT("AuthDataFailed", "저작 데이터를 준비하지 못했습니다."));
+		return;
+	}
+	AuthData->Modify();
+
+	// §9: "같은 시각(±1프레임)의 키가 있으면 갱신, 없으면 추가".
+	const int32 ExistingIndex = FindKeyIndexNearTime(Time, FrameToleranceSeconds(Seq));
+	if (AuthData->Keys.IsValidIndex(ExistingIndex))
+	{
+		AuthData->Keys[ExistingIndex].CamOffset = CamOffset;
+		AuthData->Keys[ExistingIndex].CamRotation = CamRotation;
+	}
+	else
+	{
+		FFPSRGunMotionKey NewKey;
+		NewKey.Time = Time;
+		NewKey.CamOffset = CamOffset;
+		NewKey.CamRotation = CamRotation;
+		AuthData->Keys.Add(NewKey);
+	}
+
+	Seq->MarkPackageDirty();
+	RebuildKeyRows();
+	RebakeViewportPreview();
+}
+
+void SFPSRGunMotionTab::RebuildTimelineMarkers()
+{
+	if (!KeyMarkerContainer.IsValid())
+	{
+		return;
+	}
+	KeyMarkerContainer->ClearChildren();
+
+	UAnimSequence* Seq = GetSequence();
+	const UFPSRGunMotionAuthoringData* AuthData = Seq ? Seq->GetAssetUserData<UFPSRGunMotionAuthoringData>() : nullptr;
+	const float Length = Seq ? Seq->GetPlayLength() : 0.0f;
+	if (!AuthData || Length <= UE_KINDA_SMALL_NUMBER)
+	{
+		return;
+	}
+
+	// 시간 순으로 정렬한 사본으로 마커를 왼쪽부터 배치한다 — 저작 순서가 아니라 시각 순서로 보여야 타임라인처럼 읽힌다.
+	TArray<FFPSRGunMotionKey> SortedKeys = AuthData->Keys;
+	SortedKeys.Sort([](const FFPSRGunMotionKey& A, const FFPSRGunMotionKey& B) { return A.Time < B.Time; });
+
+	float PrevTime = 0.0f;
+	for (const FFPSRGunMotionKey& Key : SortedKeys)
+	{
+		const float GapFraction = FMath::Clamp((Key.Time - PrevTime) / Length, 0.0f, 1.0f);
+		if (GapFraction > 0.0f)
+		{
+			KeyMarkerContainer->AddSlot().FillWidth(GapFraction)[SNew(SSpacer)];
+		}
+		KeyMarkerContainer->AddSlot().AutoWidth()
+		[
+			SNew(STextBlock).Text(LOCTEXT("KeyMarkerGlyph", "|")).ToolTipText(FText::AsNumber(Key.Time))
+		];
+		PrevTime = Key.Time;
+	}
+	const float TailFraction = FMath::Clamp((Length - PrevTime) / Length, 0.0f, 1.0f);
+	if (TailFraction > 0.0f)
+	{
+		KeyMarkerContainer->AddSlot().FillWidth(TailFraction)[SNew(SSpacer)];
+	}
+}
+
+float SFPSRGunMotionTab::GetScrubPosition() const
+{
+	if (!Viewport.IsValid())
+	{
+		return 0.0f;
+	}
+	const TSharedPtr<FFPSRGunMotionViewportClient> Client = Viewport->GetGunMotionClient();
+	return Client.IsValid() ? Client->GetPreviewPosition() : 0.0f;
+}
+
+void SFPSRGunMotionTab::OnScrubPositionChanged(float NewValue)
+{
+	if (!Viewport.IsValid())
+	{
+		return;
+	}
+	if (const TSharedPtr<FFPSRGunMotionViewportClient> Client = Viewport->GetGunMotionClient())
+	{
+		Client->SetPreviewPosition(NewValue);
+	}
+}
+
+void SFPSRGunMotionTab::OnScrubCaptureBegin()
+{
+	// §8: "스크럽 중에는 PreviewInstance 를 해당 시각에 고정(SetPosition, 재생 정지)" — 드래그 시작 시 재생을 멈춘다.
+	if (!Viewport.IsValid())
+	{
+		return;
+	}
+	if (const TSharedPtr<FFPSRGunMotionViewportClient> Client = Viewport->GetGunMotionClient())
+	{
+		Client->SetPreviewPlaying(false);
+	}
+}
+
+FReply SFPSRGunMotionTab::OnPlayPauseClicked()
+{
+	if (Viewport.IsValid())
+	{
+		if (const TSharedPtr<FFPSRGunMotionViewportClient> Client = Viewport->GetGunMotionClient())
+		{
+			Client->SetPreviewPlaying(!Client->IsPreviewPlaying());
+		}
+	}
+	return FReply::Handled();
+}
+
+FText SFPSRGunMotionTab::GetPlayPauseLabel() const
+{
+	const TSharedPtr<FFPSRGunMotionViewportClient> Client = Viewport.IsValid() ? Viewport->GetGunMotionClient() : nullptr;
+	const bool bPlaying = Client.IsValid() && Client->IsPreviewPlaying();
+	return bPlaying ? LOCTEXT("PauseLabel", "정지") : LOCTEXT("PlayLabel", "재생");
+}
+
+FReply SFPSRGunMotionTab::OnTranslateModeClicked()
+{
+	if (Viewport.IsValid())
+	{
+		if (const TSharedPtr<FFPSRGunMotionViewportClient> Client = Viewport->GetGunMotionClient())
+		{
+			Client->SetWidgetMode(UE::Widget::WM_Translate);
+		}
+	}
+	return FReply::Handled();
+}
+
+FReply SFPSRGunMotionTab::OnRotateModeClicked()
+{
+	if (Viewport.IsValid())
+	{
+		if (const TSharedPtr<FFPSRGunMotionViewportClient> Client = Viewport->GetGunMotionClient())
+		{
+			Client->SetWidgetMode(UE::Widget::WM_Rotate);
+		}
+	}
+	return FReply::Handled();
+}
+
+FReply SFPSRGunMotionTab::OnKeyAtCurrentTimeClicked()
+{
+	UAnimSequence* Seq = GetSequence();
+	if (!Seq || !Viewport.IsValid())
+	{
+		SetStatus(LOCTEXT("NoClipSelected", "클립을 먼저 선택하세요."));
+		return FReply::Handled();
+	}
+	const TSharedPtr<FFPSRGunMotionViewportClient> Client = Viewport->GetGunMotionClient();
+	const float Time = Client.IsValid() ? Client->GetPreviewPosition() : 0.0f;
+
+	const FScopedTransaction Transaction(LOCTEXT("KeyAtTimeTransaction", "총 모션 키 추가(현재 시각)"));
+	UFPSRGunMotionAuthoringData* AuthData = GetOrCreateAuthoringData(/*bCreateIfMissing=*/true);
+	if (!AuthData)
+	{
+		SetStatus(LOCTEXT("AuthDataFailed", "저작 데이터를 준비하지 못했습니다."));
+		return FReply::Handled();
+	}
+	AuthData->Modify();
+
+	const int32 ExistingIndex = FindKeyIndexNearTime(Time, FrameToleranceSeconds(Seq));
+	if (!AuthData->Keys.IsValidIndex(ExistingIndex))
+	{
+		FFPSRGunMotionKey NewKey;
+		NewKey.Time = Time;
+		AuthData->Keys.Add(NewKey);
+	}
+
+	Seq->MarkPackageDirty();
+	RebuildKeyRows();
+	RebakeViewportPreview();
+	return FReply::Handled();
+}
+
+FReply SFPSRGunMotionTab::OnDeleteKeyAtCurrentTimeClicked()
+{
+	UAnimSequence* Seq = GetSequence();
+	if (!Seq || !Viewport.IsValid())
+	{
+		return FReply::Handled();
+	}
+	const TSharedPtr<FFPSRGunMotionViewportClient> Client = Viewport->GetGunMotionClient();
+	const float Time = Client.IsValid() ? Client->GetPreviewPosition() : 0.0f;
+
+	UFPSRGunMotionAuthoringData* AuthData = Seq->GetAssetUserData<UFPSRGunMotionAuthoringData>();
+	const int32 ExistingIndex = AuthData ? FindKeyIndexNearTime(Time, FrameToleranceSeconds(Seq)) : INDEX_NONE;
+	if (!AuthData || !AuthData->Keys.IsValidIndex(ExistingIndex))
+	{
+		return FReply::Handled();
+	}
+
+	const FScopedTransaction Transaction(LOCTEXT("DeleteKeyAtTimeTransaction", "총 모션 키 삭제(현재 시각)"));
+	AuthData->Modify();
+	AuthData->Keys.RemoveAt(ExistingIndex);
+
+	Seq->MarkPackageDirty();
+	RebuildKeyRows();
+	RebakeViewportPreview();
+	return FReply::Handled();
 }
 
 #undef LOCTEXT_NAMESPACE

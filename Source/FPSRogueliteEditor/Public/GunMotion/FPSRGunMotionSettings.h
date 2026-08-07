@@ -7,6 +7,8 @@
 #include "Engine/Blueprint.h"   // TSoftObjectPtr<UBlueprint> — GetCamToCompRotation 이 이 BP 의 CDO 에서 컴포넌트를 찾는다
 #include "FPSRGunMotionSettings.generated.h"
 
+class UStaticMesh;
+
 /**
  * 총 모션 저작 툴 설정(editor-only). Config = Editor + DefaultConfig — 값이 Config/DefaultEditor.ini 에 실려
  * 체크인되고, 재빌드 없이 Project Settings > FPSR 에서 바꿀 수 있다(기존 UFPSRWeaponAssemblerSettings 패턴 답습,
@@ -48,6 +50,17 @@ public:
 	/** TargetCharacterBP 위의 1인칭 카메라 컴포넌트 이름(GetCamToCompRotation, 위와 동일한 이유로 이름 조회). */
 	UPROPERTY(EditAnywhere, Config, Category = "Gun Motion")
 	FName CameraComponentName = TEXT("FirstPersonCamera");
+
+	/** 비주얼 저작 프리뷰(증보 v2, §7)가 팔 소켓에 붙이는 무기 스태틱 메시. 게임의 gun-anchor 경로(ik_hand_gun 뼈
+	 *  앵커)와는 부착 메커니즘이 다르지만 등가다 — ABP 의 CopyBone(ik_hand_gun := hand_r)이 항등인 조건에서 총은
+	 *  hand_r 을 강체로 따라가므로, 프리뷰에서 hand_r 소켓(PreviewWeaponAttachSocket)에 부착하는 것이 인게임 결과와
+	 *  같은 상대 배치를 만든다. */
+	UPROPERTY(EditAnywhere, Config, Category = "Gun Motion Preview")
+	TSoftObjectPtr<UStaticMesh> PreviewWeaponMesh;
+
+	/** 위 무기 메시를 붙일 팔 메시의 소켓 이름(§7). */
+	UPROPERTY(EditAnywhere, Config, Category = "Gun Motion Preview")
+	FName PreviewWeaponAttachSocket = TEXT("SOCKET_Weapon");
 
 	UFPSRGunMotionSettings();
 };
