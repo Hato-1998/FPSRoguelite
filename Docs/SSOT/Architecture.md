@@ -2,7 +2,7 @@
 
 > `Game.md`(SSOT 허브)의 분할 문서. **섹션 번호(§x)는 원본 그대로 보존** — 소스 주석·교차참조 호환.
 > 작업 시작 전 허브 `Game.md` + `PROGRESS.md`를 먼저 읽고, 신규 클래스·모듈·폴더 구조·기술 채택 결정 관련 작업 시 본 파일을 연다. 성능 예산은 `Performance.md`(§5), 작업 규칙은 `Workflow.md`(§6).
-> 담는 섹션: §3 확정 기술 스택 / §4 프로그래밍 구조(§4-1 목표 구조, §4-2 실제 클래스맵).
+> 담는 섹션: §3 확정 기술 스택 / §4 프로그래밍 구조(§4-1 목표 구조, §4-2 실제 클래스맵, §4-3 서버 RPC 규약).
 
 ---
 
@@ -86,3 +86,14 @@ Source/FPSRoguelite/
 ```
 - ASC는 `AFPSRPlayerState`가 소유, `AFPSRCharacter`가 `PossessedBy`/`OnRep_PlayerState`에서 ActorInfo 초기화
 - 데미지 브릿지: 플레이어 GAS 계산 → `UFPSREnemyHealthComponent::ApplyDamage` (적 ASC 없음)
+
+### 4-3. 서버 RPC 규약 — 실패 처분 = **조용히 거부** (`WithValidation` 미채택, 결정 2026-08-07)
+
+**규약**: Server RPC 는 **`_Implementation` 몸통(또는 그 위임처)에서 직접 검사하고, 유효하지 않으면 아무 일도 하지 않고 반환**한다. `WithValidation` 은 쓰지 않는다. 신규 RPC 도 이 규약을 따른다.
+
+- **필수**: 클라가 보낸 인덱스/ID 는 **서버가 들고 있는 상태와 대조**한다(`CachedOffer.IsValidIndex` · `Pool->IsValidIndex` · `Slots.IsValidIndex` · `OfferId != CurrentOfferId` 등). 클라는 **인덱스만** 보내고 실체(카드·무기)는 서버 캐시에서 꺼낸다 — 실체 주입이 구조적으로 불가능해야 한다.
+- **금지**: 검사를 `_Validate` 로 올리는 것. `_Validate` 가 false 를 반환하면 **그 클라이언트의 연결이 끊긴다** — 엔진 경로 = `RPC_ValidateFailed`(`CoreNet.cpp:667`) → `ReceivedRPC` false(`DataReplication.cpp:1461`) → **`Connection->Close(ENetCloseResult::ObjectReplicatorReceivedBunchFail)`**(`DataChannel.cpp:3440`, UE 5.7 실측). 즉 걸러내기가 아니라 **강제 퇴장**이다.
+- **거부 사유의 절반은 악의가 아니라 정상 레이스다** — 스테일 오퍼·더블클릭(`HandleCardSelection`·`ServerRerollOffer` 주석이 명시). `_Validate` 로 올리면 **더블클릭한 정상 플레이어가 킥**된다.
+- **채택 근거(제1원리)**: 4인 협동이라 치터가 망치는 건 자기 파티뿐이고 랭킹·경제·PvP 가 없다 → 오탐 킥의 손실 > 억지력. 이미 12개 전부 안전하게 거부되므로 `WithValidation` 이 더하는 건 보호가 아니라 **처벌뿐**이다. **경쟁 요소(랭킹/매치메이킹)가 들어오면 이 규약을 재검토**한다 — 그때는 결론이 뒤집힌다.
+- **스팸은 별개 계층** — 유효한 값을 대량 전송하는 공격은 `_Validate` 를 전부 통과한다. 엔진 전용 계층 `RPCDoSDetection` 소관이며 **현재 꺼져 있다**(`BaseEngine.ini:1866` `bRPCDoSDetection=false`, 프로젝트 오버라이드 없음).
+- 조사 전문 = `Docs/Refactor_20260806_Report.md §7-4`. 실측 대상 = Server RPC 12개(파라미터 없음 3 / `bool` 2 / `int32` 7).
