@@ -33,6 +33,9 @@ class UAnimMontage;
 class USoundBase;
 class UParticleSystem;
 class UUserWidget;
+#if WITH_EDITOR
+struct FPropertyChangedEvent;
+#endif
 
 /** Base player character: first-person camera + ONE shared body mesh (True First Person, ADR 0002) + Enhanced Input +
  *  weapon inventory/firing. ASC lives on PlayerState. */
@@ -473,6 +476,23 @@ protected:
 
 	/** Local client: apply (true) or clear (false) the camera vision-restriction post-process. Idempotent. */
 	void ApplyVisionRestriction(bool bRestricted);
+
+#if WITH_EDITOR
+	/** Editor-only authoring-loop shim (fparms-gunanchor-ik): the gun-frame grip cache (GetRightHandGripInGunFrame /
+	 *  GetLeftHandGripInGunFrame) is a CONSTANT re-solved only on equip/part changes — by design (see those functions'
+	 *  own comments) — so tuning a grip/attach socket's transform in the editor had no visible effect until a PIE
+	 *  restart re-ran AttachWeaponMeshes. Bound to FCoreUObjectDelegates::OnObjectPropertyChanged in BeginPlay, this
+	 *  re-attaches (which re-caches, see AttachWeaponMeshes) whenever ANY socket's property changes in the editor,
+	 *  closing that loop. AttachWeaponMeshes is idempotent and this only fires on human editor edits (low frequency),
+	 *  so reacting to every socket rather than filtering to "is this socket mine" costs nothing — and that filter
+	 *  would itself be a place to get it wrong: a socket's Outer can be either the mesh or the skeleton (this project
+	 *  has hit both), so a narrower check risks silently missing an update instead of just doing one harmless extra
+	 *  re-attach. */
+	void OnEditorObjectPropertyChanged(UObject* Object, FPropertyChangedEvent& Event);
+
+	/** Handle for the OnEditorObjectPropertyChanged binding above — bound in BeginPlay, removed in EndPlay. */
+	FDelegateHandle EditorSocketChangedHandle;
+#endif
 
 	// Enhanced Input handlers
 	void Input_MoveForward(const FInputActionValue& Value);

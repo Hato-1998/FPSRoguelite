@@ -32,6 +32,8 @@
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/SkeletalMesh.h"
+#include "Engine/SkeletalMeshSocket.h"
+#include "Engine/StaticMeshSocket.h"
 #include "Animation/AnimInstance.h"
 #include "Animation/AnimMontage.h"
 #include "Sound/SoundBase.h"
@@ -327,6 +329,12 @@ void AFPSRCharacter::BeginPlay()
 	// not wait for a controller-change edge that will never arrive. A remote client's pawn is NOT locally controlled
 	// yet at this point — NotifyControllerChanged catches that one.
 	RefreshFirstPersonRendering();
+
+#if WITH_EDITOR
+	// Authoring-loop shim (fparms-gunanchor-ik) — see the header comment on OnEditorObjectPropertyChanged. Editor
+	// (PIE/standalone-in-editor) only: the delegate itself doesn't exist outside WITH_EDITOR.
+	EditorSocketChangedHandle = FCoreUObjectDelegates::OnObjectPropertyChanged.AddUObject(this, &AFPSRCharacter::OnEditorObjectPropertyChanged);
+#endif
 }
 
 void AFPSRCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -354,8 +362,29 @@ void AFPSRCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 		bVisionDelegateBound = false;
 	}
 
+#if WITH_EDITOR
+	FCoreUObjectDelegates::OnObjectPropertyChanged.Remove(EditorSocketChangedHandle);
+#endif
+
 	Super::EndPlay(EndPlayReason);
 }
+
+#if WITH_EDITOR
+void AFPSRCharacter::OnEditorObjectPropertyChanged(UObject* Object, FPropertyChangedEvent& Event)
+{
+	// Editor-only shim for the socket-tuning loop: the grip cache is a constant re-solved only on equip/part changes
+	// (design — see GetRightHandGripInGunFrame's comment), so editing a socket in the editor had no effect until a
+	// PIE restart. Any socket property change re-attaches (and therefore re-caches) once — AttachWeaponMeshes is
+	// idempotent and this only fires on human editor edits (low frequency), so reacting to every socket without
+	// filtering is free. Not filtering to "is this socket mine" on purpose: a socket's Outer can be either the mesh
+	// or the skeleton (this project has actually hit both), so a narrower check risks silently missing an update —
+	// the wide net is the safer failure mode (one harmless extra no-op re-attach).
+	if (Cast<USkeletalMeshSocket>(Object) || Cast<UStaticMeshSocket>(Object))
+	{
+		AttachWeaponMeshes(); // internally chains into RefreshHandGripInGunFrameCache
+	}
+}
+#endif
 
 void AFPSRCharacter::PossessedBy(AController* NewController)
 {
