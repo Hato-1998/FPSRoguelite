@@ -1,0 +1,727 @@
+// Copyright Epic Games, Inc. All Rights Reserved.
+
+#include "GunMotion/SFPSRGunMotionTab.h"
+
+#include "GunMotion/FPSRGunMotionSettings.h"
+#include "GunMotion/FPSRGunMotionBaker.h"
+#include "Anim/FPSRGunMotionAuthoringData.h"
+#include "Core/FPSRLogChannels.h"
+#include "Hero/FPSRCharacter.h"
+
+#include "Animation/AnimSequence.h"
+#include "Animation/AnimData/IAnimationDataModel.h"
+#include "Animation/AnimInstance.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "GameFramework/PlayerController.h"
+
+#include "Editor.h"
+#include "FileHelpers.h"   // UEditorLoadingAndSavingUtils::SavePackages (UnrealEd) — 이 프로젝트가 기존에 EditorScriptingUtilities
+                            // 플러그인(비활성)을 피해 온 관례를 그대로 따른다(FPSRWeaponAssemblerHelpers.cpp 주석 참조).
+                            // 스펙 §4-5 는 UEditorAssetLibrary::SaveLoadedAsset 을 지목하지만 그 플러그인은 이
+                            // 프로젝트에서 비활성 상태다 — 대신 이미 검증된 이 경로로 대체했다(보고서에 명시).
+#include "Misc/MessageDialog.h"
+#include "ScopedTransaction.h"
+
+#include "PropertyEditorModule.h"
+#include "PropertyCustomizationHelpers.h"
+#include "AssetRegistry/AssetData.h"
+#include "Widgets/SBoxPanel.h"
+#include "Widgets/Input/SButton.h"
+#include "Widgets/Input/SNumericEntryBox.h"
+#include "Widgets/Layout/SBox.h"
+#include "Widgets/Layout/SScrollBox.h"
+#include "Widgets/Text/STextBlock.h"
+
+#define LOCTEXT_NAMESPACE "SFPSRGunMotionTab"
+
+namespace
+{
+	/** PIE 재생(§4-6)이 FirstPersonArms 를 찾는 데 쓴다 — AFPSRCharacter::FirstPersonArms 는 protected 라 직접
+	 *  멤버 접근이 안 되므로, GetCamToCompRotation 과 같은 방식(설정의 컴포넌트 이름으로 조회)을 재사용한다. */
+	USkeletalMeshComponent* FindSkeletalMeshComponentByName(AActor* Actor, FName ComponentName)
+	{
+		if (!Actor)
+		{
+			return nullptr;
+		}
+		TArray<USkeletalMeshComponent*> Components;
+		Actor->GetComponents<USkeletalMeshComponent>(Components);
+		for (USkeletalMeshComponent* Comp : Components)
+		{
+			if (Comp && Comp->GetFName() == ComponentName)
+			{
+				return Comp;
+			}
+		}
+		return nullptr;
+	}
+}
+
+void SFPSRGunMotionTab::Construct(const FArguments& InArgs)
+{
+	ChildSlot
+	[
+		SNew(SScrollBox)
+
+		+ SScrollBox::Slot().Padding(4.0f)
+		[
+			SNew(SVerticalBox)
+
+			// --- 1. 클립 선택(§4-1) ---
+			+ SVerticalBox::Slot().AutoHeight().Padding(2.0f)
+			[
+				SNew(SHorizontalBox)
+				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 4.0f, 0.0f)
+				[
+					SNew(STextBlock).Text(LOCTEXT("ClipPrompt", "클립:"))
+				]
+				+ SHorizontalBox::Slot().FillWidth(1.0f)
+				[
+					SNew(SObjectPropertyEntryBox)
+					.AllowedClass(UAnimSequence::StaticClass())
+					.ObjectPath(this, &SFPSRGunMotionTab::GetSequenceObjectPath)
+					.OnObjectChanged(this, &SFPSRGunMotionTab::OnSequenceChanged)
+					.AllowClear(true)
+				]
+			]
+
+			// --- 2. 상태 줄(§4-2) ---
+			+ SVerticalBox::Slot().AutoHeight().Padding(2.0f, 4.0f)
+			[
+				SAssignNew(StatusText, STextBlock)
+				.Text(this, &SFPSRGunMotionTab::GetStatusText)
+			]
+
+			// --- 나머지 전부: 비애디티브 클립이면 통째로 비활성(§4-2 "비애디티브 클립이면 전 기능 비활성") ---
+			+ SVerticalBox::Slot().AutoHeight().Padding(2.0f)
+			[
+				SNew(SVerticalBox)
+				.IsEnabled(this, &SFPSRGunMotionTab::IsClipAdditive)
+
+				// --- 3. [총 고정화] ---
+				+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 2.0f)
+				[
+					SNew(SButton)
+					.Text(LOCTEXT("SanitizeButton", "총 고정화"))
+					.OnClicked(this, &SFPSRGunMotionTab::OnSanitizeClicked)
+				]
+
+				// --- "풀 오프셋" 입력(§3-3 기본 템플릿이 읽는 값) + [기본 템플릿] ---
+				+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 6.0f, 0.0f, 2.0f)
+				[
+					SNew(STextBlock).Text(LOCTEXT("FullOffsetHeader", "풀 오프셋 (기본 템플릿용)"))
+				]
+				+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 2.0f)
+				[
+					SNew(SHorizontalBox)
+
+					+ SHorizontalBox::Slot().AutoWidth().Padding(2.0f)
+					[
+						SNew(SBox).WidthOverride(90.0f)
+						[
+							SNew(SNumericEntryBox<float>)
+							.Label()[SNew(STextBlock).Text(LOCTEXT("FullRight", "Right"))]
+							.Value(this, &SFPSRGunMotionTab::GetFullOffsetRight)
+							.OnValueChanged(this, &SFPSRGunMotionTab::SetFullOffsetRight)
+							.OnValueCommitted_Lambda([this](float V, ETextCommit::Type) { SetFullOffsetRight(V); })
+						]
+					]
+					+ SHorizontalBox::Slot().AutoWidth().Padding(2.0f)
+					[
+						SNew(SBox).WidthOverride(90.0f)
+						[
+							SNew(SNumericEntryBox<float>)
+							.Label()[SNew(STextBlock).Text(LOCTEXT("FullUp", "Up"))]
+							.Value(this, &SFPSRGunMotionTab::GetFullOffsetUp)
+							.OnValueChanged(this, &SFPSRGunMotionTab::SetFullOffsetUp)
+							.OnValueCommitted_Lambda([this](float V, ETextCommit::Type) { SetFullOffsetUp(V); })
+						]
+					]
+					+ SHorizontalBox::Slot().AutoWidth().Padding(2.0f)
+					[
+						SNew(SBox).WidthOverride(90.0f)
+						[
+							SNew(SNumericEntryBox<float>)
+							.Label()[SNew(STextBlock).Text(LOCTEXT("FullFwd", "Fwd"))]
+							.Value(this, &SFPSRGunMotionTab::GetFullOffsetFwd)
+							.OnValueChanged(this, &SFPSRGunMotionTab::SetFullOffsetFwd)
+							.OnValueCommitted_Lambda([this](float V, ETextCommit::Type) { SetFullOffsetFwd(V); })
+						]
+					]
+					+ SHorizontalBox::Slot().AutoWidth().Padding(2.0f)
+					[
+						SNew(SBox).WidthOverride(90.0f)
+						[
+							SNew(SNumericEntryBox<float>)
+							.Label()[SNew(STextBlock).Text(LOCTEXT("FullPitch", "Pitch"))]
+							.Value(this, &SFPSRGunMotionTab::GetFullOffsetPitch)
+							.OnValueChanged(this, &SFPSRGunMotionTab::SetFullOffsetPitch)
+							.OnValueCommitted_Lambda([this](float V, ETextCommit::Type) { SetFullOffsetPitch(V); })
+						]
+					]
+					+ SHorizontalBox::Slot().AutoWidth().Padding(2.0f)
+					[
+						SNew(SBox).WidthOverride(90.0f)
+						[
+							SNew(SNumericEntryBox<float>)
+							.Label()[SNew(STextBlock).Text(LOCTEXT("FullYaw", "Yaw"))]
+							.Value(this, &SFPSRGunMotionTab::GetFullOffsetYaw)
+							.OnValueChanged(this, &SFPSRGunMotionTab::SetFullOffsetYaw)
+							.OnValueCommitted_Lambda([this](float V, ETextCommit::Type) { SetFullOffsetYaw(V); })
+						]
+					]
+					+ SHorizontalBox::Slot().AutoWidth().Padding(2.0f)
+					[
+						SNew(SBox).WidthOverride(90.0f)
+						[
+							SNew(SNumericEntryBox<float>)
+							.Label()[SNew(STextBlock).Text(LOCTEXT("FullRoll", "Roll"))]
+							.Value(this, &SFPSRGunMotionTab::GetFullOffsetRoll)
+							.OnValueChanged(this, &SFPSRGunMotionTab::SetFullOffsetRoll)
+							.OnValueCommitted_Lambda([this](float V, ETextCommit::Type) { SetFullOffsetRoll(V); })
+						]
+					]
+					+ SHorizontalBox::Slot().AutoWidth().Padding(4.0f, 2.0f)
+					[
+						SNew(SButton)
+						.Text(LOCTEXT("ApplyTemplateButton", "기본 템플릿"))
+						.OnClicked(this, &SFPSRGunMotionTab::OnApplyDefaultTemplateClicked)
+					]
+				]
+
+				// --- 4. 키 목록(§4-4) ---
+				+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 6.0f, 0.0f, 2.0f)
+				[
+					SNew(SHorizontalBox)
+					+ SHorizontalBox::Slot().FillWidth(0.12f)[SNew(STextBlock).Text(LOCTEXT("ColTime", "Time(s)"))]
+					+ SHorizontalBox::Slot().FillWidth(0.12f)[SNew(STextBlock).Text(LOCTEXT("ColRight", "Right(cm)"))]
+					+ SHorizontalBox::Slot().FillWidth(0.12f)[SNew(STextBlock).Text(LOCTEXT("ColUp", "Up(cm)"))]
+					+ SHorizontalBox::Slot().FillWidth(0.12f)[SNew(STextBlock).Text(LOCTEXT("ColFwd", "Fwd(cm)"))]
+					+ SHorizontalBox::Slot().FillWidth(0.12f)[SNew(STextBlock).Text(LOCTEXT("ColPitch", "Pitch"))]
+					+ SHorizontalBox::Slot().FillWidth(0.12f)[SNew(STextBlock).Text(LOCTEXT("ColYaw", "Yaw"))]
+					+ SHorizontalBox::Slot().FillWidth(0.12f)[SNew(STextBlock).Text(LOCTEXT("ColRoll", "Roll"))]
+				]
+				+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 2.0f)
+				[
+					SAssignNew(KeyListContainer, SVerticalBox)
+				]
+				+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 2.0f)
+				[
+					SNew(SButton)
+					.Text(LOCTEXT("AddKeyButton", "+ 키 추가"))
+					.OnClicked(this, &SFPSRGunMotionTab::OnAddKeyClicked)
+				]
+
+				// --- 5. [클립에 굽기] ---
+				+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 8.0f, 0.0f, 2.0f)
+				[
+					SNew(SButton)
+					.Text(LOCTEXT("BakeButton", "클립에 굽기"))
+					.OnClicked(this, &SFPSRGunMotionTab::OnBakeClicked)
+				]
+
+				// --- 6. [PIE에서 재생] ---
+				+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 2.0f)
+				[
+					SNew(SButton)
+					.Text(LOCTEXT("PlayInPIEButton", "PIE에서 재생"))
+					.OnClicked(this, &SFPSRGunMotionTab::OnPlayInPIEClicked)
+				]
+			]
+
+			+ SVerticalBox::Slot().AutoHeight().Padding(2.0f, 6.0f, 2.0f, 2.0f)
+			[
+				SAssignNew(ActionStatusText, STextBlock)
+				.AutoWrapText(true)
+			]
+		]
+	];
+
+	RebuildKeyRows();
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// 클립 선택
+// ---------------------------------------------------------------------------------------------------------------
+
+UAnimSequence* SFPSRGunMotionTab::GetSequence() const
+{
+	return SelectedSequence.Get();
+}
+
+FString SFPSRGunMotionTab::GetSequenceObjectPath() const
+{
+	UAnimSequence* Seq = GetSequence();
+	return Seq ? Seq->GetPathName() : FString();
+}
+
+void SFPSRGunMotionTab::OnSequenceChanged(const FAssetData& AssetData)
+{
+	SelectedSequence = Cast<UAnimSequence>(AssetData.GetAsset());
+	RebuildKeyRows();
+}
+
+UFPSRGunMotionAuthoringData* SFPSRGunMotionTab::GetOrCreateAuthoringData(bool bCreateIfMissing)
+{
+	UAnimSequence* Seq = GetSequence();
+	if (!Seq)
+	{
+		return nullptr;
+	}
+	UFPSRGunMotionAuthoringData* AuthData = Seq->GetAssetUserData<UFPSRGunMotionAuthoringData>();
+	if (!AuthData && bCreateIfMissing)
+	{
+		AuthData = NewObject<UFPSRGunMotionAuthoringData>(Seq);
+		Seq->AddAssetUserData(AuthData);
+	}
+	return AuthData;
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// 상태 줄 / 경고
+// ---------------------------------------------------------------------------------------------------------------
+
+bool SFPSRGunMotionTab::IsClipAdditive() const
+{
+	UAnimSequence* Seq = GetSequence();
+	return Seq && Seq->IsValidAdditive();
+}
+
+FText SFPSRGunMotionTab::GetStatusText() const
+{
+	UAnimSequence* Seq = GetSequence();
+	if (!Seq)
+	{
+		return LOCTEXT("NoClip", "클립을 선택하세요.");
+	}
+	if (!Seq->IsValidAdditive())
+	{
+		return LOCTEXT("StatusNotAdditive", "애디티브 클립이 아닙니다 — 이 툴은 애디티브 클립 전용입니다(모든 기능 비활성).");
+	}
+
+	const UFPSRGunMotionAuthoringData* AuthData = Seq->GetAssetUserData<UFPSRGunMotionAuthoringData>();
+	const bool bSanitized = AuthData && AuthData->bSanitized;
+	const IAnimationDataModel* Model = Seq->GetDataModel();
+	const int32 NumFrames = Model ? Model->GetNumberOfFrames() : 0;
+
+	return FText::Format(
+		LOCTEXT("StatusFmt", "애디티브: 예 · 총 고정화: {0} · 길이 {1}초 · {2}프레임"),
+		bSanitized ? LOCTEXT("SanitizedYes", "완료") : LOCTEXT("SanitizedNo", "안 됨"),
+		FText::AsNumber(Seq->GetPlayLength()),
+		FText::AsNumber(NumFrames));
+}
+
+bool SFPSRGunMotionTab::ConfirmIfOutsideConvention() const
+{
+	UAnimSequence* Seq = GetSequence();
+	if (!Seq)
+	{
+		return true;
+	}
+	const bool bInLPAMGFolder = Seq->GetPathName().Contains(TEXT("Anims_LPAMG"));
+	const FString AssetName = Seq->GetName();
+	const bool bHasConventionSuffix = AssetName.EndsWith(TEXT("_GunLocked")) || AssetName.EndsWith(TEXT("_GunMotion"));
+	if (bInLPAMGFolder && bHasConventionSuffix)
+	{
+		return true;
+	}
+
+	const EAppReturnType::Type Choice = FMessageDialog::Open(
+		EAppMsgType::YesNo,
+		LOCTEXT("OutsideConventionWarning", "이 클립은 Anims_LPAMG 경로 밖이거나 이름이 _GunLocked/_GunMotion 으로 끝나지 않습니다 — 원본 팩 클립을 직접 수정하는 것일 수 있습니다. 계속할까요?"));
+	return Choice == EAppReturnType::Yes;
+}
+
+void SFPSRGunMotionTab::SetStatus(const FText& InText)
+{
+	if (ActionStatusText.IsValid())
+	{
+		ActionStatusText->SetText(InText);
+	}
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// 액션 버튼
+// ---------------------------------------------------------------------------------------------------------------
+
+FReply SFPSRGunMotionTab::OnSanitizeClicked()
+{
+	UAnimSequence* Seq = GetSequence();
+	if (!Seq)
+	{
+		SetStatus(LOCTEXT("NoClipSelected", "클립을 먼저 선택하세요."));
+		return FReply::Handled();
+	}
+	if (!ConfirmIfOutsideConvention())
+	{
+		return FReply::Handled();
+	}
+
+	const UFPSRGunMotionSettings* Settings = GetDefault<UFPSRGunMotionSettings>();
+	FText Error;
+	const bool bOk = FPSRGunMotionBaker::SanitizeRightChain(Seq, Settings->RightChainBones, Error);
+	if (bOk)
+	{
+		UE_LOG(LogFPSR, Log, TEXT("[GunMotion] SanitizeRightChain 성공: %s"), *Seq->GetName());
+		SetStatus(LOCTEXT("SanitizeOk", "총 고정화 완료."));
+	}
+	else
+	{
+		UE_LOG(LogFPSR, Warning, TEXT("[GunMotion] SanitizeRightChain 실패: %s — %s"), *Seq->GetName(), *Error.ToString());
+		SetStatus(Error);
+	}
+	return FReply::Handled();
+}
+
+FReply SFPSRGunMotionTab::OnBakeClicked()
+{
+	UAnimSequence* Seq = GetSequence();
+	if (!Seq)
+	{
+		SetStatus(LOCTEXT("NoClipSelected", "클립을 먼저 선택하세요."));
+		return FReply::Handled();
+	}
+	if (!ConfirmIfOutsideConvention())
+	{
+		return FReply::Handled();
+	}
+
+	const UFPSRGunMotionAuthoringData* AuthData = Seq->GetAssetUserData<UFPSRGunMotionAuthoringData>();
+	const TArray<FFPSRGunMotionKey> Keys = AuthData ? AuthData->Keys : TArray<FFPSRGunMotionKey>();
+
+	FText Error;
+	if (!FPSRGunMotionBaker::BakeGunMotion(Seq, Keys, Error))
+	{
+		UE_LOG(LogFPSR, Warning, TEXT("[GunMotion] BakeGunMotion 실패: %s — %s"), *Seq->GetName(), *Error.ToString());
+		SetStatus(Error);
+		return FReply::Handled();
+	}
+
+	UE_LOG(LogFPSR, Log, TEXT("[GunMotion] BakeGunMotion 성공: %s"), *Seq->GetName());
+	SetStatus(LOCTEXT("BakeOk", "굽기 완료."));
+
+	const EAppReturnType::Type SaveChoice = FMessageDialog::Open(
+		EAppMsgType::YesNo,
+		LOCTEXT("SavePrompt", "굽기가 완료되었습니다. 지금 저장할까요?"));
+	if (SaveChoice == EAppReturnType::Yes)
+	{
+		TArray<UPackage*> PackagesToSave;
+		PackagesToSave.Add(Seq->GetOutermost());
+		UEditorLoadingAndSavingUtils::SavePackages(PackagesToSave, /*bOnlyDirty=*/false);
+	}
+	return FReply::Handled();
+}
+
+FReply SFPSRGunMotionTab::OnPlayInPIEClicked()
+{
+	UAnimSequence* Seq = GetSequence();
+	if (!Seq)
+	{
+		SetStatus(LOCTEXT("NoClipForPreview", "클립을 먼저 선택하세요."));
+		return FReply::Handled();
+	}
+
+	FWorldContext* PIEWorldContext = GEditor ? GEditor->GetPIEWorldContext() : nullptr;
+	UWorld* PIEWorld = PIEWorldContext ? PIEWorldContext->World() : nullptr;
+	if (!PIEWorld)
+	{
+		SetStatus(LOCTEXT("NoPIE", "PIE 가 실행 중이 아닙니다."));
+		return FReply::Handled();
+	}
+
+	APlayerController* PC = PIEWorld->GetFirstPlayerController();
+	AFPSRCharacter* Character = PC ? Cast<AFPSRCharacter>(PC->GetPawn()) : nullptr;
+	if (!Character)
+	{
+		SetStatus(LOCTEXT("NoCharacter", "PIE 에서 로컬 플레이어 캐릭터를 찾지 못했습니다."));
+		return FReply::Handled();
+	}
+
+	const UFPSRGunMotionSettings* Settings = GetDefault<UFPSRGunMotionSettings>();
+	USkeletalMeshComponent* Arms = FindSkeletalMeshComponentByName(Character, Settings->ArmsComponentName);
+	UAnimInstance* AnimInstance = Arms ? Arms->GetAnimInstance() : nullptr;
+	if (!AnimInstance)
+	{
+		SetStatus(LOCTEXT("NoArmsAnimInstance", "1인칭 팔의 AnimInstance 를 찾지 못했습니다."));
+		return FReply::Handled();
+	}
+
+	AnimInstance->PlaySlotAnimationAsDynamicMontage(Seq, Settings->PreviewSlotName, 0.1f, 0.1f);
+	SetStatus(LOCTEXT("PlayedInPIE", "PIE 에서 재생했습니다."));
+	return FReply::Handled();
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// 키 목록
+// ---------------------------------------------------------------------------------------------------------------
+
+FReply SFPSRGunMotionTab::OnAddKeyClicked()
+{
+	UAnimSequence* Seq = GetSequence();
+	if (!Seq)
+	{
+		SetStatus(LOCTEXT("NoClipSelected", "클립을 먼저 선택하세요."));
+		return FReply::Handled();
+	}
+
+	const FScopedTransaction Transaction(LOCTEXT("AddKeyTransaction", "총 모션 키 추가"));
+	UFPSRGunMotionAuthoringData* AuthData = GetOrCreateAuthoringData(/*bCreateIfMissing=*/true);
+	if (!AuthData)
+	{
+		SetStatus(LOCTEXT("AuthDataFailed", "저작 데이터를 준비하지 못했습니다."));
+		return FReply::Handled();
+	}
+	AuthData->Modify();
+
+	FFPSRGunMotionKey NewKey;
+	NewKey.Time = AuthData->Keys.Num() > 0 ? AuthData->Keys.Last().Time : 0.0f;
+	AuthData->Keys.Add(NewKey);
+
+	Seq->MarkPackageDirty();
+	RebuildKeyRows();
+	return FReply::Handled();
+}
+
+FReply SFPSRGunMotionTab::OnRemoveKeyClicked(int32 KeyIndex)
+{
+	UAnimSequence* Seq = GetSequence();
+	UFPSRGunMotionAuthoringData* AuthData = Seq ? Seq->GetAssetUserData<UFPSRGunMotionAuthoringData>() : nullptr;
+	if (!AuthData || !AuthData->Keys.IsValidIndex(KeyIndex))
+	{
+		return FReply::Handled();
+	}
+
+	const FScopedTransaction Transaction(LOCTEXT("RemoveKeyTransaction", "총 모션 키 삭제"));
+	AuthData->Modify();
+	AuthData->Keys.RemoveAt(KeyIndex);
+
+	Seq->MarkPackageDirty();
+	RebuildKeyRows();
+	return FReply::Handled();
+}
+
+FReply SFPSRGunMotionTab::OnApplyDefaultTemplateClicked()
+{
+	UAnimSequence* Seq = GetSequence();
+	if (!Seq)
+	{
+		SetStatus(LOCTEXT("NoClipSelected", "클립을 먼저 선택하세요."));
+		return FReply::Handled();
+	}
+
+	const float L = Seq->GetPlayLength();
+	const float SecondKeyTime = FMath::Min(0.3f, L * 0.2f);
+	const float ThirdKeyTime = FMath::Clamp(L - 0.5f, SecondKeyTime, L);
+
+	const FScopedTransaction Transaction(LOCTEXT("ApplyTemplateTransaction", "총 모션 기본 템플릿 적용"));
+	UFPSRGunMotionAuthoringData* AuthData = GetOrCreateAuthoringData(/*bCreateIfMissing=*/true);
+	if (!AuthData)
+	{
+		SetStatus(LOCTEXT("AuthDataFailed", "저작 데이터를 준비하지 못했습니다."));
+		return FReply::Handled();
+	}
+	AuthData->Modify();
+	AuthData->Keys.Reset();
+
+	const FVector FullOffset(FullOffsetFwd, FullOffsetRight, FullOffsetUp); // CamOffset: X=앞,Y=오른쪽,Z=위
+	const FRotator FullRotation(FullOffsetPitch, FullOffsetYaw, FullOffsetRoll);
+
+	auto AddTemplateKey = [&AuthData](float Time, const FVector& Offset, const FRotator& Rotation)
+	{
+		FFPSRGunMotionKey Key;
+		Key.Time = Time;
+		Key.CamOffset = Offset;
+		Key.CamRotation = Rotation;
+		AuthData->Keys.Add(Key);
+	};
+
+	AddTemplateKey(0.0f, FVector::ZeroVector, FRotator::ZeroRotator);
+	AddTemplateKey(SecondKeyTime, FullOffset, FullRotation);
+	AddTemplateKey(ThirdKeyTime, FullOffset, FullRotation);
+	AddTemplateKey(L, FVector::ZeroVector, FRotator::ZeroRotator);
+
+	Seq->MarkPackageDirty();
+	RebuildKeyRows();
+	SetStatus(LOCTEXT("TemplateApplied", "기본 템플릿을 적용했습니다."));
+	return FReply::Handled();
+}
+
+void SFPSRGunMotionTab::RebuildKeyRows()
+{
+	if (!KeyListContainer.IsValid())
+	{
+		return;
+	}
+	KeyListContainer->ClearChildren();
+
+	UAnimSequence* Seq = GetSequence();
+	const UFPSRGunMotionAuthoringData* AuthData = Seq ? Seq->GetAssetUserData<UFPSRGunMotionAuthoringData>() : nullptr;
+	const int32 NumKeys = AuthData ? AuthData->Keys.Num() : 0;
+
+	for (int32 KeyIndex = 0; KeyIndex < NumKeys; ++KeyIndex)
+	{
+		KeyListContainer->AddSlot().AutoHeight().Padding(0.0f, 1.0f)
+		[
+			BuildKeyRow(KeyIndex)
+		];
+	}
+}
+
+TSharedRef<SWidget> SFPSRGunMotionTab::BuildKeyRow(int32 KeyIndex)
+{
+	auto MakeNumBox = [this](TAttribute<TOptional<float>> Getter, TFunction<void(float)> Setter) -> TSharedRef<SWidget>
+	{
+		return SNew(SBox).WidthOverride(80.0f)
+		[
+			SNew(SNumericEntryBox<float>)
+			.Value(Getter)
+			.OnValueChanged_Lambda([Setter](float V) { Setter(V); })
+			.OnValueCommitted_Lambda([Setter](float V, ETextCommit::Type) { Setter(V); })
+		];
+	};
+
+	return SNew(SHorizontalBox)
+
+		+ SHorizontalBox::Slot().FillWidth(0.12f).Padding(2.0f)
+		[
+			MakeNumBox(
+				TAttribute<TOptional<float>>::Create(TAttribute<TOptional<float>>::FGetter::CreateLambda([this, KeyIndex]() -> TOptional<float> { return GetKeyTime(KeyIndex); })),
+				[this, KeyIndex](float V) { SetKeyTime(KeyIndex, V); })
+		]
+		+ SHorizontalBox::Slot().FillWidth(0.12f).Padding(2.0f)
+		[
+			MakeNumBox(
+				TAttribute<TOptional<float>>::Create(TAttribute<TOptional<float>>::FGetter::CreateLambda([this, KeyIndex]() -> TOptional<float> { return GetKeyRight(KeyIndex); })),
+				[this, KeyIndex](float V) { SetKeyRight(KeyIndex, V); })
+		]
+		+ SHorizontalBox::Slot().FillWidth(0.12f).Padding(2.0f)
+		[
+			MakeNumBox(
+				TAttribute<TOptional<float>>::Create(TAttribute<TOptional<float>>::FGetter::CreateLambda([this, KeyIndex]() -> TOptional<float> { return GetKeyUp(KeyIndex); })),
+				[this, KeyIndex](float V) { SetKeyUp(KeyIndex, V); })
+		]
+		+ SHorizontalBox::Slot().FillWidth(0.12f).Padding(2.0f)
+		[
+			MakeNumBox(
+				TAttribute<TOptional<float>>::Create(TAttribute<TOptional<float>>::FGetter::CreateLambda([this, KeyIndex]() -> TOptional<float> { return GetKeyFwd(KeyIndex); })),
+				[this, KeyIndex](float V) { SetKeyFwd(KeyIndex, V); })
+		]
+		+ SHorizontalBox::Slot().FillWidth(0.12f).Padding(2.0f)
+		[
+			MakeNumBox(
+				TAttribute<TOptional<float>>::Create(TAttribute<TOptional<float>>::FGetter::CreateLambda([this, KeyIndex]() -> TOptional<float> { return GetKeyPitch(KeyIndex); })),
+				[this, KeyIndex](float V) { SetKeyPitch(KeyIndex, V); })
+		]
+		+ SHorizontalBox::Slot().FillWidth(0.12f).Padding(2.0f)
+		[
+			MakeNumBox(
+				TAttribute<TOptional<float>>::Create(TAttribute<TOptional<float>>::FGetter::CreateLambda([this, KeyIndex]() -> TOptional<float> { return GetKeyYaw(KeyIndex); })),
+				[this, KeyIndex](float V) { SetKeyYaw(KeyIndex, V); })
+		]
+		+ SHorizontalBox::Slot().FillWidth(0.12f).Padding(2.0f)
+		[
+			MakeNumBox(
+				TAttribute<TOptional<float>>::Create(TAttribute<TOptional<float>>::FGetter::CreateLambda([this, KeyIndex]() -> TOptional<float> { return GetKeyRoll(KeyIndex); })),
+				[this, KeyIndex](float V) { SetKeyRoll(KeyIndex, V); })
+		]
+		+ SHorizontalBox::Slot().AutoWidth().Padding(4.0f, 0.0f, 0.0f, 0.0f)
+		[
+			SNew(SButton)
+			.Text(LOCTEXT("RemoveKeyButton", "삭제"))
+			.OnClicked(FOnClicked::CreateSP(this, &SFPSRGunMotionTab::OnRemoveKeyClicked, KeyIndex))
+		];
+}
+
+void SFPSRGunMotionTab::MutateKey(int32 KeyIndex, const FText& TransactionText, TFunctionRef<void(FFPSRGunMotionKey&)> Mutator)
+{
+	UAnimSequence* Seq = GetSequence();
+	UFPSRGunMotionAuthoringData* AuthData = Seq ? Seq->GetAssetUserData<UFPSRGunMotionAuthoringData>() : nullptr;
+	if (!AuthData || !AuthData->Keys.IsValidIndex(KeyIndex))
+	{
+		return;
+	}
+
+	const FScopedTransaction Transaction(TransactionText);
+	AuthData->Modify();
+	Mutator(AuthData->Keys[KeyIndex]);
+	Seq->MarkPackageDirty();
+}
+
+float SFPSRGunMotionTab::GetKeyTime(int32 KeyIndex) const
+{
+	UAnimSequence* Seq = GetSequence();
+	const UFPSRGunMotionAuthoringData* AuthData = Seq ? Seq->GetAssetUserData<UFPSRGunMotionAuthoringData>() : nullptr;
+	return (AuthData && AuthData->Keys.IsValidIndex(KeyIndex)) ? AuthData->Keys[KeyIndex].Time : 0.0f;
+}
+void SFPSRGunMotionTab::SetKeyTime(int32 KeyIndex, float NewValue)
+{
+	MutateKey(KeyIndex, LOCTEXT("EditKeyTimeTransaction", "총 모션 키 시간 편집"), [NewValue](FFPSRGunMotionKey& Key) { Key.Time = NewValue; });
+}
+
+float SFPSRGunMotionTab::GetKeyRight(int32 KeyIndex) const
+{
+	UAnimSequence* Seq = GetSequence();
+	const UFPSRGunMotionAuthoringData* AuthData = Seq ? Seq->GetAssetUserData<UFPSRGunMotionAuthoringData>() : nullptr;
+	return (AuthData && AuthData->Keys.IsValidIndex(KeyIndex)) ? AuthData->Keys[KeyIndex].CamOffset.Y : 0.0f;
+}
+void SFPSRGunMotionTab::SetKeyRight(int32 KeyIndex, float NewValue)
+{
+	MutateKey(KeyIndex, LOCTEXT("EditKeyRightTransaction", "총 모션 키 Right 편집"), [NewValue](FFPSRGunMotionKey& Key) { Key.CamOffset.Y = NewValue; });
+}
+
+float SFPSRGunMotionTab::GetKeyUp(int32 KeyIndex) const
+{
+	UAnimSequence* Seq = GetSequence();
+	const UFPSRGunMotionAuthoringData* AuthData = Seq ? Seq->GetAssetUserData<UFPSRGunMotionAuthoringData>() : nullptr;
+	return (AuthData && AuthData->Keys.IsValidIndex(KeyIndex)) ? AuthData->Keys[KeyIndex].CamOffset.Z : 0.0f;
+}
+void SFPSRGunMotionTab::SetKeyUp(int32 KeyIndex, float NewValue)
+{
+	MutateKey(KeyIndex, LOCTEXT("EditKeyUpTransaction", "총 모션 키 Up 편집"), [NewValue](FFPSRGunMotionKey& Key) { Key.CamOffset.Z = NewValue; });
+}
+
+float SFPSRGunMotionTab::GetKeyFwd(int32 KeyIndex) const
+{
+	UAnimSequence* Seq = GetSequence();
+	const UFPSRGunMotionAuthoringData* AuthData = Seq ? Seq->GetAssetUserData<UFPSRGunMotionAuthoringData>() : nullptr;
+	return (AuthData && AuthData->Keys.IsValidIndex(KeyIndex)) ? AuthData->Keys[KeyIndex].CamOffset.X : 0.0f;
+}
+void SFPSRGunMotionTab::SetKeyFwd(int32 KeyIndex, float NewValue)
+{
+	MutateKey(KeyIndex, LOCTEXT("EditKeyFwdTransaction", "총 모션 키 Fwd 편집"), [NewValue](FFPSRGunMotionKey& Key) { Key.CamOffset.X = NewValue; });
+}
+
+float SFPSRGunMotionTab::GetKeyPitch(int32 KeyIndex) const
+{
+	UAnimSequence* Seq = GetSequence();
+	const UFPSRGunMotionAuthoringData* AuthData = Seq ? Seq->GetAssetUserData<UFPSRGunMotionAuthoringData>() : nullptr;
+	return (AuthData && AuthData->Keys.IsValidIndex(KeyIndex)) ? AuthData->Keys[KeyIndex].CamRotation.Pitch : 0.0f;
+}
+void SFPSRGunMotionTab::SetKeyPitch(int32 KeyIndex, float NewValue)
+{
+	MutateKey(KeyIndex, LOCTEXT("EditKeyPitchTransaction", "총 모션 키 Pitch 편집"), [NewValue](FFPSRGunMotionKey& Key) { Key.CamRotation.Pitch = NewValue; });
+}
+
+float SFPSRGunMotionTab::GetKeyYaw(int32 KeyIndex) const
+{
+	UAnimSequence* Seq = GetSequence();
+	const UFPSRGunMotionAuthoringData* AuthData = Seq ? Seq->GetAssetUserData<UFPSRGunMotionAuthoringData>() : nullptr;
+	return (AuthData && AuthData->Keys.IsValidIndex(KeyIndex)) ? AuthData->Keys[KeyIndex].CamRotation.Yaw : 0.0f;
+}
+void SFPSRGunMotionTab::SetKeyYaw(int32 KeyIndex, float NewValue)
+{
+	MutateKey(KeyIndex, LOCTEXT("EditKeyYawTransaction", "총 모션 키 Yaw 편집"), [NewValue](FFPSRGunMotionKey& Key) { Key.CamRotation.Yaw = NewValue; });
+}
+
+float SFPSRGunMotionTab::GetKeyRoll(int32 KeyIndex) const
+{
+	UAnimSequence* Seq = GetSequence();
+	const UFPSRGunMotionAuthoringData* AuthData = Seq ? Seq->GetAssetUserData<UFPSRGunMotionAuthoringData>() : nullptr;
+	return (AuthData && AuthData->Keys.IsValidIndex(KeyIndex)) ? AuthData->Keys[KeyIndex].CamRotation.Roll : 0.0f;
+}
+void SFPSRGunMotionTab::SetKeyRoll(int32 KeyIndex, float NewValue)
+{
+	MutateKey(KeyIndex, LOCTEXT("EditKeyRollTransaction", "총 모션 키 Roll 편집"), [NewValue](FFPSRGunMotionKey& Key) { Key.CamRotation.Roll = NewValue; });
+}
+
+#undef LOCTEXT_NAMESPACE

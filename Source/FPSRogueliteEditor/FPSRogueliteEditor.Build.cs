@@ -36,7 +36,8 @@ public class FPSRogueliteEditor : ModuleRules
 			"AdvancedPreviewScene",     // FAdvancedPreviewScene — the Weapon Part Assembler's embedded 3D preview viewport
 			"EditorWidgets",            // SEnumComboBox — 진화 단계 트리거/스탯 콤보(Assembler evolution authoring panel)
 			"UMG",                      // UUserWidget::StaticClass() — 진화 단계 스코프 오버레이 위젯 BP 피커(SClassPropertyEntryBox)
-			"Persona"                   // SBoneSelectionWidget — Weapon Part Assembler 손 위치 저장의 기준 뼈 선택 UI
+			"Persona",                  // SBoneSelectionWidget — Weapon Part Assembler 손 위치 저장의 기준 뼈 선택 UI
+			"AnimationBlueprintLibrary" // UAnimPoseExtensions/FAnimPose(AnimPose.h) — 총 모션 베이커의 delta/raw 포즈 평가(GunMotionTool_Spec.md §3)
 		});
 	}
 }
