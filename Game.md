@@ -33,7 +33,7 @@
 | 무기·카드·모디파이어/Fragment·사격 감각 | [`Docs/SSOT/CombatWeaponCard.md`](Docs/SSOT/CombatWeaponCard.md) | §2-3, §2-4(+2-4-1·2-4-2), §2-5 |
 | 적 스웜·스폰·발사체·데미지 브릿지·네트워크 | [`Docs/SSOT/Enemy.md`](Docs/SSOT/Enemy.md) | §2-6, §2-10 |
 | 카메라·생존(DBNO)·대시·게임필/피드백·HUD | [`Docs/SSOT/PlayerFeel.md`](Docs/SSOT/PlayerFeel.md) | §2-9, §2-13, §2-14 |
-| 신규 클래스·모듈·폴더 구조·기술 채택 | [`Docs/SSOT/Architecture.md`](Docs/SSOT/Architecture.md) | §3, §4(+4-1·4-2) |
+| 신규 클래스·모듈·폴더 구조·기술 채택 · **서버 RPC 규약** | [`Docs/SSOT/Architecture.md`](Docs/SSOT/Architecture.md) | §3, §4(+4-1·4-2·4-3) |
 | 성능·복제 예산·Significance·플로우필드 | [`Docs/SSOT/Performance.md`](Docs/SSOT/Performance.md) | §5(+5-1·5-2) |
 | **모든 코드 작업(필독)** — 환경·빌드·브랜치·모델정책·**PM 보드**·리뷰 | [`Docs/SSOT/Workflow.md`](Docs/SSOT/Workflow.md) | §6(+6-1~6-9), §10 |
 | **코어·구조 설계·리팩토링** — Fable 주도 4단계 + 명세 양식 | [`Docs/SSOT/Workflow.md`](Docs/SSOT/Workflow.md) §6-5-2 + [`Docs/Specs/_TEMPLATE.md`](Docs/Specs/_TEMPLATE.md) | §6-5, §6-5-2 |
