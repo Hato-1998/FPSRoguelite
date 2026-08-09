@@ -5,18 +5,25 @@
 #include "CoreMinimal.h"
 #include "Widgets/SCompoundWidget.h"
 #include "Types/SlateEnums.h"   // ECheckBoxState — §12 자유시점 체크박스
+#include "GunMotion/FPSRGunMotionChannelId.h"   // v3 §20-3: 채널 id/종류
+#include "GunMotion/SFPSRGunMotionTimeline.h"   // v3 §20-3: FFPSRGunMotionTimelineLane — GetTimelineLanes() 반환 타입
 
 class UAnimSequence;
 class UAnimInstance;
 class UAnimMontage;
 class UFPSRGunMotionAuthoringData;
+class UFPSRWeaponDataAsset;
 class SVerticalBox;
 class STextBlock;
+class SExpandableArea;
 class FAdvancedPreviewScene;
 class SFPSRGunMotionViewport;
-class SFPSRGunMotionTimeline;
 struct FAssetData;
 struct FFPSRGunMotionKey;
+struct FFPSRGunMotionChannelKey;
+struct FFPSRGunMotionScalarKey;
+struct FFPSRGunMotionChannelTrack;
+template <typename OptionType> class SComboBox;
 
 /**
  * 총 모션 저작 툴 탭(GunMotionTool_Spec.md §4) — 클립 선택 → [총 고정화] → 카메라 공간 키 저작 → [클립에 굽기] →
@@ -108,14 +115,9 @@ private:
 	void RebuildViewportPreview();
 
 	/** 키가 바뀔 때마다(§8 "항상 구운 결과를 본다") 호출 — 현재 AssetUserData 의 Keys 로 프리뷰 클립을 다시 굽는다.
-	 *  숫자 키 목록 편집과 기즈모 편집이 공유하는 단일 경로(§7 헤더 "같은 Keys 데이터를 두 UI 가 편집한다"). */
+	 *  숫자 키 목록 편집과 기즈모 편집이 공유하는 단일 경로(§7 헤더 "같은 Keys 데이터를 두 UI 가 편집한다"). v3
+	 *  §20-4: 이제 레거시 Keys 뿐 아니라 AuthoringData 전체(§18 채널 트랙)를 넘겨 뷰포트 직접 평가도 갱신한다. */
 	void RebakeViewportPreview();
-
-	/** 기즈모 TrackingStopped 커밋(§9) — 같은 시각(±1프레임)의 키가 있으면 갱신, 없으면 추가한 뒤 재굽기. */
-	void OnGizmoKeyCommitted(float Time, FVector CamOffset, FRotator CamRotation);
-
-	/** Time 에 가장 가까운 키 인덱스(±ToleranceSeconds 이내만) — 없으면 INDEX_NONE. §9 "같은 시각(±1프레임)의 키". */
-	int32 FindKeyIndexNearTime(float Time, float ToleranceSeconds) const;
 
 	// --- 타임라인 스크럽/재생 ---
 	float GetScrubPosition() const;
@@ -132,21 +134,97 @@ private:
 	float GetTimelineSequenceLength() const;
 	/** 타임라인의 FrameRate 어트리뷰트 — 키 드래그의 프레임 스냅 기준(§16). */
 	float GetTimelineFrameRate() const;
-	/** 타임라인이 매 페인트 그릴 저작 키 목록(AssetUserData 사본 — 위젯은 표시/조작만, 소유는 여전히 탭). */
-	TArray<FFPSRGunMotionKey> GetTimelineKeys() const;
-	/** 선택된 키 인덱스 — 숫자 목록 행 강조와 타임라인 다이아몬드 강조가 공유하는 단일 상태(§16 "동기화"). */
+	/** 선택된 키 인덱스 — 숫자 목록 행 강조와 타임라인 다이아몬드 강조가 공유하는 단일 상태(§16 "동기화"). 활성
+	 *  채널이 바뀌면 SetActiveChannelId 가 INDEX_NONE 으로 되돌린다(다른 채널의 인덱스를 잘못 가리키지 않도록). */
 	int32 GetSelectedKeyIndex() const { return SelectedKeyIndex; }
-	/** 타임라인 키 클릭(§16) — 선택 상태를 갱신하고 기존 스크럽 경로(일시정지 후 이동)로 그 키 시각으로 점프한다. */
-	void OnTimelineKeySelected(int32 KeyIndex);
 
-	// --- 기즈모 툴바(§9) ---
+	// --- 기즈모 툴바(§9, v3 §20-4 에서 "활성 채널 대상"으로 일반화) ---
 	FReply OnTranslateModeClicked();
 	FReply OnRotateModeClicked();
-	/** "현재 시각에 키" — 지금 스크럽 시각에 키가 없으면 지금 무기 오프셋(기즈모로 만진 값이 있다면 그 값, 없으면
-	 *  이전 값 유지)으로 새 키를 추가한다. 값 자체는 TrackingStopped 경로와 동일하게 GunBase/GunNow 역산으로 구한다. */
+	/** "현재 시각에 키" — 지금 스크럽 시각에 활성 채널 키가 없으면 그 채널의 현재 평가값으로 새 키를 추가한다
+	 *  (§20-3 일반화 — v2 시절엔 무기 채널 고정이었다). */
 	FReply OnKeyAtCurrentTimeClicked();
-	/** "키 삭제" — 현재 스크럽 시각에 가장 가까운 키를 지운다(±1프레임 이내). 없으면 무동작. */
+	/** "키 삭제" — 현재 스크럽 시각에 가장 가까운 활성 채널 키를 지운다(±1프레임 이내). 없으면 무동작. */
 	FReply OnDeleteKeyAtCurrentTimeClicked();
+
+	// --- v3 §20-3~§20-5: 채널 상태·타임라인 레인·부착 드롭다운·[새 액션 클립]·채널 커브 베이크 ------------------------
+
+	/** 지금 기즈모/숫자 목록/타임라인 하이라이트가 가리키는 채널(§20-3). 소유자는 이 탭 — 뷰포트 클라이언트는
+	 *  SetActiveChannelId 가 미는 상태를 그대로 반영만 한다(FFPSRGunMotionViewportClient::SetActiveChannel). */
+	FName GetActiveChannelId() const { return SelectedChannelId; }
+	/** 활성 채널 전환(레인 클릭·드롭다운·히트 프록시 클릭 공통 경로) — 뷰포트에도 되비추고, 다른 채널의 선택 키
+	 *  인덱스를 안 들고 가도록 SelectedKeyIndex 를 리셋한다. */
+	void SetActiveChannelId(FName NewChannelId);
+
+	/** §20-3 타임라인 레인 목록(총/왼손(+Blend)/오른손(+Blend)/파츠×N) — 탭이 매 페인트 AuthoringData 에서 다시
+	 *  구성한다(위젯은 표시/조작만). */
+	TArray<FFPSRGunMotionTimelineLane> GetTimelineLanes() const;
+	/** 레인 클릭(빈 곳 포함) = 활성 채널 전환. */
+	void OnTimelineChannelSelected(FName ChannelId);
+	/** 키 클릭 = 선택 + 그 키 시각으로 스크럽 점프(§16, 채널 id 포함). */
+	void OnTimelineChannelKeySelected(FName ChannelId, int32 KeyIndex);
+	/** 키 드래그 종료 커밋(§16) — MutateChannelKey/MutateBlendKey 단일 훅으로 이어진다. */
+	void OnTimelineChannelKeyTimeCommitted(FName ChannelId, int32 KeyIndex, float NewTime);
+	/** 키 우클릭 [키 삭제]. */
+	void OnTimelineChannelKeyDeleteRequested(FName ChannelId, int32 KeyIndex);
+	/** 빈 곳 더블클릭 = 그 채널·그 시각의 현재 보간값으로 키 추가(포즈 무점프, §16). */
+	void OnTimelineChannelKeyAddRequested(FName ChannelId, float Time);
+
+	/** 뷰포트 기즈모 TrackingStopped 커밋(§20-4) — 채널별 MutateChannelKey 로 이어지는 단일 진입점. 같은 시각
+	 *  (±1프레임)의 키가 있으면 갱신, 없으면 추가(§9 규약 그대로, 채널 파라미터화). */
+	void OnViewportChannelGizmoCommitted(FName ChannelId, float Time, FVector Loc, FRotator Rot);
+	/** 뷰포트 히트 프록시 클릭(§20-4) — 활성 채널 전환. */
+	void OnViewportChannelPicked(FName ChannelId);
+
+	/** §18 채널 트랙 해석(총/왼손/오른손 고정 필드 3개 + 파츠는 PartTracks 맵) — 기존 MutateKey 단일 훅을 채널
+	 *  id 로 파라미터화하는 데 쓰는 조회 헬퍼. bCreatePartIfMissing 이면 파츠 채널을 PartTracks 에 새로 만든다. */
+	FFPSRGunMotionChannelTrack* ResolveChannelTrack(UFPSRGunMotionAuthoringData& AuthData, FName ChannelId, bool bCreatePartIfMissing) const;
+	const FFPSRGunMotionChannelTrack* ResolveChannelTrackConst(const UFPSRGunMotionAuthoringData& AuthData, FName ChannelId) const;
+	/** Blend 스칼라 트랙 해석(왼손/오른손 전용, §18 FPGM_HL_Blend/FPGM_HR_Blend). 그 외 채널은 null. */
+	TArray<FFPSRGunMotionScalarKey>* ResolveScalarTrack(UFPSRGunMotionAuthoringData& AuthData, FName ChannelId) const;
+	const TArray<FFPSRGunMotionScalarKey>* ResolveScalarTrackConst(const UFPSRGunMotionAuthoringData& AuthData, FName ChannelId) const;
+
+	/** v2 MutateKey 의 §20-3 채널 파라미터화 — loc/rot 채널 키 하나를 트랜잭션 안에서 고친다(같은 꼬리:
+	 *  FScopedTransaction + AssetUserData::Modify + Seq::MarkPackageDirty + RebakeViewportPreview). */
+	void MutateChannelKey(FName ChannelId, int32 KeyIndex, const FText& TransactionText, TFunctionRef<void(FFPSRGunMotionChannelKey&)> Mutator);
+	/** 위의 스칼라(Blend) 버전. */
+	void MutateBlendKey(FName ChannelId, int32 KeyIndex, const FText& TransactionText, TFunctionRef<void(FFPSRGunMotionScalarKey&)> Mutator);
+
+	/** Time 에 가장 가까운 그 채널의 키 인덱스(±ToleranceSeconds 이내만, 채널 종류에 따라 channel/scalar 트랙 중
+	 *  하나를 본다) — 없으면 INDEX_NONE. §9 "같은 시각(±1프레임)의 키"의 §20-3 채널 파라미터화. */
+	int32 FindChannelKeyIndexNearTime(FName ChannelId, float Time, float ToleranceSeconds) const;
+	/** 그 채널의 KeyIndex 번째 키의 Time(채널/스칼라 공용) — 타임라인 키 클릭의 스크럽 점프가 쓴다. */
+	float GetChannelKeyTime(FName ChannelId, int32 KeyIndex) const;
+
+	/** §20-3 활성 채널의 숫자 키 목록을 다시 그린다(loc/rot 6열 또는 Blend Time/Value 2열, 채널 종류로 분기). */
+	void RebuildChannelKeyRows();
+	TSharedRef<SWidget> BuildChannelKeyRow(FName ChannelId, int32 KeyIndex);
+	TSharedRef<SWidget> BuildBlendKeyRow(FName ChannelId, int32 KeyIndex);
+	FReply OnAddChannelKeyClicked();
+	FReply OnRemoveChannelKeyClicked(FName ChannelId, int32 KeyIndex);
+	/** 활성 채널 숫자 목록 위의 헤더 텍스트("총 채널" / "왼손 채널" 등, §20-3). */
+	FText GetActiveChannelHeaderText() const;
+
+	// --- v3 §20-3: 부착 드롭다운(손 채널 전용, FPGM_HL/HR_Blend 가 재기저할 파츠 선택) ---------------------------------
+
+	/** AttachOptions(콤보 옵션 캐시)를 Settings->PreviewWeaponData::WeaponParts 에서 다시 채운다(없음 포함). 매
+	 *  페인트 새로 만들면 SComboBox 선택 상태가 깨지므로 클립 선택/파츠 목록이 바뀔 때만 호출한다. */
+	void RebuildAttachOptions();
+	TSharedRef<SWidget> BuildAttachComboRow();
+	/** 활성 채널(왼손/오른손)의 지금 AttachPartSocket 라벨. */
+	FText GetAttachComboLabel() const;
+	void OnAttachOptionSelected(TSharedPtr<FName> NewSelection, ESelectInfo::Type);
+	TSharedRef<SWidget> GenerateAttachOptionWidget(TSharedPtr<FName> Option);
+	/** 활성 채널이 왼손/오른손일 때만 보인다(§20 "손 채널에 부착 파츠 선택"). */
+	EVisibility GetAttachRowVisibility() const;
+
+	// --- v3 §20-2: 채널 커브 베이크(A17 자동화 — 본 트랙 대체) ---------------------------------------------------------
+
+	FReply OnBakeCurveChannelsClicked();
+
+	// --- v3 §20-5: [새 액션 클립] ------------------------------------------------------------------------------------
+
+	FReply OnCreateNewActionClipClicked();
 
 	// --- 증보 v2.1 §11-§12: PIE 구도 캡처 + 자유시점 --------------------------------------------------------------
 
@@ -226,4 +304,19 @@ private:
 
 	/** §11: 지금 구도가 캡처값인지 폴백인지 표시하는 상태줄(GetCompositionSourceText). */
 	TSharedPtr<STextBlock> CompositionStatusText;
+
+	// --- v3 §20-3~§20-5: 채널 상태 + 부착 드롭다운 ---------------------------------------------------------------
+
+	/** 지금 기즈모/숫자 목록/타임라인이 가리키는 채널(§20-3). 기본값 Gun — 탭을 열면 총 채널부터 저작하는 게
+	 *  자연스러운 시작점(뷰포트 클라이언트 기본값과 동일하게 맞춘다). */
+	FName SelectedChannelId = FPSRGunMotionChannelIds::Gun;
+
+	/** 활성 채널의 숫자 키 목록 컨테이너(레거시 KeyListContainer 와 별개 — §20-3 채널 목록은 v2 목록과 나란히
+	 *  살아있지 않고 위쪽 v3 섹션에 독립적으로 그려진다). */
+	TSharedPtr<SVerticalBox> ChannelKeyListContainer;
+
+	/** 부착 드롭다운 옵션 캐시(§20-3) — "없음" + PreviewWeaponData::WeaponParts. SComboBox 는 옵션 배열을
+	 *  TSharedPtr 항목으로 들고 있어야 선택 상태가 유지된다(매 페인트 새로 만들면 깨진다). */
+	TArray<TSharedPtr<FName>> AttachOptions;
+	TSharedPtr<SComboBox<TSharedPtr<FName>>> AttachCombo;
 };

@@ -5,9 +5,11 @@
 #include "CoreMinimal.h"
 #include "Engine/DeveloperSettings.h"
 #include "Engine/Blueprint.h"   // TSoftObjectPtr<UBlueprint> — GetCamToCompRotation 이 이 BP 의 CDO 에서 컴포넌트를 찾는다
+#include "UObject/SoftObjectPath.h"   // FDirectoryPath — v3 §20-5 [새 액션 클립] 저장 폴더(UFPSRBlockoutSettings::PrefabSaveFolder 와 같은 관례)
 #include "FPSRGunMotionSettings.generated.h"
 
 class UStaticMesh;
+class UFPSRWeaponDataAsset;
 
 /**
  * 총 모션 저작 툴 설정(editor-only). Config = Editor + DefaultConfig — 값이 Config/DefaultEditor.ini 에 실려
@@ -68,6 +70,20 @@ public:
 	/** 위 무기 메시를 붙일 팔 메시의 소켓 이름(§7). */
 	UPROPERTY(EditAnywhere, Config, Category = "Gun Motion Preview")
 	FName PreviewWeaponAttachSocket = TEXT("SOCKET_Weapon");
+
+	/** v3 §20-3: 파츠 레인(SFPSRGunMotionTimeline)과 §20-4 그립 소켓(손 IK 타깃 프록시 위치)의 데이터 소스 —
+	 *  WeaponParts(파츠 목록) + LeftHandSocket/RightHandSocket(그립 소켓, AFPSRCharacter::ComputeGripInGunFrame 이
+	 *  읽는 것과 같은 필드)을 여기서 읽는다. PreviewWeaponMesh(§7, 팔 소켓에 붙는 무기 "몸통" 스태틱 메시)와는 별개 —
+	 *  이 DA 는 파츠/소켓 "데이터"만 제공하고, 뷰포트에 실제로 뜨는 무기 바디 메시는 여전히 PreviewWeaponMesh다. */
+	UPROPERTY(EditAnywhere, Config, Category = "Gun Motion Preview")
+	TSoftObjectPtr<UFPSRWeaponDataAsset> PreviewWeaponData;
+
+	/** v3 §20-5: [새 액션 클립]이 만드는 애셋의 저장 폴더 — §5 "원본 팩 클립 직접 수정 방지" 경고 규약이 통과하는
+	 *  Anims_LPAMG 하위 위치. 에셋 경로 하드코딩 금지 원칙(프로젝트 CLAUDE.md)에 따라 여기 노출한다 — §20-5 원문은
+	 *  "Anims_LPAMG 하위"만 지정하고 정확한 필드는 명시하지 않았으나, 이 프로젝트에 이미 있는 동종 패턴
+	 *  (UFPSRBlockoutSettings::PrefabSaveFolder — "새로 만드는 콘텐츠의 저장 폴더")을 그대로 답습했다. */
+	UPROPERTY(EditAnywhere, Config, Category = "Gun Motion Preview")
+	FDirectoryPath NewActionClipFolder;
 
 	// --- 증보 v2.1 §11: PIE 구도 캡처 -----------------------------------------------------------------------------
 	// 프로브 스폰(BeginPlay 없음)의 구도는 CDO 저작 배치라 런타임 보정(시선 높이/스탠스 카메라 등)이 빠진다 —

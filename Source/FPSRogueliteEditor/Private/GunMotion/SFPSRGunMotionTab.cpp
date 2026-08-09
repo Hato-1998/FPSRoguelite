@@ -7,18 +7,23 @@
 #include "GunMotion/FPSRGunMotionViewportClient.h"
 #include "GunMotion/SFPSRGunMotionViewport.h"
 #include "GunMotion/SFPSRGunMotionTimeline.h"   // 증보 v2.3 §16 — 기존 SSlider + 키 마커 줄을 대체하는 타임라인 위젯
+#include "GunMotion/FPSRGunMotionChannelId.h"   // v3 §20-3: 채널 id/종류
 #include "Anim/FPSRGunMotionAuthoringData.h"
+#include "Anim/FPSRGunMotionCurveNames.h"   // v3 §20-2 몽타주 굽기 보고 문구가 참조하는 규약 확인용(직접 커브명 리터럴은 안 씀)
+#include "Weapon/FPSRWeaponDataAsset.h"   // FFPSRWeaponPartAttachment — §20-3 파츠 레인/부착 드롭다운
 #include "Core/FPSRLogChannels.h"
 #include "Hero/FPSRCharacter.h"
 
 #include "Animation/AnimSequence.h"
 #include "Animation/AnimData/IAnimationDataModel.h"
+#include "Animation/AnimData/IAnimationDataController.h"   // v3 §20-5: [새 액션 클립] — InitializeModel/SetFrameRate/SetNumberOfFrames
 #include "Animation/AnimCurveTypes.h"   // FFloatCurve — §14 마지막: [총 고정화]의 LeftHandIKWeight 커브 존재 확인
 #include "Animation/AnimInstance.h"
 #include "Animation/AnimMontage.h"   // §14 라이브 미러 — Montage_* 계열이 받는 UAnimMontage 완전 타입
 #include "Camera/CameraComponent.h"   // §11 [PIE 구도 캡처] — FirstPersonCamera::GetCameraView
 #include "Camera/CameraTypes.h"       // FMinimalViewInfo
 #include "Components/SkeletalMeshComponent.h"
+#include "Engine/SkeletalMesh.h"      // v3 §20-5: 팔 스켈레톤 → USkeleton
 #include "GameFramework/PlayerController.h"
 
 #include "AdvancedPreviewScene.h"   // §7: 이 탭이 단독 소유하는 프리뷰 씬
@@ -29,17 +34,25 @@
                             // 스펙 §4-5 는 UEditorAssetLibrary::SaveLoadedAsset 을 지목하지만 그 플러그인은 이
                             // 프로젝트에서 비활성 상태다 — 대신 이미 검증된 이 경로로 대체했다(보고서에 명시).
 #include "Misc/MessageDialog.h"
+#include "Misc/PackageName.h"      // v3 §20-5: LongPackageNameToFilename
 #include "ScopedTransaction.h"
+#include "UObject/Package.h"       // v3 §20-5: CreatePackage
+#include "UObject/SavePackage.h"   // v3 §20-5: FSavePackageArgs
 
 #include "PropertyEditorModule.h"
 #include "PropertyCustomizationHelpers.h"
 #include "AssetRegistry/AssetData.h"
+#include "AssetRegistry/AssetRegistryModule.h"   // v3 §20-5: FAssetRegistryModule::AssetCreated
 #include "Widgets/SBoxPanel.h"
+#include "Widgets/SWindow.h"           // v3 §20-5: [새 액션 클립] 모달 다이얼로그
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SCheckBox.h"   // §12 자유시점 체크박스
+#include "Widgets/Input/SComboBox.h"   // v3 §20-3: 부착 드롭다운
+#include "Widgets/Input/SEditableTextBox.h"   // v3 §20-5: 새 액션 클립 다이얼로그 이름 입력
 #include "Widgets/Input/SNumericEntryBox.h"
 #include "Widgets/Layout/SBorder.h"   // §16 숫자 목록 행 선택 강조(BuildKeyRow)
 #include "Widgets/Layout/SBox.h"
+#include "Widgets/Layout/SExpandableArea.h"   // v3 §20-3: 레거시(v2) 접힘 섹션
 #include "Widgets/Layout/SScrollBox.h"
 #include "Widgets/Text/STextBlock.h"
 #include "Styling/AppStyle.h"   // §16 행 강조에 쓰는 WhiteBrush
@@ -97,6 +110,100 @@ namespace
 		}
 		return false;
 	}
+
+	/** v3 §20-5 [새 액션 클립] 입력 다이얼로그 — 엔진 SDlgPickPath(Editor/UnrealEd/Public/Dialogs/DlgPickPath.h) 와
+	 *  같은 최소 패턴(SWindow 서브클래스 + GEditor->EditorAddModalWindow + UserResponse 필드)을 그대로 축소 적용한
+	 *  것 — 이름/길이(초) 두 필드만 받는다. */
+	class SFPSRGunMotionNewClipDialog : public SWindow
+	{
+	public:
+		SLATE_BEGIN_ARGS(SFPSRGunMotionNewClipDialog) {}
+		SLATE_END_ARGS()
+
+		void Construct(const FArguments& InArgs)
+		{
+			UserResponse = EAppReturnType::Cancel;
+			AssetName = TEXT("AM_NewGunMotion_GunMotion");
+			LengthSeconds = 1.0f;
+
+			SWindow::Construct(SWindow::FArguments()
+				.Title(NSLOCTEXT("SFPSRGunMotionTab", "NewClipDialogTitle", "새 액션 클립"))
+				.SizingRule(ESizingRule::Autosized)
+				.SupportsMinimize(false)
+				.SupportsMaximize(false)
+				[
+					SNew(SVerticalBox)
+
+					+ SVerticalBox::Slot().AutoHeight().Padding(8.0f)
+					[
+						SNew(SHorizontalBox)
+						+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 4.0f, 0.0f)
+						[
+							SNew(STextBlock).Text(NSLOCTEXT("SFPSRGunMotionTab", "NewClipNameLabel", "에셋 이름"))
+						]
+						+ SHorizontalBox::Slot().FillWidth(1.0f)
+						[
+							SNew(SEditableTextBox)
+							.Text(FText::FromString(AssetName))
+							.OnTextChanged_Lambda([this](const FText& NewText) { AssetName = NewText.ToString(); })
+						]
+					]
+
+					+ SVerticalBox::Slot().AutoHeight().Padding(8.0f, 0.0f, 8.0f, 8.0f)
+					[
+						SNew(SHorizontalBox)
+						+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 4.0f, 0.0f)
+						[
+							SNew(STextBlock).Text(NSLOCTEXT("SFPSRGunMotionTab", "NewClipLengthLabel", "길이(초)"))
+						]
+						+ SHorizontalBox::Slot().FillWidth(1.0f)
+						[
+							SNew(SNumericEntryBox<float>)
+							.Value_Lambda([this]() -> TOptional<float> { return LengthSeconds; })
+							.OnValueChanged_Lambda([this](float V) { LengthSeconds = V; })
+						]
+					]
+
+					+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Right).Padding(8.0f)
+					[
+						SNew(SHorizontalBox)
+						+ SHorizontalBox::Slot().AutoWidth().Padding(2.0f)
+						[
+							SNew(SButton)
+							.Text(NSLOCTEXT("SFPSRGunMotionTab", "NewClipOk", "생성"))
+							.OnClicked(this, &SFPSRGunMotionNewClipDialog::OnButtonClick, EAppReturnType::Ok)
+						]
+						+ SHorizontalBox::Slot().AutoWidth().Padding(2.0f)
+						[
+							SNew(SButton)
+							.Text(NSLOCTEXT("SFPSRGunMotionTab", "NewClipCancel", "취소"))
+							.OnClicked(this, &SFPSRGunMotionNewClipDialog::OnButtonClick, EAppReturnType::Cancel)
+						]
+					]
+				]);
+		}
+
+		EAppReturnType::Type ShowModal()
+		{
+			GEditor->EditorAddModalWindow(SharedThis(this));
+			return UserResponse;
+		}
+
+		const FString& GetAssetName() const { return AssetName; }
+		float GetLengthSeconds() const { return LengthSeconds; }
+
+	private:
+		FReply OnButtonClick(EAppReturnType::Type ButtonID)
+		{
+			UserResponse = ButtonID;
+			RequestDestroyWindow();
+			return FReply::Handled();
+		}
+
+		EAppReturnType::Type UserResponse = EAppReturnType::Cancel;
+		FString AssetName;
+		float LengthSeconds = 1.0f;
+	};
 }
 
 void SFPSRGunMotionTab::Construct(const FArguments& InArgs)
@@ -136,14 +243,16 @@ void SFPSRGunMotionTab::Construct(const FArguments& InArgs)
 				.SequenceLength(this, &SFPSRGunMotionTab::GetTimelineSequenceLength)
 				.FrameRate(this, &SFPSRGunMotionTab::GetTimelineFrameRate)
 				.ScrubPosition(this, &SFPSRGunMotionTab::GetScrubPosition)
-				.Keys(this, &SFPSRGunMotionTab::GetTimelineKeys)
+				.Lanes(this, &SFPSRGunMotionTab::GetTimelineLanes)
+				.ActiveChannelId(this, &SFPSRGunMotionTab::GetActiveChannelId)
 				.SelectedKeyIndex(this, &SFPSRGunMotionTab::GetSelectedKeyIndex)
 				.OnScrubPositionChanged(this, &SFPSRGunMotionTab::OnScrubPositionChanged)
 				.OnScrubCaptureBegin(this, &SFPSRGunMotionTab::OnScrubCaptureBegin)
-				.OnKeySelected(this, &SFPSRGunMotionTab::OnTimelineKeySelected)
-				.OnKeyTimeCommitted(this, &SFPSRGunMotionTab::SetKeyTime)
-				.OnKeyDeleteRequested_Lambda([this](int32 KeyIndex) { OnRemoveKeyClicked(KeyIndex); })
-				.OnKeyAddRequested(this, &SFPSRGunMotionTab::OnGizmoKeyCommitted)
+				.OnChannelSelected(this, &SFPSRGunMotionTab::OnTimelineChannelSelected)
+				.OnKeySelected(this, &SFPSRGunMotionTab::OnTimelineChannelKeySelected)
+				.OnKeyTimeCommitted(this, &SFPSRGunMotionTab::OnTimelineChannelKeyTimeCommitted)
+				.OnKeyDeleteRequested(this, &SFPSRGunMotionTab::OnTimelineChannelKeyDeleteRequested)
+				.OnKeyAddRequested(this, &SFPSRGunMotionTab::OnTimelineChannelKeyAddRequested)
 			]
 		]
 
@@ -254,6 +363,13 @@ void SFPSRGunMotionTab::Construct(const FArguments& InArgs)
 					.OnObjectChanged(this, &SFPSRGunMotionTab::OnSequenceChanged)
 					.AllowClear(true)
 				]
+				+ SHorizontalBox::Slot().AutoWidth().Padding(4.0f, 0.0f, 0.0f, 0.0f)
+				[
+					SNew(SButton)
+					.Text(LOCTEXT("NewActionClipButton", "새 액션 클립"))
+					.ToolTipText(LOCTEXT("NewActionClipTooltip", "본 트랙 0개(델타 0 = Idle 그대로)인 새 애디티브 클립을 만들고 엽니다(§20-5)."))
+					.OnClicked(this, &SFPSRGunMotionTab::OnCreateNewActionClipClicked)
+				]
 			]
 
 			// --- 2. 상태 줄(§4-2) ---
@@ -263,9 +379,57 @@ void SFPSRGunMotionTab::Construct(const FArguments& InArgs)
 				.Text(this, &SFPSRGunMotionTab::GetStatusText)
 			]
 
-			// --- 나머지 전부: 비애디티브 클립이면 통째로 비활성(§4-2 "비애디티브 클립이면 전 기능 비활성") ---
+			// --- v3 §20-3: 활성 채널 저작(비애디티브 클립이면 비활성, §4-2 규약 그대로) ---
 			+ SVerticalBox::Slot().AutoHeight().Padding(2.0f)
 			[
+				SNew(SVerticalBox)
+				.IsEnabled(this, &SFPSRGunMotionTab::IsClipAdditive)
+
+				+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 2.0f, 0.0f, 4.0f)
+				[
+					SNew(STextBlock)
+					.Text(this, &SFPSRGunMotionTab::GetActiveChannelHeaderText)
+				]
+
+				// --- 부착 드롭다운(§20-3, 손 채널에서만 표시) ---
+				+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 2.0f)
+				[
+					SNew(SBox)
+					.Visibility(this, &SFPSRGunMotionTab::GetAttachRowVisibility)
+					[
+						BuildAttachComboRow()
+					]
+				]
+
+				// --- 활성 채널 숫자 키 목록(loc/rot 6열 또는 Blend Time/Value 2열, §20-3) ---
+				+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 6.0f, 0.0f, 2.0f)
+				[
+					SAssignNew(ChannelKeyListContainer, SVerticalBox)
+				]
+				+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 2.0f)
+				[
+					SNew(SButton)
+					.Text(LOCTEXT("AddChannelKeyButton", "+ 채널 키 추가(현재 시각)"))
+					.OnClicked(this, &SFPSRGunMotionTab::OnAddChannelKeyClicked)
+				]
+
+				// --- [채널 커브 굽기](§20-2: 본 트랙 대체 — 클립+몽타주 양쪽, A17 자동화) ---
+				+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 8.0f, 0.0f, 2.0f)
+				[
+					SNew(SButton)
+					.Text(LOCTEXT("BakeCurveChannelsButton", "채널 커브 굽기 (클립 + 몽타주)"))
+					.OnClicked(this, &SFPSRGunMotionTab::OnBakeCurveChannelsClicked)
+				]
+			]
+
+			// --- 레거시(v2): hand_r 본 트랙 베이크 — 접힘 섹션(§20-2 "UI 에서 레거시(v2) 접힘 섹션으로 이동") ---
+			+ SVerticalBox::Slot().AutoHeight().Padding(2.0f, 8.0f, 2.0f, 2.0f)
+			[
+				SNew(SExpandableArea)
+				.InitiallyCollapsed(true)
+				.AreaTitle(LOCTEXT("LegacySectionHeader", "레거시(v2) — hand_r 본 트랙 베이크"))
+				.BodyContent()
+				[
 				SNew(SVerticalBox)
 				.IsEnabled(this, &SFPSRGunMotionTab::IsClipAdditive)
 
@@ -398,6 +562,7 @@ void SFPSRGunMotionTab::Construct(const FArguments& InArgs)
 					.Text(LOCTEXT("PlayInPIEButton", "PIE에서 재생"))
 					.OnClicked(this, &SFPSRGunMotionTab::OnPlayInPIEClicked)
 				]
+				] // BodyContent
 			]
 
 			+ SVerticalBox::Slot().AutoHeight().Padding(2.0f, 6.0f, 2.0f, 2.0f)
@@ -416,11 +581,14 @@ void SFPSRGunMotionTab::Construct(const FArguments& InArgs)
 	{
 		if (const TSharedPtr<FFPSRGunMotionViewportClient> Client = Viewport->GetGunMotionClient())
 		{
-			Client->OnGizmoCommit().BindSP(this, &SFPSRGunMotionTab::OnGizmoKeyCommitted);
+			Client->OnChannelGizmoCommit().BindSP(this, &SFPSRGunMotionTab::OnViewportChannelGizmoCommitted);
+			Client->OnChannelPicked().BindSP(this, &SFPSRGunMotionTab::OnViewportChannelPicked);
 		}
 	}
 
 	RebuildKeyRows();
+	RebuildAttachOptions();
+	RebuildChannelKeyRows();
 }
 
 SFPSRGunMotionTab::~SFPSRGunMotionTab()
@@ -463,7 +631,9 @@ FString SFPSRGunMotionTab::GetSequenceObjectPath() const
 void SFPSRGunMotionTab::OnSequenceChanged(const FAssetData& AssetData)
 {
 	SelectedSequence = Cast<UAnimSequence>(AssetData.GetAsset());
+	SelectedKeyIndex = INDEX_NONE;
 	RebuildKeyRows();
+	RebuildChannelKeyRows();
 	RebuildViewportPreview();
 }
 
@@ -987,12 +1157,14 @@ void SFPSRGunMotionTab::RebuildViewportPreview()
 
 	UAnimSequence* Seq = GetSequence();
 	const UFPSRGunMotionAuthoringData* AuthData = Seq ? Seq->GetAssetUserData<UFPSRGunMotionAuthoringData>() : nullptr;
-	const TArray<FFPSRGunMotionKey> Keys = AuthData ? AuthData->Keys : TArray<FFPSRGunMotionKey>();
 
-	Client->SetSourceClip(Seq, Keys);
+	// v3 §20-4: AuthoringData 전체를 넘긴다 — 레거시 Keys(hand_r 본 트랙) 뿐 아니라 §18 채널 트랙도 여기서부터
+	// 직접 평가로 적용해야 해서다(SetSourceClip 이 내부에서 RebakePreview(Data) 를 호출한다).
+	Client->SetSourceClip(Seq, AuthData);
+	Client->SetActiveChannel(SelectedChannelId);
 
-	// §16: 타임라인 위젯은 SequenceLength/Keys 를 매 페인트 어트리뷰트로 다시 읽으므로(GetTimelineSequenceLength/
-	// GetTimelineKeys), 기존 스크럽 슬라이더처럼 여기서 범위를 수동 동기화할 필요가 없다.
+	// §16: 타임라인 위젯은 SequenceLength/Lanes 를 매 페인트 어트리뷰트로 다시 읽으므로(GetTimelineSequenceLength/
+	// GetTimelineLanes), 기존 스크럽 슬라이더처럼 여기서 범위를 수동 동기화할 필요가 없다.
 
 	if (!Client->GetIssue().IsEmpty())
 	{
@@ -1014,74 +1186,12 @@ void SFPSRGunMotionTab::RebakeViewportPreview()
 
 	UAnimSequence* Seq = GetSequence();
 	const UFPSRGunMotionAuthoringData* AuthData = Seq ? Seq->GetAssetUserData<UFPSRGunMotionAuthoringData>() : nullptr;
-	const TArray<FFPSRGunMotionKey> Keys = AuthData ? AuthData->Keys : TArray<FFPSRGunMotionKey>();
 
-	Client->RebakePreview(Keys);
+	Client->RebakePreview(AuthData);
 
 	// §14: "재굽기 직후 → 미러 몽타주를 정지 후 재시작(블렌드 0.05)" — 재생 중인 몽타주가 갱신된 압축 데이터를
 	// 확실히 다시 읽게 하는 가장 단순한 보장. 미러가 연결돼 있지 않으면(§14 수명주기) 무동작.
 	ResyncMirrorAfterRebake();
-}
-
-int32 SFPSRGunMotionTab::FindKeyIndexNearTime(float Time, float ToleranceSeconds) const
-{
-	UAnimSequence* Seq = GetSequence();
-	const UFPSRGunMotionAuthoringData* AuthData = Seq ? Seq->GetAssetUserData<UFPSRGunMotionAuthoringData>() : nullptr;
-	if (!AuthData)
-	{
-		return INDEX_NONE;
-	}
-
-	int32 BestIndex = INDEX_NONE;
-	float BestDelta = ToleranceSeconds;
-	for (int32 Index = 0; Index < AuthData->Keys.Num(); ++Index)
-	{
-		const float Delta = FMath::Abs(AuthData->Keys[Index].Time - Time);
-		if (Delta <= BestDelta)
-		{
-			BestDelta = Delta;
-			BestIndex = Index;
-		}
-	}
-	return BestIndex;
-}
-
-void SFPSRGunMotionTab::OnGizmoKeyCommitted(float Time, FVector CamOffset, FRotator CamRotation)
-{
-	UAnimSequence* Seq = GetSequence();
-	if (!Seq)
-	{
-		return;
-	}
-
-	const FScopedTransaction Transaction(LOCTEXT("GizmoKeyCommitTransaction", "총 모션 키(기즈모)"));
-	UFPSRGunMotionAuthoringData* AuthData = GetOrCreateAuthoringData(/*bCreateIfMissing=*/true);
-	if (!AuthData)
-	{
-		SetStatus(LOCTEXT("AuthDataFailed", "저작 데이터를 준비하지 못했습니다."));
-		return;
-	}
-	AuthData->Modify();
-
-	// §9: "같은 시각(±1프레임)의 키가 있으면 갱신, 없으면 추가".
-	const int32 ExistingIndex = FindKeyIndexNearTime(Time, FrameToleranceSeconds(Seq));
-	if (AuthData->Keys.IsValidIndex(ExistingIndex))
-	{
-		AuthData->Keys[ExistingIndex].CamOffset = CamOffset;
-		AuthData->Keys[ExistingIndex].CamRotation = CamRotation;
-	}
-	else
-	{
-		FFPSRGunMotionKey NewKey;
-		NewKey.Time = Time;
-		NewKey.CamOffset = CamOffset;
-		NewKey.CamRotation = CamRotation;
-		AuthData->Keys.Add(NewKey);
-	}
-
-	Seq->MarkPackageDirty();
-	RebuildKeyRows();
-	RebakeViewportPreview();
 }
 
 float SFPSRGunMotionTab::GetScrubPosition() const
@@ -1156,22 +1266,6 @@ float SFPSRGunMotionTab::GetTimelineFrameRate() const
 	return (Fps > 0.0) ? static_cast<float>(Fps) : 30.0f;
 }
 
-TArray<FFPSRGunMotionKey> SFPSRGunMotionTab::GetTimelineKeys() const
-{
-	UAnimSequence* Seq = GetSequence();
-	const UFPSRGunMotionAuthoringData* AuthData = Seq ? Seq->GetAssetUserData<UFPSRGunMotionAuthoringData>() : nullptr;
-	return AuthData ? AuthData->Keys : TArray<FFPSRGunMotionKey>();
-}
-
-void SFPSRGunMotionTab::OnTimelineKeySelected(int32 KeyIndex)
-{
-	SelectedKeyIndex = KeyIndex;
-	// §16: "키 클릭 = 선택 + 스크럽을 그 키 시각으로 점프" — 기존 스크럽 캡처/이동 경로(재생 정지 후 위치 이동)를
-	// 그대로 재사용한다(§8 에서부터 쓰던 것과 같은 단일 경로).
-	OnScrubCaptureBegin();
-	OnScrubPositionChanged(GetKeyTime(KeyIndex));
-}
-
 FReply SFPSRGunMotionTab::OnTranslateModeClicked()
 {
 	if (Viewport.IsValid())
@@ -1198,36 +1292,8 @@ FReply SFPSRGunMotionTab::OnRotateModeClicked()
 
 FReply SFPSRGunMotionTab::OnKeyAtCurrentTimeClicked()
 {
-	UAnimSequence* Seq = GetSequence();
-	if (!Seq || !Viewport.IsValid())
-	{
-		SetStatus(LOCTEXT("NoClipSelected", "클립을 먼저 선택하세요."));
-		return FReply::Handled();
-	}
-	const TSharedPtr<FFPSRGunMotionViewportClient> Client = Viewport->GetGunMotionClient();
-	const float Time = Client.IsValid() ? Client->GetPreviewPosition() : 0.0f;
-
-	const FScopedTransaction Transaction(LOCTEXT("KeyAtTimeTransaction", "총 모션 키 추가(현재 시각)"));
-	UFPSRGunMotionAuthoringData* AuthData = GetOrCreateAuthoringData(/*bCreateIfMissing=*/true);
-	if (!AuthData)
-	{
-		SetStatus(LOCTEXT("AuthDataFailed", "저작 데이터를 준비하지 못했습니다."));
-		return FReply::Handled();
-	}
-	AuthData->Modify();
-
-	const int32 ExistingIndex = FindKeyIndexNearTime(Time, FrameToleranceSeconds(Seq));
-	if (!AuthData->Keys.IsValidIndex(ExistingIndex))
-	{
-		FFPSRGunMotionKey NewKey;
-		NewKey.Time = Time;
-		AuthData->Keys.Add(NewKey);
-	}
-
-	Seq->MarkPackageDirty();
-	RebuildKeyRows();
-	RebakeViewportPreview();
-	return FReply::Handled();
+	// v3 §20-4: "현재 시각에 키" 는 이제 활성 채널에 적용된다(§20-3 일반화) — v2 시절엔 무기 채널 고정이었다.
+	return OnAddChannelKeyClicked();
 }
 
 FReply SFPSRGunMotionTab::OnDeleteKeyAtCurrentTimeClicked()
@@ -1240,20 +1306,951 @@ FReply SFPSRGunMotionTab::OnDeleteKeyAtCurrentTimeClicked()
 	const TSharedPtr<FFPSRGunMotionViewportClient> Client = Viewport->GetGunMotionClient();
 	const float Time = Client.IsValid() ? Client->GetPreviewPosition() : 0.0f;
 
-	UFPSRGunMotionAuthoringData* AuthData = Seq->GetAssetUserData<UFPSRGunMotionAuthoringData>();
-	const int32 ExistingIndex = AuthData ? FindKeyIndexNearTime(Time, FrameToleranceSeconds(Seq)) : INDEX_NONE;
-	if (!AuthData || !AuthData->Keys.IsValidIndex(ExistingIndex))
+	const int32 ExistingIndex = FindChannelKeyIndexNearTime(SelectedChannelId, Time, FrameToleranceSeconds(Seq));
+	OnRemoveChannelKeyClicked(SelectedChannelId, ExistingIndex);
+	return FReply::Handled();
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// v3 §20-3: 채널 상태 + 타임라인 레인
+// ---------------------------------------------------------------------------------------------------------------
+
+void SFPSRGunMotionTab::SetActiveChannelId(FName NewChannelId)
+{
+	if (SelectedChannelId == NewChannelId)
+	{
+		return;
+	}
+	SelectedChannelId = NewChannelId;
+	SelectedKeyIndex = INDEX_NONE;
+
+	if (Viewport.IsValid())
+	{
+		if (const TSharedPtr<FFPSRGunMotionViewportClient> Client = Viewport->GetGunMotionClient())
+		{
+			Client->SetActiveChannel(NewChannelId);
+		}
+	}
+
+	RebuildChannelKeyRows();
+}
+
+TArray<FFPSRGunMotionTimelineLane> SFPSRGunMotionTab::GetTimelineLanes() const
+{
+	TArray<FFPSRGunMotionTimelineLane> Lanes;
+
+	UAnimSequence* Seq = GetSequence();
+	const UFPSRGunMotionAuthoringData* AuthData = Seq ? Seq->GetAssetUserData<UFPSRGunMotionAuthoringData>() : nullptr;
+
+	auto CollectTimes = [](const TArray<FFPSRGunMotionChannelKey>& Keys) -> TArray<float>
+	{
+		TArray<float> Times;
+		Times.Reserve(Keys.Num());
+		for (const FFPSRGunMotionChannelKey& Key : Keys) { Times.Add(Key.Time); }
+		return Times;
+	};
+	auto CollectScalarTimes = [](const TArray<FFPSRGunMotionScalarKey>& Keys) -> TArray<float>
+	{
+		TArray<float> Times;
+		Times.Reserve(Keys.Num());
+		for (const FFPSRGunMotionScalarKey& Key : Keys) { Times.Add(Key.Time); }
+		return Times;
+	};
+
+	FFPSRGunMotionTimelineLane GunLane;
+	GunLane.ChannelId = FPSRGunMotionChannelIds::Gun;
+	GunLane.Label = LOCTEXT("LaneGun", "총");
+	GunLane.KeyTimes = AuthData ? CollectTimes(AuthData->GunTrack.Keys) : TArray<float>();
+	Lanes.Add(GunLane);
+
+	FFPSRGunMotionTimelineLane LeftHandLane;
+	LeftHandLane.ChannelId = FPSRGunMotionChannelIds::LeftHand;
+	LeftHandLane.Label = LOCTEXT("LaneLeftHand", "왼손");
+	LeftHandLane.KeyTimes = AuthData ? CollectTimes(AuthData->LeftHandTrack.Keys) : TArray<float>();
+	Lanes.Add(LeftHandLane);
+
+	FFPSRGunMotionTimelineLane LeftHandBlendLane;
+	LeftHandBlendLane.ChannelId = FPSRGunMotionChannelIds::LeftHandBlend;
+	LeftHandBlendLane.Label = LOCTEXT("LaneLeftHandBlend", "왼손 Blend");
+	LeftHandBlendLane.bSubLane = true;
+	LeftHandBlendLane.KeyTimes = AuthData ? CollectScalarTimes(AuthData->LeftHandBlendKeys) : TArray<float>();
+	Lanes.Add(LeftHandBlendLane);
+
+	FFPSRGunMotionTimelineLane RightHandLane;
+	RightHandLane.ChannelId = FPSRGunMotionChannelIds::RightHand;
+	RightHandLane.Label = LOCTEXT("LaneRightHand", "오른손");
+	RightHandLane.KeyTimes = AuthData ? CollectTimes(AuthData->RightHandTrack.Keys) : TArray<float>();
+	Lanes.Add(RightHandLane);
+
+	FFPSRGunMotionTimelineLane RightHandBlendLane;
+	RightHandBlendLane.ChannelId = FPSRGunMotionChannelIds::RightHandBlend;
+	RightHandBlendLane.Label = LOCTEXT("LaneRightHandBlend", "오른손 Blend");
+	RightHandBlendLane.bSubLane = true;
+	RightHandBlendLane.KeyTimes = AuthData ? CollectScalarTimes(AuthData->RightHandBlendKeys) : TArray<float>();
+	Lanes.Add(RightHandBlendLane);
+
+	// 파츠 레인 — 뷰포트가 이미 PreviewWeaponData 에서 구성해 둔 채널 id 목록을 그대로 쓴다(§20-3, 뷰포트/타임라인이
+	// 같은 파츠 순서를 보도록 하는 단일 소스).
+	if (Viewport.IsValid())
+	{
+		if (const TSharedPtr<FFPSRGunMotionViewportClient> Client = Viewport->GetGunMotionClient())
+		{
+			for (const FName& PartChannelId : Client->GetPartChannelIds())
+			{
+				FFPSRGunMotionTimelineLane PartLane;
+				PartLane.ChannelId = PartChannelId;
+				PartLane.Label = FText::FromName(PartChannelId);
+				if (AuthData)
+				{
+					if (const FFPSRGunMotionChannelTrack* Track = AuthData->PartTracks.Find(PartChannelId))
+					{
+						PartLane.KeyTimes = CollectTimes(Track->Keys);
+					}
+				}
+				Lanes.Add(PartLane);
+			}
+		}
+	}
+
+	return Lanes;
+}
+
+void SFPSRGunMotionTab::OnTimelineChannelSelected(FName ChannelId)
+{
+	SetActiveChannelId(ChannelId);
+}
+
+void SFPSRGunMotionTab::OnTimelineChannelKeySelected(FName ChannelId, int32 KeyIndex)
+{
+	SetActiveChannelId(ChannelId);
+	SelectedKeyIndex = KeyIndex;
+	// §16: "키 클릭 = 선택 + 스크럽을 그 키 시각으로 점프" — 기존 스크럽 캡처/이동 경로를 그대로 재사용한다.
+	OnScrubCaptureBegin();
+	OnScrubPositionChanged(GetChannelKeyTime(ChannelId, KeyIndex));
+}
+
+void SFPSRGunMotionTab::OnTimelineChannelKeyTimeCommitted(FName ChannelId, int32 KeyIndex, float NewTime)
+{
+	if (FPSRGunMotionChannelIsScalar(FPSRGunMotionClassifyChannel(ChannelId)))
+	{
+		MutateBlendKey(ChannelId, KeyIndex, LOCTEXT("EditChannelKeyTimeTransaction", "총 모션 채널 키 시간 편집"),
+			[NewTime](FFPSRGunMotionScalarKey& Key) { Key.Time = NewTime; });
+	}
+	else
+	{
+		MutateChannelKey(ChannelId, KeyIndex, LOCTEXT("EditChannelKeyTimeTransaction", "총 모션 채널 키 시간 편집"),
+			[NewTime](FFPSRGunMotionChannelKey& Key) { Key.Time = NewTime; });
+	}
+}
+
+void SFPSRGunMotionTab::OnTimelineChannelKeyDeleteRequested(FName ChannelId, int32 KeyIndex)
+{
+	OnRemoveChannelKeyClicked(ChannelId, KeyIndex);
+}
+
+void SFPSRGunMotionTab::OnTimelineChannelKeyAddRequested(FName ChannelId, float Time)
+{
+	UAnimSequence* Seq = GetSequence();
+	if (!Seq)
+	{
+		return;
+	}
+
+	const FScopedTransaction Transaction(LOCTEXT("AddChannelKeyAtTimeTransaction", "총 모션 채널 키 추가"));
+	UFPSRGunMotionAuthoringData* AuthData = GetOrCreateAuthoringData(/*bCreateIfMissing=*/true);
+	if (!AuthData)
+	{
+		SetStatus(LOCTEXT("AuthDataFailed", "저작 데이터를 준비하지 못했습니다."));
+		return;
+	}
+	AuthData->Modify();
+
+	if (FPSRGunMotionChannelIsScalar(FPSRGunMotionClassifyChannel(ChannelId)))
+	{
+		if (TArray<FFPSRGunMotionScalarKey>* Track = ResolveScalarTrack(*AuthData, ChannelId))
+		{
+			TArray<FFPSRGunMotionScalarKey> Sorted = *Track;
+			Sorted.Sort([](const FFPSRGunMotionScalarKey& A, const FFPSRGunMotionScalarKey& B) { return A.Time < B.Time; });
+			FFPSRGunMotionScalarKey NewKey;
+			NewKey.Time = Time;
+			NewKey.Value = FPSRGunMotionBaker::EvalScalarKeys(Sorted, Time);
+			Track->Add(NewKey);
+		}
+	}
+	else if (FFPSRGunMotionChannelTrack* Track = ResolveChannelTrack(*AuthData, ChannelId, /*bCreatePartIfMissing=*/true))
+	{
+		TArray<FFPSRGunMotionChannelKey> Sorted = Track->Keys;
+		Sorted.Sort([](const FFPSRGunMotionChannelKey& A, const FFPSRGunMotionChannelKey& B) { return A.Time < B.Time; });
+		FVector Loc;
+		FQuat RotQ;
+		FPSRGunMotionBaker::EvalChannelKeys(Sorted, Time, Loc, RotQ);
+		FFPSRGunMotionChannelKey NewKey;
+		NewKey.Time = Time;
+		NewKey.Loc = Loc;
+		NewKey.Rot = RotQ.Rotator();
+		Track->Keys.Add(NewKey);
+	}
+
+	Seq->MarkPackageDirty();
+	SetActiveChannelId(ChannelId);   // 레인 클릭·더블클릭 모두 그 레인을 활성화한다(§20-3).
+	RebuildChannelKeyRows();
+	RebakeViewportPreview();
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// v3 §20-4: 뷰포트 채널 훅(기즈모 커밋 + 히트 프록시 클릭)
+// ---------------------------------------------------------------------------------------------------------------
+
+void SFPSRGunMotionTab::OnViewportChannelGizmoCommitted(FName ChannelId, float Time, FVector Loc, FRotator Rot)
+{
+	UAnimSequence* Seq = GetSequence();
+	if (!Seq)
+	{
+		return;
+	}
+
+	const FScopedTransaction Transaction(LOCTEXT("GizmoChannelKeyCommitTransaction", "총 모션 키(기즈모)"));
+	UFPSRGunMotionAuthoringData* AuthData = GetOrCreateAuthoringData(/*bCreateIfMissing=*/true);
+	if (!AuthData)
+	{
+		SetStatus(LOCTEXT("AuthDataFailed", "저작 데이터를 준비하지 못했습니다."));
+		return;
+	}
+	AuthData->Modify();
+
+	if (FFPSRGunMotionChannelTrack* Track = ResolveChannelTrack(*AuthData, ChannelId, /*bCreatePartIfMissing=*/true))
+	{
+		// §9: "같은 시각(±1프레임)의 키가 있으면 갱신, 없으면 추가" — 채널 파라미터화(§20-4).
+		const int32 ExistingIndex = FindChannelKeyIndexNearTime(ChannelId, Time, FrameToleranceSeconds(Seq));
+		if (Track->Keys.IsValidIndex(ExistingIndex))
+		{
+			Track->Keys[ExistingIndex].Loc = Loc;
+			Track->Keys[ExistingIndex].Rot = Rot;
+		}
+		else
+		{
+			FFPSRGunMotionChannelKey NewKey;
+			NewKey.Time = Time;
+			NewKey.Loc = Loc;
+			NewKey.Rot = Rot;
+			Track->Keys.Add(NewKey);
+		}
+	}
+
+	Seq->MarkPackageDirty();
+	RebuildChannelKeyRows();
+	RebakeViewportPreview();
+}
+
+void SFPSRGunMotionTab::OnViewportChannelPicked(FName ChannelId)
+{
+	SetActiveChannelId(ChannelId);
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// v3 §20-1/§20-3: 채널 트랙 해석 + 단일 커밋 훅(채널 id 파라미터화)
+// ---------------------------------------------------------------------------------------------------------------
+
+FFPSRGunMotionChannelTrack* SFPSRGunMotionTab::ResolveChannelTrack(UFPSRGunMotionAuthoringData& AuthData, FName ChannelId, bool bCreatePartIfMissing) const
+{
+	switch (FPSRGunMotionClassifyChannel(ChannelId))
+	{
+	case EFPSRGunMotionChannelKind::Gun:
+		return &AuthData.GunTrack;
+	case EFPSRGunMotionChannelKind::LeftHand:
+		return &AuthData.LeftHandTrack;
+	case EFPSRGunMotionChannelKind::RightHand:
+		return &AuthData.RightHandTrack;
+	default:
+		break;
+	}
+
+	// Part — PartTracks 는 맵이라 없으면 새로 만들 수도 있다(§20-1 "채널마다 독립 타이밍" 맵).
+	if (!bCreatePartIfMissing)
+	{
+		return AuthData.PartTracks.Find(ChannelId);
+	}
+	return &AuthData.PartTracks.FindOrAdd(ChannelId);
+}
+
+const FFPSRGunMotionChannelTrack* SFPSRGunMotionTab::ResolveChannelTrackConst(const UFPSRGunMotionAuthoringData& AuthData, FName ChannelId) const
+{
+	switch (FPSRGunMotionClassifyChannel(ChannelId))
+	{
+	case EFPSRGunMotionChannelKind::Gun:
+		return &AuthData.GunTrack;
+	case EFPSRGunMotionChannelKind::LeftHand:
+		return &AuthData.LeftHandTrack;
+	case EFPSRGunMotionChannelKind::RightHand:
+		return &AuthData.RightHandTrack;
+	default:
+		return AuthData.PartTracks.Find(ChannelId);
+	}
+}
+
+TArray<FFPSRGunMotionScalarKey>* SFPSRGunMotionTab::ResolveScalarTrack(UFPSRGunMotionAuthoringData& AuthData, FName ChannelId) const
+{
+	if (ChannelId == FPSRGunMotionChannelIds::LeftHandBlend)
+	{
+		return &AuthData.LeftHandBlendKeys;
+	}
+	if (ChannelId == FPSRGunMotionChannelIds::RightHandBlend)
+	{
+		return &AuthData.RightHandBlendKeys;
+	}
+	return nullptr;
+}
+
+const TArray<FFPSRGunMotionScalarKey>* SFPSRGunMotionTab::ResolveScalarTrackConst(const UFPSRGunMotionAuthoringData& AuthData, FName ChannelId) const
+{
+	if (ChannelId == FPSRGunMotionChannelIds::LeftHandBlend)
+	{
+		return &AuthData.LeftHandBlendKeys;
+	}
+	if (ChannelId == FPSRGunMotionChannelIds::RightHandBlend)
+	{
+		return &AuthData.RightHandBlendKeys;
+	}
+	return nullptr;
+}
+
+void SFPSRGunMotionTab::MutateChannelKey(FName ChannelId, int32 KeyIndex, const FText& TransactionText, TFunctionRef<void(FFPSRGunMotionChannelKey&)> Mutator)
+{
+	UAnimSequence* Seq = GetSequence();
+	UFPSRGunMotionAuthoringData* AuthData = Seq ? Seq->GetAssetUserData<UFPSRGunMotionAuthoringData>() : nullptr;
+	if (!AuthData)
+	{
+		return;
+	}
+	FFPSRGunMotionChannelTrack* Track = ResolveChannelTrack(*AuthData, ChannelId, /*bCreatePartIfMissing=*/false);
+	if (!Track || !Track->Keys.IsValidIndex(KeyIndex))
+	{
+		return;
+	}
+
+	const FScopedTransaction Transaction(TransactionText);
+	AuthData->Modify();
+	Mutator(Track->Keys[KeyIndex]);
+	Seq->MarkPackageDirty();
+
+	// §7 헤더 취지의 §20-3 확장: 숫자 입력·타임라인 드래그·기즈모가 전부 이 하나의 꼬리를 공유한다.
+	RebakeViewportPreview();
+}
+
+void SFPSRGunMotionTab::MutateBlendKey(FName ChannelId, int32 KeyIndex, const FText& TransactionText, TFunctionRef<void(FFPSRGunMotionScalarKey&)> Mutator)
+{
+	UAnimSequence* Seq = GetSequence();
+	UFPSRGunMotionAuthoringData* AuthData = Seq ? Seq->GetAssetUserData<UFPSRGunMotionAuthoringData>() : nullptr;
+	if (!AuthData)
+	{
+		return;
+	}
+	TArray<FFPSRGunMotionScalarKey>* Track = ResolveScalarTrack(*AuthData, ChannelId);
+	if (!Track || !Track->IsValidIndex(KeyIndex))
+	{
+		return;
+	}
+
+	const FScopedTransaction Transaction(TransactionText);
+	AuthData->Modify();
+	Mutator((*Track)[KeyIndex]);
+	Seq->MarkPackageDirty();
+	RebakeViewportPreview();
+}
+
+int32 SFPSRGunMotionTab::FindChannelKeyIndexNearTime(FName ChannelId, float Time, float ToleranceSeconds) const
+{
+	UAnimSequence* Seq = GetSequence();
+	const UFPSRGunMotionAuthoringData* AuthData = Seq ? Seq->GetAssetUserData<UFPSRGunMotionAuthoringData>() : nullptr;
+	if (!AuthData)
+	{
+		return INDEX_NONE;
+	}
+
+	int32 BestIndex = INDEX_NONE;
+	float BestDelta = ToleranceSeconds;
+
+	if (FPSRGunMotionChannelIsScalar(FPSRGunMotionClassifyChannel(ChannelId)))
+	{
+		const TArray<FFPSRGunMotionScalarKey>* Track = ResolveScalarTrackConst(*AuthData, ChannelId);
+		if (!Track)
+		{
+			return INDEX_NONE;
+		}
+		for (int32 Index = 0; Index < Track->Num(); ++Index)
+		{
+			const float Delta = FMath::Abs((*Track)[Index].Time - Time);
+			if (Delta <= BestDelta)
+			{
+				BestDelta = Delta;
+				BestIndex = Index;
+			}
+		}
+	}
+	else
+	{
+		const FFPSRGunMotionChannelTrack* Track = ResolveChannelTrackConst(*AuthData, ChannelId);
+		if (!Track)
+		{
+			return INDEX_NONE;
+		}
+		for (int32 Index = 0; Index < Track->Keys.Num(); ++Index)
+		{
+			const float Delta = FMath::Abs(Track->Keys[Index].Time - Time);
+			if (Delta <= BestDelta)
+			{
+				BestDelta = Delta;
+				BestIndex = Index;
+			}
+		}
+	}
+	return BestIndex;
+}
+
+float SFPSRGunMotionTab::GetChannelKeyTime(FName ChannelId, int32 KeyIndex) const
+{
+	UAnimSequence* Seq = GetSequence();
+	const UFPSRGunMotionAuthoringData* AuthData = Seq ? Seq->GetAssetUserData<UFPSRGunMotionAuthoringData>() : nullptr;
+	if (!AuthData)
+	{
+		return 0.0f;
+	}
+	if (FPSRGunMotionChannelIsScalar(FPSRGunMotionClassifyChannel(ChannelId)))
+	{
+		const TArray<FFPSRGunMotionScalarKey>* Track = ResolveScalarTrackConst(*AuthData, ChannelId);
+		return (Track && Track->IsValidIndex(KeyIndex)) ? (*Track)[KeyIndex].Time : 0.0f;
+	}
+	const FFPSRGunMotionChannelTrack* Track = ResolveChannelTrackConst(*AuthData, ChannelId);
+	return (Track && Track->Keys.IsValidIndex(KeyIndex)) ? Track->Keys[KeyIndex].Time : 0.0f;
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// v3 §20-3: 활성 채널 숫자 키 목록
+// ---------------------------------------------------------------------------------------------------------------
+
+void SFPSRGunMotionTab::RebuildChannelKeyRows()
+{
+	if (!ChannelKeyListContainer.IsValid())
+	{
+		return;
+	}
+	ChannelKeyListContainer->ClearChildren();
+
+	UAnimSequence* Seq = GetSequence();
+	const UFPSRGunMotionAuthoringData* AuthData = Seq ? Seq->GetAssetUserData<UFPSRGunMotionAuthoringData>() : nullptr;
+	if (!AuthData)
+	{
+		return;
+	}
+
+	if (FPSRGunMotionChannelIsScalar(FPSRGunMotionClassifyChannel(SelectedChannelId)))
+	{
+		const TArray<FFPSRGunMotionScalarKey>* Track = ResolveScalarTrackConst(*AuthData, SelectedChannelId);
+		const int32 NumKeys = Track ? Track->Num() : 0;
+		for (int32 KeyIndex = 0; KeyIndex < NumKeys; ++KeyIndex)
+		{
+			ChannelKeyListContainer->AddSlot().AutoHeight().Padding(0.0f, 1.0f)
+			[
+				BuildBlendKeyRow(SelectedChannelId, KeyIndex)
+			];
+		}
+	}
+	else
+	{
+		const FFPSRGunMotionChannelTrack* Track = ResolveChannelTrackConst(*AuthData, SelectedChannelId);
+		const int32 NumKeys = Track ? Track->Keys.Num() : 0;
+		for (int32 KeyIndex = 0; KeyIndex < NumKeys; ++KeyIndex)
+		{
+			ChannelKeyListContainer->AddSlot().AutoHeight().Padding(0.0f, 1.0f)
+			[
+				BuildChannelKeyRow(SelectedChannelId, KeyIndex)
+			];
+		}
+	}
+}
+
+TSharedRef<SWidget> SFPSRGunMotionTab::BuildChannelKeyRow(FName ChannelId, int32 KeyIndex)
+{
+	auto MakeNumBox = [this](TAttribute<TOptional<float>> Getter, TFunction<void(float)> Setter) -> TSharedRef<SWidget>
+	{
+		return SNew(SBox).WidthOverride(72.0f)
+		[
+			SNew(SNumericEntryBox<float>)
+			.Value(Getter)
+			.OnValueChanged_Lambda([Setter](float V) { Setter(V); })
+			.OnValueCommitted_Lambda([Setter](float V, ETextCommit::Type) { Setter(V); })
+		];
+	};
+
+	// Field: 0=Time 1=TX 2=TY 3=TZ 4=RP(Pitch) 5=RY(Yaw) 6=RR(Roll) — §18 커브 접미와 같은 순서.
+	auto GetField = [this, ChannelId, KeyIndex](int32 Field) -> TOptional<float>
+	{
+		UAnimSequence* Seq = GetSequence();
+		const UFPSRGunMotionAuthoringData* AuthData = Seq ? Seq->GetAssetUserData<UFPSRGunMotionAuthoringData>() : nullptr;
+		const FFPSRGunMotionChannelTrack* Track = AuthData ? ResolveChannelTrackConst(*AuthData, ChannelId) : nullptr;
+		if (!Track || !Track->Keys.IsValidIndex(KeyIndex))
+		{
+			return 0.0f;
+		}
+		const FFPSRGunMotionChannelKey& Key = Track->Keys[KeyIndex];
+		switch (Field)
+		{
+		case 0: return Key.Time;
+		case 1: return Key.Loc.X;
+		case 2: return Key.Loc.Y;
+		case 3: return Key.Loc.Z;
+		case 4: return Key.Rot.Pitch;
+		case 5: return Key.Rot.Yaw;
+		default: return Key.Rot.Roll;
+		}
+	};
+	auto SetField = [this, ChannelId, KeyIndex](int32 Field, float V)
+	{
+		MutateChannelKey(ChannelId, KeyIndex, LOCTEXT("EditChannelKeyTransaction", "총 모션 채널 키 편집"),
+			[Field, V](FFPSRGunMotionChannelKey& Key)
+			{
+				switch (Field)
+				{
+				case 0: Key.Time = V; break;
+				case 1: Key.Loc.X = V; break;
+				case 2: Key.Loc.Y = V; break;
+				case 3: Key.Loc.Z = V; break;
+				case 4: Key.Rot.Pitch = V; break;
+				case 5: Key.Rot.Yaw = V; break;
+				default: Key.Rot.Roll = V; break;
+				}
+			});
+	};
+
+	TSharedRef<SHorizontalBox> RowContent = SNew(SHorizontalBox);
+	for (int32 Field = 0; Field < 7; ++Field)
+	{
+		RowContent->AddSlot().FillWidth(0.13f).Padding(2.0f)
+		[
+			MakeNumBox(
+				TAttribute<TOptional<float>>::Create(TAttribute<TOptional<float>>::FGetter::CreateLambda([GetField, Field]() { return GetField(Field); })),
+				[SetField, Field](float V) { SetField(Field, V); })
+		];
+	}
+	RowContent->AddSlot().AutoWidth().Padding(4.0f, 0.0f, 0.0f, 0.0f)
+	[
+		SNew(SButton)
+		.Text(LOCTEXT("RemoveChannelKeyButton", "삭제"))
+		.OnClicked(FOnClicked::CreateSP(this, &SFPSRGunMotionTab::OnRemoveChannelKeyClicked, ChannelId, KeyIndex))
+	];
+
+	return RowContent;
+}
+
+TSharedRef<SWidget> SFPSRGunMotionTab::BuildBlendKeyRow(FName ChannelId, int32 KeyIndex)
+{
+	auto GetTime = [this, ChannelId, KeyIndex]() -> TOptional<float>
+	{
+		return GetChannelKeyTime(ChannelId, KeyIndex);
+	};
+	auto SetTime = [this, ChannelId, KeyIndex](float V)
+	{
+		MutateBlendKey(ChannelId, KeyIndex, LOCTEXT("EditBlendKeyTimeTransaction", "총 모션 Blend 키 시간 편집"),
+			[V](FFPSRGunMotionScalarKey& Key) { Key.Time = V; });
+	};
+	auto GetValue = [this, ChannelId, KeyIndex]() -> TOptional<float>
+	{
+		UAnimSequence* Seq = GetSequence();
+		const UFPSRGunMotionAuthoringData* AuthData = Seq ? Seq->GetAssetUserData<UFPSRGunMotionAuthoringData>() : nullptr;
+		const TArray<FFPSRGunMotionScalarKey>* Track = AuthData ? ResolveScalarTrackConst(*AuthData, ChannelId) : nullptr;
+		return (Track && Track->IsValidIndex(KeyIndex)) ? (*Track)[KeyIndex].Value : 0.0f;
+	};
+	auto SetValue = [this, ChannelId, KeyIndex](float V)
+	{
+		MutateBlendKey(ChannelId, KeyIndex, LOCTEXT("EditBlendKeyValueTransaction", "총 모션 Blend 키 값 편집"),
+			[V](FFPSRGunMotionScalarKey& Key) { Key.Value = FMath::Clamp(V, 0.0f, 1.0f); });
+	};
+
+	return SNew(SHorizontalBox)
+		+ SHorizontalBox::Slot().FillWidth(0.4f).Padding(2.0f)
+		[
+			SNew(SBox).WidthOverride(80.0f)
+			[
+				SNew(SNumericEntryBox<float>)
+				.Value_Lambda(GetTime)
+				.OnValueChanged_Lambda(SetTime)
+				.OnValueCommitted_Lambda([SetTime](float V, ETextCommit::Type) { SetTime(V); })
+			]
+		]
+		+ SHorizontalBox::Slot().FillWidth(0.4f).Padding(2.0f)
+		[
+			SNew(SBox).WidthOverride(80.0f)
+			[
+				SNew(SNumericEntryBox<float>)
+				.MinValue(0.0f)
+				.MaxValue(1.0f)
+				.Value_Lambda(GetValue)
+				.OnValueChanged_Lambda(SetValue)
+				.OnValueCommitted_Lambda([SetValue](float V, ETextCommit::Type) { SetValue(V); })
+			]
+		]
+		+ SHorizontalBox::Slot().AutoWidth().Padding(4.0f, 0.0f, 0.0f, 0.0f)
+		[
+			SNew(SButton)
+			.Text(LOCTEXT("RemoveBlendKeyButton", "삭제"))
+			.OnClicked(FOnClicked::CreateSP(this, &SFPSRGunMotionTab::OnRemoveChannelKeyClicked, ChannelId, KeyIndex))
+		];
+}
+
+FReply SFPSRGunMotionTab::OnAddChannelKeyClicked()
+{
+	UAnimSequence* Seq = GetSequence();
+	if (!Seq || !Viewport.IsValid())
+	{
+		SetStatus(LOCTEXT("NoClipSelected", "클립을 먼저 선택하세요."));
+		return FReply::Handled();
+	}
+	const TSharedPtr<FFPSRGunMotionViewportClient> Client = Viewport->GetGunMotionClient();
+	const float Time = Client.IsValid() ? Client->GetPreviewPosition() : 0.0f;
+
+	// §20-4 원문 규약("지금 스크럽 시각에 키가 없으면 새로 추가") — 이미 있으면 무동작(중복 키 방지).
+	if (FindChannelKeyIndexNearTime(SelectedChannelId, Time, FrameToleranceSeconds(Seq)) != INDEX_NONE)
 	{
 		return FReply::Handled();
 	}
 
-	const FScopedTransaction Transaction(LOCTEXT("DeleteKeyAtTimeTransaction", "총 모션 키 삭제(현재 시각)"));
-	AuthData->Modify();
-	AuthData->Keys.RemoveAt(ExistingIndex);
+	OnTimelineChannelKeyAddRequested(SelectedChannelId, Time);
+	return FReply::Handled();
+}
 
+FReply SFPSRGunMotionTab::OnRemoveChannelKeyClicked(FName ChannelId, int32 KeyIndex)
+{
+	UAnimSequence* Seq = GetSequence();
+	UFPSRGunMotionAuthoringData* AuthData = Seq ? Seq->GetAssetUserData<UFPSRGunMotionAuthoringData>() : nullptr;
+	if (!AuthData || KeyIndex == INDEX_NONE)
+	{
+		return FReply::Handled();
+	}
+
+	if (FPSRGunMotionChannelIsScalar(FPSRGunMotionClassifyChannel(ChannelId)))
+	{
+		TArray<FFPSRGunMotionScalarKey>* Track = ResolveScalarTrack(*AuthData, ChannelId);
+		if (!Track || !Track->IsValidIndex(KeyIndex))
+		{
+			return FReply::Handled();
+		}
+		const FScopedTransaction Transaction(LOCTEXT("RemoveBlendKeyTransaction", "총 모션 Blend 키 삭제"));
+		AuthData->Modify();
+		Track->RemoveAt(KeyIndex);
+	}
+	else
+	{
+		FFPSRGunMotionChannelTrack* Track = ResolveChannelTrack(*AuthData, ChannelId, /*bCreatePartIfMissing=*/false);
+		if (!Track || !Track->Keys.IsValidIndex(KeyIndex))
+		{
+			return FReply::Handled();
+		}
+		const FScopedTransaction Transaction(LOCTEXT("RemoveChannelKeyTransaction", "총 모션 채널 키 삭제"));
+		AuthData->Modify();
+		Track->Keys.RemoveAt(KeyIndex);
+	}
+
+	SelectedKeyIndex = INDEX_NONE;
 	Seq->MarkPackageDirty();
-	RebuildKeyRows();
+	RebuildChannelKeyRows();
 	RebakeViewportPreview();
+	return FReply::Handled();
+}
+
+FText SFPSRGunMotionTab::GetActiveChannelHeaderText() const
+{
+	FText ChannelLabel;
+	switch (FPSRGunMotionClassifyChannel(SelectedChannelId))
+	{
+	case EFPSRGunMotionChannelKind::Gun:
+		ChannelLabel = LOCTEXT("ChannelHeaderGun", "총");
+		break;
+	case EFPSRGunMotionChannelKind::LeftHand:
+		ChannelLabel = LOCTEXT("ChannelHeaderLeftHand", "왼손");
+		break;
+	case EFPSRGunMotionChannelKind::RightHand:
+		ChannelLabel = LOCTEXT("ChannelHeaderRightHand", "오른손");
+		break;
+	case EFPSRGunMotionChannelKind::LeftHandBlend:
+		ChannelLabel = LOCTEXT("ChannelHeaderLeftHandBlend", "왼손 Blend");
+		break;
+	case EFPSRGunMotionChannelKind::RightHandBlend:
+		ChannelLabel = LOCTEXT("ChannelHeaderRightHandBlend", "오른손 Blend");
+		break;
+	default:
+		ChannelLabel = FText::FromName(SelectedChannelId); // 파츠 — 안정 소켓 id 그대로 표시.
+		break;
+	}
+	return FText::Format(LOCTEXT("ChannelHeaderFmt", "활성 채널: {0}"), ChannelLabel);
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// v3 §20-3: 부착 드롭다운(손 채널 전용)
+// ---------------------------------------------------------------------------------------------------------------
+
+void SFPSRGunMotionTab::RebuildAttachOptions()
+{
+	AttachOptions.Reset();
+	AttachOptions.Add(MakeShared<FName>(NAME_None));   // "없음"
+
+	const UFPSRGunMotionSettings* Settings = GetDefault<UFPSRGunMotionSettings>();
+	const UFPSRWeaponDataAsset* WeaponData = (Settings && !Settings->PreviewWeaponData.IsNull()) ? Settings->PreviewWeaponData.LoadSynchronous() : nullptr;
+	if (WeaponData)
+	{
+		for (const FFPSRWeaponPartAttachment& Part : WeaponData->WeaponParts)
+		{
+			if (!Part.Part.IsNull() && !Part.Socket.IsNone())
+			{
+				AttachOptions.Add(MakeShared<FName>(Part.Socket));
+			}
+		}
+	}
+
+	if (AttachCombo.IsValid())
+	{
+		AttachCombo->RefreshOptions();
+	}
+}
+
+TSharedRef<SWidget> SFPSRGunMotionTab::BuildAttachComboRow()
+{
+	return SNew(SHorizontalBox)
+		+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 4.0f, 0.0f)
+		[
+			SNew(STextBlock).Text(LOCTEXT("AttachPartLabel", "부착 파츠:"))
+		]
+		+ SHorizontalBox::Slot().FillWidth(1.0f)
+		[
+			SAssignNew(AttachCombo, SComboBox<TSharedPtr<FName>>)
+			.OptionsSource(&AttachOptions)
+			.OnGenerateWidget(this, &SFPSRGunMotionTab::GenerateAttachOptionWidget)
+			.OnSelectionChanged(this, &SFPSRGunMotionTab::OnAttachOptionSelected)
+			[
+				SNew(STextBlock).Text(this, &SFPSRGunMotionTab::GetAttachComboLabel)
+			]
+		];
+}
+
+FText SFPSRGunMotionTab::GetAttachComboLabel() const
+{
+	UAnimSequence* Seq = GetSequence();
+	const UFPSRGunMotionAuthoringData* AuthData = Seq ? Seq->GetAssetUserData<UFPSRGunMotionAuthoringData>() : nullptr;
+	if (!AuthData)
+	{
+		return LOCTEXT("AttachNone", "없음");
+	}
+	FName Current = NAME_None;
+	const EFPSRGunMotionChannelKind Kind = FPSRGunMotionClassifyChannel(SelectedChannelId);
+	if (Kind == EFPSRGunMotionChannelKind::LeftHand)
+	{
+		Current = AuthData->LeftHandAttachPartSocket;
+	}
+	else if (Kind == EFPSRGunMotionChannelKind::RightHand)
+	{
+		Current = AuthData->RightHandAttachPartSocket;
+	}
+	return Current.IsNone() ? LOCTEXT("AttachNone", "없음") : FText::FromName(Current);
+}
+
+void SFPSRGunMotionTab::OnAttachOptionSelected(TSharedPtr<FName> NewSelection, ESelectInfo::Type)
+{
+	if (!NewSelection.IsValid())
+	{
+		return;
+	}
+	UAnimSequence* Seq = GetSequence();
+	if (!Seq)
+	{
+		return;
+	}
+	const EFPSRGunMotionChannelKind Kind = FPSRGunMotionClassifyChannel(SelectedChannelId);
+	if (Kind != EFPSRGunMotionChannelKind::LeftHand && Kind != EFPSRGunMotionChannelKind::RightHand)
+	{
+		return;
+	}
+
+	const FScopedTransaction Transaction(LOCTEXT("SetAttachPartTransaction", "총 모션 부착 파츠 지정"));
+	UFPSRGunMotionAuthoringData* AuthData = GetOrCreateAuthoringData(/*bCreateIfMissing=*/true);
+	if (!AuthData)
+	{
+		SetStatus(LOCTEXT("AuthDataFailed", "저작 데이터를 준비하지 못했습니다."));
+		return;
+	}
+	AuthData->Modify();
+	if (Kind == EFPSRGunMotionChannelKind::LeftHand)
+	{
+		AuthData->LeftHandAttachPartSocket = *NewSelection;
+	}
+	else
+	{
+		AuthData->RightHandAttachPartSocket = *NewSelection;
+	}
+	Seq->MarkPackageDirty();
+	RebakeViewportPreview();
+}
+
+TSharedRef<SWidget> SFPSRGunMotionTab::GenerateAttachOptionWidget(TSharedPtr<FName> Option)
+{
+	const FName Value = Option.IsValid() ? *Option : NAME_None;
+	return SNew(STextBlock).Text(Value.IsNone() ? LOCTEXT("AttachNone", "없음") : FText::FromName(Value));
+}
+
+EVisibility SFPSRGunMotionTab::GetAttachRowVisibility() const
+{
+	const EFPSRGunMotionChannelKind Kind = FPSRGunMotionClassifyChannel(SelectedChannelId);
+	return (Kind == EFPSRGunMotionChannelKind::LeftHand || Kind == EFPSRGunMotionChannelKind::RightHand) ? EVisibility::Visible : EVisibility::Collapsed;
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// v3 §20-2: 채널 커브 베이크(A17 자동화 — 본 트랙 대체)
+// ---------------------------------------------------------------------------------------------------------------
+
+FReply SFPSRGunMotionTab::OnBakeCurveChannelsClicked()
+{
+	UAnimSequence* Seq = GetSequence();
+	if (!Seq)
+	{
+		SetStatus(LOCTEXT("NoClipSelected", "클립을 먼저 선택하세요."));
+		return FReply::Handled();
+	}
+	if (!ConfirmIfOutsideConvention())
+	{
+		return FReply::Handled();
+	}
+
+	const UFPSRGunMotionAuthoringData* AuthData = Seq->GetAssetUserData<UFPSRGunMotionAuthoringData>();
+	if (!AuthData)
+	{
+		SetStatus(LOCTEXT("NoAuthoringData", "저작 데이터가 없습니다 — 채널 키를 먼저 저작하세요."));
+		return FReply::Handled();
+	}
+
+	TArray<FString> MontageReport;
+	FText Error;
+	if (!FPSRGunMotionBaker::BakeCurveChannels(Seq, *AuthData, Error, &MontageReport))
+	{
+		UE_LOG(LogFPSR, Warning, TEXT("[GunMotion] BakeCurveChannels 실패: %s — %s"), *Seq->GetName(), *Error.ToString());
+		SetStatus(Error);
+		return FReply::Handled();
+	}
+
+	const FString ReportJoined = MontageReport.Num() > 0 ? FString::Join(MontageReport, TEXT(" / ")) : TEXT("참조 몽타주 없음");
+	UE_LOG(LogFPSR, Log, TEXT("[GunMotion] BakeCurveChannels 성공: %s — %s"), *Seq->GetName(), *ReportJoined);
+	SetStatus(FText::Format(LOCTEXT("BakeCurveChannelsOk", "채널 커브 굽기 완료. 몽타주: {0}"), FText::FromString(ReportJoined)));
+
+	const EAppReturnType::Type SaveChoice = FMessageDialog::Open(
+		EAppMsgType::YesNo,
+		LOCTEXT("SavePrompt", "굽기가 완료되었습니다. 지금 저장할까요?"));
+	if (SaveChoice == EAppReturnType::Yes)
+	{
+		// BakeCurveChannels 는 굽기/스킵 사유를 문자열로만 보고한다(몽타주 UObject 포인터는 안 돌려준다) — 참조
+		// 몽타주 패키지는 여기서 명시적으로 저장하지 않지만 MarkPackageDirty 상태로 남아 에디터가 "저장되지 않은
+		// 변경"으로 계속 추적하므로 데이터 유실은 없다(사용자가 나중에 일괄 저장 가능). 이 절충은 보고서에 명시.
+		TArray<UPackage*> PackagesToSave;
+		PackagesToSave.Add(Seq->GetOutermost());
+		UEditorLoadingAndSavingUtils::SavePackages(PackagesToSave, /*bOnlyDirty=*/false);
+	}
+	return FReply::Handled();
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// v3 §20-5: [새 액션 클립]
+// ---------------------------------------------------------------------------------------------------------------
+
+FReply SFPSRGunMotionTab::OnCreateNewActionClipClicked()
+{
+	const UFPSRGunMotionSettings* Settings = GetDefault<UFPSRGunMotionSettings>();
+	if (!Settings || Settings->TargetCharacterBP.IsNull())
+	{
+		SetStatus(LOCTEXT("NoTargetCharacterBP", "프로젝트 설정 > FPSR > FPSR Gun Motion 에 '대상 캐릭터 BP'가 비어 있습니다."));
+		return FReply::Handled();
+	}
+
+	UBlueprint* BP = Settings->TargetCharacterBP.LoadSynchronous();
+	UClass* GeneratedClass = BP ? BP->GeneratedClass.Get() : nullptr;
+	AActor* CDO = GeneratedClass ? GeneratedClass->GetDefaultObject<AActor>() : nullptr;
+	USkeletalMeshComponent* ArmsSource = CDO ? FindComponentByName<USkeletalMeshComponent>(CDO, Settings->ArmsComponentName) : nullptr;
+	USkeletalMesh* ArmsMesh = ArmsSource ? ArmsSource->GetSkeletalMeshAsset() : nullptr;
+	USkeleton* ArmsSkeleton = ArmsMesh ? ArmsMesh->GetSkeleton() : nullptr;
+	if (!ArmsSkeleton)
+	{
+		SetStatus(LOCTEXT("NoArmsSkeleton", "대상 캐릭터 BP 에서 팔 스켈레톤을 찾지 못했습니다."));
+		return FReply::Handled();
+	}
+
+	TSharedRef<SFPSRGunMotionNewClipDialog> Dialog = SNew(SFPSRGunMotionNewClipDialog);
+	if (Dialog->ShowModal() != EAppReturnType::Ok)
+	{
+		return FReply::Handled();
+	}
+
+	FString AssetName = Dialog->GetAssetName();
+	if (AssetName.IsEmpty())
+	{
+		SetStatus(LOCTEXT("NewClipNoName", "에셋 이름을 입력하세요."));
+		return FReply::Handled();
+	}
+	// §20-5/§5: "저장 경로 = Anims_LPAMG 하위 + _GunMotion 접미 강제(§5 경고 규약 통과 위치)".
+	if (!AssetName.EndsWith(TEXT("_GunLocked")) && !AssetName.EndsWith(TEXT("_GunMotion")))
+	{
+		AssetName += TEXT("_GunMotion");
+	}
+
+	const float LengthSeconds = FMath::Max(Dialog->GetLengthSeconds(), 1.0f / 30.0f);
+	const FString FolderPath = Settings->NewActionClipFolder.Path.IsEmpty() ? TEXT("/Game/Character/FPArms/Anims_LPAMG") : Settings->NewActionClipFolder.Path;
+	const FString PackageName = FolderPath / AssetName;
+
+	// 같은 이름 에셋이 이미 있으면 조용히 덮지 않는다 — CreatePackage+NewObject 는 기존 오브젝트와 충돌한다.
+	if (FPackageName::DoesPackageExist(PackageName))
+	{
+		SetStatus(FText::Format(LOCTEXT("NewClipAlreadyExists", "같은 이름의 에셋이 이미 있습니다: {0} — 다른 이름을 쓰세요."), FText::FromString(PackageName)));
+		return FReply::Handled();
+	}
+
+	UPackage* Package = CreatePackage(*PackageName);
+	if (!Package)
+	{
+		SetStatus(LOCTEXT("NewClipPackageFailed", "패키지 생성에 실패했습니다."));
+		return FReply::Handled();
+	}
+
+	UAnimSequence* NewSeq = NewObject<UAnimSequence>(Package, FName(*AssetName), RF_Public | RF_Standalone);
+	NewSeq->SetSkeleton(ArmsSkeleton);
+
+	// §20-5: 본 트랙 0개, 30fps, 애디티브(AAT_LocalSpaceBase) + RefPoseType=ABPT_RefPose — 트랙이 없으므로
+	// raw=refpose=base 가 구조적으로 성립해 델타가 항등 0 이다(A16 함정 "트랙 삭제 ≠ 델타 0"과 무관 — 여기는
+	// 아예 처음부터 트랙이 없는 신규 클립).
+	IAnimationDataController& Controller = NewSeq->GetController();
+	Controller.InitializeModel();
+	Controller.SetFrameRate(FFrameRate(30, 1));
+	Controller.SetNumberOfFrames(FFrameNumber(FMath::RoundToInt(LengthSeconds * 30.0f)));
+	NewSeq->AdditiveAnimType = AAT_LocalSpaceBase;
+	NewSeq->RefPoseType = ABPT_RefPose;
+	Controller.NotifyPopulated();
+
+	// §20-5: "생성 직후 탭이 그 클립을 열고 AUD 부착, bSanitized=true 로 시작(본 트랙이 없어 고정화 불요)".
+	UFPSRGunMotionAuthoringData* AuthData = NewObject<UFPSRGunMotionAuthoringData>(NewSeq);
+	AuthData->bSanitized = true;
+	NewSeq->AddAssetUserData(AuthData);
+
+	NewSeq->MarkPackageDirty();
+	FAssetRegistryModule::AssetCreated(NewSeq);
+
+	const FString PackageFileName = FPackageName::LongPackageNameToFilename(PackageName, FPackageName::GetAssetPackageExtension());
+	FSavePackageArgs SaveArgs;
+	SaveArgs.TopLevelFlags = RF_Public | RF_Standalone;
+	const bool bSaved = UPackage::SavePackage(Package, NewSeq, *PackageFileName, SaveArgs);
+
+	SelectedSequence = NewSeq;
+	SelectedKeyIndex = INDEX_NONE;
+	SetActiveChannelId(FPSRGunMotionChannelIds::Gun);
+	RebuildKeyRows();
+	RebuildChannelKeyRows();
+	RebuildViewportPreview();
+
+	SetStatus(bSaved
+		? FText::Format(LOCTEXT("NewClipCreated", "새 액션 클립 생성 완료: {0}"), FText::FromString(AssetName))
+		: FText::Format(LOCTEXT("NewClipCreatedNotSaved", "새 액션 클립을 만들었지만 저장에 실패했습니다: {0}"), FText::FromString(AssetName)));
 	return FReply::Handled();
 }
 

@@ -20,4 +20,11 @@ UFPSRGunMotionSettings::UFPSRGunMotionSettings()
 	// 증보 v2 §7 기본값.
 	PreviewWeaponMesh = TSoftObjectPtr<UStaticMesh>(FSoftObjectPath(
 		TEXT("/Game/PolygonMilitary/Meshes/Weapons/Modular/Weapon_A/SM_Wep_Mod_A_Body_01.SM_Wep_Mod_A_Body_01")));
+
+	// v3 §20-3 기본값(스펙 원문).
+	PreviewWeaponData = TSoftObjectPtr<UFPSRWeaponDataAsset>(FSoftObjectPath(
+		TEXT("/Game/Weapons/DataTable/DA_Weapon_Rifle.DA_Weapon_Rifle")));
+
+	// v3 §20-5 기본값 — 기존 장전 1호 클립(FP_Rifle_Reload_GunLocked)이 사는 폴더와 같다(§5 경고 규약 통과 위치).
+	NewActionClipFolder.Path = TEXT("/Game/Character/FPArms/Anims_LPAMG");
 }
