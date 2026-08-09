@@ -110,19 +110,23 @@ int32 SFPSRGunMotionTimeline::OnPaint(const FPaintArgs& Args, const FGeometry& A
 	const float Height = static_cast<float>(AllottedGeometry.GetLocalSize().Y);
 	const float SequenceLength = FMath::Max(0.0f, SequenceLengthAttr.Get());
 
-	const FSlateBrush* WhiteBrush = FAppStyle::GetBrush(TEXT("WhiteBrush"));
+	// 🚨 스타일 키 무의존: "WhiteBrush"/"Brushes.Recessed" 를 FAppStyle 에서 찾으면 키가 스타일셋에 없을 때
+	// 미싱 브러시(흰색)로 조용히 폴백해 타임라인 전체가 흰 판으로 보인다(실사고 2026-08-09 — 첫 렌더가
+	// 정확히 그 증상이었다). FCoreStyle 의 WhiteBrush 는 항상 존재하므로 그것만 쓰고 색은 전부 명시 틴트로 준다.
+	const FSlateBrush* WhiteBrush = FCoreStyle::Get().GetBrush(TEXT("WhiteBrush"));
 	const FSlateFontInfo TickFont = FCoreStyle::GetDefaultFontStyle("Regular", 8);
 	const TSharedRef<FSlateFontMeasure> FontMeasure = FSlateApplication::Get().GetRenderer()->GetFontMeasureService();
-	const FLinearColor BaseTint = InWidgetStyle.GetColorAndOpacityTint();
+	const FLinearColor RulerColor(0.72f, 0.72f, 0.72f, 1.0f);
+	const FLinearColor BackgroundColor(0.015f, 0.015f, 0.018f, 1.0f);
 
 	int32 CurrentLayer = LayerId;
 
-	// 배경 — SScrubWidget 관례("Brushes.Recessed") 답습.
+	// 배경 — 어두운 명시 색(위 주석의 이유로 스타일 브러시를 신뢰하지 않는다).
 	FSlateDrawElement::MakeBox(
 		OutDrawElements, CurrentLayer,
 		AllottedGeometry.ToPaintGeometry(),
-		FAppStyle::Get().GetBrush("Brushes.Recessed"),
-		DrawEffects, BaseTint);
+		WhiteBrush,
+		DrawEffects, BackgroundColor);
 	++CurrentLayer;
 
 	// --- §16 시간 룰러: 초 주눈금 + 0.1s 보조눈금 + 숫자 라벨 ---
@@ -144,7 +148,7 @@ int32 SFPSRGunMotionTimeline::OnPaint(const FPaintArgs& Args, const FGeometry& A
 			FSlateDrawElement::MakeLines(
 				OutDrawElements, CurrentLayer,
 				AllottedGeometry.ToPaintGeometry(),
-				TickPoints, DrawEffects, BaseTint, true, 1.0f);
+				TickPoints, DrawEffects, RulerColor, true, 1.0f);
 
 			if (bMajor)
 			{
@@ -154,7 +158,7 @@ int32 SFPSRGunMotionTimeline::OnPaint(const FPaintArgs& Args, const FGeometry& A
 				FSlateDrawElement::MakeText(
 					OutDrawElements, CurrentLayer,
 					AllottedGeometry.ToPaintGeometry(LabelSize, FSlateLayoutTransform(LabelPos)),
-					Label, TickFont, DrawEffects, BaseTint);
+					Label, TickFont, DrawEffects, RulerColor);
 			}
 
 			if (TickTime >= SequenceLength)
@@ -170,7 +174,8 @@ int32 SFPSRGunMotionTimeline::OnPaint(const FPaintArgs& Args, const FGeometry& A
 	const int32 SelectedIndex = SelectedKeyIndexAttr.Get();
 	const float LaneCenterY = GRulerHeight + GMarkerLaneHeight * 0.5f;
 	const FLinearColor NormalKeyColor(0.65f, 0.75f, 1.0f, 1.0f);
-	const FLinearColor SelectedKeyColor = FAppStyle::GetSlateColor("SelectionColor").GetColor(InWidgetStyle);
+	// 배경과 같은 이유로 스타일 키 대신 명시 색 — 에디터 기본 선택색(주황)과 같은 계열.
+	const FLinearColor SelectedKeyColor(0.95f, 0.58f, 0.10f, 1.0f);
 
 	for (int32 KeyIndex = 0; KeyIndex < Keys.Num(); ++KeyIndex)
 	{
