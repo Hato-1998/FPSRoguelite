@@ -344,6 +344,85 @@ SetBoneTrackKeys("hand_r", ...) — 하나의 bracket, 패키지 dirty.
 - **[새 액션 클립]** 버튼: 길이 지정 → 본 트랙 없는 애디티브 클립(델타 0 = Idle 그대로) 생성 —
   "Idle 기준 0부터 저작"의 진입점. (몽타주 생성+DA 배정 자동화는 후속 — 지금은 기존 몽타주 재사용.)
 
+### 20-1. 데이터 — AssetUserData 확장 (채널별 키 배열 맵)
+
+- 신규 USTRUCT(런타임 모듈 `FPSRGunMotionAuthoringData.h`에 병기 — AUD 클래스가 거기 있으므로):
+  - `FFPSRGunMotionChannelKey { float Time; FVector Loc; FRotator Rot; }` — 공간은 채널이 정한다
+    (§18: 총=카메라 공간, 손=총 공간, 파츠=파츠 로컬).
+  - `FFPSRGunMotionScalarKey { float Time; float Value; }` — Blend 등 스칼라 채널용.
+  - `FFPSRGunMotionChannelTrack { TArray<FFPSRGunMotionChannelKey> Keys; }`
+- `UFPSRGunMotionAuthoringData` 추가 필드(기존 `Keys`/`bSanitized`/부착소켓 2필드는 **보존** —
+  v2 레거시 + 부착 메타는 계속 런타임이 읽는다):
+  - `FFPSRGunMotionChannelTrack GunTrack; LeftHandTrack; RightHandTrack;`
+  - `TArray<FFPSRGunMotionScalarKey> LeftHandBlendKeys; RightHandBlendKeys;`
+  - `TMap<FName, FFPSRGunMotionChannelTrack> PartTracks;` — 키 = 안정 부착소켓 id
+    (`FFPSRWeaponPartAttachment::Socket`, 예 `SOCKET_Mount_3`)
+- 키 보간 = 기존 §3-3(smoothstep + Slerp)을 채널 무관 공용 함수로 일반화해 재사용. 스칼라도 동일 규칙.
+
+### 20-2. 커브 베이크 (본 트랙 대체 · A17 자동화)
+
+- `FPSRGunMotionBaker` 신규: `static bool BakeCurveChannels(UAnimSequence* Seq,
+  const UFPSRGunMotionAuthoringData& Data, FText& OutError)`
+  - 각 채널 트랙 → §18 커브명으로 클립에 커브 기록. **커브명은 전부 `FPSRGunMotionCurveNames`
+    상수 + `MakePartCurveNames`(런타임 모듈) — 리터럴 중복 금지.**
+  - 커브 키 = 저작 키를 클립 프레임레이트로 §3-3 평가해 샘플(툴 프리뷰·런타임 GetCurveValue 가
+    같은 모양을 보게). 키 0개 채널 = 해당 커브 **삭제**(부재=0 규약 — 죽은 커브 잔존 금지).
+  - 커브 쓰기 API 는 엔진 grep(`IAnimationDataController` AddCurve/SetCurveKeys,
+    `FAnimationCurveIdentifier`) — 커브 이관 스크립트(커밋 `406448de` 언저리 Scripts/) 사용례 대조.
+- **몽타주 자동 기록(A17)**: 클립 베이크 성공 후 애셋 레지스트리 referencer 로 이 클립을 세그먼트로
+  무는 `UAnimMontage` 를 찾아 같은 커브를 몽타주에도 기록.
+  - 지원 = 세그먼트 1개·PlayRate 1·시작 0(현 AM_FP_Rifle_Reload 형태): 시간 매핑 항등.
+  - 그 외(다중 세그먼트/비-1 레이트/오프셋) = 그 몽타주 스킵 + 사유를 결과에 명시(조용한 불일치 금지).
+  - 기록/스킵한 몽타주 목록을 토스트·로그로 보고.
+- 부착 드롭다운은 AUD 의 `LeftHand/RightHandAttachPartSocket` 에 쓴다(베이크와 무관, 런타임이 직접 읽음).
+- hand_r 본 트랙 베이크(`BakeGunMotion`)·[총 고정화]는 **코드 유지**, v3 채널 저작에선 호출하지 않음 —
+  UI 에서 "레거시(v2)" 접힘 섹션으로 이동.
+
+### 20-3. 채널 레인 타임라인 + 활성 채널
+
+- `SFPSRGunMotionTimeline` 확장: 레인 = 총 / 왼손(+Blend 하위 얇은 레인) / 오른손(+Blend) / 파츠×N.
+  파츠 레인 = 설정 신규 `PreviewWeaponData`(`TSoftObjectPtr<UFPSRWeaponDataAsset>`, 기본
+  `/Game/Weapons/DataTable/DA_Weapon_Rifle`)의 `WeaponParts` 에서 자동(Part=null·Socket=None 제외,
+  라벨 = DisplayLabel 우선, 없으면 Socket).
+- 활성 채널은 항상 1개(레인 하이라이트). 레인 클릭 = 활성 전환. 키 조작(클릭 선택/드래그 스냅/우클릭
+  삭제/더블클릭 보간값 추가/언두)은 v2.3 그대로 레인별 동작 — 커밋은 **기존 MutateKey 단일 훅을 채널
+  id 로 파라미터화**해 경유(새 커밋 경로 금지, 재굽기→미러 재싱크 체인 보존).
+- 숫자 키 목록(§4-4)은 활성 채널의 키를 표시·편집(Blend 레인은 Time·Value 2열).
+
+### 20-4. 뷰포트 — 대상 클릭 선택 + 조작 프리뷰 (판정은 PIE)
+
+- 프리뷰 씬 추가 구성: 파츠 스태틱메시 컴포넌트 ×N(무기 메시의 Socket+Offset 부착 — DA 값 그대로),
+  손 IK 타깃 프록시 = 구체 컴포넌트 2개. 그립 기준점은 캐릭터 그립 캐시와 같은 소스(무기 메시의 그립
+  소켓 — `AFPSRCharacter::ComputeGripInGunFrame` 이 읽는 그 소켓명 경로를 grep 해 동일 소켓 사용).
+  소켓이 없으면 총 원점 폴백 + 상태줄 한 줄(저작값은 오프셋이라 조작엔 지장 없음).
+- 히트 프록시(어셈블러 뷰포트 클라이언트의 HActor 계열 패턴)로 총몸/파츠/손 프록시 클릭 → 활성 채널
+  전환(타임라인 하이라이트와 동기).
+- 기즈모 = 활성 채널 대상 컴포넌트 조작. 드래그 종료 시 **그 채널의 공간으로 역산**(총 = 잠금 구도
+  카메라 공간 §9·§12 그대로 / 손 = 총 공간 / 파츠 = 파츠 로컬) → 현재 스크럽 시각 키 커밋.
+- **뷰포트 포즈 반영 = 평가값 직접 적용**: 스크럽·키 변경 시 §3-3 평가 결과를 프리뷰 컴포넌트 상대
+  트랜스폼에 가산 적용(총=무기 컴포넌트, 파츠=파츠 컴포넌트, 손=프록시 구체). 런타임과 같은 수학이라
+  근사가 아니라 등가 — 단 팔 스킨 포즈(ABP·IK)는 뷰포트에 없으므로 **판정은 PIE 라이브 미러**(v2.2
+  유지: transient 프리뷰 클립 재굽기가 커브를 실으므로 미러가 총/손/파츠 전부 실제로 보여준다).
+
+### 20-5. [새 액션 클립]
+
+- 버튼 → 다이얼로그(에셋 이름 + 길이 초). 생성: 팔 스켈레톤(설정 TargetCharacterBP 팔 메시 기준)
+  UAnimSequence, **본 트랙 0개**, 30fps, 애디티브 `AAT_LOCAL_SPACE_BASE` +
+  `RefPoseType=ABPT_REF_POSE`(트랙 0 → raw=refpose=base → 델타 항등 0 = Idle 그대로.
+  A16 함정은 "기존 트랙 삭제" 케이스 — 무트랙+refpose base 는 구조적으로 0. 구현 후 AnimPose 델타
+  재계측 0.000 으로 실증, 0 아니면 중단·보고).
+- 저장 경로 = `Anims_LPAMG` 하위 + `_GunMotion` 접미 강제(§5 경고 규약 통과 위치).
+- 생성 직후 탭이 그 클립을 열고 AUD 부착, `bSanitized=true` 로 시작(본 트랙이 없어 고정화 불요).
+- 몽타주 생성·DA 배정 자동화는 범위 밖(§20 원문 유지).
+
+### 20-6. P2 검증 (Fable — §21-2 구체화)
+
+1. 빌드 0 에러(에디터 닫힌 상태) + 신규/변경 리플렉션 필드 명세 대조.
+2. 코드 리뷰: 커브명 리터럴 0(전부 상수/MakePartCurveNames) · MutateKey 단일 훅 유지 ·
+   TWeakObjectPtr 수명주기 · 몽타주 스킵 사유 보고 경로.
+3. 에디터 실사용(사용자와): 레인 표시·대상 클릭 전환·기즈모 3공간 저작·베이크 후 클립+몽타주 커브
+   대조·[새 액션 클립] 델타 0·PIE 미러 판정.
+
 ## 21. v3 검증 (Fable)
 
 1. P1: 커브를 파이썬으로 수동 저작한 테스트 클립 → PIE 실측 — 총/양손/파츠가 각 채널 커브대로
