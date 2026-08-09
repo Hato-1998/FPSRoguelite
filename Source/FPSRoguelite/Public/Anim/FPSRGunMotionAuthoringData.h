@@ -47,4 +47,16 @@ public:
 	/** SanitizeRightChain 이 우측 체인을 중립화 완료했는지 — BakeGunMotion 의 선행 조건 게이트. */
 	UPROPERTY(VisibleAnywhere)
 	bool bSanitized = false;
+
+	/** v3 §18: 이 클립이 재생되는 동안 왼손 IK 타깃이 FPGM_HL_Blend=1 에서 재기저할 부착 파츠의 안정 id
+	 *  (FFPSRWeaponPartAttachment::Socket, 예: "SOCKET_Mount_3"). 클립당 손별 1개(장전=왼손↔탄창이면 충분 —
+	 *  한 클립에서 여러 파츠를 순차 부착하는 것은 후속 확장, §18). None = 이 클립은 왼손 재기저를 쓰지 않음
+	 *  (Blend 커브가 있어도 그립 기준 오프셋으로만 남는다 — AFPSRFirstPersonArmsAnimInstance 가 이 값을
+	 *  런타임에 조회해 AFPSRCharacter::GetWeaponPartFrameInGunSpace 에 넘긴다). */
+	UPROPERTY(EditAnywhere)
+	FName LeftHandAttachPartSocket = NAME_None;
+
+	/** 오른손 미러(v3 §18) — FPGM_HR_Blend=1 에서 재기저할 부착 파츠의 안정 id. */
+	UPROPERTY(EditAnywhere)
+	FName RightHandAttachPartSocket = NAME_None;
 };

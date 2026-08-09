@@ -2112,6 +2112,9 @@ void AFPSRCharacter::RebuildPartsFromSelection(const TArray<FFPSRWeaponPartAttac
 		}
 	}
 	WeaponPartComponents.Reset();
+	// v3 §18-19 P1: kept index-aligned with WeaponPartComponents above (both grow together in the loop below).
+	WeaponPartBaseOffsets.Reset();
+	WeaponPartCurveNames.Reset();
 
 	// Reset the modular muzzle/aim/left-hand source caches HERE (both equip + modifier-change paths share this
 	// invariant) so a slot swap that drops the socket-carrying part can't leave a dangling pointer to a destroyed
@@ -2157,6 +2160,11 @@ void AFPSRCharacter::RebuildPartsFromSelection(const TArray<FFPSRWeaponPartAttac
 		PartComp->SetRelativeTransform(PartDef.Offset);
 		WeaponPartComponents.Add(PartComp);
 		AddedScopeDescriptors.Add(PartDef.Scope);
+		// v3 §18-19 P1: snapshot the authored base (see WeaponPartBaseOffsets' comment) and precompute this part's
+		// curve-name candidates (see WeaponPartCurveNames' comment) — both index-aligned with WeaponPartComponents
+		// by construction (appended together, right here).
+		WeaponPartBaseOffsets.Add(PartDef.Offset);
+		WeaponPartCurveNames.Add(FPSRGunMotionCurveNames::MakePartCurveNames(PartDef.Socket));
 	}
 
 	// Re-resolve modular muzzle source: the muzzle socket lives on a cosmetic part (barrel/forestock), so prefer the
@@ -2231,6 +2239,9 @@ void AFPSRCharacter::RebuildPartsFromSelection(const TArray<FFPSRWeaponPartAttac
 	// The parts (and therefore which component carries each grip socket) just changed — refresh the gun-frame grip
 	// cache rather than re-solving it every animation frame.
 	RefreshHandGripInGunFrameCache();
+
+	// v3 §18-19 P1: same reasoning, same lifecycle point — the attached parts' gun-space frames just changed too.
+	RefreshPartFramesInGunSpaceCache();
 }
 
 UMeshComponent* AFPSRCharacter::ResolveLeftHandGripComponent() const
@@ -2366,23 +2377,15 @@ bool AFPSRCharacter::ComputeGripInGunFrame(UMeshComponent* GripComp, FName GripS
 		Comp = Parent;
 	}
 
-	// Weapon -> gun frame (ik_hand_gun bone space == hand_r bone space once the animgraph's CopyBone runs). Read which
-	// scheme AttachWeaponMeshes actually used for the CURRENT attachment rather than assume one:
-	//  - ik_hand_gun bone anchor (see AttachWeaponMeshes): WeaponRoot's own RelativeTransform IS ALREADY the fixed
-	//    gun-frame offset — no further hop needed, and no further hop would be SAFE (ik_hand_gun's live bone transform
-	//    is posed — exactly the pose-dependence this function must not touch).
-	//  - Fallback Snap-on-AttachSocket (body, or an arms mesh with no ik_hand_gun bone): RelativeTransform is only
-	//    relative to that SOCKET, so one more fixed hop through the socket's own RTS_ParentBoneSpace offset finishes
-	//    the trip into hand_r's frame.
-	// Reading WeaponRoot's OWN live attach-socket name (rather than assuming which path ran) is what keeps this correct
-	// under either AttachWeaponMeshes path without this function having to know which one is live.
-	const FTransform WeaponRel = WeaponRoot->GetRelativeTransform();
-	FTransform WeaponInGunFrame = WeaponRel;
-	if (IkHandGunBoneName.IsNone() || WeaponRoot->GetAttachSocketName() != IkHandGunBoneName)
+	// Weapon -> gun frame (ik_hand_gun bone space == hand_r bone space once the animgraph's CopyBone runs) — shared
+	// tail with RefreshPartFramesInGunSpaceCache (v3 §18-19), extracted into GetWeaponRootPlacementInGunFrame.
+	FTransform WeaponInGunFrame;
+	if (!GetWeaponRootPlacementInGunFrame(WeaponInGunFrame))
 	{
-		const UFPSRWeaponDataAsset* Weapon = WeaponInventory ? WeaponInventory->GetCurrentWeapon() : nullptr;
-		const FName AttachSocket = ResolveWeaponAttachSocket(Weapon);
-		WeaponInGunFrame = WeaponRel * FirstPersonArms->GetSocketTransform(AttachSocket, RTS_ParentBoneSpace);
+		// Can't happen given the WeaponRoot/FirstPersonArms null-checks already passed above, but stay consistent
+		// with "refuse rather than compose a meaningless partial transform" (see the chain-ran-out branch above).
+		OutGripInGun = FTransform::Identity;
+		return false;
 	}
 
 	OutGripInGun = X * WeaponInGunFrame;
@@ -2390,6 +2393,37 @@ bool AFPSRCharacter::ComputeGripInGunFrame(UMeshComponent* GripComp, FName GripS
 	// normalized only here at the very end — an effector reads location/rotation only, but zeroing scale mid-
 	// composition would silently drop that scale from the result instead of just from the output.
 	OutGripInGun.SetScale3D(FVector::OneVector);
+	return true;
+}
+
+bool AFPSRCharacter::GetWeaponRootPlacementInGunFrame(FTransform& OutWeaponInGunFrame) const
+{
+	// Extracted from ComputeGripInGunFrame (v3 §18-19 P1 — RefreshPartFramesInGunSpaceCache needs the exact same
+	// tail for a part instead of a grip point). Read which scheme AttachWeaponMeshes actually used for the CURRENT
+	// attachment rather than assume one:
+	//  - ik_hand_gun bone anchor (see AttachWeaponMeshes): WeaponRoot's own RelativeTransform IS ALREADY the fixed
+	//    gun-frame offset — no further hop needed, and no further hop would be SAFE (ik_hand_gun's live bone transform
+	//    is posed — exactly the pose-dependence this function must not touch).
+	//  - Fallback Snap-on-AttachSocket (body, or an arms mesh with no ik_hand_gun bone): RelativeTransform is only
+	//    relative to that SOCKET, so one more fixed hop through the socket's own RTS_ParentBoneSpace offset finishes
+	//    the trip into hand_r's frame.
+	// Reading WeaponRoot's OWN live attach-socket name (rather than assuming which path ran) is what keeps this correct
+	// under either AttachWeaponMeshes path without the caller having to know which one is live.
+	OutWeaponInGunFrame = FTransform::Identity;
+	UMeshComponent* const WeaponRoot = ActiveWeaponMesh;
+	if (!WeaponRoot || !FirstPersonArms)
+	{
+		return false;
+	}
+
+	const FTransform WeaponRel = WeaponRoot->GetRelativeTransform();
+	OutWeaponInGunFrame = WeaponRel;
+	if (IkHandGunBoneName.IsNone() || WeaponRoot->GetAttachSocketName() != IkHandGunBoneName)
+	{
+		const UFPSRWeaponDataAsset* Weapon = WeaponInventory ? WeaponInventory->GetCurrentWeapon() : nullptr;
+		const FName AttachSocket = ResolveWeaponAttachSocket(Weapon);
+		OutWeaponInGunFrame = WeaponRel * FirstPersonArms->GetSocketTransform(AttachSocket, RTS_ParentBoneSpace);
+	}
 	return true;
 }
 
@@ -2433,6 +2467,110 @@ bool AFPSRCharacter::GetLeftHandGripInGunFrame(const USceneComponent* ForMesh, F
 	}
 	OutGripInGun = CachedLeftGripInGun.GetValue();
 	return true;
+}
+
+bool AFPSRCharacter::GetWeaponPartFrameInGunSpace(FName AttachSocket, FTransform& OutFrame) const
+{
+	// Cache reader only — RefreshPartFramesInGunSpaceCache is where this is actually solved (on attach/part
+	// changes, same lifecycle point as the grip cache above), never per animation frame.
+	OutFrame = FTransform::Identity;
+	if (AttachSocket.IsNone())
+	{
+		return false;
+	}
+	const FTransform* Cached = CachedPartFramesInGunSpace.Find(AttachSocket);
+	if (!Cached)
+	{
+		return false;
+	}
+	OutFrame = *Cached;
+	return true;
+}
+
+void AFPSRCharacter::RefreshPartFramesInGunSpaceCache()
+{
+	CachedPartFramesInGunSpace.Reset();
+
+	FTransform WeaponInGunFrame;
+	if (!WeaponMesh || !GetWeaponRootPlacementInGunFrame(WeaponInGunFrame))
+	{
+		return;
+	}
+
+	for (int32 i = 0; i < WeaponPartComponents.Num(); ++i)
+	{
+		UStaticMeshComponent* Part = WeaponPartComponents[i];
+		if (!Part || !WeaponPartBaseOffsets.IsValidIndex(i))
+		{
+			continue;
+		}
+		const FName Socket = Part->GetAttachSocketName();
+		if (Socket.IsNone())
+		{
+			continue;
+		}
+
+		// Part's AUTHORED placement (WeaponPartBaseOffsets[i] — "socket + Offset", BEFORE any FPGM_P_* curve is
+		// applied by ApplyWeaponPartCurves) relative to the socket, hopped into WeaponMesh's own RTS_Component
+		// space, then composed through the SAME WeaponInGunFrame tail ComputeGripInGunFrame uses for a grip point
+		// — landing this in the EXACT SAME frame as CachedRightGripInGun / CachedLeftGripInGun (ik_hand_gun
+		// bone-parent space), which is what lets the arms AnimInstance lerp/slerp between a grip target and a part
+		// target (v3 §18 Blend semantics) without a space mismatch.
+		const FTransform PartInWeaponSpace = WeaponPartBaseOffsets[i] * WeaponMesh->GetSocketTransform(Socket, RTS_Component);
+		CachedPartFramesInGunSpace.Add(Socket, PartInWeaponSpace * WeaponInGunFrame);
+	}
+}
+
+void AFPSRCharacter::ApplyWeaponPartCurves()
+{
+	// Same gate UpdateAimDownSights uses for "am I the one solving against the arms" (v3 §19-3): no split, no arms,
+	// nothing to apply curves to.
+	if (!bFirstPersonSplitActive || !FirstPersonArms || WeaponPartComponents.Num() == 0)
+	{
+		return;
+	}
+	UAnimInstance* ArmsAnim = FirstPersonArms->GetAnimInstance();
+	if (!ArmsAnim)
+	{
+		return;
+	}
+
+	for (int32 i = 0; i < WeaponPartComponents.Num(); ++i)
+	{
+		UStaticMeshComponent* Part = WeaponPartComponents[i];
+		if (!Part || !WeaponPartCurveNames.IsValidIndex(i) || !WeaponPartBaseOffsets.IsValidIndex(i))
+		{
+			continue;
+		}
+
+		// Cheap no-op path (v3 §19-3 perf budget: parts <=8, one owner — effectively free): the FIRST curve name is
+		// the gate. A currently-blended pose that never authored FPGM_P_<Socket>_TX for this part — the
+		// overwhelming common case, since most clips never touch any part curve at all — skips straight past this
+		// part without reading the other 5 curves or touching SetRelativeTransform.
+		const FPSRGunMotionCurveNames::FPartCurveNames& Names = WeaponPartCurveNames[i];
+		float TX = 0.0f;
+		if (!ArmsAnim->GetCurveValue(Names.TX, TX))
+		{
+			continue;
+		}
+		float TY = 0.0f, TZ = 0.0f, RP = 0.0f, RY = 0.0f, RR = 0.0f;
+		ArmsAnim->GetCurveValue(Names.TY, TY);
+		ArmsAnim->GetCurveValue(Names.TZ, TZ);
+		ArmsAnim->GetCurveValue(Names.RP, RP);
+		ArmsAnim->GetCurveValue(Names.RY, RY);
+		ArmsAnim->GetCurveValue(Names.RR, RR);
+
+		// "기본 소켓+Offset ⊕ 커브 로컬 오프셋" (§18/§19-3): compose the curve delta onto the AUTHORED base, never
+		// onto the part's current RelativeTransform — reading that back would already include LAST frame's curve
+		// offset and accumulate it frame over frame instead of applying a fresh offset from the same base every
+		// time. Same composition style as §3-2 (rotation multiplies, translation adds — both already in the base's
+		// own local frame, the space a socket's RelativeLocation/Offset is authored in).
+		const FTransform& Base = WeaponPartBaseOffsets[i];
+		FTransform Result = Base;
+		Result.SetLocation(Base.GetLocation() + FVector(TX, TY, TZ));
+		Result.SetRotation((FRotator(RP, RY, RR).Quaternion() * Base.GetRotation()).GetNormalized());
+		Part->SetRelativeTransform(Result);
+	}
 }
 
 void AFPSRCharacter::NotifyEquippedWeaponModifiersChanged(const UFPSRWeaponInstance* ChangedInstance)
