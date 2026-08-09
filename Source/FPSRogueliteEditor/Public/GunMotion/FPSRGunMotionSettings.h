@@ -38,9 +38,16 @@ public:
 	UPROPERTY(EditAnywhere, Config, Category = "Gun Motion")
 	FName GripSourceBone = TEXT("hand_r");
 
-	/** [PIE에서 재생] 버튼이 PlaySlotAnimationAsDynamicMontage 에 넘기는 몽타주 슬롯 이름. */
+	/** [PIE에서 재생] 버튼, §14 PIE 라이브 링크 미러 몽타주가 공통으로 PlaySlotAnimationAsDynamicMontage 에
+	 *  넘기는 몽타주 슬롯 이름. */
 	UPROPERTY(EditAnywhere, Config, Category = "Gun Motion")
 	FName PreviewSlotName = TEXT("DefaultSlot");
+
+	/** 증보 v2.2 §14 마지막: [총 고정화] 실행 시 클립에 이 이름의 플로트 커브가 없으면 상태줄에 경고("IK 해제
+	 *  커브가 클립에 없음 — 미러에서 왼손이 그립에 고정됨")를 낸다. 🚨 런타임 UFPSRFirstPersonArmsAnimInstance::
+	 *  LeftHandIKWeightCurve 와 이름이 일치해야 한다 — 어긋나면 이 경고가 무의미해진다. */
+	UPROPERTY(EditAnywhere, Config, Category = "Gun Motion")
+	FName LeftHandIKWeightCurveName = TEXT("LeftHandIKWeight");
 
 	/** TargetCharacterBP 위의 1인칭 팔 스켈레탈 메시 컴포넌트 이름(GetCamToCompRotation 이 CDO 컴포넌트 배열에서
 	 *  이 이름으로 찾는다 — protected UPROPERTY 라 직접 멤버 접근 대신 이름 조회를 쓴다). */

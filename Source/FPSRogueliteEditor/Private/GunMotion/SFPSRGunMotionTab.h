@@ -7,6 +7,8 @@
 #include "Types/SlateEnums.h"   // ECheckBoxState — §12 자유시점 체크박스
 
 class UAnimSequence;
+class UAnimInstance;
+class UAnimMontage;
 class UFPSRGunMotionAuthoringData;
 class SVerticalBox;
 class SHorizontalBox;
@@ -32,6 +34,11 @@ public:
 	SLATE_END_ARGS()
 
 	void Construct(const FArguments& InArgs);
+	~SFPSRGunMotionTab();
+
+	/** 매 틱(SWidget) — §14 PIE 라이브 링크 유효성 재검사 + 미러 몽타주 재생/스크럽 동기화. SFPSRWeaponAssemblerFPTab::
+	 *  Tick 과 같은 근거(연결 상태를 매 프레임 재확인하는 이 프로젝트의 기존 관용구). */
+	virtual void Tick(const FGeometry& AllottedGeometry, const double InCurrentTime, const float InDeltaTime) override;
 
 private:
 	// --- 클립 선택 ---
@@ -142,6 +149,42 @@ private:
 
 	/** 상태줄 — 지금 구도가 캡처값인지 폴백(BP 프로브)인지(§11 "상태줄에 어느 소스인지 표시"). */
 	FText GetCompositionSourceText() const;
+
+	// --- 증보 v2.2 §14: PIE 라이브 링크 -----------------------------------------------------------------------------
+
+	/** [PIE 라이브 링크] 체크박스(기본 ON, §14). */
+	ECheckBoxState GetPIELiveLinkState() const;
+	void OnPIELiveLinkStateChanged(ECheckBoxState NewState);
+
+	/** 상태줄 — "PIE 링크 활성" / "PIE 없음"(§14 축자) — 토글이 꺼져 있으면 별도 문구. */
+	FText GetPIELiveLinkStatusText() const;
+
+	/** 매 틱(Tick 이 호출) — PIE 로컬 AFPSRCharacter 의 FirstPersonArms AnimInstance 를 재조회해 미러 연결을
+	 *  갱신하고(끊기면 조용히 해제, 재개되면 자동 재연결), 연결돼 있으면 재생 상태·스크럽 위치를 동기화한다. */
+	void UpdatePIEMirror();
+
+	/** 미러 몽타주를 지금 프리뷰 클립으로 (재)시작한다 — 최초 연결/재연결/재굽기-재시작이 공유하는 단일 경로.
+	 *  InTimeToStartMontageAt 에 현재 스크럽 위치를 넘겨 시작 즉시 그 위치에서 출발하게 하고(§14 "스크럽 위치로
+	 *  복원"), 탭이 재생 중이 아니면 시작 직후 바로 Montage_Pause 한다. */
+	void StartOrRestartMirrorMontage(UAnimInstance& AnimInstance, UAnimSequence& PreviewClip, float BlendTime);
+
+	/** 재굽기(RebakeViewportPreview) 직후 호출(§14) — 미러가 연결돼 있으면 몽타주를 정지 후(블렌드 0.05) 같은
+	 *  블렌드로 재시작해 갱신된 압축 데이터를 확실히 다시 읽게 한다. 미러가 연결돼 있지 않으면 무동작(다음 Tick 의
+	 *  UpdatePIEMirror 가 알아서 연결한다). */
+	void ResyncMirrorAfterRebake();
+
+	/** 미러 몽타주 정리(§14 "탭/클립 닫기 시 Montage_Stop(0.1)") — 소멸자·PIE 라이브 링크 OFF 전환·PIE/클립 소실
+	 *  공통 경로. */
+	void StopMirrorMontage();
+
+	/** [PIE 라이브 링크] 토글 상태(기본 ON). */
+	bool bPIELiveLinkEnabled = true;
+
+	/** 미러가 지금 물고 있는 PIE AnimInstance/몽타주/프리뷰클립. 전부 PIE 월드(또는 트랜지언트 패키지) 소유라
+	 *  TWeakObjectPtr(§14 수명주기 — 매 틱 유효성 검사, PIE 종료/리스폰 시 조용히 해제). */
+	TWeakObjectPtr<UAnimInstance> MirrorAnimInstance;
+	TWeakObjectPtr<UAnimMontage> MirrorMontage;
+	TWeakObjectPtr<UAnimSequence> MirrorPlayingClip;
 
 	TWeakObjectPtr<UAnimSequence> SelectedSequence;
 

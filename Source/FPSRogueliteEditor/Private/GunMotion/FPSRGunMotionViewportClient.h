@@ -40,6 +40,9 @@ public:
 	void RebakePreview(const TArray<FFPSRGunMotionKey>& Keys);
 
 	bool HasPreviewClip() const { return PreviewClip != nullptr; }
+	/** 지금 프리뷰 클립(§14 PIE 라이브 링크가 미러링할 대상 — RebakePreview 가 in-place 로 덮어쓰는 바로 그
+	 *  객체). 없으면 null. */
+	UAnimSequence* GetPreviewClip() const { return PreviewClip; }
 	/** 팔/카메라/무기 준비 상태에 대한 마지막 사유(없으면 정상). */
 	const FString& GetIssue() const { return Issue; }
 

@@ -12,7 +12,9 @@
 
 #include "Animation/AnimSequence.h"
 #include "Animation/AnimData/IAnimationDataModel.h"
+#include "Animation/AnimCurveTypes.h"   // FFloatCurve — §14 마지막: [총 고정화]의 LeftHandIKWeight 커브 존재 확인
 #include "Animation/AnimInstance.h"
+#include "Animation/AnimMontage.h"   // §14 라이브 미러 — Montage_* 계열이 받는 UAnimMontage 완전 타입
 #include "Camera/CameraComponent.h"   // §11 [PIE 구도 캡처] — FirstPersonCamera::GetCameraView
 #include "Camera/CameraTypes.h"       // FMinimalViewInfo
 #include "Components/SkeletalMeshComponent.h"
@@ -74,6 +76,25 @@ namespace
 		const IAnimationDataModel* Model = Seq ? Seq->GetDataModel() : nullptr;
 		const double Fps = Model ? Model->GetFrameRate().AsDecimal() : 0.0;
 		return (Fps > 0.0) ? static_cast<float>(1.0 / Fps) : (1.0f / 30.0f);
+	}
+
+	/** §14 마지막: [총 고정화] 직후 클립에 CurveName 이름의 플로트 커브가 있는지 — 없으면 경고 대상
+	 *  (슬롯 재생은 클립 자신의 커브만 흐르므로, 정식 몽타주에만 실린 IK 해제 커브는 미러에 안 실린다). */
+	bool HasFloatCurveNamed(const UAnimSequence* Seq, FName CurveName)
+	{
+		const IAnimationDataModel* Model = Seq ? Seq->GetDataModel() : nullptr;
+		if (!Model || CurveName.IsNone())
+		{
+			return false;
+		}
+		for (const FFloatCurve& Curve : Model->GetFloatCurves())
+		{
+			if (Curve.GetName() == CurveName)
+			{
+				return true;
+			}
+		}
+		return false;
 	}
 }
 
@@ -179,6 +200,18 @@ void SFPSRGunMotionTab::Construct(const FArguments& InArgs)
 					SNew(STextBlock).Text(LOCTEXT("FreeLookLabel", "자유시점 (F)"))
 				]
 			]
+
+			// --- 증보 v2.2 §14: [PIE 라이브 링크] 토글 ---
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(8.0f, 0.0f, 0.0f, 0.0f)
+			[
+				SNew(SCheckBox)
+				.IsChecked(this, &SFPSRGunMotionTab::GetPIELiveLinkState)
+				.OnCheckStateChanged(this, &SFPSRGunMotionTab::OnPIELiveLinkStateChanged)
+				.ToolTipText(LOCTEXT("PIELiveLinkTooltip", "켜면 PIE 의 로컬 1인칭 팔이 이 탭의 저작 포즈(스크럽/재생/재굽기)를 실시간으로 미러링합니다."))
+				[
+					SNew(STextBlock).Text(LOCTEXT("PIELiveLinkLabel", "PIE 라이브 링크"))
+				]
+			]
 		]
 
 		// --- §11 상태줄: 지금 구도가 캡처값인지 폴백인지 ---
@@ -186,6 +219,13 @@ void SFPSRGunMotionTab::Construct(const FArguments& InArgs)
 		[
 			SAssignNew(CompositionStatusText, STextBlock)
 			.Text(this, &SFPSRGunMotionTab::GetCompositionSourceText)
+		]
+
+		// --- 증보 v2.2 §14 상태줄: PIE 라이브 링크 상태("PIE 링크 활성" / "PIE 없음") ---
+		+ SVerticalBox::Slot().AutoHeight().Padding(2.0f, 0.0f, 2.0f, 4.0f)
+		[
+			SNew(STextBlock)
+			.Text(this, &SFPSRGunMotionTab::GetPIELiveLinkStatusText)
 		]
 
 		// --- 기존 UI(§4) 그대로 — 숫자 키 목록은 미세조정용으로 유지, 뷰포트 기즈모와 같은 Keys 데이터를 편집한다 ---
@@ -382,6 +422,28 @@ void SFPSRGunMotionTab::Construct(const FArguments& InArgs)
 	RebuildKeyRows();
 }
 
+SFPSRGunMotionTab::~SFPSRGunMotionTab()
+{
+	// §14 수명주기: "탭 닫기 시 미러 몽타주 Montage_Stop(0.1) 정리" — 탭이 닫힌 뒤에도 PIE 팔이 마지막 저작 포즈에
+	// 얼어붙어 있으면 안 된다.
+	StopMirrorMontage();
+}
+
+void SFPSRGunMotionTab::Tick(const FGeometry& AllottedGeometry, const double InCurrentTime, const float InDeltaTime)
+{
+	SCompoundWidget::Tick(AllottedGeometry, InCurrentTime, InDeltaTime);
+
+	if (bPIELiveLinkEnabled)
+	{
+		UpdatePIEMirror();
+	}
+	else if (MirrorAnimInstance.IsValid())
+	{
+		// 토글을 끈 순간까지 연결돼 있었다 — 마지막 포즈에 얼어붙은 채 남기지 않는다(§14 취지, "정리" 확장).
+		StopMirrorMontage();
+	}
+}
+
 // ---------------------------------------------------------------------------------------------------------------
 // 클립 선택
 // ---------------------------------------------------------------------------------------------------------------
@@ -506,7 +568,17 @@ FReply SFPSRGunMotionTab::OnSanitizeClicked()
 	if (bOk)
 	{
 		UE_LOG(LogFPSR, Log, TEXT("[GunMotion] SanitizeRightChain 성공: %s"), *Seq->GetName());
-		SetStatus(LOCTEXT("SanitizeOk", "총 고정화 완료."));
+
+		// §14 마지막: 슬롯 재생(미러)은 클립 자신의 커브만 흐른다 — IK 해제 커브(LeftHandIKWeight)가 정식 몽타주에만
+		// 실려 있으면 미러엔 안 실린다. 이관 여부는 툴이 판단하지 않는다(범위 밖) — 없으면 경고만 낸다.
+		if (HasFloatCurveNamed(Seq, Settings->LeftHandIKWeightCurveName))
+		{
+			SetStatus(LOCTEXT("SanitizeOk", "총 고정화 완료."));
+		}
+		else
+		{
+			SetStatus(LOCTEXT("SanitizeOkNoIKCurve", "총 고정화 완료. IK 해제 커브가 클립에 없음 — 미러에서 왼손이 그립에 고정됨."));
+		}
 
 		// §8: 이전에 복제해 둔 프리뷰 클립은 고정화 이전 상태로 고정된 채라(bSanitized=false 로 복제됨) 재사용할 수
 		// 없다 — 원본 클립을 다시 복제해 베이스라인부터 새로 잡는다.
@@ -931,6 +1003,10 @@ void SFPSRGunMotionTab::RebakeViewportPreview()
 
 	Client->RebakePreview(Keys);
 	RebuildTimelineMarkers();
+
+	// §14: "재굽기 직후 → 미러 몽타주를 정지 후 재시작(블렌드 0.05)" — 재생 중인 몽타주가 갱신된 압축 데이터를
+	// 확실히 다시 읽게 하는 가장 단순한 보장. 미러가 연결돼 있지 않으면(§14 수명주기) 무동작.
+	ResyncMirrorAfterRebake();
 }
 
 int32 SFPSRGunMotionTab::FindKeyIndexNearTime(float Time, float ToleranceSeconds) const
@@ -1262,6 +1338,174 @@ FText SFPSRGunMotionTab::GetCompositionSourceText() const
 		return LOCTEXT("CompositionSourceCaptured", "구도: 캡처 구도(PIE 실측)");
 	}
 	return LOCTEXT("CompositionSourceFallback", "구도: 기본(BP) 구도 — PIE 캡처 권장");
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// 증보 v2.2 §14: PIE 라이브 링크
+// ---------------------------------------------------------------------------------------------------------------
+
+ECheckBoxState SFPSRGunMotionTab::GetPIELiveLinkState() const
+{
+	return bPIELiveLinkEnabled ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
+}
+
+void SFPSRGunMotionTab::OnPIELiveLinkStateChanged(ECheckBoxState NewState)
+{
+	bPIELiveLinkEnabled = (NewState == ECheckBoxState::Checked);
+	if (!bPIELiveLinkEnabled)
+	{
+		// 사용자 승인 해석 ①: OFF 전환은 "탭/클립 닫기"와 같은 취지 — 마지막 저작 포즈에 얼어붙은 채로 남기지 않는다.
+		StopMirrorMontage();
+	}
+}
+
+FText SFPSRGunMotionTab::GetPIELiveLinkStatusText() const
+{
+	if (!bPIELiveLinkEnabled)
+	{
+		return LOCTEXT("PIELiveLinkOff", "PIE 라이브 링크: 꺼짐");
+	}
+	return MirrorAnimInstance.IsValid()
+		? LOCTEXT("PIELiveLinkActive", "PIE 링크 활성")
+		: LOCTEXT("PIELiveLinkInactive", "PIE 없음");
+}
+
+void SFPSRGunMotionTab::UpdatePIEMirror()
+{
+	const TSharedPtr<FFPSRGunMotionViewportClient> Client = Viewport.IsValid() ? Viewport->GetGunMotionClient() : nullptr;
+	UAnimSequence* PreviewClip = (Client.IsValid() && Client->HasPreviewClip()) ? Client->GetPreviewClip() : nullptr;
+
+	// §14 조건: "PIE 월드 존재 + 프리뷰 클립 유효" — 둘 중 하나라도 없으면 조용히 해제.
+	FWorldContext* PIEWorldContext = GEditor ? GEditor->GetPIEWorldContext() : nullptr;
+	UWorld* PIEWorld = PIEWorldContext ? PIEWorldContext->World() : nullptr;
+	if (!PIEWorld || !PreviewClip)
+	{
+		if (MirrorAnimInstance.IsValid())
+		{
+			StopMirrorMontage();
+		}
+		return;
+	}
+
+	APlayerController* PC = PIEWorld->GetFirstPlayerController();
+	AFPSRCharacter* Character = PC ? Cast<AFPSRCharacter>(PC->GetPawn()) : nullptr;
+	const UFPSRGunMotionSettings* Settings = GetDefault<UFPSRGunMotionSettings>();
+	USkeletalMeshComponent* Arms = Character ? FindComponentByName<USkeletalMeshComponent>(Character, Settings->ArmsComponentName) : nullptr;
+	UAnimInstance* AnimInstance = Arms ? Arms->GetAnimInstance() : nullptr;
+	if (!AnimInstance)
+	{
+		// PIE 는 살아 있지만 폰/팔을 아직(또는 더 이상) 못 찾음 — 리스폰 도중 등. 조용히 해제, 다음 틱에 재시도.
+		if (MirrorAnimInstance.IsValid())
+		{
+			StopMirrorMontage();
+		}
+		return;
+	}
+
+	// §14 수명주기: 재조회한 AnimInstance/클립이 지금 물고 있는 것과 다르거나, 몽타주가 더 이상 살아있지 않으면
+	// (PIE 재시작·리스폰·클립 재선택) (재)연결한다 — 최초 연결도 이 분기를 탄다(MirrorMontage 가 아직 비어 있으므로).
+	const bool bNeedsReconnect =
+		(MirrorAnimInstance.Get() != AnimInstance) ||
+		(MirrorPlayingClip.Get() != PreviewClip) ||
+		!MirrorMontage.IsValid() ||
+		!AnimInstance->Montage_IsActive(MirrorMontage.Get());
+	if (bNeedsReconnect)
+	{
+		StartOrRestartMirrorMontage(*AnimInstance, *PreviewClip, /*BlendTime=*/0.1f);
+		return;
+	}
+
+	// 이미 연결됨 — 재생 상태/스크럽 위치 동기화.
+	UAnimMontage* Montage = MirrorMontage.Get();
+	const bool bTabPlaying = Client->IsPreviewPlaying();
+	const float TabPosition = Client->GetPreviewPosition();
+	const float MirrorPosition = AnimInstance->Montage_GetPosition(Montage);
+
+	if (bTabPlaying)
+	{
+		// §14: "탭 [재생] 중 → 미러 몽타주도 재생, 매 틱 위치 오차 0.1s 이상이면 재동기화".
+		if (!AnimInstance->Montage_IsPlaying(Montage))
+		{
+			AnimInstance->Montage_Resume(Montage);
+		}
+		if (FMath::Abs(MirrorPosition - TabPosition) >= 0.1f)
+		{
+			AnimInstance->Montage_SetPosition(Montage, TabPosition);
+		}
+	}
+	else
+	{
+		// §14: "탭 스크럽 변경 → Montage_SetPosition + Montage_Pause (포즈 고정 동기화)".
+		if (!FMath::IsNearlyEqual(MirrorPosition, TabPosition, 0.001f))
+		{
+			AnimInstance->Montage_SetPosition(Montage, TabPosition);
+		}
+		if (AnimInstance->Montage_IsPlaying(Montage))
+		{
+			AnimInstance->Montage_Pause(Montage);
+		}
+	}
+}
+
+void SFPSRGunMotionTab::StartOrRestartMirrorMontage(UAnimInstance& AnimInstance, UAnimSequence& PreviewClip, float BlendTime)
+{
+	const UFPSRGunMotionSettings* Settings = GetDefault<UFPSRGunMotionSettings>();
+	const TSharedPtr<FFPSRGunMotionViewportClient> Client = Viewport.IsValid() ? Viewport->GetGunMotionClient() : nullptr;
+	const float StartPosition = Client.IsValid() ? Client->GetPreviewPosition() : 0.0f;
+	const bool bShouldPlay = Client.IsValid() && Client->IsPreviewPlaying();
+
+	// InTimeToStartMontageAt 에 현재 스크럽 위치를 넘겨 시작과 동시에 그 위치에서 출발하게 한다(§14 "스크럽 위치로
+	// 복원" — 재굽기 재시작·최초 연결·재연결이 전부 이 경로 하나를 공유한다).
+	UAnimMontage* Montage = AnimInstance.PlaySlotAnimationAsDynamicMontage(
+		&PreviewClip, Settings->PreviewSlotName, BlendTime, BlendTime,
+		/*InPlayRate=*/1.0f, /*LoopCount=*/1, /*BlendOutTriggerTime=*/-1.0f, /*InTimeToStartMontageAt=*/StartPosition);
+
+	MirrorAnimInstance = &AnimInstance;
+	MirrorMontage = Montage;
+	MirrorPlayingClip = &PreviewClip;
+
+	if (Montage && !bShouldPlay)
+	{
+		AnimInstance.Montage_Pause(Montage);
+	}
+}
+
+void SFPSRGunMotionTab::ResyncMirrorAfterRebake()
+{
+	if (!bPIELiveLinkEnabled || !MirrorAnimInstance.IsValid())
+	{
+		// 미러가 연결돼 있지 않으면 무동작 — 다음 Tick 의 UpdatePIEMirror 가 알아서 (재)연결한다.
+		return;
+	}
+
+	UAnimInstance* AnimInstance = MirrorAnimInstance.Get();
+	const TSharedPtr<FFPSRGunMotionViewportClient> Client = Viewport.IsValid() ? Viewport->GetGunMotionClient() : nullptr;
+	UAnimSequence* PreviewClip = (Client.IsValid() && Client->HasPreviewClip()) ? Client->GetPreviewClip() : nullptr;
+	if (!PreviewClip)
+	{
+		return;
+	}
+
+	// 사용자 승인 해석 ②: "정지 후 재시작(블렌드 0.05)"을 정지/재시작 양쪽 블렌드에 대칭 적용.
+	if (UAnimMontage* OldMontage = MirrorMontage.Get())
+	{
+		AnimInstance->Montage_Stop(0.05f, OldMontage);
+	}
+	StartOrRestartMirrorMontage(*AnimInstance, *PreviewClip, /*BlendTime=*/0.05f);
+}
+
+void SFPSRGunMotionTab::StopMirrorMontage()
+{
+	if (UAnimInstance* AnimInstance = MirrorAnimInstance.Get())
+	{
+		if (UAnimMontage* Montage = MirrorMontage.Get())
+		{
+			AnimInstance->Montage_Stop(0.1f, Montage);
+		}
+	}
+	MirrorAnimInstance.Reset();
+	MirrorMontage.Reset();
+	MirrorPlayingClip.Reset();
 }
 
 #undef LOCTEXT_NAMESPACE
