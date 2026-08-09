@@ -26,11 +26,14 @@ public:
 	 *  ArmsComponentName/CameraComponentName 컴포넌트를 찾아 어태치 체인을 걸어 올라가며 계산한다. */
 	static bool GetCamToCompRotation(FQuat& OutM, FText& OutError);
 
+	/** §3-3: Time 오름차순으로 정렬된 Keys 를 스무스스텝 보간해 Time 시각의 카메라 공간 오프셋/회전을 구한다.
+	 *  증보 v2.3 §16: 타임라인의 "빈 곳 더블클릭 = 현재 보간값으로 키 추가"가 이 함수를 그대로 재사용한다
+	 *  (원래 private 였던 것을 이번 증보에서 public 으로 올렸다 — BakeGunMotion 과 같은 보간 결과를 UI 도 봐야
+	 *  더블클릭 추가가 포즈를 튀게 하지 않는다). */
+	static void EvalKeys(const TArray<FFPSRGunMotionKey>& SortedKeys, float Time, FVector& OutCamOffset, FQuat& OutCamRotation);
+
 private:
 	/** §3-1: 본 하나의 시각 t=0 base 트랜스폼 역산(base = delta⁻¹∘raw). Seq 는 애디티브(AAT_LOCAL_SPACE_BASE)
 	 *  여야 한다 — 아니면 delta/raw 개념 자체가 성립하지 않는다. */
 	static bool ComputeBoneBaseAtFrame0(UAnimSequence* Seq, FName BoneName, FTransform& OutBase, FText& OutError);
-
-	/** §3-3: Time 오름차순으로 정렬된 Keys 를 스무스스텝 보간해 Time 시각의 카메라 공간 오프셋/회전을 구한다. */
-	static void EvalKeys(const TArray<FFPSRGunMotionKey>& SortedKeys, float Time, FVector& OutCamOffset, FQuat& OutCamRotation);
 };

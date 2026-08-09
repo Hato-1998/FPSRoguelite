@@ -6,6 +6,7 @@
 #include "GunMotion/FPSRGunMotionBaker.h"
 #include "GunMotion/FPSRGunMotionViewportClient.h"
 #include "GunMotion/SFPSRGunMotionViewport.h"
+#include "GunMotion/SFPSRGunMotionTimeline.h"   // 증보 v2.3 §16 — 기존 SSlider + 키 마커 줄을 대체하는 타임라인 위젯
 #include "Anim/FPSRGunMotionAuthoringData.h"
 #include "Core/FPSRLogChannels.h"
 #include "Hero/FPSRCharacter.h"
@@ -37,11 +38,11 @@
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SCheckBox.h"   // §12 자유시점 체크박스
 #include "Widgets/Input/SNumericEntryBox.h"
-#include "Widgets/Input/SSlider.h"
+#include "Widgets/Layout/SBorder.h"   // §16 숫자 목록 행 선택 강조(BuildKeyRow)
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SScrollBox.h"
-#include "Widgets/Layout/SSpacer.h"
 #include "Widgets/Text/STextBlock.h"
+#include "Styling/AppStyle.h"   // §16 행 강조에 쓰는 WhiteBrush
 
 #define LOCTEXT_NAMESPACE "SFPSRGunMotionTab"
 
@@ -117,7 +118,7 @@ void SFPSRGunMotionTab::Construct(const FArguments& InArgs)
 			]
 		]
 
-		// --- §8 타임라인: 재생/정지 + 스크럽 슬라이더 ---
+		// --- §16 타임라인: 재생/정지 + 룰러/플레이헤드/키 다이아몬드 위젯(기존 스크럽 슬라이더 + §8 키 마커 줄 대체) ---
 		+ SVerticalBox::Slot().AutoHeight().Padding(2.0f, 4.0f, 2.0f, 0.0f)
 		[
 			SNew(SHorizontalBox)
@@ -131,19 +132,19 @@ void SFPSRGunMotionTab::Construct(const FArguments& InArgs)
 
 			+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
 			[
-				SAssignNew(ScrubSlider, SSlider)
-				.MinValue(0.0f)
-				.MaxValue(1.0f)
-				.Value(this, &SFPSRGunMotionTab::GetScrubPosition)
-				.OnMouseCaptureBegin(this, &SFPSRGunMotionTab::OnScrubCaptureBegin)
-				.OnValueChanged(this, &SFPSRGunMotionTab::OnScrubPositionChanged)
+				SAssignNew(Timeline, SFPSRGunMotionTimeline)
+				.SequenceLength(this, &SFPSRGunMotionTab::GetTimelineSequenceLength)
+				.FrameRate(this, &SFPSRGunMotionTab::GetTimelineFrameRate)
+				.ScrubPosition(this, &SFPSRGunMotionTab::GetScrubPosition)
+				.Keys(this, &SFPSRGunMotionTab::GetTimelineKeys)
+				.SelectedKeyIndex(this, &SFPSRGunMotionTab::GetSelectedKeyIndex)
+				.OnScrubPositionChanged(this, &SFPSRGunMotionTab::OnScrubPositionChanged)
+				.OnScrubCaptureBegin(this, &SFPSRGunMotionTab::OnScrubCaptureBegin)
+				.OnKeySelected(this, &SFPSRGunMotionTab::OnTimelineKeySelected)
+				.OnKeyTimeCommitted(this, &SFPSRGunMotionTab::SetKeyTime)
+				.OnKeyDeleteRequested_Lambda([this](int32 KeyIndex) { OnRemoveKeyClicked(KeyIndex); })
+				.OnKeyAddRequested(this, &SFPSRGunMotionTab::OnGizmoKeyCommitted)
 			]
-		]
-
-		// --- §8 키 시각 마커 줄 ---
-		+ SVerticalBox::Slot().AutoHeight().Padding(2.0f, 0.0f, 2.0f, 4.0f)
-		[
-			SAssignNew(KeyMarkerContainer, SHorizontalBox)
 		]
 
 		// --- §9 기즈모 툴바: 이동/회전 + 현재 시각에 키/삭제 ---
@@ -715,6 +716,10 @@ FReply SFPSRGunMotionTab::OnRemoveKeyClicked(int32 KeyIndex)
 	AuthData->Modify();
 	AuthData->Keys.RemoveAt(KeyIndex);
 
+	// 삭제로 인덱스가 밀리므로, 지금 선택돼 있던 키가 무엇이었든 더 이상 유효하지 않다(§16 타임라인 우클릭 삭제도
+	// 이 경로를 공유한다 — 단일 훅).
+	SelectedKeyIndex = INDEX_NONE;
+
 	Seq->MarkPackageDirty();
 	RebuildKeyRows();
 	RebakeViewportPreview();
@@ -802,7 +807,9 @@ TSharedRef<SWidget> SFPSRGunMotionTab::BuildKeyRow(int32 KeyIndex)
 		];
 	};
 
-	return SNew(SHorizontalBox)
+	// §16 "숫자 목록 행 선택과 동기화" — 타임라인에서 선택된 키와 같은 행을 옅게 강조한다. 선택 아님(투명)일 땐
+	// 시각적으로 아무 것도 안 그려지므로 배경 브러시는 WhiteBrush 하나로 충분하다(틴트 알파로 온/오프).
+	TSharedRef<SHorizontalBox> RowContent = SNew(SHorizontalBox)
 
 		+ SHorizontalBox::Slot().FillWidth(0.12f).Padding(2.0f)
 		[
@@ -851,6 +858,19 @@ TSharedRef<SWidget> SFPSRGunMotionTab::BuildKeyRow(int32 KeyIndex)
 			SNew(SButton)
 			.Text(LOCTEXT("RemoveKeyButton", "삭제"))
 			.OnClicked(FOnClicked::CreateSP(this, &SFPSRGunMotionTab::OnRemoveKeyClicked, KeyIndex))
+		];
+
+	return SNew(SBorder)
+		.BorderImage(FAppStyle::GetBrush("WhiteBrush"))
+		.Padding(FMargin(0.0f))
+		.BorderBackgroundColor_Lambda([this, KeyIndex]() -> FSlateColor
+		{
+			return (KeyIndex == SelectedKeyIndex)
+				? FSlateColor(FLinearColor(0.2f, 0.4f, 0.9f, 0.35f))
+				: FSlateColor(FLinearColor::Transparent);
+		})
+		[
+			RowContent
 		];
 }
 
@@ -971,13 +991,8 @@ void SFPSRGunMotionTab::RebuildViewportPreview()
 
 	Client->SetSourceClip(Seq, Keys);
 
-	if (ScrubSlider.IsValid())
-	{
-		const float Length = Client->GetPreviewLength();
-		ScrubSlider->SetMinAndMaxValues(0.0f, FMath::Max(UE_KINDA_SMALL_NUMBER, Length));
-	}
-
-	RebuildTimelineMarkers();
+	// §16: 타임라인 위젯은 SequenceLength/Keys 를 매 페인트 어트리뷰트로 다시 읽으므로(GetTimelineSequenceLength/
+	// GetTimelineKeys), 기존 스크럽 슬라이더처럼 여기서 범위를 수동 동기화할 필요가 없다.
 
 	if (!Client->GetIssue().IsEmpty())
 	{
@@ -1002,7 +1017,6 @@ void SFPSRGunMotionTab::RebakeViewportPreview()
 	const TArray<FFPSRGunMotionKey> Keys = AuthData ? AuthData->Keys : TArray<FFPSRGunMotionKey>();
 
 	Client->RebakePreview(Keys);
-	RebuildTimelineMarkers();
 
 	// §14: "재굽기 직후 → 미러 몽타주를 정지 후 재시작(블렌드 0.05)" — 재생 중인 몽타주가 갱신된 압축 데이터를
 	// 확실히 다시 읽게 하는 가장 단순한 보장. 미러가 연결돼 있지 않으면(§14 수명주기) 무동작.
@@ -1070,47 +1084,6 @@ void SFPSRGunMotionTab::OnGizmoKeyCommitted(float Time, FVector CamOffset, FRota
 	RebakeViewportPreview();
 }
 
-void SFPSRGunMotionTab::RebuildTimelineMarkers()
-{
-	if (!KeyMarkerContainer.IsValid())
-	{
-		return;
-	}
-	KeyMarkerContainer->ClearChildren();
-
-	UAnimSequence* Seq = GetSequence();
-	const UFPSRGunMotionAuthoringData* AuthData = Seq ? Seq->GetAssetUserData<UFPSRGunMotionAuthoringData>() : nullptr;
-	const float Length = Seq ? Seq->GetPlayLength() : 0.0f;
-	if (!AuthData || Length <= UE_KINDA_SMALL_NUMBER)
-	{
-		return;
-	}
-
-	// 시간 순으로 정렬한 사본으로 마커를 왼쪽부터 배치한다 — 저작 순서가 아니라 시각 순서로 보여야 타임라인처럼 읽힌다.
-	TArray<FFPSRGunMotionKey> SortedKeys = AuthData->Keys;
-	SortedKeys.Sort([](const FFPSRGunMotionKey& A, const FFPSRGunMotionKey& B) { return A.Time < B.Time; });
-
-	float PrevTime = 0.0f;
-	for (const FFPSRGunMotionKey& Key : SortedKeys)
-	{
-		const float GapFraction = FMath::Clamp((Key.Time - PrevTime) / Length, 0.0f, 1.0f);
-		if (GapFraction > 0.0f)
-		{
-			KeyMarkerContainer->AddSlot().FillWidth(GapFraction)[SNew(SSpacer)];
-		}
-		KeyMarkerContainer->AddSlot().AutoWidth()
-		[
-			SNew(STextBlock).Text(LOCTEXT("KeyMarkerGlyph", "|")).ToolTipText(FText::AsNumber(Key.Time))
-		];
-		PrevTime = Key.Time;
-	}
-	const float TailFraction = FMath::Clamp((Length - PrevTime) / Length, 0.0f, 1.0f);
-	if (TailFraction > 0.0f)
-	{
-		KeyMarkerContainer->AddSlot().FillWidth(TailFraction)[SNew(SSpacer)];
-	}
-}
-
 float SFPSRGunMotionTab::GetScrubPosition() const
 {
 	if (!Viewport.IsValid())
@@ -1163,6 +1136,40 @@ FText SFPSRGunMotionTab::GetPlayPauseLabel() const
 	const TSharedPtr<FFPSRGunMotionViewportClient> Client = Viewport.IsValid() ? Viewport->GetGunMotionClient() : nullptr;
 	const bool bPlaying = Client.IsValid() && Client->IsPreviewPlaying();
 	return bPlaying ? LOCTEXT("PauseLabel", "정지") : LOCTEXT("PlayLabel", "재생");
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// 증보 v2.3 §16: 타임라인 위젯(SFPSRGunMotionTimeline) 어트리뷰트/델리게이트
+// ---------------------------------------------------------------------------------------------------------------
+
+float SFPSRGunMotionTab::GetTimelineSequenceLength() const
+{
+	const TSharedPtr<FFPSRGunMotionViewportClient> Client = Viewport.IsValid() ? Viewport->GetGunMotionClient() : nullptr;
+	return Client.IsValid() ? Client->GetPreviewLength() : 0.0f;
+}
+
+float SFPSRGunMotionTab::GetTimelineFrameRate() const
+{
+	const UAnimSequence* Seq = GetSequence();
+	const IAnimationDataModel* Model = Seq ? Seq->GetDataModel() : nullptr;
+	const double Fps = Model ? Model->GetFrameRate().AsDecimal() : 0.0;
+	return (Fps > 0.0) ? static_cast<float>(Fps) : 30.0f;
+}
+
+TArray<FFPSRGunMotionKey> SFPSRGunMotionTab::GetTimelineKeys() const
+{
+	UAnimSequence* Seq = GetSequence();
+	const UFPSRGunMotionAuthoringData* AuthData = Seq ? Seq->GetAssetUserData<UFPSRGunMotionAuthoringData>() : nullptr;
+	return AuthData ? AuthData->Keys : TArray<FFPSRGunMotionKey>();
+}
+
+void SFPSRGunMotionTab::OnTimelineKeySelected(int32 KeyIndex)
+{
+	SelectedKeyIndex = KeyIndex;
+	// §16: "키 클릭 = 선택 + 스크럽을 그 키 시각으로 점프" — 기존 스크럽 캡처/이동 경로(재생 정지 후 위치 이동)를
+	// 그대로 재사용한다(§8 에서부터 쓰던 것과 같은 단일 경로).
+	OnScrubCaptureBegin();
+	OnScrubPositionChanged(GetKeyTime(KeyIndex));
 }
 
 FReply SFPSRGunMotionTab::OnTranslateModeClicked()

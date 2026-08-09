@@ -11,11 +11,10 @@ class UAnimInstance;
 class UAnimMontage;
 class UFPSRGunMotionAuthoringData;
 class SVerticalBox;
-class SHorizontalBox;
 class STextBlock;
-class SSlider;
 class FAdvancedPreviewScene;
 class SFPSRGunMotionViewport;
+class SFPSRGunMotionTimeline;
 struct FAssetData;
 struct FFPSRGunMotionKey;
 
@@ -118,15 +117,27 @@ private:
 	/** Time 에 가장 가까운 키 인덱스(±ToleranceSeconds 이내만) — 없으면 INDEX_NONE. §9 "같은 시각(±1프레임)의 키". */
 	int32 FindKeyIndexNearTime(float Time, float ToleranceSeconds) const;
 
-	/** 타임라인 아래 키 시각 마커 줄을 다시 그린다(§8). */
-	void RebuildTimelineMarkers();
-
 	// --- 타임라인 스크럽/재생 ---
 	float GetScrubPosition() const;
 	void OnScrubPositionChanged(float NewValue);
 	void OnScrubCaptureBegin();
 	FReply OnPlayPauseClicked();
 	FText GetPlayPauseLabel() const;
+
+	// --- 증보 v2.3 §16: 타임라인 위젯(SFPSRGunMotionTimeline) ------------------------------------------------------
+
+	/** 타임라인의 SequenceLength 어트리뷰트 — 기존 스크럽 슬라이더가 SetMinAndMaxValues 로 한 번 동기화하던 것을
+	 *  매 페인트 읽는 어트리뷰트로 바꿨다(위젯이 룰러/플레이헤드를 그때그때 다시 그리므로 별도 동기화 호출이
+	 *  필요 없다). */
+	float GetTimelineSequenceLength() const;
+	/** 타임라인의 FrameRate 어트리뷰트 — 키 드래그의 프레임 스냅 기준(§16). */
+	float GetTimelineFrameRate() const;
+	/** 타임라인이 매 페인트 그릴 저작 키 목록(AssetUserData 사본 — 위젯은 표시/조작만, 소유는 여전히 탭). */
+	TArray<FFPSRGunMotionKey> GetTimelineKeys() const;
+	/** 선택된 키 인덱스 — 숫자 목록 행 강조와 타임라인 다이아몬드 강조가 공유하는 단일 상태(§16 "동기화"). */
+	int32 GetSelectedKeyIndex() const { return SelectedKeyIndex; }
+	/** 타임라인 키 클릭(§16) — 선택 상태를 갱신하고 기존 스크럽 경로(일시정지 후 이동)로 그 키 시각으로 점프한다. */
+	void OnTimelineKeySelected(int32 KeyIndex);
 
 	// --- 기즈모 툴바(§9) ---
 	FReply OnTranslateModeClicked();
@@ -206,9 +217,12 @@ private:
 	TSharedPtr<FAdvancedPreviewScene> PreviewScene;
 	TSharedPtr<SFPSRGunMotionViewport> Viewport;
 
-	TSharedPtr<SSlider> ScrubSlider;
-	/** 타임라인 아래 키 시각 마커 줄(§8). RebuildTimelineMarkers 가 채운다. */
-	TSharedPtr<SHorizontalBox> KeyMarkerContainer;
+	/** 증보 v2.3 §16: 타임라인 위젯(룰러+플레이헤드+키 다이아몬드) — 기존 스크럽 슬라이더(SSlider) + §8 키 시각
+	 *  마커 줄을 대체한다. */
+	TSharedPtr<SFPSRGunMotionTimeline> Timeline;
+
+	/** §16 "숫자 목록 행 선택과 동기화" — 타임라인에서 클릭/드래그로 선택된 키 인덱스(없으면 INDEX_NONE). */
+	int32 SelectedKeyIndex = INDEX_NONE;
 
 	/** §11: 지금 구도가 캡처값인지 폴백인지 표시하는 상태줄(GetCompositionSourceText). */
 	TSharedPtr<STextBlock> CompositionStatusText;
