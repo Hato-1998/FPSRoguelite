@@ -71,14 +71,7 @@ public:
 	 *  is no per-frame source to lag behind in the first place.
 	 *
 	 *  Rotator, not FTransform/FQuat, because that is what TransformBone's pins take. Meaningless (zero) when the
-	 *  matching bHas*HandGrip is false.
-	 *
-	 *  v3 (GunMotionTool_Spec.md §18-19, P1): no longer a straight cache pass-through. FPGM_HR_TX/TY/TZ/RP/RY/RR
-	 *  (GUN space — already this exact frame, no M conversion) are composed on top of the cached grip, and when
-	 *  FPGM_HR_Blend > 0 the result is lerped/slerped toward the currently-playing clip's attach-part frame
-	 *  (AFPSRCharacter::GetWeaponPartFrameInGunSpace, keyed by the clip's RightHandAttachPartSocket metadata) — see
-	 *  ComputeHandIKTarget. A clip with none of those curves authored reproduces the pre-v3 value exactly (0
-	 *  offset, 0 blend), which is the P1 regression contract (§21). */
+	 *  matching bHas*HandGrip is false. */
 	UPROPERTY(BlueprintReadOnly, Category = "FPSR|Arms")
 	FVector RightGripInGunLocation = FVector::ZeroVector;
 
@@ -110,22 +103,6 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Arms")
 	FName RightHandIKWeightCurve = FName(TEXT("RightHandIKWeight"));
 
-	/** v3 curve-channel authoring (GunMotionTool_Spec.md §18-19, P1): whole-gun offset read from FPGM_Gun_TX/TY/TZ/
-	 *  RP/RY/RR (CAMERA space) and converted to COMPONENT space via the runtime M = ArmsRot^-1 * CamRot (both
-	 *  components' actual world rotations, recomputed every publish — see ComputeCameraToArmsRotation). Feed
-	 *  straight into a Component-space additive TransformBone(ik_hand_gun) node's Translation/Rotation pins
-	 *  (§19-2 — that ABP node is out of this change's scope; only the published names have to match). Because the
-	 *  two-hand IK targets below are expressed in GUN space (ik_hand_gun bone-parent space, same as
-	 *  Right/LeftGripInGun*), and ik_hand_l/r sit as CHILDREN of ik_hand_gun in the retarget rig, this offset
-	 *  carries both hands along automatically without touching their targets (§19-1) — no curve here means
-	 *  identity (zero), which is a pure pass-through of the existing gun-anchor pose.
-	 */
-	UPROPERTY(BlueprintReadOnly, Category = "FPSR|Arms")
-	FVector GunOffsetLocation = FVector::ZeroVector;
-
-	UPROPERTY(BlueprintReadOnly, Category = "FPSR|Arms")
-	FRotator GunOffsetRotation = FRotator::ZeroRotator;
-
 protected:
 	virtual void NativeInitializeAnimation() override;
 
@@ -140,31 +117,6 @@ protected:
 private:
 	void UpdateAndPublish(float DeltaSeconds);
 	void PushToLinkedLayers() const;
-
-	/** v3 §18-19 P1: the runtime camera->arms rotation M, from the two components' ACTUAL WORLD rotations (never a
-	 *  CDO/editor path — this has to stay correct as the owner turns their view every frame). M = ArmsRot^-1 *
-	 *  CamRot (GunMotionTool_Spec.md §19-1 / §3-2's Ocomp = M * Ocam * M^-1 formula, reused verbatim). Identity
-	 *  when either component is missing. Cost: two GetComponentQuat() reads + one quaternion multiply, once per
-	 *  publish — negligible next to the rest of this owner-local pass. */
-	FQuat ComputeCameraToArmsRotation(const class AFPSRCharacter& Character) const;
-
-	/** v3 §18-19 P1: compose the FPGM_H{L,R}_TX..RR gun-space offset onto GripInGun, then — when the matching
-	 *  Blend curve is > 0 AND ActiveClipMeta resolves an attach-part socket for this hand AND that part is
-	 *  currently attached (AFPSRCharacter::GetWeaponPartFrameInGunSpace) — lerp/slerp the result toward the same
-	 *  offset composed onto the part's frame instead (§18 Blend semantics: 0 = grip, 1 = part). Zeroes the output
-	 *  when bHasGrip is false (mirrors the pre-v3 bHas*HandGrip contract exactly — a weapon with no grip on this
-	 *  hand has no gun-space frame to compose against in the first place). */
-	void ComputeHandIKTarget(class AFPSRCharacter& Character, bool bIsLeftHand, bool bHasGrip,
-		const FTransform& GripInGun, const class UFPSRGunMotionAuthoringData* ActiveClipMeta,
-		FVector& OutLocation, FRotator& OutRotation) const;
-
-	/** v3 §18-19 P1: AssetUserData of the currently-playing leaf AnimSequence on this instance's highest-priority
-	 *  active montage (any slot) — i.e. the gun-motion clip metadata (Left/RightHandAttachPartSocket,
-	 *  FPSRGunMotionAuthoringData.h) that ComputeHandIKTarget's Blend rebase needs. Null when no montage is active
-	 *  or the active leaf carries none (ordinary poses — the overwhelming common case; §19-1's "absent curve = no
-	 *  offset" convention extends the same way to this metadata: no data found, no rebase, ComputeHandIKTarget
-	 *  just returns the grip-based target). GAME THREAD ONLY, same class of caveat as GetCurveValue itself. */
-	const class UFPSRGunMotionAuthoringData* FindActiveGunMotionClipMeta() const;
 
 	/** True only for the instance the arms component itself owns. Answerable in NativeInitializeAnimation because the
 	 *  engine assigns the component's AnimScriptInstance before calling InitializeAnimation on it. */

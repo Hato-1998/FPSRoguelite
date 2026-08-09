@@ -54,10 +54,6 @@ private:
 	 *  game's, which a docked viewport cannot do (its aspect differs, so the vertical framing differs). */
 	static void OnOpenWeaponAssemblerFPMenuEntry();
 
-	/** Menu command handler: opens (or focuses) the FPSR Gun Motion tool nomad tab (Tools > FPSR > "FPSR 총 모션
-	 *  저작…") — GunMotionTool_Spec.md, the C++ tab port of the 30a97953 Python gun-motion authoring recipe. */
-	static void OnOpenGunMotionMenuEntry();
-
 	/** Nomad tab spawner for the FPSR Data Editor (P1) — registered in StartupModule, unregistered in
 	 *  ShutdownModule. Returns a dock tab hosting a single SFPSRDataEditorWidget. */
 	static TSharedRef<class SDockTab> SpawnDataEditorTab(const class FSpawnTabArgs& Args);
@@ -74,10 +70,6 @@ private:
 	 *  in ShutdownModule. Returns a dock tab hosting a single SFPSRWeaponAssemblerFPTab. */
 	static TSharedRef<class SDockTab> SpawnWeaponAssemblerFPTab(const class FSpawnTabArgs& Args);
 
-	/** Nomad tab spawner for the FPSR Gun Motion tool — registered in StartupModule, unregistered in
-	 *  ShutdownModule. Returns a dock tab hosting a single SFPSRGunMotionTab. */
-	static TSharedRef<class SDockTab> SpawnGunMotionTab(const class FSpawnTabArgs& Args);
-
 	/** Tab identifier for the FPSR Data Editor nomad tab (RegisterNomadTabSpawner / TryInvokeTab both key off this). */
 	static const FName FPSRDataEditorTabName;
 
@@ -89,9 +81,6 @@ private:
 
 	/** Tab identifier for the Weapon Assembler first-person view nomad tab. */
 	static const FName FPSRWeaponAssemblerFPTabName;
-
-	/** Tab identifier for the FPSR Gun Motion tool nomad tab (GunMotionTool_Spec.md §1: tab ID "FPSRGunMotionTab"). */
-	static const FName FPSRGunMotionTabName;
 
 	/** Backing store for GetLiveWeaponAssemblerTab — set by SpawnWeaponAssemblerTab, expires on its own when the
 	 *  user closes the tab (weak). See the accessor's comment for why it can't be a strong reference. */

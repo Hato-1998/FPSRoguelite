@@ -6,7 +6,6 @@
 #include "AbilitySystemInterface.h"
 #include "GameplayTagContainer.h"
 #include "Weapon/FPSRWeaponDataAsset.h"
-#include "Anim/FPSRGunMotionCurveNames.h"
 #include "FPSRCharacter.generated.h"
 
 class UAbilitySystemComponent;
@@ -200,18 +199,6 @@ public:
 	 *  local render flag, not replicated, so this only clears the OWNER's view — teammates still see the gun. (W-U2) */
 	void UpdateScopeWeaponVisibility();
 
-	/** v3 §18-19 P1: read FPGM_P_<AttachSocket>_TX..RR (6 curves per attached part) off the arms AnimInstance's
-	 *  currently-blended pose and apply them as an additional relative-transform offset on top of each weapon
-	 *  part's authored placement (socket + FFPSRWeaponPartAttachment::Offset). Called from the same owner-local,
-	 *  post-arms-pose tick site as UpdateAimDownSights above (FPSRWeaponFireComponent::TickComponent, which is
-	 *  explicitly ordered after FirstPersonArms via AddTickPrerequisiteComponent in BeginPlay) rather than from
-	 *  this actor's own Tick — reading a curve off an AnimInstance whose graph hasn't evaluated yet this frame
-	 *  would reproduce exactly the one-frame lag the gun-anchor IK refactor exists to avoid (see
-	 *  GetRightHandGripInGunFrame's comment). No-op when the first-person split is off, there are no attached
-	 *  parts, or (per part, cheaply) the currently-blended pose never authored that part's first curve — see the
-	 *  .cpp for the early-return this buys (v3 §19-3 perf budget: parts <=8, one owner, effectively free). */
-	void ApplyWeaponPartCurves();
-
 	/** Single owner of "is the weapon drawn". Composes every reason to hide it (scope, wall) so the reasons cannot
 	 *  cancel each other out. Idempotent — safe to call from spawn, possession, equip and movement-mode paths.
 	 *  @param bForce  Re-apply to the components even when the composed answer has not changed. Required after the
@@ -262,14 +249,6 @@ public:
 	 *
 	 *  두 컴포넌트 중 하나라도 없으면 false 를 반환하고 출력값은 건드리지 않는다. */
 	bool GetFirstPersonViewSetup(FTransform& OutCameraRelativeToArms, FMinimalViewInfo& OutViewInfo) const;
-
-	/** v3 §19-1: raw accessor for FirstPersonCamera (protected below) so the arms AnimInstance can read its LIVE
-	 *  world rotation every frame and compose the runtime M = ArmsRot^-1 * CamRot itself
-	 *  (UFPSRFirstPersonArmsAnimInstance::ComputeCameraToArmsRotation). Deliberately NOT GetFirstPersonViewSetup
-	 *  above — that call also solves FOV/aspect via UCameraComponent::GetCameraView for the editor preview camera,
-	 *  which this per-frame read has no use for and shouldn't pay for. Null only before the component exists
-	 *  (never in practice once possessed). */
-	UCameraComponent* GetFirstPersonCameraComponent() const { return FirstPersonCamera; }
 
 	/** 활성 사이트의 스코프 오버레이 위젯 클래스(스코프 시각 활성 시). 없으면 null(HUD가 폴백 사용). 호출은 스코프
 	 *  진입 엣지에서(프레임마다 아님) — 소프트 참조를 동기 로드한다. (스코프 위젯화) */
@@ -342,18 +321,6 @@ public:
 	 *  Both hands share one internal composition helper; only the resolved grip component/socket/offset differ. */
 	UFUNCTION(BlueprintPure, Category = "FPSR|Weapon")
 	bool GetLeftHandGripInGunFrame(const USceneComponent* ForMesh, FTransform& OutGripInGun) const;
-
-	/** v3 §18-19 P1: the currently-attached weapon part carrying AttachSocket (FFPSRWeaponPartAttachment::Socket,
-	 *  the pack's stable per-part id — the same identifier a v3 gun-motion clip's LeftHandAttachPartSocket /
-	 *  RightHandAttachPartSocket names, FPSRGunMotionAuthoringData.h), expressed in the EXACT SAME composed frame
-	 *  as GetRightHandGripInGunFrame / GetLeftHandGripInGunFrame above (ik_hand_gun bone-parent space) — required
-	 *  so the arms AnimInstance can lerp/slerp a hand IK target between a grip frame and a part frame (§18 Blend
-	 *  semantics) without a space mismatch. Pure cache read: solved in RefreshPartFramesInGunSpaceCache at the same
-	 *  lifecycle point as the grip cache (RebuildPartsFromSelection), never per animation frame — same pose-free
-	 *  reasoning as GetRightHandGripInGunFrame (see its comment). Returns false when no currently-attached part
-	 *  carries AttachSocket (weapon config without that mount, wrong id, or nothing equipped). */
-	UFUNCTION(BlueprintPure, Category = "FPSR|Weapon")
-	bool GetWeaponPartFrameInGunSpace(FName AttachSocket, FTransform& OutFrame) const;
 
 	/** Play reload cosmetics on a server-confirmed reload-start edge (called from UFPSRWeaponInstance::OnRep_Reloading,
 	 *  which fires on every client holding the replicated instance). One body mesh, one montage, owner and remotes alike
@@ -970,12 +937,6 @@ protected:
 	TOptional<FTransform> CachedRightGripInGun;
 	TOptional<FTransform> CachedLeftGripInGun;
 
-	/** v3 §18-19 P1: per-attached-part gun-space frame (GetWeaponPartFrameInGunSpace's cache — same composed space
-	 *  as CachedRightGripInGun / CachedLeftGripInGun above), keyed by FFPSRWeaponPartAttachment::Socket. Rebuilt in
-	 *  RefreshPartFramesInGunSpaceCache, called from RebuildPartsFromSelection alongside RefreshHandGripInGunFrameCache
-	 *  — never re-solved per animation frame (same pose-free reasoning as the grip cache). */
-	TMap<FName, FTransform> CachedPartFramesInGunSpace;
-
 	float CachedADSSightDistance = 25.0f;
 	bool bCachedHasADS = false;
 	bool bCachedADSAlignRotation = true;
@@ -1024,20 +985,6 @@ protected:
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<UStaticMeshComponent>> WeaponPartComponents;
 
-	/** v3 §18-19 P1: each attached part's AUTHORED placement (FFPSRWeaponPartAttachment::Offset — "socket + Offset"
-	 *  BEFORE any FPGM_P_* curve is applied), index-aligned with WeaponPartComponents. Captured once in
-	 *  RebuildPartsFromSelection at the moment SetRelativeTransform(PartDef.Offset) runs — has to be a snapshot,
-	 *  not a re-read of the component's current RelativeTransform, because ApplyWeaponPartCurves overwrites that
-	 *  every frame with base+curve and re-reading it back next frame would accumulate the curve offset instead of
-	 *  applying it fresh (same base every time). Also doubles as the base for RefreshPartFramesInGunSpaceCache's
-	 *  gun-space composition below. */
-	TArray<FTransform> WeaponPartBaseOffsets;
-
-	/** v3 §18-19 P1: each attached part's FPGM_P_<AttachSocket>_* curve name candidates (6 per part), index-aligned
-	 *  with WeaponPartComponents. Built once (FPSRGunMotionCurveNames::MakePartCurveNames) in RebuildPartsFromSelection
-	 *  so ApplyWeaponPartCurves never assembles an FName from a string per animation frame (§19-3). */
-	TArray<FPSRGunMotionCurveNames::FPartCurveNames> WeaponPartCurveNames;
-
 	/** W-U1: pending next-tick parts rebuild flag (coalesces a burst of modifier/fragment OnReps into one rebuild). */
 	bool bWeaponPartsRebuildPending = false;
 	/** W-U1: hash of the last-applied selected part set; ProcessPendingWeaponPartsRebuild skips rebuild when unchanged.
@@ -1057,16 +1004,10 @@ protected:
 	 *  declaration above for the full contract). */
 	void ProcessPendingWeaponPartsRebuild();
 
-	/** Shared tail of ComputeGripInGunFrame and RefreshPartFramesInGunSpaceCache below: ActiveWeaponMesh's OWN
-	 *  placement expressed in gun frame (ik_hand_gun bone-parent space) — the same "WeaponInGunFrame" hop both call
-	 *  sites land on after climbing their own component-local piece (a grip point's socket offset, or a part's
-	 *  socket offset). Extracted so the two stay identical by construction instead of by discipline. False
-	 *  (identity) when there is no attached weapon / no arms — same gate ComputeGripInGunFrame already had inline. */
+	/** Tail of ComputeGripInGunFrame: ActiveWeaponMesh's OWN placement expressed in gun frame (ik_hand_gun
+	 *  bone-parent space) — the "WeaponInGunFrame" hop a gun-frame consumer lands on after climbing its own
+	 *  component-local piece (e.g. a grip point's socket offset). False (identity) when there is no attached
+	 *  weapon / no arms — same gate ComputeGripInGunFrame already had inline. */
 	bool GetWeaponRootPlacementInGunFrame(FTransform& OutWeaponInGunFrame) const;
-
-	/** v3 §18-19 P1: rebuild CachedPartFramesInGunSpace from WeaponPartComponents/WeaponPartBaseOffsets. Called
-	 *  from RebuildPartsFromSelection right alongside RefreshHandGripInGunFrameCache — same lifecycle point, same
-	 *  pose-free reasoning (GetWeaponPartFrameInGunSpace is a pure cache read). */
-	void RefreshPartFramesInGunSpaceCache();
 
 };

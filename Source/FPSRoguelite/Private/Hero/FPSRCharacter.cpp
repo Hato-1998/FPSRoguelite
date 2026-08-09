@@ -2112,9 +2112,6 @@ void AFPSRCharacter::RebuildPartsFromSelection(const TArray<FFPSRWeaponPartAttac
 		}
 	}
 	WeaponPartComponents.Reset();
-	// v3 §18-19 P1: kept index-aligned with WeaponPartComponents above (both grow together in the loop below).
-	WeaponPartBaseOffsets.Reset();
-	WeaponPartCurveNames.Reset();
 
 	// Reset the modular muzzle/aim/left-hand source caches HERE (both equip + modifier-change paths share this
 	// invariant) so a slot swap that drops the socket-carrying part can't leave a dangling pointer to a destroyed
@@ -2160,11 +2157,6 @@ void AFPSRCharacter::RebuildPartsFromSelection(const TArray<FFPSRWeaponPartAttac
 		PartComp->SetRelativeTransform(PartDef.Offset);
 		WeaponPartComponents.Add(PartComp);
 		AddedScopeDescriptors.Add(PartDef.Scope);
-		// v3 §18-19 P1: snapshot the authored base (see WeaponPartBaseOffsets' comment) and precompute this part's
-		// curve-name candidates (see WeaponPartCurveNames' comment) — both index-aligned with WeaponPartComponents
-		// by construction (appended together, right here).
-		WeaponPartBaseOffsets.Add(PartDef.Offset);
-		WeaponPartCurveNames.Add(FPSRGunMotionCurveNames::MakePartCurveNames(PartDef.Socket));
 	}
 
 	// Re-resolve modular muzzle source: the muzzle socket lives on a cosmetic part (barrel/forestock), so prefer the
@@ -2239,9 +2231,6 @@ void AFPSRCharacter::RebuildPartsFromSelection(const TArray<FFPSRWeaponPartAttac
 	// The parts (and therefore which component carries each grip socket) just changed — refresh the gun-frame grip
 	// cache rather than re-solving it every animation frame.
 	RefreshHandGripInGunFrameCache();
-
-	// v3 §18-19 P1: same reasoning, same lifecycle point — the attached parts' gun-space frames just changed too.
-	RefreshPartFramesInGunSpaceCache();
 }
 
 UMeshComponent* AFPSRCharacter::ResolveLeftHandGripComponent() const
@@ -2377,8 +2366,8 @@ bool AFPSRCharacter::ComputeGripInGunFrame(UMeshComponent* GripComp, FName GripS
 		Comp = Parent;
 	}
 
-	// Weapon -> gun frame (ik_hand_gun bone space == hand_r bone space once the animgraph's CopyBone runs) — shared
-	// tail with RefreshPartFramesInGunSpaceCache (v3 §18-19), extracted into GetWeaponRootPlacementInGunFrame.
+	// Weapon -> gun frame (ik_hand_gun bone space == hand_r bone space once the animgraph's CopyBone runs) —
+	// extracted into GetWeaponRootPlacementInGunFrame so future gun-frame consumers reuse the same hop.
 	FTransform WeaponInGunFrame;
 	if (!GetWeaponRootPlacementInGunFrame(WeaponInGunFrame))
 	{
@@ -2398,8 +2387,7 @@ bool AFPSRCharacter::ComputeGripInGunFrame(UMeshComponent* GripComp, FName GripS
 
 bool AFPSRCharacter::GetWeaponRootPlacementInGunFrame(FTransform& OutWeaponInGunFrame) const
 {
-	// Extracted from ComputeGripInGunFrame (v3 §18-19 P1 — RefreshPartFramesInGunSpaceCache needs the exact same
-	// tail for a part instead of a grip point). Read which scheme AttachWeaponMeshes actually used for the CURRENT
+	// Extracted from ComputeGripInGunFrame. Read which scheme AttachWeaponMeshes actually used for the CURRENT
 	// attachment rather than assume one:
 	//  - ik_hand_gun bone anchor (see AttachWeaponMeshes): WeaponRoot's own RelativeTransform IS ALREADY the fixed
 	//    gun-frame offset — no further hop needed, and no further hop would be SAFE (ik_hand_gun's live bone transform
@@ -2467,158 +2455,6 @@ bool AFPSRCharacter::GetLeftHandGripInGunFrame(const USceneComponent* ForMesh, F
 	}
 	OutGripInGun = CachedLeftGripInGun.GetValue();
 	return true;
-}
-
-namespace
-{
-	/** FPGM_P_* 6커브를 읽어 파츠 로컬 델타(이동=소켓 프레임 가산, 회전=좌곱 쿼트)로 돌려준다. 하나라도
-	 *  존재하면 true — TX 단독 게이트는 TZ 만 저작한 클립을 통째로 스킵하는 결함이라 금지(§21-1 실측). */
-	bool ReadPartCurveDelta(UAnimInstance* ArmsAnim, const FPSRGunMotionCurveNames::FPartCurveNames& Names,
-		FVector& OutLoc, FQuat& OutRot)
-	{
-		float TX = 0.0f, TY = 0.0f, TZ = 0.0f, RP = 0.0f, RY = 0.0f, RR = 0.0f;
-		bool bAny = false;
-		bAny |= ArmsAnim->GetCurveValue(Names.TX, TX);
-		bAny |= ArmsAnim->GetCurveValue(Names.TY, TY);
-		bAny |= ArmsAnim->GetCurveValue(Names.TZ, TZ);
-		bAny |= ArmsAnim->GetCurveValue(Names.RP, RP);
-		bAny |= ArmsAnim->GetCurveValue(Names.RY, RY);
-		bAny |= ArmsAnim->GetCurveValue(Names.RR, RR);
-		OutLoc = FVector(TX, TY, TZ);
-		OutRot = FRotator(RP, RY, RR).Quaternion();
-		return bAny;
-	}
-}
-
-bool AFPSRCharacter::GetWeaponPartFrameInGunSpace(FName AttachSocket, FTransform& OutFrame) const
-{
-	OutFrame = FTransform::Identity;
-	if (AttachSocket.IsNone())
-	{
-		return false;
-	}
-	const FTransform* Cached = CachedPartFramesInGunSpace.Find(AttachSocket);
-	if (!Cached)
-	{
-		return false;
-	}
-	OutFrame = *Cached;
-
-	// v3 §18 Blend 의미론(실측으로 잡힌 명세 갭): 손이 따라가야 하는 것은 파츠의 정적 저작 배치가 아니라
-	// **커브가 움직이고 있는 라이브 파츠**다 — 탄창이 빠지는 동안 손이 원래 자리 프레임에 붙어 있으면 부착의
-	// 의미가 없다. Cached = Base * T (T = 소켓·총 합성)이므로 라이브 = Result * Base⁻¹ * Cached — T 를 몰라도
-	// 성립한다. 합성 규칙은 ApplyWeaponPartCurves 와 동일(ReadPartCurveDelta 공유).
-	UAnimInstance* ArmsAnim = (bFirstPersonSplitActive && FirstPersonArms) ? FirstPersonArms->GetAnimInstance() : nullptr;
-	if (!ArmsAnim)
-	{
-		return true;
-	}
-	for (int32 i = 0; i < WeaponPartComponents.Num(); ++i)
-	{
-		const UStaticMeshComponent* Part = WeaponPartComponents[i];
-		if (!Part || Part->GetAttachSocketName() != AttachSocket
-			|| !WeaponPartCurveNames.IsValidIndex(i) || !WeaponPartBaseOffsets.IsValidIndex(i))
-		{
-			continue;
-		}
-		FVector DeltaLoc; FQuat DeltaRot;
-		if (!ReadPartCurveDelta(ArmsAnim, WeaponPartCurveNames[i], DeltaLoc, DeltaRot))
-		{
-			return true; // 이 파츠에 커브 없음 — 정적 프레임 그대로
-		}
-		const FTransform& Base = WeaponPartBaseOffsets[i];
-		FTransform Result = Base;
-		Result.SetLocation(Base.GetLocation() + DeltaLoc);
-		Result.SetRotation((DeltaRot * Base.GetRotation()).GetNormalized());
-		OutFrame = Result * Base.Inverse() * (*Cached);
-		return true;
-	}
-	return true;
-}
-
-void AFPSRCharacter::RefreshPartFramesInGunSpaceCache()
-{
-	CachedPartFramesInGunSpace.Reset();
-
-	FTransform WeaponInGunFrame;
-	if (!WeaponMesh || !GetWeaponRootPlacementInGunFrame(WeaponInGunFrame))
-	{
-		return;
-	}
-
-	for (int32 i = 0; i < WeaponPartComponents.Num(); ++i)
-	{
-		UStaticMeshComponent* Part = WeaponPartComponents[i];
-		if (!Part || !WeaponPartBaseOffsets.IsValidIndex(i))
-		{
-			continue;
-		}
-		const FName Socket = Part->GetAttachSocketName();
-		if (Socket.IsNone())
-		{
-			continue;
-		}
-
-		// Part's AUTHORED placement (WeaponPartBaseOffsets[i] — "socket + Offset", BEFORE any FPGM_P_* curve is
-		// applied by ApplyWeaponPartCurves) relative to the socket, hopped into WeaponMesh's own RTS_Component
-		// space, then composed through the SAME WeaponInGunFrame tail ComputeGripInGunFrame uses for a grip point
-		// — landing this in the EXACT SAME frame as CachedRightGripInGun / CachedLeftGripInGun (ik_hand_gun
-		// bone-parent space), which is what lets the arms AnimInstance lerp/slerp between a grip target and a part
-		// target (v3 §18 Blend semantics) without a space mismatch.
-		const FTransform PartInWeaponSpace = WeaponPartBaseOffsets[i] * WeaponMesh->GetSocketTransform(Socket, RTS_Component);
-		CachedPartFramesInGunSpace.Add(Socket, PartInWeaponSpace * WeaponInGunFrame);
-	}
-}
-
-void AFPSRCharacter::ApplyWeaponPartCurves()
-{
-	// Same gate UpdateAimDownSights uses for "am I the one solving against the arms" (v3 §19-3): no split, no arms,
-	// nothing to apply curves to.
-	if (!bFirstPersonSplitActive || !FirstPersonArms || WeaponPartComponents.Num() == 0)
-	{
-		return;
-	}
-	UAnimInstance* ArmsAnim = FirstPersonArms->GetAnimInstance();
-	if (!ArmsAnim)
-	{
-		return;
-	}
-
-	for (int32 i = 0; i < WeaponPartComponents.Num(); ++i)
-	{
-		UStaticMeshComponent* Part = WeaponPartComponents[i];
-		if (!Part || !WeaponPartCurveNames.IsValidIndex(i) || !WeaponPartBaseOffsets.IsValidIndex(i))
-		{
-			continue;
-		}
-
-		// 게이트 = "6커브 중 하나라도 있는가"(ReadPartCurveDelta) — 파츠당 6회 해시 룩업, 파츠 <=8 ·
-		// owner 1명이라 예산 무시 가능(§19-3). 정확성이 우선.
-		FVector DeltaLoc; FQuat DeltaRot;
-		if (!ReadPartCurveDelta(ArmsAnim, WeaponPartCurveNames[i], DeltaLoc, DeltaRot))
-		{
-			// 커브가 사라진 프레임(몽타주 종료/블렌드아웃 완료): 마지막으로 적용했던 오프셋이 컴포넌트에
-			// 그대로 잔존한다(§21-1 실측 — 탄창이 빠진 채 영구 고정). 상태 추적 없이 복원: 저작 기본 배치와
-			// 다르면 되돌린다. Equals 비교라 평상시(커브 없는 클립)엔 비교 1회로 끝난다.
-			const FTransform& Base = WeaponPartBaseOffsets[i];
-			if (!Part->GetRelativeTransform().Equals(Base))
-			{
-				Part->SetRelativeTransform(Base);
-			}
-			continue;
-		}
-
-		// "기본 소켓+Offset ⊕ 커브 로컬 오프셋" (§18/§19-3): compose the curve delta onto the AUTHORED base, never
-		// onto the part's current RelativeTransform — reading that back would already include LAST frame's curve
-		// offset and accumulate it frame over frame instead of applying a fresh offset from the same base every
-		// time. Same composition style as §3-2 (rotation multiplies, translation adds — both already in the base's
-		// own local frame, the space a socket's RelativeLocation/Offset is authored in).
-		const FTransform& Base = WeaponPartBaseOffsets[i];
-		FTransform Result = Base;
-		Result.SetLocation(Base.GetLocation() + DeltaLoc);
-		Result.SetRotation((DeltaRot * Base.GetRotation()).GetNormalized());
-		Part->SetRelativeTransform(Result);
-	}
 }
 
 void AFPSRCharacter::NotifyEquippedWeaponModifiersChanged(const UFPSRWeaponInstance* ChangedInstance)

@@ -609,12 +609,6 @@ void UFPSRWeaponFireComponent::TickComponent(float DeltaTime, ELevelTick TickTyp
 	{
 		Char->UpdateAimDownSights(DeltaTime);
 		Char->UpdateScopeWeaponVisibility();
-
-		// v3 §18-19 P1: same tick site as the two calls above and for the same reason — this component is
-		// explicitly ordered AFTER FirstPersonArms (BeginPlay's AddTickPrerequisiteComponent), so the curves read
-		// here reflect THIS frame's arms pose rather than reproducing the one-frame lag the gun-anchor IK refactor
-		// exists to avoid.
-		Char->ApplyWeaponPartCurves();
 	}
 
 	// ChargeLaser charge-recoil ramp: spread the shot's up-kick across the charge so the view climbs gradually and the

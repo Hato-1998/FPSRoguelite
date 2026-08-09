@@ -8,7 +8,6 @@
 #include "Assembler/SFPSRWeaponAssemblerTab.h"
 #include "Assembler/SFPSRWeaponAssemblerFPTab.h"
 #include "Blockout/SFPSRBlockoutTab.h"
-#include "GunMotion/SFPSRGunMotionTab.h"
 #include "Editor.h"
 #include "EditorValidatorSubsystem.h"
 #include "Logging/MessageLog.h"
@@ -31,7 +30,6 @@ const FName FFPSRogueliteEditorModule::FPSRDataEditorTabName(TEXT("FPSRDataEdito
 const FName FFPSRogueliteEditorModule::FPSRWeaponAssemblerTabName(TEXT("FPSRWeaponAssembler"));
 const FName FFPSRogueliteEditorModule::FPSRBlockoutTabName(TEXT("FPSRBlockout"));
 const FName FFPSRogueliteEditorModule::FPSRWeaponAssemblerFPTabName(TEXT("FPSRWeaponAssemblerFP"));
-const FName FFPSRogueliteEditorModule::FPSRGunMotionTabName(TEXT("FPSRGunMotionTab"));
 
 TWeakPtr<SFPSRWeaponAssemblerTab> FFPSRogueliteEditorModule::LiveWeaponAssemblerTab;
 
@@ -72,11 +70,6 @@ void FFPSRogueliteEditorModule::StartupModule()
 	FGlobalTabmanager::Get()->RegisterNomadTabSpawner(FPSRBlockoutTabName, FOnSpawnTab::CreateStatic(&FFPSRogueliteEditorModule::SpawnBlockoutTab))
 		.SetDisplayName(LOCTEXT("BlockoutTabTitle", "블록아웃 툴"))
 		.SetGroup(WorkspaceMenu::GetMenuStructure().GetToolsCategory());
-
-	// FPSR 총 모션 저작 툴(GunMotionTool_Spec.md) — 같은 노마드 탭 수명주기 패턴.
-	FGlobalTabmanager::Get()->RegisterNomadTabSpawner(FPSRGunMotionTabName, FOnSpawnTab::CreateStatic(&FFPSRogueliteEditorModule::SpawnGunMotionTab))
-		.SetDisplayName(LOCTEXT("GunMotionTabTitle", "FPSR 총 모션 저작"))
-		.SetGroup(WorkspaceMenu::GetMenuStructure().GetToolsCategory());
 }
 
 void FFPSRogueliteEditorModule::ShutdownModule()
@@ -87,7 +80,6 @@ void FFPSRogueliteEditorModule::ShutdownModule()
 	FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(FPSRWeaponAssemblerTabName);
 	FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(FPSRWeaponAssemblerFPTabName);
 	FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(FPSRBlockoutTabName);
-	FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(FPSRGunMotionTabName);
 }
 
 void FFPSRogueliteEditorModule::RegisterMenus()
@@ -130,13 +122,6 @@ void FFPSRogueliteEditorModule::RegisterMenus()
 		LOCTEXT("OpenBlockoutTooltip", "FPSR 블록아웃 툴 열기 (config 기반 모듈러 맵 팔레트 + 블록아웃 가드레일). 팔레트 폴더는 Project Settings > FPSR > FPSR Blockout 에서 설정."),
 		FSlateIcon(FAppStyle::GetAppStyleSetName(), "DeveloperTools.MenuIcon"),
 		FUIAction(FExecuteAction::CreateStatic(&FFPSRogueliteEditorModule::OnOpenBlockoutMenuEntry))
-	);
-	Section.AddMenuEntry(
-		"FPSROpenGunMotion",
-		LOCTEXT("OpenGunMotionTitle", "FPSR 총 모션 저작…"),
-		LOCTEXT("OpenGunMotionTooltip", "총 모션 저작 툴 열기 (1인칭 팔 클립의 우측 체인 고정화 + 카메라 공간 키 저작 + hand_r 트랙 굽기)."),
-		FSlateIcon(FAppStyle::GetAppStyleSetName(), "DeveloperTools.MenuIcon"),
-		FUIAction(FExecuteAction::CreateStatic(&FFPSRogueliteEditorModule::OnOpenGunMotionMenuEntry))
 	);
 }
 
@@ -198,20 +183,6 @@ TSharedRef<SDockTab> FFPSRogueliteEditorModule::SpawnBlockoutTab(const FSpawnTab
 		.TabRole(ETabRole::NomadTab)
 		[
 			SNew(SFPSRBlockoutTab)
-		];
-}
-
-void FFPSRogueliteEditorModule::OnOpenGunMotionMenuEntry()
-{
-	FGlobalTabmanager::Get()->TryInvokeTab(FPSRGunMotionTabName);
-}
-
-TSharedRef<SDockTab> FFPSRogueliteEditorModule::SpawnGunMotionTab(const FSpawnTabArgs& Args)
-{
-	return SNew(SDockTab)
-		.TabRole(ETabRole::NomadTab)
-		[
-			SNew(SFPSRGunMotionTab)
 		];
 }
 
