@@ -1,0 +1,19 @@
+﻿{
+	"FileVersion": 3,
+	"Version": 3,
+	"VersionName": "1.3",
+	"FriendlyName": "ImGui",
+	"Description": "",
+	"Category": "Other",
+	"CreatedBy": "VesCodes",
+	"CreatedByURL": "https://github.com/VesCodes",
+	"DocsURL": "",
+	"MarketplaceURL": "",
+	"Modules": [
+		{
+			"Name": "ImGui",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		}
+	]
+}
