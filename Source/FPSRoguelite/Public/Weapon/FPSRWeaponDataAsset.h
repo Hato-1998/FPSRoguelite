@@ -15,6 +15,7 @@ class USkeletalMesh;
 class UStaticMesh;
 class UAnimInstance;
 class UAnimMontage;
+class UAnimSequence;
 class USoundBase;
 class UParticleSystem;
 class UMaterialInterface;
@@ -148,6 +149,23 @@ struct FFPSRWeaponPartAttachment
 	TArray<FFPSRWeaponPartStage> Stages;
 };
 
+/** 상태 포즈 한 개(GunMotionTool_Spec.md §6) — 무기 전체에 적용되는 오프셋+틸트. 저작 = 총모션 스튜디오의 "상태
+ *  포즈 모드"(§5 범위 밖, 이 명세는 스키마까지)에서 무기 전체 기즈모로 잡은 뒤 [DA에 저장]으로 기록한다. 소비는
+ *  홀스터 행(UpdateAimDownSights 상태 레이어·홀스터 게이트) 범위 — 이 파일은 데이터 계약만 정의한다. */
+USTRUCT(BlueprintType)
+struct FFPSRWeaponStatePose
+{
+	GENERATED_BODY()
+
+	/** 무기 전체 위치 오프셋(cm, 그립 기준). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|상태 포즈", meta = (DisplayName = "위치 오프셋(cm)"))
+	FVector Offset = FVector::ZeroVector;
+
+	/** 무기 전체 회전 오프셋(도). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|상태 포즈", meta = (DisplayName = "회전(틸트)"))
+	FRotator Tilt = FRotator::ZeroRotator;
+};
+
 /** 1P 절차 무기 모션(힙) 프로파일 — 정적 무기도 "살아있게" 만드는 owner-local 코스메틱 모션 파라미터 묶음(P1).
  *  룩스웨이(조준 지연)·걷기밥(속도 게이트)·발사킥. 값은 AFPSRCharacter::UpdateAimDownSights에서 힙 레이어로
  *  합성되며 ADS 진입 시 (1-알파)로 페이드아웃한다. 트레이스/조준에 영향 없음(순수 시각). */
@@ -195,6 +213,32 @@ struct FFPSRProceduralWeaponMotionProfile
 	/** 발사킥 복귀속도(FInterpTo) — 발사킥이 0으로 가라앉는 속도. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "힙 절차모션|발사킥", meta = (DisplayName = "발사킥 복귀속도", ClampMin = "0.1"))
 	float FireKickRecoverySpeed = 11.0f;
+
+	// --- 상태 포즈(§6, 통합 스키마 — 저작만 이 명세, 소비는 홀스터 행) ---
+
+	/** 슬라이드 상태 무기 포즈. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|상태 포즈", meta = (DisplayName = "슬라이드 포즈"))
+	FFPSRWeaponStatePose SlidePose;
+
+	/** 슬라이드 중 밥(bob) 허용량 — 0=포즈 고정, 기본 0(§6 명세값). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|상태 포즈", meta = (DisplayName = "슬라이드 밥 배율", ClampMin = "0.0"))
+	float SlideBobScale = 0.0f;
+
+	/** 공중(에어본) 상태 무기 포즈. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|상태 포즈", meta = (DisplayName = "공중 포즈"))
+	FFPSRWeaponStatePose AirbornePose;
+
+	/** 공중 중 밥(bob) 허용량 — 기본 1(§6 명세값, 힙 밥을 그대로 통과). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|상태 포즈", meta = (DisplayName = "공중 밥 배율", ClampMin = "0.0"))
+	float AirborneBobScale = 1.0f;
+
+	/** 홀스터(수납) 상태 무기 포즈. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|상태 포즈", meta = (DisplayName = "홀스터 포즈"))
+	FFPSRWeaponStatePose HolsterPose;
+
+	/** 홀스터 전환 소요 시간(초) — 기본 0.25(§6 명세값). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|상태 포즈", meta = (DisplayName = "홀스터 소요시간(초)", ClampMin = "0.0"))
+	float HolsterDuration = 0.25f;
 };
 
 /** Data-driven weapon definition. */
@@ -495,6 +539,12 @@ public:
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|애니 몽타주", meta = (DisplayName = "재장전 몽타주(1인칭 팔)"))
 	TSoftObjectPtr<UAnimMontage> ArmsReloadMontage;
+
+	/** 1인칭 팔 Idle 애니메이션 — 총모션 스튜디오(GunMotionTool_Spec.md §0)가 저작 베이스로 표시·검증하는 용도.
+	 *  ABP의 실제 Idle 포즈 배선은 현행(링크드 애니 레이어)을 그대로 쓴다 — 이 필드는 그 배선을 대체하지 않고,
+	 *  스튜디오가 "이 무기의 Idle이 뭔지" 읽어오는 참조일 뿐이다. null = 스튜디오에서 이 무기의 베이스를 못 찾음. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|애니 몽타주", meta = (DisplayName = "Idle 애니메이션(1인칭 팔)"))
+	TSoftObjectPtr<UAnimSequence> ArmsIdleAnim;
 
 	/** --- Fire-part recoil (bolt / charging handle), data-driven via UFPSRWeaponAnimInstance ---
 	 *  The bone the weapon AnimBP's ModifyBone targets (bolt / charging handle). None = no moving fire part (no-op).

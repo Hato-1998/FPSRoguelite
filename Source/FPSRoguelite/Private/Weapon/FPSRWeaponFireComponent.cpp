@@ -609,6 +609,11 @@ void UFPSRWeaponFireComponent::TickComponent(float DeltaTime, ELevelTick TickTyp
 	{
 		Char->UpdateAimDownSights(DeltaTime);
 		Char->UpdateScopeWeaponVisibility();
+		// Gun-motion studio P2 curve consumption (GunMotionTool_Spec.md §4-2/§4-3): same owner-local, post-arms-pose
+		// tick site as the two calls above (this component ticks after FirstPersonArms via a tick prerequisite set in
+		// BeginPlay) — reading FPGM_P_* off the arms AnimInstance from anywhere earlier would reproduce the one-frame
+		// gun-anchor lag this project already fixed elsewhere.
+		Char->ApplyWeaponPartCurves();
 	}
 
 	// ChargeLaser charge-recoil ramp: spread the shot's up-kick across the charge so the view climbs gradually and the

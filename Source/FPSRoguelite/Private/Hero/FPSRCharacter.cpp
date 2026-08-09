@@ -18,6 +18,7 @@
 #include "Weapon/FPSRWeaponFragment.h"
 #include "Weapon/FPSRWeaponAnimInstance.h"
 #include "Weapon/FPSRWeaponPartSelector.h"
+#include "Anim/FPSRGunMotionCurves.h"
 #include "Hero/FPSRPlayerFeedbackComponent.h"
 #include "Hero/FPSRBlindspotAudioComponent.h"
 #include "Hero/FPSRCharacterMovementComponent.h"
@@ -2112,6 +2113,10 @@ void AFPSRCharacter::RebuildPartsFromSelection(const TArray<FFPSRWeaponPartAttac
 		}
 	}
 	WeaponPartComponents.Reset();
+	// P2 (GunMotionTool_Spec.md §4-2): index-aligned with WeaponPartComponents above — reset alongside it so a
+	// rebuild never reads a stale base offset / curve-name set against a mismatched index.
+	WeaponPartBaseOffsets.Reset();
+	WeaponPartCurveNames.Reset();
 
 	// Reset the modular muzzle/aim/left-hand source caches HERE (both equip + modifier-change paths share this
 	// invariant) so a slot swap that drops the socket-carrying part can't leave a dangling pointer to a destroyed
@@ -2157,6 +2162,10 @@ void AFPSRCharacter::RebuildPartsFromSelection(const TArray<FFPSRWeaponPartAttac
 		PartComp->SetRelativeTransform(PartDef.Offset);
 		WeaponPartComponents.Add(PartComp);
 		AddedScopeDescriptors.Add(PartDef.Scope);
+		// P2 (GunMotionTool_Spec.md §4-2): snapshot the authored base placement and pre-build this part's curve
+		// names — index-aligned with WeaponPartComponents (appended together, same as AddedScopeDescriptors above).
+		WeaponPartBaseOffsets.Add(PartDef.Offset);
+		WeaponPartCurveNames.Add(FPSRGunMotionCurves::MakePartCurveNames(PartDef.Socket));
 	}
 
 	// Re-resolve modular muzzle source: the muzzle socket lives on a cosmetic part (barrel/forestock), so prefer the
@@ -2231,6 +2240,9 @@ void AFPSRCharacter::RebuildPartsFromSelection(const TArray<FFPSRWeaponPartAttac
 	// The parts (and therefore which component carries each grip socket) just changed — refresh the gun-frame grip
 	// cache rather than re-solving it every animation frame.
 	RefreshHandGripInGunFrameCache();
+	// P2 (GunMotionTool_Spec.md §4-2): same lifecycle point — the attached parts (and their base offsets/curve names
+	// above) just changed, so their gun-space frames need rebuilding too.
+	RefreshPartFramesInGunSpaceCache();
 }
 
 UMeshComponent* AFPSRCharacter::ResolveLeftHandGripComponent() const
@@ -2455,6 +2467,162 @@ bool AFPSRCharacter::GetLeftHandGripInGunFrame(const USceneComponent* ForMesh, F
 	}
 	OutGripInGun = CachedLeftGripInGun.GetValue();
 	return true;
+}
+
+namespace
+{
+	/** P2 (GunMotionTool_Spec.md §4-1/§4-2): read the 6 FPGM_P_* curves for one part and return the local delta
+	 *  (translation = additive, rotation = quaternion to left-multiply). Returns true if ANY of the 6 is currently
+	 *  authored — a TX-only gate would silently skip a clip that only authored TZ, which is exactly the bug the spec
+	 *  calls out ("6커브 중 하나라도 있으면 적용 — TX 단독 게이트 금지"). */
+	bool ReadPartCurveDelta(UAnimInstance* ArmsAnim, const FPSRGunMotionCurves::FPartCurveNames& Names,
+		FVector& OutLoc, FQuat& OutRot)
+	{
+		float TX = 0.0f, TY = 0.0f, TZ = 0.0f, RP = 0.0f, RY = 0.0f, RR = 0.0f;
+		bool bAny = false;
+		bAny |= ArmsAnim->GetCurveValue(Names.TX, TX);
+		bAny |= ArmsAnim->GetCurveValue(Names.TY, TY);
+		bAny |= ArmsAnim->GetCurveValue(Names.TZ, TZ);
+		bAny |= ArmsAnim->GetCurveValue(Names.RP, RP);
+		bAny |= ArmsAnim->GetCurveValue(Names.RY, RY);
+		bAny |= ArmsAnim->GetCurveValue(Names.RR, RR);
+		OutLoc = FVector(TX, TY, TZ);
+		OutRot = FRotator(RP, RY, RR).Quaternion();
+		return bAny;
+	}
+}
+
+bool AFPSRCharacter::GetWeaponPartFrameInGunSpace(FName AttachSocket, FTransform& OutFrame) const
+{
+	OutFrame = FTransform::Identity;
+	if (AttachSocket.IsNone())
+	{
+		return false;
+	}
+	const FTransform* Cached = CachedPartFramesInGunSpace.Find(AttachSocket);
+	if (!Cached)
+	{
+		return false;
+	}
+	OutFrame = *Cached;
+
+	// §4-1 Blend semantics (measured spec gap): the hand needs to follow the part's LIVE motion, not its static
+	// authored placement — if a magazine is mid-eject when a hand attaches to it, snapping the hand to the rest frame
+	// defeats the point of attaching at all. Cached = Base * T (T = socket+gun composition), so
+	// Live = Result * Base^-1 * Cached — T is never needed to derive it. Same composition rule as
+	// ApplyWeaponPartCurves (they share ReadPartCurveDelta).
+	UAnimInstance* ArmsAnim = (bFirstPersonSplitActive && FirstPersonArms) ? FirstPersonArms->GetAnimInstance() : nullptr;
+	if (!ArmsAnim)
+	{
+		return true;
+	}
+	for (int32 i = 0; i < WeaponPartComponents.Num(); ++i)
+	{
+		const UStaticMeshComponent* Part = WeaponPartComponents[i];
+		if (!Part || Part->GetAttachSocketName() != AttachSocket
+			|| !WeaponPartCurveNames.IsValidIndex(i) || !WeaponPartBaseOffsets.IsValidIndex(i))
+		{
+			continue;
+		}
+		FVector DeltaLoc; FQuat DeltaRot;
+		if (!ReadPartCurveDelta(ArmsAnim, WeaponPartCurveNames[i], DeltaLoc, DeltaRot))
+		{
+			return true; // 이 파츠에 커브 없음 — 정적 프레임 그대로
+		}
+		const FTransform& Base = WeaponPartBaseOffsets[i];
+		FTransform Result = Base;
+		Result.SetLocation(Base.GetLocation() + DeltaLoc);
+		Result.SetRotation((DeltaRot * Base.GetRotation()).GetNormalized());
+		OutFrame = Result * Base.Inverse() * (*Cached);
+		return true;
+	}
+	return true;
+}
+
+void AFPSRCharacter::RefreshPartFramesInGunSpaceCache()
+{
+	CachedPartFramesInGunSpace.Reset();
+
+	FTransform WeaponInGunFrame;
+	if (!WeaponMesh || !GetWeaponRootPlacementInGunFrame(WeaponInGunFrame))
+	{
+		return;
+	}
+
+	for (int32 i = 0; i < WeaponPartComponents.Num(); ++i)
+	{
+		UStaticMeshComponent* Part = WeaponPartComponents[i];
+		if (!Part || !WeaponPartBaseOffsets.IsValidIndex(i))
+		{
+			continue;
+		}
+		const FName Socket = Part->GetAttachSocketName();
+		if (Socket.IsNone())
+		{
+			continue;
+		}
+
+		// Part's AUTHORED placement (WeaponPartBaseOffsets[i] — "socket + Offset", BEFORE any FPGM_P_* curve is
+		// applied by ApplyWeaponPartCurves) relative to the socket, hopped into WeaponMesh's own RTS_Component space,
+		// then composed through the SAME WeaponInGunFrame tail ComputeGripInGunFrame uses for a grip point — landing
+		// this in the EXACT SAME frame as CachedRightGripInGun / CachedLeftGripInGun (ik_hand_gun bone-parent space),
+		// which is what lets the arms AnimInstance lerp/slerp between a grip target and a part target (§2-1 Blend
+		// semantics) without a space mismatch.
+		const FTransform PartInWeaponSpace = WeaponPartBaseOffsets[i] * WeaponMesh->GetSocketTransform(Socket, RTS_Component);
+		CachedPartFramesInGunSpace.Add(Socket, PartInWeaponSpace * WeaponInGunFrame);
+	}
+}
+
+void AFPSRCharacter::ApplyWeaponPartCurves()
+{
+	// Same gate UpdateAimDownSights uses for "am I the one solving against the arms": no split, no arms, nothing to
+	// apply curves to (§4-2).
+	if (!bFirstPersonSplitActive || !FirstPersonArms || WeaponPartComponents.Num() == 0)
+	{
+		return;
+	}
+	UAnimInstance* ArmsAnim = FirstPersonArms->GetAnimInstance();
+	if (!ArmsAnim)
+	{
+		return;
+	}
+
+	for (int32 i = 0; i < WeaponPartComponents.Num(); ++i)
+	{
+		UStaticMeshComponent* Part = WeaponPartComponents[i];
+		if (!Part || !WeaponPartCurveNames.IsValidIndex(i) || !WeaponPartBaseOffsets.IsValidIndex(i))
+		{
+			continue;
+		}
+
+		// Gate = "any of the 6 curves present" (ReadPartCurveDelta) — 6 hash lookups per part, parts <=8, one owner,
+		// so the budget is irrelevant (§4-2); correctness (no TX-only gate) comes first.
+		FVector DeltaLoc; FQuat DeltaRot;
+		if (!ReadPartCurveDelta(ArmsAnim, WeaponPartCurveNames[i], DeltaLoc, DeltaRot))
+		{
+			// The curve just vanished (montage ended/blended out): whatever offset was last applied stays on the
+			// component forever unless restored (§4-2 measured pitfall — a magazine left detached permanently).
+			// Stateless restore: revert only if it currently differs from the authored base. Equals compares once,
+			// so the common "no curve on this clip" case costs a single comparison.
+			const FTransform& Base = WeaponPartBaseOffsets[i];
+			if (!Part->GetRelativeTransform().Equals(Base))
+			{
+				Part->SetRelativeTransform(Base);
+			}
+			continue;
+		}
+
+		// "authored socket+Offset base (+) curve local delta" (§4-2): compose the curve delta onto the AUTHORED base,
+		// never onto the part's current RelativeTransform — reading that back would already include LAST frame's
+		// curve offset and accumulate it frame over frame instead of applying a fresh offset from the same base
+		// every time. Translation adds, rotation left-multiplies — both already expressed in the base's own local
+		// frame, the space a socket's RelativeLocation/Offset is authored in.
+		const FTransform& Base = WeaponPartBaseOffsets[i];
+		FTransform Result = Base;
+		Result.SetLocation(Base.GetLocation() + DeltaLoc);
+		Result.SetRotation((DeltaRot * Base.GetRotation()).GetNormalized());
+		Part->SetRelativeTransform(Result);
+	}
 }
 
 void AFPSRCharacter::NotifyEquippedWeaponModifiersChanged(const UFPSRWeaponInstance* ChangedInstance)
