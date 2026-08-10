@@ -225,6 +225,31 @@ PIE 대조군(원본 클립 드리프트 재현). 사례 = `FP_Rifle_Reload_GunL
 미러용). 둘 다 상수 0 유지 — 값이 갈라지면 두 경로가 다르게 논다(드리프트 주의, 커브를 모양
 있게 저작하게 되면 한쪽을 소스로 정하고 다른 쪽은 복사 스크립트로).
 
+### A18. 1인칭 조준각과 3인칭 프록시 시선각이 **상수로** 어긋난다 (2026-08-08)
+
+**증상** — 1인칭이 수평을 조준하는데 다른 화면의 3인칭 프록시는 총·머리가 ~20° 아래를 본다.
+반대로 프록시가 수평으로 보이려면 1인칭이 그만큼 위를 봐야 한다. 각도 차이가 조준 각도와 무관하게 일정하다.
+
+**원인 판별 — "상수 오프셋"이면 복제 유죄가 아니다.** RemoteViewPitch(16bit)·서버 카메라 캐시
+(ServerUpdateCamera RPC) 경로는 지연·계단은 만들어도 상수 오프셋은 못 만든다. 이 건은 코드·배선·
+AO 설정(mesh-space additive, 기준=Center) 전부 정상이었고, **AO 샘플 패밀리 전체(센터 포함)가
+카메라 수평보다 아래를 보도록 저작**된 것이 원인. `AnimPose`로 잰 샘플 간 상대 회전은 라벨 그대로
+45.0°/89.9° — 즉 패밀리 내부는 정확하고 **절대 기준만 통째로 시프트**돼 있었다.
+
+**계측** — `FPSR.Debug.AimSync 1`(캐릭터별 pitch 소스 분해 readout, 2=로그 덤프). 수치가 송신측과
+같은데 각도만 다르면 콘텐츠, 수치가 다르면 복제/코드.
+
+**해결** — 재저작 대신 **그래프 사후 보정**: `ABL_Blu_W2_Rifle`의 AO 적용(Apply Mesh Space Additive)
+뒤에 `Transform (Modify) Bone` — Bone `chest`, Rotation Mode `Add to Existing`, Space `Component`,
+**Roll −20**(PIE 2인 캘리브레이션 확정값). TwoWayBlend(서기/앉기) 뒤라 한 노드로 두 스탠스 커버,
+걷기/조깅 베이스도 같은 시프트 계열이라 함께 보정된다. 새 무기 세트 레이어에도 같은 패턴 복제.
+
+**함정 3개**
+- **TMB Rotation Mode 기본값 = `Replace Existing`** — 노드를 넣는 순간 (0,0,0)으로 교체돼 상체가 90°
+  꺾인다. `Add to Existing`으로 바꾸고 (0,0,0)에서 포즈 불변인지 먼저 확인.
+- 이 릭은 **Blender식 네이밍**: `spine_03`이 없고 `root>hips>spine>chest>neck>head` (척추 2개뿐).
+- 이 릭의 상하 조준축 = **컴포넌트 X축 회전 = rotator 표기상 Roll**이다(Pitch 필드가 아님).
+
 ### B1. 카메라 근처의 메시가 잘려 보인다
 **근평면은 10cm가 아니라 1.0cm다.** `Config/DefaultEngine.ini`의 `[/Script/Engine.Engine] NearClipPlane=1.0`을 엔진이 `UEngine::Init` → `SetNearClipPlaneGlobals`(`UnrealEngine.cpp:2221`)에서 읽는다. `CoreGlobals.cpp:260`의 `GNearClippingPlane = 10.0f`는 **config를 읽기 전 초기값**이다.
 → 몇 cm짜리 잘림은 근평면이 아니라 **지오메트리가 카메라 평면을 관통**하는 것이다. 근평면을 더 낮춰봐야 헛수고.

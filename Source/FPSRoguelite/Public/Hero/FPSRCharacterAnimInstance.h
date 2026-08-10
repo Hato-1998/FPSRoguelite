@@ -99,7 +99,8 @@ public:
 	bool bIsAiming = false;
 
 	/** View pitch relative to the actor, -90..90. Correct on simulated proxies for free: the engine already replicates
-	 *  APawn::RemoteViewPitch16 (COND_SkipOwner) and GetBaseAimRotation folds it in. No extra replication. */
+	 *  APawn::RemoteViewPitch16 (COND_SkipOwner) and GetBaseAimRotation folds it in. No extra replication.
+	 *  The -90..90 range is enforced by an explicit clamp in UpdateFromCharacter, not just assumed. */
 	UPROPERTY(BlueprintReadOnly, Category = "FPSR|Anim")
 	float AimPitch = 0.0f;
 
@@ -252,6 +253,13 @@ private:
 
 	/** So a missing elbow bone is reported once, not every frame. */
 	bool bWarnedMissingElbowBone = false;
+
+	/** So actor-pitch pollution (which silently kills the proxy RemoteViewPitch fallback) is reported once, not every frame. */
+	bool bWarnedActorPitchPollution = false;
+
+	/** Accumulator for the FPSR.Debug.AimSync >= 2 throttled log. Debug-only in effect; kept unconditional so the
+	 *  header doesn't change shape between build configs. */
+	float AimSyncLogAccum = 0.0f;
 
 	/** Frame the values were last published, so the two hooks above can't both run. Sentinel = "never". */
 	uint64 LastPublishedFrame = TNumericLimits<uint64>::Max();

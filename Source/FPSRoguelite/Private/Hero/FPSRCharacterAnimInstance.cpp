@@ -7,6 +7,21 @@
 #include "Core/FPSRLogChannels.h" // LogFPSR — explicit, not relied on transitively via unity (IWYU)
 
 #include "Components/SkeletalMeshComponent.h"
+#include "GameFramework/PlayerController.h" // GetPlayerViewPoint — explicit, not relied on transitively via unity (IWYU)
+#include "HAL/IConsoleManager.h" // TAutoConsoleVariable — explicit, not relied on transitively via unity (IWYU)
+#include "Engine/Engine.h" // GEngine — explicit, not relied on transitively via unity (IWYU)
+
+#if ENABLE_DRAW_DEBUG
+// Per-character aim pitch source readout, permanent instrumentation (not removed after the AimOffset desync bug is
+// closed) — the same class of proxy-vs-owner-vs-server pitch mismatch can recur any time a new pitch source is added,
+// and this is the fastest way to see which source disagreed in a live PIE session. Mirrors CVarMovementDebug's shape
+// (FPSRCharacter.cpp) so the two debug CVars read the same way.
+static TAutoConsoleVariable<int32> CVarAimSyncDebug(
+	TEXT("FPSR.Debug.AimSync"),
+	0,
+	TEXT("Per-character aim pitch source readout. 1 = on-screen line per character, 2 = also throttled LogFPSR dump (for PIE server/client comparison). 0 = off (default)."),
+	ECVF_Cheat);
+#endif
 
 namespace
 {
@@ -152,7 +167,64 @@ void UFPSRCharacterAnimInstance::UpdateFromCharacter(AFPSRCharacter& Character, 
 
 	// AimPitch needs no compensation (Rotate Root Bone only turns yaw). On a simulated proxy this is still correct
 	// without any work of ours: the engine replicates APawn::RemoteViewPitch16 and GetBaseAimRotation folds it in.
-	AimPitch = FRotator::NormalizeAxis(AimRotation.Pitch - ActorRotation.Pitch);
+	// The clamp only enforces the -90..90 contract the header already promises (PlayerCameraManager's ViewPitchMin/Max
+	// is ±89.9 by default, but nothing in THIS function guarantees a sane source) — it is a contract guard, not a fix.
+	AimPitch = FMath::Clamp(FRotator::NormalizeAxis(AimRotation.Pitch - ActorRotation.Pitch), -90.0f, 90.0f);
+
+	// GetBaseAimRotation only falls back to the replicated RemoteViewPitch16 while the actor pitch is nearly zero
+	// (APawn::GetBaseAimRotation, UE 5.7). bUseControllerRotationPitch is false so nothing should ever write actor
+	// pitch — if something does (ragdoll, root motion, a future slope-align), proxies silently lose their aim pitch.
+	// Detect that instead of failing quietly. Say it once (same pattern as the elbow-bone warning below).
+	if (!bWarnedActorPitchPollution && !FMath::IsNearlyZero(ActorRotation.Pitch, 0.1))
+	{
+		bWarnedActorPitchPollution = true;
+		UE_LOG(LogFPSR, Warning,
+			TEXT("[Anim] %s: actor pitch is %.2f (expected 0) — GetBaseAimRotation's RemoteViewPitch fallback is bypassed on simulated proxies; their AimPitch is now wrong."),
+			*GetNameSafe(&Character), ActorRotation.Pitch);
+	}
+
+#if ENABLE_DRAW_DEBUG
+	// Instrumentation for the AimPitch desync bug: break the final value down by source so a PIE server/client pair
+	// can be compared line-for-line instead of guessing which stage disagreed.
+	if (CVarAimSyncDebug.GetValueOnGameThread() >= 1 && GEngine)
+	{
+		const bool bAuthority = Character.HasAuthority();
+		const bool bLocal = Character.IsLocallyControlled();
+		const TCHAR* RoleTag = (bAuthority && bLocal) ? TEXT("SRV+LOC") : bAuthority ? TEXT("SRV") : bLocal ? TEXT("LOC") : TEXT("SIM");
+
+		const APlayerController* Controller = Character.GetController<APlayerController>();
+		FVector ViewLoc = FVector::ZeroVector;
+		FRotator ViewRot = FRotator::ZeroRotator;
+		if (Controller)
+		{
+			// void return — fills the outs from the camera cache (or falls back to the view target's actor transform).
+			Controller->GetPlayerViewPoint(ViewLoc, ViewRot);
+		}
+
+		// Built as FStrings rather than dereferenced Printf temporaries so nothing here relies on a temporary's
+		// lifetime surviving into the outer Printf call below.
+		const FString CtrlStr = Controller ? FString::Printf(TEXT("%.1f"), Controller->GetControlRotation().Pitch) : TEXT("--");
+		const FString ViewStr = Controller ? FString::Printf(TEXT("%.1f"), ViewRot.Pitch) : TEXT("--");
+
+		const FString Msg = FString::Printf(
+			TEXT("AIM [%s nm%d] Ctrl %s View %s Base %.1f Actor %.1f => Pitch %.1f"),
+			RoleTag, (int32)Character.GetNetMode(), *CtrlStr, *ViewStr,
+			AimRotation.Pitch, ActorRotation.Pitch, AimPitch);
+
+		GEngine->AddOnScreenDebugMessage((uint64)(UPTRINT)this, 0.0f,
+			Character.IsLocallyControlled() ? FColor::Green : FColor::Orange, Msg);
+
+		if (CVarAimSyncDebug.GetValueOnGameThread() >= 2)
+		{
+			AimSyncLogAccum += DeltaSeconds;
+			if (AimSyncLogAccum >= 0.5f)
+			{
+				AimSyncLogAccum = 0.0f;
+				UE_LOG(LogFPSR, Log, TEXT("%s"), *Msg);
+			}
+		}
+	}
+#endif
 
 	// These two subtract the SAME post-clamp RootYawOffset that goes to Rotate Root Bone this frame. The node turns the
 	// whole pose by it; subtracting here cancels that, so the feet keep pointing along the real velocity and the upper
