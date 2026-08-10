@@ -90,7 +90,9 @@ protected:
 	 *  owning controller once (P1). Owner-local; returns null off the owning client / before the component exists. */
 	UFPSRRecoilComponent* ResolveRecoil();
 
-	/** True when the equipped weapon has ammo and is not reloading. */
+	/** True when the equipped weapon has ammo, is not reloading, AND the current locomotion state permits firing
+	 *  (UFPSRCharacterMovementComponent::CanFireInCurrentState — wall-hang puts both hands on the wall). Client-side
+	 *  prediction gate only; the authority is UFPSRGameplayAbility::IsFirePermittedByMovementState inside each fire GA. */
 	bool CanFire() const;
 
 	/** Owner-client: if the mag is empty while the player wants to fire, request a reload (once). */

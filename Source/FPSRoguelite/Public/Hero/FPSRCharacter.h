@@ -1063,11 +1063,11 @@ protected:
 	bool bCachedHasHipMotion = false;
 
 	// --- State pose blend (§6, GunMotionTool_Spec.md — slide/airborne/holster weapon poses; owner-local cosmetic,
-	// advanced + composed in UpdateAimDownSights) ---
+	// advanced + composed in ApplyWeaponStatePose) ---
 	/** 0 = drawn, 1 = fully holstered. Judged from the SAME predicate as the server fire gate
 	 *  (UFPSRWeaponFireComponent / UFPSRGameplayAbility::IsFirePermittedByMovementState) and the HUD crosshair
 	 *  (UFPSRRunHUDWidget) — UFPSRCharacterMovementComponent::CanFireInCurrentState() — so "can I shoot" and "is the
-	 *  gun in my hands" can never disagree. Advanced + composed into the pose layer in UpdateAimDownSights; consumed
+	 *  gun in my hands" can never disagree. Advanced + composed into the weapon delta in ApplyWeaponStatePose; consumed
 	 *  by RefreshWeaponVisibility (gated on bCachedHasHolsterPose below) to delay the wall-hide until the descent
 	 *  finishes instead of vanishing the instant the wall gate closes. */
 	float HolsterBlendAlpha = 0.0f;

@@ -664,22 +664,27 @@ void AFPSRCharacter::RefreshWeaponVisibility(bool bForce)
 	bool bHideForWall = Move && Move->IsOnWall();
 
 	// Holster-authored delay (§6): instead of vanishing the instant the wall gate closes, an authored weapon
-	// descends into its holster pose (UpdateAimDownSights) and the mesh stays visible until that descent actually
+	// descends into its holster pose (ApplyWeaponStatePose) and the mesh stays visible until that descent actually
 	// finishes. This only ever DELAYS a wall-hide that was already decided above — it can never invent a new reason
-	// to hide or show the weapon, and it never touches bHideForScope. Four guards, all required:
+	// to hide or show the weapon, and it never touches bHideForScope. Three guards, all required:
 	//  1. bHideForWall already true — nothing to delay otherwise.
-	//  2. IsLocallyControlled() — HolsterBlendAlpha is advanced ONLY in UpdateAimDownSights, which itself early-outs
+	//  2. IsLocallyControlled() — HolsterBlendAlpha is advanced ONLY in ApplyWeaponStatePose, which itself early-outs
 	//     on anything but the owning client (owner-local cosmetic solve). A simulated proxy's alpha therefore never
 	//     leaves 0, which — left unguarded — would silently defeat this delay forever (0 < 1.0 never gates true) as
 	//     an accident of an unadvanced float rather than a deliberate choice. Made explicit here instead: remote
 	//     observers (3P) keep the PRE-EXISTING instant hide. The wall clip is bare-handed on every machine, so a
 	//     delayed hide would show the gun floating beside an empty hand for anyone watching — the opposite of what
 	//     this track exists to fix.
-	//  3. bFirstPersonSplitActive — the holster pose is solved against the split first-person arms/weapon
-	//     presentation; without the split there is nothing for the delayed pose to actually ride on.
-	//  4. bCachedHasHolsterPose — an unauthored weapon (every weapon until §5 DA content lands) has no pose to show
-	//     during a delay, so it keeps the exact legacy instant-hide behavior (zero regression).
-	if (bHideForWall && IsLocallyControlled() && bFirstPersonSplitActive && bCachedHasHolsterPose)
+	//  3. bWeaponAttachIsGunAnchor && bCachedHasHolsterPose — the delay is only honest when a descent will ACTUALLY be
+	//     rendered, and ApplyWeaponStatePose writes the pose on exactly this pair of conditions (see its own gate).
+	//     Testing bFirstPersonSplitActive here instead would be WIDER than what actually moves the weapon: the split
+	//     can be on while the gun-anchor attach fell back to a plain socket (arms mesh missing ik_hand_gun, or the
+	//     socket-parent-bone check in AttachWeaponMeshes logging a Warning and falling back) — and in that state the
+	//     weapon would hang motionless in-hand for the whole HolsterDuration and then vanish in one frame, i.e. the
+	//     exact "gun disappears out of nowhere" this track exists to remove, reintroduced only on the fallback path.
+	//     bCachedHasHolsterPose covers the other half: an unauthored weapon has no pose to show during a delay, so it
+	//     keeps the exact legacy instant-hide behavior (zero regression).
+	if (bHideForWall && IsLocallyControlled() && bWeaponAttachIsGunAnchor && bCachedHasHolsterPose)
 	{
 		bHideForWall = (HolsterBlendAlpha >= 1.0f);
 	}
@@ -2960,8 +2965,15 @@ void AFPSRCharacter::ApplyWeaponStatePose(float DeltaTime)
 {
 	// Owner-local only — same gate UpdateAimDownSights uses below (this is owner-local presentation, never
 	// replicated: the components it touches carry only local render state).
+	//
+	// The delta is cleared on the way out of EVERY early return in this function, not just the zero-delta branch
+	// below: CachedWeaponStatePoseDelta is read by GetRight/LeftHandGripInGunFrame and GetWeaponPartFrameInGunSpace,
+	// which have no idea this function stopped running. Leaving the last live value behind would keep multiplying a
+	// dead slide/holster pose into every grip and part frame indefinitely — e.g. a listen-server host's pawn being
+	// UnPossessed mid-slide would freeze that tilt into the hand-IK targets for as long as the pawn lives.
 	if (!IsLocallyControlled() || GetNetMode() == NM_DedicatedServer)
 	{
+		CachedWeaponStatePoseDelta = FTransform::Identity;
 		return;
 	}
 
@@ -3017,8 +3029,13 @@ void AFPSRCharacter::ApplyWeaponStatePose(float DeltaTime)
 	// weapon's WORLD transform every frame there (bSolvingArms == false) — a relative write here would just be
 	// clobbered a moment later, so this function leaves the weapon untouched on that path (current behavior,
 	// zero regression for every weapon until content authors the gun-anchor rig).
+	// Delta cleared here too (see the top-of-function note): !ActiveWeaponMesh is the UNEQUIP path, which does NOT go
+	// through AttachWeaponMeshes (RefreshEquippedWeaponVisual returns early once it has cleared the meshes) — so this
+	// is the only place that can stop a slide/holster delta from outliving the weapon it belonged to and being folded
+	// into a stale grip cache the arms would then reach for bare-handed.
 	if (!bWeaponAttachIsGunAnchor || !FirstPersonArms || !ActiveWeaponMesh)
 	{
+		CachedWeaponStatePoseDelta = FTransform::Identity;
 		return;
 	}
 
