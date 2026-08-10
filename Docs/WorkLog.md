@@ -9,6 +9,55 @@
 
 ---
 
+## 🔩 소규모 하드닝 3건 — 위조 Gen · 콘솔 Reserve · ADS 무음 폴백 (2026-08-11, `fix/small-hardening-batch`)
+> 머지 `ee15b5fb`. 보드 대기 16건 중 **"한두 번의 체크로 끝나는 것"만** 골라 처리(사용자 요청).
+> 커밋 3개 = `77a3835b`(위조 Gen) · `f5abfa90`(Reserve + 소유 헬퍼) · `7f0daf5d`(ADS 경고).
+
+### 🪤 보드 행 본문이 내 구현보다 정확했다 — 음수 한 글자
+`Reserve` 상한을 `FMath::Min(Count, Candidates.Num())`로 잡았는데, **보드 행은 `FMath::Max(Count, 0)`까지 요구**하고 있었다.
+확인해 보니 그게 맞았다 — 엔진 `Array.h`의 `TArray::Reserve`는 **음수를 `OnInvalidArrayNum`으로 보낸다**(치명 처리).
+콘솔은 `FCString::Atoi` 결과를 검증 없이 넘기므로 **`FPSR.DrawCards -1`은 "아무것도 안 뽑기"가 아니라 프로세스를 내린다.**
+큰 값만 막고 끝냈으면 **정반대 방향의 같은 크래시**를 그대로 남길 뻔했다.
+→ 교훈: 보드 행이 지정한 식을 "대충 같은 뜻"으로 줄여 쓰지 말 것. 왜 그 형태인지 먼저 확인.
+- 같은 도메인 전수 grep: 외부 입력 기반 `Reserve`/`SetNum`은 이것 하나뿐(나머지 1건은 DataAsset 배열 길이).
+
+### 위조 Gen 하나로 늦은참여 게이트가 영구히 열려 있었다 (`77a3835b`)
+`ServerAckTopology(Gen)`이 클라 값을 그대로 넘기고, `SetAckedTopologyGeneration`은 `FMath::Max`로 **단조 증가**만 한다.
+즉 **`INT32_MAX`를 한 번만 보내면 그 값이 영원히 남아**, 이후 문이 열려 `JoinGen`이 올라가도 `AckedGen >= JoinGen`이 계속 참이다.
+- **한 곳에서만 클램프**했다 — `HasAuthority` 직후. 여기서 막으면 PlayerState 경로와 `PendingAckTopologyGeneration`
+  **버퍼 경로가 같이 덮인다**(두 군데 중복 검사 불필요).
+- 하한 0이 정상 클라를 막지 않는 근거도 코드로 확인: `JoinTopologyGeneration >= 0`이라 0으로 깎여도 gen 0 조인만 만족한다.
+- **성격 = 위생 조치지 보안 수정이 아니다**(보드 결정 문구 그대로). 단일맵에선 이 게이트가 사실상 no-op이라,
+  주석에 **"멀티맵(`bUnifiedExtent`) 활성화 시 재평가"**를 명시했다 — 자가 충족이 실제 이득이 되는 건 그때부터다.
+
+### 소유 판정을 세 함수에 복붙하지 않았다 (`f5abfa90`)
+`GetOwnedWeapons()`는 `BlueprintPure`라 시그니처를 못 바꾼다 → `HasOwnedWeapon()`/`HasAnyOwnedWeapon()` **추가**만 하고
+스칼라 질문 2곳만 교체(배열을 실제로 쓰는 나머지 2곳은 손대지 않음).
+- ⚠️ **"맨손은 소유가 아니다"(`bExcludeFromProgression`) 규칙을 세 함수에 흩지 않았다** — 파일 로컬 `ResolveOwnedWeapon()`
+  하나로 뽑고 셋 다 그걸 쓴다. 이 규칙이 갈라지면 맨손이 **카드풀 시드·"무기 보유" 검사·로비 시작무기**로 새는데,
+  세 곳이 제각각 새면 증상이 달라 추적이 어렵다.
+
+### ADS "되긴 하는데 안 맞는" 상태를 말하게 했다 (`7f0daf5d`)
+조준 소켓이 비었거나 메시에 없으면 `bAiming`만 조용히 false가 되는데, **FOV 줌은 소켓과 무관하게 걸린다** → 화면상 ADS가
+작동하는 것처럼 보인다. 이번 ADS 트랙 최초 오진단의 원인이 이 무음이었다.
+- **넣은 위치가 이 작업의 전부**였다: `RefreshWeaponPartComponents()` **직후**. `CachedAimSocket`은 그 앞에서 캐시되지만
+  **`CachedAimComponent`는 파츠 리빌드가 정한다** → 앞에 넣으면 직전 무기의 낡은 값이나 리셋된 null을 본다
+  (항상 뜨거나 항상 안 뜨는 경고가 된다). 매 프레임 게이트에는 넣지 않았다(핫패스).
+- **판정을 소비처와 동일하게** 맞췄다(`CachedAimComponent` → 없으면 `ActiveWeaponMesh` = `UpdateAimDownSights`의 `WeaponCarrier`).
+  런타임이 보는 것과 다른 걸 검사하면 경고 자체가 거짓이 된다.
+- `RefreshEquippedWeaponVisual`은 **모든 머신에서 돈다**(헤더 주석). 이 캐시를 읽는 건 오너 로컬 전용 함수뿐이라
+  `IsLocallyControlled()`로 게이트 — 안 그러면 같은 DA 오설정을 접속 머신 수만큼 중복 보고한다.
+- ⚠️ 이 보드 행은 **닫지 않았다.** 나머지 절반(무기 DA 5종 조준 소켓 **값 저작**)은 사용자 작업이다.
+  이제 그 5종을 장착하면 어느 DA가 비었는지 PIE 로그가 이름으로 알려 준다.
+
+### 손대지 않기로 판정한 것 (대기 유지)
+- **정리 대상 4건** — 2항목이 "LPAMG 트랙 확정 후"·"폴더명 결정 필요"로 **사용자 결정 대기**, 삭제분이 git으로 복구 불가라 임의 착수 비권장.
+- **어셈블러 잔여 2건** — 둘 다 **원인 미상 + 이미 우회 적용**. 재현이 없어 지금 능동적으로 끝낼 게 없다(관찰 대기).
+- **ABP_FPArms 리다이렉터 fixup** — 행 본문이 에디터 우클릭 조작을 지정 = 사용자 작업 영역.
+- **U14 perf 측정 항목 등록 / 적 재스폰 체력바 잔존** — 전자는 "측정 후 결정"으로 명시 이연, 후자는 원인 미확정(조사 동반).
+
+---
+
 ## 🧹 보드 3행 처리 — 잔여 머신 경로 · SSOT 드리프트 13건 · CachedRecoil 약참조 (2026-08-11)
 > 브랜치 2개: `docs/ssot-drift-and-path-neutralize`(보드 2행, 머지 `898992ea`) ·
 > `fix/cachedrecoil-weakptr`(보드 1행, 머지 `18480710`).
