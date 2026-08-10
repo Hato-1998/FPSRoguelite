@@ -766,6 +766,39 @@ void AFPSRPlayerController::DebugSelectFragmentReplacement(int32 DropIndex)
 		bApplied ? TEXT("APPLIED — fragment swapped in") : TEXT("REJECTED — at cap with no valid drop index (anti-cheat / out-of-range)"));
 }
 
+void AFPSRPlayerController::DebugSkipAllCardSelections()
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+
+	// Always slot 0, always through HandleCardSelection — the same validated server path the UI's RPC lands in, so
+	// nothing here can apply a card the player couldn't have picked. The loop exists because the opening seed is a
+	// SEQUENCE of picks: applying one presents the next. Guarded so a selection that stops applying (offer type that
+	// declines index 0, exhausted pool) can't spin forever.
+	int32 Guard = 16;
+	int32 Resolved = 0;
+	while (Guard-- > 0)
+	{
+		if (!HasActiveOffer())
+		{
+			PresentNextOfferIfNeeded();
+			if (!HasActiveOffer())
+			{
+				break; // nothing pending, nothing presentable — done
+			}
+		}
+		if (!HandleCardSelection(0, CurrentOfferId, INDEX_NONE))
+		{
+			break;
+		}
+		++Resolved;
+	}
+	UE_LOG(LogFPSR, Warning, TEXT("[Card] SkipCards: %s — %d selection(s) auto-resolved (slot 0)"),
+		*GetName(), Resolved);
+}
+
 namespace
 {
 	AFPSRPlayerController* GetLocalFPSRController(UWorld* World)
@@ -832,6 +865,33 @@ namespace
 			}
 			const int32 DropIndex = Args.Num() > 0 ? FCString::Atoi(*Args[0]) : 0;
 			PC->DebugSelectFragmentReplacement(DropIndex);
+		}));
+
+	FAutoConsoleCommandWithWorld GCmd_SkipCards(
+		TEXT("FPSR.SkipCards"),
+		TEXT("Resolve every pending card selection for ALL players by picking slot 0 (debug, authority/host only) — clears the opening-seed / level-up freeze so PIE tests reach live gameplay without the modal."),
+		FConsoleCommandWithWorldDelegate::CreateLambda([](UWorld* World)
+		{
+			if (!World)
+			{
+				return;
+			}
+			// Every controller, not just the local one: the global freeze holds until NO player owes a selection,
+			// so skipping only the host would leave the run frozen on the client's modal.
+			for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+			{
+				if (AFPSRPlayerController* PC = Cast<AFPSRPlayerController>(It->Get()))
+				{
+					if (PC->HasAuthority())
+					{
+						PC->DebugSkipAllCardSelections();
+					}
+				}
+			}
+			if (AFPSRGameState* GS = World->GetGameState<AFPSRGameState>())
+			{
+				GS->RefreshPauseState();
+			}
 		}));
 }
 

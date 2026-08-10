@@ -197,7 +197,13 @@ private:
 	/** 바디를 팔의 무기 부착 소켓/뼈에 **실제로 attach** 한다(P3 해결 — 예전엔 한 번 스냅만 하고 그 뒤 월드에 떠
 	 *  있었다). 파츠는 이제 바디의 진짜 자식(B2)이라 따로 손대지 않아도 자동으로 따라온다.
 	 *
-	 *  부착 이름 결정 우선순위(런타임 AttachWeaponMeshes와 같은 규칙을 CDO로 조회):
+	 *  🚨 이 함수는 런타임 AttachWeaponMeshes 의 **소켓-부착 폴백** 경로만 재현한다 — 런타임이 gun-anchor
+	 *  2-스킴(ik_hand_gun 뼈 앵커 / 소켓 폴백, fparms-gunanchor-ik)이 된 뒤로 둘은 더 이상 "동일 규칙"이 아니다.
+	 *  이 프리뷰가 gun-anchor 경로의 실제 인게임 결과와 같아지는 건 ABP 의 CopyBone(ik_hand_gun := hand_r) 이
+	 *  실제로 성립하는 동안뿐이며, 그 등가성은 애님그래프 쪽이라 이 함수가 검증하거나 강제할 수 없다.
+	 *
+	 *  부착 이름 결정 우선순위(소켓 "이름" 해석 규칙은 AFPSRCharacter::ResolveWeaponAttachSocket 을 CDO로 그대로
+	 *  조회 — 여기까지는 런타임과 동일. 그 이름에 실제로 "붙이는" 방식은 위 문단대로 폴백 쪽뿐이다):
 	 *   1. AFPSRCharacter::ResolveWeaponAttachSocket(WeaponDA)가 돌려준 소켓이 ArmsComp에 실제로 있으면 그 이름으로
 	 *      붙이고, GripBone을 그 소켓의 소유 뼈로 갱신한다.
 	 *   2. 없으면 현재 GripBone(사용자가 SetGripBone으로 고른 뼈, 또는 이전 해석의 잔재)으로 붙인다 — 단
@@ -207,8 +213,9 @@ private:
 	 *      ArmsAttachIssue에 남겨 GetArmsStatusMessage()로 노출한다.
 	 *
 	 *  🚨 바디 스케일을 무기 DA 의 WeaponAttachScale 로 맞춘다(SetRelativeScale3D — 소켓 자체엔 스케일을 굽지 않는다,
-	 *     불변식 I-B). 런타임이 그렇게 붙이기 때문(FPSRCharacter::AttachWeaponMeshes)이고, 프리뷰가 1.0 이면 화면에서
-	 *     총이 인게임보다 커 보여 그립 판정이 어긋난다. 파츠는 바디의 자식이라 스케일이 자동으로 상속된다(B2).
+	 *     불변식 I-B). 런타임의 소켓-부착 폴백 경로가 그렇게 붙이기 때문(FPSRCharacter::AttachWeaponMeshes)이고,
+	 *     프리뷰가 1.0 이면 화면에서 총이 인게임보다 커 보여 그립 판정이 어긋난다. 파츠는 바디의 자식이라 스케일이
+	 *     자동으로 상속된다(B2).
 	 *
 	 *  팔/바디/DA 중 하나라도 없으면 DetachAssemblyFromHand로 정리하고 끝낸다. */
 	void AttachAssemblyToHand();

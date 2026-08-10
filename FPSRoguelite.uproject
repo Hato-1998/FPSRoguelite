@@ -87,6 +87,10 @@
 			"Name": "VibeUE",
 			"Enabled": true,
 			"Optional": true
+		},
+		{
+			"Name": "ImGui",
+			"Enabled": true
 		}
 	]
 }

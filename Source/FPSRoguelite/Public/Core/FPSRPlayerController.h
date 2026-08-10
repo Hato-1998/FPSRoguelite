@@ -54,6 +54,11 @@ public:
 	 *  DropIndex via the same server-authoritative path as the replacement RPC (FPSR.Frag.Replace). An out-of-range
 	 *  DropIndex demonstrates the anti-cheat rejection. */
 	void DebugSelectFragmentReplacement(int32 DropIndex);
+
+	/** Debug (authority/host): resolve every pending card selection for THIS player by always taking slot 0, through
+	 *  the same server-authoritative path the UI uses (FPSR.SkipCards). Clears the opening-seed / level-up freeze so
+	 *  PIE tests reach live gameplay without clicking through the modal. */
+	void DebugSkipAllCardSelections();
 #endif
 
 	/** Client intent: notify the server the local UI is ready, so the server can issue the one-time

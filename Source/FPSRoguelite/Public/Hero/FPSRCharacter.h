@@ -6,6 +6,7 @@
 #include "AbilitySystemInterface.h"
 #include "GameplayTagContainer.h"
 #include "Weapon/FPSRWeaponDataAsset.h"
+#include "Anim/FPSRGunMotionCurves.h"
 #include "FPSRCharacter.generated.h"
 
 class UAbilitySystemComponent;
@@ -33,6 +34,9 @@ class UAnimMontage;
 class USoundBase;
 class UParticleSystem;
 class UUserWidget;
+#if WITH_EDITOR
+struct FPropertyChangedEvent;
+#endif
 
 /** Base player character: first-person camera + ONE shared body mesh (True First Person, ADR 0002) + Enhanced Input +
  *  weapon inventory/firing. ASC lives on PlayerState. */
@@ -196,6 +200,17 @@ public:
 	 *  local render flag, not replicated, so this only clears the OWNER's view — teammates still see the gun. (W-U2) */
 	void UpdateScopeWeaponVisibility();
 
+	/** P2 (GunMotionTool_Spec.md §4-2): read FPGM_P_<AttachSocket>_TX..RR (6 curves per attached part) off the arms
+	 *  AnimInstance's currently-blended pose and apply them as an additional relative-transform offset on top of each
+	 *  weapon part's authored placement (socket + FFPSRWeaponPartAttachment::Offset). Called from the same owner-local,
+	 *  post-arms-pose tick site as UpdateAimDownSights above (FPSRWeaponFireComponent::TickComponent, which is
+	 *  explicitly ordered after FirstPersonArms via AddTickPrerequisiteComponent in BeginPlay) rather than from this
+	 *  actor's own Tick — reading a curve off an AnimInstance whose graph hasn't evaluated yet this frame would
+	 *  reproduce exactly the one-frame lag the gun-anchor IK refactor exists to avoid (see GetRightHandGripInGunFrame's
+	 *  comment). No-op when the first-person split is off, there are no attached parts, or (per part, cheaply) the
+	 *  currently-blended pose never authored that part's first curve — see the .cpp for the early-return this buys. */
+	void ApplyWeaponPartCurves();
+
 	/** Single owner of "is the weapon drawn". Composes every reason to hide it (scope, wall) so the reasons cannot
 	 *  cancel each other out. Idempotent — safe to call from spawn, possession, equip and movement-mode paths.
 	 *  @param bForce  Re-apply to the components even when the composed answer has not changed. Required after the
@@ -296,6 +311,42 @@ public:
 	UFUNCTION(BlueprintPure, Category = "FPSR|Weapon")
 	bool GetLeftHandGripTransform(const USceneComponent* ForMesh, FTransform& OutGripWorld) const;
 
+	/** Gun-anchor IK (fparms-gunanchor-ik): the equipped weapon's grip frame expressed as a CONSTANT in ik_hand_gun BONE
+	 *  SPACE — i.e. the same space as hand_r once the arms' animgraph does CopyBone(ik_hand_gun := hand_r, component
+	 *  space). Feed this straight into a Transform (Modify) Bone node on ik_hand_r / ik_hand_l with Bone Space =
+	 *  "Parent Bone Space" (ik_hand_gun IS that parent in the retarget rig: ik_hand_root > ik_hand_gun > ik_hand_l/r).
+	 *
+	 *  🚨 POSE MUST NOT ENTER THIS VALUE — no world transform, no live bone read of an animated chain. It is composed
+	 *  ENTIRELY from fixed, authored offsets (part/socket local transforms + the weapon's own RelativeTransform once
+	 *  attached — see AttachWeaponMeshes) precisely so it stays correct without re-solving every frame: it only needs
+	 *  to change when the equipped weapon or its parts change, which is exactly when it's recached (see
+	 *  CachedRightGripInGun / RefreshHandGripInGunFrameCache). A pose-dependent read here would reintroduce the
+	 *  one-frame lag this refactor exists to remove (see UFPSRFirstPersonArmsAnimInstance).
+	 *
+	 *  Same ForMesh gate as GetLeftHandGripTransform above (only answers true when the grip is actually attached to
+	 *  THIS mesh — in practice always the first-person arms, since the ik_hand_gun rig only exists there).
+	 *  GAME THREAD ONLY (same reason as GetLeftHandGripTransform). */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Weapon")
+	bool GetRightHandGripInGunFrame(const USceneComponent* ForMesh, FTransform& OutGripInGun) const;
+
+	/** Left-hand counterpart of GetRightHandGripInGunFrame above — same gun-frame contract, same gate, same caching.
+	 *  Both hands share one internal composition helper; only the resolved grip component/socket/offset differ. */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Weapon")
+	bool GetLeftHandGripInGunFrame(const USceneComponent* ForMesh, FTransform& OutGripInGun) const;
+
+	/** P2 (GunMotionTool_Spec.md §4-1/§4-2): the currently-attached weapon part carrying AttachSocket
+	 *  (FFPSRWeaponPartAttachment::Socket, the pack's stable per-part id — the same identifier a gun-motion clip's
+	 *  LeftHandAttachPartSocket/RightHandAttachPartSocket studio metadata names), expressed in the EXACT SAME composed
+	 *  frame as GetRightHandGripInGunFrame / GetLeftHandGripInGunFrame above (ik_hand_gun bone-parent space) —
+	 *  required so the arms AnimInstance can lerp/slerp a hand IK target between a grip frame and a part frame (§2-1
+	 *  Blend semantics) without a space mismatch. The frame returned is the part's LIVE frame — if
+	 *  UFPSRCharacter::ApplyWeaponPartCurves is currently moving this part via FPGM_P_* curves, that live result is
+	 *  what comes back, not the static authored placement (§4-1 "라이브 = Result·Base⁻¹·Cached" — a hand attaching to
+	 *  a part mid-motion has to follow where it actually is). Returns false when no currently-attached part carries
+	 *  AttachSocket (weapon config without that mount, wrong id, or nothing equipped). */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Weapon")
+	bool GetWeaponPartFrameInGunSpace(FName AttachSocket, FTransform& OutFrame) const;
+
 	/** Play reload cosmetics on a server-confirmed reload-start edge (called from UFPSRWeaponInstance::OnRep_Reloading,
 	 *  which fires on every client holding the replicated instance). One body mesh, one montage, owner and remotes alike
 	 *  (ADR 0002 invariant 4), plus the weapon's own magazine/bolt montage. No-op when bIsReloading is false, during the
@@ -357,6 +408,35 @@ protected:
 	/** Resolve which mesh carries the equipped weapon's LeftHandSocket — the modular part that owns it (handguard) or
 	 *  the receiver. Null when this weapon authors no left-hand grip. Shared by the AnimBP getter. */
 	UMeshComponent* ResolveLeftHandGripComponent() const;
+
+	/** Right-hand mirror of ResolveLeftHandGripComponent — resolves CachedRightHandSocket the same way. */
+	UMeshComponent* ResolveRightHandGripComponent() const;
+
+	/** Shared composition behind GetRightHandGripInGunFrame / GetLeftHandGripInGunFrame (both hands only differ in
+	 *  which grip component/socket/offset they pass in). Same 3-stage gate as GetLeftHandGripTransform (null resolve,
+	 *  ForMesh-attached check), then a POSE-FREE static composition:
+	 *   1. GripSocket's transform in GripComp's own RTS_Component space (+ GripOffset) — the grip point relative to
+	 *      whichever mesh actually carries the socket (a part, or the receiver).
+	 *   2. Climb GripComp's attachment chain up to (not including) ActiveWeaponMesh, staying in RTS_Component space
+	 *      the whole way, so nothing here ever reads a posed transform.
+	 *   3. ActiveWeaponMesh's own RelativeTransform — relative to WHATEVER it is currently attached to. When
+	 *      AttachWeaponMeshes used the ik_hand_gun-bone anchor (see there), that RelativeTransform IS ALREADY the
+	 *      fixed gun-frame offset (no further hop needed). When it fell back to Snap-on-AttachSocket (body, or an
+	 *      arms mesh with no ik_hand_gun bone), RelativeTransform is only relative to that SOCKET, so one more fixed
+	 *      hop through the socket's own RTS_ParentBoneSpace offset finishes the trip into gun-frame. Which of the two
+	 *      applies is read from ActiveWeaponMesh's OWN live attach-socket name — not assumed — so this stays correct
+	 *      under either AttachWeaponMeshes path without the caller having to know which one is live.
+	 *  Scale is carried through the composition (it affects position) and normalized to (1,1,1) only on the final
+	 *  result — effectors read location/rotation only, but an intermediate normalization would drop the weapon's
+	 *  WeaponAttachScale from the position math. */
+	bool ComputeGripInGunFrame(UMeshComponent* GripComp, FName GripSocket, const FVector& GripOffset,
+		const USceneComponent* ForMesh, FTransform& OutGripInGun) const;
+
+	/** Recompute CachedRightGripInGun / CachedLeftGripInGun from ComputeGripInGunFrame and store them. Called once on
+	 *  attach/part changes (AttachWeaponMeshes, RebuildPartsFromSelection, RefreshEquippedWeaponVisual) rather than
+	 *  every animation frame — the gun-frame grip is a constant between those events (see GetRightHandGripInGunFrame),
+	 *  so re-solving it per frame would just repeat the same answer at a per-frame cost. */
+	void RefreshHandGripInGunFrameCache();
 
 	/** Swap the body's per-weapon anim layer to the equipped weapon's (ADR 0002 step 4). Called from
 	 *  RefreshEquippedWeaponVisual, so it runs on every machine — the layer decides the POSE, and a client that skipped
@@ -421,6 +501,23 @@ protected:
 
 	/** Local client: apply (true) or clear (false) the camera vision-restriction post-process. Idempotent. */
 	void ApplyVisionRestriction(bool bRestricted);
+
+#if WITH_EDITOR
+	/** Editor-only authoring-loop shim (fparms-gunanchor-ik): the gun-frame grip cache (GetRightHandGripInGunFrame /
+	 *  GetLeftHandGripInGunFrame) is a CONSTANT re-solved only on equip/part changes — by design (see those functions'
+	 *  own comments) — so tuning a grip/attach socket's transform in the editor had no visible effect until a PIE
+	 *  restart re-ran AttachWeaponMeshes. Bound to FCoreUObjectDelegates::OnObjectPropertyChanged in BeginPlay, this
+	 *  re-attaches (which re-caches, see AttachWeaponMeshes) whenever ANY socket's property changes in the editor,
+	 *  closing that loop. AttachWeaponMeshes is idempotent and this only fires on human editor edits (low frequency),
+	 *  so reacting to every socket rather than filtering to "is this socket mine" costs nothing — and that filter
+	 *  would itself be a place to get it wrong: a socket's Outer can be either the mesh or the skeleton (this project
+	 *  has hit both), so a narrower check risks silently missing an update instead of just doing one harmless extra
+	 *  re-attach. */
+	void OnEditorObjectPropertyChanged(UObject* Object, FPropertyChangedEvent& Event);
+
+	/** Handle for the OnEditorObjectPropertyChanged binding above — bound in BeginPlay, removed in EndPlay. */
+	FDelegateHandle EditorSocketChangedHandle;
+#endif
 
 	// Enhanced Input handlers
 	void Input_MoveForward(const FInputActionValue& Value);
@@ -564,6 +661,29 @@ protected:
 	 *  would make the next adjustment a code change (ADR 0002 invariant 9). */
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Mesh")
 	FVector LeftHandGripOffset = FVector::ZeroVector;
+
+	/** Right-hand mirror of LeftHandGripOffset above — same authoring convention (grip component space), same reason
+	 *  (the hand bone sits a hand's thickness off the socket's grip line, and that's a property of the arms, not the
+	 *  weapon). Zero by default. */
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Mesh")
+	FVector RightHandGripOffset = FVector::ZeroVector;
+
+	/** Name of the IK bone the weapon anchors to on arms that have the two-bone hand-IK rig (ik_hand_root > ik_hand_gun
+	 *  > ik_hand_l/r — gun-anchor refactor). Data, not a literal (ADR 0002 invariant 9): a future rig could rename or
+	 *  restructure the IK chain without a recompile. AttachWeaponMeshes attaches here instead of the grip socket
+	 *  whenever this bone exists on the current arms mesh; GetRightHandGripInGunFrame / GetLeftHandGripInGunFrame
+	 *  express their result in this bone's space. */
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Mesh")
+	FName IkHandGunBoneName = FName(TEXT("ik_hand_gun"));
+
+	/** The source bone the arms' animgraph CopyBones INTO IkHandGunBoneName every frame (component space) — i.e. the
+	 *  bone the gun-anchor math in AttachWeaponMeshes treats ik_hand_gun's frame as equal to. AttachWeaponMeshes can
+	 *  only verify HALF of that equality from C++ — that AttachSocket's own parent bone matches this name — since
+	 *  whether the ABP's CopyBone node actually reads FROM this bone is Blueprint-side and unverifiable here. Data,
+	 *  not a literal, for the same reason as IkHandGunBoneName: a re-rig could rename the source bone without a
+	 *  recompile. */
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Mesh")
+	FName ExpectedGripSourceBoneName = FName(TEXT("hand_r"));
 
 	/** Bone hidden while looking through this pawn's eyes (Blu: "head"; its children — hair, eyes, glasses — go with it,
 	 *  engine: BVS_HiddenByParent). Data for the same reason as WeaponAttachSocketName: HideBoneByName does NOTHING and
@@ -763,6 +883,11 @@ protected:
 	UPROPERTY(Transient)
 	TObjectPtr<UMeshComponent> CachedLeftHandComponent;
 
+	/** Right-hand mirror of CachedLeftHandComponent above — same resolution (RebuildPartsFromSelection), same
+	 *  fallback (ResolveRightHandGripComponent). */
+	UPROPERTY(Transient)
+	TObjectPtr<UMeshComponent> CachedRightHandComponent;
+
 	/** Scope descriptor of the currently-active sight part (the one carrying CachedAimSocket), captured alongside
 	 *  CachedAimComponent in RebuildPartsFromSelection. Default (bScopeOverlay=false) when no scope sight is active.
 	 *  Owner-local cosmetic; not replicated/saved. (W-U2) */
@@ -829,6 +954,22 @@ protected:
 	FName CachedAimSocket = NAME_None;
 	/** Equipped weapon's left-hand grip socket (ADR 0002 step 4). None = no left-hand IK for this weapon. */
 	FName CachedLeftHandSocket = NAME_None;
+	/** Right-hand mirror of CachedLeftHandSocket above (fparms-gunanchor-ik). None = no right-hand IK for this weapon. */
+	FName CachedRightHandSocket = NAME_None;
+	/** Gun-anchor IK (fparms-gunanchor-ik): grip frame in ik_hand_gun bone space, recomputed on attach/part changes
+	 *  (RefreshHandGripInGunFrameCache) rather than every frame — see GetRightHandGripInGunFrame / GetLeftHandGripInGunFrame.
+	 *  Unset = this hand has no grip on the current arms (weapon has no socket for it, or it isn't on the arms at all). */
+	TOptional<FTransform> CachedRightGripInGun;
+	TOptional<FTransform> CachedLeftGripInGun;
+
+	/** P2 (GunMotionTool_Spec.md §4-2): per-attached-part gun-space frame (GetWeaponPartFrameInGunSpace's static base
+	 *  — same composed space as CachedRightGripInGun / CachedLeftGripInGun above), keyed by
+	 *  FFPSRWeaponPartAttachment::Socket. Rebuilt in RefreshPartFramesInGunSpaceCache, called from
+	 *  RebuildPartsFromSelection alongside RefreshHandGripInGunFrameCache — never re-solved per animation frame (same
+	 *  pose-free reasoning as the grip cache). GetWeaponPartFrameInGunSpace re-derives the LIVE frame from this base
+	 *  when ApplyWeaponPartCurves is currently moving the part (§4-1). */
+	TMap<FName, FTransform> CachedPartFramesInGunSpace;
+
 	float CachedADSSightDistance = 25.0f;
 	bool bCachedHasADS = false;
 	bool bCachedADSAlignRotation = true;
@@ -877,6 +1018,20 @@ protected:
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<UStaticMeshComponent>> WeaponPartComponents;
 
+	/** P2 (GunMotionTool_Spec.md §4-2): each attached part's AUTHORED placement (FFPSRWeaponPartAttachment::Offset —
+	 *  "socket + Offset" BEFORE any FPGM_P_* curve is applied), index-aligned with WeaponPartComponents. Captured once
+	 *  in RebuildPartsFromSelection at the moment SetRelativeTransform(PartDef.Offset) runs — has to be a snapshot,
+	 *  not a re-read of the component's current RelativeTransform, because ApplyWeaponPartCurves overwrites that every
+	 *  frame with base+curve and re-reading it back next frame would accumulate the curve offset instead of applying
+	 *  it fresh (same base every time). Also doubles as the base for RefreshPartFramesInGunSpaceCache's gun-space
+	 *  composition below. */
+	TArray<FTransform> WeaponPartBaseOffsets;
+
+	/** P2 (GunMotionTool_Spec.md §4-2): each attached part's FPGM_P_<AttachSocket>_* curve name candidates (6 per
+	 *  part), index-aligned with WeaponPartComponents. Built once (FPSRGunMotionCurves::MakePartCurveNames) in
+	 *  RebuildPartsFromSelection so ApplyWeaponPartCurves never assembles an FName from a string per animation frame. */
+	TArray<FPSRGunMotionCurves::FPartCurveNames> WeaponPartCurveNames;
+
 	/** W-U1: pending next-tick parts rebuild flag (coalesces a burst of modifier/fragment OnReps into one rebuild). */
 	bool bWeaponPartsRebuildPending = false;
 	/** W-U1: hash of the last-applied selected part set; ProcessPendingWeaponPartsRebuild skips rebuild when unchanged.
@@ -895,5 +1050,17 @@ protected:
 	/** W-U1 signature-diff rebuild (next-tick coalesced half of NotifyEquippedWeaponModifiersChanged, see the public
 	 *  declaration above for the full contract). */
 	void ProcessPendingWeaponPartsRebuild();
+
+	/** Tail of ComputeGripInGunFrame: ActiveWeaponMesh's OWN placement expressed in gun frame (ik_hand_gun
+	 *  bone-parent space) — the "WeaponInGunFrame" hop a gun-frame consumer lands on after climbing its own
+	 *  component-local piece (e.g. a grip point's socket offset). False (identity) when there is no attached
+	 *  weapon / no arms — same gate ComputeGripInGunFrame already had inline. */
+	bool GetWeaponRootPlacementInGunFrame(FTransform& OutWeaponInGunFrame) const;
+
+	/** P2 (GunMotionTool_Spec.md §4-2): rebuild CachedPartFramesInGunSpace from WeaponPartComponents/
+	 *  WeaponPartBaseOffsets. Called from RebuildPartsFromSelection right alongside RefreshHandGripInGunFrameCache —
+	 *  same lifecycle point, same pose-free reasoning (GetWeaponPartFrameInGunSpace's static base is a pure cache
+	 *  read; only its optional live-curve re-derivation touches the animated pose). */
+	void RefreshPartFramesInGunSpaceCache();
 
 };
