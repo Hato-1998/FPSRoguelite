@@ -2084,7 +2084,9 @@ void AFPSRCharacter::RefreshEquippedWeaponVisual()
 	CachedADSAimRotationOffset = Weapon->ADSAimRotationOffset;
 	bCachedSuppressFireMontagesWhileADS = Weapon->bSuppressFireMontagesWhileADS;
 	CachedADSInterpSpeed = Weapon->BaseStats.ADSInterpSpeed;
-	CachedADSPositionBobScale = Weapon->ADSPositionBobScale;
+	CachedADSSwayIdleScale = Weapon->ADSSwayIdleScale;
+	CachedADSSwayFreeHorizontalCm = Weapon->ADSSwayFreeHorizontalCm;
+	CachedADSSwayFreeVerticalCm = Weapon->ADSSwayFreeVerticalCm;
 	bCachedSuppressWeaponBoltWhileADS = Weapon->bSuppressWeaponBoltWhileADS;
 	CachedADSMuzzleFlashScale = Weapon->ADSMuzzleFlashScale;
 	CachedADSFireKickDegrees = Weapon->ADSFireKickDegrees;
@@ -3250,19 +3252,26 @@ void AFPSRCharacter::UpdateAimDownSights(float DeltaTime)
 	const FVector HipBaseLoc = HipRelCam.GetLocation();
 	const FQuat HipBaseRot = HipRelCam.GetRotation();
 
-	// ADS position glue (stabilization knob): ADSAimLoc cancels the animated socket motion each frame, so at bob scale 0
-	// the sight is pinned exactly on the centre-line (steady reticle). Lerping the aim location back toward the hip pose
-	// removes that fraction of the anti-bob correction, letting an equal fraction of the animated positional bob survive
-	// (a livelier ADS) while rotation below stays fully glued. Scale 0 (default) == the original exact-glue behaviour.
-	const FVector GluedAimLoc = FMath::Lerp(ADSAimLoc, HipBaseLoc, CachedADSPositionBobScale);
-	FVector NewLoc = FMath::Lerp(HipBaseLoc, GluedAimLoc, CurrentADSAlpha);
+	// ADS position: blend hip -> the solved aim location, which pins the AimSocket on the view centre-line every frame.
+	//
+	// There used to be an ADSPositionBobScale knob here that lerped ADSAimLoc back toward HipBaseLoc, documented as
+	// "lets that fraction of the animated positional bob survive for a livelier ADS". That was FALSE on the arms path
+	// and it was removed (measured 2026-08-10, cost a long hunt): HipBaseLoc is ArmsHipRelativeTransform, a CONSTANT
+	// snapshotted once in BeginPlay (see the hip-reference block above — the arms hang off the camera, so there is
+	// nothing animated to re-read). Blending toward a constant cannot reintroduce motion; it can only drag the gun a
+	// FIXED distance off the centre-line, i.e. a permanently misaligned sight that never moves. The knob only ever did
+	// what it claimed on the older no-arms path, where the hip reference was re-read from an animated hand each frame.
+	// Liveliness during ADS belongs to the sway block below, which moves the gun about the PINNED sight instead.
+	FVector NewLoc = FMath::Lerp(HipBaseLoc, ADSAimLoc, CurrentADSAlpha);
 	FQuat NewRot = FQuat::Slerp(HipBaseRot, ADSAimRot.Quaternion(), CurrentADSAlpha);
 
 	// ADS idle sway + fire kick: BOTH pivot the weapon about the pinned sight (camera-space ≈ (ADSSightDistance, 0, 0)),
 	// faded by the ADS alpha, so the gun body/muzzle moves while the sight stays on the centre-line (steady reticle).
 	//  - Sway: a gentle handheld "breathing" wander (yaw = L-R, subtle pitch) — two out-of-phase sines per axis so it
-	//    reads organic rather than a metronome. MOVEMENT-GATED (below): scaled by a smoothed 0..1 speed factor so a
-	//    planted/standing-still aim stays dead steady and the sway only lives while walking. Cosmetic + owner-local.
+	//    reads organic rather than a metronome. Movement-SCALED, not movement-GATED: ADSSwayIdleScale is the fraction
+	//    that survives standing still, so a planted aim still breathes instead of freezing into a photograph (it used
+	//    to multiply by the movement factor alone, which meant exactly zero at a standstill — that dead-still ADS is
+	//    what this fixes). Cosmetic + owner-local.
 	//  - Kick: the per-shot recoil snap (+pitch = muzzle up) set on each aimed shot (PlayWeaponFireCosmetics), settled
 	//    back toward zero each frame. Both are scaled by the ADS alpha so they appear only in ADS and fade on release.
 	// Smoothed movement factor: 0 when still → 1 at BaseWalkSpeed, eased (FInterpTo) so the sway winds down after you
@@ -3271,15 +3280,19 @@ void AFPSRCharacter::UpdateAimDownSights(float DeltaTime)
 	const float SwayMoveTarget = FMath::Clamp(GetVelocity().Size2D() / SwayRefSpeed, 0.0f, 1.0f);
 	ADSSwayMoveAlpha = FMath::FInterpTo(ADSSwayMoveAlpha, SwayMoveTarget, DeltaTime, 8.0f);
 
+	// Standing still keeps ADSSwayIdleScale of the amplitude; walking ramps it to full. Lerp (not max/gate) so there is
+	// no step at the moment the player starts or stops moving.
+	const float SwayWeight = FMath::Lerp(FMath::Clamp(CachedADSSwayIdleScale, 0.0f, 1.0f), 1.0f, ADSSwayMoveAlpha);
+
 	FRotator ExtraRot(ADSFireKickPitch, 0.0f, 0.0f);
 	if (CurrentADSAlpha > KINDA_SMALL_NUMBER)
 	{
-		if (ADSSwayMoveAlpha > KINDA_SMALL_NUMBER && (CachedADSSwayYawDegrees > 0.0f || CachedADSSwayPitchDegrees > 0.0f))
+		const float T = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
+		const float W = CachedADSSwaySpeed;
+		if (SwayWeight > KINDA_SMALL_NUMBER && (CachedADSSwayYawDegrees > 0.0f || CachedADSSwayPitchDegrees > 0.0f))
 		{
-			const float T = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
-			const float W = CachedADSSwaySpeed;
-			ExtraRot.Yaw   += ADSSwayMoveAlpha * CachedADSSwayYawDegrees   * (0.6f * FMath::Sin(T * W)            + 0.4f * FMath::Sin(T * W * 1.7f + 1.1f));
-			ExtraRot.Pitch += ADSSwayMoveAlpha * CachedADSSwayPitchDegrees * (0.6f * FMath::Sin(T * W * 0.8f + 0.5f) + 0.4f * FMath::Sin(T * W * 1.3f + 2.3f));
+			ExtraRot.Yaw   += SwayWeight * CachedADSSwayYawDegrees   * (0.6f * FMath::Sin(T * W)            + 0.4f * FMath::Sin(T * W * 1.7f + 1.1f));
+			ExtraRot.Pitch += SwayWeight * CachedADSSwayPitchDegrees * (0.6f * FMath::Sin(T * W * 0.8f + 0.5f) + 0.4f * FMath::Sin(T * W * 1.3f + 2.3f));
 		}
 		if (!ExtraRot.IsNearlyZero())
 		{
@@ -3287,6 +3300,22 @@ void AFPSRCharacter::UpdateAimDownSights(float DeltaTime)
 			const FQuat ExtraQuat = (ExtraRot * CurrentADSAlpha).Quaternion();
 			NewLoc = Pivot + ExtraQuat.RotateVector(NewLoc - Pivot);
 			NewRot = ExtraQuat * NewRot;
+		}
+
+		// Optional FREE sway (defaults to 0 = off): a straight screen-space wander of the whole weapon. Unlike the
+		// rotation above it deliberately does NOT pivot about the sight, so the reticle itself drifts — which is the
+		// only way to get lateral/vertical positional motion at all. A rigid body cannot translate sideways while a
+		// point on it stays fixed; "move the gun but keep the sight nailed" is EXCLUSIVELY a rotation about that
+		// sight. Kept as its own opt-in knob (0 by default) because the standing rule here is that aim belongs to the
+		// player's input and cosmetics must not move it — raise these only if a little reticle drift is wanted.
+		if (SwayWeight > KINDA_SMALL_NUMBER
+			&& (CachedADSSwayFreeHorizontalCm > 0.0f || CachedADSSwayFreeVerticalCm > 0.0f))
+		{
+			// Frequencies deliberately unrelated to the rotation's above, so the two layers never lock into one
+			// visible beat.
+			const float FreeY = CachedADSSwayFreeHorizontalCm * (0.6f * FMath::Sin(T * W * 0.9f + 0.7f) + 0.4f * FMath::Sin(T * W * 1.5f + 2.0f));
+			const float FreeZ = CachedADSSwayFreeVerticalCm   * (0.6f * FMath::Sin(T * W * 1.1f + 1.6f) + 0.4f * FMath::Sin(T * W * 0.7f + 0.3f));
+			NewLoc += (SwayWeight * CurrentADSAlpha) * FVector(0.0f, FreeY, FreeZ);
 		}
 	}
 	ADSFireKickPitch = FMath::FInterpTo(ADSFireKickPitch, 0.0f, DeltaTime, CachedADSFireKickRecoveryRate);

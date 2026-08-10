@@ -1026,9 +1026,13 @@ protected:
 	FRotator CachedADSAimRotationOffset = FRotator::ZeroRotator;
 	bool bCachedSuppressFireMontagesWhileADS = true;
 	float CachedADSInterpSpeed = 12.0f;
-	/** Fraction of the aim pose's animated positional bob allowed through while aiming (0 = sight fully glued to the
-	 *  centre-line; >0 lets that fraction of the bob survive). Rotation stays fully glued regardless. */
-	float CachedADSPositionBobScale = 0.0f;
+	/** Fraction of the ADS sway amplitude that survives standing still (0 = dead steady when planted, 1 = same as
+	 *  walking). Lerped up to 1 by the movement factor, so there is no step when the player starts/stops moving. */
+	float CachedADSSwayIdleScale = 0.35f;
+	/** Optional screen-space ADS sway that moves the WHOLE weapon — reticle included — rather than pivoting about the
+	 *  sight (0 = off, the default; see the DataAsset field for why lateral motion cannot keep the sight pinned). */
+	float CachedADSSwayFreeHorizontalCm = 0.0f;
+	float CachedADSSwayFreeVerticalCm = 0.0f;
 	bool bCachedSuppressWeaponBoltWhileADS = false;
 	float CachedADSMuzzleFlashScale = 0.35f;
 	float CachedADSFireKickDegrees = 1.5f;

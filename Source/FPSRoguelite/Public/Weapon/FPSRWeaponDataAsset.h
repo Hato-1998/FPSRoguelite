@@ -464,13 +464,24 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|조준(ADS)", meta = (DisplayName = "조준 중 발사몽타주 억제(바디)"))
 	bool bSuppressFireMontagesWhileADS = true;
 
-	/** ADS stabilization knob: how much of the aim pose's animated positional bob is allowed through while aiming.
-	 *  0 (default) pins the AimSocket exactly on the view centre-line every frame — steadiest reticle, no drift.
-	 *  Raise slightly (e.g. 0.1–0.25) to let that fraction of the animated bob survive for a livelier ADS, at the cost
-	 *  of a small sight drift off centre. ROTATION stays fully glued regardless. Only used when aiming an ADS weapon
-	 *  with an AimSocket; ignored otherwise. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|조준(ADS)", meta = (DisplayName = "조준 위치흔들림 허용량", ClampMin = "0.0", ClampMax = "1.0"))
-	float ADSPositionBobScale = 0.0f;
+	/** 정지 상태에서 남는 조준 흔들림 비율(0~1). 0 = 서 있으면 완전히 정지(예전 동작 — 조준 화면이 사진처럼
+	 *  얼어붙는다), 1 = 이동 중과 같은 크기. 이동하면 이 값에서 1까지 부드럽게 올라간다.
+	 *  흔들림 자체의 크기는 아래 「조준 흔들림 좌우/상하(도)」가 정한다. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|조준(ADS)", meta = (DisplayName = "조준 흔들림 정지 시 비율", ClampMin = "0.0", ClampMax = "1.0"))
+	float ADSSwayIdleScale = 0.35f;
+
+	/** 조준경을 축으로 돌지 않고 **무기 전체를 화면에서 그대로 밀어내는** 흔들림(cm). 0 = 끔(기본).
+	 *
+	 *  ⚠️ 이건 **조준점(레티클)이 같이 움직인다.** 강체는 한 점을 고정한 채 옆으로 평행이동할 수 없어서,
+	 *  "총은 흔들리되 조준경은 화면에 박혀 있게"는 **조준경 축 회전으로만** 가능하다(위 좌우/상하 도 값).
+	 *  기본 원칙은 "조준은 플레이어 입력의 것이고 연출이 그걸 움직이면 안 된다"이므로 기본 0이며,
+	 *  조준점이 조금 흔들리는 편이 낫다고 판단할 때만 올린다. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|조준(ADS)", meta = (DisplayName = "조준 흔들림 좌우 이동(cm, 조준점도 흔들림)", ClampMin = "0.0"))
+	float ADSSwayFreeHorizontalCm = 0.0f;
+
+	/** 위 항목의 상하 짝. 0 = 끔(기본). 같은 주의사항이 그대로 적용된다(조준점이 같이 움직인다). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|조준(ADS)", meta = (DisplayName = "조준 흔들림 상하 이동(cm, 조준점도 흔들림)", ClampMin = "0.0"))
+	float ADSSwayFreeVerticalCm = 0.0f;
 
 	/** While aiming, suppress the WEAPON bolt/action montage too. Default false: the bolt keeps cycling in ADS as fire
 	 *  feedback (it animates the bolt bone, not the sight, so the reticle holds). Set true only for a weapon whose bolt
