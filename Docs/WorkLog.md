@@ -9,6 +9,20 @@
 
 ---
 
+## 🗑️ `Blu_FP_Arms` 폐기 완료 — 참조 0 실측 후 삭제 (2026-08-10, `main`)
+> 2026-08-03 제작한 **Blu 스켈레톤 자동컷 1인칭 팔**. ADR 0003 §전환표에서 "폐기 대상"으로 지정됐고,
+> 이후 ADR 0006(구매 리그 LPAMG 리타깃)이 확정되면서 이 메시를 쓸 경로가 완전히 사라졌다.
+> 원 지시 = `Docs/FirstPersonArms_PWAS_ResumePrompt.md` 7번 항목("참조 0 확인 후 폐기").
+
+- **삭제한 것(4개)** = `Content/Characters/Blu/SkeletalMeshes/Blu_FP_Arms/` 전체
+  — `SkeletalMeshes/Blu_FP_Arms.uasset` · `SkeletalMeshes/Blu_FP_Arms_PhysicsAsset.uasset` · `Materials/Body.uasset` · `Textures/Blu_UV_Body_BaseColor.uasset`.
+- **참조 0 판정 근거(실측)**: `Content` 하위 **전 `.uasset`/`.umap`을 바이트 스캔**(ASCII + UTF-16 양쪽, 자기 폴더 제외) → **일치 0건**.
+  네 에셋 모두 패키지 경로에 `Blu_FP_Arms` 가 들어가므로 이 한 번의 스캔이 4개 전부를 덮는다.
+  `Source/`·`Config/` 텍스트 검색도 0건 — 남은 언급은 **문서 3개뿐**(`Troubleshooting.md`, `FirstPersonArms_PWAS_ResumePrompt.md`, ADR 0003).
+- ⚠️ **에디터를 끈 상태에서 파일로 지웠다** — 메모리 [[no-force-delete-after-pie]] 규약(스크래치 에셋 삭제는 에디터 종료 후 파일로). 삭제 전 `UnrealEditor` 프로세스 0개 확인.
+- 되돌리려면 `git checkout d494b64e -- Content/Characters/Blu/SkeletalMeshes/Blu_FP_Arms` — **git 히스토리에 그대로 남아 있다.**
+- ⚠️ 메모리 [[fparms-own-skeleton-track]] 의 "**에셋은 보존**"은 **자체 스켈레톤 트랙(ADR 0004/0005) 산출물** 이야기다. 이 건은 그보다 앞선 **Blu 스켈레톤 자동컷 메시**로, 처음부터 폐기 대상으로 지정돼 있던 별개 자산이다.
+
 ## 🧾 리팩토링 결정대기 전 항목 종결 — 사용자 결정 8건 + 후속 6행 (2026-08-07, `docs/rpc-failure-policy`)
 > 원천 = [`Docs/Refactor_20260806_Report.md`](Refactor_20260806_Report.md) §6·§7. **코드 변경 0** — 결정은 전부 보드 새 행으로만.
 > 착수 전 메모리 `refactor-report-stale-premises` 지침대로 **전제 8건을 현재 코드와 재대조**(스테일 0건 추가 확인).
@@ -635,7 +649,7 @@ FOV 30도짜리 스코프에서 5도가 17% 배율 변화로 보인다. **기준
   - ⚠ **PWAS 참조 비우기가 B+C 이후 더 급해졌다**: `ReloadMontage`(PWAS 팔 스켈레톤용)가 이제 **Blu 바디 메시에서 재생**된다 → 스켈레톤 불일치로 재생 거부 + 경고 로그(크래시는 아님). `WeaponAnimInstanceClass`(PWAS 팔 ABP)도 무기 메시에 얹혀 같은 형태로 실패한다
 - **에디터 첫 실행 시 예상되는 것**: `BP_FPSRPlayer`에 `FirstPersonArms`·`WeaponMesh1P`·`WeaponMeshStatic1P` **고아 컴포넌트 기록**이 남아 경고가 뜬다(A단계의 `WeaponMesh3P`와 같은 형태 — 무해, BP 재저장하면 정리됨). 새 `WeaponMesh`/`WeaponMeshStatic`은 C++ 기본값으로 시작하니 **BP에서 손으로 맞췄던 옛 상대 트랜스폼은 사라진다**(의도 — 정렬 주체가 이제 `SOCKET_Weapon`이다). 폐기 에셋 `Content/Character/FPArms`(+`SK_FP_Manny_Simple`)는 참조가 0이 되므로 정리 대상
 
-## 🧹 BP 그래프 정리 = ✅완료 + **에디터 툴화** / ⏳눈으로 확인 대기 (2026-07-30, `refactor/character`)
+## 🧹 BP 그래프 정리 = ✅완료 + **에디터 툴화** (2026-07-30, `refactor/character`) — **✅사용자 육안 확인 완료 2026-08-10**
 > 요청 = `Docs/BPGraphLayout_ResumePrompt.md` → 이후 사용자 추가 요청(게터 복제·reroute·툴화).
 > **로직·배선·값은 안 바뀐다.** 엔진 = `Content/Python/fpsr_bp_layout.py`.
 
@@ -680,9 +694,9 @@ FOV 30도짜리 스코프에서 5도가 17% 배율 변화로 보인다. **기준
 - **⚠️ 별건 발견 — `ABP_Blu_Body`에 죽은 상태머신이 있다.** 출력에 연결된 건 `Locomotion2`인데
   이전 `Locomotion`(19노드)이 어디에도 연결되지 않은 채 남아 있고, 딸린 `Transition` 그래프가 **42개**,
   `Ground`가 **3개**로 불어나 있다. 4a 저작 스크립트가 두 번 돈 흔적. **배선을 바꾸는 일이라 손대지 않았다** — 별도 승인·별도 커밋 대상.
-- **남은 확인**: 에디터에서 `WBP_Lobby`·`WBP_RunHUD`·`BP_Door`·`ABL_Blu_W2_Rifle`을 열어 눈으로 보기 + 애님은 PIE로 로코모션 동일한지.
+- ~~**남은 확인**: 에디터에서 `WBP_Lobby`·`WBP_RunHUD`·`BP_Door`·`ABL_Blu_W2_Rifle`을 열어 눈으로 보기 + 애님은 PIE로 로코모션 동일한지.~~ → **✅ 사용자 확인 완료(2026-08-10) — 이상 없음. 보드 행 완료 처리.**
 
-## 🌬️ 에어 스트레이프 = ✅코드 완료 / ⏳PIE 대기 (2026-07-29, `refactor/character`)
+## 🌬️ 에어 스트레이프 = ✅완료 (2026-07-29, `refactor/character`) — **✅사용자 PIE 확인 완료 2026-08-10**
 > 사용자 요청 = "체공 상태 조작이 거의 안 된다" → 대화 중 목표가 **에어 스트레이프**(FPS 유저 기술)로 특정됨.
 > 시나리오 = 슬라이드 → 점프 → 공중에서 **W 떼고 D 유지 + 마우스 오른쪽** → **속도를 보존한 채** 코너를 돈다.
 - **처음 세운 "공중 가속을 올린다" 안은 폐기했다.** 그걸론 성립하지 않는다 — 엔진 `CalcVelocity`는 **속도 벡터 전체를 입력 쪽으로 가속하고 총합을 클램프**해서, 진행 방향과 어긋나는 입력이 **속도를 깎는다**(`CharacterMovementComponent.cpp:3863-3865`). 가속을 아무리 올려도 "속도를 잃지 않고 돈다"가 안 나온다. **알고리즘 자체가 다르다.**
@@ -697,7 +711,7 @@ FOV 30도짜리 스코프에서 5도가 17% 배율 변화로 보인다. **기준
 - **상한 규칙**: `Ceiling = max(현재 횡속도, AirStrafeMaxSpeed)` — 들고 온 속도를 **클램프가 깎지 않는다**. 단 **진행 방향과 반대되는 입력은 깎는다**(벡터 덧셈이므로) — 그게 공중 브레이크다. "저절로 사라지지 않고 플레이어만 버릴 수 있다"가 정확한 표현(Codex가 초안의 과장 문구를 잡아냄).
 - **부수 효과(의도)**: 공중에서 **`MaxWalkSpeed` 상한이 사라진다**(낙하 중 `GetMaxSpeed()` 미사용) — 이 기능의 전제. 덕분에 `GetMaxSpeed()`의 **뒷걸음 감속 공중 누수**(지상 게이트 누락, 공중 후진 450)도 공중에선 무의미해졌다(지상은 그대로). **엔진 공중 노브 3개 무동작**: `AirControl`·`AirControlBoostMultiplier`·`AirControlBoostVelocityThreshold`(디테일 패널엔 계속 보임).
 - **예측**: `Acceleration`·`Velocity`·상수만 읽음 → **`FSavedMove_FPSR` 추가 상태 0개**.
-- **검증**: 빌드 `Result: Succeeded`×2(UHT `-WarningsAsErrors` 포함) + `git diff` 재검토(2파일, 의도 외 변경 0). Codex 게이트 플랜 2회·diff 1회(결함 5건 반영). ⏳ **PIE = 사용자**.
+- **검증**: 빌드 `Result: Succeeded`×2(UHT `-WarningsAsErrors` 포함) + `git diff` 재검토(2파일, 의도 외 변경 0). Codex 게이트 플랜 2회·diff 1회(결함 5건 반영). **✅ PIE 사용자 확인 완료(2026-08-10)** — `WallJumpMaxSpeed` 1400 BP 오버라이드 건 포함해 이상 없음. 보드 행 완료 처리(커밋 `6c81c332`).
 
 ## 🔪 근접 전용 3번 슬롯 + 무기별 이동속도 = ✅코드 완료 / ⏳콘텐츠·PIE 대기 (2026-07-29, `refactor/character`)
 > 사용자 요청 = "근접무기를 다른 무기와 섞지 말고 3번 슬롯 전용으로. 근접무기가 없어도 3번을 누르면 맨손 상태로 클릭 가능하고, 이동속도를 더 준다(600→700, 슬라이드 900→1000)."
@@ -764,6 +778,7 @@ FOV 30도짜리 스코프에서 5도가 17% 배율 변화로 보인다. **기준
 - 저장 위치 = 엔진 기본 `Saved/SaveGames/`(SaveGame). 기존 `UFPSRGameUserSettings`(오디오·크로스헤어,
   `GameUserSettings.ini`)와 **별도 경로** — 합치지 않음(이득 없음).
 - **✅ PIE 사용자 확인 완료(2026-07-29)** — 기존 조작 전부 이상 없음.
+- **✅ 보드 행 완료 처리(2026-08-10)** — 남아 있던 "휠 행 키 종류" 결정은 **`MouseWheelAxis` 그대로 유지**로 종결(사용자). 커밋 `0353cd4a`.
 
 ## ⑩ 핸드오프 (2026-07-29, `refactor/character`) — **벽 매달리기(3단계) + 자세 전환 블렌딩 · ✅PIE 확인 완료**
 
