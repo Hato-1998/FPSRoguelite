@@ -70,6 +70,23 @@ void AFPSRPlayerController::ServerAckTopology_Implementation(int32 Gen)
 	{
 		return;
 	}
+
+	// Clamp to the generation the server itself has actually broadcast (GameState's TopologyGeneration) before this
+	// value reaches EITHER landing path below — the PlayerState (SetAckedTopologyGeneration) AND the
+	// PendingAckTopologyGeneration buffer both need the same ceiling, so clamping once here covers both instead of
+	// duplicating the check in two places. A client can only legitimately ack a generation the server published, and
+	// SetAckedTopologyGeneration is monotone (FMath::Max, never regresses) — without this clamp, a single forged
+	// Gen (e.g. INT32_MAX) would push AckedTopologyGeneration past anything real and keep it there forever, which
+	// permanently self-satisfies the late-join gate (IsTopologyAckSatisfied's AckedGen >= JoinGen, FPSRPlayerState.cpp).
+	// Lower-bound 0 never blocks an honest client: JoinTopologyGeneration is always >= 0 (MarkTopologyJoin), so a
+	// negative Gen clamped up to 0 can only satisfy a gen-0 join, which is the normal unforged state for it anyway.
+	// Scope note: this is HYGIENE, not a security fix. On the current single-map setup the gate is effectively a
+	// no-op and a forged-high Gen mostly hurts the forger, so the clamp is here to keep the invariant true before it
+	// starts to matter. RE-EVALUATE WHEN MULTI-MAP (bUnifiedExtent) GOES LIVE — that is when a self-satisfied
+	// late-join gate actually buys a client something (participating in occupancy/targeting it hasn't synced to).
+	const AFPSRGameState* GS = GetWorld() ? GetWorld()->GetGameState<AFPSRGameState>() : nullptr;
+	Gen = FMath::Clamp(Gen, 0, GS ? GS->GetTopologyGeneration() : 0);
+
 	if (AFPSRPlayerState* PS = GetPlayerState<AFPSRPlayerState>())
 	{
 		PS->SetAckedTopologyGeneration(Gen); // monotone on the PS — a forged low/high value only advances this player's ack
