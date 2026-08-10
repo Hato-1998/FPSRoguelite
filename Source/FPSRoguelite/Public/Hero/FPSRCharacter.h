@@ -1082,6 +1082,11 @@ protected:
 	 *  by RefreshWeaponVisibility (gated on bCachedHasHolsterPose below) to delay the wall-hide until the descent
 	 *  finishes instead of vanishing the instant the wall gate closes. */
 	float HolsterBlendAlpha = 0.0f;
+	/** 0 = normal, 1 = fully lowered for reload. 🚧 Temporary stand-in for an unauthored first-person reload
+	 *  animation (see ReloadPose's DataAsset comment). Advanced in ApplyWeaponStatePose and composed onto the arms
+	 *  in CAMERA SPACE in UpdateAimDownSights — same shape as HolsterBlendAlpha, but on its OWN clock
+	 *  (ReloadBlendDuration) so reload timing and holster timing never pull on each other. */
+	float ReloadBlendAlpha = 0.0f;
 	/** Smoothed toward UFPSRCharacterMovementComponent::IsFalling() (a binary source with no smoothing of its own,
 	 *  unlike the slide's GetSlideBlend) at the equipped weapon's CachedHipMotion.AirborneBlendDuration rate.
 	 *  0 = grounded pose, 1 = fully airborne pose. */
@@ -1091,6 +1096,12 @@ protected:
 	 *  unauthored weapon (every weapon until §5 DA content lands) keeps the pre-this-track INSTANT hide on wall-hang,
 	 *  so this is a zero-regression switch rather than a behavior change for existing content. */
 	bool bCachedHasHolsterPose = false;
+	/** True only when the EQUIPPED weapon has actually authored ReloadPose (Offset/Tilt non-zero). Kept as its OWN
+	 *  cached bool rather than reading CachedHipMotion directly at the use site: that struct is only assigned when a
+	 *  weapon EXISTS and is never cleared on unequip, so reading the trigger there would let a stale request keep
+	 *  pulling the alpha down after the weapon is put away — the same trap bCachedForceHolsteredPose already stepped
+	 *  in (see its own comment). Reset alongside it on unequip/clear. */
+	bool bCachedHasReloadPose = false;
 
 	/** Runtime-created modular weapon-part components (U15), child-attached to WeaponMesh and rebuilt on each weapon
 	 *  change. Visible to everyone, like the weapon they hang off (ADR 0002 — they used to be OnlyOwnerSee). Empty for

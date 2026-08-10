@@ -963,6 +963,21 @@ void AFPSRCharacter::OnMovementModeChanged(EMovementMode PrevMovementMode, uint8
 	// movement component reach into weapon rendering would blur ADR 0001's rule that everything else only QUERIES it.
 	// Fires on simulated proxies too — the engine's ApplyNetworkMovementMode goes through SetMovementMode.
 	RefreshWeaponVisibility();
+
+	// Grabbing a wall cancels any in-flight reload — both hands are on the wall, the exact same reason the fire gate
+	// closes, so this reads the SAME predicate (CanFireInCurrentState) rather than inventing a second one: one reason,
+	// one predicate, so the two can never drift apart. CancelReload checks authority internally, so this single call
+	// site is correct on every machine — the server actually cancels, and the owner finds out via OnRep_Reloading.
+	// This function also runs on SIMULATED PROXIES (the engine's ApplyNetworkMovementMode routes through
+	// SetMovementMode too), but CancelReload's HasAuthority() early-out makes that call a harmless no-op there.
+	if (WeaponInventory)
+	{
+		const UFPSRCharacterMovementComponent* Move = GetFPSRMovement();
+		if (Move && !Move->CanFireInCurrentState())
+		{
+			WeaponInventory->CancelReload();
+		}
+	}
 }
 
 void AFPSRCharacter::UpdateFirstPersonBodyVisibility()
@@ -1383,6 +1398,11 @@ void AFPSRCharacter::Input_EquipSlot3(const FInputActionValue& Value) { if (IsRu
 void AFPSRCharacter::Input_Reload(const FInputActionValue& Value)
 {
 	if (IsRunFrozen() || IsIncapacitatedLocal()) { return; }
+	// Client-side UX gate only — the server-authoritative gate lives in UFPSRWeaponInventoryComponent::StartReload.
+	// Same client-input + server-RPC pairing this project uses everywhere else (Input_EquipSlot / ServerEquipSlot):
+	// don't send an RPC that is guaranteed to be rejected.
+	const UFPSRCharacterMovementComponent* Move = GetFPSRMovement();
+	if (Move && !Move->CanFireInCurrentState()) { return; }
 	ServerReload();
 }
 
@@ -2002,6 +2022,7 @@ void AFPSRCharacter::RefreshEquippedWeaponVisual()
 	// Reset the holster-pose-authored flag (§6): no weapon = nothing for RefreshWeaponVisibility's delay gate to key
 	// off, so it falls back to the legacy instant hide. Recomputed below when a weapon is actually equipped.
 	bCachedHasHolsterPose = false;
+	bCachedHasReloadPose = false;
 	// Same for the temporary force-holster switch — "no weapon" must never inherit the last weapon's request.
 	bCachedForceHolsteredPose = false;
 
@@ -2120,6 +2141,13 @@ void AFPSRCharacter::RefreshEquippedWeaponVisual()
 	bCachedHasHolsterPose =
 		(!CachedHipMotion.HolsterPose.Offset.IsNearlyZero() || !CachedHipMotion.HolsterPose.Tilt.IsNearlyZero())
 		&& CachedHipMotion.HolsterDuration > 0.0f;
+
+	// 🚧 Reload pose authored? (see ReloadPose's DataAsset comment) — read straight off Weapon->ProceduralWeaponMotion,
+	// same as bCachedForceHolsteredPose just below, not off CachedHipMotion: bCachedHasReloadPose is a dedicated
+	// cached bool precisely so it (unlike CachedHipMotion) gets cleared on unequip — see its header comment.
+	bCachedHasReloadPose =
+		!Weapon->ProceduralWeaponMotion.ReloadPose.Offset.IsNearlyZero()
+		|| !Weapon->ProceduralWeaponMotion.ReloadPose.Tilt.IsNearlyZero();
 
 	// 🚧 Temporary (see the DataAsset field): this weapon has no authored first-person idle, so keep it holstered for
 	// as long as it is held rather than showing the arms in whatever pose the graph falls back to.
@@ -3046,6 +3074,19 @@ void AFPSRCharacter::ApplyWeaponStatePose(float DeltaTime)
 		RefreshWeaponVisibility();
 	}
 
+	// Reload (🚧 temporary arms-down stand-in for an unauthored first-person reload animation — see ReloadPose's
+	// DataAsset comment): same camera-space ARMS treatment as holster above, but its OWN alpha and OWN clock
+	// (ReloadBlendDuration) so reload and holster timing never pull on each other. Zeroing ReloadPose in the DA
+	// switches this off with no code change. Cannot overlap the holster pose in practice: entering a wall cancels
+	// any in-flight reload (OnMovementModeChanged) and StartReload refuses to begin one while wall-hung
+	// (UFPSRWeaponInventoryComponent::StartReload), so the two poses never have to be resolved against each other.
+	// No RefreshWeaponVisibility call here, unlike the holster edge above: reloading is not a reason to HIDE the
+	// mesh (the holster path's delayed-hide is gated on bHideForWall specifically) — this only moves it off-screen
+	// via the pose, visibility is untouched.
+	const bool bWantsReloadPose = bCachedHasReloadPose && IsReloading();
+	const float ReloadRate = 1.0f / FMath::Max(CachedHipMotion.ReloadBlendDuration, KINDA_SMALL_NUMBER);
+	ReloadBlendAlpha = FMath::FInterpConstantTo(ReloadBlendAlpha, bWantsReloadPose ? 1.0f : 0.0f, StateDt, ReloadRate);
+
 	// --- Gun-space delta: gun-anchor attach path ONLY (§②/§③ of the plan this implements). The fallback/socket-
 	// attach path (body hand, or an arms mesh with no ik_hand_gun bone) already has UpdateAimDownSights writing the
 	// weapon's WORLD transform every frame there (bSolvingArms == false) — a relative write here would just be
@@ -3440,6 +3481,18 @@ void AFPSRCharacter::UpdateAimDownSights(float DeltaTime)
 		const float HolsterEase = FMath::SmoothStep(0.0f, 1.0f, HolsterBlendAlpha);
 		NewLoc += HolsterEase * CachedHipMotion.HolsterPose.Offset;
 		NewRot = (CachedHipMotion.HolsterPose.Tilt * HolsterEase).Quaternion() * NewRot;
+	}
+
+	// Reload layer (🚧 temporary, see ApplyWeaponStatePose/ReloadPose comments) — same space, same full weight, same
+	// SmoothStep reshaping as the holster layer just above, only keyed off its own alpha. Not mutually exclusive with
+	// the holster term above (no else/early-out between them): simply summed, because the two alphas are never both
+	// non-zero at once — entering a wall cancels an in-flight reload and refuses a new one while wall-hung, so there
+	// is nothing here that needs arbitrating.
+	if (ReloadBlendAlpha > KINDA_SMALL_NUMBER)
+	{
+		const float ReloadEase = FMath::SmoothStep(0.0f, 1.0f, ReloadBlendAlpha);
+		NewLoc += ReloadEase * CachedHipMotion.ReloadPose.Offset;
+		NewRot = (CachedHipMotion.ReloadPose.Tilt * ReloadEase).Quaternion() * NewRot;
 	}
 
 	// The one write, and the ONE place the solved pose is applied. Everything above produced a camera-relative transform;
