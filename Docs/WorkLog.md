@@ -9,6 +9,27 @@
 
 ---
 
+## 🎯 1인칭 조준 pitch ↔ 3인칭 프록시 시선각 정합 (2026-08-08, `fix/aimoffset-remoteviewpitch`)
+> 증상→원인→해결 = [`Docs/Troubleshooting.md`](Troubleshooting.md) **A18** · 보드 행 = "1인칭 조준(카메라 pitch) ↔ 3인칭 프록시 머리/시선 각도 불일치".
+> 커밋 `e884fed4`(계측 CVar+클램프+오염 가드) → ABL 콘텐츠 보정 커밋(본 머지에 포함).
+
+**원인** = 복제가 아니라 콘텐츠: AO 샘플 패밀리 전체(센터 포함)가 카메라 수평 대비 아래로 시프트 저작.
+샘플 간 상대 델타는 `AnimPose` 실측 45.0°/89.9°로 라벨 그대로 → 패밀리 내부 정확, 절대 기준만 시프트.
+**해결** = `ABL_Blu_W2_Rifle` AO 적용 뒤 `Transform (Modify) Bone`(chest, Add to Existing, Component, **Roll −20** 캘리브레이션 확정).
+
+**기각/반증 기록** (같은 논의 반복 방지):
+- ~~CalcCamera 서버 자기참조~~ — 엔진 5.7 소스로 반증(`PlayerCameraManager.cpp:788`: 기본
+  `bUseClientSideCameraUpdates=true`에서 서버는 원격 PC의 `DoUpdateCamera`를 안 돌림; 서버 캐시 =
+  `ServerUpdateCamera` RPC). `FPSRCharacter.cpp` 무변경.
+- ~~AO 에셋 범위 부족(±90 미만)~~ — 실사용 AO(`AO_Stand_Aim`/`AO_Crouch_Aim`)는 ±90 풀그리드 정상.
+- ~~ABP 배선 오류~~ — T3D 익스포트로 X←AimYaw·Y←AimPitch·MeshSpaceAdditive Alpha=1 확인.
+
+**남긴 인프라**: `FPSR.Debug.AimSync` CVar(1=온스크린 pitch 소스 분해, 2=+0.5s 로그), AimPitch ±90
+계약 클램프, 액터 pitch 오염 1회성 경고(엔진 `IsNearlyZero` 가드 우회 감지).
+**잔여**: 미참조 AO 에셋 4종 정리(별도 태스크 칩, `Blu_AO_Rifle`은 샘플 빈 껍데기).
+
+---
+
 ## 🧾 리팩토링 결정대기 전 항목 종결 — 사용자 결정 8건 + 후속 6행 (2026-08-07, `docs/rpc-failure-policy`)
 > 원천 = [`Docs/Refactor_20260806_Report.md`](Refactor_20260806_Report.md) §6·§7. **코드 변경 0** — 결정은 전부 보드 새 행으로만.
 > 착수 전 메모리 `refactor-report-stale-premises` 지침대로 **전제 8건을 현재 코드와 재대조**(스테일 0건 추가 확인).
