@@ -573,6 +573,18 @@ void UFPSRCharacterMovementComponent::PhysCustom(float deltaTime, int32 Iteratio
 		return;
 	}
 
+	// Simulated proxies do not run the hold, for the same reason they don't decide it (see the role gate in
+	// UpdateCharacterStateBeforeMovement) — but they DO arrive here, because MoveSmooth routes MOVE_Custom straight to
+	// PhysCustom for proxies as well. The wall itself never reaches them: WallNormal is deliberately left at zero on a
+	// proxy (see GetWallYawForDisplay), so the glide, the stick and the lateral projection below would every one of
+	// them be computed against a zero normal, and a slip onto the floor would reach StopWallHang and drive
+	// SetMovementMode against the very mode replication is feeding in. A proxy's position on the wall is owned by
+	// replication and net smoothing; predicting it forward from here can only fight that.
+	if (CharacterOwner->GetLocalRole() == ROLE_SimulatedProxy)
+	{
+		return;
+	}
+
 	RestorePreAdditiveRootMotionVelocity();
 
 	if (!HasAnimRootMotion() && !CurrentRootMotion.HasOverrideVelocity())
@@ -705,15 +717,33 @@ void UFPSRCharacterMovementComponent::UpdateCharacterStateBeforeMovement(float D
 {
 	// Runs before the physics step on the owning client, the server, and every replayed move — the one place where the
 	// derived slide and wall-hang states are decided, so all three agree.
+
+	// Stance weights. Advanced here rather than on a tick of their own because this runs on every role — the engine
+	// calls it from PerformMovement for the owning client and the server AND from SimulateMovement for remote proxies —
+	// so one place keeps the camera, the speed cap and (later) every player's animation on the same clock. This is the
+	// one piece of this function a proxy genuinely wants, which is why it sits ABOVE the role gate below.
+	AdvanceStanceBlends(DeltaSeconds);
+
+	// SIMULATED PROXIES STOP HERE. The engine calls this from SimulateMovement as well as from PerformMovement, and a
+	// proxy satisfies every entry condition below: bWantsToCrouch arrives through ACharacter::OnRep_IsCrouched, and
+	// MovementMode and Velocity are both replicated. Deriving the states there would RE-DECIDE them on the one machine
+	// with no authority over them — StartSliding would re-apply the entry impulse to an already-replicated velocity and
+	// SimulateMovement integrates the result through MoveSmooth, while wall hang would drive SetMovementMode against
+	// the very mode replication is feeding it, and run WallHangMaxDuration on a clock of its own so the proxy lets go
+	// while the server still says it is holding on.
+	// Proxies are TOLD these states instead: bSlidingVisual, WallYawByte and WallSideSign replicate for exactly that,
+	// and IsSlidingForDisplay()/GetWallYawForDisplay() read those copies. Leaving early also spares every remote player
+	// a per-frame CanGrabWall sweep.
+	if (CharacterOwner && CharacterOwner->GetLocalRole() == ROLE_SimulatedProxy)
+	{
+		Super::UpdateCharacterStateBeforeMovement(DeltaSeconds);
+		return;
+	}
+
 	if (SlideCooldownRemaining > 0.0f)
 	{
 		SlideCooldownRemaining = FMath::Max(0.0f, SlideCooldownRemaining - DeltaSeconds);
 	}
-
-	// Stance weights. Advanced here rather than on a tick of their own because this runs on every role — the engine
-	// calls it from PerformMovement for the owning client and the server AND from SimulateMovement for remote proxies —
-	// so one place keeps the camera, the speed cap and (later) every player's animation on the same clock.
-	AdvanceStanceBlends(DeltaSeconds);
 
 	// Wall hang. Sliding is ground-only and hanging is air-only, so this and the slide block below can never both be
 	// active — but the budget does have to be refreshed on the ground, which is the one moment both are quiet.
@@ -754,12 +784,20 @@ void UFPSRCharacterMovementComponent::UpdateCharacterStateBeforeMovement(float D
 
 		// (2) Slope also feeds real acceleration: g * sin(angle) along the direction of travel. Accumulated separately
 		// from the curve because the curve is recomputed each frame and would wipe it out.
+		// This frame's contribution on its own, which is what the no-curve path below adds. Taken BEFORE the running
+		// total is clamped, deliberately: that clamp bounds a gross counter of everything the slope has ever added,
+		// while braking is removing speed the whole time, so on a long descent the counter saturates while the actual
+		// speed is still far below the ceiling. Deriving this from the clamped total would therefore switch slope
+		// acceleration off partway down a hill. What the property contract bounds is the RESULT (see
+		// SlopeAccelerationScale), and the final clamp below is what delivers that.
+		float SlopeBonusThisFrame = 0.0f;
 		if (SlopeAccelerationScale > 0.0f && !FMath::IsNearlyZero(SlopeAlignment))
 		{
 			const float GravityMagnitude = FMath::Abs(GetGravityZ());
-			SlideSlopeSpeedBonus += GravityMagnitude * SlopeAlignment * SlopeAccelerationScale * DeltaSeconds;
+			SlopeBonusThisFrame = GravityMagnitude * SlopeAlignment * SlopeAccelerationScale * DeltaSeconds;
+			SlideSlopeSpeedBonus += SlopeBonusThisFrame;
 			// Bounded both ways: downhill tops out at the slide ceiling instead of accelerating without limit, and
-			// uphill can't drive the total below zero.
+			// uphill can't drive the total below zero. Only the curve path reads this running total.
 			SlideSlopeSpeedBonus = FMath::Clamp(SlideSlopeSpeedBonus, -SlideMaxSpeed, SlideMaxSpeed);
 		}
 
@@ -784,6 +822,10 @@ void UFPSRCharacterMovementComponent::UpdateCharacterStateBeforeMovement(float D
 				{
 					TargetSpeed *= BackwardSpeedMultiplier;
 				}
+
+				// Rebuilt from SlideEntrySpeed every frame, so this speed carries no history — the WHOLE accumulated
+				// slope bonus has to ride on top again each time.
+				TargetSpeed += SlideSlopeSpeedBonus;
 			}
 			else
 			{
@@ -794,11 +836,17 @@ void UFPSRCharacterMovementComponent::UpdateCharacterStateBeforeMovement(float D
 				{
 					TargetSpeed = FMath::Min(TargetSpeed, SlideEntrySpeed * BackwardSpeedMultiplier);
 				}
+
+				// Only this frame's contribution, NOT the running total. Unlike the curve branch, this speed was
+				// written by the previous frame and so already carries every earlier contribution; adding the
+				// accumulated bonus here would re-apply the whole of it once per frame and accelerate super-linearly
+				// until the cap.
+				TargetSpeed += SlopeBonusThisFrame;
 			}
 
-			// Slope contribution rides on top, then the whole thing is capped — a long descent reaches the slide's
-			// terminal speed rather than growing indefinitely.
-			TargetSpeed = FMath::Clamp(TargetSpeed + SlideSlopeSpeedBonus, 0.0f, SlideMaxSpeed);
+			// Capped on both paths — a long descent reaches the slide's terminal speed rather than growing
+			// indefinitely, and an uphill bonus can't drive the result negative.
+			TargetSpeed = FMath::Clamp(TargetSpeed, 0.0f, SlideMaxSpeed);
 
 			Velocity.X = SlideHeading.X * TargetSpeed;
 			Velocity.Y = SlideHeading.Y * TargetSpeed;
@@ -914,10 +962,12 @@ namespace
 
 void UFPSRCharacterMovementComponent::AdvanceStanceBlends(float DeltaSeconds)
 {
-	// IsCrouching() reads the replicated bIsCrouched, so remote players' stance weights are correct too. bIsSliding is
-	// local-only, which is why the slide weight carries the caveat documented on GetSlideBlend().
+	// Both sources are correct on every role. IsCrouching() reads the replicated bIsCrouched; IsSlidingForDisplay()
+	// hands the owner and the server the exact local bIsSliding and a proxy the replicated bSlidingVisual. Reading
+	// bIsSliding directly here would peg a proxy's slide weight to 0, because deriving the slide is the owner's and the
+	// server's job alone (see the role gate in UpdateCharacterStateBeforeMovement).
 	StanceBlend = AdvanceBlendTowards(StanceBlend, IsCrouching() ? 1.0f : 0.0f, StanceBlendDuration, DeltaSeconds);
-	SlideBlend = AdvanceBlendTowards(SlideBlend, bIsSliding ? 1.0f : 0.0f, SlideBlendDuration, DeltaSeconds);
+	SlideBlend = AdvanceBlendTowards(SlideBlend, IsSlidingForDisplay() ? 1.0f : 0.0f, SlideBlendDuration, DeltaSeconds);
 
 	// Retire the transition once it has settled so GetMaxSpeed goes straight back to the plain stance cap.
 	if (StanceSpeedFrom > 0.0f && GetStanceTransitionProgress() >= 1.0f)
