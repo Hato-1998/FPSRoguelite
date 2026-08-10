@@ -9,6 +9,80 @@
 
 ---
 
+## 🛰️ 시뮬레이티드 프록시가 슬라이드·벽매달림을 로컬로 재결정하고 있었다 (2026-08-10, `fix/slide-proxy-sim-and-bonus`)
+> 보드 4행("검증·테스트")을 한 번에 처리해 달라는 요청에서 시작했는데, **4행 중 검증 작업은 하나도 없었다.**
+> 2건은 실제 버그 수정, 1건은 착수 불가, 1건은 사용자 작업 영역. 전제 정정 후 2건만 진행.
+> 출처는 전부 `fix/slope-slide-duration` 머지 전 레드팀 리뷰(2026-08-10)다.
+
+### 원 보드 행은 "왜곡 여부 검증 필요"였으나 확정 결함이었다
+프록시가 진입 임펄스를 복제 속도에 재적용한다는 의심을 엔진 소스로 끝까지 확인한 결과 **전부 성립**했다.
+1. `SimulateMovement`(engine `CharacterMovementComponent.cpp:2159`)가 `UpdateCharacterStateBeforeMovement`를 **:2226에서 호출**
+2. **UE 5.7 `ACharacter::OnRep_IsCrouched`가 프록시에서 `bWantsToCrouch = true`를 직접 세팅**한다 — 구버전과 달라진 지점이고, 이게 성립 조건이었다. `bWantsToCrouch` 자체는 복제 프로퍼티가 아니라(헤더 `UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly)`) "복제 안 되니 안전하다"고 넘기기 쉽다
+3. `CanEnterSlide()`의 나머지 항도 프록시에서 전부 통과 — `Velocity`는 `ReplicatedMovement`로 오고, `SlideCooldownRemaining`은 프록시 로컬에서 0
+4. **결정타 = engine :2263 `MoveSmooth(Velocity, ...)`** — 프록시가 그 속도를 실제로 적분한다
+
+즉 ×1.5 진입 임펄스뿐 아니라 곡선 감쇠·슬로프 보너스·헤딩 조향까지 매 프레임 프록시에서 돌며 복제 위치와 싸우고 있었다.
+엔진의 `bZeroReplicatedGroundVelocity` 완화책(:2241)은 *정지 상태*만 커버해서 하필 슬라이드 진입 속도 조건을 만족하는 케이스엔 안 걸린다.
+
+### 벽 매달림도 같은 결함 — 그리고 더 심각했다 (범위 밖이었으나 같은 함수·같은 근본 원인)
+`StartWallHang`이 프록시에서 `SetMovementMode(MOVE_Custom, CMOVE_WallHang)`를 로컬 실행하고, `WallHangElapsed`가 로컬 누적돼
+**서버가 아직 매달림이라 말하는 동안 프록시만 먼저 떨어진다.** 게이트 하나로 함께 막았다.
+
+### ⚠️ 1차 게이트는 절반짜리였다 — 레드팀이 잡아냈다
+`UpdateCharacterStateBeforeMovement`만 막고 **`PhysCustom`을 놓쳤다.**
+**engine `MoveSmooth`는 `MovementMode == MOVE_Custom`이면 프록시에서도 `PhysCustom(deltaTime, 0)`으로 직행하고 곧장 return 한다(`:6808-6813`).**
+복제된 `CMOVE_WallHang`에 들어간 프록시는 매 프레임 `PhysCustom`을 도는데, `WallNormal`은 프록시에 의도적으로 전달되지 않아
+(헤더 `GetWallYawForDisplay` — "Deliberately NOT fed back into WallNormal") **ZeroVector**다. 글라이드·벽스틱·좌우 투영이 전부
+영벡터 기준으로 계산되고, 슬립 착지 시 `StopWallHang → SetMovementMode(MOVE_Falling)`이 프록시에서 실행된다 — 1차 커밋이 막았다고
+주장한 바로 그 실패 클래스가 다른 경로로 남아 있었던 것.
+게다가 **1차 게이트가 `UpdateWallHang`을 막으면서 `WallHangElapsed`가 프록시에서 0에 동결**돼
+`GetWallEntryMomentumAlpha()`가 계속 최대값이 되고, `Lerp`가 매 프레임 진입 속도를 다시 써 넣어 넷 교정을 즉시 되돌리는
+**회귀까지 동반**했다. → `PhysCustom`의 `CMOVE_WallHang` 경로에 동일한 `ROLE_SimulatedProxy` 조기 반환 추가.
+
+### 무곡선 슬라이드 슬로프 보너스 이중 가산 — 2차 시도 만에 제대로 고쳤다
+무곡선 분기의 `TargetSpeed = Velocity.Size2D()`는 **직전 프레임이 써 넣은 값이라 누적 보너스를 이미 품고 있는데**,
+최종 단계에서 누적 보너스를 통째로 다시 더하고 있었다(매 프레임 전체 재가산 → 초선형 가속).
+- **1차 시도(틀림)**: 클램프 **이후** 차분을 증분으로 썼다. `SlideSlopeSpeedBonus`는 슬로프가 더한 양의 **총계(gross) 카운터**인데
+  브레이킹이 동시에 속도를 빼내므로, **실속도가 상한 근처가 아닐 때 누적기가 먼저 포화**한다 → 그 순간부터 증분 0 →
+  **내리막 중간에 슬로프 가속만 조용히 사라진다.** 커밋 메시지의 "포화하면 상한이 그대로 성립"이라는 자기 정당화가
+  **결과 상한과 총획득량 제한을 혼동**한 것이었고, 후자는 `SlopeAccelerationScale` 계약("The **result** is still bounded by
+  SlideMaxSpeed")에 없다.
+- **2차(채택)**: 무곡선 분기는 **클램프 전 원시 증분**을 적분. 누적기 클램프는 곡선 분기 전용으로 남긴다.
+  곡선 분기는 매 프레임 `SlideEntrySpeed`에서 재구축돼 이력이 없으므로 **누적 전체 가산이 맞다** — 두 분기의 요구가 다르다.
+  후진 캡 `Min`이 누적 이득을 잘라도 원시 증분이 계속 더해져 회복된다(1차 방식은 영구 소실이었다).
+- 현재 콘텐츠는 곡선을 쓰므로 **PIE로는 안 잡히는 결함**이다. 곡선 미할당 무기·상태에서만 재현된다.
+
+### 동반 수정 — `SlideBlend` 소스 교체
+게이트를 넣으면 프록시의 `bIsSliding`이 항상 false가 되어 **원격 슬라이드 포즈 가중치가 0으로 굳는다.**
+→ `AdvanceStanceBlends`의 소스를 `bIsSliding` → **`IsSlidingForDisplay()`**(권한·로컬조종은 정확값, 프록시는 복제된 `bSlidingVisual`)로 교체.
+헤더에 "GetSlideBlend는 프록시에서 신뢰 불가"로 문서화돼 있던 제약이 이로써 해소됐다.
+⚠️ 단 **프록시 쪽은 넷 업데이트 스냅샷 기준**이라 업데이트 사이에 시작·종료한 슬라이드(점프캔슬 2프레임)는 여전히 안 잡힌다 —
+그게 `GetSlideVisualSerial()`이 존재하는 이유다. 1차에 이 한계를 헤더에서 무단 삭제했다가 레드팀 지적으로 복원했다.
+
+### 검증
+UBT Development 빌드 exit 0 · 헤드리스 스모크 `FPSRoguelite.Smoke.ModuleLoads` `Result={Success}` (둘 다 3커밋 반영 상태 측정).
+레드팀 게이트(§6-6-1) 1회 — **P1 0건 / P2 3건 / P3 1건, 4건 전부 수용·수정, 기각 0건.**
+머지 판정 = Fable(§6-5-2 모드 B, 코어 갈래 T3 복제 경로) → **통과**. 지적 원장 전문은 머지 커밋 `f2f5a1ec`에 있다(명세 파일 없는 유닛).
+
+### 같이 요청됐으나 하지 않은 것
+- **[이동] 슬라이드 SlopeTimeScale 경계 유닛테스트 — 착수 불가로 보류(상태 `대기` 유지).**
+  대상 브랜치 `fix/slope-slide-duration`이 **origin·로컬 모두에 없고**(`git branch -a`), `SlideSlopeTimeRecoveryCap` 심볼도 소스 전역 0건이다.
+  main의 공식은 `FMath::Max(0.0f, 1.0f - (SlopeAlignment * SlopeTimeInfluence))`로 **음수가 될 수 없어**
+  보드가 요구한 `scale < -cap` 클램프·되감기·`SlideElapsed` 0-플로어 케이스는 **대상 코드 자체가 부재**하다.
+  ⚠️ **같은 리뷰에서 나온 행들의 인용 라인번호가 main 대비 3줄씩 밀려 있다**(795/804 → 792/801) — 미머지 브랜치 스냅샷 기준이라는 방증.
+  브랜치가 origin에 도착하면 원래 스펙대로 작성한다.
+- **ABP_Blu_Body 죽은 상태머신 정리 — 건너뜀.** 행 자체가 "AnimBP 그래프 편집 = 사용자 작업 영역, Claude는 조회·진단·가이드까지"로 못박고 있다.
+
+### 후속으로 남긴 것 (전부 비차단)
+- `CMOVE_WallHang` 프록시는 넷 업데이트 사이 로컬 전진이 없다 — 원격 벽매달림 충실도가 `ReplicatedMovement` 빈도 + 메시 스무딩에 전적으로 의존.
+  글라이드가 저속이라 수용 가능하고 코드 주석에 의도로 문서화. 뚝뚝 끊겨 보이면 **NetUpdateFrequency 튜닝 사안이지 코드 결함이 아니다.**
+- **곡선 분기는 슬로프 보너스가 후진 배수 뒤에 가산돼 후진 내리막이 후진 캡을 넘어 `SlideMaxSpeed`까지 갈 수 있다.**
+  main에도 동일한 기존 의미론이라 이번 머지의 결격 사유는 아니나 **디자인 확인 사안**이다.
+- `OnMovementModeChanged`가 프록시에서도 실행되며 `JumpCurrentCount`·`bWallHangConsumed`를 프록시 로컬로 쓴다(현재 무해, 권한 가드 부재).
+- 폰이 Autonomous → Simulated로 전환되면(관전/빙의 해제) 게이트 때문에 stale `bIsSliding = true`가 그 머신에 잔존할 수 있다(로컬 독자 한정, 표시 경로 무관).
+
+---
+
 ## 🔄 장전 = 임시 "내렸다 올리기" 포즈 + 벽 매달림 장전 차단 (2026-08-10, `phase/fparms-reload-sequencer`)
 > **사용자 PIE 실측 확인 완료.** 원래 이 브랜치는 "1인칭 장전 애니 Sequencer 편집"으로 시작했는데,
 > 조사 중 **배선 결함**이 나왔고 이어 사용자가 **애니 편집 자체를 접기로** 결정해 산출물이 바뀌었다.
