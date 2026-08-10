@@ -76,6 +76,16 @@ void UFPSRGA_WeaponFire_ChargeLaser::ActivateAbility(
 		}
 	}
 
+	// No firing while the current locomotion state forbids it (wall-hang: both hands on the wall). This ability is
+	// ServerOnly (NetExecutionPolicy above) — ActivateAbility runs ONLY on the server, so this check is the SOLE
+	// authority for the wall-hang block on ChargeLaser weapons; there is no predicted-client run to double it up with,
+	// unlike the LocalPredicted hitscan/projectile abilities.
+	if (!IsFirePermittedByMovementState(Avatar))
+	{
+		EndAbility(Handle, ActorInfo, ActivationInfo, true, true);
+		return;
+	}
+
 	// Resolve weapon stats (base × modifiers).
 	UFPSRWeaponInventoryComponent* Inventory = Avatar->FindComponentByClass<UFPSRWeaponInventoryComponent>();
 	UFPSRWeaponInstance* Instance = Inventory ? Inventory->GetCurrentInstance() : nullptr;
@@ -199,6 +209,18 @@ void UFPSRGA_WeaponFire_ChargeLaser::FireBeam(float BeamDamage, bool bIsPayoffSh
 		{
 			return;
 		}
+	}
+
+	// Same re-check, same reason, for the locomotion gate: ActivateAbility's IsFirePermittedByMovementState() only
+	// answers for the INSTANT the charge began, and this ability outlives that instant by ChargeTime — the player can
+	// latch onto a wall mid-charge, at which point the weapon leaves their hands (AFPSRCharacter::RefreshWeaponVisibility
+	// hides it / the holster pose lowers it) while these timers keep ticking. Without this the warm-up and payoff beams
+	// would keep landing authoritative damage from a gun that is visibly not being held — breaking the one invariant
+	// this whole gate exists for ("can I shoot" and "is the gun in my hands" never disagree). Fired-state timing is left
+	// alone exactly like the freeze gate above: the charge still completes, it just lands nothing.
+	if (!IsFirePermittedByMovementState(Avatar))
+	{
+		return;
 	}
 
 	// Global damage multiplier + crit apply to the PAYOFF shot only. Warm-up ticks are pure fixed chip damage

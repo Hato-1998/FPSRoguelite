@@ -96,9 +96,12 @@ void UFPSRRunHUDWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTim
 
 	// Weapon layer. Wall-hanging takes the gun out of the player's hands (AFPSRCharacter::RefreshWeaponVisibility
 	// hides the mesh on exactly this condition, and UFPSRCharacterMovementComponent::CanFireInCurrentState() is false),
-	// so the weapon's crosshair has nothing to describe and drops out — leaving the base dot alone.
+	// so the weapon's crosshair has nothing to describe and drops out — leaving the base dot alone. Reads
+	// CanFireInCurrentState() directly (rather than re-deriving "wall = no weapon" from IsOnWall()) so this stays the
+	// SAME judgment source as the fire gate and the holster visual (a later phase of this track) — one predicate, no
+	// chance of the HUD disagreeing with what the gun can actually do.
 	const UFPSRCharacterMovementComponent* Move = OwningChar ? OwningChar->GetFPSRMovement() : nullptr;
-	const bool bWeaponInHand = !(Move && Move->IsOnWall());
+	const bool bWeaponInHand = !Move || Move->CanFireInCurrentState();
 
 	// Per-weapon crosshair material. No style is a NORMAL state (melee / unarmed): the base dot already covers the
 	// screen centre, so there is no generic fallback to substitute — the layer simply doesn't draw.

@@ -385,6 +385,24 @@ protected:
 	 *  what a DBNO teammate spectating it renders through (CalcCamera). */
 	void UpdateCameraFieldOfView(float DeltaSeconds);
 
+	/** Owner-local per-frame: advance the state-pose alphas (slide/airborne/holster — moved out of UpdateAimDownSights,
+	 *  see that function's own comment) and, on the gun-anchor attach path only, compose them into a total-offset/tilt
+	 *  DELTA written onto the currently-active weapon mesh's RELATIVE transform (component-wise addition on top of
+	 *  CachedWeaponAttachRelative — not a world write, and not the arms). Called from AFPSRCharacter::Tick — which
+	 *  BeginPlay wires as a tick PREREQUISITE of FirstPersonArms (FirstPersonArms->AddTickPrerequisiteActor(this)) — so
+	 *  the delta lands before the arms' anim graph (and its hand-IK nodes, which read GetRightHandGripInGunFrame /
+	 *  GetLeftHandGripInGunFrame / GetWeaponPartFrameInGunSpace) evaluates this same frame. Solving it later, from the
+	 *  weapon-fire tick (where UpdateAimDownSights itself still runs — that solve needs the arms pose FINALIZED, this
+	 *  one does not), would reproduce the one-frame gun-anchor IK lag this project has already fixed once (see
+	 *  GetRightHandGripInGunFrame's header comment).
+	 *
+	 *  No-op off the locally-controlled owner / on a dedicated server (same gate as UpdateAimDownSights — this is
+	 *  owner-local presentation, never replicated). On the fallback/socket-attach path (no ik_hand_gun bone, or the
+	 *  body's own hand) this leaves the weapon mesh untouched: ADS already owns a WORLD write to it every frame there
+	 *  (UpdateAimDownSights, bSolvingArms==false), so a relative write here would just be clobbered — zero regression
+	 *  for every weapon until the arms authoring the gun-anchor rig ships. */
+	void ApplyWeaponStatePose(float DeltaTime);
+
 	/** Called from the crouch overrides once the capsule and BaseEyeHeight have already changed. Measures how far the
 	 *  view was about to jump and holds it back by exactly that much, so UpdateStanceCamera can ease it away. */
 	void BeginStanceCameraBlend();
@@ -962,6 +980,38 @@ protected:
 	TOptional<FTransform> CachedRightGripInGun;
 	TOptional<FTransform> CachedLeftGripInGun;
 
+	/** State-pose-on-weapon refactor: the gun-anchor attach's fixed relative transform (== GunBoneRelativeTransform,
+	 *  AttachWeaponMeshes) — i.e. the weapon's relative transform BEFORE ApplyWeaponStatePose adds any state-pose
+	 *  delta on top. Owner-local, never replicated. Two jobs:
+	 *   1. The BASE the state-pose delta is added to/subtracted from (ApplyWeaponStatePose writes Final = this +
+	 *      TotalOffset/Tilt; the correction below undoes it: Delta = this^-1 * Final).
+	 *   2. What GetWeaponRootPlacementInGunFrame reads INSTEAD OF the weapon's live RelativeTransform on the gun-
+	 *      anchor path — reading live there would let a state pose that happens to be riding on the weapon THIS
+	 *      INSTANT get folded into the gun-frame grip/part caches (RefreshHandGripInGunFrameCache /
+	 *      RefreshPartFramesInGunSpaceCache), which only re-solve on attach/part-rebuild — i.e. PERMANENTLY BAKED IN
+	 *      until the next re-solve (⚠️ the exact caching-contamination trap this refactor was warned about; a mid-
+	 *      reload part rebuild while a slide pose is live is the realistic trigger). */
+	FTransform CachedWeaponAttachRelative = FTransform::Identity;
+
+	/** True only when AttachWeaponMeshes used the ik_hand_gun bone anchor for the CURRENTLY-attached weapon (as
+	 *  opposed to the socket-attach fallback — body hand, or an arms mesh with no ik_hand_gun bone). Gates
+	 *  ApplyWeaponStatePose's weapon write (the fallback path already has ADS writing the weapon's WORLD transform
+	 *  every frame; a relative write here would just be clobbered) and which branch GetWeaponRootPlacementInGunFrame
+	 *  takes for its base read (cached vs. live — see CachedWeaponAttachRelative above). Set alongside
+	 *  CachedWeaponAttachRelative in AttachWeaponMeshes. */
+	bool bWeaponAttachIsGunAnchor = false;
+
+	/** State-pose-on-weapon refactor: CachedWeaponAttachRelative^-1 * (the weapon's actual current relative transform)
+	 *  — i.e. exactly the state-pose delta ApplyWeaponStatePose composed onto the base this frame, as a standalone
+	 *  transform. Recomputed ONCE per character tick (ApplyWeaponStatePose) rather than re-derived by every grip/part
+	 *  reader, which run up to twice per hand/part PER ANIM FRAME (GetRightHandGripInGunFrame,
+	 *  GetLeftHandGripInGunFrame, GetWeaponPartFrameInGunSpace) — each folds it in with one extra multiply:
+	 *  NewFrame = CachedFrame * CachedWeaponStatePoseDelta (same "State * Base^-1 * Cached" composition idiom
+	 *  GetWeaponPartFrameInGunSpace's live-curve branch already uses, just with Base on the OUTER side of the cached
+	 *  composition instead of the inner — see that function's own comment for the derivation). Identity when no state
+	 *  pose is currently riding the weapon (readers skip the multiply in that case) or on the fallback attach path. */
+	FTransform CachedWeaponStatePoseDelta = FTransform::Identity;
+
 	/** P2 (GunMotionTool_Spec.md §4-2): per-attached-part gun-space frame (GetWeaponPartFrameInGunSpace's static base
 	 *  — same composed space as CachedRightGripInGun / CachedLeftGripInGun above), keyed by
 	 *  FFPSRWeaponPartAttachment::Socket. Rebuilt in RefreshPartFramesInGunSpaceCache, called from
@@ -1011,6 +1061,25 @@ protected:
 	FFPSRProceduralWeaponMotionProfile CachedHipMotion;
 	/** True when the cached profile has any non-zero amplitude (skip the whole hip block otherwise). */
 	bool bCachedHasHipMotion = false;
+
+	// --- State pose blend (§6, GunMotionTool_Spec.md — slide/airborne/holster weapon poses; owner-local cosmetic,
+	// advanced + composed in ApplyWeaponStatePose) ---
+	/** 0 = drawn, 1 = fully holstered. Judged from the SAME predicate as the server fire gate
+	 *  (UFPSRWeaponFireComponent / UFPSRGameplayAbility::IsFirePermittedByMovementState) and the HUD crosshair
+	 *  (UFPSRRunHUDWidget) — UFPSRCharacterMovementComponent::CanFireInCurrentState() — so "can I shoot" and "is the
+	 *  gun in my hands" can never disagree. Advanced + composed into the weapon delta in ApplyWeaponStatePose; consumed
+	 *  by RefreshWeaponVisibility (gated on bCachedHasHolsterPose below) to delay the wall-hide until the descent
+	 *  finishes instead of vanishing the instant the wall gate closes. */
+	float HolsterBlendAlpha = 0.0f;
+	/** Smoothed toward UFPSRCharacterMovementComponent::IsFalling() (a binary source with no smoothing of its own,
+	 *  unlike the slide's GetSlideBlend) at the equipped weapon's CachedHipMotion.AirborneBlendDuration rate.
+	 *  0 = grounded pose, 1 = fully airborne pose. */
+	float AirborneBlendAlpha = 0.0f;
+	/** True when the EQUIPPED weapon has actually authored a holster pose (RefreshEquippedWeaponVisual: HolsterPose
+	 *  Offset/Tilt non-zero AND HolsterDuration > 0). Gates RefreshWeaponVisibility's delayed-hide path — an
+	 *  unauthored weapon (every weapon until §5 DA content lands) keeps the pre-this-track INSTANT hide on wall-hang,
+	 *  so this is a zero-regression switch rather than a behavior change for existing content. */
+	bool bCachedHasHolsterPose = false;
 
 	/** Runtime-created modular weapon-part components (U15), child-attached to WeaponMesh and rebuilt on each weapon
 	 *  change. Visible to everyone, like the weapon they hang off (ADR 0002 — they used to be OnlyOwnerSee). Empty for

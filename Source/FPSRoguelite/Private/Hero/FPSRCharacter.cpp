@@ -220,6 +220,15 @@ void AFPSRCharacter::Tick(float DeltaSeconds)
 	UpdateCameraFieldOfView(DeltaSeconds);
 	UpdateFirstPersonBodyVisibility();
 
+	// State-pose-on-weapon refactor (§4): advance the slide/airborne/holster alphas and, on the gun-anchor attach
+	// path, write the resulting delta onto the weapon HERE — after UpdateFirstPersonBodyVisibility above (so
+	// bFirstPersonSplitActive/bWeaponAttachIsGunAnchor reflect this frame's split state), and before FirstPersonArms
+	// ticks (BeginPlay wires FirstPersonArms->AddTickPrerequisiteActor(this), so this Tick always runs first). That
+	// ordering is what lets the arms' hand-IK nodes (which read GetRightHandGripInGunFrame /
+	// GetLeftHandGripInGunFrame / GetWeaponPartFrameInGunSpace during their own anim-graph evaluation) see THIS
+	// frame's weapon placement instead of last frame's — see ApplyWeaponStatePose's own header comment.
+	ApplyWeaponStatePose(DeltaSeconds);
+
 #if ENABLE_DRAW_DEBUG
 	// Debug scaffolding (replaced by HUD in P3): on-screen health / dead readout for the local player.
 	if (GEngine && IsLocallyControlled())
@@ -284,6 +293,19 @@ void AFPSRCharacter::BeginPlay()
 		{
 			WeaponFire->AddTickPrerequisiteComponent(FirstPersonArms);
 		}
+	}
+
+	// State-pose-on-weapon refactor (§4): close the tick-prerequisite chain so it reads CMC -> Character (this Tick,
+	// which now runs ApplyWeaponStatePose) -> FirstPersonArms (anim graph, hand-IK reads the weapon placement
+	// ApplyWeaponStatePose just wrote) -> WeaponFire (UpdateAimDownSights, which needs the arms pose already
+	// finalized — see that function's comment). Without this edge, an actor's own Tick and its components' Tick have
+	// no ordering relationship by default — AddTickPrerequisiteActor is the documented way to add one (engine:
+	// UActorComponent::AddTickPrerequisiteActor, ActorComponent.cpp — makes FirstPersonArms's tick depend on
+	// AFPSRCharacter's PrimaryActorTick). Symmetric with the WeaponFire->AddTickPrerequisiteComponent(FirstPersonArms)
+	// edge just above; together the two calls form one unbroken chain rather than two independent ones.
+	if (FirstPersonArms)
+	{
+		FirstPersonArms->AddTickPrerequisiteActor(this);
 	}
 
 	// Push the authored baseline AGAIN here, not only from the constructor: a Blueprint subclass's override of
@@ -639,8 +661,36 @@ void AFPSRCharacter::RefreshWeaponVisibility(bool bForce)
 		&& IsScopeVisualActive() && CachedScopeDescriptor.bHideWeaponWhileScoped;
 
 	const UFPSRCharacterMovementComponent* Move = GetFPSRMovement();
-	const bool bHideForWall = Move && Move->IsOnWall();
+	bool bHideForWall = Move && Move->IsOnWall();
 
+	// Holster-authored delay (§6): instead of vanishing the instant the wall gate closes, an authored weapon
+	// descends into its holster pose (ApplyWeaponStatePose) and the mesh stays visible until that descent actually
+	// finishes. This only ever DELAYS a wall-hide that was already decided above — it can never invent a new reason
+	// to hide or show the weapon, and it never touches bHideForScope. Three guards, all required:
+	//  1. bHideForWall already true — nothing to delay otherwise.
+	//  2. IsLocallyControlled() — HolsterBlendAlpha is advanced ONLY in ApplyWeaponStatePose, which itself early-outs
+	//     on anything but the owning client (owner-local cosmetic solve). A simulated proxy's alpha therefore never
+	//     leaves 0, which — left unguarded — would silently defeat this delay forever (0 < 1.0 never gates true) as
+	//     an accident of an unadvanced float rather than a deliberate choice. Made explicit here instead: remote
+	//     observers (3P) keep the PRE-EXISTING instant hide. The wall clip is bare-handed on every machine, so a
+	//     delayed hide would show the gun floating beside an empty hand for anyone watching — the opposite of what
+	//     this track exists to fix.
+	//  3. bWeaponAttachIsGunAnchor && bCachedHasHolsterPose — the delay is only honest when a descent will ACTUALLY be
+	//     rendered, and ApplyWeaponStatePose writes the pose on exactly this pair of conditions (see its own gate).
+	//     Testing bFirstPersonSplitActive here instead would be WIDER than what actually moves the weapon: the split
+	//     can be on while the gun-anchor attach fell back to a plain socket (arms mesh missing ik_hand_gun, or the
+	//     socket-parent-bone check in AttachWeaponMeshes logging a Warning and falling back) — and in that state the
+	//     weapon would hang motionless in-hand for the whole HolsterDuration and then vanish in one frame, i.e. the
+	//     exact "gun disappears out of nowhere" this track exists to remove, reintroduced only on the fallback path.
+	//     bCachedHasHolsterPose covers the other half: an unauthored weapon has no pose to show during a delay, so it
+	//     keeps the exact legacy instant-hide behavior (zero regression).
+	if (bHideForWall && IsLocallyControlled() && bWeaponAttachIsGunAnchor && bCachedHasHolsterPose)
+	{
+		bHideForWall = (HolsterBlendAlpha >= 1.0f);
+	}
+
+	// SetVisibility below and the bWeaponHidden latch remain THIS function's alone to write — the delay above only
+	// feeds an input into bHideForWall, it does not add a second visibility toggle or a second latch.
 	const bool bShouldHide = bHideForScope || bHideForWall;
 	if (bShouldHide == bWeaponHidden && !bForce)
 	{
@@ -838,6 +888,18 @@ void AFPSRCharacter::AttachWeaponMeshes()
 			}
 		}
 	}
+
+	// State-pose-on-weapon refactor: cache the base this attach just resolved, and whether it is the gun-anchor path,
+	// BEFORE the AttachOne lambda below runs — ApplyWeaponStatePose (AFPSRCharacter::Tick) adds its delta on top of
+	// CachedWeaponAttachRelative every frame, and GetWeaponRootPlacementInGunFrame reads it instead of the weapon's
+	// live RelativeTransform (see that function + CachedWeaponAttachRelative's own header comments for why). The
+	// fallback path gets Identity/false, which is what keeps ApplyWeaponStatePose a no-op there (current ADS-owns-the-
+	// world-write behavior, unchanged). Also reset the derived per-frame delta: a re-attach (equip/part-rebuild) means
+	// whatever state-pose delta was riding the PREVIOUS weapon no longer means anything for grip/part-frame readers
+	// until ApplyWeaponStatePose recomputes it fresh next tick.
+	CachedWeaponAttachRelative = bUseGunBoneAnchor ? GunBoneRelativeTransform : FTransform::Identity;
+	bWeaponAttachIsGunAnchor = bUseGunBoneAnchor;
+	CachedWeaponStatePoseDelta = FTransform::Identity;
 
 	// Snap (not KeepRelative) so the weapon sits exactly where the skeleton's grip socket was authored.
 	// SnapToTargetNotIncludingScale leaves scale alone (engine: its scale rule is KeepWorld), which is what lets the
@@ -1142,7 +1204,12 @@ void AFPSRCharacter::UpdateCameraFieldOfView(float DeltaSeconds)
 	if (Instance)
 	{
 		const FFPSRWeaponStatBlock& Stats = Instance->GetResolvedStats();
-		const bool bBaseWantsADS = WeaponFire && WeaponFire->IsAiming() && Stats.bHasADS;
+		// Movement state gates the ADS FOV the same way it gates UpdateAimDownSights' pose/sight solve (single
+		// judgment source, CanFireInCurrentState()) — a wall-hang drops the zoom back to hip FOV instead of leaving
+		// the player staring down a scope for a gun that just left their hands. FPSRMovement is already resolved
+		// above for the slide FOV offset, so this reuses it rather than re-fetching the component.
+		const bool bBaseWantsADS = WeaponFire && WeaponFire->IsAiming() && Stats.bHasADS
+			&& (!FPSRMovement || FPSRMovement->CanFireInCurrentState());
 		// REPLACES the hip target rather than adding to it: while aiming, the sight's magnification is the whole point
 		// and a stance offset stacked on top of a ~30 degree scope would read as the zoom changing.
 		TargetFOV = ResolveADSTargetFOV(HipTargetFOV, Stats.ADSFieldOfView, bBaseWantsADS);
@@ -1934,6 +2001,10 @@ void AFPSRCharacter::RefreshEquippedWeaponVisual()
 	// Reset hip procedural weapon motion (owner-local cosmetic); no weapon = no hip motion until the next equip.
 	bCachedHasHipMotion = false;
 
+	// Reset the holster-pose-authored flag (§6): no weapon = nothing for RefreshWeaponVisibility's delay gate to key
+	// off, so it falls back to the legacy instant hide. Recomputed below when a weapon is actually equipped.
+	bCachedHasHolsterPose = false;
+
 	if (!Weapon)
 	{
 		// No weapon: hide the meshes and drop any modular parts.
@@ -2038,6 +2109,26 @@ void AFPSRCharacter::RefreshEquippedWeaponVisual()
 	{
 		PreviousControlRotation = GetControlRotation();
 	}
+
+	// Holster pose authored? (§6) — either the offset or the tilt has to actually move the gun, AND the transition
+	// has to take real time. A weapon with only a zero HolsterDuration authored (or vice versa) is indistinguishable
+	// from "no holster pose" once RefreshWeaponVisibility starts keying off the ALPHA instead of the raw wall state —
+	// so both have to be present together or this stays false and that function keeps the legacy instant hide (§5:
+	// zero regression for every weapon that hasn't been authored yet).
+	bCachedHasHolsterPose =
+		(!CachedHipMotion.HolsterPose.Offset.IsNearlyZero() || !CachedHipMotion.HolsterPose.Tilt.IsNearlyZero())
+		&& CachedHipMotion.HolsterDuration > 0.0f;
+
+	// Snap (not smooth-ramp) both state alphas to whatever the CURRENT movement state already is, rather than
+	// starting them both at 0 on every equip. This runs on a weapon SWAP too (not just the first equip), and a
+	// mid-wall or mid-air swap must not replay the NEW weapon's holster-descend / airborne-rise animation from
+	// scratch — the movement STATE is continuous across the swap (still on the wall, still falling), only the
+	// weapon changed, so the pose should already read as "in that state" the instant the new gun appears. This snap
+	// point doubles as the hook a future "play a holster motion ON WEAPON SWAP itself" feature would extend from
+	// (out of scope here — deliberately not built, just noted so it isn't rediscovered as a mystery gap later).
+	const UFPSRCharacterMovementComponent* SwapMove = GetFPSRMovement();
+	HolsterBlendAlpha = (SwapMove && !SwapMove->CanFireInCurrentState()) ? 1.0f : 0.0f;
+	AirborneBlendAlpha = (SwapMove && SwapMove->IsFalling()) ? 1.0f : 0.0f;
 
 	// Rebuild modular cosmetic parts on the (skeletal) weapon mesh from the weapon's part list.
 	RefreshWeaponPartComponents(Weapon);
@@ -2416,7 +2507,18 @@ bool AFPSRCharacter::GetWeaponRootPlacementInGunFrame(FTransform& OutWeaponInGun
 		return false;
 	}
 
-	const FTransform WeaponRel = WeaponRoot->GetRelativeTransform();
+	// State-pose-on-weapon refactor (⚠️ caching-contamination trap — see CachedWeaponAttachRelative's header comment):
+	// this function is ONLY ever called from cache-rebuild sites (RefreshHandGripInGunFrameCache via
+	// ComputeGripInGunFrame, RefreshPartFramesInGunSpaceCache) — attach/part-change events, not per animation frame.
+	// On the gun-anchor path, WeaponRoot->GetRelativeTransform() is no longer purely the fixed attach offset:
+	// ApplyWeaponStatePose (AFPSRCharacter::Tick) writes a per-frame state-pose delta on top of it. Reading that LIVE
+	// value here would let whichever state pose happens to be riding the weapon AT THE INSTANT a rebuild fires (e.g. a
+	// reload's mid-animation part rebuild while a slide pose is live) get folded into a cache that is not re-solved
+	// again until the NEXT rebuild — permanently baking in a transient pose. CachedWeaponAttachRelative is the base
+	// BEFORE that delta, so reading it instead keeps this function's contract (a pose-free CONSTANT) intact. The
+	// fallback path has no such cache contamination risk (nothing writes a relative delta there — see
+	// ApplyWeaponStatePose's own gate) and keeps the live read it always had.
+	const FTransform WeaponRel = bWeaponAttachIsGunAnchor ? CachedWeaponAttachRelative : WeaponRoot->GetRelativeTransform();
 	OutWeaponInGunFrame = WeaponRel;
 	if (IkHandGunBoneName.IsNone() || WeaponRoot->GetAttachSocketName() != IkHandGunBoneName)
 	{
@@ -2454,18 +2556,33 @@ bool AFPSRCharacter::GetRightHandGripInGunFrame(const USceneComponent* ForMesh, 
 		return false;
 	}
 	OutGripInGun = CachedRightGripInGun.GetValue();
+	// State-pose-on-weapon correction (§③, gun-space state-pose refactor): CachedRightGripInGun was solved against
+	// CachedWeaponAttachRelative (the gun-anchor BASE — see GetWeaponRootPlacementInGunFrame). If a slide/airborne/
+	// holster pose is riding on top of that base right now (ApplyWeaponStatePose, AFPSRCharacter::Tick, which runs
+	// BEFORE this read this same frame — see its own header comment), the grip has moved with the weapon and the
+	// cached value alone would leave the hand behind — worst on the LEFT hand (forward grip, furthest from the gun's
+	// own origin; the right hand's grip sits close to it and moves comparatively little). CachedWeaponStatePoseDelta
+	// = Base^-1 * Final folds that motion back in with one multiply instead of re-solving the whole chain here.
+	if (!CachedWeaponStatePoseDelta.Equals(FTransform::Identity))
+	{
+		OutGripInGun = OutGripInGun * CachedWeaponStatePoseDelta;
+	}
 	return true;
 }
 
 bool AFPSRCharacter::GetLeftHandGripInGunFrame(const USceneComponent* ForMesh, FTransform& OutGripInGun) const
 {
-	// Left-hand mirror of GetRightHandGripInGunFrame above.
+	// Left-hand mirror of GetRightHandGripInGunFrame above (including the state-pose correction).
 	if (!ForMesh || ForMesh != FirstPersonArms || !CachedLeftGripInGun.IsSet())
 	{
 		OutGripInGun = FTransform::Identity;
 		return false;
 	}
 	OutGripInGun = CachedLeftGripInGun.GetValue();
+	if (!CachedWeaponStatePoseDelta.Equals(FTransform::Identity))
+	{
+		OutGripInGun = OutGripInGun * CachedWeaponStatePoseDelta;
+	}
 	return true;
 }
 
@@ -2511,9 +2628,20 @@ bool AFPSRCharacter::GetWeaponPartFrameInGunSpace(FName AttachSocket, FTransform
 	// defeats the point of attaching at all. Cached = Base * T (T = socket+gun composition), so
 	// Live = Result * Base^-1 * Cached — T is never needed to derive it. Same composition rule as
 	// ApplyWeaponPartCurves (they share ReadPartCurveDelta).
+	//
+	// State-pose-on-weapon correction (§③): every OutFrame this function can return is ultimately derived from
+	// *Cached, which — like the grip caches — was solved against CachedWeaponAttachRelative (the gun-anchor base,
+	// via GetWeaponRootPlacementInGunFrame). CachedWeaponStatePoseDelta (Base^-1 * Final, recomputed once per tick by
+	// ApplyWeaponStatePose) folds any currently-riding state pose back in with one trailing multiply — same
+	// GetRightHandGripInGunFrame idiom, applied at each return below rather than once at the end because this
+	// function has multiple early-outs on the pure-cache value.
 	UAnimInstance* ArmsAnim = (bFirstPersonSplitActive && FirstPersonArms) ? FirstPersonArms->GetAnimInstance() : nullptr;
 	if (!ArmsAnim)
 	{
+		if (!CachedWeaponStatePoseDelta.Equals(FTransform::Identity))
+		{
+			OutFrame = OutFrame * CachedWeaponStatePoseDelta;
+		}
 		return true;
 	}
 	for (int32 i = 0; i < WeaponPartComponents.Num(); ++i)
@@ -2527,14 +2655,27 @@ bool AFPSRCharacter::GetWeaponPartFrameInGunSpace(FName AttachSocket, FTransform
 		FVector DeltaLoc; FQuat DeltaRot;
 		if (!ReadPartCurveDelta(ArmsAnim, WeaponPartCurveNames[i], DeltaLoc, DeltaRot))
 		{
-			return true; // 이 파츠에 커브 없음 — 정적 프레임 그대로
+			// 이 파츠에 커브 없음 — 정적 프레임 그대로(단, 상태포즈 보정은 적용).
+			if (!CachedWeaponStatePoseDelta.Equals(FTransform::Identity))
+			{
+				OutFrame = OutFrame * CachedWeaponStatePoseDelta;
+			}
+			return true;
 		}
 		const FTransform& Base = WeaponPartBaseOffsets[i];
 		FTransform Result = Base;
 		Result.SetLocation(Base.GetLocation() + DeltaLoc);
 		Result.SetRotation((DeltaRot * Base.GetRotation()).GetNormalized());
 		OutFrame = Result * Base.Inverse() * (*Cached);
+		if (!CachedWeaponStatePoseDelta.Equals(FTransform::Identity))
+		{
+			OutFrame = OutFrame * CachedWeaponStatePoseDelta;
+		}
 		return true;
+	}
+	if (!CachedWeaponStatePoseDelta.Equals(FTransform::Identity))
+	{
+		OutFrame = OutFrame * CachedWeaponStatePoseDelta;
 	}
 	return true;
 }
@@ -2820,6 +2961,135 @@ void AFPSRCharacter::PlayWeaponFireCosmetics()
 	}
 }
 
+void AFPSRCharacter::ApplyWeaponStatePose(float DeltaTime)
+{
+	// Owner-local only — same gate UpdateAimDownSights uses below (this is owner-local presentation, never
+	// replicated: the components it touches carry only local render state).
+	//
+	// The delta is cleared on the way out of EVERY early return in this function, not just the zero-delta branch
+	// below: CachedWeaponStatePoseDelta is read by GetRight/LeftHandGripInGunFrame and GetWeaponPartFrameInGunSpace,
+	// which have no idea this function stopped running. Leaving the last live value behind would keep multiplying a
+	// dead slide/holster pose into every grip and part frame indefinitely — e.g. a listen-server host's pawn being
+	// UnPossessed mid-slide would freeze that tilt into the hand-IK targets for as long as the pawn lives.
+	if (!IsLocallyControlled() || GetNetMode() == NM_DedicatedServer)
+	{
+		CachedWeaponStatePoseDelta = FTransform::Identity;
+		return;
+	}
+
+	// --- Alpha advance (moved out of UpdateAimDownSights — see that function's own comment on why: this now runs
+	// from AFPSRCharacter::Tick, ahead of FirstPersonArms in the tick-prerequisite chain, instead of from the
+	// weapon-fire tick that runs after it) ---
+	const UFPSRCharacterMovementComponent* Move = GetFPSRMovement();
+
+	// Independent smoothing clock — same clamp reasoning as UpdateAimDownSights's HipDt (a frame spike or low FPS
+	// can't snap FInterpConstantTo to target in one tick).
+	const float StateDt = FMath::Min(DeltaTime, 1.0f / 30.0f);
+
+	// Slide: already a smoothed 0..1 alpha owned by the movement component (GetSlideBlend) — nothing to smooth here,
+	// only to read. Local, not a member (see the header comment on this — UpdateAimDownSights re-derives the same
+	// value the same way for its own StateBobScale, rather than reading a member across the tick boundary).
+	const float SlideW = Move ? Move->GetSlideBlend() : 0.0f;
+
+	// Airborne: IsFalling() is a binary source with no smoothing of its own (unlike the slide), so this ramps toward
+	// it at the equipped weapon's authored rate — CachedHipMotion.AirborneBlendDuration, 0 = instant snap.
+	// FInterpConstantTo (not FInterpTo) so the climb is LINEAR — a fixed transition time regardless of how far
+	// AirborneBlendAlpha currently sits from the target, which is what "AirborneBlendDuration seconds" is actually
+	// promising the data author.
+	const bool bWantsAirborne = Move && Move->IsFalling();
+	const float AirborneRate = 1.0f / FMath::Max(CachedHipMotion.AirborneBlendDuration, KINDA_SMALL_NUMBER);
+	AirborneBlendAlpha = FMath::FInterpConstantTo(AirborneBlendAlpha, bWantsAirborne ? 1.0f : 0.0f, StateDt, AirborneRate);
+
+	// Holster: same judgment source as the server fire gate (UFPSRWeaponFireComponent::CanFire/FireOneShot, and both
+	// fire GAs via UFPSRGameplayAbility::IsFirePermittedByMovementState) and the HUD crosshair (UFPSRRunHUDWidget) —
+	// CanFireInCurrentState() — so "can I shoot" and "is the gun in my hands" can never drift apart. This pass
+	// advances the alpha, folds it into the delta below, AND (edge-detected right after) drives
+	// RefreshWeaponVisibility's holster-delay gate (§6, RefreshWeaponVisibility). HolsterDuration 0 = instant snap.
+	const bool bWantsHolster = Move && !Move->CanFireInCurrentState();
+	const float HolsterRate = 1.0f / FMath::Max(CachedHipMotion.HolsterDuration, KINDA_SMALL_NUMBER);
+	const float PrevHolsterBlendAlpha = HolsterBlendAlpha;
+	HolsterBlendAlpha = FMath::FInterpConstantTo(HolsterBlendAlpha, bWantsHolster ? 1.0f : 0.0f, StateDt, HolsterRate);
+
+	// Rising-edge only (Prev<1, Now>=1): the moment the holster descent FINISHES is the one instant
+	// RefreshWeaponVisibility has to re-run to actually hide the (now off-screen) mesh — everything in between this
+	// and the previous call is just the pose sliding, nothing to toggle. The FALLING edge (draw) needs no symmetric
+	// call: OnMovementModeChanged already fires RefreshWeaponVisibility() the instant the wall gate opens (bHideForWall
+	// goes false immediately, independent of HolsterBlendAlpha, so the mesh un-hides that same frame) and the pose
+	// simply rises into view from there — there is no "finished rising" moment that needs a visibility toggle, only a
+	// "started falling" one. Same "just ask the owner function to re-evaluate" pattern as UpdateScopeWeaponVisibility —
+	// this never decides visibility itself, RefreshWeaponVisibility remains the single owner of bWeaponHidden and the
+	// SetVisibility calls.
+	if (PrevHolsterBlendAlpha < 1.0f && HolsterBlendAlpha >= 1.0f)
+	{
+		RefreshWeaponVisibility();
+	}
+
+	// --- Gun-space delta: gun-anchor attach path ONLY (§②/§③ of the plan this implements). The fallback/socket-
+	// attach path (body hand, or an arms mesh with no ik_hand_gun bone) already has UpdateAimDownSights writing the
+	// weapon's WORLD transform every frame there (bSolvingArms == false) — a relative write here would just be
+	// clobbered a moment later, so this function leaves the weapon untouched on that path (current behavior,
+	// zero regression for every weapon until content authors the gun-anchor rig).
+	// Delta cleared here too (see the top-of-function note): !ActiveWeaponMesh is the UNEQUIP path, which does NOT go
+	// through AttachWeaponMeshes (RefreshEquippedWeaponVisual returns early once it has cleared the meshes) — so this
+	// is the only place that can stop a slide/holster delta from outliving the weapon it belonged to and being folded
+	// into a stale grip cache the arms would then reach for bare-handed.
+	if (!bWeaponAttachIsGunAnchor || !FirstPersonArms || !ActiveWeaponMesh)
+	{
+		CachedWeaponStatePoseDelta = FTransform::Identity;
+		return;
+	}
+
+	// (1 - CurrentADSAlpha) weight for slide/airborne — the SAME weight UpdateAimDownSights used to apply in place,
+	// kept so a player who enters ADS mid-slide still gets the sight glue's own pose instead of fighting this one.
+	// Read as a MEMBER here because CurrentADSAlpha is written LATER this same frame — UpdateAimDownSights runs from
+	// the weapon-fire tick, which sits AFTER this function's caller (AFPSRCharacter::Tick) in the prerequisite chain
+	// (that ordering is deliberate — see UpdateAimDownSights's own comment: the sight-glue solve needs the arms pose
+	// finalized, this delta does not). So this reads last frame's alpha — up to one frame stale, same class of cross-
+	// tick read as any other member, and immaterial here: it only scales how much of the slide/airborne pose shows
+	// through while ADS is transitioning, at CachedADSInterpSpeed's typical rate (a small fraction of one frame's
+	// worth of blend). Holster is unweighted (full weight, matching the removed layer's original rule) — stowing has
+	// to pull the gun off-screen regardless of aim state.
+	const float StatePoseWeight = 1.0f - CurrentADSAlpha;
+	const float HolsterEase = FMath::SmoothStep(0.0f, 1.0f, HolsterBlendAlpha);
+
+	const FVector TotalOffset = StatePoseWeight * (SlideW * CachedHipMotion.SlidePose.Offset + AirborneBlendAlpha * CachedHipMotion.AirbornePose.Offset)
+		+ HolsterEase * CachedHipMotion.HolsterPose.Offset;
+	const FRotator TotalTilt = (CachedHipMotion.SlidePose.Tilt * SlideW + CachedHipMotion.AirbornePose.Tilt * AirborneBlendAlpha) * StatePoseWeight
+		+ CachedHipMotion.HolsterPose.Tilt * HolsterEase;
+
+	if (TotalOffset.IsNearlyZero() && TotalTilt.IsNearlyZero())
+	{
+		// Unauthored weapon (every weapon until §5 DA content lands), or a settled state (all three alphas back at
+		// 0) — skip the write rather than repeat a no-op transform every frame (§ regression-zero requirement: an
+		// unauthored weapon's WeaponMesh panel numbers must read exactly as attached, always). Only touch the
+		// component if a PREVIOUS frame actually left a residual delta on it — same restore-to-base idiom
+		// ApplyWeaponPartCurves already uses for its own per-part base restore, above.
+		if (!ActiveWeaponMesh->GetRelativeTransform().Equals(CachedWeaponAttachRelative))
+		{
+			ActiveWeaponMesh->SetRelativeTransform(CachedWeaponAttachRelative);
+		}
+		CachedWeaponStatePoseDelta = FTransform::Identity;
+		return;
+	}
+
+	// Component-wise addition (NOT quaternion composition) is the entire point of moving this layer onto the weapon
+	// (see the plan this implements): a designer dialing in a pose by hand in the WeaponMesh detail panel reads
+	// Location/Rotation as three independent numbers each, and Offset/Tilt have to move those SAME three numbers by
+	// the SAME amount for the PIE-authoring loop to close (pose in the panel -> read the delta -> type it into the
+	// DA). Scale is never touched here — WeaponAttachScale lives untouched inside CachedWeaponAttachRelative.
+	const FVector FinalLoc = CachedWeaponAttachRelative.GetLocation() + TotalOffset;
+	const FRotator FinalRot = CachedWeaponAttachRelative.Rotator() + TotalTilt;
+
+	ActiveWeaponMesh->SetRelativeLocationAndRotation(FinalLoc, FinalRot);
+
+	// Cached once here rather than re-derived by every grip/part-frame reader below (GetRightHandGripInGunFrame /
+	// GetLeftHandGripInGunFrame / GetWeaponPartFrameInGunSpace — up to twice per hand/part PER ANIM FRAME) — this
+	// runs once per character tick. Scale carried through from CachedWeaponAttachRelative (matches ActiveWeaponMesh's
+	// own untouched scale) so the inverse below is well-formed.
+	const FTransform Final(FinalRot, FinalLoc, CachedWeaponAttachRelative.GetScale3D());
+	CachedWeaponStatePoseDelta = CachedWeaponAttachRelative.Inverse() * Final;
+}
+
 void AFPSRCharacter::UpdateAimDownSights(float DeltaTime)
 {
 	// Owner-local only. Everyone else keeps the weapon rigidly on the body's grip socket, reading the aim from the body
@@ -2859,14 +3129,38 @@ void AFPSRCharacter::UpdateAimDownSights(float DeltaTime)
 		AimComp = WeaponCarrier;
 	}
 
+	// Movement-state gate (server-authoritative source = UFPSRCharacterMovementComponent, ADR 0001 single owner of
+	// locomotion state) feeds the ADS intent gate (bAiming, right below) and the walk-bob amplitude scale further
+	// down (StateBobScale). The STATE-POSE alphas themselves (slide/airborne/holster) are no longer advanced here —
+	// see ApplyWeaponStatePose (AFPSRCharacter::Tick), which this refactor moved them to so the weapon's state-pose
+	// delta lands BEFORE FirstPersonArms evaluates its anim graph this frame instead of one frame after it (the same
+	// one-frame gun-anchor lag class this project has already fixed once — GetRightHandGripInGunFrame's header
+	// comment). AirborneBlendAlpha (member, read further down) is already advanced for THIS frame when this function
+	// runs: Character::Tick sits ahead of the weapon-fire tick in the prerequisite chain BeginPlay wires up
+	// (CMC -> Character -> Arms -> WeaponFire).
+	const UFPSRCharacterMovementComponent* Move = GetFPSRMovement();
+
+	// Re-derived rather than read from a cached member: GetSlideBlend() is already the movement component's own
+	// smoothed value, so there is nothing to persist, and ApplyWeaponStatePose computes this identical number from
+	// this identical source earlier the SAME frame for its own state-pose delta — recomputing here (only used below,
+	// in StateBobScale) is cheaper than threading a copy across the tick boundary.
+	const float SlideW = Move ? Move->GetSlideBlend() : 0.0f;
+
 	// Relax the ADS glue during a reload: the reload (mag-swap) montage swings the weapon a lot, and re-solving each frame
 	// to keep the sight glued to centre would counter-swing it just as hard — a violent shake at reload timing. Treat a
 	// reload as not-aiming so the alpha smoothly lowers the gun toward hip for the reload and raises back afterwards; the
 	// reload animation then plays cleanly with nothing fighting it. IsReloading() reflects the replicated per-instance
 	// reload state, set on the same OnRep as the reload montage, so the relax is in sync with the montage.
 	const bool bReloading = WeaponInventory && WeaponInventory->IsReloading();
+	// Movement state also gates the ADS INTENT here, not just the pose layer above: wall-hang already blocks firing
+	// (CanFireInCurrentState() false), and the Apex reference releases the sight the instant the state pose takes
+	// over. bIsAiming itself (replicated, read via WeaponFire->IsAiming()) is UNTOUCHED by this — it only decides
+	// whether THIS owner-local presentation (this solve, plus the matching gate in UpdateCameraFieldOfView) honors
+	// that intent this frame. A wall exit self-heals the visual the instant CanFireInCurrentState() goes true again,
+	// with no RPC round trip.
 	const bool bAiming = bCachedHasADS && !CachedAimSocket.IsNone() && WeaponFire && WeaponFire->IsAiming() && !bReloading
-		&& AimComp && AimComp->DoesSocketExist(CachedAimSocket);
+		&& AimComp && AimComp->DoesSocketExist(CachedAimSocket)
+		&& (!Move || Move->CanFireInCurrentState());
 
 	// Every frame below is SCALE-FREE. The weapon hangs off the grip socket at WeaponAttachScale (0.85 for the rifle),
 	// and composing transforms that still carry that scale would shrink the socket offsets along with the mesh — the
@@ -3025,11 +3319,17 @@ void AFPSRCharacter::UpdateAimDownSights(float DeltaTime)
 		CurrentHipLookSway = FMath::RInterpTo(CurrentHipLookSway, SwayTarget, HipDt, CachedHipMotion.LookSwayReturnSpeed);
 
 		// Walk/run bob: velocity-gated figure-8. Reuse the smoothed 0..1 movement factor computed above (ADSSwayMoveAlpha).
-		// Phase accumulates with dt (frame-rate independent); vertical runs at 2x the horizontal frequency.
+		// Phase accumulates with dt (frame-rate independent); vertical runs at 2x the horizontal frequency. PHASE is
+		// untouched by the state layer (a phase jump would pop the bob mid-cycle) — only the AMPLITUDE scales, via
+		// StateBobScale: slide/airborne widen or (typically) zero the bob. Exclusive-resolved-then-lerped by the
+		// blend weight (SlideW / AirborneBlendAlpha) rather than a hard switch, so a weapon with default scales
+		// (Slide 0, Airborne 1) reproduces the pre-state-layer amplitude exactly and the transition itself is smooth.
 		HipBobPhase += HipDt * CachedHipMotion.WalkBobFrequency * ADSSwayMoveAlpha;
 		HipBobPhase = FMath::Fmod(HipBobPhase, 1024.0f);
-		const float BobH = FMath::Sin(HipBobPhase * 2.0f * PI) * CachedHipMotion.WalkBobHorizontal * ADSSwayMoveAlpha;
-		const float BobV = FMath::Sin(HipBobPhase * 4.0f * PI) * CachedHipMotion.WalkBobVertical * ADSSwayMoveAlpha;
+		const float StateBobScale = FMath::Lerp(1.0f, CachedHipMotion.SlideBobScale, SlideW)
+			* FMath::Lerp(1.0f, CachedHipMotion.AirborneBobScale, AirborneBlendAlpha);
+		const float BobH = FMath::Sin(HipBobPhase * 2.0f * PI) * CachedHipMotion.WalkBobHorizontal * ADSSwayMoveAlpha * StateBobScale;
+		const float BobV = FMath::Sin(HipBobPhase * 4.0f * PI) * CachedHipMotion.WalkBobVertical * ADSSwayMoveAlpha * StateBobScale;
 
 		// Fire kick: decay the per-shot alpha (bumped to 1 in PlayWeaponFireCosmetics), then scale the kick offset/pitch.
 		HipFireKickAlpha = FMath::FInterpTo(HipFireKickAlpha, 0.0f, HipDt, CachedHipMotion.FireKickRecoverySpeed);
@@ -3046,6 +3346,14 @@ void AFPSRCharacter::UpdateAimDownSights(float DeltaTime)
 		}
 	}
 
+	// --- State pose / holster layers (§6, GunMotionTool_Spec.md) REMOVED FROM HERE (state-pose-on-weapon refactor):
+	// slide/airborne/holster used to be composed additively onto whatever this function's ADS/hip solve produced and
+	// written to SolveTarget (the ARMS, on the gun-anchor path) below. They now compose against the WEAPON's own
+	// relative transform instead — see ApplyWeaponStatePose (AFPSRCharacter::Tick) — so a designer tuning a pose in
+	// PIE reads/writes the SAME WeaponMesh detail-panel numbers the game applies, and rotating about the gun's own
+	// origin reproduces the smaller, tighter pose the arms-space version could not (rotating the arms swings the gun
+	// through their much larger radius instead). NewLoc/NewRot below are therefore the ADS + hip-motion result ONLY.
+	//
 	// The one write, and the ONE place the solved pose is applied. Everything above produced a camera-relative transform;
 	// only this decides what receives it, and in which space.
 	if (bSolvingArms)

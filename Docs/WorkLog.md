@@ -9,6 +9,68 @@
 
 ---
 
+## 🔫 1인칭 뷰모델 — 홀스터/드로우 + 상태별(슬라이드/공중) 모션 + 벽 매달림 발사 게이트 (2026-08-10, `phase/fparms-holster-statemotion`)
+> 보드 행 = "1인칭 무기 뷰모델 애니메이션 — 수납/꺼내기(홀스터) + 상태별(슬라이딩/공중) 무기 모션 분리"(하이).
+> 커밋 `0ab4d732`(1차 구현) → `23a237e4`(적용 대상 재설계). **사용자 PIE 실측 확인 완료.**
+
+**요구(2026-08-07 사용자 지시)**: ①무기 못 쓰는 상태(벽 매달림)에서 즉시 소멸 대신 6시로 수납/꺼내기
+②걷기 밥이 슬라이딩·공중에도 그대로 재생되던 것을 상태별로 분리(슬라이드=틸트 로우 포즈·사격 가능, 공중=살짝 +Z·밥 없음).
+
+### 스키마는 이미 있었다 — 이번 작업 = 그 **소비** 구현
+`FFPSRWeaponStatePose`(Offset/Tilt) + `SlidePose`/`SlideBobScale(0)`/`AirbornePose`/`AirborneBobScale(1)`/
+`HolsterPose`/`HolsterDuration(0.25)` 는 총모션 명세 §6에서 이미 `FPSRWeaponDataAsset.h`에 정의돼 있었고 소비처가 0건이었다.
+`CachedHipMotion`이 같은 struct라 상태 포즈까지 이미 캐시된다 — 추가 캐시 불필요. 신규 필드는 `AirborneBlendDuration` 1개뿐
+(공중만 `IsFalling()`이라는 **이진 소스**라 스무딩 시간이 데이터로 필요하다. 슬라이드=`GetSlideBlend`, 홀스터=`HolsterDuration`은 이미 있음).
+
+### 🔁 적용 대상 재설계 — 팔(카메라 공간) → 총(부착 기준 성분 덧셈 델타)
+1차 구현(`0ab4d732`)은 상태 포즈를 **팔**에 카메라 공간으로 합성했다. **사용자 지적으로 전제가 틀렸음이 드러났다**:
+- 사용자의 저작 루프 = **PIE 디테일 패널에서 WeaponMesh 트랜스폼을 직접 만져 목표 포즈를 잡고 그 숫자를 DA로 옮기는** 방식.
+- 팔에 합성하면 ① WeaponMesh 패널 수치가 **영영 안 바뀐다**(팔에만 쓰고, 총의 상대 트랜스폼은 부착 시 1회만 쓰인다)
+  ② 회전 중심이 다르다(팔 원점 = 카메라 근처) → 사용자가 저작한 포즈가 **재현되지 않는다**.
+→ `23a237e4`에서 **총의 부착 기준값에 대한 성분 덧셈 델타**로 전환. `Final = Base + Σw·(Offset/Tilt)`, Scale 불가침.
+**성분 덧셈을 쓴 이유 = 패널 3개 숫자와 1:1 대응**(쿼터니언 합성은 숫자가 예측 불가라 저작 루프가 닫히지 않는다).
+절대값(고정 수치) 안은 기각 — 상태끼리 블렌드가 안 되고 무기마다 base가 달라 재사용 0.
+
+**실증**: DA `슬라이드 포즈 → 회전(틸트)`에 **Roll −13 / Pitch −55 / Yaw +30** 입력 → 슬라이드 중 패널이 **−30/−55/105**로 읽힘
+(기준 −17/0/75 + 델타). 사용자 확인 "원하는대로야".
+
+### 같이 잡은 함정 3개 (이게 없으면 눈에 보이는 버그)
+1. **손 IK 추종** — 그립 타깃은 부착 시점 상수라 총이 움직이면 낡는다. 특히 **왼손(포어그립, 총 원점에서 멀다)** 이 크게 어긋난다.
+   `CachedWeaponStatePoseDelta = Base⁻¹·Final` 을 그립·파츠 프레임 리더에 합성. ⚠️ `ComputeGripInGunFrame`이 마지막에 스케일을
+   1로 정규화하고 base는 `WeaponAttachScale`(0.85)을 물고 있어 어긋날 것처럼 보이지만, **역행렬에서 스케일이 정확히 상쇄**돼
+   순수 강체 델타가 된다(검산 완료 — `Bs⁻¹·Fs`의 스케일 = (1/S)·S = 1, 이동 성분도 S가 소거).
+2. **캐시 오염** — `GetWeaponRootPlacementInGunFrame`이 총의 **라이브** 상대 트랜스폼을 읽고 있었다. 델타가 실린 채
+   그립/파츠 캐시가 재계산되면(**재장전 중 파츠 재빌드가 현실적 트리거**) 그 순간의 상태 포즈가 캐시에 **영구히 구워진다**.
+   건-앵커 경로에선 `CachedWeaponAttachRelative`(부착 기준)를 읽도록 교체.
+3. **1프레임 지연** — 팔 애님이 먼저 도는 틱 순서라 델타를 `UpdateAimDownSights`(WeaponFire 틱)에서 계산하면 손 IK가 1프레임 늦는다
+   (이 프로젝트가 이미 한 번 잡은 건-앵커 랙과 같은 부류). 알파 진행+델타+총 write를 `AFPSRCharacter::Tick`으로 옮기고
+   `FirstPersonArms->AddTickPrerequisiteActor(this)` 추가 → 체인 **CMC → Character → Arms → WeaponFire**.
+   ADS 사이트 글루는 팔 포즈가 확정된 뒤라야 맞으므로 WeaponFire 틱에 **잔류**.
+
+### 홀스터 가시성 — 단일 소유자 유지
+`RefreshWeaponVisibility`가 계속 `SetVisibility`·`bWeaponHidden` 래치의 유일한 주인이고, 지연은 `bHideForWall` 입력 1식으로만 들어간다.
+가드 4개: 이미 벽 숨김 결정 + **owner-local**(프록시는 알파가 안 돌아 자동 배제 = **리모트 3P는 기존 즉시 숨김 유지** — 벽 클립은 전 머신
+맨손이라 지연 표시는 손 옆에 총이 뜨는 버그다) + 스플릿 활성 + `bCachedHasHolsterPose`(**미저작 무기 = 레거시 즉시 숨김, 회귀 0**).
+하강 완료(알파 1.0 상승 엣지)에서만 재평가 1회 호출 — 드로우 방향은 `OnMovementModeChanged`가 이미 즉시 재평가하므로 대칭 호출 불요.
+
+### 부수 처리 — 호출자 0건이던 게이트 2개 배선
+`CanFireInCurrentState()`·`GetSpreadMultiplier()`가 **호출자 0건**이었다 → **벽 매달림 중 발사가 코드상 전혀 안 막혀 있었다**(무기만 숨김).
+- 클라 UX 게이트: `CanFire()`(자동/버스트 루프 정지) + `FireOneShot()` 상단(**코스메틱·GA 발동보다 앞** — 막힌 샷의 총구화염/반동 누출 방지).
+  밀리도 포함(벽 = 양손 사용 중).
+- **서버 권위 게이트**: 신규 `UFPSRGameplayAbility::IsFirePermittedByMovementState()`를 발사 GA 4종의 기존 게이트 블록
+  (`IsRunPaused`/`IsAlive` 옆, **`ServerTryConsumeFireInterval` 이전**)에 추가. `HasAuthority` 분기 **밖** — LocalPredicted는 예측 클라+서버
+  양쪽에서 돌고 서버 실행이 권위가 된다. `CanActivateAbility` 오버라이드는 기각(패시브 상속 + 기존 관례 = ActivateAbility 내 조기 EndAbility).
+- 확산 배율: `ComputeSpreadDegrees`에 `StateSpreadMultiplier` 추가 + 호출자 3곳(HUD/Hitscan/Projectile) 배선 → 크로스헤어와 실제 원뿔이 동조.
+- HUD의 `!IsOnWall()` 직독을 `CanFireInCurrentState()`로 통일 — "쏠 수 있나"와 "총이 손에 있나"가 **한 술어**를 공유한다.
+
+### 남은 것 / 알려진 잔여
+- 슬라이드/공중 가중 `(1-CurrentADSAlpha)`는 **1프레임 스테일**(ADS 솔브가 뒤에 돌아 구조상 불가피). ADS 전환 중 포즈 비침 정도만 영향.
+- **홀스터 포즈를 크게 저작하면 손 IK가 끝까지 뻗어 어색해질 수 있다** — 그 경우 홀스터만 팔-공간으로 되돌리는 선택지(슬라이드/공중은 총-공간 유지).
+- DA 저작은 **슬라이드만 완료**. 공중 밥 제거는 `AirborneBobScale=0`을 넣어야 나타난다(기본 1). 홀스터/공중 포즈 값 미저작.
+- 검증 = `-NoXGE -DisableUnity` 풀빌드 2회 Succeeded(경고 0) + 사용자 PIE 실측.
+
+---
+
 ## 🧾 보드 5건 종결 — 검증 완료 3건 + 범위 조정 1건 + 폐기 1건 (2026-08-10, `main`)
 > 사용자 확인분 정리. **코드·에셋 변경 0** — 보드 상태와 이 기록만 바뀐다.
 

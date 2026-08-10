@@ -16,8 +16,11 @@
 #include "Core/FPSRPlayerState.h"
 #include "Core/FPSRLogChannels.h"
 
+#include "Hero/FPSRCharacterMovementComponent.h"
+
 #include "AbilitySystemComponent.h"
 #include "GameFramework/Pawn.h"
+#include "GameFramework/Character.h"
 #include "GameFramework/Controller.h"
 #include "Engine/World.h"
 #include "DrawDebugHelpers.h"
@@ -66,6 +69,17 @@ void UFPSRGA_WeaponFire_Hitscan::ActivateAbility(
 			EndAbility(Handle, ActorInfo, ActivationInfo, true, true);
 			return;
 		}
+	}
+
+	// No firing while the current locomotion state forbids it (wall-hang: both hands on the wall). Deliberately
+	// OUTSIDE any HasAuthority() branch — this ability is LocalPredicted, so ActivateAbility runs on the predicting
+	// owning client AND the server, and IsFirePermittedByMovementState() reads CanFireInCurrentState() the same way on
+	// both. This is the REAL authority for the wall-hang fire block; UFPSRWeaponFireComponent's client-side check is
+	// cosmetic-only prediction that stops the local recoil/montage loop from running ahead of a rejection here.
+	if (!IsFirePermittedByMovementState(Avatar))
+	{
+		EndAbility(Handle, ActorInfo, ActivationInfo, true, true);
+		return;
 	}
 
 	// Resolve weapon stats from the equipped weapon instance (base stats × accumulated modifiers; fallback to defaults).
@@ -119,8 +133,18 @@ void UFPSRGA_WeaponFire_Hitscan::ActivateAbility(
 	{
 		const float HeatSpread = Recoil ? Recoil->GetHeatSpread() : 0.0f;
 		const bool bAiming = FireComp->IsAiming();
+		// Movement-state spread multiplier (airborne/slide/crouch) — the authoritative trace below must widen the same
+		// way the HUD crosshair already promised the player. Fail-open to 1.0 for a non-Character avatar.
+		float StateSpreadMultiplier = 1.0f;
+		if (const ACharacter* AvatarCharacter = Cast<ACharacter>(Avatar))
+		{
+			if (const UFPSRCharacterMovementComponent* Move = Cast<UFPSRCharacterMovementComponent>(AvatarCharacter->GetCharacterMovement()))
+			{
+				StateSpreadMultiplier = Move->GetSpreadMultiplier();
+			}
+		}
 		SpreadDegrees = Stats
-			? UFPSRWeaponFireComponent::ComputeSpreadDegrees(*Stats, HeatSpread, bAiming)
+			? UFPSRWeaponFireComponent::ComputeSpreadDegrees(*Stats, HeatSpread, bAiming, StateSpreadMultiplier)
 			: SpreadDegrees + HeatSpread;
 		bADSDeterministic = Stats && Stats->bHasADS && bAiming;
 	}
