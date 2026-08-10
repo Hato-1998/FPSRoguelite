@@ -269,6 +269,28 @@ struct FFPSRProceduralWeaponMotionProfile
 	 *  이 값을 켜려면 아래 「홀스터 포즈」에 실제 값이 저작돼 있어야 한다(0이면 내려갈 곳이 없다). */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|상태 포즈", meta = (DisplayName = "🚧 항상 수납 포즈(임시 — 아이들 미저작 무기)"))
 	bool bForceHolsteredPose = false;
+
+	/** 🚧 **임시 조치용 포즈** — 장전하는 동안 팔·무기를 이 포즈로 내렸다가 장전이 끝나면 되돌린다.
+	 *  1인칭 장전 애니메이션을 아직 쓸 수 없어(팔 메시부터 고쳐야 한다) 그 사이를 메우는 용도다.
+	 *  **장전 애니메이션이 저작되면 이 값을 0으로 되돌리면 된다 — 코드는 다시 건드릴 필요가 없다.**
+	 *  스위치가 곧 이 값이다: Offset/Tilt 가 전부 0 이면 아무 일도 일어나지 않는다(기본값 = 비활성).
+	 *  별도 bool 을 두지 않은 이유 = 이 포즈의 방아쇠는 "장전 중인가" 하나뿐이라서다
+	 *  (bForceHolsteredPose 가 bool 인 건 홀스터 포즈가 이미 벽 매달림에 쓰이고 있어 두 번째 방아쇠가 필요했기 때문).
+	 *
+	 *  ⚠️ **위 슬라이드/공중과 공간이 다르다 — 홀스터 포즈와 같은 규약이다.** 슬라이드·공중은 총의 부착 기준값에
+	 *  더해지는 총-공간 델타지만, 이 포즈는 **1인칭 팔 전체**에 얹히는 카메라 공간 오프셋이다
+	 *  (+X 전방 / +Y 우 / +Z 상 — 아래로 내리려면 Z 에 음수). 총만 내리면 어깨가 카메라에 고정돼 있어 팔이 닿는
+	 *  거리를 넘는 순간 손 IK 가 총을 놓고 팔만 화면에 남는다(홀스터 포즈 주석의 실측 근거 그대로).
+	 *  그래서 패널 숫자로 저작할 수 없고, 값을 넣고 실행해 확인하는 방식으로 잡는다.
+	 *
+	 *  「재장전 몽타주(1인칭 팔)」과 **동시에 쓰지 말 것** — 화면 밖에서 보이지도 않는 몽타주가 도는 셈이다
+	 *  (UFPSRWeaponDataAsset::IsDataValid 가 경고한다). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|상태 포즈", meta = (DisplayName = "🚧 장전 포즈(임시 — 장전 애니 미저작)"))
+	FFPSRWeaponStatePose ReloadPose;
+
+	/** 🚧 장전 포즈 전환 소요 시간(초) — 내려가는 데, 올라오는 데 각각 걸리는 시간. 0 = 즉시 스냅. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|상태 포즈", meta = (DisplayName = "🚧 장전 포즈 전환시간(초)", ClampMin = "0.0"))
+	float ReloadBlendDuration = 0.12f;
 };
 
 /** Data-driven weapon definition. */

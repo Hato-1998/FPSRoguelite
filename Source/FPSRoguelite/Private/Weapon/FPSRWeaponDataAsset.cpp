@@ -477,6 +477,16 @@ EDataValidationResult UFPSRWeaponDataAsset::IsDataValid(FDataValidationContext& 
 			FText::FromName(FirePartRecoilBone)));
 	}
 
+	// 🚧 장전 포즈(임시, ReloadPose)가 저작돼 있으면 장전하는 동안 1인칭 팔 전체가 화면 밖으로 내려간다 — 그 상태에서
+	// 1인칭 팔 장전 몽타주(ArmsReloadMontage)를 같이 재생해도 화면엔 보이지 않는다(화면 밖에서 도는 몽타주가 되는
+	// 셈). 이 임시 조치와 정식 장전 애니메이션은 같이 쓰지 말고 둘 중 하나만 쓸 것.
+	if ((!ProceduralWeaponMotion.ReloadPose.Offset.IsNearlyZero() || !ProceduralWeaponMotion.ReloadPose.Tilt.IsNearlyZero())
+		&& !ArmsReloadMontage.IsNull())
+	{
+		Context.AddWarning(LOCTEXT("ReloadPoseHidesArmsMontage",
+			"🚧 장전 포즈(ReloadPose)가 저작되어 있는데 1인칭 팔 장전 몽타주(ArmsReloadMontage)도 설정돼 있습니다 — 장전 포즈가 팔 전체를 화면 밖으로 내리므로 몽타주는 재생돼도 보이지 않습니다. 둘 중 하나만 사용하세요."));
+	}
+
 	return Result;
 }
 

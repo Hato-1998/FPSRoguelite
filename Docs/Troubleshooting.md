@@ -250,6 +250,29 @@ AO 설정(mesh-space additive, 기준=Center) 전부 정상이었고, **AO 샘�
 - 이 릭은 **Blender식 네이밍**: `spine_03`이 없고 `root>hips>spine>chest>neck>head` (척추 2개뿐).
 - 이 릭의 상하 조준축 = **컴포넌트 X축 회전 = rotator 표기상 Roll**이다(Pitch 필드가 아님).
 
+### A19. 몽타주가 **다른 스켈레톤**을 가리켜도 UE는 아무 말 없이 재생한다 (2026-08-10)
+
+**증상** — 1인칭 장전 애니가 "움직이긴 하는데 이상하다"(팔이 엉뚱한 방향으로 꺾임). 클립·몽타주·커브는
+다 멀쩡하고 에러도 경고도 없다.
+
+**원인** — `DA_Weapon_Rifle.ArmsReloadMontage`가 **`S_Mannequin`(161본)** 몽타주를 가리키는데 실제 팔은
+**`SKEL_LPAMG_Character`**다. 양쪽 `CompatibleSkeletons`가 비어 있어 리매핑이 없고, 본 인덱스가 어긋난다
+(`clavicle_l` 5↔10 · `hand_r` 29↔66 · `ik_hand_gun` 65↔153). 본 **이름**은 겹쳐서 "맞는 것처럼" 보인다.
+
+🚨 **UE 5.7 `Montage_PlayInternal`은 호환성을 검사하지 않는다** — `if (CurrentSkeleton && MontageToPlay->GetSkeleton())`
+로 **널만** 본다(`AnimInstance.cpp:2396`). else 절의 `"Playing a Montage (%s) for the wrong Skeleton"`
+경고문(`:2460`)은 **널일 때만** 뜨므로, 스켈레톤이 달라도 그 경고는 영영 안 나온다. 즉 이 사고는
+로그에 아무 흔적을 남기지 않는다.
+
+**판정법** — 애니를 의심하기 전에 **몽타주의 스켈레톤과 재생 대상 메시의 스켈레톤을 직접 대조**하라.
+`m.get_editor_property("skeleton").get_name()` vs `comp.get_skeletal_mesh_asset().get_editor_property("skeleton")`.
+보조 단서: 해당 몽타주가 **에셋 참조 0건**인데 DA는 다른 걸 물고 있다(`get_referencers`로 확인).
+⚠️ `skeletal_mesh` 속성은 폐기됐다 — `get_skeletal_mesh_asset()`을 쓸 것([[ue-deprecated-property-stale-read]] 계열).
+
+**해결** — DA가 팔과 **같은 스켈레톤**의 몽타주를 가리키게 고친다. 여기선 마켓 데모 폴더
+(`/Game/ProceduralWeaponAnimationSystem/`)의 동명이인 에셋(`AM_FP_RifleReload`)이 프로젝트 자체 에셋
+(`AM_FP_Rifle_Reload` — **언더바 위치만 다름**)을 밀어내고 있었다. 이름이 아니라 **경로로** 고를 것.
+
 ### B1. 카메라 근처의 메시가 잘려 보인다
 **근평면은 10cm가 아니라 1.0cm다.** `Config/DefaultEngine.ini`의 `[/Script/Engine.Engine] NearClipPlane=1.0`을 엔진이 `UEngine::Init` → `SetNearClipPlaneGlobals`(`UnrealEngine.cpp:2221`)에서 읽는다. `CoreGlobals.cpp:260`의 `GNearClippingPlane = 10.0f`는 **config를 읽기 전 초기값**이다.
 → 몇 cm짜리 잘림은 근평면이 아니라 **지오메트리가 카메라 평면을 관통**하는 것이다. 근평면을 더 낮춰봐야 헛수고.

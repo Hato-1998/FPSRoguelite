@@ -556,6 +556,17 @@ void UFPSRWeaponInventoryComponent::StartReload()
 			return;
 		}
 	}
+	// Wall-hang refuses a reload start — both hands are on the wall, the same reason the fire gate closes, so this
+	// reads the identical predicate (CanFireInCurrentState) rather than inventing a second one. Single chokepoint
+	// (see the freeze gate above): manual ServerReload, auto-reload, and equip-resume all funnel through this one
+	// function, so this one check covers every entry point.
+	const AFPSRCharacter* Char = Cast<AFPSRCharacter>(GetOwner());
+	const UFPSRCharacterMovementComponent* Move = Char ? Char->GetFPSRMovement() : nullptr;
+	if (Move && !Move->CanFireInCurrentState())
+	{
+		return;
+	}
+
 	UFPSRWeaponInstance* Instance = GetCurrentInstance();
 	if (!Instance || Instance->IsReloading())
 	{
