@@ -38,7 +38,7 @@
 | **P2** ✅ | SpawnDirector + Flow-Field + Pooling + Significance (적 300+ 안정) + **적 이속 ±10% 편차** + **적 근접 데미지·공격토큰 baseline** + **충돌무시 대시** |
 | **P3** ✅ | 공유XP + 파티레벨 + **레벨업 스택(프리즈 폐지)** + **정비시간 RunPhase** + **오프닝 카드 시드** + Card UI + 동적 카드풀 + Rarity + 리롤 |
 | **P4** ✅ | **P4-A**(재설계) 런 디렉터(시간 미션 스케줄+보스타임) + 확장형 미션 프레임워크+스폰포인트 + **레벨업/미션클리어 전역 프리즈**(라운드제 폐지)+레퍼런스 미션 1종+오프닝시드 / **P4-B** Weapon Modifier Fragment+weapon-scope 카드+미션 보상 실적용 / **P4-C** 무기 7종 / **P4-D** 게임필(히트마커·핑·위협 인디케이터·사각 오디오)+PickupRadius/XPGain+HUD위젯. (+원거리 적 규격·공격토큰 확장) |
-| **P5** ✅ | 4인 협동 + 세션(Steam, 2-PC E2E) + **아군 오사(50%, 기본 ON 설계확정 2026-07-01·호스트 OFF 토글; 기본값 ON 전환=코드 후속)** + **수동 부활(DBNO=근접 자동부활)** — 완료 / Iris 평가=**비채택**(Push Model 유지)·NetProfiler(적500 정량)=**U14 이월** |
+| **P5** ✅ | 4인 협동 + 세션(Steam, 2-PC E2E) + **아군 오사(50% 치사 · 기본 OFF 확정 2026-08-07 — 2026-07-01 "기본 ON"을 뒤집음 · 호스트 ON 토글; 코드와 일치 = 후속 없음)** + **수동 부활(DBNO=근접 자동부활)** — 완료 / Iris 평가=**비채택**(Push Model 유지)·NetProfiler(적500 정량)=**U14 이월** |
 | **P6** ✅ | 메타 프로그레션(U10 SaveGame) + 보스(U4) + 클리어 플로우(P6-A 셸) |
 | **P7** (부분) | CommonUI ✅ · 오디오 MVP ✅ / Insights·README·빌드 폴리시 = 잔여 |
 | **P8** ✅ | 다중맵 심리스 **U 연속필드**(P-0~P-H `34b5eea`) + 반동 **CrystalRecoil** 어댑터(`6f1a981`) + **무기 전면개편**(투사체화·SMG·유탄런처 제거 `3adc945`) + **FPSR Data Editor** P0~P2 + 통합 애니 패스 인프라 · U5~U20 2차 트랙 — 전부 main 머지(상세 `PROGRESS.md` 완료 이력) |
@@ -80,7 +80,7 @@
 > **환경 에셋 방향 = Path A (통일 로우폴리 Synty POLYGON 패밀리) 확정 (피벗 2026-07-03, `Concept.md §1-C-9`)**. 근거(제1원리): 로우폴리 = 드로우콜/텍스처 최소 → 적 200-300 프레임예산 보존 + 기존 로우폴리 에셋 정합 + 벤더 통일 = 통일감 자동. (Path B 리얼리스틱 = 무겁·톤충돌로 기각.)
 > ⚠️ **착수 전 필수 = 파일럿 검증**: Synty 후보 1팩을 **UE5.7 임포트 + 적 300 스폰 + U7 플로우필드 + 20분 런 프레임 실측** → 통과분만 채택. **Fab 등재 여부 팩별 확인**(예: POLYGON Sci-Fi City는 Fab 미이관·Epic 볼트만일 수 있음).
 >
-> **🔄 2026-07-10 아트 스택 재확정 (사용자 결정)** — 로우폴리 유지하되 **전체 셀/툰(애니) 통일 룩**으로 상향. 상세 = 아래 슬롯별 표. ⚠️ 종전 여기 지목돼 있던 `Docs/AssetReplacement_Synty_ResumePrompt.md`는 **폐기본**(SRS를 "최후 폴백 유료옵션"이라 하는 등 이 SSOT와 모순, `TaskPrompts_Master.md:139`에서 "읽지 말 것"으로 지정) — **읽지 말 것**. 임포트 리스트는 U22 실행 프롬프트가 재작성한다(2026-07-19 정정):
+> **🔄 2026-07-10 아트 스택 재확정 (사용자 결정)** — 로우폴리 유지하되 **전체 셀/툰(애니) 통일 룩**으로 상향. 상세 = 아래 슬롯별 표. ⚠️ 종전 여기 지목돼 있던 `AssetReplacement_Synty_ResumePrompt.md`는 **폐기본**(SRS를 "최후 폴백 유료옵션"이라 하는 등 이 SSOT와 모순, `TaskPrompts_Master.md` §U22a/U22b에서 "읽지 말 것"으로 지정)이라 **`Docs/Archive/prompts/`로 내렸다** — 읽지 말 것. 임포트 리스트는 U22 실행 프롬프트가 재작성한다(2026-07-19 정정):
 > - **환경** Synty Cyber City(맵1) · **무기** Synty **Military Pack 모듈 백본 + 사이버 리스킨**(Infima 교체) · **캐릭터** 애니 셀 'Anime Girl Blu' 리스킨(플레이어/팀원) · **적 스웜** 별도 저코스트 VAT(애니 리스킨 금지) · **FP 팔** Blu 팔 추출 + **PWAS** 절차 애니 · **UI** Synty **Sci-Fi Soldier HUD** · **VFX** Synty Particle FX + Epic Niagara(무료) · **오디오** Synty 밖(Sonniss·Kenney·Fab).
 > - **✅ 렌더러 = SRS(Stylized Rendering System) 확정**(2026-07-10 파일럿 실측 합격). **통합 계약**: 셀/아웃라인 = per-mesh Custom Depth-Stencil 마스킹(효과 받을 메시 `render_custom_depth=True` + `r.CustomDepth=3`). **실측**: 적 300 스웜 커스텀뎁스 = Custom Depth 패스 1.33ms(예산 내) → 스웜 채택 OK. 불통 대안 = DIY 스크린스페이스 Sobel+포스터라이즈. 세부 룩 튜닝은 인게임 반복.
 > - ⚠️ **제1원리 리스크**: 셀 아웃라인=post-process(inverted-hull 금지=스웜 드로우콜 2배) · 셀×VAT 스웜 정합 실측 · 애니 고폴리를 스웜에 리스킨 금지 · Synty 5.4→5.7 마이그레이션.

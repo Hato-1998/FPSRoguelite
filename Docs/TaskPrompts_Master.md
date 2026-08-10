@@ -138,7 +138,7 @@
 ### U22a / U22b — Synty 셀/툰 에셋 교체
 
 > **실행 프롬프트(자족) = [`Docs/U22_AssetReplacement_Prompt.md`](U22_AssetReplacement_Prompt.md)** — 그 문서를 새 세션에 붙여넣는다(여기 중복 안 함, SSOT 분리). 2026-07-19 작성, 7에이전트 조사 + 적대 검증(주장 13건 반박·정정) 기반.
-> ⚠️ 구 `Docs/AssetReplacement_Synty_ResumePrompt.md` = **폐기본**(SSOT와 모순) — 읽지 말 것.
+> ⚠️ 구 `AssetReplacement_Synty_ResumePrompt.md` = **폐기본**(SSOT와 모순) — 읽지 말 것. `Docs/Archive/prompts/`로 내렸다(2026-08-11).
 
 - **분할**(사용자 결정 2026-07-19): **U22a 환경 → 사용자 육안 게이트 → U22b 나머지**. 아트 판정이 전부 사용자 육안이라 유닛 끝 1회 판정으로 두면 룩이 어긋났을 때 전량 재작업이 된다.
 - **범위 결정**(같은 날): 맵 = **맵1 CyberCity만** · 레거시 삭제 = **`ModularSciFiStation`(1.4G, 참조 0건)만** · UI = **스타일 리스킨**(구조 재작성 금지).

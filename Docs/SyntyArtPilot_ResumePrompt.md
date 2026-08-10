@@ -1,6 +1,6 @@
 # Synty 애니 셀/툰 아트 스택 — 파일럿 게이트 실행 프롬프트 (복붙용)
 
-> **근거**: 2026-07-10 아트 스택 재확정(전체 셀/툰 통일). SSOT = `Concept.md §1-C-9`·`Roadmap.md §8`·`Docs/AssetReplacement_Synty_ResumePrompt.md`(2026-07-10 갱신). 메모리 = `synty-anime-cel-art-pivot`.
+> **근거**: 2026-07-10 아트 스택 재확정(전체 셀/툰 통일). SSOT = `Concept.md §1-C-9`·`Roadmap.md §8`·`Docs/U22_AssetReplacement_Prompt.md`. 메모리 = `synty-anime-cel-art-pivot`.
 > **목적**: 대량 채택·콘텐츠 저작 **전에** 이 아트 스택이 제1원리(적 200-300 싸게)를 지키는지 + 셀/툰 룩 결과물을 실측/육안 검증. 통과분만 채택(파일럿=throwaway, 채택분만 LFS 커밋).
 > **어디서**: 활성 코드 클론 `E:\Git_Project\FPSRoguelite`. 에셋·PIE 작업이라 LFS 대용량 · 에디터 종료 상태서 임포트.
 > 아래 코드블록을 새 세션에 붙여넣는다.
@@ -9,7 +9,7 @@
 Game.md + PROGRESS.md 먼저 읽어. 그다음 이 파일럿의 근거를 읽는다:
 - Docs/SSOT/Concept.md §1-C-9 (아트 방향=전체 셀/툰 통일)
 - Docs/SSOT/Roadmap.md §8 (에셋 스택·파일럿 게이트)
-- Docs/AssetReplacement_Synty_ResumePrompt.md (2026-07-10 재확정 블록 = 임포트 리스트·리스크)
+- Docs/U22_AssetReplacement_Prompt.md (임포트 리스트·리스크 — 구 AssetReplacement_Synty_ResumePrompt.md는 폐기본, Archive/prompts/로 내림)
 - Docs/SSOT/Performance.md §5 (적 200-300 예산·U7 플로우필드 ECC_WorldStatic 의존)
 
 [작업] Synty 애니 셀/툰 아트 스택 파일럿 검증. Synty 전량 보유(SyntyPass). 목표 = 대량 저작 전에 성능·룩을 실측/육안으로 게이트 통과시키는 것. 코드 변경 최소(에셋·머티리얼·PIE 위주). 플랜모드 우선·승인 후 진행. 통과 전 커밋 금지.

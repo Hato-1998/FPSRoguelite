@@ -14,7 +14,7 @@
 
 [먼저 읽기]
 - Game.md + PROGRESS.md
-- SSOT: Docs/SSOT/Concept.md §1-C-9, Docs/SSOT/Roadmap.md §8, Docs/AssetReplacement_Synty_ResumePrompt.md, Docs/SyntyArtPilot_ResumePrompt.md
+- SSOT: Docs/SSOT/Concept.md §1-C-9, Docs/SSOT/Roadmap.md §8, Docs/U22_AssetReplacement_Prompt.md, Docs/SyntyArtPilot_ResumePrompt.md
 - 메모리: synty-anime-cel-art-pivot, unreal-editor-mcp-vibeue, vibeue-mcp-capabilities, vibeue-render-target-gpu-hazard, vat-bake-inherited-component-wiring, weapon-da-pack-code-mapping, asset-integration-protocol, ue-editor-file-locks-block-git
 - 스킬: editor-bridge
 
@@ -29,7 +29,7 @@
 - 잔여물 Content/__ExternalActors__ · __ExternalObjects__ (PWAS 데모맵 World Partition, 무해 → 나중 트림)
 
 [Phase 0 — VibeUE 연결 확인 (착수 전 필수)]
-- 127.0.0.1:8088 핸드셰이크. ⚠️ **반드시 이 트리(E:/Git_Project/FPSRoguelite)에 연결됐는지** 프로젝트 경로/에셋 존재로 확인 — 옆 클론 FPSRoguelite2에 붙으면 이 에셋들이 없다(과거 실사고). 죽은 mcp__unreal_editor__*(Aura 잔상) 금지.
+- 127.0.0.1:8088 핸드셰이크. ⚠️ **반드시 작업 클론**(`git rev-parse --show-toplevel`)**에 연결됐는지** 프로젝트 경로/에셋 존재로 확인 — 옆 클론에 붙으면 이 에셋들이 없다(과거 실사고). 죽은 mcp__unreal_editor__*(Aura 잔상) 금지.
 - 확인 결과 한국어로 1줄 보고 후 진행.
 
 [Phase 1 — 에셋 인스펙션 (최우선) · 각 항목 "확인 → 판정 → 산출"]
