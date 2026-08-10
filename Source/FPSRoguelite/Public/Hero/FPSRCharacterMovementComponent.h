@@ -307,13 +307,22 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Movement|Slide", meta = (ClampMin = "0.0"))
 	float SlopeAccelerationScale = 1.0f;
 
-	/** How strongly a slope stretches (downhill) or compresses (uphill) the slide's sense of time. The speed curve is
-	 *  advanced by DeltaTime * (1 - slope * this), so a downhill slide decays in slow motion and keeps going for as
-	 *  long as the hill lasts, while an uphill one runs through the curve early and ends sooner. 0 disables it and the
-	 *  slide always lasts exactly the curve's length. Needed alongside SlopeAccelerationScale because acceleration
-	 *  alone can't extend a slide past its time limit. */
+	/** How strongly a slope stretches (downhill) or compresses (uphill) the slide's sense of time. The timer advances
+	 *  by DeltaTime * (1 - slope * this): a gentle downhill plays the decay in slow motion, at sin(angle) = 1/this it
+	 *  freezes, and past that it REWINDS (rate capped by SlideSlopeTimeRecoveryCap), so the slide regains duration —
+	 *  and through the curve, speed — for as long as the hill lasts. The default 3.0 puts the freeze point at
+	 *  asin(1/3) ~ 19.5 degrees of straight-downhill travel; uphill still runs the curve out early. 0 disables slope
+	 *  time entirely and the slide always lasts exactly the curve's length. Needed alongside SlopeAccelerationScale
+	 *  because acceleration alone can't extend a slide past its time limit. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Movement|Slide", meta = (ClampMin = "0.0"))
-	float SlopeTimeInfluence = 1.0f;
+	float SlopeTimeInfluence = 3.0f;
+
+	/** Fastest the slide timer may REWIND on a steep downhill, as a multiple of real time (1.0 = one second of
+	 *  duration regained per second spent on the hill). Rewinding — not just stalling — is what hands the player a
+	 *  recovered slide after a long descent instead of merely postponing the timeout at the freeze angle.
+	 *  0 disables rewinding entirely and restores the old floor-at-freeze behaviour. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Movement|Slide", meta = (ClampMin = "0.0"))
+	float SlideSlopeTimeRecoveryCap = 1.0f;
 
 	/** Lockout after a slide ENDS before another may start. Without it, tapping crouch repeatedly re-triggers the entry
 	 *  impulse over and over and the player rides a permanent speed boost. Applied on EVERY exit (released, too slow,
@@ -328,8 +337,11 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Movement|Slide", meta = (ClampMin = "0.0"))
 	float SlideTurnRateDegrees = 270.0f;
 
-	/** Hard time limit on a single slide (invariant 7: every state needs a time bound or an unconditional exit).
-	 *  Without this a downhill slide that keeps regaining speed would never satisfy the speed-based exit.
+	/** Hard time limit on a single slide (invariant 7: every state needs an escape path). Without this a downhill
+	 *  slide that keeps regaining speed would never satisfy the speed-based exit. A steep downhill DEFERS the limit —
+	 *  SlopeTimeInfluence can stall or rewind the timer — but only while the per-frame slope check keeps passing (the
+	 *  same shape as wall-hang's "is the wall still there"): the moment the hill ends the timer resumes and this
+	 *  bound bites again, and crouch-release / leaving the ground / the special-movement gate stay live throughout.
 	 *  IGNORED when SlideSpeedCurve is assigned — the curve's own length becomes the limit instead, so that drawing a
 	 *  5-second decay really gives a 5-second slide rather than being silently cut off here. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Movement|Slide", meta = (ClampMin = "0.1"))
