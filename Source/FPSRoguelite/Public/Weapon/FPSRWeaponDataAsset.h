@@ -255,6 +255,20 @@ struct FFPSRProceduralWeaponMotionProfile
 	/** 홀스터 전환 소요 시간(초) — 기본 0.25(§6 명세값). */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|상태 포즈", meta = (DisplayName = "홀스터 소요시간(초)", ClampMin = "0.0"))
 	float HolsterDuration = 0.25f;
+
+	/** 🚧 **임시 조치용 스위치** — 이 무기를 든 동안 홀스터 포즈를 계속 유지한다(팔·무기가 화면 밖에 머문다).
+	 *  1인칭 아이들 모션이 아직 저작되지 않은 무기(맨손 등)가 엉뚱한 포즈로 화면에 뜨는 것을 가리는 용도다.
+	 *  **아이들 모션을 저작하면 이 체크만 끄면 된다 — 코드는 다시 건드릴 필요가 없다.**
+	 *
+	 *  ⚠️ **이 프로젝트의 원칙을 의도적으로 어긴다.** 원래 "무기가 손에 없으면(수납) 쏠 수도 없다"가
+	 *  한 술어(`CanFireInCurrentState`)로 묶여 있는데, 이 스위치는 **수납해 두고 공격은 되게** 한다.
+	 *  즉 화면엔 아무것도 없는데 근접 공격이 나간다. 임시 상태로만 쓸 것(사용자 결정 2026-08-10 — 대안이던
+	 *  "공격도 같이 막기"는 근접 무기를 못 쓰게 돼 기각, "공격 시에만 팔이 올라오기"는 아이들 저작되면
+	 *  버려질 배선이라 기각).
+	 *
+	 *  이 값을 켜려면 아래 「홀스터 포즈」에 실제 값이 저작돼 있어야 한다(0이면 내려갈 곳이 없다). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|상태 포즈", meta = (DisplayName = "🚧 항상 수납 포즈(임시 — 아이들 미저작 무기)"))
+	bool bForceHolsteredPose = false;
 };
 
 /** Data-driven weapon definition. */
