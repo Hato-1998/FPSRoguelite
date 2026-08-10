@@ -114,8 +114,14 @@ protected:
 	UPROPERTY(Replicated)
 	bool bIsAiming = false;
 
-	TObjectPtr<UFPSRRecoilComponent> CachedRecoil; // CrystalRecoil-adapter recoil driver, resolved lazily (P1)
-	bool bRecoilTargetSet = false;                 // SetTargetController(owning controller) done once
+	// CrystalRecoil-adapter recoil driver, resolved lazily via FindComponentByClass (P1). WEAK on purpose: this class
+	// does not create or own the component, it only caches the lookup — a UPROPERTY() strong ref would state the
+	// opposite contract (that the cache keeps the component alive). Weak also means a destroyed component resolves to
+	// null and takes the null fallback that was already there, instead of dangling.
+	// Note TWeakObjectPtr deletes operator bool (engine: "use Get() once in a function") — resolve into a local raw
+	// pointer, do not test the member directly.
+	TWeakObjectPtr<UFPSRRecoilComponent> CachedRecoil;
+	bool bRecoilTargetSet = false; // SetTargetController(owning controller) done once
 
 	// --- Recoil state (local feel only) ---
 	float RecoilDebtPitch = 0.0f;       // up-kick owed for downward recovery (raw input units)

@@ -143,25 +143,27 @@ UFPSRRecoilComponent* UFPSRWeaponFireComponent::ResolveRecoil()
 	{
 		return nullptr;
 	}
-	if (!CachedRecoil)
+	UFPSRRecoilComponent* Recoil = CachedRecoil.Get();
+	if (!Recoil)
 	{
-		CachedRecoil = Owner->FindComponentByClass<UFPSRRecoilComponent>();
+		Recoil = Owner->FindComponentByClass<UFPSRRecoilComponent>();
+		CachedRecoil = Recoil;
 	}
 	// Bind the recoil to the OWNING controller once it exists (explicit target so a listen-server host's own recoil
 	// component targets its own PC, not the plugin's GetFirstPlayerController fallback). Retried until the controller
 	// is available (possession can lag component init).
-	if (CachedRecoil && !bRecoilTargetSet)
+	if (Recoil && !bRecoilTargetSet)
 	{
 		if (const APawn* OwnerPawn = Cast<APawn>(Owner))
 		{
 			if (AController* OwningController = OwnerPawn->GetController())
 			{
-				CachedRecoil->SetTargetController(OwningController);
+				Recoil->SetTargetController(OwningController);
 				bRecoilTargetSet = true;
 			}
 		}
 	}
-	return CachedRecoil;
+	return Recoil;
 }
 
 float UFPSRWeaponFireComponent::ComputeSpreadDegrees(const FFPSRWeaponStatBlock& Stats, float HeatSpread, bool bAiming, float StateSpreadMultiplier)
@@ -184,8 +186,11 @@ float UFPSRWeaponFireComponent::GetCurrentSpreadDegrees() const
 		return 0.0f;
 	}
 	// Dynamic spread now comes from the recoil component's heat model (single source shared with the fire GAs).
-	const UFPSRRecoilComponent* Recoil = CachedRecoil ? CachedRecoil.Get()
-		: (GetOwner() ? GetOwner()->FindComponentByClass<UFPSRRecoilComponent>() : nullptr);
+	const UFPSRRecoilComponent* Recoil = CachedRecoil.Get();
+	if (!Recoil)
+	{
+		Recoil = GetOwner() ? GetOwner()->FindComponentByClass<UFPSRRecoilComponent>() : nullptr;
+	}
 	const float HeatSpread = Recoil ? Recoil->GetHeatSpread() : 0.0f;
 
 	// Movement-state spread multiplier — the HUD crosshair gap has to show the SAME cone the fire GA below will
