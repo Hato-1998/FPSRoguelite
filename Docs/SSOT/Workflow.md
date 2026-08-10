@@ -139,7 +139,8 @@
 ### 6-6. 빌드 / 검증 방법
 - 빌드(에디터 닫고 · 빌드하는 클론의 `.uproject` 사용 · `<엔진루트>` 해석은 **§6-1**):
   `"<엔진루트>\Engine\Build\BatchFiles\Build.bat" FPSRogueliteEditor Win64 Development -Project="<작업 클론>\FPSRoguelite.uproject" -WaitMutex`
-  - **클론이 여럿인 머신에서만** 빌드 대상 클론을 고른다 — D:/E: 머신의 현 코드 빌드 대상 = `FPSRoguelite2`. 클론이 하나인 머신은 그 클론이 곧 빌드 대상이다
+  - **클론이 여럿인 머신에서만** 빌드 대상 클론을 고른다 — D:/E: 머신의 현 코드 빌드 대상 = **`FPSRoguelite`**(정정 2026-08-11: 종전 `FPSRoguelite2`는 스테일이었다. 실측 = `FPSRoguelite2` HEAD가 한참 뒤처져 있고, 최근 세션들은 전부 `FPSRoguelite`에서 빌드·검증했다. `git worktree list`에도 없어 워크트리가 아니라 **독립 클론**이다). 클론이 하나인 머신은 그 클론이 곧 빌드 대상이다
+  - ⚠️ **기본 규칙은 "코드를 고친 그 클론에서 빌드한다"** 이다 — 다른 클론을 빌드하면 내 변경이 안 들어간 바이너리를 검증하게 된다. 위 지목은 그 위의 예외가 아니라, 클론이 여럿일 때 **어느 쪽이 현 코드 트리인지**를 적어 둔 것이다
 - 헤드리스 검증:
   `UnrealEditor-Cmd.exe <uproject> -unattended -nopause -nullrhi -nosplash -nosound -ExecCmds="Automation RunTests FPSRoguelite.Smoke.ModuleLoads" -TestExit="Automation Test Queue Empty" -abslog=...`
 - 새 UCLASS 다수면 Live Coding 불가 → 풀빌드(에디터 닫아야 함). 입력 IA 생성은 `Scripts/gen_input_assets.py`
