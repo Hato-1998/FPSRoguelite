@@ -239,7 +239,16 @@ struct FFPSRProceduralWeaponMotionProfile
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|상태 포즈", meta = (DisplayName = "공중 블렌드 시간(초)", ClampMin = "0.0"))
 	float AirborneBlendDuration = 0.15f;
 
-	/** 홀스터(수납) 상태 무기 포즈. */
+	/** 홀스터(수납) 상태 포즈. ⚠️ **위 슬라이드/공중과 공간이 다르다.** 슬라이드·공중은 총의 부착 기준값에
+	 *  더해지는 총-공간 델타(디테일 패널 WeaponMesh 숫자와 1:1 대응)지만, 홀스터는 **1인칭 팔 전체**에 얹히는
+	 *  카메라 공간 오프셋이다(+X 전방 / +Y 우 / +Z 상 — 아래로 내리려면 Z에 음수).
+	 *
+	 *  왜 홀스터만 다른가: 수납은 "화면에 아무것도 안 남기기"가 목표인데, 총만 내리면 어깨가 카메라에 고정돼 있어
+	 *  팔이 닿는 거리를 넘는 순간 손 IK가 총을 놓고 **팔만 화면에 남는다**. 팔을 움직이면 총은 팔에 붙어 있으니
+	 *  같이 빠진다. 팔을 아예 숨기는 안은 기각 — 나중에 진짜 1인칭 홀스터 애니메이션이 들어오면 되돌려야 한다.
+	 *
+	 *  그래서 이 값은 패널 숫자로 저작할 수 없다(팔 트랜스폼은 매 프레임 덮어써진다). 값을 넣고 실행해 확인하는
+	 *  방식으로 잡는다 — 정밀 포즈가 아니라 "충분히 화면 밖으로"라 몇 번이면 수렴한다. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|상태 포즈", meta = (DisplayName = "홀스터 포즈"))
 	FFPSRWeaponStatePose HolsterPose;
 

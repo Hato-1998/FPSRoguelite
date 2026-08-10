@@ -675,16 +675,14 @@ void AFPSRCharacter::RefreshWeaponVisibility(bool bForce)
 	//     observers (3P) keep the PRE-EXISTING instant hide. The wall clip is bare-handed on every machine, so a
 	//     delayed hide would show the gun floating beside an empty hand for anyone watching — the opposite of what
 	//     this track exists to fix.
-	//  3. bWeaponAttachIsGunAnchor && bCachedHasHolsterPose — the delay is only honest when a descent will ACTUALLY be
-	//     rendered, and ApplyWeaponStatePose writes the pose on exactly this pair of conditions (see its own gate).
-	//     Testing bFirstPersonSplitActive here instead would be WIDER than what actually moves the weapon: the split
-	//     can be on while the gun-anchor attach fell back to a plain socket (arms mesh missing ik_hand_gun, or the
-	//     socket-parent-bone check in AttachWeaponMeshes logging a Warning and falling back) — and in that state the
-	//     weapon would hang motionless in-hand for the whole HolsterDuration and then vanish in one frame, i.e. the
-	//     exact "gun disappears out of nowhere" this track exists to remove, reintroduced only on the fallback path.
+	//  3. bFirstPersonSplitActive && bCachedHasHolsterPose — the delay is only honest when a descent will ACTUALLY be
+	//     rendered, so this has to match the condition the holster pose itself is composed on. That pose rides the
+	//     ARMS (UpdateAimDownSights, camera space), not the weapon, so the split being active is the whole
+	//     requirement — deliberately NOT bWeaponAttachIsGunAnchor, which gates the SLIDE/AIRBORNE poses in
+	//     ApplyWeaponStatePose. Gun-anchor is an attach detail of where the weapon hangs; the arms descend either way.
 	//     bCachedHasHolsterPose covers the other half: an unauthored weapon has no pose to show during a delay, so it
 	//     keeps the exact legacy instant-hide behavior (zero regression).
-	if (bHideForWall && IsLocallyControlled() && bWeaponAttachIsGunAnchor && bCachedHasHolsterPose)
+	if (bHideForWall && IsLocallyControlled() && bFirstPersonSplitActive && bCachedHasHolsterPose)
 	{
 		bHideForWall = (HolsterBlendAlpha >= 1.0f);
 	}
@@ -3047,15 +3045,20 @@ void AFPSRCharacter::ApplyWeaponStatePose(float DeltaTime)
 	// finalized, this delta does not). So this reads last frame's alpha — up to one frame stale, same class of cross-
 	// tick read as any other member, and immaterial here: it only scales how much of the slide/airborne pose shows
 	// through while ADS is transitioning, at CachedADSInterpSpeed's typical rate (a small fraction of one frame's
-	// worth of blend). Holster is unweighted (full weight, matching the removed layer's original rule) — stowing has
-	// to pull the gun off-screen regardless of aim state.
+	// worth of blend).
+	//
+	// HOLSTER IS DELIBERATELY NOT HERE — it is composed onto the ARMS instead (UpdateAimDownSights, camera space).
+	// Slide/airborne are small in-hand adjustments, so moving the gun and letting the hands follow it by IK is both
+	// correct and what makes the detail-panel authoring loop work. Stowing is the opposite problem: it has to clear
+	// the whole first-person frame (arms included — the requirement is "nothing on screen", and hiding the arms
+	// outright was rejected because a real 1P holster ANIMATION would later have to undo it). A gun-space holster
+	// cannot deliver that: the shoulders stay pinned to the camera, so past the arm's reach the two-bone IK simply
+	// stops following and the gun leaves the hands — gun off-screen, arms still in frame stretched at nothing.
+	// Moving the arms takes the gun with it for free (the gun is attached to them), so the whole assembly exits.
 	const float StatePoseWeight = 1.0f - CurrentADSAlpha;
-	const float HolsterEase = FMath::SmoothStep(0.0f, 1.0f, HolsterBlendAlpha);
 
-	const FVector TotalOffset = StatePoseWeight * (SlideW * CachedHipMotion.SlidePose.Offset + AirborneBlendAlpha * CachedHipMotion.AirbornePose.Offset)
-		+ HolsterEase * CachedHipMotion.HolsterPose.Offset;
-	const FRotator TotalTilt = (CachedHipMotion.SlidePose.Tilt * SlideW + CachedHipMotion.AirbornePose.Tilt * AirborneBlendAlpha) * StatePoseWeight
-		+ CachedHipMotion.HolsterPose.Tilt * HolsterEase;
+	const FVector TotalOffset = StatePoseWeight * (SlideW * CachedHipMotion.SlidePose.Offset + AirborneBlendAlpha * CachedHipMotion.AirbornePose.Offset);
+	const FRotator TotalTilt = (CachedHipMotion.SlidePose.Tilt * SlideW + CachedHipMotion.AirbornePose.Tilt * AirborneBlendAlpha) * StatePoseWeight;
 
 	if (TotalOffset.IsNearlyZero() && TotalTilt.IsNearlyZero())
 	{
@@ -3354,6 +3357,31 @@ void AFPSRCharacter::UpdateAimDownSights(float DeltaTime)
 	// origin reproduces the smaller, tighter pose the arms-space version could not (rotating the arms swings the gun
 	// through their much larger radius instead). NewLoc/NewRot below are therefore the ADS + hip-motion result ONLY.
 	//
+	// --- Holster layer (§6): the stow/draw offset, and the ONE state pose that still rides the ARMS rather than the
+	// weapon (slide/airborne moved to gun space in the state-pose refactor — see ApplyWeaponStatePose for why holster
+	// did not follow them). Requirement is "nothing on screen while stowed", arms included, and only moving the arms
+	// achieves that: the gun is attached to them so it exits with them, whereas a gun-space holster would run out of
+	// arm reach and drop the gun out of the hands while the arms stayed in frame. Hiding the arms outright was the
+	// other candidate and was rejected — a real first-person holster ANIMATION, once authored, would have to undo it.
+	//
+	// LAST in the composition order and at FULL WEIGHT — no (1-CurrentADSAlpha) gating like the hip layer above —
+	// because stowing has to clear the frame regardless of aim state; a holstered gun that stayed glued to a sight
+	// pose would defeat the whole point. bAiming above already drops CurrentADSAlpha toward 0 the instant
+	// CanFireInCurrentState() goes false (same predicate), so full weight is belt-and-braces rather than the only
+	// thing keeping a stowed gun from also reading as aimed.
+	//
+	// HolsterBlendAlpha is advanced in ApplyWeaponStatePose, which runs from AFPSRCharacter::Tick — AHEAD of this
+	// function's weapon-fire tick in the prerequisite chain — so this reads THIS frame's value, not last frame's.
+	// SmoothStep (not the raw linear alpha) so the motion eases at both ends instead of stopping on a dime; the alpha
+	// itself stays linear (FInterpConstantTo) so a fixed HolsterDuration still means a fixed transition TIME — the
+	// ease is a presentation-only reshaping of that same clock.
+	if (HolsterBlendAlpha > KINDA_SMALL_NUMBER)
+	{
+		const float HolsterEase = FMath::SmoothStep(0.0f, 1.0f, HolsterBlendAlpha);
+		NewLoc += HolsterEase * CachedHipMotion.HolsterPose.Offset;
+		NewRot = (CachedHipMotion.HolsterPose.Tilt * HolsterEase).Quaternion() * NewRot;
+	}
+
 	// The one write, and the ONE place the solved pose is applied. Everything above produced a camera-relative transform;
 	// only this decides what receives it, and in which space.
 	if (bSolvingArms)
