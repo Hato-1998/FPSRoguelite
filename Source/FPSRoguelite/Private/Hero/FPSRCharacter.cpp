@@ -3128,10 +3128,19 @@ void AFPSRCharacter::UpdateAimDownSights(float DeltaTime)
 		return;
 	}
 
-	// Nothing equipped, nothing to place. ActiveWeaponMesh is whichever mesh the weapon actually shows (skeletal firearm
-	// or static melee).
+	// ActiveWeaponMesh is whichever mesh the weapon actually shows (skeletal firearm or static melee) — and it is NULL
+	// for a weapon that shows none at all: BARE HANDS. That case still has something to place, because the ARMS are a
+	// mesh of their own and the holster layer below has to be able to lower them (measured 2026-08-10: bare hands
+	// authored "always holstered" did nothing at any offset value, because this early-out skipped the whole function
+	// and the arms simply froze at whatever transform the previously-equipped weapon left behind). So bail only when
+	// there is neither a weapon mesh NOR arms to move.
+	//
+	// Everything weapon-specific below is already gated for the no-weapon case and needs no extra guard: bAiming
+	// requires AimComp (null here) so the ADS solve is skipped, the hip block is gated on bCachedHasHipMotion, and the
+	// weapon-space branches are all behind !bSolvingArms, which cannot be taken when WeaponCarrier is null.
 	UMeshComponent* WeaponCarrier = ActiveWeaponMesh;
-	if (!WeaponCarrier)
+	const bool bArmsAvailable = bFirstPersonSplitActive && FirstPersonArms != nullptr;
+	if (!WeaponCarrier && !bArmsAvailable)
 	{
 		return;
 	}
@@ -3142,7 +3151,7 @@ void AFPSRCharacter::UpdateAimDownSights(float DeltaTime)
 	// needed no change: ADR 0002 left this as "a change to the target, not to the solve".
 	// With no arms, the weapon hangs off an animated hand and moving it alone is the only option available.
 	USceneComponent* SolveTarget = WeaponCarrier;
-	if (bFirstPersonSplitActive && FirstPersonArms)
+	if (bArmsAvailable)
 	{
 		SolveTarget = FirstPersonArms;
 	}
