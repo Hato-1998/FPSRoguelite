@@ -772,13 +772,18 @@ void UFPSRCharacterMovementComponent::UpdateCharacterStateBeforeMovement(float D
 
 		// (2) Slope also feeds real acceleration: g * sin(angle) along the direction of travel. Accumulated separately
 		// from the curve because the curve is recomputed each frame and would wipe it out.
+		// This frame's share of that accumulation, which is all the no-curve path below is allowed to add.
+		float SlopeBonusDelta = 0.0f;
 		if (SlopeAccelerationScale > 0.0f && !FMath::IsNearlyZero(SlopeAlignment))
 		{
 			const float GravityMagnitude = FMath::Abs(GetGravityZ());
+			const float PreviousSlopeBonus = SlideSlopeSpeedBonus;
 			SlideSlopeSpeedBonus += GravityMagnitude * SlopeAlignment * SlopeAccelerationScale * DeltaSeconds;
 			// Bounded both ways: downhill tops out at the slide ceiling instead of accelerating without limit, and
 			// uphill can't drive the total below zero.
 			SlideSlopeSpeedBonus = FMath::Clamp(SlideSlopeSpeedBonus, -SlideMaxSpeed, SlideMaxSpeed);
+			// Measured AFTER the clamp, so once the bonus saturates this goes to zero and stops contributing.
+			SlopeBonusDelta = SlideSlopeSpeedBonus - PreviousSlopeBonus;
 		}
 
 		// Speed and heading are handled separately: the curve (or the braking deceleration) owns HOW FAST, this owns
@@ -802,6 +807,10 @@ void UFPSRCharacterMovementComponent::UpdateCharacterStateBeforeMovement(float D
 				{
 					TargetSpeed *= BackwardSpeedMultiplier;
 				}
+
+				// Rebuilt from SlideEntrySpeed every frame, so this speed carries no history — the WHOLE accumulated
+				// slope bonus has to ride on top again each time.
+				TargetSpeed += SlideSlopeSpeedBonus;
 			}
 			else
 			{
@@ -812,11 +821,16 @@ void UFPSRCharacterMovementComponent::UpdateCharacterStateBeforeMovement(float D
 				{
 					TargetSpeed = FMath::Min(TargetSpeed, SlideEntrySpeed * BackwardSpeedMultiplier);
 				}
+
+				// Only this frame's increment, NOT the running total. Unlike the curve branch, this speed was written
+				// by the previous frame and so already carries every earlier increment; adding the accumulated bonus
+				// here would re-apply the whole of it once per frame and accelerate super-linearly until the cap.
+				TargetSpeed += SlopeBonusDelta;
 			}
 
-			// Slope contribution rides on top, then the whole thing is capped — a long descent reaches the slide's
-			// terminal speed rather than growing indefinitely.
-			TargetSpeed = FMath::Clamp(TargetSpeed + SlideSlopeSpeedBonus, 0.0f, SlideMaxSpeed);
+			// Capped on both paths — a long descent reaches the slide's terminal speed rather than growing
+			// indefinitely, and an uphill bonus can't drive the result negative.
+			TargetSpeed = FMath::Clamp(TargetSpeed, 0.0f, SlideMaxSpeed);
 
 			Velocity.X = SlideHeading.X * TargetSpeed;
 			Velocity.Y = SlideHeading.Y * TargetSpeed;
