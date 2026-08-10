@@ -45,9 +45,12 @@ public:
 	bool GetEquippedCrosshairUsesDynamic() const;
 
 	/** Shared spread formula used by BOTH the fire ability cone and the HUD crosshair:
-	 *  (Stats.SpreadDegrees + HeatSpread) x (bAiming && Stats.bHasADS ? Stats.ADSSpreadMultiplier : 1).
-	 *  HeatSpread = the recoil component's heat-based dynamic spread (UFPSRRecoilComponent::GetHeatSpread). */
-	static float ComputeSpreadDegrees(const struct FFPSRWeaponStatBlock& Stats, float HeatSpread, bool bAiming);
+	 *  (Stats.SpreadDegrees + HeatSpread) x StateSpreadMultiplier x (bAiming && Stats.bHasADS ? Stats.ADSSpreadMultiplier : 1).
+	 *  HeatSpread = the recoil component's heat-based dynamic spread (UFPSRRecoilComponent::GetHeatSpread).
+	 *  StateSpreadMultiplier = UFPSRCharacterMovementComponent::GetSpreadMultiplier() (airborne/slide/crouch widen the
+	 *  cone, invariant 5 in that header: multiplier only, states resolved exclusively not compounded). Defaults to 1.0
+	 *  so a caller that hasn't been wired up yet (none should remain after this pass) behaves exactly as before. */
+	static float ComputeSpreadDegrees(const struct FFPSRWeaponStatBlock& Stats, float HeatSpread, bool bAiming, float StateSpreadMultiplier = 1.0f);
 
 	/** Set aim-down-sights state (FOV/recoil local, spread read by fire GA, aim pose read by the body AnimBP).
 	 *  Callable ONLY on the authority or the owning client — a simulated proxy gets this by replication and a local

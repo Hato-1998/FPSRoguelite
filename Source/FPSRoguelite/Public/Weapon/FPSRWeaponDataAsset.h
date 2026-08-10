@@ -232,6 +232,13 @@ struct FFPSRProceduralWeaponMotionProfile
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|상태 포즈", meta = (DisplayName = "공중 밥 배율", ClampMin = "0.0"))
 	float AirborneBobScale = 1.0f;
 
+	/** 공중 블렌드 전환 소요 시간(초). 슬라이드는 이미 스무드 소스가 있고(GetSlideBlend), 홀스터도 이미 있지만
+	 *  (HolsterDuration), 공중은 IsFalling()이라는 유일한 이진(binary) 소스뿐이라 스무딩 시간을 데이터로 쥐어줘야
+	 *  한다. 0 = 즉시 스냅(이 필드가 생기기 전의 동작과 동일). 기본 0.15는 §6 명세엔 없던 값이다 — 소비 구현
+	 *  (홀스터 행)이 정한 제안 기본값. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|상태 포즈", meta = (DisplayName = "공중 블렌드 시간(초)", ClampMin = "0.0"))
+	float AirborneBlendDuration = 0.15f;
+
 	/** 홀스터(수납) 상태 무기 포즈. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|상태 포즈", meta = (DisplayName = "홀스터 포즈"))
 	FFPSRWeaponStatePose HolsterPose;

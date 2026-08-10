@@ -1012,6 +1012,25 @@ protected:
 	/** True when the cached profile has any non-zero amplitude (skip the whole hip block otherwise). */
 	bool bCachedHasHipMotion = false;
 
+	// --- State pose blend (§6, GunMotionTool_Spec.md — slide/airborne/holster weapon poses; owner-local cosmetic,
+	// advanced + composed in UpdateAimDownSights) ---
+	/** 0 = drawn, 1 = fully holstered. Judged from the SAME predicate as the server fire gate
+	 *  (UFPSRWeaponFireComponent / UFPSRGameplayAbility::IsFirePermittedByMovementState) and the HUD crosshair
+	 *  (UFPSRRunHUDWidget) — UFPSRCharacterMovementComponent::CanFireInCurrentState() — so "can I shoot" and "is the
+	 *  gun in my hands" can never disagree. Advanced + composed into the pose layer in UpdateAimDownSights; consumed
+	 *  by RefreshWeaponVisibility (gated on bCachedHasHolsterPose below) to delay the wall-hide until the descent
+	 *  finishes instead of vanishing the instant the wall gate closes. */
+	float HolsterBlendAlpha = 0.0f;
+	/** Smoothed toward UFPSRCharacterMovementComponent::IsFalling() (a binary source with no smoothing of its own,
+	 *  unlike the slide's GetSlideBlend) at the equipped weapon's CachedHipMotion.AirborneBlendDuration rate.
+	 *  0 = grounded pose, 1 = fully airborne pose. */
+	float AirborneBlendAlpha = 0.0f;
+	/** True when the EQUIPPED weapon has actually authored a holster pose (RefreshEquippedWeaponVisual: HolsterPose
+	 *  Offset/Tilt non-zero AND HolsterDuration > 0). Gates RefreshWeaponVisibility's delayed-hide path — an
+	 *  unauthored weapon (every weapon until §5 DA content lands) keeps the pre-this-track INSTANT hide on wall-hang,
+	 *  so this is a zero-regression switch rather than a behavior change for existing content. */
+	bool bCachedHasHolsterPose = false;
+
 	/** Runtime-created modular weapon-part components (U15), child-attached to WeaponMesh and rebuilt on each weapon
 	 *  change. Visible to everyone, like the weapon they hang off (ADR 0002 — they used to be OnlyOwnerSee). Empty for
 	 *  static/melee/partless weapons. */

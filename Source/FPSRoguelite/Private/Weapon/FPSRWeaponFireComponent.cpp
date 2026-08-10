@@ -10,6 +10,7 @@
 #include "Weapon/FPSRRecoilComponent.h"
 #include "Data/CRRecoilPattern.h"
 #include "Hero/FPSRCharacter.h"
+#include "Hero/FPSRCharacterMovementComponent.h"
 #include "Core/FPSRGameState.h"
 #include "Core/FPSRLogChannels.h" // LogFPSR (was relied on transitively via unity — make the dependency explicit, IWYU)
 
@@ -163,9 +164,14 @@ UFPSRRecoilComponent* UFPSRWeaponFireComponent::ResolveRecoil()
 	return CachedRecoil;
 }
 
-float UFPSRWeaponFireComponent::ComputeSpreadDegrees(const FFPSRWeaponStatBlock& Stats, float HeatSpread, bool bAiming)
+float UFPSRWeaponFireComponent::ComputeSpreadDegrees(const FFPSRWeaponStatBlock& Stats, float HeatSpread, bool bAiming, float StateSpreadMultiplier)
 {
-	const float Base = Stats.SpreadDegrees + HeatSpread;
+	// StateSpreadMultiplier (UFPSRCharacterMovementComponent::GetSpreadMultiplier() — airborne/slide/crouch) scales the
+	// base+heat sum; the heat accumulation itself (Stats.SpreadDegrees + HeatSpread) is completely untouched by this
+	// pass, this only widens/narrows the cone the heat model already computed. Multiplication is associative, so
+	// whether the state multiplier lands before or after the ADS tightening is mathematically identical — written
+	// state-first to read as "how wide is my stance-adjusted gun, THEN how much does ADS tighten it".
+	const float Base = (Stats.SpreadDegrees + HeatSpread) * StateSpreadMultiplier;
 	return (bAiming && Stats.bHasADS) ? Base * Stats.ADSSpreadMultiplier : Base;
 }
 
@@ -181,7 +187,20 @@ float UFPSRWeaponFireComponent::GetCurrentSpreadDegrees() const
 	const UFPSRRecoilComponent* Recoil = CachedRecoil ? CachedRecoil.Get()
 		: (GetOwner() ? GetOwner()->FindComponentByClass<UFPSRRecoilComponent>() : nullptr);
 	const float HeatSpread = Recoil ? Recoil->GetHeatSpread() : 0.0f;
-	return ComputeSpreadDegrees(Inst->GetResolvedStats(), HeatSpread, bIsAiming);
+
+	// Movement-state spread multiplier — the HUD crosshair gap has to show the SAME cone the fire GA below will
+	// actually shoot with, or the crosshair lies to the player about how accurate their gun currently is. Fail-open to
+	// 1.0 (no widening) when the owner isn't the movement-owning AFPSRCharacter.
+	float StateSpreadMultiplier = 1.0f;
+	if (const AFPSRCharacter* Char = Cast<AFPSRCharacter>(GetOwner()))
+	{
+		if (const UFPSRCharacterMovementComponent* Move = Char->GetFPSRMovement())
+		{
+			StateSpreadMultiplier = Move->GetSpreadMultiplier();
+		}
+	}
+
+	return ComputeSpreadDegrees(Inst->GetResolvedStats(), HeatSpread, bIsAiming, StateSpreadMultiplier);
 }
 
 UMaterialInterface* UFPSRWeaponFireComponent::GetEquippedCrosshairMaterial() const
@@ -220,7 +239,27 @@ bool UFPSRWeaponFireComponent::GetEquippedCrosshairUsesDynamic() const
 bool UFPSRWeaponFireComponent::CanFire() const
 {
 	UFPSRWeaponInventoryComponent* Inv = GetInventory();
-	return Inv && !Inv->IsReloading() && Inv->GetCurrentAmmo() > 0;
+	if (!Inv || Inv->IsReloading() || Inv->GetCurrentAmmo() <= 0)
+	{
+		return false;
+	}
+
+	// Movement-state gate (server-authoritative source = UFPSRCharacterMovementComponent, ADR 0001 single owner of
+	// locomotion state): wall-hang is the one locomotion state that pulls the weapon out of the player's hands (both
+	// hands are on the wall), so the auto/burst Tick loop above must stop the instant the player latches onto a wall
+	// instead of continuing to spray for the rest of the interval. This is a CLIENT-side/cosmetic check only — CanFire
+	// gates the local prediction loop (recoil/cosmetics/cadence), it is NOT the authority. The real gate is
+	// UFPSRGameplayAbility::IsFirePermittedByMovementState() inside each fire GA's ActivateAbility, which runs the
+	// identical CanFireInCurrentState() query on the server. Fail-open (true) when no CMC is found, so a
+	// non-AFPSRCharacter owner is never silently blocked by a movement state it doesn't have.
+	if (const AFPSRCharacter* Char = Cast<AFPSRCharacter>(GetOwner()))
+	{
+		if (const UFPSRCharacterMovementComponent* Move = Char->GetFPSRMovement())
+		{
+			return Move->CanFireInCurrentState();
+		}
+	}
+	return true;
 }
 
 void UFPSRWeaponFireComponent::MaybeAutoReload()
@@ -390,6 +429,26 @@ void UFPSRWeaponFireComponent::FireOneShot()
 	if (!Weapon)
 	{
 		return;
+	}
+
+	// Movement-state fire gate (server-authoritative source = UFPSRCharacterMovementComponent, ADR 0001 single owner
+	// of locomotion state): wall-hang takes BOTH hands off the weapon and onto the wall, so melee is blocked here too
+	// (bMelee below is not exempted). Deliberately placed before EVERYTHING else in this function — the ability
+	// activation (TryActivateAbilityByClass) and the owner-client cosmetics (PlayWeaponFireCosmetics) — so a blocked
+	// shot neither spends server ammo nor plays a montage the player couldn't actually fire. This check is a CLIENT
+	// UX/cosmetic gate only: the real authority is UFPSRGameplayAbility::IsFirePermittedByMovementState(), which runs
+	// the identical CanFireInCurrentState() query inside each fire GA's ActivateAbility on the server. It is also the
+	// same predicate the (later-phase) holster visual reads, so "can I shoot" and "is the gun even in my hands" can
+	// never drift apart. Fail-open (no CMC found) so a non-AFPSRCharacter owner is unaffected.
+	if (const AFPSRCharacter* Char = Cast<AFPSRCharacter>(OwnerPawn))
+	{
+		if (const UFPSRCharacterMovementComponent* Move = Char->GetFPSRMovement())
+		{
+			if (!Move->CanFireInCurrentState())
+			{
+				return;
+			}
+		}
 	}
 
 	const bool bMelee = (Weapon->GetArchetype() == EFPSRWeaponArchetype::Melee);

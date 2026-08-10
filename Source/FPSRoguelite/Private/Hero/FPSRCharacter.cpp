@@ -639,8 +639,31 @@ void AFPSRCharacter::RefreshWeaponVisibility(bool bForce)
 		&& IsScopeVisualActive() && CachedScopeDescriptor.bHideWeaponWhileScoped;
 
 	const UFPSRCharacterMovementComponent* Move = GetFPSRMovement();
-	const bool bHideForWall = Move && Move->IsOnWall();
+	bool bHideForWall = Move && Move->IsOnWall();
 
+	// Holster-authored delay (§6): instead of vanishing the instant the wall gate closes, an authored weapon
+	// descends into its holster pose (UpdateAimDownSights) and the mesh stays visible until that descent actually
+	// finishes. This only ever DELAYS a wall-hide that was already decided above — it can never invent a new reason
+	// to hide or show the weapon, and it never touches bHideForScope. Four guards, all required:
+	//  1. bHideForWall already true — nothing to delay otherwise.
+	//  2. IsLocallyControlled() — HolsterBlendAlpha is advanced ONLY in UpdateAimDownSights, which itself early-outs
+	//     on anything but the owning client (owner-local cosmetic solve). A simulated proxy's alpha therefore never
+	//     leaves 0, which — left unguarded — would silently defeat this delay forever (0 < 1.0 never gates true) as
+	//     an accident of an unadvanced float rather than a deliberate choice. Made explicit here instead: remote
+	//     observers (3P) keep the PRE-EXISTING instant hide. The wall clip is bare-handed on every machine, so a
+	//     delayed hide would show the gun floating beside an empty hand for anyone watching — the opposite of what
+	//     this track exists to fix.
+	//  3. bFirstPersonSplitActive — the holster pose is solved against the split first-person arms/weapon
+	//     presentation; without the split there is nothing for the delayed pose to actually ride on.
+	//  4. bCachedHasHolsterPose — an unauthored weapon (every weapon until §5 DA content lands) has no pose to show
+	//     during a delay, so it keeps the exact legacy instant-hide behavior (zero regression).
+	if (bHideForWall && IsLocallyControlled() && bFirstPersonSplitActive && bCachedHasHolsterPose)
+	{
+		bHideForWall = (HolsterBlendAlpha >= 1.0f);
+	}
+
+	// SetVisibility below and the bWeaponHidden latch remain THIS function's alone to write — the delay above only
+	// feeds an input into bHideForWall, it does not add a second visibility toggle or a second latch.
 	const bool bShouldHide = bHideForScope || bHideForWall;
 	if (bShouldHide == bWeaponHidden && !bForce)
 	{
@@ -1142,7 +1165,12 @@ void AFPSRCharacter::UpdateCameraFieldOfView(float DeltaSeconds)
 	if (Instance)
 	{
 		const FFPSRWeaponStatBlock& Stats = Instance->GetResolvedStats();
-		const bool bBaseWantsADS = WeaponFire && WeaponFire->IsAiming() && Stats.bHasADS;
+		// Movement state gates the ADS FOV the same way it gates UpdateAimDownSights' pose/sight solve (single
+		// judgment source, CanFireInCurrentState()) — a wall-hang drops the zoom back to hip FOV instead of leaving
+		// the player staring down a scope for a gun that just left their hands. FPSRMovement is already resolved
+		// above for the slide FOV offset, so this reuses it rather than re-fetching the component.
+		const bool bBaseWantsADS = WeaponFire && WeaponFire->IsAiming() && Stats.bHasADS
+			&& (!FPSRMovement || FPSRMovement->CanFireInCurrentState());
 		// REPLACES the hip target rather than adding to it: while aiming, the sight's magnification is the whole point
 		// and a stance offset stacked on top of a ~30 degree scope would read as the zoom changing.
 		TargetFOV = ResolveADSTargetFOV(HipTargetFOV, Stats.ADSFieldOfView, bBaseWantsADS);
@@ -1934,6 +1962,10 @@ void AFPSRCharacter::RefreshEquippedWeaponVisual()
 	// Reset hip procedural weapon motion (owner-local cosmetic); no weapon = no hip motion until the next equip.
 	bCachedHasHipMotion = false;
 
+	// Reset the holster-pose-authored flag (§6): no weapon = nothing for RefreshWeaponVisibility's delay gate to key
+	// off, so it falls back to the legacy instant hide. Recomputed below when a weapon is actually equipped.
+	bCachedHasHolsterPose = false;
+
 	if (!Weapon)
 	{
 		// No weapon: hide the meshes and drop any modular parts.
@@ -2038,6 +2070,26 @@ void AFPSRCharacter::RefreshEquippedWeaponVisual()
 	{
 		PreviousControlRotation = GetControlRotation();
 	}
+
+	// Holster pose authored? (§6) — either the offset or the tilt has to actually move the gun, AND the transition
+	// has to take real time. A weapon with only a zero HolsterDuration authored (or vice versa) is indistinguishable
+	// from "no holster pose" once RefreshWeaponVisibility starts keying off the ALPHA instead of the raw wall state —
+	// so both have to be present together or this stays false and that function keeps the legacy instant hide (§5:
+	// zero regression for every weapon that hasn't been authored yet).
+	bCachedHasHolsterPose =
+		(!CachedHipMotion.HolsterPose.Offset.IsNearlyZero() || !CachedHipMotion.HolsterPose.Tilt.IsNearlyZero())
+		&& CachedHipMotion.HolsterDuration > 0.0f;
+
+	// Snap (not smooth-ramp) both state alphas to whatever the CURRENT movement state already is, rather than
+	// starting them both at 0 on every equip. This runs on a weapon SWAP too (not just the first equip), and a
+	// mid-wall or mid-air swap must not replay the NEW weapon's holster-descend / airborne-rise animation from
+	// scratch — the movement STATE is continuous across the swap (still on the wall, still falling), only the
+	// weapon changed, so the pose should already read as "in that state" the instant the new gun appears. This snap
+	// point doubles as the hook a future "play a holster motion ON WEAPON SWAP itself" feature would extend from
+	// (out of scope here — deliberately not built, just noted so it isn't rediscovered as a mystery gap later).
+	const UFPSRCharacterMovementComponent* SwapMove = GetFPSRMovement();
+	HolsterBlendAlpha = (SwapMove && !SwapMove->CanFireInCurrentState()) ? 1.0f : 0.0f;
+	AirborneBlendAlpha = (SwapMove && SwapMove->IsFalling()) ? 1.0f : 0.0f;
 
 	// Rebuild modular cosmetic parts on the (skeletal) weapon mesh from the weapon's part list.
 	RefreshWeaponPartComponents(Weapon);
@@ -2859,14 +2911,69 @@ void AFPSRCharacter::UpdateAimDownSights(float DeltaTime)
 		AimComp = WeaponCarrier;
 	}
 
+	// Movement-state gate (server-authoritative source = UFPSRCharacterMovementComponent, ADR 0001 single owner of
+	// locomotion state) feeds THREE things below: the ADS intent gate (bAiming, right below), the state-pose blend
+	// weights (slide/airborne/holster, composed near the single write at the bottom of this function), and the
+	// walk-bob amplitude scale further down. Resolved once here so all three read the exact same frame's state.
+	const UFPSRCharacterMovementComponent* Move = GetFPSRMovement();
+
+	// Independent smoothing clock for the state layer below — same clamp reasoning as HipDt further down (a frame
+	// spike or low FPS can't snap FInterpConstantTo to target in one tick) — kept as its OWN variable because this
+	// block runs whether or not bCachedHasHipMotion is set, unlike HipDt which lives inside that gate.
+	const float StateDt = FMath::Min(DeltaTime, 1.0f / 30.0f);
+
+	// Slide: already a smoothed 0..1 alpha owned by the movement component (GetSlideBlend) — nothing to smooth here,
+	// only to read.
+	const float SlideW = Move ? Move->GetSlideBlend() : 0.0f;
+
+	// Airborne: IsFalling() is a binary source with no smoothing of its own (unlike the slide), so this ramps toward
+	// it at the equipped weapon's authored rate — CachedHipMotion.AirborneBlendDuration, 0 = instant snap (the
+	// behavior before this state layer existed). FInterpConstantTo (not FInterpTo) so the climb is LINEAR — a fixed
+	// transition time regardless of how far AirborneBlendAlpha currently sits from the target, which is what
+	// "AirborneBlendDuration seconds" is actually promising the data author.
+	const bool bWantsAirborne = Move && Move->IsFalling();
+	const float AirborneRate = 1.0f / FMath::Max(CachedHipMotion.AirborneBlendDuration, KINDA_SMALL_NUMBER);
+	AirborneBlendAlpha = FMath::FInterpConstantTo(AirborneBlendAlpha, bWantsAirborne ? 1.0f : 0.0f, StateDt, AirborneRate);
+
+	// Holster: same judgment source as the server fire gate (UFPSRWeaponFireComponent::CanFire/FireOneShot, and both
+	// fire GAs via UFPSRGameplayAbility::IsFirePermittedByMovementState) and the HUD crosshair (UFPSRRunHUDWidget) —
+	// CanFireInCurrentState() — so "can I shoot" and "is the gun in my hands" can never drift apart. This pass
+	// advances the alpha, folds it into the pose layer below, AND (edge-detected right after) drives
+	// RefreshWeaponVisibility's holster-delay gate (§6, RefreshWeaponVisibility). HolsterDuration 0 = instant snap.
+	const bool bWantsHolster = Move && !Move->CanFireInCurrentState();
+	const float HolsterRate = 1.0f / FMath::Max(CachedHipMotion.HolsterDuration, KINDA_SMALL_NUMBER);
+	const float PrevHolsterBlendAlpha = HolsterBlendAlpha;
+	HolsterBlendAlpha = FMath::FInterpConstantTo(HolsterBlendAlpha, bWantsHolster ? 1.0f : 0.0f, StateDt, HolsterRate);
+
+	// Rising-edge only (Prev<1, Now>=1): the moment the holster descent FINISHES is the one instant
+	// RefreshWeaponVisibility has to re-run to actually hide the (now off-screen) mesh — everything in between this
+	// and the previous call is just the pose sliding, nothing to toggle. The FALLING edge (draw) needs no symmetric
+	// call: OnMovementModeChanged already fires RefreshWeaponVisibility() the instant the wall gate opens (bHideForWall
+	// goes false immediately, independent of HolsterBlendAlpha, so the mesh un-hides that same frame) and the pose
+	// simply rises into view from there — there is no "finished rising" moment that needs a visibility toggle, only a
+	// "started falling" one. Same "just ask the owner function to re-evaluate" pattern as UpdateScopeWeaponVisibility
+	// (§ above) — this never decides visibility itself, RefreshWeaponVisibility remains the single owner of
+	// bWeaponHidden and the SetVisibility calls.
+	if (PrevHolsterBlendAlpha < 1.0f && HolsterBlendAlpha >= 1.0f)
+	{
+		RefreshWeaponVisibility();
+	}
+
 	// Relax the ADS glue during a reload: the reload (mag-swap) montage swings the weapon a lot, and re-solving each frame
 	// to keep the sight glued to centre would counter-swing it just as hard — a violent shake at reload timing. Treat a
 	// reload as not-aiming so the alpha smoothly lowers the gun toward hip for the reload and raises back afterwards; the
 	// reload animation then plays cleanly with nothing fighting it. IsReloading() reflects the replicated per-instance
 	// reload state, set on the same OnRep as the reload montage, so the relax is in sync with the montage.
 	const bool bReloading = WeaponInventory && WeaponInventory->IsReloading();
+	// Movement state also gates the ADS INTENT here, not just the pose layer above: wall-hang already blocks firing
+	// (CanFireInCurrentState() false), and the Apex reference releases the sight the instant the state pose takes
+	// over. bIsAiming itself (replicated, read via WeaponFire->IsAiming()) is UNTOUCHED by this — it only decides
+	// whether THIS owner-local presentation (this solve, plus the matching gate in UpdateCameraFieldOfView) honors
+	// that intent this frame. A wall exit self-heals the visual the instant CanFireInCurrentState() goes true again,
+	// with no RPC round trip.
 	const bool bAiming = bCachedHasADS && !CachedAimSocket.IsNone() && WeaponFire && WeaponFire->IsAiming() && !bReloading
-		&& AimComp && AimComp->DoesSocketExist(CachedAimSocket);
+		&& AimComp && AimComp->DoesSocketExist(CachedAimSocket)
+		&& (!Move || Move->CanFireInCurrentState());
 
 	// Every frame below is SCALE-FREE. The weapon hangs off the grip socket at WeaponAttachScale (0.85 for the rifle),
 	// and composing transforms that still carry that scale would shrink the socket offsets along with the mesh — the
@@ -3025,11 +3132,17 @@ void AFPSRCharacter::UpdateAimDownSights(float DeltaTime)
 		CurrentHipLookSway = FMath::RInterpTo(CurrentHipLookSway, SwayTarget, HipDt, CachedHipMotion.LookSwayReturnSpeed);
 
 		// Walk/run bob: velocity-gated figure-8. Reuse the smoothed 0..1 movement factor computed above (ADSSwayMoveAlpha).
-		// Phase accumulates with dt (frame-rate independent); vertical runs at 2x the horizontal frequency.
+		// Phase accumulates with dt (frame-rate independent); vertical runs at 2x the horizontal frequency. PHASE is
+		// untouched by the state layer (a phase jump would pop the bob mid-cycle) — only the AMPLITUDE scales, via
+		// StateBobScale: slide/airborne widen or (typically) zero the bob. Exclusive-resolved-then-lerped by the
+		// blend weight (SlideW / AirborneBlendAlpha) rather than a hard switch, so a weapon with default scales
+		// (Slide 0, Airborne 1) reproduces the pre-state-layer amplitude exactly and the transition itself is smooth.
 		HipBobPhase += HipDt * CachedHipMotion.WalkBobFrequency * ADSSwayMoveAlpha;
 		HipBobPhase = FMath::Fmod(HipBobPhase, 1024.0f);
-		const float BobH = FMath::Sin(HipBobPhase * 2.0f * PI) * CachedHipMotion.WalkBobHorizontal * ADSSwayMoveAlpha;
-		const float BobV = FMath::Sin(HipBobPhase * 4.0f * PI) * CachedHipMotion.WalkBobVertical * ADSSwayMoveAlpha;
+		const float StateBobScale = FMath::Lerp(1.0f, CachedHipMotion.SlideBobScale, SlideW)
+			* FMath::Lerp(1.0f, CachedHipMotion.AirborneBobScale, AirborneBlendAlpha);
+		const float BobH = FMath::Sin(HipBobPhase * 2.0f * PI) * CachedHipMotion.WalkBobHorizontal * ADSSwayMoveAlpha * StateBobScale;
+		const float BobV = FMath::Sin(HipBobPhase * 4.0f * PI) * CachedHipMotion.WalkBobVertical * ADSSwayMoveAlpha * StateBobScale;
 
 		// Fire kick: decay the per-shot alpha (bumped to 1 in PlayWeaponFireCosmetics), then scale the kick offset/pitch.
 		HipFireKickAlpha = FMath::FInterpTo(HipFireKickAlpha, 0.0f, HipDt, CachedHipMotion.FireKickRecoverySpeed);
@@ -3044,6 +3157,39 @@ void AFPSRCharacter::UpdateAimDownSights(float DeltaTime)
 			const FRotator HipRot(CurrentHipLookSway.Pitch + KickPitch, CurrentHipLookSway.Yaw, 0.0f);
 			NewRot = (HipRot * HipWeight).Quaternion() * NewRot;
 		}
+	}
+
+	// --- State pose layer (§6, GunMotionTool_Spec.md): slide/airborne weapon poses, additive to whatever the ADS/hip
+	// solve above produced. Deliberately OUTSIDE bCachedHasHipMotion — an unauthored-hip weapon (no look-sway/bob/kick)
+	// still has to tilt on a slide or lift in the air; the two are independent authoring concerns, and CachedHipMotion
+	// is already fully cached on equip regardless (no extra cache needed). Weighted by (1-CurrentADSAlpha) — the SAME
+	// weight the hip layer above uses — rather than exclusively gated on bAiming: a player who enters ADS mid-slide
+	// keeps the sight glued to centre (the Apex reference releases the slide tilt exactly as ADS engages) instead of
+	// this pose fighting the sight glue. Axes are CAMERA SPACE — same convention as the hip layer (+X forward, +Y
+	// right, +Z up; rotation composed the same way as HipRot above) — this is the contract the (later) motion
+	// studio's "state pose mode" authors against.
+	const float StatePoseWeight = 1.0f - CurrentADSAlpha;
+	if (StatePoseWeight > KINDA_SMALL_NUMBER)
+	{
+		const FVector StateOffset = SlideW * CachedHipMotion.SlidePose.Offset + AirborneBlendAlpha * CachedHipMotion.AirbornePose.Offset;
+		NewLoc += StatePoseWeight * StateOffset;
+		const FRotator StateTilt = (CachedHipMotion.SlidePose.Tilt * SlideW) + (CachedHipMotion.AirbornePose.Tilt * AirborneBlendAlpha);
+		NewRot = (StateTilt * StatePoseWeight).Quaternion() * NewRot;
+	}
+
+	// --- Holster layer (§6): drawn/stowed weapon offset. LAST in the composition order and at FULL WEIGHT — no
+	// (1-CurrentADSAlpha) gating like the layer above — because stowing has to pull the gun off-screen regardless of
+	// aim state; a holstered gun that stayed glued to a sight pose would defeat the whole point of the visual. bAiming
+	// above already drops CurrentADSAlpha toward 0 the instant CanFireInCurrentState() goes false (same predicate),
+	// so this full-weight rule is belt-and-braces rather than the only thing keeping a holstered gun from also
+	// reading as aimed. SmoothStep (not the raw linear alpha) so the motion visibly eases at both ends instead of
+	// stopping on a dime — HolsterBlendAlpha itself stays linear (FInterpConstantTo above) so a fixed HolsterDuration
+	// means a fixed transition TIME; the ease is a presentation-only reshaping of that same clock.
+	if (HolsterBlendAlpha > KINDA_SMALL_NUMBER)
+	{
+		const float HolsterEase = FMath::SmoothStep(0.0f, 1.0f, HolsterBlendAlpha);
+		NewLoc += HolsterEase * CachedHipMotion.HolsterPose.Offset;
+		NewRot = (CachedHipMotion.HolsterPose.Tilt * HolsterEase).Quaternion() * NewRot;
 	}
 
 	// The one write, and the ONE place the solved pose is applied. Everything above produced a camera-relative transform;

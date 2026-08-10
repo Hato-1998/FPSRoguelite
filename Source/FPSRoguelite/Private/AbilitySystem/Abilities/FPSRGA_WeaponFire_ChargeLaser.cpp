@@ -76,6 +76,16 @@ void UFPSRGA_WeaponFire_ChargeLaser::ActivateAbility(
 		}
 	}
 
+	// No firing while the current locomotion state forbids it (wall-hang: both hands on the wall). This ability is
+	// ServerOnly (NetExecutionPolicy above) — ActivateAbility runs ONLY on the server, so this check is the SOLE
+	// authority for the wall-hang block on ChargeLaser weapons; there is no predicted-client run to double it up with,
+	// unlike the LocalPredicted hitscan/projectile abilities.
+	if (!IsFirePermittedByMovementState(Avatar))
+	{
+		EndAbility(Handle, ActorInfo, ActivationInfo, true, true);
+		return;
+	}
+
 	// Resolve weapon stats (base × modifiers).
 	UFPSRWeaponInventoryComponent* Inventory = Avatar->FindComponentByClass<UFPSRWeaponInventoryComponent>();
 	UFPSRWeaponInstance* Instance = Inventory ? Inventory->GetCurrentInstance() : nullptr;

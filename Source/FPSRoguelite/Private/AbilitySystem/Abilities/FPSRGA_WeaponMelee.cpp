@@ -70,6 +70,18 @@ void UFPSRGA_WeaponMelee::ActivateAbility(
 		}
 	}
 
+	// No attacking while the current locomotion state forbids it (wall-hang: both hands on the wall — melee is
+	// included, not just ranged fire). Deliberately OUTSIDE any HasAuthority() branch — this ability is LocalPredicted,
+	// so ActivateAbility runs on the predicting owning client AND the server, and IsFirePermittedByMovementState()
+	// reads CanFireInCurrentState() the same way on both. This is the REAL authority for the wall-hang block;
+	// UFPSRWeaponFireComponent's client-side check is cosmetic-only prediction (it also stops the melee repeat-swing
+	// Tick loop from continuing while latched onto a wall).
+	if (!IsFirePermittedByMovementState(Avatar))
+	{
+		EndAbility(Handle, ActorInfo, ActivationInfo, true, true);
+		return;
+	}
+
 	float Damage = 15.0f;
 	float MeleeRadius = 175.0f;
 	float MeleeAttackDelay = 0.0f;
