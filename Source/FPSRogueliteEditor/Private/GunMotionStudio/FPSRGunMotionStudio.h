@@ -5,6 +5,10 @@
 #include "CoreMinimal.h"
 #include "Containers/Ticker.h"
 
+// 스튜디오 공용 로그 카테고리 — 정의는 FPSRGunMotionStudio.cpp. (TU별 DEFINE_LOG_CATEGORY_STATIC 은 유니티 빌드가
+// 두 .cpp 를 한 블롭으로 합치는 순간 재정의 충돌한다 — 실측 C2011.)
+DECLARE_LOG_CATEGORY_EXTERN(LogFPSRGunMotionStudio, Log, All);
+
 class AFPSRCharacter;
 class APlayerController;
 class UAnimSequence;

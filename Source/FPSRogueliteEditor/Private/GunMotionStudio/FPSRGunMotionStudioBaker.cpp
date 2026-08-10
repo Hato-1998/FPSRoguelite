@@ -78,9 +78,15 @@ UAnimSequence* FPSRGunMotionStudioBaker::CreateWipClip(USkeleton* ArmsSkeleton, 
 	{
 		IAnimationDataController::FScopedBracket Bracket(Controller, LOCTEXT("CreateWipBracket", "FPSR Gun Motion: Create WIP Clip"));
 		Seq->Modify();
+		// 🚨 InitializeModel 필수 — UE5.7 데이터 모델(UAnimationSequencerDataModel)은 여기서 내부 MovieScene 을
+		// 만든다. 빠뜨리면 "No Movie Scene found for SequencerDataModel" 에러와 함께 길이 0 클립이 되어 슬롯
+		// 다이내믹 몽타주 재생이 조용히 실패한다(첫 스모크 실측). UAnimSequenceFactory::FactoryCreateNew 순서
+		// (InitializeModel → 프레임 설정 → NotifyPopulated) 답습.
+		Controller.InitializeModel();
 		Controller.SetFrameRate(FFrameRate(30, 1));
 		const int32 NumFrames = FMath::Max(1, FMath::RoundToInt(LengthSeconds * 30.0f));
 		Controller.SetNumberOfFrames(FFrameNumber(NumFrames));
+		Controller.NotifyPopulated();
 	}
 
 	return Seq;

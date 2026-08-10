@@ -29,7 +29,7 @@
 #include "Misc/PackageName.h"
 #include "UObject/Package.h"
 
-DEFINE_LOG_CATEGORY_STATIC(LogFPSRGunMotionStudio, Log, All);
+DEFINE_LOG_CATEGORY(LogFPSRGunMotionStudio); // 선언은 헤더(DECLARE_LOG_CATEGORY_EXTERN) — UI TU 와 공유
 
 // Forward declaration only — FPSRGunMotionStudioUI.cpp owns the ImGui/ImGuizmo drawing (§1 "로직과 분리"). This
 // translation unit never includes imgui.h/ImGuizmo.h.

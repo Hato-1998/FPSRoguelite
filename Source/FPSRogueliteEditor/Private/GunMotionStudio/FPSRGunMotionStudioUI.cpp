@@ -17,6 +17,9 @@
 #include "Camera/PlayerCameraManager.h"
 #include "Engine/LocalPlayer.h"
 #include "Kismet/KismetMathLibrary.h"
+#include "Misc/Paths.h"       // 한글 폰트 경로(EngineContentDir)
+#include "Misc/ScopeExit.h"   // ON_SCOPE_EXIT — PushFont/PopFont 짝 보장
+#include "Engine/Engine.h"    // GEngine->GetWorldContextFromWorld — PIE 인스턴스 id 명시 해석
 
 THIRD_PARTY_INCLUDES_START
 #include "imgui.h"
@@ -425,18 +428,62 @@ namespace FPSRGunMotionStudioUI
 
 	void Draw(FFPSRGunMotionStudio& Session)
 	{
-		const ImGui::FScopedContext ScopedContext;
-		if (!ScopedContext)
-		{
-			return;
-		}
-
 		AFPSRCharacter* Character = Session.GetCharacter();
 		APlayerController* PC = Cast<APlayerController>(Character ? Character->GetController() : nullptr);
 		if (!Character || !PC)
 		{
 			return;
 		}
+
+		// 🚨 PIE 인스턴스 id 를 캐릭터 월드에서 **명시** 해석해야 한다 — 이 함수는 FTSTicker(월드 밖)에서 불리므로
+		// 기본 인자 FScopedContext 는 GetPlayInEditorID()=INDEX_NONE 을 보고 **에디터 메인 창 전체** 컨텍스트를
+		// 만들어 버린다(첫 스모크 실측: 오버레이가 뷰포트가 아니라 에디터 좌상단에 뜨고, 픽킹/기즈모 좌표계가
+		// PIE 뷰포트와 어긋남). PIE id 로 받으면 플러그인이 게임 뷰포트 위젯에 오버레이를 붙인다(ImGuiModule.cpp).
+		int32 PieSessionId = INDEX_NONE;
+		if (const FWorldContext* WorldContext = GEngine->GetWorldContextFromWorld(Character->GetWorld()))
+		{
+			PieSessionId = WorldContext->PIEInstance;
+		}
+		if (PieSessionId == INDEX_NONE)
+		{
+			return; // PIE 밖(월드 소멸 중 등) — 메인 창 컨텍스트로 새는 것보다 이번 프레임을 건너뛰는 게 안전.
+		}
+		const ImGui::FScopedContext ScopedContext(PieSessionId);
+		if (!ScopedContext)
+		{
+			return;
+		}
+
+		// 한글 폰트 — 플러그인 기본 아틀라스는 Roboto(ASCII)뿐이라 한글 라벨이 전부 '?' 로 깨진다(첫 스모크 실측).
+		// 엔진 동봉 CJK 폴백 폰트를 컨텍스트당 1회 등록한다(시스템 폰트 의존 없음). ImGui 1.92 는 동적 아틀라스라
+		// 프레임 사이 추가가 안전하고, 글리프는 필요 시점에 로드된다(glyph ranges 불요).
+		static ImFont* KoreanFont = nullptr;
+		static ImGuiContext* KoreanFontContext = nullptr;
+		if (ImGuiContext* CurrentContext = ImGui::GetCurrentContext(); CurrentContext != KoreanFontContext)
+		{
+			KoreanFontContext = CurrentContext;
+			KoreanFont = nullptr;
+			const FString FontPath = FPaths::EngineContentDir() / TEXT("Slate/Fonts/DroidSansFallback.ttf");
+			if (FPaths::FileExists(FontPath))
+			{
+				KoreanFont = ImGui::GetIO().Fonts->AddFontFromFileTTF(TCHAR_TO_UTF8(*FontPath), 16.0f);
+			}
+			else
+			{
+				UE_LOG(LogFPSRGunMotionStudio, Warning, TEXT("[GunMotionStudio] CJK 폴백 폰트를 찾지 못했습니다(%s) — 한글 라벨이 깨져 보입니다."), *FontPath);
+			}
+		}
+		if (KoreanFont)
+		{
+			ImGui::PushFont(KoreanFont, 16.0f);
+		}
+		ON_SCOPE_EXIT
+		{
+			if (KoreanFont)
+			{
+				ImGui::PopFont();
+			}
+		};
 
 		// §5 화면 클릭으로 대상 선택 — ImGui 윈도우가 입력을 소비 중이 아닐 때만(그렇지 않으면 타임라인/버튼 클릭이
 		// 오인식된다), 좌클릭 & 기즈모를 잡고 있지 않을 때.
@@ -475,8 +522,10 @@ namespace FPSRGunMotionStudioUI
 				}
 			}
 
+			// TCHAR_TO_UTF8 이어야 한다 — ImGui 텍스트는 UTF-8 전제, TCHAR_TO_ANSI 는 시스템 코드페이지(CP949)라
+			// 한글 폰트를 얹어도 모지바케가 난다(첫 스모크 실측 계열).
 			const TCHAR* SelectionNames[] = { TEXT("없음"), TEXT("총"), TEXT("왼손"), TEXT("오른손"), TEXT("파츠") };
-			ImGui::Text("선택: %s", TCHAR_TO_ANSI(SelectionNames[static_cast<int32>(Session.GetSelection())]));
+			ImGui::Text("선택: %s", TCHAR_TO_UTF8(SelectionNames[static_cast<int32>(Session.GetSelection())]));
 
 			ImGui::Separator();
 			DrawAttachControls(Session);
