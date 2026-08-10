@@ -347,41 +347,6 @@ public:
 	UFUNCTION(BlueprintPure, Category = "FPSR|Weapon")
 	bool GetWeaponPartFrameInGunSpace(FName AttachSocket, FTransform& OutFrame) const;
 
-	// --- GunMotionTool_Spec.md §5 read-only accessors for the in-game ImGui gun-motion studio (editor module,
-	//     FPSRogueliteEditor/Private/GunMotionStudio) — the studio runs inside the SAME PIE process (it is an editor
-	//     feature, structurally excluded from packaged builds) and needs the live component pointers to cache the
-	//     M/P transforms at session start (§3-2) and to hit-test/gizmo the gun body, hands, and parts (§5). Plain
-	//     const getters, not UFUNCTIONs — this is a C++-only editor-module consumer, not Blueprint API surface. ---
-
-	/** First-person arms mesh (may be null with no first-person arms authored on this pawn/mesh set). */
-	FORCEINLINE USkeletalMeshComponent* GetFirstPersonArmsMeshComponent() const { return FirstPersonArms; }
-
-	/** First-person camera — §3-2's M = ArmsComp world rotation⁻¹ * Cam world rotation is cached from this live
-	 *  component's GetComponentTransform() at studio session entry, not a CDO/Blueprint-CDO approximation. */
-	FORCEINLINE UCameraComponent* GetFirstPersonCameraComponent() const { return FirstPersonCamera; }
-
-	/** The equipped weapon's mesh component actually being rendered/animated right now (arms-attached skeletal mesh
-	 *  when first-person split is active; may be the body-attached one otherwise) — same resolution UpdateAimDownSights
-	 *  uses, exposed read-only for the studio's gizmo/pick targets. */
-	FORCEINLINE UMeshComponent* GetActiveWeaponMeshComponentForStudio() const { return ActiveWeaponMesh; }
-
-	/** The equipped weapon's OWN skeletal mesh component (WeaponMesh, not the arms) — the studio's "whole gun" gizmo
-	 *  target and part-parent for hit-testing WeaponParts sockets. */
-	FORCEINLINE USkeletalMeshComponent* GetWeaponMeshComponentForStudio() const { return WeaponMesh; }
-
-	/** Currently-attached cosmetic part components, index-aligned with the weapon DA's WeaponParts (RebuildPartsFromSelection) —
-	 *  the studio iterates these for part click-selection and to resolve a part's current socket for [IK 붙이기] validation. */
-	const TArray<TObjectPtr<UStaticMeshComponent>>& GetWeaponPartComponentsForStudio() const { return WeaponPartComponents; }
-
-	/** Studio-only passthrough to the protected GetWeaponRootPlacementInGunFrame — the whole-gun gizmo's baseline
-	 *  frame (§5 "무기 전체 모드"), same ik_hand_gun bone-parent space as the grip/part frames above. */
-	bool GetWeaponRootPlacementInGunFrameForStudio(FTransform& OutWeaponInGunFrame) const { return GetWeaponRootPlacementInGunFrame(OutWeaponInGunFrame); }
-
-	/** The IK bone the gun-anchor math treats the weapon as attached to (§3-2's fixed grip-source bone name is
-	 *  lowerarm_r, defined in the studio baker per spec — this is the SEPARATE ik_hand_gun anchor bone, exposed so the
-	 *  studio never re-literals it either). */
-	FORCEINLINE FName GetIkHandGunBoneNameForStudio() const { return IkHandGunBoneName; }
-
 	/** Play reload cosmetics on a server-confirmed reload-start edge (called from UFPSRWeaponInstance::OnRep_Reloading,
 	 *  which fires on every client holding the replicated instance). One body mesh, one montage, owner and remotes alike
 	 *  (ADR 0002 invariant 4), plus the weapon's own magazine/bolt montage. No-op when bIsReloading is false, during the

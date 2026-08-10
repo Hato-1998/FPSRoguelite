@@ -14,9 +14,7 @@ public class FPSRogueliteEditor : ModuleRules
 			"CoreUObject",
 			"Engine",
 			"FPSRoguelite",   // runtime module: the DataAsset types we validate/enumerate
-			"GameplayTags",
-			"ImGui"           // GunMotionTool_Spec.md §1/§5 — 인게임 스튜디오 렌더 컨텍스트(ImGui::FScopedContext, imgui.h/imgui_internal.h
-			                  // 를 이 모듈 전체가 시스템 include 경로로 상속받도록 Public — README 사용례와 동일)
+			"GameplayTags"
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[]
@@ -28,7 +26,7 @@ public class FPSRogueliteEditor : ModuleRules
 			"SlateCore",
 			"EditorSubsystem",
 			"ToolMenus",
-			"AssetRegistry",            // GunMotionTool_Spec.md §3-3/A17 — GetReferencers 몽타주 스캔(FPSRGunMotionStudioBaker)
+			"AssetRegistry",            // DataEditor/Assembler/Blockout/Validation 전반의 에셋 열거·참조 조회
 			"DataValidation",   // UEditorValidatorBase (Engine/Plugins/Editor/DataValidation)
 			"DeveloperSettings",
 			"Projects",
@@ -41,12 +39,5 @@ public class FPSRogueliteEditor : ModuleRules
 			"Persona"                   // SBoneSelectionWidget — Weapon Part Assembler 손 위치 저장의 기준 뼈 선택 UI
 		});
 
-		// ImGuizmo (vendored, Private/GunMotionStudio/ImGuizmo, MIT) defines IMGUI_DEFINE_MATH_OPERATORS itself right
-		// before its own first `#include "imgui.h"` — but imgui.h is `#pragma once`, so in a Unity build another .cpp
-		// in this module could include it FIRST (without the macro) and silently deny ImGuizmo.cpp the ImVec2/ImVec4
-		// operators it needs (whichever translation unit's include wins the pragma-once race, non-deterministically
-		// across incremental builds). Defining it at the module level via PrivateDefinitions removes the ordering
-		// dependency entirely — it is set before ANY inclusion in ANY .cpp of this module.
-		PrivateDefinitions.Add("IMGUI_DEFINE_MATH_OPERATORS=1");
 	}
 }
