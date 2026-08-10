@@ -9,14 +9,24 @@
 ## 6. 작업 방식 / 규칙
 
 ### 6-1. 환경 / 경로
-- 엔진: **UE 5.7** — `D:\UnrealEngine\UE_5.7`
-  - UBT: `D:\UnrealEngine\UE_5.7\Engine\Build\BatchFiles\Build.bat`
-  - GenerateProjectFiles: `D:\UnrealEngine\UE_5.7\Engine\Build\BatchFiles\GenerateProjectFiles.bat`
-  - 엔진 소스/플러그인: `D:\UnrealEngine\UE_5.7\Engine\Source`, `D:\UnrealEngine\UE_5.7\Engine\Plugins`
-- 프로젝트 루트: `E:\Git_Project\FPSRoguelite`
-- 참조 세팅 템플릿: `E:\Git_Project\언리얼세팅`
+> ⚠️ **절대경로를 이 문서에 박지 말 것.** 이 문서는 여러 클론·**여러 머신**이 공유한다. 경로를 박으면 다른 머신 세션이 문서대로 실행했을 때 즉시 실패한다 — 실제로 2026-08-10 실측에서 기존에 박혀 있던 `D:`·`E:` 경로가 한 머신엔 **드라이브 자체가 없었다**. 아래는 **해석 규칙**이고, 맨 끝 표는 참고용 실측치다.
+
+- 엔진: **UE 5.7**. `<엔진루트>` = `.uproject`의 `EngineAssociation`(=`5.7`)을 레지스트리로 해석한 값
+  - 조회: `(Get-ItemProperty 'HKLM:\SOFTWARE\EpicGames\Unreal Engine\5.7').InstalledDirectory`
+  - UBT: `<엔진루트>\Engine\Build\BatchFiles\Build.bat`
+  - 엔진 소스/플러그인: `<엔진루트>\Engine\Source`, `<엔진루트>\Engine\Plugins`
+  - GenerateProjectFiles: `<엔진루트>\Engine\Build\BatchFiles\GenerateProjectFiles.bat` — **소스 빌드에만 존재한다.** 런처(바이너리) 설치엔 없으므로 `UnrealVersionSelector.exe /projectfiles <uproject>` 또는 `.uproject` 우클릭을 쓴다
+- 프로젝트 루트: `<작업 클론>` = `git rev-parse --show-toplevel`. 클론마다 다르므로 박지 않는다
+- 참조 세팅 템플릿: `언리얼세팅` — 소스빌드 머신에만 있는 로컬 참고물(없어도 작업 가능)
 - 모듈명: `FPSRoguelite`(Runtime), 게임 타깃 `FPSRoguelite`, 에디터 타깃 `FPSRogueliteEditor`
 - VS 2022 (`.vsconfig` 워크로드 기준)
+
+**알려진 머신** (참고 전용 — 규칙은 위 해석 규칙이다. 새 머신을 쓰기 시작할 때만 한 줄 추가)
+
+| 머신 (식별) | 엔진 설치 | `<엔진루트>` | 클론 |
+|---|---|---|---|
+| D:/E: 분리 드라이브 | 소스 빌드 | `D:\UnrealEngine\UE_5.7` | `E:\Git_Project\FPSRoguelite`, `FPSRoguelite2` |
+| C: 단일 드라이브 | 런처(바이너리) | `C:\Program Files\Epic Games\UE_5.7` | `...\UnrealProject\FPSRoguelite` (단일) |
 
 ### 6-2. 프로덕션 방식 원칙 (필수)
 - 코드/개발은 **프로덕션 품질**. 엔진 템플릿 편의 단축은 지양
@@ -127,8 +137,9 @@
 - **폴백**: Fable이 거부(refusal)하거나 쓸 수 없으면 **Opus 5로 설계를 진행하고, 그 사실을 명세 메타에 기록**한다.
 
 ### 6-6. 빌드 / 검증 방법
-- 빌드(에디터 닫고 · **현 코드 빌드 대상 클론 = FPSRoguelite2**; 양 클론 공유 문서 = 경로 중립, 빌드하는 클론의 `.uproject` 사용):
-  `"D:\UnrealEngine\UE_5.7\Engine\Build\BatchFiles\Build.bat" FPSRogueliteEditor Win64 Development -Project="<작업 클론>\FPSRoguelite.uproject" -WaitMutex`
+- 빌드(에디터 닫고 · 빌드하는 클론의 `.uproject` 사용 · `<엔진루트>` 해석은 **§6-1**):
+  `"<엔진루트>\Engine\Build\BatchFiles\Build.bat" FPSRogueliteEditor Win64 Development -Project="<작업 클론>\FPSRoguelite.uproject" -WaitMutex`
+  - **클론이 여럿인 머신에서만** 빌드 대상 클론을 고른다 — D:/E: 머신의 현 코드 빌드 대상 = `FPSRoguelite2`. 클론이 하나인 머신은 그 클론이 곧 빌드 대상이다
 - 헤드리스 검증:
   `UnrealEditor-Cmd.exe <uproject> -unattended -nopause -nullrhi -nosplash -nosound -ExecCmds="Automation RunTests FPSRoguelite.Smoke.ModuleLoads" -TestExit="Automation Test Queue Empty" -abslog=...`
 - 새 UCLASS 다수면 Live Coding 불가 → 풀빌드(에디터 닫아야 함). 입력 IA 생성은 `Scripts/gen_input_assets.py`
