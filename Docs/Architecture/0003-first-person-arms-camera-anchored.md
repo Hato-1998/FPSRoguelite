@@ -364,4 +364,4 @@ PWAS가 절차 모션을 애님그래프 안에 넣는다는 사실에서 *"커�
 | `Docs/PWAS_FPArm_Integration_ResumePrompt.md` (ADR 0002가 "폐기" 처리) | **되살아난다.** 다만 그 문서의 전제는 "Blu 팔 추출 + PWAS 커널"이므로, 이 결정(마네킹 팔 + 포즈만)과 다르다 — **참고용이지 지침이 아니다** |
 | `Docs/AnimationPass_ContentGuide.md` 도메인 A (`ArmsAnimInstanceClass` 축 소멸) | **부활, 이름이 바뀜.** `ArmsAnimLayerClass` (레이어 인터페이스 패턴) |
 | `Docs/SSOT/PlayerFeel.md` §2-9 | ADR 0002가 "Separated Arms 폐기"로 갱신한 절이다. **다시 갱신 필요** — 팔이 돌아온다 |
-| `Content/Characters/Blu/SkeletalMeshes/Blu_FP_Arms/` (2026-08-03 제작, Blu 스켈레톤 자동컷) | **폐기 대상.** 이 결정은 마네킹 팔을 쓴다. 참조 0 확인 후 삭제 |
+| `Content/Characters/Blu/SkeletalMeshes/Blu_FP_Arms/` (2026-08-03 제작, Blu 스켈레톤 자동컷) | ~~**폐기 대상.** 이 결정은 마네킹 팔을 쓴다. 참조 0 확인 후 삭제~~ → **✅ 삭제 완료 2026-08-10**(참조 0 실측, `Docs/WorkLog.md` 최상단 절) |

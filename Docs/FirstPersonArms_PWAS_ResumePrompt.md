@@ -38,7 +38,7 @@ PWAS 본체도 생존: `Content/ProceduralWeaponAnimationSystem` **145 에셋** 
 4. **무기 이중화 복원** — 1P(카메라측) + 3P(월드). 무기 DA에 `ArmsAnimInstanceClass`·FP 재장전 몽타주 필드 복원
 5. ADS 정렬 재정의 — 무기가 카메라 공간에 오면 `UpdateAimDownSights`의 월드 정렬 전제가 바뀐다
 6. 왼손 IK(`Two Bone IK`, `hand_L`)를 어느 그래프에 둘지 결정
-7. `Blu_FP_Arms`(Blu 스켈레톤·자동컷, 2026-08-03 제작) **폐기** — 참조 0 확인 후
+7. ~~`Blu_FP_Arms`(Blu 스켈레톤·자동컷, 2026-08-03 제작) **폐기** — 참조 0 확인 후~~ → **✅ 완료 2026-08-10**(참조 0 실측 후 4에셋 삭제, `Docs/WorkLog.md` 최상단 절)
 
 ## 🪤 함정 (전부 실제로 당한 것)
 1. **UE는 스켈레톤을 공유하면 레퍼런스 포즈도 공유한다.** 메시 바인드 포즈가 스켈레톤 ref pose와 다르면 그 부위가 강제로 늘어난다 — 실측 48.8cm 메시가 에디터에 **157cm**로 뭉갰다. `NeonV_FPArms`는 이 조건을 이미 만족하므로 **건드리지 말 것**
