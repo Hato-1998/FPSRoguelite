@@ -705,15 +705,33 @@ void UFPSRCharacterMovementComponent::UpdateCharacterStateBeforeMovement(float D
 {
 	// Runs before the physics step on the owning client, the server, and every replayed move — the one place where the
 	// derived slide and wall-hang states are decided, so all three agree.
+
+	// Stance weights. Advanced here rather than on a tick of their own because this runs on every role — the engine
+	// calls it from PerformMovement for the owning client and the server AND from SimulateMovement for remote proxies —
+	// so one place keeps the camera, the speed cap and (later) every player's animation on the same clock. This is the
+	// one piece of this function a proxy genuinely wants, which is why it sits ABOVE the role gate below.
+	AdvanceStanceBlends(DeltaSeconds);
+
+	// SIMULATED PROXIES STOP HERE. The engine calls this from SimulateMovement as well as from PerformMovement, and a
+	// proxy satisfies every entry condition below: bWantsToCrouch arrives through ACharacter::OnRep_IsCrouched, and
+	// MovementMode and Velocity are both replicated. Deriving the states there would RE-DECIDE them on the one machine
+	// with no authority over them — StartSliding would re-apply the entry impulse to an already-replicated velocity and
+	// SimulateMovement integrates the result through MoveSmooth, while wall hang would drive SetMovementMode against
+	// the very mode replication is feeding it, and run WallHangMaxDuration on a clock of its own so the proxy lets go
+	// while the server still says it is holding on.
+	// Proxies are TOLD these states instead: bSlidingVisual, WallYawByte and WallSideSign replicate for exactly that,
+	// and IsSlidingForDisplay()/GetWallYawForDisplay() read those copies. Leaving early also spares every remote player
+	// a per-frame CanGrabWall sweep.
+	if (CharacterOwner && CharacterOwner->GetLocalRole() == ROLE_SimulatedProxy)
+	{
+		Super::UpdateCharacterStateBeforeMovement(DeltaSeconds);
+		return;
+	}
+
 	if (SlideCooldownRemaining > 0.0f)
 	{
 		SlideCooldownRemaining = FMath::Max(0.0f, SlideCooldownRemaining - DeltaSeconds);
 	}
-
-	// Stance weights. Advanced here rather than on a tick of their own because this runs on every role — the engine
-	// calls it from PerformMovement for the owning client and the server AND from SimulateMovement for remote proxies —
-	// so one place keeps the camera, the speed cap and (later) every player's animation on the same clock.
-	AdvanceStanceBlends(DeltaSeconds);
 
 	// Wall hang. Sliding is ground-only and hanging is air-only, so this and the slide block below can never both be
 	// active — but the budget does have to be refreshed on the ground, which is the one moment both are quiet.
@@ -914,10 +932,12 @@ namespace
 
 void UFPSRCharacterMovementComponent::AdvanceStanceBlends(float DeltaSeconds)
 {
-	// IsCrouching() reads the replicated bIsCrouched, so remote players' stance weights are correct too. bIsSliding is
-	// local-only, which is why the slide weight carries the caveat documented on GetSlideBlend().
+	// Both sources are correct on every role. IsCrouching() reads the replicated bIsCrouched; IsSlidingForDisplay()
+	// hands the owner and the server the exact local bIsSliding and a proxy the replicated bSlidingVisual. Reading
+	// bIsSliding directly here would peg a proxy's slide weight to 0, because deriving the slide is the owner's and the
+	// server's job alone (see the role gate in UpdateCharacterStateBeforeMovement).
 	StanceBlend = AdvanceBlendTowards(StanceBlend, IsCrouching() ? 1.0f : 0.0f, StanceBlendDuration, DeltaSeconds);
-	SlideBlend = AdvanceBlendTowards(SlideBlend, bIsSliding ? 1.0f : 0.0f, SlideBlendDuration, DeltaSeconds);
+	SlideBlend = AdvanceBlendTowards(SlideBlend, IsSlidingForDisplay() ? 1.0f : 0.0f, SlideBlendDuration, DeltaSeconds);
 
 	// Retire the transition once it has settled so GetMaxSpeed goes straight back to the plain stance cap.
 	if (StanceSpeedFrom > 0.0f && GetStanceTransitionProgress() >= 1.0f)

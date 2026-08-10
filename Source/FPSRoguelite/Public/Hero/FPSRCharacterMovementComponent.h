@@ -81,9 +81,8 @@ public:
 	float GetStanceBlend() const { return StanceBlend; }
 
 	/** Same idea for the slide pose: 0 not sliding, 1 fully sliding, over SlideBlendDuration.
-	 *  NOTE for animation work: this follows bIsSliding, which is derived locally and NOT replicated — it is only
-	 *  trustworthy on the owning client and the server, not for remote players. Use IsSlidingForDisplay() when the
-	 *  answer has to be right on a simulated proxy too. GetStanceBlend() has no such limit (bIsCrouched is replicated). */
+	 *  Follows IsSlidingForDisplay(), so it is trustworthy on every role — the exact local state on the owning client
+	 *  and the server, the replicated copy on a simulated proxy. Same footing as GetStanceBlend(). */
 	UFUNCTION(BlueprintPure, Category = "FPSR|Movement")
 	float GetSlideBlend() const { return SlideBlend; }
 
