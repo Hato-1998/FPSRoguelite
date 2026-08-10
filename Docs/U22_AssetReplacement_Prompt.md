@@ -1,6 +1,6 @@
 # U22 — Synty 셀/툰 에셋 전체교체 · 실행 프롬프트
 
-> **작성 2026-07-19.** 구 `Docs/AssetReplacement_Synty_ResumePrompt.md`는 **폐기본**(SRS를 "최후 폴백 유료옵션"이라 하는 등 SSOT와 모순) — 읽지 말 것. 이 문서가 U22의 유일한 실행 프롬프트다.
+> **작성 2026-07-19.** 구 `AssetReplacement_Synty_ResumePrompt.md`(2026-08-11 `Docs/Archive/prompts/`로 내림)는 **폐기본**(SRS를 "최후 폴백 유료옵션"이라 하는 등 SSOT와 모순) — 읽지 말 것. 이 문서가 U22의 유일한 실행 프롬프트다.
 >
 > 여기 적힌 수치·경로·줄번호는 **2026-07-19 HEAD(`c3245e76` 이후) 기준 실측**이다. 7 에이전트 조사 + 적대 검증(주장 13건 반박·정정)을 거쳤다. 다만 **줄번호는 커밋마다 밀린다** — 인용 줄이 안 맞으면 그 줄을 믿지 말고 grep으로 재확인할 것.
 
@@ -16,7 +16,7 @@ U22 작업의 대부분은 **에디터가 있어야** 한다(레벨 저작·머�
 4. **헤드리스에서 크래시가 확정된 조작 3종** — 리그드 GLB 임포트(Interchange), 배치 IK 리타겟, 스켈레탈 FBX 익스포트. 이건 에디터 GUI로 하거나 사용자에게 요청한다.
 5. 에디터가 없으면 **우회 조사·추측하지 말고 사용자에게 켜달라고 요청하고 대기**한다.
 
-빌드는 별개다 — **빌드 대상 클론 = `FPSRoguelite2`**, 에디터를 닫고 실행한다.
+빌드는 별개다 — 에디터를 닫고 실행한다. **클론이 여럿인 머신에서만** 빌드 대상 클론을 고른다(경로·클론 해석 규칙 = `Docs/SSOT/Workflow.md` §6-1·§6-6).
 
 ---
 
@@ -311,8 +311,9 @@ Game.md + PROGRESS.md + Docs/U22_AssetReplacement_Prompt.md 먼저 읽어. U22b�
 ### 5-4. 검증 절차
 
 ```
-빌드   : "D:\UnrealEngine\UE_5.7\Engine\Build\BatchFiles\Build.bat" FPSRogueliteEditor Win64 Development
-         -Project="<빌드 클론>\FPSRoguelite.uproject" -WaitMutex     (에디터 닫고 / 클론 = FPSRoguelite2)
+빌드   : "<엔진루트>\Engine\Build\BatchFiles\Build.bat" FPSRogueliteEditor Win64 Development
+         -Project="<빌드 클론>\FPSRoguelite.uproject" -WaitMutex     (에디터 닫고)
+         <엔진루트>·<빌드 클론> 해석 규칙 = Workflow.md §6-1·§6-6 (절대경로를 여기 박지 말 것)
 스모크 : UnrealEditor-Cmd.exe <uproject> -unattended -nullrhi -ExecCmds="Automation RunTests FPSRoguelite.Smoke.ModuleLoads"
 리뷰   : 레드팀 게이트(Workflow.md §6-6-1) — 코어/구조 변경일 때만. 에셋 교체는 대상 아님
 ```
