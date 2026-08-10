@@ -993,6 +993,13 @@ protected:
 	 *      reload part rebuild while a slide pose is live is the realistic trigger). */
 	FTransform CachedWeaponAttachRelative = FTransform::Identity;
 
+	/** 🚧 Temporary: the equipped weapon asks to stay holstered for as long as it is held (UFPSRWeaponDataAsset::
+	 *  bForceHolsteredPose — a weapon whose first-person idle has not been authored yet, e.g. bare hands). ORs into the
+	 *  holster target alongside the movement-state reason. Deliberately does NOT gate attacking, which breaks this
+	 *  project's "stowed weapon cannot fire" pairing on purpose — see the DataAsset field's comment for the decision
+	 *  and the two rejected alternatives. Goes away by unchecking the box once an idle exists; no code change. */
+	bool bCachedForceHolsteredPose = false;
+
 	/** True only when AttachWeaponMeshes used the ik_hand_gun bone anchor for the CURRENTLY-attached weapon (as
 	 *  opposed to the socket-attach fallback — body hand, or an arms mesh with no ik_hand_gun bone). Gates
 	 *  ApplyWeaponStatePose's weapon write (the fallback path already has ADS writing the weapon's WORLD transform

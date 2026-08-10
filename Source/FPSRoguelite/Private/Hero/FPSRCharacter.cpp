@@ -2002,6 +2002,8 @@ void AFPSRCharacter::RefreshEquippedWeaponVisual()
 	// Reset the holster-pose-authored flag (§6): no weapon = nothing for RefreshWeaponVisibility's delay gate to key
 	// off, so it falls back to the legacy instant hide. Recomputed below when a weapon is actually equipped.
 	bCachedHasHolsterPose = false;
+	// Same for the temporary force-holster switch — "no weapon" must never inherit the last weapon's request.
+	bCachedForceHolsteredPose = false;
 
 	if (!Weapon)
 	{
@@ -2119,6 +2121,13 @@ void AFPSRCharacter::RefreshEquippedWeaponVisual()
 		(!CachedHipMotion.HolsterPose.Offset.IsNearlyZero() || !CachedHipMotion.HolsterPose.Tilt.IsNearlyZero())
 		&& CachedHipMotion.HolsterDuration > 0.0f;
 
+	// 🚧 Temporary (see the DataAsset field): this weapon has no authored first-person idle, so keep it holstered for
+	// as long as it is held rather than showing the arms in whatever pose the graph falls back to.
+	// Kept as its OWN cached bool rather than read straight off CachedHipMotion (where the field lives): that struct is
+	// only assigned when a weapon EXISTS and is never cleared on unequip, so reading it there would let the last
+	// weapon's request keep driving the holster alpha with nothing equipped. This one is reset in the block above.
+	bCachedForceHolsteredPose = Weapon->ProceduralWeaponMotion.bForceHolsteredPose;
+
 	// Snap (not smooth-ramp) both state alphas to whatever the CURRENT movement state already is, rather than
 	// starting them both at 0 on every equip. This runs on a weapon SWAP too (not just the first equip), and a
 	// mid-wall or mid-air swap must not replay the NEW weapon's holster-descend / airborne-rise animation from
@@ -2127,7 +2136,16 @@ void AFPSRCharacter::RefreshEquippedWeaponVisual()
 	// point doubles as the hook a future "play a holster motion ON WEAPON SWAP itself" feature would extend from
 	// (out of scope here — deliberately not built, just noted so it isn't rediscovered as a mystery gap later).
 	const UFPSRCharacterMovementComponent* SwapMove = GetFPSRMovement();
-	HolsterBlendAlpha = (SwapMove && !SwapMove->CanFireInCurrentState()) ? 1.0f : 0.0f;
+	// Holster snaps in ONE direction only — toward stowed. Snapping to 0 as well would undo the very thing this snap
+	// exists for the moment a swap happens on the ground: the alpha would jump to "drawn" and the new weapon would
+	// appear fully in-hand instead of rising into view. Letting the DRAW direction blend instead means a ground swap
+	// now reads as stow-then-draw for free (the "holster motion on weapon swap" extension previously noted here as
+	// out of scope — it falls out of this rule rather than needing its own machinery), while the wall/air case still
+	// snaps because there the state itself is continuous across the swap and replaying a descent would be the pop.
+	if (SwapMove && !SwapMove->CanFireInCurrentState())
+	{
+		HolsterBlendAlpha = 1.0f;
+	}
 	AirborneBlendAlpha = (SwapMove && SwapMove->IsFalling()) ? 1.0f : 0.0f;
 
 	// Rebuild modular cosmetic parts on the (skeletal) weapon mesh from the weapon's part list.
@@ -3005,7 +3023,11 @@ void AFPSRCharacter::ApplyWeaponStatePose(float DeltaTime)
 	// CanFireInCurrentState() — so "can I shoot" and "is the gun in my hands" can never drift apart. This pass
 	// advances the alpha, folds it into the delta below, AND (edge-detected right after) drives
 	// RefreshWeaponVisibility's holster-delay gate (§6, RefreshWeaponVisibility). HolsterDuration 0 = instant snap.
-	const bool bWantsHolster = Move && !Move->CanFireInCurrentState();
+	// Two independent reasons to be stowed, OR'd: the movement state forbids firing (wall-hang — the original reason,
+	// and the one that keeps "can I shoot" and "is the gun in my hands" in lockstep), OR 🚧 the equipped weapon asks
+	// to stay stowed because its first-person idle has not been authored yet (bForceHolsteredPose — temporary; that
+	// one deliberately does NOT gate attacking, see its DataAsset comment).
+	const bool bWantsHolster = bCachedForceHolsteredPose || (Move && !Move->CanFireInCurrentState());
 	const float HolsterRate = 1.0f / FMath::Max(CachedHipMotion.HolsterDuration, KINDA_SMALL_NUMBER);
 	const float PrevHolsterBlendAlpha = HolsterBlendAlpha;
 	HolsterBlendAlpha = FMath::FInterpConstantTo(HolsterBlendAlpha, bWantsHolster ? 1.0f : 0.0f, StateDt, HolsterRate);
@@ -3106,10 +3128,19 @@ void AFPSRCharacter::UpdateAimDownSights(float DeltaTime)
 		return;
 	}
 
-	// Nothing equipped, nothing to place. ActiveWeaponMesh is whichever mesh the weapon actually shows (skeletal firearm
-	// or static melee).
+	// ActiveWeaponMesh is whichever mesh the weapon actually shows (skeletal firearm or static melee) — and it is NULL
+	// for a weapon that shows none at all: BARE HANDS. That case still has something to place, because the ARMS are a
+	// mesh of their own and the holster layer below has to be able to lower them (measured 2026-08-10: bare hands
+	// authored "always holstered" did nothing at any offset value, because this early-out skipped the whole function
+	// and the arms simply froze at whatever transform the previously-equipped weapon left behind). So bail only when
+	// there is neither a weapon mesh NOR arms to move.
+	//
+	// Everything weapon-specific below is already gated for the no-weapon case and needs no extra guard: bAiming
+	// requires AimComp (null here) so the ADS solve is skipped, the hip block is gated on bCachedHasHipMotion, and the
+	// weapon-space branches are all behind !bSolvingArms, which cannot be taken when WeaponCarrier is null.
 	UMeshComponent* WeaponCarrier = ActiveWeaponMesh;
-	if (!WeaponCarrier)
+	const bool bArmsAvailable = bFirstPersonSplitActive && FirstPersonArms != nullptr;
+	if (!WeaponCarrier && !bArmsAvailable)
 	{
 		return;
 	}
@@ -3120,7 +3151,7 @@ void AFPSRCharacter::UpdateAimDownSights(float DeltaTime)
 	// needed no change: ADR 0002 left this as "a change to the target, not to the solve".
 	// With no arms, the weapon hangs off an animated hand and moving it alone is the only option available.
 	USceneComponent* SolveTarget = WeaponCarrier;
-	if (bFirstPersonSplitActive && FirstPersonArms)
+	if (bArmsAvailable)
 	{
 		SolveTarget = FirstPersonArms;
 	}
