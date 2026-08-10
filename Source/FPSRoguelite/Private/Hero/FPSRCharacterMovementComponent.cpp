@@ -573,6 +573,18 @@ void UFPSRCharacterMovementComponent::PhysCustom(float deltaTime, int32 Iteratio
 		return;
 	}
 
+	// Simulated proxies do not run the hold, for the same reason they don't decide it (see the role gate in
+	// UpdateCharacterStateBeforeMovement) — but they DO arrive here, because MoveSmooth routes MOVE_Custom straight to
+	// PhysCustom for proxies as well. The wall itself never reaches them: WallNormal is deliberately left at zero on a
+	// proxy (see GetWallYawForDisplay), so the glide, the stick and the lateral projection below would every one of
+	// them be computed against a zero normal, and a slip onto the floor would reach StopWallHang and drive
+	// SetMovementMode against the very mode replication is feeding in. A proxy's position on the wall is owned by
+	// replication and net smoothing; predicting it forward from here can only fight that.
+	if (CharacterOwner->GetLocalRole() == ROLE_SimulatedProxy)
+	{
+		return;
+	}
+
 	RestorePreAdditiveRootMotionVelocity();
 
 	if (!HasAnimRootMotion() && !CurrentRootMotion.HasOverrideVelocity())
@@ -772,18 +784,21 @@ void UFPSRCharacterMovementComponent::UpdateCharacterStateBeforeMovement(float D
 
 		// (2) Slope also feeds real acceleration: g * sin(angle) along the direction of travel. Accumulated separately
 		// from the curve because the curve is recomputed each frame and would wipe it out.
-		// This frame's share of that accumulation, which is all the no-curve path below is allowed to add.
-		float SlopeBonusDelta = 0.0f;
+		// This frame's contribution on its own, which is what the no-curve path below adds. Taken BEFORE the running
+		// total is clamped, deliberately: that clamp bounds a gross counter of everything the slope has ever added,
+		// while braking is removing speed the whole time, so on a long descent the counter saturates while the actual
+		// speed is still far below the ceiling. Deriving this from the clamped total would therefore switch slope
+		// acceleration off partway down a hill. What the property contract bounds is the RESULT (see
+		// SlopeAccelerationScale), and the final clamp below is what delivers that.
+		float SlopeBonusThisFrame = 0.0f;
 		if (SlopeAccelerationScale > 0.0f && !FMath::IsNearlyZero(SlopeAlignment))
 		{
 			const float GravityMagnitude = FMath::Abs(GetGravityZ());
-			const float PreviousSlopeBonus = SlideSlopeSpeedBonus;
-			SlideSlopeSpeedBonus += GravityMagnitude * SlopeAlignment * SlopeAccelerationScale * DeltaSeconds;
+			SlopeBonusThisFrame = GravityMagnitude * SlopeAlignment * SlopeAccelerationScale * DeltaSeconds;
+			SlideSlopeSpeedBonus += SlopeBonusThisFrame;
 			// Bounded both ways: downhill tops out at the slide ceiling instead of accelerating without limit, and
-			// uphill can't drive the total below zero.
+			// uphill can't drive the total below zero. Only the curve path reads this running total.
 			SlideSlopeSpeedBonus = FMath::Clamp(SlideSlopeSpeedBonus, -SlideMaxSpeed, SlideMaxSpeed);
-			// Measured AFTER the clamp, so once the bonus saturates this goes to zero and stops contributing.
-			SlopeBonusDelta = SlideSlopeSpeedBonus - PreviousSlopeBonus;
 		}
 
 		// Speed and heading are handled separately: the curve (or the braking deceleration) owns HOW FAST, this owns
@@ -822,10 +837,11 @@ void UFPSRCharacterMovementComponent::UpdateCharacterStateBeforeMovement(float D
 					TargetSpeed = FMath::Min(TargetSpeed, SlideEntrySpeed * BackwardSpeedMultiplier);
 				}
 
-				// Only this frame's increment, NOT the running total. Unlike the curve branch, this speed was written
-				// by the previous frame and so already carries every earlier increment; adding the accumulated bonus
-				// here would re-apply the whole of it once per frame and accelerate super-linearly until the cap.
-				TargetSpeed += SlopeBonusDelta;
+				// Only this frame's contribution, NOT the running total. Unlike the curve branch, this speed was
+				// written by the previous frame and so already carries every earlier contribution; adding the
+				// accumulated bonus here would re-apply the whole of it once per frame and accelerate super-linearly
+				// until the cap.
+				TargetSpeed += SlopeBonusThisFrame;
 			}
 
 			// Capped on both paths — a long descent reaches the slide's terminal speed rather than growing

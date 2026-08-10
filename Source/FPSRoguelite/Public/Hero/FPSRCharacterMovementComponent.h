@@ -81,8 +81,11 @@ public:
 	float GetStanceBlend() const { return StanceBlend; }
 
 	/** Same idea for the slide pose: 0 not sliding, 1 fully sliding, over SlideBlendDuration.
-	 *  Follows IsSlidingForDisplay(), so it is trustworthy on every role — the exact local state on the owning client
-	 *  and the server, the replicated copy on a simulated proxy. Same footing as GetStanceBlend(). */
+	 *  Follows IsSlidingForDisplay(), so it is right on every role — the exact local state on the owning client and the
+	 *  server, the replicated copy on a simulated proxy.
+	 *  NOTE for animation work: on a proxy that copy is a net-update snapshot, so a slide that both starts and ends
+	 *  between two updates (a jump-cancel is two frames) never raises this weight at all. GetSlideVisualSerial() is
+	 *  what catches those; GetStanceBlend() has no such limit. */
 	UFUNCTION(BlueprintPure, Category = "FPSR|Movement")
 	float GetSlideBlend() const { return SlideBlend; }
 
