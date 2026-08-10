@@ -108,7 +108,7 @@ TArray<FFPSRCardDraw> UFPSRCardSubsystem::DrawCards(AController* ForPlayer, int3
 	{
 		Inv = Pawn->FindComponentByClass<UFPSRWeaponInventoryComponent>();
 	}
-	const bool bHasWeapon = Inv && Inv->GetOwnedWeapons().Num() > 0;
+	const bool bHasWeapon = Inv && Inv->HasAnyOwnedWeapon();
 
 	// Flatten each eligible card into one weighted offer per OFFERED rarity. Excluded cards, behavior-fragment
 	// cards (U6/H2 routes them to UnlockableFeatures — mission/milestone only, never this level-up draw), and
@@ -161,7 +161,12 @@ TArray<FFPSRCardDraw> UFPSRCardSubsystem::DrawCards(AController* ForPlayer, int3
 	// Weighted sampling without replacement. Once an offer is picked, every remaining offer of the same card
 	// (all its tiers) and same family is removed, so a card never appears twice and families stay exclusive.
 	TArray<FFPSRCardDraw> Result;
-	Result.Reserve(Count);
+	// Bound the reservation by the candidate pool, not by the raw Count. Count reaches here straight from
+	// FPSR.DrawCards' FCString::Atoi with no validation, and it is only ever an UPPER bound on the loop below (which
+	// also stops at Candidates.Num()), so a large Count cannot change the result — it can only over-allocate.
+	// The Max(0) is not cosmetic: TArray::Reserve routes a negative size to OnInvalidArrayNum (Array.h), so
+	// "FPSR.DrawCards -1" would take down the process rather than just drawing nothing.
+	Result.Reserve(FMath::Min(FMath::Max(Count, 0), Candidates.Num()));
 	for (int32 i = 0; i < Count && Candidates.Num() > 0; ++i)
 	{
 		float TotalWeight = 0.0f;

@@ -24,6 +24,21 @@
 
 #define LOCTEXT_NAMESPACE "FPSRWeaponInventory"
 
+namespace
+{
+	/** Weapon a slot's instance actually OWNS, or null if the slot is empty or holds only its default weapon (bare
+	 *  hands). A slot's default weapon occupies the slot but was never GRANTED, so it isn't owned — letting it
+	 *  through would offer weapon cards targeting bare hands, make "the player has a weapon" true before the first
+	 *  pickup, and put it in the lobby's starting-weapon list. Single source of truth for this rule: GetOwnedWeapons,
+	 *  HasOwnedWeapon and HasAnyOwnedWeapon (below) all route through here so the rule can't drift between them
+	 *  (see the header comment on GetOwnedWeapons). */
+	UFPSRWeaponDataAsset* ResolveOwnedWeapon(const UFPSRWeaponInstance* Instance)
+	{
+		UFPSRWeaponDataAsset* Source = Instance ? Instance->GetSource() : nullptr;
+		return (Source && !Source->bExcludeFromProgression) ? Source : nullptr;
+	}
+}
+
 UFPSRWeaponInventoryComponent::UFPSRWeaponInventoryComponent()
 {
 	PrimaryComponentTick.bCanEverTick = false;
@@ -487,16 +502,40 @@ TArray<UFPSRWeaponDataAsset*> UFPSRWeaponInventoryComponent::GetOwnedWeapons() c
 	Result.Reserve(Slots.Num());
 	for (const TObjectPtr<UFPSRWeaponInstance>& Instance : Slots)
 	{
-		UFPSRWeaponDataAsset* Source = Instance ? Instance->GetSource() : nullptr;
-		// A slot's default weapon (bare hands) occupies a slot but was never GRANTED, so it isn't owned. Letting it
-		// through would offer weapon cards targeting bare hands, make "the player has a weapon" true before the first
-		// pickup, and put it in the lobby's starting-weapon list.
-		if (Source && !Source->bExcludeFromProgression)
+		if (UFPSRWeaponDataAsset* Owned = ResolveOwnedWeapon(Instance))
 		{
-			Result.Add(Source);
+			Result.Add(Owned);
 		}
 	}
 	return Result;
+}
+
+bool UFPSRWeaponInventoryComponent::HasOwnedWeapon(const UFPSRWeaponDataAsset* Weapon) const
+{
+	if (!Weapon)
+	{
+		return false;
+	}
+	for (const TObjectPtr<UFPSRWeaponInstance>& Instance : Slots)
+	{
+		if (ResolveOwnedWeapon(Instance) == Weapon)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+bool UFPSRWeaponInventoryComponent::HasAnyOwnedWeapon() const
+{
+	for (const TObjectPtr<UFPSRWeaponInstance>& Instance : Slots)
+	{
+		if (ResolveOwnedWeapon(Instance))
+		{
+			return true;
+		}
+	}
+	return false;
 }
 
 UFPSRWeaponInstance* UFPSRWeaponInventoryComponent::GetInstanceForWeapon(const UFPSRWeaponDataAsset* Weapon) const
