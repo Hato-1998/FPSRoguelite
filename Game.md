@@ -15,6 +15,7 @@
 | **`Docs/SSOT/*.md`** | 도메인별 SSOT 본문(기획·기술·구조·성능·규칙·로드맵). 섹션번호 보존 | 우리(세션) |
 | **`Docs/Specs/*.md`** | **코어/구조 작업의 헤더 수준 설계 명세**(Fable 작성 → Sonnet이 그대로 구현 → Fable이 이 문서와 대조해 판정). 템플릿 `_TEMPLATE.md`, 절차 `Docs/SSOT/Workflow.md` §6-5-2 | Fable(설계 세션) |
 | **Notion PM 보드** | **작업 현황·우선순위·선행관계·핸드오프의 SSOT**(2026-08-07 전면 이관). 프로토콜·URL = `Docs/SSOT/Workflow.md` §6-9. 보드 클레임 없이 작업 착수 금지(하드 게이트) | 모든 세션 + 사용자(PM) |
+| **Notion 마일스톤 DB** | 출시(EA→정식) 마일스톤의 **상태·진척·작업 연결**(2026-08-11 도입, §6-9 (8)). **정의·Exit Criteria 정본은 `Docs/SSOT/Roadmap.md` §7-6**(git). 🔒 일반 세션은 조회하지 않는다 — **사용자 지시 시에만** | 사용자(PM) |
 | PROGRESS.md | 보드로 안내하는 **포인터 전용**(이관 전 내용은 git 히스토리) | 거의 불변 |
 | `CLAUDE.md` / `AGENTS.md` | 진입 포인터(≤10줄). "Game.md·PM 보드 보기" + 절대금지 3줄 | 거의 불변 |
 | `GameConfirm.md` | **다른 AI가 작성**하는 리뷰/추가제안 문서. 우리는 만들지 않음(§10, `Docs/SSOT/Workflow.md`) | 외부 AI |
