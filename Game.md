@@ -39,6 +39,7 @@
 | **모든 코드 작업(필독)** — 환경·빌드·브랜치·모델정책·**PM 보드**·리뷰 | [`Docs/SSOT/Workflow.md`](Docs/SSOT/Workflow.md) | §6(+6-1~6-9), §10 |
 | **코어·구조 설계·리팩토링** — Fable 주도 4단계 + 명세 양식 | [`Docs/SSOT/Workflow.md`](Docs/SSOT/Workflow.md) §6-5-2 + [`Docs/Specs/_TEMPLATE.md`](Docs/Specs/_TEMPLATE.md) | §6-5, §6-5-2 |
 | 진행상황·로드맵·재미 게이트·플레이스홀더 전환 | [`Docs/SSOT/Roadmap.md`](Docs/SSOT/Roadmap.md) | §7(+7-1~7-5), §8 |
+| **출시 마일스톤(EA→정식)·Exit Criteria·착수 순서** | [`Docs/SSOT/Roadmap.md`](Docs/SSOT/Roadmap.md) **§7-6** + [`Docs/SSOT/Workflow.md`](Docs/SSOT/Workflow.md) §6-9 (8) | §7-6 |
 
 > 빠른 규칙: **어떤 코드 작업이든 `Workflow.md`(§6)는 먼저** 본다. 그 외엔 위 표에서 작업에 해당하는 1~2개만 읽는다.
 
@@ -80,4 +81,5 @@
 - **UE5.7 IMC 매핑은 Python `set_editor_property` 미반영 → 에디터 수동**(IA 에셋 생성은 Python OK)
 - 카드선택 = **레벨업/미션클리어 시 전역 프리즈**(적·플레이어 정지)에 전원 선택 → 재개(§2-2, `Docs/SSOT/RunFlow.md`). 오프닝 시드 2장은 런 시작 시. (라운드제·정비시간 폐지 2026-06-04)
 - 적 길찾기 = **Flow-Field(고정맵 사전계산) + 높이/유계 2층 인지**(겹친 2층=메자닌 추격 지원, 기본 `NumLayers=2`·정적맵 1회 베이크; 상세 `Docs/SSOT/Performance.md §5-2`)
-- git: 사용자 콘텐츠(L_Sandbox 맵, DA_Weapon_Rifle/Knife @ `Content/Weapons/DataTable/` 등)는 **커밋 완료**(LFS tracked, 2026-07-01 확인). 신규 콘텐츠 저작 후엔 Phase 종료 시 `git status`로 동반커밋 확인.
+- git: 사용자 콘텐츠(맵, DA_Weapon_Rifle/Knife @ `Content/Weapons/DataTable/` 등)는 **커밋 완료**(LFS tracked, 2026-07-01 확인). 신규 콘텐츠 저작 후엔 작업 단위 종료 시 `git status`로 동반커밋 확인.
+  - ⚠️ **정정 2026-08-11(레드팀)**: 종전 여기 적혀 있던 `L_Sandbox` 맵은 **실재하지 않는다.** `Content/Maps` = `L_MainMenu`·`L_Lobby`·`L_Transition`·**`Map_CyberCity`**(유일 인게임 맵)·`TestWorld`. 같은 오참조가 `Roadmap.md` §8에도 있었고 함께 정정했다.
