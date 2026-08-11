@@ -777,10 +777,13 @@ void UFPSRCharacterMovementComponent::UpdateCharacterStateBeforeMovement(float D
 		// Slope, sampled once and used for both effects below. Positive downhill, negative uphill.
 		const float SlopeAlignment = ComputeSlopeAlignment();
 
-		// (1) Slope stretches or compresses the curve's timeline. Downhill the decay plays in slow motion, so the slide
-		// lasts as long as the hill does rather than expiring at the curve's authored length; uphill it runs out early.
-		const float SlopeTimeScale = FMath::Max(0.0f, 1.0f - (SlopeAlignment * SlopeTimeInfluence));
-		SlideElapsed += DeltaSeconds * SlopeTimeScale;
+		// (1) Slope stretches or compresses the curve's timeline. A gentle downhill plays the decay in slow motion; a
+		// steep one (past sin(angle) = 1/SlopeTimeInfluence) drives the scale negative and the timer REWINDS toward
+		// zero, restoring duration — and through the curve, speed — for as long as the hill lasts. Uphill runs out
+		// early. The scale is one straight line, so slowdown, freeze and rewind meet with no seam at the threshold;
+		// the rewind is bounded below so a cliff-steep slope can't snap the timer back instantly.
+		const float SlopeTimeScale = FMath::Max(-SlideSlopeTimeRecoveryCap, 1.0f - (SlopeAlignment * SlopeTimeInfluence));
+		SlideElapsed = FMath::Max(0.0f, SlideElapsed + DeltaSeconds * SlopeTimeScale);
 
 		// (2) Slope also feeds real acceleration: g * sin(angle) along the direction of travel. Accumulated separately
 		// from the curve because the curve is recomputed each frame and would wipe it out.
@@ -853,7 +856,10 @@ void UFPSRCharacterMovementComponent::UpdateCharacterStateBeforeMovement(float D
 		}
 
 		// Exits, in the order they matter. The elapsed-time bound is invariant 7's guarantee: a downhill slide that
-		// keeps regaining speed would otherwise never satisfy the speed exit and the state would be inescapable.
+		// keeps regaining speed would otherwise never satisfy the speed exit and the state would be inescapable. A
+		// steep downhill only DEFERS it — the slope block above rewinds the timer frame by frame, the same shape as
+		// wall-hang's "is the wall still there" — so once the hill ends the timer resumes and this exit is
+		// unconditional again, with crouch-release, leaving the ground and the gate live the whole way down.
 		const bool bReleasedCrouch = !bWantsToCrouch;
 		const bool bLeftGround = !IsMovingOnGround();
 		const bool bTooSlow = Velocity.SizeSquared2D() < FMath::Square(SlideMinSpeed);
