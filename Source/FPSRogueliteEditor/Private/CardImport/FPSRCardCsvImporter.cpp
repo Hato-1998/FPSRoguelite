@@ -569,19 +569,24 @@ namespace
 			case EFPSRCardRoute::LevelUpWeapon:
 			case EFPSRCardRoute::MissionClearWeaponFeature:
 			{
-				UFPSRWeaponDataAsset* Weapon = FindWeaponByAssetName(WeaponAssets, Row.OwnerWeapon);
-				if (!Weapon)
+				// Target set = UNION over every weapon in OwnerWeapons (§5/C2 2026-08-13) — a card wired into
+				// several weapons' pools at once must stay wired into all of them, not just the first.
+				for (const FString& OwnerWeaponName : Row.OwnerWeapons)
 				{
-					OutErrors.Add(FString::Printf(TEXT("Import: card '%s' OwnerWeapon '%s' does not resolve to a UFPSRWeaponDataAsset asset."), *Row.CardId.ToString(), *Row.OwnerWeapon));
-					continue;
-				}
-				if (Row.Route == EFPSRCardRoute::LevelUpWeapon)
-				{
-					TargetWeaponCards.FindOrAdd(Weapon).Add(Card);
-				}
-				else
-				{
-					TargetUnlockableFeatures.FindOrAdd(Weapon).Add(Card);
+					UFPSRWeaponDataAsset* Weapon = FindWeaponByAssetName(WeaponAssets, OwnerWeaponName);
+					if (!Weapon)
+					{
+						OutErrors.Add(FString::Printf(TEXT("Import: card '%s' OwnerWeapon '%s' does not resolve to a UFPSRWeaponDataAsset asset."), *Row.CardId.ToString(), *OwnerWeaponName));
+						continue;
+					}
+					if (Row.Route == EFPSRCardRoute::LevelUpWeapon)
+					{
+						TargetWeaponCards.FindOrAdd(Weapon).Add(Card);
+					}
+					else
+					{
+						TargetUnlockableFeatures.FindOrAdd(Weapon).Add(Card);
+					}
 				}
 				break;
 			}

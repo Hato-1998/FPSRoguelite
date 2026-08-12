@@ -76,8 +76,11 @@ bool FFPSRCardCsvSchemaMultiEffectTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("two-row catalog parses"), FPSRCardCsv::ParseCatalog(CatalogCsv, CatalogResult));
 	TestEqual(TEXT("catalog has 2 rows"), CatalogResult.Catalog.Num(), 2);
 
+	// OwnerWeapon is also exercised here as a multi-weapon semicolon list (§5/C2 2026-08-13 — a card wired into
+	// several weapons' pools at once, e.g. content shared across Rifle and SMG, must round-trip as a LIST not a
+	// single value or the migration collapses real multi-weapon membership).
 	const FString CardsCsv = CardsHeaderCardCsvSchemaTest + TEXT("\n")
-		+ TEXT("Card.FireRateMagTradeoff,DA_Card_FireRate_MagTradeoff,Weapon,LevelUpWeapon,DA_Weapon_Rifle,1.0,Card.Family.RifleTradeoff,연사+/장탄-,Fire+/Mag-,連射+/弾-,,,,")
+		+ TEXT("Card.FireRateMagTradeoff,DA_Card_FireRate_MagTradeoff,Weapon,LevelUpWeapon,DA_Weapon_Rifle;DA_Weapon_SMG,1.0,Card.Family.RifleTradeoff,연사+/장탄-,Fire+/Mag-,連射+/弾-,,,,")
 		+ TEXT("weapon.firerate,,C:0.05;R:0.10,weapon.magsize,Op=Additive;ThisWeaponOnly=true,C:-2;R:-4,,,");
 
 	FFPSRCardCsvParseResult Result;
@@ -89,7 +92,12 @@ bool FFPSRCardCsvSchemaMultiEffectTest::RunTest(const FString& Parameters)
 	if (Result.Cards.Num() == 1)
 	{
 		const FFPSRCardCsvRow& Row = Result.Cards[0];
-		TestEqual(TEXT("OwnerWeapon carried through for a weapon route"), Row.OwnerWeapon, FString(TEXT("DA_Weapon_Rifle")));
+		TestEqual(TEXT("OwnerWeapon semicolon list parses into 2 entries"), Row.OwnerWeapons.Num(), 2);
+		if (Row.OwnerWeapons.Num() == 2)
+		{
+			TestEqual(TEXT("OwnerWeapons[0]"), Row.OwnerWeapons[0], FString(TEXT("DA_Weapon_Rifle")));
+			TestEqual(TEXT("OwnerWeapons[1]"), Row.OwnerWeapons[1], FString(TEXT("DA_Weapon_SMG")));
+		}
 		TestEqual(TEXT("two effect columns used (E1+E2)"), Row.Effects.Num(), 2);
 		if (Row.Effects.Num() == 2)
 		{

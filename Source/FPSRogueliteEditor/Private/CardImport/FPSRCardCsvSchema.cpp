@@ -251,9 +251,22 @@ bool FPSRCardCsv::ParseCards(const FString& CardsCsvText, const TArray<FFPSRCard
 			}
 		}
 
-		// OwnerWeapon — required when Route is a weapon route (§5 interface sketch).
-		Row.OwnerWeapon = GetCell(Cells, 4);
-		if (bRouteRequiresWeapon && Row.OwnerWeapon.IsEmpty())
+		// OwnerWeapon — semicolon-separated weapon-DA-asset-name list; required when Route is a weapon route
+		// (§5 interface sketch, C2 2026-08-13 — preserves cards wired into multiple weapons' pools at once).
+		{
+			const FString OwnerWeaponCell = GetCell(Cells, 4);
+			TArray<FString> RawEntries;
+			OwnerWeaponCell.ParseIntoArray(RawEntries, TEXT(";"), /*InCullEmpty=*/true);
+			for (FString& Entry : RawEntries)
+			{
+				Entry.TrimStartAndEndInline();
+				if (!Entry.IsEmpty())
+				{
+					Row.OwnerWeapons.Add(Entry);
+				}
+			}
+		}
+		if (bRouteRequiresWeapon && Row.OwnerWeapons.Num() == 0)
 		{
 			InOut.Errors.Add(FString::Printf(TEXT("%s:%d OwnerWeapon: empty but Route requires a weapon (LevelUpWeapon/MissionClearWeaponFeature)."), *FileTag, SourceRow));
 		}

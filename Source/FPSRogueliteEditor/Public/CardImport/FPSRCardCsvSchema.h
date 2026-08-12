@@ -12,7 +12,9 @@ struct FFPSRCardCsvRow
 	FString  AssetName;                 // DA_Card_<Group>_<Theme> 린트 대상. 필수
 	ECardGroup Group = ECardGroup::Character;
 	EFPSRCardRoute Route = EFPSRCardRoute::LevelUpGlobal;
-	FString  OwnerWeapon;               // 무기 루트(LevelUpWeapon/MissionClearWeaponFeature)일 때 무기 DA 에셋명. 그 외 빈칸
+	TArray<FString> OwnerWeapons;       // 무기 루트(LevelUpWeapon/MissionClearWeaponFeature)일 때 무기 DA 에셋명 세미콜론 리스트
+	                                     // (CSV 컬럼명은 OwnerWeapon 유지, 값만 "DA_Weapon_Rifle;DA_Weapon_SMG" 리스트 — 다중 무기
+	                                     // 풀 동시 소속 보존, §5/C2 2026-08-13). 그 외 루트는 빈 배열.
 	float    Weight = 1.0f;
 	FName    Family;                    // 공란 = E1 AttrId에서 파생(§2-3-2 v3)
 	FString  DisplayName[3];            // ko,en,ja (ST_Card.csv 원천 — DA에는 FromStringTable 참조가 들어간다)
@@ -40,7 +42,8 @@ struct FFPSRCardCsvParseResult { TArray<FFPSRCardCsvRow> Cards; TArray<FFPSRCard
 namespace FPSRCardCsv
 {
 	/** CSV 텍스트 → 구조체. 검사: 헤더 정확 일치, CardId/AttrId 유일, enum 파싱, Tiers 문법(레어도 이니셜 C/R/E/L,
-	 *  중복 금지, magnitude=float), E*_Attr가 카탈로그에 존재, 무기 루트인데 OwnerWeapon 공란, 효과 0개 카드. */
+	 *  중복 금지, magnitude=float), E*_Attr가 카탈로그에 존재, 무기 루트인데 OwnerWeapon(세미콜론 리스트) 공란,
+	 *  효과 0개 카드. OwnerWeapon 파싱: 세미콜론 분리 → 트림 → 빈 항목 제거. */
 	FPSROGUELITEEDITOR_API bool ParseCards(const FString& CardsCsvText, const TArray<FFPSRCardCatalogRow>& Catalog, FFPSRCardCsvParseResult& InOut);
 	FPSROGUELITEEDITOR_API bool ParseCatalog(const FString& CatalogCsvText, FFPSRCardCsvParseResult& InOut);
 }

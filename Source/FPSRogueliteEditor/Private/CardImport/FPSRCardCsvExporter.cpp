@@ -337,7 +337,9 @@ namespace
 	struct FMembership
 	{
 		EFPSRCardRoute Route = EFPSRCardRoute::LevelUpGlobal;
-		FString OwnerWeapon;
+		TArray<FString> OwnerWeapons; // only meaningful for LevelUpWeapon/MissionClearWeaponFeature — accumulates
+		                              // EVERY weapon this card is wired into under that route (§5/C2 2026-08-13:
+		                              // a single OwnerWeapon collapsed real multi-weapon-shared cards — no-regression fix).
 		bool bFound = false;
 	};
 
@@ -373,25 +375,32 @@ namespace
 	{
 		IAssetRegistry& AssetRegistry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
 
+		// Accumulates EVERY weapon a card is wired into under a CONSISTENT route (§5/C2): the first route seen for
+		// a card is canonical; a later membership under a DIFFERENT route is a genuine wiring conflict (structurally
+		// possible — nothing stops a card being added to both WeaponCards and UnlockableFeatures — but not seen in
+		// current content) and is warned + skipped rather than silently picked. Same-route memberships across
+		// multiple weapons are the expected, common case this exists to preserve.
 		auto RecordMembership = [&OutMap, &OutWarnings](const UFPSRCardDataAsset* Card, EFPSRCardRoute Route, const FString& OwnerWeapon)
 		{
 			if (!Card)
 			{
 				return;
 			}
-			if (FMembership* Existing = OutMap.Find(Card))
+			FMembership& M = OutMap.FindOrAdd(Card);
+			if (!M.bFound)
 			{
-				if (Existing->bFound)
-				{
-					OutWarnings.Add(FString::Printf(TEXT("Export: card '%s' is wired into more than one pool/weapon array — using the first membership found, later ones ignored."), *Card->GetName()));
-					return;
-				}
+				M.Route = Route;
+				M.bFound = true;
 			}
-			FMembership M;
-			M.Route = Route;
-			M.OwnerWeapon = OwnerWeapon;
-			M.bFound = true;
-			OutMap.Add(Card, M);
+			else if (M.Route != Route)
+			{
+				OutWarnings.Add(FString::Printf(TEXT("Export: card '%s' is wired into pools/weapons under DIFFERENT routes — using the first route found, this membership (weapon '%s') ignored."), *Card->GetName(), *OwnerWeapon));
+				return;
+			}
+			if (!OwnerWeapon.IsEmpty())
+			{
+				M.OwnerWeapons.AddUnique(OwnerWeapon);
+			}
 		};
 
 		FARFilter PoolFilter;
@@ -464,7 +473,8 @@ bool FPSRCardCsvExport::ExportAll(const FString& OutCardsCsvPath, const FString&
 
 	struct FOutputCardRow
 	{
-		FString CardId, AssetName, Group, Route, OwnerWeapon, Weight, Family;
+		FString CardId, AssetName, Group, Route, Weight, Family;
+		TArray<FString> OwnerWeapons; // joined with ';' at CSV-write time
 		FString DisplayName[3];
 		FString Description[3];
 		struct FEffectCell { FString AttrId, Override, Tiers; };
@@ -497,7 +507,7 @@ bool FPSRCardCsvExport::ExportAll(const FString& OutCardsCsvPath, const FString&
 		if (Found && Found->bFound)
 		{
 			Row.Route = StaticEnum<EFPSRCardRoute>()->GetNameStringByValue(static_cast<int64>(Found->Route));
-			Row.OwnerWeapon = Found->OwnerWeapon;
+			Row.OwnerWeapons = Found->OwnerWeapons;
 		}
 		else
 		{
@@ -511,13 +521,15 @@ bool FPSRCardCsvExport::ExportAll(const FString& OutCardsCsvPath, const FString&
 			const TArray<EFPSRCardRoute> Eligible = FFPSRDataEditorHelpers::GetCardEligibleRoutes(Card);
 			const EFPSRCardRoute FallbackRoute = Eligible.Num() > 0 ? Eligible[0] : EFPSRCardRoute::LevelUpGlobal;
 			Row.Route = StaticEnum<EFPSRCardRoute>()->GetNameStringByValue(static_cast<int64>(FallbackRoute));
+			FString PlaceholderWeaponForLog;
 			if (FallbackRoute == EFPSRCardRoute::LevelUpWeapon || FallbackRoute == EFPSRCardRoute::MissionClearWeaponFeature)
 			{
-				Row.OwnerWeapon = FindPlaceholderOwnerWeaponName();
+				PlaceholderWeaponForLog = FindPlaceholderOwnerWeaponName();
+				Row.OwnerWeapons.Add(PlaceholderWeaponForLog);
 			}
 			Warnings.Add(FString::Printf(TEXT("Export: card '%s' is not wired into any card pool or weapon — exported with a best-guess Route (%s%s%s) derived from its own effect eligibility; re-wire or delete it."),
 				*Card->GetName(), *Row.Route,
-				Row.OwnerWeapon.IsEmpty() ? TEXT("") : TEXT(", OwnerWeapon="), *Row.OwnerWeapon));
+				PlaceholderWeaponForLog.IsEmpty() ? TEXT("") : TEXT(", OwnerWeapon="), *PlaceholderWeaponForLog));
 		}
 
 		SplitMigrationText(Card->DisplayName, Row.DisplayName);
@@ -611,8 +623,14 @@ bool FPSRCardCsvExport::ExportAll(const FString& OutCardsCsvPath, const FString&
 
 		for (const FOutputCardRow& Row : OutputRows)
 		{
+			// Deterministic weapon order (round-trip stability — AssetRegistry enumeration order is not guaranteed
+			// stable across runs/machines): sort before joining into the CSV's ';'-separated OwnerWeapon cell.
+			TArray<FString> SortedOwnerWeapons = Row.OwnerWeapons;
+			SortedOwnerWeapons.Sort();
+			const FString OwnerWeaponCell = FString::Join(SortedOwnerWeapons, TEXT(";"));
+
 			TArray<FString> Cells = {
-				Row.CardId, Row.AssetName, Row.Group, Row.Route, Row.OwnerWeapon, Row.Weight, Row.Family,
+				Row.CardId, Row.AssetName, Row.Group, Row.Route, OwnerWeaponCell, Row.Weight, Row.Family,
 				Row.DisplayName[0], Row.DisplayName[1], Row.DisplayName[2],
 				Row.Description[0], Row.Description[1], Row.Description[2]
 			};
