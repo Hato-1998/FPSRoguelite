@@ -106,6 +106,7 @@ struct FFPSRCardCsvParseResult;
 struct FFPSRCardImportResult
 {
     int32 CreatedCount = 0, UpdatedCount = 0, UnchangedCount = 0;   // Unchanged = 무접촉(dirty 아님) — 멱등의 관측값
+    int32 RemovedMembershipCount = 0;                                // 선언적 동기화가 제거한 풀/무기 멤버십 수(레드팀 P3-⑪ — 다이얼로그 표기)
     TArray<FString> Errors;                                          // 파싱+해석+검증 게이트 오류 전부
     bool Succeeded() const { return Errors.Num() == 0; }
 };
@@ -151,7 +152,7 @@ FName CardFamily;
 - 에셋 경로 = `/Game/Cards/` 하위 **기존 에셋 우선**: AssetRegistry에서 `CardId` 일치 DA 탐색(1순위) → 없으면 `AssetName` 일치(2순위, CardId를 새로 기록) → 둘 다 없으면 `/Game/Cards/Imported/<AssetName>` 신규 생성(기존 폴더 구조는 옮기지 않는다 — 리네임/이동 금지).
 - Instanced 효과 재사용: 인덱스 i의 기존 `Effects[i]`가 목표 클래스와 같으면 in-place 프로퍼티 갱신, 다르면 `Rename(트래시)`→`NewObject`(Outer=카드 DA, 이름 `Effect_<i>`). 배열 길이 축소 시 잉여 효과 트래시.
 - Tiers → `RarityTiers` 배열(레어도 오름차순 정렬 기록 — 순서까지 결정적이어야 diff 0). `OfferRarities`는 기존 `RefreshOfferRarities()` 경로(PostEditChangeProperty) 재사용.
-- DisplayName/Description: `FText::FromStringTable(TEXT("Card"), FString::Printf(TEXT("%s.DisplayName"), *CardId.ToString()))` — **비교도 테이블 참조 여부+키로**(FText 값 비교 금지; 멱등 판정용 헬퍼 필요).
+- DisplayName/Description: `FText::FromStringTable(TEXT("Card"), FString::Printf(TEXT("%s.DisplayName"), *CardId.ToString()))` — **비교도 테이블 참조 여부+키로**(FText 값 비교 금지; 멱등 판정용 헬퍼 필요). **3개 언어 컬럼 전부 공란이면 `FText::GetEmpty()` 기록**(레드팀 P2-① — ST_Card.csv 키 생성 규칙과 1:1: 키 없는 참조 = `<MISSING STRING TABLE ENTRY>` UI 노출 금지).
 - `ST_Card.csv` 재생성: Cards.csv의 ko/en/ja 컬럼 → `Key,SourceString,en,ja` 전체 재작성(`Debug.LocSmoke` 시드 행 보존). LOC0 규약(따옴표 최소·BOM 없음).
 - 풀 멤버십: Route별 목표 집합을 CSV에서 구성 → `UFPSRCardPoolDataAsset.Cards/WeaponUnlockCards`·무기 DA `WeaponCards/UnlockableFeatures`를 **선언적으로 일치**시킨다(추가+제거 모두; CSV에 없는 기존 멤버 제거는 경고 로그 동반). OwnerWeapon 해석 = AssetRegistry 에셋명 매칭. **무기 루트 카드의 목표 집합은 OwnerWeapons 리스트의 전 무기에 대한 합집합**(다중 소속 보존 — 무회귀).
 - 검증 게이트: 접촉(생성/갱신) 에셋 전부 + 멤버십이 바뀐 풀/무기 DA에 `IsDataValid`, 이어서 `FPSRCardPoolValidator` 계열 크로스체크 호출. 오류 = Errors에 수집, `bSaveAssets`여도 해당 에셋 미저장.
@@ -214,8 +215,19 @@ FName CardFamily;
 | 7 | PIE / 사용자 스모크 | 카드 추첨 3장 표시(멀티이펙트 포함)·선택 적용·툴팁 자동설명 ko/en/ja·무기 해금 오퍼·family 상호배제(같은 속성 2장 동시 제시 없음) |
 | 8 | 시트 왕복 | Cards/CardCatalog 시트 시딩 후 `sync-authoring-csv.ps1` → 임포트 → diff 0 |
 
-## 13. 레드팀 지적 원장 (C3에서 채운다)
+## 13. 레드팀 지적 원장 (C3, 2026-08-13)
 
-| 심각도 | 지적 | 처리 | 근거 |
+**레드팀에 무엇을 줬나**: `git diff main..HEAD`(9커밋·57파일) · 이 명세 · SSOT §2-3-10/§2-3-2 · `Docs/InternalRedTeamReview.md` 프라이머 · 리포+엔진 소스. 판정: **P1 0 / P2 7 / P3 9**.
+
+| 심각도 | 지적 (요약) | 처리 | 근거/수정 |
 |---|---|---|---|
-| | | | |
+| P2-① | Description 공란 카드 11장 → 미존재 키 참조 = UI `<MISSING STRING TABLE ENTRY>` 노출(StringTableCore.cpp:84-88 확정) | **수용·수정** | 3언어 전부 공란 = `FText::GetEmpty()`(§5 개정) — ST_Card 키 생성 규칙과 1:1 |
+| P2-② | 해석 오류 카드가 혼합 상태로 저장(옛 클래스+새 티어) — §6 "오류 에셋 미저장" 위반 | **수용·수정** | 행 오류 카드 = 저장·멤버십 제외 |
+| P2-③ | 검증 실패 신규 카드 미저장인데 풀은 그 참조를 담아 저장 → 온디스크 dangling | **수용·수정** | 실패 카드 멤버십 제거 후 재동기화 |
+| P2-④ | SavePackages 실패를 exit 0으로 삼킴(반환값 폐기) | **수용·수정** | 반환 검사 → Errors 편입 |
+| P2-⑤ | AssetName 중복 시 뒷행이 앞행 카드 무음 하이재킹(CardId 덮어씀 — 세이브 키 파괴) | **수용·수정** | 파서 AssetName 유일성 검사 |
+| P2-⑥ | `Effect_<i>` NewObject가 동명·타클래스 잔존 서브오브젝트와 충돌 시 엔진 Fatal(UObjectGlobals.cpp:3656) | **수용·수정** | StaticFindObject 선(先)트래시 |
+| P2-⑦ | Family 자동 파생이 FireRate·RecoilVertical의 AllWeapon/ThisWeapon 쌍에 **신규 상호배제** 도입(main 대비 거동 변화) | **기각(의도 판정)** | SSOT §2-3-2 v3 = "같은 속성 = 한 제시 1장"이 사용자 확정 기본안(보드 로그 2026-08-12 피드백) — 자동 파생의 목적 그 자체. 영향 쌍 2건을 여기 명시, 사용자 최종 확인 대기(뒤집으려면 해당 카드 Family 명시 옵트아웃 = 시트 셀 2개) |
+| P3 ⑦~⑪ | Weight≤0 경고 / 비무기 루트+OwnerWeapon 경고 / CardId 중복 타이브레이크 / 라운드트립 주석·dirty 계수 / 제거 건수 다이얼로그 집계 | **수용·수정(경량 동승)** | 수정 배치에 포함 |
+| P3 잔여 | 익스포터 메뉴 상시 노출 가드 / 익스포터 조기 반환 시 경고 미도달 / stale OfferRarities 미치유 / **머지 시 타 브랜치 미재저장 uasset의 CardFamily 태그→FName 무음 드롭**(PropertyName.cpp:88-108) | **후속(보류)** | 마지막 항목은 머지 체크리스트에 반영: 머지 직후 validate-data 전수 + 카드 재임포트 1회로 그물질 |
+| 범위 밖 | FireRate_ThisWeapon이 Knife(근접) 풀에도 소속 — 기획 의도 확인 감 | 사용자 확인 항목 | 기존 콘텐츠 유래(파이프라인 무관) |
