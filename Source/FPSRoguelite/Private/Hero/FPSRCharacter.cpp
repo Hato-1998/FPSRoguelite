@@ -2179,6 +2179,43 @@ void AFPSRCharacter::RefreshEquippedWeaponVisual()
 	// Rebuild modular cosmetic parts on the (skeletal) weapon mesh from the weapon's part list.
 	RefreshWeaponPartComponents(Weapon);
 
+	// An ADS weapon whose AimSocket can't actually resolve fails completely silently today: the bAiming gate in
+	// UpdateAimDownSights just goes false, but IsADSFOVActive (which drives the FOV zoom) is AimSocket-independent,
+	// so the camera still zooms in while the sight never lines up — reads as "ADS works but is off" instead of the
+	// DA misconfiguration it actually is. Checked once per equip, right here (not in the per-frame bAiming gate,
+	// which is a hot path): this is the first point where the answer is knowable, because CachedAimComponent is only
+	// resolved by RefreshWeaponPartComponents just above (RebuildPartsFromSelection finds the part carrying
+	// AimSocket, or leaves it null to fall back to the receiver — the same resolution UpdateAimDownSights's AimComp
+	// uses). Gated to the owning client only: RefreshEquippedWeaponVisual runs on EVERY machine (server + every
+	// observer, per this function's own header comment), but CachedAimSocket/CachedAimComponent are read only by
+	// UpdateAimDownSights, which is itself owner-local-only (its own early-out: !IsLocallyControlled() || ... ||
+	// NM_DedicatedServer) — warning from the server or a remote sim proxy here would just duplicate the same report
+	// once per connected machine for state nobody there ever reads.
+	if (IsLocallyControlled() && bCachedHasADS)
+	{
+		if (CachedAimSocket.IsNone())
+		{
+			UE_LOG(LogFPSR, Warning, TEXT("%s: '%s' has ADS enabled but no AimSocket is set — ADS will FOV-zoom without the sight ever aligning."),
+				*GetName(), *Weapon->GetName());
+		}
+		else
+		{
+			// Same fallback UpdateAimDownSights uses for its own AimComp: prefer the part carrying AimSocket, else
+			// the receiver (ActiveWeaponMesh, already set above by the SkelMesh/StaticMesh assignment this function did earlier).
+			UMeshComponent* ResolvedAimComp = CachedAimComponent;
+			if (!ResolvedAimComp)
+			{
+				ResolvedAimComp = ActiveWeaponMesh;
+			}
+			if (!ResolvedAimComp || !ResolvedAimComp->DoesSocketExist(CachedAimSocket))
+			{
+				UE_LOG(LogFPSR, Warning, TEXT("%s: '%s' AimSocket '%s' not found on %s — ADS will FOV-zoom without the sight ever aligning."),
+					*GetName(), *Weapon->GetName(), *CachedAimSocket.ToString(),
+					ResolvedAimComp ? *ResolvedAimComp->GetName() : TEXT("<no weapon mesh>"));
+			}
+		}
+	}
+
 	// Optional equip montage on the body. This function runs on every machine, so the swap now reads for remote
 	// observers too instead of being an owner-only flourish (one mesh, one anim graph — invariant 4).
 	if (BodyMesh && !Weapon->EquipMontage.IsNull())

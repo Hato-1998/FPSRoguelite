@@ -15,6 +15,7 @@
 | **`Docs/SSOT/*.md`** | 도메인별 SSOT 본문(기획·기술·구조·성능·규칙·로드맵). 섹션번호 보존 | 우리(세션) |
 | **`Docs/Specs/*.md`** | **코어/구조 작업의 헤더 수준 설계 명세**(Fable 작성 → Sonnet이 그대로 구현 → Fable이 이 문서와 대조해 판정). 템플릿 `_TEMPLATE.md`, 절차 `Docs/SSOT/Workflow.md` §6-5-2 | Fable(설계 세션) |
 | **Notion PM 보드** | **작업 현황·우선순위·선행관계·핸드오프의 SSOT**(2026-08-07 전면 이관). 프로토콜·URL = `Docs/SSOT/Workflow.md` §6-9. 보드 클레임 없이 작업 착수 금지(하드 게이트) | 모든 세션 + 사용자(PM) |
+| **Notion 마일스톤 DB** | 출시(EA→정식) 마일스톤의 **상태·진척·작업 연결**(2026-08-11 도입, §6-9 (8)). **정의·Exit Criteria 정본은 `Docs/SSOT/Roadmap.md` §7-6**(git). 🔒 일반 세션은 조회하지 않는다 — **사용자 지시 시에만** | 사용자(PM) |
 | PROGRESS.md | 보드로 안내하는 **포인터 전용**(이관 전 내용은 git 히스토리) | 거의 불변 |
 | `CLAUDE.md` / `AGENTS.md` | 진입 포인터(≤10줄). "Game.md·PM 보드 보기" + 절대금지 3줄 | 거의 불변 |
 | `GameConfirm.md` | **다른 AI가 작성**하는 리뷰/추가제안 문서. 우리는 만들지 않음(§10, `Docs/SSOT/Workflow.md`) | 외부 AI |
@@ -39,6 +40,7 @@
 | **모든 코드 작업(필독)** — 환경·빌드·브랜치·모델정책·**PM 보드**·리뷰 | [`Docs/SSOT/Workflow.md`](Docs/SSOT/Workflow.md) | §6(+6-1~6-9), §10 |
 | **코어·구조 설계·리팩토링** — Fable 주도 4단계 + 명세 양식 | [`Docs/SSOT/Workflow.md`](Docs/SSOT/Workflow.md) §6-5-2 + [`Docs/Specs/_TEMPLATE.md`](Docs/Specs/_TEMPLATE.md) | §6-5, §6-5-2 |
 | 진행상황·로드맵·재미 게이트·플레이스홀더 전환 | [`Docs/SSOT/Roadmap.md`](Docs/SSOT/Roadmap.md) | §7(+7-1~7-5), §8 |
+| **출시 마일스톤(EA→정식)·Exit Criteria·착수 순서** | [`Docs/SSOT/Roadmap.md`](Docs/SSOT/Roadmap.md) **§7-6** + [`Docs/SSOT/Workflow.md`](Docs/SSOT/Workflow.md) §6-9 (8) | §7-6 |
 
 > 빠른 규칙: **어떤 코드 작업이든 `Workflow.md`(§6)는 먼저** 본다. 그 외엔 위 표에서 작업에 해당하는 1~2개만 읽는다.
 
@@ -80,4 +82,6 @@
 - **UE5.7 IMC 매핑은 Python `set_editor_property` 미반영 → 에디터 수동**(IA 에셋 생성은 Python OK)
 - 카드선택 = **레벨업/미션클리어 시 전역 프리즈**(적·플레이어 정지)에 전원 선택 → 재개(§2-2, `Docs/SSOT/RunFlow.md`). 오프닝 시드 2장은 런 시작 시. (라운드제·정비시간 폐지 2026-06-04)
 - 적 길찾기 = **Flow-Field(고정맵 사전계산) + 높이/유계 2층 인지**(겹친 2층=메자닌 추격 지원, 기본 `NumLayers=2`·정적맵 1회 베이크; 상세 `Docs/SSOT/Performance.md §5-2`)
-- git: 사용자 콘텐츠(L_Sandbox 맵, DA_Weapon_Rifle/Knife @ `Content/Weapons/DataTable/` 등)는 **커밋 완료**(LFS tracked, 2026-07-01 확인). 신규 콘텐츠 저작 후엔 Phase 종료 시 `git status`로 동반커밋 확인.
+- git: 사용자 콘텐츠(맵, DA_Weapon_Rifle/Knife @ `Content/Weapons/DataTable/` 등)는 **커밋 완료**(LFS tracked, 2026-07-01 확인). 신규 콘텐츠 저작 후엔 작업 단위 종료 시 `git status`로 동반커밋 확인.
+  - ⚠️ **정정 2026-08-11(레드팀)**: 종전 여기 적혀 있던 `L_Sandbox` 맵은 **실재하지 않는다.** `Content/Maps` = `L_MainMenu`·`L_Lobby`·`L_Transition`·**`Map_CyberCity`**(유일 인게임 맵)·`TestWorld`. 같은 오참조가 `Roadmap.md` §8에도 있었고 함께 정정했다.
+  - 🔄 **갱신 2026-08-12(맵1 교체 P1, 커밋 `dca19b4e`)**: `Map_CyberCity` **삭제 완료** → 유일 인게임 맵 = **`L_Map1_City`**(Fab Synthwave City Kit 데모맵 기반). 현행 `Content/Maps` = `L_MainMenu`·`L_Lobby`·`L_Transition`·**`L_Map1_City`**·`TestWorld`. `Config/DefaultGame.ini` 의 `RunMap`·`MapsToCook` 도 함께 교체됐다.

@@ -113,11 +113,22 @@ public:
 	UFUNCTION(BlueprintPure, Category = "FPSR|Weapon")
 	UFPSRWeaponInstance* GetCurrentInstance() const;
 
-	/** Weapons the player actually OWNS, in slot order. Slot default weapons (bare hands) are excluded via their DA's
-	 *  bExcludeFromProgression, so they can't seed the card pool, can't satisfy a "player has a weapon" check and
-	 *  can't be offered as a lobby starting weapon. */
+	/** Weapons the player actually OWNS, in slot order. The ownership rule (a slot's default weapon, e.g. bare hands,
+	 *  doesn't count) lives in one place — see ResolveOwnedWeapon in the .cpp — and GetOwnedWeapons, HasOwnedWeapon
+	 *  and HasAnyOwnedWeapon below all route through it, so the rule can't drift between the three. Prefer
+	 *  HasOwnedWeapon / HasAnyOwnedWeapon when a yes/no answer is all that's needed — they skip this array entirely. */
 	UFUNCTION(BlueprintPure, Category = "FPSR|Weapon")
 	TArray<UFPSRWeaponDataAsset*> GetOwnedWeapons() const;
+
+	/** Scalar equivalent of GetOwnedWeapons().Contains(Weapon) that never allocates the array — same shared
+	 *  ownership rule (see GetOwnedWeapons above). False if Weapon is null. */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Weapon")
+	bool HasOwnedWeapon(const UFPSRWeaponDataAsset* Weapon) const;
+
+	/** Scalar equivalent of GetOwnedWeapons().Num() > 0 that never allocates the array — same shared ownership rule
+	 *  (see GetOwnedWeapons above). */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Weapon")
+	bool HasAnyOwnedWeapon() const;
 
 	/** Owned weapon instance whose source DataAsset matches Weapon (any slot, equipped or not). null if not owned.
 	 *  Lets weapon-scope cards apply to their source weapon rather than the currently equipped one. */

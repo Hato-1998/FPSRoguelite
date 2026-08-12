@@ -22,13 +22,20 @@
 | 적 NetCull | **P-H 구현**(2026-07-10): 멀티슬롯 유니파이드 = footprint 버블 균일 `R=max(무기사거리, min(무기사거리+seam, 슬롯대각+seam))`(현 132m 슬롯 ≈140m, 현 200m 대비 relevant 면적 ~2배↓); 단일맵 = ctor 기본 200m(BP `NetCullRadius` per-archetype 튜닝, BeginPlay 반영) | 대칭 거리컬이라 seam-only 불가(자기슬롯 완전커버 ⟺ 이웃 slot bleed) → **RepGraph=진짜 공간 relevancy 해법·별도 후속**(단계서 per-acquire 반경 적 재-bucket 필요). 클라 far-slot/seam 팝인=수용 D3 한계. 대역폭 PIE 실측=사용자 |
 | 적 NetUpdateFrequency | 위협도별 S0 30Hz / S1 10Hz / S2 5Hz / S3 2Hz (코드 실측 일치 2026-06-30) | 거리기반(최근접 플레이어), 티어변경시만 SetNetUpdateFrequency(적500 핫패스 가드, W1 P2) |
 | 적 Dormancy | 원거리·비활성 DORMANT, 접근 시 wake | |
-| 적 복제 상태 | Transform(위치/Yaw)만 최소 복제, 체력=서버 권위 | 히트/사망 코스메틱은 GameplayMessage/Cue (복제 액터 상태 아님) |
+| 적 복제 상태 | Transform(위치/Yaw) + `UFPSREnemyHealthComponent`의 **3프로퍼티**(`Health`·`MaxHealth`·`bDead`, 전부 Push Model) | 히트/사망 코스메틱은 GameplayMessage/Cue (복제 액터 상태 아님). **계약 정정 2026-08-11 — 아래 주 참조** |
 | XP/픽업 | 개수 cap + 인접 병합, 자석=클라 코스메틱·서버 권위 수령 | |
 | 복제 발사체 액터 | **팀별 분리 예산**(U5, 2026-06-30): 플레이어 ≤64 / 적 ≤`FPSR.Enemy.ProjectileBudget`(기본 32, 천장 100) | **⚠️갱신 2026-07-08(무기 전면 투사체화)**: 이제 **차지레이저(히트스캔)·근접 외 전 플레이어 무기 = 복제 발사체**(연사총도 포함). 캡 ≤64 초과 시 팀내 FIFO 회수=총알 조용히 소멸 → **연사 무기는 고속·단수명 필수**로 동시 비행을 낮게 유지(무기별 피크 ≈ `FireRate×Lifetime×Pellet`, `UFPSRWeaponDataAsset::IsDataValid`가 >12 경고). 실측 4인 최악 피크 ≈ 무기당 <8 → 합계 <32(캡 여유). PIE 4인 시뮬 `UFPSRProjectileSubsystem::GetActiveCount()` 피크로 실검증. 팀별 FIFO라 적 사격↔플레이어 상호 잠식 없음. 원격 클라 시각 예측=별도 후속(A3, 호스트/싱글은 즉발) |
 | 적 공격 판정 | 서버 배치 처리(거리 체크 배치) + **공격 토큰 상한** | 플레이어당 동시 공격 시도 적 수 제한(§2-6) |
 | **호스트(리슨서버) 부하** | 자기 클라 렌더 + 적 500 서버권위 시뮬 **동시 부담 = 최악 케이스** | 전용 서버 없음(§2-10) → 호스트 프레임예산 **별도 측정**, 하드캡은 호스트 기준으로 결정. 부족 시 RepGraph·시뮬 LOD·스폰 보류 우선 |
 
+**⚠️ 적 복제 상태 계약 정정 (사용자 결정 2026-08-07 · 반영 2026-08-11)** — 종전 계약은 "Transform만 최소 복제, 체력=서버 권위"였는데 **실제로는 3개**를 복제하고 있었다(`FPSREnemyHealthComponent.cpp` 실측). 결정 = **코드 유지 + 계약을 실제에 맞춤**. 각각 남는 이유:
+- `Health` — 원래 계약에 있던 것.
+- `MaxHealth` — 클라가 체력바 **비율**을 계산하려면 필요. **스폰 때 한 번만** 바뀌므로 지속 비용은 사실상 0.
+- `bDead` — `Health <= 0`에서 파생 가능하지만, **풀 재사용 때 `true→false` 전이를 클라가 놓치지 않게 하는 엣지 감지**용이다(`OnRep_bDead`). 클라에서 `Health` 엣지를 추론하는 안은 기각 — **비트 하나보다 엣지 감지 정확성이 우선**(적을 재사용하는 구조라 놓친 전이는 곧 유령 시체·체력바 잔존으로 나타난다).
+
 **리플리케이션 도구 평가 순서**: Push Model(기본) → 부하 시 **Replication Graph**(spatial grid relevancy, 검증된 도구) → 그래도 부족 시 Iris(Beta) 평가. **Iris를 1순위로 두지 않음**(RepGraph가 다수 액터·연결별 relevancy 병목에 더 직접적).
+
+> 🔴 **이 "복제 = Push Model" 전제는 출시(패키지) 빌드에선 성립하지 않는다** — Push Model이 컴파일 단계에서 빠져 비교 기반 복제로 폴백한다(동작은 정상, 의도한 CPU 절감이 없음). 미해결·결정 대기 = **`Docs/OpenIssues_Network.md` N-1**. 호스트 프레임 예산을 계산할 때 이 차이를 빼고 세지 말 것.
 
 **다중맵 예산 모델 (설계 수렴 2026-07-05, `Docs/Review/20260705-multimap-budget-regroup.md`)** — ⚠️ **per-map 레지스트리·map-aware allocator 기구는 U 연속필드로 대체됨**(다음 문단; **전역 공유 캡 원칙은 U에 계승**). (원안 참고) 심리스 다중맵에서도 예산은 **전역 공유 캡**(맵 수 무관 호스트 전역 상한 — per-map 캡 금지=붕괴; 잠정 전역 200, perf 후 확정). 단일 `FPSREnemySpawnSubsystem` → **map-aware allocator**(점유맵 배분, "2인+ 맵 > 솔로 맵" 가중, 빈 맵 target=0+하드 드레인), U7 플로우필드 → **per-map 레지스트리**(`ULevel*` 키·stream-in bake·stream-out evict, bake는 ECC_WorldStatic 의존이라 콜리전 등록 후). 새 맵 진입 공백은 **예약 헤드룸(진입 시드) + 백그라운드 silent recycle**(Kill 아님·NetCull밖·LOS없음·최근교전/미션/엘리트 보호·drain rate ≤10-15%/10s·local pressure floor)로 채움. 복제 = **NetCull 구현(§5 1순위 미구현 레버) → RepGraph 앞당김**(다중맵+분산이 connection별 relevancy를 필수화). **map-aware allocator = 적 예산 + 콘텐츠(미션/보스/엘리트/이벤트) 배분 공동**(디렉터 결정 2026-07-05: 그룹 버프 전면 폐기 → "뭉치면 효율"은 고가치 콘텐츠를 2인+ 그룹에 집중시켜야만 성립, allocator가 설계의 심장). **맵 잔존(언로드X·LOD컬)**: 픽업/문/상자는 dormant/HISM 경량 잔존(이관/소멸 로직 불요, 백트래킹 유혹 방지 위해 큰 성장은 미션/보스/상자), **적만** 빈 맵 하드 드레인(예산 회수). Tier 0(코어)/1(예산 게임필·콘텐츠 allocator)/2(텔레포터·은근한 비효율) 스코프·시작 수치 = 리포트.
 
