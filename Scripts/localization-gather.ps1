@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
   FPSRoguelite Game 로컬라이제이션 타깃 원버튼 왕복(gather -> CSV 번역 주입 -> LocRes 컴파일) (LOC0 §5).
 .DESCRIPTION

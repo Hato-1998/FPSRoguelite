@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
   구글 시트(저작 마스터) -> 리포 CSV(빌드 스냅샷) 동기화 (LOC0 §5).
 .DESCRIPTION
@@ -79,12 +79,18 @@ foreach ($Sheet in $Sheets) {
         continue
     }
 
-    $Content = $Response.Content
-    if ([string]::IsNullOrEmpty($Content)) {
+    # PS 5.1의 $Response.Content(문자열)는 charset 미지정 응답을 Latin-1로 디코드해 UTF-8 본문을 이중 인코딩으로
+    # 파손시킨다(C3에서 실측). 원시 바이트를 받아 UTF-8로만 해석하고, 저장도 그 바이트를 그대로 쓴다.
+    $RawBytes = $null
+    if ($Response.RawContentStream) {
+        $RawBytes = $Response.RawContentStream.ToArray()
+    }
+    if (-not $RawBytes -or $RawBytes.Length -eq 0) {
         Write-Warning "[$Name] 응답이 비어 있습니다 — 기존 파일 무접촉."
         $bHadFailure = $true
         continue
     }
+    $Content = [System.Text.Encoding]::UTF8.GetString($RawBytes)
 
     # 헤더 행만 파싱해서 비교 (본문은 검증 통과 후 그대로 저장 — 우리가 재직렬화하지 않는다).
     $FirstLineBreak = $Content.IndexOfAny([char[]]@("`r", "`n"))
@@ -107,12 +113,12 @@ foreach ($Sheet in $Sheets) {
         continue
     }
 
-    # 헤더 검증 통과 — target에 UTF-8(BOM 없음)으로 저장.
+    # 헤더 검증 통과 — 받은 원시 바이트를 그대로 저장(재직렬화·재인코딩 없음. Sheets export는 BOM 없는 UTF-8).
     $TargetDir = Split-Path -Parent $TargetPath
     if (-not (Test-Path $TargetDir)) {
         New-Item -ItemType Directory -Force -Path $TargetDir | Out-Null
     }
-    [System.IO.File]::WriteAllText($TargetPath, $Content, $Utf8NoBom)
+    [System.IO.File]::WriteAllBytes($TargetPath, $RawBytes)
 
     $Sha256 = (Get-FileHash -Path $TargetPath -Algorithm SHA256).Hash
     $ManifestEntries[$Name] = [PSCustomObject]@{
