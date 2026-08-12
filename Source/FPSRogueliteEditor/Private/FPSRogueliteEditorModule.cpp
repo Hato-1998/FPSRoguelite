@@ -10,6 +10,7 @@
 #include "Blockout/SFPSRBlockoutTab.h"
 #include "Localization/FPSRStringTableReload.h"
 #include "CardImport/FPSRCardCsvExporter.h"
+#include "CardImport/FPSRCardCsvImporter.h"
 #include "Editor.h"
 #include "EditorValidatorSubsystem.h"
 #include "Logging/MessageLog.h"
@@ -141,6 +142,13 @@ void FFPSRogueliteEditorModule::RegisterMenus()
 		FSlateIcon(FAppStyle::GetAppStyleSetName(), "DeveloperTools.MenuIcon"),
 		FUIAction(FExecuteAction::CreateStatic(&FFPSRogueliteEditorModule::OnExportCardCsvMenuEntry))
 	);
+	Section.AddMenuEntry(
+		"FPSRImportCardCsv",
+		LOCTEXT("ImportCardCsvTitle", "카드 CSV 임포트"),
+		LOCTEXT("ImportCardCsvTooltip", "Content/Authoring/Cards.csv·CardCatalog.csv를 읽어 DA_Card_*를 생성/갱신하고 검증 통과분을 저장합니다 (§2-3-10)."),
+		FSlateIcon(FAppStyle::GetAppStyleSetName(), "DeveloperTools.MenuIcon"),
+		FUIAction(FExecuteAction::CreateStatic(&FFPSRogueliteEditorModule::OnImportCardCsvMenuEntry))
+	);
 }
 
 void FFPSRogueliteEditorModule::OnOpenDataEditorMenuEntry()
@@ -237,6 +245,25 @@ void FFPSRogueliteEditorModule::OnExportCardCsvMenuEntry()
 		ExportLog.Error(FText::FromString(Error));
 	}
 	ExportLog.Open(bSucceeded ? EMessageSeverity::Info : EMessageSeverity::Error, /*bOpenEvenIfEmpty=*/true);
+}
+
+void FFPSRogueliteEditorModule::OnImportCardCsvMenuEntry()
+{
+	FScopedSlowTask SlowTask(1.0f, LOCTEXT("ImportCardCsvSlowTask", "카드 CSV 임포트 중..."));
+	SlowTask.MakeDialog();
+
+	const FFPSRCardImportResult Result = FPSRCardCsvImport::ImportAll(/*bSaveAssets=*/true);
+	SlowTask.EnterProgressFrame(1.0f);
+
+	FMessageLog ImportLog(TEXT("FPSRCardCsvImport"));
+	ImportLog.Info(FText::Format(
+		LOCTEXT("ImportCardCsvSummary", "카드 CSV 임포트: 생성 {0} / 갱신 {1} / 무변경 {2} / 오류 {3}"),
+		FText::AsNumber(Result.CreatedCount), FText::AsNumber(Result.UpdatedCount), FText::AsNumber(Result.UnchangedCount), FText::AsNumber(Result.Errors.Num())));
+	for (const FString& Error : Result.Errors)
+	{
+		ImportLog.Error(FText::FromString(Error));
+	}
+	ImportLog.Open(Result.Succeeded() ? EMessageSeverity::Info : EMessageSeverity::Error, /*bOpenEvenIfEmpty=*/true);
 }
 
 void FFPSRogueliteEditorModule::OnValidateAnchoredDataMenuEntry()

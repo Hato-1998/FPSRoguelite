@@ -57,6 +57,11 @@ private:
 	 *  DA_Card_* assets, writing Content/Authoring/{Cards,CardCatalog}.csv. Opens a message log with the result. */
 	static void OnExportCardCsvMenuEntry();
 
+	/** Menu command handler (§2-3-10 B-4): runs FPSRCardCsvImport::ImportAll(true) against
+	 *  Content/Authoring/{Cards,CardCatalog}.csv, creating/updating DA_Card_* and saving successful assets. Opens
+	 *  a message log with the created/updated/unchanged/error counts. */
+	static void OnImportCardCsvMenuEntry();
+
 	/** Menu command handler: opens (or focuses) the Weapon Assembler's first-person view nomad tab — draws the
 	 *  assembler's own preview scene with the camera locked at the player's eye and the aspect ratio pinned to the
 	 *  game's, which a docked viewport cannot do (its aspect differs, so the vertical framing differs). */
