@@ -9,6 +9,27 @@
 
 ---
 
+## 🌐 LOC0 — StringTable CSV 파이프라인 공통 기반 (2026-08-12, `phase/loc-foundation-stringtable` → 머지 `6f92dbdb`, origin 통합 `5bb52a02`)
+> 보드 행 "문자열 외부화 파이프라인 + 기존 UI 전수 이관"(하이)의 **Phase 0**. 이 위에서 Phase A(UI 전수 이관, `phase/loc-ui-migration`)와 Phase B(카드 CSV 개편, `phase/card-csv-pipeline`)가 병렬 분기한다. 명세·레드팀 원장 = `Docs/Specs/LOC0_StringTablePipeline.md`, SSOT = `Docs/SSOT/Localization.md`(신설).
+
+### 결과
+- **런타임 문자열 소스 = `Content/StringTables/*.csv` 3개**(UI/CardEffect/Card), `LOCTABLE_FROMFILE_GAME` 리터럴 3건으로 등록(게임 모듈 `FFPSRogueliteGameModule` 신설 — gather가 소스의 매크로 리터럴을 파싱해 CSV를 발견하므로 ini 데이터드리븐 등록 금지가 구조 제약).
+- **ko 네이티브 + en/ja 타깃**: 커스텀 gather 스텝 `UFPSRImportCsvTranslationsCommandlet`이 CSV의 en/ja 컬럼을 문화권 아카이브에 주입 → `Scripts/localization-gather.ps1` 원버튼으로 gather→주입→LocRes 컴파일 왕복(멱등 확인).
+- **저작 마스터 = 구글 시트**(공유폴더 `FPS로그라이크/시트/`) → `Scripts/sync-authoring-csv.ps1` 무인증 export URL pull(헤더 검증·실패 시 스냅샷 보존·provenance = `Config/AuthoringSheets.manifest.json`). 리포 CSV = 빌드 스냅샷(단방향).
+- 검증: 빌드 3회 그린(-DisableUnity 포함) · 자동테스트 `FPSRoguelite.Editor.Localization.StringTableCsv` Success · sync 정상+부정 테스트 · 패키징 스모크(pak 내 CSV 3종 + ko/en/ja LocRes + ICU 스테이징 확인) · 레드팀 게이트 P1 0/P2 2(전건 수정)/P3 6(5건 수정, 1건 후속).
+
+### 🪤 함정 (Troubleshooting에도 올릴 것)
+1. **PS5.1 + BOM 없는 한글 .ps1 = 파서 에러**(CP949 오독). 스크립트는 UTF-8 **BOM** 필수.
+2. **PS5.1 `Invoke-WebRequest`의 `$Response.Content` 문자열은 charset 미지정 응답을 Latin-1로 디코드** → UTF-8 본문 이중 인코딩 파손. 원시 바이트(`RawContentStream`)로 받고 그대로 저장할 것.
+3. **`Internal_LocTableFromFile`은 ImportStrings 실패에도 빈 테이블을 무조건 등록** — 리로드류 유틸은 엔진 파일워처처럼 기존 테이블에 in-place `ImportStrings`(검증 후 클리어 = 깨진 CSV에 기존 문자열 보존)로.
+4. **`CulturesToStage`만으론 패키지에서 문화권 활성화 불가** — ICU 데이터는 `InternationalizationPreset`이 결정(BaseGame 기본 English → `EFIGSCJK`로 덮음). 스테이징 확인만으론 못 잡는 무음 결함.
+5. **Localization 대시보드 Gather/Compile 클릭 = 수제 `Config/Localization/Game_*.ini` 덮어씀** — 실행은 반드시 스크립트로.
+6. `Content/StringTables/` 안에 두는 모든 파일은 UFS 스테이징으로 pak에 실린다(provenance manifest를 Config/로 뺀 이유).
+
+### 남긴 것
+- PIE 사용자 스모크(culture=en/ja 시드 전환 + ja 폰트 글리프 확인) 대기. 패키지 기본 문화권(DefaultCulture, 현 en) = 제품 결정 대기.
+- P3 후속 1건: `Game_ImportCsvTranslations.ini CSVFiles` ↔ 테스트 목록 자동 대조.
+
 ## 🏙️ 인게임 맵 교체 완료 — Synthwave City Kit → `L_Map1_City` (2026-08-12, `content/map1-synthwave`)
 > M0 **(a′) 완료**. 프롭 밀도까지 이 작업 단위 안에서 확정했으므로, (b) 베이스라인의 선행 중 맵 쪽은 닫혔다.
 > **남은 (b) 선행은 2건**이다 — ①**(a″) 적 인스턴싱/VAT** ②**[결정] 목표 프레임 예산 수치 + 측정 빌드 구성**(현재 *결정대기*).
