@@ -5,4 +5,10 @@
                 "expectedHeader": ["Key","SourceString","en","ja"] },
               { "name": "ST_CardEffect", "sheetId": "1HbZxxghuw2CWwkXFbrYfuNsauj6VRouublXtAi7uHbs",
                 "gid": "0", "target": "Content/StringTables/ST_CardEffect.csv",
-                "expectedHeader": ["Key","SourceString","en","ja"] } ] }
+                "expectedHeader": ["Key","SourceString","en","ja"] },
+              { "name": "Cards", "sheetId": "1ewnshKoJpntr01alLVwxOkAynnOb_TDR8Tp89QfMZuQ",
+                "gid": "0", "target": "Content/Authoring/Cards.csv",
+                "expectedHeader": ["CardId","AssetName","Group","Route","OwnerWeapon","Weight","Family","DisplayName_ko","DisplayName_en","DisplayName_ja","Description_ko","Description_en","Description_ja","E1_Attr","E1_Override","E1_Tiers","E2_Attr","E2_Override","E2_Tiers","E3_Attr","E3_Override","E3_Tiers"] },
+              { "name": "CardCatalog", "sheetId": "12v_vWsuwnPe8mw0nE1doAR5IHy0qnnzp77hl8-V5vT4",
+                "gid": "0", "target": "Content/Authoring/CardCatalog.csv",
+                "expectedHeader": ["AttrId","EffectType","Payload","DefaultOp","DefaultThisWeaponOnly","ShowAsPercent","Notes"] } ] }
