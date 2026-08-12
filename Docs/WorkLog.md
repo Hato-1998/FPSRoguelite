@@ -9,6 +9,83 @@
 
 ---
 
+## 🏙️ 인게임 맵 교체 완료 — Synthwave City Kit → `L_Map1_City` (2026-08-12, `content/map1-synthwave`)
+> M0 **(a′) 완료**. 프롭 밀도까지 이 작업 단위 안에서 확정했으므로, (b) 베이스라인의 선행 중 맵 쪽은 닫혔다.
+> 남은 (b) 선행은 **(a″) 적 인스턴싱/VAT** 하나뿐이다.
+
+### 결과
+`Map_CyberCity` 폐기 → `L_Map1_City` 신규. 배치·검증·PIE 전부 통과(**"레벨 검증" 0건**, PIE 스모크 이상 없음).
+
+### 🪤 P2 실측치가 통째로 무효가 됐다 — 재측정이 필수였다
+2026-08-12 오전에 확정했던 값(*7×9 = 315×405m · 윗면 Z=-50 · 셀 158×203 = 32,074, `CellSizeOverride` 불요*)은
+사용자 레벨 편집으로 **전부 폐기**됐다. 지형이 커지고 올라갔다:
+
+| | 이전(무효) | 확정 |
+|---|---|---|
+| 주 지면 | 7×9 = 63타일 · 315×405m · 윗면 **Z=-50** | **10×11 = 110타일 · 450×495m · 윗면 Z=200** · 구멍 없음 |
+| 층 | 단층 | **2단** — 주 지면 Z=200 + **고가 지면 Z≈800**(면적의 20%) |
+| 셀(200cm) | 158×203 = 32,074 ✅ | 225×248 = **55,800 ❌ 상한 40,000 초과** |
+
+→ **`CellSizeOverride = 250` 을 명시**해 181×200 = **36,200 / 40,000** 으로 맞췄다.
+런타임은 죽지 않고 [셀을 자동으로 키우지만](../Source/FPSRoguelite/Private/Enemy/FPSRFlowFieldComputer.cpp#L964) **검증기가 Error로 잡으므로** 명시가 맞다.
+지면이 -50 → 200 으로 올라가면서 **가드레일 #6에 새 제약**이 생겼다: `지면Z ≤ 볼륨Min.Z + 150` 이라 **Min.Z ≥ 50**. (Min.Z = 100 으로 배치)
+
+### 확정 배치값
+- **볼륨** 1개 — 위치 `(0, 2250, 850)` · Box Extent `(22600, 24900, 750)` · 회전 0(축정렬) · `CellSizeOverride = 250`
+  · MapId 미설정 · 월드박스 X `-22600..22600` Y `-22650..27150` Z `100..1600`
+- **PlayerStart** `(0, 0, 299)` — 지면 199 위 100cm. 이 액터가 [격자원점 Z를 정한다](../Source/FPSRoguelite/Private/Enemy/FPSRFlowFieldSubsystem.cpp#L44)(단일맵은 `DetectFloorZForVolume` 이 아니라 `DetectFloorZ` = 첫 PlayerStart 아래 트레이스) → **격자원점 Z = 199**
+- **적 스폰포인트 18개** — 주 지면 15 · 고가 지면 3. 전부 지면+100
+- **천장 안개판 2장** — `Fog` Z=6505 · `Fog2` Z=13216, 600×600m, `MI_CeilingFog`
+
+### 🪤 층 간 이동 — 계단 9개 중 2개는 적이 못 쓴다
+단차 600cm는 오를 수 있는 최대(60)의 10배라 계단·다리로만 연결된다. 셀 250cm 기준 **셀당 상승량** 실측:
+
+| 메쉬 | 개수 | 상승 / 수평런 | 셀당 | 판정 |
+|---|--:|---|--:|---|
+| `SM_stairs_02` | 7 | 685 / 4305 | **39.8cm** | ✅ 통과 |
+| `SM_bridge` | 4 | 170 / 1200 | 35.4cm | ✅ |
+| `SM_stairs` | 2 | 685 / **1670** | **102.6cm** | ❌ 벽으로 인식 |
+
+셀을 200으로 낮춰도 82cm라 **셀 크기 문제가 아니라 계단 형상 문제**다. 적을 올리려면 수평 런을 늘려야 한다(플레이어는 CMC라 그대로 오른다).
+
+### 스폰 템포 — 우려가 수치로 확인됨
+스폰 선택은 [**균등랜덤**이고 거리 가중치는 2026-06-25에 제거됐다](../Source/FPSRoguelite/Private/Enemy/FPSREnemySpawnSubsystem.cpp#L1242).
+플레이어 근처 스폰(front spawning)은 [멀티맵 전용](../Source/FPSRoguelite/Private/Enemy/FPSREnemySpawnSubsystem.cpp#L813)이라 단일맵인 이 맵에선 **작동하지 않는다**.
+
+> PlayerStart까지 거리 최소 18m · **중앙 240m** · 최대 342m → 적 250cm/s 기준 **중앙 96초 · 최대 137초**
+
+코어 재미 게이트가 "30초 루프"인데 절반의 적이 3루프 뒤에 온다. **스폰포인트를 늘려도 안 바뀐다**(균등랜덤이라 점 개수와 평균거리는 무관).
+바꾸려면 ①`ZoneTag`+`AFPSRSpawnRoom` 으로 구역 활성화 ②아레나 축소 ③적 속도 — 셋 중 하나다.
+PIE 스모크에서는 이상 없었으므로 **현 상태 유지**, 템포 문제가 실제로 드러나면 그때 손댄다(사용자 결정 2026-08-12의 연장).
+
+### 룩 — 밝기의 주범은 광원이 아니라 이미시브였다
+`DirectionalLight` Intensity = **1.0**(거의 꺼진 값)인데도 화면이 밝다. 실제 출처는 키트의 이미시브 머티리얼:
+`MI_neon_` **29.22**(색 B=2.0 → 실효 58) · `MI_synthwave_wall`/`_wall5` **24.51** · `MI_neon_6` 21.28 · `MI_sun` 9.50.
+그리고 이 레벨엔 **PostProcessVolume·SkyLight가 아예 없었고**, `DefaultEngine.ini`의 `[/Script/Engine.RendererSettings]`는 **2줄뿐**(`r.AllowStaticLighting=False`·`r.CustomDepth=3`)이라 노출·블룸이 전부 엔진 기본값이었다. → 사용자가 PostProcessVolume 배치.
+
+**천장 안개** = `M_CeilingFog` / `MI_CeilingFog` 신규(`/Game/Materials/Fog/`). Unlit·Translucent·양면, 포스트프로세스가 아니라 **메쉬 머티리얼**.
+Opacity = `Fog Opacity` × lerp(`Opacity Facing`, `Opacity Grazing`, Fresnel(`Grazing Exponent`)) × DepthFade(`Depth Fade Distance`).
+`ExponentialHeightFog` 로는 불가능하다 — 높이 안개는 **아래로 짙어지고 위로 옅어져** 방향이 반대다.
+SRS의 `BP_SRS_Fog`(`M_Fog`, `Fog Height`/`Fog Half Density Height` 보유)도 후보였지만 **높이 방향을 뒤집을 수 있는지 확인 못 했다**(머티리얼 그래프가 Python에 안 열림). 나중에 필요하면 그쪽을 먼저 시험할 것.
+
+### 🚨 가드레일 사각지대 — 천장 판 콜리전
+안개판은 처음에 `QUERY_AND_PHYSICS` + **WorldStatic** 이었다. 두 가지를 기록해 둔다:
+1. **플로우필드는 격자원점 Z + 2000(=2200)에서 아래로 프로브**한다. 판이 그보다 **위**(6505/13216)면 무해하지만, **아래**였다면 모든 칸의 바닥이 천장으로 잡혀 맵 전체 길찾기가 깨진다.
+2. **"레벨 검증"이 이걸 못 잡는다.** 가드레일 #1은 *"막는데 WorldStatic이 아닌 것"* 만 보는데 이 판은 WorldStatic이라 **통과해 버린다.** 판정식의 사각지대다.
+→ 천장/장식 판은 **NoCollision** 이 정답(검증기도 `NoCollision`은 건너뛴다). 최종 상태는 콜리전·그림자 모두 꺼짐.
+
+### 🪤 도구 쪽 함정 3건
+- **`HitResult` 필드가 Python에 안 열린다** — `impact_point`·`hit_actor` 전부 `get_editor_property` 실패, `break_hit_result`도 미노출. 트레이스는 **맞았나/아니냐(HitResult vs None)만** 읽힌다. 표면 Z는 **끝점 Z를 이분 탐색**해서 구했다(16회 = cm 정밀도).
+- **`delete_asset` 이 모달을 띄워 에디터를 멈춘다** — 임시 프로브 머티리얼을 지우려다 게임 스레드가 막혔고 에디터 재시작으로 이어졌다(크래시 아님, 유실 없음). 스크래치 에셋 정리는 **파일로** 할 것.
+- **기존 액터에만 기즈모가 안 뜨던 건** 사용자가 해결. Game View·선택·화면내 여부·모드 전부 정상이었고, 새로 만든 큐브는 정상 동작했다 — 즉 **액터별 속성** 문제였다. `bLockLocation` 은 protected UPROPERTY라 Python으로 못 읽는다(`.umap` 이름 테이블에 없으면 잠긴 액터가 없다는 뜻).
+
+### 남은 것
+- **`SM_stairs` 2개** — 적이 못 오르는 계단. 장식으로 둘지 런을 늘릴지 미정.
+- **고가 지면 스폰 3개** — PIE에서 이상 없었으나, 스웜이 커졌을 때 계단 병목이 생기는지는 미확인.
+- 스폰 템포(중앙 96초) — 위 참조.
+
+---
+
 ## ⚡ 적 인스턴싱/VAT를 M2 → M0로 이동 (2026-08-11, `docs/instancing-to-m0`)
 > 사용자 결정. 아래 시딩 항목에서 "M0 베이스라인 결과에 따라 당겨야 할 수 있다"고 표시해 둔 건을 **재검토 없이 바로 당기는 쪽으로** 확정.
 
