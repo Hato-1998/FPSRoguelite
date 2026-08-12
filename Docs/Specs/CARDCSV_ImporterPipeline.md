@@ -63,7 +63,10 @@ struct FFPSRCardCsvRow
     FString  AssetName;                 // DA_Card_<Group>_<Theme> 린트 대상. 필수
     ECardGroup Group = ECardGroup::Character;
     EFPSRCardRoute Route = EFPSRCardRoute::LevelUpGlobal;
-    FString  OwnerWeapon;               // 무기 루트(LevelUpWeapon/MissionClearWeaponFeature)일 때 무기 DA 에셋명. 그 외 빈칸
+    TArray<FString> OwnerWeapons;       // 무기 루트(LevelUpWeapon/MissionClearWeaponFeature)일 때 무기 DA 에셋명 **세미콜론 리스트**
+                                        // (예: "DA_Weapon_Rifle;DA_Weapon_SMG"). 현행 콘텐츠에 다중 무기 풀 동시 소속 카드 7장 존재 —
+                                        // 단일 컬럼이면 마이그레이션이 소속을 붕괴시켜 무회귀 절대조건(§2-3) 위반 (C2 발견, 2026-08-13 교정).
+                                        // 그 외 루트는 빈칸. CSV 컬럼명은 OwnerWeapon 유지(값만 리스트).
     float    Weight = 1.0f;
     FName    Family;                    // 공란 = E1 AttrId에서 파생(§2-3-2 v3)
     FString  DisplayName[3];            // ko,en,ja (ST_Card.csv 원천 — DA에는 FromStringTable 참조가 들어간다)
@@ -150,7 +153,7 @@ FName CardFamily;
 - Tiers → `RarityTiers` 배열(레어도 오름차순 정렬 기록 — 순서까지 결정적이어야 diff 0). `OfferRarities`는 기존 `RefreshOfferRarities()` 경로(PostEditChangeProperty) 재사용.
 - DisplayName/Description: `FText::FromStringTable(TEXT("Card"), FString::Printf(TEXT("%s.DisplayName"), *CardId.ToString()))` — **비교도 테이블 참조 여부+키로**(FText 값 비교 금지; 멱등 판정용 헬퍼 필요).
 - `ST_Card.csv` 재생성: Cards.csv의 ko/en/ja 컬럼 → `Key,SourceString,en,ja` 전체 재작성(`Debug.LocSmoke` 시드 행 보존). LOC0 규약(따옴표 최소·BOM 없음).
-- 풀 멤버십: Route별 목표 집합을 CSV에서 구성 → `UFPSRCardPoolDataAsset.Cards/WeaponUnlockCards`·무기 DA `WeaponCards/UnlockableFeatures`를 **선언적으로 일치**시킨다(추가+제거 모두; CSV에 없는 기존 멤버 제거는 경고 로그 동반). OwnerWeapon 해석 = AssetRegistry 에셋명 매칭.
+- 풀 멤버십: Route별 목표 집합을 CSV에서 구성 → `UFPSRCardPoolDataAsset.Cards/WeaponUnlockCards`·무기 DA `WeaponCards/UnlockableFeatures`를 **선언적으로 일치**시킨다(추가+제거 모두; CSV에 없는 기존 멤버 제거는 경고 로그 동반). OwnerWeapon 해석 = AssetRegistry 에셋명 매칭. **무기 루트 카드의 목표 집합은 OwnerWeapons 리스트의 전 무기에 대한 합집합**(다중 소속 보존 — 무회귀).
 - 검증 게이트: 접촉(생성/갱신) 에셋 전부 + 멤버십이 바뀐 풀/무기 DA에 `IsDataValid`, 이어서 `FPSRCardPoolValidator` 계열 크로스체크 호출. 오류 = Errors에 수집, `bSaveAssets`여도 해당 에셋 미저장.
 
 **AuthoringSheets.json 추가 항목**: `Cards` = `1ewnshKoJpntr01alLVwxOkAynnOb_TDR8Tp89QfMZuQ` / `CardCatalog` = `12v_vWsuwnPe8mw0nE1doAR5IHy0qnnzp77hl8-V5vT4` (gid 0, target `Content/Authoring/<이름>.csv`, expectedHeader = §2-3-10 스키마).
@@ -190,6 +193,11 @@ FName CardFamily;
 **미결정**
 - 역추출 시 기존 에셋 폴더 구조(`Character/Data/`, `Weapons/Card/` 등)는 그대로 두고 CSV의 AssetName만 기록 — 신규 카드만 `Imported/`에 생성. 폴더 재편은 별도 결정.
 - `E*_Override` 파싱 키 집합 = 카탈로그 Default* 3종과 동일(`Op=`, `ThisWeaponOnly=`, `ShowAsPercent=`). 그 외 키 = 오류.
+
+**C2 갭 판정 기록 (2026-08-13)**
+- 카드 uasset 실수 = **30**(스펙 초안의 "49"는 Content/Cards/ 전체 uasset 수 — GE/풀/프래그먼트 포함 집계의 착오). 30이 맞다.
+- 오펀 카드(어느 풀에도 미소속) 폴백 라우팅 = 카드 효과들의 `GetEditorEligibleRoutes()` 교집합에서 유도(C2 구현 채택 — LevelUpGlobal 고정은 PoolValidator가 반증). **수용.**
+- `OwnerWeapon` 단일 → `OwnerWeapons` 리스트 확장(위 §5) — C2가 발견한 다중 소속 붕괴의 교정. B-7 커밋으로 구현.
 
 **갭 처리 규칙(고정)**: 명세에 없는 판단 필요 시 멈추고 "명세 갭" 보고 → C1 수정 후 재개.
 

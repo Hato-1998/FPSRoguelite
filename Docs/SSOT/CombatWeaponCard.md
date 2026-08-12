@@ -93,6 +93,7 @@
 
 - **Cards.csv 스키마** (멀티이펙트 = 컬럼 반복 N=3 — 카드 1장=행 1개가 엑셀 저작·diff 최소 인지 단위; 현행 최대 효과 수 2; 초과 시 헤더 감지 버전업):
   `CardId, AssetName, Group, Route, OwnerWeapon, Weight, Family, DisplayName_ko/en/ja, Description_ko/en/ja, E1_Attr, E1_Override, E1_Tiers, E2_*, E3_*`
+  - `OwnerWeapon` = 무기 DA 에셋명 **세미콜론 리스트**(다중 무기 풀 동시 소속 보존 — 현행 카드 7장이 복수 무기에 물려 있어 단일 값이면 무회귀 위반. 2026-08-13 교정).
   - `CardId` = 행 키 = 세이브 키(기존 필드) = 로컬라이징 키 접두(`<CardId>.DisplayName`). `E*_Tiers` = `C:15;R:30;E:60;L:100`(티어 존재 = 레어도 노출범위, OfferRarities 자동 파생 현행 유지). `E*_Override` = 카탈로그 기본값 덮어쓰기(`k=v;`, 드묾).
 - **CardCatalog.csv (속성 카탈로그)**: `AttrId, EffectType, Payload, DefaultOp, DefaultThisWeaponOnly, ShowAsPercent, Notes`. EffectType 5종 = `UCardEffect_*` 서브클래스 1:1(임포터가 NewObject+Payload 주입 — 런타임 폴리모픽 무변경 = 무회귀). **새 효과 타입 = 서브클래스 1개 + 타입 팩토리 map 1행**(OCP 유지, §2-3-1 directive 존속). 사용자 2분류 스키마 대응: "전체무기 vs 개별무기"=`DefaultThisWeaponOnly`, "무기 해금 vs 기능추가"=`GrantWeapon` vs `WeaponBehavior`.
 - **임포터 계약**: 기존 에셋 in-place 갱신(변경분만 dirty = **멱등**, 재임포트 diff 0이 무회귀 기준선), Instanced 효과 = 결정적 네이밍(`Effect_0..`) + 클래스 불일치 시 트래시→재생성. DisplayName/Description = `FText::FromStringTable("Card", "<CardId>.*")` 세팅 + `ST_Card.csv` 동시 생성(Cards.csv의 ko/en/ja 컬럼이 원천 — ST_Card는 저작물이 아니라 파생물). 진입점 = Tools 메뉴 + 헤드리스 커맨드렛.
