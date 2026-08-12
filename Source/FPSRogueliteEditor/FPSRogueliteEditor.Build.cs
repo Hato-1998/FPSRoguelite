@@ -28,6 +28,7 @@ public class FPSRogueliteEditor : ModuleRules
 			"ToolMenus",
 			"AssetRegistry",            // DataEditor/Assembler/Blockout/Validation 전반의 에셋 열거·참조 조회
 			"DataValidation",   // UEditorValidatorBase (Engine/Plugins/Editor/DataValidation)
+			"Localization",    // FLocTextHelper (LOC0 — FPSRImportCsvTranslationsCommandlet); UnrealEd only re-exposes GatherTextCommandletBase itself, not this
 			"DeveloperSettings",
 			"Projects",
 			"PropertyEditor",          // IDetailsView (P1 Data Editor), SObjectPropertyEntryBox (Weapon Part Assembler DA picker)

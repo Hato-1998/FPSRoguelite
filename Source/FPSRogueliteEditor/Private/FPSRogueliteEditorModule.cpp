@@ -8,6 +8,7 @@
 #include "Assembler/SFPSRWeaponAssemblerTab.h"
 #include "Assembler/SFPSRWeaponAssemblerFPTab.h"
 #include "Blockout/SFPSRBlockoutTab.h"
+#include "Localization/FPSRStringTableReload.h"
 #include "Editor.h"
 #include "EditorValidatorSubsystem.h"
 #include "Logging/MessageLog.h"
@@ -123,6 +124,13 @@ void FFPSRogueliteEditorModule::RegisterMenus()
 		FSlateIcon(FAppStyle::GetAppStyleSetName(), "DeveloperTools.MenuIcon"),
 		FUIAction(FExecuteAction::CreateStatic(&FFPSRogueliteEditorModule::OnOpenBlockoutMenuEntry))
 	);
+	Section.AddMenuEntry(
+		"FPSRReloadStringTableCsv",
+		LOCTEXT("ReloadStringTableCsvTitle", "StringTable CSV 리로드"),
+		LOCTEXT("ReloadStringTableCsvTooltip", "Content/StringTables/*.csv 3개를 다시 읽어 런타임 문자열 테이블을 재등록합니다 (에디터 재시작 불필요)."),
+		FSlateIcon(FAppStyle::GetAppStyleSetName(), "DeveloperTools.MenuIcon"),
+		FUIAction(FExecuteAction::CreateStatic(&FFPSRogueliteEditorModule::OnReloadStringTableCsvMenuEntry))
+	);
 }
 
 void FFPSRogueliteEditorModule::OnOpenDataEditorMenuEntry()
@@ -184,6 +192,13 @@ TSharedRef<SDockTab> FFPSRogueliteEditorModule::SpawnBlockoutTab(const FSpawnTab
 		[
 			SNew(SFPSRBlockoutTab)
 		];
+}
+
+void FFPSRogueliteEditorModule::OnReloadStringTableCsvMenuEntry()
+{
+	// ReloadAll already logs a per-table Error line + summary and, on partial failure, raises its own toast
+	// notification — nothing else to surface here.
+	FPSRStringTableReload::ReloadAll();
 }
 
 void FFPSRogueliteEditorModule::OnValidateAnchoredDataMenuEntry()
