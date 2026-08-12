@@ -49,6 +49,10 @@ private:
 	 *  palette (Tools > FPSR > "블록아웃 툴…"). */
 	static void OnOpenBlockoutMenuEntry();
 
+	/** Menu command handler (LOC0): re-registers the game's CSV string tables in-process via
+	 *  FPSRStringTableReload::ReloadAll — lets a designer pick up a CSV edit without restarting the editor. */
+	static void OnReloadStringTableCsvMenuEntry();
+
 	/** Menu command handler: opens (or focuses) the Weapon Assembler's first-person view nomad tab — draws the
 	 *  assembler's own preview scene with the camera locked at the player's eye and the aspect ratio pinned to the
 	 *  game's, which a docked viewport cannot do (its aspect differs, so the vertical framing differs). */
