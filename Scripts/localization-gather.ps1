@@ -39,7 +39,8 @@ if ($Sync) {
     & powershell -NoProfile -File $SyncScript
     $SyncExitCode = $LASTEXITCODE
     if ($SyncExitCode -ne 0) {
-        Write-Error "sync-authoring-csv.ps1 실패 (exit $SyncExitCode) — gather를 중단합니다."
+        # Write-Error는 $ErrorActionPreference='Stop' 아래서 즉시 종료를 던져 아랫줄 exit에 도달하지 않는다(레드팀 P3-6c).
+        Write-Warning "sync-authoring-csv.ps1 실패 (exit $SyncExitCode) — gather를 중단합니다."
         exit $SyncExitCode
     }
 }

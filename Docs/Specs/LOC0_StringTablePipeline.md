@@ -8,7 +8,7 @@
 | 브랜치 | `phase/loc-foundation-stringtable` |
 | 작성 모델 | `claude-fable-5` |
 | 작성일 / 최종 갱신 | 2026-08-12 |
-| 상태 | `확정` |
+| 상태 | `구현완료` (C3 통과 2026-08-12 — §13 원장 참조) |
 | 관련 SSOT | `Docs/SSOT/Localization.md`(본 유닛이 신설), `Docs/SSOT/Workflow.md` §6 |
 | 관련 메모리 | [[vibeue-buildgraph-pie-worldleak]](후속 Phase A에서만 해당) |
 
@@ -31,7 +31,7 @@
 
 1. **제1원리 근거** — 콘텐츠(문자열·카드 수치)는 C++가 아니라 데이터가 소유한다(핵심 2). 저작 소스와 런타임 소스를 같은 파일(CSV)로 두면 "임포트 잊음 = stale 에셋" 오류 계급이 통째로 사라지고 diff가 완전해진다.
 2. **엔진 기본값·기존 인프라와의 관계** — 엔진 공식 경로를 그대로 쓴다(덮지 않음): `LOCTABLE_FROMFILE_GAME` 매크로(`StringTableRegistry.h:117`), gather의 매크로 소스-파싱 수집(`GatherTextFromSourceCommandlet.cpp:498` — **CSV 발견은 소스의 매크로 리터럴을 파싱해서 이뤄지므로 테이블 등록은 반드시 리터럴 매크로 호출이어야 한다. ini 데이터드리븐 등록으로 바꾸면 gather가 CSV를 못 찾는다** — 이 제약이 §5의 "매크로 3줄 하드코딩"의 근거), 커스텀 gather 스텝(`GatherTextCommandlet.cpp:383-442`), 번역 주입 `FLocTextHelper::ImportTranslation`(`LocTextHelper.h:771`), 런타임 경로 `BaseGame.ini +LocalizationPaths=%GAMEDIR%Content/Localization/Game`(타깃명 Game이면 프로젝트 ini 추가 불필요).
-3. **프로젝트 제약과의 정합** — 카드 CSV 파이프라인(Phase B)과 "시트=저작 마스터, 리포 CSV=빌드 스냅샷, 파생물=에셋" 모델을 공유. 문자열 테이블 추가 = 매크로 1줄 + CSV 1파일 + 시트 1개(중앙 수정 없음).
+3. **프로젝트 제약과의 정합** — 카드 CSV 파이프라인(Phase B)과 "시트=저작 마스터, 리포 CSV=빌드 스냅샷, 파생물=에셋" 모델을 공유. 문자열 테이블 추가 = 등록 지점 7곳(매크로/CSV/시트/AuthoringSheets.json/CSVFiles/리로드 GTables/테스트 목록 — 정직한 목록은 SSOT L-3; C3 레드팀 P3-4로 원 문구 "중앙 수정 없음" 정정). CSVFiles 누락류 드리프트는 커맨드렛 100%-미스 에러 승격이 방어.
 
 ## 4. 파일 목록
 
@@ -122,7 +122,7 @@ namespace FPSRStringTableReload
 (ST_Card는 파생물이라 시트 매핑 없음. Cards/CardCatalog 항목은 Phase B가 추가.)
 
 **스크립트 계약**
-- `sync-authoring-csv.ps1 [-SheetName <이름>]`: 각 항목에 대해 `https://docs.google.com/spreadsheets/d/<sheetId>/export?format=csv&gid=<gid>` GET → 1행 헤더를 `expectedHeader`와 정확 비교(불일치=해당 파일 스킵+exit 1 예약) → 통과 시 `target`에 UTF-8(BOM 없음) 저장 → `Content/StringTables/.sync-manifest.json`에 `{name, utcTime, sha256}` 기록. 다운로드/검증 실패 시 기존 파일 무접촉.
+- `sync-authoring-csv.ps1 [-SheetName <이름>]`: 각 항목에 대해 `https://docs.google.com/spreadsheets/d/<sheetId>/export?format=csv&gid=<gid>` GET(원시 바이트 수신·30초 타임아웃) → 1행 헤더를 `expectedHeader`와 정확 비교(불일치=해당 파일 스킵+exit 1 예약) → 통과 시 `target`에 수신 바이트 그대로 저장(재인코딩 금지 — PS5.1 `$Response.Content` 문자열 디코드는 Latin-1 이중 인코딩 파손, C3 실측) → `Config/AuthoringSheets.manifest.json`(UFS 스테이징 밖)에 `{name, utcTime, sha256}` 기록. 다운로드/검증 실패 시 기존 파일 무접촉.
 - `localization-gather.ps1 [-Sync]`: (-Sync 시 위 스크립트 선행, 실패 시 중단) → `UnrealEditor-Cmd.exe <uproject> -run=GatherText -config="Config/Localization/Game_Gather.ini;Config/Localization/Game_ImportCsvTranslations.ini;Config/Localization/Game_Compile.ini" -log` → exit code 전파. 엔진 경로·인보크 방식은 `Scripts/validate-data.ps1`의 기존 패턴을 미러.
 
 ## 6. 함수별 계약
@@ -177,10 +177,21 @@ namespace FPSRStringTableReload
 | 5 | sync 왕복 | `sync-authoring-csv.ps1` exit 0(시트 헤더 기입 후) + 헤더 오염 시트로 부정 테스트 = 기존 파일 무접촉 |
 | 6 | 레드팀 게이트 | §6-6-1 (P1 잔존 시 머지 금지) |
 | 7 | PIE / 사용자 스모크 | PIE 콘솔 `culture=en` → 시드 문자열 "Localization seed" / `culture=ja` → "ローカライズシード" / `culture=ko` 복귀. ja 표시가 □(두부)면 폰트 글리프 미포함 → 보드 후속 행 등록 |
-| 8 | 패키징 스모크 | 개발 패키징 1회: `StringTables/*.csv` + `Localization/Game/**` 스테이징 확인, 패키지 실행 문자열 정상 |
+| 8 | 패키징 스모크 | 개발 패키징 1회: `StringTables/*.csv` + `Localization/Game/**` 스테이징 확인, **패키지 실행에서 `culture=ja`/`culture=ko` 전환이 실제 표시로 이어짐**(ICU 프리셋 미탑재 결함은 스테이징 확인만으론 안 잡힌다 — 레드팀 P2-2) |
 
-## 13. 레드팀 지적 원장 (C3에서 채운다)
+## 13. 레드팀 지적 원장 (C3, 2026-08-12)
 
-| 심각도 | 지적 | 처리 | 근거 |
+**레드팀에 무엇을 줬나**: `git diff 90682a0f..c7833d77` · 이 명세 · `Docs/InternalRedTeamReview.md` 프라이머 · 리포+엔진 소스 읽기 권한. 판정: **P1 0 / P2 2 / P3 6** — P2 전건 수용·수정.
+
+| 심각도 | 지적 (요약) | 처리 | 근거/수정 |
 |---|---|---|---|
-| | | | |
+| P2-1 | 리로드 유틸 실패 감지 = 데드 코드, 깨진 CSV 리로드 시 빈 테이블로 파괴 교체 후 거짓 성공 (`Internal_LocTableFromFile`은 실패에도 무조건 등록, StringTableRegistry.cpp:198-209) | **수용·수정** | 엔진 파일워처와 동일한 in-place `ImportStrings` 경로로 재작성(검증 후 클리어 → 깨진 CSV=기존 문자열 보존, 해제 창 자체 제거). 미등록 케이스는 스크래치 테이블 검증 후 등록 |
+| P2-2 | `CulturesToStage=ja` 추가에도 ICU 프리셋이 English 잔존 → 패키지에 ja/ko ICU 미탑재, culture 전환 불가 | **수용·수정** | `DefaultGame.ini InternationalizationPreset=EFIGSCJK` + §12-8 통과 조건에 패키지 내 culture 전환 명시. DefaultCulture=en 유지(제품 결정 대기) |
+| P3-3 | 대시보드 Gather/Compile 클릭이 수제 `Game_*.ini` 덮어씀 — 금지 규칙 미문서 | **수용·수정** | SSOT L-4에 대시보드 실행 금지 갓차 추가 |
+| P3-4 | 테이블 목록 4곳 복제 + NS 파생 암묵 결합, 위반 시 exit 0 무음 / 명세 §3-3 "중앙 수정 없음" 과장 | **수용·수정(부분)** | 커맨드렛 100%-매니페스트-미스 → 에러 승격. §3-3·SSOT L-3 문구를 정직한 7곳 목록으로 정정. CSVFiles↔테스트 목록 자동 대조는 후속(P3 잔여) |
+| P3-5 | "원자적 리로드" 주석이 코드가 없는 보장(락 2회 분리) 주장 | **수용·해소** | P2-1 재작성으로 해제 창 제거 — 주석도 실제 보장으로 교체 |
+| P3-6 | sync/gather 스크립트 엣지: (a) 타임아웃 없음 (b) 항목 1개 시 manifest 스키마 요동 (c) Write-Error가 exit 도달 차단 | **수용·수정** | `-TimeoutSec 30` / `ConvertTo-Json -InputObject @(...)` 강제 배열 / `Write-Warning`+exit |
+| P3-7 | 스테이징 누락 동작 주석 오서술("원문 폴백" — 실제는 빈 테이블) | **수용·수정** | DefaultGame.ini 주석 정정 |
+| (자체) | `.sync-manifest.json`이 UFS 스테이징에 걸려 pak 탑재(C3 패키징 실측) | **수용·수정** | provenance를 `Config/AuthoringSheets.manifest.json`으로 이동 |
+
+**C2 명세 편차 4건(전부 수용)**: ① `ModuleInterface.h`→`ModuleManager.h`(FDefaultGameModuleImpl 선언 위치, ModuleManager.h:879) ② 커맨드렛 NS 파생 = 파일명−`ST_`(LOCTABLE 등록과 1:1) ③ gather 소스 범위 `Source/FPSRoguelite/`만(§2 비목표 이행; 패키지 gather는 Phase A에서 잔존 인라인 탐지용으로 재검토) ④ docs 파일은 선행 커밋에 이미 존재. + 구현 내부 private 헬퍼 `ImportCsvForNamespace` 추가(계약 불변, .cpp 내부 구조).

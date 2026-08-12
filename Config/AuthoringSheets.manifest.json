@@ -1,12 +1,12 @@
 [
     {
         "name":  "ST_CardEffect",
-        "utcTime":  "2026-08-12T09:25:22.4363673Z",
+        "utcTime":  "2026-08-12T09:54:54.3136904Z",
         "sha256":  "B002F939C03ECFB311070B860B5B4BFE22FC9039FB0F93BE614AAA35C9AC7485"
     },
     {
         "name":  "ST_UI",
-        "utcTime":  "2026-08-12T09:25:21.6634262Z",
+        "utcTime":  "2026-08-12T09:54:53.1244478Z",
         "sha256":  "B002F939C03ECFB311070B860B5B4BFE22FC9039FB0F93BE614AAA35C9AC7485"
     }
 ]

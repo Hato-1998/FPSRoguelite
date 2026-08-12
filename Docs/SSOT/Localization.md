@@ -38,8 +38,9 @@
 ```
 
 - **PO 파일 수기 편집 금지** — 번역 진실은 시트/CSV 한 곳. 매 gather마다 CSV가 아카이브를 덮어쓴다.
-- gather 소스 범위 = `Source/FPSRoguelite`만(에디터 모듈의 LOCTEXT 400+건은 개발자용 — 수집 제외가 의도). 패키지 범위 = `Content/UI`, `Content/Cards`.
-- 타깃 추가(예: zh) = 시트에 컬럼 1개 + `Cultures` 설정 1줄 + CulturesToStage 1줄.
+- gather 소스 범위 = `Source/FPSRoguelite`만(에디터 모듈의 LOCTEXT 400+건은 개발자용 — 수집 제외가 의도). 패키지(에셋) gather는 Phase 0 미사용 — Phase A에서 "잔존 인라인 FText 탐지" 용도로 추가 검토.
+- 타깃 추가(예: zh) = 시트 컬럼 1개 + `Game_*.ini`의 `CulturesToGenerate` 1줄 + `Game_ImportCsvTranslations.ini`의 `Cultures` 1항목 + `DefaultGame.ini CulturesToStage` 1줄(+ ICU 프리셋 포함 여부 확인 — 아래 L-4).
+- **테이블 추가 비용(정직한 목록)** = 매크로 1줄(`FPSRoguelite.cpp`) + CSV 1파일 + 시트 1개 + `AuthoringSheets.json` 1항목 + `Game_ImportCsvTranslations.ini CSVFiles` 1항목 + 리로드 유틸 `GTables` 1행 + 테스트 목록 1행. 중앙 "코드 로직" 수정은 없지만 등록 지점이 위 7곳이다 — CSVFiles 누락 시 번역만 조용히 빠지는 무음 실패는 커맨드렛의 100%-미스 에러 승격이 방어(전부 미스=구성 드리프트로 간주, exit 비0).
 
 ## L-4. 갓차 (걸리면 여기부터)
 
@@ -50,13 +51,15 @@
 - **에디터 실행 중 CSV 수정** = Tools>FPSR "StringTable CSV 리로드"로 반영(재시작 불필요).
 - **쿠킹 빌드 enum DisplayName 폴백** — `UEnum::GetDisplayNameTextByIndex`는 비에디터에서 raw 이름 반환. 플레이어 노출 enum 이름은 반드시 `Stat.*` 등 키로(Phase A에서 일괄 이관).
 - **WBP 편집(MCP) 후 같은 세션 PIE 금지** — [[vibeue-buildgraph-pie-worldleak]]. 배치 쓰기→에디터 재시작→PIE.
+- **Localization 대시보드에서 Gather/Compile 버튼 실행 금지** — 대시보드는 `Config/Localization/Game_*.ini`를 자기 생성본으로 **덮어쓴다**(수제 주석·`Game_ImportCsvTranslations.ini` 체인 소실, 엔진 `LocalizationConfigurationScript.cpp` WriteWithSCC). 실행은 반드시 `Scripts/localization-gather.ps1`. `DefaultEditor.ini`의 타깃 항목은 UI 노출용일 뿐이다.
+- **패키지 문화권은 ICU 프리셋이 결정** — `CulturesToStage`만으론 부족. `InternationalizationPreset=EFIGSCJK`(DefaultGame.ini)가 ko/ja ICU 데이터를 스테이징한다. 이걸 지우면 패키지에서 culture=ja/ko 활성화 자체가 불가(빌드는 통과, 런타임만 무음 실패). 패키지 기본 문화권 = en(BaseGame `DefaultCulture=en` 미덮음 — 제품 결정 대기).
 
 ## L-5. 시트 동기화 규약
 
 - 매핑 = `Config/AuthoringSheets.json` (sheetId/gid/target/expectedHeader). 공유 폴더ID `1jdMK1VlVI2t71nMc89DWCPxuw-jQjnLv`.
 - 시트 권한 = "링크 보유자 보기 가능"(무인증 export URL — 2026-08-12 HTTP 200 검증). 민감해지면 서비스 계정 인증으로 승격.
 - **초기 시딩(리포→시트)은 테이블당 1회만**(마이그레이션 시점). 이후 시트=마스터, 동기화=단방향. 양방향 동기화 금지.
-- provenance = `Content/StringTables/.sync-manifest.json`(다운로드 UTC·sha256) — 스냅샷 커밋에 동봉.
+- provenance = `Config/AuthoringSheets.manifest.json`(다운로드 UTC·sha256) — 스냅샷 커밋에 동봉. (Content/StringTables/ 안에 두면 UFS 스테이징에 걸려 pak에 실리므로 Config/에 둔다.)
 
 ## L-6. 경계
 

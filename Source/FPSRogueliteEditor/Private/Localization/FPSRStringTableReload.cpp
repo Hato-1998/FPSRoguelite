@@ -2,6 +2,7 @@
 
 #include "Localization/FPSRStringTableReload.h"
 
+#include "Internationalization/StringTableCore.h"
 #include "Internationalization/StringTableRegistry.h"
 #include "Misc/Paths.h"
 #include "Framework/Notifications/NotificationManager.h"
@@ -41,19 +42,41 @@ namespace FPSRStringTableReload
 
 		for (const FFPSRStringTableReloadSpec& Table : GTables)
 		{
-			// Atomic per table: unregister immediately followed by re-register within the same loop iteration, so
-			// no caller can observe the table missing from the registry mid-reload (spec §8: "해제→재등록을 한 함수
-			// 안에서 원자적으로 수행 — 부분 상태 노출 금지").
-			Registry.UnregisterStringTable(Table.Id);
-			Registry.Internal_LocTableFromFile(Table.Id, Table.Namespace, Table.FilePath, FPaths::ProjectContentDir());
+			// In-place import on the already-registered table — the same path the engine's own CSV file-watcher uses
+			// (FStringTableRegistry::Internal_OnDirectoryChanged → FindMutableStringTable → ImportStrings). ImportStrings
+			// validates the file (load + header) BEFORE clearing, so a broken/locked CSV returns false and leaves the
+			// previous strings intact, and the table never leaves the registry (no unregister window). The old
+			// unregister→Internal_LocTableFromFile approach was both destructive (Internal_LocTableFromFile registers an
+			// EMPTY table even when ImportStrings fails — StringTableRegistry.cpp:198-209) and unobservable (the
+			// registered-check was always true) — 레드팀 P2-1.
+			const FString FullPath = FPaths::ProjectContentDir() / Table.FilePath;
+			bool bSucceeded = false;
 
-			if (Registry.FindStringTable(Table.Id).IsValid())
+			FStringTablePtr ExistingTable = Registry.FindMutableStringTable(Table.Id);
+			if (ExistingTable.IsValid())
+			{
+				bSucceeded = ExistingTable->ImportStrings(FullPath);
+			}
+			else
+			{
+				// Not registered (e.g. the CSV was missing at module startup): validate on a scratch table first and
+				// register only on success — never expose an empty table under the id.
+				FStringTableRef NewTable = FStringTable::NewStringTable();
+				NewTable->SetNamespace(Table.Namespace);
+				if (NewTable->ImportStrings(FullPath))
+				{
+					Registry.RegisterStringTable(Table.Id, NewTable);
+					bSucceeded = true;
+				}
+			}
+
+			if (bSucceeded)
 			{
 				++SucceededCount;
 			}
 			else
 			{
-				UE_LOG(LogFPSRStringTableReload, Error, TEXT("FPSRStringTableReload: failed to reload string table '%s' from '%s' — CSV missing or unreadable."), Table.Id, Table.FilePath);
+				UE_LOG(LogFPSRStringTableReload, Error, TEXT("FPSRStringTableReload: failed to reload string table '%s' from '%s' — CSV missing, locked, or malformed. Previous strings (if any) were left untouched."), Table.Id, Table.FilePath);
 			}
 		}
 

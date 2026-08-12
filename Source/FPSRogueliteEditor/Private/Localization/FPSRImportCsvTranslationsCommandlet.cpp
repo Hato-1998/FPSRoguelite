@@ -187,6 +187,37 @@ bool UFPSRImportCsvTranslationsCommandlet::ImportCsvForNamespace(FLocTextHelper&
 		}
 	}
 
+	// Configuration-drift tripwire (레드팀 P3-4): the manifest namespace comes from the LOCTABLE_FROMFILE_GAME macro's
+	// 2nd argument while this commandlet derives it from the CSV filename — if the two ever disagree (or the table's
+	// macro registration is missing entirely), every key lands in the "no manifest entry" skip below. A 100% miss is
+	// never a per-row authoring problem, so escalate it to a hard error instead of exiting 0 with the culture silently
+	// untranslated.
+	int32 ValidKeyRowCount = 0;
+	int32 ManifestMissCount = 0;
+	for (int32 RowIndex = 1; RowIndex < Rows.Num(); ++RowIndex)
+	{
+		const auto& Row = Rows[RowIndex];
+		if (!Row.IsValidIndex(KeyColumnIndex))
+		{
+			continue;
+		}
+		const FString Key(Row[KeyColumnIndex]);
+		if (Key.IsEmpty())
+		{
+			continue;
+		}
+		++ValidKeyRowCount;
+		if (!InLocTextHelper.FindSourceText(InNamespace, Key).IsValid())
+		{
+			++ManifestMissCount;
+		}
+	}
+	if (ValidKeyRowCount > 0 && ManifestMissCount == ValidKeyRowCount)
+	{
+		UE_LOG(LogFPSRImportCsvTranslations, Error, TEXT("CSV '%s': ALL %d key(s) are missing from the manifest under namespace '%s' — the table's LOCTABLE_FROMFILE_GAME registration is missing/mismatched or Game_Gather.ini did not run. Refusing to exit 0 with this culture silently untranslated."), *InCsvFilePath, ValidKeyRowCount, *InNamespace);
+		return false;
+	}
+
 	// Import each requested culture's column, one culture at a time (SaveArchive itself is per-culture).
 	for (const TPair<FString, int32>& CulturePair : CultureColumnIndices)
 	{

@@ -43,8 +43,9 @@ if ($SheetName) {
 }
 
 $Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-$ManifestDir = Join-Path $RepoRoot 'Content\StringTables'
-$ManifestPath = Join-Path $ManifestDir '.sync-manifest.json'
+# provenance는 Config/에 둔다 — Content/StringTables/는 DirectoriesToAlwaysStageAsUFS라 그 안의 파일은 pak에 실린다(C3 실측).
+$ManifestDir = Join-Path $RepoRoot 'Config'
+$ManifestPath = Join-Path $ManifestDir 'AuthoringSheets.manifest.json'
 
 $ManifestEntries = @{}
 if (Test-Path $ManifestPath) {
@@ -71,7 +72,7 @@ foreach ($Sheet in $Sheets) {
     Write-Host "[$Name] GET $ExportUrl"
 
     try {
-        $Response = Invoke-WebRequest -Uri $ExportUrl -UseBasicParsing
+        $Response = Invoke-WebRequest -Uri $ExportUrl -UseBasicParsing -TimeoutSec 30
     }
     catch {
         Write-Warning "[$Name] 다운로드 실패: $($_.Exception.Message) — 기존 파일 무접촉."
@@ -133,7 +134,8 @@ foreach ($Sheet in $Sheets) {
 if (-not (Test-Path $ManifestDir)) {
     New-Item -ItemType Directory -Force -Path $ManifestDir | Out-Null
 }
-$ManifestJson = ($ManifestEntries.Values | Sort-Object name | ConvertTo-Json -Depth 4)
+# @()로 강제 배열화 — 항목 1개일 때 ConvertTo-Json이 단일 오브젝트를 내보내 스키마가 요동하는 것 방지(레드팀 P3-6b).
+$ManifestJson = ConvertTo-Json -InputObject @($ManifestEntries.Values | Sort-Object name) -Depth 4
 [System.IO.File]::WriteAllText($ManifestPath, $ManifestJson, $Utf8NoBom)
 
 if ($bHadFailure) {
