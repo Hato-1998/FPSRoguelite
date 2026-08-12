@@ -27,6 +27,7 @@ public class FPSRogueliteEditor : ModuleRules
 			"EditorSubsystem",
 			"ToolMenus",
 			"AssetRegistry",            // DataEditor/Assembler/Blockout/Validation 전반의 에셋 열거·참조 조회
+			"GameplayAbilities",        // TSubclassOf<UGameplayEffect> 링크 — CardCsvExporter/Importer의 CharGE 페이로드(§2-3-10)
 			"DataValidation",   // UEditorValidatorBase (Engine/Plugins/Editor/DataValidation)
 			"Localization",    // FLocTextHelper (LOC0 — FPSRImportCsvTranslationsCommandlet); UnrealEd only re-exposes GatherTextCommandletBase itself, not this
 			"DeveloperSettings",
