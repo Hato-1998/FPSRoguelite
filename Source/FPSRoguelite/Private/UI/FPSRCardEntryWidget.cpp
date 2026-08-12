@@ -7,6 +7,14 @@
 #include "Components/TextBlock.h"
 #include "Components/Button.h"
 #include "Core/FPSRLogChannels.h"
+#include "Internationalization/StringTableRegistry.h"
+
+UFPSRCardEntryWidget::UFPSRCardEntryWidget()
+{
+	// StringTable-backed default (Docs/SSOT/Localization.md L-2, CardEffect namespace) — kept out of the header's
+	// default member initializer so the widget's public header doesn't need StringTableRegistry.h.
+	FragmentCategoryText = LOCTABLE("CardEffect", "Fmt.FragmentCategory");
+}
 
 void UFPSRCardEntryWidget::NativeOnInitialized()
 {
@@ -41,7 +49,7 @@ void UFPSRCardEntryWidget::UpdateDisplay()
 
 	if (!CardAsset)
 	{
-		if (CardNameText) CardNameText->SetText(FText::FromString(TEXT("[Missing]")));
+		if (CardNameText) CardNameText->SetText(LOCTABLE("UI", "Widget.CardEntry.Missing"));
 		if (RarityText) RarityText->SetText(FText::GetEmpty());
 		if (DescriptionText) DescriptionText->SetText(FText::GetEmpty());
 		if (MagnitudeText) MagnitudeText->SetText(FText::GetEmpty());
@@ -92,11 +100,11 @@ void UFPSRCardEntryWidget::UpdateDisplay()
 		{
 			switch (CachedDraw.Rarity)
 			{
-				case ECardRarity::Common: RarityText->SetText(NSLOCTEXT("FPSRCardEntry", "Rarity_Common", "Common")); break;
-				case ECardRarity::Rare: RarityText->SetText(NSLOCTEXT("FPSRCardEntry", "Rarity_Rare", "Rare")); break;
-				case ECardRarity::Epic: RarityText->SetText(NSLOCTEXT("FPSRCardEntry", "Rarity_Epic", "Epic")); break;
-				case ECardRarity::Legendary: RarityText->SetText(NSLOCTEXT("FPSRCardEntry", "Rarity_Legendary", "Legendary")); break;
-				default: RarityText->SetText(FText::FromString(TEXT("?"))); break;
+				case ECardRarity::Common: RarityText->SetText(LOCTABLE("CardEffect", "Rarity.Common")); break;
+				case ECardRarity::Rare: RarityText->SetText(LOCTABLE("CardEffect", "Rarity.Rare")); break;
+				case ECardRarity::Epic: RarityText->SetText(LOCTABLE("CardEffect", "Rarity.Epic")); break;
+				case ECardRarity::Legendary: RarityText->SetText(LOCTABLE("CardEffect", "Rarity.Legendary")); break;
+				default: RarityText->SetText(LOCTABLE("CardEffect", "Rarity.Unknown")); break;
 			}
 		}
 	}

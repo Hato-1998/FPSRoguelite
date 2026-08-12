@@ -10,6 +10,7 @@
 #include "Weapon/FPSRWeaponDataAsset.h"
 #include "AbilitySystemComponent.h"
 #include "GameplayEffect.h"
+#include "Internationalization/StringTableRegistry.h"
 
 #if WITH_EDITOR
 #include "Misc/DataValidation.h"
@@ -126,7 +127,11 @@ FText UCardEffect_CharacterGE::GetDescription(ECardRarity Rarity, float Magnitud
 	}
 	// The card's authored Description carries the human text; this slot shows the rolled numeric value. bShowAsPercent
 	// renders fractional-multiplier attributes (damage/crit-chance/pickup/xp) as "+7.5%"; flat attributes as "+15".
-	return FText::FromString(FormatCardMagnitude(Magnitude, bShowAsPercent));
+	// ICU-formatted (AsPercent/AsNumber) instead of FString Printf assembly — AlwaysSign keeps the "+" convention,
+	// AsPercent takes the 0..1 fraction directly (no *100.0f — unlike the old FormatCardMagnitude path).
+	FNumberFormattingOptions Options;
+	Options.SetAlwaysSign(true).SetUseGrouping(false).SetMaximumFractionalDigits(bShowAsPercent ? 1 : 2);
+	return bShowAsPercent ? FText::AsPercent(Magnitude, &Options) : FText::AsNumber(Magnitude, &Options);
 }
 
 bool UCardEffect_CharacterGE::CanApply(const FFPSRCardEffectContext& Context) const
@@ -190,11 +195,15 @@ FText UCardEffect_WeaponStat::GetDescription(ECardRarity Rarity, float Magnitude
 		return FText::GetEmpty();
 	}
 	const bool bPercent = (Op == EFPSRWeaponModOp::PercentMultiply);
-	const FString StatName = StaticEnum<EFPSRWeaponStat>()
-		? StaticEnum<EFPSRWeaponStat>()->GetDisplayNameTextByValue(static_cast<int64>(Stat)).ToString()
-		: FString(TEXT("Stat"));
-	const FString ScopeSuffix = bThisWeaponOnly ? FString() : FString(TEXT(" (all weapons)"));
-	return FText::FromString(FString::Printf(TEXT("%s %s%s"), *StatName, *FormatCardMagnitude(Magnitude, bPercent), *ScopeSuffix));
+	// Stat display name = CardEffect.Stat.<raw enum name> lookup, NOT UEnum::GetDisplayNameTextByValue — that API
+	// falls back to the raw C++ enum name outside the editor (Docs/SSOT/Localization.md L-4), which would leak
+	// "MagSize" etc. into cooked builds. GetNameStringByValue always returns the raw name, deterministically.
+	const FString StatKey = FString::Printf(TEXT("Stat.%s"),
+		*StaticEnum<EFPSRWeaponStat>()->GetNameStringByValue(static_cast<int64>(Stat)));
+	const FText StatName = FText::FromStringTable(TEXT("CardEffect"), StatKey);
+	const FText MagnitudeText = FText::FromString(FormatCardMagnitude(Magnitude, bPercent));
+	const FText ScopeSuffix = bThisWeaponOnly ? FText::GetEmpty() : LOCTABLE("CardEffect", "Fmt.WeaponStat.AllWeaponsSuffix");
+	return FText::Format(LOCTABLE("CardEffect", "Fmt.WeaponStat"), StatName, MagnitudeText, ScopeSuffix);
 }
 
 bool UCardEffect_WeaponStat::CanApply(const FFPSRCardEffectContext& Context) const
@@ -273,7 +282,7 @@ FText UCardEffect_WeaponBehavior::GetDescription(ECardRarity Rarity, float Magni
 	{
 		return Fragment->DisplayName;
 	}
-	return LOCTEXT("WeaponModifier", "Weapon Modifier");
+	return LOCTABLE("CardEffect", "Fmt.FragmentCategory"); // shared with FPSRCardEntryWidget's default label
 }
 
 bool UCardEffect_WeaponBehavior::CanApply(const FFPSRCardEffectContext& Context) const
@@ -343,7 +352,7 @@ void UCardEffect_GrantWeapon::Apply(const FFPSRCardEffectContext& Context, float
 FText UCardEffect_GrantWeapon::GetDescription(ECardRarity /*Rarity*/, float /*Magnitude*/) const
 {
 	const FText WeaponName = WeaponToGrant ? WeaponToGrant->DisplayName : LOCTEXT("UnknownWeapon", "Weapon");
-	return FText::Format(LOCTEXT("UnlockWeaponFmt", "Unlock: {0}"), WeaponName);
+	return FText::Format(LOCTABLE("CardEffect", "Fmt.UnlockWeapon"), WeaponName);
 }
 
 bool UCardEffect_GrantWeapon::CanApply(const FFPSRCardEffectContext& Context) const
@@ -406,7 +415,7 @@ FText UCardEffect_CharacterPassive::GetDescription(ECardRarity /*Rarity*/, float
 {
 	// Passive GAs carry their own flavor; the card's DisplayName is the authored description. Keep this non-empty so
 	// the multi-effect aggregator never renders a blank line.
-	return LOCTEXT("CharacterPassiveDesc", "Passive ability");
+	return LOCTABLE("CardEffect", "Fmt.CharacterPassive");
 }
 
 bool UCardEffect_CharacterPassive::CanApply(const FFPSRCardEffectContext& Context) const

@@ -1,2 +1,5 @@
 Key,SourceString,en,ja
 Debug.LocSmoke,로컬라이제이션 시드,Localization seed,ローカライズシード
+Widget.CardEntry.Missing,[없음],[Missing],[欠落]
+Widget.Lobby.PlayerRowFmt,{0}{1}  -  {2}{3},{0}{1}  -  {2}{3},{0}{1}  -  {2}{3}
+Widget.Lobby.ReadyMark,"   [준비완료]","   [READY]","   [準備完了]"

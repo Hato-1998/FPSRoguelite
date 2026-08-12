@@ -20,6 +20,8 @@ class FPSROGUELITE_API UFPSRCardEntryWidget : public UCommonUserWidget
 	GENERATED_BODY()
 
 public:
+	UFPSRCardEntryWidget();
+
 	/** Set the card data to display. */
 	void SetCardDraw(const FFPSRCardDraw& Draw, int32 InCardIndex);
 
@@ -27,9 +29,11 @@ public:
 	FOnCardEntrySelected OnCardSelected;
 
 	/** Label shown in the rarity slot for behavior-fragment cards (which have no meaningful rarity).
-	 *  Designer-overridable per WBP. */
+	 *  Designer-overridable per WBP. Default set in the .cpp constructor (LOCTABLE reads the CardEffect string table,
+	 *  which would drag Internationalization/StringTableRegistry.h into this header if resolved as a default member
+	 *  initializer here — Docs/SSOT/Localization.md). */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "FPSR|Card")
-	FText FragmentCategoryText = NSLOCTEXT("FPSRCardEntry", "FragmentCategory", "Weapon Modifier");
+	FText FragmentCategoryText;
 
 protected:
 	/** Bind the select button here (runs once per instance) — NOT NativeConstruct, which the CommonUI

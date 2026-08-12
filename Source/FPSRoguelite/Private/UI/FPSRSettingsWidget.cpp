@@ -116,8 +116,11 @@ void UFPSRSettingsWidget::UpdateValueText(float Value)
 {
 	if (MasterVolumeValueText)
 	{
-		const int32 Percent = FMath::RoundToInt(FMath::Clamp(Value, 0.0f, 1.0f) * 100.0f);
-		MasterVolumeValueText->SetText(FText::FromString(FString::Printf(TEXT("%d%%"), Percent)));
+		// ICU percent formatting (locale-neutral — no CSV key needed, Docs/SSOT/Localization.md L-6): AsPercent takes
+		// the 0..1 fraction directly and multiplies internally, so no *100.0f here (unlike the old Printf path).
+		FNumberFormattingOptions Options;
+		Options.SetMaximumFractionalDigits(0).SetMinimumFractionalDigits(0);
+		MasterVolumeValueText->SetText(FText::AsPercent(FMath::Clamp(Value, 0.0f, 1.0f), &Options));
 	}
 }
 
