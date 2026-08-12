@@ -83,3 +83,4 @@
 - 적 길찾기 = **Flow-Field(고정맵 사전계산) + 높이/유계 2층 인지**(겹친 2층=메자닌 추격 지원, 기본 `NumLayers=2`·정적맵 1회 베이크; 상세 `Docs/SSOT/Performance.md §5-2`)
 - git: 사용자 콘텐츠(맵, DA_Weapon_Rifle/Knife @ `Content/Weapons/DataTable/` 등)는 **커밋 완료**(LFS tracked, 2026-07-01 확인). 신규 콘텐츠 저작 후엔 작업 단위 종료 시 `git status`로 동반커밋 확인.
   - ⚠️ **정정 2026-08-11(레드팀)**: 종전 여기 적혀 있던 `L_Sandbox` 맵은 **실재하지 않는다.** `Content/Maps` = `L_MainMenu`·`L_Lobby`·`L_Transition`·**`Map_CyberCity`**(유일 인게임 맵)·`TestWorld`. 같은 오참조가 `Roadmap.md` §8에도 있었고 함께 정정했다.
+  - 🔄 **갱신 2026-08-12(맵1 교체 P1, 커밋 `dca19b4e`)**: `Map_CyberCity` **삭제 완료** → 유일 인게임 맵 = **`L_Map1_City`**(Fab Synthwave City Kit 데모맵 기반). 현행 `Content/Maps` = `L_MainMenu`·`L_Lobby`·`L_Transition`·**`L_Map1_City`**·`TestWorld`. `Config/DefaultGame.ini` 의 `RunMap`·`MapsToCook` 도 함께 교체됐다.
