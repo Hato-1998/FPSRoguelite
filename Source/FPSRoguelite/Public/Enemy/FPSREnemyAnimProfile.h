@@ -9,6 +9,23 @@
 class UMeshComponent;
 class UMaterialInstanceDynamic;
 
+/** One baked VAT clip's frame range on the AnimToTexture-style material (CPD path, Stage 2). DATA, not code — a
+ *  clip is NOT a selectable index (see FPSRVATAnimParams.h CPDSlot_StartFrame/EndFrame comment); it is a
+ *  [StartFrame, EndFrame] window the material's GetFrameSwitch autoplays through. Bake output, so authored per
+ *  archetype on UFPSREnemyAnimProfile_VAT_CPD rather than hardcoded — today's bake only has one walk/jog clip, so
+ *  every field defaults to 0..0 (content assigns the real ranges once more clips are baked). */
+USTRUCT(BlueprintType)
+struct FFPSRVATClipRange
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, Category = "FPSR|Enemy|Anim")
+	float StartFrame = 0.0f;
+
+	UPROPERTY(EditAnywhere, Category = "FPSR|Enemy|Anim")
+	float EndFrame = 0.0f;
+};
+
 /** Polymorphic, data-driven selector for HOW a swarm enemy's animation is rendered (U20 domain C). An enemy archetype
  *  assigns a concrete profile (EditInlineNew instanced sub-object on AFPSREnemyBase); the base calls ApplyAnimState on
  *  animation-state transitions only (never per-frame). New render backends = a new subclass, with NO central enum/switch
@@ -43,4 +60,41 @@ class FPSROGUELITE_API UFPSREnemyAnimProfile_VAT : public UFPSREnemyAnimProfile
 public:
 	virtual void ApplyAnimState(UMeshComponent* Mesh, EFPSRAnimState State, float PlayRate, float Phase,
 		TObjectPtr<UMaterialInstanceDynamic>& CachedMID) const override;
+};
+
+/** VAT render backend using CustomPrimitiveData (CPD) instead of a per-actor MID (U20 Stage-2 render-path spike).
+ *  CPD lives on the PRIMITIVE COMPONENT instance, not on a unique material, so writing the animation scalars there
+ *  (instead of a per-actor MID's scalar parameters) lets every instance keep sharing the swarm's base material —
+ *  preserving draw-call batching, which the MID backend explicitly breaks at swarm scale (300 unique MIDs = 300 draw
+ *  calls; see UFPSREnemyAnimProfile_VAT::ApplyAnimState). CachedMID is left untouched (stays null): this backend
+ *  never creates one. CONTRACT: the assigned material must read Custom Primitive Data at the same fixed slot indices
+ *  this writes to — FPSRVATAnim::CPDSlot_StartFrame/EndFrame/PlayRate/Phase (FPSRVATAnimParams.h) — so a re-authored
+ *  M_BroBot_VAT (CPD variant) is required; the default MID-authored material will not react to this backend. Unlike
+ *  the MID path's selectable clip index, the material has no such param — a clip is a [StartFrame, EndFrame] window,
+ *  so the per-state ranges are authored below (FFPSRVATClipRange) instead of the legacy ClipIndex_* constants. */
+UCLASS(meta = (DisplayName = "VAT Anim Profile (CPD)"))
+class FPSROGUELITE_API UFPSREnemyAnimProfile_VAT_CPD : public UFPSREnemyAnimProfile
+{
+	GENERATED_BODY()
+
+public:
+	virtual void ApplyAnimState(UMeshComponent* Mesh, EFPSRAnimState State, float PlayRate, float Phase,
+		TObjectPtr<UMaterialInstanceDynamic>& CachedMID) const override;
+
+	/** Baked frame range for the Idle clip. Defaults to 0..0 (today's bake has only one walk/jog clip) — content
+	 *  fills in the real range once more clips exist. */
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Enemy|Anim")
+	FFPSRVATClipRange IdleClip;
+
+	/** Baked frame range for the Walk clip. */
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Enemy|Anim")
+	FFPSRVATClipRange WalkClip;
+
+	/** Baked frame range for the Attack clip. */
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Enemy|Anim")
+	FFPSRVATClipRange AttackClip;
+
+	/** Baked frame range for the Death clip. */
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Enemy|Anim")
+	FFPSRVATClipRange DeathClip;
 };

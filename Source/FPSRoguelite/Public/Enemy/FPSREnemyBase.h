@@ -235,6 +235,15 @@ protected:
 	 *  off-authority; the authority drives state from its server movement/attack pass instead. */
 	virtual void PostNetReceiveLocationAndRotation() override;
 
+	/** Client: reset the cosmetic anim state on the pool-reuse "became visible again" edge (bHidden true -> false).
+	 *  AActor::bHidden replicates with NO OnRep/RepNotify (Actor.h) — the client instead applies it by calling this
+	 *  virtual setter from PostNetReceive (ActorReplication.cpp: PreNetReceive saves the old value, PostNetReceive
+	 *  exchanges it back in and calls SetActorHiddenInGame(NewValue) if it differs), so overriding it is the correct
+	 *  client-side hook. Mirrors Activate()'s authority-side reset (cpp) so a reused enemy's stale CPD/anim state (a
+	 *  prior life's Death clip, a huge dormant-period dt) doesn't leak into the new life. No-op on authority — the
+	 *  server-side reset is Activate()'s job. */
+	virtual void SetActorHiddenInGame(bool bNewHidden) override;
+
 	/** Bound to the health component's OnDeathCosmetic (client death edge) — enters the Death animation state. */
 	UFUNCTION()
 	void HandleDeathCosmetic();
