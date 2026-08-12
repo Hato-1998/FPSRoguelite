@@ -203,7 +203,7 @@ bool FFPSRDataEditorTierAndBulkTest::RunTest(const FString& Parameters)
 		return false;
 	}
 	MultiCard->CardId = FName("TestCard_Multi");
-	MultiCard->CardFamily = FGameplayTag::RequestGameplayTag(FName("Card.Family.MagSize")); // reuse a real registered tag (native table lookup) — an ad-hoc "Test.*" tag would resolve invalid and fail the IsValid() check below
+	MultiCard->CardFamily = FName("weapon.magsize"); // CardFamily is FName (§ B-6) — any non-None value is valid, no ini registration needed
 
 	UCardEffect_WeaponStat* MultiA = NewObject<UCardEffect_WeaponStat>(MultiCard);
 	UCardEffect_WeaponStat* MultiB = NewObject<UCardEffect_WeaponStat>(MultiCard);
@@ -277,7 +277,7 @@ bool FFPSRDataEditorTierAndBulkTest::RunTest(const FString& Parameters)
 	{
 		UFPSRCardDataAsset* FlatBulkCard = NewObject<UFPSRCardDataAsset>();
 		FlatBulkCard->CardId = FName("TestCard_FlatBulk");
-		FlatBulkCard->CardFamily = FGameplayTag::RequestGameplayTag(FName("Test.Card.FlatBulk"), false);
+		FlatBulkCard->CardFamily = FName("Test.Card.FlatBulk");
 		UCardEffect_WeaponStat* FlatA = NewObject<UCardEffect_WeaponStat>(FlatBulkCard);
 		UCardEffect_WeaponStat* FlatB = NewObject<UCardEffect_WeaponStat>(FlatBulkCard);
 		FlatA->Op = EFPSRWeaponModOp::Additive;
@@ -339,7 +339,7 @@ bool FFPSRDataEditorTierAndBulkTest::RunTest(const FString& Parameters)
 	{
 		UFPSRCardDataAsset* MixedCard = NewObject<UFPSRCardDataAsset>();
 		MixedCard->CardId = FName("TestCard_Mixed");
-		MixedCard->CardFamily = FGameplayTag::RequestGameplayTag(FName("Test.Card.Mixed"), false);
+		MixedCard->CardFamily = FName("Test.Card.Mixed");
 		UCardEffect_CharacterGE* MixedPercent = NewObject<UCardEffect_CharacterGE>(MixedCard);
 		MixedPercent->bShowAsPercent = true;
 		MixedPercent->RarityTiers.Add(FFPSRCardRarityTier{ ECardRarity::Common, 0.05f });
@@ -372,7 +372,7 @@ bool FFPSRDataEditorTierAndBulkTest::RunTest(const FString& Parameters)
 	// ---------------------------------------------------------------------------------------------------------
 	TestTrue(TEXT("Card CardId untouched by tier/bulk edits"), Card->CardId == FName("TestCard_TierAndBulk"));
 	TestTrue(TEXT("MultiCard CardId untouched"), MultiCard->CardId == FName("TestCard_Multi"));
-	TestTrue(TEXT("MultiCard CardFamily still valid/unchanged"), MultiCard->CardFamily.IsValid());
+	TestTrue(TEXT("MultiCard CardFamily still valid/unchanged"), !MultiCard->CardFamily.IsNone());
 	{
 		UCardEffect_GrantWeapon* NoneUnitEffect = NewObject<UCardEffect_GrantWeapon>(Card);
 		TestEqual(TEXT("A None-unit effect (GrantWeapon) never has RarityTiers populated"), NoneUnitEffect->RarityTiers.Num(), 0);

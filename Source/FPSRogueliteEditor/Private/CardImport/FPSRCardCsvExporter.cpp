@@ -553,10 +553,10 @@ bool FPSRCardCsvExport::ExportAll(const FString& OutCardsCsvPath, const FString&
 			Row.Effects.Add(MoveTemp(Cell));
 		}
 
-		if (Card->CardFamily.IsValid())
+		if (!Card->CardFamily.IsNone())
 		{
-			const FString TagName = Card->CardFamily.GetTagName().ToString();
-			Row.Family = (TagName == FirstAttrIdForFamilyDerivation) ? FString() : TagName;
+			const FString FamilyName = Card->CardFamily.ToString();
+			Row.Family = (FamilyName == FirstAttrIdForFamilyDerivation) ? FString() : FamilyName;
 		}
 
 		OutputRows.Add(MoveTemp(Row));

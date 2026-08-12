@@ -339,32 +339,20 @@ namespace
 		return bChanged;
 	}
 
-	// Applies the (existing-tag-only, pre-B-6) CardFamily. Blank CSV Family derives from E1's AttrId — this only
-	// succeeds when that exact string happens to already be a REGISTERED gameplay tag (raw AttrIds like
-	// "weapon.magsize" normally are not); otherwise the card's existing value is left untouched and IsDataValid's
-	// existing multi-effect-requires-CardFamily check surfaces the gap. B-6 changes this field to FName and this
-	// function's body along with it (§ commit B-6).
+	// Applies CardFamily (§2-3-2 v3, FName post-B-6). Blank CSV Family derives from E1's AttrId — no ini
+	// registration needed now that the field is a plain FName (that friction was exactly why v3 dropped
+	// FGameplayTag). An explicit CSV Family value always wins over the derived one.
 	bool ApplyCardFamily(UFPSRCardDataAsset* Card, const FFPSRCardCsvRow& Row)
 	{
-		FString DesiredTagName = Row.Family.IsNone() ? FString() : Row.Family.ToString();
-		if (DesiredTagName.IsEmpty() && Row.Effects.Num() > 0)
+		FName DesiredFamily = Row.Family;
+		if (DesiredFamily.IsNone() && Row.Effects.Num() > 0)
 		{
-			DesiredTagName = Row.Effects[0].AttrId.ToString();
+			DesiredFamily = Row.Effects[0].AttrId;
 		}
-		if (DesiredTagName.IsEmpty())
-		{
-			return false;
-		}
-
-		const FGameplayTag DesiredTag = FGameplayTag::RequestGameplayTag(FName(*DesiredTagName), /*ErrorIfNotFound=*/false);
-		if (!DesiredTag.IsValid())
-		{
-			return false;
-		}
-		if (Card->CardFamily != DesiredTag)
+		if (Card->CardFamily != DesiredFamily)
 		{
 			Card->Modify();
-			Card->CardFamily = DesiredTag;
+			Card->CardFamily = DesiredFamily;
 			return true;
 		}
 		return false;

@@ -4,7 +4,6 @@
 
 #include "Engine/DataAsset.h"
 #include "Card/FPSRCardTypes.h"
-#include "GameplayTagContainer.h"
 #include "FPSRCardDataAsset.generated.h"
 
 class UFPSRCardEffect;
@@ -43,9 +42,11 @@ public:
 	TArray<ECardRarity> OfferRarities;
 
 	/** Cards sharing a family are mutually exclusive within a single draw (only one is ever offered). Required for
-	 *  multi-effect cards (the v1 AppliedEffect-GE-class fallback was removed — IsDataValid enforces it). */
+	 *  multi-effect cards (the v1 AppliedEffect-GE-class fallback was removed — IsDataValid enforces it). CSV
+	 *  pipeline is the authoring source and leaves this blank to auto-derive from E1 AttrId (§2-3-2 v3); FName
+	 *  because auto-derived values and static gameplay-tag ini registration don't mix. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Card")
-	FGameplayTag CardFamily;
+	FName CardFamily;
 
 	/** Stable meta-save key (U10): identifies this card in the player's save independent of the asset's file name,
 	 *  so renaming the asset does not orphan a player's unlock. Authored per card. IsDataValid requires it non-empty;
