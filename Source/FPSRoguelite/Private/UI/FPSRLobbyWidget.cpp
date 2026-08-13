@@ -19,6 +19,7 @@
 #include "GameFramework/GameStateBase.h"
 #include "GameFramework/PlayerController.h"
 #include "TimerManager.h"
+#include "Internationalization/StringTableRegistry.h"
 
 void UFPSRLobbyWidget::NativeConstruct()
 {
@@ -250,15 +251,19 @@ FText UFPSRLobbyWidget::GetLobbyPlayerListText() const
 {
 	const TArray<FFPSRLobbyPlayerRow> Rows = GetLobbyPlayerRows();
 
-	TArray<FString> Lines;
+	// "> " (local-player marker) and "..." (no-weapon-yet placeholder) are locale-neutral symbols, not natural-
+	// language content (Docs/SSOT/Localization.md L-6) — kept as literal format args rather than CSV keys.
+	// "[READY]" IS translated content (bracketed status word) — that one goes through Widget.Lobby.ReadyMark.
+	TArray<FText> Lines;
 	Lines.Reserve(Rows.Num());
 	for (const FFPSRLobbyPlayerRow& Row : Rows)
 	{
-		const FString SelfMark = Row.bIsLocalPlayer ? TEXT("> ") : TEXT("");
-		const FString WeaponLabel = Row.bHasWeapon ? Row.WeaponName.ToString() : TEXT("...");
-		const FString ReadyMark = Row.bReady ? TEXT("   [READY]") : TEXT("");
-		Lines.Add(FString::Printf(TEXT("%s%s  -  %s%s"), *SelfMark, *Row.PlayerName, *WeaponLabel, *ReadyMark));
+		const FText SelfMark = Row.bIsLocalPlayer ? FText::FromString(TEXT("> ")) : FText::GetEmpty();
+		const FText WeaponLabel = Row.bHasWeapon ? Row.WeaponName : FText::FromString(TEXT("..."));
+		const FText ReadyMark = Row.bReady ? LOCTABLE("UI", "Widget.Lobby.ReadyMark") : FText::GetEmpty();
+		Lines.Add(FText::Format(LOCTABLE("UI", "Widget.Lobby.PlayerRowFmt"),
+			SelfMark, FText::FromString(Row.PlayerName), WeaponLabel, ReadyMark));
 	}
 
-	return FText::FromString(FString::Join(Lines, TEXT("\n")));
+	return FText::Join(FText::FromString(TEXT("\n")), Lines);
 }
