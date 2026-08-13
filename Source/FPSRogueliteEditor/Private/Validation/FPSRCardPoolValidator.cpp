@@ -193,14 +193,14 @@ EDataValidationResult UFPSRCardPoolValidator::ValidateCrossPoolChecks(const UFPS
 	//     only ever offer one representative). Warning-only — an under-populated pool still functions, it's just a
 	//     thin draw designers should know about. ---
 	TArray<const UFPSRCardDataAsset*> DistinctCandidates; // one representative per CardFamily (empty family = itself)
-	TSet<FGameplayTag> SeenFamilies;
+	TSet<FName> SeenFamilies;
 	for (const TObjectPtr<UFPSRCardDataAsset>& Card : Pool->Cards)
 	{
 		if (!Card)
 		{
 			continue;
 		}
-		if (Card->CardFamily.IsValid())
+		if (!Card->CardFamily.IsNone())
 		{
 			if (SeenFamilies.Contains(Card->CardFamily))
 			{

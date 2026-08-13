@@ -27,11 +27,7 @@ namespace
 	 *  single card-level GE to key on, and IsDataValid requires multi-effect cards to set CardFamily). */
 	FName GetCardFamilyKey(const UFPSRCardDataAsset* Card)
 	{
-		if (!Card || !Card->CardFamily.IsValid())
-		{
-			return NAME_None;
-		}
-		return Card->CardFamily.GetTagName();
+		return Card ? Card->CardFamily : NAME_None;
 	}
 
 	/** True if any of the card's effects targets a weapon (WeaponStat / WeaponBehavior). Mirrors v1's "weapon-scope

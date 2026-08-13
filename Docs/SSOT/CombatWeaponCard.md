@@ -12,6 +12,7 @@
 > **무회귀 절대조건**: 기존 캐릭터카드 7종·무기 stat 카드·Fragment 4종은 v2 전환 후에도 **현행과 동일 거동**(단일→멀티효과 = 1효과 배열로 마이그레이션).
 
 - **데이터 방식**: **DataAsset + (효과별) GE/GAS/무기모디파이어/Fragment** — 스탯 하드코딩 금지. 에셋 경로 C++ 하드코딩 금지(§6-2).
+- **저작 소스 = CSV (2026-08-12 사용자 확정, §2-3-10)**: 카드 저작은 구글 시트(Cards/CardCatalog) → `Content/Authoring/*.csv`(빌드 스냅샷) → **에디터 임포터가 DA_Card_\* 를 생성·갱신**한다. **DA = 파생물**(직접 편집은 임시 실험만 — 재임포트가 덮는다), 런타임 구조(v2 폴리모픽)는 무변경. 로컬라이징 키 정책은 `Docs/SSOT/Localization.md` L-2와 공유(`<CardId>.DisplayName/.Description` → ST_Card.csv도 임포터 파생물).
 - **카드 확장 비용 (확장성-우선 directive 2026-06-20)**:
   - **새 효과 타입 = `UFPSRCardEffect` 서브클래스 1개(~40줄) — 중앙 코드 0 수정**(아래 §2-3-1). 새 카드 = DataAsset 1개(코드 0).
   - **기존 Attribute 범위 내 새 카드 = GE 효과 + DataAsset (코드 0)** / **완전히 새 Attribute = C++ AttributeSet 확장 필요** → AttributeSet 스탯 축을 넉넉히 미리 확보(`UFPSRCombatSet`에 예약 슬롯 주석). 상세 = 컨벤션 쿡북(§2-3-8).
@@ -36,6 +37,7 @@
 - **구 `ECardScope` 매핑(무회귀)**: `Character`→군=Character·`CharacterGE` / `AllWeapons`→**군=Character·`WeaponStat(false)`** / `ThisWeapon`→군=Weapon·`WeaponStat(true)` 또는 `WeaponBehavior`.
 - **같은 주제 양군 공존**(사양7): 연사 Up = 캐릭터 카드(전체무기 소폭) ‖ 무기 카드(해당무기 크게) — "넓고 얕게 vs 좁고 깊게" 빌드 선택.
 - **family-key 교정(무회귀 위험, Codex 게이트)**: `GetCardFamilyKey`의 `AppliedEffect` GE클래스 폴백은 멀티효과에서 카드레벨 Scope/AppliedEffect 소멸로 붕괴 → **멀티효과 카드 `CardFamily` 필수**(`IsDataValid` 에러) + 폴백 삭제. 같은 family = 한 추첨 1장(상호배타) 유지.
+- **CardFamily v3 (CSV 파이프라인, 2026-08-12 사용자 피드백 반영)**: ① 타입 = `FGameplayTag` → **`FName` 전환**(자동 파생 값과 태그 ini 정적 등록의 마찰 제거 — 소비처는 `GetCardFamilyKey()`가 FName화해 쓰는 것뿐, 세이브/네트워크 미탑재라 파급=에디터/검증 층). ② **저작 기본 = 자동 파생**: Cards.csv `Family` 컬럼 공란이면 임포터가 `E1_Attr`(첫 효과의 속성 ID)에서 파생해 DA에 기록 — "같은 속성을 만지는 카드 = 한 제시에 1장"이 기본 의미론. 명시 `Family` 값은 덮어쓰기(묶음 확장/옵트아웃 겸용). 런타임 추첨 코드는 저장된 값만 읽으므로 무변경. `Card.Family.*` 게임플레이태그(DefaultGameplayTags.ini)는 전환 후 제거.
 
 #### 2-3-3. 추첨·적용 (서버권위)
 - **레벨업 프리즈(§2-2)**: 캐릭터군 + 보유 무기군 풀 전체에서 **3장 랜덤**, **리롤 3회**(`RunRerollCharges`, 서버 차감) 또는 선택, **런 종료까지 영구**. 무기 stat 카드는 무기 보유 시 동적 합류(Gunfire Reborn식). 등급 4단계(Common/Rare/Epic/Legendary), **Luck**이 상위등급 가중치(※ RarityBonus는 Luck 통합·폐지 2026-06-02).
@@ -73,6 +75,7 @@
 
 #### 2-3-8. 검증·명명·기획자 툴 (directive ②)
 - **`IsDataValid` 가드레일**(load-bearing): `Effects[]`→`ValidateEffect()`(서브클래스별 자기 필드) + 빈 Effects 에러 + 멀티효과 `CardFamily` 필수 + **rarity 커버리지**(§2-3-1) + 빈 DisplayName 경고 + 명명 prefix 린트. 메시지=자산+필드 명시(무음 실패 금지).
+- **CSV 임포트 게이트(§2-3-10)**: 임포터는 접촉한 모든 에셋에 `IsDataValid` + `FPSRCardPoolValidator` 크로스체크를 **임포트 직후 실행**(검증기는 포팅이 아니라 재사용) — 에러 시 요약 리포트 + 실패 반환(에셋은 dirty로 남김). 명명규약의 에셋명은 Cards.csv `AssetName` 컬럼이 결정(`DA_Card_<Group>_<Theme>` 린트는 임포터 단계에서도 동일 적용).
 - **자동 설명 `GetDescription`**: 카드 표시텍스트를 효과에서 **생성**(기획자 Description 수기 불요, 멀티효과="primary (+N more)" 집계). `FPSRCardEntryWidget`가 `Effect->GetDescription(Rarity)` 소비.
 - **서브클래스별 깔끔 에디터 UI** = `EditInlineNew` 폴리모픽의 공짜 부산물(각 효과 자기 필드만 노출, `EditConditionHides` 캐스케이드 제거). [[dataasset-conditional-field-visibility]]
 - **카드 카탈로그 에디터 유틸**(U18d, 비차단): Blutility + `BlueprintCallable` C++ 로더 = 전 `DA_Card_*`의 군/효과/등급 magnitude/family/풀소속 한눈에 + 필터 → 밸런스 이상치 점검. [[vibeue-mcp-capabilities]]
@@ -83,6 +86,20 @@
 #### 2-3-9. 빌드 시너지 · 경계
 - **빌드 시너지 설계 (기획 2026-06-10)**: 카드 *메커니즘*과 별개로 **무엇이 빌드를 다르게 느끼게 하는가**(시너지 축: 원소/상태이상, 투사체수↔단발위력, 크리↔지속피해, AOE↔관통)를 별도 설계 — 뱀서 핵심 리텐션. **Fragment 상호작용(§2-4-1) + 멀티효과 트레이드오프가 1차 수단**. 시너지 패스 = 재미 게이트(§7-5) 전후.
 - **경계/시임**: 상태창 UI(사양9)=후속(데이터 노출 시임만). 상태이상 본체·OnStatusKill 배선·elemental 거동=**D3**. 보스 OnKill=**U3**. AllWeapons 복제=**U11b**. CardId=**U10**.
+
+#### 2-3-10. 카드 CSV 저작 파이프라인 (2026-08-12 사용자 확정 — DA 저작 → CSV/시트 저작)
+
+> 진실 사슬: **구글 시트(저작 마스터) → `Content/Authoring/*.csv`(빌드 스냅샷, `Scripts/sync-authoring-csv.ps1`) → 에디터 임포터 → `DA_Card_*`(파생물)**. 공통 규약(단방향 동기화·provenance·인코딩 갓차) = `Docs/SSOT/Localization.md` L-4·L-5. 설계 명세 = `Docs/Specs/CARDCSV_ImporterPipeline.md`.
+
+- **Cards.csv 스키마** (멀티이펙트 = 컬럼 반복 N=3 — 카드 1장=행 1개가 엑셀 저작·diff 최소 인지 단위; 현행 최대 효과 수 2; 초과 시 헤더 감지 버전업):
+  `CardId, AssetName, Group, Route, OwnerWeapon, Weight, Family, DisplayName_ko/en/ja, Description_ko/en/ja, E1_Attr, E1_Override, E1_Tiers, E2_*, E3_*`
+  - `OwnerWeapon` = 무기 DA 에셋명 **세미콜론 리스트**(다중 무기 풀 동시 소속 보존 — 현행 카드 7장이 복수 무기에 물려 있어 단일 값이면 무회귀 위반. 2026-08-13 교정).
+  - `CardId` = 행 키 = 세이브 키(기존 필드) = 로컬라이징 키 접두(`<CardId>.DisplayName`). `E*_Tiers` = `C:15;R:30;E:60;L:100`(티어 존재 = 레어도 노출범위, OfferRarities 자동 파생 현행 유지). `E*_Override` = 카탈로그 기본값 덮어쓰기(`k=v;`, 드묾).
+- **CardCatalog.csv (속성 카탈로그)**: `AttrId, EffectType, Payload, DefaultOp, DefaultThisWeaponOnly, ShowAsPercent, Notes`. EffectType 5종 = `UCardEffect_*` 서브클래스 1:1(임포터가 NewObject+Payload 주입 — 런타임 폴리모픽 무변경 = 무회귀). **새 효과 타입 = 서브클래스 1개 + 타입 팩토리 map 1행**(OCP 유지, §2-3-1 directive 존속). 사용자 2분류 스키마 대응: "전체무기 vs 개별무기"=`DefaultThisWeaponOnly`, "무기 해금 vs 기능추가"=`GrantWeapon` vs `WeaponBehavior`.
+- **임포터 계약**: 기존 에셋 in-place 갱신(변경분만 dirty = **멱등**, 재임포트 diff 0이 무회귀 기준선), Instanced 효과 = 결정적 네이밍(`Effect_0..`) + 클래스 불일치 시 트래시→재생성. DisplayName/Description = `FText::FromStringTable("Card", "<CardId>.*")` 세팅 + `ST_Card.csv` 동시 생성(Cards.csv의 ko/en/ja 컬럼이 원천 — ST_Card는 저작물이 아니라 파생물). 진입점 = Tools 메뉴 + 헤드리스 커맨드렛.
+- **익스포터(마이그레이션 전용)**: 기존 49 uasset → Cards/CardCatalog.csv 역추출(영어 FText→en 컬럼, SourceString에 `[KO-TODO]` 마커) → 시트 1회 시딩 → **역추출→재임포트→에셋 diff 0 왕복으로 무회귀 증명**. 이후 시트=마스터.
+- **풀 멤버십 동기화**: `Route`/`OwnerWeapon` 컬럼 → `UFPSRCardPoolDataAsset.Cards/WeaponUnlockCards`·무기 DA `WeaponCards/UnlockableFeatures` 배열 갱신 + `GetEditorEligibleRoutes()` 교차검증을 임포트 시점으로 전진.
+- **경계**: `Content/Authoring/`은 쿠킹/스테이징 제외(에디터 전용 저작물). 카드 신규 추가 = 시트 1행(+필요시 카탈로그 1행) → sync → 임포트 — 에디터 DA 수작업 저작은 폐지(DataEditor 툴은 조회·밸런스 점검 용도로 존속).
 
 ### 2-4. 무기 시스템
 - 최대 **3개 동시 보유** = **원거리 2 + 근접/맨손 1**(슬롯 역할 분리 2026-07-29, 아래 참조). 5렙/20렙 등에 무기 카드 등장
