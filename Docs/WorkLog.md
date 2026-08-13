@@ -9,6 +9,9 @@
 
 ---
 
+## 🎲 CARDDRAW v4 — 추첨 배제 규칙 (family+레어도 쌍) (2026-08-13, `phase/card-draw-exclusion-v4` → 머지 `3d5418cc`)
+> 사용자 확정 판정표: All레어+All레전더리 ✅ / All레어+All레어 ❌ / All레어+This레어 ✅. 배제 키 = (family, 굴린 레어도) 쌍, WeaponStat 자동 family에 `.all`/`.this` 스코프 접미(전체/개별 = 다른 카드), 같은 카드가 레어도만 달리해 2장 제시 가능(동일 카드 포인터 차단 폐지 — 단 같은 카드+같은 레어도는 family 유무 무관 무조건 배제 = 레드팀 P2 가드). family 키는 대상 무기 미구분(SSOT 명기, 사용자 확인 대기 항목). 명세+원장 = `Docs/Specs/CARDDRAW_FamilyRarityExclusion.md`. 6장(FireRate·MagSize·RecoilVertical All/This) family 재파생, 멱등 재확인. 후속: PoolValidator ThinOffer 휴리스틱 v3 잔존(과잉 경고 가능).
+
 ## 🃏 CARDCSV — 카드 CSV 저작 파이프라인 (2026-08-13, `phase/card-csv-pipeline` → 머지 `da180388`)
 > 보드 행 "카드 시스템 외부 엑셀 데이터 파이프라인 개편"의 코드 전량. 저작 사슬 = 구글 시트(Cards/CardCatalog) → sync → `Content/Authoring/*.csv` → 임포터(Tools 메뉴/`-run=FPSRImportCards`) → `DA_Card_*`(파생물). 명세+레드팀 원장 = `Docs/Specs/CARDCSV_ImporterPipeline.md`, SSOT = `CombatWeaponCard.md` §2-3-10 신설.
 

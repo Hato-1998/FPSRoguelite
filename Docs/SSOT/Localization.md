@@ -49,6 +49,7 @@
 - **`ImportStrings`는 전체 클리어 후 재구축** — CSV 파손 = 테이블 전멸. sync 스크립트의 헤더 검증·실패 시 스냅샷 보존이 방어선.
 - **한국어 Excel로 CSV 직접 편집 금지**(CP949 저장 → ko/ja 파손). 편집은 항상 구글 시트에서.
 - **에디터 실행 중 CSV 수정** = Tools>FPSR "StringTable CSV 리로드"로 반영(재시작 불필요).
+- **PIE에서 게임 텍스트 언어 전환은 `culture=`가 아니라 "미리보기 게임 언어"** — 에디터는 게임 텍스트를 항상 원문(소스)으로 표시하는 게 기본이고, PIE는 에디터 개인설정→지역 및 언어→**미리보기 게임 언어**(Preview Game Language)를 자동 적용한다(`EditorEngine.cpp:1283` EnableGameLocalizationPreview). `culture=` 콘솔 명령은 에디터 UI 언어만 바꾼다(2026-08-13 실측). 패키지에 가까운 검증 = 독립형 게임 + `-culture=ja`.
 - **쿠킹 빌드 enum DisplayName 폴백** — `UEnum::GetDisplayNameTextByIndex`는 비에디터에서 raw 이름 반환. 플레이어 노출 enum 이름은 반드시 `Stat.*` 등 키로(Phase A에서 일괄 이관).
 - **WBP 편집(MCP) 후 같은 세션 PIE 금지** — [[vibeue-buildgraph-pie-worldleak]]. 배치 쓰기→에디터 재시작→PIE.
 - **Localization 대시보드에서 Gather/Compile 버튼 실행 금지** — 대시보드는 `Config/Localization/Game_*.ini`를 자기 생성본으로 **덮어쓴다**(수제 주석·`Game_ImportCsvTranslations.ini` 체인 소실, 엔진 `LocalizationConfigurationScript.cpp` WriteWithSCC). 실행은 반드시 `Scripts/localization-gather.ps1`. `DefaultEditor.ini`의 타깃 항목은 UI 노출용일 뿐이다.
