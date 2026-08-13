@@ -6,8 +6,7 @@ Rarity.Rare,레어,Rare,レア
 Rarity.Epic,에픽,Epic,エピック
 Rarity.Legendary,레전더리,Legendary,レジェンダリー
 Rarity.Unknown,?,?,?
-Fmt.WeaponStat,{0} {1}{2},{0} {1}{2},{0} {1}{2}
-Fmt.WeaponStat.AllWeaponsSuffix," (전체 무기)"," (all weapons)"," (全武器)"
+Fmt.WeaponStat,{0} {1},{0} {1},{0} {1}
 Fmt.UnlockWeapon,해금: {0},Unlock: {0},解禁: {0}
 Fmt.CharacterPassive,패시브 능력,Passive ability,パッシブ能力
 Stat.MagSize,탄창 크기,Magazine Size,マガジン容量

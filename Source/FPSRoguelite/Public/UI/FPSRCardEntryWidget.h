@@ -62,6 +62,12 @@ protected:
 	UPROPERTY(meta = (BindWidgetOptional))
 	TObjectPtr<UTextBlock> TargetWeaponText;
 
+	/** Source-pool label: the target weapon's display name for weapon-scoped cards, or the "Character" fallback
+	 *  (Widget.CardEntry.SourceCharacter) for character-pool cards. Optional — not yet placed in WBP_CardEntry
+	 *  (A-4~6 WBP pass); left unbound this stays null and UpdateDisplay skips it. */
+	UPROPERTY(meta = (BindWidgetOptional))
+	TObjectPtr<UTextBlock> SourcePoolText;
+
 	UPROPERTY(meta = (BindWidget))
 	TObjectPtr<UButton> SelectButton;
 

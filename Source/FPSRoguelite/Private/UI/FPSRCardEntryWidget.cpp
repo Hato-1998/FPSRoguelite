@@ -135,4 +135,14 @@ void UFPSRCardEntryWidget::UpdateDisplay()
 			TargetWeaponText->SetVisibility(ESlateVisibility::Collapsed);
 		}
 	}
+
+	// Source-pool label: which pool this card was drawn from — the target weapon's name for weapon-scoped cards,
+	// or the character-pool fallback otherwise (Fmt.WeaponStat's AllWeaponsSuffix used to carry this distinction;
+	// this label replaces it, always visible rather than collapsing).
+	if (SourcePoolText)
+	{
+		SourcePoolText->SetText(CachedDraw.TargetWeapon
+			? CachedDraw.TargetWeapon->DisplayName
+			: LOCTABLE("UI", "Widget.CardEntry.SourceCharacter"));
+	}
 }

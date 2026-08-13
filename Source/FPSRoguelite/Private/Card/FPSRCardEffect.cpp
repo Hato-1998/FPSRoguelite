@@ -202,8 +202,10 @@ FText UCardEffect_WeaponStat::GetDescription(ECardRarity Rarity, float Magnitude
 		*StaticEnum<EFPSRWeaponStat>()->GetNameStringByValue(static_cast<int64>(Stat)));
 	const FText StatName = FText::FromStringTable(TEXT("CardEffect"), StatKey);
 	const FText MagnitudeText = FText::FromString(FormatCardMagnitude(Magnitude, bPercent));
-	const FText ScopeSuffix = bThisWeaponOnly ? FText::GetEmpty() : LOCTABLE("CardEffect", "Fmt.WeaponStat.AllWeaponsSuffix");
-	return FText::Format(LOCTABLE("CardEffect", "Fmt.WeaponStat"), StatName, MagnitudeText, ScopeSuffix);
+	// Scope (this-weapon vs all-weapons) used to render as a suffix here (Fmt.WeaponStat.AllWeaponsSuffix); the
+	// card entry widget's source-pool label (FPSRCardEntryWidget::SourcePoolText, A-1b) now carries that
+	// distinction — an all-weapons stat card is character-pool scoped, so its "Character" label already implies it.
+	return FText::Format(LOCTABLE("CardEffect", "Fmt.WeaponStat"), StatName, MagnitudeText);
 }
 
 bool UCardEffect_WeaponStat::CanApply(const FFPSRCardEffectContext& Context) const
