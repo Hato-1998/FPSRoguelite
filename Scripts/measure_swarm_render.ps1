@@ -16,9 +16,12 @@ param(
     [Parameter(Mandatory=$true)][string]$BuildDir,
     [Parameter(Mandatory=$true)][string]$Label,
     [int]$EnemyCount = 300,
+    [int]$SpawnRadius = 6000,     # cm. 근접 링(600)은 수 초 만에 카메라 위치로 뭉쳐 화면 밖 — 원거리 링이 수렴 중 시야를 채운다
+
     [int]$CaptureFrames = 6000,   # 60fps≈100s / 120fps≈50s — 워밍업 절삭 후에도 유효구간 확보
-    [int]$MaxWaitSeconds = 300,   # CSV 플러시 대기 상한
-    [int]$ShotAtSeconds = 45      # VAT 재생 확인 스크린샷 시점(+1.5s 두 번째 장)
+    [int]$BootWaitSeconds = 600,  # 캡처 시작(=CSV 생성) 대기 상한 — 첫 부팅 셰이더/PSO 컴파일이 5분+ 걸린 실측
+    [int]$MaxWaitSeconds = 300,   # 캡처 시작 후 완주(크기 안정화) 대기 상한
+    [int]$ShotAtSeconds = 30      # 캡처 시작 기준 스크린샷 시점(+1.5s 두 번째 장)
 )
 $ErrorActionPreference = 'Stop'
 # ⚠️ 아카이브 최상위 exe는 부트스트랩 — Start-Process 핸들을 죽여도 실제 게임 자식이 살아남아
@@ -36,7 +39,7 @@ if (Test-Path $csvDir) { Get-ChildItem $csvDir -Filter *.csv | Remove-Item -Forc
 $gameArgs = @(
     "L_Map1_City?listen",
     "-windowed","-resx=1920","-resy=1080","-novsync","-log",
-    "-ExecCmds=`"FPSR.SkipCards, FPSR.Invuln 600, FPSR.SpawnEnemies $EnemyCount, CsvProfile Frames=$CaptureFrames`"",
+    "-ExecCmds=`"FPSR.SkipCards, FPSR.Invuln 600, FPSR.SpawnEnemies $EnemyCount $SpawnRadius, CsvProfile Frames=$CaptureFrames`"",
     "-csvGpuStats"
 )
 Write-Host "[measure] launching $Label : $exe $($gameArgs -join ' ')"
@@ -50,16 +53,28 @@ function Take-Shot($path) {
     $b.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
     $g.Dispose(); $b.Dispose()
 }
-Start-Sleep -Seconds $ShotAtSeconds
-Take-Shot (Join-Path $outDir "shot_t0.png")
-Start-Sleep -Milliseconds 1500
-Take-Shot (Join-Path $outDir "shot_t1.png")
+# 1단계: 캡처 시작 대기 — CSV 파일은 캡처 '시작' 시 생성돼 스트리밍된다(실측). 부팅(첫 부팅 셰이더 컴파일 5분+)의
+#        기준점이 불명확하므로 CSV 생성을 "런 시작" 신호로 쓴다.
+$csv = $null; $waited = 0
+while ($waited -lt $BootWaitSeconds) {
+    if (-not (Get-Process -Name "FPSRoguelite*" -ErrorAction SilentlyContinue)) { Write-Warning "[measure] game exited during boot (crash?)"; break }
+    $csv = Get-ChildItem $csvDir -Filter *.csv -ErrorAction SilentlyContinue | Sort-Object LastWriteTime | Select-Object -Last 1
+    if ($csv) { Write-Host "[measure] capture started after ${waited}s boot"; break }
+    Start-Sleep -Seconds 5; $waited += 5
+}
 
-# CSV 완주 대기 — 파일은 캡처 '시작' 시 생겨 스트리밍되므로(실측), 존재가 아니라 '크기 안정화'를 기다린다.
-$waited = $ShotAtSeconds + 2
-$csv = $null
+# 2단계: 캡처 시작 +ShotAt초에 시차 스크린샷(스웜이 화면에 있는 시점)
+if ($csv) {
+    Start-Sleep -Seconds $ShotAtSeconds
+    Take-Shot (Join-Path $outDir "shot_t0.png")
+    Start-Sleep -Milliseconds 1500
+    Take-Shot (Join-Path $outDir "shot_t1.png")
+}
+
+# 3단계: 완주 대기 — 크기 안정화(10초 무변화)로 판정
+$waited = 0
 $lastSize = -1; $stableFor = 0
-while ($waited -lt $MaxWaitSeconds) {
+while ($csv -and $waited -lt $MaxWaitSeconds) {
     if (-not (Get-Process -Name "FPSRoguelite*" -ErrorAction SilentlyContinue)) { Write-Warning "[measure] game exited early (crash?)"; break }
     $csv = Get-ChildItem $csvDir -Filter *.csv -ErrorAction SilentlyContinue | Sort-Object LastWriteTime | Select-Object -Last 1
     if ($csv) {
