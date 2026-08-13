@@ -126,7 +126,20 @@
 - (c) **문자열 외부화** — StringTable 파이프라인 + 기존 UI 위젯 전수 이관. **이 선을 넘긴 뒤 만들어지는 UI는 외부화된 채로 태어난다.** ~~로컬라이제이션은 현재 0(`Config/Localization` 부재).~~
   - ✅ **정정 2026-08-13 (EC ④ 재대조) — 위 취소선은 사실과 반대다.** 파이프라인은 **이미 서 있다**: `Config/Localization/`(`Game_Gather.ini`·`Game_Compile.ini`·`Game_ImportCsvTranslations.ini`) · `Content/Localization/Game/`(manifest 95엔트리 + **ko·en·ja** archive/locres) · `Content/StringTables/`(`ST_UI.csv`·`ST_Card.csv`·`ST_CardEffect.csv` — **UStringTable 에셋 0은 설계 의도**다: `LOCTABLE_FROMFILE_GAME` 런타임 직접 로드, `Localization.md` §L-1) · 전용 SSOT `Docs/SSOT/Localization.md`. **Phase A UI 전수 이관도 완료**(`f1b7e314`·`3e23a33a`·`609839c2`). 이 문장을 그대로 두면 M0 Exit 판정이 (c)를 미착수로 오판한다.
   - 🔑 **EC ②의 "검사 대상"은 이미 기계화돼 있다** — `Config/Localization/Game_Gather.ini`가 `SearchDirectoryPaths=Source/FPSRoguelite/`(에디터 모듈 배제) + `ShouldGatherFromEditorOnlyData=false`(`#if WITH_EDITOR` 블록 스킵)이므로, **`Content/Localization/Game/Game.manifest`에 수집된 것 = 프로젝트가 스스로 정의한 검사 대상**이다. 검사기가 정의를 새로 만들 필요가 없다.
-  - ⬜ **잔여 = 16건**(실측 2026-08-13, 전부 빌드 또는 에디터 동반): C++ **5**(Boss `GetDescription` 4 — 실질은 `#if WITH_EDITOR` 가드 누락 / `FPSRCardEffect.cpp:356` 1 — 진짜 UI 노출) · WBP 인라인 Text **11**(`WBP_Lobby` 10 + `WBP_LoadoutEntry.NameText` 1) · BP 그래프 핀 리터럴 ~4곳 · 고아 WBP **2**(`WBP_PlayButton`·`WBP_ReturnButton`, 참조 0 확인).
+  - ⬜ **잔여 — 실측 2026-08-13 + 사용자 결정 반영 2026-08-13**(전부 빌드 또는 에디터 동반):
+
+    | 구분 | 건수 | 판정 |
+    |---|---|---|
+    | 디자인타임 플레이스홀더(`WBP_CardEntry`의 `CardName`·`Description…`, `WBP_DamageNumber`의 `99`, `WBP_RunHUD`의 `00:00`, `WBP_Button_Base`의 `TestBlock` 등) | ~10 | ❌ **검사 대상 아님** — 아래 EC ② 판정 정의 |
+    | **`WBP_Lobby` 계열** — 인라인 Text 10(`WeaponSlot0~7`·`InviteButton`·`JoinButton`) + BP 그래프 핀 4(`CODE: ------`·`Ready (R)`·`무기 이름`·`선택중`) | 14 | 🟡 **보류** — 로비 전면 개편 대기(아래) |
+    | `WBP_LoadoutEntry.NameText` | 1 | 🟡 **보류**(로비 로드아웃 행으로 추정). ⚠️ **참조 0** — C++·다른 위젯 어디서도 안 쓴다. `WBP_PlayButton`·`WBP_ReturnButton` 처럼 **고아일 가능성** → 개편 시 함께 판정 |
+    | **C++ LOCTEXT** — Boss `GetDescription` 4(실질은 `#if WITH_EDITOR` 가드 누락) + `FPSRCardEffect.cpp:356` 1(진짜 UI 노출) | 5 | ⬜ **실행**(빌드 동반) |
+    | **BP 그래프 핀** — `WBP_Result`·`WBP_DownedOverlay`·`WBP_MissionBanner` | 3곳 | ⬜ **실행**(에디터) |
+    | 고아 WBP 삭제 — `WBP_PlayButton`·`WBP_ReturnButton`(참조 0 확인) | 2 | ⬜ **실행**(에디터. 문자열 이관이 아니라 정리) |
+
+  - 🟡 **로비 전면 개편으로 인한 보류 15건** (사용자 방향 2026-08-13): 로비를 **UI 화면 방식이 아니라 이동 가능한 작은 방(공간형, PEAK류)으로 전면 재구축**한다. `WBP_Lobby` 와 그 파생 문자열은 개편에서 **통째로 교체될 대상**이라, 지금 StringTable로 이관하면 그대로 버려진다.
+    - **이 카브아웃이 EC ②의 취지를 훼손하지 않는 이유**: (c)가 걸고자 한 것은 *"이 선을 넘긴 뒤 만들어지는 UI는 외부화된 채로 태어난다"* 이고, **새 로비는 (3) 폴리시 레인의 UI 규칙("새 화면은 StringTable 경유로 태어난다")이 이미 강제**한다. 죽을 예정인 화면을 외부화하는 것은 그 취지가 요구하는 바가 아니다.
+    - ⚠️ **단 `ST_UI.csv` 의 `Widget.Lobby.*` 11키는 지금 고아 상태로 남는다** — 개편 시 재사용하거나 그때 정리한다. **"고아 키니까 지우자"고 판단하지 말 것**(이 보류 기록이 그 이유다).
 - (d) **엔진 에셋 쿡 생존 감사** ⚠️ *(d) 교체 2026-08-11(레드팀).* 종전 (d)는 "세이브 버저닝 + 마이그레이션 하네스"였으나 **이미 구현돼 있다**(`URogueliteSaveGame::CurrentSaveVersion`/`SaveVersion`/`MigrateIfNeeded()` + `FPSRoguelite.Smoke.SaveGame` 자동 테스트, P6 `RunFlow.md §2-11`) → 착수 0으로 이미 충족이라 게이트로서 아무것도 막지 못했다. 대신 실제 갭을 넣는다: **`/Engine/` 에디터 전용 에셋을 참조하는 `/Game` 콘텐츠가 패키지 쿡에서 살아남는지**(확인된 사례 = `BP_FPSRPlayer.WarningSound` → `/Engine/VREditor/Sounds/UI/Camera_Shutter`). 살아남지 못하면 §7-5 G1 ③(사각 오디오) 판정 근거가 **패키지 빌드에서 무효**가 된다.
   - ✅ **감사 완료 2026-08-13 — 정본 = [`Docs/Review/EngineRefCookAudit_20260813.md`](../Review/EngineRefCookAudit_20260813.md)** (LFS 실체 4,314/4,314 전건 확인 → 감사 불가 항목 0).
     · **결론: 현 설정에서 쿡 탈락은 0건이다.** UE 5.7의 엔진 콘텐츠 쿡 제외는 **`/Engine/Editor*`·`/Engine/VREditor` 두 접두사뿐**이고(`CookSavePackage.cpp:292`), 그 게이트인 `bSkipEditorContent`가 `BaseGame.ini:113`에서 `false`이며 **프로젝트가 오버라이드하지 않는다**. 즉 §7-5 G1 ③의 판정 근거는 현재 무효가 아니다.
@@ -139,8 +152,12 @@
 ① ⬜ `Performance.md §5`에 **측정 빌드 구성이 명기된** 적 300/500 실측 프레임값이 기입됨(추정치 아님). 그 값은 **(a′)로 확정된 맵 위에서, (a″)로 확정된 렌더 경로가 적용된 상태**로 잰 것이어야 한다 — 즉 **우리가 유지할 아키텍처의 수치**여야 한다.
   - ⚠️ *문구 정정 2026-08-13(EC ④ 재대조)*: 종전 *"(a″) **인스턴싱/VAT**가 적용된 상태"* 는 **VAT-1 결론과 모순**이다 — ADR `0007`이 ISM/인스턴싱을 **기각**하고 CPD를 채택했으므로(위 (a″) 참조), 문자 그대로 읽으면 이 EC는 영원히 닫히지 않는다. 실제 요구는 "**MID 제거 + CustomPrimitiveData 렌더 경로 위에서**"다.
 ② ⬜ **하드코딩 UI 문자열 = 0.** *검사 대상 정의*: C++의 `FText` 리터럴/`LOCTEXT` 및 **BP 위젯의 인라인 Text 프로퍼티**. 검사기는 이 정의를 스스로 정하지 않는다.
-  - 실측 2026-08-13 = **잔여 16건**(내역 = 위 (c)). 검사 대상의 기계적 정의 = `Game.manifest` 수집분(위 (c) 🔑).
-  - 🟠 **판정 경계 1건 = 사용자 결정 대기** — 런타임에 C++ `SetText`로 덮여 **표시되지 않는** 디자인타임 플레이스홀더(`WBP_CardEntry`의 `CardName`/`Description…`, `WBP_DamageNumber`의 `99`, `WBP_RunHUD`의 `00:00`, `WBP_Button_Base`의 `TestBlock` 등 ~10건)를 이 "0"에 셀 것인가. EC 문구는 "인라인 Text 프로퍼티"라 썼지 "**표시되는**"이라 쓰지 않았고, 이 조항 자신이 *"검사기는 이 정의를 스스로 정하지 않는다"* 고 못박았다. → 보드 `결정대기`.
+  - 🔒 **판정 정의 확정 (사용자 결정 2026-08-13) — "표시되는 것만 센다."** 런타임에 C++ `SetText`로 덮여 **화면에 나타나지 않는** 디자인타임 플레이스홀더는 이 "0"에 **포함하지 않는다**(`WBP_CardEntry`의 `CardName`·`Description…`, `WBP_DamageNumber`의 `99`, `WBP_RunHUD`의 `00:00`, `WBP_Button_Base`의 `TestBlock` 등 ~10건).
+    - **근거**: 이 조항이 막으려는 것은 **번역 누락**이다. 화면에 안 뜨는 글자는 번역되지 않아도 플레이어가 볼 일이 없으므로, 제외는 편의가 아니라 조항의 목적에 맞다. 부수적으로 에디터에서 카드·HUD 레이아웃을 눈으로 보며 저작하는 편의도 유지된다(비우면 빈 칸만 보인다).
+    - ⚠️ **대가(정직 기록)**: "표시되는가"는 **정적으로 판정할 수 없다** — 이 결정으로 EC ② 검사는 완전히 기계적이지 않게 됐다. 남는 위험 = 나중에 누군가 디자인타임 플레이스홀더를 **실제로 표시되게 배선하면 번역 없이 조용히 출시**된다. 검토했던 완화책(접두 규약 `[DT]` 강제)은 채택하지 않았다 — 되살릴 필요가 생기면 여기서 시작할 것.
+    - 🚫 **후속 세션 주의**: 위 ~10건을 "하드코딩 문자열"로 보고 StringTable로 이관하지 말 것. **의도된 상태다.**
+  - 검사 대상의 기계적 정의(무엇을 훑는가) = `Game.manifest` 수집분(위 (c) 🔑). 잔여 내역·보류분 = 위 (c) 표.
+  - 🟡 **`WBP_Lobby` 계열 15건은 EC ② 판정에서 보류한다**(로비 전면 개편 대기 — (c) 참조). **즉 EC ②는 C++ 5 + BP 그래프 핀 3곳(+ 고아 WBP 2 정리)으로 닫힌다.**
 ③ ✅ **완료 2026-08-13** — **`/Engine/` 참조 감사 결과가 문서화되고**, 쿡 탈락분은 교체 대상으로 M2에 등록됨. 정본 = [`Docs/Review/EngineRefCookAudit_20260813.md`](../Review/EngineRefCookAudit_20260813.md) (아래 (d) 요약).
 ④ ✅ **완료 2026-08-13** — (a) 전수 재대조 완료. §7-3(4행 정정) · §7-5 판정 기록(일치) · §8 인벤토리(7행 정정) · 도메인 SSOT(`Performance.md`·`RunFlow.md`·`Enemy.md`·`CombatWeaponCard.md`·`PlayerFeel.md` 정정)가 실물과 일치. 경위 = `Docs/WorkLog.md` 최상단.
 
@@ -177,6 +194,10 @@
 - 포스트런 개인화(로비 선복귀 + 결산을 로비에서 — E안, 보드에 결정완료로 대기 중)
 - 메타 프로그레션 실물화 — 언락 곡선(`RunFlow.md §2-11`), §1-C-8 "30시간 여정" 스코프의 실체화
 - 난이도 계단식 승급 · 로비 UX
+  - 🔄 **로비 전면 개편 방향 (사용자 2026-08-13)** — 로비를 **UI 화면 방식이 아니라 이동 가능한 작은 방(공간형, PEAK류)으로 전면 재구축**한다. 현행 `WBP_Lobby`(무기 슬롯 8 · 초대/참가 버튼 · 준비 표시 등)와 `WBP_LoadoutEntry` 는 **통째로 교체될 대상**이다.
+  - **이미 걸린 영향**: §7-6 M0 **EC ②** 의 `WBP_Lobby` 계열 잔여 **15건이 보류**로 빠졌다(위 M0 (c)) — 죽을 화면을 외부화하는 비용을 막기 위해서다. 새 로비는 (3) 폴리시 레인 UI 규칙("새 화면은 StringTable 경유로 태어난다")이 강제하므로 취지는 유지된다.
+  - ⚠️ **마일스톤 배정 미확정** — 여기(M3 "로비 UX")에 방향만 적어 둔 것이고, 개편 자체가 M3 소관인지 별도 슬라이스인지는 **사용자 확인 필요**(§6-9 (8) 임의 배정 금지). 보드에도 `마일스톤` 공란으로 행을 열어 뒀다.
+  - ℹ️ 범위·수용조건은 아직 없다 — 착수 전에 정해야 한다(현행 로비가 담당하던 것 = Steam 세션·친구초대·무기 선택·준비/카운트다운·심리스 트래블. 공간형으로 옮길 때 **이 기능들이 어디로 가는지**가 설계의 본체다).
 
 **Exit Criteria** (판정 주체 = **사용자**) — ① 로비 → 런 → (사망 및 클리어) → 로비를 **4인으로 3연속 완주**(끊김·재접속 없이) ② 메타 진행이 세이브에 남고 **재시작 후 다음 런에 반영**됨 ③ 난이도 계단을 최소 3단 올릴 수 있고 각 단이 체감상 구분됨
 
