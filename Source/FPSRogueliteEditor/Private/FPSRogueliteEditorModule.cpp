@@ -257,8 +257,9 @@ void FFPSRogueliteEditorModule::OnImportCardCsvMenuEntry()
 
 	FMessageLog ImportLog(TEXT("FPSRCardCsvImport"));
 	ImportLog.Info(FText::Format(
-		LOCTEXT("ImportCardCsvSummary", "카드 CSV 임포트: 생성 {0} / 갱신 {1} / 무변경 {2} / 오류 {3}"),
-		FText::AsNumber(Result.CreatedCount), FText::AsNumber(Result.UpdatedCount), FText::AsNumber(Result.UnchangedCount), FText::AsNumber(Result.Errors.Num())));
+		LOCTEXT("ImportCardCsvSummary", "카드 CSV 임포트: 생성 {0} / 갱신 {1} / 무변경 {2} / 풀·무기 소속 제거 {3} / 오류 {4}"),
+		FText::AsNumber(Result.CreatedCount), FText::AsNumber(Result.UpdatedCount), FText::AsNumber(Result.UnchangedCount),
+		FText::AsNumber(Result.RemovedMembershipCount), FText::AsNumber(Result.Errors.Num())));
 	for (const FString& Error : Result.Errors)
 	{
 		ImportLog.Error(FText::FromString(Error));

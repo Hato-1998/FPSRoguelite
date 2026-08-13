@@ -178,16 +178,26 @@ namespace
 		Card->Modify();
 		bOutCardChanged = true;
 
-		if (Card->Effects.IsValidIndex(Index) && Card->Effects[Index])
-		{
-			Card->Effects[Index]->Rename(nullptr, GetTransientPackage(), REN_DontCreateRedirectors);
-		}
 		if (!Card->Effects.IsValidIndex(Index))
 		{
 			Card->Effects.SetNum(Index + 1);
 		}
 
-		UFPSRCardEffect* NewEffect = NewObject<UFPSRCardEffect>(Card, TargetClass, FName(*FString::Printf(TEXT("Effect_%d"), Index)));
+		const FString SlotNameStr = FString::Printf(TEXT("Effect_%d"), Index);
+
+		// P2-⑥: trash ANY existing occupant of this subobject name under Card — not just the one Effects[Index]
+		// currently points to. An orphaned same-named object of an INCOMPATIBLE class left behind by a prior run
+		// (e.g. the array shrank without renaming that slot away) would otherwise collide with NewObject below:
+		// UObjectGlobals.cpp's StaticAllocateObject finds the occupant by name first and hits a Fatal
+		// ("Cannot replace existing object of a different class") when its class isn't a child of TargetClass
+		// (verified against engine source, UObjectGlobals.cpp:3656-3680). StaticFindObject with the base UObject
+		// class catches the occupant regardless of what it actually is.
+		if (UObject* Occupant = StaticFindObject(UObject::StaticClass(), Card, *SlotNameStr))
+		{
+			Occupant->Rename(nullptr, GetTransientPackage(), REN_DontCreateRedirectors);
+		}
+
+		UFPSRCardEffect* NewEffect = NewObject<UFPSRCardEffect>(Card, TargetClass, FName(*SlotNameStr));
 		Card->Effects[Index] = NewEffect;
 		return NewEffect;
 	}
@@ -199,6 +209,39 @@ namespace
 		if (FTextInspector::GetTableIdAndKey(Text, TableId, Key))
 		{
 			return TableId == FName(TEXT("Card")) && Key == ExpectedKey;
+		}
+		return false;
+	}
+
+	// P2-①: true if AT LEAST ONE of the ko/en/ja columns is non-empty. Mirrors RegenerateStCardCsv's own
+	// key-emission condition (below) EXACTLY on purpose — a card whose DisplayName/Description this function
+	// says "has text" must be the same set of cards RegenerateStCardCsv writes a ST_Card.csv key for, or a DA
+	// could end up referencing a StringTable key nobody wrote ("<MISSING STRING TABLE ENTRY>" at runtime).
+	bool HasAnyLocalizedText(const FString(&Columns)[3])
+	{
+		return !Columns[0].IsEmpty() || !Columns[1].IsEmpty() || !Columns[2].IsEmpty();
+	}
+
+	// Sets Field to a StringTable("Card", Key) reference when Columns has any text, else to FText::GetEmpty() —
+	// never a reference to a key that ST_Card.csv was never given a row for. Idempotent both ways: IsEmpty() is a
+	// representation-agnostic "is this already the blank state" check, symmetric with IsAlreadyStringTableRef's
+	// "is this already the referenced state" check.
+	bool ApplyLocalizedField(UFPSRCardDataAsset* Card, FText& Field, const FString(&Columns)[3], const FString& Key)
+	{
+		if (HasAnyLocalizedText(Columns))
+		{
+			if (!IsAlreadyStringTableRef(Field, Key))
+			{
+				Card->Modify();
+				Field = FText::FromStringTable(TEXT("Card"), Key);
+				return true;
+			}
+		}
+		else if (!Field.IsEmpty())
+		{
+			Card->Modify();
+			Field = FText::GetEmpty();
+			return true;
 		}
 		return false;
 	}
@@ -363,19 +406,33 @@ namespace
 	// /Game/Cards/Imported/<AssetName> (§5 "임포터 상세 계약").
 	// ---------------------------------------------------------------------------------------------------------
 
-	UFPSRCardDataAsset* FindCardByCardId(const TArray<FAssetData>& AllCards, FName CardId)
+	UFPSRCardDataAsset* FindCardByCardId(const TArray<FAssetData>& AllCards, FName CardId, const FString& PreferredAssetName)
 	{
+		UFPSRCardDataAsset* FirstMatch = nullptr;
 		for (const FAssetData& AssetData : AllCards)
 		{
 			if (UFPSRCardDataAsset* Card = Cast<UFPSRCardDataAsset>(AssetData.GetAsset()))
 			{
-				if (Card->CardId == CardId)
+				if (Card->CardId != CardId)
+				{
+					continue;
+				}
+				// P2-⑨: if more than one asset shares this CardId (a content bug — e.g. a copy-pasted asset that
+				// never got its own CardId updated; the DA_CardModifiers_SniperScope/BurstFire collision found
+				// during B-3), prefer the one whose OWN asset name matches this row's AssetName — the
+				// unambiguous, author-intended match — over whichever the AssetRegistry enumerates first
+				// (unstable order across runs/machines).
+				if (Card->GetName() == PreferredAssetName)
 				{
 					return Card;
 				}
+				if (!FirstMatch)
+				{
+					FirstMatch = Card;
+				}
 			}
 		}
-		return nullptr;
+		return FirstMatch;
 	}
 
 	UFPSRCardDataAsset* FindCardByAssetName(const TArray<FAssetData>& AllCards, const FString& AssetName)
@@ -519,7 +576,8 @@ namespace
 	// ---------------------------------------------------------------------------------------------------------
 
 	void SyncPoolMembership(const TArray<FFPSRCardCsvRow>& Rows, const TMap<FName, UFPSRCardDataAsset*>& CardsByCardId,
-		TSet<UObject*>& OutTouchedForValidation, TArray<UPackage*>& OutDirtyPackages, TArray<FString>& OutErrors)
+		TSet<UObject*>& OutTouchedForValidation, TArray<UPackage*>& OutDirtyPackages, TArray<FString>& OutErrors,
+		int32& OutRemovedMembershipCount) // P2-⑪
 	{
 		IAssetRegistry& AssetRegistry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
 
@@ -613,6 +671,7 @@ namespace
 					if (FFPSRDataEditorHelpers::RemoveCardFromPool(Pool, Card, /*bUnlockArray=*/false))
 					{
 						OutTouchedForValidation.Add(Pool);
+						++OutRemovedMembershipCount;
 					}
 				}
 			}
@@ -634,6 +693,7 @@ namespace
 					if (FFPSRDataEditorHelpers::RemoveCardFromPool(Pool, Card, /*bUnlockArray=*/true))
 					{
 						OutTouchedForValidation.Add(Pool);
+						++OutRemovedMembershipCount;
 					}
 				}
 			}
@@ -663,6 +723,7 @@ namespace
 					if (FFPSRDataEditorHelpers::RemoveCardFromWeapon(Weapon, Card, bUnlockableFeatures))
 					{
 						bWeaponTouched = true;
+						++OutRemovedMembershipCount;
 					}
 				}
 			}
@@ -696,6 +757,108 @@ namespace
 			const TSet<UFPSRCardDataAsset*>* TargetFeatures = TargetUnlockableFeatures.Find(Weapon);
 			SyncWeaponArray(Weapon, TargetFeatures ? *TargetFeatures : TSet<UFPSRCardDataAsset*>(), /*bUnlockableFeatures=*/true, TEXT("UnlockableFeatures"));
 		}
+	}
+
+	// ---------------------------------------------------------------------------------------------------------
+	// Validation gate (§6-2 / §2-3-8: IsDataValid + FPSRCardPoolValidator, reused not ported). Factored out so it
+	// can run a SECOND time on just the pool/weapon objects touched by RemoveInvalidCardsFromMembership (P2-③).
+	// ---------------------------------------------------------------------------------------------------------
+
+	TSet<UObject*> ValidateObjects(const TSet<UObject*>& Objects, bool bSaveAssets, TArray<FString>& OutErrors)
+	{
+		TSet<UObject*> Invalid;
+		if (Objects.Num() == 0 || !GEditor)
+		{
+			return Invalid;
+		}
+		UEditorValidatorSubsystem* ValidationSubsystem = GEditor->GetEditorSubsystem<UEditorValidatorSubsystem>();
+		if (!ValidationSubsystem)
+		{
+			return Invalid;
+		}
+
+		TArray<FAssetData> ToValidate;
+		ToValidate.Reserve(Objects.Num());
+		for (UObject* Object : Objects)
+		{
+			ToValidate.Add(FAssetData(Object));
+		}
+
+		FValidateAssetsSettings Settings;
+		Settings.bSkipExcludedDirectories = true;
+		Settings.bShowIfNoFailures = false;
+		Settings.bCollectPerAssetDetails = true;
+		Settings.ValidationUsecase = bSaveAssets ? EDataValidationUsecase::Commandlet : EDataValidationUsecase::Manual;
+
+		FValidateAssetsResults ValidationResults;
+		ValidationSubsystem->ValidateAssetsWithSettings(ToValidate, Settings, ValidationResults);
+
+		for (UObject* Object : Objects)
+		{
+			const FString ObjectPath = FAssetData(Object).GetObjectPathString();
+			if (const FValidateAssetsDetails* Details = ValidationResults.AssetsDetails.Find(ObjectPath))
+			{
+				if (Details->Result == EDataValidationResult::Invalid)
+				{
+					Invalid.Add(Object);
+					for (const FText& Error : Details->ValidationErrors)
+					{
+						OutErrors.Add(FString::Printf(TEXT("Import validation: %s: %s"), *Object->GetName(), *Error.ToString()));
+					}
+				}
+			}
+		}
+		return Invalid;
+	}
+
+	// P2-③: surgically un-wires INVALID cards from whichever pool/weapon arrays SyncPoolMembership just wired
+	// them into, so a save never leaves a pool/weapon referencing a card that stays dirty and unsaved (most
+	// concretely: a brand-new card that fails IsDataValid — the pool would otherwise point at an asset that was
+	// never written to disk). Only scans TouchedForValidation (this run's own pool/weapon touches), not every
+	// pool/weapon in the project. Returns the distinct set of pool/weapon objects actually changed — candidates
+	// for re-validation, since removing a card can CURE a routing violation that made them invalid in pass 1
+	// (FPSRCardPoolValidator's routing check is evaluated on the pool/weapon's OWN IsDataValid, which legitimately
+	// depends on current membership).
+	TSet<UObject*> RemoveInvalidCardsFromMembership(const TSet<UObject*>& TouchedForValidation, const TArray<UFPSRCardDataAsset*>& InvalidCards,
+		TArray<UPackage*>& OutDirtyPackages, int32& OutRemovedMembershipCount)
+	{
+		TSet<UObject*> Changed;
+		for (UObject* Object : TouchedForValidation)
+		{
+			if (UFPSRCardPoolDataAsset* Pool = Cast<UFPSRCardPoolDataAsset>(Object))
+			{
+				for (UFPSRCardDataAsset* InvalidCard : InvalidCards)
+				{
+					const bool bRemovedFromCards = FFPSRDataEditorHelpers::RemoveCardFromPool(Pool, InvalidCard, /*bUnlockArray=*/false);
+					const bool bRemovedFromUnlock = FFPSRDataEditorHelpers::RemoveCardFromPool(Pool, InvalidCard, /*bUnlockArray=*/true);
+					if (bRemovedFromCards || bRemovedFromUnlock)
+					{
+						UE_LOG(LogFPSRCardCsvImport, Warning, TEXT("Import: removing INVALID card '%s' from Pool '%s' — it failed IsDataValid and cannot be saved wired into a saved pool."), *InvalidCard->GetName(), *Pool->GetName());
+						Changed.Add(Pool);
+						OutRemovedMembershipCount += (bRemovedFromCards ? 1 : 0) + (bRemovedFromUnlock ? 1 : 0);
+					}
+				}
+			}
+			else if (UFPSRWeaponDataAsset* Weapon = Cast<UFPSRWeaponDataAsset>(Object))
+			{
+				for (UFPSRCardDataAsset* InvalidCard : InvalidCards)
+				{
+					const bool bRemovedFromWeaponCards = FFPSRDataEditorHelpers::RemoveCardFromWeapon(Weapon, InvalidCard, /*bUnlockableFeatures=*/false);
+					const bool bRemovedFromFeatures = FFPSRDataEditorHelpers::RemoveCardFromWeapon(Weapon, InvalidCard, /*bUnlockableFeatures=*/true);
+					if (bRemovedFromWeaponCards || bRemovedFromFeatures)
+					{
+						UE_LOG(LogFPSRCardCsvImport, Warning, TEXT("Import: removing INVALID card '%s' from Weapon '%s' — it failed IsDataValid and cannot be saved wired into a saved weapon."), *InvalidCard->GetName(), *Weapon->GetName());
+						Changed.Add(Weapon);
+						OutRemovedMembershipCount += (bRemovedFromWeaponCards ? 1 : 0) + (bRemovedFromFeatures ? 1 : 0);
+					}
+				}
+			}
+		}
+		for (UObject* Object : Changed)
+		{
+			OutDirtyPackages.AddUnique(Object->GetPackage());
+		}
+		return Changed;
 	}
 }
 
@@ -748,7 +911,7 @@ FFPSRCardImportResult FPSRCardCsvImport::ImportAll(bool bSaveAssets)
 
 	for (const FFPSRCardCsvRow& Row : ParseResult.Cards)
 	{
-		UFPSRCardDataAsset* Card = FindCardByCardId(AllCardAssets, Row.CardId);
+		UFPSRCardDataAsset* Card = FindCardByCardId(AllCardAssets, Row.CardId, Row.AssetName);
 		bool bNewlyCreated = false;
 		bool bCardChanged = false;
 
@@ -781,7 +944,8 @@ FFPSRCardImportResult FPSRCardCsvImport::ImportAll(bool bSaveAssets)
 			AllCardAssets.Add(FAssetData(Card)); // so a later duplicate CardId row in the same run still resolves
 		}
 
-		CardsByCardId.Add(Row.CardId, Card);
+		// P2-②: CardsByCardId registration is deferred to the end of the loop body, gated on this row not having
+		// incurred a resolution error — see below.
 
 		if (Card->Group != Row.Group)
 		{
@@ -797,20 +961,17 @@ FFPSRCardImportResult FPSRCardCsvImport::ImportAll(bool bSaveAssets)
 		}
 
 		const FString DisplayNameKey = FString::Printf(TEXT("%s.DisplayName"), *Row.CardId.ToString());
-		if (!IsAlreadyStringTableRef(Card->DisplayName, DisplayNameKey))
+		if (ApplyLocalizedField(Card, Card->DisplayName, Row.DisplayName, DisplayNameKey))
 		{
-			Card->Modify();
-			Card->DisplayName = FText::FromStringTable(TEXT("Card"), DisplayNameKey);
 			bCardChanged = true;
 		}
 		const FString DescriptionKey = FString::Printf(TEXT("%s.Description"), *Row.CardId.ToString());
-		if (!IsAlreadyStringTableRef(Card->Description, DescriptionKey))
+		if (ApplyLocalizedField(Card, Card->Description, Row.Description, DescriptionKey))
 		{
-			Card->Modify();
-			Card->Description = FText::FromStringTable(TEXT("Card"), DescriptionKey);
 			bCardChanged = true;
 		}
 
+		const int32 ErrorsBeforeEffects = Result.Errors.Num(); // P2-②: detect this ROW's own resolution errors
 		bool bEffectsChanged = false;
 		for (int32 EffectIndex = 0; EffectIndex < Row.Effects.Num(); ++EffectIndex)
 		{
@@ -859,6 +1020,19 @@ FFPSRCardImportResult FPSRCardCsvImport::ImportAll(bool bSaveAssets)
 			++Result.UnchangedCount;
 		}
 
+		// P2-②: a resolution error (payload failed to load, unknown EffectType/enum name, ...) leaves this card in
+		// a MIXED state — some fields written from the CSV, the failed one left at its previous value. Never let
+		// that leak to disk (excluded from TouchedPackages below) and never let the CSV's declared membership for
+		// it take effect (excluded from CardsByCardId, so SyncPoolMembership's per-row lookup naturally skips it —
+		// see its "resolution failure already reported elsewhere" continue).
+		const bool bRowHasResolutionErrors = Result.Errors.Num() > ErrorsBeforeEffects;
+		if (bRowHasResolutionErrors)
+		{
+			continue;
+		}
+
+		CardsByCardId.Add(Row.CardId, Card);
+
 		if (bCardChanged)
 		{
 			TouchedForValidation.Add(Card);
@@ -866,51 +1040,41 @@ FFPSRCardImportResult FPSRCardCsvImport::ImportAll(bool bSaveAssets)
 		}
 	}
 
-	SyncPoolMembership(ParseResult.Cards, CardsByCardId, TouchedForValidation, TouchedPackages, Result.Errors);
+	SyncPoolMembership(ParseResult.Cards, CardsByCardId, TouchedForValidation, TouchedPackages, Result.Errors, Result.RemovedMembershipCount);
 
 	if (!RegenerateStCardCsv(ParseResult.Cards, Result.Errors))
 	{
 		// Non-fatal to the DA import itself, but surfaced — the CSV pipeline's text side failed to update.
 	}
 
-	// --- Validation gate (§6-2 / §2-3-8: IsDataValid + FPSRCardPoolValidator, reused not ported) ---
-	TSet<UObject*> ValidatedInvalid;
-	if (TouchedForValidation.Num() > 0 && GEditor)
+	// --- Validation gate pass 1 (§6-2 / §2-3-8: IsDataValid + FPSRCardPoolValidator, reused not ported) ---
+	TSet<UObject*> ValidatedInvalid = ValidateObjects(TouchedForValidation, bSaveAssets, Result.Errors);
+
+	// P2-③: a card that failed its OWN IsDataValid must not remain wired into a pool/weapon we're about to save —
+	// that would leave a saved asset referencing an unsaved, still-dirty (invalid) one. Surgically un-wire it,
+	// then re-validate ONLY the pool/weapon objects whose membership actually changed as a result: removing the
+	// card may have CURED a routing violation that made THEM invalid in pass 1 (their IsDataValid legitimately
+	// depends on current membership — FPSRCardPoolValidator's routing check), so the pass-1 verdict for those
+	// specific objects is stale and must be replaced, not merely kept.
+	TArray<UFPSRCardDataAsset*> InvalidCards;
+	for (UObject* Object : ValidatedInvalid)
 	{
-		UEditorValidatorSubsystem* ValidationSubsystem = GEditor->GetEditorSubsystem<UEditorValidatorSubsystem>();
-		if (ValidationSubsystem)
+		if (UFPSRCardDataAsset* InvalidCard = Cast<UFPSRCardDataAsset>(Object))
 		{
-			TArray<FAssetData> ToValidate;
-			ToValidate.Reserve(TouchedForValidation.Num());
-			for (UObject* Object : TouchedForValidation)
+			InvalidCards.Add(InvalidCard);
+		}
+	}
+	if (InvalidCards.Num() > 0)
+	{
+		const TSet<UObject*> ReSyncTargets = RemoveInvalidCardsFromMembership(TouchedForValidation, InvalidCards, TouchedPackages, Result.RemovedMembershipCount);
+		if (ReSyncTargets.Num() > 0)
+		{
+			const TSet<UObject*> ReValidatedInvalid = ValidateObjects(ReSyncTargets, bSaveAssets, Result.Errors);
+			for (UObject* Object : ReSyncTargets)
 			{
-				ToValidate.Add(FAssetData(Object));
+				ValidatedInvalid.Remove(Object);
 			}
-
-			FValidateAssetsSettings Settings;
-			Settings.bSkipExcludedDirectories = true;
-			Settings.bShowIfNoFailures = false;
-			Settings.bCollectPerAssetDetails = true;
-			Settings.ValidationUsecase = bSaveAssets ? EDataValidationUsecase::Commandlet : EDataValidationUsecase::Manual;
-
-			FValidateAssetsResults ValidationResults;
-			ValidationSubsystem->ValidateAssetsWithSettings(ToValidate, Settings, ValidationResults);
-
-			for (UObject* Object : TouchedForValidation)
-			{
-				const FString ObjectPath = FAssetData(Object).GetObjectPathString();
-				if (const FValidateAssetsDetails* Details = ValidationResults.AssetsDetails.Find(ObjectPath))
-				{
-					if (Details->Result == EDataValidationResult::Invalid)
-					{
-						ValidatedInvalid.Add(Object);
-						for (const FText& Error : Details->ValidationErrors)
-						{
-							Result.Errors.Add(FString::Printf(TEXT("Import validation: %s: %s"), *Object->GetName(), *Error.ToString()));
-						}
-					}
-				}
-			}
+			ValidatedInvalid.Append(ReValidatedInvalid);
 		}
 	}
 
@@ -936,7 +1100,24 @@ FFPSRCardImportResult FPSRCardCsvImport::ImportAll(bool bSaveAssets)
 		}
 		if (PackagesToSave.Num() > 0)
 		{
-			FFPSRDataEditorHelpers::SavePackages(PackagesToSave);
+			// P2-④: SavePackages returns how many of the requested-dirty packages it actually saved — 0 when the
+			// underlying UEditorLoadingAndSavingUtils::SavePackages call itself failed (it reports one bool for
+			// the whole batch, not per-package). Compare against our OWN dirty count (recomputed here, since
+			// SavePackages doesn't expose its internal one) so a save failure surfaces as a Result.Errors entry —
+			// which the commandlet already propagates as a non-zero exit code (Main() returns Errors.Num()).
+			int32 ExpectedDirtyCount = 0;
+			for (const UPackage* Package : PackagesToSave)
+			{
+				if (Package && Package->IsDirty())
+				{
+					++ExpectedDirtyCount;
+				}
+			}
+			const int32 ActuallySavedCount = FFPSRDataEditorHelpers::SavePackages(PackagesToSave);
+			if (ActuallySavedCount < ExpectedDirtyCount)
+			{
+				Result.Errors.Add(FString::Printf(TEXT("Import: SavePackages saved %d/%d dirty package(s) — the save batch failed, some assets were not written to disk."), ActuallySavedCount, ExpectedDirtyCount));
+			}
 		}
 	}
 

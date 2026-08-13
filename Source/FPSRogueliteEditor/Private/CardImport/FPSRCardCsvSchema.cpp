@@ -5,6 +5,8 @@
 #include "Serialization/Csv/CsvParser.h"
 #include "Misc/DefaultValueHelper.h"
 
+DEFINE_LOG_CATEGORY_STATIC(LogFPSRCardCsvSchema, Log, All);
+
 namespace
 {
 	// Column order = SSOT CombatWeaponCard.md §2-3-10. Shared internally by ParseCards/ParseCatalog; the
@@ -177,6 +179,8 @@ bool FPSRCardCsv::ParseCards(const FString& CardsCsvText, const TArray<FFPSRCard
 	}
 
 	TSet<FName> SeenCardIds;
+	TSet<FString> SeenAssetNames; // P2-⑤: a duplicate AssetName makes existing-asset resolution (§5 CardId->AssetName
+	                              // fallback) ambiguous between rows — same severity as a duplicate CardId.
 	for (int32 RowIndex = 1; RowIndex < Rows.Num(); ++RowIndex)
 	{
 		const TArray<const TCHAR*>& RawRow = Rows[RowIndex];
@@ -214,11 +218,20 @@ bool FPSRCardCsv::ParseCards(const FString& CardsCsvText, const TArray<FFPSRCard
 			}
 		}
 
-		// AssetName — required (naming-lint target, §2-3-8).
+		// AssetName — required (naming-lint target, §2-3-8), unique within the file (P2-⑤).
 		Row.AssetName = GetCell(Cells, 1);
 		if (Row.AssetName.IsEmpty())
 		{
 			InOut.Errors.Add(FString::Printf(TEXT("%s:%d AssetName: empty — required (DA_Card_<Group>_<Theme>)."), *FileTag, SourceRow));
+		}
+		else
+		{
+			bool bAssetNameAlreadySeen = false;
+			SeenAssetNames.Add(Row.AssetName, &bAssetNameAlreadySeen);
+			if (bAssetNameAlreadySeen)
+			{
+				InOut.Errors.Add(FString::Printf(TEXT("%s:%d AssetName: '%s' is duplicated in this file."), *FileTag, SourceRow, *Row.AssetName));
+			}
 		}
 
 		// Group.
@@ -270,6 +283,14 @@ bool FPSRCardCsv::ParseCards(const FString& CardsCsvText, const TArray<FFPSRCard
 		{
 			InOut.Errors.Add(FString::Printf(TEXT("%s:%d OwnerWeapon: empty but Route requires a weapon (LevelUpWeapon/MissionClearWeaponFeature)."), *FileTag, SourceRow));
 		}
+		else if (!bRouteRequiresWeapon && Row.OwnerWeapons.Num() > 0)
+		{
+			// P2-⑧: a central-route (LevelUpGlobal/MissionClearNewWeapon) row with OwnerWeapon filled in is very
+			// likely a copy-paste leftover — not an error (the importer's central routes never consult
+			// OwnerWeapons), but worth a designer's attention.
+			UE_LOG(LogFPSRCardCsvSchema, Warning, TEXT("%s:%d OwnerWeapon: '%s' is set but Route is not a weapon route — ignored by the importer."),
+				*FileTag, SourceRow, *FString::Join(Row.OwnerWeapons, TEXT(";")));
+		}
 
 		// Weight — blank = default 1.0.
 		{
@@ -281,6 +302,13 @@ bool FPSRCardCsv::ParseCards(const FString& CardsCsvText, const TArray<FFPSRCard
 			else if (!FDefaultValueHelper::ParseFloat(WeightStr, Row.Weight))
 			{
 				InOut.Errors.Add(FString::Printf(TEXT("%s:%d Weight: '%s' is not a valid number."), *FileTag, SourceRow, *WeightStr));
+			}
+			else if (Row.Weight <= 0.0f)
+			{
+				// P2-⑦: a non-positive Weight never wins the weighted draw (UFPSRCardSubsystem::GetEffectiveWeight
+				// clamps the final weight to >= 0) — not a parse error, but a card that can never be offered is
+				// almost certainly a mistake.
+				UE_LOG(LogFPSRCardCsvSchema, Warning, TEXT("%s:%d Weight: '%s' is <= 0 — this card's draw weight will never be positive, so it can never be offered."), *FileTag, SourceRow, *WeightStr);
 			}
 		}
 

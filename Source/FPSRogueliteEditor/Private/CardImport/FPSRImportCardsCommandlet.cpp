@@ -19,8 +19,8 @@ int32 UFPSRImportCardsCommandlet::Main(const FString& Params)
 		UE_LOG(LogFPSRImportCards, Error, TEXT("FPSRImportCards: %s"), *Error);
 	}
 
-	UE_LOG(LogFPSRImportCards, Log, TEXT("FPSRImportCards: created=%d updated=%d unchanged=%d errors=%d"),
-		Result.CreatedCount, Result.UpdatedCount, Result.UnchangedCount, Result.Errors.Num());
+	UE_LOG(LogFPSRImportCards, Log, TEXT("FPSRImportCards: created=%d updated=%d unchanged=%d removedMembership=%d errors=%d"),
+		Result.CreatedCount, Result.UpdatedCount, Result.UnchangedCount, Result.RemovedMembershipCount, Result.Errors.Num());
 	UE_LOG(LogFPSRImportCards, Log, TEXT("--------------------------------------------------------------------------------------------"));
 
 	return Result.Errors.Num();

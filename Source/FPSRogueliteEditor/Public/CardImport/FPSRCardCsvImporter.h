@@ -11,6 +11,10 @@ struct FFPSRCardCsvParseResult;
 struct FFPSRCardImportResult
 {
 	int32 CreatedCount = 0, UpdatedCount = 0, UnchangedCount = 0;
+	/** Pool/weapon membership array entries removed this run — declarative-sync removals (a card no longer in
+	 *  Cards.csv for that route) plus invalid-card cleanup (§ red-team gate P2-③). Surfaced in the Tools menu
+	 *  summary so a designer notices an unexpectedly large drop in wired-up content. */
+	int32 RemovedMembershipCount = 0;
 	TArray<FString> Errors; // parsing + resolution + validation-gate errors, all of them
 	bool Succeeded() const { return Errors.Num() == 0; }
 };
