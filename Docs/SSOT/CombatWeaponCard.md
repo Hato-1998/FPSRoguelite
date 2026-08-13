@@ -8,7 +8,7 @@
 
 ### 2-3. 카드 시스템 — **v2 재설계 (U18, 2026-06-20)**
 
-> **설계 상태**: 이 절은 **v2 목표 설계**(사용자 확정 사양 + 확장성/툴 directive). **구현 = U18a~d**(§B/`TaskPrompts_Master.md`). 현행 출시 코드는 **v1 단일효과**(카드 1=효과 1, `ECardScope` enum)이며 U18a 마이그레이션 대상이다. 설계-우선(SSOT 먼저) 원칙에 따라 본 절을 v2로 갱신하고 코드가 뒤따른다.
+> **설계 상태**: 이 절은 **v2 목표 설계**(사용자 확정 사양 + 확장성/툴 directive). **구현 = U18a~d**(§B/`TaskPrompts_Master.md`). ~~현행 출시 코드는 **v1 단일효과**(카드 1=효과 1, `ECardScope` enum)이며 U18a 마이그레이션 대상이다.~~ 🔁 **정정 2026-08-13(M0 EC ④ 재대조)**: **코드는 이미 v2다.** `UFPSRCardEffect`가 실존하고(`Private/Card/FPSRCardEffect.cpp`), `FPSRCardDataAsset`이 `TArray<TObjectPtr<UFPSRCardEffect>> Effects`를 8곳에서 순회한다. **`ECardScope` 참조는 `Source/`·`Content/` 통틀어 0건.** U18a 마이그레이션은 끝났고 이 문장만 남아 있었다. 설계-우선(SSOT 먼저) 원칙에 따라 본 절을 v2로 갱신하고 코드가 뒤따랐다.
 > **무회귀 절대조건**: 기존 캐릭터카드 7종·무기 stat 카드·Fragment 4종은 v2 전환 후에도 **현행과 동일 거동**(단일→멀티효과 = 1효과 배열로 마이그레이션).
 
 - **데이터 방식**: **DataAsset + (효과별) GE/GAS/무기모디파이어/Fragment** — 스탯 하드코딩 금지. 에셋 경로 C++ 하드코딩 금지(§6-2).

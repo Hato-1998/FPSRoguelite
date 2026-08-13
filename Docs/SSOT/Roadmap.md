@@ -30,18 +30,20 @@
 - → 이후 full-auto PIE 테스트 → 통과 시 P1 완료, P1.5-B(탄약/재장전/ADS)
 
 ### 7-3. Phase 로드맵
+> 🔁 **완료 표기 전수 재대조 2026-08-13** (§7-6 M0 EC ④, `docs/m0-baseline-reconcile`) — 아래 표의 ✅ 를 코드·에셋 실물과 전수 대조했다. **정정 = P2·P3·P4-D·P8 4행**(각 행에 인라인 각주), **일치 확인 = P0·P1·P1.5·P4-A/B/C·P5·P6·P7**. 대조 명령어·근거는 `Docs/WorkLog.md` 최상단.
+
 | Phase | 산출물 |
 |---|---|
 | **P0** ✅ | 경량 C++ 스캐폴드 + Git/LFS + 플러그인 + GameplayTags + 빌드 OK + 스모크 |
 | **P1** ✅ | Net-aware 1P 캐릭터(Separated Arms) + 무기 2종 + 적 1종 + 데미지 브릿지 |
 | **P1.5** ✅ | 사격/이동 감각 (A: 연사/반동/확산, B: MagSize+재장전(예비 무한)/ADS) — 이후 반동/확산=CrystalRecoil heat 모델로 이관(`6f1a981`) |
-| **P2** ✅ | SpawnDirector + Flow-Field + Pooling + Significance (적 300+ 안정) + **적 이속 ±10% 편차** + **적 근접 데미지·공격토큰 baseline** + **충돌무시 대시** |
-| **P3** ✅ | 공유XP + 파티레벨 + **레벨업 스택(프리즈 폐지)** + **정비시간 RunPhase** + **오프닝 카드 시드** + Card UI + 동적 카드풀 + Rarity + 리롤 |
-| **P4** ✅ | **P4-A**(재설계) 런 디렉터(시간 미션 스케줄+보스타임) + 확장형 미션 프레임워크+스폰포인트 + **레벨업/미션클리어 전역 프리즈**(라운드제 폐지)+레퍼런스 미션 1종+오프닝시드 / **P4-B** Weapon Modifier Fragment+weapon-scope 카드+미션 보상 실적용 / **P4-C** 무기 7종 / **P4-D** 게임필(히트마커·핑·위협 인디케이터·사각 오디오)+PickupRadius/XPGain+HUD위젯. (+원거리 적 규격·공격토큰 확장) |
-| **P5** ✅ | 4인 협동 + 세션(Steam, 2-PC E2E) + **아군 오사(50% 치사 · 기본 OFF 확정 2026-08-07 — 2026-07-01 "기본 ON"을 뒤집음 · 호스트 ON 토글; 코드와 일치 = 후속 없음)** + **수동 부활(DBNO=근접 자동부활)** — 완료 / Iris 평가=**비채택**(Push Model 유지)·NetProfiler(적500 정량)=**U14 이월** |
+| **P2** ✅ | SpawnDirector + Flow-Field + Pooling + **거리밴드 티어링**(⚠️ *정정 2026-08-13*: 종전 표기는 "Significance"였으나 **`USignificanceManager`는 미사용**이다 — 플러그인만 enable(`.uproject:58-61`)이고 `Source/` 참조 **0**. `Enemy.md §2-6`·`Architecture.md`의 2026-08-11 정정과 동일한 사실인데 이 표만 안 고쳐져 있었다) + 적 300 안정(근거 = `Performance.md §5` VAT-1 실측 스웜 렌더 2.05ms@300) + **적 이속 ±10% 편차** + **적 근접 데미지·공격토큰 baseline** + **충돌무시 대시** |
+| **P3** ✅ | 공유XP + 파티레벨 + **레벨업 스택(프리즈 폐지)** + ~~**정비시간 RunPhase**~~(⚠️ *정정 2026-08-13*: **폐지된 개념이다** — P4-A 재설계가 라운드제·정비시간을 전역 프리즈로 흡수했다(2026-06-04, `Game.md §9`). `ERunPhase` 실물 = `Combat`·`Boss` **2개뿐**(`FPSRGameState.h:15-19`)이고 `RunFlow.md`에 "정비"는 0회 등장 — 이 표가 유일한 출처였다) + **오프닝 카드 시드** + Card UI + 동적 카드풀 + Rarity + 리롤 |
+| **P4** ✅ | **P4-A**(재설계) 런 디렉터(시간 미션 스케줄+보스타임) + 확장형 미션 프레임워크+스폰포인트 + **레벨업/미션클리어 전역 프리즈**(라운드제 폐지)+레퍼런스 미션 1종+오프닝시드 / **P4-B** Weapon Modifier Fragment+weapon-scope 카드+미션 보상 실적용 / **P4-C** 무기 7종 / **P4-D** 게임필(히트마커·~~핑~~·위협 인디케이터·사각 오디오⚠️)+PickupRadius/XPGain+HUD위젯. (+원거리 적 규격·공격토큰 확장)<br>⚠️ *정정 2026-08-13*: ① **핑은 미구현이다** — `Source/` 전체에서 `Ping` 참조 **0**, `Content/UI/HUD/`에도 핑 위젯 없음(히트마커·위협 인디케이터는 실존). 도메인 SSOT `PlayerFeel.md §2-14`가 이미 *"핑/Gibs는 후속"* 이라 반박하고 있었다. **재배치 = 킬/크릿 핑 사운드 → M2(오디오) · 팀 핑(수동 1키 + 위험 자동) → M4(협동 UX)**. ② **사각 오디오는 기구만 완료** — `UFPSRBlindspotAudioComponent`는 완전 구현이나 울리는 큐가 `/Engine/VREditor/Sounds/UI/Camera_Shutter`(엔진 **에디터** 에셋 플레이스홀더, `da761449`)다. 쿡 생존 판정 = §7-6 M0 (d) 감사(현 설정 탈락 0 · **조건부** 취약), 프로덕션 사운드 교체 = **M2**. |
+| **P5** ✅ | 4인 협동 + 세션(Steam, 2-PC E2E) + **아군 오사(50% 치사 · 기본 OFF 확정 2026-08-07 — 2026-07-01 "기본 ON"을 뒤집음 · 호스트 ON 토글; 코드와 일치 = 후속 없음)** + **수동 부활(DBNO=근접 자동부활)** — 완료 / Iris 평가=**비채택**(Push Model 유지 — 재확인 2026-08-13: `Config/` 전체에 `Iris`/`net.Iris` 0건, `DefaultEngine.ini:44` `net.IsPushModelEnabled=1` 실존. ⚠️ 단 **패키지 빌드에서는 Push Model이 빠진다**(`OpenIssues_Network.md` **N-1**) — 이 "유지"는 에디터/개발 빌드 한정이고, §7-6 M0 (b)가 측정 구성을 고정한 이유다)·NetProfiler(적500 정량)=**U14 이월** |
 | **P6** ✅ | 메타 프로그레션(U10 SaveGame) + 보스(U4) + 클리어 플로우(P6-A 셸) |
 | **P7** (부분) | CommonUI ✅(실물 정합 — `UFPSRGameViewportClient : UCommonGameViewportClient` 배선 확인) · 오디오 = **배관만 ✅ / `/Game` 사운드 에셋 0** (⚠️ 2026-08-11 실측 정정 2회 — 종전 "오디오 MVP ✅"는 오기록. `Content/Audio`는 `SC_Master`·`SMix_Master` 2개뿐이고 `/Game` 전체에 SoundWave·SoundCue·MetaSound **0개**, 무기 DA `FireSound`는 전부 빈 슬롯. **단 `WarningSound`는 빈 슬롯이 아니다** — `BP_FPSRPlayer`에 엔진 **에디터 전용** 에셋 `/Engine/VREditor/Sounds/UI/Camera_Shutter`가 플레이스홀더로 꽂혀 있다(`da761449`, §7-5 G1 ③ 판정이 성립한 이유). ⚠️ 그래서 리스크는 "무음"이 아니라 **"에디터에서만 울리고 패키지에선 쿡 탈락일 수 있음"** — 쿡 생존 확인 = M0 → 프로덕션 교체 = **M2**) / Insights·README·빌드 폴리시 = 잔여(→ **M5**) |
-| **P8** ✅ | 다중맵 심리스 **U 연속필드**(P-0~P-H `34b5eea`) + 반동 **CrystalRecoil** 어댑터(`6f1a981`) + **무기 전면개편**(투사체화·SMG·유탄런처 제거 `3adc945`) + **FPSR Data Editor** P0~P2 + 통합 애니 패스 인프라 · U5~U20 2차 트랙 — 전부 main 머지(상세 `PROGRESS.md` 완료 이력) |
+| **P8** ✅ | 다중맵 심리스 **U 연속필드**(P-0~P-H `34b5eea`) + 반동 **CrystalRecoil** 어댑터(`6f1a981`) + **무기 전면개편**(전면 투사체화 · **점사총 → 라이플 언락 프래그먼트** · 유탄런처 제거 · **SMG 추가** `3adc945` — ⚠️ *정정 2026-08-13*: 종전 "SMG·유탄런처 제거"는 오기록이다. SMG는 **추가**됐고(`DA_Weapon_SMG` 실존 + `DA_LoadoutPool` 참조 + `DA_CardUnlock_SMG`), 실제로 제거된 것은 **점사총**이다. 커밋 원문 및 `CombatWeaponCard.md:114` *"③ 기관단총(SMG) 추가"* 와 일치) + **FPSR Data Editor** P0~P2 + 통합 애니 패스 인프라 · U5~U20 2차 트랙 — 전부 main 머지(상세 `PROGRESS.md` 완료 이력) |
 
 ### 7-4. P0/P1 잔여 연결 항목 (착수 전 확인)
 - 기본 맵/GameMode config 연결(OpenWorld 템플릿 기본값 제거), `GlobalDefaultGameMode` 지정 검토
@@ -121,15 +123,26 @@
 - (b) **성능 정량 베이스라인** — §7-5 G1에서 **미실시로 이월된 `Performance.md §5` 적 500 정량 측정**. 셀셰이딩(SRS Custom Depth) on/off × 적 300/500 교차 실측. **(a′)·(a″) 완료 후**에 잰다.
   - ⚠️ **측정 빌드 구성을 반드시 고정**한다 — `Performance.md §5`가 *"Push Model 전제는 출시(패키지) 빌드에선 성립하지 않는다 … 호스트 프레임 예산을 계산할 때 이 차이를 빼고 세지 말 것"* 이라 명시했다(미해결 = `OpenIssues_Network.md` **N-1**). **PIE 실측만 하면 M2~M5의 "베이스라인 대비" 판정이 전부 §5가 금지한 비교 위에 선다.** ~~최소 = **패키지 빌드 1회 포함**, N-1 결정과의 선후를 (5)-6에서 정한다.~~ → ✅ **확정 2026-08-12**: 측정 = ~~패키지 Test 구성~~ → **Development**(정정 2026-08-13 — 런처 엔진은 Test 빌드 불가, `Performance.md §5`), Push Model 꺼진 상태 그대로(전제 명기) — N-1 해소 시 동일 구성 재측정으로 전후 비교.
   - ~~⚠️ **목표 프레임 예산 수치가 어느 SSOT에도 없다**(§5 예산표는 캡/빈도 표라 프레임값 행이 없음) → (5)-6 결정 후 §5에 행 신설.~~ → ✅ **해소 2026-08-12**: `Performance.md §5` 헤더에 "🎯 목표 프레임 예산 확정" 블록 신설.
-- (c) **문자열 외부화** — StringTable 파이프라인 + 기존 UI 위젯 전수 이관. **이 선을 넘긴 뒤 만들어지는 UI는 외부화된 채로 태어난다.** 로컬라이제이션은 현재 0(`Config/Localization` 부재).
+- (c) **문자열 외부화** — StringTable 파이프라인 + 기존 UI 위젯 전수 이관. **이 선을 넘긴 뒤 만들어지는 UI는 외부화된 채로 태어난다.** ~~로컬라이제이션은 현재 0(`Config/Localization` 부재).~~
+  - ✅ **정정 2026-08-13 (EC ④ 재대조) — 위 취소선은 사실과 반대다.** 파이프라인은 **이미 서 있다**: `Config/Localization/`(`Game_Gather.ini`·`Game_Compile.ini`·`Game_ImportCsvTranslations.ini`) · `Content/Localization/Game/`(manifest 95엔트리 + **ko·en·ja** archive/locres) · `Content/StringTables/`(`ST_UI.csv`·`ST_Card.csv`·`ST_CardEffect.csv` — **UStringTable 에셋 0은 설계 의도**다: `LOCTABLE_FROMFILE_GAME` 런타임 직접 로드, `Localization.md` §L-1) · 전용 SSOT `Docs/SSOT/Localization.md`. **Phase A UI 전수 이관도 완료**(`f1b7e314`·`3e23a33a`·`609839c2`). 이 문장을 그대로 두면 M0 Exit 판정이 (c)를 미착수로 오판한다.
+  - 🔑 **EC ②의 "검사 대상"은 이미 기계화돼 있다** — `Config/Localization/Game_Gather.ini`가 `SearchDirectoryPaths=Source/FPSRoguelite/`(에디터 모듈 배제) + `ShouldGatherFromEditorOnlyData=false`(`#if WITH_EDITOR` 블록 스킵)이므로, **`Content/Localization/Game/Game.manifest`에 수집된 것 = 프로젝트가 스스로 정의한 검사 대상**이다. 검사기가 정의를 새로 만들 필요가 없다.
+  - ⬜ **잔여 = 16건**(실측 2026-08-13, 전부 빌드 또는 에디터 동반): C++ **5**(Boss `GetDescription` 4 — 실질은 `#if WITH_EDITOR` 가드 누락 / `FPSRCardEffect.cpp:356` 1 — 진짜 UI 노출) · WBP 인라인 Text **11**(`WBP_Lobby` 10 + `WBP_LoadoutEntry.NameText` 1) · BP 그래프 핀 리터럴 ~4곳 · 고아 WBP **2**(`WBP_PlayButton`·`WBP_ReturnButton`, 참조 0 확인).
 - (d) **엔진 에셋 쿡 생존 감사** ⚠️ *(d) 교체 2026-08-11(레드팀).* 종전 (d)는 "세이브 버저닝 + 마이그레이션 하네스"였으나 **이미 구현돼 있다**(`URogueliteSaveGame::CurrentSaveVersion`/`SaveVersion`/`MigrateIfNeeded()` + `FPSRoguelite.Smoke.SaveGame` 자동 테스트, P6 `RunFlow.md §2-11`) → 착수 0으로 이미 충족이라 게이트로서 아무것도 막지 못했다. 대신 실제 갭을 넣는다: **`/Engine/` 에디터 전용 에셋을 참조하는 `/Game` 콘텐츠가 패키지 쿡에서 살아남는지**(확인된 사례 = `BP_FPSRPlayer.WarningSound` → `/Engine/VREditor/Sounds/UI/Camera_Shutter`). 살아남지 못하면 §7-5 G1 ③(사각 오디오) 판정 근거가 **패키지 빌드에서 무효**가 된다.
-  - 세이브 쪽 잔여 = **EA 요구와의 갭 정의만**(런중 세이브 정책 · Steam Cloud 슬롯 · 손상 복구) → 갭이 있으면 M5로.
+  - ✅ **감사 완료 2026-08-13 — 정본 = [`Docs/Review/EngineRefCookAudit_20260813.md`](../Review/EngineRefCookAudit_20260813.md)** (LFS 실체 4,314/4,314 전건 확인 → 감사 불가 항목 0).
+    · **결론: 현 설정에서 쿡 탈락은 0건이다.** UE 5.7의 엔진 콘텐츠 쿡 제외는 **`/Engine/Editor*`·`/Engine/VREditor` 두 접두사뿐**이고(`CookSavePackage.cpp:292`), 그 게이트인 `bSkipEditorContent`가 `BaseGame.ini:113`에서 `false`이며 **프로젝트가 오버라이드하지 않는다**. 즉 §7-5 G1 ③의 판정 근거는 현재 무효가 아니다.
+    · **⚠️ 조건부 취약 2건**(에디터 전용 디렉터리를 **가드 없는 런타임 UPROPERTY**로 하드 참조 — `bSkipEditorContent`를 켜거나 UAT에 `-SkipCookingEditorContent`가 들어오면 즉시 탈락): ① `BP_FPSRPlayer.WarningSound` → `/Engine/VREditor/Sounds/UI/Camera_Shutter`(기지 사례, M2 기등록) ② 🆕 **`BP_MissionPointSet`의 Billboard `Sprite` → `/Engine/EditorResources/Spawn_Point`** — 종전 미등록. `UBillboardComponent::Sprite`는 `WITH_EDITORONLY_DATA` **밖**의 순수 런타임 프로퍼티이고(`BillboardComponent.h:23-24`) 이 BP는 `bIsEditorOnly`를 설정하지 않았다(대조군 = 프로젝트 자체 `FPSRFlowFieldBoundsVolume.cpp:28`은 제대로 설정한다). **M2 신규 등록.**
+    · 무해 5건(엔진 C++이 `#if WITH_EDITOR` + `EditorOnlyCollect`로 참조를 스스로 차단) · 런타임 쿡 대상 101건 · Slate loose 리소스 4건 · **`Source/` 하드코딩 `/Engine/` 경로 = 0건**.
+  - ~~세이브 쪽 잔여 = **EA 요구와의 갭 정의만**(런중 세이브 정책 · Steam Cloud 슬롯 · 손상 복구) → 갭이 있으면 M5로.~~
+    - ✅ **갭 정의 완료 2026-08-13 — 정본 = [`Docs/Review/SaveSystem_EAGap_20260813.md`](../Review/SaveSystem_EAGap_20260813.md).** 요구 3축 판정 = 런중 세이브 정책 ❌ · Steam Cloud ❌(코드 0, ini 주석 스텁뿐) · 손상 복구 🟡(백업 슬롯 3단 폴백은 있고 체크섬·부분손상 감지·사용자 고지가 없다). **추가 축 5건 발견**(스키마 공백 · `UserIndex=0` 전제 오류 · 저장 실패 무고지 · 세이브 삭제 경로 부재 · 런 종료 직후 이탈 클라 보상 유실). **전부 M5로 이관**(→ M5 항목).
 
 **Exit Criteria** (판정 주체 = **사용자**, §7-5 게이트와 동일)
-① `Performance.md §5`에 **측정 빌드 구성이 명기된** 적 300/500 실측 프레임값이 기입됨(추정치 아님). 그 값은 **(a′)로 확정된 맵 위에서, (a″) 인스턴싱/VAT가 적용된 상태**로 잰 것이어야 한다 — 즉 **우리가 유지할 아키텍처의 수치**여야 한다
-② **하드코딩 UI 문자열 = 0.** *검사 대상 정의*: C++의 `FText` 리터럴/`LOCTEXT` 및 **BP 위젯의 인라인 Text 프로퍼티**. 검사기는 이 정의를 스스로 정하지 않는다
-③ **`/Engine/` 참조 감사 결과가 문서화되고**, 쿡 탈락분은 교체 대상으로 M2에 등록됨
-④ (a) 전수 재대조 완료 — §7-3 · §7-5 판정 기록 · §8 인벤토리 · 도메인 SSOT가 실물과 일치
+① ⬜ `Performance.md §5`에 **측정 빌드 구성이 명기된** 적 300/500 실측 프레임값이 기입됨(추정치 아님). 그 값은 **(a′)로 확정된 맵 위에서, (a″)로 확정된 렌더 경로가 적용된 상태**로 잰 것이어야 한다 — 즉 **우리가 유지할 아키텍처의 수치**여야 한다.
+  - ⚠️ *문구 정정 2026-08-13(EC ④ 재대조)*: 종전 *"(a″) **인스턴싱/VAT**가 적용된 상태"* 는 **VAT-1 결론과 모순**이다 — ADR `0007`이 ISM/인스턴싱을 **기각**하고 CPD를 채택했으므로(위 (a″) 참조), 문자 그대로 읽으면 이 EC는 영원히 닫히지 않는다. 실제 요구는 "**MID 제거 + CustomPrimitiveData 렌더 경로 위에서**"다.
+② ⬜ **하드코딩 UI 문자열 = 0.** *검사 대상 정의*: C++의 `FText` 리터럴/`LOCTEXT` 및 **BP 위젯의 인라인 Text 프로퍼티**. 검사기는 이 정의를 스스로 정하지 않는다.
+  - 실측 2026-08-13 = **잔여 16건**(내역 = 위 (c)). 검사 대상의 기계적 정의 = `Game.manifest` 수집분(위 (c) 🔑).
+  - 🟠 **판정 경계 1건 = 사용자 결정 대기** — 런타임에 C++ `SetText`로 덮여 **표시되지 않는** 디자인타임 플레이스홀더(`WBP_CardEntry`의 `CardName`/`Description…`, `WBP_DamageNumber`의 `99`, `WBP_RunHUD`의 `00:00`, `WBP_Button_Base`의 `TestBlock` 등 ~10건)를 이 "0"에 셀 것인가. EC 문구는 "인라인 Text 프로퍼티"라 썼지 "**표시되는**"이라 쓰지 않았고, 이 조항 자신이 *"검사기는 이 정의를 스스로 정하지 않는다"* 고 못박았다. → 보드 `결정대기`.
+③ ✅ **완료 2026-08-13** — **`/Engine/` 참조 감사 결과가 문서화되고**, 쿡 탈락분은 교체 대상으로 M2에 등록됨. 정본 = [`Docs/Review/EngineRefCookAudit_20260813.md`](../Review/EngineRefCookAudit_20260813.md) (아래 (d) 요약).
+④ ✅ **완료 2026-08-13** — (a) 전수 재대조 완료. §7-3(4행 정정) · §7-5 판정 기록(일치) · §8 인벤토리(7행 정정) · 도메인 SSOT(`Performance.md`·`RunFlow.md`·`Enemy.md`·`CombatWeaponCard.md`·`PlayerFeel.md` 정정)가 실물과 일치. 경위 = `Docs/WorkLog.md` 최상단.
 
 ---
 
@@ -184,6 +197,13 @@
 > EA라서 여기로 **앞당겨진** 항목: Steam 실앱 ID · 텔레메트리 (세이브 마이그레이션은 M0에서 선처리).
 
 - **Steam 실앱 ID 전환** — 현재 `SteamDevAppId=480`(Spacewar 공용 테스트 앱)이다. 전환 시 **세션 · 친구초대 · Steam Cloud 전면 재검증**(`DefaultEngine.ini` §Steam 주석 참조).
+- **세이브 — EA 운영 요구 충족**(M0 (d)에서 갭 정의 완료 이관, 2026-08-13. 정본 = [`Docs/Review/SaveSystem_EAGap_20260813.md`](../Review/SaveSystem_EAGap_20260813.md))
+  - **Steam Cloud 슬롯 정책** — 코드 0. Auto-Cloud(파일 글롭) vs `ISteamRemoteStorage` API 선택 · Root/Path 글롭 값 · 충돌 해결 정책 미정. **실앱 ID 전환이 선행**(480으로는 파트너 사이트 Auto-Cloud 구성 불가).
+  - **런중 세이브 정책** — 현재 저장은 `EndRun` 1회뿐이고 `EFPSRSaveReason::Lobby`는 호출처가 0이다. 호스트 크래시·Alt+F4 = 그 런 전부 소실(`Deinitialize()`가 pending을 flush하지 않는다).
+  - **손상 복구 보강 + 저장 실패 고지** — 백업 슬롯 3단 폴백은 있으나 체크섬·부분손상 감지·torn-write 방어가 없고, `OnSaveComplete` 구독자가 0이라 실패가 플레이어에게 보이지 않는다. EA 리뷰의 "진행이 사라졌다"가 여기서 나온다.
+  - **세이브 삭제/새 게임 경로** — `DeleteGameInSlot`이 셰이핑 코드에 0건. 진행 초기화 수단도, 손상 세이브를 플레이어가 치울 수단도 없다.
+  - ⚠️ **`UserIndex=0` + 단일 슬롯 전제 재검토** — 코드 주석은 "Steam=머신당 단일 유저"라 단정하나 UE 기본 SaveGameSystem은 **Steam 계정이 아니라 Windows 사용자** 기준이다. 공유 PC·Family Sharing·같은 윈도우 계정에서의 Steam 계정 전환 시 세이브가 상호 덮인다. **Cloud를 붙이면 이 충돌이 클라우드까지 전파되므로 Cloud보다 먼저 판정한다.**
+  - ℹ️ **저장 스키마 자체의 공백은 M3 소관** — 현재 저장 필드는 `SaveVersion` + 중립 `Reserved0` **2개뿐**이라 "저장할 것"이 아직 없다. 스키마가 확정돼야 위 4항목이 의미를 갖는다(→ M3 메타 프로그레션 실물화).
 - **텔레메트리 파이프라인** — §1-C-8이 D1 35% / D7 15%를 북극성으로 확정했는데 **계측 수단이 현재 0**이다. 마일스톤에 없으면 출시일에도 없다.
 - **스토어 페이지 + EA 로드맵·FAQ** — Steam EA 필수 제출물.
 - **에셋 라이선스 감사 + 크레딧** — Synty · SRS · PWAS · LowPolyAnimatedModernGuns · Paragon/BroBot. 상업 배포 조건이 팩마다 다르고, **Fab 미이관 리스크는 §8에 이미 기록돼 있다**. 출시 직전에 한 팩이 걸리면 그 슬롯 전체를 갈아야 한다.
@@ -237,17 +257,19 @@
 
 ## 8. 디버그 / 플레이스홀더 인벤토리 (프로덕션 전환 대상)
 
+> 🔁 **전수 재대조 2026-08-13** (§7-6 M0 EC ④) — 9행을 실물과 대조했다. **해소 3행**(취소선) · **기전/내용 스테일 4행**(정정) · **절반 해소 1행** · **유효 1행**. 해소 행은 지우지 않고 취소선으로 남긴다(왜 더 안 하는지가 사라지지 않도록, §6-9 (6)과 같은 이유).
+
 | 항목 | 현재 | 전환 계획 |
 |---|---|---|
-| 발사/근접 DrawDebug 라인·구체 | 검증용 시각화 | `#if !UE_BUILD_SHIPPING` 게이트 / VFX 교체 |
-| `FPSR.SpawnEnemies [N]` 콘솔 커맨드 | 적 스폰 테스트 | P2 SpawnDirector로 대체, shipping 제외 |
-| 적 큐브 placeholder 메시 | 엔진 기본 큐브. ⚠️ **인스턴싱 0**(적마다 개별 `UStaticMeshComponent`) · `SignificanceManager` 미사용 — `Enemy.md §2-6` 2026-08-11 정정 | 실제 적 메시 + 인스턴싱/VAT → **§7-6 M0 (a″)**(2026-08-11 사용자 결정으로 M2에서 당김. 근거 = 제1원리상 액터당 렌더 비용이 지배항이라, 손대기 전에 잰 값은 *버릴 아키텍처의 성능*이다) |
-| XP 픽업 placeholder 스피어(`AFPSRXPPickup`, ConstructorHelpers) | 엔진 기본 스피어 | 실제 XP 오브 VFX + 풀링/배칭(P3-B 후속) |
-| FP팔/3P 바디 메시 | (현행 Infima 팔·BroBot) | **애니 셀 베이스('Anime Girl Blu') 리스킨** — FP 팔 추출 + PWAS 절차 애니(§1-C-9) |
-| 적 추격 = 단순 스티어링 | 최근접 추격 | P2 Flow-Field + separation + 배치 교체 |
-| 환경/레벨 지오메트리 | ⚠️ **정정 2026-08-11(레드팀)**: 종전 "L_Sandbox 화이트박스"는 **실재하지 않는다** — `Content/Maps` = `L_MainMenu`·`L_Lobby`·`L_Transition`·**`Map_CyberCity`**(유일 인게임 맵)·`TestWorld`. 현행 = `Map_CyberCity` | 🔄 **맵1 베이스 변경 (사용자 결정 2026-08-11, SSOT 전파 2026-08-11)**: `Map_CyberCity` **폐기** → Fab **Synthwave City Kit** 데모맵 기반 재구축. 종전 "Synty POLYGON Sci-Fi Cyber City(맵1 베이스)"(2026-07-10)를 **맵1에 한해 대체**한다 — **전체 셀/툰 통일(§1-C-9)·로우폴리 제1원리·2맵 Nature·3맵 Space 계획은 불변**. 갱신 지점 = `Config/DefaultGame.ini`의 `RunMap`·`MapsToCook`(코드 참조는 주석뿐). ~~⚠️ **블로커 = 사용자의 Fab 에셋 임포트**~~ · 이 교체는 §7-6 **M0 (a′)** 이며 성능 베이스라인 (b)의 **선행**이다(보드 릴레이션으로 강제).<br>🔄 **2026-08-12 P1 완료(`dca19b4e`)**: 임포트 블로커 해소 · 신규 맵 = **`L_Map1_City`**(`Map_CyberCity.umap` 삭제) · config 2지점 교체 · 팔레트에 `/Game/Synthwave_city` 등록. **잔여 = 맵1 배치**(플레이어 스타트 · 플로우필드 볼륨 ×1 · 적 스폰포인트 Z=바닥+100 · 세부 프롭) → **배치 담당 = 사용자**(2026-08-12 지시) |
-| PlayerController `[Input] Added DefaultMappingContext` Warning | 1회성 로그 | 다음 빌드 시 Verbose 다운그레이드 |
-| CommonUI `LogUIActionRouter` 에러 | 무해 | P3 `CommonGameViewportClient` 설정 시 해결 |
+| 발사/근접 DrawDebug 라인·구체 | 검증용 시각화 | ~~`#if !UE_BUILD_SHIPPING` 게이트~~ ✅ **게이트는 이미 걸려 있다** — 다만 `!UE_BUILD_SHIPPING`이 아니라 **`#if ENABLE_DRAW_DEBUG`**(`FPSRGA_WeaponFire_Hitscan.cpp:350`·`FPSRGA_WeaponMelee.cpp:103`, 재대조 2026-08-13). **잔여 = VFX 교체 → M2** |
+| ~~`FPSR.SpawnEnemies [N]` 콘솔 커맨드~~ **해소 2026-08-13** | 적 스폰 테스트 | ✅ **제거 대상이 아니라 유지되는 개발 도구다.** ①shipping 제외 이미 적용(`FPSREnemySpawnSubsystem.cpp:1536-1542`가 `#if !UE_BUILD_SHIPPING` 안) ②SpawnDirector(`UFPSREnemySpawnSubsystem`)도 실존 ③**VAT-1 렌더 측정 러너가 상시 쓴다**(`FPSR.SpawnEnemies N 6000`, `Performance.md §5`) |
+| ~~적 큐브 placeholder 메시~~ → **적 스웜 메시 = VAT BroBot** | ⚠️ *정정 2026-08-13*: **큐브가 아니다.** `BP_EnemyMeleeBase`가 참조하는 것은 `/Game/Assets/Characters/BroBot/VAT/SM_BroBot_VAT` + `MI_BroBot_VAT_Enemy_CPD`다. 엔진 큐브는 **BP가 메시를 안 준 raw C++ 스폰의 폴백**일 뿐(`DefaultGame.ini:19` + `FPSRPlaceholderVisualSettings.h:27-29`) | ⚠️ *정정 2026-08-13*: 종전 전환계획 "인스턴싱/VAT"는 **기각된 방안**이다 — ADR [`0007`](../Architecture/0007-enemy-swarm-render-path-cpd.md)(채택 2026-08-13)이 ISM/인스턴싱을 기각하고 **개별 `UStaticMeshComponent` + CustomPrimitiveData**를 채택했다(엔진 동적 인스턴싱이 드로우 병합을 보존, 실측 2.05ms@300). §7-6 (a″) 자신이 *"인스턴싱은 도입하지 않는 것으로 종결"* 이라 적었는데 이 행만 안 고쳐져 있었다. **잔여 = U22 최종 아트 메시 교체** |
+| XP 픽업 placeholder 스피어(`AFPSRXPPickup`) | 엔진 기본 스피어. ⚠️ *기전 정정 2026-08-13*: **`ConstructorHelpers`는 `Source/` 전체에 0건**이다 — 지금은 config 소프트패스다(`DefaultGame.ini:18` `XPGemMesh=/Engine/BasicShapes/Sphere.Sphere` + `FPSRPlaceholderVisualSettings.h:24-25`) | 실제 XP 오브 VFX + 풀링/배칭(P3-B 후속) → **M2** |
+| FP팔/3P 바디 메시 | ⚠️ *정정 2026-08-13*: **Infima는 없다**(`Content/`에 Infima 폴더 0). 실물 = FP팔 `Content/Character/FPArms/SK_NeonV_FPArms`(+`ABP_FPArms`/`ABP_FP_Base`) · **3P 바디 = `/Game/Characters/Blu/…/Blu_` + `ABP_Blu_Body`**. BroBot은 이제 **적 스웜 VAT 메시**로만 남았다.<br>🪤 `BP_FPSRPlayer`가 `SK_LPAMG_Arms_Base_Smooth`도 참조해 **팔 계보가 3중**(NeonV/Blu/LPAMG)이라 문서만으로는 어느 것이 활성인지 판별 불가 | ✅ **3P 바디 = 완료**('Anime Girl Blu' 리스킨이 이미 플레이어에 적용됨 — 이 칸이 "전환 계획"이라 적어 둔 것이 이미 실물이다). **잔여 = FP 팔 Blu 추출 + PWAS 절차 애니**(§1-C-9) |
+| ~~적 추격 = 단순 스티어링~~ **해소** | Flow-Field + separation + 배치 | ✅ **P2에서 교체 완료**(재대조 2026-08-13 — `Enemy/` 플로우필드 서브시스템·바운즈 볼륨 실존, §7-3 P2 ✅와 일치) |
+| 환경/레벨 지오메트리 | ⚠️ **정정 2026-08-11(레드팀)**: 종전 "L_Sandbox 화이트박스"는 **실재하지 않는다** — `Content/Maps` = `L_MainMenu`·`L_Lobby`·`L_Transition`·**`Map_CyberCity`**(유일 인게임 맵)·`TestWorld`. **현행 = `L_Map1_City`**(🔁 *재정정 2026-08-13*: 이 칸이 아직 `Map_CyberCity`였다 — 실물 `Content/Maps` = `L_MainMenu`·`L_Lobby`·`L_Transition`·**`L_Map1_City`**·`TestWorld`, `DefaultGame.ini:37` `RunMap=/Game/Maps/L_Map1_City`) | 🔄 **맵1 베이스 변경 (사용자 결정 2026-08-11, SSOT 전파 2026-08-11)**: `Map_CyberCity` **폐기** → Fab **Synthwave City Kit** 데모맵 기반 재구축. 종전 "Synty POLYGON Sci-Fi Cyber City(맵1 베이스)"(2026-07-10)를 **맵1에 한해 대체**한다 — **전체 셀/툰 통일(§1-C-9)·로우폴리 제1원리·2맵 Nature·3맵 Space 계획은 불변**. 갱신 지점 = `Config/DefaultGame.ini`의 `RunMap`·`MapsToCook`(코드 참조는 주석뿐). ~~⚠️ **블로커 = 사용자의 Fab 에셋 임포트**~~ · 이 교체는 §7-6 **M0 (a′)** 이며 성능 베이스라인 (b)의 **선행**이다(보드 릴레이션으로 강제).<br>🔄 **2026-08-12 P1 완료(`dca19b4e`)**: 임포트 블로커 해소 · 신규 맵 = **`L_Map1_City`**(`Map_CyberCity.umap` 삭제) · config 2지점 교체 · 팔레트에 `/Game/Synthwave_city` 등록. ~~**잔여 = 맵1 배치**(플레이어 스타트 · 플로우필드 볼륨 ×1 · 적 스폰포인트 Z=바닥+100 · 세부 프롭) → **배치 담당 = 사용자**(2026-08-12 지시)~~ → ✅ **배치 완료 2026-08-12 — (a′) 닫힘**("레벨 검증" 0건 + PIE 스모크 통과. 실측 지형 수치·가드레일은 §7-6 M0 (a′)) |
+| ~~PlayerController `[Input] Added DefaultMappingContext` Warning~~ **해소** | 1회성 로그 | ✅ **이미 Verbose다** — `FPSRPlayerController.cpp:205` `UE_LOG(LogFPSR, Verbose, …)`(재대조 2026-08-13) |
+| ~~CommonUI `LogUIActionRouter` 에러~~ **해소** | 무해 | ✅ **해결됨** — `UFPSRGameViewportClient : UCommonGameViewportClient`(`FPSRGameViewportClient.h:11`) + `DefaultEngine.ini:20` `GameViewportClientClassName` 배선(재대조 2026-08-13. §7-3 P7 ✅와 일치) |
 
 > **환경 에셋 방향 = Path A (통일 로우폴리 Synty POLYGON 패밀리) 확정 (피벗 2026-07-03, `Concept.md §1-C-9`)**. 근거(제1원리): 로우폴리 = 드로우콜/텍스처 최소 → 적 200-300 프레임예산 보존 + 기존 로우폴리 에셋 정합 + 벤더 통일 = 통일감 자동. (Path B 리얼리스틱 = 무겁·톤충돌로 기각.)
 > ⚠️ **착수 전 필수 = 파일럿 검증**: Synty 후보 1팩을 **UE5.7 임포트 + 적 300 스폰 + U7 플로우필드 + 20분 런 프레임 실측** → 통과분만 채택. **Fab 등재 여부 팩별 확인**(예: POLYGON Sci-Fi City는 Fab 미이관·Epic 볼트만일 수 있음).
