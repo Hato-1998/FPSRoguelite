@@ -20,6 +20,17 @@
 > - **적 500(스트레스)**: 합불 아님 — **≥30fps 헤드룸 확인**용
 > - **스웜 렌더 서브예산**: 베이스패스+Custom Depth+그림자 합 **≤4ms @300** — 인스턴싱/VAT 렌더 경로(M0 (a″) VAT-1) 판정 잣대. 참고 실측: Custom Depth 단독 1.33ms@300(2026-07-10 SRS 파일럿)
 > - **측정 빌드 = 패키지 Test 구성**(Shipping급 최적화 + stat/Insights 가능). ⚠️ 패키지에선 Push Model이 꺼진다(N-1, 아래 🔴 주) — **그 상태 그대로 잰다**(현재 유지 아키텍처의 실비용이므로), 측정 기록에 이 전제를 명기. N-1 해소 시 동일 구성 재측정으로 전후 비교.
+>   🔴 **정정 2026-08-13**: 런처(Installed) 엔진은 Test 구성 빌드를 **지원하지 않는다**(*"Targets cannot be built in the Test configuration with this engine distribution"* 실측). Shipping은 stat/CSV가 빠져 측정 불가 → **실측은 Development 패키지로 수행**(수치는 Test 대비 5~15% 보수적 — 합격 판정엔 안전한 방향). 소스 엔진 도입 시 Test로 재측정.
+>
+> **📊 VAT-1 실측 (2026-08-13, `phase/vat-renderpath-spike`)** — 고정 시나리오(`L_Map1_City` 리슨 호스트 · `FPSR.SpawnEnemies N 6000` 60m 링 수렴 · PlayerStart 고정 카메라 · Development 패키지 · `Scripts/measure_swarm_render.ps1`):
+> | | **B(CPD 채택)** @300 | A(대조군) @300 | B @500 |
+> |---|---|---|---|
+> | 프레임 평균 | **5.48ms(182fps)** | 6.48ms(154fps) | 7.11ms(141fps) |
+> | P95 | 7.99ms | 8.08ms | 9.68ms |
+> | 스웜 렌더 합(BasePass+Shadow+CustomDepth) | **2.05ms** | 2.68ms | 3.03ms |
+> | RHI 드로우콜 | 445 | 529 | 562 |
+>
+> **전 게이트 통과(여유 2~3배) → 스웜 렌더 경로 = CPD(경로 B) 채택**(`Docs/Architecture/0007`). 이 표는 (a″) 완료 시점 참고치 — **(b) 공식 베이스라인은 별도 실측**(카이팅 실플레이 포함, 이 표의 시나리오 재사용 권장). 드로우콜 완전 병합 검증(V1)·원격 클라 CPD 리셋 2클라 테스트(V5)는 VAT-2로 이월.
 
 | 항목 | 잠정 목표 | 비고 |
 |---|---|---|

@@ -15,32 +15,30 @@ enum class EFPSRAnimState : uint8
 	Death,
 };
 
-/** C++ <-> VAT-material contract for swarm-enemy animation (U20 domain C).
+/** C++ <-> VAT-material contract for swarm-enemy animation (U20 domain C, adopted render path = ADR 0007).
  *
- *  ⚠️ Stage-2 EDITOR DEPENDENCY: the actual scalar parameter NAMES (in FPSREnemyAnimProfile.cpp) and the per-state
- *  clip indices below are a PLACEHOLDER contract — they cannot be confirmed headlessly and MUST be verified in-editor
- *  against M_BroBot_VAT / MF_BoneAnimation (does it GPU-autoplay a SELECTED index at a SET playrate? what are the real
- *  parameter names? is there a per-clip loop/hold for death?). This header + the profile cpp are the SINGLE edit-point:
- *  once confirmed, fill the real names/indices here and the whole driver picks them up. WriteAnimScalar is no-op-safe
- *  on a wrong name (SetScalarParameterValue on an absent parameter is ignored), so the code builds and runs today.
- *
- *  The whole driver is DORMANT until a designer assigns a UFPSREnemyAnimProfile to an enemy archetype (Stage 3), so
- *  it adds ZERO cost to the current cube/VAT render until content opts in. */
+ *  The whole driver is DORMANT until a designer assigns a UFPSREnemyAnimProfile to an enemy archetype, so it adds
+ *  ZERO cost to any archetype that has not opted in. */
 namespace FPSRVATAnim
 {
-	// VAT sequence indices (which baked clip in DA_*_VAT.AnimSequences[]) per state. PLACEHOLDER — the content bake
-	// (Stage 3) defines the real order; keep in sync with the DA when idle/attack/death sequences are baked. Today
-	// only a single walk/jog clip exists at index 0, so every state maps to it (visually a no-op until Stage 3).
-	constexpr float ClipIndex_Idle = 0.0f;
-	constexpr float ClipIndex_Walk = 0.0f;
-	constexpr float ClipIndex_Attack = 0.0f; // TODO Stage 3: real attack clip index
-	constexpr float ClipIndex_Death = 0.0f;  // TODO Stage 3: real death clip index
+	// CustomPrimitiveData slot indices (the adopted CPD render path, ADR 0007). In-editor verification of
+	// M_BroBot_VAT's AnimToTexture playback (MF_BoneAnimation's GetFrameSwitch) found there is NO selectable
+	// "AnimationIndex" scalar — a clip is a FRAME RANGE, and playback reads the scalar params StartFrame / EndFrame /
+	// Playrate / TimeOffset (the AutoPlay static-switch path). UFPSREnemyAnimProfile_VAT_CPD::ApplyAnimState
+	// (FPSREnemyAnimProfile.cpp) writes those four via Mesh->SetCustomPrimitiveDataFloat at the fixed indices below;
+	// the CPD-reauthored material variant (M_BroBot_VAT_CPD) reads them back through the SAME scalar params flagged
+	// bUseCustomPrimitiveData with PrimitiveDataIndex = these indices (there is no dedicated CPD node —
+	// MaterialExpressionScalarParameter.h). This header is the single edit-point for both sides of that contract —
+	// change an index here only if the material's params move too. Per-state frame ranges are DATA (bake output),
+	// authored on UFPSREnemyAnimProfile_VAT_CPD as FFPSRVATClipRange properties, not hardcoded here.
+	constexpr int32 CPDSlot_StartFrame = 0; // material param: StartFrame
+	constexpr int32 CPDSlot_EndFrame   = 1; // material param: EndFrame
+	constexpr int32 CPDSlot_PlayRate   = 2; // material param: Playrate
+	constexpr int32 CPDSlot_Phase      = 3; // material param: TimeOffset (seconds) — per-actor de-lockstep offset
 
-	// CustomPrimitiveData slot indices (CPD path — used once M_BroBot_VAT is re-authored to read Custom Primitive
-	// Data at these fixed slots, Stage 2). PLACEHOLDER contract; the MID path (default) uses named params instead.
-	constexpr int32 CPDSlot_AnimationIndex = 0;
-	constexpr int32 CPDSlot_PlayRate = 1;
-	constexpr int32 CPDSlot_Phase = 2;
+	// Reserved / unused by any current backend — kept clear for a future hit-flash cosmetic (a short emissive pulse
+	// driven per-primitive without a MID) so it does not collide with a later Stage-3 slot allocation.
+	constexpr int32 CPDSlot_HitFlash_Reserved = 4;
 
 	// Anim distance LOD: beyond this squared radius the animation FREEZES (playrate 0 / no further param writes) to
 	// shed CPU param writes and distant GPU frame-advance. MIRRORS UFPSREnemySpawnSubsystem::TierS1RadiusSq (the S1

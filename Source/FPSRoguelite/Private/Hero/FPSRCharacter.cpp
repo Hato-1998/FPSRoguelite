@@ -1572,7 +1572,14 @@ void AFPSRCharacter::BeginGraceWindow(float Seconds)
 	{
 		return;
 	}
-	GraceUntil = World->GetTimeSeconds() + Seconds;
+	// Overlapping grace windows EXTEND, never shorten: a shorter grace (e.g. the 3s post-freeze resume grace) must not
+	// cut an already-running longer one (post-revive, or a debug FPSR.Invuln fixture) — protection only ratchets up.
+	const float NewUntil = World->GetTimeSeconds() + Seconds;
+	if (NewUntil <= GraceUntil)
+	{
+		return;
+	}
+	GraceUntil = NewUntil;
 
 	// Pass through enemy pawns for the grace window so the player can walk out of a surround — the swarm that downed
 	// them (post-revive) or that closed in during the card freeze (post-freeze). The shared helper composes this with

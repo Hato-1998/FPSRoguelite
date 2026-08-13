@@ -1537,7 +1537,9 @@ void UFPSREnemySpawnSubsystem::ReleaseRangedToken(const TWeakObjectPtr<AFPSRPlay
 #if !UE_BUILD_SHIPPING
 static FAutoConsoleCommandWithWorldAndArgs GFPSRSpawnEnemiesCmd(
 	TEXT("FPSR.SpawnEnemies"),
-	TEXT("Burst-spawn N test enemies via the pool around the local player. Usage: FPSR.SpawnEnemies [count]"),
+	TEXT("Burst-spawn N test enemies via the pool in a ring around the local player. Radius (cm) is optional — a far "
+	     "ring (e.g. 6000) keeps the converging swarm visible in front of the camera for render measurements, where "
+	     "the default close ring collapses onto the player/camera within seconds. Usage: FPSR.SpawnEnemies [count] [radius=600]"),
 	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic([](const TArray<FString>& Args, UWorld* World)
 	{
 		if (!World)
@@ -1551,10 +1553,17 @@ static FAutoConsoleCommandWithWorldAndArgs GFPSRSpawnEnemiesCmd(
 			return;
 		}
 
+		// Clamp to the pool hard cap — AcquireEnemy stops there anyway, but an absurd count (e.g. a typo'd 2000000000)
+		// must not spin this loop through millions of guaranteed-null acquires.
 		int32 Count = 5;
 		if (Args.Num() > 0)
 		{
-			Count = FMath::Max(1, FCString::Atoi(*Args[0]));
+			Count = FMath::Clamp(FCString::Atoi(*Args[0]), 1, UFPSREnemySpawnSubsystem::MaxActiveEnemies);
+		}
+		float Radius = 600.0f;
+		if (Args.Num() > 1)
+		{
+			Radius = FMath::Max(100.0f, FCString::Atof(*Args[1]));
 		}
 
 		// Find first player pawn as center.
@@ -1575,7 +1584,7 @@ static FAutoConsoleCommandWithWorldAndArgs GFPSRSpawnEnemiesCmd(
 		for (int32 i = 0; i < Count; ++i)
 		{
 			const float Angle = (2.0f * PI * i) / FMath::Max(1, Count);
-			const FVector Offset(FMath::Cos(Angle) * 600.0f, FMath::Sin(Angle) * 600.0f, 100.0f);
+			const FVector Offset(FMath::Cos(Angle) * Radius, FMath::Sin(Angle) * Radius, 100.0f);
 			Sub->AcquireEnemy(Center + Offset);
 		}
 	}));

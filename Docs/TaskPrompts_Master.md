@@ -327,6 +327,7 @@ Game.md + PROGRESS.md + Docs/SSOT/Roadmap.md §8(플레이스홀더 인벤토리
 
 | # | 출처 리포트 | 액션/결정 | 종류 | 대상 유닛 | 상태 |
 |---|---|---|---|---|---|
+| V1 | [Review/20260812-plan-vat1-swarm-render-path.md](Review/20260812-plan-vat1-swarm-render-path.md) | **VAT-1 재정의 = 스웜 렌더 경로 대조 실험**(A 현행 MID / B MID폐기+CPD / C ISM 조건부). B 통과 시 VAT-2 대축소. 측정=Test 패키지·드로우수 병행 | 코드+측정 | 보드 VAT-1~4 (M0 (a″)) | ✅완료(ADR 0007, B=CPD 채택 2026-08-13) |
 | C1 | [Review/20260616-lmg-spinup-feel.md](Review/20260616-lmg-spinup-feel.md) | `UFPSRWeaponFireComponent::GetSpinupAlpha()` BlueprintPure 노출(사운드/크로스헤어/애님 단일 콘텐츠 훅) | 코드(소) | U13 또는 U15 합류 | 신규 |
 | C2 | 〃 | 발사 루프 사운드 피치/볼륨 램프 + spin-down/brake 사운드 3종(탄소진/재장전/교체) | 콘텐츠 | U13(오디오) | 신규 |
 | C3 | 〃 | 크로스헤어 스핀업 미세 피드백(V3 재사용, Alpha→gap/두께, 실제 Bloom과 일치) | 콘텐츠/UI | U12(UI·필 잔여) | 신규 |
