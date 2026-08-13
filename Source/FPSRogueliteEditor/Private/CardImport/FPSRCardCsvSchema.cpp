@@ -63,8 +63,18 @@ namespace
 	}
 
 	// Cell-index access that tolerates a row shorter than the header (trailing blank columns Excel/Sheets can
-	// drop) — returns an empty string rather than reading out of bounds.
+	// drop) — returns an empty string rather than reading out of bounds. TRIMS surrounding whitespace: sheet
+	// editing invites stray trailing spaces in ID/enum cells ('weapon.frag.bonusshot ' failed the catalog lookup,
+	// 실사고 2026-08-13), and no identifier/number/tiers cell legitimately carries edge whitespace. Display-text
+	// columns that may keep intentional edge spaces use GetCellRaw below instead.
 	FString GetCell(const TArray<FString>& Cells, int32 Index)
+	{
+		return Cells.IsValidIndex(Index) ? Cells[Index].TrimStartAndEnd() : FString();
+	}
+
+	// Raw (untrimmed) variant for display-text columns (DisplayName_*/Description_* — e.g. a "레벨 : " style
+	// trailing-space label is authored intent there).
+	FString GetCellRaw(const TArray<FString>& Cells, int32 Index)
 	{
 		return Cells.IsValidIndex(Index) ? Cells[Index] : FString();
 	}
@@ -320,12 +330,12 @@ bool FPSRCardCsv::ParseCards(const FString& CardsCsvText, const TArray<FFPSRCard
 
 		// DisplayName / Description (ko,en,ja) — no syntax to validate here (blank tolerated; [KO-TODO] markers
 		// are an exporter/authoring convention, not a parser rule).
-		Row.DisplayName[0] = GetCell(Cells, 7);
-		Row.DisplayName[1] = GetCell(Cells, 8);
-		Row.DisplayName[2] = GetCell(Cells, 9);
-		Row.Description[0] = GetCell(Cells, 10);
-		Row.Description[1] = GetCell(Cells, 11);
-		Row.Description[2] = GetCell(Cells, 12);
+		Row.DisplayName[0] = GetCellRaw(Cells, 7);
+		Row.DisplayName[1] = GetCellRaw(Cells, 8);
+		Row.DisplayName[2] = GetCellRaw(Cells, 9);
+		Row.Description[0] = GetCellRaw(Cells, 10);
+		Row.Description[1] = GetCellRaw(Cells, 11);
+		Row.Description[2] = GetCellRaw(Cells, 12);
 
 		// E1..E3 effect column groups — a slot is "used" only when its *_Attr cell is non-empty.
 		static constexpr int32 EffectBaseColumn = 13;
