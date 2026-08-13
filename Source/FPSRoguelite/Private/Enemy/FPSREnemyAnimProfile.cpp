@@ -4,6 +4,39 @@
 
 #include "Components/MeshComponent.h"
 
+#if WITH_EDITOR
+#include "Misc/DataValidation.h"
+
+#define LOCTEXT_NAMESPACE "FPSREnemyAnimProfile"
+
+EDataValidationResult UFPSREnemyAnimProfile_VAT_CPD::IsDataValid(FDataValidationContext& Context) const
+{
+	EDataValidationResult Result = Super::IsDataValid(Context);
+
+	// A reversed range is always an authoring slip (the bake emits Start <= End) — warn here because the runtime
+	// clamp corrects it silently into a single held frame, indistinguishable from the un-authored 0..0 default.
+	const TPair<FText, const FFPSRVATClipRange*> Clips[] = {
+		{ LOCTEXT("ClipIdle", "IdleClip"), &IdleClip },
+		{ LOCTEXT("ClipWalk", "WalkClip"), &WalkClip },
+		{ LOCTEXT("ClipAttack", "AttackClip"), &AttackClip },
+		{ LOCTEXT("ClipDeath", "DeathClip"), &DeathClip },
+	};
+	for (const TPair<FText, const FFPSRVATClipRange*>& Clip : Clips)
+	{
+		if (Clip.Value->EndFrame < Clip.Value->StartFrame)
+		{
+			Context.AddWarning(FText::Format(
+				LOCTEXT("ReversedClipRange", "{0} has EndFrame < StartFrame — the runtime will hold a single frame. Swap the values (the bake's DA.Animations[] lists Start <= End)."),
+				Clip.Key));
+		}
+	}
+
+	return Result;
+}
+
+#undef LOCTEXT_NAMESPACE
+#endif // WITH_EDITOR
+
 void UFPSREnemyAnimProfile_VAT_CPD::ApplyAnimState(UMeshComponent* Mesh, EFPSRAnimState State, float PlayRate,
 	float Phase) const
 {

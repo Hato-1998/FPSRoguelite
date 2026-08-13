@@ -84,4 +84,11 @@ public:
 	/** Baked frame range for the Death clip. */
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Enemy|Anim")
 	FFPSRVATClipRange DeathClip;
+
+#if WITH_EDITOR
+	/** Editor validation: a reversed clip range (EndFrame < StartFrame) is an authoring mistake — the runtime clamp
+	 *  silently pins it to a single frame, which looks identical to the un-authored 0..0 default and is therefore
+	 *  undiagnosable in-game. Warn at authoring time instead (the runtime clamp stays as the last line of defense). */
+	virtual EDataValidationResult IsDataValid(class FDataValidationContext& Context) const override;
+#endif
 };
