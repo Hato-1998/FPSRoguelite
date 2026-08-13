@@ -154,8 +154,12 @@ TArray<FFPSRCardDraw> UFPSRCardSubsystem::DrawCards(AController* ForPlayer, int3
 		}
 	}
 
-	// Weighted sampling without replacement. Once an offer is picked, every remaining offer of the same card
-	// (all its tiers) and same family is removed, so a card never appears twice and families stay exclusive.
+	// Weighted sampling without replacement. Once an offer is picked, the exact same (card, rolled rarity)
+	// candidate is removed (a card can never repeat at the SAME rarity it was just drawn at) and every remaining
+	// candidate sharing its (family, rolled rarity) pair is also removed (CARDDRAW v4, Docs/Specs/
+	// CARDDRAW_FamilyRarityExclusion.md §5). A different rarity of the SAME family — including the same card
+	// asset re-offered at another rarity — stays eligible: same family + different rarity is a valid co-presence
+	// (the old same-card-pointer-at-any-rarity block is superseded by this pair key, not layered on top of it).
 	TArray<FFPSRCardDraw> Result;
 	// Bound the reservation by the candidate pool, not by the raw Count. Count reaches here straight from
 	// FPSR.DrawCards' FCString::Atoi with no validation, and it is only ever an UPPER bound on the loop below (which
@@ -197,11 +201,15 @@ TArray<FFPSRCardDraw> UFPSRCardSubsystem::DrawCards(AController* ForPlayer, int3
 		Result.Add(Selected);
 
 		const FName FamilyKey = GetCardFamilyKey(Selected.Card);
+		const ECardRarity SelectedRarity = Selected.Rarity;
 		for (int32 k = Candidates.Num() - 1; k >= 0; --k)
 		{
-			const bool bSameCard = (Candidates[k].Card == Selected.Card);
-			const bool bSameFamily = (FamilyKey != NAME_None) && (GetCardFamilyKey(Candidates[k].Card) == FamilyKey);
-			if (bSameCard || bSameFamily)
+			// Self always goes (guarantees the exact picked candidate can't repeat even if FamilyKey is unset).
+			const bool bIsSelf = (k == SelectedIndex);
+			const bool bSameFamilyAndRarity = (FamilyKey != NAME_None)
+				&& (GetCardFamilyKey(Candidates[k].Card) == FamilyKey)
+				&& (Candidates[k].Rarity == SelectedRarity);
+			if (bIsSelf || bSameFamilyAndRarity)
 			{
 				Candidates.RemoveAt(k);
 				CandidateWeights.RemoveAt(k);
