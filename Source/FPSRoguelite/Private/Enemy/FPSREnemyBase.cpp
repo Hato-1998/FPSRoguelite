@@ -327,7 +327,7 @@ void AFPSREnemyBase::SetAnimState(EFPSRAnimState NewState, float PlayRate)
 
 	if (Mesh)
 	{
-		AnimProfile->ApplyAnimState(Mesh, NewState, PlayRate, AnimPhase, AnimMID);
+		AnimProfile->ApplyAnimState(Mesh, NewState, PlayRate, AnimPhase);
 	}
 }
 
