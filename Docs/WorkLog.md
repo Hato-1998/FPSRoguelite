@@ -9,6 +9,24 @@
 
 ---
 
+## 🃏 CARDCSV — 카드 CSV 저작 파이프라인 (2026-08-13, `phase/card-csv-pipeline` → 머지 `da180388`)
+> 보드 행 "카드 시스템 외부 엑셀 데이터 파이프라인 개편"의 코드 전량. 저작 사슬 = 구글 시트(Cards/CardCatalog) → sync → `Content/Authoring/*.csv` → 임포터(Tools 메뉴/`-run=FPSRImportCards`) → `DA_Card_*`(파생물). 명세+레드팀 원장 = `Docs/Specs/CARDCSV_ImporterPipeline.md`, SSOT = `CombatWeaponCard.md` §2-3-10 신설.
+
+### 결과
+- 30장 역추출→재임포트 **멱등 증명**(2회차 unchanged=30, dirty 0) = 무회귀 기준선. 다중 무기 풀 동시 소속 7장은 OwnerWeapon 세미콜론 리스트로 보존(단일 컬럼이었으면 붕괴 — C2 에이전트가 잡아 머지 보류 걸었던 건).
+- CardFamily = FGameplayTag → **FName + E1 속성 ID 자동 파생**(공란 기본). `Card.Family.*` 태그 제거. **의도된 거동 변화 1건**: FireRate·RecoilVertical의 전체무기/개별무기 쌍이 같은 제시에 동시 등장 안 함(같은 속성=한 제시 1장 — §2-3-2 v3 사용자 확정 의미론. 원복 = 시트 Family 셀에 다른 값).
+- 레드팀 P1 0 / P2 7(6건 수정 + 1건 의도 판정) / P3 9(5건 수정, 4건 후속). 주요 수정: Description 공란 11장의 `<MISSING STRING TABLE ENTRY>` 노출 차단(GetEmpty 규칙), 부분실패 3종(오류 카드 저장·풀 dangling·SavePackages exit 0 삼킴), AssetName 중복 하이재킹, Effect_<i> NewObject Fatal 경로.
+- 부수 발견·치유: `DA_CardModifiers_SniperScope`의 CardId가 BurstFire 복붙 중복(기존 콘텐츠 버그).
+
+### 🪤 함정
+1. **`-DisableUnity` 게이트 빌드가 10분을 넘기면** 셸 타임아웃으로 끊겨도 UBT 자식은 계속 돈다 → 재실행이 `ConflictingInstance` 뮤텍스 충돌. UBT 종료는 `Win32_Process`의 CommandLine으로 감시(PS5.1 `Get-Process`는 CommandLine 미노출).
+2. 임포터 계약 설계 시 **"파생 텍스트 키 생성 규칙"과 "에셋에 기록하는 참조 규칙"은 반드시 1:1 대칭**이어야 한다 — 한쪽만 공란을 스킵하면 미존재 키 참조가 태어난다(P2-①).
+
+### 남은 것 (보드 행 유지 사유)
+- Cards/CardCatalog **시트 시딩**(리포 CSV → 시트, 1회) → 이후 시트=마스터. ko 재저작([KO-TODO] 소거)·en/ja 번역 = 시트에서.
+- PIE 사용자 스모크(§12-7): 카드 3장 제시·빈 설명 11장 플레이스홀더 없음·같은 속성 쌍 배제·해금 오퍼.
+- P3 후속 4건(익스포터 메뉴 가드 등) + 머지 체크리스트: 타 브랜치에 미재저장 카드 uasset 있으면 CardFamily 태그→FName 무음 드롭(재검증 그물 필수).
+
 ## 🌐 LOC0 — StringTable CSV 파이프라인 공통 기반 (2026-08-12, `phase/loc-foundation-stringtable` → 머지 `6f92dbdb`, origin 통합 `5bb52a02`)
 > 보드 행 "문자열 외부화 파이프라인 + 기존 UI 전수 이관"(하이)의 **Phase 0**. 이 위에서 Phase A(UI 전수 이관, `phase/loc-ui-migration`)와 Phase B(카드 CSV 개편, `phase/card-csv-pipeline`)가 병렬 분기한다. 명세·레드팀 원장 = `Docs/Specs/LOC0_StringTablePipeline.md`, SSOT = `Docs/SSOT/Localization.md`(신설).
 
