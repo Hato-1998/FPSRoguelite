@@ -7,7 +7,7 @@ Widget.Lobby.ReadyMark,"   [준비완료]","   [READY]","   [準備完了]"
 HUD.Boss.NameLabel,보스,BOSS,ボス
 HUD.Run.FrozenBanner,레벨 업 — 카드를 선택하세요,LEVEL UP — SELECT CARDS,レベルアップ — カードを選択
 "HUD.Run.LevelLabel","레벨 : ","Level : ","レベル : "
-Menu.Button.Back,버튼,Button,ボタン
+Menu.Button.Back,뒤로,Back,戻る
 Menu.Button.Play,플레이,Play,プレイ
 Menu.Button.Quit,종료,Quit,終了
 Menu.Button.Return,메뉴로 돌아가기,Return to Menu,メニューに戻る
@@ -18,7 +18,7 @@ Widget.Lobby.WeaponSlot0,풀오토 소총,FullAutoRifle,フルオートライフ
 Widget.Lobby.WeaponSlot1,저격소총,Sniper,スナイパー
 Widget.Lobby.WeaponSlot2,샷건,Shotgun,ショットガン
 Widget.Lobby.WeaponSlot3,바주카,Bazooka,バズーカ
-Widget.Lobby.WeaponSlot4,유탄발사기,GrenadeLuncher,グレネードランチャー
+Widget.Lobby.WeaponSlot4,유탄발사기,Grenade Launcher,グレネードランチャー
 Widget.Lobby.WeaponSlot5,차지 레이저,ChargeLaser,チャージレーザー
 Widget.Lobby.WeaponSlot6,경기관총,LMG,軽機関銃
 Widget.Lobby.WeaponSlot7,점사소총,BurstRifle,バーストライフル
