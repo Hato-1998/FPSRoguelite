@@ -15,7 +15,6 @@ class AFPSRCharacter;
 class AFPSRPlayerController;
 class APlayerController;
 class UFPSREnemyAnimProfile;
-class UMaterialInstanceDynamic;
 
 /** Outcome of a per-pass server attack decision, returned to the spawn subsystem so it can account the melee
  *  attack token. Ranged archetypes manage their own (held) token directly and return None. */
@@ -420,10 +419,6 @@ protected:
 	 *  UFPSREnemyAnimProfile_VAT (Stage 3) to enable state-driven animation. Instanced/polymorphic (no central switch). */
 	UPROPERTY(EditDefaultsOnly, Instanced, Category = "FPSR|Enemy|Anim")
 	TObjectPtr<UFPSREnemyAnimProfile> AnimProfile;
-
-	/** Per-actor MID lazily created by the AnimProfile on first state application (reused across the actor's life). */
-	UPROPERTY(Transient)
-	TObjectPtr<UMaterialInstanceDynamic> AnimMID;
 
 	/** Current cosmetic animation state (not replicated). */
 	EFPSRAnimState CurrentAnimState = EFPSRAnimState::Idle;
