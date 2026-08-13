@@ -67,7 +67,7 @@
 | 심각도 | 지적 | 처리 | 근거/수정 |
 |---|---|---|---|
 | P2 | family=None 카드(단일효과는 IsDataValid가 허용)가 다중 무기 배선 시 동일 카드·동일 레어도 2장 제시 가능 — "포인터 차단 포섭" 주장 반증 | **수용·수정** | 배제 루프에 무조건 `(같은 카드 && 같은 레어도)` 가드 1줄(FPSRCardSubsystem.cpp) |
-| P3 | 쌍 키가 TargetWeapon 미구분(Rifle-This레어 선택 → SMG-This레어 배제) — 명세 근거 문장과 긴장 | **문서화·사용자 확인 대기** | SSOT v4 항에 미구분 명기. 무기별 구분 원하면 키 확장(경량) |
+| P3 | 쌍 키가 TargetWeapon 미구분(Rifle-This레어 선택 → SMG-This레어 배제) — 명세 근거 문장과 긴장 | **수용·수정(사용자 확정 2026-08-13)** | 배제 키 = family × 레어도 × TargetWeapon으로 확장(`phase/card-draw-weapon-dim`). 캐릭터/전체무기 오퍼는 null==null로 종전 의미 |
 | P3 | FPSRCardPoolValidator ThinOfferPool 휴리스틱 v3 잔존(과잉 경고 가능) | **후속** | 경고 전용, 런타임 무해 |
 | P3 | GetCardFamilyKey 독스트링 stale | **수용·수정** | 주석 v4로 갱신 |
 | P3 | v4 이전 명시 Family가 구 파생값과 일치 저작된 경우 스코프 접미 도입으로 묶음 무음 해제 | **문서화** | SSOT v4 항 주의 1줄(현 콘텐츠 명시 저작 0건) |
