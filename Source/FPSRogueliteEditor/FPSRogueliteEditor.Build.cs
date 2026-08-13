@@ -27,7 +27,10 @@ public class FPSRogueliteEditor : ModuleRules
 			"EditorSubsystem",
 			"ToolMenus",
 			"AssetRegistry",            // DataEditor/Assembler/Blockout/Validation 전반의 에셋 열거·참조 조회
+			"AssetTools",               // IAssetTools::CreateAsset — CardCsvImporter의 신규 카드 DA 생성(§2-3-10)
+			"GameplayAbilities",        // TSubclassOf<UGameplayEffect> 링크 — CardCsvExporter/Importer의 CharGE 페이로드(§2-3-10)
 			"DataValidation",   // UEditorValidatorBase (Engine/Plugins/Editor/DataValidation)
+			"Localization",    // FLocTextHelper (LOC0 — FPSRImportCsvTranslationsCommandlet); UnrealEd only re-exposes GatherTextCommandletBase itself, not this
 			"DeveloperSettings",
 			"Projects",
 			"PropertyEditor",          // IDetailsView (P1 Data Editor), SObjectPropertyEntryBox (Weapon Part Assembler DA picker)

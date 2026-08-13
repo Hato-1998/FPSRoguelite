@@ -8,6 +8,9 @@
 #include "Assembler/SFPSRWeaponAssemblerTab.h"
 #include "Assembler/SFPSRWeaponAssemblerFPTab.h"
 #include "Blockout/SFPSRBlockoutTab.h"
+#include "Localization/FPSRStringTableReload.h"
+#include "CardImport/FPSRCardCsvExporter.h"
+#include "CardImport/FPSRCardCsvImporter.h"
 #include "Editor.h"
 #include "EditorValidatorSubsystem.h"
 #include "Logging/MessageLog.h"
@@ -19,6 +22,8 @@
 #include "Misc/MessageDialog.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "AssetRegistry/IAssetRegistry.h"
+#include "Misc/ScopedSlowTask.h"
+#include "Misc/Paths.h"
 #include "Widgets/Docking/SDockTab.h"
 #include "Framework/Docking/TabManager.h"
 #include "WorkspaceMenuStructure.h"
@@ -123,6 +128,27 @@ void FFPSRogueliteEditorModule::RegisterMenus()
 		FSlateIcon(FAppStyle::GetAppStyleSetName(), "DeveloperTools.MenuIcon"),
 		FUIAction(FExecuteAction::CreateStatic(&FFPSRogueliteEditorModule::OnOpenBlockoutMenuEntry))
 	);
+	Section.AddMenuEntry(
+		"FPSRReloadStringTableCsv",
+		LOCTEXT("ReloadStringTableCsvTitle", "StringTable CSV 리로드"),
+		LOCTEXT("ReloadStringTableCsvTooltip", "Content/StringTables/*.csv 3개를 다시 읽어 런타임 문자열 테이블을 재등록합니다 (에디터 재시작 불필요)."),
+		FSlateIcon(FAppStyle::GetAppStyleSetName(), "DeveloperTools.MenuIcon"),
+		FUIAction(FExecuteAction::CreateStatic(&FFPSRogueliteEditorModule::OnReloadStringTableCsvMenuEntry))
+	);
+	Section.AddMenuEntry(
+		"FPSRExportCardCsv",
+		LOCTEXT("ExportCardCsvTitle", "카드 CSV 내보내기(마이그레이션)"),
+		LOCTEXT("ExportCardCsvTooltip", "기존 DA_Card_* 에셋 전수를 Content/Authoring/Cards.csv·CardCatalog.csv로 역추출합니다 (마이그레이션 1회용 — §2-3-10)."),
+		FSlateIcon(FAppStyle::GetAppStyleSetName(), "DeveloperTools.MenuIcon"),
+		FUIAction(FExecuteAction::CreateStatic(&FFPSRogueliteEditorModule::OnExportCardCsvMenuEntry))
+	);
+	Section.AddMenuEntry(
+		"FPSRImportCardCsv",
+		LOCTEXT("ImportCardCsvTitle", "카드 CSV 임포트"),
+		LOCTEXT("ImportCardCsvTooltip", "Content/Authoring/Cards.csv·CardCatalog.csv를 읽어 DA_Card_*를 생성/갱신하고 검증 통과분을 저장합니다 (§2-3-10)."),
+		FSlateIcon(FAppStyle::GetAppStyleSetName(), "DeveloperTools.MenuIcon"),
+		FUIAction(FExecuteAction::CreateStatic(&FFPSRogueliteEditorModule::OnImportCardCsvMenuEntry))
+	);
 }
 
 void FFPSRogueliteEditorModule::OnOpenDataEditorMenuEntry()
@@ -184,6 +210,61 @@ TSharedRef<SDockTab> FFPSRogueliteEditorModule::SpawnBlockoutTab(const FSpawnTab
 		[
 			SNew(SFPSRBlockoutTab)
 		];
+}
+
+void FFPSRogueliteEditorModule::OnReloadStringTableCsvMenuEntry()
+{
+	// ReloadAll already logs a per-table Error line + summary and, on partial failure, raises its own toast
+	// notification — nothing else to surface here.
+	FPSRStringTableReload::ReloadAll();
+}
+
+void FFPSRogueliteEditorModule::OnExportCardCsvMenuEntry()
+{
+	FScopedSlowTask SlowTask(1.0f, LOCTEXT("ExportCardCsvSlowTask", "카드 CSV 내보내는 중..."));
+	SlowTask.MakeDialog();
+
+	const FString CardsPath = FPaths::ProjectContentDir() / TEXT("Authoring/Cards.csv");
+	const FString CatalogPath = FPaths::ProjectContentDir() / TEXT("Authoring/CardCatalog.csv");
+
+	TArray<FString> Errors;
+	const bool bSucceeded = FPSRCardCsvExport::ExportAll(CardsPath, CatalogPath, Errors);
+	SlowTask.EnterProgressFrame(1.0f);
+
+	FMessageLog ExportLog(TEXT("FPSRCardCsvExport"));
+	if (bSucceeded)
+	{
+		ExportLog.Info(FText::Format(LOCTEXT("ExportCardCsvSucceeded", "카드 CSV 내보내기 완료: {0}, {1}"), FText::FromString(CardsPath), FText::FromString(CatalogPath)));
+	}
+	else
+	{
+		ExportLog.Error(LOCTEXT("ExportCardCsvFailed", "카드 CSV 내보내기 실패 — 아래 오류를 확인하세요. 파일은 기록되지 않았습니다."));
+	}
+	for (const FString& Error : Errors)
+	{
+		ExportLog.Error(FText::FromString(Error));
+	}
+	ExportLog.Open(bSucceeded ? EMessageSeverity::Info : EMessageSeverity::Error, /*bOpenEvenIfEmpty=*/true);
+}
+
+void FFPSRogueliteEditorModule::OnImportCardCsvMenuEntry()
+{
+	FScopedSlowTask SlowTask(1.0f, LOCTEXT("ImportCardCsvSlowTask", "카드 CSV 임포트 중..."));
+	SlowTask.MakeDialog();
+
+	const FFPSRCardImportResult Result = FPSRCardCsvImport::ImportAll(/*bSaveAssets=*/true);
+	SlowTask.EnterProgressFrame(1.0f);
+
+	FMessageLog ImportLog(TEXT("FPSRCardCsvImport"));
+	ImportLog.Info(FText::Format(
+		LOCTEXT("ImportCardCsvSummary", "카드 CSV 임포트: 생성 {0} / 갱신 {1} / 무변경 {2} / 풀·무기 소속 제거 {3} / 오류 {4}"),
+		FText::AsNumber(Result.CreatedCount), FText::AsNumber(Result.UpdatedCount), FText::AsNumber(Result.UnchangedCount),
+		FText::AsNumber(Result.RemovedMembershipCount), FText::AsNumber(Result.Errors.Num())));
+	for (const FString& Error : Result.Errors)
+	{
+		ImportLog.Error(FText::FromString(Error));
+	}
+	ImportLog.Open(Result.Succeeded() ? EMessageSeverity::Info : EMessageSeverity::Error, /*bOpenEvenIfEmpty=*/true);
 }
 
 void FFPSRogueliteEditorModule::OnValidateAnchoredDataMenuEntry()

@@ -15,6 +15,7 @@
 - [E. 데이터 · 컴포넌트 · BP](#e-데이터--컴포넌트--bp)
 - [F. 단위 · 좌표계](#f-단위--좌표계)
 - [G. 검증 방법 자체의 함정](#g-검증-방법-자체의-함정)
+- [H. 로컬라이제이션 · 파이프라인 스크립트](#h-로컬라이제이션--파이프라인-스크립트)
 
 ---
 
@@ -503,3 +504,25 @@ A1의 Y축 반전이 2026-07-26부터 잠복할 수 있었던 이유가 정확�
 건드리기 전에 `git status` 기준선을 잡아두고, 되돌릴 땐 파일 복구(`git checkout -- <umap>`)
 **직후 에디터에서 그 레벨을 변경사항 버리고 다시 열어야** 한다 — 안 그러면 메모리에 남은
 액터가 다음 저장 때 되살아난다.
+
+---
+
+## H. 로컬라이제이션 · 파이프라인 스크립트
+
+### H1. .ps1 실행이 "문자열 터미네이터 없음" 파서 에러로 죽는다
+**원인**: 한글 주석이 든 스크립트가 **BOM 없는 UTF-8** — Windows PowerShell 5.1은 BOM 없는 파일을 CP949로 읽어 문자열 리터럴이 깨진다. → 스크립트는 **UTF-8 BOM**으로 저장(2026-08-12 LOC0 실측).
+
+### H2. 웹에서 받은 CSV의 한글/일본어가 ã‚·ë¡œ 깨져 저장된다
+**원인**: PS5.1 `Invoke-WebRequest`의 `$Response.Content`(문자열)는 charset 미지정 응답을 **Latin-1로 디코드** → UTF-8 재저장 시 이중 인코딩. → `RawContentStream.ToArray()`로 원시 바이트를 받아 그대로 `WriteAllBytes`(LOC0 sync 스크립트가 레퍼런스).
+
+### H3. StringTable CSV 리로드 후 UI 문자열이 전멸했는데 툴은 "성공"이라 한다
+**원인**: `FStringTableRegistry::Internal_LocTableFromFile`은 ImportStrings **실패에도 빈 테이블을 무조건 등록**(StringTableRegistry.cpp:198-209) — 등록 여부 체크는 항상 참. → 리로드는 엔진 파일워처처럼 기존 테이블에 in-place `ImportStrings`(검증 후 클리어 = 실패 시 기존 문자열 보존). `FPSRStringTableReload.cpp` 참조.
+
+### H4. LocRes도 pak에 실렸는데 패키지에서 culture=ja/ko 전환이 안 된다
+**원인**: ICU 로케일 데이터는 `CulturesToStage`가 아니라 **`InternationalizationPreset`**(BaseGame 기본 English)이 결정 — ja/ko ICU가 아예 미탑재. → `DefaultGame.ini InternationalizationPreset=EFIGSCJK`. 스테이징 목록 확인만으론 못 잡는다(패키지에서 실제 전환 표시까지 봐야).
+
+### H5. gather 설정을 고쳤는데 어느 순간 원복돼 있다
+**원인**: Localization **대시보드의 Gather/Compile 버튼이 `Config/Localization/Game_*.ini`를 자기 생성본으로 덮어씀**(커스텀 스텝 체인 소실). → 실행은 반드시 `Scripts/localization-gather.ps1`. 대시보드 타깃 항목은 UI 노출용.
+
+### H6. 의도 안 한 파일이 pak에 들어가 있다
+**원인**: `DirectoriesToAlwaysStageAsUFS`에 걸린 폴더(`Content/StringTables/`)는 **그 안의 모든 파일**이 스테이징된다(.sync-manifest.json이 실려 나감, 실측). → 메타/작업 파일은 스테이징 밖(`Config/` 등)에 둔다.

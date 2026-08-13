@@ -20,6 +20,48 @@
 - **측정 인프라(재사용 — (b) 베이스라인이 그대로 씀)**: `Scripts/measure_swarm_render.ps1` + `Scripts/analyze_swarm_csv.py`. 함정 원장: 부트 캡처(-csvCaptureFrames)=RHI 초기화 전 어설션 즉사 / 아카이브 최상위 exe=부트스트랩(자식 게임 잔존→인스턴스 4개 누적 오염) / 근접 링 스폰=적이 카메라 근평면 뒤로 뭉쳐 "적 0마리 장면" 측정(CustomDepth 0.01ms가 단서) / UE CSV=끝 헤더+컬럼 증가+EVENTS 문자열 / **런처 엔진은 Test 구성 미지원** → Development로 측정(보수적).
 - **커밋**: `08ebe184`(예산 확정) `5b40c2c7`(컨설트) `280c04f3`(CPD 백엔드) `1e1625b1`(CPD 콘텐츠) `426deefa`·`3c8fb399`·`766d3ecb`·`bd78e0ef`(측정 도구·grace).
 
+## 🎲 CARDDRAW v4 — 추첨 배제 규칙 (family+레어도 쌍) (2026-08-13, `phase/card-draw-exclusion-v4` → 머지 `3d5418cc`)
+> 사용자 확정 판정표: All레어+All레전더리 ✅ / All레어+All레어 ❌ / All레어+This레어 ✅. 배제 키 = (family, 굴린 레어도) 쌍, WeaponStat 자동 family에 `.all`/`.this` 스코프 접미(전체/개별 = 다른 카드), 같은 카드가 레어도만 달리해 2장 제시 가능(동일 카드 포인터 차단 폐지 — 단 같은 카드+같은 레어도는 family 유무 무관 무조건 배제 = 레드팀 P2 가드). family 키는 대상 무기 미구분(SSOT 명기, 사용자 확인 대기 항목). 명세+원장 = `Docs/Specs/CARDDRAW_FamilyRarityExclusion.md`. 6장(FireRate·MagSize·RecoilVertical All/This) family 재파생, 멱등 재확인. 후속: PoolValidator ThinOffer 휴리스틱 v3 잔존(과잉 경고 가능).
+
+## 🃏 CARDCSV — 카드 CSV 저작 파이프라인 (2026-08-13, `phase/card-csv-pipeline` → 머지 `da180388`)
+> 보드 행 "카드 시스템 외부 엑셀 데이터 파이프라인 개편"의 코드 전량. 저작 사슬 = 구글 시트(Cards/CardCatalog) → sync → `Content/Authoring/*.csv` → 임포터(Tools 메뉴/`-run=FPSRImportCards`) → `DA_Card_*`(파생물). 명세+레드팀 원장 = `Docs/Specs/CARDCSV_ImporterPipeline.md`, SSOT = `CombatWeaponCard.md` §2-3-10 신설.
+
+### 결과
+- 30장 역추출→재임포트 **멱등 증명**(2회차 unchanged=30, dirty 0) = 무회귀 기준선. 다중 무기 풀 동시 소속 7장은 OwnerWeapon 세미콜론 리스트로 보존(단일 컬럼이었으면 붕괴 — C2 에이전트가 잡아 머지 보류 걸었던 건).
+- CardFamily = FGameplayTag → **FName + E1 속성 ID 자동 파생**(공란 기본). `Card.Family.*` 태그 제거. **의도된 거동 변화 1건**: FireRate·RecoilVertical의 전체무기/개별무기 쌍이 같은 제시에 동시 등장 안 함(같은 속성=한 제시 1장 — §2-3-2 v3 사용자 확정 의미론. 원복 = 시트 Family 셀에 다른 값).
+- 레드팀 P1 0 / P2 7(6건 수정 + 1건 의도 판정) / P3 9(5건 수정, 4건 후속). 주요 수정: Description 공란 11장의 `<MISSING STRING TABLE ENTRY>` 노출 차단(GetEmpty 규칙), 부분실패 3종(오류 카드 저장·풀 dangling·SavePackages exit 0 삼킴), AssetName 중복 하이재킹, Effect_<i> NewObject Fatal 경로.
+- 부수 발견·치유: `DA_CardModifiers_SniperScope`의 CardId가 BurstFire 복붙 중복(기존 콘텐츠 버그).
+
+### 🪤 함정
+1. **`-DisableUnity` 게이트 빌드가 10분을 넘기면** 셸 타임아웃으로 끊겨도 UBT 자식은 계속 돈다 → 재실행이 `ConflictingInstance` 뮤텍스 충돌. UBT 종료는 `Win32_Process`의 CommandLine으로 감시(PS5.1 `Get-Process`는 CommandLine 미노출).
+2. 임포터 계약 설계 시 **"파생 텍스트 키 생성 규칙"과 "에셋에 기록하는 참조 규칙"은 반드시 1:1 대칭**이어야 한다 — 한쪽만 공란을 스킵하면 미존재 키 참조가 태어난다(P2-①).
+
+### 남은 것 (보드 행 유지 사유)
+- Cards/CardCatalog **시트 시딩**(리포 CSV → 시트, 1회) → 이후 시트=마스터. ko 재저작([KO-TODO] 소거)·en/ja 번역 = 시트에서.
+- PIE 사용자 스모크(§12-7): 카드 3장 제시·빈 설명 11장 플레이스홀더 없음·같은 속성 쌍 배제·해금 오퍼.
+- P3 후속 4건(익스포터 메뉴 가드 등) + 머지 체크리스트: 타 브랜치에 미재저장 카드 uasset 있으면 CardFamily 태그→FName 무음 드롭(재검증 그물 필수).
+
+## 🌐 LOC0 — StringTable CSV 파이프라인 공통 기반 (2026-08-12, `phase/loc-foundation-stringtable` → 머지 `6f92dbdb`, origin 통합 `5bb52a02`)
+> 보드 행 "문자열 외부화 파이프라인 + 기존 UI 전수 이관"(하이)의 **Phase 0**. 이 위에서 Phase A(UI 전수 이관, `phase/loc-ui-migration`)와 Phase B(카드 CSV 개편, `phase/card-csv-pipeline`)가 병렬 분기한다. 명세·레드팀 원장 = `Docs/Specs/LOC0_StringTablePipeline.md`, SSOT = `Docs/SSOT/Localization.md`(신설).
+
+### 결과
+- **런타임 문자열 소스 = `Content/StringTables/*.csv` 3개**(UI/CardEffect/Card), `LOCTABLE_FROMFILE_GAME` 리터럴 3건으로 등록(게임 모듈 `FFPSRogueliteGameModule` 신설 — gather가 소스의 매크로 리터럴을 파싱해 CSV를 발견하므로 ini 데이터드리븐 등록 금지가 구조 제약).
+- **ko 네이티브 + en/ja 타깃**: 커스텀 gather 스텝 `UFPSRImportCsvTranslationsCommandlet`이 CSV의 en/ja 컬럼을 문화권 아카이브에 주입 → `Scripts/localization-gather.ps1` 원버튼으로 gather→주입→LocRes 컴파일 왕복(멱등 확인).
+- **저작 마스터 = 구글 시트**(공유폴더 `FPS로그라이크/시트/`) → `Scripts/sync-authoring-csv.ps1` 무인증 export URL pull(헤더 검증·실패 시 스냅샷 보존·provenance = `Config/AuthoringSheets.manifest.json`). 리포 CSV = 빌드 스냅샷(단방향).
+- 검증: 빌드 3회 그린(-DisableUnity 포함) · 자동테스트 `FPSRoguelite.Editor.Localization.StringTableCsv` Success · sync 정상+부정 테스트 · 패키징 스모크(pak 내 CSV 3종 + ko/en/ja LocRes + ICU 스테이징 확인) · 레드팀 게이트 P1 0/P2 2(전건 수정)/P3 6(5건 수정, 1건 후속).
+
+### 🪤 함정 (Troubleshooting에도 올릴 것)
+1. **PS5.1 + BOM 없는 한글 .ps1 = 파서 에러**(CP949 오독). 스크립트는 UTF-8 **BOM** 필수.
+2. **PS5.1 `Invoke-WebRequest`의 `$Response.Content` 문자열은 charset 미지정 응답을 Latin-1로 디코드** → UTF-8 본문 이중 인코딩 파손. 원시 바이트(`RawContentStream`)로 받고 그대로 저장할 것.
+3. **`Internal_LocTableFromFile`은 ImportStrings 실패에도 빈 테이블을 무조건 등록** — 리로드류 유틸은 엔진 파일워처처럼 기존 테이블에 in-place `ImportStrings`(검증 후 클리어 = 깨진 CSV에 기존 문자열 보존)로.
+4. **`CulturesToStage`만으론 패키지에서 문화권 활성화 불가** — ICU 데이터는 `InternationalizationPreset`이 결정(BaseGame 기본 English → `EFIGSCJK`로 덮음). 스테이징 확인만으론 못 잡는 무음 결함.
+5. **Localization 대시보드 Gather/Compile 클릭 = 수제 `Config/Localization/Game_*.ini` 덮어씀** — 실행은 반드시 스크립트로.
+6. `Content/StringTables/` 안에 두는 모든 파일은 UFS 스테이징으로 pak에 실린다(provenance manifest를 Config/로 뺀 이유).
+
+### 남긴 것
+- PIE 사용자 스모크(culture=en/ja 시드 전환 + ja 폰트 글리프 확인) 대기. 패키지 기본 문화권(DefaultCulture, 현 en) = 제품 결정 대기.
+- P3 후속 1건: `Game_ImportCsvTranslations.ini CSVFiles` ↔ 테스트 목록 자동 대조.
+
 ## 🏙️ 인게임 맵 교체 완료 — Synthwave City Kit → `L_Map1_City` (2026-08-12, `content/map1-synthwave`)
 > M0 **(a′) 완료**. 프롭 밀도까지 이 작업 단위 안에서 확정했으므로, (b) 베이스라인의 선행 중 맵 쪽은 닫혔다.
 > **남은 (b) 선행은 2건**이다 — ①**(a″) 적 인스턴싱/VAT** ②**[결정] 목표 프레임 예산 수치 + 측정 빌드 구성**(현재 *결정대기*).

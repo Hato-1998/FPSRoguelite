@@ -147,7 +147,7 @@ EDataValidationResult UFPSRCardDataAsset::IsDataValid(FDataValidationContext& Co
 	}
 
 	// Multi-effect cards must set CardFamily (the v1 AppliedEffect-GE-class family fallback was removed).
-	if (NumValidEffects > 1 && !CardFamily.IsValid())
+	if (NumValidEffects > 1 && CardFamily.IsNone())
 	{
 		Context.AddError(LOCTEXT("MultiNoFamily", "Multi-effect card must set CardFamily — mutual-exclusion can no longer fall back to a GE class."));
 		Result = EDataValidationResult::Invalid;
