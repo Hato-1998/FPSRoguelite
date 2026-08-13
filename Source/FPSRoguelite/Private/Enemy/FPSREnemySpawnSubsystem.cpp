@@ -1553,10 +1553,12 @@ static FAutoConsoleCommandWithWorldAndArgs GFPSRSpawnEnemiesCmd(
 			return;
 		}
 
+		// Clamp to the pool hard cap — AcquireEnemy stops there anyway, but an absurd count (e.g. a typo'd 2000000000)
+		// must not spin this loop through millions of guaranteed-null acquires.
 		int32 Count = 5;
 		if (Args.Num() > 0)
 		{
-			Count = FMath::Max(1, FCString::Atoi(*Args[0]));
+			Count = FMath::Clamp(FCString::Atoi(*Args[0]), 1, UFPSREnemySpawnSubsystem::MaxActiveEnemies);
 		}
 		float Radius = 600.0f;
 		if (Args.Num() > 1)

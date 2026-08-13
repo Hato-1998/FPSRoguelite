@@ -36,10 +36,13 @@ New-Item -ItemType Directory -Force $outDir | Out-Null
 $csvDir = Join-Path $BuildDir "Windows\FPSRoguelite\Saved\Profiling\CSV"
 if (Test-Path $csvDir) { Get-ChildItem $csvDir -Filter *.csv | Remove-Item -Force -Confirm:$false }
 
+# 무적 시간은 ExecCmds 시점부터 기산 — 부팅(첫 부팅 PSO 컴파일 5분+ 실측)·캡처·여유를 전부 덮어야
+# grace 만료→다운→run-end→빈 씬이 평균을 오염시키는 무효 측정을 막는다(레드팀 P3 지적).
+$invulnSeconds = $BootWaitSeconds + $MaxWaitSeconds + 300
 $gameArgs = @(
     "L_Map1_City?listen",
     "-windowed","-resx=1920","-resy=1080","-novsync","-log",
-    "-ExecCmds=`"FPSR.SkipCards, FPSR.Invuln 600, FPSR.SpawnEnemies $EnemyCount $SpawnRadius, CsvProfile Frames=$CaptureFrames`"",
+    "-ExecCmds=`"FPSR.SkipCards, FPSR.Invuln $invulnSeconds, FPSR.SpawnEnemies $EnemyCount $SpawnRadius, CsvProfile Frames=$CaptureFrames`"",
     "-csvGpuStats"
 )
 Write-Host "[measure] launching $Label : $exe $($gameArgs -join ' ')"
@@ -101,4 +104,15 @@ if ($csv) {
 }
 $gameLog = Get-ChildItem (Join-Path $BuildDir "Windows\FPSRoguelite\Saved\Logs") -Filter "FPSRoguelite*.log" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime | Select-Object -Last 1
 if ($gameLog) { Copy-Item $gameLog.FullName (Join-Path $outDir "game.log") }
+
+# 유효성 게이트 — 캡처 중 런이 끝났으면(플레이어 다운 → 빈 씬) 그 CSV는 무효다. 조용히 통과 금지.
+if ($gameLog) {
+    $endEvents = Select-String -Path (Join-Path $outDir "game.log") -Pattern "\[Run\] END|EndRun outcome|-> DBNO" -SimpleMatch:$false
+    if ($endEvents) {
+        Write-Warning "[measure] ⚠️ 측정 무효 의심 — 캡처 세션에서 런 종료/다운 이벤트 감지:"
+        $endEvents | Select-Object -First 3 | ForEach-Object { Write-Warning "  $($_.Line.Trim())" }
+    } else {
+        Write-Host "[measure] validity: run survived (no END/DBNO events)"
+    }
+}
 Write-Host "[measure] done: $outDir"
