@@ -3,10 +3,10 @@ Debug.LocSmoke,로컬라이제이션 시드,Localization seed,ローカライズ
 Widget.CardEntry.Missing,[없음],[Missing],[欠落]
 Widget.CardEntry.SourceCharacter,캐릭터,Character,キャラクター
 Widget.Lobby.PlayerRowFmt,{0}{1}  -  {2}{3},{0}{1}  -  {2}{3},{0}{1}  -  {2}{3}
-Widget.Lobby.ReadyMark,"   [준비완료]","   [READY]","   [準備完了]"
+Widget.Lobby.ReadyMark,   [준비완료],   [READY],   [準備完了]
 HUD.Boss.NameLabel,보스,BOSS,ボス
 HUD.Run.FrozenBanner,레벨 업 — 카드를 선택하세요,LEVEL UP — SELECT CARDS,レベルアップ — カードを選択
-"HUD.Run.LevelLabel","레벨 : ","Level : ","レベル : "
+HUD.Run.LevelLabel,레벨 : ,Level : ,レベル : 
 Menu.Button.Back,뒤로,Back,戻る
 Menu.Button.Play,플레이,Play,プレイ
 Menu.Button.Quit,종료,Quit,終了
@@ -22,5 +22,5 @@ Widget.Lobby.WeaponSlot4,유탄발사기,Grenade Launcher,グレネードラン�
 Widget.Lobby.WeaponSlot5,차지 레이저,ChargeLaser,チャージレーザー
 Widget.Lobby.WeaponSlot6,경기관총,LMG,軽機関銃
 Widget.Lobby.WeaponSlot7,점사소총,BurstRifle,バーストライフル
-Widget.Lobby.InviteButton,"친구 초대 (F)","Invite Friends (F)","フレンドを招待 (F)"
-Widget.Lobby.JoinButton,"참가 (V)","Join (V)","参加 (V)"
+Widget.Lobby.InviteButton,친구 초대 (F),Invite Friends (F),フレンドを招待 (F)
+Widget.Lobby.JoinButton,참가 (V),Join (V),参加 (V)
