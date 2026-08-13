@@ -317,6 +317,14 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Enemy|Movement")
 	float GravityAccel = 1800.0f;
 
+	/** Hover height (cm) the CAPSULE rests above the floor — a floating archetype hovers with its COLLISION (not a
+	 *  visual mesh offset, which would desync hits from the silhouette: shots under the mesh would hit, shots at the
+	 *  raised tip would miss). Applied at the single grounding anchor in ApplyGravity, so stepping, falling and
+	 *  landing all inherit it. KEEP WELL BELOW the melee/projectile vertical attack gate (150cm) and the flow field's
+	 *  storey separation (~300cm+) — the foot-Z layer pick floats by this much. 0 = walks on the ground. */
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Enemy|Movement", meta = (ClampMin = "0.0"))
+	float HoverHeight = 0.0f;
+
 	/** If the floor is within this of the feet (up or down), snap to it (slopes/steps); beyond it (a real drop),
 	 *  fall under gravity. Also the BASE increment the movement step-up lifts over a stair riser (see MaxCrestStepUp). */
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Enemy|Movement")

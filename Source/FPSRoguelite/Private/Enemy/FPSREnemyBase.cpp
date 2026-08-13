@@ -643,7 +643,7 @@ void AFPSREnemyBase::ApplyGravity(float ScaledDeltaSeconds)
 	}
 	if (bHitFloor)
 	{
-		const float TargetZ = Hit.ImpactPoint.Z + HalfHeight + GroundRestClearance; // rest just above the floor (not flush — see GroundRestClearance)
+		const float TargetZ = Hit.ImpactPoint.Z + HalfHeight + GroundRestClearance + HoverHeight; // rest just above the floor (+HoverHeight for floating archetypes)
 		const float Diff = Loc.Z - TargetZ;
 
 		// Snap window: DOWN up to MaxStepDownHeight while GROUNDED (a grounded enemy walking off a small ledge / down a
