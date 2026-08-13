@@ -30,8 +30,8 @@ DA_Card_XPGain.DisplayName,경험치 획득,XP Gain,経験値獲得
 DA_Card_XPGain.Description,경험치 획득량 증가,XP Gain Up,経験値獲得量アップ
 DA_CardModifiers_AmmoOnMiss.DisplayName,빗나감 보충,Ammo on Miss,ミス時弾薬回復
 DA_CardModifiers_AmmoOnMiss.Description,빗나간 사격의 탄약을 돌려받는다,Missed shots refund ammo,外した射撃の弾薬が戻ってくる
-DA_CardModifiers_BounsDamage.DisplayName,보너스 샷,Bonus Shot,ボーナスショット
-DA_CardModifiers_BounsDamage.Description,사격 시 추가 사격이 나간다,Shooting fires an additional shot,射撃時に追加の射撃が発生する
+DA_CardModifiers_BonusShot.DisplayName,보너스 샷,Bonus Shot,ボーナスショット
+DA_CardModifiers_BonusShot.Description,사격 시 추가 사격이 나간다,Shooting fires an additional shot,射撃時に追加の射撃が発生する
 DA_CardModifiers_BurstFire.DisplayName,점사 사격,Burst Fire,バースト射撃
 DA_CardModifiers_BurstFire.Description,방아쇠 1회당 3점사로 발사한다,Fire a 3-round burst per trigger pull,1回の引き金で3点バースト射撃
 DA_CardModifiers_SniperScope.DisplayName,저격 스코프,Sniper Scope,スナイパースコープ
