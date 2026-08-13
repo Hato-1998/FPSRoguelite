@@ -20,6 +20,20 @@
 - **측정 인프라(재사용 — (b) 베이스라인이 그대로 씀)**: `Scripts/measure_swarm_render.ps1` + `Scripts/analyze_swarm_csv.py`. 함정 원장: 부트 캡처(-csvCaptureFrames)=RHI 초기화 전 어설션 즉사 / 아카이브 최상위 exe=부트스트랩(자식 게임 잔존→인스턴스 4개 누적 오염) / 근접 링 스폰=적이 카메라 근평면 뒤로 뭉쳐 "적 0마리 장면" 측정(CustomDepth 0.01ms가 단서) / UE CSV=끝 헤더+컬럼 증가+EVENTS 문자열 / **런처 엔진은 Test 구성 미지원** → Development로 측정(보수적).
 - **커밋**: `08ebe184`(예산 확정) `5b40c2c7`(컨설트) `280c04f3`(CPD 백엔드) `1e1625b1`(CPD 콘텐츠) `426deefa`·`3c8fb399`·`766d3ecb`·`bd78e0ef`(측정 도구·grace).
 
+## 🌍 Phase A — UI 문자열 전수 이관 완료 (2026-08-13, `phase/loc-ui-migration` → 머지 `f1b7e314`, 정합복원 `60a68015`)
+> 보드 행 "문자열 외부화 파이프라인 + 기존 UI 전수 이관" **완료 마킹**. C++ 런타임 이관(A-1 `df62d400`) + 출처 풀 라벨(A-1b `d9b76d3c`) + WBP 23개 인벤토리(A-2 `5a3691a4`) + 사용자 에디터 작업(A-4 `3e23a33a`: 키 바인딩 15곳·버튼 WBP_Button_Base 통합·SourcePoolText·BonusShot 리네임). 사용자 PIE ko/en/ja 순회 정상.
+
+### 🪤 함정
+1. **CommonButtonBase는 루트 버튼 슬롯을 강제 Fill로 리셋**(`CommonButtonBase.cpp:495-497` — 컴파일마다 정렬 원복). 정렬은 콘텐츠 안쪽(Overlay 래핑)에서.
+2. **WBP 상속 = 자식 트리가 부모 트리를 통째 대체**(부분 오버라이드 불가). 자식에 부모와 동명(FName 대소문자 무시) 위젯 변수 잔존 시 Internal Compiler Error("property already exists"). 공유 버튼 = Base 트리 + 인스턴스가 노출 프로퍼티(StringTable 키)만 지정.
+3. **에디터 PIE 게임 텍스트 언어 = '미리보기 게임 언어'**(culture= 콘솔은 에디터 UI만) + **번역은 각 워킹트리에서 gather를 돌려야 LocRes가 생긴다**(브랜치에 키만 있고 gather 안 돌리면 어느 언어로도 안 바뀜).
+4. **worktree 브랜치가 오래되면 에디터 저장이 구버전 데이터 기반** — 머지에서 무기 DA/LocRes 충돌은 main 채택 + **임포터 재실행이 참조·멤버십·family를 CSV 기준으로 복원**(선언적 동기화가 머지 수리 도구가 됨). CardFamily 태그→FName 무음 드롭도 재임포트가 그물.
+5. **시딩 전 시트에 full sync 금지** — 시드 2행뿐인 ST_UI/ST_CardEffect 시트가 25행 스냅샷을 롤백(실사고, git 복원). 시트별 -SheetName 지정 습관.
+6. 리네임은 시트 셀 연쇄(CardId/AssetName/AttrId/Payload) — 오타 2회 왕복 실측. 리네임 시 관련 셀 목록을 한 번에 안내할 것.
+
+### 남은 것 (후속 행 등재)
+BP 그래프 핀 리터럴 3곳 / ST_UI·ST_CardEffect 시트 시딩(사용자) + Cards 시트 bounsshot 오타 / LoadoutEntry 배선 확인 / 고아 WBP 2개 정리.
+
 ## 🎲 CARDDRAW v4 — 추첨 배제 규칙 (family+레어도 쌍) (2026-08-13, `phase/card-draw-exclusion-v4` → 머지 `3d5418cc`)
 > 사용자 확정 판정표: All레어+All레전더리 ✅ / All레어+All레어 ❌ / All레어+This레어 ✅. 배제 키 = (family, 굴린 레어도) 쌍, WeaponStat 자동 family에 `.all`/`.this` 스코프 접미(전체/개별 = 다른 카드), 같은 카드가 레어도만 달리해 2장 제시 가능(동일 카드 포인터 차단 폐지 — 단 같은 카드+같은 레어도는 family 유무 무관 무조건 배제 = 레드팀 P2 가드). family 키는 대상 무기 미구분(SSOT 명기, 사용자 확인 대기 항목). 명세+원장 = `Docs/Specs/CARDDRAW_FamilyRarityExclusion.md`. 6장(FireRate·MagSize·RecoilVertical All/This) family 재파생, 멱등 재확인. 후속: PoolValidator ThinOffer 휴리스틱 v3 잔존(과잉 경고 가능).
 
