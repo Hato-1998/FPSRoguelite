@@ -382,15 +382,32 @@ namespace
 		return bChanged;
 	}
 
-	// Applies CardFamily (§2-3-2 v3, FName post-B-6). Blank CSV Family derives from E1's AttrId — no ini
-	// registration needed now that the field is a plain FName (that friction was exactly why v3 dropped
-	// FGameplayTag). An explicit CSV Family value always wins over the derived one.
-	bool ApplyCardFamily(UFPSRCardDataAsset* Card, const FFPSRCardCsvRow& Row)
+	// Derives the auto-family for E1 when the CSV Family column is blank (CARDDRAW v4, Docs/Specs/
+	// CARDDRAW_FamilyRarityExclusion.md §5): WeaponStat E1 -> "<AttrId>.all" / "<AttrId>.this" (the ".this"/".all"
+	// suffix keyed off the RESOLVED bThisWeaponOnly — override-then-catalog-default, same resolution ApplyEffectColumn
+	// uses for the live Stat->bThisWeaponOnly field, so the derived family always matches what actually got written to
+	// the effect). Any other E1 EffectType (or a catalog miss, reported elsewhere as an error) -> plain "<AttrId>".
+	FName DeriveCardFamilyFromE1(const FFPSRCardCsvRow::FEffectCol& E1, const TMap<FName, FCatalogDescriptor>& CatalogMap)
+	{
+		const FCatalogDescriptor* Descriptor = CatalogMap.Find(E1.AttrId);
+		if (Descriptor && Descriptor->EffectType == TEXT("WeaponStat"))
+		{
+			const TMap<FString, FString> Overrides = ParseOverridePairs(E1.Override);
+			const bool bThisWeaponOnly = ParseBoolStrict(ResolveEffective(Overrides, TEXT("ThisWeaponOnly"), Descriptor->DefaultThisWeaponOnly, TEXT("true")), true);
+			return FName(*(E1.AttrId.ToString() + (bThisWeaponOnly ? TEXT(".this") : TEXT(".all"))));
+		}
+		return E1.AttrId;
+	}
+
+	// Applies CardFamily (§2-3-2 v3, FName post-B-6; scope-qualified derivation v4). Blank CSV Family derives from
+	// E1 (DeriveCardFamilyFromE1 above) — no ini registration needed now that the field is a plain FName (that
+	// friction was exactly why v3 dropped FGameplayTag). An explicit CSV Family value always wins over the derived one.
+	bool ApplyCardFamily(UFPSRCardDataAsset* Card, const FFPSRCardCsvRow& Row, const TMap<FName, FCatalogDescriptor>& CatalogMap)
 	{
 		FName DesiredFamily = Row.Family;
 		if (DesiredFamily.IsNone() && Row.Effects.Num() > 0)
 		{
-			DesiredFamily = Row.Effects[0].AttrId;
+			DesiredFamily = DeriveCardFamilyFromE1(Row.Effects[0], CatalogMap);
 		}
 		if (Card->CardFamily != DesiredFamily)
 		{
@@ -1002,7 +1019,7 @@ FFPSRCardImportResult FPSRCardCsvImport::ImportAll(bool bSaveAssets)
 			Card->PostEditChangeProperty(Evt); // re-derives OfferRarities (RefreshOfferRarities)
 		}
 
-		if (ApplyCardFamily(Card, Row))
+		if (ApplyCardFamily(Card, Row, CatalogMap))
 		{
 			bCardChanged = true;
 		}

@@ -540,7 +540,12 @@ bool FPSRCardCsvExport::ExportAll(const FString& OutCardsCsvPath, const FString&
 			OutErrors.Add(FString::Printf(TEXT("Export: card '%s' has %d effects — the CSV schema supports at most 3 (E1..E3, §2-3-10)."), *Card->GetName(), Card->Effects.Num()));
 		}
 
+		// E1's resolved shape drives the family-blank normalization below — must mirror the importer's
+		// DeriveCardFamilyFromE1 (CARDDRAW v4, Docs/Specs/CARDDRAW_FamilyRarityExclusion.md §5) exactly, or a
+		// round-trip would forge a spurious explicit Family and break re-import idempotency.
 		FString FirstAttrIdForFamilyDerivation;
+		FName FirstEffectTypeForFamilyDerivation;
+		bool bFirstThisWeaponOnly = true;
 		for (int32 EffectIndex = 0; EffectIndex < FMath::Min(Card->Effects.Num(), 3); ++EffectIndex)
 		{
 			const UFPSRCardEffect* Effect = Card->Effects[EffectIndex];
@@ -556,6 +561,8 @@ bool FPSRCardCsvExport::ExportAll(const FString& OutCardsCsvPath, const FString&
 			if (EffectIndex == 0)
 			{
 				FirstAttrIdForFamilyDerivation = AttrId.ToString();
+				FirstEffectTypeForFamilyDerivation = Resolved.EffectType;
+				bFirstThisWeaponOnly = Resolved.DefaultThisWeaponOnly.Equals(TEXT("true"), ESearchCase::IgnoreCase);
 			}
 
 			FOutputCardRow::FEffectCell Cell;
@@ -567,8 +574,13 @@ bool FPSRCardCsvExport::ExportAll(const FString& OutCardsCsvPath, const FString&
 
 		if (!Card->CardFamily.IsNone())
 		{
+			FString DerivedFamily = FirstAttrIdForFamilyDerivation;
+			if (!DerivedFamily.IsEmpty() && FirstEffectTypeForFamilyDerivation == TEXT("WeaponStat"))
+			{
+				DerivedFamily += bFirstThisWeaponOnly ? TEXT(".this") : TEXT(".all");
+			}
 			const FString FamilyName = Card->CardFamily.ToString();
-			Row.Family = (FamilyName == FirstAttrIdForFamilyDerivation) ? FString() : FamilyName;
+			Row.Family = (FamilyName == DerivedFamily) ? FString() : FamilyName;
 		}
 
 		OutputRows.Add(MoveTemp(Row));
