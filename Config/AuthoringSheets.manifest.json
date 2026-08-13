@@ -1,5 +1,10 @@
 [
     {
+        "name":  "CardCatalog",
+        "utcTime":  "2026-08-13T03:38:06.5864576Z",
+        "sha256":  "9888EA5698B09CB1656952850A5B9A4E1B3E45BD2DC6A1E960CA580F06B7F513"
+    },
+    {
         "name":  "ST_CardEffect",
         "utcTime":  "2026-08-12T09:54:54.3136904Z",
         "sha256":  "B002F939C03ECFB311070B860B5B4BFE22FC9039FB0F93BE614AAA35C9AC7485"

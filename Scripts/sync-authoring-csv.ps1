@@ -67,7 +67,12 @@ foreach ($Sheet in $Sheets) {
     $TargetRelative = $Sheet.target
     $TargetPath = Join-Path $RepoRoot $TargetRelative
     $ExpectedHeader = @($Sheet.expectedHeader)
-    $ExportUrl = "https://docs.google.com/spreadsheets/d/$($Sheet.sheetId)/export?format=csv&gid=$($Sheet.gid)"
+    # gid 공란/누락 = 첫 번째(유일) 탭 export. "파일>가져오기>현재 시트 교체"가 탭을 갈아끼우며 gid를 바꾸는
+    # 갓차가 있어(C3 실측 2026-08-13, 구 gid로는 HTTP 400) 우리 시트는 스프레드시트당 탭 1개 원칙 + gid 생략이 기본.
+    $ExportUrl = "https://docs.google.com/spreadsheets/d/$($Sheet.sheetId)/export?format=csv"
+    if ($Sheet.PSObject.Properties['gid'] -and $Sheet.gid) {
+        $ExportUrl += "&gid=$($Sheet.gid)"
+    }
 
     Write-Host "[$Name] GET $ExportUrl"
 
