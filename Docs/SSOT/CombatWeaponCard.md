@@ -37,7 +37,8 @@
 - **구 `ECardScope` 매핑(무회귀)**: `Character`→군=Character·`CharacterGE` / `AllWeapons`→**군=Character·`WeaponStat(false)`** / `ThisWeapon`→군=Weapon·`WeaponStat(true)` 또는 `WeaponBehavior`.
 - **같은 주제 양군 공존**(사양7): 연사 Up = 캐릭터 카드(전체무기 소폭) ‖ 무기 카드(해당무기 크게) — "넓고 얕게 vs 좁고 깊게" 빌드 선택.
 - **family-key 교정(무회귀 위험, Codex 게이트)**: `GetCardFamilyKey`의 `AppliedEffect` GE클래스 폴백은 멀티효과에서 카드레벨 Scope/AppliedEffect 소멸로 붕괴 → **멀티효과 카드 `CardFamily` 필수**(`IsDataValid` 에러) + 폴백 삭제. 같은 family = 한 추첨 1장(상호배타) 유지.
-- **CardFamily v3 (CSV 파이프라인, 2026-08-12 사용자 피드백 반영)**: ① 타입 = `FGameplayTag` → **`FName` 전환**(자동 파생 값과 태그 ini 정적 등록의 마찰 제거 — 소비처는 `GetCardFamilyKey()`가 FName화해 쓰는 것뿐, 세이브/네트워크 미탑재라 파급=에디터/검증 층). ② **저작 기본 = 자동 파생**: Cards.csv `Family` 컬럼 공란이면 임포터가 `E1_Attr`(첫 효과의 속성 ID)에서 파생해 DA에 기록 — "같은 속성을 만지는 카드 = 한 제시에 1장"이 기본 의미론. 명시 `Family` 값은 덮어쓰기(묶음 확장/옵트아웃 겸용). 런타임 추첨 코드는 저장된 값만 읽으므로 무변경. `Card.Family.*` 게임플레이태그(DefaultGameplayTags.ini)는 전환 후 제거.
+- **CardFamily v3 (CSV 파이프라인, 2026-08-12 사용자 피드백 반영)**: ① 타입 = `FGameplayTag` → **`FName` 전환**(자동 파생 값과 태그 ini 정적 등록의 마찰 제거 — 소비처는 `GetCardFamilyKey()`가 FName화해 쓰는 것뿐, 세이브/네트워크 미탑재라 파급=에디터/검증 층). ② **저작 기본 = 자동 파생**: Cards.csv `Family` 컬럼 공란이면 임포터가 파생해 DA에 기록. 명시 `Family` 값은 덮어쓰기(묶음 확장/옵트아웃 겸용). `Card.Family.*` 게임플레이태그(DefaultGameplayTags.ini)는 전환 후 제거.
+- **배제 규칙 v4 (2026-08-13 사용자 확정 — v3의 "같은 속성=한 제시 1장" 대체)**: **배제 키 = (family, 굴린 레어도) 쌍.** 같은 family라도 레어도가 다르면 한 제시에 공존 가능(같은 카드가 레어도만 달리해 2장 등장 가능 — 종전 동일 카드 포인터 차단은 이 규칙이 대체·폐지). **family 자동 파생에 스코프 구분 포함**: WeaponStat 카드 = `<E1_Attr>.<all|this>`(전체무기와 개별무기는 서로 다른 카드 — 동시 제시 허용), 그 외 = `<E1_Attr>`. 판정표: All레어+All레전더리 ✅ / All레어+All레어 ❌ / All레어+This레어 ✅.
 
 #### 2-3-3. 추첨·적용 (서버권위)
 - **레벨업 프리즈(§2-2)**: 캐릭터군 + 보유 무기군 풀 전체에서 **3장 랜덤**, **리롤 3회**(`RunRerollCharges`, 서버 차감) 또는 선택, **런 종료까지 영구**. 무기 stat 카드는 무기 보유 시 동적 합류(Gunfire Reborn식). 등급 4단계(Common/Rare/Epic/Legendary), **Luck**이 상위등급 가중치(※ RarityBonus는 Luck 통합·폐지 2026-06-02).
