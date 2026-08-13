@@ -1,51 +1,53 @@
 Key,SourceString,en,ja
 Debug.LocSmoke,"로컬라이제이션 시드","Localization seed","ローカライズシード"
-DA_Card_Character_HealthRegen.DisplayName,[KO-TODO] Health Regen,Health Regen,
-DA_Card_Character_Lifesteal.DisplayName,[KO-TODO] Lifesteal,Lifesteal,
-DA_Card_CritChance.DisplayName,[KO-TODO] Critical Chance,Critical Chance,
-DA_Card_CritChance.Description,[KO-TODO] Critical Chance Up,Critical Chance Up,
-DA_Card_CritMult.DisplayName,[KO-TODO] Critical Damage,Critical Damage,
-DA_Card_CritMult.Description,[KO-TODO] Critical Damage Up,Critical Damage Up,
-DA_Card_Damage.DisplayName,[KO-TODO] Damage,Damage,
-DA_Card_Damage.Description,[KO-TODO] Damage Up ,Damage Up ,
-DA_Card_FireRate_AllWeapon.DisplayName,[KO-TODO] FireRate,FireRate,
-DA_Card_FireRate_AllWeapon.Description,[KO-TODO] FireRate ,FireRate ,
-DA_Card_FireRate_ThisWeapon.DisplayName,[KO-TODO] FireRate,FireRate,
-DA_Card_FireRate_ThisWeapon.Description,[KO-TODO] This FireRate ,This FireRate ,
-DA_Card_Luck.DisplayName,[KO-TODO] Lucky,Lucky,
-DA_Card_Luck.Description,[KO-TODO] Lucky Up,Lucky Up,
-DA_Card_MagSize_AllWeapon.DisplayName,[KO-TODO] MagSize,MagSize,
-DA_Card_MagSize_AllWeapon.Description,[KO-TODO] Mag Size Up,Mag Size Up,
-DA_Card_MagSize_ThisWeapon.DisplayName,[KO-TODO] MagSize,MagSize,
-DA_Card_MagSize_ThisWeapon.Description,[KO-TODO] This Weapon Mag Size Up,This Weapon Mag Size Up,
-DA_Card_MaxHealth.DisplayName,[KO-TODO] Max Health,Max Health,
-DA_Card_MaxHealth.Description,[KO-TODO] Max Health Up,Max Health Up,
-DA_Card_PickupRadius.DisplayName,[KO-TODO] PickupRadius,PickupRadius,
-DA_Card_PickupRadius.Description,[KO-TODO] PickupRadius Up,PickupRadius Up,
-DA_Card_RecoilVertical_AllWeapon.DisplayName,[KO-TODO] RecoilVertical,RecoilVertical,
-DA_Card_RecoilVertical_AllWeapon.Description,[KO-TODO] RecoilVertical Down,RecoilVertical Down,
-DA_Card_RecoilVertical_ThisWeapon.DisplayName,[KO-TODO] RecoilVertical,RecoilVertical,
-DA_Card_RecoilVertical_ThisWeapon.Description,[KO-TODO] This Weapon RecoilVertical Down,This Weapon RecoilVertical Down,
-DA_Card_XPGain.DisplayName,[KO-TODO] Exp Up,Exp Up,
-DA_Card_XPGain.Description,[KO-TODO] Exp Up,Exp Up,
-DA_CardModifiers_AmmoOnMiss.DisplayName,[KO-TODO] Ammo on Miss,Ammo on Miss,
-DA_CardModifiers_BounsDamage.DisplayName,[KO-TODO] BounsShot,BounsShot,
-DA_CardModifiers_BounsDamage.Description,[KO-TODO] Additional damage will be done when shooting,Additional damage will be done when shooting,
-DA_CardModifiers_BurstFire.DisplayName,[KO-TODO] Burst Fire,Burst Fire,
-DA_CardModifiers_BurstFire.Description,[KO-TODO] Fire a 3-round burst per trigger pull.,Fire a 3-round burst per trigger pull.,
-DA_CardModifiers_SniperScope.DisplayName,저격 스코프,,
-DA_CardModifiers_SniperScope.Description,조준경을 저격 스코프로 진화 — 강한 배율 + 풀스크린 오버레이.,,
-DA_CardModifiers_ExplosiveRounds.DisplayName,[KO-TODO] ExplosiveRounds,ExplosiveRounds,
-DA_CardModifiers_ExplosiveRounds.Description,[KO-TODO] Weapon Bullet is Explosive,Weapon Bullet is Explosive,
-DA_CardModifiers_MultiShot.DisplayName,[KO-TODO] Multi Tap,Multi Tap,
-DA_CardModifiers_MultiShot.Description,[KO-TODO] You'll get one more bullet when you shoot,You'll get one more bullet when you shoot,
-DA_CardModifiers_NoSelfDamage.DisplayName,[KO-TODO] NoSelfDamage,NoSelfDamage,
-DA_CardModifiers_NoSelfDamage.Description,[KO-TODO] AOE Damage is not self,AOE Damage is not self,
-DA_CardModifiers_ReloadOnKill.DisplayName,[KO-TODO] Reload on Kill,Reload on Kill,
-DA_CardUnlock_Bazooka.DisplayName,[KO-TODO] Bazooka,Bazooka,
-DA_CardUnlock_ChargeLaser.DisplayName,[KO-TODO] ChargeLaser,ChargeLaser,
-DA_CardUnlock_LMG.DisplayName,[KO-TODO] LMG,LMG,
-DA_CardUnlock_Rifle.DisplayName,[KO-TODO] FullAutoRifle,FullAutoRifle,
-DA_CardUnlock_Shotgun.DisplayName,[KO-TODO] Shotgun,Shotgun,
-DA_CardUnlock_SMG.DisplayName,[KO-TODO] SMG,SMG,
-DA_CardUnlock_Sniper.DisplayName,[KO-TODO] Sniper,Sniper,
+DA_Card_Character_HealthRegen.DisplayName,체력 재생,Health Regen,体力再生
+DA_Card_Character_Lifesteal.DisplayName,흡혈,Lifesteal,ライフスティール
+DA_Card_CritChance.DisplayName,치명타 확률,Critical Chance,クリティカル確率
+DA_Card_CritChance.Description,치명타 확률 증가,Critical Chance Up,クリティカル確率アップ
+DA_Card_CritMult.DisplayName,치명타 피해,Critical Damage,クリティカルダメージ
+DA_Card_CritMult.Description,치명타 피해 증가,Critical Damage Up,クリティカルダメージアップ
+DA_Card_Damage.DisplayName,공격력,Damage,攻撃力
+DA_Card_Damage.Description,공격력 증가,Damage Up,攻撃力アップ
+DA_Card_FireRate_AllWeapon.DisplayName,연사 속도,Fire Rate,発射速度
+DA_Card_FireRate_AllWeapon.Description,모든 무기의 연사 속도 증가,Fire rate up for all weapons,全武器の発射速度アップ
+DA_Card_FireRate_ThisWeapon.DisplayName,연사 속도,Fire Rate,発射速度
+DA_Card_FireRate_ThisWeapon.Description,이 무기의 연사 속도 증가,Fire rate up for this weapon,この武器の発射速度アップ
+DA_Card_Luck.DisplayName,행운,Luck,幸運
+DA_Card_Luck.Description,행운 증가,Luck Up,幸運アップ
+DA_Card_MagSize_AllWeapon.DisplayName,탄창 용량,Magazine Size,マガジン容量
+DA_Card_MagSize_AllWeapon.Description,모든 무기의 탄창 용량 증가,Magazine size up for all weapons,全武器のマガジン容量アップ
+DA_Card_MagSize_ThisWeapon.DisplayName,탄창 용량,Magazine Size,マガジン容量
+DA_Card_MagSize_ThisWeapon.Description,이 무기의 탄창 용량 증가,Magazine size up for this weapon,この武器のマガジン容量アップ
+DA_Card_MaxHealth.DisplayName,최대 체력,Max Health,最大体力
+DA_Card_MaxHealth.Description,최대 체력 증가,Max Health Up,最大体力アップ
+DA_Card_PickupRadius.DisplayName,획득 반경,Pickup Radius,回収範囲
+DA_Card_PickupRadius.Description,획득 반경 증가,Pickup Radius Up,回収範囲アップ
+DA_Card_RecoilVertical_AllWeapon.DisplayName,수직 반동,Vertical Recoil,垂直反動
+DA_Card_RecoilVertical_AllWeapon.Description,모든 무기의 수직 반동 감소,Vertical recoil down for all weapons,全武器の垂直反動ダウン
+DA_Card_RecoilVertical_ThisWeapon.DisplayName,수직 반동,Vertical Recoil,垂直反動
+DA_Card_RecoilVertical_ThisWeapon.Description,이 무기의 수직 반동 감소,Vertical recoil down for this weapon,この武器の垂直反動ダウン
+DA_Card_XPGain.DisplayName,경험치 획득,XP Gain,経験値獲得
+DA_Card_XPGain.Description,경험치 획득량 증가,XP Gain Up,経験値獲得量アップ
+DA_CardModifiers_AmmoOnMiss.DisplayName,빗나감 보충,Ammo on Miss,ミス時弾薬回復
+DA_CardModifiers_AmmoOnMiss.Description,빗나간 사격의 탄약을 돌려받는다,Missed shots refund ammo,外した射撃の弾薬が戻ってくる
+DA_CardModifiers_BounsDamage.DisplayName,보너스 피해,Bonus Damage,ボーナスダメージ
+DA_CardModifiers_BounsDamage.Description,사격 시 추가 피해를 입힌다,Shots deal additional damage,射撃時に追加ダメージを与える
+DA_CardModifiers_BurstFire.DisplayName,점사 사격,Burst Fire,バースト射撃
+DA_CardModifiers_BurstFire.Description,방아쇠 1회당 3점사로 발사한다,Fire a 3-round burst per trigger pull,1回の引き金で3点バースト射撃
+DA_CardModifiers_SniperScope.DisplayName,저격 스코프,Sniper Scope,スナイパースコープ
+DA_CardModifiers_SniperScope.Description,조준경을 저격 스코프로 진화 — 강한 배율 + 풀스크린 오버레이,Evolves the sight into a sniper scope — high zoom with a full-screen overlay,照準器をスナイパースコープに進化 — 高倍率＋フルスクリーンオーバーレイ
+DA_CardModifiers_ExplosiveRounds.DisplayName,폭발탄,Explosive Rounds,爆発弾
+DA_CardModifiers_ExplosiveRounds.Description,탄환이 착탄 시 폭발한다,Bullets explode on impact,弾丸が着弾時に爆発する
+DA_CardModifiers_MultiShot.DisplayName,멀티 샷,Multi Shot,マルチショット
+DA_CardModifiers_MultiShot.Description,사격 시 탄환이 1발 추가된다,Fire one extra bullet per shot,射撃時に弾丸が1発追加される
+DA_CardModifiers_NoSelfDamage.DisplayName,자가 피해 방지,No Self Damage,自爆ダメージ無効
+DA_CardModifiers_NoSelfDamage.Description,폭발 피해가 자신에게 적용되지 않는다,Explosion damage no longer hurts you,爆発ダメージが自分に適用されない
+DA_CardModifiers_ReloadOnKill.DisplayName,처치 시 재장전,Reload on Kill,キル時リロード
+DA_CardModifiers_ReloadOnKill.Description,적 처치 시 즉시 재장전된다,Kills instantly reload this weapon,敵を倒すと即座にリロードされる
+DA_CardUnlock_Bazooka.DisplayName,바주카,Bazooka,バズーカ
+DA_CardUnlock_ChargeLaser.DisplayName,차지 레이저,Charge Laser,チャージレーザー
+DA_CardUnlock_LMG.DisplayName,LMG,LMG,LMG
+DA_CardUnlock_Rifle.DisplayName,라이플,Rifle,ライフル
+DA_CardUnlock_Shotgun.DisplayName,샷건,Shotgun,ショットガン
+DA_CardUnlock_SMG.DisplayName,SMG,SMG,SMG
+DA_CardUnlock_Sniper.DisplayName,저격총,Sniper,スナイパー
