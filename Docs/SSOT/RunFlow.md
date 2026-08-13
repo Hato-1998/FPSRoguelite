@@ -79,6 +79,12 @@
 - Run 시작 시 영구 스탯을 GE로 캐릭터 ASC에 적용
 - 통화 1종, Steam 클라우드 세이브 고려
 - **저장 정책(P6)**: SaveData 버전 필드+마이그레이션, 슬롯명 규칙, Steam Cloud 대상, 저장 실패 처리, 해금 데이터 삭제/리네임 fallback, 런중 vs 로비 저장 구분. **`UGameInstanceSubsystem` SaveManager 경유**(UI/Actor가 SaveGame 직접 접근 금지)
+  - 🔁 **구현 상태 실측 2026-08-13 (M0 (d) 갭 정의 — 정본 [`Docs/Review/SaveSystem_EAGap_20260813.md`](../Review/SaveSystem_EAGap_20260813.md))**: 위 6항목 중 **충족 4 / 미충족 2**.
+    · ✅ 버전+마이그레이션(`URogueliteSaveGame::CurrentSaveVersion`/`MigrateIfNeeded()`) · ✅ 슬롯명 규칙(`UFPSRSaveSettings` config 주도, C++ 하드코딩 0) · ✅ 저장 실패 처리(백업 슬롯 3단 폴백 + `bSavePending` 재시도 + 실패 시 last-good 백업 보존) · ✅ 리네임 fallback(`ResolveCardId`, 8홉 체인·사이클 방어)
+    · ❌ **Steam Cloud 대상** — 코드 0(`DefaultEngine.ini` 에 조사·경로는 문서화돼 있으나 결정과 구현이 없다. `SteamDevAppId=480`이라 파트너 사이트 구성 자체가 불가) → **M5**
+    · ❌ **런중 vs 로비 저장 구분** — `EFPSRSaveReason::Lobby` 는 enum만 있고 **호출처 0**. 저장은 `EndRun` 1회뿐이라 호스트 크래시·Alt+F4 = 그 런 전부 소실(`Deinitialize()`도 pending을 flush하지 않는다) → **M5**
+  - ⚠️ **위 3줄(누적 재화·업그레이드 트리·해금 / Run 시작 GE 적용 / 통화 1종)은 전부 미구현(P0-③)** 이다 — 현재 저장 필드는 `SaveVersion` + 중립 `Reserved0` **2개뿐**이다. **EA 최대 갭은 "정책"이 아니라 "저장할 게 아직 없다"** 이고, 스키마가 확정돼야 위 M5 항목들이 정의된다(→ **M3 메타 프로그레션 실물화**).
+  - ⚠️ **`UserIndex=0` 전제 오류** — `UFPSRSaveSettings` 주석이 *"Steam=머신당 단일 유저"* 라 단정하나, 엔진 `SaveGameSystem.h:169-171` 의 `GetSaveGamePath()` 는 **`UserIndex` 를 경로에 넣지 않는다**(`<ProjectSavedDir>/SaveGames/<Slot>.sav` 하나). 공유 PC·Family Sharing·계정 전환 시 세이브가 상호 덮인다. **Steam Cloud를 붙이기 전에 판정할 것**(→ M5).
 
 ### 2-12. 난이도 압박 수단 (이속 불변 유지)
 스폰 밀도↑ / 원거리 적 비율↑ / 특수 적 패턴 / 미션 목표 압박 / 보스 phase pressure.
