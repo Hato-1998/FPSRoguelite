@@ -207,16 +207,21 @@ TArray<FFPSRCardDraw> UFPSRCardSubsystem::DrawCards(AController* ForPlayer, int3
 		{
 			// Self always goes (guarantees the exact picked candidate can't repeat even if FamilyKey is unset).
 			const bool bIsSelf = (k == SelectedIndex);
-			// Unconditional same-card-same-rarity guard (레드팀 P2, 2026-08-13): a family-less card wired into
-			// two owned weapons yields two candidates (GatherCandidatePool makes one offer per owning weapon), and
-			// without this line both could be drawn at the same rarity — single-effect cards are allowed to have
-			// CardFamily=None by IsDataValid, so the family pair-key alone does not subsume the old bSameCard block.
+			// The exclusion key carries the TARGET WEAPON dimension (사용자 확정 2026-08-13): the same shared card
+			// offered for two different owned weapons is two distinct choices ("라이플 연사 vs SMG 연사"), so only
+			// candidates aimed at the SAME weapon collide. TargetWeapon is null for character/all-weapons offers,
+			// where null==null keeps the plain (family, rarity) semantics.
+			const bool bSameWeapon = (Candidates[k].TargetWeapon == Selected.TargetWeapon);
+			// Unconditional same-card guard (레드팀 P2, 2026-08-13): single-effect cards may ship CardFamily=None
+			// (IsDataValid allows it), so the family pair-key alone does not subsume the old bSameCard block.
 			// When the family IS set, this is implied by bSameFamilyAndRarity below.
 			const bool bSameCardSameRarity = (Candidates[k].Card == Selected.Card)
-				&& (Candidates[k].Rarity == SelectedRarity);
+				&& (Candidates[k].Rarity == SelectedRarity)
+				&& bSameWeapon;
 			const bool bSameFamilyAndRarity = (FamilyKey != NAME_None)
 				&& (GetCardFamilyKey(Candidates[k].Card) == FamilyKey)
-				&& (Candidates[k].Rarity == SelectedRarity);
+				&& (Candidates[k].Rarity == SelectedRarity)
+				&& bSameWeapon;
 			if (bIsSelf || bSameCardSameRarity || bSameFamilyAndRarity)
 			{
 				Candidates.RemoveAt(k);
