@@ -9,6 +9,43 @@
 
 ---
 
+## 🧾 M0 기준선 정정 — 비-빌드/에디터 트랙 일괄 (2026-08-13, `docs/m0-baseline-reconcile`)
+> 사용자 지시 = *"M0 작업보드 중 빌드·에디터 관련을 제외한 작업을 전부 처리"*. 보드 M0 활성 14건 중 **5건 착수 / 9건 미착수 유지**(빌드·에디터·사용자 PIE 의존).
+> **닫힌 것 = EC ③·EC ④ + M0 (c) 표기 정정 + M0 (d) 세이브 잔여.** 코드 변경 0(문서·감사·보드만) → 빌드 불요, `git diff` 자기비판 경로(§6-7 3).
+
+### 왜 이 셋이 빌드 없이 닫히는가
+- **EC ③(`/Engine` 참조 감사)** — "쿡에서 탈락하는가"는 **엔진의 제외 조건 + 프로젝트 설정으로 정적 판정이 가능**했다. UE 5.7의 엔진 콘텐츠 쿡 제외는 `/Engine/Editor*`·`/Engine/VREditor` **두 접두사뿐**(`CookSavePackage.cpp:292`)이고, 게이트 `bSkipEditorContent` 가 `BaseGame.ini:113`에서 `false`이며 프로젝트가 오버라이드하지 않는다 → **현재 탈락 0건**. EC ③의 요구는 "감사 결과 문서화 + 쿡 탈락분 M2 등록"이므로 이걸로 충족된다.
+- **EC ④(완료 표기 재대조)** — 전부 문서 수정.
+- **M0 (d) 세이브 잔여** — 이미 "갭 *정의* 만" 으로 축소돼 있었다.
+
+### 산출
+- **정본 2건 신설**: [`Docs/Review/EngineRefCookAudit_20260813.md`](Review/EngineRefCookAudit_20260813.md) · [`Docs/Review/SaveSystem_EAGap_20260813.md`](Review/SaveSystem_EAGap_20260813.md) (둘 다 재현 명령어 수록)
+- **정정 12건**: §7-3 4행 · §7-6 M0 (c)·EC ① 문구 · §8 7행 · 도메인 SSOT 5파일
+
+### 🔎 재대조가 잡은 것 (실물 근거)
+1. **§7-3 P2 "Significance"** — `USignificanceManager` 는 **미사용**(플러그인만 enable, `Source/` 참조 0). `Enemy.md`·`Architecture.md` 는 2026-08-11에 이미 정정됐는데 **이 표만 남아 있었다** = EC ④가 잡아야 할 정확히 그 드리프트.
+2. **§7-3 P3 "정비시간 RunPhase"** — 그런 Phase가 없다. `ERunPhase` = `Combat`·`Boss` **2개뿐**. P4-A가 전역 프리즈로 흡수·폐지(2026-06-04)했는데 P3 행에 남았다.
+3. **§7-3 P4-D "핑"** — `Source/` 에 `Ping` 참조 **0**. `PlayerFeel.md §2-14` 가 이미 *"핑/Gibs는 후속"* 이라 반박하고 있었다.
+4. **§7-3 P8 "SMG 제거"** — 반대다. **SMG는 추가**됐고 제거된 것은 **점사총**이다(`3adc945` 커밋 원문 · `DA_Weapon_SMG` 실존).
+5. **§7-6 M0 (c) "로컬라이제이션 0 / `Config/Localization` 부재"** — **사실과 반대.** 파이프라인이 이미 서 있고 Phase A 이관도 끝났다. 그대로 두면 **Exit 판정이 (c)를 미착수로 오판한다.**
+6. **EC ① 문구 "인스턴싱/VAT가 적용된 상태"** — ADR 0007이 인스턴싱을 **기각**했으므로 문자 그대로는 **영원히 닫히지 않는 EC**였다 → "확정된 렌더 경로(CPD)"로 교정.
+7. **§8 9행 중 7행이 스테일** — 해소 3(`FPSR.SpawnEnemies`·Input Warning·`LogUIActionRouter`) · 내용 스테일 4(적 메시는 큐브가 아니라 VAT BroBot이고 전환계획이 기각된 방안 / `ConstructorHelpers` 0건 / Infima 없음·Blu 3P 적용 완료 / 현행 맵 칸이 아직 `Map_CyberCity`) · 절반 해소 1.
+8. 🆕 **`/Engine` 감사 신규 발견** — `BP_MissionPointSet` 의 Billboard `Sprite` → `/Engine/EditorResources/Spawn_Point`. `UBillboardComponent::Sprite` 는 `WITH_EDITORONLY_DATA` **밖**의 순수 런타임 프로퍼티이고(`BillboardComponent.h:23-24`) 이 BP는 `bIsEditorOnly` 미설정. **대조군 = 프로젝트 자체 `FPSRFlowFieldBoundsVolume.cpp:28` 은 제대로 설정한다.** → M2 등록.
+9. 🆕 **세이브 `UserIndex=0` 전제 오류** — 주석이 *"Steam=머신당 단일 유저"* 라 단정하나, 엔진 `SaveGameSystem.h:169-171` 의 `GetSaveGamePath()` 는 **`UserIndex` 를 경로에 넣지 않는다**. 공유 PC·계정 전환 시 세이브가 상호 덮인다 → **Cloud를 붙이기 전에 판정할 것**.
+10. **Phase A "전수 이관 완료"가 잔여를 과소 기록** — 실측 16건 중 `WBP_Lobby` 10 + C++ 5가 누락돼 있었다(아래 Phase A 항목의 정정 블록).
+
+### 🪤 함정
+- **`Content/` 감사는 LFS 실체 확인이 선행 조건이다.** 포인터만 받은 클론에서는 grep이 **조용히 0건**을 내 "깨끗하다"는 거짓 결론이 나온다. `git lfs ls-files | awk '$2=="-"'` 가 0인지 먼저 본다(이번엔 4,314/4,314 실체).
+- **`strings` 금지, `grep -a -o` 사용** — 이름 테이블을 놓쳐 오판한다(기록된 실사고).
+- **`grep -P` 는 이 환경에서 에러 종료**(`-P supports only unibyte and UTF-8 locales`). `2>/dev/null` 과 함께 쓰면 **깨끗한 거짓 0건**이 나온다.
+- **`DirectoriesToNeverCook` 는 존재하지 않는 키다**(엔진·프로젝트 전체 0건). 이걸로 쿡 제외를 설명하면 틀린다.
+- **이름에 속지 말 것** — `EngineDebugMaterials`·`MapTemplates`·`OpenWorldTemplate` 은 어떤 제외 규칙에도 안 걸린다(정상 쿡 대상).
+- **서브에이전트 결과는 액면 그대로 믿지 않는다** — 감사 에이전트가 §8을 **8행이라 보고했으나 실제로는 9행**이었고(`적 추격 = 단순 스티어링` 누락), 그 행도 해소 대상이었다. 주요 수치·주장은 전부 메인 세션이 재실행해 재현했다.
+
+### 이번 범위에서 제외 (보드 후속 행)
+C++ 5건 LOCTEXT 정리(컴파일 필요) · 코드 주석 2줄의 `Map_CyberCity` 인용(헤더 변경 = 대규모 재컴파일) · WBP 인라인 Text 11 + BP 그래프 핀 + 고아 WBP 2(위젯 에디터) · `localization-gather.ps1` 재실행(커맨드렛).
+**M0 잔여 EC = ①(성능 실측 — VAT 체인 대기) · ②(UI 문자열 16건 + 판정 경계 1건 결정대기).**
+
 ## 🤖 VAT-1 완료 — 스웜 렌더 경로 대조 실험 → CPD(경로 B) 채택 (2026-08-13, `phase/vat-renderpath-spike`)
 > M0 **(a″) 분할 조각 1/4 완료** + 사실상 조각 2의 구현 본체까지 이 스파이크 안에서 끝남(VAT-2는 "정식화·잔여 검증"으로 스코프 교체, 사용자 승인).
 > 정본: 결정 = `Docs/Architecture/0007-enemy-swarm-render-path-cpd.md` · 실측 = `Performance.md §5` · 컨설트 = `Docs/Review/20260812-plan-vat1-swarm-render-path.md`(Codex 4R, 기각 0).
@@ -33,6 +70,24 @@
 
 ### 남은 것 (후속 행 등재)
 BP 그래프 핀 리터럴 3곳 / ST_UI·ST_CardEffect 시트 시딩(사용자) + Cards 시트 bounsshot 오타 / LoadoutEntry 배선 확인 / 고아 WBP 2개 정리.
+
+> 🔁 **정정 2026-08-13 (M0 EC ④ 재대조, `docs/m0-baseline-reconcile`) — 위 "남은 것"이 잔여를 과소 기록했다.**
+> 제목이 "**전수** 이관 완료"이고 보드 행이 완료 마킹된 상태라, 이 갭을 그대로 두면 **M0 EC ② 판정이 위양성으로 통과한다.** 실측 잔여는 **16건**이다.
+>
+> **① 누락돼 있던 것 — `WBP_Lobby` 10건.** 위 기록은 "LoadoutEntry 배선 확인" 1건만 적었으나 실제로는 **11건**이다.
+> 판정 방법(양방향 증거): `ST_UI.csv` 의 키 24개를 하나씩 `Content/**/*.uasset` 과 `Source/` 양쪽에서 역추적하면, **양쪽 모두 참조 0인 키가 정확히 11개** 나온다 —
+> `Widget.Lobby.WeaponSlot0`~`7`(8) · `Widget.Lobby.InviteButton` · `Widget.Lobby.JoinButton` · `Widget.LoadoutEntry.NameLabel`.
+> 나머지 13개는 전부 WBP 바이너리 또는 C++ 에서 참조된다. **"시트에 행은 심었는데 위젯 바인딩을 안 했다"** 가 확정된다.
+> ℹ️ 단 `WBP_Lobby` 무기명 8슬롯은 `Docs/Review/WBP_TextInventory_20260813.md` §3-2가 *"무기명을 고유명사로 유지할지 기획 확인 필요"* 라 적어 **의도적 보류일 가능성**이 있다 — 그렇다면 보류 사유가 여기 기록되지 않은 것이 문제다. → 보드 `결정대기`.
+>
+> **② 누락돼 있던 것 — C++ 5건.** gather manifest 가 수집까지 하고 있는데(= 프로젝트 스스로 검사 대상이라 선언한 것) 기록되지 않았다.
+> · `FPSRBossDefinitionDataAsset.cpp` 의 `GetDescription()` **4건**(`DefaultBoss`/`AtSpawnPoint`/`AtFallback`/`BossDescFmt`) — **실질은 가드 누락**이다. 헤더 주석이 *"designer tooling / catalog"* 라 선언해 놓고 `#if WITH_EDITOR` **밖**에 있어 쿠킹 빌드에 실린다. 호출자는 C++·BP 통틀어 0(사실상 dead code)이고, 같은 파일의 `IsDataValid` 는 제대로 가드돼 있다 → **가드 라인을 위로 올리면 4건이 한 번에 소거된다.**
+> · `FPSRCardEffect.cpp:356` `LOCTEXT("UnknownWeapon", "Weapon")` **1건** — 이건 **진짜 UI 노출**이다(`UCardEffect_GrantWeapon::GetDescription` → 카드 선택 위젯). 같은 줄의 `Fmt.UnlockWeapon` 은 이미 LOCTABLE인데 인자만 리터럴로 남았다.
+>
+> **③ 검사 대상의 정의는 이미 기계화돼 있었다** — `Config/Localization/Game_Gather.ini` 가 `SearchDirectoryPaths=Source/FPSRoguelite/`(에디터 모듈 배제) + `ShouldGatherFromEditorOnlyData=false`(`#if WITH_EDITOR` 스킵)라, **`Game.manifest` 수집분 = EC ② 검사 대상**이다. 에디터 모듈 `FPSRogueliteEditor` 의 LOCTEXT 383건과 런타임 `#if WITH_EDITOR` 내부 ~108건은 **대상이 아니다**(수집 제외가 의도).
+>
+> **잔여 16건 = C++ 5(빌드 동반) + WBP 인라인 Text 11(위젯 에디터) + BP 그래프 핀 ~4곳 + 고아 WBP 2.** 전부 빌드 또는 에디터를 요구하므로 이번 문서 트랙에서는 처리하지 않고 보드 후속 행으로 등재했다.
+> 🪤 **재현 시 주의**: 이 환경의 `grep -P` 는 `-P supports only unibyte and UTF-8 locales` 로 **에러 종료**한다(`LC_ALL=C` 로도 해소 안 됨). `2>/dev/null` 을 걸어 두면 "한글 0건"이라는 **깨끗한 거짓 결과**가 나온다 — `.uasset` 내 CJK 탐지에는 `grep -P` 를 쓰지 말 것.
 
 ## 🎲 CARDDRAW v4 — 추첨 배제 규칙 (family+레어도 쌍) (2026-08-13, `phase/card-draw-exclusion-v4` → 머지 `3d5418cc`)
 > 사용자 확정 판정표: All레어+All레전더리 ✅ / All레어+All레어 ❌ / All레어+This레어 ✅. 배제 키 = (family, 굴린 레어도) 쌍, WeaponStat 자동 family에 `.all`/`.this` 스코프 접미(전체/개별 = 다른 카드), 같은 카드가 레어도만 달리해 2장 제시 가능(동일 카드 포인터 차단 폐지 — 단 같은 카드+같은 레어도는 family 유무 무관 무조건 배제 = 레드팀 P2 가드). family 키는 대상 무기 미구분(SSOT 명기, 사용자 확인 대기 항목). 명세+원장 = `Docs/Specs/CARDDRAW_FamilyRarityExclusion.md`. 6장(FireRate·MagSize·RecoilVertical All/This) family 재파생, 멱등 재확인. 후속: PoolValidator ThinOffer 휴리스틱 v3 잔존(과잉 경고 가능).
