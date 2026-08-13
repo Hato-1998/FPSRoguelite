@@ -391,6 +391,29 @@ void AFPSREnemyBase::PostNetReceiveLocationAndRotation()
 	SetAnimState(bMoving ? EFPSRAnimState::Walk : EFPSRAnimState::Idle);
 }
 
+void AFPSREnemyBase::SetActorHiddenInGame(bool bNewHidden)
+{
+	Super::SetActorHiddenInGame(bNewHidden);
+
+	// Client-only pool-reuse reset. AActor::bHidden is UPROPERTY(Replicated) with NO ReplicatedUsing/OnRep (Actor.h)
+	// — the engine applies a replicated bHidden change on the receiving end by calling THIS virtual setter instead:
+	// AActor::PreNetReceive() saves the pre-update value, PostNetReceive() exchanges the new value back in and calls
+	// SetActorHiddenInGame(NewValue) only if it differs (ActorReplication.cpp). So this override is the real
+	// client-side "bHidden changed" hook, not an OnRep. Only the true->false (became visible again) edge matters here
+	// — mirror Activate()'s authority-side reset (see Activate, cpp above) so a reused enemy's stale CPD/anim state
+	// (a prior life's Death clip, or a huge dormant-period dt in PostNetReceiveLocationAndRotation's speed calc)
+	// doesn't leak into the new life. Authority doesn't need this: Activate() already resets on that path, and this
+	// setter also fires locally on the server's own SetActorHiddenInGame(false) call inside Activate() (HasAuthority
+	// guards against double-resetting there).
+	if (!bNewHidden && !HasAuthority())
+	{
+		CurrentAnimState = EFPSRAnimState::Idle;
+		CurrentSpeedBucket = -1;
+		LastRecvTime = -1.0f;
+		SetAnimState(EFPSRAnimState::Idle, 1.0f);
+	}
+}
+
 void AFPSREnemyBase::HandleDeathCosmetic()
 {
 	// Client death edge (from the health component's OnRep_bDead). Enter the Death animation state. No-op when dormant.

@@ -27,6 +27,10 @@ class FPSROGUELITE_API UFPSREnemySpawnSubsystem : public UWorldSubsystem, public
 	GENERATED_BODY()
 
 public:
+	/** Hard cap on active enemies (Game.MD §5) — the pool ceiling / endless-fall backstop. Public read-only constant
+	 *  so debug commands (FPSR.SpawnEnemies) can clamp their input against the real cap instead of duplicating it. */
+	static constexpr int32 MaxActiveEnemies = 500;
+
 	virtual bool ShouldCreateSubsystem(UObject* Outer) const override;
 	virtual void OnWorldBeginPlay(UWorld& InWorld) override;
 	virtual void Deinitialize() override;
@@ -300,9 +304,6 @@ private:
 
 	/** Total enemies spawned (hard cap at MaxActiveEnemies). */
 	int32 TotalSpawned = 0;
-
-	/** Hard cap on active enemies (Game.MD §5) — the pool ceiling / endless-fall backstop. */
-	static constexpr int32 MaxActiveEnemies = 500;
 
 	// --- Map-aware allocator (multimap Tier 0, Performance §5 / Codex consult 2026-07-06) ---
 

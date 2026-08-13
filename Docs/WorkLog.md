@@ -9,6 +9,17 @@
 
 ---
 
+## 🤖 VAT-1 완료 — 스웜 렌더 경로 대조 실험 → CPD(경로 B) 채택 (2026-08-13, `phase/vat-renderpath-spike`)
+> M0 **(a″) 분할 조각 1/4 완료** + 사실상 조각 2의 구현 본체까지 이 스파이크 안에서 끝남(VAT-2는 "정식화·잔여 검증"으로 스코프 교체, 사용자 승인).
+> 정본: 결정 = `Docs/Architecture/0007-enemy-swarm-render-path-cpd.md` · 실측 = `Performance.md §5` · 컨설트 = `Docs/Review/20260812-plan-vat1-swarm-render-path.md`(Codex 4R, 기각 0).
+
+- **경위**: 초안은 "ISM 채택"이었으나 컨설트 R2가 전제를 뒤집음("개별 컴포넌트=지배항"은 미측정 주장, 진범 후보=per-actor MID) → A(현행)/B(MID 폐기+CPD)/C(ISM, 조건부) 대조 실험으로 재편 → **B 전 게이트 통과·전 지표 A 우세 → 채택, C 미개봉**.
+- **실측(Development 패키지·고정 시나리오)**: B@300 = 평균 5.48ms(182fps)·P95 7.99ms·스웜 렌더 합 2.05ms(예산 4ms) / A@300 = 6.48ms·2.68ms / B@500 = 7.11ms(141fps)·3.03ms. 사용자 실플레이 2판 육안 = 애니 정상·정상 작동.
+- **스파이크 중 발견(중요)**: ①AnimToTexture에 "AnimationIndex" 파라미터 없음 — 클립=프레임 구간, 종전 MID 드라이버는 이름 불일치로 **무동작**이었다 → CPD 계약 4슬롯(Start/End/PlayRate/Phase)으로 확정 ②A가 애니된 이유 = 머티리얼 AutoPlay 기본값(상태 제어는 B만 가능) ③멜리 BP stencil=1 vs 랭드 0 콘텐츠 드리프트(별도 정리 대상).
+- **낳은 수정**: `fix(hero)` grace 창 연장-만(ratchet) — 프리즈 해제 3s grace가 진행 중인 긴 grace(부활/디버그)를 단축하던 실버그(`3c8fb399`). 디버그 커맨드 `FPSR.Invuln`·`FPSR.SpawnEnemies [count] [radius]` 신설.
+- **측정 인프라(재사용 — (b) 베이스라인이 그대로 씀)**: `Scripts/measure_swarm_render.ps1` + `Scripts/analyze_swarm_csv.py`. 함정 원장: 부트 캡처(-csvCaptureFrames)=RHI 초기화 전 어설션 즉사 / 아카이브 최상위 exe=부트스트랩(자식 게임 잔존→인스턴스 4개 누적 오염) / 근접 링 스폰=적이 카메라 근평면 뒤로 뭉쳐 "적 0마리 장면" 측정(CustomDepth 0.01ms가 단서) / UE CSV=끝 헤더+컬럼 증가+EVENTS 문자열 / **런처 엔진은 Test 구성 미지원** → Development로 측정(보수적).
+- **커밋**: `08ebe184`(예산 확정) `5b40c2c7`(컨설트) `280c04f3`(CPD 백엔드) `1e1625b1`(CPD 콘텐츠) `426deefa`·`3c8fb399`·`766d3ecb`·`bd78e0ef`(측정 도구·grace).
+
 ## 🎲 CARDDRAW v4 — 추첨 배제 규칙 (family+레어도 쌍) (2026-08-13, `phase/card-draw-exclusion-v4` → 머지 `3d5418cc`)
 > 사용자 확정 판정표: All레어+All레전더리 ✅ / All레어+All레어 ❌ / All레어+This레어 ✅. 배제 키 = (family, 굴린 레어도) 쌍, WeaponStat 자동 family에 `.all`/`.this` 스코프 접미(전체/개별 = 다른 카드), 같은 카드가 레어도만 달리해 2장 제시 가능(동일 카드 포인터 차단 폐지 — 단 같은 카드+같은 레어도는 family 유무 무관 무조건 배제 = 레드팀 P2 가드). family 키는 대상 무기 미구분(SSOT 명기, 사용자 확인 대기 항목). 명세+원장 = `Docs/Specs/CARDDRAW_FamilyRarityExclusion.md`. 6장(FireRate·MagSize·RecoilVertical All/This) family 재파생, 멱등 재확인. 후속: PoolValidator ThinOffer 휴리스틱 v3 잔존(과잉 경고 가능).
 

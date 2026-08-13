@@ -3,19 +3,8 @@
 #include "Enemy/FPSREnemyAnimProfile.h"
 
 #include "Components/MeshComponent.h"
-#include "Materials/MaterialInstanceDynamic.h"
 
-namespace
-{
-	// Material scalar parameter names (MID path). ⚠️ PLACEHOLDER — confirm against M_BroBot_VAT / MF_BoneAnimation
-	// in-editor (Stage 2). SetScalarParameterValue on an absent name is silently ignored, so a wrong name here is a
-	// safe no-op (the driver still builds and runs; the animation just won't visibly change until the names match).
-	static const FName NAME_AnimationIndex(TEXT("AnimationIndex"));
-	static const FName NAME_PlayRate(TEXT("PlayRate"));
-	static const FName NAME_Phase(TEXT("Phase"));
-}
-
-void UFPSREnemyAnimProfile_VAT::ApplyAnimState(UMeshComponent* Mesh, EFPSRAnimState State, float PlayRate,
+void UFPSREnemyAnimProfile_VAT_CPD::ApplyAnimState(UMeshComponent* Mesh, EFPSRAnimState State, float PlayRate,
 	float Phase, TObjectPtr<UMaterialInstanceDynamic>& CachedMID) const
 {
 	if (!Mesh)
@@ -23,33 +12,25 @@ void UFPSREnemyAnimProfile_VAT::ApplyAnimState(UMeshComponent* Mesh, EFPSRAnimSt
 		return;
 	}
 
-	// Lazily create the per-actor MID on first use and reuse it thereafter (the caller only reaches here on a state
-	// transition, and only where there is local rendering — see AFPSREnemyBase::SetAnimState's dedicated-server gate).
-	// NOTE (Stage 2): 300 unique MIDs break draw-call batching; the CPD path (re-authored master material reading
-	// Custom Primitive Data) is the cheaper target. This MID bridge keeps the driver working against today's material.
-	UMaterialInstanceDynamic* MID = CachedMID;
-	if (!MID)
-	{
-		MID = Mesh->CreateAndSetMaterialInstanceDynamic(0);
-		CachedMID = MID;
-	}
-	if (!MID)
-	{
-		return;
-	}
-
-	// Clip index comes from the state; PlayRate is supplied by the caller (walk-speed scaled, or 0 to FREEZE the clip
-	// for distance LOD). Clip indices are placeholders until the Stage-3 content bake.
-	float ClipIndex = FPSRVATAnim::ClipIndex_Idle;
+	// No MID here (CachedMID is intentionally left untouched / stays null) — CPD is per-primitive-instance data, not
+	// a material parameter, so instances sharing the base material stay dynamic-instancing merge candidates (the
+	// whole point of this backend, ADR 0007). SetCustomPrimitiveDataFloat write-on-changes (Memcmp-guarded) and
+	// pushes a lightweight FScene::UpdateCustomPrimitiveData, not a full render-state recreate, so it is cheap to
+	// call on every state transition.
+	//
+	// The material has no selectable clip-index param (verified in-editor against M_BroBot_VAT / MF_BoneAnimation's
+	// GetFrameSwitch) — a clip is a [StartFrame, EndFrame] window, authored per state on this profile.
+	const FFPSRVATClipRange* ClipRange = &IdleClip;
 	switch (State)
 	{
-	case EFPSRAnimState::Idle:   ClipIndex = FPSRVATAnim::ClipIndex_Idle;   break;
-	case EFPSRAnimState::Walk:   ClipIndex = FPSRVATAnim::ClipIndex_Walk;   break;
-	case EFPSRAnimState::Attack: ClipIndex = FPSRVATAnim::ClipIndex_Attack; break;
-	case EFPSRAnimState::Death:  ClipIndex = FPSRVATAnim::ClipIndex_Death;  break;
+	case EFPSRAnimState::Idle:   ClipRange = &IdleClip;   break;
+	case EFPSRAnimState::Walk:   ClipRange = &WalkClip;   break;
+	case EFPSRAnimState::Attack: ClipRange = &AttackClip; break;
+	case EFPSRAnimState::Death:  ClipRange = &DeathClip;  break;
 	}
 
-	MID->SetScalarParameterValue(NAME_AnimationIndex, ClipIndex);
-	MID->SetScalarParameterValue(NAME_PlayRate, FMath::Max(0.0f, PlayRate));
-	MID->SetScalarParameterValue(NAME_Phase, Phase);
+	Mesh->SetCustomPrimitiveDataFloat(FPSRVATAnim::CPDSlot_StartFrame, ClipRange->StartFrame);
+	Mesh->SetCustomPrimitiveDataFloat(FPSRVATAnim::CPDSlot_EndFrame, ClipRange->EndFrame);
+	Mesh->SetCustomPrimitiveDataFloat(FPSRVATAnim::CPDSlot_PlayRate, FMath::Max(0.0f, PlayRate));
+	Mesh->SetCustomPrimitiveDataFloat(FPSRVATAnim::CPDSlot_Phase, Phase);
 }

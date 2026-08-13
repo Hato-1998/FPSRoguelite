@@ -31,6 +31,7 @@
 #include "UI/FPSRGameHUDWidget.h"
 #include "UI/FPSRResultWidget.h"
 #include "Hero/FPSRPlayerFeedbackComponent.h"
+#include "Hero/FPSRCharacter.h"
 #include "GameFramework/Pawn.h"
 
 AFPSRPlayerController::AFPSRPlayerController()
@@ -908,6 +909,33 @@ namespace
 			if (AFPSRGameState* GS = World->GetGameState<AFPSRGameState>())
 			{
 				GS->RefreshPauseState();
+			}
+		}));
+
+	FAutoConsoleCommandWithWorldAndArgs GCmd_Invuln(
+		TEXT("FPSR.Invuln"),
+		TEXT("Grant every player a long grace window (invulnerable + enemy pass-through) via BeginGraceWindow (debug, "
+		     "authority/host only). For perf-measurement fixtures where a burst-spawned swarm would otherwise end the "
+		     "run in seconds (VAT-1 render-path A/B). Usage: FPSR.Invuln [seconds=600]"),
+		FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& Args, UWorld* World)
+		{
+			if (!World)
+			{
+				return;
+			}
+			const float Seconds = Args.Num() > 0 ? FCString::Atof(*Args[0]) : 600.0f;
+			for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+			{
+				if (const APlayerController* PC = It->Get())
+				{
+					if (PC->HasAuthority())
+					{
+						if (AFPSRCharacter* Char = Cast<AFPSRCharacter>(PC->GetPawn()))
+						{
+							Char->BeginGraceWindow(Seconds);
+						}
+					}
+				}
 			}
 		}));
 }
