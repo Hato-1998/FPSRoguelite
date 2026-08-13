@@ -22,8 +22,9 @@
 
 namespace
 {
-	/** Family key used to keep same-family cards mutually exclusive in a single draw. v2: the explicit CardFamily tag
-	 *  only (the v1 AppliedEffect-GE-class fallback was removed — with polymorphic multi-effect cards there is no
+	/** Family key of a card for draw exclusion. v4 (§2-3-2): exclusion is per (family, rolled rarity) PAIR — same
+	 *  family at a different rarity co-presents; see DrawCards. The key itself: the authored/derived CardFamily only
+	 *  (the v1 AppliedEffect-GE-class fallback was removed — with polymorphic multi-effect cards there is no
 	 *  single card-level GE to key on, and IsDataValid requires multi-effect cards to set CardFamily). */
 	FName GetCardFamilyKey(const UFPSRCardDataAsset* Card)
 	{
@@ -206,10 +207,17 @@ TArray<FFPSRCardDraw> UFPSRCardSubsystem::DrawCards(AController* ForPlayer, int3
 		{
 			// Self always goes (guarantees the exact picked candidate can't repeat even if FamilyKey is unset).
 			const bool bIsSelf = (k == SelectedIndex);
+			// Unconditional same-card-same-rarity guard (레드팀 P2, 2026-08-13): a family-less card wired into
+			// two owned weapons yields two candidates (GatherCandidatePool makes one offer per owning weapon), and
+			// without this line both could be drawn at the same rarity — single-effect cards are allowed to have
+			// CardFamily=None by IsDataValid, so the family pair-key alone does not subsume the old bSameCard block.
+			// When the family IS set, this is implied by bSameFamilyAndRarity below.
+			const bool bSameCardSameRarity = (Candidates[k].Card == Selected.Card)
+				&& (Candidates[k].Rarity == SelectedRarity);
 			const bool bSameFamilyAndRarity = (FamilyKey != NAME_None)
 				&& (GetCardFamilyKey(Candidates[k].Card) == FamilyKey)
 				&& (Candidates[k].Rarity == SelectedRarity);
-			if (bIsSelf || bSameFamilyAndRarity)
+			if (bIsSelf || bSameCardSameRarity || bSameFamilyAndRarity)
 			{
 				Candidates.RemoveAt(k);
 				CandidateWeights.RemoveAt(k);
