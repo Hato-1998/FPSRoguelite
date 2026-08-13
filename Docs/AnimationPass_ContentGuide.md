@@ -71,12 +71,13 @@
 1. **실제 스칼라 파라미터명** (애니 인덱스 / 프레임 / 재생속도) → `FPSREnemyAnimProfile.cpp`의 `NAME_AnimationIndex`/`NAME_PlayRate`/`NAME_Phase`를 실제 이름으로 교체(현재 플레이스홀더, 틀리면 no-op).
 2. **선택-인덱스 GPU 자가재생 가능 여부**: `AnimationIndex`를 바꾸면 GPU가 해당 클립을 Time으로 자가재생하는가? (안 되면 = per-frame 프레임 구동 필요 → 대안 = MPC 공유 클럭 1회/프레임 전역 기록).
 3. **사망 per-clip loop/hold**(death는 1회 재생 후 마지막 프레임 고정) + **재생속도 0 정지** 지원 여부.
-4. **MID vs CustomPrimitiveData 결정**: per-actor MID 300개는 드로우콜 배칭을 깬다. `M_BroBot_VAT`를 Custom Primitive Data 노드로 재저작하면(슬롯 = `FPSRVATAnim::CPDSlot_*`) 배칭 보존 + 인덱스 기록(더 쌈). 재저작 시 `UFPSREnemyAnimProfile_VAT`를 CPD 경로로 전환.
+4. **MID vs CustomPrimitiveData 결정**: ✅ **해소(VAT-1, ADR 0007)** — CPD 채택·MID 백엔드 삭제. 실물 = `UFPSREnemyAnimProfile_VAT_CPD` + CPD 머티리얼 변형(`M_BroBot_VAT_CPD` 계열, 원본 불변 복제·`bUseCustomPrimitiveData` 플래그 방식 — 별도 CPD 노드는 존재하지 않음).
 
 ### Stage 3 — 콘텐츠 베이크 + 활성화
-1. **VAT 다중 시퀀스 베이크**: `DA_Minion_Melee_VAT`/`DA_Minion_Siege_VAT`의 `AnimSequences[]`에 idle/attack/death 추가(`UAnimToTextureBPLibrary::AnimationToTexture` 재베이크) + `bAutoPlay=false`(C++ 구동 전환) + `SampleRate` 확인.
-2. **`FPSRVATAnimParams.h` 클립 인덱스 매핑**: `ClipIndex_Idle/Walk/Attack/Death`를 실제 `AnimSequences[]` 순서에 맞춤.
-3. **프로파일 할당(활성화 스위치)**: 적 아키타입 BP(`BP_EnemyBase` 등)의 `AnimProfile`에 `UFPSREnemyAnimProfile_VAT` 인스턴스 지정 → 드라이버 활성. **엘리트 Siege=VAT 유지**(스켈 승격 안 함).
+> ⚠️ **정정 2026-08-13 (VAT-1/ADR 0007 반영)**: 렌더 백엔드 = **CPD 채택·MID 백엔드 삭제**, 클립 = 인덱스가 아니라 **[StartFrame, EndFrame] 프레임 구간**. 아래 1·2번의 원문은 이 결정 전 작성이라 낡았다 — 정정본으로 따를 것. 진행 상태 = 보드 VAT-3(적 메시 확정까지 보류, 2026-08-13 사용자 결정 — Attack/Death 클립이 팩에 원천 부재라 클립 소싱 행 별도).
+1. **VAT 다중 시퀀스 베이크**: ~~`DA_Minion_Melee_VAT`/`DA_Minion_Siege_VAT`~~ → 실물은 **`DA_BroBot_VAT`** 하나. `AnimSequences[]`에 idle/attack/death 추가(`UAnimToTextureBPLibrary::AnimationToTexture` 재베이크 — WITH_EDITOR 전용, 재베이크마다 `SM_BroBot_VAT` UV1도 함께 변경됨) + `bAutoPlay=false`(C++ CPD 구동 전환, **현재 true 잔존**) + `SampleRate` 확인 + `UpdateMaterialInstanceFromDataAsset`로 `MI_BroBot_VAT_Enemy_CPD` 갱신.
+2. ~~**`FPSRVATAnimParams.h` 클립 인덱스 매핑**~~ → **클립 구간 전사**: 베이크가 산출한 `DA.Animations[]`의 `{StartFrame, EndFrame}`을 `UFPSREnemyAnimProfile_VAT_CPD`의 `IdleClip/WalkClip/AttackClip/DeathClip`(`FFPSRVATClipRange`)에 기입(ClipIndex 설계는 VAT-1에서 폐기 — 머티리얼에 인덱스 파라미터가 없음).
+3. **프로파일 할당(활성화 스위치)**: 적 아키타입 BP의 `AnimProfile`에 `UFPSREnemyAnimProfile_VAT_CPD` 인스턴스 지정 → 드라이버 활성(**BP_EnemyMeleeBase/RangedBase는 VAT-1에서 할당 완료**). **엘리트 Siege=VAT 유지**(스켈 승격 안 함).
 4. **사망 death-dwell**(후속): 현재 `HandleDeath`→즉시 `ReleaseEnemy`(숨김)라 death 애니 미가시. 서버 death-dwell 타이머로 클립 길이만큼 릴리즈 지연 + 소수 dying 액터 한정 프레임 구동(병목은 정상상태 ×300이지 과도 ×소수 아님).
 5. **공격 애니 지속**(후속): 현재 Attack은 transient(다음 패스 Walk/Idle 복귀). 실제 attack 클립 길이 기반 지속 = Stage 3 튜닝.
 

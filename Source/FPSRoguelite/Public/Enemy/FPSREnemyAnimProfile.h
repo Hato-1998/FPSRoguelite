@@ -7,7 +7,6 @@
 #include "FPSREnemyAnimProfile.generated.h"
 
 class UMeshComponent;
-class UMaterialInstanceDynamic;
 
 /** One baked VAT clip's frame range on the AnimToTexture-style material (CPD path, Stage 2). DATA, not code — a
  *  clip is NOT a selectable index (see FPSRVATAnimParams.h CPDSlot_StartFrame/EndFrame comment); it is a
@@ -19,10 +18,10 @@ struct FFPSRVATClipRange
 {
 	GENERATED_BODY()
 
-	UPROPERTY(EditAnywhere, Category = "FPSR|Enemy|Anim")
+	UPROPERTY(EditAnywhere, Category = "FPSR|Enemy|Anim", meta = (ClampMin = "0.0"))
 	float StartFrame = 0.0f;
 
-	UPROPERTY(EditAnywhere, Category = "FPSR|Enemy|Anim")
+	UPROPERTY(EditAnywhere, Category = "FPSR|Enemy|Anim", meta = (ClampMin = "0.0"))
 	float EndFrame = 0.0f;
 };
 
@@ -43,9 +42,8 @@ public:
 	 *  never per-frame — the GPU keeps advancing the VAT frame from time. PlayRate is the EXPLICIT playback rate to
 	 *  write (the caller computes it): 1.0 for a normal clip, a speed-scaled value for walk, and 0.0 to FREEZE the
 	 *  clip in place (distance LOD — sheds CPU writes AND distant GPU frame advance). Phase (0..1) is a per-actor
-	 *  offset so the swarm doesn't march in lockstep. CachedMID is the caller's lazily created MID slot. */
-	virtual void ApplyAnimState(UMeshComponent* Mesh, EFPSRAnimState State, float PlayRate, float Phase,
-		TObjectPtr<UMaterialInstanceDynamic>& CachedMID) const {}
+	 *  offset so the swarm doesn't march in lockstep. */
+	virtual void ApplyAnimState(UMeshComponent* Mesh, EFPSRAnimState State, float PlayRate, float Phase) const {}
 };
 
 // NOTE: the per-actor MID backend (UFPSREnemyAnimProfile_VAT) was DELETED per ADR 0007 — it was proven inert (its
@@ -56,8 +54,8 @@ public:
 /** VAT render backend using CustomPrimitiveData (CPD) — the adopted swarm render path (ADR 0007). CPD lives on the
  *  PRIMITIVE COMPONENT instance, not on a unique material, so writing the animation scalars there lets every
  *  instance keep sharing the swarm's base material — staying a dynamic-instancing merge candidate, which a per-actor
- *  MID forfeits (measured 84-draw-call delta @300; complete-merge verification deferred to VAT-2 V1). CachedMID is
- *  left untouched (stays null): this backend never creates one. CONTRACT: the assigned material must read Custom
+ *  MID forfeits (measured 84-draw-call delta @300; complete-merge verification deferred to VAT-2 V1). No backend
+ *  creates a MID any more (ADR 0007) — CPD is the only render path. CONTRACT: the assigned material must read Custom
  *  Primitive Data at the same fixed slot indices this writes to — FPSRVATAnim::CPDSlot_StartFrame/EndFrame/PlayRate/
  *  Phase (FPSRVATAnimParams.h) — so the CPD-reauthored material variant (M_BroBot_VAT_CPD) is required; a plain
  *  scalar-param material will not react to this backend. The material has no selectable clip-index param — a clip is
@@ -68,8 +66,7 @@ class FPSROGUELITE_API UFPSREnemyAnimProfile_VAT_CPD : public UFPSREnemyAnimProf
 	GENERATED_BODY()
 
 public:
-	virtual void ApplyAnimState(UMeshComponent* Mesh, EFPSRAnimState State, float PlayRate, float Phase,
-		TObjectPtr<UMaterialInstanceDynamic>& CachedMID) const override;
+	virtual void ApplyAnimState(UMeshComponent* Mesh, EFPSRAnimState State, float PlayRate, float Phase) const override;
 
 	/** Baked frame range for the Idle clip. Defaults to 0..0 (today's bake has only one walk/jog clip) — content
 	 *  fills in the real range once more clips exist. */
