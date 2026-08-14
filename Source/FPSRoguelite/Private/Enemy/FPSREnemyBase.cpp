@@ -97,6 +97,14 @@ void AFPSREnemyBase::BeginPlay()
 	// Per-actor animation phase (0..1) derived from the actor id so pooled enemies don't animate in lockstep (U20).
 	AnimPhase = static_cast<float>(GetUniqueID() % 1000) / 1000.0f;
 
+	// Publish the phase ONCE to the CPD contract slot so procedural materials de-lockstep from a STABLE per-actor
+	// value. (A position-hash phase inside the material rotates the mesh as the actor MOVES — measured regression.)
+	// Written here (BeginPlay runs on every machine with rendering) and never cleared: CPD survives pooling reuse.
+	if (Mesh)
+	{
+		Mesh->SetCustomPrimitiveDataFloat(FPSRVATAnim::CPDSlot_Phase, AnimPhase);
+	}
+
 	// Bind the world-space health bar / floating-damage widget to the health component once (server + clients).
 	// Pooling-safe: the actor + widget persist across dormancy, so this single bind survives every reuse.
 	InitHealthBarWidget();
@@ -610,6 +618,17 @@ void AFPSREnemyBase::ApplyGravity(float ScaledDeltaSeconds)
 	GroundRecheckTimer -= ScaledDeltaSeconds;
 	if (bGrounded && GroundRecheckTimer > 0.0f)
 	{
+		// Hovering archetypes keep gliding toward the cached rest height BETWEEN floor re-checks — glide only on
+		// re-check ticks and the amortization quantizes the motion into visible hops (no scene query here).
+		if (HoverHeight > 0.0f)
+		{
+			const FVector L = GetActorLocation();
+			if (!FMath::IsNearlyEqual(L.Z, HoverRestZ, 0.1f))
+			{
+				SetActorLocation(FVector(L.X, L.Y,
+					FMath::FInterpConstantTo(L.Z, HoverRestZ, ScaledDeltaSeconds, HoverVerticalFollowSpeed)), false);
+			}
+		}
 		return;
 	}
 	GroundRecheckTimer = GroundRecheckInterval;
@@ -659,9 +678,14 @@ void AFPSREnemyBase::ApplyGravity(float ScaledDeltaSeconds)
 		const float SnapDown = bGrounded ? MaxStepDownHeight : GroundSnapTolerance;
 		if (VerticalVelocity <= 0.0f && Diff <= SnapDown && Diff >= -(GroundSnapTolerance + HoverHeight))
 		{
+			HoverRestZ = TargetZ; // refresh the glide target on every floor re-check
 			if (!FMath::IsNearlyZero(Diff))
 			{
-				SetActorLocation(FVector(Loc.X, Loc.Y, TargetZ), false); // small slope/step correction
+				// Floaters glide toward the rest height (stair treads = smooth ramp); walkers snap instantly (no regression).
+				const float NewZ = (HoverHeight > 0.0f)
+					? FMath::FInterpConstantTo(Loc.Z, TargetZ, ScaledDeltaSeconds, HoverVerticalFollowSpeed)
+					: TargetZ;
+				SetActorLocation(FVector(Loc.X, Loc.Y, NewZ), false); // small slope/step correction
 			}
 			VerticalVelocity = 0.0f;
 			bGrounded = true;
@@ -681,6 +705,7 @@ void AFPSREnemyBase::ApplyGravity(float ScaledDeltaSeconds)
 				VerticalVelocity = 0.0f;
 				bGrounded = true;
 				GroundNormal = Hit.ImpactNormal; // just landed -> remember the slope
+				HoverRestZ = TargetZ;            // landing seeds the floater's glide target
 			}
 			else
 			{

@@ -325,6 +325,17 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Enemy|Movement", meta = (ClampMin = "0.0"))
 	float HoverHeight = 0.0f;
 
+	/** Vertical follow speed (cm/s) a HOVERING archetype (HoverHeight > 0) glides toward its rest height with —
+	 *  terrain height changes (stair treads, curbs) read as a smooth ramp instead of the grounded snap's discrete
+	 *  steps, which look wrong on a floater. Grounded archetypes (HoverHeight == 0) keep the instant snap. Keep
+	 *  comfortably above MoveSpeed x steepest slope rate or the floater lags below its height on long ramps. */
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Enemy|Movement", meta = (ClampMin = "1.0"))
+	float HoverVerticalFollowSpeed = 300.0f;
+
+	/** Server-only: cached rest-height target a hovering archetype glides toward BETWEEN amortized floor re-checks
+	 *  (ApplyGravity re-traces every GroundRecheckInterval; gliding only on those ticks would quantize the motion). */
+	float HoverRestZ = 0.0f;
+
 	/** If the floor is within this of the feet (up or down), snap to it (slopes/steps); beyond it (a real drop),
 	 *  fall under gravity. Also the BASE increment the movement step-up lifts over a stair riser (see MaxCrestStepUp). */
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Enemy|Movement")
