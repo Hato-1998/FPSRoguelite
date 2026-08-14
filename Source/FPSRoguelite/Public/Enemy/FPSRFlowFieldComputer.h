@@ -169,14 +169,16 @@ public:
 	//     over). Pure array math, no world query, exercised by FPSRoguelite.FlowField.HoverFloorSample. ---
 
 	/** Cell-center-quad bilinear interpolation of the baked floor Z under WorldLocation. Picks the ANCHOR cell/rank
-	 *  from AnchorFootZ (via WorldToCellIndex + PickRankForFootZ), then blends the 2x2 surrounding cells' floors
-	 *  NEAREST that anchor Z. A corner with no valid surface, or whose nearest surface is more than MaxSurfaceDeltaCm
-	 *  from the anchor (a DIFFERENT storey, not this one continuing), is flattened to the anchor's own Z instead of
-	 *  being blended in — interpolating across a layer boundary would read as a vertical teleport. Corners past the
-	 *  grid edge are clamped to the nearest in-grid cell (edge Z extends past the boundary). False if the grid is
-	 *  unbuilt, WorldLocation is off-grid, or the anchor cell has no surface near AnchorFootZ. OutFloorNormal (if
-	 *  requested) is an approximate slope from the corner Z gradient — good enough for a hover actor's lean/ground-
-	 *  normal, not an exact surface normal. */
+	 *  from AnchorFootZ via WorldToCellIndex + a TWO-TIER pick: (1) PickRankForFootZ — nearest surface within
+	 *  MaxLayerPickDrop; (2) if none, the HIGHEST surface strictly AT OR BELOW AnchorFootZ (glide-descent past a
+	 *  ledge/cliff — never a surface ABOVE the foot, which would have the caller's spring climb instead of descend).
+	 *  Then blends the 2x2 surrounding cells' floors NEAREST that anchor Z. A corner with no valid surface, or whose
+	 *  nearest surface is more than MaxSurfaceDeltaCm from the anchor (a DIFFERENT storey, not this one continuing),
+	 *  is flattened to the anchor's own Z instead of being blended in — interpolating across a layer boundary would
+	 *  read as a vertical teleport. Corners past the grid edge are clamped to the nearest in-grid cell (edge Z
+	 *  extends past the boundary). False if the grid is unbuilt, WorldLocation is off-grid, or the anchor cell has
+	 *  no surface within pick range AND none below AnchorFootZ. OutFloorNormal (if requested) is an approximate
+	 *  slope from the corner Z gradient — good enough for a hover actor's lean/ground-normal, not an exact normal. */
 	bool SampleFloorZBilinear(const FVector& WorldLocation, float AnchorFootZ, float MaxSurfaceDeltaCm, float& OutFloorZ, FVector* OutFloorNormal = nullptr) const;
 
 	/** Hover-height composite: SampleFloorZBilinear at WorldLocation, then (if FlowDirXY is non-zero) also samples

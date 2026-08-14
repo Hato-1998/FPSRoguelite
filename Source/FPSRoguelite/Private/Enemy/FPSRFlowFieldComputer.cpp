@@ -798,10 +798,33 @@ bool UFPSRFlowFieldComputer::SampleFloorZBilinear(const FVector& WorldLocation, 
 	{
 		return false;
 	}
-	const int32 AnchorRank = PickRankForFootZ(AnchorCell, AnchorFootZ);
+
+	// Anchor resolution, two-tier (2026-08-14 follow-up — glide-descent):
+	//  1) PRIMARY (unchanged): PickRankForFootZ — the surface nearest the foot within MaxLayerPickDrop. The
+	//     canonical "which storey are my legs on" pick, used for ordinary grounded / hover-follow sampling.
+	//  2) FALLBACK (v2 glide-descent only, new): nothing near the foot -> search STRICTLY DOWNWARD (Z <= AnchorFootZ)
+	//     for the HIGHEST such surface — the floor a falling/gliding hover actor is descending TOWARD past a ledge
+	//     or cliff edge. Deliberately does NOT fall further back to "lowest surface overall" (unlike
+	//     AreWorldLocationsConnected's ColumnRank helper) — anchoring on a surface ABOVE the foot would have the
+	//     spring climb a storey instead of descending to it. No surface below at all -> fail, same as v1 (nothing
+	//     to glide onto here; the caller hands off to the scene-query fallback).
+	int32 AnchorRank = PickRankForFootZ(AnchorCell, AnchorFootZ);
 	if (AnchorRank == INDEX_NONE)
 	{
-		return false;
+		float BestBelowZ = -MAX_flt;
+		for (int32 R = 0; R < NumLayers; ++R)
+		{
+			const float Z = CellFloorZ[SurfIndex(AnchorCell, R)];
+			if (Z != MAX_flt && Z <= AnchorFootZ && Z > BestBelowZ)
+			{
+				BestBelowZ = Z;
+				AnchorRank = R;
+			}
+		}
+		if (AnchorRank == INDEX_NONE)
+		{
+			return false;
+		}
 	}
 	const float AnchorZ = CellFloorZ[SurfIndex(AnchorCell, AnchorRank)];
 

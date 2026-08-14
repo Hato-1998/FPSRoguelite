@@ -632,46 +632,51 @@ void AFPSREnemyBase::ApplyGravity(float ScaledDeltaSeconds, const FVector& FlowD
 
 	// --- v2 PRIORITY PATH: flow-field CellFloorZ array sampler (spec ①③) — zero scene query, every movement update
 	//     (no amortize timer; SampleHoverFloorZ is O(1) array math, cheap enough to run unthrottled at swarm scale).
-	//     Only for a SETTLED hovering archetype (already grounded, not currently launched/falling) — a freshly
-	//     spawned or knocked-back enemy still falls/lands via the v1 path below, so the ballistic arc is unchanged. ---
-	if (CurrentHoverHeight > 0.0f && bGrounded && VerticalVelocity <= 0.0f && CachedFlowField)
+	//     Gate = CurrentHoverHeight>0 && VerticalVelocity<=0 (NOT bGrounded, 2026-08-14 follow-up — user decision): a
+	//     hover archetype descending under gravity, past the apex of a knockback launch, or freshly spawned in the
+	//     air ALSO glides down on this path instead of free-falling — a cliff/step-down should look like a smooth
+	//     height-correction, not a physics drop. Still ballistic while RISING (VerticalVelocity>0, the initial
+	//     upward half of a knockback pop) — the launch arc itself is unchanged. ---
+	if (CurrentHoverHeight > 0.0f && VerticalVelocity <= 0.0f && CachedFlowField)
 	{
 		const FVector Loc = GetActorLocation();
 		// AnchorFootZ = capsule BOTTOM (Z - HalfHeight), NOT ActorZ - EnemyStandOffset(95) — that offset is Sample()'s
 		// own convention for the flow-DIRECTION query. SampleFloorZBilinear picks each corner's surface NEAREST this
-		// foot Z within MaxLayerPickDrop (200cm, PickRankForFootZ) — since a hovering foot sits CurrentHoverHeight
-		// above its actual floor, that 200cm budget is the hard ceiling on how high HoverHeight/HoverHeightMax can go
-		// before the anchor rank picks the WRONG storey (see the HoverHeight UPROPERTY comment).
+		// foot Z within MaxLayerPickDrop (200cm, PickRankForFootZ), falling back to the nearest surface BELOW the foot
+		// when none is near it (a cliff/ledge glide-descent target) — since a hovering foot sits CurrentHoverHeight
+		// above its actual floor, that 200cm budget is still the hard ceiling on how high HoverHeight/HoverHeightMax
+		// can go before the primary anchor pick finds the WRONG storey (see the HoverHeight UPROPERTY comment).
 		const float AnchorFootZ = static_cast<float>(Loc.Z) - HalfHeight;
 		float FloorZ;
 		FVector FloorNormal;
 		if (CachedFlowField->SampleHoverFloorZ(Loc, FVector2D(FlowDirXY.X, FlowDirXY.Y), AnchorFootZ, MaxCrestStepUp, FloorZ, &FloorNormal))
 		{
+			// No cliff cutoff here (v1 had one via MaxStepDownHeight) — a sampled target arbitrarily far below is now
+			// exactly the case this path exists to handle: the spring GLIDES down to it over time (rate-limited by
+			// HoverSpringFrequency/DampingRatio, not a teleport), which is the requested descent curve. The anchor's
+			// two-tier pick (SampleFloorZBilinear) plus the corner MaxSurfaceDeltaCm guard are what keep the TARGET
+			// itself sane (never a storey the enemy didn't actually fall past); this code only decides how to REACH it.
 			const float TargetZ = FloorZ + HalfHeight + GroundRestClearance + CurrentHoverHeight;
-			const float Diff = static_cast<float>(Loc.Z) - TargetZ;
-			if (Diff > MaxStepDownHeight)
+
+			// Continuity seed: captured while airborne (falling, or past a knockback's apex) — the spring inherits the
+			// current ballistic VerticalVelocity so the hand-off curves smoothly into the glide instead of kinking. An
+			// already-grounded tick keeps the spring's own running rate (VerticalVelocity is 0 there -> a no-op).
+			if (!bGrounded)
 			{
-				// A genuine cliff (mirrors the v1 grounded snap-window's down budget): hand off to the v1 fall path
-				// below instead of springing across a storey gap. Force an immediate re-check so the fall starts now.
-				bGrounded = false;
-				GroundRecheckTimer = 0.0f;
+				HoverSpringRateZ = VerticalVelocity;
 			}
-			else
-			{
-				// No separate "don't rise too fast" guard needed: SampleFloorZBilinear's MaxSurfaceDeltaCm corner guard
-				// already rejects any corner beyond a layer boundary (no story-jump target), and the spring itself is
-				// rate-limited motion toward TargetZ, not a teleport.
-				float Z = static_cast<float>(Loc.Z);
-				FMath::SpringDamper(Z, HoverSpringRateZ, TargetZ, 0.0f, ScaledDeltaSeconds, HoverSpringFrequency, HoverSpringDampingRatio);
-				SetActorLocation(FVector(Loc.X, Loc.Y, Z), false);
-				GroundNormal = FloorNormal;
-				VerticalVelocity = 0.0f;
-				HoverRestZ = TargetZ; // keep the v1 fallback's glide target current in case a later sample fails
-				return;
-			}
+
+			float Z = static_cast<float>(Loc.Z);
+			FMath::SpringDamper(Z, HoverSpringRateZ, TargetZ, 0.0f, ScaledDeltaSeconds, HoverSpringFrequency, HoverSpringDampingRatio);
+			SetActorLocation(FVector(Loc.X, Loc.Y, Z), false);
+			GroundNormal = FloorNormal;
+			VerticalVelocity = 0.0f;
+			bGrounded = true; // the spring is now carrying vertical motion — no longer a free-falling body
+			HoverRestZ = TargetZ; // keep the v1 fallback's glide target current in case a later sample fails
+			return;
 		}
-		// Sample failed (off-grid / no baked surface under this column) — fall through to the v1 scene-query path,
-		// which re-checks the floor this same tick (bGrounded/GroundRecheckTimer still say "due").
+		// Sample failed (off-grid / no baked surface anywhere at or below this column) — fall through to the v1
+		// scene-query path: a genuine void / grid edge the array sampler has nothing to glide onto.
 	}
 
 	// --- v1 SCENE-QUERY PATH (fallback for a non-hovering archetype, an airborne/launched enemy, a hover sample

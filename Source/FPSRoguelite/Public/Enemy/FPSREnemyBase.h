@@ -201,10 +201,12 @@ protected:
 	/** Server: ground-follow + gravity each movement update — a single down-trace snaps the enemy to the floor
 	 *  (slopes/steps within GroundSnapTolerance) or lets it fall under gravity off a ledge / after a high spawn,
 	 *  so enemies never float and rooftop-spawned enemies drop down before chasing. A hovering archetype
-	 *  (CurrentHoverHeight > 0) tries the v2 flow-field array height sampler FIRST (zero scene query); FlowDirXY
-	 *  (the enemy's current flow/face direction) drives its 1-cell look-ahead so a floater starts rising before it
-	 *  reaches a step instead of snapping up at the cell boundary. Defaults to ZeroVector for callers that don't
-	 *  steer (no look-ahead, straight-down sample only — matches v1 behavior). */
+	 *  (CurrentHoverHeight > 0) tries the v2 flow-field array height sampler FIRST (zero scene query) whenever
+	 *  VerticalVelocity <= 0 — i.e. descending OR resting, not just already grounded (2026-08-14 follow-up: a
+	 *  cliff/step-down GLIDES down via the spring instead of free-falling; still ballistic while rising under a
+	 *  knockback launch). FlowDirXY (the enemy's current flow/face direction) drives the sampler's 1-cell look-ahead
+	 *  so a floater starts rising before it reaches a step instead of snapping up at the cell boundary. Defaults to
+	 *  ZeroVector for callers that don't steer (no look-ahead, straight-down sample only — matches v1 behavior). */
 	void ApplyGravity(float ScaledDeltaSeconds, const FVector& FlowDirXY = FVector::ZeroVector);
 
 	UFUNCTION()
