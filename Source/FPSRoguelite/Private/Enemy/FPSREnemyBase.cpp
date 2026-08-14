@@ -652,8 +652,12 @@ void AFPSREnemyBase::ApplyGravity(float ScaledDeltaSeconds)
 		// A drop beyond the down budget is a true cliff -> fall under gravity below (the flow routes to the stair; don't
 		// snap across a storey). An AIRBORNE enemy keeps the tight ±GroundSnapTolerance window so it lands cleanly rather
 		// than snapping onto a passing ledge. NOT while rising under a knockback impulse (VerticalVelocity > 0).
+		// The UP-snap window must include HoverHeight: a hovering archetype's rest target sits HoverHeight above the
+		// old one, so a freshly spawned (ground-snapped) enemy is legitimately that much below target — without this
+		// the spawn state reads as the no-snap fall path and the enemy free-falls through the floor (regression fix).
+		// The wall guard's meaning is preserved: relative to the ACTUAL rest height the allowance is still ±Tolerance.
 		const float SnapDown = bGrounded ? MaxStepDownHeight : GroundSnapTolerance;
-		if (VerticalVelocity <= 0.0f && Diff <= SnapDown && Diff >= -GroundSnapTolerance)
+		if (VerticalVelocity <= 0.0f && Diff <= SnapDown && Diff >= -(GroundSnapTolerance + HoverHeight))
 		{
 			if (!FMath::IsNearlyZero(Diff))
 			{
