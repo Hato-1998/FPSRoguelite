@@ -15,6 +15,7 @@ class AFPSRCharacter;
 class AFPSRPlayerController;
 class APlayerController;
 class UFPSREnemyAnimProfile;
+class UFPSRFlowFieldSubsystem;
 
 /** Outcome of a per-pass server attack decision, returned to the spawn subsystem so it can account the melee
  *  attack token. Ranged archetypes manage their own (held) token directly and return None. */
@@ -199,8 +200,12 @@ protected:
 
 	/** Server: ground-follow + gravity each movement update — a single down-trace snaps the enemy to the floor
 	 *  (slopes/steps within GroundSnapTolerance) or lets it fall under gravity off a ledge / after a high spawn,
-	 *  so enemies never float and rooftop-spawned enemies drop down before chasing. */
-	void ApplyGravity(float ScaledDeltaSeconds);
+	 *  so enemies never float and rooftop-spawned enemies drop down before chasing. A hovering archetype
+	 *  (CurrentHoverHeight > 0) tries the v2 flow-field array height sampler FIRST (zero scene query); FlowDirXY
+	 *  (the enemy's current flow/face direction) drives its 1-cell look-ahead so a floater starts rising before it
+	 *  reaches a step instead of snapping up at the cell boundary. Defaults to ZeroVector for callers that don't
+	 *  steer (no look-ahead, straight-down sample only — matches v1 behavior). */
+	void ApplyGravity(float ScaledDeltaSeconds, const FVector& FlowDirXY = FVector::ZeroVector);
 
 	UFUNCTION()
 	void HandleDeath(AActor* DeadActor, AActor* Killer);
@@ -321,19 +326,59 @@ protected:
 	 *  visual mesh offset, which would desync hits from the silhouette: shots under the mesh would hit, shots at the
 	 *  raised tip would miss). Applied at the single grounding anchor in ApplyGravity, so stepping, falling and
 	 *  landing all inherit it. KEEP WELL BELOW the melee/projectile vertical attack gate (150cm) and the flow field's
-	 *  storey separation (~300cm+) — the foot-Z layer pick floats by this much. 0 = walks on the ground. */
+	 *  layer-pick window (UFPSRFlowFieldComputer::MaxLayerPickDrop = 200cm) — a hovering foot sits CurrentHoverHeight
+	 *  above its floor surface, and both the v1 foot-Z layer pick and the v2 height sampler's anchor rank resolve
+	 *  from that raised foot, so a taller hover risks snapping to the WRONG storey. 0 = walks on the ground. This is
+	 *  the FALLBACK value used when HoverHeightMin/Max don't define a per-instance range (see CurrentHoverHeight) —
+	 *  runtime code reads CurrentHoverHeight, never this field directly. */
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Enemy|Movement", meta = (ClampMin = "0.0"))
 	float HoverHeight = 0.0f;
 
-	/** Vertical follow speed (cm/s) a HOVERING archetype (HoverHeight > 0) glides toward its rest height with —
-	 *  terrain height changes (stair treads, curbs) read as a smooth ramp instead of the grounded snap's discrete
-	 *  steps, which look wrong on a floater. Grounded archetypes (HoverHeight == 0) keep the instant snap. Keep
-	 *  comfortably above MoveSpeed x steepest slope rate or the floater lags below its height on long ramps. */
-	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Enemy|Movement", meta = (ClampMin = "1.0"))
-	float HoverVerticalFollowSpeed = 300.0f;
+	/** Per-instance hover-height range (cm, spec item 4 — variety across a swarm, e.g. a bipyramid archetype at
+	 *  120~180). When HoverHeightMax > HoverHeightMin, Activate samples CurrentHoverHeight uniformly from this range;
+	 *  otherwise (the 0/0 default = "no range authored") CurrentHoverHeight falls back to HoverHeight, so an existing
+	 *  archetype BP needs no re-authoring (no-regression). Content sets these; there is no code-side default range. */
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Enemy|Movement", meta = (ClampMin = "0.0"))
+	float HoverHeightMin = 0.0f;
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Enemy|Movement", meta = (ClampMin = "0.0"))
+	float HoverHeightMax = 0.0f;
 
-	/** Server-only: cached rest-height target a hovering archetype glides toward BETWEEN amortized floor re-checks
-	 *  (ApplyGravity re-traces every GroundRecheckInterval; gliding only on those ticks would quantize the motion). */
+	/** Undamped spring frequency (Hz) for a hovering archetype's vertical follow (v2 — replaces v1's constant-speed
+	 *  FInterpConstantTo glide with FMath::SpringDamper, UnrealMathUtility.h:1665). Higher = stiffer/snappier catch-up
+	 *  to the target height. SpringDamper stays numerically stable across the swarm's stride-scaled (ScaledDelta-
+	 *  Seconds) timestep, so no custom integrator is needed here. */
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Enemy|Movement", meta = (ClampMin = "0.1"))
+	float HoverSpringFrequency = 1.5f;
+
+	/** Damping ratio for the same vertical spring. 1.0 = critically damped (reaches the target height with no
+	 *  overshoot — the default "solid hover" feel); below 1.0 under-damps (bounces past the target before settling),
+	 *  an intentional data-only knob for a looser/wobblier floater. */
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Enemy|Movement", meta = (ClampMin = "0.2"))
+	float HoverSpringDampingRatio = 1.0f;
+
+	/** Server-only: this instance's actual hover height, sampled from [HoverHeightMin, HoverHeightMax] on Activate
+	 *  (or copied from HoverHeight when no range is authored). ApplyGravity/TickServerMovement read THIS — never
+	 *  HoverHeight directly — so per-instance variety (spec item 4) reaches every hover code path uniformly. */
+	UPROPERTY(Transient)
+	float CurrentHoverHeight = 0.0f;
+
+	/** Server-only: FMath::SpringDamper's velocity state for the vertical hover follow. ONE spring shared by the v2
+	 *  array-sampled path and the v1 scene-query fallback (see ApplyGravity), so a mid-flight handoff between them
+	 *  doesn't reset the motion. Reset to 0 on Activate; seeded from VerticalVelocity on a fall landing so a knocked-
+	 *  back / spawn-dropped hover archetype eases into its rest height instead of restarting from rest. */
+	UPROPERTY(Transient)
+	float HoverSpringRateZ = 0.0f;
+
+	/** Server-only: the world's flow-field subsystem, cached ONCE in BeginPlay — a world subsystem outlives every
+	 *  pooled enemy (world lifetime >= actor lifetime), so caching avoids a GetSubsystem<>() lookup on every enemy's
+	 *  every movement update at swarm scale (Performance §5-2). Feeds the v2 hover height sampler; null on a world
+	 *  with no flow field (e.g. pre-content) falls back to the v1 scene-query path unconditionally. */
+	UPROPERTY(Transient)
+	TObjectPtr<UFPSRFlowFieldSubsystem> CachedFlowField;
+
+	/** Server-only: cached rest-height target for the v1 SCENE-QUERY FALLBACK path only (ApplyGravity re-traces every
+	 *  GroundRecheckInterval; gliding only on those ticks would quantize the motion). The v2 array sampler needs no
+	 *  cache of its own — SampleHoverFloorZ is O(1) array math, so it re-samples fresh every movement update. */
 	float HoverRestZ = 0.0f;
 
 	/** If the floor is within this of the feet (up or down), snap to it (slopes/steps); beyond it (a real drop),

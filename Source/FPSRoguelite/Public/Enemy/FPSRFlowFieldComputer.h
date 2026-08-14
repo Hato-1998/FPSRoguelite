@@ -164,6 +164,27 @@ public:
 	/** Convert a world location to a grid cell index (XY only). INDEX_NONE if outside the grid. */
 	int32 WorldToCellIndex(const FVector& WorldLocation) const;
 
+	// --- U hover height v2 (bake-time CellFloorZ is fixed regardless of BFS/flow, so these do NOT gate on
+	//     bFieldReady — a source-less field, e.g. all players unsnapped, still has a valid static floor to hover
+	//     over). Pure array math, no world query, exercised by FPSRoguelite.FlowField.HoverFloorSample. ---
+
+	/** Cell-center-quad bilinear interpolation of the baked floor Z under WorldLocation. Picks the ANCHOR cell/rank
+	 *  from AnchorFootZ (via WorldToCellIndex + PickRankForFootZ), then blends the 2x2 surrounding cells' floors
+	 *  NEAREST that anchor Z. A corner with no valid surface, or whose nearest surface is more than MaxSurfaceDeltaCm
+	 *  from the anchor (a DIFFERENT storey, not this one continuing), is flattened to the anchor's own Z instead of
+	 *  being blended in — interpolating across a layer boundary would read as a vertical teleport. Corners past the
+	 *  grid edge are clamped to the nearest in-grid cell (edge Z extends past the boundary). False if the grid is
+	 *  unbuilt, WorldLocation is off-grid, or the anchor cell has no surface near AnchorFootZ. OutFloorNormal (if
+	 *  requested) is an approximate slope from the corner Z gradient — good enough for a hover actor's lean/ground-
+	 *  normal, not an exact surface normal. */
+	bool SampleFloorZBilinear(const FVector& WorldLocation, float AnchorFootZ, float MaxSurfaceDeltaCm, float& OutFloorZ, FVector* OutFloorNormal = nullptr) const;
+
+	/** Hover-height composite: SampleFloorZBilinear at WorldLocation, then (if FlowDirXY is non-zero) also samples
+	 *  one cell ahead along the flow direction at the SAME AnchorFootZ and takes the MAX of the two — a hovering
+	 *  actor starts rising toward a step's height before it reaches it (pre-rise/look-ahead), and a failed or LOWER
+	 *  ahead sample never lowers the result. False only if the "here" sample fails (off-grid / no surface). */
+	bool SampleHoverFloorZ(const FVector& WorldLocation, const FVector2D& FlowDirXY, float AnchorFootZ, float MaxSurfaceDeltaCm, float& OutFloorZ, FVector* OutFloorNormal = nullptr) const;
+
 	/** U P-D: path-distance (cells, uniform-cost BFS steps) from the nearest flow source (player) to WorldLocation's surface
 	 *  (foot-Z rank pick), for the front-chase range gate. OutStatus distinguishes OK / OffGrid / SourceLess / Unreachable
 	 *  (returns MAX_int32 for every non-OK). O(1) array read after RunBFS. */

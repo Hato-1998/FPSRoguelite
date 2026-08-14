@@ -6,6 +6,7 @@
 #include "Enemy/FPSREnemyAnimProfile.h"
 #include "Enemy/FPSREnemyMetricsSubsystem.h" // S4 readability metrics registry (CSV-gated, see below)
 #include "Enemy/FPSREnemyShadowLODSubsystem.h" // per-viewer dynamic-shadow band (see BeginPlay/EndPlay)
+#include "Enemy/FPSRFlowFieldSubsystem.h" // v2 hover height sampler (CachedFlowField, see BeginPlay/ApplyGravity)
 #include "Hero/FPSRCharacter.h"
 #include "Pickup/FPSRPickupSubsystem.h"
 #include "Core/FPSRLogChannels.h"
@@ -71,6 +72,15 @@ void AFPSREnemyBase::BeginPlay()
 	// fallback path. In the unified multi-slot field the spawn subsystem overrides this per-acquire (ApplyNetCullRadius), which
 	// runs on every Activate (after BeginPlay) and still wins. No-op vs the ctor when NetCullRadius is unchanged (no regression).
 	SetNetCullDistanceSquared(FMath::Square(NetCullRadius));
+
+	// v2 hover height sampler (ApplyGravity): cache the world's flow-field subsystem ONCE — it outlives every pooled
+	// enemy (world subsystem lifetime = world lifetime), so this avoids a GetSubsystem<>() lookup per enemy per
+	// movement update at swarm scale. Null on a world with no flow field (pre-content) — ApplyGravity falls back to
+	// the v1 scene-query path unconditionally in that case.
+	if (UWorld* World = GetWorld())
+	{
+		CachedFlowField = World->GetSubsystem<UFPSRFlowFieldSubsystem>();
+	}
 
 	// Fallback placeholder mesh from config only when no content BP mesh was assigned (Game.md §6-2 — no hard-coded
 	// path in C++). Normal enemy BPs carry a VAT mesh, so the guard skips the load; only the raw-C++ spawn hits it.
@@ -225,6 +235,10 @@ void AFPSREnemyBase::Activate(const FVector& Location)
 	}
 
 	CurrentMoveSpeed = MoveSpeed * FMath::FRandRange(0.9f, 1.1f);
+	// Per-instance hover height (spec item 4): sample from the authored range when one exists (Max > Min), else fall
+	// back to the single HoverHeight value (existing archetype BPs with no range authored see no behavior change).
+	CurrentHoverHeight = (HoverHeightMax > HoverHeightMin) ? FMath::FRandRange(HoverHeightMin, HoverHeightMax) : HoverHeight;
+	HoverSpringRateZ = 0.0f; // fresh spring state for the reused actor (no residual velocity from a prior life)
 	VerticalVelocity = 0.0f; // reset fall state for the reused actor
 	bGrounded = false;       // re-check ground on the first update (may spawn on a rooftop)
 	GroundRecheckTimer = 0.0f;
@@ -569,8 +583,9 @@ void AFPSREnemyBase::TickServerMovement(const FVector& MoveDirection, const FVec
 	}
 
 	// Vertical: ground-follow + gravity ALWAYS (even when not steering) so enemies never float and a
-	// rooftop-spawned enemy falls before chasing.
-	ApplyGravity(ScaledDeltaSeconds);
+	// rooftop-spawned enemy falls before chasing. FaceDirection feeds the v2 hover sampler's look-ahead (a floater
+	// pre-rises before a step in its direction of travel) — see ApplyGravity.
+	ApplyGravity(ScaledDeltaSeconds, FaceDirection);
 
 	// (U20) Cosmetic walk/idle from the actual XY displacement this pass. Skip the override while a fresh melee attack
 	// tell is still within its cooldown window so ServerTickAttack's Attack state isn't clobbered the same pass (a
@@ -605,7 +620,7 @@ void AFPSREnemyBase::ApplyKnockback(const FVector& Velocity)
 	GroundRecheckTimer = 0.0f; // re-check the floor immediately
 }
 
-void AFPSREnemyBase::ApplyGravity(float ScaledDeltaSeconds)
+void AFPSREnemyBase::ApplyGravity(float ScaledDeltaSeconds, const FVector& FlowDirXY)
 {
 	UWorld* World = GetWorld();
 	if (!World || !Capsule)
@@ -613,27 +628,79 @@ void AFPSREnemyBase::ApplyGravity(float ScaledDeltaSeconds)
 		return;
 	}
 
+	const float HalfHeight = Capsule->GetScaledCapsuleHalfHeight();
+
+	// --- v2 PRIORITY PATH: flow-field CellFloorZ array sampler (spec ①③) — zero scene query, every movement update
+	//     (no amortize timer; SampleHoverFloorZ is O(1) array math, cheap enough to run unthrottled at swarm scale).
+	//     Only for a SETTLED hovering archetype (already grounded, not currently launched/falling) — a freshly
+	//     spawned or knocked-back enemy still falls/lands via the v1 path below, so the ballistic arc is unchanged. ---
+	if (CurrentHoverHeight > 0.0f && bGrounded && VerticalVelocity <= 0.0f && CachedFlowField)
+	{
+		const FVector Loc = GetActorLocation();
+		// AnchorFootZ = capsule BOTTOM (Z - HalfHeight), NOT ActorZ - EnemyStandOffset(95) — that offset is Sample()'s
+		// own convention for the flow-DIRECTION query. SampleFloorZBilinear picks each corner's surface NEAREST this
+		// foot Z within MaxLayerPickDrop (200cm, PickRankForFootZ) — since a hovering foot sits CurrentHoverHeight
+		// above its actual floor, that 200cm budget is the hard ceiling on how high HoverHeight/HoverHeightMax can go
+		// before the anchor rank picks the WRONG storey (see the HoverHeight UPROPERTY comment).
+		const float AnchorFootZ = static_cast<float>(Loc.Z) - HalfHeight;
+		float FloorZ;
+		FVector FloorNormal;
+		if (CachedFlowField->SampleHoverFloorZ(Loc, FVector2D(FlowDirXY.X, FlowDirXY.Y), AnchorFootZ, MaxCrestStepUp, FloorZ, &FloorNormal))
+		{
+			const float TargetZ = FloorZ + HalfHeight + GroundRestClearance + CurrentHoverHeight;
+			const float Diff = static_cast<float>(Loc.Z) - TargetZ;
+			if (Diff > MaxStepDownHeight)
+			{
+				// A genuine cliff (mirrors the v1 grounded snap-window's down budget): hand off to the v1 fall path
+				// below instead of springing across a storey gap. Force an immediate re-check so the fall starts now.
+				bGrounded = false;
+				GroundRecheckTimer = 0.0f;
+			}
+			else
+			{
+				// No separate "don't rise too fast" guard needed: SampleFloorZBilinear's MaxSurfaceDeltaCm corner guard
+				// already rejects any corner beyond a layer boundary (no story-jump target), and the spring itself is
+				// rate-limited motion toward TargetZ, not a teleport.
+				float Z = static_cast<float>(Loc.Z);
+				FMath::SpringDamper(Z, HoverSpringRateZ, TargetZ, 0.0f, ScaledDeltaSeconds, HoverSpringFrequency, HoverSpringDampingRatio);
+				SetActorLocation(FVector(Loc.X, Loc.Y, Z), false);
+				GroundNormal = FloorNormal;
+				VerticalVelocity = 0.0f;
+				HoverRestZ = TargetZ; // keep the v1 fallback's glide target current in case a later sample fails
+				return;
+			}
+		}
+		// Sample failed (off-grid / no baked surface under this column) — fall through to the v1 scene-query path,
+		// which re-checks the floor this same tick (bGrounded/GroundRecheckTimer still say "due").
+	}
+
+	// --- v1 SCENE-QUERY PATH (fallback for a non-hovering archetype, an airborne/launched enemy, a hover sample
+	//     miss, or a world with no CachedFlowField) — unchanged ground-follow + gravity integrator, except the two
+	//     glide sites now drive the SAME spring as the v2 path (HoverSpringRateZ) instead of v1's constant-speed
+	//     FInterpConstantTo, so a mid-flight handoff between the array sampler and this fallback carries its
+	//     velocity instead of resetting it. ---
+
 	// Amortize: a stably grounded enemy re-checks the floor only every GroundRecheckInterval; airborne enemies
 	// (falling) run every update so they land promptly (Codex P1 — no per-frame scene query for the whole swarm).
 	GroundRecheckTimer -= ScaledDeltaSeconds;
 	if (bGrounded && GroundRecheckTimer > 0.0f)
 	{
-		// Hovering archetypes keep gliding toward the cached rest height BETWEEN floor re-checks — glide only on
-		// re-check ticks and the amortization quantizes the motion into visible hops (no scene query here).
-		if (HoverHeight > 0.0f)
+		// Hovering archetypes keep springing toward the cached rest height BETWEEN floor re-checks — only these ticks
+		// touch Z; the amortization otherwise quantizes the motion into visible hops (no scene query here).
+		if (CurrentHoverHeight > 0.0f)
 		{
 			const FVector L = GetActorLocation();
 			if (!FMath::IsNearlyEqual(L.Z, HoverRestZ, 0.1f))
 			{
-				SetActorLocation(FVector(L.X, L.Y,
-					FMath::FInterpConstantTo(L.Z, HoverRestZ, ScaledDeltaSeconds, HoverVerticalFollowSpeed)), false);
+				float Z = static_cast<float>(L.Z);
+				FMath::SpringDamper(Z, HoverSpringRateZ, HoverRestZ, 0.0f, ScaledDeltaSeconds, HoverSpringFrequency, HoverSpringDampingRatio);
+				SetActorLocation(FVector(L.X, L.Y, Z), false);
 			}
 		}
 		return;
 	}
 	GroundRecheckTimer = GroundRecheckInterval;
 
-	const float HalfHeight = Capsule->GetScaledCapsuleHalfHeight();
 	const FVector Loc = GetActorLocation();
 
 	// Down-trace against STATIC world ONLY — ignore other pawns/dynamic actors so a falling enemy doesn't 'land'
@@ -662,7 +729,7 @@ void AFPSREnemyBase::ApplyGravity(float ScaledDeltaSeconds)
 	}
 	if (bHitFloor)
 	{
-		const float TargetZ = Hit.ImpactPoint.Z + HalfHeight + GroundRestClearance + HoverHeight; // rest just above the floor (+HoverHeight for floating archetypes)
+		const float TargetZ = Hit.ImpactPoint.Z + HalfHeight + GroundRestClearance + CurrentHoverHeight; // rest just above the floor (+CurrentHoverHeight for floating archetypes)
 		const float Diff = Loc.Z - TargetZ;
 
 		// Snap window: DOWN up to MaxStepDownHeight while GROUNDED (a grounded enemy walking off a small ledge / down a
@@ -671,20 +738,29 @@ void AFPSREnemyBase::ApplyGravity(float ScaledDeltaSeconds)
 		// A drop beyond the down budget is a true cliff -> fall under gravity below (the flow routes to the stair; don't
 		// snap across a storey). An AIRBORNE enemy keeps the tight ±GroundSnapTolerance window so it lands cleanly rather
 		// than snapping onto a passing ledge. NOT while rising under a knockback impulse (VerticalVelocity > 0).
-		// The UP-snap window must include HoverHeight: a hovering archetype's rest target sits HoverHeight above the
-		// old one, so a freshly spawned (ground-snapped) enemy is legitimately that much below target — without this
-		// the spawn state reads as the no-snap fall path and the enemy free-falls through the floor (regression fix).
-		// The wall guard's meaning is preserved: relative to the ACTUAL rest height the allowance is still ±Tolerance.
+		// The UP-snap window must include CurrentHoverHeight: a hovering archetype's rest target sits CurrentHoverHeight
+		// above the old one, so a freshly spawned (ground-snapped) enemy is legitimately that much below target —
+		// without this the spawn state reads as the no-snap fall path and the enemy free-falls through the floor
+		// (regression fix). The wall guard's meaning is preserved: relative to the ACTUAL rest height the allowance is
+		// still ±Tolerance.
 		const float SnapDown = bGrounded ? MaxStepDownHeight : GroundSnapTolerance;
-		if (VerticalVelocity <= 0.0f && Diff <= SnapDown && Diff >= -(GroundSnapTolerance + HoverHeight))
+		if (VerticalVelocity <= 0.0f && Diff <= SnapDown && Diff >= -(GroundSnapTolerance + CurrentHoverHeight))
 		{
 			HoverRestZ = TargetZ; // refresh the glide target on every floor re-check
 			if (!FMath::IsNearlyZero(Diff))
 			{
-				// Floaters glide toward the rest height (stair treads = smooth ramp); walkers snap instantly (no regression).
-				const float NewZ = (HoverHeight > 0.0f)
-					? FMath::FInterpConstantTo(Loc.Z, TargetZ, ScaledDeltaSeconds, HoverVerticalFollowSpeed)
-					: TargetZ;
+				// Floaters spring toward the rest height (stair treads = smooth ramp); walkers snap instantly (no regression).
+				float NewZ;
+				if (CurrentHoverHeight > 0.0f)
+				{
+					float Z = static_cast<float>(Loc.Z);
+					FMath::SpringDamper(Z, HoverSpringRateZ, TargetZ, 0.0f, ScaledDeltaSeconds, HoverSpringFrequency, HoverSpringDampingRatio);
+					NewZ = Z;
+				}
+				else
+				{
+					NewZ = TargetZ;
+				}
 				SetActorLocation(FVector(Loc.X, Loc.Y, NewZ), false); // small slope/step correction
 			}
 			VerticalVelocity = 0.0f;
@@ -701,6 +777,13 @@ void AFPSREnemyBase::ApplyGravity(float ScaledDeltaSeconds)
 			float NewZ = Loc.Z + VerticalVelocity * ScaledDeltaSeconds;
 			if (VerticalVelocity <= 0.0f && NewZ <= TargetZ)
 			{
+				if (CurrentHoverHeight > 0.0f)
+				{
+					// Seed the shared spring with the falling velocity BEFORE it's zeroed below, so a hover archetype's
+					// landing eases into its rest height carrying its fall momentum instead of restarting from a dead
+					// stop (v1 hard-snapped on landing; v2's spring inherits the motion — no rethink-then-rise pop).
+					HoverSpringRateZ = VerticalVelocity;
+				}
 				NewZ = TargetZ;
 				VerticalVelocity = 0.0f;
 				bGrounded = true;
