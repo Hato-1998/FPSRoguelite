@@ -5,6 +5,7 @@
 #include "GameFramework/Pawn.h"
 #include "GameplayTagContainer.h"
 #include "Enemy/FPSRVATAnimParams.h"
+#include "Enemy/FPSREnemyPursuit.h" // ADR 0008: FFPSRPursuitState/Params (PursuitState member, plain struct — no UObject dep)
 #include "FPSREnemyBase.generated.h"
 
 class UCapsuleComponent;
@@ -52,6 +53,33 @@ struct FFPSRServerAttackContext
 	bool bMeleeTokenAvailable = false;
 };
 
+/** Per-pass movement context the spawn subsystem hands to TickServerMovement (ADR 0008 — FFPSRServerAttackContext's
+ *  struct-per-pass convention, so the pursuit-mode inputs travel together instead of growing the parameter list).
+ *  The subsystem owns target selection + flow sampling + the beeline fallback; the enemy owns steering + the
+ *  Flow/Seek3D pursuit decision (FFPSRPursuitState::Tick) built from these fields. */
+struct FFPSRServerMoveContext
+{
+	/** Steering direction this pass (flow + separation combined, or the beeline fallback) — the former 1st param. */
+	FVector MoveDir = FVector::ZeroVector;
+	/** Direction to face/turn toward (stable — player-relative, not separation-jittery) — the former 2nd param. */
+	FVector FaceDir = FVector::ZeroVector;
+	/** Stride-scaled delta for this pass (LOD-throttled dt) — the former 3rd param. */
+	float ScaledDelta = 0.0f;
+	/** World time this pass (World->GetTimeSeconds()) — the pursuit stall check's clock, alongside LastAttackTime. */
+	float Now = 0.0f;
+	/** True if this enemy has a live move/attack target this pass (same-map or front-chase). False on the authored
+	 *  exit-path branch (ADR 0008: Seek3D must NEVER interrupt a designer-authored spawn-structure exit route) and
+	 *  on a genuinely targetless enemy (empty map, pre-drain). */
+	bool bHasTarget = false;
+	/** True when the subsystem's flow-field sample for this enemy came back zero (ADR 0008 invariant 1's PRIMARY
+	 *  Seek3D trigger — a proven BFS-unreachable column, e.g. a deck too tall to route to). Reuses the exact
+	 *  zero-check the beeline fallback already performs — no added flow-field query. */
+	bool bFlowZero = false;
+	/** The current pursuit target's world location (BestPlayerLocation) — Seek3D's straight-line XY aim point and
+	 *  the reference the seek altitude band is measured from. */
+	FVector TargetLocation = FVector::ZeroVector;
+};
+
 /** Lightweight server-authoritative swarm enemy — a cheap pooled APawn (NOT GAS-based), designed to run hundreds at
  *  once. Movement is the spawn subsystem's batched flow-field + separation pass (TickServerMovement), not per-actor AI;
  *  pooling reuses actors across lives (Activate/Deactivate with net dormancy). Also carries exit-path following,
@@ -78,13 +106,14 @@ public:
 	 *  teardown path (pool release, death, kill-Z recycle all route through here). */
 	virtual void Deactivate();
 
-	/** Server: move along MoveDirection (XY world dir; magnitude ignored, normalized internally) at
-	 *  CurrentMoveSpeed * ScaledDeltaSeconds. No-op if MoveDirection is ~zero. Driven by the enemy
-	 *  movement subsystem's batched pass (flow-field + separation). ScaledDeltaSeconds is the real delta
-	 *  times this enemy's LOD stride so throttled enemies still cover the right distance.
-	 *  FaceDirection is what the enemy TURNS to face (XY) — the direction to the player, NOT MoveDirection:
-	 *  at StopDistance MoveDirection is separation-only and jitters, which would spin the enemy in place. */
-	void TickServerMovement(const FVector& MoveDirection, const FVector& FaceDirection, float ScaledDeltaSeconds);
+	/** Server: move along Ctx.MoveDir (XY world dir; magnitude ignored, normalized internally) at CurrentMoveSpeed *
+	 *  Ctx.ScaledDelta. No-op if MoveDir is ~zero. Driven by the enemy movement subsystem's batched pass (flow-field
+	 *  + separation, or the authored exit path). Ctx.FaceDir is what the enemy TURNS to face (XY) — the direction
+	 *  to the player, NOT MoveDir: at StopDistance MoveDir is separation-only and jitters, which would spin the
+	 *  enemy in place. ADR 0008: also runs PursuitState.Tick from Ctx.bHasTarget/bFlowZero/Now and drives the
+	 *  Flow/Seek3D steering + Seek3D altitude override (see the .cpp) — a single context struct (FFPSRServerAttack-
+	 *  Context's precedent) instead of growing this into a long parameter list. */
+	void TickServerMovement(const FFPSRServerMoveContext& Ctx);
 
 	/** Server: assign an authored exit path (world-space waypoints) the enemy follows OUT of its spawn structure
 	 *  (e.g. a pipe/box that the flow-field can't path out of) before reverting to flow-field player-chase at the
@@ -206,7 +235,9 @@ protected:
 	 *  cliff/step-down GLIDES down via the spring instead of free-falling; still ballistic while rising under a
 	 *  knockback launch). FlowDirXY (the enemy's current flow/face direction) drives the sampler's 1-cell look-ahead
 	 *  so a floater starts rising before it reaches a step instead of snapping up at the cell boundary. Defaults to
-	 *  ZeroVector for callers that don't steer (no look-ahead, straight-down sample only — matches v1 behavior). */
+	 *  ZeroVector for callers that don't steer (no look-ahead, straight-down sample only — matches v1 behavior).
+	 *  ADR 0008: while bSeekTargetZValid, the spring's TargetZ is max(this terrain-relative target, SeekTargetZ) —
+	 *  ONE integrator regardless of pursuit mode (invariant 2); Seek3D never gets its own Z code path. */
 	void ApplyGravity(float ScaledDeltaSeconds, const FVector& FlowDirXY = FVector::ZeroVector);
 
 	UFUNCTION()
@@ -448,6 +479,77 @@ protected:
 
 	/** Time constant (s) for the exponential decay of horizontal knockback (~0.25s feels like a shove, not a slide). */
 	static constexpr float KnockbackDecayTime = 0.18f;
+
+	// --- ADR 0008 (Docs/Architecture/0008-hover-enemy-pursuit-reachability-modes.md): reachability-based pursuit
+	// mode. Flow (default) = the flow-field XY + v2 terrain-relative Z above; Seek3D (opened only when the flow
+	// can't route, or the enemy stalls without landing an attack) = straight-line XY + an incrementally-climbing
+	// altitude override, so no enemy stays "chasing + unable to attack" forever against unreachable terrain
+	// (invariant 3). The judgment itself lives in the UObject-free FFPSRPursuitState (FPSREnemyPursuit.h) so it is
+	// unit-testable (FPSRoguelite.Enemy.Pursuit); this actor only supplies its per-pass inputs and reads
+	// Mode/ClimbOffset back. All tuning is per-archetype DATA (invariant 4 — never a code branch). ---
+
+	/** T (seconds): stall-detection window before Seek3D opens — see FFPSRPursuitParams::StallTime. */
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Enemy|Seek3D")
+	float SeekStallTime = 3.0f;
+
+	/** D (cm): minimum net displacement inside the stall window that counts as progress — StallMinMove. */
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Enemy|Seek3D")
+	float SeekStallMinMove = 150.0f;
+
+	/** Altitude gained (cm) per blocked-forward-sweep escalation step while climbing in Seek3D — ClimbStep. */
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Enemy|Seek3D")
+	float SeekClimbStep = 120.0f;
+
+	/** Flight ceiling (cm, added on top of the seek altitude band) the climb escalation can reach — ClimbCeiling. */
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Enemy|Seek3D")
+	float SeekClimbCeiling = 1200.0f;
+
+	/** Seconds the forward sweep must stay clear before the climb escalation decays one step — ClearDecayTime. */
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Enemy|Seek3D")
+	float SeekClearDecayTime = 0.5f;
+
+	/** Hysteresis floor (seconds) a pursuit mode is held before it may transition out again — ModeMinHold
+	 *  (invariant 6: no tick-to-tick mode flapping). */
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Enemy|Seek3D")
+	float SeekModeMinHold = 1.0f;
+
+	/** Per-instance Seek3D altitude band above the target player's Z (cm) — sampled uniformly on Activate when
+	 *  Max > Min (HoverHeightMin/Max's exact pattern), else SeekAltitudeAbovePlayerMin is used directly. A PRIMARY
+	 *  anti-clumping variable so a whole swarm doesn't sniper from one identical altitude (ADR goal — variety via
+	 *  archetype data, invariant 4). */
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Enemy|Seek3D", meta = (ClampMin = "0.0"))
+	float SeekAltitudeAbovePlayerMin = 80.0f;
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Enemy|Seek3D", meta = (ClampMin = "0.0"))
+	float SeekAltitudeAbovePlayerMax = 220.0f;
+
+	/** Server-only: this instance's actual Seek3D altitude band (cm above the target), sampled from
+	 *  [SeekAltitudeAbovePlayerMin, Max] on Activate. See that UPROPERTY's comment. */
+	UPROPERTY(Transient)
+	float CurrentSeekAltitude = 0.0f;
+
+	/** Server-only: the ADR 0008 pursuit judgment core (Flow/Seek3D mode, stall window, climb escalation) — pure
+	 *  data ticked once per movement pass from TickServerMovement. NOT a UPROPERTY: FFPSRPursuitState is a plain,
+	 *  UObject-independent struct by design (so it's constructible/testable with no engine dependency at all — see
+	 *  FPSREnemyPursuit.h), which UHT can't reflect. Reset() on Activate (pool reuse; no state leaks across lives). */
+	FFPSRPursuitState PursuitState;
+
+	/** Server-only: this pass's Seek3D vertical target (TargetLocation.Z + CurrentSeekAltitude + ClimbOffset),
+	 *  meaningful only while bSeekTargetZValid. ApplyGravity's v2 path takes max(terrain-relative target, this) so
+	 *  a Seek3D enemy never glides BELOW its seek band even when the terrain sampler also succeeds (e.g. mid-climb
+	 *  over a roof the flow field also happens to cover). Written by TickServerMovement, consumed the SAME pass by
+	 *  ApplyGravity (called from within TickServerMovement) — never stale across passes. */
+	UPROPERTY(Transient)
+	float SeekTargetZ = 0.0f;
+	UPROPERTY(Transient)
+	bool bSeekTargetZValid = false;
+
+	/** Server-only: whether THIS pass's horizontal movement sweep hit a riser/wall (the step-up branch (b) in
+	 *  TickServerMovement) — read as bForwardBlocked by FFPSRPursuitState::Tick the FOLLOWING pass to drive the
+	 *  Seek3D climb escalation (a one-pass lag is ADR-accepted: ticks are only a few cm apart). In Seek3D mode the
+	 *  step-up LIFT LOOP itself is skipped (invariant 2 — Z is never pushed directly by AddActorWorldOffset(0,0,
+	 *  Lift); only the v2 spring may move Z), so this flag is still set from the blocked sweep, just without lifting. */
+	UPROPERTY(Transient)
+	bool bLastForwardBlocked = false;
 
 	// --- Authored exit path (C1) — server-only. Guides enemies spawned inside a structure (pipe/box) out to its
 	// mouth along designer waypoints before flow-field player-chase takes over, so they never jam inside concave

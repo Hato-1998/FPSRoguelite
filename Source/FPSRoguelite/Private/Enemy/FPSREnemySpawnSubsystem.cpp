@@ -586,7 +586,15 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 		if (Enemy->ConsumeExitPathSteering(EnemyLocation, ScaledDelta, ExitDir))
 		{
 			ExitDir.Z = 0.0f;
-			Enemy->TickServerMovement(ExitDir, ExitDir, ScaledDelta); // follow the exit path; face the way we're going
+			// ADR 0008: bHasTarget=false so the pursuit judgment (PursuitState.Tick) never opens Seek3D on an
+			// authored exit route — a designer-placed escape path must never be interrupted by a reachability escape.
+			FFPSRServerMoveContext ExitCtx;
+			ExitCtx.MoveDir = ExitDir;
+			ExitCtx.FaceDir = ExitDir; // face the way we're going
+			ExitCtx.ScaledDelta = ScaledDelta;
+			ExitCtx.Now = Now;
+			ExitCtx.bHasTarget = false;
+			Enemy->TickServerMovement(ExitCtx);
 		}
 		else
 		{
@@ -595,7 +603,11 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 			// flow (the subsystem retries by containing-grid on a stale MapId). No same-map player -> no beeline (never
 			// chase cross-map): FlowDir stays zero and the enemy just separates.
 			FVector FlowDir = FlowField ? FlowField->SampleFlowDirection(EnemyMap, EnemyLocation) : FVector::ZeroVector;
-			if (FlowDir.IsNearlyZero() && bHasTarget)
+			// ADR 0008 invariant 1's PRIMARY Seek3D trigger — the exact zero-check the beeline fallback below already
+			// performs, promoted into the move context (bFlowZero) so TickServerMovement's PursuitState.Tick sees a
+			// proven BFS-unreachable column immediately. No added flow-field query (invariant 5).
+			const bool bFlowZero = FlowDir.IsNearlyZero();
+			if (bFlowZero && bHasTarget)
 			{
 				// Field not ready in this enemy's map yet (no source) but we have a target — beeline straight at the nearest
 				// player so the enemy still advances instead of only separating.
@@ -627,7 +639,15 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 			FVector MoveDir = Desired + ComputeSeparation(i, Locations, SpatialHash) * SeparationStrength;
 			MoveDir.Z = 0.0f;
 
-			Enemy->TickServerMovement(MoveDir, FlowDir, ScaledDelta);
+			FFPSRServerMoveContext MoveCtx;
+			MoveCtx.MoveDir = MoveDir;
+			MoveCtx.FaceDir = FlowDir;
+			MoveCtx.ScaledDelta = ScaledDelta;
+			MoveCtx.Now = Now;
+			MoveCtx.bHasTarget = bHasTarget;
+			MoveCtx.bFlowZero = bFlowZero;
+			MoveCtx.TargetLocation = BestPlayerLocation;
+			Enemy->TickServerMovement(MoveCtx);
 		}
 
 		// Recycle an enemy that has fallen out of the playable world (walked into a pit / no static floor under
