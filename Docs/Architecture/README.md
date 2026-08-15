@@ -21,7 +21,8 @@
 | [0005](0005-first-person-arms-hand-led-minimal-rig.md) | 1인칭 팔 = 손이 끄는 최소 리그 (팔뚝+손 47본, IK 폐지) | 대체됨(→ 0006) | 비쌈 | 2026-08-04 |
 | [0006](0006-first-person-arms-purchased-rig-retargeted.md) | 1인칭 팔 = 구매 리그(LPAMG) + PWAS 리타게팅 | 채택 | 보통 | 2026-08-05 |
 | [0007](0007-enemy-swarm-render-path-cpd.md) | 적 스웜 렌더 경로 = CustomPrimitiveData (MID 폐기 · ISM 기각) | 채택 | 비쌈 | 2026-08-13 |
-| [0008](0008-hover-enemy-pursuit-reachability-modes.md) | 부양 적 추적 = 도달성 기반 모드 전환 (플로우 + 3D 시크) | 채택 | 비쌈 | 2026-08-14 |
+| [0008](0008-hover-enemy-pursuit-reachability-modes.md) | 부양 적 추적 = 도달성 기반 모드 전환 (플로우 + 3D 시크) | 대체됨(→ 0009) | 비쌈 | 2026-08-14 |
+| [0009](0009-hover-swarm-local-3d-flow-window.md) | 부양 스웜 내비게이션 = 플레이어 중심 국소 3D 창 필드 (+2D 전역 유지) | 채택 | 보통 | 2026-08-14 |
 
 > 0002는 **불변식 8개와 축 3개(시각 회전 분리 · 눈 앵커 · 관전자 소유 리그)가 0003으로 계승**된다. 대체된 것은 1인칭 표현 방식(불변식 4 · 비목표 2개)이다. 0003이 어느 것을 계승하고 어느 것을 버리는지 명시하고 있으므로 **0002는 여전히 읽어야 하는 문서다.**
 >
