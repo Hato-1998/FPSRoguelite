@@ -15,6 +15,7 @@ class AFPSREnemySpawnPoint;
 class AFPSRSpawnRoom;
 class AFPSRPlayerController;
 class APlayerController;
+class AFPSRCharacter;
 class UFPSREnemyRosterDataAsset;
 enum class EFPSRFieldQuery : uint8; // U P-E: front path-distance query status (IsRearStatus)
 
@@ -222,6 +223,16 @@ private:
 	TArray<AFPSREnemyBase*> MovementAgentsScratch;
 	TArray<FVector> MovementLocationsScratch;
 	TMap<FIntPoint, TArray<int32>> MovementSpatialHashScratch;
+
+	/** ADR 0009 prep ("부유체 스웜" draft §3 invariant, piped 2026-08-15 ahead of the redesign): each tracked
+	 *  player's Z the last time UCharacterMovementComponent::IsMovingOnGround() was true. PERSISTS ACROSS PASSES
+	 *  (unlike the per-pass scratch above) — updated once per player in the collection loop (grounded -> refresh;
+	 *  airborne -> keep the stale value, a jump/fall must not move the cached target), then read into
+	 *  FFPSRServerMoveContext::TargetGroundedZ so a Seek3D altitude band (ADR 0008/0009) tracks where the target
+	 *  last STOOD, never its instantaneous jump/fall Z (would otherwise jitter the whole swarm's altitude in
+	 *  lockstep with every player hop). Stale entries (dead TWeakObjectPtr) are pruned in the same collection loop
+	 *  so a departed/destroyed player's cache doesn't leak forever. */
+	TMap<TWeakObjectPtr<AFPSRCharacter>, float> LastGroundedZByPlayer;
 
 	// Significance distance tiers (squared cm) and per-tier update stride / net update frequency (Game.MD §5/§5-1).
 	static constexpr float TierS0RadiusSq = 1500.0f * 1500.0f; // S0: full update

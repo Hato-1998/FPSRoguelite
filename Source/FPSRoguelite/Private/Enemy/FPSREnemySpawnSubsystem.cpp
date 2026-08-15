@@ -18,6 +18,7 @@
 #include "EngineUtils.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/Pawn.h"
+#include "GameFramework/CharacterMovementComponent.h" // IsMovingOnGround() (ADR 0009 prep: LastGroundedZByPlayer)
 #include "CollisionQueryParams.h"
 #include "TimerManager.h"
 #include "HAL/IConsoleManager.h"
@@ -291,10 +292,24 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 	const UFPSRFlowFieldSubsystem* FlowField = World->GetSubsystem<UFPSRFlowFieldSubsystem>();
 	const bool bUnified = FlowField && FlowField->GetMultiSlotUnifiedComputer() != nullptr; // P-G: multimap only (single-map degenerate grid = false)
 
-	// Cache alive player pawn locations, pawns, and committed MapIds once for this pass.
+	// ADR 0009 prep: prune stale grounded-Z cache entries (a destroyed/departed player's weak key resolves to
+	// nullptr) once per pass here, rather than letting the map grow unbounded across a long run.
+	for (auto CacheIt = LastGroundedZByPlayer.CreateIterator(); CacheIt; ++CacheIt)
+	{
+		if (!CacheIt->Key.IsValid())
+		{
+			CacheIt.RemoveCurrent();
+		}
+	}
+
+	// Cache alive player pawn locations, pawns, committed MapIds, and grounded Z once for this pass.
 	TArray<APawn*, TInlineAllocator<4>> PlayerPawns;
 	TArray<FVector, TInlineAllocator<4>> PlayerLocations;
 	TArray<FGameplayTag, TInlineAllocator<4>> PlayerMapIds; // multimap Tier 0: enemies target only same-map players
+	// ADR 0009 prep (§3 invariant): each player's Z the last time they were GROUNDED, parallel to PlayerLocations
+	// (index-aligned) — see LastGroundedZByPlayer's comment. Piped into the move context even while Seek3D stays
+	// gated off, so the redesign lands on correct wiring without a second plumbing pass.
+	TArray<float, TInlineAllocator<4>> PlayerGroundedZ;
 	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
 	{
 		if (APlayerController* PC = It->Get())
@@ -318,10 +333,30 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 					continue;
 				}
 				PlayerPawns.Add(PlayerPawn);
-				PlayerLocations.Add(PlayerPawn->GetActorLocation());
+				const FVector PlayerLoc = PlayerPawn->GetActorLocation();
+				PlayerLocations.Add(PlayerLoc);
 				// Committed occupancy (unset = Default single-map). Grace is a server-only allocator notion, NOT used
 				// here for targeting/attack (Codex R5: combat uses committed MapId strictly, flow-continuity uses grace).
 				PlayerMapIds.Add(PS ? PS->GetCurrentMapId() : FGameplayTag());
+
+				// ADR 0009 prep: refresh the grounded-Z cache while standing (a jump/fall must NOT move the cached
+				// value); while airborne, read back the last-grounded value (or the current Z if this player has
+				// never been cached yet — e.g. spawned mid-air).
+				float GroundedZ = PlayerLoc.Z;
+				if (AFPSRCharacter* Character = Cast<AFPSRCharacter>(PlayerPawn))
+				{
+					const TWeakObjectPtr<AFPSRCharacter> WeakChar(Character);
+					const UCharacterMovementComponent* Movement = Character->GetCharacterMovement();
+					if (Movement && Movement->IsMovingOnGround())
+					{
+						LastGroundedZByPlayer.Add(WeakChar, GroundedZ);
+					}
+					else if (const float* Cached = LastGroundedZByPlayer.Find(WeakChar))
+					{
+						GroundedZ = *Cached;
+					}
+				}
+				PlayerGroundedZ.Add(GroundedZ);
 			}
 		}
 	}
@@ -491,6 +526,9 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 		// No target at all (an unoccupied map before the empty-map drain culls it, S2b) -> cheapest LOD, no attack, no
 		// player-directed movement (separation only).
 		const FVector BestPlayerLocation = bHasTarget ? PlayerLocations[BestPlayerIndex] : EnemyLocation;
+		// ADR 0009 prep: index-aligned with PlayerLocations (both the same-map search and the front-chase override
+		// above write BestPlayerIndex into the SAME player arrays) — see LastGroundedZByPlayer's comment.
+		const float BestPlayerGroundedZ = bHasTarget ? PlayerGroundedZ[BestPlayerIndex] : EnemyLocation.Z;
 
 		// Distance LOD tier -> movement stride + attack stride + net update frequency (Game.MD §5).
 		// AttackStride throttles the per-enemy attack DECISION for distant tiers (F1) so the swarm's attack cost scales
@@ -647,6 +685,7 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 			MoveCtx.bHasTarget = bHasTarget;
 			MoveCtx.bFlowZero = bFlowZero;
 			MoveCtx.TargetLocation = BestPlayerLocation;
+			MoveCtx.TargetGroundedZ = BestPlayerGroundedZ;
 			Enemy->TickServerMovement(MoveCtx);
 		}
 

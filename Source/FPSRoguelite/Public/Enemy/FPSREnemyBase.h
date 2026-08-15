@@ -76,8 +76,15 @@ struct FFPSRServerMoveContext
 	 *  zero-check the beeline fallback already performs — no added flow-field query. */
 	bool bFlowZero = false;
 	/** The current pursuit target's world location (BestPlayerLocation) — Seek3D's straight-line XY aim point and
-	 *  the reference the seek altitude band is measured from. */
+	 *  the reference the seek altitude band is measured from. NEVER read for the vertical seek target (see
+	 *  TargetGroundedZ below) — the attack-range / stop-distance gates still key off this actual position. */
 	FVector TargetLocation = FVector::ZeroVector;
+	/** The target player's Z the last time it was GROUNDED (IsMovingOnGround), not its instantaneous Z (ADR 0009
+	 *  invariant — "부유체 스웜" draft §3: the seek altitude target must not chase a jump/fall in real time, or the
+	 *  whole swarm's altitude jitters in lockstep with every player hop). Piped now (2026-08-15) even while
+	 *  bEnableSeek3D is off, so ADR 0009 lands on the correct wiring without a second plumbing pass. Falls back to
+	 *  the player's current Z if no grounded sample was ever cached (e.g. a player who spawned mid-air). */
+	float TargetGroundedZ = 0.0f;
 };
 
 /** Lightweight server-authoritative swarm enemy — a cheap pooled APawn (NOT GAS-based), designed to run hundreds at
@@ -487,6 +494,17 @@ protected:
 	// (invariant 3). The judgment itself lives in the UObject-free FFPSRPursuitState (FPSREnemyPursuit.h) so it is
 	// unit-testable (FPSRoguelite.Enemy.Pursuit); this actor only supplies its per-pass inputs and reads
 	// Mode/ClimbOffset back. All tuning is per-archetype DATA (invariant 4 — never a code branch). ---
+
+	/** Master gate for ADR 0008 Seek3D (2026-08-15 emergency patch, user decision): OFF by default. PIE exposed two
+	 *  swarm-wide defects — (1) the flow-zero trigger is GLOBAL: a player standing on an unreachable-component deck
+	 *  drops the WHOLE map's BFS sources, zeroing flow for every enemy at once, so the entire swarm opens Seek3D
+	 *  simultaneously (a mass ascent, not a targeted escape); (2) SeekTargetZ tracked the player's INSTANTANEOUS Z,
+	 *  so every player jump/fall jittered the whole swarm's altitude in lockstep. ADR 0009 (a player-centric LOCAL
+	 *  3D window field) is the confirmed structural replacement for both; until it lands, Seek3D stays locked off so
+	 *  no enemy opens it. The judgment core (FFPSRPursuitState) and all Seek3D data below are PRESERVED (not
+	 *  removed) — ADR 0009 reuses the mode/escalation state machine, only the trigger + Z source change. */
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Enemy|Seek3D")
+	bool bEnableSeek3D = false;
 
 	/** T (seconds): stall-detection window before Seek3D opens — see FFPSRPursuitParams::StallTime. */
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Enemy|Seek3D")

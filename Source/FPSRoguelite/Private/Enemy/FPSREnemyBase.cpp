@@ -487,31 +487,45 @@ void AFPSREnemyBase::TickServerMovement(const FFPSRServerMoveContext& Ctx)
 		return;
 	}
 
-	// ADR 0008: advance the pursuit judgment FIRST, using the PREVIOUS pass's forward-blocked reading
-	// (bLastForwardBlocked, set by the step-up branch (b) below) — a one-pass lag the ADR accepts (movement ticks
-	// only a few cm apart). Params are copied from this archetype's EditDefaultsOnly Seek3D data every pass
-	// (invariant 4 — variety is DATA, never a code branch per archetype).
-	FFPSRPursuitParams SeekParams;
-	SeekParams.StallTime = SeekStallTime;
-	SeekParams.StallMinMove = SeekStallMinMove;
-	SeekParams.ClimbStep = SeekClimbStep;
-	SeekParams.ClimbCeiling = SeekClimbCeiling;
-	SeekParams.ClearDecayTime = SeekClearDecayTime;
-	SeekParams.ModeMinHold = SeekModeMinHold;
-	PursuitState.Tick(Ctx.ScaledDelta, GetActorLocation(), Ctx.bHasTarget, Ctx.bFlowZero, bLastForwardBlocked,
-		LastAttackTime, Ctx.Now, SeekParams);
-	// bHasTarget also gates Seek3D off on the authored exit-path branch (which assembles bHasTarget=false, ADR 0008
-	// §2) even if PursuitState still nominally reads Seek3D from a prior life — the exit route must never be
-	// interrupted by a pursuit escape.
-	const bool bSeeking = Ctx.bHasTarget && PursuitState.Mode == EFPSRPursuitMode::Seek3D;
-	bLastForwardBlocked = false; // this pass's OWN sweep result is recorded fresh below, for the NEXT call
+	// ADR 0008 pursuit judgment — GATED OFF by default (2026-08-15 emergency patch, see bEnableSeek3D's comment):
+	// PIE found the flow-zero trigger is GLOBAL (one player on an unreachable deck zeroes the WHOLE map's BFS
+	// sources, so the entire swarm opens Seek3D at once) and the altitude target chased the player's INSTANTANEOUS
+	// Z (jittering the whole swarm on every jump). ADR 0009 (a local 3D window field) is the confirmed fix; until
+	// then bEnableSeek3D stays false so no enemy ever calls PursuitState.Tick — its timers/escalation would just be
+	// dead motion — and bSeeking stays false, which also kills the step-up branch's Seek3D skip below (restoring
+	// the always-run pre-0008 lift loop, byte-for-byte the old grounded behavior).
+	bool bSeeking = false;
+	if (bEnableSeek3D)
+	{
+		// Advance the pursuit judgment FIRST, using the PREVIOUS pass's forward-blocked reading
+		// (bLastForwardBlocked, set by the step-up branch (b) below) — a one-pass lag the ADR accepts (movement
+		// ticks only a few cm apart). Params are copied from this archetype's EditDefaultsOnly Seek3D data every
+		// pass (invariant 4 — variety is DATA, never a code branch per archetype).
+		FFPSRPursuitParams SeekParams;
+		SeekParams.StallTime = SeekStallTime;
+		SeekParams.StallMinMove = SeekStallMinMove;
+		SeekParams.ClimbStep = SeekClimbStep;
+		SeekParams.ClimbCeiling = SeekClimbCeiling;
+		SeekParams.ClearDecayTime = SeekClearDecayTime;
+		SeekParams.ModeMinHold = SeekModeMinHold;
+		PursuitState.Tick(Ctx.ScaledDelta, GetActorLocation(), Ctx.bHasTarget, Ctx.bFlowZero, bLastForwardBlocked,
+			LastAttackTime, Ctx.Now, SeekParams);
+		// bHasTarget also gates Seek3D off on the authored exit-path branch (which assembles bHasTarget=false, ADR
+		// 0008 §2) even if PursuitState still nominally reads Seek3D from a prior life — the exit route must never
+		// be interrupted by a pursuit escape.
+		bSeeking = Ctx.bHasTarget && PursuitState.Mode == EFPSRPursuitMode::Seek3D;
+	}
+	bLastForwardBlocked = false; // this pass's OWN sweep result is recorded fresh below, for the NEXT call (harmless even while the gate is off)
 
 	// Seek3D vertical target for ApplyGravity's v2 spring (invariant 2 — this only supplies a TARGET; the spring
 	// integrator itself never forks by mode): player-relative altitude band + this pass's climb escalation.
+	// Ctx.TargetGroundedZ (NOT TargetLocation.Z, ADR 0009 invariant, piped ahead of the redesign): the altitude
+	// band tracks where the target last stood on ground, not its instantaneous jump/fall Z — avoids the whole
+	// swarm's seek altitude jittering in lockstep with every player hop.
 	bSeekTargetZValid = bSeeking;
 	if (bSeekTargetZValid)
 	{
-		SeekTargetZ = Ctx.TargetLocation.Z + CurrentSeekAltitude + PursuitState.ClimbOffset;
+		SeekTargetZ = Ctx.TargetGroundedZ + CurrentSeekAltitude + PursuitState.ClimbOffset;
 	}
 
 	// (U20) Pre-move location to classify walk vs idle for the cosmetic anim. Guarded so it is zero-cost when no
