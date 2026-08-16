@@ -95,17 +95,28 @@ void AFPSRArenaActor::BeginPlay()
 	RebuildRepresentation();
 }
 
-bool AFPSRArenaActor::BuildLocalLayout()
+bool AFPSRArenaActor::GetGenParams(FFPSRArenaGenParams& OutParams, FVector& OutOrigin) const
 {
 	if (!ArenaParams)
 	{
-		UE_LOG(LogFPSR, Error, TEXT("[Arena] %s has no ArenaParams — no layout, no flow field. Assign a UFPSRArenaParamsDataAsset."),
-			*GetName());
-		Layout = FFPSRArenaLayout();
 		return false;
 	}
+	OutParams = ArenaParams->ToGenParams();
+	OutOrigin = ComputeGridOrigin(OutParams);
+	return true;
+}
 
-	const FFPSRArenaGenParams GenParams = ArenaParams->ToGenParams();
+bool AFPSRArenaActor::BuildLayoutForSeed(int32 Seed, FFPSRArenaLayout& OutLayout) const
+{
+	FFPSRArenaGenParams GenParams;
+	FVector Origin;
+	if (!GetGenParams(GenParams, Origin))
+	{
+		UE_LOG(LogFPSR, Error, TEXT("[Arena] %s has no ArenaParams — no layout, no flow field. Assign a UFPSRArenaParamsDataAsset."),
+			*GetName());
+		OutLayout = FFPSRArenaLayout();
+		return false;
+	}
 
 	// Gather what the designer placed. Note this reads ACTORS, not collision — the arena is told what blocks it
 	// rather than discovering it, which is what keeps the mask free of world queries (ADR 0011 E3).
@@ -134,8 +145,16 @@ bool AFPSRArenaActor::BuildLocalLayout()
 		}
 	}
 
-	if (!FFPSRArenaGenerator::Generate(ActiveSeed, GenParams, ComputeGridOrigin(GenParams), Authored, Layout))
+	return FFPSRArenaGenerator::Generate(Seed, GenParams, Origin, Authored, OutLayout);
+}
+
+bool AFPSRArenaActor::BuildLocalLayout()
+{
+	FFPSRArenaGenParams GenParams;
+	FVector Origin;
+	if (!GetGenParams(GenParams, Origin) || !BuildLayoutForSeed(ActiveSeed, Layout))
 	{
+		Layout = FFPSRArenaLayout();
 		return false;
 	}
 

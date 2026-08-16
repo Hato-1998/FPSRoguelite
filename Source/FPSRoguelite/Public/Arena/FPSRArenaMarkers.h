@@ -34,6 +34,10 @@ public:
 	 *  arena is single-plane, so there is nothing for the other axes to mean. */
 	float GetYawDegrees() const;
 
+	/** Size this blocker from cell-space dimensions. Used by the editor's starting-layout tool so a proposal
+	 *  lands as real, hand-editable actors rather than a preview the designer cannot touch. */
+	void SetFootprint(const FVector2D& HalfExtentXY, float HeightCm);
+
 protected:
 	/** The volume. This is what the arena reads and what the player collides with — one shape, no drift. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "아레나|블로커")

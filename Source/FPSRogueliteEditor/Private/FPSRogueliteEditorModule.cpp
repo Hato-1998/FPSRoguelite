@@ -8,6 +8,7 @@
 #include "Assembler/SFPSRWeaponAssemblerTab.h"
 #include "Assembler/SFPSRWeaponAssemblerFPTab.h"
 #include "Blockout/SFPSRBlockoutTab.h"
+#include "Arena/FPSRArenaAuthoringTool.h"
 #include "Localization/FPSRStringTableReload.h"
 #include "CardImport/FPSRCardCsvExporter.h"
 #include "CardImport/FPSRCardCsvImporter.h"
@@ -127,6 +128,20 @@ void FFPSRogueliteEditorModule::RegisterMenus()
 		LOCTEXT("OpenBlockoutTooltip", "FPSR 블록아웃 툴 열기 (config 기반 모듈러 맵 팔레트 + 블록아웃 가드레일). 팔레트 폴더는 Project Settings > FPSR > FPSR Blockout 에서 설정."),
 		FSlateIcon(FAppStyle::GetAppStyleSetName(), "DeveloperTools.MenuIcon"),
 		FUIAction(FExecuteAction::CreateStatic(&FFPSRogueliteEditorModule::OnOpenBlockoutMenuEntry))
+	);
+	Section.AddMenuEntry(
+		"FPSRArenaProposeLayout",
+		LOCTEXT("ArenaProposeLayoutTitle", "아레나 시작 배치 제안"),
+		LOCTEXT("ArenaProposeLayoutTooltip", "레벨의 FPSRArenaActor 파라미터와 '시작 시드'로 클러스터 배치를 제안해 FPSRArenaBlocker 를 놓습니다. 순환·교차·최소 통로폭이 보장된 시작점이며, 손대는 순간부터는 '아레나 검증'이 책임집니다. 기존 블로커가 있으면 교체 여부를 묻고, 전체가 한 번의 Ctrl+Z 로 되돌아갑니다."),
+		FSlateIcon(FAppStyle::GetAppStyleSetName(), "DeveloperTools.MenuIcon"),
+		FUIAction(FExecuteAction::CreateStatic(&FFPSRArenaAuthoringTool::ProposeStartingLayout))
+	);
+	Section.AddMenuEntry(
+		"FPSRArenaValidate",
+		LOCTEXT("ArenaValidateTitle", "아레나 검증"),
+		LOCTEXT("ArenaValidateTooltip", "레벨에 배치된 블로커·랜드마크를 실제 런타임과 같은 경로로 셀 마스크로 굽고 검사합니다: 단일 연결성분 · 순환 회로 · 최소 통로폭 · 오목 주머니 · 프롭 여유분 (ADR 0011 E4)."),
+		FSlateIcon(FAppStyle::GetAppStyleSetName(), "DeveloperTools.MenuIcon"),
+		FUIAction(FExecuteAction::CreateStatic(&FFPSRArenaAuthoringTool::ValidateArenaInLevel))
 	);
 	Section.AddMenuEntry(
 		"FPSRReloadStringTableCsv",

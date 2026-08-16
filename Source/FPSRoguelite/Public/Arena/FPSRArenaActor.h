@@ -51,10 +51,26 @@ public:
 	 *  clients by OnRep_ActiveSeed; also called by the flow-field subsystem at world begin. */
 	bool BuildLocalLayout();
 
+	/** Gather the authored actors and generate a layout for an arbitrary seed WITHOUT touching this actor's state.
+	 *  Shared by BuildLocalLayout and by the editor authoring tools, so what the designer previews in the editor
+	 *  is produced by the same code the runtime will run — not a second implementation that agrees with it only
+	 *  until one of the two is edited. */
+	bool BuildLayoutForSeed(int32 Seed, FFPSRArenaLayout& OutLayout) const;
+
+	/** Resolved generator params + world-space grid origin, or false if no params asset is assigned. */
+	bool GetGenParams(FFPSRArenaGenParams& OutParams, FVector& OutOrigin) const;
+
 	const FFPSRArenaLayout& GetLayout() const { return Layout; }
 	bool HasLayout() const { return Layout.IsValid(); }
 
 	int32 GetActiveSeed() const { return ActiveSeed; }
+
+	/** The seed authored on the actor — what the editor tools propose from (ActiveSeed is only meaningful in play). */
+	int32 GetInitialSeed() const { return InitialSeed; }
+
+	/** Height the editor's starting-layout tool gives a proposed blocker. Lives here rather than in the tool so the
+	 *  authored number stays in one place — the designer tunes it on the arena and every proposal follows. */
+	float GetClusterHeight() const { return ClusterHeight; }
 
 	/** Find the arena in this world, if any. Null is the normal answer for a legacy authored map. */
 	static AFPSRArenaActor* FindInWorld(const UWorld* World);

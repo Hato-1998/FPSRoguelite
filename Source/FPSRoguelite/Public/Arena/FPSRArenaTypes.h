@@ -130,8 +130,10 @@ struct FFPSRArenaGenParams
 		SlotGridOptions = { FIntPoint(2, 2), FIntPoint(2, 1), FIntPoint(1, 2), FIntPoint(3, 2), FIntPoint(2, 3) };
 	}
 
-	/** Cheap self-check: are these numbers geometrically satisfiable at all? Fills OutError on failure. */
-	bool Validate(FString& OutError) const;
+	/** Cheap self-check: are these numbers geometrically satisfiable at all? Fills OutError on failure.
+	 *  Exported because the EDITOR module calls it too — the authoring tool must reject bad params with the same
+	 *  predicate the runtime fails on, not a second copy of the rules that agrees with it only for now. */
+	FPSROGUELITE_API bool Validate(FString& OutError) const;
 };
 
 /**

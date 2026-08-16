@@ -44,6 +44,18 @@ float AFPSRArenaBlocker::GetYawDegrees() const
 	return GetActorRotation().Yaw;
 }
 
+void AFPSRArenaBlocker::SetFootprint(const FVector2D& HalfExtentXY, float HeightCm)
+{
+	if (!Box)
+	{
+		return;
+	}
+	// Written as UNSCALED extent with the actor scale left at 1: a designer who then drags the actor's scale gets
+	// the number they expect, instead of compounding onto a scale the tool quietly baked in.
+	Box->SetBoxExtent(FVector(HalfExtentXY.X, HalfExtentXY.Y, HeightCm * 0.5f), /*bUpdateOverlaps=*/false);
+	SetActorScale3D(FVector::OneVector);
+}
+
 AFPSRArenaLandmark::AFPSRArenaLandmark()
 {
 	PrimaryActorTick.bCanEverTick = false;
