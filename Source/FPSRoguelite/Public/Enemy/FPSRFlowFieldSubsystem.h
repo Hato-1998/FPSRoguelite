@@ -72,6 +72,16 @@ public:
 	 *  once a streamed map's collision is registered (S3). Returns false if no volume with that MapId is loaded. */
 	bool BakeDiscoveredMap(const FGameplayTag& MapId);
 
+	/** ADR 0010: adopt a GENERATED arena surface as the field. The generator owns the obstacle mask — nothing here
+	 *  traces the world, which is what keeps a stage transition off the game thread's critical path (a world-trace
+	 *  bake is thousands of downtraces and cannot be moved off it).
+	 *
+	 *  Also re-baselines: a regenerated arena IS the new topology, and keeping the previous one would let
+	 *  ResetDoorTopologyToBaseline resurrect the old arena's walls. Bumps the topology generation and recomputes,
+	 *  so swarm flow and the origin-aware combat gate are correct on return. Server-only; false off authority or
+	 *  on malformed data — callers must NOT substitute a world-trace bake (invariant 5). */
+	bool AdoptArenaSurface(const FFPSRFlowFieldSurfaceData& Surface);
+
 	/** U (P-B): a breakable seam door was destroyed (server) — open the unified grid's cross-seam edges the door spanned
 	 *  and recompute NOW so swarm flow + the origin-aware combat gate cross it immediately. No-op with no unified field
 	 *  (single-map / pre-content) or off authority — the closed seam kept the slots isolated, so nothing changes. Called by

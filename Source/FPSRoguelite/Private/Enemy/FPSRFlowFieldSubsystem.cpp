@@ -2,6 +2,7 @@
 
 #include "Enemy/FPSRFlowFieldSubsystem.h"
 #include "Enemy/FPSRFlowFieldBoundsVolume.h"
+#include "Arena/FPSRArenaActor.h"
 #include "Core/FPSRGameState.h"
 #include "Core/FPSRLogChannels.h"
 #include "Engine/World.h"
@@ -108,7 +109,31 @@ void UFPSRFlowFieldSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 		bAnyMapIdVolume = true; // a MapId'd slot -> baked into the unified grid by BuildUnifiedField (needs a bUnifiedExtent)
 	}
 
-	if (UnifiedVolume)
+	// ADR 0010: an arena actor OWNS the obstacle mask. We PULL it here rather than letting the actor push during its
+	// BeginPlay, because actor BeginPlay runs BEFORE world subsystems' OnWorldBeginPlay — a push would be overwritten
+	// by whichever bake ran below a moment later.
+	if (AFPSRArenaActor* Arena = AFPSRArenaActor::FindInWorld(&InWorld))
+	{
+		if (Arena->BuildLocalLayout())
+		{
+			UnifiedComputer = NewObject<UFPSRFlowFieldComputer>(this);
+			UnifiedComputer->BuildFromSurfaceData(Arena->GetLayout().Surface);
+			UnifiedComputer->ExtractSurfaceData(BakedBaseline);
+			bHasBaseline = true;
+			UE_LOG(LogFPSR, Log, TEXT("[FlowField] Arena field adopted from %s (seed %d) — no world trace."),
+				*Arena->GetName(), Arena->GetActiveSeed());
+		}
+		else
+		{
+			// Fail-fast, NOT fall-through. Invariant 5 forbids a world-trace fallback: the trace anchors its grid Z
+			// from the PlayerStart downtrace, and ADR 0010 keeps a spare arena parked below the live one — the day
+			// this fallback fired it would anchor the whole field to that spare arena's roof.
+			UE_LOG(LogFPSR, Error,
+				TEXT("[FlowField] %s is present but produced no layout — building NO flow field. This is a content error (fix the arena params); the world-trace bake is deliberately NOT used as a fallback."),
+				*Arena->GetName());
+		}
+	}
+	else if (UnifiedVolume)
 	{
 		// Multimap: the pre-sized bUnifiedExtent grid with every MapId'd slot baked in (sets UnifiedComputer + SlotBounds +
 		// bUnifiedMultiSlot + the BakedBaseline snapshot).
@@ -256,6 +281,40 @@ bool UFPSRFlowFieldSubsystem::BakeSlotIntoUnified(UWorld& InWorld, const AFPSRFl
 			*Slot.GetMapId().ToString(), CellOffset.X, CellOffset.Y);
 	}
 	return bOk;
+}
+
+bool UFPSRFlowFieldSubsystem::AdoptArenaSurface(const FFPSRFlowFieldSurfaceData& Surface)
+{
+	if (!HasServerAuthority())
+	{
+		return false;
+	}
+	if (Surface.GridDimX <= 0 || Surface.GridDimY <= 0)
+	{
+		UE_LOG(LogFPSR, Error, TEXT("[FlowField] AdoptArenaSurface rejected: empty surface data."));
+		return false;
+	}
+
+	if (!UnifiedComputer)
+	{
+		UnifiedComputer = NewObject<UFPSRFlowFieldComputer>(this);
+	}
+	UnifiedComputer->BuildFromSurfaceData(Surface);
+
+	// The regenerated arena IS the baseline now. Keeping the old snapshot would let a later
+	// ResetDoorTopologyToBaseline restore the PREVIOUS arena's walls into the current one.
+	UnifiedComputer->ExtractSurfaceData(BakedBaseline);
+	bHasBaseline = true;
+	bTopologyMutatedSinceBaseline = false;
+
+	// Connectivity changed wholesale, so clients' late-join ack and the freeze pre-unfreeze recompute must both see
+	// a new generation; then recompute immediately rather than leaving up to 0.2s of stale flow after a swap.
+	++TopologyGeneration;
+	RecomputeAllFields();
+
+	UE_LOG(LogFPSR, Log, TEXT("[FlowField] Adopted arena surface %dx%d cell=%.0f (topology gen %d)."),
+		Surface.GridDimX, Surface.GridDimY, Surface.CellSize, TopologyGeneration);
+	return true;
 }
 
 bool UFPSRFlowFieldSubsystem::BakeDiscoveredMap(const FGameplayTag& MapId)
