@@ -35,6 +35,43 @@ struct FFPSRArenaCluster
 };
 
 /**
+ * Which side of the 45/60 authoring band a procedural prop sits on (ADR 0010 D4).
+ *
+ * There is no third option on purpose. The band between 45 and 60 cm is a trap — the player cannot step over it
+ * and the flow field's obstacle probe starts above it, so the swarm walks into it and jams. Making the tier an
+ * enum with exactly two members means L1 cannot accidentally author into that gap.
+ */
+UENUM()
+enum class EFPSRArenaPropTier : uint8
+{
+	/** >= 60 cm. Occupies its cell; the swarm routes around it. */
+	Blocking,
+	/** <= 45 cm. Occupies nothing — both the player and the swarm walk over it. Density and texture only. */
+	Passable,
+};
+
+/** One procedurally placed micro prop (L1). Cell-space so it cannot drift off the grid the mask was built on. */
+USTRUCT(BlueprintType)
+struct FFPSRArenaProp
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadOnly, Category = "FPSR|Arena")
+	FIntPoint Cell = FIntPoint::ZeroValue;
+
+	UPROPERTY(BlueprintReadOnly, Category = "FPSR|Arena")
+	EFPSRArenaPropTier Tier = EFPSRArenaPropTier::Passable;
+
+	/** Which mesh of the set to use. Seeded, so the same seed dresses the arena identically everywhere. */
+	UPROPERTY(BlueprintReadOnly, Category = "FPSR|Arena")
+	uint8 Variant = 0;
+
+	/** Seeded yaw in 90-degree steps — circuit-board parts sit on an axis, not at arbitrary angles. */
+	UPROPERTY(BlueprintReadOnly, Category = "FPSR|Arena")
+	float YawDegrees = 0.0f;
+};
+
+/**
  * One authored blocking volume, in WORLD space (centre + half-extent + yaw).
  *
  * The generator RASTERISES these into cells. It does not trace them, and that distinction is the whole reason
@@ -125,6 +162,25 @@ struct FFPSRArenaGenParams
 	float ClusterFillMin = 0.45f;
 	float ClusterFillMax = 0.80f;
 
+	// --- L1 micro props (ADR 0010 D5 / 0011 E6) ---------------------------------------------------------
+
+	/** Blocking micro props per 100 open cells. These narrow corridors, so this is a gameplay dial, not dressing. */
+	float BlockingPropsPer100Cells = 1.2f;
+
+	/** Passable (<=45 cm) props per 100 open cells. Free of gameplay consequence — pure density. */
+	float PassablePropsPer100Cells = 6.0f;
+
+	/** Minimum gap in cells between two BLOCKING micro props. Below the swarm's own footprint they could cup a
+	 *  pocket between them, which is the failure invariant 7 exists to make impossible. */
+	int32 PropMinSpacingCells = 3;
+
+	/** Ceiling on how much of a corridor's slack L1 may eat, as a fraction. At 1.0 a dense seed could shave every
+	 *  corridor to the legal minimum — technically valid and miserable to move through. */
+	float MaxSlackConsumption = 0.5f;
+
+	/** How many mesh variants the content provides per tier (the generator only picks an index). */
+	int32 PropVariantCount = 4;
+
 	FFPSRArenaGenParams()
 	{
 		SlotGridOptions = { FIntPoint(2, 2), FIntPoint(2, 1), FIntPoint(1, 2), FIntPoint(3, 2), FIntPoint(2, 3) };
@@ -159,6 +215,10 @@ struct FFPSRArenaLayout
 
 	/** Carried through so L1 can keep its props off them and the HUD can point at them. */
 	TArray<FFPSRArenaAuthoredLandmark> Landmarks;
+
+	/** L1 output. Blocking entries are already reflected in Surface.BlockedField; passable ones occupy nothing. */
+	UPROPERTY(BlueprintReadOnly, Category = "FPSR|Arena")
+	TArray<FFPSRArenaProp> Props;
 
 	UPROPERTY(BlueprintReadOnly, Category = "FPSR|Arena")
 	int32 Seed = 0;

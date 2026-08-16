@@ -199,6 +199,161 @@ FFPSRArenaAuthoredBox FFPSRArenaGenerator::ClusterToAuthoredBox(const FFPSRArena
 	return Box;
 }
 
+namespace
+{
+	/**
+	 * L1 (ADR 0010 D5 / 0011 E6): fill the slack the authored skeleton left with micro props.
+	 *
+	 * The hard part is not placing them, it is placing them without breaking the invariants the designer just
+	 * satisfied. This does it with a LOCAL check rather than a place-then-validate-then-retry loop:
+	 *
+	 * Every open cell must keep run >= MinCorridorWidth on BOTH axes (that is what the validator measures).
+	 * Blocking one cell only changes the X-runs of its own row and the Y-runs of its own column, so checking the
+	 * four segments around the candidate is sufficient — and a segment is acceptable only if it vanishes entirely
+	 * or stays at least MinCorridorWidth long. A chain of props therefore cannot leave a sub-minimum gap between
+	 * them, which is also what stops props from quietly walling a corridor off.
+	 *
+	 * Placement order is a seeded Fisher-Yates over a fixed candidate list — deterministic on every machine
+	 * (invariant 10) while still looking scattered rather than raster-scanned.
+	 */
+	void PlaceMicroProps(FRandomStream& RS, const FFPSRArenaGenParams& Params, FFPSRArenaLayout& Layout)
+	{
+		const int32 W = Layout.GridDims.X;
+		const int32 H = Layout.GridDims.Y;
+		const int32 MinW = FMath::Max(1, Params.MinCorridorWidthCells);
+		const int32 Spacing = FMath::Max(1, Params.PropMinSpacingCells);
+		const int32 Variants = FMath::Max(1, Params.PropVariantCount);
+		FFPSRFlowFieldSurfaceData& S = Layout.Surface;
+
+		auto Open = [&Layout](int32 CX, int32 CY) { return FFPSRArenaGenerator::IsCellOpen(Layout, CX, CY); };
+
+		// Landmarks are navigation beacons (0010 D6). Burying one is not a cosmetic problem — it removes the only
+		// thing telling a first-person player which way they are facing.
+		TArray<bool> Reserved;
+		Reserved.Init(false, W * H);
+		for (const FFPSRArenaAuthoredLandmark& LM : Layout.Landmarks)
+		{
+			const int32 LCX = FMath::FloorToInt((LM.Location.X - Layout.GridOrigin.X) / Layout.CellSize);
+			const int32 LCY = FMath::FloorToInt((LM.Location.Y - Layout.GridOrigin.Y) / Layout.CellSize);
+			const int32 R = FMath::Max(0, LM.ReserveRadiusCells);
+			for (int32 DY = -R; DY <= R; ++DY)
+			{
+				for (int32 DX = -R; DX <= R; ++DX)
+				{
+					const int32 CX = LCX + DX;
+					const int32 CY = LCY + DY;
+					if (CX >= 0 && CY >= 0 && CX < W && CY < H) { Reserved[CY * W + CX] = true; }
+				}
+			}
+		}
+
+		// Survey: how much room is there, and how much of it is spare?
+		TArray<int32> Candidates;
+		Candidates.Reserve(W * H / 4);
+		int32 OpenCells = 0;
+		int32 SlackCells = 0;
+		for (int32 CY = 0; CY < H; ++CY)
+		{
+			for (int32 CX = 0; CX < W; ++CX)
+			{
+				if (!Open(CX, CY)) { continue; }
+				++OpenCells;
+
+				int32 RunX = 1, RunY = 1;
+				for (int32 X = CX - 1; Open(X, CY); --X) { ++RunX; }
+				for (int32 X = CX + 1; Open(X, CY); ++X) { ++RunX; }
+				for (int32 Y = CY - 1; Open(CX, Y); --Y) { ++RunY; }
+				for (int32 Y = CY + 1; Open(CX, Y); ++Y) { ++RunY; }
+				if (FMath::Min(RunX, RunY) > MinW) { ++SlackCells; }
+
+				if (!Reserved[CY * W + CX]) { Candidates.Add(CY * W + CX); }
+			}
+		}
+		if (OpenCells == 0 || Candidates.Num() == 0) { return; }
+
+		// Two ceilings, and the tighter one wins: the authored density, and the share of slack L1 is allowed to
+		// eat. Without the second, a dense seed could shave every corridor to the legal minimum — valid by the
+		// letter of the invariants and miserable to move through.
+		const int32 DensityBudget = FMath::RoundToInt(OpenCells * Params.BlockingPropsPer100Cells / 100.0f);
+		const int32 SlackBudget = FMath::RoundToInt(SlackCells * Params.MaxSlackConsumption);
+		const int32 BlockingBudget = FMath::Max(0, FMath::Min(DensityBudget, SlackBudget));
+		const int32 PassableBudget = FMath::Max(0, FMath::RoundToInt(OpenCells * Params.PassablePropsPer100Cells / 100.0f));
+
+		// Seeded shuffle of a fixed list: same result everywhere, without the raster-scan look of taking cells in order.
+		for (int32 i = Candidates.Num() - 1; i > 0; --i)
+		{
+			Candidates.Swap(i, RS.RandRange(0, i));
+		}
+
+		TArray<bool> SpacingBlocked;
+		SpacingBlocked.Init(false, W * H);
+		TArray<bool> Used;
+		Used.Init(false, W * H);
+
+		// --- blocking tier ---------------------------------------------------------------------------------
+		int32 Placed = 0;
+		for (int32 Index = 0; Index < Candidates.Num() && Placed < BlockingBudget; ++Index)
+		{
+			const int32 Cell = Candidates[Index];
+			const int32 CX = Cell % W;
+			const int32 CY = Cell / W;
+			if (SpacingBlocked[Cell] || !Open(CX, CY)) { continue; }
+
+			// Each of the four segments this would carve must either disappear or stay usable. "Or disappear" is
+			// what lets a prop hug a wall; "or stay >= MinW" is what stops it from pinching a corridor.
+			int32 Left = 0, Right = 0, Up = 0, Down = 0;
+			for (int32 X = CX - 1; Open(X, CY); --X) { ++Left; }
+			for (int32 X = CX + 1; Open(X, CY); ++X) { ++Right; }
+			for (int32 Y = CY - 1; Open(CX, Y); --Y) { ++Up; }
+			for (int32 Y = CY + 1; Open(CX, Y); ++Y) { ++Down; }
+			auto SegmentOk = [MinW](int32 Len) { return Len == 0 || Len >= MinW; };
+			if (!SegmentOk(Left) || !SegmentOk(Right) || !SegmentOk(Up) || !SegmentOk(Down)) { continue; }
+
+			S.BlockedField[SurfIndex(Cell, 0)] = true;
+
+			FFPSRArenaProp Prop;
+			Prop.Cell = FIntPoint(CX, CY);
+			Prop.Tier = EFPSRArenaPropTier::Blocking;
+			Prop.Variant = static_cast<uint8>(RS.RandRange(0, Variants - 1));
+			Prop.YawDegrees = 90.0f * RS.RandRange(0, 3);
+			Layout.Props.Add(Prop);
+			Used[Cell] = true;
+			++Placed;
+
+			for (int32 DY = -Spacing; DY <= Spacing; ++DY)
+			{
+				for (int32 DX = -Spacing; DX <= Spacing; ++DX)
+				{
+					const int32 NX = CX + DX;
+					const int32 NY = CY + DY;
+					if (NX >= 0 && NY >= 0 && NX < W && NY < H) { SpacingBlocked[NY * W + NX] = true; }
+				}
+			}
+		}
+
+		// --- passable tier ---------------------------------------------------------------------------------
+		// No cell occupancy at all, so no safety check is possible or needed: at <= 45 cm both the player and the
+		// swarm step straight over these. They are texture, not terrain.
+		int32 PlacedPassable = 0;
+		for (int32 Index = 0; Index < Candidates.Num() && PlacedPassable < PassableBudget; ++Index)
+		{
+			const int32 Cell = Candidates[Index];
+			const int32 CX = Cell % W;
+			const int32 CY = Cell / W;
+			if (Used[Cell] || !Open(CX, CY)) { continue; }
+
+			FFPSRArenaProp Prop;
+			Prop.Cell = FIntPoint(CX, CY);
+			Prop.Tier = EFPSRArenaPropTier::Passable;
+			Prop.Variant = static_cast<uint8>(RS.RandRange(0, Variants - 1));
+			Prop.YawDegrees = 90.0f * RS.RandRange(0, 3);
+			Layout.Props.Add(Prop);
+			Used[Cell] = true;
+			++PlacedPassable;
+		}
+	}
+}
+
 bool FFPSRArenaGenerator::Generate(int32 Seed, const FFPSRArenaGenParams& Params, const FVector& ArenaOrigin,
 	const FFPSRArenaAuthoredInput& Authored, FFPSRArenaLayout& OutLayout)
 {
@@ -319,9 +474,16 @@ bool FFPSRArenaGenerator::Generate(int32 Seed, const FFPSRArenaGenParams& Params
 		BlockCell(LCX, LCY);
 	}
 
+	// --- L1: procedural micro props in whatever slack the authored skeleton left -----------------------------
+	{
+		FRandomStream RS(Seed);
+		PlaceMicroProps(RS, Params, OutLayout);
+	}
+
 	UE_LOG(LogFPSR, Log,
-		TEXT("[Arena] Generated seed=%d grid=%dx%d cell=%.0f authored(blockers=%d landmarks=%d) origin=%s"),
-		Seed, W, H, Params.CellSize, Authored.Blockers.Num(), Authored.Landmarks.Num(), *ArenaOrigin.ToString());
+		TEXT("[Arena] Generated seed=%d grid=%dx%d cell=%.0f authored(blockers=%d landmarks=%d) props=%d origin=%s"),
+		Seed, W, H, Params.CellSize, Authored.Blockers.Num(), Authored.Landmarks.Num(),
+		OutLayout.Props.Num(), *ArenaOrigin.ToString());
 
 	return true;
 }

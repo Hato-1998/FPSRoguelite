@@ -295,8 +295,21 @@ void AFPSRArenaActor::RebuildRepresentation()
 	AddBox(BlockingMeshes, FVector(Origin.X - T * 0.5, Origin.Y + SpanY * 0.5, WallZ), FVector(T, SpanY, WallHeight));
 	AddBox(BlockingMeshes, FVector(Origin.X + SpanX + T * 0.5, Origin.Y + SpanY * 0.5, WallZ), FVector(T, SpanY, WallHeight));
 
-	UE_LOG(LogFPSR, Log, TEXT("[Arena] Representation rebuilt: %d clusters + 4 walls + floor (seed %d)."),
-		Layout.Clusters.Num(), Layout.Seed);
+	// L1 micro props. Both tiers get real collision — that is the point of the height rule rather than a collision
+	// flag: a 30 cm box IS steppable at MaxStepHeight 45, and a 100 cm one IS not. The geometry and the swarm's
+	// mask agree because both are derived from the same number.
+	for (const FFPSRArenaProp& Prop : Layout.Props)
+	{
+		const bool bBlocking = (Prop.Tier == EFPSRArenaPropTier::Blocking);
+		const double PropHeight = bBlocking ? BlockingPropHeight : PassablePropHeight;
+		const FVector Centre = Layout.CellCenterWorld(Prop.Cell.X, Prop.Cell.Y);
+		AddBox(BlockingMeshes,
+			FVector(Centre.X, Centre.Y, Origin.Z + PropHeight * 0.5),
+			FVector(Cell * 0.9, Cell * 0.9, PropHeight));
+	}
+
+	UE_LOG(LogFPSR, Log, TEXT("[Arena] Representation rebuilt: %d clusters + %d props + 4 walls + floor (seed %d)."),
+		Layout.Clusters.Num(), Layout.Props.Num(), Layout.Seed);
 }
 
 AFPSRArenaActor* AFPSRArenaActor::FindInWorld(const UWorld* World)

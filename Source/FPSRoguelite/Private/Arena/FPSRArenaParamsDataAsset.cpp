@@ -19,6 +19,11 @@ FFPSRArenaGenParams UFPSRArenaParamsDataAsset::ToGenParams() const
 	Out.BoundaryMarginCells = BoundaryMarginCells;
 	Out.ClusterFillMin = ClusterFillMin;
 	Out.ClusterFillMax = ClusterFillMax;
+	Out.BlockingPropsPer100Cells = BlockingPropsPer100Cells;
+	Out.PassablePropsPer100Cells = PassablePropsPer100Cells;
+	Out.PropMinSpacingCells = PropMinSpacingCells;
+	Out.MaxSlackConsumption = MaxSlackConsumption;
+	Out.PropVariantCount = PropVariantCount;
 	return Out;
 }
 

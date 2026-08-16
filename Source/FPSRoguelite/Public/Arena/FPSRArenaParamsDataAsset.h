@@ -55,6 +55,26 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "아레나|골격", meta = (DisplayName = "클러스터 채움 비율 상한", ClampMin = "0.05", ClampMax = "1.0"))
 	float ClusterFillMax = 0.80f;
 
+	/** 열린 셀 100개당 **차단** 미세 프롭 수. 통로를 좁히므로 장식이 아니라 게임플레이 다이얼이다. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "아레나|미세 프롭", meta = (DisplayName = "차단 프롭 밀도(/100셀)", ClampMin = "0.0"))
+	float BlockingPropsPer100Cells = 1.2f;
+
+	/** 열린 셀 100개당 **통과**(≤45cm) 프롭 수. 통행에 영향이 없어 순수 밀도값이다. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "아레나|미세 프롭", meta = (DisplayName = "통과 프롭 밀도(/100셀)", ClampMin = "0.0"))
+	float PassablePropsPer100Cells = 6.0f;
+
+	/** 차단 프롭 사이 최소 간격(셀). 적 몸집보다 좁으면 둘이 오목한 주머니를 만들 수 있다. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "아레나|미세 프롭", meta = (DisplayName = "차단 프롭 최소 간격(셀)", ClampMin = "1"))
+	int32 PropMinSpacingCells = 3;
+
+	/** 통로 여유분을 L1이 얼마까지 먹어도 되는지(비율). 1.0이면 모든 통로가 법적 최소폭까지 깎일 수 있다. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "아레나|미세 프롭", meta = (DisplayName = "여유분 소비 상한", ClampMin = "0.0", ClampMax = "1.0"))
+	float MaxSlackConsumption = 0.5f;
+
+	/** 콘텐츠가 티어마다 제공하는 메시 변형 수(생성기는 인덱스만 고른다). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "아레나|미세 프롭", meta = (DisplayName = "프롭 변형 수", ClampMin = "1"))
+	int32 PropVariantCount = 4;
+
 	/** Copy into the plain contract the generator actually takes. */
 	FFPSRArenaGenParams ToGenParams() const;
 

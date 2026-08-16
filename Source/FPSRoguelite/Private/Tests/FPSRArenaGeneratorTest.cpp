@@ -136,6 +136,81 @@ bool FFPSRArenaGeneratorTest::RunTest(const FString& Parameters)
 		}
 	}
 
+	// --- 4b. L1 micro props (ADR 0010 D5 / 0011 E6) -----------------------------------------------------
+	// The 100-seed loop above already proves L1 cannot break the invariants — Generate runs it, so a prop that
+	// pinched a corridor would surface as a validation failure there. What is left is the properties only L1 has.
+	{
+		FFPSRArenaLayout L;
+		TestTrue(TEXT("build with props"), BuildFromProposal(31, Params, Origin, L));
+		TestTrue(TEXT("L1 placed something"), L.Props.Num() > 0);
+
+		int32 Blocking = 0, Passable = 0;
+		TArray<FIntPoint> BlockingCells;
+		for (const FFPSRArenaProp& P : L.Props)
+		{
+			if (P.Tier == EFPSRArenaPropTier::Blocking) { ++Blocking; BlockingCells.Add(P.Cell); }
+			else { ++Passable; }
+
+			TestTrue(TEXT("prop yaw is axis-aligned"),
+				FMath::IsNearlyZero(FMath::Fmod(P.YawDegrees, 90.0f)));
+			TestTrue(TEXT("prop variant within the authored set"), P.Variant < Params.PropVariantCount);
+
+			// A blocking prop must have taken its cell; a passable one must NOT have.
+			const bool bCellOpen = FFPSRArenaGenerator::IsCellOpen(L, P.Cell.X, P.Cell.Y);
+			if (P.Tier == EFPSRArenaPropTier::Blocking) { TestFalse(TEXT("blocking prop occupies its cell"), bCellOpen); }
+			else { TestTrue(TEXT("passable prop leaves its cell open"), bCellOpen); }
+		}
+		TestTrue(TEXT("both tiers present"), Blocking > 0 && Passable > 0);
+
+		// Min spacing: two blocking props closer than this could cup a pocket between them (invariant 7).
+		for (int32 i = 0; i < BlockingCells.Num(); ++i)
+		{
+			for (int32 j = i + 1; j < BlockingCells.Num(); ++j)
+			{
+				const int32 Cheb = FMath::Max(
+					FMath::Abs(BlockingCells[i].X - BlockingCells[j].X),
+					FMath::Abs(BlockingCells[i].Y - BlockingCells[j].Y));
+				TestTrue(*FString::Printf(TEXT("blocking props %d,%d respect min spacing (%d)"), i, j, Cheb),
+					Cheb >= Params.PropMinSpacingCells);
+			}
+		}
+
+		// Determinism has to cover the props too — they are generated from the same seed and never replicated.
+		FFPSRArenaLayout L2;
+		TestTrue(TEXT("rebuild same seed"), BuildFromProposal(31, Params, Origin, L2));
+		if (TestEqual(TEXT("same seed -> same prop count"), L2.Props.Num(), L.Props.Num()))
+		{
+			bool bAllSame = true;
+			for (int32 i = 0; i < L.Props.Num(); ++i)
+			{
+				bAllSame &= (L.Props[i].Cell == L2.Props[i].Cell)
+					&& (L.Props[i].Tier == L2.Props[i].Tier)
+					&& (L.Props[i].Variant == L2.Props[i].Variant);
+			}
+			TestTrue(TEXT("same seed -> identical props"), bAllSame);
+		}
+	}
+
+	// --- 4c. landmarks are never buried (ADR 0010 D6) ---------------------------------------------------
+	{
+		FFPSRArenaAuthoredInput Authored;
+		FFPSRArenaAuthoredLandmark LM;
+		LM.Location = FVector(Origin.X + 40.0 * Params.CellSize, Origin.Y + 40.0 * Params.CellSize, Origin.Z);
+		LM.ReserveRadiusCells = 3;
+		LM.bBlocking = false;   // a floor beacon: it must stay VISIBLE, not become an obstacle
+		Authored.Landmarks.Add(LM);
+
+		FFPSRArenaLayout L;
+		TestTrue(TEXT("build with a landmark"), FFPSRArenaGenerator::Generate(9, Params, Origin, Authored, L));
+
+		for (const FFPSRArenaProp& P : L.Props)
+		{
+			const int32 Cheb = FMath::Max(FMath::Abs(P.Cell.X - 40), FMath::Abs(P.Cell.Y - 40));
+			TestTrue(*FString::Printf(TEXT("no prop inside the landmark reserve (cheb %d)"), Cheb),
+				Cheb > LM.ReserveRadiusCells);
+		}
+	}
+
 	// --- 5. the validator actually FAILS a broken arena -------------------------------------------------
 	// Without this the suite proves only that good input passes, which a validator that returns success
 	// unconditionally would also satisfy.

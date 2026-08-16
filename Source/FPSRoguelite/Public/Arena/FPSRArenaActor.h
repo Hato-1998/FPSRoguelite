@@ -110,6 +110,15 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "아레나|화이트박스", meta = (DisplayName = "바닥판 두께(cm)", ClampMin = "1"))
 	float FloorThickness = 50.0f;
 
+	/** 차단 미세 프롭 높이(cm). **60 미만으로 못 내린다** — 45~60 은 플로우필드가 못 보는 구간이라
+	 *  적이 낀다(ADR 0010 D4). 클램프가 그 구간을 저작에서 아예 막는다. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "아레나|화이트박스", meta = (DisplayName = "차단 프롭 높이(cm)", ClampMin = "60"))
+	float BlockingPropHeight = 100.0f;
+
+	/** 통과 미세 프롭 높이(cm). **45 초과 못 올린다** — 같은 이유로 반대쪽 가드다. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "아레나|화이트박스", meta = (DisplayName = "통과 프롭 높이(cm)", ClampMin = "1", ClampMax = "45"))
+	float PassablePropHeight = 30.0f;
+
 	/** The one replicated thing. Clients rebuild everything else from it. */
 	UPROPERTY(ReplicatedUsing = OnRep_ActiveSeed)
 	int32 ActiveSeed = 0;
