@@ -257,7 +257,7 @@ protected:
 	TObjectPtr<UFPSREnemyHealthComponent> HealthComponent;
 
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Enemy")
-	float MoveSpeed = 250.0f;
+	float MoveSpeed = 750.0f;
 
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Enemy")
 	float StopDistance = 120.0f;

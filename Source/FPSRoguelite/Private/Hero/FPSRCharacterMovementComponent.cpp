@@ -73,6 +73,11 @@ UFPSRCharacterMovementComponent::UFPSRCharacterMovementComponent()
 	// jumps out of slides, fights mid-air and lands into cover. Overridable per-hero in the Blueprint.
 	AirControl = 0.4f;
 
+	// Raised with the 2026-08-16 x1.5 speed pass (engine default 2048 -> 3070, rounded to 10 like the rest). Speed and
+	// acceleration have to move together: leaving the engine default here would make a faster player take 1.5x as long
+	// to reach the new cap, which reads as sluggish rather than fast. Overridable per-hero in the Blueprint.
+	MaxAcceleration = 3070.0f;
+
 	// Seed the cap from the layers rather than leaving the engine's own MaxWalkSpeed default in place, so the
 	// composition below owns the value from the very first frame.
 	RefreshWalkSpeedCap();

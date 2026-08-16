@@ -790,7 +790,7 @@ protected:
 
 	/** Baseline walk speed before MoveSpeedMultiplier. Designers may tune per-hero. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Movement")
-	float BaseWalkSpeed = 600.0f;
+	float BaseWalkSpeed = 900.0f;
 
 
 	/** Invulnerability window (seconds) after taking contact damage; further hits within it are ignored.
