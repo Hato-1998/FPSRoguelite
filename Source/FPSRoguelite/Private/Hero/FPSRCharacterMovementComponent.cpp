@@ -144,7 +144,7 @@ bool UFPSRCharacterMovementComponent::CanEnterSlide() const
 	// Entry must be at least as strict as the exit. If a designer ever tunes SlideMinSpeed above SlideMinEnterSpeed the
 	// raw values would let a slide start and immediately satisfy its own too-slow exit, flickering every frame; taking
 	// the max makes a mistuned pair merely hard to trigger instead of visibly broken.
-	const float EnterThreshold = FMath::Max(SlideMinEnterSpeed, SlideMinSpeed);
+	const float EnterThreshold = FPSRScaled(FMath::Max(SlideMinEnterSpeed, SlideMinSpeed));
 	return Velocity.SizeSquared2D() >= FMath::Square(EnterThreshold);
 }
 
@@ -258,8 +258,8 @@ void UFPSRCharacterMovementComponent::StartSliding()
 	// taking the max with the incoming speed keeps that momentum. Meanwhile re-sliding at or above the entry cap gains
 	// nothing, which is what stops jump-slide cycles from ratcheting speed upward.
 	const float BoostedSpeed = FMath::Min(
-		FMath::Max(CurrentSpeed, FMath::Min(CurrentSpeed * SlideEnterSpeedMultiplier, SlideMaxEntrySpeed)),
-		SlideMaxSpeed);
+		FMath::Max(CurrentSpeed, FMath::Min(CurrentSpeed * SlideEnterSpeedMultiplier, FPSRScaled(SlideMaxEntrySpeed))),
+		FPSRScaled(SlideMaxSpeed));
 
 	const FVector SlideDirection = PlanarVelocity.GetSafeNormal();
 	if (!SlideDirection.IsNearlyZero())
@@ -846,11 +846,14 @@ void UFPSRCharacterMovementComponent::UpdateCharacterStateBeforeMovement(float D
 		if (SlopeAccelerationScale > 0.0f && !FMath::IsNearlyZero(SlopeAlignment))
 		{
 			const float GravityMagnitude = FMath::Abs(GetGravityZ());
-			SlopeBonusThisFrame = GravityMagnitude * SlopeAlignment * SlopeAccelerationScale * DeltaSeconds;
+			// Scaled like every other acceleration: gravity is a world constant, so an unscaled slope bonus would
+			// become proportionally negligible the moment the player speeds up, and downhill slides would stop
+			// feeling like downhill slides.
+			SlopeBonusThisFrame = FPSRScaled(GravityMagnitude * SlopeAlignment * SlopeAccelerationScale) * DeltaSeconds;
 			SlideSlopeSpeedBonus += SlopeBonusThisFrame;
 			// Bounded both ways: downhill tops out at the slide ceiling instead of accelerating without limit, and
 			// uphill can't drive the total below zero. Only the curve path reads this running total.
-			SlideSlopeSpeedBonus = FMath::Clamp(SlideSlopeSpeedBonus, -SlideMaxSpeed, SlideMaxSpeed);
+			SlideSlopeSpeedBonus = FMath::Clamp(SlideSlopeSpeedBonus, -FPSRScaled(SlideMaxSpeed), FPSRScaled(SlideMaxSpeed));
 		}
 
 		// Speed and heading are handled separately: the curve (or the braking deceleration) owns HOW FAST, this owns
@@ -898,7 +901,9 @@ void UFPSRCharacterMovementComponent::UpdateCharacterStateBeforeMovement(float D
 
 			// Capped on both paths — a long descent reaches the slide's terminal speed rather than growing
 			// indefinitely, and an uphill bonus can't drive the result negative.
-			TargetSpeed = FMath::Clamp(TargetSpeed, 0.0f, SlideMaxSpeed);
+			// THE slide ceiling. The curve path writes Velocity outright a couple of lines below, so GetMaxSpeed()
+			// never sees a slide — scaling only there left this 1400 in force and the whole slide unscaled.
+			TargetSpeed = FMath::Clamp(TargetSpeed, 0.0f, FPSRScaled(SlideMaxSpeed));
 
 			Velocity.X = SlideHeading.X * TargetSpeed;
 			Velocity.Y = SlideHeading.Y * TargetSpeed;
@@ -911,7 +916,7 @@ void UFPSRCharacterMovementComponent::UpdateCharacterStateBeforeMovement(float D
 		// unconditional again, with crouch-release, leaving the ground and the gate live the whole way down.
 		const bool bReleasedCrouch = !bWantsToCrouch;
 		const bool bLeftGround = !IsMovingOnGround();
-		const bool bTooSlow = Velocity.SizeSquared2D() < FMath::Square(SlideMinSpeed);
+		const bool bTooSlow = Velocity.SizeSquared2D() < FMath::Square(FPSRScaled(SlideMinSpeed));
 		const bool bTimedOut = SlideElapsed >= GetEffectiveSlideMaxDuration();
 		const bool bGateClosed = !IsSpecialMovementAllowed();
 
@@ -1191,12 +1196,17 @@ float UFPSRCharacterMovementComponent::GetMaxSpeed() const
 		// Flat ceiling while sliding: with SlideSpeedCurve assigned the curve writes the speed outright each frame
 		// (UpdateCharacterStateBeforeMovement), so this only has to stay out of its way. A slide holds its committed
 		// direction, so the backpedal penalty deliberately does not apply here.
-		return SlideMaxSpeed * FPSRPlayerSpeedScale();
+		return FPSRScaled(SlideMaxSpeed);
 	}
 
 	// Engine speed for this stance: MaxWalkSpeed standing, MaxWalkSpeedCrouched crouched — and already carrying any
 	// card multiplier, which is why the normalized curve needs no scaling of its own.
-	float MaxSpeed = Super::GetMaxSpeed();
+	// Scaled HERE rather than on the way out, so everything below works in one consistent space. StanceSpeedFrom is
+	// captured by calling this very function (Crouch/UnCrouch sample it before the stance flips), so it arrives
+	// already scaled — a scale applied after the Lerp below would hit it a second time and a 3x setting would ease
+	// down from 9x for the length of a crouch. The curve ramp and backpedal penalty are multiplicative and do not
+	// care which space they are in.
+	float MaxSpeed = FPSRScaled(Super::GetMaxSpeed());
 
 	// Applying the ramp as a MAX SPEED (rather than writing Velocity) keeps knockback, slopes and other external
 	// forces behaving normally.
@@ -1227,9 +1237,7 @@ float UFPSRCharacterMovementComponent::GetMaxSpeed() const
 			MaxSpeed = FMath::Lerp(StanceSpeedFrom, MaxSpeed, TransitionProgress);
 		}
 	}
-	// Scaled at the very end so every term above (curve ramp, backpedal penalty, stance easing, card multiplier)
-	// keeps its shape and only the magnitude moves.
-	return MaxSpeed * FPSRPlayerSpeedScale();
+	return MaxSpeed;
 }
 
 float UFPSRCharacterMovementComponent::GetMaxAcceleration() const
