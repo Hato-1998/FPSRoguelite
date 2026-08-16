@@ -216,14 +216,28 @@ namespace
 	 * Placement order is a seeded Fisher-Yates over a fixed candidate list — deterministic on every machine
 	 * (invariant 10) while still looking scattered rather than raster-scanned.
 	 */
+	/** Rotate a cell offset by 90-degree steps. */
+	FORCEINLINE FIntPoint RotateOffset(const FIntPoint& O, int32 Quarter)
+	{
+		switch (Quarter & 3)
+		{
+			case 1:  return FIntPoint(-O.Y, O.X);
+			case 2:  return FIntPoint(-O.X, -O.Y);
+			case 3:  return FIntPoint(O.Y, -O.X);
+			default: return O;
+		}
+	}
+
 	void PlaceMicroProps(FRandomStream& RS, const FFPSRArenaGenParams& Params, FFPSRArenaLayout& Layout)
 	{
 		const int32 W = Layout.GridDims.X;
 		const int32 H = Layout.GridDims.Y;
 		const int32 MinW = FMath::Max(1, Params.MinCorridorWidthCells);
-		const int32 Spacing = FMath::Max(1, Params.PropMinSpacingCells);
-		const int32 Variants = FMath::Max(1, Params.PropVariantCount);
 		FFPSRFlowFieldSurfaceData& S = Layout.Surface;
+
+		// No authored sets = no props. Deliberately not a fallback to something procedural: an empty list is how
+		// the designer asks to judge the authored skeleton on its own (ADR 0011 invariant 12 baseline).
+		if (Params.PropSets.Num() == 0) { return; }
 
 		auto Open = [&Layout](int32 CX, int32 CY) { return FFPSRArenaGenerator::IsCellOpen(Layout, CX, CY); };
 
@@ -248,8 +262,6 @@ namespace
 		}
 
 		// Survey: how much room is there, and how much of it is spare?
-		TArray<int32> Candidates;
-		Candidates.Reserve(W * H / 4);
 		int32 OpenCells = 0;
 		int32 SlackCells = 0;
 		for (int32 CY = 0; CY < H; ++CY)
@@ -265,91 +277,115 @@ namespace
 				for (int32 Y = CY - 1; Open(CX, Y); --Y) { ++RunY; }
 				for (int32 Y = CY + 1; Open(CX, Y); ++Y) { ++RunY; }
 				if (FMath::Min(RunX, RunY) > MinW) { ++SlackCells; }
-
-				if (!Reserved[CY * W + CX]) { Candidates.Add(CY * W + CX); }
 			}
 		}
-		if (OpenCells == 0 || Candidates.Num() == 0) { return; }
+		if (OpenCells == 0) { return; }
 
-		// Two ceilings, and the tighter one wins: the authored density, and the share of slack L1 is allowed to
-		// eat. Without the second, a dense seed could shave every corridor to the legal minimum — valid by the
-		// letter of the invariants and miserable to move through.
-		const int32 DensityBudget = FMath::RoundToInt(OpenCells * Params.BlockingPropsPer100Cells / 100.0f);
-		const int32 SlackBudget = FMath::RoundToInt(SlackCells * Params.MaxSlackConsumption);
-		const int32 BlockingBudget = FMath::Max(0, FMath::Min(DensityBudget, SlackBudget));
-		const int32 PassableBudget = FMath::Max(0, FMath::RoundToInt(OpenCells * Params.PassablePropsPer100Cells / 100.0f));
+		const int32 SlackBudget = FMath::Max(0, FMath::RoundToInt(SlackCells * Params.MaxSlackConsumption));
+		int32 SlackUsed = 0;
 
-		// Seeded shuffle of a fixed list: same result everywhere, without the raster-scan look of taking cells in order.
-		for (int32 i = Candidates.Num() - 1; i > 0; --i)
-		{
-			Candidates.Swap(i, RS.RandRange(0, i));
-		}
+		int32 TotalWeight = 0;
+		for (const FFPSRArenaPropSet& Set : Params.PropSets) { TotalWeight += FMath::Max(1, Set.Weight); }
+		if (TotalWeight <= 0) { return; }
 
-		TArray<bool> SpacingBlocked;
-		SpacingBlocked.Init(false, W * H);
 		TArray<bool> Used;
 		Used.Init(false, W * H);
 
-		// --- blocking tier ---------------------------------------------------------------------------------
-		int32 Placed = 0;
-		for (int32 Index = 0; Index < Candidates.Num() && Placed < BlockingBudget; ++Index)
+		auto SegmentOk = [MinW](int32 Len) { return Len == 0 || Len >= MinW; };
+
+		// Stratified placement: one attempt per lattice cell, anchored at a jittered point inside it. Uniform
+		// random at this count clumps in places and leaves bald patches elsewhere; a jittered lattice covers
+		// evenly while still not reading as a grid.
+		const int32 Pitch = FMath::Max(4, Params.PropSetSpacingCells);
+		const int32 Jitter = FMath::Clamp(Params.PropSetJitterCells, 0, Pitch / 2);
+
+		for (int32 LY = 0; LY * Pitch < H; ++LY)
 		{
-			const int32 Cell = Candidates[Index];
-			const int32 CX = Cell % W;
-			const int32 CY = Cell / W;
-			if (SpacingBlocked[Cell] || !Open(CX, CY)) { continue; }
-
-			// Each of the four segments this would carve must either disappear or stay usable. "Or disappear" is
-			// what lets a prop hug a wall; "or stay >= MinW" is what stops it from pinching a corridor.
-			int32 Left = 0, Right = 0, Up = 0, Down = 0;
-			for (int32 X = CX - 1; Open(X, CY); --X) { ++Left; }
-			for (int32 X = CX + 1; Open(X, CY); ++X) { ++Right; }
-			for (int32 Y = CY - 1; Open(CX, Y); --Y) { ++Up; }
-			for (int32 Y = CY + 1; Open(CX, Y); ++Y) { ++Down; }
-			auto SegmentOk = [MinW](int32 Len) { return Len == 0 || Len >= MinW; };
-			if (!SegmentOk(Left) || !SegmentOk(Right) || !SegmentOk(Up) || !SegmentOk(Down)) { continue; }
-
-			S.BlockedField[SurfIndex(Cell, 0)] = true;
-
-			FFPSRArenaProp Prop;
-			Prop.Cell = FIntPoint(CX, CY);
-			Prop.Tier = EFPSRArenaPropTier::Blocking;
-			Prop.Variant = static_cast<uint8>(RS.RandRange(0, Variants - 1));
-			Prop.YawDegrees = 90.0f * RS.RandRange(0, 3);
-			Layout.Props.Add(Prop);
-			Used[Cell] = true;
-			++Placed;
-
-			for (int32 DY = -Spacing; DY <= Spacing; ++DY)
+			for (int32 LX = 0; LX * Pitch < W; ++LX)
 			{
-				for (int32 DX = -Spacing; DX <= Spacing; ++DX)
+				// Pick the set first so the stream is consumed identically whether or not the placement lands.
+				int32 Roll = RS.RandRange(0, TotalWeight - 1);
+				const FFPSRArenaPropSet* Chosen = &Params.PropSets[0];
+				for (const FFPSRArenaPropSet& Set : Params.PropSets)
 				{
-					const int32 NX = CX + DX;
-					const int32 NY = CY + DY;
-					if (NX >= 0 && NY >= 0 && NX < W && NY < H) { SpacingBlocked[NY * W + NX] = true; }
+					Roll -= FMath::Max(1, Set.Weight);
+					if (Roll < 0) { Chosen = &Set; break; }
+				}
+				const int32 Quarter = Chosen->bAllowRotation ? RS.RandRange(0, 3) : 0;
+
+				// A few jittered attempts inside this lattice cell, then give up on it. Bounded on purpose —
+				// ADR 0010 rules out unbounded regeneration loops, and a cell that cannot host a set is a
+				// legitimate outcome (it is probably inside a cluster).
+				bool bPlaced = false;
+				for (int32 Attempt = 0; Attempt < 3 && !bPlaced; ++Attempt)
+				{
+					const int32 AX = LX * Pitch + Pitch / 2 + (Jitter > 0 ? RS.RandRange(-Jitter, Jitter) : 0);
+					const int32 AY = LY * Pitch + Pitch / 2 + (Jitter > 0 ? RS.RandRange(-Jitter, Jitter) : 0);
+
+					// Pass 1: can every cell of the set even go there?
+					bool bFits = true;
+					for (const FFPSRArenaPropSetEntry& E : Chosen->Entries)
+					{
+						const FIntPoint Off = RotateOffset(E.CellOffset, Quarter);
+						const int32 CX = AX + Off.X;
+						const int32 CY = AY + Off.Y;
+						if (CX < 0 || CY < 0 || CX >= W || CY >= H || !Open(CX, CY)
+							|| Reserved[CY * W + CX] || Used[CY * W + CX])
+						{
+							bFits = false;
+							break;
+						}
+					}
+					if (!bFits) { continue; }
+
+					// Pass 2: apply the blocking entries one at a time, checking the corridor rule after each —
+					// entries within one set narrow each other, so they have to be evaluated in sequence rather
+					// than against the state the set started from. Any failure rolls the whole set back, so a
+					// half-placed group can never survive.
+					TArray<int32> BlockedNow;
+					bool bSafe = true;
+					for (const FFPSRArenaPropSetEntry& E : Chosen->Entries)
+					{
+						if (E.Tier != EFPSRArenaPropTier::Blocking) { continue; }
+						const FIntPoint Off = RotateOffset(E.CellOffset, Quarter);
+						const int32 CX = AX + Off.X;
+						const int32 CY = AY + Off.Y;
+
+						int32 Left = 0, Right = 0, Up = 0, Down = 0;
+						for (int32 X = CX - 1; Open(X, CY); --X) { ++Left; }
+						for (int32 X = CX + 1; Open(X, CY); ++X) { ++Right; }
+						for (int32 Y = CY - 1; Open(CX, Y); --Y) { ++Up; }
+						for (int32 Y = CY + 1; Open(CX, Y); ++Y) { ++Down; }
+						if (!SegmentOk(Left) || !SegmentOk(Right) || !SegmentOk(Up) || !SegmentOk(Down))
+						{
+							bSafe = false;
+							break;
+						}
+						const int32 Cell = CY * W + CX;
+						S.BlockedField[SurfIndex(Cell, 0)] = true;
+						BlockedNow.Add(Cell);
+					}
+					if (!bSafe || SlackUsed + BlockedNow.Num() > SlackBudget)
+					{
+						for (int32 Cell : BlockedNow) { S.BlockedField[SurfIndex(Cell, 0)] = false; }
+						continue;
+					}
+					SlackUsed += BlockedNow.Num();
+
+					for (const FFPSRArenaPropSetEntry& E : Chosen->Entries)
+					{
+						const FIntPoint Off = RotateOffset(E.CellOffset, Quarter);
+						FFPSRArenaProp Prop;
+						Prop.Cell = FIntPoint(AX + Off.X, AY + Off.Y);
+						Prop.Tier = E.Tier;
+						Prop.Variant = E.Variant;
+						Prop.YawDegrees = E.YawDegrees + 90.0f * Quarter;
+						Layout.Props.Add(Prop);
+						Used[Prop.Cell.Y * W + Prop.Cell.X] = true;
+					}
+					bPlaced = true;
 				}
 			}
-		}
-
-		// --- passable tier ---------------------------------------------------------------------------------
-		// No cell occupancy at all, so no safety check is possible or needed: at <= 45 cm both the player and the
-		// swarm step straight over these. They are texture, not terrain.
-		int32 PlacedPassable = 0;
-		for (int32 Index = 0; Index < Candidates.Num() && PlacedPassable < PassableBudget; ++Index)
-		{
-			const int32 Cell = Candidates[Index];
-			const int32 CX = Cell % W;
-			const int32 CY = Cell / W;
-			if (Used[Cell] || !Open(CX, CY)) { continue; }
-
-			FFPSRArenaProp Prop;
-			Prop.Cell = FIntPoint(CX, CY);
-			Prop.Tier = EFPSRArenaPropTier::Passable;
-			Prop.Variant = static_cast<uint8>(RS.RandRange(0, Variants - 1));
-			Prop.YawDegrees = 90.0f * RS.RandRange(0, 3);
-			Layout.Props.Add(Prop);
-			Used[Cell] = true;
-			++PlacedPassable;
 		}
 	}
 }

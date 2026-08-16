@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "Engine/DataAsset.h"
 #include "Arena/FPSRArenaTypes.h"
+#include "Arena/FPSRArenaPropSetDataAsset.h"
 #include "FPSRArenaParamsDataAsset.generated.h"
 
 /**
@@ -55,25 +56,23 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "아레나|골격", meta = (DisplayName = "클러스터 채움 비율 상한", ClampMin = "0.05", ClampMax = "1.0"))
 	float ClusterFillMax = 0.80f;
 
-	/** 열린 셀 100개당 **차단** 미세 프롭 수. 통로를 좁히므로 장식이 아니라 게임플레이 다이얼이다. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "아레나|미세 프롭", meta = (DisplayName = "차단 프롭 밀도(/100셀)", ClampMin = "0.0"))
-	float BlockingPropsPer100Cells = 1.2f;
+	/** L1이 스탬프할 **저작 프롭 세트** 목록. **비워 두면 프롭이 하나도 안 생긴다** — 저작 골격만으로
+	 *  동선을 판정할 때의 깨끗한 기준선이 이 상태다. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "아레나|프롭 세트", meta = (DisplayName = "프롭 세트 목록"))
+	TArray<TObjectPtr<UFPSRArenaPropSetDataAsset>> PropSets;
 
-	/** 열린 셀 100개당 **통과**(≤45cm) 프롭 수. 통행에 영향이 없어 순수 밀도값이다. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "아레나|미세 프롭", meta = (DisplayName = "통과 프롭 밀도(/100셀)", ClampMin = "0.0"))
-	float PassablePropsPer100Cells = 6.0f;
+	/** 배치 격자 간격(셀). 격자 칸마다 세트 하나를 시도한다 — 균등 난수가 아니라 **층화 배치**라
+	 *  뭉침과 빈 구멍 없이 고르게 깔린다. 클수록 성글고 읽기 쉽다. 28셀 = 28m 간격. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "아레나|프롭 세트", meta = (DisplayName = "세트 간격(셀)", ClampMin = "4"))
+	int32 PropSetSpacingCells = 28;
 
-	/** 차단 프롭 사이 최소 간격(셀). 적 몸집보다 좁으면 둘이 오목한 주머니를 만들 수 있다. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "아레나|미세 프롭", meta = (DisplayName = "차단 프롭 최소 간격(셀)", ClampMin = "1"))
-	int32 PropMinSpacingCells = 3;
+	/** 격자 칸 안에서 앵커가 흔들릴 수 있는 범위(셀). 0이면 규칙적인 격자가 눈에 보인다. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "아레나|프롭 세트", meta = (DisplayName = "앵커 지터(셀)", ClampMin = "0"))
+	int32 PropSetJitterCells = 8;
 
 	/** 통로 여유분을 L1이 얼마까지 먹어도 되는지(비율). 1.0이면 모든 통로가 법적 최소폭까지 깎일 수 있다. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "아레나|미세 프롭", meta = (DisplayName = "여유분 소비 상한", ClampMin = "0.0", ClampMax = "1.0"))
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "아레나|프롭 세트", meta = (DisplayName = "여유분 소비 상한", ClampMin = "0.0", ClampMax = "1.0"))
 	float MaxSlackConsumption = 0.5f;
-
-	/** 콘텐츠가 티어마다 제공하는 메시 변형 수(생성기는 인덱스만 고른다). */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "아레나|미세 프롭", meta = (DisplayName = "프롭 변형 수", ClampMin = "1"))
-	int32 PropVariantCount = 4;
 
 	/** Copy into the plain contract the generator actually takes. */
 	FFPSRArenaGenParams ToGenParams() const;

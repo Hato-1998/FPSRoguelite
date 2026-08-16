@@ -19,11 +19,18 @@ FFPSRArenaGenParams UFPSRArenaParamsDataAsset::ToGenParams() const
 	Out.BoundaryMarginCells = BoundaryMarginCells;
 	Out.ClusterFillMin = ClusterFillMin;
 	Out.ClusterFillMax = ClusterFillMax;
-	Out.BlockingPropsPer100Cells = BlockingPropsPer100Cells;
-	Out.PassablePropsPer100Cells = PassablePropsPer100Cells;
-	Out.PropMinSpacingCells = PropMinSpacingCells;
+	Out.PropSetSpacingCells = PropSetSpacingCells;
+	Out.PropSetJitterCells = PropSetJitterCells;
 	Out.MaxSlackConsumption = MaxSlackConsumption;
-	Out.PropVariantCount = PropVariantCount;
+
+	// Flattened here so the generator never touches a UObject — that is what keeps it callable from a worldless
+	// automation test. Null entries are skipped rather than faulting: a half-filled list is an authoring state,
+	// not a crash.
+	Out.PropSets.Reserve(PropSets.Num());
+	for (const TObjectPtr<UFPSRArenaPropSetDataAsset>& Set : PropSets)
+	{
+		if (Set) { Out.PropSets.Add(Set->ToPropSet()); }
+	}
 	return Out;
 }
 

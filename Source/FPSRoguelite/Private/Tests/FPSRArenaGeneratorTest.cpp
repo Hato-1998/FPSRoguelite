@@ -30,6 +30,28 @@ namespace
 			&& A.CellFloorZ == B.CellFloorZ && A.BlockedField == B.BlockedField && A.EdgeMask == B.EdgeMask;
 	}
 
+	/** A stand-in for an authored prop group: one blocking part with passable ones around it, 3x2 cells. */
+	FFPSRArenaPropSet MakeTestSet()
+	{
+		FFPSRArenaPropSet Set;
+		auto Add = [&Set](int32 X, int32 Y, EFPSRArenaPropTier Tier, uint8 Variant)
+		{
+			FFPSRArenaPropSetEntry E;
+			E.CellOffset = FIntPoint(X, Y);
+			E.Tier = Tier;
+			E.Variant = Variant;
+			Set.Entries.Add(E);
+		};
+		Add(0, 0, EFPSRArenaPropTier::Blocking, 0);
+		Add(-1, 0, EFPSRArenaPropTier::Passable, 1);
+		Add(1, 0, EFPSRArenaPropTier::Passable, 1);
+		Add(0, 1, EFPSRArenaPropTier::Passable, 2);
+		Set.FootprintCells = FIntPoint(3, 2);
+		Set.Weight = 1;
+		Set.bAllowRotation = true;
+		return Set;
+	}
+
 	/** The editor tool's output, expressed the way the level would hand it to the runtime. */
 	bool BuildFromProposal(int32 Seed, const FFPSRArenaGenParams& Params, const FVector& Origin, FFPSRArenaLayout& Out)
 	{
@@ -54,7 +76,13 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFPSRArenaGeneratorTest, "FPSRoguelite.Arena.Ge
 
 bool FFPSRArenaGeneratorTest::RunTest(const FString& Parameters)
 {
-	const FFPSRArenaGenParams Params;               // shipped defaults: 160x160 @ 100cm, min corridor 3
+	// Shipped defaults (160x160 @ 100cm, min corridor 3) plus one authored prop set, so every section below
+	// exercises L1 rather than only the skeleton. The shipped default PropSets is EMPTY on purpose — that is the
+	// baseline state for judging the authored skeleton alone — so a test using the raw defaults would silently
+	// stop covering L1 entirely.
+	FFPSRArenaGenParams Params;
+	Params.PropSets.Add(MakeTestSet());
+	const int32 SetSize = Params.PropSets[0].Entries.Num();
 	const FVector Origin(0.0, 0.0, 200.0);
 
 	// --- 1. determinism (ADR 0010 invariant 10) ---------------------------------------------------------
@@ -145,35 +173,28 @@ bool FFPSRArenaGeneratorTest::RunTest(const FString& Parameters)
 		TestTrue(TEXT("L1 placed something"), L.Props.Num() > 0);
 
 		int32 Blocking = 0, Passable = 0;
-		TArray<FIntPoint> BlockingCells;
+		TSet<FIntPoint> Occupied;
 		for (const FFPSRArenaProp& P : L.Props)
 		{
-			if (P.Tier == EFPSRArenaPropTier::Blocking) { ++Blocking; BlockingCells.Add(P.Cell); }
-			else { ++Passable; }
+			if (P.Tier == EFPSRArenaPropTier::Blocking) { ++Blocking; } else { ++Passable; }
 
 			TestTrue(TEXT("prop yaw is axis-aligned"),
 				FMath::IsNearlyZero(FMath::Fmod(P.YawDegrees, 90.0f)));
-			TestTrue(TEXT("prop variant within the authored set"), P.Variant < Params.PropVariantCount);
 
 			// A blocking prop must have taken its cell; a passable one must NOT have.
 			const bool bCellOpen = FFPSRArenaGenerator::IsCellOpen(L, P.Cell.X, P.Cell.Y);
 			if (P.Tier == EFPSRArenaPropTier::Blocking) { TestFalse(TEXT("blocking prop occupies its cell"), bCellOpen); }
 			else { TestTrue(TEXT("passable prop leaves its cell open"), bCellOpen); }
+
+			bool bAlready = false;
+			Occupied.Add(P.Cell, &bAlready);
+			TestFalse(TEXT("two props never share a cell"), bAlready);
 		}
 		TestTrue(TEXT("both tiers present"), Blocking > 0 && Passable > 0);
 
-		// Min spacing: two blocking props closer than this could cup a pocket between them (invariant 7).
-		for (int32 i = 0; i < BlockingCells.Num(); ++i)
-		{
-			for (int32 j = i + 1; j < BlockingCells.Num(); ++j)
-			{
-				const int32 Cheb = FMath::Max(
-					FMath::Abs(BlockingCells[i].X - BlockingCells[j].X),
-					FMath::Abs(BlockingCells[i].Y - BlockingCells[j].Y));
-				TestTrue(*FString::Printf(TEXT("blocking props %d,%d respect min spacing (%d)"), i, j, Cheb),
-					Cheb >= Params.PropMinSpacingCells);
-			}
-		}
+		// Sets land whole or not at all. A partially-applied group would mean the rollback path is broken, and a
+		// half-placed group is exactly what a failed safety check must never leave behind.
+		TestEqual(TEXT("prop count is a whole number of sets"), L.Props.Num() % SetSize, 0);
 
 		// Determinism has to cover the props too — they are generated from the same seed and never replicated.
 		FFPSRArenaLayout L2;
@@ -209,6 +230,15 @@ bool FFPSRArenaGeneratorTest::RunTest(const FString& Parameters)
 			TestTrue(*FString::Printf(TEXT("no prop inside the landmark reserve (cheb %d)"), Cheb),
 				Cheb > LM.ReserveRadiusCells);
 		}
+	}
+
+	// --- 4d. an empty set list means NO props (the skeleton-only baseline) -------------------------------
+	{
+		FFPSRArenaGenParams NoSets = Params;
+		NoSets.PropSets.Reset();
+		FFPSRArenaLayout L;
+		TestTrue(TEXT("build with no prop sets"), BuildFromProposal(31, NoSets, Origin, L));
+		TestEqual(TEXT("no authored sets -> no props at all"), L.Props.Num(), 0);
 	}
 
 	// --- 5. the validator actually FAILS a broken arena -------------------------------------------------

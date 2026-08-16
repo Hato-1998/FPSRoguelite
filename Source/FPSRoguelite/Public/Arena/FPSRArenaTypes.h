@@ -50,6 +50,49 @@ enum class EFPSRArenaPropTier : uint8
 	Passable,
 };
 
+/**
+ * One prop inside an authored SET, positioned relative to the set's anchor cell.
+ *
+ * L1 places sets, not individual props. Scattering props cell by cell produced even coverage with no structure —
+ * which reads as dirt, because a circuit board is the opposite: parts sit in groups around the chips and the
+ * substrate between them is empty. A human authors what a plausible group looks like once, and the generator
+ * decides only WHERE groups go.
+ */
+USTRUCT(BlueprintType)
+struct FFPSRArenaPropSetEntry
+{
+	GENERATED_BODY()
+
+	/** Cell offset from the set's anchor (0,0 = the anchor cell itself). */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "FPSR|Arena", meta = (DisplayName = "셀 오프셋"))
+	FIntPoint CellOffset = FIntPoint::ZeroValue;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "FPSR|Arena", meta = (DisplayName = "티어"))
+	EFPSRArenaPropTier Tier = EFPSRArenaPropTier::Passable;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "FPSR|Arena", meta = (DisplayName = "메시 변형", ClampMin = "0"))
+	uint8 Variant = 0;
+
+	/** Yaw relative to the set's own rotation, in degrees. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "FPSR|Arena", meta = (DisplayName = "상대 Yaw"))
+	float YawDegrees = 0.0f;
+};
+
+/** An authored prop group, flattened out of its DataAsset so the generator stays UObject-free and testable. */
+USTRUCT()
+struct FFPSRArenaPropSet
+{
+	GENERATED_BODY()
+
+	TArray<FFPSRArenaPropSetEntry> Entries;
+	/** Bounding size in cells, derived from Entries. */
+	FIntPoint FootprintCells = FIntPoint(1, 1);
+	/** Relative pick weight among all sets. */
+	int32 Weight = 1;
+	/** Whether the seed may rotate the whole group in 90-degree steps. */
+	bool bAllowRotation = true;
+};
+
 /** One procedurally placed micro prop (L1). Cell-space so it cannot drift off the grid the mask was built on. */
 USTRUCT(BlueprintType)
 struct FFPSRArenaProp
@@ -162,24 +205,24 @@ struct FFPSRArenaGenParams
 	float ClusterFillMin = 0.45f;
 	float ClusterFillMax = 0.80f;
 
-	// --- L1 micro props (ADR 0010 D5 / 0011 E6) ---------------------------------------------------------
+	// --- L1 prop sets (ADR 0010 D5 / 0011 E6) -----------------------------------------------------------
 
-	/** Blocking micro props per 100 open cells. These narrow corridors, so this is a gameplay dial, not dressing. */
-	float BlockingPropsPer100Cells = 1.2f;
+	/** Authored groups L1 stamps into the arena. EMPTY = no props at all, which is the clean baseline for
+	 *  judging the authored skeleton on its own. */
+	TArray<FFPSRArenaPropSet> PropSets;
 
-	/** Passable (<=45 cm) props per 100 open cells. Free of gameplay consequence — pure density. */
-	float PassablePropsPer100Cells = 6.0f;
+	/** Placement lattice pitch in cells. One set is attempted per lattice cell, anchored at a jittered position
+	 *  inside it — stratified rather than uniform-random, so coverage is even WITHOUT the clumps and bald patches
+	 *  pure randomness produces at this density. Larger = sparser and more legible. */
+	int32 PropSetSpacingCells = 28;
 
-	/** Minimum gap in cells between two BLOCKING micro props. Below the swarm's own footprint they could cup a
-	 *  pocket between them, which is the failure invariant 7 exists to make impossible. */
-	int32 PropMinSpacingCells = 3;
+	/** How far the anchor may wander inside its lattice cell, in cells. 0 = a visible regular grid. */
+	int32 PropSetJitterCells = 8;
 
-	/** Ceiling on how much of a corridor's slack L1 may eat, as a fraction. At 1.0 a dense seed could shave every
-	 *  corridor to the legal minimum — technically valid and miserable to move through. */
+	/** Ceiling on how much of a corridor's slack L1 may eat, as a fraction of slack cells. At 1.0 a dense seed
+	 *  could shave every corridor to the legal minimum — valid by the letter of the invariants, miserable to
+	 *  move through. */
 	float MaxSlackConsumption = 0.5f;
-
-	/** How many mesh variants the content provides per tier (the generator only picks an index). */
-	int32 PropVariantCount = 4;
 
 	FFPSRArenaGenParams()
 	{
