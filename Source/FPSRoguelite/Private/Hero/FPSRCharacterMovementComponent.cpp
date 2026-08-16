@@ -11,6 +11,52 @@
 #include "Net/UnrealNetwork.h"
 #include "Net/Core/PushModel/PushModel.h"
 
+//~ Playtest speed scale. Defined at the TOP of the file on purpose: the wall/air movement code that reads it sits
+//~ several hundred lines above GetMaxSpeed(), and a definition placed next to its "main" user would be invisible to
+//~ everything earlier in the translation unit.
+
+#if !UE_BUILD_SHIPPING
+static float GFPSRPlayerSpeedScale = 1.0f;
+static FAutoConsoleVariableRef CVarFPSRPlayerSpeedScale(
+	TEXT("FPSR.Debug.PlayerSpeedScale"),
+	GFPSRPlayerSpeedScale,
+	TEXT("Playtest multiplier on every player speed cap AND acceleration — ground, slide, air-strafe and wall alike\n"
+	     "(both speed and acceleration, so time-to-top-speed is unchanged).\n"
+	     "Deliberately does NOT touch:\n"
+	     "  MaxStepHeight   - mirrored into the flow field's ClimbableStepHeight; scaling it would let the player\n"
+	     "                    walk over props the swarm cannot, breaking the 45/60 authoring band (ADR 0010 inv. 4).\n"
+	     "  Jump / wall-jump UP speed - jump HEIGHT goes with v^2, so a 3x scale would be a 9x jump.\n"
+	     "  Wall probe distances/radii - geometry, not speed; scaling them is a different feature, not a faster one.\n"
+	     "  Hang/slip durations - a wall hang is a beat, not a distance.\n"
+	     "Set the SAME value on server and client: CharacterMovement replays moves on correction, so a mismatch\n"
+	     "reads as constant rubber-banding. 1 = off."),
+	ECVF_Cheat);
+#endif
+
+/** 1.0 outside of dev builds, so shipping keeps the authored numbers with no branch worth mentioning. */
+static FORCEINLINE float FPSRPlayerSpeedScale()
+{
+#if !UE_BUILD_SHIPPING
+	return FMath::Max(0.0f, GFPSRPlayerSpeedScale);
+#else
+	return 1.0f;
+#endif
+}
+
+/**
+ * Wraps an authored SPEED or ACCELERATION that the movement code reads directly — the air-strafe and wall values,
+ * which never pass through GetMaxSpeed() and so would otherwise stay at 1x while the ground game scaled away from
+ * them. Scaling only some of them is worse than scaling none: raise WallJumpMaxSpeed alone and the ceiling moves
+ * while the push that reaches for it does not.
+ *
+ * NOT applied to probe distances/radii (geometry), angles/dots (dimensionless), durations (a beat, not a distance),
+ * or vertical jump speeds (height goes with v^2) — see the cvar help.
+ */
+static FORCEINLINE float FPSRScaled(float AuthoredSpeed)
+{
+	return AuthoredSpeed * FPSRPlayerSpeedScale();
+}
+
 UFPSRCharacterMovementComponent::UFPSRCharacterMovementComponent()
 {
 	// The shared body AnimBP runs on every machine, so a teammate's slide and the wall they are holding have to reach
@@ -597,8 +643,8 @@ void UFPSRCharacterMovementComponent::PhysCustom(float deltaTime, int32 Iteratio
 		// Climbing is a flat speed; slipping eases toward its terminal speed so letting go reads as sliding down the
 		// surface rather than the hands snapping open.
 		const float VerticalSpeed = bClimbing
-			? WallClimbSpeed
-			: FMath::FInterpConstantTo(Velocity.Z, -WallSlipSpeed, deltaTime, WallSlipAcceleration);
+			? FPSRScaled(WallClimbSpeed)
+			: FMath::FInterpConstantTo(Velocity.Z, -FPSRScaled(WallSlipSpeed), deltaTime, FPSRScaled(WallSlipAcceleration));
 
 		// Limited sideways movement (ADR 0001: 등반 중 제한적 좌우 이동). Only the part of the input running ALONG the
 		// wall counts, so pressing into it or away from it changes nothing about where the player goes.
@@ -606,7 +652,7 @@ void UFPSRCharacterMovementComponent::PhysCustom(float deltaTime, int32 Iteratio
 		const FVector InputDirection = Acceleration.GetSafeNormal2D();
 		if (!InputDirection.IsNearlyZero())
 		{
-			LateralVelocity = FVector::VectorPlaneProject(InputDirection, WallNormal).GetSafeNormal2D() * WallLateralSpeed;
+			LateralVelocity = FVector::VectorPlaneProject(InputDirection, WallNormal).GetSafeNormal2D() * FPSRScaled(WallLateralSpeed);
 		}
 
 		// Entry momentum: for a moment after the grab the player keeps sliding along the wall at the speed they came in
@@ -621,7 +667,7 @@ void UFPSRCharacterMovementComponent::PhysCustom(float deltaTime, int32 Iteratio
 
 		// The pull toward the wall is what keeps the capsule in contact, and contact is what keeps the hold probe
 		// finding the surface next frame.
-		Velocity = LateralVelocity - (WallNormal * WallStickSpeed);
+		Velocity = LateralVelocity - (WallNormal * FPSRScaled(WallStickSpeed));
 		Velocity.Z = VerticalSpeed;
 	}
 
@@ -700,7 +746,9 @@ bool UFPSRCharacterMovementComponent::DoJump(bool bReplayingMoves, float DeltaTi
 	{
 		// Speed still in hand from the approach rides on top of the base push, so reacting fast to a fast impact pays
 		// out — capped so a full-speed slide into a wall can't launch beyond the rest of the movement set.
-		const float JumpSpeed = FMath::Min(WallJumpPushSpeed + CarriedSpeed, WallJumpMaxSpeed);
+		// Both terms scale together: CarriedSpeed comes from live velocity (already scaled), so leaving the authored
+		// pair at 1x would make a scaled-up player hit the ceiling instantly and lose the carry mechanic entirely.
+		const float JumpSpeed = FMath::Min(FPSRScaled(WallJumpPushSpeed) + CarriedSpeed, FPSRScaled(WallJumpMaxSpeed));
 		Velocity.X = JumpDirection.X * JumpSpeed;
 		Velocity.Y = JumpDirection.Y * JumpSpeed;
 	}
@@ -1136,31 +1184,6 @@ bool UFPSRCharacterMovementComponent::IsSlidingBackward() const
 	return bIsSliding && IsDirectionBackward(Velocity);
 }
 
-#if !UE_BUILD_SHIPPING
-static float GFPSRPlayerSpeedScale = 1.0f;
-static FAutoConsoleVariableRef CVarFPSRPlayerSpeedScale(
-	TEXT("FPSR.Debug.PlayerSpeedScale"),
-	GFPSRPlayerSpeedScale,
-	TEXT("Playtest multiplier on every player speed cap AND acceleration (both, so time-to-top-speed is unchanged).\n"
-	     "Deliberately does NOT touch:\n"
-	     "  MaxStepHeight  - mirrored into the flow field's ClimbableStepHeight; scaling it would let the player\n"
-	     "                   walk over props the swarm cannot, breaking the 45/60 authoring band (ADR 0010 inv. 4).\n"
-	     "  JumpZVelocity  - jump HEIGHT goes with v^2, so a 3x scale would be a 9x jump.\n"
-	     "Set the SAME value on server and client: CharacterMovement replays moves on correction, so a mismatch\n"
-	     "reads as constant rubber-banding. 1 = off."),
-	ECVF_Cheat);
-#endif
-
-/** 1.0 outside of dev builds, so shipping keeps the authored numbers with no branch worth mentioning. */
-static FORCEINLINE float FPSRPlayerSpeedScale()
-{
-#if !UE_BUILD_SHIPPING
-	return FMath::Max(0.0f, GFPSRPlayerSpeedScale);
-#else
-	return 1.0f;
-#endif
-}
-
 float UFPSRCharacterMovementComponent::GetMaxSpeed() const
 {
 	if (bIsSliding)
@@ -1232,7 +1255,9 @@ void UFPSRCharacterMovementComponent::CalcVelocity(float DeltaTime, float Fricti
 		// to an effective 16 and ends the slide in under a tenth of a second.
 		if (!SlideSpeedCurve)
 		{
-			ApplyVelocityBraking(DeltaTime, SlideGroundFriction, SlideBrakingDeceleration);
+			// Scales with speed so the slide keeps its SHAPE: an unscaled deceleration would stretch every slide out
+			// three times as far, which is a different move rather than the same move faster.
+			ApplyVelocityBraking(DeltaTime, SlideGroundFriction, FPSRScaled(SlideBrakingDeceleration));
 		}
 		return;
 	}
@@ -1266,7 +1291,7 @@ void UFPSRCharacterMovementComponent::ApplyAirStrafeVelocity(float DeltaTime)
 	// How much of the current speed already points where the player is asking to go. Near zero when strafing across
 	// the direction of travel, which is what keeps the full allowance available for the turn.
 	const float SpeedAlongWish = FVector::DotProduct(LateralVelocity, WishDirection);
-	const float AddSpeed = AirStrafeWishSpeed - SpeedAlongWish;
+	const float AddSpeed = FPSRScaled(AirStrafeWishSpeed) - SpeedAlongWish;
 	if (AddSpeed <= 0.0f)
 	{
 		return; // already moving that way at least this fast — holding forward in the air must not accelerate
@@ -1275,7 +1300,7 @@ void UFPSRCharacterMovementComponent::ApplyAirStrafeVelocity(float DeltaTime)
 	// Note this function can run MORE THAN ONCE per frame (the falling step sub-steps, and re-runs after a mid-air
 	// collision). It holds no state and the AddSpeed test bounds the total speed along any one direction, so repeat
 	// calls converge instead of compounding — don't add anything here that assumes one call per frame.
-	const float AccelSpeed = FMath::Min(AirStrafeAcceleration * DeltaTime, AddSpeed);
+	const float AccelSpeed = FMath::Min(FPSRScaled(AirStrafeAcceleration) * DeltaTime, AddSpeed);
 	const float SpeedBefore = LateralVelocity.Size();
 	LateralVelocity += WishDirection * AccelSpeed;
 
@@ -1285,7 +1310,7 @@ void UFPSRCharacterMovementComponent::ApplyAirStrafeVelocity(float DeltaTime)
 	// That is a statement about the clamp, not about the whole step: input pointing AGAINST the direction of travel
 	// still subtracts, because the push above is a vector addition. That is deliberate — holding the back key is how
 	// a player sheds momentum in the air. Nothing takes speed away on its own; only the player can.
-	LateralVelocity = LateralVelocity.GetClampedToMaxSize(FMath::Max(SpeedBefore, AirStrafeMaxSpeed));
+	LateralVelocity = LateralVelocity.GetClampedToMaxSize(FMath::Max(SpeedBefore, FPSRScaled(AirStrafeMaxSpeed)));
 
 	Velocity.X = LateralVelocity.X;
 	Velocity.Y = LateralVelocity.Y;
@@ -1308,7 +1333,7 @@ FVector UFPSRCharacterMovementComponent::GetFallingLateralAcceleration(float Del
 	// Acceleration (sized by MaxAcceleration, 2048) would make grazing a wall shove the player far harder than the
 	// strafe model ever does.
 	const FVector WishDirection = Acceleration.GetSafeNormal2D();
-	return WishDirection.IsNearlyZero() ? FVector::ZeroVector : (WishDirection * AirStrafeAcceleration);
+	return WishDirection.IsNearlyZero() ? FVector::ZeroVector : (WishDirection * FPSRScaled(AirStrafeAcceleration));
 }
 
 bool UFPSRCharacterMovementComponent::CanCrouchInCurrentState() const
