@@ -21,11 +21,13 @@ class FPSROGUELITE_API UFPSRArenaParamsDataAsset : public UPrimaryDataAsset
 	GENERATED_BODY()
 
 public:
-	/** 아레나 크기(셀). 100cm 셀 기준 80×80 = 80×80m (ADR 0010 D2). */
+	/** 아레나 크기(셀). 100cm 셀 기준 160×160 = 160×160m (ADR 0011 E1). 80×80 화이트박스로 루프·교차 위상이
+	 *  확증된 뒤, 랜드마크를 놓을 공간을 위해 올렸다. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "아레나|치수", meta = (DisplayName = "아레나 크기(셀)", ClampMin = "16"))
-	FIntPoint ArenaSizeCells = FIntPoint(80, 80);
+	FIntPoint ArenaSizeCells = FIntPoint(160, 160);
 
-	/** 플로우필드 셀 크기(cm). D3 = 100. 낮추면 미세 프롭 해상도가 오르지만 적 footprint보다 작아지면 흐름이 몸통 안에서 바뀐다. */
+	/** 플로우필드 셀 크기(cm). **160m에서는 사실상 100 고정**이다 — 컴파일 상수(축 ≤256 · 총 ≤40000)에서 역산하면
+	 *  80~100cm 뿐이라 "답답하면 50으로 내린다"(0010 D3)는 탈출구가 산술적으로 사라졌다. 남는 레버는 프롭 밀도다. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "아레나|치수", meta = (DisplayName = "셀 크기(cm)", ClampMin = "25"))
 	float CellSize = 100.0f;
 

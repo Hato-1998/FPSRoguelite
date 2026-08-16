@@ -2,7 +2,9 @@
 
 #include "Arena/FPSRArenaActor.h"
 #include "Arena/FPSRArenaGenerator.h"
+#include "Arena/FPSRArenaMarkers.h"
 #include "Arena/FPSRArenaParamsDataAsset.h"
+#include "Arena/FPSRArenaValidator.h"
 #include "Enemy/FPSRFlowFieldSubsystem.h"
 #include "Core/FPSRLogChannels.h"
 
@@ -104,7 +106,55 @@ bool AFPSRArenaActor::BuildLocalLayout()
 	}
 
 	const FFPSRArenaGenParams GenParams = ArenaParams->ToGenParams();
-	return FFPSRArenaGenerator::Generate(ActiveSeed, GenParams, ComputeGridOrigin(GenParams), Layout);
+
+	// Gather what the designer placed. Note this reads ACTORS, not collision — the arena is told what blocks it
+	// rather than discovering it, which is what keeps the mask free of world queries (ADR 0011 E3).
+	FFPSRArenaAuthoredInput Authored;
+	if (const UWorld* World = GetWorld())
+	{
+		for (TActorIterator<AFPSRArenaBlocker> It(const_cast<UWorld*>(World)); It; ++It)
+		{
+			const AFPSRArenaBlocker* Blocker = *It;
+			if (!IsValid(Blocker)) { continue; }
+			FFPSRArenaAuthoredBox BoxEntry;
+			BoxEntry.Center = Blocker->GetActorLocation();
+			BoxEntry.HalfExtentXY = Blocker->GetHalfExtentXY();
+			BoxEntry.YawDegrees = Blocker->GetYawDegrees();
+			Authored.Blockers.Add(BoxEntry);
+		}
+		for (TActorIterator<AFPSRArenaLandmark> It(const_cast<UWorld*>(World)); It; ++It)
+		{
+			const AFPSRArenaLandmark* Landmark = *It;
+			if (!IsValid(Landmark)) { continue; }
+			FFPSRArenaAuthoredLandmark LandmarkEntry;
+			LandmarkEntry.Location = Landmark->GetActorLocation();
+			LandmarkEntry.ReserveRadiusCells = Landmark->GetReserveRadiusCells();
+			LandmarkEntry.bBlocking = Landmark->IsBlocking();
+			Authored.Landmarks.Add(LandmarkEntry);
+		}
+	}
+
+	if (!FFPSRArenaGenerator::Generate(ActiveSeed, GenParams, ComputeGridOrigin(GenParams), Authored, Layout))
+	{
+		return false;
+	}
+
+	// Alarm, not a gate (ADR 0011 실패 흐름 1). A broken arena still loads: refusing to build it at runtime would
+	// only mean the map vanishes for whoever is playing, with nobody present to fix the authoring. The verdict that
+	// matters is the editor's — this is here so a regression cannot pass unnoticed.
+	const FFPSRArenaValidationResult Validation = FFPSRArenaValidator::Validate(Layout, GenParams);
+	if (!Validation.Passed())
+	{
+		UE_LOG(LogFPSR, Error, TEXT("[Arena] %s FAILED validation — %s"), *GetName(), *FFPSRArenaValidator::Summarize(Validation));
+		for (const FString& Err : Validation.Errors) { UE_LOG(LogFPSR, Error, TEXT("[Arena]   %s"), *Err); }
+	}
+	else
+	{
+		UE_LOG(LogFPSR, Log, TEXT("[Arena] %s validation %s"), *GetName(), *FFPSRArenaValidator::Summarize(Validation));
+	}
+	for (const FString& Warn : Validation.Warnings) { UE_LOG(LogFPSR, Warning, TEXT("[Arena]   %s"), *Warn); }
+
+	return true;
 }
 
 bool AFPSRArenaActor::ServerRegenerate(int32 NewSeed)
@@ -214,17 +264,9 @@ void AFPSRArenaActor::RebuildRepresentation()
 		FVector(Origin.X + SpanX * 0.5, Origin.Y + SpanY * 0.5, Origin.Z - FloorThickness * 0.5),
 		FVector(SpanX, SpanY, FloorThickness));
 
-	// Clusters.
-	for (const FFPSRArenaCluster& C : Layout.Clusters)
-	{
-		const double MinX = Origin.X + C.MinCell.X * Cell;
-		const double MinY = Origin.Y + C.MinCell.Y * Cell;
-		const double SizeX = C.WidthCells() * Cell;
-		const double SizeY = C.HeightCells() * Cell;
-		AddBox(BlockingMeshes,
-			FVector(MinX + SizeX * 0.5, MinY + SizeY * 0.5, Origin.Z + ClusterHeight * 0.5),
-			FVector(SizeX, SizeY, ClusterHeight));
-	}
+	// Clusters are NOT drawn here any more (ADR 0011 E2): each AFPSRArenaBlocker carries its own box and mesh, so
+	// what the designer moves in the viewport is the same object the rasteriser reads. Drawing a second copy from
+	// the layout would be a duplicate that agrees with the authored one only until someone nudges a blocker.
 
 	// Boundary walls, placed just OUTSIDE the grid so they never occupy a cell the generator called open.
 	const double T = BoundaryWallThicknessCm;

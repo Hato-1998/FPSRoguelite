@@ -35,6 +35,57 @@ struct FFPSRArenaCluster
 };
 
 /**
+ * One authored blocking volume, in WORLD space (centre + half-extent + yaw).
+ *
+ * The generator RASTERISES these into cells. It does not trace them, and that distinction is the whole reason
+ * authoring the skeleton did not undo ADR 0010's β decision (see 0011 E3): rasterisation is pure geometry, so a
+ * stage swap still costs zero world queries and the grid origin still cannot be polluted by the spare arena
+ * parked below the live one.
+ *
+ * Only yaw is carried. A blocking volume that pitched or rolled would no longer be a prism in the XY plane, and
+ * the arena is single-plane (0010 D2) — there is nothing for the extra axes to mean.
+ */
+USTRUCT()
+struct FFPSRArenaAuthoredBox
+{
+	GENERATED_BODY()
+
+	FVector Center = FVector::ZeroVector;
+	FVector2D HalfExtentXY = FVector2D::ZeroVector;
+	/** Degrees. */
+	float YawDegrees = 0.0f;
+};
+
+/** One authored landmark: a fixed navigation beacon (ADR 0010 D6). Reserves cells so props cannot bury it. */
+USTRUCT()
+struct FFPSRArenaAuthoredLandmark
+{
+	GENERATED_BODY()
+
+	FVector Location = FVector::ZeroVector;
+	/** Cells around the landmark that stay clear of procedural props. 0 = just its own cell. */
+	int32 ReserveRadiusCells = 2;
+	/** Whether the landmark itself blocks movement (a tall pillar does; a floor decal does not). */
+	bool bBlocking = true;
+};
+
+/**
+ * Everything the DESIGNER placed, gathered from the level and handed to the generator. Empty is legal and means
+ * "no skeleton authored yet" — the validator then reports an arena with no structure rather than the generator
+ * inventing one, because ADR 0011 E5 moved lattice generation to an editor button and out of the runtime path.
+ */
+USTRUCT()
+struct FFPSRArenaAuthoredInput
+{
+	GENERATED_BODY()
+
+	TArray<FFPSRArenaAuthoredBox> Blockers;
+	TArray<FFPSRArenaAuthoredLandmark> Landmarks;
+
+	bool IsEmpty() const { return Blockers.Num() == 0 && Landmarks.Num() == 0; }
+};
+
+/**
  * Resolved generator inputs. Deliberately a PLAIN struct rather than the DataAsset itself so the generator
  * stays callable from a worldless automation test with no UObject in sight (ADR 0010 module boundary: the
  * generator touches no world, subsystem or singleton). UFPSRArenaParamsDataAsset copies itself into one of
@@ -45,10 +96,13 @@ struct FFPSRArenaGenParams
 {
 	GENERATED_BODY()
 
-	/** Arena size in cells. 80x80 at CellSize 100 = the 80x80 m of ADR 0010 D2. */
-	FIntPoint ArenaSizeCells = FIntPoint(80, 80);
+	/** Arena size in cells. 160x160 at CellSize 100 = the 160x160 m of ADR 0011 E1 (raised from 0010 D2's 80x80
+	 *  once the 80x80 whitebox confirmed the loop/crossing topology and landmarks needed room). */
+	FIntPoint ArenaSizeCells = FIntPoint(160, 160);
 
-	/** Flow-field cell size (cm). ADR 0010 D3 = 100; the trade-off table and why not 50/250 is in that section. */
+	/** Flow-field cell size (cm). ADR 0011 E1 pins this at 100 and it is no longer a free choice: at 160 m the
+	 *  compile-time caps (axis <= 256, total <= 40000) leave only 80~100 cm, so the "drop to 50 if corridors feel
+	 *  tight" escape hatch from 0010 D3 is arithmetically gone. The remaining lever is prop density. */
 	float CellSize = 100.0f;
 
 	/** Mirrors UFPSRFlowFieldComputer::DefaultClimbableStepHeight. Single-plane arenas never step, but the
@@ -95,8 +149,14 @@ struct FFPSRArenaLayout
 	/** Fed straight into UFPSRFlowFieldComputer::BuildFromSurfaceData — no world trace anywhere in between. */
 	FFPSRFlowFieldSurfaceData Surface;
 
+	/** Cell rects actually blocked by each authored volume, for debug readouts and the validator. NOT the source
+	 *  of truth for rendering — the blocker actors carry their own meshes, so what the designer sees in the
+	 *  viewport is the same object the rasteriser read. */
 	UPROPERTY(BlueprintReadOnly, Category = "FPSR|Arena")
 	TArray<FFPSRArenaCluster> Clusters;
+
+	/** Carried through so L1 can keep its props off them and the HUD can point at them. */
+	TArray<FFPSRArenaAuthoredLandmark> Landmarks;
 
 	UPROPERTY(BlueprintReadOnly, Category = "FPSR|Arena")
 	int32 Seed = 0;

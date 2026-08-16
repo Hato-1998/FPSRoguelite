@@ -66,13 +66,13 @@ bool FFPSRArenaGenParams::Validate(FString& OutError) const
 	}
 	if (SlotGridOptions.Num() == 0)
 	{
-		OutError = TEXT("SlotGridOptions is empty — the seed has no lattice to pick.");
+		OutError = TEXT("SlotGridOptions is empty — the lattice proposal has no shape to pick.");
 		return false;
 	}
 
-	// Same compile-time caps the flow field enforces. Checking here means an over-budget arena is a content
-	// error caught at author time, instead of BuildFromWorldTrace's old behaviour of silently coarsening the
-	// cell size and quietly degrading routing quality (ADR 0010 D-axis-2).
+	// Same compile-time caps the flow field enforces. Checking here means an over-budget arena is a content error
+	// caught at author time, instead of BuildFromWorldTrace's old behaviour of silently coarsening the cell size
+	// and quietly degrading routing quality (ADR 0010 axis 2 / 0011 E1).
 	const int64 TotalCells = static_cast<int64>(ArenaSizeCells.X) * ArenaSizeCells.Y;
 	if (ArenaSizeCells.X > UFPSRFlowFieldComputer::GetMaxGridDimPerAxis() ||
 		ArenaSizeCells.Y > UFPSRFlowFieldComputer::GetMaxGridDimPerAxis() ||
@@ -86,7 +86,7 @@ bool FFPSRArenaGenParams::Validate(FString& OutError) const
 	}
 
 	// Every lattice option has to leave room for a >=1 cell cluster once both sides are inset by the corridor
-	// width; otherwise that option would silently produce fewer clusters than the designer asked for.
+	// width; otherwise that option would silently propose fewer clusters than the designer asked for.
 	const int32 InteriorW = ArenaSizeCells.X - 2 * BoundaryMarginCells;
 	const int32 InteriorH = ArenaSizeCells.Y - 2 * BoundaryMarginCells;
 	const int32 MinSlotSpan = 2 * MinCorridorWidthCells + 1;
@@ -116,51 +116,42 @@ bool FFPSRArenaGenParams::Validate(FString& OutError) const
 	return true;
 }
 
-bool FFPSRArenaGenerator::Generate(int32 Seed, const FFPSRArenaGenParams& Params, const FVector& ArenaOrigin, FFPSRArenaLayout& OutLayout)
+bool FFPSRArenaGenerator::ProposeLatticeClusters(int32 Seed, const FFPSRArenaGenParams& Params,
+	TArray<FFPSRArenaCluster>& OutClusters, FIntPoint& OutLattice)
 {
-	OutLayout = FFPSRArenaLayout();
+	OutClusters.Reset();
+	OutLattice = FIntPoint::ZeroValue;
 
 	FString Error;
 	if (!Params.Validate(Error))
 	{
-		UE_LOG(LogFPSR, Error, TEXT("[Arena] Generate rejected: %s"), *Error);
+		UE_LOG(LogFPSR, Error, TEXT("[Arena] ProposeLatticeClusters rejected: %s"), *Error);
 		return false;
 	}
 
-	const int32 W = Params.ArenaSizeCells.X;
-	const int32 H = Params.ArenaSizeCells.Y;
 	const int32 Inset = Params.MinCorridorWidthCells;
 	const int32 Margin = Params.BoundaryMarginCells;
-
-	OutLayout.Seed = Seed;
-	OutLayout.GridDims = Params.ArenaSizeCells;
-	OutLayout.CellSize = Params.CellSize;
-	OutLayout.GridOrigin = ArenaOrigin;
+	const int32 InteriorW = Params.ArenaSizeCells.X - 2 * Margin;
+	const int32 InteriorH = Params.ArenaSizeCells.Y - 2 * Margin;
 
 	FRandomStream RS(Seed);
+	OutLattice = Params.SlotGridOptions[RS.RandRange(0, Params.SlotGridOptions.Num() - 1)];
 
-	// --- L0: cluster lattice -------------------------------------------------------------------------------
-	const FIntPoint Lattice = Params.SlotGridOptions[RS.RandRange(0, Params.SlotGridOptions.Num() - 1)];
-	OutLayout.SlotGrid = Lattice;
-
-	const int32 InteriorW = W - 2 * Margin;
-	const int32 InteriorH = H - 2 * Margin;
 	const int32 FillMinPct = ToPercent(Params.ClusterFillMin);
 	const int32 FillMaxPct = ToPercent(Params.ClusterFillMax);
-
-	OutLayout.Clusters.Reserve(Lattice.X * Lattice.Y);
+	OutClusters.Reserve(OutLattice.X * OutLattice.Y);
 
 	// Fixed iteration order (rows, then columns) — the random stream is consumed in a defined sequence, which is
 	// half of what makes two machines agree. The other half is that every decision below is integer.
-	for (int32 SY = 0; SY < Lattice.Y; ++SY)
+	for (int32 SY = 0; SY < OutLattice.Y; ++SY)
 	{
 		int32 SlotBeginY, SlotEndY;
-		SplitRange(InteriorH, Lattice.Y, SY, SlotBeginY, SlotEndY);
+		SplitRange(InteriorH, OutLattice.Y, SY, SlotBeginY, SlotEndY);
 
-		for (int32 SX = 0; SX < Lattice.X; ++SX)
+		for (int32 SX = 0; SX < OutLattice.X; ++SX)
 		{
 			int32 SlotBeginX, SlotEndX;
-			SplitRange(InteriorW, Lattice.X, SX, SlotBeginX, SlotEndX);
+			SplitRange(InteriorW, OutLattice.X, SX, SlotBeginX, SlotEndX);
 
 			// Inset on ALL sides by the corridor width. Two clusters in adjacent slots therefore end up 2x Inset
 			// apart, and a cluster is Margin + Inset from the arena wall — so both the crossing corridors and the
@@ -185,11 +176,52 @@ bool FFPSRArenaGenerator::Generate(int32 Seed, const FFPSRArenaGenParams& Params
 			Cluster.MinCell.Y = AvailMinY + RS.RandRange(0, AvailH - ClusterH);
 			Cluster.MaxCell.X = Cluster.MinCell.X + ClusterW - 1;
 			Cluster.MaxCell.Y = Cluster.MinCell.Y + ClusterH - 1;
-			OutLayout.Clusters.Add(Cluster);
+			OutClusters.Add(Cluster);
 		}
 	}
 
-	// --- Surface data: what the flow field will adopt verbatim ---------------------------------------------
+	return true;
+}
+
+FFPSRArenaAuthoredBox FFPSRArenaGenerator::ClusterToAuthoredBox(const FFPSRArenaCluster& Cluster,
+	const FFPSRArenaGenParams& Params, const FVector& ArenaOrigin)
+{
+	const double Cell = Params.CellSize;
+	const double MinX = ArenaOrigin.X + Cluster.MinCell.X * Cell;
+	const double MinY = ArenaOrigin.Y + Cluster.MinCell.Y * Cell;
+	const double SizeX = Cluster.WidthCells() * Cell;
+	const double SizeY = Cluster.HeightCells() * Cell;
+
+	FFPSRArenaAuthoredBox Box;
+	Box.Center = FVector(MinX + SizeX * 0.5, MinY + SizeY * 0.5, ArenaOrigin.Z);
+	Box.HalfExtentXY = FVector2D(SizeX * 0.5, SizeY * 0.5);
+	Box.YawDegrees = 0.0f;
+	return Box;
+}
+
+bool FFPSRArenaGenerator::Generate(int32 Seed, const FFPSRArenaGenParams& Params, const FVector& ArenaOrigin,
+	const FFPSRArenaAuthoredInput& Authored, FFPSRArenaLayout& OutLayout)
+{
+	OutLayout = FFPSRArenaLayout();
+
+	FString Error;
+	if (!Params.Validate(Error))
+	{
+		UE_LOG(LogFPSR, Error, TEXT("[Arena] Generate rejected: %s"), *Error);
+		return false;
+	}
+
+	const int32 W = Params.ArenaSizeCells.X;
+	const int32 H = Params.ArenaSizeCells.Y;
+	const double Cell = Params.CellSize;
+
+	OutLayout.Seed = Seed;
+	OutLayout.GridDims = Params.ArenaSizeCells;
+	OutLayout.CellSize = Params.CellSize;
+	OutLayout.GridOrigin = ArenaOrigin;
+	OutLayout.Landmarks = Authored.Landmarks;
+
+	// --- base surface: one floor plane, every internal edge open --------------------------------------------
 	const int32 NumCells = W * H;
 	FFPSRFlowFieldSurfaceData& S = OutLayout.Surface;
 	S.GridDimX = W;
@@ -205,34 +237,91 @@ bool FFPSRArenaGenerator::Generate(int32 Seed, const FFPSRArenaGenParams& Params
 	{
 		for (int32 CX = 0; CX < W; ++CX)
 		{
-			const int32 Cell = CY * W + CX;
+			const int32 CellIdx = CY * W + CX;
 
-			// rank0 is the single floor plane; rank1 stays MAX_flt (absent) because ADR 0010 made the arena
-			// single-plane, so the 2-layer surface graph costs one unused slot and nothing else.
-			S.CellFloorZ[SurfIndex(Cell, 0)] = static_cast<float>(ArenaOrigin.Z);
+			// rank0 is the single floor plane; rank1 stays MAX_flt (absent) because the arena is single-plane, so
+			// the 2-layer surface graph costs one unused slot and nothing else.
+			S.CellFloorZ[SurfIndex(CellIdx, 0)] = static_cast<float>(ArenaOrigin.Z);
 
-			// Edges are opened everywhere inside the grid, INCLUDING into cluster cells. Traversability is decided
+			// Edges are opened everywhere inside the grid, INCLUDING into blocked cells. Traversability is decided
 			// by BlockedField, not by removing edges — that is how the flow field itself reads a surface
 			// (CellFloorZ != MAX_flt && !BlockedField), and how door stamping expects to unblock a cell later.
 			// The arena boundary needs no wall of blocked cells: the grid simply has no edge pointing outward.
-			if (CX + 1 < W) { S.EdgeMask[Cell * 2 + 0] |= Rank0EdgeBit; }
-			if (CY + 1 < H) { S.EdgeMask[Cell * 2 + 1] |= Rank0EdgeBit; }
+			if (CX + 1 < W) { S.EdgeMask[CellIdx * 2 + 0] |= Rank0EdgeBit; }
+			if (CY + 1 < H) { S.EdgeMask[CellIdx * 2 + 1] |= Rank0EdgeBit; }
 		}
 	}
 
-	for (const FFPSRArenaCluster& Cluster : OutLayout.Clusters)
+	// --- L0: rasterise the authored blocking volumes ---------------------------------------------------------
+	auto BlockCell = [&S, W, H](int32 CX, int32 CY) -> bool
 	{
-		for (int32 CY = Cluster.MinCell.Y; CY <= Cluster.MaxCell.Y; ++CY)
+		if (CX < 0 || CY < 0 || CX >= W || CY >= H) { return false; }
+		S.BlockedField[SurfIndex(CY * W + CX, 0)] = true;
+		return true;
+	};
+
+	OutLayout.Clusters.Reserve(Authored.Blockers.Num());
+	for (const FFPSRArenaAuthoredBox& Box : Authored.Blockers)
+	{
+		const double Yaw = FMath::DegreesToRadians(static_cast<double>(Box.YawDegrees));
+		const double CosY = FMath::Cos(Yaw);
+		const double SinY = FMath::Sin(Yaw);
+
+		// A cell counts as blocked when its CENTRE falls inside the box grown by half a cell on each local axis.
+		// Growing rather than testing exact overlap is deliberate: it errs toward blocking a partially covered
+		// cell. The opposite error would let the swarm path through a cell that has geometry in it, and an enemy
+		// walking into a wall is far worse than one taking a slightly wider berth around it.
+		const double GrowX = Box.HalfExtentXY.X + Cell * 0.5;
+		const double GrowY = Box.HalfExtentXY.Y + Cell * 0.5;
+
+		// World AABB of the rotated box (plus the grow margin) -> the cell range worth testing at all.
+		const double AabbX = FMath::Abs(CosY) * GrowX + FMath::Abs(SinY) * GrowY;
+		const double AabbY = FMath::Abs(SinY) * GrowX + FMath::Abs(CosY) * GrowY;
+		const int32 MinCX = FMath::Max(0, FMath::FloorToInt((Box.Center.X - AabbX - ArenaOrigin.X) / Cell));
+		const int32 MaxCX = FMath::Min(W - 1, FMath::CeilToInt((Box.Center.X + AabbX - ArenaOrigin.X) / Cell));
+		const int32 MinCY = FMath::Max(0, FMath::FloorToInt((Box.Center.Y - AabbY - ArenaOrigin.Y) / Cell));
+		const int32 MaxCY = FMath::Min(H - 1, FMath::CeilToInt((Box.Center.Y + AabbY - ArenaOrigin.Y) / Cell));
+
+		FFPSRArenaCluster Rect;
+		bool bAny = false;
+		for (int32 CY = MinCY; CY <= MaxCY; ++CY)
 		{
-			for (int32 CX = Cluster.MinCell.X; CX <= Cluster.MaxCell.X; ++CX)
+			for (int32 CX = MinCX; CX <= MaxCX; ++CX)
 			{
-				S.BlockedField[SurfIndex(CY * W + CX, 0)] = true;
+				const FVector Centre = OutLayout.CellCenterWorld(CX, CY);
+				const double DX = Centre.X - Box.Center.X;
+				const double DY = Centre.Y - Box.Center.Y;
+				// Into the box's local frame (inverse yaw).
+				const double LocalX = DX * CosY + DY * SinY;
+				const double LocalY = -DX * SinY + DY * CosY;
+				if (FMath::Abs(LocalX) > GrowX || FMath::Abs(LocalY) > GrowY) { continue; }
+
+				if (!BlockCell(CX, CY)) { continue; }
+				if (!bAny) { Rect.MinCell = Rect.MaxCell = FIntPoint(CX, CY); bAny = true; }
+				else
+				{
+					Rect.MinCell.X = FMath::Min(Rect.MinCell.X, CX);
+					Rect.MinCell.Y = FMath::Min(Rect.MinCell.Y, CY);
+					Rect.MaxCell.X = FMath::Max(Rect.MaxCell.X, CX);
+					Rect.MaxCell.Y = FMath::Max(Rect.MaxCell.Y, CY);
+				}
 			}
 		}
+		if (bAny) { OutLayout.Clusters.Add(Rect); }
 	}
 
-	UE_LOG(LogFPSR, Log, TEXT("[Arena] Generated seed=%d grid=%dx%d cell=%.0f lattice=%dx%d clusters=%d origin=%s"),
-		Seed, W, H, Params.CellSize, Lattice.X, Lattice.Y, OutLayout.Clusters.Num(), *ArenaOrigin.ToString());
+	// --- landmarks: only the blocking ones occupy cells ------------------------------------------------------
+	for (const FFPSRArenaAuthoredLandmark& Landmark : Authored.Landmarks)
+	{
+		if (!Landmark.bBlocking) { continue; }
+		const int32 LCX = FMath::FloorToInt((Landmark.Location.X - ArenaOrigin.X) / Cell);
+		const int32 LCY = FMath::FloorToInt((Landmark.Location.Y - ArenaOrigin.Y) / Cell);
+		BlockCell(LCX, LCY);
+	}
+
+	UE_LOG(LogFPSR, Log,
+		TEXT("[Arena] Generated seed=%d grid=%dx%d cell=%.0f authored(blockers=%d landmarks=%d) origin=%s"),
+		Seed, W, H, Params.CellSize, Authored.Blockers.Num(), Authored.Landmarks.Num(), *ArenaOrigin.ToString());
 
 	return true;
 }
@@ -246,5 +335,6 @@ bool FFPSRArenaGenerator::IsCellOpen(const FFPSRArenaLayout& Layout, int32 CX, i
 	const int32 Surf = SurfIndex(Layout.CellIndex(CX, CY), 0);
 	return Layout.Surface.CellFloorZ.IsValidIndex(Surf)
 		&& Layout.Surface.CellFloorZ[Surf] != MAX_flt
+		&& Layout.Surface.BlockedField.IsValidIndex(Surf)
 		&& !Layout.Surface.BlockedField[Surf];
 }
