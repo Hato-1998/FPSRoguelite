@@ -184,6 +184,10 @@ public:
 	virtual class FNetworkPredictionData_Client* GetPredictionData_Client() const override;
 	virtual float GetMaxSpeed() const override;
 
+	/** Overridden only to carry the FPSR.Debug.PlayerSpeedScale playtest multiplier — acceleration has to move with
+	 *  the speed cap or a scaled-up player just feels slow to get going. No behaviour change at scale 1. */
+	virtual float GetMaxAcceleration() const override;
+
 	/** Takes over velocity entirely while sliding — see the implementation for why MaxAcceleration is deliberately
 	 *  left alone instead of being zeroed. */
 	virtual void CalcVelocity(float DeltaTime, float Friction, bool bFluid, float BrakingDeceleration) override;

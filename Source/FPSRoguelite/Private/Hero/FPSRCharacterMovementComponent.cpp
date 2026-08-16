@@ -6,6 +6,7 @@
 #include "Curves/CurveFloat.h"
 #include "Engine/World.h"
 #include "GameFramework/Character.h"
+#include "HAL/IConsoleManager.h"
 #include "Hero/FPSRCharacter.h"
 #include "Net/UnrealNetwork.h"
 #include "Net/Core/PushModel/PushModel.h"
@@ -1135,6 +1136,31 @@ bool UFPSRCharacterMovementComponent::IsSlidingBackward() const
 	return bIsSliding && IsDirectionBackward(Velocity);
 }
 
+#if !UE_BUILD_SHIPPING
+static float GFPSRPlayerSpeedScale = 1.0f;
+static FAutoConsoleVariableRef CVarFPSRPlayerSpeedScale(
+	TEXT("FPSR.Debug.PlayerSpeedScale"),
+	GFPSRPlayerSpeedScale,
+	TEXT("Playtest multiplier on every player speed cap AND acceleration (both, so time-to-top-speed is unchanged).\n"
+	     "Deliberately does NOT touch:\n"
+	     "  MaxStepHeight  - mirrored into the flow field's ClimbableStepHeight; scaling it would let the player\n"
+	     "                   walk over props the swarm cannot, breaking the 45/60 authoring band (ADR 0010 inv. 4).\n"
+	     "  JumpZVelocity  - jump HEIGHT goes with v^2, so a 3x scale would be a 9x jump.\n"
+	     "Set the SAME value on server and client: CharacterMovement replays moves on correction, so a mismatch\n"
+	     "reads as constant rubber-banding. 1 = off."),
+	ECVF_Cheat);
+#endif
+
+/** 1.0 outside of dev builds, so shipping keeps the authored numbers with no branch worth mentioning. */
+static FORCEINLINE float FPSRPlayerSpeedScale()
+{
+#if !UE_BUILD_SHIPPING
+	return FMath::Max(0.0f, GFPSRPlayerSpeedScale);
+#else
+	return 1.0f;
+#endif
+}
+
 float UFPSRCharacterMovementComponent::GetMaxSpeed() const
 {
 	if (bIsSliding)
@@ -1142,7 +1168,7 @@ float UFPSRCharacterMovementComponent::GetMaxSpeed() const
 		// Flat ceiling while sliding: with SlideSpeedCurve assigned the curve writes the speed outright each frame
 		// (UpdateCharacterStateBeforeMovement), so this only has to stay out of its way. A slide holds its committed
 		// direction, so the backpedal penalty deliberately does not apply here.
-		return SlideMaxSpeed;
+		return SlideMaxSpeed * FPSRPlayerSpeedScale();
 	}
 
 	// Engine speed for this stance: MaxWalkSpeed standing, MaxWalkSpeedCrouched crouched — and already carrying any
@@ -1178,7 +1204,16 @@ float UFPSRCharacterMovementComponent::GetMaxSpeed() const
 			MaxSpeed = FMath::Lerp(StanceSpeedFrom, MaxSpeed, TransitionProgress);
 		}
 	}
-	return MaxSpeed;
+	// Scaled at the very end so every term above (curve ramp, backpedal penalty, stance easing, card multiplier)
+	// keeps its shape and only the magnitude moves.
+	return MaxSpeed * FPSRPlayerSpeedScale();
+}
+
+float UFPSRCharacterMovementComponent::GetMaxAcceleration() const
+{
+	// Acceleration scales WITH speed on purpose. Scaling the cap alone would leave the player taking three times as
+	// long to reach it, which reads as sluggish rather than fast — the opposite of what the experiment is asking.
+	return Super::GetMaxAcceleration() * FPSRPlayerSpeedScale();
 }
 
 void UFPSRCharacterMovementComponent::CalcVelocity(float DeltaTime, float Friction, bool bFluid, float BrakingDeceleration)

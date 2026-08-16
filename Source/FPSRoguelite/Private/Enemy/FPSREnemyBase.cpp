@@ -18,6 +18,28 @@
 #include "GameFramework/PlayerController.h"
 #include "ProfilingDebugging/CsvProfiler.h" // CSV_PROFILER_STATS gate for the metrics registry calls below
 #include "Settings/FPSRPlaceholderVisualSettings.h"
+#include "HAL/IConsoleManager.h"
+
+#if !UE_BUILD_SHIPPING
+static float GFPSREnemySpeedScale = 1.0f;
+static FAutoConsoleVariableRef CVarFPSREnemySpeedScale(
+	TEXT("FPSR.Debug.EnemySpeedScale"),
+	GFPSREnemySpeedScale,
+	TEXT("Playtest multiplier on swarm move speed. Applied at USE, so it affects enemies already on the field.\n"
+	     "Pair with FPSR.Debug.PlayerSpeedScale: scaling BOTH by the same factor leaves the chase dynamics\n"
+	     "identical and only changes how fast the arena is crossed — which is the point when the arena grows.\n"
+	     "Server-authoritative movement, so this only does anything on the host. 1 = off."),
+	ECVF_Cheat);
+#endif
+
+float AFPSREnemyBase::GetEffectiveMoveSpeed() const
+{
+#if !UE_BUILD_SHIPPING
+	return CurrentMoveSpeed * FMath::Max(0.0f, GFPSREnemySpeedScale);
+#else
+	return CurrentMoveSpeed;
+#endif
+}
 
 AFPSREnemyBase::AFPSREnemyBase()
 {
@@ -468,7 +490,7 @@ void AFPSREnemyBase::TickServerMovement(const FVector& MoveDirection, const FVec
 	if (!bKnockbackActive && Dir.SizeSquared() > KINDA_SMALL_NUMBER)
 	{
 		const FVector Normalized = Dir.GetSafeNormal();
-		const float MoveDist = CurrentMoveSpeed * ScaledDeltaSeconds;
+		const float MoveDist = GetEffectiveMoveSpeed() * ScaledDeltaSeconds;
 
 		// Walk ALONG the ground slope (the swarm equivalent of CharacterMovement's MoveAlongFloor): project the steering
 		// onto the last-known ground plane and move at full speed along it, so the enemy ascends/descends ramps and stair
@@ -569,7 +591,7 @@ void AFPSREnemyBase::TickServerMovement(const FVector& MoveDirection, const FVec
 	// stationary attacker reads as Idle otherwise). Attack-anim length/persistence is refined with the clips in Stage 3.
 	if (AnimProfile)
 	{
-		const float ExpectedMove = CurrentMoveSpeed * ScaledDeltaSeconds;
+		const float ExpectedMove = GetEffectiveMoveSpeed() * ScaledDeltaSeconds;
 		const float MovedSq = FVector::DistSquaredXY(GetActorLocation(), AnimStartLoc);
 		const bool bMoved = ExpectedMove > KINDA_SMALL_NUMBER && MovedSq > FMath::Square(ExpectedMove * 0.25f);
 		if (bMoved)

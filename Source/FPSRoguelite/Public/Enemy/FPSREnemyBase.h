@@ -313,6 +313,12 @@ protected:
 	UPROPERTY(Transient)
 	float CurrentMoveSpeed = MoveSpeed;
 
+	/** CurrentMoveSpeed with the FPSR.Debug.EnemySpeedScale playtest multiplier applied. Deliberately applied at USE
+	 *  rather than folded into CurrentMoveSpeed at spawn: the knob exists to sweep 1x/2x/3x while a swarm is already
+	 *  on the field, and a spawn-time fold would only affect enemies spawned after the change. Identical to
+	 *  CurrentMoveSpeed at scale 1 and in shipping. */
+	float GetEffectiveMoveSpeed() const;
+
 	/** Gravity acceleration (cm/s^2) applied while airborne (fall off ledges / land after a high spawn). */
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Enemy|Movement")
 	float GravityAccel = 1800.0f;
