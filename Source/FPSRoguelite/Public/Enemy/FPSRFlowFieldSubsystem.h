@@ -4,6 +4,7 @@
 
 #include "Subsystems/WorldSubsystem.h"
 #include "GameplayTagContainer.h"
+#include "Containers/ArrayView.h" // TConstArrayView (NotifyArenaCellsOpened)
 #include "Enemy/FPSRFlowFieldComputer.h" // FFPSRFlowFieldSurfaceData (BakedBaseline by-value member, U P-F) + EFPSRFieldQuery
 #include "FPSRFlowFieldSubsystem.generated.h"
 
@@ -87,6 +88,15 @@ public:
 	 *  (single-map / pre-content) or off authority — the closed seam kept the slots isolated, so nothing changes. Called by
 	 *  AFPSRDoor::HandleBroken; the door->cell mapping is UFPSRFlowFieldComputer::MapDoorSeamCellPairs. */
 	void NotifyDoorBroken(const AActor* Door);
+
+	/** ADR 0010 D7: an arena destructible broke and its AUTHORED cells (FFPSRArenaGenerator::ComputeDestructibleCells)
+	 *  should open — blocked -> open stamp, then a topology generation bump + recompute. Unlike NotifyDoorBroken,
+	 *  several of these can land in the SAME frame (an explosion chaining multiple props), so the recompute is
+	 *  coalesced to ONE per frame via SetTimerForNextTick rather than run immediately — ADR 0010 D7: "제한해야 할
+	 *  것은 동시 파괴 빈도이며, 폭발로 여러 개가 한 프레임에 터지면 BFS를 1회로 합친다". No bUnifiedMultiSlot gate
+	 *  (unlike NotifyDoorBroken) — the arena is always a single grid, never a multi-slot seam. Off-authority or no
+	 *  grid built yet -> no-op. Called by AFPSRArenaDestructible::HandleBrokenAuthority. */
+	void NotifyArenaCellsOpened(TConstArrayView<int32> Cells);
 
 	/** U (P-F): server-authoritative topology generation — bumped every time the unified grid's connectivity changes
 	 *  (a seam door opens, a slot bakes in, or a new-run baseline reset). Late-join ack + the freeze pre-unfreeze
@@ -188,6 +198,11 @@ private:
 	/** True once a seam door / slot bake has changed the topology away from the baked baseline. Gates the new-run reset
 	 *  to a no-op on a first (unmutated) run so the generation stays 0 (StartRun runs even on the first run). */
 	bool bTopologyMutatedSinceBaseline = false;
+
+	/** Coalescing guard for NotifyArenaCellsOpened: true once this frame's deferred recompute has already been
+	 *  scheduled via SetTimerForNextTick, so N destructibles breaking in the same frame produce ONE generation bump
+	 *  + ONE BFS instead of N of each (ADR 0010 D7). Reset back to false by the deferred callback itself. */
+	bool bArenaOpenRecomputePending = false;
 
 	/** Whether BakedBaseline holds a valid world-begin snapshot (only captured when a unified field is built). */
 	bool bHasBaseline = false;

@@ -112,7 +112,7 @@ void UFPSRFlowFieldSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 	// ADR 0010: an arena actor OWNS the obstacle mask. We PULL it here rather than letting the actor push during its
 	// BeginPlay, because actor BeginPlay runs BEFORE world subsystems' OnWorldBeginPlay — a push would be overwritten
 	// by whichever bake ran below a moment later.
-	if (AFPSRArenaActor* Arena = AFPSRArenaActor::FindInWorld(&InWorld))
+	if (AFPSRArenaActor* Arena = AFPSRArenaActor::FindActiveInWorld(&InWorld))
 	{
 		if (Arena->BuildLocalLayout())
 		{
@@ -309,7 +309,10 @@ bool UFPSRFlowFieldSubsystem::AdoptArenaSurface(const FFPSRFlowFieldSurfaceData&
 
 	// Connectivity changed wholesale, so clients' late-join ack and the freeze pre-unfreeze recompute must both see
 	// a new generation; then recompute immediately rather than leaving up to 0.2s of stale flow after a swap.
-	++TopologyGeneration;
+	// AdvanceTopologyGeneration() — NOT a raw ++ — because it also mirrors the count to the replicated GameState;
+	// a bare ++TopologyGeneration here left that mirror stale, so a remote client's late-join ack could never see
+	// the post-swap generation (bug found during arena-topology multi-arena work; GameState never OnRep'd).
+	AdvanceTopologyGeneration();
 	RecomputeAllFields();
 
 	UE_LOG(LogFPSR, Log, TEXT("[FlowField] Adopted arena surface %dx%d cell=%.0f (topology gen %d)."),
@@ -405,6 +408,43 @@ void UFPSRFlowFieldSubsystem::NotifyDoorBroken(const AActor* Door)
 	RecomputeAllFields();
 	UE_LOG(LogFPSR, Log, TEXT("[FlowField] NotifyDoorBroken: door '%s' opened %d seam edge(s) across %d cell-pair(s); field recomputed (topology generation now %d)."),
 		*Door->GetName(), OpenedEdges, Pairs.Num(), TopologyGeneration);
+}
+
+void UFPSRFlowFieldSubsystem::NotifyArenaCellsOpened(TConstArrayView<int32> Cells)
+{
+	// The arena is always a single grid (never a multi-slot seam), so — unlike NotifyDoorBroken — there is no
+	// bUnifiedMultiSlot gate here: only authority + "a grid actually exists yet" matter.
+	if (!HasServerAuthority() || !UnifiedComputer)
+	{
+		return;
+	}
+
+	for (const int32 Cell : Cells)
+	{
+		UnifiedComputer->StampCellBlocked(Cell, /*Rank=*/0, /*bBlocked=*/false);
+	}
+	bTopologyMutatedSinceBaseline = true;
+
+	// Coalesce same-frame breaks into ONE recompute: several destructibles can go down in one frame (an
+	// explosion), and ADR 0010 D7 is explicit that what must be bounded is simultaneous-break FREQUENCY, not prop
+	// count — "여러 개가 한 프레임에 터지면 BFS를 1회로 합친다". Unlike NotifyDoorBroken (a single door, recomputed
+	// immediately), this defers to next tick so a burst of N breaks this frame costs one generation bump + one BFS,
+	// not N of each.
+	if (!bArenaOpenRecomputePending)
+	{
+		bArenaOpenRecomputePending = true;
+		if (UWorld* World = GetWorld())
+		{
+			World->GetTimerManager().SetTimerForNextTick(FTimerDelegate::CreateWeakLambda(this, [this]()
+			{
+				bArenaOpenRecomputePending = false;
+				AdvanceTopologyGeneration();
+				RecomputeAllFields();
+				UE_LOG(LogFPSR, Log, TEXT("[FlowField] NotifyArenaCellsOpened: coalesced recompute done (topology generation now %d)."),
+					TopologyGeneration);
+			}));
+		}
+	}
 }
 
 bool UFPSRFlowFieldSubsystem::IsLocationInMap(const FGameplayTag& MapId, const FVector& WorldLocation) const

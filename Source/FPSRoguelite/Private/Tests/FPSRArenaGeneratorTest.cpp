@@ -274,6 +274,150 @@ bool FFPSRArenaGeneratorTest::RunTest(const FString& Parameters)
 		TestFalse(TEXT("rejected layout is left invalid"), L.IsValid());
 	}
 
+	// --- 7. ComputeDestructibleCells: footprint shape, ascending order, grid-edge clipping (ADR 0010 D7) --------
+	// Pure geometry — no Generate() call, so L1 cannot interfere with these assertions.
+	{
+		const FIntPoint GridDims = Params.ArenaSizeCells; // shipped default 160x160
+
+		// 1x1 footprint -> exactly its own anchor cell.
+		{
+			FFPSRArenaAuthoredDestructible D;
+			D.Location = Origin + FVector(10.5 * Params.CellSize, 20.5 * Params.CellSize, 0.0);
+			D.FootprintCells = FIntPoint(1, 1);
+			TArray<int32> Cells;
+			FFPSRArenaGenerator::ComputeDestructibleCells(D, Origin, Params.CellSize, GridDims, Cells);
+			if (TestEqual(TEXT("1x1 footprint -> 1 cell"), Cells.Num(), 1))
+			{
+				TestEqual(TEXT("1x1 footprint anchor cell index"), Cells[0], 20 * GridDims.X + 10);
+			}
+		}
+
+		// 2x3 footprint (width 2, height 3) -> 6 cells, growing +X/+Y from the anchor, in ascending index order.
+		{
+			FFPSRArenaAuthoredDestructible D;
+			D.Location = Origin + FVector(5.5 * Params.CellSize, 5.5 * Params.CellSize, 0.0);
+			D.FootprintCells = FIntPoint(2, 3);
+			TArray<int32> Cells;
+			FFPSRArenaGenerator::ComputeDestructibleCells(D, Origin, Params.CellSize, GridDims, Cells);
+			TestEqual(TEXT("2x3 footprint -> 6 cells"), Cells.Num(), 6);
+
+			TArray<int32> Expected;
+			for (int32 DY = 0; DY < 3; ++DY)
+			{
+				for (int32 DX = 0; DX < 2; ++DX)
+				{
+					Expected.Add((5 + DY) * GridDims.X + (5 + DX));
+				}
+			}
+			TestTrue(TEXT("2x3 footprint matches the expected cell set"), Cells == Expected);
+
+			bool bAscending = true;
+			for (int32 i = 1; i < Cells.Num(); ++i)
+			{
+				bAscending &= (Cells[i] > Cells[i - 1]);
+			}
+			TestTrue(TEXT("cell order is strictly ascending"), bAscending);
+		}
+
+		// Anchor at the grid's last cell + a footprint that overshoots the far edge -> off-grid cells silently
+		// dropped (not clamped/wrapped back onto the grid).
+		{
+			FFPSRArenaAuthoredDestructible D;
+			D.Location = Origin + FVector((GridDims.X - 1 + 0.5) * Params.CellSize, (GridDims.Y - 1 + 0.5) * Params.CellSize, 0.0);
+			D.FootprintCells = FIntPoint(3, 3);
+			TArray<int32> Cells;
+			FFPSRArenaGenerator::ComputeDestructibleCells(D, Origin, Params.CellSize, GridDims, Cells);
+			if (TestEqual(TEXT("off-grid footprint clipped to the single in-grid cell"), Cells.Num(), 1))
+			{
+				TestEqual(TEXT("clipped cell is the grid's last index"), Cells[0], (GridDims.Y - 1) * GridDims.X + (GridDims.X - 1));
+			}
+		}
+
+		// Anchor entirely off-grid (negative) -> zero cells, not a crash or a negative index.
+		{
+			FFPSRArenaAuthoredDestructible D;
+			D.Location = Origin + FVector(-5.0 * Params.CellSize, -5.0 * Params.CellSize, 0.0);
+			D.FootprintCells = FIntPoint(2, 2);
+			TArray<int32> Cells;
+			FFPSRArenaGenerator::ComputeDestructibleCells(D, Origin, Params.CellSize, GridDims, Cells);
+			TestEqual(TEXT("fully off-grid anchor -> 0 cells"), Cells.Num(), 0);
+		}
+	}
+
+	// --- 8. an authored destructible blocks its cells; without one they stay open (ADR 0010 D7) -----------------
+	{
+		// Isolated from L1 (same reasoning as test 4d): a stray micro-prop landing on the exact cells under test
+		// would make this flaky for reasons that have nothing to do with destructibles.
+		FFPSRArenaGenParams NoProps = Params;
+		NoProps.PropSets.Reset();
+
+		FFPSRArenaAuthoredInput Authored;
+		FFPSRArenaAuthoredDestructible D;
+		D.Location = Origin + FVector(60.5 * NoProps.CellSize, 60.5 * NoProps.CellSize, 0.0);
+		D.FootprintCells = FIntPoint(2, 2);
+		Authored.Destructibles.Add(D);
+
+		TArray<int32> ExpectedCells;
+		FFPSRArenaGenerator::ComputeDestructibleCells(D, Origin, NoProps.CellSize, NoProps.ArenaSizeCells, ExpectedCells);
+		TestTrue(TEXT("destructible authors a non-empty footprint for this test"), ExpectedCells.Num() > 0);
+
+		FFPSRArenaLayout WithDestructible;
+		TestTrue(TEXT("build with a destructible"), FFPSRArenaGenerator::Generate(5, NoProps, Origin, Authored, WithDestructible));
+		if (TestEqual(TEXT("layout records one destructible's cells"), WithDestructible.DestructibleCells.Num(), 1))
+		{
+			TestTrue(TEXT("recorded cells match ComputeDestructibleCells"), WithDestructible.DestructibleCells[0] == ExpectedCells);
+		}
+		for (const int32 CellIdx : ExpectedCells)
+		{
+			const int32 CX = CellIdx % NoProps.ArenaSizeCells.X;
+			const int32 CY = CellIdx / NoProps.ArenaSizeCells.X;
+			TestFalse(*FString::Printf(TEXT("destructible cell (%d,%d) is blocked"), CX, CY),
+				FFPSRArenaGenerator::IsCellOpen(WithDestructible, CX, CY));
+		}
+
+		FFPSRArenaLayout WithoutDestructible;
+		TestTrue(TEXT("build without the destructible"),
+			FFPSRArenaGenerator::Generate(5, NoProps, Origin, FFPSRArenaAuthoredInput(), WithoutDestructible));
+		TestEqual(TEXT("no authored destructibles -> no recorded cell lists"), WithoutDestructible.DestructibleCells.Num(), 0);
+		for (const int32 CellIdx : ExpectedCells)
+		{
+			const int32 CX = CellIdx % NoProps.ArenaSizeCells.X;
+			const int32 CY = CellIdx / NoProps.ArenaSizeCells.X;
+			TestTrue(*FString::Printf(TEXT("same cell (%d,%d) is open with no destructible authored"), CX, CY),
+				FFPSRArenaGenerator::IsCellOpen(WithoutDestructible, CX, CY));
+		}
+	}
+
+	// --- 9. determinism: same input -> identical destructible cell lists, twice (ADR 0010 invariant 10) ---------
+	{
+		FFPSRArenaGenParams NoProps = Params;
+		NoProps.PropSets.Reset();
+
+		FFPSRArenaAuthoredInput Authored;
+		FFPSRArenaAuthoredDestructible D1, D2;
+		D1.Location = Origin + FVector(30.5 * NoProps.CellSize, 30.5 * NoProps.CellSize, 0.0);
+		D1.FootprintCells = FIntPoint(2, 1);
+		D2.Location = Origin + FVector(90.5 * NoProps.CellSize, 12.5 * NoProps.CellSize, 0.0);
+		D2.FootprintCells = FIntPoint(1, 4);
+		Authored.Destructibles.Add(D1);
+		Authored.Destructibles.Add(D2);
+
+		FFPSRArenaLayout A, B;
+		TestTrue(TEXT("build A with destructibles"), FFPSRArenaGenerator::Generate(11, NoProps, Origin, Authored, A));
+		TestTrue(TEXT("build B with destructibles"), FFPSRArenaGenerator::Generate(11, NoProps, Origin, Authored, B));
+
+		TestTrue(TEXT("same seed+authored input -> identical surface"), SurfaceEquals(A.Surface, B.Surface));
+		if (TestEqual(TEXT("same number of destructible-cell entries"), A.DestructibleCells.Num(), B.DestructibleCells.Num()))
+		{
+			bool bAllSame = true;
+			for (int32 i = 0; i < A.DestructibleCells.Num(); ++i)
+			{
+				bAllSame &= (A.DestructibleCells[i] == B.DestructibleCells[i]);
+			}
+			TestTrue(TEXT("destructible cell lists are identical across both builds"), bAllSame);
+		}
+	}
+
 	return true;
 }
 

@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Arena/FPSRArenaActor.h"
+#include "Arena/FPSRArenaDestructible.h"
 #include "Arena/FPSRArenaGenerator.h"
 #include "Arena/FPSRArenaMarkers.h"
 #include "Arena/FPSRArenaParamsDataAsset.h"
@@ -13,6 +14,7 @@
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "GameFramework/PlayerController.h"
+#include "GameFramework/PlayerStart.h"
 #include "HAL/IConsoleManager.h"
 #include "Net/UnrealNetwork.h"
 #include "Net/Core/PushModel/PushModel.h"
@@ -82,6 +84,12 @@ void AFPSRArenaActor::BeginPlay()
 {
 	Super::BeginPlay();
 
+	// Authority-independent and FIRST: bStartsActive is a level-authored constant every machine reads off the same
+	// placed actor (not replicated — it does not need to be), so every client agrees with the server on which
+	// arena starts active without a network round trip. Everything below (layout build, representation) must see
+	// the correct active/inactive state from the start rather than toggling it in after the fact.
+	SetArenaActive(bStartsActive);
+
 	if (HasAuthority())
 	{
 		ActiveSeed = InitialSeed;
@@ -120,13 +128,18 @@ bool AFPSRArenaActor::BuildLayoutForSeed(int32 Seed, FFPSRArenaLayout& OutLayout
 
 	// Gather what the designer placed. Note this reads ACTORS, not collision — the arena is told what blocks it
 	// rather than discovering it, which is what keeps the mask free of world queries (ADR 0011 E3).
+	//
+	// Ownership is SPATIAL (ContainsWorldLocation), not an authored per-actor link: with several arenas now able
+	// to live in one level (ADR 0010 D6, same-level parking), a marker actor carries no "which arena am I in"
+	// property to keep in sync by hand — being physically inside an arena's own cell grid IS the membership test,
+	// so it cannot drift as markers are added, moved, or a whole new arena is dropped into the level.
 	FFPSRArenaAuthoredInput Authored;
 	if (const UWorld* World = GetWorld())
 	{
 		for (TActorIterator<AFPSRArenaBlocker> It(const_cast<UWorld*>(World)); It; ++It)
 		{
 			const AFPSRArenaBlocker* Blocker = *It;
-			if (!IsValid(Blocker)) { continue; }
+			if (!IsValid(Blocker) || !ContainsWorldLocation(Blocker->GetActorLocation())) { continue; }
 			FFPSRArenaAuthoredBox BoxEntry;
 			BoxEntry.Center = Blocker->GetActorLocation();
 			BoxEntry.HalfExtentXY = Blocker->GetHalfExtentXY();
@@ -136,12 +149,21 @@ bool AFPSRArenaActor::BuildLayoutForSeed(int32 Seed, FFPSRArenaLayout& OutLayout
 		for (TActorIterator<AFPSRArenaLandmark> It(const_cast<UWorld*>(World)); It; ++It)
 		{
 			const AFPSRArenaLandmark* Landmark = *It;
-			if (!IsValid(Landmark)) { continue; }
+			if (!IsValid(Landmark) || !ContainsWorldLocation(Landmark->GetActorLocation())) { continue; }
 			FFPSRArenaAuthoredLandmark LandmarkEntry;
 			LandmarkEntry.Location = Landmark->GetActorLocation();
 			LandmarkEntry.ReserveRadiusCells = Landmark->GetReserveRadiusCells();
 			LandmarkEntry.bBlocking = Landmark->IsBlocking();
 			Authored.Landmarks.Add(LandmarkEntry);
+		}
+		for (TActorIterator<AFPSRArenaDestructible> It(const_cast<UWorld*>(World)); It; ++It)
+		{
+			const AFPSRArenaDestructible* Destructible = *It;
+			if (!IsValid(Destructible) || !ContainsWorldLocation(Destructible->GetActorLocation())) { continue; }
+			FFPSRArenaAuthoredDestructible DestructibleEntry;
+			DestructibleEntry.Location = Destructible->GetActorLocation();
+			DestructibleEntry.FootprintCells = Destructible->GetFootprintCells();
+			Authored.Destructibles.Add(DestructibleEntry);
 		}
 	}
 
@@ -195,6 +217,18 @@ bool AFPSRArenaActor::ServerRegenerate(int32 NewSeed)
 	}
 
 	RebuildRepresentation();
+
+	// Only the LIVE arena's mask may reach the flow field. With spare arenas parked in the same level (ADR 0010 D6
+	// as amended 2026-08-17), a regenerate on a dormant one — a console command aimed at the wrong actor, a BP
+	// call, a future transition bug — would otherwise hand the swarm the geometry of an arena nobody is standing
+	// in, and enemies would path against walls 300 m away. Regenerating a dormant arena's own layout is fine and
+	// still happens above; publishing it is what is gated.
+	if (!bIsArenaActive)
+	{
+		UE_LOG(LogFPSR, Verbose, TEXT("[Arena] %s regenerated seed %d locally but is not the active arena — flow field untouched."),
+			*GetName(), NewSeed);
+		return true;
+	}
 
 	if (UWorld* World = GetWorld())
 	{
@@ -312,20 +346,170 @@ void AFPSRArenaActor::RebuildRepresentation()
 		Layout.Clusters.Num(), Layout.Props.Num(), Layout.Seed);
 }
 
-AFPSRArenaActor* AFPSRArenaActor::FindInWorld(const UWorld* World)
+void AFPSRArenaActor::SetArenaActive(bool bInActive)
 {
+	bIsArenaActive = bInActive;
+
+	if (BlockingMeshes)
+	{
+		BlockingMeshes->SetVisibility(bInActive);
+		BlockingMeshes->SetCollisionEnabled(bInActive ? ECollisionEnabled::QueryAndPhysics : ECollisionEnabled::NoCollision);
+	}
+	if (FloorMeshes)
+	{
+		FloorMeshes->SetVisibility(bInActive);
+		FloorMeshes->SetCollisionEnabled(bInActive ? ECollisionEnabled::QueryAndPhysics : ECollisionEnabled::NoCollision);
+	}
+
+	// Marker actors physically inside THIS arena's grid — same spatial-ownership test BuildLayoutForSeed uses, so
+	// "which arena does this marker belong to" can never disagree between generation and activation. Transform is
+	// never touched (Static mobility on all three types); SetActorHiddenInGame/SetActorEnableCollision are
+	// idempotent, so calling this twice with the same bInActive is a harmless no-op.
+	if (const UWorld* World = GetWorld())
+	{
+		for (TActorIterator<AFPSRArenaBlocker> It(const_cast<UWorld*>(World)); It; ++It)
+		{
+			AFPSRArenaBlocker* Blocker = *It;
+			if (!IsValid(Blocker) || !ContainsWorldLocation(Blocker->GetActorLocation())) { continue; }
+			Blocker->SetActorHiddenInGame(!bInActive);
+			Blocker->SetActorEnableCollision(bInActive);
+		}
+		for (TActorIterator<AFPSRArenaLandmark> It(const_cast<UWorld*>(World)); It; ++It)
+		{
+			AFPSRArenaLandmark* Landmark = *It;
+			if (!IsValid(Landmark) || !ContainsWorldLocation(Landmark->GetActorLocation())) { continue; }
+			Landmark->SetActorHiddenInGame(!bInActive);
+			Landmark->SetActorEnableCollision(bInActive);
+		}
+		for (TActorIterator<AFPSRArenaDestructible> It(const_cast<UWorld*>(World)); It; ++It)
+		{
+			AFPSRArenaDestructible* Destructible = *It;
+			if (!IsValid(Destructible) || !ContainsWorldLocation(Destructible->GetActorLocation())) { continue; }
+			Destructible->SetActorHiddenInGame(!bInActive);
+			Destructible->SetActorEnableCollision(bInActive);
+		}
+	}
+}
+
+bool AFPSRArenaActor::ContainsWorldLocation(const FVector& World) const
+{
+	// Reads the two dimension fields straight off the asset instead of going through GetGenParams/ToGenParams:
+	// that path copies the whole generator contract INCLUDING the flattened prop-set entry arrays, and this
+	// predicate runs once per marker actor in each of SetArenaActive's three sweeps and again in
+	// BuildLayoutForSeed — hundreds of throwaway array copies for a bounds test that needs two numbers.
+	if (!ArenaParams)
+	{
+		return false;
+	}
+
+	const double Cell = ArenaParams->CellSize;
+	const double SpanX = static_cast<double>(ArenaParams->ArenaSizeCells.X) * Cell;
+	const double SpanY = static_cast<double>(ArenaParams->ArenaSizeCells.Y) * Cell;
+	// Same centre-anchored origin ComputeGridOrigin derives (the actor sits at the arena CENTRE), restated from the
+	// same two fields so the two can only disagree if both are edited.
+	const FVector Centre = GetActorLocation();
+	const double MinX = Centre.X - 0.5 * SpanX;
+	const double MinY = Centre.Y - 0.5 * SpanY;
+
+	// Z is deliberately absent from this test — see the header comment. The arena is a single Z-plane and reserve
+	// arenas are parked BESIDE the live one (2026-08-17 decision), so XY alone is what tells two arenas apart.
+	return World.X >= MinX && World.X < MinX + SpanX
+		&& World.Y >= MinY && World.Y < MinY + SpanY;
+}
+
+bool AFPSRArenaActor::GetPlayerEntryTransforms(TArray<FTransform>& Out) const
+{
+	Out.Reset();
+
+	TArray<APlayerStart*> Starts;
+	if (const UWorld* World = GetWorld())
+	{
+		for (TActorIterator<APlayerStart> It(const_cast<UWorld*>(World)); It; ++It)
+		{
+			APlayerStart* Start = *It;
+			if (IsValid(Start) && ContainsWorldLocation(Start->GetActorLocation()))
+			{
+				Starts.Add(Start);
+			}
+		}
+	}
+
+	if (Starts.Num() == 0)
+	{
+		// No authored entry points — fall back to something usable (spread around the arena centre) rather than
+		// handing the caller an empty array, but report false so the gap can be logged instead of silently
+		// teleporting every player onto the same point.
+		const FVector Centre = GetActorLocation();
+		constexpr double FallbackOffset = 200.0;
+		const FVector Offsets[4] = {
+			FVector(FallbackOffset, 0.0, 0.0), FVector(-FallbackOffset, 0.0, 0.0),
+			FVector(0.0, FallbackOffset, 0.0), FVector(0.0, -FallbackOffset, 0.0)
+		};
+		Out.Reserve(4);
+		for (const FVector& Offset : Offsets)
+		{
+			Out.Add(FTransform(FRotator::ZeroRotator, Centre + Offset));
+		}
+		return false;
+	}
+
+	// Sorted by NAME, not TActorIterator discovery order — that order is not guaranteed identical across machines
+	// or even across runs, and every client must derive the same entry-point order from the same authored actors
+	// with nothing replicated to settle it.
+	Starts.Sort([](const APlayerStart& A, const APlayerStart& B) { return A.GetName() < B.GetName(); });
+
+	Out.Reserve(Starts.Num());
+	for (const APlayerStart* Start : Starts)
+	{
+		Out.Add(Start->GetActorTransform());
+	}
+	return true;
+}
+
+AFPSRArenaActor* AFPSRArenaActor::FindActiveInWorld(const UWorld* World)
+{
+	TArray<AFPSRArenaActor*> All;
+	FindAllInWorld(World, All); // already sorted: StageOrder ascending, ties by name — every tier below wants that order
+
+	// Tier 1: whichever arena actually toggled itself active (normal play — SetArenaActive ran in BeginPlay).
+	for (AFPSRArenaActor* Arena : All)
+	{
+		if (Arena->IsArenaActive()) { return Arena; }
+	}
+	// Tier 2: nobody has gone through BeginPlay yet (editor / not in PIE) — fall back to what is AUTHORED to
+	// start active, since that is what BeginPlay would pick a moment later.
+	for (AFPSRArenaActor* Arena : All)
+	{
+		if (Arena->bStartsActive) { return Arena; }
+	}
+	// Tier 3: nothing is marked active or start-active at all — an authoring gap. Still return something
+	// deterministic (lowest StageOrder, ties by name) rather than null, so editor tools have an arena to work with.
+	return All.Num() > 0 ? All[0] : nullptr;
+}
+
+void AFPSRArenaActor::FindAllInWorld(const UWorld* World, TArray<AFPSRArenaActor*>& Out)
+{
+	Out.Reset();
 	if (!World)
 	{
-		return nullptr;
+		return;
 	}
 	for (TActorIterator<AFPSRArenaActor> It(const_cast<UWorld*>(World)); It; ++It)
 	{
 		if (IsValid(*It))
 		{
-			return *It;
+			Out.Add(*It);
 		}
 	}
-	return nullptr;
+
+	// StageOrder ascending (the transition order); ties broken by name so every machine agrees on the same order
+	// even when two arenas are authored with the same StageOrder.
+	// Predicate takes REFERENCES, not pointers: TArray<T*>::Sort routes through TDereferenceWrapper<T*, ...>, whose
+	// operator() calls Predicate(*A, *B) (Core/Public/Templates/Sorting.h) — a pointer-typed predicate does not compile.
+	Out.Sort([](const AFPSRArenaActor& A, const AFPSRArenaActor& B)
+	{
+		return (A.StageOrder != B.StageOrder) ? (A.StageOrder < B.StageOrder) : (A.GetName() < B.GetName());
+	});
 }
 
 void AFPSRArenaActor::Tick(float DeltaSeconds)
@@ -376,7 +560,7 @@ void AFPSRArenaActor::Tick(float DeltaSeconds)
 #if !UE_BUILD_SHIPPING
 static void ArenaGenerateCmd(const TArray<FString>& Args, UWorld* World, FOutputDevice& Ar)
 {
-	AFPSRArenaActor* Arena = AFPSRArenaActor::FindInWorld(World);
+	AFPSRArenaActor* Arena = AFPSRArenaActor::FindActiveInWorld(World);
 	if (!Arena)
 	{
 		Ar.Logf(TEXT("FPSR.Arena.Generate: no AFPSRArenaActor in this world."));

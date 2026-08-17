@@ -57,6 +57,14 @@ public:
 	static FFPSRArenaAuthoredBox ClusterToAuthoredBox(const FFPSRArenaCluster& Cluster,
 		const FFPSRArenaGenParams& Params, const FVector& ArenaOrigin);
 
+	/** Cell indices an authored destructible occupies (its footprint, anchored at Location, growing +X/+Y).
+	 *  Off-grid cells are dropped; the surviving indices come out in ascending order. Both the generator (blocking
+	 *  these cells at Generate()) and the destructible actor (opening them at HandleBrokenAuthority) call this SAME
+	 *  function, so the two sides can never disagree about which cells one prop owns. Pure geometry — no world
+	 *  access, matching this class's module boundary. */
+	static void ComputeDestructibleCells(const FFPSRArenaAuthoredDestructible& Destructible,
+		const FVector& ArenaOrigin, float CellSize, const FIntPoint& GridDims, TArray<int32>& OutCells);
+
 	/** True if the cell is inside the grid and not blocked. Mirrors the flow field's own traversability predicate
 	 *  (surface exists AND not blocked), so layout and field never disagree about what is walkable. */
 	static bool IsCellOpen(const FFPSRArenaLayout& Layout, int32 CX, int32 CY);

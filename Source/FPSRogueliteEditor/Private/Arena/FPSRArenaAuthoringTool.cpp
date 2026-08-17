@@ -3,10 +3,12 @@
 #include "Arena/FPSRArenaAuthoringTool.h"
 
 #include "Arena/FPSRArenaActor.h"
+#include "Arena/FPSRArenaDestructible.h"
 #include "Arena/FPSRArenaGenerator.h"
 #include "Arena/FPSRArenaMarkers.h"
 #include "Arena/FPSRArenaTypes.h"
 #include "Arena/FPSRArenaValidator.h"
+#include "Core/FPSRLogChannels.h"
 
 #include "Editor.h"
 #include "Engine/World.h"
@@ -23,172 +25,258 @@ namespace
 		return GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
 	}
 
-	/** The level's arena, or null with a dialog explaining what to place. */
-	AFPSRArenaActor* FindArenaOrComplain(UWorld* World)
+	/** Every arena in the level, StageOrder order — or empty with a dialog explaining what to place. Multiple
+	 *  arenas in one level are now normal (ADR 0010 D6, 2026-08-17: spare arenas parked beside the live one), so
+	 *  both editor flows below must visit all of them rather than assume a single AFPSRArenaActor. */
+	bool FindAllArenasOrComplain(UWorld* World, TArray<AFPSRArenaActor*>& OutArenas)
 	{
+		OutArenas.Reset();
 		if (!World)
 		{
 			FMessageDialog::Open(EAppMsgType::Ok, LOCTEXT("NoWorld", "편집 중인 레벨이 없습니다."));
-			return nullptr;
+			return false;
 		}
-		AFPSRArenaActor* Arena = AFPSRArenaActor::FindInWorld(World);
-		if (!Arena)
+		AFPSRArenaActor::FindAllInWorld(World, OutArenas);
+		if (OutArenas.Num() == 0)
 		{
 			FMessageDialog::Open(EAppMsgType::Ok,
 				LOCTEXT("NoArena", "이 레벨에 FPSRArenaActor 가 없습니다.\n\nPlace Actors 패널에서 'FPSRArenaActor' 를 하나 놓고, "
 					"디테일 패널의 '아레나 파라미터' 에 UFPSRArenaParamsDataAsset 을 지정한 뒤 다시 실행하세요."));
+			return false;
 		}
-		return Arena;
+		return true;
+	}
+
+	/**
+	 * Level-wide checks that only exist because an arena is no longer alone in its level (ADR 0010 D6, 2026-08-17).
+	 * Neither failure is visible at runtime — FindActiveInWorld picks an arena deterministically whatever the
+	 * authoring says, and a marker outside every grid is simply never gathered — so the editor is the only place
+	 * they can be caught (ADR 0011 E4: 판정 시점은 에디터다).
+	 */
+	FString CheckLevelWideArenaAuthoring(UWorld* World, const TArray<AFPSRArenaActor*>& Arenas)
+	{
+		FString Report;
+
+		// (1) Exactly one arena may be authored as the starting one. Two means whichever sorts first silently wins;
+		// zero means the live arena is picked by StageOrder, which is almost certainly not what was intended.
+		TArray<FString> StartActiveNames;
+		for (const AFPSRArenaActor* Arena : Arenas)
+		{
+			if (Arena && Arena->StartsActive()) { StartActiveNames.Add(Arena->GetName()); }
+		}
+		if (StartActiveNames.Num() != 1)
+		{
+			Report += (StartActiveNames.Num() == 0)
+				? FString::Printf(TEXT("[오류] '시작 시 활성' 인 아레나가 없습니다. 하나를 켜세요 — 지금은 스테이지 순서로 아무거나 골라집니다.\n"))
+				: FString::Printf(TEXT("[오류] '시작 시 활성' 인 아레나가 %d개입니다(%s). 하나만 켜세요 — 나머지는 예비 아레나입니다.\n"),
+					StartActiveNames.Num(), *FString::Join(StartActiveNames, TEXT(", ")));
+		}
+
+		// (2) Markers that fall inside NO arena's grid. Membership is spatial, so a blocker nudged (or pasted) out
+		// of every grid stops blocking anything without a word — it still looks like a wall in the viewport.
+		TArray<FString> Orphans;
+		auto CollectOrphans = [&Arenas, &Orphans](AActor* Actor)
+		{
+			if (!IsValid(Actor)) { return; }
+			for (const AFPSRArenaActor* Arena : Arenas)
+			{
+				if (Arena && Arena->ContainsWorldLocation(Actor->GetActorLocation())) { return; }
+			}
+			Orphans.Add(Actor->GetName());
+		};
+		for (TActorIterator<AFPSRArenaBlocker> It(World); It; ++It) { CollectOrphans(*It); }
+		for (TActorIterator<AFPSRArenaLandmark> It(World); It; ++It) { CollectOrphans(*It); }
+		for (TActorIterator<AFPSRArenaDestructible> It(World); It; ++It) { CollectOrphans(*It); }
+		if (Orphans.Num() > 0)
+		{
+			Report += FString::Printf(
+				TEXT("[오류] 어느 아레나 격자에도 속하지 않은 마커 %d개: %s\n뷰포트에선 벽처럼 보이지만 아무것도 막지 않습니다 — "
+				     "아레나 안으로 옮기거나 지우세요.\n"),
+				Orphans.Num(), *FString::Join(Orphans, TEXT(", ")));
+		}
+
+		if (Report.IsEmpty())
+		{
+			Report = TEXT("레벨 전체: 시작 아레나 1개 · 미소속 마커 없음.\n");
+		}
+		return Report + TEXT("\n");
 	}
 }
 
 void FFPSRArenaAuthoringTool::ProposeStartingLayout()
 {
 	UWorld* World = GetEditorWorld();
-	AFPSRArenaActor* Arena = FindArenaOrComplain(World);
-	if (!Arena)
+	TArray<AFPSRArenaActor*> Arenas;
+	if (!FindAllArenasOrComplain(World, Arenas))
 	{
 		return;
 	}
 
-	FFPSRArenaGenParams Params;
-	FVector Origin;
-	if (!Arena->GetGenParams(Params, Origin))
-	{
-		FMessageDialog::Open(EAppMsgType::Ok,
-			LOCTEXT("NoParams", "아레나 액터에 '아레나 파라미터' 가 지정되지 않았습니다.\n\n"
-				"콘텐츠 브라우저 우클릭 > Miscellaneous > Data Asset > FPSRArenaParamsDataAsset 으로 만들어 지정하세요."));
-		return;
-	}
-
-	FString ParamError;
-	if (!Params.Validate(ParamError))
-	{
-		FMessageDialog::Open(EAppMsgType::Ok, FText::Format(
-			LOCTEXT("BadParams", "아레나 파라미터가 기하학적으로 성립하지 않습니다:\n\n{0}"), FText::FromString(ParamError)));
-		return;
-	}
-
-	// Existing blockers are hand-authored work, so replacing them is the designer's call, not the tool's. The whole
-	// operation (delete + spawn) sits in ONE transaction, so Ctrl+Z puts the old layout back exactly — which is what
-	// makes offering "replace" safe at all.
-	TArray<AFPSRArenaBlocker*> Existing;
-	for (TActorIterator<AFPSRArenaBlocker> It(World); It; ++It)
-	{
-		if (IsValid(*It)) { Existing.Add(*It); }
-	}
-	if (Existing.Num() > 0)
-	{
-		const EAppReturnType::Type Answer = FMessageDialog::Open(EAppMsgType::YesNo, FText::Format(
-			LOCTEXT("ReplaceBlockers",
-				"이 레벨에 이미 블로커가 {0}개 있습니다.\n\n지우고 새 시작 배치를 제안할까요?\n"
-				"(Ctrl+Z 한 번으로 전부 되돌릴 수 있습니다.)"),
-			FText::AsNumber(Existing.Num())));
-		if (Answer != EAppReturnType::Yes)
-		{
-			return;
-		}
-	}
-
-	TArray<FFPSRArenaCluster> Clusters;
-	FIntPoint Lattice = FIntPoint::ZeroValue;
-	if (!FFPSRArenaGenerator::ProposeLatticeClusters(Arena->GetInitialSeed(), Params, Clusters, Lattice) || Clusters.Num() == 0)
-	{
-		FMessageDialog::Open(EAppMsgType::Ok,
-			LOCTEXT("ProposeFailed", "시작 배치를 만들지 못했습니다. 출력 로그의 [Arena] 항목을 확인하세요."));
-		return;
-	}
-
+	// ONE transaction for the whole multi-arena sweep, so Ctrl+Z undoes every spawn across every arena in a single
+	// step. Unlike the old single-arena tool, there is no "replace?" branch any more (see the skip check below) —
+	// an already-authored arena is simply left alone, so there is nothing destructive here to weigh per arena.
 	const FScopedTransaction Transaction(LOCTEXT("ProposeTransaction", "아레나 시작 배치 제안"));
 
-	for (AFPSRArenaBlocker* Old : Existing)
-	{
-		World->EditorDestroyActor(Old, /*bShouldModifyLevel=*/true);
-	}
+	FString Report;
+	TArray<FString> SkippedNames;
 
-	const float Height = Arena->GetClusterHeight();
-	int32 Spawned = 0;
-	for (const FFPSRArenaCluster& Cluster : Clusters)
+	for (AFPSRArenaActor* Arena : Arenas)
 	{
-		// Round-tripped through the SAME cell->world conversion the rasteriser reads back, so what the tool places
-		// and what the swarm believes are the same rectangle rather than two that agree by coincidence.
-		const FFPSRArenaAuthoredBox Box = FFPSRArenaGenerator::ClusterToAuthoredBox(Cluster, Params, Origin);
-
-		FActorSpawnParameters SpawnParams;
-		SpawnParams.ObjectFlags = RF_Transactional; // so the spawn itself is part of the undo above
-		AFPSRArenaBlocker* Blocker = World->SpawnActor<AFPSRArenaBlocker>(
-			FVector(Box.Center.X, Box.Center.Y, Origin.Z + Height * 0.5),
-			FRotator::ZeroRotator, SpawnParams);
-		if (!Blocker)
+		if (!Arena)
 		{
 			continue;
 		}
-		Blocker->SetFootprint(Box.HalfExtentXY, Height);
-		++Spawned;
+
+		FFPSRArenaGenParams Params;
+		FVector Origin;
+		if (!Arena->GetGenParams(Params, Origin))
+		{
+			Report += FString::Printf(TEXT("[%s] 아레나 파라미터가 지정되지 않아 건너뜁니다.\n\n"), *Arena->GetName());
+			continue;
+		}
+
+		FString ParamError;
+		if (!Params.Validate(ParamError))
+		{
+			Report += FString::Printf(TEXT("[%s] 파라미터가 기하학적으로 성립하지 않아 건너뜁니다: %s\n\n"), *Arena->GetName(), *ParamError);
+			continue;
+		}
+
+		// A blocker already inside THIS arena's own grid means a designer started authoring it by hand — the
+		// multi-arena sweep must never overwrite that. This replaces the old single-arena tool's "replace?"
+		// confirmation: with several arenas processed per click, silently SKIPPING an authored one (and saying so)
+		// reads better than a modal per arena.
+		bool bAlreadyAuthored = false;
+		for (TActorIterator<AFPSRArenaBlocker> It(World); It; ++It)
+		{
+			const AFPSRArenaBlocker* Blocker = *It;
+			if (IsValid(Blocker) && Arena->ContainsWorldLocation(Blocker->GetActorLocation()))
+			{
+				bAlreadyAuthored = true;
+				break;
+			}
+		}
+		if (bAlreadyAuthored)
+		{
+			UE_LOG(LogFPSR, Log, TEXT("[Arena] ProposeStartingLayout: '%s' already has authored blockers — skipped."), *Arena->GetName());
+			SkippedNames.Add(Arena->GetName());
+			continue;
+		}
+
+		TArray<FFPSRArenaCluster> Clusters;
+		FIntPoint Lattice = FIntPoint::ZeroValue;
+		if (!FFPSRArenaGenerator::ProposeLatticeClusters(Arena->GetInitialSeed(), Params, Clusters, Lattice) || Clusters.Num() == 0)
+		{
+			Report += FString::Printf(TEXT("[%s] 시작 배치를 만들지 못했습니다. 출력 로그의 [Arena] 항목을 확인하세요.\n\n"), *Arena->GetName());
+			continue;
+		}
+
+		const float Height = Arena->GetClusterHeight();
+		int32 Spawned = 0;
+		for (const FFPSRArenaCluster& Cluster : Clusters)
+		{
+			// Round-tripped through the SAME cell->world conversion the rasteriser reads back, so what the tool
+			// places and what the swarm believes are the same rectangle rather than two that agree by coincidence.
+			const FFPSRArenaAuthoredBox Box = FFPSRArenaGenerator::ClusterToAuthoredBox(Cluster, Params, Origin);
+
+			FActorSpawnParameters SpawnParams;
+			SpawnParams.ObjectFlags = RF_Transactional; // so the spawn itself is part of the undo above
+			AFPSRArenaBlocker* Blocker = World->SpawnActor<AFPSRArenaBlocker>(
+				FVector(Box.Center.X, Box.Center.Y, Origin.Z + Height * 0.5),
+				FRotator::ZeroRotator, SpawnParams);
+			if (!Blocker)
+			{
+				continue;
+			}
+			Blocker->SetFootprint(Box.HalfExtentXY, Height);
+			++Spawned;
+		}
+
+		// Report through the layout the runtime would actually build, not through the proposal — if the two ever
+		// disagreed, saying "proposed N clusters" would hide it.
+		FFPSRArenaLayout Layout;
+		FString ValidationSummary;
+		if (Arena->BuildLayoutForSeed(Arena->GetInitialSeed(), Layout))
+		{
+			ValidationSummary = FFPSRArenaValidator::Summarize(FFPSRArenaValidator::Validate(Layout, Params));
+		}
+		Report += FString::Printf(TEXT("[%s] 격자 %d×%d · 블로커 %d개 · 시드 %d\n%s\n\n"),
+			*Arena->GetName(), Lattice.X, Lattice.Y, Spawned, Arena->GetInitialSeed(), *ValidationSummary);
 	}
 
-	// Report through the layout the runtime would actually build, not through the proposal — if the two ever
-	// disagreed, saying "proposed N clusters" would hide it.
-	FFPSRArenaLayout Layout;
-	FString Report;
-	if (Arena->BuildLayoutForSeed(Arena->GetInitialSeed(), Layout))
+	if (SkippedNames.Num() > 0)
 	{
-		Report = FFPSRArenaValidator::Summarize(FFPSRArenaValidator::Validate(Layout, Params));
+		Report += FString::Printf(TEXT("이미 블로커가 있어 건너뜀: %s"), *FString::Join(SkippedNames, TEXT(", ")));
 	}
 
 	FMessageDialog::Open(EAppMsgType::Ok, FText::Format(
 		LOCTEXT("ProposeDone",
-			"시작 배치를 놓았습니다.\n\n격자 {0}×{1} · 블로커 {2}개 · 시드 {3}\n\n{4}\n\n"
+			"아레나 {0}개를 대상으로 시작 배치를 제안했습니다.\n\n{1}\n"
 			"이제 손으로 옮기고 크기를 바꾸세요. 손댄 순간부터 순환·통로폭·오목은 검증기가 봅니다 — "
 			"Tools > FPSR > '아레나 검증' 을 쓰세요.\n"
 			"다른 배치를 보려면 아레나 액터의 '시작 시드' 를 바꾸고 다시 실행하면 됩니다."),
-		FText::AsNumber(Lattice.X), FText::AsNumber(Lattice.Y), FText::AsNumber(Spawned),
-		FText::AsNumber(Arena->GetInitialSeed()), FText::FromString(Report)));
+		FText::AsNumber(Arenas.Num()), FText::FromString(Report)));
 }
 
 void FFPSRArenaAuthoringTool::ValidateArenaInLevel()
 {
 	UWorld* World = GetEditorWorld();
-	AFPSRArenaActor* Arena = FindArenaOrComplain(World);
-	if (!Arena)
+	TArray<AFPSRArenaActor*> Arenas;
+	if (!FindAllArenasOrComplain(World, Arenas))
 	{
 		return;
 	}
 
-	FFPSRArenaGenParams Params;
-	FVector Origin;
-	if (!Arena->GetGenParams(Params, Origin))
-	{
-		FMessageDialog::Open(EAppMsgType::Ok, LOCTEXT("ValidateNoParams", "아레나 액터에 '아레나 파라미터' 가 지정되지 않았습니다."));
-		return;
-	}
+	// Level-wide first: a wrong start-arena or an orphaned marker changes what every per-arena result below MEANS,
+	// so it has to be read before them, not appended after.
+	FString Body = CheckLevelWideArenaAuthoring(World, Arenas);
 
-	FFPSRArenaLayout Layout;
-	if (!Arena->BuildLayoutForSeed(Arena->GetInitialSeed(), Layout))
+	for (AFPSRArenaActor* Arena : Arenas)
 	{
-		FMessageDialog::Open(EAppMsgType::Ok, LOCTEXT("ValidateBuildFailed", "레이아웃을 만들지 못했습니다. 출력 로그의 [Arena] 항목을 확인하세요."));
-		return;
-	}
+		if (!Arena)
+		{
+			continue;
+		}
 
-	const FFPSRArenaValidationResult Result = FFPSRArenaValidator::Validate(Layout, Params);
+		FFPSRArenaGenParams Params;
+		FVector Origin;
+		if (!Arena->GetGenParams(Params, Origin))
+		{
+			Body += FString::Printf(TEXT("[%s] 아레나 파라미터가 지정되지 않았습니다.\n\n"), *Arena->GetName());
+			continue;
+		}
 
-	FString Body = FFPSRArenaValidator::Summarize(Result);
-	if (Result.Errors.Num() > 0)
-	{
-		Body += TEXT("\n\n[오류]\n") + FString::Join(Result.Errors, TEXT("\n\n"));
-	}
-	if (Result.Warnings.Num() > 0)
-	{
-		Body += TEXT("\n\n[경고]\n") + FString::Join(Result.Warnings, TEXT("\n\n"));
-	}
-	if (Result.Passed() && Result.Warnings.Num() == 0)
-	{
-		Body += TEXT("\n\n통과 — 순환 · 통로 폭 · 오목 없음 전부 만족합니다.");
+		FFPSRArenaLayout Layout;
+		if (!Arena->BuildLayoutForSeed(Arena->GetInitialSeed(), Layout))
+		{
+			Body += FString::Printf(TEXT("[%s] 레이아웃을 만들지 못했습니다. 출력 로그의 [Arena] 항목을 확인하세요.\n\n"), *Arena->GetName());
+			continue;
+		}
+
+		const FFPSRArenaValidationResult Result = FFPSRArenaValidator::Validate(Layout, Params);
+
+		// The arena's name goes IN the summary line itself, not only as a header above it — so a single line
+		// copy-pasted out of a multi-arena report still says which arena it is about.
+		Body += FString::Printf(TEXT("[%s] (시드 %d) %s\n"),
+			*Arena->GetName(), Arena->GetInitialSeed(), *FFPSRArenaValidator::Summarize(Result));
+		if (Result.Errors.Num() > 0)
+		{
+			Body += TEXT("[오류]\n") + FString::Join(Result.Errors, TEXT("\n")) + TEXT("\n");
+		}
+		if (Result.Warnings.Num() > 0)
+		{
+			Body += TEXT("[경고]\n") + FString::Join(Result.Warnings, TEXT("\n")) + TEXT("\n");
+		}
+		if (Result.Passed() && Result.Warnings.Num() == 0)
+		{
+			Body += TEXT("통과 — 순환 · 통로 폭 · 오목 없음 전부 만족합니다.\n");
+		}
+		Body += TEXT("\n");
 	}
 
 	FMessageDialog::Open(EAppMsgType::Ok, FText::Format(
-		LOCTEXT("ValidateResult", "아레나 검증 (시드 {0})\n\n{1}"),
-		FText::AsNumber(Arena->GetInitialSeed()), FText::FromString(Body)));
+		LOCTEXT("ValidateResult", "아레나 검증 ({0}개)\n\n{1}"),
+		FText::AsNumber(Arenas.Num()), FText::FromString(Body)));
 }
 
 #undef LOCTEXT_NAMESPACE

@@ -199,6 +199,36 @@ FFPSRArenaAuthoredBox FFPSRArenaGenerator::ClusterToAuthoredBox(const FFPSRArena
 	return Box;
 }
 
+void FFPSRArenaGenerator::ComputeDestructibleCells(const FFPSRArenaAuthoredDestructible& Destructible,
+	const FVector& ArenaOrigin, float CellSize, const FIntPoint& GridDims, TArray<int32>& OutCells)
+{
+	OutCells.Reset();
+	if (CellSize <= 0.0f || GridDims.X <= 0 || GridDims.Y <= 0)
+	{
+		return;
+	}
+
+	const int32 AnchorCX = FMath::FloorToInt((Destructible.Location.X - ArenaOrigin.X) / CellSize);
+	const int32 AnchorCY = FMath::FloorToInt((Destructible.Location.Y - ArenaOrigin.Y) / CellSize);
+	const int32 FootprintX = FMath::Max(1, Destructible.FootprintCells.X);
+	const int32 FootprintY = FMath::Max(1, Destructible.FootprintCells.Y);
+
+	// Row-major (Y outer, X inner): since every surviving CX is < GridDims.X, each row's indices are entirely
+	// below the next row's — so this loop order is what MAKES the ascending-order guarantee true, not an
+	// incidental side effect of it.
+	for (int32 DY = 0; DY < FootprintY; ++DY)
+	{
+		const int32 CY = AnchorCY + DY;
+		if (CY < 0 || CY >= GridDims.Y) { continue; }
+		for (int32 DX = 0; DX < FootprintX; ++DX)
+		{
+			const int32 CX = AnchorCX + DX;
+			if (CX < 0 || CX >= GridDims.X) { continue; }
+			OutCells.Add(CY * GridDims.X + CX);
+		}
+	}
+}
+
 namespace
 {
 	/**
@@ -510,6 +540,24 @@ bool FFPSRArenaGenerator::Generate(int32 Seed, const FFPSRArenaGenParams& Params
 		BlockCell(LCX, LCY);
 	}
 
+	// --- destructibles: authored footprints blocked while intact (ADR 0010 D7) --------------------------------
+	// Same stage as landmarks (both are point-authored, non-cluster blocking) and BEFORE L1 on purpose: L1's
+	// corridor-width check must see these cells as wall, or a micro prop could legally narrow a corridor right up
+	// against a destructible that, once broken, would carve it below the minimum width. ComputeDestructibleCells is
+	// the SAME function AFPSRArenaDestructible calls on break (HandleBrokenAuthority) — the generator (closing) and
+	// the actor (opening) can never compute a different footprint for one prop.
+	OutLayout.DestructibleCells.Reserve(Authored.Destructibles.Num());
+	for (const FFPSRArenaAuthoredDestructible& Destructible : Authored.Destructibles)
+	{
+		TArray<int32> DestructibleCellsOut;
+		ComputeDestructibleCells(Destructible, ArenaOrigin, static_cast<float>(Cell), OutLayout.GridDims, DestructibleCellsOut);
+		for (const int32 CellIdx : DestructibleCellsOut)
+		{
+			S.BlockedField[SurfIndex(CellIdx, 0)] = true;
+		}
+		OutLayout.DestructibleCells.Add(MoveTemp(DestructibleCellsOut));
+	}
+
 	// --- L1: procedural micro props in whatever slack the authored skeleton left -----------------------------
 	{
 		FRandomStream RS(Seed);
@@ -517,8 +565,8 @@ bool FFPSRArenaGenerator::Generate(int32 Seed, const FFPSRArenaGenParams& Params
 	}
 
 	UE_LOG(LogFPSR, Log,
-		TEXT("[Arena] Generated seed=%d grid=%dx%d cell=%.0f authored(blockers=%d landmarks=%d) props=%d origin=%s"),
-		Seed, W, H, Params.CellSize, Authored.Blockers.Num(), Authored.Landmarks.Num(),
+		TEXT("[Arena] Generated seed=%d grid=%dx%d cell=%.0f authored(blockers=%d landmarks=%d destructibles=%d) props=%d origin=%s"),
+		Seed, W, H, Params.CellSize, Authored.Blockers.Num(), Authored.Landmarks.Num(), Authored.Destructibles.Num(),
 		OutLayout.Props.Num(), *ArenaOrigin.ToString());
 
 	return true;

@@ -150,6 +150,26 @@ struct FFPSRArenaAuthoredLandmark
 };
 
 /**
+ * One authored destructible prop (ADR 0010 D7): a WORLD-space anchor + the cells it occupies while intact.
+ *
+ * The footprint is AUTHORED, not measured at break time. Re-probing "which cells does breaking this open" would
+ * be a runtime world query — exactly what rasterising (instead of tracing) authored volumes exists to avoid (see
+ * FFPSRArenaAuthoredBox's comment above). Declaring it here means the generator (blocking, at
+ * FFPSRArenaGenerator::Generate) and the destructible actor (opening, at HandleBrokenAuthority) both call
+ * FFPSRArenaGenerator::ComputeDestructibleCells — the SAME function — so the two sides can never disagree about
+ * which cells one prop owns.
+ */
+USTRUCT()
+struct FFPSRArenaAuthoredDestructible
+{
+	GENERATED_BODY()
+
+	FVector Location = FVector::ZeroVector;
+	/** Cells this prop occupies (width x height), growing from the anchor cell toward +X/+Y. */
+	FIntPoint FootprintCells = FIntPoint(1, 1);
+};
+
+/**
  * Everything the DESIGNER placed, gathered from the level and handed to the generator. Empty is legal and means
  * "no skeleton authored yet" — the validator then reports an arena with no structure rather than the generator
  * inventing one, because ADR 0011 E5 moved lattice generation to an editor button and out of the runtime path.
@@ -161,8 +181,9 @@ struct FFPSRArenaAuthoredInput
 
 	TArray<FFPSRArenaAuthoredBox> Blockers;
 	TArray<FFPSRArenaAuthoredLandmark> Landmarks;
+	TArray<FFPSRArenaAuthoredDestructible> Destructibles;
 
-	bool IsEmpty() const { return Blockers.Num() == 0 && Landmarks.Num() == 0; }
+	bool IsEmpty() const { return Blockers.Num() == 0 && Landmarks.Num() == 0 && Destructibles.Num() == 0; }
 };
 
 /**
@@ -258,6 +279,13 @@ struct FFPSRArenaLayout
 
 	/** Carried through so L1 can keep its props off them and the HUD can point at them. */
 	TArray<FFPSRArenaAuthoredLandmark> Landmarks;
+
+	/** Cells each authored destructible blocked while intact, one array per destructible (index-parallel with
+	 *  Authored.Destructibles). Debug/validator only, deliberately NOT UPROPERTY-exposed: the truth at break time
+	 *  is recomputed by the destructible actor via the SAME function (FFPSRArenaGenerator::ComputeDestructibleCells),
+	 *  because this layout is regenerated fresh from every seed — caching state here would go stale the moment the
+	 *  seed (or the authored destructibles) changes. */
+	TArray<TArray<int32>> DestructibleCells;
 
 	/** L1 output. Blocking entries are already reflected in Surface.BlockedField; passable ones occupy nothing. */
 	UPROPERTY(BlueprintReadOnly, Category = "FPSR|Arena")

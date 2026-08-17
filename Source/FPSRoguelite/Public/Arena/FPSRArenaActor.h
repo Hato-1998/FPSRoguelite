@@ -29,6 +29,21 @@ class UStaticMesh;
  *
  * The whitebox meshes here are representation only and exist to answer one question — "is the circulation
  * fun?" (invariant 12). Art comes after that verdict, not before.
+ *
+ * ## Multiple arenas, one level
+ *
+ * ADR 0010 D6 as amended 2026-08-17 (user decision): a future stage transition needs the NEXT arena ready before
+ * the current one ends, and the chosen shape for that is several AFPSRArenaActor instances placed in the SAME
+ * level at XY locations far enough apart that their cell grids never overlap — not one arena loaded from a
+ * streaming sublevel. A loaded sublevel cannot be relocated at runtime, and turning its visibility on is not one
+ * atomic moment — it resolves over several frames per client as that client's streaming catches up, with no
+ * shared deadline; a transition built on either would stop being one atomic swap, so different clients would ack
+ * a different-length window — exactly what invariant 8 (a FIXED damage-dealing window) forbids. Parking arenas
+ * beside each other in one already-loaded level instead means "swap" is only a transform-free visibility/collision
+ * toggle (SetArenaActive) plus a player teleport: no load, no per-client streaming lag, so the window is the same
+ * fixed length everywhere. This slice does NOT build the transition state machine itself — only the foundation
+ * multiple arenas need: StageOrder/bStartsActive, SetArenaActive, ContainsWorldLocation (spatial ownership of the
+ * markers inside an arena's grid — see BuildLayoutForSeed), and FindActiveInWorld/FindAllInWorld.
  */
 UCLASS()
 class FPSROGUELITE_API AFPSRArenaActor : public AActor
@@ -72,8 +87,42 @@ public:
 	 *  authored number stays in one place — the designer tunes it on the arena and every proposal follows. */
 	float GetClusterHeight() const { return ClusterHeight; }
 
-	/** Find the arena in this world, if any. Null is the normal answer for a legacy authored map. */
-	static AFPSRArenaActor* FindInWorld(const UWorld* World);
+	/** Toggle this arena's whitebox geometry + its own blocker/landmark/destructible markers (spatial membership —
+	 *  see BuildLayoutForSeed) on or off: HISM visibility + collision, marker actors hidden + collision-disabled.
+	 *  Idempotent; NEVER touches a transform (everything here is Static mobility, and UE forbids moving a Static
+	 *  primitive at runtime — see the class comment on why "swap" has to work this way). Called from BeginPlay with
+	 *  bStartsActive; the future stage-transition state machine (not built in this slice) calls it again to swap. */
+	void SetArenaActive(bool bInActive);
+
+	bool IsArenaActive() const { return bIsArenaActive; }
+
+	/** Whether this arena is AUTHORED to be the live one at level start (as opposed to IsArenaActive(), which is the
+	 *  runtime state). Exposed so the editor validator can enforce "exactly one" — the authoring mistake of marking
+	 *  two (or none) is invisible at runtime, where FindActiveInWorld just picks one deterministically. */
+	bool StartsActive() const { return bStartsActive; }
+
+	/** True if World is inside this arena's cell grid on the XY plane. Z is deliberately NOT checked: the arena is
+	 *  a single Z-plane (ADR 0010 D2), and reserve arenas are parked BESIDE the live one rather than stacked below
+	 *  it (see the class comment) — so two arenas can share a Z but never overlap in XY, and XY alone is what tells
+	 *  them apart. This is the ONE membership test every marker actor and every editor tool uses, so "which arena
+	 *  owns this actor" cannot drift between call sites. */
+	bool ContainsWorldLocation(const FVector& World) const;
+
+	/** Collect this arena's authored entry points (its own APlayerStart actors), sorted by NAME so every machine
+	 *  derives the same order with nothing replicated. No authored starts -> fills Out with a fallback (arena
+	 *  centre + 4 cardinal 200 cm offsets) and returns false, so the caller can log the authoring gap instead of
+	 *  silently stacking every player on one point. */
+	bool GetPlayerEntryTransforms(TArray<FTransform>& Out) const;
+
+	/** The arena to treat as "the live one". Prefers whichever arena actually IsArenaActive(); if nobody has gone
+	 *  through BeginPlay yet (editor / not in PIE), falls back to bStartsActive, then to the lowest StageOrder
+	 *  (ties broken by name) so the answer is still deterministic. Null only if the world has no arena at all.
+	 *  Replaces the old single-arena FindInWorld now that ADR 0010 D6 parks spare arenas in the same level. */
+	static AFPSRArenaActor* FindActiveInWorld(const UWorld* World);
+
+	/** Every arena in the world, ordered by StageOrder ascending (ties broken by name) — the order a stage
+	 *  transition advances through, and the order FindActiveInWorld's fallback tiers scan in. */
+	static void FindAllInWorld(const UWorld* World, TArray<AFPSRArenaActor*>& Out);
 
 protected:
 	UFUNCTION()
@@ -92,6 +141,15 @@ protected:
 	/** 레벨 시작 시드. 런타임에는 서버가 ActiveSeed 를 굴려 덮는다. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "아레나", meta = (DisplayName = "시작 시드"))
 	int32 InitialSeed = 1;
+
+	/** 전환 순서(작은 값부터 진행). 같은 값이 둘이면 이름 순으로 갈린다. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "아레나", meta = (DisplayName = "스테이지 순서"))
+	int32 StageOrder = 0;
+
+	/** 레벨 시작 시 이 아레나가 활성 상태인가. **레벨에 하나만 true 여야 한다** — 나머지는 예비 아레나로, 같은
+	 *  레벨의 떨어진 자리에서 렌더·콜리전이 꺼진 채 대기한다(2026-08-17 사용자 결정 — 클래스 주석 참고). */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "아레나", meta = (DisplayName = "시작 시 활성"))
+	bool bStartsActive = true;
 
 	/** 화이트박스용 박스 메시. **크기·피벗은 메시 바운드에서 자동으로 읽으므로** 정육면체가 아니어도, 원점이 중심이
 	 *  아니어도 된다. C++ 에 에셋 경로를 박지 않으므로 비워 두면 지오메트리가 안 생긴다(디버그 격자 뷰는 그래도 동작). */
@@ -137,4 +195,10 @@ protected:
 private:
 	/** Local, never replicated, never saved — regenerated from ActiveSeed. */
 	FFPSRArenaLayout Layout;
+
+	/** Backs IsArenaActive(). Defaults to false (NOT bStartsActive) on purpose: it means "nobody has toggled this
+	 *  arena yet", which is exactly the editor / not-in-PIE state BeginPlay never reaches — that is what lets
+	 *  FindActiveInWorld tell "genuinely active" apart from "would become active a moment later" and fall through
+	 *  to its bStartsActive tier correctly. Set by SetArenaActive, first called from BeginPlay. */
+	bool bIsArenaActive = false;
 };
