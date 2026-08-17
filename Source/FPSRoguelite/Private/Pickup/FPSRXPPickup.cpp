@@ -78,6 +78,47 @@ void AFPSRXPPickup::Tick(float DeltaSeconds)
 		{
 			return;
 		}
+
+		// Stage-transition grace window (ADR 0010 D6): the whole point of the window is "grind the frozen swarm and
+		// collect what it drops" (안 G), but player MOVEMENT is locked for that same window (IsMovementFrozen) — a
+		// gem sitting outside the normal magnet radius would be visible but permanently unreachable, and the reward
+		// would not actually pay out. A magnet pull doesn't fix it either: the window is a FIXED duration
+		// (invariant 8), so a magnet's travel time would make arrival depend on how far the gem happened to drop.
+		// ADR 0010 doesn't cover XP specifically (only the swarm/damage/movement axes) — this is the judgment call
+		// that fills the gap: collect instantly, radius-independent, by whichever living player is nearest.
+		if (GameState->IsStageTransitionActive())
+		{
+			APawn* NearestPlayer = nullptr;
+			float NearestDistSq = TNumericLimits<float>::Max();
+			for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+			{
+				const APlayerController* PC = It->Get();
+				APawn* PlayerPawn = PC ? PC->GetPawn() : nullptr;
+				if (!PlayerPawn)
+				{
+					continue;
+				}
+				if (const AFPSRPlayerState* PS = PC->GetPlayerState<AFPSRPlayerState>())
+				{
+					if (!PS->IsAlive())
+					{
+						continue; // DBNO/Dead players don't collect (mirrors the normal collect gate below)
+					}
+				}
+				const float DistSq = FVector::DistSquaredXY(PlayerPawn->GetActorLocation(), GetActorLocation());
+				if (DistSq < NearestDistSq)
+				{
+					NearestDistSq = DistSq;
+					NearestPlayer = PlayerPawn;
+				}
+			}
+
+			if (NearestPlayer != nullptr)
+			{
+				CollectBy(NearestPlayer);
+			}
+			return; // transition branch replaces the normal magnet/collect pass below for this tick
+		}
 	}
 
 	const FVector PickupLocation = GetActorLocation();
@@ -136,13 +177,7 @@ void AFPSRXPPickup::Tick(float DeltaSeconds)
 
 	if (CollectPlayer != nullptr)
 	{
-		if (AFPSRGameState* GameState = World->GetGameState<AFPSRGameState>())
-		{
-			const float XPMult = GetCollectorXPGainMult(CollectPlayer);
-			const int32 EffectiveXP = FMath::Max(1, FMath::RoundToInt(XPValue * XPMult));
-			GameState->AddSharedXP(EffectiveXP);
-		}
-		Destroy();
+		CollectBy(CollectPlayer);
 		return;
 	}
 
@@ -174,6 +209,23 @@ float AFPSRXPPickup::GetCollectorPickupRadiusMult(class APawn* Pawn) const
 	}
 
 	return FMath::Max(0.01f, CombatSet->GetPickupRadius());
+}
+
+void AFPSRXPPickup::CollectBy(APawn* Collector)
+{
+	// The one place a gem is banked. Two callers reach it — the normal radius collect and the stage-transition
+	// instant collect (ADR 0010 D6) — and both must apply the collector's own XPGain multiplier before adding to the
+	// shared pool; splitting that across two inline copies is how one of them eventually loses the multiplier.
+	if (UWorld* World = GetWorld())
+	{
+		if (AFPSRGameState* GameState = World->GetGameState<AFPSRGameState>())
+		{
+			const float XPMult = GetCollectorXPGainMult(Collector);
+			const int32 EffectiveXP = FMath::Max(1, FMath::RoundToInt(XPValue * XPMult));
+			GameState->AddSharedXP(EffectiveXP);
+		}
+	}
+	Destroy();
 }
 
 float AFPSRXPPickup::GetCollectorXPGainMult(class APawn* Pawn) const

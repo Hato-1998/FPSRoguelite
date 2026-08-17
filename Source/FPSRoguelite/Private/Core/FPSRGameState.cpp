@@ -4,6 +4,7 @@
 #include "Core/FPSRPlayerState.h"
 #include "Core/FPSRPlayerController.h"
 #include "Run/FPSRRunScheduleDataAsset.h"
+#include "Arena/FPSRArenaActor.h"
 #include "Net/UnrealNetwork.h"
 #include "Net/Core/PushModel/PushModel.h"
 #include "Engine/World.h"
@@ -33,6 +34,10 @@ void AFPSRGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLi
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRGameState, MissionProgress, Params);
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRGameState, RunScheduleAsset, Params);
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRGameState, TopologyGeneration, Params);
+	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRGameState, StageTransitionPhase, Params);
+	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRGameState, StageIndex, Params);
+	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRGameState, GraceDealingEndServerTime, Params);
+	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRGameState, ActiveArena, Params);
 }
 
 void AFPSRGameState::SetActiveBoss(AFPSRBossBase* InBoss)
@@ -354,6 +359,89 @@ float AFPSRGameState::GetLobbyReadyCountdownRemaining() const
 void AFPSRGameState::OnRep_RunState()
 {
 	OnRunStateChanged.Broadcast();
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Stage transition (ADR 0010 D6) — see the header for what each field/accessor means.
+// ---------------------------------------------------------------------------------------------------------------
+
+void AFPSRGameState::SetStageTransition(EFPSRStageTransitionPhase NewPhase, float DealingEndServerTime)
+{
+	if (!HasAuthority() || (StageTransitionPhase == NewPhase && GraceDealingEndServerTime == DealingEndServerTime))
+	{
+		return;
+	}
+	StageTransitionPhase = NewPhase;
+	GraceDealingEndServerTime = DealingEndServerTime;
+	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRGameState, StageTransitionPhase, this);
+	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRGameState, GraceDealingEndServerTime, this);
+	ApplyStageTransitionLocal(); // host gets no OnRep — apply directly (mirrors SetActiveBoss/SetActiveMission)
+
+	UE_LOG(LogFPSR, Log, TEXT("[Stage] Transition phase -> %d (dealing-end server-t=%.1f)"),
+		static_cast<int32>(StageTransitionPhase), GraceDealingEndServerTime);
+}
+
+void AFPSRGameState::SetStageIndex(int32 NewStageIndex)
+{
+	if (!HasAuthority() || StageIndex == NewStageIndex)
+	{
+		return;
+	}
+	StageIndex = NewStageIndex;
+	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRGameState, StageIndex, this);
+	ApplyStageTransitionLocal(); // host gets no OnRep — apply directly (shares OnRep_StageTransition with the rest)
+}
+
+void AFPSRGameState::SetActiveArena(AFPSRArenaActor* InArena)
+{
+	if (!HasAuthority() || ActiveArena == InArena)
+	{
+		return;
+	}
+	ActiveArena = InArena;
+	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRGameState, ActiveArena, this);
+	ApplyStageTransitionLocal(); // host gets no OnRep — apply directly
+}
+
+void AFPSRGameState::ApplyStageTransitionLocal()
+{
+	OnStageTransitionChanged.Broadcast();
+
+	// Existing OnRunStateChanged subscribers (AFPSRCharacter::HandleRunStateChanged_Movement in particular) must
+	// react to a stage transition the same way they react to bRunPaused — re-broadcasting the EXISTING signal
+	// reuses that handling instead of every consumer needing a second subscription to a new delegate.
+	OnRunStateChanged.Broadcast();
+
+	// Client arena-follow, no dedicated RPC: every arena in the world snaps its IsArenaActive() to match
+	// ActiveArena. Fires on every ApplyStageTransitionLocal call (phase changes included, not just ActiveArena
+	// changes) — harmless: when ActiveArena hasn't actually changed this is just re-asserting the same active/
+	// inactive state every arena already has (SetArenaActive is idempotent).
+	if (ActiveArena)
+	{
+		TArray<AFPSRArenaActor*> AllArenas;
+		AFPSRArenaActor::FindAllInWorld(GetWorld(), AllArenas);
+		for (AFPSRArenaActor* Arena : AllArenas)
+		{
+			if (Arena)
+			{
+				Arena->SetArenaActive(Arena == ActiveArena);
+			}
+		}
+	}
+}
+
+void AFPSRGameState::OnRep_StageTransition()
+{
+	ApplyStageTransitionLocal();
+}
+
+float AFPSRGameState::GetStageDealingRemaining() const
+{
+	if (StageTransitionPhase != EFPSRStageTransitionPhase::Grace)
+	{
+		return 0.0f;
+	}
+	return FMath::Max(0.0f, GraceDealingEndServerTime - GetServerWorldTimeSeconds());
 }
 
 #if !UE_BUILD_SHIPPING

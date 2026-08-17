@@ -14,6 +14,7 @@
 #include "Core/FPSRPlayerState.h"
 #include "Core/FPSRPlayerController.h"
 #include "Run/FPSRRunDirectorSubsystem.h"
+#include "Arena/FPSRArenaActor.h" // ADR 0010 D6: arena-bounds spawn gate (PassesCommonSpawnGates)
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "GameFramework/PlayerController.h"
@@ -335,9 +336,11 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 	AttackersThisPass.Init(0, PlayerPawns.Num());
 
 	const AFPSRGameState* GameState = World->GetGameState<AFPSRGameState>();
-	// Global freeze (card selection): enemies are frozen in place — skip the whole movement+attack pass.
-	// (Enemies move/attack during both Combat and Boss phases.)
-	if (GameState && GameState->IsRunPaused())
+	// Global freeze (card selection) OR an active stage transition (ADR 0010 D6): enemies are frozen in place — skip
+	// the whole movement+attack pass. During a transition the frozen swarm IS the grace-window reward (안 G) — the
+	// player grinds down enemies that cannot move or fight back, so freezing them here (not just their damage output)
+	// is what makes that hold. (Enemies move/attack during both Combat and Boss phases outside a transition.)
+	if (GameState && (GameState->IsRunPaused() || GameState->IsStageTransitionActive()))
 	{
 		return;
 	}
@@ -794,6 +797,26 @@ bool UFPSREnemySpawnSubsystem::PassesCommonSpawnGates(const AFPSREnemySpawnPoint
 		}
 	}
 
+	// Arena-bounds gate (ADR 0010 D6 stage transition): only spawn points inside the CURRENTLY ACTIVE arena are
+	// eligible. Reserve arenas are parked 100+ m away in the same level (ADR 0010 D6 as amended 2026-08-17) — without
+	// this filter, a spawn point that happens to sit in a currently-INACTIVE arena would still pass every gate above,
+	// and the swarm would spawn into an empty arena nobody is standing in.
+	//
+	// Read off the replicated GameState, NOT AFPSRArenaActor::FindActiveInWorld: this runs per spawn CANDIDATE on the
+	// director tick, and FindActiveInWorld sweeps the whole actor list (TActorIterator) — its cost scales with every
+	// actor in the level, not with the handful of arenas. The GameState pointer is the same answer in O(1), and it is
+	// the authoritative one (the stage director sets it on every swap). Null = no arena seeded (legacy level, or
+	// pre-BeginPlay) -> nothing to gate against, pass through unconditionally.
+	const UWorld* GateWorld = GetWorld();
+	const AFPSRGameState* GateGameState = GateWorld ? GateWorld->GetGameState<AFPSRGameState>() : nullptr;
+	if (const AFPSRArenaActor* ActiveArena = GateGameState ? GateGameState->GetActiveArena() : nullptr)
+	{
+		if (!ActiveArena->ContainsWorldLocation(Point->GetSpawnLocation()))
+		{
+			return false;
+		}
+	}
+
 	return true;
 }
 
@@ -1017,12 +1040,14 @@ void UFPSREnemySpawnSubsystem::TickDirector()
 	LastDirectorTime = Now;
 
 	const AFPSRGameState* GameState = World->GetGameState<AFPSRGameState>();
-	if (GameState && (GameState->IsRunPaused()
+	if (GameState && (GameState->IsRunPaused() || GameState->IsStageTransitionActive()
 		|| (!GameState->IsCombatPhase() && GameState->GetRunPhase() != ERunPhase::Boss)))
 	{
 		// Spawn during Combat AND Boss (the swarm persists + keeps ramping through the boss fight); never while
-		// frozen for card selection, and not in pre-combat/menu phases (Game.MD §2-2). The drain does NOT run here (no
-		// draining while frozen); LastDirectorTime is already stamped so the next live tick's DrainDt is one interval.
+		// frozen for card selection, during an active stage transition (the swarm is frozen/being ground down, not
+		// growing — see TickEnemyMovement), and not in pre-combat/menu phases (Game.MD §2-2). The drain does NOT run
+		// here (no draining while frozen); LastDirectorTime is already stamped so the next live tick's DrainDt is one
+		// interval.
 		return;
 	}
 

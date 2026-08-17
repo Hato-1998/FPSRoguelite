@@ -11,6 +11,7 @@
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/Pawn.h"
 #include "Engine/World.h"
+#include "Run/FPSRStageDirectorSubsystem.h" // no cycle: the stage director (Run/) does not know about rewards (Destructible/)
 
 // ---------------------------------------------------------------------------------------------------------------
 // UFPSRDestructibleReward_PlayerEffect — GE applied to every living player within Radius (ADR 0010 D7 "_Heal").
@@ -103,4 +104,25 @@ void UFPSRDestructibleReward_CardPick::Grant(const FFPSRDestructibleRewardContex
 	// Once for the whole grant, NOT once per player — RefreshPauseState recomputes the freeze from every player's
 	// pending-pick count, so calling it inside the loop above would re-derive the same freeze state N times.
 	GS->RefreshPauseState();
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// UFPSRDestructibleReward_StageTransition — the suppressor (ADR 0010 D6/D7). See the header: there is no separate
+// suppressor class, only a destructible authored with this one Reward.
+// ---------------------------------------------------------------------------------------------------------------
+void UFPSRDestructibleReward_StageTransition::Grant(const FFPSRDestructibleRewardContext& Context) const
+{
+	if (!Context.World)
+	{
+		return;
+	}
+	if (UFPSRStageDirectorSubsystem* StageDirector = Context.World->GetSubsystem<UFPSRStageDirectorSubsystem>())
+	{
+		StageDirector->RequestTransition();
+	}
+	else
+	{
+		UE_LOG(LogFPSR, Warning, TEXT("[Destructible] StageTransition reward broke on %s but no UFPSRStageDirectorSubsystem exists in this world."),
+			Context.Source ? *Context.Source->GetName() : TEXT("?"));
+	}
 }

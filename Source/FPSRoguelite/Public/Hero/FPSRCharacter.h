@@ -61,6 +61,15 @@ public:
 	 *  machines to reach the same answer. Public because the movement component is a separate class. */
 	bool CanPerformSpecialMovement() const;
 
+	/** True while MOVEMENT specifically is locked: the card-selection freeze (IsRunFrozen) OR an active stage
+	 *  transition (AFPSRGameState::IsStageTransitionActive, ADR 0010 D6). Deliberately a SEPARATE predicate from
+	 *  IsRunFrozen rather than widening it — the card freeze stops everything (fire, ADS, reload, movement), but a
+	 *  stage transition's grace window stops ONLY movement: firing is the window's whole reward (ADR 0010 D6 / 안
+	 *  G), so every fire/ADS/reload/equip input keeps reading IsRunFrozen alone and stays live through a
+	 *  transition. Public — the movement component (a separate class) gates slide/wall-hang entry on this via
+	 *  CanPerformSpecialMovement. */
+	bool IsMovementFrozen() const;
+
 	virtual void PossessedBy(AController* NewController) override;
 	virtual void OnRep_PlayerState() override;
 
@@ -509,8 +518,13 @@ protected:
 	UFUNCTION()
 	void HandleRunStateChanged_Vision();
 
-	/** Server (authority): on the run-freeze (§2-2) halt residual locomotion (e.g. an in-progress fall) so the player
-	 *  can't drift across the frozen card screen. CMC replicates the stop. */
+	/** Server (authority): on the run-freeze (§2-2) OR an active stage transition (ADR 0010 D6) halt residual
+	 *  locomotion (e.g. an in-progress fall) so the player can't drift across the frozen card screen — or across a
+	 *  transition, where movement alone is meant to be locked (IsMovementFrozen). CMC replicates the stop. The
+	 *  post-freeze invulnerable grace window stays keyed to the card freeze SPECIFICALLY (bWasRunPausedAuth /
+	 *  BeginGraceWindow, unchanged in the .cpp) — a transition swap needs none, the swarm is already released back
+	 *  to the pool before the swap commits (UFPSRStageDirectorSubsystem::PerformSwap step 6), so there is nothing
+	 *  left standing to ambush the teleported player. */
 	UFUNCTION()
 	void HandleRunStateChanged_Movement();
 

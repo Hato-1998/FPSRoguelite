@@ -6,6 +6,7 @@
 #include "Arena/FPSRArenaMarkers.h"
 #include "Arena/FPSRArenaParamsDataAsset.h"
 #include "Arena/FPSRArenaValidator.h"
+#include "Core/FPSRGameState.h"
 #include "Enemy/FPSRFlowFieldSubsystem.h"
 #include "Core/FPSRLogChannels.h"
 
@@ -94,6 +95,21 @@ void AFPSRArenaActor::BeginPlay()
 	{
 		ActiveSeed = InitialSeed;
 		MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRArenaActor, ActiveSeed, this);
+
+		// Seed the replicated "which arena is live" pointer at level start. The stage director only ever sets it on a
+		// SWAP, so without this it stays null until the first transition — and everything that reads it as the cheap
+		// O(1) answer (the enemy spawn subsystem's arena-bounds gate) would silently not gate for the whole first
+		// stage, spawning the swarm into reserve arenas nobody is standing in.
+		if (bStartsActive)
+		{
+			if (UWorld* World = GetWorld())
+			{
+				if (AFPSRGameState* GS = World->GetGameState<AFPSRGameState>())
+				{
+					GS->SetActiveArena(this);
+				}
+			}
+		}
 	}
 
 	// Both sides build locally. On a client the seed may already have arrived (OnRep can fire before BeginPlay

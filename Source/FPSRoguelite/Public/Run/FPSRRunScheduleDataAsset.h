@@ -112,4 +112,10 @@ public:
 	 *  spawn PACE without changing the target count. Tune for pacing feel. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Run", meta = (ClampMin = "0.02"))
 	float SpawnIntervalSeconds = 0.1f;
+
+	/** 스테이지 전환의 **딜링 고정 시간**(초). 억제기를 부순 뒤 이만큼은 정지한 적을 갈아 회수할 수 있고,
+	 *  그 뒤엔 잔존 적이 무적이 된다(ADR 0010 불변식 8: 보상이 하드웨어·로딩 시간에 비례해선 안 된다).
+	 *  ⚠️ 8초는 **미검증 시작값**이다 — PIE 로 체감을 보고 정한다. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Run", meta = (ClampMin = "0.5"))
+	float StageGraceSeconds = 8.0f;
 };

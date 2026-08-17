@@ -98,9 +98,26 @@ namespace FPSRCombat
 			return 0.0f;
 		}
 
-		// Swarm enemy (identified by its non-GAS health component): always full damage.
+		// Swarm enemy (identified by its non-GAS health component): full damage — UNLESS a stage transition's dealing
+		// window has closed (ADR 0010 D6 invariant 8). Once IsStageDealingOpen() goes false the frozen swarm becomes
+		// invulnerable rather than a farm target for whoever is slower to react — the reward is a FIXED-time window,
+		// not "however long it takes".
+		//
+		// 🚨 Gated on AFPSREnemyBase specifically, NOT "has a UFPSREnemyHealthComponent" — a door/arena destructible
+		// carries the SAME component (17d6b320) and must stay damageable through a transition (breaking a second
+		// suppressor, or any other destructible, is unaffected by this gate). AFPSRBossBase is a separate hierarchy
+		// (ACharacter, not AFPSREnemyBase) and is deliberately NOT covered here — a transition is not expected to run
+		// during a boss fight, but even if it did, the boss should keep taking damage.
 		if (Target->FindComponentByClass<UFPSREnemyHealthComponent>())
 		{
+			if (Target->IsA(AFPSREnemyBase::StaticClass()))
+			{
+				const AFPSRGameState* GS = World ? World->GetGameState<AFPSRGameState>() : nullptr;
+				if (GS && GS->IsStageTransitionActive() && !GS->IsStageDealingOpen())
+				{
+					return 0.0f;
+				}
+			}
 			return BaseDamage;
 		}
 

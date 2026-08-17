@@ -73,6 +73,13 @@ private:
 	 *  deferred perf measurement; the per-player ranged concurrency token keeps the typical enemy count far below it. */
 	static constexpr int32 MaxEnemyProjectileCeiling = 100;
 
-	/** Last observed global-freeze state, so Tick only acts on the pause/resume transition. */
-	bool bProjectilesPaused = false;
+	/** Last observed ALL-projectiles-paused state (the global card-selection freeze), so Tick only acts on its
+	 *  transition edge. */
+	bool bPausedAll = false;
+
+	/** Last observed ENEMY-projectiles-ONLY-paused state (an active stage transition while the run is NOT otherwise
+	 *  paused, ADR 0010 D6), so Tick only acts on its transition edge. Player projectiles keep flying through a
+	 *  transition — firing is the grace window's whole reward (안 G) — only enemy-team ones freeze alongside the
+	 *  frozen swarm. */
+	bool bPausedEnemyOnly = false;
 };

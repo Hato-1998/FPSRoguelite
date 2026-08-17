@@ -84,3 +84,18 @@ public:
 
 	virtual void Grant(const FFPSRDestructibleRewardContext& Context) const override;
 };
+
+/** The suppressor (억제기), ADR 0010 D6/D7. **A suppressor is not a separate class** — any AFPSRArenaDestructible
+ *  authored with exactly this one Reward IS the suppressor; the polymorphic Rewards array (see AFPSRDestructible's
+ *  header) is what makes "add a new kind of break trigger" a subclass here instead of a new destructible hierarchy.
+ *  Grant() asks the world's UFPSRStageDirectorSubsystem to begin the stage-transition state machine (grace dealing
+ *  window -> swap). Multiple suppressors / a multi-kill explosion are safe: the subsystem silently ignores every
+ *  request after the first (see UFPSRStageDirectorSubsystem::RequestTransition). */
+UCLASS(meta = (DisplayName = "Stage Transition"))
+class FPSROGUELITE_API UFPSRDestructibleReward_StageTransition : public UFPSRDestructibleReward
+{
+	GENERATED_BODY()
+
+public:
+	virtual void Grant(const FFPSRDestructibleRewardContext& Context) const override;
+};
