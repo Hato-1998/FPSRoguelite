@@ -10,7 +10,7 @@
 #include "Enemy/FPSREnemyBase.h"
 #include "Boss/FPSRBossBase.h"
 #include "Hero/FPSRCharacter.h"
-#include "Door/FPSRDoor.h"
+#include "Destructible/FPSRDestructible.h"
 #include "Run/Mission/FPSRMissionActor.h"
 
 #include "GameFramework/Pawn.h"
@@ -54,7 +54,7 @@ EFPSRDamageSourceClass FPSRTelemetry::ClassifyDamageSource(const AActor* Instiga
 	{
 		return EFPSRDamageSourceClass::FriendlyFire;
 	}
-	if (Cast<AFPSRDoor>(Instigator))
+	if (Cast<AFPSRDestructible>(Instigator))
 	{
 		return EFPSRDamageSourceClass::Door;
 	}

@@ -25,7 +25,7 @@ enum class EFPSRDamageSourceClass : uint8
 	Enemy,           // AFPSREnemyBase (incl. AFPSRRangedEnemyBase)
 	Boss,            // AFPSRBossBase (separate bucket; ACharacter, NOT an AFPSREnemyBase)
 	FriendlyFire,    // another AFPSRCharacter
-	Door,            // AFPSRDoor (shares the enemy health component but is not a combatant)
+	Door,            // AFPSRDestructible: doors AND breakable props (shares the enemy health component, not a combatant)
 	Mission,         // AFPSRMissionActor
 	Env,             // null instigator / anything else (falling, world, unclassified)
 	Count
