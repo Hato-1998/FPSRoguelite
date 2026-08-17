@@ -420,6 +420,228 @@ namespace
 	}
 }
 
+namespace
+{
+	/**
+	 * L2 (ADR 0010 D8): derive floor wiring traces from the L0 corridor skeleton.
+	 *
+	 * Three deterministic, seedless passes over the open-cell mask (Layout.Surface as it stands when called —
+	 * see FFPSRArenaGenerator::DeriveFloorTraces for why call order matters):
+	 *  (A) Chebyshev distance transform  - how far every open cell is from the nearest wall.
+	 *  (B) Zhang-Suen thinning           - collapse the open region to a 1-cell-wide topological skeleton.
+	 *  (C) walk the skeleton             - one trace segment per adjacent skeleton pair; junctions where it forks.
+	 *
+	 * Nothing here touches FRandomStream, FMath::Rand, or any other source of randomness — see the header
+	 * comment on DeriveFloorTraces for why that is a stronger guarantee than this class's usual determinism.
+	 */
+
+	/** Zhang-Suen neighbour offsets, clockwise from north: P2=N, P3=NE, P4=E, P5=SE, P6=S, P7=SW, P8=W, P9=NW.
+	 *  Index i corresponds to P(i+2); also reused (unchanged) for the 8-neighbour degree/adjacency walk in
+	 *  stage (C), since a skeleton cell's "junction-ness" and its trace partners are both just its 8-neighbours. */
+	constexpr int32 ZSOffsetX[8] = { 0,  1, 1, 1, 0, -1, -1, -1 };
+	constexpr int32 ZSOffsetY[8] = { -1, -1, 0, 1, 1,  1,  0, -1 };
+
+	/** (A) Chessboard (Chebyshev) distance-to-nearest-wall for every cell, via the standard two-pass chamfer
+	 *  raster scan: forward pass pulls from the 4 8-neighbours already visited in raster order (Y asc, X asc),
+	 *  backward pass pulls from the remaining 4. Unlike the same technique applied to Euclidean distance, this is
+	 *  EXACT (not an approximation) for the Chebyshev metric. Blocked cells and off-grid neighbours both read as
+	 *  distance 0, and blocked cells are never revisited after that, so they stay 0 through both passes. */
+	void ComputeChebyshevWallDistance(const FFPSRArenaLayout& Layout, TArray<int32>& OutDist)
+	{
+		const int32 W = Layout.GridDims.X;
+		const int32 H = Layout.GridDims.Y;
+		OutDist.Init(0, W * H);
+
+		auto DistAt = [&OutDist, W, H](int32 CX, int32 CY) -> int32
+		{
+			return (CX < 0 || CY < 0 || CX >= W || CY >= H) ? 0 : OutDist[CY * W + CX];
+		};
+
+		// Forward pass (Y asc, X asc): NW, N, NE, W are already processed at this point in the scan.
+		for (int32 CY = 0; CY < H; ++CY)
+		{
+			for (int32 CX = 0; CX < W; ++CX)
+			{
+				if (!FFPSRArenaGenerator::IsCellOpen(Layout, CX, CY)) { continue; } // blocked cells stay 0
+				int32 M = DistAt(CX - 1, CY - 1);
+				M = FMath::Min(M, DistAt(CX, CY - 1));
+				M = FMath::Min(M, DistAt(CX + 1, CY - 1));
+				M = FMath::Min(M, DistAt(CX - 1, CY));
+				OutDist[CY * W + CX] = 1 + M;
+			}
+		}
+		// Backward pass (Y desc, X desc): SE, S, SW, E are already processed at this point in the reverse scan.
+		for (int32 CY = H - 1; CY >= 0; --CY)
+		{
+			for (int32 CX = W - 1; CX >= 0; --CX)
+			{
+				if (!FFPSRArenaGenerator::IsCellOpen(Layout, CX, CY)) { continue; }
+				int32 M = DistAt(CX + 1, CY + 1);
+				M = FMath::Min(M, DistAt(CX, CY + 1));
+				M = FMath::Min(M, DistAt(CX - 1, CY + 1));
+				M = FMath::Min(M, DistAt(CX + 1, CY));
+				const int32 Cell = CY * W + CX;
+				OutDist[Cell] = FMath::Min(OutDist[Cell], 1 + M);
+			}
+		}
+	}
+
+	/** (B) Zhang-Suen thinning: reduce the open-cell mask to a 1-cell-wide skeleton, in place. Off-grid reads as
+	 *  background (false / wall), per the standard algorithm. Bounded at 256 iterations — a corridor mask
+	 *  converges in far fewer in practice, but nothing here proves that, so the cap is what stands between a
+	 *  pathological mask and a hang; hitting it still returns a usable (if imperfectly thinned) skeleton. */
+	void ThinToSkeleton(int32 W, int32 H, TArray<bool>& Skel)
+	{
+		auto At = [&Skel, W, H](int32 CX, int32 CY) -> bool
+		{
+			return (CX < 0 || CY < 0 || CX >= W || CY >= H) ? false : Skel[CY * W + CX];
+		};
+
+		constexpr int32 MaxIterations = 256;
+		TArray<int32> ToDelete;
+
+		for (int32 Iter = 0; Iter < MaxIterations; ++Iter)
+		{
+			bool bAnyDeleted = false;
+
+			for (int32 SubIter = 0; SubIter < 2; ++SubIter)
+			{
+				ToDelete.Reset();
+
+				for (int32 CY = 0; CY < H; ++CY)
+				{
+					for (int32 CX = 0; CX < W; ++CX)
+					{
+						if (!Skel[CY * W + CX]) { continue; }
+
+						bool N[8];
+						for (int32 i = 0; i < 8; ++i) { N[i] = At(CX + ZSOffsetX[i], CY + ZSOffsetY[i]); }
+
+						// B(P1): how many of the 8 neighbours are foreground.
+						const int32 B = N[0] + N[1] + N[2] + N[3] + N[4] + N[5] + N[6] + N[7];
+						if (B < 2 || B > 6) { continue; }
+
+						// A(P1): 0->1 transitions walking P2..P9..P2 — exactly 1 means removing this pixel cannot
+						// disconnect its neighbourhood (the classic Zhang-Suen connectivity guard).
+						int32 A = 0;
+						for (int32 i = 0; i < 8; ++i) { if (!N[i] && N[(i + 1) & 7]) { ++A; } }
+						if (A != 1) { continue; }
+
+						// N[0]=P2(N), N[2]=P4(E), N[4]=P6(S), N[6]=P8(W).
+						const bool bC3 = (SubIter == 0) ? !(N[0] && N[2] && N[4]) : !(N[0] && N[2] && N[6]);
+						const bool bC4 = (SubIter == 0) ? !(N[2] && N[4] && N[6]) : !(N[0] && N[4] && N[6]);
+						if (bC3 && bC4) { ToDelete.Add(CY * W + CX); }
+					}
+				}
+
+				// Every candidate this sub-iteration found is collected above and applied HERE, all at once — not
+				// as each one is found. Deleting in place mid-scan would let an early deletion change a
+				// not-yet-visited neighbour's B/A count within the SAME sub-iteration, making the result depend on
+				// raster scan order. That is exactly the non-determinism this whole L2 pass exists to avoid
+				// (ADR 0010 invariant 10 applies to this derived data too, even though it takes no seed).
+				if (ToDelete.Num() > 0)
+				{
+					bAnyDeleted = true;
+					for (const int32 Idx : ToDelete) { Skel[Idx] = false; }
+				}
+			}
+
+			if (!bAnyDeleted)
+			{
+				return; // converged
+			}
+
+			if (Iter == MaxIterations - 1)
+			{
+				UE_LOG(LogFPSR, Warning,
+					TEXT("[Arena] DeriveFloorTraces: thinning hit the %d-iteration cap without converging; using the partial skeleton."),
+					MaxIterations);
+			}
+		}
+	}
+}
+
+void FFPSRArenaGenerator::DeriveFloorTraces(FFPSRArenaLayout& Layout)
+{
+	Layout.Traces.Reset();
+	Layout.TraceJunctions.Reset();
+
+	const int32 W = Layout.GridDims.X;
+	const int32 H = Layout.GridDims.Y;
+	if (W <= 0 || H <= 0) { return; }
+
+	// (A) Distance to the nearest wall, per open cell. Becomes each trace's WidthClass below.
+	TArray<int32> Dist;
+	ComputeChebyshevWallDistance(Layout, Dist);
+
+	// (B) Thin the CURRENT open-cell mask (IsCellOpen, same predicate the flow field uses) to a 1-cell skeleton.
+	// Becomes the trace centrelines.
+	TArray<bool> Skel;
+	Skel.Init(false, W * H);
+	for (int32 CY = 0; CY < H; ++CY)
+	{
+		for (int32 CX = 0; CX < W; ++CX)
+		{
+			if (FFPSRArenaGenerator::IsCellOpen(Layout, CX, CY)) { Skel[CY * W + CX] = true; }
+		}
+	}
+	ThinToSkeleton(W, H, Skel);
+
+	auto SkelAt = [&Skel, W, H](int32 CX, int32 CY) -> bool
+	{
+		return (CX < 0 || CY < 0 || CX >= W || CY >= H) ? false : Skel[CY * W + CX];
+	};
+
+	// (C1) Degree (8-neighbour skeleton count) per skeleton cell -> junctions. Collected in raster order so
+	// TraceJunctions comes out cell-index ascending with no explicit sort. Done as its own pass (rather than
+	// inline with C2 below) because a segment needs to know BOTH endpoints' junction status, including an
+	// endpoint with a higher cell index that the raster scan has not reached yet when a segment is emitted.
+	TArray<bool> IsJunction;
+	IsJunction.Init(false, W * H);
+	for (int32 CY = 0; CY < H; ++CY)
+	{
+		for (int32 CX = 0; CX < W; ++CX)
+		{
+			if (!Skel[CY * W + CX]) { continue; }
+			int32 Degree = 0;
+			for (int32 i = 0; i < 8; ++i) { if (SkelAt(CX + ZSOffsetX[i], CY + ZSOffsetY[i])) { ++Degree; } }
+			if (Degree >= 3)
+			{
+				IsJunction[CY * W + CX] = true;
+				Layout.TraceJunctions.Add(FIntPoint(CX, CY));
+			}
+		}
+	}
+
+	// (C2) One segment per adjacent skeleton pair. Emitting only when the neighbour's cell index is greater than
+	// this cell's own is what makes each pair appear exactly once with no separate dedup set; the outer loop
+	// being the same raster scan is what makes Traces come out cell-index ascending, same as TraceJunctions above.
+	for (int32 CY = 0; CY < H; ++CY)
+	{
+		for (int32 CX = 0; CX < W; ++CX)
+		{
+			if (!Skel[CY * W + CX]) { continue; }
+			const int32 SelfIdx = CY * W + CX;
+
+			for (int32 i = 0; i < 8; ++i)
+			{
+				const int32 NX = CX + ZSOffsetX[i];
+				const int32 NY = CY + ZSOffsetY[i];
+				if (NX < 0 || NY < 0 || NX >= W || NY >= H || !Skel[NY * W + NX]) { continue; }
+				const int32 NeighborIdx = NY * W + NX;
+				if (NeighborIdx <= SelfIdx) { continue; }
+
+				FFPSRArenaTraceSegment Seg;
+				Seg.FromCell = FIntPoint(CX, CY);
+				Seg.ToCell = FIntPoint(NX, NY);
+				Seg.WidthClass = static_cast<uint8>(FMath::Clamp(FMath::Min(Dist[SelfIdx], Dist[NeighborIdx]), 0, 255));
+				Seg.bJunction = IsJunction[SelfIdx] || IsJunction[NeighborIdx];
+				Layout.Traces.Add(Seg);
+			}
+		}
+	}
+}
+
 bool FFPSRArenaGenerator::Generate(int32 Seed, const FFPSRArenaGenParams& Params, const FVector& ArenaOrigin,
 	const FFPSRArenaAuthoredInput& Authored, FFPSRArenaLayout& OutLayout)
 {
@@ -558,6 +780,15 @@ bool FFPSRArenaGenerator::Generate(int32 Seed, const FFPSRArenaGenParams& Params
 		OutLayout.DestructibleCells.Add(MoveTemp(DestructibleCellsOut));
 	}
 
+	// --- L2: derive floor wiring traces from the L0 mask (ADR 0010 D8) ---------------------------------------
+	// MUST run here — after L0 (blockers, landmarks, destructibles are all rasterised above) but BEFORE L1
+	// (PlaceMicroProps, below). L2 is derived ONLY from L0. If this ran after L1 instead, L1's micro props would
+	// have already carved the corridor mask further, so the traces would no longer line up with where the
+	// swarm/player can actually walk — which is exactly the external proposal's self-contradiction ADR 0010 D8
+	// called out: wiring laid wherever cells happen to be spare, in a place that has nothing to do with the
+	// actual paths through the arena.
+	DeriveFloorTraces(OutLayout);
+
 	// --- L1: procedural micro props in whatever slack the authored skeleton left -----------------------------
 	{
 		FRandomStream RS(Seed);
@@ -565,9 +796,9 @@ bool FFPSRArenaGenerator::Generate(int32 Seed, const FFPSRArenaGenParams& Params
 	}
 
 	UE_LOG(LogFPSR, Log,
-		TEXT("[Arena] Generated seed=%d grid=%dx%d cell=%.0f authored(blockers=%d landmarks=%d destructibles=%d) props=%d origin=%s"),
+		TEXT("[Arena] Generated seed=%d grid=%dx%d cell=%.0f authored(blockers=%d landmarks=%d destructibles=%d) props=%d traces=%d junctions=%d origin=%s"),
 		Seed, W, H, Params.CellSize, Authored.Blockers.Num(), Authored.Landmarks.Num(), Authored.Destructibles.Num(),
-		OutLayout.Props.Num(), *ArenaOrigin.ToString());
+		OutLayout.Props.Num(), OutLayout.Traces.Num(), OutLayout.TraceJunctions.Num(), *ArenaOrigin.ToString());
 
 	return true;
 }

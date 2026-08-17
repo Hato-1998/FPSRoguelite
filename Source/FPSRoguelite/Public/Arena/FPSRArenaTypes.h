@@ -257,6 +257,37 @@ struct FFPSRArenaGenParams
 };
 
 /**
+ * One wiring trace between two adjacent skeleton cells (ADR 0010 D8, L2 "circuit board floor wiring").
+ *
+ * An axis-aligned pair produces a straight trace; a diagonal pair produces a 45-degree one. That is not
+ * incidental — it is the same Manhattan + 45-degree routing convention a circuit board's copper traces follow,
+ * and it falls out for free because FromCell/ToCell are just two 8-neighbour cells on the corridor skeleton
+ * (see FFPSRArenaGenerator::DeriveFloorTraces).
+ */
+USTRUCT(BlueprintType)
+struct FFPSRArenaTraceSegment
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadOnly, Category = "FPSR|Arena")
+	FIntPoint FromCell = FIntPoint::ZeroValue;
+
+	UPROPERTY(BlueprintReadOnly, Category = "FPSR|Arena")
+	FIntPoint ToCell = FIntPoint::ZeroValue;
+
+	/** Half-width class (cells) of the corridor this segment runs through — the smaller of the two endpoints'
+	 *  distance-to-wall. A thicker rendered trace means a wider corridor (ADR 0010 D8: the bright line IS where
+	 *  the swarm/player can actually walk). */
+	UPROPERTY(BlueprintReadOnly, Category = "FPSR|Arena")
+	uint8 WidthClass = 0;
+
+	/** True if either endpoint is a junction (3+ skeleton neighbours) — a point where circulation branches, i.e.
+	 *  where a run through the arena actually involves a choice. */
+	UPROPERTY(BlueprintReadOnly, Category = "FPSR|Arena")
+	bool bJunction = false;
+};
+
+/**
  * The generator's whole output. ADR 0010 data ownership: this has NO owner — every machine regenerates it
  * from the replicated seed, so it is never replicated and never saved.
  *
@@ -290,6 +321,17 @@ struct FFPSRArenaLayout
 	/** L1 output. Blocking entries are already reflected in Surface.BlockedField; passable ones occupy nothing. */
 	UPROPERTY(BlueprintReadOnly, Category = "FPSR|Arena")
 	TArray<FFPSRArenaProp> Props;
+
+	/** L2 output (ADR 0010 D8): floor wiring traces derived from the L0 corridor skeleton, BEFORE L1 ran — see
+	 *  FFPSRArenaGenerator::DeriveFloorTraces. Purely cosmetic; carries no collision (0010 D4 "flat decoration"). */
+	UPROPERTY(BlueprintReadOnly, Category = "FPSR|Arena")
+	TArray<FFPSRArenaTraceSegment> Traces;
+
+	/** Cells where the skeleton branches (3+ skeleton neighbours), i.e. where the wiring forks — via placement.
+	 *  A subset of the cells the Traces segments touch; kept separately so via placement need not re-derive
+	 *  degree from the segment list. */
+	UPROPERTY(BlueprintReadOnly, Category = "FPSR|Arena")
+	TArray<FIntPoint> TraceJunctions;
 
 	UPROPERTY(BlueprintReadOnly, Category = "FPSR|Arena")
 	int32 Seed = 0;

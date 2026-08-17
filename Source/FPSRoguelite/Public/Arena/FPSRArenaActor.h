@@ -177,6 +177,30 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "아레나|화이트박스", meta = (DisplayName = "통과 프롭 높이(cm)", ClampMin = "1", ClampMax = "45"))
 	float PassablePropHeight = 30.0f;
 
+	/** 배선 메시(L2, ADR 0010 D8). **비워 두면 배선 지오메트리가 생성되지 않는다** — 아직 아트가 없는 상태가
+	 *  정상이며, 경고를 띄우지 않는다(WhiteboxCubeMesh 와 달리 이건 장식일 뿐 위상을 대신 보여주지 않아도 된다).
+	 *  위상은 `FPSR.Arena.DebugTraces` 로 확인할 수 있다. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "아레나|화이트박스", meta = (DisplayName = "배선 메시"))
+	TObjectPtr<UStaticMesh> TraceMesh;
+
+	/** 정션(비아) 메시. 배선이 갈라지는 지점마다 하나씩. 비워 두면 정션 지오메트리가 생성되지 않는다(경고 없음). */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "아레나|화이트박스", meta = (DisplayName = "정션(비아) 메시"))
+	TObjectPtr<UStaticMesh> TraceJunctionMesh;
+
+	/** 배선 기본 폭(cm). 실제 렌더 폭 = TraceWidthCm + WidthClass * TraceWidthPerClassCm. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "아레나|화이트박스", meta = (DisplayName = "배선 폭(cm)", ClampMin = "1"))
+	float TraceWidthCm = 40.0f;
+
+	/** 통로폭(WidthClass) 1단당 배선이 굵어지는 정도(cm). **굵은 배선 = 넓은 통로** — ADR 0010 D8 이 말하는
+	 *  "밝은 라인이 곧 지나갈 수 있는 곳"을 폭으로도 드러낸다. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "아레나|화이트박스", meta = (DisplayName = "통로폭당 배선 가중(cm)", ClampMin = "0"))
+	float TraceWidthPerClassCm = 8.0f;
+
+	/** 배선 두께(cm). 0010 D4 「평면 장식」이라 콜리전이 없다 — 두께는 통행에 아무 의미가 없고, 바닥판과의
+	 *  z-fighting 을 피하기 위한 값일 뿐이다. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "아레나|화이트박스", meta = (DisplayName = "배선 두께(cm)", ClampMin = "0.1"))
+	float TraceHeightCm = 2.0f;
+
 	/** The one replicated thing. Clients rebuild everything else from it. */
 	UPROPERTY(ReplicatedUsing = OnRep_ActiveSeed)
 	int32 ActiveSeed = 0;
@@ -191,6 +215,15 @@ protected:
 	/** The floor slab. Separate component so it can be non-blocking-to-nothing and differently materialled later. */
 	UPROPERTY(VisibleAnywhere, Category = "아레나|화이트박스")
 	TObjectPtr<UHierarchicalInstancedStaticMeshComponent> FloorMeshes;
+
+	/** L2 floor wiring trace instances (ADR 0010 D8). NoCollision — 0010 D4 「평면 장식」, traces affect nothing
+	 *  about traversal. */
+	UPROPERTY(VisibleAnywhere, Category = "아레나|화이트박스")
+	TObjectPtr<UHierarchicalInstancedStaticMeshComponent> TraceMeshes;
+
+	/** L2 junction (via) instances, one per FFPSRArenaLayout::TraceJunctions entry. Also NoCollision. */
+	UPROPERTY(VisibleAnywhere, Category = "아레나|화이트박스")
+	TObjectPtr<UHierarchicalInstancedStaticMeshComponent> JunctionMeshes;
 
 private:
 	/** Local, never replicated, never saved — regenerated from ActiveSeed. */

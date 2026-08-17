@@ -25,6 +25,10 @@ struct FFPSRArenaValidationResult
 	int32 PocketCells = 0;
 	/** Fraction of open cells that are NOT part of the minimum corridor width, i.e. what L1 has to work with. */
 	float SlackFraction = 0.0f;
+	/** L2 floor wiring counts, READ from Layout.Traces/TraceJunctions rather than recomputed here — the layout
+	 *  is the source of truth (see FFPSRArenaGenerator::DeriveFloorTraces). */
+	int32 TraceSegments = 0;
+	int32 TraceJunctions = 0;
 
 	bool Passed() const { return Errors.Num() == 0; }
 };

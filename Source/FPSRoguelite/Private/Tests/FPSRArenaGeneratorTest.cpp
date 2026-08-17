@@ -418,6 +418,140 @@ bool FFPSRArenaGeneratorTest::RunTest(const FString& Parameters)
 		}
 	}
 
+	// --- 10. L2 floor wiring traces (ADR 0010 D8) --------------------------------------------------------------
+	// Derived from the L0 mask alone, BEFORE L1 runs — see FFPSRArenaGenerator::DeriveFloorTraces. Test 10b is the
+	// load-bearing one for this slice: if it ever fails, L2 has started reading L1's micro-prop blocking, which
+	// is exactly the "wiring gets laid wherever cells happen to be spare" self-contradiction ADR 0010 D8 called
+	// out in the external proposal it rejected.
+	{
+		auto SegmentsEqual = [](const TArray<FFPSRArenaTraceSegment>& A, const TArray<FFPSRArenaTraceSegment>& B)
+		{
+			if (A.Num() != B.Num()) { return false; }
+			for (int32 i = 0; i < A.Num(); ++i)
+			{
+				if (A[i].FromCell != B[i].FromCell || A[i].ToCell != B[i].ToCell
+					|| A[i].WidthClass != B[i].WidthClass || A[i].bJunction != B[i].bJunction)
+				{
+					return false;
+				}
+			}
+			return true;
+		};
+
+		// --- 10a. determinism: same (seed, params, authored) twice -> identical Traces + TraceJunctions ---------
+		{
+			FFPSRArenaLayout A, B;
+			TestTrue(TEXT("trace determinism: build A"), BuildFromProposal(31, Params, Origin, A));
+			TestTrue(TEXT("trace determinism: build B"), BuildFromProposal(31, Params, Origin, B));
+			TestTrue(TEXT("trace determinism: same input -> identical Traces"), SegmentsEqual(A.Traces, B.Traces));
+			TestTrue(TEXT("trace determinism: same input -> identical TraceJunctions"), A.TraceJunctions == B.TraceJunctions);
+		}
+
+		// --- 10b. L1 independence: props on vs off must not change Traces/TraceJunctions at all -----------------
+		{
+			FFPSRArenaGenParams NoProps = Params;
+			NoProps.PropSets.Reset();
+
+			FFPSRArenaLayout WithProps, WithoutProps;
+			TestTrue(TEXT("trace L1-independence: build with props"), BuildFromProposal(31, Params, Origin, WithProps));
+			TestTrue(TEXT("trace L1-independence: build without props"), BuildFromProposal(31, NoProps, Origin, WithoutProps));
+
+			// If this is ever false the comparison below proves nothing (both sides would trivially agree on "no
+			// props changed anything" because no props were placed on either side to begin with).
+			TestTrue(TEXT("trace L1-independence: L1 actually placed props on the 'with' side"), WithProps.Props.Num() > 0);
+
+			TestTrue(TEXT("trace L1-independence: Traces identical with/without L1 props"),
+				SegmentsEqual(WithProps.Traces, WithoutProps.Traces));
+			TestTrue(TEXT("trace L1-independence: TraceJunctions identical with/without L1 props"),
+				WithProps.TraceJunctions == WithoutProps.TraceJunctions);
+		}
+
+		// --- 10c. wiring tracks CORRIDOR STRUCTURE, not floor area ---------------------------------------------
+		// A completely empty arena is one solid rectangle of open cells, and the medial axis of a rectangle is a
+		// POINT (a square) or a short line — there are no corridors, so there is nothing to wire, and the skeleton
+		// collapses to too few cells to form a single adjacent pair. That is the correct answer, not a failure:
+		// traces exist to say "this is where you can walk THROUGH", and an empty box has no through-route to mark.
+		// Drop in a single blocker and the open space becomes a loop around it, which does wire up.
+		{
+			FFPSRArenaLayout Empty;
+			TestTrue(TEXT("trace empty-arena: generates"),
+				FFPSRArenaGenerator::Generate(1, Params, Origin, FFPSRArenaAuthoredInput(), Empty));
+			TestEqual(TEXT("trace empty-arena: no corridor structure -> no wiring"), Empty.Traces.Num(), 0);
+
+			// One blocker in the middle -> a ring of open space around it -> a wired loop.
+			//
+			// Deliberately NOT asserting a junction count here. The medial axis of the region between two nested
+			// rectangles is a loop PLUS spurs running into the corners (where the inner and outer corners each
+			// generate their own ridge), and those spurs are legitimate degree-3 cells. How many appear is emergent
+			// corner geometry, not a designed contract — pinning it would be testing the shape of the arena rather
+			// than the behaviour of the derivation. The junction contract that IS meaningful lives in 10d: a
+			// multi-cluster lattice must produce branching.
+			FFPSRArenaAuthoredInput OneBlocker;
+			FFPSRArenaAuthoredBox Box;
+			Box.Center = Origin + FVector(0.5 * Params.ArenaSizeCells.X * Params.CellSize,
+				0.5 * Params.ArenaSizeCells.Y * Params.CellSize, 0.0);
+			Box.HalfExtentXY = FVector2D(20.0 * Params.CellSize, 20.0 * Params.CellSize);
+			OneBlocker.Blockers.Add(Box);
+
+			FFPSRArenaLayout Ring;
+			TestTrue(TEXT("trace one-blocker: generates"),
+				FFPSRArenaGenerator::Generate(1, Params, Origin, OneBlocker, Ring));
+			TestTrue(TEXT("trace one-blocker: a loop around it DOES wire up"), Ring.Traces.Num() > 0);
+
+			// Internal consistency instead: every junction must actually sit on the wiring. A junction cell that no
+			// segment touches would mean the degree pass and the segment pass disagreed about what the skeleton is,
+			// and the via markers would render in mid-air away from any trace.
+			TSet<FIntPoint> WiredCells;
+			for (const FFPSRArenaTraceSegment& Seg : Ring.Traces)
+			{
+				WiredCells.Add(Seg.FromCell);
+				WiredCells.Add(Seg.ToCell);
+			}
+			bool bEveryJunctionIsWired = true;
+			for (const FIntPoint& Junction : Ring.TraceJunctions)
+			{
+				bEveryJunctionIsWired &= WiredCells.Contains(Junction);
+			}
+			TestTrue(TEXT("trace one-blocker: every junction cell lies on a segment"), bEveryJunctionIsWired);
+		}
+
+		// --- 10d. a multi-cluster (2x2) lattice produces branching corridors -> at least one junction -----------
+		{
+			FFPSRArenaGenParams Lattice2x2 = Params;
+			Lattice2x2.SlotGridOptions = { FIntPoint(2, 2) };
+
+			FFPSRArenaLayout L;
+			TestTrue(TEXT("trace lattice 2x2: builds"), BuildFromProposal(2, Lattice2x2, Origin, L));
+			TestTrue(TEXT("trace lattice 2x2: at least one junction"), L.TraceJunctions.Num() > 0);
+		}
+
+		// --- 10e. every segment connects two genuine 8-neighbours, and no pair appears twice --------------------
+		{
+			FFPSRArenaLayout L;
+			TestTrue(TEXT("trace adjacency: build"), BuildFromProposal(31, Params, Origin, L));
+			TestTrue(TEXT("trace adjacency: has traces to check"), L.Traces.Num() > 0);
+
+			TSet<uint64> SeenPairs;
+			bool bAllAdjacent = true;
+			bool bNoDuplicates = true;
+			for (const FFPSRArenaTraceSegment& Seg : L.Traces)
+			{
+				const int32 DX = FMath::Abs(Seg.ToCell.X - Seg.FromCell.X);
+				const int32 DY = FMath::Abs(Seg.ToCell.Y - Seg.FromCell.Y);
+				if (DX > 1 || DY > 1 || (DX == 0 && DY == 0)) { bAllAdjacent = false; }
+
+				const int32 FromIdx = L.CellIndex(Seg.FromCell.X, Seg.FromCell.Y);
+				const int32 ToIdx = L.CellIndex(Seg.ToCell.X, Seg.ToCell.Y);
+				const uint64 PairKey = (static_cast<uint64>(static_cast<uint32>(FromIdx)) << 32) | static_cast<uint32>(ToIdx);
+				bool bAlready = false;
+				SeenPairs.Add(PairKey, &bAlready);
+				if (bAlready) { bNoDuplicates = false; }
+			}
+			TestTrue(TEXT("trace adjacency: every segment's two cells are 8-neighbours"), bAllAdjacent);
+			TestTrue(TEXT("trace adjacency: no duplicate segment pairs"), bNoDuplicates);
+		}
+	}
+
 	return true;
 }
 

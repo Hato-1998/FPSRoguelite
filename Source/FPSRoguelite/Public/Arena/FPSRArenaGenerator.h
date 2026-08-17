@@ -65,6 +65,19 @@ public:
 	static void ComputeDestructibleCells(const FFPSRArenaAuthoredDestructible& Destructible,
 		const FVector& ArenaOrigin, float CellSize, const FIntPoint& GridDims, TArray<int32>& OutCells);
 
+	/**
+	 * Derive L2 floor wiring traces from the L0 corridor mask (ADR 0010 D8): Chebyshev-distance-transform the
+	 * open-cell mask, thin it to a 1-cell-wide skeleton (Zhang-Suen), then emit one trace segment per adjacent
+	 * skeleton-cell pair and flag the cells where the skeleton branches as junctions. Fills Layout.Traces and
+	 * Layout.TraceJunctions from Layout.Surface/GridDims as they stand when called — MUST run after L0 (blockers,
+	 * landmarks, destructibles) and BEFORE PlaceMicroProps (L1); see the call site in Generate() for why.
+	 *
+	 * Uses NO randomness whatsoever — not even FRandomStream. That is a STRONGER guarantee than this class's
+	 * usual seed-determinism (ADR 0010 invariant 10): the same authored skeleton produces the same wiring on
+	 * every machine regardless of seed, because the seed is never read by this function at all.
+	 */
+	static void DeriveFloorTraces(FFPSRArenaLayout& Layout);
+
 	/** True if the cell is inside the grid and not blocked. Mirrors the flow field's own traversability predicate
 	 *  (surface exists AND not blocked), so layout and field never disagree about what is walkable. */
 	static bool IsCellOpen(const FFPSRArenaLayout& Layout, int32 CX, int32 CY);

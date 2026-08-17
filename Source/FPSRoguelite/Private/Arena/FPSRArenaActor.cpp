@@ -45,6 +45,14 @@ static FAutoConsoleVariableRef CVarArenaDebugGridRadius(
 	GArenaDebugGridRadius,
 	TEXT("Radius (cm) around the viewer within which FPSR.Arena.DebugGrid draws cells."),
 	ECVF_Cheat);
+
+static int32 GArenaDebugTraces = 0;
+static FAutoConsoleVariableRef CVarArenaDebugTraces(
+	TEXT("FPSR.Arena.DebugTraces"),
+	GArenaDebugTraces,
+	TEXT("Draw the arena's L2 floor wiring traces and junctions around the viewer (ADR 0010 D8). Junctions draw in "
+	     "a different colour. 0 = off. Shares FPSR.Arena.DebugGridRadius for the draw distance."),
+	ECVF_Cheat);
 #endif
 
 AFPSRArenaActor::AFPSRArenaActor()
@@ -70,6 +78,17 @@ AFPSRArenaActor::AFPSRArenaActor()
 	FloorMeshes->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 	FloorMeshes->SetCollisionProfileName(TEXT("BlockAll"));
 	FloorMeshes->SetMobility(EComponentMobility::Static);
+
+	// L2 floor wiring (ADR 0010 D8): NoCollision throughout — 0010 D4 「평면 장식」, these never affect traversal.
+	TraceMeshes = CreateDefaultSubobject<UHierarchicalInstancedStaticMeshComponent>(TEXT("TraceMeshes"));
+	TraceMeshes->SetupAttachment(SceneRoot);
+	TraceMeshes->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	TraceMeshes->SetMobility(EComponentMobility::Static);
+
+	JunctionMeshes = CreateDefaultSubobject<UHierarchicalInstancedStaticMeshComponent>(TEXT("JunctionMeshes"));
+	JunctionMeshes->SetupAttachment(SceneRoot);
+	JunctionMeshes->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	JunctionMeshes->SetMobility(EComponentMobility::Static);
 }
 
 void AFPSRArenaActor::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
@@ -276,13 +295,15 @@ FVector AFPSRArenaActor::ComputeGridOrigin(const FFPSRArenaGenParams& Params) co
 
 void AFPSRArenaActor::RebuildRepresentation()
 {
-	if (!BlockingMeshes || !FloorMeshes)
+	if (!BlockingMeshes || !FloorMeshes || !TraceMeshes || !JunctionMeshes)
 	{
 		return;
 	}
 
 	BlockingMeshes->ClearInstances();
 	FloorMeshes->ClearInstances();
+	TraceMeshes->ClearInstances();
+	JunctionMeshes->ClearInstances();
 
 	if (!WhiteboxCubeMesh)
 	{
@@ -328,6 +349,23 @@ void AFPSRArenaActor::RebuildRepresentation()
 		Comp->AddInstance(Xf, /*bWorldSpace=*/true);
 	};
 
+	// Same pivot-cancelling idea as AddBox, but (a) takes a YAW so a trace segment can point along its own
+	// direction, and (b) takes the mesh's size/offset as PARAMETERS rather than a capture, because traces and
+	// junctions are drawn with their OWN meshes (TraceMesh / TraceJunctionMesh), not WhiteboxCubeMesh — one
+	// lambda serves both instead of two near-duplicates that could drift apart.
+	auto AddOrientedBox = [](UHierarchicalInstancedStaticMeshComponent* Comp, const FVector& MeshSizeIn,
+		const FVector& MeshOffsetIn, const FVector& WorldCentre, const FVector& SizeCm, float YawDegrees)
+	{
+		const FVector Scale(SizeCm.X / MeshSizeIn.X, SizeCm.Y / MeshSizeIn.Y, SizeCm.Z / MeshSizeIn.Z);
+		const FRotator Rot(0.0f, YawDegrees, 0.0f);
+		// The pivot offset lives in the mesh's LOCAL space, so it has to be scaled AND rotated (in that order —
+		// TRS) into world space before it can be subtracted from WorldCentre; AddBox skips the rotation only
+		// because its rotation is always identity.
+		const FVector PivotWorld = Rot.RotateVector(MeshOffsetIn * Scale);
+		const FTransform Xf(Rot, WorldCentre - PivotWorld, Scale);
+		Comp->AddInstance(Xf, /*bWorldSpace=*/true);
+	};
+
 	// Floor slab, sitting just under the grid's Z so the walkable surface is exactly GridOrigin.Z.
 	AddBox(FloorMeshes,
 		FVector(Origin.X + SpanX * 0.5, Origin.Y + SpanY * 0.5, Origin.Z - FloorThickness * 0.5),
@@ -358,6 +396,65 @@ void AFPSRArenaActor::RebuildRepresentation()
 			FVector(Cell * 0.9, Cell * 0.9, PropHeight));
 	}
 
+	// L2 floor wiring (ADR 0010 D8): each trace segment is a box oriented along the two cells it connects, each
+	// junction a square "via" marker. Both are drawn with their OWN meshes and both are silently skipped (no
+	// warning) when unassigned — unlike WhiteboxCubeMesh above, an unset TraceMesh/TraceJunctionMesh is a normal
+	// "no art yet" authoring state, not a gap in the arena's whole representation. FPSR.Arena.DebugTraces shows
+	// the topology regardless of whether either mesh is assigned.
+	const double TraceZ = Origin.Z + TraceHeightCm * 0.5;
+
+	if (TraceMesh)
+	{
+		const FBoxSphereBounds TraceBounds = TraceMesh->GetBounds();
+		const FVector TraceMeshSize = TraceBounds.BoxExtent * 2.0;
+		if (TraceMeshSize.X <= UE_KINDA_SMALL_NUMBER || TraceMeshSize.Y <= UE_KINDA_SMALL_NUMBER || TraceMeshSize.Z <= UE_KINDA_SMALL_NUMBER)
+		{
+			UE_LOG(LogFPSR, Error, TEXT("[Arena] TraceMesh '%s' has degenerate bounds (%s) — trace geometry not built."),
+				*TraceMesh->GetName(), *TraceMeshSize.ToString());
+		}
+		else
+		{
+			TraceMeshes->SetStaticMesh(TraceMesh);
+			for (const FFPSRArenaTraceSegment& Seg : Layout.Traces)
+			{
+				const FVector FromWorld = Layout.CellCenterWorld(Seg.FromCell.X, Seg.FromCell.Y);
+				const FVector ToWorld = Layout.CellCenterWorld(Seg.ToCell.X, Seg.ToCell.Y);
+				const FVector Delta = ToWorld - FromWorld;
+				// Diagonal segments come out √2·Cell long automatically — no special-casing needed.
+				const double SegLength = Delta.Size();
+				const float SegYaw = static_cast<float>(FMath::RadiansToDegrees(FMath::Atan2(Delta.Y, Delta.X)));
+				const double SegWidth = TraceWidthCm + Seg.WidthClass * TraceWidthPerClassCm;
+				const FVector MidPoint = (FromWorld + ToWorld) * 0.5;
+
+				AddOrientedBox(TraceMeshes, TraceMeshSize, TraceBounds.Origin,
+					FVector(MidPoint.X, MidPoint.Y, TraceZ),
+					FVector(SegLength, SegWidth, TraceHeightCm), SegYaw);
+			}
+		}
+	}
+
+	if (TraceJunctionMesh)
+	{
+		const FBoxSphereBounds JuncBounds = TraceJunctionMesh->GetBounds();
+		const FVector JuncMeshSize = JuncBounds.BoxExtent * 2.0;
+		if (JuncMeshSize.X <= UE_KINDA_SMALL_NUMBER || JuncMeshSize.Y <= UE_KINDA_SMALL_NUMBER || JuncMeshSize.Z <= UE_KINDA_SMALL_NUMBER)
+		{
+			UE_LOG(LogFPSR, Error, TEXT("[Arena] TraceJunctionMesh '%s' has degenerate bounds (%s) — junction geometry not built."),
+				*TraceJunctionMesh->GetName(), *JuncMeshSize.ToString());
+		}
+		else
+		{
+			JunctionMeshes->SetStaticMesh(TraceJunctionMesh);
+			for (const FIntPoint& JCell : Layout.TraceJunctions)
+			{
+				const FVector JWorld = Layout.CellCenterWorld(JCell.X, JCell.Y);
+				AddOrientedBox(JunctionMeshes, JuncMeshSize, JuncBounds.Origin,
+					FVector(JWorld.X, JWorld.Y, TraceZ),
+					FVector(TraceWidthCm, TraceWidthCm, TraceHeightCm), 0.0f);
+			}
+		}
+	}
+
 	UE_LOG(LogFPSR, Log, TEXT("[Arena] Representation rebuilt: %d clusters + %d props + 4 walls + floor (seed %d)."),
 		Layout.Clusters.Num(), Layout.Props.Num(), Layout.Seed);
 }
@@ -375,6 +472,17 @@ void AFPSRArenaActor::SetArenaActive(bool bInActive)
 	{
 		FloorMeshes->SetVisibility(bInActive);
 		FloorMeshes->SetCollisionEnabled(bInActive ? ECollisionEnabled::QueryAndPhysics : ECollisionEnabled::NoCollision);
+	}
+	// L2 wiring is NoCollision (0010 D4 「평면 장식」) so only visibility matters here — but it does matter: a dormant
+	// arena that hid its walls and floor while still drawing its floor traces would leave a glowing circuit diagram
+	// floating in the dark 300 m from the live arena.
+	if (TraceMeshes)
+	{
+		TraceMeshes->SetVisibility(bInActive);
+	}
+	if (JunctionMeshes)
+	{
+		JunctionMeshes->SetVisibility(bInActive);
 	}
 
 	// Marker actors physically inside THIS arena's grid — same spatial-ownership test BuildLayoutForSeed uses, so
@@ -533,7 +641,7 @@ void AFPSRArenaActor::Tick(float DeltaSeconds)
 	Super::Tick(DeltaSeconds);
 
 #if !UE_BUILD_SHIPPING
-	if (GArenaDebugGrid == 0 || !Layout.IsValid())
+	if ((GArenaDebugGrid == 0 && GArenaDebugTraces == 0) || !Layout.IsValid())
 	{
 		return;
 	}
@@ -555,19 +663,51 @@ void AFPSRArenaActor::Tick(float DeltaSeconds)
 	const double Cell = Layout.CellSize;
 	const FVector Origin = Layout.GridOrigin;
 	const double R = GArenaDebugGridRadius;
-	const int32 MinCX = FMath::Max(0, FMath::FloorToInt((ViewPos.X - R - Origin.X) / Cell));
-	const int32 MaxCX = FMath::Min(Layout.GridDims.X - 1, FMath::CeilToInt((ViewPos.X + R - Origin.X) / Cell));
-	const int32 MinCY = FMath::Max(0, FMath::FloorToInt((ViewPos.Y - R - Origin.Y) / Cell));
-	const int32 MaxCY = FMath::Min(Layout.GridDims.Y - 1, FMath::CeilToInt((ViewPos.Y + R - Origin.Y) / Cell));
 
-	const FVector HalfCell(Cell * 0.5 * 0.9, Cell * 0.5 * 0.9, 4.0);
-	for (int32 CY = MinCY; CY <= MaxCY; ++CY)
+	if (GArenaDebugGrid != 0)
 	{
-		for (int32 CX = MinCX; CX <= MaxCX; ++CX)
+		const int32 MinCX = FMath::Max(0, FMath::FloorToInt((ViewPos.X - R - Origin.X) / Cell));
+		const int32 MaxCX = FMath::Min(Layout.GridDims.X - 1, FMath::CeilToInt((ViewPos.X + R - Origin.X) / Cell));
+		const int32 MinCY = FMath::Max(0, FMath::FloorToInt((ViewPos.Y - R - Origin.Y) / Cell));
+		const int32 MaxCY = FMath::Min(Layout.GridDims.Y - 1, FMath::CeilToInt((ViewPos.Y + R - Origin.Y) / Cell));
+
+		const FVector HalfCell(Cell * 0.5 * 0.9, Cell * 0.5 * 0.9, 4.0);
+		for (int32 CY = MinCY; CY <= MaxCY; ++CY)
 		{
-			const bool bOpen = FFPSRArenaGenerator::IsCellOpen(Layout, CX, CY);
-			DrawDebugBox(World, Layout.CellCenterWorld(CX, CY) + FVector(0, 0, 10.0), HalfCell,
-				bOpen ? FColor(0, 160, 255, 40) : FColor(255, 64, 0, 90), false, -1.0f, 0, 1.0f);
+			for (int32 CX = MinCX; CX <= MaxCX; ++CX)
+			{
+				const bool bOpen = FFPSRArenaGenerator::IsCellOpen(Layout, CX, CY);
+				DrawDebugBox(World, Layout.CellCenterWorld(CX, CY) + FVector(0, 0, 10.0), HalfCell,
+					bOpen ? FColor(0, 160, 255, 40) : FColor(255, 64, 0, 90), false, -1.0f, 0, 1.0f);
+			}
+		}
+	}
+
+	if (GArenaDebugTraces != 0)
+	{
+		// Segments draw as lines, junctions as points in a DIFFERENT colour — the crossing points are the whole
+		// point of this debug view (ADR 0010 D1: circulation choices happen where the wiring branches), so they
+		// need to read as visually distinct from an ordinary run of trace.
+		const double RSq = R * R;
+		for (const FFPSRArenaTraceSegment& Seg : Layout.Traces)
+		{
+			const FVector FromWorld = Layout.CellCenterWorld(Seg.FromCell.X, Seg.FromCell.Y) + FVector(0, 0, 12.0);
+			const FVector ToWorld = Layout.CellCenterWorld(Seg.ToCell.X, Seg.ToCell.Y) + FVector(0, 0, 12.0);
+			if (FVector::DistSquaredXY(FromWorld, ViewPos) > RSq && FVector::DistSquaredXY(ToWorld, ViewPos) > RSq)
+			{
+				continue;
+			}
+			DrawDebugLine(World, FromWorld, ToWorld, Seg.bJunction ? FColor(255, 200, 0) : FColor(0, 255, 140),
+				false, -1.0f, 0, Seg.bJunction ? 3.0f : 1.5f);
+		}
+		for (const FIntPoint& JCell : Layout.TraceJunctions)
+		{
+			const FVector JWorld = Layout.CellCenterWorld(JCell.X, JCell.Y) + FVector(0, 0, 12.0);
+			if (FVector::DistSquaredXY(JWorld, ViewPos) > RSq)
+			{
+				continue;
+			}
+			DrawDebugPoint(World, JWorld, 12.0f, FColor(255, 40, 220), false, -1.0f, 0);
 		}
 	}
 #endif

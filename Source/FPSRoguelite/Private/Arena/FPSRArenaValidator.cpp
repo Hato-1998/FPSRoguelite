@@ -83,6 +83,12 @@ FFPSRArenaValidationResult FFPSRArenaValidator::Validate(const FFPSRArenaLayout&
 	}
 	R.SlackFraction = static_cast<float>(SlackCells) / static_cast<float>(R.OpenCells);
 
+	// L2 floor wiring: READ, not recomputed — Layout.Traces/TraceJunctions are already the ground truth produced
+	// by FFPSRArenaGenerator::DeriveFloorTraces, and re-deriving them here would be a second implementation of
+	// that algorithm that could silently disagree with the first.
+	R.TraceSegments = Layout.Traces.Num();
+	R.TraceJunctions = Layout.TraceJunctions.Num();
+
 	// --- connectivity: flood from the first open cell -------------------------------------------------------
 	{
 		TArray<bool> Seen;
@@ -151,6 +157,37 @@ FFPSRArenaValidationResult FFPSRArenaValidator::Validate(const FFPSRArenaLayout&
 			R.PocketCells));
 	}
 
+	// L2 floor wiring is derived from L0 alone (ADR 0010 D8), and it tracks CORRIDOR structure rather than floor
+	// area: the medial axis of one solid open rectangle is a point, so an arena with nothing in it wires up to
+	// nothing. That is a correct answer for a structureless arena, not a derivation failure — which is why the
+	// verdict here depends on whether anything was actually placed to route around.
+	if (R.TraceSegments == 0)
+	{
+		if (Layout.Clusters.Num() > 0)
+		{
+			R.Errors.Add(FString::Printf(
+				TEXT("No floor wiring despite %d blocking cluster(s): the open space should route around them, so the "
+				     "L2 corridor-graph derivation failed."),
+				Layout.Clusters.Num()));
+		}
+		else
+		{
+			R.Warnings.Add(TEXT("No floor wiring, because nothing is placed to route around — this arena is one empty "
+				"box. Place blocking volumes to create corridors (ADR 0010 D1: the topology IS the blockers)."));
+		}
+	}
+
+	// Warning, not an error: a single-loop arena is still a valid arena. But ADR 0010 D1 makes the crossing
+	// points where circulation branches the visible heart of the topology, and a junction count of zero means the
+	// wiring never forks — i.e. there is nowhere the run actually offers a choice, which is worth flagging even
+	// though it does not by itself break anything.
+	if (R.TraceJunctions == 0)
+	{
+		R.Warnings.Add(TEXT("No wiring junctions: the floor traces never fork, so the arena is probably one single loop. "
+			"ADR 0010 D1 puts the crossing — where circulation branches and the player has to choose each lap — at the "
+			"heart of the topology, and a layout with no fork never shows that choice."));
+	}
+
 	// Warning, not an error: a deliberately tight arena is a legitimate choice. But if there is no slack anywhere,
 	// L1 has nothing to place into and every run of this arena will look identical — the variation quietly dies and
 	// nobody notices, which is exactly why it is worth saying out loud (ADR 0011 실패 흐름 2).
@@ -168,8 +205,8 @@ FFPSRArenaValidationResult FFPSRArenaValidator::Validate(const FFPSRArenaLayout&
 FString FFPSRArenaValidator::Summarize(const FFPSRArenaValidationResult& Result)
 {
 	return FString::Printf(
-		TEXT("open=%d component=%d edges=%d narrowest=%d pockets=%d slack=%.0f%% -> %s (%d error(s), %d warning(s))"),
+		TEXT("open=%d component=%d edges=%d narrowest=%d pockets=%d traces=%d junctions=%d slack=%.0f%% -> %s (%d error(s), %d warning(s))"),
 		Result.OpenCells, Result.LargestComponent, Result.OpenEdges, Result.NarrowestCorridor,
-		Result.PocketCells, Result.SlackFraction * 100.0f,
+		Result.PocketCells, Result.TraceSegments, Result.TraceJunctions, Result.SlackFraction * 100.0f,
 		Result.Passed() ? TEXT("PASS") : TEXT("FAIL"), Result.Errors.Num(), Result.Warnings.Num());
 }
