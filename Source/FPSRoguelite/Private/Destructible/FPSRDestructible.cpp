@@ -136,6 +136,40 @@ void AFPSRDestructible::OnRep_Broken()
 		ApplyBrokenState();
 		FireBrokenPresentation();
 	}
+	else
+	{
+		// F2: the false edge — a broken destructible replicated back to intact (ServerReset, e.g. an arena revisit
+		// — see AFPSRArenaActor::SetArenaActive). No presentation fires here, unlike the true edge: there is no
+		// "un-breaking" cosmetic to show, and re-firing OnDestructibleBroken() on the way back up would be backwards.
+		ClearBrokenState();
+	}
+}
+
+void AFPSRDestructible::ServerReset()
+{
+	if (!HasAuthority() || !bBroken)
+	{
+		return; // already intact — no-op. Called unconditionally by SetArenaActive(true) for every destructible in
+		        // the grid, broken or not, so this guard is what keeps an already-intact prop a true no-op.
+	}
+
+	bBroken = false;
+	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRDestructible, bBroken, this);
+
+	DamageStage = 0;
+	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRDestructible, DamageStage, this);
+
+	// InitializeMaxHealth, NOT ResetForReuse: both restore Health to full and clear the health component's dead
+	// flag, but InitializeMaxHealth also re-asserts MaxHealth = Durability — the designer-authored value this actor
+	// was built with — rather than trusting whatever MaxHealth already holds. That is the more defensive restore
+	// for something coming back from being fully destroyed (this reset), as opposed to ResetForReuse's pooled-actor
+	// reuse (where MaxHealth was never touched to begin with).
+	if (HealthComponent)
+	{
+		HealthComponent->InitializeMaxHealth(Durability);
+	}
+
+	ClearBrokenState();
 }
 
 void AFPSRDestructible::HandleBrokenAuthority(AActor* Breaker)
@@ -159,6 +193,12 @@ void AFPSRDestructible::ApplyBrokenState()
 {
 	SetActorEnableCollision(false);
 	SetActorHiddenInGame(true);
+}
+
+void AFPSRDestructible::ClearBrokenState()
+{
+	SetActorEnableCollision(true);
+	SetActorHiddenInGame(false);
 }
 
 void AFPSRDestructible::FireBrokenPresentation()

@@ -78,7 +78,12 @@ bool FFPSRStageTransitionTest::RunTest(const FString& Parameters)
 		TestEqual(TEXT("3 arenas: 1 -> 2"), U::NextArenaIndex(1, 3), 2);
 		TestEqual(TEXT("3 arenas: 2 -> 0 (wraps)"), U::NextArenaIndex(2, 3), 0);
 
-		// 1 arena: cycles to itself (the intended single-arena behavior, not an authoring gap).
+		// 1 arena: cycles to itself. NextArenaIndex(0,1)==0 is still correct on its own, but the self-cycle is only
+		// SOUND end-to-end because AFPSRArenaActor::SetArenaActive(true) resets every broken AFPSRArenaDestructible
+		// in the grid back to intact (F2, ServerReset) — without that reset, a self-cycle would revisit an arena
+		// whose suppressor is still bBroken (and 0 health, unbreakable) forever, and the very next transition could
+		// never be triggered again. This predicate doesn't know about destructibles at all; this comment exists so
+		// that dependency doesn't get silently assumed away if PerformSwap's step order ever changes.
 		TestEqual(TEXT("1 arena: 0 -> 0 (self-cycle)"), U::NextArenaIndex(0, 1), 0);
 
 		// No arenas: INDEX_NONE.

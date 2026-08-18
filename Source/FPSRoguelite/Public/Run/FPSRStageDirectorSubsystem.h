@@ -66,8 +66,13 @@ private:
 	/** Grace's one-shot dealing timer expired: decide Pending vs. Swapping (DecidePhaseAfterDealing) and act on it. */
 	void OnDealingWindowClosed();
 
-	/** Bound to GameState::OnRunStateChanged ONLY while Pending, so a Pending transition swaps the instant the
-	 *  card-selection freeze clears instead of polling for it. */
+	/** Bound to GameState::OnRunStateChanged from the moment RequestTransition enters Grace through PerformSwap
+	 *  (F3) — unbound there, same as before. Branches on the CURRENT phase:
+	 *   - Grace: tracks the card-selection freeze (bRunPaused) edge and pauses/unpauses DealingTimerHandle across
+	 *     it (see bWasRunPausedForDealing) — invariant 8 promises a fixed amount of PLAYER-USABLE dealing time, and
+	 *     the card freeze blocks firing (the window's only reward channel), so time spent behind the card screen
+	 *     must not count against the window.
+	 *   - Pending: swaps the instant the freeze clears (TrySwap), same as before F3. */
 	UFUNCTION()
 	void HandleRunStateChanged();
 
@@ -79,9 +84,17 @@ private:
 	 *  release the leftover swarm, commit the new stage to GameState. See the .cpp for the fixed step order. */
 	void PerformSwap();
 
-	/** True once HandleRunStateChanged has been bound to GameState::OnRunStateChanged, so entering Pending never
+	/** True once HandleRunStateChanged has been bound to GameState::OnRunStateChanged, so entering Grace never
 	 *  binds the same handler twice across repeated transitions. */
 	bool bBoundRunStateChanged = false;
+
+	/** F3 edge-tracker: GS->IsRunPaused() as of the last time HandleRunStateChanged acted on it, while Phase ==
+	 *  Grace. OnRunStateChanged fires for many unrelated reasons (run clock, mission progress) — comparing against
+	 *  this is what turns "the broadcast fired" into "the freeze actually just started/ended", so DealingTimerHandle
+	 *  is paused/unpaused exactly once per freeze rather than on every unrelated broadcast (the engine timer calls
+	 *  are not idempotent the way SetArenaActive's collision toggles are). Seeded from the live value when Grace is
+	 *  entered (RequestTransition), mirroring UFPSRFlowFieldSubsystem::TryBindRunStateHandler's bWasPaused. */
+	bool bWasRunPausedForDealing = false;
 
 	/** Fallback dealing-window length when the run has no schedule asset assigned (mirrors
 	 *  UFPSRRunDirectorSubsystem::FallbackBossTime — an asset-less run still needs to work, just untuned). */

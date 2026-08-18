@@ -157,6 +157,29 @@ FFPSRArenaValidationResult FFPSRArenaValidator::Validate(const FFPSRArenaLayout&
 			R.PocketCells));
 	}
 
+	// --- landmarks: none may be buried (ADR 0011 E4 check (5)) -----------------------------------------------
+	// A landmark is the only thing that answers "which way am I facing" in a uniform-floor first-person arena
+	// (see AFPSRArenaLandmark's class comment), so one sitting on a cell the mask calls closed is a real failure —
+	// it looks authored but is unreachable/invisible from the floor the player actually walks. C.Open() already
+	// reads false for an off-grid cell (FFPSRArenaGenerator::IsCellOpen bounds-checks first), so a single check
+	// covers "off the grid entirely" and "on the grid but blocked" both.
+	for (const FFPSRArenaAuthoredLandmark& Landmark : Layout.Landmarks)
+	{
+		const int32 LCX = FMath::FloorToInt((Landmark.Location.X - Layout.GridOrigin.X) / Layout.CellSize);
+		const int32 LCY = FMath::FloorToInt((Landmark.Location.Y - Layout.GridOrigin.Y) / Layout.CellSize);
+		if (!C.Open(LCX, LCY))
+		{
+			++R.BuriedLandmarks;
+		}
+	}
+	if (R.BuriedLandmarks > 0)
+	{
+		R.Errors.Add(FString::Printf(
+			TEXT("%d landmark(s) buried: anchor cell is off-grid or blocked. A buried landmark cannot do its one "
+			     "job — the only wayfinding cue on a uniform floor — so move the landmark or the blocking volume."),
+			R.BuriedLandmarks));
+	}
+
 	// L2 floor wiring is derived from L0 alone (ADR 0010 D8), and it tracks CORRIDOR structure rather than floor
 	// area: the medial axis of one solid open rectangle is a point, so an arena with nothing in it wires up to
 	// nothing. That is a correct answer for a structureless arena, not a derivation failure — which is why the
@@ -205,8 +228,9 @@ FFPSRArenaValidationResult FFPSRArenaValidator::Validate(const FFPSRArenaLayout&
 FString FFPSRArenaValidator::Summarize(const FFPSRArenaValidationResult& Result)
 {
 	return FString::Printf(
-		TEXT("open=%d component=%d edges=%d narrowest=%d pockets=%d traces=%d junctions=%d slack=%.0f%% -> %s (%d error(s), %d warning(s))"),
+		TEXT("open=%d component=%d edges=%d narrowest=%d pockets=%d traces=%d junctions=%d slack=%.0f%% buried=%d -> %s (%d error(s), %d warning(s))"),
 		Result.OpenCells, Result.LargestComponent, Result.OpenEdges, Result.NarrowestCorridor,
 		Result.PocketCells, Result.TraceSegments, Result.TraceJunctions, Result.SlackFraction * 100.0f,
+		Result.BuriedLandmarks,
 		Result.Passed() ? TEXT("PASS") : TEXT("FAIL"), Result.Errors.Num(), Result.Warnings.Num());
 }

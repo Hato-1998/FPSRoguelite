@@ -136,7 +136,9 @@ struct FFPSRArenaAuthoredBox
 	float YawDegrees = 0.0f;
 };
 
-/** One authored landmark: a fixed navigation beacon (ADR 0010 D6). Reserves cells so props cannot bury it. */
+/** One authored landmark: a fixed navigation beacon (ADR 0010 D6). Reserves cells so props cannot bury it. Never
+ *  blocks movement itself (F6) — a landmark that also needs to physically block is an AFPSRArenaBlocker placed on
+ *  top of it (0011 E2 role split: one actor type owns the mask, this one owns wayfinding), not a property here. */
 USTRUCT()
 struct FFPSRArenaAuthoredLandmark
 {
@@ -145,8 +147,6 @@ struct FFPSRArenaAuthoredLandmark
 	FVector Location = FVector::ZeroVector;
 	/** Cells around the landmark that stay clear of procedural props. 0 = just its own cell. */
 	int32 ReserveRadiusCells = 2;
-	/** Whether the landmark itself blocks movement (a tall pillar does; a floor decal does not). */
-	bool bBlocking = true;
 };
 
 /**

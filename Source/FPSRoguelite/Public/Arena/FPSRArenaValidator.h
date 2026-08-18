@@ -23,6 +23,9 @@ struct FFPSRArenaValidationResult
 	int32 NarrowestCorridor = 0;
 	/** Open cells walled on 3+ orthogonal sides — the pocket an enemy gets pushed into and cannot steer out of. */
 	int32 PocketCells = 0;
+	/** Landmarks whose anchor cell is off-grid or blocked (ADR 0011 E4 check (5) — F7). A buried landmark is worse
+	 *  than a missing one: it looks placed but the player standing on the walkable floor can never see it. */
+	int32 BuriedLandmarks = 0;
 	/** Fraction of open cells that are NOT part of the minimum corridor width, i.e. what L1 has to work with. */
 	float SlackFraction = 0.0f;
 	/** L2 floor wiring counts, READ from Layout.Traces/TraceJunctions rather than recomputed here — the layout

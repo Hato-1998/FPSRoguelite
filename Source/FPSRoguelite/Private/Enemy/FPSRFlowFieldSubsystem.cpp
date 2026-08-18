@@ -110,8 +110,14 @@ void UFPSRFlowFieldSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 	}
 
 	// ADR 0010: an arena actor OWNS the obstacle mask. We PULL it here rather than letting the actor push during its
-	// BeginPlay, because actor BeginPlay runs BEFORE world subsystems' OnWorldBeginPlay — a push would be overwritten
-	// by whichever bake ran below a moment later.
+	// BeginPlay, because actor BeginPlay runs AFTER world subsystems' OnWorldBeginPlay (UWorld::BeginPlay dispatches
+	// SubsystemCollection.ForEachSubsystem(OnWorldBeginPlay) FIRST, then GameMode->StartPlay -> ... -> every actor's
+	// own BeginPlay — verified against UE 5.7's World.cpp/GameModeBase.cpp/GameStateBase.cpp/WorldSettings.cpp; an
+	// earlier version of this comment had the order backwards). A push from actor BeginPlay would therefore always
+	// arrive too LATE for this pull, not "be overwritten a moment later". That is exactly why the seed this pull
+	// depends on (AFPSRArenaActor::ActiveSeed) is finalized in PostInitializeComponents rather than BeginPlay — the
+	// only actor callback the engine guarantees to run before this OnWorldBeginPlay pull (see FPSRArenaActor.h and
+	// FPSRArenaActor::PostInitializeComponents for the full chain).
 	if (AFPSRArenaActor* Arena = AFPSRArenaActor::FindActiveInWorld(&InWorld))
 	{
 		if (Arena->BuildLocalLayout())

@@ -13,6 +13,10 @@
 //                         inheritance, not just a parallel class with the same shape).
 //   Empty-by-default   — AFPSRDestructible's own CDO carries no Rewards (a plain destructible = pure obstacle,
 //                         no reward, until an author opts in per placed instance).
+//   Unbroken-by-default — AFPSRDestructible's own CDO starts IsBroken() == false (F2): ServerReset/ClearBrokenState
+//                          only make sense against that resting state. ClearBrokenState itself is NOT tested here —
+//                          it is protected (no CDO-level access from outside the class) and its effect
+//                          (SetActorEnableCollision/SetActorHiddenInGame) needs a world to observe meaningfully.
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFPSRDestructibleTest, "FPSRoguelite.Destructible.Base",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
@@ -50,6 +54,13 @@ bool FFPSRDestructibleTest::RunTest(const FString& Parameters)
 	{
 		const AFPSRDestructible* DestructibleCDO = GetDefault<AFPSRDestructible>();
 		TestEqual(TEXT("AFPSRDestructible CDO Rewards is empty by default"), DestructibleCDO->GetRewards().Num(), 0);
+	}
+
+	// --- (5) A fresh AFPSRDestructible CDO starts unbroken (F2). AFPSRArenaActor::SetArenaActive's ServerReset
+	//         pass only means anything if "not broken" is this class's own resting state to begin with. ---
+	{
+		const AFPSRDestructible* DestructibleCDO = GetDefault<AFPSRDestructible>();
+		TestFalse(TEXT("AFPSRDestructible CDO IsBroken() == false"), DestructibleCDO->IsBroken());
 	}
 
 	return true;

@@ -100,6 +100,45 @@ void AFPSRArenaActor::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutL
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRArenaActor, ActiveSeed, Params);
 }
 
+void AFPSRArenaActor::PostInitializeComponents()
+{
+	Super::PostInitializeComponents();
+
+	if (!HasAuthority())
+	{
+		return;
+	}
+
+	// F1: ActiveSeed MUST be final before UFPSRFlowFieldSubsystem::OnWorldBeginPlay PULLs this arena's layout (see
+	// this class's header comment for the engine-verified call order). PostInitializeComponents is the only actor
+	// callback guaranteed to run before that pull — the engine calls it from ULevel::RouteActorInitialize during
+	// UWorld::InitializeActorsForPlay, which always completes before UWorld::BeginPlay() is even invoked. Doing
+	// this in BeginPlay (as before) left ActiveSeed at its 0 default for the pull, because actor BeginPlay is
+	// dispatched from INSIDE UWorld::BeginPlay(), AFTER world subsystems' OnWorldBeginPlay already ran — the
+	// reverse of what an earlier version of this code assumed.
+	ActiveSeed = InitialSeed;
+	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRArenaActor, ActiveSeed, this);
+
+	// Seed the replicated "which arena is live" pointer at level start. The stage director only ever sets it on a
+	// SWAP, so without this it stays null until the first transition — and everything that reads it as the cheap
+	// O(1) answer (the enemy spawn subsystem's arena-bounds gate) would silently not gate for the whole first
+	// stage, spawning the swarm into reserve arenas nobody is standing in.
+	//
+	// GameState can legitimately not exist yet this early in some bootstrap orders — BeginPlay (below) retries the
+	// same call once World::BeginPlay guarantees GameState is up; SetActiveArena no-ops once ActiveArena already
+	// equals this actor, so the retry is idempotent rather than a double-set.
+	if (bStartsActive)
+	{
+		if (UWorld* World = GetWorld())
+		{
+			if (AFPSRGameState* GS = World->GetGameState<AFPSRGameState>())
+			{
+				GS->SetActiveArena(this);
+			}
+		}
+	}
+}
+
 void AFPSRArenaActor::BeginPlay()
 {
 	Super::BeginPlay();
@@ -110,31 +149,31 @@ void AFPSRArenaActor::BeginPlay()
 	// the correct active/inactive state from the start rather than toggling it in after the fact.
 	SetArenaActive(bStartsActive);
 
-	if (HasAuthority())
+	// Fallback ONLY: PostInitializeComponents (above) already set ActiveSeed and attempted this same
+	// GS->SetActiveArena(this) call, but GetGameState<>() can legitimately be null that early in some bootstrap
+	// orders. Retry now that BeginPlay guarantees GameState exists — harmless if PostInitializeComponents already
+	// succeeded (SetActiveArena no-ops once ActiveArena already equals this actor).
+	if (HasAuthority() && bStartsActive)
 	{
-		ActiveSeed = InitialSeed;
-		MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRArenaActor, ActiveSeed, this);
-
-		// Seed the replicated "which arena is live" pointer at level start. The stage director only ever sets it on a
-		// SWAP, so without this it stays null until the first transition — and everything that reads it as the cheap
-		// O(1) answer (the enemy spawn subsystem's arena-bounds gate) would silently not gate for the whole first
-		// stage, spawning the swarm into reserve arenas nobody is standing in.
-		if (bStartsActive)
+		if (UWorld* World = GetWorld())
 		{
-			if (UWorld* World = GetWorld())
+			if (AFPSRGameState* GS = World->GetGameState<AFPSRGameState>())
 			{
-				if (AFPSRGameState* GS = World->GetGameState<AFPSRGameState>())
-				{
-					GS->SetActiveArena(this);
-				}
+				GS->SetActiveArena(this);
 			}
 		}
 	}
 
-	// Both sides build locally. On a client the seed may already have arrived (OnRep can fire before BeginPlay
-	// for an actor that exists at level load), in which case OnRep_ActiveSeed's build was skipped because the
-	// components were not ready yet — so building here unconditionally is the simple, correct move.
-	BuildLocalLayout();
+	// F1: the server's layout was already built by UFPSRFlowFieldSubsystem::OnWorldBeginPlay PULLING it
+	// (Arena->BuildLocalLayout(), reading the ActiveSeed PostInitializeComponents already finalized) — calling
+	// BuildLocalLayout() again here would silently regenerate the whole grid a second time for nothing. A client
+	// has no such pull (the flow field subsystem is server-only — HasServerAuthority() gates its whole
+	// OnWorldBeginPlay), so this IS its first build, UNLESS OnRep_ActiveSeed already ran first (OnRep can fire
+	// before BeginPlay for an actor that exists at level load). Either way, HasLayout() is the correct guard.
+	if (!HasLayout())
+	{
+		BuildLocalLayout();
+	}
 	RebuildRepresentation();
 }
 
@@ -188,7 +227,6 @@ bool AFPSRArenaActor::BuildLayoutForSeed(int32 Seed, FFPSRArenaLayout& OutLayout
 			FFPSRArenaAuthoredLandmark LandmarkEntry;
 			LandmarkEntry.Location = Landmark->GetActorLocation();
 			LandmarkEntry.ReserveRadiusCells = Landmark->GetReserveRadiusCells();
-			LandmarkEntry.bBlocking = Landmark->IsBlocking();
 			Authored.Landmarks.Add(LandmarkEntry);
 		}
 		for (TActorIterator<AFPSRArenaDestructible> It(const_cast<UWorld*>(World)); It; ++It)
@@ -509,6 +547,20 @@ void AFPSRArenaActor::SetArenaActive(bool bInActive)
 		{
 			AFPSRArenaDestructible* Destructible = *It;
 			if (!IsValid(Destructible) || !ContainsWorldLocation(Destructible->GetActorLocation())) { continue; }
+
+			// F2: on ACTIVATION only, and only the authority — reset any destructible this arena grid owns back to
+			// intact. Nothing else in the codebase ever clears bBroken, so without this a destructible broken on an
+			// earlier visit stayed broken (and unbreakable — 0 health) forever, and a revisited arena could never
+			// offer its terrain-changing reward again (ADR 0010 D7 "지형을 바꾼다" means each visit, not once ever).
+			// Deactivation does NOT reset — a dormant arena's destructibles should still read as however the
+			// player last left them if that arena becomes active again without an intervening reset pass. The
+			// explicit HasAuthority() here (on top of ServerReset()'s own guard) avoids the call entirely on
+			// clients, who reach this same loop via OnRep_StageTransition -> ApplyStageTransitionLocal.
+			if (bInActive && HasAuthority())
+			{
+				Destructible->ServerReset();
+			}
+
 			Destructible->SetActorHiddenInGame(!bInActive);
 			Destructible->SetActorEnableCollision(bInActive);
 		}

@@ -52,6 +52,12 @@ protected:
 	 *  visible: the frame is a wall, not a leaf). Not SetActorHiddenInGame/SetActorEnableCollision on the actor. */
 	virtual void ApplyBrokenState() override;
 
+	/** Reverse of ApplyBrokenState() above (F2): re-enable collision + unhide DoorMesh (propagated to its
+	 *  sub-meshes), back to its pre-broken QueryOnly/visible state. Does NOT call Super, same reason as
+	 *  ApplyBrokenState — the frame was never disabled, so Super::ClearBrokenState() would be reversing state this
+	 *  subclass never touched. */
+	virtual void ClearBrokenState() override;
+
 	/** Fires OnDoorBroken only — does NOT call Super (the base's OnDestructibleBroken), so BP_Door's existing event
 	 *  binding is the only thing that fires and nothing double-fires. */
 	virtual void FireBrokenPresentation() override;

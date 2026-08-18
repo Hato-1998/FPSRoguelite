@@ -217,8 +217,7 @@ bool FFPSRArenaGeneratorTest::RunTest(const FString& Parameters)
 		FFPSRArenaAuthoredInput Authored;
 		FFPSRArenaAuthoredLandmark LM;
 		LM.Location = FVector(Origin.X + 40.0 * Params.CellSize, Origin.Y + 40.0 * Params.CellSize, Origin.Z);
-		LM.ReserveRadiusCells = 3;
-		LM.bBlocking = false;   // a floor beacon: it must stay VISIBLE, not become an obstacle
+		LM.ReserveRadiusCells = 3;   // a landmark is a beacon, never a blocker (F6) — nothing to set for that here
 		Authored.Landmarks.Add(LM);
 
 		FFPSRArenaLayout L;

@@ -753,14 +753,11 @@ bool FFPSRArenaGenerator::Generate(int32 Seed, const FFPSRArenaGenParams& Params
 		if (bAny) { OutLayout.Clusters.Add(Rect); }
 	}
 
-	// --- landmarks: only the blocking ones occupy cells ------------------------------------------------------
-	for (const FFPSRArenaAuthoredLandmark& Landmark : Authored.Landmarks)
-	{
-		if (!Landmark.bBlocking) { continue; }
-		const int32 LCX = FMath::FloorToInt((Landmark.Location.X - ArenaOrigin.X) / Cell);
-		const int32 LCY = FMath::FloorToInt((Landmark.Location.Y - ArenaOrigin.Y) / Cell);
-		BlockCell(LCX, LCY);
-	}
+	// --- landmarks do NOT occupy cells (F6, 0011 E2 role split) -------------------------------------------------
+	// A landmark is a navigation beacon, not a blocker — see AFPSRArenaLandmark's class comment. They still keep
+	// PROCEDURAL PROPS off their reserve radius (PlaceMicroProps' Reserved bitmap, built from OutLayout.Landmarks —
+	// set above), just never touch S.BlockedField. An author who wants a landmark to also physically block places
+	// an AFPSRArenaBlocker on top of it (rasterised by the Authored.Blockers loop above) instead.
 
 	// --- destructibles: authored footprints blocked while intact (ADR 0010 D7) --------------------------------
 	// Same stage as landmarks (both are point-authored, non-cluster blocking) and BEFORE L1 on purpose: L1's

@@ -81,6 +81,17 @@ void AFPSRDoor::ApplyBrokenState()
 	}
 }
 
+void AFPSRDoor::ClearBrokenState()
+{
+	// Reverse of ApplyBrokenState above: QueryOnly is DoorMesh's ORIGINAL collision setting from the constructor,
+	// not QueryAndPhysics — restoring anything else would silently change what the leaf collides as post-reset.
+	if (DoorMesh)
+	{
+		DoorMesh->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+		DoorMesh->SetVisibility(true, /*bPropagateToChildren*/ true);
+	}
+}
+
 void AFPSRDoor::FireBrokenPresentation()
 {
 	OnDoorBroken();

@@ -55,6 +55,13 @@ protected:
  * placement cannot promise — and the reason the skeleton became authored at all. In a first-person arena with a
  * uniform floor texture this is the only thing that answers "which way am I facing", so burying one under props
  * is a real failure rather than a cosmetic one; hence the reserve radius.
+ *
+ * A landmark is a navigation BEACON, not a blocker (F6). It reserves cells so procedural props cannot bury it
+ * (ReserveRadiusCells, below), but it never occupies a cell in the flow-field mask, and its DisplayMesh carries no
+ * collision (see the .cpp ctor) — a player and the swarm both walk straight through one. If a landmark also needs
+ * to physically block, place an AFPSRArenaBlocker on top of it instead: that is the ONE actor type the generator
+ * rasterises into blocked cells (0011 E2's role split), so the mask and what the player actually collides with can
+ * never drift apart the way a landmark that tried to do both once did.
  */
 UCLASS()
 class FPSROGUELITE_API AFPSRArenaLandmark : public AActor
@@ -65,7 +72,6 @@ public:
 	AFPSRArenaLandmark();
 
 	int32 GetReserveRadiusCells() const { return ReserveRadiusCells; }
-	bool IsBlocking() const { return bBlocking; }
 
 	/** Identity + colour are what the player actually navigates by, so they live on the actor rather than being
 	 *  derived from anything procedural. */
@@ -75,10 +81,6 @@ protected:
 	/** 주변 몇 셀까지 절차 프롭을 금지할지. 0 = 자기 셀만. 파묻히면 랜드마크가 아니다. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "아레나|랜드마크", meta = (DisplayName = "프롭 금지 반경(셀)", ClampMin = "0"))
 	int32 ReserveRadiusCells = 2;
-
-	/** 이 랜드마크가 통행을 막는가(높은 기둥=막음 / 바닥 마크=안 막음). */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "아레나|랜드마크", meta = (DisplayName = "통행 차단"))
-	bool bBlocking = true;
 
 	/** 멀리서 식별하는 색. 셋은 서로 확실히 달라야 한다. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "아레나|랜드마크", meta = (DisplayName = "식별 색"))

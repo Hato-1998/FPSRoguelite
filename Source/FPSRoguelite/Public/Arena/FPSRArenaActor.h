@@ -22,10 +22,18 @@ class UStaticMesh;
  *
  * ## Who reads it
  *
- * UFPSRFlowFieldSubsystem PULLS the surface data at world begin rather than this actor pushing it. Actor
- * BeginPlay runs before world subsystems' OnWorldBeginPlay, so a push would be overwritten by the subsystem's
- * own bake a moment later. Pull also keeps the fail-fast in one place: if the layout is missing, the
- * subsystem builds NO field rather than quietly falling back to a world-trace bake (invariant 5).
+ * UFPSRFlowFieldSubsystem PULLS the surface data at world begin rather than this actor pushing it. The engine
+ * order is the OPPOSITE of what an earlier version of this comment claimed (verified against UE 5.7's
+ * World.cpp/GameModeBase.cpp/GameStateBase.cpp/WorldSettings.cpp): world subsystems' OnWorldBeginPlay runs FIRST
+ * (UWorld::BeginPlay -> SubsystemCollection.ForEachSubsystem), and only THEN does GameMode->StartPlay ->
+ * GameState->HandleBeginPlay -> WorldSettings->NotifyBeginPlay dispatch every actor's OWN BeginPlay. A push from
+ * this actor's BeginPlay would therefore always be too LATE for the subsystem's initial pull, not "overwritten a
+ * moment later" — the subsystem would have already read whatever this actor had by OnWorldBeginPlay time, or
+ * nothing. That is exactly why ActiveSeed is finalized in PostInitializeComponents (see below), which the engine
+ * runs even earlier still (ULevel::RouteActorInitialize, during UWorld::InitializeActorsForPlay — strictly before
+ * UWorld::BeginPlay() is even called): it is the only actor callback guaranteed to complete before this PULL runs.
+ * Pull also keeps the fail-fast in one place: if the layout is missing, the subsystem builds NO field rather than
+ * quietly falling back to a world-trace bake (invariant 5).
  *
  * The whitebox meshes here are representation only and exist to answer one question — "is the circulation
  * fun?" (invariant 12). Art comes after that verdict, not before.
@@ -54,6 +62,7 @@ public:
 	AFPSRArenaActor();
 
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
+	virtual void PostInitializeComponents() override;
 	virtual void BeginPlay() override;
 	virtual void Tick(float DeltaSeconds) override;
 

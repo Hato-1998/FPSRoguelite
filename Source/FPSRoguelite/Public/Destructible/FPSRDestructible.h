@@ -41,6 +41,14 @@ public:
 	 *  confirm a plain AFPSRDestructible authors no reward by default (pure obstacle; opt-in per placed instance). */
 	const TArray<TObjectPtr<UFPSRDestructibleReward>>& GetRewards() const { return Rewards; }
 
+	/** Server: reset a broken destructible back to its pre-broken resting state — bBroken=false, DamageStage=0,
+	 *  health restored to full, then ClearBrokenState() reverses the collision/visibility change (F2, ADR 0010 D7).
+	 *  No-op if not currently broken. Called by AFPSRArenaActor::SetArenaActive(true) so a revisited arena's
+	 *  destructibles come back intact — without this, bBroken never clears anywhere in the codebase, so a broken
+	 *  suppressor stayed broken (and unbreakable — 0 health) forever, permanently blocking every later transition
+	 *  that arena would otherwise trigger. */
+	void ServerReset();
+
 	/** Pure, worldless: how many DamageStageThresholds (descending %) HealthPct is at-or-below. Extracted from the
 	 *  original inline AFPSRDoor::HandleHealthChanged loop so it is unit-testable without a world (FPSRoguelite.
 	 *  Destructible.Base). Order-independent for the COUNT; the 0-based index semantics assume descending order
@@ -92,6 +100,14 @@ protected:
 	 *  (HandleBroken) and the client OnRep (OnRep_Broken) — the same call from both sides is what keeps a late
 	 *  joiner and an already-connected client in the same visual state. */
 	virtual void ApplyBrokenState();
+
+	/** Reverse of ApplyBrokenState() (F2). Base = re-enable collision + unhide the WHOLE actor
+	 *  (SetActorEnableCollision(true) + SetActorHiddenInGame(false)), mirroring ApplyBrokenState's own base. A
+	 *  subclass whose ApplyBrokenState override only touches PART of itself (AFPSRDoor hides just the leaf) mirrors
+	 *  that here too and does NOT call Super — Super would touch state this subclass never disabled in the first
+	 *  place (the frame). Called by ServerReset (above) and by OnRep_Broken's false edge — a broken->intact
+	 *  replication (e.g. ServerReset on a remote client). */
+	virtual void ClearBrokenState();
 
 	/** Fire the "broken" BP presentation. Base = OnDestructibleBroken(). AFPSRDoor overrides to fire OnDoorBroken()
 	 *  INSTEAD (it does not call Super) so BP_Door's existing event binding is the only thing that fires and
