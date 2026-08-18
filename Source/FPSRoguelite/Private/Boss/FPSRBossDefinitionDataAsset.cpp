@@ -9,6 +9,7 @@
 
 #define LOCTEXT_NAMESPACE "FPSRBossDefinition"
 
+#if WITH_EDITOR
 FText UFPSRBossDefinitionDataAsset::GetDescription() const
 {
 	const FText ClassName = BossClass
@@ -22,7 +23,6 @@ FText UFPSRBossDefinitionDataAsset::GetDescription() const
 		ClassName, FText::AsNumber(FMath::RoundToInt(MaxHealth)), SpawnRule);
 }
 
-#if WITH_EDITOR
 EDataValidationResult UFPSRBossDefinitionDataAsset::IsDataValid(FDataValidationContext& Context) const
 {
 	EDataValidationResult Result = Super::IsDataValid(Context);
