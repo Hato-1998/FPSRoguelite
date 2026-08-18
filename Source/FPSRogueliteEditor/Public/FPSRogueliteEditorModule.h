@@ -29,6 +29,9 @@ public:
 	static FName GetWeaponAssemblerFPTabName();
 
 private:
+	/** OnPreSaveWorld 구독 핸들 (ADR 0012 검사 ①). */
+	FDelegateHandle PreSaveWorldHandle;
+
 	/** Registers the Tools > FPSR menu entries. Deferred via UToolMenus::RegisterStartupCallback (menus aren't
 	 *  ready to register at module-load time). */
 	void RegisterMenus();
@@ -36,6 +39,17 @@ private:
 	/** Menu command handler: runs the same anchors+reachable validation as the commandlet, in-editor, then opens
 	 *  the AssetCheck message log so results are visible without digging through Output Log. */
 	static void OnValidateAnchoredDataMenuEntry();
+
+	/**
+	 * ADR 0012 검사 ① — 레벨 저장 직전에 아레나 베이크가 레벨과 일치하는지 대조해 **경고만** 한다.
+	 *
+	 * 굽지 않는 것이 요점이다. 저장할 때마다 자동으로 구우면 (가)안(베이크를 서브레벨에 인라인 저장)과
+	 * 사실상 같아지는데, 그 대가(저장마다 300KB 쓰기 + 저장 지연)를 피하려고 (나)안을 골랐다. 여기서는
+	 * 해시만 비교한다 — 싸고, 사람이 잊었다는 사실을 가장 이른 시점에 알려 준다.
+	 *
+	 * 이건 다섯 겹 중 가장 무른 층이다(클릭 한 번으로 넘어간다). 실제 차단은 PreSubmit 검증기가 한다.
+	 */
+	static void OnPreSaveWorld(class UWorld* World, class FObjectPreSaveContext Context);
 
 	/** Menu command handler (P1): opens (or focuses) the FPSR Data Editor nomad tab. */
 	static void OnOpenDataEditorMenuEntry();

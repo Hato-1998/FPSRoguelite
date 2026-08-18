@@ -34,7 +34,12 @@ int32 UFPSRValidateAnchoredDataCommandlet::Main(const FString& Params)
 		return 1;
 	}
 
-	const TArray<FAssetData> ToValidate = FFPSRAnchoredValidationService::GatherAssetsToValidate();
+	TArray<FAssetData> ToValidate = FFPSRAnchoredValidationService::GatherAssetsToValidate();
+
+	// ADR 0012 검사 ④ — 레벨도 같이 태운다. 아레나 베이크가 스테일이면 PreSubmit 뿐 아니라 CI 에서도
+	// 막혀야 한다: PreSubmit 은 로컬 훅이라 우회 경로가 있지만 CI 는 없다. 아레나 없는 레벨은 검증기가
+	// NotValidated 로 흘려보내므로 여기서 골라낼 필요가 없다.
+	ToValidate.Append(FFPSRAnchoredValidationService::FindLevelAssets());
 
 	UEditorValidatorSubsystem* EditorValidationSubsystem = GEditor->GetEditorSubsystem<UEditorValidatorSubsystem>();
 	check(EditorValidationSubsystem);

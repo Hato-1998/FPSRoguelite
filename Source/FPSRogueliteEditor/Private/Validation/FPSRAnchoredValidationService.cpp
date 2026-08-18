@@ -57,6 +57,18 @@ TArray<FAssetData> FFPSRAnchoredValidationService::FindAnchorAssets()
 	return Anchors;
 }
 
+TArray<FAssetData> FFPSRAnchoredValidationService::FindLevelAssets()
+{
+	IAssetRegistry& AssetRegistry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
+
+	FARFilter Filter = MakeClassFilter({ UWorld::StaticClass() });
+
+	TArray<FAssetData> Levels;
+	AssetRegistry.GetAssets(Filter, Levels);
+	Levels.RemoveAll([](const FAssetData& Asset) { return IsExcludedPath(Asset.PackagePath); });
+	return Levels;
+}
+
 TArray<FAssetData> FFPSRAnchoredValidationService::FindLeafCandidates()
 {
 	IAssetRegistry& AssetRegistry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();

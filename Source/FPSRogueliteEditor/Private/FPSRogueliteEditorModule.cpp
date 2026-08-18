@@ -9,6 +9,13 @@
 #include "Assembler/SFPSRWeaponAssemblerFPTab.h"
 #include "Blockout/SFPSRBlockoutTab.h"
 #include "Arena/FPSRArenaAuthoringTool.h"
+#include "Arena/FPSRArenaActor.h"
+#include "Arena/FPSRArenaBakeHash.h"
+#include "Core/FPSRLogChannels.h"
+#include "Engine/World.h"
+#include "UObject/ObjectSaveContext.h"
+#include "Framework/Notifications/NotificationManager.h"
+#include "Widgets/Notifications/SNotificationList.h"
 #include "Localization/FPSRStringTableReload.h"
 #include "CardImport/FPSRCardCsvExporter.h"
 #include "CardImport/FPSRCardCsvImporter.h"
@@ -76,16 +83,78 @@ void FFPSRogueliteEditorModule::StartupModule()
 	FGlobalTabmanager::Get()->RegisterNomadTabSpawner(FPSRBlockoutTabName, FOnSpawnTab::CreateStatic(&FFPSRogueliteEditorModule::SpawnBlockoutTab))
 		.SetDisplayName(LOCTEXT("BlockoutTabTitle", "블록아웃 툴"))
 		.SetGroup(WorkspaceMenu::GetMenuStructure().GetToolsCategory());
+
+	// ADR 0012 검사 ① — 레벨 저장 직전 베이크 스테일 경고. 다섯 겹 중 가장 이른 층이다.
+	PreSaveWorldHandle = FEditorDelegates::PreSaveWorldWithContext.AddStatic(&FFPSRogueliteEditorModule::OnPreSaveWorld);
 }
 
 void FFPSRogueliteEditorModule::ShutdownModule()
 {
+	FEditorDelegates::PreSaveWorldWithContext.Remove(PreSaveWorldHandle);
 	UToolMenus::UnRegisterStartupCallback(this);
 	UToolMenus::UnregisterOwner(this);
 	FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(FPSRDataEditorTabName);
 	FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(FPSRWeaponAssemblerTabName);
 	FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(FPSRWeaponAssemblerFPTabName);
 	FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(FPSRBlockoutTabName);
+}
+
+void FFPSRogueliteEditorModule::OnPreSaveWorld(UWorld* World, FObjectPreSaveContext Context)
+{
+	// 쿡·diff 같은 기계 저장에는 띄우지 않는다. 사람이 Ctrl+S 를 눌렀을 때만 의미가 있는 알림이고,
+	// 쿡 로그에 토스트 요청이 섞이면 노이즈만 된다.
+	if (!World || Context.IsProceduralSave())
+	{
+		return;
+	}
+
+	TArray<AFPSRArenaActor*> Arenas;
+	AFPSRArenaActor::FindAllInWorld(World, Arenas);
+	if (Arenas.Num() == 0)
+	{
+		return; // 아레나 없는 레벨(로비·메뉴)에는 할 말이 없다
+	}
+
+	TArray<FString> Problems;
+	for (const AFPSRArenaActor* Arena : Arenas)
+	{
+		if (!IsValid(Arena))
+		{
+			continue;
+		}
+		const FFPSRArenaBakeCheck Check = FFPSRArenaBakeHash::CheckFreshness(*Arena);
+		// NoAsset 은 여기서 조용히 넘긴다 — 아레나를 막 놓고 아직 굽지 않은 상태에서 저장할 때마다
+		// 토스트가 뜨면 저작을 방해하고, 그 상태는 검증 툴과 PreSubmit 이 이미 잡는다.
+		if (Check.Freshness == EFPSRArenaBakeFreshness::Stale
+			|| Check.Freshness == EFPSRArenaBakeFreshness::NotBaked)
+		{
+			Problems.Add(Check.Message);
+		}
+	}
+
+	if (Problems.Num() == 0)
+	{
+		return;
+	}
+
+	for (const FString& Problem : Problems)
+	{
+		UE_LOG(LogFPSR, Warning, TEXT("[Arena] %s"), *Problem);
+	}
+
+	// 모달이 아니라 토스트다. 저장은 아무 일 없이 끝나야 한다 — 저장을 막으면 사람이 알림을 끄는 방법을
+	// 찾게 되고, 그러면 다섯 겹 중 한 겹이 통째로 사라진다.
+	FNotificationInfo Info(FText::Format(
+		LOCTEXT("ArenaBakeStaleOnSave", "아레나 베이크가 레벨과 다릅니다 ({0}건)\nTools > FPSR > '아레나 베이크' 를 다시 실행하세요. 자세한 내용은 출력 로그의 [Arena] 항목."),
+		FText::AsNumber(Problems.Num())));
+	Info.ExpireDuration = 12.0f;
+	Info.bFireAndForget = true;
+	Info.bUseSuccessFailIcons = true;
+	const TSharedPtr<SNotificationItem> Notification = FSlateNotificationManager::Get().AddNotification(Info);
+	if (Notification.IsValid())
+	{
+		Notification->SetCompletionState(SNotificationItem::CS_Fail);
+	}
 }
 
 void FFPSRogueliteEditorModule::RegisterMenus()

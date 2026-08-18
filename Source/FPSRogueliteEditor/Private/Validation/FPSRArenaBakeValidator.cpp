@@ -21,19 +21,24 @@ bool UFPSRArenaBakeValidator::CanValidateAsset_Implementation(const FAssetData& 
 EDataValidationResult UFPSRArenaBakeValidator::ValidateLoadedAsset_Implementation(const FAssetData& InAssetData,
 	UObject* InAsset, FDataValidationContext& Context)
 {
+	// 아래 두 이른 반환이 Valid 인 이유(NotValidated 가 아니라):
+	// `확인됨` UEditorValidatorBase::ValidateLoadedAsset 이 CanValidateAsset 을 통과한 에셋에 대해
+	// NotValidated 를 돌려주면 엔진이 ensure 로 잡는다 — "Validator did not return a validation result"
+	// (EditorValidatorBase.cpp, UE 5.7). "할 말이 없다"를 표현하는 자리는 반환값이 아니라 CanValidateAsset
+	// 이고, 아레나 유무는 레벨을 열어 봐야 알 수 있어 거기서는 판단할 수 없다. 그래서 아레나 없는 레벨은
+	// "검사했고 문제 없음"으로 답한다. (처음에 NotValidated 를 돌려줬다가 커맨드렛 실행에서 L_Lobby 로
+	// ensure 가 터졌다.)
 	const UWorld* World = Cast<UWorld>(InAsset);
 	if (!World)
 	{
-		return EDataValidationResult::NotValidated;
+		return EDataValidationResult::Valid;
 	}
 
 	TArray<AFPSRArenaActor*> Arenas;
 	AFPSRArenaActor::FindAllInWorld(World, Arenas);
 	if (Arenas.Num() == 0)
 	{
-		// 아레나가 없는 레벨(로비·메뉴·구 맵)에 대해 할 말이 없다. NotValidated 로 두어야 검증 리포트가
-		// "통과"로 채워지지 않는다 — 검사하지 않은 것과 검사해서 괜찮은 것은 다르다.
-		return EDataValidationResult::NotValidated;
+		return EDataValidationResult::Valid; // 로비·메뉴·구 맵 — 이 검사가 다룰 대상이 아니다
 	}
 
 	EDataValidationResult Result = EDataValidationResult::Valid;
