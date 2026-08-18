@@ -297,6 +297,14 @@ struct FFPSRArenaLayout
 {
 	GENERATED_BODY()
 
+	/** True when this layout was assembled from a BAKED mask (ADR 0012) rather than produced by the generator.
+	 *  The validator needs to know because several of its checks are questions about generator OUTPUT — "did the
+	 *  L2 derivation produce wiring for these clusters?" — and a baked arena has neither clusters nor derived
+	 *  wiring: its corridors are authored geometry and its floor traces are meshes someone placed. Running those
+	 *  checks anyway makes them fire on every healthy baked arena, and a warning that is always on is a warning
+	 *  nobody reads. */
+	bool bFromBake = false;
+
 	/** Fed straight into UFPSRFlowFieldComputer::BuildFromSurfaceData — no world trace anywhere in between. */
 	FFPSRFlowFieldSurfaceData Surface;
 

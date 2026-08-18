@@ -97,6 +97,21 @@ public:
 	 *  플로우필드가 마스크를 얻는 유일한 경로다. 실패 시 OutWorld 는 건드리지 않는다. */
 	bool GetBakedWorldSurface(FFPSRFlowFieldSurfaceData& OutWorld) const;
 
+	/**
+	 * 베이크된 마스크를 이 액터의 `Layout` 으로 채택한다 (ADR 0012). `BuildLocalLayout()` 의 베이크 판.
+	 *
+	 * 생성기 출력 대신 베이크를 담지만 **`Layout` 이라는 같은 자리에 넣는 것이 핵심**이다. 진입점 스냅
+	 * (`GetPlayerEntryTransforms`)·디버그 그리드·검증기가 전부 `Layout` 을 읽으므로, 베이크를 옆에 따로
+	 * 들면 그 셋이 조용히 "레이아웃 없음" 경로를 타면서 스냅도 검사도 사라진다.
+	 *
+	 * 채택 후 검증기를 돌려 로그에 남긴다 — 런타임 검사는 경보이지 게이트가 아니다(0011 E4).
+	 */
+	bool AdoptBakedLayout();
+
+	/** 베이크된 마스크를 검증기 입력 형태로 조립한다. 클러스터·프롭·배선은 비운다(베이크엔 그런 개념이
+	 *  없고, `bFromBake` 가 검증기에 그 사실을 알린다). 랜드마크는 여전히 레벨 액터에서 모은다(0011 E2). */
+	bool BuildValidationLayoutFromBake(FFPSRArenaLayout& Out) const;
+
 	const FFPSRArenaLayout& GetLayout() const { return Layout; }
 	bool HasLayout() const { return Layout.IsValid(); }
 

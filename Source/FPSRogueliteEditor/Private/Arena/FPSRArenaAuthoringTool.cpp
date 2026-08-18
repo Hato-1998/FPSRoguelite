@@ -331,19 +331,32 @@ void FFPSRArenaAuthoringTool::ValidateArenaInLevel()
 			continue;
 		}
 
+		// ADR 0012: 베이크가 있으면 **베이크를 검사한다.** 이게 핵심이다 — 생성기 레이아웃을 검사하면
+		// 실제로 런타임이 쓰는 마스크와 다른 것을 보게 되고, 실측으로 그 사고가 났다(2026-08-18: 베이크는
+		// 25,600셀 중 6,931셀이 바닥 없음이었는데 검증기는 "전부 열림, PASS"를 찍었다 — 블로커 0개인 빈
+		// 생성기 레이아웃을 보고 있었기 때문). 통과 신호가 틀리는 것은 검사가 없는 것보다 나쁘다.
 		FFPSRArenaLayout Layout;
-		if (!Arena->BuildLayoutForSeed(Arena->GetInitialSeed(), Layout))
+		const bool bUsedBake = Arena->BuildValidationLayoutFromBake(Layout);
+		if (!bUsedBake && !Arena->BuildLayoutForSeed(Arena->GetInitialSeed(), Layout))
 		{
-			Body += FString::Printf(TEXT("[%s] 레이아웃을 만들지 못했습니다. 출력 로그의 [Arena] 항목을 확인하세요.\n\n"), *Arena->GetName());
+			Body += FString::Printf(TEXT("[%s] 검사할 것이 없습니다 — 베이크도 없고 절차 레이아웃도 만들지 못했습니다. 출력 로그의 [Arena] 항목을 확인하세요.\n\n"), *Arena->GetName());
 			continue;
 		}
 
 		const FFPSRArenaValidationResult Result = FFPSRArenaValidator::Validate(Layout, Params);
 
 		// The arena's name goes IN the summary line itself, not only as a header above it — so a single line
-		// copy-pasted out of a multi-arena report still says which arena it is about.
-		Body += FString::Printf(TEXT("[%s] (시드 %d) %s\n"),
-			*Arena->GetName(), Arena->GetInitialSeed(), *FFPSRArenaValidator::Summarize(Result));
+		// copy-pasted out of a multi-arena report still says which arena it is about. WHAT was checked goes in
+		// too: a PASS means something completely different depending on whether it read the shipped mask or a
+		// procedural layout nothing will ever use.
+		Body += FString::Printf(TEXT("[%s] %s %s\n"),
+			*Arena->GetName(),
+			bUsedBake ? TEXT("(베이크)") : *FString::Printf(TEXT("(절차 · 시드 %d)"), Arena->GetInitialSeed()),
+			*FFPSRArenaValidator::Summarize(Result));
+		if (!bUsedBake)
+		{
+			Body += TEXT("  ⚠ 베이크 데이터가 없어 절차 레이아웃을 검사했습니다 — 런타임이 실제로 쓰는 마스크가 아닙니다. 먼저 '아레나 베이크' 를 돌리세요.\n");
+		}
 		if (Result.Errors.Num() > 0)
 		{
 			Body += TEXT("[오류]\n") + FString::Join(Result.Errors, TEXT("\n")) + TEXT("\n");
@@ -472,6 +485,14 @@ void FFPSRArenaAuthoringTool::BakeArenasInLevel()
 			Asset->Surface.GridDimX, Asset->Surface.GridDimY, Asset->Surface.CellSize,
 			OpenCells, NumCells,
 			Digest.ActorCount, Digest.ComponentCount, *Digest.Hash.Left(12));
+
+		// 같은 내용을 로그에도 남긴다. 다이얼로그는 닫는 순간 사라지므로, 나중에 "그때 몇 개가 잡혔더라"를
+		// 물으면 답할 방법이 없다 — 베이크가 옳았는지는 이 숫자들로만 판정할 수 있다.
+		UE_LOG(LogFPSR, Log,
+			TEXT("[Arena] BAKE %s -> %s: grid %dx%d cell=%.0f, open %d/%d cells, sources %d actor(s) / %d component(s), hash %s"),
+			*Arena->GetName(), *Asset->GetName(),
+			Asset->Surface.GridDimX, Asset->Surface.GridDimY, Asset->Surface.CellSize,
+			OpenCells, NumCells, Digest.ActorCount, Digest.ComponentCount, *Digest.Hash);
 
 		// 액터가 거의 안 잡혔다는 것은 대개 콜리전 설정 사고다(불변식 2: 콜리전이 곧 마스크). 에셋
 		// 검증에서도 잡지만, 방금 구운 사람 눈앞에 띄우는 편이 훨씬 빠르다.

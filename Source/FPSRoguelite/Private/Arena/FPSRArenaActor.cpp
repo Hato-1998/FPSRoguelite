@@ -207,11 +207,19 @@ void AFPSRArenaActor::BeginPlay()
 	// has no such pull (the flow field subsystem is server-only — HasServerAuthority() gates its whole
 	// OnWorldBeginPlay), so this IS its first build, UNLESS OnRep_ActiveSeed already ran first (OnRep can fire
 	// before BeginPlay for an actor that exists at level load). Either way, HasLayout() is the correct guard.
-	if (!HasLayout())
+	// ADR 0012: 베이크가 있으면 그것을 채택하고, 없을 때만 구 절차 생성으로 내려간다.
+	if (!HasLayout() && !AdoptBakedLayout())
 	{
 		BuildLocalLayout();
 	}
-	RebuildRepresentation();
+
+	// 불변식 3(에디터에서 보이는 것이 인게임에 나오는 것이다): 베이크된 아레나의 지오메트리는 레벨에 저작돼
+	// 있으므로 런타임이 또 만들면 화면에 아레나가 둘이 된다 — 이 ADR 을 낳은 바로 그 증상이다. 절차 경로만
+	// 화이트박스를 짓고, 그 경로는 생성기가 에디터 모듈로 이사하면서 사라진다.
+	if (!Layout.bFromBake)
+	{
+		RebuildRepresentation();
+	}
 }
 
 bool AFPSRArenaActor::GetGenParams(FFPSRArenaGenParams& OutParams, FVector& OutOrigin) const
@@ -352,7 +360,16 @@ bool AFPSRArenaActor::ServerRegenerate(int32 NewSeed)
 
 void AFPSRArenaActor::OnRep_ActiveSeed()
 {
-	// Client side: same seed, same generator, same arena. Nothing about the layout crosses the wire.
+	// ADR 0012: a baked arena's geometry is in the .umap, so client and server load the SAME file and there is
+	// nothing to reproduce from the seed — the whole class of "client regenerated different geometry from the
+	// server's mask, so enemies walk through walls" (ADR 0010's ⚠️ on the data-ownership table) cannot happen.
+	// Adopt the bake and stop; do not build whitebox geometry over the authored level.
+	if (AdoptBakedLayout())
+	{
+		return;
+	}
+
+	// Legacy procedural path: same seed, same generator, same arena. Nothing about the layout crosses the wire.
 	BuildLocalLayout();
 	RebuildRepresentation();
 }
@@ -619,6 +636,84 @@ bool AFPSRArenaActor::GetBakedWorldSurface(FFPSRFlowFieldSurfaceData& OutWorld) 
 		return false;
 	}
 	return BakeData->BuildWorldSurface(GetActorTransform(), OutWorld);
+}
+
+bool AFPSRArenaActor::BuildValidationLayoutFromBake(FFPSRArenaLayout& Out) const
+{
+	Out = FFPSRArenaLayout();
+	if (!GetBakedWorldSurface(Out.Surface))
+	{
+		return false;
+	}
+
+	Out.bFromBake = true;
+	Out.GridDims = FIntPoint(Out.Surface.GridDimX, Out.Surface.GridDimY);
+	Out.CellSize = Out.Surface.CellSize;
+	Out.GridOrigin = Out.Surface.GridOrigin;
+
+	// 랜드마크는 베이크에 들어가지 않는다 — 콜리전이 없으니(FPSRArenaMarkers.h) 장애물 프로브가 통과한다.
+	// 그런데 매몰 검사(0011 E4 ⑤)는 여전히 필요하므로 레벨 액터에서 직접 모은다. 소속 판정은 다른 마커와
+	// 같은 공간 기준(ContainsWorldLocation)이라 "어느 아레나 것인가"가 어긋날 수 없다.
+	if (const UWorld* World = GetWorld())
+	{
+		for (TActorIterator<AFPSRArenaLandmark> It(const_cast<UWorld*>(World)); It; ++It)
+		{
+			const AFPSRArenaLandmark* Landmark = *It;
+			if (!IsValid(Landmark) || !ContainsWorldLocation(Landmark->GetActorLocation()))
+			{
+				continue;
+			}
+			FFPSRArenaAuthoredLandmark Entry;
+			Entry.Location = Landmark->GetActorLocation();
+			Entry.ReserveRadiusCells = Landmark->GetReserveRadiusCells();
+			Out.Landmarks.Add(Entry);
+		}
+	}
+
+	// Clusters / Props / Traces / TraceJunctions 는 비운 채로 둔다. 전부 생성기 산출물이고 베이크엔 대응물이
+	// 없다 — 억지로 채우면 검증기가 있지도 않은 절차 출력을 검사하게 된다.
+	return true;
+}
+
+bool AFPSRArenaActor::AdoptBakedLayout()
+{
+	FFPSRArenaLayout BakeLayout;
+	if (!BuildValidationLayoutFromBake(BakeLayout))
+	{
+		return false;
+	}
+
+	FFPSRArenaGenParams Params;
+	FVector UnusedOrigin;
+	if (!GetGenParams(Params, UnusedOrigin))
+	{
+		UE_LOG(LogFPSR, Error,
+			TEXT("[Arena] %s 는 베이크가 있지만 아레나 파라미터가 없어 검증할 수 없다 — '아레나 파라미터' 를 설정할 것."),
+			*GetName());
+		return false;
+	}
+
+	Layout = MoveTemp(BakeLayout);
+
+	UE_LOG(LogFPSR, Log, TEXT("[Arena] %s adopted BAKED layout: grid=%dx%d cell=%.0f origin=%s landmarks=%d"),
+		*GetName(), Layout.GridDims.X, Layout.GridDims.Y, Layout.CellSize,
+		*Layout.GridOrigin.ToString(), Layout.Landmarks.Num());
+
+	// 검사는 경보이지 게이트가 아니다(0011 E4) — 여기서 막아도 고칠 사람이 그 자리에 없다. 판정 시점은
+	// 에디터이고, 이 줄은 "에디터에서 통과시킨 것이 런타임에도 그대로인가"를 보는 회귀망이다.
+	const FFPSRArenaValidationResult Validation = FFPSRArenaValidator::Validate(Layout, Params);
+	if (!Validation.Passed())
+	{
+		UE_LOG(LogFPSR, Error, TEXT("[Arena] %s BAKE validation %s"), *GetName(), *FFPSRArenaValidator::Summarize(Validation));
+		for (const FString& Err : Validation.Errors) { UE_LOG(LogFPSR, Error, TEXT("[Arena]   %s"), *Err); }
+	}
+	else
+	{
+		UE_LOG(LogFPSR, Log, TEXT("[Arena] %s BAKE validation %s"), *GetName(), *FFPSRArenaValidator::Summarize(Validation));
+	}
+	for (const FString& Warn : Validation.Warnings) { UE_LOG(LogFPSR, Warning, TEXT("[Arena]   %s"), *Warn); }
+
+	return true;
 }
 
 bool AFPSRArenaActor::ContainsWorldLocation(const FVector& World) const

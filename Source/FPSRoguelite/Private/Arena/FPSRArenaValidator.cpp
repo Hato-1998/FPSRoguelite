@@ -233,7 +233,10 @@ FFPSRArenaValidationResult FFPSRArenaValidator::Validate(const FFPSRArenaLayout&
 	// area: the medial axis of one solid open rectangle is a point, so an arena with nothing in it wires up to
 	// nothing. That is a correct answer for a structureless arena, not a derivation failure — which is why the
 	// verdict here depends on whether anything was actually placed to route around.
-	if (R.TraceSegments == 0)
+	// ADR 0012: a BAKED arena has no derived wiring to check. Its corridors are authored geometry and its floor
+	// traces are meshes a person placed, so "the L2 derivation produced nothing" is not a finding about the arena —
+	// there was no derivation. Asking anyway would fire on every healthy baked arena.
+	if (R.TraceSegments == 0 && !Layout.bFromBake)
 	{
 		if (Layout.Clusters.Num() > 0)
 		{
@@ -249,11 +252,26 @@ FFPSRArenaValidationResult FFPSRArenaValidator::Validate(const FFPSRArenaLayout&
 		}
 	}
 
+	// The baked equivalent of the "empty box" check, and the one that actually matters (ADR 0012 invariant 2:
+	// collision IS the mask). If the bake found nothing to block with, every cell is open — which looks like a
+	// clean PASS while meaning the exact opposite: the mask the swarm will use has no walls in it. The usual cause
+	// is geometry that is not ECC_WorldStatic with query collision, so the obstacle probe passes straight through
+	// it. This is an ERROR rather than a warning because a wall-less arena is not a playable arena, and the
+	// failure is silent everywhere else — the level looks completely normal on screen.
+	if (Layout.bFromBake && R.OpenCells == C.W * C.H)
+	{
+		R.Errors.Add(FString::Printf(
+			TEXT("The bake found NO obstacles — all %d cells are open. The swarm would walk through every wall in "
+			     "this level. Check that the blocking geometry is ECC_WorldStatic with Query collision enabled: "
+			     "anything else is invisible to the obstacle probe (ADR 0012 invariant 2)."),
+			R.OpenCells));
+	}
+
 	// Warning, not an error: a single-loop arena is still a valid arena. But ADR 0010 D1 makes the crossing
 	// points where circulation branches the visible heart of the topology, and a junction count of zero means the
 	// wiring never forks — i.e. there is nowhere the run actually offers a choice, which is worth flagging even
 	// though it does not by itself break anything.
-	if (R.TraceJunctions == 0)
+	if (R.TraceJunctions == 0 && !Layout.bFromBake)
 	{
 		R.Warnings.Add(TEXT("No wiring junctions: the floor traces never fork, so the arena is probably one single loop. "
 			"ADR 0010 D1 puts the crossing — where circulation branches and the player has to choose each lap — at the "
