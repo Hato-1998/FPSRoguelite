@@ -14,19 +14,6 @@ FFPSRArenaPropSet UFPSRArenaPropSetDataAsset::ToPropSet() const
 	Out.Entries = Entries;
 	Out.Weight = FMath::Max(1, Weight);
 	Out.bAllowRotation = bAllowRotation;
-
-	// Derived, never authored: the fit test trusts this box to contain every entry, and a hand-typed one that
-	// was a cell too small would let a group overhang into a corridor the test had already called clear.
-	FIntPoint Min = FIntPoint::ZeroValue;
-	FIntPoint Max = FIntPoint::ZeroValue;
-	for (const FFPSRArenaPropSetEntry& E : Entries)
-	{
-		Min.X = FMath::Min(Min.X, E.CellOffset.X);
-		Min.Y = FMath::Min(Min.Y, E.CellOffset.Y);
-		Max.X = FMath::Max(Max.X, E.CellOffset.X);
-		Max.Y = FMath::Max(Max.Y, E.CellOffset.Y);
-	}
-	Out.FootprintCells = FIntPoint(Max.X - Min.X + 1, Max.Y - Min.Y + 1);
 	return Out;
 }
 

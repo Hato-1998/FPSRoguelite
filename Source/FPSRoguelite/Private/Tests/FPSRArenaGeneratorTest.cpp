@@ -46,7 +46,6 @@ namespace
 		Add(-1, 0, EFPSRArenaPropTier::Passable, 1);
 		Add(1, 0, EFPSRArenaPropTier::Passable, 1);
 		Add(0, 1, EFPSRArenaPropTier::Passable, 2);
-		Set.FootprintCells = FIntPoint(3, 2);
 		Set.Weight = 1;
 		Set.bAllowRotation = true;
 		return Set;

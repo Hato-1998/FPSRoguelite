@@ -120,7 +120,8 @@ public:
 	/** Collect this arena's authored entry points (its own APlayerStart actors), sorted by NAME so every machine
 	 *  derives the same order with nothing replicated. No authored starts -> fills Out with a fallback (arena
 	 *  centre + 4 cardinal 200 cm offsets) and returns false, so the caller can log the authoring gap instead of
-	 *  silently stacking every player on one point. */
+	 *  silently stacking every player on one point. Either way, every returned transform's XY is then snapped onto
+	 *  the nearest OPEN cell (Z/rotation untouched) if this machine has a layout — see the .cpp for why. */
 	bool GetPlayerEntryTransforms(TArray<FTransform>& Out) const;
 
 	/** The arena to treat as "the live one". Prefers whichever arena actually IsArenaActive(); if nobody has gone

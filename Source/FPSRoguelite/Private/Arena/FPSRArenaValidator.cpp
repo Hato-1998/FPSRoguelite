@@ -12,25 +12,74 @@ namespace
 		const int32 W;
 		const int32 H;
 
+		/** P3 redteam fix: RunX/RunY used to walk outward from the query cell to the nearest wall on every call —
+		 *  O(W+H) each — and the swap-frame scan below (Validate's main sweep) calls them once per open cell, so
+		 *  the whole pass was O(OpenCells * (W+H)), worst case ~8.2M cell visits at 160x160. These two arrays make
+		 *  every RunX/RunY call an O(1) lookup instead — see ComputeAxisRunLengths for how they are built. Same
+		 *  DEFINITION as the old walk (self cell included, maximal contiguous open run along that axis); only the
+		 *  cost changed. */
+		TArray<int32> RunXLen;
+		TArray<int32> RunYLen;
+
 		explicit FArenaCells(const FFPSRArenaLayout& InLayout)
-			: L(InLayout), W(InLayout.GridDims.X), H(InLayout.GridDims.Y) {}
+			: L(InLayout), W(InLayout.GridDims.X), H(InLayout.GridDims.Y)
+		{
+			ComputeAxisRunLengths(/*bAlongX=*/true, RunXLen);
+			ComputeAxisRunLengths(/*bAlongX=*/false, RunYLen);
+		}
 
 		bool Open(int32 CX, int32 CY) const { return FFPSRArenaGenerator::IsCellOpen(L, CX, CY); }
 
-		/** Length of the maximal run of open cells along X (resp. Y) containing this cell. */
+		/** Length of the maximal run of open cells along X (resp. Y) containing this cell. O(1) — see RunXLen/RunYLen.
+		 *  Bounds-checked defensively (every real caller already only asks about an open, in-grid cell). */
 		int32 RunX(int32 CX, int32 CY) const
 		{
-			int32 N = 1;
-			for (int32 X = CX - 1; Open(X, CY); --X) { ++N; }
-			for (int32 X = CX + 1; Open(X, CY); ++X) { ++N; }
-			return N;
+			return (CX >= 0 && CY >= 0 && CX < W && CY < H) ? RunXLen[CY * W + CX] : 0;
 		}
 		int32 RunY(int32 CX, int32 CY) const
 		{
-			int32 N = 1;
-			for (int32 Y = CY - 1; Open(CX, Y); --Y) { ++N; }
-			for (int32 Y = CY + 1; Open(CX, Y); ++Y) { ++N; }
-			return N;
+			return (CX >= 0 && CY >= 0 && CX < W && CY < H) ? RunYLen[CY * W + CX] : 0;
+		}
+
+		/** Two-pass O(W*H) run length for one axis: a forward pass accumulates a consecutive-open count along the
+		 *  row (resp. column); a backward pass then propagates each run's final (i.e. FULL) length back across
+		 *  every cell inside that run — every open cell in one contiguous run shares that same containing-run
+		 *  length by definition, so the value the run's last cell computed is the answer for all of them. */
+		void ComputeAxisRunLengths(bool bAlongX, TArray<int32>& OutRun) const
+		{
+			OutRun.Init(0, W * H);
+			if (bAlongX)
+			{
+				for (int32 CY = 0; CY < H; ++CY)
+				{
+					int32 Running = 0;
+					for (int32 CX = 0; CX < W; ++CX)
+					{
+						Running = Open(CX, CY) ? Running + 1 : 0;
+						OutRun[CY * W + CX] = Running;
+					}
+					for (int32 CX = W - 2; CX >= 0; --CX)
+					{
+						if (Open(CX, CY) && Open(CX + 1, CY)) { OutRun[CY * W + CX] = OutRun[CY * W + CX + 1]; }
+					}
+				}
+			}
+			else
+			{
+				for (int32 CX = 0; CX < W; ++CX)
+				{
+					int32 Running = 0;
+					for (int32 CY = 0; CY < H; ++CY)
+					{
+						Running = Open(CX, CY) ? Running + 1 : 0;
+						OutRun[CY * W + CX] = Running;
+					}
+					for (int32 CY = H - 2; CY >= 0; --CY)
+					{
+						if (Open(CX, CY) && Open(CX, CY + 1)) { OutRun[CY * W + CX] = OutRun[(CY + 1) * W + CX]; }
+					}
+				}
+			}
 		}
 	};
 }

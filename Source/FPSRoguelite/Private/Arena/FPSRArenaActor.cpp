@@ -29,6 +29,42 @@ namespace
 	/** Boundary wall thickness (cm). Cosmetic — the flow field already has no edge pointing out of the grid, so
 	 *  this only stops the PLAYER from walking off. */
 	constexpr double BoundaryWallThicknessCm = 100.0;
+
+	/** P3 redteam fix: how far GetPlayerEntryTransforms searches outward (in cells) for an open cell to snap a
+	 *  candidate entry point onto before giving up and leaving it exactly where it was authored/computed. */
+	constexpr int32 PlayerEntrySnapMaxRadiusCells = 32;
+
+	/** Deterministic outward ring search for the open cell nearest AnchorCell (Chebyshev distance), scanned in a
+	 *  fixed row-major order within each ring — same idiom as UFPSRFlowFieldComputer::FindNearestOpenSurface — so
+	 *  every machine picks the identical cell when a ring has more than one open candidate (no float distance
+	 *  compare, no FMath::Rand). AnchorCell itself counts as a hit at radius 0. Returns false (OutCell untouched)
+	 *  if nothing opens within MaxRadiusCells. */
+	bool FindNearestOpenCell(const FFPSRArenaLayout& Layout, const FIntPoint& AnchorCell, int32 MaxRadiusCells, FIntPoint& OutCell)
+	{
+		if (FFPSRArenaGenerator::IsCellOpen(Layout, AnchorCell.X, AnchorCell.Y))
+		{
+			OutCell = AnchorCell;
+			return true;
+		}
+		for (int32 R = 1; R <= MaxRadiusCells; ++R)
+		{
+			for (int32 DY = -R; DY <= R; ++DY)
+			{
+				for (int32 DX = -R; DX <= R; ++DX)
+				{
+					if (FMath::Max(FMath::Abs(DX), FMath::Abs(DY)) != R) { continue; } // ring perimeter only
+					const int32 CX = AnchorCell.X + DX;
+					const int32 CY = AnchorCell.Y + DY;
+					if (FFPSRArenaGenerator::IsCellOpen(Layout, CX, CY))
+					{
+						OutCell = FIntPoint(CX, CY);
+						return true;
+					}
+				}
+			}
+		}
+		return false;
+	}
 }
 
 #if !UE_BUILD_SHIPPING
@@ -597,6 +633,43 @@ bool AFPSRArenaActor::GetPlayerEntryTransforms(TArray<FTransform>& Out) const
 {
 	Out.Reset();
 
+	// P3 redteam fix: neither an authored APlayerStart nor the centre-offset fallback below checks the mask — a
+	// start sitting inside a cell L1 (or the skeleton-avoidance fix) ended up blocking, or a fallback offset that
+	// happens to land on a blocked cell near a busy centre, both used to teleport straight into geometry (the
+	// caller's teleport uses bSweep=false, which does not resolve overlaps — see PerformSwap). Snaps every
+	// candidate's XY onto the nearest OPEN cell in place; Z and rotation are left untouched. Skipped when this
+	// machine has no layout yet (e.g. inspected in the editor before BuildLocalLayout ever ran) since IsCellOpen
+	// has nothing to answer with. Called at BOTH exits below (authored starts and the no-starts fallback) so
+	// neither path can hand back a point sitting inside a wall.
+	auto SnapToOpenCells = [this](TArray<FTransform>& Transforms)
+	{
+		if (!Layout.IsValid())
+		{
+			return;
+		}
+		for (FTransform& Xf : Transforms)
+		{
+			const FVector Loc = Xf.GetLocation();
+			const FIntPoint Cell(
+				FMath::FloorToInt((Loc.X - Layout.GridOrigin.X) / Layout.CellSize),
+				FMath::FloorToInt((Loc.Y - Layout.GridOrigin.Y) / Layout.CellSize));
+
+			FIntPoint OpenCell;
+			if (!FindNearestOpenCell(Layout, Cell, PlayerEntrySnapMaxRadiusCells, OpenCell))
+			{
+				UE_LOG(LogFPSR, Warning,
+					TEXT("[Arena] %s player entry at %s sits in blocked cell (%d,%d) with no open cell within %d — leaving it unsnapped."),
+					*GetName(), *Loc.ToString(), Cell.X, Cell.Y, PlayerEntrySnapMaxRadiusCells);
+				continue;
+			}
+			if (OpenCell != Cell)
+			{
+				const FVector SnapCentre = Layout.CellCenterWorld(OpenCell.X, OpenCell.Y);
+				Xf.SetLocation(FVector(SnapCentre.X, SnapCentre.Y, Loc.Z));
+			}
+		}
+	};
+
 	TArray<APlayerStart*> Starts;
 	if (const UWorld* World = GetWorld())
 	{
@@ -626,6 +699,7 @@ bool AFPSRArenaActor::GetPlayerEntryTransforms(TArray<FTransform>& Out) const
 		{
 			Out.Add(FTransform(FRotator::ZeroRotator, Centre + Offset));
 		}
+		SnapToOpenCells(Out);
 		return false;
 	}
 
@@ -639,6 +713,7 @@ bool AFPSRArenaActor::GetPlayerEntryTransforms(TArray<FTransform>& Out) const
 	{
 		Out.Add(Start->GetActorTransform());
 	}
+	SnapToOpenCells(Out);
 	return true;
 }
 

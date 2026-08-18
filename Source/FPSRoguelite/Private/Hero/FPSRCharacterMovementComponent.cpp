@@ -29,7 +29,9 @@ static FAutoConsoleVariableRef CVarFPSRPlayerSpeedScale(
 	     "  Wall probe distances/radii - geometry, not speed; scaling them is a different feature, not a faster one.\n"
 	     "  Hang/slip durations - a wall hang is a beat, not a distance.\n"
 	     "Set the SAME value on server and client: CharacterMovement replays moves on correction, so a mismatch\n"
-	     "reads as constant rubber-banding. 1 = off."),
+	     "reads as constant rubber-banding. In multiplayer the WORST case is setting it on the listen host\n"
+	     "alone: the server replays every remote client's ServerMove against the scaled cap, so one\n"
+	     "host-side change rubber-bands EVERY other player rather than the host. 1 = off."),
 	ECVF_Cheat);
 #endif
 

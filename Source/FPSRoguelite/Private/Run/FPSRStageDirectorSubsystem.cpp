@@ -2,6 +2,7 @@
 
 #include "Run/FPSRStageDirectorSubsystem.h"
 #include "Run/FPSRRunScheduleDataAsset.h"
+#include "Run/FPSRRunDirectorSubsystem.h"
 #include "Arena/FPSRArenaActor.h"
 #include "Enemy/FPSREnemySpawnSubsystem.h"
 #include "Hero/FPSRCharacter.h"
@@ -349,9 +350,25 @@ void UFPSRStageDirectorSubsystem::PerformSwap()
 		Prev->SetArenaActive(false);
 	}
 
-	// 6. Release every surviving enemy back to the pool (ADR 0010 D6): "새 아레나 좌표로 재배치하지 않는다 —
-	//    절차 배치와 곱해지면 적이 벽에서 튀어나온다." The old arena's leftover swarm has no valid standing room in
-	//    the new arena's freshly rolled layout, so it goes back to the pool instead of being relocated into it.
+	// 6. Cleanup that belongs to the OLD arena, not the new one — cancel whatever mission is still active, then
+	//    release every surviving enemy back to the pool (ADR 0010 D6):
+	//     - Mission: breaking the suppressor that triggered this swap was the player's choice to leave this arena
+	//       — the active mission's objective (spawn point, escort target, etc.) lives in the OLD arena, which
+	//       loses its collision the moment step 5 above deactivates it, so the objective becomes physically
+	//       unreachable. Left alone that is a SILENT failure: the mission just times out later with no obvious
+	//       cause. Cancelling explicitly here makes the loss immediate and attributable to the swap instead.
+	//       CancelActiveMission is a pure teardown (no reward grant, no "failed" log) — the mission simply no
+	//       longer exists, matching neither a success nor a real failure.
+	//     - Enemies: "새 아레나 좌표로 재배치하지 않는다 — 절차 배치와 곱해지면 적이 벽에서 튀어나온다." The old
+	//       arena's leftover swarm has no valid standing room in the new arena's freshly rolled layout, so it goes
+	//       back to the pool instead of being relocated into it.
+	if (UFPSRRunDirectorSubsystem* RunDirector = World->GetSubsystem<UFPSRRunDirectorSubsystem>())
+	{
+		if (RunDirector->CancelActiveMission())
+		{
+			UE_LOG(LogFPSR, Log, TEXT("[StageDirector] Active mission cancelled — its objective was in the arena being left."));
+		}
+	}
 	if (UFPSREnemySpawnSubsystem* SpawnSub = World->GetSubsystem<UFPSREnemySpawnSubsystem>())
 	{
 		SpawnSub->ReleaseAllEnemies();

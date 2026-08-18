@@ -223,8 +223,10 @@ public:
 	int32 GetStageIndex() const { return StageIndex; }
 
 	/** The arena currently live (the transition target once Swapping starts committing, the arena the transition
-	 *  started FROM before that). Null before the first transition ever runs — query
-	 *  AFPSRArenaActor::FindActiveInWorld for the pre-first-transition answer instead. */
+	 *  started FROM before that). Seeded at level start by the arena itself (AFPSRArenaActor::PostInitializeComponents,
+	 *  which runs before the flow-field pull) so this is valid from the FIRST stage on, not only after a transition —
+	 *  this IS the cheap O(1) "which arena is live" answer, and callers on any hot path should prefer it over
+	 *  AFPSRArenaActor::FindActiveInWorld, which sweeps every actor in the level. Null only in a level with no arena. */
 	UFUNCTION(BlueprintPure, Category = "FPSR|Run")
 	AFPSRArenaActor* GetActiveArena() const { return ActiveArena; }
 
@@ -364,6 +366,17 @@ protected:
 	 *      transition exactly like they react to bRunPaused (stop residual movement, exit slide/wall-hang); giving
 	 *      the transition its own signal instead would mean every one of those consumers needs a second subscription.
 	 *   2. Makes every AFPSRArenaActor in the world follow ActiveArena (SetArenaActive(Arena == ActiveArena)) — the
-	 *      mechanism that lets a client follow an arena swap from the replicated pointer alone, with no dedicated RPC. */
+	 *      mechanism that lets a client follow an arena swap from the replicated pointer alone, with no dedicated RPC.
+	 *      GUARDED by LastAppliedActiveArena below (P3 redteam fix) — see that member for why. */
 	void ApplyStageTransitionLocal();
+
+	/** P3 redteam fix: the ActiveArena value ApplyStageTransitionLocal last actually SWEPT (ran SetArenaActive over
+	 *  every arena for) — see that function's point 2. All four stage-transition fields share ONE OnRep, so a
+	 *  client that receives several of them in one replication batch calls ApplyStageTransitionLocal once PER
+	 *  FIELD that changed — up to 4x for a single logical swap — and each call used to re-run the full arena sweep
+	 *  regardless. Re-running was harmless (SetArenaActive is idempotent) but not free: each pass is a
+	 *  TActorIterator scan of every blocker/landmark/destructible in every arena, which gets more expensive as
+	 *  marker counts grow. TWeakObjectPtr (not a raw pointer) because the arena it references can be destroyed
+	 *  between calls without this needing to be told. */
+	TWeakObjectPtr<AFPSRArenaActor> LastAppliedActiveArena;
 };

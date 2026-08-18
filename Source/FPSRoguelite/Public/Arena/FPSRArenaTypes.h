@@ -85,8 +85,6 @@ struct FFPSRArenaPropSet
 	GENERATED_BODY()
 
 	TArray<FFPSRArenaPropSetEntry> Entries;
-	/** Bounding size in cells, derived from Entries. */
-	FIntPoint FootprintCells = FIntPoint(1, 1);
 	/** Relative pick weight among all sets. */
 	int32 Weight = 1;
 	/** Whether the seed may rotate the whole group in 90-degree steps. */

@@ -40,9 +40,7 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "프롭 세트", meta = (DisplayName = "90도 회전 허용"))
 	bool bAllowRotation = true;
 
-	/** Flatten into the plain struct the generator consumes. Footprint is derived from Entries — an authored
-	 *  bounding box could disagree with the actual contents, and a wrong one would either waste space or, worse,
-	 *  let a set overhang into a corridor the fit test believed was clear. */
+	/** Flatten into the plain struct the generator consumes. */
 	FFPSRArenaPropSet ToPropSet() const;
 
 #if WITH_EDITOR

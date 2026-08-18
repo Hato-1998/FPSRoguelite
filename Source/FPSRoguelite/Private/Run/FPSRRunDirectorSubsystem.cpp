@@ -166,6 +166,13 @@ float UFPSRRunDirectorSubsystem::GetBossTime() const
 	return ActiveSchedule ? ActiveSchedule->BossTime : FallbackBossTime;
 }
 
+bool UFPSRRunDirectorSubsystem::CancelActiveMission()
+{
+	const bool bHadMission = (ActiveMission != nullptr);
+	DestroyActiveMission();
+	return bHadMission;
+}
+
 int32 UFPSRRunDirectorSubsystem::ComputeTargetAliveCount() const
 {
 	const int32 MaxCount = ActiveSchedule ? ActiveSchedule->MaxAliveCount : FallbackMaxAliveCount;

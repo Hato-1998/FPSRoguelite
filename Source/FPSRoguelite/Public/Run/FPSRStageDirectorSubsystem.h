@@ -81,7 +81,8 @@ private:
 	void TrySwap();
 
 	/** The swap itself: activate the destination, regenerate it, teleport living players, deactivate the source,
-	 *  release the leftover swarm, commit the new stage to GameState. See the .cpp for the fixed step order. */
+	 *  cancel any still-active mission (its objective was left behind in the old arena), release the leftover
+	 *  swarm, commit the new stage to GameState. See the .cpp for the fixed step order. */
 	void PerformSwap();
 
 	/** True once HandleRunStateChanged has been bound to GameState::OnRunStateChanged, so entering Grace never

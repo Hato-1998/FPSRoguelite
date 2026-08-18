@@ -24,7 +24,7 @@
   (`AFPSRSpawnRoom`·존 활성/비활성 미사용). `AFPSRDoor`는 제거되지 않고 **`AFPSRDestructible`(파괴물 + 폴리모픽 리워드)로
   일반화**되며, 그중 리워드가 스테이지 전환인 것이 **억제기**다(0010 D6·D7).
   ⚠️ **함께 사라진 것 = "60s+ 전후방 2섹터 압력"**(아래 '초반 협동 비트' 불릿). 특수 AI 없이 **스폰 위치만으로**
-  back-to-back을 강제하던 USP 부품이다. 80×80 m 아레나에서 균등 랜덤이 자연히 사방을 커버하는지는 **측정하지 않았다**
+  back-to-back을 강제하던 USP 부품이다. **160×160 m**(ADR 0011 E1, 80×80 에서 갱신) 아레나에서 균등 랜덤이 자연히 사방을 커버하는지는 **측정하지 않았다** — 면적이 4배가 되며 이 미측정 항목의 위험도 함께 커졌다
   (`판단`) — 성립하지 않으면 스폰 위치 편향(폐루프 디렉터 P1 공간선택)을 후속으로 다시 연다.
   아래 항목은 **경위 보존용**이며 현행 설계가 아니다.
 - ~~**룸 기반 점진 개방 스폰**~~(구현 2026-06-25 · 🔴 폐기 2026-08-16): 맵=방(룸) 구성. 벽의 `AFPSRDoor`(파괴 장벽)를 사격해 부수면 통로 개방 → 플레이어가 `AFPSRSpawnRoom`(박스 트리거) 진입 시 그 방의 스폰존이 활성. 활성 존은 **누적**(지나온 방 계속 스폰; 적 총량은 레벨기반(§위)으로 불변, 방 개방은 스폰 **위치**만 추가). 스폰포인트는 방 박스가 BeginPlay에 자동 태깅(`AFPSREnemySpawnPoint.ZoneTag=RoomTag`, 수동 태그는 존중), 선택은 적격(MinPlayerDistance + 존활성) **균등 랜덤**(가중치·거리폴오프 폐지 2026-06-25, **out-of-view(시야 밖) 게이트 폐지 2026-06-29** — 스폰포인트가 플레이어 시야 안에 있어도 스폰 허용. 적이 눈앞에 등장할 수 있으므로 배치는 디자이너가 등 뒤/측면으로 의도; 단일 정면 포인트가 스폰을 굶기던 문제 해소). 시작방=`bActiveAtStart`. 서버 권위(`UFPSREnemySpawnSubsystem.ActiveSpawnZones`/`ActivateSpawnZone`/`ResetSpawnZones`/`DeactivateSpawnZone`; 리셋=OnWorldBeginPlay + StartRun). **룸 비활성화 볼륨**(2026-06-25 추가): 누적이 **기본**이지만, 디자이너가 `AFPSRSpawnRoom.TriggerMode=Deactivate`로 둔 볼륨에 플레이어가 진입하면 대상 존(같은 `RoomTag`)이 꺼진다(`DeactivateSpawnZone`=`ActiveSpawnZones.RemoveTag`, `ActivateSpawnZone`의 대칭; 플랫 RoomTag exact 제거). 즉 누적=기본 동작, 비활성화=레벨 디자이너가 특정 방 스폰을 **명시적으로** 정리(페이싱/슬라이딩)하려 할 때만 작동(Deactivate룸은 자동태깅 안 함=대상 존만 참조, `ResetSpawnZones`는 Activate 시작방만 재활성). 존 상태는 전역 서버권위(활성화와 동일)라 4인 협동에서 1인 진입=전역 토글(분리 파티 주의). 같은태그 대칭(1볼륨=1존). 설계상세 `Docs/Archive/guides/RoomSpawnSystem_Handoff.md`(아카이브).

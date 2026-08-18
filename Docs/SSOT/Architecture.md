@@ -19,7 +19,7 @@
 | 저장 | SaveGame |
 | 네트워크 | 리슨서버 P2P, Push Model |
 | 무브먼트 | 표준 CMC + **충돌무시 대시(회피기)** |
-| 레벨 | 🔴 **재결정 2026-08-16([ADR 0010](../Architecture/0010-arena-topology-and-stage-transition.md))** = **고정 크기 단일 아레나**(80×80m·단일 평면·다중 코어 교차 동선) + **골격 저작 + 내부 절차 생성** + **억제기 파괴 → 스테이지 전환**. 마스크는 트레이스가 아니라 **생성기가 `FFPSRFlowFieldSurfaceData` 직접 산출**(`BuildFromSurfaceData`). ~~다중맵 심리스(문 파괴→인접맵 스트림-in)~~ **폐기** — U 연속필드 코드는 **존치·미사용**(제거 아님), 레벨 스트리밍 미사용 |
+| 레벨 | 🔴 **재결정 2026-08-16([ADR 0010](../Architecture/0010-arena-topology-and-stage-transition.md))** = **고정 크기 단일 아레나**(**160×160m**·단일 평면·다중 코어 교차 동선 — 치수는 [ADR 0011](../Architecture/0011-authored-skeleton-and-arena-validator.md) E1 로 80×80 에서 갱신) + **골격 저작 + 내부 절차 생성** + **억제기 파괴 → 스테이지 전환**. 마스크는 트레이스가 아니라 **생성기가 `FFPSRFlowFieldSurfaceData` 직접 산출**(`BuildFromSurfaceData`). ~~다중맵 심리스(문 파괴→인접맵 스트림-in)~~ **폐기** — U 연속필드 코드는 **존치·미사용**(제거 아님), 레벨 스트리밍 미사용 |
 
 > ⚠️ **문서↔코드 정정 (2026-08-11, 드리프트 감사)** — 위 표의 「적 스웜」·「보스」 줄에 예전엔 없는 것이 적혀 있었다.
 > - **`USignificanceManager` 미사용**: 플러그인은 켜져 있지만 코드 참조 **0**. 실제 티어링은 손수 짠 거리밴드이고, 이동 패스와 융합돼 있어 오히려 이쪽이 이 게임에 맞는다. `Performance.md §5-1` 티어 정의는 유효.

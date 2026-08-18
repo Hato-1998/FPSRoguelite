@@ -409,14 +409,22 @@ void AFPSRGameState::ApplyStageTransitionLocal()
 
 	// Existing OnRunStateChanged subscribers (AFPSRCharacter::HandleRunStateChanged_Movement in particular) must
 	// react to a stage transition the same way they react to bRunPaused — re-broadcasting the EXISTING signal
-	// reuses that handling instead of every consumer needing a second subscription to a new delegate.
+	// reuses that handling instead of every consumer needing a second subscription to a new delegate. Broadcasts
+	// unconditionally, unlike the arena-follow sweep below: a subscriber needs to see EVERY field's change (phase,
+	// stage index, dealing-end timestamp), not just whether ActiveArena itself moved.
 	OnRunStateChanged.Broadcast();
 
 	// Client arena-follow, no dedicated RPC: every arena in the world snaps its IsArenaActive() to match
-	// ActiveArena. Fires on every ApplyStageTransitionLocal call (phase changes included, not just ActiveArena
-	// changes) — harmless: when ActiveArena hasn't actually changed this is just re-asserting the same active/
-	// inactive state every arena already has (SetArenaActive is idempotent).
-	if (ActiveArena)
+	// ActiveArena. P3 redteam fix: all FOUR stage-transition fields share this one OnRep, so a client that receives
+	// several of them in the same replication batch calls ApplyStageTransitionLocal once PER FIELD that changed —
+	// up to 4x for one logical swap (e.g. PerformSwap's final commit, which calls SetStageIndex/SetActiveArena/
+	// SetStageTransition back to back) — and this used to re-run the FULL sweep every time. Each pass is a
+	// TActorIterator scan of every blocker/landmark/destructible in every arena (SetArenaActive's own cost), so
+	// the repeats were wasted work, not just redundant — more expensive as marker counts grow, worst case a
+	// swap-frame spike. Skipping once ActiveArena is already the arena LastAppliedActiveArena recorded collapses
+	// the (up to) 4 calls in one batch down to exactly one real sweep, with the identical end state the
+	// unconditional version produced (SetArenaActive is idempotent, so re-asserting was never adding anything new).
+	if (ActiveArena && LastAppliedActiveArena != ActiveArena)
 	{
 		TArray<AFPSRArenaActor*> AllArenas;
 		AFPSRArenaActor::FindAllInWorld(GetWorld(), AllArenas);
@@ -427,6 +435,7 @@ void AFPSRGameState::ApplyStageTransitionLocal()
 				Arena->SetArenaActive(Arena == ActiveArena);
 			}
 		}
+		LastAppliedActiveArena = ActiveArena;
 	}
 }
 

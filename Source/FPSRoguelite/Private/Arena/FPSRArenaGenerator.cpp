@@ -243,6 +243,9 @@ namespace
 	 * or stays at least MinCorridorWidth long. A chain of props therefore cannot leave a sub-minimum gap between
 	 * them, which is also what stops props from quietly walling a corridor off.
 	 *
+	 * A BLOCKING entry is additionally refused on any L2 skeleton cell (SkeletonCells, populated by
+	 * DeriveFloorTraces) — see the Pass 1 fit test below for why (ADR 0010 D8).
+	 *
 	 * Placement order is a seeded Fisher-Yates over a fixed candidate list — deterministic on every machine
 	 * (invariant 10) while still looking scattered rather than raster-scanned.
 	 */
@@ -258,7 +261,8 @@ namespace
 		}
 	}
 
-	void PlaceMicroProps(FRandomStream& RS, const FFPSRArenaGenParams& Params, FFPSRArenaLayout& Layout)
+	void PlaceMicroProps(FRandomStream& RS, const FFPSRArenaGenParams& Params, FFPSRArenaLayout& Layout,
+		const TArray<bool>& SkeletonCells)
 	{
 		const int32 W = Layout.GridDims.X;
 		const int32 H = Layout.GridDims.Y;
@@ -291,7 +295,45 @@ namespace
 			}
 		}
 
-		// Survey: how much room is there, and how much of it is spare?
+		// Survey: how much room is there, and how much of it is spare? PERF (P3 redteam fix): this used to walk
+		// outward to the wall in all four directions from EVERY open cell — O(OpenCells * (W+H)), worst case ~8.2M
+		// cell visits at 160x160. Two passes per axis instead: a forward pass accumulates a consecutive-open run
+		// length along the row/column, then a backward pass propagates each run's final (i.e. full) length back
+		// across every cell inside it — every cell in one contiguous open run shares that same length by
+		// definition — so RunXLen/RunYLen become O(1) lookups below. This is a SNAPSHOT of the mask as it stands
+		// right now, before any L1 placement changes it — fine here because the survey only wants a one-time
+		// global slack BUDGET (see SlackBudget below); Pass 2 further down deliberately keeps walking the LIVE
+		// mask cell by cell instead, because placement changes that mask as it goes.
+		TArray<int32> RunXLen, RunYLen;
+		RunXLen.Init(0, W * H);
+		RunYLen.Init(0, W * H);
+		for (int32 CY = 0; CY < H; ++CY)
+		{
+			int32 Running = 0;
+			for (int32 CX = 0; CX < W; ++CX)
+			{
+				Running = Open(CX, CY) ? Running + 1 : 0;
+				RunXLen[CY * W + CX] = Running;
+			}
+			for (int32 CX = W - 2; CX >= 0; --CX)
+			{
+				if (Open(CX, CY) && Open(CX + 1, CY)) { RunXLen[CY * W + CX] = RunXLen[CY * W + CX + 1]; }
+			}
+		}
+		for (int32 CX = 0; CX < W; ++CX)
+		{
+			int32 Running = 0;
+			for (int32 CY = 0; CY < H; ++CY)
+			{
+				Running = Open(CX, CY) ? Running + 1 : 0;
+				RunYLen[CY * W + CX] = Running;
+			}
+			for (int32 CY = H - 2; CY >= 0; --CY)
+			{
+				if (Open(CX, CY) && Open(CX, CY + 1)) { RunYLen[CY * W + CX] = RunYLen[(CY + 1) * W + CX]; }
+			}
+		}
+
 		int32 OpenCells = 0;
 		int32 SlackCells = 0;
 		for (int32 CY = 0; CY < H; ++CY)
@@ -300,13 +342,7 @@ namespace
 			{
 				if (!Open(CX, CY)) { continue; }
 				++OpenCells;
-
-				int32 RunX = 1, RunY = 1;
-				for (int32 X = CX - 1; Open(X, CY); --X) { ++RunX; }
-				for (int32 X = CX + 1; Open(X, CY); ++X) { ++RunX; }
-				for (int32 Y = CY - 1; Open(CX, Y); --Y) { ++RunY; }
-				for (int32 Y = CY + 1; Open(CX, Y); ++Y) { ++RunY; }
-				if (FMath::Min(RunX, RunY) > MinW) { ++SlackCells; }
+				if (FMath::Min(RunXLen[CY * W + CX], RunYLen[CY * W + CX]) > MinW) { ++SlackCells; }
 			}
 		}
 		if (OpenCells == 0) { return; }
@@ -360,7 +396,13 @@ namespace
 						const int32 CX = AX + Off.X;
 						const int32 CY = AY + Off.Y;
 						if (CX < 0 || CY < 0 || CX >= W || CY >= H || !Open(CX, CY)
-							|| Reserved[CY * W + CX] || Used[CY * W + CX])
+							|| Reserved[CY * W + CX] || Used[CY * W + CX]
+							// P3 redteam fix: the L2 skeleton is derived BEFORE L1 runs (see Generate()), so without
+							// this a BLOCKING entry could legally land in the middle of a wide corridor — exactly the
+							// skeleton cell the wiring renders as the bright "you can walk here" line (ADR 0010 D8).
+							// Only Blocking is refused: Passable is <=45cm, the swarm/player walk straight over it,
+							// so a passable prop sitting on the wiring is still just texture, not a contradiction.
+							|| (E.Tier == EFPSRArenaPropTier::Blocking && SkeletonCells[CY * W + CX]))
 						{
 							bFits = false;
 							break;
@@ -561,10 +603,11 @@ namespace
 	}
 }
 
-void FFPSRArenaGenerator::DeriveFloorTraces(FFPSRArenaLayout& Layout)
+void FFPSRArenaGenerator::DeriveFloorTraces(FFPSRArenaLayout& Layout, TArray<bool>& OutSkeletonCells)
 {
 	Layout.Traces.Reset();
 	Layout.TraceJunctions.Reset();
+	OutSkeletonCells.Reset();
 
 	const int32 W = Layout.GridDims.X;
 	const int32 H = Layout.GridDims.Y;
@@ -640,6 +683,11 @@ void FFPSRArenaGenerator::DeriveFloorTraces(FFPSRArenaLayout& Layout)
 			}
 		}
 	}
+
+	// P3 redteam fix: hand the finished skeleton bitmap back to Generate() so it can pass it into PlaceMicroProps
+	// (L1) — see this function's header comment (FPSRArenaGenerator.h) for why L1 needs it. Moved rather than
+	// copied: nothing below reads Skel again.
+	OutSkeletonCells = MoveTemp(Skel);
 }
 
 bool FFPSRArenaGenerator::Generate(int32 Seed, const FFPSRArenaGenParams& Params, const FVector& ArenaOrigin,
@@ -779,17 +827,28 @@ bool FFPSRArenaGenerator::Generate(int32 Seed, const FFPSRArenaGenParams& Params
 
 	// --- L2: derive floor wiring traces from the L0 mask (ADR 0010 D8) ---------------------------------------
 	// MUST run here — after L0 (blockers, landmarks, destructibles are all rasterised above) but BEFORE L1
-	// (PlaceMicroProps, below). L2 is derived ONLY from L0. If this ran after L1 instead, L1's micro props would
-	// have already carved the corridor mask further, so the traces would no longer line up with where the
-	// swarm/player can actually walk — which is exactly the external proposal's self-contradiction ADR 0010 D8
-	// called out: wiring laid wherever cells happen to be spare, in a place that has nothing to do with the
-	// actual paths through the arena.
-	DeriveFloorTraces(OutLayout);
+	// (PlaceMicroProps, below), because the wiring expresses the AUTHORED corridor topology.
+	//
+	// The reason is topological stability, not local accuracy — do not "fix" this by moving it after L1. Running it
+	// after L1 would in fact track the post-prop walkable space MORE closely cell-for-cell; what it would destroy is
+	// the thing the wiring is for. L0 is authored and seed-invariant, so a trace derived from it is the same corridor
+	// graph every run: one continuous bright line per route, forking at the crossings ADR 0010 D1 built the topology
+	// around. L1 is per-seed dressing that sits INSIDE those corridors, and deriving the skeleton after it would let
+	// a handful of micro props split one route into a different set of disconnected wire fragments every single seed
+	// — the corridor would still be there, but "follow the bright line" would stop reading as a route at all.
+	//
+	// The local cost of this ordering is that L1 does not appear in the mask L2 saw, so a blocking prop could land on
+	// a trace cell; SkeletonCells (below) is what closes that gap.
+	//
+	// SkeletonCells rides along for the same reason in reverse: L1 needs to know which cells ARE the L2 wiring so
+	// it can refuse a BLOCKING prop on top of the bright "you can walk here" line (see PlaceMicroProps' Pass 1).
+	TArray<bool> SkeletonCells;
+	DeriveFloorTraces(OutLayout, SkeletonCells);
 
 	// --- L1: procedural micro props in whatever slack the authored skeleton left -----------------------------
 	{
 		FRandomStream RS(Seed);
-		PlaceMicroProps(RS, Params, OutLayout);
+		PlaceMicroProps(RS, Params, OutLayout, SkeletonCells);
 	}
 
 	UE_LOG(LogFPSR, Log,

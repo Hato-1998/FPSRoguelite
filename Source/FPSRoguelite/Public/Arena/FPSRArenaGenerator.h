@@ -72,11 +72,16 @@ public:
 	 * Layout.TraceJunctions from Layout.Surface/GridDims as they stand when called — MUST run after L0 (blockers,
 	 * landmarks, destructibles) and BEFORE PlaceMicroProps (L1); see the call site in Generate() for why.
 	 *
+	 * Also fills OutSkeletonCells with the thinned skeleton mask itself (GridDims.X*GridDims.Y bool bitmap, same
+	 * cell-index convention as Layout.Surface) so Generate() can hand it to PlaceMicroProps — L1 needs to know
+	 * which cells are the L2 wiring so it can refuse to plant a BLOCKING prop on top of a bright "you can walk
+	 * here" line (see PlaceMicroProps' Pass 1 fit test).
+	 *
 	 * Uses NO randomness whatsoever — not even FRandomStream. That is a STRONGER guarantee than this class's
 	 * usual seed-determinism (ADR 0010 invariant 10): the same authored skeleton produces the same wiring on
 	 * every machine regardless of seed, because the seed is never read by this function at all.
 	 */
-	static void DeriveFloorTraces(FFPSRArenaLayout& Layout);
+	static void DeriveFloorTraces(FFPSRArenaLayout& Layout, TArray<bool>& OutSkeletonCells);
 
 	/** True if the cell is inside the grid and not blocked. Mirrors the flow field's own traversability predicate
 	 *  (surface exists AND not blocked), so layout and field never disagree about what is walkable. */

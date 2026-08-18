@@ -47,6 +47,16 @@ namespace
 		return true;
 	}
 
+	/** Degrees. Below this, a rotation reads as noise from a viewport drag; above it, an assumption the rasteriser
+	 *  actually depends on (destructible footprints grow along the WORLD grid axes regardless of actor rotation;
+	 *  blockers rasterise from yaw alone, treating themselves as an XY-plane prism) is genuinely violated. */
+	constexpr float ArenaAuthoringRotationToleranceDegrees = 1.0f;
+
+	/** cm. How far a marker's Z may drift from its owning arena's floor before the editor calls it out — the
+	 *  rasteriser itself never reads Z (XY-only membership + rasterisation, ADR 0010 D2 single-plane arena), so a
+	 *  marker floating well above or buried well below the floor still blocks/reserves exactly as if it sat on it. */
+	constexpr float ArenaAuthoringZToleranceCm = 200.0f;
+
 	/**
 	 * Level-wide checks that only exist because an arena is no longer alone in its level (ADR 0010 D6, 2026-08-17).
 	 * Neither failure is visible at runtime — FindActiveInWorld picks an arena deterministically whatever the
@@ -95,9 +105,82 @@ namespace
 				Orphans.Num(), *FString::Join(Orphans, TEXT(", ")));
 		}
 
+		// (3) Destructible yaw != 0. AFPSRArenaDestructible's footprint grows along the GRID's own +X/+Y regardless
+		// of the actor's rotation (FFPSRArenaGenerator::ComputeDestructibleCells) — a yawed actor's mesh no longer
+		// matches the cells the generator actually blocks while intact / opens once it breaks.
+		TArray<FString> YawedDestructibles;
+		for (TActorIterator<AFPSRArenaDestructible> It(World); It; ++It)
+		{
+			const AFPSRArenaDestructible* Destructible = *It;
+			if (IsValid(Destructible) && FMath::Abs(Destructible->GetActorRotation().Yaw) > ArenaAuthoringRotationToleranceDegrees)
+			{
+				YawedDestructibles.Add(Destructible->GetName());
+			}
+		}
+		if (YawedDestructibles.Num() > 0)
+		{
+			Report += FString::Printf(
+				TEXT("[경고] 회전(Yaw)이 있는 파괴물 %d개: %s\n발자국은 액터 회전과 무관하게 그리드 +X/+Y 로 자랍니다 — "
+				     "마스크와 메시가 어긋납니다. 의도한 것이 아니라면 Yaw 를 0 으로 되돌리세요.\n"),
+				YawedDestructibles.Num(), *FString::Join(YawedDestructibles, TEXT(", ")));
+		}
+
+		// (4) Blocker pitch/roll != 0. Rasterisation reads ONLY yaw — the generator treats every blocker as an
+		// XY-plane prism (Generate()'s box loop; AFPSRArenaBlocker::GetYawDegrees never reads pitch/roll at all) —
+		// so a pitched/rolled blocker looks tilted in the viewport but still blocks the same flat footprint its
+		// yaw alone implies.
+		TArray<FString> TiltedBlockers;
+		for (TActorIterator<AFPSRArenaBlocker> It(World); It; ++It)
+		{
+			const AFPSRArenaBlocker* Blocker = *It;
+			if (!IsValid(Blocker)) { continue; }
+			const FRotator Rot = Blocker->GetActorRotation();
+			if (FMath::Abs(Rot.Pitch) > ArenaAuthoringRotationToleranceDegrees || FMath::Abs(Rot.Roll) > ArenaAuthoringRotationToleranceDegrees)
+			{
+				TiltedBlockers.Add(Blocker->GetName());
+			}
+		}
+		if (TiltedBlockers.Num() > 0)
+		{
+			Report += FString::Printf(
+				TEXT("[경고] Pitch/Roll 이 있는 블로커 %d개: %s\n래스터화는 Yaw 만 읽습니다 — 기울어진 만큼 보이는 것과 "
+				     "실제로 막는 셀이 달라집니다. 의도한 것이 아니라면 Pitch/Roll 을 0 으로 되돌리세요.\n"),
+				TiltedBlockers.Num(), *FString::Join(TiltedBlockers, TEXT(", ")));
+		}
+
+		// (5) Marker Z far from ITS OWN arena's floor. Membership (ContainsWorldLocation) and rasterisation are
+		// both XY-only (ADR 0010 D2 single-plane arena) — a marker floating well above or buried well below the
+		// floor still blocks/reserves exactly as if it sat on the floor, which usually means it was dragged off
+		// the floor plane by accident rather than authored airborne on purpose.
+		TArray<FString> OffPlaneMarkers;
+		auto CheckZ = [&Arenas, &OffPlaneMarkers](AActor* Actor)
+		{
+			if (!IsValid(Actor)) { return; }
+			for (const AFPSRArenaActor* Arena : Arenas)
+			{
+				if (!Arena || !Arena->ContainsWorldLocation(Actor->GetActorLocation())) { continue; }
+				const double DeltaZ = Actor->GetActorLocation().Z - Arena->GetActorLocation().Z;
+				if (FMath::Abs(DeltaZ) > ArenaAuthoringZToleranceCm)
+				{
+					OffPlaneMarkers.Add(FString::Printf(TEXT("%s(%.0fcm)"), *Actor->GetName(), DeltaZ));
+				}
+				return; // membership is spatial + exclusive to one arena — orphans (no owning arena) are check (2)'s job
+			}
+		};
+		for (TActorIterator<AFPSRArenaBlocker> It(World); It; ++It) { CheckZ(*It); }
+		for (TActorIterator<AFPSRArenaLandmark> It(World); It; ++It) { CheckZ(*It); }
+		for (TActorIterator<AFPSRArenaDestructible> It(World); It; ++It) { CheckZ(*It); }
+		if (OffPlaneMarkers.Num() > 0)
+		{
+			Report += FString::Printf(
+				TEXT("[경고] 아레나 바닥에서 %.0fcm 넘게 떨어진 마커 %d개: %s\n공중/지하 배치도 XY 판정이라 그대로 "
+				     "래스터화됩니다 — 의도한 배치가 맞는지 확인하세요.\n"),
+				ArenaAuthoringZToleranceCm, OffPlaneMarkers.Num(), *FString::Join(OffPlaneMarkers, TEXT(", ")));
+		}
+
 		if (Report.IsEmpty())
 		{
-			Report = TEXT("레벨 전체: 시작 아레나 1개 · 미소속 마커 없음.\n");
+			Report = TEXT("레벨 전체: 시작 아레나 1개 · 미소속 마커 없음 · 회전 이상 없음 · 바닥 정렬 이상 없음.\n");
 		}
 		return Report + TEXT("\n");
 	}

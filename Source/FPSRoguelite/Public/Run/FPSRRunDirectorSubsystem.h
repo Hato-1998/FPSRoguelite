@@ -29,6 +29,14 @@ public:
 	/** Start the run: reset the clock and activate the director timer loop. */
 	void StartRun();
 
+	/** Cancel whatever mission is currently active, with NO success/failure consequence (no reward grant, no
+	 *  "Mission failed" log) — a pure teardown, distinct from both a successful clear and a timeout/fail. Public
+	 *  wrapper around the private DestroyActiveMission so a caller outside this subsystem (currently only
+	 *  UFPSRStageDirectorSubsystem::PerformSwap, on an arena swap — ADR 0010 D6) can reach it without taking on the
+	 *  rest of the mission lifecycle. Returns true if a mission was actually active (and is now gone); false is a
+	 *  harmless no-op, so a caller that doesn't care may ignore the return value. */
+	bool CancelActiveMission();
+
 	// Debug/testing entry points
 	void DebugTriggerMission(int32 WindowIndex = -1, int32 PoolIndex = -1);
 	void DebugClearMission();
