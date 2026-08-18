@@ -327,6 +327,35 @@ bool AFPSRArenaActor::ServerRegenerate(int32 NewSeed)
 	ActiveSeed = NewSeed;
 	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRArenaActor, ActiveSeed, this);
 
+	// ADR 0012: a BAKED arena has nothing to regenerate — its mask is authored geometry, not a function of the
+	// seed. Falling through to the generator here would REPLACE the baked mask with procedural output, and the
+	// swarm would start pathing against walls that are not in the level while the players see the level's real
+	// ones. The stage director calls this on every swap (FPSRStageDirectorSubsystem), so this branch is the
+	// difference between a working transition and a silently broken one — it is not defensive padding.
+	if (HasBakedSurface())
+	{
+		if (!AdoptBakedLayout())
+		{
+			UE_LOG(LogFPSR, Error, TEXT("[Arena] %s has a bake but could not adopt it — flow field left untouched."), *GetName());
+			return false;
+		}
+
+		// Same publish gate as the procedural path below: only the LIVE arena's mask may reach the flow field.
+		if (!bIsArenaActive)
+		{
+			UE_LOG(LogFPSR, Verbose, TEXT("[Arena] %s re-adopted its bake but is not the active arena — flow field untouched."), *GetName());
+			return true;
+		}
+		if (UWorld* World = GetWorld())
+		{
+			if (UFPSRFlowFieldSubsystem* Flow = World->GetSubsystem<UFPSRFlowFieldSubsystem>())
+			{
+				Flow->AdoptArenaSurface(Layout.Surface);
+			}
+		}
+		return true;
+	}
+
 	if (!BuildLocalLayout())
 	{
 		// Deliberately no fallback: ADR 0010 invariant 5 says the generator owns the mask, and a world-trace
