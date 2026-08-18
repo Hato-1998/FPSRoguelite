@@ -357,6 +357,16 @@ void FFPSRArenaAuthoringTool::ValidateArenaInLevel()
 		{
 			Body += TEXT("  ⚠ 베이크 데이터가 없어 절차 레이아웃을 검사했습니다 — 런타임이 실제로 쓰는 마스크가 아닙니다. 먼저 '아레나 베이크' 를 돌리세요.\n");
 		}
+
+		// ADR 0012 5겹 검사 ② — 스테일 대조. 위의 통과/실패보다 이것이 먼저 읽혀야 한다: 베이크가 레벨과
+		// 다르면 위 결과는 **지금 레벨이 아니라 옛 레벨**에 대한 판정이라, PASS 든 FAIL 이든 의미가 없다.
+		const FFPSRArenaBakeCheck Freshness = FFPSRArenaBakeHash::CheckFreshness(*Arena);
+		Body += FString::Printf(TEXT("  %s %s\n"),
+			Freshness.IsProblem() ? TEXT("🔴") : TEXT("✔"), *Freshness.Message);
+		if (Freshness.Freshness == EFPSRArenaBakeFreshness::Stale && bUsedBake)
+		{
+			Body += TEXT("  → 위 검사 결과는 지금 레벨이 아니라 마지막으로 구웠던 레벨에 대한 것입니다. 다시 굽기 전에는 통과든 실패든 믿지 마세요.\n");
+		}
 		if (Result.Errors.Num() > 0)
 		{
 			Body += TEXT("[오류]\n") + FString::Join(Result.Errors, TEXT("\n")) + TEXT("\n");

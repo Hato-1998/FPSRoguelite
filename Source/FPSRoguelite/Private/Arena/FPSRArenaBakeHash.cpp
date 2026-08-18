@@ -2,6 +2,7 @@
 
 #include "Arena/FPSRArenaBakeHash.h"
 #include "Arena/FPSRArenaActor.h"
+#include "Arena/FPSRArenaBakeDataAsset.h" // CheckFreshness reads IsBaked()/SourceHash off the asset
 #include "Core/FPSRLogChannels.h"
 
 #include "Components/PrimitiveComponent.h"
@@ -55,6 +56,56 @@ namespace
 
 		return Comp->GetCollisionObjectType() == ECC_WorldStatic;
 	}
+}
+
+FFPSRArenaBakeCheck FFPSRArenaBakeHash::CheckFreshness(const AFPSRArenaActor& Arena)
+{
+	FFPSRArenaBakeCheck Check;
+
+	const UFPSRArenaBakeDataAsset* Asset = Arena.GetBakeData();
+	if (!Asset)
+	{
+		// 스테일과 구분한다. 아직 안 물린 것은 저작 중인 정상 상태일 수 있고, 스테일은 언제나 사고다.
+		Check.Freshness = EFPSRArenaBakeFreshness::NoAsset;
+		Check.Message = FString::Printf(
+			TEXT("[%s] 베이크 데이터가 지정되지 않았습니다. UFPSRArenaBakeDataAsset 을 만들어 액터의 '베이크 데이터' 에 물리고 'Tools > FPSR > 아레나 베이크' 를 실행하세요."),
+			*Arena.GetName());
+		return Check;
+	}
+
+	if (!Asset->IsBaked() || Asset->SourceHash.IsEmpty())
+	{
+		Check.Freshness = EFPSRArenaBakeFreshness::NotBaked;
+		Check.Message = FString::Printf(
+			TEXT("[%s] 베이크 에셋 '%s' 가 비어 있습니다(굽지 않았거나 저장되지 않음). 'Tools > FPSR > 아레나 베이크' 후 Ctrl+S."),
+			*Arena.GetName(), *Asset->GetName());
+		return Check;
+	}
+
+	if (!Compute(Arena, Check.Current))
+	{
+		// 해시를 못 구한 상태에서 "일치"라고 답하면 안 된다 — 모르는 것은 스테일로 친다(fail-closed).
+		Check.Freshness = EFPSRArenaBakeFreshness::Stale;
+		Check.Message = FString::Printf(
+			TEXT("[%s] 현재 레벨의 소스 해시를 계산할 수 없어 베이크 신선도를 확인하지 못했습니다 — 스테일로 간주합니다."),
+			*Arena.GetName());
+		return Check;
+	}
+
+	if (Check.Current.Hash != Asset->SourceHash)
+	{
+		Check.Freshness = EFPSRArenaBakeFreshness::Stale;
+		Check.Message = FString::Printf(
+			TEXT("[%s] 베이크가 레벨과 다릅니다(STALE). 지오메트리를 고치고 다시 굽지 않았습니다 — 화면은 새 지오메트리를, 적은 옛 마스크를 봅니다. 저장 해시 %s / 현재 %s · 현재 소스 %d액터(%d컴포넌트). 'Tools > FPSR > 아레나 베이크' 를 다시 실행하세요."),
+			*Arena.GetName(), *Asset->SourceHash.Left(12), *Check.Current.Hash.Left(12),
+			Check.Current.ActorCount, Check.Current.ComponentCount);
+		return Check;
+	}
+
+	Check.Freshness = EFPSRArenaBakeFreshness::Fresh;
+	Check.Message = FString::Printf(TEXT("[%s] 베이크 최신 (소스 %d액터 / %d컴포넌트)."),
+		*Arena.GetName(), Check.Current.ActorCount, Check.Current.ComponentCount);
+	return Check;
 }
 
 bool FFPSRArenaBakeHash::Compute(const AFPSRArenaActor& Arena, FFPSRArenaBakeSourceDigest& Out)

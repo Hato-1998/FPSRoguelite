@@ -2,6 +2,7 @@
 
 #include "Arena/FPSRArenaActor.h"
 #include "Arena/FPSRArenaBakeDataAsset.h"
+#include "Arena/FPSRArenaBakeHash.h"
 #include "Arena/FPSRArenaDestructible.h"
 #include "Arena/FPSRArenaGenerator.h"
 #include "Arena/FPSRArenaMarkers.h"
@@ -698,6 +699,20 @@ bool AFPSRArenaActor::AdoptBakedLayout()
 	UE_LOG(LogFPSR, Log, TEXT("[Arena] %s adopted BAKED layout: grid=%dx%d cell=%.0f origin=%s landmarks=%d"),
 		*GetName(), Layout.GridDims.X, Layout.GridDims.Y, Layout.CellSize,
 		*Layout.GridOrigin.ToString(), Layout.Landmarks.Num());
+
+#if !UE_BUILD_SHIPPING
+	// ADR 0012 5겹 검사 ⑤ — 월드 시작 스테일 알람. 게이트가 아니라 경보다(0011 E4): 여기서 막아도 고칠
+	// 사람이 그 자리에 없고, 판정 시점은 에디터다. 그래도 남기는 이유는 앞의 네 겹을 전부 통과해 버린
+	// 베이크가 존재할 수 있고, 그때 이 줄이 "적이 왜 이러지"를 몇 시간에서 몇 초로 줄이기 때문이다.
+	//
+	// 셰이핑 빌드에서는 뺀다 — 레벨의 전 액터를 훑어 해시하는 비용을 출시 빌드가 낼 이유가 없고,
+	// 출시 시점에는 이미 커밋 게이트(③④)를 통과한 베이크만 존재한다.
+	const FFPSRArenaBakeCheck Freshness = FFPSRArenaBakeHash::CheckFreshness(*this);
+	if (Freshness.IsProblem())
+	{
+		UE_LOG(LogFPSR, Error, TEXT("[Arena] %s"), *Freshness.Message);
+	}
+#endif
 
 	// 검사는 경보이지 게이트가 아니다(0011 E4) — 여기서 막아도 고칠 사람이 그 자리에 없다. 판정 시점은
 	// 에디터이고, 이 줄은 "에디터에서 통과시킨 것이 런타임에도 그대로인가"를 보는 회귀망이다.
