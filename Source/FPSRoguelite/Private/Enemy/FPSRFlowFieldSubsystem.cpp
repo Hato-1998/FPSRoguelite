@@ -120,10 +120,12 @@ void UFPSRFlowFieldSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 	// FPSRArenaActor::PostInitializeComponents for the full chain).
 	if (AFPSRArenaActor* Arena = AFPSRArenaActor::FindActiveInWorld(&InWorld))
 	{
-		// ADR 0012: a BAKED mask wins outright. It is the invariant-1 source — produced in the editor from the
-		// level's own collision, so what the designer sees IS what the swarm believes. The procedural branch below
-		// only survives until the generator moves to the editor module (its own board row); it is not a fallback
-		// the baked path may quietly fail into, which is why the two are separate branches rather than a ?:.
+		// ADR 0012 invariant 1: the BAKED mask is the only source. It is produced in the editor from the level's
+		// own collision, so what the designer sees IS what the swarm believes. There is deliberately no second
+		// branch here — the procedural fallback that used to sit below was removed with the runtime generator,
+		// and a world-trace fallback is forbidden outright: the trace anchors its grid Z from the PlayerStart
+		// downtrace, so the day it fired next to a parked reserve arena it would anchor the field to that
+		// arena's roof.
 		FFPSRFlowFieldSurfaceData BakedWorld;
 		if (Arena->GetBakedWorldSurface(BakedWorld))
 		{
@@ -135,27 +137,14 @@ void UFPSRFlowFieldSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 				TEXT("[FlowField] Arena field adopted from %s BAKE (%dx%d cell=%.0f) — no world trace, no generation."),
 				*Arena->GetName(), BakedWorld.GridDimX, BakedWorld.GridDimY, BakedWorld.CellSize);
 		}
-		else if (Arena->BuildLocalLayout())
-		{
-			UnifiedComputer = NewObject<UFPSRFlowFieldComputer>(this);
-			UnifiedComputer->BuildFromSurfaceData(Arena->GetLayout().Surface);
-			UnifiedComputer->ExtractSurfaceData(BakedBaseline);
-			bHasBaseline = true;
-			// Deliberately a WARNING, not a Log line. ADR 0012 retired runtime generation; an arena still reaching
-			// this branch has no bake asset assigned (or an empty one), which means the level a designer is looking
-			// at and the mask the swarm uses came from different places. That is the exact condition 0012 exists to
-			// remove, so it should be visible in the log rather than read as normal operation.
-			UE_LOG(LogFPSR, Warning,
-				TEXT("[FlowField] %s has NO baked mask — fell back to procedural generation (seed %d). ADR 0012: assign a UFPSRArenaBakeDataAsset and bake it in the editor; this path is being removed."),
-				*Arena->GetName(), Arena->GetActiveSeed());
-		}
 		else
 		{
-			// Fail-fast, NOT fall-through. Invariant 5 forbids a world-trace fallback: the trace anchors its grid Z
-			// from the PlayerStart downtrace, and ADR 0010 keeps a spare arena parked below the live one — the day
-			// this fallback fired it would anchor the whole field to that spare arena's roof.
+			// Fail-fast, NOT fall-through. An arena reaching this has no bake asset assigned (or an empty one),
+			// which means the level a designer is looking at and the mask the swarm would use came from different
+			// places — the exact condition ADR 0012 exists to remove. Building NO field makes that loud; quietly
+			// substituting one makes it a bug someone finds in playtest instead.
 			UE_LOG(LogFPSR, Error,
-				TEXT("[FlowField] %s is present but produced no layout — building NO flow field. This is a content error (fix the arena params); the world-trace bake is deliberately NOT used as a fallback."),
+				TEXT("[FlowField] %s has NO baked mask — building NO flow field. Assign a UFPSRArenaBakeDataAsset and bake it (Tools > FPSR > 아레나 베이크); the world-trace bake is deliberately NOT used as a fallback."),
 				*Arena->GetName());
 		}
 	}

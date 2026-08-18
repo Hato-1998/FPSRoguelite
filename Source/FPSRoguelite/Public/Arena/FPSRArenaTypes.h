@@ -154,7 +154,7 @@ struct FFPSRArenaAuthoredLandmark
  * be a runtime world query — exactly what rasterising (instead of tracing) authored volumes exists to avoid (see
  * FFPSRArenaAuthoredBox's comment above). Declaring it here means the generator (blocking, at
  * FFPSRArenaGenerator::Generate) and the destructible actor (opening, at HandleBrokenAuthority) both call
- * FFPSRArenaGenerator::ComputeDestructibleCells — the SAME function — so the two sides can never disagree about
+ * FFPSRArenaCells::ComputeDestructibleCells — the SAME function — so the two sides can never disagree about
  * which cells one prop owns.
  */
 USTRUCT()
@@ -319,7 +319,7 @@ struct FFPSRArenaLayout
 
 	/** Cells each authored destructible blocked while intact, one array per destructible (index-parallel with
 	 *  Authored.Destructibles). Debug/validator only, deliberately NOT UPROPERTY-exposed: the truth at break time
-	 *  is recomputed by the destructible actor via the SAME function (FFPSRArenaGenerator::ComputeDestructibleCells),
+	 *  is recomputed by the destructible actor via the SAME function (FFPSRArenaCells::ComputeDestructibleCells),
 	 *  because this layout is regenerated fresh from every seed — caching state here would go stale the moment the
 	 *  seed (or the authored destructibles) changes. */
 	TArray<TArray<int32>> DestructibleCells;

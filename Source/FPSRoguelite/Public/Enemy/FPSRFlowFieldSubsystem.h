@@ -89,7 +89,7 @@ public:
 	 *  AFPSRDoor::HandleBroken; the door->cell mapping is UFPSRFlowFieldComputer::MapDoorSeamCellPairs. */
 	void NotifyDoorBroken(const AActor* Door);
 
-	/** ADR 0010 D7: an arena destructible broke and its AUTHORED cells (FFPSRArenaGenerator::ComputeDestructibleCells)
+	/** ADR 0010 D7: an arena destructible broke and its AUTHORED cells (FFPSRArenaCells::ComputeDestructibleCells)
 	 *  should open — blocked -> open stamp, then a topology generation bump + recompute. Unlike NotifyDoorBroken,
 	 *  several of these can land in the SAME frame (an explosion chaining multiple props), so the recompute is
 	 *  coalesced to ONE per frame via SetTimerForNextTick rather than run immediately — ADR 0010 D7: "제한해야 할

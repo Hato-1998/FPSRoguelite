@@ -25,6 +25,12 @@ class FPSROGUELITE_API UFPSRStageDirectorSubsystem : public UWorldSubsystem
 	GENERATED_BODY()
 
 public:
+	/** Parks the arena AFTER the starting one as soon as the world begins (ADR 0012 axis 5) — the whole point is
+	 *  that AddToWorld is paid a stage early, so the first park cannot wait for the first transition. */
+	virtual void OnWorldBeginPlay(UWorld& InWorld) override;
+
+	virtual void Deinitialize() override;
+
 	/** Requested by a broken suppressor's UFPSRDestructibleReward_StageTransition::Grant(). Silently ignored if a
 	 *  transition is already in progress (Phase != None) — several suppressors can exist in one arena, or an
 	 *  explosion can finish more than one at once, and only the FIRST request should start the state machine. */
@@ -76,9 +82,38 @@ private:
 	UFUNCTION()
 	void HandleRunStateChanged();
 
-	/** Pending -> Swapping -> PerformSwap, guarded by CanSwapNow. Safe to call redundantly — HandleRunStateChanged
+	/** Pending -> Swapping -> BeginSwap, guarded by CanSwapNow. Safe to call redundantly — HandleRunStateChanged
 	 *  can fire while Pending for reasons unrelated to the freeze (e.g. mission progress ticking on OnRunStateChanged). */
 	void TrySwap();
+
+	/**
+	 * Entry point for the swap once the dealing window has closed: hand over to PerformSwap the moment the
+	 * destination arena is visible to EVERY connection, or after StageSwapReadyTimeoutSeconds regardless.
+	 *
+	 * Sublevel visibility is per client (UNetConnection::ClientVisibleLevelNames), and the server will not
+	 * replicate an actor in a level a given client has not made visible — so swapping to an arena a client
+	 * cannot see teleports that player into a space with no geometry, no destructibles and no ActiveArena
+	 * pointer. ADR 0012 axis 5 makes this wait normally ZERO by parking a stage early; this is the tail case.
+	 *
+	 * This does NOT put the wait inside the damage-dealing window. Grace has already ended by the time anything
+	 * here runs (see the call sites), so ADR 0010 invariant 8 — a FIXED reward window — is untouched.
+	 */
+	void BeginSwap();
+
+	/** True (and swaps) if the destination is ready for everyone. False leaves the caller to keep waiting. */
+	bool TrySwapIfDestinationReady();
+
+	/** Retry body for BeginSwap's wait; gives up (and swaps anyway, loudly) at the authored timeout. */
+	void PollSwapReadiness();
+
+	/** Authored everyone-ready wait cap, or DefaultSwapReadyTimeoutSeconds when the run has no schedule asset. */
+	float GetSwapReadyTimeoutSeconds() const;
+
+	/** Ask UFPSRArenaStreamSubsystem to park whatever arena comes after StageOrder. No-op with one arena. */
+	void ParkArenaAfter(int32 StageOrder) const;
+
+	/** StageOrder of the arena the run is standing in right now, or INDEX_NONE. */
+	int32 GetCurrentStageOrder() const;
 
 	/** The swap itself: activate the destination, regenerate it, teleport living players, deactivate the source,
 	 *  cancel any still-active mission (its objective was left behind in the old arena), release the leftover
@@ -103,4 +138,18 @@ private:
 
 	/** One-shot timer for the Grace dealing window (armed by RequestTransition, fires OnDealingWindowClosed). */
 	FTimerHandle DealingTimerHandle;
+
+	/** Repeating timer for the everyone-ready wait in BeginSwap. Only ever active while Phase == Swapping. */
+	FTimerHandle SwapReadyTimerHandle;
+
+	/** Seconds BeginSwap has been waiting for the destination arena to reach every connection. */
+	float SwapReadyElapsed = 0.0f;
+
+	/** How often the everyone-ready wait re-checks. Matches UFPSRArenaStreamSubsystem's own poll interval —
+	 *  checking faster than the thing being observed updates only burns queries. */
+	static constexpr float SwapReadyPollInterval = 0.2f;
+
+	/** Fallback everyone-ready timeout when the run has no schedule asset assigned (mirrors
+	 *  DefaultStageGraceSeconds — an asset-less run still needs to work, just untuned). */
+	static constexpr float DefaultSwapReadyTimeoutSeconds = 5.0f;
 };

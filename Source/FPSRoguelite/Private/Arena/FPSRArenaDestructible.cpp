@@ -2,7 +2,7 @@
 
 #include "Arena/FPSRArenaDestructible.h"
 #include "Arena/FPSRArenaActor.h"
-#include "Arena/FPSRArenaGenerator.h"
+#include "Arena/FPSRArenaCells.h"
 #include "Arena/FPSRArenaTypes.h"
 #include "Enemy/FPSRFlowFieldSubsystem.h"
 #include "Core/FPSRLogChannels.h"
@@ -44,7 +44,7 @@ void AFPSRArenaDestructible::HandleBrokenAuthority(AActor* Breaker)
 				Self.FootprintCells = FootprintCells;
 
 				TArray<int32> Cells;
-				FFPSRArenaGenerator::ComputeDestructibleCells(Self, Origin, Params.CellSize, Params.ArenaSizeCells, Cells);
+				FFPSRArenaCells::ComputeDestructibleCells(Self, Origin, Params.CellSize, Params.ArenaSizeCells, Cells);
 
 				if (Cells.Num() > 0)
 				{

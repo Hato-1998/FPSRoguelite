@@ -418,10 +418,10 @@ void AFPSRGameState::ApplyStageTransitionLocal()
 	// ActiveArena. P3 redteam fix: all FOUR stage-transition fields share this one OnRep, so a client that receives
 	// several of them in the same replication batch calls ApplyStageTransitionLocal once PER FIELD that changed —
 	// up to 4x for one logical swap (e.g. PerformSwap's final commit, which calls SetStageIndex/SetActiveArena/
-	// SetStageTransition back to back) — and this used to re-run the FULL sweep every time. Each pass is a
-	// TActorIterator scan of every blocker/landmark/destructible in every arena (SetArenaActive's own cost), so
-	// the repeats were wasted work, not just redundant — more expensive as marker counts grow, worst case a
-	// swap-frame spike. Skipping once ActiveArena is already the arena LastAppliedActiveArena recorded collapses
+	// SetStageTransition back to back) — and this used to re-run the FULL sweep every time. Each pass walks every
+	// actor of every arena's own level, hiding or restoring it (SetArenaActive's own cost, ADR 0012), so the
+	// repeats were wasted work, not just redundant — more expensive as levels fill up, worst case a swap-frame
+	// spike. Skipping once ActiveArena is already the arena LastAppliedActiveArena recorded collapses
 	// the (up to) 4 calls in one batch down to exactly one real sweep, with the identical end state the
 	// unconditional version produced (SetArenaActive is idempotent, so re-asserting was never adding anything new).
 	if (ActiveArena && LastAppliedActiveArena != ActiveArena)

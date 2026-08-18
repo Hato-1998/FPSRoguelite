@@ -1,7 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Arena/FPSRArenaValidator.h"
-#include "Arena/FPSRArenaGenerator.h"
+#include "Arena/FPSRArenaCells.h"
 
 namespace
 {
@@ -28,7 +28,7 @@ namespace
 			ComputeAxisRunLengths(/*bAlongX=*/false, RunYLen);
 		}
 
-		bool Open(int32 CX, int32 CY) const { return FFPSRArenaGenerator::IsCellOpen(L, CX, CY); }
+		bool Open(int32 CX, int32 CY) const { return FFPSRArenaCells::IsCellOpen(L, CX, CY); }
 
 		/** Length of the maximal run of open cells along X (resp. Y) containing this cell. O(1) — see RunXLen/RunYLen.
 		 *  Bounds-checked defensively (every real caller already only asks about an open, in-grid cell). */
@@ -210,7 +210,7 @@ FFPSRArenaValidationResult FFPSRArenaValidator::Validate(const FFPSRArenaLayout&
 	// A landmark is the only thing that answers "which way am I facing" in a uniform-floor first-person arena
 	// (see AFPSRArenaLandmark's class comment), so one sitting on a cell the mask calls closed is a real failure —
 	// it looks authored but is unreachable/invisible from the floor the player actually walks. C.Open() already
-	// reads false for an off-grid cell (FFPSRArenaGenerator::IsCellOpen bounds-checks first), so a single check
+	// reads false for an off-grid cell (FFPSRArenaCells::IsCellOpen bounds-checks first), so a single check
 	// covers "off the grid entirely" and "on the grid but blocked" both.
 	for (const FFPSRArenaAuthoredLandmark& Landmark : Layout.Landmarks)
 	{

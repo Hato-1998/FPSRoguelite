@@ -4,7 +4,7 @@
 #include "Arena/FPSRArenaBakeDataAsset.h"
 #include "Arena/FPSRArenaBakeHash.h"
 #include "Arena/FPSRArenaDestructible.h"
-#include "Arena/FPSRArenaGenerator.h"
+#include "Arena/FPSRArenaCells.h"
 #include "Arena/FPSRArenaMarkers.h"
 #include "Arena/FPSRArenaParamsDataAsset.h"
 #include "Arena/FPSRArenaValidator.h"
@@ -12,8 +12,7 @@
 #include "Enemy/FPSRFlowFieldSubsystem.h"
 #include "Core/FPSRLogChannels.h"
 
-#include "Components/HierarchicalInstancedStaticMeshComponent.h"
-#include "Engine/StaticMesh.h"
+#include "Engine/Level.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "GameFramework/PlayerController.h"
@@ -28,10 +27,6 @@
 
 namespace
 {
-	/** Boundary wall thickness (cm). Cosmetic — the flow field already has no edge pointing out of the grid, so
-	 *  this only stops the PLAYER from walking off. */
-	constexpr double BoundaryWallThicknessCm = 100.0;
-
 	/** P3 redteam fix: how far GetPlayerEntryTransforms searches outward (in cells) for an open cell to snap a
 	 *  candidate entry point onto before giving up and leaving it exactly where it was authored/computed. */
 	constexpr int32 PlayerEntrySnapMaxRadiusCells = 32;
@@ -43,7 +38,7 @@ namespace
 	 *  if nothing opens within MaxRadiusCells. */
 	bool FindNearestOpenCell(const FFPSRArenaLayout& Layout, const FIntPoint& AnchorCell, int32 MaxRadiusCells, FIntPoint& OutCell)
 	{
-		if (FFPSRArenaGenerator::IsCellOpen(Layout, AnchorCell.X, AnchorCell.Y))
+		if (FFPSRArenaCells::IsCellOpen(Layout, AnchorCell.X, AnchorCell.Y))
 		{
 			OutCell = AnchorCell;
 			return true;
@@ -57,7 +52,7 @@ namespace
 					if (FMath::Max(FMath::Abs(DX), FMath::Abs(DY)) != R) { continue; } // ring perimeter only
 					const int32 CX = AnchorCell.X + DX;
 					const int32 CY = AnchorCell.Y + DY;
-					if (FFPSRArenaGenerator::IsCellOpen(Layout, CX, CY))
+					if (FFPSRArenaCells::IsCellOpen(Layout, CX, CY))
 					{
 						OutCell = FIntPoint(CX, CY);
 						return true;
@@ -104,29 +99,6 @@ AFPSRArenaActor::AFPSRArenaActor()
 
 	SceneRoot = CreateDefaultSubobject<USceneComponent>(TEXT("SceneRoot"));
 	SetRootComponent(SceneRoot);
-
-	BlockingMeshes = CreateDefaultSubobject<UHierarchicalInstancedStaticMeshComponent>(TEXT("BlockingMeshes"));
-	BlockingMeshes->SetupAttachment(SceneRoot);
-	BlockingMeshes->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-	BlockingMeshes->SetCollisionProfileName(TEXT("BlockAll"));
-	BlockingMeshes->SetMobility(EComponentMobility::Static);
-
-	FloorMeshes = CreateDefaultSubobject<UHierarchicalInstancedStaticMeshComponent>(TEXT("FloorMeshes"));
-	FloorMeshes->SetupAttachment(SceneRoot);
-	FloorMeshes->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-	FloorMeshes->SetCollisionProfileName(TEXT("BlockAll"));
-	FloorMeshes->SetMobility(EComponentMobility::Static);
-
-	// L2 floor wiring (ADR 0010 D8): NoCollision throughout — 0010 D4 「평면 장식」, these never affect traversal.
-	TraceMeshes = CreateDefaultSubobject<UHierarchicalInstancedStaticMeshComponent>(TEXT("TraceMeshes"));
-	TraceMeshes->SetupAttachment(SceneRoot);
-	TraceMeshes->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	TraceMeshes->SetMobility(EComponentMobility::Static);
-
-	JunctionMeshes = CreateDefaultSubobject<UHierarchicalInstancedStaticMeshComponent>(TEXT("JunctionMeshes"));
-	JunctionMeshes->SetupAttachment(SceneRoot);
-	JunctionMeshes->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	JunctionMeshes->SetMobility(EComponentMobility::Static);
 }
 
 void AFPSRArenaActor::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
@@ -202,24 +174,23 @@ void AFPSRArenaActor::BeginPlay()
 		}
 	}
 
-	// F1: the server's layout was already built by UFPSRFlowFieldSubsystem::OnWorldBeginPlay PULLING it
-	// (Arena->BuildLocalLayout(), reading the ActiveSeed PostInitializeComponents already finalized) — calling
-	// BuildLocalLayout() again here would silently regenerate the whole grid a second time for nothing. A client
-	// has no such pull (the flow field subsystem is server-only — HasServerAuthority() gates its whole
-	// OnWorldBeginPlay), so this IS its first build, UNLESS OnRep_ActiveSeed already ran first (OnRep can fire
-	// before BeginPlay for an actor that exists at level load). Either way, HasLayout() is the correct guard.
-	// ADR 0012: 베이크가 있으면 그것을 채택하고, 없을 때만 구 절차 생성으로 내려간다.
+	// F1: on the server the layout is usually already in place — UFPSRFlowFieldSubsystem::OnWorldBeginPlay PULLs
+	// it before any actor's BeginPlay runs (see this class's header for the engine-verified order). A client has
+	// no such pull (the flow field subsystem is server-only), so this IS its first adopt, UNLESS OnRep_ActiveSeed
+	// already ran first (OnRep can fire before BeginPlay for an actor that exists at level load). Either way,
+	// HasLayout() is the correct guard.
+	//
+	// A PARKED arena reaches this the same way, when its sublevel is made visible mid-play: AddToWorld routes
+	// actor initialisation and BeginPlay for the newly added level. Adopting here is what gives the reserve arena
+	// a Layout of its own before the swap, so PerformSwap's activation is a publish and not a build.
+	//
+	// ADR 0012: there is no procedural fallback below this any more. No bake = no layout, and that is a content
+	// error the log names rather than something the runtime papers over (invariant 1).
 	if (!HasLayout() && !AdoptBakedLayout())
 	{
-		BuildLocalLayout();
-	}
-
-	// 불변식 3(에디터에서 보이는 것이 인게임에 나오는 것이다): 베이크된 아레나의 지오메트리는 레벨에 저작돼
-	// 있으므로 런타임이 또 만들면 화면에 아레나가 둘이 된다 — 이 ADR 을 낳은 바로 그 증상이다. 절차 경로만
-	// 화이트박스를 짓고, 그 경로는 생성기가 에디터 모듈로 이사하면서 사라진다.
-	if (!Layout.bFromBake)
-	{
-		RebuildRepresentation();
+		UE_LOG(LogFPSR, Error,
+			TEXT("[Arena] %s has NO usable baked mask — this arena has no layout at all. Assign a UFPSRArenaBakeDataAsset and bake it (Tools > FPSR > 아레나 베이크)."),
+			*GetName());
 	}
 }
 
@@ -231,89 +202,6 @@ bool AFPSRArenaActor::GetGenParams(FFPSRArenaGenParams& OutParams, FVector& OutO
 	}
 	OutParams = ArenaParams->ToGenParams();
 	OutOrigin = ComputeGridOrigin(OutParams);
-	return true;
-}
-
-bool AFPSRArenaActor::BuildLayoutForSeed(int32 Seed, FFPSRArenaLayout& OutLayout) const
-{
-	FFPSRArenaGenParams GenParams;
-	FVector Origin;
-	if (!GetGenParams(GenParams, Origin))
-	{
-		UE_LOG(LogFPSR, Error, TEXT("[Arena] %s has no ArenaParams — no layout, no flow field. Assign a UFPSRArenaParamsDataAsset."),
-			*GetName());
-		OutLayout = FFPSRArenaLayout();
-		return false;
-	}
-
-	// Gather what the designer placed. Note this reads ACTORS, not collision — the arena is told what blocks it
-	// rather than discovering it, which is what keeps the mask free of world queries (ADR 0011 E3).
-	//
-	// Ownership is SPATIAL (ContainsWorldLocation), not an authored per-actor link: with several arenas now able
-	// to live in one level (ADR 0010 D6, same-level parking), a marker actor carries no "which arena am I in"
-	// property to keep in sync by hand — being physically inside an arena's own cell grid IS the membership test,
-	// so it cannot drift as markers are added, moved, or a whole new arena is dropped into the level.
-	FFPSRArenaAuthoredInput Authored;
-	if (const UWorld* World = GetWorld())
-	{
-		for (TActorIterator<AFPSRArenaBlocker> It(const_cast<UWorld*>(World)); It; ++It)
-		{
-			const AFPSRArenaBlocker* Blocker = *It;
-			if (!IsValid(Blocker) || !ContainsWorldLocation(Blocker->GetActorLocation())) { continue; }
-			FFPSRArenaAuthoredBox BoxEntry;
-			BoxEntry.Center = Blocker->GetActorLocation();
-			BoxEntry.HalfExtentXY = Blocker->GetHalfExtentXY();
-			BoxEntry.YawDegrees = Blocker->GetYawDegrees();
-			Authored.Blockers.Add(BoxEntry);
-		}
-		for (TActorIterator<AFPSRArenaLandmark> It(const_cast<UWorld*>(World)); It; ++It)
-		{
-			const AFPSRArenaLandmark* Landmark = *It;
-			if (!IsValid(Landmark) || !ContainsWorldLocation(Landmark->GetActorLocation())) { continue; }
-			FFPSRArenaAuthoredLandmark LandmarkEntry;
-			LandmarkEntry.Location = Landmark->GetActorLocation();
-			LandmarkEntry.ReserveRadiusCells = Landmark->GetReserveRadiusCells();
-			Authored.Landmarks.Add(LandmarkEntry);
-		}
-		for (TActorIterator<AFPSRArenaDestructible> It(const_cast<UWorld*>(World)); It; ++It)
-		{
-			const AFPSRArenaDestructible* Destructible = *It;
-			if (!IsValid(Destructible) || !ContainsWorldLocation(Destructible->GetActorLocation())) { continue; }
-			FFPSRArenaAuthoredDestructible DestructibleEntry;
-			DestructibleEntry.Location = Destructible->GetActorLocation();
-			DestructibleEntry.FootprintCells = Destructible->GetFootprintCells();
-			Authored.Destructibles.Add(DestructibleEntry);
-		}
-	}
-
-	return FFPSRArenaGenerator::Generate(Seed, GenParams, Origin, Authored, OutLayout);
-}
-
-bool AFPSRArenaActor::BuildLocalLayout()
-{
-	FFPSRArenaGenParams GenParams;
-	FVector Origin;
-	if (!GetGenParams(GenParams, Origin) || !BuildLayoutForSeed(ActiveSeed, Layout))
-	{
-		Layout = FFPSRArenaLayout();
-		return false;
-	}
-
-	// Alarm, not a gate (ADR 0011 실패 흐름 1). A broken arena still loads: refusing to build it at runtime would
-	// only mean the map vanishes for whoever is playing, with nobody present to fix the authoring. The verdict that
-	// matters is the editor's — this is here so a regression cannot pass unnoticed.
-	const FFPSRArenaValidationResult Validation = FFPSRArenaValidator::Validate(Layout, GenParams);
-	if (!Validation.Passed())
-	{
-		UE_LOG(LogFPSR, Error, TEXT("[Arena] %s FAILED validation — %s"), *GetName(), *FFPSRArenaValidator::Summarize(Validation));
-		for (const FString& Err : Validation.Errors) { UE_LOG(LogFPSR, Error, TEXT("[Arena]   %s"), *Err); }
-	}
-	else
-	{
-		UE_LOG(LogFPSR, Log, TEXT("[Arena] %s validation %s"), *GetName(), *FFPSRArenaValidator::Summarize(Validation));
-	}
-	for (const FString& Warn : Validation.Warnings) { UE_LOG(LogFPSR, Warning, TEXT("[Arena]   %s"), *Warn); }
-
 	return true;
 }
 
@@ -356,36 +244,13 @@ bool AFPSRArenaActor::ServerRegenerate(int32 NewSeed)
 		return true;
 	}
 
-	if (!BuildLocalLayout())
-	{
-		// Deliberately no fallback: ADR 0010 invariant 5 says the generator owns the mask, and a world-trace
-		// bake here would quietly re-introduce exactly the failure mode that invariant exists to prevent.
-		UE_LOG(LogFPSR, Error, TEXT("[Arena] Regenerate failed for seed %d — flow field left untouched."), NewSeed);
-		return false;
-	}
-
-	RebuildRepresentation();
-
-	// Only the LIVE arena's mask may reach the flow field. With spare arenas parked in the same level (ADR 0010 D6
-	// as amended 2026-08-17), a regenerate on a dormant one — a console command aimed at the wrong actor, a BP
-	// call, a future transition bug — would otherwise hand the swarm the geometry of an arena nobody is standing
-	// in, and enemies would path against walls 300 m away. Regenerating a dormant arena's own layout is fine and
-	// still happens above; publishing it is what is gated.
-	if (!bIsArenaActive)
-	{
-		UE_LOG(LogFPSR, Verbose, TEXT("[Arena] %s regenerated seed %d locally but is not the active arena — flow field untouched."),
-			*GetName(), NewSeed);
-		return true;
-	}
-
-	if (UWorld* World = GetWorld())
-	{
-		if (UFPSRFlowFieldSubsystem* Flow = World->GetSubsystem<UFPSRFlowFieldSubsystem>())
-		{
-			Flow->AdoptArenaSurface(Layout.Surface);
-		}
-	}
-	return true;
+	// No bake = no mask. Deliberately no fallback: ADR 0012 invariant 1 makes the baked data the ONLY source, and
+	// generating or world-tracing one here would quietly re-introduce exactly the mismatch this ADR removed —
+	// the players would see the level's walls while the swarm pathed against something else.
+	UE_LOG(LogFPSR, Error,
+		TEXT("[Arena] %s has no baked mask — regenerate for seed %d did nothing and the flow field is untouched. Assign a UFPSRArenaBakeDataAsset and bake it (Tools > FPSR > 아레나 베이크)."),
+		*GetName(), NewSeed);
+	return false;
 }
 
 void AFPSRArenaActor::OnRep_ActiveSeed()
@@ -393,15 +258,17 @@ void AFPSRArenaActor::OnRep_ActiveSeed()
 	// ADR 0012: a baked arena's geometry is in the .umap, so client and server load the SAME file and there is
 	// nothing to reproduce from the seed — the whole class of "client regenerated different geometry from the
 	// server's mask, so enemies walk through walls" (ADR 0010's ⚠️ on the data-ownership table) cannot happen.
-	// Adopt the bake and stop; do not build whitebox geometry over the authored level.
-	if (AdoptBakedLayout())
+	//
+	// So the seed no longer selects geometry at all. It is kept (and still replicated) because ADR 0012 「이번 런의
+	// 랜덤 선택 결과」 — picking which traversal-neutral / breakable props this run uses — is the next thing that
+	// needs a per-stage seed, and that selection is server-decided and replicated rather than re-derived. Adopting
+	// the bake here is what keeps a client's Layout in step with the server's after a stage swap.
+	if (!AdoptBakedLayout())
 	{
-		return;
+		UE_LOG(LogFPSR, Warning,
+			TEXT("[Arena] %s replicated seed %d but has no usable bake — this client has NO arena layout. Bake it in the editor (Tools > FPSR > 아레나 베이크)."),
+			*GetName(), ActiveSeed);
 	}
-
-	// Legacy procedural path: same seed, same generator, same arena. Nothing about the layout crosses the wire.
-	BuildLocalLayout();
-	RebuildRepresentation();
 }
 
 FVector AFPSRArenaActor::ComputeGridOrigin(const FFPSRArenaGenParams& Params) const
@@ -415,239 +282,76 @@ FVector AFPSRArenaActor::ComputeGridOrigin(const FFPSRArenaGenParams& Params) co
 		Centre.Z);
 }
 
-void AFPSRArenaActor::RebuildRepresentation()
-{
-	if (!BlockingMeshes || !FloorMeshes || !TraceMeshes || !JunctionMeshes)
-	{
-		return;
-	}
-
-	BlockingMeshes->ClearInstances();
-	FloorMeshes->ClearInstances();
-	TraceMeshes->ClearInstances();
-	JunctionMeshes->ClearInstances();
-
-	if (!WhiteboxCubeMesh)
-	{
-		// Not fatal: the debug grid view still shows the topology, which is what invariant 12 actually needs.
-		// No engine asset path is hardcoded here on purpose (asset paths in C++ are banned, and /Engine/ content
-		// is a known cook hazard for this project).
-		UE_LOG(LogFPSR, Warning, TEXT("[Arena] %s has no WhiteboxCubeMesh — geometry not built. Assign any box mesh (size/pivot are read from its bounds), or inspect the topology with FPSR.Arena.DebugGrid 1."),
-			*GetName());
-		return;
-	}
-
-	if (!Layout.IsValid())
-	{
-		return;
-	}
-
-	BlockingMeshes->SetStaticMesh(WhiteboxCubeMesh);
-	FloorMeshes->SetStaticMesh(WhiteboxCubeMesh);
-
-	const double Cell = Layout.CellSize;
-	const double SpanX = Layout.GridDims.X * Cell;
-	const double SpanY = Layout.GridDims.Y * Cell;
-	const FVector Origin = Layout.GridOrigin;
-
-	// Derive the mesh's real size instead of assuming a 100 cm cube: assigning a differently-sized (or off-centre)
-	// box would otherwise scale the whole arena wrong with nothing on screen saying so, and "the arena is subtly
-	// the wrong size" is exactly the kind of bug that survives a playtest and poisons the verdict.
-	const FBoxSphereBounds MeshBounds = WhiteboxCubeMesh->GetBounds();
-	const FVector MeshSize = MeshBounds.BoxExtent * 2.0;
-	if (MeshSize.X <= UE_KINDA_SMALL_NUMBER || MeshSize.Y <= UE_KINDA_SMALL_NUMBER || MeshSize.Z <= UE_KINDA_SMALL_NUMBER)
-	{
-		UE_LOG(LogFPSR, Error, TEXT("[Arena] WhiteboxCubeMesh '%s' has degenerate bounds (%s) — geometry not built."),
-			*WhiteboxCubeMesh->GetName(), *MeshSize.ToString());
-		return;
-	}
-
-	auto AddBox = [MeshSize, MeshOffset = MeshBounds.Origin](
-		UHierarchicalInstancedStaticMeshComponent* Comp, const FVector& WorldCentre, const FVector& SizeCm)
-	{
-		const FVector Scale(SizeCm.X / MeshSize.X, SizeCm.Y / MeshSize.Y, SizeCm.Z / MeshSize.Z);
-		// Cancel the mesh's own pivot offset so WorldCentre really is the centre of the placed box.
-		const FTransform Xf(FRotator::ZeroRotator, WorldCentre - MeshOffset * Scale, Scale);
-		Comp->AddInstance(Xf, /*bWorldSpace=*/true);
-	};
-
-	// Same pivot-cancelling idea as AddBox, but (a) takes a YAW so a trace segment can point along its own
-	// direction, and (b) takes the mesh's size/offset as PARAMETERS rather than a capture, because traces and
-	// junctions are drawn with their OWN meshes (TraceMesh / TraceJunctionMesh), not WhiteboxCubeMesh — one
-	// lambda serves both instead of two near-duplicates that could drift apart.
-	auto AddOrientedBox = [](UHierarchicalInstancedStaticMeshComponent* Comp, const FVector& MeshSizeIn,
-		const FVector& MeshOffsetIn, const FVector& WorldCentre, const FVector& SizeCm, float YawDegrees)
-	{
-		const FVector Scale(SizeCm.X / MeshSizeIn.X, SizeCm.Y / MeshSizeIn.Y, SizeCm.Z / MeshSizeIn.Z);
-		const FRotator Rot(0.0f, YawDegrees, 0.0f);
-		// The pivot offset lives in the mesh's LOCAL space, so it has to be scaled AND rotated (in that order —
-		// TRS) into world space before it can be subtracted from WorldCentre; AddBox skips the rotation only
-		// because its rotation is always identity.
-		const FVector PivotWorld = Rot.RotateVector(MeshOffsetIn * Scale);
-		const FTransform Xf(Rot, WorldCentre - PivotWorld, Scale);
-		Comp->AddInstance(Xf, /*bWorldSpace=*/true);
-	};
-
-	// Floor slab, sitting just under the grid's Z so the walkable surface is exactly GridOrigin.Z.
-	AddBox(FloorMeshes,
-		FVector(Origin.X + SpanX * 0.5, Origin.Y + SpanY * 0.5, Origin.Z - FloorThickness * 0.5),
-		FVector(SpanX, SpanY, FloorThickness));
-
-	// Clusters are NOT drawn here any more (ADR 0011 E2): each AFPSRArenaBlocker carries its own box and mesh, so
-	// what the designer moves in the viewport is the same object the rasteriser reads. Drawing a second copy from
-	// the layout would be a duplicate that agrees with the authored one only until someone nudges a blocker.
-
-	// Boundary walls, placed just OUTSIDE the grid so they never occupy a cell the generator called open.
-	const double T = BoundaryWallThicknessCm;
-	const double WallZ = Origin.Z + WallHeight * 0.5;
-	AddBox(BlockingMeshes, FVector(Origin.X + SpanX * 0.5, Origin.Y - T * 0.5, WallZ), FVector(SpanX + 2 * T, T, WallHeight));
-	AddBox(BlockingMeshes, FVector(Origin.X + SpanX * 0.5, Origin.Y + SpanY + T * 0.5, WallZ), FVector(SpanX + 2 * T, T, WallHeight));
-	AddBox(BlockingMeshes, FVector(Origin.X - T * 0.5, Origin.Y + SpanY * 0.5, WallZ), FVector(T, SpanY, WallHeight));
-	AddBox(BlockingMeshes, FVector(Origin.X + SpanX + T * 0.5, Origin.Y + SpanY * 0.5, WallZ), FVector(T, SpanY, WallHeight));
-
-	// L1 micro props. Both tiers get real collision — that is the point of the height rule rather than a collision
-	// flag: a 30 cm box IS steppable at MaxStepHeight 45, and a 100 cm one IS not. The geometry and the swarm's
-	// mask agree because both are derived from the same number.
-	for (const FFPSRArenaProp& Prop : Layout.Props)
-	{
-		const bool bBlocking = (Prop.Tier == EFPSRArenaPropTier::Blocking);
-		const double PropHeight = bBlocking ? BlockingPropHeight : PassablePropHeight;
-		const FVector Centre = Layout.CellCenterWorld(Prop.Cell.X, Prop.Cell.Y);
-		AddBox(BlockingMeshes,
-			FVector(Centre.X, Centre.Y, Origin.Z + PropHeight * 0.5),
-			FVector(Cell * 0.9, Cell * 0.9, PropHeight));
-	}
-
-	// L2 floor wiring (ADR 0010 D8): each trace segment is a box oriented along the two cells it connects, each
-	// junction a square "via" marker. Both are drawn with their OWN meshes and both are silently skipped (no
-	// warning) when unassigned — unlike WhiteboxCubeMesh above, an unset TraceMesh/TraceJunctionMesh is a normal
-	// "no art yet" authoring state, not a gap in the arena's whole representation. FPSR.Arena.DebugTraces shows
-	// the topology regardless of whether either mesh is assigned.
-	const double TraceZ = Origin.Z + TraceHeightCm * 0.5;
-
-	if (TraceMesh)
-	{
-		const FBoxSphereBounds TraceBounds = TraceMesh->GetBounds();
-		const FVector TraceMeshSize = TraceBounds.BoxExtent * 2.0;
-		if (TraceMeshSize.X <= UE_KINDA_SMALL_NUMBER || TraceMeshSize.Y <= UE_KINDA_SMALL_NUMBER || TraceMeshSize.Z <= UE_KINDA_SMALL_NUMBER)
-		{
-			UE_LOG(LogFPSR, Error, TEXT("[Arena] TraceMesh '%s' has degenerate bounds (%s) — trace geometry not built."),
-				*TraceMesh->GetName(), *TraceMeshSize.ToString());
-		}
-		else
-		{
-			TraceMeshes->SetStaticMesh(TraceMesh);
-			for (const FFPSRArenaTraceSegment& Seg : Layout.Traces)
-			{
-				const FVector FromWorld = Layout.CellCenterWorld(Seg.FromCell.X, Seg.FromCell.Y);
-				const FVector ToWorld = Layout.CellCenterWorld(Seg.ToCell.X, Seg.ToCell.Y);
-				const FVector Delta = ToWorld - FromWorld;
-				// Diagonal segments come out √2·Cell long automatically — no special-casing needed.
-				const double SegLength = Delta.Size();
-				const float SegYaw = static_cast<float>(FMath::RadiansToDegrees(FMath::Atan2(Delta.Y, Delta.X)));
-				const double SegWidth = TraceWidthCm + Seg.WidthClass * TraceWidthPerClassCm;
-				const FVector MidPoint = (FromWorld + ToWorld) * 0.5;
-
-				AddOrientedBox(TraceMeshes, TraceMeshSize, TraceBounds.Origin,
-					FVector(MidPoint.X, MidPoint.Y, TraceZ),
-					FVector(SegLength, SegWidth, TraceHeightCm), SegYaw);
-			}
-		}
-	}
-
-	if (TraceJunctionMesh)
-	{
-		const FBoxSphereBounds JuncBounds = TraceJunctionMesh->GetBounds();
-		const FVector JuncMeshSize = JuncBounds.BoxExtent * 2.0;
-		if (JuncMeshSize.X <= UE_KINDA_SMALL_NUMBER || JuncMeshSize.Y <= UE_KINDA_SMALL_NUMBER || JuncMeshSize.Z <= UE_KINDA_SMALL_NUMBER)
-		{
-			UE_LOG(LogFPSR, Error, TEXT("[Arena] TraceJunctionMesh '%s' has degenerate bounds (%s) — junction geometry not built."),
-				*TraceJunctionMesh->GetName(), *JuncMeshSize.ToString());
-		}
-		else
-		{
-			JunctionMeshes->SetStaticMesh(TraceJunctionMesh);
-			for (const FIntPoint& JCell : Layout.TraceJunctions)
-			{
-				const FVector JWorld = Layout.CellCenterWorld(JCell.X, JCell.Y);
-				AddOrientedBox(JunctionMeshes, JuncMeshSize, JuncBounds.Origin,
-					FVector(JWorld.X, JWorld.Y, TraceZ),
-					FVector(TraceWidthCm, TraceWidthCm, TraceHeightCm), 0.0f);
-			}
-		}
-	}
-
-	UE_LOG(LogFPSR, Log, TEXT("[Arena] Representation rebuilt: %d clusters + %d props + 4 walls + floor (seed %d)."),
-		Layout.Clusters.Num(), Layout.Props.Num(), Layout.Seed);
-}
-
 void AFPSRArenaActor::SetArenaActive(bool bInActive)
 {
 	bIsArenaActive = bInActive;
 
-	if (BlockingMeshes)
+	// ADR 0012: the arena's geometry is LEVEL AUTHORING, not something this actor builds — so "activate" means
+	// showing the sublevel this actor lives in, and "deactivate" means hiding it. The old body toggled four HISM
+	// components; against a baked arena those are empty and that path silently did nothing.
+	//
+	// SCOPE = this actor's own ULevel. Invariant 4 (one arena = one sublevel = one mask) is what makes that exact,
+	// and it is the same scope FFPSRArenaBakeHash::Compute already uses to decide what the mask was baked from —
+	// so the set of things that get hidden and the set of things that are IN the mask are the same set by
+	// construction, not by two lists someone has to keep in agreement.
+	//
+	// This deliberately does NOT replace ContainsWorldLocation, which stays the spatial-membership test for spawn
+	// gating, marker ownership and the bake hash. Only the geometry toggle moved to level scope.
+	//
+	// A parked (visible-but-dormant) arena is hidden rather than left to distance culling: ADR 0012 axis 5 pays
+	// for AddToWorld one stage early, so the level IS in the world and would otherwise render. Hiding keeps its
+	// components registered, which is what makes re-showing it O(1) at swap time.
+	//
+	// Never touches a transform (everything here is Static mobility, and UE forbids moving a Static primitive at
+	// runtime). SetActorHiddenInGame/SetActorEnableCollision are idempotent, so calling this twice with the same
+	// bInActive is a harmless no-op.
+	ULevel* MyLevel = GetLevel();
+	if (!MyLevel)
 	{
-		BlockingMeshes->SetVisibility(bInActive);
-		BlockingMeshes->SetCollisionEnabled(bInActive ? ECollisionEnabled::QueryAndPhysics : ECollisionEnabled::NoCollision);
-	}
-	if (FloorMeshes)
-	{
-		FloorMeshes->SetVisibility(bInActive);
-		FloorMeshes->SetCollisionEnabled(bInActive ? ECollisionEnabled::QueryAndPhysics : ECollisionEnabled::NoCollision);
-	}
-	// L2 wiring is NoCollision (0010 D4 「평면 장식」) so only visibility matters here — but it does matter: a dormant
-	// arena that hid its walls and floor while still drawing its floor traces would leave a glowing circuit diagram
-	// floating in the dark 300 m from the live arena.
-	if (TraceMeshes)
-	{
-		TraceMeshes->SetVisibility(bInActive);
-	}
-	if (JunctionMeshes)
-	{
-		JunctionMeshes->SetVisibility(bInActive);
+		return;
 	}
 
-	// Marker actors physically inside THIS arena's grid — same spatial-ownership test BuildLayoutForSeed uses, so
-	// "which arena does this marker belong to" can never disagree between generation and activation. Transform is
-	// never touched (Static mobility on all three types); SetActorHiddenInGame/SetActorEnableCollision are
-	// idempotent, so calling this twice with the same bInActive is a harmless no-op.
-	if (const UWorld* World = GetWorld())
+	for (AActor* Actor : MyLevel->Actors)
 	{
-		for (TActorIterator<AFPSRArenaBlocker> It(const_cast<UWorld*>(World)); It; ++It)
+		if (!IsValid(Actor) || Actor == this)
 		{
-			AFPSRArenaBlocker* Blocker = *It;
-			if (!IsValid(Blocker) || !ContainsWorldLocation(Blocker->GetActorLocation())) { continue; }
-			Blocker->SetActorHiddenInGame(!bInActive);
-			Blocker->SetActorEnableCollision(bInActive);
+			// The arena actor carries no geometry (a bare SceneComponent since the HISMs went), so there is
+			// nothing to hide — and skipping it keeps the actor performing this operation out of its own
+			// authored-state snapshot, where an entry would only ever be dead weight.
+			continue;
 		}
-		for (TActorIterator<AFPSRArenaLandmark> It(const_cast<UWorld*>(World)); It; ++It)
-		{
-			AFPSRArenaLandmark* Landmark = *It;
-			if (!IsValid(Landmark) || !ContainsWorldLocation(Landmark->GetActorLocation())) { continue; }
-			Landmark->SetActorHiddenInGame(!bInActive);
-			Landmark->SetActorEnableCollision(bInActive);
-		}
-		for (TActorIterator<AFPSRArenaDestructible> It(const_cast<UWorld*>(World)); It; ++It)
-		{
-			AFPSRArenaDestructible* Destructible = *It;
-			if (!IsValid(Destructible) || !ContainsWorldLocation(Destructible->GetActorLocation())) { continue; }
 
-			// F2: on ACTIVATION only, and only the authority — reset any destructible this arena grid owns back to
-			// intact. Nothing else in the codebase ever clears bBroken, so without this a destructible broken on an
-			// earlier visit stayed broken (and unbreakable — 0 health) forever, and a revisited arena could never
-			// offer its terrain-changing reward again (ADR 0010 D7 "지형을 바꾼다" means each visit, not once ever).
-			// Deactivation does NOT reset — a dormant arena's destructibles should still read as however the
-			// player last left them if that arena becomes active again without an intervening reset pass. The
-			// explicit HasAuthority() here (on top of ServerReset()'s own guard) avoids the call entirely on
-			// clients, who reach this same loop via OnRep_StageTransition -> ApplyStageTransitionLocal.
-			if (bInActive && HasAuthority())
+		// F2: on ACTIVATION only, and only the authority — reset any destructible this arena owns back to intact.
+		// Nothing else in the codebase ever clears bBroken, so without this a destructible broken on an earlier
+		// visit stayed broken (and unbreakable — 0 health) forever, and a revisited arena could never offer its
+		// terrain-changing reward again (ADR 0010 D7 "지형을 바꾼다" means each visit, not once ever). Deactivation
+		// does NOT reset — a dormant arena's destructibles should still read as however the player last left them
+		// if that arena becomes active again without an intervening reset pass. The explicit HasAuthority() here
+		// (on top of ServerReset()'s own guard) avoids the call entirely on clients, who reach this same loop via
+		// OnRep_StageTransition -> ApplyStageTransitionLocal.
+		if (bInActive && HasAuthority())
+		{
+			if (AFPSRArenaDestructible* Destructible = Cast<AFPSRArenaDestructible>(Actor))
 			{
 				Destructible->ServerReset();
 			}
-
-			Destructible->SetActorHiddenInGame(!bInActive);
-			Destructible->SetActorEnableCollision(bInActive);
 		}
+
+		// Restore the AUTHORED flags on activation instead of forcing "visible + colliding". Both bHidden and
+		// bActorEnableCollision are per-actor authorable, so a prop deliberately hidden in the level would
+		// otherwise be revealed the first time this arena went live — a bug that only ever shows up in play,
+		// which is the exact shape of problem ADR 0012 exists to remove.
+		const FFPSRAuthoredActorState* Authored = AuthoredActorStates.Find(Actor);
+		if (!Authored)
+		{
+			FFPSRAuthoredActorState Captured;
+			Captured.bHidden = Actor->IsHidden();
+			Captured.bCollisionEnabled = Actor->GetActorEnableCollision();
+			Authored = &AuthoredActorStates.Add(Actor, Captured);
+		}
+
+		Actor->SetActorHiddenInGame(bInActive ? Authored->bHidden : true);
+		Actor->SetActorEnableCollision(bInActive ? Authored->bCollisionEnabled : false);
 	}
 }
 
@@ -795,7 +499,7 @@ bool AFPSRArenaActor::GetPlayerEntryTransforms(TArray<FTransform>& Out) const
 	// happens to land on a blocked cell near a busy centre, both used to teleport straight into geometry (the
 	// caller's teleport uses bSweep=false, which does not resolve overlaps — see PerformSwap). Snaps every
 	// candidate's XY onto the nearest OPEN cell in place; Z and rotation are left untouched. Skipped when this
-	// machine has no layout yet (e.g. inspected in the editor before BuildLocalLayout ever ran) since IsCellOpen
+	// machine has no layout yet (e.g. inspected in the editor before AdoptBakedLayout ever ran) since IsCellOpen
 	// has nothing to answer with. Called at BOTH exits below (authored starts and the no-starts fallback) so
 	// neither path can hand back a point sitting inside a wall.
 	auto SnapToOpenCells = [this](TArray<FTransform>& Transforms)
@@ -960,7 +664,7 @@ void AFPSRArenaActor::Tick(float DeltaSeconds)
 		{
 			for (int32 CX = MinCX; CX <= MaxCX; ++CX)
 			{
-				const bool bOpen = FFPSRArenaGenerator::IsCellOpen(Layout, CX, CY);
+				const bool bOpen = FFPSRArenaCells::IsCellOpen(Layout, CX, CY);
 				DrawDebugBox(World, Layout.CellCenterWorld(CX, CY) + FVector(0, 0, 10.0), HalfCell,
 					bOpen ? FColor(0, 160, 255, 40) : FColor(255, 64, 0, 90), false, -1.0f, 0, 1.0f);
 			}

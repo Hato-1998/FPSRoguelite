@@ -10,7 +10,7 @@ class UStaticMeshComponent;
 /**
  * A destructible prop placed INSIDE an arena's cell grid (ADR 0010 D7 — the door's "AFPSRDestructible" generalisation
  * applied to arena props). Breaking it opens the cells it was AUTHORED to occupy — see FootprintCells and
- * FFPSRArenaGenerator::ComputeDestructibleCells, which both this class (on break) and the generator (while intact)
+ * FFPSRArenaCells::ComputeDestructibleCells, which both this class (on break) and the generator (while intact)
  * call so the two can never compute a different footprint for the same prop.
  *
  * ## Why "reserve arenas parked beside the live one" matters here
@@ -39,7 +39,7 @@ public:
 	const FIntPoint& GetFootprintCells() const { return FootprintCells; }
 
 protected:
-	/** Server: open this prop's authored cells (FFPSRArenaGenerator::ComputeDestructibleCells) in the owning
+	/** Server: open this prop's authored cells (FFPSRArenaCells::ComputeDestructibleCells) in the owning
 	 *  arena's flow field via UFPSRFlowFieldSubsystem::NotifyArenaCellsOpened, THEN (Super) pay out any Rewards
 	 *  authored on this prop — same fixed order as AFPSRDoor::HandleBrokenAuthority. If no active arena contains
 	 *  this actor, or the footprint computes to zero cells, this is a one-line warning and Super only. */
@@ -56,7 +56,7 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "FPSR|Arena")
 	TObjectPtr<UStaticMeshComponent> DestructibleMesh;
 
-	/** 셀 발자국(가로×세로). 부서지면 여는 셀 수 — FFPSRArenaGenerator::ComputeDestructibleCells 가 이 액터의
+	/** 셀 발자국(가로×세로). 부서지면 여는 셀 수 — FFPSRArenaCells::ComputeDestructibleCells 가 이 액터의
 	 *  위치를 앵커 셀로 삼아 +X/+Y 로 이 크기만큼 계산한다. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "아레나", meta = (DisplayName = "셀 발자국(가로×세로)", ClampMin = "1"))
 	FIntPoint FootprintCells = FIntPoint(1, 1);

@@ -1,16 +1,24 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Arena/FPSRArenaGenerator.h"
+#include "Arena/FPSRArenaActor.h"
+#include "Arena/FPSRArenaCells.h"
+#include "Arena/FPSRArenaMarkers.h"
+#include "Arena/FPSRArenaDestructible.h"
 #include "Enemy/FPSRFlowFieldComputer.h"
 #include "Core/FPSRLogChannels.h"
+#include "Engine/World.h"
+#include "EngineUtils.h"
 #include "Math/RandomStream.h"
 
 namespace
 {
 	constexpr int32 NL = UFPSRFlowFieldComputer::NumLayers; // 2
 
-	/** Must match UFPSRFlowFieldComputer's own Surf(Cell, Rank) = Cell * NumLayers + Rank. */
-	FORCEINLINE int32 SurfIndex(int32 Cell, int32 Rank) { return Cell * NL + Rank; }
+	/** Forwards to FFPSRArenaCells so the Surf(Cell, Rank) packing has ONE definition outside the flow-field
+	 *  computer. Restating the formula here would be a second thing to update the day NumLayers changes, and
+	 *  the copy that drifts is the one nobody is looking at. */
+	FORCEINLINE int32 SurfIndex(int32 Cell, int32 Rank) { return FFPSRArenaCells::SurfIndex(Cell, Rank); }
 
 	/** The rank0<->rank0 connectivity bit inside an EdgeMask byte. A single-plane arena never uses another one:
 	 *  rank1 is left absent (CellFloorZ = MAX_flt), which is what makes NumLayers=2 cost nothing here. */
@@ -30,90 +38,6 @@ namespace
 	{
 		return FMath::Clamp(FMath::RoundToInt(Fraction * 100.0f), 1, 100);
 	}
-}
-
-bool FFPSRArenaGenParams::Validate(FString& OutError) const
-{
-	if (CellSize <= 0.0f)
-	{
-		OutError = TEXT("CellSize must be > 0.");
-		return false;
-	}
-	if (ClimbableStepHeight <= 0.0f)
-	{
-		OutError = TEXT("ClimbableStepHeight must be > 0 (the flow field requires a uniform positive step).");
-		return false;
-	}
-	if (ArenaSizeCells.X < 1 || ArenaSizeCells.Y < 1)
-	{
-		OutError = TEXT("ArenaSizeCells must be at least 1x1.");
-		return false;
-	}
-	if (MinCorridorWidthCells < 1)
-	{
-		OutError = TEXT("MinCorridorWidthCells must be >= 1.");
-		return false;
-	}
-	if (BoundaryMarginCells < 0)
-	{
-		OutError = TEXT("BoundaryMarginCells must be >= 0.");
-		return false;
-	}
-	if (ClusterFillMin <= 0.0f || ClusterFillMax > 1.0f || ClusterFillMin > ClusterFillMax)
-	{
-		OutError = TEXT("Cluster fill range must satisfy 0 < Min <= Max <= 1.");
-		return false;
-	}
-	if (SlotGridOptions.Num() == 0)
-	{
-		OutError = TEXT("SlotGridOptions is empty — the lattice proposal has no shape to pick.");
-		return false;
-	}
-
-	// Same compile-time caps the flow field enforces. Checking here means an over-budget arena is a content error
-	// caught at author time, instead of BuildFromWorldTrace's old behaviour of silently coarsening the cell size
-	// and quietly degrading routing quality (ADR 0010 axis 2 / 0011 E1).
-	const int64 TotalCells = static_cast<int64>(ArenaSizeCells.X) * ArenaSizeCells.Y;
-	if (ArenaSizeCells.X > UFPSRFlowFieldComputer::GetMaxGridDimPerAxis() ||
-		ArenaSizeCells.Y > UFPSRFlowFieldComputer::GetMaxGridDimPerAxis() ||
-		TotalCells > UFPSRFlowFieldComputer::GetMaxTotalCells())
-	{
-		OutError = FString::Printf(
-			TEXT("Arena %dx%d (%lld cells) exceeds the flow-field budget (axis <= %d, total <= %d)."),
-			ArenaSizeCells.X, ArenaSizeCells.Y, TotalCells,
-			UFPSRFlowFieldComputer::GetMaxGridDimPerAxis(), UFPSRFlowFieldComputer::GetMaxTotalCells());
-		return false;
-	}
-
-	// Every lattice option has to leave room for a >=1 cell cluster once both sides are inset by the corridor
-	// width; otherwise that option would silently propose fewer clusters than the designer asked for.
-	const int32 InteriorW = ArenaSizeCells.X - 2 * BoundaryMarginCells;
-	const int32 InteriorH = ArenaSizeCells.Y - 2 * BoundaryMarginCells;
-	const int32 MinSlotSpan = 2 * MinCorridorWidthCells + 1;
-	if (InteriorW < MinSlotSpan || InteriorH < MinSlotSpan)
-	{
-		OutError = FString::Printf(
-			TEXT("Interior %dx%d is too small for a single cluster (needs >= %d per axis after the boundary margin)."),
-			InteriorW, InteriorH, MinSlotSpan);
-		return false;
-	}
-	for (const FIntPoint& Lattice : SlotGridOptions)
-	{
-		if (Lattice.X < 1 || Lattice.Y < 1)
-		{
-			OutError = TEXT("SlotGridOptions contains a lattice with a zero or negative axis.");
-			return false;
-		}
-		if (InteriorW / Lattice.X < MinSlotSpan || InteriorH / Lattice.Y < MinSlotSpan)
-		{
-			OutError = FString::Printf(
-				TEXT("Lattice %dx%d does not fit: each slot needs >= %d cells per axis, interior is %dx%d."),
-				Lattice.X, Lattice.Y, MinSlotSpan, InteriorW, InteriorH);
-			return false;
-		}
-	}
-
-	return true;
 }
 
 bool FFPSRArenaGenerator::ProposeLatticeClusters(int32 Seed, const FFPSRArenaGenParams& Params,
@@ -199,36 +123,6 @@ FFPSRArenaAuthoredBox FFPSRArenaGenerator::ClusterToAuthoredBox(const FFPSRArena
 	return Box;
 }
 
-void FFPSRArenaGenerator::ComputeDestructibleCells(const FFPSRArenaAuthoredDestructible& Destructible,
-	const FVector& ArenaOrigin, float CellSize, const FIntPoint& GridDims, TArray<int32>& OutCells)
-{
-	OutCells.Reset();
-	if (CellSize <= 0.0f || GridDims.X <= 0 || GridDims.Y <= 0)
-	{
-		return;
-	}
-
-	const int32 AnchorCX = FMath::FloorToInt((Destructible.Location.X - ArenaOrigin.X) / CellSize);
-	const int32 AnchorCY = FMath::FloorToInt((Destructible.Location.Y - ArenaOrigin.Y) / CellSize);
-	const int32 FootprintX = FMath::Max(1, Destructible.FootprintCells.X);
-	const int32 FootprintY = FMath::Max(1, Destructible.FootprintCells.Y);
-
-	// Row-major (Y outer, X inner): since every surviving CX is < GridDims.X, each row's indices are entirely
-	// below the next row's — so this loop order is what MAKES the ascending-order guarantee true, not an
-	// incidental side effect of it.
-	for (int32 DY = 0; DY < FootprintY; ++DY)
-	{
-		const int32 CY = AnchorCY + DY;
-		if (CY < 0 || CY >= GridDims.Y) { continue; }
-		for (int32 DX = 0; DX < FootprintX; ++DX)
-		{
-			const int32 CX = AnchorCX + DX;
-			if (CX < 0 || CX >= GridDims.X) { continue; }
-			OutCells.Add(CY * GridDims.X + CX);
-		}
-	}
-}
-
 namespace
 {
 	/**
@@ -273,7 +167,7 @@ namespace
 		// the designer asks to judge the authored skeleton on its own (ADR 0011 invariant 12 baseline).
 		if (Params.PropSets.Num() == 0) { return; }
 
-		auto Open = [&Layout](int32 CX, int32 CY) { return FFPSRArenaGenerator::IsCellOpen(Layout, CX, CY); };
+		auto Open = [&Layout](int32 CX, int32 CY) { return FFPSRArenaCells::IsCellOpen(Layout, CX, CY); };
 
 		// Landmarks are navigation beacons (0010 D6). Burying one is not a cosmetic problem — it removes the only
 		// thing telling a first-person player which way they are facing.
@@ -504,7 +398,7 @@ namespace
 		{
 			for (int32 CX = 0; CX < W; ++CX)
 			{
-				if (!FFPSRArenaGenerator::IsCellOpen(Layout, CX, CY)) { continue; } // blocked cells stay 0
+				if (!FFPSRArenaCells::IsCellOpen(Layout, CX, CY)) { continue; } // blocked cells stay 0
 				int32 M = DistAt(CX - 1, CY - 1);
 				M = FMath::Min(M, DistAt(CX, CY - 1));
 				M = FMath::Min(M, DistAt(CX + 1, CY - 1));
@@ -517,7 +411,7 @@ namespace
 		{
 			for (int32 CX = W - 1; CX >= 0; --CX)
 			{
-				if (!FFPSRArenaGenerator::IsCellOpen(Layout, CX, CY)) { continue; }
+				if (!FFPSRArenaCells::IsCellOpen(Layout, CX, CY)) { continue; }
 				int32 M = DistAt(CX + 1, CY + 1);
 				M = FMath::Min(M, DistAt(CX, CY + 1));
 				M = FMath::Min(M, DistAt(CX - 1, CY + 1));
@@ -625,7 +519,7 @@ void FFPSRArenaGenerator::DeriveFloorTraces(FFPSRArenaLayout& Layout, TArray<boo
 	{
 		for (int32 CX = 0; CX < W; ++CX)
 		{
-			if (FFPSRArenaGenerator::IsCellOpen(Layout, CX, CY)) { Skel[CY * W + CX] = true; }
+			if (FFPSRArenaCells::IsCellOpen(Layout, CX, CY)) { Skel[CY * W + CX] = true; }
 		}
 	}
 	ThinToSkeleton(W, H, Skel);
@@ -817,7 +711,7 @@ bool FFPSRArenaGenerator::Generate(int32 Seed, const FFPSRArenaGenParams& Params
 	for (const FFPSRArenaAuthoredDestructible& Destructible : Authored.Destructibles)
 	{
 		TArray<int32> DestructibleCellsOut;
-		ComputeDestructibleCells(Destructible, ArenaOrigin, static_cast<float>(Cell), OutLayout.GridDims, DestructibleCellsOut);
+		FFPSRArenaCells::ComputeDestructibleCells(Destructible, ArenaOrigin, static_cast<float>(Cell), OutLayout.GridDims, DestructibleCellsOut);
 		for (const int32 CellIdx : DestructibleCellsOut)
 		{
 			S.BlockedField[SurfIndex(CellIdx, 0)] = true;
@@ -859,15 +753,58 @@ bool FFPSRArenaGenerator::Generate(int32 Seed, const FFPSRArenaGenParams& Params
 	return true;
 }
 
-bool FFPSRArenaGenerator::IsCellOpen(const FFPSRArenaLayout& Layout, int32 CX, int32 CY)
+bool FFPSRArenaGenerator::BuildLayoutForSeed(const AFPSRArenaActor& Arena, int32 Seed, FFPSRArenaLayout& OutLayout)
 {
-	if (CX < 0 || CY < 0 || CX >= Layout.GridDims.X || CY >= Layout.GridDims.Y)
+	FFPSRArenaGenParams GenParams;
+	FVector Origin;
+	if (!Arena.GetGenParams(GenParams, Origin))
 	{
+		UE_LOG(LogFPSR, Error, TEXT("[Arena] %s has no ArenaParams — the authoring tools have nothing to propose against. Assign a UFPSRArenaParamsDataAsset."),
+			*Arena.GetName());
+		OutLayout = FFPSRArenaLayout();
 		return false;
 	}
-	const int32 Surf = SurfIndex(Layout.CellIndex(CX, CY), 0);
-	return Layout.Surface.CellFloorZ.IsValidIndex(Surf)
-		&& Layout.Surface.CellFloorZ[Surf] != MAX_flt
-		&& Layout.Surface.BlockedField.IsValidIndex(Surf)
-		&& !Layout.Surface.BlockedField[Surf];
+
+	// Gather what the designer placed. Note this reads ACTORS, not collision — the preview is told what blocks it
+	// rather than discovering it. The SHIPPING mask is the opposite (ADR 0012 bakes real collision); these two
+	// answer different questions, which is why they are allowed to be different code.
+	//
+	// Ownership is SPATIAL (ContainsWorldLocation), not an authored per-actor link nor the level the marker sits
+	// in: being physically inside an arena's own cell grid IS the membership test, so it cannot drift as markers
+	// are added, moved, or a whole new arena is dropped into the level. Every marker, tool and spawn gate shares
+	// this one test.
+	FFPSRArenaAuthoredInput Authored;
+	if (const UWorld* World = Arena.GetWorld())
+	{
+		for (TActorIterator<AFPSRArenaBlocker> It(const_cast<UWorld*>(World)); It; ++It)
+		{
+			const AFPSRArenaBlocker* Blocker = *It;
+			if (!IsValid(Blocker) || !Arena.ContainsWorldLocation(Blocker->GetActorLocation())) { continue; }
+			FFPSRArenaAuthoredBox BoxEntry;
+			BoxEntry.Center = Blocker->GetActorLocation();
+			BoxEntry.HalfExtentXY = Blocker->GetHalfExtentXY();
+			BoxEntry.YawDegrees = Blocker->GetYawDegrees();
+			Authored.Blockers.Add(BoxEntry);
+		}
+		for (TActorIterator<AFPSRArenaLandmark> It(const_cast<UWorld*>(World)); It; ++It)
+		{
+			const AFPSRArenaLandmark* Landmark = *It;
+			if (!IsValid(Landmark) || !Arena.ContainsWorldLocation(Landmark->GetActorLocation())) { continue; }
+			FFPSRArenaAuthoredLandmark LandmarkEntry;
+			LandmarkEntry.Location = Landmark->GetActorLocation();
+			LandmarkEntry.ReserveRadiusCells = Landmark->GetReserveRadiusCells();
+			Authored.Landmarks.Add(LandmarkEntry);
+		}
+		for (TActorIterator<AFPSRArenaDestructible> It(const_cast<UWorld*>(World)); It; ++It)
+		{
+			const AFPSRArenaDestructible* Destructible = *It;
+			if (!IsValid(Destructible) || !Arena.ContainsWorldLocation(Destructible->GetActorLocation())) { continue; }
+			FFPSRArenaAuthoredDestructible DestructibleEntry;
+			DestructibleEntry.Location = Destructible->GetActorLocation();
+			DestructibleEntry.FootprintCells = Destructible->GetFootprintCells();
+			Authored.Destructibles.Add(DestructibleEntry);
+		}
+	}
+
+	return Generate(Seed, GenParams, Origin, Authored, OutLayout);
 }

@@ -2,6 +2,7 @@
 
 #include "Misc/AutomationTest.h"
 #include "Arena/FPSRArenaGenerator.h"
+#include "Arena/FPSRArenaCells.h"
 #include "Arena/FPSRArenaValidator.h"
 #include "Enemy/FPSRFlowFieldComputer.h"
 
@@ -131,7 +132,7 @@ bool FFPSRArenaGeneratorTest::RunTest(const FString& Parameters)
 			FFPSRArenaGenerator::Generate(1, Params, Origin, FFPSRArenaAuthoredInput(), L));
 		TestEqual(TEXT("no clusters from empty input"), L.Clusters.Num(), 0);
 		TestTrue(TEXT("empty arena is open at its centre"),
-			FFPSRArenaGenerator::IsCellOpen(L, Params.ArenaSizeCells.X / 2, Params.ArenaSizeCells.Y / 2));
+			FFPSRArenaCells::IsCellOpen(L, Params.ArenaSizeCells.X / 2, Params.ArenaSizeCells.Y / 2));
 	}
 
 	// --- 4. the validator agrees with the proposal, over 100 seeds --------------------------------------
@@ -181,7 +182,7 @@ bool FFPSRArenaGeneratorTest::RunTest(const FString& Parameters)
 				FMath::IsNearlyZero(FMath::Fmod(P.YawDegrees, 90.0f)));
 
 			// A blocking prop must have taken its cell; a passable one must NOT have.
-			const bool bCellOpen = FFPSRArenaGenerator::IsCellOpen(L, P.Cell.X, P.Cell.Y);
+			const bool bCellOpen = FFPSRArenaCells::IsCellOpen(L, P.Cell.X, P.Cell.Y);
 			if (P.Tier == EFPSRArenaPropTier::Blocking) { TestFalse(TEXT("blocking prop occupies its cell"), bCellOpen); }
 			else { TestTrue(TEXT("passable prop leaves its cell open"), bCellOpen); }
 
@@ -283,7 +284,7 @@ bool FFPSRArenaGeneratorTest::RunTest(const FString& Parameters)
 			D.Location = Origin + FVector(10.5 * Params.CellSize, 20.5 * Params.CellSize, 0.0);
 			D.FootprintCells = FIntPoint(1, 1);
 			TArray<int32> Cells;
-			FFPSRArenaGenerator::ComputeDestructibleCells(D, Origin, Params.CellSize, GridDims, Cells);
+			FFPSRArenaCells::ComputeDestructibleCells(D, Origin, Params.CellSize, GridDims, Cells);
 			if (TestEqual(TEXT("1x1 footprint -> 1 cell"), Cells.Num(), 1))
 			{
 				TestEqual(TEXT("1x1 footprint anchor cell index"), Cells[0], 20 * GridDims.X + 10);
@@ -296,7 +297,7 @@ bool FFPSRArenaGeneratorTest::RunTest(const FString& Parameters)
 			D.Location = Origin + FVector(5.5 * Params.CellSize, 5.5 * Params.CellSize, 0.0);
 			D.FootprintCells = FIntPoint(2, 3);
 			TArray<int32> Cells;
-			FFPSRArenaGenerator::ComputeDestructibleCells(D, Origin, Params.CellSize, GridDims, Cells);
+			FFPSRArenaCells::ComputeDestructibleCells(D, Origin, Params.CellSize, GridDims, Cells);
 			TestEqual(TEXT("2x3 footprint -> 6 cells"), Cells.Num(), 6);
 
 			TArray<int32> Expected;
@@ -324,7 +325,7 @@ bool FFPSRArenaGeneratorTest::RunTest(const FString& Parameters)
 			D.Location = Origin + FVector((GridDims.X - 1 + 0.5) * Params.CellSize, (GridDims.Y - 1 + 0.5) * Params.CellSize, 0.0);
 			D.FootprintCells = FIntPoint(3, 3);
 			TArray<int32> Cells;
-			FFPSRArenaGenerator::ComputeDestructibleCells(D, Origin, Params.CellSize, GridDims, Cells);
+			FFPSRArenaCells::ComputeDestructibleCells(D, Origin, Params.CellSize, GridDims, Cells);
 			if (TestEqual(TEXT("off-grid footprint clipped to the single in-grid cell"), Cells.Num(), 1))
 			{
 				TestEqual(TEXT("clipped cell is the grid's last index"), Cells[0], (GridDims.Y - 1) * GridDims.X + (GridDims.X - 1));
@@ -337,7 +338,7 @@ bool FFPSRArenaGeneratorTest::RunTest(const FString& Parameters)
 			D.Location = Origin + FVector(-5.0 * Params.CellSize, -5.0 * Params.CellSize, 0.0);
 			D.FootprintCells = FIntPoint(2, 2);
 			TArray<int32> Cells;
-			FFPSRArenaGenerator::ComputeDestructibleCells(D, Origin, Params.CellSize, GridDims, Cells);
+			FFPSRArenaCells::ComputeDestructibleCells(D, Origin, Params.CellSize, GridDims, Cells);
 			TestEqual(TEXT("fully off-grid anchor -> 0 cells"), Cells.Num(), 0);
 		}
 	}
@@ -356,7 +357,7 @@ bool FFPSRArenaGeneratorTest::RunTest(const FString& Parameters)
 		Authored.Destructibles.Add(D);
 
 		TArray<int32> ExpectedCells;
-		FFPSRArenaGenerator::ComputeDestructibleCells(D, Origin, NoProps.CellSize, NoProps.ArenaSizeCells, ExpectedCells);
+		FFPSRArenaCells::ComputeDestructibleCells(D, Origin, NoProps.CellSize, NoProps.ArenaSizeCells, ExpectedCells);
 		TestTrue(TEXT("destructible authors a non-empty footprint for this test"), ExpectedCells.Num() > 0);
 
 		FFPSRArenaLayout WithDestructible;
@@ -370,7 +371,7 @@ bool FFPSRArenaGeneratorTest::RunTest(const FString& Parameters)
 			const int32 CX = CellIdx % NoProps.ArenaSizeCells.X;
 			const int32 CY = CellIdx / NoProps.ArenaSizeCells.X;
 			TestFalse(*FString::Printf(TEXT("destructible cell (%d,%d) is blocked"), CX, CY),
-				FFPSRArenaGenerator::IsCellOpen(WithDestructible, CX, CY));
+				FFPSRArenaCells::IsCellOpen(WithDestructible, CX, CY));
 		}
 
 		FFPSRArenaLayout WithoutDestructible;
@@ -382,7 +383,7 @@ bool FFPSRArenaGeneratorTest::RunTest(const FString& Parameters)
 			const int32 CX = CellIdx % NoProps.ArenaSizeCells.X;
 			const int32 CY = CellIdx / NoProps.ArenaSizeCells.X;
 			TestTrue(*FString::Printf(TEXT("same cell (%d,%d) is open with no destructible authored"), CX, CY),
-				FFPSRArenaGenerator::IsCellOpen(WithoutDestructible, CX, CY));
+				FFPSRArenaCells::IsCellOpen(WithoutDestructible, CX, CY));
 		}
 	}
 

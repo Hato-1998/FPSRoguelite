@@ -4,6 +4,7 @@
 #include "Run/FPSRRunScheduleDataAsset.h"
 #include "Run/FPSRRunDirectorSubsystem.h"
 #include "Arena/FPSRArenaActor.h"
+#include "Arena/FPSRArenaStreamSubsystem.h"
 #include "Enemy/FPSREnemySpawnSubsystem.h"
 #include "Hero/FPSRCharacter.h"
 #include "Core/FPSRLogChannels.h"
@@ -11,6 +12,64 @@
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "TimerManager.h"
+
+void UFPSRStageDirectorSubsystem::OnWorldBeginPlay(UWorld& InWorld)
+{
+	Super::OnWorldBeginPlay(InWorld);
+
+	if (!HasServerAuthority())
+	{
+		return; // sublevel visibility is driven by the server; clients follow via the engine's streaming status RPCs
+	}
+
+	// ADR 0012 axis 5: park arena N+1 the moment stage N begins, and stage 1 begins here. Waiting for the first
+	// suppressor to break would put AddToWorld back inside the transition window, which is the whole thing this
+	// mechanism exists to avoid.
+	//
+	// The starting arena is read from UFPSRArenaStreamSubsystem's roster (bStartsActive) rather than from
+	// GameState: the roster is built from level packages, which are guaranteed loaded by now (LoadMap flushes
+	// always-loaded sublevels before InitializeActorsForPlay), whereas GameState's ActiveArena depends on actor
+	// initialisation order that this callback deliberately does not assume.
+	if (const UFPSRArenaStreamSubsystem* Stream = InWorld.GetSubsystem<UFPSRArenaStreamSubsystem>())
+	{
+		const int32 StartOrder = Stream->FindStartingStageOrder();
+		if (StartOrder != INDEX_NONE)
+		{
+			ParkArenaAfter(StartOrder);
+		}
+	}
+}
+
+void UFPSRStageDirectorSubsystem::Deinitialize()
+{
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(DealingTimerHandle);
+		World->GetTimerManager().ClearTimer(SwapReadyTimerHandle);
+	}
+	Super::Deinitialize();
+}
+
+int32 UFPSRStageDirectorSubsystem::GetCurrentStageOrder() const
+{
+	const AFPSRGameState* GS = GetGS();
+	const AFPSRArenaActor* Arena = GS ? GS->GetActiveArena() : nullptr;
+	return Arena ? Arena->GetStageOrder() : INDEX_NONE;
+}
+
+void UFPSRStageDirectorSubsystem::ParkArenaAfter(int32 StageOrder) const
+{
+	UWorld* World = GetWorld();
+	UFPSRArenaStreamSubsystem* Stream = World ? World->GetSubsystem<UFPSRArenaStreamSubsystem>() : nullptr;
+	if (!Stream)
+	{
+		return;
+	}
+	// RequestParkAfter, not RequestPark(GetNextStageOrder(...)): at world begin the successor's sublevel package
+	// can still be async-loading, so "who comes next" is not answerable yet. Resolving it here once would read
+	// as "there is no next arena" and never retry — and the run would cycle the first arena to itself, silently.
+	Stream->RequestParkAfter(StageOrder);
+}
 
 bool UFPSRStageDirectorSubsystem::HasServerAuthority() const
 {
@@ -156,7 +215,7 @@ void UFPSRStageDirectorSubsystem::OnDealingWindowClosed()
 		return;
 	}
 
-	PerformSwap();
+	BeginSwap();
 }
 
 void UFPSRStageDirectorSubsystem::HandleRunStateChanged()
@@ -232,7 +291,103 @@ void UFPSRStageDirectorSubsystem::TrySwap()
 	}
 
 	GS->SetStageTransition(EFPSRStageTransitionPhase::Swapping, 0.0f);
+	BeginSwap();
+}
+
+void UFPSRStageDirectorSubsystem::BeginSwap()
+{
+	SwapReadyElapsed = 0.0f;
+	if (TrySwapIfDestinationReady())
+	{
+		return; // the normal case — parking a stage early means the destination is already everywhere
+	}
+
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		PerformSwap();
+		return;
+	}
+
+	TArray<FString> NotReady;
+	if (const UFPSRArenaStreamSubsystem* Stream = World->GetSubsystem<UFPSRArenaStreamSubsystem>())
+	{
+		Stream->GetConnectionsNotReady(Stream->GetNextStageOrder(GetCurrentStageOrder()), NotReady);
+	}
+	UE_LOG(LogFPSR, Warning,
+		TEXT("[StageDirector] Destination arena is not visible to %d connection(s) yet (%s) — holding the swap for up to %.1fs. The dealing window has already closed, so the reward was not extended."),
+		NotReady.Num(), *FString::Join(NotReady, TEXT(", ")), GetSwapReadyTimeoutSeconds());
+
+	World->GetTimerManager().SetTimer(
+		SwapReadyTimerHandle, this, &UFPSRStageDirectorSubsystem::PollSwapReadiness, SwapReadyPollInterval, /*bLoop*/true);
+}
+
+bool UFPSRStageDirectorSubsystem::TrySwapIfDestinationReady()
+{
+	UWorld* World = GetWorld();
+	const UFPSRArenaStreamSubsystem* Stream = World ? World->GetSubsystem<UFPSRArenaStreamSubsystem>() : nullptr;
+	if (!Stream)
+	{
+		PerformSwap(); // no streaming subsystem (non-game world / teardown) — nothing to wait on
+		return true;
+	}
+
+	// Which arena the swap will land on has to come from the ROSTER, not from AFPSRArenaActor::FindAllInWorld:
+	// FindAllInWorld iterates the world, so an arena whose sublevel is not visible yet is invisible to it and the
+	// cycle would silently return the CURRENT arena — i.e. exactly the case this gate exists to catch would read
+	// as "ready".
+	const int32 NextOrder = Stream->GetNextStageOrder(GetCurrentStageOrder());
+	if (!Stream->IsReadyForEveryone(NextOrder))
+	{
+		return false;
+	}
+
+	if (UWorld* W = GetWorld())
+	{
+		W->GetTimerManager().ClearTimer(SwapReadyTimerHandle);
+	}
 	PerformSwap();
+	return true;
+}
+
+void UFPSRStageDirectorSubsystem::PollSwapReadiness()
+{
+	SwapReadyElapsed += SwapReadyPollInterval;
+
+	if (TrySwapIfDestinationReady())
+	{
+		return;
+	}
+
+	if (SwapReadyElapsed < GetSwapReadyTimeoutSeconds())
+	{
+		return;
+	}
+
+	// Give up waiting and swap anyway. A player whose client still has not made the level visible will see the new
+	// arena pop in when their streaming catches up; standing frozen indefinitely is worse, and an unbounded hold
+	// would hand one slow machine the power to stall everyone's run.
+	TArray<FString> NotReady;
+	if (const UFPSRArenaStreamSubsystem* Stream = GetWorld() ? GetWorld()->GetSubsystem<UFPSRArenaStreamSubsystem>() : nullptr)
+	{
+		Stream->GetConnectionsNotReady(Stream->GetNextStageOrder(GetCurrentStageOrder()), NotReady);
+	}
+	UE_LOG(LogFPSR, Error,
+		TEXT("[StageDirector] Destination arena still not visible to %d connection(s) (%s) after %.1fs — swapping anyway. Those clients will see the arena appear late."),
+		NotReady.Num(), *FString::Join(NotReady, TEXT(", ")), SwapReadyElapsed);
+
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(SwapReadyTimerHandle);
+	}
+	PerformSwap();
+}
+
+float UFPSRStageDirectorSubsystem::GetSwapReadyTimeoutSeconds() const
+{
+	const AFPSRGameState* GS = GetGS();
+	const UFPSRRunScheduleDataAsset* Schedule = GS ? GS->GetRunSchedule() : nullptr;
+	return Schedule ? Schedule->StageSwapReadyTimeoutSeconds : DefaultSwapReadyTimeoutSeconds;
 }
 
 void UFPSRStageDirectorSubsystem::PerformSwap()
@@ -382,4 +537,10 @@ void UFPSRStageDirectorSubsystem::PerformSwap()
 
 	UE_LOG(LogFPSR, Log, TEXT("[StageDirector] Swap complete: %s -> %s (stage %d, seed %d)."),
 		Prev ? *Prev->GetName() : TEXT("?"), *Next->GetName(), NewStageIndex, Next->GetActiveSeed());
+
+	// 8. Park the arena AFTER this one, now that this stage has begun (ADR 0012 axis 5). Done LAST so the park
+	//    request cannot compete with the swap's own frame, and so GetCurrentStageOrder already reads the arena we
+	//    just moved into. The previous arena stays loaded and visible-but-hidden — unloading it would give back
+	//    the AddToWorld cost the moment the run cycles around to it again.
+	ParkArenaAfter(Next->GetStageOrder());
 }

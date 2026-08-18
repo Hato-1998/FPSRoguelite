@@ -7,6 +7,7 @@
 #include "Arena/FPSRArenaBakeHash.h"
 #include "Arena/FPSRArenaDestructible.h"
 #include "Arena/FPSRArenaGenerator.h"
+#include "Arena/FPSRArenaCells.h"
 #include "Arena/FPSRArenaMarkers.h"
 #include "Arena/FPSRArenaTypes.h"
 #include "Arena/FPSRArenaValidator.h"
@@ -107,8 +108,61 @@ namespace
 				Orphans.Num(), *FString::Join(Orphans, TEXT(", ")));
 		}
 
+		// (2b) One arena per level (ADR 0012 invariant 4), and nothing in an arena's level that sits outside its
+		// grid. Both are new consequences of arenas becoming streaming sublevels:
+		//   - SetArenaActive now shows/hides EVERY actor in the arena's own ULevel, so a second arena in that
+		//     level would be dragged in and out of visibility by its neighbour.
+		//   - Shared lighting/post-process left in an arena sublevel goes dark the moment that arena is parked,
+		//     and doubles up while two arenas are visible at once. It belongs in the persistent level.
+		// Actors with no primitive (deferred spawners, notes) are ignored — they have no location that means
+		// anything spatially and are not what this check is about.
+		TMap<ULevel*, TArray<FString>> ArenasByLevel;
+		for (const AFPSRArenaActor* Arena : Arenas)
+		{
+			if (!Arena) { continue; }
+			if (ULevel* Level = Arena->GetLevel())
+			{
+				ArenasByLevel.FindOrAdd(Level).Add(Arena->GetName());
+			}
+		}
+		for (const TPair<ULevel*, TArray<FString>>& Pair : ArenasByLevel)
+		{
+			if (Pair.Value.Num() > 1)
+			{
+				Report += FString::Printf(
+					TEXT("[오류] 레벨 하나에 아레나가 %d개입니다(%s). ADR 0012 불변식 4 — 아레나 1개 = 서브레벨 1개입니다.\n"
+					     "지금 상태로는 한 아레나를 숨기면 옆 아레나까지 같이 사라집니다.\n"),
+					Pair.Value.Num(), *FString::Join(Pair.Value, TEXT(", ")));
+			}
+		}
+		for (const AFPSRArenaActor* Arena : Arenas)
+		{
+			ULevel* Level = Arena ? Arena->GetLevel() : nullptr;
+			if (!Level || ArenasByLevel.FindOrAdd(Level).Num() > 1)
+			{
+				continue; // the "two arenas in one level" error above already explains this level
+			}
+			TArray<FString> Outside;
+			for (AActor* Actor : Level->Actors)
+			{
+				if (!IsValid(Actor) || Actor == Arena) { continue; }
+				if (!Actor->GetRootComponent()) { continue; }
+				if (!Arena->ContainsWorldLocation(Actor->GetActorLocation()))
+				{
+					Outside.Add(Actor->GetName());
+				}
+			}
+			if (Outside.Num() > 0)
+			{
+				Report += FString::Printf(
+					TEXT("[경고] [%s] 의 레벨에 아레나 격자 밖 액터가 %d개 있습니다: %s\n"
+					     "이 아레나가 예비로 대기하는 동안 같이 숨겨집니다 — 공용 조명·포스트프로세스라면 지속 레벨로 옮기세요.\n"),
+					*Arena->GetName(), Outside.Num(), *FString::Join(Outside, TEXT(", ")));
+			}
+		}
+
 		// (3) Destructible yaw != 0. AFPSRArenaDestructible's footprint grows along the GRID's own +X/+Y regardless
-		// of the actor's rotation (FFPSRArenaGenerator::ComputeDestructibleCells) — a yawed actor's mesh no longer
+		// of the actor's rotation (FFPSRArenaCells::ComputeDestructibleCells) — a yawed actor's mesh no longer
 		// matches the cells the generator actually blocks while intact / opens once it breaks.
 		TArray<FString> YawedDestructibles;
 		for (TActorIterator<AFPSRArenaDestructible> It(World); It; ++It)
@@ -281,7 +335,7 @@ void FFPSRArenaAuthoringTool::ProposeStartingLayout()
 		// disagreed, saying "proposed N clusters" would hide it.
 		FFPSRArenaLayout Layout;
 		FString ValidationSummary;
-		if (Arena->BuildLayoutForSeed(Arena->GetInitialSeed(), Layout))
+		if (FFPSRArenaGenerator::BuildLayoutForSeed(*Arena, Arena->GetInitialSeed(), Layout))
 		{
 			ValidationSummary = FFPSRArenaValidator::Summarize(FFPSRArenaValidator::Validate(Layout, Params));
 		}
@@ -337,7 +391,7 @@ void FFPSRArenaAuthoringTool::ValidateArenaInLevel()
 		// 생성기 레이아웃을 보고 있었기 때문). 통과 신호가 틀리는 것은 검사가 없는 것보다 나쁘다.
 		FFPSRArenaLayout Layout;
 		const bool bUsedBake = Arena->BuildValidationLayoutFromBake(Layout);
-		if (!bUsedBake && !Arena->BuildLayoutForSeed(Arena->GetInitialSeed(), Layout))
+		if (!bUsedBake && !FFPSRArenaGenerator::BuildLayoutForSeed(*Arena, Arena->GetInitialSeed(), Layout))
 		{
 			Body += FString::Printf(TEXT("[%s] 검사할 것이 없습니다 — 베이크도 없고 절차 레이아웃도 만들지 못했습니다. 출력 로그의 [Arena] 항목을 확인하세요.\n\n"), *Arena->GetName());
 			continue;
