@@ -120,13 +120,33 @@ void UFPSRFlowFieldSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 	// FPSRArenaActor::PostInitializeComponents for the full chain).
 	if (AFPSRArenaActor* Arena = AFPSRArenaActor::FindActiveInWorld(&InWorld))
 	{
-		if (Arena->BuildLocalLayout())
+		// ADR 0012: a BAKED mask wins outright. It is the invariant-1 source — produced in the editor from the
+		// level's own collision, so what the designer sees IS what the swarm believes. The procedural branch below
+		// only survives until the generator moves to the editor module (its own board row); it is not a fallback
+		// the baked path may quietly fail into, which is why the two are separate branches rather than a ?:.
+		FFPSRFlowFieldSurfaceData BakedWorld;
+		if (Arena->GetBakedWorldSurface(BakedWorld))
+		{
+			UnifiedComputer = NewObject<UFPSRFlowFieldComputer>(this);
+			UnifiedComputer->BuildFromSurfaceData(BakedWorld);
+			UnifiedComputer->ExtractSurfaceData(BakedBaseline);
+			bHasBaseline = true;
+			UE_LOG(LogFPSR, Log,
+				TEXT("[FlowField] Arena field adopted from %s BAKE (%dx%d cell=%.0f) — no world trace, no generation."),
+				*Arena->GetName(), BakedWorld.GridDimX, BakedWorld.GridDimY, BakedWorld.CellSize);
+		}
+		else if (Arena->BuildLocalLayout())
 		{
 			UnifiedComputer = NewObject<UFPSRFlowFieldComputer>(this);
 			UnifiedComputer->BuildFromSurfaceData(Arena->GetLayout().Surface);
 			UnifiedComputer->ExtractSurfaceData(BakedBaseline);
 			bHasBaseline = true;
-			UE_LOG(LogFPSR, Log, TEXT("[FlowField] Arena field adopted from %s (seed %d) — no world trace."),
+			// Deliberately a WARNING, not a Log line. ADR 0012 retired runtime generation; an arena still reaching
+			// this branch has no bake asset assigned (or an empty one), which means the level a designer is looking
+			// at and the mask the swarm uses came from different places. That is the exact condition 0012 exists to
+			// remove, so it should be visible in the log rather than read as normal operation.
+			UE_LOG(LogFPSR, Warning,
+				TEXT("[FlowField] %s has NO baked mask — fell back to procedural generation (seed %d). ADR 0012: assign a UFPSRArenaBakeDataAsset and bake it in the editor; this path is being removed."),
 				*Arena->GetName(), Arena->GetActiveSeed());
 		}
 		else

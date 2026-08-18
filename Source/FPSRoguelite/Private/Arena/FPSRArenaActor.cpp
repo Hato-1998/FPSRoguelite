@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Arena/FPSRArenaActor.h"
+#include "Arena/FPSRArenaBakeDataAsset.h"
 #include "Arena/FPSRArenaDestructible.h"
 #include "Arena/FPSRArenaGenerator.h"
 #include "Arena/FPSRArenaMarkers.h"
@@ -601,6 +602,23 @@ void AFPSRArenaActor::SetArenaActive(bool bInActive)
 			Destructible->SetActorEnableCollision(bInActive);
 		}
 	}
+}
+
+bool AFPSRArenaActor::HasBakedSurface() const
+{
+	// "참조가 있다"로 판단하지 않는다. 굽지 않은 빈 에셋을 물려 두는 것은 저작 중 흔한 중간 상태이고,
+	// 그것을 마스크로 채택하면 격자는 0셀인데 필드는 만들어졌다고 믿게 된다 — 증상은 적이 아무 데나
+	// 걸어가는 것이고, 로그엔 아무것도 안 남는다. IsBaked() 가 배열 길이까지 확인한다.
+	return BakeData != nullptr && BakeData->IsBaked();
+}
+
+bool AFPSRArenaActor::GetBakedWorldSurface(FFPSRFlowFieldSurfaceData& OutWorld) const
+{
+	if (!HasBakedSurface())
+	{
+		return false;
+	}
+	return BakeData->BuildWorldSurface(GetActorTransform(), OutWorld);
 }
 
 bool AFPSRArenaActor::ContainsWorldLocation(const FVector& World) const

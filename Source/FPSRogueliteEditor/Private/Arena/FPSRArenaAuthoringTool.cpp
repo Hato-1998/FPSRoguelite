@@ -3,6 +3,8 @@
 #include "Arena/FPSRArenaAuthoringTool.h"
 
 #include "Arena/FPSRArenaActor.h"
+#include "Arena/FPSRArenaBakeDataAsset.h"
+#include "Arena/FPSRArenaBakeHash.h"
 #include "Arena/FPSRArenaDestructible.h"
 #include "Arena/FPSRArenaGenerator.h"
 #include "Arena/FPSRArenaMarkers.h"
@@ -360,6 +362,132 @@ void FFPSRArenaAuthoringTool::ValidateArenaInLevel()
 	FMessageDialog::Open(EAppMsgType::Ok, FText::Format(
 		LOCTEXT("ValidateResult", "아레나 검증 ({0}개)\n\n{1}"),
 		FText::AsNumber(Arenas.Num()), FText::FromString(Body)));
+}
+
+void FFPSRArenaAuthoringTool::BakeArenasInLevel()
+{
+	UWorld* World = GetEditorWorld();
+	TArray<AFPSRArenaActor*> Arenas;
+	if (!FindAllArenasOrComplain(World, Arenas))
+	{
+		return;
+	}
+
+	FString Body;
+	int32 NumBaked = 0;
+	int32 NumFailed = 0;
+
+	for (AFPSRArenaActor* Arena : Arenas)
+	{
+		UFPSRArenaBakeDataAsset* Asset = Arena->GetBakeData();
+		if (!Asset)
+		{
+			// 조용히 건너뛰지 않는다. "구웠는데 왜 안 바뀌지"의 가장 흔한 원인이 참조 미설정이고, 그건
+			// 리포트에 한 줄 없으면 알아낼 방법이 없다.
+			Body += FString::Printf(TEXT("[%s] 건너뜀 — '베이크 데이터' 가 비어 있습니다. UFPSRArenaBakeDataAsset 을 만들어 액터에 물리세요.\n\n"),
+				*Arena->GetName());
+			++NumFailed;
+			continue;
+		}
+
+		FFPSRArenaGenParams Params;
+		FVector Origin;
+		if (!Arena->GetGenParams(Params, Origin))
+		{
+			Body += FString::Printf(TEXT("[%s] 실패 — 아레나 파라미터를 읽을 수 없습니다('아레나 파라미터' 미설정 또는 유효하지 않음).\n\n"),
+				*Arena->GetName());
+			++NumFailed;
+			continue;
+		}
+
+		FFPSRFlowFieldBakeRequest Request;
+		Request.GridOrigin = Origin;
+		Request.SizeX = Params.ArenaSizeCells.X * Params.CellSize;
+		Request.SizeY = Params.ArenaSizeCells.Y * Params.CellSize;
+		Request.CellSize = Params.CellSize;
+		Request.ClimbableStepHeight = Params.ClimbableStepHeight;
+		Request.ProbeApexAboveOrigin = UFPSRFlowFieldComputer::GetDefaultProbeApexAboveOrigin();
+		Request.bFailOnBudgetOverflow = true; // 저작 베이크는 조용히 성기게 굽지 않는다 (ADR 0011 E1 · 0012)
+		Request.SourceLabel = TEXT("arena editor bake");
+
+		// 트랜지언트 임시 컴퓨터. 레벨의 살아 있는 필드를 건드리지 않고 결과 구조체만 뽑아 온다.
+		UFPSRFlowFieldComputer* Temp = NewObject<UFPSRFlowFieldComputer>(GetTransientPackage());
+		if (!Temp->BuildFromTraceRequest(World, Request))
+		{
+			Body += FString::Printf(TEXT("[%s] 실패 — 베이크가 거부됐습니다. 출력 로그의 [FlowField] 줄을 보세요(대개 셀 예산 초과).\n\n"),
+				*Arena->GetName());
+			++NumFailed;
+			continue;
+		}
+
+		FFPSRFlowFieldSurfaceData WorldSurface;
+		Temp->ExtractSurfaceData(WorldSurface);
+
+		FFPSRFlowFieldSurfaceData LocalSurface;
+		if (!UFPSRArenaBakeDataAsset::LocalizeSurface(WorldSurface, Arena->GetActorTransform(), LocalSurface))
+		{
+			Body += FString::Printf(TEXT("[%s] 실패 — 아레나 트랜스폼을 로컬로 접을 수 없습니다(회전/스케일). 출력 로그 참조.\n\n"),
+				*Arena->GetName());
+			++NumFailed;
+			continue;
+		}
+
+		FFPSRArenaBakeSourceDigest Digest;
+		if (!FFPSRArenaBakeHash::Compute(*Arena, Digest))
+		{
+			Body += FString::Printf(TEXT("[%s] 실패 — 소스 해시를 계산할 수 없습니다.\n\n"), *Arena->GetName());
+			++NumFailed;
+			continue;
+		}
+
+		// 열린 셀 수: 검증기와 같은 정의(랭크 0 에 표면이 있고 막히지 않음)를 쓴다. 사람이 리포트 한 줄로
+		// "이게 그럴듯한가"를 판단하는 유일한 수치다 — 벌크 배열은 눈으로 볼 수 없다.
+		int32 OpenCells = 0;
+		const int32 NumCells = LocalSurface.GridDimX * LocalSurface.GridDimY;
+		for (int32 Cell = 0; Cell < NumCells; ++Cell)
+		{
+			const int32 Surf = Cell * UFPSRFlowFieldComputer::NumLayers;
+			if (LocalSurface.CellFloorZ.IsValidIndex(Surf)
+				&& LocalSurface.CellFloorZ[Surf] != MAX_flt
+				&& !LocalSurface.BlockedField[Surf])
+			{
+				++OpenCells;
+			}
+		}
+
+		Asset->Modify();
+		Asset->Surface = MoveTemp(LocalSurface);
+		Asset->SourceHash = Digest.Hash;
+		Asset->SourceActorCount = Digest.ActorCount;
+		Asset->SourceLevel = FSoftObjectPath(Arena->GetTypedOuter<UWorld>());
+		Asset->SourceArenaName = Arena->GetFName();
+		Asset->BakedAtUtc = FDateTime::UtcNow();
+		Asset->OpenCells = OpenCells;
+		Asset->MarkPackageDirty();
+
+		++NumBaked;
+		Body += FString::Printf(
+			TEXT("[%s] → %s\n  격자 %dx%d (셀 %.0fcm) · 열린 셀 %d / %d\n  소스 액터 %d개 (컴포넌트 %d) · 해시 %s\n\n"),
+			*Arena->GetName(), *Asset->GetName(),
+			Asset->Surface.GridDimX, Asset->Surface.GridDimY, Asset->Surface.CellSize,
+			OpenCells, NumCells,
+			Digest.ActorCount, Digest.ComponentCount, *Digest.Hash.Left(12));
+
+		// 액터가 거의 안 잡혔다는 것은 대개 콜리전 설정 사고다(불변식 2: 콜리전이 곧 마스크). 에셋
+		// 검증에서도 잡지만, 방금 구운 사람 눈앞에 띄우는 편이 훨씬 빠르다.
+		if (Digest.ComponentCount <= 1)
+		{
+			Body += FString::Printf(
+				TEXT("  ⚠ 소스가 %d개뿐입니다. 벽 메시가 WorldStatic + Query 콜리전인지 확인하세요 — 아닌 것은 베이크에 안 들어갑니다.\n\n"),
+				Digest.ComponentCount);
+		}
+	}
+
+	Body += TEXT("에셋은 더티 상태로 두었습니다 — 저장(Ctrl+S)해야 반영됩니다.\n다음: 'Tools > FPSR > 아레나 검증' 으로 연결성·통로폭을 확인하세요.");
+
+	FMessageDialog::Open(EAppMsgType::Ok, FText::Format(
+		LOCTEXT("BakeResult", "아레나 베이크 — 성공 {0} / 실패·건너뜀 {1}\n\n{2}"),
+		FText::AsNumber(NumBaked), FText::AsNumber(NumFailed), FText::FromString(Body)));
 }
 
 #undef LOCTEXT_NAMESPACE

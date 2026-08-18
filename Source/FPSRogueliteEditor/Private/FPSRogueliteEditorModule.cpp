@@ -137,6 +137,13 @@ void FFPSRogueliteEditorModule::RegisterMenus()
 		FUIAction(FExecuteAction::CreateStatic(&FFPSRArenaAuthoringTool::ProposeStartingLayout))
 	);
 	Section.AddMenuEntry(
+		"FPSRArenaBake",
+		LOCTEXT("ArenaBakeTitle", "아레나 베이크"),
+		LOCTEXT("ArenaBakeTooltip", "레벨에 놓인 지오메트리의 콜리전(WorldStatic + Query)에서 적 이동 마스크를 구워 각 아레나의 '베이크 데이터' 에셋에 저장합니다. 런타임은 이 결과만 읽습니다 — 절차 생성도 월드 트레이스도 하지 않습니다 (ADR 0012). 셀 예산을 넘으면 조용히 성기게 굽는 대신 거부합니다. 에셋은 더티로 두므로 Ctrl+S 로 저장하세요."),
+		FSlateIcon(FAppStyle::GetAppStyleSetName(), "DeveloperTools.MenuIcon"),
+		FUIAction(FExecuteAction::CreateStatic(&FFPSRArenaAuthoringTool::BakeArenasInLevel))
+	);
+	Section.AddMenuEntry(
 		"FPSRArenaValidate",
 		LOCTEXT("ArenaValidateTitle", "아레나 검증"),
 		LOCTEXT("ArenaValidateTooltip", "레벨에 배치된 블로커·랜드마크를 실제 런타임과 같은 경로로 셀 마스크로 굽고 검사합니다: 단일 연결성분 · 순환 회로 · 최소 통로폭 · 오목 주머니 · 프롭 여유분 (ADR 0011 E4)."),

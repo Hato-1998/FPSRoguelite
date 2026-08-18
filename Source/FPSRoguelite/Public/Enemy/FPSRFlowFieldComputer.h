@@ -26,6 +26,20 @@ enum class EFPSRFieldQuery : uint8
  * Produced either by the production world-trace bake (BuildFromWorldTrace) or, for headless unit tests,
  * hand-authored and fed via BuildFromSurfaceData. Once built, the 0.2s recompute + per-enemy sample are
  * pure O(1) array math (Performance §5-2) — this struct carries exactly the arrays the worldless core reads.
+ *
+ * EVERY field carries UPROPERTY because ADR 0012 persists this struct into a UFPSRArenaBakeDataAsset. A
+ * USTRUCT serialises through its REFLECTED properties only, so an unreflected field here would be silently
+ * dropped on save and read back as an empty array — no error, no warning, and the only symptom is that the
+ * swarm walks through walls. Adding a field without UPROPERTY reintroduces exactly that (ADR 0012 「감수하기로
+ * 한 것」). Reflection costs nothing on the hot path: the sample/recompute loops touch the arrays directly.
+ *
+ * COORDINATE SYSTEM — this struct is deliberately AGNOSTIC, and that is a hazard worth naming. GridOrigin and
+ * CellFloorZ mean whatever the producer put in them:
+ *   - BuildFromWorldTrace / ExtractSurfaceData  -> WORLD space (the runtime field must be in world space)
+ *   - UFPSRArenaBakeDataAsset                   -> ARENA-LOCAL (ADR 0012 invariant 8)
+ * Never assume; convert at the DataAsset boundary and nowhere else. A local-space struct fed straight into
+ * BuildFromSurfaceData puts the whole grid at the world origin, and a world-space struct stored into a bake
+ * asset pins that arena to one position forever (both fail silently — the geometry looks right either way).
  */
 USTRUCT()
 struct FFPSRFlowFieldSurfaceData
@@ -33,24 +47,77 @@ struct FFPSRFlowFieldSurfaceData
 	GENERATED_BODY()
 
 	/** Grid dimensions (cells per axis). Cell index = CY*GridDimX + CX. */
+	UPROPERTY(VisibleAnywhere, Category = "FlowField|Surface")
 	int32 GridDimX = 0;
+
+	UPROPERTY(VisibleAnywhere, Category = "FlowField|Surface")
 	int32 GridDimY = 0;
-	/** Min corner (world) of cell (0,0). */
+
+	/** Min corner of cell (0,0). World space from the runtime bake; arena-local inside a bake asset — see the
+	 *  COORDINATE SYSTEM note on this struct. */
+	UPROPERTY(VisibleAnywhere, Category = "FlowField|Surface")
 	FVector GridOrigin = FVector::ZeroVector;
+
 	/** Cell size (cm). */
+	UPROPERTY(VisibleAnywhere, Category = "FlowField|Surface")
 	float CellSize = 200.0f;
 
 	/** Climbable step height (cm) this slot was baked with (default = UFPSRFlowFieldComputer::DefaultClimbableStepHeight).
 	 *  In the U unified grid every committed slot must share this value (validated by CommitSubregion) so a door seam uses
 	 *  the SAME step gate as the slots' baked edges — otherwise the field could disagree with the movement graph (Codex R3). */
+	UPROPERTY(VisibleAnywhere, Category = "FlowField|Surface")
 	float ClimbableStepHeight = 45.0f;
 
-	/** Per-surface reachable floor Z (world), sized NumCells*NumLayers. MAX_flt = no surface at this (cell,rank). */
+	// The three bulk arrays are reflected (so they persist) but NOT Visible/Edit: at 160x160 cells x 2 layers they
+	// hold 51,200 entries each, and a details panel that tried to draw one would lock the editor. Inspect them
+	// through the bake asset's summary fields or FPSR.Arena.DebugGrid instead.
+
+	/** Per-surface reachable floor Z, sized NumCells*NumLayers. MAX_flt = no surface at this (cell,rank).
+	 *  Same world/arena-local caveat as GridOrigin. */
+	UPROPERTY()
 	TArray<float> CellFloorZ;
+
 	/** Per-surface occupancy mask (true = surface exists but is occupancy-blocked), sized NumCells*NumLayers. */
+	UPROPERTY()
 	TArray<bool> BlockedField;
+
 	/** Per-cell edge rank-pairing mask, sized NumCells*2 ([cell*2+0] = +X edge, [cell*2+1] = +Y edge). */
+	UPROPERTY()
 	TArray<uint8> EdgeMask;
+};
+
+/**
+ * Everything the world-trace bake needs, with no dependency on an AFPSRFlowFieldBoundsVolume (ADR 0012).
+ *
+ * Plain struct, not USTRUCT: it is a call argument that lives for the duration of one bake and is never stored,
+ * replicated, or shown to a designer. The persisted thing is the RESULT (FFPSRFlowFieldSurfaceData).
+ */
+struct FFPSRFlowFieldBakeRequest
+{
+	/** Min corner of cell (0,0) in WORLD space. Z is the floor anchor the whole grid is measured from. */
+	FVector GridOrigin = FVector::ZeroVector;
+
+	/** World extent to cover (cm). The grid rounds UP to whole cells, so it never covers less than this. */
+	float SizeX = 0.0f;
+	float SizeY = 0.0f;
+
+	float CellSize = 0.0f;
+	float ClimbableStepHeight = 0.0f;
+	float ProbeApexAboveOrigin = 0.0f;
+
+	/** true (authoring bake): a grid over the cell budget is an ERROR and the bake refuses.
+	 *  false (runtime): grow the cell size to fit, as the shipped path has always done. */
+	bool bFailOnBudgetOverflow = false;
+
+	/** What asked for this bake, for the log line only. Keeping it on the request rather than as a member on the
+	 *  computer means the wrapper does not have to leave state behind just to describe itself. */
+	const TCHAR* SourceLabel = TEXT("trace request");
+
+	bool IsValid() const
+	{
+		return SizeX > 0.0f && SizeY > 0.0f && CellSize > 0.0f
+			&& ClimbableStepHeight > 0.0f && ProbeApexAboveOrigin > 0.0f;
+	}
 };
 
 /**
@@ -229,12 +296,38 @@ public:
 	static constexpr int32 GetMaxGridDimPerAxis() { return MaxGridDimPerAxis; }
 	static constexpr int32 GetMaxTotalCells() { return MaxTotalCells; }
 
+	/** Probe apex used when nothing overrides it. Exposed for the arena's editor baker (ADR 0012), which sizes its
+	 *  grid from arena params and has no bounds volume to read an override from — without this it would have to
+	 *  restate 2000 as a literal, and the day the default moves the bake would silently keep the old one. */
+	static constexpr float GetDefaultProbeApexAboveOrigin() { return DefaultProbeApexAboveOrigin; }
+
 	// --- PRODUCTION PATH (server, world queries) ---
 
 	/** Size the grid from a bounds volume (or origin-centered fallback) anchored at FloorZ, then trace the static-obstacle
 	 *  surface graph ONCE, producing a FFPSRFlowFieldSurfaceData and adopting it via BuildFromSurfaceData. TargetLevel (if
-	 *  set) scopes actor discovery when multiple sublevels are loaded. */
+	 *  set) scopes actor discovery when multiple sublevels are loaded.
+	 *
+	 *  Thin wrapper: it reads the four numbers a bounds volume carries into an FFPSRFlowFieldBakeRequest and hands
+	 *  off to BuildFromTraceRequest. Behaviour is unchanged — including the silent coarsen, which the runtime path
+	 *  keeps on purpose (a live game must degrade rather than refuse to build a field). */
 	void BuildFromWorldTrace(UWorld* World, const AFPSRFlowFieldBoundsVolume* BoundsVolume, float FloorZ);
+
+	/**
+	 * Same trace bake, driven by explicit numbers instead of a bounds volume actor (ADR 0012).
+	 *
+	 * The arena's editor baker sizes its grid from UFPSRArenaParamsDataAsset (ArenaSizeCells x CellSize, centred on
+	 * the arena actor) and has no bounds volume to point at — inventing a throwaway one just to carry four floats
+	 * would put a second, drifting definition of the arena's extent into the level.
+	 *
+	 * It also sets bFailOnBudgetOverflow. The runtime path GROWS the cell size when the grid exceeds the budget so a
+	 * shipped game still gets a field; an authoring bake must not, because a coarsened arena is a DIFFERENT arena
+	 * from the one the designer validated, and the only sign of it is a warning line nobody reads. ADR 0011 E1
+	 * already called this out ("caught at author time, instead of BuildFromWorldTrace's old behaviour of silently
+	 * coarsening the cell size") — this flag is where that becomes true.
+	 *
+	 * @return false only when bFailOnBudgetOverflow rejected the request; the grid is left untouched in that case.
+	 */
+	bool BuildFromTraceRequest(UWorld* World, const struct FFPSRFlowFieldBakeRequest& Request);
 
 	/** Resolve alive-player sources in World (optionally filtered to InMapPlayers when non-null) and run the BFS. */
 	void RecomputeFromWorld(UWorld* World, const TArray<FVector>* SourcePlayerFootLocations = nullptr);

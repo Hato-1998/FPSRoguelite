@@ -84,6 +84,19 @@ public:
 	/** Resolved generator params + world-space grid origin, or false if no params asset is assigned. */
 	bool GetGenParams(FFPSRArenaGenParams& OutParams, FVector& OutOrigin) const;
 
+	/** 이 아레나가 베이크된 마스크를 갖고 있는가 (ADR 0012). 참조만이 아니라 내용까지 본다 — 참조는 걸려
+	 *  있는데 배열이 빈 에셋이 정확히 "적이 벽을 뚫는" 증상으로 나타나므로, 그 상태를 없음으로 취급한다. */
+	bool HasBakedSurface() const;
+
+	/** 베이크 에셋 참조 자체(내용 무관). 에디터 베이커가 여기에 결과를 써 넣고, 검증기가 "참조는 있는데
+	 *  안 구워졌다"와 "참조조차 없다"를 구분하는 데 쓴다 — HasBakedSurface() 는 그 둘을 똑같이 false 로
+	 *  뭉개므로 지적 문구를 고를 수 없다. */
+	class UFPSRArenaBakeDataAsset* GetBakeData() const { return BakeData; }
+
+	/** 베이크된 마스크를 이 액터의 트랜스폼만큼 옮겨 **월드 좌표**로 돌려준다(ADR 0012 불변식 8).
+	 *  플로우필드가 마스크를 얻는 유일한 경로다. 실패 시 OutWorld 는 건드리지 않는다. */
+	bool GetBakedWorldSurface(FFPSRFlowFieldSurfaceData& OutWorld) const;
+
 	const FFPSRArenaLayout& GetLayout() const { return Layout; }
 	bool HasLayout() const { return Layout.IsValid(); }
 
@@ -147,6 +160,12 @@ protected:
 	/** 아레나 파라미터(치수·클러스터 격자·통로 폭). 비어 있으면 아레나를 만들지 않는다. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "아레나", meta = (DisplayName = "아레나 파라미터"))
 	TObjectPtr<UFPSRArenaParamsDataAsset> ArenaParams;
+
+	/** 이 아레나의 **베이크된 장애물 마스크**(ADR 0012). 에디터 베이커가 레벨 콜리전에서 구워 넣는다.
+	 *  설정돼 있으면 플로우필드가 이것만 읽고 절차 생성 경로는 쓰지 않는다 — 불변식 1·3.
+	 *  비어 있으면 구 절차 생성 경로로 폴백하며 경고를 남긴다(마이그레이션 중에만 유효한 상태다). */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "아레나", meta = (DisplayName = "베이크 데이터"))
+	TObjectPtr<class UFPSRArenaBakeDataAsset> BakeData;
 
 	/** 레벨 시작 시드. 런타임에는 서버가 ActiveSeed 를 굴려 덮는다. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "아레나", meta = (DisplayName = "시작 시드"))
