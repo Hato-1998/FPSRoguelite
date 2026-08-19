@@ -464,12 +464,12 @@ bool AFPSRArenaActor::AdoptBakedLayout()
 	return true;
 }
 
-bool AFPSRArenaActor::ContainsWorldLocation(const FVector& World) const
+bool AFPSRArenaActor::GetGridBoundsXY(FVector2D& OutMin, FVector2D& OutMax) const
 {
 	// Reads the two dimension fields straight off the asset instead of going through GetGenParams/ToGenParams:
-	// that path copies the whole generator contract INCLUDING the flattened prop-set entry arrays, and this
-	// predicate runs once per marker actor in each of SetArenaActive's three sweeps and again in
-	// BuildLayoutForSeed — hundreds of throwaway array copies for a bounds test that needs two numbers.
+	// that path copies the whole generator contract INCLUDING the flattened prop-set entry arrays, and this runs
+	// once per actor in SetArenaActive's sweep and once per component in the bake hash — hundreds of throwaway
+	// array copies for a bounds test that needs two numbers.
 	if (!ArenaParams)
 	{
 		return false;
@@ -481,13 +481,43 @@ bool AFPSRArenaActor::ContainsWorldLocation(const FVector& World) const
 	// Same centre-anchored origin ComputeGridOrigin derives (the actor sits at the arena CENTRE), restated from the
 	// same two fields so the two can only disagree if both are edited.
 	const FVector Centre = GetActorLocation();
-	const double MinX = Centre.X - 0.5 * SpanX;
-	const double MinY = Centre.Y - 0.5 * SpanY;
+	OutMin = FVector2D(Centre.X - 0.5 * SpanX, Centre.Y - 0.5 * SpanY);
+	OutMax = FVector2D(OutMin.X + SpanX, OutMin.Y + SpanY);
+	return true;
+}
 
-	// Z is deliberately absent from this test — see the header comment. The arena is a single Z-plane and reserve
-	// arenas are parked BESIDE the live one (2026-08-17 decision), so XY alone is what tells two arenas apart.
-	return World.X >= MinX && World.X < MinX + SpanX
-		&& World.Y >= MinY && World.Y < MinY + SpanY;
+bool AFPSRArenaActor::OverlapsWorldBoundsXY(const FBoxSphereBounds& Bounds) const
+{
+	FVector2D GridMin, GridMax;
+	if (!GetGridBoundsXY(GridMin, GridMax))
+	{
+		return false;
+	}
+
+	// Closed on both sides here, unlike ContainsWorldLocation's half-open point test: a wall that merely TOUCHES
+	// the grid edge is still something the obstacle probe can hit, and excluding it is exactly the bug this
+	// function exists to remove. Z is absent for the same reason it is absent there — the arena is one Z-plane
+	// and reserve arenas are parked beside the live one, so XY alone separates them.
+	const double MinX = Bounds.Origin.X - Bounds.BoxExtent.X;
+	const double MaxX = Bounds.Origin.X + Bounds.BoxExtent.X;
+	const double MinY = Bounds.Origin.Y - Bounds.BoxExtent.Y;
+	const double MaxY = Bounds.Origin.Y + Bounds.BoxExtent.Y;
+	return MaxX >= GridMin.X && MinX <= GridMax.X
+		&& MaxY >= GridMin.Y && MinY <= GridMax.Y;
+}
+
+bool AFPSRArenaActor::ContainsWorldLocation(const FVector& World) const
+{
+	FVector2D GridMin, GridMax;
+	if (!GetGridBoundsXY(GridMin, GridMax))
+	{
+		return false;
+	}
+
+	// Half-open on the upper edge so two arenas laid out edge to edge can never both claim the same point.
+	// Z is deliberately absent from this test — see the header comment.
+	return World.X >= GridMin.X && World.X < GridMax.X
+		&& World.Y >= GridMin.Y && World.Y < GridMax.Y;
 }
 
 bool AFPSRArenaActor::GetPlayerEntryTransforms(TArray<FTransform>& Out) const

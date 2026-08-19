@@ -142,12 +142,15 @@ namespace
 			{
 				continue; // the "two arenas in one level" error above already explains this level
 			}
+			// 겹침 판정이지 중심점 판정이 아니다 — 경계벽은 격자 모서리에 중심을 맞춰 저작되므로 중심으로
+			// 재면 정상 저작물이 매번 걸린다(실측: 벽 4개 중 3개). 항상 켜져 있는 경고는 아무도 안 읽는다.
 			TArray<FString> Outside;
 			for (AActor* Actor : Level->Actors)
 			{
 				if (!IsValid(Actor) || Actor == Arena) { continue; }
-				if (!Actor->GetRootComponent()) { continue; }
-				if (!Arena->ContainsWorldLocation(Actor->GetActorLocation()))
+				const USceneComponent* Root = Actor->GetRootComponent();
+				if (!Root) { continue; }
+				if (!Arena->OverlapsWorldBoundsXY(Root->Bounds))
 				{
 					Outside.Add(Actor->GetName());
 				}
@@ -155,8 +158,9 @@ namespace
 			if (Outside.Num() > 0)
 			{
 				Report += FString::Printf(
-					TEXT("[경고] [%s] 의 레벨에 아레나 격자 밖 액터가 %d개 있습니다: %s\n"
-					     "이 아레나가 예비로 대기하는 동안 같이 숨겨집니다 — 공용 조명·포스트프로세스라면 지속 레벨로 옮기세요.\n"),
+					TEXT("[경고] [%s] 의 레벨에 아레나 격자에 전혀 닿지 않는 액터가 %d개 있습니다: %s\n"
+					     "이 아레나가 예비로 대기하는 동안 같이 숨겨지고, 베이크 해시에도 들어가지 않습니다 — "
+					     "공용 조명·포스트프로세스라면 지속 레벨로 옮기세요.\n"),
 					*Arena->GetName(), Outside.Num(), *FString::Join(Outside, TEXT(", ")));
 			}
 		}

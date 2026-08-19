@@ -135,6 +135,25 @@ public:
 	 *  two (or none) is invisible at runtime, where FindActiveInWorld just picks one deterministically. */
 	bool StartsActive() const { return bStartsActive; }
 
+	/** This arena's cell grid as a world-space XY box. False if no params asset is assigned.
+	 *  The ONE definition of "where the arena is" — ContainsWorldLocation and OverlapsWorldBoundsXY both derive
+	 *  from it so a point test and an extent test can never disagree about the same edge. */
+	bool GetGridBoundsXY(FVector2D& OutMin, FVector2D& OutMax) const;
+
+	/**
+	 * True if Bounds' world XY box overlaps this arena's grid — the test for things that have EXTENT.
+	 *
+	 * ContainsWorldLocation is the wrong question for geometry. A boundary wall is authored centred ON the grid
+	 * edge, so whether its centre lands inside is decided by float noise in the 4th decimal: measured on
+	 * L_Map_2, three of four walls fell outside (y = -8000.0001, x = 28000.0000, x = 11999.9997) and one fell
+	 * inside. The bake's obstacle probe hits all four regardless, so a centre test silently leaves most of the
+	 * arena's own boundary out of the freshness hash — move a wall and nothing reports stale.
+	 *
+	 * Use this for anything with a size (bake sources, validator geometry checks); use ContainsWorldLocation for
+	 * point-like membership (which arena owns this spawn point / marker).
+	 */
+	bool OverlapsWorldBoundsXY(const FBoxSphereBounds& Bounds) const;
+
 	/** True if World is inside this arena's cell grid on the XY plane. Z is deliberately NOT checked: the arena is
 	 *  a single Z-plane (ADR 0010 D2), and reserve arenas are parked BESIDE the live one rather than stacked below
 	 *  it (see the class comment) — so two arenas can share a Z but never overlap in XY, and XY alone is what tells

@@ -164,9 +164,13 @@ bool FFPSRArenaBakeHash::Compute(const AFPSRArenaActor& Arena, FFPSRArenaBakeSou
 			}
 
 			// 아레나 격자 밖의 지오메트리는 프로브가 닿지 않으므로 해시에도 넣지 않는다. 넣으면 아레나와
-			// 무관한 장식을 옮긴 것만으로 재베이크를 요구하게 된다. 컴포넌트 바운드의 중심으로 판정한다 —
-			// ContainsWorldLocation 이 XY 만 보므로 경계에 걸친 벽도 중심이 안에 있으면 포함된다.
-			if (!Arena.ContainsWorldLocation(Comp->Bounds.Origin))
+			// 무관한 장식을 옮긴 것만으로 재베이크를 요구하게 된다.
+			//
+			// 판정은 **바운드 겹침**이지 중심점 포함이 아니다. 경계벽은 격자 모서리에 중심을 맞춰 저작되므로
+			// 중심이 안인지 밖인지가 소수점 4자리 부동소수 잡음으로 갈린다 — L_Map_2 실측에서 벽 4개 중 3개가
+			// 밖으로 떨어졌다(y=-8000.0001 · x=28000.0000 · x=11999.9997). 프로브는 넷 다 때리므로, 중심
+			// 판정은 아레나 자신의 경계를 해시에서 조용히 빼 버린다 — 벽을 옮겨도 스테일이 안 뜬다.
+			if (!Arena.OverlapsWorldBoundsXY(Comp->Bounds))
 			{
 				continue;
 			}
