@@ -9,6 +9,61 @@
 
 ---
 
+## 🧾 M0 EC ② — C++ 하드코딩 문자열 잔여 5 → 0 (2026-08-19, `phase/m0-ec2-cpp-loctext`, 머지 `c485b68e`)
+> 보드 행 = *"EC ② 잔여 — C++ LOCTEXT 5건 + Map_CyberCity 주석 2줄 (빌드 동반)"*(M0 · 로우 · S · Opus).
+> **EC ②의 C++ 축이 닫혔다.** 남은 EC ② 잔여 = 에디터 행(BP 그래프 핀 3곳 + 고아 WBP 2)뿐.
+
+### 판정을 먼저 기계화했다
+착수 전에 `Content/Localization/Game/Game.manifest` 를 네임스페이스별로 세어 기준선을 박았다 —
+**총 98엔트리 = `Card` 52 / `CardEffect` 16 / `UI` 25 / `FPSRBossDefinition` 4 / `FPSRCardEffect` 1.**
+앞 셋은 StringTable 경유(정상)고 **뒤 둘이 C++ LOCTEXT 잔여 5건**이다. 그래서 EC ②는
+*"뒤 두 네임스페이스가 소멸하고 `CardEffect` 가 17이 되면 닫힌다"* 는 **대조 가능한 명제**가 됐다.
+최종 = **94 = `Card` 52 / `CardEffect` 17 / `UI` 25**, 두 네임스페이스는 manifest·ko/en/ja archive
+**전부에서 소멸**. 신규 키 수집·번역 주입도 직접 파싱해 확인(ko `무기` / en `Weapon` / ja `武器`).
+
+### ① Boss `GetDescription()` 4건 — 이관이 아니라 **가드**가 답이었다
+헤더가 *"One-line summary for designer tooling / catalog"* 라 **에디터 도구용이라 선언해 놓고**
+`#if WITH_EDITOR` 밖에 있어 쿠킹 빌드에 실리고 gather에 잡혔다. 같은 파일의 `IsDataValid` 는
+제대로 가드돼 있어 **대조군이 파일 안에 있었다**. 에디터 전용 문자열은 번역 대상이 아니므로
+StringTable로 옮기는 게 아니라 **수집 대상에서 빼는 것**이 옳다 → CSV·gather 불필요.
+🪤 **`UFUNCTION(BlueprintPure)` 를 가드로 감싸면 BP 호출자가 있을 때 쿡 빌드가 깨진다** —
+선확인 필수였고 실측 = `Source/` 0 · 프로젝트 소유 BP 디렉터리 15곳 0 · `Content/Python`·`Tools` 0
+= 호출자 전무. 엔진 선례 = `PrimitiveComponent.h:1487` `GetEditorMaterial`.
+
+### ② `FPSRCardEffect.cpp:356` 1건 — 시트가 먼저다
+`LOCTEXT("UnknownWeapon","Weapon")` 폴백. 바로 다음 줄은 이미 `LOCTABLE("CardEffect","Fmt.UnlockWeapon")`
+인데 **인자만 리터럴**로 남아 있었고, 이 함수는 `FPSRCardEntryWidget.cpp:82` 가 소비하는
+카드 선택 UI 경로다(에디터 전용이 아니라 진짜 노출).
+🪤 **코드부터 고치면 안 된다.** `Localization.md` §L-5(*"시트=마스터, 단방향, 양방향 금지"*)·§50
+(*"편집은 항상 구글 시트에서"*)이라 리포 CSV는 **빌드 스냅샷**이고, 손편집하면 다음 sync에 덮인다.
+키 없이 코드만 바꾸면 **카드 UI에 빈 문자열 회귀**가 난다. 순서 = 사용자가 시트 `ST_CardEffect` 에
+`Fallback.UnknownWeapon,무기,Weapon,武器` 행 추가 → `sync-authoring-csv.ps1 -SheetName ST_CardEffect`
+(정확히 +1행, 다른 시트 무접촉) → 코드 1줄 교체 → 재-gather.
+
+### ③ 곁다리 — 삭제된 맵을 예시로 든 주석 2줄
+`FPSRFlowFieldBoundsVolume.h:31` · `FPSRFlowFieldSubsystem.h:22` → `L_Map1_City`(`dca19b4e` 이후 현행).
+
+### 🪤 이번에 검증이 거짓 통과할 뻔했다 (둘 다 `Docs/Troubleshooting.md` 로 내림)
+1. **`G10` — 헤드리스 스모크가 exit 0인데 아무것도 안 돌았다.** PS 5.1에서 `-abslog=$log` 를
+   따옴표 없이 넘기면 `UnrealEditor-Cmd` 가 아예 뜨지 않는데 `$LASTEXITCODE` 는 **0**이고 stdout도
+   비어 있고 `Saved/Logs/` 에도 새 파일이 없다. **로그 부재는 실패가 아니라 "안 돌았다"** 이고 둘은
+   구분해야 한다. 해결 = `Scripts/validate-data.ps1` 처럼 `=` 든 인자를 통째로 따옴표 + `-log`,
+   그리고 판정은 로그의 `Result={Success}` 와 `N tests performed` 로.
+2. **`H7` — `Game.manifest` 는 UTF-16LE.** 첫 grep이 대상 5키에 대해 에러 없이 **조용히 0건**을 냈다.
+   그대로 믿었으면 *"이미 정리됨"* 으로 오판했을 자리다. UTF-8 변환 후 JSON 파싱이 정답.
+
+### 검증
+`Build.bat FPSRogueliteEditor Win64 Development -MaxParallelActions=2` 2회 = **Succeeded**(실에러·경고 0).
+UHT가 `-WarningsAsErrors` 로 통과 = `#if WITH_EDITOR` 안 `UFUNCTION` 배치 정상.
+헤드리스 스모크 **5/5 Success**(`Smoke.ModuleLoads`·`SaveGame`·`GameplayMessage`·`CrosshairSettings`
++ `Editor.Localization.StringTableCsv`). 레드팀 게이트 = **미적용**(§6-6-1 — 코어 갈래 T1~T5 아님).
+
+### 병렬 트랙 메모
+`FPSRFlowFieldSubsystem.h` 는 `phase/arena-topology`(당시 미머지 26커밋)도 +25줄 수정 중이었다.
+이 트랙의 헌크는 L22 주석, arena 쪽은 L4·L73+ 라 auto-merge가 확실해 그대로 진행했다.
+
+---
+
 ## 🧾 M0 기준선 정정 — 비-빌드/에디터 트랙 일괄 (2026-08-13, `docs/m0-baseline-reconcile`)
 > 사용자 지시 = *"M0 작업보드 중 빌드·에디터 관련을 제외한 작업을 전부 처리"*. 보드 M0 활성 14건 중 **5건 착수 / 9건 미착수 유지**(빌드·에디터·사용자 PIE 의존).
 > **닫힌 것 = EC ③·EC ④ + M0 (c) 표기 정정 + M0 (d) 세이브 잔여.** 코드 변경 0(문서·감사·보드만) → 빌드 불요, `git diff` 자기비판 경로(§6-7 3).
