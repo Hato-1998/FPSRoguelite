@@ -288,6 +288,16 @@ AO 설정(mesh-space additive, 기준=Center) 전부 정상이었고, **AO 샘�
 ### B4. 1인칭 FOV/스케일을 켜면 조준이 어긋난다
 `bEnableFirstPersonFieldOfView` / `bEnableFirstPersonScale`은 **둘 다 엔진 기본 false**다. 켜면 1인칭 패스가 다른 FOV·스케일로 렌더돼서 **사이트가 "렌더되는 곳"과 코드가 "월드에 놓는 곳"이 갈라진다.** 이 프로젝트는 조준점을 화면 중앙에 못 박으므로, 켜려면 ADS 정렬을 다시 재야 한다.
 
+### B5. 총구 화염·연기가 사격을 멈춰도 안 꺼진다 (쏠수록 심해진다)
+**원인**: 총구 화염은 발사마다 `SpawnEmitterAttached(bAutoDestroy=true)`로 스폰하고 버리는 일회성 연출이다. 그런데 붙인 Cascade 시스템이 **`EmitterLoops=0`(무한) + `EmitterDuration=0`(무한) + `SpawnRate>0`** 이면 `ActiveParticles`가 0이 되는 순간이 없어 `CheckEmitterFinished`(`ParticleEmitterInstances.cpp:881`)가 `bEmitterIsDone`을 못 세운다 → `bAutoDeactivate`가 안 걸리고 → 시스템이 "완료"에 못 들어가 **`bAutoDestroy`가 영원히 발동하지 않는다.** 총 한 발 = `UParticleSystemComponent` 하나가 폰에 영구 잔존, 각자 계속 파티클을 뿜는다.
+
+**단서**: `LogParticles: ... spawned potentially immortal particle system!` — `Log` 레벨이라 조용히 지나간다(화면엔 빨간 온스크린 메시지). 실사고에서 PIE 한 세션에 85건.
+
+🪤 **경고가 떴다고 전부 누수는 아니다.** immortal 판정(`ParticleSystem.cpp:236` — `EmitterLoops==0 && EmitterDuration==0`)과 실제 정리 여부(**`SpawnRate==0`이면 버스트 후 자동 비활성화**)는 **다른 게이트**다. 같은 팩의 `PS_Gunshot_Single`은 경고가 뜨는데도 정리는 됐다. 그래서 판정 지표를 "경고가 사라졌나"로 잡으면 안 되고, **사격 전/후 `obj list class=ParticleSystemComponent` 개수**로 봐야 한다.
+
+**해결**: 일회성 연출에는 유한 에미터를 쓴다 — Cascade의 각 에미터 Required 모듈 > Duration 에서 `Emitter Loops ≥ 1`, `Emitter Duration > 0`(Duration은 *스폰 창*만 제한하므로 짧아도 파티클은 제 수명을 다 산다). 무기 `MuzzleFlash`는 `UFPSRWeaponDataAsset::IsDataValid`가 immortal이면 ERROR로 막는다.
+전체 경위·실측치 = `WorkLog.md` 2026-08-19 *"총구 화염이 안 꺼지던 것"* 절(`6ffcfff0`).
+
 ---
 
 ## C. 빌드 · 에디터 기동

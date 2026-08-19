@@ -9,6 +9,81 @@
 
 ---
 
+## 🧾 총구 화염이 안 꺼지던 것 — 발사마다 남는 immortal 파티클 (2026-08-19, `phase/arena-spawnpoints`, `6ffcfff0`)
+> 보드 행 = *"총구 화염 immortal 파티클 누수 — PS_Gunshot_Repeating 발사마다 PSC 잔존"*(M2 · 하이 · S · Opus).
+> **§6-9 (8) M0 개시순서 예외 ③으로 당겨 썼다** — 남은 M0 Exit Criteria ①이 *"적 300/500 정량 성능
+> 베이스라인 실측"*인데, 사격이 들어간 어떤 측정도 이 누수에 오염된다. 먼저 막지 않으면 그 수치 자체가
+> 성립하지 않는다. M0 EC ① 측정은 이제 이 오염원에서 자유롭다(근거 = 이 커밋).
+
+증상 = 라이플을 쏘면 총구 화염과 연기가 사라지지 않고 계속 나온다. 단서는 로그 한 줄이었다:
+`LogParticles: ... spawned potentially immortal particle system! ... (PS_Gunshot_Repeating)` — PIE 한 세션에 **85건**.
+
+### 🪤 immortal 경고 ≠ 누수. 게이트가 둘이고, 갈리는 지점은 SpawnRate다
+엔진 판정이 두 군데로 나뉘어 있고, **경고를 내는 쪽과 실제로 죽이는 쪽이 다르다.**
+
+| 게이트 | 조건 | 결과 |
+|---|---|---|
+| `UParticleSystem::bIsImmortal` (`ParticleSystem.cpp:236-268`) | `EmitterLoops==0 && EmitterDuration==0` | **경고만** 낸다 (`GameplayStatics.cpp:1378`) |
+| `FParticleEmitterInstance::CheckEmitterFinished` (`ParticleEmitterInstances.cpp:881`) | `ActiveParticles==0` && 마지막 버스트 지남 && `GetMaximumSpawnRate()==0` | `bEmitterIsDone` → `bAutoDeactivate`(기본 true) → 완료 → `bAutoDestroy` |
+
+T3D 덤프 실측(둘 다 에미터 = `FX_MusketFire` + `FX_MusketSmoke`):
+
+| | `PS_Gunshot_Repeating` | `PS_Gunshot_Single` (수정 전) |
+|---|---|---|
+| EmitterLoops / EmitterDuration | 0 / 0.0 | 0 / 0.0 |
+| **SpawnRate** | **8/초** | **0** (버스트 전용) |
+
+→ **둘 다 immortal 플래그가 켜져 있었다.** 차이는 SpawnRate 하나뿐인데, 그것 때문에 `_Repeating`은
+`ActiveParticles`가 0이 되는 순간이 없어 `bEmitterIsDone`이 영원히 안 서고 → 자동 비활성화가 안 걸리고 →
+`bAutoDestroy`가 발동하지 않는다. **총 한 발 = `UParticleSystemComponent` 하나가 폰에 영구 잔존**, 각자
+초당 화염 8 + 연기 8을 계속 뿜는다. `_Single`은 우연히 정리될 뿐, 누가 SpawnRate를 올리면 즉시 같은 지뢰가 된다.
+
+**여기서 성급히 결론냈으면 틀렸다.** "이름이 `_Repeating`이니 `_Single`로 바꾸면 끝"이 첫 가설이었는데,
+`_Single`도 immortal이라 그것만으로는 **빨간 온스크린 경고가 그대로 남고** 잠재 지뢰도 남는다.
+`_Single`을 유한화(`Loops=1`/`Duration=0.1`)해야 비로소 닫힌다.
+
+### 배정 자체가 틀렸다
+팩이 의도한 `_Repeating`의 용법 = *격발 유지 동안 한 번 Activate → 놓으면 Deactivate*. 그런데 이 프로젝트는
+`PlayWeaponFireCosmetics`/`MulticastFireCosmetics`에서 **발사마다 `SpawnEmitterAttached`로 스폰하고 버린다**
+(`bAutoDestroy=true`). 루프형 에셋을 일회성 경로에 꽂은 것. Rifle/SMG/LMG/ChargeLaser 4종이 그랬고,
+Bazooka/Shotgun/Sniper 3종은 처음부터 `_Single`이라 멀쩡했다.
+
+### 수정
+- **무기 DA** — Rifle/SMG/LMG → `PS_Gunshot_Single`. **ChargeLaser는 None**(화약 총기가 아니므로 —
+  사용자 결정, 레이저 VFX는 M2 *"VFX 전투 4종"* 행에서 별도 저작).
+- **`PS_Gunshot_Single`** 두 에미터 Required 모듈 — `EmitterLoops 0→1`, `EmitterDuration 0.0→0.1`.
+  버스트는 시간 0이라 그대로 터지고, Duration은 *스폰 창*만 제한하므로 연기는 제 수명(0.5~1.5초)을 다 산다.
+- **`UFPSRWeaponDataAsset::IsDataValid`** — `MuzzleFlash`가 `IsImmortal()`이면 ERROR. 엔진은 이 상황을
+  `Log` 한 줄로만 알려주므로 데이터 단계에서 막는다. `MuzzleFlash`는 이 프로젝트의 **유일한**
+  `UParticleSystem` 프로퍼티라(스폰 지점도 위 두 곳뿐) 이 검사 하나로 노출면 전부가 덮인다.
+
+### 기각·보류
+- **`_Repeating`을 살리는 안**(격발 시작/종료를 코스메틱에 노출해 Activate/Deactivate로 구동) — 기각.
+  발사마다 스폰하는 현 구조에서는 불가능하고, 별도 상태 배선이 필요하다. LMG의 "연속으로 타오르는 총구
+  화염"을 원하면 그때 별건으로 세운다.
+- **PSC 풀링(`EPSCPoolMethod::AutoRelease`)** — 보류. 발사당 UObject 생성/등록 제거(4인 × ~10발/초 ≈
+  초당 40개)로 제1원리(액터당 비용 최소화)에 맞지만, **이번 버그와 무관하고** 풀 재사용 상태라는 별도
+  리스크면이 있어 커밋에 섞지 않았다. 백로그 후보.
+- **검증을 Warning으로 낮추는 안** — 기각. 쿠킹/커맨드릿 검증을 통과해버려 다시 새어나간다.
+
+### 검증 (전부 실측, 대조군 포함)
+- UBT `Result: Succeeded`, 컴파일 에러 0, 602초.
+- **검증기 대조군** — 고치기 전 무기 DA 전수 검증에서 `MuzzleFlashImmortal` **정확히 3건**
+  (SMG/LMG/ChargeLaser, 원인 에셋 `PS_Gunshot_Repeating`), 이미 고쳤던 Rifle + 나머지 6종 미발생.
+  수정 후 9종 재검증 **0건**. → "에러 0"이 *통과*인지 *검사가 안 도는 것*인지 구분됐다.
+- `PS_Gunshot_Single` T3D 재덤프 — 두 Required 모듈 모두 `Loops=1` / `Duration=0.1` (수정 전 `0` / `0.0`).
+- PIE(`L_Arena`) — `potentially immortal` **0건**(수정 전 85건), 사격 중단 후 화염·연기 소멸.
+
+### 🔓 조사 기법 — protected 프로퍼티는 T3D로 읽는다
+Cascade는 Python에 **클래스 자체가 없고**(`unreal.ParticleModuleRequired` = AttributeError),
+`UParticleSystem::Emitters`는 protected라 `get_editor_property`가 거부한다. 그래서 위 표의 값들을 읽을
+방법이 없어 보였는데, **`unreal.Exporter.run_asset_export_task`로 T3D를 뽑으면 전부 평문으로 나온다**
+(C++ 리플렉션이라 Python 노출 여부와 무관). 수정 전/후 덤프 대조로 값이 실제로 들어갔는지 판정하는 데도 썼다.
+⚠️ T3D는 **CDO 기본값과 다른 것만** 쓴다 — 항목이 안 보이면 *없다*가 아니라 *기본값이다*
+(`EmitterLoops` 미출력 = 기본값 0 = 무한 반복. 이걸 모르면 정반대로 읽는다).
+
+---
+
 ## 🧾 M0 EC ② 닫힘 — BP 인라인 Text 이관 + 고아 위젯 정리 (2026-08-19, `phase/m0-ec2-editor`, 머지 `1c646085`)
 > 보드 행 = *"EC ② 잔여 — BP 그래프 핀 3곳 + 고아 WBP 2 (에디터)"*(M0 · 로우 · S · Opus).
 > **§7-6 M0 EC ② 가 이 행으로 종료됐다.** 같은 날 닫힌 C++ 축(`c485b68e`)과 합쳐 하드코딩 UI 문자열 = 0.
