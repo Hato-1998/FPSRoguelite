@@ -268,7 +268,7 @@ void UFPSRArenaStreamSubsystem::PollPending()
 			// Log, not Warning: a one-arena map is a legitimate configuration (it cycles to itself), and this is
 			// the only place that can tell the reader which of the two situations they are in.
 			UE_LOG(LogFPSR, Log,
-				TEXT("[ArenaStream] no arena follows stage %d after %.0fs — either this map has a single arena (it will cycle to itself), or the next arena's sublevel is not set 'Initially Loaded' in the persistent level's Levels panel and so never entered the roster."),
+				TEXT("[ArenaStream] no arena follows stage %d after %.0fs — either this map has a single arena (it will cycle to itself), or the next arena's sublevel never entered the roster. The roster needs the PACKAGE loaded, which for an authored sublevel means Levels panel > right-click > Change Streaming Method > Always Loaded (ULevelStreamingAlwaysLoaded::ShouldBeLoaded is the only authorable way to force it; bShouldBeLoaded itself is not EditAnywhere). Leave 'Visibility in Game' OFF on a reserve arena — ShouldBeVisible is NOT overridden by that class, so Always Loaded + hidden is exactly 'loaded but not visible'."),
 				PendingParkAfterOrder, RosterResolveTimeout);
 			PendingParkAfterOrder = INDEX_NONE;
 		}
@@ -317,7 +317,7 @@ void UFPSRArenaStreamSubsystem::PollPending()
 			// transition's own readiness check is what decides whether the swap can go ahead. Silence here would
 			// turn a stuck stream into a mystery stall at the next transition instead.
 			UE_LOG(LogFPSR, Error,
-				TEXT("[ArenaStream] arena stage %d ('%s') did not reach LoadedVisible within %.0fs. Check it is an authored streaming sublevel of the persistent map (Levels panel) and that its Initially Loaded flag is set."),
+				TEXT("[ArenaStream] arena stage %d ('%s') did not reach LoadedVisible within %.0fs. Check it is an authored streaming sublevel of the persistent map (Levels panel > Add Existing) — a level created at runtime cannot work here, because clients resolve streaming status by package name against their OWN persistent level."),
 				StageOrder, *Slot.PackageName.ToString(), ParkTimeout);
 			Pending.RemoveAt(i);
 		}
