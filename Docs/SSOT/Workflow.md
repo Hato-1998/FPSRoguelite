@@ -25,7 +25,7 @@
 
 | 머신 (식별) | 엔진 설치 | `<엔진루트>` | 클론 |
 |---|---|---|---|
-| D:/E: 분리 드라이브 | 소스 빌드 | `D:\UnrealEngine\UE_5.7` | `E:\Git_Project\FPSRoguelite`, `FPSRoguelite2` |
+| D:/E: 분리 드라이브 | **Installed Build**(🔁 정정 2026-08-19: 종전 "소스 빌드"는 오기 — 실물 `Engine/Build/InstalledBuild.txt` 존재, `SourceDistribution.txt` 없음. `Engine/Source` 동봉은 판정 근거가 못 된다. 함의: `[RequiresUniqueBuildEnvironment]` 타깃 플래그(N-1 `bWithPushModel` 등) 오버라이드 불가 = 런처 배포판과 동일 제약) | `D:\UnrealEngine\UE_5.7` | `E:\Git_Project\FPSRoguelite`, `FPSRoguelite2` |
 | C: 단일 드라이브 | 런처(바이너리) | `C:\Program Files\Epic Games\UE_5.7` | `...\UnrealProject\FPSRoguelite` (단일) |
 
 ### 6-2. 프로덕션 방식 원칙 (필수)

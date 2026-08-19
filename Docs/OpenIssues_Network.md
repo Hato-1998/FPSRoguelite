@@ -39,6 +39,8 @@
 | B | **현 상태 유지** + `Performance.md §5` 에 "출시 빌드는 비교 기반 복제"라고 명시 | 비용 0. 대신 §5 예산 수치를 비교 기반 기준으로 다시 봐야 함 |
 | C | **U14 perf 패스에서 측정 후 결정** | 판단을 데이터 위에서. 그때까지 §5 에 미결 표시 |
 
+> ✅ **진행 2026-08-19 (U14R)**: C안의 측정 항목 등록 완료 — 결정 메트릭(`Exclusive/GameThread/ServerReplicateActors`)·4인 시나리오 러너(`measure_swarm_render.ps1 -ClientCount 3`)·잠정 판정 기준(≤1.5ms @300×4클라 → B안 권고, 초과 시 소스 엔진 전환 전에 RepGraph 앞당김 평가) = **`Docs/Specs/U14R_PerfMeasureRegistry.md` §5-A**. 실측 실행 = M0 EC ① 베이스라인 패스.
+
 > 📌 함께 알아 둘 것: `FDoRepLifetimeParams::bIsPushBased` 기본값도 **`false`** 다
 > (`UnrealNetwork.h:146`). **`DOREPLIFETIME_WITH_PARAMS_FAST` 를 썼다는 사실만으로는 push 기반이 아니다** —
 > 호출부가 명시해야 한다. 이 프로젝트는 12개 클래스가 명시했고 `MARK_PROPERTY_DIRTY` 를 가진 파일이

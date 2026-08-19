@@ -9,6 +9,25 @@
 
 ---
 
+## 🧾 U14R — perf 측정 항목 등록: N-1 복제 폴백 + GMS §7-7 (2026-08-19, `perf/u14-measure-registry`, Fable 모드 A)
+> 보드 행 = *"U14 perf 측정 항목 등록 — 출시빌드 Push Model 폴백 실측 + MsgSubsystem 프로파일"*(M0 · 하이 · M · Fable).
+> **정본 = `Docs/Specs/U14R_PerfMeasureRegistry.md`** — 2026-08-07 "측정 후 결정" 이연 2건(N-1·§7-7)을 CSV 컬럼명 단위로 측정 가능하게 등록. **실측 실행 = M0 EC ① 베이스라인 패스**(후행 행)가 이 명세를 읽고 수행한다. 인덱스 = `Performance.md` §5-3.
+
+### 무엇이 생겼나
+- **항목 A(N-1)**: 결정 메트릭 `Exclusive/GameThread/ServerReplicateActors`(엔진 기본 스탯 — 신규 계측 0), 4인 리슨서버 러너(`measure_swarm_render.ps1 -ClientCount 3 -CaptureFrames 18000`), 잠정 판정 ≤1.5ms @300×4 → B안 권고 / 초과 → 소스 엔진 전환 전 RepGraph 앞당김 평가.
+- **항목 B(§7-7)**: GMS `BroadcastMessageInternal` CSV 계측 4스탯(`FPSRMsg/GameThread/GMSBroadcast`·`Broadcasts`·`Dispatches`·`ListenersCopied` — 태그 깊이 증폭 = ListenersCopied). early-out 앞 계측 0(핫패스 계약 유지). 잠정 ≤0.2ms @300. **🔴 선행조건: U13 배선 전엔 발행/구독 0이라 측정 불가로 기록**(grep 실측 — 발행처 = 데모·테스트뿐).
+- 측정 픽스처: `FPSR.Invuln [s]` 10s 반복 재적용(late-join 커버) · `FPSR.SkipCards [s]` 5s 반복(late-join 오프닝 시드 프리즈 해소) · `FPSR.GMS.Demo [s]` 1Hz 재발행(캡처 비영 검증용). 전부 `!UE_BUILD_SHIPPING`.
+
+### 🪤 함정 (EC ① 패스 세션이 먼저 알아야 할 것)
+1. **루프백 4인 = `-nosteam` + `-NetDriverOverrides=IpNetDriver` 필수** — 패키지는 GameNetDriver=SteamSockets(127.0.0.1과 프로토콜 불일치=타임아웃), 오버라이드만으론 소켓 서브시스템이 Steam이라 raw UDP 바인드 실패(`NetDriverListenFailure`→메인메뉴 폴백). 러너가 ClientCount>0에서 자동 부여.
+2. **`Replication/NumConnections`는 Game 빌드에서 영원히 0** — `USE_SERVER_PERF_COUNTERS=(UE_SERVER||UE_EDITOR)&&WITH_PERFCOUNTERS`(Build.h:115). 접속 유효성 = 호스트 로그 `AddClientConnection` 카운트(러너 게이트).
+3. **late-join 클라 = 오프닝 카드 전역 프리즈 재유발**(스모크 실증: 조인 +1s `[Run] FREEZE`) — SkipCards 반복 모드가 5s 내 해소, 판정 창은 마지막 `[Run] RESUME` 이후. 러너 프리즈 게이트(FREEZE>RESUME 경고)가 잔존 검출.
+4. 타이밍 스탯 컬럼은 스레드명이 끼는다(`FPSRMsg/GameThread/GMSBroadcast`) — 커스텀 스탯은 안 낌.
+5. 멀티클라 런 캡처는 `-CaptureFrames ≥18000`(uncapped fps에선 기본 6000이 조인 전에 닫힘) — `MaxWaitSeconds` 미지정 시 러너가 자동 상향.
+
+### 검증(전부 이 세션 실측)
+`-DisableUnity` 풀빌드 + 증분 Succeeded · 헤드리스 스모크 4/4 · 계측 실증(-game nullrhi 캡처: FPSRMsg 4컬럼 + 1Hz 비영 5프레임, 2회 호출 이중등록 0) · 러너 E2E 스모크 7회(구 8/13 패키지 — 조인 3/3·프리즈 게이트 경고 검출·정리 완주) · 구 CSV(B_300_fixed) 재분석 수치 보존 · **레드팀 게이트 P1 0 · P2 4 · P3 3 전부 수용·수정**(원장 = 명세 §13). 부수 정정: `Workflow.md:28` 환경표 "소스 빌드"→**Installed Build**(별도 드리프트 행 해소 — N-1 A안을 한 줄로 오판하는 함정 차단).
+
 ## 🧾 M0 EC ② 닫힘 — BP 인라인 Text 이관 + 고아 위젯 정리 (2026-08-19, `phase/m0-ec2-editor`, 머지 `1c646085`)
 > 보드 행 = *"EC ② 잔여 — BP 그래프 핀 3곳 + 고아 WBP 2 (에디터)"*(M0 · 로우 · S · Opus).
 > **§7-6 M0 EC ② 가 이 행으로 종료됐다.** 같은 날 닫힌 C++ 축(`c485b68e`)과 합쳐 하드코딩 UI 문자열 = 0.

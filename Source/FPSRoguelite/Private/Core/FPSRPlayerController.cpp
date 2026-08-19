@@ -33,6 +33,7 @@
 #include "Hero/FPSRPlayerFeedbackComponent.h"
 #include "Hero/FPSRCharacter.h"
 #include "GameFramework/Pawn.h"
+#include "TimerManager.h"
 
 AFPSRPlayerController::AFPSRPlayerController()
 {
@@ -885,38 +886,95 @@ namespace
 			PC->DebugSelectFragmentReplacement(DropIndex);
 		}));
 
-	FAutoConsoleCommandWithWorld GCmd_SkipCards(
+	// Shared by the immediate resolve below and the repeat-mode timer, so the "resolve every pending selection +
+	// refresh pause state" logic lives in exactly one place (§5-C(2-b)).
+	void FPSRSkipCards_ResolveAllPlayers(UWorld* World)
+	{
+		// Every controller, not just the local one: the global freeze holds until NO player owes a selection,
+		// so skipping only the host would leave the run frozen on the client's modal.
+		for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+		{
+			if (AFPSRPlayerController* PC = Cast<AFPSRPlayerController>(It->Get()))
+			{
+				if (PC->HasAuthority())
+				{
+					PC->DebugSkipAllCardSelections();
+				}
+			}
+		}
+		if (AFPSRGameState* GS = World->GetGameState<AFPSRGameState>())
+		{
+			GS->RefreshPauseState();
+		}
+	}
+
+	// Debug fixture, not production lifecycle: the world owns the timer, so a world teardown kills the timer with
+	// it, and the next FPSR.SkipCards repeat call's SetTimer simply reuses this handle (mirrors Invuln §5-C(2)).
+	static FTimerHandle GFPSRSkipCardsReapplyTimer;
+
+	FAutoConsoleCommandWithWorldAndArgs GCmd_SkipCards(
 		TEXT("FPSR.SkipCards"),
-		TEXT("Resolve every pending card selection for ALL players by picking slot 0 (debug, authority/host only) — clears the opening-seed / level-up freeze so PIE tests reach live gameplay without the modal."),
-		FConsoleCommandWithWorldDelegate::CreateLambda([](UWorld* World)
+		TEXT("Resolve every pending card selection for ALL players by picking slot 0 (debug, authority/host only) — clears the opening-seed / level-up freeze so PIE tests reach live gameplay without the modal. "
+		     "RepeatSeconds>0 re-resolves every 5s to catch late-joining clients' opening seed until it elapses. "
+		     "Usage: FPSR.SkipCards [RepeatSeconds=0]"),
+		FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& Args, UWorld* World)
 		{
 			if (!World)
 			{
 				return;
 			}
-			// Every controller, not just the local one: the global freeze holds until NO player owes a selection,
-			// so skipping only the host would leave the run frozen on the client's modal.
-			for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+			FPSRSkipCards_ResolveAllPlayers(World);
+
+			const float RepeatSeconds = Args.Num() > 0 ? FCString::Atof(*Args[0]) : 0.0f;
+			if (RepeatSeconds <= 0.0f)
 			{
-				if (AFPSRPlayerController* PC = Cast<AFPSRPlayerController>(It->Get()))
+				return;
+			}
+
+			// Late-join opening-seed reapply (§5-C(2-b)): a client that joins after the immediate pass above still
+			// owes its opening seed, which re-freezes the run with no local resolver to clear it. Re-walk every 5s
+			// (idempotent — only PCs with a pending selection actually resolve) until RepeatSeconds elapses.
+			const float ExpiryTime = World->GetTimeSeconds() + RepeatSeconds;
+			World->GetTimerManager().SetTimer(GFPSRSkipCardsReapplyTimer, FTimerDelegate::CreateLambda([World, ExpiryTime]()
+			{
+				if (World->GetTimeSeconds() >= ExpiryTime)
 				{
-					if (PC->HasAuthority())
+					World->GetTimerManager().ClearTimer(GFPSRSkipCardsReapplyTimer);
+					return;
+				}
+				FPSRSkipCards_ResolveAllPlayers(World);
+			}), 5.0f, true);
+		}));
+
+	// Shared by the immediate apply below and the late-joiner reapply timer, so the "walk every PC, grant grace to
+	// authority-owned FPSR pawns" logic lives in exactly one place (§5-C(2)).
+	void FPSRInvuln_ApplyToAllPlayers(UWorld* World, float Seconds)
+	{
+		for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+		{
+			if (const APlayerController* PC = It->Get())
+			{
+				if (PC->HasAuthority())
+				{
+					if (AFPSRCharacter* Char = Cast<AFPSRCharacter>(PC->GetPawn()))
 					{
-						PC->DebugSkipAllCardSelections();
+						Char->BeginGraceWindow(Seconds);
 					}
 				}
 			}
-			if (AFPSRGameState* GS = World->GetGameState<AFPSRGameState>())
-			{
-				GS->RefreshPauseState();
-			}
-		}));
+		}
+	}
+
+	// Debug fixture, not production lifecycle: the world owns the timer, so a world teardown kills the timer with
+	// it, and the next FPSR.Invuln call's SetTimer simply reuses this handle.
+	static FTimerHandle GFPSRInvulnReapplyTimer;
 
 	FAutoConsoleCommandWithWorldAndArgs GCmd_Invuln(
 		TEXT("FPSR.Invuln"),
 		TEXT("Grant every player a long grace window (invulnerable + enemy pass-through) via BeginGraceWindow (debug, "
 		     "authority/host only). For perf-measurement fixtures where a burst-spawned swarm would otherwise end the "
-		     "run in seconds (VAT-1 render-path A/B). Usage: FPSR.Invuln [seconds=600]"),
+		     "run in seconds (VAT-1 render-path A/B); re-applies every 10s to cover late-joining clients. "
+		     "Usage: FPSR.Invuln [seconds=600]"),
 		FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& Args, UWorld* World)
 		{
 			if (!World)
@@ -924,19 +982,24 @@ namespace
 				return;
 			}
 			const float Seconds = Args.Num() > 0 ? FCString::Atof(*Args[0]) : 600.0f;
-			for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+			FPSRInvuln_ApplyToAllPlayers(World, Seconds);
+
+			// Late-joiner reapply (§5-C(2)): the pass above only covers PCs already connected when the command runs,
+			// so a remote client that joins after boot -ExecCmds finishes would arrive with no grace and get downed
+			// by the swarm within seconds. Re-walk every 10s until the original window's expiry, passing the
+			// REMAINING time each pass — BeginGraceWindow ratchets (never shortens, FPSRCharacter.cpp:1576-1582), so
+			// reapplying on already-covered players is a no-op while a late joiner's pawn picks up the remaining grace.
+			const float ExpiryTime = World->GetTimeSeconds() + Seconds;
+			World->GetTimerManager().SetTimer(GFPSRInvulnReapplyTimer, FTimerDelegate::CreateLambda([World, ExpiryTime]()
 			{
-				if (const APlayerController* PC = It->Get())
+				const float Remaining = ExpiryTime - World->GetTimeSeconds();
+				if (Remaining <= 0.0f)
 				{
-					if (PC->HasAuthority())
-					{
-						if (AFPSRCharacter* Char = Cast<AFPSRCharacter>(PC->GetPawn()))
-						{
-							Char->BeginGraceWindow(Seconds);
-						}
-					}
+					World->GetTimerManager().ClearTimer(GFPSRInvulnReapplyTimer);
+					return;
 				}
-			}
+				FPSRInvuln_ApplyToAllPlayers(World, Remaining);
+			}), 10.0f, true);
 		}));
 }
 
