@@ -8,6 +8,7 @@
 #
 # 사용:
 #   Scripts\measure_swarm_render.ps1 -BuildDir "Packaged\26_8_13_BuildTest_1_B" -Label B_300 -EnemyCount 300
+#   Scripts\measure_swarm_render.ps1 -BuildDir "Packaged\26_8_13_BuildTest_1_B" -Label N1_300_4p -EnemyCount 300 -ClientCount 3
 #
 # 판정 규약(리포트 §측정 프로토콜):
 #   - 워밍업 = 캡처 앞 10초 절삭(분석 단계), GPU ms 단독 판정 금지 — RHI/DrawCalls 병행
@@ -21,7 +22,8 @@ param(
     [int]$CaptureFrames = 6000,   # 60fps≈100s / 120fps≈50s — 워밍업 절삭 후에도 유효구간 확보
     [int]$BootWaitSeconds = 600,  # 캡처 시작(=CSV 생성) 대기 상한 — 첫 부팅 셰이더/PSO 컴파일이 5분+ 걸린 실측
     [int]$MaxWaitSeconds = 300,   # 캡처 시작 후 완주(크기 안정화) 대기 상한
-    [int]$ShotAtSeconds = 30      # 캡처 시작 기준 스크린샷 시점(+1.5s 두 번째 장)
+    [int]$ShotAtSeconds = 30,     # 캡처 시작 기준 스크린샷 시점(+1.5s 두 번째 장)
+    [int]$ClientCount = 0         # N-1 복제 폴백 측정용: 리슨 호스트에 붙는 -nullrhi 클라 수(기본 0 = 기존 동작 완전 무변경)
 )
 $ErrorActionPreference = 'Stop'
 # ⚠️ 아카이브 최상위 exe는 부트스트랩 — Start-Process 핸들을 죽여도 실제 게임 자식이 살아남아
@@ -45,6 +47,11 @@ $gameArgs = @(
     "-ExecCmds=`"FPSR.SkipCards, FPSR.Invuln $invulnSeconds, FPSR.SpawnEnemies $EnemyCount $SpawnRadius, CsvProfile Frames=$CaptureFrames`"",
     "-csvGpuStats"
 )
+# N-1 멀티클라 시(§5-A ⑤): 패키지는 GameNetDriver=SteamSockets 라우팅(DefaultEngine.ini)이라 127.0.0.1 다이얼과
+# 프로토콜이 어긋나고(스모크 1차: 클라 핸드셰이크 타임아웃), NetDriverOverrides만으론 소켓 서브시스템이 Steam이라
+# raw UDP 바인드 실패(스모크 2차: SO_BROADCAST failed → NetDriverListenFailure → 메인메뉴 폴백) →
+# host·클라 모두 -nosteam(SteamSockets 소켓 서브시스템 미등록) + IpNetDriver 강제. ClientCount 0이면 기존 인자 그대로.
+if ($ClientCount -gt 0) { $gameArgs += @("-nosteam", "-NetDriverOverrides=/Script/OnlineSubsystemUtils.IpNetDriver") }
 Write-Host "[measure] launching $Label : $exe $($gameArgs -join ' ')"
 $proc = Start-Process -FilePath $exe -ArgumentList $gameArgs -PassThru
 
@@ -64,6 +71,16 @@ while ($waited -lt $BootWaitSeconds) {
     $csv = Get-ChildItem $csvDir -Filter *.csv -ErrorAction SilentlyContinue | Sort-Object LastWriteTime | Select-Object -Last 1
     if ($csv) { Write-Host "[measure] capture started after ${waited}s boot"; break }
     Start-Sleep -Seconds 5; $waited += 5
+}
+
+# N-1 클라 기동(§5-C(3)): CSV 생성 = 엔진 초기화 후 ExecCmds 실행 완료 = 맵 로드·리슨 확립의 실측 가능한 신호 —
+# 그 전 조인은 접속 실패 리스크라 캡처 시작 감지 '직후'에만 기동한다. 2초 간격 순차 기동으로 동시 접속 폭주를 피한다.
+if ($csv -and $ClientCount -gt 0) {
+    for ($i = 0; $i -lt $ClientCount; $i++) {
+        Write-Host "[measure] launching client $($i + 1)/$ClientCount"
+        Start-Process -FilePath $exe -ArgumentList @("127.0.0.1", "-nullrhi", "-nosound", "-windowed", "-resx=640", "-resy=360", "-log", "-nosteam", "-NetDriverOverrides=/Script/OnlineSubsystemUtils.IpNetDriver")
+        Start-Sleep -Seconds 2
+    }
 }
 
 # 2단계: 캡처 시작 +ShotAt초에 시차 스크린샷(스웜이 화면에 있는 시점)
@@ -114,5 +131,15 @@ if ($gameLog) {
     } else {
         Write-Host "[measure] validity: run survived (no END/DBNO events)"
     }
+}
+# 접속 유효성 게이트(§5-A): CSV의 Replication/NumConnections는 Game 빌드에서 갱신되지 않는다
+# (USE_SERVER_PERF_COUNTERS = (UE_SERVER||UE_EDITOR)&&WITH_PERFCOUNTERS, Build.h:115 — 컬럼만 등록, 영원히 0).
+# 호스트 로그의 AddClientConnection 카운트가 유일한 접속 증거다.
+if ($ClientCount -gt 0) {
+    $joinLog = Join-Path $outDir "game.log"
+    $joins = 0
+    if (Test-Path $joinLog) { $joins = (Select-String -Path $joinLog -Pattern "AddClientConnection" -SimpleMatch | Measure-Object).Count }
+    if ($joins -eq $ClientCount) { Write-Host "[measure] validity: client joins $joins/$ClientCount (AddClientConnection in host log)" }
+    else { Write-Warning "[measure] ⚠️ client joins $joins/$ClientCount — capture may not represent a $(1 + $ClientCount)-player listen server" }
 }
 Write-Host "[measure] done: $outDir"

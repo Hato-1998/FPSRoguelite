@@ -17,7 +17,25 @@ WANTED = [
     ("GPU/CustomDepth", "GPU/CustomDepth"),
     ("RHI/DrawCalls", "RHI/DrawCalls"),
     ("RHI/PrimitivesDrawn", "RHI/PrimitivesDrawn"),
+    ("Excl/ServerRepActors", "Exclusive/GameThread/ServerReplicateActors"),
+    ("Excl/NetworkOutgoing", "Exclusive/GameThread/NetworkOutgoing"),
+    ("Repl/ActiveActors",    "Replication/NumberOfActiveActors"),
+    ("Repl/FullyDormant",    "Replication/NumberOfFullyDormantActors"),
+    ("FPSRMsg/GMSBroadcast", "FPSRMsg/GameThread/GMSBroadcast"),
+    ("FPSRMsg/Broadcasts",   "FPSRMsg/Broadcasts"),
+    ("FPSRMsg/Dispatches",   "FPSRMsg/Dispatches"),
+    ("FPSRMsg/ListenersCopied", "FPSRMsg/ListenersCopied"),
+    ("FPSREnemy/ServerAlive", "FPSREnemy/ServerAlive"),
 ]
+
+# 카운트성 컬럼(정수 avg/P50/max 포맷) — 기존 RHI/* 2종 포함, §5-C(4) 신규 8종 중 카운트성만.
+# 시간성(Excl/*·FPSRMsg/GMSBroadcast)은 이 집합에 넣지 않는다 — 기존 ms 포맷(avg/P50/P95) 유지.
+COUNT_LABELS = {
+    "RHI/DrawCalls", "RHI/PrimitivesDrawn",
+    "Repl/ActiveActors", "Repl/FullyDormant",
+    "FPSRMsg/Broadcasts", "FPSRMsg/Dispatches", "FPSRMsg/ListenersCopied",
+    "FPSREnemy/ServerAlive",
+}
 
 def main():
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -74,7 +92,7 @@ def main():
         avg = statistics.mean(vals)
         if label == "FrameTime":
             print(f"{label:20s} avg={avg:7.2f}ms (~{1000.0/avg:.0f}fps)  P50={p50:7.2f}  P95={p95:7.2f}")
-        elif label.startswith("RHI/"):
+        elif label in COUNT_LABELS:
             print(f"{label:20s} avg={avg:10.0f}   P50={p50:10.0f}  max={max(vals):10.0f}")
         else:
             print(f"{label:20s} avg={avg:7.2f}ms            P50={p50:7.2f}  P95={p95:7.2f}")
