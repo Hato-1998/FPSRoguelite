@@ -31,14 +31,21 @@ void UFPSRProjectileSubsystem::Tick(float DeltaTime)
 
 	const UWorld* World = GetWorld();
 	const AFPSRGameState* GameState = World ? World->GetGameState<AFPSRGameState>() : nullptr;
-	const bool bPaused = GameState && GameState->IsRunPaused();
+	const bool bNewPausedAll = GameState && GameState->IsRunPaused();
+	// Stage-transition window (ADR 0010 D6): enemy-team projectiles freeze alongside the frozen swarm, but only
+	// when the run isn't ALSO globally paused — bPausedAll already covers every projectile in that case. Written
+	// as an explicit "not already all-paused" rather than relying on the two states being mutually exclusive in
+	// practice, so the two flags still compose correctly if that ever changes.
+	const bool bNewPausedEnemyOnly = !bNewPausedAll && GameState && GameState->IsStageTransitionActive();
 
-	// Only act on the pause/resume transition (Game.MD §2-2): suspend/resume every active projectile once.
-	if (bPaused == bProjectilesPaused)
+	// Only act on an edge (either flag changing): suspend/resume the affected projectiles once per transition —
+	// same reasoning as the single-flag version this replaces (Game.MD §2-2).
+	if (bNewPausedAll == bPausedAll && bNewPausedEnemyOnly == bPausedEnemyOnly)
 	{
 		return;
 	}
-	bProjectilesPaused = bPaused;
+	bPausedAll = bNewPausedAll;
+	bPausedEnemyOnly = bNewPausedEnemyOnly;
 
 	// Iterate a snapshot: SetSimulationPaused(false) can resolve a deferred freeze-frame impact, which releases
 	// the projectile and mutates ActiveProjectiles mid-loop (range-for over the live array would be invalidated
@@ -49,7 +56,8 @@ void UFPSRProjectileSubsystem::Tick(float DeltaTime)
 		AFPSRProjectile* Projectile = ProjectilePtr.Get();
 		if (IsValid(Projectile))
 		{
-			Projectile->SetSimulationPaused(bPaused);
+			const bool bShouldPause = bPausedAll || (bPausedEnemyOnly && Projectile->GetTeam() == EFPSRProjectileTeam::Enemy);
+			Projectile->SetSimulationPaused(bShouldPause);
 		}
 	}
 }
@@ -209,9 +217,10 @@ AFPSRProjectile* UFPSRProjectileSubsystem::AcquireProjectile(
 	ActiveProjectiles.Add(Projectile);
 	Projectile->Activate(Location, InParams, Direction);
 
-	// If acquired while the run is already frozen, suspend immediately (the Tick transition already fired, so it
-	// wouldn't otherwise be paused until the next freeze cycle). No-op if Activate already released it.
-	if (bProjectilesPaused)
+	// If acquired while already paused (global freeze, or enemy-only during a stage transition), suspend immediately
+	// — the Tick transition already fired, so it wouldn't otherwise be paused until the next edge. No-op if Activate
+	// already released it.
+	if (bPausedAll || (bPausedEnemyOnly && Projectile->GetTeam() == EFPSRProjectileTeam::Enemy))
 	{
 		Projectile->SetSimulationPaused(true);
 	}

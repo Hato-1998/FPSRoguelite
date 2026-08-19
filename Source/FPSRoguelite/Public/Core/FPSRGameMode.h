@@ -30,6 +30,16 @@ public:
 	 *  ever re-trigger the recompute — it seals itself). Mirrors AFPSRLobbyGameMode::Logout. */
 	virtual void Logout(AController* Exiting) override;
 
+	/** Route spawn/reconnect placement through the currently ACTIVE arena's own authored APlayerStart set (F9).
+	 *  ADR 0010 D6 parks reserve arenas in the SAME level with rendering/collision off but their authored
+	 *  APlayerStart actors still physically present — the engine default (AGameModeBase::
+	 *  ChoosePlayerStart_Implementation) scans every PlayerStart in the whole level with no notion of "which arena
+	 *  is live", so it can hand a run start or a reconnect a start point sitting in a currently-inactive arena:
+	 *  invisible, and the player falls through the instant they land (that arena's floor collision is off). Falls
+	 *  back to Super:: when there is no active arena or it authored no starts, same as before this override existed.
+	 *  Mirrors AFPSRLobbyGameMode::ChoosePlayerStart_Implementation's per-seat override. */
+	virtual AActor* ChoosePlayerStart_Implementation(AController* Player) override;
+
 	/** Called when the run ends (victory or defeat). Authority-only.
 	 *  Notifies all players with their individual result (ClientShowRunResult RPC). */
 	UFUNCTION(BlueprintCallable, Category = "FPSR|Flow")

@@ -25,6 +25,10 @@ protected:
 	virtual void BeginPlay() override;
 	virtual void Tick(float DeltaSeconds) override;
 
+	/** Server: bank this gem to Collector (their XPGain multiplier applied) and destroy it. The single collect path,
+	 *  shared by the normal radius collect and the stage-transition instant collect (ADR 0010 D6). */
+	void CollectBy(class APawn* Collector);
+
 	/** Read the given player's CombatSet PickupRadius multiplier (>=0.01), or 1.0 if unavailable. */
 	float GetCollectorPickupRadiusMult(class APawn* Pawn) const;
 

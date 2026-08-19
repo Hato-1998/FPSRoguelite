@@ -37,6 +37,7 @@
 | 신규 클래스·모듈·폴더 구조·기술 채택 · **서버 RPC 규약** | [`Docs/SSOT/Architecture.md`](Docs/SSOT/Architecture.md) | §3, §4(+4-1·4-2·4-3) |
 | 성능·복제 예산·Significance·플로우필드 | [`Docs/SSOT/Performance.md`](Docs/SSOT/Performance.md) | §5(+5-1·5-2) |
 | **UI 문자열·로컬라이징·저작 시트 동기화** | [`Docs/SSOT/Localization.md`](Docs/SSOT/Localization.md) | §L-1~L-6 |
+| **컬러·명도/채도 대역·팔레트** (맵·에셋·VFX·UI) | [`Docs/SSOT/ArtDirection.md`](Docs/SSOT/ArtDirection.md) | §A-1~A-6 |
 | **모든 코드 작업(필독)** — 환경·빌드·브랜치·모델정책·**PM 보드**·리뷰 | [`Docs/SSOT/Workflow.md`](Docs/SSOT/Workflow.md) | §6(+6-1~6-9), §10 |
 | **코어·구조 설계·리팩토링** — Fable 주도 4단계 + 명세 양식 | [`Docs/SSOT/Workflow.md`](Docs/SSOT/Workflow.md) §6-5-2 + [`Docs/Specs/_TEMPLATE.md`](Docs/Specs/_TEMPLATE.md) | §6-5, §6-5-2 |
 | 진행상황·로드맵·재미 게이트·플레이스홀더 전환 | [`Docs/SSOT/Roadmap.md`](Docs/SSOT/Roadmap.md) | §7(+7-1~7-5), §8 |

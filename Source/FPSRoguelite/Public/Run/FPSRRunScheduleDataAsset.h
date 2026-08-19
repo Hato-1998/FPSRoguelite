@@ -112,4 +112,18 @@ public:
 	 *  spawn PACE without changing the target count. Tune for pacing feel. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Run", meta = (ClampMin = "0.02"))
 	float SpawnIntervalSeconds = 0.1f;
+
+	/** 스테이지 전환의 **딜링 고정 시간**(초). 억제기를 부순 뒤 이만큼은 정지한 적을 갈아 회수할 수 있고,
+	 *  그 뒤엔 잔존 적이 무적이 된다(ADR 0010 불변식 8: 보상이 하드웨어·로딩 시간에 비례해선 안 된다).
+	 *  ⚠️ 8초는 **미검증 시작값**이다 — PIE 로 체감을 보고 정한다. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Run", meta = (ClampMin = "0.5"))
+	float StageGraceSeconds = 8.0f;
+
+	/** 다음 아레나가 **전원에게 준비될 때까지** 스왑을 미룰 최대 시간(초). ADR 0012 축5 는 다음 아레나를 한
+	 *  스테이지 앞서 파킹하므로 보통은 0초 대기다 — 이 값은 저장장치가 느린 클라이언트 하나가 못 따라왔을 때만
+	 *  쓰인다. 다 지나면 **경고를 남기고 그냥 스왑한다**(무한 대기가 더 나쁘다).
+	 *  딜링 창(`StageGraceSeconds`)은 이 대기 前에 이미 닫히므로 **불변식 8 은 이 값과 무관하다** — 여기서
+	 *  늘어나는 것은 보상 시간이 아니라 암전 대기다. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Run", meta = (ClampMin = "0.0"))
+	float StageSwapReadyTimeoutSeconds = 5.0f;
 };

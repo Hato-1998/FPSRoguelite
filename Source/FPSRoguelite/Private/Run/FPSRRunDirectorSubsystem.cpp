@@ -166,6 +166,13 @@ float UFPSRRunDirectorSubsystem::GetBossTime() const
 	return ActiveSchedule ? ActiveSchedule->BossTime : FallbackBossTime;
 }
 
+bool UFPSRRunDirectorSubsystem::CancelActiveMission()
+{
+	const bool bHadMission = (ActiveMission != nullptr);
+	DestroyActiveMission();
+	return bHadMission;
+}
+
 int32 UFPSRRunDirectorSubsystem::ComputeTargetAliveCount() const
 {
 	const int32 MaxCount = ActiveSchedule ? ActiveSchedule->MaxAliveCount : FallbackMaxAliveCount;
@@ -245,8 +252,9 @@ void UFPSRRunDirectorSubsystem::DirectorTick()
 			{
 				UE_LOG(LogFPSR, Warning, TEXT("[Run] Opening-seed hold timed out — starting combat"));
 			}
-			// If the freeze is still up (mid-selection), the pause gate holds spawning; otherwise start now.
-			if (!GS->IsRunPaused())
+			// If the freeze is still up (mid-selection) or a stage transition is active, the pause gate holds
+			// spawning; otherwise start now.
+			if (!GS->IsRunPaused() && !GS->IsStageTransitionActive())
 			{
 				UpdateSpawnIntensity();
 			}
@@ -254,8 +262,10 @@ void UFPSRRunDirectorSubsystem::DirectorTick()
 		return;
 	}
 
-	// Global freeze (card selection): the whole timeline halts (Game.MD §2-2).
-	if (GS->IsRunPaused())
+	// Global freeze (card selection) OR an active stage transition: the whole timeline halts (Game.MD §2-2 / ADR
+	// 0010 D6) — a transition window is not survival time, so the run clock and spawn ramp must not advance through
+	// it either (the swarm is frozen for the grace-window reward, not growing).
+	if (GS->IsRunPaused() || GS->IsStageTransitionActive())
 	{
 		return;
 	}

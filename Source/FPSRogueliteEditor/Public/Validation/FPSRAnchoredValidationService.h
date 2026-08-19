@@ -28,6 +28,20 @@ public:
 	 *  reachable from any anchor. Warning-only signal for designers (dead content), never fails a build. */
 	static TArray<FAssetData> FindOrphans();
 
+	/**
+	 * Every level (UWorld) in the project, excluding designer scratch space — the commandlet's second validate set
+	 * (ADR 0012 check ④ of five: a stale arena bake must fail CI, not just PreSubmit).
+	 *
+	 * Kept OUT of GatherAssetsToValidate on purpose. That function means one specific thing — "the DataAssets a run
+	 * can actually reach" — and levels are a different axis entirely; folding them in would make the anchor
+	 * reachability story unreadable for the next person who has to change it.
+	 *
+	 * Returns ALL levels rather than only the ones containing an arena, because telling them apart means opening
+	 * them. UFPSRArenaBakeValidator already self-filters (a level with no arena comes back NotValidated), so the
+	 * extra work is bounded by the project's map count, which is single digits.
+	 */
+	static TArray<FAssetData> FindLevelAssets();
+
 	/** True if PackagePath sits under an excluded designer/test/scratch root — /Game/Developers, /Game/Test, or any
 	 *  path containing "_Scratch" (case-insensitive). Public so cross-asset validators can honor the SAME exclusion
 	 *  (e.g. the CardId-uniqueness scan must not let a scratch/sandbox card fail an anchored build). */

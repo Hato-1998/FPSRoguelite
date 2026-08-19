@@ -579,6 +579,14 @@ bool AFPSRCharacter::IsRunFrozen() const
 	return GS && GS->IsRunPaused();
 }
 
+bool AFPSRCharacter::IsMovementFrozen() const
+{
+	// See the header: a stage transition's grace window freezes movement ONLY — fire/ADS/reload/equip keep reading
+	// IsRunFrozen() alone (unchanged) so they stay live through it.
+	const AFPSRGameState* GS = GetWorld() ? GetWorld()->GetGameState<AFPSRGameState>() : nullptr;
+	return IsRunFrozen() || (GS && GS->IsStageTransitionActive());
+}
+
 bool AFPSRCharacter::IsAiming() const
 {
 	// Aim state lives on the weapon-fire component (Input_ADS* on the owner + ServerSetAiming on the server, replicated
@@ -1252,9 +1260,10 @@ UFPSRCharacterMovementComponent* AFPSRCharacter::GetFPSRMovement() const
 
 bool AFPSRCharacter::CanPerformSpecialMovement() const
 {
-	// Both terms read replicated state (GameState run-paused, PlayerState life state), so the server and the owning
-	// client agree — the movement component gates the slide on this and prediction needs both to match.
-	return !IsRunFrozen() && !IsIncapacitatedLocal();
+	// Both terms read replicated state (GameState run-paused/stage-transition, PlayerState life state), so the
+	// server and the owning client agree — the movement component gates the slide on this and prediction needs
+	// both to match. IsMovementFrozen (not IsRunFrozen) so a stage transition also blocks slide/wall-hang entry.
+	return !IsMovementFrozen() && !IsIncapacitatedLocal();
 }
 
 bool AFPSRCharacter::IsIncapacitatedLocal() const
@@ -1320,8 +1329,8 @@ void AFPSRCharacter::ApplyDownedLocomotion(bool bDowned)
 void AFPSRCharacter::Input_MoveForward(const FInputActionValue& Value)
 {
 	// Downed (DBNO) is stationary + spectating an ally (§2-13), so block movement for DBNO and Dead alike. A hard
-	// freeze (card select) also stops movement here.
-	if (IsRunFrozen() || IsIncapacitatedLocal())
+	// freeze (card select) or an active stage transition (ADR 0010 D6 — movement-only lock) also stops movement here.
+	if (IsMovementFrozen() || IsIncapacitatedLocal())
 	{
 		GetCharacterMovement()->StopMovementImmediately(); // kill residual slide during the freeze
 		return;
@@ -1336,7 +1345,7 @@ void AFPSRCharacter::Input_MoveForward(const FInputActionValue& Value)
 void AFPSRCharacter::Input_MoveRight(const FInputActionValue& Value)
 {
 	// Downed (DBNO) is stationary (spectating an ally) — same gate as MoveForward.
-	if (IsRunFrozen() || IsIncapacitatedLocal())
+	if (IsMovementFrozen() || IsIncapacitatedLocal())
 	{
 		GetCharacterMovement()->StopMovementImmediately();
 		return;
@@ -1423,7 +1432,7 @@ void AFPSRCharacter::Input_CrouchHeld(const FInputActionValue& Value)
 {
 	// Intent only — whether this becomes a crouch or a slide is the movement component's call (it owns the state, and
 	// it needs to reach the same conclusion on the server, which never sees this function).
-	if (IsRunFrozen() || IsIncapacitatedLocal())
+	if (IsMovementFrozen() || IsIncapacitatedLocal())
 	{
 		return;
 	}
@@ -1447,7 +1456,7 @@ void AFPSRCharacter::Input_CrouchHeld(const FInputActionValue& Value)
 
 void AFPSRCharacter::Input_Jump(const FInputActionValue& Value)
 {
-	if (IsRunFrozen() || IsIncapacitatedLocal())
+	if (IsMovementFrozen() || IsIncapacitatedLocal())
 	{
 		return;
 	}
@@ -1818,9 +1827,11 @@ void AFPSRCharacter::HandleRunStateChanged_Vision()
 void AFPSRCharacter::HandleRunStateChanged_Movement()
 {
 	// §2-2 freeze is a STATE gate (not time dilation), so the CharacterMovement keeps integrating while the run is
-	// paused. Input-driven moves already gate on IsRunFrozen, but residual velocity that isn't input-driven (an
+	// paused. Input-driven moves already gate on IsMovementFrozen, but residual velocity that isn't input-driven (an
 	// in-progress fall, and later any non-input locomotion state) would otherwise carry the player across the frozen
-	// card screen. Run on the authority (the server owns every pawn here; CMC replicates the stop) and halt it.
+	// card screen — or across an active stage transition. Run on the authority (the server owns every pawn here; CMC
+	// replicates the stop) and halt it. This handler now also fires on a stage-transition change (GameState::
+	// ApplyStageTransitionLocal re-broadcasts OnRunStateChanged for exactly this reason).
 	if (!HasAuthority())
 	{
 		return;
@@ -1828,26 +1839,32 @@ void AFPSRCharacter::HandleRunStateChanged_Movement()
 	UWorld* World = GetWorld();
 	const AFPSRGameState* GS = World ? World->GetGameState<AFPSRGameState>() : nullptr;
 	const bool bPaused = GS && GS->IsRunPaused();
+	// Movement-only freeze (mirrors IsMovementFrozen, computed locally since GS is already in hand): the card
+	// freeze OR an active stage transition. Used ONLY for the stop-movement block below.
+	const bool bMovementFrozen = bPaused || (GS && GS->IsStageTransitionActive());
 
-	// Post-card-selection resume grace (§2-13): when the global freeze ENDS, grant a short grace window so a player who
-	// unfreezes standing in the swarm isn't hit the instant the world resumes (the card screen otherwise can't be left
-	// safely). Fires once on the paused->unpaused transition; BeginGraceWindow is server-only (we're on authority).
+	// Post-card-selection resume grace (§2-13): deliberately keyed on bPaused (IsRunPaused), NOT bMovementFrozen —
+	// this grace protects coming OUT of the CARD screen specifically, where a player can be standing anywhere in an
+	// unpredictable swarm. A stage-transition swap needs no such grace: the leftover swarm is released back to the
+	// pool before the swap commits (UFPSRStageDirectorSubsystem::PerformSwap step 6), so there is nothing left
+	// standing at the destination to ambush the teleported player.
 	if (bWasRunPausedAuth && !bPaused)
 	{
 		BeginGraceWindow(PostFreezeInvulnSeconds);
 	}
 	bWasRunPausedAuth = bPaused;
 
-	if (!bPaused)
+	if (!bMovementFrozen)
 	{
-		return; // only act on entering the freeze; resume restores normal input-driven control
+		return; // only act while movement is actually frozen (card freeze or transition); resume restores input control
 	}
 
 	GetCharacterMovement()->StopMovementImmediately(); // kill residual velocity so the player is stopped
 
-	// Invariant 8: gating the START of special locomotion is not enough — a slide or a wall hang already in progress
-	// has to end too, or it carries the player across the frozen card screen. (The movement component also self-exits
-	// on the same gate, so this is belt-and-braces for the authority side, which is the one that matters for position.)
+	// Invariant 8 / movement-freeze parity: a slide or wall hang already in progress has to end too, whether the
+	// freeze is the card screen or a stage transition — either way movement input is about to go dead. (The
+	// movement component also self-exits on the same gate, so this is belt-and-braces for the authority side, which
+	// is the one that matters for position.)
 	if (UFPSRCharacterMovementComponent* FPSRMovement = GetFPSRMovement())
 	{
 		FPSRMovement->StopSliding();

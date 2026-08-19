@@ -184,6 +184,10 @@ public:
 	virtual class FNetworkPredictionData_Client* GetPredictionData_Client() const override;
 	virtual float GetMaxSpeed() const override;
 
+	/** Overridden only to carry the FPSR.Debug.PlayerSpeedScale playtest multiplier — acceleration has to move with
+	 *  the speed cap or a scaled-up player just feels slow to get going. No behaviour change at scale 1. */
+	virtual float GetMaxAcceleration() const override;
+
 	/** Takes over velocity entirely while sliding — see the implementation for why MaxAcceleration is deliberately
 	 *  left alone instead of being zeroed. */
 	virtual void CalcVelocity(float DeltaTime, float Friction, bool bFluid, float BrakingDeceleration) override;
@@ -256,12 +260,12 @@ protected:
 
 	/** Minimum planar speed required to ENTER a slide. Below this, the crouch input is just a crouch. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Movement|Slide", meta = (ClampMin = "0.0"))
-	float SlideMinEnterSpeed = 450.0f;
+	float SlideMinEnterSpeed = 680.0f;
 
 	/** Planar speed at which an ongoing slide ends (it has decayed into a crouch-walk). Kept strictly below
 	 *  SlideMinEnterSpeed so a slide can't immediately re-trigger the instant it ends while crouch is still held. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Movement|Slide", meta = (ClampMin = "0.0"))
-	float SlideMinSpeed = 250.0f;
+	float SlideMinSpeed = 380.0f;
 
 	/** Entry impulse: current planar speed is multiplied by this on the frame the slide starts. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Movement|Slide", meta = (ClampMin = "1.0"))
@@ -280,17 +284,17 @@ protected:
 	 *  Raised 900 -> 1000 on 2026-07-29 for that reason; note it also lengthens slides entered between 600 and 1000
 	 *  cm/s (speed cards, downhill momentum, a wall-jump landing). */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Movement|Slide", meta = (ClampMin = "0.0"))
-	float SlideMaxEntrySpeed = 1000.0f;
+	float SlideMaxEntrySpeed = 1500.0f;
 
 	/** Hard ceiling on slide speed from ANY source (entry impulse, slope acceleration, carried momentum). Speeds above
 	 *  SlideMaxEntrySpeed have to be earned — typically by accelerating down a slope. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Movement|Slide", meta = (ClampMin = "0.0"))
-	float SlideMaxSpeed = 1400.0f;
+	float SlideMaxSpeed = 2100.0f;
 
 	/** Deceleration (cm/s²) applied while sliding. This is the "속도 감소 곡선" in its simplest form; assign
 	 *  SlideSpeedCurve below for a shaped decay instead. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Movement|Slide", meta = (ClampMin = "0.0"))
-	float SlideBrakingDeceleration = 900.0f;
+	float SlideBrakingDeceleration = 1350.0f;
 
 	/** Ground friction while sliding. MUST stay low or there is no slide to see: PhysWalking feeds GroundFriction
 	 *  (engine default 8) into the braking math, where BrakingFrictionFactor doubles it — an effective 16, which decays
@@ -305,7 +309,7 @@ protected:
 	 *  needed. The result is still bounded by SlideMaxSpeed, matching how a slide tops out rather than accelerating
 	 *  forever down a long hill. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Movement|Slide", meta = (ClampMin = "0.0"))
-	float SlopeAccelerationScale = 1.0f;
+	float SlopeAccelerationScale = 1.5f;
 
 	/** How strongly a slope stretches (downhill) or compresses (uphill) the slide's sense of time. The timer advances
 	 *  by DeltaTime * (1 - sin(angle) * this): a gentle downhill plays the decay in slow motion, at sin(angle) =
@@ -419,13 +423,13 @@ protected:
 	 *  possible by sweeping the mouse to keep the input perpendicular to travel — skill extends it, but is not
 	 *  required to get the basic turn. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Movement|Air", meta = (ClampMin = "0.0"))
-	float AirStrafeWishSpeed = 300.0f;
+	float AirStrafeWishSpeed = 450.0f;
 
 	/** How fast that allowance is spent (cm/s²) — the responsiveness of an air turn, and of braking with the back
 	 *  key. Comparable to ground acceleration (2048), which is why it is an absolute rate rather than the Quake
 	 *  formula's multiplier on the wish speed: there, changing the wish speed would silently change this too. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Movement|Air", meta = (ClampMin = "0.0"))
-	float AirStrafeAcceleration = 2000.0f;
+	float AirStrafeAcceleration = 3000.0f;
 
 	/** Ceiling on the speed air strafing may BUILD. Speed carried in above it (a fast slide jump) is not cut by the
 	 *  ceiling — the same "only ever raises, never lowers" rule as SlideMaxEntrySpeed. It can still be spent by
@@ -433,7 +437,7 @@ protected:
 	 *  own. Kept equal to SlideMaxSpeed and WallJumpMaxSpeed so the game has one top speed rather than three that
 	 *  drift apart. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Movement|Air", meta = (ClampMin = "0.0"))
-	float AirStrafeMaxSpeed = 1400.0f;
+	float AirStrafeMaxSpeed = 2100.0f;
 
 	// --- Stance blending (presentation + the walk-speed cap; the stance itself still changes instantly) ---
 
@@ -484,26 +488,26 @@ protected:
 
 	/** Climb speed up the wall (cm/s) while the input pushes into it. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Movement|Wall", meta = (ClampMin = "0.0"))
-	float WallClimbSpeed = 260.0f;
+	float WallClimbSpeed = 390.0f;
 
 	/** Downward speed (cm/s) the player settles to after letting go of the wall. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Movement|Wall", meta = (ClampMin = "0.0"))
-	float WallSlipSpeed = 180.0f;
+	float WallSlipSpeed = 270.0f;
 
 	/** How fast the vertical speed moves toward WallSlipSpeed (cm/s²). Snapping straight to it reads as the hands
 	 *  coming off rather than sliding — the design word is "미끄러져", a slip. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Movement|Wall", meta = (ClampMin = "0.0"))
-	float WallSlipAcceleration = 900.0f;
+	float WallSlipAcceleration = 1350.0f;
 
 	/** Sideways speed along the wall face (cm/s) — the "제한적 좌우 이동" the design allows during a climb. Only the
 	 *  part of the input running ALONG the wall contributes, so this can never push the player off it. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Movement|Wall", meta = (ClampMin = "0.0"))
-	float WallLateralSpeed = 120.0f;
+	float WallLateralSpeed = 180.0f;
 
 	/** Gentle pull toward the wall (cm/s) that keeps the capsule in contact, which is what keeps the hold probe
 	 *  finding the surface. 0 lets the player drift off the wall on any bump. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Movement|Wall", meta = (ClampMin = "0.0"))
-	float WallStickSpeed = 60.0f;
+	float WallStickSpeed = 90.0f;
 
 	/** Hard time limit on a single hang (invariant 7: every state needs a time bound or an unconditional exit).
 	 *  Also caps how far one grab can climb, since climb speed is constant. */
@@ -524,7 +528,7 @@ protected:
 
 	/** Base speed (cm/s) of the push when jumping off. Entry momentum still in hand is added to this. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Movement|Wall", meta = (ClampMin = "0.0"))
-	float WallJumpPushSpeed = 520.0f;
+	float WallJumpPushSpeed = 780.0f;
 
 	/** Where a wall jump goes: 0 = straight out along the wall normal, 1 = wherever the player is looking, 0.5 = an
 	 *  even blend of the two. Looking is what makes the exit feel aimed rather than scripted; the wall's share is what
@@ -542,7 +546,7 @@ protected:
 	 *  and AirStrafeMaxSpeed on purpose: a player who built speed by air strafing and then jumps off a wall should not
 	 *  silently lose it at the wall, so the game has ONE top speed rather than three that disagree. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Movement|Wall", meta = (ClampMin = "0.0"))
-	float WallJumpMaxSpeed = 1400.0f;
+	float WallJumpMaxSpeed = 2100.0f;
 
 	/** Upward speed (cm/s) of a wall jump. 0 = use the character's normal JumpZVelocity, so a jump-height card scales
 	 *  the wall jump too; set it above 0 to give the wall jump its own height independent of the ordinary jump. */
@@ -696,7 +700,7 @@ protected:
 
 	/** Authored baseline pushed from the character (its BaseWalkSpeed). The literal only exists so a component used
 	 *  without a character still moves; the character overwrites it on construction. */
-	float AuthoredBaseWalkSpeed = 600.0f;
+	float AuthoredBaseWalkSpeed = 900.0f;
 
 	/** Equipped weapon's baseline; 0 = fall back to AuthoredBaseWalkSpeed. */
 	float LoadoutWalkSpeed = 0.0f;

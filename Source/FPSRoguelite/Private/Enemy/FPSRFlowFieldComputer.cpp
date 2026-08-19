@@ -926,21 +926,24 @@ void UFPSRFlowFieldComputer::BuildFromWorldTrace(UWorld* World, const AFPSRFlowF
 	}
 
 	// Data-driven grid bounds (Performance §5-2): if a bounds volume was supplied, size the grid to its world AABB;
-	// otherwise fall back to the origin-centered HalfExtentFallback grid.
-	float SizeX, SizeY;
+	// otherwise fall back to the origin-centered HalfExtentFallback grid. Either way this only fills in the request —
+	// the bake itself lives in BuildFromTraceRequest so the arena's editor baker can drive it without a volume actor.
+	FFPSRFlowFieldBakeRequest Request;
+	Request.bFailOnBudgetOverflow = false; // runtime: degrade rather than refuse to build a field
 	if (BoundsVolume)
 	{
 		const FBox WB = BoundsVolume->GetWorldBounds();
 		const float Override = BoundsVolume->GetCellSizeOverride();
-		ActiveCellSize = (Override > 0.0f) ? Override : DefaultCellSize;
+		Request.CellSize = (Override > 0.0f) ? Override : DefaultCellSize;
 		const float StepOverride = BoundsVolume->GetClimbableStepHeightOverride();
-		ActiveClimbableStepHeight = (StepOverride > 0.0f) ? StepOverride : DefaultClimbableStepHeight;
+		Request.ClimbableStepHeight = (StepOverride > 0.0f) ? StepOverride : DefaultClimbableStepHeight;
 		const float ApexOverride = BoundsVolume->GetProbeApexAboveOriginOverride();
-		ActiveProbeApexAboveOrigin = (ApexOverride > 0.0f) ? ApexOverride : DefaultProbeApexAboveOrigin;
-		GridOrigin = FVector(WB.Min.X, WB.Min.Y, FloorZ);
-		SizeX = FMath::Max(ActiveCellSize, WB.GetSize().X);
-		SizeY = FMath::Max(ActiveCellSize, WB.GetSize().Y);
-		if (WB.GetSize().X < ActiveCellSize || WB.GetSize().Y < ActiveCellSize)
+		Request.ProbeApexAboveOrigin = (ApexOverride > 0.0f) ? ApexOverride : DefaultProbeApexAboveOrigin;
+		Request.GridOrigin = FVector(WB.Min.X, WB.Min.Y, FloorZ);
+		Request.SizeX = FMath::Max(Request.CellSize, static_cast<float>(WB.GetSize().X));
+		Request.SizeY = FMath::Max(Request.CellSize, static_cast<float>(WB.GetSize().Y));
+		Request.SourceLabel = TEXT("bounds volume");
+		if (WB.GetSize().X < Request.CellSize || WB.GetSize().Y < Request.CellSize)
 		{
 			UE_LOG(LogFPSR, Warning, TEXT("[FlowField] Bounds volume %s has a near-zero extent (%s); check its box size."),
 				*BoundsVolume->GetName(), *WB.GetSize().ToString());
@@ -948,13 +951,38 @@ void UFPSRFlowFieldComputer::BuildFromWorldTrace(UWorld* World, const AFPSRFlowF
 	}
 	else
 	{
-		ActiveCellSize = DefaultCellSize;
-		ActiveClimbableStepHeight = DefaultClimbableStepHeight;
-		ActiveProbeApexAboveOrigin = DefaultProbeApexAboveOrigin;
-		GridOrigin = FVector(-HalfExtentFallback, -HalfExtentFallback, FloorZ);
-		SizeX = 2.0f * HalfExtentFallback;
-		SizeY = 2.0f * HalfExtentFallback;
+		Request.CellSize = DefaultCellSize;
+		Request.ClimbableStepHeight = DefaultClimbableStepHeight;
+		Request.ProbeApexAboveOrigin = DefaultProbeApexAboveOrigin;
+		Request.GridOrigin = FVector(-HalfExtentFallback, -HalfExtentFallback, FloorZ);
+		Request.SizeX = 2.0f * HalfExtentFallback;
+		Request.SizeY = 2.0f * HalfExtentFallback;
+		Request.SourceLabel = TEXT("origin-centered fallback");
 	}
+
+	BuildFromTraceRequest(World, Request);
+}
+
+bool UFPSRFlowFieldComputer::BuildFromTraceRequest(UWorld* World, const FFPSRFlowFieldBakeRequest& Request)
+{
+	if (!World)
+	{
+		return false;
+	}
+	if (!Request.IsValid())
+	{
+		UE_LOG(LogFPSR, Error,
+			TEXT("[FlowField] Bake request is incomplete (size %.0fx%.0f cell=%.0f step=%.0f apex=%.0f) — no field built."),
+			Request.SizeX, Request.SizeY, Request.CellSize, Request.ClimbableStepHeight, Request.ProbeApexAboveOrigin);
+		return false;
+	}
+
+	ActiveCellSize = Request.CellSize;
+	ActiveClimbableStepHeight = Request.ClimbableStepHeight;
+	ActiveProbeApexAboveOrigin = Request.ProbeApexAboveOrigin;
+	GridOrigin = Request.GridOrigin;
+	const float SizeX = Request.SizeX;
+	const float SizeY = Request.SizeY;
 
 	GridDimX = FMath::Max(1, FMath::CeilToInt(SizeX / ActiveCellSize));
 	GridDimY = FMath::Max(1, FMath::CeilToInt(SizeY / ActiveCellSize));
@@ -963,6 +991,19 @@ void UFPSRFlowFieldComputer::BuildFromWorldTrace(UWorld* World, const AFPSRFlowF
 	// count fits while still covering the full region.
 	if (static_cast<int64>(GridDimX) * GridDimY > MaxTotalCells || GridDimX > MaxGridDimPerAxis || GridDimY > MaxGridDimPerAxis)
 	{
+		// An AUTHORING bake refuses instead (ADR 0012 / 0011 E1). A coarsened arena is not the arena the designer
+		// validated — corridors measured in cells change width — and the only trace of it is a warning line. Better
+		// to fail here, where the person who can fix the params is sitting in front of the editor.
+		if (Request.bFailOnBudgetOverflow)
+		{
+			UE_LOG(LogFPSR, Error,
+				TEXT("[FlowField] Bake request %.0fx%.0f at cell %.0f needs %dx%d cells, over the budget (axis %d, total %d). REFUSED — shrink the arena or raise the cell size in its params; the bake does NOT silently coarsen."),
+				SizeX, SizeY, ActiveCellSize, GridDimX, GridDimY, MaxGridDimPerAxis, MaxTotalCells);
+			GridDimX = 0;
+			GridDimY = 0;
+			return false;
+		}
+
 		const float CellForTotal = ActiveCellSize * FMath::Sqrt((static_cast<float>(GridDimX) * GridDimY) / static_cast<float>(MaxTotalCells));
 		const float CellForAxisX = SizeX / static_cast<float>(MaxGridDimPerAxis);
 		const float CellForAxisY = SizeY / static_cast<float>(MaxGridDimPerAxis);
@@ -988,8 +1029,7 @@ void UFPSRFlowFieldComputer::BuildFromWorldTrace(UWorld* World, const AFPSRFlowF
 	Data.EdgeMask.Init(0, NumCells * 2);
 
 	UE_LOG(LogFPSR, Log, TEXT("[FlowField] Grid %dx%d cell=%.0f layers=%d origin=%s (%s)."),
-		GridDimX, GridDimY, ActiveCellSize, NumLayers, *GridOrigin.ToString(),
-		BoundsVolume ? TEXT("bounds volume") : TEXT("origin-centered fallback"));
+		GridDimX, GridDimY, ActiveCellSize, NumLayers, *GridOrigin.ToString(), Request.SourceLabel);
 
 	// --- BuildObstacleMask (moved verbatim; writes into Data arrays, reads grid config from the members set above) ---
 	{
@@ -1331,6 +1371,7 @@ void UFPSRFlowFieldComputer::BuildFromWorldTrace(UWorld* World, const AFPSRFlowF
 	Data.ClimbableStepHeight = ActiveClimbableStepHeight;
 	// Adopt the baked graph into the hot-path arrays (worldless core).
 	BuildFromSurfaceData(Data);
+	return true;
 }
 
 void UFPSRFlowFieldComputer::RecomputeFromWorld(UWorld* World, const TArray<FVector>* SourcePlayerFootLocations)

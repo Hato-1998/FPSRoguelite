@@ -101,14 +101,15 @@ void AFPSRMissionActor::Tick(float DeltaSeconds)
 		return;
 	}
 
-	// Freeze all mission advancement (objective time, zone movement, time limit) while the run is globally
-	// paused for card selection (Game.MD §2-2): players are immobilized, so progressing objectives — or letting
-	// the time limit expire — would be unfair. Applies to every mission subclass via this single base gate.
+	// Freeze all mission advancement (objective time, zone movement, time limit) while the run is globally paused
+	// for card selection (Game.MD §2-2) OR a stage transition is active (ADR 0010 D6): players are immobilized (or
+	// the swarm is frozen for the grace-window reward), so progressing objectives — or letting the time limit
+	// expire — would be unfair. Applies to every mission subclass via this single base gate.
 	if (const UWorld* World = GetWorld())
 	{
 		if (const AFPSRGameState* RunState = World->GetGameState<AFPSRGameState>())
 		{
-			if (RunState->IsRunPaused())
+			if (RunState->IsRunPaused() || RunState->IsStageTransitionActive())
 			{
 				return;
 			}

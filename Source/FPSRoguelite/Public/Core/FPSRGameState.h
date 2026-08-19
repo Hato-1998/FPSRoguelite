@@ -8,6 +8,7 @@
 class AFPSRBossBase;
 class UFPSRMissionDataAsset;
 class UFPSRRunScheduleDataAsset;
+class AFPSRArenaActor;
 
 /** Macro run phase. Combat = normal run / mission window; Boss = final boss (no timer, no missions).
  *  Global freeze during card selection is the separate bRunPaused flag, independent of the phase. */
@@ -32,6 +33,18 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnActiveBossChanged, AFPSRBossBase*
 /** Fired on every client (and the host) when a mission starts (MissionData set) or ends (null) (B10). The HUD shows
  *  a "<DisplayName> 미션 시작" banner for a few seconds when MissionData is non-null. */
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnActiveMissionChanged, UFPSRMissionDataAsset*, MissionData);
+
+/** Stage transition phase (ADR 0010 D6). None = normal play. Grace = the dealing window — enemies frozen, player
+ *  movement frozen, player FIRING still live (the window's whole reward, 안 G). Pending = the dealing window already
+ *  closed but the card-selection freeze (bRunPaused) is still up, so the swap is held (invariant 8: swapping while
+ *  a freeze is up would let a slow card pick silently stretch the transition). Swapping = the arena swap itself is
+ *  in progress this frame (activate next, regenerate, teleport, deactivate previous, release the swarm). */
+UENUM(BlueprintType)
+enum class EFPSRStageTransitionPhase : uint8 { None, Pending, Grace, Swapping };
+
+/** Fired on every client (and the host) whenever StageTransitionPhase/StageIndex/ActiveArena changes (ADR 0010 D6).
+ *  HUD stage-transition UI (dealing-window countdown, swap cue) binds here. */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnStageTransitionChanged);
 
 /** Server-authoritative run progression state (shared XP, party level, run phase, global freeze).
  *  Redesign 2026-06-04 (Game.MD §2-2): on level-up (or mission clear) the run globally freezes — enemies
@@ -186,6 +199,54 @@ public:
 	 *  Push-Model replicated; the OnRep drives each remote client's re-ack. Idempotent (no-op if unchanged). */
 	void SetTopologyGeneration(int32 NewGen);
 
+	// ---- Stage transition (ADR 0010 D6) ----------------------------------------------------------------------
+
+	UFUNCTION(BlueprintPure, Category = "FPSR|Run")
+	EFPSRStageTransitionPhase GetStageTransitionPhase() const { return StageTransitionPhase; }
+
+	/** True while ANY stage-transition phase is active (Grace/Pending/Swapping). Movement-freeze consumers
+	 *  (AFPSRCharacter::IsMovementFrozen) and the enemy/damage/projectile/XP/run-clock gates all key off this. */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Run")
+	bool IsStageTransitionActive() const { return StageTransitionPhase != EFPSRStageTransitionPhase::None; }
+
+	/** True only during the Grace phase's FIXED dealing window (ADR 0010 invariant 8: the damage-dealing window
+	 *  must be a fixed duration, never proportional to hardware/loading time — a slow machine must not be able to
+	 *  farm the frozen swarm longer than a fast one). This predicate is what expresses that invariant: it is true
+	 *  from the moment Grace starts until the pre-computed GraceDealingEndServerTime, and then closes at exactly
+	 *  that instant no matter how much longer Pending/Swapping end up taking afterward — the swarm becomes
+	 *  invulnerable at that fixed point (see FPSRCombatStatics.cpp's ResolveDamage), so extra wall-clock time never
+	 *  buys extra reward. */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Run")
+	bool IsStageDealingOpen() const { return StageTransitionPhase == EFPSRStageTransitionPhase::Grace && GetServerWorldTimeSeconds() < GraceDealingEndServerTime; }
+
+	UFUNCTION(BlueprintPure, Category = "FPSR|Run")
+	int32 GetStageIndex() const { return StageIndex; }
+
+	/** The arena currently live (the transition target once Swapping starts committing, the arena the transition
+	 *  started FROM before that). Seeded at level start by the arena itself (AFPSRArenaActor::PostInitializeComponents,
+	 *  which runs before the flow-field pull) so this is valid from the FIRST stage on, not only after a transition —
+	 *  this IS the cheap O(1) "which arena is live" answer, and callers on any hot path should prefer it over
+	 *  AFPSRArenaActor::FindActiveInWorld, which sweeps every actor in the level. Null only in a level with no arena. */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Run")
+	AFPSRArenaActor* GetActiveArena() const { return ActiveArena; }
+
+	/** Seconds left in the dealing window, for a HUD countdown cue. 0 whenever IsStageDealingOpen() is false. */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Run")
+	float GetStageDealingRemaining() const;
+
+	/** Server: set the transition phase + the dealing-window end timestamp (DealingEndServerTime is only meaningful
+	 *  entering Grace; pass 0 for every other phase). No-op off authority or when nothing actually changes. */
+	void SetStageTransition(EFPSRStageTransitionPhase NewPhase, float DealingEndServerTime);
+
+	/** Server: set the replicated stage index (bumped by the stage director on a committed swap). */
+	void SetStageIndex(int32 NewStageIndex);
+
+	/** Server: set/clear the active arena (called by the stage director around a swap). */
+	void SetActiveArena(AFPSRArenaActor* InArena);
+
+	UPROPERTY(BlueprintAssignable, Category = "FPSR|Run")
+	FOnStageTransitionChanged OnStageTransitionChanged;
+
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 protected:
@@ -200,6 +261,9 @@ protected:
 
 	UFUNCTION()
 	void OnRep_TopologyGeneration();
+
+	UFUNCTION()
+	void OnRep_StageTransition();
 
 	/** XP required to advance from level 1; each level adds XPPerLevel (linear curve placeholder —
 	 *  a UCurveFloat data-driven curve is a follow-up, Game.MD §2-8). Editor-tunable. */
@@ -275,4 +339,44 @@ protected:
 	 *  RefreshPauseState early-out, so the world stays frozen behind the result screen. Not replicated — the
 	 *  visible freeze rides the replicated bRunPaused; this resets naturally on the next run (fresh GameState). */
 	bool bRunEnded = false;
+
+	// ---- Stage transition (ADR 0010 D6) — see the public accessors above for what each field means. ------------
+
+	UPROPERTY(ReplicatedUsing = OnRep_StageTransition)
+	EFPSRStageTransitionPhase StageTransitionPhase = EFPSRStageTransitionPhase::None;
+
+	UPROPERTY(ReplicatedUsing = OnRep_StageTransition)
+	int32 StageIndex = 0;
+
+	/** Server world-time stamp (GetServerWorldTimeSeconds) at which the Grace dealing window closes. Only
+	 *  meaningful while StageTransitionPhase == Grace; 0 otherwise. Clients read the SAME server clock via
+	 *  GetServerWorldTimeSeconds(), so IsStageDealingOpen agrees on every machine with nothing else to synchronize. */
+	UPROPERTY(ReplicatedUsing = OnRep_StageTransition)
+	float GraceDealingEndServerTime = 0.0f;
+
+	/** The arena the transition is centered on — same "hard ref to an always-relevant actor" shape as ActiveBoss. */
+	UPROPERTY(ReplicatedUsing = OnRep_StageTransition)
+	TObjectPtr<AFPSRArenaActor> ActiveArena = nullptr;
+
+	/** Shared by every stage-transition server setter AND OnRep_StageTransition (the listen-server host gets no
+	 *  OnRep, so the setters must apply this locally too — same pattern as SetActiveBoss/SetActiveMission). Does two
+	 *  things every time ANY of the four fields above changes:
+	 *   1. Re-broadcasts OnRunStateChanged (not just OnStageTransitionChanged) — AFPSRCharacter::
+	 *      HandleRunStateChanged_Movement and other existing OnRunStateChanged subscribers must react to a
+	 *      transition exactly like they react to bRunPaused (stop residual movement, exit slide/wall-hang); giving
+	 *      the transition its own signal instead would mean every one of those consumers needs a second subscription.
+	 *   2. Makes every AFPSRArenaActor in the world follow ActiveArena (SetArenaActive(Arena == ActiveArena)) — the
+	 *      mechanism that lets a client follow an arena swap from the replicated pointer alone, with no dedicated RPC.
+	 *      GUARDED by LastAppliedActiveArena below (P3 redteam fix) — see that member for why. */
+	void ApplyStageTransitionLocal();
+
+	/** P3 redteam fix: the ActiveArena value ApplyStageTransitionLocal last actually SWEPT (ran SetArenaActive over
+	 *  every arena for) — see that function's point 2. All four stage-transition fields share ONE OnRep, so a
+	 *  client that receives several of them in one replication batch calls ApplyStageTransitionLocal once PER
+	 *  FIELD that changed — up to 4x for a single logical swap — and each call used to re-run the full arena sweep
+	 *  regardless. Re-running was harmless (SetArenaActive is idempotent) but not free: each pass is a
+	 *  TActorIterator scan of every blocker/landmark/destructible in every arena, which gets more expensive as
+	 *  marker counts grow. TWeakObjectPtr (not a raw pointer) because the arena it references can be destroyed
+	 *  between calls without this needing to be told. */
+	TWeakObjectPtr<AFPSRArenaActor> LastAppliedActiveArena;
 };

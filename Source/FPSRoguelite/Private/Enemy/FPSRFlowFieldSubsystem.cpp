@@ -2,6 +2,7 @@
 
 #include "Enemy/FPSRFlowFieldSubsystem.h"
 #include "Enemy/FPSRFlowFieldBoundsVolume.h"
+#include "Arena/FPSRArenaActor.h"
 #include "Core/FPSRGameState.h"
 #include "Core/FPSRLogChannels.h"
 #include "Engine/World.h"
@@ -108,7 +109,46 @@ void UFPSRFlowFieldSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 		bAnyMapIdVolume = true; // a MapId'd slot -> baked into the unified grid by BuildUnifiedField (needs a bUnifiedExtent)
 	}
 
-	if (UnifiedVolume)
+	// ADR 0010: an arena actor OWNS the obstacle mask. We PULL it here rather than letting the actor push during its
+	// BeginPlay, because actor BeginPlay runs AFTER world subsystems' OnWorldBeginPlay (UWorld::BeginPlay dispatches
+	// SubsystemCollection.ForEachSubsystem(OnWorldBeginPlay) FIRST, then GameMode->StartPlay -> ... -> every actor's
+	// own BeginPlay — verified against UE 5.7's World.cpp/GameModeBase.cpp/GameStateBase.cpp/WorldSettings.cpp; an
+	// earlier version of this comment had the order backwards). A push from actor BeginPlay would therefore always
+	// arrive too LATE for this pull, not "be overwritten a moment later". That is exactly why the seed this pull
+	// depends on (AFPSRArenaActor::ActiveSeed) is finalized in PostInitializeComponents rather than BeginPlay — the
+	// only actor callback the engine guarantees to run before this OnWorldBeginPlay pull (see FPSRArenaActor.h and
+	// FPSRArenaActor::PostInitializeComponents for the full chain).
+	if (AFPSRArenaActor* Arena = AFPSRArenaActor::FindActiveInWorld(&InWorld))
+	{
+		// ADR 0012 invariant 1: the BAKED mask is the only source. It is produced in the editor from the level's
+		// own collision, so what the designer sees IS what the swarm believes. There is deliberately no second
+		// branch here — the procedural fallback that used to sit below was removed with the runtime generator,
+		// and a world-trace fallback is forbidden outright: the trace anchors its grid Z from the PlayerStart
+		// downtrace, so the day it fired next to a parked reserve arena it would anchor the field to that
+		// arena's roof.
+		FFPSRFlowFieldSurfaceData BakedWorld;
+		if (Arena->GetBakedWorldSurface(BakedWorld))
+		{
+			UnifiedComputer = NewObject<UFPSRFlowFieldComputer>(this);
+			UnifiedComputer->BuildFromSurfaceData(BakedWorld);
+			UnifiedComputer->ExtractSurfaceData(BakedBaseline);
+			bHasBaseline = true;
+			UE_LOG(LogFPSR, Log,
+				TEXT("[FlowField] Arena field adopted from %s BAKE (%dx%d cell=%.0f) — no world trace, no generation."),
+				*Arena->GetName(), BakedWorld.GridDimX, BakedWorld.GridDimY, BakedWorld.CellSize);
+		}
+		else
+		{
+			// Fail-fast, NOT fall-through. An arena reaching this has no bake asset assigned (or an empty one),
+			// which means the level a designer is looking at and the mask the swarm would use came from different
+			// places — the exact condition ADR 0012 exists to remove. Building NO field makes that loud; quietly
+			// substituting one makes it a bug someone finds in playtest instead.
+			UE_LOG(LogFPSR, Error,
+				TEXT("[FlowField] %s has NO baked mask — building NO flow field. Assign a UFPSRArenaBakeDataAsset and bake it (Tools > FPSR > 아레나 베이크); the world-trace bake is deliberately NOT used as a fallback."),
+				*Arena->GetName());
+		}
+	}
+	else if (UnifiedVolume)
 	{
 		// Multimap: the pre-sized bUnifiedExtent grid with every MapId'd slot baked in (sets UnifiedComputer + SlotBounds +
 		// bUnifiedMultiSlot + the BakedBaseline snapshot).
@@ -258,6 +298,43 @@ bool UFPSRFlowFieldSubsystem::BakeSlotIntoUnified(UWorld& InWorld, const AFPSRFl
 	return bOk;
 }
 
+bool UFPSRFlowFieldSubsystem::AdoptArenaSurface(const FFPSRFlowFieldSurfaceData& Surface)
+{
+	if (!HasServerAuthority())
+	{
+		return false;
+	}
+	if (Surface.GridDimX <= 0 || Surface.GridDimY <= 0)
+	{
+		UE_LOG(LogFPSR, Error, TEXT("[FlowField] AdoptArenaSurface rejected: empty surface data."));
+		return false;
+	}
+
+	if (!UnifiedComputer)
+	{
+		UnifiedComputer = NewObject<UFPSRFlowFieldComputer>(this);
+	}
+	UnifiedComputer->BuildFromSurfaceData(Surface);
+
+	// The regenerated arena IS the baseline now. Keeping the old snapshot would let a later
+	// ResetDoorTopologyToBaseline restore the PREVIOUS arena's walls into the current one.
+	UnifiedComputer->ExtractSurfaceData(BakedBaseline);
+	bHasBaseline = true;
+	bTopologyMutatedSinceBaseline = false;
+
+	// Connectivity changed wholesale, so clients' late-join ack and the freeze pre-unfreeze recompute must both see
+	// a new generation; then recompute immediately rather than leaving up to 0.2s of stale flow after a swap.
+	// AdvanceTopologyGeneration() — NOT a raw ++ — because it also mirrors the count to the replicated GameState;
+	// a bare ++TopologyGeneration here left that mirror stale, so a remote client's late-join ack could never see
+	// the post-swap generation (bug found during arena-topology multi-arena work; GameState never OnRep'd).
+	AdvanceTopologyGeneration();
+	RecomputeAllFields();
+
+	UE_LOG(LogFPSR, Log, TEXT("[FlowField] Adopted arena surface %dx%d cell=%.0f (topology gen %d)."),
+		Surface.GridDimX, Surface.GridDimY, Surface.CellSize, TopologyGeneration);
+	return true;
+}
+
 bool UFPSRFlowFieldSubsystem::BakeDiscoveredMap(const FGameplayTag& MapId)
 {
 	if (!HasServerAuthority() || !MapId.IsValid())
@@ -346,6 +423,43 @@ void UFPSRFlowFieldSubsystem::NotifyDoorBroken(const AActor* Door)
 	RecomputeAllFields();
 	UE_LOG(LogFPSR, Log, TEXT("[FlowField] NotifyDoorBroken: door '%s' opened %d seam edge(s) across %d cell-pair(s); field recomputed (topology generation now %d)."),
 		*Door->GetName(), OpenedEdges, Pairs.Num(), TopologyGeneration);
+}
+
+void UFPSRFlowFieldSubsystem::NotifyArenaCellsOpened(TConstArrayView<int32> Cells)
+{
+	// The arena is always a single grid (never a multi-slot seam), so — unlike NotifyDoorBroken — there is no
+	// bUnifiedMultiSlot gate here: only authority + "a grid actually exists yet" matter.
+	if (!HasServerAuthority() || !UnifiedComputer)
+	{
+		return;
+	}
+
+	for (const int32 Cell : Cells)
+	{
+		UnifiedComputer->StampCellBlocked(Cell, /*Rank=*/0, /*bBlocked=*/false);
+	}
+	bTopologyMutatedSinceBaseline = true;
+
+	// Coalesce same-frame breaks into ONE recompute: several destructibles can go down in one frame (an
+	// explosion), and ADR 0010 D7 is explicit that what must be bounded is simultaneous-break FREQUENCY, not prop
+	// count — "여러 개가 한 프레임에 터지면 BFS를 1회로 합친다". Unlike NotifyDoorBroken (a single door, recomputed
+	// immediately), this defers to next tick so a burst of N breaks this frame costs one generation bump + one BFS,
+	// not N of each.
+	if (!bArenaOpenRecomputePending)
+	{
+		bArenaOpenRecomputePending = true;
+		if (UWorld* World = GetWorld())
+		{
+			World->GetTimerManager().SetTimerForNextTick(FTimerDelegate::CreateWeakLambda(this, [this]()
+			{
+				bArenaOpenRecomputePending = false;
+				AdvanceTopologyGeneration();
+				RecomputeAllFields();
+				UE_LOG(LogFPSR, Log, TEXT("[FlowField] NotifyArenaCellsOpened: coalesced recompute done (topology generation now %d)."),
+					TopologyGeneration);
+			}));
+		}
+	}
 }
 
 bool UFPSRFlowFieldSubsystem::IsLocationInMap(const FGameplayTag& MapId, const FVector& WorldLocation) const

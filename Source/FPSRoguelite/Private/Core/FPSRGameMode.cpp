@@ -14,13 +14,23 @@
 #include "Run/FPSRRunDirectorSubsystem.h"
 #include "Enemy/FPSREnemySpawnSubsystem.h"
 #include "Director/FPSRDirectorSensorSubsystem.h"
+#include "Arena/FPSRArenaActor.h"
 #include "Engine/World.h"
 #include "GameFramework/GameStateBase.h"
+#include "GameFramework/PlayerStart.h"
+#include "EngineUtils.h"
 #include "TimerManager.h"
 #include "HAL/IConsoleManager.h"
 
 namespace
 {
+	/** F9 occupied-avoidance radius (cm): how close another player's pawn may already be to a candidate
+	 *  APlayerStart before ChoosePlayerStart_Implementation treats it as taken. Named rather than a bare literal —
+	 *  this is a lightweight stand-in for the engine default's EncroachingBlockingGeometry sweep (this project's
+	 *  arena floors are open, so there is no geometry to encroach on; the only thing that actually must not happen
+	 *  is two players landing on the identical point). */
+	constexpr float GChoosePlayerStartOccupiedRadiusCm = 150.0f;
+
 	/** Seamless ServerTravel to a configured (soft) map as a listen server. Shared by the post-run lobby travel
 	 *  and the debug travel commands. No-op (logged) if the map is unset/invalid. */
 	void ServerTravelListenToMap(UWorld* World, const TSoftObjectPtr<UWorld>& Map)
@@ -133,6 +143,64 @@ void AFPSRGameMode::Logout(AController* Exiting)
 			}
 		}));
 	}
+}
+
+AActor* AFPSRGameMode::ChoosePlayerStart_Implementation(AController* Player)
+{
+	// F9: route through the active arena's OWN authored start set — see the header comment for why the engine
+	// default (which knows nothing about "which arena is live") is not safe here.
+	const AFPSRGameState* GS = GetGameState<AFPSRGameState>();
+	const AFPSRArenaActor* Arena = GS ? GS->GetActiveArena() : nullptr;
+	if (!Arena)
+	{
+		return Super::ChoosePlayerStart_Implementation(Player);
+	}
+
+	TArray<APlayerStart*> Candidates;
+	for (TActorIterator<APlayerStart> It(GetWorld()); It; ++It)
+	{
+		APlayerStart* Start = *It;
+		if (IsValid(Start) && Arena->ContainsWorldLocation(Start->GetActorLocation()))
+		{
+			Candidates.Add(Start);
+		}
+	}
+	if (Candidates.Num() == 0)
+	{
+		return Super::ChoosePlayerStart_Implementation(Player);
+	}
+
+	// Sorted by NAME, not TActorIterator's unspecified discovery order — deterministic and repeatable to author
+	// against, the same reason AFPSRArenaActor::GetPlayerEntryTransforms sorts its own start candidates. The engine
+	// default's random pick among unoccupied starts is not needed here.
+	Candidates.Sort([](const APlayerStart& A, const APlayerStart& B) { return A.GetName() < B.GetName(); });
+
+	// First candidate with no OTHER player's pawn already standing on it, so a multi-player run start doesn't
+	// stack everyone on the same point (see GChoosePlayerStartOccupiedRadiusCm's comment for why this — not the
+	// engine's EncroachingBlockingGeometry sweep — is enough here).
+	for (APlayerStart* Start : Candidates)
+	{
+		bool bOccupied = false;
+		for (FConstPlayerControllerIterator PCIt = GetWorld()->GetPlayerControllerIterator(); PCIt; ++PCIt)
+		{
+			const APlayerController* OtherPC = PCIt->Get();
+			const APawn* OtherPawn = (OtherPC && OtherPC != Player) ? OtherPC->GetPawn() : nullptr;
+			if (OtherPawn && FVector::DistSquared(OtherPawn->GetActorLocation(), Start->GetActorLocation())
+				< FMath::Square(GChoosePlayerStartOccupiedRadiusCm))
+			{
+				bOccupied = true;
+				break;
+			}
+		}
+		if (!bOccupied)
+		{
+			return Start;
+		}
+	}
+
+	// Every candidate reads occupied (more players than authored starts) — still an arena start, never fall
+	// through to Super:: here; the first one is as good as any other for the overlap.
+	return Candidates[0];
 }
 
 void AFPSRGameMode::HandlePostRunTravel()

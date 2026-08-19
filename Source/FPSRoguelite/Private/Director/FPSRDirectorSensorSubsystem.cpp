@@ -10,7 +10,7 @@
 #include "Enemy/FPSREnemyBase.h"
 #include "Boss/FPSRBossBase.h"
 #include "Hero/FPSRCharacter.h"
-#include "Door/FPSRDoor.h"
+#include "Destructible/FPSRDestructible.h"
 #include "Run/Mission/FPSRMissionActor.h"
 
 #include "GameFramework/Pawn.h"
@@ -54,7 +54,7 @@ EFPSRDamageSourceClass FPSRTelemetry::ClassifyDamageSource(const AActor* Instiga
 	{
 		return EFPSRDamageSourceClass::FriendlyFire;
 	}
-	if (Cast<AFPSRDoor>(Instigator))
+	if (Cast<AFPSRDestructible>(Instigator))
 	{
 		return EFPSRDamageSourceClass::Door;
 	}
@@ -246,7 +246,11 @@ bool UFPSRDirectorSensorSubsystem::GetPlayerSnapshot(const AFPSRPlayerState* PS,
 void UFPSRDirectorSensorSubsystem::SensorTick()
 {
 	const AFPSRGameState* GS = GetGS();
-	const bool bPaused = GS ? GS->IsRunPaused() : true; // no GameState -> treat as paused (do nothing)
+	// Treat an active stage transition (ADR 0010 D6) the same as the card-selection freeze: the sensor windows
+	// measure ongoing play pressure, and a transition's grace window is neither (movement is locked, the swarm is
+	// frozen for the reward). Folded into bPaused rather than widening ShouldAdvance's signature — it stays the
+	// tested pure authority+active+paused predicate (FPSRDirectorSensorTest.cpp); only what "paused" MEANS grows.
+	const bool bPaused = GS ? (GS->IsRunPaused() || GS->IsStageTransitionActive()) : true; // no GameState -> treat as paused (do nothing)
 	if (!FPSRTelemetry::ShouldAdvance(HasServerAuthority(), bRunActive, bPaused))
 	{
 		return; // frozen / not a run / client -> the sensor clock and windows do NOT progress
