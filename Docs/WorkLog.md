@@ -9,6 +9,74 @@
 
 ---
 
+## 🧾 총알이 억제기·문을 그냥 통과하던 것 — 파괴물 전용 콜리전 채널 (2026-08-19, `phase/arena-spawnpoints`, `d49998f2`)
+> 보드 행 = *"파괴물 전용 콜리전 채널 신설 — 투사체가 억제기/문을 관통하는 결함 수정"*(M0 · 하이 · S · 추천모델 Fable, 수행 Opus).
+> 조사 중 드러난 사실 하나 = 이 행은 기존 *"PIE 검증 — 스테이지 전환·그레이스 창·파괴물"*(M0 · 하이) 행의
+> **미등록 선행조건**이었다. 그 행의 검증 항목 6개가 전부 "억제기를 총으로 부숴 전환을 트리거"를 전제로 하는데,
+> 억제기가 안 부서지니 6개 다 실행 자체가 불가능했다. 선행 관계를 보드에 등록했다.
+
+증상 = 억제기(BP_Inhibitor)를 쏘면 부서지지 않고, **반대편에 있는 적이 맞는다.**
+사용자 최초 진단은 "기본 Cube 인데 충돌처리가 안 된 것 같다"였다.
+
+### 🪤 콜리전은 멀쩡했다 — 총알 쪽이 파괴물을 "벽"에서 빼고 있었다
+에디터 월드에서 억제기를 관통하는 Visibility 라인트레이스를 직접 쏴 봤다:
+`bBlockingHit=True`, 거리 650, 컴포넌트 `BP_Inhibitor_C_1.DestructibleMesh`. **콜리전은 살아 있다.**
+BP CDO와 배치 인스턴스 둘 다 QueryOnly / 전 채널 Block / Cube 메시 정상. 즉 에셋 쪽엔 아무 문제가 없었다.
+
+진범은 **"데미지를 받으려고 빌려 쓴 오브젝트 채널"** 이었다. `AFPSRArenaDestructible`/`AFPSRDoor` 의 메시는
+오브젝트 타입을 `ECC_FPSRPlayerPawn` 으로 쓴다 — 무기의 폰 오브젝트 쿼리에 걸려서 **새 코드 없이 데미지를
+받으려는** 설계다(`FPSRArenaDestructible.h` 주석에 그 전제가 그대로 적혀 있었다: *"gathered by every weapon
+object-query"*). 그리고 오버랩 이벤트는 꺼 둔다(`SetGenerateOverlapEvents(false)`).
+
+**전 무기가 히트스캔이던 시절엔 이 조합이 성립했다.** 오브젝트 타입 라인트레이스는 씬 쿼리라
+오버랩 이벤트 플래그를 아예 보지 않기 때문이다. 전 무기가 투사체로 바뀌면서 두 경로가 동시에 죽었다.
+
+| 경로 | 왜 죽었나 |
+|---|---|
+| 블로킹 히트 (`OnSphereHit`) | `AFPSRProjectile::Activate` 가 `ECC_FPSRPlayerPawn` 에 **Overlap** 응답만 준다. 총알을 멈추던 건 `ECC_WorldStatic` 하나뿐이었다 |
+| 오버랩 이벤트 (`OnSphereOverlap`) | 엔진이 **양쪽 컴포넌트 모두** 플래그가 있어야 보낸다 (`PrimitiveComponent.cpp:2972` — *"Both components must set GetGenerateOverlapEvents()"*). 파괴물이 꺼 놨다 |
+
+→ 블록도 없고 오버랩도 없음 = **완전 관통.** 게임 내 **모든** 파괴물이 총으로 파괴 불가였고,
+ADR 0010 D6/D7 의 "억제기 파괴 → 스테이지 전환" 루프 전체가 죽어 있었다. 문이 그나마 엄폐물로 보인 건
+`FrameMesh` 가 `ECC_WorldStatic` 이라 **문틀**이 막아 줬기 때문이고, 문짝 자체는 못 부쉈다.
+
+### 이미 알고 있었는데 우회해 둔 흔적이 있었다
+`FPSRRangedEnemyBase::HasLineOfSight` 주석: *"적 투사체는 그 채널을 오버랩하고 AFPSRCharacter 만 적으로
+치므로 문을 그냥 통과한다"*. **같은 결함을 알고도 고치는 대신 LOS 게이트로 덮어 둔 것.**
+이번 수정이 그 우회의 근본 원인을 없앤다(LOS 게이트는 더 싼 1차 방어로 남긴다).
+
+### 수정 — 파괴물을 pawn 채널에서 떼어 자기 채널로
+`ECC_FPSRDestructible = ECC_GameTraceChannel3` 신설. **`DefaultResponse=Block`** 이라 기존 콜리전
+프로파일을 하나도 건드리지 않고 전원(플레이어 캡슐·적 캡슐·트레이스)이 파괴물을 고체로 취급한다.
+
+오브젝트 타입을 옮겼으므로 **파괴물을 찾아야 하는 쿼리를 전수 조사해 전부 새 채널을 추가**했다 —
+히트스캔 / 차지레이저 / 근접 / `ApplyExplosion`(바주카 스플래시로 억제기가 부서지는 경로) /
+**적 원거리 LOS**(빠뜨리면 적이 문·억제기 너머로 쏜다). 이걸 빠뜨리면 관통 버그가 다른 경로로 재발한다.
+
+라인트레이스 두 경로(히트스캔·차지레이저)에는 별도 결함이 하나 더 있었다: 벽 거리를 구할 때
+**폰 쿼리에 걸린 액터를 전부 무시 목록에 넣는데**, 파괴물도 거기 걸리니 벽 컷오프가 파괴물 너머로 흘러
+뒤쪽 적까지 데미지가 샜다. `FPSRCombat::IsDestructibleGeometry` 로 파괴물만 무시 목록에서 제외했다.
+같은 이유로 `WallDist` 비교에 `KINDA_SMALL_NUMBER` 톨러런스를 줬다 — **파괴물 자기 항목이 정확히
+`WallDist` 에 걸리므로**, 맨 `>` 로는 float 잡음에 자기 데미지가 조용히 누락될 수 있고 그 실패는
+"안 부서진다"로만 보인다.
+
+관통(`ProjectilePierce`)은 파괴물에 **적용하지 않는다.** 관통은 대(對)폰 스탯이고 파괴물은 벽 그 자체라,
+저격총(`Pierce=2`)도 억제기 앞에서 멈춘다.
+
+### 검증
+- UBT `-DisableUnity` 풀빌드 `Result: Succeeded` (에러 0 / 경고 0, 376초).
+- **대조군**: 수정 전 `BP_Inhibitor.DestructibleMesh` objtype = `ECC_PLAYER_PAWN(14)`,
+  수정 후 CDO·배치 인스턴스 **둘 다** `ECC_DESTRUCTIBLE(16)`. 채널 등록과 **BP 오버라이드 부재**를
+  한 번에 확인한 것 — 네이티브 컴포넌트라 BP 가 `BodyInstance` 를 오버라이드해 저장했으면 C++ 변경이
+  안 먹는데, 값이 16 으로 나온 것이 그 반증이다.
+- PIE: 억제기가 파괴되고, 반대편 적이 더는 맞지 않음(사용자 확인).
+
+### 남은 것
+`Durability` 기본 50 은 라이플 5발(0.5초)이라 여전히 낮다. ADR 0010 에서 억제기 체력은 "일찍 부수려 할수록
+비싸다"의 **비용 축**인데 50 은 사실상 0 이다. 밸런스 값이라 사용자 결정 사항으로 남긴다.
+
+---
+
 ## 🧾 총구 화염이 안 꺼지던 것 — 발사마다 남는 immortal 파티클 (2026-08-19, `phase/arena-spawnpoints`, `6ffcfff0`)
 > 보드 행 = *"총구 화염 immortal 파티클 누수 — PS_Gunshot_Repeating 발사마다 PSC 잔존"*(M2 · 하이 · S · Opus).
 > **§6-9 (8) M0 개시순서 예외 ③으로 당겨 썼다** — 남은 M0 Exit Criteria ①이 *"적 300/500 정량 성능
