@@ -3,6 +3,7 @@
 #include "Destructible/FPSRDestructible.h"
 #include "Destructible/FPSRDestructibleReward.h"
 #include "Enemy/FPSREnemyHealthComponent.h"
+#include "Core/FPSRLogChannels.h"
 
 #include "Components/SceneComponent.h"
 #include "Engine/World.h"
@@ -84,6 +85,12 @@ void AFPSRDestructible::HandleHealthChanged(float NewHealth, float MaxHealth)
 	const float Pct = NewHealth / MaxHealth;
 	const int32 NewStage = ComputeDamageStage(DamageStageThresholds, Pct);
 
+	// 파괴물이 맞았다는 **유일한 관측 신호**. 이게 없으면 "안 맞은 것"과 "맞았는데 연출이 없는 것"을
+	// 구분할 방법이 없다 — 실제로 억제기 배치 검증에서 그 둘을 못 가려 한참 헤맸다. 파괴물은 개수가
+	// 적고(스웜과 달리) 맞을 때만 찍히므로 Verbose 가 아니라 Log 로 둔다.
+	UE_LOG(LogFPSR, Log, TEXT("[Destructible] %s 피격 — 체력 %.0f/%.0f (%.0f%%), 손상 단계 %d"),
+		*GetName(), NewHealth, MaxHealth, Pct * 100.0f, NewStage);
+
 	if (NewStage > DamageStage)
 	{
 		FireDamageStages(DamageStage, NewStage, Pct); // server-local presentation
@@ -119,6 +126,11 @@ void AFPSRDestructible::HandleBroken(AActor* DeadActor, AActor* Killer)
 
 	bBroken = true;
 	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRDestructible, bBroken, this);
+
+	// 보상 개수까지 찍는다: 억제기를 부쉈는데 전환이 안 오는 흔한 원인이 「파괴 보상」 배열이 비어
+	// 있는 것이고, 그때 리워드 쪽 로그는 아무것도 안 남는다(Grant 가 호출조차 안 되므로).
+	UE_LOG(LogFPSR, Log, TEXT("[Destructible] %s 파괴됨 (파괴자 %s) — 보상 %d개 적용"),
+		*GetName(), Killer ? *Killer->GetName() : TEXT("?"), Rewards.Num());
 
 	// Fixed order: HandleBrokenAuthority BEFORE ApplyBrokenState BEFORE FireBrokenPresentation. AFPSRDoor's
 	// HandleBrokenAuthority override notifies the flow field of the broken seam using the door leaf's bounds —
