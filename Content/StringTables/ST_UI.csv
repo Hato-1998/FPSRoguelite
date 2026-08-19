@@ -24,3 +24,9 @@ Widget.Lobby.WeaponSlot6,경기관총,LMG,軽機関銃
 Widget.Lobby.WeaponSlot7,점사소총,BurstRifle,バーストライフル
 Widget.Lobby.InviteButton,친구 초대 (F),Invite Friends (F),フレンドを招待 (F)
 Widget.Lobby.JoinButton,참가 (V),Join (V),参加 (V)
+Menu.Result.Victory,승리,VICTORY,勝利
+Menu.Result.Defeat,패배,DEFEAT,敗北
+HUD.Downed.WaitingForAlly,다운 — 아군을 기다리는 중,DOWNED — WAITING FOR A TEAMMATE,ダウン — 味方を待っています
+HUD.Downed.Reviving,부활 중...,Reviving...,蘇生中...
+HUD.Downed.AllyReviving,아군 부활 중...,Reviving teammate...,味方を蘇生中...
+HUD.Mission.BannerLabel,미션,MISSION,ミッション
