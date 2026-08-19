@@ -133,6 +133,12 @@ void FFPSRMessageListenerHandle::Unregister()
 // the world, and the next FPSR.GMS.Demo repeat call's SetTimer simply reuses this handle (mirrors Invuln §5-C(2)).
 static FTimerHandle GFPSRGMSDemoTimer;
 
+// Active listener from the most recent FPSR.GMS.Demo call (§5-C(1)(d) red-team P2-3): kept file-scope static —
+// not a local captured by the timer lambda — so a re-run mid-repeat can Unregister it before SetTimer silently
+// destroys the previous timer's lambda unrun (which would otherwise leak the listener: unregistered-but-live
+// entries keep inflating Dispatches/ListenersCopied on every subsequent broadcast).
+static FFPSRMessageListenerHandle GFPSRGMSDemoHandle;
+
 static FAutoConsoleCommandWithWorldAndArgs GFPSRGMSDemoCmd(
 	TEXT("FPSR.GMS.Demo"),
 	TEXT("U8 GMS demo: register a temp logging listener on GameplayEvent.EnemyKilled and broadcast one cosmetic event. "
@@ -147,9 +153,14 @@ static FAutoConsoleCommandWithWorldAndArgs GFPSRGMSDemoCmd(
 			return;
 		}
 
+		// Stale-listener cleanup (§5-C(1)(d) red-team P2-3): common to both modes — clear any timer + listener left
+		// behind by an in-flight repeat from a previous call before registering the new one.
+		World->GetTimerManager().ClearTimer(GFPSRGMSDemoTimer);
+		GFPSRGMSDemoHandle.Unregister();
+
 		const FGameplayTag Channel = FGameplayTag::RequestGameplayTag(FName("GameplayEvent.EnemyKilled"));
 
-		FFPSRMessageListenerHandle Handle = GMS->RegisterListener<FFPSRCosmeticEventMessage>(Channel,
+		GFPSRGMSDemoHandle = GMS->RegisterListener<FFPSRCosmeticEventMessage>(Channel,
 			[](FGameplayTag InChannel, const FFPSRCosmeticEventMessage& Msg)
 			{
 				UE_LOG(LogFPSRMessage, Log, TEXT("[FPSR.GMS.Demo] received on '%s': Loc=%s Kill=%d Team=%u"),
@@ -165,7 +176,7 @@ static FAutoConsoleCommandWithWorldAndArgs GFPSRGMSDemoCmd(
 		const float RepeatSeconds = Args.Num() > 0 ? FCString::Atof(*Args[0]) : 0.0f;
 		if (RepeatSeconds <= 0.0f)
 		{
-			Handle.Unregister();
+			GFPSRGMSDemoHandle.Unregister();
 			UE_LOG(LogFPSRMessage, Log, TEXT("[FPSR.GMS.Demo] broadcast complete on '%s' (real enemy-death publish = U13 seam)."), *Channel.ToString());
 			return;
 		}
@@ -174,12 +185,12 @@ static FAutoConsoleCommandWithWorldAndArgs GFPSRGMSDemoCmd(
 		// boundary, so CsvProfiler can never show it as non-zero. Keep the listener alive and re-broadcast every 1s
 		// via a world timer until RepeatSeconds elapses, so several in-capture frames carry the FPSRMsg/* stats.
 		World->GetTimerManager().SetTimer(GFPSRGMSDemoTimer, FTimerDelegate::CreateLambda(
-			[World, GMS, Channel, Msg, Handle, ExpiryTime = World->GetTimeSeconds() + RepeatSeconds]() mutable
+			[World, GMS, Channel, Msg, ExpiryTime = World->GetTimeSeconds() + RepeatSeconds]()
 			{
 				if (World->GetTimeSeconds() >= ExpiryTime)
 				{
 					World->GetTimerManager().ClearTimer(GFPSRGMSDemoTimer);
-					Handle.Unregister();
+					GFPSRGMSDemoHandle.Unregister();
 					UE_LOG(LogFPSRMessage, Log, TEXT("[FPSR.GMS.Demo] repeat complete on '%s' (real enemy-death publish = U13 seam)."), *Channel.ToString());
 					return;
 				}

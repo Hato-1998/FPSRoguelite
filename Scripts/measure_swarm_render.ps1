@@ -26,6 +26,11 @@ param(
     [int]$ClientCount = 0         # N-1 복제 폴백 측정용: 리슨 호스트에 붙는 -nullrhi 클라 수(기본 0 = 기존 동작 완전 무변경)
 )
 $ErrorActionPreference = 'Stop'
+# 완주 대기 자동 산출(레드팀 P2-4 수용): 미지정 시 60fps 미만에서 CaptureFrames가 MaxWaitSeconds를 넘겨
+# 캡처가 중간 킬 → 꼬리 헤더 없는 불완전 CSV가 되는 모순을 막는다. 명시 지정 시 그 값 그대로 쓴다.
+if (-not $PSBoundParameters.ContainsKey('MaxWaitSeconds')) {
+    $MaxWaitSeconds = [Math]::Max(300, [int]($CaptureFrames / 30) + 120)
+}
 # ⚠️ 아카이브 최상위 exe는 부트스트랩 — Start-Process 핸들을 죽여도 실제 게임 자식이 살아남아
 #    인스턴스가 누적되고 GPU를 나눠 먹어 측정을 오염시킨다(실사고: 동시 4개).
 #    → 실행 전 동명 프로세스 전부 정리 + 종료도 프로세스 '이름' 기준으로 한다.
@@ -37,14 +42,20 @@ $outDir = Join-Path "Packaged\Measurements" $Label
 New-Item -ItemType Directory -Force $outDir | Out-Null
 $csvDir = Join-Path $BuildDir "Windows\FPSRoguelite\Saved\Profiling\CSV"
 if (Test-Path $csvDir) { Get-ChildItem $csvDir -Filter *.csv | Remove-Item -Force -Confirm:$false }
+$hostLog = $null   # 클라 기동 직전 스냅샷(§5-C(3) 레드팀 P2-2) — 미설정(ClientCount=0)이면 기존 최신-선택 폴백
+$hostPids = @()    # 클라 기동 직전 호스트 PID 스냅샷(레드팀 P3-1) — 3단계에서 호스트 단독 크래시 판별에 사용
 
 # 무적 시간은 ExecCmds 시점부터 기산 — 부팅(첫 부팅 PSO 컴파일 5분+ 실측)·캡처·여유를 전부 덮어야
 # grace 만료→다운→run-end→빈 씬이 평균을 오염시키는 무효 측정을 막는다(레드팀 P3 지적).
 $invulnSeconds = $BootWaitSeconds + $MaxWaitSeconds + 300
+# 프리즈 게이트(§5-C(3) 레드팀 P2-1): late-join 클라의 오프닝 시드가 전역 프리즈를 재유발하므로(§5-A ⑦),
+# ClientCount>0이면 SkipCards를 반복 모드(§5-C(2-b))로 걸어 5s 내 해소한다. 0이면 기존 1회 호출 그대로
+# (VAT 솔로 시나리오 무변경).
+$skipCardsCmd = if ($ClientCount -gt 0) { "FPSR.SkipCards $invulnSeconds" } else { "FPSR.SkipCards" }
 $gameArgs = @(
     "L_Map1_City?listen",
     "-windowed","-resx=1920","-resy=1080","-novsync","-log",
-    "-ExecCmds=`"FPSR.SkipCards, FPSR.Invuln $invulnSeconds, FPSR.SpawnEnemies $EnemyCount $SpawnRadius, CsvProfile Frames=$CaptureFrames`"",
+    "-ExecCmds=`"$skipCardsCmd, FPSR.Invuln $invulnSeconds, FPSR.SpawnEnemies $EnemyCount $SpawnRadius, CsvProfile Frames=$CaptureFrames`"",
     "-csvGpuStats"
 )
 # N-1 멀티클라 시(§5-A ⑤): 패키지는 GameNetDriver=SteamSockets 라우팅(DefaultEngine.ini)이라 127.0.0.1 다이얼과
@@ -76,6 +87,10 @@ while ($waited -lt $BootWaitSeconds) {
 # N-1 클라 기동(§5-C(3)): CSV 생성 = 엔진 초기화 후 ExecCmds 실행 완료 = 맵 로드·리슨 확립의 실측 가능한 신호 —
 # 그 전 조인은 접속 실패 리스크라 캡처 시작 감지 '직후'에만 기동한다. 2초 간격 순차 기동으로 동시 접속 폭주를 피한다.
 if ($csv -and $ClientCount -gt 0) {
+    # 호스트 로그 고정(레드팀 P2-2) + 호스트 PID 스냅샷(레드팀 P3-1): 이 시점이 신규 로그/프로세스 = 호스트뿐인
+    # 마지막 순간 — 클라가 뜨면 "최신 로그/이름 기준" 선택이 클라를 집을 수 있다(비결정).
+    $hostLog = Get-ChildItem (Join-Path $BuildDir "Windows\FPSRoguelite\Saved\Logs") -Filter "FPSRoguelite*.log" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime | Select-Object -Last 1
+    $hostPids = (Get-Process -Name "FPSRoguelite*" -ErrorAction SilentlyContinue).Id
     for ($i = 0; $i -lt $ClientCount; $i++) {
         Write-Host "[measure] launching client $($i + 1)/$ClientCount"
         Start-Process -FilePath $exe -ArgumentList @("127.0.0.1", "-nullrhi", "-nosound", "-windowed", "-resx=640", "-resy=360", "-log", "-nosteam", "-NetDriverOverrides=/Script/OnlineSubsystemUtils.IpNetDriver")
@@ -95,7 +110,15 @@ if ($csv) {
 $waited = 0
 $lastSize = -1; $stableFor = 0
 while ($csv -and $waited -lt $MaxWaitSeconds) {
-    if (-not (Get-Process -Name "FPSRoguelite*" -ErrorAction SilentlyContinue)) { Write-Warning "[measure] game exited early (crash?)"; break }
+    # 호스트 단독 크래시 감시(레드팀 P3-1): ClientCount>0이면 클라 생존이 이름 기준 검사를 속여 호스트 크래시를
+    # 가릴 수 있다 — 클라 기동 직전 스냅샷한 호스트 PID들이 전멸했는지로 판별한다. ClientCount=0(스냅샷 없음)이면
+    # 기존 이름 기준 검사 그대로.
+    if ($ClientCount -gt 0 -and $hostPids) {
+        $hostAlive = $hostPids | Where-Object { Get-Process -Id $_ -ErrorAction SilentlyContinue }
+        if (-not $hostAlive) { Write-Warning "[measure] host exited (crash?)"; break }
+    } elseif (-not (Get-Process -Name "FPSRoguelite*" -ErrorAction SilentlyContinue)) {
+        Write-Warning "[measure] game exited early (crash?)"; break
+    }
     $csv = Get-ChildItem $csvDir -Filter *.csv -ErrorAction SilentlyContinue | Sort-Object LastWriteTime | Select-Object -Last 1
     if ($csv) {
         if ($csv.Length -eq $lastSize -and $csv.Length -gt 0) { $stableFor += 5; if ($stableFor -ge 10) { break } }
@@ -119,7 +142,10 @@ if ($csv) {
 } else {
     Write-Warning "[measure] no CSV captured"
 }
-$gameLog = Get-ChildItem (Join-Path $BuildDir "Windows\FPSRoguelite\Saved\Logs") -Filter "FPSRoguelite*.log" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime | Select-Object -Last 1
+# 호스트 로그 고정(레드팀 P2-2): 클라 기동 직전 스냅샷($hostLog)을 우선 사용 — 4인스턴스가 같은 Saved\Logs를
+# 공유해 "최신 로그 1개" 선택은 클라 로그를 집을 수 있다(게이트 전부가 서버측 로그 전제). 스냅샷 없으면(ClientCount=0)
+# 기존 최신-선택 폴백.
+$gameLog = if ($hostLog) { $hostLog } else { Get-ChildItem (Join-Path $BuildDir "Windows\FPSRoguelite\Saved\Logs") -Filter "FPSRoguelite*.log" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime | Select-Object -Last 1 }
 if ($gameLog) { Copy-Item $gameLog.FullName (Join-Path $outDir "game.log") }
 
 # 유효성 게이트 — 캡처 중 런이 끝났으면(플레이어 다운 → 빈 씬) 그 CSV는 무효다. 조용히 통과 금지.
@@ -132,6 +158,16 @@ if ($gameLog) {
         Write-Host "[measure] validity: run survived (no END/DBNO events)"
     }
 }
+# 프리즈 게이트(레드팀 P2-1 수용): FREEZE 발생 수 > RESUME 발생 수면 카드선택 프리즈가 캡처에 미해소로
+# 남았다는 뜻(원문 "[Run] FREEZE (card selection)" / "[Run] RESUME" — FPSRGameState.cpp:226) — 그 구간은
+# "멈춘 월드"라 복제 비용을 과소 측정한다.
+if ($gameLog) {
+    $freezeCount = (Select-String -Path (Join-Path $outDir "game.log") -Pattern "\[Run\] FREEZE" -SimpleMatch:$false | Measure-Object).Count
+    $resumeCount = (Select-String -Path (Join-Path $outDir "game.log") -Pattern "\[Run\] RESUME" -SimpleMatch:$false | Measure-Object).Count
+    if ($freezeCount -gt $resumeCount) {
+        Write-Warning "[measure] ⚠️ 캡처에 프리즈 구간 잔존 — 측정 무효 의심 (FREEZE=$freezeCount RESUME=$resumeCount)"
+    }
+}
 # 접속 유효성 게이트(§5-A): CSV의 Replication/NumConnections는 Game 빌드에서 갱신되지 않는다
 # (USE_SERVER_PERF_COUNTERS = (UE_SERVER||UE_EDITOR)&&WITH_PERFCOUNTERS, Build.h:115 — 컬럼만 등록, 영원히 0).
 # 호스트 로그의 AddClientConnection 카운트가 유일한 접속 증거다.
@@ -140,6 +176,6 @@ if ($ClientCount -gt 0) {
     $joins = 0
     if (Test-Path $joinLog) { $joins = (Select-String -Path $joinLog -Pattern "AddClientConnection" -SimpleMatch | Measure-Object).Count }
     if ($joins -eq $ClientCount) { Write-Host "[measure] validity: client joins $joins/$ClientCount (AddClientConnection in host log)" }
-    else { Write-Warning "[measure] ⚠️ client joins $joins/$ClientCount — capture may not represent a $(1 + $ClientCount)-player listen server" }
+    else { Write-Warning "[measure] ⚠️ client joins $joins/$ClientCount — capture may not represent a $(1 + $ClientCount)-player listen server (초과 = 재접속[타임아웃 후 재시도] 의심)" }
 }
 Write-Host "[measure] done: $outDir"

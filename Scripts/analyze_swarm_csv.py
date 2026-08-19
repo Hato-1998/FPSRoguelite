@@ -28,7 +28,7 @@ WANTED = [
     ("FPSREnemy/ServerAlive", "FPSREnemy/ServerAlive"),
 ]
 
-# 카운트성 컬럼(정수 avg/P50/max 포맷) — 기존 RHI/* 2종 포함, §5-C(4) 신규 8종 중 카운트성만.
+# 카운트성 컬럼(정수 avg/P50/max 포맷) — 기존 RHI/* 2종 포함, §5-C(4) 신규 9종 중 카운트성 6종.
 # 시간성(Excl/*·FPSRMsg/GMSBroadcast)은 이 집합에 넣지 않는다 — 기존 ms 포맷(avg/P50/P95) 유지.
 COUNT_LABELS = {
     "RHI/DrawCalls", "RHI/PrimitivesDrawn",
