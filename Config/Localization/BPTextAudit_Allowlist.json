@@ -1,0 +1,149 @@
+{
+  "_note": "M0 EC 2 (Roadmap.md 7-6) BP 인라인 Text 감사 얼라우리스트. 문서화된 카브아웃만 넣는다 — '지금 존재하니까'는 근거가 아니다. 항목은 명시된 필드가 전부 일치할 때만 면제된다(빈 문자열/누락 필드는 와일드카드). reason 은 design-time-placeholder | M3-lobby-rework 중 하나.",
+  "entries": [
+    {
+      "path": "/Game/UI/HUD/WBP_DamageNumber.WBP_DamageNumber_C:WidgetTree.DmgText.Text",
+      "source": "99",
+      "reason": "design-time-placeholder",
+      "note": "Roadmap.md 7-6 M0 EC 2 판정 정의(사용자 결정 2026-08-13 '표시되는 것만 센다') — 런타임 SetText/프로퍼티 바인딩으로 덮여 화면에 나타나지 않는 디자인타임 플레이스홀더. 이관 금지(의도된 상태)."
+    },
+    {
+      "path": "/Game/UI/HUD/WBP_RunHUD.WBP_RunHUD_C:WidgetTree.ClockText.Text",
+      "source": "00:00",
+      "reason": "design-time-placeholder",
+      "note": "Roadmap.md 7-6 M0 EC 2 판정 정의(사용자 결정 2026-08-13 '표시되는 것만 센다') — 런타임 SetText/프로퍼티 바인딩으로 덮여 화면에 나타나지 않는 디자인타임 플레이스홀더. 이관 금지(의도된 상태)."
+    },
+    {
+      "path": "/Game/UI/HUD/WBP_RunHUD.WBP_RunHUD_C:WidgetTree.LevelText.Text",
+      "source": "1",
+      "reason": "design-time-placeholder",
+      "note": "Roadmap.md 7-6 M0 EC 2 판정 정의(사용자 결정 2026-08-13 '표시되는 것만 센다') — 런타임 SetText/프로퍼티 바인딩으로 덮여 화면에 나타나지 않는 디자인타임 플레이스홀더. 이관 금지(의도된 상태)."
+    },
+    {
+      "path": "/Game/UI/Menu/WBP_Button_Base.Default__WBP_Button_Base_C.ButtonLabelText",
+      "source": "TestBlock",
+      "reason": "design-time-placeholder",
+      "note": "Roadmap.md 7-6 M0 EC 2 판정 정의(사용자 결정 2026-08-13 '표시되는 것만 센다') — 런타임 SetText/프로퍼티 바인딩으로 덮여 화면에 나타나지 않는 디자인타임 플레이스홀더. 이관 금지(의도된 상태)."
+    },
+    {
+      "path": "/Game/UI/Menu/WBP_Button_Base.WBP_Button_Base_C:WidgetTree.Text_ButtonText.Text",
+      "source": "Text Block",
+      "reason": "design-time-placeholder",
+      "note": "Roadmap.md 7-6 M0 EC 2 판정 정의(사용자 결정 2026-08-13 '표시되는 것만 센다') — 런타임 SetText/프로퍼티 바인딩으로 덮여 화면에 나타나지 않는 디자인타임 플레이스홀더. 이관 금지(의도된 상태)."
+    },
+    {
+      "path": "/Game/UI/Widget/WBP_CardEntry.WBP_CardEntry_C:WidgetTree.CardNameText.Text",
+      "source": "CardName",
+      "reason": "design-time-placeholder",
+      "note": "Roadmap.md 7-6 M0 EC 2 판정 정의(사용자 결정 2026-08-13 '표시되는 것만 센다') — 런타임 SetText/프로퍼티 바인딩으로 덮여 화면에 나타나지 않는 디자인타임 플레이스홀더. 이관 금지(의도된 상태)."
+    },
+    {
+      "path": "/Game/UI/Widget/WBP_CardEntry.WBP_CardEntry_C:WidgetTree.DescriptionText.Text",
+      "source": "Description  Description Description",
+      "reason": "design-time-placeholder",
+      "note": "Roadmap.md 7-6 M0 EC 2 판정 정의(사용자 결정 2026-08-13 '표시되는 것만 센다') — 런타임 SetText/프로퍼티 바인딩으로 덮여 화면에 나타나지 않는 디자인타임 플레이스홀더. 이관 금지(의도된 상태)."
+    },
+    {
+      "path": "/Game/UI/Widget/WBP_CardEntry.WBP_CardEntry_C:WidgetTree.MagnitudeText.Text",
+      "source": "Magnitude",
+      "reason": "design-time-placeholder",
+      "note": "Roadmap.md 7-6 M0 EC 2 판정 정의(사용자 결정 2026-08-13 '표시되는 것만 센다') — 런타임 SetText/프로퍼티 바인딩으로 덮여 화면에 나타나지 않는 디자인타임 플레이스홀더. 이관 금지(의도된 상태)."
+    },
+    {
+      "path": "/Game/UI/Widget/WBP_CardEntry.WBP_CardEntry_C:WidgetTree.RarityText.Text",
+      "source": "Rarity",
+      "reason": "design-time-placeholder",
+      "note": "Roadmap.md 7-6 M0 EC 2 판정 정의(사용자 결정 2026-08-13 '표시되는 것만 센다') — 런타임 SetText/프로퍼티 바인딩으로 덮여 화면에 나타나지 않는 디자인타임 플레이스홀더. 이관 금지(의도된 상태)."
+    },
+    {
+      "path": "/Game/UI/Widget/WBP_CardEntry.WBP_CardEntry_C:WidgetTree.SourcePoolText.Text",
+      "source": "캐릭터",
+      "reason": "design-time-placeholder",
+      "note": "Roadmap.md 7-6 M0 EC 2 판정 정의(사용자 결정 2026-08-13 '표시되는 것만 센다') — 런타임 SetText/프로퍼티 바인딩으로 덮여 화면에 나타나지 않는 디자인타임 플레이스홀더. 이관 금지(의도된 상태)."
+    },
+    {
+      "path": "/Game/UI/Widget/WBP_CardSelecter.WBP_CardSelecter_C:WidgetTree.RerollChargesText.Text",
+      "source": "Count : 3",
+      "reason": "design-time-placeholder",
+      "note": "Roadmap.md 7-6 M0 EC 2 판정 정의(사용자 결정 2026-08-13 '표시되는 것만 센다') — 런타임 SetText/프로퍼티 바인딩으로 덮여 화면에 나타나지 않는 디자인타임 플레이스홀더. 이관 금지(의도된 상태)."
+    },
+    {
+      "path": "/Game/UI/Widget/WBP_LoadoutEntry.WBP_LoadoutEntry_C:WidgetTree.NameText.Text",
+      "source": "Weapon",
+      "reason": "M3-lobby-rework",
+      "note": "Roadmap.md 7-6 M0 (c) 보류 — 로비 전면 개편(M3)에서 통째로 교체될 화면이라 지금 StringTable로 이관하면 버려진다. 개편 시 이 항목을 함께 정리한다."
+    },
+    {
+      "path": "/Game/UI/Widget/WBP_Lobby.WBP_Lobby_C:WidgetTree.InviteText.Text",
+      "source": "Invite Friends (F)",
+      "reason": "M3-lobby-rework",
+      "note": "Roadmap.md 7-6 M0 (c) 보류 — 로비 전면 개편(M3)에서 통째로 교체될 화면이라 지금 StringTable로 이관하면 버려진다. 개편 시 이 항목을 함께 정리한다."
+    },
+    {
+      "path": "/Game/UI/Widget/WBP_Lobby.WBP_Lobby_C:WidgetTree.JoinText.Text",
+      "source": "Join (V)",
+      "reason": "M3-lobby-rework",
+      "note": "Roadmap.md 7-6 M0 (c) 보류 — 로비 전면 개편(M3)에서 통째로 교체될 화면이라 지금 StringTable로 이관하면 버려진다. 개편 시 이 항목을 함께 정리한다."
+    },
+    {
+      "path": "/Game/UI/Widget/WBP_Lobby.WBP_Lobby_C:WidgetTree.LobbyCodeText.Text",
+      "source": "CODE: ------",
+      "reason": "M3-lobby-rework",
+      "note": "Roadmap.md 7-6 M0 (c) 보류 — 로비 전면 개편(M3)에서 통째로 교체될 화면이라 지금 StringTable로 이관하면 버려진다. 개편 시 이 항목을 함께 정리한다."
+    },
+    {
+      "path": "/Game/UI/Widget/WBP_Lobby.WBP_Lobby_C:WidgetTree.ReadyText.Text",
+      "source": "Ready (R)",
+      "reason": "M3-lobby-rework",
+      "note": "Roadmap.md 7-6 M0 (c) 보류 — 로비 전면 개편(M3)에서 통째로 교체될 화면이라 지금 StringTable로 이관하면 버려진다. 개편 시 이 항목을 함께 정리한다."
+    },
+    {
+      "path": "/Game/UI/Widget/WBP_Lobby.WBP_Lobby_C:WidgetTree.WpnTxt0.Text",
+      "source": "FullAutoRifle",
+      "reason": "M3-lobby-rework",
+      "note": "Roadmap.md 7-6 M0 (c) 보류 — 로비 전면 개편(M3)에서 통째로 교체될 화면이라 지금 StringTable로 이관하면 버려진다. 개편 시 이 항목을 함께 정리한다."
+    },
+    {
+      "path": "/Game/UI/Widget/WBP_Lobby.WBP_Lobby_C:WidgetTree.WpnTxt1.Text",
+      "source": "Sniper",
+      "reason": "M3-lobby-rework",
+      "note": "Roadmap.md 7-6 M0 (c) 보류 — 로비 전면 개편(M3)에서 통째로 교체될 화면이라 지금 StringTable로 이관하면 버려진다. 개편 시 이 항목을 함께 정리한다."
+    },
+    {
+      "path": "/Game/UI/Widget/WBP_Lobby.WBP_Lobby_C:WidgetTree.WpnTxt2.Text",
+      "source": "Shotgun",
+      "reason": "M3-lobby-rework",
+      "note": "Roadmap.md 7-6 M0 (c) 보류 — 로비 전면 개편(M3)에서 통째로 교체될 화면이라 지금 StringTable로 이관하면 버려진다. 개편 시 이 항목을 함께 정리한다."
+    },
+    {
+      "path": "/Game/UI/Widget/WBP_Lobby.WBP_Lobby_C:WidgetTree.WpnTxt3.Text",
+      "source": "Bazooka",
+      "reason": "M3-lobby-rework",
+      "note": "Roadmap.md 7-6 M0 (c) 보류 — 로비 전면 개편(M3)에서 통째로 교체될 화면이라 지금 StringTable로 이관하면 버려진다. 개편 시 이 항목을 함께 정리한다."
+    },
+    {
+      "path": "/Game/UI/Widget/WBP_Lobby.WBP_Lobby_C:WidgetTree.WpnTxt4.Text",
+      "source": "GrenadeLuncher",
+      "reason": "M3-lobby-rework",
+      "note": "Roadmap.md 7-6 M0 (c) 보류 — 로비 전면 개편(M3)에서 통째로 교체될 화면이라 지금 StringTable로 이관하면 버려진다. 개편 시 이 항목을 함께 정리한다."
+    },
+    {
+      "path": "/Game/UI/Widget/WBP_Lobby.WBP_Lobby_C:WidgetTree.WpnTxt5.Text",
+      "source": "ChargeLaser",
+      "reason": "M3-lobby-rework",
+      "note": "Roadmap.md 7-6 M0 (c) 보류 — 로비 전면 개편(M3)에서 통째로 교체될 화면이라 지금 StringTable로 이관하면 버려진다. 개편 시 이 항목을 함께 정리한다."
+    },
+    {
+      "path": "/Game/UI/Widget/WBP_Lobby.WBP_Lobby_C:WidgetTree.WpnTxt6.Text",
+      "source": "LMG",
+      "reason": "M3-lobby-rework",
+      "note": "Roadmap.md 7-6 M0 (c) 보류 — 로비 전면 개편(M3)에서 통째로 교체될 화면이라 지금 StringTable로 이관하면 버려진다. 개편 시 이 항목을 함께 정리한다."
+    },
+    {
+      "path": "/Game/UI/Widget/WBP_Lobby.WBP_Lobby_C:WidgetTree.WpnTxt7.Text",
+      "source": "BurstRifle",
+      "reason": "M3-lobby-rework",
+      "note": "Roadmap.md 7-6 M0 (c) 보류 — 로비 전면 개편(M3)에서 통째로 교체될 화면이라 지금 StringTable로 이관하면 버려진다. 개편 시 이 항목을 함께 정리한다."
+    }
+  ]
+}

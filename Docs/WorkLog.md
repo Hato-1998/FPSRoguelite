@@ -9,7 +9,38 @@
 
 ---
 
-## 🧾 U14R — perf 측정 항목 등록: N-1 복제 폴백 + GMS §7-7 (2026-08-19, `perf/u14-measure-registry`, Fable 모드 A)
+## 🧾 BP 인라인 Text 자동검사 하네스 — M0 EC ② 회귀 가드 (2026-08-19, `phase/loc-bptext-audit`, 구현 Sonnet 위임 / 검증 Opus 직접)
+> 보드 행 = *"BP 인라인 Text가 gather에 구조적으로 안 잡힌다 — 에셋 수집 단계 부재"*(마일스톤 **미배정 → M0 배정**(사용자 결정 2026-08-19) · 백로그→미듐 · M · Opus).
+> **정본 = `Docs/SSOT/Localization.md` §L-7.** 같은 날 닫힌 EC ②(`c485b68e`·`1c646085`)의 BP 축이 *수동 열거 + 바이너리 grep*에 의존했고 새 리터럴을 막을 장치가 없던 것을 메운다.
+> 🔀 **병렬 착수 경위**: M0 진행중 3트랙(`enemy-proto-shapes`·`arena-spawnpoints`·`stage-transition-redesign`)은 전부 **형제 클론 `FPSRoguelite`** 가 클레임 중이고 M0 대기 9건은 그 3트랙에 전부 종속돼 병렬 후보가 0이었다. 겹치지 않는 것은 마일스톤 미배정 3행뿐이라 사용자가 이 행을 지목했다.
+
+### 무엇이 생겼나 (신규 3파일 · 기존 파일은 문서만)
+| 파일 | 역할 |
+|---|---|
+| `Config/Localization/Game_AuditBPText.ini` | **감사 전용** gather 타깃 — `GatherTextFromAssets` → `Saved/Localization/BPTextAudit/BPTextAudit.manifest`. 서드파티 루트 12개 제외로 로드 대상 4,300 → **221패키지** |
+| `Scripts/localization-audit-bptext.ps1` | 매니페스트(UTF-16) 파싱 → 게이트/참고 분류 → 얼라우리스트 대조 → 신규 있으면 **exit 1**. `-SkipGather`·`-ReportOnly` |
+| `Config/Localization/BPTextAudit_Allowlist.json` | 문서화된 카브아웃 24항목(`design-time-placeholder` 11 / `M3-lobby-rework` 13). 매니페스트에서 스크립트로 시딩(전사 오류 차단) |
+
+### 설계 결정 — 출하 체인을 켜지 않고 타깃을 분리했다
+보드 행이 "착수 시 정하라"고 남긴 3건을 이렇게 닫았다. ① 출하 `Game_Gather.ini`에 에셋 수집을 켜는 **가장 짧은 안을 기각** — 켜면 "표시되는 것만 센다"(2026-08-13) 결정으로 제외한 플레이스홀더와 로비 보류분이 **출하 매니페스트·아카이브에 편입돼 번역 의무가 생기고** `Game_ImportCsvTranslations.ini` 미스 집계까지 흔든다. 감사 산출물은 `Saved/`(gitignore)로 나가 출하물 무변경. ② 미채택으로 남겨둔 접두 규약 `[DT]`는 되살리지 않고 **얼라우리스트 + `reason`/`note`** 로 처리(로비 개편 세션이 이 파일만 보고 정리 가능). ③ 신규 발견은 **실패로 승격**(exit 1)하되 훅·PreSubmit 배선은 하지 않음(`.claude/settings.json`이 클론 로컬 — §6-9 (7)).
+
+### 🪤 함정 (엔진 소스 실측 — 추측 아님)
+1. **매니페스트는 UTF-16 LE + BOM** — `grep -o '"Key"' Game.manifest`가 **0을 반환한다**(무음 오답). 파서는 BOM 인식 리더 필수.
+2. **BP 그래프 핀의 FText는 에디터 전용으로 분류** — `EdGraphNode.cpp:173-185`가 `Pin->DefaultTextValue`를 `bIsEditorOnly=true`로 넘기고 `GatherTextFromAssetsCommandlet.cpp:605`가 필터한다 → `ShouldGatherFromEditorOnlyData=false`면 통째 누락. **실측 대조: true 68건 / false 62건**(늘어난 6건은 전부 엔진 에디터 메타데이터 — 위젯 애니 트랙 DisplayName 2 + 머티리얼 ChannelNames·Niagara Category·SCS CategoryName 4). 지금 프로젝트에 그래프 핀 FText는 0이지만, 앞으로 생기면 잡히는 쪽이 EC ② 정의에 맞아 **true 유지**.
+3. **`SkipGatherCache=true`는 "항상 새로 읽는다"가 아니다** — `CalculatePackageLocCacheState`(같은 파일 1754)가 `PKG_RequiresLocalizationGather` 붙은 패키지만 재로드로 되돌린다. 실측: 221 중 실제 로드 **72**, 나머지는 패키지 헤더 캐시본.
+4. **엔진 자동생성 메타데이터는 얼라우리스트가 아니라 구조로 제외해야 한다** — 네임스페이스 `UObjectDisplayNames`(위젯 애니 트랙 `DisplayName`)를 경로로 면제하면 **애니메이션 트랙 가진 위젯이 새로 생길 때마다 오탐**이 난다. `EUW_`(에디터 유틸리티 위젯)도 같은 이유로 구조 제외.
+5. ⚠️ **PS 5.1로 UTF-8(BOM 없는) 한글 파일 in-place 치환 금지** — 이 세션에서 `Get-Content -Raw | Set-Content -Encoding utf8`이 ini의 한글 주석을 전부 모지바케로 깨뜨렸다(Get-Content가 ANSI로 디코드). 파일 편집은 Edit/Write 도구로.
+
+### 부수 발견 — 참고 44건에 실물 부채가 있었다
+게이트가 아닌 `참고`에 **무기·프래그먼트·미션 DataAsset의 인라인 `FText` ~28건**이 잡혔다(`DA_Weapon_*.DisplayName`, `DA_Weapon_Rifle.WeaponParts[].DisplayLabel`(개머리판·조준경·탄창…), `DA_Mission_*.DisplayName/Description`, `DA_Fragment_*.DisplayName`). **EC ②의 문면 정의(C++ · BP 위젯) 밖이라 그 "0"을 깨지 않는다** — 그래서 실패 판정에 넣지 않고 참고로 분류하고 별도 보드 행으로 등록했다. 오타도 함께 드러났다(`DA_Fragment_BonusShot.DisplayName` = `BounsDamage`, `DA_DefeatFleeing.DisplayName` = `FeerObejct`).
+
+### 정직 기록 — 완전 기계화가 아니다
+착수 전 수용시험은 *"`WBP_Lobby`의 위젯트리 Text 10 + 그래프 핀 4를 모두 잡아야 한다"* 였다. **위젯트리는 통과, 그래프 핀은 미통과**다. 원인 = **gather는 `FText`만 본다** — `무기 이름`·`선택중`은 `WBP_Lobby.uasset`에 **UTF-16으로 실존**(각 1건)하는데 매니페스트에 없다(String 핀 기본값 계급). 또한 Roadmap이 그래프 핀으로 적어 둔 `CODE: ------`·`Ready (R)`는 실물은 **위젯트리 Text**(`LobbyCodeText`·`ReadyText`)였다. 결론: 이 검사기는 **`FText` 계급의 회귀만** 막고, String 리터럴은 여전히 바이너리 실측이 유일한 수단이다.
+
+### 검증(전부 이 세션 실측)
+① 전체 gather **68건 = 게이트 24(전부 면제) + 참고 44 → exit 0** ② 음성 시험 = 얼라우리스트 1행 임시 제거 → **신규 1건 · exit 1**(그 항목이 리포트에 표시), 원복 후 다시 exit 0 → **게이트가 양방향으로 발화함을 에디터 없이 증명** ③ **출하 산출물 무변경** — 실행 후 `git status`에 `Content/Localization/` 변경 0 ④ 기존 왕복 `Scripts/localization-gather.ps1` 회귀 없음(exit 0 · locres 산출).
+
+
 > 보드 행 = *"U14 perf 측정 항목 등록 — 출시빌드 Push Model 폴백 실측 + MsgSubsystem 프로파일"*(M0 · 하이 · M · Fable).
 > **정본 = `Docs/Specs/U14R_PerfMeasureRegistry.md`** — 2026-08-07 "측정 후 결정" 이연 2건(N-1·§7-7)을 CSV 컬럼명 단위로 측정 가능하게 등록. **실측 실행 = M0 EC ① 베이스라인 패스**(후행 행)가 이 명세를 읽고 수행한다. 인덱스 = `Performance.md` §5-3.
 
