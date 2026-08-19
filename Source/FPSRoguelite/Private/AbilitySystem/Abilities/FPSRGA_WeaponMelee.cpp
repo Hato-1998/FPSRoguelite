@@ -162,6 +162,7 @@ void UFPSRGA_WeaponMelee::ActivateAbility(
 		FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(FPSRWeaponMelee), false, Avatar);
 		FCollisionObjectQueryParams ObjParams;
 		FPSRCombat::AddDamageablePawnObjectTypes(ObjParams);
+		FPSRCombat::AddDestructibleObjectType(ObjParams); // a swing must still break a door / suppressor at arm's reach
 		const bool bAny = World->OverlapMultiByObjectType(
 			Overlaps, Center, FQuat::Identity, ObjParams,
 			FCollisionShape::MakeSphere(MeleeRadius), QueryParams);

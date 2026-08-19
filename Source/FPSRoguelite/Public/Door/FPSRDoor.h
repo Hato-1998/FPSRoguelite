@@ -76,10 +76,10 @@ protected:
 	UFUNCTION(BlueprintImplementableEvent, Category = "FPSR|Door")
 	void OnDoorDamageStage(int32 StageIndex, float HealthPct, float Threshold);
 
-	/** Breakable door leaves (상·하단). Object type ECC_FPSRPlayerPawn: gathered by EVERY weapon object-query so all
-	 *  weapon types damage it via HealthComponent (no new code), blocked by players AND enemies (both block the
-	 *  player channel), and immune to the ECC_Pawn pass-through windows (grace / downed only ignore ECC_Pawn, so a
-	 *  player can never walk through a door leaf). Designer assigns the mesh(es) in BP; attach
+	/** Breakable door leaves (상·하단). Object type ECC_FPSRDestructible: gathered by EVERY weapon damage query so all
+	 *  weapon types damage it via HealthComponent (no new code), blocked by players AND enemies (the channel defaults
+	 *  to Block), STOPS an in-flight projectile, and immune to the ECC_Pawn pass-through windows (grace / downed only
+	 *  ignore ECC_Pawn, so a player can never walk through a door leaf). Designer assigns the mesh(es) in BP; attach
 	 *  the top/bottom leaves under this so a single break hides them together (and OnDoorBroken can animate each). */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "FPSR|Door")
 	TObjectPtr<UStaticMeshComponent> DoorMesh;

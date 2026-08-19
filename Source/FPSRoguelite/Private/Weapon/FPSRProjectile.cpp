@@ -149,6 +149,11 @@ void AFPSRProjectile::Activate(const FVector& Location, const FFPSRProjectilePar
 		CollisionSphere->SetCollisionObjectType(ECC_WorldDynamic);
 		CollisionSphere->SetCollisionResponseToAllChannels(ECR_Ignore);
 		CollisionSphere->SetCollisionResponseToChannel(ECC_WorldStatic, ECR_Block);
+		// Breakable geometry BLOCKS — it does not overlap. A door leaf / arena prop is a wall that happens to have
+		// HP, so the round has to terminate on it (OnSphereHit damages it there). Overlap would not even fire:
+		// those meshes keep bGenerateOverlapEvents=false and the engine dispatches an overlap only when BOTH
+		// components have it, which is exactly how these props ended up transparent to gunfire.
+		CollisionSphere->SetCollisionResponseToChannel(ECC_FPSRDestructible, ECR_Block);
 		CollisionSphere->SetCollisionResponseToChannel(ECC_Pawn, ECR_Overlap);
 		// Also overlap the player object channel so a projectile can hit a friendly player (friendly fire) or a
 		// player target (enemy-team projectile). IsHostileTarget/ResolveDamage still gate whether damage lands.
@@ -198,6 +203,25 @@ void AFPSRProjectile::OnSphereHit(UPrimitiveComponent* HitComp, AActor* OtherAct
 	if (!bActive || !HasAuthority() || IsRunFrozen())
 	{
 		return;
+	}
+
+	// Breakable geometry we blocked on takes the round's damage before the impact terminates it — otherwise a door
+	// or suppressor would stop bullets and never break. Pierce is deliberately NOT honoured here: it is an
+	// anti-pawn stat, and a destructible is the wall, so even a piercing sniper round ends at it. An AOE round
+	// skips the direct hit because HandleImpact's radial sweep already covers this actor (same no-double-damage
+	// rule as OnSphereOverlap). Inert geometry falls out via IsHostileTarget inside TryDamageActor.
+	if (Params.ExplosionRadius <= 0.0f)
+	{
+		bool bCrit = false;
+		bool bKill = false;
+		bool bWasEnemy = false;
+		bool bDamaged = false;
+		if (TryDamageActor(OtherActor, 1.0f, bCrit, bKill, bWasEnemy, bDamaged) && bDamaged)
+		{
+			// Weakpoints never live on geometry, so bWeak is always false here; a destructible is not an enemy
+			// (bCountsAsKill false) so this resolves to a plain Hit marker, matching the other damage paths.
+			NotifyInstigatorHitMarker(bCrit && bWasEnemy, false, bKill);
+		}
 	}
 
 	// World block: impact (detonates an AOE round; a single-hit round simply expires here).

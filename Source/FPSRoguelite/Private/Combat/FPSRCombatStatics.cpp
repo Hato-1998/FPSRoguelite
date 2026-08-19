@@ -256,6 +256,9 @@ namespace FPSRCombat
 		// self-damage/self-knockback are resolved below.
 		FCollisionObjectQueryParams ObjectParams;
 		AddDamageablePawnObjectTypes(ObjectParams);
+		// Breakable geometry too: a rocket splashing a door / suppressor has to damage it. These moved off the
+		// player channel onto their own, so the pawn types alone no longer reach them.
+		AddDestructibleObjectType(ObjectParams);
 		FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(FPSRExplosion), false, nullptr);
 
 		TArray<FOverlapResult> Overlaps;
@@ -352,6 +355,16 @@ namespace FPSRCombat
 	void AddWeakpointObjectType(FCollisionObjectQueryParams& OutParams)
 	{
 		OutParams.AddObjectTypesToQuery(ECC_FPSRWeakpoint);
+	}
+
+	void AddDestructibleObjectType(FCollisionObjectQueryParams& OutParams)
+	{
+		OutParams.AddObjectTypesToQuery(ECC_FPSRDestructible); // doors + arena props (억제기)
+	}
+
+	bool IsDestructibleGeometry(const UPrimitiveComponent* Component)
+	{
+		return Component && Component->GetCollisionObjectType() == ECC_FPSRDestructible;
 	}
 
 	float GetWeakpointMultiplier(const UPrimitiveComponent* Component)

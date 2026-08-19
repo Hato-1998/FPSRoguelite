@@ -190,7 +190,7 @@ public:
 	void ExtractSurfaceData(FFPSRFlowFieldSurfaceData& OutData) const;
 
 	// --- U door stamping (P-B, 2026-07-07): a breakable door in a slot wall is NOT caught by the WorldStatic bake (its
-	//     leaf/blocker are ECC_FPSRPlayerPawn / WorldDynamic), so the flow must be told about it explicitly. While intact,
+	//     leaf/blocker are ECC_FPSRDestructible / WorldDynamic), so the flow must be told about it explicitly. While intact,
 	//     the door's gap cells are stamped BLOCKED; on break they are unblocked and the cross-slot edges are opened from
 	//     the neighbours' baked Z (Codex R1 Q1). These are the grid PRIMITIVES; the door-object -> cell-span mapping is the
 	//     server / FPSRDoor wiring, proven in-world (P-B PIE). Both invalidate the field (the caller then RunBFS). ---

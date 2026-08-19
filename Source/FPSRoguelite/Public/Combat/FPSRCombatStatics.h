@@ -120,6 +120,18 @@ namespace FPSRCombat
 	 *  which must never gather weakpoints). */
 	FPSROGUELITE_API void AddWeakpointObjectType(FCollisionObjectQueryParams& OutParams);
 
+	/** Add the destructible object type (doors / arena props) to an object query. EVERY damage path that can reach
+	 *  breakable geometry must call this alongside AddDamageablePawnObjectTypes — a destructible is not a pawn, so
+	 *  the pawn types alone no longer find it. Kept separate rather than folded into AddDamageablePawnObjectTypes so
+	 *  each query still states exactly what it gathers (same reason AddWeakpointObjectType is its own call). */
+	FPSROGUELITE_API void AddDestructibleObjectType(FCollisionObjectQueryParams& OutParams);
+
+	/** True when a primitive gathered by a damage object-query is breakable GEOMETRY (door leaf / arena prop)
+	 *  rather than a pawn. The line-trace paths must NOT put these in their wall-trace ignore list: a destructible
+	 *  IS the wall, so everything behind it stays out of range. A pawn is the opposite case — it must never
+	 *  masquerade as cover — which is why the ignore list exists at all. */
+	FPSROGUELITE_API bool IsDestructibleGeometry(const UPrimitiveComponent* Component);
+
 	/** Weakpoint damage multiplier for a hit primitive (1.0 if it is not a UFPSRWeakpointComponent). */
 	FPSROGUELITE_API float GetWeakpointMultiplier(const UPrimitiveComponent* Component);
 

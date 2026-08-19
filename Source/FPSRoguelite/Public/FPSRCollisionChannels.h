@@ -34,3 +34,25 @@ constexpr ECollisionChannel ECC_FPSRPlayerPawn = ECC_GameTraceChannel1;
  * Keep this alias and the .ini channel index in sync.
  */
 constexpr ECollisionChannel ECC_FPSRWeakpoint = ECC_GameTraceChannel2;
+
+/**
+ * Custom object channel for breakable geometry — AFPSRDoor leaves and AFPSRArenaDestructible props (the 억제기).
+ *
+ * Why a DEDICATED channel (not ECC_FPSRPlayerPawn, which these used before): a destructible has to be TWO things
+ * at once — a wall that stops a round, and a target the damage queries gather. Borrowing the player's object
+ * channel bought the second and silently lost the first: AFPSRProjectile only OVERLAPS ECC_FPSRPlayerPawn (so
+ * friendly rounds pass through teammates), and these meshes set bGenerateOverlapEvents=false — and the engine
+ * only dispatches an overlap when BOTH components have it (PrimitiveComponent.cpp, "Both components must set
+ * GetGenerateOverlapEvents()"). No block AND no overlap event = every bullet flew straight through a door or
+ * suppressor, damaging whatever stood behind it. That went unnoticed while weapons were hitscan, because an
+ * object-type LINE TRACE is a scene query and never consults the overlap-event flag.
+ *
+ * On its own channel a destructible blocks by default (DefaultResponse=ECR_Block in the .ini, so pawns/walls/
+ * traces treat it as solid with no per-profile edits), the projectile blocks it explicitly, and the damage
+ * queries opt in via FPSRCombat::AddDestructibleObjectType. It also stays immune to the ECC_Pawn pass-through
+ * windows (grace / downed), which is why the leaves were moved off ECC_Pawn in the first place.
+ *
+ * Registered in Config/DefaultEngine.ini as DefaultChannelResponses Channel=ECC_GameTraceChannel3 Name="Destructible".
+ * Keep this alias and the .ini channel index in sync.
+ */
+constexpr ECollisionChannel ECC_FPSRDestructible = ECC_GameTraceChannel3;
