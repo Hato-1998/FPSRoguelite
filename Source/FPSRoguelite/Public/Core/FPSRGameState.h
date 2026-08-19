@@ -34,13 +34,20 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnActiveBossChanged, AFPSRBossBase*
  *  a "<DisplayName> 미션 시작" banner for a few seconds when MissionData is non-null. */
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnActiveMissionChanged, UFPSRMissionDataAsset*, MissionData);
 
-/** Stage transition phase (ADR 0010 D6). None = normal play. Grace = the dealing window — enemies frozen, player
- *  movement frozen, player FIRING still live (the window's whole reward, 안 G). Pending = the dealing window already
- *  closed but the card-selection freeze (bRunPaused) is still up, so the swap is held (invariant 8: swapping while
- *  a freeze is up would let a slow card pick silently stretch the transition). Swapping = the arena swap itself is
- *  in progress this frame (activate next, regenerate, teleport, deactivate previous, release the swarm). */
+/** Stage transition phase (ADR 0010 D6, Phase A phase split). None = normal play. Grace = the dealing window —
+ *  enemies frozen, player movement frozen, player FIRING still live (the window's whole reward, 안 G). Pending = the
+ *  dealing window already closed but the card-selection freeze (bRunPaused) is still up, so the swap is held
+ *  (invariant 8: swapping while a freeze is up would let a slow card pick silently stretch the transition).
+ *  Swapping = "암전 유지 + 목적지 준비 대기" — the destination arena is activated/regenerated and the state machine
+ *  waits (BeginSwap/PollSwapReadiness) for it to be visible to every connection before PerformSwap actually commits
+ *  the teleport/enemy-carry/deactivate-previous work; the world stays visually blacked out the whole time (Phase B
+ *  drives the fade off StagePhaseEndServerTime/phase, not this state machine). FadeOut/FadeIn = the new fixed-length
+ *  cosmetic phases either side of the swap — FadeOut after the dealing window closes and before Swapping begins,
+ *  FadeIn after PerformSwap commits and before returning to None. FadeOut/FadeIn are appended AFTER Swapping (not
+ *  interleaved with the pre-existing values) so None==0 and every prior ordinal is preserved —
+ *  FPSRStageTransitionTest locks both down. */
 UENUM(BlueprintType)
-enum class EFPSRStageTransitionPhase : uint8 { None, Pending, Grace, Swapping };
+enum class EFPSRStageTransitionPhase : uint8 { None, Pending, Grace, Swapping, FadeOut, FadeIn };
 
 /** Fired on every client (and the host) whenever StageTransitionPhase/StageIndex/ActiveArena changes (ADR 0010 D6).
  *  HUD stage-transition UI (dealing-window countdown, swap cue) binds here. */
@@ -204,20 +211,21 @@ public:
 	UFUNCTION(BlueprintPure, Category = "FPSR|Run")
 	EFPSRStageTransitionPhase GetStageTransitionPhase() const { return StageTransitionPhase; }
 
-	/** True while ANY stage-transition phase is active (Grace/Pending/Swapping). Movement-freeze consumers
-	 *  (AFPSRCharacter::IsMovementFrozen) and the enemy/damage/projectile/XP/run-clock gates all key off this. */
+	/** True while ANY stage-transition phase is active (Grace/Pending/Swapping/FadeOut/FadeIn). Movement-freeze
+	 *  consumers (AFPSRCharacter::IsMovementFrozen) and the enemy/damage/projectile/XP/run-clock gates all key off
+	 *  this — the swarm and the run clock stay frozen through the fade phases too, not just the swap itself. */
 	UFUNCTION(BlueprintPure, Category = "FPSR|Run")
 	bool IsStageTransitionActive() const { return StageTransitionPhase != EFPSRStageTransitionPhase::None; }
 
 	/** True only during the Grace phase's FIXED dealing window (ADR 0010 invariant 8: the damage-dealing window
 	 *  must be a fixed duration, never proportional to hardware/loading time — a slow machine must not be able to
 	 *  farm the frozen swarm longer than a fast one). This predicate is what expresses that invariant: it is true
-	 *  from the moment Grace starts until the pre-computed GraceDealingEndServerTime, and then closes at exactly
-	 *  that instant no matter how much longer Pending/Swapping end up taking afterward — the swarm becomes
-	 *  invulnerable at that fixed point (see FPSRCombatStatics.cpp's ResolveDamage), so extra wall-clock time never
-	 *  buys extra reward. */
+	 *  from the moment Grace starts until the pre-computed StagePhaseEndServerTime, and then closes at exactly
+	 *  that instant no matter how much longer Pending/Swapping/FadeOut/FadeIn end up taking afterward — the swarm
+	 *  becomes invulnerable at that fixed point (see FPSRCombatStatics.cpp's ResolveDamage), so extra wall-clock
+	 *  time never buys extra reward. */
 	UFUNCTION(BlueprintPure, Category = "FPSR|Run")
-	bool IsStageDealingOpen() const { return StageTransitionPhase == EFPSRStageTransitionPhase::Grace && GetServerWorldTimeSeconds() < GraceDealingEndServerTime; }
+	bool IsStageDealingOpen() const { return StageTransitionPhase == EFPSRStageTransitionPhase::Grace && GetServerWorldTimeSeconds() < StagePhaseEndServerTime; }
 
 	UFUNCTION(BlueprintPure, Category = "FPSR|Run")
 	int32 GetStageIndex() const { return StageIndex; }
@@ -234,9 +242,16 @@ public:
 	UFUNCTION(BlueprintPure, Category = "FPSR|Run")
 	float GetStageDealingRemaining() const;
 
-	/** Server: set the transition phase + the dealing-window end timestamp (DealingEndServerTime is only meaningful
-	 *  entering Grace; pass 0 for every other phase). No-op off authority or when nothing actually changes. */
-	void SetStageTransition(EFPSRStageTransitionPhase NewPhase, float DealingEndServerTime);
+	/** Server-world-time stamp (GetServerWorldTimeSeconds) at which the CURRENT phase ends — Grace: the dealing
+	 *  window closes; FadeOut/FadeIn: the fade finishes; every other phase: 0 (nothing to count down). Phase B's
+	 *  client fade driver + HUD countdown read this alongside GetStageTransitionPhase() to know both WHAT phase is
+	 *  active and WHEN it ends, without a second replicated field per phase. */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Run")
+	float GetStagePhaseEndServerTime() const { return StagePhaseEndServerTime; }
+
+	/** Server: set the transition phase + that phase's end timestamp (StagePhaseEndServerTime — meaningful for
+	 *  Grace/FadeOut/FadeIn; pass 0 for every other phase). No-op off authority or when nothing actually changes. */
+	void SetStageTransition(EFPSRStageTransitionPhase NewPhase, float PhaseEndServerTime);
 
 	/** Server: set the replicated stage index (bumped by the stage director on a committed swap). */
 	void SetStageIndex(int32 NewStageIndex);
@@ -348,11 +363,13 @@ protected:
 	UPROPERTY(ReplicatedUsing = OnRep_StageTransition)
 	int32 StageIndex = 0;
 
-	/** Server world-time stamp (GetServerWorldTimeSeconds) at which the Grace dealing window closes. Only
-	 *  meaningful while StageTransitionPhase == Grace; 0 otherwise. Clients read the SAME server clock via
-	 *  GetServerWorldTimeSeconds(), so IsStageDealingOpen agrees on every machine with nothing else to synchronize. */
+	/** Server world-time stamp (GetServerWorldTimeSeconds) at which the CURRENT phase ends (Grace: dealing window
+	 *  closes; FadeOut/FadeIn: the fade finishes). 0 for every other phase. Clients read the SAME server clock via
+	 *  GetServerWorldTimeSeconds(), so IsStageDealingOpen (and Phase B's fade progress) agrees on every machine with
+	 *  nothing else to synchronize. Renamed from GraceDealingEndServerTime (Phase A phase split) — same field, same
+	 *  replication/Push-Model wiring, wider meaning (one end-timestamp shared by three timed phases instead of one). */
 	UPROPERTY(ReplicatedUsing = OnRep_StageTransition)
-	float GraceDealingEndServerTime = 0.0f;
+	float StagePhaseEndServerTime = 0.0f;
 
 	/** The arena the transition is centered on — same "hard ref to an always-relevant actor" shape as ActiveBoss. */
 	UPROPERTY(ReplicatedUsing = OnRep_StageTransition)

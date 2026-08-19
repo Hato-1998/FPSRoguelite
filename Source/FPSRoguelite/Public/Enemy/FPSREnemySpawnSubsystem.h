@@ -55,6 +55,18 @@ public:
 	/** Release every active enemy back to the dormant pool (server). Used by mission/debug flows. */
 	void ReleaseAllEnemies();
 
+	/** Server (Phase A stage-transition redesign): carry the leftover swarm over to the new arena instead of
+	 *  releasing it, called by UFPSRStageDirectorSubsystem::PerformSwap in place of the old ReleaseAllEnemies. Each
+	 *  surviving enemy is offset by the DELTA of its nearest OLD player location -> the SAME player's NEW location
+	 *  (OldPlayerLocs[i]/NewPlayerLocs[i] must be index-paired, one player per slot — see the call site), then
+	 *  snapped onto the new arena's nearest open flow-field cell (UFPSRFlowFieldSubsystem::FindNearestOpenLocation —
+	 *  array-only, no world query, D7). CarryMaxFraction (0..1, UFPSRRunScheduleDataAsset::StageCarryOverMaxFraction)
+	 *  caps how many carry over; the excess is released, farthest-from-a-new-player-location first. Falls back to
+	 *  ReleaseAllEnemies (+ a Warning log) if OldPlayerLocs/NewPlayerLocs is empty — no delta to carry by. No-op
+	 *  off authority. The whole swarm is frozen for the transition (TickEnemyMovement's IsStageTransitionActive
+	 *  gate), so there is no movement-pass race with this. */
+	void CarryEnemiesToNewStage(const TArray<FVector>& OldPlayerLocs, const TArray<FVector>& NewPlayerLocs, float CarryMaxFraction);
+
 	/** Server (U P-F): reset the director's transient run state for a same-world re-run (StartRun) — drain the trickle
 	 *  token bucket, clear the director clock, empty the per-map grace + transition-tracker maps, and release every active
 	 *  enemy back to the pool. Stage 2 also resets each PlayerState's topology ack. A first run starts empty, so this is a

@@ -191,6 +191,19 @@ public:
 	/** Server: release front attribution (credit consumed / caught up) — the enemy becomes a normal slot enemy. */
 	void ClearFrontSpawn() { bFrontSpawned = false; FrontCreditExpireTime = -1.0f; }
 
+	/** Server (Phase A stage-transition carry-over): relocate this ACTIVE (not pooled/dormant) enemy across a stage
+	 *  swap to NewLocation. Clears any leftover exit path — and its WorldStatic collision-ignore override — BEFORE
+	 *  moving (ClearExitPath is the single recovery point, protected; this is the public entry point a caller
+	 *  outside the class uses to reach it), then teleports (no sweep — the caller already resolved an open cell via
+	 *  UFPSRFlowFieldSubsystem::FindNearestOpenLocation) and resets the physics-contact state Activate() resets for
+	 *  a pooled reuse ("may spawn on a rooftop" there == "may land somewhere new" here — a KnockbackVelocityXY /
+	 *  VerticalVelocity / bGrounded / GroundRecheckTimer computed against the OLD arena's geometry is meaningless in
+	 *  the new one). Deliberately narrower than Activate(): does NOT touch health, front-chase/front-spawn state,
+	 *  MapId, or anim/cosmetic state — this is the SAME life, just relocated (see
+	 *  UFPSREnemySpawnSubsystem::CarryEnemiesToNewStage for which per-enemy state is safe to leave untouched and
+	 *  why). No-op off authority. */
+	void ServerRelocateForStageCarry(const FVector& NewLocation);
+
 protected:
 	virtual void BeginPlay() override;
 

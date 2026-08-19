@@ -301,6 +301,23 @@ void AFPSREnemyBase::ClearExitPath()
 	}
 }
 
+void AFPSREnemyBase::ServerRelocateForStageCarry(const FVector& NewLocation)
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+
+	ClearExitPath(); // unconditional, BEFORE moving (spec: the single recovery point, see ClearExitPath's comment)
+	SetActorLocation(NewLocation, false, nullptr, ETeleportType::TeleportPhysics);
+
+	// Physics-contact state reset (see the header comment) — same subset Activate() resets for a pooled reuse.
+	VerticalVelocity = 0.0f;
+	bGrounded = false;
+	GroundRecheckTimer = 0.0f;
+	KnockbackVelocityXY = FVector::ZeroVector;
+}
+
 
 bool AFPSREnemyBase::ConsumeExitPathSteering(const FVector& MyLocation, float ScaledDeltaSeconds, FVector& OutDir)
 {

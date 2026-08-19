@@ -813,6 +813,128 @@ int32 UFPSRFlowFieldComputer::GetPathDistanceCells(const FVector& WorldLocation,
 	return Dist;
 }
 
+int32 UFPSRFlowFieldComputer::FindNearestOpenCell(TConstArrayView<float> CellFloorZ, TConstArrayView<bool> BlockedField,
+	int32 GridDimX, int32 GridDimY, int32 CellX, int32 CellY, int32 MaxRadiusCells)
+{
+	if (GridDimX <= 0 || GridDimY <= 0)
+	{
+		return INDEX_NONE;
+	}
+
+	// "Open" = at least one of this cell's NumLayers ranks has a valid, unblocked surface. Local lambda, not a
+	// member function, so this stays a genuinely worldless static (the array views ARE the grid — no implicit
+	// this-> read of the computer's own CellFloorZ/BlockedField, which is what makes the headless test able to feed
+	// synthetic arrays without a UFPSRFlowFieldComputer instance).
+	auto IsCellOpen = [&](int32 CX, int32 CY) -> bool
+	{
+		if (CX < 0 || CX >= GridDimX || CY < 0 || CY >= GridDimY)
+		{
+			return false;
+		}
+		const int32 Base = (CY * GridDimX + CX) * NumLayers;
+		for (int32 R = 0; R < NumLayers; ++R)
+		{
+			const int32 Surf = Base + R;
+			if (CellFloorZ.IsValidIndex(Surf) && CellFloorZ[Surf] != MAX_flt
+				&& BlockedField.IsValidIndex(Surf) && !BlockedField[Surf])
+			{
+				return true;
+			}
+		}
+		return false;
+	};
+
+	// Off-grid anchor -> clamp into the grid before searching (spec: treat like a blocked self-cell).
+	const int32 AnchorCX = FMath::Clamp(CellX, 0, GridDimX - 1);
+	const int32 AnchorCY = FMath::Clamp(CellY, 0, GridDimY - 1);
+
+	if (IsCellOpen(AnchorCX, AnchorCY))
+	{
+		return AnchorCY * GridDimX + AnchorCX;
+	}
+
+	// Chebyshev ring search, radius 1..MaxRadiusCells, FIXED scan order (dy outer, dx inner, ring-perimeter only —
+	// same idiom as FindNearestOpenSurface / FPSRArenaActor.cpp's file-local FindNearestOpenCell) so a tie between
+	// two equally-open cells at the same radius always resolves to the SAME one (invariant 10).
+	for (int32 R = 1; R <= MaxRadiusCells; ++R)
+	{
+		for (int32 DY = -R; DY <= R; ++DY)
+		{
+			for (int32 DX = -R; DX <= R; ++DX)
+			{
+				if (FMath::Max(FMath::Abs(DX), FMath::Abs(DY)) != R)
+				{
+					continue; // ring perimeter only — the interior was already covered by a smaller radius
+				}
+				const int32 CX = AnchorCX + DX;
+				const int32 CY = AnchorCY + DY;
+				if (IsCellOpen(CX, CY))
+				{
+					return CY * GridDimX + CX;
+				}
+			}
+		}
+	}
+	return INDEX_NONE;
+}
+
+bool UFPSRFlowFieldComputer::FindNearestOpenLocation(const FVector& InWorld, int32 MaxRadiusCells, FVector& OutWorld) const
+{
+	if (GridDimX <= 0 || GridDimY <= 0)
+	{
+		return false;
+	}
+
+	const int32 RawCX = FMath::FloorToInt((InWorld.X - GridOrigin.X) / ActiveCellSize);
+	const int32 RawCY = FMath::FloorToInt((InWorld.Y - GridOrigin.Y) / ActiveCellSize);
+	const int32 ClampedCX = FMath::Clamp(RawCX, 0, GridDimX - 1);
+	const int32 ClampedCY = FMath::Clamp(RawCY, 0, GridDimY - 1);
+	const int32 SelfCell = ClampedCY * GridDimX + ClampedCX;
+
+	const int32 FoundCell = FindNearestOpenCell(CellFloorZ, BlockedField, GridDimX, GridDimY, ClampedCX, ClampedCY, MaxRadiusCells);
+	if (FoundCell == INDEX_NONE)
+	{
+		return false;
+	}
+
+	// Pick this cell's open rank nearest InWorld.Z for the baked-Z correction (FindNearestOpenCell already
+	// guarantees at least one open rank exists here — same nearest-match rule PickRankForFootZ uses, but filtered to
+	// UNBLOCKED surfaces too, since PickRankForFootZ alone doesn't check BlockedField).
+	const int32 Base = FoundCell * NumLayers;
+	float BestZ = 0.0f;
+	float BestZDist = MAX_flt;
+	for (int32 R = 0; R < NumLayers; ++R)
+	{
+		const int32 Surf = Base + R;
+		if (CellFloorZ[Surf] == MAX_flt || BlockedField[Surf])
+		{
+			continue;
+		}
+		const float D = FMath::Abs(CellFloorZ[Surf] - static_cast<float>(InWorld.Z));
+		if (D < BestZDist)
+		{
+			BestZDist = D;
+			BestZ = CellFloorZ[Surf];
+		}
+	}
+
+	if (FoundCell == SelfCell)
+	{
+		// Self-cell is open — keep the candidate's XY exactly, only correct Z (don't drag a stale arena's Z along).
+		OutWorld = FVector(InWorld.X, InWorld.Y, BestZ);
+	}
+	else
+	{
+		const int32 FX = FoundCell % GridDimX;
+		const int32 FY = FoundCell / GridDimX;
+		OutWorld = FVector(
+			GridOrigin.X + (FX + 0.5f) * ActiveCellSize,
+			GridOrigin.Y + (FY + 0.5f) * ActiveCellSize,
+			BestZ);
+	}
+	return true;
+}
+
 int32 UFPSRFlowFieldComputer::WorldToCellIndex(const FVector& WorldLocation) const
 {
 	if (GridDimX <= 0 || GridDimY <= 0)

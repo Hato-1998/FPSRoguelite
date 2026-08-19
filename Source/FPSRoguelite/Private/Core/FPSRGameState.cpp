@@ -36,7 +36,7 @@ void AFPSRGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLi
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRGameState, TopologyGeneration, Params);
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRGameState, StageTransitionPhase, Params);
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRGameState, StageIndex, Params);
-	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRGameState, GraceDealingEndServerTime, Params);
+	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRGameState, StagePhaseEndServerTime, Params);
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRGameState, ActiveArena, Params);
 }
 
@@ -365,20 +365,20 @@ void AFPSRGameState::OnRep_RunState()
 // Stage transition (ADR 0010 D6) — see the header for what each field/accessor means.
 // ---------------------------------------------------------------------------------------------------------------
 
-void AFPSRGameState::SetStageTransition(EFPSRStageTransitionPhase NewPhase, float DealingEndServerTime)
+void AFPSRGameState::SetStageTransition(EFPSRStageTransitionPhase NewPhase, float PhaseEndServerTime)
 {
-	if (!HasAuthority() || (StageTransitionPhase == NewPhase && GraceDealingEndServerTime == DealingEndServerTime))
+	if (!HasAuthority() || (StageTransitionPhase == NewPhase && StagePhaseEndServerTime == PhaseEndServerTime))
 	{
 		return;
 	}
 	StageTransitionPhase = NewPhase;
-	GraceDealingEndServerTime = DealingEndServerTime;
+	StagePhaseEndServerTime = PhaseEndServerTime;
 	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRGameState, StageTransitionPhase, this);
-	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRGameState, GraceDealingEndServerTime, this);
+	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRGameState, StagePhaseEndServerTime, this);
 	ApplyStageTransitionLocal(); // host gets no OnRep — apply directly (mirrors SetActiveBoss/SetActiveMission)
 
-	UE_LOG(LogFPSR, Log, TEXT("[Stage] Transition phase -> %d (dealing-end server-t=%.1f)"),
-		static_cast<int32>(StageTransitionPhase), GraceDealingEndServerTime);
+	UE_LOG(LogFPSR, Log, TEXT("[Stage] Transition phase -> %d (phase-end server-t=%.1f)"),
+		static_cast<int32>(StageTransitionPhase), StagePhaseEndServerTime);
 }
 
 void AFPSRGameState::SetStageIndex(int32 NewStageIndex)
@@ -450,7 +450,7 @@ float AFPSRGameState::GetStageDealingRemaining() const
 	{
 		return 0.0f;
 	}
-	return FMath::Max(0.0f, GraceDealingEndServerTime - GetServerWorldTimeSeconds());
+	return FMath::Max(0.0f, StagePhaseEndServerTime - GetServerWorldTimeSeconds());
 }
 
 #if !UE_BUILD_SHIPPING

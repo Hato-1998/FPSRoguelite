@@ -5,6 +5,7 @@
 #include "UObject/Object.h"
 #include "Math/Vector2D.h"
 #include "Math/IntPoint.h"
+#include "Containers/ArrayView.h" // TConstArrayView (FindNearestOpenCell — worldless ring-search core, Phase A)
 #include "FPSRFlowFieldComputer.generated.h"
 
 class AFPSRFlowFieldBoundsVolume;
@@ -235,6 +236,34 @@ public:
 	 *  (foot-Z rank pick), for the front-chase range gate. OutStatus distinguishes OK / OffGrid / SourceLess / Unreachable
 	 *  (returns MAX_int32 for every non-OK). O(1) array read after RunBFS. */
 	int32 GetPathDistanceCells(const FVector& WorldLocation, EFPSRFieldQuery& OutStatus) const;
+
+	// --- Phase A stage-transition carry-over: nearest-open-cell snap (D7 — array-only, NO world query) ---
+
+	/** Nearest OPEN (walkable, unblocked) location to InWorld on THIS grid — the live adopted arena surface (post-
+	 *  AdoptArenaSurface, so destructible footprints / door stamps are reflected). If InWorld's own cell already has
+	 *  an open surface, returns InWorld's XY UNCHANGED (only Z is corrected to that surface's baked floor, so a
+	 *  stale Z from the arena the caller carried the candidate over from is never dragged along); otherwise a
+	 *  deterministic outward ring search (FindNearestOpenCell, Chebyshev radius 1..MaxRadiusCells) finds the nearest
+	 *  open cell and returns ITS center + baked Z. Off-grid input is clamped into the grid before searching (treated
+	 *  like a blocked self-cell). False if the grid isn't built (GridDimX/Y <= 0) or nothing opens within
+	 *  MaxRadiusCells. Pure array math — no LineTrace, no world query (unlike FindNearestOpenSurface, which this is
+	 *  NOT interchangeable with: that one is a world-trace bake helper with an LOS test; this one runs on the live
+	 *  frozen-swarm path where a world query is a hard performance-contract violation). */
+	bool FindNearestOpenLocation(const FVector& InWorld, int32 MaxRadiusCells, FVector& OutWorld) const;
+
+	/** Worldless ring-search CORE for FindNearestOpenLocation, exposed static + pure so FPSRStageTransitionTest can
+	 *  lock it down with synthetic arrays (no UFPSRFlowFieldComputer instance / world needed) — same idiom as the
+	 *  file-local FindNearestOpenCell in FPSRArenaActor.cpp (which does the identical search over the AUTHORED
+	 *  FFPSRArenaLayout at entry-point-snap time; this one runs over the LIVE runtime grid's own arrays instead).
+	 *  "Open" = the cell has at least one rank (of NumLayers) with a valid, UNBLOCKED surface (CellFloorZ != MAX_flt
+	 *  && !BlockedField). Self-cell (CellX,CellY) counts as a hit at radius 0; then a Chebyshev-ring outward search
+	 *  (radius 1..MaxRadiusCells) in a FIXED scan order (dy outer, dx inner, ring-perimeter only) — same order
+	 *  FindNearestOpenSurface uses — so two equally-open cells at the same radius always resolve to the SAME one on
+	 *  every machine (invariant 10). CellX/CellY are clamped into [0,GridDim) internally, so an off-grid anchor
+	 *  degrades to "search from the nearest in-grid cell" rather than failing outright. Returns the found cell index
+	 *  (CY*GridDimX+CX), or INDEX_NONE if nothing opens within MaxRadiusCells / the grid is empty. */
+	static int32 FindNearestOpenCell(TConstArrayView<float> CellFloorZ, TConstArrayView<bool> BlockedField,
+		int32 GridDimX, int32 GridDimY, int32 CellX, int32 CellY, int32 MaxRadiusCells);
 
 	/** Surface (cell, rank) flat index. Rank in [0, NumLayers). */
 	FORCEINLINE int32 SurfIndex(int32 Cell, int32 Rank) const { return Cell * NumLayers + Rank; }

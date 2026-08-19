@@ -496,6 +496,38 @@ void FFPSRArenaAuthoringTool::ValidateArenaInLevel()
 			}
 		}
 
+		// ── 플레이어 진입 지점 저작 검사 (Phase A: 잔존 적 이월) ──────────────────────────────────────────
+		// 진입 지점이 막힌 셀에 있어도 런타임(AFPSRArenaActor::GetPlayerEntryTransforms)은 크래시하지 않는다 —
+		// 조용히 가장 가까운 열린 셀로 스냅한다(P3 redteam fix). 그러니 여기서 지적하는 것은 "터진다"가 아니라
+		// "저작한 위치와 실제로 플레이어가 서는 위치가 다르다"는 것이다(문 앞·엄폐물 뒤 같은 의도된 자리를
+		// 벗어날 수 있다). GetPlayerEntryTransforms를 **그대로 호출**해 같은 소스·같은 열거(APlayerStart 이름순
+		// 정렬, 없으면 중심 오프셋 폴백)를 그대로 쓴다 — 런타임 스냅이 읽는 Arena->Layout은 에디터에선 아직
+		// AdoptArenaSurface가 돈 적이 없어 항상 비어 있으므로(IsValid()==false) 그 함수 안의 SnapToOpenCells는
+		// no-op이고, 반환된 좌표는 저작 그대로다. 그 좌표를 이 아레나 검증에 쓰는 (베이크/절차) Layout으로
+		// 판정한다 — 스폰포인트 검사와 같은 기준.
+		{
+			TArray<FTransform> EntryTransforms;
+			const bool bHasAuthoredStarts = Arena->GetPlayerEntryTransforms(EntryTransforms);
+
+			TArray<FString> BlockedEntries;
+			for (const FTransform& EntryXf : EntryTransforms)
+			{
+				const FIntPoint EntryCell = FFPSRArenaCells::WorldToCell(Layout, EntryXf.GetLocation());
+				if (!FFPSRArenaCells::IsCellOpen(Layout, EntryCell.X, EntryCell.Y))
+				{
+					BlockedEntries.Add(EntryXf.GetLocation().ToString());
+				}
+			}
+			if (BlockedEntries.Num() > 0)
+			{
+				Body += FString::Printf(
+					TEXT("  [오류] 플레이어 진입 지점 %d개가 막힌 셀에 있습니다: %s\n"
+					     "  런타임은 조용히 가장 가까운 열린 셀로 스냅합니다 — 저작한 자리가 아닐 수 있으니 %s 를 열린 셀 위로 옮기세요.\n"),
+					BlockedEntries.Num(), *FString::Join(BlockedEntries, TEXT(", ")),
+					bHasAuthoredStarts ? TEXT("해당 APlayerStart") : TEXT("아레나(진입점이 없어 중심 폴백을 쓰는 중입니다 — APlayerStart를 놓으세요)"));
+			}
+		}
+
 		// The arena's name goes IN the summary line itself, not only as a header above it — so a single line
 		// copy-pasted out of a multi-arena report still says which arena it is about. WHAT was checked goes in
 		// too: a PASS means something completely different depending on whether it read the shipped mask or a

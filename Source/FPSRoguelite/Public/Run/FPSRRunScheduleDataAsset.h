@@ -126,4 +126,19 @@ public:
 	 *  늘어나는 것은 보상 시간이 아니라 암전 대기다. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Run", meta = (ClampMin = "0.0"))
 	float StageSwapReadyTimeoutSeconds = 5.0f;
+
+	/** 스왑 전 **지형 페이드아웃** 길이(초, Phase B 연출 — 여기선 서버 상태기 타이밍만). 딜링 창(`StageGraceSeconds`)이
+	 *  이미 닫힌 **뒤**의 고정 연출 구간이라 불변식 8과 무관하다. 0 = 페이드 생략(하드컷, 기존과 동일). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Run", meta = (ClampMin = "0.0"))
+	float StageFadeOutSeconds = 0.8f;
+
+	/** 스왑 뒤 **페이드인** 길이(초, Phase B 연출). 0 = 생략(하드컷). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Run", meta = (ClampMin = "0.0"))
+	float StageFadeInSeconds = 0.8f;
+
+	/** 전환 시 새 아레나로 **이월**할 잔존 적의 비율 상한(0~1). 초과분은 새 진입 지점에서 먼 순으로 풀 반납된다.
+	 *  1.0 = 전부 이월. 페이싱 손잡이 — 전환 후 새 아레나의 스폰 캡 계상은 이월된 ActiveEnemies 잔존 수로 자동
+	 *  반영되므로(director tick의 GlobalAliveCap 게이트), 이 값을 낮추면 새 스테이지 시작이 더 비어 보인다. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Run", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float StageCarryOverMaxFraction = 1.0f;
 };
