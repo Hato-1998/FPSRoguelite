@@ -126,16 +126,16 @@
 - (c) **문자열 외부화** — StringTable 파이프라인 + 기존 UI 위젯 전수 이관. **이 선을 넘긴 뒤 만들어지는 UI는 외부화된 채로 태어난다.** ~~로컬라이제이션은 현재 0(`Config/Localization` 부재).~~
   - ✅ **정정 2026-08-13 (EC ④ 재대조) — 위 취소선은 사실과 반대다.** 파이프라인은 **이미 서 있다**: `Config/Localization/`(`Game_Gather.ini`·`Game_Compile.ini`·`Game_ImportCsvTranslations.ini`) · `Content/Localization/Game/`(manifest 95엔트리 + **ko·en·ja** archive/locres) · `Content/StringTables/`(`ST_UI.csv`·`ST_Card.csv`·`ST_CardEffect.csv` — **UStringTable 에셋 0은 설계 의도**다: `LOCTABLE_FROMFILE_GAME` 런타임 직접 로드, `Localization.md` §L-1) · 전용 SSOT `Docs/SSOT/Localization.md`. **Phase A UI 전수 이관도 완료**(`f1b7e314`·`3e23a33a`·`609839c2`). 이 문장을 그대로 두면 M0 Exit 판정이 (c)를 미착수로 오판한다.
   - 🔑 **EC ②의 "검사 대상"은 이미 기계화돼 있다** — `Config/Localization/Game_Gather.ini`가 `SearchDirectoryPaths=Source/FPSRoguelite/`(에디터 모듈 배제) + `ShouldGatherFromEditorOnlyData=false`(`#if WITH_EDITOR` 블록 스킵)이므로, **`Content/Localization/Game/Game.manifest`에 수집된 것 = 프로젝트가 스스로 정의한 검사 대상**이다. 검사기가 정의를 새로 만들 필요가 없다.
-  - ⬜ **잔여 — 실측 2026-08-13 + 사용자 결정 반영 2026-08-13**(전부 빌드 또는 에디터 동반):
+  - ✅ **잔여 전부 해소 2026-08-19** (착수 시점 실측 2026-08-13 + 사용자 결정 반영 2026-08-13. 머지 `c485b68e`(C++ 축) · `1c646085`(BP 축)):
 
     | 구분 | 건수 | 판정 |
     |---|---|---|
     | 디자인타임 플레이스홀더(`WBP_CardEntry`의 `CardName`·`Description…`, `WBP_DamageNumber`의 `99`, `WBP_RunHUD`의 `00:00`, `WBP_Button_Base`의 `TestBlock` 등) | ~10 | ❌ **검사 대상 아님** — 아래 EC ② 판정 정의 |
     | **`WBP_Lobby` 계열** — 인라인 Text 10(`WeaponSlot0~7`·`InviteButton`·`JoinButton`) + BP 그래프 핀 4(`CODE: ------`·`Ready (R)`·`무기 이름`·`선택중`) | 14 | 🟡 **보류** — 로비 전면 개편 대기(아래) |
     | `WBP_LoadoutEntry.NameText` | 1 | 🟡 **보류**(로비 로드아웃 행으로 추정). ⚠️ **참조 0** — C++·다른 위젯 어디서도 안 쓴다. `WBP_PlayButton`·`WBP_ReturnButton` 처럼 **고아일 가능성** → 개편 시 함께 판정 |
-    | **C++ LOCTEXT** — Boss `GetDescription` 4(실질은 `#if WITH_EDITOR` 가드 누락) + `FPSRCardEffect.cpp:356` 1(진짜 UI 노출) | 5 | ⬜ **실행**(빌드 동반) |
-    | **BP 그래프 핀** — `WBP_Result`·`WBP_DownedOverlay`·`WBP_MissionBanner` | 3곳 | ⬜ **실행**(에디터) |
-    | 고아 WBP 삭제 — `WBP_PlayButton`·`WBP_ReturnButton`(참조 0 확인) | 2 | ⬜ **실행**(에디터. 문자열 이관이 아니라 정리) |
+    | **C++ LOCTEXT** — Boss `GetDescription` 4(실질은 `#if WITH_EDITOR` 가드 누락) + `FPSRCardEffect.cpp:356` 1(진짜 UI 노출) | 5 | ✅ **완료 2026-08-19**(`c485b68e`). Boss 4건은 이관이 아니라 **가드**로 소거(에디터 전용 문자열은 번역 대상이 아니다), CardEffect 1건은 `LOCTABLE("CardEffect","Fallback.UnknownWeapon")` 이관 |
+    | **BP 인라인 Text** — `WBP_Result`·`WBP_DownedOverlay`·`WBP_MissionBanner` | 3곳 → **실측 7건** | ✅ **완료 2026-08-19**(`1c646085`). ⚠️ *실물은 "그래프 핀 3곳"이 아니라* **위젯 트리 Text 3 + 그래프 핀 4** 였다. `WBP_RunHUD` 의 Select `Combat`/`Boss` 는 **대상 아님 확정**(`Combat` 부재 · `Boss` 는 기존 키 `HUD.Boss.NameLabel` 의 부분일치) |
+    | 고아 WBP 삭제 — `WBP_PlayButton`·`WBP_ReturnButton`(참조 0 확인) | 2 | ✅ **완료 2026-08-19**(`9fde733a`). `Content` 10루트 `.uasset`/`.umap` + `Source` + `Config` 전수 ASCII·UTF-16 참조 0 확인 후 파일 삭제(리다이렉터는 delete 에서 안 생긴다) |
 
   - 🟡 **로비 전면 개편으로 인한 보류 15건** (사용자 방향 2026-08-13): 로비를 **UI 화면 방식이 아니라 이동 가능한 작은 방(공간형, PEAK류)으로 전면 재구축**한다. `WBP_Lobby` 와 그 파생 문자열은 개편에서 **통째로 교체될 대상**이라, 지금 StringTable로 이관하면 그대로 버려진다.
     - **이 카브아웃이 EC ②의 취지를 훼손하지 않는 이유**: (c)가 걸고자 한 것은 *"이 선을 넘긴 뒤 만들어지는 UI는 외부화된 채로 태어난다"* 이고, **새 로비는 (3) 폴리시 레인의 UI 규칙("새 화면은 StringTable 경유로 태어난다")이 이미 강제**한다. 죽을 예정인 화면을 외부화하는 것은 그 취지가 요구하는 바가 아니다.
@@ -151,12 +151,13 @@
 **Exit Criteria** (판정 주체 = **사용자**, §7-5 게이트와 동일)
 ① ⬜ `Performance.md §5`에 **측정 빌드 구성이 명기된** 적 300/500 실측 프레임값이 기입됨(추정치 아님). 그 값은 **(a′)로 확정된 맵 위에서, (a″)로 확정된 렌더 경로가 적용된 상태**로 잰 것이어야 한다 — 즉 **우리가 유지할 아키텍처의 수치**여야 한다.
   - ⚠️ *문구 정정 2026-08-13(EC ④ 재대조)*: 종전 *"(a″) **인스턴싱/VAT**가 적용된 상태"* 는 **VAT-1 결론과 모순**이다 — ADR `0007`이 ISM/인스턴싱을 **기각**하고 CPD를 채택했으므로(위 (a″) 참조), 문자 그대로 읽으면 이 EC는 영원히 닫히지 않는다. 실제 요구는 "**MID 제거 + CustomPrimitiveData 렌더 경로 위에서**"다.
-② ⬜ **하드코딩 UI 문자열 = 0.** *검사 대상 정의*: C++의 `FText` 리터럴/`LOCTEXT` 및 **BP 위젯의 인라인 Text 프로퍼티**. 검사기는 이 정의를 스스로 정하지 않는다.
+② ✅ **완료 2026-08-19 — 하드코딩 UI 문자열 = 0.** (C++ 축 = 머지 `c485b68e` · BP 축 = 머지 `1c646085`. 기계적 근거 = `Game.manifest` 에서 C++ LOCTEXT 네임스페이스 `FPSRBossDefinition`·`FPSRCardEffect` **소멸**, 대상 BP 리터럴 7건 **바이너리 0건**. 경위 = `Docs/WorkLog.md` 최상단) *검사 대상 정의*: C++의 `FText` 리터럴/`LOCTEXT` 및 **BP 위젯의 인라인 Text 프로퍼티**. 검사기는 이 정의를 스스로 정하지 않는다.
   - 🔒 **판정 정의 확정 (사용자 결정 2026-08-13) — "표시되는 것만 센다."** 런타임에 C++ `SetText`로 덮여 **화면에 나타나지 않는** 디자인타임 플레이스홀더는 이 "0"에 **포함하지 않는다**(`WBP_CardEntry`의 `CardName`·`Description…`, `WBP_DamageNumber`의 `99`, `WBP_RunHUD`의 `00:00`, `WBP_Button_Base`의 `TestBlock` 등 ~10건).
     - **근거**: 이 조항이 막으려는 것은 **번역 누락**이다. 화면에 안 뜨는 글자는 번역되지 않아도 플레이어가 볼 일이 없으므로, 제외는 편의가 아니라 조항의 목적에 맞다. 부수적으로 에디터에서 카드·HUD 레이아웃을 눈으로 보며 저작하는 편의도 유지된다(비우면 빈 칸만 보인다).
     - ⚠️ **대가(정직 기록)**: "표시되는가"는 **정적으로 판정할 수 없다** — 이 결정으로 EC ② 검사는 완전히 기계적이지 않게 됐다. 남는 위험 = 나중에 누군가 디자인타임 플레이스홀더를 **실제로 표시되게 배선하면 번역 없이 조용히 출시**된다. 검토했던 완화책(접두 규약 `[DT]` 강제)은 채택하지 않았다 — 되살릴 필요가 생기면 여기서 시작할 것.
     - 🚫 **후속 세션 주의**: 위 ~10건을 "하드코딩 문자열"로 보고 StringTable로 이관하지 말 것. **의도된 상태다.**
-  - 검사 대상의 기계적 정의(무엇을 훑는가) = `Game.manifest` 수집분(위 (c) 🔑). 잔여 내역·보류분 = 위 (c) 표.
+  - 검사 대상의 기계적 정의(무엇을 훑는가) = `Game.manifest` 수집분(위 (c) 🔑).
+  - ⚠️ **단 그 기계적 정의는 C++ 에만 성립한다**(발견 2026-08-19) — `Game_Gather.ini` 에 `GatherTextFromSource` 단계만 있고 **패키지(에셋) 수집 단계가 없어** 조항이 명시한 *"BP 위젯의 인라인 Text 프로퍼티"* 는 manifest 로 탐지되지 않는다. 이번 BP 축은 **수동 열거 + 바이너리 실측**으로 닫았고, 새 BP 리터럴을 막을 자동 검사는 아직 없다(보드 백로그 행 등록됨). 잔여 내역·보류분 = 위 (c) 표.
   - 🟡 **`WBP_Lobby` 계열 15건은 EC ② 판정에서 보류한다**(로비 전면 개편 대기 — (c) 참조). **즉 EC ②는 C++ 5 + BP 그래프 핀 3곳(+ 고아 WBP 2 정리)으로 닫힌다.**
 ③ ✅ **완료 2026-08-13** — **`/Engine/` 참조 감사 결과가 문서화되고**, 쿡 탈락분은 교체 대상으로 M2에 등록됨. 정본 = [`Docs/Review/EngineRefCookAudit_20260813.md`](../Review/EngineRefCookAudit_20260813.md) (아래 (d) 요약).
 ④ ✅ **완료 2026-08-13** — (a) 전수 재대조 완료. §7-3(4행 정정) · §7-5 판정 기록(일치) · §8 인벤토리(7행 정정) · 도메인 SSOT(`Performance.md`·`RunFlow.md`·`Enemy.md`·`CombatWeaponCard.md`·`PlayerFeel.md` 정정)가 실물과 일치. 경위 = `Docs/WorkLog.md` 최상단.

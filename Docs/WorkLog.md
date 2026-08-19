@@ -9,6 +9,68 @@
 
 ---
 
+## 🧾 M0 EC ② 닫힘 — BP 인라인 Text 이관 + 고아 위젯 정리 (2026-08-19, `phase/m0-ec2-editor`, 머지 `1c646085`)
+> 보드 행 = *"EC ② 잔여 — BP 그래프 핀 3곳 + 고아 WBP 2 (에디터)"*(M0 · 로우 · S · Opus).
+> **§7-6 M0 EC ② 가 이 행으로 종료됐다.** 같은 날 닫힌 C++ 축(`c485b68e`)과 합쳐 하드코딩 UI 문자열 = 0.
+> M0 잔여 Exit = **EC ① 뿐**(성능 정량 베이스라인 — VAT-3 차단의 연쇄).
+
+### 착수 전 열거가 틀렸다 — 3곳이 아니라 7건
+보드·SSOT 모두 *"BP 그래프 핀 3곳"* 이라 적고 있었으나, 실물은 **위젯 트리 Text 3 + 그래프 핀 4**였다.
+둘은 **편집 수단이 다르다** — 이걸 먼저 갈라 재지 않으면 되는 것까지 사람 손으로 하게 된다.
+
+| 위치 | 대상 | 키 | 수단 |
+|---|---|---|---|
+| 위젯 트리 Text | `WBP_DownedOverlay.DownedText` · `.ReviverText` · `WBP_MissionBanner.BannerText` | `HUD.Downed.WaitingForAlly` · `HUD.Downed.AllyReviving` · `HUD.Mission.BannerLabel` | **Python 가능** |
+| 그래프 핀 | `WBP_Result` `SetText(In Text)`×2 · `WBP_DownedOverlay` `Select Text(A/B)` | `Menu.Result.Victory` · `Menu.Result.Defeat` · `HUD.Downed.WaitingForAlly` · `HUD.Downed.Reviving` | **에디터 UI 전용** |
+
+`WBP_RunHUD` 의 Select `Combat`/`Boss` 는 **대상 아님 확정** — `Combat` 은 바이너리에 부재하고, `Boss` 단일 히트는 기존 키 `HUD.Boss.NameLabel` 문자열의 부분일치였다(2026-08-13 메모의 *"현재 바이너리에서 안 나온다"* 가 옳았다).
+
+### 🪤 Python 이 닿는 경계 (다음 세션이 제일 먼저 알아야 할 것)
+- **닿는다** — 위젯 트리 Text 프로퍼티. `WidgetTree` 는 `get_editor_property` 로는 못 받지만
+  **서브오브젝트 경로로는 로드된다**: `unreal.load_object(None, "<pkg>.<asset>:WidgetTree.<WidgetName>")`.
+  위젯 이름은 uasset 이름테이블에서 뽑아 후보를 시도하면 잡힌다.
+  값 주입 = `unreal.TextLibrary.text_from_string_table("UI", key)` → `set_editor_property("text", …)`.
+- **안 닿는다** — 그래프 핀 기본값. `EdGraphNode::Pins` 가 **protected** 라 노드 객체는 잡혀도 핀이 안 나온다.
+  `EdGraph.Nodes` 도 protected. `manage_asset` 도 에셋 단위 작업(search/find/open/save/duplicate/move/delete)만 제공한다.
+- 그래서 **7건 중 3건은 자동, 4건은 사람 손**이었다.
+
+### 🪤 `To Text (String)` 은 오답이다 (실사고)
+중간 시도로 그래프 핀에 `To Text (String)` 노드를 놓고 `In String` 에 키 문자열을 적는 형태가 나왔다.
+그건 `Conv_StringToText` 라 **문자열을 글자 그대로 FText 로 바꿀 뿐 테이블 조회를 하지 않는다** —
+컴파일하면 화면에 `승리` 대신 **`Menu.Result.Victory`** 가 그대로 뜬다.
+→ 검증 지표로 **바이너리에 `Conv_StringToText` 0건**을 쓰면 확실하게 잡힌다(실제로 이걸로 확인했다).
+
+### 왜 핀 참조인가 (Advanced 노드를 기각한 근거)
+`KismetTextLibrary.h:316` 이 직접 권고한다 — *"문자열 테이블 참조는 텍스트 프로퍼티나 **핀에 직접** 설정하는 쪽을 선호하라, 훨씬 견고하다"*.
+`Make Text from String Table (Advanced)`(`TextFromStringTable`)는 조회 실패 시 **dummy text 를 돌려주는 조용한 실패**라 키 오타가 런타임까지 간다. 핀 참조는 에디터가 검증한다.
+
+### 🔑 `UStringTable` 에셋 0개인데 UMG String Table 참조가 성립하는 이유
+테이블 id `UI` 를 `LOCTABLE_FROMFILE_GAME` 이 모듈 시작 시 등록하기 때문이다 —
+실측 `StringTableLibrary.get_registered_string_tables()` = `["UI","CardEffect","Card"]`.
+그리고 **CSV sync 직후 에디터 재시작 없이 새 키 6개가 즉시 LIVE** 였다(런타임 CSV 로더가 다시 읽는다).
+⚠️ 키를 꽂기 전 `is_registered_table_entry` 로 등록을 확인할 것 — 미등록 키는 **빈 문자열 회귀**로 조용히 끝난다.
+
+### 고아 위젯 2개는 에디터가 아니라 파일 삭제로
+`WBP_PlayButton`·`WBP_ReturnButton`. 삭제 전 **`Content` 10개 루트의 `.uasset`/`.umap` 전수 + `Source` + `Config` 를 ASCII·UTF-16 양쪽**으로 세어 참조 0을 확인했다(인코딩 가정 하나로 "참조 없음"을 단정하면 삭제 사고가 난다).
+리다이렉터는 rename/move 에서 생기고 delete 에서는 안 생기므로 잔재도 없다.
+
+### ⚠️ 구조적 발견 — EC ② 의 "기계적 정의"는 절반만 성립한다
+`Config/Localization/Game_Gather.ini` 에 **`GatherTextFromSource` 단계만 있고 패키지(에셋) 수집 단계가 없다.**
+그래서 EC ② 가 근거로 삼은 *"검사 대상 = `Game.manifest` 수집분"* 은 **C++ 에만 성립**하고, 조항이 명시한
+*"BP 위젯의 인라인 Text 프로퍼티"* 는 **원리적으로 탐지되지 않는다.** 이번 BP 축은 수동 열거 + 바이너리 실측으로 닫았고,
+새 BP 리터럴을 막을 자동 검사는 없다. → **보드 백로그 행 등록**(켜면 "표시되는 것만 센다"로 제외 합의한 디자인타임 플레이스홀더 ~10건과 보류 중인 `WBP_Lobby` 15건이 전부 올라오므로, 켜는 것 자체가 별도 설계 판단이다).
+
+### 검증
+바이너리 실측(대상 리터럴 7건 전부 ASCII·UTF-16 양쪽 **0** · 키 결선 확인 · `Conv_StringToText` **0** · `WBP_Result` 65,092 → 60,692 바이트) ·
+6키 `get_table_entry_source_string` 실값 반환 = dummy 아님 · 3위젯 재컴파일 + `generated_class` 생성 ·
+gather **manifest 94 → 100**(`UI` 25 → 31, 6키 전부 수집, C++ LOCTEXT 네임스페이스 0 유지) · **6키 × 3언어 18/18 번역 주입**(아카이브 직접 파싱) ·
+헤드리스 스모크 **5/5 Success** · 레드팀 게이트 **미적용**(§6-6-1 — 콘텐츠·BP배선 갈래).
+
+### 커밋
+`9fde733a` 고아 WBP 2 삭제 · `76354ff5` ST_UI 6키 + 트리 3건 · `f4bdc351` 그래프 핀 4건 · `42c669f7` gather 산출물 · `1c646085` 머지
+
+---
+
 ## 🧾 M0 EC ② — C++ 하드코딩 문자열 잔여 5 → 0 (2026-08-19, `phase/m0-ec2-cpp-loctext`, 머지 `c485b68e`)
 > 보드 행 = *"EC ② 잔여 — C++ LOCTEXT 5건 + Map_CyberCity 주석 2줄 (빌드 동반)"*(M0 · 로우 · S · Opus).
 > **EC ②의 C++ 축이 닫혔다.** 남은 EC ② 잔여 = 에디터 행(BP 그래프 핀 3곳 + 고아 WBP 2)뿐.
