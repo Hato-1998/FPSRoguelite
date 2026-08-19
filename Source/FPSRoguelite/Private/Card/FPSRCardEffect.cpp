@@ -353,7 +353,7 @@ void UCardEffect_GrantWeapon::Apply(const FFPSRCardEffectContext& Context, float
 
 FText UCardEffect_GrantWeapon::GetDescription(ECardRarity /*Rarity*/, float /*Magnitude*/) const
 {
-	const FText WeaponName = WeaponToGrant ? WeaponToGrant->DisplayName : LOCTEXT("UnknownWeapon", "Weapon");
+	const FText WeaponName = WeaponToGrant ? WeaponToGrant->DisplayName : LOCTABLE("CardEffect", "Fallback.UnknownWeapon");
 	return FText::Format(LOCTABLE("CardEffect", "Fmt.UnlockWeapon"), WeaponName);
 }
 

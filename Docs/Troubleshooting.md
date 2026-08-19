@@ -505,6 +505,18 @@ A1의 Y축 반전이 2026-07-26부터 잠복할 수 있었던 이유가 정확�
 **직후 에디터에서 그 레벨을 변경사항 버리고 다시 열어야** 한다 — 안 그러면 메모리에 남은
 액터가 다음 저장 때 되살아난다.
 
+### G10. 헤드리스 자동화가 exit 0을 내는데 **아무것도 안 돌았다** (2026-08-19, EC ②)
+PS 5.1에서 `-abslog=$log` 를 **따옴표 없이** 넘기면 `UnrealEditor-Cmd` 가 아예 뜨지 않는다.
+그런데 `$LASTEXITCODE` 는 **0**이고, stdout도 비어 있고(`-abslog` 가 리다이렉트했다고 착각하게 된다),
+`Saved/Logs/` 에도 새 파일이 없다. 스모크 "통과"로 기록될 뻔했다.
+
+→ **인보크는 `Scripts/validate-data.ps1` 을 그대로 미러할 것** — `& $EditorCmd $UProject … -log "-abslog=$AbsLog"`
+처럼 `=` 가 든 네이티브 인자는 **통째로 따옴표**로 감싼다.
+
+→ 그리고 **exit 0을 통과 근거로 쓰지 말 것.** 판정은 로그의 `Test Completed. Result={Success}` 줄과
+`…Automation Test Queue Empty N tests performed.` 의 N으로 한다. **로그 파일이 없으면 그건 실패가 아니라
+"안 돌았다"** 이고, 둘은 구분해야 한다(G2·G8과 같은 실패형 — 빈 결과를 통과로 읽는 것).
+
 ---
 
 ## H. 로컬라이제이션 · 파이프라인 스크립트
@@ -526,3 +538,10 @@ A1의 Y축 반전이 2026-07-26부터 잠복할 수 있었던 이유가 정확�
 
 ### H6. 의도 안 한 파일이 pak에 들어가 있다
 **원인**: `DirectoriesToAlwaysStageAsUFS`에 걸린 폴더(`Content/StringTables/`)는 **그 안의 모든 파일**이 스테이징된다(.sync-manifest.json이 실려 나감, 실측). → 메타/작업 파일은 스테이징 밖(`Config/` 등)에 둔다.
+
+### H7. `Game.manifest` 를 grep 했는데 있어야 할 키가 0건 나온다
+**원인**: `Content/Localization/Game/Game.manifest` 는 **UTF-16LE**다. `grep "DefaultBoss"` 는 에러 없이
+**조용히 0건**을 내고, 그걸 "이미 정리됐다"로 오독하게 된다(`.archive` 도 같다). → UTF-8로 변환 후 JSON 파싱:
+`python -c "open(out,'w',encoding='utf-8').write(open(p,encoding='utf-16').read())"`.
+EC ② 판정처럼 **네임스페이스별 엔트리 수를 세는 검사**는 반드시 이 경로로 한다(2026-08-19 실측: 총 98엔트리 =
+`Card` 52 / `CardEffect` 16 / `UI` 25 / `FPSRBossDefinition` 4 / `FPSRCardEffect` 1 — 뒤 둘이 C++ LOCTEXT 잔여).

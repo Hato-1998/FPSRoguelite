@@ -36,11 +36,11 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Boss")
 	bool bUseBossSpawnPoint = true;
 
+#if WITH_EDITOR
 	/** One-line summary for designer tooling / catalog (auto-description directive). */
 	UFUNCTION(BlueprintPure, Category = "Boss")
 	FText GetDescription() const;
 
-#if WITH_EDITOR
 	virtual EDataValidationResult IsDataValid(class FDataValidationContext& Context) const override;
 #endif
 };
