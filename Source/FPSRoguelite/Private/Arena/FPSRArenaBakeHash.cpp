@@ -12,6 +12,7 @@
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "Misc/SecureHash.h"
+#include "PhysicsEngine/BodyInstance.h" // AuthoredCollisionEnabled — 액터 게이트를 우회한 원본 콜리전 설정
 
 namespace
 {
@@ -37,6 +38,21 @@ namespace
 			*Quantize(S.X), *Quantize(S.Y), *Quantize(S.Z));
 	}
 
+	/**
+	 * 이 컴포넌트에 **저작된** 콜리전 설정. `UPrimitiveComponent::GetCollisionEnabled()` 를 쓰면 안 된다 —
+	 * 그것은 소유 액터가 `bActorEnableCollision=false` 면 무조건 `NoCollision` 을 돌려준다
+	 * (`PrimitiveComponentPhysics.cpp:1564`).
+	 *
+	 * 그 차이가 실제 사고를 냈다. `AFPSRArenaActor::SetArenaActive(false)` 는 예비 아레나의 레벨 액터 전체에
+	 * `SetActorEnableCollision(false)` 를 건다. 그 상태에서 해시를 구하면 **모든 컴포넌트가 탈락해 소스가
+	 * 0개**가 되고, 빈 해시(SHA1 of "" = DA39A3EE…)가 나와 멀쩡한 베이크가 STALE 로 보고된다.
+	 * 해시는 **저작된 레벨**을 기술해야지 런타임에 켜졌다 꺼졌다 하는 상태를 기술하면 안 된다.
+	 */
+	ECollisionEnabled::Type AuthoredCollisionEnabled(const UPrimitiveComponent* Comp)
+	{
+		return Comp->BodyInstance.GetCollisionEnabled(/*bCheckOwner*/ false);
+	}
+
 	/** 이 컴포넌트가 베이크의 장애물 프로브에 잡히는가.
 	 *  UFPSRFlowFieldComputer 의 프로브는 ECC_WorldStatic **오브젝트 타입**을 질의한다 — 트레이스 채널 응답이
 	 *  아니라 오브젝트 타입이므로, 여기서도 같은 것을 본다. */
@@ -48,7 +64,7 @@ namespace
 		}
 
 		// QueryOnly / QueryAndPhysics 여야 라인트레이스에 걸린다. PhysicsOnly 와 NoCollision 은 프로브가 통과한다.
-		const ECollisionEnabled::Type Enabled = Comp->GetCollisionEnabled();
+		const ECollisionEnabled::Type Enabled = AuthoredCollisionEnabled(Comp);
 		if (Enabled != ECollisionEnabled::QueryOnly && Enabled != ECollisionEnabled::QueryAndPhysics)
 		{
 			return false;
@@ -168,11 +184,16 @@ bool FFPSRArenaBakeHash::Compute(const AFPSRArenaActor& Arena, FFPSRArenaBakeSou
 					*Quantize(Comp->Bounds.SphereRadius));
 			}
 
+			// 경로는 **레벨 기준 상대 경로**여야 한다(`GetPathName(ArenaLevel)`). 절대 경로를 쓰면 PIE 가
+			// 패키지에 `UEDPIE_0_` 접두사를 붙이므로(`/Game/Maps/UEDPIE_0_L_Map_1...`) 에디터에서 구운 해시와
+			// 인게임에서 다시 구한 해시가 **아무것도 안 바꿔도 항상 다르다** — 실제로 그렇게 났다.
+			// 레벨 상대 경로는 그 접두사 바깥이라 양쪽에서 같고, 이미 ArenaLevel 로 스코프하고 있으므로
+			// 액터·컴포넌트 이름만으로 이 레벨 안에서 유일하다.
 			Entries.Add(FString::Printf(TEXT("%s|%s|%s|%d"),
-				*Comp->GetPathName(),
+				*Comp->GetPathName(ArenaLevel),
 				*DescribeTransform(Comp->GetComponentTransform().GetRelativeTransform(ArenaToWorld)),
 				*GeometryId,
-				static_cast<int32>(Comp->GetCollisionEnabled())));
+				static_cast<int32>(AuthoredCollisionEnabled(Comp))));
 
 			bActorContributed = true;
 		}
