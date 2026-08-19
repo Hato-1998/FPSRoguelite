@@ -55,19 +55,21 @@
 | | |
 |---|---|
 | **결정 메트릭** | `Exclusive/GameThread/ServerReplicateActors` avg·P95 (호스트 게임스레드 ms) |
-| **보조 메트릭** | `Exclusive/GameThread/NetworkOutgoing` · `Replication/NumConnections`(유효성: 1+클라 수) · `Replication/NumberOfActiveActors`·`NumberOfFullyDormantActors`(dormancy 동작 확인) · `FPSREnemy/ServerAlive`(적 수 유효성) |
+| **보조 메트릭** | `Exclusive/GameThread/NetworkOutgoing` · `Replication/NumberOfActiveActors`·`NumberOfFullyDormantActors`(dormancy 동작 확인) · `FPSREnemy/ServerAlive`(적 수 유효성). ⚠️ `Replication/NumConnections` 등 커넥션 통계는 **Game 패키지에서 영원히 0**(`USE_SERVER_PERF_COUNTERS = (UE_SERVER \|\| UE_EDITOR) && WITH_PERFCOUNTERS`, `Build.h:115` — 컬럼은 등록되나 갱신 블록이 컴파일 아웃, 스모크 실측) — 쓰지 말 것 |
+| **유효성 게이트(접속)** | **호스트 로그 `AddClientConnection` 카운트 = 클라 수**(러너가 게이트 실행·출력). CSV 커넥션 스탯이 죽어 있으므로 로그가 유일한 접속 증거다. 보조: 판정 창에서 `ServerRepActors` 비영 |
 | **시나리오** | VAT-1 고정 시나리오 재사용: `L_Map1_City?listen` · Development 패키지 · `-novsync` · `FPSR.SpawnEnemies N 6000` · PlayerStart 고정 카메라 + **클라 3 인스턴스**(`127.0.0.1` 접속, `-nullrhi -nosound`) = 4인. N=300(판정) + N=500(스트레스) 2회 |
-| **실행** | `Scripts\measure_swarm_render.ps1 -BuildDir <pkg> -Label N1_300_4p -EnemyCount 300 -ClientCount 3` → `python Scripts/analyze_swarm_csv.py <capture.csv>` |
+| **실행** | `Scripts\measure_swarm_render.ps1 -BuildDir <pkg> -Label N1_300_4p -EnemyCount 300 -ClientCount 3 -CaptureFrames 18000` → `python Scripts/analyze_swarm_csv.py <capture.csv> --skip-seconds <조인 완료 시점>`. ⚠️ **멀티클라 런은 `-CaptureFrames`를 크게(≥18000)** — 캡처는 부트 ExecCmds에서 시작되는데(`CsvProfile`엔 지연 시작 옵션 없음 — `CsvProfiler.cpp:951-988` 실물) 클라 조인은 캡처 시작 +35~60s에 완료되므로, 기본 6000프레임은 uncapped fps에선 조인 전에 닫힌다(스모크 실측: 278fps × 6000 = 21.6s). 판정 창 = ⑥ |
 | **판정 기준(잠정 — 패스 실행 시 사용자 비준)** | `ServerReplicateActors` avg **≤1.5ms @300×4클라** → **B안**(현상 유지 + §5에 "출시=비교 기반 복제" 명기) 권고. 초과 → 소스 엔진 전환(A안) 전에 **RepGraph 앞당김을 먼저 평가**(§5 도구 평가 순서 Push→RepGraph→Iris; 비교 기반 폴백 비용의 대부분은 connection별 relevancy로 깎이는 게 먼저다) |
-| **캐비앗(측정 기록에 명기)** | ① 동일 머신 4인스턴스 = CPU 경합 → 수치는 비관(보수) 방향, 합격 판정엔 안전 ② Development는 Test 대비 5~15% 보수적(§5 2026-08-13) ③ Push-on 대조군은 Installed Build에서 제작 불가 → **절대비용 판정**(델타 아님). 이 구성은 "현상 그대로"(Push Model 꺼진 출시 상태)를 잰다 ④ `Exclusive/*`는 게임스레드 자기시간 — 클라 인스턴스 CPU 경합이 늘리는 방향이지 줄이는 방향이 아님 |
+| **캐비앗(측정 기록에 명기)** | ① 동일 머신 4인스턴스 = CPU 경합 → 수치는 비관(보수) 방향, 합격 판정엔 안전 ② Development는 Test 대비 5~15% 보수적(§5 2026-08-13) ③ Push-on 대조군은 Installed Build에서 제작 불가 → **절대비용 판정**(델타 아님). 이 구성은 "현상 그대로"(Push Model 꺼진 출시 상태)를 잰다 ④ `Exclusive/*`는 게임스레드 자기시간 — 클라 인스턴스 CPU 경합이 늘리는 방향이지 줄이는 방향이 아님 ⑤ **루프백 = `-nosteam` + IpNetDriver 강제**(🔁 정정 2026-08-19, 스모크 2회 실측): 패키지는 GameNetDriver를 SteamSockets로 라우팅(`DefaultEngine.ini:104-105`)해 `127.0.0.1` 다이얼과 프로토콜이 어긋나고(1차: 클라 핸드셰이크 타임아웃), NetDriverOverrides만으로는 **소켓 서브시스템이 Steam으로 대체**된 상태라 raw UDP 바인드가 실패한다(2차: `SteamSockets: setsockopt SO_BROADCAST failed` → `NetDriverListenFailure` → 메인메뉴 폴백). → `ClientCount>0`이면 러너가 host·클라 모두 **`-nosteam`**(OSS Steam 비활성 = SteamSockets 소켓 서브시스템 미등록, 엔진 `OnlineSubsystemModuleSteam.cpp:73`·`SteamSocketsModule.cpp:17-20` 실물) **+ `-NetDriverOverrides=/Script/OnlineSubsystemUtils.IpNetDriver`**(`UnrealEngine.cpp:14543`) 부여. `ServerReplicateActors`(게임스레드 직렬화·비교 비용)는 드라이버 무관 — 소켓 계층이 프로덕션(SteamSockets 릴레이)과 다름은 기록에 명기 ⑥ 클라 접속은 캡처 시작 +5~10s(웜 부팅)~수십 초(콜드) 뒤 완료 → **판정 창은 호스트 로그 `AddClientConnection` 마지막 시각 이후로 `--skip-seconds` 상향**(CSV `NumConnections`는 Game 빌드에서 죽은 스탯이라 창 판정에 못 쓴다 — 위 유효성 게이트 행) |
 
 ### 5-B. 측정 항목 B — GMS §7-7 브로드캐스트 비용 (신규 계측 = 5-C)
 
 | | |
 |---|---|
-| **결정 메트릭** | `FPSRMsg/GMSBroadcast` (프레임당 인클루시브 ms 합) |
+| **결정 메트릭** | `FPSRMsg/GameThread/GMSBroadcast` (프레임당 인클루시브 ms 합 — 🔁 정정 2026-08-19: 타이밍 스탯 컬럼은 엔진이 스레드명을 끼운다, `Networking/GameThread/*`와 동일 규칙·캡처 실물 확인) |
 | **보조 메트릭** | `FPSRMsg/Broadcasts`(early-out 통과 브로드캐스트/프레임) · `FPSRMsg/Dispatches`(콜백 호출/프레임) · `FPSRMsg/ListenersCopied`(**복사된 리스너 요소 총합/프레임 = TFunction 힙 할당 프록시 — 부모 태그 체인 증폭이 여기 잡힌다**) |
-| **시나리오** | 항목 A와 **같은 캡처**에서 공짜 수집(U13 코스메틱 소비처가 실구독 상태의 실전 부하) |
+| **시나리오** | 항목 A와 **같은 캡처**에서 공짜 수집 |
+| **🔴 선행조건 (2026-08-19 grep 실측)** | **현재 GMS엔 프로덕션 발행처·구독처가 0이다**(데모 커맨드·테스트뿐 — 적 사망 발행은 U13 배선 몫, `FPSRGameplayMessageSubsystem.cpp:114` 주석). 구독 0이면 early-out이라 전 스탯 = 0. **U13 발행/구독 배선 전 캡처에서 `FPSRMsg/*`가 0인 것은 "통과"가 아니라 "측정 불가(연기)"로 기록**하고, 항목 B 실측은 U13 배선 후 캡처로 판정한다 |
 | **판정 기준(잠정)** | `GMSBroadcast` avg **≤0.2ms @300** → §7-7 재설계 불요(보류 유지). 초과 → 세대 카운터/톰스톤 재설계 **신규 코어 행 생성**(§7-7 "구조 변경 = 별도 작업" 그대로) |
 | **캐비앗** | 스코프 타이밍 스탯은 캡처 중 브로드캐스트당 마커 2개를 쌓는다 — 캡처 중에만 발생하는 관찰 비용이며, 측정치에 자기비용이 소량 포함된다(과대 방향 = 판정엔 안전) |
 
@@ -103,6 +105,10 @@ CSV_DEFINE_CATEGORY(FPSRMsg, true);
 #endif
 ```
 - 기존 `TotalDispatchCount`(`!UE_BUILD_SHIPPING`)는 **그대로 유지**(테스트가 사용). 두 카운터는 게이트가 다르므로 통합 금지(`CSV_PROFILER_STATS`는 `!UE_BUILD_SHIPPING`의 부분집합이 아니라 별개 구성 축 — CsvProfilerConfig.h).
+- **(d) `FPSR.GMS.Demo` 반복 모드**(계측 실증용 — 1회 발행은 ExecCmds 시점이라 CSV 캡처 시작(프레임 경계) 전에 끝나 비영 확인 불가): 사용법 `FPSR.GMS.Demo [RepeatSeconds=0]`.
+  - `RepeatSeconds <= 0`(기본) = **기존 동작 문자 그대로**(즉시 1회 발행 + 즉시 Unregister).
+  - `> 0` = 임시 리스너를 유지한 채 **1초 주기 월드 타이머**로 같은 메시지를 재발행, 만료 시 타이머 해제 + `Handle.Unregister()` + 완료 로그. 타이머 핸들 = 파일 스코프 static `FTimerHandle`(Invuln §5-C(2)와 같은 디버그 픽스처 패턴 — 월드 소유라 월드 소멸 시 자동 정리), 리스너 핸들·만료 시각은 람다 값 캡처.
+  - 전부 기존 `#if !UE_BUILD_SHIPPING` 데모 블록 안. 도움말 텍스트에 반복 모드 1줄 추가.
 - 그 외 어떤 줄도 변경 금지(제어 흐름·주석 포함).
 
 **(2) `FPSRPlayerController.cpp` — `FPSR.Invuln` late-joiner 재적용.**
@@ -114,27 +120,27 @@ CSV_DEFINE_CATEGORY(FPSRMsg, true);
 
 **(3) `Scripts/measure_swarm_render.ps1`** — `-ClientCount N`(기본 0 = 기존 동작 완전 무변경).
 - param 블록에 `[int]$ClientCount = 0` 추가.
+- **루프백 강제(§5-A ⑤)**: `$ClientCount -gt 0`이면 호스트 `$gameArgs`에 `-nosteam` + `-NetDriverOverrides=/Script/OnlineSubsystemUtils.IpNetDriver`를 추가(0이면 기존 인자 그대로 = VAT 솔로 시나리오 무변경). 클라 인자에도 동일 2플래그.
 - **삽입 지점 = 1단계(캡처 시작 감지) 성공 직후, 2단계(스크린샷) 전**: `if ($csv -and $ClientCount -gt 0)` → 클라 N개를 2초 간격 순차 기동:
-  `Start-Process $exe -ArgumentList @("127.0.0.1", "-nullrhi", "-nosound", "-windowed", "-resx=640", "-resy=360", "-log")`
+  `Start-Process $exe -ArgumentList @("127.0.0.1", "-nullrhi", "-nosound", "-windowed", "-resx=640", "-resy=360", "-log", "-nosteam", "-NetDriverOverrides=/Script/OnlineSubsystemUtils.IpNetDriver")`
   (CSV 생성 = 엔진 초기화 후 ExecCmds 실행 완료 = 맵 로드·리슨 확립의 실측 가능한 신호 — 그 전 조인은 접속 실패 리스크).
 - 종료·정리: 기존 프로세스-**이름** 기준 정리(스크립트 상단 함정 주석)가 클라도 같이 덮는다 — 추가 정리 코드 금지.
-- 유효성 게이트 확장: 기존 END/DBNO 그렙 유지 + `$ClientCount > 0`이면 완료 로그에 "expect Replication/NumConnections == $(1+$ClientCount) — verify in analyzer output" 안내 1줄(호스트 CSV에서 분석기가 실측).
+- 유효성 게이트 확장: 기존 END/DBNO 그렙 유지 + `$ClientCount > 0`이면 복사된 `game.log`에서 `AddClientConnection` 발생 수를 세어 `== $ClientCount`면 통과 로그, 미달이면 경고 출력(🔁 정정 2026-08-19: 종전 "CSV NumConnections 확인" 안내는 무효 — 그 스탯은 Game 빌드에서 갱신되지 않는다, §5-A).
 - 헤더 주석의 사용 예에 `-ClientCount 3` 예시 1줄 추가.
 
 **(4) `Scripts/analyze_swarm_csv.py`** — `WANTED` 리스트에 아래 10줄 추가(기존 순서 뒤에, 라벨=컬럼명 그대로):
 ```
 ("Excl/ServerRepActors", "Exclusive/GameThread/ServerReplicateActors"),
 ("Excl/NetworkOutgoing", "Exclusive/GameThread/NetworkOutgoing"),
-("Repl/NumConnections",  "Replication/NumConnections"),
 ("Repl/ActiveActors",    "Replication/NumberOfActiveActors"),
 ("Repl/FullyDormant",    "Replication/NumberOfFullyDormantActors"),
-("FPSRMsg/GMSBroadcast", "FPSRMsg/GMSBroadcast"),
+("FPSRMsg/GMSBroadcast", "FPSRMsg/GameThread/GMSBroadcast"),
 ("FPSRMsg/Broadcasts",   "FPSRMsg/Broadcasts"),
 ("FPSRMsg/Dispatches",   "FPSRMsg/Dispatches"),
 ("FPSRMsg/ListenersCopied", "FPSRMsg/ListenersCopied"),
 ("FPSREnemy/ServerAlive", "FPSREnemy/ServerAlive"),
 ```
-- 출력 포맷: 카운트성 컬럼(`Repl/NumConnections`·`Repl/ActiveActors`·`Repl/FullyDormant`·`FPSRMsg/Broadcasts`·`Dispatches`·`ListenersCopied`·`FPSREnemy/ServerAlive`)은 기존 `RHI/` 분기와 같은 정수 포맷(avg/P50/max)으로 — 라벨 접두 판정을 `RHI/` 하드코딩에서 **카운트 라벨 집합**으로 바꾼다(기존 `RHI/` 2종 포함). 시간성(`Excl/*`·`FPSRMsg/GMSBroadcast`)은 ms 포맷 유지. 결측 컬럼은 기존 "(no data)" 경로(구 CSV 재분석 호환 — 동작 확인만, 로직 변경 금지).
+- 출력 포맷: 카운트성 컬럼(`Repl/ActiveActors`·`Repl/FullyDormant`·`FPSRMsg/Broadcasts`·`Dispatches`·`ListenersCopied`·`FPSREnemy/ServerAlive`)은 기존 `RHI/` 분기와 같은 정수 포맷(avg/P50/max)으로 — 라벨 접두 판정을 `RHI/` 하드코딩에서 **카운트 라벨 집합**으로 바꾼다(기존 `RHI/` 2종 포함). 시간성(`Excl/*`·`FPSRMsg/GMSBroadcast`)은 ms 포맷 유지. 결측 컬럼은 기존 "(no data)" 경로(구 CSV 재분석 호환 — 동작 확인만, 로직 변경 금지).
 
 ## 6. 함수별 계약
 
@@ -142,7 +148,7 @@ CSV_DEFINE_CATEGORY(FPSRMsg, true);
 |---|---|---|---|---|
 | `BroadcastMessageInternal` 계측 | 권위 무관(순수 로컬 버스) | 기존 호출자 전부 | 캡처 중일 때만 기록(CSV 매크로 자체 게이트) | 계측 실패 개념 없음(no-op 매크로) |
 | `FPSR.Invuln` 재적용 타이머 | 호스트(authority PC만 적용 — 기존 루프 조건 유지) | 콘솔/ExecCmds | 월드 유효 | 월드 소멸 시 타이머 자동 소멸 |
-| 러너 클라 기동 | — | 측정 실행자 | 호스트 CSV 생성 감지 후 | 클라 미접속 시 NumConnections 실측으로 드러남(분석기) |
+| 러너 클라 기동 | — | 측정 실행자 | 호스트 CSV 생성 감지 후 | 클라 미접속 시 러너 유효성 게이트(`AddClientConnection` 카운트) 경고로 드러남 |
 
 ## 7. 복제표
 
@@ -178,8 +184,8 @@ CSV_DEFINE_CATEGORY(FPSRMsg, true);
 | 1 | 명세 대조 | §5-C의 삽입 지점·스탯명·게이트가 diff와 1:1 일치, 금지선(early-out 앞 계측, 제어 흐름 변경) 위반 0 |
 | 2 | 빌드 | `Build.bat FPSRogueliteEditor Win64 Development -Project="E:\Git_Project\FPSRoguelite2\FPSRoguelite.uproject"` **Succeeded** — include 추가가 있으므로 **`-DisableUnity` 1회 병행**(유니티 블롭이 include 누락을 가린다) |
 | 3 | 헤드리스 스모크 | `FPSRoguelite.Smoke.ModuleLoads` + 기존 GMS 테스트 통과 |
-| 4 | 계측 실증 | `UnrealEditor-Cmd -game -nullrhi ... -ExecCmds="FPSR.GMS.Demo, CsvProfile Frames=60"` 캡처 CSV에 `FPSRMsg/*` 4컬럼 존재 + Demo 프레임에서 비영 |
-| 5 | 러너 실증 | 기존 2026-08-13 패키지(`E:\Git_Project\FPSRoguelite\Packaged\26_8_13_BuildTest_1_B`)로 `-ClientCount 3` 스모크: 클라 접속(`Replication/NumConnections` 분석기 실측 4) + 프로세스 정리 완주. 구 바이너리라 `FPSRMsg/*` 부재·DBNO 오염은 **이 스모크의 실패가 아님**(late-joiner invuln이 구 바이너리에 없으므로) — 오케스트레이션만 판정 |
+| 4 | 계측 실증 | `UnrealEditor-Cmd -game -nullrhi ... -ExecCmds="FPSR.GMS.Demo 30, CsvProfile Frames=300"` 캡처 CSV에 `FPSRMsg/*` 4컬럼 존재 + 반복 발행 프레임에서 비영(반복 모드 근거 = §5-C(1)(d)) |
+| 5 | 러너 실증 | 기존 2026-08-13 패키지(`E:\Git_Project\FPSRoguelite\Packaged\26_8_13_BuildTest_1_B`)로 `-ClientCount 3` 스모크: 클라 접속(호스트 로그 `AddClientConnection` = 3, 러너 게이트 통과 출력) + 프로세스 정리 완주 + 캡처 CSV의 넷 컬럼(`ServerRepActors`·`ActiveActors`) 유효. 구 바이너리라 `FPSRMsg/*` 부재·DBNO 오염은 **이 스모크의 실패가 아님**(late-joiner invuln이 구 바이너리에 없으므로) — 오케스트레이션만 판정 |
 | 6 | 레드팀 게이트 | `Workflow.md` §6-6-1대로. **P1 잔존 시 머지 금지** |
 | 7 | 회귀 | `-ClientCount` 미지정 시 러너 동작 diff 0 · 분석기가 구 CSV(B_300_fixed)를 종전과 동일 수치로 분석 + 신규 컬럼 출력 |
 | 8 | PIE / 사용자 스모크 | 없음(사용자 확인 불요 — 계측·스크립트·문서만). EC ① 패스가 실전 검증을 겸한다 |
