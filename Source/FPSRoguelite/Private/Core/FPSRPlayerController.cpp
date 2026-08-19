@@ -33,6 +33,7 @@
 #include "Hero/FPSRPlayerFeedbackComponent.h"
 #include "Hero/FPSRCharacter.h"
 #include "GameFramework/Pawn.h"
+#include "TimerManager.h"
 
 AFPSRPlayerController::AFPSRPlayerController()
 {
@@ -912,11 +913,35 @@ namespace
 			}
 		}));
 
+	// Shared by the immediate apply below and the late-joiner reapply timer, so the "walk every PC, grant grace to
+	// authority-owned FPSR pawns" logic lives in exactly one place (§5-C(2)).
+	void FPSRInvuln_ApplyToAllPlayers(UWorld* World, float Seconds)
+	{
+		for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+		{
+			if (const APlayerController* PC = It->Get())
+			{
+				if (PC->HasAuthority())
+				{
+					if (AFPSRCharacter* Char = Cast<AFPSRCharacter>(PC->GetPawn()))
+					{
+						Char->BeginGraceWindow(Seconds);
+					}
+				}
+			}
+		}
+	}
+
+	// Debug fixture, not production lifecycle: the world owns the timer, so a world teardown kills the timer with
+	// it, and the next FPSR.Invuln call's SetTimer simply reuses this handle.
+	static FTimerHandle GFPSRInvulnReapplyTimer;
+
 	FAutoConsoleCommandWithWorldAndArgs GCmd_Invuln(
 		TEXT("FPSR.Invuln"),
 		TEXT("Grant every player a long grace window (invulnerable + enemy pass-through) via BeginGraceWindow (debug, "
 		     "authority/host only). For perf-measurement fixtures where a burst-spawned swarm would otherwise end the "
-		     "run in seconds (VAT-1 render-path A/B). Usage: FPSR.Invuln [seconds=600]"),
+		     "run in seconds (VAT-1 render-path A/B); re-applies every 10s to cover late-joining clients. "
+		     "Usage: FPSR.Invuln [seconds=600]"),
 		FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& Args, UWorld* World)
 		{
 			if (!World)
@@ -924,19 +949,24 @@ namespace
 				return;
 			}
 			const float Seconds = Args.Num() > 0 ? FCString::Atof(*Args[0]) : 600.0f;
-			for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+			FPSRInvuln_ApplyToAllPlayers(World, Seconds);
+
+			// Late-joiner reapply (§5-C(2)): the pass above only covers PCs already connected when the command runs,
+			// so a remote client that joins after boot -ExecCmds finishes would arrive with no grace and get downed
+			// by the swarm within seconds. Re-walk every 10s until the original window's expiry, passing the
+			// REMAINING time each pass — BeginGraceWindow ratchets (never shortens, FPSRCharacter.cpp:1576-1582), so
+			// reapplying on already-covered players is a no-op while a late joiner's pawn picks up the remaining grace.
+			const float ExpiryTime = World->GetTimeSeconds() + Seconds;
+			World->GetTimerManager().SetTimer(GFPSRInvulnReapplyTimer, FTimerDelegate::CreateLambda([World, ExpiryTime]()
 			{
-				if (const APlayerController* PC = It->Get())
+				const float Remaining = ExpiryTime - World->GetTimeSeconds();
+				if (Remaining <= 0.0f)
 				{
-					if (PC->HasAuthority())
-					{
-						if (AFPSRCharacter* Char = Cast<AFPSRCharacter>(PC->GetPawn()))
-						{
-							Char->BeginGraceWindow(Seconds);
-						}
-					}
+					World->GetTimerManager().ClearTimer(GFPSRInvulnReapplyTimer);
+					return;
 				}
-			}
+				FPSRInvuln_ApplyToAllPlayers(World, Remaining);
+			}), 10.0f, true);
 		}));
 }
 
