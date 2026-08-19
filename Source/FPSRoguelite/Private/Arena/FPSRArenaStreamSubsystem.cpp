@@ -2,6 +2,7 @@
 
 #include "Arena/FPSRArenaStreamSubsystem.h"
 #include "Arena/FPSRArenaActor.h"
+#include "Enemy/FPSREnemySpawnSubsystem.h" // 파킹 완료 시 스폰포인트 재캐시 — 아래 PollPending 주석 참고
 #include "Core/FPSRLogChannels.h"
 #include "Engine/Level.h"
 #include "Engine/LevelStreaming.h"
@@ -298,6 +299,23 @@ void UFPSRArenaStreamSubsystem::PollPending()
 				if (!Arena->IsArenaActive())
 				{
 					Arena->SetArenaActive(false);
+				}
+			}
+
+			// Re-cache enemy spawn points: UFPSREnemySpawnSubsystem caches them ONCE at world begin
+			// (CacheSpawnPoints), and a parked arena's sublevel is not visible yet at that moment — so without
+			// this its spawn points never enter the cache and the stage that arena becomes live has NO enemies.
+			// UFPSRMapStreamSubsystem::HandleMapReady does the same thing at the same point in its own flow.
+			//
+			// Doing it HERE (at park) rather than at the swap is deliberate and safe: PassesCommonSpawnGates ends
+			// with an arena-bounds test against the LIVE arena, so a reserve arena's points sit in the cache
+			// ineligible until it actually goes live. Caching early costs nothing and takes one more thing out of
+			// the transition window.
+			if (UWorld* World = GetWorld())
+			{
+				if (UFPSREnemySpawnSubsystem* Spawn = World->GetSubsystem<UFPSREnemySpawnSubsystem>())
+				{
+					Spawn->RefreshSpawnPointCache();
 				}
 			}
 

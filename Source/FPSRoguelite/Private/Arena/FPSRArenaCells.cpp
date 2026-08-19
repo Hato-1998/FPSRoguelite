@@ -132,3 +132,14 @@ bool FFPSRArenaCells::IsCellOpen(const FFPSRArenaLayout& Layout, int32 CX, int32
 		&& Layout.Surface.BlockedField.IsValidIndex(Surf)
 		&& !Layout.Surface.BlockedField[Surf];
 }
+
+FIntPoint FFPSRArenaCells::WorldToCell(const FFPSRArenaLayout& Layout, const FVector& World)
+{
+	if (Layout.CellSize <= 0.0f)
+	{
+		return FIntPoint(INDEX_NONE, INDEX_NONE); // no grid -> a deliberately out-of-range cell, never "open"
+	}
+	return FIntPoint(
+		FMath::FloorToInt((World.X - Layout.GridOrigin.X) / Layout.CellSize),
+		FMath::FloorToInt((World.Y - Layout.GridOrigin.Y) / Layout.CellSize));
+}

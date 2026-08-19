@@ -11,6 +11,7 @@
 #include "Arena/FPSRArenaMarkers.h"
 #include "Arena/FPSRArenaTypes.h"
 #include "Arena/FPSRArenaValidator.h"
+#include "Enemy/FPSREnemySpawnPoint.h" // 스폰포인트 저작 검사
 #include "Core/FPSRLogChannels.h"
 
 #include "Editor.h"
@@ -402,6 +403,98 @@ void FFPSRArenaAuthoringTool::ValidateArenaInLevel()
 		}
 
 		const FFPSRArenaValidationResult Result = FFPSRArenaValidator::Validate(Layout, Params);
+
+		// ── 적 스폰포인트 저작 검사 ──────────────────────────────────────────────────────────────────────
+		// 스웜은 스폰포인트가 없으면 **폴백 없이 0마리**다(보스만 플레이어 앞 폴백이 있다). 그런데 런타임은
+		// 부적격 점을 조용히 떨어뜨릴 뿐 아무 말도 하지 않으므로, 잘못 놓은 것은 플레이해 보기 전엔 안 보인다.
+		// 여기가 그 침묵을 메우는 자리다.
+		//
+		// 좌표는 반드시 GetSpawnLocation() — 액터 원점이 아니다. 구조형 스포너(Enemy.md C1)는 SpawnAnchor 를
+		// 메시 공동 안으로 옮겨 두므로 원점으로 재면 엉뚱한 셀을 본다.
+		{
+			TArray<FString> OutsideGrid;   // 이 아레나 레벨에 있는데 격자 밖 — 경계 게이트가 영원히 탈락시킨다
+			TArray<FString> TrappedNoPath; // 막힌 셀인데 탈출 경로가 없다 — 구조물 안에 갇힌다
+			TArray<FString> PathEndsBlocked; // 탈출 경로 끝이 막힌 셀 — 다 따라 나와도 갇힌다
+			int32 InArenaCount = 0;
+
+			for (TActorIterator<AFPSREnemySpawnPoint> It(World); It; ++It)
+			{
+				const AFPSREnemySpawnPoint* Point = *It;
+				if (!IsValid(Point))
+				{
+					continue;
+				}
+
+				const bool bInThisLevel = (Point->GetLevel() == Arena->GetLevel());
+				const FVector SpawnLoc = Point->GetSpawnLocation();
+				const bool bInGrid = Arena->ContainsWorldLocation(SpawnLoc);
+
+				if (!bInGrid)
+				{
+					// 다른 아레나 소속이면 그 아레나 차례에 검사된다. 이 아레나 레벨 안인데 격자 밖일 때만 지적.
+					if (bInThisLevel)
+					{
+						OutsideGrid.Add(Point->GetName());
+					}
+					continue;
+				}
+				++InArenaCount;
+
+				TArray<FVector> ExitPath;
+				Point->GetExitPathWorldPoints(ExitPath);
+
+				// 막힌 셀 자체는 오류가 아니다 — 구조형 스포너는 **일부러** 메시 공동(=막힌 셀) 안에서
+				// 스폰시킨다(C1 이 정확히 그걸 위해 만들어졌다). 오류인 것은 나올 수단이 없는 것이다.
+				const FIntPoint SpawnCell = FFPSRArenaCells::WorldToCell(Layout, SpawnLoc);
+				if (!FFPSRArenaCells::IsCellOpen(Layout, SpawnCell.X, SpawnCell.Y) && ExitPath.Num() == 0)
+				{
+					TrappedNoPath.Add(Point->GetName());
+				}
+
+				// 마지막 웨이포인트가 플로우필드 추적으로 넘기는 지점이다. 거기가 막혀 있으면 경로를 다 따라
+				// 나와도 갇힌 채로 인계된다.
+				if (ExitPath.Num() > 0)
+				{
+					const FIntPoint EndCell = FFPSRArenaCells::WorldToCell(Layout, ExitPath.Last());
+					if (!FFPSRArenaCells::IsCellOpen(Layout, EndCell.X, EndCell.Y))
+					{
+						PathEndsBlocked.Add(Point->GetName());
+					}
+				}
+			}
+
+			if (InArenaCount == 0)
+			{
+				Body += FString::Printf(
+					TEXT("  [오류] [%s] 격자 안에 적 스폰포인트가 0개입니다 — 런은 돌지만 적이 한 마리도 안 나옵니다(적 스폰엔 폴백이 없습니다).\n"),
+					*Arena->GetName());
+			}
+			if (OutsideGrid.Num() > 0)
+			{
+				Body += FString::Printf(
+					TEXT("  [오류] 이 아레나 레벨에 있는데 격자 밖인 스폰포인트 %d개: %s\n"
+					     "  아레나 경계 게이트가 조용히 탈락시켜 영원히 쓰이지 않습니다.\n"),
+					OutsideGrid.Num(), *FString::Join(OutsideGrid, TEXT(", ")));
+			}
+			if (TrappedNoPath.Num() > 0)
+			{
+				Body += FString::Printf(
+					TEXT("  [오류] 막힌 셀에 있으면서 탈출 경로가 없는 스폰포인트 %d개: %s\n"
+					     "  적이 구조물 안에 갇힙니다. 구조형 스포너라면 ExitPathRoot 아래에 웨이포인트를 놓으세요(Enemy.md C1).\n"),
+					TrappedNoPath.Num(), *FString::Join(TrappedNoPath, TEXT(", ")));
+			}
+			if (PathEndsBlocked.Num() > 0)
+			{
+				Body += FString::Printf(
+					TEXT("  [오류] 탈출 경로의 **마지막** 웨이포인트가 막힌 셀인 스폰포인트 %d개: %s\n"
+					     "  마지막 점이 플로우필드 추적 인계 지점입니다 — 경로를 다 따라 나와도 갇힙니다.\n"),
+					PathEndsBlocked.Num(), *FString::Join(PathEndsBlocked, TEXT(", ")));
+			}
+			if (InArenaCount > 0)
+			{
+				Body += FString::Printf(TEXT("  적 스폰포인트 %d개.\n"), InArenaCount);
+			}
+		}
 
 		// The arena's name goes IN the summary line itself, not only as a header above it — so a single line
 		// copy-pasted out of a multi-arena report still says which arena it is about. WHAT was checked goes in

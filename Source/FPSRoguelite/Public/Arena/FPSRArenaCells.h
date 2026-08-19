@@ -43,4 +43,12 @@ public:
 	/** True if the cell is inside the grid and not blocked. Mirrors the flow field's own traversability
 	 *  predicate (surface exists AND not blocked), so layout and field never disagree about what is walkable. */
 	static bool IsCellOpen(const FFPSRArenaLayout& Layout, int32 CX, int32 CY);
+
+	/** World XY -> cell coordinates for Layout's grid. The cell may be OUT of range — pair it with IsCellOpen,
+	 *  which bounds-checks, rather than trusting the result blindly.
+	 *
+	 *  The ONE definition of this conversion. It was previously restated inline at three call sites, which is the
+	 *  same duplication that produced the boundary-wall hash bug (four copies of "where is the grid", three of
+	 *  which disagreed at the edge). Z is ignored: the arena is a single Z-plane. */
+	static FIntPoint WorldToCell(const FFPSRArenaLayout& Layout, const FVector& World);
 };

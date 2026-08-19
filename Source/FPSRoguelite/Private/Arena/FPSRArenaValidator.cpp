@@ -214,9 +214,8 @@ FFPSRArenaValidationResult FFPSRArenaValidator::Validate(const FFPSRArenaLayout&
 	// covers "off the grid entirely" and "on the grid but blocked" both.
 	for (const FFPSRArenaAuthoredLandmark& Landmark : Layout.Landmarks)
 	{
-		const int32 LCX = FMath::FloorToInt((Landmark.Location.X - Layout.GridOrigin.X) / Layout.CellSize);
-		const int32 LCY = FMath::FloorToInt((Landmark.Location.Y - Layout.GridOrigin.Y) / Layout.CellSize);
-		if (!C.Open(LCX, LCY))
+		const FIntPoint LCell = FFPSRArenaCells::WorldToCell(Layout, Landmark.Location);
+		if (!C.Open(LCell.X, LCell.Y))
 		{
 			++R.BuriedLandmarks;
 		}
