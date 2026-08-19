@@ -6,6 +6,7 @@
 #include "Misc/DataValidation.h"
 #include "Engine/SkeletalMesh.h"
 #include "Engine/StaticMesh.h"
+#include "Particles/ParticleSystem.h"
 #include "AbilitySystem/Abilities/FPSRGA_WeaponFire_Projectile.h"
 #include "Weapon/FPSRWeaponFragment.h"
 
@@ -341,6 +342,26 @@ EDataValidationResult UFPSRWeaponDataAsset::IsDataValid(FDataValidationContext& 
 			Context.AddWarning(FText::Format(LOCTEXT("MuzzleSocketMissing",
 				"MuzzleSocket '{0}' is not found on WeaponMesh or any modular part — the muzzle flash will spawn at the mesh origin. Put the muzzle socket on the barrel/forestock part (or the weapon mesh) and check for typos."),
 				FText::FromName(MuzzleSocket)));
+		}
+	}
+
+	// 총구 화염은 발사마다 새로 스폰하고 버리는 일회성 연출이다(FPSRCharacter 의 PlayWeaponFireCosmetics /
+	// MulticastFireCosmetics → SpawnEmitterAttached, bAutoDestroy=true). 그런데 무한 반복(EmitterLoops=0) +
+	// 무한 지속(EmitterDuration=0) 에미터가 하나라도 있으면 시스템이 "완료" 상태에 들어가지 못해 bAutoDestroy 가
+	// 영원히 발동하지 않는다 — 화염·연기가 안 꺼지고, 파티클 컴포넌트가 발사 수만큼 폰에 쌓인다(PS_Gunshot_Repeating
+	// 실사고). 판정 기준은 엔진과 동일한 UParticleSystem::IsImmortal(). 엔진 자신은 이 상황을 로그 한 줄로만
+	// 알려주므로(UGameplayStatics::SpawnEmitterAttached) 데이터 단계에서 막는다.
+	if (!MuzzleFlash.IsNull())
+	{
+		if (const UParticleSystem* Flash = MuzzleFlash.LoadSynchronous())
+		{
+			if (Flash->IsImmortal())
+			{
+				Context.AddError(FText::Format(LOCTEXT("MuzzleFlashImmortal",
+					"총구 화염 파티클 '{0}'에 무한 반복 에미터가 있습니다 — 발사마다 스폰된 파티클 컴포넌트가 스스로 사라지지 못해 화염·연기가 계속 나오고 발사 수만큼 쌓입니다. Cascade에서 각 에미터의 Required 모듈 > Duration 을 열어 Emitter Loops를 1 이상, Emitter Duration을 0보다 크게 설정하세요."),
+					FText::FromString(MuzzleFlash.GetAssetName())));
+				Result = EDataValidationResult::Invalid;
+			}
 		}
 	}
 
