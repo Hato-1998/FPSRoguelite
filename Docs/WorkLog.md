@@ -9,6 +9,48 @@
 
 ---
 
+## 🔍 아레나 트랙 11커밋 소급 검증 — Fable, 코드 결함 0건 (2026-08-19, `phase/arena-spawnpoints`)
+> 보드 행 = *"아레나 트랙 소급 검증 — 11커밋/53파일 (콜리전 채널 d49998f2 최우선)"*(M0 · 하이 · M · Fable).
+> 경위 = 이 브랜치의 아레나 작업 11커밋(`876bb644..d73f22ae`)은 모델 배분상 Fable 몫인 코어·구조 사안을
+> Opus 세션이 진행했다(사용자 판정 2026-08-19). Fable 이 diff + 호출처 전수 조사로 소급 검증했다.
+
+**판정: 코드 수정을 요구하는 결함 없음.** 인계 문서의 쟁점 6개를 전부 실코드로 확인했다.
+
+`d49998f2`(파괴물 콜리전 채널) 쟁점별 판정:
+- **`DefaultResponse=ECR_Block` — 유지.** grace/downed pass-through 창은 플레이어 캡슐의 `ECC_Pawn` 응답
+  **하나만** 토글한다(`FPSRCharacter.cpp:1574`) — 파괴물 채널과 상호작용 자체가 없다. 다운된 플레이어가
+  문짝을 통과 못 하는 것은 의도된 불변("문짝은 pass-through 면제")과 일치.
+- **관통(Pierce) 미소모 — 유지.** 히트스캔·차지레이저 쪽도 파괴물이 벽 컷오프로 작동해 관통이 파괴물
+  너머로 못 넘어간다 — 세 무기 경로의 의미가 이미 일치한다. 투사체는 어차피 `HandleImpact→ReleaseToPool`
+  로 종료되므로 "미소모"는 의미론일 뿐 동작 차이가 없다.
+- **AOE 이중 데미지 게이트 — 대칭 확인.** `OnSphereOverlap` = `ExplosionRadius>0`이면 직격 스킵 후 폭발만,
+  `OnSphereHit` = `<=0`일 때만 직격. `ApplyExplosion`이 파괴물을 gather 하므로 AOE 탄의 파괴물 데미지는
+  방사 스윕이 담당. 대칭 성립.
+- **적 LOS에 `ECC_FPSRPlayerPawn` 잔류 — 유지.** 수정 전에도 그 채널 쿼리로 팀원 몸이 LOS 를 막았다
+  (기존 동작 보존). 적이 팀원 너머의 표적에게 사격을 삼가는 보수적 동작 — MP 기준 문제 없음.
+- **적팀 AOE(`FPSRProjectile.cpp:351`)에 파괴물 미추가 — 유지.** `IsHostileTarget`(Enemy 팀)은
+  `AFPSRCharacter`만 통과 — gather 해도 걸러진다. 설계상으로도 적은 문을 파괴하지 않는 게 맞다.
+- **헬퍼 분리(`AddDestructibleObjectType`) — 유지.** `AddDamageablePawnObjectTypes`는 적팀 AOE처럼
+  **파괴물을 모으면 안 되는** 쿼리에서도 쓰인다 — 합치면 그 경로가 오염된다. 데미지 오브젝트 쿼리 전수
+  조사(`MultiByObjectType` 계열 5곳): 히트스캔·차지레이저·근접·`ApplyExplosion` 커버, 적팀 AOE 만 의도적
+  제외. 누락 0.
+- 추가 확인: 파괴물 = `UFPSREnemyHealthComponent`(`SetCountsAsKill(false)`) 보유라 `IsHostileTarget`/
+  `TryDamageActor` 통과(직격 데미지 성립). `ECC_FPSRPlayerPawn` 참조 전수 조사 — "문이 그 채널에 있다"는
+  옛 전제를 가진 코드 잔존 0 (`FPSRSpawnRoom` 트리거·`FPSRBoundaryBlocker`는 무관).
+
+나머지 커밋: `876bb644`(파킹 재캐시 + `WorldToCell` 단일화 + 저작 검사 4항목) · `59624da5`(탈출 중
+WorldStatic 응답만 Ignore, `ClearExitPath`가 무조건 복구 + Activate 경유라 누수 불가) · `1670ed5e`
+(구멍별 탈출 경로 2단 조회) · `5b41e13c`(로그) · `6ffcfff0`(immortal 파티클 + `IsImmortal()` 데이터 검증)
+— 전부 통과.
+
+**주의 노트 2건 (코드 수정 없음, 저작 규약)**:
+1. `1670ed5e`: 스포너 BP의 `ChildActorComponent`에 붙은 **모든** Scene 컴포넌트가 웨이포인트로 읽힌다 —
+   장식용 컴포넌트를 CAC 밑에 붙이면 경로가 오염된다. 검증기는 마지막 웨이포인트만 검사하므로 중간 오염은
+   못 잡는다. 스포너 BP 저작 시 CAC 밑에는 웨이포인트만 붙일 것.
+2. `d49998f2` 부수 효과: **적 투사체도 이제 파괴물에 블록**된다(이전엔 관통). LOS 게이트가 1차 방어라
+   드물지만, 동작 변화로 기록해 둔다. PIE 미검증 목록(문 경로·근접·차지레이저 실사격)은 기존
+   *"PIE 검증 — 스테이지 전환·그레이스 창·파괴물"* 행 그대로.
+
 ## 🧾 총알이 억제기·문을 그냥 통과하던 것 — 파괴물 전용 콜리전 채널 (2026-08-19, `phase/arena-spawnpoints`, `d49998f2`)
 > 보드 행 = *"파괴물 전용 콜리전 채널 신설 — 투사체가 억제기/문을 관통하는 결함 수정"*(M0 · 하이 · S · 추천모델 Fable, 수행 Opus).
 > 조사 중 드러난 사실 하나 = 이 행은 기존 *"PIE 검증 — 스테이지 전환·그레이스 창·파괴물"*(M0 · 하이) 행의
