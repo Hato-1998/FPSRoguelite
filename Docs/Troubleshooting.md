@@ -517,6 +517,22 @@ PS 5.1에서 `-abslog=$log` 를 **따옴표 없이** 넘기면 `UnrealEditor-Cmd
 `…Automation Test Queue Empty N tests performed.` 의 N으로 한다. **로그 파일이 없으면 그건 실패가 아니라
 "안 돌았다"** 이고, 둘은 구분해야 한다(G2·G8과 같은 실패형 — 빈 결과를 통과로 읽는 것).
 
+### G11. 요약이 "무변경 / 오류 0"인데 **경고가 매번 같은 자리에서 반복**된다 (2026-08-19, CARDCSV)
+카드 CSV 임포트가 `생성 0 / 갱신 0 / 무변경 30 / 소속 제거 0 / 오류 0` 을 내면서, 같은 실행에서
+`Warning: Import: removing '<null>' from Weapon 'DA_Weapon_Bazooka'.UnlockableFeatures` 를 찍고 있었다.
+"제거하겠다"는 로그와 제거 카운트 0이 **동시에** 참이다.
+
+**원인**: 경고를 찍는 쪽과 실제 제거를 수행하는 헬퍼의 **null 계약이 어긋난다.**
+`FPSRCardCsvImporter.cpp:739` 는 목표 집합에 없는 원소를 전부 "removing" 으로 로깅하는데,
+`FPSRDataEditorHelpers.cpp:53` `RemoveFromArray` 는 `if (!Owner || !Element) return false;` 로
+**null 원소를 no-op 반환**한다. 그래서 배열 안의 null은 영원히 안 지워지고 경고만 무한 재발하며,
+디스크는 무변경이라 `git status` 도 깨끗하다.
+
+→ **멱등 파이프라인에서 "무변경"을 그린으로 읽지 말 것.** 무변경은 "목표와 같다"가 아니라
+"쓸 게 없었다"이고, 그 둘은 **경고가 0일 때만** 같다. 선언적 동기화(추가+제거)를 구현할 때는
+로깅 조건과 실제 변경 헬퍼의 가드 조건이 1:1인지 확인한다 — 어긋나면 요약이 갭을 덮는다.
+(런타임 소비 지점은 대개 null 가드가 있어 무해하므로, 증상은 로그 노이즈로만 나타난다.)
+
 ---
 
 ## H. 로컬라이제이션 · 파이프라인 스크립트

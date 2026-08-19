@@ -240,11 +240,17 @@ BP 그래프 핀 리터럴 3곳 / ST_UI·ST_CardEffect 시트 시딩(사용자) 
 ### 🪤 함정
 1. **`-DisableUnity` 게이트 빌드가 10분을 넘기면** 셸 타임아웃으로 끊겨도 UBT 자식은 계속 돈다 → 재실행이 `ConflictingInstance` 뮤텍스 충돌. UBT 종료는 `Win32_Process`의 CommandLine으로 감시(PS5.1 `Get-Process`는 CommandLine 미노출).
 2. 임포터 계약 설계 시 **"파생 텍스트 키 생성 규칙"과 "에셋에 기록하는 참조 규칙"은 반드시 1:1 대칭**이어야 한다 — 한쪽만 공란을 스킵하면 미존재 키 참조가 태어난다(P2-①).
+3. (2026-08-19 추가) **선언적 멤버십 동기화는 null 원소를 못 지운다** — "제거하겠다"고 로깅하는 코드와 실제 제거 헬퍼의 null 계약이 어긋나면, 요약 카운트는 0(=무변경)으로 깨끗한데 경고만 매 실행 반복된다. **무변경 = 목표와 같다가 아니라 쓸 게 없었다**이고, 둘은 경고 0일 때만 같다(`Troubleshooting.md` G11).
 
-### 남은 것 (보드 행 유지 사유)
-- Cards/CardCatalog **시트 시딩**(리포 CSV → 시트, 1회) → 이후 시트=마스터. ko 재저작([KO-TODO] 소거)·en/ja 번역 = 시트에서.
-- PIE 사용자 스모크(§12-7): 카드 3장 제시·빈 설명 11장 플레이스홀더 없음·같은 속성 쌍 배제·해금 오퍼.
-- P3 후속 4건(익스포터 메뉴 가드 등) + 머지 체크리스트: 타 브랜치에 미재저장 카드 uasset 있으면 CardFamily 태그→FName 무음 드롭(재검증 그물 필수).
+### ✅ 마감 (2026-08-19, 머지 `7ea565de` — 보드 행 완료)
+- **시트 시딩·번역 완료** — 구글 시트 live export ↔ `Content/Authoring/*.csv` SHA256 완전 일치(Cards `E0A18F5C…A49281` / CardCatalog `24362FA5…6907CE`) = 미반영 시트 편집 0, `[KO-TODO]` 0.
+- **PIE 사용자 스모크 §12-7 통과**(사용자 실시). 설명 3언어 공란 카드는 최종 **9장**(초안의 "11장"은 저작 진행 전 수치).
+- **머지 체크리스트 그물질 통과** — 재임포트 결과 `생성 0 / 갱신 0 / 무변경 30 / 소속 제거 0 / 오류 0` + `git status` 클린 = `CardFamily` 태그→FName 무음 드롭 없음. `validate-data` 0 error.
+- **사용자 결정: All/This 동시 제시 = 현행 유지(허용)** — P2-⑦이 도입했던 배제는 CARDDRAW v4의 `.all`/`.this` 스코프 접미([`FPSRCardCsvImporter.cpp:397`](../Source/FPSRogueliteEditor/Private/CardImport/FPSRCardCsvImporter.cpp))로 되돌아간 상태였고, 그 현행 거동을 확정했다. 시트·코드 수정 0건.
+- **부수 수정**: `DA_Weapon_Bazooka.UnlockableFeatures` null 슬롯 제거(7→6). 임포터가 이걸 못 지우던 원인 = [`FPSRDataEditorHelpers.cpp:53`](../Source/FPSRogueliteEditor/Private/DataEditor/FPSRDataEditorHelpers.cpp) `RemoveFromArray` 의 `!Element` no-op 반환 → **경고만 영구 재발**. 런타임은 소비 2곳 모두 null 가드가 있어 무해.
+
+### 이월 (후속 백로그 행 = "카드 CSV 파이프라인 P3 후속 묶음", M1)
+익스포터 메뉴 상시 노출 가드 · 익스포터 조기 반환 시 경고 미도달 · stale `OfferRarities` 미치유 · `FPSRCardPoolValidator` ThinOfferPool v3 과잉경고 · **`RemoveFromArray` null 원소 제거 불가(도구 갭 잔존)** · 죽은 `RarityTiers` 2건(`DA_CardModifiers_NoSelfDamage`·`AmmoOnMiss`).
 
 ## 🌐 LOC0 — StringTable CSV 파이프라인 공통 기반 (2026-08-12, `phase/loc-foundation-stringtable` → 머지 `6f92dbdb`, origin 통합 `5bb52a02`)
 > 보드 행 "문자열 외부화 파이프라인 + 기존 UI 전수 이관"(하이)의 **Phase 0**. 이 위에서 Phase A(UI 전수 이관, `phase/loc-ui-migration`)와 Phase B(카드 CSV 개편, `phase/card-csv-pipeline`)가 병렬 분기한다. 명세·레드팀 원장 = `Docs/Specs/LOC0_StringTablePipeline.md`, SSOT = `Docs/SSOT/Localization.md`(신설).
