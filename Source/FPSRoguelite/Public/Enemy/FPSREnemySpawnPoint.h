@@ -70,10 +70,19 @@ public:
 	/** Server/setup: assign this point's spawn zone (used by AFPSRSpawnRoom to auto-tag its interior points). */
 	void SetZoneTag(const FGameplayTag& InZoneTag) { ZoneTag = InZoneTag; }
 
-	/** Append this point's authored exit-path waypoints (world space) to Out, in attach order. The waypoints are the
-	 *  child scene components of ExitPathRoot: in a structured-spawner BP (a pipe/box mesh enemies spawn INSIDE), add
-	 *  Scene components under ExitPathRoot and place them along the route OUT to the mouth — the last is the hand-off
-	 *  point to flow-field player-chase. No children = no path (the enemy chases immediately). (C1) */
+	/**
+	 * Append this point's authored exit-path waypoints (world space) to Out, in attach order — the route OUT of a
+	 * structured spawner, ending at the hand-off point to flow-field player-chase. No waypoints = no path (the
+	 * enemy chases immediately). (C1)
+	 *
+	 * Two authoring places, checked in this order:
+	 *   1. Scene components attached to the **UChildActorComponent that spawned this point**, i.e. authored in the
+	 *      SPAWNER Blueprint. Use this when one mesh has several holes that exit in DIFFERENT directions — each
+	 *      ChildActorComponent carries its own route, dragged in that BP's viewport.
+	 *   2. Scene components under this actor's own **ExitPathRoot**. Used by a directly-placed spawn point, and as
+	 *      the shared default a structured spawner inherits when a hole has no route of its own (identical routes
+	 *      differing only by rotation are covered by rotating the ChildActorComponent).
+	 */
 	void GetExitPathWorldPoints(TArray<FVector>& Out) const;
 
 	/** World location where the enemy actually spawns = SpawnAnchor's world location (falls back to the actor origin

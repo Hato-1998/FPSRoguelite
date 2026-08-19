@@ -2,6 +2,7 @@
 
 #include "Enemy/FPSREnemySpawnPoint.h"
 #include "Components/SceneComponent.h"
+#include "Components/ChildActorComponent.h"
 
 #if WITH_EDITORONLY_DATA
 #include "Components/ArrowComponent.h"
@@ -45,6 +46,37 @@ FVector AFPSREnemySpawnPoint::GetSpawnLocation() const
 
 void AFPSREnemySpawnPoint::GetExitPathWorldPoints(TArray<FVector>& Out) const
 {
+	// (1) PREFERRED when this point is a child actor of a structured-spawner BP: waypoints attached to the
+	//     UChildActorComponent that spawned us. Those components live in the SPAWNER's Blueprint, so each hole in
+	//     one mesh can have its OWN route, dragged in that BP's viewport.
+	//
+	//     Without this, every hole would have to share the single path authored inside the spawn-point BP — which
+	//     is unusable the moment a mesh's holes exit in different directions, and you cannot work around it by
+	//     adding components to a ChildActorComponent's template (the editor does not allow it). Rotating the
+	//     ChildActorComponent only covers the case where every route has the SAME shape relative to its hole.
+	//
+	//     GetAttachChildren() on that component also contains OUR OWN root (the engine attaches a child actor's
+	//     root to its ChildActorComponent — ChildActorComponent.cpp:860), so anything owned by this actor is
+	//     skipped: it is not a waypoint, it is us.
+	if (const UChildActorComponent* SpawnedBy = GetParentComponent())
+	{
+		const TArray<TObjectPtr<USceneComponent>>& Attached = SpawnedBy->GetAttachChildren();
+		for (const USceneComponent* Child : Attached)
+		{
+			if (Child && Child->GetOwner() != this)
+			{
+				Out.Add(Child->GetComponentLocation());
+			}
+		}
+		if (Out.Num() > 0)
+		{
+			return;
+		}
+		// None authored on the component — fall through so the spawn-point BP's own path can act as the default.
+	}
+
+	// (2) The point's own ExitPathRoot children. This is the path for a standalone (directly placed) spawn point,
+	//     and the per-hole default a structured spawner inherits when its ChildActorComponent has no waypoints.
 	if (!ExitPathRoot)
 	{
 		return;
