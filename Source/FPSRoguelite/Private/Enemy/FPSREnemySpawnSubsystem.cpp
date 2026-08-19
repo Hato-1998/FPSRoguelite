@@ -1433,7 +1433,7 @@ AFPSREnemyBase* UFPSREnemySpawnSubsystem::AcquireEnemy(const FVector& Location, 
 		SpawnPoint->GetExitPathWorldPoints(ExitWaypoints);
 		if (ExitWaypoints.Num() > 0)
 		{
-			Enemy->SetExitPath(ExitWaypoints);
+			Enemy->SetExitPath(ExitWaypoints, SpawnPoint->ShouldPhaseThroughWorldWhileExiting());
 		}
 	}
 

@@ -89,7 +89,10 @@ public:
 	 *  (e.g. a pipe/box that the flow-field can't path out of) before reverting to flow-field player-chase at the
 	 *  final waypoint. Empty = no path (immediate chase). Set right after Activate by the spawn subsystem from the
 	 *  selected spawn point; cleared on Deactivate / overwritten on the next reuse. (C1) */
-	void SetExitPath(const TArray<FVector>& InWaypoints);
+	/** @param bPhaseThroughWorld 경로를 따라가는 동안 정적 지오메트리를 통과할지(구조형 스포너 — 막힌 메시
+	 *         안에서 스폰돼 벽을 지나 나온다). 캡슐의 WorldStatic 응답 하나만 Ignore 로 바뀌고 경로가 끝나면
+	 *         복구된다 — 그 사이에도 적은 맞고(Visibility) 플레이어를 막으며(ECC_FPSRPlayerPawn) 바닥도 밟는다. */
+	void SetExitPath(const TArray<FVector>& InWaypoints, bool bPhaseThroughWorld);
 
 	/** Server: true while the enemy is still following its authored exit path (not yet handed off to the flow-field). */
 	bool IsFollowingExitPath() const { return bFollowingExitPath; }

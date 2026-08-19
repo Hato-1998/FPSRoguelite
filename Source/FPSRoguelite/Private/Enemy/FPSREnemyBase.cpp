@@ -256,7 +256,7 @@ void AFPSREnemyBase::Activate(const FVector& Location)
 	SetAnimState(EFPSRAnimState::Idle);
 }
 
-void AFPSREnemyBase::SetExitPath(const TArray<FVector>& InWaypoints)
+void AFPSREnemyBase::SetExitPath(const TArray<FVector>& InWaypoints, bool bPhaseThroughWorld)
 {
 	if (!HasAuthority())
 	{
@@ -266,6 +266,23 @@ void AFPSREnemyBase::SetExitPath(const TArray<FVector>& InWaypoints)
 	ExitPathIndex = 0;
 	ExitPathElapsed = 0.0f;
 	bFollowingExitPath = (ExitPath.Num() > 0);
+
+	// 구조형 스포너(Enemy.md C1)를 위한 통과. 대안이었던 "메시 콜리전에 구멍을 뚫는다"는 두 가지가 나쁘다 —
+	// 구멍이 적 캡슐보다 좁으면 조용히 끼고, 무콜리전으로 만들면 **플레이어가 스포너 안으로 빠진다**.
+	// 메시를 완전히 막힌 채 두고 적만 잠시 통과시키면 둘 다 없다.
+	//
+	// 바꾸는 것은 WorldStatic 응답 **하나뿐**이다. 그래서 통과 중에도:
+	//   - 소총 트레이스(Visibility)가 그대로 맞는다 — 나오는 중에도 죽일 수 있다
+	//   - 플레이어(ECC_FPSRPlayerPawn)를 그대로 막는다
+	//   - 바닥을 그대로 밟는다 — ApplyGravity 는 캡슐 응답이 아니라 별도 월드 쿼리
+	//     (SweepSingleByObjectType)로 바닥을 찾으므로 이 변경에 영향받지 않는다
+	//
+	// 경로가 잘못 저작돼 적이 아레나 밖으로 새는 최악은 ExitPathTimeout 이 막는다(그때 ClearExitPath 가
+	// 복구한다). 저작 시점 검사는 에디터 「아레나 검증」이 한다 — 마지막 웨이포인트가 열린 셀인지.
+	if (bFollowingExitPath && bPhaseThroughWorld && Capsule)
+	{
+		Capsule->SetCollisionResponseToChannel(ECC_WorldStatic, ECR_Ignore);
+	}
 }
 
 void AFPSREnemyBase::ClearExitPath()
@@ -274,6 +291,14 @@ void AFPSREnemyBase::ClearExitPath()
 	ExitPathIndex = 0;
 	ExitPathElapsed = 0.0f;
 	bFollowingExitPath = false;
+
+	// 통과를 무조건 되돌린다 — 플래그를 기억해 두고 조건부로 풀지 않는다. 이 함수는 경로 소진 · 스톨
+	// 타임아웃 · 풀에서 꺼낼 때(Activate) 전부에서 불리는 단일 복구 지점이고, 한 번이라도 새면 그 적은
+	// 남은 수명 내내 벽을 통과한다. 무조건 Block 으로 되돌리는 것이 생성자 설정과 같은 값이라 안전하다.
+	if (Capsule)
+	{
+		Capsule->SetCollisionResponseToChannel(ECC_WorldStatic, ECR_Block);
+	}
 }
 
 
