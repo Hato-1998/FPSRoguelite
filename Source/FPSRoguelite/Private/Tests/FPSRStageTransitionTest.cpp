@@ -2,6 +2,7 @@
 
 #include "Misc/AutomationTest.h"
 #include "Run/FPSRStageDirectorSubsystem.h"
+#include "Run/FPSRStageFadeSubsystem.h"
 #include "Core/FPSRGameState.h"
 #include "Enemy/FPSRFlowFieldComputer.h"
 
@@ -175,6 +176,57 @@ bool FFPSRStageTransitionTest::RunTest(const FString& Parameters)
 		// bare int32 pair is ambiguous between its float/double overloads and its generic template on MSVC (C2668).
 		TestTrue(TEXT("same block pattern, larger radius -> finds the radius-2 opening"),
 			C::FindNearestOpenCell(FloorZ, RingBlocked, W, H, 2, 2, 2) != INDEX_NONE);
+	}
+
+	// --- (8) UFPSRStageFadeSubsystem::ComputeStageFadeAlpha — the Phase B client fade driver's pure alpha calc. ------
+	{
+		using F = UFPSRStageFadeSubsystem;
+		constexpr float FadeOutSeconds = 0.8f;
+		constexpr float FadeInSeconds = 0.8f;
+
+		// (8a) None/Grace/Pending -> 0, regardless of a (nonsensical here, but shouldn't matter) nonzero End.
+		TestEqual(TEXT("None -> 0"),
+			F::ComputeStageFadeAlpha(EFPSRStageTransitionPhase::None, 10.0f, 20.0f, FadeOutSeconds, FadeInSeconds), 0.0f);
+		TestEqual(TEXT("Grace -> 0"),
+			F::ComputeStageFadeAlpha(EFPSRStageTransitionPhase::Grace, 10.0f, 20.0f, FadeOutSeconds, FadeInSeconds), 0.0f);
+		TestEqual(TEXT("Pending -> 0"),
+			F::ComputeStageFadeAlpha(EFPSRStageTransitionPhase::Pending, 10.0f, 20.0f, FadeOutSeconds, FadeInSeconds), 0.0f);
+
+		// (8b) FadeOut, halfway through (Now == End - FadeOutSeconds/2) -> ~0.5 (default float TestEqual tolerance).
+		TestEqual(TEXT("FadeOut halfway -> 0.5"),
+			F::ComputeStageFadeAlpha(EFPSRStageTransitionPhase::FadeOut, 19.6f, 20.0f, FadeOutSeconds, FadeInSeconds),
+			0.5f);
+
+		// (8c) FadeOut, End reached (Now == End) -> 1 (fully faded).
+		TestEqual(TEXT("FadeOut End reached -> 1"),
+			F::ComputeStageFadeAlpha(EFPSRStageTransitionPhase::FadeOut, 20.0f, 20.0f, FadeOutSeconds, FadeInSeconds), 1.0f);
+
+		// (8d) Swapping -> always 1, however far Now sits from a (here irrelevant) End.
+		TestEqual(TEXT("Swapping -> 1"),
+			F::ComputeStageFadeAlpha(EFPSRStageTransitionPhase::Swapping, 5.0f, 0.0f, FadeOutSeconds, FadeInSeconds), 1.0f);
+
+		// (8e) FadeIn, halfway through -> ~0.5.
+		TestEqual(TEXT("FadeIn halfway -> 0.5"),
+			F::ComputeStageFadeAlpha(EFPSRStageTransitionPhase::FadeIn, 19.6f, 20.0f, FadeOutSeconds, FadeInSeconds),
+			0.5f);
+
+		// (8f) FadeIn, End reached -> 0 (fully cleared).
+		TestEqual(TEXT("FadeIn End reached -> 0"),
+			F::ComputeStageFadeAlpha(EFPSRStageTransitionPhase::FadeIn, 20.0f, 20.0f, FadeOutSeconds, FadeInSeconds), 0.0f);
+
+		// (8g) 0-length transition (End<=0, the hard-cut path EnterFadeOut/EnterFadeIn publish): FadeOut -> 1
+		//      (already fully faded, matching the instant hard-cut), FadeIn -> 0 (already clear).
+		TestEqual(TEXT("FadeOut, End<=0 -> 1"),
+			F::ComputeStageFadeAlpha(EFPSRStageTransitionPhase::FadeOut, 5.0f, 0.0f, FadeOutSeconds, FadeInSeconds), 1.0f);
+		TestEqual(TEXT("FadeIn, End<=0 -> 0"),
+			F::ComputeStageFadeAlpha(EFPSRStageTransitionPhase::FadeIn, 5.0f, 0.0f, FadeOutSeconds, FadeInSeconds), 0.0f);
+
+		// (8h) FadeOutSeconds/FadeInSeconds<=0 with a real (>0) End: defended against a 0-division rather than
+		//      producing inf/NaN — reads the same as the 0-length case above.
+		TestEqual(TEXT("FadeOut, FadeOutSeconds<=0 -> 1 (no 0-div)"),
+			F::ComputeStageFadeAlpha(EFPSRStageTransitionPhase::FadeOut, 19.9f, 20.0f, 0.0f, FadeInSeconds), 1.0f);
+		TestEqual(TEXT("FadeIn, FadeInSeconds<=0 -> 0 (no 0-div)"),
+			F::ComputeStageFadeAlpha(EFPSRStageTransitionPhase::FadeIn, 19.9f, 20.0f, FadeOutSeconds, 0.0f), 0.0f);
 	}
 
 	return true;
