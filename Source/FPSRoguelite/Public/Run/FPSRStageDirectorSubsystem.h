@@ -131,8 +131,10 @@ private:
 	 * cannot see teleports that player into a space with no geometry, no destructibles and no ActiveArena
 	 * pointer. ADR 0012 axis 5 makes this wait normally ZERO by parking a stage early; this is the tail case.
 	 *
-	 * This does NOT put the wait inside the damage-dealing window. Grace has already ended by the time anything
-	 * here runs (see the call sites), so ADR 0010 invariant 8 — a FIXED reward window — is untouched.
+	 * Farmability note (2026-08-20, invulnerability retired): the swarm IS damageable during this wait, so a slow
+	 * client's readiness stall does extend farm time — the one variable stretch ADR 0010 invariant 8's correction
+	 * explicitly accepts (capped by StageSwapReadyTimeoutSeconds; the swarm being ground is the same swarm that
+	 * carries over, so the extra dealing trades against next stage's carry-over pressure).
 	 */
 	void BeginSwap();
 
@@ -161,6 +163,12 @@ private:
 	 *  binds the same handler twice across repeated transitions. */
 	bool bBoundRunStateChanged = false;
 
+	/** True while PerformSwap has deferred the actual swap because a card-selection freeze (a mid-fade level-up —
+	 *  possible since the dealing invulnerability was retired) was up when it ran. HandleRunStateChanged's unpause
+	 *  edge consumes it and re-enters BeginSwap; without this flag that branch could double-run the swap off
+	 *  unrelated OnRunStateChanged broadcasts while Swapping legitimately waits on destination readiness. */
+	bool bSwapDeferredByFreeze = false;
+
 	/** F3 edge-tracker: GS->IsRunPaused() as of the last time HandleRunStateChanged acted on it, while Phase ==
 	 *  Grace. OnRunStateChanged fires for many unrelated reasons (run clock, mission progress) — comparing against
 	 *  this is what turns "the broadcast fired" into "the freeze actually just started/ended", so DealingTimerHandle
@@ -179,6 +187,7 @@ private:
 	static constexpr float DefaultStageFadeOutSeconds = 0.8f;
 	static constexpr float DefaultStageFadeInSeconds = 0.8f;
 	static constexpr float DefaultStageBlackoutHoldSeconds = 0.5f;
+	static constexpr float DefaultStagePostSwapGraceSeconds = 1.0f;
 
 	/** One-shot timer for the Grace dealing window (armed by RequestTransition, fires OnDealingWindowClosed). */
 	FTimerHandle DealingTimerHandle;

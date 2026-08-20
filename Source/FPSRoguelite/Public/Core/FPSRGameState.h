@@ -125,6 +125,12 @@ public:
 	/** Server: set the global freeze flag directly (normally driven by RefreshPauseState). */
 	void SetRunPaused(bool bPaused);
 
+	/** Server-only: has the run hit its terminal end (EndRunFreeze latched bRunEnded)? Distinguishes the two
+	 *  reasons bRunPaused can be up — a permanent end-of-run freeze vs a transient card-selection freeze — for
+	 *  callers that must abort on the former but HOLD on the latter (UFPSRStageDirectorSubsystem::PerformSwap).
+	 *  Always false on clients (bRunEnded is not replicated; the visible freeze rides bRunPaused). */
+	bool HasRunEnded() const { return bRunEnded; }
+
 	/** Server: end-of-run terminal freeze. Pins the global freeze on (reuses bRunPaused) and latches bRunEnded so
 	 *  RefreshPauseState stops recomputing — the world stays frozen behind the result screen even if a player's
 	 *  card selection completes after EndRun. Idempotent. */

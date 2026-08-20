@@ -238,6 +238,21 @@ void UFPSRStageDirectorSubsystem::HandleRunStateChanged()
 		return;
 	}
 
+	// A swap PerformSwap deferred because a card-selection freeze was up (see its guard): resume the moment the
+	// freeze clears. Gated on bSwapDeferredByFreeze, not on the phase alone — OnRunStateChanged fires for many
+	// unrelated reasons while Swapping is legitimately waiting on destination readiness, and an ungated BeginSwap
+	// here would race the readiness poll into a SECOND PerformSwap (double stage-index commit). BeginSwap rather
+	// than PerformSwap directly: it re-verifies destination readiness, which may have changed while frozen.
+	if (Phase == EFPSRStageTransitionPhase::Swapping && bSwapDeferredByFreeze)
+	{
+		if (!GS->IsRunPaused())
+		{
+			bSwapDeferredByFreeze = false;
+			BeginSwap();
+		}
+		return;
+	}
+
 	if (Phase != EFPSRStageTransitionPhase::Grace)
 	{
 		return; // OnRunStateChanged fires for many unrelated reasons — only act while Grace or Pending
@@ -401,10 +416,36 @@ void UFPSRStageDirectorSubsystem::EnterFadeIn()
 
 void UFPSRStageDirectorSubsystem::OnFadeInComplete()
 {
-	if (AFPSRGameState* GS = GetGS())
+	AFPSRGameState* GS = GetGS();
+	if (!GS)
 	{
-		GS->SetStageTransition(EFPSRStageTransitionPhase::None, 0.0f);
+		return;
 	}
+
+	// Post-swap grace, granted HERE (the exact unfreeze moment) rather than at PerformSwap — granting at the swap
+	// would let the FadeIn length silently eat the window (enemies are frozen through FadeIn, so grace spent there
+	// protects nothing). Carried enemies stand at their pre-transition RELATIVE positions — a melee enemy that was
+	// at contact range when the suppressor broke is at contact range NOW, and everything unfreezes on this same
+	// frame; without this window that enemy lands a zero-reaction-time hit the old release-everything design made
+	// structurally impossible (merge-review finding C2). Same BeginGraceWindow mechanic as spawn/revive protection.
+	const UFPSRRunScheduleDataAsset* Schedule = GS->GetRunSchedule();
+	const float GraceSeconds = Schedule ? Schedule->StagePostSwapGraceSeconds : DefaultStagePostSwapGraceSeconds;
+	if (GraceSeconds > 0.0f)
+	{
+		if (UWorld* World = GetWorld())
+		{
+			for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+			{
+				const APlayerController* PC = It->Get();
+				if (AFPSRCharacter* Char = PC ? Cast<AFPSRCharacter>(PC->GetPawn()) : nullptr)
+				{
+					Char->BeginGraceWindow(GraceSeconds);
+				}
+			}
+		}
+	}
+
+	GS->SetStageTransition(EFPSRStageTransitionPhase::None, 0.0f);
 }
 
 float UFPSRStageDirectorSubsystem::GetStageFadeInSeconds() const
@@ -519,17 +560,27 @@ void UFPSRStageDirectorSubsystem::PerformSwap()
 		return;
 	}
 
-	// Phase A: PerformSwap is only ever entered un-paused (OnDealingWindowClosed only reaches FadeOut when
-	// !IsRunPaused, and TrySwap's CanSwapNow gate says the same for the Pending path) — but FadeOut and Swapping's
-	// destination-ready wait (BeginSwap/PollSwapReadiness) both take real wall-clock time, during which the ONLY
-	// thing that can still freeze the run is EndRunFreeze (victory/defeat pinning bRunPaused permanently — a level-up
-	// card freeze cannot land here, RefreshPauseState's offer gate is already closed by IsStageTransitionActive
-	// covering FadeOut/Swapping too). Abort rather than teleport players, carry the swarm, and commit a new stage
-	// index behind the result screen.
+	// FadeOut and Swapping's destination-ready wait both take real wall-clock time, and a freeze CAN land inside
+	// them: since the dealing-window invulnerability was retired (2026-08-20) a kill during the fades pays XP
+	// instantly (FPSRXPPickup's transition-collect path), and AddSharedXP -> RefreshPauseState raises the
+	// card-selection freeze with NO transition gate. The two pause reasons need opposite reactions:
+	//  - EndRun (bRunEnded latched): abort. Teleporting players, carrying the swarm and committing a stage index
+	//    behind the result screen would all be wrong — and the run is over, so the lost transition is moot.
+	//  - Card-selection freeze: HOLD, never abort — the suppressor is already consumed and nothing would ever call
+	//    RequestTransition again, so aborting here silently strands the run on this stage forever (merge-review
+	//    finding B1, the first version of this guard did exactly that). Stay in Swapping (the screen is already
+	//    blacked out, which sits fine under the fullscreen card UI) and let HandleRunStateChanged's unpause edge
+	//    re-enter BeginSwap — the same hold-then-resume contract Pending implements before the fades.
 	if (GS->IsRunPaused())
 	{
-		GS->SetStageTransition(EFPSRStageTransitionPhase::None, 0.0f);
-		UE_LOG(LogFPSR, Error, TEXT("[StageDirector] Swap aborted: the run is paused (EndRun) — not swapping behind the result screen."));
+		if (GS->HasRunEnded())
+		{
+			GS->SetStageTransition(EFPSRStageTransitionPhase::None, 0.0f);
+			UE_LOG(LogFPSR, Error, TEXT("[StageDirector] Swap aborted: the run has ended — not swapping behind the result screen."));
+			return;
+		}
+		bSwapDeferredByFreeze = true;
+		UE_LOG(LogFPSR, Log, TEXT("[StageDirector] Swap deferred: a card-selection freeze is up — holding the blackout until it clears."));
 		return;
 	}
 

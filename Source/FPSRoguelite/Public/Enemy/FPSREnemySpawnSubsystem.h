@@ -265,7 +265,10 @@ private:
 
 	/** Server-only: per-player count of enemies currently holding a ranged-charge token (keyed by controller so it
 	 *  survives the per-pass PlayerPawns rebuild). Incremented in TryAcquireRangedToken, decremented in
-	 *  ReleaseRangedToken; cleared on ReleaseAllEnemies. */
+	 *  ReleaseRangedToken; cleared on ReleaseAllEnemies. NOTE: the stage-transition path no longer goes through
+	 *  ReleaseAllEnemies (CarryEnemiesToNewStage carries instead), so a stale key from a mid-charge leaver now
+	 *  survives a stage swap and is only cleaned by the next full-release flow (run reset / mission release). The
+	 *  keys are TObjectKey so nothing collides; do not read this map assuming per-stage clearing. */
 	TMap<TObjectKey<AFPSRPlayerController>, int32> RangedChargeCountByPlayer;
 
 	/** Max vertical (Z) gap for a contact attack to land — stops an airborne/rooftop or falling enemy from

@@ -374,7 +374,10 @@ void UFPSRGA_WeaponFire_Hitscan::ActivateAbility(
 				// Tolerance, not decoration: a destructible is BOTH the wall and a target, so its own entry sits
 				// exactly AT WallDist (same ray, same surface, two separate queries). A bare > would let last-bit
 				// float noise drop the wall's own damage, and that failure is silent — the prop just never breaks.
-				if (Entry.Distance > WallDist + KINDA_SMALL_NUMBER)
+				// RELATIVE term, not a bare constant: float ULP at 8192cm (~82 m) is already ~1e-3 cm, bigger than
+				// KINDA_SMALL_NUMBER — a fixed epsilon silently stops covering exactly the noise it exists for on a
+				// long-range shot (merge-review finding A3). 1e-3 relative ≈ 1 ULP headroom across the weapon ranges.
+				if (Entry.Distance > WallDist + FMath::Max(KINDA_SMALL_NUMBER, WallDist * 1.0e-3f))
 				{
 					break; // behind the wall (everything after is too — distance-sorted)
 				}

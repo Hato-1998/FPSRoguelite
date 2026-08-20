@@ -146,6 +146,14 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Run", meta = (ClampMin = "0.0"))
 	float StageFadeInSeconds = 0.8f;
 
+	/** 전환이 끝나는 순간(페이드인 완료 = 스웜 언프리즈)부터 플레이어에게 주는 **그레이스**(초 — 무적 +
+	 *  적 통과, 부활 그레이스와 같은 BeginGraceWindow 기제). 잔존 적을 이월하면서 필요해졌다: 전환 시작 때
+	 *  근접거리에 있던 적이 상대 위치 그대로 이월돼 재개 프레임에 반응 시간 0으로 선공할 수 있다(종전엔
+	 *  잔존 적이 소멸돼 구조적으로 불가능했던 패턴 — 머지 리뷰 C2). 0 = 그레이스 없음. ⚠️ 1초는 미검증
+	 *  시작값. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Run", meta = (ClampMin = "0.0"))
+	float StagePostSwapGraceSeconds = 1.0f;
+
 	/** 전환 시 새 아레나로 **이월**할 잔존 적의 비율 상한(0~1). 초과분은 새 진입 지점에서 먼 순으로 풀 반납된다.
 	 *  1.0 = 전부 이월. 페이싱 손잡이 — 전환 후 새 아레나의 스폰 캡 계상은 이월된 ActiveEnemies 잔존 수로 자동
 	 *  반영되므로(director tick의 GlobalAliveCap 게이트), 이 값을 낮추면 새 스테이지 시작이 더 비어 보인다. */

@@ -1513,7 +1513,10 @@ void UFPSREnemySpawnSubsystem::CarryEnemiesToNewStage(const TArray<FVector>& Old
 			Snapshot.Add(Enemy);
 		}
 	}
-	const int32 MaxCarry = FMath::FloorToInt(CarryMaxFraction * Snapshot.Num());
+	// RoundToInt, not FloorToInt: authored fractions are not exactly representable (0.7f is 0.69999…), so a floor
+	// systematically under-carries by one on clean authored values (0.7 × 10 → 6, not 7 — merge-review finding A1).
+	// Round keeps the designer's arithmetic; the 0..Num clamp is implicit (fraction is ClampMin/Max 0..1 in the DA).
+	const int32 MaxCarry = FMath::RoundToInt(CarryMaxFraction * Snapshot.Num());
 
 	// Per-enemy candidate (post-delta, pre-snap) position + its rank key. A VALUE struct, not AFPSREnemyBase* — so
 	// the Sort below compares plain floats, not enemy pointers (TArray<T*>::Sort dereferences its predicate's
