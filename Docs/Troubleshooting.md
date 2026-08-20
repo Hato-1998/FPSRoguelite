@@ -347,6 +347,7 @@ Riot Client가 **8558 포트**를 점유해 ZenServer가 못 뜬 것. Riot을 �
 ### D1-b. 커맨드렛에서 에셋을 임포트하면 끝나자마자 죽는다
 `AssetTools.import_asset_tasks`는 임포트를 **완료한 뒤** 콘텐츠 브라우저를 동기화하는데, 커맨드렛엔 Slate가 없어 거기서 죽는다 — 콜스택이 `AssetTools → ContentBrowser → Slate`, `Assertion failed: CurrentApplication.IsValid()`.
 → **`InterchangeManager.get_interchange_manager_scripted().import_asset(dest, source_data, params)`** 를 직접 쓰면 그 경로를 안 탄다(실증: 같은 GLB가 크래시 없이 들어옴).
+→ **범용 우회(2026-08-14 실증) = 정식 에디터를 헤드리스로**: `UnrealEditor-Cmd.exe <uproject> -nullrhi -unattended -nosplash -ExecCmds="py <스크립트>"` — Slate가 뜨는 진짜 에디터라 `import_asset_tasks`·리페어런트·컴파일·저장 전부 되고, 스크립트 말미에 `unreal.SystemLibrary.quit_editor()`로 닫는다. 라이브 에디터 데드락(D1-a)·커맨드렛 즉사(D1-b/D7)를 모두 피하는 세 번째 실행 모드. 실사용 = `Scripts/import_enemy_proto_meshes.py`·`apply_enemy_hover.py`·`convert_enemies_ranged.py`.
 
 ### D2. `execute_python_code`가 타임아웃 났다
 **30초 타임아웃**이다. 툴은 에러를 주지만 **에디터 쪽 작업은 계속 진행돼 결과가 남는다.**
@@ -399,6 +400,12 @@ Riot Client가 **8558 포트**를 점유해 ZenServer가 못 뜬 것. Riot을 �
 > 실제로 체인이 15개 멀쩡히 있는데 0개로 오판해 엉뚱한 곳을 팠다.
 
 ## E. 데이터 · 컴포넌트 · BP
+
+### E0. BP 에셋을 열 때마다 에디터가 스택 오버플로로 죽는다
+**디테일 패널(PropertyEditor) 무한 재귀** — 콜스택이 `UnrealEditor_PropertyEditor` 반복이면 이것이다. PIE·스폰은 멀쩡하고 **BP 에디터를 여는 순간만** 죽는다(디테일 패널 경로라서).
+실사고(2026-08-14, `BP_EnemyMeleeBase`): 유력 원인 = **파이썬 `new_object(outer=CDO)`로 심은 EditInlineNew 인스턴스드 서브오브젝트**(`AnimProfile`)가 반복 컴파일을 거치며 깨진 것(같은 방식의 다른 BP는 멀쩡했어서 세부 인과는 미확정 — 인스턴스는 컴파일 사이클 중 조용히 탈락하기도 한다).
+**진단법(이분법)**: 헤드리스/라이브 에디터에서 `AssetEditorSubsystem.open_editor_for_assets`로 직접 열어 재현 → 의심 프로퍼티를 메모리에서 None으로 → 재오픈. 살아나면 그놈이다.
+**해소**: 인스턴스 제거+저장 → 재생성은 **에디터 디테일 패널 드롭다운으로**(사람 손). 인스턴스드 프로퍼티의 파이썬 심기는 봉인.
 
 ### E1. 컴포넌트 슬롯에 넣은 값이 런타임에 다른 것으로 바뀐다
 **코드가 컴포넌트를 덮어쓰고 있다.** 데이터 필드와 컴포넌트 슬롯이 같은 것을 가리키면 **슬롯이 거짓말이 된다** — 디자이너가 넣고, 뷰포트도 맞게 보이고, 런타임만 다르다.

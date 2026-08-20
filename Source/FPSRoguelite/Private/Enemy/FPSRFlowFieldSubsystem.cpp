@@ -702,3 +702,9 @@ FVector UFPSRFlowFieldSubsystem::SampleFlowDirection(const FGameplayTag& MapId, 
 	// passes the enemy's MapId) is unchanged.
 	return UnifiedComputer ? UnifiedComputer->Sample(WorldLocation) : FVector::ZeroVector;
 }
+
+bool UFPSRFlowFieldSubsystem::SampleHoverFloorZ(const FVector& Loc, const FVector2D& FlowDirXY, float AnchorFootZ, float MaxSurfaceDeltaCm, float& OutFloorZ, FVector* OutFloorNormal) const
+{
+	// Same P-G routing as SampleFlowDirection: ONE continuous field, no per-map MapId. False off-authority / pre-build.
+	return UnifiedComputer ? UnifiedComputer->SampleHoverFloorZ(Loc, FlowDirXY, AnchorFootZ, MaxSurfaceDeltaCm, OutFloorZ, OutFloorNormal) : false;
+}

@@ -780,6 +780,147 @@ FVector UFPSRFlowFieldComputer::Sample(const FVector& WorldLocation) const
 	return FVector(F.X, F.Y, 0.0f);
 }
 
+// ======================================================================================
+//  U HOVER HEIGHT v2 — CellFloorZ bilinear sampler (spec ①③). Pure array math, no world query, no bFieldReady
+//  dependency (CellFloorZ is fixed at bake time, independent of the BFS/flow — see the header comment). Exercised
+//  by FPSRoguelite.FlowField.HoverFloorSample.
+// ======================================================================================
+
+bool UFPSRFlowFieldComputer::SampleFloorZBilinear(const FVector& WorldLocation, float AnchorFootZ, float MaxSurfaceDeltaCm, float& OutFloorZ, FVector* OutFloorNormal) const
+{
+	if (GridDimX <= 0 || GridDimY <= 0)
+	{
+		return false;
+	}
+
+	const int32 AnchorCell = WorldToCellIndex(WorldLocation);
+	if (AnchorCell == INDEX_NONE)
+	{
+		return false;
+	}
+
+	// Anchor resolution, two-tier (2026-08-14 follow-up — glide-descent):
+	//  1) PRIMARY (unchanged): PickRankForFootZ — the surface nearest the foot within MaxLayerPickDrop. The
+	//     canonical "which storey are my legs on" pick, used for ordinary grounded / hover-follow sampling.
+	//  2) FALLBACK (v2 glide-descent only, new): nothing near the foot -> search STRICTLY DOWNWARD (Z <= AnchorFootZ)
+	//     for the HIGHEST such surface — the floor a falling/gliding hover actor is descending TOWARD past a ledge
+	//     or cliff edge. Deliberately does NOT fall further back to "lowest surface overall" (unlike
+	//     AreWorldLocationsConnected's ColumnRank helper) — anchoring on a surface ABOVE the foot would have the
+	//     spring climb a storey instead of descending to it. No surface below at all -> fail, same as v1 (nothing
+	//     to glide onto here; the caller hands off to the scene-query fallback).
+	int32 AnchorRank = PickRankForFootZ(AnchorCell, AnchorFootZ);
+	if (AnchorRank == INDEX_NONE)
+	{
+		float BestBelowZ = -MAX_flt;
+		for (int32 R = 0; R < NumLayers; ++R)
+		{
+			const float Z = CellFloorZ[SurfIndex(AnchorCell, R)];
+			if (Z != MAX_flt && Z <= AnchorFootZ && Z > BestBelowZ)
+			{
+				BestBelowZ = Z;
+				AnchorRank = R;
+			}
+		}
+		if (AnchorRank == INDEX_NONE)
+		{
+			return false;
+		}
+	}
+	const float AnchorZ = CellFloorZ[SurfIndex(AnchorCell, AnchorRank)];
+
+	// Sample point in CELL-CENTER grid coordinates (cell i's center sits at i+0.5): floor() gives the lower-left
+	// cell of the 2x2 bilinear quad, and the fractional remainder is the interpolation weight within it.
+	const float GX = static_cast<float>((WorldLocation.X - GridOrigin.X) / ActiveCellSize) - 0.5f;
+	const float GY = static_cast<float>((WorldLocation.Y - GridOrigin.Y) / ActiveCellSize) - 0.5f;
+	const int32 IX = FMath::FloorToInt(GX);
+	const int32 IY = FMath::FloorToInt(GY);
+	const float FracX = GX - IX;
+	const float FracY = GY - IY;
+
+	// Resolve one corner's Z: the surface NEAREST AnchorZ (not nearest AnchorFootZ — a neighbouring cell's floor can
+	// sit a full storey away from the anchor's own rank split, so re-picking by raw FootZ could jump layers mid-quad).
+	auto CornerZ = [this, AnchorZ, MaxSurfaceDeltaCm](int32 CX, int32 CY) -> float
+	{
+		CX = FMath::Clamp(CX, 0, GridDimX - 1);
+		CY = FMath::Clamp(CY, 0, GridDimY - 1);
+		const int32 Cell = CY * GridDimX + CX;
+		float BestZ = MAX_flt;
+		float BestDelta = MAX_flt;
+		for (int32 R = 0; R < NumLayers; ++R)
+		{
+			const float Z = CellFloorZ[SurfIndex(Cell, R)];
+			if (Z == MAX_flt)
+			{
+				continue;
+			}
+			const float Delta = FMath::Abs(Z - AnchorZ);
+			if (Delta < BestDelta)
+			{
+				BestDelta = Delta;
+				BestZ = Z;
+			}
+		}
+		// No valid surface at all, OR the nearest one is a different storey (beyond MaxSurfaceDeltaCm) — do NOT
+		// interpolate across a layer boundary (that would read as a vertical teleport); flatten this corner to the
+		// anchor's own Z instead, so it contributes nothing to the slope/height blend.
+		return (BestZ != MAX_flt && BestDelta <= MaxSurfaceDeltaCm) ? BestZ : AnchorZ;
+	};
+
+	const float Z00 = CornerZ(IX, IY);
+	const float Z10 = CornerZ(IX + 1, IY);
+	const float Z01 = CornerZ(IX, IY + 1);
+	const float Z11 = CornerZ(IX + 1, IY + 1);
+
+	OutFloorZ = FMath::Lerp(FMath::Lerp(Z00, Z10, FracX), FMath::Lerp(Z01, Z11, FracX), FracY);
+
+	if (OutFloorNormal)
+	{
+		// Approximate slope from the corner Z gradient (average of the quad's two edge pairs per axis) — good enough
+		// for a hover actor's visual lean / ground-normal, not a physically exact surface normal.
+		const float DZdX = ((Z10 - Z00) + (Z11 - Z01)) * 0.5f / ActiveCellSize;
+		const float DZdY = ((Z01 - Z00) + (Z11 - Z10)) * 0.5f / ActiveCellSize;
+		*OutFloorNormal = FVector(-DZdX, -DZdY, 1.0).GetSafeNormal();
+	}
+
+	return true;
+}
+
+bool UFPSRFlowFieldComputer::SampleHoverFloorZ(const FVector& WorldLocation, const FVector2D& FlowDirXY, float AnchorFootZ, float MaxSurfaceDeltaCm, float& OutFloorZ, FVector* OutFloorNormal) const
+{
+	float HereZ;
+	FVector HereNormal;
+	if (!SampleFloorZBilinear(WorldLocation, AnchorFootZ, MaxSurfaceDeltaCm, HereZ, OutFloorNormal ? &HereNormal : nullptr))
+	{
+		return false;
+	}
+	OutFloorZ = HereZ;
+	if (OutFloorNormal)
+	{
+		*OutFloorNormal = HereNormal;
+	}
+
+	// Look-ahead (pre-rise before a step): probe one cell along the flow direction at the SAME anchor FootZ, and
+	// take the max of "here" and "ahead" — a hover actor starts climbing before it reaches the step instead of
+	// snapping up at the cell boundary. A failed or LOWER ahead sample never lowers the result.
+	if (!FlowDirXY.IsNearlyZero())
+	{
+		const FVector2D AheadDir = FlowDirXY.GetSafeNormal();
+		const FVector AheadLocation = WorldLocation + FVector(AheadDir.X, AheadDir.Y, 0.0) * ActiveCellSize;
+		float AheadZ;
+		FVector AheadNormal;
+		if (SampleFloorZBilinear(AheadLocation, AnchorFootZ, MaxSurfaceDeltaCm, AheadZ, OutFloorNormal ? &AheadNormal : nullptr)
+			&& AheadZ > HereZ)
+		{
+			OutFloorZ = AheadZ;
+			if (OutFloorNormal)
+			{
+				*OutFloorNormal = AheadNormal;
+			}
+		}
+	}
+	return true;
+}
+
 int32 UFPSRFlowFieldComputer::GetPathDistanceCells(const FVector& WorldLocation, EFPSRFieldQuery& OutStatus) const
 {
 	if (GridDimX <= 0 || GridDimY <= 0)

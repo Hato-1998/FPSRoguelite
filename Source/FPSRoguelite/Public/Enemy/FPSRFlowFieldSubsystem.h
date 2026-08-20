@@ -43,6 +43,11 @@ public:
 	 *  retries against the map whose grid actually contains it so flow stays continuous at the boundary. */
 	FVector SampleFlowDirection(const FGameplayTag& MapId, const FVector& WorldLocation) const;
 
+	/** U hover height v2: routing wrapper for UFPSRFlowFieldComputer::SampleHoverFloorZ on the unified field (same
+	 *  P-G "one continuous field" routing as SampleFlowDirection — no per-map MapId needed). False with no
+	 *  UnifiedComputer (off-authority / pre-build). See the computer's header comment for the sampler contract. */
+	bool SampleHoverFloorZ(const FVector& Loc, const FVector2D& FlowDirXY, float AnchorFootZ, float MaxSurfaceDeltaCm, float& OutFloorZ, FVector* OutFloorNormal = nullptr) const;
+
 	/** The continuous flow field (P-G: ALWAYS built on the server — a real bUnifiedExtent multimap grid, OR a single
 	 *  degenerate world-trace grid for a plain single-map). Used for flow sampling + origin<->target open-grid connectivity
 	 *  (FPSRCombat::CanAffectTarget). Null only off-authority (clients never build it) / pre-build. Server-authoritative. */

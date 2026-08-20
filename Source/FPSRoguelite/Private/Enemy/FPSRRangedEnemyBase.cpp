@@ -103,6 +103,7 @@ EFPSRServerAttackResult AFPSRRangedEnemyBase::ServerTickAttack(const FFPSRServer
 		if (ChargeElapsed >= RangedChargeTime)
 		{
 			FireProjectile(Ctx);
+			NotifyAttacked(Ctx.Now); // ADR 0008: unify the melee/ranged "attack succeeded" signal for stall detection
 			ReleaseRangedHold(); // shot away — clear the warning + free the token (no longer "attempting")
 			ChargeState = EFPSRRangedChargeState::Cooldown;
 			CooldownElapsed = 0.0f;

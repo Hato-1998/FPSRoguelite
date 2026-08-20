@@ -6,6 +6,7 @@
 #include "Enemy/FPSREnemyAnimProfile.h"
 #include "Enemy/FPSREnemyMetricsSubsystem.h" // S4 readability metrics registry (CSV-gated, see below)
 #include "Enemy/FPSREnemyShadowLODSubsystem.h" // per-viewer dynamic-shadow band (see BeginPlay/EndPlay)
+#include "Enemy/FPSRFlowFieldSubsystem.h" // v2 hover height sampler (CachedFlowField, see BeginPlay/ApplyGravity)
 #include "Hero/FPSRCharacter.h"
 #include "Pickup/FPSRPickupSubsystem.h"
 #include "Core/FPSRLogChannels.h"
@@ -94,6 +95,15 @@ void AFPSREnemyBase::BeginPlay()
 	// runs on every Activate (after BeginPlay) and still wins. No-op vs the ctor when NetCullRadius is unchanged (no regression).
 	SetNetCullDistanceSquared(FMath::Square(NetCullRadius));
 
+	// v2 hover height sampler (ApplyGravity): cache the world's flow-field subsystem ONCE — it outlives every pooled
+	// enemy (world subsystem lifetime = world lifetime), so this avoids a GetSubsystem<>() lookup per enemy per
+	// movement update at swarm scale. Null on a world with no flow field (pre-content) — ApplyGravity falls back to
+	// the v1 scene-query path unconditionally in that case.
+	if (UWorld* World = GetWorld())
+	{
+		CachedFlowField = World->GetSubsystem<UFPSRFlowFieldSubsystem>();
+	}
+
 	// Fallback placeholder mesh from config only when no content BP mesh was assigned (Game.md §6-2 — no hard-coded
 	// path in C++). Normal enemy BPs carry a VAT mesh, so the guard skips the load; only the raw-C++ spawn hits it.
 	if (Mesh && Mesh->GetStaticMesh() == nullptr)
@@ -118,6 +128,14 @@ void AFPSREnemyBase::BeginPlay()
 
 	// Per-actor animation phase (0..1) derived from the actor id so pooled enemies don't animate in lockstep (U20).
 	AnimPhase = static_cast<float>(GetUniqueID() % 1000) / 1000.0f;
+
+	// Publish the phase ONCE to the CPD contract slot so procedural materials de-lockstep from a STABLE per-actor
+	// value. (A position-hash phase inside the material rotates the mesh as the actor MOVES — measured regression.)
+	// Written here (BeginPlay runs on every machine with rendering) and never cleared: CPD survives pooling reuse.
+	if (Mesh)
+	{
+		Mesh->SetCustomPrimitiveDataFloat(FPSRVATAnim::CPDSlot_Phase, AnimPhase);
+	}
 
 	// Bind the world-space health bar / floating-damage widget to the health component once (server + clients).
 	// Pooling-safe: the actor + widget persist across dormancy, so this single bind survives every reuse.
@@ -239,6 +257,21 @@ void AFPSREnemyBase::Activate(const FVector& Location)
 	}
 
 	CurrentMoveSpeed = MoveSpeed * FMath::FRandRange(0.9f, 1.1f);
+	// Per-instance hover height (spec item 4): sample from the authored range when one exists (Max > Min), else fall
+	// back to the single HoverHeight value (existing archetype BPs with no range authored see no behavior change).
+	CurrentHoverHeight = (HoverHeightMax > HoverHeightMin) ? FMath::FRandRange(HoverHeightMin, HoverHeightMax) : HoverHeight;
+	HoverSpringRateZ = 0.0f; // fresh spring state for the reused actor (no residual velocity from a prior life)
+	// ADR 0008 (pursuit mode) reset — full sweep, pool-reuse leak prevention: PursuitState back to Flow with every
+	// timer/accumulator zeroed, a fresh per-instance seek altitude sample (HoverHeightMin/Max's pattern exactly),
+	// and the seek-Z override + forward-blocked flag cleared so a reused actor never inherits a prior life's
+	// mid-climb Seek3D state (e.g. spawning already believing the previous life's roof was blocking it).
+	PursuitState.Reset();
+	CurrentSeekAltitude = (SeekAltitudeAbovePlayerMax > SeekAltitudeAbovePlayerMin)
+		? FMath::FRandRange(SeekAltitudeAbovePlayerMin, SeekAltitudeAbovePlayerMax)
+		: SeekAltitudeAbovePlayerMin;
+	SeekTargetZ = 0.0f;
+	bSeekTargetZValid = false;
+	bLastForwardBlocked = false;
 	VerticalVelocity = 0.0f; // reset fall state for the reused actor
 	bGrounded = false;       // re-check ground on the first update (may spawn on a rooftop)
 	GroundRecheckTimer = 0.0f;
@@ -523,28 +556,86 @@ EFPSRServerAttackResult AFPSREnemyBase::ServerTickAttack(const FFPSRServerAttack
 	return EFPSRServerAttackResult::None;
 }
 
-void AFPSREnemyBase::TickServerMovement(const FVector& MoveDirection, const FVector& FaceDirection, float ScaledDeltaSeconds)
+void AFPSREnemyBase::TickServerMovement(const FFPSRServerMoveContext& Ctx)
 {
 	if (!HasAuthority() || (HealthComponent && HealthComponent->IsDead()))
 	{
 		return;
 	}
 
+	// ADR 0008 pursuit judgment — GATED OFF by default (2026-08-15 emergency patch, see bEnableSeek3D's comment):
+	// PIE found the flow-zero trigger is GLOBAL (one player on an unreachable deck zeroes the WHOLE map's BFS
+	// sources, so the entire swarm opens Seek3D at once) and the altitude target chased the player's INSTANTANEOUS
+	// Z (jittering the whole swarm on every jump). ADR 0009 (a local 3D window field) is the confirmed fix; until
+	// then bEnableSeek3D stays false so no enemy ever calls PursuitState.Tick — its timers/escalation would just be
+	// dead motion — and bSeeking stays false, which also kills the step-up branch's Seek3D skip below (restoring
+	// the always-run pre-0008 lift loop, byte-for-byte the old grounded behavior).
+	bool bSeeking = false;
+	if (bEnableSeek3D)
+	{
+		// Advance the pursuit judgment FIRST, using the PREVIOUS pass's forward-blocked reading
+		// (bLastForwardBlocked, set by the step-up branch (b) below) — a one-pass lag the ADR accepts (movement
+		// ticks only a few cm apart). Params are copied from this archetype's EditDefaultsOnly Seek3D data every
+		// pass (invariant 4 — variety is DATA, never a code branch per archetype).
+		FFPSRPursuitParams SeekParams;
+		SeekParams.StallTime = SeekStallTime;
+		SeekParams.StallMinMove = SeekStallMinMove;
+		SeekParams.ClimbStep = SeekClimbStep;
+		SeekParams.ClimbCeiling = SeekClimbCeiling;
+		SeekParams.ClearDecayTime = SeekClearDecayTime;
+		SeekParams.ModeMinHold = SeekModeMinHold;
+		PursuitState.Tick(Ctx.ScaledDelta, GetActorLocation(), Ctx.bHasTarget, Ctx.bFlowZero, bLastForwardBlocked,
+			LastAttackTime, Ctx.Now, SeekParams);
+		// bHasTarget also gates Seek3D off on the authored exit-path branch (which assembles bHasTarget=false, ADR
+		// 0008 §2) even if PursuitState still nominally reads Seek3D from a prior life — the exit route must never
+		// be interrupted by a pursuit escape.
+		bSeeking = Ctx.bHasTarget && PursuitState.Mode == EFPSRPursuitMode::Seek3D;
+	}
+	bLastForwardBlocked = false; // this pass's OWN sweep result is recorded fresh below, for the NEXT call (harmless even while the gate is off)
+
+	// Seek3D vertical target for ApplyGravity's v2 spring (invariant 2 — this only supplies a TARGET; the spring
+	// integrator itself never forks by mode): player-relative altitude band + this pass's climb escalation.
+	// Ctx.TargetGroundedZ (NOT TargetLocation.Z, ADR 0009 invariant, piped ahead of the redesign): the altitude
+	// band tracks where the target last stood on ground, not its instantaneous jump/fall Z — avoids the whole
+	// swarm's seek altitude jittering in lockstep with every player hop.
+	bSeekTargetZValid = bSeeking;
+	if (bSeekTargetZValid)
+	{
+		SeekTargetZ = Ctx.TargetGroundedZ + CurrentSeekAltitude + PursuitState.ClimbOffset;
+	}
+
 	// (U20) Pre-move location to classify walk vs idle for the cosmetic anim. Guarded so it is zero-cost when no
 	// AnimProfile is assigned (the swarm default until Stage 3). Authority render only (standalone / listen host).
 	const FVector AnimStartLoc = AnimProfile ? GetActorLocation() : FVector::ZeroVector;
 
-	// Knockback (explosion push): a decaying horizontal impulse. While it's active, suppress flow-field steering
-	// so the push isn't immediately cancelled by the enemy walking back toward the player.
+	// Knockback (explosion push): a decaying horizontal impulse. While it's active, suppress flow/seek steering so
+	// the push isn't immediately cancelled by the enemy walking back toward the player.
 	const bool bKnockbackActive = !KnockbackVelocityXY.IsNearlyZero(1.0f);
 
-	// Horizontal steering (flow-field + separation), swept so it blocks against walls.
-	FVector Dir = MoveDirection;
+	// Horizontal steering. Seek3D (ADR 0008 §2): a straight-line XY beeline to the target REPLACES the flow +
+	// separation MoveDir — no separation applied (a recovery maneuver is short-lived, so momentary clumping during
+	// it is an accepted cost rather than complicating the escape steering, noted in the ADR). Flow mode is
+	// unchanged (Ctx.MoveDir already carries flow + separation, combined by the caller).
+	// Seek3D MUST re-apply the engagement standoff itself: the subsystem's StopDistance gate only zeroed Ctx.MoveDir,
+	// which the beeline discards — without this 3D check every seeking enemy advances until its XY converges onto the
+	// target's own column (and with separation off, the swarm stacks into one vertical pillar over the player). The
+	// full-3D distance mirrors the subsystem's stop semantics (BestDist3DSq): an enemy holding at its seek altitude
+	// near the target counts its height gap toward the standoff, then holds and lets the spring/attack do the rest.
+	FVector Dir;
+	if (bSeeking)
+	{
+		const FVector ToTarget = Ctx.TargetLocation - GetActorLocation();
+		Dir = (ToTarget.SizeSquared() > FMath::Square(GetStopDistance())) ? ToTarget : FVector::ZeroVector;
+	}
+	else
+	{
+		Dir = Ctx.MoveDir;
+	}
 	Dir.Z = 0.0f;
 	if (!bKnockbackActive && Dir.SizeSquared() > KINDA_SMALL_NUMBER)
 	{
 		const FVector Normalized = Dir.GetSafeNormal();
-		const float MoveDist = GetEffectiveMoveSpeed() * ScaledDeltaSeconds;
+		const float MoveDist = GetEffectiveMoveSpeed() * Ctx.ScaledDelta;
 
 		// Walk ALONG the ground slope (the swarm equivalent of CharacterMovement's MoveAlongFloor): project the steering
 		// onto the last-known ground plane and move at full speed along it, so the enemy ascends/descends ramps and stair
@@ -571,39 +662,52 @@ void AFPSREnemyBase::TickServerMovement(const FVector& MoveDirection, const FVec
 			else if (bGrounded && !Remaining.IsNearlyZero())
 			{
 				// (b) RISER / LEDGE / ramp-crest LIP (anything not a walkable slope — covers the whole normal-Z range below
-				// WalkableSlopeNormalZ, so a face between a ramp and vertical no longer stalls the enemy dead). Step up so it
-				// climbs what the flow field routed it toward. A ramp/stair top onto a platform can present a lip taller than
-				// one flat GroundSnapTolerance step, so try progressively taller lifts and take the SMALLEST that lets the
-				// re-advance make progress (no over-hop on small risers). On a SLOPE (cresting a ramp — GroundNormal tilted)
-				// allow up to MaxCrestStepUp; on FLAT ground cap at one step so enemies don't scale walls the field routes
-				// around. Each lift is swept (stops under a low ceiling); ApplyGravity settles onto the top. Revert if none
-				// clears (taller than the cap = a wall, not a riser) so we don't bob against it.
-				//
-				// Re-advance along the FLOW (FaceDirection), NOT the separation-laden move dir: a lifted enemy carrying the
-				// lateral separation push of its stair-mates would walk off the side of a narrow flight and fall. Climbing
-				// FORWARD (toward the objective) keeps it on the stairs. Magnitude = the blocked remainder of this move.
-				FVector StepFwd = FaceDirection;
-				StepFwd.Z = 0.0f;
-				StepFwd = StepFwd.IsNearlyZero() ? MoveDir.GetSafeNormal2D() : StepFwd.GetSafeNormal();
-				const FVector StepAdvance = StepFwd * (MoveDist * (1.0f - MoveHit.Time));
-				const FVector PreStepLoc = GetActorLocation();
-				const float MaxLift = (GroundNormal.Z < 0.99f) ? MaxCrestStepUp : GroundSnapTolerance;
-				bool bCleared = false;
-				for (float Lift = GroundSnapTolerance; Lift <= MaxLift + KINDA_SMALL_NUMBER; Lift += GroundSnapTolerance)
+				// WalkableSlopeNormalZ, so a face between a ramp and vertical no longer stalls the enemy dead).
+				if (bSeeking)
 				{
-					SetActorLocation(PreStepLoc, false);
-					AddActorWorldOffset(FVector(0.0f, 0.0f, Lift), true);
-					FHitResult StepFwdHit;
-					AddActorWorldOffset(StepAdvance, true, &StepFwdHit);
-					if (!(StepFwdHit.bBlockingHit && StepFwdHit.Time < KINDA_SMALL_NUMBER))
-					{
-						bCleared = true; // this lift cleared the riser/lip (re-advance made progress)
-						break;
-					}
+					// ADR 0008 invariant 2: Seek3D NEVER pushes Z directly via the lift loop below — vertical motion
+					// is the v2 spring's job alone (SeekTargetZ, escalated by FFPSRPursuitState next pass via
+					// ClimbOffset). Record the block for the NEXT Tick's climb escalation input and skip the lift.
+					bLastForwardBlocked = true;
 				}
-				if (!bCleared)
+				else
 				{
-					SetActorLocation(PreStepLoc, false);
+					// FLOW MODE (unchanged): step up so it climbs what the flow field routed it toward. A ramp/stair
+					// top onto a platform can present a lip taller than one flat GroundSnapTolerance step, so try
+					// progressively taller lifts and take the SMALLEST that lets the re-advance make progress (no
+					// over-hop on small risers). On a SLOPE (cresting a ramp — GroundNormal tilted) allow up to
+					// MaxCrestStepUp; on FLAT ground cap at one step so enemies don't scale walls the field routes
+					// around. Each lift is swept (stops under a low ceiling); ApplyGravity settles onto the top.
+					// Revert if none clears (taller than the cap = a wall, not a riser) so we don't bob against it.
+					//
+					// Re-advance along the FLOW (Ctx.FaceDir), NOT the separation-laden move dir: a lifted enemy
+					// carrying the lateral separation push of its stair-mates would walk off the side of a narrow
+					// flight and fall. Climbing FORWARD (toward the objective) keeps it on the stairs. Magnitude =
+					// the blocked remainder of this move.
+					FVector StepFwd = Ctx.FaceDir;
+					StepFwd.Z = 0.0f;
+					StepFwd = StepFwd.IsNearlyZero() ? MoveDir.GetSafeNormal2D() : StepFwd.GetSafeNormal();
+					const FVector StepAdvance = StepFwd * (MoveDist * (1.0f - MoveHit.Time));
+					const FVector PreStepLoc = GetActorLocation();
+					const float MaxLift = (GroundNormal.Z < 0.99f) ? MaxCrestStepUp : GroundSnapTolerance;
+					bool bCleared = false;
+					for (float Lift = GroundSnapTolerance; Lift <= MaxLift + KINDA_SMALL_NUMBER; Lift += GroundSnapTolerance)
+					{
+						SetActorLocation(PreStepLoc, false);
+						AddActorWorldOffset(FVector(0.0f, 0.0f, Lift), true);
+						FHitResult StepFwdHit;
+						AddActorWorldOffset(StepAdvance, true, &StepFwdHit);
+						if (!(StepFwdHit.bBlockingHit && StepFwdHit.Time < KINDA_SMALL_NUMBER))
+						{
+							bCleared = true; // this lift cleared the riser/lip (re-advance made progress)
+							break;
+						}
+					}
+					if (!bCleared)
+					{
+						SetActorLocation(PreStepLoc, false);
+					}
+					bLastForwardBlocked = !bCleared; // still blocked only if no lift height cleared it
 				}
 			}
 		}
@@ -615,9 +719,9 @@ void AFPSREnemyBase::TickServerMovement(const FVector& MoveDirection, const FVec
 			GroundRecheckTimer = 0.0f;
 		}
 
-		// Face the PLAYER (FaceDirection), not the move direction: at StopDistance the move is separation-only and its
-		// direction jitters, which would spin the enemy 360deg in place. FaceDirection is stable (toward the target).
-		FVector FaceXY = FaceDirection;
+		// Face the PLAYER (Ctx.FaceDir), not the move direction: at StopDistance the move is separation-only and its
+		// direction jitters, which would spin the enemy 360deg in place. Ctx.FaceDir is stable (toward the target).
+		FVector FaceXY = Ctx.FaceDir;
 		FaceXY.Z = 0.0f;
 		if (!FaceXY.IsNearlyZero())
 		{
@@ -627,8 +731,8 @@ void AFPSREnemyBase::TickServerMovement(const FVector& MoveDirection, const FVec
 
 	if (bKnockbackActive)
 	{
-		AddActorWorldOffset(KnockbackVelocityXY * ScaledDeltaSeconds, true); // swept: blocks against walls
-		const float DecayFactor = FMath::Exp(-ScaledDeltaSeconds / FMath::Max(KnockbackDecayTime, 0.01f));
+		AddActorWorldOffset(KnockbackVelocityXY * Ctx.ScaledDelta, true); // swept: blocks against walls
+		const float DecayFactor = FMath::Exp(-Ctx.ScaledDelta / FMath::Max(KnockbackDecayTime, 0.01f));
 		KnockbackVelocityXY *= DecayFactor;
 		if (KnockbackVelocityXY.IsNearlyZero(1.0f))
 		{
@@ -637,15 +741,17 @@ void AFPSREnemyBase::TickServerMovement(const FVector& MoveDirection, const FVec
 	}
 
 	// Vertical: ground-follow + gravity ALWAYS (even when not steering) so enemies never float and a
-	// rooftop-spawned enemy falls before chasing.
-	ApplyGravity(ScaledDeltaSeconds);
+	// rooftop-spawned enemy falls before chasing. Ctx.FaceDir feeds the v2 hover sampler's look-ahead (a floater
+	// pre-rises before a step in its direction of travel); SeekTargetZ (set above) folds into the SAME spring via
+	// ApplyGravity's max() — see ApplyGravity and its ADR 0008 note.
+	ApplyGravity(Ctx.ScaledDelta, Ctx.FaceDir);
 
 	// (U20) Cosmetic walk/idle from the actual XY displacement this pass. Skip the override while a fresh melee attack
 	// tell is still within its cooldown window so ServerTickAttack's Attack state isn't clobbered the same pass (a
 	// stationary attacker reads as Idle otherwise). Attack-anim length/persistence is refined with the clips in Stage 3.
 	if (AnimProfile)
 	{
-		const float ExpectedMove = GetEffectiveMoveSpeed() * ScaledDeltaSeconds;
+		const float ExpectedMove = GetEffectiveMoveSpeed() * Ctx.ScaledDelta;
 		const float MovedSq = FVector::DistSquaredXY(GetActorLocation(), AnimStartLoc);
 		const bool bMoved = ExpectedMove > KINDA_SMALL_NUMBER && MovedSq > FMath::Square(ExpectedMove * 0.25f);
 		if (bMoved)
@@ -673,7 +779,7 @@ void AFPSREnemyBase::ApplyKnockback(const FVector& Velocity)
 	GroundRecheckTimer = 0.0f; // re-check the floor immediately
 }
 
-void AFPSREnemyBase::ApplyGravity(float ScaledDeltaSeconds)
+void AFPSREnemyBase::ApplyGravity(float ScaledDeltaSeconds, const FVector& FlowDirXY)
 {
 	UWorld* World = GetWorld();
 	if (!World || !Capsule)
@@ -681,16 +787,99 @@ void AFPSREnemyBase::ApplyGravity(float ScaledDeltaSeconds)
 		return;
 	}
 
+	const float HalfHeight = Capsule->GetScaledCapsuleHalfHeight();
+
+	// --- v2 PRIORITY PATH: flow-field CellFloorZ array sampler (spec ①③) — zero scene query, every movement update
+	//     (no amortize timer; SampleHoverFloorZ is O(1) array math, cheap enough to run unthrottled at swarm scale).
+	//     Gate = CurrentHoverHeight>0 && VerticalVelocity<=0 (NOT bGrounded, 2026-08-14 follow-up — user decision): a
+	//     hover archetype descending under gravity, past the apex of a knockback launch, or freshly spawned in the
+	//     air ALSO glides down on this path instead of free-falling — a cliff/step-down should look like a smooth
+	//     height-correction, not a physics drop. Still ballistic while RISING (VerticalVelocity>0, the initial
+	//     upward half of a knockback pop) — the launch arc itself is unchanged. ---
+	if (CurrentHoverHeight > 0.0f && VerticalVelocity <= 0.0f && CachedFlowField)
+	{
+		const FVector Loc = GetActorLocation();
+		// AnchorFootZ = capsule BOTTOM (Z - HalfHeight), NOT ActorZ - EnemyStandOffset(95) — that offset is Sample()'s
+		// own convention for the flow-DIRECTION query. SampleFloorZBilinear picks each corner's surface NEAREST this
+		// foot Z within MaxLayerPickDrop (200cm, PickRankForFootZ), falling back to the nearest surface BELOW the foot
+		// when none is near it (a cliff/ledge glide-descent target) — since a hovering foot sits CurrentHoverHeight
+		// above its actual floor, that 200cm budget is still the hard ceiling on how high HoverHeight/HoverHeightMax
+		// can go before the primary anchor pick finds the WRONG storey (see the HoverHeight UPROPERTY comment).
+		const float AnchorFootZ = static_cast<float>(Loc.Z) - HalfHeight;
+		float FloorZ;
+		FVector FloorNormal;
+		const bool bTerrainSampled = CachedFlowField->SampleHoverFloorZ(Loc, FVector2D(FlowDirXY.X, FlowDirXY.Y), AnchorFootZ, MaxCrestStepUp, FloorZ, &FloorNormal);
+
+		// ADR 0008: while Seek3D holds a valid target this pass (bSeekTargetZValid), the spring's TargetZ is
+		// max(terrain-relative rest, SeekTargetZ) — ONE integrator regardless of pursuit mode (invariant 2), never a
+		// separate Seek3D Z code path. A terrain-sampler MISS with a live seek target (open air past a roof edge, a
+		// building the flow field doesn't cover) still resolves via SeekTargetZ ALONE, so a Seek3D enemy stays on
+		// this zero-scene-query path instead of dropping to the v1 fallback below (invariant 5 — no added queries).
+		if (bTerrainSampled || bSeekTargetZValid)
+		{
+			// No cliff cutoff here (v1 had one via MaxStepDownHeight) — a sampled target arbitrarily far below is now
+			// exactly the case this path exists to handle: the spring GLIDES down to it over time (rate-limited by
+			// HoverSpringFrequency/DampingRatio, not a teleport), which is the requested descent curve. The anchor's
+			// two-tier pick (SampleFloorZBilinear) plus the corner MaxSurfaceDeltaCm guard are what keep the terrain
+			// TARGET itself sane (never a storey the enemy didn't actually fall past); this code only decides how to
+			// REACH the (possibly seek-overridden) target.
+			float TargetZ = bTerrainSampled ? (FloorZ + HalfHeight + GroundRestClearance + CurrentHoverHeight) : -MAX_flt;
+			if (bSeekTargetZValid)
+			{
+				TargetZ = FMath::Max(TargetZ, SeekTargetZ);
+			}
+
+			// Continuity seed: captured while airborne (falling, or past a knockback's apex) — the spring inherits the
+			// current ballistic VerticalVelocity so the hand-off curves smoothly into the glide instead of kinking. An
+			// already-grounded tick keeps the spring's own running rate (VerticalVelocity is 0 there -> a no-op).
+			if (!bGrounded)
+			{
+				HoverSpringRateZ = VerticalVelocity;
+			}
+
+			float Z = static_cast<float>(Loc.Z);
+			FMath::SpringDamper(Z, HoverSpringRateZ, TargetZ, 0.0f, ScaledDeltaSeconds, HoverSpringFrequency, HoverSpringDampingRatio);
+			SetActorLocation(FVector(Loc.X, Loc.Y, Z), false);
+			if (bTerrainSampled)
+			{
+				GroundNormal = FloorNormal; // only a real terrain sample has a meaningful surface normal to lean on
+			}
+			VerticalVelocity = 0.0f;
+			bGrounded = true; // the spring is now carrying vertical motion — no longer a free-falling body
+			HoverRestZ = TargetZ; // keep the v1 fallback's glide target current in case a later sample fails
+			return;
+		}
+		// Neither the terrain sampler nor a Seek3D target succeeded — fall through to the v1 scene-query path: a
+		// genuine void / grid edge with nothing (terrain or seek) to glide onto.
+	}
+
+	// --- v1 SCENE-QUERY PATH (fallback for a non-hovering archetype, an airborne/launched enemy, a hover sample
+	//     miss, or a world with no CachedFlowField) — unchanged ground-follow + gravity integrator, except the two
+	//     glide sites now drive the SAME spring as the v2 path (HoverSpringRateZ) instead of v1's constant-speed
+	//     FInterpConstantTo, so a mid-flight handoff between the array sampler and this fallback carries its
+	//     velocity instead of resetting it. ---
+
 	// Amortize: a stably grounded enemy re-checks the floor only every GroundRecheckInterval; airborne enemies
 	// (falling) run every update so they land promptly (Codex P1 — no per-frame scene query for the whole swarm).
 	GroundRecheckTimer -= ScaledDeltaSeconds;
 	if (bGrounded && GroundRecheckTimer > 0.0f)
 	{
+		// Hovering archetypes keep springing toward the cached rest height BETWEEN floor re-checks — only these ticks
+		// touch Z; the amortization otherwise quantizes the motion into visible hops (no scene query here).
+		if (CurrentHoverHeight > 0.0f)
+		{
+			const FVector L = GetActorLocation();
+			if (!FMath::IsNearlyEqual(L.Z, HoverRestZ, 0.1f))
+			{
+				float Z = static_cast<float>(L.Z);
+				FMath::SpringDamper(Z, HoverSpringRateZ, HoverRestZ, 0.0f, ScaledDeltaSeconds, HoverSpringFrequency, HoverSpringDampingRatio);
+				SetActorLocation(FVector(L.X, L.Y, Z), false);
+			}
+		}
 		return;
 	}
 	GroundRecheckTimer = GroundRecheckInterval;
 
-	const float HalfHeight = Capsule->GetScaledCapsuleHalfHeight();
 	const FVector Loc = GetActorLocation();
 
 	// Down-trace against STATIC world ONLY — ignore other pawns/dynamic actors so a falling enemy doesn't 'land'
@@ -719,7 +908,7 @@ void AFPSREnemyBase::ApplyGravity(float ScaledDeltaSeconds)
 	}
 	if (bHitFloor)
 	{
-		const float TargetZ = Hit.ImpactPoint.Z + HalfHeight + GroundRestClearance; // rest just above the floor (not flush — see GroundRestClearance)
+		const float TargetZ = Hit.ImpactPoint.Z + HalfHeight + GroundRestClearance + CurrentHoverHeight; // rest just above the floor (+CurrentHoverHeight for floating archetypes)
 		const float Diff = Loc.Z - TargetZ;
 
 		// Snap window: DOWN up to MaxStepDownHeight while GROUNDED (a grounded enemy walking off a small ledge / down a
@@ -728,12 +917,30 @@ void AFPSREnemyBase::ApplyGravity(float ScaledDeltaSeconds)
 		// A drop beyond the down budget is a true cliff -> fall under gravity below (the flow routes to the stair; don't
 		// snap across a storey). An AIRBORNE enemy keeps the tight ±GroundSnapTolerance window so it lands cleanly rather
 		// than snapping onto a passing ledge. NOT while rising under a knockback impulse (VerticalVelocity > 0).
+		// The UP-snap window must include CurrentHoverHeight: a hovering archetype's rest target sits CurrentHoverHeight
+		// above the old one, so a freshly spawned (ground-snapped) enemy is legitimately that much below target —
+		// without this the spawn state reads as the no-snap fall path and the enemy free-falls through the floor
+		// (regression fix). The wall guard's meaning is preserved: relative to the ACTUAL rest height the allowance is
+		// still ±Tolerance.
 		const float SnapDown = bGrounded ? MaxStepDownHeight : GroundSnapTolerance;
-		if (VerticalVelocity <= 0.0f && Diff <= SnapDown && Diff >= -GroundSnapTolerance)
+		if (VerticalVelocity <= 0.0f && Diff <= SnapDown && Diff >= -(GroundSnapTolerance + CurrentHoverHeight))
 		{
+			HoverRestZ = TargetZ; // refresh the glide target on every floor re-check
 			if (!FMath::IsNearlyZero(Diff))
 			{
-				SetActorLocation(FVector(Loc.X, Loc.Y, TargetZ), false); // small slope/step correction
+				// Floaters spring toward the rest height (stair treads = smooth ramp); walkers snap instantly (no regression).
+				float NewZ;
+				if (CurrentHoverHeight > 0.0f)
+				{
+					float Z = static_cast<float>(Loc.Z);
+					FMath::SpringDamper(Z, HoverSpringRateZ, TargetZ, 0.0f, ScaledDeltaSeconds, HoverSpringFrequency, HoverSpringDampingRatio);
+					NewZ = Z;
+				}
+				else
+				{
+					NewZ = TargetZ;
+				}
+				SetActorLocation(FVector(Loc.X, Loc.Y, NewZ), false); // small slope/step correction
 			}
 			VerticalVelocity = 0.0f;
 			bGrounded = true;
@@ -749,10 +956,18 @@ void AFPSREnemyBase::ApplyGravity(float ScaledDeltaSeconds)
 			float NewZ = Loc.Z + VerticalVelocity * ScaledDeltaSeconds;
 			if (VerticalVelocity <= 0.0f && NewZ <= TargetZ)
 			{
+				if (CurrentHoverHeight > 0.0f)
+				{
+					// Seed the shared spring with the falling velocity BEFORE it's zeroed below, so a hover archetype's
+					// landing eases into its rest height carrying its fall momentum instead of restarting from a dead
+					// stop (v1 hard-snapped on landing; v2's spring inherits the motion — no rethink-then-rise pop).
+					HoverSpringRateZ = VerticalVelocity;
+				}
 				NewZ = TargetZ;
 				VerticalVelocity = 0.0f;
 				bGrounded = true;
 				GroundNormal = Hit.ImpactNormal; // just landed -> remember the slope
+				HoverRestZ = TargetZ;            // landing seeds the floater's glide target
 			}
 			else
 			{
