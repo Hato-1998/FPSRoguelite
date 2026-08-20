@@ -9,6 +9,24 @@
 
 ---
 
+## 🧾 보스 프리즈 "미정지" = 오진 — 프리즈 계약 명문화로 종결 (2026-08-19, `docs/freeze-anim-contract`)
+> 보드 행 = *"보스가 카드 프리즈 중에도 정지하지 않음 — §2-2 프리즈 게이트 대칭 구멍"*(하이 · S · Fable · 마일스톤 미배정).
+> **결론: 결함이 아니다.** 조사로 결론을 냈으므로 §6-9 (5) 정의상 `완료`(폐기 아님). 산출물 = 계약 명문화 2건.
+
+### 무엇이 틀렸나
+행은 2026-08-18 레드팀 리뷰에서 *"`Boss/FPSRBossBase.cpp` 에 pause 참조 0건"* 만 근거로 **"프리즈 중에도 보스가 계속 행동한다"** 고 서술했다(재현 절차·PIE 관찰 없음). 실제로는 같은 클래스의 **헤더**가 *"movement is disabled … no per-tick logic — so there is nothing for the global level-up freeze to gate here"* 라 적고 `bCanEverTick=false` 다 — **멈출 행동이 없어서** 가드가 없는 것이다.
+
+에디터를 열지 않고 `BP_Boss.uasset` 을 바이너리로 실측한 결과도 같았다: 그래프에 `ReceiveTick` 은 있으나(C++ 주석과 어긋나는 지점) 호출 노드는 `GetComponentByClass`·`GetUserWidgetObject` + 캐스트(`FPSREnemyHealthComponent`/`WBP_BossHealthBar`) + BP 함수 `InitHealthComp` 뿐이고, **`AddMovementInput`·`SetActorLocation`·`SetTimer`·`SpawnActor`·`Montage`·`AIController` 는 전부 0건**이다.
+
+### PIE 재현(사용자 실시) = 아이들 애님만 재생 → 비대칭도 없었다
+프리즈는 **입력·게임플레이 틱 게이트**지 시간정지가 아니라, 세 주체가 전부 같게 동작한다 — 플레이어는 입력만 막히고 AnimBP는 계속 돌며(`AFPSRCharacter::IsRunFrozen()` 게이트 11곳), 스웜 적도 이동·공격 배치 패스만 스킵되고(`FPSREnemySpawnSubsystem` early return 2곳) **VAT 아이들 클립은 계속 재생**된다(playrate 0은 *거리* LOD `FPSRVATAnim::AnimFreezeRadiusSq` 에서만). 보스만의 구멍이 아니었다.
+
+### 왜 오진이 가능했나 → 그게 산출물이다
+`RunFlow.md` §2-2가 *"적·플레이어 모두 정지(적은 제자리 동결…)"* 라고만 적고 **애니메이션을 한 번도 언급하지 않았다.** "제자리 동결"은 위치 고정이지 포즈 정지가 아닌데 그 구분이 문서에 없었다. → §2-2에 **주체별 정지/비정지 표**를 명문화하고, `Troubleshooting.md` **G12**("참조 0건을 '결함이 있다'의 증거로 쓰지 말 것")를 신설했다.
+
+### 잔여 1건 (별도 행)
+`BP_Boss` 의 **게이트 없는 Event Tick** — 매 프레임 `GetUserWidgetObject` 폴링으로 체력바를 배선한다. 게임플레이 무관 P3(BeginPlay 1회로 옮기는 게 맞다).
+
 ## 🧾 BP 인라인 Text 자동검사 하네스 — M0 EC ② 회귀 가드 (2026-08-19, `phase/loc-bptext-audit`, 구현 Sonnet 위임 / 검증 Opus 직접)
 > 보드 행 = *"BP 인라인 Text가 gather에 구조적으로 안 잡힌다 — 에셋 수집 단계 부재"*(마일스톤 **미배정 → M0 배정**(사용자 결정 2026-08-19) · 백로그→미듐 · M · Opus).
 > **정본 = `Docs/SSOT/Localization.md` §L-7.** 같은 날 닫힌 EC ②(`c485b68e`·`1c646085`)의 BP 축이 *수동 열거 + 바이너리 grep*에 의존했고 새 리터럴을 막을 장치가 없던 것을 메운다.
