@@ -272,6 +272,8 @@ void AFPSREnemyBase::Activate(const FVector& Location)
 	SeekTargetZ = 0.0f;
 	bSeekTargetZValid = false;
 	bLastForwardBlocked = false;
+	LastAttackTime = -1000.0f; // the pursuit stall window reads this (bRecentAttack) — a prior life's attack must not
+	                           // suppress the reused actor's stall detection for up to StallTime (merge-gate P3)
 	VerticalVelocity = 0.0f; // reset fall state for the reused actor
 	bGrounded = false;       // re-check ground on the first update (may spawn on a rooftop)
 	GroundRecheckTimer = 0.0f;
@@ -795,8 +797,14 @@ void AFPSREnemyBase::ApplyGravity(float ScaledDeltaSeconds, const FVector& FlowD
 	//     hover archetype descending under gravity, past the apex of a knockback launch, or freshly spawned in the
 	//     air ALSO glides down on this path instead of free-falling — a cliff/step-down should look like a smooth
 	//     height-correction, not a physics drop. Still ballistic while RISING (VerticalVelocity>0, the initial
-	//     upward half of a knockback pop) — the launch arc itself is unchanged. ---
-	if (CurrentHoverHeight > 0.0f && VerticalVelocity <= 0.0f && CachedFlowField)
+	//     upward half of a knockback pop) — the launch arc itself is unchanged.
+	//     NOT while following an authored exit path (bFollowingExitPath): the exit route exists precisely because the
+	//     baked field does not describe the spawn structure's interior, and the look-ahead (FaceDir = exit direction,
+	//     pointing INTO the structure's wall) can anchor a low structure's ROOF surface, springing the enemy up onto
+	//     it instead of out through the authored hole (merge-gate P2). The exit leg runs the v1 scene-query path below,
+	//     which is the invariant SetExitPath's phase-through was designed against ("바닥을 그대로 밟는다" — the ground
+	//     probe is a world query, not a capsule response, so it works while WorldStatic is ignored). ---
+	if (CurrentHoverHeight > 0.0f && VerticalVelocity <= 0.0f && CachedFlowField && !bFollowingExitPath)
 	{
 		const FVector Loc = GetActorLocation();
 		// AnchorFootZ = capsule BOTTOM (Z - HalfHeight), NOT ActorZ - EnemyStandOffset(95) — that offset is Sample()'s
@@ -823,7 +831,8 @@ void AFPSREnemyBase::ApplyGravity(float ScaledDeltaSeconds, const FVector& FlowD
 			// two-tier pick (SampleFloorZBilinear) plus the corner MaxSurfaceDeltaCm guard are what keep the terrain
 			// TARGET itself sane (never a storey the enemy didn't actually fall past); this code only decides how to
 			// REACH the (possibly seek-overridden) target.
-			float TargetZ = bTerrainSampled ? (FloorZ + HalfHeight + GroundRestClearance + CurrentHoverHeight) : -MAX_flt;
+			const float TerrainRestZ = bTerrainSampled ? (FloorZ + HalfHeight + GroundRestClearance + CurrentHoverHeight) : -MAX_flt;
+			float TargetZ = TerrainRestZ;
 			if (bSeekTargetZValid)
 			{
 				TargetZ = FMath::Max(TargetZ, SeekTargetZ);
@@ -839,14 +848,46 @@ void AFPSREnemyBase::ApplyGravity(float ScaledDeltaSeconds, const FVector& FlowD
 
 			float Z = static_cast<float>(Loc.Z);
 			FMath::SpringDamper(Z, HoverSpringRateZ, TargetZ, 0.0f, ScaledDeltaSeconds, HoverSpringFrequency, HoverSpringDampingRatio);
-			SetActorLocation(FVector(Loc.X, Loc.Y, Z), false);
-			if (bTerrainSampled)
+
+			// Deep-glide sweep (merge-gate P2): a terrain anchor MORE than the tier-1 pick window below the foot was
+			// served by the tier-2 unlimited-depth fallback — the one case where blocking-but-UNBAKED geometry (an
+			// awning, the roof over an enclosed interior) can sit between the pawn and the target, and a blind Z
+			// write would carry the capsule straight through it. Sweep ONLY these descending moves (cost ≈ the v1
+			// airborne probe this path replaced, paid only while a deep glide is in flight); in-window hover / stair
+			// motion keeps the zero-scene-query write.
+			bool bGlideBlocked = false;
+			const bool bDeepGlide = Z < Loc.Z && bTerrainSampled
+				&& (AnchorFootZ - FloorZ) > UFPSRFlowFieldComputer::GetMaxLayerPickDrop();
+			if (bDeepGlide)
+			{
+				FHitResult GlideHit;
+				SetActorLocation(FVector(Loc.X, Loc.Y, Z), true, &GlideHit);
+				if (GlideHit.bBlockingHit)
+				{
+					// Came to rest on real (unbaked) geometry short of the sampled target — hold HERE and kill the
+					// spring's downward rate so the next pass doesn't immediately re-shove into the surface.
+					bGlideBlocked = true;
+					HoverSpringRateZ = 0.0f;
+				}
+			}
+			else
+			{
+				SetActorLocation(FVector(Loc.X, Loc.Y, Z), false);
+			}
+			if (bTerrainSampled && !bGlideBlocked)
 			{
 				GroundNormal = FloorNormal; // only a real terrain sample has a meaningful surface normal to lean on
 			}
 			VerticalVelocity = 0.0f;
 			bGrounded = true; // the spring is now carrying vertical motion — no longer a free-falling body
-			HoverRestZ = TargetZ; // keep the v1 fallback's glide target current in case a later sample fails
+			// Keep the v1 fallback's glide target current in case a later sample fails — but only ever a TERRAIN rest
+			// height (or the blocked-landing Z), never a Seek3D altitude: caching a dead seek altitude here left the
+			// v1 amortized branch springing toward mid-air with no scene query behind it (merge-gate P3).
+			HoverRestZ = bGlideBlocked ? static_cast<float>(GetActorLocation().Z)
+				: (bTerrainSampled ? TerrainRestZ : HoverRestZ);
+			// And the v1 amortized hold must never resume on a timer that froze while this path carried the motion —
+			// force the first v1 pass after a handoff to do a full floor re-check (merge-gate P3).
+			GroundRecheckTimer = 0.0f;
 			return;
 		}
 		// Neither the terrain sampler nor a Seek3D target succeeded — fall through to the v1 scene-query path: a

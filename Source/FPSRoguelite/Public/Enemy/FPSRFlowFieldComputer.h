@@ -353,6 +353,12 @@ public:
 	 *  restate 2000 as a literal, and the day the default moves the bake would silently keep the old one. */
 	static constexpr float GetDefaultProbeApexAboveOrigin() { return DefaultProbeApexAboveOrigin; }
 
+	/** SampleFloorZBilinear's tier-1 pick window (cm below the foot). A caller whose anchor came back MORE than this
+	 *  below the foot knows it was served by the tier-2 unlimited-depth fallback (a deep glide target), which is the
+	 *  one case where unbaked-but-blocking geometry can sit between the pawn and the target — see the enemy's hover
+	 *  descent sweep gate. Exposed for that check only; the pick itself stays internal. */
+	static constexpr float GetMaxLayerPickDrop() { return MaxLayerPickDrop; }
+
 	// --- PRODUCTION PATH (server, world queries) ---
 
 	/** Size the grid from a bounds volume (or origin-centered fallback) anchored at FloorZ, then trace the static-obstacle
