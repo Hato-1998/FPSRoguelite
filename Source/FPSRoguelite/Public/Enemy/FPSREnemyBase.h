@@ -89,7 +89,10 @@ public:
 	 *  (e.g. a pipe/box that the flow-field can't path out of) before reverting to flow-field player-chase at the
 	 *  final waypoint. Empty = no path (immediate chase). Set right after Activate by the spawn subsystem from the
 	 *  selected spawn point; cleared on Deactivate / overwritten on the next reuse. (C1) */
-	void SetExitPath(const TArray<FVector>& InWaypoints);
+	/** @param bPhaseThroughWorld 경로를 따라가는 동안 정적 지오메트리를 통과할지(구조형 스포너 — 막힌 메시
+	 *         안에서 스폰돼 벽을 지나 나온다). 캡슐의 WorldStatic 응답 하나만 Ignore 로 바뀌고 경로가 끝나면
+	 *         복구된다 — 그 사이에도 적은 맞고(Visibility) 플레이어를 막으며(ECC_FPSRPlayerPawn) 바닥도 밟는다. */
+	void SetExitPath(const TArray<FVector>& InWaypoints, bool bPhaseThroughWorld);
 
 	/** Server: true while the enemy is still following its authored exit path (not yet handed off to the flow-field). */
 	bool IsFollowingExitPath() const { return bFollowingExitPath; }
@@ -187,6 +190,22 @@ public:
 	bool IsFrontCreditLive(float Now) const { return Now < FrontCreditExpireTime; }
 	/** Server: release front attribution (credit consumed / caught up) — the enemy becomes a normal slot enemy. */
 	void ClearFrontSpawn() { bFrontSpawned = false; FrontCreditExpireTime = -1.0f; }
+
+	/** Server (Phase A stage-transition carry-over): relocate this ACTIVE (not pooled/dormant) enemy across a stage
+	 *  swap to NewLocation. Clears any leftover exit path — and its WorldStatic collision-ignore override — BEFORE
+	 *  moving (ClearExitPath is the single recovery point, protected; this is the public entry point a caller
+	 *  outside the class uses to reach it), then teleports (no sweep — the caller already resolved an open cell via
+	 *  UFPSRFlowFieldSubsystem::FindNearestOpenLocation; NewLocation.Z is that cell's FLOOR SURFACE Z, and this
+	 *  function converts it to the capsule's rest Z — floor + HalfHeight + GroundRestClearance, ApplyGravity's own
+	 *  TargetZ convention — so the enemy lands standing instead of half-buried) and resets the physics-contact state
+	 *  Activate() resets for
+	 *  a pooled reuse ("may spawn on a rooftop" there == "may land somewhere new" here — a KnockbackVelocityXY /
+	 *  VerticalVelocity / bGrounded / GroundRecheckTimer computed against the OLD arena's geometry is meaningless in
+	 *  the new one). Deliberately narrower than Activate(): does NOT touch health, front-chase/front-spawn state,
+	 *  MapId, or anim/cosmetic state — this is the SAME life, just relocated (see
+	 *  UFPSREnemySpawnSubsystem::CarryEnemiesToNewStage for which per-enemy state is safe to leave untouched and
+	 *  why). No-op off authority. */
+	void ServerRelocateForStageCarry(const FVector& NewLocation);
 
 protected:
 	virtual void BeginPlay() override;

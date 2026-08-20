@@ -9,6 +9,232 @@
 
 ---
 
+## 🎬 스테이지 전환 재설계 — 잔존 적 이월 + 지형 페이드, PIE 4라운드로 완성 (2026-08-19~20, `phase/stage-transition-redesign`)
+> 보드 행 = *"스테이지 전환 재설계 — 잔존 적 이월 + 지형 페이드 (ADR 0010 §축3 뒤집기)"*(M0 · 미듐 · L · Fable).
+> 사용자 결정으로 ADR 0010 을 두 번 정정: §축 3 안 G→**안 H(이월)**, 불변식 8 집행 수단(무적→전 구간 피격).
+> 플랜·스펙·검증 = Fable / C++ 구현 = Sonnet 위임 / 머티리얼 저작 = Fable(커맨드렛+라이브).
+
+**최종 구조.** `None→Grace(딜링)→[Pending]→FadeOut→Swapping(암전 유지+스왑)→FadeIn→None`.
+잔존 적은 소멸 대신 **새 아레나로 이월**(최근접 플레이어 델타 + 라이브 그리드 최근접 열린 셀 스냅, 월드 쿼리 0).
+플레이어 텔레포트 = **위치만**(XY 진입 지점 + Z 현재 높이 유지, 시선 보존). 지형 페이드 = After Tonemapping PP
+(`M_PP_StageFade`) + 폰/무기 CustomDepth 제외, 클라 드라이버 = `UFPSRStageFadeSubsystem` + `UCameraModifier`.
+타이밍 5개 전부 `DA_RunSchedule` 노출(딜링/페이드아웃/**암전 유지(신규)**/대기 상한/페이드인). 전환 전 구간 피격 가능.
+
+**커밋 열.** `79d0e46c`(Phase A 페이즈 분할+이월) · `0221b84c`(ADR 안 H) · `44ac2278`(Phase B 페이드) ·
+`b2bf89be`/`3c531f12`/`d68be6f7`/`ac5c62f8`(PIE 결함 4건) · `f74cf685`(암전 유지 파라미터) · `e1f46144`(무적 폐기) ·
+`2415e53f`/`02ab89e5`(사용자 콘텐츠).
+
+**PIE 실사격이 잡은 결함 4건 (전부 코드/에셋 검증을 통과한 뒤에 잡힘 — 실측의 가치):**
+1. **페이드 무반응** = PP 머티리얼 무음 컴파일 실패 **2중**: ① If 노드에 float4(스칼라 전용) ② Lerp float4×float3.
+   에러 본문은 `Failed to compile` 경고와 같은 로그 엔트리의 **연속 줄**에 숨는다(`grep -A5`). 헤드리스 판정 =
+   **단일 패키지 쿡**(`-run=cook -CookSinglePackageNorefs`) · 라이브 에디터 stats 인스트럭션 0 = 실패 신호.
+2. **이월 적 전원 소멸** = 스냅 Z 가 셀 바닥 표면인데 액터 규약은 바닥+HalfHeight+유격(`ApplyGravity` TargetZ) —
+   반매몰 → 위 스냅 거부 → 낙사. `ServerRelocateForStageCarry` 에서 휴식 Z 변환.
+3. **"튐"** = 텔레포트가 시선·높이를 진입 지점 저작값으로 덮어씀. 상대 세계 보존(이월)은 시선이 살아야 성립 —
+   위치만 이동으로 수정. (부수: 아레나 액터들이 서브레벨별 동명이라 스왑 로그가 자기 순환처럼 보임 → GetPathName.)
+4. **반투명 벽이 안 어두워짐** = 벽(MI_light1, Translucent)이 씬 깊이를 안 써서, 뒤가 허공인 픽셀은
+   SceneDepth==CustomDepth==far plane 으로 "폰" 오검출. `CustomDepthValidMaxCm` (실기록 판정) AND 추가.
+
+**설계 정정 2건(사용자 결정):** ① 무적 게이트 폐기 — 페이즈가 전부 고정 길이라 보상 창은 무적 없이도 고정
+(가변 = 느린 클라 대기뿐, 감수). `IsStageDealingOpen` 은 HUD 전용으로 존치. ② 완전 암전 유지 시간 신설
+(`StageBlackoutHoldSeconds`) — 목적지 대기와 직렬.
+
+**남은 것.** 브랜치는 `phase/arena-spawnpoints` 위에 있어 **main 머지는 그 트랙(Opus 행) 마감 후** 함께.
+"PIE 검증" 행의 전환 항목은 이번 실측으로 대체 — 파괴물 잔여 항목(문·근접·차지레이저 실사격)만 그 행에 남는다.
+4인 MP 실측(이월 델타의 원거리 적 이동 체감·클라 페이드 동기)은 미실시 — PIE 2인 레시피로 후속.
+
+## 🔍 아레나 트랙 11커밋 소급 검증 — Fable, 코드 결함 0건 (2026-08-19, `phase/arena-spawnpoints`)
+> 보드 행 = *"아레나 트랙 소급 검증 — 11커밋/53파일 (콜리전 채널 d49998f2 최우선)"*(M0 · 하이 · M · Fable).
+> 경위 = 이 브랜치의 아레나 작업 11커밋(`876bb644..d73f22ae`)은 모델 배분상 Fable 몫인 코어·구조 사안을
+> Opus 세션이 진행했다(사용자 판정 2026-08-19). Fable 이 diff + 호출처 전수 조사로 소급 검증했다.
+
+**판정: 코드 수정을 요구하는 결함 없음.** 인계 문서의 쟁점 6개를 전부 실코드로 확인했다.
+
+`d49998f2`(파괴물 콜리전 채널) 쟁점별 판정:
+- **`DefaultResponse=ECR_Block` — 유지.** grace/downed pass-through 창은 플레이어 캡슐의 `ECC_Pawn` 응답
+  **하나만** 토글한다(`FPSRCharacter.cpp:1574`) — 파괴물 채널과 상호작용 자체가 없다. 다운된 플레이어가
+  문짝을 통과 못 하는 것은 의도된 불변("문짝은 pass-through 면제")과 일치.
+- **관통(Pierce) 미소모 — 유지.** 히트스캔·차지레이저 쪽도 파괴물이 벽 컷오프로 작동해 관통이 파괴물
+  너머로 못 넘어간다 — 세 무기 경로의 의미가 이미 일치한다. 투사체는 어차피 `HandleImpact→ReleaseToPool`
+  로 종료되므로 "미소모"는 의미론일 뿐 동작 차이가 없다.
+- **AOE 이중 데미지 게이트 — 대칭 확인.** `OnSphereOverlap` = `ExplosionRadius>0`이면 직격 스킵 후 폭발만,
+  `OnSphereHit` = `<=0`일 때만 직격. `ApplyExplosion`이 파괴물을 gather 하므로 AOE 탄의 파괴물 데미지는
+  방사 스윕이 담당. 대칭 성립.
+- **적 LOS에 `ECC_FPSRPlayerPawn` 잔류 — 유지.** 수정 전에도 그 채널 쿼리로 팀원 몸이 LOS 를 막았다
+  (기존 동작 보존). 적이 팀원 너머의 표적에게 사격을 삼가는 보수적 동작 — MP 기준 문제 없음.
+- **적팀 AOE(`FPSRProjectile.cpp:351`)에 파괴물 미추가 — 유지.** `IsHostileTarget`(Enemy 팀)은
+  `AFPSRCharacter`만 통과 — gather 해도 걸러진다. 설계상으로도 적은 문을 파괴하지 않는 게 맞다.
+- **헬퍼 분리(`AddDestructibleObjectType`) — 유지.** `AddDamageablePawnObjectTypes`는 적팀 AOE처럼
+  **파괴물을 모으면 안 되는** 쿼리에서도 쓰인다 — 합치면 그 경로가 오염된다. 데미지 오브젝트 쿼리 전수
+  조사(`MultiByObjectType` 계열 5곳): 히트스캔·차지레이저·근접·`ApplyExplosion` 커버, 적팀 AOE 만 의도적
+  제외. 누락 0.
+- 추가 확인: 파괴물 = `UFPSREnemyHealthComponent`(`SetCountsAsKill(false)`) 보유라 `IsHostileTarget`/
+  `TryDamageActor` 통과(직격 데미지 성립). `ECC_FPSRPlayerPawn` 참조 전수 조사 — "문이 그 채널에 있다"는
+  옛 전제를 가진 코드 잔존 0 (`FPSRSpawnRoom` 트리거·`FPSRBoundaryBlocker`는 무관).
+
+나머지 커밋: `876bb644`(파킹 재캐시 + `WorldToCell` 단일화 + 저작 검사 4항목) · `59624da5`(탈출 중
+WorldStatic 응답만 Ignore, `ClearExitPath`가 무조건 복구 + Activate 경유라 누수 불가) · `1670ed5e`
+(구멍별 탈출 경로 2단 조회) · `5b41e13c`(로그) · `6ffcfff0`(immortal 파티클 + `IsImmortal()` 데이터 검증)
+— 전부 통과.
+
+**주의 노트 2건 (코드 수정 없음, 저작 규약)**:
+1. `1670ed5e`: 스포너 BP의 `ChildActorComponent`에 붙은 **모든** Scene 컴포넌트가 웨이포인트로 읽힌다 —
+   장식용 컴포넌트를 CAC 밑에 붙이면 경로가 오염된다. 검증기는 마지막 웨이포인트만 검사하므로 중간 오염은
+   못 잡는다. 스포너 BP 저작 시 CAC 밑에는 웨이포인트만 붙일 것.
+2. `d49998f2` 부수 효과: **적 투사체도 이제 파괴물에 블록**된다(이전엔 관통). LOS 게이트가 1차 방어라
+   드물지만, 동작 변화로 기록해 둔다. PIE 미검증 목록(문 경로·근접·차지레이저 실사격)은 기존
+   *"PIE 검증 — 스테이지 전환·그레이스 창·파괴물"* 행 그대로.
+
+## 🧾 총알이 억제기·문을 그냥 통과하던 것 — 파괴물 전용 콜리전 채널 (2026-08-19, `phase/arena-spawnpoints`, `d49998f2`)
+> 보드 행 = *"파괴물 전용 콜리전 채널 신설 — 투사체가 억제기/문을 관통하는 결함 수정"*(M0 · 하이 · S · 추천모델 Fable, 수행 Opus).
+> 조사 중 드러난 사실 하나 = 이 행은 기존 *"PIE 검증 — 스테이지 전환·그레이스 창·파괴물"*(M0 · 하이) 행의
+> **미등록 선행조건**이었다. 그 행의 검증 항목 6개가 전부 "억제기를 총으로 부숴 전환을 트리거"를 전제로 하는데,
+> 억제기가 안 부서지니 6개 다 실행 자체가 불가능했다. 선행 관계를 보드에 등록했다.
+
+증상 = 억제기(BP_Inhibitor)를 쏘면 부서지지 않고, **반대편에 있는 적이 맞는다.**
+사용자 최초 진단은 "기본 Cube 인데 충돌처리가 안 된 것 같다"였다.
+
+### 🪤 콜리전은 멀쩡했다 — 총알 쪽이 파괴물을 "벽"에서 빼고 있었다
+에디터 월드에서 억제기를 관통하는 Visibility 라인트레이스를 직접 쏴 봤다:
+`bBlockingHit=True`, 거리 650, 컴포넌트 `BP_Inhibitor_C_1.DestructibleMesh`. **콜리전은 살아 있다.**
+BP CDO와 배치 인스턴스 둘 다 QueryOnly / 전 채널 Block / Cube 메시 정상. 즉 에셋 쪽엔 아무 문제가 없었다.
+
+진범은 **"데미지를 받으려고 빌려 쓴 오브젝트 채널"** 이었다. `AFPSRArenaDestructible`/`AFPSRDoor` 의 메시는
+오브젝트 타입을 `ECC_FPSRPlayerPawn` 으로 쓴다 — 무기의 폰 오브젝트 쿼리에 걸려서 **새 코드 없이 데미지를
+받으려는** 설계다(`FPSRArenaDestructible.h` 주석에 그 전제가 그대로 적혀 있었다: *"gathered by every weapon
+object-query"*). 그리고 오버랩 이벤트는 꺼 둔다(`SetGenerateOverlapEvents(false)`).
+
+**전 무기가 히트스캔이던 시절엔 이 조합이 성립했다.** 오브젝트 타입 라인트레이스는 씬 쿼리라
+오버랩 이벤트 플래그를 아예 보지 않기 때문이다. 전 무기가 투사체로 바뀌면서 두 경로가 동시에 죽었다.
+
+| 경로 | 왜 죽었나 |
+|---|---|
+| 블로킹 히트 (`OnSphereHit`) | `AFPSRProjectile::Activate` 가 `ECC_FPSRPlayerPawn` 에 **Overlap** 응답만 준다. 총알을 멈추던 건 `ECC_WorldStatic` 하나뿐이었다 |
+| 오버랩 이벤트 (`OnSphereOverlap`) | 엔진이 **양쪽 컴포넌트 모두** 플래그가 있어야 보낸다 (`PrimitiveComponent.cpp:2972` — *"Both components must set GetGenerateOverlapEvents()"*). 파괴물이 꺼 놨다 |
+
+→ 블록도 없고 오버랩도 없음 = **완전 관통.** 게임 내 **모든** 파괴물이 총으로 파괴 불가였고,
+ADR 0010 D6/D7 의 "억제기 파괴 → 스테이지 전환" 루프 전체가 죽어 있었다. 문이 그나마 엄폐물로 보인 건
+`FrameMesh` 가 `ECC_WorldStatic` 이라 **문틀**이 막아 줬기 때문이고, 문짝 자체는 못 부쉈다.
+
+### 이미 알고 있었는데 우회해 둔 흔적이 있었다
+`FPSRRangedEnemyBase::HasLineOfSight` 주석: *"적 투사체는 그 채널을 오버랩하고 AFPSRCharacter 만 적으로
+치므로 문을 그냥 통과한다"*. **같은 결함을 알고도 고치는 대신 LOS 게이트로 덮어 둔 것.**
+이번 수정이 그 우회의 근본 원인을 없앤다(LOS 게이트는 더 싼 1차 방어로 남긴다).
+
+### 수정 — 파괴물을 pawn 채널에서 떼어 자기 채널로
+`ECC_FPSRDestructible = ECC_GameTraceChannel3` 신설. **`DefaultResponse=Block`** 이라 기존 콜리전
+프로파일을 하나도 건드리지 않고 전원(플레이어 캡슐·적 캡슐·트레이스)이 파괴물을 고체로 취급한다.
+
+오브젝트 타입을 옮겼으므로 **파괴물을 찾아야 하는 쿼리를 전수 조사해 전부 새 채널을 추가**했다 —
+히트스캔 / 차지레이저 / 근접 / `ApplyExplosion`(바주카 스플래시로 억제기가 부서지는 경로) /
+**적 원거리 LOS**(빠뜨리면 적이 문·억제기 너머로 쏜다). 이걸 빠뜨리면 관통 버그가 다른 경로로 재발한다.
+
+라인트레이스 두 경로(히트스캔·차지레이저)에는 별도 결함이 하나 더 있었다: 벽 거리를 구할 때
+**폰 쿼리에 걸린 액터를 전부 무시 목록에 넣는데**, 파괴물도 거기 걸리니 벽 컷오프가 파괴물 너머로 흘러
+뒤쪽 적까지 데미지가 샜다. `FPSRCombat::IsDestructibleGeometry` 로 파괴물만 무시 목록에서 제외했다.
+같은 이유로 `WallDist` 비교에 `KINDA_SMALL_NUMBER` 톨러런스를 줬다 — **파괴물 자기 항목이 정확히
+`WallDist` 에 걸리므로**, 맨 `>` 로는 float 잡음에 자기 데미지가 조용히 누락될 수 있고 그 실패는
+"안 부서진다"로만 보인다.
+
+관통(`ProjectilePierce`)은 파괴물에 **적용하지 않는다.** 관통은 대(對)폰 스탯이고 파괴물은 벽 그 자체라,
+저격총(`Pierce=2`)도 억제기 앞에서 멈춘다.
+
+### 검증
+- UBT `-DisableUnity` 풀빌드 `Result: Succeeded` (에러 0 / 경고 0, 376초).
+- **대조군**: 수정 전 `BP_Inhibitor.DestructibleMesh` objtype = `ECC_PLAYER_PAWN(14)`,
+  수정 후 CDO·배치 인스턴스 **둘 다** `ECC_DESTRUCTIBLE(16)`. 채널 등록과 **BP 오버라이드 부재**를
+  한 번에 확인한 것 — 네이티브 컴포넌트라 BP 가 `BodyInstance` 를 오버라이드해 저장했으면 C++ 변경이
+  안 먹는데, 값이 16 으로 나온 것이 그 반증이다.
+- PIE: 억제기가 파괴되고, 반대편 적이 더는 맞지 않음(사용자 확인).
+
+### 후속 — Durability 5000 확정, 그리고 곧바로 드러난 인원수 문제
+`Durability` 는 최초 **50** 이었다. 라이플(12dmg × 8발/s = 96dps) 기준 **0.5초** — ADR 0010 에서 억제기
+체력은 "일찍 부수려 할수록 비싸다"의 **비용 축**인데, 그 축이 사실상 없는 상태였다.
+사용자가 **5000** 으로 확정했다(솔로 라이플 기준 약 52초).
+
+여기서 다음 문제가 바로 드러난다: **5000 고정이면 4인 파티는 약 13초다.** ADR 0010 위험 목록의
+*"억제기 체력이 고정이면 4인 파티가 항상 1/4 시간에 스킵한다"*(§512)가 그대로 재현된다.
+인원수에 따른 억제기·적 체력 스케일링을 별도 보드 행으로 분리했다 — 다만 적 **마릿수**는 이미
+`FPSREnemyAllocator::Apportion` 이 인원수로 배분하므로, 체력까지 곱하면 **이중 스케일**이 된다.
+두 계수는 반드시 함께 봐야 한다.
+
+---
+
+## 🧾 총구 화염이 안 꺼지던 것 — 발사마다 남는 immortal 파티클 (2026-08-19, `phase/arena-spawnpoints`, `6ffcfff0`)
+> 보드 행 = *"총구 화염 immortal 파티클 누수 — PS_Gunshot_Repeating 발사마다 PSC 잔존"*(M2 · 하이 · S · Opus).
+> **§6-9 (8) M0 개시순서 예외 ③으로 당겨 썼다** — 남은 M0 Exit Criteria ①이 *"적 300/500 정량 성능
+> 베이스라인 실측"*인데, 사격이 들어간 어떤 측정도 이 누수에 오염된다. 먼저 막지 않으면 그 수치 자체가
+> 성립하지 않는다. M0 EC ① 측정은 이제 이 오염원에서 자유롭다(근거 = 이 커밋).
+
+증상 = 라이플을 쏘면 총구 화염과 연기가 사라지지 않고 계속 나온다. 단서는 로그 한 줄이었다:
+`LogParticles: ... spawned potentially immortal particle system! ... (PS_Gunshot_Repeating)` — PIE 한 세션에 **85건**.
+
+### 🪤 immortal 경고 ≠ 누수. 게이트가 둘이고, 갈리는 지점은 SpawnRate다
+엔진 판정이 두 군데로 나뉘어 있고, **경고를 내는 쪽과 실제로 죽이는 쪽이 다르다.**
+
+| 게이트 | 조건 | 결과 |
+|---|---|---|
+| `UParticleSystem::bIsImmortal` (`ParticleSystem.cpp:236-268`) | `EmitterLoops==0 && EmitterDuration==0` | **경고만** 낸다 (`GameplayStatics.cpp:1378`) |
+| `FParticleEmitterInstance::CheckEmitterFinished` (`ParticleEmitterInstances.cpp:881`) | `ActiveParticles==0` && 마지막 버스트 지남 && `GetMaximumSpawnRate()==0` | `bEmitterIsDone` → `bAutoDeactivate`(기본 true) → 완료 → `bAutoDestroy` |
+
+T3D 덤프 실측(둘 다 에미터 = `FX_MusketFire` + `FX_MusketSmoke`):
+
+| | `PS_Gunshot_Repeating` | `PS_Gunshot_Single` (수정 전) |
+|---|---|---|
+| EmitterLoops / EmitterDuration | 0 / 0.0 | 0 / 0.0 |
+| **SpawnRate** | **8/초** | **0** (버스트 전용) |
+
+→ **둘 다 immortal 플래그가 켜져 있었다.** 차이는 SpawnRate 하나뿐인데, 그것 때문에 `_Repeating`은
+`ActiveParticles`가 0이 되는 순간이 없어 `bEmitterIsDone`이 영원히 안 서고 → 자동 비활성화가 안 걸리고 →
+`bAutoDestroy`가 발동하지 않는다. **총 한 발 = `UParticleSystemComponent` 하나가 폰에 영구 잔존**, 각자
+초당 화염 8 + 연기 8을 계속 뿜는다. `_Single`은 우연히 정리될 뿐, 누가 SpawnRate를 올리면 즉시 같은 지뢰가 된다.
+
+**여기서 성급히 결론냈으면 틀렸다.** "이름이 `_Repeating`이니 `_Single`로 바꾸면 끝"이 첫 가설이었는데,
+`_Single`도 immortal이라 그것만으로는 **빨간 온스크린 경고가 그대로 남고** 잠재 지뢰도 남는다.
+`_Single`을 유한화(`Loops=1`/`Duration=0.1`)해야 비로소 닫힌다.
+
+### 배정 자체가 틀렸다
+팩이 의도한 `_Repeating`의 용법 = *격발 유지 동안 한 번 Activate → 놓으면 Deactivate*. 그런데 이 프로젝트는
+`PlayWeaponFireCosmetics`/`MulticastFireCosmetics`에서 **발사마다 `SpawnEmitterAttached`로 스폰하고 버린다**
+(`bAutoDestroy=true`). 루프형 에셋을 일회성 경로에 꽂은 것. Rifle/SMG/LMG/ChargeLaser 4종이 그랬고,
+Bazooka/Shotgun/Sniper 3종은 처음부터 `_Single`이라 멀쩡했다.
+
+### 수정
+- **무기 DA** — Rifle/SMG/LMG → `PS_Gunshot_Single`. **ChargeLaser는 None**(화약 총기가 아니므로 —
+  사용자 결정, 레이저 VFX는 M2 *"VFX 전투 4종"* 행에서 별도 저작).
+- **`PS_Gunshot_Single`** 두 에미터 Required 모듈 — `EmitterLoops 0→1`, `EmitterDuration 0.0→0.1`.
+  버스트는 시간 0이라 그대로 터지고, Duration은 *스폰 창*만 제한하므로 연기는 제 수명(0.5~1.5초)을 다 산다.
+- **`UFPSRWeaponDataAsset::IsDataValid`** — `MuzzleFlash`가 `IsImmortal()`이면 ERROR. 엔진은 이 상황을
+  `Log` 한 줄로만 알려주므로 데이터 단계에서 막는다. `MuzzleFlash`는 이 프로젝트의 **유일한**
+  `UParticleSystem` 프로퍼티라(스폰 지점도 위 두 곳뿐) 이 검사 하나로 노출면 전부가 덮인다.
+
+### 기각·보류
+- **`_Repeating`을 살리는 안**(격발 시작/종료를 코스메틱에 노출해 Activate/Deactivate로 구동) — 기각.
+  발사마다 스폰하는 현 구조에서는 불가능하고, 별도 상태 배선이 필요하다. LMG의 "연속으로 타오르는 총구
+  화염"을 원하면 그때 별건으로 세운다.
+- **PSC 풀링(`EPSCPoolMethod::AutoRelease`)** — 보류. 발사당 UObject 생성/등록 제거(4인 × ~10발/초 ≈
+  초당 40개)로 제1원리(액터당 비용 최소화)에 맞지만, **이번 버그와 무관하고** 풀 재사용 상태라는 별도
+  리스크면이 있어 커밋에 섞지 않았다. 백로그 후보.
+- **검증을 Warning으로 낮추는 안** — 기각. 쿠킹/커맨드릿 검증을 통과해버려 다시 새어나간다.
+
+### 검증 (전부 실측, 대조군 포함)
+- UBT `Result: Succeeded`, 컴파일 에러 0, 602초.
+- **검증기 대조군** — 고치기 전 무기 DA 전수 검증에서 `MuzzleFlashImmortal` **정확히 3건**
+  (SMG/LMG/ChargeLaser, 원인 에셋 `PS_Gunshot_Repeating`), 이미 고쳤던 Rifle + 나머지 6종 미발생.
+  수정 후 9종 재검증 **0건**. → "에러 0"이 *통과*인지 *검사가 안 도는 것*인지 구분됐다.
+- `PS_Gunshot_Single` T3D 재덤프 — 두 Required 모듈 모두 `Loops=1` / `Duration=0.1` (수정 전 `0` / `0.0`).
+- PIE(`L_Arena`) — `potentially immortal` **0건**(수정 전 85건), 사격 중단 후 화염·연기 소멸.
+
+### 🔓 조사 기법 — protected 프로퍼티는 T3D로 읽는다
+Cascade는 Python에 **클래스 자체가 없고**(`unreal.ParticleModuleRequired` = AttributeError),
+`UParticleSystem::Emitters`는 protected라 `get_editor_property`가 거부한다. 그래서 위 표의 값들을 읽을
+방법이 없어 보였는데, **`unreal.Exporter.run_asset_export_task`로 T3D를 뽑으면 전부 평문으로 나온다**
+(C++ 리플렉션이라 Python 노출 여부와 무관). 수정 전/후 덤프 대조로 값이 실제로 들어갔는지 판정하는 데도 썼다.
+⚠️ T3D는 **CDO 기본값과 다른 것만** 쓴다 — 항목이 안 보이면 *없다*가 아니라 *기본값이다*
+(`EmitterLoops` 미출력 = 기본값 0 = 무한 반복. 이걸 모르면 정반대로 읽는다).
+
+---
+
 ## 🧾 보스 프리즈 "미정지" = 오진 — 프리즈 계약 명문화로 종결 (2026-08-19, `docs/freeze-anim-contract`)
 > 보드 행 = *"보스가 카드 프리즈 중에도 정지하지 않음 — §2-2 프리즈 게이트 대칭 구멍"*(하이 · S · Fable · 마일스톤 미배정).
 > **결론: 결함이 아니다.** 조사로 결론을 냈으므로 §6-9 (5) 정의상 `완료`(폐기 아님). 산출물 = 계약 명문화 2건.

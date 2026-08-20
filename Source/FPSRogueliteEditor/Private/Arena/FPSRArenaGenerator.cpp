@@ -175,8 +175,9 @@ namespace
 		Reserved.Init(false, W * H);
 		for (const FFPSRArenaAuthoredLandmark& LM : Layout.Landmarks)
 		{
-			const int32 LCX = FMath::FloorToInt((LM.Location.X - Layout.GridOrigin.X) / Layout.CellSize);
-			const int32 LCY = FMath::FloorToInt((LM.Location.Y - Layout.GridOrigin.Y) / Layout.CellSize);
+			const FIntPoint LCell = FFPSRArenaCells::WorldToCell(Layout, LM.Location);
+			const int32 LCX = LCell.X;
+			const int32 LCY = LCell.Y;
 			const int32 R = FMath::Max(0, LM.ReserveRadiusCells);
 			for (int32 DY = -R; DY <= R; ++DY)
 			{

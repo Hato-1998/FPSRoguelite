@@ -2,17 +2,21 @@
 
 #include "Misc/AutomationTest.h"
 #include "Run/FPSRStageDirectorSubsystem.h"
+#include "Run/FPSRStageFadeSubsystem.h"
 #include "Core/FPSRGameState.h"
+#include "Enemy/FPSRFlowFieldComputer.h"
 
 #if WITH_AUTOMATION_TESTS
 
 // Headless invariant net for the ADR 0010 D6 stage-transition state machine's PURE, worldless predicates — no
 // world, no SpawnActor (mirrors FPSREnemyFrontBudgetTest.cpp / FPSRDirectorSensorTest.cpp's style):
-//   DecidePhaseAfterDealing / CanSwapNow — the Grace->{Pending,Swapping} branch (invariant 8).
+//   DecidePhaseAfterDealing / CanSwapNow — the Grace->{Pending,FadeOut} branch (invariant 8; Phase A phase split).
 //   IsDealingOpen                       — the FIXED-time dealing window actually closes at its end timestamp.
 //   ComputeStageSeed                    — deterministic + adjacent stages diverge (server computes once, replicates).
 //   NextArenaIndex                      — cycling through N arenas, including the single-arena self-cycle case.
 //   EFPSRStageTransitionPhase::None==0  — the enum's default must be the "normal play" value (safe replication default).
+//   FadeOut/FadeIn appended AFTER Swapping — Phase A must not reorder the pre-existing ordinals.
+//   UFPSRFlowFieldComputer::FindNearestOpenCell — the Phase A carry-over snap's worldless ring-search core.
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFPSRStageTransitionTest, "FPSRoguelite.Arena.StageTransition",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
@@ -21,10 +25,11 @@ bool FFPSRStageTransitionTest::RunTest(const FString& Parameters)
 {
 	using U = UFPSRStageDirectorSubsystem;
 
-	// --- (1) DecidePhaseAfterDealing: Grace closes to Swapping when unpaused, Pending when the card freeze is up. ---
+	// --- (1) DecidePhaseAfterDealing: Grace closes to FadeOut when unpaused (Phase A — used to be Swapping),
+	//         Pending when the card freeze is up. ------------------------------------------------------------------
 	{
-		TestTrue(TEXT("DecidePhaseAfterDealing(false) == Swapping"),
-			U::DecidePhaseAfterDealing(false) == EFPSRStageTransitionPhase::Swapping);
+		TestTrue(TEXT("DecidePhaseAfterDealing(false) == FadeOut"),
+			U::DecidePhaseAfterDealing(false) == EFPSRStageTransitionPhase::FadeOut);
 		TestTrue(TEXT("DecidePhaseAfterDealing(true) == Pending"),
 			U::DecidePhaseAfterDealing(true) == EFPSRStageTransitionPhase::Pending);
 	}
@@ -92,10 +97,136 @@ bool FFPSRStageTransitionTest::RunTest(const FString& Parameters)
 	}
 
 	// --- (6) EFPSRStageTransitionPhase::None must be 0 — the safe replication default (a fresh GameState, or a
-	//         client that hasn't yet received the real value, must read as "no transition in progress"). -----------
+	//         client that hasn't yet received the real value, must read as "no transition in progress"). Phase A:
+	//         FadeOut/FadeIn must be appended AFTER Swapping, not interleaved with the pre-existing values — a
+	//         regression here would silently reorder every already-replicated/saved ordinal. ----------------------
 	{
 		TestEqual(TEXT("EFPSRStageTransitionPhase::None == 0"),
 			static_cast<uint8>(EFPSRStageTransitionPhase::None), static_cast<uint8>(0));
+
+		TestEqual(TEXT("Pending == 1 (unchanged by the Phase A append)"),
+			static_cast<uint8>(EFPSRStageTransitionPhase::Pending), static_cast<uint8>(1));
+		TestEqual(TEXT("Grace == 2 (unchanged)"),
+			static_cast<uint8>(EFPSRStageTransitionPhase::Grace), static_cast<uint8>(2));
+		TestEqual(TEXT("Swapping == 3 (unchanged)"),
+			static_cast<uint8>(EFPSRStageTransitionPhase::Swapping), static_cast<uint8>(3));
+		TestEqual(TEXT("FadeOut == Swapping + 1 (appended right after Swapping)"),
+			static_cast<uint8>(EFPSRStageTransitionPhase::FadeOut),
+			static_cast<uint8>(static_cast<uint8>(EFPSRStageTransitionPhase::Swapping) + 1));
+		TestEqual(TEXT("FadeIn == FadeOut + 1"),
+			static_cast<uint8>(EFPSRStageTransitionPhase::FadeIn),
+			static_cast<uint8>(static_cast<uint8>(EFPSRStageTransitionPhase::FadeOut) + 1));
+	}
+
+	// --- (7) UFPSRFlowFieldComputer::FindNearestOpenCell — the Phase A carry-over snap's worldless ring-search core.
+	//         Synthetic 5x5 grid, single layer (rank 0), NumLayers==2 so rank 1 is always absent everywhere. -------
+	{
+		using C = UFPSRFlowFieldComputer;
+		constexpr int32 NL = C::NumLayers; // 2
+		constexpr int32 W = 5, H = 5;
+		constexpr int32 NumCells = W * H;
+
+		auto Surf = [](int32 Cell, int32 Rank) { return Cell * NL + Rank; };
+		auto CellOf = [](int32 CX, int32 CY) { return CY * W + CX; };
+
+		// All rank-0 surfaces present + open by default; rank 1 absent everywhere (MAX_flt).
+		TArray<float> FloorZ;
+		FloorZ.Init(MAX_flt, NumCells * NL);
+		TArray<bool> Blocked;
+		Blocked.Init(false, NumCells * NL);
+		for (int32 Cell = 0; Cell < NumCells; ++Cell)
+		{
+			FloorZ[Surf(Cell, 0)] = 0.0f;
+		}
+
+		// (7a) Open self cell -> returns itself at radius 0.
+		TestEqual(TEXT("open self cell -> itself"),
+			C::FindNearestOpenCell(FloorZ, Blocked, W, H, 2, 2, 8), CellOf(2, 2));
+
+		// (7b) Block the self cell -> nearest open cell is one of its radius-1 neighbours (still open); the FIXED
+		//      scan order (dy outer -1..1, dx outer -1..1 within the ring, ring-perimeter only) picks (1,1) first
+		//      (the smallest dy, then smallest dx, excluding the already-checked interior at radius 0).
+		Blocked[Surf(CellOf(2, 2), 0)] = true;
+		TestEqual(TEXT("blocked self cell -> nearest open cell via radius-1 scan order"),
+			C::FindNearestOpenCell(FloorZ, Blocked, W, H, 2, 2, 8), CellOf(1, 1));
+
+		// (7c) Determinism: two calls with the same (blocked) input resolve to the SAME cell (invariant 10).
+		TestEqual(TEXT("determinism: repeat call -> same cell"),
+			C::FindNearestOpenCell(FloorZ, Blocked, W, H, 2, 2, 8), CellOf(1, 1));
+
+		// (7d) Every cell in the grid blocked -> no open cell anywhere -> INDEX_NONE even with a huge radius.
+		TArray<bool> AllBlocked;
+		AllBlocked.Init(true, NumCells * NL);
+		TestEqual(TEXT("every cell blocked -> INDEX_NONE"),
+			C::FindNearestOpenCell(FloorZ, AllBlocked, W, H, 2, 2, 8), INDEX_NONE);
+
+		// (7e) Self blocked, radius too small to reach ANY open neighbour (all of radius 1 blocked too) -> INDEX_NONE
+		//      within that small radius, even though an open cell exists further out (MaxRadiusCells is honored).
+		TArray<bool> RingBlocked = Blocked; // self (2,2) already blocked from (7b)
+		for (int32 dy = -1; dy <= 1; ++dy)
+		{
+			for (int32 dx = -1; dx <= 1; ++dx)
+			{
+				RingBlocked[Surf(CellOf(2 + dx, 2 + dy), 0)] = true; // blocks the whole radius-1 ring too
+			}
+		}
+		TestEqual(TEXT("blocked within MaxRadiusCells -> INDEX_NONE (radius too small)"),
+			C::FindNearestOpenCell(FloorZ, RingBlocked, W, H, 2, 2, 1), INDEX_NONE);
+		// TestTrue + != (not TestNotEqual): TestNotEqual has no int32-specific overload (unlike TestEqual), so a
+		// bare int32 pair is ambiguous between its float/double overloads and its generic template on MSVC (C2668).
+		TestTrue(TEXT("same block pattern, larger radius -> finds the radius-2 opening"),
+			C::FindNearestOpenCell(FloorZ, RingBlocked, W, H, 2, 2, 2) != INDEX_NONE);
+	}
+
+	// --- (8) UFPSRStageFadeSubsystem::ComputeStageFadeAlpha — the Phase B client fade driver's pure alpha calc. ------
+	{
+		using F = UFPSRStageFadeSubsystem;
+		constexpr float FadeOutSeconds = 0.8f;
+		constexpr float FadeInSeconds = 0.8f;
+
+		// (8a) None/Grace/Pending -> 0, regardless of a (nonsensical here, but shouldn't matter) nonzero End.
+		TestEqual(TEXT("None -> 0"),
+			F::ComputeStageFadeAlpha(EFPSRStageTransitionPhase::None, 10.0f, 20.0f, FadeOutSeconds, FadeInSeconds), 0.0f);
+		TestEqual(TEXT("Grace -> 0"),
+			F::ComputeStageFadeAlpha(EFPSRStageTransitionPhase::Grace, 10.0f, 20.0f, FadeOutSeconds, FadeInSeconds), 0.0f);
+		TestEqual(TEXT("Pending -> 0"),
+			F::ComputeStageFadeAlpha(EFPSRStageTransitionPhase::Pending, 10.0f, 20.0f, FadeOutSeconds, FadeInSeconds), 0.0f);
+
+		// (8b) FadeOut, halfway through (Now == End - FadeOutSeconds/2) -> ~0.5 (default float TestEqual tolerance).
+		TestEqual(TEXT("FadeOut halfway -> 0.5"),
+			F::ComputeStageFadeAlpha(EFPSRStageTransitionPhase::FadeOut, 19.6f, 20.0f, FadeOutSeconds, FadeInSeconds),
+			0.5f);
+
+		// (8c) FadeOut, End reached (Now == End) -> 1 (fully faded).
+		TestEqual(TEXT("FadeOut End reached -> 1"),
+			F::ComputeStageFadeAlpha(EFPSRStageTransitionPhase::FadeOut, 20.0f, 20.0f, FadeOutSeconds, FadeInSeconds), 1.0f);
+
+		// (8d) Swapping -> always 1, however far Now sits from a (here irrelevant) End.
+		TestEqual(TEXT("Swapping -> 1"),
+			F::ComputeStageFadeAlpha(EFPSRStageTransitionPhase::Swapping, 5.0f, 0.0f, FadeOutSeconds, FadeInSeconds), 1.0f);
+
+		// (8e) FadeIn, halfway through -> ~0.5.
+		TestEqual(TEXT("FadeIn halfway -> 0.5"),
+			F::ComputeStageFadeAlpha(EFPSRStageTransitionPhase::FadeIn, 19.6f, 20.0f, FadeOutSeconds, FadeInSeconds),
+			0.5f);
+
+		// (8f) FadeIn, End reached -> 0 (fully cleared).
+		TestEqual(TEXT("FadeIn End reached -> 0"),
+			F::ComputeStageFadeAlpha(EFPSRStageTransitionPhase::FadeIn, 20.0f, 20.0f, FadeOutSeconds, FadeInSeconds), 0.0f);
+
+		// (8g) 0-length transition (End<=0, the hard-cut path EnterFadeOut/EnterFadeIn publish): FadeOut -> 1
+		//      (already fully faded, matching the instant hard-cut), FadeIn -> 0 (already clear).
+		TestEqual(TEXT("FadeOut, End<=0 -> 1"),
+			F::ComputeStageFadeAlpha(EFPSRStageTransitionPhase::FadeOut, 5.0f, 0.0f, FadeOutSeconds, FadeInSeconds), 1.0f);
+		TestEqual(TEXT("FadeIn, End<=0 -> 0"),
+			F::ComputeStageFadeAlpha(EFPSRStageTransitionPhase::FadeIn, 5.0f, 0.0f, FadeOutSeconds, FadeInSeconds), 0.0f);
+
+		// (8h) FadeOutSeconds/FadeInSeconds<=0 with a real (>0) End: defended against a 0-division rather than
+		//      producing inf/NaN — reads the same as the 0-length case above.
+		TestEqual(TEXT("FadeOut, FadeOutSeconds<=0 -> 1 (no 0-div)"),
+			F::ComputeStageFadeAlpha(EFPSRStageTransitionPhase::FadeOut, 19.9f, 20.0f, 0.0f, FadeInSeconds), 1.0f);
+		TestEqual(TEXT("FadeIn, FadeInSeconds<=0 -> 0 (no 0-div)"),
+			F::ComputeStageFadeAlpha(EFPSRStageTransitionPhase::FadeIn, 19.9f, 20.0f, FadeOutSeconds, 0.0f), 0.0f);
 	}
 
 	return true;

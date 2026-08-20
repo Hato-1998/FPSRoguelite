@@ -110,10 +110,15 @@ AFPSRCharacter::AFPSRCharacter(const FObjectInitializer& ObjectInitializer)
 	WeaponMesh = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("WeaponMesh"));
 	WeaponMesh->SetupAttachment(GetMesh(), WeaponAttachSocketName);
 	WeaponMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	// Stage-fade PP exclusion mask (Phase B, M_PP_StageFade — see the GetMesh()/FirstPersonArms comment below for
+	// why this is CustomDepth, not a stencil value): the weapon hangs off the body in every camera, so it needs
+	// the same flag or it would visibly fade out while the hand holding it stays masked-in.
+	WeaponMesh->SetRenderCustomDepth(true);
 
 	WeaponMeshStatic = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("WeaponMeshStatic"));
 	WeaponMeshStatic->SetupAttachment(GetMesh(), WeaponAttachSocketName);
 	WeaponMeshStatic->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	WeaponMeshStatic->SetRenderCustomDepth(true);
 
 	// The separate 3P weapon mesh is gone (ADR 0002). It existed so remote observers could see a weapon the owner-only
 	// 1P mesh hid from them; with one mesh serving both there is nothing left to mirror — and a survey of all 9 weapon
@@ -141,6 +146,14 @@ AFPSRCharacter::AFPSRCharacter(const FObjectInitializer& ObjectInitializer)
 	// so this stays. Unconditional: this is the player, of whom there are at most 4. The per-actor budget this project
 	// is built around is about enemies, and they keep their own setting.
 	GetMesh()->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
+
+	// Stage-fade PP exclusion mask (Phase B, M_PP_StageFade): the mask is a CustomDepth==SceneDepth pixel test, not
+	// a stencil-value test, so every mesh the player renders has to WRITE CustomDepth or it gets swallowed by the
+	// fade like static geometry. Enemies already do this (their base BPs set mesh RenderCustomDepth=True); this is
+	// the player-side half. Weapon meshes are handled separately where they attach (WeaponMesh/WeaponMeshStatic
+	// below, and the per-part components created in RebuildPartsFromSelection).
+	GetMesh()->SetRenderCustomDepth(true);
+	FirstPersonArms->SetRenderCustomDepth(true);
 
 	WeaponInventory = CreateDefaultSubobject<UFPSRWeaponInventoryComponent>(TEXT("WeaponInventory"));
 	WeaponFire = CreateDefaultSubobject<UFPSRWeaponFireComponent>(TEXT("WeaponFire"));
@@ -2355,6 +2368,11 @@ void AFPSRCharacter::RebuildPartsFromSelection(const TArray<FFPSRWeaponPartAttac
 		// Match the weapon it hangs off: the render tag isn't inherited through attachment, so a part created while the
 		// first-person arms are up would otherwise cast a world shadow from camera space (ADR 0003).
 		PartComp->SetFirstPersonPrimitiveType(GetWeaponFirstPersonPrimitiveType());
+		// Stage-fade PP exclusion mask (Phase B, M_PP_StageFade): same reason as WeaponMesh/WeaponMeshStatic above —
+		// this doesn't inherit through attachment either, and unlike those two fixed components, parts are torn
+		// down and rebuilt fresh on every equip/modifier change (RebuildPartsFromSelection's top of function), so
+		// the flag has to be set HERE at creation rather than once in the constructor.
+		PartComp->SetRenderCustomDepth(true);
 		PartComp->RegisterComponent();
 		PartComp->AttachToComponent(WeaponMesh, FAttachmentTransformRules::KeepRelativeTransform, PartDef.Socket);
 		PartComp->SetRelativeTransform(PartDef.Offset);

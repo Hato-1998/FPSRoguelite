@@ -541,9 +541,7 @@ bool AFPSRArenaActor::GetPlayerEntryTransforms(TArray<FTransform>& Out) const
 		for (FTransform& Xf : Transforms)
 		{
 			const FVector Loc = Xf.GetLocation();
-			const FIntPoint Cell(
-				FMath::FloorToInt((Loc.X - Layout.GridOrigin.X) / Layout.CellSize),
-				FMath::FloorToInt((Loc.Y - Layout.GridOrigin.Y) / Layout.CellSize));
+			const FIntPoint Cell = FFPSRArenaCells::WorldToCell(Layout, Loc);
 
 			FIntPoint OpenCell;
 			if (!FindNearestOpenCell(Layout, Cell, PlayerEntrySnapMaxRadiusCells, OpenCell))

@@ -1433,7 +1433,7 @@ AFPSREnemyBase* UFPSREnemySpawnSubsystem::AcquireEnemy(const FVector& Location, 
 		SpawnPoint->GetExitPathWorldPoints(ExitWaypoints);
 		if (ExitWaypoints.Num() > 0)
 		{
-			Enemy->SetExitPath(ExitWaypoints);
+			Enemy->SetExitPath(ExitWaypoints, SpawnPoint->ShouldPhaseThroughWorldWhileExiting());
 		}
 	}
 
@@ -1478,6 +1478,123 @@ void UFPSREnemySpawnSubsystem::ReleaseAllEnemies()
 	// Every charging enemy released its ranged token via Deactivate; reset the per-player counts as a safety net
 	// (e.g. against a stale-controller decrement that couldn't match its key after a player left mid-charge).
 	RangedChargeCountByPlayer.Reset();
+}
+
+void UFPSREnemySpawnSubsystem::CarryEnemiesToNewStage(const TArray<FVector>& OldPlayerLocs, const TArray<FVector>& NewPlayerLocs, float CarryMaxFraction)
+{
+	if (!HasServerAuthority())
+	{
+		return;
+	}
+
+	// No delta to carry by (no player actually teleported this swap, or a caller bug pairing mismatched arrays) —
+	// fall back to the old behavior rather than guess at a delta. Warning: an all-DBNO/no-pawn transition (every
+	// controller skipped PerformSwap's teleport loop) is a legitimate, if rare, run state, not a bug on its own.
+	if (OldPlayerLocs.Num() == 0 || NewPlayerLocs.Num() != OldPlayerLocs.Num())
+	{
+		UE_LOG(LogFPSR, Warning,
+			TEXT("[Spawn] CarryEnemiesToNewStage: no player delta to carry by (%d old / %d new loc) — releasing the whole swarm instead."),
+			OldPlayerLocs.Num(), NewPlayerLocs.Num());
+		ReleaseAllEnemies();
+		return;
+	}
+
+	const UWorld* World = GetWorld();
+	const UFPSRFlowFieldSubsystem* FlowField = World ? World->GetSubsystem<UFPSRFlowFieldSubsystem>() : nullptr;
+
+	// Snapshot BEFORE any release/move — ReleaseEnemy (below) mutates ActiveEnemies, so it can't be walked directly,
+	// and MaxCarry must be measured against the count as it stood the instant the carry-over started.
+	TArray<AFPSREnemyBase*> Snapshot;
+	Snapshot.Reserve(ActiveEnemies.Num());
+	for (const TObjectPtr<AFPSREnemyBase>& EnemyPtr : ActiveEnemies)
+	{
+		if (AFPSREnemyBase* Enemy = EnemyPtr.Get())
+		{
+			Snapshot.Add(Enemy);
+		}
+	}
+	// RoundToInt, not FloorToInt: authored fractions are not exactly representable (0.7f is 0.69999…), so a floor
+	// systematically under-carries by one on clean authored values (0.7 × 10 → 6, not 7 — merge-review finding A1).
+	// Round keeps the designer's arithmetic; the 0..Num clamp is implicit (fraction is ClampMin/Max 0..1 in the DA).
+	const int32 MaxCarry = FMath::RoundToInt(CarryMaxFraction * Snapshot.Num());
+
+	// Per-enemy candidate (post-delta, pre-snap) position + its rank key. A VALUE struct, not AFPSREnemyBase* — so
+	// the Sort below compares plain floats, not enemy pointers (TArray<T*>::Sort dereferences its predicate's
+	// arguments — a pointer-typed predicate signature trips a hard-to-diagnose C2664 buried in the engine's sort
+	// header rather than here).
+	struct FCarryCandidate
+	{
+		AFPSREnemyBase* Enemy = nullptr;
+		FVector CandidateLoc = FVector::ZeroVector;
+		float RankDistSq = 0.0f; // squared XY distance from CandidateLoc to the nearest NEW player location
+	};
+	TArray<FCarryCandidate> Candidates;
+	Candidates.Reserve(Snapshot.Num());
+
+	for (AFPSREnemyBase* Enemy : Snapshot)
+	{
+		const FVector CurrentLoc = Enemy->GetActorLocation();
+
+		// Nearest OLD player location (XY — the same "nearest player" metric TickEnemyMovement's DistSquaredXY
+		// already uses) decides whose teleport delta this enemy rides.
+		int32 NearestOldIdx = 0;
+		float BestOldDistSq = FVector::DistSquaredXY(CurrentLoc, OldPlayerLocs[0]);
+		for (int32 i = 1; i < OldPlayerLocs.Num(); ++i)
+		{
+			const float DistSq = FVector::DistSquaredXY(CurrentLoc, OldPlayerLocs[i]);
+			if (DistSq < BestOldDistSq)
+			{
+				BestOldDistSq = DistSq;
+				NearestOldIdx = i;
+			}
+		}
+
+		const FVector Delta = NewPlayerLocs[NearestOldIdx] - OldPlayerLocs[NearestOldIdx];
+		const FVector Candidate = CurrentLoc + Delta;
+
+		float BestNewDistSq = FVector::DistSquaredXY(Candidate, NewPlayerLocs[0]);
+		for (int32 i = 1; i < NewPlayerLocs.Num(); ++i)
+		{
+			BestNewDistSq = FMath::Min(BestNewDistSq, FVector::DistSquaredXY(Candidate, NewPlayerLocs[i]));
+		}
+
+		Candidates.Add(FCarryCandidate{ Enemy, Candidate, BestNewDistSq });
+	}
+
+	// Nearest-to-a-new-player first; the excess (index >= MaxCarry, once sorted) is released farthest-first (A4).
+	Candidates.Sort([](const FCarryCandidate& A, const FCarryCandidate& B) { return A.RankDistSq < B.RankDistSq; });
+
+	// A4 call-site constant: ~200 calls/transition budget, MaxRadiusCells 16 recommended.
+	constexpr int32 CarrySnapMaxRadiusCells = 16;
+
+	int32 CarriedCount = 0;
+	int32 SnapFailCount = 0;
+	for (int32 i = 0; i < Candidates.Num(); ++i)
+	{
+		AFPSREnemyBase* Enemy = Candidates[i].Enemy;
+		if (i >= MaxCarry)
+		{
+			ReleaseEnemy(Enemy); // over the carry cap — farthest from a new player, released like ReleaseAllEnemies
+			continue;
+		}
+
+		FVector SnapLoc;
+		if (!FlowField || !FlowField->FindNearestOpenLocation(Candidates[i].CandidateLoc, CarrySnapMaxRadiusCells, SnapLoc))
+		{
+			UE_LOG(LogFPSR, Verbose,
+				TEXT("[Spawn] CarryEnemiesToNewStage: no open cell within %d cells of %s — releasing %s instead of carrying it."),
+				CarrySnapMaxRadiusCells, *Candidates[i].CandidateLoc.ToString(), *Enemy->GetName());
+			ReleaseEnemy(Enemy);
+			++SnapFailCount;
+			continue;
+		}
+
+		Enemy->ServerRelocateForStageCarry(SnapLoc);
+		++CarriedCount;
+	}
+
+	UE_LOG(LogFPSR, Log, TEXT("[Spawn] CarryEnemiesToNewStage: carried %d / released %d (cap %d, snap-failed %d)."),
+		CarriedCount, Snapshot.Num() - CarriedCount, MaxCarry, SnapFailCount);
 }
 
 void UFPSREnemySpawnSubsystem::ResetForNewRun()

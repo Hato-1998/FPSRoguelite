@@ -243,6 +243,7 @@ void UFPSRGA_WeaponFire_Hitscan::ActivateAbility(
 	FCollisionObjectQueryParams PawnObjParams;
 	FPSRCombat::AddDamageablePawnObjectTypes(PawnObjParams);
 	FPSRCombat::AddWeakpointObjectType(PawnObjParams);
+	FPSRCombat::AddDestructibleObjectType(PawnObjParams); // doors / arena props: damageable, but they are also the wall below
 
 	// bAllowSelf for any per-impact explosion (ExplosiveRounds card): self unless the NoSelfDamage card cleared it.
 	const bool bAllowSelfOnImpact = !FireCtx.bSuppressSelfDamage;
@@ -341,6 +342,9 @@ void UFPSRGA_WeaponFire_Hitscan::ActivateAbility(
 			FCollisionQueryParams WallParams(SCENE_QUERY_STAT(FPSRWeaponFireWall), false, Avatar);
 			for (const FHitResult& PawnHit : PawnHits)
 			{
+				// PAWNS only. A destructible is gathered by the same query (it is damageable) but it IS the wall —
+				// ignoring it would let the cutoff run past a door / suppressor and damage whatever stood behind it.
+				if (FPSRCombat::IsDestructibleGeometry(PawnHit.GetComponent())) { continue; }
 				if (AActor* PawnActor = PawnHit.GetActor()) { WallParams.AddIgnoredActor(PawnActor); }
 			}
 			FHitResult WallHit;
@@ -367,7 +371,13 @@ void UFPSRGA_WeaponFire_Hitscan::ActivateAbility(
 			FVector ImpactPoint = bWall ? WallHit.ImpactPoint : End;
 			for (const FPSRCombat::FResolvedHit& Entry : ResolvedHits)
 			{
-				if (Entry.Distance > WallDist)
+				// Tolerance, not decoration: a destructible is BOTH the wall and a target, so its own entry sits
+				// exactly AT WallDist (same ray, same surface, two separate queries). A bare > would let last-bit
+				// float noise drop the wall's own damage, and that failure is silent — the prop just never breaks.
+				// RELATIVE term, not a bare constant: float ULP at 8192cm (~82 m) is already ~1e-3 cm, bigger than
+				// KINDA_SMALL_NUMBER — a fixed epsilon silently stops covering exactly the noise it exists for on a
+				// long-range shot (merge-review finding A3). 1e-3 relative ≈ 1 ULP headroom across the weapon ranges.
+				if (Entry.Distance > WallDist + FMath::Max(KINDA_SMALL_NUMBER, WallDist * 1.0e-3f))
 				{
 					break; // behind the wall (everything after is too — distance-sorted)
 				}

@@ -5,7 +5,7 @@
 #include "Run/FPSRRunDirectorSubsystem.h"
 #include "Arena/FPSRArenaActor.h"
 #include "Arena/FPSRArenaStreamSubsystem.h"
-#include "Enemy/FPSREnemySpawnSubsystem.h"
+#include "Enemy/FPSREnemySpawnSubsystem.h" // CarryEnemiesToNewStage (Phase A leftover-swarm carry-over)
 #include "Hero/FPSRCharacter.h"
 #include "Core/FPSRLogChannels.h"
 #include "Engine/World.h"
@@ -46,6 +46,7 @@ void UFPSRStageDirectorSubsystem::Deinitialize()
 	{
 		World->GetTimerManager().ClearTimer(DealingTimerHandle);
 		World->GetTimerManager().ClearTimer(SwapReadyTimerHandle);
+		World->GetTimerManager().ClearTimer(FadeTimerHandle);
 	}
 	Super::Deinitialize();
 }
@@ -89,7 +90,8 @@ AFPSRGameState* UFPSRStageDirectorSubsystem::GetGS() const
 
 EFPSRStageTransitionPhase UFPSRStageDirectorSubsystem::DecidePhaseAfterDealing(bool bRunPaused)
 {
-	return bRunPaused ? EFPSRStageTransitionPhase::Pending : EFPSRStageTransitionPhase::Swapping;
+	// Phase A phase split: FadeOut (was Swapping before the fade phases existed) — see the header comment.
+	return bRunPaused ? EFPSRStageTransitionPhase::Pending : EFPSRStageTransitionPhase::FadeOut;
 }
 
 bool UFPSRStageDirectorSubsystem::CanSwapNow(bool bRunPaused)
@@ -206,16 +208,18 @@ void UFPSRStageDirectorSubsystem::OnDealingWindowClosed()
 	// ending (EndRunFreeze) pins bRunPaused permanently, and Pending correctly holds rather than swapping behind
 	// the result screen.
 	const EFPSRStageTransitionPhase NextPhase = DecidePhaseAfterDealing(GS->IsRunPaused());
-	GS->SetStageTransition(NextPhase, 0.0f); // dealing has closed either way — no end-timestamp left to carry
-
 	if (NextPhase == EFPSRStageTransitionPhase::Pending)
 	{
-		// The freeze is still up (see above) — HandleRunStateChanged (already bound since RequestTransition) now
-		// also branches on Pending and calls TrySwap() the instant it clears. Nothing else to arm here.
+		// The freeze is still up (see above) — dealing has closed either way, so no end-timestamp left to carry.
+		// HandleRunStateChanged (already bound since RequestTransition) now also branches on Pending and calls
+		// TrySwap() the instant it clears. Nothing else to arm here.
+		GS->SetStageTransition(EFPSRStageTransitionPhase::Pending, 0.0f);
 		return;
 	}
 
-	BeginSwap();
+	// Phase A phase split: dealing closed and no freeze -> FadeOut (EnterFadeOut sets the phase itself, with the
+	// real fade-length end-timestamp — no intermediate SetStageTransition needed here).
+	EnterFadeOut();
 }
 
 void UFPSRStageDirectorSubsystem::HandleRunStateChanged()
@@ -231,6 +235,21 @@ void UFPSRStageDirectorSubsystem::HandleRunStateChanged()
 	if (Phase == EFPSRStageTransitionPhase::Pending)
 	{
 		TrySwap();
+		return;
+	}
+
+	// A swap PerformSwap deferred because a card-selection freeze was up (see its guard): resume the moment the
+	// freeze clears. Gated on bSwapDeferredByFreeze, not on the phase alone — OnRunStateChanged fires for many
+	// unrelated reasons while Swapping is legitimately waiting on destination readiness, and an ungated BeginSwap
+	// here would race the readiness poll into a SECOND PerformSwap (double stage-index commit). BeginSwap rather
+	// than PerformSwap directly: it re-verifies destination readiness, which may have changed while frozen.
+	if (Phase == EFPSRStageTransitionPhase::Swapping && bSwapDeferredByFreeze)
+	{
+		if (!GS->IsRunPaused())
+		{
+			bSwapDeferredByFreeze = false;
+			BeginSwap();
+		}
 		return;
 	}
 
@@ -270,7 +289,7 @@ void UFPSRStageDirectorSubsystem::HandleRunStateChanged()
 
 	// Unpause edge: read the remaining time BEFORE UnPauseTimer, while the timer is still definitely Paused
 	// (FTimerManager stores the frozen remaining time directly in that state — see TimerManager.cpp), then push
-	// GraceDealingEndServerTime out by exactly that much so IsStageDealingOpen — which every client evaluates
+	// StagePhaseEndServerTime out by exactly that much so IsStageDealingOpen — which every client evaluates
 	// against this SAME replicated timestamp, not a local timer — still closes at the right FIXED distance from
 	// now. One more replication, same mechanism as any other SetStageTransition call.
 	const float Remaining = TimerManager.GetTimerRemaining(DealingTimerHandle);
@@ -290,8 +309,150 @@ void UFPSRStageDirectorSubsystem::TrySwap()
 		return; // the freeze that put us in Pending hasn't cleared yet
 	}
 
+	// Phase A phase split: Pending -> FadeOut (used to go straight to Swapping + BeginSwap).
+	EnterFadeOut();
+}
+
+void UFPSRStageDirectorSubsystem::EnterFadeOut()
+{
+	AFPSRGameState* GS = GetGS();
+	if (!GS)
+	{
+		return;
+	}
+
+	const float FadeSeconds = GetStageFadeOutSeconds();
+	if (FadeSeconds <= 0.0f)
+	{
+		// 0-length fade: still publish the FadeOut phase (IsStageTransitionActive/replication stay consistent with
+		// a real fade), but skip the timer and fall straight through to OnFadeOutComplete — the pre-Phase-A hard-cut
+		// path (spec A3.2).
+		GS->SetStageTransition(EFPSRStageTransitionPhase::FadeOut, 0.0f);
+		OnFadeOutComplete();
+		return;
+	}
+
+	GS->SetStageTransition(EFPSRStageTransitionPhase::FadeOut, GS->GetServerWorldTimeSeconds() + FadeSeconds);
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().SetTimer(
+			FadeTimerHandle, this, &UFPSRStageDirectorSubsystem::OnFadeOutComplete, FadeSeconds, /*bLoop*/false);
+	}
+}
+
+void UFPSRStageDirectorSubsystem::OnFadeOutComplete()
+{
+	AFPSRGameState* GS = GetGS();
+	if (!GS)
+	{
+		return;
+	}
+
+	// Swapping now means "blacked out + destination activated/regenerated, waiting for/running the actual swap" —
+	// see the header comment on EFPSRStageTransitionPhase::Swapping. The client fade holds alpha at 1.0 for the
+	// WHOLE Swapping phase, so publishing it here (before the hold below) is what makes the hold read as blackout.
 	GS->SetStageTransition(EFPSRStageTransitionPhase::Swapping, 0.0f);
+
+	// Minimum full-blackout dwell (StageBlackoutHoldSeconds, user request 2026-08-20): without it the normal
+	// destination-ready case swaps the very frame the fade-out finishes and the blackout reads as a flicker.
+	// SERIALIZED before BeginSwap's readiness wait rather than run in parallel — the wait is 0 in the normal case
+	// (the destination is parked a stage early), so parallelizing would only complicate the worst case, where a
+	// slow client already stretches the blackout past the hold anyway. 0 = no dwell, pre-parameter behavior.
+	const float HoldSeconds = GetStageBlackoutHoldSeconds();
+	UWorld* World = GetWorld();
+	if (HoldSeconds <= 0.0f || !World)
+	{
+		OnBlackoutHoldComplete();
+		return;
+	}
+	World->GetTimerManager().SetTimer(
+		FadeTimerHandle, this, &UFPSRStageDirectorSubsystem::OnBlackoutHoldComplete, HoldSeconds, /*bLoop*/false);
+}
+
+void UFPSRStageDirectorSubsystem::OnBlackoutHoldComplete()
+{
+	// BeginSwap (unchanged from before the phase split) either commits immediately (the normal ADR 0012 axis-5
+	// case, destination already parked+visible) or polls until every connection can see the destination.
 	BeginSwap();
+}
+
+float UFPSRStageDirectorSubsystem::GetStageBlackoutHoldSeconds() const
+{
+	const AFPSRGameState* GS = GetGS();
+	const UFPSRRunScheduleDataAsset* Schedule = GS ? GS->GetRunSchedule() : nullptr;
+	return Schedule ? Schedule->StageBlackoutHoldSeconds : DefaultStageBlackoutHoldSeconds;
+}
+
+float UFPSRStageDirectorSubsystem::GetStageFadeOutSeconds() const
+{
+	const AFPSRGameState* GS = GetGS();
+	const UFPSRRunScheduleDataAsset* Schedule = GS ? GS->GetRunSchedule() : nullptr;
+	return Schedule ? Schedule->StageFadeOutSeconds : DefaultStageFadeOutSeconds;
+}
+
+void UFPSRStageDirectorSubsystem::EnterFadeIn()
+{
+	AFPSRGameState* GS = GetGS();
+	if (!GS)
+	{
+		return;
+	}
+
+	const float FadeSeconds = GetStageFadeInSeconds();
+	if (FadeSeconds <= 0.0f)
+	{
+		GS->SetStageTransition(EFPSRStageTransitionPhase::FadeIn, 0.0f);
+		OnFadeInComplete();
+		return;
+	}
+
+	GS->SetStageTransition(EFPSRStageTransitionPhase::FadeIn, GS->GetServerWorldTimeSeconds() + FadeSeconds);
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().SetTimer(
+			FadeTimerHandle, this, &UFPSRStageDirectorSubsystem::OnFadeInComplete, FadeSeconds, /*bLoop*/false);
+	}
+}
+
+void UFPSRStageDirectorSubsystem::OnFadeInComplete()
+{
+	AFPSRGameState* GS = GetGS();
+	if (!GS)
+	{
+		return;
+	}
+
+	// Post-swap grace, granted HERE (the exact unfreeze moment) rather than at PerformSwap — granting at the swap
+	// would let the FadeIn length silently eat the window (enemies are frozen through FadeIn, so grace spent there
+	// protects nothing). Carried enemies stand at their pre-transition RELATIVE positions — a melee enemy that was
+	// at contact range when the suppressor broke is at contact range NOW, and everything unfreezes on this same
+	// frame; without this window that enemy lands a zero-reaction-time hit the old release-everything design made
+	// structurally impossible (merge-review finding C2). Same BeginGraceWindow mechanic as spawn/revive protection.
+	const UFPSRRunScheduleDataAsset* Schedule = GS->GetRunSchedule();
+	const float GraceSeconds = Schedule ? Schedule->StagePostSwapGraceSeconds : DefaultStagePostSwapGraceSeconds;
+	if (GraceSeconds > 0.0f)
+	{
+		if (UWorld* World = GetWorld())
+		{
+			for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+			{
+				const APlayerController* PC = It->Get();
+				if (AFPSRCharacter* Char = PC ? Cast<AFPSRCharacter>(PC->GetPawn()) : nullptr)
+				{
+					Char->BeginGraceWindow(GraceSeconds);
+				}
+			}
+		}
+	}
+
+	GS->SetStageTransition(EFPSRStageTransitionPhase::None, 0.0f);
+}
+
+float UFPSRStageDirectorSubsystem::GetStageFadeInSeconds() const
+{
+	const AFPSRGameState* GS = GetGS();
+	const UFPSRRunScheduleDataAsset* Schedule = GS ? GS->GetRunSchedule() : nullptr;
+	return Schedule ? Schedule->StageFadeInSeconds : DefaultStageFadeInSeconds;
 }
 
 void UFPSRStageDirectorSubsystem::BeginSwap()
@@ -399,6 +560,30 @@ void UFPSRStageDirectorSubsystem::PerformSwap()
 		return;
 	}
 
+	// FadeOut and Swapping's destination-ready wait both take real wall-clock time, and a freeze CAN land inside
+	// them: since the dealing-window invulnerability was retired (2026-08-20) a kill during the fades pays XP
+	// instantly (FPSRXPPickup's transition-collect path), and AddSharedXP -> RefreshPauseState raises the
+	// card-selection freeze with NO transition gate. The two pause reasons need opposite reactions:
+	//  - EndRun (bRunEnded latched): abort. Teleporting players, carrying the swarm and committing a stage index
+	//    behind the result screen would all be wrong — and the run is over, so the lost transition is moot.
+	//  - Card-selection freeze: HOLD, never abort — the suppressor is already consumed and nothing would ever call
+	//    RequestTransition again, so aborting here silently strands the run on this stage forever (merge-review
+	//    finding B1, the first version of this guard did exactly that). Stay in Swapping (the screen is already
+	//    blacked out, which sits fine under the fullscreen card UI) and let HandleRunStateChanged's unpause edge
+	//    re-enter BeginSwap — the same hold-then-resume contract Pending implements before the fades.
+	if (GS->IsRunPaused())
+	{
+		if (GS->HasRunEnded())
+		{
+			GS->SetStageTransition(EFPSRStageTransitionPhase::None, 0.0f);
+			UE_LOG(LogFPSR, Error, TEXT("[StageDirector] Swap aborted: the run has ended — not swapping behind the result screen."));
+			return;
+		}
+		bSwapDeferredByFreeze = true;
+		UE_LOG(LogFPSR, Log, TEXT("[StageDirector] Swap deferred: a card-selection freeze is up — holding the blackout until it clears."));
+		return;
+	}
+
 	// Unsubscribe now (safe even if we never bound — RemoveDynamic on an unbound delegate is a no-op). Leaving this
 	// bound past the swap would double-react the next time Pending is entered and OnRunStateChanged fires again.
 	if (bBoundRunStateChanged)
@@ -462,12 +647,26 @@ void UFPSRStageDirectorSubsystem::PerformSwap()
 	// 4. Teleport every player pawn that exists to the new arena's entry points (round-robin if there are more
 	//    players than entries) and kill residual velocity so nobody carries a slide/knockback across the
 	//    instantaneous swap.
+	//
+	//    POSITION ONLY — XY from the entry point, Z preserved (current height + the arenas' plane delta), and the
+	//    view/actor rotation NOT touched. The whole carry-over design (안 H) preserves each enemy's position
+	//    RELATIVE to its player, which only reads as "the terrain changed around me" if the player's own facing
+	//    and eye height survive the swap too: first live-fire PIE snapped the control rotation to the entry
+	//    point's authored facing, and that turn — plus the entry's authored Z — was exactly the "튐" the user
+	//    reported, enemies staying put notwithstanding. An entry point's authored ROTATION still matters where it
+	//    always did (run-start spawns via GameMode); the mid-run swap deliberately ignores it.
 	TArray<FTransform> EntryTransforms;
 	if (!Next->GetPlayerEntryTransforms(EntryTransforms))
 	{
 		UE_LOG(LogFPSR, Warning, TEXT("[StageDirector] %s has no authored player entry points (APlayerStart) — using its fallback ring."),
 			*Next->GetName());
 	}
+	// Phase A (step 4.5 below): pre/post-teleport locations, SAME index in both arrays, for CarryEnemiesToNewStage's
+	// per-enemy delta. A pawn-less controller (no Char) or an arena with no entry transforms is skipped on BOTH
+	// arrays below (never added to one without the other), so index i in OldPlayerLocs and NewPlayerLocs always
+	// describes the SAME player's before/after — CarryEnemiesToNewStage relies on that pairing.
+	TArray<FVector> OldPlayerLocs;
+	TArray<FVector> NewPlayerLocs;
 	int32 EntryCursor = 0;
 	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
 	{
@@ -490,13 +689,36 @@ void UFPSRStageDirectorSubsystem::PerformSwap()
 		const FTransform& EntryXform = EntryTransforms[EntryCursor % EntryTransforms.Num()];
 		++EntryCursor;
 
-		Char->SetActorLocationAndRotation(EntryXform.GetLocation(), EntryXform.GetRotation(),
-			/*bSweep*/false, nullptr, ETeleportType::TeleportPhysics);
-		PC->SetControlRotation(EntryXform.Rotator());
+		const FVector OldLoc = Char->GetActorLocation();
+		// Z: keep the pawn's own standing height, shifted by the two arenas' base-plane delta (0 while every arena
+		// sits on the same Z plane — D2 is single-plane, but the delta keeps this correct if a future arena isn't).
+		// Taking the entry point's authored Z instead is what made the first live-fire PIE read as a height pop:
+		// a PlayerStart's Z is wherever it was dropped in the level, not this pawn's capsule-center convention.
+		const float PlaneDeltaZ = (Prev && Prev != Next) ? (Next->GetActorLocation().Z - Prev->GetActorLocation().Z) : 0.0f;
+		const FVector NewLoc(EntryXform.GetLocation().X, EntryXform.GetLocation().Y, OldLoc.Z + PlaneDeltaZ);
+
+		OldPlayerLocs.Add(OldLoc); // BEFORE moving — this player's stage-A carry-over delta source
+		NewPlayerLocs.Add(NewLoc);
+
+		Char->SetActorLocation(NewLoc, /*bSweep*/false, nullptr, ETeleportType::TeleportPhysics);
 		if (UCharacterMovementComponent* Move = Char->GetCharacterMovement())
 		{
 			Move->StopMovementImmediately();
 		}
+	}
+
+	// 4.5. Carry the leftover swarm over to the new arena (Phase A — replaces the old ReleaseAllEnemies at step 6;
+	//      see that step's comment for why release is no longer correct). Ordering invariant: AFTER the destination
+	//      is regenerated + published to the flow field (step 3, AdoptArenaSurface — CarryEnemiesToNewStage's snap
+	//      needs the LIVE grid the enemies are about to land in) and AFTER the player teleport (step 4, so the
+	//      per-enemy delta has both the old and new player locations) — BEFORE the previous arena deactivates (step
+	//      5, so nothing here needs the OLD arena's collision to still be up). The whole swarm is frozen for the
+	//      entire transition (TickEnemyMovement's IsStageTransitionActive gate covers FadeOut/Swapping/FadeIn too),
+	//      so there is no tick-order race between this and the movement pass.
+	if (UFPSREnemySpawnSubsystem* SpawnSub = World->GetSubsystem<UFPSREnemySpawnSubsystem>())
+	{
+		const float CarryFraction = GS->GetRunSchedule() ? GS->GetRunSchedule()->StageCarryOverMaxFraction : 1.0f;
+		SpawnSub->CarryEnemiesToNewStage(OldPlayerLocs, NewPlayerLocs, CarryFraction);
 	}
 
 	// 5. Deactivate the previous arena (a single-arena cycle skips this — Prev == Next there).
@@ -505,18 +727,17 @@ void UFPSRStageDirectorSubsystem::PerformSwap()
 		Prev->SetArenaActive(false);
 	}
 
-	// 6. Cleanup that belongs to the OLD arena, not the new one — cancel whatever mission is still active, then
-	//    release every surviving enemy back to the pool (ADR 0010 D6):
-	//     - Mission: breaking the suppressor that triggered this swap was the player's choice to leave this arena
-	//       — the active mission's objective (spawn point, escort target, etc.) lives in the OLD arena, which
-	//       loses its collision the moment step 5 above deactivates it, so the objective becomes physically
-	//       unreachable. Left alone that is a SILENT failure: the mission just times out later with no obvious
-	//       cause. Cancelling explicitly here makes the loss immediate and attributable to the swap instead.
-	//       CancelActiveMission is a pure teardown (no reward grant, no "failed" log) — the mission simply no
-	//       longer exists, matching neither a success nor a real failure.
-	//     - Enemies: "새 아레나 좌표로 재배치하지 않는다 — 절차 배치와 곱해지면 적이 벽에서 튀어나온다." The old
-	//       arena's leftover swarm has no valid standing room in the new arena's freshly rolled layout, so it goes
-	//       back to the pool instead of being relocated into it.
+	// 6. Cleanup that belongs to the OLD arena, not the new one — cancel whatever mission is still active (ADR 0010
+	//    D6): breaking the suppressor that triggered this swap was the player's choice to leave this arena — the
+	//    active mission's objective (spawn point, escort target, etc.) lives in the OLD arena, which loses its
+	//    collision the moment step 5 above deactivates it, so the objective becomes physically unreachable. Left
+	//    alone that is a SILENT failure: the mission just times out later with no obvious cause. Cancelling
+	//    explicitly here makes the loss immediate and attributable to the swap instead. CancelActiveMission is a
+	//    pure teardown (no reward grant, no "failed" log) — the mission simply no longer exists, matching neither a
+	//    success nor a real failure.
+	//    (Phase A: the leftover SWARM used to be released here too — "새 아레나 좌표로 재배치하지 않는다" — but user
+	//    decision now carries it over instead (step 4.5, CarryEnemiesToNewStage), so there is nothing enemy-related
+	//    left to do at this step.)
 	if (UFPSRRunDirectorSubsystem* RunDirector = World->GetSubsystem<UFPSRRunDirectorSubsystem>())
 	{
 		if (RunDirector->CancelActiveMission())
@@ -524,19 +745,19 @@ void UFPSRStageDirectorSubsystem::PerformSwap()
 			UE_LOG(LogFPSR, Log, TEXT("[StageDirector] Active mission cancelled — its objective was in the arena being left."));
 		}
 	}
-	if (UFPSREnemySpawnSubsystem* SpawnSub = World->GetSubsystem<UFPSREnemySpawnSubsystem>())
-	{
-		SpawnSub->ReleaseAllEnemies();
-	}
 
 	// 7. Commit the new stage — every client follows purely from these replicated values (arena visibility toggle +
-	//    the OnRunStateChanged re-broadcast in ApplyStageTransitionLocal), no dedicated RPC needed.
+	//    the OnRunStateChanged re-broadcast in ApplyStageTransitionLocal), no dedicated RPC needed. Then enter
+	//    FadeIn (Phase A phase split — used to go straight to None here; EnterFadeIn sets the phase itself).
 	GS->SetStageIndex(NewStageIndex);
 	GS->SetActiveArena(Next);
-	GS->SetStageTransition(EFPSRStageTransitionPhase::None, 0.0f);
+	EnterFadeIn();
 
+	// GetPathName, not GetName: every arena's actor tends to share one object NAME ("FPSRArenaActor_0") because each
+	// lives in its own sublevel namespace — a name-only line reads as a self-cycle when the swap actually crossed
+	// arenas (first live-fire PIE did exactly that). The path carries the sublevel, which is the distinguishing part.
 	UE_LOG(LogFPSR, Log, TEXT("[StageDirector] Swap complete: %s -> %s (stage %d, seed %d)."),
-		Prev ? *Prev->GetName() : TEXT("?"), *Next->GetName(), NewStageIndex, Next->GetActiveSeed());
+		Prev ? *Prev->GetPathName() : TEXT("?"), *Next->GetPathName(), NewStageIndex, Next->GetActiveSeed());
 
 	// 8. Park the arena AFTER this one, now that this stage has begun (ADR 0012 axis 5). Done LAST so the park
 	//    request cannot compete with the swap's own frame, and so GetCurrentStageOrder already reads the arena we

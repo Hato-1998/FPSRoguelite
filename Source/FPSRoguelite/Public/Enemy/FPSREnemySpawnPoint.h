@@ -44,18 +44,45 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Enemy Spawn")
 	bool bEnabled = true;
 
+	/**
+	 * 탈출 경로를 따라가는 동안 적이 **정적 지오메트리를 통과**하는가 (구조형 스포너용, 기본 켬).
+	 *
+	 * 스포너 메시에 실제 구멍을 뚫어 두는 대신 이것을 쓴다. 메시는 **완전히 막힌 채로** 두므로 플레이어가
+	 * 빠지거나 통과하지 않고, 적만 스폰 연출 동안 벽을 지나 나온다. 뚫린 콜리전은 구멍이 적 캡슐보다 좁으면
+	 * 조용히 끼는데, 이 방식엔 그 실패 모드가 없다.
+	 *
+	 * 통과 중에도 적은 **여전히 맞고**(Visibility 채널 그대로) **플레이어를 막는다** — WorldStatic 응답
+	 * 하나만 잠시 Ignore 된다. 바닥도 그대로 밟는다: 중력은 캡슐 응답이 아니라 별도 월드 쿼리로 바닥을
+	 * 찾는다(`AFPSREnemyBase::ApplyGravity`).
+	 *
+	 * 끄는 경우: 탈출 경로가 "구조물에서 빼내는" 용도가 아니라 "모퉁이를 돌려보내는" 연출일 때. 그때는
+	 * 벽을 통과하면 안 된다.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Enemy Spawn", meta = (DisplayName = "탈출 중 지오메트리 통과"))
+	bool bPhaseThroughWorldWhileExiting = true;
+
 	FGameplayTag GetZoneTag() const { return ZoneTag; }
 	const FGameplayTag& GetMapId() const { return MapId; }
 	float GetMinPlayerDistance() const { return MinPlayerDistance; }
 	bool IsEnabled() const { return bEnabled; }
+	bool ShouldPhaseThroughWorldWhileExiting() const { return bPhaseThroughWorldWhileExiting; }
 
 	/** Server/setup: assign this point's spawn zone (used by AFPSRSpawnRoom to auto-tag its interior points). */
 	void SetZoneTag(const FGameplayTag& InZoneTag) { ZoneTag = InZoneTag; }
 
-	/** Append this point's authored exit-path waypoints (world space) to Out, in attach order. The waypoints are the
-	 *  child scene components of ExitPathRoot: in a structured-spawner BP (a pipe/box mesh enemies spawn INSIDE), add
-	 *  Scene components under ExitPathRoot and place them along the route OUT to the mouth — the last is the hand-off
-	 *  point to flow-field player-chase. No children = no path (the enemy chases immediately). (C1) */
+	/**
+	 * Append this point's authored exit-path waypoints (world space) to Out, in attach order — the route OUT of a
+	 * structured spawner, ending at the hand-off point to flow-field player-chase. No waypoints = no path (the
+	 * enemy chases immediately). (C1)
+	 *
+	 * Two authoring places, checked in this order:
+	 *   1. Scene components attached to the **UChildActorComponent that spawned this point**, i.e. authored in the
+	 *      SPAWNER Blueprint. Use this when one mesh has several holes that exit in DIFFERENT directions — each
+	 *      ChildActorComponent carries its own route, dragged in that BP's viewport.
+	 *   2. Scene components under this actor's own **ExitPathRoot**. Used by a directly-placed spawn point, and as
+	 *      the shared default a structured spawner inherits when a hole has no route of its own (identical routes
+	 *      differing only by rotation are covered by rotating the ChildActorComponent).
+	 */
 	void GetExitPathWorldPoints(TArray<FVector>& Out) const;
 
 	/** World location where the enemy actually spawns = SpawnAnchor's world location (falls back to the actor origin

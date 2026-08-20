@@ -517,6 +517,14 @@ FGameplayTag UFPSRFlowFieldSubsystem::FindMapIdForLocation(const FVector& WorldL
 	return FGameplayTag();
 }
 
+bool UFPSRFlowFieldSubsystem::FindNearestOpenLocation(const FVector& InWorld, int32 MaxRadiusCells, FVector& OutWorld) const
+{
+	// UnifiedComputer is the LIVE adopted grid (arena mode: rebuilt whole by AdoptArenaSurface on every transition,
+	// so this always reflects the destination arena's post-regenerate, post-destructible-reset state). Null off
+	// authority (clients never build it) or before the first bake/adopt — false, same as every other query here.
+	return UnifiedComputer && UnifiedComputer->FindNearestOpenLocation(InWorld, MaxRadiusCells, OutWorld);
+}
+
 void UFPSRFlowFieldSubsystem::Deinitialize()
 {
 	if (UWorld* World = GetWorld())

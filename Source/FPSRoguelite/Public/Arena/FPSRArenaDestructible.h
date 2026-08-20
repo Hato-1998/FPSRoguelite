@@ -45,9 +45,10 @@ protected:
 	 *  this actor, or the footprint computes to zero cells, this is a one-line warning and Super only. */
 	virtual void HandleBrokenAuthority(AActor* Breaker) override;
 
-	/** The prop's mesh. Object type ECC_FPSRPlayerPawn / QueryOnly — the exact recipe AFPSRDoor uses for DoorMesh
-	 *  (see FPSRCollisionChannels.h): gathered by every weapon object-query (so every weapon type damages it via
-	 *  HealthComponent, zero new damage code) and blocks both players and enemies. Must NOT be WorldStatic: a
+	/** The prop's mesh. Object type ECC_FPSRDestructible / QueryOnly — the exact recipe AFPSRDoor uses for DoorMesh
+	 *  (see FPSRCollisionChannels.h): gathered by every weapon damage query (so every weapon type damages it via
+	 *  HealthComponent, zero new damage code), blocks players and enemies, and BLOCKS an in-flight projectile so a
+	 *  round terminates here instead of passing through to whatever stands behind. Must NOT be WorldStatic: a
 	 *  WorldStatic mesh is exactly what the arena's (now-abandoned) world-trace bake would have picked up on its
 	 *  own, and re-probing "which cells does this open" at break time would be a runtime world query — banned by
 	 *  the D7 performance contract (ADR 0010 D7 / 0011 E3). Declaring FootprintCells instead of tracing the mesh is

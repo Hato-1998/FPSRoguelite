@@ -15,9 +15,12 @@ class AFPSRArenaActor;
  * StageTransitionPhase/StageIndex/ActiveArena rather than this subsystem directly — the same GameState-mediated
  * pattern ERunPhase/bRunPaused already use.
  *
- * Flow: RequestTransition (None -> Grace, arms a one-shot dealing timer) -> OnDealingWindowClosed (Grace ->
- * Pending if the card freeze is up, else straight to Swapping) -> [Pending waits for the freeze to clear, then
- * TrySwap] -> PerformSwap (Swapping -> the actual arena swap -> None).
+ * Flow (Phase A phase split): RequestTransition (None -> Grace, arms a one-shot dealing timer) -> OnDealingWindowClosed
+ * (Grace -> Pending if the card freeze is up, else straight to FadeOut) -> [Pending waits for the freeze to clear,
+ * then TrySwap -> FadeOut] -> OnFadeOutComplete (FadeOut -> Swapping -> BeginSwap) -> PerformSwap (the actual arena
+ * swap, still inside Swapping -> FadeIn) -> OnFadeInComplete (FadeIn -> None). FadeOut/FadeIn are fixed-length
+ * cosmetic holds either side of the swap (0 length = instant, the pre-Phase-A hard-cut behavior); the visual fade
+ * itself is Phase B (out of scope here — this subsystem only owns the timing/state).
  */
 UCLASS()
 class FPSROGUELITE_API UFPSRStageDirectorSubsystem : public UWorldSubsystem
@@ -42,7 +45,8 @@ public:
 
 	/** Which phase to enter once the Grace dealing window closes: Pending if the card-selection freeze is up (the
 	 *  swap must wait it out — ADR 0010 invariant 8, see AFPSRGameState::IsStageDealingOpen's header comment),
-	 *  otherwise straight to Swapping. */
+	 *  otherwise straight to FadeOut (Phase A phase split — FadeOut used to be Swapping's job before the fade
+	 *  phases existed; Pending still hands off to FadeOut too, via TrySwap, once the freeze clears). */
 	static EFPSRStageTransitionPhase DecidePhaseAfterDealing(bool bRunPaused);
 
 	/** Whether a Pending transition may swap now — i.e. whether the card-selection freeze has cleared. */
@@ -78,13 +82,45 @@ private:
 	 *     it (see bWasRunPausedForDealing) — invariant 8 promises a fixed amount of PLAYER-USABLE dealing time, and
 	 *     the card freeze blocks firing (the window's only reward channel), so time spent behind the card screen
 	 *     must not count against the window.
-	 *   - Pending: swaps the instant the freeze clears (TrySwap), same as before F3. */
+	 *   - Pending: swaps the instant the freeze clears (TrySwap -> FadeOut, Phase A phase split), same edge as
+	 *     before F3. */
 	UFUNCTION()
 	void HandleRunStateChanged();
 
-	/** Pending -> Swapping -> BeginSwap, guarded by CanSwapNow. Safe to call redundantly — HandleRunStateChanged
-	 *  can fire while Pending for reasons unrelated to the freeze (e.g. mission progress ticking on OnRunStateChanged). */
+	/** Pending -> FadeOut (Phase A phase split — used to go straight to Swapping), guarded by CanSwapNow. Safe to
+	 *  call redundantly — HandleRunStateChanged can fire while Pending for reasons unrelated to the freeze (e.g.
+	 *  mission progress ticking on OnRunStateChanged). */
 	void TrySwap();
+
+	/** Grace/Pending closed -> FadeOut entered: arms a one-shot fade timer (StageFadeOutSeconds, or immediate if 0 —
+	 *  the pre-Phase-A hard-cut path) that fires OnFadeOutComplete. The visual fade itself is Phase B; this only
+	 *  owns the timing so the swarm/movement freeze (gated on IsStageTransitionActive) already covers it. */
+	void EnterFadeOut();
+
+	/** FadeOut's timer expired (or was skipped, 0-length): FadeOut -> Swapping, then a minimum full-blackout dwell
+	 *  (StageBlackoutHoldSeconds — without it the normal ready-destination case swaps the same frame the fade-out
+	 *  finishes and the blackout reads as a flicker) before OnBlackoutHoldComplete hands over to BeginSwap. */
+	void OnFadeOutComplete();
+
+	/** The blackout dwell expired (or was skipped, 0-length): run BeginSwap — readiness wait + the swap itself
+	 *  (unchanged from before the phase split — Swapping means "blacked out + waiting for/running the swap"). */
+	void OnBlackoutHoldComplete();
+
+	/** StageBlackoutHoldSeconds from the run schedule, or DefaultStageBlackoutHoldSeconds with no schedule asset. */
+	float GetStageBlackoutHoldSeconds() const;
+
+	/** PerformSwap's final commit entered FadeIn: arms a one-shot fade timer (StageFadeInSeconds, or immediate if 0)
+	 *  that fires OnFadeInComplete. */
+	void EnterFadeIn();
+
+	/** FadeIn's timer expired (or was skipped): FadeIn -> None. The transition is over. */
+	void OnFadeInComplete();
+
+	/** StageFadeOutSeconds from the run schedule, or DefaultStageFadeOutSeconds with no schedule asset. */
+	float GetStageFadeOutSeconds() const;
+
+	/** StageFadeInSeconds from the run schedule, or DefaultStageFadeInSeconds with no schedule asset. */
+	float GetStageFadeInSeconds() const;
 
 	/**
 	 * Entry point for the swap once the dealing window has closed: hand over to PerformSwap the moment the
@@ -95,8 +131,10 @@ private:
 	 * cannot see teleports that player into a space with no geometry, no destructibles and no ActiveArena
 	 * pointer. ADR 0012 axis 5 makes this wait normally ZERO by parking a stage early; this is the tail case.
 	 *
-	 * This does NOT put the wait inside the damage-dealing window. Grace has already ended by the time anything
-	 * here runs (see the call sites), so ADR 0010 invariant 8 — a FIXED reward window — is untouched.
+	 * Farmability note (2026-08-20, invulnerability retired): the swarm IS damageable during this wait, so a slow
+	 * client's readiness stall does extend farm time — the one variable stretch ADR 0010 invariant 8's correction
+	 * explicitly accepts (capped by StageSwapReadyTimeoutSeconds; the swarm being ground is the same swarm that
+	 * carries over, so the extra dealing trades against next stage's carry-over pressure).
 	 */
 	void BeginSwap();
 
@@ -115,14 +153,21 @@ private:
 	/** StageOrder of the arena the run is standing in right now, or INDEX_NONE. */
 	int32 GetCurrentStageOrder() const;
 
-	/** The swap itself: activate the destination, regenerate it, teleport living players, deactivate the source,
-	 *  cancel any still-active mission (its objective was left behind in the old arena), release the leftover
-	 *  swarm, commit the new stage to GameState. See the .cpp for the fixed step order. */
+	/** The swap itself: activate the destination, regenerate it, teleport living players, carry the leftover swarm
+	 *  over to the new arena (Phase A — replaces the old ReleaseAllEnemies), deactivate the source, cancel any
+	 *  still-active mission (its objective was left behind in the old arena), commit the new stage to GameState,
+	 *  then enter FadeIn (EnterFadeIn) instead of going straight to None. See the .cpp for the fixed step order. */
 	void PerformSwap();
 
 	/** True once HandleRunStateChanged has been bound to GameState::OnRunStateChanged, so entering Grace never
 	 *  binds the same handler twice across repeated transitions. */
 	bool bBoundRunStateChanged = false;
+
+	/** True while PerformSwap has deferred the actual swap because a card-selection freeze (a mid-fade level-up —
+	 *  possible since the dealing invulnerability was retired) was up when it ran. HandleRunStateChanged's unpause
+	 *  edge consumes it and re-enters BeginSwap; without this flag that branch could double-run the swap off
+	 *  unrelated OnRunStateChanged broadcasts while Swapping legitimately waits on destination readiness. */
+	bool bSwapDeferredByFreeze = false;
 
 	/** F3 edge-tracker: GS->IsRunPaused() as of the last time HandleRunStateChanged acted on it, while Phase ==
 	 *  Grace. OnRunStateChanged fires for many unrelated reasons (run clock, mission progress) — comparing against
@@ -136,8 +181,20 @@ private:
 	 *  UFPSRRunDirectorSubsystem::FallbackBossTime — an asset-less run still needs to work, just untuned). */
 	static constexpr float DefaultStageGraceSeconds = 8.0f;
 
+	/** Fallback FadeOut/FadeIn length when the run has no schedule asset assigned (same untuned-fallback pattern as
+	 *  DefaultStageGraceSeconds; matches UFPSRRunScheduleDataAsset::StageFadeOutSeconds/StageFadeInSeconds' own
+	 *  default so an asset-less run behaves the same as a freshly-authored schedule). */
+	static constexpr float DefaultStageFadeOutSeconds = 0.8f;
+	static constexpr float DefaultStageFadeInSeconds = 0.8f;
+	static constexpr float DefaultStageBlackoutHoldSeconds = 0.5f;
+	static constexpr float DefaultStagePostSwapGraceSeconds = 1.0f;
+
 	/** One-shot timer for the Grace dealing window (armed by RequestTransition, fires OnDealingWindowClosed). */
 	FTimerHandle DealingTimerHandle;
+
+	/** One-shot timer shared by FadeOut and FadeIn (never both armed at once — the phases are sequential), armed by
+	 *  EnterFadeOut/EnterFadeIn, fires OnFadeOutComplete/OnFadeInComplete. */
+	FTimerHandle FadeTimerHandle;
 
 	/** Repeating timer for the everyone-ready wait in BeginSwap. Only ever active while Phase == Swapping. */
 	FTimerHandle SwapReadyTimerHandle;

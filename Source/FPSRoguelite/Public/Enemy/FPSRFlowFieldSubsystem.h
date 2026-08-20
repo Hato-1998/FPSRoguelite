@@ -126,6 +126,13 @@ public:
 	 *  Used to re-resolve an enemy's MapId once it has left its previous slot (door crossing). P-G: resolved from SlotBounds. */
 	FGameplayTag FindMapIdForLocation(const FVector& WorldLocation) const;
 
+	/** Phase A stage-transition carry-over: nearest OPEN location to InWorld on the LIVE adopted grid (thin forward
+	 *  to UFPSRFlowFieldComputer::FindNearestOpenLocation — see that function for the exact rules). False with no
+	 *  built grid (UnifiedComputer null — off authority, or before the first AdoptArenaSurface/bake). Array-only, no
+	 *  world query (D7). Used by UFPSREnemySpawnSubsystem::CarryEnemiesToNewStage to snap a carried enemy's
+	 *  post-delta candidate position onto a walkable cell of the NEW arena. */
+	bool FindNearestOpenLocation(const FVector& InWorld, int32 MaxRadiusCells, FVector& OutWorld) const;
+
 private:
 	void RecomputeAllFields();
 	bool HasServerAuthority() const;

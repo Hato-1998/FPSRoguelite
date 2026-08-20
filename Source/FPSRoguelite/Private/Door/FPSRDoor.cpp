@@ -14,20 +14,21 @@ AFPSRDoor::AFPSRDoor()
 	// defaults ARE the pre-refactor door's values — the base was extracted from this class, so restating them here
 	// would only duplicate the numbers. A BP_Door instance override still wins over the inherited default as before.
 
-	// Breakable leaves — the weapon target + barrier. ECC_FPSRPlayerPawn (see header): gathered by every weapon
-	// object-query (-> auto damage via HealthComponent), blocks players + enemies, and is immune to the ECC_Pawn
-	// pass-through windows (grace / downed). QueryOnly is enough
+	// Breakable leaves — the weapon target + barrier. ECC_FPSRDestructible (see header): gathered by every weapon
+	// damage query (-> auto damage via HealthComponent), blocks players + enemies + projectiles, and is immune to
+	// the ECC_Pawn pass-through windows (grace / downed). QueryOnly is enough
 	// (movement sweeps + weapon queries are all query-based; no physics simulation needed).
 	DoorMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("DoorMesh"));
 	DoorMesh->SetupAttachment(RootComponent); // RootComponent = AFPSRDestructible's "Root" scene component
 	DoorMesh->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
-	DoorMesh->SetCollisionObjectType(ECC_FPSRPlayerPawn);
+	DoorMesh->SetCollisionObjectType(ECC_FPSRDestructible);
 	DoorMesh->SetCollisionResponseToAllChannels(ECR_Block);
 	DoorMesh->SetGenerateOverlapEvents(false);
 	// No mesh asset assigned here — Game.MD §2 forbids hardcoding asset paths; the designer assigns SM in BP.
 
 	// Frame (문틀) — inert wall. WorldStatic object type is NEVER gathered by the weapon object-queries
-	// (ECC_Pawn / ECC_FPSRPlayerPawn / weakpoint), so shots stop on it as cover with no damage; it still blocks
+	// (ECC_Pawn / ECC_FPSRPlayerPawn / ECC_FPSRDestructible / weakpoint), so shots stop on it as cover with no
+	// damage; it still blocks
 	// movement and the weapon Visibility wall-trace like normal static geometry. Empty by default (frameless door).
 	FrameMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("FrameMesh"));
 	FrameMesh->SetupAttachment(RootComponent);

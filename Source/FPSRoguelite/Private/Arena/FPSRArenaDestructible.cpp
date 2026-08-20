@@ -14,12 +14,14 @@
 AFPSRArenaDestructible::AFPSRArenaDestructible()
 {
 	// Same collision recipe as AFPSRDoor's DoorMesh (see FPSRCollisionChannels.h / this class's header comment):
-	// ECC_FPSRPlayerPawn is gathered by every weapon object-query (auto damage via HealthComponent, zero new code)
-	// and blocks both players and enemies. QueryOnly is enough — nothing here needs physics simulation.
+	// ECC_FPSRDestructible is gathered by every weapon damage query (auto damage via HealthComponent, zero new code),
+	// blocks both players and enemies, AND blocks an in-flight projectile — the last part is why this is its own
+	// channel and not the player's: a projectile only OVERLAPS pawns, so a prop wearing the player channel was
+	// physically transparent to gunfire. QueryOnly is enough — nothing here needs physics simulation.
 	DestructibleMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("DestructibleMesh"));
 	DestructibleMesh->SetupAttachment(RootComponent); // RootComponent = AFPSRDestructible's "Root" scene component
 	DestructibleMesh->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
-	DestructibleMesh->SetCollisionObjectType(ECC_FPSRPlayerPawn);
+	DestructibleMesh->SetCollisionObjectType(ECC_FPSRDestructible);
 	DestructibleMesh->SetCollisionResponseToAllChannels(ECR_Block);
 	DestructibleMesh->SetGenerateOverlapEvents(false);
 	// No mesh asset assigned here — Game.MD §2 forbids hardcoding asset paths; the designer assigns SM in BP.

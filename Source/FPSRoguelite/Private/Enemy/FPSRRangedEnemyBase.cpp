@@ -181,16 +181,18 @@ bool AFPSRRangedEnemyBase::HasLineOfSight(const AActor* TargetActor, const FVect
 		return false;
 	}
 
-	// Block on STATIC geometry (walls / door frames) AND the player-pawn object channel — which includes CLOSED
-	// AFPSRDoor leaves (ECC_FPSRPlayerPawn, Enemy.md §2-6). Without the player-pawn channel a ranged enemy would
-	// "see" — and shoot — through a closed door to the player behind it (the enemy projectile overlaps that channel
-	// but treats only AFPSRCharacter as hostile, so it would pass straight through the door). Doors only ever break
-	// OPEN (never re-close), so gating the SHOT on LOS fully prevents a through-door hit — no barrier can appear in
-	// front of an in-flight projectile. Ignore self + the target so neither counts as an occluder. Other ENEMIES
-	// (ECC_Pawn) are intentionally NOT queried — an enemy projectile passes through them, so they don't block LOS.
+	// Block on STATIC geometry (walls / door frames) AND breakable geometry — CLOSED AFPSRDoor leaves and arena
+	// props (ECC_FPSRDestructible, Enemy.md §2-6; these used to ride ECC_FPSRPlayerPawn). Without that channel a
+	// ranged enemy would "see" — and shoot — through a closed door to the player behind it. The enemy projectile
+	// now BLOCKS on destructibles too, so this is no longer the only thing preventing a through-door hit, but it
+	// is still the cheaper gate: it stops the shot from being taken at all instead of eating it on the door.
+	// The player channel stays queried so a teammate's body also breaks LOS. Ignore self + the target so neither
+	// counts as an occluder. Other ENEMIES (ECC_Pawn) are intentionally NOT queried — an enemy projectile passes
+	// through them, so they don't block LOS.
 	FCollisionObjectQueryParams ObjParams;
 	ObjParams.AddObjectTypesToQuery(ECC_WorldStatic);
 	ObjParams.AddObjectTypesToQuery(ECC_FPSRPlayerPawn);
+	ObjParams.AddObjectTypesToQuery(ECC_FPSRDestructible);
 	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(FPSRRangedLOS), false, this);
 	if (TargetActor)
 	{
