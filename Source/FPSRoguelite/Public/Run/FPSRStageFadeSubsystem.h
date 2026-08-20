@@ -96,4 +96,9 @@ private:
 	 *  every Tick via SetFadeState rather than re-created — see GetOrCreateModifier. */
 	UPROPERTY()
 	TObjectPtr<UFPSRStageFadeCameraModifier> CachedModifier;
+
+	/** Edge tracker for the once-per-transition engage/release log in Tick — logging every alpha>0 frame would be
+	 *  spam, logging nothing made "fade never ran" and "fade ran but drew nothing" (the silently-uncompilable
+	 *  material of the first live-fire PIE) indistinguishable. */
+	bool bFadeEngaged = false;
 };

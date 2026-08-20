@@ -661,8 +661,11 @@ void UFPSRStageDirectorSubsystem::PerformSwap()
 	GS->SetActiveArena(Next);
 	EnterFadeIn();
 
+	// GetPathName, not GetName: every arena's actor tends to share one object NAME ("FPSRArenaActor_0") because each
+	// lives in its own sublevel namespace — a name-only line reads as a self-cycle when the swap actually crossed
+	// arenas (first live-fire PIE did exactly that). The path carries the sublevel, which is the distinguishing part.
 	UE_LOG(LogFPSR, Log, TEXT("[StageDirector] Swap complete: %s -> %s (stage %d, seed %d)."),
-		Prev ? *Prev->GetName() : TEXT("?"), *Next->GetName(), NewStageIndex, Next->GetActiveSeed());
+		Prev ? *Prev->GetPathName() : TEXT("?"), *Next->GetPathName(), NewStageIndex, Next->GetActiveSeed());
 
 	// 8. Park the arena AFTER this one, now that this stage has begun (ADR 0012 axis 5). Done LAST so the park
 	//    request cannot compete with the swap's own frame, and so GetCurrentStageOrder already reads the arena we

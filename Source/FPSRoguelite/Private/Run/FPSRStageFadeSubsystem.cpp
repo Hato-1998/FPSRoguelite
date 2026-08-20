@@ -194,7 +194,22 @@ void UFPSRStageFadeSubsystem::Tick(float DeltaTime)
 		{
 			CachedModifier->SetFadeState(nullptr, 0.0f);
 		}
+		if (bFadeEngaged)
+		{
+			bFadeEngaged = false;
+			UE_LOG(LogFPSR, Log, TEXT("[StageFade] fade released."));
+		}
 		return;
+	}
+
+	// Edge log, once per transition (same observability rationale as the destructible hit/broken logs): without it,
+	// "the fade never rendered" and "the fade rendered but the material drew nothing" (the first live-fire failure —
+	// a silently uncompilable material) are indistinguishable in a PIE log.
+	if (!bFadeEngaged)
+	{
+		bFadeEngaged = true;
+		UE_LOG(LogFPSR, Log, TEXT("[StageFade] fade engaged (phase %d, alpha %.2f)."),
+			static_cast<int32>(GS->GetStageTransitionPhase()), Alpha);
 	}
 
 	// GetFirstLocalPlayerController, NOT UWorld::GetFirstPlayerController: on a listen server the latter's list

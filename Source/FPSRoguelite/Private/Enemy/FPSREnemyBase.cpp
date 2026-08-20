@@ -309,7 +309,19 @@ void AFPSREnemyBase::ServerRelocateForStageCarry(const FVector& NewLocation)
 	}
 
 	ClearExitPath(); // unconditional, BEFORE moving (spec: the single recovery point, see ClearExitPath's comment)
-	SetActorLocation(NewLocation, false, nullptr, ETeleportType::TeleportPhysics);
+
+	// NewLocation.Z is the flow-field cell's FLOOR SURFACE Z (UFPSRFlowFieldSubsystem::FindNearestOpenLocation
+	// hands out baked surface heights, not actor heights). This actor's rest convention is capsule CENTER at
+	// floor + HalfHeight + GroundRestClearance (ApplyGravity's TargetZ) — placing the center AT the floor sinks
+	// the capsule half-deep, ApplyGravity refuses the > GroundSnapTolerance upward snap it would need ("never
+	// teleport up onto a wall"), and the enemy falls out of the world. First live-fire PIE of the carry-over hit
+	// exactly that: all 17 carried enemies vanished. Convert to the rest pose HERE, where the capsule is known.
+	FVector RestLocation = NewLocation;
+	if (Capsule)
+	{
+		RestLocation.Z += Capsule->GetScaledCapsuleHalfHeight() + GroundRestClearance;
+	}
+	SetActorLocation(RestLocation, false, nullptr, ETeleportType::TeleportPhysics);
 
 	// Physics-contact state reset (see the header comment) — same subset Activate() resets for a pooled reuse.
 	VerticalVelocity = 0.0f;
