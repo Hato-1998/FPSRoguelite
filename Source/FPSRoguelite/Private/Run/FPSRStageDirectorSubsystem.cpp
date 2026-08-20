@@ -569,6 +569,14 @@ void UFPSRStageDirectorSubsystem::PerformSwap()
 	// 4. Teleport every player pawn that exists to the new arena's entry points (round-robin if there are more
 	//    players than entries) and kill residual velocity so nobody carries a slide/knockback across the
 	//    instantaneous swap.
+	//
+	//    POSITION ONLY — XY from the entry point, Z preserved (current height + the arenas' plane delta), and the
+	//    view/actor rotation NOT touched. The whole carry-over design (안 H) preserves each enemy's position
+	//    RELATIVE to its player, which only reads as "the terrain changed around me" if the player's own facing
+	//    and eye height survive the swap too: first live-fire PIE snapped the control rotation to the entry
+	//    point's authored facing, and that turn — plus the entry's authored Z — was exactly the "튐" the user
+	//    reported, enemies staying put notwithstanding. An entry point's authored ROTATION still matters where it
+	//    always did (run-start spawns via GameMode); the mid-run swap deliberately ignores it.
 	TArray<FTransform> EntryTransforms;
 	if (!Next->GetPlayerEntryTransforms(EntryTransforms))
 	{
@@ -603,12 +611,18 @@ void UFPSRStageDirectorSubsystem::PerformSwap()
 		const FTransform& EntryXform = EntryTransforms[EntryCursor % EntryTransforms.Num()];
 		++EntryCursor;
 
-		OldPlayerLocs.Add(Char->GetActorLocation()); // BEFORE moving — this player's stage-A carry-over delta source
-		NewPlayerLocs.Add(EntryXform.GetLocation());
+		const FVector OldLoc = Char->GetActorLocation();
+		// Z: keep the pawn's own standing height, shifted by the two arenas' base-plane delta (0 while every arena
+		// sits on the same Z plane — D2 is single-plane, but the delta keeps this correct if a future arena isn't).
+		// Taking the entry point's authored Z instead is what made the first live-fire PIE read as a height pop:
+		// a PlayerStart's Z is wherever it was dropped in the level, not this pawn's capsule-center convention.
+		const float PlaneDeltaZ = (Prev && Prev != Next) ? (Next->GetActorLocation().Z - Prev->GetActorLocation().Z) : 0.0f;
+		const FVector NewLoc(EntryXform.GetLocation().X, EntryXform.GetLocation().Y, OldLoc.Z + PlaneDeltaZ);
 
-		Char->SetActorLocationAndRotation(EntryXform.GetLocation(), EntryXform.GetRotation(),
-			/*bSweep*/false, nullptr, ETeleportType::TeleportPhysics);
-		PC->SetControlRotation(EntryXform.Rotator());
+		OldPlayerLocs.Add(OldLoc); // BEFORE moving — this player's stage-A carry-over delta source
+		NewPlayerLocs.Add(NewLoc);
+
+		Char->SetActorLocation(NewLoc, /*bSweep*/false, nullptr, ETeleportType::TeleportPhysics);
 		if (UCharacterMovementComponent* Move = Char->GetCharacterMovement())
 		{
 			Move->StopMovementImmediately();
