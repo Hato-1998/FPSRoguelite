@@ -165,7 +165,12 @@
     - ⚠️ **대가(정직 기록)**: "표시되는가"는 **정적으로 판정할 수 없다** — 이 결정으로 EC ② 검사는 완전히 기계적이지 않게 됐다. 남는 위험 = 나중에 누군가 디자인타임 플레이스홀더를 **실제로 표시되게 배선하면 번역 없이 조용히 출시**된다. 검토했던 완화책(접두 규약 `[DT]` 강제)은 채택하지 않았다 — 되살릴 필요가 생기면 여기서 시작할 것.
     - 🚫 **후속 세션 주의**: 위 ~10건을 "하드코딩 문자열"로 보고 StringTable로 이관하지 말 것. **의도된 상태다.**
   - 검사 대상의 기계적 정의(무엇을 훑는가) = `Game.manifest` 수집분(위 (c) 🔑).
-  - ⚠️ **단 그 기계적 정의는 C++ 에만 성립한다**(발견 2026-08-19) — `Game_Gather.ini` 에 `GatherTextFromSource` 단계만 있고 **패키지(에셋) 수집 단계가 없어** 조항이 명시한 *"BP 위젯의 인라인 Text 프로퍼티"* 는 manifest 로 탐지되지 않는다. 이번 BP 축은 **수동 열거 + 바이너리 실측**으로 닫았고, 새 BP 리터럴을 막을 자동 검사는 아직 없다(보드 백로그 행 등록됨). 잔여 내역·보류분 = 위 (c) 표.
+  - ⚠️ **단 출하 `Game.manifest` 의 기계적 정의는 C++ 에만 성립한다**(발견 2026-08-19) — `Game_Gather.ini` 에 `GatherTextFromSource` 단계만 있고 **패키지(에셋) 수집 단계가 없어** 조항이 명시한 *"BP 위젯의 인라인 Text 프로퍼티"* 는 출하 manifest 로 탐지되지 않는다. 이번 BP 축은 **수동 열거 + 바이너리 실측**으로 닫았다. 잔여 내역·보류분 = 위 (c) 표.
+    - ✅ **BP 축 자동 검사 신설 2026-08-19** — 정본 = [`Docs/SSOT/Localization.md`](Localization.md) **§L-7**. 감사 **전용** gather 타깃(`Config/Localization/Game_AuditBPText.ini` → `Saved/`)이 `GatherTextFromAssets` 로 BP 위젯 인라인 Text 를 뽑고, `Scripts/localization-audit-bptext.ps1` 이 얼라우리스트(`Config/Localization/BPTextAudit_Allowlist.json`, 문서화된 카브아웃 24항목)와 대조해 **신규가 있으면 exit 1** 로 떨어진다. 실행 = `powershell -File Scripts\localization-audit-bptext.ps1`(에디터 GUI·PIE 불요, 수 초). 실측 = 총 68건 → 게이트 24(전부 면제) + 참고 44.
+      - 🔒 **출하 체인은 건드리지 않았다** — 에셋 수집을 출하 타깃에 켜면 "표시되는 것만 센다" 결정으로 제외한 플레이스홀더와 로비 보류분이 출하 매니페스트·아카이브에 편입돼 번역 의무가 생긴다. 그래서 감사 타깃을 분리했다.
+      - ⚠️ **완전 기계화는 아니다(정직 기록)** — gather 는 `FText` 만 본다. BP 그래프의 **String 핀 기본값은 어떤 설정으로도 안 잡힌다**(실측: `WBP_Lobby` 의 `무기 이름`·`선택중` 은 에셋에 UTF-16 으로 실존하나 매니페스트에 없다). 이 계급은 여전히 바이너리 실측이 유일한 수단이다. 즉 이 검사기는 **`FText` 계급의 회귀만** 막는다.
+      - ℹ️ 훅/CI 배선은 범위 밖(`.claude/settings.json` 은 클론 로컬 — §6-9 (7)). 수동 실행이며 exit 코드는 CI 가 그대로 물 수 있다.
+      - 🆕 **부수 발견** = `참고` 44건 중 **무기·프래그먼트·미션 DataAsset 의 인라인 `FText` ~28건**(`DA_Weapon_*.DisplayName`·`DA_Weapon_Rifle.WeaponParts[].DisplayLabel`·`DA_Mission_*.DisplayName/Description`·`DA_Fragment_*.DisplayName`). **EC ② 의 문면 정의(C++ · BP 위젯) 밖이라 이 조항의 "0" 을 깨지 않는다**(그래서 게이트가 아니라 참고로 분류했다). 다만 플레이어 노출 문자열이라 별도 보드 행으로 등록했다.
   - 🟡 **`WBP_Lobby` 계열 15건은 EC ② 판정에서 보류한다**(로비 전면 개편 대기 — (c) 참조). **즉 EC ②는 C++ 5 + BP 그래프 핀 3곳(+ 고아 WBP 2 정리)으로 닫힌다.**
 ③ ✅ **완료 2026-08-13** — **`/Engine/` 참조 감사 결과가 문서화되고**, 쿡 탈락분은 교체 대상으로 M2에 등록됨. 정본 = [`Docs/Review/EngineRefCookAudit_20260813.md`](../Review/EngineRefCookAudit_20260813.md) (아래 (d) 요약).
 ④ ✅ **완료 2026-08-13** — (a) 전수 재대조 완료. §7-3(4행 정정) · §7-5 판정 기록(일치) · §8 인벤토리(7행 정정) · 도메인 SSOT(`Performance.md`·`RunFlow.md`·`Enemy.md`·`CombatWeaponCard.md`·`PlayerFeel.md` 정정)가 실물과 일치. 경위 = `Docs/WorkLog.md` 최상단.

@@ -9,6 +9,74 @@
 
 ---
 
+## 🧾 보스 프리즈 "미정지" = 오진 — 프리즈 계약 명문화로 종결 (2026-08-19, `docs/freeze-anim-contract`)
+> 보드 행 = *"보스가 카드 프리즈 중에도 정지하지 않음 — §2-2 프리즈 게이트 대칭 구멍"*(하이 · S · Fable · 마일스톤 미배정).
+> **결론: 결함이 아니다.** 조사로 결론을 냈으므로 §6-9 (5) 정의상 `완료`(폐기 아님). 산출물 = 계약 명문화 2건.
+
+### 무엇이 틀렸나
+행은 2026-08-18 레드팀 리뷰에서 *"`Boss/FPSRBossBase.cpp` 에 pause 참조 0건"* 만 근거로 **"프리즈 중에도 보스가 계속 행동한다"** 고 서술했다(재현 절차·PIE 관찰 없음). 실제로는 같은 클래스의 **헤더**가 *"movement is disabled … no per-tick logic — so there is nothing for the global level-up freeze to gate here"* 라 적고 `bCanEverTick=false` 다 — **멈출 행동이 없어서** 가드가 없는 것이다.
+
+에디터를 열지 않고 `BP_Boss.uasset` 을 바이너리로 실측한 결과도 같았다: 그래프에 `ReceiveTick` 은 있으나(C++ 주석과 어긋나는 지점) 호출 노드는 `GetComponentByClass`·`GetUserWidgetObject` + 캐스트(`FPSREnemyHealthComponent`/`WBP_BossHealthBar`) + BP 함수 `InitHealthComp` 뿐이고, **`AddMovementInput`·`SetActorLocation`·`SetTimer`·`SpawnActor`·`Montage`·`AIController` 는 전부 0건**이다.
+
+### PIE 재현(사용자 실시) = 아이들 애님만 재생 → 비대칭도 없었다
+프리즈는 **입력·게임플레이 틱 게이트**지 시간정지가 아니라, 세 주체가 전부 같게 동작한다 — 플레이어는 입력만 막히고 AnimBP는 계속 돌며(`AFPSRCharacter::IsRunFrozen()` 게이트 11곳), 스웜 적도 이동·공격 배치 패스만 스킵되고(`FPSREnemySpawnSubsystem` early return 2곳) **VAT 아이들 클립은 계속 재생**된다(playrate 0은 *거리* LOD `FPSRVATAnim::AnimFreezeRadiusSq` 에서만). 보스만의 구멍이 아니었다.
+
+### 왜 오진이 가능했나 → 그게 산출물이다
+`RunFlow.md` §2-2가 *"적·플레이어 모두 정지(적은 제자리 동결…)"* 라고만 적고 **애니메이션을 한 번도 언급하지 않았다.** "제자리 동결"은 위치 고정이지 포즈 정지가 아닌데 그 구분이 문서에 없었다. → §2-2에 **주체별 정지/비정지 표**를 명문화하고, `Troubleshooting.md` **G12**("참조 0건을 '결함이 있다'의 증거로 쓰지 말 것")를 신설했다.
+
+### 잔여 1건 (별도 행)
+`BP_Boss` 의 **게이트 없는 Event Tick** — 매 프레임 `GetUserWidgetObject` 폴링으로 체력바를 배선한다. 게임플레이 무관 P3(BeginPlay 1회로 옮기는 게 맞다).
+
+## 🧾 BP 인라인 Text 자동검사 하네스 — M0 EC ② 회귀 가드 (2026-08-19, `phase/loc-bptext-audit`, 구현 Sonnet 위임 / 검증 Opus 직접)
+> 보드 행 = *"BP 인라인 Text가 gather에 구조적으로 안 잡힌다 — 에셋 수집 단계 부재"*(마일스톤 **미배정 → M0 배정**(사용자 결정 2026-08-19) · 백로그→미듐 · M · Opus).
+> **정본 = `Docs/SSOT/Localization.md` §L-7.** 같은 날 닫힌 EC ②(`c485b68e`·`1c646085`)의 BP 축이 *수동 열거 + 바이너리 grep*에 의존했고 새 리터럴을 막을 장치가 없던 것을 메운다.
+> 🔀 **병렬 착수 경위**: M0 진행중 3트랙(`enemy-proto-shapes`·`arena-spawnpoints`·`stage-transition-redesign`)은 전부 **형제 클론 `FPSRoguelite`** 가 클레임 중이고 M0 대기 9건은 그 3트랙에 전부 종속돼 병렬 후보가 0이었다. 겹치지 않는 것은 마일스톤 미배정 3행뿐이라 사용자가 이 행을 지목했다.
+
+### 무엇이 생겼나 (신규 3파일 · 기존 파일은 문서만)
+| 파일 | 역할 |
+|---|---|
+| `Config/Localization/Game_AuditBPText.ini` | **감사 전용** gather 타깃 — `GatherTextFromAssets` → `Saved/Localization/BPTextAudit/BPTextAudit.manifest`. 서드파티 루트 12개 제외로 로드 대상 4,300 → **221패키지** |
+| `Scripts/localization-audit-bptext.ps1` | 매니페스트(UTF-16) 파싱 → 게이트/참고 분류 → 얼라우리스트 대조 → 신규 있으면 **exit 1**. `-SkipGather`·`-ReportOnly` |
+| `Config/Localization/BPTextAudit_Allowlist.json` | 문서화된 카브아웃 24항목(`design-time-placeholder` 11 / `M3-lobby-rework` 13). 매니페스트에서 스크립트로 시딩(전사 오류 차단) |
+
+### 설계 결정 — 출하 체인을 켜지 않고 타깃을 분리했다
+보드 행이 "착수 시 정하라"고 남긴 3건을 이렇게 닫았다. ① 출하 `Game_Gather.ini`에 에셋 수집을 켜는 **가장 짧은 안을 기각** — 켜면 "표시되는 것만 센다"(2026-08-13) 결정으로 제외한 플레이스홀더와 로비 보류분이 **출하 매니페스트·아카이브에 편입돼 번역 의무가 생기고** `Game_ImportCsvTranslations.ini` 미스 집계까지 흔든다. 감사 산출물은 `Saved/`(gitignore)로 나가 출하물 무변경. ② 미채택으로 남겨둔 접두 규약 `[DT]`는 되살리지 않고 **얼라우리스트 + `reason`/`note`** 로 처리(로비 개편 세션이 이 파일만 보고 정리 가능). ③ 신규 발견은 **실패로 승격**(exit 1)하되 훅·PreSubmit 배선은 하지 않음(`.claude/settings.json`이 클론 로컬 — §6-9 (7)).
+
+### 🪤 함정 (엔진 소스 실측 — 추측 아님)
+1. **매니페스트는 UTF-16 LE + BOM** — `grep -o '"Key"' Game.manifest`가 **0을 반환한다**(무음 오답). 파서는 BOM 인식 리더 필수.
+2. **BP 그래프 핀의 FText는 에디터 전용으로 분류** — `EdGraphNode.cpp:173-185`가 `Pin->DefaultTextValue`를 `bIsEditorOnly=true`로 넘기고 `GatherTextFromAssetsCommandlet.cpp:605`가 필터한다 → `ShouldGatherFromEditorOnlyData=false`면 통째 누락. **실측 대조: true 68건 / false 62건**(늘어난 6건은 전부 엔진 에디터 메타데이터 — 위젯 애니 트랙 DisplayName 2 + 머티리얼 ChannelNames·Niagara Category·SCS CategoryName 4). 지금 프로젝트에 그래프 핀 FText는 0이지만, 앞으로 생기면 잡히는 쪽이 EC ② 정의에 맞아 **true 유지**.
+3. **`SkipGatherCache=true`는 "항상 새로 읽는다"가 아니다** — `CalculatePackageLocCacheState`(같은 파일 1754)가 `PKG_RequiresLocalizationGather` 붙은 패키지만 재로드로 되돌린다. 실측: 221 중 실제 로드 **72**, 나머지는 패키지 헤더 캐시본.
+4. **엔진 자동생성 메타데이터는 얼라우리스트가 아니라 구조로 제외해야 한다** — 네임스페이스 `UObjectDisplayNames`(위젯 애니 트랙 `DisplayName`)를 경로로 면제하면 **애니메이션 트랙 가진 위젯이 새로 생길 때마다 오탐**이 난다. `EUW_`(에디터 유틸리티 위젯)도 같은 이유로 구조 제외.
+5. ⚠️ **PS 5.1로 UTF-8(BOM 없는) 한글 파일 in-place 치환 금지** — 이 세션에서 `Get-Content -Raw | Set-Content -Encoding utf8`이 ini의 한글 주석을 전부 모지바케로 깨뜨렸다(Get-Content가 ANSI로 디코드). 파일 편집은 Edit/Write 도구로.
+
+### 부수 발견 — 참고 44건에 실물 부채가 있었다
+게이트가 아닌 `참고`에 **무기·프래그먼트·미션 DataAsset의 인라인 `FText` ~28건**이 잡혔다(`DA_Weapon_*.DisplayName`, `DA_Weapon_Rifle.WeaponParts[].DisplayLabel`(개머리판·조준경·탄창…), `DA_Mission_*.DisplayName/Description`, `DA_Fragment_*.DisplayName`). **EC ②의 문면 정의(C++ · BP 위젯) 밖이라 그 "0"을 깨지 않는다** — 그래서 실패 판정에 넣지 않고 참고로 분류하고 별도 보드 행으로 등록했다. 오타도 함께 드러났다(`DA_Fragment_BonusShot.DisplayName` = `BounsDamage`, `DA_DefeatFleeing.DisplayName` = `FeerObejct`).
+
+### 정직 기록 — 완전 기계화가 아니다
+착수 전 수용시험은 *"`WBP_Lobby`의 위젯트리 Text 10 + 그래프 핀 4를 모두 잡아야 한다"* 였다. **위젯트리는 통과, 그래프 핀은 미통과**다. 원인 = **gather는 `FText`만 본다** — `무기 이름`·`선택중`은 `WBP_Lobby.uasset`에 **UTF-16으로 실존**(각 1건)하는데 매니페스트에 없다(String 핀 기본값 계급). 또한 Roadmap이 그래프 핀으로 적어 둔 `CODE: ------`·`Ready (R)`는 실물은 **위젯트리 Text**(`LobbyCodeText`·`ReadyText`)였다. 결론: 이 검사기는 **`FText` 계급의 회귀만** 막고, String 리터럴은 여전히 바이너리 실측이 유일한 수단이다.
+
+### 검증(전부 이 세션 실측)
+① 전체 gather **68건 = 게이트 24(전부 면제) + 참고 44 → exit 0** ② 음성 시험 = 얼라우리스트 1행 임시 제거 → **신규 1건 · exit 1**(그 항목이 리포트에 표시), 원복 후 다시 exit 0 → **게이트가 양방향으로 발화함을 에디터 없이 증명** ③ **출하 산출물 무변경** — 실행 후 `git status`에 `Content/Localization/` 변경 0 ④ 기존 왕복 `Scripts/localization-gather.ps1` 회귀 없음(exit 0 · locres 산출).
+
+
+> 보드 행 = *"U14 perf 측정 항목 등록 — 출시빌드 Push Model 폴백 실측 + MsgSubsystem 프로파일"*(M0 · 하이 · M · Fable).
+> **정본 = `Docs/Specs/U14R_PerfMeasureRegistry.md`** — 2026-08-07 "측정 후 결정" 이연 2건(N-1·§7-7)을 CSV 컬럼명 단위로 측정 가능하게 등록. **실측 실행 = M0 EC ① 베이스라인 패스**(후행 행)가 이 명세를 읽고 수행한다. 인덱스 = `Performance.md` §5-3.
+
+### 무엇이 생겼나
+- **항목 A(N-1)**: 결정 메트릭 `Exclusive/GameThread/ServerReplicateActors`(엔진 기본 스탯 — 신규 계측 0), 4인 리슨서버 러너(`measure_swarm_render.ps1 -ClientCount 3 -CaptureFrames 18000`), 잠정 판정 ≤1.5ms @300×4 → B안 권고 / 초과 → 소스 엔진 전환 전 RepGraph 앞당김 평가.
+- **항목 B(§7-7)**: GMS `BroadcastMessageInternal` CSV 계측 4스탯(`FPSRMsg/GameThread/GMSBroadcast`·`Broadcasts`·`Dispatches`·`ListenersCopied` — 태그 깊이 증폭 = ListenersCopied). early-out 앞 계측 0(핫패스 계약 유지). 잠정 ≤0.2ms @300. **🔴 선행조건: U13 배선 전엔 발행/구독 0이라 측정 불가로 기록**(grep 실측 — 발행처 = 데모·테스트뿐).
+- 측정 픽스처: `FPSR.Invuln [s]` 10s 반복 재적용(late-join 커버) · `FPSR.SkipCards [s]` 5s 반복(late-join 오프닝 시드 프리즈 해소) · `FPSR.GMS.Demo [s]` 1Hz 재발행(캡처 비영 검증용). 전부 `!UE_BUILD_SHIPPING`.
+
+### 🪤 함정 (EC ① 패스 세션이 먼저 알아야 할 것)
+1. **루프백 4인 = `-nosteam` + `-NetDriverOverrides=IpNetDriver` 필수** — 패키지는 GameNetDriver=SteamSockets(127.0.0.1과 프로토콜 불일치=타임아웃), 오버라이드만으론 소켓 서브시스템이 Steam이라 raw UDP 바인드 실패(`NetDriverListenFailure`→메인메뉴 폴백). 러너가 ClientCount>0에서 자동 부여.
+2. **`Replication/NumConnections`는 Game 빌드에서 영원히 0** — `USE_SERVER_PERF_COUNTERS=(UE_SERVER||UE_EDITOR)&&WITH_PERFCOUNTERS`(Build.h:115). 접속 유효성 = 호스트 로그 `AddClientConnection` 카운트(러너 게이트).
+3. **late-join 클라 = 오프닝 카드 전역 프리즈 재유발**(스모크 실증: 조인 +1s `[Run] FREEZE`) — SkipCards 반복 모드가 5s 내 해소, 판정 창은 마지막 `[Run] RESUME` 이후. 러너 프리즈 게이트(FREEZE>RESUME 경고)가 잔존 검출.
+4. 타이밍 스탯 컬럼은 스레드명이 끼는다(`FPSRMsg/GameThread/GMSBroadcast`) — 커스텀 스탯은 안 낌.
+5. 멀티클라 런 캡처는 `-CaptureFrames ≥18000`(uncapped fps에선 기본 6000이 조인 전에 닫힘) — `MaxWaitSeconds` 미지정 시 러너가 자동 상향.
+
+### 검증(전부 이 세션 실측)
+`-DisableUnity` 풀빌드 + 증분 Succeeded · 헤드리스 스모크 4/4 · 계측 실증(-game nullrhi 캡처: FPSRMsg 4컬럼 + 1Hz 비영 5프레임, 2회 호출 이중등록 0) · 러너 E2E 스모크 7회(구 8/13 패키지 — 조인 3/3·프리즈 게이트 경고 검출·정리 완주) · 구 CSV(B_300_fixed) 재분석 수치 보존 · **레드팀 게이트 P1 0 · P2 4 · P3 3 전부 수용·수정**(원장 = 명세 §13). 부수 정정: `Workflow.md:28` 환경표 "소스 빌드"→**Installed Build**(별도 드리프트 행 해소 — N-1 A안을 한 줄로 오판하는 함정 차단).
+
 ## 🧾 M0 EC ② 닫힘 — BP 인라인 Text 이관 + 고아 위젯 정리 (2026-08-19, `phase/m0-ec2-editor`, 머지 `1c646085`)
 > 보드 행 = *"EC ② 잔여 — BP 그래프 핀 3곳 + 고아 WBP 2 (에디터)"*(M0 · 로우 · S · Opus).
 > **§7-6 M0 EC ② 가 이 행으로 종료됐다.** 같은 날 닫힌 C++ 축(`c485b68e`)과 합쳐 하드코딩 UI 문자열 = 0.
@@ -221,11 +289,17 @@ BP 그래프 핀 리터럴 3곳 / ST_UI·ST_CardEffect 시트 시딩(사용자) 
 ### 🪤 함정
 1. **`-DisableUnity` 게이트 빌드가 10분을 넘기면** 셸 타임아웃으로 끊겨도 UBT 자식은 계속 돈다 → 재실행이 `ConflictingInstance` 뮤텍스 충돌. UBT 종료는 `Win32_Process`의 CommandLine으로 감시(PS5.1 `Get-Process`는 CommandLine 미노출).
 2. 임포터 계약 설계 시 **"파생 텍스트 키 생성 규칙"과 "에셋에 기록하는 참조 규칙"은 반드시 1:1 대칭**이어야 한다 — 한쪽만 공란을 스킵하면 미존재 키 참조가 태어난다(P2-①).
+3. (2026-08-19 추가) **선언적 멤버십 동기화는 null 원소를 못 지운다** — "제거하겠다"고 로깅하는 코드와 실제 제거 헬퍼의 null 계약이 어긋나면, 요약 카운트는 0(=무변경)으로 깨끗한데 경고만 매 실행 반복된다. **무변경 = 목표와 같다가 아니라 쓸 게 없었다**이고, 둘은 경고 0일 때만 같다(`Troubleshooting.md` G11).
 
-### 남은 것 (보드 행 유지 사유)
-- Cards/CardCatalog **시트 시딩**(리포 CSV → 시트, 1회) → 이후 시트=마스터. ko 재저작([KO-TODO] 소거)·en/ja 번역 = 시트에서.
-- PIE 사용자 스모크(§12-7): 카드 3장 제시·빈 설명 11장 플레이스홀더 없음·같은 속성 쌍 배제·해금 오퍼.
-- P3 후속 4건(익스포터 메뉴 가드 등) + 머지 체크리스트: 타 브랜치에 미재저장 카드 uasset 있으면 CardFamily 태그→FName 무음 드롭(재검증 그물 필수).
+### ✅ 마감 (2026-08-19, 머지 `7ea565de` — 보드 행 완료)
+- **시트 시딩·번역 완료** — 구글 시트 live export ↔ `Content/Authoring/*.csv` SHA256 완전 일치(Cards `E0A18F5C…A49281` / CardCatalog `24362FA5…6907CE`) = 미반영 시트 편집 0, `[KO-TODO]` 0.
+- **PIE 사용자 스모크 §12-7 통과**(사용자 실시). 설명 3언어 공란 카드는 최종 **9장**(초안의 "11장"은 저작 진행 전 수치).
+- **머지 체크리스트 그물질 통과** — 재임포트 결과 `생성 0 / 갱신 0 / 무변경 30 / 소속 제거 0 / 오류 0` + `git status` 클린 = `CardFamily` 태그→FName 무음 드롭 없음. `validate-data` 0 error.
+- **사용자 결정: All/This 동시 제시 = 현행 유지(허용)** — P2-⑦이 도입했던 배제는 CARDDRAW v4의 `.all`/`.this` 스코프 접미([`FPSRCardCsvImporter.cpp:397`](../Source/FPSRogueliteEditor/Private/CardImport/FPSRCardCsvImporter.cpp))로 되돌아간 상태였고, 그 현행 거동을 확정했다. 시트·코드 수정 0건.
+- **부수 수정**: `DA_Weapon_Bazooka.UnlockableFeatures` null 슬롯 제거(7→6). 임포터가 이걸 못 지우던 원인 = [`FPSRDataEditorHelpers.cpp:53`](../Source/FPSRogueliteEditor/Private/DataEditor/FPSRDataEditorHelpers.cpp) `RemoveFromArray` 의 `!Element` no-op 반환 → **경고만 영구 재발**. 런타임은 소비 2곳 모두 null 가드가 있어 무해.
+
+### 이월 (후속 백로그 행 = "카드 CSV 파이프라인 P3 후속 묶음", M1)
+익스포터 메뉴 상시 노출 가드 · 익스포터 조기 반환 시 경고 미도달 · stale `OfferRarities` 미치유 · `FPSRCardPoolValidator` ThinOfferPool v3 과잉경고 · **`RemoveFromArray` null 원소 제거 불가(도구 갭 잔존)** · 죽은 `RarityTiers` 2건(`DA_CardModifiers_NoSelfDamage`·`AmmoOnMiss`).
 
 ## 🌐 LOC0 — StringTable CSV 파이프라인 공통 기반 (2026-08-12, `phase/loc-foundation-stringtable` → 머지 `6f92dbdb`, origin 통합 `5bb52a02`)
 > 보드 행 "문자열 외부화 파이프라인 + 기존 UI 전수 이관"(하이)의 **Phase 0**. 이 위에서 Phase A(UI 전수 이관, `phase/loc-ui-migration`)와 Phase B(카드 CSV 개편, `phase/card-csv-pipeline`)가 병렬 분기한다. 명세·레드팀 원장 = `Docs/Specs/LOC0_StringTablePipeline.md`, SSOT = `Docs/SSOT/Localization.md`(신설).
