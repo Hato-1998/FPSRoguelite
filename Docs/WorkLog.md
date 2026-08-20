@@ -9,6 +9,40 @@
 
 ---
 
+## 🎬 스테이지 전환 재설계 — 잔존 적 이월 + 지형 페이드, PIE 4라운드로 완성 (2026-08-19~20, `phase/stage-transition-redesign`)
+> 보드 행 = *"스테이지 전환 재설계 — 잔존 적 이월 + 지형 페이드 (ADR 0010 §축3 뒤집기)"*(M0 · 미듐 · L · Fable).
+> 사용자 결정으로 ADR 0010 을 두 번 정정: §축 3 안 G→**안 H(이월)**, 불변식 8 집행 수단(무적→전 구간 피격).
+> 플랜·스펙·검증 = Fable / C++ 구현 = Sonnet 위임 / 머티리얼 저작 = Fable(커맨드렛+라이브).
+
+**최종 구조.** `None→Grace(딜링)→[Pending]→FadeOut→Swapping(암전 유지+스왑)→FadeIn→None`.
+잔존 적은 소멸 대신 **새 아레나로 이월**(최근접 플레이어 델타 + 라이브 그리드 최근접 열린 셀 스냅, 월드 쿼리 0).
+플레이어 텔레포트 = **위치만**(XY 진입 지점 + Z 현재 높이 유지, 시선 보존). 지형 페이드 = After Tonemapping PP
+(`M_PP_StageFade`) + 폰/무기 CustomDepth 제외, 클라 드라이버 = `UFPSRStageFadeSubsystem` + `UCameraModifier`.
+타이밍 5개 전부 `DA_RunSchedule` 노출(딜링/페이드아웃/**암전 유지(신규)**/대기 상한/페이드인). 전환 전 구간 피격 가능.
+
+**커밋 열.** `79d0e46c`(Phase A 페이즈 분할+이월) · `0221b84c`(ADR 안 H) · `44ac2278`(Phase B 페이드) ·
+`b2bf89be`/`3c531f12`/`d68be6f7`/`ac5c62f8`(PIE 결함 4건) · `f74cf685`(암전 유지 파라미터) · `e1f46144`(무적 폐기) ·
+`2415e53f`/`02ab89e5`(사용자 콘텐츠).
+
+**PIE 실사격이 잡은 결함 4건 (전부 코드/에셋 검증을 통과한 뒤에 잡힘 — 실측의 가치):**
+1. **페이드 무반응** = PP 머티리얼 무음 컴파일 실패 **2중**: ① If 노드에 float4(스칼라 전용) ② Lerp float4×float3.
+   에러 본문은 `Failed to compile` 경고와 같은 로그 엔트리의 **연속 줄**에 숨는다(`grep -A5`). 헤드리스 판정 =
+   **단일 패키지 쿡**(`-run=cook -CookSinglePackageNorefs`) · 라이브 에디터 stats 인스트럭션 0 = 실패 신호.
+2. **이월 적 전원 소멸** = 스냅 Z 가 셀 바닥 표면인데 액터 규약은 바닥+HalfHeight+유격(`ApplyGravity` TargetZ) —
+   반매몰 → 위 스냅 거부 → 낙사. `ServerRelocateForStageCarry` 에서 휴식 Z 변환.
+3. **"튐"** = 텔레포트가 시선·높이를 진입 지점 저작값으로 덮어씀. 상대 세계 보존(이월)은 시선이 살아야 성립 —
+   위치만 이동으로 수정. (부수: 아레나 액터들이 서브레벨별 동명이라 스왑 로그가 자기 순환처럼 보임 → GetPathName.)
+4. **반투명 벽이 안 어두워짐** = 벽(MI_light1, Translucent)이 씬 깊이를 안 써서, 뒤가 허공인 픽셀은
+   SceneDepth==CustomDepth==far plane 으로 "폰" 오검출. `CustomDepthValidMaxCm` (실기록 판정) AND 추가.
+
+**설계 정정 2건(사용자 결정):** ① 무적 게이트 폐기 — 페이즈가 전부 고정 길이라 보상 창은 무적 없이도 고정
+(가변 = 느린 클라 대기뿐, 감수). `IsStageDealingOpen` 은 HUD 전용으로 존치. ② 완전 암전 유지 시간 신설
+(`StageBlackoutHoldSeconds`) — 목적지 대기와 직렬.
+
+**남은 것.** 브랜치는 `phase/arena-spawnpoints` 위에 있어 **main 머지는 그 트랙(Opus 행) 마감 후** 함께.
+"PIE 검증" 행의 전환 항목은 이번 실측으로 대체 — 파괴물 잔여 항목(문·근접·차지레이저 실사격)만 그 행에 남는다.
+4인 MP 실측(이월 델타의 원거리 적 이동 체감·클라 페이드 동기)은 미실시 — PIE 2인 레시피로 후속.
+
 ## 🔍 아레나 트랙 11커밋 소급 검증 — Fable, 코드 결함 0건 (2026-08-19, `phase/arena-spawnpoints`)
 > 보드 행 = *"아레나 트랙 소급 검증 — 11커밋/53파일 (콜리전 채널 d49998f2 최우선)"*(M0 · 하이 · M · Fable).
 > 경위 = 이 브랜치의 아레나 작업 11커밋(`876bb644..d73f22ae`)은 모델 배분상 Fable 몫인 코어·구조 사안을
