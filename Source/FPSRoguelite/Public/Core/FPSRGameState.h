@@ -217,13 +217,10 @@ public:
 	UFUNCTION(BlueprintPure, Category = "FPSR|Run")
 	bool IsStageTransitionActive() const { return StageTransitionPhase != EFPSRStageTransitionPhase::None; }
 
-	/** True only during the Grace phase's FIXED dealing window (ADR 0010 invariant 8: the damage-dealing window
-	 *  must be a fixed duration, never proportional to hardware/loading time — a slow machine must not be able to
-	 *  farm the frozen swarm longer than a fast one). This predicate is what expresses that invariant: it is true
-	 *  from the moment Grace starts until the pre-computed StagePhaseEndServerTime, and then closes at exactly
-	 *  that instant no matter how much longer Pending/Swapping/FadeOut/FadeIn end up taking afterward — the swarm
-	 *  becomes invulnerable at that fixed point (see FPSRCombatStatics.cpp's ResolveDamage), so extra wall-clock
-	 *  time never buys extra reward. */
+	/** True only during the Grace phase's FIXED pre-fade window. HUD-only these days (the dealing countdown cue):
+	 *  the invulnerability this used to gate in ResolveDamage was retired 2026-08-20 (user decision, ADR 0010 안 H
+	 *  정정) — the swarm now stays damageable through the WHOLE transition, whose segments are each fixed-length
+	 *  authored numbers, so the reward window is still a fixed sum rather than hardware-proportional. */
 	UFUNCTION(BlueprintPure, Category = "FPSR|Run")
 	bool IsStageDealingOpen() const { return StageTransitionPhase == EFPSRStageTransitionPhase::Grace && GetServerWorldTimeSeconds() < StagePhaseEndServerTime; }
 

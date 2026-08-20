@@ -113,8 +113,10 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Run", meta = (ClampMin = "0.02"))
 	float SpawnIntervalSeconds = 0.1f;
 
-	/** 스테이지 전환의 **딜링 고정 시간**(초). 억제기를 부순 뒤 이만큼은 정지한 적을 갈아 회수할 수 있고,
-	 *  그 뒤엔 잔존 적이 무적이 된다(ADR 0010 불변식 8: 보상이 하드웨어·로딩 시간에 비례해선 안 된다).
+	/** 스테이지 전환에서 **페이드아웃이 시작되기 전까지 버티는 구간**(초). 적은 정지하고 플레이어는 그대로
+	 *  사격 가능. (정정 2026-08-20, 사용자 결정: 종전에는 이 창이 닫히면 잔존 적이 무적이 됐으나, 이제 전환
+	 *  **전 구간** 피격 가능이다 — 페이즈가 전부 고정 길이라 보상 시간도 저작값의 합으로 고정된다. 이 값은
+	 *  이제 "화면 변화 없이 갈아먹는 앞구간"의 길이일 뿐이다.)
 	 *  ⚠️ 8초는 **미검증 시작값**이다 — PIE 로 체감을 보고 정한다. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Run", meta = (ClampMin = "0.5"))
 	float StageGraceSeconds = 8.0f;

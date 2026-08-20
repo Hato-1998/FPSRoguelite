@@ -98,26 +98,16 @@ namespace FPSRCombat
 			return 0.0f;
 		}
 
-		// Swarm enemy (identified by its non-GAS health component): full damage — UNLESS a stage transition's dealing
-		// window has closed (ADR 0010 D6 invariant 8). Once IsStageDealingOpen() goes false the frozen swarm becomes
-		// invulnerable rather than a farm target for whoever is slower to react — the reward is a FIXED-time window,
-		// not "however long it takes".
-		//
-		// 🚨 Gated on AFPSREnemyBase specifically, NOT "has a UFPSREnemyHealthComponent" — a door/arena destructible
-		// carries the SAME component (17d6b320) and must stay damageable through a transition (breaking a second
-		// suppressor, or any other destructible, is unaffected by this gate). AFPSRBossBase is a separate hierarchy
-		// (ACharacter, not AFPSREnemyBase) and is deliberately NOT covered here — a transition is not expected to run
-		// during a boss fight, but even if it did, the boss should keep taking damage.
+		// Swarm enemy (identified by its non-GAS health component): full damage — INCLUDING the whole stage
+		// transition (user decision 2026-08-20, ADR 0010 안 H 정정). There used to be an invulnerability gate here
+		// ("dealing window closed -> frozen swarm can't be farmed", invariant 8's enforcement) — retired: with the
+		// phase split every transition segment is itself fixed-length, so the farmable window is Grace + FadeOut +
+		// blackout hold + FadeIn, all authored numbers. The one variable stretch (a slow client's destination-ready
+		// wait, StageSwapReadyTimeoutSeconds-capped and normally 0) is accepted as-is — the swarm the player is
+		// grinding is the same swarm that carries over, so extra farm time trades against the next stage's own
+		// carry-over pressure rather than being free reward.
 		if (Target->FindComponentByClass<UFPSREnemyHealthComponent>())
 		{
-			if (Target->IsA(AFPSREnemyBase::StaticClass()))
-			{
-				const AFPSRGameState* GS = World ? World->GetGameState<AFPSRGameState>() : nullptr;
-				if (GS && GS->IsStageTransitionActive() && !GS->IsStageDealingOpen())
-				{
-					return 0.0f;
-				}
-			}
 			return BaseDamage;
 		}
 
