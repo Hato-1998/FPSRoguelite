@@ -132,6 +132,14 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Run", meta = (ClampMin = "0.0"))
 	float StageFadeOutSeconds = 0.8f;
 
+	/** 페이드아웃이 끝난 뒤 **완전 암전을 유지하는 최소 시간**(초). 이 시간이 지나야 스왑(텔레포트·이월)이
+	 *  실행되고 페이드인이 시작된다 — "깜빡"하고 지나가는 암전이 싫을 때 올린다. 목적지 아레나가 아직 준비
+	 *  안 된 클라이언트 대기(`StageSwapReadyTimeoutSeconds`)는 이 시간과 **별도로** 뒤에 이어질 수 있다(보통
+	 *  0초). 0 = 유지 없이 즉시 스왑(이 파라미터 도입 전과 동일). ⚠️ 0.5초는 미검증 시작값 — PIE 체감으로
+	 *  정한다. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Run", meta = (ClampMin = "0.0"))
+	float StageBlackoutHoldSeconds = 0.5f;
+
 	/** 스왑 뒤 **페이드인** 길이(초, Phase B 연출). 0 = 생략(하드컷). */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Run", meta = (ClampMin = "0.0"))
 	float StageFadeInSeconds = 0.8f;

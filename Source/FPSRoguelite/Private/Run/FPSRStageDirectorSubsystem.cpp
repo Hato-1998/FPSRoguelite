@@ -334,11 +334,38 @@ void UFPSRStageDirectorSubsystem::OnFadeOutComplete()
 	}
 
 	// Swapping now means "blacked out + destination activated/regenerated, waiting for/running the actual swap" —
-	// see the header comment on EFPSRStageTransitionPhase::Swapping. BeginSwap (unchanged from before the phase
-	// split) either commits immediately (the normal ADR 0012 axis-5 case, destination already parked+visible) or
-	// polls until every connection can see the destination.
+	// see the header comment on EFPSRStageTransitionPhase::Swapping. The client fade holds alpha at 1.0 for the
+	// WHOLE Swapping phase, so publishing it here (before the hold below) is what makes the hold read as blackout.
 	GS->SetStageTransition(EFPSRStageTransitionPhase::Swapping, 0.0f);
+
+	// Minimum full-blackout dwell (StageBlackoutHoldSeconds, user request 2026-08-20): without it the normal
+	// destination-ready case swaps the very frame the fade-out finishes and the blackout reads as a flicker.
+	// SERIALIZED before BeginSwap's readiness wait rather than run in parallel — the wait is 0 in the normal case
+	// (the destination is parked a stage early), so parallelizing would only complicate the worst case, where a
+	// slow client already stretches the blackout past the hold anyway. 0 = no dwell, pre-parameter behavior.
+	const float HoldSeconds = GetStageBlackoutHoldSeconds();
+	UWorld* World = GetWorld();
+	if (HoldSeconds <= 0.0f || !World)
+	{
+		OnBlackoutHoldComplete();
+		return;
+	}
+	World->GetTimerManager().SetTimer(
+		FadeTimerHandle, this, &UFPSRStageDirectorSubsystem::OnBlackoutHoldComplete, HoldSeconds, /*bLoop*/false);
+}
+
+void UFPSRStageDirectorSubsystem::OnBlackoutHoldComplete()
+{
+	// BeginSwap (unchanged from before the phase split) either commits immediately (the normal ADR 0012 axis-5
+	// case, destination already parked+visible) or polls until every connection can see the destination.
 	BeginSwap();
+}
+
+float UFPSRStageDirectorSubsystem::GetStageBlackoutHoldSeconds() const
+{
+	const AFPSRGameState* GS = GetGS();
+	const UFPSRRunScheduleDataAsset* Schedule = GS ? GS->GetRunSchedule() : nullptr;
+	return Schedule ? Schedule->StageBlackoutHoldSeconds : DefaultStageBlackoutHoldSeconds;
 }
 
 float UFPSRStageDirectorSubsystem::GetStageFadeOutSeconds() const

@@ -97,10 +97,17 @@ private:
 	 *  owns the timing so the swarm/movement freeze (gated on IsStageTransitionActive) already covers it. */
 	void EnterFadeOut();
 
-	/** FadeOut's timer expired (or was skipped, 0-length): FadeOut -> Swapping, then BeginSwap (unchanged from
-	 *  before the phase split — Swapping now means "blacked out + waiting for/running the swap", not "just
-	 *  swapping this frame"). */
+	/** FadeOut's timer expired (or was skipped, 0-length): FadeOut -> Swapping, then a minimum full-blackout dwell
+	 *  (StageBlackoutHoldSeconds — without it the normal ready-destination case swaps the same frame the fade-out
+	 *  finishes and the blackout reads as a flicker) before OnBlackoutHoldComplete hands over to BeginSwap. */
 	void OnFadeOutComplete();
+
+	/** The blackout dwell expired (or was skipped, 0-length): run BeginSwap — readiness wait + the swap itself
+	 *  (unchanged from before the phase split — Swapping means "blacked out + waiting for/running the swap"). */
+	void OnBlackoutHoldComplete();
+
+	/** StageBlackoutHoldSeconds from the run schedule, or DefaultStageBlackoutHoldSeconds with no schedule asset. */
+	float GetStageBlackoutHoldSeconds() const;
 
 	/** PerformSwap's final commit entered FadeIn: arms a one-shot fade timer (StageFadeInSeconds, or immediate if 0)
 	 *  that fires OnFadeInComplete. */
@@ -171,6 +178,7 @@ private:
 	 *  default so an asset-less run behaves the same as a freshly-authored schedule). */
 	static constexpr float DefaultStageFadeOutSeconds = 0.8f;
 	static constexpr float DefaultStageFadeInSeconds = 0.8f;
+	static constexpr float DefaultStageBlackoutHoldSeconds = 0.5f;
 
 	/** One-shot timer for the Grace dealing window (armed by RequestTransition, fires OnDealingWindowClosed). */
 	FTimerHandle DealingTimerHandle;
