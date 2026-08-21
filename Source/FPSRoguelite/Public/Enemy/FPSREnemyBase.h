@@ -160,6 +160,11 @@ public:
 	/** Distance at which the enemy stops advancing toward a player (used by the movement subsystem). */
 	float GetStopDistance() const { return StopDistance; }
 
+	/** This life's sampled hover height (0 = a ground archetype). The movement subsystem's QueryFlow gate reads it:
+	 *  only hover archetypes may take the 3D window route — their spring is what EXECUTES the window's vertical
+	 *  guidance; a ground agent has no such mover (merge-gate P1, see FFPSRFlowQuery::bHoverCapable). */
+	float GetCurrentHoverHeight() const { return CurrentHoverHeight; }
+
 	float GetAttackRange() const { return AttackRange; }
 	float GetAttackDamage() const { return AttackDamage; }
 

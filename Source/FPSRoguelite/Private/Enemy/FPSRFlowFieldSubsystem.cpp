@@ -4,6 +4,7 @@
 #include "Enemy/FPSRFlowFieldBoundsVolume.h"
 #include "Enemy/FPSRHoverWindowSubsystem.h" // S3 (ADR 0009 P1): QueryFlow's Window3D routing
 #include "Arena/FPSRArenaActor.h"
+#include "Arena/FPSRArenaDestructible.h" // S2/merge-gate P2: intact-prop voxel stamp at adoption (GetVoxelBounds/IsBroken)
 #include "Core/FPSRGameState.h"
 #include "Core/FPSRLogChannels.h"
 #include "Engine/World.h"
@@ -336,6 +337,29 @@ bool UFPSRFlowFieldSubsystem::AdoptArenaFieldInternal(const AFPSRArenaActor& Are
 	if (BakeData && BakeData->BuildWorldVoxels(Arena.GetActorTransform(), WorldVoxels))
 	{
 		AdoptedVoxels = MoveTemp(WorldVoxels);
+
+		// Stamp INTACT destructible props into the adopted field (merge-gate P2): their meshes are
+		// ECC_FPSRDestructible, so the editor bake's ECC_WorldStatic probe never saw them — without this stamp the
+		// break-time NotifyArenaVolumeOpened clears bits that were never set (its whole purpose a no-op) while the
+		// hover window happily floods straight through intact props. Spatial membership (ContainsWorldLocation) is
+		// this class of actor's own arena-resolution rule; props are intact at every adoption path (SetArenaActive
+		// resets them before ServerRegenerate; a fresh world starts intact) but IsBroken is checked anyway so an
+		// unforeseen adoption order can only under-stamp, never resurrect a broken prop's occupancy.
+		if (UWorld* StampWorld = GetWorld())
+		{
+			int32 StampedProps = 0;
+			for (TActorIterator<AFPSRArenaDestructible> It(StampWorld); It; ++It)
+			{
+				const AFPSRArenaDestructible* Prop = *It;
+				if (Prop && !Prop->IsBroken() && Arena.ContainsWorldLocation(Prop->GetActorLocation()))
+				{
+					FFPSRArenaVoxelData::SetOccupiedAABB(AdoptedVoxels, Prop->GetVoxelBounds());
+					++StampedProps;
+				}
+			}
+			UE_LOG(LogFPSR, Log, TEXT("[FlowField] Voxel field adopted from %s: %d intact destructible(s) stamped occupied."),
+				*Arena.GetName(), StampedProps);
+		}
 	}
 	else
 	{
@@ -344,7 +368,19 @@ bool UFPSRFlowFieldSubsystem::AdoptArenaFieldInternal(const AFPSRArenaActor& Are
 			TEXT("[FlowField] %s has no baked voxel occupancy — S3 hover window will have no field here until this arena is re-baked (ADR 0009 S2)."),
 			*Arena.GetName());
 	}
-	VoxelBaseline = AdoptedVoxels; // same adopt-time-snapshot contract as BakedBaseline
+	VoxelBaseline = AdoptedVoxels; // same adopt-time-snapshot contract as BakedBaseline (stamps included — a
+	                               // baseline reset restores props CLOSED, matching their intact reset on re-run)
+
+	// Every published hover window was propagated over the PREVIOUS field's occupancy/placement — wrong-ARENA stale
+	// from this instant (merge-gate P1). Null-safe: at world begin the window subsystem may not exist yet, and its
+	// slots are all empty then anyway.
+	if (UWorld* InvalidateWorld = GetWorld())
+	{
+		if (UFPSRHoverWindowSubsystem* HoverWindows = InvalidateWorld->GetSubsystem<UFPSRHoverWindowSubsystem>())
+		{
+			HoverWindows->InvalidateAllWindows();
+		}
+	}
 
 	if (bBumpGenerationAndRecompute)
 	{
@@ -453,13 +489,12 @@ void UFPSRFlowFieldSubsystem::NotifyDoorBroken(const AActor* Door)
 		OpenedEdges += UnifiedComputer->StampDoorEdgesOpen(Pair.Key, Pair.Value);
 	}
 
-	// S2 (ADR 0009 P1): clear the SAME door's world AABB out of the voxel occupancy too, alongside the 2D seam
-	// stamp above, so a future S3 hover window sees the opened doorway the instant the 2D field does. No-op if no
-	// voxel field is adopted (single-map / pre-P1 bake) — DoorAABB was already computed above for MapDoorSeamCellPairs.
-	if (AdoptedVoxels.IsBakedVoxels())
-	{
-		FFPSRArenaVoxelData::ClearOccupiedAABB(AdoptedVoxels, DoorAABB);
-	}
+	// NO voxel clear here, deliberately (merge-gate P3): this door path is gated on bUnifiedMultiSlot (multimap
+	// mode), and AdoptedVoxels only exists in ARENA mode — the two are mutually exclusive branches of
+	// OnWorldBeginPlay, so a "voxel-adopted world with doors" cannot exist. If multimap content ever returns AND
+	// grows a voxel field, doors will also need stamping INTO that field first (their leaf mesh is
+	// ECC_FPSRDestructible, invisible to the ECC_WorldStatic bake probe — same situation as the arena
+	// destructibles, solved for them in AdoptArenaFieldInternal's stamp pass).
 
 	// U (P-F): the seam topology changed — bump the generation (mirrored to the replicated GameState in Stage 2 so late
 	// joiners re-ack) and mark the field mutated so a new-run ResetDoorTopologyToBaseline restores the closed seam. Done
@@ -752,6 +787,15 @@ void UFPSRFlowFieldSubsystem::ResetDoorTopologyToBaseline()
 	// door/destructible voxel clears since adoption (NotifyDoorBroken / NotifyArenaVolumeOpened) must not survive
 	// a same-world re-run any more than their 2D counterparts do.
 	AdoptedVoxels = VoxelBaseline;
+	// The baseline restore just changed the voxel occupancy under every published window (broken props close
+	// again) — invalidate them for the same reason AdoptArenaFieldInternal does (merge-gate P1's serial gate).
+	if (UWorld* InvalidateWorld = GetWorld())
+	{
+		if (UFPSRHoverWindowSubsystem* HoverWindows = InvalidateWorld->GetSubsystem<UFPSRHoverWindowSubsystem>())
+		{
+			HoverWindows->InvalidateAllWindows();
+		}
+	}
 	bTopologyMutatedSinceBaseline = false;
 	AdvanceTopologyGeneration();
 	RecomputeAllFields();
@@ -788,7 +832,7 @@ bool UFPSRFlowFieldSubsystem::QueryFlow(const FFPSRFlowQuery& Query, FFPSRFlowRe
 		// window subsystem, no window adopted for this world, this pawn owns no slot, WorldPos outside the window/
 		// its edge margin, or the cell itself unreached) — the 2D field is always ready, so there is never a
 		// "neither answered" gap (ADR §실패 흐름).
-		if (Query.TargetPlayerPawn)
+		if (Query.TargetPlayerPawn && Query.bHoverCapable)
 		{
 			if (!CachedHoverWindowSubsystem.IsValid())
 			{

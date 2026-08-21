@@ -23,18 +23,27 @@ struct FFPSRHoverWindowSlot
 	 *  (fewer live players than slots) — TickWindows reassigns it fresh every launch decision. */
 	TWeakObjectPtr<APawn> OwnerPawn;
 
-	/** This window's min-corner, in the ADOPTED VOXEL FIELD's own cell coordinates (UFPSRFlowFieldSubsystem::
-	 *  GetAdoptedVoxels()'s axis system) — the argument CopyWindow re-centres against. */
-	FIntVector WindowMinCell = FIntVector::ZeroValue;
+	/** One buffer's PLACEMENT — everything needed to interpret its propagated field in world space. Double-buffered
+	 *  in lockstep with Fields[] (merge-gate P1): a published field MUST be decoded with the placement it was
+	 *  PROPAGATED against, never the placement of the next launch. A single slot-level placement meant every
+	 *  published field spent its whole ~250ms front lifetime being read through the NEXT launch's origin — a
+	 *  constant ~1-cell skew for a sprinting player, and an arbitrary-distance skew across a stage-swap teleport. */
+	struct FPlacement
+	{
+		/** This window's min-corner, in the ADOPTED VOXEL FIELD's own cell coordinates (UFPSRFlowFieldSubsystem::
+		 *  GetAdoptedVoxels()'s axis system) — the argument CopyWindow re-centred against. */
+		FIntVector MinCell = FIntVector::ZeroValue;
+		/** World-space position of MinCell's own min corner — QueryWindow's world<->local conversion anchor. */
+		FVector WorldOrigin = FVector::ZeroVector;
+		/** Window dimensions this buffer was propagated with (a live settings edit affects the NEXT launch only). */
+		FFPSRHoverWindowDims Dims;
+		/** The adopted field's own cell size at launch time — NOT the compile-time constant (merge-gate P3: a
+		 *  future cell-size generation, or a legacy asset, must skew loudly at adoption — never silently here). */
+		float VoxelSize = 0.0f;
+	};
 
-	/** This slot's window dimensions, snapshotted from UFPSREnemySwarmSettings at LAUNCH time (a live edit takes
-	 *  effect on this slot's NEXT launch, not mid-flight — the in-flight task captured its own copy of Dims by
-	 *  value at launch, so it keeps running against what it was actually launched with). */
-	FFPSRHoverWindowDims Dims;
-
-	/** World-space position of WindowMinCell's own min corner (WindowMinCell*VoxelSize + the adopted field's
-	 *  VoxelOrigin) — QueryWindow's world<->local cell conversion anchor. */
-	FVector WindowWorldOrigin = FVector::ZeroVector;
+	/** Placements[i] describes Fields[i]; both indexed by FrontIndex and swapped together at publish. */
+	FPlacement Placements[2];
 
 	/** GAME-THREAD-WRITTEN, WORKER-READ: this launch's row-wise occupancy snapshot (FFPSRArenaVoxelData::CopyWindow)
 	 *  out of the global adopted voxel field. Written before Task is launched; the worker only reads it; the game
@@ -61,6 +70,11 @@ struct FFPSRHoverWindowSlot
 
 	/** This slot's currently in-flight (or last-completed, until relaunched) propagation job. */
 	UE::Tasks::FTask Task;
+
+	/** The subsystem's AdoptionSerial captured at launch. A publish only validates its front when this still equals
+	 *  the CURRENT serial — a field propagated over a PREVIOUS arena's occupancy must never publish as valid after
+	 *  a re-adoption (merge-gate P1: the stage-swap teleport case, where the placement alone can't tell). */
+	uint64 LaunchSerial = 0;
 };
 
 /**
@@ -111,6 +125,13 @@ public:
 	 *  Read-only, game-thread-only (reads only the FRONT buffer, per this class's threading contract). */
 	bool QueryWindow(const APawn* Pawn, const FVector& WorldPos, FVector& OutDirection, float& OutSeekZ, bool& OutSeekValid) const;
 
+	/** Called by UFPSRFlowFieldSubsystem whenever a (new) arena's voxel field is adopted: every published window
+	 *  was propagated over the PREVIOUS field's occupancy and placement, so serving it against the new arena is
+	 *  wrong-ARENA stale — outside what invariant 5 tolerates (merge-gate P1). Unpublishes every slot immediately
+	 *  and bumps AdoptionSerial so an in-flight task's own later publish is discarded too (its snapshot is equally
+	 *  pre-adoption). Slots repopulate over the next full round-robin cycle (~250ms). */
+	void InvalidateAllWindows();
+
 private:
 	/** The staggered round-robin driver (FTimerHandle loop at WindowUpdateIntervalSec) — considers exactly ONE
 	 *  slot per call: publish its completed task if any, then (freeze/authority/occupancy permitting) prepare and
@@ -129,7 +150,16 @@ private:
 	/** Next slot TickWindows will consider (round-robin cursor, wraps mod NumSlots). */
 	int32 NextSlotCursor = 0;
 
+	/** Bumped by InvalidateAllWindows on every voxel-field adoption; compared against each slot's LaunchSerial at
+	 *  publish time so a pre-adoption propagation can never publish as valid (merge-gate P1). */
+	uint64 AdoptionSerial = 1;
+
 	FTimerHandle TickTimerHandle;
+
+	/** The interval TickTimerHandle is currently armed with — compared against the live setting every TickWindows
+	 *  so a PIE edit re-arms the timer instead of being silently ignored (merge-gate P3: the settings comment
+	 *  promises a live knob, so it must BE one). */
+	float ArmedIntervalSec = 0.0f;
 
 	/** Server-only: each tracked player's Z the last time IsMovingOnGround() was true — the SAME "don't chase a
 	 *  jump/fall in real time" cache UFPSREnemySpawnSubsystem::LastGroundedZByPlayer keeps, duplicated here (not

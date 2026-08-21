@@ -168,10 +168,21 @@ bool FFPSRArenaVoxelDataTest::RunTest(const FString& Parameters)
 		TestFalse(TEXT("straddling box clears the partially-overlapped voxel"), IsSet(1));
 		TestTrue(TEXT("straddling box leaves untouched voxels set"), IsSet(2) && IsSet(3));
 
-		// (4c) An invalid box is a no-op (defensive — callers pass GetActorBounds()-derived boxes, which are
+		// (4c) An invalid box is a no-op (defensive — callers pass mesh-bounds-derived boxes, which are
 		// always valid, but the helper must not crash on a degenerate one).
 		FFPSRArenaVoxelData::ClearOccupiedAABB(V, FBox(ForceInit));
 		TestTrue(TEXT("an invalid AABB is a no-op"), IsSet(2) && IsSet(3));
+
+		// (4d) SetOccupiedAABB is ClearOccupiedAABB's exact mirror (the adoption-time destructible stamp,
+		// merge-gate P2): stamping the SAME box the clear used must restore exactly the bits it cleared —
+		// stamp/clear round-trip symmetry is what keeps break-time clears from leaving phantom occupancy.
+		const FBox StraddleBox(FVector(-50.0f, -50.0f, -50.0f), FVector(150.0f, 50.0f, 50.0f));
+		FFPSRArenaVoxelData::SetOccupiedAABB(V, StraddleBox);
+		TestTrue(TEXT("stamp restores exactly the voxels the same box cleared"), IsSet(0) && IsSet(1));
+		FFPSRArenaVoxelData::ClearOccupiedAABB(V, StraddleBox);
+		TestFalse(TEXT("stamp/clear round-trips to the cleared state"), IsSet(0) || IsSet(1));
+		FFPSRArenaVoxelData::SetOccupiedAABB(V, FBox(ForceInit));
+		TestFalse(TEXT("an invalid AABB is a no-op for the stamp too"), IsSet(0) || IsSet(1));
 	}
 
 	return true;

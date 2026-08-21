@@ -183,6 +183,52 @@ struct FPSROGUELITE_API FFPSRArenaVoxelData
 	}
 
 	/**
+	 * Exact mirror of ClearOccupiedAABB: SETS every voxel the box touches. Exists for the runtime destructible
+	 * stamp (merge-gate P2): destructible props are ECC_FPSRDestructible, so the editor bake's ECC_WorldStatic
+	 * probe never sees them — an intact prop must be stamped INTO the adopted field at adoption time for the
+	 * break-time clear to have anything to open (the 2D field gets the same treatment through its own footprint
+	 * cells). Same clamp/fail-closed rules as the clear; both must use the SAME box source (the prop's root
+	 * primitive bounds) or a stamp/clear mismatch leaves phantom occupancy behind.
+	 */
+	static void SetOccupiedAABB(FFPSRArenaVoxelData& Voxels, const FBox& WorldAABB)
+	{
+		if (!Voxels.IsBakedVoxels() || !WorldAABB.IsValid)
+		{
+			return;
+		}
+		const FVector RelMin = WorldAABB.Min - Voxels.VoxelOrigin;
+		const FVector RelMax = WorldAABB.Max - Voxels.VoxelOrigin;
+		const int32 RawMinX = FMath::FloorToInt(RelMin.X / Voxels.VoxelSize);
+		const int32 RawMinY = FMath::FloorToInt(RelMin.Y / Voxels.VoxelSize);
+		const int32 RawMinZ = FMath::FloorToInt(RelMin.Z / Voxels.VoxelSize);
+		const int32 RawMaxX = FMath::FloorToInt(RelMax.X / Voxels.VoxelSize);
+		const int32 RawMaxY = FMath::FloorToInt(RelMax.Y / Voxels.VoxelSize);
+		const int32 RawMaxZ = FMath::FloorToInt(RelMax.Z / Voxels.VoxelSize);
+		if (RawMaxX < 0 || RawMinX >= Voxels.DimX || RawMaxY < 0 || RawMinY >= Voxels.DimY
+			|| RawMaxZ < 0 || RawMinZ >= Voxels.DimZ)
+		{
+			return; // entirely outside — same pre-clamp rejection as the clear (never fold onto voxel 0)
+		}
+		const int32 MinX = FMath::Clamp(RawMinX, 0, Voxels.DimX - 1);
+		const int32 MinY = FMath::Clamp(RawMinY, 0, Voxels.DimY - 1);
+		const int32 MinZ = FMath::Clamp(RawMinZ, 0, Voxels.DimZ - 1);
+		const int32 MaxX = FMath::Clamp(RawMaxX, 0, Voxels.DimX - 1);
+		const int32 MaxY = FMath::Clamp(RawMaxY, 0, Voxels.DimY - 1);
+		const int32 MaxZ = FMath::Clamp(RawMaxZ, 0, Voxels.DimZ - 1);
+		for (int32 Z = MinZ; Z <= MaxZ; ++Z)
+		{
+			for (int32 Y = MinY; Y <= MaxY; ++Y)
+			{
+				for (int32 X = MinX; X <= MaxX; ++X)
+				{
+					const int32 Idx = Voxels.VoxelIndex(X, Y, Z);
+					Voxels.Occupancy[Idx >> 6] |= (1ull << (Idx & 63));
+				}
+			}
+		}
+	}
+
+	/**
 	 * S3 hover-window occupancy fill (ADR 0009 P1 §A — UFPSRHoverWindowSubsystem's per-launch snapshot step). Copies
 	 * a WindowDims-shaped occupancy field out of THIS global voxel field, re-centred at MinCell (a cell coordinate
 	 * in THIS field's own axis system, e.g. from WorldToVoxel on the window owner's position). Row-wise: the bounds
@@ -202,11 +248,16 @@ struct FPSROGUELITE_API FFPSRArenaVoxelData
 	 */
 	void CopyWindow(const FIntVector& MinCell, const FFPSRHoverWindowDims& WindowDims, TArray<uint64>& OutOccupancy) const
 	{
-		OutOccupancy.Init(0, FPSRHoverWindow::OccupancyWords(FMath::Max(0, WindowDims.NumCells())));
-		if (WindowDims.DimX <= 0 || WindowDims.DimY <= 0 || WindowDims.DimZ <= 0)
+		// IsValid() (int64 product check), NOT a per-axis > 0 check, and BEFORE the Init below: oversized dims from
+		// a hand-edited config wrap NumCells()'s int32 multiply negative, which would size OutOccupancy to zero
+		// words while the fail-closed fill loops still ran their full (huge) extents — an out-of-bounds SetOccupied
+		// on the game thread (merge-gate P3). Propagate guards itself the same way; the snapshot step must too.
+		if (!WindowDims.IsValid())
 		{
-			return; // nothing to fill — caller wouldn't Propagate against zero dims anyway
+			OutOccupancy.Reset();
+			return;
 		}
+		OutOccupancy.Init(0, FPSRHoverWindow::OccupancyWords(WindowDims.NumCells()));
 
 		const bool bSourceUsable = IsBakedVoxels();
 		for (int32 WZ = 0; WZ < WindowDims.DimZ; ++WZ)

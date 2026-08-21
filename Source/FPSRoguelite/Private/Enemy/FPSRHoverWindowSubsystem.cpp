@@ -159,8 +159,17 @@ void UFPSRHoverWindowSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 	}
 
 	const UFPSREnemySwarmSettings* Settings = GetDefault<UFPSREnemySwarmSettings>();
-	const float Interval = FMath::Max(0.01f, Settings->WindowUpdateIntervalSec);
-	InWorld.GetTimerManager().SetTimer(TickTimerHandle, this, &UFPSRHoverWindowSubsystem::TickWindows, Interval, true);
+	ArmedIntervalSec = FMath::Max(0.01f, Settings->WindowUpdateIntervalSec);
+	InWorld.GetTimerManager().SetTimer(TickTimerHandle, this, &UFPSRHoverWindowSubsystem::TickWindows, ArmedIntervalSec, true);
+}
+
+void UFPSRHoverWindowSubsystem::InvalidateAllWindows()
+{
+	++AdoptionSerial;
+	for (FFPSRHoverWindowSlot& Slot : Slots)
+	{
+		Slot.bFrontValid = false; // wrong-ARENA stale from this instant on — see the header comment
+	}
 }
 
 void UFPSRHoverWindowSubsystem::Deinitialize()
@@ -201,8 +210,13 @@ bool UFPSRHoverWindowSubsystem::QueryWindow(const APawn* Pawn, const FVector& Wo
 		{
 			return false; // matched a slot, but it has no usable published field yet (or seeded 0 last launch)
 		}
+		// The FRONT buffer's OWN placement — the origin/dims/cell-size it was actually propagated against, never
+		// the slot-level values of the next launch (merge-gate P1: placement is double-buffered in lockstep with
+		// Fields, see FFPSRHoverWindowSlot::FPlacement). VoxelSize likewise comes from the placement, not the
+		// compile-time constant (merge-gate P3: a legacy/other-generation asset must not silently skew here).
+		const FFPSRHoverWindowSlot::FPlacement& Placement = Slot.Placements[Slot.FrontIndex];
 		const UFPSREnemySwarmSettings* Settings = GetDefault<UFPSREnemySwarmSettings>();
-		return FPSRHoverWindowRuntime::ResolveQuery(Slot.Dims, Slot.WindowWorldOrigin, FFPSRArenaVoxelData::VoxelCellSizeCm,
+		return FPSRHoverWindowRuntime::ResolveQuery(Placement.Dims, Placement.WorldOrigin, Placement.VoxelSize,
 			Slot.Fields[Slot.FrontIndex], Settings->WindowEdgeMarginCells, WorldPos, OutDirection, OutSeekZ, OutSeekValid);
 	}
 	return false; // Pawn doesn't currently own any slot (5th+ co-op player, or not yet assigned this cycle)
@@ -218,6 +232,17 @@ void UFPSRHoverWindowSubsystem::TickWindows()
 	if (!World)
 	{
 		return;
+	}
+
+	// Live re-arm (merge-gate P3): the settings block advertises the cadence as a designer knob, so a PIE edit must
+	// actually take — compare against what the timer is armed with and re-arm on change (next fire at the new rate).
+	{
+		const float WantedInterval = FMath::Max(0.01f, GetDefault<UFPSREnemySwarmSettings>()->WindowUpdateIntervalSec);
+		if (!FMath::IsNearlyEqual(WantedInterval, ArmedIntervalSec))
+		{
+			ArmedIntervalSec = WantedInterval;
+			World->GetTimerManager().SetTimer(TickTimerHandle, this, &UFPSRHoverWindowSubsystem::TickWindows, ArmedIntervalSec, true);
+		}
 	}
 
 	UFPSRFlowFieldSubsystem* FlowField = World->GetSubsystem<UFPSRFlowFieldSubsystem>();
@@ -248,7 +273,9 @@ void UFPSRHoverWindowSubsystem::TickWindows()
 			return; // still in flight — this slot's own next turn (one full round-robin cycle) retries
 		}
 		Slot.FrontIndex = 1 - Slot.FrontIndex;
-		Slot.bFrontValid = Slot.SeededCount > 0;
+		// LaunchSerial gate (merge-gate P1): a task launched BEFORE the last voxel adoption propagated over the
+		// previous arena's occupancy — its result must never publish as valid against the new arena.
+		Slot.bFrontValid = Slot.SeededCount > 0 && Slot.LaunchSerial == AdoptionSerial;
 		// Publish EXACTLY once per completed task: without this reset, any turn that skips the relaunch below
 		// (freeze gate, no owner) re-enters here with the SAME completed task and swaps again — flip-flopping the
 		// front between the latest and the previous field every cycle for as long as launches stay skipped.
@@ -338,19 +365,31 @@ void UFPSRHoverWindowSubsystem::TickWindows()
 	}
 	Slot.OwnerPawn = OwnerPawn;
 
-	// (2) Window re-centre + dims snapshot (live-tunable — a settings edit takes effect on THIS slot's next launch).
+	// (2) Window re-centre + dims snapshot, written into the BACK buffer's OWN placement (merge-gate P1: the front
+	//     buffer's placement — what QueryWindow decodes with — is untouched here; the pair swaps together at the
+	//     next publish). Live-tunable — a settings edit takes effect on THIS slot's next launch.
+	const int32 BackIndex = 1 - Slot.FrontIndex;
+	FFPSRHoverWindowSlot::FPlacement& BackPlacement = Slot.Placements[BackIndex];
 	const UFPSREnemySwarmSettings* Settings = GetDefault<UFPSREnemySwarmSettings>();
 	FFPSRHoverWindowDims Dims;
 	Dims.DimX = FMath::Max(1, Settings->WindowDimXY);
 	Dims.DimY = FMath::Max(1, Settings->WindowDimXY);
 	Dims.DimZ = FMath::Max(1, Settings->WindowDimZ);
-	Slot.Dims = Dims;
+	if (!Dims.IsValid())
+	{
+		// A config-file value past the UI clamps overflowed the cell product (merge-gate P3) — refuse the launch
+		// (and any publish) rather than hand CopyWindow/Propagate a wrapped cell count.
+		Slot.bFrontValid = false;
+		return;
+	}
 
 	const FFPSRArenaVoxelData& Voxels = FlowField->GetAdoptedVoxels();
 	const FVector OwnerLocation = OwnerPawn->GetActorLocation();
 	const FIntVector MinCell = FPSRHoverWindowRuntime::ComputeWindowMinCell(OwnerLocation, Voxels.VoxelOrigin, Voxels.VoxelSize, Dims);
-	Slot.WindowMinCell = MinCell;
-	Slot.WindowWorldOrigin = Voxels.VoxelOrigin + FVector(static_cast<float>(MinCell.X), static_cast<float>(MinCell.Y), static_cast<float>(MinCell.Z)) * Voxels.VoxelSize;
+	BackPlacement.MinCell = MinCell;
+	BackPlacement.Dims = Dims;
+	BackPlacement.VoxelSize = Voxels.VoxelSize;
+	BackPlacement.WorldOrigin = Voxels.VoxelOrigin + FVector(static_cast<float>(MinCell.X), static_cast<float>(MinCell.Y), static_cast<float>(MinCell.Z)) * Voxels.VoxelSize;
 
 	// (3) Occupancy snapshot: row-wise fail-closed copy out of the global adopted voxel field. GAME THREAD ONLY —
 	//     the worker launched below never touches Voxels/FlowField itself, only this slot's own snapshot.
@@ -358,7 +397,7 @@ void UFPSRHoverWindowSubsystem::TickWindows()
 
 	// (4) Source cell: the owner's (XY, grounded Z) column, snapped to the nearest free voxel if occupied.
 	const FVector SourceWorldPos(OwnerLocation.X, OwnerLocation.Y, PlayerGroundedZ[SlotIndex]);
-	const FVector SourceRel = SourceWorldPos - Slot.WindowWorldOrigin;
+	const FVector SourceRel = SourceWorldPos - BackPlacement.WorldOrigin;
 	const FIntVector SourceLocalCell(
 		FMath::FloorToInt(SourceRel.X / Voxels.VoxelSize),
 		FMath::FloorToInt(SourceRel.Y / Voxels.VoxelSize),
@@ -378,11 +417,11 @@ void UFPSRHoverWindowSubsystem::TickWindows()
 	//     of THIS slot, which the game thread will not touch again until Task.IsCompleted() is confirmed on a later
 	//     tick (this class's threading contract) — SourceCell/Sources is moved in as a task-owned copy since it was
 	//     only ever a local.
-	const int32 BackIndex = 1 - Slot.FrontIndex;
-	FFPSRHoverWindowField& BackField = Slot.Fields[BackIndex];
+	FFPSRHoverWindowField& BackField = Slot.Fields[BackIndex]; // BackIndex/BackPlacement from step (2) above
 	TArray<uint64>& Snapshot = Slot.OccupancySnapshot;
 	int32* SeededCountPtr = &Slot.SeededCount;
 
+	Slot.LaunchSerial = AdoptionSerial; // this launch's occupancy generation — publish gates on it (merge-gate P1)
 	Slot.Task = UE::Tasks::Launch(TEXT("FPSRHoverWindowPropagate"),
 		[Dims, &Snapshot, Sources = MoveTemp(Sources), &BackField, SeededCountPtr]()
 		{

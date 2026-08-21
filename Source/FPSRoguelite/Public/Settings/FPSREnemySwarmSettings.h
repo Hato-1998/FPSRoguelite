@@ -40,13 +40,13 @@ public:
 	/** Window horizontal extent (cells, both X and Y) — a square footprint centred on its owning player. At the
 	 *  default 150cm voxel size (FFPSRArenaVoxelData::VoxelCellSizeCm) this is a 96m-wide window. */
 	UPROPERTY(Config, EditAnywhere, Category = "Hover Window",
-		meta = (DisplayName = "창 가로 셀 수", ClampMin = "8", UIMax = "128"))
+		meta = (DisplayName = "창 가로 셀 수", ClampMin = "8", ClampMax = "192", UIMax = "128"))
 	int32 WindowDimXY = 64;
 
 	/** Window vertical extent (cells). Matches the arena voxel bake's own Z band (VoxelBelowOriginCm +
 	 *  VoxelAboveOriginCm = 3600cm -> 24 cells at 150cm) by default. */
 	UPROPERTY(Config, EditAnywhere, Category = "Hover Window",
-		meta = (DisplayName = "창 세로 셀 수", ClampMin = "4", UIMax = "48"))
+		meta = (DisplayName = "창 세로 셀 수", ClampMin = "4", ClampMax = "64", UIMax = "48"))
 	int32 WindowDimZ = 24;
 
 	/** Per-tick round-robin cadence (seconds) — UFPSRHoverWindowSubsystem considers exactly ONE of its 4 slots each

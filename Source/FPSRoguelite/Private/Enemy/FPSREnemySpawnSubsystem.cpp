@@ -657,6 +657,9 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 			FlowQuery.WorldPos = EnemyLocation;
 			FlowQuery.bWantDirection = true;
 			FlowQuery.TargetPlayerPawn = bHasTarget ? PlayerPawns[BestPlayerIndex] : nullptr;
+			// Window3D is hover-only (merge-gate P1): a ground archetype handed the window's free-air gradient
+			// would zero its XY on a vertical step with no means to climb and both fallbacks suppressed.
+			FlowQuery.bHoverCapable = Enemy->GetCurrentHoverHeight() > 0.0f;
 			FFPSRFlowResult FlowRes;
 			if (FlowField)
 			{

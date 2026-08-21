@@ -32,6 +32,13 @@ struct FFPSRFlowQuery
 	FVector WorldPos = FVector::ZeroVector;
 	/** true = resolve the horizontal steer direction (the 2D flow sample today). */
 	bool bWantDirection = false;
+	/** true = this agent can EXECUTE vertical guidance (a hover archetype — CurrentHoverHeight > 0, whose spring
+	 *  consumes SeekZ). The Window3D route is gated on this (merge-gate P1): a GROUND agent handed the window's
+	 *  free-air gradient has no means to climb a vertical step (its only Z mover is the walk step-up), so a pure
+	 *  (0,0,+1) StepDir would zero its XY steering while suppressing both fallbacks — permanent stall under any
+	 *  platform the target stands on. Ground agents stay on the 2D surface field, whose edges are walk-traversable
+	 *  by construction. */
+	bool bHoverCapable = false;
 	/** true = resolve the hover terrain anchor (SampleHoverFloorZ today). */
 	bool bWantHoverFloor = false;
 	/** Hover-floor pick anchor: capsule BOTTOM Z (caller convention — see AFPSREnemyBase::ApplyGravity). */

@@ -27,6 +27,18 @@ AFPSRArenaDestructible::AFPSRArenaDestructible()
 	// No mesh asset assigned here — Game.MD §2 forbids hardcoding asset paths; the designer assigns SM in BP.
 }
 
+FBox AFPSRArenaDestructible::GetVoxelBounds() const
+{
+	// The MESH's own render bounds — see the header comment for why this is neither GetActorBounds(false) (inflated
+	// by non-colliding components) nor a collision query (already disabled by break-time). Render bounds track the
+	// assigned SM asset and survive collision teardown, so stamp (adoption) and clear (break) read the same box.
+	if (DestructibleMesh && DestructibleMesh->GetStaticMesh())
+	{
+		return DestructibleMesh->Bounds.GetBox();
+	}
+	return FBox(ForceInit); // no mesh authored — invalid box, both voxel ops no-op on it
+}
+
 void AFPSRArenaDestructible::HandleBrokenAuthority(AActor* Breaker)
 {
 	bool bOpened = false;
@@ -54,13 +66,13 @@ void AFPSRArenaDestructible::HandleBrokenAuthority(AActor* Breaker)
 					{
 						Flow->NotifyArenaCellsOpened(Cells);
 
-						// S2 (ADR 0009 P1): also clear this prop's full 3D world AABB out of the voxel occupancy
-						// field, at the SAME break event — a destructible has height, so its voxel footprint is not
-						// just the 2D cells extruded. GetActorBounds(false): ALL components, matching NotifyDoorBroken's
-						// own AABB computation (be robust to collision already being off by the time this runs).
-						FVector BoundsOrigin, BoundsExtent;
-						GetActorBounds(/*bOnlyCollidingComponents*/ false, BoundsOrigin, BoundsExtent);
-						Flow->NotifyArenaVolumeOpened(FBox(BoundsOrigin - BoundsExtent, BoundsOrigin + BoundsExtent));
+						// S2 (ADR 0009 P1): also clear this prop's 3D voxel occupancy at the SAME break event — a
+						// destructible has height, so its voxel footprint is not just the 2D cells extruded. The
+						// box comes from GetVoxelBounds() — the SAME source the adoption-time stamp used
+						// (merge-gate P2: the ECC_WorldStatic bake probe never saw this ECC_FPSRDestructible mesh,
+						// so the prop was stamped INTO the adopted field at adoption; stamp and clear must mirror
+						// each other exactly or phantom occupancy is left behind).
+						Flow->NotifyArenaVolumeOpened(GetVoxelBounds());
 
 						bOpened = true;
 					}
