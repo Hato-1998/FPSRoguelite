@@ -157,13 +157,15 @@ bool FFPSRFlowFieldHoverSampleTest::RunTest(const FString& Parameters)
 		TestTrue(TEXT("clamped edge sample matches the uniform Z"), FMath::IsNearlyEqual(FloorZ, 300.0f, 1e-3f));
 	}
 
-	// ---- (7) Look-ahead (SampleHoverFloorZ): ahead-higher adopts the max, ahead-lower keeps current, zero flow skips it ----
+	// ---- (7) Look-ahead (SampleHoverFloorZ): a TRAVERSABLE ahead step adopts the max, ahead-lower keeps current,
+	//          zero flow skips it. The ahead step must be <= the bake's ClimbableStepHeight (the same threshold
+	//          RebuildConnectivity opens edges with) — see (7b) for the wall-top rejection (2026-08-21). ----
 	{
 		const int32 W = 3, H = 1;
 		FFPSRFlowFieldSurfaceData D = MakeUniformGridH(W, H, Cell, FVector::ZeroVector, 100.0f);
 		D.CellFloorZ[SurfH(0, 0)] = 50.0f;  // "behind" cell — genuinely LOWER than "here"
 		D.CellFloorZ[SurfH(1, 0)] = 100.0f; // "here" cell
-		D.CellFloorZ[SurfH(2, 0)] = 250.0f; // "ahead" cell (a step up), within MaxDelta of the anchor
+		D.CellFloorZ[SurfH(2, 0)] = 140.0f; // "ahead" cell — a 40cm step, within the bake's ClimbableStepHeight (45)
 		TStrongObjectPtr<UFPSRFlowFieldComputer> C(NewObject<UFPSRFlowFieldComputer>());
 		C->BuildFromSurfaceData(D);
 
@@ -184,6 +186,25 @@ bool FFPSRFlowFieldHoverSampleTest::RunTest(const FString& Parameters)
 		// A "here" sample failure (off-grid) propagates false regardless of FlowDirXY.
 		TestFalse(TEXT("hover sample fails when the current position is off-grid"),
 			C->SampleHoverFloorZ(FVector(-9999.0f, -9999.0f, 100.0f), FVector2D(1.0f, 0.0f), 100.0f, MaxDelta, FloorZ));
+	}
+
+	// ---- (7b) Look-ahead wall-top REJECTION (2026-08-21 regression guard): an ahead surface higher than the
+	//           bake's ClimbableStepHeight is a wall top / higher storey the flow field would never route through —
+	//           the pre-rise must NOT climb it, no matter how long crowd pressure pins the enemy against the wall.
+	//           Before the fix this was the first rung of the observed ratchet-to-the-roof. ----
+	{
+		const int32 W = 3, H = 1;
+		FFPSRFlowFieldSurfaceData D = MakeUniformGridH(W, H, Cell, FVector::ZeroVector, 100.0f);
+		D.CellFloorZ[SurfH(0, 0)] = 100.0f;
+		D.CellFloorZ[SurfH(1, 0)] = 100.0f; // "here" cell
+		D.CellFloorZ[SurfH(2, 0)] = 250.0f; // "ahead" cell: a 150cm rise — inside the old +/-MaxDelta window, but NOT traversable
+		TStrongObjectPtr<UFPSRFlowFieldComputer> C(NewObject<UFPSRFlowFieldComputer>());
+		C->BuildFromSurfaceData(D);
+
+		const FVector Here(150.0f, 50.0f, 100.0f);
+		float FloorZ = 0.0f;
+		TestTrue(TEXT("look-ahead toward the wall still samples"), C->SampleHoverFloorZ(Here, FVector2D(1.0f, 0.0f), 100.0f, MaxDelta, FloorZ));
+		TestTrue(TEXT("non-traversable ahead rise is rejected (no wall pre-rise)"), FMath::IsNearlyEqual(FloorZ, 100.0f, 1e-3f));
 	}
 
 	return true;

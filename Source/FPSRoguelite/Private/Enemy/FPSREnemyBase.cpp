@@ -707,7 +707,9 @@ void AFPSREnemyBase::TickServerMovement(const FFPSRServerMoveContext& Ctx)
 					StepFwd.Z = 0.0f;
 					StepFwd = StepFwd.IsNearlyZero() ? MoveDir.GetSafeNormal2D() : StepFwd.GetSafeNormal();
 					const FVector StepAdvance = StepFwd * (MoveDist * (1.0f - MoveHit.Time));
+					const float StepAdvanceLen = static_cast<float>(StepAdvance.Size());
 					const FVector PreStepLoc = GetActorLocation();
+					const float PreStepFootZ = static_cast<float>(PreStepLoc.Z) - (Capsule ? Capsule->GetScaledCapsuleHalfHeight() : 0.0f);
 					const float MaxLift = (GroundNormal.Z < 0.99f) ? MaxCrestStepUp : GroundSnapTolerance;
 					bool bCleared = false;
 					for (float Lift = GroundSnapTolerance; Lift <= MaxLift + KINDA_SMALL_NUMBER; Lift += GroundSnapTolerance)
@@ -716,9 +718,33 @@ void AFPSREnemyBase::TickServerMovement(const FFPSRServerMoveContext& Ctx)
 						AddActorWorldOffset(FVector(0.0f, 0.0f, Lift), true);
 						FHitResult StepFwdHit;
 						AddActorWorldOffset(StepAdvance, true, &StepFwdHit);
-						if (!(StepFwdHit.bBlockingHit && StepFwdHit.Time < KINDA_SMALL_NUMBER))
+						// (i) REAL progress, not a hair's slide: the old test (Time < KINDA_SMALL_NUMBER) accepted any
+						// nonzero forward movement, so a beveled/tessellated wall face let the lift stand (2026-08-21
+						// wall-climb: crowd pressure re-ran this every pass and the kept lifts were the ladder's rungs).
+						const float Advanced = StepFwdHit.bBlockingHit ? StepFwdHit.Time * StepAdvanceLen : StepAdvanceLen;
+						if (Advanced < FMath::Max(1.0f, StepAdvanceLen * 0.25f))
 						{
-							bCleared = true; // this lift cleared the riser/lip (re-advance made progress)
+							continue;
+						}
+						// (ii) FLOOR PROOF: a lift only stands if the capsule actually arrived OVER a walkable floor
+						// HIGHER than where it started — the definition of a step. A slide along a wall face passes (i)
+						// but has nothing new underneath, so it reverts here. One line trace, only on a lift that made
+						// progress — bounded cost (this branch runs at most once per blocked move).
+						const FVector PostLoc = GetActorLocation();
+						FHitResult FloorHit;
+						FCollisionObjectQueryParams StepObjParams;
+						StepObjParams.AddObjectTypesToQuery(ECC_WorldStatic);
+						FCollisionQueryParams StepQueryParams(SCENE_QUERY_STAT(FPSREnemyStepProof), false, this);
+						const float StepHalfHeight = Capsule ? Capsule->GetScaledCapsuleHalfHeight() : 0.0f;
+						const FVector ProofStart(PostLoc.X, PostLoc.Y, PostLoc.Z - StepHalfHeight + GroundSnapTolerance);
+						const FVector ProofEnd(PostLoc.X, PostLoc.Y, PostLoc.Z - StepHalfHeight - Lift - GroundSnapTolerance);
+						UWorld* const StepWorld = GetWorld();
+						if (StepWorld
+							&& StepWorld->LineTraceSingleByObjectType(FloorHit, ProofStart, ProofEnd, StepObjParams, StepQueryParams)
+							&& FloorHit.ImpactNormal.Z >= WalkableSlopeNormalZ
+							&& FloorHit.ImpactPoint.Z > PreStepFootZ + 1.0f)
+						{
+							bCleared = true; // stepped onto something real and higher
 							break;
 						}
 					}

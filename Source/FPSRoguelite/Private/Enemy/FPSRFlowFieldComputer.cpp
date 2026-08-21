@@ -853,17 +853,28 @@ bool UFPSRFlowFieldComputer::SampleFloorZBilinear(const FVector& WorldLocation, 
 			{
 				continue;
 			}
-			const float Delta = FMath::Abs(Z - AnchorZ);
+			// ASYMMETRIC storey window (2026-08-21 wall-climb fix). UPWARD: only a surface the swarm could actually
+			// WALK onto (<= the bake's own traversable step, the exact threshold RebuildConnectivity opens edges
+			// with) may raise the blend — a wall top / higher storey inside the old +/-MaxSurfaceDeltaCm window
+			// both lifted the target AND tilted the pseudo-normal, which unlocked the movement step-up's crest
+			// budget against a plain wall (the observed climb-to-the-top when crowd pressure pins an enemy to it).
+			// DOWNWARD: unchanged full window — gliding off a ledge legitimately blends toward a lower storey.
+			const float Rise = Z - AnchorZ;
+			if (Rise > ActiveClimbableStepHeight + KINDA_SMALL_NUMBER || -Rise > MaxSurfaceDeltaCm)
+			{
+				continue;
+			}
+			const float Delta = FMath::Abs(Rise);
 			if (Delta < BestDelta)
 			{
 				BestDelta = Delta;
 				BestZ = Z;
 			}
 		}
-		// No valid surface at all, OR the nearest one is a different storey (beyond MaxSurfaceDeltaCm) — do NOT
-		// interpolate across a layer boundary (that would read as a vertical teleport); flatten this corner to the
-		// anchor's own Z instead, so it contributes nothing to the slope/height blend.
-		return (BestZ != MAX_flt && BestDelta <= MaxSurfaceDeltaCm) ? BestZ : AnchorZ;
+		// No surface passed the storey window — do NOT interpolate across a layer boundary (that would read as a
+		// vertical teleport); flatten this corner to the anchor's own Z instead, so it contributes nothing to the
+		// slope/height blend.
+		return (BestZ != MAX_flt) ? BestZ : AnchorZ;
 	};
 
 	const float Z00 = CornerZ(IX, IY);
@@ -902,6 +913,13 @@ bool UFPSRFlowFieldComputer::SampleHoverFloorZ(const FVector& WorldLocation, con
 	// Look-ahead (pre-rise before a step): probe one cell along the flow direction at the SAME anchor FootZ, and
 	// take the max of "here" and "ahead" — a hover actor starts climbing before it reaches the step instead of
 	// snapping up at the cell boundary. A failed or LOWER ahead sample never lowers the result.
+	//
+	// The ahead surface must be a step the swarm can actually TRAVERSE (<= ActiveClimbableStepHeight — the exact
+	// threshold RebuildConnectivity opens edges with; 2026-08-21 wall-climb fix). The ahead cell anchors its own
+	// pick at the raw foot Z, so without this gate a wall column whose (walkable) TOP sat inside the foot's pick
+	// window became the pre-rise target: the spring lifted the enemy, the foot-anchored window slid up with it,
+	// and the enemy ratcheted up the wall face — the flow field would never ROUTE through that edge, so the
+	// pre-rise must not climb it either.
 	if (!FlowDirXY.IsNearlyZero())
 	{
 		const FVector2D AheadDir = FlowDirXY.GetSafeNormal();
@@ -909,7 +927,8 @@ bool UFPSRFlowFieldComputer::SampleHoverFloorZ(const FVector& WorldLocation, con
 		float AheadZ;
 		FVector AheadNormal;
 		if (SampleFloorZBilinear(AheadLocation, AnchorFootZ, MaxSurfaceDeltaCm, AheadZ, OutFloorNormal ? &AheadNormal : nullptr)
-			&& AheadZ > HereZ)
+			&& AheadZ > HereZ
+			&& (AheadZ - HereZ) <= ActiveClimbableStepHeight + KINDA_SMALL_NUMBER)
 		{
 			OutFloorZ = AheadZ;
 			if (OutFloorNormal)
