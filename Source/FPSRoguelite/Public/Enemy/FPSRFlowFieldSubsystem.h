@@ -10,15 +10,17 @@
 #include "FPSRFlowFieldSubsystem.generated.h"
 
 class AActor;
+class APawn;
 class UFPSRFlowFieldComputer;
 class AFPSRFlowFieldBoundsVolume;
 class AFPSRGameState;
 class AFPSRArenaActor;
+class UFPSRHoverWindowSubsystem;
 
 /** Which field actually answered a QueryFlow — S1 has exactly one source; S3 (ADR 0009 결정 1) adds Window3D.
  *  Consumers MUST NOT branch on this for behavior (invariant 6 — agents don't know which field they read);
  *  it exists for logging/telemetry only. */
-enum class EFPSRFlowSource : uint8 { None, Surface2D };
+enum class EFPSRFlowSource : uint8 { None, Surface2D, Window3D };
 
 /** One movement-consumer flow query (ADR 0009 결정 5 — the single seam). Direction and hover-floor sampling
  *  keep their historical, DIFFERENT foot conventions (direction = Sample()'s internal EnemyStandOffset;
@@ -38,6 +40,12 @@ struct FFPSRFlowQuery
 	FVector2D LookAheadDirXY = FVector2D::ZeroVector;
 	/** Hover-floor corner/pick window (the caller's MaxCrestStepUp budget). */
 	float MaxSurfaceDeltaCm = 0.0f;
+	/** S3 (ADR 0009 P1): the player this query's caller is currently pursuing, if any. Null = never try the 3D
+	 *  window (front-chase / no-target / exit-path callers all leave this unset, ADR §실패 흐름 — the window is
+	 *  keyed by OWNING player pawn, so a query with no target player has nothing to match against). Non-null routes
+	 *  bWantDirection through UFPSRHoverWindowSubsystem::QueryWindow FIRST, falling back to the 2D surface sample on
+	 *  ANY miss (no window adopted, this pawn owns no slot, out of bounds/margin, or the cell unreached). */
+	const APawn* TargetPlayerPawn = nullptr;
 };
 
 /** QueryFlow's answer. Only the parts requested are written; the rest keep these defaults. */
@@ -328,4 +336,10 @@ private:
 
 	/** Whether HandleRunStateChanged is bound to the GameState delegate (idempotent bind guard). */
 	bool bRunStateHandlerBound = false;
+
+	/** S3 (ADR 0009 P1): lazily-resolved, cached the same way GetWorld()->GetSubsystem<T>() results are elsewhere in
+	 *  this module — one GetSubsystem lookup per world, not per QueryFlow call. Mutable because QueryFlow (the
+	 *  seam this cache serves) is const; TWeakObjectPtr needs no UPROPERTY to stay GC-safe (same reasoning
+	 *  UFPSREnemySpawnSubsystem::LastGroundedZByPlayer's key documents). */
+	mutable TWeakObjectPtr<UFPSRHoverWindowSubsystem> CachedHoverWindowSubsystem;
 };

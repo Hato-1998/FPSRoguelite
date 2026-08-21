@@ -4,6 +4,18 @@
 
 #include "Math/Vector.h"
 
+/**
+ * DORMANT SAFETY NET (2026-08-21, ADR 0009 P1): this file's mode-switching pursuit judgment is no longer called
+ * from AFPSREnemyBase::TickServerMovement — the S3 hover window (UFPSRHoverWindowSubsystem) structurally replaced
+ * the reachability-escape problem this ADR 0008 state machine was built to solve, and does so WITHOUT a mode
+ * switch (a hover-window SeekZ is just another vertical target ApplyGravity's spring already max()s against, not a
+ * straight-line-beeline escape mode). Nothing here was deleted: AFPSREnemyBase::PursuitState still exists and is
+ * still Reset() on every Activate() (pool-reuse hygiene), and FPSRoguelite.Enemy.Pursuit still exercises Tick()
+ * directly against this worldless core — ADR 0009 explicitly calls this state machine reusable "재활용 여지" if a
+ * future need for an actual mode-switching escape (rather than a passive Z target) resurfaces, so it is kept
+ * compiling, tested, and wired for reactivation rather than removed and potentially re-authored from scratch later.
+ */
+
 /** ADR 0008 (Docs/Architecture/0008-hover-enemy-pursuit-reachability-modes.md): which steering/vertical mode a
  *  hovering enemy is in this pass. Flow = the normal flow-field XY + v2 terrain-relative Z (the everyday case —
  *  invariant 1's single source of routing). Seek3D = the reachability-escape mode opened ONLY when the flow can't

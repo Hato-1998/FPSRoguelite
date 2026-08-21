@@ -261,10 +261,12 @@ void AFPSREnemyBase::Activate(const FVector& Location)
 	// back to the single HoverHeight value (existing archetype BPs with no range authored see no behavior change).
 	CurrentHoverHeight = (HoverHeightMax > HoverHeightMin) ? FMath::FRandRange(HoverHeightMin, HoverHeightMax) : HoverHeight;
 	HoverSpringRateZ = 0.0f; // fresh spring state for the reused actor (no residual velocity from a prior life)
-	// ADR 0008 (pursuit mode) reset — full sweep, pool-reuse leak prevention: PursuitState back to Flow with every
-	// timer/accumulator zeroed, a fresh per-instance seek altitude sample (HoverHeightMin/Max's pattern exactly),
-	// and the seek-Z override + forward-blocked flag cleared so a reused actor never inherits a prior life's
-	// mid-climb Seek3D state (e.g. spawning already believing the previous life's roof was blocking it).
+	// Pool-reuse leak-prevention sweep for the (now dormant, ADR 0008 retired 2026-08-21) pursuit fields: PursuitState
+	// back to Flow with every timer/accumulator zeroed even though nothing ticks it any more (Reset stays cheap and
+	// keeps a future reactivation from needing its own reset wiring — see PursuitState's field comment), a fresh
+	// per-instance altitude sample (HoverHeightMin/Max's pattern exactly, itself currently unconsumed — see
+	// CurrentSeekAltitude's comment), and the seek-Z override + forward-blocked flag cleared so a reused actor never
+	// inherits a prior life's stale window seek target.
 	PursuitState.Reset();
 	CurrentSeekAltitude = (SeekAltitudeAbovePlayerMax > SeekAltitudeAbovePlayerMin)
 		? FMath::FRandRange(SeekAltitudeAbovePlayerMin, SeekAltitudeAbovePlayerMax)
@@ -272,8 +274,8 @@ void AFPSREnemyBase::Activate(const FVector& Location)
 	SeekTargetZ = 0.0f;
 	bSeekTargetZValid = false;
 	bLastForwardBlocked = false;
-	LastAttackTime = -1000.0f; // the pursuit stall window reads this (bRecentAttack) — a prior life's attack must not
-	                           // suppress the reused actor's stall detection for up to StallTime (merge-gate P3)
+	LastAttackTime = -1000.0f; // CanAttack's own cooldown gate reads this (unrelated to the dormant pursuit fields
+	                           // above) — reset so a reused actor doesn't inherit a prior life's cooldown clock
 	VerticalVelocity = 0.0f; // reset fall state for the reused actor
 	bGrounded = false;       // re-check ground on the first update (may spawn on a rooftop)
 	GroundRecheckTimer = 0.0f;
@@ -574,74 +576,29 @@ void AFPSREnemyBase::TickServerMovement(const FFPSRServerMoveContext& Ctx)
 		return;
 	}
 
-	// ADR 0008 pursuit judgment — GATED OFF by default (2026-08-15 emergency patch, see bEnableSeek3D's comment):
-	// PIE found the flow-zero trigger is GLOBAL (one player on an unreachable deck zeroes the WHOLE map's BFS
-	// sources, so the entire swarm opens Seek3D at once) and the altitude target chased the player's INSTANTANEOUS
-	// Z (jittering the whole swarm on every jump). ADR 0009 (a local 3D window field) is the confirmed fix; until
-	// then bEnableSeek3D stays false so no enemy ever calls PursuitState.Tick — its timers/escalation would just be
-	// dead motion — and bSeeking stays false, which also kills the step-up branch's Seek3D skip below (restoring
-	// the always-run pre-0008 lift loop, byte-for-byte the old grounded behavior).
-	bool bSeeking = false;
-	if (bEnableSeek3D)
-	{
-		// Advance the pursuit judgment FIRST, using the PREVIOUS pass's forward-blocked reading
-		// (bLastForwardBlocked, set by the step-up branch (b) below) — a one-pass lag the ADR accepts (movement
-		// ticks only a few cm apart). Params are copied from this archetype's EditDefaultsOnly Seek3D data every
-		// pass (invariant 4 — variety is DATA, never a code branch per archetype).
-		FFPSRPursuitParams SeekParams;
-		SeekParams.StallTime = SeekStallTime;
-		SeekParams.StallMinMove = SeekStallMinMove;
-		SeekParams.ClimbStep = SeekClimbStep;
-		SeekParams.ClimbCeiling = SeekClimbCeiling;
-		SeekParams.ClearDecayTime = SeekClearDecayTime;
-		SeekParams.ModeMinHold = SeekModeMinHold;
-		PursuitState.Tick(Ctx.ScaledDelta, GetActorLocation(), Ctx.bHasTarget, Ctx.bFlowZero, bLastForwardBlocked,
-			LastAttackTime, Ctx.Now, SeekParams);
-		// bHasTarget also gates Seek3D off on the authored exit-path branch (which assembles bHasTarget=false, ADR
-		// 0008 §2) even if PursuitState still nominally reads Seek3D from a prior life — the exit route must never
-		// be interrupted by a pursuit escape.
-		bSeeking = Ctx.bHasTarget && PursuitState.Mode == EFPSRPursuitMode::Seek3D;
-	}
-	bLastForwardBlocked = false; // this pass's OWN sweep result is recorded fresh below, for the NEXT call (harmless even while the gate is off)
+	// ADR 0008's mode-switching Seek3D pursuit judgment (PursuitState.Tick + the beeline/step-up-skip branches this
+	// block used to gate) was RETIRED 2026-08-21 (ADR 0009 P1) — the S3 hover window supersedes it structurally:
+	// SeekZ is now just ANOTHER vertical target ApplyGravity's spring already max()s against, no mode switch or
+	// straight-line beeline needed. FFPSRPursuitState is preserved dormant (see its field comment) but no longer
+	// ticked here.
+	bLastForwardBlocked = false; // this pass's OWN sweep result is recorded fresh below, for the NEXT call
 
-	// Seek3D vertical target for ApplyGravity's v2 spring (invariant 2 — this only supplies a TARGET; the spring
-	// integrator itself never forks by mode): player-relative altitude band + this pass's climb escalation.
-	// Ctx.TargetGroundedZ (NOT TargetLocation.Z, ADR 0009 invariant, piped ahead of the redesign): the altitude
-	// band tracks where the target last stood on ground, not its instantaneous jump/fall Z — avoids the whole
-	// swarm's seek altitude jittering in lockstep with every player hop.
-	bSeekTargetZValid = bSeeking;
-	if (bSeekTargetZValid)
-	{
-		SeekTargetZ = Ctx.TargetGroundedZ + CurrentSeekAltitude + PursuitState.ClimbOffset;
-	}
+	// S3 (ADR 0009 P1): the hover window's vertical seek target for ApplyGravity's spring, straight from the
+	// subsystem's own QueryFlow answer — no per-pass computation here (that was the retired ADR 0008 formula).
+	bSeekTargetZValid = Ctx.bSeekValid;
+	SeekTargetZ = Ctx.SeekZ;
 
 	// (U20) Pre-move location to classify walk vs idle for the cosmetic anim. Guarded so it is zero-cost when no
 	// AnimProfile is assigned (the swarm default until Stage 3). Authority render only (standalone / listen host).
 	const FVector AnimStartLoc = AnimProfile ? GetActorLocation() : FVector::ZeroVector;
 
-	// Knockback (explosion push): a decaying horizontal impulse. While it's active, suppress flow/seek steering so
-	// the push isn't immediately cancelled by the enemy walking back toward the player.
+	// Knockback (explosion push): a decaying horizontal impulse. While it's active, suppress flow steering so the
+	// push isn't immediately cancelled by the enemy walking back toward the player.
 	const bool bKnockbackActive = !KnockbackVelocityXY.IsNearlyZero(1.0f);
 
-	// Horizontal steering. Seek3D (ADR 0008 §2): a straight-line XY beeline to the target REPLACES the flow +
-	// separation MoveDir — no separation applied (a recovery maneuver is short-lived, so momentary clumping during
-	// it is an accepted cost rather than complicating the escape steering, noted in the ADR). Flow mode is
-	// unchanged (Ctx.MoveDir already carries flow + separation, combined by the caller).
-	// Seek3D MUST re-apply the engagement standoff itself: the subsystem's StopDistance gate only zeroed Ctx.MoveDir,
-	// which the beeline discards — without this 3D check every seeking enemy advances until its XY converges onto the
-	// target's own column (and with separation off, the swarm stacks into one vertical pillar over the player). The
-	// full-3D distance mirrors the subsystem's stop semantics (BestDist3DSq): an enemy holding at its seek altitude
-	// near the target counts its height gap toward the standoff, then holds and lets the spring/attack do the rest.
-	FVector Dir;
-	if (bSeeking)
-	{
-		const FVector ToTarget = Ctx.TargetLocation - GetActorLocation();
-		Dir = (ToTarget.SizeSquared() > FMath::Square(GetStopDistance())) ? ToTarget : FVector::ZeroVector;
-	}
-	else
-	{
-		Dir = Ctx.MoveDir;
-	}
+	// Horizontal steering: flow mode only (Ctx.MoveDir already carries flow + separation, combined by the caller) —
+	// unified since the ADR 0008 Seek3D beeline branch above was retired.
+	FVector Dir = Ctx.MoveDir;
 	Dir.Z = 0.0f;
 	if (!bKnockbackActive && Dir.SizeSquared() > KINDA_SMALL_NUMBER)
 	{
@@ -682,78 +639,70 @@ void AFPSREnemyBase::TickServerMovement(const FFPSRServerMoveContext& Ctx)
 			{
 				// (b) RISER / LEDGE / ramp-crest LIP (anything not a walkable slope — covers the whole normal-Z range below
 				// WalkableSlopeNormalZ, so a face between a ramp and vertical no longer stalls the enemy dead).
-				if (bSeeking)
+				//
+				// Step up so it climbs what the flow field routed it toward (unconditional since the ADR 0008 Seek3D
+				// skip-the-lift branch that used to gate this was retired — flow mode is now the ONLY mode). A
+				// ramp/stair top onto a platform can present a lip taller than one flat GroundSnapTolerance step, so
+				// try progressively taller lifts and take the SMALLEST that lets the re-advance make progress (no
+				// over-hop on small risers). On a SLOPE (cresting a ramp — GroundNormal tilted) allow up to
+				// MaxCrestStepUp; on FLAT ground cap at one step so enemies don't scale walls the field routes
+				// around. Each lift is swept (stops under a low ceiling); ApplyGravity settles onto the top.
+				// Revert if none clears (taller than the cap = a wall, not a riser) so we don't bob against it.
+				//
+				// Re-advance along the FLOW (Ctx.FaceDir), NOT the separation-laden move dir: a lifted enemy
+				// carrying the lateral separation push of its stair-mates would walk off the side of a narrow
+				// flight and fall. Climbing FORWARD (toward the objective) keeps it on the stairs. Magnitude =
+				// the blocked remainder of this move.
+				FVector StepFwd = Ctx.FaceDir;
+				StepFwd.Z = 0.0f;
+				StepFwd = StepFwd.IsNearlyZero() ? MoveDir.GetSafeNormal2D() : StepFwd.GetSafeNormal();
+				const FVector StepAdvance = StepFwd * (MoveDist * (1.0f - MoveHit.Time));
+				const float StepAdvanceLen = static_cast<float>(StepAdvance.Size());
+				const FVector PreStepLoc = GetActorLocation();
+				const float PreStepFootZ = static_cast<float>(PreStepLoc.Z) - (Capsule ? Capsule->GetScaledCapsuleHalfHeight() : 0.0f);
+				const float MaxLift = (GroundNormal.Z < 0.99f) ? MaxCrestStepUp : GroundSnapTolerance;
+				bool bCleared = false;
+				for (float Lift = GroundSnapTolerance; Lift <= MaxLift + KINDA_SMALL_NUMBER; Lift += GroundSnapTolerance)
 				{
-					// ADR 0008 invariant 2: Seek3D NEVER pushes Z directly via the lift loop below — vertical motion
-					// is the v2 spring's job alone (SeekTargetZ, escalated by FFPSRPursuitState next pass via
-					// ClimbOffset). Record the block for the NEXT Tick's climb escalation input and skip the lift.
-					bLastForwardBlocked = true;
+					SetActorLocation(PreStepLoc, false);
+					AddActorWorldOffset(FVector(0.0f, 0.0f, Lift), true);
+					FHitResult StepFwdHit;
+					AddActorWorldOffset(StepAdvance, true, &StepFwdHit);
+					// (i) REAL progress, not a hair's slide: the old test (Time < KINDA_SMALL_NUMBER) accepted any
+					// nonzero forward movement, so a beveled/tessellated wall face let the lift stand (2026-08-21
+					// wall-climb: crowd pressure re-ran this every pass and the kept lifts were the ladder's rungs).
+					const float Advanced = StepFwdHit.bBlockingHit ? StepFwdHit.Time * StepAdvanceLen : StepAdvanceLen;
+					if (Advanced < FMath::Max(1.0f, StepAdvanceLen * 0.25f))
+					{
+						continue;
+					}
+					// (ii) FLOOR PROOF: a lift only stands if the capsule actually arrived OVER a walkable floor
+					// HIGHER than where it started — the definition of a step. A slide along a wall face passes (i)
+					// but has nothing new underneath, so it reverts here. One line trace, only on a lift that made
+					// progress — bounded cost (this branch runs at most once per blocked move).
+					const FVector PostLoc = GetActorLocation();
+					FHitResult FloorHit;
+					FCollisionObjectQueryParams StepObjParams;
+					StepObjParams.AddObjectTypesToQuery(ECC_WorldStatic);
+					FCollisionQueryParams StepQueryParams(SCENE_QUERY_STAT(FPSREnemyStepProof), false, this);
+					const float StepHalfHeight = Capsule ? Capsule->GetScaledCapsuleHalfHeight() : 0.0f;
+					const FVector ProofStart(PostLoc.X, PostLoc.Y, PostLoc.Z - StepHalfHeight + GroundSnapTolerance);
+					const FVector ProofEnd(PostLoc.X, PostLoc.Y, PostLoc.Z - StepHalfHeight - Lift - GroundSnapTolerance);
+					UWorld* const StepWorld = GetWorld();
+					if (StepWorld
+						&& StepWorld->LineTraceSingleByObjectType(FloorHit, ProofStart, ProofEnd, StepObjParams, StepQueryParams)
+						&& FloorHit.ImpactNormal.Z >= WalkableSlopeNormalZ
+						&& FloorHit.ImpactPoint.Z > PreStepFootZ + 1.0f)
+					{
+						bCleared = true; // stepped onto something real and higher
+						break;
+					}
 				}
-				else
+				if (!bCleared)
 				{
-					// FLOW MODE (unchanged): step up so it climbs what the flow field routed it toward. A ramp/stair
-					// top onto a platform can present a lip taller than one flat GroundSnapTolerance step, so try
-					// progressively taller lifts and take the SMALLEST that lets the re-advance make progress (no
-					// over-hop on small risers). On a SLOPE (cresting a ramp — GroundNormal tilted) allow up to
-					// MaxCrestStepUp; on FLAT ground cap at one step so enemies don't scale walls the field routes
-					// around. Each lift is swept (stops under a low ceiling); ApplyGravity settles onto the top.
-					// Revert if none clears (taller than the cap = a wall, not a riser) so we don't bob against it.
-					//
-					// Re-advance along the FLOW (Ctx.FaceDir), NOT the separation-laden move dir: a lifted enemy
-					// carrying the lateral separation push of its stair-mates would walk off the side of a narrow
-					// flight and fall. Climbing FORWARD (toward the objective) keeps it on the stairs. Magnitude =
-					// the blocked remainder of this move.
-					FVector StepFwd = Ctx.FaceDir;
-					StepFwd.Z = 0.0f;
-					StepFwd = StepFwd.IsNearlyZero() ? MoveDir.GetSafeNormal2D() : StepFwd.GetSafeNormal();
-					const FVector StepAdvance = StepFwd * (MoveDist * (1.0f - MoveHit.Time));
-					const float StepAdvanceLen = static_cast<float>(StepAdvance.Size());
-					const FVector PreStepLoc = GetActorLocation();
-					const float PreStepFootZ = static_cast<float>(PreStepLoc.Z) - (Capsule ? Capsule->GetScaledCapsuleHalfHeight() : 0.0f);
-					const float MaxLift = (GroundNormal.Z < 0.99f) ? MaxCrestStepUp : GroundSnapTolerance;
-					bool bCleared = false;
-					for (float Lift = GroundSnapTolerance; Lift <= MaxLift + KINDA_SMALL_NUMBER; Lift += GroundSnapTolerance)
-					{
-						SetActorLocation(PreStepLoc, false);
-						AddActorWorldOffset(FVector(0.0f, 0.0f, Lift), true);
-						FHitResult StepFwdHit;
-						AddActorWorldOffset(StepAdvance, true, &StepFwdHit);
-						// (i) REAL progress, not a hair's slide: the old test (Time < KINDA_SMALL_NUMBER) accepted any
-						// nonzero forward movement, so a beveled/tessellated wall face let the lift stand (2026-08-21
-						// wall-climb: crowd pressure re-ran this every pass and the kept lifts were the ladder's rungs).
-						const float Advanced = StepFwdHit.bBlockingHit ? StepFwdHit.Time * StepAdvanceLen : StepAdvanceLen;
-						if (Advanced < FMath::Max(1.0f, StepAdvanceLen * 0.25f))
-						{
-							continue;
-						}
-						// (ii) FLOOR PROOF: a lift only stands if the capsule actually arrived OVER a walkable floor
-						// HIGHER than where it started — the definition of a step. A slide along a wall face passes (i)
-						// but has nothing new underneath, so it reverts here. One line trace, only on a lift that made
-						// progress — bounded cost (this branch runs at most once per blocked move).
-						const FVector PostLoc = GetActorLocation();
-						FHitResult FloorHit;
-						FCollisionObjectQueryParams StepObjParams;
-						StepObjParams.AddObjectTypesToQuery(ECC_WorldStatic);
-						FCollisionQueryParams StepQueryParams(SCENE_QUERY_STAT(FPSREnemyStepProof), false, this);
-						const float StepHalfHeight = Capsule ? Capsule->GetScaledCapsuleHalfHeight() : 0.0f;
-						const FVector ProofStart(PostLoc.X, PostLoc.Y, PostLoc.Z - StepHalfHeight + GroundSnapTolerance);
-						const FVector ProofEnd(PostLoc.X, PostLoc.Y, PostLoc.Z - StepHalfHeight - Lift - GroundSnapTolerance);
-						UWorld* const StepWorld = GetWorld();
-						if (StepWorld
-							&& StepWorld->LineTraceSingleByObjectType(FloorHit, ProofStart, ProofEnd, StepObjParams, StepQueryParams)
-							&& FloorHit.ImpactNormal.Z >= WalkableSlopeNormalZ
-							&& FloorHit.ImpactPoint.Z > PreStepFootZ + 1.0f)
-						{
-							bCleared = true; // stepped onto something real and higher
-							break;
-						}
-					}
-					if (!bCleared)
-					{
-						SetActorLocation(PreStepLoc, false);
-					}
-					bLastForwardBlocked = !bCleared; // still blocked only if no lift height cleared it
+					SetActorLocation(PreStepLoc, false);
 				}
+				bLastForwardBlocked = !bCleared; // still blocked only if no lift height cleared it
 			}
 		}
 

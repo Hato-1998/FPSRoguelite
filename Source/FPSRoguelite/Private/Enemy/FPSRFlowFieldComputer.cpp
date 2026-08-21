@@ -198,7 +198,10 @@ bool UFPSRFlowFieldComputer::CommitSubregion(FIntPoint CellOffset, const FFPSRFl
 
 	// --- Atomic transplant: surfaces + INTERNAL edges only. The seal above cleared this rect's boundary edges (both sides),
 	//     so cross-slot seams start CLOSED and doors are (re-)stamped after commit. Single game thread + no yield -> no
-	//     half-applied read (Codex R1 Q2). ---
+	//     half-applied read (Codex R1 Q2). NOTE (ADR 0009 P1 S3): this "single game thread" reasoning covers the 2D
+	//     field ONLY — the 3D hover window (UFPSRHoverWindowSubsystem) DOES hand work to an actual worker thread and
+	//     relies on a different mechanism (completion-gated handoff, not "nothing yields"); see that class's header
+	//     comment for its own threading contract rather than assuming this one extends there. ---
 	for (int32 SY = 0; SY < SDY; ++SY)
 	{
 		for (int32 SX = 0; SX < SDX; ++SX)

@@ -2,6 +2,7 @@
 
 #include "Enemy/FPSRFlowFieldSubsystem.h"
 #include "Enemy/FPSRFlowFieldBoundsVolume.h"
+#include "Enemy/FPSRHoverWindowSubsystem.h" // S3 (ADR 0009 P1): QueryFlow's Window3D routing
 #include "Arena/FPSRArenaActor.h"
 #include "Core/FPSRGameState.h"
 #include "Core/FPSRLogChannels.h"
@@ -772,28 +773,62 @@ bool UFPSRFlowFieldSubsystem::SampleHoverFloorZ(const FVector& Loc, const FVecto
 
 bool UFPSRFlowFieldSubsystem::QueryFlow(const FFPSRFlowQuery& Query, FFPSRFlowResult& Out) const
 {
-	// ADR 0009 결정 5 — the single movement-consumer seam. S1 has exactly one source (the 2D surface field via the
-	// private routing wrappers below); S3 adds a 3D window here as a local edit, not a call-site change.
+	// ADR 0009 결정 5 — the single movement-consumer seam. S1 had exactly one source (the 2D surface field via the
+	// private routing wrappers below); S3 adds the 3D window here as a local edit to THIS function, not a call-site
+	// change — every existing QueryFlow caller (front-chase, exit-path, hover-floor-only) is unaffected unless it
+	// also started passing TargetPlayerPawn.
 	bool bAnyValid = false;
+	bool bWindowAnswered = false;
 
 	if (Query.bWantDirection)
 	{
-		// Identical to the former public SampleFlowDirection(const FVector&) single-arg overload: an unset MapId
-		// routes to the Default field via the tag-overload's own MapId-is-irrelevant routing (P-G, one grid).
-		Out.Direction = SampleFlowDirection(FGameplayTag(), Query.WorldPos);
-		Out.bDirectionValid = !Out.Direction.IsNearlyZero();
+		// S3: try the player-centred 3D window FIRST when the caller named its target player. A live, in-bounds
+		// window answer carries a REAL 3D Direction (Z included) and may also set SeekZ — something the 2D surface
+		// path never produces. Falls back to the unconditional 2D sample on ANY miss (no TargetPlayerPawn, no
+		// window subsystem, no window adopted for this world, this pawn owns no slot, WorldPos outside the window/
+		// its edge margin, or the cell itself unreached) — the 2D field is always ready, so there is never a
+		// "neither answered" gap (ADR §실패 흐름).
+		if (Query.TargetPlayerPawn)
+		{
+			if (!CachedHoverWindowSubsystem.IsValid())
+			{
+				if (const UWorld* World = GetWorld())
+				{
+					CachedHoverWindowSubsystem = World->GetSubsystem<UFPSRHoverWindowSubsystem>();
+				}
+			}
+			if (const UFPSRHoverWindowSubsystem* HoverWindow = CachedHoverWindowSubsystem.Get())
+			{
+				bWindowAnswered = HoverWindow->QueryWindow(Query.TargetPlayerPawn, Query.WorldPos, Out.Direction, Out.SeekZ, Out.bSeekValid);
+			}
+		}
+
+		if (bWindowAnswered)
+		{
+			Out.bDirectionValid = true;
+		}
+		else
+		{
+			// Identical to the former public SampleFlowDirection(const FVector&) single-arg overload: an unset
+			// MapId routes to the Default field via the tag-overload's own MapId-is-irrelevant routing (P-G, one
+			// grid). Never sets SeekZ/bSeekValid — S1 parity (only the window supplies a vertical seek target).
+			Out.Direction = SampleFlowDirection(FGameplayTag(), Query.WorldPos);
+			Out.bDirectionValid = !Out.Direction.IsNearlyZero();
+		}
 		bAnyValid |= Out.bDirectionValid;
 	}
 
 	if (Query.bWantHoverFloor)
 	{
+		// Unchanged from S1 (ADR 0009 §B — bWantHoverFloor is NOT routed through the window; terrain-follow stays
+		// 2D CellFloorZ, the verified path).
 		Out.bFloorValid = SampleHoverFloorZ(Query.WorldPos, Query.LookAheadDirXY, Query.HoverAnchorFootZ, Query.MaxSurfaceDeltaCm, Out.FloorZ, &Out.FloorNormal);
 		bAnyValid |= Out.bFloorValid;
 	}
 
 	if (bAnyValid)
 	{
-		Out.Source = EFPSRFlowSource::Surface2D;
+		Out.Source = bWindowAnswered ? EFPSRFlowSource::Window3D : EFPSRFlowSource::Surface2D;
 	}
 
 	return bAnyValid;

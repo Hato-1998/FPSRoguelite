@@ -181,6 +181,71 @@ struct FPSROGUELITE_API FFPSRArenaVoxelData
 			}
 		}
 	}
+
+	/**
+	 * S3 hover-window occupancy fill (ADR 0009 P1 §A — UFPSRHoverWindowSubsystem's per-launch snapshot step). Copies
+	 * a WindowDims-shaped occupancy field out of THIS global voxel field, re-centred at MinCell (a cell coordinate
+	 * in THIS field's own axis system, e.g. from WorldToVoxel on the window owner's position). Row-wise: the bounds
+	 * check for a whole (Y,Z) row is hoisted out of the X loop, so a row entirely outside this field's Y/Z extent is
+	 * filled occupied without ever touching Occupancy — matching the class comment's "row-wise bit copy... rather
+	 * than a per-cell re-derivation" (the X edge still needs its own per-cell clamp, since the window can hang off
+	 * either X edge independently of Y/Z).
+	 *
+	 * OutOccupancy is (re)sized to FPSRHoverWindow::OccupancyWords(WindowDims.NumCells()) and CLEARED first, then
+	 * only the bits that are actually solid are set. Fail-closed (mirrors IsWorldPosOccupied): a row/cell outside
+	 * this field's own [0,DimX)x[0,DimY)x[0,DimZ) bounds, OR this field not being baked at all, is left OCCUPIED —
+	 * the window's Propagate must treat "no global data here" as a wall, never as open air past the arena's baked
+	 * extent (same reasoning IsWorldPosOccupied's fail-closed default documents).
+	 *
+	 * Game-thread only (like every other read of this struct's Occupancy) — the caller snapshots BEFORE handing
+	 * OutOccupancy to a worker task; this function itself never touches anything outside its own arguments.
+	 */
+	void CopyWindow(const FIntVector& MinCell, const FFPSRHoverWindowDims& WindowDims, TArray<uint64>& OutOccupancy) const
+	{
+		OutOccupancy.Init(0, FPSRHoverWindow::OccupancyWords(FMath::Max(0, WindowDims.NumCells())));
+		if (WindowDims.DimX <= 0 || WindowDims.DimY <= 0 || WindowDims.DimZ <= 0)
+		{
+			return; // nothing to fill — caller wouldn't Propagate against zero dims anyway
+		}
+
+		const bool bSourceUsable = IsBakedVoxels();
+		for (int32 WZ = 0; WZ < WindowDims.DimZ; ++WZ)
+		{
+			const int32 SrcZ = MinCell.Z + WZ;
+			const bool bZInRange = bSourceUsable && SrcZ >= 0 && SrcZ < DimZ;
+			for (int32 WY = 0; WY < WindowDims.DimY; ++WY)
+			{
+				const int32 SrcY = MinCell.Y + WY;
+				const int32 DstRowStart = WindowDims.CellIndex(0, WY, WZ);
+				if (!bZInRange || SrcY < 0 || SrcY >= DimY)
+				{
+					// Whole row falls outside this field's baked Y/Z extent -> fail-closed occupied, no source read.
+					for (int32 WX = 0; WX < WindowDims.DimX; ++WX)
+					{
+						FPSRHoverWindow::SetOccupied(OutOccupancy, DstRowStart + WX);
+					}
+					continue;
+				}
+
+				// Row is inside the source field's Y/Z range; X still needs its own per-cell clamp (the window can
+				// hang off either X edge independently of Y/Z). SrcRowStart anchors X=0 once per row.
+				const int32 SrcRowStart = VoxelIndex(0, SrcY, SrcZ);
+				for (int32 WX = 0; WX < WindowDims.DimX; ++WX)
+				{
+					const int32 SrcX = MinCell.X + WX;
+					if (SrcX < 0 || SrcX >= DimX)
+					{
+						FPSRHoverWindow::SetOccupied(OutOccupancy, DstRowStart + WX); // off the source's X edge -> occupied
+						continue;
+					}
+					if (FPSRHoverWindow::IsOccupied(Occupancy, SrcRowStart + SrcX))
+					{
+						FPSRHoverWindow::SetOccupied(OutOccupancy, DstRowStart + WX);
+					}
+				}
+			}
+		}
+	}
 };
 
 /**
