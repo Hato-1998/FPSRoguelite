@@ -690,12 +690,6 @@ void UFPSRFlowFieldSubsystem::ResetDoorTopologyToBaseline()
 	UE_LOG(LogFPSR, Log, TEXT("[FlowField] U P-F: door topology reset to baked baseline (generation now %d)."), TopologyGeneration);
 }
 
-FVector UFPSRFlowFieldSubsystem::SampleFlowDirection(const FVector& WorldLocation) const
-{
-	// P-G: ONE continuous field (multimap unified grid OR single-map degenerate grid). ZeroVector off-authority / pre-build.
-	return UnifiedComputer ? UnifiedComputer->Sample(WorldLocation) : FVector::ZeroVector;
-}
-
 FVector UFPSRFlowFieldSubsystem::SampleFlowDirection(const FGameplayTag& MapId, const FVector& WorldLocation) const
 {
 	// P-G: the enemy's MapId is irrelevant now (one grid). Kept as a distinct overload so the movement-pass call site (which
@@ -707,4 +701,33 @@ bool UFPSRFlowFieldSubsystem::SampleHoverFloorZ(const FVector& Loc, const FVecto
 {
 	// Same P-G routing as SampleFlowDirection: ONE continuous field, no per-map MapId. False off-authority / pre-build.
 	return UnifiedComputer ? UnifiedComputer->SampleHoverFloorZ(Loc, FlowDirXY, AnchorFootZ, MaxSurfaceDeltaCm, OutFloorZ, OutFloorNormal) : false;
+}
+
+bool UFPSRFlowFieldSubsystem::QueryFlow(const FFPSRFlowQuery& Query, FFPSRFlowResult& Out) const
+{
+	// ADR 0009 결정 5 — the single movement-consumer seam. S1 has exactly one source (the 2D surface field via the
+	// private routing wrappers below); S3 adds a 3D window here as a local edit, not a call-site change.
+	bool bAnyValid = false;
+
+	if (Query.bWantDirection)
+	{
+		// Identical to the former public SampleFlowDirection(const FVector&) single-arg overload: an unset MapId
+		// routes to the Default field via the tag-overload's own MapId-is-irrelevant routing (P-G, one grid).
+		Out.Direction = SampleFlowDirection(FGameplayTag(), Query.WorldPos);
+		Out.bDirectionValid = !Out.Direction.IsNearlyZero();
+		bAnyValid |= Out.bDirectionValid;
+	}
+
+	if (Query.bWantHoverFloor)
+	{
+		Out.bFloorValid = SampleHoverFloorZ(Query.WorldPos, Query.LookAheadDirXY, Query.HoverAnchorFootZ, Query.MaxSurfaceDeltaCm, Out.FloorZ, &Out.FloorNormal);
+		bAnyValid |= Out.bFloorValid;
+	}
+
+	if (bAnyValid)
+	{
+		Out.Source = EFPSRFlowSource::Surface2D;
+	}
+
+	return bAnyValid;
 }

@@ -857,9 +857,19 @@ void AFPSREnemyBase::ApplyGravity(float ScaledDeltaSeconds, const FVector& FlowD
 		// above its actual floor, that 200cm budget is still the hard ceiling on how high HoverHeight/HoverHeightMax
 		// can go before the primary anchor pick finds the WRONG storey (see the HoverHeight UPROPERTY comment).
 		const float AnchorFootZ = static_cast<float>(Loc.Z) - HalfHeight;
-		float FloorZ;
-		FVector FloorNormal;
-		const bool bTerrainSampled = CachedFlowField->SampleHoverFloorZ(Loc, FVector2D(FlowDirXY.X, FlowDirXY.Y), AnchorFootZ, MaxCrestStepUp, FloorZ, &FloorNormal);
+		// ADR 0009 결정 5: routed through QueryFlow, the single movement-consumer seam — S1 this is still the 2D
+		// surface field's SampleHoverFloorZ, unchanged sampling.
+		FFPSRFlowQuery HoverQuery;
+		HoverQuery.WorldPos = Loc;
+		HoverQuery.bWantHoverFloor = true;
+		HoverQuery.HoverAnchorFootZ = AnchorFootZ;
+		HoverQuery.LookAheadDirXY = FVector2D(FlowDirXY.X, FlowDirXY.Y);
+		HoverQuery.MaxSurfaceDeltaCm = MaxCrestStepUp;
+		FFPSRFlowResult HoverRes;
+		CachedFlowField->QueryFlow(HoverQuery, HoverRes);
+		float FloorZ = HoverRes.FloorZ;
+		FVector FloorNormal = HoverRes.FloorNormal;
+		const bool bTerrainSampled = HoverRes.bFloorValid;
 
 		// ADR 0008: while Seek3D holds a valid target this pass (bSeekTargetZValid), the spring's TargetZ is
 		// max(terrain-relative rest, SeekTargetZ) — ONE integrator regardless of pursuit mode (invariant 2), never a

@@ -648,14 +648,22 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 		else
 		{
 			// Flow-field direction toward SAME-MAP players (fall back to direct-to-nearest same-map player if the field
-			// isn't ready). Sampled from the enemy's own map so a mid-transition enemy near the door still gets its map's
-			// flow (the subsystem retries by containing-grid on a stale MapId). No same-map player -> no beeline (never
-			// chase cross-map): FlowDir stays zero and the enemy just separates.
-			FVector FlowDir = FlowField ? FlowField->SampleFlowDirection(EnemyMap, EnemyLocation) : FVector::ZeroVector;
+			// isn't ready). ADR 0009 결정 5: routed through QueryFlow, the single movement-consumer seam — S1 this is
+			// still the 2D surface field (the enemy's own MapId is irrelevant to it, P-G one grid), unchanged flow. No
+			// same-map player -> no beeline (never chase cross-map): FlowDir stays zero and the enemy just separates.
+			FFPSRFlowQuery FlowQuery;
+			FlowQuery.WorldPos = EnemyLocation;
+			FlowQuery.bWantDirection = true;
+			FFPSRFlowResult FlowRes;
+			if (FlowField)
+			{
+				FlowField->QueryFlow(FlowQuery, FlowRes);
+			}
+			FVector FlowDir = FlowRes.Direction;
 			// ADR 0008 invariant 1's PRIMARY Seek3D trigger — the exact zero-check the beeline fallback below already
 			// performs, promoted into the move context (bFlowZero) so TickServerMovement's PursuitState.Tick sees a
 			// proven BFS-unreachable column immediately. No added flow-field query (invariant 5).
-			const bool bFlowZero = FlowDir.IsNearlyZero();
+			const bool bFlowZero = !FlowRes.bDirectionValid;
 			if (bFlowZero && bHasTarget)
 			{
 				// Field not ready in this enemy's map yet (no source) but we have a target — beeline straight at the nearest

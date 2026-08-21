@@ -13,6 +13,47 @@ class UFPSRFlowFieldComputer;
 class AFPSRFlowFieldBoundsVolume;
 class AFPSRGameState;
 
+/** Which field actually answered a QueryFlow — S1 has exactly one source; S3 (ADR 0009 결정 1) adds Window3D.
+ *  Consumers MUST NOT branch on this for behavior (invariant 6 — agents don't know which field they read);
+ *  it exists for logging/telemetry only. */
+enum class EFPSRFlowSource : uint8 { None, Surface2D };
+
+/** One movement-consumer flow query (ADR 0009 결정 5 — the single seam). Direction and hover-floor sampling
+ *  keep their historical, DIFFERENT foot conventions (direction = Sample()'s internal EnemyStandOffset;
+ *  hover floor = the CALLER's capsule-bottom FootZ) — the seam absorbs the duality as explicit inputs
+ *  instead of silently unifying them, which would change layer picking. */
+struct FFPSRFlowQuery
+{
+	/** Query anchor (enemy actor location). */
+	FVector WorldPos = FVector::ZeroVector;
+	/** true = resolve the horizontal steer direction (the 2D flow sample today). */
+	bool bWantDirection = false;
+	/** true = resolve the hover terrain anchor (SampleHoverFloorZ today). */
+	bool bWantHoverFloor = false;
+	/** Hover-floor pick anchor: capsule BOTTOM Z (caller convention — see AFPSREnemyBase::ApplyGravity). */
+	float HoverAnchorFootZ = 0.0f;
+	/** Hover-floor look-ahead direction (zero = none). */
+	FVector2D LookAheadDirXY = FVector2D::ZeroVector;
+	/** Hover-floor corner/pick window (the caller's MaxCrestStepUp budget). */
+	float MaxSurfaceDeltaCm = 0.0f;
+};
+
+/** QueryFlow's answer. Only the parts requested are written; the rest keep these defaults. */
+struct FFPSRFlowResult
+{
+	/** Horizontal steer direction (unit XY, Z=0 today; a 3D window may set Z in S3). Zero when invalid. */
+	FVector Direction = FVector::ZeroVector;
+	bool bDirectionValid = false;
+	/** Hover terrain anchor surface. */
+	float FloorZ = 0.0f;
+	FVector FloorNormal = FVector::UpVector;
+	bool bFloorValid = false;
+	/** Vertical seek target for the hover spring (S3 window fills this; S1 never does). */
+	float SeekZ = 0.0f;
+	bool bSeekValid = false;
+	EFPSRFlowSource Source = EFPSRFlowSource::None;
+};
+
 /** Server-authoritative flow-field driver for swarm pathing (P2-B2, U7 multi-layer). Owns a single per-world
  *  UnifiedComputer (a multi-slot unified grid when bUnifiedMultiSlot, else a degenerate single-map grid) and drives
  *  its 0.2s recompute from one scheduler; SlotBounds resolves a location's MapId per slot. (P-G replaced the former
@@ -34,19 +75,11 @@ public:
 	virtual void OnWorldBeginPlay(UWorld& InWorld) override;
 	virtual void Deinitialize() override;
 
-	/** Flow direction at WorldLocation, routed to the computer whose grid contains it (S1b bridge — used until enemies
-	 *  carry a MapId in S2a). ZeroVector if no map covers the location / field not ready. */
-	FVector SampleFlowDirection(const FVector& WorldLocation) const;
-
-	/** Flow direction at WorldLocation from the given map's computer (S2a caller — the enemy passes its own MapId). An
-	 *  unset MapId uses the Default field. If the location is outside the passed map's grid (mid-transition across a door),
-	 *  retries against the map whose grid actually contains it so flow stays continuous at the boundary. */
-	FVector SampleFlowDirection(const FGameplayTag& MapId, const FVector& WorldLocation) const;
-
-	/** U hover height v2: routing wrapper for UFPSRFlowFieldComputer::SampleHoverFloorZ on the unified field (same
-	 *  P-G "one continuous field" routing as SampleFlowDirection — no per-map MapId needed). False with no
-	 *  UnifiedComputer (off-authority / pre-build). See the computer's header comment for the sampler contract. */
-	bool SampleHoverFloorZ(const FVector& Loc, const FVector2D& FlowDirXY, float AnchorFootZ, float MaxSurfaceDeltaCm, float& OutFloorZ, FVector* OutFloorNormal = nullptr) const;
+	/** THE movement-consumer seam (ADR 0009 결정 5): every enemy-movement read of any flow field goes through
+	 *  here, so swapping the field behind it (the S3 3D window) is a local edit to this function alone.
+	 *  Non-movement consumers (damage connectivity, front distance, spawn validation, stamping) deliberately
+	 *  do NOT use this — they are 2D-for-life (ADR 0009 수정 ③). */
+	bool QueryFlow(const FFPSRFlowQuery& Query, FFPSRFlowResult& Out) const;
 
 	/** The continuous flow field (P-G: ALWAYS built on the server — a real bUnifiedExtent multimap grid, OR a single
 	 *  degenerate world-trace grid for a plain single-map). Used for flow sampling + origin<->target open-grid connectivity
@@ -139,6 +172,19 @@ public:
 	bool FindNearestOpenLocation(const FVector& InWorld, int32 MaxRadiusCells, FVector& OutWorld) const;
 
 private:
+	/** Flow direction at WorldLocation from the given map's computer. An unset MapId uses the Default field. If the
+	 *  location is outside the passed map's grid (mid-transition across a door), retries against the map whose grid
+	 *  actually contains it so flow stays continuous at the boundary. QueryFlow is the only movement-consumption
+	 *  surface (ADR 0009 결정 5) — do not call this directly outside QueryFlow's implementation. */
+	FVector SampleFlowDirection(const FGameplayTag& MapId, const FVector& WorldLocation) const;
+
+	/** U hover height v2: routing wrapper for UFPSRFlowFieldComputer::SampleHoverFloorZ on the unified field (same
+	 *  P-G "one continuous field" routing as SampleFlowDirection — no per-map MapId needed). False with no
+	 *  UnifiedComputer (off-authority / pre-build). See the computer's header comment for the sampler contract.
+	 *  QueryFlow is the only movement-consumption surface (ADR 0009 결정 5) — do not call this directly outside
+	 *  QueryFlow's implementation. */
+	bool SampleHoverFloorZ(const FVector& Loc, const FVector2D& FlowDirXY, float AnchorFootZ, float MaxSurfaceDeltaCm, float& OutFloorZ, FVector* OutFloorNormal = nullptr) const;
+
 	void RecomputeAllFields();
 	bool HasServerAuthority() const;
 
