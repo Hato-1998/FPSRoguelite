@@ -119,6 +119,51 @@ bool UFPSRArenaBakeDataAsset::LocalizeSurface(const FFPSRFlowFieldSurfaceData& W
 	return true;
 }
 
+bool UFPSRArenaBakeDataAsset::BuildWorldVoxels(const FTransform& ArenaTransform, FFPSRArenaVoxelData& OutWorld) const
+{
+	if (!Voxels.IsBakedVoxels())
+	{
+		// Warning, not Error: a pre-P1 asset legitimately has no voxels yet, and the runtime adopter treats that
+		// as a documented SOFT downgrade (2D flow keeps working, the S3 hover window just has no field until the
+		// arena is re-baked). The hard "this must be fixed" surface is IsDataValid()'s Error — at author/validate
+		// time, where the fix (re-bake) actually happens — not every adoption at runtime.
+		UE_LOG(LogFPSR, Warning,
+			TEXT("[Arena] 베이크 에셋 '%s' 에 쓸 수 있는 복셀 점유 데이터가 없다 — 에디터에서 아레나를 다시 굽고 저장했는지 확인할 것. (ADR 0009 S2)"),
+			*GetName());
+		return false;
+	}
+
+	FVector Offset;
+	FString Error;
+	if (!ExtractPlanarOffset(ArenaTransform, Offset, Error))
+	{
+		UE_LOG(LogFPSR, Error, TEXT("[Arena] 베이크 에셋 '%s' 의 복셀을 월드로 펼 수 없다: %s"), *GetName(), *Error);
+		return false;
+	}
+
+	// Dims/size/Occupancy/FreeVoxels are coordinate-independent — only the origin moves (unlike OffsetSurface,
+	// there is no MAX_flt sentinel to skip; every Occupancy entry is a bit, not a height).
+	OutWorld = Voxels;
+	OutWorld.VoxelOrigin = Voxels.VoxelOrigin + Offset;
+	return true;
+}
+
+bool UFPSRArenaBakeDataAsset::LocalizeVoxels(const FFPSRArenaVoxelData& World, const FTransform& ArenaTransform,
+	FFPSRArenaVoxelData& OutLocal)
+{
+	FVector Offset;
+	FString Error;
+	if (!ExtractPlanarOffset(ArenaTransform, Offset, Error))
+	{
+		UE_LOG(LogFPSR, Error, TEXT("[Arena] 베이크 복셀 결과를 로컬로 접을 수 없다: %s"), *Error);
+		return false;
+	}
+
+	OutLocal = World; // BuildWorldVoxels 의 정확한 역연산
+	OutLocal.VoxelOrigin = World.VoxelOrigin - Offset;
+	return true;
+}
+
 #if WITH_EDITOR
 EDataValidationResult UFPSRArenaBakeDataAsset::IsDataValid(FDataValidationContext& Context) const
 {
@@ -145,6 +190,17 @@ EDataValidationResult UFPSRArenaBakeDataAsset::IsDataValid(FDataValidationContex
 	{
 		Context.AddError(LOCTEXT("NoSourceLevel",
 			"소스 레벨이 비었다 — 검증기가 무엇을 다시 해시해야 할지 알 수 없다."));
+		Result = EDataValidationResult::Invalid;
+	}
+
+	// ADR 0009 S2 마이그레이션 신호: 2D 는 구웠는데 복셀이 없거나(비어 있음) 치수/배열 길이가 안 맞으면
+	// 그 자체가 "이 에셋을 P1 이전에 구웠다"는 뜻이다. IsBaked()(런타임 채택 게이트)는 건드리지 않는다 —
+	// 복셀 없이도 2D 서페이스만으로 런타임은 계속 살아야 하고(부양 스웜 3D 창이 그냥 안 뜨는 소프트 강등,
+	// UFPSRFlowFieldSubsystem::AdoptArenaField 참고), 이 검증은 에디터에서만 그 갭을 드러낸다.
+	if (IsBaked() && !Voxels.IsBakedVoxels())
+	{
+		Context.AddError(LOCTEXT("NoVoxels",
+			"2D 표면은 구웠지만 복셀 점유 데이터가 없거나 치수가 맞지 않는다 — 에디터에서 아레나를 다시 구울 것 (ADR 0009 S2)."));
 		Result = EDataValidationResult::Invalid;
 	}
 

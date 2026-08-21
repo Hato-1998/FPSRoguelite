@@ -38,6 +38,14 @@ public:
 
 	const FIntPoint& GetFootprintCells() const { return FootprintCells; }
 
+	/** The world AABB both voxel operations use for this prop — the ADOPTION-TIME stamp (SetOccupiedAABB) and the
+	 *  BREAK-TIME clear (NotifyArenaVolumeOpened) MUST derive the same box or a stamp/clear mismatch leaves
+	 *  phantom occupancy. The prop's own MESH render bounds, deliberately NOT GetActorBounds(false): that sums
+	 *  every registered component (particles, sprites), inflating the box into neighbouring wall/floor voxels
+	 *  (merge-gate P3), while the mesh's bounds exist regardless of whether collision has already been disabled
+	 *  by break-time. Invalid box when the mesh is missing — both callers treat that as a no-op. */
+	FBox GetVoxelBounds() const;
+
 protected:
 	/** Server: open this prop's authored cells (FFPSRArenaCells::ComputeDestructibleCells) in the owning
 	 *  arena's flow field via UFPSRFlowFieldSubsystem::NotifyArenaCellsOpened, THEN (Super) pay out any Rewards

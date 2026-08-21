@@ -6,12 +6,70 @@
 #include "GameplayTagContainer.h"
 #include "Containers/ArrayView.h" // TConstArrayView (NotifyArenaCellsOpened)
 #include "Enemy/FPSRFlowFieldComputer.h" // FFPSRFlowFieldSurfaceData (BakedBaseline by-value member, U P-F) + EFPSRFieldQuery
+#include "Arena/FPSRArenaBakeDataAsset.h" // FFPSRArenaVoxelData (AdoptedVoxels/VoxelBaseline by-value members, ADR 0009 S2)
 #include "FPSRFlowFieldSubsystem.generated.h"
 
 class AActor;
+class APawn;
 class UFPSRFlowFieldComputer;
 class AFPSRFlowFieldBoundsVolume;
 class AFPSRGameState;
+class AFPSRArenaActor;
+class UFPSRHoverWindowSubsystem;
+
+/** Which field actually answered a QueryFlow — S1 has exactly one source; S3 (ADR 0009 결정 1) adds Window3D.
+ *  Consumers MUST NOT branch on this for behavior (invariant 6 — agents don't know which field they read);
+ *  it exists for logging/telemetry only. */
+enum class EFPSRFlowSource : uint8 { None, Surface2D, Window3D };
+
+/** One movement-consumer flow query (ADR 0009 결정 5 — the single seam). Direction and hover-floor sampling
+ *  keep their historical, DIFFERENT foot conventions (direction = Sample()'s internal EnemyStandOffset;
+ *  hover floor = the CALLER's capsule-bottom FootZ) — the seam absorbs the duality as explicit inputs
+ *  instead of silently unifying them, which would change layer picking. */
+struct FFPSRFlowQuery
+{
+	/** Query anchor (enemy actor location). */
+	FVector WorldPos = FVector::ZeroVector;
+	/** true = resolve the horizontal steer direction (the 2D flow sample today). */
+	bool bWantDirection = false;
+	/** true = this agent can EXECUTE vertical guidance (a hover archetype — CurrentHoverHeight > 0, whose spring
+	 *  consumes SeekZ). The Window3D route is gated on this (merge-gate P1): a GROUND agent handed the window's
+	 *  free-air gradient has no means to climb a vertical step (its only Z mover is the walk step-up), so a pure
+	 *  (0,0,+1) StepDir would zero its XY steering while suppressing both fallbacks — permanent stall under any
+	 *  platform the target stands on. Ground agents stay on the 2D surface field, whose edges are walk-traversable
+	 *  by construction. */
+	bool bHoverCapable = false;
+	/** true = resolve the hover terrain anchor (SampleHoverFloorZ today). */
+	bool bWantHoverFloor = false;
+	/** Hover-floor pick anchor: capsule BOTTOM Z (caller convention — see AFPSREnemyBase::ApplyGravity). */
+	float HoverAnchorFootZ = 0.0f;
+	/** Hover-floor look-ahead direction (zero = none). */
+	FVector2D LookAheadDirXY = FVector2D::ZeroVector;
+	/** Hover-floor corner/pick window (the caller's MaxCrestStepUp budget). */
+	float MaxSurfaceDeltaCm = 0.0f;
+	/** S3 (ADR 0009 P1): the player this query's caller is currently pursuing, if any. Null = never try the 3D
+	 *  window (front-chase / no-target / exit-path callers all leave this unset, ADR §실패 흐름 — the window is
+	 *  keyed by OWNING player pawn, so a query with no target player has nothing to match against). Non-null routes
+	 *  bWantDirection through UFPSRHoverWindowSubsystem::QueryWindow FIRST, falling back to the 2D surface sample on
+	 *  ANY miss (no window adopted, this pawn owns no slot, out of bounds/margin, or the cell unreached). */
+	const APawn* TargetPlayerPawn = nullptr;
+};
+
+/** QueryFlow's answer. Only the parts requested are written; the rest keep these defaults. */
+struct FFPSRFlowResult
+{
+	/** Horizontal steer direction (unit XY, Z=0 today; a 3D window may set Z in S3). Zero when invalid. */
+	FVector Direction = FVector::ZeroVector;
+	bool bDirectionValid = false;
+	/** Hover terrain anchor surface. */
+	float FloorZ = 0.0f;
+	FVector FloorNormal = FVector::UpVector;
+	bool bFloorValid = false;
+	/** Vertical seek target for the hover spring (S3 window fills this; S1 never does). */
+	float SeekZ = 0.0f;
+	bool bSeekValid = false;
+	EFPSRFlowSource Source = EFPSRFlowSource::None;
+};
 
 /** Server-authoritative flow-field driver for swarm pathing (P2-B2, U7 multi-layer). Owns a single per-world
  *  UnifiedComputer (a multi-slot unified grid when bUnifiedMultiSlot, else a degenerate single-map grid) and drives
@@ -34,19 +92,11 @@ public:
 	virtual void OnWorldBeginPlay(UWorld& InWorld) override;
 	virtual void Deinitialize() override;
 
-	/** Flow direction at WorldLocation, routed to the computer whose grid contains it (S1b bridge — used until enemies
-	 *  carry a MapId in S2a). ZeroVector if no map covers the location / field not ready. */
-	FVector SampleFlowDirection(const FVector& WorldLocation) const;
-
-	/** Flow direction at WorldLocation from the given map's computer (S2a caller — the enemy passes its own MapId). An
-	 *  unset MapId uses the Default field. If the location is outside the passed map's grid (mid-transition across a door),
-	 *  retries against the map whose grid actually contains it so flow stays continuous at the boundary. */
-	FVector SampleFlowDirection(const FGameplayTag& MapId, const FVector& WorldLocation) const;
-
-	/** U hover height v2: routing wrapper for UFPSRFlowFieldComputer::SampleHoverFloorZ on the unified field (same
-	 *  P-G "one continuous field" routing as SampleFlowDirection — no per-map MapId needed). False with no
-	 *  UnifiedComputer (off-authority / pre-build). See the computer's header comment for the sampler contract. */
-	bool SampleHoverFloorZ(const FVector& Loc, const FVector2D& FlowDirXY, float AnchorFootZ, float MaxSurfaceDeltaCm, float& OutFloorZ, FVector* OutFloorNormal = nullptr) const;
+	/** THE movement-consumer seam (ADR 0009 결정 5): every enemy-movement read of any flow field goes through
+	 *  here, so swapping the field behind it (the S3 3D window) is a local edit to this function alone.
+	 *  Non-movement consumers (damage connectivity, front distance, spawn validation, stamping) deliberately
+	 *  do NOT use this — they are 2D-for-life (ADR 0009 수정 ③). */
+	bool QueryFlow(const FFPSRFlowQuery& Query, FFPSRFlowResult& Out) const;
 
 	/** The continuous flow field (P-G: ALWAYS built on the server — a real bUnifiedExtent multimap grid, OR a single
 	 *  degenerate world-trace grid for a plain single-map). Used for flow sampling + origin<->target open-grid connectivity
@@ -78,15 +128,30 @@ public:
 	 *  once a streamed map's collision is registered (S3). Returns false if no volume with that MapId is loaded. */
 	bool BakeDiscoveredMap(const FGameplayTag& MapId);
 
-	/** ADR 0010: adopt a GENERATED arena surface as the field. The generator owns the obstacle mask — nothing here
-	 *  traces the world, which is what keeps a stage transition off the game thread's critical path (a world-trace
-	 *  bake is thousands of downtraces and cannot be moved off it).
+	/** ADR 0010: adopt an arena's BAKED field — surface AND (ADR 0009 S2) voxel occupancy — as the live one.
+	 *  Promoted from the old AdoptArenaSurface(Surface) (2026-08-21, ADR 0009 P1): pulling straight from the
+	 *  Arena actor rather than a caller-supplied FFPSRFlowFieldSurfaceData means the surface and the voxel field
+	 *  can never come from two different bake assets/transforms by caller mistake — both are fetched from the
+	 *  SAME Arena.GetBakeData() + Arena.GetActorTransform() inside this one call.
 	 *
-	 *  Also re-baselines: a regenerated arena IS the new topology, and keeping the previous one would let
-	 *  ResetDoorTopologyToBaseline resurrect the old arena's walls. Bumps the topology generation and recomputes,
-	 *  so swarm flow and the origin-aware combat gate are correct on return. Server-only; false off authority or
-	 *  on malformed data — callers must NOT substitute a world-trace bake (invariant 5). */
-	bool AdoptArenaSurface(const FFPSRFlowFieldSurfaceData& Surface);
+	 *  Also re-baselines both fields: a regenerated/swapped arena IS the new topology, and keeping the previous
+	 *  snapshot would let ResetDoorTopologyToBaseline resurrect the old arena's walls (2D) or solids (voxel).
+	 *  Bumps the topology generation and recomputes, so swarm flow and the origin-aware combat gate are correct
+	 *  on return. Server-only; false off authority or when the arena has no usable baked SURFACE (2D remains the
+	 *  hard requirement — invariant 5, callers must NOT substitute a world-trace bake). A missing/stale VOXEL bake
+	 *  is a soft downgrade, not a rejection: AdoptedVoxels/VoxelBaseline go empty and S3's hover window simply has
+	 *  no field here yet (logged once) — see .cpp for why this asymmetry is deliberate. */
+	bool AdoptArenaField(const AFPSRArenaActor& Arena);
+
+	/** S2 (ADR 0009 P1): the arena's baked WORLD-space voxel occupancy field, adopted alongside the flow surface
+	 *  by AdoptArenaField. The intended reader is S3's hover-swarm window (not yet built) — nothing in this
+	 *  subsystem consumes it itself. Empty (HasAdoptedVoxels()==false) until an arena WITH baked voxels has been
+	 *  adopted; see AdoptArenaField's soft-downgrade note. Server-authoritative. */
+	const FFPSRArenaVoxelData& GetAdoptedVoxels() const { return AdoptedVoxels; }
+
+	/** True only when GetAdoptedVoxels() holds a usable bake (dims + Occupancy length all check out via
+	 *  FFPSRArenaVoxelData::IsBakedVoxels()) — the cheap gate a consumer should check before reading it. */
+	bool HasAdoptedVoxels() const { return AdoptedVoxels.IsBakedVoxels(); }
 
 	/** U (P-B): a breakable seam door was destroyed (server) — open the unified grid's cross-seam edges the door spanned
 	 *  and recompute NOW so swarm flow + the origin-aware combat gate cross it immediately. No-op with no unified field
@@ -102,6 +167,16 @@ public:
 	 *  (unlike NotifyDoorBroken) — the arena is always a single grid, never a multi-slot seam. Off-authority or no
 	 *  grid built yet -> no-op. Called by AFPSRArenaDestructible::HandleBrokenAuthority. */
 	void NotifyArenaCellsOpened(TConstArrayView<int32> Cells);
+
+	/** S2 (ADR 0009 P1): voxel-only counterpart to NotifyArenaCellsOpened, called at the SAME break event
+	 *  (AFPSRArenaDestructible::HandleBrokenAuthority) but taking the prop's full 3D world AABB rather than its
+	 *  2D footprint cells — a destructible has height, so its voxel footprint is not "the 2D cells, extruded".
+	 *  Clears AdoptedVoxels' occupancy in place (FFPSRArenaVoxelData::ClearOccupiedAABB). Deliberately triggers NO
+	 *  generation bump / recompute of its own: the sibling NotifyArenaCellsOpened call at the same call site
+	 *  already advances TopologyGeneration for this break, and a future S3 window is expected to key its
+	 *  re-sample off THAT one counter rather than a second, voxel-private one. No-op off authority or with no
+	 *  baked voxel field adopted (single warning already logged at adopt time — this stays silent per-call). */
+	void NotifyArenaVolumeOpened(const FBox& WorldBounds);
 
 	/** U (P-F): server-authoritative topology generation — bumped every time the unified grid's connectivity changes
 	 *  (a seam door opens, a slot bakes in, or a new-run baseline reset). Late-join ack + the freeze pre-unfreeze
@@ -133,12 +208,38 @@ public:
 
 	/** Phase A stage-transition carry-over: nearest OPEN location to InWorld on the LIVE adopted grid (thin forward
 	 *  to UFPSRFlowFieldComputer::FindNearestOpenLocation — see that function for the exact rules). False with no
-	 *  built grid (UnifiedComputer null — off authority, or before the first AdoptArenaSurface/bake). Array-only, no
+	 *  built grid (UnifiedComputer null — off authority, or before the first AdoptArenaField/bake). Array-only, no
 	 *  world query (D7). Used by UFPSREnemySpawnSubsystem::CarryEnemiesToNewStage to snap a carried enemy's
 	 *  post-delta candidate position onto a walkable cell of the NEW arena. */
 	bool FindNearestOpenLocation(const FVector& InWorld, int32 MaxRadiusCells, FVector& OutWorld) const;
 
 private:
+	/** Flow direction at WorldLocation from the given map's computer. An unset MapId uses the Default field. If the
+	 *  location is outside the passed map's grid (mid-transition across a door), retries against the map whose grid
+	 *  actually contains it so flow stays continuous at the boundary. QueryFlow is the only movement-consumption
+	 *  surface (ADR 0009 결정 5) — do not call this directly outside QueryFlow's implementation. */
+	FVector SampleFlowDirection(const FGameplayTag& MapId, const FVector& WorldLocation) const;
+
+	/** U hover height v2: routing wrapper for UFPSRFlowFieldComputer::SampleHoverFloorZ on the unified field (same
+	 *  P-G "one continuous field" routing as SampleFlowDirection — no per-map MapId needed). False with no
+	 *  UnifiedComputer (off-authority / pre-build). See the computer's header comment for the sampler contract.
+	 *  QueryFlow is the only movement-consumption surface (ADR 0009 결정 5) — do not call this directly outside
+	 *  QueryFlow's implementation. */
+	bool SampleHoverFloorZ(const FVector& Loc, const FVector2D& FlowDirXY, float AnchorFootZ, float MaxSurfaceDeltaCm, float& OutFloorZ, FVector* OutFloorNormal = nullptr) const;
+
+	/** Shared body of AdoptArenaField for BOTH call sites (2026-08-21, ADR 0009 P1 — collapses what used to be two
+	 *  independent code paths: OnWorldBeginPlay built the field inline, ServerRegenerate went through
+	 *  AdoptArenaSurface). Builds UnifiedComputer + BakedBaseline from the arena's baked surface and, if the bake
+	 *  has voxels, AdoptedVoxels + VoxelBaseline from the same bake asset/transform. Returns false ONLY when the
+	 *  arena has no usable baked SURFACE (voxel absence is a soft downgrade handled internally, never a rejection).
+	 *
+	 *  bBumpGenerationAndRecompute=false is world-begin's case: OnWorldBeginPlay already calls RecomputeAllFields()
+	 *  itself exactly once after this returns, and bumping the generation here as well would push a FRESH world's
+	 *  TopologyGeneration off 0 — breaking ResetDoorTopologyToBaseline's "a first, unmutated run stays at
+	 *  generation 0 so a fresh client's gen-0 ack is instantly satisfied" contract. true is every other caller
+	 *  (a stage swap): matches AdoptArenaSurface's old swap-time contract exactly (immediate bump + recompute). */
+	bool AdoptArenaFieldInternal(const AFPSRArenaActor& Arena, bool bBumpGenerationAndRecompute);
+
 	void RecomputeAllFields();
 	bool HasServerAuthority() const;
 
@@ -223,9 +324,29 @@ private:
 	 *  Plain member (POD arrays, no UObject refs -> no GC concern); server-only. */
 	FFPSRFlowFieldSurfaceData BakedBaseline;
 
+	// --- S2 (ADR 0009 P1): baked 3D voxel occupancy, adopted alongside BakedBaseline/UnifiedComputer by
+	//     AdoptArenaFieldInternal. Same lifetime/ownership rules as the surface pair above (plain POD-array
+	//     members, no UObject refs, server-only) — the voxel field is transport-only cargo riding the existing
+	//     adopt/stamp/reset machinery, not a parallel subsystem. ---
+
+	/** Live WORLD-space voxel occupancy for the currently-adopted arena. Empty (FFPSRArenaVoxelData::IsBakedVoxels()
+	 *  false) until an arena WITH baked voxels has been adopted — see AdoptArenaField's soft-downgrade note.
+	 *  GetAdoptedVoxels() is the read-only public seam; S3's hover window is the intended (future) consumer. */
+	FFPSRArenaVoxelData AdoptedVoxels;
+
+	/** Adopt-time snapshot of AdoptedVoxels, restored by ResetDoorTopologyToBaseline — the voxel-field mirror of
+	 *  BakedBaseline. */
+	FFPSRArenaVoxelData VoxelBaseline;
+
 	/** Last-seen pause state for the OnRunStateChanged unpause-edge detection (seeded at bind time). */
 	bool bWasPaused = false;
 
 	/** Whether HandleRunStateChanged is bound to the GameState delegate (idempotent bind guard). */
 	bool bRunStateHandlerBound = false;
+
+	/** S3 (ADR 0009 P1): lazily-resolved, cached the same way GetWorld()->GetSubsystem<T>() results are elsewhere in
+	 *  this module — one GetSubsystem lookup per world, not per QueryFlow call. Mutable because QueryFlow (the
+	 *  seam this cache serves) is const; TWeakObjectPtr needs no UPROPERTY to stay GC-safe (same reasoning
+	 *  UFPSREnemySpawnSubsystem::LastGroundedZByPlayer's key documents). */
+	mutable TWeakObjectPtr<UFPSRHoverWindowSubsystem> CachedHoverWindowSubsystem;
 };

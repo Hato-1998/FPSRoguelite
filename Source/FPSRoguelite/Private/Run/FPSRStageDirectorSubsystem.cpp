@@ -612,7 +612,7 @@ void UFPSRStageDirectorSubsystem::PerformSwap()
 	const int32 NewStageIndex = GS->GetStageIndex() + 1;
 
 	// 2. Activate the destination BEFORE regenerating it — AFPSRArenaActor::ServerRegenerate only publishes the new
-	//    layout to the flow field (AdoptArenaSurface) when the arena is already the active one (17d6b320's gate);
+	//    layout to the flow field (AdoptArenaField, 구 AdoptArenaSurface) when the arena is already the active one (17d6b320's gate);
 	//    regenerating first would silently build the layout without ever handing it to the swarm. This order is
 	//    also what F2 needs: SetArenaActive(true) resets every AFPSRArenaDestructible in Next's grid back to intact
 	//    BEFORE step 3 (re)generates and publishes this stage's mask/flow field — so nothing in the arena is ever
@@ -709,7 +709,7 @@ void UFPSRStageDirectorSubsystem::PerformSwap()
 
 	// 4.5. Carry the leftover swarm over to the new arena (Phase A — replaces the old ReleaseAllEnemies at step 6;
 	//      see that step's comment for why release is no longer correct). Ordering invariant: AFTER the destination
-	//      is regenerated + published to the flow field (step 3, AdoptArenaSurface — CarryEnemiesToNewStage's snap
+	//      is regenerated + published to the flow field (step 3, AdoptArenaField — CarryEnemiesToNewStage's snap
 	//      needs the LIVE grid the enemies are about to land in) and AFTER the player teleport (step 4, so the
 	//      per-enemy delta has both the old and new player locations) — BEFORE the previous arena deactivates (step
 	//      5, so nothing here needs the OLD arena's collision to still be up). The whole swarm is frozen for the

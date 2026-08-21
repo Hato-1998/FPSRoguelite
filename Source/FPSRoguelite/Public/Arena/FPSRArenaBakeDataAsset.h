@@ -5,7 +5,299 @@
 #include "CoreMinimal.h"
 #include "Engine/DataAsset.h"
 #include "Enemy/FPSRFlowFieldComputer.h" // FFPSRFlowFieldSurfaceData
+#include "Enemy/FPSRHoverWindowCore.h" // FPSRHoverWindow::OccupancyWords/SetOccupied/IsOccupied — same bit layout, ADR 0009 S2
 #include "FPSRArenaBakeDataAsset.generated.h"
+
+/**
+ * One arena's baked 3D voxel occupancy (ADR 0009 결정 3, S2 — "전역 3D 복셀 오프라인 베이크"). Additive to
+ * FFPSRFlowFieldSurfaceData, never a replacement: the 2D field still owns flow/connectivity, this struct only
+ * answers "is this world point solid" for the S3 hover-swarm window's occupancy input.
+ *
+ * Same click, same SourceHash, same 5-layer staleness check as the 2D bake — this is deliberately NOT a second
+ * bake asset/pipeline. It rides BakeArenasInLevel and is invalidated by the exact same hash ContributesToBake
+ * already defines (the probe below queries the identical object-type set, ECC_WorldStatic, as the 2D obstacle
+ * probe — see FPSRArenaBakeHash.h's "WHAT COUNTS" contract).
+ *
+ * COORDINATE SYSTEM: like Surface, this is baked and stored ARENA-LOCAL (invariant 8) — VoxelOrigin is never the
+ * world position on disk. BuildWorldVoxels/LocalizeVoxels are the only conversion, mirroring BuildWorldSurface/
+ * LocalizeSurface exactly (translation-only; rotated/scaled arena transforms are rejected, same reasons).
+ *
+ * BIT LAYOUT: intentionally identical to FFPSRHoverWindowDims — VoxelIndex uses the SAME (Z*DimY+Y)*DimX+X axis
+ * order and the SAME FPSRHoverWindow::OccupancyWords/SetOccupied/IsOccupied bit-packing (FPSRHoverWindowCore.h).
+ * This is the precondition that lets S3's window fill be a row-wise bit copy out of this field rather than a
+ * per-cell re-derivation — a different axis order here would silently transpose every window it seeds.
+ *
+ * Every field is UPROPERTY() — Occupancy included. ADR 0012's "감수하기로 한 것" already burned this project once
+ * (see UFPSRArenaBakeDataAsset::IsBaked's comment): a bulk TArray without UPROPERTY loads with scalars intact
+ * and the array silently empty. IsBakedVoxels() below re-applies that same length-not-just-dimensions check.
+ */
+USTRUCT()
+struct FPSROGUELITE_API FFPSRArenaVoxelData
+{
+	GENERATED_BODY()
+
+	/** Voxel edge length (cm). Fixed by the P1 plan, not designer-tunable — the whole point of a fixed value is
+	 *  that S3's window math never has to ask a per-arena field what its cell size is. */
+	static constexpr float VoxelCellSizeCm = 150.0f;
+	/** Z band floor, relative to the arena's 2D GridOrigin.Z (below it). */
+	static constexpr float VoxelBelowOriginCm = 600.0f;
+	/** Z band ceiling, relative to the arena's 2D GridOrigin.Z (above it). */
+	static constexpr float VoxelAboveOriginCm = 3000.0f;
+
+	/** World-min corner of voxel (0,0,0), in whatever space this instance is currently expressed in (arena-local
+	 *  when this is UFPSRArenaBakeDataAsset::Voxels; world when returned by BuildWorldVoxels). XY matches the 2D
+	 *  field's GridOrigin.XY exactly; Z is GridOrigin.Z - VoxelBelowOriginCm (the fixed band's floor). */
+	UPROPERTY()
+	FVector VoxelOrigin = FVector::ZeroVector;
+
+	/** Always VoxelCellSizeCm once baked; stored (not just the constant) so a saved asset from before a future
+	 *  cell-size change can still be told apart from a same-generation one — same rationale as Surface.CellSize. */
+	UPROPERTY()
+	float VoxelSize = VoxelCellSizeCm;
+
+	UPROPERTY()
+	int32 DimX = 0;
+
+	UPROPERTY()
+	int32 DimY = 0;
+
+	UPROPERTY()
+	int32 DimZ = 0;
+
+	/** Bit-packed occupancy, FPSRHoverWindow::OccupancyWords(NumVoxels()) uint64 words, SAME layout as
+	 *  FFPSRHoverWindowDims/FPSRHoverWindow::IsOccupied. A set bit = solid (ECC_WorldStatic overlap at bake time). */
+	UPROPERTY()
+	TArray<uint64> Occupancy;
+
+	/** Free (unset-bit) voxel count at bake time — the human "does this look plausible" window (bulk Occupancy
+	 *  can't be eyeballed in the details panel), same role as Surface's OpenCells. NOT maintained incrementally
+	 *  by runtime stamps (ClearOccupiedAABB) — it is a bake-time snapshot, like OpenCells. */
+	UPROPERTY()
+	int32 FreeVoxels = 0;
+
+	int32 NumVoxels() const { return DimX * DimY * DimZ; }
+
+	/** Dimensions strictly positive AND Occupancy's length matches what those dimensions demand — the same
+	 *  "don't trust the scalars alone" check IsBaked() applies to Surface, for the same reason (see class comment). */
+	bool IsBakedVoxels() const
+	{
+		if (DimX <= 0 || DimY <= 0 || DimZ <= 0 || VoxelSize <= 0.0f)
+		{
+			return false;
+		}
+		return Occupancy.Num() == FPSRHoverWindow::OccupancyWords(NumVoxels());
+	}
+
+	/** Flat index for voxel (X,Y,Z). SAME axis order as FFPSRHoverWindowDims::CellIndex — see class comment.
+	 *  Caller-verified in-range (no bounds check — this is the hot-path predicate IsWorldPosOccupied leans on). */
+	int32 VoxelIndex(int32 X, int32 Y, int32 Z) const { return (Z * DimY + Y) * DimX + X; }
+
+	/** World/local position -> voxel cell coordinate (floor-divide by VoxelSize, matching VoxelIndex's own cell
+	 *  membership: cell N spans [VoxelOrigin + N*VoxelSize, VoxelOrigin + (N+1)*VoxelSize) on every axis). Returns
+	 *  false (OutCell left at whatever FMath produced) when Pos falls outside [0,DimX)x[0,DimY)x[0,DimZ) — the
+	 *  caller decides what "outside" means (IsWorldPosOccupied below treats it as occupied, fail-closed). */
+	bool WorldToVoxel(const FVector& Pos, FIntVector& OutCell) const
+	{
+		if (VoxelSize <= 0.0f)
+		{
+			return false;
+		}
+		const FVector Rel = Pos - VoxelOrigin;
+		OutCell = FIntVector(
+			FMath::FloorToInt(Rel.X / VoxelSize),
+			FMath::FloorToInt(Rel.Y / VoxelSize),
+			FMath::FloorToInt(Rel.Z / VoxelSize));
+		return OutCell.X >= 0 && OutCell.X < DimX && OutCell.Y >= 0 && OutCell.Y < DimY && OutCell.Z >= 0 && OutCell.Z < DimZ;
+	}
+
+	/**
+	 * The field's fail-closed occupancy predicate (P1 plan: "필드 밖 = 점유"). Unbaked data and out-of-range
+	 * positions are BOTH treated as occupied — a caller (the S3 window fill) that can't tell "no data" from
+	 * "solid wall" apart must default to the safer of the two, exactly like the 2D field's edge-of-grid behavior.
+	 */
+	bool IsWorldPosOccupied(const FVector& Pos) const
+	{
+		if (!IsBakedVoxels())
+		{
+			return true;
+		}
+		FIntVector Cell;
+		if (!WorldToVoxel(Pos, Cell))
+		{
+			return true;
+		}
+		return FPSRHoverWindow::IsOccupied(Occupancy, VoxelIndex(Cell.X, Cell.Y, Cell.Z));
+	}
+
+	/**
+	 * Clears every occupancy bit whose voxel center falls inside WorldAABB (a door/destructible break — "unblock
+	 * these voxels"). WorldAABB must be in the SAME space as VoxelOrigin (both runtime call sites — NotifyDoorBroken
+	 * and NotifyArenaVolumeOpened — stamp UFPSRFlowFieldSubsystem::AdoptedVoxels, which is WORLD-space). Clamps to
+	 * the field's own bounds first: a box that only partly overlaps, or misses entirely, touches only the voxels
+	 * actually inside it and never indexes Occupancy out of range. No-op on an unbaked field. Static + pure array
+	 * math (no UWorld) so it is exercised worldless by FPSRoguelite.Arena.VoxelData.
+	 */
+	static void ClearOccupiedAABB(FFPSRArenaVoxelData& Voxels, const FBox& WorldAABB)
+	{
+		if (!Voxels.IsBakedVoxels() || !WorldAABB.IsValid)
+		{
+			return;
+		}
+
+		const FVector RelMin = WorldAABB.Min - Voxels.VoxelOrigin;
+		const FVector RelMax = WorldAABB.Max - Voxels.VoxelOrigin;
+		const int32 RawMinX = FMath::FloorToInt(RelMin.X / Voxels.VoxelSize);
+		const int32 RawMinY = FMath::FloorToInt(RelMin.Y / Voxels.VoxelSize);
+		const int32 RawMinZ = FMath::FloorToInt(RelMin.Z / Voxels.VoxelSize);
+		const int32 RawMaxX = FMath::FloorToInt(RelMax.X / Voxels.VoxelSize);
+		const int32 RawMaxY = FMath::FloorToInt(RelMax.Y / Voxels.VoxelSize);
+		const int32 RawMaxZ = FMath::FloorToInt(RelMax.Z / Voxels.VoxelSize);
+
+		// Entirely outside on some axis -> nothing to clear. Checked BEFORE clamping: clamping first would fold an
+		// out-of-range box onto voxel 0 (both raw bounds negative -> both clamp to 0), clearing a bit that was
+		// never actually inside WorldAABB.
+		if (RawMaxX < 0 || RawMinX >= Voxels.DimX || RawMaxY < 0 || RawMinY >= Voxels.DimY
+			|| RawMaxZ < 0 || RawMinZ >= Voxels.DimZ)
+		{
+			return;
+		}
+
+		const int32 MinX = FMath::Clamp(RawMinX, 0, Voxels.DimX - 1);
+		const int32 MinY = FMath::Clamp(RawMinY, 0, Voxels.DimY - 1);
+		const int32 MinZ = FMath::Clamp(RawMinZ, 0, Voxels.DimZ - 1);
+		const int32 MaxX = FMath::Clamp(RawMaxX, 0, Voxels.DimX - 1);
+		const int32 MaxY = FMath::Clamp(RawMaxY, 0, Voxels.DimY - 1);
+		const int32 MaxZ = FMath::Clamp(RawMaxZ, 0, Voxels.DimZ - 1);
+
+		for (int32 Z = MinZ; Z <= MaxZ; ++Z)
+		{
+			for (int32 Y = MinY; Y <= MaxY; ++Y)
+			{
+				for (int32 X = MinX; X <= MaxX; ++X)
+				{
+					const int32 Idx = Voxels.VoxelIndex(X, Y, Z);
+					Voxels.Occupancy[Idx >> 6] &= ~(1ull << (Idx & 63));
+				}
+			}
+		}
+	}
+
+	/**
+	 * Exact mirror of ClearOccupiedAABB: SETS every voxel the box touches. Exists for the runtime destructible
+	 * stamp (merge-gate P2): destructible props are ECC_FPSRDestructible, so the editor bake's ECC_WorldStatic
+	 * probe never sees them — an intact prop must be stamped INTO the adopted field at adoption time for the
+	 * break-time clear to have anything to open (the 2D field gets the same treatment through its own footprint
+	 * cells). Same clamp/fail-closed rules as the clear; both must use the SAME box source (the prop's root
+	 * primitive bounds) or a stamp/clear mismatch leaves phantom occupancy behind.
+	 */
+	static void SetOccupiedAABB(FFPSRArenaVoxelData& Voxels, const FBox& WorldAABB)
+	{
+		if (!Voxels.IsBakedVoxels() || !WorldAABB.IsValid)
+		{
+			return;
+		}
+		const FVector RelMin = WorldAABB.Min - Voxels.VoxelOrigin;
+		const FVector RelMax = WorldAABB.Max - Voxels.VoxelOrigin;
+		const int32 RawMinX = FMath::FloorToInt(RelMin.X / Voxels.VoxelSize);
+		const int32 RawMinY = FMath::FloorToInt(RelMin.Y / Voxels.VoxelSize);
+		const int32 RawMinZ = FMath::FloorToInt(RelMin.Z / Voxels.VoxelSize);
+		const int32 RawMaxX = FMath::FloorToInt(RelMax.X / Voxels.VoxelSize);
+		const int32 RawMaxY = FMath::FloorToInt(RelMax.Y / Voxels.VoxelSize);
+		const int32 RawMaxZ = FMath::FloorToInt(RelMax.Z / Voxels.VoxelSize);
+		if (RawMaxX < 0 || RawMinX >= Voxels.DimX || RawMaxY < 0 || RawMinY >= Voxels.DimY
+			|| RawMaxZ < 0 || RawMinZ >= Voxels.DimZ)
+		{
+			return; // entirely outside — same pre-clamp rejection as the clear (never fold onto voxel 0)
+		}
+		const int32 MinX = FMath::Clamp(RawMinX, 0, Voxels.DimX - 1);
+		const int32 MinY = FMath::Clamp(RawMinY, 0, Voxels.DimY - 1);
+		const int32 MinZ = FMath::Clamp(RawMinZ, 0, Voxels.DimZ - 1);
+		const int32 MaxX = FMath::Clamp(RawMaxX, 0, Voxels.DimX - 1);
+		const int32 MaxY = FMath::Clamp(RawMaxY, 0, Voxels.DimY - 1);
+		const int32 MaxZ = FMath::Clamp(RawMaxZ, 0, Voxels.DimZ - 1);
+		for (int32 Z = MinZ; Z <= MaxZ; ++Z)
+		{
+			for (int32 Y = MinY; Y <= MaxY; ++Y)
+			{
+				for (int32 X = MinX; X <= MaxX; ++X)
+				{
+					const int32 Idx = Voxels.VoxelIndex(X, Y, Z);
+					Voxels.Occupancy[Idx >> 6] |= (1ull << (Idx & 63));
+				}
+			}
+		}
+	}
+
+	/**
+	 * S3 hover-window occupancy fill (ADR 0009 P1 §A — UFPSRHoverWindowSubsystem's per-launch snapshot step). Copies
+	 * a WindowDims-shaped occupancy field out of THIS global voxel field, re-centred at MinCell (a cell coordinate
+	 * in THIS field's own axis system, e.g. from WorldToVoxel on the window owner's position). Row-wise: the bounds
+	 * check for a whole (Y,Z) row is hoisted out of the X loop, so a row entirely outside this field's Y/Z extent is
+	 * filled occupied without ever touching Occupancy — matching the class comment's "row-wise bit copy... rather
+	 * than a per-cell re-derivation" (the X edge still needs its own per-cell clamp, since the window can hang off
+	 * either X edge independently of Y/Z).
+	 *
+	 * OutOccupancy is (re)sized to FPSRHoverWindow::OccupancyWords(WindowDims.NumCells()) and CLEARED first, then
+	 * only the bits that are actually solid are set. Fail-closed (mirrors IsWorldPosOccupied): a row/cell outside
+	 * this field's own [0,DimX)x[0,DimY)x[0,DimZ) bounds, OR this field not being baked at all, is left OCCUPIED —
+	 * the window's Propagate must treat "no global data here" as a wall, never as open air past the arena's baked
+	 * extent (same reasoning IsWorldPosOccupied's fail-closed default documents).
+	 *
+	 * Game-thread only (like every other read of this struct's Occupancy) — the caller snapshots BEFORE handing
+	 * OutOccupancy to a worker task; this function itself never touches anything outside its own arguments.
+	 */
+	void CopyWindow(const FIntVector& MinCell, const FFPSRHoverWindowDims& WindowDims, TArray<uint64>& OutOccupancy) const
+	{
+		// IsValid() (int64 product check), NOT a per-axis > 0 check, and BEFORE the Init below: oversized dims from
+		// a hand-edited config wrap NumCells()'s int32 multiply negative, which would size OutOccupancy to zero
+		// words while the fail-closed fill loops still ran their full (huge) extents — an out-of-bounds SetOccupied
+		// on the game thread (merge-gate P3). Propagate guards itself the same way; the snapshot step must too.
+		if (!WindowDims.IsValid())
+		{
+			OutOccupancy.Reset();
+			return;
+		}
+		OutOccupancy.Init(0, FPSRHoverWindow::OccupancyWords(WindowDims.NumCells()));
+
+		const bool bSourceUsable = IsBakedVoxels();
+		for (int32 WZ = 0; WZ < WindowDims.DimZ; ++WZ)
+		{
+			const int32 SrcZ = MinCell.Z + WZ;
+			const bool bZInRange = bSourceUsable && SrcZ >= 0 && SrcZ < DimZ;
+			for (int32 WY = 0; WY < WindowDims.DimY; ++WY)
+			{
+				const int32 SrcY = MinCell.Y + WY;
+				const int32 DstRowStart = WindowDims.CellIndex(0, WY, WZ);
+				if (!bZInRange || SrcY < 0 || SrcY >= DimY)
+				{
+					// Whole row falls outside this field's baked Y/Z extent -> fail-closed occupied, no source read.
+					for (int32 WX = 0; WX < WindowDims.DimX; ++WX)
+					{
+						FPSRHoverWindow::SetOccupied(OutOccupancy, DstRowStart + WX);
+					}
+					continue;
+				}
+
+				// Row is inside the source field's Y/Z range; X still needs its own per-cell clamp (the window can
+				// hang off either X edge independently of Y/Z). SrcRowStart anchors X=0 once per row.
+				const int32 SrcRowStart = VoxelIndex(0, SrcY, SrcZ);
+				for (int32 WX = 0; WX < WindowDims.DimX; ++WX)
+				{
+					const int32 SrcX = MinCell.X + WX;
+					if (SrcX < 0 || SrcX >= DimX)
+					{
+						FPSRHoverWindow::SetOccupied(OutOccupancy, DstRowStart + WX); // off the source's X edge -> occupied
+						continue;
+					}
+					if (FPSRHoverWindow::IsOccupied(Occupancy, SrcRowStart + SrcX))
+					{
+						FPSRHoverWindow::SetOccupied(OutOccupancy, DstRowStart + WX);
+					}
+				}
+			}
+		}
+	}
+};
 
 /**
  * One arena's baked obstacle mask (ADR 0012).
@@ -26,6 +318,9 @@
  * Never hand Surface straight to BuildFromSurfaceData; go through BuildWorldSurface, which is the only place
  * the conversion lives. Baking world coordinates would pin the arena to one position forever, which kills
  * both reusing one arena .umap at several LevelTransforms and simply nudging a parked arena later.
+ *
+ * Also owns Voxels (ADR 0009 S2, FFPSRArenaVoxelData above) — the 3D occupancy bake rides this SAME asset,
+ * SAME click, SAME SourceHash as Surface, on purpose (see that struct's own comment for why).
  */
 UCLASS(BlueprintType)
 class FPSROGUELITE_API UFPSRArenaBakeDataAsset : public UDataAsset
@@ -36,6 +331,12 @@ public:
 	/** 구워진 표면 그래프. **아레나 로컬 좌표**다 — 런타임은 `BuildWorldSurface` 로만 읽는다. */
 	UPROPERTY(VisibleAnywhere, Category = "아레나|베이크", meta = (DisplayName = "표면 데이터(로컬)"))
 	FFPSRFlowFieldSurfaceData Surface;
+
+	/** 구워진 3D 복셀 점유(ADR 0009 S2). **아레나 로컬 좌표**다 — 런타임은 `BuildWorldVoxels` 로만 읽는다.
+	 *  Surface 와 같은 클릭·같은 SourceHash 로 함께 구워진다(별도 파이프라인 아님). 비어 있을 수 있다 —
+	 *  이 P1 이전에 구운 에셋의 마이그레이션 상태이며, `IsBaked()`(2D 기준)는 이것과 무관하게 참을 유지한다. */
+	UPROPERTY(VisibleAnywhere, Category = "아레나|베이크", meta = (DisplayName = "복셀 점유(로컬)"))
+	FFPSRArenaVoxelData Voxels;
 
 	/** 베이크 대상 액터 집합의 해시. 현재 레벨에서 다시 계산한 값과 다르면 **스테일**이다 — ADR 0012
 	 *  5겹 검사가 전부 이 한 값을 본다. 비어 있으면 "아직 안 구움"이지 "일치"가 아니다. */
@@ -85,6 +386,22 @@ public:
 	 *  `BuildWorldSurface` 의 정확한 역연산 — 둘이 같은 파일에 있어야 한쪽만 고쳐지지 않는다. */
 	static bool LocalizeSurface(const FFPSRFlowFieldSurfaceData& World, const FTransform& ArenaTransform,
 		FFPSRFlowFieldSurfaceData& OutLocal);
+
+	/**
+	 * Same conversion as `BuildWorldSurface`, for `Voxels` (ADR 0009 S2). Deliberately does NOT reuse
+	 * `OffsetSurface` — voxels have no MAX_flt sentinel to skip (every entry is a bit, not a height), so only
+	 * `VoxelOrigin` moves; DimX/DimY/DimZ/VoxelSize/Occupancy/FreeVoxels are coordinate-independent and copy as-is.
+	 * Same rotation/scale rejection as the surface pair (`ExtractPlanarOffset`) for the same reason: the voxel
+	 * grid is axis-aligned too.
+	 *
+	 * @return 성공 여부. 실패 시 OutWorld 는 건드리지 않는다.
+	 */
+	bool BuildWorldVoxels(const FTransform& ArenaTransform, FFPSRArenaVoxelData& OutWorld) const;
+
+	/** `BuildWorldVoxels` 의 정확한 역연산(에디터 베이커 전용) — `LocalizeSurface` 와 같은 파일에 있어야
+	 *  하는 이유도 같다: 한쪽만 고쳐지는 사고를 막는다. */
+	static bool LocalizeVoxels(const FFPSRArenaVoxelData& World, const FTransform& ArenaTransform,
+		FFPSRArenaVoxelData& OutLocal);
 
 #if WITH_EDITOR
 	virtual EDataValidationResult IsDataValid(class FDataValidationContext& Context) const override;

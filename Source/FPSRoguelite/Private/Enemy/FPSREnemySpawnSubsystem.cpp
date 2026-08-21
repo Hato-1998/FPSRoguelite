@@ -648,14 +648,32 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 		else
 		{
 			// Flow-field direction toward SAME-MAP players (fall back to direct-to-nearest same-map player if the field
-			// isn't ready). Sampled from the enemy's own map so a mid-transition enemy near the door still gets its map's
-			// flow (the subsystem retries by containing-grid on a stale MapId). No same-map player -> no beeline (never
-			// chase cross-map): FlowDir stays zero and the enemy just separates.
-			FVector FlowDir = FlowField ? FlowField->SampleFlowDirection(EnemyMap, EnemyLocation) : FVector::ZeroVector;
-			// ADR 0008 invariant 1's PRIMARY Seek3D trigger — the exact zero-check the beeline fallback below already
-			// performs, promoted into the move context (bFlowZero) so TickServerMovement's PursuitState.Tick sees a
-			// proven BFS-unreachable column immediately. No added flow-field query (invariant 5).
-			const bool bFlowZero = FlowDir.IsNearlyZero();
+			// isn't ready). ADR 0009 결정 5: routed through QueryFlow, the single movement-consumer seam. S3 (P1): naming
+			// TargetPlayerPawn lets QueryFlow try the player-centred 3D window FIRST (a real 3D Direction, occasionally
+			// SeekZ too), falling back to the unchanged 2D surface sample on any miss — see QueryFlow's own comment for
+			// the exact fallback conditions. No same-map player -> no beeline (never chase cross-map) and no window
+			// target either (TargetPlayerPawn null): FlowDir stays zero and the enemy just separates.
+			FFPSRFlowQuery FlowQuery;
+			FlowQuery.WorldPos = EnemyLocation;
+			FlowQuery.bWantDirection = true;
+			FlowQuery.TargetPlayerPawn = bHasTarget ? PlayerPawns[BestPlayerIndex] : nullptr;
+			// Window3D is hover-only (merge-gate P1): a ground archetype handed the window's free-air gradient
+			// would zero its XY on a vertical step with no means to climb and both fallbacks suppressed.
+			FlowQuery.bHoverCapable = Enemy->GetCurrentHoverHeight() > 0.0f;
+			FFPSRFlowResult FlowRes;
+			if (FlowField)
+			{
+				FlowField->QueryFlow(FlowQuery, FlowRes);
+			}
+			// S3: FlowDir may now carry a nonzero Z when the window answered. That's fine as-is here — MoveDir.Z is
+			// zeroed below regardless (horizontal steering stays 2D) and FaceDir only ever reads XY (TickServerMovement
+			// zeroes FaceXY.Z) — the vertical component reaches the enemy separately via MoveCtx.SeekZ/bSeekValid below.
+			FVector FlowDir = FlowRes.Direction;
+			// The beeline fallback's own zero-check (bFlowZero, used immediately below) — ALSO still carried into
+			// MoveCtx.bFlowZero (unread by TickServerMovement now that ADR 0008's Seek3D was retired; kept for the
+			// same "dormant reactivation" reason as the pursuit fields it used to feed — see FFPSRServerMoveContext's
+			// class comment). No added flow-field query either way (still just this one QueryFlow call).
+			const bool bFlowZero = !FlowRes.bDirectionValid;
 			if (bFlowZero && bHasTarget)
 			{
 				// Field not ready in this enemy's map yet (no source) but we have a target — beeline straight at the nearest
@@ -697,6 +715,10 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 			MoveCtx.bFlowZero = bFlowZero;
 			MoveCtx.TargetLocation = BestPlayerLocation;
 			MoveCtx.TargetGroundedZ = BestPlayerGroundedZ;
+			// S3 (ADR 0009 P1): forwarded straight from QueryFlow's answer into AFPSREnemyBase::SeekTargetZ/
+			// bSeekTargetZValid — see TickServerMovement.
+			MoveCtx.SeekZ = FlowRes.SeekZ;
+			MoveCtx.bSeekValid = FlowRes.bSeekValid;
 			Enemy->TickServerMovement(MoveCtx);
 		}
 
