@@ -369,8 +369,10 @@ bool FFPSRHoverWindowBenchTest::RunTest(const FString& Parameters)
 				}
 				const double AvgMs = SumMs / Iters;
 
-				// Dist(2B) + StepDir(1B) per cell, plus the occupancy bitfield actually carried for this window.
-				const double MemKB = (NumCells * (sizeof(uint16) + sizeof(uint8))
+				// Dist(2B) + StepDir(1B) + frontier scratch(4B — the LARGEST buffer, caller-owned on Field like the
+				// others; omitting it understated per-window memory ~2.3x, merge-gate P3) per cell, plus the
+				// occupancy bitfield actually carried for this window.
+				const double MemKB = (NumCells * (sizeof(uint16) + sizeof(uint8) + sizeof(int32))
 					+ FPSRHoverWindow::OccupancyWords(NumCells) * sizeof(uint64)) / 1024.0;
 
 				AddInfo(FString::Printf(

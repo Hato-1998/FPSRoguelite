@@ -60,7 +60,11 @@ namespace FPSRHoverWindow
 
 	int32 OccupancyWords(int32 NumCells)
 	{
-		return (NumCells + 63) / 64;
+		// NOT (NumCells + 63) / 64: IsValid() admits NumCells up to MAX_int32, where the +63 signed-overflows (UB,
+		// in practice negative) and a negative word count would sail through Propagate's Occupancy-size guard —
+		// turning IsOccupied into an out-of-bounds read in Shipping, where the ArrayView range check compiles out
+		// (merge-gate P3). Divide-then-round avoids the overflow at every admissible NumCells.
+		return NumCells / 64 + ((NumCells % 64) != 0 ? 1 : 0);
 	}
 
 	void SetOccupied(TArrayView<uint64> Occupancy, int32 Cell)
@@ -121,7 +125,11 @@ namespace FPSRHoverWindow
 		// Frontier is a plain flat array + read cursor, not TQueue: uniform-cost BFS never needs to reorder or
 		// re-visit, so a ring buffer is unnecessary and TQueue's per-node heap allocation would show up directly in
 		// the bench (ADR 0009 invariant 7 — this window's propagation cost is exactly what's being measured here).
-		TArray<int32> Frontier;
+		// Caller-owned scratch (merge-gate P2): Reset keeps the capacity, so after a window's first Propagate the
+		// flood runs with zero heap traffic — a function-local array would malloc/free its 4B/cell (the largest
+		// buffer here) on every stagger tick per window.
+		TArray<int32>& Frontier = Field.FrontierScratch;
+		Frontier.Reset();
 		Frontier.Reserve(NumCells);
 		int32 ReadCursor = 0;
 
@@ -154,6 +162,19 @@ namespace FPSRHoverWindow
 		{
 			const int32 Current = Frontier[ReadCursor++];
 			const int32 CurDist = Field.Dist[Current];
+
+			// Saturation guard (merge-gate P2): windows carry more cells than uint16 distances (524K at 128x128x32),
+			// so a pathological maze COULD push a geodesic past 65534. Without this, the relax would write the
+			// UnreachedDist sentinel itself — the cell then reads as unvisited forever (re-relaxed and re-pushed,
+			// breaking the frontier's Reserve contract) and its own expansion wraps to a fake distance-0 source that
+			// inverts the StepDir gradient. Cells beyond the representable horizon stay Unreached instead, which
+			// agents already handle (same as a walled-off component). Hoisted out of the neighbour loop (depends on
+			// CurDist only); also load-bearing for P1's possible real-distance weighting, where stored distances
+			// grow ~10x faster.
+			if (CurDist + 1 >= static_cast<int32>(UnreachedDist))
+			{
+				continue;
+			}
 			// Decode X/Y/Z from the flat index rather than walking the offset arithmetically on the 1D index: adding
 			// an offset directly to a flat index wraps across the X boundary into the next row/slice, so every
 			// neighbour must be computed in X/Y/Z space and bounds-checked per axis before re-flattening.

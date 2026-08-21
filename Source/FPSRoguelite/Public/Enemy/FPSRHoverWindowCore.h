@@ -55,6 +55,12 @@ struct FFPSRHoverWindowField
 	 *  i.e. it is already the direction an agent standing in N should move, not the direction propagation arrived
 	 *  from. See FPSRHoverWindow::Propagate's header comment for the reverse-offset derivation. */
 	TArray<uint8> StepDir;
+
+	/** BFS frontier scratch, caller-owned for the same reason Dist/StepDir are: it is the propagation's single
+	 *  LARGEST buffer (4B/cell — more than Dist+StepDir combined), so a function-local array would re-pay a
+	 *  malloc/free of that size on every stagger tick per window — exactly the per-tick churn the caller-owned
+	 *  Field contract exists to avoid (merge-gate P2). Contents are meaningless between calls; Propagate resets it. */
+	TArray<int32> FrontierScratch;
 };
 
 namespace FPSRHoverWindow
