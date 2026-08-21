@@ -238,7 +238,10 @@ bool AFPSRArenaActor::ServerRegenerate(int32 NewSeed)
 		{
 			if (UFPSRFlowFieldSubsystem* Flow = World->GetSubsystem<UFPSRFlowFieldSubsystem>())
 			{
-				Flow->AdoptArenaSurface(Layout.Surface);
+				// AdoptArenaField (2026-08-21, ADR 0009 P1) pulls both the 2D surface AND the voxel occupancy
+				// straight from this arena's bake asset + transform, rather than being handed Layout.Surface —
+				// the two can no longer come from mismatched sources by caller mistake.
+				Flow->AdoptArenaField(*this);
 			}
 		}
 		return true;

@@ -126,16 +126,16 @@ void UFPSRFlowFieldSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 		// and a world-trace fallback is forbidden outright: the trace anchors its grid Z from the PlayerStart
 		// downtrace, so the day it fired next to a parked reserve arena it would anchor the field to that
 		// arena's roof.
-		FFPSRFlowFieldSurfaceData BakedWorld;
-		if (Arena->GetBakedWorldSurface(BakedWorld))
+		//
+		// bBumpGenerationAndRecompute=false: this world-begin pull happens BEFORE the immediate RecomputeAllFields()
+		// call a few lines down (which every path below — this one, BuildUnifiedField, BuildFromWorldTrace — shares),
+		// so bumping the generation here too would push a fresh world off TopologyGeneration 0 (see
+		// AdoptArenaFieldInternal's header comment for why that regresses the late-join ack).
+		if (AdoptArenaFieldInternal(*Arena, /*bBumpGenerationAndRecompute=*/false))
 		{
-			UnifiedComputer = NewObject<UFPSRFlowFieldComputer>(this);
-			UnifiedComputer->BuildFromSurfaceData(BakedWorld);
-			UnifiedComputer->ExtractSurfaceData(BakedBaseline);
-			bHasBaseline = true;
 			UE_LOG(LogFPSR, Log,
 				TEXT("[FlowField] Arena field adopted from %s BAKE (%dx%d cell=%.0f) — no world trace, no generation."),
-				*Arena->GetName(), BakedWorld.GridDimX, BakedWorld.GridDimY, BakedWorld.CellSize);
+				*Arena->GetName(), BakedBaseline.GridDimX, BakedBaseline.GridDimY, BakedBaseline.CellSize);
 		}
 		else
 		{
@@ -298,15 +298,18 @@ bool UFPSRFlowFieldSubsystem::BakeSlotIntoUnified(UWorld& InWorld, const AFPSRFl
 	return bOk;
 }
 
-bool UFPSRFlowFieldSubsystem::AdoptArenaSurface(const FFPSRFlowFieldSurfaceData& Surface)
+bool UFPSRFlowFieldSubsystem::AdoptArenaFieldInternal(const AFPSRArenaActor& Arena, bool bBumpGenerationAndRecompute)
 {
 	if (!HasServerAuthority())
 	{
 		return false;
 	}
-	if (Surface.GridDimX <= 0 || Surface.GridDimY <= 0)
+
+	FFPSRFlowFieldSurfaceData WorldSurface;
+	if (!Arena.GetBakedWorldSurface(WorldSurface) || WorldSurface.GridDimX <= 0 || WorldSurface.GridDimY <= 0)
 	{
-		UE_LOG(LogFPSR, Error, TEXT("[FlowField] AdoptArenaSurface rejected: empty surface data."));
+		// Callers log their own contextual message (world-begin and a stage swap want different wording) — this
+		// function only decides whether the adoption itself succeeded.
 		return false;
 	}
 
@@ -314,25 +317,61 @@ bool UFPSRFlowFieldSubsystem::AdoptArenaSurface(const FFPSRFlowFieldSurfaceData&
 	{
 		UnifiedComputer = NewObject<UFPSRFlowFieldComputer>(this);
 	}
-	UnifiedComputer->BuildFromSurfaceData(Surface);
+	UnifiedComputer->BuildFromSurfaceData(WorldSurface);
 
-	// The regenerated arena IS the baseline now. Keeping the old snapshot would let a later
+	// The adopted arena IS the baseline now. Keeping the old snapshot would let a later
 	// ResetDoorTopologyToBaseline restore the PREVIOUS arena's walls into the current one.
 	UnifiedComputer->ExtractSurfaceData(BakedBaseline);
 	bHasBaseline = true;
-	bTopologyMutatedSinceBaseline = false;
 
-	// Connectivity changed wholesale, so clients' late-join ack and the freeze pre-unfreeze recompute must both see
-	// a new generation; then recompute immediately rather than leaving up to 0.2s of stale flow after a swap.
-	// AdvanceTopologyGeneration() — NOT a raw ++ — because it also mirrors the count to the replicated GameState;
-	// a bare ++TopologyGeneration here left that mirror stale, so a remote client's late-join ack could never see
-	// the post-swap generation (bug found during arena-topology multi-arena work; GameState never OnRep'd).
-	AdvanceTopologyGeneration();
-	RecomputeAllFields();
+	// S2 (ADR 0009 P1): pull this SAME arena's WORLD-space voxel occupancy from the SAME bake asset + the SAME
+	// actor transform as the surface above, so flow-surface and voxel-occupancy can never describe different
+	// arenas/poses (ADR 0009 결정 3's whole reason for riding the existing bake pipeline instead of a second one).
+	// No voxels baked yet (an asset baked before this P1) -> soft downgrade: AdoptedVoxels/VoxelBaseline go empty
+	// and S3's window simply has no field here until re-baked — logged once, not a hard failure, because the 2D
+	// flow field everything else already depends on is fine.
+	FFPSRArenaVoxelData WorldVoxels;
+	const UFPSRArenaBakeDataAsset* BakeData = Arena.GetBakeData();
+	if (BakeData && BakeData->BuildWorldVoxels(Arena.GetActorTransform(), WorldVoxels))
+	{
+		AdoptedVoxels = MoveTemp(WorldVoxels);
+	}
+	else
+	{
+		AdoptedVoxels = FFPSRArenaVoxelData();
+		UE_LOG(LogFPSR, Warning,
+			TEXT("[FlowField] %s has no baked voxel occupancy — S3 hover window will have no field here until this arena is re-baked (ADR 0009 S2)."),
+			*Arena.GetName());
+	}
+	VoxelBaseline = AdoptedVoxels; // same adopt-time-snapshot contract as BakedBaseline
 
-	UE_LOG(LogFPSR, Log, TEXT("[FlowField] Adopted arena surface %dx%d cell=%.0f (topology gen %d)."),
-		Surface.GridDimX, Surface.GridDimY, Surface.CellSize, TopologyGeneration);
+	if (bBumpGenerationAndRecompute)
+	{
+		bTopologyMutatedSinceBaseline = false;
+
+		// Connectivity changed wholesale, so clients' late-join ack and the freeze pre-unfreeze recompute must both
+		// see a new generation; then recompute immediately rather than leaving up to 0.2s of stale flow after a
+		// swap. AdvanceTopologyGeneration() — NOT a raw ++ — because it also mirrors the count to the replicated
+		// GameState; a bare ++TopologyGeneration here left that mirror stale, so a remote client's late-join ack
+		// could never see the post-swap generation (bug found during arena-topology multi-arena work; GameState
+		// never OnRep'd).
+		AdvanceTopologyGeneration();
+		RecomputeAllFields();
+
+		UE_LOG(LogFPSR, Log, TEXT("[FlowField] Adopted arena field %s (%dx%d cell=%.0f, topology gen %d)."),
+			*Arena.GetName(), WorldSurface.GridDimX, WorldSurface.GridDimY, WorldSurface.CellSize, TopologyGeneration);
+	}
 	return true;
+}
+
+bool UFPSRFlowFieldSubsystem::AdoptArenaField(const AFPSRArenaActor& Arena)
+{
+	if (AdoptArenaFieldInternal(Arena, /*bBumpGenerationAndRecompute=*/true))
+	{
+		return true;
+	}
+	UE_LOG(LogFPSR, Error, TEXT("[FlowField] AdoptArenaField(%s) rejected: no usable baked surface."), *Arena.GetName());
+	return false;
 }
 
 bool UFPSRFlowFieldSubsystem::BakeDiscoveredMap(const FGameplayTag& MapId)
@@ -412,6 +451,15 @@ void UFPSRFlowFieldSubsystem::NotifyDoorBroken(const AActor* Door)
 	{
 		OpenedEdges += UnifiedComputer->StampDoorEdgesOpen(Pair.Key, Pair.Value);
 	}
+
+	// S2 (ADR 0009 P1): clear the SAME door's world AABB out of the voxel occupancy too, alongside the 2D seam
+	// stamp above, so a future S3 hover window sees the opened doorway the instant the 2D field does. No-op if no
+	// voxel field is adopted (single-map / pre-P1 bake) — DoorAABB was already computed above for MapDoorSeamCellPairs.
+	if (AdoptedVoxels.IsBakedVoxels())
+	{
+		FFPSRArenaVoxelData::ClearOccupiedAABB(AdoptedVoxels, DoorAABB);
+	}
+
 	// U (P-F): the seam topology changed — bump the generation (mirrored to the replicated GameState in Stage 2 so late
 	// joiners re-ack) and mark the field mutated so a new-run ResetDoorTopologyToBaseline restores the closed seam. Done
 	// BEFORE the recompute so RecomputeAllFields stamps LastRecomputedGeneration to the NEW generation (or, if a freeze is
@@ -460,6 +508,21 @@ void UFPSRFlowFieldSubsystem::NotifyArenaCellsOpened(TConstArrayView<int32> Cell
 			}));
 		}
 	}
+}
+
+void UFPSRFlowFieldSubsystem::NotifyArenaVolumeOpened(const FBox& WorldBounds)
+{
+	// S2 (ADR 0009 P1): voxel-only stamp, deliberately separate from NotifyArenaCellsOpened above — a
+	// destructible's 2D footprint cells and its full 3D world AABB are different shapes (props have height), so
+	// this takes the box directly instead of re-deriving one from the cell list. No generation bump / recompute of
+	// its own: the sibling NotifyArenaCellsOpened call at the same call site (AFPSRArenaDestructible::
+	// HandleBrokenAuthority) already advances TopologyGeneration for this SAME break event, and a future S3 window
+	// is expected to key its re-sample off that one counter, not a second voxel-private one.
+	if (!HasServerAuthority() || !AdoptedVoxels.IsBakedVoxels())
+	{
+		return;
+	}
+	FFPSRArenaVoxelData::ClearOccupiedAABB(AdoptedVoxels, WorldBounds);
 }
 
 bool UFPSRFlowFieldSubsystem::IsLocationInMap(const FGameplayTag& MapId, const FVector& WorldLocation) const
@@ -519,7 +582,7 @@ FGameplayTag UFPSRFlowFieldSubsystem::FindMapIdForLocation(const FVector& WorldL
 
 bool UFPSRFlowFieldSubsystem::FindNearestOpenLocation(const FVector& InWorld, int32 MaxRadiusCells, FVector& OutWorld) const
 {
-	// UnifiedComputer is the LIVE adopted grid (arena mode: rebuilt whole by AdoptArenaSurface on every transition,
+	// UnifiedComputer is the LIVE adopted grid (arena mode: rebuilt whole by AdoptArenaField on every transition,
 	// so this always reflects the destination arena's post-regenerate, post-destructible-reset state). Null off
 	// authority (clients never build it) or before the first bake/adopt — false, same as every other query here.
 	return UnifiedComputer && UnifiedComputer->FindNearestOpenLocation(InWorld, MaxRadiusCells, OutWorld);
@@ -684,6 +747,10 @@ void UFPSRFlowFieldSubsystem::ResetDoorTopologyToBaseline()
 	// Atomically restore the closed-seam baseline (a plain re-adopt of the baked surface graph — all opened doors close at
 	// once). BuildFromSurfaceData invalidates the field; the recompute below rebuilds flow + connectivity.
 	UnifiedComputer->BuildFromSurfaceData(BakedBaseline);
+	// S2 (ADR 0009 P1): restore the voxel field's adopt-time snapshot too, same reasoning as BakedBaseline — any
+	// door/destructible voxel clears since adoption (NotifyDoorBroken / NotifyArenaVolumeOpened) must not survive
+	// a same-world re-run any more than their 2D counterparts do.
+	AdoptedVoxels = VoxelBaseline;
 	bTopologyMutatedSinceBaseline = false;
 	AdvanceTopologyGeneration();
 	RecomputeAllFields();

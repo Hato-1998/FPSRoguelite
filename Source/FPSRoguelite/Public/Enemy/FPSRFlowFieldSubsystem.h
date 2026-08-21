@@ -6,12 +6,14 @@
 #include "GameplayTagContainer.h"
 #include "Containers/ArrayView.h" // TConstArrayView (NotifyArenaCellsOpened)
 #include "Enemy/FPSRFlowFieldComputer.h" // FFPSRFlowFieldSurfaceData (BakedBaseline by-value member, U P-F) + EFPSRFieldQuery
+#include "Arena/FPSRArenaBakeDataAsset.h" // FFPSRArenaVoxelData (AdoptedVoxels/VoxelBaseline by-value members, ADR 0009 S2)
 #include "FPSRFlowFieldSubsystem.generated.h"
 
 class AActor;
 class UFPSRFlowFieldComputer;
 class AFPSRFlowFieldBoundsVolume;
 class AFPSRGameState;
+class AFPSRArenaActor;
 
 /** Which field actually answered a QueryFlow — S1 has exactly one source; S3 (ADR 0009 결정 1) adds Window3D.
  *  Consumers MUST NOT branch on this for behavior (invariant 6 — agents don't know which field they read);
@@ -111,15 +113,30 @@ public:
 	 *  once a streamed map's collision is registered (S3). Returns false if no volume with that MapId is loaded. */
 	bool BakeDiscoveredMap(const FGameplayTag& MapId);
 
-	/** ADR 0010: adopt a GENERATED arena surface as the field. The generator owns the obstacle mask — nothing here
-	 *  traces the world, which is what keeps a stage transition off the game thread's critical path (a world-trace
-	 *  bake is thousands of downtraces and cannot be moved off it).
+	/** ADR 0010: adopt an arena's BAKED field — surface AND (ADR 0009 S2) voxel occupancy — as the live one.
+	 *  Promoted from the old AdoptArenaSurface(Surface) (2026-08-21, ADR 0009 P1): pulling straight from the
+	 *  Arena actor rather than a caller-supplied FFPSRFlowFieldSurfaceData means the surface and the voxel field
+	 *  can never come from two different bake assets/transforms by caller mistake — both are fetched from the
+	 *  SAME Arena.GetBakeData() + Arena.GetActorTransform() inside this one call.
 	 *
-	 *  Also re-baselines: a regenerated arena IS the new topology, and keeping the previous one would let
-	 *  ResetDoorTopologyToBaseline resurrect the old arena's walls. Bumps the topology generation and recomputes,
-	 *  so swarm flow and the origin-aware combat gate are correct on return. Server-only; false off authority or
-	 *  on malformed data — callers must NOT substitute a world-trace bake (invariant 5). */
-	bool AdoptArenaSurface(const FFPSRFlowFieldSurfaceData& Surface);
+	 *  Also re-baselines both fields: a regenerated/swapped arena IS the new topology, and keeping the previous
+	 *  snapshot would let ResetDoorTopologyToBaseline resurrect the old arena's walls (2D) or solids (voxel).
+	 *  Bumps the topology generation and recomputes, so swarm flow and the origin-aware combat gate are correct
+	 *  on return. Server-only; false off authority or when the arena has no usable baked SURFACE (2D remains the
+	 *  hard requirement — invariant 5, callers must NOT substitute a world-trace bake). A missing/stale VOXEL bake
+	 *  is a soft downgrade, not a rejection: AdoptedVoxels/VoxelBaseline go empty and S3's hover window simply has
+	 *  no field here yet (logged once) — see .cpp for why this asymmetry is deliberate. */
+	bool AdoptArenaField(const AFPSRArenaActor& Arena);
+
+	/** S2 (ADR 0009 P1): the arena's baked WORLD-space voxel occupancy field, adopted alongside the flow surface
+	 *  by AdoptArenaField. The intended reader is S3's hover-swarm window (not yet built) — nothing in this
+	 *  subsystem consumes it itself. Empty (HasAdoptedVoxels()==false) until an arena WITH baked voxels has been
+	 *  adopted; see AdoptArenaField's soft-downgrade note. Server-authoritative. */
+	const FFPSRArenaVoxelData& GetAdoptedVoxels() const { return AdoptedVoxels; }
+
+	/** True only when GetAdoptedVoxels() holds a usable bake (dims + Occupancy length all check out via
+	 *  FFPSRArenaVoxelData::IsBakedVoxels()) — the cheap gate a consumer should check before reading it. */
+	bool HasAdoptedVoxels() const { return AdoptedVoxels.IsBakedVoxels(); }
 
 	/** U (P-B): a breakable seam door was destroyed (server) — open the unified grid's cross-seam edges the door spanned
 	 *  and recompute NOW so swarm flow + the origin-aware combat gate cross it immediately. No-op with no unified field
@@ -135,6 +152,16 @@ public:
 	 *  (unlike NotifyDoorBroken) — the arena is always a single grid, never a multi-slot seam. Off-authority or no
 	 *  grid built yet -> no-op. Called by AFPSRArenaDestructible::HandleBrokenAuthority. */
 	void NotifyArenaCellsOpened(TConstArrayView<int32> Cells);
+
+	/** S2 (ADR 0009 P1): voxel-only counterpart to NotifyArenaCellsOpened, called at the SAME break event
+	 *  (AFPSRArenaDestructible::HandleBrokenAuthority) but taking the prop's full 3D world AABB rather than its
+	 *  2D footprint cells — a destructible has height, so its voxel footprint is not "the 2D cells, extruded".
+	 *  Clears AdoptedVoxels' occupancy in place (FFPSRArenaVoxelData::ClearOccupiedAABB). Deliberately triggers NO
+	 *  generation bump / recompute of its own: the sibling NotifyArenaCellsOpened call at the same call site
+	 *  already advances TopologyGeneration for this break, and a future S3 window is expected to key its
+	 *  re-sample off THAT one counter rather than a second, voxel-private one. No-op off authority or with no
+	 *  baked voxel field adopted (single warning already logged at adopt time — this stays silent per-call). */
+	void NotifyArenaVolumeOpened(const FBox& WorldBounds);
 
 	/** U (P-F): server-authoritative topology generation — bumped every time the unified grid's connectivity changes
 	 *  (a seam door opens, a slot bakes in, or a new-run baseline reset). Late-join ack + the freeze pre-unfreeze
@@ -166,7 +193,7 @@ public:
 
 	/** Phase A stage-transition carry-over: nearest OPEN location to InWorld on the LIVE adopted grid (thin forward
 	 *  to UFPSRFlowFieldComputer::FindNearestOpenLocation — see that function for the exact rules). False with no
-	 *  built grid (UnifiedComputer null — off authority, or before the first AdoptArenaSurface/bake). Array-only, no
+	 *  built grid (UnifiedComputer null — off authority, or before the first AdoptArenaField/bake). Array-only, no
 	 *  world query (D7). Used by UFPSREnemySpawnSubsystem::CarryEnemiesToNewStage to snap a carried enemy's
 	 *  post-delta candidate position onto a walkable cell of the NEW arena. */
 	bool FindNearestOpenLocation(const FVector& InWorld, int32 MaxRadiusCells, FVector& OutWorld) const;
@@ -184,6 +211,19 @@ private:
 	 *  QueryFlow is the only movement-consumption surface (ADR 0009 결정 5) — do not call this directly outside
 	 *  QueryFlow's implementation. */
 	bool SampleHoverFloorZ(const FVector& Loc, const FVector2D& FlowDirXY, float AnchorFootZ, float MaxSurfaceDeltaCm, float& OutFloorZ, FVector* OutFloorNormal = nullptr) const;
+
+	/** Shared body of AdoptArenaField for BOTH call sites (2026-08-21, ADR 0009 P1 — collapses what used to be two
+	 *  independent code paths: OnWorldBeginPlay built the field inline, ServerRegenerate went through
+	 *  AdoptArenaSurface). Builds UnifiedComputer + BakedBaseline from the arena's baked surface and, if the bake
+	 *  has voxels, AdoptedVoxels + VoxelBaseline from the same bake asset/transform. Returns false ONLY when the
+	 *  arena has no usable baked SURFACE (voxel absence is a soft downgrade handled internally, never a rejection).
+	 *
+	 *  bBumpGenerationAndRecompute=false is world-begin's case: OnWorldBeginPlay already calls RecomputeAllFields()
+	 *  itself exactly once after this returns, and bumping the generation here as well would push a FRESH world's
+	 *  TopologyGeneration off 0 — breaking ResetDoorTopologyToBaseline's "a first, unmutated run stays at
+	 *  generation 0 so a fresh client's gen-0 ack is instantly satisfied" contract. true is every other caller
+	 *  (a stage swap): matches AdoptArenaSurface's old swap-time contract exactly (immediate bump + recompute). */
+	bool AdoptArenaFieldInternal(const AFPSRArenaActor& Arena, bool bBumpGenerationAndRecompute);
 
 	void RecomputeAllFields();
 	bool HasServerAuthority() const;
@@ -268,6 +308,20 @@ private:
 	/** World-begin snapshot of the unified grid's surface graph (all seam doors closed), for ResetDoorTopologyToBaseline.
 	 *  Plain member (POD arrays, no UObject refs -> no GC concern); server-only. */
 	FFPSRFlowFieldSurfaceData BakedBaseline;
+
+	// --- S2 (ADR 0009 P1): baked 3D voxel occupancy, adopted alongside BakedBaseline/UnifiedComputer by
+	//     AdoptArenaFieldInternal. Same lifetime/ownership rules as the surface pair above (plain POD-array
+	//     members, no UObject refs, server-only) — the voxel field is transport-only cargo riding the existing
+	//     adopt/stamp/reset machinery, not a parallel subsystem. ---
+
+	/** Live WORLD-space voxel occupancy for the currently-adopted arena. Empty (FFPSRArenaVoxelData::IsBakedVoxels()
+	 *  false) until an arena WITH baked voxels has been adopted — see AdoptArenaField's soft-downgrade note.
+	 *  GetAdoptedVoxels() is the read-only public seam; S3's hover window is the intended (future) consumer. */
+	FFPSRArenaVoxelData AdoptedVoxels;
+
+	/** Adopt-time snapshot of AdoptedVoxels, restored by ResetDoorTopologyToBaseline — the voxel-field mirror of
+	 *  BakedBaseline. */
+	FFPSRArenaVoxelData VoxelBaseline;
 
 	/** Last-seen pause state for the OnRunStateChanged unpause-edge detection (seeded at bind time). */
 	bool bWasPaused = false;

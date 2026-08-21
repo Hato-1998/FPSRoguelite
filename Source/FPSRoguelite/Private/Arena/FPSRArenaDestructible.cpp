@@ -53,6 +53,15 @@ void AFPSRArenaDestructible::HandleBrokenAuthority(AActor* Breaker)
 					if (UFPSRFlowFieldSubsystem* Flow = World->GetSubsystem<UFPSRFlowFieldSubsystem>())
 					{
 						Flow->NotifyArenaCellsOpened(Cells);
+
+						// S2 (ADR 0009 P1): also clear this prop's full 3D world AABB out of the voxel occupancy
+						// field, at the SAME break event — a destructible has height, so its voxel footprint is not
+						// just the 2D cells extruded. GetActorBounds(false): ALL components, matching NotifyDoorBroken's
+						// own AABB computation (be robust to collision already being off by the time this runs).
+						FVector BoundsOrigin, BoundsExtent;
+						GetActorBounds(/*bOnlyCollidingComponents*/ false, BoundsOrigin, BoundsExtent);
+						Flow->NotifyArenaVolumeOpened(FBox(BoundsOrigin - BoundsExtent, BoundsOrigin + BoundsExtent));
+
 						bOpened = true;
 					}
 				}

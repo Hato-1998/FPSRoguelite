@@ -12,13 +12,17 @@
 #include "Arena/FPSRArenaTypes.h"
 #include "Arena/FPSRArenaValidator.h"
 #include "Enemy/FPSREnemySpawnPoint.h" // 스폰포인트 저작 검사
+#include "Enemy/FPSRHoverWindowCore.h" // FPSRHoverWindow::OccupancyWords/SetOccupied — voxel bake (ADR 0009 S2)
 #include "Core/FPSRLogChannels.h"
 
 #include "Editor.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "Misc/MessageDialog.h"
+#include "Misc/ScopedSlowTask.h"
 #include "ScopedTransaction.h"
+#include "CollisionShape.h"
+#include "CollisionQueryParams.h"
 
 #define LOCTEXT_NAMESPACE "FPSRArenaAuthoring"
 
@@ -502,7 +506,7 @@ void FFPSRArenaAuthoringTool::ValidateArenaInLevel()
 		// "저작한 위치와 실제로 플레이어가 서는 위치가 다르다"는 것이다(문 앞·엄폐물 뒤 같은 의도된 자리를
 		// 벗어날 수 있다). GetPlayerEntryTransforms를 **그대로 호출**해 같은 소스·같은 열거(APlayerStart 이름순
 		// 정렬, 없으면 중심 오프셋 폴백)를 그대로 쓴다 — 런타임 스냅이 읽는 Arena->Layout은 에디터에선 아직
-		// AdoptArenaSurface가 돈 적이 없어 항상 비어 있으므로(IsValid()==false) 그 함수 안의 SnapToOpenCells는
+		// AdoptArenaField(구 AdoptArenaSurface)가 돈 적이 없어 항상 비어 있으므로(IsValid()==false) 그 함수 안의 SnapToOpenCells는
 		// no-op이고, 반환된 좌표는 저작 그대로다. 그 좌표를 이 아레나 검증에 쓰는 (베이크/절차) Layout으로
 		// 판정한다 — 스폰포인트 검사와 같은 기준.
 		{
@@ -570,6 +574,95 @@ void FFPSRArenaAuthoringTool::ValidateArenaInLevel()
 		FText::AsNumber(Arenas.Num()), FText::FromString(Body)));
 }
 
+namespace
+{
+	/**
+	 * Editor-only budget guard for the voxel bake (ADR 0011 E1 / 0012's authoring-refusal spirit, adapted). The
+	 * voxel cell size is FIXED at 150cm (FFPSRArenaVoxelData::VoxelCellSizeCm) by the P1 plan — unlike the 2D bake
+	 * there is no "grow the cell size" escape valve on overflow, so this is a hard refusal, not a coarsen. The
+	 * plan's own default footprint (160x160 cells @ 100cm 2D = 16000x16000cm) voxelizes to 107x107x24 = ~275K
+	 * probes; these caps leave generous headroom above that before calling an arena "wildly oversized".
+	 */
+	constexpr int32 MaxVoxelDimPerAxis = 512;
+	constexpr int64 MaxVoxelTotal = 4000000;
+
+	/**
+	 * Voxelizes WorldStatic collision into a WORLD-space FFPSRArenaVoxelData (ADR 0009 결정 3, S2). Mirrors the 2D
+	 * bake's obstacle probe deliberately — same object type (ECC_WorldStatic), same overlap-test shape of query —
+	 * so this rides the SAME SourceHash as the 2D bake without redefining "what counts": FPSRArenaBakeHash.h's
+	 * ContributesToBake predicate already matches this probe's query set 1:1.
+	 *
+	 * WorldGridOrigin/Params are the SAME values BakeArenasInLevel already computed for the 2D Request
+	 * (Request.GridOrigin / Params.ArenaSizeCells/CellSize) — the two bakes share one arena footprint, just
+	 * discretized at two different FIXED cell sizes (100cm 2D, 150cm 3D).
+	 *
+	 * Returns false (with a human-readable OutError) on a budget overflow (see MaxVoxelDimPerAxis/MaxVoxelTotal) —
+	 * refused, never silently coarsened.
+	 */
+	bool VoxelizeArenaWorld(UWorld* World, const FVector& WorldGridOrigin, const FFPSRArenaGenParams& Params,
+		FFPSRArenaVoxelData& OutWorld, FString& OutError)
+	{
+		const float VoxelSize = FFPSRArenaVoxelData::VoxelCellSizeCm;
+		const float SizeX = Params.ArenaSizeCells.X * Params.CellSize;
+		const float SizeY = Params.ArenaSizeCells.Y * Params.CellSize;
+		const int32 DimX = FMath::Max(1, FMath::CeilToInt(SizeX / VoxelSize));
+		const int32 DimY = FMath::Max(1, FMath::CeilToInt(SizeY / VoxelSize));
+		const int32 DimZ = FMath::Max(1, FMath::CeilToInt(
+			(FFPSRArenaVoxelData::VoxelBelowOriginCm + FFPSRArenaVoxelData::VoxelAboveOriginCm) / VoxelSize));
+
+		const int64 TotalVoxels = static_cast<int64>(DimX) * DimY * DimZ;
+		if (DimX > MaxVoxelDimPerAxis || DimY > MaxVoxelDimPerAxis || TotalVoxels > MaxVoxelTotal)
+		{
+			OutError = FString::Printf(
+				TEXT("복셀 격자 %dx%dx%d (150cm 고정 셀) 이 예산을 넘는다(축<=%d, 총<=%lld) — 아레나 XY 크기를 줄일 것. ")
+				TEXT("복셀 셀 크기는 고정값이라 2D 베이크처럼 성기게 굽는 대신 거부한다."),
+				DimX, DimY, DimZ, MaxVoxelDimPerAxis, MaxVoxelTotal);
+			return false;
+		}
+
+		OutWorld.VoxelOrigin = FVector(WorldGridOrigin.X, WorldGridOrigin.Y,
+			WorldGridOrigin.Z - FFPSRArenaVoxelData::VoxelBelowOriginCm);
+		OutWorld.VoxelSize = VoxelSize;
+		OutWorld.DimX = DimX;
+		OutWorld.DimY = DimY;
+		OutWorld.DimZ = DimZ;
+		OutWorld.Occupancy.Init(0, FPSRHoverWindow::OccupancyWords(static_cast<int32>(TotalVoxels)));
+		OutWorld.FreeVoxels = 0;
+
+		FCollisionObjectQueryParams ObjParams;
+		ObjParams.AddObjectTypesToQuery(ECC_WorldStatic);
+		FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(FPSRArenaVoxelBake), false);
+		const FCollisionShape Box = FCollisionShape::MakeBox(FVector(VoxelSize * 0.5f)); // half-extent, tiles exactly
+
+		FScopedSlowTask SlowTask(static_cast<float>(DimZ), LOCTEXT("VoxelizeArenaSlowTask", "아레나 복셀 베이크 중..."));
+		SlowTask.MakeDialog();
+
+		for (int32 Z = 0; Z < DimZ; ++Z)
+		{
+			SlowTask.EnterProgressFrame(1.0f);
+			const float CenterZ = OutWorld.VoxelOrigin.Z + (Z + 0.5f) * VoxelSize;
+			for (int32 Y = 0; Y < DimY; ++Y)
+			{
+				const float CenterY = OutWorld.VoxelOrigin.Y + (Y + 0.5f) * VoxelSize;
+				for (int32 X = 0; X < DimX; ++X)
+				{
+					const float CenterX = OutWorld.VoxelOrigin.X + (X + 0.5f) * VoxelSize;
+					const int32 Idx = OutWorld.VoxelIndex(X, Y, Z);
+					if (World->OverlapAnyTestByObjectType(FVector(CenterX, CenterY, CenterZ), FQuat::Identity, ObjParams, Box, QueryParams))
+					{
+						FPSRHoverWindow::SetOccupied(OutWorld.Occupancy, Idx);
+					}
+					else
+					{
+						++OutWorld.FreeVoxels;
+					}
+				}
+			}
+		}
+		return true;
+	}
+}
+
 void FFPSRArenaAuthoringTool::BakeArenasInLevel()
 {
 	UWorld* World = GetEditorWorld();
@@ -629,10 +722,31 @@ void FFPSRArenaAuthoringTool::BakeArenasInLevel()
 		FFPSRFlowFieldSurfaceData WorldSurface;
 		Temp->ExtractSurfaceData(WorldSurface);
 
+		// ADR 0009 S2: voxelize the SAME arena footprint right after the 2D surface, before anything is written —
+		// a voxel-budget refusal must abort this arena's WHOLE bake (2D included), not leave Voxels stale while
+		// Surface updates (the half-write ADR 0012's write block below exists to prevent).
+		FFPSRArenaVoxelData WorldVoxels;
+		FString VoxelError;
+		if (!VoxelizeArenaWorld(World, Origin, Params, WorldVoxels, VoxelError))
+		{
+			Body += FString::Printf(TEXT("[%s] 실패 — 복셀 베이크가 거부됐습니다: %s\n\n"), *Arena->GetName(), *VoxelError);
+			++NumFailed;
+			continue;
+		}
+
 		FFPSRFlowFieldSurfaceData LocalSurface;
 		if (!UFPSRArenaBakeDataAsset::LocalizeSurface(WorldSurface, Arena->GetActorTransform(), LocalSurface))
 		{
 			Body += FString::Printf(TEXT("[%s] 실패 — 아레나 트랜스폼을 로컬로 접을 수 없습니다(회전/스케일). 출력 로그 참조.\n\n"),
+				*Arena->GetName());
+			++NumFailed;
+			continue;
+		}
+
+		FFPSRArenaVoxelData LocalVoxels;
+		if (!UFPSRArenaBakeDataAsset::LocalizeVoxels(WorldVoxels, Arena->GetActorTransform(), LocalVoxels))
+		{
+			Body += FString::Printf(TEXT("[%s] 실패 — 복셀 데이터를 로컬로 접을 수 없습니다(회전/스케일). 출력 로그 참조.\n\n"),
 				*Arena->GetName());
 			++NumFailed;
 			continue;
@@ -663,6 +777,7 @@ void FFPSRArenaAuthoringTool::BakeArenasInLevel()
 
 		Asset->Modify();
 		Asset->Surface = MoveTemp(LocalSurface);
+		Asset->Voxels = MoveTemp(LocalVoxels);
 		Asset->SourceHash = Digest.Hash;
 		Asset->SourceActorCount = Digest.ActorCount;
 		Asset->SourceLevel = FSoftObjectPath(Arena->GetTypedOuter<UWorld>());
@@ -671,12 +786,21 @@ void FFPSRArenaAuthoringTool::BakeArenasInLevel()
 		Asset->OpenCells = OpenCells;
 		Asset->MarkPackageDirty();
 
+		// ADR 0009 S2 리포트 수치: 복셀은 51,200 표면 엔트리보다도 커서(107x107x24 ≈ 27만) 더더욱 눈으로 볼
+		// 수 없다 — FreeVoxels/총수/점유율/바이트가 유일한 "이게 그럴듯한가" 창이다.
+		const int32 NumVoxels = Asset->Voxels.NumVoxels();
+		const int32 OccupiedVoxels = NumVoxels - Asset->Voxels.FreeVoxels;
+		const float OccupiedPct = (NumVoxels > 0) ? (100.0f * OccupiedVoxels / static_cast<float>(NumVoxels)) : 0.0f;
+		const int64 VoxelBytes = static_cast<int64>(Asset->Voxels.Occupancy.Num()) * static_cast<int64>(sizeof(uint64));
+
 		++NumBaked;
 		Body += FString::Printf(
-			TEXT("[%s] → %s\n  격자 %dx%d (셀 %.0fcm) · 열린 셀 %d / %d\n  소스 액터 %d개 (컴포넌트 %d) · 해시 %s\n\n"),
+			TEXT("[%s] → %s\n  격자 %dx%d (셀 %.0fcm) · 열린 셀 %d / %d\n  복셀 %dx%dx%d (셀 %.0fcm) · 자유 %d / %d (점유 %.1f%%) · %lld바이트\n  소스 액터 %d개 (컴포넌트 %d) · 해시 %s\n\n"),
 			*Arena->GetName(), *Asset->GetName(),
 			Asset->Surface.GridDimX, Asset->Surface.GridDimY, Asset->Surface.CellSize,
 			OpenCells, NumCells,
+			Asset->Voxels.DimX, Asset->Voxels.DimY, Asset->Voxels.DimZ, Asset->Voxels.VoxelSize,
+			Asset->Voxels.FreeVoxels, NumVoxels, OccupiedPct, VoxelBytes,
 			Digest.ActorCount, Digest.ComponentCount, *Digest.Hash.Left(12));
 
 		// 같은 내용을 로그에도 남긴다. 다이얼로그는 닫는 순간 사라지므로, 나중에 "그때 몇 개가 잡혔더라"를
@@ -686,6 +810,11 @@ void FFPSRArenaAuthoringTool::BakeArenasInLevel()
 			*Arena->GetName(), *Asset->GetName(),
 			Asset->Surface.GridDimX, Asset->Surface.GridDimY, Asset->Surface.CellSize,
 			OpenCells, NumCells, Digest.ActorCount, Digest.ComponentCount, *Digest.Hash);
+		UE_LOG(LogFPSR, Log,
+			TEXT("[Arena] BAKE %s -> %s: voxels %dx%dx%d cell=%.0f, free %d/%d (%.1f%% occupied), %lld bytes"),
+			*Arena->GetName(), *Asset->GetName(),
+			Asset->Voxels.DimX, Asset->Voxels.DimY, Asset->Voxels.DimZ, Asset->Voxels.VoxelSize,
+			Asset->Voxels.FreeVoxels, NumVoxels, OccupiedPct, VoxelBytes);
 
 		// 액터가 거의 안 잡혔다는 것은 대개 콜리전 설정 사고다(불변식 2: 콜리전이 곧 마스크). 에셋
 		// 검증에서도 잡지만, 방금 구운 사람 눈앞에 띄우는 편이 훨씬 빠르다.

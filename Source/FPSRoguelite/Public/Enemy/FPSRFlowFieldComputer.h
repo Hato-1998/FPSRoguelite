@@ -263,7 +263,7 @@ public:
 	// --- Phase A stage-transition carry-over: nearest-open-cell snap (D7 — array-only, NO world query) ---
 
 	/** Nearest OPEN (walkable, unblocked) location to InWorld on THIS grid — the live adopted arena surface (post-
-	 *  AdoptArenaSurface, so destructible footprints / door stamps are reflected). If InWorld's own cell already has
+	 *  AdoptArenaField (구 AdoptArenaSurface), so destructible footprints / door stamps are reflected). If InWorld's own cell already has
 	 *  an open surface, returns InWorld's XY UNCHANGED (only Z is corrected to that surface's baked floor, so a
 	 *  stale Z from the arena the caller carried the candidate over from is never dragged along); otherwise a
 	 *  deterministic outward ring search (FindNearestOpenCell, Chebyshev radius 1..MaxRadiusCells) finds the nearest
