@@ -354,7 +354,11 @@ void AFPSREnemyBase::ServerRelocateForStageCarry(const FVector& NewLocation)
 	FVector RestLocation = NewLocation;
 	if (Capsule)
 	{
-		RestLocation.Z += Capsule->GetScaledCapsuleHalfHeight() + GroundRestClearance;
+		// + CurrentHoverHeight: a hover archetype's rest pose FLOATS. Omitting it planted the carried swarm at
+		// ground rest for the whole (frozen) transition, then the spring re-lifted everyone after FadeIn — the
+		// observed "sink at swap, rise after transition" (PIE feedback 2026-08-21). Placing at the full hover rest
+		// makes the first post-freeze ApplyGravity a no-op: the enemy is already exactly at its target.
+		RestLocation.Z += Capsule->GetScaledCapsuleHalfHeight() + GroundRestClearance + CurrentHoverHeight;
 	}
 	SetActorLocation(RestLocation, false, nullptr, ETeleportType::TeleportPhysics);
 
@@ -363,6 +367,11 @@ void AFPSREnemyBase::ServerRelocateForStageCarry(const FVector& NewLocation)
 	bGrounded = false;
 	GroundRecheckTimer = 0.0f;
 	KnockbackVelocityXY = FVector::ZeroVector;
+	// Hover spring continuity across the swap: rest target = the pose we just placed (NOT the previous arena's
+	// cached height), rate = 0 (any pre-swap glide momentum is meaningless at the new location). Without this the
+	// v1 amortized branch could spring toward the OLD arena's HoverRestZ for one recheck window after unfreeze.
+	HoverRestZ = static_cast<float>(RestLocation.Z);
+	HoverSpringRateZ = 0.0f;
 }
 
 
@@ -637,7 +646,15 @@ void AFPSREnemyBase::TickServerMovement(const FFPSRServerMoveContext& Ctx)
 	if (!bKnockbackActive && Dir.SizeSquared() > KINDA_SMALL_NUMBER)
 	{
 		const FVector Normalized = Dir.GetSafeNormal();
-		const float MoveDist = GetEffectiveMoveSpeed() * Ctx.ScaledDelta;
+		// Steering-magnitude speed scale (PIE feedback 2026-08-21, stop-ring jitter): normalizing Dir made ANY
+		// nonzero steering a full-speed move, so at the stop ring — where the flow term is zeroed and only the
+		// separation push remains — neighbours shoved past each other at full speed and flipped push direction
+		// every pass (the observed left-right vibration). Scaling by the pre-normalize magnitude, clamped at 1 so
+		// a flow-driven chase keeps exactly its speed, lets a separation-only nudge taper to zero toward the
+		// radius edge: the crowd relaxes to its spacing instead of oscillating around it. The seek beeline and
+		// exit-path steering hand in vectors at/above unit length -> clamp = full speed, unchanged.
+		const float SteerScale = FMath::Min(1.0f, static_cast<float>(Dir.Size()));
+		const float MoveDist = GetEffectiveMoveSpeed() * Ctx.ScaledDelta * SteerScale;
 
 		// Walk ALONG the ground slope (the swarm equivalent of CharacterMovement's MoveAlongFloor): project the steering
 		// onto the last-known ground plane and move at full speed along it, so the enemy ascends/descends ramps and stair

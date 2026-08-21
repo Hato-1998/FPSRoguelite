@@ -14,6 +14,7 @@
 #include "Core/FPSRPlayerState.h"
 #include "Core/FPSRPlayerController.h"
 #include "Run/FPSRRunDirectorSubsystem.h"
+#include "Settings/FPSREnemySwarmSettings.h" // separation tuning (designer knob, read once per movement pass)
 #include "Arena/FPSRArenaActor.h" // ADR 0010 D6: arena-bounds spawn gate (PassesCommonSpawnGates)
 #include "Engine/World.h"
 #include "EngineUtils.h"
@@ -397,6 +398,13 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 		ContactDamage = FMath::Lerp(25.0f, 50.0f, Alpha);
 	}
 
+	// Separation tuning, snapshotted ONCE per pass (designer knob, read at use so PIE edits hit enemies already on
+	// the field). The snapshot is what keeps the hash build and the 3x3 neighbour query on the SAME cell size even
+	// if the setting is edited mid-session; the ClampMin(50) on the property keeps the hash from degenerating.
+	const UFPSREnemySwarmSettings* SwarmSettings = GetDefault<UFPSREnemySwarmSettings>();
+	const float SeparationRadius = FMath::Max(50.0f, SwarmSettings->SeparationRadius);
+	const float SeparationStrength = FMath::Max(0.0f, SwarmSettings->SeparationStrength);
+
 	// Build the per-pass agent arrays + uniform-grid spatial hash (all valid active enemies) for separation.
 	// Reuse the member scratch (Reset keeps capacity) so the 500-enemy batch doesn't realloc every frame (W1 P2-4).
 	TArray<AFPSREnemyBase*>& Agents = MovementAgentsScratch;
@@ -677,7 +685,7 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 
 			// Combine flow + separation; TickServerMovement normalizes and moves at CurrentMoveSpeed. Face the player
 			// (FlowDir points toward them, direct near them) — NOT MoveDir, whose separation jitter would spin the enemy.
-			FVector MoveDir = Desired + ComputeSeparation(i, Locations, SpatialHash) * SeparationStrength;
+			FVector MoveDir = Desired + ComputeSeparation(i, Locations, SpatialHash, SeparationRadius) * SeparationStrength;
 			MoveDir.Z = 0.0f;
 
 			FFPSRServerMoveContext MoveCtx;
@@ -704,7 +712,7 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 }
 
 
-FVector UFPSREnemySpawnSubsystem::ComputeSeparation(int32 AgentIndex, const TArray<FVector>& Locations, const TMap<FIntPoint, TArray<int32>>& SpatialHash) const
+FVector UFPSREnemySpawnSubsystem::ComputeSeparation(int32 AgentIndex, const TArray<FVector>& Locations, const TMap<FIntPoint, TArray<int32>>& SpatialHash, float SeparationRadius) const
 {
 	const FVector Origin = Locations[AgentIndex];
 	const int32 CX = FMath::FloorToInt(Origin.X / SeparationRadius);

@@ -209,8 +209,9 @@ private:
 	/** Batched server movement pass with distance LOD (replaces per-actor enemy Tick). */
 	void TickEnemyMovement(float DeltaTime);
 
-	/** Sum a repulsion vector from nearby enemies (anti-clumping), using the per-pass spatial hash. */
-	FVector ComputeSeparation(int32 AgentIndex, const TArray<FVector>& Locations, const TMap<FIntPoint, TArray<int32>>& SpatialHash) const;
+	/** Sum a repulsion vector from nearby enemies (anti-clumping), using the per-pass spatial hash. SeparationRadius
+	 *  must be the SAME value the pass built the hash with (it is the hash cell size — see TickEnemyMovement). */
+	FVector ComputeSeparation(int32 AgentIndex, const TArray<FVector>& Locations, const TMap<FIntPoint, TArray<int32>>& SpatialHash, float SeparationRadius) const;
 
 	/** Check if this subsystem has server authority. */
 	bool HasServerAuthority() const;
@@ -261,10 +262,9 @@ private:
 	/** Across-seam lookahead (cm) added to the bubble so a cross-door chaser replicates a moment before it reaches the player. */
 	static constexpr float NetCullSeamMarginCm = 4000.0f; // cm (40m)
 
-	// Separation (anti-clumping) tuning. Cell size for the spatial hash == SeparationRadius so a 3x3
-	// neighbor scan covers the full radius.
-	static constexpr float SeparationRadius = 120.0f;   // cm
-	static constexpr float SeparationStrength = 1.5f;   // weight of separation vs the unit flow direction
+	// Separation (anti-clumping) tuning lives in UFPSREnemySwarmSettings (Project Settings, designer knob — PIE
+	// feedback 2026-08-21: the constexpr pair here made crowd spacing a recompile). Cell size for the spatial hash
+	// == the settings' SeparationRadius, snapshotted ONCE per movement pass so hash build and query always agree.
 
 	/** Max enemies allowed to deal contact damage to a single player per pass (attack token, Game.MD §2-6/§5). */
 	static constexpr int32 AttackTokenLimit = 10;
