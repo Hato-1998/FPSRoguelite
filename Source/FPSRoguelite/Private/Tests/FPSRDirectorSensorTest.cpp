@@ -9,7 +9,7 @@
 #include "Enemy/FPSRRangedEnemyBase.h"
 #include "Boss/FPSRBossBase.h"
 #include "Hero/FPSRCharacter.h"
-#include "Door/FPSRDoor.h"
+#include "Arena/FPSRArenaDestructible.h"
 #include "Run/Mission/FPSRMissionActor.h"
 #include "Enemy/FPSRFlowFieldComputer.h" // a concrete, worldless-instantiable UObject for the lifecycle keys
 
@@ -66,7 +66,7 @@ bool FFPSRDirectorSensorSourceGatingTest::RunTest(const FString& Parameters)
 	const AActor* Ranged = GetDefault<AFPSRRangedEnemyBase>();
 	const AActor* Boss = GetDefault<AFPSRBossBase>();
 	const AActor* Player = GetDefault<AFPSRCharacter>();
-	const AActor* Door = GetDefault<AFPSRDoor>();
+	const AActor* Destructible = GetDefault<AFPSRArenaDestructible>(); // any AFPSRDestructible; AFPSRDoor retired 2026-08-24
 	const AActor* Mission = GetDefault<AFPSRMissionActor>();
 
 	// Classification (enum has no TestEqual overload -> compare with ==).
@@ -75,7 +75,7 @@ bool FFPSRDirectorSensorSourceGatingTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("boss -> Boss (boss is an ACharacter, not an AFPSREnemyBase)"), ClassifyDamageSource(Boss, Player) == EFPSRDamageSourceClass::Boss);
 	TestTrue(TEXT("self (instigator==victim) -> Self"), ClassifyDamageSource(Player, Player) == EFPSRDamageSourceClass::Self);
 	TestTrue(TEXT("other player -> FriendlyFire"), ClassifyDamageSource(Player, Enemy /*any distinct victim*/) == EFPSRDamageSourceClass::FriendlyFire);
-	TestTrue(TEXT("door -> Door"), ClassifyDamageSource(Door, Player) == EFPSRDamageSourceClass::Door);
+	TestTrue(TEXT("destructible -> Door"), ClassifyDamageSource(Destructible, Player) == EFPSRDamageSourceClass::Door);
 	TestTrue(TEXT("mission -> Mission"), ClassifyDamageSource(Mission, Player) == EFPSRDamageSourceClass::Mission);
 	TestTrue(TEXT("null instigator -> Env"), ClassifyDamageSource(nullptr, Player) == EFPSRDamageSourceClass::Env);
 

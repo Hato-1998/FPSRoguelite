@@ -30,7 +30,10 @@ public:
 
 	/** Server: begin streaming in LevelName (an authored sublevel of the persistent map) and, on verified collision-ready,
 	 *  bake MapId's flow field + re-cache spawn points + open its boundary. Idempotent (ignores already-pending/ready maps).
-	 *  Called from AFPSRDoor::HandleBroken. No-op off-authority / with an invalid MapId or level name. */
+	 *  No-op off-authority / with an invalid MapId or level name.
+	 *
+	 *  ⚠️ CALLER-LESS since 2026-08-24 — its only caller, AFPSRDoor, was retired (the suppressor replaces it). Parked
+	 *  rather than deleted, like the rest of the multimap code ADR 0010 shelved ("존치하되 쓰지 않는다"). */
 	void RequestStreamIn(const FGameplayTag& MapId, FName LevelName);
 
 	/** True once MapId has streamed in and its collision was verified ready (field baked, boundary opened). */

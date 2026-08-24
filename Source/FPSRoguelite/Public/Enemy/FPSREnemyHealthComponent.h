@@ -54,8 +54,8 @@ public:
 	/** Health change (post-clamp), fired on every applied hit including the lethal one. Fires on the SERVER from the
 	 *  authoritative damage path (ApplyDamage) AND on CLIENTS from OnRep_Health once replicated Health/MaxHealth
 	 *  arrive — so a client HUD / world-space health bar can bind here directly (B12). MaxHealth now replicates
-	 *  (below), so the NewHealth/MaxHealth percent is valid on both sides. (AFPSRDoor still gates its handler to
-	 *  authority, so the door cosmetic stays server-driven and doesn't double-fire.) */
+	 *  (below), so the NewHealth/MaxHealth percent is valid on both sides. (AFPSRDoor — retired 2026-08-24 — used to
+	 *  gate its handler to authority so the door cosmetic stayed server-driven; see git history.) */
 	UPROPERTY(BlueprintAssignable, Category = "FPSR|Enemy")
 	FFPSREnemyHealthChangedSignature OnHealthChanged;
 

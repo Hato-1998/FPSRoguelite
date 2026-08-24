@@ -2,15 +2,17 @@
 
 #include "Misc/AutomationTest.h"
 #include "Destructible/FPSRDestructible.h"
-#include "Door/FPSRDoor.h"
+#include "Arena/FPSRArenaDestructible.h"
 
 #if WITH_AUTOMATION_TESTS
 
 // Golden net for the door -> destructible generalization (ADR 0010 D7, "파괴 가능 프롭 = 문의 일반화"). Pure/CDO
 // checks only — no world, no SpawnActor (mirrors FPSRDirectorSensorTest.cpp's CDO-as-classifier-input style):
 //   ComputeDamageStage — the pure threshold-count helper extracted from the old inline AFPSRDoor::HandleHealthChanged.
-//   Inheritance        — AFPSRDoor's CDO IS-A AFPSRDestructible (the generalization actually happened as real
-//                         inheritance, not just a parallel class with the same shape).
+//   Inheritance        — AFPSRArenaDestructible's CDO IS-A AFPSRDestructible (the generalization actually happened
+//                         as real inheritance, not just a parallel class with the same shape). This used to assert it
+//                         through AFPSRDoor, the class the base was extracted FROM; the door was retired 2026-08-24
+//                         (the suppressor replaces it) so the arena prop is now the subclass that proves the same thing.
 //   Empty-by-default   — AFPSRDestructible's own CDO carries no Rewards (a plain destructible = pure obstacle,
 //                         no reward, until an author opts in per placed instance).
 //   Unbroken-by-default — AFPSRDestructible's own CDO starts IsBroken() == false (F2): ServerReset/ClearBrokenState
@@ -43,11 +45,11 @@ bool FFPSRDestructibleTest::RunTest(const FString& Parameters)
 		TestEqual(TEXT("empty thresholds, Pct 0.0 -> stage 0"), AFPSRDestructible::ComputeDamageStage(Empty, 0.0f), 0);
 	}
 
-	// --- (3) AFPSRDoor's CDO IS-A AFPSRDestructible — the generalization is real inheritance, not merely a
-	//         parallel class that happens to look the same. -------------------------------------------------
+	// --- (3) AFPSRArenaDestructible's CDO IS-A AFPSRDestructible — the generalization is real inheritance, not
+	//         merely a parallel class that happens to look the same. ---------------------------------------
 	{
-		const AFPSRDoor* DoorCDO = GetDefault<AFPSRDoor>();
-		TestTrue(TEXT("AFPSRDoor CDO IsA AFPSRDestructible"), DoorCDO->IsA<AFPSRDestructible>());
+		const AFPSRArenaDestructible* ArenaPropCDO = GetDefault<AFPSRArenaDestructible>();
+		TestTrue(TEXT("AFPSRArenaDestructible CDO IsA AFPSRDestructible"), ArenaPropCDO->IsA<AFPSRDestructible>());
 	}
 
 	// --- (4) AFPSRDestructible's own CDO carries no Rewards by default (pure obstacle, opt-in per instance). ---

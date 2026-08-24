@@ -16,6 +16,10 @@ class UFPSRDestructibleReward;
  *  on-kill fragments / lifesteal, exactly like the pre-refactor door), progressive damage-stage presentation,
  *  replicated broken state (Push Model), and a polymorphic Instanced Rewards array (ADR 0010 D7) paid out on break.
  *
+ *  ⚠️ AFPSRDoor itself was RETIRED 2026-08-24 (user decision — the suppressor replaces it). Every AFPSRDoor mention
+ *  below is HISTORY explaining why this base is shaped the way it is, not a live subclass; the surviving subclass is
+ *  AFPSRArenaDestructible. See git history for the door's own implementation.
+ *
  *  C++ owns gameplay only (collision/visibility on break, health, replication); the mesh and the broken
  *  presentation stay content (Game.MD §2 — no hardcoded asset paths). This base deliberately creates NO mesh
  *  subobject: which part(s) of a destructible get hidden/collision-disabled on break differs by subclass

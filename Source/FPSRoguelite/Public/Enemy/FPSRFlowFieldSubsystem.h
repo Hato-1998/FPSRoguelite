@@ -155,8 +155,14 @@ public:
 
 	/** U (P-B): a breakable seam door was destroyed (server) — open the unified grid's cross-seam edges the door spanned
 	 *  and recompute NOW so swarm flow + the origin-aware combat gate cross it immediately. No-op with no unified field
-	 *  (single-map / pre-content) or off authority — the closed seam kept the slots isolated, so nothing changes. Called by
-	 *  AFPSRDoor::HandleBroken; the door->cell mapping is UFPSRFlowFieldComputer::MapDoorSeamCellPairs. */
+	 *  (single-map / pre-content) or off authority — the closed seam kept the slots isolated, so nothing changes. The
+	 *  door->cell mapping is UFPSRFlowFieldComputer::MapDoorSeamCellPairs.
+	 *
+	 *  ⚠️ CALLER-LESS since 2026-08-24 — its only caller was AFPSRDoor::HandleBrokenAuthority, and the door class was
+	 *  retired (the suppressor replaces it). Kept rather than deleted, on the same footing as the rest of the U
+	 *  multi-slot seam code ADR 0010 shelved ("존치하되 쓰지 않는다"): this is the multi-SLOT seam path, which
+	 *  NotifyArenaCellsOpened below deliberately does NOT cover (an arena is always a single grid). Anything that
+	 *  opens a seam BETWEEN slots has to come back through here. */
 	void NotifyDoorBroken(const AActor* Door);
 
 	/** ADR 0010 D7: an arena destructible broke and its AUTHORED cells (FFPSRArenaCells::ComputeDestructibleCells)
