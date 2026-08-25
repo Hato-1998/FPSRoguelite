@@ -22,6 +22,23 @@ enum class EFPSRFieldQuery : uint8; // U P-E: front path-distance query status (
 /** Lightweight server-authoritative object pool + spawn director for swarm enemies (P2-A).
  *  Pooling reuses dormant actors; director keeps ~TargetAliveCount alive around players.
  *  P2-B1: Batched movement + LOD driven by FTickableGameObject pass (replaces per-actor enemy Tick). */
+/** One dwelling corpse: an enemy past EnterDyingState (gameplay over, still rendering + replicating) that has not
+ *  yet returned to the dormant pool. Enemy is a real UPROPERTY — during the dwell this list is the ONLY container
+ *  holding it (BeginDying already pulled it out of ActiveEnemies, and it does not reach DormantPool until
+ *  FinishDyingEnemy), so unlike this subsystem's per-frame scratch arrays it must not rely on some other reference
+ *  outliving it. Matches how DormantPool/ActiveEnemies declare their own pooled-actor references. */
+USTRUCT()
+struct FFPSRDyingEnemy
+{
+	GENERATED_BODY()
+
+	UPROPERTY(Transient)
+	TObjectPtr<AFPSREnemyBase> Enemy = nullptr;
+
+	/** World seconds at which this corpse's dwell ends and FinishDyingEnemy returns it to the pool. */
+	float DeadlineWorldSeconds = 0.0f;
+};
+
 UCLASS()
 class FPSROGUELITE_API UFPSREnemySpawnSubsystem : public UWorldSubsystem, public FTickableGameObject
 {
@@ -53,7 +70,20 @@ public:
 	/** Release an enemy back to the dormant pool. */
 	void ReleaseEnemy(AFPSREnemyBase* Enemy);
 
-	/** Release every active enemy back to the dormant pool (server). Used by mission/debug flows. */
+	/** Server (death-dwell teardown split): the SOLE entry point for the DEATH path — called once, from
+	 *  AFPSREnemyBase::HandleDeath. Immediately pulls Enemy OUT of ActiveEnemies (so the very next movement/attack
+	 *  pass already skips it — it can't move, can't attack, and its collision-off corpse can never front-line-shield
+	 *  the swarm behind it — LineTraceMulti stops at the first blocking hit) and calls Enemy->EnterDyingState()
+	 *  (gameplay ends now), then schedules the LATER presentation teardown (Deactivate + return to DormantPool) at
+	 *  Now + Enemy->GetDeathDwellSeconds() via the DyingEnemies dwell list, swept every TickEnemyMovement pass
+	 *  (SweepDyingEnemies). This is NOT a replacement for ReleaseEnemy — every OTHER teardown (pool release /
+	 *  rear-drain / kill-Z recycle / stage-carry overflow) is not a "death" in the health-component sense and stays
+	 *  an immediate ReleaseEnemy. Null-safe. */
+	void BeginDying(AFPSREnemyBase* Enemy);
+
+	/** Release every active enemy back to the dormant pool (server). Used by mission/debug flows. Also flushes any
+	 *  corpse still dwelling (BeginDying already pulled it out of ActiveEnemies, so this doesn't happen for free —
+	 *  see the .cpp) so a "clear the board now" call can't leave a corpse to leak into the next run/stage. */
 	void ReleaseAllEnemies();
 
 	/** Server (Phase A stage-transition redesign): carry the leftover swarm over to the new arena instead of
@@ -206,6 +236,19 @@ private:
 	int32 DrainRearEnemies(const TArray<FGameplayTag>& OccupiedMaps,
 		const TMap<FGameplayTag, TArray<const AFPSREnemySpawnPoint*>>& FrontPointsByMap, int32 MaxToRelease, float Now);
 
+	/** Server (death-dwell): finish every dwelling corpse whose DeadlineWorldSeconds has passed (Deactivate + return
+	 *  to DormantPool) and prune any entry whose actor went invalid. Called once per TickEnemyMovement pass, ABOVE
+	 *  that function's ActiveEnemies==0 early-return (see the .cpp) so a corpse dwells out even as the last enemy
+	 *  standing, gated on the SAME freeze/transition check the movement+attack pass uses (a new FTimerHandle would
+	 *  need its own PauseTimer wiring against the global freeze gate; piggybacking on this already-gated per-frame
+	 *  pass gets that for free). */
+	void SweepDyingEnemies(float Now);
+
+	/** Server: the shared "a corpse's dwell is over" recovery point (Deactivate + DormantPool.Add). Used by
+	 *  SweepDyingEnemies (deadline reached), BeginDying (MaxDyingEnemies overflow eviction), and ReleaseAllEnemies
+	 *  (bulk-flush the whole dwell list). No-op on an already-invalid Enemy. */
+	void FinishDyingEnemy(AFPSREnemyBase* Enemy);
+
 	/** Batched server movement pass with distance LOD (replaces per-actor enemy Tick). */
 	void TickEnemyMovement(float DeltaTime);
 
@@ -321,6 +364,22 @@ private:
 	/** Set of currently active (visible, enabled) enemies. */
 	UPROPERTY(Transient)
 	TSet<TObjectPtr<AFPSREnemyBase>> ActiveEnemies;
+
+	// --- Death-dwell (server-only). A corpse leaves ActiveEnemies THE INSTANT it dies (BeginDying) but isn't
+	//     returned to DormantPool until its Death cosmetic has had time to actually be seen. A THIRD bucket rather
+	//     than a flag on the existing two: ActiveEnemies membership is exactly "may move/attack this pass" (the
+	//     movement/attack loop's own iteration set, TickEnemyMovement) and DormantPool membership is exactly
+	//     "available for AcquireEnemy" — a dying-but-not-yet-pooled corpse is neither, and forcing it into either
+	//     would need extra per-enemy filtering added to the 500-enemy hot loop / the pool reuse scan. ---
+	/** Corpses past EnterDyingState, pending their LATER Deactivate+DormantPool return. Bounded by MaxDyingEnemies
+	 *  (BeginDying evicts the oldest entry over the cap via FinishDyingEnemy); swept every TickEnemyMovement pass
+	 *  (SweepDyingEnemies). */
+	UPROPERTY(Transient)
+	TArray<FFPSRDyingEnemy> DyingEnemies;
+	/** Hard cap on concurrent dwelling corpses — generous headroom at this project's ~200-300-alive swarm scale
+	 *  (Game.MD §5: GlobalAliveCap=200); BeginDying finishes the OLDEST entry immediately (the same FinishDyingEnemy
+	 *  path SweepDyingEnemies uses) on overflow rather than growing this list unbounded. */
+	static constexpr int32 MaxDyingEnemies = 48;
 
 	/** Timer handle for the director tick. */
 	FTimerHandle DirectorTimerHandle;

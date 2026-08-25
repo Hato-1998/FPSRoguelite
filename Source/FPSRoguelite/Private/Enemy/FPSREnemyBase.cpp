@@ -16,6 +16,7 @@
 #include "Components/WidgetComponent.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
+#include "EngineUtils.h" // TActorIterator (debug ForceAnimState command at the end of this file)
 #include "GameFramework/PlayerController.h"
 #include "ProfilingDebugging/CsvProfiler.h" // CSV_PROFILER_STATS gate for the metrics registry calls below
 #include "Settings/FPSRPlaceholderVisualSettings.h"
@@ -124,6 +125,18 @@ void AFPSREnemyBase::BeginPlay()
 		// death cosmetics from its own path — HandleDeath calls HandleDeathCosmetic directly, since OnRep does not
 		// run on the server). Enters the Death animation state. Harmless when no AnimProfile is set.
 		HealthComponent->OnDeathCosmetic.AddDynamic(this, &AFPSREnemyBase::HandleDeathCosmetic);
+		// Hit-flash cosmetic (U20 CPD slot 4): fires on BOTH server (ApplyDamage) and clients (OnRep_Health), unlike
+		// OnDeathCosmetic above — see HandleHealthChangedForHitFlash's own comment for the pool-reuse guard this needs.
+		HealthComponent->OnHealthChanged.AddDynamic(this, &AFPSREnemyBase::HandleHealthChangedForHitFlash);
+
+		// Seed the edge tracker from the health that is ALREADY there. Leaving it at its -1 default makes the first
+		// observation structurally unable to be a "decrease", so a client would swallow the first hit of an actor's
+		// first life: the initial replicated Health equals the archetype default, so no initial OnRep_Health fires to
+		// prime the tracker, and the first real damage OnRep then compares against -1. On the server the component's
+		// own BeginPlay has already set Health = MaxHealth by the time this actor BeginPlay body runs; on a client the
+		// initial replicated value is applied before BeginPlay. A late-relevancy joiner seeds from the already-damaged
+		// value, which is also correct — it just means no flash for damage it never witnessed.
+		LastHealthForHitFlash = HealthComponent->GetHealth();
 	}
 
 	// Per-actor animation phase (0..1) derived from the actor id so pooled enemies don't animate in lockstep (U20).
@@ -134,7 +147,7 @@ void AFPSREnemyBase::BeginPlay()
 	// Written here (BeginPlay runs on every machine with rendering) and never cleared: CPD survives pooling reuse.
 	if (Mesh)
 	{
-		Mesh->SetCustomPrimitiveDataFloat(FPSRVATAnim::CPDSlot_Phase, AnimPhase);
+		Mesh->SetCustomPrimitiveDataFloat(FPSRAnimCPD::CPDSlot_Phase, AnimPhase);
 	}
 
 	// Bind the world-space health bar / floating-damage widget to the health component once (server + clients).
@@ -213,13 +226,46 @@ void AFPSREnemyBase::InitHealthBarWidget()
 	OnHealthBarReady();
 }
 
+#if !UE_BUILD_SHIPPING
+void AFPSREnemyBase::DebugForceAnimState(EFPSRAnimState State, bool bPin)
+{
+	// Bypass EVERY gate SetAnimState applies (dedupe, one-shot re-entry guard, the attack hold window) and push the
+	// CPD contract straight at the profile. That is the whole point: it isolates "the material does not react" from
+	// "the state driver never asked it to". Re-applies on every call, so a repeated Attack must visibly restart.
+	if (!AnimProfile || !Mesh)
+	{
+		return;
+	}
+	// Set the pin BEFORE applying, so no driver write can slip between the two. Held across pool reuse on purpose:
+	// a debug session pins once and expects it to stay pinned until it is explicitly cleared.
+	bDebugAnimPinned = bPin;
+	const UWorld* World = GetWorld();
+	const float Rate = IsOneShotState(State)
+		? 1.0f / FMath::Max(KINDA_SMALL_NUMBER, (State == EFPSRAnimState::Death) ? DeathDwellSeconds : AttackAnimHoldSeconds)
+		: 1.0f;
+	CurrentAnimState = State;
+	CurrentSpeedBucket = FMath::Clamp(static_cast<int32>(Rate * FPSRAnimCPD::SpeedBucketCount), 0, FPSRAnimCPD::SpeedBucketCount - 1);
+	AnimOneShotEnterTime = IsOneShotState(State) ? (World ? World->GetTimeSeconds() : 0.0f) : -1.0f;
+	AnimOneShotCycleSeconds = IsOneShotState(State) ? (1.0f / FMath::Max(KINDA_SMALL_NUMBER, Rate)) : -1.0f;
+	AnimProfile->ApplyAnimState(Mesh, State, Rate, AnimPhase);
+}
+#endif // !UE_BUILD_SHIPPING
+
+void AFPSREnemyBase::SetHealthBarVisible(bool bVisible)
+{
+	if (UWidgetComponent* WidgetComp = FindComponentByClass<UWidgetComponent>())
+	{
+		WidgetComp->SetHiddenInGame(!bVisible);
+	}
+}
+
 void AFPSREnemyBase::HandleDeath(AActor* DeadActor, AActor* Killer)
 {
 	// Death cosmetics for the listen-server host / standalone: OnDeathCosmetic only fires from OnRep_bDead, which
 	// never runs on authority, so without this the host is the one machine that never plays the death state (remote
-	// clients do). Mirrors AFPSRBossBase::HandleDeath. Currently invisible on BOTH sides because ReleaseEnemy below
-	// hides the actor in the same frame (the known Stage-3 death-dwell dependency documented on HandleDeathCosmetic);
-	// calling it here means Stage-3 lands with host/client parity instead of regressing the host only.
+	// clients do). Mirrors AFPSRBossBase::HandleDeath. Now actually VISIBLE on both sides (previously invisible: the
+	// old immediate ReleaseEnemy below hid the actor the same frame) — BeginDying keeps the actor visible/replicating
+	// for GetDeathDwellSeconds() before its LATER Deactivate(), see BeginDying/EnterDyingState.
 	HandleDeathCosmetic();
 
 	if (UWorld* World = GetWorld())
@@ -231,11 +277,28 @@ void AFPSREnemyBase::HandleDeath(AActor* DeadActor, AActor* Killer)
 
 		if (UFPSREnemySpawnSubsystem* Sub = World->GetSubsystem<UFPSREnemySpawnSubsystem>())
 		{
-			Sub->ReleaseEnemy(this);
+			// Death is the ONE teardown path that is NOT an immediate ReleaseEnemy: BeginDying pulls this actor out
+			// of ActiveEnemies right now (so it can't move/attack/shield the swarm) but defers the hide+pool-return
+			// to its death-dwell deadline, so the Death cosmetic just triggered above actually gets seen. Every
+			// OTHER teardown (pool release / rear-drain / kill-Z / stage-carry overflow) stays an immediate
+			// ReleaseEnemy — see the spawn subsystem's BeginDying doc comment for the full call-site reasoning.
+			Sub->BeginDying(this);
 			return;
 		}
 	}
 	Destroy();
+}
+
+void AFPSREnemyBase::EnterDyingState()
+{
+	// Gameplay ends NOW; presentation does not — see this function's header doc for the full EnterDyingState vs.
+	// Deactivate role split. No hide / no SetNetDormancy here (unlike Deactivate): bDead already replicated before
+	// HandleDeath ever ran (the health component's ApplyDamage->OnDeath fires first), so a remote client's own
+	// OnRep_bDead -> HandleDeathCosmetic needs this actor to keep rendering/replicating for the dwell window to be
+	// seen. Collision off so a dying enemy can never deal another contact hit, and — the concrete swarm-scale
+	// motivation — a front-row corpse can no longer shield the enemies behind it from LineTraceMulti (which stops at
+	// the first blocking hit) or from the movement/attack pass's stop-distance queries.
+	SetActorEnableCollision(false);
 }
 
 void AFPSREnemyBase::Activate(const FVector& Location)
@@ -276,6 +339,9 @@ void AFPSREnemyBase::Activate(const FVector& Location)
 	bLastForwardBlocked = false;
 	LastAttackTime = -1000.0f; // CanAttack's own cooldown gate reads this (unrelated to the dormant pursuit fields
 	                           // above) — reset so a reused actor doesn't inherit a prior life's cooldown clock
+	AttackAnimHoldUntil = -1.0f; // same reasoning as LastAttackTime just above — a reused actor must not inherit a
+	                             // prior life's walk/idle-suppression window (a short-lived corpse reused shortly
+	                             // after dwelling could otherwise spawn already "holding" for its remaining span)
 	VerticalVelocity = 0.0f; // reset fall state for the reused actor
 	bGrounded = false;       // re-check ground on the first update (may spawn on a rooftop)
 	GroundRecheckTimer = 0.0f;
@@ -289,7 +355,21 @@ void AFPSREnemyBase::Activate(const FVector& Location)
 	// state overrides any stale Death), so this authority-side reset covers the standalone / listen-server host.
 	CurrentAnimState = EFPSRAnimState::Idle;
 	CurrentSpeedBucket = -1;
+	AnimOneShotEnterTime = -1.0f;
+	AnimOneShotCycleSeconds = -1.0f;
 	LastRecvTime = -1.0f;
+	SetHealthBarVisible(true); // reverse of HandleDeathCosmetic's hide — the widget survives pooling, the bind doesn't rerun
+	// CPD survives pooling reuse (see the phase write in BeginPlay), so a prior life's hit stamp would otherwise ride
+	// into this one and flash an enemy the instant it respawns — CPDSlot_LastHitTime's contract is "this life".
+	if (AnimProfile && Mesh)
+	{
+		Mesh->SetCustomPrimitiveDataFloat(FPSRAnimCPD::CPDSlot_LastHitTime, 0.0f);
+	}
+	// HealthComponent->ResetForReuse() above already resynced this via its OnHealthChanged broadcast (when
+	// AnimProfile is set — see HandleHealthChangedForHitFlash). This explicit resync is belt-and-suspenders for the
+	// dormant (no AnimProfile yet) case, so the tracker can never carry a stale prior-life value forward. GetHealth()
+	// reads MaxHealth here (ResetForReuse already ran above), so this life's own first real hit is never swallowed.
+	LastHealthForHitFlash = HealthComponent ? HealthComponent->GetHealth() : 0.0f;
 	SetAnimState(EFPSRAnimState::Idle);
 }
 
@@ -428,6 +508,11 @@ void AFPSREnemyBase::Deactivate()
 	SetNetDormancy(DORM_DormantAll);
 }
 
+bool AFPSREnemyBase::IsOneShotState(EFPSRAnimState InState)
+{
+	return InState == EFPSRAnimState::Attack || InState == EFPSRAnimState::Death;
+}
+
 void AFPSREnemyBase::SetAnimState(EFPSRAnimState NewState, float PlayRate)
 {
 	// Dormant unless an archetype opted into animation; no local rendering (so no cosmetics) on a dedicated server.
@@ -436,21 +521,102 @@ void AFPSREnemyBase::SetAnimState(EFPSRAnimState NewState, float PlayRate)
 		return;
 	}
 
+#if !UE_BUILD_SHIPPING
+	// Canary pin (FPSR.Enemy.ForceAnimState <state> 1): the whole driver is muted so the forced state actually
+	// holds. Without this the canary is only a poke and cannot tell a driver-caused restart from a material one.
+	if (bDebugAnimPinned)
+	{
+		return;
+	}
+#endif
+
+	// PlayRate < 0 is the "caller didn't pass one" sentinel (see the header doc) — a plain 1.0f default couldn't be
+	// told apart from a caller explicitly requesting normal speed, and a one-shot state needs a DURATION-derived rate
+	// (never a guessed 1.0) so its material progress (Time-EnterTime)*Rate reaches 1.0 exactly at the authored
+	// hold/dwell length — so the default itself has to carry that information instead of the argument's value.
+	if (PlayRate < 0.0f)
+	{
+		PlayRate = IsOneShotState(NewState)
+			? 1.0f / FMath::Max(KINDA_SMALL_NUMBER, (NewState == EFPSRAnimState::Death) ? DeathDwellSeconds : AttackAnimHoldSeconds)
+			: 1.0f;
+	}
+
 	// Quantize the playrate so the scalar is re-written only when it crosses a bucket boundary (write-on-change). A
 	// frozen clip (playrate 0) lands in bucket 0 and a playing clip in a higher bucket, so freeze<->play transitions
 	// still trigger exactly one write.
-	const int32 NewBucket = FMath::Clamp(static_cast<int32>(PlayRate * FPSRVATAnim::SpeedBucketCount), 0, FPSRVATAnim::SpeedBucketCount - 1);
-	if (NewState == CurrentAnimState && NewBucket == CurrentSpeedBucket)
+	const int32 NewBucket = FMath::Clamp(static_cast<int32>(PlayRate * FPSRAnimCPD::SpeedBucketCount), 0, FPSRAnimCPD::SpeedBucketCount - 1);
+
+	// A one-shot RE-ENTERED from itself needs its own rule — the plain dedupe below would freeze it on its final pose
+	// forever (a melee attacker re-entering Attack every cooldown sits in the same state AND the same playrate
+	// bucket), but bypassing the dedupe unconditionally is just as wrong: the CLIENT attack tell fires from
+	// PostNetReceiveLocationAndRotation on EVERY net update while the enemy is in range, which would restamp
+	// EnterTime before the clip ever finished and rewind it to frame 0 forever. So: restart a one-shot only once its
+	// previous cycle has actually elapsed.
+	if (IsOneShotState(NewState) && NewState == CurrentAnimState)
+	{
+		// Death is TERMINAL — the actor is on its way out, and PostNetReceiveLocationAndRotation re-asserts Death for
+		// as long as IsDead(), so a completion-based restart would loop the death animation until the corpse hides.
+		if (NewState == EFPSRAnimState::Death)
+		{
+			return;
+		}
+		const UWorld* World = GetWorld();
+		const float Now = World ? World->GetTimeSeconds() : 0.0f;
+		// The RUNNING cycle's length, not one derived from this call's rate — see AnimOneShotCycleSeconds' comment.
+		if (AnimOneShotEnterTime >= 0.0f && (Now - AnimOneShotEnterTime) < AnimOneShotCycleSeconds)
+		{
+			return; // still playing — do not rewind it
+		}
+	}
+	else if (NewState == CurrentAnimState && NewBucket == CurrentSpeedBucket)
 	{
 		return; // event-driven: state + playrate bucket unchanged, nothing to write
 	}
 	CurrentAnimState = NewState;
 	CurrentSpeedBucket = NewBucket;
+	if (IsOneShotState(NewState))
+	{
+		const UWorld* World = GetWorld();
+		AnimOneShotEnterTime = World ? World->GetTimeSeconds() : 0.0f;
+		AnimOneShotCycleSeconds = 1.0f / FMath::Max(KINDA_SMALL_NUMBER, PlayRate);
+	}
+	else
+	{
+		AnimOneShotEnterTime = -1.0f;
+		AnimOneShotCycleSeconds = -1.0f;
+	}
 
 	if (Mesh)
 	{
 		AnimProfile->ApplyAnimState(Mesh, NewState, PlayRate, AnimPhase);
 	}
+}
+
+void AFPSREnemyBase::HandleHealthChangedForHitFlash(float NewHealth, float MaxHealth)
+{
+	(void)MaxHealth;
+
+	// Same dormant/dedicated-server gate as SetAnimState above — zero cost until an archetype opts in, and a
+	// dedicated server never renders so it never needs the write.
+	if (!AnimProfile || GetNetMode() == NM_DedicatedServer)
+	{
+		return;
+	}
+
+	// Decrease-edge gate: ResetForReuse() (FPSREnemyHealthComponent.cpp) broadcasts this SAME delegate on pool reuse
+	// (Health snaps 0 -> MaxHealth there), which is an INCREASE, not a hit — without this check every pooled enemy
+	// would flash the instant it (re)spawns. LastHealthForHitFlash is resynced in Activate() too (see its own
+	// comment), so a reused actor's first real hit this life is judged against that life's own starting Health,
+	// never a stale prior-life value.
+	const bool bDecreased = NewHealth < LastHealthForHitFlash;
+	LastHealthForHitFlash = NewHealth;
+	if (!bDecreased || !Mesh)
+	{
+		return;
+	}
+
+	const UWorld* World = GetWorld();
+	Mesh->SetCustomPrimitiveDataFloat(FPSRAnimCPD::CPDSlot_LastHitTime, World ? World->GetTimeSeconds() : 0.0f);
 }
 
 void AFPSREnemyBase::PostNetReceiveLocationAndRotation()
@@ -496,7 +662,7 @@ void AFPSREnemyBase::PostNetReceiveLocationAndRotation()
 	// Distance LOD: beyond the freeze radius, FREEZE the clip (playrate 0) — this stops CPU scalar writes (write-on-
 	// change settles after one freeze) AND the distant GPU frame advance. Reuses the S1 boundary (Performance §5-1);
 	// no new per-enemy world query (arithmetic on data the client already has).
-	if (LocalPawn && DistSqToLocal > FPSRVATAnim::AnimFreezeRadiusSq)
+	if (LocalPawn && DistSqToLocal > FPSRAnimCPD::AnimFreezeRadiusSq)
 	{
 		SetAnimState(EFPSRAnimState::Idle, 0.0f);
 		return;
@@ -507,6 +673,21 @@ void AFPSREnemyBase::PostNetReceiveLocationAndRotation()
 	if (!bMoving && LocalPawn && DistSqToLocal <= (AttackRange * AttackRange))
 	{
 		SetAnimState(EFPSRAnimState::Attack);
+		AttackAnimHoldUntil = Now + AttackAnimHoldSeconds; // mirrors the authority stamp in ServerTickAttack
+		return;
+	}
+
+	// The same hold the AUTHORITY driver has always applied (TickServerMovement's walk/idle branch), which this
+	// client-side driver was missing entirely — an Attack one-shot owns the cosmetic until its window elapses.
+	// Without it: (a) a swarm enemy whose bMoving flickers across the 10 cm/s threshold leaves Attack for Walk and
+	// comes straight back, and a re-entry from a DIFFERENT state skips SetAnimState's one-shot re-entry guard, so
+	// CPD EnterTime is restamped and the material's (Time-EnterTime)*Rate progress rewinds to 0 mid-play; (b) the
+	// ranged charge tell was worse still — a ranged enemy sits far outside AttackRange, so this branch erased
+	// OnRep_Charging's telegraph on the very next net update, ~33 ms into a charge lasting RangedChargeTime.
+	// Placed AFTER the melee tell so a fresh attack can always re-stamp its own window, and after the distance-LOD
+	// freeze above so the perf gate still wins at range.
+	if (Now < AttackAnimHoldUntil)
+	{
 		return;
 	}
 
@@ -531,7 +712,16 @@ void AFPSREnemyBase::SetActorHiddenInGame(bool bNewHidden)
 	{
 		CurrentAnimState = EFPSRAnimState::Idle;
 		CurrentSpeedBucket = -1;
+		AnimOneShotEnterTime = -1.0f;
+		AnimOneShotCycleSeconds = -1.0f;
+		AttackAnimHoldUntil = -1.0f; // client mirror of Activate()'s authority-side reset — a reused actor must not
+		                             // spawn already suppressing walk/idle for a prior life's remaining hold span
 		LastRecvTime = -1.0f;
+		SetHealthBarVisible(true); // client mirror of the authority-side restore (a remote client never runs Activate)
+		if (AnimProfile && Mesh) // clear the prior life's hit stamp — see the authority-side reset for why
+		{
+			Mesh->SetCustomPrimitiveDataFloat(FPSRAnimCPD::CPDSlot_LastHitTime, 0.0f);
+		}
 		SetAnimState(EFPSRAnimState::Idle, 1.0f);
 	}
 }
@@ -539,16 +729,32 @@ void AFPSREnemyBase::SetActorHiddenInGame(bool bNewHidden)
 void AFPSREnemyBase::HandleDeathCosmetic()
 {
 	// Client death edge (from the health component's OnRep_bDead). Enter the Death animation state. No-op when dormant.
-	// ⚠️ KNOWN Stage-3 dependency (Codex merge-gate P2, accepted+deferred): for a SWARM enemy the authoritative
-	// HandleDeath immediately ReleaseEnemy -> Deactivate (hide + dormancy flush) in the same death flow, so this Death
-	// state is applied to an actor that is being hidden and won't be visibly seen until Stage 3 adds a server
-	// death-dwell (delay the pool release for the death-clip window; the clip LENGTH is content, hence Stage 3). This
-	// hook is the foundation for that. The BOSS (AFPSRBossBase) persists after death, so its death montage IS visible.
+	// For a SWARM enemy, HandleDeath -> UFPSREnemySpawnSubsystem::BeginDying keeps this actor visible/replicating
+	// (EnterDyingState only disables collision) for GetDeathDwellSeconds() before the LATER Deactivate() actually
+	// hides it and returns it to the pool — so the Death state entered here now has a real window to be seen, instead
+	// of being applied to an actor hidden the same frame. The BOSS (AFPSRBossBase) persists after death entirely, so
+	// its death montage was always visible regardless.
 	SetAnimState(EFPSRAnimState::Death);
+
+	// Drop the health bar the instant death is known, not when the corpse finally hides. The dwell that makes the
+	// death motion visible would otherwise leave a full-looking bar floating over a shrinking corpse for its whole
+	// length, which reads as "it isn't dead yet" (PIE 2026-08-25). This runs on clients (OnRep_bDead) and on the
+	// host (HandleDeath calls it directly), which is exactly the pair that renders the bar.
+	SetHealthBarVisible(false);
 }
 
 EFPSRServerAttackResult AFPSREnemyBase::ServerTickAttack(const FFPSRServerAttackContext& Ctx)
 {
+	// Defensive: A-2 (UFPSREnemySpawnSubsystem::BeginDying) already makes this structurally unreachable — a dying
+	// enemy is pulled OUT of ActiveEnemies the instant HandleDeath runs, and the subsystem's per-pass loop only ever
+	// calls ServerTickAttack on enemies it iterates FROM that set — but this function had NO IsDead gate of its own
+	// before this stage, so a future call path that doesn't route through that same set would silently reopen a
+	// dead-enemy-attacks bug. Cheap: one bool check per pass.
+	if (HealthComponent && HealthComponent->IsDead())
+	{
+		return EFPSRServerAttackResult::None;
+	}
+
 	// Melee contact attack: in horizontal range + within the vertical gap (no through-floor hits) + cooldown elapsed
 	// + the target player's attack-token budget allows. Behaviour-identical refactor of the spawn subsystem's former
 	// inline attack block — the subsystem now delegates the decision here so ranged archetypes can override it.
@@ -561,9 +767,11 @@ EFPSRServerAttackResult AFPSREnemyBase::ServerTickAttack(const FFPSRServerAttack
 		Ctx.TargetChar->ApplyContactDamage(Ctx.ContactDamage, this);
 		NotifyAttacked(Ctx.Now);
 		// Authority-side attack anim tell (U20) — drives the listen-server host / standalone render. Clients derive
-		// their own attack tell from proximity in PostNetReceiveLocationAndRotation. Foundational/transient this pass:
-		// the next movement pass reverts to Walk/Idle (attack-anim persistence needs the baked clip length, Stage 3).
+		// their own attack tell from proximity in PostNetReceiveLocationAndRotation. AttackAnimHoldUntil (server
+		// lifecycle hold) keeps this state through TickServerMovement's walk/idle branch for AttackAnimHoldSeconds,
+		// so the one-shot is actually visible instead of the very next movement pass overwriting it.
 		SetAnimState(EFPSRAnimState::Attack);
+		AttackAnimHoldUntil = Ctx.Now + AttackAnimHoldSeconds;
 		return EFPSRServerAttackResult::MeleeAttacked;
 	}
 	return EFPSRServerAttackResult::None;
@@ -740,22 +948,18 @@ void AFPSREnemyBase::TickServerMovement(const FFPSRServerMoveContext& Ctx)
 	// ApplyGravity's max() — see ApplyGravity and its ADR 0008 note.
 	ApplyGravity(Ctx.ScaledDelta, Ctx.FaceDir);
 
-	// (U20) Cosmetic walk/idle from the actual XY displacement this pass. Skip the override while a fresh melee attack
-	// tell is still within its cooldown window so ServerTickAttack's Attack state isn't clobbered the same pass (a
-	// stationary attacker reads as Idle otherwise). Attack-anim length/persistence is refined with the clips in Stage 3.
-	if (AnimProfile)
+	// (U20) Cosmetic walk/idle from the actual XY displacement this pass. Gated on AttackAnimHoldUntil rather than
+	// CurrentAnimState (the pre-this-stage code read `CurrentAnimState != Attack`, which is correct only on a
+	// listen-server host — SetAnimState early-returns before ever WRITING CurrentAnimState on a dedicated server, so
+	// it is permanently stuck at Idle there; see AttackAnimHoldUntil's own comment). Applies to BOTH branches: a
+	// stationary melee attacker / ranged charger can still read as bMoved on a separation-jitter pass, which used to
+	// stomp Walk over Attack unconditionally (Idle was the only guarded branch before).
+	if (AnimProfile && Ctx.Now >= AttackAnimHoldUntil)
 	{
 		const float ExpectedMove = GetEffectiveMoveSpeed() * Ctx.ScaledDelta;
 		const float MovedSq = FVector::DistSquaredXY(GetActorLocation(), AnimStartLoc);
 		const bool bMoved = ExpectedMove > KINDA_SMALL_NUMBER && MovedSq > FMath::Square(ExpectedMove * 0.25f);
-		if (bMoved)
-		{
-			SetAnimState(EFPSRAnimState::Walk);
-		}
-		else if (CurrentAnimState != EFPSRAnimState::Attack)
-		{
-			SetAnimState(EFPSRAnimState::Idle);
-		}
+		SetAnimState(bMoved ? EFPSRAnimState::Walk : EFPSRAnimState::Idle);
 	}
 }
 
@@ -1032,3 +1236,46 @@ void AFPSREnemyBase::ApplyGravity(float ScaledDeltaSeconds, const FVector& FlowD
 	bGrounded = false;
 	GroundNormal = FVector::UpVector; // airborne -> steer horizontally
 }
+
+#if !UE_BUILD_SHIPPING
+// 애니 상태 카나리아 — "값을 바꿨는데 화면이 안 변한다" 류를 C++ 쪽인지 머티리얼 쪽인지 1분 만에 가른다.
+// 상태 구동(공격 쿨다운·홀드 창·재진입 가드)을 통째로 우회해 CPD 를 직접 밀어 넣으므로, 이걸로 형태가
+// 매번 반응하면 머티리얼은 무죄이고 상태 구동 쪽을 파면 된다. 반대로 이걸로도 첫 회만 반응하면
+// 머티리얼(진행도 계산)이 범인이다.
+//   FPSR.Enemy.ForceAnimState 2      → 전 적을 Attack 으로 (재호출할 때마다 진행도 재시작)
+//   FPSR.Enemy.ForceAnimState 0      → Idle 로 되돌림
+//
+// 두 번째 인자 = 핀. **"진행도가 저절로 되감긴다"는 이 핀 없이는 판정이 안 된다** — 핀이 없으면 구동부가
+// 다음 네트 업데이트에서 상태를 다시 써 버려서, 되감은 범인이 구동부인지 머티리얼인지 구분이 안 된다.
+//   FPSR.Enemy.ForceAnimState 2 1    → Attack 으로 고정(구동부 정지). 원샷이 **한 번 재생되고 멈춰야** 정상.
+//                                       그래도 되감기면 그때가 머티리얼(진행도 계산) 범인이다.
+//   FPSR.Enemy.ForceAnimState 0 0    → 핀 해제 + Idle 로 복귀
+static FAutoConsoleCommandWithWorldAndArgs GFPSRForceAnimStateCmd(
+	TEXT("FPSR.Enemy.ForceAnimState"),
+	TEXT("Force every active enemy into an animation state, bypassing the state driver (debug). "
+	     "Usage: FPSR.Enemy.ForceAnimState [0=Idle 1=Walk 2=Attack 3=Death] [pin 0|1]"),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic([](const TArray<FString>& Args, UWorld* World)
+	{
+		if (!World)
+		{
+			return;
+		}
+		const int32 Raw = Args.Num() > 0 ? FCString::Atoi(*Args[0]) : 2;
+		const EFPSRAnimState State = static_cast<EFPSRAnimState>(FMath::Clamp(Raw, 0, 3));
+		// Default OFF: an unpinned poke stays the cheap "does the material react at all" probe this command started
+		// as. Pinning is opt-in because it deliberately stops gameplay from animating the swarm.
+		const bool bPin = Args.Num() > 1 && FCString::Atoi(*Args[1]) != 0;
+		int32 Count = 0;
+		for (TActorIterator<AFPSREnemyBase> It(World); It; ++It)
+		{
+			AFPSREnemyBase* Enemy = *It;
+			if (IsValid(Enemy) && !Enemy->IsHidden())
+			{
+				Enemy->DebugForceAnimState(State, bPin);
+				++Count;
+			}
+		}
+		UE_LOG(LogFPSR, Log, TEXT("[Enemy] ForceAnimState %d (pin=%d) applied to %d enemies."),
+			static_cast<int32>(State), bPin ? 1 : 0, Count);
+	}));
+#endif // !UE_BUILD_SHIPPING

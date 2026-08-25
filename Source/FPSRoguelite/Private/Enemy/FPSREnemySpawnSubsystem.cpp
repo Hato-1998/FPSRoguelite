@@ -280,14 +280,33 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 	}
 
 	UWorld* World = GetWorld();
-	if (!World || ActiveEnemies.Num() == 0)
+	if (!World)
+	{
+		return;
+	}
+
+	const float Now = World->GetTimeSeconds();
+
+	// Death-dwell sweep: hoisted here, ABOVE the ActiveEnemies==0 early-return just below, so a corpse's dwell window
+	// is still honored when it's the LAST enemy standing (BeginDying removes it from ActiveEnemies the instant it
+	// dies — a dying corpse is never counted here) or between spawns; this Tick()-driven pass runs every frame
+	// regardless of ActiveEnemies.Num(). Gated on the SAME freeze/transition check the movement+attack pass below
+	// uses (computed once here as bFrozen, reused at that check further down — see it for why NOT a new
+	// FTimerHandle): piggybacking on this already-gated pass gets freeze consistency for free (a dwelling corpse
+	// holds its pose for the whole freeze instead of quietly finishing mid-freeze).
+	const AFPSRGameState* GameState = World->GetGameState<AFPSRGameState>();
+	const bool bFrozen = GameState && (GameState->IsRunPaused() || GameState->IsStageTransitionActive());
+	if (!bFrozen)
+	{
+		SweepDyingEnemies(Now);
+	}
+
+	if (ActiveEnemies.Num() == 0)
 	{
 		return;
 	}
 
 	++MovementFrameCounter;
-
-	const float Now = World->GetTimeSeconds();
 
 	// U P-D/P-F: the MULTI-SLOT unified field drives front-chase targeting AND the topology late-join ack gate — both are
 	// active ONLY for a real multimap grid (P-G: a single-map degenerate grid keeps the exact same-map behavior, no regression).
@@ -371,12 +390,13 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 	TArray<int32, TInlineAllocator<4>> AttackersThisPass;
 	AttackersThisPass.Init(0, PlayerPawns.Num());
 
-	const AFPSRGameState* GameState = World->GetGameState<AFPSRGameState>();
 	// Global freeze (card selection) OR an active stage transition (ADR 0010 D6): enemies are frozen in place — skip
 	// the whole movement+attack pass. During a transition the frozen swarm IS the grace-window reward (안 G) — the
 	// player grinds down enemies that cannot move or fight back, so freezing them here (not just their damage output)
-	// is what makes that hold. (Enemies move/attack during both Combat and Boss phases outside a transition.)
-	if (GameState && (GameState->IsRunPaused() || GameState->IsStageTransitionActive()))
+	// is what makes that hold. (Enemies move/attack during both Combat and Boss phases outside a transition. bFrozen
+	// + GameState were already computed above, alongside the death-dwell sweep gate — a single freeze determination
+	// per pass.)
+	if (bFrozen)
 	{
 		return;
 	}
@@ -1542,6 +1562,75 @@ void UFPSREnemySpawnSubsystem::ReleaseEnemy(AFPSREnemyBase* Enemy)
 	DormantPool.Add(Enemy);
 }
 
+void UFPSREnemySpawnSubsystem::FinishDyingEnemy(AFPSREnemyBase* Enemy)
+{
+	// The shared "corpse's dwell is over" recovery point — same Deactivate+DormantPool.Add pair ReleaseEnemy uses,
+	// just without the ActiveEnemies.Remove (BeginDying already did that the moment the corpse started dwelling).
+	if (!IsValid(Enemy))
+	{
+		return;
+	}
+	Enemy->Deactivate();
+	DormantPool.Add(Enemy);
+}
+
+void UFPSREnemySpawnSubsystem::BeginDying(AFPSREnemyBase* Enemy)
+{
+	if (Enemy == nullptr)
+	{
+		return;
+	}
+
+	// Remove from ActiveEnemies IMMEDIATELY — this is the crux of the death-dwell split. TickEnemyMovement's per-pass
+	// loop (and its ComputeAliveAndFrontState / DrainRearEnemies siblings) all iterate ActiveEnemies, so the instant
+	// this enemy drops out of it, it can no longer move, can no longer attack, and its collision-off corpse
+	// (EnterDyingState) can never front-line-shield the enemies behind it. It also frees its GlobalAliveCap /
+	// MaxActiveEnemies slot at once, so a corpse dwelling does NOT starve the spawner.
+	ActiveEnemies.Remove(Enemy);
+	Enemy->EnterDyingState();
+
+	const UWorld* World = GetWorld();
+	const float Now = World ? World->GetTimeSeconds() : 0.0f;
+	DyingEnemies.Add(FFPSRDyingEnemy{ Enemy, Now + Enemy->GetDeathDwellSeconds() });
+
+	// Bound the dwell list: a burst of deaths beyond MaxDyingEnemies finishes the corpse CLOSEST TO EXPIRING
+	// immediately (the same FinishDyingEnemy path the deadline sweep uses) rather than growing this list unbounded.
+	// Adding exactly one entry above can push the count at most one over the cap, so a single eviction always
+	// suffices. The victim is found by scanning for the earliest deadline rather than taking index 0: SweepDyingEnemies
+	// uses RemoveAtSwap, so this array's ORDER carries no age information — cutting index 0 short would evict an
+	// arbitrary corpse (possibly one that just died) while the one about to vanish anyway kept dwelling. The scan is
+	// bounded by MaxDyingEnemies and only runs on overflow.
+	if (DyingEnemies.Num() > MaxDyingEnemies)
+	{
+		int32 EarliestIndex = 0;
+		for (int32 i = 1; i < DyingEnemies.Num(); ++i)
+		{
+			if (DyingEnemies[i].DeadlineWorldSeconds < DyingEnemies[EarliestIndex].DeadlineWorldSeconds)
+			{
+				EarliestIndex = i;
+			}
+		}
+		FinishDyingEnemy(DyingEnemies[EarliestIndex].Enemy.Get());
+		DyingEnemies.RemoveAtSwap(EarliestIndex);
+	}
+}
+
+void UFPSREnemySpawnSubsystem::SweepDyingEnemies(float Now)
+{
+	// Reverse iteration + RemoveAtSwap: this list's order carries no meaning (unlike DrainRearEnemies' sorted rear
+	// candidates), so an O(1) swap-remove while walking backward is the cheap, safe "remove while iterating" idiom
+	// this same file already uses for the dormant-pool scan in AcquireEnemy.
+	for (int32 i = DyingEnemies.Num() - 1; i >= 0; --i)
+	{
+		AFPSREnemyBase* Enemy = DyingEnemies[i].Enemy.Get();
+		if (!IsValid(Enemy) || Now >= DyingEnemies[i].DeadlineWorldSeconds)
+		{
+			FinishDyingEnemy(Enemy); // no-op (IsValid guard inside) for an already-invalid entry
+			DyingEnemies.RemoveAtSwap(i);
+		}
+	}
+}
+
 void UFPSREnemySpawnSubsystem::ReleaseAllEnemies()
 {
 	if (!HasServerAuthority())
@@ -1563,6 +1652,17 @@ void UFPSREnemySpawnSubsystem::ReleaseAllEnemies()
 	{
 		ReleaseEnemy(Enemy);
 	}
+
+	// A bulk release must also flush any corpse still dwelling — BeginDying already pulled it OUT of ActiveEnemies,
+	// so the loop above never touches it, and leaving it dwelling would let it survive past this explicit "clear the
+	// board now" call and leak into the next run/stage (ResetForNewRun and the CarryEnemiesToNewStage no-player-delta
+	// fallback both route through here). FinishDyingEnemy is the SAME Deactivate+DormantPool.Add pair the deadline
+	// sweep uses, just invoked immediately instead of waiting for each corpse's own deadline.
+	for (const FFPSRDyingEnemy& Dying : DyingEnemies)
+	{
+		FinishDyingEnemy(Dying.Enemy.Get());
+	}
+	DyingEnemies.Reset();
 
 	// Every charging enemy released its ranged token via Deactivate; reset the per-player counts as a safety net
 	// (e.g. against a stale-controller decrement that couldn't match its key after a player left mid-charge).

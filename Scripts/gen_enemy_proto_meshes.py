@@ -2,10 +2,11 @@
 # OBJ 2종을 생성한다. 요소(Element) ID는 UV.u 정수 타일로 인코딩: ElementId = floor(u).
 # 머티리얼(Custom HLSL WPO)이 ID별로 자전/부유/공전을 준다 — 스켈레탈 애니·VAT 불필요.
 #
-#   1) SM_EnemyProto_Bipyramid : 오각 쌍뿔 셸(상/하 분리, 적도 틈새) + 내부 코어 구(약점 시각체)
+#   1) SM_EnemyProto_Bipyramid : 오각 쌍뿔 셸(상/하 분리, 휴식 시 닫힘) + 내부 코어 구(약점 시각체)
 #        element 0 = 상부 뿔, 1 = 하부 뿔, 2 = 코어 구
 #   2) SM_EnemyProto_AtomCubes : 중앙 핵 큐브 + 전자 큐브 3개(궤도 초기 위치 배치, 공전은 머티리얼)
-#        element 0 = 핵, 1..3 = 전자 (전자 k의 궤도축/속도는 머티리얼 HLSL과 계약 — 아래 ORBITS 주석)
+#        element 0 = 핵 큐브(껍질), 1..3 = 전자, 4 = 내부 코어 구(약점 시각체 — 쌍뿔의 element 2 와 같은 역할)
+#        (전자 k의 궤도축/속도는 머티리얼 HLSL과 계약 — 아래 ORBITS 주석)
 #
 # 사용: python Scripts/gen_enemy_proto_meshes.py [출력폴더=Saved/EnemyProto]
 # 단위 cm, +Z 상방. 임포트는 커맨드렛으로(라이브 에디터 파이썬 임포트 = 데드락, 메모리 참조).
@@ -78,16 +79,24 @@ def write_obj(m, path, name):
     print(f"[gen] {path}  (tris={len(m['f'])})")
 
 def gen_bipyramid(out_dir):
-    # 오각 쌍뿔: 적도 반경 50, 꼭짓점 ±75. 상/하 반쪽을 z=±4로 띄워 적도 틈새(코어 빛 노출).
+    # 오각 쌍뿔: 적도 반경 50, 꼭짓점 ±75.
+    #
+    # GAP=0 = 휴식 자세에서 **닫힌** 껍질(사용자 결정 2026-08-25). 종전엔 z=±4로 벌려 적도 틈새로
+    # 코어 빛을 노출했는데, 그러면 "쉬는 중"과 "공격 중"이 같은 실루엣이라 공격이 안 읽혔다. 이제
+    # 벌어지는 것 자체가 공격 모션이다(머티리얼 ProcWPO 의 Attack 오버레이가 element 0/1 을 ±Z 로
+    # 민다) — 조개가 입을 여는 것에 해당한다. 코어는 껍질이 반투명이라 닫힌 상태에서도 비쳐 보인다.
+    #
+    # ⚠️ 이 값을 0 이 아닌 값으로 되돌리면 C0-at-entry 계약이 깨진다: 휴식 변위가 0 이어야
+    # 상태 진입/이탈에 팝이 없다(FPSRAnimCPDParams.h 계약).
     m = obj_writer()
-    R, APEX, GAP = 50.0, 75.0, 4.0
+    R, APEX, GAP = 50.0, 75.0, 0.0
     ring = [(R*math.cos(2*math.pi*i/5), R*math.sin(2*math.pi*i/5)) for i in range(5)]
     top, bot = (0.0, 0.0, APEX), (0.0, 0.0, -APEX)
     for i in range(5):
         a, b = ring[i], ring[(i+1) % 5]
-        # 상부 뿔(element 0): 적도변 z=+GAP
+        # 상부 뿔(element 0): 적도변 z=+GAP — 공격 시 머티리얼이 +Z 로 민다
         add_tri(m, (a[0], a[1], GAP), (b[0], b[1], GAP), top, 0)
-        # 하부 뿔(element 1): 적도변 z=-GAP (와인딩 반대)
+        # 하부 뿔(element 1): 적도변 z=-GAP (와인딩 반대) — 공격 시 -Z
         add_tri(m, (b[0], b[1], -GAP), (a[0], a[1], -GAP), bot, 1)
     icosphere(m, (0.0, 0.0, 0.0), 20.0, 2)  # 코어(element 2)
     write_obj(m, os.path.join(out_dir, "SM_EnemyProto_Bipyramid.obj"), "SM_EnemyProto_Bipyramid")
@@ -103,6 +112,10 @@ def gen_atom_cubes(out_dir):
     cube(m, (80.0, 0.0, 0.0), 10.0, 1)
     cube(m, (80.0, 0.0, 0.0), 10.0, 2)
     cube(m, (0.0, 80.0, 0.0), 10.0, 3)
+    # 코어 구(element 4, 사용자 결정 2026-08-25): 핵 큐브 안에 든 작은 구 — 쌍뿔의 element 2 와 같은
+    # 역할이다. 껍질(핵 큐브)의 십자 창을 통해 비쳐 보인다. 껍질보다 확실히 작아야(30 vs 14) 창
+    # 밖으로 삐져나오지 않는다. 마지막에 써야 반투명 그리기 순서상 껍질 위로 비친다(정렬 없음).
+    icosphere(m, (0.0, 0.0, 0.0), 14.0, 4)
     write_obj(m, os.path.join(out_dir, "SM_EnemyProto_AtomCubes.obj"), "SM_EnemyProto_AtomCubes")
 
 if __name__ == "__main__":

@@ -15,6 +15,29 @@
 
 ## 계약 (구현 배선)
 
+> ℹ️ **정정 (2026-08-24, 사용자 결정 — 절차적 적 형태 프로토 합격)**: 아래 «CPD 슬롯»·«백엔드»·«머티리얼»
+> 세 항목은 **스켈레탈(BroBot VAT) 전제 위에 쓰인 것이라 만료됐다.** 적 비주얼이 절차적 스태틱 메시로
+> 바뀌면서(`95124189`) VAT 베이크 트랙이 폐기됐고, 그에 따라 헤더는 `FPSRVATAnimParams.h` →
+> **`FPSRAnimCPDParams.h`**(네임스페이스 `FPSRVATAnim` → `FPSRAnimCPD`), 백엔드는
+> `UFPSREnemyAnimProfile_VAT_CPD` → **`UFPSREnemyAnimProfile_Proc`**, 슬롯 의미는 아래로 바뀌었다:
+>
+> | 슬롯 | 신 의미 | 구 의미(만료) |
+> |---|---|---|
+> | 0 | `StateId` (Idle0/Walk1/Attack2/Death3) | StartFrame |
+> | 1 | `EnterTime` (상태 진입 월드시각 초) | EndFrame |
+> | 2 | `Rate` (루프=배율 / 원샷=1/지속시간) | PlayRate |
+> | 3 | `Phase` (0..1) — **불변** | Phase |
+> | 4 | `LastHitTime` (0=미피격) | 히트플래시 예약(미사용) |
+>
+> **이 ADR 이 정한 것 중 살아 있는 것** = 렌더 경로 판정 자체다(개별 SMC + 공유 머티리얼 + CPD, MID 폐기,
+> ISM 기각) — 그 결론과 실측치는 절차 메시에도 그대로 유효하다. 만료된 것은 «무엇을 슬롯에 싣는가» 뿐이다.
+> **슬롯 계약의 정본은 언제나 `FPSRAnimCPDParams.h`** 다. 아래 «리셋 계약»도 유효(오히려 확장됨 —
+> 새 계약은 슬롯 4를 두 리셋 시임에서 명시적으로 0으로 되돌린다).
+>
+> 참고: CPD 페이로드는 엔진이 float4 9개(=36 슬롯)를 **고정 예약**하므로(`NUM_CUSTOM_PRIMITIVE_DATA`)
+> 슬롯 수는 병합·비용에 영향이 없다. 병합을 깨는 것은 머티리얼 분화이며, 그 판정이 이 ADR 의 본론이다.
+
+
 - **CPD 슬롯** (`FPSRVATAnimParams.h` = 단일 편집점): 0=StartFrame · 1=EndFrame · 2=PlayRate · 3=Phase(머티리얼 `TimeOffset`) · 4=히트플래시 예약.
   ⚠️ AnimToTexture에 "AnimationIndex" 파라미터는 **존재하지 않는다** — 클립 = [StartFrame, EndFrame] 프레임 구간(스파이크 중 발견, 종전 MID 드라이버는 이름 불일치로 무동작이었음).
 - **백엔드** = `UFPSREnemyAnimProfile_VAT_CPD`(폴리모픽 프로파일 서브클래스, 중앙 switch 없음). 클립 구간은 프로파일의 `FFPSRVATClipRange` 프로퍼티(디자이너 저작, 하드코딩 금지).
