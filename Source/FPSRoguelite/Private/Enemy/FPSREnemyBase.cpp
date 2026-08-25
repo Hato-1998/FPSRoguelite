@@ -16,6 +16,7 @@
 #include "Components/WidgetComponent.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
+#include "EngineUtils.h" // TActorIterator (debug ForceAnimState command at the end of this file)
 #include "GameFramework/PlayerController.h"
 #include "ProfilingDebugging/CsvProfiler.h" // CSV_PROFILER_STATS gate for the metrics registry calls below
 #include "Settings/FPSRPlaceholderVisualSettings.h"
@@ -224,6 +225,28 @@ void AFPSREnemyBase::InitHealthBarWidget()
 	}
 	OnHealthBarReady();
 }
+
+#if !UE_BUILD_SHIPPING
+void AFPSREnemyBase::DebugForceAnimState(EFPSRAnimState State)
+{
+	// Bypass EVERY gate SetAnimState applies (dedupe, one-shot re-entry guard, the attack hold window) and push the
+	// CPD contract straight at the profile. That is the whole point: it isolates "the material does not react" from
+	// "the state driver never asked it to". Re-applies on every call, so a repeated Attack must visibly restart.
+	if (!AnimProfile || !Mesh)
+	{
+		return;
+	}
+	const UWorld* World = GetWorld();
+	const float Rate = IsOneShotState(State)
+		? 1.0f / FMath::Max(KINDA_SMALL_NUMBER, (State == EFPSRAnimState::Death) ? DeathDwellSeconds : AttackAnimHoldSeconds)
+		: 1.0f;
+	CurrentAnimState = State;
+	CurrentSpeedBucket = FMath::Clamp(static_cast<int32>(Rate * FPSRAnimCPD::SpeedBucketCount), 0, FPSRAnimCPD::SpeedBucketCount - 1);
+	AnimOneShotEnterTime = IsOneShotState(State) ? (World ? World->GetTimeSeconds() : 0.0f) : -1.0f;
+	AnimOneShotCycleSeconds = IsOneShotState(State) ? (1.0f / FMath::Max(KINDA_SMALL_NUMBER, Rate)) : -1.0f;
+	AnimProfile->ApplyAnimState(Mesh, State, Rate, AnimPhase);
+}
+#endif // !UE_BUILD_SHIPPING
 
 void AFPSREnemyBase::SetHealthBarVisible(bool bVisible)
 {
@@ -1184,3 +1207,36 @@ void AFPSREnemyBase::ApplyGravity(float ScaledDeltaSeconds, const FVector& FlowD
 	bGrounded = false;
 	GroundNormal = FVector::UpVector; // airborne -> steer horizontally
 }
+
+#if !UE_BUILD_SHIPPING
+// 애니 상태 카나리아 — "값을 바꿨는데 화면이 안 변한다" 류를 C++ 쪽인지 머티리얼 쪽인지 1분 만에 가른다.
+// 상태 구동(공격 쿨다운·홀드 창·재진입 가드)을 통째로 우회해 CPD 를 직접 밀어 넣으므로, 이걸로 형태가
+// 매번 반응하면 머티리얼은 무죄이고 상태 구동 쪽을 파면 된다. 반대로 이걸로도 첫 회만 반응하면
+// 머티리얼(진행도 계산)이 범인이다.
+//   FPSR.Enemy.ForceAnimState 2      → 전 적을 Attack 으로 (재호출할 때마다 진행도 재시작)
+//   FPSR.Enemy.ForceAnimState 0      → Idle 로 되돌림
+static FAutoConsoleCommandWithWorldAndArgs GFPSRForceAnimStateCmd(
+	TEXT("FPSR.Enemy.ForceAnimState"),
+	TEXT("Force every active enemy into an animation state, bypassing the state driver (debug). "
+	     "Usage: FPSR.Enemy.ForceAnimState [0=Idle 1=Walk 2=Attack 3=Death]"),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic([](const TArray<FString>& Args, UWorld* World)
+	{
+		if (!World)
+		{
+			return;
+		}
+		const int32 Raw = Args.Num() > 0 ? FCString::Atoi(*Args[0]) : 2;
+		const EFPSRAnimState State = static_cast<EFPSRAnimState>(FMath::Clamp(Raw, 0, 3));
+		int32 Count = 0;
+		for (TActorIterator<AFPSREnemyBase> It(World); It; ++It)
+		{
+			AFPSREnemyBase* Enemy = *It;
+			if (IsValid(Enemy) && !Enemy->IsHidden())
+			{
+				Enemy->DebugForceAnimState(State);
+				++Count;
+			}
+		}
+		UE_LOG(LogFPSR, Log, TEXT("[Enemy] ForceAnimState %d applied to %d enemies."), static_cast<int32>(State), Count);
+	}));
+#endif // !UE_BUILD_SHIPPING

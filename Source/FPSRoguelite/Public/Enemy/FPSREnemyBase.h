@@ -114,6 +114,14 @@ class FPSROGUELITE_API AFPSREnemyBase : public APawn
 	GENERATED_BODY()
 
 public:
+#if !UE_BUILD_SHIPPING
+	/** Debug canary (FPSR.Enemy.ForceAnimState): apply a state to the mesh with EVERY gate bypassed — the dedupe,
+	 *  the one-shot re-entry guard, and the attack hold window. Splits "the material does not react" from "the state
+	 *  driver never asked it to" in one PIE pass instead of a log-reading round trip. PUBLIC because the console
+	 *  command that drives it is a free function, not a member. Never called by gameplay. */
+	void DebugForceAnimState(EFPSRAnimState State);
+#endif
+
 	AFPSREnemyBase();
 
 	/** Capsule half-height (cm) the swarm enemy is built with. Shared so tooling (e.g. the editor blockout validator's
@@ -329,6 +337,7 @@ protected:
 	 *  Re-shown on Activate() / the client unhide reset, since the widget survives pooling (InitHealthBarWidget's
 	 *  bind is once-per-lifetime and must stay valid). */
 	void SetHealthBarVisible(bool bVisible);
+
 
 	/** BP hook (fired by InitHealthBarWidget): the BP does GetUserWidgetObject -> Cast(WBP_EnemyHealthBar) ->
 	 *  InitHealthComp(GetHealthComponent()) so the bar/floating-damage widget binds OnHealthChanged. */
