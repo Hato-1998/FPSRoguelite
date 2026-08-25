@@ -229,9 +229,9 @@ void AFPSREnemyBase::HandleDeath(AActor* DeadActor, AActor* Killer)
 {
 	// Death cosmetics for the listen-server host / standalone: OnDeathCosmetic only fires from OnRep_bDead, which
 	// never runs on authority, so without this the host is the one machine that never plays the death state (remote
-	// clients do). Mirrors AFPSRBossBase::HandleDeath. Currently invisible on BOTH sides because ReleaseEnemy below
-	// hides the actor in the same frame (the known Stage-3 death-dwell dependency documented on HandleDeathCosmetic);
-	// calling it here means Stage-3 lands with host/client parity instead of regressing the host only.
+	// clients do). Mirrors AFPSRBossBase::HandleDeath. Now actually VISIBLE on both sides (previously invisible: the
+	// old immediate ReleaseEnemy below hid the actor the same frame) — BeginDying keeps the actor visible/replicating
+	// for GetDeathDwellSeconds() before its LATER Deactivate(), see BeginDying/EnterDyingState.
 	HandleDeathCosmetic();
 
 	if (UWorld* World = GetWorld())
@@ -243,11 +243,28 @@ void AFPSREnemyBase::HandleDeath(AActor* DeadActor, AActor* Killer)
 
 		if (UFPSREnemySpawnSubsystem* Sub = World->GetSubsystem<UFPSREnemySpawnSubsystem>())
 		{
-			Sub->ReleaseEnemy(this);
+			// Death is the ONE teardown path that is NOT an immediate ReleaseEnemy: BeginDying pulls this actor out
+			// of ActiveEnemies right now (so it can't move/attack/shield the swarm) but defers the hide+pool-return
+			// to its death-dwell deadline, so the Death cosmetic just triggered above actually gets seen. Every
+			// OTHER teardown (pool release / rear-drain / kill-Z / stage-carry overflow) stays an immediate
+			// ReleaseEnemy — see the spawn subsystem's BeginDying doc comment for the full call-site reasoning.
+			Sub->BeginDying(this);
 			return;
 		}
 	}
 	Destroy();
+}
+
+void AFPSREnemyBase::EnterDyingState()
+{
+	// Gameplay ends NOW; presentation does not — see this function's header doc for the full EnterDyingState vs.
+	// Deactivate role split. No hide / no SetNetDormancy here (unlike Deactivate): bDead already replicated before
+	// HandleDeath ever ran (the health component's ApplyDamage->OnDeath fires first), so a remote client's own
+	// OnRep_bDead -> HandleDeathCosmetic needs this actor to keep rendering/replicating for the dwell window to be
+	// seen. Collision off so a dying enemy can never deal another contact hit, and — the concrete swarm-scale
+	// motivation — a front-row corpse can no longer shield the enemies behind it from LineTraceMulti (which stops at
+	// the first blocking hit) or from the movement/attack pass's stop-distance queries.
+	SetActorEnableCollision(false);
 }
 
 void AFPSREnemyBase::Activate(const FVector& Location)
@@ -288,6 +305,9 @@ void AFPSREnemyBase::Activate(const FVector& Location)
 	bLastForwardBlocked = false;
 	LastAttackTime = -1000.0f; // CanAttack's own cooldown gate reads this (unrelated to the dormant pursuit fields
 	                           // above) — reset so a reused actor doesn't inherit a prior life's cooldown clock
+	AttackAnimHoldUntil = -1.0f; // same reasoning as LastAttackTime just above — a reused actor must not inherit a
+	                             // prior life's walk/idle-suppression window (a short-lived corpse reused shortly
+	                             // after dwelling could otherwise spawn already "holding" for its remaining span)
 	VerticalVelocity = 0.0f; // reset fall state for the reused actor
 	bGrounded = false;       // re-check ground on the first update (may spawn on a rooftop)
 	GroundRecheckTimer = 0.0f;
@@ -647,16 +667,26 @@ void AFPSREnemyBase::SetActorHiddenInGame(bool bNewHidden)
 void AFPSREnemyBase::HandleDeathCosmetic()
 {
 	// Client death edge (from the health component's OnRep_bDead). Enter the Death animation state. No-op when dormant.
-	// ⚠️ KNOWN Stage-3 dependency (Codex merge-gate P2, accepted+deferred): for a SWARM enemy the authoritative
-	// HandleDeath immediately ReleaseEnemy -> Deactivate (hide + dormancy flush) in the same death flow, so this Death
-	// state is applied to an actor that is being hidden and won't be visibly seen until Stage 3 adds a server
-	// death-dwell (delay the pool release for the death-clip window; the clip LENGTH is content, hence Stage 3). This
-	// hook is the foundation for that. The BOSS (AFPSRBossBase) persists after death, so its death montage IS visible.
+	// For a SWARM enemy, HandleDeath -> UFPSREnemySpawnSubsystem::BeginDying keeps this actor visible/replicating
+	// (EnterDyingState only disables collision) for GetDeathDwellSeconds() before the LATER Deactivate() actually
+	// hides it and returns it to the pool — so the Death state entered here now has a real window to be seen, instead
+	// of being applied to an actor hidden the same frame. The BOSS (AFPSRBossBase) persists after death entirely, so
+	// its death montage was always visible regardless.
 	SetAnimState(EFPSRAnimState::Death);
 }
 
 EFPSRServerAttackResult AFPSREnemyBase::ServerTickAttack(const FFPSRServerAttackContext& Ctx)
 {
+	// Defensive: A-2 (UFPSREnemySpawnSubsystem::BeginDying) already makes this structurally unreachable — a dying
+	// enemy is pulled OUT of ActiveEnemies the instant HandleDeath runs, and the subsystem's per-pass loop only ever
+	// calls ServerTickAttack on enemies it iterates FROM that set — but this function had NO IsDead gate of its own
+	// before this stage, so a future call path that doesn't route through that same set would silently reopen a
+	// dead-enemy-attacks bug. Cheap: one bool check per pass.
+	if (HealthComponent && HealthComponent->IsDead())
+	{
+		return EFPSRServerAttackResult::None;
+	}
+
 	// Melee contact attack: in horizontal range + within the vertical gap (no through-floor hits) + cooldown elapsed
 	// + the target player's attack-token budget allows. Behaviour-identical refactor of the spawn subsystem's former
 	// inline attack block — the subsystem now delegates the decision here so ranged archetypes can override it.
@@ -669,9 +699,11 @@ EFPSRServerAttackResult AFPSREnemyBase::ServerTickAttack(const FFPSRServerAttack
 		Ctx.TargetChar->ApplyContactDamage(Ctx.ContactDamage, this);
 		NotifyAttacked(Ctx.Now);
 		// Authority-side attack anim tell (U20) — drives the listen-server host / standalone render. Clients derive
-		// their own attack tell from proximity in PostNetReceiveLocationAndRotation. Foundational/transient this pass:
-		// the next movement pass reverts to Walk/Idle (attack-anim persistence needs the baked clip length, Stage 3).
+		// their own attack tell from proximity in PostNetReceiveLocationAndRotation. AttackAnimHoldUntil (server
+		// lifecycle hold) keeps this state through TickServerMovement's walk/idle branch for AttackAnimHoldSeconds,
+		// so the one-shot is actually visible instead of the very next movement pass overwriting it.
 		SetAnimState(EFPSRAnimState::Attack);
+		AttackAnimHoldUntil = Ctx.Now + AttackAnimHoldSeconds;
 		return EFPSRServerAttackResult::MeleeAttacked;
 	}
 	return EFPSRServerAttackResult::None;
@@ -848,22 +880,18 @@ void AFPSREnemyBase::TickServerMovement(const FFPSRServerMoveContext& Ctx)
 	// ApplyGravity's max() — see ApplyGravity and its ADR 0008 note.
 	ApplyGravity(Ctx.ScaledDelta, Ctx.FaceDir);
 
-	// (U20) Cosmetic walk/idle from the actual XY displacement this pass. Skip the override while a fresh melee attack
-	// tell is still within its cooldown window so ServerTickAttack's Attack state isn't clobbered the same pass (a
-	// stationary attacker reads as Idle otherwise). Attack-anim length/persistence is refined with the clips in Stage 3.
-	if (AnimProfile)
+	// (U20) Cosmetic walk/idle from the actual XY displacement this pass. Gated on AttackAnimHoldUntil rather than
+	// CurrentAnimState (the pre-this-stage code read `CurrentAnimState != Attack`, which is correct only on a
+	// listen-server host — SetAnimState early-returns before ever WRITING CurrentAnimState on a dedicated server, so
+	// it is permanently stuck at Idle there; see AttackAnimHoldUntil's own comment). Applies to BOTH branches: a
+	// stationary melee attacker / ranged charger can still read as bMoved on a separation-jitter pass, which used to
+	// stomp Walk over Attack unconditionally (Idle was the only guarded branch before).
+	if (AnimProfile && Ctx.Now >= AttackAnimHoldUntil)
 	{
 		const float ExpectedMove = GetEffectiveMoveSpeed() * Ctx.ScaledDelta;
 		const float MovedSq = FVector::DistSquaredXY(GetActorLocation(), AnimStartLoc);
 		const bool bMoved = ExpectedMove > KINDA_SMALL_NUMBER && MovedSq > FMath::Square(ExpectedMove * 0.25f);
-		if (bMoved)
-		{
-			SetAnimState(EFPSRAnimState::Walk);
-		}
-		else if (CurrentAnimState != EFPSRAnimState::Attack)
-		{
-			SetAnimState(EFPSRAnimState::Idle);
-		}
+		SetAnimState(bMoved ? EFPSRAnimState::Walk : EFPSRAnimState::Idle);
 	}
 }
 

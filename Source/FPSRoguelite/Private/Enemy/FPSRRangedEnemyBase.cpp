@@ -2,6 +2,7 @@
 
 #include "Enemy/FPSRRangedEnemyBase.h"
 #include "Enemy/FPSREnemySpawnSubsystem.h"
+#include "Enemy/FPSREnemyHealthComponent.h" // IsDead() — HealthComponent is only forward-declared in FPSREnemyBase.h
 #include "Weapon/FPSRProjectile.h"
 #include "Weapon/FPSRProjectileSubsystem.h"
 #include "Weapon/FPSRProjectileTypes.h"
@@ -12,12 +13,23 @@
 
 #include "Engine/World.h"
 #include "CollisionQueryParams.h"
+#include "Net/UnrealNetwork.h"
+#include "Net/Core/PushModel/PushModel.h"
 
 AFPSRRangedEnemyBase::AFPSRRangedEnemyBase()
 {
 	// Ranged enemies hold at distance to shoot rather than closing to melee: stop advancing further out (within the
 	// engage range so they stop, then charge). Tunable per archetype in the BP child.
 	StopDistance = 900.0f;
+}
+
+void AFPSRRangedEnemyBase::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+
+	FDoRepLifetimeParams Params;
+	Params.bIsPushBased = true;
+	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRRangedEnemyBase, bCharging, Params);
 }
 
 void AFPSRRangedEnemyBase::Activate(const FVector& Location)
@@ -28,15 +40,37 @@ void AFPSRRangedEnemyBase::Activate(const FVector& Location)
 	bHoldingToken = false;
 	HeldTargetPC = nullptr;
 	ResetRangedCycle();
+
+	// Defensive reset: bCharging should already be false via ReleaseRangedHold on every teardown path (Deactivate /
+	// EnterDyingState / EndPlay all route through it), but Activate is the ONE pool-reuse entry point every archetype
+	// life passes through — belt-and-suspenders so a reused actor can never render the non-targeted charge telegraph
+	// before its first real charge this life.
+	if (bCharging)
+	{
+		bCharging = false;
+		MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRRangedEnemyBase, bCharging, this);
+	}
 }
 
 void AFPSRRangedEnemyBase::Deactivate()
 {
-	// Pool release / death / kill-Z recycle all route here — close the warning + release the token on EVERY teardown
-	// path (not just an explicit abort) so a Reliable 'off' is never dropped and the concurrency count never leaks.
+	// Pool release / death-dwell completion / kill-Z recycle all route here — close the warning + release the token
+	// on EVERY teardown path (not just an explicit abort) so a Reliable 'off' is never dropped and the concurrency
+	// count never leaks.
 	ReleaseRangedHold();
 	ResetRangedCycle();
 	Super::Deactivate();
+}
+
+void AFPSRRangedEnemyBase::EnterDyingState()
+{
+	// Same reason as Deactivate() above, but earlier: whichever teardown reaches this enemy first, the held ranged
+	// state must close HERE, not wait for the LATER Deactivate() call — a ranged corpse can now dwell for
+	// GetDeathDwellSeconds() before that runs, and the target's warning indicator (+ this enemy's concurrency token)
+	// must not stay held for the whole dwell window.
+	ReleaseRangedHold();
+	ResetRangedCycle();
+	Super::EnterDyingState();
 }
 
 void AFPSRRangedEnemyBase::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -47,6 +81,13 @@ void AFPSRRangedEnemyBase::EndPlay(const EEndPlayReason::Type EndPlayReason)
 
 EFPSRServerAttackResult AFPSRRangedEnemyBase::ServerTickAttack(const FFPSRServerAttackContext& Ctx)
 {
+	// Defensive — see AFPSREnemyBase::ServerTickAttack's identical guard for why this is added despite being
+	// structurally unreachable today (BeginDying already removes a dying enemy from the subsystem's per-pass set).
+	if (HealthComponent && HealthComponent->IsDead())
+	{
+		return EFPSRServerAttackResult::None;
+	}
+
 	// The subsystem already early-returns the whole pass while the run is frozen, so DeltaSeconds only accrues during
 	// active gameplay — the charge/cooldown accumulators below are freeze-paused for free. Ranged never deals melee
 	// contact damage, so we always return None (no melee token consumed).
@@ -72,6 +113,20 @@ EFPSRServerAttackResult AFPSRRangedEnemyBase::ServerTickAttack(const FFPSRServer
 				HeldTargetPC = Ctx.TargetController;
 				LastWarnLocation = GetActorLocation();
 				SendRangedWarning(true); // telegraph: the target gets a directional warning to dodge
+
+				// Drive the Attack cosmetic at the CHARGE-length rate so the material's (Time-EnterTime)*Rate
+				// progress reaches exactly 1.0 the moment the shot fires (not the melee AttackAnimHoldSeconds
+				// default), and hold it there for the same span so TickServerMovement's walk/idle branch can't stomp
+				// it mid-charge (a stationary/slow-repositioning charger can still read as bMoved on a separation-
+				// jitter pass).
+				const float ChargeRate = 1.0f / FMath::Max(KINDA_SMALL_NUMBER, RangedChargeTime);
+				SetAnimState(EFPSRAnimState::Attack, ChargeRate);
+				AttackAnimHoldUntil = Ctx.Now + RangedChargeTime;
+
+				// Non-targeted client telegraph (user decision, see bCharging's own comment): replicate the charge
+				// to EVERY client, not just the Reliable-RPC'd target.
+				bCharging = true;
+				MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRRangedEnemyBase, bCharging, this);
 			}
 		}
 		break;
@@ -215,6 +270,21 @@ void AFPSRRangedEnemyBase::SendRangedWarning(bool bActive)
 
 void AFPSRRangedEnemyBase::ReleaseRangedHold()
 {
+	// bCharging is cleared UNCONDITIONALLY here, ahead of the bHoldingToken early-return below, so the non-targeted-
+	// client telegraph never sticks true across a teardown that races the charge state — this function is already
+	// the single "idempotent, safe on every teardown path" recovery point (Deactivate / EnterDyingState / EndPlay /
+	// both ServerTickAttack exits all route through it), exactly mirroring why the warning RPC below always fires.
+	if (bCharging)
+	{
+		bCharging = false;
+		MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRRangedEnemyBase, bCharging, this);
+		// Also release the movement-anim hold immediately: an ABORTED charge (target left range / re-targeted) must
+		// not leave the cosmetic Attack pose stuck through the remainder of the original RangedChargeTime window
+		// while the enemy is actually free to move (a successful FIRE reaches this at ChargeElapsed>=RangedChargeTime,
+		// i.e. Ctx.Now is already ~AttackAnimHoldUntil, so clearing it here early is a no-op harm-wise on that path).
+		AttackAnimHoldUntil = -1.0f;
+	}
+
 	if (!bHoldingToken)
 	{
 		return;
@@ -229,6 +299,18 @@ void AFPSRRangedEnemyBase::ReleaseRangedHold()
 	}
 	bHoldingToken = false;
 	HeldTargetPC = nullptr;
+}
+
+void AFPSRRangedEnemyBase::OnRep_Charging()
+{
+	// Non-targeted client telegraph (see bCharging's header comment). True -> enter the Attack cosmetic at the
+	// charge-length rate, mirroring the server's own SetAnimState call in ServerTickAttack's Idle->Charging
+	// transition. False -> do nothing: the next PostNetReceiveLocationAndRotation naturally re-derives Walk/Idle
+	// from the replicated transform, same as any other attack tell falling out of range.
+	if (bCharging)
+	{
+		SetAnimState(EFPSRAnimState::Attack, 1.0f / FMath::Max(KINDA_SMALL_NUMBER, RangedChargeTime));
+	}
 }
 
 void AFPSRRangedEnemyBase::ResetRangedCycle()

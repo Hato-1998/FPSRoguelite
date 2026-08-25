@@ -126,8 +126,29 @@ public:
 
 	/** Server: deactivate and return to dormant pool state (hide, disable collision, net dormant). Virtual so
 	 *  archetypes can release per-life state (e.g. a ranged enemy clears its warning + concurrency token) on EVERY
-	 *  teardown path (pool release, death, kill-Z recycle all route through here). */
+	 *  teardown path (pool release, death-dwell completion, kill-Z recycle all route through here). Called by the
+	 *  spawn subsystem either immediately (pool release / rear-drain / kill-Z / stage-carry overflow) or LATER, once
+	 *  a death-dwell has elapsed (UFPSREnemySpawnSubsystem::SweepDyingEnemies) — see EnterDyingState for the earlier,
+	 *  immediate half of the DEATH path specifically. */
 	virtual void Deactivate();
+
+	/** Server: end this enemy's GAMEPLAY immediately on death, WITHOUT the hide/collision-off/dormancy Deactivate()
+	 *  does — called once, synchronously, from UFPSREnemySpawnSubsystem::BeginDying (itself called from HandleDeath),
+	 *  so the very next movement/attack pass already excludes this enemy (BeginDying also pulls it out of
+	 *  ActiveEnemies in the same call). Disables collision ONLY: a dying enemy must never deal further contact damage
+	 *  or (as a front-row corpse with collision still on) shield the swarm behind it from LineTraceMulti, which stops
+	 *  at the first blocking hit. Deliberately does NOT hide the actor or touch net dormancy — bDead has already
+	 *  replicated by the time this runs (the health component's ApplyDamage->OnDeath fired before HandleDeath), so a
+	 *  remote client's own OnRep_bDead -> HandleDeathCosmetic needs the actor to keep replicating/rendering for the
+	 *  death-dwell window to actually be SEEN. Deactivate() (called later, once GetDeathDwellSeconds() has elapsed)
+	 *  is the second half that ends presentation and returns the actor to the pool. Virtual so archetypes with their
+	 *  own held server state (e.g. AFPSRRangedEnemyBase's ranged token) can release it here too — see that
+	 *  override's comment for why every teardown path, not just Deactivate(), must close it. */
+	virtual void EnterDyingState();
+
+	/** This archetype's authored death-dwell duration (DeathDwellSeconds) — read by the spawn subsystem's
+	 *  BeginDying/SweepDyingEnemies to schedule this corpse's LATER Deactivate()+pool-return deadline. */
+	float GetDeathDwellSeconds() const { return DeathDwellSeconds; }
 
 	/** Server: move along Ctx.MoveDir (XY world dir; magnitude ignored, normalized internally) at CurrentMoveSpeed *
 	 *  Ctx.ScaledDelta. No-op if MoveDir is ~zero. Driven by the enemy movement subsystem's batched pass (flow-field
@@ -389,6 +410,19 @@ protected:
 
 	/** Server-only: world time of last attack (init far in the past so the first attack is allowed). */
 	float LastAttackTime = -1000.0f;
+
+	/** Server-only: world time until which TickServerMovement's walk/idle branch must NOT override the cosmetic anim
+	 *  state — holds an Attack one-shot / ranged charge tell for its full duration instead of the very next movement
+	 *  pass stomping it back to Walk/Idle. NOT replicated (server-authoritative bookkeeping; the cosmetic state it
+	 *  gates is itself never replicated — Performance §5). Stamped by ServerTickAttack (melee: Now +
+	 *  AttackAnimHoldSeconds) and AFPSRRangedEnemyBase::ServerTickAttack's Idle->Charging transition (Now +
+	 *  RangedChargeTime, matching the charge-length SetAnimState rate set alongside it). Deliberately a raw server
+	 *  timestamp rather than a read of CurrentAnimState: SetAnimState early-returns before ever WRITING
+	 *  CurrentAnimState on a dedicated server (see its NM_DedicatedServer gate), so CurrentAnimState is permanently
+	 *  stuck at its Idle default there — a guard built on it is correct only on a listen-server host. This field is
+	 *  written unconditionally by the attack decision (gated on nothing cosmetic), so the hold window is correct on
+	 *  every net mode. Reset on Activate so a pooled reuse never inherits a prior life's hold. */
+	float AttackAnimHoldUntil = -1.0f;
 
 	/** Server-only: this enemy's map (multimap Tier 0). See GetMapId. Not replicated. */
 	FGameplayTag MapId;
@@ -669,17 +703,17 @@ protected:
 
 	/** Seconds the Attack one-shot plays before the next movement pass may revert it to Walk/Idle. Gameplay data, so
 	 *  it lives on the ACTOR (not the cosmetic AnimProfile, which can be null and is skipped on a dedicated server) —
-	 *  a future stage's SERVER LIFECYCLE (holding the enemy in its attack pose / gating re-attack) reads this SAME
-	 *  value, not a separate one. Also feeds SetAnimState's duration-derived PlayRate default (1 / this) for an
-	 *  Attack call that doesn't pass an explicit rate. Not this stage's scope: no actual hold is implemented yet. */
+	 *  the SERVER LIFECYCLE hold (AttackAnimHoldUntil, gating TickServerMovement's walk/idle branch in
+	 *  ServerTickAttack/TickServerMovement) reads this SAME value, not a separate one. Also feeds SetAnimState's
+	 *  duration-derived PlayRate default (1 / this) for an Attack call that doesn't pass an explicit rate. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Enemy|Anim", meta = (ClampMin = "0.05"))
 	float AttackAnimHoldSeconds = 0.4f;
 
 	/** Seconds the Death one-shot plays before the pooled actor may actually be released back to the pool. Same
-	 *  reasoning as AttackAnimHoldSeconds: gameplay data on the actor because a future stage's SERVER LIFECYCLE
-	 *  (delaying ReleaseEnemy so the death pose is visible instead of instantly hidden) reads it too. Also feeds
-	 *  SetAnimState's duration-derived PlayRate default (1 / this) for a Death call with no explicit rate. Not this
-	 *  stage's scope: HandleDeath still releases immediately (see its own comment). */
+	 *  reasoning as AttackAnimHoldSeconds: gameplay data on the actor because the SERVER LIFECYCLE (delaying the
+	 *  actual pool-return so the death pose is visible instead of instantly hidden — UFPSREnemySpawnSubsystem::
+	 *  BeginDying/SweepDyingEnemies) reads it too, via GetDeathDwellSeconds(). Also feeds SetAnimState's
+	 *  duration-derived PlayRate default (1 / this) for a Death call with no explicit rate. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Enemy|Anim", meta = (ClampMin = "0.05"))
 	float DeathDwellSeconds = 0.8f;
 

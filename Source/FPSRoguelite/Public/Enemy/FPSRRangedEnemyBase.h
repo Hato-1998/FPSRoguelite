@@ -38,9 +38,17 @@ public:
 	/** Pooling reactivate: reset the ranged cycle for the reused actor. */
 	virtual void Activate(const FVector& Location) override;
 
-	/** Pooling deactivate / death / kill-Z recycle: ALWAYS clear the warning + release the held token (closes the
-	 *  Reliable 'off' on every teardown path, not just an explicit abort), then reset the cycle. */
+	/** Pooling deactivate / death-dwell completion / kill-Z recycle: ALWAYS clear the warning + release the held token
+	 *  (closes the Reliable 'off' on every teardown path, not just an explicit abort), then reset the cycle. */
 	virtual void Deactivate() override;
+
+	/** Death-dwell ENTRY (server-authoritative gameplay end — see AFPSREnemyBase::EnterDyingState): release the held
+	 *  token/warning + reset the cycle BEFORE Super ends collision. Same "every teardown path must close the hold"
+	 *  reasoning as the Deactivate() override above — a ranged corpse can now dwell for GetDeathDwellSeconds() BEFORE
+	 *  Deactivate() ever runs, so waiting for Deactivate() to close the Reliable 'off' would leave the target's
+	 *  warning indicator (and this enemy's concurrency token) held for the whole dwell window instead of closing the
+	 *  instant the enemy actually dies. */
+	virtual void EnterDyingState() override;
 
 	/** Server: per-pass charge->fire cycle (replaces the base melee contact decision). */
 	virtual EFPSRServerAttackResult ServerTickAttack(const FFPSRServerAttackContext& Ctx) override;
@@ -48,6 +56,21 @@ public:
 protected:
 	/** World teardown / level change: ensure the warning is cleared + the token released. */
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+
+	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
+
+	/** Non-targeted client telegraph (user decision): the targeted player already gets a directional warning via the
+	 *  Reliable ClientNotifyRangedTarget RPC (SendRangedWarning), but that RPC is unicast to ONLY that player's
+	 *  controller — a bystander's screen has no cue a nearby ranged enemy is charging (the client attack-tell
+	 *  heuristic in AFPSREnemyBase::PostNetReceiveLocationAndRotation keys off melee AttackRange, which a ranged
+	 *  archetype's engage distance sits well outside). This 1-byte flag replicates to EVERY client so OnRep_Charging
+	 *  can drive the same Attack cosmetic there. Push Model (this project's replication convention — mirrors
+	 *  UFPSREnemyHealthComponent::bDead). */
+	UFUNCTION()
+	void OnRep_Charging();
+
+	UPROPERTY(ReplicatedUsing = OnRep_Charging)
+	bool bCharging = false;
 
 	// --- Engagement (server-authority; editor/BP tunable per archetype) ---
 
@@ -102,7 +125,9 @@ private:
 	/** Send the ranged-target warning (Client RPC) to the held target's controller. bActive=false clears it. */
 	void SendRangedWarning(bool bActive);
 
-	/** Idempotent: clear the warning on the held target + release the concurrency token. Safe on every teardown. */
+	/** Idempotent: clear the warning on the held target + release the concurrency token + clear bCharging. Safe on
+	 *  every teardown (see this function's own top-of-body comment on the .cpp side for why bCharging in particular
+	 *  is reset unconditionally, ahead of everything else here). */
 	void ReleaseRangedHold();
 
 	/** Reset the cycle to Idle (charge/cooldown accumulators zeroed). */
