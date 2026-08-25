@@ -149,6 +149,7 @@ p_ramp   = scalar_param("OpenRampFrac",     0.12, x=-1900, y=-60)  # 열리는 �
 p_close  = scalar_param("CloseRampFrac",    0.10, x=-1900, y=-20)  # 발사 직전 닫히는 비율
 p_band   = scalar_param("WindowBandFrac",   0.30, x=-1900, y=700)  # 십자 창 폭(요소 반크기 대비)
 p_frame  = scalar_param("FrameWidthFrac",   0.10, x=-1900, y=800)  # 모서리 프레임 폭(요소 반크기 대비)
+p_frmpx  = scalar_param("FrameMinPixels",    1.6, x=-1900, y=850)  # 모서리선이 유지할 최소 화면 폭(픽셀)
 p_texscale= scalar_param("TexScale",        0.01, x=-1900, y=900)  # 로컬 위치 → UV 배율(질감 타일링)
 
 # ── 3. ProcWPO 에 상태 입력 추가 + HLSL 교체 ─────────────────────────────────────────────────────
@@ -325,7 +326,7 @@ if not elem_mask:
 # 십자 판정은 **회전 전 로컬 위치**(LocalPos)로 한다 — 전자가 공전해도 마스크가 표면에 붙어 함께 돈다.
 op_mask = ensure_custom("OpacityMask",
                         ("LocalPos", "UV", "MeshType", "CoreMask", "ShellOpacity", "BandFrac",
-                         "FrameWidthFrac", "TexScale"), -1200, 700, prune=True)
+                         "FrameWidthFrac", "FrameMinPixels", "TexScale"), -1200, 700, prune=True)
 
 op_mask.set_editor_property("output_type", unreal.CustomMaterialOutputType.CMOT_FLOAT4)
 op_mask.set_editor_property("code", """// 요소별 중심/반크기 — 메시 생성기(gen_enemy_proto_meshes.py)와의 계약이다. 값이 바뀌면 양쪽을 같이 고칠 것.
@@ -352,26 +353,44 @@ float inCross = (min(a.x, min(a.y, a.z)) < band) ? 1.0 : 0.0;
 
 // ── 기하 모서리 프레임 ───────────────────────────────────────────────────────────────────────
 // 프레넬(시선 각도)로는 정면에서 본 능선이 안 잡힌다 — 실제 모서리를 형태별로 계산한다.
-float edge = 0.0;
-float fw = FrameWidthFrac;
+//
+// 이진 비교(">")가 아니라 **모서리까지의 거리** dEdge(0=모서리 위, 1=면 한가운데)를 먼저 내고,
+// 폭은 마지막에 한 번만 먹인다. 종전엔 형태별 분기 안에서 곧장 0/1 을 냈는데 두 가지가 걸렸다:
+//   ① 스웜은 대부분 멀리서 읽힌다. 오브젝트 공간 고정폭(반크기의 10% = 큐브 3cm)은 30m 쯤에서
+//      1픽셀 밑으로 떨어져 깜빡이고 TSR 이 뭉갠다 — "외곽선으로 형태를 읽는다"가 거기서 무너진다.
+//   ② 하드 스텝이라 가까이서도 계단이 진다.
+// fwidth(dEdge) = 이 픽셀에서 dEdge 가 1픽셀당 변하는 양이다. 그걸로 **최소 화면 폭**을 보장하면
+// 거리와 무관하게 선이 살고, 같은 값을 smoothstep 폭으로 재사용하면 안티에일리어싱까지 공짜다.
+// (OpacityMask 노드의 출력은 전부 픽셀 셰이더에서만 쓰이므로 fwidth 사용이 안전하다 — WPO 쪽인
+//  ProcWPO 에 넣었다면 정점 셰이더라 컴파일이 깨진다.)
+float dEdge = 1.0;
 if (isCube)
 {
-    // 큐브: 면=한 축만 반크기에 붙음 / 변=두 축 / 꼭짓점=세 축. 두 축 이상이면 모서리다.
-    float3 n = a / max(hs, 1e-4);
-    float cnt = (n.x > 1.0 - fw ? 1.0 : 0.0) + (n.y > 1.0 - fw ? 1.0 : 0.0) + (n.z > 1.0 - fw ? 1.0 : 0.0);
-    edge = (cnt >= 2.0) ? 1.0 : 0.0;
+    // 큐브: 면=한 축만 반크기에 붙음 / 변=두 축 / 꼭짓점=세 축. 면 위의 점에서 모서리까지의 거리는
+    // "두 번째로 큰 정규화 축값"이 1 에 얼마나 가까운가다(제일 큰 값 = 그 면의 법선축이라 늘 1).
+    float3 n = saturate(a / max(hs, 1e-4));
+    float mx = max(n.x, max(n.y, n.z));
+    float mn = min(n.x, min(n.y, n.z));
+    float mid = n.x + n.y + n.z - mx - mn;   // 두 번째로 큰 값
+    dEdge = 1.0 - mid;
 }
 else
 {
-    // 오각 쌍뿔: 모서리 셋 — ①꼭짓점에서 적도 링 정점으로 내려오는 능선 5개 ②적도 림 ③꼭짓점.
-    // 능선은 방위각으로 잡는다: 링 정점이 2*pi*k/5 마다 있으므로 그 격자에 가까우면 능선이다.
-    float ang = atan2(lp.y, lp.x) * 5.0 / 6.28318530718;   // 정점마다 정수
+    // 오각 쌍뿔(생성기 계약 gen_enemy_proto_meshes.py: 적도 반경 50 · 꼭짓점 ±75 · 링 5분할).
+    // 모서리 셋 — ①꼭짓점에서 적도 링 정점으로 내려오는 능선 5개 ②적도 림 ③꼭짓점. 셋 중 제일
+    // 가까운 것까지의 거리를 쓴다.
+    float ang = atan2(lp.y, lp.x) * 5.0 / 6.28318530718;   // 링 정점마다 정수
     float f = abs(frac(ang) - 0.5) * 2.0;                   // 정점에서 1, 면 한가운데서 0
-    float rimZ = abs(lp.z) / 75.0;                          // 적도 0, 꼭짓점 1
-    edge = (f > 1.0 - fw * 3.0) ? 1.0 : 0.0;                // ① 능선
-    edge = max(edge, (rimZ < fw) ? 1.0 : 0.0);              // ② 적도 림
-    edge = max(edge, (rimZ > 1.0 - fw) ? 1.0 : 0.0);        // ③ 꼭짓점 근처
+    float rimZ = saturate(abs(lp.z) / 75.0);                // 적도 0, 꼭짓점 1
+    // 능선 항에 1/3 을 곱하는 것 = 종전이 폭에 fw*3.0 을 쓰던 보정을 거리 쪽으로 옮긴 것이다
+    // (f 는 방위각 기준이라 같은 폭이 축 기준보다 3배쯤 넓게 먹는다).
+    dEdge = min((1.0 - f) * 0.33333, min(rimZ, 1.0 - rimZ));
 }
+
+// aa 가 0 이면 smoothstep 의 두 경계가 같아져 정의가 무너진다 — 하한을 준다.
+float aa = max(fwidth(dEdge), 1e-5);
+float fw = max(FrameWidthFrac, aa * FrameMinPixels);
+float edge = 1.0 - smoothstep(fw - aa, fw + aa, dEdge);
 
 // ── 불투명도 ─────────────────────────────────────────────────────────────────────────────────
 // 기본 불투명(돌/블럭) · 십자 창만 반투명 · 모서리와 코어는 다시 불투명.
@@ -398,7 +417,7 @@ for nm, node in (("TexCoord", t_coord), ("LocalPosition", local_pos), ("MeshType
 
 for src, pin in ((local_pos, "LocalPos"), (t_coord, "UV"), (mesh_type, "MeshType"),
                  (elem_mask, "CoreMask"), (p_shellop, "ShellOpacity"), (p_band, "BandFrac"),
-                 (p_frame, "FrameWidthFrac"), (p_texscale, "TexScale")):
+                 (p_frame, "FrameWidthFrac"), (p_frmpx, "FrameMinPixels"), (p_texscale, "TexScale")):
     ok = mel.connect_material_expressions(src, "", op_mask, pin)
     print(f"[s4] connect -> OpacityMask.{pin:12s} : {ok}")
     if not ok:
