@@ -120,6 +120,47 @@ void FFPSRArenaCells::ComputeDestructibleCells(const FFPSRArenaAuthoredDestructi
 	}
 }
 
+void FFPSRArenaCells::ComputeCellsFromBoundsXY(const FBox& WorldBounds, const FVector& ArenaOrigin,
+	float CellSize, const FIntPoint& GridDims, TArray<int32>& OutCells)
+{
+	OutCells.Reset();
+	if (CellSize <= 0.0f || GridDims.X <= 0 || GridDims.Y <= 0 || !WorldBounds.IsValid)
+	{
+		return;
+	}
+
+	const int32 RawMinCX = FMath::FloorToInt((WorldBounds.Min.X - ArenaOrigin.X) / CellSize);
+	const int32 RawMaxCX = FMath::FloorToInt((WorldBounds.Max.X - ArenaOrigin.X) / CellSize);
+	const int32 RawMinCY = FMath::FloorToInt((WorldBounds.Min.Y - ArenaOrigin.Y) / CellSize);
+	const int32 RawMaxCY = FMath::FloorToInt((WorldBounds.Max.Y - ArenaOrigin.Y) / CellSize);
+
+	// Entirely off-grid on some axis -> nothing to stamp. Checked BEFORE clamping for the same reason
+	// FFPSRArenaVoxelData::ClearOccupiedAABB checks first: clamping a wholly-negative range would fold it onto
+	// cell 0 and yield a cell the box never touched. Clamping (rather than testing each index inside the loop)
+	// also bounds the iteration to the grid, so a caller passing an absurdly large box costs grid-sized work at
+	// worst instead of box-sized.
+	if (RawMaxCX < 0 || RawMinCX >= GridDims.X || RawMaxCY < 0 || RawMinCY >= GridDims.Y)
+	{
+		return;
+	}
+
+	const int32 MinCX = FMath::Max(RawMinCX, 0);
+	const int32 MaxCX = FMath::Min(RawMaxCX, GridDims.X - 1);
+	const int32 MinCY = FMath::Max(RawMinCY, 0);
+	const int32 MaxCY = FMath::Min(RawMaxCY, GridDims.Y - 1);
+
+	// Row-major (Y outer, X inner) — the SAME loop order as ComputeDestructibleCells above, kept for the SAME
+	// reason: every surviving CX is < GridDims.X, so each row's indices sit entirely below the next row's, which
+	// is what MAKES the ascending-order guarantee true rather than an incidental side effect of it.
+	for (int32 CY = MinCY; CY <= MaxCY; ++CY)
+	{
+		for (int32 CX = MinCX; CX <= MaxCX; ++CX)
+		{
+			OutCells.Add(CY * GridDims.X + CX);
+		}
+	}
+}
+
 bool FFPSRArenaCells::IsCellOpen(const FFPSRArenaLayout& Layout, int32 CX, int32 CY)
 {
 	if (CX < 0 || CY < 0 || CX >= Layout.GridDims.X || CY >= Layout.GridDims.Y)

@@ -321,6 +321,47 @@ bool UFPSRFlowFieldSubsystem::AdoptArenaFieldInternal(const AFPSRArenaActor& Are
 	}
 	UnifiedComputer->BuildFromSurfaceData(WorldSurface);
 
+	// 2D counterpart of the 3D voxel stamp further down: the editor bake probes ObjParams={ECC_WorldStatic} only
+	// (FPSRFlowFieldComputer's world-trace bake), and this prop's mesh is ECC_FPSRDestructible (see
+	// AFPSRArenaDestructible's constructor comment) — so every cell an intact destructible stands on baked
+	// "walkable", and HandleBrokenAuthority's NotifyArenaCellsOpened would go on to "open" a cell that was never
+	// actually closed. MUST run BEFORE ExtractSurfaceData(BakedBaseline) below, not after: the baseline is what
+	// ResetDoorTopologyToBaseline replays on a revisit, so it has to already contain these blocked cells for a
+	// revisited arena to restore its intact destructibles CLOSED — the exact same "stamps included — a baseline
+	// reset restores props CLOSED" contract VoxelBaseline documents a few lines down for the 3D field. Stamping
+	// after the baseline snapshot would let a reset resurrect a broken prop's cells as open.
+	FFPSRArenaGenParams Params;
+	FVector Origin;
+	if (Arena.GetGenParams(Params, Origin))
+	{
+		if (UWorld* StampWorld = GetWorld())
+		{
+			int32 StampedProps = 0;
+			int32 StampedCells = 0;
+			TArray<int32> Cells; // hoisted: ComputeGridCells Resets it, so one allocation serves every prop
+			for (TActorIterator<AFPSRArenaDestructible> It(StampWorld); It; ++It)
+			{
+				const AFPSRArenaDestructible* Prop = *It;
+				if (Prop && !Prop->IsBroken() && Arena.ContainsWorldLocation(Prop->GetActorLocation()))
+				{
+					Prop->ComputeGridCells(Origin, Params.CellSize, Params.ArenaSizeCells, Cells);
+					for (int32 Cell : Cells)
+					{
+						UnifiedComputer->StampCellBlocked(Cell, /*Rank=*/0, /*bBlocked=*/true);
+					}
+					++StampedProps;
+					StampedCells += Cells.Num();
+				}
+			}
+			UE_LOG(LogFPSR, Log,
+				TEXT("[FlowField] Arena surface adopted from %s: %d intact destructible(s) stamped blocked (%d cell(s))."),
+				*Arena.GetName(), StampedProps, StampedCells);
+		}
+	}
+	// GetGenParams failing here is not logged separately — it means this arena has no grid params to stamp
+	// against, and the surface adoption above already either succeeded on its own terms or the caller will log
+	// the overall adoption failure; a second warning here would just be noise on top of that.
+
 	// The adopted arena IS the baseline now. Keeping the old snapshot would let a later
 	// ResetDoorTopologyToBaseline restore the PREVIOUS arena's walls into the current one.
 	UnifiedComputer->ExtractSurfaceData(BakedBaseline);

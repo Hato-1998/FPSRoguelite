@@ -40,6 +40,16 @@ public:
 	static void ComputeDestructibleCells(const FFPSRArenaAuthoredDestructible& Destructible,
 		const FVector& ArenaOrigin, float CellSize, const FIntPoint& GridDims, TArray<int32>& OutCells);
 
+	/** Cell indices covered by a WORLD-space XY bounds box — the 2D counterpart of
+	 *  FFPSRArenaVoxelData::SetOccupiedAABB (the 3D voxel stamp taken at arena adoption): instead of an authored
+	 *  anchor+footprint, the cells are derived straight from a mesh's own render bounds, so the 2D flow field and
+	 *  the 3D voxel field describe the SAME prop footprint instead of one trusting a hand-typed FootprintCells that
+	 *  can drift from the mesh. Off-grid cells are dropped; the surviving indices come out in ascending order via
+	 *  the SAME row-major (Y outer, X inner) loop as ComputeDestructibleCells above, for the same reason that
+	 *  function's comment gives — the loop order is what MAKES the ordering true, not incidental to it. */
+	static void ComputeCellsFromBoundsXY(const FBox& WorldBounds, const FVector& ArenaOrigin,
+		float CellSize, const FIntPoint& GridDims, TArray<int32>& OutCells);
+
 	/** True if the cell is inside the grid and not blocked. Mirrors the flow field's own traversability
 	 *  predicate (surface exists AND not blocked), so layout and field never disagree about what is walkable. */
 	static bool IsCellOpen(const FFPSRArenaLayout& Layout, int32 CX, int32 CY);

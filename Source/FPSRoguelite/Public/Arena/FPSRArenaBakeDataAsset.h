@@ -186,9 +186,13 @@ struct FPSROGUELITE_API FFPSRArenaVoxelData
 	 * Exact mirror of ClearOccupiedAABB: SETS every voxel the box touches. Exists for the runtime destructible
 	 * stamp (merge-gate P2): destructible props are ECC_FPSRDestructible, so the editor bake's ECC_WorldStatic
 	 * probe never sees them — an intact prop must be stamped INTO the adopted field at adoption time for the
-	 * break-time clear to have anything to open (the 2D field gets the same treatment through its own footprint
-	 * cells). Same clamp/fail-closed rules as the clear; both must use the SAME box source (the prop's root
-	 * primitive bounds) or a stamp/clear mismatch leaves phantom occupancy behind.
+	 * break-time clear to have anything to open. The 2D field gets the same treatment at the same moment through
+	 * AFPSRArenaDestructible::ComputeGridCells + StampCellBlocked (UFPSRFlowFieldSubsystem::AdoptArenaFieldInternal)
+	 * — which by default derives its cells from the SAME GetVoxelBounds() box this stamp uses, so the two fields
+	 * cannot disagree about where a prop sits. (This line previously claimed the 2D side was already covered "through
+	 * its own footprint cells"; it was not — nothing blocked 2D cells at all between ADR 0012 retiring the generator
+	 * and that stamp landing.) Same clamp/fail-closed rules as the clear; both must use the SAME box source (the
+	 * prop's root primitive bounds) or a stamp/clear mismatch leaves phantom occupancy behind.
 	 */
 	static void SetOccupiedAABB(FFPSRArenaVoxelData& Voxels, const FBox& WorldAABB)
 	{
