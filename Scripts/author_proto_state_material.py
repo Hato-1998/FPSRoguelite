@@ -106,7 +106,8 @@ p_shellop= scalar_param("ShellOpacity",     0.55, x=-1900, y=600)  # 십자 창�
 p_ramp   = scalar_param("OpenRampFrac",     0.12, x=-1900, y=-60)  # 열리는 데 쓰는 진행도 비율
 p_close  = scalar_param("CloseRampFrac",    0.10, x=-1900, y=-20)  # 발사 직전 닫히는 비율
 p_band   = scalar_param("WindowBandFrac",   0.30, x=-1900, y=700)  # 십자 창 폭(요소 반크기 대비)
-p_frame  = scalar_param("FramePower",       3.0,  x=-1900, y=800)  # 외곽 프레임(프레넬) 날카로움
+p_frame  = scalar_param("FrameWidthFrac",   0.10, x=-1900, y=800)  # 모서리 프레임 폭(요소 반크기 대비)
+p_texscale= scalar_param("TexScale",        0.01, x=-1900, y=900)  # 로컬 위치 → UV 배율(질감 타일링)
 
 # ── 3. ProcWPO 에 상태 입력 추가 + HLSL 교체 ─────────────────────────────────────────────────────
 wpo = find_custom("ProcWPO")
@@ -295,7 +296,7 @@ if not op_mask:
     op_mask = mel.create_material_expression(mat, unreal.MaterialExpressionCustom, -1200, 700)
     op_mask.set_editor_property("description", "OpacityMask")
     ins = []
-    for n in ("LocalPos", "UV", "MeshType", "CoreMask", "ShellOpacity", "BandFrac", "Fresnel"):
+    for n in ("LocalPos", "UV", "MeshType", "CoreMask", "ShellOpacity", "BandFrac", "FrameWidthFrac", "TexScale"):
         ci = unreal.CustomInput()
         ci.set_editor_property("input_name", n)
         ins.append(ci)
@@ -304,45 +305,67 @@ if not op_mask:
 else:
     print("[s4] OpacityMask Custom 노드 재사용")
 
-op_mask.set_editor_property("output_type", unreal.CustomMaterialOutputType.CMOT_FLOAT1)
+op_mask.set_editor_property("output_type", unreal.CustomMaterialOutputType.CMOT_FLOAT4)
 op_mask.set_editor_property("code", """// 요소별 중심/반크기 — 메시 생성기(gen_enemy_proto_meshes.py)와의 계약이다. 값이 바뀌면 양쪽을 같이 고칠 것.
 int id = (int)floor(UV.x);
 float3 c = float3(0.0, 0.0, 0.0);
 float hs = 75.0;
-if (MeshType < 0.5)
+bool isCube = (MeshType >= 0.5);
+if (isCube)
 {
-    // 쌍뿔: 상뿔/하뿔/코어 전부 원점 기준. 반크기 = 꼭짓점 높이.
-    hs = 75.0;
-}
-else
-{
-    // 원자 큐브: 핵(half 30) · 전자 3개(half 10, 궤도 반경 80) · 코어 구(반지름 14).
     if (id == 1 || id == 2) { c = float3(80.0, 0.0, 0.0); hs = 10.0; }
     else if (id == 3)       { c = float3(0.0, 80.0, 0.0); hs = 10.0; }
     else if (id == 4)       { hs = 14.0; }
     else                    { hs = 30.0; }
 }
 
-// 십자 띠: 요소 로컬에서 세 축 중 **하나라도** 중심선에 가까우면 창이다. 면 위의 점은 지배축이
-// 반크기에 붙어 있으므로, 나머지 두 축 가운데 하나가 가까울 때만 참이 된다 = 그림의 십자.
-float3 a = abs(LocalPos - c);
+float3 lp = LocalPos - c;
+float3 a = abs(lp);
+
+// ── 십자 창 ──────────────────────────────────────────────────────────────────────────────────
+// 요소 로컬에서 세 축 중 하나라도 중심선에 가까우면 창. 면 위의 점은 지배축이 반크기에 붙어 있으니
+// 나머지 두 축 중 하나가 가까울 때만 참 = 그림의 십자.
 float band = BandFrac * hs;
 float inCross = (min(a.x, min(a.y, a.z)) < band) ? 1.0 : 0.0;
 
-// 기본 불투명, 십자 창만 반투명. 프레임(프레넬)과 코어는 다시 불투명으로 끌어올린다.
-float o = lerp(1.0, ShellOpacity, inCross);
-o = max(o, Fresnel);
-return lerp(o, 1.0, saturate(CoreMask));""")
+// ── 기하 모서리 프레임 ───────────────────────────────────────────────────────────────────────
+// 프레넬(시선 각도)로는 정면에서 본 능선이 안 잡힌다 — 실제 모서리를 형태별로 계산한다.
+float edge = 0.0;
+float fw = FrameWidthFrac;
+if (isCube)
+{
+    // 큐브: 면=한 축만 반크기에 붙음 / 변=두 축 / 꼭짓점=세 축. 두 축 이상이면 모서리다.
+    float3 n = a / max(hs, 1e-4);
+    float cnt = (n.x > 1.0 - fw ? 1.0 : 0.0) + (n.y > 1.0 - fw ? 1.0 : 0.0) + (n.z > 1.0 - fw ? 1.0 : 0.0);
+    edge = (cnt >= 2.0) ? 1.0 : 0.0;
+}
+else
+{
+    // 오각 쌍뿔: 모서리 셋 — ①꼭짓점에서 적도 링 정점으로 내려오는 능선 5개 ②적도 림 ③꼭짓점.
+    // 능선은 방위각으로 잡는다: 링 정점이 2*pi*k/5 마다 있으므로 그 격자에 가까우면 능선이다.
+    float ang = atan2(lp.y, lp.x) * 5.0 / 6.28318530718;   // 정점마다 정수
+    float f = abs(frac(ang) - 0.5) * 2.0;                   // 정점에서 1, 면 한가운데서 0
+    float rimZ = abs(lp.z) / 75.0;                          // 적도 0, 꼭짓점 1
+    edge = (f > 1.0 - fw * 3.0) ? 1.0 : 0.0;                // ① 능선
+    edge = max(edge, (rimZ < fw) ? 1.0 : 0.0);              // ② 적도 림
+    edge = max(edge, (rimZ > 1.0 - fw) ? 1.0 : 0.0);        // ③ 꼭짓점 근처
+}
 
-fres = None
-for e in expressions(unreal.MaterialExpressionFresnel):
-    fres = e
-    break
-if not fres:
-    fres = mel.create_material_expression(mat, unreal.MaterialExpressionFresnel, -1500, 800)
-    print("[s4] Fresnel 노드 생성")
-ok = mel.connect_material_expressions(p_frame, "", fres, "ExponentIn")
-print(f"[s4] connect FramePower -> Fresnel : {ok}")
+// ── 불투명도 ─────────────────────────────────────────────────────────────────────────────────
+// 기본 불투명(돌/블럭) · 십자 창만 반투명 · 모서리와 코어는 다시 불투명.
+float o = lerp(1.0, ShellOpacity, inCross);
+o = max(o, edge);
+o = lerp(o, 1.0, saturate(CoreMask));
+
+// ── 질감용 투영 UV ───────────────────────────────────────────────────────────────────────────
+// 메시 UV 는 요소 ID 인코딩이라 텍스처를 물릴 수 없다. 지배 노멀 축으로 평면 투영해 UV 를 만든다 —
+// 3중 투영(triplanar)의 1/3 비용이고, 블럭·돌처럼 결이 강하지 않은 질감엔 45도 이음매가 안 보인다.
+float2 puv;
+if (a.x >= a.y && a.x >= a.z)      puv = lp.yz;
+else if (a.y >= a.z)               puv = lp.xz;
+else                               puv = lp.xy;
+
+return float4(o, edge, puv * TexScale);""")
 
 t_coord = find_by_object_name("MaterialExpressionTextureCoordinate_0")
 local_pos = find_by_object_name("MaterialExpressionLocalPosition_0")
@@ -353,7 +376,7 @@ for nm, node in (("TexCoord", t_coord), ("LocalPosition", local_pos), ("MeshType
 
 for src, pin in ((local_pos, "LocalPos"), (t_coord, "UV"), (mesh_type, "MeshType"),
                  (elem_mask, "CoreMask"), (p_shellop, "ShellOpacity"), (p_band, "BandFrac"),
-                 (fres, "Fresnel")):
+                 (p_frame, "FrameWidthFrac"), (p_texscale, "TexScale")):
     ok = mel.connect_material_expressions(src, "", op_mask, pin)
     print(f"[s4] connect -> OpacityMask.{pin:12s} : {ok}")
     if not ok:
@@ -364,10 +387,99 @@ mat.set_editor_property("blend_mode", unreal.BlendMode.BLEND_TRANSLUCENT)
 mat.set_editor_property("shading_model", unreal.MaterialShadingModel.MSM_DEFAULT_LIT)
 mat.set_editor_property("translucency_lighting_mode", unreal.TranslucencyLightingMode.TLM_SURFACE_PER_PIXEL_LIGHTING)
 
-ok = mel.connect_material_property(op_mask, "", unreal.MaterialProperty.MP_OPACITY)
-print(f"[s4] connect OpacityMask -> Opacity : {ok}")
+# 마스크 노드는 float4(x=불투명도, y=모서리, zw=투영UV)를 낸다 — 세 소비처가 같은 계산을 공유하도록
+# 한 노드에 모았다(요소 중심·반크기 판정이 셋 다 필요하다). 성분별로 갈라 쓴다.
+def component_mask(name, r, g, b_, a_, x, y):
+    for e in expressions(unreal.MaterialExpressionComponentMask):
+        if str(e.get_editor_property("desc")) == name:
+            return e
+    cm = mel.create_material_expression(mat, unreal.MaterialExpressionComponentMask, x, y)
+    cm.set_editor_property("desc", name)
+    for prop, val in (("r", r), ("g", g), ("b", b_), ("a", a_)):
+        cm.set_editor_property(prop, val)
+    ok = mel.connect_material_expressions(op_mask, "", cm, "")
+    print(f"[s4] ComponentMask {name} 생성, connect={ok}")
+    if not ok:
+        raise SystemExit(f"[s4] ComponentMask {name} 연결 실패 — 중단")
+    return cm
+
+m_opacity = component_mask("MaskOpacity", True, False, False, False, -900, 700)
+m_edge    = component_mask("MaskEdge",    False, True, False, False, -900, 800)
+m_uv      = component_mask("MaskUV",      False, False, True, True,  -900, 900)
+
+ok = mel.connect_material_expressions(m_opacity, "", None, "") if False else True
+ok = mel.connect_material_property(m_opacity, "", unreal.MaterialProperty.MP_OPACITY)
+print(f"[s4] connect MaskOpacity -> Opacity : {ok}")
 if not ok:
     raise SystemExit("[s4] Opacity 출력 연결 실패 — 중단")
+
+# ── 4-c. 질감 소켓 + 모서리 어둡게 ───────────────────────────────────────────────────────────────
+# 사용자가 돌/블럭 텍스처를 찾아 넣을 자리를 미리 판다((가) 채택, 2026-08-25). 기본값은 흰색
+# 엔진 텍스처라 지금은 BaseColor 가 종전과 동일하게 보이고, MI 에서 텍스처만 지정하면 켜진다.
+# UV 는 메시 UV 가 아니라 마스크 노드가 낸 **투영 UV** 를 쓴다 — 메시 UV 는 요소 ID 인코딩이라
+# 텍스처를 물리면 뭉개진다.
+tex = None
+for e in expressions(unreal.MaterialExpressionTextureSampleParameter2D):
+    tex = e
+    break
+if not tex:
+    tex = mel.create_material_expression(mat, unreal.MaterialExpressionTextureSampleParameter2D, -700, 900)
+    tex.set_editor_property("parameter_name", "BaseTexture")
+    white = unreal.load_asset("/Engine/EngineResources/WhiteSquareTexture")
+    if white:
+        tex.set_editor_property("texture", white)
+    print("[s4] BaseTexture 파라미터 생성(기본=흰색, MI 에서 교체)")
+else:
+    print("[s4] BaseTexture 파라미터 재사용")
+ok = mel.connect_material_expressions(m_uv, "", tex, "UVs")
+print(f"[s4] connect 투영UV -> BaseTexture.UVs : {ok}")
+if not ok:
+    raise SystemExit("[s4] BaseTexture.UVs 연결 실패 — 중단")
+
+# BaseColor = (저작 색 × 질감) 을 모서리에서 FrameColor 로 대체. 그림의 검은 테두리에 해당한다.
+frame_color = None
+for e in expressions(unreal.MaterialExpressionVectorParameter):
+    if str(e.get_editor_property("parameter_name")) == "FrameColor":
+        frame_color = e
+        break
+if not frame_color:
+    frame_color = mel.create_material_expression(mat, unreal.MaterialExpressionVectorParameter, -1200, 1000)
+    frame_color.set_editor_property("parameter_name", "FrameColor")
+    frame_color.set_editor_property("default_value", unreal.LinearColor(0.02, 0.02, 0.03, 1.0))
+    print("[s4] FrameColor 파라미터 생성")
+
+tinted = None
+for e in expressions(unreal.MaterialExpressionMultiply):
+    if str(e.get_editor_property("desc")) == "BaseTinted":
+        tinted = e
+        break
+if not tinted:
+    tinted = mel.create_material_expression(mat, unreal.MaterialExpressionMultiply, -500, 850)
+    tinted.set_editor_property("desc", "BaseTinted")
+    print("[s4] BaseTinted Multiply 생성")
+for src, pin in ((base_color, "A"), (tex, "B")):
+    ok = mel.connect_material_expressions(src, "", tinted, pin)
+    if not ok:
+        raise SystemExit(f"[s4] BaseTinted.{pin} 연결 실패 — 중단")
+
+edge_lerp = None
+for e in expressions(unreal.MaterialExpressionLinearInterpolate):
+    if str(e.get_editor_property("desc")) == "EdgeTint":
+        edge_lerp = e
+        break
+if not edge_lerp:
+    edge_lerp = mel.create_material_expression(mat, unreal.MaterialExpressionLinearInterpolate, -300, 850)
+    edge_lerp.set_editor_property("desc", "EdgeTint")
+    print("[s4] EdgeTint Lerp 생성")
+for src, pin in ((tinted, "A"), (frame_color, "B"), (m_edge, "Alpha")):
+    ok = mel.connect_material_expressions(src, "", edge_lerp, pin)
+    if not ok:
+        raise SystemExit(f"[s4] EdgeTint.{pin} 연결 실패 — 중단")
+
+ok = mel.connect_material_property(edge_lerp, "", unreal.MaterialProperty.MP_BASE_COLOR)
+print(f"[s4] connect EdgeTint -> BaseColor : {ok}")
+if not ok:
+    raise SystemExit("[s4] BaseColor 연결 실패 — 중단")
 
 # ── 5. 고아 노드 정리 ────────────────────────────────────────────────────────────────────────────
 # 위상 소스를 오브젝트 위치 해시 → CPD 슬롯3 으로 갈아끼울 때(fix_proto_material_phase.py) 입력만
