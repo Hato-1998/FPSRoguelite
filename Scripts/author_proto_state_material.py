@@ -169,10 +169,11 @@ p_hitint = scalar_param("HitFlashIntensity", 12.0,  x=-1900, y=500)
 p_open   = scalar_param("AttackOpen",      22.0, x=-1900, y=-100)  # cm, 쌍뿔 상/하 분리 거리
 p_epull  = scalar_param("ElectronPull",     0.55, x=-1900, y=0)    # 0..1 전자가 핵으로 빨려드는 정도
 p_esnap  = scalar_param("ElectronSnap",     0.45, x=-1900, y=100)  # 0..1 발사 순간 튕겨나가는 정도
-# 십자 창의 불투명도(그 밖은 불투명). Masked+디더라 의미가 연속이다: 0 = 완전히 잘린 진짜 구멍 /
-# 1 = 통짜 불투명 / 사이 = TSR 이 풀어 주는 확률적 반투명. 0.80 = **코어가 희미하게 비치는 정도**
-# (창 픽셀의 20%만 뚫린다) — 사용자 결정 2026-08-25.
-p_shellop= scalar_param("ShellOpacity",     0.80, x=-1900, y=600)
+# 십자 창의 불투명도(그 밖은 불투명). 디더를 뺀 뒤로는 **이분법**이다 — 클립값(0.3333) 아래면
+# 잘린 진짜 구멍, 위면 불투명. 1.0 = 통짜 불투명(코어 안 보임) = 사용자 저작 원래 값.
+# 코어를 보이게 하려면 0.0 으로 내리면 깨끗한 십자 구멍이 난다. 중간값은 의미 없다(0.3333 기준으로
+# 둘 중 하나로 떨어진다).
+p_shellop= scalar_param("ShellOpacity",     1.00, x=-1900, y=600)
 p_ramp   = scalar_param("OpenRampFrac",     0.12, x=-1900, y=-60)  # 열리는 데 쓰는 진행도 비율
 p_close  = scalar_param("CloseRampFrac",    0.10, x=-1900, y=-20)  # 발사 직전 닫히는 비율
 p_band   = scalar_param("WindowBandFrac",   0.30, x=-1900, y=700)  # 십자 창 폭(요소 반크기 대비)
@@ -350,9 +351,8 @@ if not ok:
 #
 # Masked 는 깊이를 쓰므로 정렬이 정확해져 얼룩이 사라지고, 베이스 패스에 남아 early-z 를 되찾는다 —
 # 적 200~300 이 뭉치는 게임이라 제1원리("적 수백을 싸게")·ADR 0007 예산(4ms)에 직접 걸리는 차이다.
-# Masked 는 이분법(그리거나 자르거나)이라 중간 불투명도는 **디더**로 낸다(아래 WindowDither):
-# ShellOpacity 0 = 완전히 잘린 진짜 구멍(디더 노이즈 0) / 1 = 통짜 불투명 / 사이 = TSR 이 풀어 주는
-# 확률적 반투명. 즉 종전 Translucent 가 하던 일의 상위집합이면서 정렬이 산다.
+# Masked 는 이분법이다(그리거나 자르거나) — ShellOpacity 가 클립값 아래면 잘린 **진짜 구멍**,
+# 위면 통짜 불투명. 중간값을 디더로 내 보려던 시도는 사용자 PIE 확인 후 접었다(아래 4-c 주석).
 # ⚠️ 껍질이 한 겹이라(two_sided=False) 창 너머로 코어가 안 채우는 각도에선 뒷배경이 비칠 수 있다.
 #    그때의 손잡이는 two_sided=True 지만 껍질 셰이딩 비용이 2배라 스웜엔 비싸다 — PIE 로 먼저 볼 것.
 elem_mask = find_custom("ElemMask")
@@ -478,35 +478,22 @@ m_opacity = component_mask("MaskOpacity", True, False, False, False, -900, 700)
 m_edge    = component_mask("MaskEdge",    False, True, False, False, -900, 800)
 m_uv      = component_mask("MaskUV",      False, False, True, True,  -900, 900)
 
-# 디더 — 엔진이 정확히 이 용도로 내놓는 함수를 쓴다(직접 HLSL 로 짜면 View.StateFrameIndexMod8 같은
-# 엔진 내부 심볼에 의존해 버전마다 깨진다). 실측 핀 이름: 입력 "Alpha Threshold"/"Random", 출력 "Result".
-# "Random" 은 선택 입력이라 비워 두면 함수가 기본 시퀀스를 쓴다.
-DITHER_FN = "/Engine/Functions/Engine_MaterialFunctions02/Utility/DitherTemporalAA"
-dither = None
+# ⏸️ **디더 제거 (사용자 결정 2026-08-25, PIE 확인 후).** 한동안 DitherTemporalAA 를 물려 중간
+# 불투명도를 냈는데, Masked 에서 "반쯤 투명"은 원리적으로 **스크린도어(픽셀을 솎아내기)** 밖에
+# 없고 그게 화면에선 **면이 모자이크 처리된 것처럼** 보인다("이 부분도 되돌려줘"). 그래서 마스크를
+# OpacityMask 에 직결한다.
+#
+# 그 결과 ShellOpacity 는 **이분법**이 된다 — 클립값(0.3333) 아래면 잘린 진짜 구멍, 위면 불투명.
+# 즉 이 머티리얼로 낼 수 있는 그림은 둘뿐이다: **깨끗한 십자 구멍**(코어가 또렷이 보임) 또는
+# **통짜 불투명**(코어가 안 보임). "희미하게"는 Masked 로는 못 낸다 — 반투명으로 돌아가면 메시
+# 안에서 깊이 정렬이 없어 코어에 얼룩이 지는 종전 버그가 그대로 돌아온다(27e2730b 참조).
 for e in expressions(unreal.MaterialExpressionMaterialFunctionCall):
     if str(e.get_editor_property("desc")) == "WindowDither":
-        dither = e
-        break
-if not dither:
-    fn = unreal.load_asset(DITHER_FN)
-    if not fn:
-        raise SystemExit(f"[s4] 디더 함수를 못 찾음: {DITHER_FN}")
-    dither = mel.create_material_expression(mat, unreal.MaterialExpressionMaterialFunctionCall, -700, 700)
-    dither.set_editor_property("desc", "WindowDither")
-    # set_material_function 을 쓴다 — set_editor_property 로 넣으면 핀 배열이 재구축되지 않아
-    # 아래 connect 가 조용히 False 를 낸다.
-    dither.set_material_function(fn)
-    print("[s4] WindowDither(DitherTemporalAA) 생성")
-else:
-    print("[s4] WindowDither 재사용")
+        mel.delete_material_expression(mat, e)
+        print("[s4] WindowDither(DitherTemporalAA) 제거")
 
-ok = mel.connect_material_expressions(m_opacity, "", dither, "Alpha Threshold")
-print(f"[s4] connect MaskOpacity -> WindowDither.Alpha Threshold : {ok}")
-if not ok:
-    raise SystemExit("[s4] WindowDither 입력 연결 실패 — 중단")
-
-ok = mel.connect_material_property(dither, "", unreal.MaterialProperty.MP_OPACITY_MASK)
-print(f"[s4] connect WindowDither -> OpacityMask : {ok}")
+ok = mel.connect_material_property(m_opacity, "", unreal.MaterialProperty.MP_OPACITY_MASK)
+print(f"[s4] connect MaskOpacity -> OpacityMask : {ok}")
 if not ok:
     raise SystemExit("[s4] OpacityMask 출력 연결 실패 — 중단")
 
@@ -657,8 +644,8 @@ print(f"[s4] 프레넬 잔재 제거: {len(dead)}개")
 # ⚠️ 이 표는 사용자 저작값을 덮는다. 다른 값으로 가고 싶으면 에디터에서 MI 를 고치는 대신 여기를
 #    고칠 것 — 안 그러면 다음 실행에 조용히 되돌아간다.
 MI_SCALARS = {
-    "MI_EnemyProto_AtomCubes": {"EmissiveElementId": 4.0, "ShellOpacity": 0.80},
-    "MI_EnemyProto_Bipyramid": {"EmissiveElementId": 2.0, "ShellOpacity": 0.80},
+    "MI_EnemyProto_AtomCubes": {"EmissiveElementId": 4.0, "ShellOpacity": 1.00},
+    "MI_EnemyProto_Bipyramid": {"EmissiveElementId": 2.0, "ShellOpacity": 1.00},
 }
 for mi_name, params in MI_SCALARS.items():
     mi_path = f"{'/'.join(MAT_PATH.split('/')[:-1])}/{mi_name}"
