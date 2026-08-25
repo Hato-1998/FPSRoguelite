@@ -118,8 +118,15 @@ public:
 	/** Debug canary (FPSR.Enemy.ForceAnimState): apply a state to the mesh with EVERY gate bypassed — the dedupe,
 	 *  the one-shot re-entry guard, and the attack hold window. Splits "the material does not react" from "the state
 	 *  driver never asked it to" in one PIE pass instead of a log-reading round trip. PUBLIC because the console
-	 *  command that drives it is a free function, not a member. Never called by gameplay. */
-	void DebugForceAnimState(EFPSRAnimState State);
+	 *  command that drives it is a free function, not a member. Never called by gameplay.
+	 *
+	 *  bPin additionally SUPPRESSES the state driver (SetAnimState early-returns) until a later call clears it.
+	 *  Without the pin this is only a poke: the driver re-derives a state on the very next net update / movement
+	 *  pass and overwrites it, which makes a driver-caused restart indistinguishable from a material-caused one —
+	 *  precisely the ambiguity the canary exists to remove for the "progress resets by itself" symptom. Pinned, a
+	 *  forced one-shot MUST play through once and stop; if it still rewinds, the material's progress math is the
+	 *  culprit. */
+	void DebugForceAnimState(EFPSRAnimState State, bool bPin);
 #endif
 
 	AFPSREnemyBase();
@@ -428,17 +435,25 @@ protected:
 	/** Server-only: world time of last attack (init far in the past so the first attack is allowed). */
 	float LastAttackTime = -1000.0f;
 
-	/** Server-only: world time until which TickServerMovement's walk/idle branch must NOT override the cosmetic anim
-	 *  state — holds an Attack one-shot / ranged charge tell for its full duration instead of the very next movement
-	 *  pass stomping it back to Walk/Idle. NOT replicated (server-authoritative bookkeeping; the cosmetic state it
-	 *  gates is itself never replicated — Performance §5). Stamped by ServerTickAttack (melee: Now +
-	 *  AttackAnimHoldSeconds) and AFPSRRangedEnemyBase::ServerTickAttack's Idle->Charging transition (Now +
-	 *  RangedChargeTime, matching the charge-length SetAnimState rate set alongside it). Deliberately a raw server
-	 *  timestamp rather than a read of CurrentAnimState: SetAnimState early-returns before ever WRITING
-	 *  CurrentAnimState on a dedicated server (see its NM_DedicatedServer gate), so CurrentAnimState is permanently
-	 *  stuck at its Idle default there — a guard built on it is correct only on a listen-server host. This field is
-	 *  written unconditionally by the attack decision (gated on nothing cosmetic), so the hold window is correct on
-	 *  every net mode. Reset on Activate so a pooled reuse never inherits a prior life's hold. */
+	/** World time until which the walk/idle branch must NOT override the cosmetic anim state — holds an Attack
+	 *  one-shot / ranged charge tell for its full duration instead of the very next movement pass or net update
+	 *  stomping it back to Walk/Idle. NOT replicated: each side stamps its OWN copy for the driver that owns this
+	 *  instance, and the two drivers never run for the same instance (PostNetReceiveLocationAndRotation fires only
+	 *  on a remote client, TickServerMovement only on authority), so one field serves both without contention.
+	 *   - AUTHORITY driver, gating TickServerMovement's walk/idle branch: stamped by ServerTickAttack (melee: Now +
+	 *     AttackAnimHoldSeconds) and AFPSRRangedEnemyBase::ServerTickAttack's Idle->Charging transition (Now +
+	 *     RangedChargeTime, matching the charge-length SetAnimState rate set alongside it).
+	 *   - CLIENT driver, gating PostNetReceiveLocationAndRotation's walk/idle branch: stamped by that function's own
+	 *     melee proximity tell and by AFPSRRangedEnemyBase::OnRep_Charging. The client used to have no hold at all,
+	 *     which is what let a flickering bMoving bounce Attack->Walk->Attack; a re-entry from a DIFFERENT state
+	 *     skips SetAnimState's one-shot guard and restamps CPD EnterTime, rewinding the material's
+	 *     (Time-EnterTime)*Rate progress to 0 mid-play.
+	 *  Deliberately a raw timestamp rather than a read of CurrentAnimState: SetAnimState early-returns before ever
+	 *  WRITING CurrentAnimState on a dedicated server (see its NM_DedicatedServer gate), so CurrentAnimState is
+	 *  permanently stuck at its Idle default there — a guard built on it is correct only on a listen-server host.
+	 *  This field is written unconditionally by the attack decision (gated on nothing cosmetic), so the hold window
+	 *  is correct on every net mode. Reset on Activate (authority) and in SetActorHiddenInGame's became-visible edge
+	 *  (client) so a pooled reuse never inherits a prior life's hold. */
 	float AttackAnimHoldUntil = -1.0f;
 
 	/** Server-only: this enemy's map (multimap Tier 0). See GetMapId. Not replicated. */
@@ -736,6 +751,13 @@ protected:
 
 	/** Current cosmetic animation state (not replicated). */
 	EFPSRAnimState CurrentAnimState = EFPSRAnimState::Idle;
+
+#if !UE_BUILD_SHIPPING
+	/** Debug canary pin (FPSR.Enemy.ForceAnimState <state> 1): while set, SetAnimState writes nothing, so the state
+	 *  the canary pushed survives instead of being re-derived on the next net update. Debug-only isolation aid —
+	 *  never set by gameplay, and compiled out of shipping along with DebugForceAnimState itself. */
+	bool bDebugAnimPinned = false;
+#endif
 
 	/** Quantized walk-speed bucket of the last applied state (so playrate is re-written only on a bucket change). */
 	int32 CurrentSpeedBucket = -1;

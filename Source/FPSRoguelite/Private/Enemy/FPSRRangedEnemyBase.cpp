@@ -305,11 +305,26 @@ void AFPSRRangedEnemyBase::OnRep_Charging()
 {
 	// Non-targeted client telegraph (see bCharging's header comment). True -> enter the Attack cosmetic at the
 	// charge-length rate, mirroring the server's own SetAnimState call in ServerTickAttack's Idle->Charging
-	// transition. False -> do nothing: the next PostNetReceiveLocationAndRotation naturally re-derives Walk/Idle
-	// from the replicated transform, same as any other attack tell falling out of range.
+	// transition. False -> release the hold so the next PostNetReceiveLocationAndRotation re-derives Walk/Idle from
+	// the replicated transform, same as any other attack tell falling out of range.
 	if (bCharging)
 	{
 		SetAnimState(EFPSRAnimState::Attack, 1.0f / FMath::Max(KINDA_SMALL_NUMBER, RangedChargeTime));
+		// Hold the cosmetic for the charge length on THIS client, mirroring the authority-side hold that
+		// ServerTickAttack stamps alongside its own SetAnimState. A ranged enemy fires from far outside
+		// AttackRange, so PostNetReceiveLocationAndRotation's melee tell never claims it and its walk/idle branch
+		// would otherwise erase this telegraph on the very next net update — a charge the user decided to
+		// replicate specifically so it could be READ would be visible for one frame out of RangedChargeTime.
+		if (const UWorld* World = GetWorld())
+		{
+			AttackAnimHoldUntil = World->GetTimeSeconds() + RangedChargeTime;
+		}
+	}
+	else
+	{
+		// Aborted or completed charge: drop the hold immediately, exactly as ClearRangedReservation does on the
+		// authority side, so the enemy does not sit in the charge pose while it is already free to move.
+		AttackAnimHoldUntil = -1.0f;
 	}
 }
 

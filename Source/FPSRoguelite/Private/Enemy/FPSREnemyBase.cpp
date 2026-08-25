@@ -227,7 +227,7 @@ void AFPSREnemyBase::InitHealthBarWidget()
 }
 
 #if !UE_BUILD_SHIPPING
-void AFPSREnemyBase::DebugForceAnimState(EFPSRAnimState State)
+void AFPSREnemyBase::DebugForceAnimState(EFPSRAnimState State, bool bPin)
 {
 	// Bypass EVERY gate SetAnimState applies (dedupe, one-shot re-entry guard, the attack hold window) and push the
 	// CPD contract straight at the profile. That is the whole point: it isolates "the material does not react" from
@@ -236,6 +236,9 @@ void AFPSREnemyBase::DebugForceAnimState(EFPSRAnimState State)
 	{
 		return;
 	}
+	// Set the pin BEFORE applying, so no driver write can slip between the two. Held across pool reuse on purpose:
+	// a debug session pins once and expects it to stay pinned until it is explicitly cleared.
+	bDebugAnimPinned = bPin;
 	const UWorld* World = GetWorld();
 	const float Rate = IsOneShotState(State)
 		? 1.0f / FMath::Max(KINDA_SMALL_NUMBER, (State == EFPSRAnimState::Death) ? DeathDwellSeconds : AttackAnimHoldSeconds)
@@ -518,6 +521,15 @@ void AFPSREnemyBase::SetAnimState(EFPSRAnimState NewState, float PlayRate)
 		return;
 	}
 
+#if !UE_BUILD_SHIPPING
+	// Canary pin (FPSR.Enemy.ForceAnimState <state> 1): the whole driver is muted so the forced state actually
+	// holds. Without this the canary is only a poke and cannot tell a driver-caused restart from a material one.
+	if (bDebugAnimPinned)
+	{
+		return;
+	}
+#endif
+
 	// PlayRate < 0 is the "caller didn't pass one" sentinel (see the header doc) — a plain 1.0f default couldn't be
 	// told apart from a caller explicitly requesting normal speed, and a one-shot state needs a DURATION-derived rate
 	// (never a guessed 1.0) so its material progress (Time-EnterTime)*Rate reaches 1.0 exactly at the authored
@@ -661,6 +673,21 @@ void AFPSREnemyBase::PostNetReceiveLocationAndRotation()
 	if (!bMoving && LocalPawn && DistSqToLocal <= (AttackRange * AttackRange))
 	{
 		SetAnimState(EFPSRAnimState::Attack);
+		AttackAnimHoldUntil = Now + AttackAnimHoldSeconds; // mirrors the authority stamp in ServerTickAttack
+		return;
+	}
+
+	// The same hold the AUTHORITY driver has always applied (TickServerMovement's walk/idle branch), which this
+	// client-side driver was missing entirely — an Attack one-shot owns the cosmetic until its window elapses.
+	// Without it: (a) a swarm enemy whose bMoving flickers across the 10 cm/s threshold leaves Attack for Walk and
+	// comes straight back, and a re-entry from a DIFFERENT state skips SetAnimState's one-shot re-entry guard, so
+	// CPD EnterTime is restamped and the material's (Time-EnterTime)*Rate progress rewinds to 0 mid-play; (b) the
+	// ranged charge tell was worse still — a ranged enemy sits far outside AttackRange, so this branch erased
+	// OnRep_Charging's telegraph on the very next net update, ~33 ms into a charge lasting RangedChargeTime.
+	// Placed AFTER the melee tell so a fresh attack can always re-stamp its own window, and after the distance-LOD
+	// freeze above so the perf gate still wins at range.
+	if (Now < AttackAnimHoldUntil)
+	{
 		return;
 	}
 
@@ -687,6 +714,8 @@ void AFPSREnemyBase::SetActorHiddenInGame(bool bNewHidden)
 		CurrentSpeedBucket = -1;
 		AnimOneShotEnterTime = -1.0f;
 		AnimOneShotCycleSeconds = -1.0f;
+		AttackAnimHoldUntil = -1.0f; // client mirror of Activate()'s authority-side reset — a reused actor must not
+		                             // spawn already suppressing walk/idle for a prior life's remaining hold span
 		LastRecvTime = -1.0f;
 		SetHealthBarVisible(true); // client mirror of the authority-side restore (a remote client never runs Activate)
 		if (AnimProfile && Mesh) // clear the prior life's hit stamp — see the authority-side reset for why
@@ -1215,10 +1244,16 @@ void AFPSREnemyBase::ApplyGravity(float ScaledDeltaSeconds, const FVector& FlowD
 // 머티리얼(진행도 계산)이 범인이다.
 //   FPSR.Enemy.ForceAnimState 2      → 전 적을 Attack 으로 (재호출할 때마다 진행도 재시작)
 //   FPSR.Enemy.ForceAnimState 0      → Idle 로 되돌림
+//
+// 두 번째 인자 = 핀. **"진행도가 저절로 되감긴다"는 이 핀 없이는 판정이 안 된다** — 핀이 없으면 구동부가
+// 다음 네트 업데이트에서 상태를 다시 써 버려서, 되감은 범인이 구동부인지 머티리얼인지 구분이 안 된다.
+//   FPSR.Enemy.ForceAnimState 2 1    → Attack 으로 고정(구동부 정지). 원샷이 **한 번 재생되고 멈춰야** 정상.
+//                                       그래도 되감기면 그때가 머티리얼(진행도 계산) 범인이다.
+//   FPSR.Enemy.ForceAnimState 0 0    → 핀 해제 + Idle 로 복귀
 static FAutoConsoleCommandWithWorldAndArgs GFPSRForceAnimStateCmd(
 	TEXT("FPSR.Enemy.ForceAnimState"),
 	TEXT("Force every active enemy into an animation state, bypassing the state driver (debug). "
-	     "Usage: FPSR.Enemy.ForceAnimState [0=Idle 1=Walk 2=Attack 3=Death]"),
+	     "Usage: FPSR.Enemy.ForceAnimState [0=Idle 1=Walk 2=Attack 3=Death] [pin 0|1]"),
 	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic([](const TArray<FString>& Args, UWorld* World)
 	{
 		if (!World)
@@ -1227,16 +1262,20 @@ static FAutoConsoleCommandWithWorldAndArgs GFPSRForceAnimStateCmd(
 		}
 		const int32 Raw = Args.Num() > 0 ? FCString::Atoi(*Args[0]) : 2;
 		const EFPSRAnimState State = static_cast<EFPSRAnimState>(FMath::Clamp(Raw, 0, 3));
+		// Default OFF: an unpinned poke stays the cheap "does the material react at all" probe this command started
+		// as. Pinning is opt-in because it deliberately stops gameplay from animating the swarm.
+		const bool bPin = Args.Num() > 1 && FCString::Atoi(*Args[1]) != 0;
 		int32 Count = 0;
 		for (TActorIterator<AFPSREnemyBase> It(World); It; ++It)
 		{
 			AFPSREnemyBase* Enemy = *It;
 			if (IsValid(Enemy) && !Enemy->IsHidden())
 			{
-				Enemy->DebugForceAnimState(State);
+				Enemy->DebugForceAnimState(State, bPin);
 				++Count;
 			}
 		}
-		UE_LOG(LogFPSR, Log, TEXT("[Enemy] ForceAnimState %d applied to %d enemies."), static_cast<int32>(State), Count);
+		UE_LOG(LogFPSR, Log, TEXT("[Enemy] ForceAnimState %d (pin=%d) applied to %d enemies."),
+			static_cast<int32>(State), bPin ? 1 : 0, Count);
 	}));
 #endif // !UE_BUILD_SHIPPING
