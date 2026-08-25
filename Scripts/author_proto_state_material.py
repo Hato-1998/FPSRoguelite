@@ -169,23 +169,26 @@ p_hitint = scalar_param("HitFlashIntensity", 12.0,  x=-1900, y=500)
 p_open   = scalar_param("AttackOpen",      22.0, x=-1900, y=-100)  # cm, 쌍뿔 상/하 분리 거리
 p_epull  = scalar_param("ElectronPull",     0.55, x=-1900, y=0)    # 0..1 전자가 핵으로 빨려드는 정도
 p_esnap  = scalar_param("ElectronSnap",     0.45, x=-1900, y=100)  # 0..1 발사 순간 튕겨나가는 정도
-p_shellop= scalar_param("ShellOpacity",     0.55, x=-1900, y=600)  # 십자 창의 불투명도 (그 밖은 불투명)
+# 십자 창의 불투명도(그 밖은 불투명). Masked+디더라 의미가 연속이다: 0 = 완전히 잘린 진짜 구멍 /
+# 1 = 통짜 불투명 / 사이 = TSR 이 풀어 주는 확률적 반투명. 0.80 = **코어가 희미하게 비치는 정도**
+# (창 픽셀의 20%만 뚫린다) — 사용자 결정 2026-08-25.
+p_shellop= scalar_param("ShellOpacity",     0.80, x=-1900, y=600)
 p_ramp   = scalar_param("OpenRampFrac",     0.12, x=-1900, y=-60)  # 열리는 데 쓰는 진행도 비율
 p_close  = scalar_param("CloseRampFrac",    0.10, x=-1900, y=-20)  # 발사 직전 닫히는 비율
 p_band   = scalar_param("WindowBandFrac",   0.30, x=-1900, y=700)  # 십자 창 폭(요소 반크기 대비)
-p_frame  = scalar_param("FrameWidthFrac",   0.14, x=-1900, y=800)  # 모서리 프레임 폭(요소 반크기 대비)
-p_frmpx  = scalar_param("FrameMinPixels",    1.6, x=-1900, y=850)  # 모서리선이 유지할 최소 화면 폭(픽셀)
+p_frame  = scalar_param("FrameWidthFrac",   0.10, x=-1900, y=800)  # 모서리 프레임 폭(요소 반크기 대비)
 p_texscale= scalar_param("TexScale",        0.01, x=-1900, y=900)  # 로컬 위치 → UV 배율(질감 타일링)
 
-# ── 2-b. 색 — "외곽선으로 형태를 읽는다"의 성립 조건 ────────────────────────────────────────────
-# 사용자 레퍼런스(2026-08-25) = 밝은 면 + 두꺼운 검은 모서리선, 글씨 외곽선 같은 그래픽한 읽힘.
-# 🔑 **조명은 면과 선에 똑같이 곱해진다.** 그러므로 대비는 오직 두 색의 *비율*로만 나오고, 레벨이
-#    밝든 어둡든 비율이 1:1 이면 선은 영원히 안 보인다. 실사고: BaseColor (0.020,0.020,0.025) vs
-#    FrameColor (0.020,0.020,0.030) — 파랑만 0.005 차이라 프레임이 계산·저작돼 있는데도 설계상
-#    보일 수가 없었다(PIE 2026-08-25 "외곽선 느낌이 안 난다"의 정체).
-# FrameColor 는 이미 거의 검정이라 더 내릴 데가 없으므로 올릴 것은 면 쪽이다. 아래는 **시작값**이고
-# 최종 톤은 PIE 를 보며 MI 오버라이드로 잡는다(판정 = 검은 선이 면과 뚜렷이 갈리는가).
-p_basecol  = vector_param("BaseColor",  unreal.LinearColor(0.35, 0.35, 0.38, 1.0), x=-1900, y=1000)
+# ── 2-b. 색 ────────────────────────────────────────────────────────────────────────────────────
+# ⏸️ **절차적 외곽선 트랙 보류 (사용자 결정 2026-08-25).** PIE 로 보고 "아트적으로 맘에 안 든다,
+#    나중에 텍스처로 작업하겠다"로 정리됐다. 그래서 면 색은 원래 값으로 되돌린다.
+#
+# 되돌리면서 남기는 실측 하나 — 다시 시도할 때 같은 데서 헤매지 않도록:
+#   **조명은 면과 선에 똑같이 곱해진다.** 대비는 오직 두 색의 *비율*로만 나오므로, 레벨이 밝든
+#   어둡든 비율이 1:1 이면 선은 영원히 안 보인다. 실제로 BaseColor (0.020,0.020,0.025) vs
+#   FrameColor (0.020,0.020,0.030) = 파랑만 0.005 차이여서, 프레임이 계산도 저작도 돼 있는데
+#   설계상 보일 수가 없었다. 텍스처로 갈 때도 이 비율 조건은 그대로 적용된다.
+p_basecol  = vector_param("BaseColor",  unreal.LinearColor(0.02, 0.02, 0.025, 1.0), x=-1900, y=1000)
 p_framecol = vector_param("FrameColor", unreal.LinearColor(0.02, 0.02, 0.03, 1.0), x=-1900, y=1100)
 
 # ── 3. ProcWPO 에 상태 입력 추가 + HLSL 교체 ─────────────────────────────────────────────────────
@@ -365,7 +368,7 @@ if not elem_mask:
 # 십자 판정은 **회전 전 로컬 위치**(LocalPos)로 한다 — 전자가 공전해도 마스크가 표면에 붙어 함께 돈다.
 op_mask = ensure_custom("OpacityMask",
                         ("LocalPos", "UV", "MeshType", "CoreMask", "ShellOpacity", "BandFrac",
-                         "FrameWidthFrac", "FrameMinPixels", "TexScale"), -1200, 700, prune=True)
+                         "FrameWidthFrac", "TexScale"), -1200, 700, prune=True)
 
 op_mask.set_editor_property("output_type", unreal.CustomMaterialOutputType.CMOT_FLOAT4)
 op_mask.set_editor_property("code", """// 요소별 중심/반크기 — 메시 생성기(gen_enemy_proto_meshes.py)와의 계약이다. 값이 바뀌면 양쪽을 같이 고칠 것.
@@ -392,44 +395,31 @@ float inCross = (min(a.x, min(a.y, a.z)) < band) ? 1.0 : 0.0;
 
 // ── 기하 모서리 프레임 ───────────────────────────────────────────────────────────────────────
 // 프레넬(시선 각도)로는 정면에서 본 능선이 안 잡힌다 — 실제 모서리를 형태별로 계산한다.
-//
-// 이진 비교(">")가 아니라 **모서리까지의 거리** dEdge(0=모서리 위, 1=면 한가운데)를 먼저 내고,
-// 폭은 마지막에 한 번만 먹인다. 종전엔 형태별 분기 안에서 곧장 0/1 을 냈는데 두 가지가 걸렸다:
-//   ① 스웜은 대부분 멀리서 읽힌다. 오브젝트 공간 고정폭(반크기의 10% = 큐브 3cm)은 30m 쯤에서
-//      1픽셀 밑으로 떨어져 깜빡이고 TSR 이 뭉갠다 — "외곽선으로 형태를 읽는다"가 거기서 무너진다.
-//   ② 하드 스텝이라 가까이서도 계단이 진다.
-// fwidth(dEdge) = 이 픽셀에서 dEdge 가 1픽셀당 변하는 양이다. 그걸로 **최소 화면 폭**을 보장하면
-// 거리와 무관하게 선이 살고, 같은 값을 smoothstep 폭으로 재사용하면 안티에일리어싱까지 공짜다.
-// (OpacityMask 노드의 출력은 전부 픽셀 셰이더에서만 쓰이므로 fwidth 사용이 안전하다 — WPO 쪽인
-//  ProcWPO 에 넣었다면 정점 셰이더라 컴파일이 깨진다.)
-float dEdge = 1.0;
+// ⏸️ 절차적 외곽선 트랙은 보류됐다(사용자 결정 2026-08-25, 나중에 텍스처로). 그래서 화면폭 하한 +
+//    안티에일리어싱을 얹었던 것을 원래의 이진 비교로 되돌린다. 다시 손댈 때 알아 둘 것:
+//    이 이진 비교는 **거리에 따라 깨진다** — 폭이 오브젝트 공간 고정이라 반크기의 10%(큐브 3cm)면
+//    30m 거리 1080p FOV90 에서 약 1.5픽셀이고, 거기서부터 깜빡이며 TSR 이 뭉갠다.
+//    해법은 fwidth(모서리까지의 거리)로 최소 화면폭을 보장하는 것이었다(커밋 8516e304 참조).
+float edge = 0.0;
+float fw = FrameWidthFrac;
 if (isCube)
 {
-    // 큐브: 면=한 축만 반크기에 붙음 / 변=두 축 / 꼭짓점=세 축. 면 위의 점에서 모서리까지의 거리는
-    // "두 번째로 큰 정규화 축값"이 1 에 얼마나 가까운가다(제일 큰 값 = 그 면의 법선축이라 늘 1).
-    float3 n = saturate(a / max(hs, 1e-4));
-    float mx = max(n.x, max(n.y, n.z));
-    float mn = min(n.x, min(n.y, n.z));
-    float mid = n.x + n.y + n.z - mx - mn;   // 두 번째로 큰 값
-    dEdge = 1.0 - mid;
+    // 큐브: 면=한 축만 반크기에 붙음 / 변=두 축 / 꼭짓점=세 축. 두 축 이상이면 모서리다.
+    float3 n = a / max(hs, 1e-4);
+    float cnt = (n.x > 1.0 - fw ? 1.0 : 0.0) + (n.y > 1.0 - fw ? 1.0 : 0.0) + (n.z > 1.0 - fw ? 1.0 : 0.0);
+    edge = (cnt >= 2.0) ? 1.0 : 0.0;
 }
 else
 {
-    // 오각 쌍뿔(생성기 계약 gen_enemy_proto_meshes.py: 적도 반경 50 · 꼭짓점 ±75 · 링 5분할).
-    // 모서리 셋 — ①꼭짓점에서 적도 링 정점으로 내려오는 능선 5개 ②적도 림 ③꼭짓점. 셋 중 제일
-    // 가까운 것까지의 거리를 쓴다.
-    float ang = atan2(lp.y, lp.x) * 5.0 / 6.28318530718;   // 링 정점마다 정수
+    // 오각 쌍뿔: 모서리 셋 — ①꼭짓점에서 적도 링 정점으로 내려오는 능선 5개 ②적도 림 ③꼭짓점.
+    // 능선은 방위각으로 잡는다: 링 정점이 2*pi*k/5 마다 있으므로 그 격자에 가까우면 능선이다.
+    float ang = atan2(lp.y, lp.x) * 5.0 / 6.28318530718;   // 정점마다 정수
     float f = abs(frac(ang) - 0.5) * 2.0;                   // 정점에서 1, 면 한가운데서 0
-    float rimZ = saturate(abs(lp.z) / 75.0);                // 적도 0, 꼭짓점 1
-    // 능선 항에 1/3 을 곱하는 것 = 종전이 폭에 fw*3.0 을 쓰던 보정을 거리 쪽으로 옮긴 것이다
-    // (f 는 방위각 기준이라 같은 폭이 축 기준보다 3배쯤 넓게 먹는다).
-    dEdge = min((1.0 - f) * 0.33333, min(rimZ, 1.0 - rimZ));
+    float rimZ = abs(lp.z) / 75.0;                          // 적도 0, 꼭짓점 1
+    edge = (f > 1.0 - fw * 3.0) ? 1.0 : 0.0;                // ① 능선
+    edge = max(edge, (rimZ < fw) ? 1.0 : 0.0);              // ② 적도 림
+    edge = max(edge, (rimZ > 1.0 - fw) ? 1.0 : 0.0);        // ③ 꼭짓점 근처
 }
-
-// aa 가 0 이면 smoothstep 의 두 경계가 같아져 정의가 무너진다 — 하한을 준다.
-float aa = max(fwidth(dEdge), 1e-5);
-float fw = max(FrameWidthFrac, aa * FrameMinPixels);
-float edge = 1.0 - smoothstep(fw - aa, fw + aa, dEdge);
 
 // ── 불투명도 ─────────────────────────────────────────────────────────────────────────────────
 // 기본 불투명(돌/블럭) · 십자 창만 반투명 · 모서리와 코어는 다시 불투명.
@@ -456,7 +446,7 @@ for nm, node in (("TexCoord", t_coord), ("LocalPosition", local_pos), ("MeshType
 
 for src, pin in ((local_pos, "LocalPos"), (t_coord, "UV"), (mesh_type, "MeshType"),
                  (elem_mask, "CoreMask"), (p_shellop, "ShellOpacity"), (p_band, "BandFrac"),
-                 (p_frame, "FrameWidthFrac"), (p_frmpx, "FrameMinPixels"), (p_texscale, "TexScale")):
+                 (p_frame, "FrameWidthFrac"), (p_texscale, "TexScale")):
     ok = mel.connect_material_expressions(src, "", op_mask, pin)
     print(f"[s4] connect -> OpacityMask.{pin:12s} : {ok}")
     if not ok:
@@ -646,21 +636,40 @@ for o in orphans:
     mel.delete_material_expression(mat, o)
 print(f"[s4] 고아 ObjectPositionWS 제거: {len(orphans)}개")
 
+# 프레넬 방식 잔재 (사용자 확인 2026-08-25 "지워줘"). 모서리 판정을 프레넬 -> 기하 계산으로 갈아엎을
+# 때 코드에서만 빠지고 노드·파라미터가 남았다. `FramePower` 는 아무도 안 읽는 손잡이라 기획자가
+# 돌려 보고 "안 먹는다"고 헤매게 되는 종류다. Fresnel 노드도 OpacityMask 의 핀이 빠진 뒤로 고아다.
+dead = [e for e in expressions(unreal.MaterialExpressionFresnel)]
+fp = find_scalar("FramePower")
+if fp:
+    dead.append(fp)
+for d in dead:
+    mel.delete_material_expression(mat, d)
+print(f"[s4] 프레넬 잔재 제거: {len(dead)}개")
+
 # ── 5-b. MI 의 코어 요소 지정 갱신 ──────────────────────────────────────────────────────────────
 # 원자 큐브에 내부 코어 구(element 4)가 새로 생겼으므로(gen_enemy_proto_meshes.py) "어느 요소가
 # 코어인가"를 가리키는 EmissiveElementId 를 핵 큐브(0) → 코어 구(4) 로 옮긴다. 이 값이 이미시브와
 # 불투명도 양쪽의 코어 판정(ElemMask)을 동시에 몰기 때문에, 안 옮기면 껍질인 핵 큐브가 빛나고
 # 정작 코어 구는 십자 창 너머로 어둡게 남는다. 쌍뿔은 종전대로 element 2 라 건드리지 않는다.
-MI_CORE_ELEMENT = {"MI_EnemyProto_AtomCubes": 4.0}
-for mi_name, elem_id in MI_CORE_ELEMENT.items():
+# ShellOpacity 도 여기서 쓴다 — 두 MI 가 1.0 으로 오버라이드하고 있어서 머티리얼 기본값만 바꾸면
+# MI 가 이기고 껍질이 통짜 불투명으로 남아 **코어가 아예 안 보인다**(PIE 2026-08-25 실측).
+# ⚠️ 이 표는 사용자 저작값을 덮는다. 다른 값으로 가고 싶으면 에디터에서 MI 를 고치는 대신 여기를
+#    고칠 것 — 안 그러면 다음 실행에 조용히 되돌아간다.
+MI_SCALARS = {
+    "MI_EnemyProto_AtomCubes": {"EmissiveElementId": 4.0, "ShellOpacity": 0.80},
+    "MI_EnemyProto_Bipyramid": {"EmissiveElementId": 2.0, "ShellOpacity": 0.80},
+}
+for mi_name, params in MI_SCALARS.items():
     mi_path = f"{'/'.join(MAT_PATH.split('/')[:-1])}/{mi_name}"
     mi = unreal.load_asset(mi_path)
     if not mi:
         print(f"[s4] ⚠️ MI 없음, 건너뜀: {mi_path}")
         continue
-    mel.set_material_instance_scalar_parameter_value(mi, "EmissiveElementId", elem_id)
+    for pname, pval in params.items():
+        mel.set_material_instance_scalar_parameter_value(mi, pname, pval)
     saved_mi = eal.save_asset(mi_path)
-    print(f"[s4] MI {mi_name}.EmissiveElementId = {elem_id} (save={saved_mi})")
+    print(f"[s4] MI {mi_name} {params} (save={saved_mi})")
 
 # ── 6. 컴파일 + 저장 ─────────────────────────────────────────────────────────────────────────────
 # ⚠️ 머티리얼 무음 컴파일 실패가 이 저장소의 상습 함정이다(If 노드 스칼라 전용 / MaterialAttributes
