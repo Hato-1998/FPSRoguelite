@@ -353,8 +353,14 @@ if not ok:
 # 적 200~300 이 뭉치는 게임이라 제1원리("적 수백을 싸게")·ADR 0007 예산(4ms)에 직접 걸리는 차이다.
 # Masked 는 이분법이다(그리거나 자르거나) — ShellOpacity 가 클립값 아래면 잘린 **진짜 구멍**,
 # 위면 통짜 불투명. 중간값을 디더로 내 보려던 시도는 사용자 PIE 확인 후 접었다(아래 4-c 주석).
-# ⚠️ 껍질이 한 겹이라(two_sided=False) 창 너머로 코어가 안 채우는 각도에선 뒷배경이 비칠 수 있다.
-#    그때의 손잡이는 two_sided=True 지만 껍질 셰이딩 비용이 2배라 스웜엔 비싸다 — PIE 로 먼저 볼 것.
+# ✅ **양면 렌더 (사용자 결정 2026-08-25, PIE 확인 후).** 껍질 메시는 한 겹이라 기본 컬링에선 안쪽
+#    면이 아예 안 그려진다. 휴식 자세(닫힘)에선 티가 안 나지만 **공격으로 껍질이 벌어지는 순간 내부가
+#    통째로 비어 뒷배경이 비쳐 보인다** — 조개가 입을 벌리는 텔레그래프가 성립하지 않는다.
+#    (예상은 "창 너머 각도"였는데 실제로 걸린 건 공격 열림이었다.)
+#    비용: 백페이스가 래스터라이즈된다. 다만 Masked 라 깊이 프리패스가 앞면으로 깊이를 확정하므로,
+#    닫힌 껍질에서 안쪽 면은 베이스 패스의 깊이 테스트에서 떨어져 **풀 셰이딩까지 가지 않는다** —
+#    실제로 셰이딩되는 건 벌어져서 정말 보이는 순간뿐이다. 스웜 예산에 대한 노출이 "2배"가 아닌 이유.
+#    UE 는 백페이스의 노멀을 자동으로 뒤집으므로(TwoSidedSign) 안쪽 면 조명도 그대로 맞는다.
 elem_mask = find_custom("ElemMask")
 if not elem_mask:
     raise SystemExit("[s4] ElemMask Custom 노드를 못 찾음 — 불투명도 분기를 걸 수 없다")
@@ -454,6 +460,7 @@ for src, pin in ((local_pos, "LocalPos"), (t_coord, "UV"), (mesh_type, "MeshType
 
 mat.set_editor_property("blend_mode", unreal.BlendMode.BLEND_MASKED)
 mat.set_editor_property("shading_model", unreal.MaterialShadingModel.MSM_DEFAULT_LIT)
+mat.set_editor_property("two_sided", True)
 # translucency_lighting_mode 는 Masked 에선 컴파일에 들어가지 않으므로 손대지 않는다(남은 값은 무해).
 # 반대로 opacity_mask_clip_value 는 여기서 살아난다 — DitherTemporalAA 는 엔진 기본값(0.3333) 기준으로
 # 설계된 함수라 그대로 둔다.
