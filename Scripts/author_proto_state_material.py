@@ -289,16 +289,29 @@ print(f"[s4] connect Add -> EmissiveColor : {ok}")
 if not ok:
     raise SystemExit("[s4] EmissiveColor 연결 실패 — 중단")
 
-# ── 4-b. 반투명 껍질 — 코어가 항상 비쳐 보이게 (사용자 결정 2026-08-25, "(다) 반투명") ──────────────
-# 껍질을 닫아 놓으면(메시 GAP=0) 불투명일 때 코어가 아예 안 보인다. 그래서 블렌드를 Translucent 로
-# 바꾸고, 불투명도를 요소별로 나눈다: 코어(= EmissiveElementId 가 가리키는 요소)는 1.0, 껍질은
-# ShellOpacity. ElemMask 가 이미 "이 픽셀이 코어인가"를 0/1 로 돌려주므로 그것으로 lerp 한다.
+# ── 4-b. 껍질 = 불투명, 십자 창만 뚫린다 (사용자 결정 2026-08-25 "십자 창으로만 (원래 설계)") ───────
+# 껍질을 닫아 놓으면(메시 GAP=0) 코어가 안 보이므로 십자 창으로 들여다보게 한다. 불투명도는 요소별로
+# 나눈다: 코어(= EmissiveElementId 가 가리키는 요소)는 1.0, 껍질은 ShellOpacity. ElemMask 가 이미
+# "이 픽셀이 코어인가"를 0/1 로 돌려주므로 그것으로 lerp 한다.
 #
-# ⚠️ 성능 — 반투명은 별도 패스라 early-z 를 잃고 겹칠수록 오버드로우가 쌓인다. 적 200~300 이 뭉치는
-#    게임이라 제1원리("적 수백을 싸게")·ADR 0007 예산(4ms)에 직접 걸린다. 하니스 A/B 로 재고,
-#    예산을 넘기면 Masked+디더(베이스 패스 유지, 훨씬 쌈)로 내려가는 것이 대안이다.
-# ℹ️ 메시 내부 정렬 — 반투명은 삼각형 단위로 정렬되지 않는다. 다만 생성기가 껍질을 먼저, 코어 구를
-#    나중에 쓰므로(gen_enemy_proto_meshes.py) 코어가 뒤에 그려져 껍질 위로 비친다 — 원하는 그림이다.
+# 🔄 **Translucent -> Masked 전환 (PIE 2026-08-25 사용자 보고 "코어에 그림자 얼룩")**
+# 종전 Translucent 가 실제로 낸 그림은 "반투명 창"이 아니라 얼룩이었다. **UE 반투명은 메시 안에서
+# 깊이 정렬을 하지 않는다** — 껍질과 코어 중 누가 앞인지 정할 근거가 없어, 카메라가 움직일 때마다
+# 승패가 뒤집히며 코어에 그림자처럼 보이는 반점이 생긴다. (종전 주석은 "생성기가 껍질을 먼저, 코어를
+# 나중에 쓰므로 코어가 위로 비친다"고 적어 뒀는데, 그 제출 순서 의존이 바로 여기서 깨졌다.)
+#
+# 조명이 아니라 정렬이 원인이라는 증거: 코어는 CoreColor x CoreEmissive(30) 이미시브인데
+# **이미시브는 조명 계산이 끝난 뒤 더해지므로 그림자가 어둡게 만들 수 없다.** 게다가 실측 당시 두 MI
+# 모두 ShellOpacity=1.0(창 닫힘)이라 껍질이 코어를 완전히 가려야 했는데 코어가 뚫고 보였다 — 정렬이
+# 무너졌다는 직접 증거다.
+#
+# Masked 는 깊이를 쓰므로 정렬이 정확해져 얼룩이 사라지고, 베이스 패스에 남아 early-z 를 되찾는다 —
+# 적 200~300 이 뭉치는 게임이라 제1원리("적 수백을 싸게")·ADR 0007 예산(4ms)에 직접 걸리는 차이다.
+# Masked 는 이분법(그리거나 자르거나)이라 중간 불투명도는 **디더**로 낸다(아래 WindowDither):
+# ShellOpacity 0 = 완전히 잘린 진짜 구멍(디더 노이즈 0) / 1 = 통짜 불투명 / 사이 = TSR 이 풀어 주는
+# 확률적 반투명. 즉 종전 Translucent 가 하던 일의 상위집합이면서 정렬이 산다.
+# ⚠️ 껍질이 한 겹이라(two_sided=False) 창 너머로 코어가 안 채우는 각도에선 뒷배경이 비칠 수 있다.
+#    그때의 손잡이는 two_sided=True 지만 껍질 셰이딩 비용이 2배라 스웜엔 비싸다 — PIE 로 먼저 볼 것.
 elem_mask = find_custom("ElemMask")
 if not elem_mask:
     raise SystemExit("[s4] ElemMask Custom 노드를 못 찾음 — 불투명도 분기를 걸 수 없다")
@@ -391,10 +404,11 @@ for src, pin in ((local_pos, "LocalPos"), (t_coord, "UV"), (mesh_type, "MeshType
     if not ok:
         raise SystemExit(f"[s4] OpacityMask.{pin} 연결 실패 — 중단")
 
-mat.set_editor_property("blend_mode", unreal.BlendMode.BLEND_TRANSLUCENT)
-# 반투명 기본값은 조명을 받지 않는 Unlit 이라 셰이딩 모델을 명시적으로 되돌려 놔야 한다.
+mat.set_editor_property("blend_mode", unreal.BlendMode.BLEND_MASKED)
 mat.set_editor_property("shading_model", unreal.MaterialShadingModel.MSM_DEFAULT_LIT)
-mat.set_editor_property("translucency_lighting_mode", unreal.TranslucencyLightingMode.TLM_SURFACE_PER_PIXEL_LIGHTING)
+# translucency_lighting_mode 는 Masked 에선 컴파일에 들어가지 않으므로 손대지 않는다(남은 값은 무해).
+# 반대로 opacity_mask_clip_value 는 여기서 살아난다 — DitherTemporalAA 는 엔진 기본값(0.3333) 기준으로
+# 설계된 함수라 그대로 둔다.
 
 # 마스크 노드는 float4(x=불투명도, y=모서리, zw=투영UV)를 낸다 — 세 소비처가 같은 계산을 공유하도록
 # 한 노드에 모았다(요소 중심·반크기 판정이 셋 다 필요하다). 성분별로 갈라 쓴다.
@@ -416,11 +430,37 @@ m_opacity = component_mask("MaskOpacity", True, False, False, False, -900, 700)
 m_edge    = component_mask("MaskEdge",    False, True, False, False, -900, 800)
 m_uv      = component_mask("MaskUV",      False, False, True, True,  -900, 900)
 
-ok = mel.connect_material_expressions(m_opacity, "", None, "") if False else True
-ok = mel.connect_material_property(m_opacity, "", unreal.MaterialProperty.MP_OPACITY)
-print(f"[s4] connect MaskOpacity -> Opacity : {ok}")
+# 디더 — 엔진이 정확히 이 용도로 내놓는 함수를 쓴다(직접 HLSL 로 짜면 View.StateFrameIndexMod8 같은
+# 엔진 내부 심볼에 의존해 버전마다 깨진다). 실측 핀 이름: 입력 "Alpha Threshold"/"Random", 출력 "Result".
+# "Random" 은 선택 입력이라 비워 두면 함수가 기본 시퀀스를 쓴다.
+DITHER_FN = "/Engine/Functions/Engine_MaterialFunctions02/Utility/DitherTemporalAA"
+dither = None
+for e in expressions(unreal.MaterialExpressionMaterialFunctionCall):
+    if str(e.get_editor_property("desc")) == "WindowDither":
+        dither = e
+        break
+if not dither:
+    fn = unreal.load_asset(DITHER_FN)
+    if not fn:
+        raise SystemExit(f"[s4] 디더 함수를 못 찾음: {DITHER_FN}")
+    dither = mel.create_material_expression(mat, unreal.MaterialExpressionMaterialFunctionCall, -700, 700)
+    dither.set_editor_property("desc", "WindowDither")
+    # set_material_function 을 쓴다 — set_editor_property 로 넣으면 핀 배열이 재구축되지 않아
+    # 아래 connect 가 조용히 False 를 낸다.
+    dither.set_material_function(fn)
+    print("[s4] WindowDither(DitherTemporalAA) 생성")
+else:
+    print("[s4] WindowDither 재사용")
+
+ok = mel.connect_material_expressions(m_opacity, "", dither, "Alpha Threshold")
+print(f"[s4] connect MaskOpacity -> WindowDither.Alpha Threshold : {ok}")
 if not ok:
-    raise SystemExit("[s4] Opacity 출력 연결 실패 — 중단")
+    raise SystemExit("[s4] WindowDither 입력 연결 실패 — 중단")
+
+ok = mel.connect_material_property(dither, "", unreal.MaterialProperty.MP_OPACITY_MASK)
+print(f"[s4] connect WindowDither -> OpacityMask : {ok}")
+if not ok:
+    raise SystemExit("[s4] OpacityMask 출력 연결 실패 — 중단")
 
 # ── 4-c. 질감 소켓 + 모서리 어둡게 ───────────────────────────────────────────────────────────────
 # 사용자가 돌/블럭 텍스처를 찾아 넣을 자리를 미리 판다((가) 채택, 2026-08-25). 기본값은 흰색
@@ -485,10 +525,67 @@ for src, pin in ((tinted, "A"), (frame_color, "B"), (m_edge, "Alpha")):
     if not ok:
         raise SystemExit(f"[s4] EdgeTint.{pin} 연결 실패 — 중단")
 
-ok = mel.connect_material_property(edge_lerp, "", unreal.MaterialProperty.MP_BASE_COLOR)
-print(f"[s4] connect EdgeTint -> BaseColor : {ok}")
+# ── 4-d. 코어를 조명에서 떼어낸다 (사용자 결정 2026-08-25) ───────────────────────────────────────
+# 요구의 실체 = "생길 이유가 없는 명암이 코어에 생기는 게 문제"(밝기가 문자 그대로 불변이어야 한다는
+# 뜻은 아니다). 코어 픽셀의 BaseColor 와 Specular 를 0 으로 눌러 **조명 항을 통째로 없앤다** — 남는
+# 것이 이미시브뿐이라 광원도 그림자도 시선 각도도 코어를 건드릴 수 없다. ElemMask 가 이미 계산돼
+# 있으므로 OneMinus 하나 + 곱 둘이면 끝난다(사실상 공짜).
+# ℹ️ 위 Masked 전환(얼룩=정렬)과는 별개의 조치다. 둘 다 필요하다 — 정렬을 고쳐도 조명은 남고,
+#    조명을 떼어도 껍질의 명암은 그대로 정렬을 타기 때문이다.
+one_minus_core = None
+for e in expressions(unreal.MaterialExpressionOneMinus):
+    if str(e.get_editor_property("desc")) == "ShellOnly":
+        one_minus_core = e
+        break
+if not one_minus_core:
+    one_minus_core = mel.create_material_expression(mat, unreal.MaterialExpressionOneMinus, -1000, 1150)
+    one_minus_core.set_editor_property("desc", "ShellOnly")
+    print("[s4] ShellOnly(OneMinus CoreMask) 생성")
+ok = mel.connect_material_expressions(elem_mask, "", one_minus_core, "")
+if not ok:
+    raise SystemExit("[s4] ShellOnly 입력 연결 실패 — 중단")
+
+core_unlit = None
+for e in expressions(unreal.MaterialExpressionMultiply):
+    if str(e.get_editor_property("desc")) == "CoreUnlitBase":
+        core_unlit = e
+        break
+if not core_unlit:
+    core_unlit = mel.create_material_expression(mat, unreal.MaterialExpressionMultiply, -150, 850)
+    core_unlit.set_editor_property("desc", "CoreUnlitBase")
+    print("[s4] CoreUnlitBase Multiply 생성")
+for src, pin in ((edge_lerp, "A"), (one_minus_core, "B")):
+    ok = mel.connect_material_expressions(src, "", core_unlit, pin)
+    if not ok:
+        raise SystemExit(f"[s4] CoreUnlitBase.{pin} 연결 실패 — 중단")
+
+ok = mel.connect_material_property(core_unlit, "", unreal.MaterialProperty.MP_BASE_COLOR)
+print(f"[s4] connect CoreUnlitBase -> BaseColor : {ok}")
 if not ok:
     raise SystemExit("[s4] BaseColor 연결 실패 — 중단")
+
+# Specular 는 여태 미연결이었다 = 엔진 기본값 0.5. 그 0.5 를 껍질엔 그대로 두고 코어만 0 으로 만든다
+# (안 그러면 BaseColor 를 0 으로 눌러도 스페큘러 하이라이트가 시선 각도에 따라 코어 위에서 움직인다).
+spec = None
+for e in expressions(unreal.MaterialExpressionMultiply):
+    if str(e.get_editor_property("desc")) == "CoreUnlitSpecular":
+        spec = e
+        break
+if not spec:
+    spec_const = mel.create_material_expression(mat, unreal.MaterialExpressionConstant, -400, 1150)
+    spec_const.set_editor_property("r", 0.5)  # 엔진 Specular 기본값 — 껍질 룩을 그대로 보존한다
+    spec_const.set_editor_property("desc", "DefaultSpecular")
+    spec = mel.create_material_expression(mat, unreal.MaterialExpressionMultiply, -150, 1150)
+    spec.set_editor_property("desc", "CoreUnlitSpecular")
+    for src, pin in ((spec_const, "A"), (one_minus_core, "B")):
+        ok = mel.connect_material_expressions(src, "", spec, pin)
+        if not ok:
+            raise SystemExit(f"[s4] CoreUnlitSpecular.{pin} 연결 실패 — 중단")
+    print("[s4] CoreUnlitSpecular 생성 (껍질 0.5 / 코어 0)")
+ok = mel.connect_material_property(spec, "", unreal.MaterialProperty.MP_SPECULAR)
+print(f"[s4] connect CoreUnlitSpecular -> Specular : {ok}")
+if not ok:
+    raise SystemExit("[s4] Specular 연결 실패 — 중단")
 
 # ── 5. 고아 노드 정리 ────────────────────────────────────────────────────────────────────────────
 # 위상 소스를 오브젝트 위치 해시 → CPD 슬롯3 으로 갈아끼울 때(fix_proto_material_phase.py) 입력만
