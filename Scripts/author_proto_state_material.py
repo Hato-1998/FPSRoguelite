@@ -93,6 +93,13 @@ p_squash = scalar_param("AttackSquash",       0.18, x=-1900, y=-200)  # 0..1 수
 p_hitdur = scalar_param("HitFlashDuration",   0.18, x=-1900, y=400)   # 초
 p_hitint = scalar_param("HitFlashIntensity", 12.0,  x=-1900, y=500)
 
+# 공격 모션 (사용자 결정 2026-08-25): 휴식 = 닫힌 껍질, 공격 = 벌어짐. 메시 쪽 GAP 을 0 으로 닫았고
+# (gen_enemy_proto_meshes.py) 벌리는 일은 전부 여기서 한다 — 그래야 휴식 변위가 0 이라 C0-at-entry 가 성립한다.
+p_open   = scalar_param("AttackOpen",      22.0, x=-1900, y=-100)  # cm, 쌍뿔 상/하 분리 거리
+p_epull  = scalar_param("ElectronPull",     0.55, x=-1900, y=0)    # 0..1 전자가 핵으로 빨려드는 정도
+p_esnap  = scalar_param("ElectronSnap",     0.45, x=-1900, y=100)  # 0..1 발사 순간 튕겨나가는 정도
+p_shellop= scalar_param("ShellOpacity",     0.35, x=-1900, y=600)  # 껍질 불투명도 (코어는 항상 1)
+
 # ── 3. ProcWPO 에 상태 입력 추가 + HLSL 교체 ─────────────────────────────────────────────────────
 wpo = find_custom("ProcWPO")
 if not wpo:
@@ -140,15 +147,36 @@ if (StateId > 2.5)
 }
 else if (StateId > 1.5)
 {
-    // Attack: 수축 → 전방(로컬 +X) 타격 → 복귀. sin(pi*prog) 라 양 끝이 0 이다.
-    float w = sin(prog * 3.14159265);
-    q *= (1.0 - w * AttackSquash);
-    q.x += w * AttackLunge;
+    // Attack. 형태마다 다른 텔레그래프를 쓴다 — 종전의 공용 수축+전진은 1400cm 밖 원거리 적에게
+    // 화면상 몇 픽셀이라 "조준 중"이 읽히지 않았다(PIE 2026-08-25).
+    float w = sin(prog * 3.14159265);   // 0 -> 1 -> 0, 양 끝이 0 이라 진입/이탈 팝이 없다
+    if (MeshType < 0.5)
+    {
+        // 쌍뿔 = 조개. 상뿔(id 0)은 +Z, 하뿔(id 1)은 -Z 로 벌어지고 코어(id 2)는 제자리에 남아
+        // 드러난다. 휴식 시엔 껍질이 닫혀 있으므로(메시 GAP=0) 벌어지는 것 자체가 공격 신호다.
+        float dir = (id == 0) ? 1.0 : ((id == 1) ? -1.0 : 0.0);
+        q.z += dir * w * AttackOpen;
+        q *= (1.0 - w * AttackSquash);
+        q.x += w * AttackLunge;
+    }
+    else
+    {
+        // 원자 큐브 = 차징. 전자(id 1..3)가 핵으로 빨려 들어갔다가 발사 순간 튕겨 나간다.
+        // pull 은 앞 80%를 삼각(0->1->0), kick 은 마지막 20%에만 사인으로 실린다 — 발사 시점
+        // (prog=1)에 정확히 방출이 끝나고, 양 끝 변위가 0 이라 여기서도 팝이 없다.
+        float pull = (prog < 0.8) ? (prog / 0.8) : (1.0 - (prog - 0.8) / 0.2);
+        float kick = (prog < 0.8) ? 0.0 : sin((prog - 0.8) / 0.2 * 3.14159265);
+        if (id > 0)
+        {
+            q *= (1.0 - pull * ElectronPull + kick * ElectronSnap);
+        }
+    }
 }
 return q - p;"""
 
 WPO_NEW_INPUTS = [("StateId", p_state), ("EnterTime", p_enter), ("Rate", p_rate),
-                  ("AttackLunge", p_lunge), ("AttackSquash", p_squash)]
+                  ("AttackLunge", p_lunge), ("AttackSquash", p_squash),
+                  ("AttackOpen", p_open), ("ElectronPull", p_epull), ("ElectronSnap", p_esnap)]
 
 existing = [str(ci.get_editor_property("input_name")) for ci in wpo.get_editor_property("inputs")]
 to_add = [(n, e) for (n, e) in WPO_NEW_INPUTS if n not in existing]
@@ -228,6 +256,55 @@ ok = mel.connect_material_property(add, "", unreal.MaterialProperty.MP_EMISSIVE_
 print(f"[s4] connect Add -> EmissiveColor : {ok}")
 if not ok:
     raise SystemExit("[s4] EmissiveColor 연결 실패 — 중단")
+
+# ── 4-b. 반투명 껍질 — 코어가 항상 비쳐 보이게 (사용자 결정 2026-08-25, "(다) 반투명") ──────────────
+# 껍질을 닫아 놓으면(메시 GAP=0) 불투명일 때 코어가 아예 안 보인다. 그래서 블렌드를 Translucent 로
+# 바꾸고, 불투명도를 요소별로 나눈다: 코어(= EmissiveElementId 가 가리키는 요소)는 1.0, 껍질은
+# ShellOpacity. ElemMask 가 이미 "이 픽셀이 코어인가"를 0/1 로 돌려주므로 그것으로 lerp 한다.
+#
+# ⚠️ 성능 — 반투명은 별도 패스라 early-z 를 잃고 겹칠수록 오버드로우가 쌓인다. 적 200~300 이 뭉치는
+#    게임이라 제1원리("적 수백을 싸게")·ADR 0007 예산(4ms)에 직접 걸린다. 하니스 A/B 로 재고,
+#    예산을 넘기면 Masked+디더(베이스 패스 유지, 훨씬 쌈)로 내려가는 것이 대안이다.
+# ℹ️ 메시 내부 정렬 — 반투명은 삼각형 단위로 정렬되지 않는다. 다만 생성기가 껍질을 먼저, 코어 구를
+#    나중에 쓰므로(gen_enemy_proto_meshes.py) 코어가 뒤에 그려져 껍질 위로 비친다 — 원하는 그림이다.
+elem_mask = find_custom("ElemMask")
+if not elem_mask:
+    raise SystemExit("[s4] ElemMask Custom 노드를 못 찾음 — 불투명도 분기를 걸 수 없다")
+
+opacity = None
+for e in expressions(unreal.MaterialExpressionLinearInterpolate):
+    opacity = e
+    break
+if not opacity:
+    opacity = mel.create_material_expression(mat, unreal.MaterialExpressionLinearInterpolate, -900, 600)
+    print("[s4] Opacity Lerp 노드 생성")
+else:
+    print("[s4] Opacity Lerp 노드 재사용")
+
+one = None
+for e in expressions(unreal.MaterialExpressionConstant):
+    one = e
+    break
+if not one:
+    one = mel.create_material_expression(mat, unreal.MaterialExpressionConstant, -1200, 700)
+    one.set_editor_property("r", 1.0)
+    print("[s4] Constant(1.0) 생성")
+
+mat.set_editor_property("blend_mode", unreal.BlendMode.BLEND_TRANSLUCENT)
+# 반투명 기본값은 조명을 받지 않는 Unlit 이라 셰이딩 모델을 명시적으로 되돌려 놔야 한다.
+mat.set_editor_property("shading_model", unreal.MaterialShadingModel.MSM_DEFAULT_LIT)
+mat.set_editor_property("translucency_lighting_mode", unreal.TranslucencyLightingMode.TLM_SURFACE_PER_PIXEL_LIGHTING)
+
+for src, out_name, pin in ((p_shellop, "", "A"), (one, "", "B"), (elem_mask, "", "Alpha")):
+    ok = mel.connect_material_expressions(src, out_name, opacity, pin)
+    print(f"[s4] connect -> Opacity.{pin:5s} : {ok}")
+    if not ok:
+        raise SystemExit(f"[s4] Opacity.{pin} 연결 실패 — 중단")
+
+ok = mel.connect_material_property(opacity, "", unreal.MaterialProperty.MP_OPACITY)
+print(f"[s4] connect Lerp -> Opacity : {ok}")
+if not ok:
+    raise SystemExit("[s4] Opacity 출력 연결 실패 — 중단")
 
 # ── 5. 고아 노드 정리 ────────────────────────────────────────────────────────────────────────────
 # 위상 소스를 오브젝트 위치 해시 → CPD 슬롯3 으로 갈아끼울 때(fix_proto_material_phase.py) 입력만
