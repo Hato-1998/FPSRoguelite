@@ -225,6 +225,14 @@ void AFPSREnemyBase::InitHealthBarWidget()
 	OnHealthBarReady();
 }
 
+void AFPSREnemyBase::SetHealthBarVisible(bool bVisible)
+{
+	if (UWidgetComponent* WidgetComp = FindComponentByClass<UWidgetComponent>())
+	{
+		WidgetComp->SetHiddenInGame(!bVisible);
+	}
+}
+
 void AFPSREnemyBase::HandleDeath(AActor* DeadActor, AActor* Killer)
 {
 	// Death cosmetics for the listen-server host / standalone: OnDeathCosmetic only fires from OnRep_bDead, which
@@ -324,6 +332,7 @@ void AFPSREnemyBase::Activate(const FVector& Location)
 	AnimOneShotEnterTime = -1.0f;
 	AnimOneShotCycleSeconds = -1.0f;
 	LastRecvTime = -1.0f;
+	SetHealthBarVisible(true); // reverse of HandleDeathCosmetic's hide — the widget survives pooling, the bind doesn't rerun
 	// CPD survives pooling reuse (see the phase write in BeginPlay), so a prior life's hit stamp would otherwise ride
 	// into this one and flash an enemy the instant it respawns — CPDSlot_LastHitTime's contract is "this life".
 	if (AnimProfile && Mesh)
@@ -656,6 +665,7 @@ void AFPSREnemyBase::SetActorHiddenInGame(bool bNewHidden)
 		AnimOneShotEnterTime = -1.0f;
 		AnimOneShotCycleSeconds = -1.0f;
 		LastRecvTime = -1.0f;
+		SetHealthBarVisible(true); // client mirror of the authority-side restore (a remote client never runs Activate)
 		if (AnimProfile && Mesh) // clear the prior life's hit stamp — see the authority-side reset for why
 		{
 			Mesh->SetCustomPrimitiveDataFloat(FPSRAnimCPD::CPDSlot_LastHitTime, 0.0f);
@@ -673,6 +683,12 @@ void AFPSREnemyBase::HandleDeathCosmetic()
 	// of being applied to an actor hidden the same frame. The BOSS (AFPSRBossBase) persists after death entirely, so
 	// its death montage was always visible regardless.
 	SetAnimState(EFPSRAnimState::Death);
+
+	// Drop the health bar the instant death is known, not when the corpse finally hides. The dwell that makes the
+	// death motion visible would otherwise leave a full-looking bar floating over a shrinking corpse for its whole
+	// length, which reads as "it isn't dead yet" (PIE 2026-08-25). This runs on clients (OnRep_bDead) and on the
+	// host (HandleDeath calls it directly), which is exactly the pair that renders the bar.
+	SetHealthBarVisible(false);
 }
 
 EFPSRServerAttackResult AFPSREnemyBase::ServerTickAttack(const FFPSRServerAttackContext& Ctx)

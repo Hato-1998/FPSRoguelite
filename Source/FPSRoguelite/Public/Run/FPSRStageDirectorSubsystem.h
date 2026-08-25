@@ -189,6 +189,12 @@ private:
 	static constexpr float DefaultStageBlackoutHoldSeconds = 0.5f;
 	static constexpr float DefaultStagePostSwapGraceSeconds = 1.0f;
 
+	/** Ring radius (cm) each OVERFLOW player is fanned out by when an arena has fewer authored entry points than
+	 *  players — see PerformSwap's teleport loop. Deliberately smaller than the flow-field cell (100 cm, ADR 0011 E1)
+	 *  so the offset can never push a player out of the open cell GetPlayerEntryTransforms already snapped the entry
+	 *  onto, while still clearing a character capsule so two pawns cannot land inside each other. */
+	static constexpr float PlayerEntryOverflowRadius = 45.0f;
+
 	/** One-shot timer for the Grace dealing window (armed by RequestTransition, fires OnDealingWindowClosed). */
 	FTimerHandle DealingTimerHandle;
 

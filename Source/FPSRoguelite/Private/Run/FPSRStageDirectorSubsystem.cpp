@@ -686,7 +686,25 @@ void UFPSRStageDirectorSubsystem::PerformSwap()
 		{
 			continue; // no pawn to move, or nowhere to put it
 		}
-		const FTransform& EntryXform = EntryTransforms[EntryCursor % EntryTransforms.Num()];
+		// Round-robin the authored entries, and SPREAD each wrap onto its own ring slot. Without the spread, an arena
+		// with fewer entry points than players teleports them onto the SAME point — and the teleport below is
+		// deliberately bSweep=false (a sweep does not resolve an overlap anyway), so the capsules end up inside each
+		// other and nobody can move. That is not hypothetical: every arena currently ships exactly ONE APlayerStart,
+		// so in co-op EVERY player landed on one spot and stuck (PIE 2026-08-25). Authoring one start per player is
+		// still the right content fix; this makes the code safe whatever gets authored.
+		const int32 EntryIndex = EntryCursor % EntryTransforms.Num();
+		const int32 WrapIndex = EntryCursor / EntryTransforms.Num();
+		FTransform EntryXform = EntryTransforms[EntryIndex];
+		if (WrapIndex > 0)
+		{
+			// Fan the overflow around its entry point. The angle is derived from the player's own index so two
+			// players can never resolve to the same offset, and the radius grows per wrap so a third wrap clears the
+			// second. Not mask-snapped: GetPlayerEntryTransforms already snapped the entry itself onto an open cell,
+			// and PlayerEntryOverflowRadius is a fraction of a cell so the offset cannot cross into a blocked one.
+			const float Angle = (2.0f * PI) * (static_cast<float>(EntryCursor) / static_cast<float>(FMath::Max(1, EntryTransforms.Num() * (WrapIndex + 1))));
+			const float Radius = PlayerEntryOverflowRadius * static_cast<float>(WrapIndex);
+			EntryXform.AddToTranslation(FVector(FMath::Cos(Angle) * Radius, FMath::Sin(Angle) * Radius, 0.0f));
+		}
 		++EntryCursor;
 
 		const FVector OldLoc = Char->GetActorLocation();

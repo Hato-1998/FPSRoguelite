@@ -322,6 +322,14 @@ protected:
 	 *  pooling (the actor is reused, not destroyed), so this once-per-lifetime bind stays valid for every reuse. */
 	void InitHealthBarWidget();
 
+	/** Show/hide the world-space health bar. Called on BOTH sides from the same places the death cosmetic runs, which
+	 *  is why it lives on the cosmetic path and not in EnterDyingState: EnterDyingState is server-only (BeginDying),
+	 *  and the bar is a CLIENT visual — hiding it only there would leave every remote client staring at a full-looking
+	 *  bar floating over a corpse for the whole death dwell, which reads as "it didn't die" (PIE 2026-08-25).
+	 *  Re-shown on Activate() / the client unhide reset, since the widget survives pooling (InitHealthBarWidget's
+	 *  bind is once-per-lifetime and must stay valid). */
+	void SetHealthBarVisible(bool bVisible);
+
 	/** BP hook (fired by InitHealthBarWidget): the BP does GetUserWidgetObject -> Cast(WBP_EnemyHealthBar) ->
 	 *  InitHealthComp(GetHealthComponent()) so the bar/floating-damage widget binds OnHealthChanged. */
 	UFUNCTION(BlueprintImplementableEvent, Category = "FPSR|Enemy")
