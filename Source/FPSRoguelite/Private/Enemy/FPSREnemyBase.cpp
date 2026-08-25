@@ -124,6 +124,18 @@ void AFPSREnemyBase::BeginPlay()
 		// death cosmetics from its own path — HandleDeath calls HandleDeathCosmetic directly, since OnRep does not
 		// run on the server). Enters the Death animation state. Harmless when no AnimProfile is set.
 		HealthComponent->OnDeathCosmetic.AddDynamic(this, &AFPSREnemyBase::HandleDeathCosmetic);
+		// Hit-flash cosmetic (U20 CPD slot 4): fires on BOTH server (ApplyDamage) and clients (OnRep_Health), unlike
+		// OnDeathCosmetic above — see HandleHealthChangedForHitFlash's own comment for the pool-reuse guard this needs.
+		HealthComponent->OnHealthChanged.AddDynamic(this, &AFPSREnemyBase::HandleHealthChangedForHitFlash);
+
+		// Seed the edge tracker from the health that is ALREADY there. Leaving it at its -1 default makes the first
+		// observation structurally unable to be a "decrease", so a client would swallow the first hit of an actor's
+		// first life: the initial replicated Health equals the archetype default, so no initial OnRep_Health fires to
+		// prime the tracker, and the first real damage OnRep then compares against -1. On the server the component's
+		// own BeginPlay has already set Health = MaxHealth by the time this actor BeginPlay body runs; on a client the
+		// initial replicated value is applied before BeginPlay. A late-relevancy joiner seeds from the already-damaged
+		// value, which is also correct — it just means no flash for damage it never witnessed.
+		LastHealthForHitFlash = HealthComponent->GetHealth();
 	}
 
 	// Per-actor animation phase (0..1) derived from the actor id so pooled enemies don't animate in lockstep (U20).
@@ -134,7 +146,7 @@ void AFPSREnemyBase::BeginPlay()
 	// Written here (BeginPlay runs on every machine with rendering) and never cleared: CPD survives pooling reuse.
 	if (Mesh)
 	{
-		Mesh->SetCustomPrimitiveDataFloat(FPSRVATAnim::CPDSlot_Phase, AnimPhase);
+		Mesh->SetCustomPrimitiveDataFloat(FPSRAnimCPD::CPDSlot_Phase, AnimPhase);
 	}
 
 	// Bind the world-space health bar / floating-damage widget to the health component once (server + clients).
@@ -289,7 +301,20 @@ void AFPSREnemyBase::Activate(const FVector& Location)
 	// state overrides any stale Death), so this authority-side reset covers the standalone / listen-server host.
 	CurrentAnimState = EFPSRAnimState::Idle;
 	CurrentSpeedBucket = -1;
+	AnimOneShotEnterTime = -1.0f;
+	AnimOneShotCycleSeconds = -1.0f;
 	LastRecvTime = -1.0f;
+	// CPD survives pooling reuse (see the phase write in BeginPlay), so a prior life's hit stamp would otherwise ride
+	// into this one and flash an enemy the instant it respawns — CPDSlot_LastHitTime's contract is "this life".
+	if (AnimProfile && Mesh)
+	{
+		Mesh->SetCustomPrimitiveDataFloat(FPSRAnimCPD::CPDSlot_LastHitTime, 0.0f);
+	}
+	// HealthComponent->ResetForReuse() above already resynced this via its OnHealthChanged broadcast (when
+	// AnimProfile is set — see HandleHealthChangedForHitFlash). This explicit resync is belt-and-suspenders for the
+	// dormant (no AnimProfile yet) case, so the tracker can never carry a stale prior-life value forward. GetHealth()
+	// reads MaxHealth here (ResetForReuse already ran above), so this life's own first real hit is never swallowed.
+	LastHealthForHitFlash = HealthComponent ? HealthComponent->GetHealth() : 0.0f;
 	SetAnimState(EFPSRAnimState::Idle);
 }
 
@@ -428,6 +453,11 @@ void AFPSREnemyBase::Deactivate()
 	SetNetDormancy(DORM_DormantAll);
 }
 
+bool AFPSREnemyBase::IsOneShotState(EFPSRAnimState InState)
+{
+	return InState == EFPSRAnimState::Attack || InState == EFPSRAnimState::Death;
+}
+
 void AFPSREnemyBase::SetAnimState(EFPSRAnimState NewState, float PlayRate)
 {
 	// Dormant unless an archetype opted into animation; no local rendering (so no cosmetics) on a dedicated server.
@@ -436,21 +466,93 @@ void AFPSREnemyBase::SetAnimState(EFPSRAnimState NewState, float PlayRate)
 		return;
 	}
 
+	// PlayRate < 0 is the "caller didn't pass one" sentinel (see the header doc) — a plain 1.0f default couldn't be
+	// told apart from a caller explicitly requesting normal speed, and a one-shot state needs a DURATION-derived rate
+	// (never a guessed 1.0) so its material progress (Time-EnterTime)*Rate reaches 1.0 exactly at the authored
+	// hold/dwell length — so the default itself has to carry that information instead of the argument's value.
+	if (PlayRate < 0.0f)
+	{
+		PlayRate = IsOneShotState(NewState)
+			? 1.0f / FMath::Max(KINDA_SMALL_NUMBER, (NewState == EFPSRAnimState::Death) ? DeathDwellSeconds : AttackAnimHoldSeconds)
+			: 1.0f;
+	}
+
 	// Quantize the playrate so the scalar is re-written only when it crosses a bucket boundary (write-on-change). A
 	// frozen clip (playrate 0) lands in bucket 0 and a playing clip in a higher bucket, so freeze<->play transitions
 	// still trigger exactly one write.
-	const int32 NewBucket = FMath::Clamp(static_cast<int32>(PlayRate * FPSRVATAnim::SpeedBucketCount), 0, FPSRVATAnim::SpeedBucketCount - 1);
-	if (NewState == CurrentAnimState && NewBucket == CurrentSpeedBucket)
+	const int32 NewBucket = FMath::Clamp(static_cast<int32>(PlayRate * FPSRAnimCPD::SpeedBucketCount), 0, FPSRAnimCPD::SpeedBucketCount - 1);
+
+	// A one-shot RE-ENTERED from itself needs its own rule — the plain dedupe below would freeze it on its final pose
+	// forever (a melee attacker re-entering Attack every cooldown sits in the same state AND the same playrate
+	// bucket), but bypassing the dedupe unconditionally is just as wrong: the CLIENT attack tell fires from
+	// PostNetReceiveLocationAndRotation on EVERY net update while the enemy is in range, which would restamp
+	// EnterTime before the clip ever finished and rewind it to frame 0 forever. So: restart a one-shot only once its
+	// previous cycle has actually elapsed.
+	if (IsOneShotState(NewState) && NewState == CurrentAnimState)
+	{
+		// Death is TERMINAL — the actor is on its way out, and PostNetReceiveLocationAndRotation re-asserts Death for
+		// as long as IsDead(), so a completion-based restart would loop the death animation until the corpse hides.
+		if (NewState == EFPSRAnimState::Death)
+		{
+			return;
+		}
+		const UWorld* World = GetWorld();
+		const float Now = World ? World->GetTimeSeconds() : 0.0f;
+		// The RUNNING cycle's length, not one derived from this call's rate — see AnimOneShotCycleSeconds' comment.
+		if (AnimOneShotEnterTime >= 0.0f && (Now - AnimOneShotEnterTime) < AnimOneShotCycleSeconds)
+		{
+			return; // still playing — do not rewind it
+		}
+	}
+	else if (NewState == CurrentAnimState && NewBucket == CurrentSpeedBucket)
 	{
 		return; // event-driven: state + playrate bucket unchanged, nothing to write
 	}
 	CurrentAnimState = NewState;
 	CurrentSpeedBucket = NewBucket;
+	if (IsOneShotState(NewState))
+	{
+		const UWorld* World = GetWorld();
+		AnimOneShotEnterTime = World ? World->GetTimeSeconds() : 0.0f;
+		AnimOneShotCycleSeconds = 1.0f / FMath::Max(KINDA_SMALL_NUMBER, PlayRate);
+	}
+	else
+	{
+		AnimOneShotEnterTime = -1.0f;
+		AnimOneShotCycleSeconds = -1.0f;
+	}
 
 	if (Mesh)
 	{
 		AnimProfile->ApplyAnimState(Mesh, NewState, PlayRate, AnimPhase);
 	}
+}
+
+void AFPSREnemyBase::HandleHealthChangedForHitFlash(float NewHealth, float MaxHealth)
+{
+	(void)MaxHealth;
+
+	// Same dormant/dedicated-server gate as SetAnimState above — zero cost until an archetype opts in, and a
+	// dedicated server never renders so it never needs the write.
+	if (!AnimProfile || GetNetMode() == NM_DedicatedServer)
+	{
+		return;
+	}
+
+	// Decrease-edge gate: ResetForReuse() (FPSREnemyHealthComponent.cpp) broadcasts this SAME delegate on pool reuse
+	// (Health snaps 0 -> MaxHealth there), which is an INCREASE, not a hit — without this check every pooled enemy
+	// would flash the instant it (re)spawns. LastHealthForHitFlash is resynced in Activate() too (see its own
+	// comment), so a reused actor's first real hit this life is judged against that life's own starting Health,
+	// never a stale prior-life value.
+	const bool bDecreased = NewHealth < LastHealthForHitFlash;
+	LastHealthForHitFlash = NewHealth;
+	if (!bDecreased || !Mesh)
+	{
+		return;
+	}
+
+	const UWorld* World = GetWorld();
+	Mesh->SetCustomPrimitiveDataFloat(FPSRAnimCPD::CPDSlot_LastHitTime, World ? World->GetTimeSeconds() : 0.0f);
 }
 
 void AFPSREnemyBase::PostNetReceiveLocationAndRotation()
@@ -496,7 +598,7 @@ void AFPSREnemyBase::PostNetReceiveLocationAndRotation()
 	// Distance LOD: beyond the freeze radius, FREEZE the clip (playrate 0) — this stops CPU scalar writes (write-on-
 	// change settles after one freeze) AND the distant GPU frame advance. Reuses the S1 boundary (Performance §5-1);
 	// no new per-enemy world query (arithmetic on data the client already has).
-	if (LocalPawn && DistSqToLocal > FPSRVATAnim::AnimFreezeRadiusSq)
+	if (LocalPawn && DistSqToLocal > FPSRAnimCPD::AnimFreezeRadiusSq)
 	{
 		SetAnimState(EFPSRAnimState::Idle, 0.0f);
 		return;
@@ -531,7 +633,13 @@ void AFPSREnemyBase::SetActorHiddenInGame(bool bNewHidden)
 	{
 		CurrentAnimState = EFPSRAnimState::Idle;
 		CurrentSpeedBucket = -1;
+		AnimOneShotEnterTime = -1.0f;
+		AnimOneShotCycleSeconds = -1.0f;
 		LastRecvTime = -1.0f;
+		if (AnimProfile && Mesh) // clear the prior life's hit stamp — see the authority-side reset for why
+		{
+			Mesh->SetCustomPrimitiveDataFloat(FPSRAnimCPD::CPDSlot_LastHitTime, 0.0f);
+		}
 		SetAnimState(EFPSRAnimState::Idle, 1.0f);
 	}
 }
