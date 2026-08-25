@@ -121,6 +121,31 @@ def scalar_param(name, default, cpd_slot=None, x=-1800, y=0):
     return ex
 
 
+def find_vector(name):
+    for e in expressions(unreal.MaterialExpressionVectorParameter):
+        if str(e.get_editor_property("parameter_name")) == name:
+            return e
+    return None
+
+
+def vector_param(name, default, x=-1900, y=0):
+    """색 파라미터를 만들거나(없으면) 기존 것을 재사용. 기본값은 scalar_param 과 **같은 규칙**으로
+    매번 덮어쓴다 — 이 스크립트가 머티리얼 기본값의 단일 소스이기 때문이다. 종전엔 FrameColor 만
+    인라인으로 처리하면서 '생성 시에만' 기본값을 넣었는데, 그러면 값을 고쳐 다시 돌려도 재사용
+    분기로 빠져 조용히 옛 값이 남는다(scalar_param 이 같은 이유로 이미 매번 덮어쓴다).
+    실사용 조정은 MI 오버라이드로 하므로 여기 기본값을 스크립트가 소유해도 사용자 작업을 안 덮는다."""
+    ex = find_vector(name)
+    created = ex is None
+    if created:
+        ex = mel.create_material_expression(mat, unreal.MaterialExpressionVectorParameter, x, y)
+        ex.set_editor_property("parameter_name", name)
+    ex.set_editor_property("default_value", default)
+    c = default
+    print(f"[s4] vector {name:18s} {'생성' if created else '재사용'} "
+          f"({c.r:.3f}, {c.g:.3f}, {c.b:.3f})")
+    return ex
+
+
 # ── 1. CPD 파라미터 (C++ 이 쓰는 쪽) ─────────────────────────────────────────────────────────────
 # 기본값은 전부 0 이어야 한다. FPSRAnimCPDParams.h 의 계약 = "슬롯 기본값 0 = Idle·루프·큰 (T-0)에 관용".
 # 클라 첫 스폰 시 BeginPlay 가 슬롯 3만 쓰므로 0/1/2 가 0인 순간이 실제로 존재한다 — Rate=0 이면
@@ -148,9 +173,20 @@ p_shellop= scalar_param("ShellOpacity",     0.55, x=-1900, y=600)  # 십자 창�
 p_ramp   = scalar_param("OpenRampFrac",     0.12, x=-1900, y=-60)  # 열리는 데 쓰는 진행도 비율
 p_close  = scalar_param("CloseRampFrac",    0.10, x=-1900, y=-20)  # 발사 직전 닫히는 비율
 p_band   = scalar_param("WindowBandFrac",   0.30, x=-1900, y=700)  # 십자 창 폭(요소 반크기 대비)
-p_frame  = scalar_param("FrameWidthFrac",   0.10, x=-1900, y=800)  # 모서리 프레임 폭(요소 반크기 대비)
+p_frame  = scalar_param("FrameWidthFrac",   0.14, x=-1900, y=800)  # 모서리 프레임 폭(요소 반크기 대비)
 p_frmpx  = scalar_param("FrameMinPixels",    1.6, x=-1900, y=850)  # 모서리선이 유지할 최소 화면 폭(픽셀)
 p_texscale= scalar_param("TexScale",        0.01, x=-1900, y=900)  # 로컬 위치 → UV 배율(질감 타일링)
+
+# ── 2-b. 색 — "외곽선으로 형태를 읽는다"의 성립 조건 ────────────────────────────────────────────
+# 사용자 레퍼런스(2026-08-25) = 밝은 면 + 두꺼운 검은 모서리선, 글씨 외곽선 같은 그래픽한 읽힘.
+# 🔑 **조명은 면과 선에 똑같이 곱해진다.** 그러므로 대비는 오직 두 색의 *비율*로만 나오고, 레벨이
+#    밝든 어둡든 비율이 1:1 이면 선은 영원히 안 보인다. 실사고: BaseColor (0.020,0.020,0.025) vs
+#    FrameColor (0.020,0.020,0.030) — 파랑만 0.005 차이라 프레임이 계산·저작돼 있는데도 설계상
+#    보일 수가 없었다(PIE 2026-08-25 "외곽선 느낌이 안 난다"의 정체).
+# FrameColor 는 이미 거의 검정이라 더 내릴 데가 없으므로 올릴 것은 면 쪽이다. 아래는 **시작값**이고
+# 최종 톤은 PIE 를 보며 MI 오버라이드로 잡는다(판정 = 검은 선이 면과 뚜렷이 갈리는가).
+p_basecol  = vector_param("BaseColor",  unreal.LinearColor(0.35, 0.35, 0.38, 1.0), x=-1900, y=1000)
+p_framecol = vector_param("FrameColor", unreal.LinearColor(0.02, 0.02, 0.03, 1.0), x=-1900, y=1100)
 
 # ── 3. ProcWPO 에 상태 입력 추가 + HLSL 교체 ─────────────────────────────────────────────────────
 # 입력 핀 보정은 WPO_NEW_INPUTS 를 정의한 뒤(아래) ensure_custom 으로 한다.
@@ -256,11 +292,14 @@ float a = saturate(1.0 - (T - LastHitTime) / max(Duration, 0.0001));
 return Tint * (a * a * Intensity);""")
 
 t_node = find_by_object_name("MaterialExpressionTime_0")
-base_color = find_by_object_name("MaterialExpressionVectorParameter_0")  # T3D 실측: BaseColor 출력의 소스
-emissive_mul = find_by_object_name("MaterialExpressionMultiply_1")       # T3D 실측: 기존 EmissiveColor 소스
-for nm, node in (("Time", t_node), ("BaseColor", base_color), ("Multiply_1", emissive_mul)):
+emissive_mul = find_by_object_name("MaterialExpressionMultiply_1")       # 실측: 기존 EmissiveColor 소스
+# BaseColor 는 파라미터 이름으로 집는다 — 직렬화 오브젝트명(VectorParameter_0)은 저장 순서가 바뀌면
+# 다른 노드를 가리키고, 이 머티리얼엔 색 파라미터가 셋(BaseColor·CoreColor·FrameColor)이라 위험하다.
+base_color = p_basecol
+for nm, node in (("Time", t_node), ("Multiply_1", emissive_mul)):
     if not node:
-        raise SystemExit(f"[s4] 그래프에서 {nm} 노드를 못 찾음 — 배선이 바뀌었다면 T3D 를 다시 떠서 이름을 맞출 것")
+        raise SystemExit(f"[s4] 그래프에서 {nm} 노드를 못 찾음 — 배선이 바뀌었다면 노드 이름을 다시 맞출 것"
+                         " (머티리얼엔 T3D 익스포터가 없으므로 ObjectIterator 로 열거해서 확인한다)")
 
 for src, pin in ((t_node, "T"), (p_hit, "LastHitTime"), (p_hitdur, "Duration"),
                  (p_hitint, "Intensity"), (base_color, "Tint")):
@@ -505,16 +544,7 @@ if not ok:
     raise SystemExit("[s4] BaseTexture.UVs 연결 실패 — 중단")
 
 # BaseColor = (저작 색 × 질감) 을 모서리에서 FrameColor 로 대체. 그림의 검은 테두리에 해당한다.
-frame_color = None
-for e in expressions(unreal.MaterialExpressionVectorParameter):
-    if str(e.get_editor_property("parameter_name")) == "FrameColor":
-        frame_color = e
-        break
-if not frame_color:
-    frame_color = mel.create_material_expression(mat, unreal.MaterialExpressionVectorParameter, -1200, 1000)
-    frame_color.set_editor_property("parameter_name", "FrameColor")
-    frame_color.set_editor_property("default_value", unreal.LinearColor(0.02, 0.02, 0.03, 1.0))
-    print("[s4] FrameColor 파라미터 생성")
+frame_color = p_framecol  # 위 2-b 에서 이미 만들었고 기본값도 거기가 단일 소스다
 
 tinted = None
 for e in expressions(unreal.MaterialExpressionMultiply):
