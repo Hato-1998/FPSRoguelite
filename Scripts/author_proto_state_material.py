@@ -50,6 +50,48 @@ def find_custom(desc):
     return None
 
 
+def ensure_custom(desc, input_names, x=0, y=0, required=False, prune=False):
+    """Custom 노드를 만들거나 재사용하되, **입력 핀 목록을 항상 계약과 일치시킨다.**
+
+    재사용 경로에서 핀을 맞추지 않으면, 나중에 계약이 늘었을 때 이미 만들어진 노드엔 그 핀이 없어
+    connect 가 조용히 False 를 낸다(실사고 2026-08-25: OpacityMask 에 FrameWidthFrac·TexScale 을
+    더했는데 재사용 분기가 핀을 안 붙여 스크립트가 중단됐다 — ProcWPO 만 보정 로직이 있었다).
+    기존 항목은 순서도 연결도 건드리지 않고, 없는 핀만 뒤에 덧붙인다.
+
+    required=True 면 노드가 없을 때 생성하지 않고 중단한다(그래프에 이미 있어야 하는 노드용).
+
+    prune=True 면 계약에 없는 핀을 **제거**한다. 이 스크립트가 그 노드의 입력을 100% 소유할 때만 켤 것 —
+    ProcWPO 는 최초 저작 때부터 있던 입력 9개(LocalPos·UV·PhaseIn·T·MeshType·SpinSpeed·BobAmp·
+    BobSpeed·OrbitSpeed)를 이 스크립트가 모르므로 절대 켜면 안 된다. 죽은 핀을 남겨 두는 것이 왜
+    위험한가: UMaterialExpressionCustom 은 이름 붙은 입력이 **연결되지 않으면 컴파일 에러**를 낸다
+    (`Custom material %s missing input`). 즉 코드가 더는 안 쓰는 핀이라도 연결이 끊기는 순간 머티리얼이
+    통째로 죽는다 — 실제로 OpacityMask 에 프레넬 방식을 기하 모서리 계산으로 갈아엎을 때 Fresnel 핀만
+    남아 그 상태였다.
+    """
+    ex = find_custom(desc)
+    created = ex is None
+    if created:
+        if required:
+            raise SystemExit(f"[s4] {desc} Custom 노드를 못 찾음")
+        ex = mel.create_material_expression(mat, unreal.MaterialExpressionCustom, x, y)
+        ex.set_editor_property("description", desc)
+    have = [str(ci.get_editor_property("input_name")) for ci in ex.get_editor_property("inputs")]
+    missing = [n for n in input_names if n not in have]
+    stale = [n for n in have if n not in input_names] if prune else []
+    if missing or stale:
+        ins = [ci for ci in ex.get_editor_property("inputs")
+               if str(ci.get_editor_property("input_name")) not in stale]
+        for n in missing:
+            ci = unreal.CustomInput()
+            ci.set_editor_property("input_name", n)
+            ins.append(ci)
+        ex.set_editor_property("inputs", ins)
+    print(f"[s4] Custom {desc:12s} {'생성' if created else '재사용'}"
+          f"{'' if not missing else f' + 입력 추가 {missing}'}"
+          f"{'' if not stale else f' + 죽은 핀 제거 {stale}'}")
+    return ex
+
+
 def find_by_object_name(obj_name):
     """T3D 로 확인한 직렬화 오브젝트명으로 집는다 — 입력 핀(Input)이 protected 라
     파이썬으로 '무엇에 연결됐는지'를 읽을 수 없기 때문에, 그래프 상 위치를 이름으로 특정한다."""
@@ -110,9 +152,7 @@ p_frame  = scalar_param("FrameWidthFrac",   0.10, x=-1900, y=800)  # 모서리 �
 p_texscale= scalar_param("TexScale",        0.01, x=-1900, y=900)  # 로컬 위치 → UV 배율(질감 타일링)
 
 # ── 3. ProcWPO 에 상태 입력 추가 + HLSL 교체 ─────────────────────────────────────────────────────
-wpo = find_custom("ProcWPO")
-if not wpo:
-    raise SystemExit("[s4] ProcWPO Custom 노드를 못 찾음")
+# 입력 핀 보정은 WPO_NEW_INPUTS 를 정의한 뒤(아래) ensure_custom 으로 한다.
 
 WPO_CODE = """float3 p = LocalPos;
 int id = (int)floor(UV.x);
@@ -191,18 +231,9 @@ WPO_NEW_INPUTS = [("StateId", p_state), ("EnterTime", p_enter), ("Rate", p_rate)
                   ("AttackOpen", p_open), ("ElectronPull", p_epull), ("ElectronSnap", p_esnap),
                   ("OpenRampFrac", p_ramp), ("CloseRampFrac", p_close)]
 
-existing = [str(ci.get_editor_property("input_name")) for ci in wpo.get_editor_property("inputs")]
-to_add = [(n, e) for (n, e) in WPO_NEW_INPUTS if n not in existing]
-if to_add:
-    ins = list(wpo.get_editor_property("inputs"))
-    for name, _ in to_add:
-        ci = unreal.CustomInput()
-        ci.set_editor_property("input_name", name)
-        ins.append(ci)
-    wpo.set_editor_property("inputs", ins)
-    print(f"[s4] ProcWPO 입력 추가: {[n for n, _ in to_add]}")
-else:
-    print("[s4] ProcWPO 입력 이미 존재 — 추가 없음")
+# ProcWPO 는 머티리얼 최초 저작 때부터 있는 노드다 — 여기서 만들면 원래 입력(LocalPos·T·SpinSpeed…)이
+# 없는 빈 노드가 되므로 required=True 로 부재를 오류 처리한다.
+wpo = ensure_custom("ProcWPO", [n for n, _ in WPO_NEW_INPUTS], required=True)
 
 wpo.set_editor_property("code", WPO_CODE)
 for name, ex in WPO_NEW_INPUTS:
@@ -214,19 +245,7 @@ for name, ex in WPO_NEW_INPUTS:
 # ── 4. 피격 플래시: 새 Custom 노드 → 기존 이미시브에 Add ──────────────────────────────────────────
 # 기존 배선(T3D 실측): EmissiveColor <- Multiply_1( Multiply_0(CoreColor × CoreEmissive) × ElemMask ).
 # 플래시는 코어 마스크와 무관하게 몸 전체가 번쩍여야 하므로 곱이 아니라 Add 로 얹는다.
-flash = find_custom("HitFlash")
-if not flash:
-    flash = mel.create_material_expression(mat, unreal.MaterialExpressionCustom, -1200, 400)
-    flash.set_editor_property("description", "HitFlash")
-    ins = []
-    for n in ("T", "LastHitTime", "Duration", "Intensity", "Tint"):
-        ci = unreal.CustomInput()
-        ci.set_editor_property("input_name", n)
-        ins.append(ci)
-    flash.set_editor_property("inputs", ins)
-    print("[s4] HitFlash Custom 노드 생성")
-else:
-    print("[s4] HitFlash Custom 노드 재사용")
+flash = ensure_custom("HitFlash", ("T", "LastHitTime", "Duration", "Intensity", "Tint"), -1200, 400, prune=True)
 
 flash.set_editor_property("output_type", unreal.CustomMaterialOutputType.CMOT_FLOAT3)
 flash.set_editor_property("code", """// LastHitTime <= 0 = 이 생에서 아직 안 맞음. 이 가드가 없으면 레벨 시작 직후
@@ -291,19 +310,9 @@ if not elem_mask:
 #     프레넬(시선에 스치는 픽셀)로 만든다 — 어떤 형상에도 통하고 3연산이면 끝난다.
 #   · 코어 요소는 항상 불투명(EmissiveElementId, ElemMask 가 이미 판별해 준다).
 # 십자 판정은 **회전 전 로컬 위치**(LocalPos)로 한다 — 전자가 공전해도 마스크가 표면에 붙어 함께 돈다.
-op_mask = find_custom("OpacityMask")
-if not op_mask:
-    op_mask = mel.create_material_expression(mat, unreal.MaterialExpressionCustom, -1200, 700)
-    op_mask.set_editor_property("description", "OpacityMask")
-    ins = []
-    for n in ("LocalPos", "UV", "MeshType", "CoreMask", "ShellOpacity", "BandFrac", "FrameWidthFrac", "TexScale"):
-        ci = unreal.CustomInput()
-        ci.set_editor_property("input_name", n)
-        ins.append(ci)
-    op_mask.set_editor_property("inputs", ins)
-    print("[s4] OpacityMask Custom 노드 생성")
-else:
-    print("[s4] OpacityMask Custom 노드 재사용")
+op_mask = ensure_custom("OpacityMask",
+                        ("LocalPos", "UV", "MeshType", "CoreMask", "ShellOpacity", "BandFrac",
+                         "FrameWidthFrac", "TexScale"), -1200, 700, prune=True)
 
 op_mask.set_editor_property("output_type", unreal.CustomMaterialOutputType.CMOT_FLOAT4)
 op_mask.set_editor_property("code", """// 요소별 중심/반크기 — 메시 생성기(gen_enemy_proto_meshes.py)와의 계약이다. 값이 바뀌면 양쪽을 같이 고칠 것.
