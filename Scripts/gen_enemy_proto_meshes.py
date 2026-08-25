@@ -5,7 +5,8 @@
 #   1) SM_EnemyProto_Bipyramid : 오각 쌍뿔 셸(상/하 분리, 휴식 시 닫힘) + 내부 코어 구(약점 시각체)
 #        element 0 = 상부 뿔, 1 = 하부 뿔, 2 = 코어 구
 #   2) SM_EnemyProto_AtomCubes : 중앙 핵 큐브 + 전자 큐브 3개(궤도 초기 위치 배치, 공전은 머티리얼)
-#        element 0 = 핵, 1..3 = 전자 (전자 k의 궤도축/속도는 머티리얼 HLSL과 계약 — 아래 ORBITS 주석)
+#        element 0 = 핵 큐브(껍질), 1..3 = 전자, 4 = 내부 코어 구(약점 시각체 — 쌍뿔의 element 2 와 같은 역할)
+#        (전자 k의 궤도축/속도는 머티리얼 HLSL과 계약 — 아래 ORBITS 주석)
 #
 # 사용: python Scripts/gen_enemy_proto_meshes.py [출력폴더=Saved/EnemyProto]
 # 단위 cm, +Z 상방. 임포트는 커맨드렛으로(라이브 에디터 파이썬 임포트 = 데드락, 메모리 참조).
@@ -111,6 +112,10 @@ def gen_atom_cubes(out_dir):
     cube(m, (80.0, 0.0, 0.0), 10.0, 1)
     cube(m, (80.0, 0.0, 0.0), 10.0, 2)
     cube(m, (0.0, 80.0, 0.0), 10.0, 3)
+    # 코어 구(element 4, 사용자 결정 2026-08-25): 핵 큐브 안에 든 작은 구 — 쌍뿔의 element 2 와 같은
+    # 역할이다. 껍질(핵 큐브)의 십자 창을 통해 비쳐 보인다. 껍질보다 확실히 작아야(30 vs 14) 창
+    # 밖으로 삐져나오지 않는다. 마지막에 써야 반투명 그리기 순서상 껍질 위로 비친다(정렬 없음).
+    icosphere(m, (0.0, 0.0, 0.0), 14.0, 4)
     write_obj(m, os.path.join(out_dir, "SM_EnemyProto_AtomCubes.obj"), "SM_EnemyProto_AtomCubes")
 
 if __name__ == "__main__":

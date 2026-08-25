@@ -66,7 +66,11 @@ def scalar_param(name, default, cpd_slot=None, x=-1800, y=0):
     if created:
         ex = mel.create_material_expression(mat, unreal.MaterialExpressionScalarParameter, x, y)
         ex.set_editor_property("parameter_name", name)
-        ex.set_editor_property("default_value", default)
+    # 기본값은 재사용 시에도 매번 덮어쓴다 — 이 스크립트가 머티리얼 기본값의 단일 소스다. 처음엔
+    # 생성 시에만 넣었는데, 그러면 값을 고쳐 다시 돌려도 "재사용"으로 빠져 조용히 옛 값이 남는다
+    # (ShellOpacity 0.35→0.55 상향이 그렇게 한 번 유실됐다). 실사용 조정은 MI 에서 하므로 머티리얼
+    # 기본값을 스크립트가 소유해도 사용자 작업을 덮지 않는다.
+    ex.set_editor_property("default_value", default)
     if cpd_slot is not None:
         ex.set_editor_property("use_custom_primitive_data", True)
         ex.set_editor_property("primitive_data_index", cpd_slot)
@@ -98,7 +102,11 @@ p_hitint = scalar_param("HitFlashIntensity", 12.0,  x=-1900, y=500)
 p_open   = scalar_param("AttackOpen",      22.0, x=-1900, y=-100)  # cm, 쌍뿔 상/하 분리 거리
 p_epull  = scalar_param("ElectronPull",     0.55, x=-1900, y=0)    # 0..1 전자가 핵으로 빨려드는 정도
 p_esnap  = scalar_param("ElectronSnap",     0.45, x=-1900, y=100)  # 0..1 발사 순간 튕겨나가는 정도
-p_shellop= scalar_param("ShellOpacity",     0.35, x=-1900, y=600)  # 껍질 불투명도 (코어는 항상 1)
+p_shellop= scalar_param("ShellOpacity",     0.55, x=-1900, y=600)  # 십자 창의 불투명도 (그 밖은 불투명)
+p_ramp   = scalar_param("OpenRampFrac",     0.12, x=-1900, y=-60)  # 열리는 데 쓰는 진행도 비율
+p_close  = scalar_param("CloseRampFrac",    0.10, x=-1900, y=-20)  # 발사 직전 닫히는 비율
+p_band   = scalar_param("WindowBandFrac",   0.30, x=-1900, y=700)  # 십자 창 폭(요소 반크기 대비)
+p_frame  = scalar_param("FramePower",       3.0,  x=-1900, y=800)  # 외곽 프레임(프레넬) 날카로움
 
 # ── 3. ProcWPO 에 상태 입력 추가 + HLSL 교체 ─────────────────────────────────────────────────────
 wpo = find_custom("ProcWPO")
@@ -149,7 +157,10 @@ else if (StateId > 1.5)
 {
     // Attack. 형태마다 다른 텔레그래프를 쓴다 — 종전의 공용 수축+전진은 1400cm 밖 원거리 적에게
     // 화면상 몇 픽셀이라 "조준 중"이 읽히지 않았다(PIE 2026-08-25).
-    float w = sin(prog * 3.14159265);   // 0 -> 1 -> 0, 양 끝이 0 이라 진입/이탈 팝이 없다
+    // 열림 곡선: 빠르게 열고 → 발사까지 **열린 채 유지** → 발사 순간 닫힌다(사용자 결정 2026-08-25).
+    // 종전 sin(pi*prog) 는 한가운데서만 최대라 "조준 중"이 한순간 스쳐 지나갔다. 양 끝은 여전히 0 이라
+    // 진입/이탈 팝은 없다(C0-at-entry/exit).
+    float w = smoothstep(0.0, OpenRampFrac, prog) * (1.0 - smoothstep(1.0 - CloseRampFrac, 1.0, prog));
     if (MeshType < 0.5)
     {
         // 쌍뿔 = 조개. 상뿔(id 0)은 +Z, 하뿔(id 1)은 -Z 로 벌어지고 코어(id 2)는 제자리에 남아
@@ -176,7 +187,8 @@ return q - p;"""
 
 WPO_NEW_INPUTS = [("StateId", p_state), ("EnterTime", p_enter), ("Rate", p_rate),
                   ("AttackLunge", p_lunge), ("AttackSquash", p_squash),
-                  ("AttackOpen", p_open), ("ElectronPull", p_epull), ("ElectronSnap", p_esnap)]
+                  ("AttackOpen", p_open), ("ElectronPull", p_epull), ("ElectronSnap", p_esnap),
+                  ("OpenRampFrac", p_ramp), ("CloseRampFrac", p_close)]
 
 existing = [str(ci.get_editor_property("input_name")) for ci in wpo.get_editor_property("inputs")]
 to_add = [(n, e) for (n, e) in WPO_NEW_INPUTS if n not in existing]
@@ -271,38 +283,89 @@ elem_mask = find_custom("ElemMask")
 if not elem_mask:
     raise SystemExit("[s4] ElemMask Custom 노드를 못 찾음 — 불투명도 분기를 걸 수 없다")
 
-opacity = None
-for e in expressions(unreal.MaterialExpressionLinearInterpolate):
-    opacity = e
-    break
-if not opacity:
-    opacity = mel.create_material_expression(mat, unreal.MaterialExpressionLinearInterpolate, -900, 600)
-    print("[s4] Opacity Lerp 노드 생성")
+# 불투명도 마스크 = 십자 창 + 외곽 프레임 (사용자 그림 2026-08-25).
+#   · 기본은 **불투명**(돌/블럭). 그림의 회색 부분.
+#   · 각 요소의 중앙을 지나는 **십자 띠**만 반투명 — 그 창으로 내부 코어가 비친다. 그림의 노란 부분.
+#   · **외곽 프레임**은 항상 불투명. 그림의 검은 테두리. 기하학적 모서리를 셰이더에서 찾는 대신
+#     프레넬(시선에 스치는 픽셀)로 만든다 — 어떤 형상에도 통하고 3연산이면 끝난다.
+#   · 코어 요소는 항상 불투명(EmissiveElementId, ElemMask 가 이미 판별해 준다).
+# 십자 판정은 **회전 전 로컬 위치**(LocalPos)로 한다 — 전자가 공전해도 마스크가 표면에 붙어 함께 돈다.
+op_mask = find_custom("OpacityMask")
+if not op_mask:
+    op_mask = mel.create_material_expression(mat, unreal.MaterialExpressionCustom, -1200, 700)
+    op_mask.set_editor_property("description", "OpacityMask")
+    ins = []
+    for n in ("LocalPos", "UV", "MeshType", "CoreMask", "ShellOpacity", "BandFrac", "Fresnel"):
+        ci = unreal.CustomInput()
+        ci.set_editor_property("input_name", n)
+        ins.append(ci)
+    op_mask.set_editor_property("inputs", ins)
+    print("[s4] OpacityMask Custom 노드 생성")
 else:
-    print("[s4] Opacity Lerp 노드 재사용")
+    print("[s4] OpacityMask Custom 노드 재사용")
 
-one = None
-for e in expressions(unreal.MaterialExpressionConstant):
-    one = e
+op_mask.set_editor_property("output_type", unreal.CustomMaterialOutputType.CMOT_FLOAT1)
+op_mask.set_editor_property("code", """// 요소별 중심/반크기 — 메시 생성기(gen_enemy_proto_meshes.py)와의 계약이다. 값이 바뀌면 양쪽을 같이 고칠 것.
+int id = (int)floor(UV.x);
+float3 c = float3(0.0, 0.0, 0.0);
+float hs = 75.0;
+if (MeshType < 0.5)
+{
+    // 쌍뿔: 상뿔/하뿔/코어 전부 원점 기준. 반크기 = 꼭짓점 높이.
+    hs = 75.0;
+}
+else
+{
+    // 원자 큐브: 핵(half 30) · 전자 3개(half 10, 궤도 반경 80) · 코어 구(반지름 14).
+    if (id == 1 || id == 2) { c = float3(80.0, 0.0, 0.0); hs = 10.0; }
+    else if (id == 3)       { c = float3(0.0, 80.0, 0.0); hs = 10.0; }
+    else if (id == 4)       { hs = 14.0; }
+    else                    { hs = 30.0; }
+}
+
+// 십자 띠: 요소 로컬에서 세 축 중 **하나라도** 중심선에 가까우면 창이다. 면 위의 점은 지배축이
+// 반크기에 붙어 있으므로, 나머지 두 축 가운데 하나가 가까울 때만 참이 된다 = 그림의 십자.
+float3 a = abs(LocalPos - c);
+float band = BandFrac * hs;
+float inCross = (min(a.x, min(a.y, a.z)) < band) ? 1.0 : 0.0;
+
+// 기본 불투명, 십자 창만 반투명. 프레임(프레넬)과 코어는 다시 불투명으로 끌어올린다.
+float o = lerp(1.0, ShellOpacity, inCross);
+o = max(o, Fresnel);
+return lerp(o, 1.0, saturate(CoreMask));""")
+
+fres = None
+for e in expressions(unreal.MaterialExpressionFresnel):
+    fres = e
     break
-if not one:
-    one = mel.create_material_expression(mat, unreal.MaterialExpressionConstant, -1200, 700)
-    one.set_editor_property("r", 1.0)
-    print("[s4] Constant(1.0) 생성")
+if not fres:
+    fres = mel.create_material_expression(mat, unreal.MaterialExpressionFresnel, -1500, 800)
+    print("[s4] Fresnel 노드 생성")
+ok = mel.connect_material_expressions(p_frame, "", fres, "ExponentIn")
+print(f"[s4] connect FramePower -> Fresnel : {ok}")
+
+t_coord = find_by_object_name("MaterialExpressionTextureCoordinate_0")
+local_pos = find_by_object_name("MaterialExpressionLocalPosition_0")
+mesh_type = find_scalar("MeshType")
+for nm, node in (("TexCoord", t_coord), ("LocalPosition", local_pos), ("MeshType", mesh_type)):
+    if not node:
+        raise SystemExit(f"[s4] {nm} 노드를 못 찾음")
+
+for src, pin in ((local_pos, "LocalPos"), (t_coord, "UV"), (mesh_type, "MeshType"),
+                 (elem_mask, "CoreMask"), (p_shellop, "ShellOpacity"), (p_band, "BandFrac"),
+                 (fres, "Fresnel")):
+    ok = mel.connect_material_expressions(src, "", op_mask, pin)
+    print(f"[s4] connect -> OpacityMask.{pin:12s} : {ok}")
+    if not ok:
+        raise SystemExit(f"[s4] OpacityMask.{pin} 연결 실패 — 중단")
 
 mat.set_editor_property("blend_mode", unreal.BlendMode.BLEND_TRANSLUCENT)
 # 반투명 기본값은 조명을 받지 않는 Unlit 이라 셰이딩 모델을 명시적으로 되돌려 놔야 한다.
 mat.set_editor_property("shading_model", unreal.MaterialShadingModel.MSM_DEFAULT_LIT)
 mat.set_editor_property("translucency_lighting_mode", unreal.TranslucencyLightingMode.TLM_SURFACE_PER_PIXEL_LIGHTING)
 
-for src, out_name, pin in ((p_shellop, "", "A"), (one, "", "B"), (elem_mask, "", "Alpha")):
-    ok = mel.connect_material_expressions(src, out_name, opacity, pin)
-    print(f"[s4] connect -> Opacity.{pin:5s} : {ok}")
-    if not ok:
-        raise SystemExit(f"[s4] Opacity.{pin} 연결 실패 — 중단")
-
-ok = mel.connect_material_property(opacity, "", unreal.MaterialProperty.MP_OPACITY)
-print(f"[s4] connect Lerp -> Opacity : {ok}")
+ok = mel.connect_material_property(op_mask, "", unreal.MaterialProperty.MP_OPACITY)
+print(f"[s4] connect OpacityMask -> Opacity : {ok}")
 if not ok:
     raise SystemExit("[s4] Opacity 출력 연결 실패 — 중단")
 
@@ -315,6 +378,22 @@ for o in orphans:
     # 정식 경로는 MaterialEditingLibrary 의 삭제 API 다.
     mel.delete_material_expression(mat, o)
 print(f"[s4] 고아 ObjectPositionWS 제거: {len(orphans)}개")
+
+# ── 5-b. MI 의 코어 요소 지정 갱신 ──────────────────────────────────────────────────────────────
+# 원자 큐브에 내부 코어 구(element 4)가 새로 생겼으므로(gen_enemy_proto_meshes.py) "어느 요소가
+# 코어인가"를 가리키는 EmissiveElementId 를 핵 큐브(0) → 코어 구(4) 로 옮긴다. 이 값이 이미시브와
+# 불투명도 양쪽의 코어 판정(ElemMask)을 동시에 몰기 때문에, 안 옮기면 껍질인 핵 큐브가 빛나고
+# 정작 코어 구는 십자 창 너머로 어둡게 남는다. 쌍뿔은 종전대로 element 2 라 건드리지 않는다.
+MI_CORE_ELEMENT = {"MI_EnemyProto_AtomCubes": 4.0}
+for mi_name, elem_id in MI_CORE_ELEMENT.items():
+    mi_path = f"{'/'.join(MAT_PATH.split('/')[:-1])}/{mi_name}"
+    mi = unreal.load_asset(mi_path)
+    if not mi:
+        print(f"[s4] ⚠️ MI 없음, 건너뜀: {mi_path}")
+        continue
+    mel.set_material_instance_scalar_parameter_value(mi, "EmissiveElementId", elem_id)
+    saved_mi = eal.save_asset(mi_path)
+    print(f"[s4] MI {mi_name}.EmissiveElementId = {elem_id} (save={saved_mi})")
 
 # ── 6. 컴파일 + 저장 ─────────────────────────────────────────────────────────────────────────────
 # ⚠️ 머티리얼 무음 컴파일 실패가 이 저장소의 상습 함정이다(If 노드 스칼라 전용 / MaterialAttributes
