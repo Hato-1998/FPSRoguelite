@@ -7,8 +7,27 @@
 ---
 
 ### 2-6. 몬스터 (스웜 적)
-- 공격 타입 **근거리 / 원거리 / 특수 중 정확히 1개 고정** (상황 따라 전환 안 함)
-- **GAS 미사용** — 경량 `UHealthComponent`(`UFPSREnemyHealthComponent`) + 비-GE 데미지 적용
+- ~~공격 타입 **근거리 / 원거리 / 특수 중 정확히 1개 고정** (상황 따라 전환 안 함)~~
+  🔴 **정정(2026-08-26, [ADR 0013](../Architecture/0013-enemy-tier-axis-and-elite-gas.md))**: **근거리는 폐지됐다.**
+  커밋 `f5b0a78d`(2026-08-14 사용자 결정, *"전 몬스터 원거리화"*)로 적 BP 2개가 **전부 `AFPSRRangedEnemyBase` 자식**이 됐고
+  (`BP_EnemyMeleeBase` 는 이름만 "Melee"), ADR [0008](../Architecture/0008-hover-enemy-pursuit-reachability-modes.md)·[0009](../Architecture/0009-hover-swarm-local-3d-flow-window.md) 비목표가
+  *"근접 적 재도입 없음 — 근접처럼 보이는 적도 초단사거리 원거리로 만든다"* 로 못박았다.
+  → 현행 공격 방식은 **원거리 하나**이고, 그 위에서 **사거리가 아키타입 데이터로 갈린다**(초단사거리 = 옛 "근접").
+  **특수는 존치** — 아래 「분류 축」의 티어와 **직교하는 별도 축**(공격 형태: 공중·방패 등, P4 항목 참조)이다.
+  ⚠️ `AFPSREnemyBase::ServerTickAttack` 의 근접 접촉 판정과 짝인 `AttackTokenLimit=10` 근접 토큰 회계는
+  **실행하는 콘텐츠가 0인 죽은 코드**다. `Enemy.Archetype.*`/`Enemy.Attack.*` 태그 6개도 참조 0건. (정리 = ADR 0013 후속 행)
+- **분류 축 = 티어(일반 / 엘리트)** — 확정 2026-08-26, [ADR 0013](../Architecture/0013-enemy-tier-axis-and-elite-gas.md).
+  티어는 **C++ 클래스로 표현**하되 **중앙 enum/switch 로 분기하지 않는다**(virtual·폴리모픽 시임만 — 아래 로스터 룰의 확장성-우선 원칙과 같은 규약).
+  **보스는 티어에 포함되지 않는다** — `AFPSRBossBase` 는 `ACharacter` 로 별도 유지하며 스웜과의 공유는 `UFPSREnemyHealthComponent` 하나뿐이다.
+  ⚠️ **`Tier` 라는 낱말을 적 티어에 단독으로 쓰지 않는다** — `TierS0/S1/S2RadiusSq`(거리 LOD)·`EFPSRArenaPropTier`·`FFPSRCardRarityTier` 로 이미 3중 점유돼 grep 이 뒤엉킨다.
+  ⚠️ **풀 취득 비용은 클래스 수와 무관해야 한다**(ADR 0013 불변식 7): 현행 `AcquireEnemy` 는 `DormantPool` 단일 평면 배열을 `GetClass()` 정확 일치로 선형 스캔한다.
+  티어 × 형태로 클래스가 늘면 클래스별 버킷화가 **동반 조건**이지 후순위 최적화가 아니다.
+- **GAS** — ⚠️ **정정(2026-08-26, ADR 0013)**: 종전 *"GAS 미사용"* 은 이제 **티어별로 갈린다.**
+  - **일반 티어 = GAS 미사용**(무변) — 경량 `UHealthComponent`(`UFPSREnemyHealthComponent`) + 비-GE 데미지 적용
+  - **엘리트 = ASC 부착** — `Game.md §1` 의 *"GAS는 플레이어(1~4)와 보스/엘리트에만"* 중 **엘리트 절반이 실현**된다.
+    소유자는 **액터 자신**(적은 PlayerState 가 없어 플레이어와 소유 패턴이 다르다 — 플레이어는 `AFPSRPlayerState` 소유).
+    **플레이어와 어트리뷰트 셋을 공유하지 않는다.** 동시 마릿수 = **스테이지·난이도 함수 + 하드캡**(캡 없이 증가만 두면 후반 ASC 복제 예산이 터진다).
+  - **보스 = 여전히 미실현** — `FPSRBossBase.h` 가 *"no ASC/GAS is attached"* 라고 명시. ADR 0013 의 비목표다(문서가 앞서간 상태, `Docs/ProjectStructure_Report.md:38` D1).
 - 이동: **Flow-Field 샘플링(고정맵 사전계산, 높이/유계 2층 인지) + 분리(separation)**, 배치 업데이트 (P2). 적 Z로 레이어(서피스 rank) 선택 → 겹친 2층(메자닌) 플레이어를 계단/램프로 추격(U7, 상세 `Performance §5-2`). ⚠️층간 중첩은 **storey급(≥~1층)**으로 저작(storey 미만 근접 2면은 단일 계단면으로 — 레이어 진동 회피)
 - 렌더: 거리 LOD — ⚠️ **정정(2026-08-11)**: `USignificanceManager`는 **쓰지 않는다**(플러그인만 켜져 있고 코드 참조 0). 실제 티어링은 **손수 짠 거리밴드**이고 이동 패스와 융합돼 있다. **인스턴싱 컴포넌트(ISM/HISM)는 쓰지 않는다** — 적마다 개별 `UStaticMeshComponent`. 🔁 **결론 갱신 2026-08-13(M0 EC ④ 재대조)**: 이건 *미상환 부채*가 아니라 **채택된 설계**다 — ADR [`0007`](../Architecture/0007-enemy-swarm-render-path-cpd.md)이 대조 실험으로 ISM을 **기각**하고 **MID 폐기 + CustomPrimitiveData**를 채택했다(엔진 동적 인스턴싱이 드로우 병합을 이미 보존하므로, 필요했던 것은 인스턴싱 컴포넌트가 아니라 per-actor MID 제거였다). 실측 = 스웜 렌더 합 **2.05ms@300**(예산 4ms, 여유 2배) · 3.03ms@500 — `Performance.md §5`. ~~(인스턴싱/VAT = `Roadmap.md §8` 별도 트랙)~~ → 트랙은 §7-6 M0 (a″)로 이동해 VAT-1에서 종결됐다. 티어 정의 자체(S0~S3)는 `Performance.md §5-1` 그대로 유효.
 - 풀링 필수 — ⚠️ **정정(2026-08-11)**: `UActorPool`이라는 클래스는 **없다**. 풀링은 `UFPSREnemySpawnSubsystem` **안에 인라인**돼 있다(기능은 있고 이름만 없던 것). 계약("적은 Destroy 하지 말고 반납한다")은 그대로.
@@ -32,14 +51,17 @@
 - **초반 협동 비트 / 양방향 스폰 압력 (컨설트 2026-07-01 F4 — `Docs/Review/20260701-concept-conclusions.md`)**: 1인칭 협동 대상은 "스페셜/사각 위협"이라(Concept §1-C-3), 스페셜이 없는 초반은 "4솔로"로 회귀 → 방지: 0~60s 개인 손맛, **60s+ 전후방 2섹터 압력**(특수 AI 없이 **스폰 위치만으로** back-to-back 강제), **75~180s 내 첫 원거리/스페셜-lite 1마리**(초반 held ranged token 1/player·전체 ≤2), 5분 전까지 DBNO·사각·원거리 각 1회 경험. **팀 위협 비트 하한**(스케줄 §RunFlow 2-8): 1분 후 30~45s마다, 5분 후 15~25s마다 "팀적으로 봐야 하는 사건" 최소 1회. (밸런스 후속 수치)
 - **협동유도 스페셜 적 (컨설트 2026-07-01 F5)** — ℹ️ **정합 확인(2026-08-11)**: 아래 `IsolationScore` 기반 스폰 편향은 **센서만 구현돼 있고 액추에이터(스폰/타겟에 실제로 반영하는 쪽)는 아직 없다**. `RunFlow.md`의 디렉터 구현 상태와 일치하며, 이 줄은 어긋난 게 아니라 **읽는 사람이 "이미 편향이 걸려 있다"고 오해하지 않도록** 남기는 기록이다. 원칙1(적별 StateTree/개별 AI/NavMesh 금지) 준수 = **개별 지능 아니라 데이터드리븐 타겟팅 룰 + 스폰 위치 + 강한 연출**로 "1인 격리·플랭킹" 체감. `IsolationScore`(최근접 아군거리 + 시야밖 + 저최근구조)로 **고립 플레이어 측후방 스폰 가중 + 타겟 편향**(0.5~1.0s 저빈도 갱신). 공격=기존 원거리 차징/토큰/사전경고(`ClientNotifyRangedTarget`) 재사용, 연출=고유 사운드·색 투사체·피해자 HUD 마커·구출 마커. **MVP = 기존 원거리 베이스 재색칠 1종**(신규 아트 0에서 검증). 후보: Leasher(둔화/끌림)·Pinger(고립자 차징)·Splitter(파티 사이 스폰)·Screamer(주변 aggro 편향). 적 다양성 공백(평가)도 동시 해소.
 - **폐루프 디렉터 연동 (설계 채택 2026-07-20 · 미구현 · 상세 `Docs/Review/20260720-plan-closed-loop-director.md`)**: 스폰포인트 선택에 **MAX거리 게이트 + 고립 소프트가중**(⚠️회귀규약: 넓은 적격집합 유지 = 단일포인트 스폰굶김 방지, 하드게이트 금지) · **스폰포인트 per-biome 로스터**(문개방/맵확장에 디렉터 무변경으로 대응) · 구성 = 로스터룰 컨텍스트 확장(비미션 캠핑/좁은초크 사수 → 원거리↑[기존]·방패/공중↑[신규]). `UEnemyScalingProfile`(적 진폭)·성격프로파일 = P5 이연. `IsolationScore`(F5) = 센서 P0b 구현.
-- **공중 아키타입 = 엘리베이티드 히트박스(비행 아님, P4)** — ⚠️ **미구현(설계만, 2026-08-11 확인)**. 실재하는 적 아키타입은 **근접·원거리 2종뿐**이다: 일반 몹처럼 **지상 이동**(루트=지상, 이동코드 0) + 시각메시 상방 오프셋 + **올린 콜라이더 필수**(`UFPSRWeakpointComponent` mult=1.0; 시각메시는 `NoCollision`이라 "메시만 올리면" 안 맞음). 효과 = 상방 조준 강제. (Track2 감사 = **설계 정합성** 확인이지 구현 확인이 아니다)
+- **공중 아키타입 = 엘리베이티드 히트박스(비행 아님, P4)** — ⚠️ **미구현(설계만, 2026-08-11 확인)**. ~~실재하는 적 아키타입은 **근접·원거리 2종뿐**이다~~ → ⚠️ **정정(2026-08-26, ADR 0013)**: **근거리는 폐지됐다**(위 「공격 타입」 항목). 실재하는 아키타입은 **원거리 2종**(쌍뿔·원자큐브)이며, 분류 축은 이제 **티어(일반/엘리트)**다. 이하 설계 내용은 무변: 일반 몹처럼 **지상 이동**(루트=지상, 이동코드 0) + 시각메시 상방 오프셋 + **올린 콜라이더 필수**(`UFPSRWeakpointComponent` mult=1.0; 시각메시는 `NoCollision`이라 "메시만 올리면" 안 맞음). 효과 = 상방 조준 강제. (Track2 감사 = **설계 정합성** 확인이지 구현 확인이 아니다)
 - **방패 아키타입 = 방향성 아머(P4)** — ⚠️ **미구현(설계만, 2026-08-11 확인 — `UFPSRShieldComponent` 코드 참조 0)**: `FPSRCombat::ResolveDamage` 1지점 + 신규 `UFPSRShieldComponent`(bearing = Origin/Instigator, 배선0, 전 5경로 자동커버). **정면 = 90~95% 강DR(잔여>0)** — ⚠️하드블록(0뎀) 금지(hitscan 관통통과 + DamageDealt=0으로 히트마커/라이프스틸/킬크레딧 침묵). 측/후면 무방비. 정면 아크에 weakpoint 금지(상쇄). AOE near-zero bearing 가드. (Track2 감사 = **설계 정합성** 확인이지 구현 확인이 아니다)
 - **파괴 장벽(`AFPSRDoor`) = 비-적 데미지 대상**: `UFPSREnemyHealthComponent`를 가져 **데미지 브릿지로 전 무기 경로 자동 피격**(신규 데미지 코드 0). 콜리전 오브젝트타입 = `ECC_FPSRPlayerPawn`(플레이어·적 모두 차단 + 대시로 통과 불가 + 모든 무기 오브젝트쿼리에 포함). **`bCountsAsKill=false`** → 부숴도 킬 크레딧·on-kill 프래그먼트·흡혈(on-damage GAS 이벤트) 미발동(데미지/`DamageDealt`/파괴는 정상; `FPSRCombat::ApplyDamage` 게이트). 메시는 BP 지정(C++ 하드코딩 금지), 파괴 연출=`OnDoorBroken`(BlueprintImplementableEvent). 문틀은 `FrameMesh`(WorldStatic=무기쿼리 비대상=무반응 벽). XP는 `AFPSREnemyBase::HandleDeath` 전용이라 문은 자동 0.
 
 ### 2-10. 발사체 / 네트워크
 - 발사체: **서버권위 spawn·복제**(결정적 PMC 이동; 클라 cosmetic 예측 = 후속·미구현, A3)
   - **차지레이저 = 히트스캔, 근접 = 구체 오버랩, 그 외 전 플레이어 무기 = 복제 발사체**(무기 전면 투사체화 2026-07-08 `3adc945`; 샷건=펠릿 다발, 스나이퍼=관통 탄환, 바주카=AOE, 연사총 포함. 유탄런처 제거). 발사체 예산·팀별 캡·회수 = `Performance.md §5`.
-- 데미지: **플레이어 GAS 계산 → 적 HealthComponent.ApplyDamage 브릿지** (적 ASC 없음)
+- 데미지: **플레이어 GAS 계산 → 적 HealthComponent.ApplyDamage 브릿지** ~~(적 ASC 없음)~~
+  ⚠️ **정정(2026-08-26, ADR 0013)**: **엘리트는 ASC 를 갖는다.** 다만 **엘리트의 체력이 어디에 사는지는 미결정**이다 —
+  (가) 엘리트도 `HealthComponent` 유지 + ASC 는 어빌리티/GE 전용(이 브릿지 무개정) / (나) ASC 어트리뷰트 체력(**전 무기 데미지 경로 재배선**).
+  ADR 0013 은 (가)를 기본값으로 권하되 강제하지 않으며, 후속 행 「엘리트 ASC 부착」의 첫 결정이다. **일반 티어는 무변**(ASC 없음).
 - **아군 오사(Friendly Fire)** — 🔄 **기본 OFF 확정(사용자 결정 2026-08-07)**. 이 결정은 **2026-07-01의 "기본 ON = 코어 협동 정체성" 설계를 뒤집은 것**이다(Concept §1-C-6 동반 정정). 코드 기본값 `AFPSRGameState::bFriendlyFireEnabled = false`가 **이제 설계와 일치**하며, 종전 여기 적혀 있던 "⚠️ 코드 후속 = 기본값 flip 필요"는 **철회**한다.
   - **기능 자체는 그대로 있다** — 호스트가 세션 설정에서 **ON 토글** 가능(`SetFriendlyFireEnabled` / 디버그 `FPSR.SetFriendlyFire`). 켰을 때의 규격은 종전 그대로: **치사(lethal)** · 아군 적중 = **몬스터 데미지의 50%**(`FriendlyFireDamageScale=0.5f`, 크리 없음, **아군 다운(HP 0)까지 가능·HP 클램프 없음**).
   - 데미지 브릿지 팀/FF 배율 = `FPSRCombatStatics`. 자폭(폭발)·넉백은 FF 플래그와 **독립**(플래그를 꺼도 그대로).
