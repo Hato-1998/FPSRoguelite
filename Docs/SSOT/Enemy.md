@@ -10,18 +10,35 @@
 - ~~공격 타입 **근거리 / 원거리 / 특수 중 정확히 1개 고정** (상황 따라 전환 안 함)~~
   🔴 **정정(2026-08-26, [ADR 0013](../Architecture/0013-enemy-tier-axis-and-elite-gas.md))**: **근거리는 폐지됐다.**
   커밋 `f5b0a78d`(2026-08-14 사용자 결정, *"전 몬스터 원거리화"*)로 적 BP 2개가 **전부 `AFPSRRangedEnemyBase` 자식**이 됐고
-  (`BP_EnemyMeleeBase` 는 이름만 "Melee"), ADR [0008](../Architecture/0008-hover-enemy-pursuit-reachability-modes.md)·[0009](../Architecture/0009-hover-swarm-local-3d-flow-window.md) 비목표가
+  (`BP_EnemyMeleeBase` 는 이름만 "Melee" — ⚠️ **이 이름은 아직 거짓말이다**, 리네임은 리다이렉터를 낳고 `DA_EnemyRoster` 를 건드리므로 별도 콘텐츠 행), ADR [0008](../Architecture/0008-hover-enemy-pursuit-reachability-modes.md)·[0009](../Architecture/0009-hover-swarm-local-3d-flow-window.md) 비목표가
   *"근접 적 재도입 없음 — 근접처럼 보이는 적도 초단사거리 원거리로 만든다"* 로 못박았다.
   → 현행 공격 방식은 **원거리 하나**이고, 그 위에서 **사거리가 아키타입 데이터로 갈린다**(초단사거리 = 옛 "근접").
   **특수는 존치** — 아래 「분류 축」의 티어와 **직교하는 별도 축**(공격 형태: 공중·방패 등, P4 항목 참조)이다.
-  ⚠️ `AFPSREnemyBase::ServerTickAttack` 의 근접 접촉 판정과 짝인 `AttackTokenLimit=10` 근접 토큰 회계는
-  **실행하는 콘텐츠가 0인 죽은 코드**다. `Enemy.Archetype.*`/`Enemy.Attack.*` 태그 6개도 참조 0건. (정리 = ADR 0013 후속 행)
+  ✅ **정리 완료(2026-08-26, `c1e9dd7f`)** — ~~`AFPSREnemyBase::ServerTickAttack` 의 근접 접촉 판정과 짝인 `AttackTokenLimit=10` 근접 토큰 회계는 실행하는 콘텐츠가 0인 죽은 코드다. `Enemy.Archetype.*`/`Enemy.Attack.*` 태그 6개도 참조 0건.~~
+  근접 축이 코드에서 **제거됐다**: 접촉 판정 · `EFPSRServerAttackResult`(열거 자체) · `bMeleeTokenAvailable` ·
+  `AttackTokenLimit` · `AttackVerticalRange` · `ContactDamage` · `CanAttack`/`AttackInterval` · `AttackDamage`, 그리고 태그 6개.
+  `ServerTickAttack` 은 반환값 소비자가 0이 되어 **`void`** 가 됐다.
+  ⚠️ **이름이 근접처럼 보이지만 살아 있는 것들**(지우지 말 것): `AttackRange`(클라이언트 근접-tell 휴리스틱) ·
+  `LastAttackTime`/`NotifyAttacked`(원거리 발사도 스탬프 — 다만 살아 있는 독자는 ADR 0009 가 퇴역시킨 추격 스톨 감지기뿐) ·
+  `AttackAnimHoldSeconds` · 이동 스톱게이트가 쓰는 로컬 `AttackVertGap`.
 - **분류 축 = 티어(일반 / 엘리트)** — 확정 2026-08-26, [ADR 0013](../Architecture/0013-enemy-tier-axis-and-elite-gas.md).
   티어는 **C++ 클래스로 표현**하되 **중앙 enum/switch 로 분기하지 않는다**(virtual·폴리모픽 시임만 — 아래 로스터 룰의 확장성-우선 원칙과 같은 규약).
   **보스는 티어에 포함되지 않는다** — `AFPSRBossBase` 는 `ACharacter` 로 별도 유지하며 스웜과의 공유는 `UFPSREnemyHealthComponent` 하나뿐이다.
   ⚠️ **`Tier` 라는 낱말을 적 티어에 단독으로 쓰지 않는다** — `TierS0/S1/S2RadiusSq`(거리 LOD)·`EFPSRArenaPropTier`·`FFPSRCardRarityTier` 로 이미 3중 점유돼 grep 이 뒤엉킨다.
-  ⚠️ **풀 취득 비용은 클래스 수와 무관해야 한다**(ADR 0013 불변식 7): 현행 `AcquireEnemy` 는 `DormantPool` 단일 평면 배열을 `GetClass()` 정확 일치로 선형 스캔한다.
-  티어 × 형태로 클래스가 늘면 클래스별 버킷화가 **동반 조건**이지 후순위 최적화가 아니다.
+  ✅ **골격 착지(2026-08-26)** — 클래스 = **일반 `AFPSREnemyBase`**(공통 베이스가 곧 일반 티어) · **엘리트 `AFPSREnemyEliteBase`**(`a9f48d11`).
+  같은 슬라이스에서 **`AFPSRRangedEnemyBase` 를 은퇴**시키고 그 원거리 FSM 을 베이스로 **승격 합병**했다(`00ed2d9a`) —
+  전 적이 원거리인 지금 "원거리 전용 서브클래스"는 티어 축과 어긋난 계층이라, 티어·형태 클래스 전부가 그 이름을 조상으로 물려받게 되기 때문.
+  BP 재부모화는 **`Config/DefaultEngine.ini` 의 `ClassRedirects` 로 자동 처리**된다(수작업 재부모화 불필요):
+  엔진 `FLinkerLoad::FixupImportMap()` 이 임포트 맵(BPGC 의 `SuperStruct` 포함)에 리다이렉트를 적용하고,
+  저작값은 `UStruct::SerializeTaggedProperties` 의 **이름 기반 상속 체인 탐색**으로 보존된다.
+  ⚠️ 단 **저작되지 않은 상속 기본값은 그 보호를 못 받는다** — `StopDistance` 의 실효 900 이 은퇴한 랭드 생성자에만 있었고
+  `BP_EnemyMeleeBase` 는 그 값을 디스크에 갖고 있지 않아, 베이스 인라인 기본값을 120→**900** 으로 올려 보존했다.
+  회귀 가드 = `FPSRoguelite.Enemy.BlueprintParent` — `Content/Character/Enemy` 를 **폴더 규약으로 스캔**해 각 BP 를 로드하고 ①로드 성공(=리다이렉트 발화) ②`AFPSREnemyBase` 자식 ③`StopDistance > 0` ④**`ProjectileClass` 非null**(리다이렉트가 성공해도 태그드 프로퍼티는 조용히 기본값으로 떨어질 수 있고, 그러면 전 적이 발사 불능이 되는데 로그 한 줄 외엔 아무 신호가 없다)을 검사한다. ⚠️ ③은 **바닥값 검사이지 "값이 옳다" 검사가 아니다**(두 BP 의 정답값이 서로 다르다) — 실제 값과 스캔 개수는 로그로 남겨 사람이 되읽는다. 스캔 0건이면 **실패**시킨다(공허한 통과 방지).
+  ✅ **풀 클래스별 버킷화 완료**(ADR 0013 불변식 7, `61f40fe7`) — ~~현행 `AcquireEnemy` 는 `DormantPool` 단일 평면 배열을 `GetClass()` 정확 일치로 선형 스캔한다.~~
+  `FFPSREnemyDormantPool`(`TMap<TSubclassOf<AFPSREnemyBase>, 버킷>`)로 교체돼 취득 비용이 **요청 클래스 버킷 크기에만** 비례한다.
+  키는 **정확 일치**여야 한다(`IsChildOf` 금지 — 엘리트가 `AFPSREnemyBase` 의 자식이라 일반 휴면체를 집어간다). 성질 가드 = `FPSRoguelite.Enemy.DormantPool`.
+  🔴 **미해결 기아 모드**: `TotalSpawned` 는 증가만 하고 하드캡은 클래스 무관 총량이라, 전반이 클래스 A 로 캡을 채우면
+  후반 엘리트 요청이 영구 거부될 수 있다. 버킷화가 만든 게 아니라 드러낸 문제 — 해법은 **후속 행 3(엘리트 캡 회계)** 의 결정 대상으로 라우팅됐다.
 - **GAS** — ⚠️ **정정(2026-08-26, ADR 0013)**: 종전 *"GAS 미사용"* 은 이제 **티어별로 갈린다.**
   - **일반 티어 = GAS 미사용**(무변) — 경량 `UHealthComponent`(`UFPSREnemyHealthComponent`) + 비-GE 데미지 적용
   - **엘리트 = ASC 부착** — `Game.md §1` 의 *"GAS는 플레이어(1~4)와 보스/엘리트에만"* 중 **엘리트 절반이 실현**된다.
@@ -35,9 +52,9 @@
 - **개체별 이속 편차**(확정 2026-05-30): 아키타입 기본속도는 고정, **스폰 시 개체마다 ±10% 무작위 편차** 부여 → 단일 Blob 밀착 방지, 스웜을 입체적·유기적으로 분산해 카이팅 재미. 비용 0(스폰 시 1회 곱셈)
 - **원거리 공격 규격**(확정 2026-05-30): 기본 **투사체(Projectile)** 방식(눈으로 보고 회피 가능)으로 강제. 히트스캔 사용 시 **차징 유예 + 사전경고 인디케이터 필수**(부조리 탄막 금지)
 - **공격 토큰(Attack Token)**(확정 2026-05-30): 플레이어당 **동시에 공격을 시도할 수 있는 적 개체 수 상한**(서버 권위). 수백 마리 동시 사격/특수공격의 불합리 방지 + §5 "적 공격 판정 서버 배치"의 구현 수단. (토큰 개수 등 수치 튜닝은 밸런스 후속 — 기전=U5 구현 완료, 아래 참조; FF 배율은 §2-10)
-  - **구현(U5, 2026-06-30)**: 근접/원거리 **이원 토큰**. ① 근접 = `UFPSREnemySpawnSubsystem` per-pass 순간 게이트(`AttackTokenLimit=10`, 매 패스 데미지 적용 적 수 상한). ② 원거리 = **held 토큰**(`RangedAttackTokenLimit=3`, 플레이어당 동시 **차징 중** 적 수 상한; 차징 시작에 획득→발사/중단/teardown에 반납, `TryAcquireRangedToken`/`ReleaseRangedToken`/`IsRangedTokenAvailable`, 키=타겟 PC). held 모델이라야 여러 패스에 걸친 차징의 동시 위협을 제한 + 동시 적탄(복제 투사체)을 자연 상한. 수치는 밸런스 후속.
-- **원거리 아키타입(U5, 2026-06-30 — B1)**: `AFPSRRangedEnemyBase : AFPSREnemyBase`(경량 Pawn, **GAS 無**). **사거리 정지 → 차징(예고) → 발사 → 쿨다운** 사이클을 서버 배치 패스에서 구동. 베이스에 가상 `ServerTickAttack(FFPSRServerAttackContext)` 시임 추가(근접 거동을 이 override로 이전 — 거동 동일), 원거리는 차징/발사로 override. **차징·쿨다운=프리즈-멈춤 누산기**(패스가 §2-2 프리즈에 early-return하므로 `DeltaSeconds` 미가산=자동 정지). 차징 시작/종료에 대상 PC `ClientNotifyRangedTarget`(기존 Client/Reliable RPC)로 사전경고 생산(소비자=§2-14 `ReceiveRangedTarget`, 신규 RPC 0). LOS 차단 시 차징 안 함(트레이스=`ECC_WorldStatic`+`ECC_FPSRPlayerPawn`이라 벽·**닫힌 문 leaf** 너머 헛발사/관통 방지; 문은 단방향 파괴라 발사 후 재차단 없음 → LOS 게이트만으로 관통 완전 차단, Codex 머지게이트 P2 교정). DBNO/!Alive 타겟은 배치 alive 필터로 자동 제외 + 차징 중 타겟 다운 시 Abort+경고해제. 투사체=기존 `AFPSRProjectile` Team=Enemy 재사용(신규 데미지 코드 0). 약점=투사체 임팩트 자동. **콘텐츠**: BP 자식이 `ProjectileClass`·차징/쿨다운/사거리/데미지 등 EditDefaultsOnly 값 저작.
-- **데이터 주도 아키타입 혼합(U5, 2026-06-30)**: 신규 `UFPSREnemyRosterDataAsset`(`DA_RunSchedule.EnemyRoster`가 참조, 디렉터 StartRun이 스폰 서브시스템에 push). 폴리모픽 `UFPSREnemySpawnRule`(EditInlineNew, 확장성-우선=중앙 enum/switch 無; MVP=`_Static` class+weight, `FFPSREnemySpawnContext{RunClock,PartyLevel}` 전달로 시간/레벨 스케일 룰 시임 예약). 스폰 서브시스템이 가중랜덤으로 클래스 선택 + **동질 풀을 클래스별 매칭 재사용**. 빈 로스터=기존 단일 `EnemyClass` 폴백(무회귀).
+  - **구현(U5, 2026-06-30)**: ~~근접/원거리 **이원 토큰**. ① 근접 = `UFPSREnemySpawnSubsystem` per-pass 순간 게이트(`AttackTokenLimit=10`, 매 패스 데미지 적용 적 수 상한).~~ 🔴 **정정(2026-08-26, [ADR 0013](../Architecture/0013-enemy-tier-axis-and-elite-gas.md) 후속 C0, `c1e9dd7f`)**: **①근접 토큰(`AttackTokenLimit`) 회계는 제거됐다** — `f5b0a78d` 이후 실행하는 콘텐츠가 0이던 죽은 코드(위 §2-6 서두 정정 참조). **②원거리 held 토큰은 무변** — 이하 그대로 유효하다. ② 원거리 = **held 토큰**(`RangedAttackTokenLimit=3`, 플레이어당 동시 **차징 중** 적 수 상한; 차징 시작에 획득→발사/중단/teardown에 반납, `TryAcquireRangedToken`/`ReleaseRangedToken`/`IsRangedTokenAvailable`, 키=타겟 PC). held 모델이라야 여러 패스에 걸친 차징의 동시 위협을 제한 + 동시 적탄(복제 투사체)을 자연 상한. 수치는 밸런스 후속.
+- **원거리 아키타입(U5, 2026-06-30 — B1)**: ~~`AFPSRRangedEnemyBase : AFPSREnemyBase`~~ → 🔴 **정정(2026-08-26, ADR 0013 C1 `00ed2d9a`)**: **그 클래스는 은퇴했고 아래 사이클은 `AFPSREnemyBase` 자신의 것이다**(전 적이 원거리이므로 "원거리 전용 서브클래스"가 축과 어긋났다 — 위 「분류 축」 참조). 경량 Pawn, **GAS 無**(일반 티어). **사거리 정지 → 차징(예고) → 발사 → 쿨다운** 사이클을 서버 배치 패스에서 구동. ~~베이스에 가상 `ServerTickAttack(FFPSRServerAttackContext)` 시임 추가(근접 거동을 이 override로 이전 — 거동 동일), 원거리는 차징/발사로 override.~~ → `ServerTickAttack` 은 **베이스 본체가 곧 차징/발사**이며 `virtual` 시임은 엘리트·형태 클래스를 위해 유지된다(반환형은 `void` — C0 에서 소비자 소멸). **차징·쿨다운=프리즈-멈춤 누산기**(패스가 §2-2 프리즈에 early-return하므로 `DeltaSeconds` 미가산=자동 정지). 차징 시작/종료에 대상 PC `ClientNotifyRangedTarget`(기존 Client/Reliable RPC)로 사전경고 생산(소비자=§2-14 `ReceiveRangedTarget`, 신규 RPC 0). LOS 차단 시 차징 안 함(트레이스=`ECC_WorldStatic`+`ECC_FPSRPlayerPawn`이라 벽·**닫힌 문 leaf** 너머 헛발사/관통 방지; 문은 단방향 파괴라 발사 후 재차단 없음 → LOS 게이트만으로 관통 완전 차단, Codex 머지게이트 P2 교정). DBNO/!Alive 타겟은 배치 alive 필터로 자동 제외 + 차징 중 타겟 다운 시 Abort+경고해제. 투사체=기존 `AFPSRProjectile` Team=Enemy 재사용(신규 데미지 코드 0). 약점=투사체 임팩트 자동. **콘텐츠**: BP 자식이 `ProjectileClass`·차징/쿨다운/사거리/데미지 등 EditDefaultsOnly 값 저작.
+- **데이터 주도 아키타입 혼합(U5, 2026-06-30)**: 신규 `UFPSREnemyRosterDataAsset`(`DA_RunSchedule.EnemyRoster`가 참조, 디렉터 StartRun이 스폰 서브시스템에 push). 폴리모픽 `UFPSREnemySpawnRule`(EditInlineNew, 확장성-우선=중앙 enum/switch 無; MVP=`_Static` class+weight, `FFPSREnemySpawnContext{RunClock,PartyLevel}` 전달로 시간/레벨 스케일 룰 시임 예약). 스폰 서브시스템이 가중랜덤으로 클래스 선택 + **동질 풀을 클래스별 매칭 재사용**(⚠️ 2026-08-26 `61f40fe7` 이후 그 매칭은 선형 스캔이 아니라 **클래스별 버킷 TMap** 이다 — 위 「분류 축」의 버킷화 항목 참조). 빈 로스터=기존 단일 `EnemyClass` 폴백(무회귀).
 - 🔴 **룸 기반 점진 개방 스폰 = 폐기 (사용자 확정 2026-08-16 — [ADR 0010](../Architecture/0010-arena-topology-and-stage-transition.md))**
   아레나가 고정 크기 단일 공간이 되면서 방·개방 개념이 사라졌다. 현행 스폰 = **적격(MinPlayerDistance) 균등 랜덤만**
   (`AFPSRSpawnRoom`·존 활성/비활성 미사용). `AFPSRDoor`는 제거되지 않고 **`AFPSRDestructible`(파괴물 + 폴리모픽 리워드)로

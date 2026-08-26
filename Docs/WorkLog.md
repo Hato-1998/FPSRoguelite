@@ -9,6 +9,116 @@
 
 ---
 
+## 🔷 ADR 0013 실행 1 — 적 티어 골격 + 풀 버킷화 + 죽은 근접 축 정리 (2026-08-26, `phase/enemy-tier-skeleton`, 머지 `84050531`)
+> 보드 3행을 한 브랜치에서 처리 — *"적 티어 클래스 골격 — 일반/엘리트 + BP 재부모화"*(M0·하이·L) ·
+> *"적 풀 클래스별 버킷화"*(M0·하이·M) · *"죽은 근접 축 정리"*(M0·미듐·S).
+> 앞의 둘은 ADR 0013 이 **동반 조건**으로 묶어 뒀고, 세 번째는 첫 결정의 결과로 **구조적으로 끌려들어왔다**.
+
+### 첫 결정 — `AFPSRRangedEnemyBase` 의 처분 = **(가) 승격 합병 + 은퇴** (사용자 확정)
+
+ADR 은 안 A 를 `AFPSREnemyEliteBase : AFPSREnemyBase` 로 적었지만 **그대로 두면 엘리트에 공격 수단이 없다** —
+실행 콘텐츠 전부가 `AFPSRRangedEnemyBase` 자식이고 유일하게 살아 있는 공격 FSM 이 거기 있었다.
+
+근거 두 가지를 **엔진 소스로 확인**하고 (가)를 택했다(추론 아님):
+- **BP 재부모화는 사용자 손으로 할 일이 아니다.** `FLinkerLoad::FixupImportMap()` 이 임포트 맵 전체에
+  `Type_Class` CoreRedirect 를 적용하고(`LinkerLoad.cpp:2151-2239`), BPGC 의 `SuperStruct` 는 임포트다
+  -> `DefaultEngine.ini` 에 리다이렉트 한 줄이면 로드 시점에 부모가 자동 교체된다.
+- **프로퍼티를 서브클래스 -> 베이스로 올려도 BP 저작값이 살아남는다.** `UStruct::SerializeTaggedProperties` 가
+  태그를 **이름으로 `PropertyLink` 전 체인**에서 찾는다(`Class.cpp:1740-1775`).
+
+외부 참조는 실제로 2곳뿐이었다(`FPSREnemySpawnSubsystem.cpp` 의 Cast, `FPSRDirectorSensorTest.cpp` 의
+`GetDefault<>`) — 나머지 5곳은 전부 주석. 후자는 "서브클래스도 Enemy 로 분류된다"는 테스트 의도를
+신설 엘리트 클래스로 옮겨 성질을 보존했다.
+
+**커플링**: 승격된 원거리 FSM 과 근접 접촉 판정은 `ServerTickAttack` 한 함수에 공존할 수 없다(불변식 3).
+둘 중 하나는 반드시 지워야 하므로 *"죽은 근접 축 정리"* 행이 분리 불가로 끌려왔다 — 사용자 결정으로 동반 클레임.
+
+### 🚨 조용히 깨질 뻔한 것 — `StopDistance` 가 생성자에만 살고 있었다 (G1 이 잡음)
+
+`AFPSRRangedEnemyBase` 생성자의 **유일한 문장**이 `StopDistance = 900.0f;` 로 베이스 기본값 `120.0f` 를
+덮고 있었다. 그리고 **`BP_EnemyMeleeBase.uasset` 에는 `StopDistance` 태그가 없다**(실측 `grep -c` = 0) —
+델타 직렬화라 부모 CDO 와 같은 값은 디스크에 쓰이지 않기 때문이다.
+
+-> 즉 그 BP 의 900 은 **에셋이 아니라 은퇴시킬 생성자에만 존재했다.** 이걸 안 옮겼으면:
+빌드 통과 · 테스트 전원 통과 · 리다이렉트 정상 · 차징/발사 정상 — 그런데 **그 아키타입만 정지거리가
+900->120 으로 무너져 얼굴까지 파고든다.** 근접 판정을 막 지운 직후라 밸런스 문제로 오인되기 딱 좋다.
+
+**교훈: "저작값은 이름으로 살아남는다"가 참인 바로 그 이유(델타 직렬화) 때문에 *저작되지 않은 상속값*은
+죽는다.** 베이스 인라인 기본값을 900 으로 올려 해결. 이후 랭드 생성자 전문을 다시 열어 **"생성자에만 살던
+값이 또 있는지"** 전수 확인했다 — 없었다. 승격된 15개 값(저작 프로퍼티 10 + private 상태 5)과
+`UPROPERTY` 지정자·`Category`·`meta = (ClampMin)` 11개가 전부 원본과 일치함을 기계 대조로 확인.
+
+### 근접 축 제거 — 지운 것과 **지우면 안 되는 것**
+
+지움: 접촉 판정 · `EFPSRServerAttackResult`(열거 자체 — 랭드의 두 return 이 **둘 다 `None`** 이라 소비자가
+0이 됐다. `ServerTickAttack` 은 **`void`**) · `bMeleeTokenAvailable` · `AttackTokenLimit` ·
+`AttackVerticalRange` · 서브시스템 `ContactDamage` + 스케일링 · `CanAttack`/`AttackInterval` ·
+`AttackDamage`/`GetAttackDamage`(호출자 0건, 이미 사자였다) · 게임플레이 태그 6개.
+
+⚠️ **이름이 근접처럼 보이는데 살아 있는 것들** — 다음 사람이 "근접 청소" 기세로 지우기 쉬운 자리다:
+- `AttackRange` — 클라이언트 근접-tell 휴리스틱이 읽는다
+- `LastAttackTime`/`NotifyAttacked` — 원거리 발사도 스탬프한다. 다만 C0 이 `CanAttack` 을 지우면서
+  **살아 있는 독자가 사라졌고**, 남은 소비자는 ADR 0009 가 퇴역시켰지만 무장 상태로 둔 추격 스톨 감지기뿐이다
+- `AttackAnimHoldSeconds` · 이동 스톱게이트가 쓰는 로컬 `AttackVertGap`
+- `ApplyContactDamage` 자체 — 이제 **투사체 경로**(`FPSRProjectile.cpp:490`)가 쓴다. G2 가 관련 주석을
+  스테일로 지목했으나 DBNO 게이트까지 그대로라 그 문장은 **여전히 참**이어서 정정하지 않았다
+
+### 풀 버킷화 (불변식 7)
+
+평면 `TArray` + 선형 스캔 -> `FFPSREnemyDormantPool`(`TMap<TSubclassOf<AFPSREnemyBase>, 버킷 USTRUCT>`).
+취득 비용이 **요청 클래스 버킷 크기에만** 비례한다. 엔진 선례 = `PlatformSettingsManager.h:103`.
+
+🔴 **키는 정확 일치여야 한다 — `IsChildOf` 로 구현하면 안 된다.** `AFPSREnemyEliteBase` 가
+`AFPSREnemyBase` 의 자식이라, `IsChildOf` 였다면 **엘리트 요청이 일반 휴면체를 집어간다.**
+`TSubclassOf::GetTypeHash` 가 원시 `UClass*` 를 해시하므로 TMap 조회가 이 성질을 자료구조 차원에서 보장한다.
+성질 가드 = `FPSRoguelite.Enemy.DormantPool`(엘리트 전용 풀에 일반을 요청하면 null — 오구현 시 실패).
+
+🔴 **미해결 기아 모드(후속 행 3 으로 라우팅)**: `TotalSpawned` 는 증가만 하고(감소 지점 0건 실측)
+하드캡은 클래스 무관 총량이라, 전반이 클래스 A 로 캡을 채우면 후반 엘리트 요청이 **버킷 미스 + 캡 도달**로
+영구 거부될 수 있다. **버킷화가 만든 게 아니라 드러낸 문제**다. 해법 3가지(휴면체 파기=불변식 5 개정 /
+클래스별 캡 / `TotalSpawned` 감소 회계)가 전부 *엘리트 캡 회계* 행의 결정 대상이라 그 행에 기록해 뒀다.
+
+### 검증 — 리다이렉트를 **에디터 없이** 증명했다
+
+착수 시점의 자동 게이트(빌드 + 헤드리스 유닛)는 **두 BP 를 아예 로드하지 않았다.** 리다이렉트가 조용히
+실패해도 사용자가 PIE 를 켤 때까지 아무도 몰랐다. 신규 `FPSRoguelite.Enemy.BlueprintParent` 가
+`Content/Character/Enemy` 를 **폴더 규약으로 스캔**(에셋 이름 하드코딩 없음, `Build.cs` 무변)해 메운다:
+
+```
+BlueprintParent: scanning .../Content/Character/Enemy — 2 enemy Blueprint(s) found
+BlueprintParent: BP_EnemyMeleeBase  -> parent FPSREnemyBase, StopDistance=900.0,  AnimProfile=FPSREnemyAnimProfile_Proc
+BlueprintParent: BP_EnemyRangedBase -> parent FPSREnemyBase, StopDistance=1500.0, AnimProfile=FPSREnemyAnimProfile_Proc
+```
+
+- `StopDistance` 900(승격 기본값 상속) / 1500(자기 저작값 생존) — **P1 수정이 의도대로 작동한 증거**
+- `AnimProfile=_Proc` — 이 BP 들이 타는 **두 번째** 리다이렉트(`DefaultEngine.ini:146`, `VAT_CPD`->`_Proc`)까지 실측.
+  null 은 합법이라 어서션이 아니라 로그다
+- `ProjectileClass` 非null 어서션(G2 P2) — 리다이렉트가 성공해도 태그드 프로퍼티는 조용히 기본값으로 떨어질
+  수 있고, 그러면 `FireProjectile` 이 로그 한 줄 찍고 리턴할 뿐이라 **전 적이 발사 불능**이 되는데
+  크래시도 실패 테스트도 없다
+- **스캔 0건이면 실패**시킨다(공허한 통과 방지)
+
+🚨 **이 세션에서 검증 도구가 실제로 한 번 고장났다.** 승격 함수를 원본과 대조하는 awk 스크립트가
+죽어서 양쪽 다 빈 파일을 내놨는데 스크립트는 그걸 **"8개 전부 동일"** 로 찍었다. 대조군(일부러 다른
+함수끼리 비교해 '차이'가 나오는지)을 넣고서야 진짜 결과가 나왔다 — 9개 byte-identical, `ServerTickAttack`
+만 반환형 3줄 차이. `BlueprintParent` 의 커버리지 로깅과 0건 가드가 그 경험에서 나왔다.
+
+**최종**: 커밋마다 `-DisableUnity` 풀빌드 `Result: Succeeded` · 전체 자동화 **55개 전원 Success** ·
+Fable 2게이트(G1 조건부통과 -> G2 조건부승인, **P1 0건**).
+⚠️ XGE executor 가 한 번 `C1076`/`C3859`(힙 고갈)로 실패했으나 `-NoXGE` 재빌드로 44.75s 통과 —
+알려진 executor 불안정이고 코드 문제가 아니었다.
+
+### 남은 것
+- **사용자**: 에디터에서 두 BP 를 열어 저작값(`RangedEngageRange`·`MuzzleOffset`·`ProjectileClass`·`AnimProfile`,
+  랭드는 `StopDistance` 추가 — 디스크에 저작된 건 이게 전부다) 확인 후 **저장** -> 리다이렉트 영구 고정.
+  값이 틀리면 저장하지 말 것.
+- `BP_EnemyMeleeBase` 는 이름이 여전히 거짓말이다(원거리 적이다). 리네임은 리다이렉터를 낳고
+  `DA_EnemyRoster` 를 건드리므로 **별도 콘텐츠 행**.
+- 엘리트는 **의도적 공백**이다 — ASC·어트리뷰트·캡 회계·넷컬 반경 전부 후속 행 3. 이 행이 선점하지 않았다
+  (`FPSRoguelite.Enemy.NetCull` 이 **균일 반경**을 전제하므로 엘리트에 다른 반경을 주면 그 전제가 깨진다).
+
+---
+
 ## 🔷 스테이지 난이도 축 신설 — 억제기 파괴가 난이도를 올린다 (2026-08-26, `phase/stage-difficulty-axis`, 머지 `6840751e`)
 > 보드 행 = *"스테이지 난이도 축 신설 — 억제기 파괴가 난이도를 올린다(ADR 0010 개정 동반)"*(M0 · 하이 · L).
 > 산출물 = `UFPSRRunScheduleDataAsset` 스테이지 축 + 억제기 내구도 데이터화 + ADR 0010 D6 개정.

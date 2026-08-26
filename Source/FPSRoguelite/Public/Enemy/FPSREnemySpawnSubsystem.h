@@ -8,6 +8,7 @@
 #include "GameplayTagContainer.h"
 #include "UObject/ObjectKey.h"
 #include "Containers/ArrayView.h" // TConstArrayView (PassesCommonSpawnGates)
+#include "Enemy/FPSREnemyDormantPool.h" // full type: DormantPool below is a by-value UPROPERTY member (ADR 0013 불변식 7)
 #include "FPSREnemySpawnSubsystem.generated.h"
 
 class AFPSREnemyBase;
@@ -101,7 +102,8 @@ public:
 	/** Server: 전환이 **시작될 때** 충전 중이던 원거리 적의 사이클을 전부 취소한다 (사용자 결정 2026-08-26).
 	 *  전환 중에는 이 서브시스템이 공격 패스 전체를 early-return 하므로, 충전 중이던 적은 스스로 정리할 기회를
 	 *  얻지 못하고 **타겟의 방향 경고 UI 가 전환 내내 화면에 남는다**. 적은 이월되지 파괴되지 않으므로 기존
-	 *  teardown 경로도 안 걸린다. 상세 = AFPSRRangedEnemyBase::ServerCancelRangedForStageTransition.
+	 *  teardown 경로도 안 걸린다. 상세 = AFPSREnemyBase::ServerCancelRangedForStageTransition
+	 *  (ADR 0013 C1 로 원거리 FSM 이 베이스에 승격되며 AFPSRRangedEnemyBase 에서 이관됨).
 	 *  RequestTransition 에서 미션 취소·탄막 제거와 같은 자리(모든 거부 가드 뒤)에서 부른다. */
 	void CancelRangedChargesForTransition();
 
@@ -316,9 +318,6 @@ private:
 	// feedback 2026-08-21: the constexpr pair here made crowd spacing a recompile). Cell size for the spatial hash
 	// == the settings' SeparationRadius, snapshotted ONCE per movement pass so hash build and query always agree.
 
-	/** Max enemies allowed to deal contact damage to a single player per pass (attack token, Game.MD §2-6/§5). */
-	static constexpr int32 AttackTokenLimit = 10;
-
 	/** Max CONCURRENT ranged chargers per player (held attack token, Game.MD §2-6). Unlike the melee per-pass token,
 	 *  this is held for the whole charge so it bounds simultaneous ranged threats AND in-flight enemy projectiles
 	 *  (the primary projectile-pool limiter). Balance value (tune later). */
@@ -331,10 +330,6 @@ private:
 	 *  survives a stage swap and is only cleaned by the next full-release flow (run reset / mission release). The
 	 *  keys are TObjectKey so nothing collides; do not read this map assuming per-stage clearing. */
 	TMap<TObjectKey<AFPSRPlayerController>, int32> RangedChargeCountByPlayer;
-
-	/** Max vertical (Z) gap for a contact attack to land — stops an airborne/rooftop or falling enemy from
-	 *  damaging a player through a floor when only horizontal (XY) distance is in range (Codex review 2026-06-09). */
-	static constexpr float AttackVerticalRange = 150.0f; // cm (covers capsule heights + a small step)
 
 	/** While an enemy's actor Z is more than this BELOW the player's, it is still climbing UP toward the player (e.g.
 	 *  a stair to an overlapping upper deck, U7 multi-layer) and must NOT be halted by the stop-gate — otherwise, with
@@ -364,9 +359,14 @@ private:
 	UPROPERTY()
 	TObjectPtr<UFPSREnemyRosterDataAsset> EnemyRoster;
 
-	/** Pool of dormant (hidden, disabled) enemies ready for reuse. */
+	/** Pool of dormant (hidden, disabled) enemies ready for reuse — bucketed by EXACT class so acquiring one costs
+	 *  O(1) in the requested archetype's bucket size, independent of how many OTHER classes/enemies the pool holds
+	 *  (ADR 0013 불변식 7, "풀 취득 비용은 클래스 수와 무관하다" — a paid-down cost of adopting 안 A/티어 클래스,
+	 *  not an optional optimization). See FFPSREnemyDormantPool's own comment for the engine precedent, why the
+	 *  key must stay EXACT-match (not IsChildOf), and the known starvation-mode caveat (documented there, not
+	 *  fixed here — ADR 0013 후속 행 3 의 결정 대상). */
 	UPROPERTY(Transient)
-	TArray<TObjectPtr<AFPSREnemyBase>> DormantPool;
+	FFPSREnemyDormantPool DormantPool;
 
 	/** Set of currently active (visible, enabled) enemies. */
 	UPROPERTY(Transient)
