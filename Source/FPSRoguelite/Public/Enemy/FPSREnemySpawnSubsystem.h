@@ -446,6 +446,11 @@ private:
 	 *  added without wiring into this accounting can't leave the counter stuck above 0 into the next run. */
 	int32 ActiveEliteCount = 0;
 
+	/** Edge-trigger latch for the elite-cap log in AcquireEnemy — the director retries the fill every pass, so the
+	 *  log fires on the blocking/released TRANSITION rather than once per blocked attempt. Diagnostics only: the
+	 *  gate itself never reads this, and ResetForNewRun clears it alongside ActiveEliteCount. */
+	bool bEliteCapBlocking = false;
+
 	// --- Map-aware allocator (multimap Tier 0, Performance §5 / Codex consult 2026-07-06) ---
 
 	/** Global alive cap across ALL maps (the host worst-case budget — per-map caps are forbidden). The allocator splits

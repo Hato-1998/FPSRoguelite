@@ -54,13 +54,23 @@ void AFPSREnemyEliteBase::EnterDyingState()
 
 void AFPSREnemyEliteBase::Deactivate()
 {
-	// Strip active GEs BEFORE Super::Deactivate() flips this actor to DORM_DormantAll at the end of its body — see
-	// header doc: the removal's replication must ride the awake->dormant flush, which only happens while still
-	// DORM_Awake. (CancelAbilities already ran earlier, in EnterDyingState, for the death path; a non-death teardown
-	// — e.g. an immediate ReleaseEnemy with no dying dwell — reaches Deactivate directly, so this doesn't assume
-	// EnterDyingState always ran first.)
+	// Close the FULL ASC state here, not just half of it (G2 merge-gate P1). The original design split the work —
+	// abilities cancelled in EnterDyingState, GEs stripped here — which silently assumed every teardown passes
+	// through the death path. It does not: kill-Z recycle, rear-drain, ReleaseAllEnemies and the carry-over overflow
+	// release all call ReleaseEnemy -> Deactivate DIRECTLY, skipping EnterDyingState entirely. An elite released
+	// mid-ability that way keeps that ability RUNNING while parked in the pool (ability tasks tick off the ASC and
+	// the world TimerManager, neither of which cares that the actor is hidden + DORM_DormantAll), so a parked actor
+	// could still land server-authoritative damage — exactly the failure EnterDyingState's own comment describes for
+	// the death path. The ranged-hold precedent this class mirrors does the SAME complete pair at EVERY teardown
+	// (EndPlay / EnterDyingState / Deactivate / Activate / carry-over), which is the property that made it safe.
+	// CancelAbilities is idempotent (it only walks currently-active specs), so the death path's double call is free.
+	//
+	// Order: cancel first — an ability ending can apply its own instant GE, which must then be caught by the
+	// RemoveActiveEffects below. And both must run BEFORE Super::Deactivate() flips this actor to DORM_DormantAll at
+	// the end of its body: the removal's replication only rides the awake->dormant flush while still DORM_Awake.
 	if (AbilitySystem)
 	{
+		AbilitySystem->CancelAbilities();
 		AbilitySystem->RemoveActiveEffects(FGameplayEffectQuery());
 	}
 	Super::Deactivate();

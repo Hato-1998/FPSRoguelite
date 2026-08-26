@@ -107,7 +107,7 @@ protected:
 	virtual void PostInitializeComponents() override;
 
 	/** 소유자 = 액터 자신(CreateDefaultSubobject, 플레이어의 PlayerState 소유 패턴과 다름 — 위 클래스 주석
-	 *  「ADR 소유권 표」 참조). Minimal 복제 모드(PostInitializeComponents 에서 SetReplicationMode) — 엔진
+	 *  「ADR 소유권 표」 참조). Minimal 복제 모드(생성자에서 SetReplicationMode — PostInitializeComponents 는 InitAbilityActorInfo·가드 등록 담당) — 엔진
 	 *  AbilitySystemComponent.h:82 "does not work for Owned AbilitySystemComponents (Use Mixed instead)" 는
 	 *  오너 클라이언트가 있는 ASC를 말하는 것이고, 엘리트는 오너 클라가 아예 없으니(스폰 서브시스템이 서버에서
 	 *  풀 관리) 정확히 그 반대 조건을 만족한다 — 플레이어 ASC(AFPSRPlayerState::AbilitySystemComponent)가

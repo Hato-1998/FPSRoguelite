@@ -47,6 +47,9 @@
     ✅ **착지(2026-08-27)** — `AFPSREnemyEliteBase` 가 `IAbilitySystemInterface` 구현 + `UFPSRAbilitySystemComponent` 를 **액터 소유**로 부착.
     복제 모드 = **`Minimal`**(엔진 `AbilitySystemComponent.h:82` — *"does not work for **Owned** ASC"*, 엘리트는 오너 클라가 없어 정확히 해당. 플레이어가 `Mixed` 인 이유도 같은 문장).
     동시 마릿수 = `min(DA_RunSchedule.StageDifficulty[].MaxEliteAlive, UFPSREnemySpawnSubsystem::EliteHardCap)`. 캡 초과 시 **스폰 보류**(일반으로 대체하지 않는다).
+    **이월 엘리트가 새 스테이지 캡을 넘으면 = 일시 초과를 허용한다**(ADR 이 물은 양자택일의 판정) — 캡은 **신규 스폰만** 막고
+    이월분은 예산을 점유한 채 사망으로 자연 수렴한다. `GlobalAliveCap` 이 이미 정확히 그 의미론이라 새 기제가 0이고,
+    강제 반납은 이월의 의도("쌓아 온 압박을 가져간다")와 충돌한다. 총량 손잡이는 `StageCarryOverMaxFraction` 이 따로 제공한다.
     ⚠️ **어트리뷰트 셋은 만들지 않았다**(사용자 결정 2026-08-26, ADR 문구에서 의도적 이탈) — 체력은 컴포넌트에 남고(불변식 4),
     **범용 상태이상은 GAS 로 가면 안 되므로**(아래 「시간축·상태이상 계약」) 지금 넣을 어트리뷰트가 0이다. 첫 소비자가 생길 때 만든다.
     🔴 **수명주기 = 4중 폐쇄** — `EnterDyingState`(어빌리티 취소, Super 앞) · `Deactivate`(GE 제거, Super 의 `DORM_DormantAll` 앞) ·
@@ -57,7 +60,13 @@
     엔진은 이들을 월드 `FTimerManager` 로 돌린다(`GameplayEffect.cpp:4409` duration · **`:4431` period `bLoop=true`**).
     4인 협동에서 1인 레벨업 = 전원 프리즈이므로, 카드 고르는 동안 엘리트 쿨다운·디버프가 공짜로 흘러간다.
     → 대체 = **프리즈-멈춤 서버 누산기**(원거리 차징 관용구). 기획자 손잡이 = `UFPSREliteGameplayAbility::CooldownSeconds`(BP 에 숫자만 저작).
-    **강제 = 문서 약속이 아니라 런타임 가드** — `GameplayEffectApplicationQueries`(엔진 네이티브 훅)가 위반 GE 를 거부하고 대체 수단을 로그로 안내한다.
+    ⚠️ **강제 범위 정정(G2)**: 런타임 가드(`GameplayEffectApplicationQueries`, 엔진 네이티브 훅)가 막는 것은 **엘리트 ASC 가 받는 GE 3종뿐**이다.
+    **시간 기반 AbilityTask(`WaitDelay` 등)는 가드 밖**이고 월드 타이머로 도므로 프리즈를 뚫는다 — 그건 **문서 약속으로만** 금지된다.
+    (전환은 어빌리티를 취소하지만 §2-2 프리즈는 취소하지 않는다.)
+    🔴 **엘리트가 *발신*하는 GE 도 계약 대상이다** — 가드는 **수신**만 막는다. 엘리트 어빌리티가 **플레이어에게** duration/periodic
+    디버프를 걸면 그건 플레이어 ASC(`Mixed`, 가드 없음)의 월드 타이머로 돌아 레벨업 프리즈 중에도 타들어 간다.
+    이 브랜치가 최초의 적→플레이어 GE 벡터(엘리트 어빌리티 시임)를 만들었으므로 더는 이론이 아니다 —
+    **엘리트 어빌리티는 플레이어에게도 시간형 GE 를 걸지 않는다**(즉발 데미지 + 서버 누산기로 표현할 것).
     ⚠️ **Health 를 건드리는 GE 는 엘리트 ASC 에서 조용히 무시된다**(엔진 `GameplayEffect.cpp:4541` — 없는 어트리뷰트 modifier skip). 체력은 컴포넌트 소관이다.
     ⚠️ **범용 상태이상(얼음→슬로우 등)을 여기 얹지 마라** — 보스는 ASC 가 없고 일반 티어도 GAS 를 안 쓰므로 **전 적에 안 걸린다**.
     그건 별도 행(`범용 상태이상 — 속성 피격 → 전 적·보스 공통 디버프`) 소관이고, 착지점은 `DamageType` 이 이미 도달해 있는 `UFPSREnemyHealthComponent::ApplyDamage` 다.

@@ -1472,7 +1472,24 @@ AFPSREnemyBase* UFPSREnemySpawnSubsystem::AcquireEnemy(const FVector& Location, 
 		const int32 EffectiveEliteCap = FMath::Min(CurveCap, EliteHardCap);
 		if (ActiveEliteCount >= EffectiveEliteCap)
 		{
+			// Edge-triggered, NOT per-attempt: the director retries every fill pass, so an unconditional log here
+			// would spam a saturated run. Logging only the transition still answers the one question a PIE smoke
+			// actually asks ("is the effective cap the number I authored, and is it binding right now?") — without
+			// it a blocked elite spawn is completely silent, and a mis-authored MaxEliteAlive is indistinguishable
+			// from "elites just haven't been rolled yet" (G2 merge-gate P3).
+			if (!bEliteCapBlocking)
+			{
+				bEliteCapBlocking = true;
+				UE_LOG(LogFPSR, Log,
+					TEXT("[Spawn] Elite cap BINDING: %d/%d alive (stage %d, curve %d, hard cap %d) — elite spawns deferred."),
+					ActiveEliteCount, EffectiveEliteCap, CurrentStageIndex, CurveCap, EliteHardCap);
+			}
 			return nullptr;
+		}
+		if (bEliteCapBlocking)
+		{
+			bEliteCapBlocking = false;
+			UE_LOG(LogFPSR, Log, TEXT("[Spawn] Elite cap released: %d/%d alive."), ActiveEliteCount, EffectiveEliteCap);
 		}
 	}
 
@@ -1894,6 +1911,7 @@ void UFPSREnemySpawnSubsystem::ResetForNewRun()
 	// explicit anyway so a future teardown path added without wiring into ActiveEliteCount's accounting can't
 	// leave the counter stuck above 0 across a same-world re-run.
 	ActiveEliteCount = 0;
+	bEliteCapBlocking = false; // diagnostics latch — see its declaration; kept in lockstep with the counter above
 
 	// U (P-F): reset each connected PlayerState's topology late-join ack so a same-world re-run re-marks + re-gates every
 	// player against the new run's topology. A first run's PlayerStates are already at the -1 default (no-op there), and a
