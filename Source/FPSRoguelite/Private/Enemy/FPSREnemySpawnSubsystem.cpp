@@ -1488,7 +1488,38 @@ AFPSREnemyBase* UFPSREnemySpawnSubsystem::AcquireEnemy(const FVector& Location, 
 		// Hard cap on total pooled actors (Game.MD §5).
 		if (TotalSpawned >= MaxActiveEnemies)
 		{
-			return nullptr;
+			// C4 「구현 사양 B」 — 풀 기아(starvation) 해소: TotalSpawned 는 증가만 하고 클래스 무관 총량이라
+			// (FFPSREnemyDormantPool 의 클래스 주석 참조), 전반 스테이지가 클래스 A 로 캡을 채우면 후반의
+			// 클래스 B(엘리트 등) 요청은 버킷 미스 + 캡 도달로 영구 거부됐다 — 적을 잡아도 정원은 안 빈다
+			// (죽은 적은 자기 클래스 버킷으로 돌아갈 뿐이다). 수요 기반 축출로 해소: 가장 큰 **다른** 클래스
+			// 버킷에서 휴면체 1개를 꺼내 Destroy() 하고 그만큼 TotalSpawned 를 되돌려 정상 스폰 경로로
+			// 진행한다. acquire 당 최대 1개(유계) — while 이 아니라 if.
+			//
+			// 안전 확인(검증됨) — 휴면체는 ActiveEnemies·DyingEnemies 어디에도 없다(ReleaseEnemy/
+			// FinishDyingEnemy 모두 DormantPool.Add 전에 그 두 컨테이너에서 먼저 뺀다). AFPSREnemyBase::EndPlay
+			// 가 메트릭 레지스트리(UFPSREnemyMetricsSubsystem)와 그림자 LOD 레지스트리(UFPSREnemyShadowLOD
+			// Subsystem) 양쪽에서 스스로 Unregister 하므로 Destroy() 가 그 두 등록을 대신 정리해 줄 필요가
+			// 없다. AcquireOfClass 는 이미 무효 슬롯을 관용한다(위 참조). 따라서 Destroy() 대상은 무참조다.
+			//
+			// ⚠️ 불변식 5("적은 Destroy 하지 않고 풀에 반납한다")의 예외 개정 — 그 불변식은 사망·teardown
+			// 경로의 계약이고, 이 축출은 휴면 풀 거주자를 다른 클래스의 acquire 를 위해 재활용하는 것이라
+			// 그 문면 밖이다(ADR 0013 은 C6 에서 갱신 예정 — FFPSREnemyDormantPool 의 클래스 주석도 참조).
+			if (AFPSREnemyBase* Evicted = DormantPool.EvictOneFromLargestOtherBucket(ClassToSpawn))
+			{
+				UClass* EvictedClass = Evicted->GetClass();
+				Evicted->Destroy();
+				--TotalSpawned;
+				++EvictionCount;
+				// 상시 로그(디버그용 아님) — 교번 클래스 수요에서 축출이 상시화되면 사실상 풀링이 무효화되므로
+				// 보이게 해야 한다(사양서 요구).
+				UE_LOG(LogFPSR, Warning,
+					TEXT("[Spawn] Pool starvation: evicted 1 dormant %s to make room for %s (TotalSpawned %d/%d, EvictionCount %d total)."),
+					*EvictedClass->GetName(), *ClassToSpawn->GetName(), TotalSpawned, MaxActiveEnemies, EvictionCount);
+			}
+			else
+			{
+				return nullptr;
+			}
 		}
 
 		FActorSpawnParameters SpawnParams;

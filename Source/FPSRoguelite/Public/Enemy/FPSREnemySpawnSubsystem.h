@@ -398,6 +398,13 @@ private:
 	UPROPERTY(Transient)
 	FFPSREnemyDormantPool DormantPool;
 
+	/** C4 기아 축출 진단 카운터(서버 전용, 복제 안 함) — DormantPool.EvictOneFromLargestOtherBucket 이 실제로
+	 *  액터 하나를 꺼내 AcquireEnemy 가 그것을 Destroy() 할 때마다 누적. 세션(런) 경계에서 리셋하지 않는다 —
+	 *  이 값의 존재 이유 자체가 "축출이 상시화되면 보이게" 이므로, 개별 런보다 누적치가 그 신호에 더
+	 *  적합하다. 드물게(0 근처) 머물면 정상(하드캡 근접 시의 안전판); 계속 늘면 사실상 풀링이 무효화되고
+	 *  있다는 뜻 — 그때는 클래스별 캡이나 로스터 배합을 재검토해야 한다. */
+	int32 EvictionCount = 0;
+
 	/** Set of currently active (visible, enabled) enemies. */
 	UPROPERTY(Transient)
 	TSet<TObjectPtr<AFPSREnemyBase>> ActiveEnemies;
