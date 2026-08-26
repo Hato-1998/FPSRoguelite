@@ -134,6 +134,9 @@ void UFPSREnemyMetricsSubsystem::Tick(float DeltaTime)
 		// design rather than a hope. It also stops tracking BP overrides by hand — the old constant claimed to mirror the
 		// C++ ctor's InitCapsuleSize(40, 90), but BP_EnemyMeleeBase overrides the capsule to 30/80 and the mesh transform
 		// too, so a content-only edit could silently break the invariant with no code diff.
+		// (ADR 0013 C0/C1, 2026-08-26) Those 30/80 + AABB figures are the ILLUSTRATION of why the old hardcoded
+		// approach was fragile — they are NOT a tuning input to the live code below, which reads the renderer's own
+		// Bounds. Renaming or reparenting that BP therefore cannot silently skew this metric.
 		if (const UPrimitiveComponent* EnemyMesh = Enemy->GetMesh())
 		{
 			// No frustum means there is no ③a this frame. Counting ③b anyway would emit ③a=0 alongside ③b=N — a fabricated
