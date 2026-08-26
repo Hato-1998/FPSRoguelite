@@ -49,6 +49,14 @@ public:
 	/** Release all active projectiles back to the pool. */
 	void ReleaseAllProjectiles();
 
+	/** Release only the ENEMY-team projectiles in flight, leaving the player's alone (ADR 0010 D6 — 사용자 결정
+	 *  2026-08-25). Called once at transition start (UFPSRStageDirectorSubsystem::RequestTransition): enemy fire
+	 *  used to simply FREEZE for the window alongside the swarm, which left live bullets hanging in the air for the
+	 *  whole ~10s transition and then resuming into a player who had been teleported to a different arena. Clearing
+	 *  is the "탄막 제거" read instead — the window opens on a clean screen. Player projectiles are deliberately NOT
+	 *  touched: firing is the grace window's whole reward (안 G). */
+	void ReleaseEnemyProjectiles();
+
 	/** Get the current number of active projectiles. */
 	int32 GetActiveCount() const { return ActiveProjectiles.Num(); }
 
@@ -80,6 +88,13 @@ private:
 	/** Last observed ENEMY-projectiles-ONLY-paused state (an active stage transition while the run is NOT otherwise
 	 *  paused, ADR 0010 D6), so Tick only acts on its transition edge. Player projectiles keep flying through a
 	 *  transition — firing is the grace window's whole reward (안 G) — only enemy-team ones freeze alongside the
-	 *  frozen swarm. */
+	 *  frozen swarm.
+	 *
+	 *  ⚠️ This is now a SAFETY NET, not the primary mechanism: since 2026-08-25 the enemy bullets in flight are
+	 *  CLEARED outright at transition start (ReleaseEnemyProjectiles, called from RequestTransition), so there is
+	 *  normally nothing left for this to pause. It stays because "nothing left" rests on enemy FIRING also being
+	 *  gated by IsStageTransitionActive — if any path ever spawns an enemy projectile mid-transition, freezing it
+	 *  is far better than letting it fly into a player who cannot move. Costs one edge-triggered pass over an
+	 *  empty-of-enemies list. */
 	bool bPausedEnemyOnly = false;
 };

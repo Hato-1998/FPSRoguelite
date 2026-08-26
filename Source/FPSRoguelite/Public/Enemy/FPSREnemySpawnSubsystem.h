@@ -98,6 +98,13 @@ public:
 	 *  gate), so there is no movement-pass race with this. */
 	void CarryEnemiesToNewStage(const TArray<FVector>& OldPlayerLocs, const TArray<FVector>& NewPlayerLocs, float CarryMaxFraction);
 
+	/** Server: 전환이 **시작될 때** 충전 중이던 원거리 적의 사이클을 전부 취소한다 (사용자 결정 2026-08-26).
+	 *  전환 중에는 이 서브시스템이 공격 패스 전체를 early-return 하므로, 충전 중이던 적은 스스로 정리할 기회를
+	 *  얻지 못하고 **타겟의 방향 경고 UI 가 전환 내내 화면에 남는다**. 적은 이월되지 파괴되지 않으므로 기존
+	 *  teardown 경로도 안 걸린다. 상세 = AFPSRRangedEnemyBase::ServerCancelRangedForStageTransition.
+	 *  RequestTransition 에서 미션 취소·탄막 제거와 같은 자리(모든 거부 가드 뒤)에서 부른다. */
+	void CancelRangedChargesForTransition();
+
 	/** Server (U P-F): reset the director's transient run state for a same-world re-run (StartRun) — drain the trickle
 	 *  token bucket, clear the director clock, empty the per-map grace + transition-tracker maps, and release every active
 	 *  enemy back to the pool. Stage 2 also resets each PlayerState's topology ack. A first run starts empty, so this is a

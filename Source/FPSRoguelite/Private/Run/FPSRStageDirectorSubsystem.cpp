@@ -7,6 +7,7 @@
 #include "Arena/FPSRArenaStreamSubsystem.h"
 #include "Enemy/FPSREnemySpawnSubsystem.h" // CarryEnemiesToNewStage (Phase A leftover-swarm carry-over)
 #include "Pickup/FPSRPickupSubsystem.h" // CarryPickupsToNewStage (dealing-window XP gem carry-over, ADR 0010 D6)
+#include "Weapon/FPSRProjectileSubsystem.h" // ReleaseEnemyProjectiles (전환 시작 시 탄막 제거, ADR 0010 D6)
 #include "Hero/FPSRCharacter.h"
 #include "Core/FPSRLogChannels.h"
 #include "Engine/World.h"
@@ -180,6 +181,31 @@ void UFPSRStageDirectorSubsystem::RequestTransition()
 			{
 				UE_LOG(LogFPSR, Log, TEXT("[StageDirector] Active mission cancelled — its objective was in the arena being left."));
 			}
+		}
+
+		// Clear the enemy bullets already in flight (사용자 결정 2026-08-25, PIE). They used to simply FREEZE for the
+		// window alongside the swarm (UFPSRProjectileSubsystem's bPausedEnemyOnly edge), which read badly in play:
+		// live bullets hung motionless in the air for the whole ~10s transition, and they were still aimed at where
+		// the player STOOD — a position PerformSwap is about to teleport them out of, into a different arena. Clearing
+		// them is the "탄막 제거" read instead: the dealing window opens on a clean screen. Placed with the mission
+		// cancel above for the same reason — after both reject guards, so a mid-boss request that gets ignored does
+		// not wipe the screen as a side effect. PLAYER projectiles are deliberately untouched: firing through the
+		// window is its whole reward (안 G).
+		if (UFPSRProjectileSubsystem* ProjectileSub = World->GetSubsystem<UFPSRProjectileSubsystem>())
+		{
+			ProjectileSub->ReleaseEnemyProjectiles();
+		}
+
+		// Cancel the ranged charges already in progress (사용자 결정 2026-08-26, PIE). Clearing the bullets above is
+		// only half of it: an enemy mid-charge has a Reliable directional WARNING up on its target's HUD, and the
+		// transition freezes the whole attack pass (UFPSREnemySpawnSubsystem early-returns on
+		// IsStageTransitionActive), so that enemy never re-enters ServerTickAttack to close its own hold — the
+		// warning stays on screen for the entire transition. The usual teardown paths do not save us here either:
+		// they run when an enemy is DESTROYED, and a transition CARRIES enemies over instead. Cancelling also rewinds
+		// the charge cycle, so nothing fires without a fresh telegraph on the other side of the swap.
+		if (UFPSREnemySpawnSubsystem* SpawnSub = World->GetSubsystem<UFPSREnemySpawnSubsystem>())
+		{
+			SpawnSub->CancelRangedChargesForTransition();
 		}
 
 		World->GetTimerManager().SetTimer(

@@ -2,6 +2,7 @@
 
 #include "Enemy/FPSREnemySpawnSubsystem.h"
 #include "Enemy/FPSREnemyBase.h"
+#include "Enemy/FPSRRangedEnemyBase.h" // CancelRangedChargesForTransition (전환 시작 시 충전·경고 UI 취소)
 #include "Enemy/FPSREnemySpawnPoint.h"
 #include "Enemy/FPSRSpawnRoom.h"
 #include "Enemy/FPSRFlowFieldSubsystem.h"
@@ -1667,6 +1668,31 @@ void UFPSREnemySpawnSubsystem::ReleaseAllEnemies()
 	// Every charging enemy released its ranged token via Deactivate; reset the per-player counts as a safety net
 	// (e.g. against a stale-controller decrement that couldn't match its key after a player left mid-charge).
 	RangedChargeCountByPlayer.Reset();
+}
+
+void UFPSREnemySpawnSubsystem::CancelRangedChargesForTransition()
+{
+	if (!HasServerAuthority())
+	{
+		return;
+	}
+
+	// No snapshot needed (unlike the carry-over below): ServerCancelRangedForStageTransition only mutates the enemy's
+	// OWN ranged state — it never releases the actor or touches ActiveEnemies — so iterating the live array is safe.
+	int32 CancelledCount = 0;
+	for (const TObjectPtr<AFPSREnemyBase>& EnemyPtr : ActiveEnemies)
+	{
+		if (AFPSRRangedEnemyBase* Ranged = Cast<AFPSRRangedEnemyBase>(EnemyPtr.Get()))
+		{
+			if (Ranged->ServerCancelRangedForStageTransition())
+			{
+				++CancelledCount;
+			}
+		}
+	}
+
+	UE_LOG(LogFPSR, Log, TEXT("[Spawn] CancelRangedChargesForTransition: cancelled %d in-progress ranged charge(s)."),
+		CancelledCount);
 }
 
 void UFPSREnemySpawnSubsystem::CarryEnemiesToNewStage(const TArray<FVector>& OldPlayerLocs, const TArray<FVector>& NewPlayerLocs, float CarryMaxFraction)

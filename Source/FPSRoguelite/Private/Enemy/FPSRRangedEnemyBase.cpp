@@ -79,6 +79,26 @@ void AFPSRRangedEnemyBase::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	Super::EndPlay(EndPlayReason);
 }
 
+bool AFPSRRangedEnemyBase::ServerCancelRangedForStageTransition()
+{
+	if (!HasAuthority())
+	{
+		return false;
+	}
+
+	// Read BEFORE releasing — ReleaseRangedHold clears exactly these. "Was mid-cycle" covers all three because a
+	// Cooldown-state enemy holds no token and shows no warning, yet still needs the reset so it can re-engage
+	// immediately in the new arena instead of burning the rest of an old arena's cooldown.
+	const bool bWasActive = bCharging || bHoldingToken || (ChargeState != EFPSRRangedChargeState::Idle);
+
+	// The SAME pair every teardown path uses (Deactivate / EnterDyingState) — see the header for why a transition
+	// needs its own entry point despite those existing: the enemy is CARRIED OVER, not torn down, so none of them run.
+	ReleaseRangedHold();
+	ResetRangedCycle();
+
+	return bWasActive;
+}
+
 EFPSRServerAttackResult AFPSRRangedEnemyBase::ServerTickAttack(const FFPSRServerAttackContext& Ctx)
 {
 	// Defensive — see AFPSREnemyBase::ServerTickAttack's identical guard for why this is added despite being
