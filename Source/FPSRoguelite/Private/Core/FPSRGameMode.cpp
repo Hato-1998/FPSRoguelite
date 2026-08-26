@@ -78,6 +78,11 @@ void AFPSRGameMode::BeginPlay()
 		if (UFPSREnemySpawnSubsystem* SpawnSub = World->GetSubsystem<UFPSREnemySpawnSubsystem>())
 		{
 			SpawnSub->SetEnemyClass(EnemyClass);
+			// C3: hand the spawn subsystem its own reference to the schedule (elite-cap curve source) — the SAME
+			// RunSchedule handed to RunDirector->SetActiveSchedule just below. Two independent copies rather than
+			// one shared lookup because UFPSRRunDirectorSubsystem::ActiveSchedule is private with no getter (see
+			// UFPSREnemySpawnSubsystem::SetActiveSchedule's own comment).
+			SpawnSub->SetActiveSchedule(RunSchedule);
 		}
 
 		// Start the run: hand the schedule to the director (server authority) and kick off round 0.

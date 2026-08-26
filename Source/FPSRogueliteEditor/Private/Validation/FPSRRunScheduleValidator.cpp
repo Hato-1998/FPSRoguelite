@@ -3,6 +3,9 @@
 #include "Validation/FPSRRunScheduleValidator.h"
 #include "Run/FPSRRunScheduleDataAsset.h"
 #include "Run/Mission/FPSRMissionDataAsset.h"
+#include "Enemy/FPSREnemyRosterDataAsset.h" // roster cross-check: SpawnRules / UFPSREnemySpawnRule::GetEnemyClass (both public, no new accessor needed)
+#include "Enemy/FPSREnemyEliteBase.h" // AFPSREnemyEliteBase::StaticClass() — tier check for the roster cross-check
+#include "Enemy/FPSREnemySpawnSubsystem.h" // UFPSREnemySpawnSubsystem::EliteHardCap — the SAME constant AcquireEnemy's runtime gate uses (no duplicated magic number)
 #include "Misc/DataValidation.h"
 #include "Math/NumericLimits.h"
 
@@ -124,14 +127,15 @@ EDataValidationResult UFPSRRunScheduleValidator::ValidateLoadedAsset_Implementat
 		const FFPSRStageDifficultyAnchor& First = Schedule->StageDifficulty[0];
 		const bool bIsIdentity = (First.AliveCountBonus == 0)
 			&& FMath::IsNearlyEqual(First.AliveCountMultiplier, 1.0f)
-			&& FMath::IsNearlyEqual(First.InhibitorDurabilityMultiplier, 1.0f);
+			&& FMath::IsNearlyEqual(First.InhibitorDurabilityMultiplier, 1.0f)
+			&& (First.MaxEliteAlive == 0); // 4th axis (C3) — same "must be in the conjunction" trap as the 3 above
 		if (First.StageIndex > 0 && !bIsIdentity)
 		{
 			Context.AddWarning(FText::Format(
-				LOCTEXT("StageFirstAnchorNotIdentity", "StageDifficulty[0] is at StageIndex {0} with non-identity values (+{1}, x{2} alive, x{3} inhibitor) — every stage from 0 to {4} inherits them (flat clamp below the first anchor), so the run STARTS at this difficulty and the first {0} suppressor breaks raise nothing. Lead with an identity anchor at StageIndex 0 (+0, x1.0, x1.0) unless that head start is intended."),
+				LOCTEXT("StageFirstAnchorNotIdentity", "StageDifficulty[0] is at StageIndex {0} with non-identity values (+{1}, x{2} alive, x{3} inhibitor, elite cap {5}) — every stage from 0 to {4} inherits them (flat clamp below the first anchor), so the run STARTS at this difficulty and the first {0} suppressor breaks raise nothing. Lead with an identity anchor at StageIndex 0 (+0, x1.0, x1.0, elite cap 0) unless that head start is intended."),
 				FText::AsNumber(First.StageIndex), FText::AsNumber(First.AliveCountBonus),
 				FText::AsNumber(First.AliveCountMultiplier), FText::AsNumber(First.InhibitorDurabilityMultiplier),
-				FText::AsNumber(First.StageIndex - 1)));
+				FText::AsNumber(First.StageIndex - 1), FText::AsNumber(First.MaxEliteAlive)));
 		}
 	}
 
@@ -184,6 +188,19 @@ EDataValidationResult UFPSRRunScheduleValidator::ValidateLoadedAsset_Implementat
 			Result = EDataValidationResult::Invalid;
 		}
 
+		// 엘리트 캡 포화(신설, C3) — 아래 마릿수 천장/바닥 검사와 같은 패턴(Warning, "죽은 저작값"): 곡선이
+		// 서브시스템의 절대 하드캡보다 큰 값을 저작해도 컴파일도 ClampMin=0 도 이걸 잡지 못한다 —
+		// UFPSREnemySpawnSubsystem::AcquireEnemy 의 엘리트 게이트가 min(곡선값, EliteHardCap) 으로 어차피
+		// 깎으므로 하드캡을 넘는 부분은 영원히 도달 못 하는 죽은 숫자다. AliveCountByLevel 유무와 무관하게
+		// 매 앵커에 적용한다 — 이 축은 레벨 곡선과 무관하다(마릿수 축과 달리 참조할 레벨값이 없다).
+		if (Anchor.MaxEliteAlive > UFPSREnemySpawnSubsystem::EliteHardCap)
+		{
+			Context.AddWarning(FText::Format(
+				LOCTEXT("StageAnchorEliteCapExceedsHardCap", "StageDifficulty[{0}] (StageIndex {1}): MaxEliteAlive {2} exceeds UFPSREnemySpawnSubsystem::EliteHardCap ({3}) — AcquireEnemy's elite gate clamps to min(curve, hard cap), so the authored value above {3} is dead data and can never actually be reached."),
+				FText::AsNumber(Index), FText::AsNumber(Anchor.StageIndex), FText::AsNumber(Anchor.MaxEliteAlive),
+				FText::AsNumber(UFPSREnemySpawnSubsystem::EliteHardCap)));
+		}
+
 		// 🔴 포화 경고는 마지막 앵커만이 아니라 전 앵커에 적용한다 — Bonus/Multiplier 가 단조 증가라는 보장이
 		// 없어 중간 앵커가 마지막 앵커보다 더 포화할 수 있다(같은 루프 비용). "최고레벨 Count" = 저작된 마지막
 		// AliveCountByLevel 앵커의 Count — 레벨 곡선이 그 이상에서 flat 하게 유지하는 상한이므로, 장기 런에서
@@ -216,6 +233,46 @@ EDataValidationResult UFPSRRunScheduleValidator::ValidateLoadedAsset_Implementat
 					FText::AsNumber(Anchor.AliveCountBonus), FText::AsNumber(Anchor.AliveCountMultiplier),
 					FText::AsNumber(FlooredTarget)));
 			}
+		}
+	}
+
+	// --- 로스터 교차검증(신설, C3, 가치 큼) — 엘리트 캡 곡선과 로스터는 서로 다른 필드/에셋이라 각자 단독으로는
+	//     유효해도 함께 보면 죽은 저작이 될 수 있다. 오직 EnemyRoster 가 할당된 경우에만 검사한다 — 로스터가
+	//     null 인 경우는 이미 위쪽 NoEnemyRoster Warning 이 그 자체로 완결된 안내다(중복 경고 방지). 로스터
+	//     순회는 UFPSREnemyRosterDataAsset::SpawnRules(EditAnywhere, public)와 UFPSREnemySpawnRule::GetEnemyClass()
+	//     (virtual, public) — 둘 다 이미 있는 접근자이고 이 검사를 위해 새로 추가한 것이 없다. 두 방향 모두
+	//     Warning(Error 아님) — "엘리트 골격만 먼저 저작, 로스터/캡은 나중" 같은 의도적 중간 상태일 수 있다. ---
+	if (Schedule->EnemyRoster != nullptr)
+	{
+		bool bRosterHasElite = false;
+		for (const TObjectPtr<UFPSREnemySpawnRule>& Rule : Schedule->EnemyRoster->SpawnRules)
+		{
+			if (Rule && Rule->GetEnemyClass() && Rule->GetEnemyClass()->IsChildOf(AFPSREnemyEliteBase::StaticClass()))
+			{
+				bRosterHasElite = true;
+				break;
+			}
+		}
+
+		bool bAnyNonZeroEliteCap = false;
+		for (const FFPSRStageDifficultyAnchor& Anchor : Schedule->StageDifficulty)
+		{
+			if (Anchor.MaxEliteAlive > 0)
+			{
+				bAnyNonZeroEliteCap = true;
+				break;
+			}
+		}
+
+		if (bRosterHasElite && !bAnyNonZeroEliteCap)
+		{
+			Context.AddWarning(LOCTEXT("RosterEliteButCapZero",
+				"EnemyRoster contains an elite-tier (AFPSREnemyEliteBase child) spawn rule, but every StageDifficulty anchor's MaxEliteAlive is 0 (or StageDifficulty is unauthored, which evaluates to the same 0 via EvalStageAt) — no elite will ever spawn, since AcquireEnemy's elite gate blocks whenever ActiveEliteCount >= 0. Author at least one anchor with MaxEliteAlive > 0, or drop the elite rule if a plain-tier-only roster is intended."));
+		}
+		if (!bRosterHasElite && bAnyNonZeroEliteCap)
+		{
+			Context.AddWarning(LOCTEXT("EliteCapButRosterNone",
+				"StageDifficulty authors a non-zero MaxEliteAlive at some stage, but EnemyRoster has no elite-tier (AFPSREnemyEliteBase child) spawn rule — the cap can never be reached because the roster never picks an elite class to spawn in the first place. Add an elite rule to the roster, or this authored cap is dead data."));
 		}
 	}
 

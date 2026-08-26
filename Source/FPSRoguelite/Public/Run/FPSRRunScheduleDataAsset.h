@@ -53,7 +53,9 @@ struct FFPSRAliveCountAnchor
  *  curve (목표 = (레벨곡선 + Bonus) × Multiplier — 사용자 결정, 손잡이 2개), and InhibitorDurabilityMultiplier scales
  *  the active arena's suppressor durability (곱해지는 상대편 손잡이 = InhibitorDurabilityByPartySize, 아래).
  *  파티 레벨과 **별개** 축이다 — 레벨에 접는 대안은 기각됐다(설계 문서 "대안과 trade-off" 참고: "별개" 요구가
- *  깨지고, 내구도 경로엔 애초에 레벨 입력이 없어 표현이 안 된다). Anchors are authored in ascending StageIndex and
+ *  깨지고, 내구도 경로엔 애초에 레벨 입력이 없어 표현이 안 된다). **MaxEliteAlive 는 네 번째, 독립된 축이다**
+ *  (엘리트 동시 마릿수 하드캡, ADR 0013 불변식 6 + 후속 행 3 「구현 사양 B」) — 절대값이라 AliveCountMultiplier
+ *  가 이 필드에는 적용되지 않는다(그 필드 자신의 주석 참조). Anchors are authored in ascending StageIndex and
  *  interpolated piecewise-linearly — the SAME convention as FFPSRAliveCountAnchor just above (below the first
  *  anchor uses its values, above the last stays flat), reusing this codebase's only curve idiom rather than
  *  introducing FScalableFloat/UCurveFloat (그러면 밸리데이터가 커브 내용을 검사할 수 없다 — 설계 §2). */
@@ -79,6 +81,18 @@ struct FFPSRStageDifficultyAnchor
 	 *  인원수 배수). */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Stage Difficulty", meta = (DisplayName = "억제기 내구도 배수", ClampMin = "0.01"))
 	float InhibitorDurabilityMultiplier = 1.0f;
+
+	/** 엘리트 동시 마릿수 상한(ADR 0013 불변식 6 "엘리트 동시 마릿수는 하드캡을 갖는다" + 후속 행 3 「구현 사양
+	 *  B」) — 스테이지별 **절대값**이다. AliveCountBonus 처럼 레벨곡선에 "가산"되는 값이 아니라 그 자체가
+	 *  상한이고, **AliveCountMultiplier 는 이 필드에 적용되지 않는다**(그 배수는 일반 마릿수 축 전용). 소비자 =
+	 *  UFPSREnemySpawnSubsystem 의 엘리트 캡 회계(ActiveEliteCount) — 실효 상한은 이 값과 그 서브시스템의
+	 *  EliteHardCap(곡선과 무관한 절대 상한) 중 작은 쪽이다.
+	 *  🔴 **기본값 0 = "엘리트 없음"이며 이게 옳은 무회귀 기본값이다 — "0 = 무제한"이 아니다.** 저작 안 된
+	 *  StageDifficulty 배열은 EvalStageAt 이 항등(전 필드 기본값)을 돌려주고, 이 필드가 생기기 전의 현실이
+	 *  정확히 "엘리트 0마리"였기 때문이다(엘리트 티어 골격 자체가 이 필드보다 나중에 생겼다). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Stage Difficulty",
+			  meta = (DisplayName = "엘리트 동시 상한", ClampMin = "0"))
+	int32 MaxEliteAlive = 0;
 };
 
 /** Data-driven run schedule (redesign 2026-06-04 / windows 2026-06-11, §2-8): time-windowed mission spawns
@@ -234,12 +248,13 @@ public:
 	// ---------------------------------------------------------------------------------------------------------
 
 	/** Piecewise-linear interpolation of the stage-difficulty anchors at StageIndex. Returns the WHOLE anchor
-	 *  interpolated as one unit (not per-field) — walking the array once per field would need three separate
-	 *  interpolation passes that could drift from each other, and a future field addition (ADR 0013's elite-cap
-	 *  curve, deferred to its own row — see Docs/Architecture/0013-…md:205) becomes one struct field instead of a
-	 *  second walk. Empty Anchors -> identity (StageIndex 0, Bonus 0, both multipliers 1.0), so an unauthored
-	 *  StageDifficulty array is a complete no-op. Anchors must be authored in ascending StageIndex (enforced by
-	 *  UFPSRRunScheduleValidator); below the first / above the last clamps flat, same rule as EvalAliveCountByLevel. */
+	 *  interpolated as one unit (not per-field) — walking the array once per field would need three (now four)
+	 *  separate interpolation passes that could drift from each other, which is exactly why MaxEliteAlive (ADR
+	 *  0013's elite-cap curve, landed C3 「구현 사양 B」) was just one more struct field + one more Lerp line in the
+	 *  middle-interpolation branch below, not a second walk. Empty Anchors -> identity (StageIndex 0, Bonus 0, both
+	 *  multipliers 1.0, MaxEliteAlive 0), so an unauthored StageDifficulty array is a complete no-op. Anchors must be
+	 *  authored in ascending StageIndex (enforced by UFPSRRunScheduleValidator); below the first / above the last
+	 *  clamps flat, same rule as EvalAliveCountByLevel. */
 	static FFPSRStageDifficultyAnchor EvalStageAt(TConstArrayView<FFPSRStageDifficultyAnchor> Anchors, int32 StageIndex);
 
 	/** InhibitorDurabilityByPartySize lookup — index (PartySize - 1): index 0 = 1 player. PartySize <= 0 clamps to

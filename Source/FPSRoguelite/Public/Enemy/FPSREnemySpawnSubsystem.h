@@ -18,6 +18,7 @@ class AFPSRPlayerController;
 class APlayerController;
 class AFPSRCharacter;
 class UFPSREnemyRosterDataAsset;
+class UFPSRRunScheduleDataAsset; // ActiveSchedule (C3) — elite-cap curve source, see the member's own comment
 enum class EFPSRFieldQuery : uint8; // U P-E: front path-distance query status (IsRearStatus)
 
 /** Lightweight server-authoritative object pool + spawn director for swarm enemies (P2-A).
@@ -49,6 +50,16 @@ public:
 	/** Hard cap on active enemies (Game.MD §5) — the pool ceiling / endless-fall backstop. Public read-only constant
 	 *  so debug commands (FPSR.SpawnEnemies) can clamp their input against the real cap instead of duplicating it. */
 	static constexpr int32 MaxActiveEnemies = 500;
+
+	/** Hard ceiling on concurrent elite-tier enemies (ADR 0013 불변식 6 "엘리트 동시 마릿수는 하드캡을 갖는다" —
+	 *  곡선과 무관하게 이 값을 넘지 않는다), always intersected with UFPSRRunScheduleDataAsset's per-stage
+	 *  MaxEliteAlive curve — AcquireEnemy's elite gate uses min(curve value, this). Public for the SAME reason
+	 *  MaxActiveEnemies above is: UFPSRRunScheduleValidator lives in a DIFFERENT module (FPSRogueliteEditor) and
+	 *  must warn on an authored MaxEliteAlive that exceeds this WITHOUT duplicating the number (a copy would drift
+	 *  the moment either side is tuned). Conservative (예: 8) — an elite ASC's replication cost (attribute set +
+	 *  ability specs + GE handles) dwarfs a plain tier's single UActorComponent (invariant 6's own rationale in
+	 *  the ADR); raise only after profiling actual elite-count replication cost. */
+	static constexpr int32 EliteHardCap = 8;
 
 	virtual bool ShouldCreateSubsystem(UObject* Outer) const override;
 	virtual void OnWorldBeginPlay(UWorld& InWorld) override;
@@ -134,6 +145,14 @@ public:
 	/** Set the data-driven enemy roster (archetype mix). Null/empty = spawn the single EnemyClass (no regression).
 	 *  Pushed by the run director at StartRun from DA_RunSchedule.EnemyRoster (Game.MD §2-6). */
 	void SetEnemyRoster(UFPSREnemyRosterDataAsset* InRoster) { EnemyRoster = InRoster; }
+
+	/** Set the active run schedule (C3 — elite-cap curve source only; nothing else here reads it). Pushed by
+	 *  AFPSRGameMode::BeginPlay from its own RunSchedule, alongside SetEnemyClass — the SAME asset it also hands to
+	 *  UFPSRRunDirectorSubsystem::SetActiveSchedule (an independent copy: that subsystem's ActiveSchedule is
+	 *  private with no getter, so this subsystem cannot reach it and needs its own reference). Null = the elite
+	 *  gate falls back to a 0 curve cap (no elites), matching MaxEliteAlive's own "unauthored = no elites"
+	 *  no-regression default. */
+	void SetActiveSchedule(UFPSRRunScheduleDataAsset* InSchedule) { ActiveSchedule = InSchedule; }
 
 	/** Server: read-only — is there a ranged-attack slot free against TargetPC? Lets a ranged enemy skip the (more
 	 *  expensive) line-of-sight trace when it's already capped out, so capped idle ranged enemies don't trace every
@@ -363,6 +382,13 @@ private:
 	UPROPERTY()
 	TObjectPtr<UFPSREnemyRosterDataAsset> EnemyRoster;
 
+	/** The active run schedule (C3 — elite-cap curve source only). AcquireEnemy's elite gate reads
+	 *  ActiveSchedule->StageDifficulty via UFPSRRunScheduleDataAsset::EvalStageAt(...).MaxEliteAlive. Pushed by
+	 *  AFPSRGameMode::BeginPlay (see SetActiveSchedule's own comment for why this duplicates a reference the
+	 *  run director subsystem also holds). Null = the elite gate treats the curve as a 0 cap (no elites). */
+	UPROPERTY()
+	TObjectPtr<UFPSRRunScheduleDataAsset> ActiveSchedule;
+
 	/** Pool of dormant (hidden, disabled) enemies ready for reuse — bucketed by EXACT class so acquiring one costs
 	 *  O(1) in the requested archetype's bucket size, independent of how many OTHER classes/enemies the pool holds
 	 *  (ADR 0013 불변식 7, "풀 취득 비용은 클래스 수와 무관하다" — a paid-down cost of adopting 안 A/티어 클래스,
@@ -400,6 +426,18 @@ private:
 
 	/** Total enemies spawned (hard cap at MaxActiveEnemies). */
 	int32 TotalSpawned = 0;
+
+	/** Current count of active elite-tier (AFPSREnemyEliteBase child) enemies (server-authoritative, C3) —
+	 *  AcquireEnemy's elite gate compares this against min(curve MaxEliteAlive, EliteHardCap) before letting one
+	 *  more elite become active. Incremented in AcquireEnemy right next to ActiveEnemies.Add. Decremented in
+	 *  exactly TWO places: BeginDying (the death path — it removes from ActiveEnemies directly and never calls
+	 *  ReleaseEnemy, see BeginDying's own comment, so there is no double-decrement) and ReleaseEnemy (every OTHER
+	 *  teardown path — pool release / rear-drain / kill-Z recycle / stage-carry overflow / ReleaseAllEnemies, all
+	 *  of which route through ReleaseEnemy). Reset to 0 in ResetForNewRun as a defensive safety net (same
+	 *  precedent as RangedChargeCountByPlayer.Reset() there) — by that point ReleaseAllEnemies has already
+	 *  released every active elite, so that line is normally redundant; kept explicit so a future teardown path
+	 *  added without wiring into this accounting can't leave the counter stuck above 0 into the next run. */
+	int32 ActiveEliteCount = 0;
 
 	// --- Map-aware allocator (multimap Tier 0, Performance §5 / Codex consult 2026-07-06) ---
 

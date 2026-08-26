@@ -9,6 +9,7 @@
 #include "Enemy/FPSRFlowFieldComputer.h" // EFPSRFieldQuery (front-chase distance status, U P-D)
 #include "Enemy/FPSREnemyAllocator.h"
 #include "Enemy/FPSREnemyRosterDataAsset.h"
+#include "Run/FPSRRunScheduleDataAsset.h" // C3: EvalStageAt(...).MaxEliteAlive — AcquireEnemy's elite-cap gate
 #include "Hero/FPSRCharacter.h"
 #include "Core/FPSRLogChannels.h"
 #include "Core/FPSRGameState.h"
@@ -1446,6 +1447,35 @@ AFPSREnemyBase* UFPSREnemySpawnSubsystem::AcquireEnemy(const FVector& Location, 
 	}
 	UClass* ClassToSpawn = PickedClass ? PickedClass.Get() : AFPSREnemyBase::StaticClass();
 
+	// Elite cap gate (ADR 0013 불변식 6 + C3 「구현 사양 B」) — only evaluated when the roster actually picked an
+	// elite class (plain tier is untouched by this axis, no early-return cost). Checked BEFORE either a dormant-pool
+	// reuse or a fresh spawn: a pool hit and a fresh spawn both result in "one more active elite", and this pool has
+	// no "push back into the bucket" path (AcquireOfClass only ever removes), so the gate must run first, not after
+	// a pool hit that then has to be undone. 판별 = IsChildOf (티어 판별, 풀 버킷 키의 정확일치와 혼동 금지 — 그
+	// 쪽은 FFPSREnemyDormantPool 이 EXACT match 로 별도 관리한다). Effective cap = min(schedule curve, hard cap);
+	// a block returns nullptr — both TickDirector fill loops (physical + front) already treat a null AcquireEnemy
+	// return as "skip this attempt, try again next pass" (no dedicated handling needed here). No "downgrade to a
+	// normal enemy" substitute — that would need a roster re-roll API (bigger surface, 사용자·G1 판정).
+	const bool bIsEliteClass = ClassToSpawn->IsChildOf(AFPSREnemyEliteBase::StaticClass());
+	if (bIsEliteClass)
+	{
+		int32 CurrentStageIndex = 0;
+		if (const AFPSRGameState* GameState = World->GetGameState<AFPSRGameState>())
+		{
+			CurrentStageIndex = GameState->GetStageIndex();
+		}
+		// ActiveSchedule null, or StageDifficulty unauthored, both resolve to 0 here (EvalStageAt's own identity
+		// fallback) — "elite 없음" is the correct no-regression default (MaxEliteAlive's own field comment).
+		const int32 CurveCap = ActiveSchedule
+			? UFPSRRunScheduleDataAsset::EvalStageAt(ActiveSchedule->StageDifficulty, CurrentStageIndex).MaxEliteAlive
+			: 0;
+		const int32 EffectiveEliteCap = FMath::Min(CurveCap, EliteHardCap);
+		if (ActiveEliteCount >= EffectiveEliteCap)
+		{
+			return nullptr;
+		}
+	}
+
 	AFPSREnemyBase* Enemy = nullptr;
 
 	// Reuse a dormant actor of the SAME class as picked — a later request must never get a different archetype's
@@ -1512,6 +1542,10 @@ AFPSREnemyBase* UFPSREnemySpawnSubsystem::AcquireEnemy(const FVector& Location, 
 	}
 
 	ActiveEnemies.Add(Enemy);
+	if (bIsEliteClass)
+	{
+		++ActiveEliteCount; // paired decrement: BeginDying (death) / ReleaseEnemy (every other teardown) — see their own comments
+	}
 	return Enemy;
 }
 
@@ -1523,6 +1557,13 @@ void UFPSREnemySpawnSubsystem::ReleaseEnemy(AFPSREnemyBase* Enemy)
 	}
 
 	ActiveEnemies.Remove(Enemy);
+	// Elite cap accounting (C3): every teardown path EXCEPT death routes through here (pool release / rear-drain /
+	// kill-Z recycle / stage-carry overflow / ReleaseAllEnemies) — the death path decrements in BeginDying instead
+	// (it never reaches this function), so the two decrement points never double-count the same enemy.
+	if (Enemy->IsA(AFPSREnemyEliteBase::StaticClass()))
+	{
+		--ActiveEliteCount;
+	}
 	Enemy->Deactivate();
 	DormantPool.Add(Enemy);
 }
@@ -1552,6 +1593,16 @@ void UFPSREnemySpawnSubsystem::BeginDying(AFPSREnemyBase* Enemy)
 	// (EnterDyingState) can never front-line-shield the enemies behind it. It also frees its GlobalAliveCap /
 	// MaxActiveEnemies slot at once, so a corpse dwelling does NOT starve the spawner.
 	ActiveEnemies.Remove(Enemy);
+	// Elite cap accounting (C3): the death path's decrement point (paired with ReleaseEnemy's — see that function's
+	// comment for why the two never double-count). Decremented HERE, at the same instant the enemy leaves
+	// ActiveEnemies, rather than later at FinishDyingEnemy/Deactivate — for the SAME reason ActiveEnemies itself
+	// drops the enemy immediately (comment above): a dying elite must free its cap slot at once, or a dwelling
+	// elite corpse (death-dwell can run several seconds) would keep blocking a fresh elite from spawning even
+	// though the old one is already gameplay-over.
+	if (Enemy->IsA(AFPSREnemyEliteBase::StaticClass()))
+	{
+		--ActiveEliteCount;
+	}
 	Enemy->EnterDyingState();
 
 	const UWorld* World = GetWorld();
@@ -1805,6 +1856,13 @@ void UFPSREnemySpawnSubsystem::ResetForNewRun()
 	// Return every active enemy to the pool — this also clears their front attribution / crossing credit (those live on the
 	// enemy actor, cleared on Deactivate). A first run has none active (no-op).
 	ReleaseAllEnemies();
+
+	// Elite cap accounting (C3) — defensive safety net, same precedent as ReleaseAllEnemies's own
+	// RangedChargeCountByPlayer.Reset() (called inside it, just above): ReleaseAllEnemies already decremented this
+	// back to 0 via ReleaseEnemy for every currently-active elite, so this line is normally redundant. Kept
+	// explicit anyway so a future teardown path added without wiring into ActiveEliteCount's accounting can't
+	// leave the counter stuck above 0 across a same-world re-run.
+	ActiveEliteCount = 0;
 
 	// U (P-F): reset each connected PlayerState's topology late-join ack so a same-world re-run re-marks + re-gates every
 	// player against the new run's topology. A first run's PlayerStates are already at the -1 default (no-op there), and a
