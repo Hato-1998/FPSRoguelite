@@ -10,13 +10,21 @@ FFPSRStageDifficultyAnchor UFPSRRunScheduleDataAsset::EvalStageAt(TConstArrayVie
 	{
 		return FFPSRStageDifficultyAnchor(); // identity — an unauthored StageDifficulty array is a complete no-op
 	}
+	// The returned StageIndex is ALWAYS the QUERIED stage, in every branch — including the two flat clamps below,
+	// which would otherwise hand back the anchor's own index and make this field mean different things depending on
+	// which branch produced the result (merge-gate P3). Nothing reads it today; that is exactly why it has to be
+	// pinned down now rather than after a first consumer builds on one branch's meaning.
 	if (StageIndex <= Anchors[0].StageIndex)
 	{
-		return Anchors[0];
+		FFPSRStageDifficultyAnchor Clamped = Anchors[0];
+		Clamped.StageIndex = StageIndex;
+		return Clamped;
 	}
 	if (StageIndex >= Anchors[Num - 1].StageIndex)
 	{
-		return Anchors[Num - 1];
+		FFPSRStageDifficultyAnchor Clamped = Anchors[Num - 1];
+		Clamped.StageIndex = StageIndex;
+		return Clamped;
 	}
 	for (int32 i = 1; i < Num; ++i)
 	{
@@ -34,7 +42,11 @@ FFPSRStageDifficultyAnchor UFPSRRunScheduleDataAsset::EvalStageAt(TConstArrayVie
 			return Result;
 		}
 	}
-	return Anchors[Num - 1]; // unreachable (StageIndex >= last is handled above) — belt-and-suspenders, mirrors EvalAliveCountByLevel
+	// Unreachable (StageIndex >= last is handled above) — belt-and-suspenders, mirrors EvalAliveCountByLevel. Still
+	// stamps the queried StageIndex so the "always the queried stage" contract above holds on every path.
+	FFPSRStageDifficultyAnchor Fallback = Anchors[Num - 1];
+	Fallback.StageIndex = StageIndex;
+	return Fallback;
 }
 
 float UFPSRRunScheduleDataAsset::EvalPartySizeMultiplier(TConstArrayView<float> ByPartySize, int32 PartySize)

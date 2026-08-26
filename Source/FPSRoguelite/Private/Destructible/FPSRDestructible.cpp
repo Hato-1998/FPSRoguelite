@@ -209,18 +209,24 @@ void AFPSRDestructible::ServerSetDurabilityOverride(float NewDurability)
 		return;
 	}
 
-	// 🔴 InitializeMaxHealth fully heals AND clears the health component's dead flag (see its own header comment) —
-	// calling it on an already-broken destructible would resurrect it at full health, a "broken but full-HP
-	// zombie". Current call sites (UFPSRRunDirectorSubsystem::ApplyStageDifficultyToArena, right after a stage
-	// commit) only ever touch freshly-(re)activated arenas whose destructibles were just ServerReset(), so bBroken
-	// is never actually true there today — but the guard nails the contract down rather than relying on that
-	// staying true at every future call site.
+	// Store ALWAYS — even while broken. The stored value is just "what this destructible's durability should be";
+	// ServerReset re-reads it through GetEffectiveDurability() on the way back to intact, so a value that lands
+	// while broken is honoured at the next reset instead of being silently dropped (merge-gate P3: an early-return
+	// that skipped the store would lose it, and a LOST override is a quieter failure than the zombie below).
+	DurabilityOverride = NewDurability;
+
+	// 🔴 …but do NOT push it into the health pool while broken. InitializeMaxHealth fully heals AND clears the
+	// health component's dead flag (see its own header comment), so calling it on an already-broken destructible
+	// would resurrect it at full health — a "broken but full-HP zombie" with bBroken still true. Current call sites
+	// (UFPSRRunDirectorSubsystem::ApplyStageDifficultyToArena, right after a stage commit) only ever touch
+	// freshly-(re)activated arenas whose destructibles SetArenaActive just ServerReset(), so bBroken is never
+	// actually true there today — this guard nails the contract down rather than relying on that staying true at
+	// every future call site.
 	if (bBroken)
 	{
 		return;
 	}
 
-	DurabilityOverride = NewDurability;
 	if (HealthComponent)
 	{
 		HealthComponent->InitializeMaxHealth(GetEffectiveDurability());

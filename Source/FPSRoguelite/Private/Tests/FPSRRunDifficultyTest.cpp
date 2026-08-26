@@ -68,6 +68,13 @@ bool FFPSRRunDifficultyTest::RunTest(const FString& Parameters)
 		TestEqual(TEXT("above last anchor: AliveCountMultiplier == last anchor"), ResultAbove.AliveCountMultiplier, 1.3f);
 		TestEqual(TEXT("above last anchor: InhibitorDurabilityMultiplier == last anchor"), ResultAbove.InhibitorDurabilityMultiplier, 2.4f);
 
+		// (4b) The returned StageIndex is the QUERIED stage on EVERY branch, not the matched anchor's own index —
+		//      the two flat clamps are exactly where that used to diverge, so they are what this pins down.
+		TestEqual(TEXT("below first anchor: StageIndex is the queried stage"), ResultBelow.StageIndex, 0);
+		TestEqual(TEXT("above last anchor: StageIndex is the queried stage"), ResultAbove.StageIndex, 100);
+		TestEqual(TEXT("mid interpolation: StageIndex is the queried stage"),
+			UFPSRRunScheduleDataAsset::EvalStageAt(Anchors, 4).StageIndex, 4);
+
 		// (5) Exact match on an authored anchor -> returns it exactly (the loop's T=1 edge / the pre-loop clamp).
 		const FFPSRStageDifficultyAnchor ResultExact = UFPSRRunScheduleDataAsset::EvalStageAt(Anchors, 6);
 		TestEqual(TEXT("exact match: Bonus"), ResultExact.AliveCountBonus, 16);

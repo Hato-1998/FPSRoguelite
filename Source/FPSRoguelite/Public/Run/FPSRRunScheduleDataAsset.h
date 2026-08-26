@@ -121,7 +121,11 @@ public:
 	 *  때마다 마릿수·억제기 내구도를 함께 올린다. **비어 있으면 항등**(가산 0·배수 1.0 — EvalStageAt 의 빈 배열
 	 *  폴백) = 기존 스케줄은 완전 무회귀. StageIndex 오름차순 저작, 첫 앵커 아래·마지막 앵커 위는 flat clamp
 	 *  (AliveCountByLevel 과 동일 규약). 적용 지점: UFPSRRunDirectorSubsystem::ComputeTargetAliveCount (마릿수
-	 *  축) / ApplyStageDifficultyToArena (억제기 축, 스테이지 커밋마다 1회). */
+	 *  축) / ApplyStageDifficultyToArena (억제기 축, 스테이지 커밋마다 1회).
+	 *  🔴 **첫 앵커는 StageIndex 0 의 항등 앵커(+0, x1.0, x1.0)로 시작할 것.** 첫 앵커 아래가 flat clamp 라,
+	 *  첫 앵커를 (3, +8, x1.15, x1.6) 처럼 두면 스테이지 0 이 이미 x1.6 내구도로 시작하고 스테이지 0->3 의
+	 *  억제기 파괴 3회가 난이도를 전혀 올리지 않는다 — 이 축의 전제가 앞 세 스테이지에서 죽는다. 의도적
+	 *  저작일 수도 있어 밸리데이터는 Warning 으로만 짚는다(FPSRRunScheduleValidator, StageFirstAnchorNotIdentity). */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Run|난이도 축", meta = (DisplayName = "스테이지 난이도 앵커"))
 	TArray<FFPSRStageDifficultyAnchor> StageDifficulty;
 

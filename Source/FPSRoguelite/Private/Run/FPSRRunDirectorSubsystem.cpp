@@ -131,6 +131,24 @@ void UFPSRRunDirectorSubsystem::StartRun()
 		UE_LOG(LogFPSR, Log, TEXT("[Run] StartRun deferred — waiting for first player pawn"));
 	}
 
+	// 🔴 EARLY (pre-combat) suppressor sizing — a floor, not the final value. The authoritative stage-0 apply is the
+	// opening-seed release in DirectorTick, which is where the participant count is finally trustworthy; this call
+	// exists only to close the window BEFORE it. Without it a stage-0 suppressor sits at its BP-authored Durability
+	// (BP_Inhibitor's is 50 — the drift ADR 0010 D6 정정 ② records) from BeginPlay until that release, and firing is
+	// gated by IsRunPaused() ALONE (FPSRWeaponFireComponent.cpp) — so the unfreeze-to-next-tick gap (DirectorInterval,
+	// 0.25s; up to OpeningSeedWaitTimeout = 5s when no opening seed ever comes) is live fire against 50 HP. A 4-player
+	// group is ~384 DPS there: 50 HP dies in ~0.13s, inside the gap. That is a free stage-0 skip, i.e. ADR 0010 §512
+	// surviving as an opening-only exploit (merge-gate P2).
+	//
+	// Reading the participant count this early UNDER-counts (clients may not have joined yet), and that is the safe
+	// direction: the party-size multiplier is smallest at 1 player, so this can only size the suppressor LOWER than
+	// its final value, never higher — no unfair spike, and the release-point apply corrects it upward a moment later.
+	// Even the floor (base x stage0 x 1.0 = 5000-ish) is far out of reach inside those windows (~96 damage in 0.25s).
+	if (AFPSRArenaActor* OpeningArena = AFPSRArenaActor::FindActiveInWorld(GetWorld()))
+	{
+		ApplyStageDifficultyToArena(OpeningArena, 0); // StageIndex 0 — SetStageIndex(0) above already committed it
+	}
+
 	if (UWorld* World = GetWorld())
 	{
 		World->GetTimerManager().SetTimer(
