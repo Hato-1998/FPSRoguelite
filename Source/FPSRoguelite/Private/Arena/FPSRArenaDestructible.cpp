@@ -54,6 +54,17 @@ void AFPSRArenaDestructible::ComputeGridCells(const FVector& ArenaOrigin, float 
 	}
 	else
 	{
+		// merge-gate P3 교정: the UPROPERTY's ClampMin is 0, not a paired "both or neither" constraint, so a
+		// half-authored FootprintCells like (0,3) is authorable and falls through to this auto branch same as a
+		// genuine (0,0) — silently, until now. Warn only on the half-authored case; (0,0) is the normal, intentional
+		// "use auto" authoring and must stay quiet.
+		if ((FootprintCells.X > 0) != (FootprintCells.Y > 0))
+		{
+			UE_LOG(LogFPSR, Warning,
+				TEXT("[Arena] %s: FootprintCells is half-authored (%d, %d) — one axis is 0, so ComputeGridCells falls back to the auto mesh-bounds path. Author both axes > 0 to use the override, or leave both at 0 for auto."),
+				*GetName(), FootprintCells.X, FootprintCells.Y);
+		}
+
 		// Auto (default, FootprintCells == 0): derive the cells straight from the mesh's own world bounds — the
 		// SAME source GetVoxelBounds() hands the 3D voxel stamp, so 2D and 3D can never disagree about where this
 		// prop actually sits.

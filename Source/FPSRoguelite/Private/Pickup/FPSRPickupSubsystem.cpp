@@ -79,8 +79,11 @@ void UFPSRPickupSubsystem::CarryPickupsToNewStage(const TArray<FVector>& OldPlay
 	// No delta to carry by (no player actually teleported this swap, or a caller bug pairing mismatched arrays) —
 	// mirrors UFPSREnemySpawnSubsystem::CarryEnemiesToNewStage's same-condition fallback (ReleaseAllEnemies): there
 	// is no coordinate-space delta to translate into, so rather than guess, destroy every live gem outright. Leaving
-	// them behind in the OLD arena would silently occupy a MaxActivePickups slot forever — that arena is about to
-	// lose its collision and is not revisited — starving every future SpawnXPPickup call into the direct-grant branch.
+	// them behind in the OLD arena would silently occupy a MaxActivePickups slot (merge-gate P3 교정: NOT forever —
+	// PerformSwap parks arenas rather than destroying them and NextArenaIndex cycles the index, so this SAME arena
+	// is revisited once the run cycles back around; the occupancy is bounded by that cycle period, not permanent)
+	// — starving every future SpawnXPPickup call into the direct-grant branch for as long as this gem sits
+	// uncollected in an arena nobody can currently reach.
 	if (OldPlayerLocs.Num() == 0 || NewPlayerLocs.Num() != OldPlayerLocs.Num())
 	{
 		UE_LOG(LogFPSR, Warning,
@@ -99,11 +102,6 @@ void UFPSRPickupSubsystem::CarryPickupsToNewStage(const TArray<FVector>& OldPlay
 
 	const UWorld* World = GetWorld();
 	const UFPSRFlowFieldSubsystem* FlowField = World ? World->GetSubsystem<UFPSRFlowFieldSubsystem>() : nullptr;
-
-	// Same call-site constant UFPSREnemySpawnSubsystem::CarryEnemiesToNewStage uses for its own FindNearestOpenLocation
-	// snap, kept identical so a gem lands within the same search radius of the new arena's walkable mask as the
-	// enemy that might have dropped it.
-	constexpr int32 CarrySnapMaxRadiusCells = 16;
 
 	int32 CarriedCount = 0;
 	int32 SnapFailCount = 0;
@@ -135,7 +133,10 @@ void UFPSRPickupSubsystem::CarryPickupsToNewStage(const TArray<FVector>& OldPlay
 		const FVector Candidate = CurrentLoc + Delta;
 
 		FVector SnapLoc;
-		if (FlowField && FlowField->FindNearestOpenLocation(Candidate, CarrySnapMaxRadiusCells, SnapLoc))
+		// merge-gate P3 교정: 이전엔 이 반경이 여기 로컬 constexpr 16 으로 따로 박혀 있었다 — 이제
+		// UFPSRFlowFieldSubsystem::CarrySnapMaxRadiusCells 하나가 "젬이 자기를 떨군 적과 같은 반경에 스냅된다"는
+		// 계약을 강제한다(UFPSREnemySpawnSubsystem::CarryEnemiesToNewStage 도 같은 상수를 쓴다).
+		if (FlowField && FlowField->FindNearestOpenLocation(Candidate, UFPSRFlowFieldSubsystem::CarrySnapMaxRadiusCells, SnapLoc))
 		{
 			Pickup->ServerRelocateForStageCarry(SnapLoc);
 			++CarriedCount;

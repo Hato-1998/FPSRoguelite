@@ -248,11 +248,17 @@ bool FFPSRArenaCellsFromBoundsTest::RunTest(const FString& Parameters)
 		FFPSRArenaCells::ComputeCellsFromBoundsXY(Box, ArenaOrigin, CellSize, GridDims, Cells);
 
 		TestEqual(TEXT("4m box centered on a grid line covers 25 cells (5x5)"), Cells.Num(), 25);
-		TestEqual(TEXT("first cell is (78,78)"), Cells[0], 78 * GridDims.X + 78);
-		TestEqual(TEXT("last cell is (82,82)"), Cells.Last(), 82 * GridDims.X + 82);
-		for (int32 i = 1; i < Cells.Num(); ++i)
+		// merge-gate P3 교정: a regression that changes Cells.Num() away from 25 must not ALSO crash this
+		// automation session by indexing Cells[0]/Cells.Last() out of bounds — the verification tool is not
+		// allowed to be the first thing that breaks when the thing it verifies regresses.
+		if (Cells.Num() == 25)
 		{
-			TestTrue(TEXT("cells come out strictly ascending"), Cells[i] > Cells[i - 1]);
+			TestEqual(TEXT("first cell is (78,78)"), Cells[0], 78 * GridDims.X + 78);
+			TestEqual(TEXT("last cell is (82,82)"), Cells.Last(), 82 * GridDims.X + 82);
+			for (int32 i = 1; i < Cells.Num(); ++i)
+			{
+				TestTrue(TEXT("cells come out strictly ascending"), Cells[i] > Cells[i - 1]);
+			}
 		}
 	}
 
@@ -265,7 +271,10 @@ bool FFPSRArenaCellsFromBoundsTest::RunTest(const FString& Parameters)
 		FFPSRArenaCells::ComputeCellsFromBoundsXY(Box, ArenaOrigin, CellSize, GridDims, Cells);
 
 		TestEqual(TEXT("off-grid corner box clips down to the single on-grid cell"), Cells.Num(), 1);
-		TestEqual(TEXT("the surviving cell is (0,0)"), Cells[0], 0);
+		if (Cells.Num() == 1) // same regression-safety guard as test (1) above — never index on a failed Num()
+		{
+			TestEqual(TEXT("the surviving cell is (0,0)"), Cells[0], 0);
+		}
 	}
 
 	// ---- (3) An invalid box (FBox(ForceInit), the same "no mesh authored" sentinel GetVoxelBounds() returns)

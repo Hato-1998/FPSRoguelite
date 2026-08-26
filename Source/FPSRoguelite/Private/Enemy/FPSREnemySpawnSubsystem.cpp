@@ -1779,9 +1779,6 @@ void UFPSREnemySpawnSubsystem::CarryEnemiesToNewStage(const TArray<FVector>& Old
 	// Nearest-to-a-new-player first; the excess (index >= MaxCarry, once sorted) is released farthest-first (A4).
 	Candidates.Sort([](const FCarryCandidate& A, const FCarryCandidate& B) { return A.RankDistSq < B.RankDistSq; });
 
-	// A4 call-site constant: ~200 calls/transition budget, MaxRadiusCells 16 recommended.
-	constexpr int32 CarrySnapMaxRadiusCells = 16;
-
 	int32 CarriedCount = 0;
 	int32 SnapFailCount = 0;
 	for (int32 i = 0; i < Candidates.Num(); ++i)
@@ -1794,11 +1791,14 @@ void UFPSREnemySpawnSubsystem::CarryEnemiesToNewStage(const TArray<FVector>& Old
 		}
 
 		FVector SnapLoc;
-		if (!FlowField || !FlowField->FindNearestOpenLocation(Candidates[i].CandidateLoc, CarrySnapMaxRadiusCells, SnapLoc))
+		// merge-gate P3 교정: UFPSRFlowFieldSubsystem::CarrySnapMaxRadiusCells 하나가 이 반경을
+		// UFPSRPickupSubsystem::CarryPickupsToNewStage 와 공유한다 — "젬이 자기를 떨군 적과 같은 반경에
+		// 스냅된다"는 계약을 한 곳에서 강제(이전엔 각자 로컬 constexpr 16 을 들고 "kept identical" 주석만 믿었다).
+		if (!FlowField || !FlowField->FindNearestOpenLocation(Candidates[i].CandidateLoc, UFPSRFlowFieldSubsystem::CarrySnapMaxRadiusCells, SnapLoc))
 		{
 			UE_LOG(LogFPSR, Verbose,
 				TEXT("[Spawn] CarryEnemiesToNewStage: no open cell within %d cells of %s — releasing %s instead of carrying it."),
-				CarrySnapMaxRadiusCells, *Candidates[i].CandidateLoc.ToString(), *Enemy->GetName());
+				UFPSRFlowFieldSubsystem::CarrySnapMaxRadiusCells, *Candidates[i].CandidateLoc.ToString(), *Enemy->GetName());
 			ReleaseEnemy(Enemy);
 			++SnapFailCount;
 			continue;
