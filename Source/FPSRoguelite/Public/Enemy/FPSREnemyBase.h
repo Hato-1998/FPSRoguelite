@@ -36,10 +36,10 @@ struct FFPSRServerAttackContext
 	AFPSRCharacter* TargetChar = nullptr;
 	/** That player's controller (ranged-target warning RPC target). May be null. */
 	AFPSRPlayerController* TargetController = nullptr;
-	/** That player's world location. */
+	/** That player's world location. The ranged cycle derives its OWN 3D engage distance from this (DistSquared vs.
+	 *  RangedEngageRange) rather than taking a precomputed scalar — the subsystem's nearest-player metric is XY-only,
+	 *  so a squared-distance field here would silently be the wrong measure for an engage gate on overlapping decks. */
 	FVector TargetLocation = FVector::ZeroVector;
-	/** Squared XY distance to the target (matches the subsystem's nearest-player metric). */
-	float DistSqToTarget = 0.0f;
 };
 
 /** Per-pass movement context the spawn subsystem hands to TickServerMovement (ADR 0008 — FFPSRServerAttackContext's

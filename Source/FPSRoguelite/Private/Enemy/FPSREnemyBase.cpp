@@ -366,8 +366,11 @@ void AFPSREnemyBase::Activate(const FVector& Location)
 	SeekTargetZ = 0.0f;
 	bSeekTargetZValid = false;
 	bLastForwardBlocked = false;
-	LastAttackTime = -1000.0f; // CanAttack's own cooldown gate reads this (unrelated to the dormant pursuit fields
-	                           // above) — reset so a reused actor doesn't inherit a prior life's cooldown clock
+	LastAttackTime = -1000.0f; // Stamped by NotifyAttacked on every successful ranged shot. ADR 0013 C0 removed its
+	                           // last LIVE reader with the melee CanAttack cooldown gate, so it now feeds only the
+	                           // pursuit stall detector — which ADR 0009 retired but kept armed (see the dormant
+	                           // pursuit fields above). Still reset here: a reused actor must not hand a prior life's
+	                           // attack clock to the stall detector if that path is ever re-armed.
 	AttackAnimHoldUntil = -1.0f; // same reasoning as LastAttackTime just above — a reused actor must not inherit a
 	                             // prior life's walk/idle-suppression window (a short-lived corpse reused shortly
 	                             // after dwelling could otherwise spawn already "holding" for its remaining span)

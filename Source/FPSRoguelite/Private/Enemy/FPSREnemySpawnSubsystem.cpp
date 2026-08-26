@@ -586,9 +586,9 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 			{
 				// Attack decision: AFPSREnemyBase::ServerTickAttack's ranged charge->fire cycle (promoted from the
 				// retired AFPSRRangedEnemyBase, ADR 0013 C1 — every enemy has been ranged since f5b0a78d, so this is
-				// no longer a per-subclass override). DistSqToTarget (below) is the XY nearest-player test, which
-				// ignores Z — the vertical gap (computed above) doesn't feed an attack gate, only the movement
-				// stop-gate.
+				// no longer a per-subclass override). Neither BestDistSq nor the vertical gap (both computed above)
+				// feeds an attack gate any more — they are XY-only / stop-gate inputs, and the ranged cycle measures
+				// its own 3D distance to TargetLocation against RangedEngageRange.
 				if (AFPSRCharacter* TargetChar = Cast<AFPSRCharacter>(PlayerPawns[BestPlayerIndex]))
 				{
 					FFPSRServerAttackContext AttackCtx;
@@ -597,7 +597,6 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 					AttackCtx.TargetChar = TargetChar;
 					AttackCtx.TargetController = Cast<AFPSRPlayerController>(TargetChar->GetController());
 					AttackCtx.TargetLocation = BestPlayerLocation;
-					AttackCtx.DistSqToTarget = BestDistSq;
 					Enemy->ServerTickAttack(AttackCtx);
 				}
 			}
