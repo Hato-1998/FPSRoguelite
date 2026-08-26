@@ -104,7 +104,11 @@ public:
 	 *  얻지 못하고 **타겟의 방향 경고 UI 가 전환 내내 화면에 남는다**. 적은 이월되지 파괴되지 않으므로 기존
 	 *  teardown 경로도 안 걸린다. 상세 = AFPSREnemyBase::ServerCancelRangedForStageTransition
 	 *  (ADR 0013 C1 로 원거리 FSM 이 베이스에 승격되며 AFPSRRangedEnemyBase 에서 이관됨).
-	 *  RequestTransition 에서 미션 취소·탄막 제거와 같은 자리(모든 거부 가드 뒤)에서 부른다. */
+	 *  RequestTransition 에서 미션 취소·탄막 제거와 같은 자리(모든 거부 가드 뒤)에서 부른다.
+	 *
+	 *  ADR 0013 후속 행 3 실행 1: 같은 이유로 같은 루프에서 엘리트의 ASC 도 정리한다(진행 중 어빌리티만 취소,
+	 *  Infinite GE 는 보존 — 상세 = AFPSREnemyEliteBase::ServerResetEliteForStageCarry). 엘리트도 이월되지
+	 *  파괴되지 않으므로 Activate/Deactivate 어느 쪽도 밟지 않는 건 원거리 FSM 과 동일한 사정이다. */
 	void CancelRangedChargesForTransition();
 
 	/** Server (U P-F): reset the director's transient run state for a same-world re-run (StartRun) — drain the trickle

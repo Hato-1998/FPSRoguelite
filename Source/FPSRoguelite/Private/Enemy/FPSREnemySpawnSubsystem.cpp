@@ -2,6 +2,7 @@
 
 #include "Enemy/FPSREnemySpawnSubsystem.h"
 #include "Enemy/FPSREnemyBase.h" // CancelRangedChargesForTransition -> ServerCancelRangedForStageTransition (ADR 0013 C1: promoted here from the retired AFPSRRangedEnemyBase)
+#include "Enemy/FPSREnemyEliteBase.h" // CancelRangedChargesForTransition -> ServerResetEliteForStageCarry (ADR 0013 후속 행 3 실행 1 — 같은 루프에 얹는다)
 #include "Enemy/FPSREnemySpawnPoint.h"
 #include "Enemy/FPSRSpawnRoom.h"
 #include "Enemy/FPSRFlowFieldSubsystem.h"
@@ -1652,6 +1653,16 @@ void UFPSREnemySpawnSubsystem::CancelRangedChargesForTransition()
 			if (Enemy->ServerCancelRangedForStageTransition())
 			{
 				++CancelledCount;
+			}
+
+			// ADR 0013 후속 행 3 실행 1: an elite carried over here hits NEITHER Activate() nor Deactivate() (it's
+			// relocated, not torn down/reused — see ServerRelocateForStageCarry), so its ASC needs this SAME loop as
+			// its one teardown-adjacent entry point. Cast is needed here (unlike the ranged FSM above, which lives on
+			// the base): the ASC only exists on the elite tier. See AFPSREnemyEliteBase::ServerResetEliteForStageCarry
+			// for why in-progress abilities are cancelled but active (Infinite) GEs are deliberately left alone.
+			if (AFPSREnemyEliteBase* Elite = Cast<AFPSREnemyEliteBase>(Enemy))
+			{
+				Elite->ServerResetEliteForStageCarry();
 			}
 		}
 	}
