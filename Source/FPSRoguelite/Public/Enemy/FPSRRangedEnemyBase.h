@@ -50,8 +50,9 @@ public:
 	 *  instant the enemy actually dies. */
 	virtual void EnterDyingState() override;
 
-	/** Server: per-pass charge->fire cycle (replaces the base melee contact decision). */
-	virtual EFPSRServerAttackResult ServerTickAttack(const FFPSRServerAttackContext& Ctx) override;
+	/** Server: per-pass charge->fire cycle (the base itself has no attack decision — dead melee axis removed,
+	 *  ADR 0013 C0). */
+	virtual void ServerTickAttack(const FFPSRServerAttackContext& Ctx) override;
 
 	/** Server: 스테이지 전환이 **시작될 때** 진행 중이던 충전을 취소한다 (사용자 결정 2026-08-26).
 	 *

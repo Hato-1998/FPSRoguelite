@@ -14,7 +14,6 @@
 #include "Core/FPSRGameState.h"
 #include "Core/FPSRPlayerState.h"
 #include "Core/FPSRPlayerController.h"
-#include "Run/FPSRRunDirectorSubsystem.h"
 #include "Settings/FPSREnemySwarmSettings.h" // separation tuning (designer knob, read once per movement pass)
 #include "Arena/FPSRArenaActor.h" // ADR 0010 D6: arena-bounds spawn gate (PassesCommonSpawnGates)
 #include "Engine/World.h"
@@ -387,10 +386,6 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 		return;
 	}
 
-	// Per-player attacker counters for this pass (attack token gating).
-	TArray<int32, TInlineAllocator<4>> AttackersThisPass;
-	AttackersThisPass.Init(0, PlayerPawns.Num());
-
 	// Global freeze (card selection) OR an active stage transition (ADR 0010 D6): enemies are frozen in place — skip
 	// the whole movement+attack pass. During a transition the frozen swarm IS the grace-window reward (안 G) — the
 	// player grinds down enemies that cannot move or fight back, so freezing them here (not just their damage output)
@@ -400,23 +395,6 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 	if (bFrozen)
 	{
 		return;
-	}
-
-	// Time-scaled contact damage, computed ONCE per pass (one global scalar — keeps the swarm a batch, no per-enemy
-	// state): 25 for the first minute, linear ramp 25->50 by BossTime, 50 thereafter (incl. the boss phase, where the
-	// run clock is pinned at BossTime). Overrides the per-enemy AttackDamage for the player-contact path.
-	float ContactDamage = 25.0f;
-	{
-		const float RunClock = GameState ? GameState->GetRunClockSeconds() : 0.0f;
-		float BossTime = 300.0f;
-		if (const UFPSRRunDirectorSubsystem* Director = World->GetSubsystem<UFPSRRunDirectorSubsystem>())
-		{
-			BossTime = Director->GetBossTime();
-		}
-		constexpr float RampStart = 60.0f;
-		const float RampEnd = FMath::Max(BossTime, RampStart + 1.0f);
-		const float Alpha = FMath::Clamp((RunClock - RampStart) / (RampEnd - RampStart), 0.0f, 1.0f);
-		ContactDamage = FMath::Lerp(25.0f, 50.0f, Alpha);
 	}
 
 	// Separation tuning, snapshotted ONCE per pass (designer knob, read at use so PIE edits hit enemies already on
@@ -587,9 +565,9 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 			Enemy->SetNetUpdateFrequency(NetFreq);
 		}
 
-		// Vertical (Z) gap to the nearest player — used BOTH by the attack gate (no through-floor melee) and by the
-		// movement stop-gate below (folded into the 3D stop distance for overlapping decks, U7), so it stays at loop-body
-		// scope rather than inside the throttled attack block.
+		// Vertical (Z) gap to the nearest player — feeds the movement stop-gate below (folded into the 3D stop
+		// distance for overlapping decks, U7); stays at loop-body scope for that reason (the melee attack gate that
+		// used to also read this was removed as dead code, ADR 0013 C0 — see AFPSREnemyBase::ServerTickAttack).
 		const float AttackVertGap = FMath::Abs(EnemyLocation.Z - BestPlayerLocation.Z);
 
 		// Attack decision, gated FIRST by front-connectivity eligibility (U P-D) then throttled by AttackStride (perf, merged
@@ -607,8 +585,10 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 			// ranged charge/cooldown accumulators stay wall-clock-correct. Freeze preserved: the whole pass early-returns while paused.
 			if (((MovementFrameCounter + static_cast<int32>(Enemy->GetUniqueID())) % AttackStride) == 0)
 			{
-				// Per-archetype attack decision: melee contact for the base, ranged charge->fire for AFPSRRangedEnemyBase. The
-				// XY nearest test ignores Z, so use the vertical gap (computed above, no through-floor melee) as a gate.
+				// Per-archetype attack decision: the base has none of its own (dead melee axis removed, ADR 0013 C0);
+				// ranged charge->fire for AFPSRRangedEnemyBase. DistSqToTarget (below) is the XY nearest-player test,
+				// which ignores Z — the vertical gap (computed above) no longer feeds an attack gate, only the
+				// movement stop-gate.
 				if (AFPSRCharacter* TargetChar = Cast<AFPSRCharacter>(PlayerPawns[BestPlayerIndex]))
 				{
 					FFPSRServerAttackContext AttackCtx;
@@ -618,13 +598,7 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 					AttackCtx.TargetController = Cast<AFPSRPlayerController>(TargetChar->GetController());
 					AttackCtx.TargetLocation = BestPlayerLocation;
 					AttackCtx.DistSqToTarget = BestDistSq;
-					AttackCtx.bVerticalInRange = (AttackVertGap <= AttackVerticalRange);
-					AttackCtx.ContactDamage = ContactDamage;
-					AttackCtx.bMeleeTokenAvailable = (AttackersThisPass[BestPlayerIndex] < AttackTokenLimit);
-					if (Enemy->ServerTickAttack(AttackCtx) == EFPSRServerAttackResult::MeleeAttacked)
-					{
-						++AttackersThisPass[BestPlayerIndex];
-					}
+					Enemy->ServerTickAttack(AttackCtx);
 				}
 			}
 		}
@@ -633,8 +607,8 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 			// No attack-eligible target — NO same-map player (this enemy's map emptied) or a cross-slot front-chaser (MOVEMENT
 			// only, U P-D). Tick the archetype with an EMPTY-target context so its attack FSM still advances: a ranged enemy
 			// mid-charge whose target crossed a boundary / died ABORTS + releases its charge token + clears its client warning
-			// instead of freezing. The base melee no-ops on the null target, and no damage lands (null target), so this never
-			// hits across a boundary wall. Cheap: one no-op virtual call per targetless enemy.
+			// instead of freezing. The base itself has no attack of its own (dead melee axis removed, ADR 0013 C0) and simply
+			// no-ops here. Cheap: one no-op virtual call per targetless enemy.
 			FFPSRServerAttackContext AttackCtx;
 			AttackCtx.Now = Now;
 			AttackCtx.DeltaSeconds = DeltaTime;

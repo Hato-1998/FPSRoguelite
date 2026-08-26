@@ -316,9 +316,6 @@ private:
 	// feedback 2026-08-21: the constexpr pair here made crowd spacing a recompile). Cell size for the spatial hash
 	// == the settings' SeparationRadius, snapshotted ONCE per movement pass so hash build and query always agree.
 
-	/** Max enemies allowed to deal contact damage to a single player per pass (attack token, Game.MD §2-6/§5). */
-	static constexpr int32 AttackTokenLimit = 10;
-
 	/** Max CONCURRENT ranged chargers per player (held attack token, Game.MD §2-6). Unlike the melee per-pass token,
 	 *  this is held for the whole charge so it bounds simultaneous ranged threats AND in-flight enemy projectiles
 	 *  (the primary projectile-pool limiter). Balance value (tune later). */
@@ -331,10 +328,6 @@ private:
 	 *  survives a stage swap and is only cleaned by the next full-release flow (run reset / mission release). The
 	 *  keys are TObjectKey so nothing collides; do not read this map assuming per-stage clearing. */
 	TMap<TObjectKey<AFPSRPlayerController>, int32> RangedChargeCountByPlayer;
-
-	/** Max vertical (Z) gap for a contact attack to land — stops an airborne/rooftop or falling enemy from
-	 *  damaging a player through a floor when only horizontal (XY) distance is in range (Codex review 2026-06-09). */
-	static constexpr float AttackVerticalRange = 150.0f; // cm (covers capsule heights + a small step)
 
 	/** While an enemy's actor Z is more than this BELOW the player's, it is still climbing UP toward the player (e.g.
 	 *  a stair to an overlapping upper deck, U7 multi-layer) and must NOT be halted by the stop-gate — otherwise, with

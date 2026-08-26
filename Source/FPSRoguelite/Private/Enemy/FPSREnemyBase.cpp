@@ -743,7 +743,7 @@ void AFPSREnemyBase::HandleDeathCosmetic()
 	SetHealthBarVisible(false);
 }
 
-EFPSRServerAttackResult AFPSREnemyBase::ServerTickAttack(const FFPSRServerAttackContext& Ctx)
+void AFPSREnemyBase::ServerTickAttack(const FFPSRServerAttackContext& Ctx)
 {
 	// Defensive: A-2 (UFPSREnemySpawnSubsystem::BeginDying) already makes this structurally unreachable — a dying
 	// enemy is pulled OUT of ActiveEnemies the instant HandleDeath runs, and the subsystem's per-pass loop only ever
@@ -752,29 +752,13 @@ EFPSRServerAttackResult AFPSREnemyBase::ServerTickAttack(const FFPSRServerAttack
 	// dead-enemy-attacks bug. Cheap: one bool check per pass.
 	if (HealthComponent && HealthComponent->IsDead())
 	{
-		return EFPSRServerAttackResult::None;
+		return;
 	}
 
-	// Melee contact attack: in horizontal range + within the vertical gap (no through-floor hits) + cooldown elapsed
-	// + the target player's attack-token budget allows. Behaviour-identical refactor of the spawn subsystem's former
-	// inline attack block — the subsystem now delegates the decision here so ranged archetypes can override it.
-	if (Ctx.TargetChar
-		&& Ctx.DistSqToTarget <= (AttackRange * AttackRange)
-		&& Ctx.bVerticalInRange
-		&& CanAttack(Ctx.Now)
-		&& Ctx.bMeleeTokenAvailable)
-	{
-		Ctx.TargetChar->ApplyContactDamage(Ctx.ContactDamage, this);
-		NotifyAttacked(Ctx.Now);
-		// Authority-side attack anim tell (U20) — drives the listen-server host / standalone render. Clients derive
-		// their own attack tell from proximity in PostNetReceiveLocationAndRotation. AttackAnimHoldUntil (server
-		// lifecycle hold) keeps this state through TickServerMovement's walk/idle branch for AttackAnimHoldSeconds,
-		// so the one-shot is actually visible instead of the very next movement pass overwriting it.
-		SetAnimState(EFPSRAnimState::Attack);
-		AttackAnimHoldUntil = Ctx.Now + AttackAnimHoldSeconds;
-		return EFPSRServerAttackResult::MeleeAttacked;
-	}
-	return EFPSRServerAttackResult::None;
+	// The melee contact attack (in range + vertical gap + cooldown + melee token) that used to live here was removed
+	// as dead code: every enemy BP has been ranged since f5b0a78d (2026-08-14, "전 몬스터 원거리화"), so this base
+	// decision never actually ran (ADR 0013 C0). The base itself has no attack of its own; ranged archetypes override
+	// this to drive their own charge->fire cycle instead.
 }
 
 void AFPSREnemyBase::TickServerMovement(const FFPSRServerMoveContext& Ctx)

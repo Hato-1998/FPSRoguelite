@@ -18,22 +18,15 @@ class APlayerController;
 class UFPSREnemyAnimProfile;
 class UFPSRFlowFieldSubsystem;
 
-/** Outcome of a per-pass server attack decision, returned to the spawn subsystem so it can account the melee
- *  attack token. Ranged archetypes manage their own (held) token directly and return None. */
-enum class EFPSRServerAttackResult : uint8
-{
-	None,
-	MeleeAttacked,
-};
-
 /** Per-pass batch context the spawn subsystem hands to each enemy's ServerTickAttack. The subsystem owns target
- *  selection (nearest ALIVE player), the per-pass freeze gate (this is never called while run-paused), and the
- *  attack-token budgets; the enemy archetype owns the attack DECISION (melee contact vs. ranged charge->fire).
+ *  selection (nearest ALIVE player) and the per-pass freeze gate (this is never called while run-paused); the enemy
+ *  archetype owns the attack DECISION (a ranged charge->fire cycle — the melee contact axis this struct used to
+ *  also serve was removed as dead code post-f5b0a78d, ADR 0013 C0: every enemy has been ranged since that commit).
  *  DeltaSeconds is the real frame delta — it only accrues on non-frozen passes, so charge/cooldown accumulators
  *  built on it are freeze-paused for free. */
 struct FFPSRServerAttackContext
 {
-	/** World time this pass (AFPSREnemyBase::CanAttack cooldown reference). */
+	/** World time this pass (attack cooldown / charge-cycle reference). */
 	float Now = 0.0f;
 	/** Real frame delta for this pass (ranged charge/cooldown accumulators). */
 	float DeltaSeconds = 0.0f;
@@ -45,12 +38,6 @@ struct FFPSRServerAttackContext
 	FVector TargetLocation = FVector::ZeroVector;
 	/** Squared XY distance to the target (matches the subsystem's nearest-player metric). */
 	float DistSqToTarget = 0.0f;
-	/** True if the vertical gap to the target is within the contact range (no through-floor melee hits). */
-	bool bVerticalInRange = false;
-	/** Time-scaled per-pass contact damage (melee). */
-	float ContactDamage = 0.0f;
-	/** True if the target player's per-pass melee attack-token budget still allows one more attacker. */
-	bool bMeleeTokenAvailable = false;
 };
 
 /** Per-pass movement context the spawn subsystem hands to TickServerMovement (ADR 0008 — FFPSRServerAttackContext's
@@ -202,7 +189,6 @@ public:
 	float GetCurrentHoverHeight() const { return CurrentHoverHeight; }
 
 	float GetAttackRange() const { return AttackRange; }
-	float GetAttackDamage() const { return AttackDamage; }
 
 	/** The enemy's non-GAS health component — exposed so the on-damage HP bar (B11) and floating damage numbers (B20)
 	 *  WBPs can bind OnHealthChanged (client-fired via B12) and read GetHealth()/GetMaxHealth(). */
@@ -223,17 +209,15 @@ public:
 	 *  dirties the render state. */
 	void SetShadowCasting(bool bEnabled);
 
-	/** Server: true if the attack cooldown has elapsed at time Now. */
-	bool CanAttack(float Now) const { return (Now - LastAttackTime) >= AttackInterval; }
-
 	/** Server: stamp the time of an attack (called by the movement/attack subsystem). */
 	void NotifyAttacked(float Now) { LastAttackTime = Now; }
 
 	/** Server: per-pass attack decision, called by the spawn subsystem's batched pass for this enemy's nearest alive
-	 *  player. Base = melee contact damage (in range + vertical gap + cooldown + melee token). Ranged archetypes
-	 *  override this to drive a charge->fire cycle instead. Returns whether a melee token was consumed so the
-	 *  subsystem can account it. Never called while the run is globally frozen (the pass early-returns). */
-	virtual EFPSRServerAttackResult ServerTickAttack(const FFPSRServerAttackContext& Ctx);
+	 *  player. The base has no attack decision of its own — the melee contact axis (in range + vertical gap +
+	 *  cooldown + melee token) was removed as dead code (every enemy has been ranged since f5b0a78d, ADR 0013 C0);
+	 *  ranged archetypes override this to drive their own charge->fire cycle. Never called while the run is
+	 *  globally frozen (the pass early-returns). */
+	virtual void ServerTickAttack(const FFPSRServerAttackContext& Ctx);
 
 	/** Server: add a knockback impulse (cm/s, from an explosion). The horizontal part decays over KnockbackDecayTime
 	 *  while applied each movement tick; the vertical part feeds the gravity integrator so the enemy arcs up and
@@ -425,12 +409,6 @@ protected:
 
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Enemy|Attack")
 	float AttackRange = 150.0f;
-
-	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Enemy|Attack")
-	float AttackDamage = 8.0f;
-
-	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Enemy|Attack")
-	float AttackInterval = 1.0f;
 
 	/** Server-only: world time of last attack (init far in the past so the first attack is allowed). */
 	float LastAttackTime = -1000.0f;

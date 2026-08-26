@@ -99,18 +99,17 @@ bool AFPSRRangedEnemyBase::ServerCancelRangedForStageTransition()
 	return bWasActive;
 }
 
-EFPSRServerAttackResult AFPSRRangedEnemyBase::ServerTickAttack(const FFPSRServerAttackContext& Ctx)
+void AFPSRRangedEnemyBase::ServerTickAttack(const FFPSRServerAttackContext& Ctx)
 {
 	// Defensive — see AFPSREnemyBase::ServerTickAttack's identical guard for why this is added despite being
 	// structurally unreachable today (BeginDying already removes a dying enemy from the subsystem's per-pass set).
 	if (HealthComponent && HealthComponent->IsDead())
 	{
-		return EFPSRServerAttackResult::None;
+		return;
 	}
 
 	// The subsystem already early-returns the whole pass while the run is frozen, so DeltaSeconds only accrues during
-	// active gameplay — the charge/cooldown accumulators below are freeze-paused for free. Ranged never deals melee
-	// contact damage, so we always return None (no melee token consumed).
+	// active gameplay — the charge/cooldown accumulators below are freeze-paused for free.
 	const float Dt = Ctx.DeltaSeconds;
 	const bool bHaveTarget = (Ctx.TargetChar != nullptr) && (Ctx.TargetController != nullptr);
 	const bool bInRange = bHaveTarget
@@ -195,8 +194,6 @@ EFPSRServerAttackResult AFPSRRangedEnemyBase::ServerTickAttack(const FFPSRServer
 		break;
 	}
 	}
-
-	return EFPSRServerAttackResult::None;
 }
 
 void AFPSRRangedEnemyBase::FireProjectile(const FFPSRServerAttackContext& Ctx)
