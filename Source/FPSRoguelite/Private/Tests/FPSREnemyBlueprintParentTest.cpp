@@ -112,7 +112,22 @@ bool FFPSREnemyBlueprintParentTest::RunTest(const FString& Parameters)
 			AddError(FString::Printf(TEXT("%s: ProjectileClass property not found by reflection — renamed or removed?"), *AssetName));
 		}
 
-		UE_LOG(LogFPSR, Log, TEXT("[Test] BlueprintParent: %s StopDistance=%.1f"), *AssetName, Cdo->GetStopDistance());
+		// (e) The OTHER redirect these assets depend on: DefaultEngine.ini maps the deleted
+		// FPSREnemyAnimProfile_VAT_CPD onto FPSREnemyAnimProfile_Proc, and BP_EnemyRangedBase still loads through it.
+		// A null AnimProfile is LEGAL (it means the whole cosmetic anim path stays dormant), so this is logged rather
+		// than asserted — but if that redirect ever stops firing, the class name here changes or goes empty, and this
+		// line is the only place that would say so before someone opens the editor.
+		FString AnimProfileClassName = TEXT("<null>");
+		if (const FObjectProperty* AnimProp = FindFProperty<FObjectProperty>(LoadedClass, TEXT("AnimProfile")))
+		{
+			if (const UObject* Profile = AnimProp->GetObjectPropertyValue_InContainer(Cdo))
+			{
+				AnimProfileClassName = Profile->GetClass()->GetName();
+			}
+		}
+
+		UE_LOG(LogFPSR, Log, TEXT("[Test] BlueprintParent: %s StopDistance=%.1f AnimProfile=%s"),
+			*AssetName, Cdo->GetStopDistance(), *AnimProfileClassName);
 	}
 
 	return true;
