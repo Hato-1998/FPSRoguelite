@@ -3,17 +3,23 @@
 #pragma once
 
 #include "AbilitySystemInterface.h"
+#include "GameplayAbilitySpecHandle.h" // TArray<FGameplayAbilitySpecHandle> GrantedAbilityHandles
 #include "Enemy/FPSREnemyBase.h"
 #include "FPSREnemyEliteBase.generated.h"
 
 class UFPSRAbilitySystemComponent;
+class UFPSREliteGameplayAbility;
+struct FActiveGameplayEffectsContainer;
+struct FGameplayEffectSpec;
 
-/** Elite tier (ADR 0013: Docs/Architecture/0013-enemy-tier-axis-and-elite-gas.md §「결정」, 후속 행 3 실행 1 —
- *  엘리트 ASC 실부착 + 4중 수명주기 폐쇄). Still the SAME movement/attack/pooling/net-cull behavior as
- *  AFPSREnemyBase — no virtual IsElite()-style seam, no dedicated net-cull radius (FPSRoguelite.Enemy.NetCull
- *  still assumes a UNIFORM radius across the whole swarm, ADR 0013 반론 ②, which 후속 행 3 hasn't revisited yet),
- *  no elite concurrency-cap accounting (그건 사양 B). The ONLY divergence from the plain tier added here is an
- *  AbilitySystemComponent, so elite-only GAS abilities (뒤따르는 실행 2) have somewhere to run.
+/** Elite tier (ADR 0013: Docs/Architecture/0013-enemy-tier-axis-and-elite-gas.md §「결정」, 후속 행 3 실행 1+2 —
+ *  엘리트 ASC 실부착 + 4중 수명주기 폐쇄 + 어빌리티 부여 시임 + 프리즈-멈춤 쿨다운). Still the SAME
+ *  movement/attack/pooling/net-cull behavior as AFPSREnemyBase — no virtual IsElite()-style seam, no dedicated
+ *  net-cull radius (FPSRoguelite.Enemy.NetCull still assumes a UNIFORM radius across the whole swarm, ADR 0013
+ *  반론 ②, which 후속 행 3 hasn't revisited yet), no elite concurrency-cap accounting (그건 사양 B). The
+ *  divergence from the plain tier added here is an AbilitySystemComponent + a content-authored ability list
+ *  (GrantedAbilities) for elite-only GAS abilities to run on — still no actual ability/GE CONTENT ships with this
+ *  class itself (that's a content-team job; see GrantedAbilities' own comment).
  *
  *  🔴 왜 이 클래스에 UAttributeSet 서브클래스가 없는가 (사용자 결정 — ADR 문구에서 의도적 이탈, 재해석 금지):
  *  체력은 계속 UFPSREnemyHealthComponent 에 남는다 — D1 데미지 브릿지(FPSRCombatStatics::ResolveDamage/
@@ -72,6 +78,19 @@ public:
 	 *  가상함수가 아니다). */
 	void ServerResetEliteForStageCarry();
 
+	/** Server: Super::ServerTickAttack(Ctx) 뒤에 프리즈-멈춤 누산기(EliteCooldownClockSeconds)를 Ctx.DeltaSeconds
+	 *  만큼 쌓는다 — UFPSREliteGameplayAbility::CheckCooldown/ApplyCooldown 이 읽는 유일한 시계다. ⚠️
+	 *  ServerTickAttack 은 타겟이 없는 패스에서도(빈 컨텍스트) 매번 불리므로(UFPSREnemySpawnSubsystem 의
+	 *  두 호출 지점 — 타겟 있음/없음 분기 둘 다) 이 누산은 **조건 없이** 두 분기 모두에서 돌아야 한다: 어느
+	 *  한쪽에서만 쌓으면 그 분기에 머무는 동안 쿨다운이 멈춰버린다. 프리즈-정확한 이유는 Ctx.DeltaSeconds 자체가
+	 *  그렇기 때문이다 — 서브시스템이 런 전역 프리즈 중엔 공격 패스 전체를 early-return 해서 이 함수 호출 자체가
+	 *  생기지 않는다(원거리 차징 누산기가 쓰는 바로 그 관용구). */
+	virtual void ServerTickAttack(const FFPSRServerAttackContext& Ctx) override;
+
+	/** UFPSREliteGameplayAbility 가 읽는 프리즈-멈춤 누산기 값(위 ServerTickAttack 참조). 서로 다른 UObject
+	 *  계층(어빌리티는 이 액터의 서브클래스가 아니다)이라 public 접근자가 필요하다. */
+	float GetEliteCooldownClockSeconds() const { return EliteCooldownClockSeconds; }
+
 protected:
 	/** ASC 오너/아바타 초기화 — 오너=아바타=자기 자신(this, this). 적은 AFPSRPlayerState 같은 오너가 없다
 	 *  (플레이어는 PlayerState 가 ASC 를 소유하고 캐릭터가 아바타인 소유/아바타 분리 패턴이지만, 엘리트는 그
@@ -79,7 +98,12 @@ protected:
 	 *  액터"가 없다) — 이 액터의 진짜 수명 전체에 딱 한 번만 도는 PostInitializeComponents 가 유일하고 올바른
 	 *  호출 지점이다: 풀 재사용(Activate/Deactivate)은 같은 액터 인스턴스를 반복 재활용할 뿐 오너·아바타는
 	 *  절대 바뀌지 않으므로 재호출이 불필요하다(BeginPlay/EndPlay 가 "실제 수명당 1회"인 것과 동일한 근거,
-	 *  AFPSREnemyBase::EndPlay 의 S4 등록 해제 주석 참조). */
+	 *  AFPSREnemyBase::EndPlay 의 S4 등록 해제 주석 참조).
+	 *
+	 *  실행 2: 여기서 시간축 런타임 가드도 함께 등록한다(AbilitySystem->GameplayEffectApplicationQueries.Add) —
+	 *  HasDuration 이거나 Period > 0 인 GE 의 **적용 자체를 엔진 레벨에서 차단**한다(RejectTimeBasedGameplayEffect
+	 *  참조). 마찬가지로 실제 액터당 1회면 충분: 콜백은 이 액터 인스턴스에 바인딩되고(CreateUObject), 델리게이트
+	 *  배열 자체가 이 ASC 인스턴스 소유라 풀 재사용으로 사라지지 않는다. */
 	virtual void PostInitializeComponents() override;
 
 	/** 소유자 = 액터 자신(CreateDefaultSubobject, 플레이어의 PlayerState 소유 패턴과 다름 — 위 클래스 주석
@@ -90,4 +114,33 @@ protected:
 	 *  Mixed 인 이유도 같은 문장의 앞부분이다(FPSRPlayerState.cpp). */
 	UPROPERTY(VisibleAnywhere, Category = "FPSR|Enemy|Elite")
 	TObjectPtr<UFPSRAbilitySystemComponent> AbilitySystem;
+
+	/** 콘텐츠(기획)가 이 엘리트에 저작하는 어빌리티 목록 — ADR 0013 후속 행 3 실행 2 검증 시나리오 4단계가
+	 *  요구하는 "콘텐츠가 BP 로 어빌리티를 저작할 방법" 그 자체다(로직 시임이지 콘텐츠가 아니다 — 실제 GE/GA
+	 *  구현체는 이 커밋의 범위 밖). Activate() 가 풀 재사용마다 새로 부여한다(GrantedAbilityHandles 참조). 실제
+	 *  자원 소모·상태이상 등이 필요해지면 그때가 어트리뷰트 셋의 첫 소비자다(클래스 주석 참조). */
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Enemy|Elite")
+	TArray<TSubclassOf<UFPSREliteGameplayAbility>> GrantedAbilities;
+
+private:
+	/** GrantedAbilities 를 지금 부여한 핸들 — Activate() 의 "보관한 핸들 ClearAbility 후 GrantedAbilities 를
+	 *  다시 GiveAbility" 왕복이 여기 저장/조회한다. 서버 전용 ASC 상태라 복제하지 않는다(카드가 부여하는 패시브
+	 *  핸들 — AFPSRPlayerState::CardGrantedAbilityHandles — 과 같은 이유). */
+	TArray<FGameplayAbilitySpecHandle> GrantedAbilityHandles;
+
+	/** 프리즈-멈춤 누산기(초) — ServerTickAttack 이 Ctx.DeltaSeconds 로 쌓는다. UFPSREliteGameplayAbility 가
+	 *  GetEliteCooldownClockSeconds() 로 읽는다. 서버 전용, 복제하지 않는다(원거리 FSM 의 ChargeElapsed/
+	 *  CooldownElapsed 와 같은 성격 — 시각 효과가 아니라 서버 판정용 시계). */
+	float EliteCooldownClockSeconds = 0.0f;
+
+	/** PostInitializeComponents 가 AbilitySystem->GameplayEffectApplicationQueries 에 등록하는 시간축 런타임
+	 *  가드 — `false` 를 돌려주면 그 GE 는 아예 적용되지 못한다(엔진 호출부 =
+	 *  AbilitySystemComponent.cpp — ApplyGameplayEffectSpecToSelf 안의 GameplayEffectApplicationQueries 순회, 하나라도
+	 *  거부하면 즉시 FActiveGameplayEffectHandle() 반환). 거부 조건 = Spec.Def->DurationPolicy == HasDuration
+	 *  **또는** Spec.GetPeriod() > 0 — Period 를 반드시 같이 걸러야 하는 이유: Infinite(무기한) GE 도 Period 를
+	 *  가질 수 있어서(주기적으로 영원히 Execute) DurationPolicy 검사 하나만으로는 새는 구멍이 있다(이게 v1 계약이
+	 *  뚫렸던 지점 — GetPeriod() 는 Instant 이면 강제로 NO_PERIOD 를 돌려주므로 Instant GE 는 이 조건에 안
+	 *  걸린다, GameplayEffect.h). 개발 중에만 ensureMsgf 로 시끄럽게 + 로그 1줄(어떤 GE 가 거부됐는지) — 배포
+	 *  빌드에서는 크래시하지 않는다. */
+	bool RejectTimeBasedGameplayEffect(const FActiveGameplayEffectsContainer& ActiveGEContainer, const FGameplayEffectSpec& Spec) const;
 };
