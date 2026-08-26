@@ -2,6 +2,7 @@
 
 #include "Enemy/FPSREnemySpawnSubsystem.h"
 #include "Enemy/FPSREnemyBase.h"
+#include "Enemy/FPSRRangedEnemyBase.h" // CancelRangedChargesForTransition (전환 시작 시 충전·경고 UI 취소)
 #include "Enemy/FPSREnemySpawnPoint.h"
 #include "Enemy/FPSRSpawnRoom.h"
 #include "Enemy/FPSRFlowFieldSubsystem.h"
@@ -1669,6 +1670,31 @@ void UFPSREnemySpawnSubsystem::ReleaseAllEnemies()
 	RangedChargeCountByPlayer.Reset();
 }
 
+void UFPSREnemySpawnSubsystem::CancelRangedChargesForTransition()
+{
+	if (!HasServerAuthority())
+	{
+		return;
+	}
+
+	// No snapshot needed (unlike the carry-over below): ServerCancelRangedForStageTransition only mutates the enemy's
+	// OWN ranged state — it never releases the actor or touches ActiveEnemies — so iterating the live array is safe.
+	int32 CancelledCount = 0;
+	for (const TObjectPtr<AFPSREnemyBase>& EnemyPtr : ActiveEnemies)
+	{
+		if (AFPSRRangedEnemyBase* Ranged = Cast<AFPSRRangedEnemyBase>(EnemyPtr.Get()))
+		{
+			if (Ranged->ServerCancelRangedForStageTransition())
+			{
+				++CancelledCount;
+			}
+		}
+	}
+
+	UE_LOG(LogFPSR, Log, TEXT("[Spawn] CancelRangedChargesForTransition: cancelled %d in-progress ranged charge(s)."),
+		CancelledCount);
+}
+
 void UFPSREnemySpawnSubsystem::CarryEnemiesToNewStage(const TArray<FVector>& OldPlayerLocs, const TArray<FVector>& NewPlayerLocs, float CarryMaxFraction)
 {
 	if (!HasServerAuthority())
@@ -1753,9 +1779,6 @@ void UFPSREnemySpawnSubsystem::CarryEnemiesToNewStage(const TArray<FVector>& Old
 	// Nearest-to-a-new-player first; the excess (index >= MaxCarry, once sorted) is released farthest-first (A4).
 	Candidates.Sort([](const FCarryCandidate& A, const FCarryCandidate& B) { return A.RankDistSq < B.RankDistSq; });
 
-	// A4 call-site constant: ~200 calls/transition budget, MaxRadiusCells 16 recommended.
-	constexpr int32 CarrySnapMaxRadiusCells = 16;
-
 	int32 CarriedCount = 0;
 	int32 SnapFailCount = 0;
 	for (int32 i = 0; i < Candidates.Num(); ++i)
@@ -1768,11 +1791,14 @@ void UFPSREnemySpawnSubsystem::CarryEnemiesToNewStage(const TArray<FVector>& Old
 		}
 
 		FVector SnapLoc;
-		if (!FlowField || !FlowField->FindNearestOpenLocation(Candidates[i].CandidateLoc, CarrySnapMaxRadiusCells, SnapLoc))
+		// merge-gate P3 교정: UFPSRFlowFieldSubsystem::CarrySnapMaxRadiusCells 하나가 이 반경을
+		// UFPSRPickupSubsystem::CarryPickupsToNewStage 와 공유한다 — "젬이 자기를 떨군 적과 같은 반경에
+		// 스냅된다"는 계약을 한 곳에서 강제(이전엔 각자 로컬 constexpr 16 을 들고 "kept identical" 주석만 믿었다).
+		if (!FlowField || !FlowField->FindNearestOpenLocation(Candidates[i].CandidateLoc, UFPSRFlowFieldSubsystem::CarrySnapMaxRadiusCells, SnapLoc))
 		{
 			UE_LOG(LogFPSR, Verbose,
 				TEXT("[Spawn] CarryEnemiesToNewStage: no open cell within %d cells of %s — releasing %s instead of carrying it."),
-				CarrySnapMaxRadiusCells, *Candidates[i].CandidateLoc.ToString(), *Enemy->GetName());
+				UFPSRFlowFieldSubsystem::CarrySnapMaxRadiusCells, *Candidates[i].CandidateLoc.ToString(), *Enemy->GetName());
 			ReleaseEnemy(Enemy);
 			++SnapFailCount;
 			continue;

@@ -53,6 +53,23 @@ public:
 	/** Server: per-pass charge->fire cycle (replaces the base melee contact decision). */
 	virtual EFPSRServerAttackResult ServerTickAttack(const FFPSRServerAttackContext& Ctx) override;
 
+	/** Server: 스테이지 전환이 **시작될 때** 진행 중이던 충전을 취소한다 (사용자 결정 2026-08-26).
+	 *
+	 *  이게 필요한 이유 — 전환 중에는 UFPSREnemySpawnSubsystem 이 공격 패스 **전체를 early-return** 하므로
+	 *  (IsStageTransitionActive), 충전 중이던 원거리 적은 ServerTickAttack 에 다시 들어오지 못한다. 그래서
+	 *  ReleaseRangedHold 를 부르는 경로가 하나도 밟히지 않고, 타겟 플레이어의 **방향 경고 표시가 전환 내내
+	 *  화면에 남는다**(그 함수 주석이 이미 경고하는 "안 보내면 영원히 남는다"가 실제로 일어난 것).
+	 *  기존 teardown 경로(Deactivate / EnterDyingState / EndPlay)는 전부 적이 *사라질* 때만 도는데,
+	 *  전환에서 적은 사라지지 않고 **이월**되므로 그 어느 것도 안 걸린다.
+	 *
+	 *  Deactivate/EnterDyingState 와 **같은 쌍**(ReleaseRangedHold + ResetRangedCycle)을 부른다 — 사이클까지
+	 *  되감아야 스왑 뒤에 그 적이 **텔레그래프 없이 곧장 쏘는** 일이 없다(경고를 지웠는데 충전은 이어지면
+	 *  예고 없는 사격이 된다). 취소된 적은 새 아레나에서 토큰을 다시 얻고 처음부터 충전한다.
+	 *
+	 *  **실제로 취소할 게 있었으면 true.** 호출자가 로그에 개수를 찍을 수 있게 상태를 노출하는 대신 결과를
+	 *  돌려준다(bCharging/ChargeState 는 계속 protected/private 로 둔다). 유휴 상태에서 불러도 안전하다. */
+	bool ServerCancelRangedForStageTransition();
+
 protected:
 	/** World teardown / level change: ensure the warning is cleared + the token released. */
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;

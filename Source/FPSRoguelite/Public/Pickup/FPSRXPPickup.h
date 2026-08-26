@@ -21,12 +21,18 @@ public:
 	/** Server: set the XP this gem grants on collection (called by the pickup subsystem on spawn). */
 	void SetXPValue(int32 InValue) { XPValue = InValue; }
 
+	/** Server: 스테이지 스왑 때 이 젬을 새 아레나의 대응 위치로 옮긴다
+	 *  (UFPSRPickupSubsystem::CarryPickupsToNewStage). AFPSREnemyBase::ServerRelocateForStageCarry 와 같은 역할. */
+	void ServerRelocateForStageCarry(const FVector& NewLocation);
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void Tick(float DeltaSeconds) override;
 
-	/** Server: bank this gem to Collector (their XPGain multiplier applied) and destroy it. The single collect path,
-	 *  shared by the normal radius collect and the stage-transition instant collect (ADR 0010 D6). */
+	/** Server: bank this gem to Collector (their XPGain multiplier applied) and destroy it. The single collect path —
+	 *  now reached only by the normal radius collect in Tick. It used to also serve a stage-transition instant
+	 *  collect (ADR 0010 D6); that caller is gone (사용자 결정 2026-08-25) — a gem caught in a transition now carries
+	 *  over to the new arena instead (see ServerRelocateForStageCarry) and is picked up the normal way afterward. */
 	void CollectBy(class APawn* Collector);
 
 	/** Read the given player's CombatSet PickupRadius multiplier (>=0.01), or 1.0 if unavailable. */

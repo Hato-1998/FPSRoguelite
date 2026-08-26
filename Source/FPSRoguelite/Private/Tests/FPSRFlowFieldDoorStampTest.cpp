@@ -1,6 +1,8 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Misc/AutomationTest.h"
+#include "Arena/FPSRArenaCells.h"
+#include "Arena/FPSRArenaTypes.h"
 #include "Enemy/FPSRFlowFieldComputer.h"
 #include "UObject/StrongObjectPtr.h"
 
@@ -215,6 +217,101 @@ bool FFPSRFlowFieldFrontDistanceTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("B reachable through open door -> OK"), static_cast<int32>(St), static_cast<int32>(EFPSRFieldQuery::OK));
 	TestTrue(TEXT("B farther than A (monotone path distance through the door)"), dB2 > dA2);
 	TestTrue(TEXT("A,B connected after door open"), C->AreWorldLocationsConnected(FVector(50, 50, 0), FVector(350, 50, 0)));
+
+	return true;
+}
+
+// D7 2D destructible-cell stamp: worldless proof for FFPSRArenaCells::ComputeCellsFromBoundsXY, the bounds-to-cell
+// half of the fix that lets AFPSRArenaDestructible's own mesh bounds block 2D flow-field cells the same way
+// FFPSRArenaVoxelData::SetOccupiedAABB already blocks 3D voxels at arena adoption (see
+// UFPSRFlowFieldSubsystem::AdoptArenaFieldInternal's 2D stamp, added alongside this test). Pure grid arithmetic —
+// no world/actor spawn needed, exactly like FFPSRArenaCells::ComputeDestructibleCells above; the actor-bounds
+// source + StampCellBlocked + subsystem wiring is proven in-world (PIE).
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFPSRArenaCellsFromBoundsTest, "FPSRoguelite.FlowField.ArenaCellsFromBounds",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FFPSRArenaCellsFromBoundsTest::RunTest(const FString& Parameters)
+{
+	const FVector ArenaOrigin(-8000.0f, -8000.0f, 0.0f);
+	const float CellSize = 100.0f;
+	const FIntPoint GridDims(160, 160);
+
+	// ---- (1) A 4m box (half-size 200) centered on the world origin covers a clean 5x5=25 block, ascending. ----
+	// Half-size 200 (a 400cm box), NOT the "500cm box = half-size 250" a naive 5m/100cm = "5x5" guess reaches for:
+	// MinCX and MaxCX both use FloorToInt (see ComputeCellsFromBoundsXY), so ANY box whose WIDTH is an exact
+	// multiple of CellSize touches (width/CellSize)+1 cells along that axis, regardless of where it sits relative
+	// to the grid — provably so, since FloorToInt(Max/CS) - FloorToInt(Min/CS) == width/CS for any alignment. A
+	// 500cm box (5x cell size) therefore always touches 6 cells, never 5; 400cm (4x) is what actually lands on 5.
+	{
+		const FBox Box(FVector(-200.0f, -200.0f, -10.0f), FVector(200.0f, 200.0f, 10.0f));
+		TArray<int32> Cells;
+		FFPSRArenaCells::ComputeCellsFromBoundsXY(Box, ArenaOrigin, CellSize, GridDims, Cells);
+
+		TestEqual(TEXT("4m box centered on a grid line covers 25 cells (5x5)"), Cells.Num(), 25);
+		// merge-gate P3 교정: a regression that changes Cells.Num() away from 25 must not ALSO crash this
+		// automation session by indexing Cells[0]/Cells.Last() out of bounds — the verification tool is not
+		// allowed to be the first thing that breaks when the thing it verifies regresses.
+		if (Cells.Num() == 25)
+		{
+			TestEqual(TEXT("first cell is (78,78)"), Cells[0], 78 * GridDims.X + 78);
+			TestEqual(TEXT("last cell is (82,82)"), Cells.Last(), 82 * GridDims.X + 82);
+			for (int32 i = 1; i < Cells.Num(); ++i)
+			{
+				TestTrue(TEXT("cells come out strictly ascending"), Cells[i] > Cells[i - 1]);
+			}
+		}
+	}
+
+	// ---- (2) A box hanging off the grid's negative corner is CLIPPED: negative CX/CY are dropped, not wrapped
+	//      or clamped into range (the untrimmed straddle is CX,CY in {-1,0}, 4 combinations; only (0,0) is
+	//      actually on-grid). ----
+	{
+		const FBox Box(FVector(-8050.0f, -8050.0f, -10.0f), FVector(-7950.0f, -7950.0f, 10.0f));
+		TArray<int32> Cells;
+		FFPSRArenaCells::ComputeCellsFromBoundsXY(Box, ArenaOrigin, CellSize, GridDims, Cells);
+
+		TestEqual(TEXT("off-grid corner box clips down to the single on-grid cell"), Cells.Num(), 1);
+		if (Cells.Num() == 1) // same regression-safety guard as test (1) above — never index on a failed Num()
+		{
+			TestEqual(TEXT("the surviving cell is (0,0)"), Cells[0], 0);
+		}
+	}
+
+	// ---- (3) An invalid box (FBox(ForceInit), the same "no mesh authored" sentinel GetVoxelBounds() returns)
+	//      yields an empty array, not a crash or a spurious full-grid stamp. ----
+	{
+		TArray<int32> Cells;
+		FFPSRArenaCells::ComputeCellsFromBoundsXY(FBox(ForceInit), ArenaOrigin, CellSize, GridDims, Cells);
+		TestEqual(TEXT("invalid box yields no cells"), Cells.Num(), 0);
+	}
+
+	// ---- (4) ComputeDestructibleCells (authored override: anchor + grow +X/+Y only) and ComputeCellsFromBoundsXY
+	//      (auto: bounds centered on that same point) MUST disagree for the same nominal location. Pinning this
+	//      down keeps a future "just call the other one, they're basically the same" refactor from silently
+	//      breaking AFPSRArenaDestructible::ComputeGridCells's branch — the two are deliberately NOT
+	//      interchangeable (see the FootprintCells UPROPERTY comment: an authored footprint anchored at the actor
+	//      only grows toward +X/+Y, while a bounds box grows symmetrically around its center). ----
+	{
+		const FVector Location(-2450.0f, -2450.0f, 0.0f); // local (5550,5550) -> anchor cell (55,55)
+
+		FFPSRArenaAuthoredDestructible Authored;
+		Authored.Location = Location;
+		Authored.FootprintCells = FIntPoint(2, 2);
+		TArray<int32> AnchoredCells;
+		FFPSRArenaCells::ComputeDestructibleCells(Authored, ArenaOrigin, CellSize, GridDims, AnchoredCells);
+
+		const FBox CenteredBox(Location - FVector(100.0f, 100.0f, 10.0f), Location + FVector(100.0f, 100.0f, 10.0f));
+		TArray<int32> BoundsCells;
+		FFPSRArenaCells::ComputeCellsFromBoundsXY(CenteredBox, ArenaOrigin, CellSize, GridDims, BoundsCells);
+
+		TestEqual(TEXT("anchored footprint covers 4 cells (2x2 growing from the anchor)"), AnchoredCells.Num(), 4);
+		TestEqual(TEXT("centered bounds covers 9 cells (3x3 around the center)"), BoundsCells.Num(), 9);
+
+		const int32 CellBelowAnchor = 54 * GridDims.X + 54; // (54,54): -X/-Y of the anchor cell (55,55)
+		TestTrue(TEXT("centered bounds reaches -X/-Y of the anchor"), BoundsCells.Contains(CellBelowAnchor));
+		TestFalse(TEXT("anchored footprint never reaches -X/-Y of its anchor (+X/+Y growth only)"),
+			AnchoredCells.Contains(CellBelowAnchor));
+	}
 
 	return true;
 }

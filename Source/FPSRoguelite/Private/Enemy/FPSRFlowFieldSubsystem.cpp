@@ -300,6 +300,45 @@ bool UFPSRFlowFieldSubsystem::BakeSlotIntoUnified(UWorld& InWorld, const AFPSRFl
 	return bOk;
 }
 
+bool UFPSRFlowFieldSubsystem::StampIntactDestructibles(const AFPSRArenaActor& Arena, int32& OutStampedProps, int32& OutStampedCells)
+{
+	// Merge-gate P2-2 교정: 채택 시점(AdoptArenaFieldInternal)과 파괴 시점(NotifyArenaCellsOpened) 양쪽이 이걸
+	// 부른다 — 둘이 갈라지면 겹친 프롭에서 필드가 어긋난다. 에디터 베이크는 ECC_WorldStatic 만 프로브하고 이
+	// 프롭들의 메시는 ECC_FPSRDestructible 이라(AFPSRArenaDestructible 생성자 주석) 베이크만으로는 이 프롭이 선
+	// 셀이 "통행 가능"으로 잡힌다 — 그래서 온전한 프롭마다 명시적으로 막아야 한다.
+	OutStampedProps = 0;
+	OutStampedCells = 0;
+
+	FFPSRArenaGenParams Params;
+	FVector Origin;
+	if (!UnifiedComputer || !Arena.GetGenParams(Params, Origin))
+	{
+		return false;
+	}
+	UWorld* StampWorld = GetWorld();
+	if (!StampWorld)
+	{
+		return false;
+	}
+
+	TArray<int32> Cells; // hoisted: ComputeGridCells Resets it, so one allocation serves every prop
+	for (TActorIterator<AFPSRArenaDestructible> It(StampWorld); It; ++It)
+	{
+		const AFPSRArenaDestructible* Prop = *It;
+		if (Prop && !Prop->IsBroken() && Arena.ContainsWorldLocation(Prop->GetActorLocation()))
+		{
+			Prop->ComputeGridCells(Origin, Params.CellSize, Params.ArenaSizeCells, Cells);
+			for (int32 Cell : Cells)
+			{
+				UnifiedComputer->StampCellBlocked(Cell, /*Rank=*/0, /*bBlocked=*/true);
+			}
+			++OutStampedProps;
+			OutStampedCells += Cells.Num();
+		}
+	}
+	return true;
+}
+
 bool UFPSRFlowFieldSubsystem::AdoptArenaFieldInternal(const AFPSRArenaActor& Arena, bool bBumpGenerationAndRecompute)
 {
 	if (!HasServerAuthority())
@@ -320,6 +359,33 @@ bool UFPSRFlowFieldSubsystem::AdoptArenaFieldInternal(const AFPSRArenaActor& Are
 		UnifiedComputer = NewObject<UFPSRFlowFieldComputer>(this);
 	}
 	UnifiedComputer->BuildFromSurfaceData(WorldSurface);
+
+	// 2D counterpart of the 3D voxel stamp further down: the editor bake probes ObjParams={ECC_WorldStatic} only
+	// (FPSRFlowFieldComputer's world-trace bake), and this prop's mesh is ECC_FPSRDestructible (see
+	// AFPSRArenaDestructible's constructor comment) — so every cell an intact destructible stands on baked
+	// "walkable", and HandleBrokenAuthority's NotifyArenaCellsOpened would go on to "open" a cell that was never
+	// actually closed. MUST run BEFORE ExtractSurfaceData(BakedBaseline) below, not after (merge-gate P3 교정: the
+	// ORDER was always right — only the reason cited here was wrong. A stage revisit does NOT replay this baseline
+	// at all; it re-adopts fresh via PerformSwap -> ServerRegenerate -> AdoptArenaField, which re-runs this same
+	// stamp every time regardless of what BakedBaseline holds). ResetDoorTopologyToBaseline's actual — and only —
+	// caller is StartRun's same-world re-run safety net (a fresh run started WITHOUT reloading the map); for THAT
+	// path to also restore intact destructibles as closed, the baseline snapshot has to already contain these
+	// blocked cells, which is exactly the same "stamps included — a baseline reset restores props CLOSED" contract
+	// VoxelBaseline documents a few lines down for the 3D field. Stamping after the baseline snapshot would leave
+	// that same-world re-run safety net resurrecting a broken prop's cells as open.
+	// Surface*-prefixed, NOT StampedProps: the 3D voxel stamp further down declares its own StampedProps inside its
+	// block, and this one sits at function scope — same name would shadow it (C4456, warnings-as-errors).
+	int32 SurfaceStampedProps = 0;
+	int32 SurfaceStampedCells = 0;
+	if (StampIntactDestructibles(Arena, SurfaceStampedProps, SurfaceStampedCells))
+	{
+		UE_LOG(LogFPSR, Log,
+			TEXT("[FlowField] Arena surface adopted from %s: %d intact destructible(s) stamped blocked (%d cell(s))."),
+			*Arena.GetName(), SurfaceStampedProps, SurfaceStampedCells);
+	}
+	// GetGenParams failing here is not logged separately — it means this arena has no grid params to stamp
+	// against, and the surface adoption above already either succeeded on its own terms or the caller will log
+	// the overall adoption failure; a second warning here would just be noise on top of that.
 
 	// The adopted arena IS the baseline now. Keeping the old snapshot would let a later
 	// ResetDoorTopologyToBaseline restore the PREVIOUS arena's walls into the current one.
@@ -538,9 +604,28 @@ void UFPSRFlowFieldSubsystem::NotifyArenaCellsOpened(TConstArrayView<int32> Cell
 			{
 				bArenaOpenRecomputePending = false;
 				AdvanceTopologyGeneration();
+
+				// Merge-gate P2-2 교정: opening THIS prop's cells is correct per-prop, but not per-FIELD when a
+				// neighbour overlaps it — ComputeCellsFromBoundsXY's Min/Max FloorToInt lets two touching props both
+				// claim a shared boundary cell, and StampCellBlocked has no owner/refcount concept, so unblocking A's
+				// cells above can also unblock a cell B (still intact, still physically standing on it) also claimed.
+				// Re-stamp every intact destructible in this arena now, right before the recompute below picks up the
+				// unblock — same-frame multi-breaks are already coalesced to one pass (above), so this re-stamp is
+				// automatically one pass too. No separate log here (would add a line per break); the count rides the
+				// completion log just below instead.
+				int32 RestampedProps = 0;
+				int32 RestampedCells = 0;
+				if (UWorld* StampWorld = GetWorld())
+				{
+					if (const AFPSRArenaActor* Arena = AFPSRArenaActor::FindActiveInWorld(StampWorld))
+					{
+						StampIntactDestructibles(*Arena, RestampedProps, RestampedCells);
+					}
+				}
+
 				RecomputeAllFields();
-				UE_LOG(LogFPSR, Log, TEXT("[FlowField] NotifyArenaCellsOpened: coalesced recompute done (topology generation now %d)."),
-					TopologyGeneration);
+				UE_LOG(LogFPSR, Log, TEXT("[FlowField] NotifyArenaCellsOpened: coalesced recompute done (topology generation now %d, %d intact destructible(s) re-stamped)."),
+					TopologyGeneration, RestampedProps);
 			}));
 		}
 	}

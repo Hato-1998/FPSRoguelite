@@ -219,6 +219,13 @@ public:
 	 *  post-delta candidate position onto a walkable cell of the NEW arena. */
 	bool FindNearestOpenLocation(const FVector& InWorld, int32 MaxRadiusCells, FVector& OutWorld) const;
 
+	/** Merge-gate P3 교정: the shared MaxRadiusCells budget for a stage-transition carry-over's FindNearestOpenLocation
+	 *  snap — enforces in ONE place the contract that a gem lands within the same search radius of the new arena's
+	 *  walkable mask as the enemy that might have dropped it. Both UFPSREnemySpawnSubsystem::CarryEnemiesToNewStage
+	 *  and UFPSRPickupSubsystem::CarryPickupsToNewStage already include this header for FindNearestOpenLocation
+	 *  itself, so both now read this constant from here instead of each keeping its own "kept identical" copy. */
+	static constexpr int32 CarrySnapMaxRadiusCells = 16;
+
 private:
 	/** Flow direction at WorldLocation from the given map's computer. An unset MapId uses the Default field. If the
 	 *  location is outside the passed map's grid (mid-transition across a door), retries against the map whose grid
@@ -245,6 +252,18 @@ private:
 	 *  generation 0 so a fresh client's gen-0 ack is instantly satisfied" contract. true is every other caller
 	 *  (a stage swap): matches AdoptArenaSurface's old swap-time contract exactly (immediate bump + recompute). */
 	bool AdoptArenaFieldInternal(const AFPSRArenaActor& Arena, bool bBumpGenerationAndRecompute);
+
+	/** Merge-gate P2-2 교정: stamp every INTACT AFPSRArenaDestructible in Arena as blocked on the unified grid — the
+	 *  2D counterpart of the editor bake, which only probes ECC_WorldStatic and never sees these
+	 *  ECC_FPSRDestructible meshes (AFPSRArenaDestructible's constructor comment). Shared by BOTH the adoption-time
+	 *  stamp (AdoptArenaFieldInternal) and the break-time RE-stamp (NotifyArenaCellsOpened) — if the two ever
+	 *  diverge, an overlapping pair of props can leave a broken one's cell open while its still-intact neighbour is
+	 *  still physically standing on it (ComputeCellsFromBoundsXY's Min/Max FloorToInt lets two touching props both
+	 *  claim a shared boundary cell, and StampCellBlocked has no owner/refcount concept — whichever prop stamps
+	 *  LAST wins the cell). Out-params are zeroed then filled with what was actually stamped; the false return (no
+	 *  unified grid yet, or Arena has no usable gen params) leaves them at 0 — callers decide whether that is worth
+	 *  logging. */
+	bool StampIntactDestructibles(const AFPSRArenaActor& Arena, int32& OutStampedProps, int32& OutStampedCells);
 
 	void RecomputeAllFields();
 	bool HasServerAuthority() const;

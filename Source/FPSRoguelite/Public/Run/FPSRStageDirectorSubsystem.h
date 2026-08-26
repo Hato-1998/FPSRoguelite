@@ -36,7 +36,10 @@ public:
 
 	/** Requested by a broken suppressor's UFPSRDestructibleReward_StageTransition::Grant(). Silently ignored if a
 	 *  transition is already in progress (Phase != None) — several suppressors can exist in one arena, or an
-	 *  explosion can finish more than one at once, and only the FIRST request should start the state machine. */
+	 *  explosion can finish more than one at once, and only the FIRST request should start the state machine.
+	 *  Also cancels whatever mission is still active (moved here from PerformSwap — user decision 2026-08-25): the
+	 *  suppressor break is the player's decision to leave this arena, so the old arena's mission objective is
+	 *  already forfeit the instant the transition starts, not once the swap finishes. */
 	void RequestTransition();
 
 	bool IsTransitioning() const;
@@ -154,9 +157,10 @@ private:
 	int32 GetCurrentStageOrder() const;
 
 	/** The swap itself: activate the destination, regenerate it, teleport living players, carry the leftover swarm
-	 *  over to the new arena (Phase A — replaces the old ReleaseAllEnemies), deactivate the source, cancel any
-	 *  still-active mission (its objective was left behind in the old arena), commit the new stage to GameState,
-	 *  then enter FadeIn (EnterFadeIn) instead of going straight to None. See the .cpp for the fixed step order. */
+	 *  (and any live XP pickups) over to the new arena (Phase A — replaces the old ReleaseAllEnemies), deactivate
+	 *  the source, commit the new stage to GameState, then enter FadeIn (EnterFadeIn) instead of going straight to
+	 *  None. The still-active-mission cancel that used to happen here moved to RequestTransition (user decision
+	 *  2026-08-25) — see there. See the .cpp for the fixed step order. */
 	void PerformSwap();
 
 	/** True once HandleRunStateChanged has been bound to GameState::OnRunStateChanged, so entering Grace never

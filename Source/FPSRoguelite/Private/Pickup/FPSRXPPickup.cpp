@@ -28,6 +28,16 @@ AFPSRXPPickup::AFPSRXPPickup()
 	SetRootComponent(Mesh);
 }
 
+void AFPSRXPPickup::ServerRelocateForStageCarry(const FVector& NewLocation)
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+
+	SetActorLocation(NewLocation, /*bSweep*/false, nullptr, ETeleportType::TeleportPhysics);
+}
+
 void AFPSRXPPickup::BeginPlay()
 {
 	Super::BeginPlay();
@@ -79,45 +89,19 @@ void AFPSRXPPickup::Tick(float DeltaSeconds)
 			return;
 		}
 
-		// Stage-transition grace window (ADR 0010 D6): the whole point of the window is "grind the frozen swarm and
-		// collect what it drops" (안 G), but player MOVEMENT is locked for that same window (IsMovementFrozen) — a
-		// gem sitting outside the normal magnet radius would be visible but permanently unreachable, and the reward
-		// would not actually pay out. A magnet pull doesn't fix it either: the window is a FIXED duration
-		// (invariant 8), so a magnet's travel time would make arrival depend on how far the gem happened to drop.
-		// ADR 0010 doesn't cover XP specifically (only the swarm/damage/movement axes) — this is the judgment call
-		// that fills the gap: collect instantly, radius-independent, by whichever living player is nearest.
+		// Stage-transition grace window (ADR 0010 D6): everything else server-side stops for this window (the swarm,
+		// the director, missions — see the IsRunPaused early-out above and its comment), and a gem is no different —
+		// don't magnet, don't collect. This used to be the ONE exception: an instant, radius-independent collect
+		// lived here specifically because player MOVEMENT is locked for the same window (IsMovementFrozen), so a gem
+		// outside the magnet radius would be visible but permanently unreachable, and a magnet pull couldn't fix it
+		// either (the window is a FIXED duration — invariant 8 — so travel time would make arrival depend on drop
+		// distance). 사용자 결정(2026-08-25)으로 그 근거는 이월이 대체했다: 보상은 이제 스왑 "이후"에 지급된다 — 이 젬은
+		// UFPSRPickupSubsystem::CarryPickupsToNewStage 로 새 아레나까지 함께 옮겨지고(적 이월과 대칭), 전환이 끝나 이동
+		// 잠금이 풀리면 플레이어가 걸어가서 일반 반경 회수로 줍는다. 그래서 전환 중엔 자석도 회수도 돌 필요가 없고,
+		// 오히려 돌면 "직접 주우러 간다"는 의도를 깎는다.
 		if (GameState->IsStageTransitionActive())
 		{
-			APawn* NearestPlayer = nullptr;
-			float NearestDistSq = TNumericLimits<float>::Max();
-			for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
-			{
-				const APlayerController* PC = It->Get();
-				APawn* PlayerPawn = PC ? PC->GetPawn() : nullptr;
-				if (!PlayerPawn)
-				{
-					continue;
-				}
-				if (const AFPSRPlayerState* PS = PC->GetPlayerState<AFPSRPlayerState>())
-				{
-					if (!PS->IsAlive())
-					{
-						continue; // DBNO/Dead players don't collect (mirrors the normal collect gate below)
-					}
-				}
-				const float DistSq = FVector::DistSquaredXY(PlayerPawn->GetActorLocation(), GetActorLocation());
-				if (DistSq < NearestDistSq)
-				{
-					NearestDistSq = DistSq;
-					NearestPlayer = PlayerPawn;
-				}
-			}
-
-			if (NearestPlayer != nullptr)
-			{
-				CollectBy(NearestPlayer);
-			}
-			return; // transition branch replaces the normal magnet/collect pass below for this tick
+			return;
 		}
 	}
 
@@ -213,9 +197,11 @@ float AFPSRXPPickup::GetCollectorPickupRadiusMult(class APawn* Pawn) const
 
 void AFPSRXPPickup::CollectBy(APawn* Collector)
 {
-	// The one place a gem is banked. Two callers reach it — the normal radius collect and the stage-transition
-	// instant collect (ADR 0010 D6) — and both must apply the collector's own XPGain multiplier before adding to the
-	// shared pool; splitting that across two inline copies is how one of them eventually loses the multiplier.
+	// The one place a gem is banked. Used to have two callers — the normal radius collect below and a
+	// stage-transition instant collect (ADR 0010 D6) — but the instant collect is gone (사용자 결정 2026-08-25): a
+	// gem caught in a transition now carries over to the new arena instead (ServerRelocateForStageCarry) and is
+	// picked up the normal way once the player walks to it afterward. The remaining caller still routes through
+	// here rather than inlining the XPGain multiplier at the call site, so there is exactly one place that can lose it.
 	if (UWorld* World = GetWorld())
 	{
 		if (AFPSRGameState* GameState = World->GetGameState<AFPSRGameState>())

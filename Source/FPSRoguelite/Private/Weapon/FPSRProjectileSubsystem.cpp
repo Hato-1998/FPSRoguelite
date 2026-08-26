@@ -262,6 +262,30 @@ void UFPSRProjectileSubsystem::ReleaseAllProjectiles()
 	}
 }
 
+void UFPSRProjectileSubsystem::ReleaseEnemyProjectiles()
+{
+	if (!HasServerAuthority())
+	{
+		return; // pool ownership is server-side; clients follow via replicated deactivation.
+	}
+
+	// Snapshot for the same reason ReleaseAllProjectiles copies: ReleaseProjectile mutates ActiveProjectiles, so a
+	// range-for over the live array would be invalidated and could skip an entry, leaving an enemy bullet in flight.
+	const TArray<TObjectPtr<AFPSRProjectile>> Snapshot = ActiveProjectiles;
+	int32 ReleasedCount = 0;
+	for (const TObjectPtr<AFPSRProjectile>& ProjectilePtr : Snapshot)
+	{
+		AFPSRProjectile* Projectile = ProjectilePtr.Get();
+		if (IsValid(Projectile) && Projectile->GetTeam() == EFPSRProjectileTeam::Enemy)
+		{
+			ReleaseProjectile(Projectile);
+			++ReleasedCount;
+		}
+	}
+
+	UE_LOG(LogFPSR, Log, TEXT("[Projectile] ReleaseEnemyProjectiles: cleared %d enemy projectile(s) in flight."), ReleasedCount);
+}
+
 // Debug console command
 #if !UE_BUILD_SHIPPING
 namespace

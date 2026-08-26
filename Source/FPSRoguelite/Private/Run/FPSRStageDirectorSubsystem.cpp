@@ -6,6 +6,8 @@
 #include "Arena/FPSRArenaActor.h"
 #include "Arena/FPSRArenaStreamSubsystem.h"
 #include "Enemy/FPSREnemySpawnSubsystem.h" // CarryEnemiesToNewStage (Phase A leftover-swarm carry-over)
+#include "Pickup/FPSRPickupSubsystem.h" // CarryPickupsToNewStage (dealing-window XP gem carry-over, ADR 0010 D6)
+#include "Weapon/FPSRProjectileSubsystem.h" // ReleaseEnemyProjectiles (전환 시작 시 탄막 제거, ADR 0010 D6)
 #include "Hero/FPSRCharacter.h"
 #include "Core/FPSRLogChannels.h"
 #include "Engine/World.h"
@@ -135,6 +137,14 @@ void UFPSRStageDirectorSubsystem::RequestTransition()
 	{
 		return;
 	}
+	// P2-1 (merge-gate 교정): hoisted from the old wrap-block further down so the arena-existence guard a few lines
+	// below (right after the boss-phase guard) can use it BEFORE this function commits to Grace / cancels the active
+	// mission — see that guard's comment for why. The 3 cleanup calls + timer set further down keep using this World.
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
 
 	// A transition is already running: several suppressors can exist in one arena, or one explosion can finish
 	// more than one at once — only the FIRST request may start the state machine, the rest are silently ignored.
@@ -155,12 +165,77 @@ void UFPSRStageDirectorSubsystem::RequestTransition()
 		return;
 	}
 
+	// P2-1 (merge-gate 교정): same reason as the boss-phase guard just above — a transition that CANNOT finish once
+	// started must never start. PerformSwap already checks this (Arenas.Num() == 0 -> abort), but by then Grace has
+	// already been entered and the active mission cancelled below — the player would be left with no mission AND no
+	// swap. Checking here, before either of those happens, removes that combination instead of only detecting it late.
+	TArray<AFPSRArenaActor*> Arenas;
+	AFPSRArenaActor::FindAllInWorld(World, Arenas);
+	if (Arenas.Num() == 0)
+	{
+		UE_LOG(LogFPSR, Warning, TEXT("[StageDirector] Transition requested but no AFPSRArenaActor exists in this world — ignored."));
+		return;
+	}
+
 	const float GraceSeconds = GS->GetRunSchedule() ? GS->GetRunSchedule()->StageGraceSeconds : DefaultStageGraceSeconds;
 	const float DealingEnd = GS->GetServerWorldTimeSeconds() + GraceSeconds;
 	GS->SetStageTransition(EFPSRStageTransitionPhase::Grace, DealingEnd);
 
-	if (UWorld* World = GetWorld())
 	{
+		// Cancel whatever mission is still active RIGHT NOW (moved here from PerformSwap's old step 6 — user decision
+		// 2026-08-25). Breaking the suppressor that called RequestTransition is the PLAYER'S decision to leave this
+		// arena, and the objective is forfeit from that exact instant — THAT is the reason for cancelling this early,
+		// NOT a promise that this transition will run to completion (merge-gate P2-1 교정: it does not always — see
+		// below). The active mission's objective (spawn point, escort target, etc.) lives in the arena being left;
+		// leaving its UI up for the whole transition would read as "still in progress" when it no longer is. The
+		// reason this cancel used to live in PerformSwap's step 6 is still TRUE, just a LATER fact about the same
+		// arena rather than the trigger for acting: PerformSwap's step 5 switches the old arena's collision off,
+		// which makes an in-progress objective physically unreachable — left alone that is a SILENT failure, timing
+		// out later with no obvious cause. Cancelling here simply gets ahead of that fact instead of racing it.
+		// CancelActiveMission is a pure teardown (no reward grant, no "failed" log) — the mission simply no longer
+		// exists, matching neither a success nor a real failure.
+		//
+		// What actually justifies acting here: the guards above (redundant request / mid-boss / — as of this same
+		// fix — no AFPSRArenaActor in the world at all) reject exactly the requests that could never finish once
+		// started; everything that gets past them is safe to cancel early. ⚠️ One path still slips through:
+		// PerformSwap's Next->ServerRegenerate(NextSeed) can still fail — destination gen-params validity is judged
+		// INSIDE that call, not knowable here — and that abort leaves the mission already cancelled while the player
+		// stays on the OLD arena. That is an authoring-error path (the kind ADR 0011 E4's validator is meant to catch
+		// at world start), accepted rather than fixed here, but PerformSwap's own ServerRegenerate-failure log now
+		// says so explicitly, so it is never a silent one.
+		if (UFPSRRunDirectorSubsystem* RunDirector = World->GetSubsystem<UFPSRRunDirectorSubsystem>())
+		{
+			if (RunDirector->CancelActiveMission())
+			{
+				UE_LOG(LogFPSR, Log, TEXT("[StageDirector] Active mission cancelled — its objective was in the arena being left."));
+			}
+		}
+
+		// Clear the enemy bullets already in flight (사용자 결정 2026-08-25, PIE). They used to simply FREEZE for the
+		// window alongside the swarm (UFPSRProjectileSubsystem's bPausedEnemyOnly edge), which read badly in play:
+		// live bullets hung motionless in the air for the whole ~10s transition, and they were still aimed at where
+		// the player STOOD — a position PerformSwap is about to teleport them out of, into a different arena. Clearing
+		// them is the "탄막 제거" read instead: the dealing window opens on a clean screen. Placed with the mission
+		// cancel above for the same reason — after both reject guards, so a mid-boss request that gets ignored does
+		// not wipe the screen as a side effect. PLAYER projectiles are deliberately untouched: firing through the
+		// window is its whole reward (안 G).
+		if (UFPSRProjectileSubsystem* ProjectileSub = World->GetSubsystem<UFPSRProjectileSubsystem>())
+		{
+			ProjectileSub->ReleaseEnemyProjectiles();
+		}
+
+		// Cancel the ranged charges already in progress (사용자 결정 2026-08-26, PIE). Clearing the bullets above is
+		// only half of it: an enemy mid-charge has a Reliable directional WARNING up on its target's HUD, and the
+		// transition freezes the whole attack pass (UFPSREnemySpawnSubsystem early-returns on
+		// IsStageTransitionActive), so that enemy never re-enters ServerTickAttack to close its own hold — the
+		// warning stays on screen for the entire transition. The usual teardown paths do not save us here either:
+		// they run when an enemy is DESTROYED, and a transition CARRIES enemies over instead. Cancelling also rewinds
+		// the charge cycle, so nothing fires without a fresh telegraph on the other side of the swap.
+		if (UFPSREnemySpawnSubsystem* SpawnSub = World->GetSubsystem<UFPSREnemySpawnSubsystem>())
+		{
+			SpawnSub->CancelRangedChargesForTransition();
+		}
+
 		World->GetTimerManager().SetTimer(
 			DealingTimerHandle, this, &UFPSRStageDirectorSubsystem::OnDealingWindowClosed, GraceSeconds, /*bLoop*/false);
 	}
@@ -561,9 +636,12 @@ void UFPSRStageDirectorSubsystem::PerformSwap()
 	}
 
 	// FadeOut and Swapping's destination-ready wait both take real wall-clock time, and a freeze CAN land inside
-	// them: since the dealing-window invulnerability was retired (2026-08-20) a kill during the fades pays XP
-	// instantly (FPSRXPPickup's transition-collect path), and AddSharedXP -> RefreshPauseState raises the
-	// card-selection freeze with NO transition gate. The two pause reasons need opposite reactions:
+	// them: since the dealing-window invulnerability was retired (2026-08-20) a kill during the fades can still
+	// grant XP with no transition gate — not through the old dealing-window instant-collect path (merge-gate P3
+	// 교정: this branch deleted that path along with the swarm release it used to ride), but through
+	// UFPSRPickupSubsystem::SpawnXPPickup's over-cap branch, which calls AddSharedXP directly (no gem spawned, no
+	// transition check either) once ActivePickups is already at MaxActivePickups — and AddSharedXP ->
+	// RefreshPauseState raises the card-selection freeze. The two pause reasons need opposite reactions:
 	//  - EndRun (bRunEnded latched): abort. Teleporting players, carrying the swarm and committing a stage index
 	//    behind the result screen would all be wrong — and the run is over, so the lost transition is moot.
 	//  - Card-selection freeze: HOLD, never abort — the suppressor is already consumed and nothing would ever call
@@ -639,7 +717,7 @@ void UFPSRStageDirectorSubsystem::PerformSwap()
 			Next->SetArenaActive(false);
 		}
 		GS->SetStageTransition(EFPSRStageTransitionPhase::None, 0.0f);
-		UE_LOG(LogFPSR, Error, TEXT("[StageDirector] Swap aborted: %s failed to regenerate (seed %d) — staying on %s."),
+		UE_LOG(LogFPSR, Error, TEXT("[StageDirector] Swap aborted: %s failed to regenerate (seed %d) — staying on %s. The active mission was already cancelled at transition start and is NOT restored."),
 			*Next->GetName(), NextSeed, Prev ? *Prev->GetName() : TEXT("?"));
 		return;
 	}
@@ -732,11 +810,22 @@ void UFPSRStageDirectorSubsystem::PerformSwap()
 	//      per-enemy delta has both the old and new player locations) — BEFORE the previous arena deactivates (step
 	//      5, so nothing here needs the OLD arena's collision to still be up). The whole swarm is frozen for the
 	//      entire transition (TickEnemyMovement's IsStageTransitionActive gate covers FadeOut/Swapping/FadeIn too),
-	//      so there is no tick-order race between this and the movement pass.
+	//      so there is no tick-order race between this and the movement pass. XP gems ride the same delta right
+	//      after (UFPSRPickupSubsystem::CarryPickupsToNewStage, immediately below) — the dealing-window instant
+	//      collect this used to feed is gone (사용자 결정 2026-08-25), so gems now have to make this same trip too.
 	if (UFPSREnemySpawnSubsystem* SpawnSub = World->GetSubsystem<UFPSREnemySpawnSubsystem>())
 	{
 		const float CarryFraction = GS->GetRunSchedule() ? GS->GetRunSchedule()->StageCarryOverMaxFraction : 1.0f;
 		SpawnSub->CarryEnemiesToNewStage(OldPlayerLocs, NewPlayerLocs, CarryFraction);
+	}
+
+	// Same ordering invariant as the swarm carry-over just above: after the destination is regenerated + published
+	// to the flow field (step 3) and after the player teleport (step 4), but before the previous arena deactivates
+	// (step 5) — CarryPickupsToNewStage's own flow-field snap needs the new arena's live grid, and its per-gem
+	// delta needs both the old and new player locations, same as the swarm's.
+	if (UFPSRPickupSubsystem* PickupSub = World->GetSubsystem<UFPSRPickupSubsystem>())
+	{
+		PickupSub->CarryPickupsToNewStage(OldPlayerLocs, NewPlayerLocs);
 	}
 
 	// 5. Deactivate the previous arena (a single-arena cycle skips this — Prev == Next there).
@@ -745,24 +834,11 @@ void UFPSRStageDirectorSubsystem::PerformSwap()
 		Prev->SetArenaActive(false);
 	}
 
-	// 6. Cleanup that belongs to the OLD arena, not the new one — cancel whatever mission is still active (ADR 0010
-	//    D6): breaking the suppressor that triggered this swap was the player's choice to leave this arena — the
-	//    active mission's objective (spawn point, escort target, etc.) lives in the OLD arena, which loses its
-	//    collision the moment step 5 above deactivates it, so the objective becomes physically unreachable. Left
-	//    alone that is a SILENT failure: the mission just times out later with no obvious cause. Cancelling
-	//    explicitly here makes the loss immediate and attributable to the swap instead. CancelActiveMission is a
-	//    pure teardown (no reward grant, no "failed" log) — the mission simply no longer exists, matching neither a
-	//    success nor a real failure.
+	// 6. 이 단계에 있던 미션 취소는 RequestTransition 으로 앞당겨졌다(사용자 결정 2026-08-25) — 미션 UI가 전환이
+	//    "끝난 뒤"가 아니라 "시작하는 즉시" 사라지도록 하기 위해서다. 취소 로직과 근거는 RequestTransition 참고.
 	//    (Phase A: the leftover SWARM used to be released here too — "새 아레나 좌표로 재배치하지 않는다" — but user
 	//    decision now carries it over instead (step 4.5, CarryEnemiesToNewStage), so there is nothing enemy-related
 	//    left to do at this step.)
-	if (UFPSRRunDirectorSubsystem* RunDirector = World->GetSubsystem<UFPSRRunDirectorSubsystem>())
-	{
-		if (RunDirector->CancelActiveMission())
-		{
-			UE_LOG(LogFPSR, Log, TEXT("[StageDirector] Active mission cancelled — its objective was in the arena being left."));
-		}
-	}
 
 	// 7. Commit the new stage — every client follows purely from these replicated values (arena visibility toggle +
 	//    the OnRunStateChanged re-broadcast in ApplyStageTransitionLocal), no dedicated RPC needed. Then enter

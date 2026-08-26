@@ -39,6 +39,39 @@ FBox AFPSRArenaDestructible::GetVoxelBounds() const
 	return FBox(ForceInit); // no mesh authored — invalid box, both voxel ops no-op on it
 }
 
+void AFPSRArenaDestructible::ComputeGridCells(const FVector& ArenaOrigin, float CellSize, const FIntPoint& GridDims,
+	TArray<int32>& OutCells) const
+{
+	if (FootprintCells.X > 0 && FootprintCells.Y > 0)
+	{
+		// Authored override: an anchor + explicit footprint, growing +X/+Y from GetActorLocation() (see the
+		// FootprintCells UPROPERTY comment for why that drifts from the mesh unless the actor sits at the mesh's
+		// corner, not its center).
+		FFPSRArenaAuthoredDestructible Self;
+		Self.Location = GetActorLocation();
+		Self.FootprintCells = FootprintCells;
+		FFPSRArenaCells::ComputeDestructibleCells(Self, ArenaOrigin, CellSize, GridDims, OutCells);
+	}
+	else
+	{
+		// merge-gate P3 교정: the UPROPERTY's ClampMin is 0, not a paired "both or neither" constraint, so a
+		// half-authored FootprintCells like (0,3) is authorable and falls through to this auto branch same as a
+		// genuine (0,0) — silently, until now. Warn only on the half-authored case; (0,0) is the normal, intentional
+		// "use auto" authoring and must stay quiet.
+		if ((FootprintCells.X > 0) != (FootprintCells.Y > 0))
+		{
+			UE_LOG(LogFPSR, Warning,
+				TEXT("[Arena] %s: FootprintCells is half-authored (%d, %d) — one axis is 0, so ComputeGridCells falls back to the auto mesh-bounds path. Author both axes > 0 to use the override, or leave both at 0 for auto."),
+				*GetName(), FootprintCells.X, FootprintCells.Y);
+		}
+
+		// Auto (default, FootprintCells == 0): derive the cells straight from the mesh's own world bounds — the
+		// SAME source GetVoxelBounds() hands the 3D voxel stamp, so 2D and 3D can never disagree about where this
+		// prop actually sits.
+		FFPSRArenaCells::ComputeCellsFromBoundsXY(GetVoxelBounds(), ArenaOrigin, CellSize, GridDims, OutCells);
+	}
+}
+
 void AFPSRArenaDestructible::HandleBrokenAuthority(AActor* Breaker)
 {
 	bool bOpened = false;
@@ -51,14 +84,14 @@ void AFPSRArenaDestructible::HandleBrokenAuthority(AActor* Breaker)
 			FVector Origin;
 			if (Arena->ContainsWorldLocation(GetActorLocation()) && Arena->GetGenParams(Params, Origin))
 			{
-				// Recomputed, not read back from a cached layout — ComputeDestructibleCells is the SAME function
-				// Generate() called to block these cells while intact, so opening can never disagree with closing.
-				FFPSRArenaAuthoredDestructible Self;
-				Self.Location = GetActorLocation();
-				Self.FootprintCells = FootprintCells;
-
+				// Recomputed, not read back from a cached layout. The pair to this is
+				// UFPSRFlowFieldSubsystem::AdoptArenaFieldInternal's adoption-time stamp — both call ONLY
+				// ComputeGridCells (never ComputeDestructibleCells/ComputeCellsFromBoundsXY directly), so opening
+				// here can never disagree with what adoption blocked. (ADR 0012 retired Generate(), which used to
+				// be the other half of this guarantee — "the SAME function Generate() called to block these cells
+				// while intact" is no longer true; ComputeGridCells is Generate()'s replacement in that guarantee.)
 				TArray<int32> Cells;
-				FFPSRArenaCells::ComputeDestructibleCells(Self, Origin, Params.CellSize, Params.ArenaSizeCells, Cells);
+				ComputeGridCells(Origin, Params.CellSize, Params.ArenaSizeCells, Cells);
 
 				if (Cells.Num() > 0)
 				{
