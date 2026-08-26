@@ -4,6 +4,7 @@
 
 #include "GameFramework/Pawn.h"
 #include "GameplayTagContainer.h"
+#include "Templates/SubclassOf.h" // TSubclassOf<AFPSRProjectile> (ranged attack, promoted from AFPSRRangedEnemyBase — ADR 0013 C1)
 #include "Enemy/FPSRAnimCPDParams.h"
 #include "Enemy/FPSREnemyPursuit.h" // ADR 0008: FFPSRPursuitState/Params (PursuitState member, plain struct — no UObject dep)
 #include "FPSREnemyBase.generated.h"
@@ -17,6 +18,7 @@ class AFPSRPlayerController;
 class APlayerController;
 class UFPSREnemyAnimProfile;
 class UFPSRFlowFieldSubsystem;
+class AFPSRProjectile;
 
 /** Per-pass batch context the spawn subsystem hands to each enemy's ServerTickAttack. The subsystem owns target
  *  selection (nearest ALIVE player) and the per-pass freeze gate (this is never called while run-paused); the enemy
@@ -90,6 +92,29 @@ struct FFPSRServerMoveContext
 	bool bSeekValid = false;
 };
 
+/** Ranged-attack cycle state (server-only). Promoted from the retired AFPSRRangedEnemyBase (ADR 0013 C1 — every
+ *  enemy has been ranged since f5b0a78d, so a separate "ranged" subclass no longer means anything). */
+enum class EFPSRRangedChargeState : uint8
+{
+	Idle,      // not engaging — chasing / waiting for a target in range
+	Charging,  // telegraphing (warning sent to target); accumulating toward a shot
+	Cooldown,  // recovering after a shot before it can re-engage
+};
+
+/** Ranged attack cycle (Game.MD §2-6, promoted into the base 2026-08-26 — ADR 0013 C1, retiring the separate
+ *  AFPSRRangedEnemyBase subclass): stops in range, telegraphs a CHARGE (sends a ranged-target warning to the
+ *  targeted player so they can dodge), then fires a VISIBLE projectile (no hitscan — §2-6 mandates a dodgeable
+ *  shot). Lightweight (NOT GAS). Reuses the existing projectile + damage + warning + freeze infrastructure (no new
+ *  damage or RPC code).
+ *
+ *  First-principles (≈500 cheap enemies): every enemy is ranged since f5b0a78d (2026-08-14, "전 몬스터 원거리화")
+ *  — the melee contact axis this once branched away from (via a ServerTickAttack override) was itself removed as
+ *  dead code (ADR 0013 C0), so the attack decision no longer needs a per-subclass virtual split; it is simply what
+ *  ServerTickAttack (still virtual, for a future archetype that wants a different cycle) does below. Charge &
+ *  cooldown are freeze-paused accumulators (the spawn subsystem skips the attack pass while the run is globally
+ *  frozen, so DeltaSeconds never accrues then). Concurrency is bounded by the subsystem's ranged attack token (held
+ *  per-player for the whole charge) — this also keeps in-flight enemy projectiles within the pool budget. */
+
 /** Lightweight server-authoritative swarm enemy — a cheap pooled APawn (NOT GAS-based), designed to run hundreds at
  *  once. Movement is the spawn subsystem's batched flow-field + separation pass (TickServerMovement), not per-actor AI;
  *  pooling reuses actors across lives (Activate/Deactivate with net dormancy). Also carries exit-path following,
@@ -143,9 +168,10 @@ public:
 	 *  replicated by the time this runs (the health component's ApplyDamage->OnDeath fired before HandleDeath), so a
 	 *  remote client's own OnRep_bDead -> HandleDeathCosmetic needs the actor to keep replicating/rendering for the
 	 *  death-dwell window to actually be SEEN. Deactivate() (called later, once GetDeathDwellSeconds() has elapsed)
-	 *  is the second half that ends presentation and returns the actor to the pool. Virtual so archetypes with their
-	 *  own held server state (e.g. AFPSRRangedEnemyBase's ranged token) can release it here too — see that
-	 *  override's comment for why every teardown path, not just Deactivate(), must close it. */
+	 *  is the second half that ends presentation and returns the actor to the pool. Virtual so a FUTURE archetype
+	 *  with its own held server state can release it here too, exactly as THIS class's own body does below for the
+	 *  ranged charge/warning hold (every teardown path, not just Deactivate(), must close it — see
+	 *  ReleaseRangedHold's comment). */
 	virtual void EnterDyingState();
 
 	/** This archetype's authored death-dwell duration (DeathDwellSeconds) — read by the spawn subsystem's
@@ -212,11 +238,28 @@ public:
 	/** Server: stamp the time of an attack (called by the movement/attack subsystem). */
 	void NotifyAttacked(float Now) { LastAttackTime = Now; }
 
+	/** Server: 스테이지 전환이 **시작될 때** 진행 중이던 충전을 취소한다 (사용자 결정 2026-08-26).
+	 *
+	 *  이게 필요한 이유 — 전환 중에는 UFPSREnemySpawnSubsystem 이 공격 패스 **전체를 early-return** 하므로
+	 *  (IsStageTransitionActive), 충전 중이던 원거리 적은 ServerTickAttack 에 다시 들어오지 못한다. 그래서
+	 *  ReleaseRangedHold 를 부르는 경로가 하나도 밟히지 않고, 타겟 플레이어의 **방향 경고 표시가 전환 내내
+	 *  화면에 남는다**(그 함수 주석이 이미 경고하는 "안 보내면 영원히 남는다"가 실제로 일어난 것).
+	 *  기존 teardown 경로(Deactivate / EnterDyingState / EndPlay)는 전부 적이 *사라질* 때만 도는데,
+	 *  전환에서 적은 사라지지 않고 **이월**되므로 그 어느 것도 안 걸린다.
+	 *
+	 *  Deactivate/EnterDyingState 와 **같은 쌍**(ReleaseRangedHold + ResetRangedCycle)을 부른다 — 사이클까지
+	 *  되감아야 스왑 뒤에 그 적이 **텔레그래프 없이 곧장 쏘는** 일이 없다(경고를 지웠는데 충전은 이어지면
+	 *  예고 없는 사격이 된다). 취소된 적은 새 아레나에서 토큰을 다시 얻고 처음부터 충전한다.
+	 *
+	 *  **실제로 취소할 게 있었으면 true.** 호출자가 로그에 개수를 찍을 수 있게 상태를 노출하는 대신 결과를
+	 *  돌려준다(bCharging/ChargeState 는 계속 protected/private 로 둔다). 유휴 상태에서 불러도 안전하다. */
+	bool ServerCancelRangedForStageTransition();
+
 	/** Server: per-pass attack decision, called by the spawn subsystem's batched pass for this enemy's nearest alive
-	 *  player. The base has no attack decision of its own — the melee contact axis (in range + vertical gap +
-	 *  cooldown + melee token) was removed as dead code (every enemy has been ranged since f5b0a78d, ADR 0013 C0);
-	 *  ranged archetypes override this to drive their own charge->fire cycle. Never called while the run is
-	 *  globally frozen (the pass early-returns). */
+	 *  player. Charge->fire cycle (promoted from AFPSRRangedEnemyBase, ADR 0013 C1 — see the class-doc-style comment
+	 *  above EFPSRRangedChargeState for the full design rationale): stops in range, telegraphs, then fires. The
+	 *  melee contact decision this once also covered was removed as dead code (every enemy has been ranged since
+	 *  f5b0a78d, ADR 0013 C0). Never called while the run is globally frozen (the pass early-returns). */
 	virtual void ServerTickAttack(const FFPSRServerAttackContext& Ctx);
 
 	/** Server: add a knockback impulse (cm/s, from an explosion). The horizontal part decays over KnockbackDecayTime
@@ -295,6 +338,24 @@ protected:
 	 *  (level teardown / PIE end), mirroring BeginPlay's once-per-lifetime Register. CSV-gated (see .cpp); a no-op
 	 *  in Shipping. */
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+
+	/** Promoted from AFPSRRangedEnemyBase (ADR 0013 C1) — the only replicated field this class has, so this is the
+	 *  first GetLifetimeReplicatedProps override on AFPSREnemyBase itself (APawn's own base implementation still
+	 *  runs via Super below). */
+	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
+
+	/** Non-targeted client telegraph (user decision): the targeted player already gets a directional warning via the
+	 *  Reliable ClientNotifyRangedTarget RPC (SendRangedWarning), but that RPC is unicast to ONLY that player's
+	 *  controller — a bystander's screen has no cue a nearby ranged enemy is charging (the client attack-tell
+	 *  heuristic in PostNetReceiveLocationAndRotation keys off melee AttackRange, which a ranged archetype's engage
+	 *  distance sits well outside). This 1-byte flag replicates to EVERY client so OnRep_Charging can drive the same
+	 *  Attack cosmetic there. Push Model (this project's replication convention — mirrors
+	 *  UFPSREnemyHealthComponent::bDead). */
+	UFUNCTION()
+	void OnRep_Charging();
+
+	UPROPERTY(ReplicatedUsing = OnRep_Charging)
+	bool bCharging = false;
 
 	/** Server: ground-follow + gravity each movement update — a single down-trace snaps the enemy to the floor
 	 *  (slopes/steps within GroundSnapTolerance) or lets it fall under gravity off a ledge / after a high spawn,
@@ -404,8 +465,16 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Enemy")
 	float MoveSpeed = 750.0f;
 
+	/** Distance at which the enemy stops advancing toward a player (used by the movement subsystem — see
+	 *  GetStopDistance). 900, not the old melee-era 120: every enemy has been ranged since f5b0a78d (2026-08-14,
+	 *  "전 몬스터 원거리화"), and until now that 900 lived ONLY in AFPSRRangedEnemyBase's constructor override — 120
+	 *  here was a dead melee relic nothing actually shipped with (ADR 0013 C1, retiring that subclass). Confirmed by
+	 *  measurement: BP_EnemyMeleeBase.uasset carries NO StopDistance tag at all (delta-serialized BP, grep -c = 0),
+	 *  so its effective 900 existed only via the now-retired ranged constructor, not on disk — this inline default
+	 *  is the ONLY thing that still supplies it. BP_EnemyRangedBase is unaffected (it authors StopDistance itself,
+	 *  grep -c = 1). A future elite/shape subclass inherits this value too unless it authors its own. */
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Enemy")
-	float StopDistance = 120.0f;
+	float StopDistance = 900.0f;
 
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Enemy|Attack")
 	float AttackRange = 150.0f;
@@ -418,11 +487,11 @@ protected:
 	 *  stomping it back to Walk/Idle. NOT replicated: each side stamps its OWN copy for the driver that owns this
 	 *  instance, and the two drivers never run for the same instance (PostNetReceiveLocationAndRotation fires only
 	 *  on a remote client, TickServerMovement only on authority), so one field serves both without contention.
-	 *   - AUTHORITY driver, gating TickServerMovement's walk/idle branch: stamped by ServerTickAttack (melee: Now +
-	 *     AttackAnimHoldSeconds) and AFPSRRangedEnemyBase::ServerTickAttack's Idle->Charging transition (Now +
-	 *     RangedChargeTime, matching the charge-length SetAnimState rate set alongside it).
+	 *   - AUTHORITY driver, gating TickServerMovement's walk/idle branch: stamped by ServerTickAttack's Idle->Charging
+	 *     transition (Now + RangedChargeTime, matching the charge-length SetAnimState rate set alongside it) — the
+	 *     melee stamp this once also covered was removed with the dead melee axis (ADR 0013 C0).
 	 *   - CLIENT driver, gating PostNetReceiveLocationAndRotation's walk/idle branch: stamped by that function's own
-	 *     melee proximity tell and by AFPSRRangedEnemyBase::OnRep_Charging. The client used to have no hold at all,
+	 *     melee proximity tell (cosmetic heuristic, still live — see that function) and by OnRep_Charging. The client used to have no hold at all,
 	 *     which is what let a flickering bMoving bounce Attack->Walk->Attack; a re-entry from a DIFFERENT state
 	 *     skips SetAnimState's one-shot guard and restamps CPD EnterTime, rewinding the material's
 	 *     (Time-EnterTime)*Rate progress to 0 mid-play.
@@ -767,4 +836,90 @@ protected:
 	/** Client-only: last replicated location + world time, to derive movement speed for the walk/idle state. */
 	FVector LastRecvLocation = FVector::ZeroVector;
 	float LastRecvTime = -1.0f;
+
+	// --- Ranged attack cycle (promoted from AFPSRRangedEnemyBase, ADR 0013 C1 — see the class-doc-style comment
+	//     above EFPSRRangedChargeState for the full design rationale). Engagement tuning, then projectile tuning
+	//     (both editor/BP tunable per archetype), then the private FSM state + helpers below. ---
+
+	/** 3D distance within which the enemy starts charging at a target. */
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Enemy|Ranged", meta = (ClampMin = "0.0"))
+	float RangedEngageRange = 1400.0f;
+
+	/** Telegraph duration (seconds) the warning shows before the shot fires. */
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Enemy|Ranged", meta = (ClampMin = "0.0"))
+	float RangedChargeTime = 1.5f;
+
+	/** Recovery (seconds) after firing before the enemy can re-engage. */
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Enemy|Ranged", meta = (ClampMin = "0.0"))
+	float RangedFireCooldown = 2.5f;
+
+	/** Require an unobstructed line to the target (static geometry) before charging — avoids telegraphing / wasting
+	 *  shots through walls (cheap: only the concurrency-capped chargers trace). */
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Enemy|Ranged")
+	bool bRequireLineOfSight = true;
+
+	// --- Projectile (content assigns ProjectileClass; logic/base only here) ---
+
+	/** Projectile BP to fire (Team=Enemy). Null = no shot (logged once). Designer content (Game.MD §6-2). */
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Enemy|Ranged")
+	TSubclassOf<AFPSRProjectile> ProjectileClass;
+
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Enemy|Ranged", meta = (ClampMin = "0.0"))
+	float ProjectileDamage = 20.0f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Enemy|Ranged", meta = (ClampMin = "0.0"))
+	float ProjectileSpeed = 1800.0f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Enemy|Ranged", meta = (ClampMin = "0.0"))
+	float ProjectileLifetime = 4.0f;
+
+	/** 0 = straight shot; >0 = arcing (lobbed). */
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Enemy|Ranged", meta = (ClampMin = "0.0"))
+	float ProjectileGravityScale = 0.0f;
+
+	/** Local-space muzzle offset from the actor origin (also the warning / LOS source point). */
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Enemy|Ranged")
+	FVector MuzzleOffset = FVector(40.0f, 0.0f, 40.0f);
+
+private:
+	/** Fire one enemy-team projectile toward the target (reuses UFPSRProjectileSubsystem — no new damage code). */
+	void FireProjectile(const FFPSRServerAttackContext& Ctx);
+
+	/** True if a trace from the muzzle to the target is clear of static geometry AND closed door leaves (or LOS isn't
+	 *  required). Ignores self + the target so neither counts as an occluder. */
+	bool HasLineOfSight(const AActor* TargetActor, const FVector& TargetLocation) const;
+
+	/** Send the ranged-target warning (Client RPC) to the held target's controller. bActive=false clears it. */
+	void SendRangedWarning(bool bActive);
+
+	/** Idempotent: clear the warning on the held target + release the concurrency token + clear bCharging. Safe on
+	 *  every teardown (see this function's own top-of-body comment on the .cpp side for why bCharging in particular
+	 *  is reset unconditionally, ahead of everything else here). */
+	void ReleaseRangedHold();
+
+	/** Reset the cycle to Idle (charge/cooldown accumulators zeroed). */
+	void ResetRangedCycle();
+
+	/** World-space muzzle (origin + MuzzleOffset). */
+	FVector GetMuzzleLocation() const;
+
+	EFPSRRangedChargeState ChargeState = EFPSRRangedChargeState::Idle;
+
+	/** Seconds accumulated this charge (freeze-paused: only accrues on non-frozen passes). */
+	float ChargeElapsed = 0.0f;
+
+	/** Seconds accumulated since the last shot (freeze-paused). */
+	float CooldownElapsed = 0.0f;
+
+	/** True while this enemy holds a ranged concurrency token (mirrors an active warning). */
+	bool bHoldingToken = false;
+
+	/** The controller currently being charged/warned (token + warning are keyed to it). */
+	TWeakObjectPtr<AFPSRPlayerController> HeldTargetPC;
+
+	/** Last location sent in a warning — re-sent once the enemy drifts this far so the indicator tracks the source. */
+	FVector LastWarnLocation = FVector::ZeroVector;
+
+	/** Re-send the warning location after drifting this far (cm^2) during a charge (separation nudges the enemy). */
+	static constexpr float WarnResendDistSq = 75.0f * 75.0f;
 };

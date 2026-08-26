@@ -6,7 +6,7 @@
 
 // Concrete actor classes — CDOs are used as classifier inputs (no world, no SpawnActor).
 #include "Enemy/FPSREnemyBase.h"
-#include "Enemy/FPSRRangedEnemyBase.h"
+#include "Enemy/FPSREnemyEliteBase.h"
 #include "Boss/FPSRBossBase.h"
 #include "Hero/FPSRCharacter.h"
 #include "Arena/FPSRArenaDestructible.h"
@@ -63,7 +63,7 @@ bool FFPSRDirectorSensorSourceGatingTest::RunTest(const FString& Parameters)
 	// CDOs are valid instances of the exact class (no world needed); Cast<> only inspects type. The Victim
 	// argument is used ONLY for the Self identity check, so distinct CDOs stand in for distinct actors.
 	const AActor* Enemy = GetDefault<AFPSREnemyBase>();
-	const AActor* Ranged = GetDefault<AFPSRRangedEnemyBase>();
+	const AActor* Elite = GetDefault<AFPSREnemyEliteBase>();
 	const AActor* Boss = GetDefault<AFPSRBossBase>();
 	const AActor* Player = GetDefault<AFPSRCharacter>();
 	const AActor* Destructible = GetDefault<AFPSRArenaDestructible>(); // any AFPSRDestructible; AFPSRDoor retired 2026-08-24
@@ -71,7 +71,7 @@ bool FFPSRDirectorSensorSourceGatingTest::RunTest(const FString& Parameters)
 
 	// Classification (enum has no TestEqual overload -> compare with ==).
 	TestTrue(TEXT("enemy -> Enemy"), ClassifyDamageSource(Enemy, Player) == EFPSRDamageSourceClass::Enemy);
-	TestTrue(TEXT("ranged enemy -> Enemy (subclass)"), ClassifyDamageSource(Ranged, Player) == EFPSRDamageSourceClass::Enemy);
+	TestTrue(TEXT("elite enemy -> Enemy (subclass)"), ClassifyDamageSource(Elite, Player) == EFPSRDamageSourceClass::Enemy);
 	TestTrue(TEXT("boss -> Boss (boss is an ACharacter, not an AFPSREnemyBase)"), ClassifyDamageSource(Boss, Player) == EFPSRDamageSourceClass::Boss);
 	TestTrue(TEXT("self (instigator==victim) -> Self"), ClassifyDamageSource(Player, Player) == EFPSRDamageSourceClass::Self);
 	TestTrue(TEXT("other player -> FriendlyFire"), ClassifyDamageSource(Player, Enemy /*any distinct victim*/) == EFPSRDamageSourceClass::FriendlyFire);

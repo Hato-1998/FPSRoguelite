@@ -1,8 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Enemy/FPSREnemySpawnSubsystem.h"
-#include "Enemy/FPSREnemyBase.h"
-#include "Enemy/FPSRRangedEnemyBase.h" // CancelRangedChargesForTransition (전환 시작 시 충전·경고 UI 취소)
+#include "Enemy/FPSREnemyBase.h" // CancelRangedChargesForTransition -> ServerCancelRangedForStageTransition (ADR 0013 C1: promoted here from the retired AFPSRRangedEnemyBase)
 #include "Enemy/FPSREnemySpawnPoint.h"
 #include "Enemy/FPSRSpawnRoom.h"
 #include "Enemy/FPSRFlowFieldSubsystem.h"
@@ -585,10 +584,11 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 			// ranged charge/cooldown accumulators stay wall-clock-correct. Freeze preserved: the whole pass early-returns while paused.
 			if (((MovementFrameCounter + static_cast<int32>(Enemy->GetUniqueID())) % AttackStride) == 0)
 			{
-				// Per-archetype attack decision: the base has none of its own (dead melee axis removed, ADR 0013 C0);
-				// ranged charge->fire for AFPSRRangedEnemyBase. DistSqToTarget (below) is the XY nearest-player test,
-				// which ignores Z — the vertical gap (computed above) no longer feeds an attack gate, only the
-				// movement stop-gate.
+				// Attack decision: AFPSREnemyBase::ServerTickAttack's ranged charge->fire cycle (promoted from the
+				// retired AFPSRRangedEnemyBase, ADR 0013 C1 — every enemy has been ranged since f5b0a78d, so this is
+				// no longer a per-subclass override). DistSqToTarget (below) is the XY nearest-player test, which
+				// ignores Z — the vertical gap (computed above) doesn't feed an attack gate, only the movement
+				// stop-gate.
 				if (AFPSRCharacter* TargetChar = Cast<AFPSRCharacter>(PlayerPawns[BestPlayerIndex]))
 				{
 					FFPSRServerAttackContext AttackCtx;
@@ -1653,12 +1653,14 @@ void UFPSREnemySpawnSubsystem::CancelRangedChargesForTransition()
 
 	// No snapshot needed (unlike the carry-over below): ServerCancelRangedForStageTransition only mutates the enemy's
 	// OWN ranged state — it never releases the actor or touches ActiveEnemies — so iterating the live array is safe.
+	// No Cast<> any more (ADR 0013 C1): the ranged FSM is now AFPSREnemyBase's own, not a AFPSRRangedEnemyBase
+	// subclass's, so every active enemy is a direct candidate.
 	int32 CancelledCount = 0;
 	for (const TObjectPtr<AFPSREnemyBase>& EnemyPtr : ActiveEnemies)
 	{
-		if (AFPSRRangedEnemyBase* Ranged = Cast<AFPSRRangedEnemyBase>(EnemyPtr.Get()))
+		if (AFPSREnemyBase* Enemy = EnemyPtr.Get())
 		{
-			if (Ranged->ServerCancelRangedForStageTransition())
+			if (Enemy->ServerCancelRangedForStageTransition())
 			{
 				++CancelledCount;
 			}
