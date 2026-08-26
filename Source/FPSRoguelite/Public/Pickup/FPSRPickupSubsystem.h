@@ -21,6 +21,11 @@ public:
 	/** Server: spawn an XP gem at Location worth XPValue. Over the active cap, grants the XP directly. */
 	void SpawnXPPickup(const FVector& Location, int32 XPValue);
 
+	/** Server: 스테이지 스왑 때 살아있는 XP 젬을 새 아레나로 옮긴다 (ADR 0010 D6 — 딜링 창 보상은
+	 *  즉시 회수가 아니라 스왑 뒤 직접 회수로 지급된다). UFPSREnemySpawnSubsystem::CarryEnemiesToNewStage 와
+	 *  같은 델타·같은 열린셀 스냅을 쓴다. */
+	void CarryPickupsToNewStage(const TArray<FVector>& OldPlayerLocs, const TArray<FVector>& NewPlayerLocs);
+
 private:
 	/** Check if this subsystem has server authority. */
 	bool HasServerAuthority() const;
