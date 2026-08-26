@@ -7,8 +7,27 @@
 ---
 
 ### 2-6. 몬스터 (스웜 적)
-- 공격 타입 **근거리 / 원거리 / 특수 중 정확히 1개 고정** (상황 따라 전환 안 함)
-- **GAS 미사용** — 경량 `UHealthComponent`(`UFPSREnemyHealthComponent`) + 비-GE 데미지 적용
+- ~~공격 타입 **근거리 / 원거리 / 특수 중 정확히 1개 고정** (상황 따라 전환 안 함)~~
+  🔴 **정정(2026-08-26, [ADR 0013](../Architecture/0013-enemy-tier-axis-and-elite-gas.md))**: **근거리는 폐지됐다.**
+  커밋 `f5b0a78d`(2026-08-14 사용자 결정, *"전 몬스터 원거리화"*)로 적 BP 2개가 **전부 `AFPSRRangedEnemyBase` 자식**이 됐고
+  (`BP_EnemyMeleeBase` 는 이름만 "Melee"), ADR [0008](../Architecture/0008-hover-enemy-pursuit-reachability-modes.md)·[0009](../Architecture/0009-hover-swarm-local-3d-flow-window.md) 비목표가
+  *"근접 적 재도입 없음 — 근접처럼 보이는 적도 초단사거리 원거리로 만든다"* 로 못박았다.
+  → 현행 공격 방식은 **원거리 하나**이고, 그 위에서 **사거리가 아키타입 데이터로 갈린다**(초단사거리 = 옛 "근접").
+  **특수는 존치** — 아래 「분류 축」의 티어와 **직교하는 별도 축**(공격 형태: 공중·방패 등, P4 항목 참조)이다.
+  ⚠️ `AFPSREnemyBase::ServerTickAttack` 의 근접 접촉 판정과 짝인 `AttackTokenLimit=10` 근접 토큰 회계는
+  **실행하는 콘텐츠가 0인 죽은 코드**다. `Enemy.Archetype.*`/`Enemy.Attack.*` 태그 6개도 참조 0건. (정리 = ADR 0013 후속 행)
+- **분류 축 = 티어(일반 / 엘리트)** — 확정 2026-08-26, [ADR 0013](../Architecture/0013-enemy-tier-axis-and-elite-gas.md).
+  티어는 **C++ 클래스로 표현**하되 **중앙 enum/switch 로 분기하지 않는다**(virtual·폴리모픽 시임만 — 아래 로스터 룰의 확장성-우선 원칙과 같은 규약).
+  **보스는 티어에 포함되지 않는다** — `AFPSRBossBase` 는 `ACharacter` 로 별도 유지하며 스웜과의 공유는 `UFPSREnemyHealthComponent` 하나뿐이다.
+  ⚠️ **`Tier` 라는 낱말을 적 티어에 단독으로 쓰지 않는다** — `TierS0/S1/S2RadiusSq`(거리 LOD)·`EFPSRArenaPropTier`·`FFPSRCardRarityTier` 로 이미 3중 점유돼 grep 이 뒤엉킨다.
+  ⚠️ **풀 취득 비용은 클래스 수와 무관해야 한다**(ADR 0013 불변식 7): 현행 `AcquireEnemy` 는 `DormantPool` 단일 평면 배열을 `GetClass()` 정확 일치로 선형 스캔한다.
+  티어 × 형태로 클래스가 늘면 클래스별 버킷화가 **동반 조건**이지 후순위 최적화가 아니다.
+- **GAS** — ⚠️ **정정(2026-08-26, ADR 0013)**: 종전 *"GAS 미사용"* 은 이제 **티어별로 갈린다.**
+  - **일반 티어 = GAS 미사용**(무변) — 경량 `UHealthComponent`(`UFPSREnemyHealthComponent`) + 비-GE 데미지 적용
+  - **엘리트 = ASC 부착** — `Game.md §1` 의 *"GAS는 플레이어(1~4)와 보스/엘리트에만"* 중 **엘리트 절반이 실현**된다.
+    소유자는 **액터 자신**(적은 PlayerState 가 없어 플레이어와 소유 패턴이 다르다 — 플레이어는 `AFPSRPlayerState` 소유).
+    **플레이어와 어트리뷰트 셋을 공유하지 않는다.** 동시 마릿수 = **스테이지·난이도 함수 + 하드캡**(캡 없이 증가만 두면 후반 ASC 복제 예산이 터진다).
+  - **보스 = 여전히 미실현** — `FPSRBossBase.h` 가 *"no ASC/GAS is attached"* 라고 명시. ADR 0013 의 비목표다(문서가 앞서간 상태, `Docs/ProjectStructure_Report.md:38` D1).
 - 이동: **Flow-Field 샘플링(고정맵 사전계산, 높이/유계 2층 인지) + 분리(separation)**, 배치 업데이트 (P2). 적 Z로 레이어(서피스 rank) 선택 → 겹친 2층(메자닌) 플레이어를 계단/램프로 추격(U7, 상세 `Performance §5-2`). ⚠️층간 중첩은 **storey급(≥~1층)**으로 저작(storey 미만 근접 2면은 단일 계단면으로 — 레이어 진동 회피)
 - 렌더: 거리 LOD — ⚠️ **정정(2026-08-11)**: `USignificanceManager`는 **쓰지 않는다**(플러그인만 켜져 있고 코드 참조 0). 실제 티어링은 **손수 짠 거리밴드**이고 이동 패스와 융합돼 있다. **인스턴싱 컴포넌트(ISM/HISM)는 쓰지 않는다** — 적마다 개별 `UStaticMeshComponent`. 🔁 **결론 갱신 2026-08-13(M0 EC ④ 재대조)**: 이건 *미상환 부채*가 아니라 **채택된 설계**다 — ADR [`0007`](../Architecture/0007-enemy-swarm-render-path-cpd.md)이 대조 실험으로 ISM을 **기각**하고 **MID 폐기 + CustomPrimitiveData**를 채택했다(엔진 동적 인스턴싱이 드로우 병합을 이미 보존하므로, 필요했던 것은 인스턴싱 컴포넌트가 아니라 per-actor MID 제거였다). 실측 = 스웜 렌더 합 **2.05ms@300**(예산 4ms, 여유 2배) · 3.03ms@500 — `Performance.md §5`. ~~(인스턴싱/VAT = `Roadmap.md §8` 별도 트랙)~~ → 트랙은 §7-6 M0 (a″)로 이동해 VAT-1에서 종결됐다. 티어 정의 자체(S0~S3)는 `Performance.md §5-1` 그대로 유효.
 - 풀링 필수 — ⚠️ **정정(2026-08-11)**: `UActorPool`이라는 클래스는 **없다**. 풀링은 `UFPSREnemySpawnSubsystem` **안에 인라인**돼 있다(기능은 있고 이름만 없던 것). 계약("적은 Destroy 하지 말고 반납한다")은 그대로.
