@@ -45,7 +45,7 @@ EFPSRDamageSourceClass FPSRTelemetry::ClassifyDamageSource(const AActor* Instiga
 	{
 		return EFPSRDamageSourceClass::Boss;
 	}
-	if (Cast<AFPSREnemyBase>(Instigator)) // catches AFPSRRangedEnemyBase (subclass)
+	if (Cast<AFPSREnemyBase>(Instigator)) // catches AFPSREnemyEliteBase (subclass)
 	{
 		return EFPSRDamageSourceClass::Enemy;
 	}

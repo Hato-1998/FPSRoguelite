@@ -10,6 +10,11 @@
 #include "Hero/FPSRCharacter.h"
 #include "Pickup/FPSRPickupSubsystem.h"
 #include "Core/FPSRLogChannels.h"
+#include "Core/FPSRPlayerController.h" // ranged attack (promoted from AFPSRRangedEnemyBase, ADR 0013 C1)
+#include "Weapon/FPSRProjectile.h"
+#include "Weapon/FPSRProjectileSubsystem.h"
+#include "Weapon/FPSRProjectileTypes.h"
+#include "FPSRCollisionChannels.h"
 
 #include "Components/CapsuleComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -21,6 +26,9 @@
 #include "ProfilingDebugging/CsvProfiler.h" // CSV_PROFILER_STATS gate for the metrics registry calls below
 #include "Settings/FPSRPlaceholderVisualSettings.h"
 #include "HAL/IConsoleManager.h"
+#include "CollisionQueryParams.h"
+#include "Net/UnrealNetwork.h"
+#include "Net/Core/PushModel/PushModel.h"
 
 #if !UE_BUILD_SHIPPING
 static float GFPSREnemySpeedScale = 1.0f;
@@ -76,6 +84,15 @@ AFPSREnemyBase::AFPSREnemyBase()
 	// enemy BPs assign their own (VAT) mesh, so the fallback only fires for the raw-C++ spawn (unconfigured roster).
 
 	HealthComponent = CreateDefaultSubobject<UFPSREnemyHealthComponent>(TEXT("HealthComponent"));
+}
+
+void AFPSREnemyBase::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+
+	FDoRepLifetimeParams Params;
+	Params.bIsPushBased = true;
+	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSREnemyBase, bCharging, Params);
 }
 
 void AFPSREnemyBase::ApplyNetCullRadius(float RadiusCm)
@@ -181,6 +198,10 @@ void AFPSREnemyBase::BeginPlay()
 
 void AFPSREnemyBase::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	// World teardown / level change: ensure the ranged warning is cleared + the token released (promoted from
+	// AFPSRRangedEnemyBase, ADR 0013 C1).
+	ReleaseRangedHold();
+
 	// S4 readability metrics: symmetric unregister (see the BeginPlay registration above for why this is once-per-
 	// actor-lifetime, not once-per-Deactivate).
 #if CSV_PROFILER_STATS
@@ -291,6 +312,14 @@ void AFPSREnemyBase::HandleDeath(AActor* DeadActor, AActor* Killer)
 
 void AFPSREnemyBase::EnterDyingState()
 {
+	// Promoted from AFPSRRangedEnemyBase (ADR 0013 C1). Same reason as Deactivate() (see that function's comment),
+	// but earlier: whichever teardown reaches this enemy first, the held ranged state must close HERE, not wait for
+	// the LATER Deactivate() call — a ranged corpse can now dwell for GetDeathDwellSeconds() before that runs, and
+	// the target's warning indicator (+ this enemy's concurrency token) must not stay held for the whole dwell
+	// window. Must run BEFORE collision goes off below (P1 lifecycle contract — see ReleaseRangedHold).
+	ReleaseRangedHold();
+	ResetRangedCycle();
+
 	// Gameplay ends NOW; presentation does not — see this function's header doc for the full EnterDyingState vs.
 	// Deactivate role split. No hide / no SetNetDormancy here (unlike Deactivate): bDead already replicated before
 	// HandleDeath ever ran (the health component's ApplyDamage->OnDeath fires first), so a remote client's own
@@ -337,8 +366,11 @@ void AFPSREnemyBase::Activate(const FVector& Location)
 	SeekTargetZ = 0.0f;
 	bSeekTargetZValid = false;
 	bLastForwardBlocked = false;
-	LastAttackTime = -1000.0f; // CanAttack's own cooldown gate reads this (unrelated to the dormant pursuit fields
-	                           // above) — reset so a reused actor doesn't inherit a prior life's cooldown clock
+	LastAttackTime = -1000.0f; // Stamped by NotifyAttacked on every successful ranged shot. ADR 0013 C0 removed its
+	                           // last LIVE reader with the melee CanAttack cooldown gate, so it now feeds only the
+	                           // pursuit stall detector — which ADR 0009 retired but kept armed (see the dormant
+	                           // pursuit fields above). Still reset here: a reused actor must not hand a prior life's
+	                           // attack clock to the stall detector if that path is ever re-armed.
 	AttackAnimHoldUntil = -1.0f; // same reasoning as LastAttackTime just above — a reused actor must not inherit a
 	                             // prior life's walk/idle-suppression window (a short-lived corpse reused shortly
 	                             // after dwelling could otherwise spawn already "holding" for its remaining span)
@@ -371,6 +403,22 @@ void AFPSREnemyBase::Activate(const FVector& Location)
 	// reads MaxHealth here (ResetForReuse already ran above), so this life's own first real hit is never swallowed.
 	LastHealthForHitFlash = HealthComponent ? HealthComponent->GetHealth() : 0.0f;
 	SetAnimState(EFPSRAnimState::Idle);
+
+	// Promoted from AFPSRRangedEnemyBase (ADR 0013 C1). Fresh reuse: any prior hold was released by the matching
+	// Deactivate; clear defensively so no stale warning/token leaks into the new life, then reset the cycle.
+	bHoldingToken = false;
+	HeldTargetPC = nullptr;
+	ResetRangedCycle();
+
+	// Defensive reset: bCharging should already be false via ReleaseRangedHold on every teardown path (Deactivate /
+	// EnterDyingState / EndPlay all route through it), but Activate is the ONE pool-reuse entry point every archetype
+	// life passes through — belt-and-suspenders so a reused actor can never render the non-targeted charge telegraph
+	// before its first real charge this life.
+	if (bCharging)
+	{
+		bCharging = false;
+		MARK_PROPERTY_DIRTY_FROM_NAME(AFPSREnemyBase, bCharging, this);
+	}
 }
 
 void AFPSREnemyBase::SetExitPath(const TArray<FVector>& InWaypoints, bool bPhaseThroughWorld)
@@ -503,6 +551,12 @@ bool AFPSREnemyBase::ConsumeExitPathSteering(const FVector& MyLocation, float Sc
 
 void AFPSREnemyBase::Deactivate()
 {
+	// Promoted from AFPSRRangedEnemyBase (ADR 0013 C1). Pool release / death-dwell completion / kill-Z recycle all
+	// route here — close the warning + release the token on EVERY teardown path (not just an explicit abort) so a
+	// Reliable 'off' is never dropped and the concurrency count never leaks.
+	ReleaseRangedHold();
+	ResetRangedCycle();
+
 	SetActorHiddenInGame(true);
 	SetActorEnableCollision(false);
 	SetNetDormancy(DORM_DormantAll);
@@ -743,7 +797,27 @@ void AFPSREnemyBase::HandleDeathCosmetic()
 	SetHealthBarVisible(false);
 }
 
-EFPSRServerAttackResult AFPSREnemyBase::ServerTickAttack(const FFPSRServerAttackContext& Ctx)
+bool AFPSREnemyBase::ServerCancelRangedForStageTransition()
+{
+	if (!HasAuthority())
+	{
+		return false;
+	}
+
+	// Read BEFORE releasing — ReleaseRangedHold clears exactly these. "Was mid-cycle" covers all three because a
+	// Cooldown-state enemy holds no token and shows no warning, yet still needs the reset so it can re-engage
+	// immediately in the new arena instead of burning the rest of an old arena's cooldown.
+	const bool bWasActive = bCharging || bHoldingToken || (ChargeState != EFPSRRangedChargeState::Idle);
+
+	// The SAME pair every teardown path uses (Deactivate / EnterDyingState) — see the header for why a transition
+	// needs its own entry point despite those existing: the enemy is CARRIED OVER, not torn down, so none of them run.
+	ReleaseRangedHold();
+	ResetRangedCycle();
+
+	return bWasActive;
+}
+
+void AFPSREnemyBase::ServerTickAttack(const FFPSRServerAttackContext& Ctx)
 {
 	// Defensive: A-2 (UFPSREnemySpawnSubsystem::BeginDying) already makes this structurally unreachable — a dying
 	// enemy is pulled OUT of ActiveEnemies the instant HandleDeath runs, and the subsystem's per-pass loop only ever
@@ -752,29 +826,257 @@ EFPSRServerAttackResult AFPSREnemyBase::ServerTickAttack(const FFPSRServerAttack
 	// dead-enemy-attacks bug. Cheap: one bool check per pass.
 	if (HealthComponent && HealthComponent->IsDead())
 	{
-		return EFPSRServerAttackResult::None;
+		return;
 	}
 
-	// Melee contact attack: in horizontal range + within the vertical gap (no through-floor hits) + cooldown elapsed
-	// + the target player's attack-token budget allows. Behaviour-identical refactor of the spawn subsystem's former
-	// inline attack block — the subsystem now delegates the decision here so ranged archetypes can override it.
-	if (Ctx.TargetChar
-		&& Ctx.DistSqToTarget <= (AttackRange * AttackRange)
-		&& Ctx.bVerticalInRange
-		&& CanAttack(Ctx.Now)
-		&& Ctx.bMeleeTokenAvailable)
+	// Promoted from AFPSRRangedEnemyBase (ADR 0013 C1). The subsystem already early-returns the whole pass while the
+	// run is frozen, so DeltaSeconds only accrues during active gameplay — the charge/cooldown accumulators below
+	// are freeze-paused for free.
+	const float Dt = Ctx.DeltaSeconds;
+	const bool bHaveTarget = (Ctx.TargetChar != nullptr) && (Ctx.TargetController != nullptr);
+	const bool bInRange = bHaveTarget
+		&& FVector::DistSquared(GetActorLocation(), Ctx.TargetLocation) <= FMath::Square(RangedEngageRange);
+
+	switch (ChargeState)
 	{
-		Ctx.TargetChar->ApplyContactDamage(Ctx.ContactDamage, this);
-		NotifyAttacked(Ctx.Now);
-		// Authority-side attack anim tell (U20) — drives the listen-server host / standalone render. Clients derive
-		// their own attack tell from proximity in PostNetReceiveLocationAndRotation. AttackAnimHoldUntil (server
-		// lifecycle hold) keeps this state through TickServerMovement's walk/idle branch for AttackAnimHoldSeconds,
-		// so the one-shot is actually visible instead of the very next movement pass overwriting it.
-		SetAnimState(EFPSRAnimState::Attack);
-		AttackAnimHoldUntil = Ctx.Now + AttackAnimHoldSeconds;
-		return EFPSRServerAttackResult::MeleeAttacked;
+	case EFPSRRangedChargeState::Idle:
+	{
+		UFPSREnemySpawnSubsystem* Sub = GetWorld() ? GetWorld()->GetSubsystem<UFPSREnemySpawnSubsystem>() : nullptr;
+		// Cheap gates first (range, then a read-only token peek) so a capped-out idle ranged enemy never pays for the
+		// line-of-sight trace every pass at swarm scale (Game.MD §5). Acquire only after LOS confirms a clear shot.
+		if (bInRange && Sub && Sub->IsRangedTokenAvailable(Ctx.TargetController) && HasLineOfSight(Ctx.TargetChar, Ctx.TargetLocation))
+		{
+			if (Sub->TryAcquireRangedToken(Ctx.TargetController))
+			{
+				ChargeState = EFPSRRangedChargeState::Charging;
+				ChargeElapsed = 0.0f;
+				bHoldingToken = true;
+				HeldTargetPC = Ctx.TargetController;
+				LastWarnLocation = GetActorLocation();
+				SendRangedWarning(true); // telegraph: the target gets a directional warning to dodge
+
+				// Drive the Attack cosmetic at the CHARGE-length rate so the material's (Time-EnterTime)*Rate
+				// progress reaches exactly 1.0 the moment the shot fires (not the melee AttackAnimHoldSeconds
+				// default), and hold it there for the same span so TickServerMovement's walk/idle branch can't stomp
+				// it mid-charge (a stationary/slow-repositioning charger can still read as bMoved on a separation-
+				// jitter pass).
+				const float ChargeRate = 1.0f / FMath::Max(KINDA_SMALL_NUMBER, RangedChargeTime);
+				SetAnimState(EFPSRAnimState::Attack, ChargeRate);
+				AttackAnimHoldUntil = Ctx.Now + RangedChargeTime;
+
+				// Non-targeted client telegraph (user decision, see bCharging's own comment): replicate the charge
+				// to EVERY client, not just the Reliable-RPC'd target.
+				bCharging = true;
+				MARK_PROPERTY_DIRTY_FROM_NAME(AFPSREnemyBase, bCharging, this);
+			}
+		}
+		break;
 	}
-	return EFPSRServerAttackResult::None;
+	case EFPSRRangedChargeState::Charging:
+	{
+		// Abort if the target left range, became non-engageable (DBNO/dead players are filtered out of the
+		// subsystem's PlayerPawns, so the nearest target changes), or we re-targeted a different player. Release the
+		// token + clear the warning, then briefly cool down to avoid instant re-charge flicker.
+		const bool bSameTarget = HeldTargetPC.IsValid() && (Ctx.TargetController == HeldTargetPC.Get());
+		if (!bInRange || !bSameTarget)
+		{
+			ReleaseRangedHold();
+			ChargeState = EFPSRRangedChargeState::Cooldown;
+			CooldownElapsed = 0.0f;
+			break;
+		}
+
+		ChargeElapsed += Dt;
+
+		// Track the moving source: re-send the warning location once we've drifted (separation nudges us while we
+		// hold), so the indicator points at where we actually are. Throttled by distance (no per-frame Reliable spam).
+		if (FVector::DistSquared(GetActorLocation(), LastWarnLocation) > WarnResendDistSq)
+		{
+			LastWarnLocation = GetActorLocation();
+			SendRangedWarning(true);
+		}
+
+		if (ChargeElapsed >= RangedChargeTime)
+		{
+			FireProjectile(Ctx);
+			NotifyAttacked(Ctx.Now); // ADR 0008: unify the melee/ranged "attack succeeded" signal for stall detection
+			ReleaseRangedHold(); // shot away — clear the warning + free the token (no longer "attempting")
+			ChargeState = EFPSRRangedChargeState::Cooldown;
+			CooldownElapsed = 0.0f;
+		}
+		break;
+	}
+	case EFPSRRangedChargeState::Cooldown:
+	{
+		CooldownElapsed += Dt;
+		if (CooldownElapsed >= RangedFireCooldown)
+		{
+			ChargeState = EFPSRRangedChargeState::Idle;
+		}
+		break;
+	}
+	}
+}
+
+void AFPSREnemyBase::FireProjectile(const FFPSRServerAttackContext& Ctx)
+{
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+	if (!ProjectileClass)
+	{
+		UE_LOG(LogFPSR, Warning, TEXT("[RangedEnemy] %s has no ProjectileClass set — shot skipped."), *GetName());
+		return;
+	}
+
+	UFPSRProjectileSubsystem* ProjSub = World->GetSubsystem<UFPSRProjectileSubsystem>();
+	if (!ProjSub)
+	{
+		return;
+	}
+
+	const FVector MuzzleLoc = GetMuzzleLocation();
+	FVector Dir = (Ctx.TargetLocation - MuzzleLoc);
+	if (Dir.IsNearlyZero())
+	{
+		Dir = GetActorForwardVector();
+	}
+	Dir = Dir.GetSafeNormal();
+
+	// Team=Enemy reuses the whole proven projectile/damage bridge: IsHostileTarget hits only players (not other
+	// enemies, not the instigator), and damage flows through ApplyContactDamage — no new damage code (Game.MD §2-10).
+	FFPSRProjectileParams Params;
+	Params.Team = EFPSRProjectileTeam::Enemy;
+	Params.InstigatorActor = this;
+	Params.Damage = ProjectileDamage;
+	Params.CritChance = 0.0f;       // enemy fire never crits (Game.MD §2-10)
+	Params.CritMultiplier = 1.0f;
+	Params.InitialSpeed = ProjectileSpeed;
+	Params.Lifetime = ProjectileLifetime;
+	Params.GravityScale = ProjectileGravityScale;
+	Params.ExplosionRadius = 0.0f;
+	Params.Pierce = 0;
+	Params.bSelfDamage = false;
+	Params.KnockbackStrength = 0.0f;
+
+	ProjSub->AcquireProjectile(ProjectileClass, MuzzleLoc, Dir, Params);
+}
+
+bool AFPSREnemyBase::HasLineOfSight(const AActor* TargetActor, const FVector& TargetLocation) const
+{
+	if (!bRequireLineOfSight)
+	{
+		return true;
+	}
+	const UWorld* World = GetWorld();
+	if (!World)
+	{
+		return false;
+	}
+
+	// Block on STATIC geometry (walls / door frames) AND breakable geometry — CLOSED AFPSRDoor leaves and arena
+	// props (ECC_FPSRDestructible, Enemy.md §2-6; these used to ride ECC_FPSRPlayerPawn). Without that channel a
+	// ranged enemy would "see" — and shoot — through a closed door to the player behind it. The enemy projectile
+	// now BLOCKS on destructibles too, so this is no longer the only thing preventing a through-door hit, but it
+	// is still the cheaper gate: it stops the shot from being taken at all instead of eating it on the door.
+	// The player channel stays queried so a teammate's body also breaks LOS. Ignore self + the target so neither
+	// counts as an occluder. Other ENEMIES (ECC_Pawn) are intentionally NOT queried — an enemy projectile passes
+	// through them, so they don't block LOS.
+	FCollisionObjectQueryParams ObjParams;
+	ObjParams.AddObjectTypesToQuery(ECC_WorldStatic);
+	ObjParams.AddObjectTypesToQuery(ECC_FPSRPlayerPawn);
+	ObjParams.AddObjectTypesToQuery(ECC_FPSRDestructible);
+	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(FPSRRangedLOS), false, this);
+	if (TargetActor)
+	{
+		QueryParams.AddIgnoredActor(TargetActor);
+	}
+	FHitResult Hit;
+	return !World->LineTraceSingleByObjectType(Hit, GetMuzzleLocation(), TargetLocation, ObjParams, QueryParams);
+}
+
+void AFPSREnemyBase::SendRangedWarning(bool bActive)
+{
+	if (AFPSRPlayerController* PC = HeldTargetPC.Get())
+	{
+		// Existing Client+Reliable RPC -> UFPSRPlayerFeedbackComponent::ReceiveRangedTarget. SourceId = our unique id
+		// (stable across the charge window; distinct per enemy so concurrent shooters track independently).
+		PC->ClientNotifyRangedTarget(static_cast<int32>(GetUniqueID()), GetActorLocation(), bActive);
+	}
+}
+
+void AFPSREnemyBase::ReleaseRangedHold()
+{
+	// bCharging is cleared UNCONDITIONALLY here, ahead of the bHoldingToken early-return below, so the non-targeted-
+	// client telegraph never sticks true across a teardown that races the charge state — this function is already
+	// the single "idempotent, safe on every teardown path" recovery point (Deactivate / EnterDyingState / EndPlay /
+	// both ServerTickAttack exits all route through it), exactly mirroring why the warning RPC below always fires.
+	if (bCharging)
+	{
+		bCharging = false;
+		MARK_PROPERTY_DIRTY_FROM_NAME(AFPSREnemyBase, bCharging, this);
+		// Also release the movement-anim hold immediately: an ABORTED charge (target left range / re-targeted) must
+		// not leave the cosmetic Attack pose stuck through the remainder of the original RangedChargeTime window
+		// while the enemy is actually free to move (a successful FIRE reaches this at ChargeElapsed>=RangedChargeTime,
+		// i.e. Ctx.Now is already ~AttackAnimHoldUntil, so clearing it here early is a no-op harm-wise on that path).
+		AttackAnimHoldUntil = -1.0f;
+	}
+
+	if (!bHoldingToken)
+	{
+		return;
+	}
+	SendRangedWarning(false); // Reliable 'off' — must always fire or the warning indicator sticks forever
+	if (UWorld* World = GetWorld())
+	{
+		if (UFPSREnemySpawnSubsystem* Sub = World->GetSubsystem<UFPSREnemySpawnSubsystem>())
+		{
+			Sub->ReleaseRangedToken(HeldTargetPC);
+		}
+	}
+	bHoldingToken = false;
+	HeldTargetPC = nullptr;
+}
+
+void AFPSREnemyBase::OnRep_Charging()
+{
+	// Non-targeted client telegraph (see bCharging's header comment). True -> enter the Attack cosmetic at the
+	// charge-length rate, mirroring the server's own SetAnimState call in ServerTickAttack's Idle->Charging
+	// transition. False -> release the hold so the next PostNetReceiveLocationAndRotation re-derives Walk/Idle from
+	// the replicated transform, same as any other attack tell falling out of range.
+	if (bCharging)
+	{
+		SetAnimState(EFPSRAnimState::Attack, 1.0f / FMath::Max(KINDA_SMALL_NUMBER, RangedChargeTime));
+		// Hold the cosmetic for the charge length on THIS client, mirroring the authority-side hold that
+		// ServerTickAttack stamps alongside its own SetAnimState. A ranged enemy fires from far outside
+		// AttackRange, so PostNetReceiveLocationAndRotation's melee tell never claims it and its walk/idle branch
+		// would otherwise erase this telegraph on the very next net update — a charge the user decided to
+		// replicate specifically so it could be READ would be visible for one frame out of RangedChargeTime.
+		if (const UWorld* World = GetWorld())
+		{
+			AttackAnimHoldUntil = World->GetTimeSeconds() + RangedChargeTime;
+		}
+	}
+	else
+	{
+		// Aborted or completed charge: drop the hold immediately, exactly as ClearRangedReservation does on the
+		// authority side, so the enemy does not sit in the charge pose while it is already free to move.
+		AttackAnimHoldUntil = -1.0f;
+	}
+}
+
+void AFPSREnemyBase::ResetRangedCycle()
+{
+	ChargeState = EFPSRRangedChargeState::Idle;
+	ChargeElapsed = 0.0f;
+	CooldownElapsed = 0.0f;
+}
+
+FVector AFPSREnemyBase::GetMuzzleLocation() const
+{
+	return GetActorTransform().TransformPosition(MuzzleOffset);
 }
 
 void AFPSREnemyBase::TickServerMovement(const FFPSRServerMoveContext& Ctx)

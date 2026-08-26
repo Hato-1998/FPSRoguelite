@@ -22,7 +22,7 @@ class AActor;
 enum class EFPSRDamageSourceClass : uint8
 {
 	Self = 0,        // instigator == victim (rocket-jump / explosion self-damage)
-	Enemy,           // AFPSREnemyBase (incl. AFPSRRangedEnemyBase)
+	Enemy,           // AFPSREnemyBase (incl. AFPSREnemyEliteBase)
 	Boss,            // AFPSRBossBase (separate bucket; ACharacter, NOT an AFPSREnemyBase)
 	FriendlyFire,    // another AFPSRCharacter
 	Door,            // AFPSRDestructible: doors AND breakable props (shares the enemy health component, not a combatant)

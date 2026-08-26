@@ -1,8 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Enemy/FPSREnemySpawnSubsystem.h"
-#include "Enemy/FPSREnemyBase.h"
-#include "Enemy/FPSRRangedEnemyBase.h" // CancelRangedChargesForTransition (전환 시작 시 충전·경고 UI 취소)
+#include "Enemy/FPSREnemyBase.h" // CancelRangedChargesForTransition -> ServerCancelRangedForStageTransition (ADR 0013 C1: promoted here from the retired AFPSRRangedEnemyBase)
 #include "Enemy/FPSREnemySpawnPoint.h"
 #include "Enemy/FPSRSpawnRoom.h"
 #include "Enemy/FPSRFlowFieldSubsystem.h"
@@ -14,7 +13,6 @@
 #include "Core/FPSRGameState.h"
 #include "Core/FPSRPlayerState.h"
 #include "Core/FPSRPlayerController.h"
-#include "Run/FPSRRunDirectorSubsystem.h"
 #include "Settings/FPSREnemySwarmSettings.h" // separation tuning (designer knob, read once per movement pass)
 #include "Arena/FPSRArenaActor.h" // ADR 0010 D6: arena-bounds spawn gate (PassesCommonSpawnGates)
 #include "Engine/World.h"
@@ -387,10 +385,6 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 		return;
 	}
 
-	// Per-player attacker counters for this pass (attack token gating).
-	TArray<int32, TInlineAllocator<4>> AttackersThisPass;
-	AttackersThisPass.Init(0, PlayerPawns.Num());
-
 	// Global freeze (card selection) OR an active stage transition (ADR 0010 D6): enemies are frozen in place — skip
 	// the whole movement+attack pass. During a transition the frozen swarm IS the grace-window reward (안 G) — the
 	// player grinds down enemies that cannot move or fight back, so freezing them here (not just their damage output)
@@ -400,23 +394,6 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 	if (bFrozen)
 	{
 		return;
-	}
-
-	// Time-scaled contact damage, computed ONCE per pass (one global scalar — keeps the swarm a batch, no per-enemy
-	// state): 25 for the first minute, linear ramp 25->50 by BossTime, 50 thereafter (incl. the boss phase, where the
-	// run clock is pinned at BossTime). Overrides the per-enemy AttackDamage for the player-contact path.
-	float ContactDamage = 25.0f;
-	{
-		const float RunClock = GameState ? GameState->GetRunClockSeconds() : 0.0f;
-		float BossTime = 300.0f;
-		if (const UFPSRRunDirectorSubsystem* Director = World->GetSubsystem<UFPSRRunDirectorSubsystem>())
-		{
-			BossTime = Director->GetBossTime();
-		}
-		constexpr float RampStart = 60.0f;
-		const float RampEnd = FMath::Max(BossTime, RampStart + 1.0f);
-		const float Alpha = FMath::Clamp((RunClock - RampStart) / (RampEnd - RampStart), 0.0f, 1.0f);
-		ContactDamage = FMath::Lerp(25.0f, 50.0f, Alpha);
 	}
 
 	// Separation tuning, snapshotted ONCE per pass (designer knob, read at use so PIE edits hit enemies already on
@@ -547,10 +524,12 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 		}
 		const bool bHasTarget = (BestPlayerIndex != INDEX_NONE);
 
-		// Strict SAME-MAP + open-grid-CONNECTED target -> may deal contact damage. A front-chase (cross-slot, move-only)
+		// Strict SAME-MAP + open-grid-CONNECTED target -> may run the attack cycle against it. A front-chase (cross-slot, move-only)
 		// never attacks (bTargetSameMap false). Even a same-map target is gated on connectivity when a unified field exists,
-		// so a same-MapId target behind an internal closed wall / reclosed seam (a DIFFERENT component) can't be hit through
-		// the wall — contact damage bypasses FPSRCombat::CanAffectTarget, so this is the melee guard (Codex R2 #6). No unified
+		// so a same-MapId target behind an internal closed wall / reclosed seam (a DIFFERENT component) is never charged, warned or fired at through
+		// the wall (Codex R2 #6 — originally the melee-contact guard, since that axis bypassed FPSRCombat::CanAffectTarget;
+		// ADR 0013 C0 removed the axis and this gate now fronts the ranged cycle, whose own LOS trace is a SECOND line
+		// of defence, not a replacement for this one). No unified
 		// grid -> keep the exact same-map behavior (no regression).
 		const bool bAttackEligible = bHasTarget && bTargetSameMap &&
 			(!bUnified || FlowField->AreLocationsConnected(EnemyLocation, PlayerLocations[BestPlayerIndex]));
@@ -567,8 +546,9 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 		// with the number of NEAR enemies, not the total active count. It is always <= UpdateStride (attack latency is
 		// more sensitive than movement) and the un-throttled band spans S0+S1: any enemy actually in combat is never
 		// throttled. INVARIANT: this holds only while every archetype's engage range stays within the S1 radius (sqrt
-		// TierS1RadiusSq = 3500) — melee AttackRange (150) and ranged RangedEngageRange (1400) both sit well inside it,
-		// so charging/contact always happens at AttackStride 1. If a future BP tunes an engage range past 3500, its
+		// TierS1RadiusSq = 3500) — RangedEngageRange (1400) sits well inside it (as does AttackRange (150), which since
+		// ADR 0013 C0 is the client attack-tell radius, not a melee reach),
+		// so charging always happens at AttackStride 1. If a future BP tunes an engage range past 3500, its
 		// charge/cooldown timing stays correct (DeltaSeconds is stride-scaled below) but its abort/warning cadence would
 		// lag by up to AttackStride frames — re-validate this band then (natural home: the F8 significance-radius SSOT).
 		int32 UpdateStride;
@@ -587,9 +567,9 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 			Enemy->SetNetUpdateFrequency(NetFreq);
 		}
 
-		// Vertical (Z) gap to the nearest player — used BOTH by the attack gate (no through-floor melee) and by the
-		// movement stop-gate below (folded into the 3D stop distance for overlapping decks, U7), so it stays at loop-body
-		// scope rather than inside the throttled attack block.
+		// Vertical (Z) gap to the nearest player — feeds the movement stop-gate below (folded into the 3D stop
+		// distance for overlapping decks, U7); stays at loop-body scope for that reason (the melee attack gate that
+		// used to also read this was removed as dead code, ADR 0013 C0 — see AFPSREnemyBase::ServerTickAttack).
 		const float AttackVertGap = FMath::Abs(EnemyLocation.Z - BestPlayerLocation.Z);
 
 		// Attack decision, gated FIRST by front-connectivity eligibility (U P-D) then throttled by AttackStride (perf, merged
@@ -607,8 +587,11 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 			// ranged charge/cooldown accumulators stay wall-clock-correct. Freeze preserved: the whole pass early-returns while paused.
 			if (((MovementFrameCounter + static_cast<int32>(Enemy->GetUniqueID())) % AttackStride) == 0)
 			{
-				// Per-archetype attack decision: melee contact for the base, ranged charge->fire for AFPSRRangedEnemyBase. The
-				// XY nearest test ignores Z, so use the vertical gap (computed above, no through-floor melee) as a gate.
+				// Attack decision: AFPSREnemyBase::ServerTickAttack's ranged charge->fire cycle (promoted from the
+				// retired AFPSRRangedEnemyBase, ADR 0013 C1 — every enemy has been ranged since f5b0a78d, so this is
+				// no longer a per-subclass override). Neither BestDistSq nor the vertical gap (both computed above)
+				// feeds an attack gate any more — they are XY-only / stop-gate inputs, and the ranged cycle measures
+				// its own 3D distance to TargetLocation against RangedEngageRange.
 				if (AFPSRCharacter* TargetChar = Cast<AFPSRCharacter>(PlayerPawns[BestPlayerIndex]))
 				{
 					FFPSRServerAttackContext AttackCtx;
@@ -617,14 +600,7 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 					AttackCtx.TargetChar = TargetChar;
 					AttackCtx.TargetController = Cast<AFPSRPlayerController>(TargetChar->GetController());
 					AttackCtx.TargetLocation = BestPlayerLocation;
-					AttackCtx.DistSqToTarget = BestDistSq;
-					AttackCtx.bVerticalInRange = (AttackVertGap <= AttackVerticalRange);
-					AttackCtx.ContactDamage = ContactDamage;
-					AttackCtx.bMeleeTokenAvailable = (AttackersThisPass[BestPlayerIndex] < AttackTokenLimit);
-					if (Enemy->ServerTickAttack(AttackCtx) == EFPSRServerAttackResult::MeleeAttacked)
-					{
-						++AttackersThisPass[BestPlayerIndex];
-					}
+					Enemy->ServerTickAttack(AttackCtx);
 				}
 			}
 		}
@@ -633,8 +609,8 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 			// No attack-eligible target — NO same-map player (this enemy's map emptied) or a cross-slot front-chaser (MOVEMENT
 			// only, U P-D). Tick the archetype with an EMPTY-target context so its attack FSM still advances: a ranged enemy
 			// mid-charge whose target crossed a boundary / died ABORTS + releases its charge token + clears its client warning
-			// instead of freezing. The base melee no-ops on the null target, and no damage lands (null target), so this never
-			// hits across a boundary wall. Cheap: one no-op virtual call per targetless enemy.
+			// instead of freezing. The base itself has no attack of its own (dead melee axis removed, ADR 0013 C0) and simply
+			// no-ops here. Cheap: one no-op virtual call per targetless enemy.
 			FFPSRServerAttackContext AttackCtx;
 			AttackCtx.Now = Now;
 			AttackCtx.DeltaSeconds = DeltaTime;
@@ -1472,22 +1448,9 @@ AFPSREnemyBase* UFPSREnemySpawnSubsystem::AcquireEnemy(const FVector& Location, 
 	AFPSREnemyBase* Enemy = nullptr;
 
 	// Reuse a dormant actor of the SAME class as picked — a later request must never get a different archetype's
-	// mesh/behaviour. Drop any stale nulls; the pool is bounded (<=MaxActiveEnemies) so the linear scan is cheap.
-	for (int32 i = DormantPool.Num() - 1; i >= 0; --i)
-	{
-		AFPSREnemyBase* Candidate = DormantPool[i].Get();
-		if (!IsValid(Candidate))
-		{
-			DormantPool.RemoveAtSwap(i);
-			continue;
-		}
-		if (Candidate->GetClass() == ClassToSpawn)
-		{
-			Enemy = Candidate;
-			DormantPool.RemoveAtSwap(i);
-			break;
-		}
-	}
+	// mesh/behaviour. O(1) in the requested class's bucket size (ADR 0013 불변식 7 — 풀 취득 비용은 클래스 수와
+	// 무관하다); stale nulls are dropped along the way, scoped to just that bucket (FFPSREnemyDormantPool).
+	Enemy = DormantPool.AcquireOfClass(ClassToSpawn);
 
 	if (Enemy == nullptr)
 	{
@@ -1679,12 +1642,14 @@ void UFPSREnemySpawnSubsystem::CancelRangedChargesForTransition()
 
 	// No snapshot needed (unlike the carry-over below): ServerCancelRangedForStageTransition only mutates the enemy's
 	// OWN ranged state — it never releases the actor or touches ActiveEnemies — so iterating the live array is safe.
+	// No Cast<> any more (ADR 0013 C1): the ranged FSM is now AFPSREnemyBase's own, not a AFPSRRangedEnemyBase
+	// subclass's, so every active enemy is a direct candidate.
 	int32 CancelledCount = 0;
 	for (const TObjectPtr<AFPSREnemyBase>& EnemyPtr : ActiveEnemies)
 	{
-		if (AFPSRRangedEnemyBase* Ranged = Cast<AFPSRRangedEnemyBase>(EnemyPtr.Get()))
+		if (AFPSREnemyBase* Enemy = EnemyPtr.Get())
 		{
-			if (Ranged->ServerCancelRangedForStageTransition())
+			if (Enemy->ServerCancelRangedForStageTransition())
 			{
 				++CancelledCount;
 			}
