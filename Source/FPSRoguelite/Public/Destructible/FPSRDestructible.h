@@ -53,6 +53,33 @@ public:
 	 *  that arena would otherwise trigger. */
 	void ServerReset();
 
+	/** True if this destructible IS a suppressor — the stage-transition trigger (ADR 0010 D6): "any
+	 *  AFPSRArenaDestructible authored with exactly this one Reward IS the suppressor" (see
+	 *  UFPSRDestructibleReward_StageTransition's header comment). No separate flag — this asks the SAME question
+	 *  the reward-payout loop (HandleBrokenAuthority) already answers, so a designer marks a suppressor by placing
+	 *  the reward, not by ALSO flipping a redundant bool that could disagree with it. Used by
+	 *  UFPSRRunDirectorSubsystem::ApplyStageDifficultyToArena to find which of an arena's destructibles the
+	 *  stage-difficulty durability axis applies to — an ordinary prop (a crate) is left untouched. */
+	bool IsSuppressor() const;
+
+	/** Server: override this destructible's durability (ADR 0010 D6 cost axis, 신설 2026-08-26 — a suppressor's
+	 *  health scales with stage + party size, authored on UFPSRRunScheduleDataAsset, applied here rather than
+	 *  baked into the actor/BP). NewDurability <= 0 clears the override (reverts to the actor-authored Durability
+	 *  — see GetEffectiveDurability). Re-applies immediately via GetEffectiveDurability() so the health pool
+	 *  reflects the new value the same call, which is what makes the BeginPlay/override ARRIVAL ORDER safe either
+	 *  way (see GetEffectiveDurability's comment). No-op off-authority, and no-op while already bBroken:
+	 *  InitializeMaxHealth fully heals AND clears the health component's dead flag, so calling this on an
+	 *  already-broken destructible would resurrect it at full health — a live footgun this guard removes rather
+	 *  than merely documents. */
+	void ServerSetDurabilityOverride(float NewDurability);
+
+	/** The durability actually applied to HealthComponent: the server-set DurabilityOverride if one is active
+	 *  (> 0), else the actor-authored Durability. BeginPlay and ServerReset both read THROUGH this instead of
+	 *  Durability directly — whichever of BeginPlay or ServerSetDurabilityOverride runs SECOND is what ends up
+	 *  correct (an override that arrives before BeginPlay is picked up BY BeginPlay; one that arrives after is
+	 *  re-applied BY the setter), so neither ordering needs the other to have already run. */
+	float GetEffectiveDurability() const;
+
 	/** Pure, worldless: how many DamageStageThresholds (descending %) HealthPct is at-or-below. Extracted from the
 	 *  original inline AFPSRDoor::HandleHealthChanged loop so it is unit-testable without a world (FPSRoguelite.
 	 *  Destructible.Base). Order-independent for the COUNT; the 0-based index semantics assume descending order
@@ -141,6 +168,17 @@ protected:
 	 *  rifle N shots). */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Destructible", meta = (ClampMin = "1.0"))
 	float Durability = 150.0f;
+
+	/** Server-set durability override (ServerSetDurabilityOverride, 신설 2026-08-26) — <= 0 means "no override, use
+	 *  Durability" (see GetEffectiveDurability). ADR 0010 D6: a suppressor's stage+party-size-scaled health lands
+	 *  here instead of overwriting the designer's authored Durability, so the authored value survives intact for
+	 *  GetEffectiveDurability to fall back to once an override clears. NOT Replicated: HealthComponent's own
+	 *  MaxHealth/Health already replicate (they are the RESULT this feeds via InitializeMaxHealth), so a client/
+	 *  late-joiner receives that result directly — replicating this input too would be redundant traffic for the
+	 *  same fact. VisibleAnywhere (not EditAnywhere): server-computed run state, not a design-time authored value —
+	 *  nothing should hand-author it in the editor. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "FPSR|Destructible", meta = (DisplayName = "내구도 오버라이드"))
+	float DurabilityOverride = 0.0f;
 
 	/** Remaining-health fractions (1..0) at which OnDestructibleDamageStage fires, in DESCENDING order. Default
 	 *  {0.75, 0.5, 0.25, 0.05} = crack feedback at 75/50/25/5%. Designer-tunable per instance/BP (add/remove freely). */

@@ -45,6 +45,16 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "FPSR|Flow")
 	void EndRun(EFPSRRunOutcome Outcome);
 
+	/** Server: number of PARTICIPANTS (PlayerArray entries that are not spectator-only) — independent of life
+	 *  state, so it changes only on connect/disconnect, never on death/DBNO. Extracted from AreAllPlayersDead's own
+	 *  inline count (신설 2026-08-26, this IS that same loop, pulled out) so a second caller — ADR 0010 D6's stage-
+	 *  difficulty party-size lookup (UFPSRRunDirectorSubsystem::ApplyStageDifficultyToArena) — reads the SAME "who
+	 *  counts as in this run" definition the wipe check already uses, rather than a second one that could disagree.
+	 *  Deliberately NOT GetLivingPlayerCount(), below: IsAlive() excludes DBNO, and a stage-commit durability
+	 *  lookup keyed off living count would let a party go 3-down/1-up right before the commit and revive right
+	 *  after — flipping a 4-player run onto the 1-player durability rate for the rest of the stage. */
+	int32 GetParticipantCount() const;
+
 	/** Server: number of living (non-spectator) participants. Independent aggregation function — U9 (DBNO) needs
 	 *  only re-define AFPSRPlayerState::IsAlive(); this counter and the wipe predicate stay. Material for the
 	 *  P7 §3-6 'Wiped' check. */

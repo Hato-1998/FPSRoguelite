@@ -69,7 +69,11 @@
   - **확장형 프레임워크**: `AFPSRMissionActor`(서버권위 리플리케이트 Actor 베이스) 서브클래스 + `UFPSRMissionDataAsset`(메타+로직클래스+보상카드) + **디자이너 배치 `AFPSRMissionSpawnPoint`**(태그매칭+가중랜덤). 디렉터가 스폰·생명주기 관리.
   - **미션 카탈로그**(기획, 프레임워크로 수용): 좁은구역 N초 버티기 / 이동 구역 점령 / 도망치는 고체력 몹 처치 / 점프맵 오브 획득 / 피격 없이 구체 N초 소지 / 시야 극제한 버티기 / 전원 제자리 정지 등. 각 종류 = `AFPSRMission_*` 서브클래스(필요 인프라는 서브클래스+콘텐츠로 격리, 코어 불변).
   - **다중맵 점유 기반 출현 (피벗 2026-07-03, §2-1)**: 파티가 여러 맵에 분산되면 **점유된 맵마다 미션·스폰이 독립 출현**(빈 맵 = 미출현), 시간대별 1개 규칙은 **맵별**로 적용. 맵 간 적 예산 배분 = **#3 U 연속필드로 확정·구현·머지**(전역 공유 캡, `34b5eea`·§2-1); 단일 맵 스케줄도 무회귀 유지(코어 검증 기준).
-- 난이도 곡선은 `UCurveFloat`로 분리(후속)
+- ~~난이도 곡선은 `UCurveFloat`로 분리(후속)~~ → **이행됨 (2026-08-26), 단 `UCurveFloat` 가 아니라 앵커 배열로.**
+  `UFPSRRunScheduleDataAsset` 의 `AliveCountByLevel`(파티 레벨 축) + `StageDifficulty`(스테이지 축) 둘 다
+  `TArray<앵커>` + 구간 선형보간(양끝 flat clamp) 이다. **`UCurveFloat` 를 기각한 이유** = 에셋 밸리데이터가
+  커브 *내용*을 검사할 수 없다(`GetRichCurveConst()` 로 키 개수만 볼 수 있다). 앵커 배열이면 중복·역순·
+  음수 배수·포화를 전부 헤드리스 CI(`FPSRValidateAnchoredDataCommandlet`)에서 잡는다. 상세 = §2-12.
 - **구현 상태(P4-A)**: 디렉터(시간 미션+보스타임) + 미션 프레임워크 + 레퍼런스 미션 1종(`AFPSRMission_HoldZone`) + 스폰포인트 + 레벨업/미션보상 전역 프리즈 + 오프닝시드. 미션 보상의 **무기 모디파이어 실적용(weapon-scope `ApplyCard`)은 P4-B**(P4-A는 프리즈+선택 흐름까지).
 - **구현 상태(P4-B-3, main 머지 2026-06-11)**: 미션 종류 **6종** + 공용 PointSet + 시간 윈도우 스케줄러. 빌드+스모크+Codex 머지게이트(P2 교정)+PIE 통과.
   - **6종**: `AFPSRMission_StandStill`(전원 정지 N초) / `AFPSRMission_MovingZone`(PointSet 점 순차 점령) / `AFPSRMission_CollectOrbs`(PointSet 각 점 오브 스폰·수집) / `AFPSRMission_CarryNoHit`(오브 소지 무피격 N초, 캐리어 Health 폴링) / `AFPSRMission_DefeatFleeing`(독립 고체력 도망 타깃 `AFPSRMissionFleeTarget` 처치) / `AFPSRMission_LimitedVision`(시야 극제한 N초 버티기). 베이스 `AFPSRMissionActor::Tick`이 `bRunPaused`(프리즈) 중 진행/시간제한 게이트(전 미션 일괄). 공유 인프라 `AFPSRMissionOrb`(서버 오버랩, `EndPlay` 정리). 디버그 `FPSR.MissionTrigger [windowIndex] [poolIndex]`.
@@ -110,3 +114,38 @@
 ### 2-12. 난이도 압박 수단 (이속 불변 유지)
 스폰 밀도↑ / 원거리 적 비율↑ / 특수 적 패턴 / 미션 목표 압박 / 보스 phase pressure.
 > **폐루프 디렉터가 이 압박수단을 플레이어 상태 반응으로 구동**(설계 채택 2026-07-20, 미구현): 밀도·구성·미션·스폰위치를 정량신호로 조절. 상세 §2-8-2.
+
+#### 2-12-1. 런 **내** 난이도 축 — 정본 (신설 2026-08-26, [ADR 0010](../Architecture/0010-arena-topology-and-stage-transition.md) D6 정정)
+
+런 안에서 난이도를 올리는 축은 **둘**이고, 전부 `UFPSRRunScheduleDataAsset` 에서 저작된다(C++ 상수 0).
+
+| 축 | 입력 | 무엇을 움직이나 | 데이터 |
+|---|---|---|---|
+| **파티 레벨** | `AFPSRGameState::GetPartyLevel()` | 동시 생존 적 수 | `AliveCountByLevel` (기존) |
+| **스테이지** | `AFPSRGameState::GetStageIndex()` (억제기 파괴마다 +1) | 동시 생존 적 수 **＋ 억제기 내구도** | `StageDifficulty` (신설) |
+| *(억제기 한정)* **참가자 수** | `AFPSRGameMode::GetParticipantCount()` | 억제기 내구도 | `InhibitorDurabilityByPartySize` (신설) |
+
+**합성식**
+```
+목표 생존 적 수 = clamp( (AliveCountByLevel(파티레벨) + StageBonus(스테이지)) × StageMultiplier(스테이지),
+                        0, MaxAliveCount )
+억제기 실효 내구도 = InhibitorBaseDurability × StageDurabilityMultiplier(스테이지) × PartySizeMultiplier(참가자 수)
+```
+
+- **스테이지 축이 가산·배수를 둘 다 노출하는 것은 사용자 결정**(2026-08-26)이다. 저작 자유도는 최대지만
+  **손잡이 두 개가 상호작용해 밸런싱이 어려워진다** — 밸리데이터의 전 앵커 포화 경고와 적용 로그
+  (`[Run] Stage N difficulty: …`)가 그 완화책이다.
+- `StageDifficulty` 가 **비어 있으면 항등**(배수 1.0 · 가산 0) — 기존 스케줄은 무회귀다.
+- **인원수는 스테이지 시작에 1회 고정**하고 생존자가 아니라 **참가자**를 센다(DBNO 악용 차단). 근거 = ADR 0010 D6 정정 ③.
+
+> ⚠️ **마릿수 축의 실효 천장은 192다.** `UFPSREnemySpawnSubsystem` 의 `GlobalAliveCap`(200) − `SeedReserve`(8)
+> 이 컴파일 타임 상수라, 스케줄의 `MaxAliveCount`(현행 300)는 **192 위로 이미 죽은 값**이다. 스테이지
+> 배수를 아무리 올려도 거기서 잘린다 → 이 축은 **저레벨·초반 스테이지에서 실효**가 있고 고레벨에선
+> 레벨 곡선만으로 포화한다. 억제기 내구도 축은 이 천장과 무관하다. 캡 상향 + `MaxAliveCount` 드리프트
+> 정리는 별도 작업.
+
+> 🔴 **런 내 축 ≠ 런 간 축.** `Roadmap.md` §7-6 의 「난이도 계단식 승급」은 **런과 런 사이**의 메타
+> 난이도(EC ③ *"최소 3단, 각 단이 체감상 구분됨"*)이고, 여기 §2-12-1 은 **한 런 안**의 축이다.
+> **둘을 어떻게 합성할지는 미정이며 이번 범위의 명시적 비목표다.** 아무 규칙 없이 두 축을 곱하면
+> 높은 계단 × 늦은 스테이지에서 난이도가 폭발한다 — 메타 난이도를 실물화할 때(M3) **반드시 여기부터 읽고
+> 합성 규칙을 먼저 정할 것.**

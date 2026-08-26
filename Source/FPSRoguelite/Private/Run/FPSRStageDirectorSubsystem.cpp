@@ -844,6 +844,17 @@ void UFPSRStageDirectorSubsystem::PerformSwap()
 	//    the OnRunStateChanged re-broadcast in ApplyStageTransitionLocal), no dedicated RPC needed. Then enter
 	//    FadeIn (Phase A phase split — used to go straight to None here; EnterFadeIn sets the phase itself).
 	GS->SetStageIndex(NewStageIndex);
+
+	// 🔴 스테이지 N>=1 억제기 내구도 적용(ADR 0010 D6 비용 축, 신설 2026-08-26) — 반드시 SetStageIndex **뒤**.
+	// 2단계 Next->SetArenaActive(true) 시점에 했다면 GS->GetStageIndex() 가 아직 이전 값이라 EvalStageAt 이
+	// 하나 어긋난 앵커를 고른다. Next 를 직접 넘긴다 — GS->GetActiveArena() 는 몇 줄 아래에서야 갱신되므로
+	// 그걸 기다릴 이유가 없다. StageDirector -> RunDirector 결합은 CancelActiveMission()(RequestTransition, 위)
+	// 으로 이미 있는 선례라 새 결합이 아니다.
+	if (UFPSRRunDirectorSubsystem* RunDirector = World->GetSubsystem<UFPSRRunDirectorSubsystem>())
+	{
+		RunDirector->ApplyStageDifficultyToArena(Next, NewStageIndex);
+	}
+
 	GS->SetActiveArena(Next);
 	EnterFadeIn();
 

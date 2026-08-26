@@ -290,6 +290,23 @@ void AFPSRGameMode::EndRun(EFPSRRunOutcome Outcome)
 	}
 }
 
+int32 AFPSRGameMode::GetParticipantCount() const
+{
+	int32 Participants = 0;
+	if (const AGameStateBase* GS = GetGameState<AGameStateBase>())
+	{
+		for (APlayerState* PS : GS->PlayerArray)
+		{
+			const AFPSRPlayerState* FPS = Cast<AFPSRPlayerState>(PS);
+			if (FPS && !FPS->IsOnlyASpectator())
+			{
+				++Participants;
+			}
+		}
+	}
+	return Participants;
+}
+
 int32 AFPSRGameMode::GetLivingPlayerCount() const
 {
 	int32 Living = 0;
@@ -309,20 +326,8 @@ int32 AFPSRGameMode::GetLivingPlayerCount() const
 
 bool AFPSRGameMode::AreAllPlayersDead() const
 {
-	int32 Participants = 0;
-	if (const AGameStateBase* GS = GetGameState<AGameStateBase>())
-	{
-		for (APlayerState* PS : GS->PlayerArray)
-		{
-			const AFPSRPlayerState* FPS = Cast<AFPSRPlayerState>(PS);
-			if (FPS && !FPS->IsOnlyASpectator())
-			{
-				++Participants;
-			}
-		}
-	}
 	// At least one participant AND nobody alive — avoids reading a transient empty PlayerArray as a wipe.
-	return Participants > 0 && GetLivingPlayerCount() == 0;
+	return GetParticipantCount() > 0 && GetLivingPlayerCount() == 0;
 }
 
 void AFPSRGameMode::NotifyPlayerDefeated()

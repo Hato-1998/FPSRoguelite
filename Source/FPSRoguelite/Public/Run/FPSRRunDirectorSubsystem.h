@@ -12,6 +12,7 @@ class AFPSRGameState;
 class UFPSREnemySpawnSubsystem;
 class AFPSRMissionPointSet;
 class AFPSRBossBase;
+class AFPSRArenaActor;
 
 /** Server-authoritative run director (redesign 2026-06-04, Game.MD §2-8).
  *  No rounds — the run is continuous. The director advances a run clock (paused during the global card-
@@ -36,6 +37,18 @@ public:
 	 *  rest of the mission lifecycle. Returns true if a mission was actually active (and is now gone); false is a
 	 *  harmless no-op, so a caller that doesn't care may ignore the return value. */
 	bool CancelActiveMission();
+
+	/** Server: (re)apply the stage-difficulty durability axis (ADR 0010 D6 cost axis, 신설 2026-08-26) to Arena's
+	 *  suppressors — effective durability = InhibitorBaseDurability x EvalStageAt(StageIndex).
+	 *  InhibitorDurabilityMultiplier x EvalPartySizeMultiplier(participant count). No-op if ActiveSchedule or Arena
+	 *  is null (an asset-less/world-less test run leaves every suppressor at its actor-authored Durability).
+	 *  Participant count is read ONCE per call (AFPSRGameMode::GetParticipantCount — NOT GetLivingPlayerCount; see
+	 *  the .cpp for why DBNO must still count as a participant here), so a mid-stage death/DBNO never re-scales an
+	 *  already-committed suppressor's health out from under the fight. Public: called from BOTH this subsystem's
+	 *  own DirectorTick (stage 0, the opening-seed release point) AND UFPSRStageDirectorSubsystem::PerformSwap
+	 *  (stage N>=1, right after GS->SetStageIndex commits the new stage) — the same cross-subsystem shape
+	 *  CancelActiveMission above already established via RequestTransition, not a new coupling. */
+	void ApplyStageDifficultyToArena(AFPSRArenaActor* Arena, int32 StageIndex);
 
 	// Debug/testing entry points
 	void DebugTriggerMission(int32 WindowIndex = -1, int32 PoolIndex = -1);
