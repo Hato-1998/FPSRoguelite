@@ -13,6 +13,7 @@
 | 베이스 | 경량 커스텀 C++ 모듈 + 엔진 플러그인 체리픽 |
 | 플레이어 | GAS · EnhancedInput · CommonUI · Push Model |
 | 적 스웜 | 경량 풀액터 + Flow-Field(길찾기) + 스티어링(AI) + **손수 짠 거리밴드 significance** · 체력 = 경량 `UHealthComponent` + 비-GE 데미지 |
+| 적 엘리트 | 위 스웜과 **같은** 클래스 트리(`AFPSREnemyEliteBase : AFPSREnemyBase`) — 체력도 **같은** `UHealthComponent`(비-GE). 다른 점은 **ASC 부착**(어빌리티/GE 전용, 복제 `Minimal`) 하나뿐. 어트리뷰트 셋 없음 · 시간 기반 GE 금지(§2-6) |
 | 보스 | 일반 Actor(`AFPSRBossBase : ACharacter`) + 적과 **같은** `UFPSREnemyHealthComponent` 재사용 |
 | 메시징 | GameplayMessageSubsystem (경량 재구현) |
 | UI | CommonUI + Activatable Widget Stack |
