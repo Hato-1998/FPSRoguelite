@@ -85,15 +85,34 @@ bool FFPSREnemyBlueprintParentTest::RunTest(const FString& Parameters)
 			LoadedClass->GetSuperClass() ? *LoadedClass->GetSuperClass()->GetName() : TEXT("<none>"));
 
 		// (c) P1 regression guard: promoting the 900 StopDistance default into AFPSREnemyBase (ADR 0013 C1) must
-		// not have silently reverted a reparented BP to some other stale value.
-		if (const AFPSREnemyBase* Cdo = Cast<AFPSREnemyBase>(LoadedClass->GetDefaultObject()))
+		// not have left a reparented BP with no stop distance at all. Deliberately NOT an equality assertion: the two
+		// shipping BPs legitimately differ (one authors its own StopDistance, one inherits the promoted 900), so there
+		// is no single right number to assert. ">0" is therefore a floor, not a "the value is still correct" check —
+		// the VALUE is logged below so a reviewer can read back what each BP actually resolved to.
+		const AFPSREnemyBase* Cdo = Cast<AFPSREnemyBase>(LoadedClass->GetDefaultObject());
+		if (!Cdo)
 		{
-			TestTrue(FString::Printf(TEXT("%s CDO GetStopDistance() > 0"), *AssetName), Cdo->GetStopDistance() > 0.0f);
+			AddError(FString::Printf(TEXT("%s loaded but its CDO is not an AFPSREnemyBase"), *AssetName));
+			continue;
+		}
+		TestTrue(FString::Printf(TEXT("%s CDO GetStopDistance() > 0"), *AssetName), Cdo->GetStopDistance() > 0.0f);
+
+		// (d) The check with real teeth for CONTENT: a class redirect can succeed (loads fine, parent correct) while a
+		// tagged property still drops to its default — and ProjectileClass dropping to null is silent catastrophe:
+		// AFPSREnemyBase::FireProjectile just logs once and returns, so EVERY enemy stops shooting with no crash, no
+		// failed test, and no obviously-broken frame. Nothing else in the automated gate covers this. Read through
+		// reflection because the property is protected (a test must not force production code to widen its access).
+		if (const FClassProperty* ProjectileProp = FindFProperty<FClassProperty>(LoadedClass, TEXT("ProjectileClass")))
+		{
+			TestNotNull(FString::Printf(TEXT("%s CDO ProjectileClass survived the reparent"), *AssetName),
+				ProjectileProp->GetObjectPropertyValue_InContainer(Cdo));
 		}
 		else
 		{
-			AddError(FString::Printf(TEXT("%s loaded but its CDO is not an AFPSREnemyBase"), *AssetName));
+			AddError(FString::Printf(TEXT("%s: ProjectileClass property not found by reflection — renamed or removed?"), *AssetName));
 		}
+
+		UE_LOG(LogFPSR, Log, TEXT("[Test] BlueprintParent: %s StopDistance=%.1f"), *AssetName, Cdo->GetStopDistance());
 	}
 
 	return true;

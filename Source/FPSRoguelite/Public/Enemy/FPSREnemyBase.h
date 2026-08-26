@@ -101,19 +101,20 @@ enum class EFPSRRangedChargeState : uint8
 	Cooldown,  // recovering after a shot before it can re-engage
 };
 
-/** Ranged attack cycle (Game.MD §2-6, promoted into the base 2026-08-26 — ADR 0013 C1, retiring the separate
- *  AFPSRRangedEnemyBase subclass): stops in range, telegraphs a CHARGE (sends a ranged-target warning to the
- *  targeted player so they can dodge), then fires a VISIBLE projectile (no hitscan — §2-6 mandates a dodgeable
- *  shot). Lightweight (NOT GAS). Reuses the existing projectile + damage + warning + freeze infrastructure (no new
- *  damage or RPC code).
- *
- *  First-principles (≈500 cheap enemies): every enemy is ranged since f5b0a78d (2026-08-14, "전 몬스터 원거리화")
- *  — the melee contact axis this once branched away from (via a ServerTickAttack override) was itself removed as
- *  dead code (ADR 0013 C0), so the attack decision no longer needs a per-subclass virtual split; it is simply what
- *  ServerTickAttack (still virtual, for a future archetype that wants a different cycle) does below. Charge &
- *  cooldown are freeze-paused accumulators (the spawn subsystem skips the attack pass while the run is globally
- *  frozen, so DeltaSeconds never accrues then). Concurrency is bounded by the subsystem's ranged attack token (held
- *  per-player for the whole charge) — this also keeps in-flight enemy projectiles within the pool budget. */
+// ---- Ranged attack cycle — section note; the class's own doc comment follows below ----------------------------
+// Ranged attack cycle (Game.MD §2-6, promoted into the base 2026-08-26 — ADR 0013 C1, retiring the separate
+// AFPSRRangedEnemyBase subclass): stops in range, telegraphs a CHARGE (sends a ranged-target warning to the
+// targeted player so they can dodge), then fires a VISIBLE projectile (no hitscan — §2-6 mandates a dodgeable
+// shot). Lightweight (NOT GAS). Reuses the existing projectile + damage + warning + freeze infrastructure (no new
+// damage or RPC code).
+//
+// First-principles (≈500 cheap enemies): every enemy is ranged since f5b0a78d (2026-08-14, "전 몬스터 원거리화")
+// — the melee contact axis this once branched away from (via a ServerTickAttack override) was itself removed as
+// dead code (ADR 0013 C0), so the attack decision no longer needs a per-subclass virtual split; it is simply what
+// ServerTickAttack (still virtual, for a future archetype that wants a different cycle) does below. Charge &
+// cooldown are freeze-paused accumulators (the spawn subsystem skips the attack pass while the run is globally
+// frozen, so DeltaSeconds never accrues then). Concurrency is bounded by the subsystem's ranged attack token (held
+// per-player for the whole charge) — this also keeps in-flight enemy projectiles within the pool budget.
 
 /** Lightweight server-authoritative swarm enemy — a cheap pooled APawn (NOT GAS-based), designed to run hundreds at
  *  once. Movement is the spawn subsystem's batched flow-field + separation pass (TickServerMovement), not per-actor AI;

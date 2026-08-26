@@ -33,7 +33,7 @@
   저작값은 `UStruct::SerializeTaggedProperties` 의 **이름 기반 상속 체인 탐색**으로 보존된다.
   ⚠️ 단 **저작되지 않은 상속 기본값은 그 보호를 못 받는다** — `StopDistance` 의 실효 900 이 은퇴한 랭드 생성자에만 있었고
   `BP_EnemyMeleeBase` 는 그 값을 디스크에 갖고 있지 않아, 베이스 인라인 기본값을 120→**900** 으로 올려 보존했다.
-  회귀 가드 = `FPSRoguelite.Enemy.BlueprintParent`(폴더 규약 스캔 → 로드 → 부모·`StopDistance` 검사, 스캔 0건이면 실패).
+  회귀 가드 = `FPSRoguelite.Enemy.BlueprintParent` — `Content/Character/Enemy` 를 **폴더 규약으로 스캔**해 각 BP 를 로드하고 ①로드 성공(=리다이렉트 발화) ②`AFPSREnemyBase` 자식 ③`StopDistance > 0` ④**`ProjectileClass` 非null**(리다이렉트가 성공해도 태그드 프로퍼티는 조용히 기본값으로 떨어질 수 있고, 그러면 전 적이 발사 불능이 되는데 로그 한 줄 외엔 아무 신호가 없다)을 검사한다. ⚠️ ③은 **바닥값 검사이지 "값이 옳다" 검사가 아니다**(두 BP 의 정답값이 서로 다르다) — 실제 값과 스캔 개수는 로그로 남겨 사람이 되읽는다. 스캔 0건이면 **실패**시킨다(공허한 통과 방지).
   ✅ **풀 클래스별 버킷화 완료**(ADR 0013 불변식 7, `61f40fe7`) — ~~현행 `AcquireEnemy` 는 `DormantPool` 단일 평면 배열을 `GetClass()` 정확 일치로 선형 스캔한다.~~
   `FFPSREnemyDormantPool`(`TMap<TSubclassOf<AFPSREnemyBase>, 버킷>`)로 교체돼 취득 비용이 **요청 클래스 버킷 크기에만** 비례한다.
   키는 **정확 일치**여야 한다(`IsChildOf` 금지 — 엘리트가 `AFPSREnemyBase` 의 자식이라 일반 휴면체를 집어간다). 성질 가드 = `FPSRoguelite.Enemy.DormantPool`.

@@ -524,10 +524,12 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 		}
 		const bool bHasTarget = (BestPlayerIndex != INDEX_NONE);
 
-		// Strict SAME-MAP + open-grid-CONNECTED target -> may deal contact damage. A front-chase (cross-slot, move-only)
+		// Strict SAME-MAP + open-grid-CONNECTED target -> may run the attack cycle against it. A front-chase (cross-slot, move-only)
 		// never attacks (bTargetSameMap false). Even a same-map target is gated on connectivity when a unified field exists,
-		// so a same-MapId target behind an internal closed wall / reclosed seam (a DIFFERENT component) can't be hit through
-		// the wall — contact damage bypasses FPSRCombat::CanAffectTarget, so this is the melee guard (Codex R2 #6). No unified
+		// so a same-MapId target behind an internal closed wall / reclosed seam (a DIFFERENT component) is never charged, warned or fired at through
+		// the wall (Codex R2 #6 — originally the melee-contact guard, since that axis bypassed FPSRCombat::CanAffectTarget;
+		// ADR 0013 C0 removed the axis and this gate now fronts the ranged cycle, whose own LOS trace is a SECOND line
+		// of defence, not a replacement for this one). No unified
 		// grid -> keep the exact same-map behavior (no regression).
 		const bool bAttackEligible = bHasTarget && bTargetSameMap &&
 			(!bUnified || FlowField->AreLocationsConnected(EnemyLocation, PlayerLocations[BestPlayerIndex]));
@@ -544,8 +546,9 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 		// with the number of NEAR enemies, not the total active count. It is always <= UpdateStride (attack latency is
 		// more sensitive than movement) and the un-throttled band spans S0+S1: any enemy actually in combat is never
 		// throttled. INVARIANT: this holds only while every archetype's engage range stays within the S1 radius (sqrt
-		// TierS1RadiusSq = 3500) — melee AttackRange (150) and ranged RangedEngageRange (1400) both sit well inside it,
-		// so charging/contact always happens at AttackStride 1. If a future BP tunes an engage range past 3500, its
+		// TierS1RadiusSq = 3500) — RangedEngageRange (1400) sits well inside it (as does AttackRange (150), which since
+		// ADR 0013 C0 is the client attack-tell radius, not a melee reach),
+		// so charging always happens at AttackStride 1. If a future BP tunes an engage range past 3500, its
 		// charge/cooldown timing stays correct (DeltaSeconds is stride-scaled below) but its abort/warning cadence would
 		// lag by up to AttackStride frames — re-validate this band then (natural home: the F8 significance-radius SSOT).
 		int32 UpdateStride;
