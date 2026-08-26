@@ -39,6 +39,12 @@ FFPSRStageDifficultyAnchor UFPSRRunScheduleDataAsset::EvalStageAt(TConstArrayVie
 			Result.AliveCountBonus = FMath::RoundToInt(FMath::Lerp(static_cast<float>(A.AliveCountBonus), static_cast<float>(B.AliveCountBonus), T));
 			Result.AliveCountMultiplier = FMath::Lerp(A.AliveCountMultiplier, B.AliveCountMultiplier, T);
 			Result.InhibitorDurabilityMultiplier = FMath::Lerp(A.InhibitorDurabilityMultiplier, B.InhibitorDurabilityMultiplier, T);
+			// int32 field: same round(lerp(float,float,T)) idiom as AliveCountBonus above. ⚠️ This branch is the
+			// ONE place per-field enumeration is required — the two flat-clamp branches above copy the WHOLE
+			// struct (Clamped = Anchors[0]/[Num-1]), so they pick up a new field automatically; this branch does
+			// not. A field added here without a matching line here would compile clean, pass the two boundary
+			// clamps, and silently identity-clamp (0) only in the interior of the curve.
+			Result.MaxEliteAlive = FMath::RoundToInt(FMath::Lerp(static_cast<float>(A.MaxEliteAlive), static_cast<float>(B.MaxEliteAlive), T));
 			return Result;
 		}
 	}

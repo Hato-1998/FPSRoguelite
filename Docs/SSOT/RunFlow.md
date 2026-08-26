@@ -122,7 +122,7 @@
 | 축 | 입력 | 무엇을 움직이나 | 데이터 |
 |---|---|---|---|
 | **파티 레벨** | `AFPSRGameState::GetPartyLevel()` | 동시 생존 적 수 | `AliveCountByLevel` (기존) |
-| **스테이지** | `AFPSRGameState::GetStageIndex()` (억제기 파괴마다 +1) | 동시 생존 적 수 **＋ 억제기 내구도** | `StageDifficulty` (신설) |
+| **스테이지** | `AFPSRGameState::GetStageIndex()` (억제기 파괴마다 +1) | 동시 생존 적 수 **＋ 억제기 내구도 ＋ 엘리트 동시 상한** | `StageDifficulty` (신설, 엘리트 축은 2026-08-27 추가) |
 | *(억제기 한정)* **참가자 수** | `AFPSRGameMode::GetParticipantCount()` | 억제기 내구도 | `InhibitorDurabilityByPartySize` (신설) |
 
 **합성식**

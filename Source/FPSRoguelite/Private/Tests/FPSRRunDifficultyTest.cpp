@@ -27,6 +27,7 @@ bool FFPSRRunDifficultyTest::RunTest(const FString& Parameters)
 		TestEqual(TEXT("empty anchors: AliveCountBonus 0"), Result.AliveCountBonus, 0);
 		TestEqual(TEXT("empty anchors: AliveCountMultiplier 1.0"), Result.AliveCountMultiplier, 1.0f);
 		TestEqual(TEXT("empty anchors: InhibitorDurabilityMultiplier 1.0"), Result.InhibitorDurabilityMultiplier, 1.0f);
+		TestEqual(TEXT("empty anchors: MaxEliteAlive 0"), Result.MaxEliteAlive, 0);
 	}
 
 	// (2) Single anchor -> flat everywhere, regardless of the StageIndex queried.
@@ -34,6 +35,7 @@ bool FFPSRRunDifficultyTest::RunTest(const FString& Parameters)
 		TArray<FFPSRStageDifficultyAnchor> Anchors;
 		FFPSRStageDifficultyAnchor A;
 		A.StageIndex = 3; A.AliveCountBonus = 10; A.AliveCountMultiplier = 1.5f; A.InhibitorDurabilityMultiplier = 2.0f;
+		A.MaxEliteAlive = 4;
 		Anchors.Add(A);
 
 		for (int32 Query : {0, 3, 100})
@@ -42,6 +44,7 @@ bool FFPSRRunDifficultyTest::RunTest(const FString& Parameters)
 			TestEqual(TEXT("single anchor: Bonus flat"), Result.AliveCountBonus, 10);
 			TestEqual(TEXT("single anchor: AliveCountMultiplier flat"), Result.AliveCountMultiplier, 1.5f);
 			TestEqual(TEXT("single anchor: InhibitorDurabilityMultiplier flat"), Result.InhibitorDurabilityMultiplier, 2.0f);
+			TestEqual(TEXT("single anchor: MaxEliteAlive flat"), Result.MaxEliteAlive, 4);
 		}
 	}
 
@@ -51,8 +54,10 @@ bool FFPSRRunDifficultyTest::RunTest(const FString& Parameters)
 		TArray<FFPSRStageDifficultyAnchor> Anchors;
 		FFPSRStageDifficultyAnchor A0;
 		A0.StageIndex = 3; A0.AliveCountBonus = 8; A0.AliveCountMultiplier = 1.15f; A0.InhibitorDurabilityMultiplier = 1.6f;
+		A0.MaxEliteAlive = 2;
 		FFPSRStageDifficultyAnchor A1;
 		A1.StageIndex = 6; A1.AliveCountBonus = 16; A1.AliveCountMultiplier = 1.3f; A1.InhibitorDurabilityMultiplier = 2.4f;
+		A1.MaxEliteAlive = 6;
 		Anchors.Add(A0);
 		Anchors.Add(A1);
 
@@ -61,12 +66,14 @@ bool FFPSRRunDifficultyTest::RunTest(const FString& Parameters)
 		TestEqual(TEXT("below first anchor: Bonus == first anchor"), ResultBelow.AliveCountBonus, 8);
 		TestEqual(TEXT("below first anchor: AliveCountMultiplier == first anchor"), ResultBelow.AliveCountMultiplier, 1.15f);
 		TestEqual(TEXT("below first anchor: InhibitorDurabilityMultiplier == first anchor"), ResultBelow.InhibitorDurabilityMultiplier, 1.6f);
+		TestEqual(TEXT("below first anchor: MaxEliteAlive == first anchor"), ResultBelow.MaxEliteAlive, 2);
 
 		// (4) Above the last anchor -> clamps to the last anchor's values.
 		const FFPSRStageDifficultyAnchor ResultAbove = UFPSRRunScheduleDataAsset::EvalStageAt(Anchors, 100);
 		TestEqual(TEXT("above last anchor: Bonus == last anchor"), ResultAbove.AliveCountBonus, 16);
 		TestEqual(TEXT("above last anchor: AliveCountMultiplier == last anchor"), ResultAbove.AliveCountMultiplier, 1.3f);
 		TestEqual(TEXT("above last anchor: InhibitorDurabilityMultiplier == last anchor"), ResultAbove.InhibitorDurabilityMultiplier, 2.4f);
+		TestEqual(TEXT("above last anchor: MaxEliteAlive == last anchor"), ResultAbove.MaxEliteAlive, 6);
 
 		// (4b) The returned StageIndex is the QUERIED stage on EVERY branch, not the matched anchor's own index —
 		//      the two flat clamps are exactly where that used to diverge, so they are what this pins down.
@@ -80,6 +87,7 @@ bool FFPSRRunDifficultyTest::RunTest(const FString& Parameters)
 		TestEqual(TEXT("exact match: Bonus"), ResultExact.AliveCountBonus, 16);
 		TestEqual(TEXT("exact match: AliveCountMultiplier"), ResultExact.AliveCountMultiplier, 1.3f);
 		TestEqual(TEXT("exact match: InhibitorDurabilityMultiplier"), ResultExact.InhibitorDurabilityMultiplier, 2.4f);
+		TestEqual(TEXT("exact match: MaxEliteAlive"), ResultExact.MaxEliteAlive, 6);
 
 		// (6) Mid interpolation: StageIndex 4 is 1/3 of the way from 3 to 6 (span 3, offset 1).
 		const FFPSRStageDifficultyAnchor ResultMid = UFPSRRunScheduleDataAsset::EvalStageAt(Anchors, 4);
@@ -89,6 +97,10 @@ bool FFPSRRunDifficultyTest::RunTest(const FString& Parameters)
 			ResultMid.AliveCountMultiplier > 1.15f && ResultMid.AliveCountMultiplier < 1.3f);
 		TestTrue(TEXT("mid interpolation: InhibitorDurabilityMultiplier strictly between anchors"),
 			ResultMid.InhibitorDurabilityMultiplier > 1.6f && ResultMid.InhibitorDurabilityMultiplier < 2.4f);
+		// MaxEliteAlive: 2 + (6-2)*(1/3) = 3.333.. -> rounds to 3 (same FMath::RoundToInt idiom as Bonus above —
+		// this is EvalStageAt's ONE per-field-Lerp branch per its own comment, so this is the case that would
+		// silently stay 0 in the interior of the curve if a future field addition forgot its Lerp line there).
+		TestEqual(TEXT("mid interpolation: MaxEliteAlive rounds"), ResultMid.MaxEliteAlive, 3);
 	}
 
 	// (7) Two anchors authored at the SAME StageIndex (an authoring mistake the validator flags as an Error — see
@@ -99,13 +111,16 @@ bool FFPSRRunDifficultyTest::RunTest(const FString& Parameters)
 		TArray<FFPSRStageDifficultyAnchor> Anchors;
 		FFPSRStageDifficultyAnchor A0;
 		A0.StageIndex = 5; A0.AliveCountBonus = 1; A0.AliveCountMultiplier = 1.0f; A0.InhibitorDurabilityMultiplier = 1.0f;
+		A0.MaxEliteAlive = 1;
 		FFPSRStageDifficultyAnchor A1;
 		A1.StageIndex = 5; A1.AliveCountBonus = 99; A1.AliveCountMultiplier = 9.0f; A1.InhibitorDurabilityMultiplier = 9.0f;
+		A1.MaxEliteAlive = 50;
 		Anchors.Add(A0);
 		Anchors.Add(A1);
 
 		const FFPSRStageDifficultyAnchor Result = UFPSRRunScheduleDataAsset::EvalStageAt(Anchors, 5);
 		TestEqual(TEXT("zero-span anchors: well-defined result, no crash"), Result.AliveCountBonus, 1);
+		TestEqual(TEXT("zero-span anchors: MaxEliteAlive well-defined (first anchor), no crash"), Result.MaxEliteAlive, 1);
 	}
 
 	// (8) Negative StageIndex query -> clamps flat to the first anchor (same "at-or-below first" rule as (3), no
@@ -114,14 +129,17 @@ bool FFPSRRunDifficultyTest::RunTest(const FString& Parameters)
 		TArray<FFPSRStageDifficultyAnchor> Anchors;
 		FFPSRStageDifficultyAnchor A0;
 		A0.StageIndex = 0; A0.AliveCountBonus = 0; A0.AliveCountMultiplier = 1.0f; A0.InhibitorDurabilityMultiplier = 1.0f;
+		A0.MaxEliteAlive = 0;
 		FFPSRStageDifficultyAnchor A1;
 		A1.StageIndex = 3; A1.AliveCountBonus = 8; A1.AliveCountMultiplier = 1.15f; A1.InhibitorDurabilityMultiplier = 1.6f;
+		A1.MaxEliteAlive = 2;
 		Anchors.Add(A0);
 		Anchors.Add(A1);
 
 		const FFPSRStageDifficultyAnchor Result = UFPSRRunScheduleDataAsset::EvalStageAt(Anchors, -5);
 		TestEqual(TEXT("negative StageIndex: clamps to first anchor Bonus"), Result.AliveCountBonus, 0);
 		TestEqual(TEXT("negative StageIndex: clamps to first anchor AliveCountMultiplier"), Result.AliveCountMultiplier, 1.0f);
+		TestEqual(TEXT("negative StageIndex: clamps to first anchor MaxEliteAlive"), Result.MaxEliteAlive, 0);
 	}
 
 	// --- EvalPartySizeMultiplier ---------------------------------------------------------------------------------
