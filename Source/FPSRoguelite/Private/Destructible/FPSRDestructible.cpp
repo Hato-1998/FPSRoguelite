@@ -33,9 +33,11 @@ void AFPSRDestructible::BeginPlay()
 	{
 		if (HealthComponent)
 		{
-			// Size HP to the designer's durability (overrides the component default), then listen for health changes
-			// (damage stages) and death (break).
-			HealthComponent->InitializeMaxHealth(Durability);
+			// Size HP to the designer's durability, or a server-set override if one arrived BEFORE BeginPlay
+			// (GetEffectiveDurability — a suppressor's stage/party-size-scaled durability, ADR 0010 D6; see
+			// ServerSetDurabilityOverride's comment for why either arrival order is safe), then listen for health
+			// changes (damage stages) and death (break).
+			HealthComponent->InitializeMaxHealth(GetEffectiveDurability());
 			HealthComponent->OnHealthChanged.AddDynamic(this, &AFPSRDestructible::HandleHealthChanged);
 			HealthComponent->OnDeath.AddDynamic(this, &AFPSRDestructible::HandleBroken);
 		}
@@ -172,16 +174,68 @@ void AFPSRDestructible::ServerReset()
 	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRDestructible, DamageStage, this);
 
 	// InitializeMaxHealth, NOT ResetForReuse: both restore Health to full and clear the health component's dead
-	// flag, but InitializeMaxHealth also re-asserts MaxHealth = Durability — the designer-authored value this actor
-	// was built with — rather than trusting whatever MaxHealth already holds. That is the more defensive restore
-	// for something coming back from being fully destroyed (this reset), as opposed to ResetForReuse's pooled-actor
-	// reuse (where MaxHealth was never touched to begin with).
+	// flag, but InitializeMaxHealth also re-asserts MaxHealth = GetEffectiveDurability() — the designer-authored
+	// Durability, or the server-set stage/party-size override if one is currently active (ADR 0010 D6) — rather
+	// than trusting whatever MaxHealth already holds. That is the more defensive restore for something coming back
+	// from being fully destroyed (this reset), as opposed to ResetForReuse's pooled-actor reuse (where MaxHealth
+	// was never touched to begin with).
 	if (HealthComponent)
 	{
-		HealthComponent->InitializeMaxHealth(Durability);
+		HealthComponent->InitializeMaxHealth(GetEffectiveDurability());
 	}
 
 	ClearBrokenState();
+}
+
+bool AFPSRDestructible::IsSuppressor() const
+{
+	// ADR 0010 D6's own definition, applied literally: "any AFPSRArenaDestructible authored with exactly this one
+	// Reward IS the suppressor" — so this asks the Rewards array the same question HandleBrokenAuthority's payout
+	// loop already answers, rather than tracking a second, independently-authored flag that could disagree with it.
+	for (const TObjectPtr<UFPSRDestructibleReward>& Reward : Rewards)
+	{
+		if (Reward && Reward->IsA<UFPSRDestructibleReward_StageTransition>())
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+void AFPSRDestructible::ServerSetDurabilityOverride(float NewDurability)
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+
+	// Store ALWAYS — even while broken. The stored value is just "what this destructible's durability should be";
+	// ServerReset re-reads it through GetEffectiveDurability() on the way back to intact, so a value that lands
+	// while broken is honoured at the next reset instead of being silently dropped (merge-gate P3: an early-return
+	// that skipped the store would lose it, and a LOST override is a quieter failure than the zombie below).
+	DurabilityOverride = NewDurability;
+
+	// 🔴 …but do NOT push it into the health pool while broken. InitializeMaxHealth fully heals AND clears the
+	// health component's dead flag (see its own header comment), so calling it on an already-broken destructible
+	// would resurrect it at full health — a "broken but full-HP zombie" with bBroken still true. Current call sites
+	// (UFPSRRunDirectorSubsystem::ApplyStageDifficultyToArena, right after a stage commit) only ever touch
+	// freshly-(re)activated arenas whose destructibles SetArenaActive just ServerReset(), so bBroken is never
+	// actually true there today — this guard nails the contract down rather than relying on that staying true at
+	// every future call site.
+	if (bBroken)
+	{
+		return;
+	}
+
+	if (HealthComponent)
+	{
+		HealthComponent->InitializeMaxHealth(GetEffectiveDurability());
+	}
+}
+
+float AFPSRDestructible::GetEffectiveDurability() const
+{
+	return (DurabilityOverride > 0.0f) ? DurabilityOverride : Durability;
 }
 
 void AFPSRDestructible::HandleBrokenAuthority(AActor* Breaker)

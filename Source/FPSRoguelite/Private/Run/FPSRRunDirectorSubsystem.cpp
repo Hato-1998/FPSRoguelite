@@ -7,6 +7,7 @@
 #include "Run/Mission/FPSRMissionPointSet.h"
 #include "Card/FPSRCardDataAsset.h"
 #include "Core/FPSRGameState.h"
+#include "Core/FPSRGameMode.h" // GetParticipantCount (ApplyStageDifficultyToArena's party-size lookup)
 #include "Core/FPSRPlayerController.h"
 #include "Enemy/FPSREnemySpawnSubsystem.h"
 #include "Enemy/FPSREnemyRosterDataAsset.h"
@@ -14,7 +15,10 @@
 #include "Boss/FPSRBossBase.h"
 #include "Boss/FPSRBossSpawnPoint.h"
 #include "Boss/FPSRBossDefinitionDataAsset.h"
+#include "Arena/FPSRArenaActor.h" // ApplyStageDifficultyToArena's arena arg + FindActiveInWorld (stage 0)
+#include "Arena/FPSRArenaDestructible.h" // GetOwnedDestructibles' element type
 #include "Core/FPSRLogChannels.h"
+#include "Containers/ArrayView.h" // TConstArrayView (the evaluator contract — UFPSRRunScheduleDataAsset statics)
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/Pawn.h"
@@ -22,40 +26,6 @@
 #include "HAL/IConsoleManager.h"
 #include "Engine/Engine.h"
 #include "EngineUtils.h"
-
-namespace
-{
-	/** Piecewise-linear interpolation of the level→alive-count anchors at the given party level. Anchors are authored
-	 *  in ascending Level; below the first anchor returns its Count, above the last stays flat at its Count. */
-	float EvalAliveCountByLevel(const TArray<FFPSRAliveCountAnchor>& Anchors, int32 Level)
-	{
-		const int32 Num = Anchors.Num();
-		if (Num == 0)
-		{
-			return 0.0f;
-		}
-		if (Level <= Anchors[0].Level)
-		{
-			return static_cast<float>(Anchors[0].Count);
-		}
-		if (Level >= Anchors[Num - 1].Level)
-		{
-			return static_cast<float>(Anchors[Num - 1].Count);
-		}
-		for (int32 i = 1; i < Num; ++i)
-		{
-			const FFPSRAliveCountAnchor& A = Anchors[i - 1];
-			const FFPSRAliveCountAnchor& B = Anchors[i];
-			if (Level <= B.Level)
-			{
-				const float Span = static_cast<float>(B.Level - A.Level);
-				const float T = (Span > 0.0f) ? static_cast<float>(Level - A.Level) / Span : 0.0f;
-				return FMath::Lerp(static_cast<float>(A.Count), static_cast<float>(B.Count), T);
-			}
-		}
-		return static_cast<float>(Anchors[Num - 1].Count);
-	}
-}
 
 bool UFPSRRunDirectorSubsystem::HasServerAuthority() const
 {
@@ -92,6 +62,13 @@ void UFPSRRunDirectorSubsystem::StartRun()
 	if (AFPSRGameState* GS = GetGS())
 	{
 		GS->SetActiveBoss(nullptr);
+
+		// 🔴 Re-run safety, stage-difficulty axis (신설 2026-08-26): SetStageIndex's ONLY other caller is
+		// UFPSRStageDirectorSubsystem::PerformSwap (a committed stage-N swap) — nothing ever reset it back to 0, so
+		// a same-world re-run silently started combat already reading the PREVIOUS run's final stage index (both
+		// the alive-count stage anchor and the suppressor durability axis key off GetStageIndex()). A first run is
+		// unaffected (StageIndex starts at its UPROPERTY default, 0).
+		GS->SetStageIndex(0);
 	}
 	if (ActiveBoss)
 	{
@@ -154,6 +131,24 @@ void UFPSRRunDirectorSubsystem::StartRun()
 		UE_LOG(LogFPSR, Log, TEXT("[Run] StartRun deferred — waiting for first player pawn"));
 	}
 
+	// 🔴 EARLY (pre-combat) suppressor sizing — a floor, not the final value. The authoritative stage-0 apply is the
+	// opening-seed release in DirectorTick, which is where the participant count is finally trustworthy; this call
+	// exists only to close the window BEFORE it. Without it a stage-0 suppressor sits at its BP-authored Durability
+	// (BP_Inhibitor's is 50 — the drift ADR 0010 D6 정정 ② records) from BeginPlay until that release, and firing is
+	// gated by IsRunPaused() ALONE (FPSRWeaponFireComponent.cpp) — so the unfreeze-to-next-tick gap (DirectorInterval,
+	// 0.25s; up to OpeningSeedWaitTimeout = 5s when no opening seed ever comes) is live fire against 50 HP. A 4-player
+	// group is ~384 DPS there: 50 HP dies in ~0.13s, inside the gap. That is a free stage-0 skip, i.e. ADR 0010 §512
+	// surviving as an opening-only exploit (merge-gate P2).
+	//
+	// Reading the participant count this early UNDER-counts (clients may not have joined yet), and that is the safe
+	// direction: the party-size multiplier is smallest at 1 player, so this can only size the suppressor LOWER than
+	// its final value, never higher — no unfair spike, and the release-point apply corrects it upward a moment later.
+	// Even the floor (base x stage0 x 1.0 = 5000-ish) is far out of reach inside those windows (~96 damage in 0.25s).
+	if (AFPSRArenaActor* OpeningArena = AFPSRArenaActor::FindActiveInWorld(GetWorld()))
+	{
+		ApplyStageDifficultyToArena(OpeningArena, 0); // StageIndex 0 — SetStageIndex(0) above already committed it
+	}
+
 	if (UWorld* World = GetWorld())
 	{
 		World->GetTimerManager().SetTimer(
@@ -173,9 +168,77 @@ bool UFPSRRunDirectorSubsystem::CancelActiveMission()
 	return bHadMission;
 }
 
+void UFPSRRunDirectorSubsystem::ApplyStageDifficultyToArena(AFPSRArenaActor* Arena, int32 StageIndex)
+{
+	if (!ActiveSchedule || !Arena)
+	{
+		return; // asset-less / world-less test run — every suppressor keeps its actor-authored Durability
+	}
+
+	// 🔴 참가자 수 = GetParticipantCount()(PlayerArray 중 !IsOnlyASpectator()) — GetLivingPlayerCount() 가 아니다.
+	// AFPSRPlayerState::IsAlive() 는 DBNO 를 제외한다. 스테이지 커밋 시점(억제기 파괴 직후)은 전환 전 최고
+	// 압박 구간이라 DBNO 가 가장 빈발하고, "인원수는 스테이지 시작에 1회 고정"과 결합하면 4인이 3명 고의 다운
+	// 상태로 억제기를 마저 부수고 커밋 직후 부활 → 다음 스테이지 내내 4인 DPS로 1인 배수 억제기를 상대하는
+	// 악용이 열린다(ADR 0010 §512 위험이 우회 경로로 부활). 참가자 수는 접속/이탈로만 변하고 사망/DBNO 로는
+	// 변하지 않으므로 "1회 고정" 의도와 정합한다(역방향 — 우연히 다운 중 커밋되어 스테이지 전체가 과소 스케일
+	// 되는 경우 — 도 있지만, 그건 참가자 정의를 접속 기준으로 고정한 대가이지 악용 경로는 아니다).
+	int32 ParticipantCount = 1;
+	if (UWorld* World = GetWorld())
+	{
+		if (AFPSRGameMode* GameMode = World->GetAuthGameMode<AFPSRGameMode>())
+		{
+			ParticipantCount = GameMode->GetParticipantCount();
+		}
+	}
+
+	const FFPSRStageDifficultyAnchor StageAnchor = UFPSRRunScheduleDataAsset::EvalStageAt(ActiveSchedule->StageDifficulty, StageIndex);
+	const float PartySizeMultiplier = UFPSRRunScheduleDataAsset::EvalPartySizeMultiplier(ActiveSchedule->InhibitorDurabilityByPartySize, ParticipantCount);
+	const float EffectiveDurability = ActiveSchedule->InhibitorBaseDurability * StageAnchor.InhibitorDurabilityMultiplier * PartySizeMultiplier;
+
+	// GetOwnedDestructibles, not a spatial/world-wide search: Arena's own ULevel scope (invariant 4 — one arena =
+	// one sublevel), the same scope SetArenaActive already uses to reset every destructible in the arena it just
+	// (re)activated. IsSuppressor() filters to ADR 0010 D6's exact definition (Rewards contains
+	// UFPSRDestructibleReward_StageTransition) — an ordinary destructible (a crate) is left at its actor-authored
+	// Durability, only suppressors scale with stage/party size.
+	TArray<AFPSRArenaDestructible*> Destructibles;
+	Arena->GetOwnedDestructibles(Destructibles);
+	for (AFPSRArenaDestructible* Destructible : Destructibles)
+	{
+		if (Destructible && Destructible->IsSuppressor())
+		{
+			Destructible->ServerSetDurabilityOverride(EffectiveDurability);
+		}
+	}
+
+	// 판정용 로그 1줄 — alive-count 축의 Bonus/Multiplier 도 함께 찍는다(EvalStageAt 이 이미 통째로 돌려주므로
+	// 추가 비용 없음). ComputeTargetAliveCount 는 매 틱 호출이라 여기서 로그를 남기지 않고, 이 함수가 스테이지당
+	// 정확히 1회 호출되는 지점이라 여기서 두 축을 함께 남긴다(PIE 스모크 판정 — 계획 검증 6번).
+	UE_LOG(LogFPSR, Log, TEXT("[Run] Stage %d difficulty: alive (%+d) x%.2f, inhibitor %.0f x%.2f x%.2f = %.0f (participants %d)"),
+		StageIndex, StageAnchor.AliveCountBonus, StageAnchor.AliveCountMultiplier,
+		ActiveSchedule->InhibitorBaseDurability, StageAnchor.InhibitorDurabilityMultiplier, PartySizeMultiplier, EffectiveDurability,
+		ParticipantCount);
+}
+
 int32 UFPSRRunDirectorSubsystem::ComputeTargetAliveCount() const
 {
 	const int32 MaxCount = ActiveSchedule ? ActiveSchedule->MaxAliveCount : FallbackMaxAliveCount;
+
+	// Stage-difficulty anchor (신설 2026-08-26, ADR 0010 D6 비용 축): StageIndex comes off the SAME GameState both
+	// branches below already read (no new replication — GetStageIndex() is already replicated). Evaluated ONCE
+	// here so both branches apply the identical anchor. An unauthored StageDifficulty (or no schedule at all)
+	// evaluates to identity (Bonus 0, Multiplier 1.0) via EvalStageAt's empty-array fallback — complete no-op, so
+	// an existing schedule with no StageDifficulty authored does not regress.
+	int32 StageIndex = 0;
+	if (const UWorld* World = GetWorld())
+	{
+		if (const AFPSRGameState* GameState = World->GetGameState<AFPSRGameState>())
+		{
+			StageIndex = GameState->GetStageIndex();
+		}
+	}
+	const FFPSRStageDifficultyAnchor StageAnchor = UFPSRRunScheduleDataAsset::EvalStageAt(
+		ActiveSchedule ? TConstArrayView<FFPSRStageDifficultyAnchor>(ActiveSchedule->StageDifficulty) : TConstArrayView<FFPSRStageDifficultyAnchor>(),
+		StageIndex);
 
 	// Level-driven scaling (preferred): density scales with party PROGRESSION, not the clock (user 2026-06-24). The
 	// schedule's AliveCountByLevel anchors map party level -> target alive count (piecewise-linear). Falls back to the
@@ -190,7 +253,11 @@ int32 UFPSRRunDirectorSubsystem::ComputeTargetAliveCount() const
 				PartyLevel = GameState->GetPartyLevel();
 			}
 		}
-		const float Scaled = EvalAliveCountByLevel(ActiveSchedule->AliveCountByLevel, PartyLevel);
+		const float LevelScaled = UFPSRRunScheduleDataAsset::EvalAliveCountByLevel(ActiveSchedule->AliveCountByLevel, PartyLevel);
+		// 🔴 스테이지 계수는 라운딩 직전 float 단계에서 곱한다, 그리고 이 분기의 라운딩(RoundToInt)은 그대로
+		// 보존한다 — 레거시 분기(FloorToInt, 아래)와 라운딩 방식을 통일하면 항등 앵커(빈 StageDifficulty)에서도
+		// 레거시 스케줄이 미세 회귀한다(꼬리를 하나로 합치지 말 것 — 계획 3단계).
+		const float Scaled = (LevelScaled + StageAnchor.AliveCountBonus) * StageAnchor.AliveCountMultiplier;
 		return FMath::Clamp(FMath::RoundToInt(Scaled), 0, MaxCount);
 	}
 
@@ -200,7 +267,9 @@ int32 UFPSRRunDirectorSubsystem::ComputeTargetAliveCount() const
 	const float PerMin = ActiveSchedule ? ActiveSchedule->AliveCountPerMinute : FallbackAliveCountPerMinute;
 	const float PerMinAfterBoss = ActiveSchedule ? ActiveSchedule->AliveCountPerMinuteAfterBoss : FallbackAliveCountPerMinuteAfterBoss;
 	const float PreBossClock = FMath::Min(RunClock, GetBossTime());
-	const float Scaled = Base + PerMin * (PreBossClock / 60.0f) + PerMinAfterBoss * (PostBossElapsed / 60.0f);
+	const float TimeScaled = Base + PerMin * (PreBossClock / 60.0f) + PerMinAfterBoss * (PostBossElapsed / 60.0f);
+	// 🔴 레거시 분기는 FloorToInt — 레벨 분기(RoundToInt, 위)와 다른 라운딩을 그대로 보존한다(같은 이유).
+	const float Scaled = (TimeScaled + StageAnchor.AliveCountBonus) * StageAnchor.AliveCountMultiplier;
 	return FMath::Clamp(FMath::FloorToInt(Scaled), 0, MaxCount);
 }
 
@@ -248,6 +317,18 @@ void UFPSRRunDirectorSubsystem::DirectorTick()
 		if (AllPlayersOpeningSeedIssued() || bTimedOut)
 		{
 			bWaitingForOpeningSeed = false;
+
+			// 🔴 스테이지 0 억제기 내구도 적용 지점 — 반드시 여기, 무조건(아래 IsRunPaused/IsStageTransitionActive
+			// 가드 **밖**). StartRun 은 너무 이르다(클라 조인 전이라 참가자 수를 아직 못 읽는다). 그리고 바로
+			// 아래 UpdateSpawnIntensity() 호출과 나란히 그 가드 **안**에 두면 안 된다 — 정상 MP 경로에서는 이
+			// 해제 순간이 거의 항상 카드 프리즈(오프닝 시드 선택) 중이라, 가드 안에 두면 이 1회성 Apply 가
+			// 영원히 실행되지 않는다(UpdateSpawnIntensity 는 매 틱 재호출로 자가복구하지만, 이 Apply 는 그런
+			// 복구 지점이 없다 — 계획 4단계). bTimedOut 경로도 이 위치면 자동으로 함께 탄다.
+			if (AFPSRArenaActor* OpeningArena = AFPSRArenaActor::FindActiveInWorld(GetWorld()))
+			{
+				ApplyStageDifficultyToArena(OpeningArena, GS->GetStageIndex());
+			}
+
 			if (bTimedOut)
 			{
 				UE_LOG(LogFPSR, Warning, TEXT("[Run] Opening-seed hold timed out — starting combat"));

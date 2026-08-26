@@ -7,6 +7,7 @@
 #include "FPSRArenaActor.generated.h"
 
 class UFPSRArenaParamsDataAsset;
+class AFPSRArenaDestructible;
 
 /**
  * The arena, as an actor you drop in its own sublevel (ADR 0012).
@@ -167,6 +168,15 @@ public:
 	 *  silently stacking every player on one point. Either way, every returned transform's XY is then snapped onto
 	 *  the nearest OPEN cell (Z/rotation untouched) if this machine has a layout — see the .cpp for why. */
 	bool GetPlayerEntryTransforms(TArray<FTransform>& Out) const;
+
+	/** Every AFPSRArenaDestructible physically inside this actor's own ULevel (invariant 4 — one arena = one
+	 *  sublevel). Reuses SetArenaActive's own scope (GetLevel()->Actors) rather than a spatial query — the same
+	 *  set SetArenaActive already iterates to ServerReset every destructible in the grid on activation, so "which
+	 *  destructibles does this arena own" cannot drift from what SetArenaActive(true) resets. Used by
+	 *  UFPSRRunDirectorSubsystem::ApplyStageDifficultyToArena (ADR 0010 D6 cost axis, 신설 2026-08-26) to find the
+	 *  suppressors a stage-difficulty commit should re-durability. Out is reset before filling; unsorted (iteration
+	 *  order = ULevel::Actors order). */
+	void GetOwnedDestructibles(TArray<AFPSRArenaDestructible*>& Out) const;
 
 	/** The arena to treat as "the live one". Prefers whichever arena actually IsArenaActive(); if nobody has gone
 	 *  through BeginPlay yet (editor / not in PIE), falls back to bStartsActive, then to the lowest StageOrder

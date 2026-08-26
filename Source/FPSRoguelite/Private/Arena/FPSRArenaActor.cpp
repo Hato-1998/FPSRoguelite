@@ -358,6 +358,31 @@ void AFPSRArenaActor::SetArenaActive(bool bInActive)
 	}
 }
 
+void AFPSRArenaActor::GetOwnedDestructibles(TArray<AFPSRArenaDestructible*>& Out) const
+{
+	Out.Reset();
+
+	// Same scope as SetArenaActive's own sweep (this actor's ULevel — invariant 4), so "which destructibles does
+	// this arena own" can never drift from the set SetArenaActive(true) resets on activation.
+	ULevel* MyLevel = GetLevel();
+	if (!MyLevel)
+	{
+		return;
+	}
+
+	for (AActor* Actor : MyLevel->Actors)
+	{
+		if (!IsValid(Actor))
+		{
+			continue;
+		}
+		if (AFPSRArenaDestructible* Destructible = Cast<AFPSRArenaDestructible>(Actor))
+		{
+			Out.Add(Destructible);
+		}
+	}
+}
+
 bool AFPSRArenaActor::HasBakedSurface() const
 {
 	// "참조가 있다"로 판단하지 않는다. 굽지 않은 빈 에셋을 물려 두는 것은 저작 중 흔한 중간 상태이고,

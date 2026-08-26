@@ -3,6 +3,7 @@
 #pragma once
 
 #include "Engine/DataAsset.h"
+#include "Containers/ArrayView.h" // TConstArrayView (EvalStageAt / EvalPartySizeMultiplier / EvalAliveCountByLevel)
 #include "FPSRRunScheduleDataAsset.generated.h"
 
 class UFPSRMissionDataAsset;
@@ -47,6 +48,39 @@ struct FFPSRAliveCountAnchor
 	int32 Count = 10;
 };
 
+/** One anchor in the stage-driven difficulty curve (신설 2026-08-26, ADR 0010 D6 비용 축 "일찍 부수려 할수록
+ *  비싸다"): at StageIndex, AliveCountBonus/AliveCountMultiplier scale the alive-count target ON TOP OF the level
+ *  curve (목표 = (레벨곡선 + Bonus) × Multiplier — 사용자 결정, 손잡이 2개), and InhibitorDurabilityMultiplier scales
+ *  the active arena's suppressor durability (곱해지는 상대편 손잡이 = InhibitorDurabilityByPartySize, 아래).
+ *  파티 레벨과 **별개** 축이다 — 레벨에 접는 대안은 기각됐다(설계 문서 "대안과 trade-off" 참고: "별개" 요구가
+ *  깨지고, 내구도 경로엔 애초에 레벨 입력이 없어 표현이 안 된다). Anchors are authored in ascending StageIndex and
+ *  interpolated piecewise-linearly — the SAME convention as FFPSRAliveCountAnchor just above (below the first
+ *  anchor uses its values, above the last stays flat), reusing this codebase's only curve idiom rather than
+ *  introducing FScalableFloat/UCurveFloat (그러면 밸리데이터가 커브 내용을 검사할 수 없다 — 설계 §2). */
+USTRUCT(BlueprintType)
+struct FFPSRStageDifficultyAnchor
+{
+	GENERATED_BODY()
+
+	/** Stage index (AFPSRGameState::GetStageIndex) at this anchor. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Stage Difficulty", meta = (DisplayName = "스테이지 인덱스", ClampMin = "0"))
+	int32 StageIndex = 0;
+
+	/** Added to the level-curve alive-count target at/after this stage, BEFORE AliveCountMultiplier below. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Stage Difficulty", meta = (DisplayName = "마릿수 가산"))
+	int32 AliveCountBonus = 0;
+
+	/** Multiplies (level-curve target + AliveCountBonus). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Stage Difficulty", meta = (DisplayName = "마릿수 배수", ClampMin = "0.01"))
+	float AliveCountMultiplier = 1.0f;
+
+	/** Multiplies InhibitorBaseDurability, on top of the party-size multiplier (InhibitorDurabilityByPartySize,
+	 *  EvalPartySizeMultiplier) — the two axes compose by straight multiplication (실효 내구도 = 기본값 × 이 값 ×
+	 *  인원수 배수). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Stage Difficulty", meta = (DisplayName = "억제기 내구도 배수", ClampMin = "0.01"))
+	float InhibitorDurabilityMultiplier = 1.0f;
+};
+
 /** Data-driven run schedule (redesign 2026-06-04 / windows 2026-06-11, §2-8): time-windowed mission spawns
  *  (each fires once at a random time in its range, picking a random mission from its pool) + boss time + a
  *  level-scaled (preferred) or time-scaled enemy target count. No rounds — the run is continuous, frozen only for
@@ -82,6 +116,34 @@ public:
 	 *  e.g. (1,10),(20,30),(30,50): density scales with progression, not the clock. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Run")
 	TArray<FFPSRAliveCountAnchor> AliveCountByLevel;
+
+	/** 스테이지 난이도 축 앵커(신설 2026-08-26, ADR 0010 D6 비용 축) — 파티 레벨과 **별개로** 스테이지가 오를
+	 *  때마다 마릿수·억제기 내구도를 함께 올린다. **비어 있으면 항등**(가산 0·배수 1.0 — EvalStageAt 의 빈 배열
+	 *  폴백) = 기존 스케줄은 완전 무회귀. StageIndex 오름차순 저작, 첫 앵커 아래·마지막 앵커 위는 flat clamp
+	 *  (AliveCountByLevel 과 동일 규약). 적용 지점: UFPSRRunDirectorSubsystem::ComputeTargetAliveCount (마릿수
+	 *  축) / ApplyStageDifficultyToArena (억제기 축, 스테이지 커밋마다 1회).
+	 *  🔴 **첫 앵커는 StageIndex 0 의 항등 앵커(+0, x1.0, x1.0)로 시작할 것.** 첫 앵커 아래가 flat clamp 라,
+	 *  첫 앵커를 (3, +8, x1.15, x1.6) 처럼 두면 스테이지 0 이 이미 x1.6 내구도로 시작하고 스테이지 0->3 의
+	 *  억제기 파괴 3회가 난이도를 전혀 올리지 않는다 — 이 축의 전제가 앞 세 스테이지에서 죽는다. 의도적
+	 *  저작일 수도 있어 밸리데이터는 Warning 으로만 짚는다(FPSRRunScheduleValidator, StageFirstAnchorNotIdentity). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Run|난이도 축", meta = (DisplayName = "스테이지 난이도 앵커"))
+	TArray<FFPSRStageDifficultyAnchor> StageDifficulty;
+
+	/** 억제기(Suppressor) 기본 내구도의 SSOT — 종전 `BP_Inhibitor` CDO 하드값(실측 50, 문서·커밋 표기는 5000)을
+	 *  대체한다(ADR 0010 §512 위험 재현 — "5000 고정이면 4인 파티는 약 13초"). 실효 내구도 = 이 값 ×
+	 *  StageDifficulty 의 InhibitorDurabilityMultiplier × InhibitorDurabilityByPartySize(아래). 일반 파괴물
+	 *  (상자·프롭)의 Durability(액터별 저작값, FPSRDestructible.h)는 이 축과 무관하게 그대로 남는다 — 억제기만
+	 *  스테이지·인원수로 스케일한다. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Run|난이도 축", meta = (DisplayName = "억제기 기본 내구도", ClampMin = "1.0"))
+	float InhibitorBaseDurability = 5000.0f;
+
+	/** 인원수(참가자 수, `AFPSRGameMode::GetParticipantCount` — DBNO 포함, 스펙테이터만 제외)별 억제기 내구도
+	 *  배수. index 0 = 1인. 4인 협동의 화력 상쇄를 **부분 상쇄**한다(2026-08-26 사용자 결정: `×3.1` = 솔로 대비
+	 *  4인 소요시간 1.3배 — 완전 상쇄 `×4.0` 은 인원수를 무의미하게 만들고, 상쇄 없음 `×1.0` 은 §512 위험
+	 *  그 자체라 기각됨). 인원수가 배열 길이를 넘으면 마지막 값 고정(외삽 없음). 비었으면 배수 1.0 폴백
+	 *  (문서화된 동작 — 5단계 밸리데이터가 Warning으로 짚는다). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Run|난이도 축", meta = (DisplayName = "인원수별 억제기 내구도 배수"))
+	TArray<float> InhibitorDurabilityByPartySize = {1.0f, 1.8f, 2.5f, 3.1f};
 
 	/** Target alive enemy count at run start (the spawn director's base intensity). LEGACY time ramp — used only when
 	 *  AliveCountByLevel is empty. */
@@ -159,4 +221,39 @@ public:
 	 *  반영되므로(director tick의 GlobalAliveCap 게이트), 이 값을 낮추면 새 스테이지 시작이 더 비어 보인다. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Run", meta = (ClampMin = "0.0", ClampMax = "1.0"))
 	float StageCarryOverMaxFraction = 1.0f;
+
+	// ---------------------------------------------------------------------------------------------------------
+	// Pure, worldless evaluators (신설 2026-08-26) — unit-tested directly with no instance/world (FPSRoguelite.
+	// Run.Difficulty). Class statics rather than a free function in a new FPSRRunDifficulty.h: a standalone
+	// evaluator header would need FFPSRStageDifficultyAnchor/FFPSRAliveCountAnchor (both defined above, in THIS
+	// header), while this header's own UPROPERTY arrays need the evaluator header's complete types back — a
+	// mutual-include cycle. Class statics keep data and evaluator in one file with no cycle, mirroring
+	// UFPSRStageDirectorSubsystem::ComputeStageSeed — this codebase's existing precedent for "class-static pure
+	// function + worldless unit test" (the other pure-function idiom here, FPSREnemyAllocator, is a free-function
+	// namespace, but that one has no struct-type mutual-dependency to avoid).
+	// ---------------------------------------------------------------------------------------------------------
+
+	/** Piecewise-linear interpolation of the stage-difficulty anchors at StageIndex. Returns the WHOLE anchor
+	 *  interpolated as one unit (not per-field) — walking the array once per field would need three separate
+	 *  interpolation passes that could drift from each other, and a future field addition (ADR 0013's elite-cap
+	 *  curve, deferred to its own row — see Docs/Architecture/0013-…md:205) becomes one struct field instead of a
+	 *  second walk. Empty Anchors -> identity (StageIndex 0, Bonus 0, both multipliers 1.0), so an unauthored
+	 *  StageDifficulty array is a complete no-op. Anchors must be authored in ascending StageIndex (enforced by
+	 *  UFPSRRunScheduleValidator); below the first / above the last clamps flat, same rule as EvalAliveCountByLevel. */
+	static FFPSRStageDifficultyAnchor EvalStageAt(TConstArrayView<FFPSRStageDifficultyAnchor> Anchors, int32 StageIndex);
+
+	/** InhibitorDurabilityByPartySize lookup — index (PartySize - 1): index 0 = 1 player. PartySize <= 0 clamps to
+	 *  index 0 (defensive; GetParticipantCount should never actually be <= 0 when this is called); PartySize
+	 *  beyond the array holds the LAST entry (no extrapolation — a 5th player just gets the 4-player rate rather
+	 *  than an authored value). Empty ByPartySize -> 1.0 (documented fallback — see the validator's Warning on an
+	 *  empty array). */
+	static float EvalPartySizeMultiplier(TConstArrayView<float> ByPartySize, int32 PartySize);
+
+	/** Piecewise-linear interpolation of the level->alive-count anchors at Level. Moved here (2026-08-26) from an
+	 *  anonymous namespace in FPSRRunDirectorSubsystem.cpp — pure relocation, behavior is byte-identical — so it is
+	 *  unit-testable without a world; ComputeTargetAliveCount's call site was already being touched to compose this
+	 *  output with the new stage-difficulty multiplier, so moving it out cost no extra rework. Anchors authored in
+	 *  ascending Level; below the first / above the last clamps flat. Empty Anchors -> 0.0 (matches the original
+	 *  inline function's own early-out). */
+	static float EvalAliveCountByLevel(TConstArrayView<FFPSRAliveCountAnchor> Anchors, int32 Level);
 };
