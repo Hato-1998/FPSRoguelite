@@ -5,6 +5,7 @@
 #include "Misc/Paths.h"
 #include "UObject/UObjectGlobals.h"
 #include "Enemy/FPSREnemyBase.h"
+#include "Core/FPSRLogChannels.h" // LogFPSR — the coverage lines below (see the scan-count comment for why)
 
 #if WITH_AUTOMATION_TESTS
 
@@ -42,6 +43,12 @@ bool FFPSREnemyBlueprintParentTest::RunTest(const FString& Parameters)
 		return false;
 	}
 
+	// Report the COVERAGE, not just the verdict. The guard above only proves "more than zero" — if the scan silently
+	// returned one asset instead of two, every check below would still pass and the unchecked BP would look covered.
+	// A pass is only as trustworthy as the count it examined, so put that count (and each asset's resolved parent) in
+	// the log where a reviewer can read it back.
+	UE_LOG(LogFPSR, Log, TEXT("[Test] BlueprintParent: scanning %s — %d enemy Blueprint(s) found"), *EnemyDir, FoundFiles.Num());
+
 	for (const FString& FilePath : FoundFiles)
 	{
 		// Locate the folder-convention segment within the returned disk path and take everything from there on,
@@ -73,6 +80,9 @@ bool FFPSREnemyBlueprintParentTest::RunTest(const FString& Parameters)
 		// (b) Proves the reparent actually landed ON THE NEW TIER AXIS, not just "loads as something".
 		TestTrue(FString::Printf(TEXT("%s reparented onto AFPSREnemyBase"), *AssetName),
 			LoadedClass->IsChildOf(AFPSREnemyBase::StaticClass()));
+
+		UE_LOG(LogFPSR, Log, TEXT("[Test] BlueprintParent: %s -> parent %s"), *AssetName,
+			LoadedClass->GetSuperClass() ? *LoadedClass->GetSuperClass()->GetName() : TEXT("<none>"));
 
 		// (c) P1 regression guard: promoting the 900 StopDistance default into AFPSREnemyBase (ADR 0013 C1) must
 		// not have silently reverted a reparented BP to some other stale value.
