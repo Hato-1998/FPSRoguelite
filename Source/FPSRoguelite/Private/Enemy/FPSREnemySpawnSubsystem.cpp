@@ -1445,22 +1445,9 @@ AFPSREnemyBase* UFPSREnemySpawnSubsystem::AcquireEnemy(const FVector& Location, 
 	AFPSREnemyBase* Enemy = nullptr;
 
 	// Reuse a dormant actor of the SAME class as picked — a later request must never get a different archetype's
-	// mesh/behaviour. Drop any stale nulls; the pool is bounded (<=MaxActiveEnemies) so the linear scan is cheap.
-	for (int32 i = DormantPool.Num() - 1; i >= 0; --i)
-	{
-		AFPSREnemyBase* Candidate = DormantPool[i].Get();
-		if (!IsValid(Candidate))
-		{
-			DormantPool.RemoveAtSwap(i);
-			continue;
-		}
-		if (Candidate->GetClass() == ClassToSpawn)
-		{
-			Enemy = Candidate;
-			DormantPool.RemoveAtSwap(i);
-			break;
-		}
-	}
+	// mesh/behaviour. O(1) in the requested class's bucket size (ADR 0013 불변식 7 — 풀 취득 비용은 클래스 수와
+	// 무관하다); stale nulls are dropped along the way, scoped to just that bucket (FFPSREnemyDormantPool).
+	Enemy = DormantPool.AcquireOfClass(ClassToSpawn);
 
 	if (Enemy == nullptr)
 	{

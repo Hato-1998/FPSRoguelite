@@ -8,6 +8,7 @@
 #include "GameplayTagContainer.h"
 #include "UObject/ObjectKey.h"
 #include "Containers/ArrayView.h" // TConstArrayView (PassesCommonSpawnGates)
+#include "Enemy/FPSREnemyDormantPool.h" // full type: DormantPool below is a by-value UPROPERTY member (ADR 0013 불변식 7)
 #include "FPSREnemySpawnSubsystem.generated.h"
 
 class AFPSREnemyBase;
@@ -358,9 +359,14 @@ private:
 	UPROPERTY()
 	TObjectPtr<UFPSREnemyRosterDataAsset> EnemyRoster;
 
-	/** Pool of dormant (hidden, disabled) enemies ready for reuse. */
+	/** Pool of dormant (hidden, disabled) enemies ready for reuse — bucketed by EXACT class so acquiring one costs
+	 *  O(1) in the requested archetype's bucket size, independent of how many OTHER classes/enemies the pool holds
+	 *  (ADR 0013 불변식 7, "풀 취득 비용은 클래스 수와 무관하다" — a paid-down cost of adopting 안 A/티어 클래스,
+	 *  not an optional optimization). See FFPSREnemyDormantPool's own comment for the engine precedent, why the
+	 *  key must stay EXACT-match (not IsChildOf), and the known starvation-mode caveat (documented there, not
+	 *  fixed here — ADR 0013 후속 행 3 의 결정 대상). */
 	UPROPERTY(Transient)
-	TArray<TObjectPtr<AFPSREnemyBase>> DormantPool;
+	FFPSREnemyDormantPool DormantPool;
 
 	/** Set of currently active (visible, enabled) enemies. */
 	UPROPERTY(Transient)
