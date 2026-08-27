@@ -78,6 +78,21 @@ public:
 			EditCondition = "bEnableHealthBarLOD", EditConditionHides))
 	float HealthBarHysteresis = 300.0f;
 
+	/** 이 거리보다 먼 적은 **애니메이션이 멈춘다**(재생속도 0). CPU 쪽 CPD 스칼라 쓰기와 원거리 GPU WPO 전진을
+	 *  둘 다 끊는 절감이며, 코스메틱 전용이다 — 서버의 이동/공격 스트라이드·NetUpdateFrequency 밴드와는 **다른
+	 *  값이고 섞이지 않는다**(F8: 오늘 기본값이 S1 반경과 같은 3500 인 것은 우연이지 결속이 아니다).
+	 *
+	 *  ⚠️ **스위치가 없는 것은 의도다.** 프리즈는 종전부터 어떤 설정과도 무관하게 항상 동작했고, 여기에 마스터
+	 *  스위치를 주면 그걸 끈 순간 프리즈가 조용히 사라진다(= UFPSREnemyCosmeticLODSubsystem::ShouldCreateSubsystem
+	 *  이 피하려던 바로 그 회귀). 끄고 싶으면 반경을 아주 크게 잡아라 — 0 이 "전부 프리즈"로 해석되는 사고를
+	 *  막으려고 ClampMin 을 두었다.
+	 *
+	 *  ⚠️ 이 값은 **게임필 값**이라 최종 조정은 사용자 몫이다. 코드 기본값 3500 = `FPSREnemyTuning::
+	 *  AnimFreezeRadiusSq` 의 sqrt(그 상수는 이제 이 기본값의 기준점이자 F8 트립와이어로 남는다). */
+	UPROPERTY(Config, EditAnywhere, Category = "Anim LOD",
+		meta = (DisplayName = "애니 프리즈 반경", ClampMin = "100.0", UIMax = "6000.0", ForceUnits = "cm"))
+	float AnimFreezeRadius = 3500.0f;
+
 	/** Settings appear under the "Game" category in Project Settings. */
 	virtual FName GetCategoryName() const override { return FName(TEXT("Game")); }
 };

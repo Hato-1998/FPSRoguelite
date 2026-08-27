@@ -229,10 +229,11 @@ void AFPSREnemyBase::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	Super::EndPlay(EndPlayReason);
 }
 
-void AFPSREnemyBase::SetViewerLOD(FPSREnemyTuning::EFPSRDistanceBand NewBand, float ViewerDistSq)
+void AFPSREnemyBase::SetViewerLOD(FPSREnemyTuning::EFPSRDistanceBand NewBand, float ViewerDistSq,
+	float AnimFreezeRadiusSq)
 {
 	ViewerBand = NewBand;
-	bAnimFrozen = (ViewerDistSq > FPSREnemyTuning::AnimFreezeRadiusSq);
+	bAnimFrozen = (ViewerDistSq > AnimFreezeRadiusSq);
 
 	// 레벨 트리거 + 사망 가드. AnimProfile 미할당(휴면) 아키타입은 무비용으로 빠진다.
 	if (bAnimFrozen && AnimProfile && !(HealthComponent && HealthComponent->IsDead()))

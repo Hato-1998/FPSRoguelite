@@ -13,6 +13,8 @@
 | 관련 메모리 | `[[enemy-perf-remediation-roadmap]]`(F8 · RC-A) · `[[reason-in-multiplayer-terms]]` · `[[code-is-immutable-structure-only]]` · `[[leave-fine-tuning-to-user]]` · `[[production-structure-first]]` |
 | 보드 행 | https://app.notion.com/3ba3972ddd8881eaad7dd996b9cdf9ae |
 
+> **rev4 (머지 후 정정, 2026-08-27)** — **애니 프리즈 반경을 `constexpr` → config 로 뺐다**(`UFPSREnemyRenderSettings::AnimFreezeRadius`, 기본 3500cm 유지). 계기 = 사용자가 "LOD 걸린 적을 보게 반경을 5m로 줄여 달라"고 했는데 **프리즈만 못 줄였다**. 아래 §9 정정 참조 — 이 유닛이 스스로의 PIE 검증(§12-10 ②④⑤)을 불가능하게 만들고 있었다. `SetViewerLOD` 가 반경을 세 번째 인자로 받는다.
+>
 > **rev3 (G1 통과 후 P3 반영)** — 거리 메트릭 XY→3D 통일을 §6-1이 **명시적으로 소유**(의도된 동작 변경, 실효 반경 −1.5%) · 개명 딸린 주석 잔재 청소 대상 9곳 열거(`bEnableEnemyShadowLOD` 키는 불변) · `FPSRAnimCPDParams.h`는 alias 없이 상수 삭제 · `:388`→`:392` 오기 · 비사망 휴면 헬스바 비대칭을 후속 행 후보로 기록.
 >
 > **rev2 변경 요약 (G1 반려 반영)** — P1-1 사망 가드 신설 · P1-2 시그니처 갭 2건 해소(`SetViewerLOD(Band, DistSq)` + 히스테리시스 읽기 접근자·순수 헬퍼) · P2-1 **엔진 주장 정정**(`TickMode` 기본은 `Automatic`이 **아니라** `Enabled` — 명시적 `SetTickMode` 추가) · P2-2 프리즈를 에지→**레벨 트리거** · P2-3 서브시스템 생성 조건 정정 · P2-4 §2/§4 모순 해소(서버 쪽은 **식별자 치환만**) · P2-5 `ensure`→로그 강등 · P3 7건 반영.
@@ -234,7 +236,7 @@ public:
 	 *
 	 *  ⚠️ 죽은 적에게는 프리즈를 적용하지 않는다 — 사망 dwell 은 사망 모션을 보여주려고 만든 창인데
 	 *  Death→Idle 은 SetAnimState 의 one-shot 재진입 가드에 안 걸려 그대로 CPD 에 써진다. */
-	void SetViewerLOD(FPSREnemyTuning::EFPSRDistanceBand NewBand, float ViewerDistSq);
+	void SetViewerLOD(FPSREnemyTuning::EFPSRDistanceBand NewBand, float ViewerDistSq, float AnimFreezeRadiusSq); // rev4
 
 	/** 후속 코스메틱 소비자(U13 VFX 등)의 조회 seam. 서버 배치패스의 게임플레이 밴드와 **다른 값이며 섞어 쓰면
 	 *  MP 에서 틀린다** — 이 값은 코스메틱 전용이다. */
@@ -306,7 +308,7 @@ private:
 
 ```
 ViewerBand = NewBand;
-bAnimFrozen = (ViewerDistSq > FPSREnemyTuning::AnimFreezeRadiusSq);
+bAnimFrozen = (ViewerDistSq > AnimFreezeRadiusSq);   // rev4: 반경은 호출자가 config 에서 읽어 넘긴다
 
 // 레벨 트리거 + 사망 가드. AnimProfile 미할당(휴면) 아키타입은 무비용으로 빠진다.
 if (bAnimFrozen && AnimProfile && !(HealthComponent && HealthComponent->IsDead()))
@@ -367,9 +369,12 @@ if (bAnimFrozen && AnimProfile && !(HealthComponent && HealthComponent->IsDead()
 | 헬스바 LOD 사용 | `DefaultGame.ini` `[/Script/FPSRoguelite.FPSREnemyRenderSettings]` | `true` | perf 측정 단독 토글 |
 | 헬스바 표시 반경 | 위 동일 | `3500.0` cm | **게임필 값 — 최종 조정은 사용자**(`[[leave-fine-tuning-to-user]]`) |
 | 헬스바 히스테리시스 | 위 동일 | `300.0` cm | 그림자와 같은 폭 |
+| **애니 프리즈 반경** (rev4) | 위 동일 | `3500.0` cm | **게임필 값 — 사용자 몫.** 스위치 없음(주면 끄는 순간 프리즈가 사라진다 = §5-3 이 피한 회귀), `ClampMin=100` 으로 "0=전부 프리즈" 사고 차단 |
 | 그림자 반경/히스테리시스/주기 | 위 동일(기존) | 변경 없음 | |
 
-**C++에 남는 것 = 구조**: 밴드가 4단이라는 사실, 경계 비교 규칙, 두 평가자(서버/뷰어)의 분리, 소비자 배선. **밴드 반경 자체는 `constexpr`로 남긴다** — 이 값들은 `AttackStride` 무스로틀 밴드 불변식(`RangedEngageRange 1400 < S1 3500`, `FPSREnemySpawnSubsystem.cpp:551-556` 주석)에 결속돼 있어 런타임에 바뀌면 공격 판정 타이밍이 조용히 틀어진다. 즉 조정값이 아니라 **구조 상수**다(`[[code-is-immutable-structure-only]]`). 반대로 코스메틱 on/off 반경은 게임필이라 config로 나간다 — 이 경계가 이 유닛의 데이터드리븐 판정선이다.
+**C++에 남는 것 = 구조**: 밴드가 4단이라는 사실, 경계 비교 규칙, 두 평가자(서버/뷰어)의 분리, 소비자 배선. **서버 밴드 반경(`SignificanceS0/S1/S2RadiusSq`)은 `constexpr`로 남긴다** — 이 값들은 `AttackStride` 무스로틀 밴드 불변식(`RangedEngageRange 1400 < S1 3500`, `FPSREnemySpawnSubsystem.cpp:551-556` 주석)에 결속돼 있어 런타임에 바뀌면 공격 판정 타이밍이 조용히 틀어진다. 즉 조정값이 아니라 **구조 상수**다(`[[code-is-immutable-structure-only]]`). 코스메틱 반경은 게임필이라 전부 config로 나간다 — 이 경계가 이 유닛의 데이터드리븐 판정선이다.
+
+> 🔴 **rev4 정정 — rev1~3 의 §9 논거는 애니 프리즈 반경에 잘못 적용됐다.** 위 "공격 판정 타이밍" 논거는 **서버 밴드 상수에만** 성립한다. 애니 프리즈는 순수 코스메틱이고(`CurrentAnimState` 를 읽는 게임플레이 코드 0건 — C0 에서 실측했고 G2 가 재확인했다), F8 이 두 상수를 갈라놓은 이유 자체가 "둘은 다른 것"이라는 데 있다. 그런데도 프리즈 반경을 `constexpr` 로 잠근 탓에 **나머지 코스메틱 반경 둘은 config 인데 이것만 코드에 남는 비일관**이 생겼고, 더 나쁘게는 **이 유닛이 자기 자신의 검증을 막았다** — §12-10 의 ②④⑤(프리즈 관련 3항목, 그중 ④⑤는 G1 이 잡아낸 회귀를 겨냥한 검사)를 보려면 35m 밖 적의 애니 정지를 1인칭으로 판별해야 했다. **교훈: "구조 상수"인지 판정할 때는 그 값이 무엇과 결속됐는지를 값마다 따로 물어야 한다 — 같은 헤더에 있다는 이유로 묶어서 판정하면 안 된다.**
 
 ---
 
