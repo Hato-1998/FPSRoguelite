@@ -400,11 +400,13 @@ protected:
 	UFUNCTION()
 	void HandleDeath(AActor* DeadActor, AActor* Killer);
 
-	/** Server + clients: force the world-space health-bar widget (a BP-added UWidgetComponent) to exist now — it can
-	 *  otherwise be created lazily on first render, after BeginPlay, leaving the BP bind on a null widget — then fire
-	 *  OnHealthBarReady so the BP binds it to the health component (A1/B20). Runs on clients too: the bar is a client
-	 *  visual and OnHealthChanged is client-fired via OnRep_Health (B12). The widget + health component persist across
-	 *  pooling (the actor is reused, not destroyed), so this once-per-lifetime bind stays valid for every reuse. */
+	/** Server + clients: HB1 §6-2 — resolve the native HealthBarWidgetComponent's widget class (a BP override on
+	 *  the component wins; otherwise the config soft path), force the widget instance to exist now (it can
+	 *  otherwise be created lazily on first render, leaving the bind below on a null widget), bind it to the health
+	 *  component in C++, then fire OnHealthBarReady as an extension point. Runs on clients too: the bar is a client
+	 *  visual and OnHealthChanged is client-fired via OnRep_Health (B12). No-op on a dedicated server. The widget +
+	 *  health component persist across pooling (the actor is reused, not destroyed), so this once-per-lifetime bind
+	 *  stays valid for every reuse. See the .cpp body for the full step order (HB1 §6-2). */
 	void InitHealthBarWidget();
 
 	/** 수명주기 축. 종전 SetHealthBarVisible(bool) 을 대체한다. 호출처 3곳 =
@@ -413,9 +415,20 @@ protected:
 	 *  BP 노출 없음을 실측 확인 — 종전 SetHealthBarVisible 선언 위에 UFUNCTION 없었음 → 래퍼 불요. */
 	void SetHealthBarAllowed(bool bAllowed);
 
+	/** 머리 위 체력바. **네이티브인 것이 이 유닛의 핵심**이다 — BP 저작에 맡기면 잊힌다(실측: 적 BP 3종 중 2종에
+	 *  없었다). 아키타입은 BP 디테일 패널에서 이 컴포넌트의 값(WidgetClass·DrawSize·RelativeLocation 등)을 덮을 수
+	 *  있고, 그때는 BP 가 이긴다.
+	 *
+	 *  ⚠️ 이름이 `HealthBarWidget` 이 아닌 것은 의도다 — `BP_EnemyMeleeBase` 가 **같은 이름의 수동 컴포넌트를
+	 *  이미 저작**해 두었고, 부모에 동명 UPROPERTY 가 생기면 그 BP 의 컴파일이 깨진다(LOD1 실사고,
+	 *  [[cpp-uproperty-name-collides-with-bp]]). 사용자가 그 수동 컴포넌트를 제거해도 이름은 되돌리지 않는다
+	 *  (안정적인 이름이 더 가치 있다). */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "FPSR|Enemy")
+	TObjectPtr<UWidgetComponent> HealthBarWidgetComponent;
 
-	/** BP hook (fired by InitHealthBarWidget): the BP does GetUserWidgetObject -> Cast(WBP_EnemyHealthBar) ->
-	 *  InitHealthComp(GetHealthComponent()) so the bar/floating-damage widget binds OnHealthChanged. */
+	/** BP 훅: 위젯이 만들어지고 C++ 바인딩까지 끝난 **뒤** 발화한다. 베이스가 이미 BindHealthComponent 를 불렀으므로
+	 *  **아키타입은 아무것도 안 해도 된다** — 이 훅은 추가 저작(아이콘·이름표 등)을 위한 확장점으로만 남는다.
+	 *  종전에는 이 훅이 바인딩 그 자체를 책임졌고, 그래서 잊히면 바가 안 떴다. */
 	UFUNCTION(BlueprintImplementableEvent, Category = "FPSR|Enemy")
 	void OnHealthBarReady();
 
@@ -907,19 +920,6 @@ protected:
 private:
 	/** 두 축을 합쳐 실제 위젯에 적용. 유일한 SetHiddenInGame 호출 지점. */
 	void ApplyHealthBarVisibility();
-
-	/** BeginPlay 의 InitHealthBarWidget 에서 1회 캐시. 종전엔 SetHealthBarVisible 이 매 호출
-	 *  FindComponentByClass<UWidgetComponent>()(컴포넌트 배열 선형 스캔)를 돌았는데, 밴드 패스가 이를
-	 *  적 하나당 매 패스 호출하게 되므로 캐시가 **필수**가 된다. TObjectPtr = GC 가시성, Transient = 직렬화 제외.
-	 *
-	 *  ⚠️ 이름에 `Cached` 접두사가 붙은 것은 취향이 아니라 **필수**다. 콘텐츠 BP(`BP_EnemyMeleeBase`)가 월드공간
-	 *  위젯 컴포넌트를 이미 `HealthBarWidget` 이라는 이름으로 저작해 두었기 때문에, 부모 C++ 클래스에 같은 이름의
-	 *  UPROPERTY 를 두면 BP 컴파일이 깨진다(실측: "Internal Compiler Error: Tried to create a property
-	 *  HealthBarWidget in scope BP_EnemyMeleeBase_C, but another object ... already exists there" + BP 그래프의
-	 *  `Get HealthBarWidget` 이 이 private 프로퍼티로 해석되어 접근성 에러). **C++ 멤버 이름은 콘텐츠 BP 의
-	 *  변수·컴포넌트 이름공간과 충돌할 수 있다** — 적 베이스에 새 UPROPERTY 를 추가할 때 이 사실을 기억할 것. */
-	UPROPERTY(Transient)
-	TObjectPtr<UWidgetComponent> CachedHealthBarWidget;
 
 	FPSREnemyTuning::EFPSRDistanceBand ViewerBand = FPSREnemyTuning::EFPSRDistanceBand::S0;
 
