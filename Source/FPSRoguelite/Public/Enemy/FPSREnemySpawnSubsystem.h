@@ -9,6 +9,7 @@
 #include "UObject/ObjectKey.h"
 #include "Containers/ArrayView.h" // TConstArrayView (PassesCommonSpawnGates)
 #include "Enemy/FPSREnemyDormantPool.h" // full type: DormantPool below is a by-value UPROPERTY member (ADR 0013 불변식 7)
+#include "Enemy/FPSREnemyTuning.h" // FPSREnemyTuning::SignificanceS0RadiusSq (GetTierS0RadiusSq's SSOT — LOD1)
 #include "FPSREnemySpawnSubsystem.generated.h"
 
 class AFPSREnemyBase;
@@ -151,7 +152,7 @@ public:
 	 *  UFPSREnemyMetricsSubsystem's "Near15m" gate reuses the SAME 15m definition as the movement LOD tier pass
 	 *  (Game.MD §5/§5-1) instead of duplicating the magic constant. Mirrors UFPSRFlowFieldComputer::GetMaxTotalCells's
 	 *  accessor pattern. Does not expose write access — the tier pass (TickEnemyMovement) stays the sole owner. */
-	static constexpr float GetTierS0RadiusSq() { return TierS0RadiusSq; }
+	static constexpr float GetTierS0RadiusSq() { return FPSREnemyTuning::SignificanceS0RadiusSq; }
 
 	/** Set the actor class to spawn for swarm enemies (designer-configured BP child of AFPSREnemyBase).
 	 *  Falls back to AFPSREnemyBase if unset. Set this from trusted server config (e.g. GameMode). Used as the
@@ -337,11 +338,6 @@ private:
 	 *  lockstep with every player hop). Stale entries (dead TWeakObjectPtr) are pruned in the same collection loop
 	 *  so a departed/destroyed player's cache doesn't leak forever. */
 	TMap<TWeakObjectPtr<AFPSRCharacter>, float> LastGroundedZByPlayer;
-
-	// Significance distance tiers (squared cm) and per-tier update stride / net update frequency (Game.MD §5/§5-1).
-	static constexpr float TierS0RadiusSq = 1500.0f * 1500.0f; // S0: full update
-	static constexpr float TierS1RadiusSq = 3500.0f * 3500.0f; // S1
-	static constexpr float TierS2RadiusSq = 6000.0f * 6000.0f; // S2 (beyond = S3)
 
 	// --- Net-cull relevancy (multimap U P-H, server-only). In the unified field the swarm's net-cull radius is sized to an
 	//     engagement/weapon-range bubble capped to the slot footprint (ComputeUnifiedNetCullRadius) and applied UNIFORMLY at

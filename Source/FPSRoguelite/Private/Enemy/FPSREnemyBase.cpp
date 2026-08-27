@@ -5,7 +5,7 @@
 #include "Enemy/FPSREnemySpawnSubsystem.h"
 #include "Enemy/FPSREnemyAnimProfile.h"
 #include "Enemy/FPSREnemyMetricsSubsystem.h" // S4 readability metrics registry (CSV-gated, see below)
-#include "Enemy/FPSREnemyShadowLODSubsystem.h" // per-viewer dynamic-shadow band (see BeginPlay/EndPlay)
+#include "Enemy/FPSREnemyCosmeticLODSubsystem.h" // per-viewer cosmetic LOD band (see BeginPlay/EndPlay)
 #include "Enemy/FPSRFlowFieldSubsystem.h" // v2 hover height sampler (CachedFlowField, see BeginPlay/ApplyGravity)
 #include "Hero/FPSRCharacter.h"
 #include "Pickup/FPSRPickupSubsystem.h"
@@ -184,14 +184,16 @@ void AFPSREnemyBase::BeginPlay()
 	}
 #endif
 
-	// Shadow LOD registry — same shape and lifetime as the metrics registration above, and for the same reason: the
-	// decision is made from each LOCAL viewer's POV, so this runs on every net mode, not just the server. Absent on a
-	// dedicated server (and when the feature is off), where GetSubsystem returns null and this is a no-op.
+	// Cosmetic LOD registry — same shape and lifetime as the metrics registration above, and for the same reason: the
+	// decision is made from each LOCAL viewer's POV, so this runs on every net mode, not just the server. Absent ONLY
+	// on a dedicated server, where GetSubsystem returns null and this is a no-op. (LOD1: creation is no longer gated
+	// on any individual consumer's config switch — the pass carries three consumers now, one of which has no switch
+	// at all, so gating creation on one would silently kill the others. See ShouldCreateSubsystem.)
 	if (UWorld* World = GetWorld())
 	{
-		if (UFPSREnemyShadowLODSubsystem* ShadowLOD = World->GetSubsystem<UFPSREnemyShadowLODSubsystem>())
+		if (UFPSREnemyCosmeticLODSubsystem* CosmeticLOD = World->GetSubsystem<UFPSREnemyCosmeticLODSubsystem>())
 		{
-			ShadowLOD->RegisterEnemy(this);
+			CosmeticLOD->RegisterEnemy(this);
 		}
 	}
 }
@@ -214,17 +216,29 @@ void AFPSREnemyBase::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	}
 #endif
 
-	// Shadow LOD registry: symmetric unregister (the pass also compacts stale weak entries, so a missed call during
+	// Cosmetic LOD registry: symmetric unregister (the pass also compacts stale weak entries, so a missed call during
 	// teardown is survivable rather than fatal — this is the tidy path, not the only one).
 	if (UWorld* World = GetWorld())
 	{
-		if (UFPSREnemyShadowLODSubsystem* ShadowLOD = World->GetSubsystem<UFPSREnemyShadowLODSubsystem>())
+		if (UFPSREnemyCosmeticLODSubsystem* CosmeticLOD = World->GetSubsystem<UFPSREnemyCosmeticLODSubsystem>())
 		{
-			ShadowLOD->UnregisterEnemy(this);
+			CosmeticLOD->UnregisterEnemy(this);
 		}
 	}
 
 	Super::EndPlay(EndPlayReason);
+}
+
+void AFPSREnemyBase::SetViewerLOD(FPSREnemyTuning::EFPSRDistanceBand NewBand, float ViewerDistSq)
+{
+	ViewerBand = NewBand;
+	bAnimFrozen = (ViewerDistSq > FPSREnemyTuning::AnimFreezeRadiusSq);
+
+	// 레벨 트리거 + 사망 가드. AnimProfile 미할당(휴면) 아키타입은 무비용으로 빠진다.
+	if (bAnimFrozen && AnimProfile && !(HealthComponent && HealthComponent->IsDead()))
+	{
+		SetAnimState(EFPSRAnimState::Idle, 0.0f);
+	}
 }
 
 void AFPSREnemyBase::SetShadowCasting(bool bEnabled)
@@ -235,14 +249,37 @@ void AFPSREnemyBase::SetShadowCasting(bool bEnabled)
 	}
 }
 
+void AFPSREnemyBase::SetHealthBarInRange(bool bInRange)
+{
+	if (bHealthBarInRange == bInRange)
+	{
+		return;
+	}
+	bHealthBarInRange = bInRange;
+	ApplyHealthBarVisibility();
+}
+
 void AFPSREnemyBase::InitHealthBarWidget()
 {
 	// Force the BP-added world-space widget to exist NOW (it can otherwise be created lazily on first render — after
 	// BeginPlay — which would leave the BP bind on a null widget). Then let the BP bind it to OnHealthChanged. Runs on
 	// clients too (the bar is a client visual; OnHealthChanged is client-fired via OnRep_Health, B12).
-	if (UWidgetComponent* WidgetComp = FindComponentByClass<UWidgetComponent>())
+	//
+	// LOD1: cached here (once per actor lifetime) rather than re-resolved by every visibility call — the cosmetic LOD
+	// pass now calls the visibility setters every ~0.2s pass, and the old per-call FindComponentByClass<>() was a
+	// linear scan of the component array (fine for the old edge-triggered SetHealthBarVisible, not for a per-pass
+	// caller). See CachedHealthBarWidget's own field comment.
+	CachedHealthBarWidget = FindComponentByClass<UWidgetComponent>();
+	if (CachedHealthBarWidget)
 	{
-		WidgetComp->InitWidget();
+		CachedHealthBarWidget->InitWidget();
+
+		// Engine default TickMode is Enabled (WidgetComponent.cpp: bUseAutomaticTickModeByDefault defaults false),
+		// which never self-gates on SetHiddenInGame — Automatic does (WidgetComponent.cpp:1262's TickMode !=
+		// Enabled guard), so a hidden-by-LOD bar's component tick actually stops instead of ticking every frame
+		// regardless (LOD1 §3). Set explicitly rather than relying on whatever a content BP authored TickMode to
+		// (unverified uasset state) — this makes the behavior deterministic in code.
+		CachedHealthBarWidget->SetTickMode(ETickMode::Automatic);
 	}
 	OnHealthBarReady();
 }
@@ -272,12 +309,23 @@ void AFPSREnemyBase::DebugForceAnimState(EFPSRAnimState State, bool bPin)
 }
 #endif // !UE_BUILD_SHIPPING
 
-void AFPSREnemyBase::SetHealthBarVisible(bool bVisible)
+void AFPSREnemyBase::SetHealthBarAllowed(bool bAllowed)
 {
-	if (UWidgetComponent* WidgetComp = FindComponentByClass<UWidgetComponent>())
+	if (bHealthBarAllowed == bAllowed)
 	{
-		WidgetComp->SetHiddenInGame(!bVisible);
+		return;
 	}
+	bHealthBarAllowed = bAllowed;
+	ApplyHealthBarVisibility();
+}
+
+void AFPSREnemyBase::ApplyHealthBarVisibility()
+{
+	if (!CachedHealthBarWidget)
+	{
+		return;
+	}
+	CachedHealthBarWidget->SetHiddenInGame(!(bHealthBarAllowed && bHealthBarInRange));
 }
 
 void AFPSREnemyBase::HandleDeath(AActor* DeadActor, AActor* Killer)
@@ -390,7 +438,13 @@ void AFPSREnemyBase::Activate(const FVector& Location)
 	AnimOneShotEnterTime = -1.0f;
 	AnimOneShotCycleSeconds = -1.0f;
 	LastRecvTime = -1.0f;
-	SetHealthBarVisible(true); // reverse of HandleDeathCosmetic's hide — the widget survives pooling, the bind doesn't rerun
+	// LOD1: viewer-band + anim-freeze tracking reset for the reused actor — the cosmetic LOD pass re-derives both
+	// authoritatively within its next pass (<=0.2s), but a stale prior-life S3/frozen reading must not survive until
+	// then (e.g. a corpse that died far away, reused right next to a player). bHealthBarInRange is deliberately NOT
+	// reset here — see that field's own comment.
+	ViewerBand = FPSREnemyTuning::EFPSRDistanceBand::S0;
+	bAnimFrozen = false;
+	SetHealthBarAllowed(true); // reverse of HandleDeathCosmetic's hide — the widget survives pooling, the bind doesn't rerun
 	// CPD survives pooling reuse (see the phase write in BeginPlay), so a prior life's hit stamp would otherwise ride
 	// into this one and flash an enemy the instant it respawns — CPDSlot_LastHitTime's contract is "this life".
 	if (AnimProfile && Mesh)
@@ -713,12 +767,12 @@ void AFPSREnemyBase::PostNetReceiveLocationAndRotation()
 	LastRecvLocation = Loc;
 	LastRecvTime = Now;
 
-	// Distance LOD: beyond the freeze radius, FREEZE the clip (playrate 0) — this stops CPU scalar writes (write-on-
-	// change settles after one freeze) AND the distant GPU frame advance. Reuses the S1 boundary (Performance §5-1);
-	// no new per-enemy world query (arithmetic on data the client already has).
-	if (LocalPawn && DistSqToLocal > FPSRAnimCPD::AnimFreezeRadiusSq)
+	// Distance LOD: bAnimFrozen is set by the cosmetic LOD pass (UFPSREnemyCosmeticLODSubsystem -> SetViewerLOD),
+	// which re-issues SetAnimState(Idle, 0) as a level trigger every pass while frozen — this driver only needs to
+	// step aside so it doesn't fight that write with its own Walk/Idle/Attack one. Runs on every rendering machine,
+	// including a listen-server host (LOD1 — this used to be a client-only DistSq recompute here).
+	if (bAnimFrozen)
 	{
-		SetAnimState(EFPSRAnimState::Idle, 0.0f);
 		return;
 	}
 
@@ -771,7 +825,10 @@ void AFPSREnemyBase::SetActorHiddenInGame(bool bNewHidden)
 		AttackAnimHoldUntil = -1.0f; // client mirror of Activate()'s authority-side reset — a reused actor must not
 		                             // spawn already suppressing walk/idle for a prior life's remaining hold span
 		LastRecvTime = -1.0f;
-		SetHealthBarVisible(true); // client mirror of the authority-side restore (a remote client never runs Activate)
+		// LOD1: client mirror of Activate()'s ViewerBand/bAnimFrozen reset — see that block's own comment.
+		ViewerBand = FPSREnemyTuning::EFPSRDistanceBand::S0;
+		bAnimFrozen = false;
+		SetHealthBarAllowed(true); // client mirror of the authority-side restore (a remote client never runs Activate)
 		if (AnimProfile && Mesh) // clear the prior life's hit stamp — see the authority-side reset for why
 		{
 			Mesh->SetCustomPrimitiveDataFloat(FPSRAnimCPD::CPDSlot_LastHitTime, 0.0f);
@@ -794,7 +851,7 @@ void AFPSREnemyBase::HandleDeathCosmetic()
 	// death motion visible would otherwise leave a full-looking bar floating over a shrinking corpse for its whole
 	// length, which reads as "it isn't dead yet" (PIE 2026-08-25). This runs on clients (OnRep_bDead) and on the
 	// host (HandleDeath calls it directly), which is exactly the pair that renders the bar.
-	SetHealthBarVisible(false);
+	SetHealthBarAllowed(false);
 }
 
 bool AFPSREnemyBase::ServerCancelRangedForStageTransition()
@@ -1256,7 +1313,7 @@ void AFPSREnemyBase::TickServerMovement(const FFPSRServerMoveContext& Ctx)
 	// it is permanently stuck at Idle there; see AttackAnimHoldUntil's own comment). Applies to BOTH branches: a
 	// stationary melee attacker / ranged charger can still read as bMoved on a separation-jitter pass, which used to
 	// stomp Walk over Attack unconditionally (Idle was the only guarded branch before).
-	if (AnimProfile && Ctx.Now >= AttackAnimHoldUntil)
+	if (AnimProfile && !bAnimFrozen && Ctx.Now >= AttackAnimHoldUntil)
 	{
 		const float ExpectedMove = GetEffectiveMoveSpeed() * Ctx.ScaledDelta;
 		const float MovedSq = FVector::DistSquaredXY(GetActorLocation(), AnimStartLoc);

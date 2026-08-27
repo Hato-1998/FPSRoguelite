@@ -6,6 +6,7 @@
 #include "GameplayTagContainer.h"
 #include "Templates/SubclassOf.h" // TSubclassOf<AFPSRProjectile> (ranged attack, promoted from AFPSRRangedEnemyBase — ADR 0013 C1)
 #include "Enemy/FPSRAnimCPDParams.h"
+#include "Enemy/FPSREnemyTuning.h" // FPSREnemyTuning::EFPSRDistanceBand (SetViewerLOD/GetViewerBand/ViewerBand — LOD1)
 #include "Enemy/FPSREnemyPursuit.h" // ADR 0008: FFPSRPursuitState/Params (PursuitState member, plain struct — no UObject dep)
 #include "FPSREnemyBase.generated.h"
 
@@ -229,12 +230,34 @@ public:
 	 *  merely casts a shadow into view would count as "on screen" (measured: it over-reported on 48% of frames). */
 	const UStaticMeshComponent* GetMesh() const { return Mesh; }
 
-	/** Cosmetic, local-machine only (UFPSREnemyShadowLODSubsystem): drive this enemy's dynamic shadow from a distance
+	/** 코스메틱 LOD 패스가 매 패스 밀어넣는 **이 머신 뷰어 기준** 상태. 한 번의 호출로 밴드 라벨과 프리즈를 함께
+	 *  갱신한다 — 프리즈는 밴드 라벨이 아니라 **DistSq 와 AnimFreezeRadiusSq 로 직접** 판정해야 F8 의 두-상수
+	 *  분리가 살아 있기 때문에, 라벨만으로는 구현할 수 없다(그래서 DistSq 를 함께 받는다).
+	 *
+	 *  프리즈는 **레벨 트리거**다: 프리즈 중이면 매 패스 SetAnimState(Idle, 0) 을 다시 요구한다. SetAnimState 의
+	 *  dedupe 가 흡수하므로 정상 상태 비용은 비교 몇 번이고, 그 대가로 우회 기록자(OnRep_Charging / ServerTickAttack)
+	 *  가 남긴 Attack 포즈가 다음 패스에 반드시 회수된다(에지 1회 호출이면 언프리즈까지 고착된다).
+	 *
+	 *  ⚠️ 죽은 적에게는 프리즈를 적용하지 않는다 — 사망 dwell 은 사망 모션을 보여주려고 만든 창인데
+	 *  Death→Idle 은 SetAnimState 의 one-shot 재진입 가드에 안 걸려 그대로 CPD 에 써진다. */
+	void SetViewerLOD(FPSREnemyTuning::EFPSRDistanceBand NewBand, float ViewerDistSq);
+
+	/** 후속 코스메틱 소비자(U13 VFX 등)의 조회 seam. 서버 배치패스의 게임플레이 밴드와 **다른 값이며 섞어 쓰면
+	 *  MP 에서 틀린다** — 이 값은 코스메틱 전용이다. */
+	FPSREnemyTuning::EFPSRDistanceBand GetViewerBand() const { return ViewerBand; }
+
+	/** Cosmetic, local-machine only (UFPSREnemyCosmeticLODSubsystem): drive this enemy's dynamic shadow from a distance
 	 *  band instead of leaving it at UMeshComponent's constructor default of always-on. Exposed as a purpose-named
 	 *  setter rather than a mutable GetMesh so the mesh stays read-only to everyone else. No local guard is needed —
 	 *  UPrimitiveComponent::SetCastShadow already early-outs when the value is unchanged, so it never redundantly
 	 *  dirties the render state. */
 	void SetShadowCasting(bool bEnabled);
+
+	/** 헬스바 가시성의 **거리 축**. 수명주기 축과 독립이며, 둘 다 참일 때만 실제로 보인다. */
+	void SetHealthBarInRange(bool bInRange);
+
+	/** 히스테리시스 판정에 필요한 현재 상태 읽기(그림자가 Mesh->CastShadow 를 직접 읽는 것과 같은 자리). */
+	bool IsHealthBarInRange() const { return bHealthBarInRange; }
 
 	/** Server: stamp the time of an attack (called by the movement/attack subsystem). */
 	void NotifyAttacked(float Now) { LastAttackTime = Now; }
@@ -383,13 +406,10 @@ protected:
 	 *  pooling (the actor is reused, not destroyed), so this once-per-lifetime bind stays valid for every reuse. */
 	void InitHealthBarWidget();
 
-	/** Show/hide the world-space health bar. Called on BOTH sides from the same places the death cosmetic runs, which
-	 *  is why it lives on the cosmetic path and not in EnterDyingState: EnterDyingState is server-only (BeginDying),
-	 *  and the bar is a CLIENT visual — hiding it only there would leave every remote client staring at a full-looking
-	 *  bar floating over a corpse for the whole death dwell, which reads as "it didn't die" (PIE 2026-08-25).
-	 *  Re-shown on Activate() / the client unhide reset, since the widget survives pooling (InitHealthBarWidget's
-	 *  bind is once-per-lifetime and must stay valid). */
-	void SetHealthBarVisible(bool bVisible);
+	/** 수명주기 축. Activate/클라 언하이드에서 true, HandleDeathCosmetic 에서 false.
+	 *  종전 SetHealthBarVisible(bool) 을 대체한다(호출처 3곳: FPSREnemyBase.cpp:393·774·797.
+	 *  BP 노출 없음을 실측 확인 — 종전 SetHealthBarVisible 선언 위에 UFUNCTION 없었음 → 래퍼 불요). */
+	void SetHealthBarAllowed(bool bAllowed);
 
 
 	/** BP hook (fired by InitHealthBarWidget): the BP does GetUserWidgetObject -> Cast(WBP_EnemyHealthBar) ->
@@ -883,6 +903,42 @@ protected:
 	FVector MuzzleOffset = FVector(40.0f, 0.0f, 40.0f);
 
 private:
+	/** 두 축을 합쳐 실제 위젯에 적용. 유일한 SetHiddenInGame 호출 지점. */
+	void ApplyHealthBarVisibility();
+
+	/** BeginPlay 의 InitHealthBarWidget 에서 1회 캐시. 종전엔 SetHealthBarVisible 이 매 호출
+	 *  FindComponentByClass<UWidgetComponent>()(컴포넌트 배열 선형 스캔)를 돌았는데, 밴드 패스가 이를
+	 *  적 하나당 매 패스 호출하게 되므로 캐시가 **필수**가 된다. TObjectPtr = GC 가시성, Transient = 직렬화 제외.
+	 *
+	 *  ⚠️ 이름에 `Cached` 접두사가 붙은 것은 취향이 아니라 **필수**다. 콘텐츠 BP(`BP_EnemyMeleeBase`)가 월드공간
+	 *  위젯 컴포넌트를 이미 `HealthBarWidget` 이라는 이름으로 저작해 두었기 때문에, 부모 C++ 클래스에 같은 이름의
+	 *  UPROPERTY 를 두면 BP 컴파일이 깨진다(실측: "Internal Compiler Error: Tried to create a property
+	 *  HealthBarWidget in scope BP_EnemyMeleeBase_C, but another object ... already exists there" + BP 그래프의
+	 *  `Get HealthBarWidget` 이 이 private 프로퍼티로 해석되어 접근성 에러). **C++ 멤버 이름은 콘텐츠 BP 의
+	 *  변수·컴포넌트 이름공간과 충돌할 수 있다** — 적 베이스에 새 UPROPERTY 를 추가할 때 이 사실을 기억할 것. */
+	UPROPERTY(Transient)
+	TObjectPtr<UWidgetComponent> CachedHealthBarWidget;
+
+	FPSREnemyTuning::EFPSRDistanceBand ViewerBand = FPSREnemyTuning::EFPSRDistanceBand::S0;
+
+	/** 코스메틱 애니 프리즈 상태. 코스메틱 패스가 소유하고, 클라 드라이버(PostNetReceiveLocationAndRotation)와
+	 *  권위 드라이버(TickServerMovement) **양쪽이 읽는다** — 종전엔 클라 경로에만 거리검사가 박혀 있어서
+	 *  리슨서버 호스트(= 이 프로젝트 기준선)만 프리즈를 못 받았다. */
+	bool bAnimFrozen = false;
+
+	/** 헬스바 가시성의 **수명주기 축** — 이 적이 지금 바를 가질 자격이 있는가(살아 있고 활성인가).
+	 *  Activate/클라 언하이드에서 true, HandleDeathCosmetic 에서 false. 풀 재사용 시 리셋 대상이다. */
+	bool bHealthBarAllowed = true;
+
+	/** 헬스바 가시성의 **거리 축** — 코스메틱 LOD 패스가 소유한다. 실제 가시성 = 이 둘의 AND
+	 *  (ApplyHealthBarVisibility). 두 축을 하나의 bool 로 합치면 사망 dwell 중에 밴드 패스가 죽은 적의 바를
+	 *  되살린다.
+	 *
+	 *  ⚠️ **풀 재사용 시 일부러 리셋하지 않는다** — 거리 축은 다음 패스(≤ShadowUpdateInterval)가 권위 있게 다시
+	 *  쓴다. true 로 리셋하면 먼 곳에서 재활성된 적의 바가 그 한 패스 동안 깜빡인다. 초기값이 true 인 것은
+	 *  "패스가 아직 말하지 않았으면 보인다"(안전한 방향 = 잘못 숨기지 않는다)는 계약이다. */
+	bool bHealthBarInRange = true;
+
 	/** Fire one enemy-team projectile toward the target (reuses UFPSRProjectileSubsystem — no new damage code). */
 	void FireProjectile(const FFPSRServerAttackContext& Ctx);
 

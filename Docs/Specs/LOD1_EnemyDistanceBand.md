@@ -212,6 +212,16 @@ private:
 
 ### 5-4. `FPSREnemyBase.h` (수정 — 추가/변경분만)
 
+> 🔴 **C3 정정 (2026-08-27, 헤드리스 자동화가 잡음)** — 캐시 멤버 이름이 rev3까지 `HealthBarWidget` 이었으나
+> **콘텐츠 BP 와 이름이 충돌해 BP 컴파일이 깨진다**. `BP_EnemyMeleeBase` 가 월드공간 위젯 컴포넌트를 이미
+> `HealthBarWidget` 으로 저작해 두었고, 부모 C++ 에 같은 이름의 `UPROPERTY` 가 생기면
+> `FPSRoguelite.Enemy.BlueprintParent` 가 실패한다(실측 로그: *"Internal Compiler Error: Tried to create a property
+> HealthBarWidget in scope BP_EnemyMeleeBase_C, but another object (ObjectProperty
+> /Script/FPSRoguelite.FPSREnemyBase:HealthBarWidget) already exists there"* + BP 그래프의 `Get HealthBarWidget` 이
+> private 프로퍼티로 해석되어 접근성 에러). → **`CachedHealthBarWidget` 으로 개명**. 동작·계약은 불변, 이름만 바뀐다.
+> **교훈(이 유닛 밖으로 일반화)**: 적 베이스에 새 `UPROPERTY` 를 추가할 때 그 이름은 **콘텐츠 BP 의 변수·컴포넌트
+> 이름공간과 충돌할 수 있다.** 헤더만 보고는 안 보이며, `Enemy.BlueprintParent` 자동화가 유일한 조기 경보다.
+
 ```cpp
 public:
 	/** 코스메틱 LOD 패스가 매 패스 밀어넣는 **이 머신 뷰어 기준** 상태. 한 번의 호출로 밴드 라벨과 프리즈를 함께
@@ -252,7 +262,7 @@ private:
 	 *  FindComponentByClass<UWidgetComponent>()(컴포넌트 배열 선형 스캔)를 돌았는데, 밴드 패스가 이를
 	 *  적당 매 패스 호출하게 되므로 캐시가 **필수**가 된다. TObjectPtr = GC 가시성, Transient = 직렬화 제외. */
 	UPROPERTY(Transient)
-	TObjectPtr<UWidgetComponent> HealthBarWidget;
+	TObjectPtr<UWidgetComponent> CachedHealthBarWidget; // ⚠️ 이름 주의 — 아래 C3 정정 참조
 
 	FPSREnemyTuning::EFPSRDistanceBand ViewerBand = FPSREnemyTuning::EFPSRDistanceBand::S0;
 

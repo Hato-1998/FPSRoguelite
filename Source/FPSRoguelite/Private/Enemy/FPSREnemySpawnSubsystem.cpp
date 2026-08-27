@@ -557,9 +557,9 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 		int32 UpdateStride;
 		int32 AttackStride;
 		float NetFreq;
-		if (BestDistSq <= TierS0RadiusSq)      { UpdateStride = 1; AttackStride = 1; NetFreq = 30.0f; }
-		else if (BestDistSq <= TierS1RadiusSq) { UpdateStride = 2; AttackStride = 1; NetFreq = 10.0f; }
-		else if (BestDistSq <= TierS2RadiusSq) { UpdateStride = 4; AttackStride = 2; NetFreq = 5.0f;  }
+		if (BestDistSq <= FPSREnemyTuning::SignificanceS0RadiusSq)      { UpdateStride = 1; AttackStride = 1; NetFreq = 30.0f; }
+		else if (BestDistSq <= FPSREnemyTuning::SignificanceS1RadiusSq) { UpdateStride = 2; AttackStride = 1; NetFreq = 10.0f; }
+		else if (BestDistSq <= FPSREnemyTuning::SignificanceS2RadiusSq) { UpdateStride = 4; AttackStride = 2; NetFreq = 5.0f;  }
 		else                                   { UpdateStride = 8; AttackStride = 4; NetFreq = 2.0f;  }
 
 		// Only push a net-update-frequency change when the LOD tier actually changed. AActor::SetNetUpdateFrequency
@@ -1515,7 +1515,7 @@ AFPSREnemyBase* UFPSREnemySpawnSubsystem::AcquireEnemy(const FVector& Location, 
 			//
 			// 안전 확인(검증됨) — 휴면체는 ActiveEnemies·DyingEnemies 어디에도 없다(ReleaseEnemy/
 			// FinishDyingEnemy 모두 DormantPool.Add 전에 그 두 컨테이너에서 먼저 뺀다). AFPSREnemyBase::EndPlay
-			// 가 메트릭 레지스트리(UFPSREnemyMetricsSubsystem)와 그림자 LOD 레지스트리(UFPSREnemyShadowLOD
+			// 가 메트릭 레지스트리(UFPSREnemyMetricsSubsystem)와 코스메틱 LOD 레지스트리(UFPSREnemyCosmeticLOD
 			// Subsystem) 양쪽에서 스스로 Unregister 하므로 Destroy() 가 그 두 등록을 대신 정리해 줄 필요가
 			// 없다. AcquireOfClass 는 이미 무효 슬롯을 관용한다(위 참조). 따라서 Destroy() 대상은 무참조다.
 			//

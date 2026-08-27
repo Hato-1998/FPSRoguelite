@@ -52,11 +52,6 @@ namespace FPSRAnimCPD
 	// scarcity pressure motivating a cramped allocation here; slots 5+ remain free for a future cosmetic without
 	// renumbering anything above.
 
-	// Anim distance LOD: beyond this squared radius the animation FREEZES (playrate 0 / no further param writes) to
-	// shed CPU param writes and distant GPU WPO evaluation. MIRRORS UFPSREnemySpawnSubsystem::TierS1RadiusSq (the S1
-	// boundary, Performance §5-1). Kept as a documented mirror to avoid a cross-header dependency for one constant.
-	constexpr float AnimFreezeRadiusSq = 3500.0f * 3500.0f;
-
 	// Speed-bucket quantization for the walk playrate: the state driver writes a new playrate only when the enemy's
 	// speed crosses a bucket boundary (not every frame), so a swarm mostly walking issues ~0 writes/frame at steady
 	// state. Alpha (CurrentMoveSpeed-relative) is quantized into this many buckets.
