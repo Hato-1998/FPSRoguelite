@@ -21,8 +21,8 @@ class APlayerController;
  * consumes already-replicated values, so it needs no server-authoritative counterpart.
  *
  * UTickableWorldSubsystem (not a plain WorldSubsystem) because the alpha has to update smoothly every frame, the
- * same shape as UFPSREnemyShadowLODSubsystem. Excluded entirely on a dedicated server via ShouldCreateSubsystem
- * (IsRunningDedicatedServer() — the same global-flag check UFPSREnemyShadowLODSubsystem uses, deliberately NOT
+ * same shape as UFPSREnemyCosmeticLODSubsystem. Excluded entirely on a dedicated server via ShouldCreateSubsystem
+ * (IsRunningDedicatedServer() — the same global-flag check UFPSREnemyCosmeticLODSubsystem uses, deliberately NOT
  * UWorld::GetNetMode(): NetMode is a per-NetDriver value that is not guaranteed to be settled yet by the time
  * subsystem creation runs, where IsRunningDedicatedServer() is a process-wide flag set at startup). A listen-server
  * host IS a local viewer and is deliberately still covered.
@@ -86,7 +86,7 @@ private:
 	bool bMaterialLoadAttempted = false;
 
 	/** The player controller CachedModifier was resolved against. Not a UPROPERTY (matches
-	 *  UFPSREnemyShadowLODSubsystem::RegisteredEnemies' own weak-array convention) — a weak ref needs no GC
+	 *  UFPSREnemyCosmeticLODSubsystem::RegisteredEnemies' own weak-array convention) — a weak ref needs no GC
 	 *  reflection to be invalidated safely; it is only ever compared against, never dereferenced without a
 	 *  validity check. Re-resolved in GetOrCreateModifier whenever it stops matching GetFirstLocalPlayerController
 	 *  (map travel, respawn re-possession). */

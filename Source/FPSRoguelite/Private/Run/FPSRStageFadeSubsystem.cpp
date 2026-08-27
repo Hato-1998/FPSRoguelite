@@ -40,7 +40,7 @@ bool UFPSRStageFadeSubsystem::ShouldCreateSubsystem(UObject* Outer) const
 	}
 
 	// A dedicated server renders nothing and has no local viewer to fade — refuse creation outright (no
-	// registration, no Tick, no cost at all), same reasoning as UFPSREnemyShadowLODSubsystem::ShouldCreateSubsystem.
+	// registration, no Tick, no cost at all), same reasoning as UFPSREnemyCosmeticLODSubsystem::ShouldCreateSubsystem.
 	// IsRunningDedicatedServer() is a process-wide flag settled at startup, unlike UWorld::GetNetMode() which is a
 	// per-NetDriver value not guaranteed to be resolved yet at subsystem-creation time. A listen-server host IS a
 	// viewer and is deliberately not covered by this check.
@@ -49,7 +49,7 @@ bool UFPSRStageFadeSubsystem::ShouldCreateSubsystem(UObject* Outer) const
 
 ETickableTickType UFPSRStageFadeSubsystem::GetTickableTickType() const
 {
-	// Never tick the CDO/template (matches UFPSREnemyShadowLODSubsystem/UFPSREnemyMetricsSubsystem).
+	// Never tick the CDO/template (matches UFPSREnemyCosmeticLODSubsystem/UFPSREnemyMetricsSubsystem).
 	return IsTemplate() ? ETickableTickType::Never : ETickableTickType::Conditional;
 }
 
@@ -214,7 +214,7 @@ void UFPSRStageFadeSubsystem::Tick(float DeltaTime)
 
 	// GetFirstLocalPlayerController, NOT UWorld::GetFirstPlayerController: on a listen server the latter's list
 	// also holds every REMOTE client's controller (Engine.h), which would fade a host's screen off a remote
-	// player's transition state. Same reasoning as UFPSREnemyMetricsSubsystem/UFPSREnemyShadowLODSubsystem.
+	// player's transition state. Same reasoning as UFPSREnemyMetricsSubsystem/UFPSREnemyCosmeticLODSubsystem.
 	APlayerController* PC = GEngine ? GEngine->GetFirstLocalPlayerController(World) : nullptr;
 	UFPSRStageFadeCameraModifier* Modifier = GetOrCreateModifier(PC);
 	if (!Modifier)
