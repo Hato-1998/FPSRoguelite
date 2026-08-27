@@ -285,16 +285,18 @@ void AFPSREnemyBase::SetHealthBarInRange(bool bInRange)
 void AFPSREnemyBase::InitHealthBarWidget()
 {
 	// HB1 §6-2 step 1 — a dedicated server renders nothing, so there is no reason to resolve/init a widget class.
-	// This project has no dedicated server today, but the check must not lean on that absence: the component itself
-	// is separately double-gated by the engine either way (InitWidget's own dedi guard -> TickMode=Disabled, and
-	// TickComponent's first-tick guard), so this is belt-and-suspenders, not the only safety net.
+	// This project has no dedicated server today, but the check must not lean on that absence. The engine already
+	// blocks this path independently: UWidgetComponent::BeginPlay calls InitWidget unconditionally, whose dedicated-
+	// server guard sets TickMode=Disabled BEFORE any tick runs — so TickComponent's own dedi guard is a third,
+	// normally-unreachable layer. This return is belt-and-suspenders, not the only safety net.
 	if (IsRunningDedicatedServer())
 	{
 		return;
 	}
 
-	// HB1 §6-2 step 2 — the component is now a native ctor subobject on every archetype, but an archetype's content
-	// BP could still null it out in the editor, so this stays a real guard, not a formality.
+	// HB1 §6-2 step 2 — defensive null guard. NOTE: a content BP canNOT null a native ctor subobject (the details
+	// panel only overrides its properties), so this is not the "BP might delete it" case it may look like — it
+	// guards construction-order / CDO edge cases and keeps every later step free of repeated null checks.
 	if (!HealthBarWidgetComponent)
 	{
 		return;

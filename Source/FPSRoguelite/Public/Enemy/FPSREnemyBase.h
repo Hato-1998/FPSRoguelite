@@ -409,9 +409,15 @@ protected:
 	 *  stays valid for every reuse. See the .cpp body for the full step order (HB1 §6-2). */
 	void InitHealthBarWidget();
 
-	/** 수명주기 축. 종전 SetHealthBarVisible(bool) 을 대체한다. 호출처 3곳 =
-	 *  Activate / SetActorHiddenInGame 의 클라 언하이드 리셋 / HandleDeathCosmetic
-	 *  (앞 둘이 true, 마지막이 false. 줄번호로 인용하지 않는다 — 편집마다 어긋난다).
+	/** 수명주기 축. 종전 SetHealthBarVisible(bool) 을 대체한다.
+	 *
+	 *  🔴 **이 세터의 실호출처는 HandleDeathCosmetic 1곳뿐이다(false 방향).** 나머지 두 수명주기 지점
+	 *  — Activate / SetActorHiddenInGame 의 클라 언하이드 리셋 — 은 **의도적으로 이 세터를 우회**해
+	 *  bHealthBarAllowed 에 직접 대입한 뒤 ApplyHealthBarVisibility() 를 부른다(HB1 §6-3 A안).
+	 *  **그 둘을 "정리"해서 이 세터로 되돌리지 마라** — 비사망 재사용 경로는 값이 이미 true 라
+	 *  아래 값-가드에서 조기 반환되고, 그러면 근거리 재사용된 적의 바가 그 생애 내내 안 뜬다(재표시 홀).
+	 *  가드 자체는 유지한다(사망 경로는 값 변화가 실제로 있고, 대칭을 위해서도 남긴다).
+	 *
 	 *  BP 노출 없음을 실측 확인 — 종전 SetHealthBarVisible 선언 위에 UFUNCTION 없었음 → 래퍼 불요. */
 	void SetHealthBarAllowed(bool bAllowed);
 
