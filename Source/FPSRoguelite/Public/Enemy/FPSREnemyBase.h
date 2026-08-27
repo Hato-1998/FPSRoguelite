@@ -231,8 +231,9 @@ public:
 	const UStaticMeshComponent* GetMesh() const { return Mesh; }
 
 	/** 코스메틱 LOD 패스가 매 패스 밀어넣는 **이 머신 뷰어 기준** 상태. 한 번의 호출로 밴드 라벨과 프리즈를 함께
-	 *  갱신한다 — 프리즈는 밴드 라벨이 아니라 **DistSq 와 AnimFreezeRadiusSq 로 직접** 판정해야 F8 의 두-상수
-	 *  분리가 살아 있기 때문에, 라벨만으로는 구현할 수 없다(그래서 DistSq 를 함께 받는다).
+	 *  갱신한다 — 프리즈는 밴드 라벨이 아니라 **거리와 프리즈 반경으로 직접** 판정해야 F8 의 두-상수 분리가
+	 *  살아 있기 때문에, 라벨만으로는 구현할 수 없다(그래서 거리와 반경을 함께 받는다). 반경은 호출자(코스메틱
+	 *  LOD 패스)가 config 에서 읽어 패스당 1회 제곱해 넘긴다 — 액터가 매번 설정을 조회하지 않게.
 	 *
 	 *  프리즈는 **레벨 트리거**다: 프리즈 중이면 매 패스 SetAnimState(Idle, 0) 을 다시 요구한다. SetAnimState 의
 	 *  dedupe 가 흡수하므로 정상 상태 비용은 비교 몇 번이고, 그 대가로 우회 기록자(OnRep_Charging / ServerTickAttack)
@@ -240,7 +241,7 @@ public:
 	 *
 	 *  ⚠️ 죽은 적에게는 프리즈를 적용하지 않는다 — 사망 dwell 은 사망 모션을 보여주려고 만든 창인데
 	 *  Death→Idle 은 SetAnimState 의 one-shot 재진입 가드에 안 걸려 그대로 CPD 에 써진다. */
-	void SetViewerLOD(FPSREnemyTuning::EFPSRDistanceBand NewBand, float ViewerDistSq);
+	void SetViewerLOD(FPSREnemyTuning::EFPSRDistanceBand NewBand, float ViewerDistSq, float AnimFreezeRadiusSq);
 
 	/** 후속 코스메틱 소비자(U13 VFX 등)의 조회 seam. 서버 배치패스의 게임플레이 밴드와 **다른 값이며 섞어 쓰면
 	 *  MP 에서 틀린다** — 이 값은 코스메틱 전용이다. */

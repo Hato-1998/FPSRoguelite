@@ -18,9 +18,13 @@ namespace FPSREnemyTuning
 	inline constexpr float SignificanceS2RadiusSq = 6000.0f * 6000.0f; // S2 중거리 군집 (초과 = S3 원거리)
 
 	// ---- 코스메틱 애니 프리즈 반경 ----
+	// 🔁 **역할 변경(2026-08-27)**: 이 값은 더 이상 런타임이 읽는 값이 아니다. 프리즈 반경은
+	//    `UFPSREnemyRenderSettings::AnimFreezeRadius`(config, cm)로 나갔고 — 순수 코스메틱 값이라
+	//    조정 가능해야 하는데 코드에 잠겨 있어서 자기 자신의 PIE 검증조차 불가능했다(실사고) —
+	//    여기 남은 것은 **그 config 기본값의 기준점 + 아래 F8 트립와이어**다.
 	// ⚠️ 오늘 SignificanceS1RadiusSq 와 **값이 같지만 뜻이 다르다**(F8 적대재검증 결론 2026-07-08:
 	//    "net-freq 티어 vs anim-freeze 가 우연히 같은 3500² 라 하나로 합치지 말 것").
-	//    합치면 넷프리퀀시 튜닝이 애니 프리즈 거리를 조용히 옮기고, 그 반대도 성립한다.
+	//    합치면 넷프리퀀시 튜닝이 애니 프리즈 기본값을 조용히 옮기고, 그 반대도 성립한다.
 	// 아래 static_assert 는 불변식이 아니라 **트립와이어**다 — 둘 중 하나를 의도적으로 바꾸면 빌드가 깨져서
 	// "정말 둘 다 옮길 셈인가"를 묻는다. 갈라놓기로 했다면 이 assert 를 지우는 것이 올바른 대응이다.
 	inline constexpr float AnimFreezeRadiusSq = 3500.0f * 3500.0f;

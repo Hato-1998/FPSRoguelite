@@ -120,6 +120,20 @@ void UFPSREnemyCosmeticLODSubsystem::Tick(float DeltaTime)
 	const float ShadowOnRadiusSq = FMath::Square(ShadowOnRadius);
 	const float ShadowOffRadiusSq = FMath::Square(ShadowOffRadius);
 
+	// Anim-freeze radius (LOD1 follow-up): read from config here, squared ONCE per pass, so no actor ever touches
+	// UFPSREnemyRenderSettings. Unlike the two pairs around it this is a single threshold with NO hysteresis.
+	//
+	// Be honest about what that costs: an enemy sitting exactly on the boundary alternates frozen/unfrozen every
+	// pass, so its animation visibly stutters (walk, hold, walk, hold at the pass rate). That is PRE-EXISTING
+	// behaviour, not something this follow-up introduced — the client-only freeze this replaced had the same shape
+	// (re-evaluated per net update against a bare radius, no hysteresis), so leaving it alone is the no-regression
+	// choice and adding hysteresis here would be a new design decision, not a fix. It is survivable because the
+	// artifact only exists in a razor-thin shell at the radius AND at that distance the animation is small on screen
+	// — the very reason the freeze is affordable in the first place. If it ever reads badly at a SHORT authored
+	// radius (e.g. the 5m observation setting), that is the signal to give this the same On/Off pair the other two
+	// consumers have.
+	const float AnimFreezeRadiusSq = FMath::Square(FMath::Max(Settings->AnimFreezeRadius, 0.0f));
+
 	// Health-bar on/off radii (LOD1) — same shape as the shadow pair above.
 	const float HealthBarOnRadius = FMath::Max(Settings->HealthBarVisibleRadius, 0.0f);
 	const float HealthBarOffRadius = HealthBarOnRadius + FMath::Max(Settings->HealthBarHysteresis, 0.0f);
@@ -151,7 +165,7 @@ void UFPSREnemyCosmeticLODSubsystem::Tick(float DeltaTime)
 		// FPSREnemyTuning::AnimFreezeRadiusSq's own comment and LOD1 §6-1's metric note).
 		const float DistSq = FVector::DistSquared(Enemy->GetActorLocation(), ViewerLocation);
 
-		Enemy->SetViewerLOD(FPSREnemyTuning::ClassifyBand(DistSq), DistSq);
+		Enemy->SetViewerLOD(FPSREnemyTuning::ClassifyBand(DistSq), DistSq, AnimFreezeRadiusSq);
 
 		if (Settings->bEnableEnemyShadowLOD)
 		{
