@@ -44,6 +44,32 @@
   - **엘리트 = ASC 부착** — `Game.md §1` 의 *"GAS는 플레이어(1~4)와 보스/엘리트에만"* 중 **엘리트 절반이 실현**된다.
     소유자는 **액터 자신**(적은 PlayerState 가 없어 플레이어와 소유 패턴이 다르다 — 플레이어는 `AFPSRPlayerState` 소유).
     **플레이어와 어트리뷰트 셋을 공유하지 않는다.** 동시 마릿수 = **스테이지·난이도 함수 + 하드캡**(캡 없이 증가만 두면 후반 ASC 복제 예산이 터진다).
+    ✅ **착지(2026-08-27)** — `AFPSREnemyEliteBase` 가 `IAbilitySystemInterface` 구현 + `UFPSRAbilitySystemComponent` 를 **액터 소유**로 부착.
+    복제 모드 = **`Minimal`**(엔진 `AbilitySystemComponent.h:82` — *"does not work for **Owned** ASC"*, 엘리트는 오너 클라가 없어 정확히 해당. 플레이어가 `Mixed` 인 이유도 같은 문장).
+    동시 마릿수 = `min(DA_RunSchedule.StageDifficulty[].MaxEliteAlive, UFPSREnemySpawnSubsystem::EliteHardCap)`. 캡 초과 시 **스폰 보류**(일반으로 대체하지 않는다).
+    **이월 엘리트가 새 스테이지 캡을 넘으면 = 일시 초과를 허용한다**(ADR 이 물은 양자택일의 판정) — 캡은 **신규 스폰만** 막고
+    이월분은 예산을 점유한 채 사망으로 자연 수렴한다. `GlobalAliveCap` 이 이미 정확히 그 의미론이라 새 기제가 0이고,
+    강제 반납은 이월의 의도("쌓아 온 압박을 가져간다")와 충돌한다. 총량 손잡이는 `StageCarryOverMaxFraction` 이 따로 제공한다.
+    ⚠️ **어트리뷰트 셋은 만들지 않았다**(사용자 결정 2026-08-26, ADR 문구에서 의도적 이탈) — 체력은 컴포넌트에 남고(불변식 4),
+    **범용 상태이상은 GAS 로 가면 안 되므로**(아래 「시간축·상태이상 계약」) 지금 넣을 어트리뷰트가 0이다. 첫 소비자가 생길 때 만든다.
+    🔴 **수명주기 = 4중 폐쇄** — `EnterDyingState`(어빌리티 취소, Super 앞) · `Deactivate`(GE 제거, Super 의 `DORM_DormantAll` 앞) ·
+    `Activate`(방어적 재클리어 + 어빌리티 재부여) · `ServerResetEliteForStageCarry`(이월 — 어빌리티만 취소, GE 는 보존).
+    이월 적은 `Activate`/`Deactivate` 를 **둘 다 안 밟기** 때문에 네 번째가 필요하다. 원거리 홀드가 같은 이유로 이미 4중이다.
+  - 🔴 **시간축·상태이상 계약(2026-08-27)** — **엘리트 ASC 에서 시간이 흐르는 GAS 기제 전부 금지**:
+    duration GE · **periodic GE** · cooldown GE · 시간 기반 AbilityTask. 근거 = §2-2 전역 프리즈는 **상태 게이트**이지 `TimeDilation` 이 아닌데
+    엔진은 이들을 월드 `FTimerManager` 로 돌린다(`GameplayEffect.cpp:4409` duration · **`:4431` period `bLoop=true`**).
+    4인 협동에서 1인 레벨업 = 전원 프리즈이므로, 카드 고르는 동안 엘리트 쿨다운·디버프가 공짜로 흘러간다.
+    → 대체 = **프리즈-멈춤 서버 누산기**(원거리 차징 관용구). 기획자 손잡이 = `UFPSREliteGameplayAbility::CooldownSeconds`(BP 에 숫자만 저작).
+    ⚠️ **강제 범위 정정(G2)**: 런타임 가드(`GameplayEffectApplicationQueries`, 엔진 네이티브 훅)가 막는 것은 **엘리트 ASC 가 받는 GE 3종뿐**이다.
+    **시간 기반 AbilityTask(`WaitDelay` 등)는 가드 밖**이고 월드 타이머로 도므로 프리즈를 뚫는다 — 그건 **문서 약속으로만** 금지된다.
+    (전환은 어빌리티를 취소하지만 §2-2 프리즈는 취소하지 않는다.)
+    🔴 **엘리트가 *발신*하는 GE 도 계약 대상이다** — 가드는 **수신**만 막는다. 엘리트 어빌리티가 **플레이어에게** duration/periodic
+    디버프를 걸면 그건 플레이어 ASC(`Mixed`, 가드 없음)의 월드 타이머로 돌아 레벨업 프리즈 중에도 타들어 간다.
+    이 브랜치가 최초의 적→플레이어 GE 벡터(엘리트 어빌리티 시임)를 만들었으므로 더는 이론이 아니다 —
+    **엘리트 어빌리티는 플레이어에게도 시간형 GE 를 걸지 않는다**(즉발 데미지 + 서버 누산기로 표현할 것).
+    ⚠️ **Health 를 건드리는 GE 는 엘리트 ASC 에서 조용히 무시된다**(엔진 `GameplayEffect.cpp:4541` — 없는 어트리뷰트 modifier skip). 체력은 컴포넌트 소관이다.
+    ⚠️ **범용 상태이상(얼음→슬로우 등)을 여기 얹지 마라** — 보스는 ASC 가 없고 일반 티어도 GAS 를 안 쓰므로 **전 적에 안 걸린다**.
+    그건 별도 행(`범용 상태이상 — 속성 피격 → 전 적·보스 공통 디버프`) 소관이고, 착지점은 `DamageType` 이 이미 도달해 있는 `UFPSREnemyHealthComponent::ApplyDamage` 다.
   - **보스 = 여전히 미실현** — `FPSRBossBase.h` 가 *"no ASC/GAS is attached"* 라고 명시. ADR 0013 의 비목표다(문서가 앞서간 상태, `Docs/ProjectStructure_Report.md:38` D1).
 - 이동: **Flow-Field 샘플링(고정맵 사전계산, 높이/유계 2층 인지) + 분리(separation)**, 배치 업데이트 (P2). 적 Z로 레이어(서피스 rank) 선택 → 겹친 2층(메자닌) 플레이어를 계단/램프로 추격(U7, 상세 `Performance §5-2`). ⚠️층간 중첩은 **storey급(≥~1층)**으로 저작(storey 미만 근접 2면은 단일 계단면으로 — 레이어 진동 회피)
 - 렌더: 거리 LOD — ⚠️ **정정(2026-08-11)**: `USignificanceManager`는 **쓰지 않는다**(플러그인만 켜져 있고 코드 참조 0). 실제 티어링은 **손수 짠 거리밴드**이고 이동 패스와 융합돼 있다. **인스턴싱 컴포넌트(ISM/HISM)는 쓰지 않는다** — 적마다 개별 `UStaticMeshComponent`. 🔁 **결론 갱신 2026-08-13(M0 EC ④ 재대조)**: 이건 *미상환 부채*가 아니라 **채택된 설계**다 — ADR [`0007`](../Architecture/0007-enemy-swarm-render-path-cpd.md)이 대조 실험으로 ISM을 **기각**하고 **MID 폐기 + CustomPrimitiveData**를 채택했다(엔진 동적 인스턴싱이 드로우 병합을 이미 보존하므로, 필요했던 것은 인스턴싱 컴포넌트가 아니라 per-actor MID 제거였다). 실측 = 스웜 렌더 합 **2.05ms@300**(예산 4ms, 여유 2배) · 3.03ms@500 — `Performance.md §5`. ~~(인스턴싱/VAT = `Roadmap.md §8` 별도 트랙)~~ → 트랙은 §7-6 M0 (a″)로 이동해 VAT-1에서 종결됐다. 티어 정의 자체(S0~S3)는 `Performance.md §5-1` 그대로 유효.
@@ -86,5 +112,6 @@
   - (원 설계 근거 보존) 기본 ON 안의 논거는 "사선 관리가 코어 협동 긴장·실력 축 / 공개 매칭 미고려(솔로+친구 협동)라 트롤 안전장치 불요"였다. 뒤집혔지만 **ON 토글의 설계 의도는 여전히 이것**이다.
 - 토폴로지: **리슨서버 P2P** (Steam Sockets/EOS 세션, P5에서 구축)
 - **개발 방법론: P1부터 Net-aware (서버 권위 + Push Model), PIE 2-client 상시 검증.** 솔로로 만들고 나중에 리플리케이션 retrofit 금지
-- GAS ASC Replication Mode: 솔로 = Minimal, 협동 = Mixed
+- GAS ASC Replication Mode — ⚠️ **정정(2026-08-27)**: 이 줄은 **플레이어 ASC** 이야기이고, 코드는 솔로/협동 구분 없이 **무조건 `Mixed`** 다(`FPSRPlayerState.cpp:22`).
+  **엘리트 ASC 는 별개로 `Minimal`**(오너 클라가 없다 — 위 §2-6 「GAS」 참조).
 - Iris: **OFF (디폴트는 Push Model)**. P5에서 평가용으로만 검토 (Beta 리스크)

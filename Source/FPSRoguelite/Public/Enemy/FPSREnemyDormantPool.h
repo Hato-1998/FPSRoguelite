@@ -37,13 +37,18 @@ struct FFPSREnemyDormantBucket
  *  타입끼리만 비교해 포인터 동일성을 직접 보장한다. **IsChildOf 로 구현하지 않는다** — AFPSREnemyEliteBase 는
  *  AFPSREnemyBase 의 자식이라, IsChildOf 였다면 엘리트 요청이 일반 휴면체를 집어갔을 것이다.
  *
- *  🔴 알려진 한계(고치지 않음 — ADR 0013 후속 행 3 「엘리트 ASC 실부착 + 어트리뷰트 셋 + 엘리트 캡 회계」의
- *  결정 대상) — 기아(starvation) 모드: UFPSREnemySpawnSubsystem::TotalSpawned(하드캡 MaxActiveEnemies=500)는
- *  증가만 하고 클래스 무관 총량이다. 전반 스테이지가 클래스 A 로만 풀/캡을 채우면, 후반에 클래스 B(엘리트 등)를
- *  요청해도 그 버킷은 비어 있고(버킷 미스) 새로 스폰할 여지도 없어(캡 도달) 영구 거부로 이어질 수 있다. 버킷화가
- *  만든 문제가 아니라 평면 배열 시절부터 있던 문제(그때도 "다른 클래스 휴면체"는 재사용 불가였다)를 버킷화가
- *  드러낸 것이다. 해법(휴면체 파기 재도입 = 불변식 5 개정 / 클래스별 캡 / TotalSpawned 감소 회계)은 전부 후속
- *  행 3 의 결정 대상이며 이미 그 행으로 라우팅돼 있다 — 여기서 임의로 고치지 않는다. */
+ *  🔴 알려진 한계였다가 **부분 해소(C4, 「구현 사양 B — 엘리트 캡 회계 + 풀 기아 축출」)** — 기아(starvation)
+ *  모드: UFPSREnemySpawnSubsystem::TotalSpawned(하드캡 MaxActiveEnemies=500)는 증가만 하고 클래스 무관 총량이라,
+ *  전반 스테이지가 클래스 A 로만 풀/캡을 채우면 후반에 클래스 B(엘리트 등)를 요청해도 그 버킷은 비어 있고
+ *  (버킷 미스) 새로 스폰할 여지도 없어(캡 도달) 영구 거부로 이어질 수 있었다. 버킷화가 만든 문제가 아니라
+ *  평면 배열 시절부터 있던 문제(그때도 "다른 클래스 휴면체"는 재사용 불가였다)를 버킷화가 드러낸 것이다.
+ *  **해법 = 수요 기반 축출**(`EvictOneFromLargestOtherBucket`, 아래) — 버킷 미스 + 하드캡 도달일 때만, acquire
+ *  당 최대 1개, 가장 큰 다른 클래스 버킷에서 휴면체 하나를 골라 호출자가 Destroy() 하도록 돌려준다(사용자
+ *  결정 — 클래스별 캡 / TotalSpawned 별도 감소 회계는 채택하지 않았다). ⚠️ 이것은 **불변식 5("적은 Destroy
+ *  하지 않고 풀에 반납한다")의 예외 개정**이다 — 그 불변식은 사망·teardown 경로의 계약이고, 이 축출은 휴면
+ *  풀 거주자를 다른 클래스의 acquire 를 위해 재활용하는 것이라 그 문면 밖이다("명확화"가 아니라 개정, ADR
+ *  0013 은 C6 에서 갱신 예정 — 이 주석이 그때까지의 근거). 축출이 상시화되면 사실상 풀링이 무효화되므로
+ *  UFPSREnemySpawnSubsystem::EvictionCount + UE_LOG(Warning)로 보이게 한다(AcquireEnemy 호출부 참조). */
 USTRUCT()
 struct FPSROGUELITE_API FFPSREnemyDormantPool
 {
@@ -56,6 +61,16 @@ struct FPSROGUELITE_API FFPSREnemyDormantPool
 	 *  버킷에서 만난 무효(GC 된) 슬롯을 버린다 — 풀은 액터를 Destroy 하지 않으므로(ADR 0013 불변식 5) 무효
 	 *  슬롯은 외부 파괴(에디터 강제삭제 등) 시에만 생기고, 남아 있어도 무해한 널 슬롯일 뿐이다. */
 	AFPSREnemyBase* AcquireOfClass(UClass* ClassToSpawn);
+
+	/** 수요 기반 축출(C4, 「구현 사양 B」) — ExceptClass 를 **제외한** 가장 큰 버킷에서 휴면체 1개를 꺼내
+	 *  돌려준다(대상이 없거나 다른 버킷이 전부 비었으면 null). 빈 버킷은 후보에서 건너뛴다. AcquireEnemy 가
+	 *  **버킷 미스 + TotalSpawned>=MaxActiveEnemies** 일 때만, acquire 당 최대 1회 호출한다 — 기아(starvation)
+	 *  모드(클래스 무관 총량 하드캡이 한 클래스로 포화되면 다른 클래스가 영구 거부되는 것, 위 클래스 주석
+	 *  참조) 해소용이다. **이 함수 자신은 파괴하지 않는다** — AcquireOfClass 와 대칭적으로 "버킷에서 빼내기"만
+	 *  하고, 호출자가 반환된 액터를 Destroy() 한 뒤 TotalSpawned 를 감소시킨다. AcquireOfClass 와 같은
+	 *  reverse-scan-with-RemoveAtSwap 관용구로, 고른 버킷 안에서 무효 슬롯을 만나면 버린다. ⚠️ 이것은 불변식
+	 *  5("적은 Destroy 하지 않고 풀에 반납한다")의 예외 개정이다 — 위 클래스 주석 참조. */
+	AFPSREnemyBase* EvictOneFromLargestOtherBucket(UClass* ExceptClass);
 
 	/** 전 버킷 합계. 버킷 수에 비례한다(디버그·테스트용 — 핫패스인 Add/AcquireOfClass 는 이 함수를 쓰지 않는다). */
 	int32 Num() const;

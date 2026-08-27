@@ -69,6 +69,15 @@
    *(없으면: 티어·형태가 늘 때마다 데미지 코드가 같이 는다. 이것이 전 무기 경로가 보스에도 자동으로
    먹히는 유일한 이유다 — `FPSRCombatStatics::ResolveDamage`/`ApplyDamage`.)*
 5. **적은 `Destroy` 하지 않고 풀에 반납한다.**
+   🔴 **예외 개정(2026-08-27, 후속 행 3 착지 — `명확화`가 아니라 예외다).** 이 계약의 대상은 **사망·teardown
+   경로**다. **휴면 풀 거주자**를 다른 클래스의 acquire 를 위해 재활용(파기)하는 것은 이 문면 안에 들어오므로,
+   `수요 기반 축출`을 도입하면서 예외를 명시한다 — 정직하게 적자면 이건 불변식을 좁힌 것이다.
+   *사유*: `TotalSpawned` 는 증가만 하고 하드캡 `MaxActiveEnemies=500` 은 **클래스 무관 총량**이라, 전반
+   스테이지가 클래스 A 로 캡을 채우면 후반 엘리트 요청이 **버킷 미스 + 캡 도달**로 영구 거부된다(적을 잡아도
+   정원은 안 빈다 — 죽은 적은 자기 버킷으로 돌아갈 뿐이다). 클래스 수를 늘리는 것이 바로 이 축이므로 방치 불가.
+   *범위*: 캡 포화 + 버킷 미스일 때만, 가장 큰 **다른** 버킷에서 **acquire 당 1개**. 사망·teardown 경로는 무변.
+   *전환 조건*: 교번 클래스 수요에서 축출이 상시화되면 사실상 풀링이 무효화된다 — `EvictionCount` 로그가
+   유의미하게 잡히면 클래스별 캡으로 되돌아본다.
 6. **엘리트 동시 마릿수는 하드캡을 갖는다.** 난이도로 증가하되 캡을 넘지 않는다.
    *(없으면: 후반 ASC 복제 예산이 터진다. ASC 는 `UActorComponent` 하나로 끝나지 않고 어트리뷰트 셋·
    어빌리티 스펙·GE 핸들·게임플레이 큐를 함께 들고 다닌다.)*
@@ -168,7 +177,27 @@ ADR 0008 의 불변식 4 는 *"고도·공격 형태 차이는 아키타입 데�
    ⚠️ `FPSRDirectorSensorTest.cpp` 가 `GetDefault<AFPSRRangedEnemyBase>()` 를 직접 참조하므로
    클래스를 지우면 **빌드가 깨진다.**
 2. **풀 클래스별 버킷화** — 불변식 7 의 실행 수단. 안 A 를 택한 이상 선택이 아니라 **동반 조건**이다.
-3. 엘리트 ASC 실부착 + 어트리뷰트 셋 + 엘리트 캡 회계
+3. 엘리트 ASC 실부착 + ~~어트리뷰트 셋~~ + 엘리트 캡 회계
+   ✅ **착지 2026-08-27** (`phase/enemy-elite-gas`). 이 ADR 이 열어 둔 미결정의 판정:
+   - **체력 = (가)** `UFPSREnemyHealthComponent` 유지, ASC 는 어빌리티/GE 전용. 불변식 1·4 무개정.
+     근거 = `FPSRCombatStatics::ApplyDamage` 의 **단일 컴포넌트 분기 안에** 킬 크레딧·`DamageDealt` 오버킬
+     클램프·히트마커·흡혈 이벤트가 전부 매달려 있다 — (나)는 이 신호 전부를 재배선한다.
+   - **복제 모드 = `Minimal`** — 엔진 `AbilitySystemComponent.h:82` 가 *"does not work for **Owned** ASC"* 라고
+     적었고 엘리트는 오너 클라가 없다. (플레이어가 `Mixed` 인 이유도 같은 문장.)
+   - **ASC 초기화 = 4중 폐쇄**(`EnterDyingState`/`Deactivate`/`Activate`/이월 전용 진입점). 이 ADR 이 물은
+     "사망 즉시 vs 반납 시점" 양자택일은 **둘 다 틀렸다** — 원거리 홀드가 같은 이유로 이미 4중이고,
+     ASC 는 타이머·어빌리티·큐가 스스로 도는 **능동** 상태라 `HealthComponent::ResetForReuse`(수동 데이터)를
+     선례로 삼으면 안 된다.
+   - **반론 ⑤(프리즈 vs GE) 판정** = 엘리트 ASC 에서 **시간이 흐르는 GAS 기제 전부 금지**(duration·**period**·
+     cooldown GE·시간 기반 AbilityTask). duration 만 막으면 **Infinite+Period 로 뚫린다**(`GameplayEffect.cpp:4431`).
+     대체 = 프리즈-멈춤 서버 누산기 + `CheckCooldown` 오버라이드. 강제 = `GameplayEffectApplicationQueries` 런타임 가드.
+   - **반론 ②(NetCull) 판정** = 엘리트도 **균일 반경**을 쓴다. `FPSRoguelite.Enemy.NetCull` 전제 무회귀.
+   - 🔴 **어트리뷰트 셋은 만들지 않았다 — 이 ADR 문구에서 의도적으로 이탈**(사용자 결정 2026-08-26).
+     사유: 체력이 컴포넌트에 남고(위), **범용 상태이상은 GAS 로 갈 수 없다** — 보스는 ASC 가 없고
+     (`FPSRBossBase.h`) 일반 티어도 GAS 를 안 쓰므로(불변식 1) 엘리트 ASC 에 얹으면 **전 적에 안 걸린다**.
+     `Docs/SSOT/CombatWeaponCard.md:74` 가 이미 상태이상을 *"플레이어 쪽 패시브 GA 가 `Event.DamageTaken` 을
+     듣는"* 구조로 설계해 뒀다. → 지금 넣을 어트리뷰트가 **0개**이고, 소비자 없는 필드는 죽은 데이터다.
+     **첫 소비자(엘리트 어빌리티의 자원 소모 등)가 생길 때 만든다.**
 4. 특수 공격 형태(공중·방패) 클래스
 5. 죽은 근접 축 정리 — `ServerTickAttack` 근접 접촉 판정, `EFPSRServerAttackResult::MeleeAttacked`,
    `bMeleeTokenAvailable`, `AttackTokenLimit`, `Enemy.Archetype.*`/`Enemy.Attack.*` 태그 6개(참조 0건)

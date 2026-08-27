@@ -34,8 +34,8 @@
 |---|---|---|
 | 적 = 경량 풀액터 (개체별 트리·길찾기 없음) | `AFPSREnemyBase : APawn`, 개체 Tick 없음. 전부 `UFPSREnemySpawnSubsystem` 의 배치 패스에서 처리 | ✅ 일치 |
 | 적 체력 = 비-GE 경량 컴포넌트 | `UFPSREnemyHealthComponent` — 헤더에 "Lightweight, **non-GAS** health" 명시 | ✅ 일치 |
-| **GAS는 스웜 적에 절대 안 붙인다** | `Enemy/`·`Boss/` 폴더 전체에서 `AbilitySystem`/`GameplayEffect`/`GameplayAbility`/`AttributeSet` 참조 **0건** (직접 grep 확인) | ✅ 일치 |
-| GAS는 플레이어 + **보스/엘리트**에 | 플레이어는 맞다. **보스는 GAS가 없다** — `FPSRBossBase.h:23` 이 "no ASC/GAS is attached" 라고 명시. 엘리트 클래스는 C++에 아예 없다 | ⚠️ **문서가 앞서감** (§8-D1) |
+| **GAS는 스웜 적에 절대 안 붙인다** | 🔁 **갱신(2026-08-27, ADR 0013 후속 행 3 착지)**: ~~`Enemy/`·`Boss/` 참조 **0건**~~ → `Enemy/` 에 참조가 **생겼다**. 단 **일반 티어(`AFPSREnemyBase`)는 여전히 0건**이고, ASC 는 **`AFPSREnemyEliteBase` 에만** 붙는다(ADR 0013 불변식 1 = "일반 티어는 GAS 를 쓰지 않는다"). `Boss/` 는 여전히 0건 | ✅ 일치 (문구를 "스웜 적"→"일반 티어"로 좁혀 읽을 것 — `Game.md §1` 도 같이 정정됨) |
+| GAS는 플레이어 + **보스/엘리트**에 | 🔁 **갱신(2026-08-27)**: 플레이어 ✅. **엘리트 ✅ 실현됨** — `AFPSREnemyEliteBase` 가 액터 소유 ASC(복제 `Minimal`) 부착. ~~엘리트 클래스는 C++에 아예 없다~~. **보스는 여전히 GAS 가 없다** — `FPSRBossBase.h:23` "no ASC/GAS is attached"(ADR 0013 의 명시적 비목표) | ⚠️ **보스 절반만 미실현** (§8-D1, 종전 "문서가 앞서감"에서 축소) |
 | 길찾기 = Flow-Field 사전계산 | `UFPSRFlowFieldComputer` — 월드 쿼리 없는 순수 배열 BFS. 2층(`NumLayers=2`) 유계 멀티레이어 | ✅ 일치 |
 | 복제 = Push Model | 에디터에선 맞다. **패키지 빌드에선 꺼진다** (§7-1) | ⚠️ **출시 빌드에서 불일치** |
 | 적 동시 규모 | 실제 게이트는 `GlobalAliveCap`(모든 스폰 경로를 무조건 통과시켜야 함) · `MaxAliveCount`(스케줄 클램프) · `MaxActiveEnemies`(풀 액터 수 상한) **3층 구조**다 — 셋의 역할이 다르다 | 📌 사용자가 `Game.md` 서술을 직접 정리 중 |

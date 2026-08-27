@@ -115,6 +115,95 @@ bool FFPSREnemyDormantPoolTest::RunTest(const FString& Parameters)
 		TestEqual(TEXT("(5) the rejected normal request must not have consumed the elite entry"), EliteOnlyPool.Num(), 1);
 	}
 
+	// --- (6) EvictOneFromLargestOtherBucket (C4, 「구현 사양 B — 엘리트 캡 회계 + 풀 기아 축출」) — the demand-driven
+	//         eviction AcquireEnemy calls on a bucket-miss + hard-cap-reached, at most once per acquire. This
+	//         function only REMOVES from the bucket (never Destroy()s) — actor teardown is the calling subsystem's
+	//         job, so none of the sub-cases below call Destroy() on a CDO.
+	//         ⚠️ This codebase ships only TWO C++ classes under AFPSREnemyBase (itself + AFPSREnemyEliteBase) — no
+	//         third class is added here just for this test (the spec for this test explicitly says not to
+	//         fabricate one). (6b) below still exercises "pick the larger of two DIFFERENT other buckets" by
+	//         passing ExceptClass = nullptr: SubclassOf.h's TSubclassOf::operator*() returns null whenever its
+	//         Class is null (`!Class || !Class->IsChildOf(...)`), so comparing any real bucket key against a
+	//         null-constructed TSubclassOf is never equal — nullptr therefore matches NO real bucket key, and
+	//         BOTH populated buckets stay eligible "other" candidates. What that trick still cannot cover: a
+	//         genuine 3-class case where ExceptClass is itself a real, POPULATED class and two OTHER distinct
+	//         classes of different sizes exist at the same time — that needs a third production enemy class,
+	//         which this test does not add (see this comment / the spec it follows). ---------------------------
+
+	// --- (6a) The ExceptClass bucket is NEVER an eviction target — not when it is the ONLY populated bucket
+	//          (-> null), and not even when it is the LARGEST populated bucket (the smaller "other" bucket is
+	//          evicted instead). ---------------------------------------------------------------------------------
+	{
+		FFPSREnemyDormantPool Pool;
+		Pool.Add(NormalCdo);
+		TestNull(TEXT("(6a) only the except-class (normal) bucket populated -> null"),
+			Pool.EvictOneFromLargestOtherBucket(NormalClass));
+		TestEqual(TEXT("(6a) the rejected attempt must not have consumed the except-class entry"), Pool.Num(), 1);
+	}
+	{
+		FFPSREnemyDormantPool Pool;
+		Pool.Add(EliteCdo);
+		TestNull(TEXT("(6a) only the except-class (elite) bucket populated -> null"),
+			Pool.EvictOneFromLargestOtherBucket(EliteClass));
+		TestEqual(TEXT("(6a) the rejected attempt must not have consumed the except-class entry"), Pool.Num(), 1);
+	}
+	{
+		FFPSREnemyDormantPool Pool;
+		Pool.Add(NormalCdo);
+		Pool.Add(NormalCdo); // same CDO added twice — Add only keys off GetClass(), so this is a valid way to make
+							 // the normal bucket LARGER than the elite bucket without a third class/actor instance.
+		Pool.Add(EliteCdo);
+		TestEqual(TEXT("(6a) setup: normal bucket (2) outsizes the elite bucket (1)"), Pool.Num(), 3);
+
+		AFPSREnemyBase* Evicted = Pool.EvictOneFromLargestOtherBucket(NormalClass);
+		TestTrue(TEXT("(6a) ExceptClass's bucket is the BIGGER one but must still be skipped — evicts elite instead"),
+			Evicted == EliteCdo);
+		TestEqual(TEXT("(6a) only the elite entry left the pool"), Pool.Num(), 2);
+	}
+
+	// --- (6b) Among the OTHER (non-except) buckets, the LARGEST one is chosen. ExceptClass = nullptr matches no
+	//          real bucket key (see the section comment above), so both the normal and elite buckets stay
+	//          eligible — this is how "pick the larger of two DIFFERENT other buckets" gets exercised with just
+	//          the two enemy classes this codebase has. -------------------------------------------------------
+	{
+		FFPSREnemyDormantPool Pool;
+		Pool.Add(NormalCdo);                 // normal bucket size 1
+		Pool.Add(EliteCdo);
+		Pool.Add(EliteCdo);
+		Pool.Add(EliteCdo);                  // elite bucket size 3 — the larger of the two candidates
+		TestEqual(TEXT("(6b) setup: 4 entries total (1 normal + 3 elite)"), Pool.Num(), 4);
+
+		AFPSREnemyBase* Evicted = Pool.EvictOneFromLargestOtherBucket(nullptr);
+		TestTrue(TEXT("(6b) picks from the larger bucket (elite, size 3 > normal, size 1)"), Evicted == EliteCdo);
+		TestEqual(TEXT("(6b) pool shrinks by exactly one"), Pool.Num(), 3);
+	}
+
+	// --- (6c) A completely empty pool, or a pool with no OTHER populated bucket at all, returns null. -----------
+	{
+		FFPSREnemyDormantPool EmptyPool;
+		TestNull(TEXT("(6c) completely empty pool -> null"), EmptyPool.EvictOneFromLargestOtherBucket(NormalClass));
+		TestNull(TEXT("(6c) completely empty pool, ExceptClass nullptr -> still null"),
+			EmptyPool.EvictOneFromLargestOtherBucket(nullptr));
+		TestEqual(TEXT("(6c) empty pool stays empty"), EmptyPool.Num(), 0);
+	}
+
+	// --- (6d) The evicted actor is ACTUALLY removed from the pool's data — Num() reflects it, and a follow-up
+	//          eviction attempt finds nothing left (not merely "returned while still logically present"). -------
+	{
+		FFPSREnemyDormantPool Pool;
+		Pool.Add(NormalCdo);
+		Pool.Add(EliteCdo);
+		TestEqual(TEXT("(6d) setup: two distinct-class entries"), Pool.Num(), 2);
+
+		AFPSREnemyBase* Evicted = Pool.EvictOneFromLargestOtherBucket(NormalClass);
+		TestTrue(TEXT("(6d) evicts the only other (elite) entry"), Evicted == EliteCdo);
+		TestEqual(TEXT("(6d) Num() drops by exactly one"), Pool.Num(), 1);
+
+		TestNull(TEXT("(6d) a second eviction attempt now finds no other bucket left"),
+			Pool.EvictOneFromLargestOtherBucket(NormalClass));
+		TestEqual(TEXT("(6d) Num unaffected by the null second attempt"), Pool.Num(), 1);
+	}
+
 	return true;
 }
 
