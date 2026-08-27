@@ -406,9 +406,10 @@ protected:
 	 *  pooling (the actor is reused, not destroyed), so this once-per-lifetime bind stays valid for every reuse. */
 	void InitHealthBarWidget();
 
-	/** 수명주기 축. Activate/클라 언하이드에서 true, HandleDeathCosmetic 에서 false.
-	 *  종전 SetHealthBarVisible(bool) 을 대체한다(호출처 3곳: FPSREnemyBase.cpp:393·774·797.
-	 *  BP 노출 없음을 실측 확인 — 종전 SetHealthBarVisible 선언 위에 UFUNCTION 없었음 → 래퍼 불요). */
+	/** 수명주기 축. 종전 SetHealthBarVisible(bool) 을 대체한다. 호출처 3곳 =
+	 *  Activate / SetActorHiddenInGame 의 클라 언하이드 리셋 / HandleDeathCosmetic
+	 *  (앞 둘이 true, 마지막이 false. 줄번호로 인용하지 않는다 — 편집마다 어긋난다).
+	 *  BP 노출 없음을 실측 확인 — 종전 SetHealthBarVisible 선언 위에 UFUNCTION 없었음 → 래퍼 불요. */
 	void SetHealthBarAllowed(bool bAllowed);
 
 
@@ -935,8 +936,14 @@ private:
 	 *  되살린다.
 	 *
 	 *  ⚠️ **풀 재사용 시 일부러 리셋하지 않는다** — 거리 축은 다음 패스(≤ShadowUpdateInterval)가 권위 있게 다시
-	 *  쓴다. true 로 리셋하면 먼 곳에서 재활성된 적의 바가 그 한 패스 동안 깜빡인다. 초기값이 true 인 것은
-	 *  "패스가 아직 말하지 않았으면 보인다"(안전한 방향 = 잘못 숨기지 않는다)는 계약이다. */
+	 *  쓴다. **양방향 비용을 정직하게 적는다**: true 로 리셋하면 먼 곳에서 재활성된 적의 바가 한 패스 깜빡이고,
+	 *  리셋하지 않으면 그 반대 — 바깥에서 죽어 false 로 latch 된 액터가 플레이어 바로 옆에 재활성될 때 한 패스
+	 *  동안 바가 잘못 숨는다. 둘 다 ≤1패스 유계 코스메틱이라 크기는 같다. 무리셋을 고른 이유는 재사용 지점이
+	 *  대개 플레이어에게서 먼 스폰존이라 깜빡임 쪽이 더 자주 보이기 때문이지, 한쪽이 무해해서가 아니다.
+	 *
+	 *  초기값 true = "패스가 아직 말하지 않았으면 보인다"(잘못 숨기지 않는 방향). 단 이 값은 히스테리시스의
+	 *  시드이기도 해서, 생애 내내 [On, Off] 고리(기본 3500~3800cm) 안에만 머무는 개체는 On 반경을 한 번도
+	 *  통과하지 않아 바를 무기한 유지한다 — 0.2초 유계의 예외다(그림자도 동형이며 이쪽은 종전부터의 동작). */
 	bool bHealthBarInRange = true;
 
 	/** Fire one enemy-team projectile toward the target (reuses UFPSRProjectileSubsystem — no new damage code). */

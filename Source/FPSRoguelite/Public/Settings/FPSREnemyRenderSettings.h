@@ -53,9 +53,13 @@ public:
 			EditCondition = "bEnableEnemyShadowLOD", EditConditionHides))
 	float ShadowUpdateInterval = 0.2f;
 
-	/** 헬스바 거리 LOD 마스터 스위치. OFF = 밴드가 헬스바를 건드리지 않는다(수명주기 가시성만 남는다).
+	/** 헬스바 거리 LOD 마스터 스위치. OFF = 밴드가 헬스바를 더는 건드리지 않는다(수명주기 가시성만 남는다).
 	 *  그림자 스위치와 분리한 이유: 비용 성격이 다르고(그림자=셰도우패스, 헬스바=RT 드로우+슬레이트 틱),
-	 *  한쪽만 끄고 재는 것이 perf 베이스라인(M0 후행 행)의 대조군에 필요하다. */
+	 *  한쪽만 끄고 재는 것이 perf 베이스라인(M0 후행 행)의 대조군에 필요하다.
+	 *
+	 *  ⚠️ **런 단위 토글이다 — 세션 도중 전환은 미지원.** 이미 밴드로 숨겨진 바는 OFF 로 바꿔도 되살아나지
+	 *  않는다(패스가 더는 setter 를 부르지 않고, 거리 축은 풀 재사용 때도 일부러 리셋하지 않으므로 그 액터는
+	 *  세션 내내 숨은 채로 남는다). `bEnableEnemyShadowLOD` 도 동형이다. 대조군 측정은 **재시작 후** 잴 것. */
 	UPROPERTY(Config, EditAnywhere, Category = "Health Bar LOD",
 		meta = (DisplayName = "적 헬스바 거리 LOD 사용"))
 	bool bEnableHealthBarLOD = true;

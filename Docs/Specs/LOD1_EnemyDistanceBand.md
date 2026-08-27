@@ -8,7 +8,7 @@
 | 브랜치 | `perf/enemy-lod-distanceband` |
 | 작성 모델 | `claude-opus-5` (§6-5-2 개정 2026-08-26 = C1 설계 주체는 Opus) |
 | 작성일 / 최종 갱신 | 2026-08-27 (rev3 — G1 통과 + P3 반영) |
-| 상태 | `확정` — G1 통과(2회차) + 사용자 승인 2026-08-27 |
+| 상태 | `구현완료` — G1 통과(2회차) · 사용자 승인 · C3 검증 통과 · G2 통과(P1/P2 0, P3 5 전건 수용) |
 | 관련 SSOT | `Performance.md` §5-1(Significance 티어)·§5(NetUpdateFreq 표) · `Enemy.md` §2-6 · `Game.md` §1 |
 | 관련 메모리 | `[[enemy-perf-remediation-roadmap]]`(F8 · RC-A) · `[[reason-in-multiplayer-terms]]` · `[[code-is-immutable-structure-only]]` · `[[leave-fine-tuning-to-user]]` · `[[production-structure-first]]` |
 | 보드 행 | https://app.notion.com/3ba3972ddd8881eaad7dd996b9cdf9ae |
@@ -287,7 +287,7 @@ private:
 | `AFPSREnemyBase::SetViewerLOD` | 코스메틱 패스 전용 | 위 Tick | — | 아래 본문 계약 참조 |
 | `AFPSREnemyBase::SetHealthBarInRange` | 코스메틱 패스 전용 | 위 Tick | — | 값 동일 시 조기 반환 |
 | `AFPSREnemyBase::SetHealthBarAllowed` | 서버+클라(수명주기) | `Activate` · `SetActorHiddenInGame` · `HandleDeathCosmetic` | — | 값 동일 시 조기 반환 |
-| `AFPSREnemyBase::ApplyHealthBarVisibility` | 로컬 | 위 두 setter | `HealthBarWidget` 유효 | null이면 no-op(BP가 위젯을 안 붙인 아키타입) |
+| `AFPSREnemyBase::ApplyHealthBarVisibility` | 로컬 | 위 두 setter | `CachedHealthBarWidget` 유효 | null이면 no-op(BP가 위젯을 안 붙인 아키타입) |
 | `AFPSREnemyBase::SetShadowCasting` | 코스메틱 패스 전용 | 위 Tick | `Mesh` 유효 | null이면 no-op(기존 유지) |
 
 ### 6-1. 코스메틱 패스 Tick 의 패스별 순서 (고정)
@@ -335,7 +335,7 @@ if (bAnimFrozen && AnimProfile && !(HealthComponent && HealthComponent->IsDead()
 |---|---|---|---|---|---|
 | — | — | — | — | — | **신규 복제 0건.** |
 
-- `ViewerBand`·`bAnimFrozen`·`bHealthBarInRange`·`bHealthBarAllowed`·`HealthBarWidget` 전부 **비복제 로컬 상태**다. 밴드는 각 머신이 자기 뷰어로 스스로 계산하므로 복제할 이유가 없고, 복제하면 오히려 틀린다(내 화면의 LOD를 남이 정하게 된다).
+- `ViewerBand`·`bAnimFrozen`·`bHealthBarInRange`·`bHealthBarAllowed`·`CachedHealthBarWidget` 전부 **비복제 로컬 상태**다. 밴드는 각 머신이 자기 뷰어로 스스로 계산하므로 복제할 이유가 없고, 복제하면 오히려 틀린다(내 화면의 LOD를 남이 정하게 된다).
 - Push Model이 패키지 빌드에서 꺼지는 문제(N-1)와 **무관**하다 — 복제 프로퍼티를 추가하지 않으므로 켜짐/꺼짐 어느 쪽에서도 동일 동작.
 - 적 복제 계약(`Performance.md` §5 = Transform + Health/MaxHealth/bDead)은 **변경 없음**.
 
@@ -345,15 +345,18 @@ if (bAnimFrozen && AnimProfile && !(HealthComponent && HealthComponent->IsDead()
 
 - **생성/등록** — 서브시스템: `ShouldCreateSubsystem`이 `IsRunningDedicatedServer()`만 거부(§5-3). 적: `BeginPlay`의 기존 `ShadowLOD->RegisterEnemy(this)` 호출을 개명된 서브시스템으로 치환(**호출 위치·조건 불변**).
 - **해제/등록해제** — `EndPlay`의 대칭 `UnregisterEnemy`(기존 유지). Tick의 stale 압축도 유지(월드 종료 순서 비의존).
-- **GC 소유** — `HealthBarWidget`은 `UPROPERTY(Transient)` `TObjectPtr`라 raw 누수 없음. 위젯의 실소유자는 BP 액터이므로 이 참조는 **캐시일 뿐 수명을 늘리지 않는다**. `RegisteredEnemies`는 약참조라 적 수명을 잡아두지 않는다(기존).
+- **GC 소유** — `CachedHealthBarWidget`은 `UPROPERTY(Transient)` `TObjectPtr`라 raw 누수 없음. 위젯의 실소유자는 BP 액터이므로 이 참조는 **캐시일 뿐 수명을 늘리지 않는다**. `RegisteredEnemies`는 약참조라 적 수명을 잡아두지 않는다(기존).
 - **델리게이트** — 신규 구독 없음. 구독/해제 1:1 대칭 변화 없음.
 - **`SetTickMode` 호출 시점** — `InitHealthBarWidget`에서 위젯을 캐시한 직후 1회(`InitWidget()` 뒤). 액터 수명당 1회라 풀 재사용과 무관하고, BP 저작값에 관계없이 결정론적이다.
 - **풀 재사용(핵심)** — 재사용 시 리셋해야 하는 신규 상태:
   - `Activate()`(권위, 기존 애니 리셋 블록 옆 `FPSREnemyBase.cpp:388-405`): `bHealthBarAllowed = true` · `ViewerBand = S0` · `bAnimFrozen = false`.
   - `SetActorHiddenInGame(false)` 클라 리셋(`:765-779`): 동일 3개.
   - **`bHealthBarInRange`는 리셋하지 않는다** — 거리 축은 다음 패스(≤0.2초)가 권위 있게 다시 쓴다. true로 리셋하면 먼 곳에서 재활성된 적의 바가 최대 0.2초 깜빡인다.
-  - `HealthBarWidget` 캐시·`SetTickMode`는 `BeginPlay` 1회라 풀 재사용에 무관(기존 `InitHealthBarWidget` 주석의 "single bind survives every reuse"와 같은 근거).
-- **초기 동기화** — 코스메틱 패스는 최대 0.2초 뒤 첫 값을 쓴다. 그 사이 기본값은 **전부 "가까움"**(S0·프리즈 없음·바 보임)이라, 최악이어도 0.2초간 절감을 못 받을 뿐 **잘못 숨기는 일은 없다**(안전한 방향의 기본값).
+  - `CachedHealthBarWidget` 캐시·`SetTickMode`는 `BeginPlay` 1회라 풀 재사용에 무관(기존 `InitHealthBarWidget` 주석의 "single bind survives every reuse"와 같은 근거).
+- **초기 동기화** — 코스메틱 패스는 최대 0.2초 뒤 첫 값을 쓴다. 그 사이 기본값은 **전부 "가까움"**(S0·프리즈 없음·바 보임)이라, 갓 스폰된 액터는 최악이어도 0.2초간 절감을 못 받을 뿐 잘못 숨지 않는다.
+  > ⚠️ **"최악 0.2초"에는 예외 둘이 있다(G2 P3 지적, 정직 기록).**
+  > ① **풀 재사용**: `bHealthBarInRange`는 일부러 리셋하지 않으므로(위), 반경 밖에서 죽어 false로 latch된 액터가 플레이어 옆에 재활성되면 다음 패스까지 **바가 잘못 숨는다**. ≤1패스 유계이고, 리셋하는 쪽은 정확히 대칭 크기의 반대 결함(먼 곳 재활성 시 깜빡임)을 갖는다 — 어느 쪽도 무해하지 않으며 더 자주 보이는 쪽을 피한 선택이다.
+  > ② **히스테리시스 고리 상주**: 초기값 true가 히스테리시스의 `bCurrentlyOn` 시드라, 생애 내내 [On, Off] 고리(기본 3500~3800cm) 안에만 머무는 개체는 On 반경을 한 번도 통과하지 않아 **무기한** 바를 유지한다. 그림자도 동형이며 이쪽은 종전부터의 동작(무회귀). 실전에서 스웜은 플레이어로 수렴하므로 실해는 3m 고리에 한정된다.
 
 ---
 
@@ -421,6 +424,20 @@ if (bAnimFrozen && AnimProfile && !(HealthComponent && HealthComponent->IsDead()
 
 ---
 
-## 13. 레드팀 지적 원장 (C3에서 채운다)
+## 13. 레드팀 지적 원장
 
-*(설계 시점 — 비워 둔다)*
+> `Workflow.md` §6-6-1 = §6-5-2 게이트 ②. **레드팀에 준 것** = `git diff main...perf/enemy-lod-distanceband` · 이 명세 · G1 이후 판단 10건 목록(구현 이탈 6 + C3 수정 4) · 이 세션의 검증 결과와 **미검증으로 남는 것**(PIE 7항목·위젯 BP 저작 상태). 설계 변호는 싣지 않았다.
+
+**판정: P1 0건 · P2 0건 · P3 5건 → 머지 가능**(P1 잔존 없음).
+
+| 심각도 | 지적 (요약 + 파일) | 처리 | 근거 |
+|---|---|---|---|
+| P3 | 대체 함수 주석의 호출처 줄번호 3개가 태어날 때부터 스테일 — `FPSREnemyBase.h` `SetHealthBarAllowed` 독스트링. C3의 줄번호 인용 제거가 **반만** 적용됐다 | **수용·수정** | 사실. 줄번호를 지우고 함수명 인용(`Activate` / `SetActorHiddenInGame` 클라 리셋 / `HandleDeathCosmetic`)으로 교체 |
+| P3 | `bHealthBarInRange` 무리셋이 자기 계약("잘못 숨기지 않는다")과 한 방향에서 충돌 — 반경 밖에서 죽어 latch된 액터가 플레이어 옆에 재활성되면 ≤1패스 바가 잘못 숨는다. 주석·명세가 한쪽 비용만 적었다 | **수용·수정**(문서) | 사실. 필드 주석과 §8에 **양방향 비용**을 적고, 무리셋을 고른 실제 이유(재사용 지점이 대개 먼 스폰존)를 명기. 동작은 유지 — 반대안도 대칭 크기의 결함을 갖는다 |
+| P3 | 세션 중 코스메틱 스위치를 OFF 하면 latch가 영구 잔존 — `FPSREnemyRenderSettings.h`의 "OFF = 밴드가 헬스바를 건드리지 않는다"가 그 경로에서 거짓 | **수용·주석 정정** | 사실. 코드로 latch를 복원하는 대신 **"런 단위 토글, 세션 중 전환 미지원"**을 명시. 이유 = `DefaultConfig` 데브 노브라 쉬핑 런타임 도달 불가이고, §9의 A/B 측정은 런 단위 재시작이 전제다. 복원 코드를 넣으면 머지 직전에 새 상태 전이를 추가하게 된다 |
+| P3 | 명세 §6·§7·§8이 C3 개명 전 이름 `HealthBarWidget`을 그대로 사용 | **수용·수정** | 사실. 세 절을 `CachedHealthBarWidget`으로 치환 |
+| P3 | §8 "최악이어도 0.2초" 주장에 반례 — 초기값 true가 히스테리시스 시드라 [On, Off] 고리 상주 개체는 무기한 바 유지 | **수용·명세 한정** | 사실. §8에 예외 둘(풀 재사용 latch · 고리 상주)을 정직 기록. 그림자도 동형이며 이쪽은 **종전부터의 동작이라 무회귀** |
+
+- **P1·P2 0건.** 레드팀이 독립 재검증하고 "안전하다"고 본 근거(원문 요지): 엔진 주장 4건 전부 소스 대조 통과(기본 `TickMode=Enabled`·숨김 시 자기 틱 정지 가드·**재표시 시 틱 재개 경로**까지 확인) / 사망 dwell 가드가 `bDead`의 `OnRep_bDead`와 **같은 신호·같은 순서**라 Death를 Idle로 짓밟는 순서열을 만들 수 없었다 / 신규 복제·RPC 신설 0 / 서버 밴드 diff는 식별자 치환만(값·경계·순서 원형) / `CurrentAnimState`를 읽는 게임플레이 코드 없음 → 호스트 프리즈가 판정에 새는 경로 없음 / 빌드·자동화 로그를 **실물 대조**해 보고와 일치 확인.
+- **G1 이후 판단 10건 개별 검증도 통과.** 구현 이탈 6건 중 mesh null 가드 축소는 레드팀이 별도 확인("`SetAnimState`는 Mesh null이면 `ApplyAnimState`만 건너뛰고 헬스바 경로는 Mesh 무접촉 → mesh 없는 적이 밴드·헬스바를 받는 것이 올바른 방향").
+- **이 게이트도 해소 못 한 미검증** — §12-10 PIE 7항목 전부(정적 분석상 결함을 못 찾았을 뿐 **화면 실증 0건**), 헬스바 위젯 BP의 저작 상태(월드공간 여부·BP가 위젯 가시성을 자체 조작하면 2축 AND와 경합 가능 — uasset이라 판독 불가), 실측 perf 절감치(M0 후행 행 소유).
