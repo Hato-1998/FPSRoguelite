@@ -53,7 +53,7 @@
    - `WidgetComponent.cpp:58` — `static bool bUseAutomaticTickModeByDefault = false;` (CVar `WidgetComponent.UseAutomaticTickModeByDefault`). 이 프로젝트 `Config/`·`Source/`는 이 CVar를 **설정하지 않는다**(grep 0건).
    - `WidgetComponent.cpp:642` — 생성자 `TickMode(bUseAutomaticTickModeByDefault ? Automatic : Enabled)` → **기본값 = `Enabled`**.
    - `WidgetComponent.cpp:1262` — 자기-틱-차단 분기는 `TickMode != ETickMode::Enabled` 조건이라 **기본 상태에서 절대 발화하지 않는다**.
-   - `WidgetComponent.cpp:1367-1383`·`SceneComponent.cpp:3528-3537` — `SetHiddenInGame(true)`는 `IsVisible()`을 false로 만들어 `ShouldDrawWidget()`을 막는다 → **RT 드로우는 확실히 멈춘다**.
+   - `WidgetComponent.cpp:1367-1383`·`SceneComponent.cpp:3528-3537` — `SetHiddenInGame(true)`는 `IsVisible()`을 false로 만들어 `ShouldDrawWidget()`을 막는다. 🔴 **HB1 정정(§10)** — 이 절이 "RT 드로우는 확실히 멈춘다"로 적었던 것은 **월드 공간 위젯에만** 성립하는 서술이었다. 이 프로젝트의 헬스바는 실측상 `EWidgetSpace::Screen`이고(HB1 §6-1), `DrawWidgetToRenderTarget`(`WidgetComponent.cpp:1279-1295`)은 `Space == World` 분기 안에만 있어 스크린 공간은 그 경로 자체를 타지 않는다 — 애초에 멈출 RT 드로우가 없다. 값 변화로 실제 멈추는 것은 **스크린 레이어 등재**(`RemoveWidgetFromScreen`)이고, 그 결과인 자기-틱-차단(아래 :1262)이 300 규모에서의 진짜 절감분이다.
    - `WidgetComponent.cpp:807-819` — `OnHiddenInGameChanged`가 언하이드 시 틱을 되켠다.
    - `SceneComponent.cpp:3619`·`PrimitiveComponent.cpp:2101` — `SetHiddenInGame`·`SetCastShadow` 둘 다 값 변화 시에만 동작(자기-가드) → 매 패스 무조건 호출해도 정상 상태 비용 0.
 
@@ -384,7 +384,7 @@ if (bAnimFrozen && AnimProfile && !(HealthComponent && HealthComponent->IsDead()
 - **액터당 비용(신규)** — 패스마다: `DistSquared` 1회(기존 재사용) + 비교 ≤6회 + 자기-가드 세터 2~3회. 정상 상태(상태 변화 없음)에서는 세터가 전부 조기 반환 → 추가 렌더/틱 비용 0. 프리즈 중인 적은 매 패스 `SetAnimState` 1회를 더 부르지만 dedupe가 CPD 쓰기 전에 반환한다(비교 2회).
 - **제거되는 비용(정밀화)**:
   - **헬스바 컴포넌트 틱** — 오늘 `TickMode`가 `Enabled`라 300개가 **매 프레임** `TickComponent`→`UpdateWidget()`을 돈다. `SetTickMode(Automatic)` + 거리 숨김으로 밴드 밖 위젯의 **컴포넌트 틱이 완전히 정지**한다(엔진 :1262가 스스로 끔). 이것이 이 유닛 최대 절감분이다.
-  - **헬스바 RT 드로우** — `ShouldDrawWidget`에 이미 `WasRecentlyRendered(0.5)` 게이트가 있어(`:1373`) **화면 밖** 바는 오늘도 그리지 않는다. 따라서 신규 절감분은 **"화면 안 원거리 바"**로 한정된다(1인칭 FPS라 전방 시야에 원거리 적이 늘 있으므로 0이 아니다).
+  - **헬스바 스크린 레이어 등재** — 🔴 **HB1 정정(§10 판정표)**: 위 "RT 드로우" 프레이밍은 **틀렸다** — 이 프로젝트의 헬스바는 스크린 공간이라(HB1 §6-1) `DrawWidgetToRenderTarget`(`Space == World` 전용, `WidgetComponent.cpp:1279-1295`) 자체가 애초에 안 돈다. `WasRecentlyRendered(0.5)` 게이트·`ShouldDrawWidget`은 월드 공간 드로우 얘기라 이 프로젝트 헬스바엔 적용되지 않는다. 실제 신규 절감분은 **`SWorldWidgetScreenLayer::Tick`**의 per-widget 투영·배치·Slate 페인트다 — 숨겨진 바가 스크린 레이어에서 빠지면 이 비용이 사라진다. 300 규모에서는 이쪽이 지배적이다(HB1 §10 "➕ 누락돼 있었다").
   - **선형 스캔** — `FindComponentByClass<UWidgetComponent>()`가 호출당 → **액터 수명당 1회**로.
   - **애니(호스트)** — S1 밖 적의 CPD 스칼라 쓰기와 원거리 GPU WPO 전진이 멈춘다(오늘 호스트가 전혀 못 받던 절감).
 - **복제 대역** — 개체당 0바이트 증가(§7).
@@ -406,7 +406,7 @@ if (bAnimFrozen && AnimProfile && !(HealthComponent && HealthComponent->IsDead()
 - **F7** — 캡슐 `90.0f`(`FPSREnemyBase.h:149`·`FPSREnemySpawnSubsystem.h:389`)·`AgentFootprintRadius 40.0f`(`FPSRFlowFieldComputer.h:421`)·`GroundSnapTolerance 60.0f`(`FPSREnemyBase.h:618`)의 손동기화 산재를 `FPSREnemyTuning.h`로 흡수. 이 유닛이 그 헤더를 만들어 두므로 비용이 낮아진다.
 - **적 SFX 밴드** — `UFPSRBlindspotAudioComponent`의 `ThreatRadius` 단일 컷을 §5-1 밴드로 재정합.
 - **VFX 밴드 배선** — U13이 적 VFX를 만들 때 `GetViewerBand()`를 소비(필요 시 `UENUM` 래퍼 추가).
-- **비사망 휴면의 헬스바 비대칭**(G1 P3-5 발견) — rear-drain 등 **사망을 거치지 않고** 풀로 돌아가는 적은 `bHealthBarAllowed`가 `true`인 채로 휴면한다. 이 유닛 이후 사망 경유 휴면은 위젯 틱이 공짜로 꺼지는데 비사망 휴면은 안 꺼지는 비대칭이 생긴다. **오늘과 동일한 동작이라 회귀는 아니므로** 이 유닛에서 고치지 않는다(범위 밖). 후보 처방 = `Deactivate` + 클라 하이드 에지에 `SetHealthBarAllowed(false)` 미러.
+- **비사망 휴면의 헬스바 재표시 홀**(G1 P3-5 발견) — 🔴 **HB1 정정 — 기전 서술이 반대였다.** rear-drain 등 **사망을 거치지 않고** 풀로 돌아가는 적은 `bHealthBarAllowed`가 `true`인 채로 휴면한다. ~~이 유닛 이후 사망 경유 휴면은 위젯 틱이 공짜로 꺼지는데 비사망 휴면은 안 꺼지는 비대칭이 생긴다~~ — **틀렸다.** 숨겨진 위젯은 경유 경로(사망/비사망)와 무관하게 스크린 레이어에서 빠지고 컴포넌트가 스스로 틱을 끈다(§3-2/§10 정정과 같은 기전). 진짜 문제는 **다시 안 켜지는 쪽**이다: 틱을 되켜는 유일한 엔진 경로(`OnHiddenInGameChanged`)는 `SetHiddenInGame`이 **값을 바꿀 때만** 발화하는데, 비사망 재사용 경로는 `SetHealthBarAllowed(true)`·`SetHealthBarInRange(true)` 둘 다 값-무변화(`true==true`)라 `ApplyHealthBarVisibility()` 자체가 안 불려 근거리에서 재사용된 적의 바가 그 생애 내내 안 뜬다. **HB1(§6-3, A안)이 재사용 엣지 직접 호출로 이 구멍을 닫았다** — 후속 행이 아니라 HB1 구현 범위 안이었다. 보드 행(`3c93972ddd8881f0b25ee2ce911feded`)은 기전 정정 + 해소 여부 재판정 대상이다(보드 갱신 자체는 이 문서 수정의 범위 밖).
 
 **갭 처리 규칙(고정)** — 구현 중 명세에 없는 판단이 필요해지면 Sonnet은 **추측해서 채우지 말고 멈추고 "명세 갭"으로 보고**한다. 갭은 C1으로 돌아가 Opus가 명세를 고친 뒤 재개하며, 갭이 구조를 바꾸면 G1을 다시 태운다.
 

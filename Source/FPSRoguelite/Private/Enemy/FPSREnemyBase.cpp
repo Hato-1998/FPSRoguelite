@@ -19,12 +19,14 @@
 #include "Components/CapsuleComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/WidgetComponent.h"
+#include "UI/FPSREnemyHealthBarWidget.h" // HB1: BindHealthComponent (InitHealthBarWidget's bind step)
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
 #include "EngineUtils.h" // TActorIterator (debug ForceAnimState command at the end of this file)
 #include "GameFramework/PlayerController.h"
 #include "ProfilingDebugging/CsvProfiler.h" // CSV_PROFILER_STATS gate for the metrics registry calls below
 #include "Settings/FPSRPlaceholderVisualSettings.h"
+#include "Settings/FPSREnemyRenderSettings.h" // HB1: HealthBarWidgetClass soft path (InitHealthBarWidget)
 #include "HAL/IConsoleManager.h"
 #include "CollisionQueryParams.h"
 #include "Net/UnrealNetwork.h"
@@ -84,6 +86,25 @@ AFPSREnemyBase::AFPSREnemyBase()
 	// enemy BPs assign their own (VAT) mesh, so the fallback only fires for the raw-C++ spawn (unconfigured roster).
 
 	HealthComponent = CreateDefaultSubobject<UFPSREnemyHealthComponent>(TEXT("HealthComponent"));
+
+	// HB1: native health-bar widget component — every AFPSREnemyBase-derived archetype gets one unconditionally
+	// (net mode is unknown at ctor time; InitHealthBarWidget is what skips a dedicated server). Values below are
+	// BP_EnemyMeleeBase's own MEASURED authoring (HB1 §6-1) copied verbatim, so this is a no-regression migration
+	// for that archetype and a net-new (previously zero-cost, silently-missing) bar for the other two. The widget
+	// CLASS itself is resolved later from config (InitHealthBarWidget), never here — no asset path in C++.
+	HealthBarWidgetComponent = CreateDefaultSubobject<UWidgetComponent>(TEXT("HealthBarWidgetComponent"));
+	HealthBarWidgetComponent->SetupAttachment(Capsule);
+	HealthBarWidgetComponent->SetWidgetSpace(EWidgetSpace::Screen);
+	HealthBarWidgetComponent->SetDrawSize(FVector2D(160.0f, 120.0f));
+	HealthBarWidgetComponent->SetPivot(FVector2D(0.5f, 0.5f));
+	HealthBarWidgetComponent->SetRelativeLocation(FVector(0.0f, 0.0f, 120.0f));
+	HealthBarWidgetComponent->SetDrawAtDesiredSize(false);
+	HealthBarWidgetComponent->SetTickWhenOffscreen(false);
+	// Engine default TickMode is Enabled, which never self-gates on SetHiddenInGame — Automatic does
+	// (WidgetComponent.cpp:1262's TickMode != Enabled guard), so a hidden-by-LOD bar's component tick actually
+	// stops instead of ticking every frame regardless (HB1 §6-1/§10). Not dead code — see that section.
+	HealthBarWidgetComponent->SetTickMode(ETickMode::Automatic);
+	HealthBarWidgetComponent->SetHiddenInGame(false); // matches the 2-axis visibility contract's true/true initial state
 }
 
 void AFPSREnemyBase::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
@@ -167,8 +188,9 @@ void AFPSREnemyBase::BeginPlay()
 		Mesh->SetCustomPrimitiveDataFloat(FPSRAnimCPD::CPDSlot_Phase, AnimPhase);
 	}
 
-	// Bind the world-space health bar / floating-damage widget to the health component once (server + clients).
-	// Pooling-safe: the actor + widget persist across dormancy, so this single bind survives every reuse.
+	// Resolve + bind the native (HB1), screen-space health bar / floating-damage widget to the health component once
+	// (server + clients). Pooling-safe: the actor + widget persist across dormancy, so this single bind survives
+	// every reuse.
 	InitHealthBarWidget();
 
 	// S4 readability metrics: register with the per-client registry (all net modes — the metrics subsystem reads
@@ -262,26 +284,79 @@ void AFPSREnemyBase::SetHealthBarInRange(bool bInRange)
 
 void AFPSREnemyBase::InitHealthBarWidget()
 {
-	// Force the BP-added world-space widget to exist NOW (it can otherwise be created lazily on first render — after
-	// BeginPlay — which would leave the BP bind on a null widget). Then let the BP bind it to OnHealthChanged. Runs on
-	// clients too (the bar is a client visual; OnHealthChanged is client-fired via OnRep_Health, B12).
-	//
-	// LOD1: cached here (once per actor lifetime) rather than re-resolved by every visibility call — the cosmetic LOD
-	// pass now calls the visibility setters every ~0.2s pass, and the old per-call FindComponentByClass<>() was a
-	// linear scan of the component array (fine for the old edge-triggered SetHealthBarVisible, not for a per-pass
-	// caller). See CachedHealthBarWidget's own field comment.
-	CachedHealthBarWidget = FindComponentByClass<UWidgetComponent>();
-	if (CachedHealthBarWidget)
+	// HB1 §6-2 step 1 — a dedicated server renders nothing, so there is no reason to resolve/init a widget class.
+	// This project has no dedicated server today, but the check must not lean on that absence. The engine already
+	// blocks this path independently: UWidgetComponent::BeginPlay calls InitWidget unconditionally, whose dedicated-
+	// server guard sets TickMode=Disabled BEFORE any tick runs — so TickComponent's own dedi guard is a third,
+	// normally-unreachable layer. This return is belt-and-suspenders, not the only safety net.
+	if (IsRunningDedicatedServer())
 	{
-		CachedHealthBarWidget->InitWidget();
-
-		// Engine default TickMode is Enabled (WidgetComponent.cpp: bUseAutomaticTickModeByDefault defaults false),
-		// which never self-gates on SetHiddenInGame — Automatic does (WidgetComponent.cpp:1262's TickMode !=
-		// Enabled guard), so a hidden-by-LOD bar's component tick actually stops instead of ticking every frame
-		// regardless (LOD1 §3). Set explicitly rather than relying on whatever a content BP authored TickMode to
-		// (unverified uasset state) — this makes the behavior deterministic in code.
-		CachedHealthBarWidget->SetTickMode(ETickMode::Automatic);
+		return;
 	}
+
+	// HB1 §6-2 step 2 — defensive null guard. NOTE: a content BP canNOT null a native ctor subobject (the details
+	// panel only overrides its properties), so this is not the "BP might delete it" case it may look like — it
+	// guards construction-order / CDO edge cases and keeps every later step free of repeated null checks.
+	if (!HealthBarWidgetComponent)
+	{
+		return;
+	}
+
+	// HB1 §6-2 step 3 — duplicate-widget diagnostic. MUST run before step 4's early return: the diagnostic is most
+	// needed exactly when config is empty (a transitional/misconfigured state), so gating it behind that check would
+	// silence it precisely when it matters. Catches the transitional state where a content BP (e.g.
+	// BP_EnemyMeleeBase) still authors its OWN manual UWidgetComponent alongside this native one — two bars, a state
+	// no compile-time check can see.
+	TInlineComponentArray<UWidgetComponent*> AllWidgetComponents;
+	GetComponents(AllWidgetComponents);
+	if (AllWidgetComponents.Num() > 1)
+	{
+		UE_LOG(LogFPSR, Warning,
+			TEXT("[HealthBar] %s carries %d UWidgetComponents (expected 1) — a content BP likely still authors a manual health-bar widget alongside the native HealthBarWidgetComponent (HB1 사용자 작업 2)."),
+			*GetName(), AllWidgetComponents.Num());
+	}
+
+	// HB1 §6-2 step 4 — widget CLASS resolution. A BP override on the native component's WidgetClass wins outright
+	// (content decides per-archetype); only an UNSET class falls through to the config soft path (Game.md §6-2: no
+	// hard-coded asset path in C++).
+	if (!HealthBarWidgetComponent->GetWidgetClass())
+	{
+		if (const UFPSREnemyRenderSettings* Settings = GetDefault<UFPSREnemyRenderSettings>())
+		{
+			if (UClass* WidgetClass = Settings->HealthBarWidgetClass.LoadSynchronous())
+			{
+				HealthBarWidgetComponent->SetWidgetClass(WidgetClass);
+			}
+		}
+
+		if (!HealthBarWidgetComponent->GetWidgetClass())
+		{
+			// Still unset (config never authored, or the soft path failed to load) — the health-bar feature is OFF.
+			// This SetTickMode(Disabled) is REQUIRED, not an optimization: a widget-less component's tick-skip path
+			// needs bRenderCleared, which the engine sets ONLY on the world-space draw branch
+			// (WidgetComponent.cpp:1279-1295) — this component is screen-space — so without this call every one of
+			// up to 500 enemies would tick this component forever for nothing (HB1 §6-2 step 4 / §10). Return before
+			// InitWidget/bind/OnHealthBarReady below: there is no widget to init or bind.
+			HealthBarWidgetComponent->SetTickMode(ETickMode::Disabled);
+			return;
+		}
+	}
+
+	// HB1 §6-2 step 5 — force the widget to exist NOW (it can otherwise be created lazily on first render, after
+	// BeginPlay, leaving the bind below on a null widget).
+	HealthBarWidgetComponent->InitWidget();
+
+	// HB1 §6-2 step 6 — bind the health component. A WidgetClass override that is not a UFPSREnemyHealthBarWidget
+	// (BP authoring choice) fails the cast and is skipped quietly — that is a legitimate authoring choice, not an
+	// error.
+	if (UFPSREnemyHealthBarWidget* HealthBarWidget = Cast<UFPSREnemyHealthBarWidget>(HealthBarWidgetComponent->GetUserWidgetObject()))
+	{
+		HealthBarWidget->BindHealthComponent(HealthComponent);
+	}
+
+	// HB1 §6-2 step 7 — extension point, fired only once the widget exists and C++ has already bound it. Note this
+	// is a CONTRACT CHANGE from the pre-HB1 behavior, which fired unconditionally regardless of widget presence: the
+	// config-empty return at step 4 above now also skips this (HB1 §6-2 step 7 / §11 전환기 증상).
 	OnHealthBarReady();
 }
 
@@ -322,11 +397,22 @@ void AFPSREnemyBase::SetHealthBarAllowed(bool bAllowed)
 
 void AFPSREnemyBase::ApplyHealthBarVisibility()
 {
-	if (!CachedHealthBarWidget)
+	if (!HealthBarWidgetComponent)
 	{
 		return;
 	}
-	CachedHealthBarWidget->SetHiddenInGame(!(bHealthBarAllowed && bHealthBarInRange));
+	const bool bVisible = bHealthBarAllowed && bHealthBarInRange;
+	HealthBarWidgetComponent->SetHiddenInGame(!bVisible);
+
+	// HB1 §6-3 A안 — 재킥. 숨겨진 위젯은 스크린 레이어에서 빠지며 컴포넌트가 스스로 틱을 끈다(§3-2/§10); 되켜는
+	// 유일한 엔진 경로(OnHiddenInGameChanged)는 SetHiddenInGame 이 **값을 바꿀 때만** 발화하므로, 재사용 엣지에서
+	// 값-무변화로 그 경로를 못 타는 경우(Activate/클라 언하이드의 직접 대입 호출, 아래 참조) 를 위해 여기서
+	// 무조건 재적용한다. Apply 는 멱등이라 안전하고, GetUserWidgetObject() 조건은 위젯이 없는 도달 가능한 상태
+	// (config 공백·전용 서버, 둘 다 TickMode=Disabled)에서 잔여 빈 틱 1회조차 남기지 않기 위함이다.
+	if (bVisible && HealthBarWidgetComponent->GetUserWidgetObject())
+	{
+		HealthBarWidgetComponent->SetComponentTickEnabled(true); // 멱등 · SetComponentTickEnabled 자체가 값-가드를 갖는다
+	}
 }
 
 void AFPSREnemyBase::HandleDeath(AActor* DeadActor, AActor* Killer)
@@ -445,7 +531,13 @@ void AFPSREnemyBase::Activate(const FVector& Location)
 	// reset here — see that field's own comment.
 	ViewerBand = FPSREnemyTuning::EFPSRDistanceBand::S0;
 	bAnimFrozen = false;
-	SetHealthBarAllowed(true); // reverse of HandleDeathCosmetic's hide — the widget survives pooling, the bind doesn't rerun
+	// HB1 §6-3 A안: direct assign + unconditional Apply, NOT the setter — reverses HandleDeathCosmetic's hide (the
+	// widget survives pooling, the bind doesn't rerun). A non-death reuse (rear-drain etc.) reaches this with
+	// bHealthBarAllowed ALREADY true, so the setter's value-guard would skip ApplyHealthBarVisibility entirely and
+	// leave a near-player reused enemy's bar hidden for its whole life (the "재표시 홀" §6-3 closes). Apply is
+	// idempotent, so calling it unconditionally here is safe.
+	bHealthBarAllowed = true;
+	ApplyHealthBarVisibility();
 	// CPD survives pooling reuse (see the phase write in BeginPlay), so a prior life's hit stamp would otherwise ride
 	// into this one and flash an enemy the instant it respawns — CPDSlot_LastHitTime's contract is "this life".
 	if (AnimProfile && Mesh)
@@ -829,7 +921,10 @@ void AFPSREnemyBase::SetActorHiddenInGame(bool bNewHidden)
 		// LOD1: client mirror of Activate()'s ViewerBand/bAnimFrozen reset — see that block's own comment.
 		ViewerBand = FPSREnemyTuning::EFPSRDistanceBand::S0;
 		bAnimFrozen = false;
-		SetHealthBarAllowed(true); // client mirror of the authority-side restore (a remote client never runs Activate)
+		// HB1 §6-3 A안: client mirror of Activate()'s direct-assign + unconditional Apply (a remote client never
+		// runs Activate) — see that block's comment for why the setter's value-guard must be bypassed here too.
+		bHealthBarAllowed = true;
+		ApplyHealthBarVisibility();
 		if (AnimProfile && Mesh) // clear the prior life's hit stamp — see the authority-side reset for why
 		{
 			Mesh->SetCustomPrimitiveDataFloat(FPSRAnimCPD::CPDSlot_LastHitTime, 0.0f);

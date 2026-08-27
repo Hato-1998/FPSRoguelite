@@ -5,6 +5,8 @@
 #include "Engine/DeveloperSettings.h"
 #include "FPSREnemyRenderSettings.generated.h"
 
+class UFPSREnemyHealthBarWidget;
+
 /** Swarm render-LOD policy (Project Settings -> "FPSR Enemy Rendering"). Values are authored in DefaultGame.ini
  *  [/Script/FPSRoguelite.FPSREnemyRenderSettings], matching UFPSRPlaceholderVisualSettings / UFPSRAudioSettings.
  *
@@ -53,9 +55,24 @@ public:
 			EditCondition = "bEnableEnemyShadowLOD", EditConditionHides))
 	float ShadowUpdateInterval = 0.2f;
 
+	/** 적 머리 위 체력바로 쓸 위젯. **에셋 경로를 C++ 에 하드코딩하지 않기 위한 소프트경로**(핵심원칙 2,
+	 *  선례 = UFPSRPlaceholderVisualSettings / UFPSRStageFadeSettings). 기본값은 콘텐츠가 ini 에 저작한다 —
+	 *  코드에는 `ConstructorHelpers` 도, 하드코딩 경로도 두지 않는다.
+	 *
+	 *  비어 있으면 **체력바 기능 전체가 꺼진다** — 컴포넌트는 존재하되 위젯이 없고, InitHealthBarWidget 이 그때
+	 *  TickMode 를 Disabled 로 내려 **틱 비용까지 0** 으로 만든다(그 한 줄이 없으면 위젯 없는 스크린 공간 컴포넌트가
+	 *  영구히 매 프레임 틱한다 — 엔진 실측, 명세 §6-2 step 4). 그것이 "체력바를 끄는" 지원되는 방법이다.
+	 *
+	 *  ⚠️ BP 가 네이티브 컴포넌트의 WidgetClass 를 덮었으면 **BP 가 이긴다** — 이 값은 덮이지 않은 경우의
+	 *  기본값이다(엘리트 전용 바 같은 아키타입별 분기를 코드 변경 없이 열어 두기 위함). */
+	UPROPERTY(Config, EditAnywhere, Category = "Health Bar",
+		meta = (DisplayName = "적 체력바 위젯"))  // MetaClass 불요 — TSoftClassPtr 템플릿 인자가 이미 피커를 필터한다(G1 P3-4)
+	TSoftClassPtr<UFPSREnemyHealthBarWidget> HealthBarWidgetClass;
+
 	/** 헬스바 거리 LOD 마스터 스위치. OFF = 밴드가 헬스바를 더는 건드리지 않는다(수명주기 가시성만 남는다).
-	 *  그림자 스위치와 분리한 이유: 비용 성격이 다르고(그림자=셰도우패스, 헬스바=RT 드로우+슬레이트 틱),
-	 *  한쪽만 끄고 재는 것이 perf 베이스라인(M0 후행 행)의 대조군에 필요하다.
+	 *  그림자 스위치와 분리한 이유: 비용 성격이 다르고(그림자=셰도우패스, 헬스바=스크린 레이어 등재+컴포넌트 틱 —
+	 *  🔴 HB1 정정: 이 헬스바는 스크린 공간이라 RT 드로우가 없다, HB1 §10), 한쪽만 끄고 재는 것이 perf 베이스라인
+	 *  (M0 후행 행)의 대조군에 필요하다.
 	 *
 	 *  ⚠️ **런 단위 토글이다 — 세션 도중 전환은 미지원.** 이미 밴드로 숨겨진 바는 OFF 로 바꿔도 되살아나지
 	 *  않는다(패스가 더는 setter 를 부르지 않고, 거리 축은 풀 재사용 때도 일부러 리셋하지 않으므로 그 액터는

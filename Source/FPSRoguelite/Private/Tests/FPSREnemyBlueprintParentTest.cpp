@@ -6,6 +6,10 @@
 #include "UObject/UObjectGlobals.h"
 #include "Enemy/FPSREnemyBase.h"
 #include "Core/FPSRLogChannels.h" // LogFPSR — the coverage lines below (see the scan-count comment for why)
+#include "Components/WidgetComponent.h" // HB1 §12-4: UWidgetComponent count check
+#include "Engine/BlueprintGeneratedClass.h" // HB1 §12-4: walk each BP level's own SCS (mirrors SFPSRBlockoutTab.cpp's CDO+SCS pattern)
+#include "Engine/SimpleConstructionScript.h"
+#include "Engine/SCS_Node.h"
 
 #if WITH_AUTOMATION_TESTS
 
@@ -128,6 +132,47 @@ bool FFPSREnemyBlueprintParentTest::RunTest(const FString& Parameters)
 
 		UE_LOG(LogFPSR, Log, TEXT("[Test] BlueprintParent: %s StopDistance=%.1f AnimProfile=%s"),
 			*AssetName, Cdo->GetStopDistance(), *AnimProfileClassName);
+
+		// (f) HB1 §12-4: total UWidgetComponent count (CDO native + SCS) must be exactly 1 — never 0 (silently
+		// missing, the whole point of HB1 §2's "왜 지금 구조가 안 되는가") and never 2 (native + a leftover
+		// hand-authored one). CDO-only, no SpawnActor (mirrors this file's / FPSREnemyDormantPoolTest's worldless
+		// convention, and SFPSRBlockoutTab.cpp's identical CDO-native + SCS-walk pattern for the same reason): the
+		// CDO already carries every NATIVE default subobject from the full C++ ctor chain
+		// (AFPSREnemyBase::HealthBarWidgetComponent included, however many native levels deep), and a Blueprint's
+		// OWN SimpleConstructionScript nodes are walked directly by reflection for anything hand-authored on top —
+		// walking the FULL class chain (not just LoadedClass itself) so a future BP-to-BP inheritance level is
+		// still counted, since each SCS only holds the nodes IT added, not inherited ones.
+		//
+		// 🔴 EXPECTED TO FAIL for BP_EnemyMeleeBase until the user completes 사용자 작업 2 (HB1 §11) — its manual
+		// SCS-authored "HealthBarWidget" component still coexists with the new native one until removed by hand.
+		// That failure is the point (a mechanized "유닛 완결 조건", not an implementation defect) — see this
+		// session's report.
+		int32 WidgetComponentCount = 0;
+
+		TInlineComponentArray<UWidgetComponent*> NativeWidgetComponents;
+		Cdo->GetComponents(NativeWidgetComponents);
+		WidgetComponentCount += NativeWidgetComponents.Num();
+
+		for (const UClass* Class = LoadedClass; Class; Class = Class->GetSuperClass())
+		{
+			const UBlueprintGeneratedClass* BPGC = Cast<UBlueprintGeneratedClass>(Class);
+			if (!BPGC || !BPGC->SimpleConstructionScript)
+			{
+				continue;
+			}
+			for (const USCS_Node* Node : BPGC->SimpleConstructionScript->GetAllNodes())
+			{
+				if (Node && Cast<UWidgetComponent>(Node->ComponentTemplate))
+				{
+					++WidgetComponentCount;
+				}
+			}
+		}
+
+		TestEqual(FString::Printf(TEXT("%s has exactly 1 UWidgetComponent total (native CDO + SCS)"), *AssetName),
+			WidgetComponentCount, 1);
+		UE_LOG(LogFPSR, Log, TEXT("[Test] BlueprintParent: %s UWidgetComponent count (native+SCS) = %d"),
+			*AssetName, WidgetComponentCount);
 	}
 
 	return true;

@@ -8,7 +8,7 @@
 class AFPSREnemyBase;
 
 /** Drives every LOCAL-VIEWER cosmetic LOD consumer for the swarm from ONE batched per-viewer pass (Game.md §1 —
- *  per-actor cost first): dynamic shadow casting, world-space health-bar visibility, and (LOD1) the animation
+ *  per-actor cost first): dynamic shadow casting, screen-space health-bar visibility, and (LOD1) the animation
  *  freeze band. Renamed from UFPSREnemyShadowLODSubsystem now that shadow is no longer the only consumer (a
  *  Content/ search turns up zero references to the old name, so the rename is free — LOD1 §4).
  *
