@@ -9,6 +9,82 @@
 
 ---
 
+## 🔷 LOD1 — 적 프로토 메시 LOD·거리밴드 재정합 (2026-08-27, main 머지 `957928c2`)
+> 보드 행 = *"적 프로토 메시 LOD·거리밴드 재정합"*(M0 · 하이 · M · Fable 게이트). 구 이름 "VAT-4".
+> 명세 = **`Docs/Specs/LOD1_EnemyDistanceBand.md`**(rev3 + C3 정정 + §13 원장). 브랜치 `perf/enemy-lod-distanceband`.
+> 파이프라인 = §6-5-2 코어 갈래 5단계(Opus 조사·설계 → **Fable G1** → 사용자 승인 → Sonnet 구현 → Opus 검증 → **Fable G2**).
+> ⚠️ **PIE 스모크 7항목 미검증 → 보드 상태 = `검증중`**(사용자 확인 대기). 코드·문서만, 콘텐츠 변경 0.
+
+### 무엇이 문제였나 — §5-1 밴드 계약의 렌더 쪽이 절반만 지켜지고 있었다
+
+`Performance.md` §5-1은 *"적/VFX/SFX/anim tick/mesh/healthbar를 단계별로 다운"*을 계약한다. 전수 대조 결과:
+
+| §5-1 소비자 | 착수 시점 현행 | 판정 |
+|---|---|---|
+| AI 이동·공격 스트라이드 · NetUpdateFreq | S0~S3 그대로(서버 배치패스, `BestDistSq`) | 정합 |
+| **anim tick** | S1 반경을 **손복사한 상수**로 이진 freeze, **클라 경로에만** | 부분 |
+| **mesh(그림자)** | 별도 config 반경 + 자체 레지스트리·틱(평행 밴드) | 어긋남 |
+| **healthbar** | 거리 밴드 **전무** — 적 200~300이 각자 `UWidgetComponent` 보유 | 없음 |
+| **VFX** | 적 경로에 Niagara/파티클 **0건**(실측) | 대상 부재 |
+
+핵심 3건: ① 밴드 반경이 3곳에 산재(`FPSREnemySpawnSubsystem` constexpr / `FPSRAnimCPD::AnimFreezeRadiusSq`의 "MIRRORS" 손복사 / `ShadowCastRadius` 코드 기본값) ② 헬스바 무밴드 ③ **애니 프리즈가 리슨서버 호스트에서만 안 걸림**(프리즈 검사가 `PostNetReceiveLocationAndRotation` = 클라 전용 경로에 박혀 있는데, 전용서버가 없는 이 프로젝트의 기준선이 바로 그 호스트다).
+
+기존 코드 주석이 스스로 귀착점을 지목해 두고 있었다 — `FPSREnemySpawnSubsystem.cpp:556` *"re-validate this band then (natural home: the F8 significance-radius SSOT)"*. 그 SSOT 헤더가 아직 없었다(RC-A 미착수).
+
+### 구조 — 평가자는 둘로, 반경 상수만 하나로
+
+- **`FPSREnemyTuning.h` 신설** = 밴드 반경 SSOT(F8/RC-A 코드분). **넷프리퀀시 S1과 애니 프리즈를 한 심볼로 합치지 않았다** — 오늘 우연히 같은 3500²일 뿐이라 합치면 한쪽 튜닝이 다른 쪽을 조용히 옮긴다(2026-07-08 F8 적대재검증 결론). 이름 다른 상수 2개 + `static_assert` **트립와이어**(불변식이 아니라, 의도적으로 갈라놓을 때 빌드를 깨서 "정말 둘 다 옮길 셈인가"를 묻는 장치. 갈라놓기로 했다면 assert를 지우는 것이 올바른 대응).
+- **`ShadowLOD` → `CosmeticLOD` 서브시스템 승격**(`git mv`). 뷰어 거리를 **1회만** 계산해 그림자·헬스바·애니 프리즈 3소비자가 공유. 새 서브시스템·새 순회를 만들지 않았다 — 기존 헤더 주석이 이미 *"코스메틱은 보는 사람의 것이라 서버 전용 패스에 두면 안 된다"*는 논거를 적어 두고 있었다.
+- **서버 밴드와 뷰어 밴드는 둘로 유지.** 서버는 *전체 플레이어 중 최근접*으로 AI/복제를, 뷰어는 *이 머신 로컬 뷰어*로 렌더를 정한다. 4인 협동에서 "남 옆의 적"은 서버 S0이면서 내 뷰어로는 S3다 — 합치면 원격 클라가 전부 풀 코스메틱을 그린다.
+- **헬스바 = 2축 계약**(수명주기 AND 거리). 하나의 bool로 합치면 사망 dwell 중 밴드 패스가 죽은 적의 바를 되살린다.
+- **서버 배치패스는 상수 식별자만 치환** — 값·경계·분기 순서 원형 유지(§12-5 회귀 증명을 diff 자명성으로).
+
+### 엔진 소스 대조에서 한 번 틀렸다 (G1이 잡음)
+
+착수 조사에서 *"`SetHiddenInGame(true)` 하나면 RT 드로우와 컴포넌트 틱이 둘 다 멈춘다"*고 단정했는데 **절반만 맞았다**. `WidgetComponent.cpp:1262`의 자기-틱-차단 분기는 `TickMode != Enabled` 조건인데, `:58` `bUseAutomaticTickModeByDefault = false` → 생성자(`:642`) 기본이 **`Enabled`**라 그 분기가 **절대 발화하지 않는다**(프로젝트 `Config/`도 이 CVar 미설정). CVar 값을 확인하지 않고 단정한 오류였고, 그 위에 세운 절감 회계도 함께 틀렸다.
+→ 해결 = `InitHealthBarWidget` 캐시 시점에 **`SetTickMode(ETickMode::Automatic)` 명시**. 자체 틱 관리 코드가 아니라 **엔진이 제공하는 모드 선택**이고, 콘텐츠 BP의 저작값(uasset이라 미검증)에 관계없이 결정론적으로 고정된다.
+
+### G1 플랜 게이트 = 1회차 **반려**. 잡아낸 실제 회귀 2건
+
+1. **사망 dwell 중 시체의 Death 포즈를 프리즈가 덮어쓴다.** 기존 두 애니 드라이버는 죽은 적에 절대 안 쓴다(클라는 `IsDead()` 조기반환 `:688`이 프리즈 검사 `:719`보다 앞, 서버는 `BeginDying`이 `ActiveEnemies.Remove`를 즉시 실행 `FPSREnemySpawnSubsystem.cpp:1644`). 그런데 새 패스는 `RegisteredEnemies`를 돌고 **dwell 중 시체는 보이는 상태라 `IsHidden()` 스킵에 안 걸린다.** `SetAnimState`의 one-shot 가드는 *같은 상태 재진입만* 막으므로 Death→Idle은 그대로 CPD에 써진다. → **사망 가드 신설.**
+2. **먼 적이 Attack 포즈로 고착.** 프리즈를 "진입 에지 1회"로 설계했는데, `OnRep_Charging`(`:1043`)·`ServerTickAttack`(`:864`)이 프리즈와 무관하게 Attack을 쓴다. 원거리 교전 사거리(1400)는 **타겟 기준**이라 내 뷰어 거리와 무관 — 4인에서 "남을 공격 중인 먼 적"은 상시 존재한다. 지금 코드는 매 넷업데이트마다 재동결해 균형이 잡히고 있었고, `OnRep_Charging` 해제 경로 주석(`:1046-1048`)이 **명시적으로 그 재유도에 의존한다**고 적혀 있다. → **레벨 트리거**(프리즈 중 매 패스 재발행, dedupe가 흡수)로 전환.
+
+그 외 P1으로 **축자 구현 불가 명세 갭 2건**(밴드 라벨만 받는 시그니처로 거리 판정을 요구 / 히스테리시스에 필요한 현재 상태를 읽을 접근자 부재)도 잡혔다 — 구현자가 명세대로 하려다 멈출 자리를 게이트가 미리 걷어냈다. 2회차 **통과**.
+
+### 🚨 C3에서 빌드가 못 잡은 회귀 — BP 이름공간 충돌
+
+신규 캐시 프로퍼티를 `HealthBarWidget`으로 지었는데, `BP_EnemyMeleeBase`가 **같은 이름의 위젯 컴포넌트를 이미 저작**해 두고 있었다:
+
+```
+Internal Compiler Error: Tried to create a property HealthBarWidget in scope BP_EnemyMeleeBase_C,
+but another object (ObjectProperty /Script/FPSRoguelite.FPSREnemyBase:HealthBarWidget) already exists there.
+```
+
+**C++ 빌드는 두 번 연속 `Result: Succeeded`를 냈다.** 잡아준 것은 헤드리스 자동화 `FPSRoguelite.Enemy.BlueprintParent` 하나뿐. → `CachedHealthBarWidget`으로 개명. **교훈: 코어 클래스에 새 `UPROPERTY`를 넣을 때 그 이름은 콘텐츠 BP의 변수·컴포넌트 이름공간과 충돌할 수 있고, 빌드 성공은 그것을 증명하지 못한다.**
+
+### G2 머지 게이트 = **P1 0 · P2 0 · P3 5**(전건 수용, 코드 동작 변경 없음)
+
+- C3의 줄번호 인용 제거가 **반만** 적용돼 있던 것(호출처 3개 스테일) → 함수명 인용으로 교체.
+- `bHealthBarInRange` 무리셋이 **반대 방향 비용**을 갖는데 문서가 한쪽만 팔고 있었다 → 반경 밖에서 죽어 latch된 액터가 플레이어 옆에 재활성되면 ≤1패스 바가 **잘못 숨는다**. 리셋하는 쪽도 정확히 대칭 크기의 결함(먼 곳 재활성 시 깜빡임)이라 **어느 쪽도 무해하지 않다** — 더 자주 보이는 쪽을 피한 선택임을 명기.
+- **"최악 0.2초" 주장에 반례** — 초기값 true가 히스테리시스 시드라, [On, Off] 고리(3500~3800cm)에만 상주하는 개체는 On 반경을 한 번도 안 지나 **무기한** 바를 유지한다(그림자도 동형이나 이쪽은 종전부터의 동작 = 무회귀).
+- 세션 중 코스메틱 스위치 OFF 시 latch 영구 잔존 → **"런 단위 토글, 세션 중 전환 미지원"**으로 주석 정정(코드로 복원하지 않은 근거 = `DefaultConfig` 데브 노브라 쉬핑 도달 불가 + A/B 측정은 재시작 전제).
+- 명세 §6/§7/§8의 개명 전 식별자 치환.
+
+### 검증
+
+빌드 `Result: Succeeded`(`-DisableUnity -NoXGE`, 판정은 종료코드 아닌 `Result:` 줄) · 헤드리스 자동화 **7/7**(`Enemy.DistanceBand` 신규 · `BlueprintParent`·`DormantPool`·`NetCull`·`Pursuit` 회귀 · `Smoke.ModuleLoads` · `Allocator.FrontBudget`) · 신규 복제 **0건** · 서버 밴드 동작 변화 **0**.
+
+**의도된 동작 변경 1건(드리프트 아님)** — 거리 메트릭을 XY→3D로 통일했다. 착수 시점에 프리즈는 `DistSquaredXY`, 그림자는 3D였는데 패스가 거리를 1회만 재므로 하나여야 한다. 프리즈가 **더 일찍** 걸리며, 이 맵 최대 수직 분리(주 지면 Z=200 ↔ 고가 Z≈800)에서 실효 반경 3500→약 3448cm(**−1.5%**). 절감이 커지는 방향이고 코스메틱 한정.
+
+### 남은 것
+
+- ⚠️ **PIE 스모크 7항목 = 사용자**(명세 §12-10). 특히 ④ *먼 곳에서 죽은 적이 사망 모션을 끝까지 유지하는가(죽은 뒤 카이팅으로 경계를 넘길 때)* · ⑤ *남을 공격 중인 먼 적이 Attack 포즈로 굳지 않는가* — 이 둘은 G1이 잡은 회귀를 직접 겨냥한 검사다. ⑦ 2인 PIE에서 각 클라 **자신의** 거리 기준으로 동작하는가.
+- **헬스바 표시 반경 기본 3500cm는 게임필 값** — §5-1 계약에서 유도했을 뿐 실플레이 검증치가 아니다. `DefaultGame.ini` `[/Script/FPSRoguelite.FPSREnemyRenderSettings]`에서 사용자가 조정.
+- 후속 행 후보(명세 §11) = **F7**(캡슐 40/90·`GroundSnapTolerance` 60 산재를 이 헤더로 흡수 — 헤더가 생겼으니 비용이 낮아졌다) · **적 SFX 밴드** · **VFX 밴드 배선**(U13이 `GetViewerBand()` 소비) · **비사망 휴면의 헬스바 틱 비대칭**.
+- 이 행은 M0 종료 게이트(`성능 정량 베이스라인 실측 — 적 300/500`)의 **마지막 공식 선행**이었다. 이 유닛은 그 측정이 **잴 대상을 만들고**, 소비자별 단독 토글로 **대조군**을 가능하게 한다.
+
+---
+
 ## 🔷 PIE 2인 MP 검증 — C군 (2026-08-27, 코드 변경 0, 검증 전용)
 > 보드 행 = *"PIE 2인 MP 검증 — 스테이지 전환 클라 동기·CMC 보정·이월·DBNO(C군)"*(M0 · 하이 · S · Opus).
 > 절차서 = `Docs/PIE_D6D7_Checklist.md` §5. **코드·에셋 변경 0** — 실측만 한 행이다.
