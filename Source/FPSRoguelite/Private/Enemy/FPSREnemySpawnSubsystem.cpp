@@ -3,6 +3,7 @@
 #include "Enemy/FPSREnemySpawnSubsystem.h"
 #include "Enemy/FPSREnemyBase.h" // CancelRangedChargesForTransition -> ServerCancelRangedForStageTransition (ADR 0013 C1: promoted here from the retired AFPSRRangedEnemyBase)
 #include "Enemy/FPSREnemyEliteBase.h" // CancelRangedChargesForTransition -> ServerResetEliteForStageCarry (ADR 0013 후속 행 3 실행 1 — 같은 루프에 얹는다)
+#include "AbilitySystemComponent.h" // FPSR.EliteDump: reads the elite ASC's live spec/GE/tag counts (debug only)
 #include "Enemy/FPSREnemySpawnPoint.h"
 #include "Enemy/FPSRSpawnRoom.h"
 #include "Enemy/FPSRFlowFieldSubsystem.h"
@@ -1975,6 +1976,86 @@ void UFPSREnemySpawnSubsystem::ReleaseRangedToken(const TWeakObjectPtr<AFPSRPlay
 // ---- Console Commands (debug; excluded from shipping) ----
 
 #if !UE_BUILD_SHIPPING
+void UFPSREnemySpawnSubsystem::DumpEliteState() const
+{
+	// Effective cap, recomputed exactly the way AcquireEnemy's gate does it — printing the two inputs separately
+	// (curve vs hard cap) is the point: "cap is 8" alone never says whether the schedule was authored at all.
+	int32 CurrentStageIndex = 0;
+	if (const UWorld* World = GetWorld())
+	{
+		if (const AFPSRGameState* GameState = World->GetGameState<AFPSRGameState>())
+		{
+			CurrentStageIndex = GameState->GetStageIndex();
+		}
+	}
+	const int32 CurveCap = ActiveSchedule
+		? UFPSRRunScheduleDataAsset::EvalStageAt(ActiveSchedule->StageDifficulty, CurrentStageIndex).MaxEliteAlive
+		: 0;
+	const int32 EffectiveEliteCap = FMath::Min(CurveCap, EliteHardCap);
+
+	UE_LOG(LogFPSR, Log, TEXT("===== FPSR.EliteDump ====="));
+	UE_LOG(LogFPSR, Log, TEXT("  stage %d | elite cap: effective %d = min(curve %d, hard %d)%s"),
+		CurrentStageIndex, EffectiveEliteCap, CurveCap, EliteHardCap,
+		ActiveSchedule ? TEXT("") : TEXT("  <-- NO SCHEDULE PUSHED (curve reads 0: no elite can ever spawn)"));
+
+	int32 CountedElites = 0;
+	for (const TObjectPtr<AFPSREnemyBase>& EnemyPtr : ActiveEnemies)
+	{
+		const AFPSREnemyEliteBase* Elite = Cast<AFPSREnemyEliteBase>(EnemyPtr.Get());
+		if (!Elite)
+		{
+			continue;
+		}
+		++CountedElites;
+
+		const UAbilitySystemComponent* ASC = Elite->GetAbilitySystemComponent();
+		if (!ASC)
+		{
+			UE_LOG(LogFPSR, Warning, TEXT("  [%d] %s — NO ASC (elite without an ability system: construction bug)"),
+				CountedElites, *Elite->GetName());
+			continue;
+		}
+
+		FGameplayTagContainer OwnedTags;
+		ASC->GetOwnedGameplayTags(OwnedTags);
+		// GrantedAbilities is the authored expectation; the live spec count must equal it on EVERY life. Anything
+		// higher means a pool reuse re-granted without clearing (the accumulation this command exists to catch).
+		UE_LOG(LogFPSR, Log, TEXT("  [%d] %s | abilities %d (authored %d)%s | active GEs %d | owned tags %d %s"),
+			CountedElites, *Elite->GetName(),
+			ASC->GetActivatableAbilities().Num(), Elite->GetGrantedAbilityCount(),
+			(ASC->GetActivatableAbilities().Num() > Elite->GetGrantedAbilityCount())
+				? TEXT("  <-- ACCUMULATING (Activate did not clear the previous life)") : TEXT(""),
+			ASC->GetNumActiveGameplayEffects(),
+			OwnedTags.Num(), OwnedTags.Num() > 0 ? *OwnedTags.ToStringSimple() : TEXT(""));
+	}
+
+	// The accounting cross-check. ActiveEliteCount is incremented in one place and decremented in two; a missed
+	// decrement otherwise surfaces only as "elites gradually stop spawning" long after the cause.
+	UE_LOG(LogFPSR, Log, TEXT("  ActiveEliteCount %d vs elites actually in ActiveEnemies %d  %s"),
+		ActiveEliteCount, CountedElites,
+		(ActiveEliteCount == CountedElites) ? TEXT("OK")
+			: TEXT("<-- MISMATCH: the counter leaked (see BeginDying / ReleaseEnemy decrements)"));
+	UE_LOG(LogFPSR, Log, TEXT("  pool: alive %d | dormant %d | TotalSpawned %d/%d | evictions %d"),
+		ActiveEnemies.Num(), DormantPool.Num(), TotalSpawned, MaxActiveEnemies, EvictionCount);
+}
+
+static FAutoConsoleCommandWithWorldAndArgs GFPSREliteDumpCmd(
+	TEXT("FPSR.EliteDump"),
+	TEXT("Log every active elite's ASC state (granted abilities vs authored, active GEs, owned tags) plus the elite "
+	     "cap inputs and the ActiveEliteCount cross-check. Kill+respawn an elite a few times and watch the ability "
+	     "count stay flat — a growing count means pool reuse is not clearing the previous life."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic([](const TArray<FString>& Args, UWorld* World)
+	{
+		if (!World)
+		{
+			return;
+		}
+		if (const UFPSREnemySpawnSubsystem* Sub = World->GetSubsystem<UFPSREnemySpawnSubsystem>())
+		{
+			Sub->DumpEliteState();
+		}
+	}));
+
 static FAutoConsoleCommandWithWorldAndArgs GFPSRSpawnEnemiesCmd(
 	TEXT("FPSR.SpawnEnemies"),
 	TEXT("Burst-spawn N test enemies via the pool in a ring around the local player. Radius (cm) is optional — a far "

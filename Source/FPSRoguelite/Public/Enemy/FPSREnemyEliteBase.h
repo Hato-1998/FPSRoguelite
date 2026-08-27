@@ -87,6 +87,13 @@ public:
 	 *  생기지 않는다(원거리 차징 누산기가 쓰는 바로 그 관용구). */
 	virtual void ServerTickAttack(const FFPSRServerAttackContext& Ctx) override;
 
+#if !UE_BUILD_SHIPPING
+	/** Debug (FPSR.EliteDump): how many abilities this archetype is AUTHORED to grant. The dump compares it against
+	 *  the ASC's live spec count — they must be equal on every life, and a live count that grows past this one is the
+	 *  pool-reuse accumulation ADR 0013's failure scenario warns about. */
+	int32 GetGrantedAbilityCount() const { return GrantedAbilities.Num(); }
+#endif
+
 	/** UFPSREliteGameplayAbility 가 읽는 프리즈-멈춤 누산기 값(위 ServerTickAttack 참조). 서로 다른 UObject
 	 *  계층(어빌리티는 이 액터의 서브클래스가 아니다)이라 public 접근자가 필요하다. */
 	float GetEliteCooldownClockSeconds() const { return EliteCooldownClockSeconds; }

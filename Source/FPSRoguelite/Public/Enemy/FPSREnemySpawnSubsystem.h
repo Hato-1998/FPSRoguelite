@@ -131,6 +131,22 @@ public:
 	/** Get the current number of alive enemies. */
 	int32 GetAliveCount() const { return ActiveEnemies.Num(); }
 
+#if !UE_BUILD_SHIPPING
+	/** Debug (FPSR.EliteDump): log every ACTIVE elite's ASC state plus the pool/cap accounting around it.
+	 *
+	 *  Exists because ADR 0013's own failure scenario ("a pooled elite comes back carrying the previous life's ASC
+	 *  state") has no other observer: elites have no attribute set to inspect, nothing activates their abilities yet,
+	 *  and AbilitySystem.DebugAbilityTags draws tags that nothing currently grants. What IS observable without any
+	 *  ability content is ACCUMULATION — if Activate() ever stops clearing the previous life's specs, the granted
+	 *  count grows by GrantedAbilities.Num() on every pool reuse. Kill and respawn the same elite a few times and
+	 *  watch that number: it must stay flat.
+	 *
+	 *  Also cross-checks ActiveEliteCount (incremented in one place, decremented in two) against the elites actually
+	 *  in ActiveEnemies. A leaked decrement otherwise only ever surfaces as the vague "elites gradually stop
+	 *  spawning", long after the cause. Read-only: this never mutates pool or accounting state. */
+	void DumpEliteState() const;
+#endif
+
 	/** S4 readability metrics: read-only accessor for TierS0RadiusSq (15m S0 significance radius, squared cm) so
 	 *  UFPSREnemyMetricsSubsystem's "Near15m" gate reuses the SAME 15m definition as the movement LOD tier pass
 	 *  (Game.MD §5/§5-1) instead of duplicating the magic constant. Mirrors UFPSRFlowFieldComputer::GetMaxTotalCells's
