@@ -1,5 +1,5 @@
-# measure_swarm_render.ps1 — VAT-1 스웜 렌더 경로 대조 측정 러너 (Docs/Review/20260812-plan-vat1-swarm-render-path.md)
-# 패키지 빌드를 고정 시나리오(L_Map1_City 리슨 호스트 + FPSR.SpawnEnemies N)로 기동해
+﻿# measure_swarm_render.ps1 — VAT-1 스웜 렌더 경로 대조 측정 러너 (Docs/Review/20260812-plan-vat1-swarm-render-path.md)
+# 패키지 빌드를 고정 시나리오(L_Arena 리슨 호스트 + FPSR.SpawnEnemies N)로 기동해
 # CSV 프로파일(프레임타임/RHI/GPU 스탯)과 시차 스크린샷 2장(VAT 재생 확인용)을 수집한다.
 #
 # ⚠️ 부트 캡처(-csvCaptureFrames) 금지: RHI 초기화 전에 BeginCapture가 돌아
@@ -23,7 +23,15 @@ param(
     [int]$BootWaitSeconds = 600,  # 캡처 시작(=CSV 생성) 대기 상한 — 첫 부팅 셰이더/PSO 컴파일이 5분+ 걸린 실측
     [int]$MaxWaitSeconds = 300,   # 캡처 시작 후 완주(크기 안정화) 대기 상한
     [int]$ShotAtSeconds = 30,     # 캡처 시작 기준 스크린샷 시점(+1.5s 두 번째 장)
-    [int]$ClientCount = 0         # N-1 복제 폴백 측정용: 리슨 호스트에 붙는 -nullrhi 클라 수(기본 0 = 기존 동작 완전 무변경)
+    [int]$ClientCount = 0,        # N-1 복제 폴백 측정용: 리슨 호스트에 붙는 -nullrhi 클라 수(기본 0 = 기존 동작 완전 무변경)
+    # 셀/아웃라인 축(M0 베이스라인): 켠 상태가 기본이고, 이 스위치가 **포스트프로세스 머티리얼만** 끈다.
+    # r.PostProcessing.DisableMaterials 는 블렌더블만 차단하고 톤매핑·블룸·노출·그레이드는 그대로 둔다
+    # (엔진 실측: PostProcessMaterial.cpp:54 정의, :1000-1009 IsPostProcessMaterialsEnabledForView 게이트).
+    # 그래서 showflag.PostProcessing 0 처럼 PP 전체를 죽이지 않고 셀 스택 비용만 분리할 수 있다 —
+    # 같은 패키지 빌드 하나로 on/off 교차가 성립하는 이유다(빌드 2개 불요).
+    # ⚠️ 전제: 측정 씬의 블렌더블이 SRS 셀+아웃라인뿐이어야 한다. M_PP_StageFade 도 블렌더블이지만
+    #    스테이지 전환 중에만 기여하므로 정적 스폰 시나리오에서는 0 이다(BP_SRS_Fog 는 배치하지 않는다).
+    [switch]$DisablePostProcessMaterials
 )
 $ErrorActionPreference = 'Stop'
 # 완주 대기 자동 산출(레드팀 P2-4 수용): 미지정 시 60fps 미만에서 CaptureFrames가 MaxWaitSeconds를 넘겨
@@ -52,10 +60,16 @@ $invulnSeconds = $BootWaitSeconds + $MaxWaitSeconds + 300
 # ClientCount>0이면 SkipCards를 반복 모드(§5-C(2-b))로 걸어 5s 내 해소한다. 0이면 기존 1회 호출 그대로
 # (VAT 솔로 시나리오 무변경).
 $skipCardsCmd = if ($ClientCount -gt 0) { "FPSR.SkipCards $invulnSeconds" } else { "FPSR.SkipCards" }
+# 셀 축 off 실행분: ExecCmds 맨 앞에 붙여 캡처 시작(CsvProfile) 전에 확정되게 한다.
+$ppPrefix = if ($DisablePostProcessMaterials) { "r.PostProcessing.DisableMaterials 1, " } else { "" }
+# 런맵 = 아레나 지속 레벨(ADR 0012). 실제 전투 공간은 그 스트리밍 서브레벨(L_Map_1 등)이고
+# UFPSRArenaStreamSubsystem 이 가시화한다 — 즉 여기서 지속 레벨만 띄우면 되고 서브레벨은 런 진행이 붙인다.
+# ⚠️ 종전 값 "L_Map1_City?listen" 은 **삭제된 맵**이었다(ADR 0010 에서 플레이 감각 기각 → 아레나로 전환).
+#    그대로 두면 존재하지 않는 맵을 참조해 측정 자체가 무효가 된다.
 $gameArgs = @(
-    "L_Map1_City?listen",
+    "L_Arena?listen",
     "-windowed","-resx=1920","-resy=1080","-novsync","-log",
-    "-ExecCmds=`"$skipCardsCmd, FPSR.Invuln $invulnSeconds, FPSR.SpawnEnemies $EnemyCount $SpawnRadius, CsvProfile Frames=$CaptureFrames`"",
+    "-ExecCmds=`"$ppPrefix$skipCardsCmd, FPSR.Invuln $invulnSeconds, FPSR.SpawnEnemies $EnemyCount $SpawnRadius, CsvProfile Frames=$CaptureFrames`"",
     "-csvGpuStats"
 )
 # N-1 멀티클라 시(§5-A ⑤): 패키지는 GameNetDriver=SteamSockets 라우팅(DefaultEngine.ini)이라 127.0.0.1 다이얼과
