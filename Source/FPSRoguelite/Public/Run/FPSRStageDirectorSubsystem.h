@@ -7,6 +7,9 @@
 #include "FPSRStageDirectorSubsystem.generated.h"
 
 class AFPSRArenaActor;
+/** Forward-declared rather than including Arena/FPSRArenaTypes.h: an opaque enum declaration with a fixed
+ *  underlying type is already a COMPLETE type, so nothing here needs the arena/flow-field include graph. */
+enum class EFPSRArenaRole : uint8;
 
 /**
  * Server-authoritative stage-transition state machine (ADR 0010 D6). Follows the same shape as
@@ -42,6 +45,25 @@ public:
 	 *  already forfeit the instant the transition starts, not once the swap finishes. */
 	void RequestTransition();
 
+	/**
+	 * Requested by UFPSRRunDirectorSubsystem when the run clock reaches BossTime (보스 스테이지, 2026-08-28).
+	 *
+	 * Same state machine as RequestTransition — same Grace dealing window, same fades, same swap (사용자 결정:
+	 * "일반 전환과 동일하게") — with ONE difference: the destination is named rather than cycled to, so the party
+	 * lands in the boss arena instead of the next combat one.
+	 *
+	 * Ordering contract, and the reason the boss is NOT spawned before this runs: PerformSwap teleports players and
+	 * carries the swarm, but a boss is neither — it would be stranded alone in the old arena with its collision
+	 * switched off and the run could never end. That is the same fact RequestTransition's own mid-boss reject guard
+	 * is built on. So the transition happens FIRST, in Combat phase, and the run director spawns the boss only once
+	 * the swap has landed (it re-checks the active arena's role on its next tick).
+	 *
+	 * Returns true if the state machine actually started. False = the caller should try again later (a transition
+	 * is already running, the run is not in Combat phase, or the world has no arenas) — the run director keeps a
+	 * bounded retry and degrades to spawning the boss in place rather than looping forever.
+	 */
+	bool RequestBossTransition(int32 BossStageOrder);
+
 	bool IsTransitioning() const;
 
 	// ---- Pure, worldless predicates (unit-tested in FPSRStageTransitionTest.cpp, no world needed) ----------------
@@ -64,6 +86,15 @@ public:
 	 *  (Count==1) returns itself — see PerformSwap's comment on why that is the intended behavior, not a gap. */
 	static int32 NextArenaIndex(int32 CurrentIndex, int32 Count);
 
+	/** Next COMBAT arena index — NextArenaIndex's cycle, walked until a Combat-role arena turns up (보스 스테이지,
+	 *  2026-08-28). Roles is parallel to the arena array the caller is indexing into.
+	 *
+	 *  The suppressor cycle must never wander into the boss stage: that arena carries no suppressor by design, so a
+	 *  party cycled into it early would be stuck there with no boss and no way out. A lone combat arena still
+	 *  returns itself (one full lap ends where it started); a roster with no combat arena at all returns INDEX_NONE
+	 *  rather than a destination the caller must not use. Empty Roles -> INDEX_NONE. */
+	static int32 NextCombatArenaIndex(int32 CurrentIndex, TConstArrayView<EFPSRArenaRole> Roles);
+
 	/** Same rule as AFPSRGameState::IsStageDealingOpen, exposed static + worldless for the automation test to lock
 	 *  down independently of a live GameState instance. */
 	static bool IsDealingOpen(EFPSRStageTransitionPhase Phase, float NowServerTime, float DealingEndServerTime);
@@ -75,6 +106,20 @@ public:
 private:
 	bool HasServerAuthority() const;
 	AFPSRGameState* GetGS() const;
+
+	/** Shared body of RequestTransition / RequestBossTransition: the reject guards, the mission cancel + screen
+	 *  clear, entering Grace, and arming the dealing timer. DestinationStageOrder == INDEX_NONE means "cycle to the
+	 *  next combat arena" (the suppressor path); anything else names the destination (the boss path). Returns false
+	 *  when a guard rejected the request, having changed nothing. */
+	bool BeginTransition(int32 DestinationStageOrder);
+
+	/** Where this transition is headed, as a StageOrder: the named destination when one was requested, otherwise
+	 *  the next COMBAT arena from the streaming roster. INDEX_NONE when neither can be answered.
+	 *
+	 *  Answered from the ROSTER, never from AFPSRArenaActor::FindAllInWorld — that one iterates the world, so it
+	 *  cannot see the arena a transition is about to need (parked but not yet visible), and would silently answer
+	 *  "the current arena". This is the readiness gate's input, i.e. exactly the case that must not read as ready. */
+	int32 GetDestinationStageOrder() const;
 
 	/** Grace's one-shot dealing timer expired: decide Pending vs. Swapping (DecidePhaseAfterDealing) and act on it. */
 	void OnDealingWindowClosed();
@@ -162,6 +207,12 @@ private:
 	 *  None. The still-active-mission cancel that used to happen here moved to RequestTransition (user decision
 	 *  2026-08-25) — see there. See the .cpp for the fixed step order. */
 	void PerformSwap();
+
+	/** StageOrder this transition was told to land on, or INDEX_NONE for the ordinary "cycle to the next combat
+	 *  arena" path (보스 스테이지, 2026-08-28). Set by RequestBossTransition, consumed by GetDestinationStageOrder
+	 *  (readiness gate) and PerformSwap (the actual pick), and cleared on EVERY exit from the state machine —
+	 *  success and each abort alike. A stale value here would send the NEXT suppressor break to the boss arena. */
+	int32 PendingDestinationStageOrder = INDEX_NONE;
 
 	/** True once HandleRunStateChanged has been bound to GameState::OnRunStateChanged, so entering Grace never
 	 *  binds the same handler twice across repeated transitions. */

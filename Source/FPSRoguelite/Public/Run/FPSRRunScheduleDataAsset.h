@@ -124,6 +124,19 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Run")
 	TObjectPtr<UFPSRBossDefinitionDataAsset> BossDefinition;
 
+	/**
+	 * 보스 아레나를 **BossTime 보다 이만큼 먼저** 파킹한다(초). 보스 스테이지, 2026-08-28.
+	 *
+	 * ADR 0012 축 5 와 같은 논리다 — 목적지 서브레벨의 `AddToWorld` 는 프레임당 5ms 로 잘려 여러 프레임에 걸쳐
+	 * 들어오므로, 전환 창 안에서 시작하면 창 길이가 하드웨어 함수가 된다(불변식 8 위반). 억제기 전환은 "한
+	 * 스테이지 앞서" 파킹으로 해결하지만 보스 전환에는 앞선 스테이지가 없다 — 시계가 부른다. 그래서 시간으로 앞당긴다.
+	 *
+	 * 이 값이 `BossTime` 이상이면 사실상 **런 시작 시 파킹**이 된다(음수 시각은 0 으로 잘린다). 0 이면 사전
+	 * 파킹을 하지 않고 전환이 목적지 준비를 기다린다(`StageSwapReadyTimeoutSeconds` 상한).
+	 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Run", meta = (DisplayName = "보스 아레나 사전 파킹 리드(초)", ClampMin = "0.0"))
+	float BossArenaParkLeadSeconds = 45.0f;
+
 	/** Level-driven target alive count (preferred): piecewise-linear anchors over party level. When NON-EMPTY this
 	 *  REPLACES the time ramp below — target = interp(GetPartyLevel()) (below the first anchor uses its Count, above
 	 *  the last stays flat at its Count), clamped to MaxAliveCount. Empty = legacy time ramp (BaseAliveCount + …).

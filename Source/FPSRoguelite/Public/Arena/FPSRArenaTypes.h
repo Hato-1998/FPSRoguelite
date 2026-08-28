@@ -7,6 +7,29 @@
 #include "FPSRArenaTypes.generated.h"
 
 /**
+ * What an arena is FOR — the axis a stage transition routes on (보스 스테이지, 2026-08-28).
+ *
+ * Why a role on the arena actor rather than a stage order in the run schedule: the arena roster is DERIVED from
+ * the level packages (UFPSRArenaStreamSubsystem::RefreshRoster reads StageOrder straight off the arena actor),
+ * never authored twice. Putting "which stage order is the boss one" in the schedule asset would create a second
+ * place to keep in sync by hand, and nothing would report the drift — the run would simply teleport the party
+ * into an ordinary arena and spawn the boss there.
+ *
+ * An enum rather than a bool because the same axis is what a later rest / shop / elite stage would ride on; a
+ * bool would have to be replaced rather than extended (사용자 지시 — 스키마는 확장성 우선).
+ */
+UENUM(BlueprintType)
+enum class EFPSRArenaRole : uint8
+{
+	/** An ordinary combat arena. The suppressor cycle advances through these and ONLY these. */
+	Combat UMETA(DisplayName = "전투"),
+
+	/** The boss arena. Deliberately skipped by the suppressor cycle — the ONLY way in is the run director's
+	 *  BossTime transition, and (by authoring) it carries no suppressor, so there is no way back out. */
+	Boss UMETA(DisplayName = "보스"),
+};
+
+/**
  * One axis-aligned blocking cluster in arena CELL space (both corners inclusive).
  *
  * Rectangles are not a convenience — they are ADR 0010 invariant 7 ("차단 요소는 볼록하고, 서로 오목을

@@ -69,13 +69,43 @@ private:
 	void SpawnMission(UFPSRMissionDataAsset* MissionData);
 	void OnMissionEnded(AFPSRMissionActor* Mission, bool bSuccess);
 	void EnterBoss();
+
+	/**
+	 * BossTime has arrived: get the party INTO the boss arena before any boss exists (보스 스테이지, 2026-08-28).
+	 *
+	 * Returns true when the caller should stop here and let the stage transition run (a transition was just
+	 * requested, or one is already in flight); false means "there is nothing to move to — spawn the boss where we
+	 * stand", which is the pre-boss-stage behaviour and stays the behaviour for any world with no boss arena
+	 * (test maps, automation worlds).
+	 *
+	 * Order matters and is not negotiable: PerformSwap teleports players and carries the swarm, but a boss is
+	 * NEITHER — it would be left alone in the old arena with its collision switched off and the run could never
+	 * reach victory or defeat. So the swap happens first, in Combat phase, and EnterBoss runs only once
+	 * GetActiveArena() reports the boss arena.
+	 *
+	 * Bounded by BossStageResolveTimeoutSeconds of run-clock-frozen director ticks: if the boss arena never becomes
+	 * reachable (package not loaded, transition rejected repeatedly, destination regenerate failure), it gives up
+	 * LOUDLY and degrades to spawning the boss in place. A run that cannot end is worse than a boss in the wrong room.
+	 */
+	bool TryEnterBossStage();
+
+	/** Ask the arena stream subsystem to make the boss arena visible ahead of BossTime (see
+	 *  UFPSRRunScheduleDataAsset::BossArenaParkLeadSeconds). Idempotent and cheap; fires once per run. */
+	void TryPreParkBossArena();
+
+	/** StageOrder of the world's boss arena, or INDEX_NONE if it has none. Asked of the streaming ROSTER, not of
+	 *  AFPSRArenaActor::FindAllInWorld — the boss arena is deliberately not visible yet when this is first asked. */
+	int32 FindBossArenaStageOrder() const;
+
+	/** True when the arena the run is standing in right now is authored as the boss arena. */
+	bool IsInBossArena() const;
 	/** Spawn the boss (BossDefinition->BossClass, or the C++ AFPSRBossBase fallback) at a boss spawn point and
 	 *  apply its definition. Called by EnterBoss after the swarm is cleared. */
 	void SpawnBoss();
 	/** Pick where the boss spawns. When bUseSpawnPoint, weighted-random among enabled AFPSRBossSpawnPoint actors
 	 *  (falling back to a player location + forward offset, with a warning, when none are placed). When false, the
 	 *  definition opted out of spawn points — go straight to the player-relative fallback. The boss always appears. */
-	FTransform SelectBossSpawnTransform(bool bUseSpawnPoint) const;
+	FTransform SelectBossSpawnTransform(bool bUseSpawnPoint, UClass* BossClass) const;
 	void DestroyActiveMission();
 
 	/** Time-scaled target alive enemy count from the schedule (or fallback) at the current run clock. */
@@ -120,6 +150,20 @@ private:
 	bool bRunActive = false;
 	bool bRunDebug = false;
 	bool bBossStarted = false;
+
+	/** The boss-stage question is settled: either the party is standing IN the boss arena, or this world has none
+	 *  (or the wait timed out). Latched so TryEnterBossStage stops asking the roster every tick once the answer
+	 *  can no longer change, and so a post-swap tick goes straight to EnterBoss. Reset by StartRun. */
+	bool bBossStageResolved = false;
+
+	/** Seconds of director ticks spent trying to reach the boss arena, against BossStageResolveTimeoutSeconds.
+	 *  Time-based rather than an attempt count because the thing being waited on (a level package loading, a
+	 *  concurrent suppressor transition finishing) takes seconds, and a director tick is 0.25s — a "3 attempts"
+	 *  budget would expire in under a second and degrade a perfectly healthy run to an in-place boss. */
+	float BossStageWaitElapsed = 0.0f;
+
+	/** True once the boss arena's pre-park has been requested this run (see BossArenaParkLeadSeconds). */
+	bool bBossArenaParkRequested = false;
 	/** Set when StartRun is called before any player pawn exists; spawning begins once one appears. */
 	bool bAwaitingFirstPlayer = false;
 	/** Set after a pawn appears until the opening-seed freeze engages — holds spawning so enemies can't
@@ -134,6 +178,19 @@ private:
 	static constexpr float DirectorInterval = 0.25f;
 	/** Max seconds to hold spawning waiting for the opening-seed freeze before proceeding anyway (anti-deadlock). */
 	static constexpr float OpeningSeedWaitTimeout = 5.0f;
+
+	/** Max seconds to keep trying to reach the boss arena at BossTime before spawning the boss in place instead
+	 *  (anti-deadlock, same shape as OpeningSeedWaitTimeout). Generous: it has to cover a boss-arena sublevel that
+	 *  is still streaming in AND a suppressor transition that happened to start on the same tick, both of which are
+	 *  legitimate multi-second waits. The run clock does not advance during this window, so the cost of being
+	 *  generous is only that the boss appears a little later. */
+	static constexpr float BossStageResolveTimeoutSeconds = 30.0f;
+
+	/** How long to keep asking the roster for a boss arena before concluding this world simply has none. Short on
+	 *  purpose: "not authored" and "package still loading" look identical from the roster, and the FIRST is by far
+	 *  the common case (every map without a boss stage) — a long grace here would delay the boss on all of them. A
+	 *  boss sublevel registered in the persistent level is loaded well inside this window. */
+	static constexpr float BossArenaLookupGraceSeconds = 2.0f;
 
 	// Fallback (test) schedule values when no schedule asset is assigned (no missions without content).
 	static constexpr float FallbackBossTime = 300.0f;

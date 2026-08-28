@@ -5,6 +5,8 @@
 #include "Run/FPSRStageFadeSubsystem.h"
 #include "Core/FPSRGameState.h"
 #include "Enemy/FPSRFlowFieldComputer.h"
+#include "Arena/FPSRArenaTypes.h" // EFPSRArenaRole (NextCombatArenaIndex's role filter)
+#include "Containers/ArrayView.h" // TConstArrayView
 
 #if WITH_AUTOMATION_TESTS
 
@@ -14,6 +16,7 @@
 //   IsDealingOpen                       — the FIXED-time dealing window actually closes at its end timestamp.
 //   ComputeStageSeed                    — deterministic + adjacent stages diverge (server computes once, replicates).
 //   NextArenaIndex                      — cycling through N arenas, including the single-arena self-cycle case.
+//   NextCombatArenaIndex                — the same cycle with boss arenas SKIPPED (보스 스테이지 라우팅).
 //   EFPSRStageTransitionPhase::None==0  — the enum's default must be the "normal play" value (safe replication default).
 //   FadeOut/FadeIn appended AFTER Swapping — Phase A must not reorder the pre-existing ordinals.
 //   UFPSRFlowFieldComputer::FindNearestOpenCell — the Phase A carry-over snap's worldless ring-search core.
@@ -94,6 +97,46 @@ bool FFPSRStageTransitionTest::RunTest(const FString& Parameters)
 		// No arenas: INDEX_NONE.
 		TestEqual(TEXT("0 arenas -> INDEX_NONE"), U::NextArenaIndex(0, 0), INDEX_NONE);
 		TestEqual(TEXT("negative count -> INDEX_NONE"), U::NextArenaIndex(0, -1), INDEX_NONE);
+	}
+
+	// --- (5b) NextCombatArenaIndex: the same cycle, but the suppressor path must SKIP boss arenas (보스 스테이지,
+	//          2026-08-28). The boss stage carries no suppressor by design, so a party cycled into it early would be
+	//          stuck there with no boss and no way out — this predicate is the only thing standing between the
+	//          ordinary transition and that state. ------------------------------------------------------------------
+	{
+		using ER = EFPSRArenaRole;
+
+		// 3 combat arenas: identical to NextArenaIndex — the role filter must be a no-op when nothing is filtered.
+		const ER AllCombat[] = { ER::Combat, ER::Combat, ER::Combat };
+		TestEqual(TEXT("3 combat: 0 -> 1"), U::NextCombatArenaIndex(0, AllCombat), 1);
+		TestEqual(TEXT("3 combat: 2 -> 0 (wraps)"), U::NextCombatArenaIndex(2, AllCombat), 0);
+
+		// The realistic authoring shape: two combat arenas + one boss arena last. The cycle must bounce OVER index 2
+		// and come back to 0 — this is the case that would otherwise drop the party into the boss stage on the
+		// second suppressor break of every run.
+		const ER TwoCombatOneBoss[] = { ER::Combat, ER::Combat, ER::Boss };
+		TestEqual(TEXT("combat,combat,boss: 0 -> 1"), U::NextCombatArenaIndex(0, TwoCombatOneBoss), 1);
+		TestEqual(TEXT("combat,combat,boss: 1 -> 0 (skips the boss arena)"), U::NextCombatArenaIndex(1, TwoCombatOneBoss), 0);
+
+		// A boss arena in the MIDDLE is skipped the same way — the filter is by role, not by position.
+		const ER BossInMiddle[] = { ER::Combat, ER::Boss, ER::Combat };
+		TestEqual(TEXT("combat,boss,combat: 0 -> 2 (skips index 1)"), U::NextCombatArenaIndex(0, BossInMiddle), 2);
+		TestEqual(TEXT("combat,boss,combat: 2 -> 0 (wraps past index 1)"), U::NextCombatArenaIndex(2, BossInMiddle), 0);
+
+		// One combat arena + one boss arena = the minimum shippable boss-stage map. The combat arena must self-cycle
+		// (reseeded, same skeleton) rather than advance into the boss stage.
+		const ER OneCombatOneBoss[] = { ER::Combat, ER::Boss };
+		TestEqual(TEXT("combat,boss: 0 -> 0 (self-cycle, never the boss arena)"), U::NextCombatArenaIndex(0, OneCombatOneBoss), 0);
+
+		// Degenerate inputs. An all-boss world is an authoring fault, and INDEX_NONE is what makes PerformSwap abort
+		// loudly instead of swapping into the boss stage.
+		const ER AllBoss[] = { ER::Boss, ER::Boss };
+		TestEqual(TEXT("all boss -> INDEX_NONE"), U::NextCombatArenaIndex(0, AllBoss), INDEX_NONE);
+		TestEqual(TEXT("empty roles -> INDEX_NONE"), U::NextCombatArenaIndex(0, TConstArrayView<ER>()), INDEX_NONE);
+
+		// An unknown current index (INDEX_NONE — no active arena yet) must still find a destination rather than
+		// stalling the run: the scan starts before the first entry.
+		TestEqual(TEXT("unknown current (-1) -> first combat arena"), U::NextCombatArenaIndex(INDEX_NONE, BossInMiddle), 0);
 	}
 
 	// --- (6) EFPSRStageTransitionPhase::None must be 0 — the safe replication default (a fresh GameState, or a

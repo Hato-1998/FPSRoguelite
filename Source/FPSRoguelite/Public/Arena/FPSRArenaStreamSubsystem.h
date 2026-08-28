@@ -3,6 +3,7 @@
 #pragma once
 
 #include "Subsystems/WorldSubsystem.h"
+#include "Arena/FPSRArenaTypes.h" // EFPSRArenaRole (held by value in FFPSRArenaSlot below)
 #include "FPSRArenaStreamSubsystem.generated.h"
 
 class AFPSRArenaActor;
@@ -25,6 +26,12 @@ struct FFPSRArenaSlot
 
 	/** Authored to be the live arena at level start (exactly one should be). */
 	bool bStartsActive = false;
+
+	/** What this arena is FOR (보스 스테이지, 2026-08-28). Carried on the SLOT and not looked up through Arena on
+	 *  demand because every consumer here (GetNextStageOrder's skip, FindStageOrderByRole) runs while the level may
+	 *  be parked-only, and the weak pointer can be null by the time a later caller dereferences it — the role has to
+	 *  survive in the roster snapshot the same way StageOrder does. */
+	EFPSRArenaRole Role = EFPSRArenaRole::Combat;
 };
 
 /**
@@ -116,10 +123,25 @@ public:
 	 * arena a transition is about to need. Asking the world would silently cycle back to the current arena and
 	 * the run would never advance.
 	 *
-	 * A single-arena roster returns that arena (cycling to itself is the intended single-arena behaviour, matching
-	 * UFPSRStageDirectorSubsystem::NextArenaIndex). INDEX_NONE only if there are no arenas at all.
+	 * A roster with one COMBAT arena returns that arena (cycling to itself is the intended single-arena behaviour,
+	 * matching UFPSRStageDirectorSubsystem::NextCombatArenaIndex).
+	 *
+	 * ⚠️ Boss arenas are SKIPPED (보스 스테이지, 2026-08-28). The suppressor cycle must never wander into the boss
+	 * stage — that stage carries no suppressor by design, so a party cycled into it early would be stuck there with
+	 * no boss and no way out. The boss arena is reached only through
+	 * UFPSRStageDirectorSubsystem::RequestBossTransition, which names its destination explicitly. A roster of
+	 * nothing BUT boss arenas therefore has no next combat arena and returns INDEX_NONE.
 	 */
 	int32 GetNextStageOrder(int32 CurrentStageOrder) const;
+
+	/** Lowest StageOrder in the roster whose arena carries Role, or INDEX_NONE if the world has none. Used by the
+	 *  run director to find the boss arena for the BossTime transition and its pre-park. Answered from the roster
+	 *  (not AFPSRArenaActor::FindAllInWorld) for the usual reason: the boss arena is deliberately NOT visible yet
+	 *  when the director first has to ask about it, and FindAllInWorld cannot see a parked-only level.
+	 *
+	 *  Duplicates are an authoring error the editor validator flags; this returns the lowest so the answer is at
+	 *  least deterministic, and logs nothing (it is asked every director tick during the pre-park window). */
+	int32 FindStageOrderByRole(EFPSRArenaRole Role) const;
 
 	/** Roster entry for StageOrder. Rebuilds the roster on demand — arena sublevels finish loading asynchronously,
 	 *  so the first call can legitimately come before they are all there.

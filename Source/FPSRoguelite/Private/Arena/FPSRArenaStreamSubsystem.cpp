@@ -96,6 +96,7 @@ void UFPSRArenaStreamSubsystem::RefreshRoster() const
 		Slot.StageOrder = Found->GetStageOrder();
 		Slot.Arena = Found;
 		Slot.bStartsActive = Found->StartsActive();
+		Slot.Role = Found->GetArenaRole();
 		Roster.Add(Slot);
 	}
 
@@ -132,6 +133,16 @@ int32 UFPSRArenaStreamSubsystem::FindStartingStageOrder() const
 			return Slot.StageOrder;
 		}
 	}
+	// Nothing authored as the starting arena: fall back to the first COMBAT one. Skipping boss arenas here matters
+	// as much as it does in GetNextStageOrder — a level that forgot bStartsActive would otherwise start the run
+	// inside the boss stage, which carries no suppressor and so has no way out.
+	for (const FFPSRArenaSlot& Slot : Roster)
+	{
+		if (Slot.Role == EFPSRArenaRole::Combat)
+		{
+			return Slot.StageOrder;
+		}
+	}
 	return Roster.Num() > 0 ? Roster[0].StageOrder : INDEX_NONE;
 }
 
@@ -144,10 +155,40 @@ int32 UFPSRArenaStreamSubsystem::GetNextStageOrder(int32 CurrentStageOrder) cons
 	}
 	const int32 Index = Roster.IndexOfByPredicate(
 		[CurrentStageOrder](const FFPSRArenaSlot& S) { return S.StageOrder == CurrentStageOrder; });
-	// An unknown current arena falls to the first entry rather than to "no next": the roster is authored content
-	// and the caller has a transition to run either way, so advancing to a real arena beats stalling the run.
-	const int32 NextIndex = (Index == INDEX_NONE) ? 0 : (Index + 1) % Roster.Num();
-	return Roster[NextIndex].StageOrder;
+	// An unknown current arena starts the scan BEFORE the first entry rather than answering "no next": the roster is
+	// authored content and the caller has a transition to run either way, so advancing to a real arena beats
+	// stalling the run. (-1 so the first step below lands on index 0.)
+	const int32 Start = (Index == INDEX_NONE) ? -1 : Index;
+
+	// Walk the cycle until a COMBAT arena turns up (보스 스테이지, 2026-08-28 — see the header). One full lap:
+	//  - a lone combat arena returns ITSELF at the last step, which is the intended single-arena behavior
+	//    (UFPSRStageDirectorSubsystem::NextArenaIndex's self-cycle, unchanged);
+	//  - a roster with no combat arena at all falls out with INDEX_NONE rather than handing the caller the boss
+	//    stage, which the suppressor cycle must never enter.
+	for (int32 Step = 1; Step <= Roster.Num(); ++Step)
+	{
+		const int32 Candidate = (Start + Step + Roster.Num()) % Roster.Num();
+		if (Roster[Candidate].Role == EFPSRArenaRole::Combat)
+		{
+			return Roster[Candidate].StageOrder;
+		}
+	}
+	return INDEX_NONE;
+}
+
+int32 UFPSRArenaStreamSubsystem::FindStageOrderByRole(EFPSRArenaRole Role) const
+{
+	RefreshRoster();
+	// Roster is sorted by StageOrder ascending, so the first match IS the lowest — see the header on why
+	// duplicates are left to the editor validator rather than warned about here.
+	for (const FFPSRArenaSlot& Slot : Roster)
+	{
+		if (Slot.Role == Role)
+		{
+			return Slot.StageOrder;
+		}
+	}
+	return INDEX_NONE;
 }
 
 bool UFPSRArenaStreamSubsystem::IsLevelVisibleLocally(FName PackageName) const
