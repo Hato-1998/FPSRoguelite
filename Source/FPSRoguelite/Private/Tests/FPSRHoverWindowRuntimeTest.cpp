@@ -1,4 +1,4 @@
-// Copyright Epic Games, Inc. All Rights Reserved.
+﻿// Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Misc/AutomationTest.h"
 #include "Enemy/FPSRHoverWindowSubsystem.h"
@@ -28,7 +28,10 @@ namespace
 		return V;
 	}
 
-	FFPSRHoverWindowDims MakeDims(int32 DimX, int32 DimY, int32 DimZ)
+	// ⚠️ 이름이 파일별로 다른 것은 의도다 — 익명 네임스페이스는 **번역 단위**를 격리할 뿐이라,
+	//    유니티 빌드가 두 테스트 .cpp 를 한 블롭으로 합치면 동명 정의가 재정의(C2084)로 깨진다.
+	//    -DisableUnity 로는 절대 재현되지 않고 패키지(유니티) 빌드에서만 터진다 — 실사고 2026-08-28.
+	FFPSRHoverWindowDims MakeRuntimeDims(int32 DimX, int32 DimY, int32 DimZ)
 	{
 		FFPSRHoverWindowDims D;
 		D.DimX = DimX; D.DimY = DimY; D.DimZ = DimZ;
@@ -49,7 +52,7 @@ bool FFPSRHoverWindowRuntimeTest::RunTest(const FString& Parameters)
 		FPSRHoverWindow::SetOccupied(Global.Occupancy, Global.VoxelIndex(4, 5, 4));
 		FPSRHoverWindow::SetOccupied(Global.Occupancy, Global.VoxelIndex(1, 1, 1)); // outside the window below
 
-		const FFPSRHoverWindowDims WinDims = MakeDims(4, 4, 4);
+		const FFPSRHoverWindowDims WinDims = MakeRuntimeDims(4, 4, 4);
 		const FIntVector MinCell(2, 2, 2); // window covers global [2,6) on every axis — fully inside [0,10)
 		TArray<uint64> WinOccupancy;
 		Global.CopyWindow(MinCell, WinDims, WinOccupancy);
@@ -79,7 +82,7 @@ bool FFPSRHoverWindowRuntimeTest::RunTest(const FString& Parameters)
 	//          cells (and rows) are fail-closed occupied. ----
 	{
 		FFPSRArenaVoxelData Global = MakeVoxelData(6, 6, 6, 150.0f, FVector::ZeroVector); // all open
-		const FFPSRHoverWindowDims WinDims = MakeDims(4, 4, 4);
+		const FFPSRHoverWindowDims WinDims = MakeRuntimeDims(4, 4, 4);
 		const FIntVector MinCell(-2, 2, 4); // X: [-2,2) half outside (X<0) ; Y: [2,6) fully inside; Z: [4,8) half outside (Z>=6)
 		TArray<uint64> WinOccupancy;
 		Global.CopyWindow(MinCell, WinDims, WinOccupancy);
@@ -99,7 +102,7 @@ bool FFPSRHoverWindowRuntimeTest::RunTest(const FString& Parameters)
 	// ---- (3) CopyWindow: a window entirely outside the global field -> every cell fail-closed occupied. ----
 	{
 		FFPSRArenaVoxelData Global = MakeVoxelData(4, 4, 4, 150.0f, FVector::ZeroVector); // all open
-		const FFPSRHoverWindowDims WinDims = MakeDims(3, 3, 3);
+		const FFPSRHoverWindowDims WinDims = MakeRuntimeDims(3, 3, 3);
 		const FIntVector MinCell(100, 100, 100);
 		TArray<uint64> WinOccupancy;
 		Global.CopyWindow(MinCell, WinDims, WinOccupancy);
@@ -115,7 +118,7 @@ bool FFPSRHoverWindowRuntimeTest::RunTest(const FString& Parameters)
 	// ---- (4) CopyWindow: an unbaked global field (no data at all) -> fail-closed occupied everywhere too. ----
 	{
 		FFPSRArenaVoxelData Unbaked; // default-constructed: DimX/Y/Z=0, Occupancy empty -> IsBakedVoxels() false
-		const FFPSRHoverWindowDims WinDims = MakeDims(2, 2, 2);
+		const FFPSRHoverWindowDims WinDims = MakeRuntimeDims(2, 2, 2);
 		TArray<uint64> WinOccupancy;
 		Unbaked.CopyWindow(FIntVector(0, 0, 0), WinDims, WinOccupancy);
 		bool bAllOccupied = true;
@@ -129,7 +132,7 @@ bool FFPSRHoverWindowRuntimeTest::RunTest(const FString& Parameters)
 	// ---- (5) ComputeWindowMinCell: a player exactly at a cell's centre snaps to that cell, then the window is
 	//          re-centred so the player's cell sits at (DimX/2, DimY/2, DimZ/2) inside it. ----
 	{
-		const FFPSRHoverWindowDims Dims = MakeDims(64, 64, 24);
+		const FFPSRHoverWindowDims Dims = MakeRuntimeDims(64, 64, 24);
 		constexpr float VoxelSize = 150.0f;
 		const FVector Origin = FVector::ZeroVector;
 		// Cell (32,32,12)'s centre.
@@ -149,7 +152,7 @@ bool FFPSRHoverWindowRuntimeTest::RunTest(const FString& Parameters)
 	// ---- (6) ResolveQuery: source directly ABOVE the query cell -> Direction.Z > 0 and SeekZ = the source layer's
 	//          world-centre Z (the plan's "위층 소스 -> Direction Z>0, SeekZ=위층 Z" case). ----
 	{
-		const FFPSRHoverWindowDims Dims = MakeDims(3, 3, 3);
+		const FFPSRHoverWindowDims Dims = MakeRuntimeDims(3, 3, 3);
 		constexpr float VoxelSize = 150.0f;
 		const FVector WindowWorldOrigin = FVector::ZeroVector;
 
@@ -181,7 +184,7 @@ bool FFPSRHoverWindowRuntimeTest::RunTest(const FString& Parameters)
 	// ---- (7) ResolveQuery: source on the SAME layer -> Direction.Z == 0 and bSeekValid stays false (2D terrain-
 	//          follow keeps driving Z, the plan's "평지 -> bSeekValid=false" case). ----
 	{
-		const FFPSRHoverWindowDims Dims = MakeDims(3, 3, 3);
+		const FFPSRHoverWindowDims Dims = MakeRuntimeDims(3, 3, 3);
 		constexpr float VoxelSize = 150.0f;
 		const FVector WindowWorldOrigin = FVector::ZeroVector;
 
@@ -211,7 +214,7 @@ bool FFPSRHoverWindowRuntimeTest::RunTest(const FString& Parameters)
 	// ---- (8) ResolveQuery: rejection cases — unreached cell, the source cell itself, and a query too close to the
 	//          window's own edge (inside EdgeMarginCells) all fail closed to false. ----
 	{
-		const FFPSRHoverWindowDims Dims = MakeDims(4, 4, 4);
+		const FFPSRHoverWindowDims Dims = MakeRuntimeDims(4, 4, 4);
 		constexpr float VoxelSize = 150.0f;
 		const FVector WindowWorldOrigin = FVector::ZeroVector;
 
@@ -246,7 +249,7 @@ bool FFPSRHoverWindowRuntimeTest::RunTest(const FString& Parameters)
 	// ---- (9) ResolveSourceCell: an occupied player cell snaps to the nearest free cell in the same XY column,
 	//          preferring the closer of up/down and ties broken upward; an all-occupied column fails closed. ----
 	{
-		const FFPSRHoverWindowDims Dims = MakeDims(3, 3, 5);
+		const FFPSRHoverWindowDims Dims = MakeRuntimeDims(3, 3, 5);
 		TArray<uint64> Occupancy;
 		Occupancy.Init(0, FPSRHoverWindow::OccupancyWords(Dims.NumCells()));
 
