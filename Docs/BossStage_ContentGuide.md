@@ -35,21 +35,25 @@
 되돌리는 법(에디터 닫고):
 
 ```bash
-git checkout -- Content/Maps/Data/DA_Map_2_ArenaBake.uasset
+git checkout f105933a -- Content/Maps/Data/DA_Map_2_ArenaBake.uasset
 ```
 
-커밋된 판이 L_Map_2 의 올바른 베이크이고 `L_Map_2.umap` 은 그 뒤로 바뀌지 않았으므로, **재베이크는
-필요 없다.** 복구 후 L_Map_2 를 열어 데이터 검증(아래 §8)이 초록인지만 확인하면 된다.
+> ⚠️ `git checkout --`(커밋 지정 없이)로는 안 된다. PC 이동을 위해 이 깨진 상태가 `a6b1edc3` 에
+> **이미 커밋됐기 때문**이다 — 커밋 지정 없이 부르면 깨진 판이 그대로 돌아온다. `f105933a` 는
+> 이 사고 직전의 마지막 정상 커밋이다.
+
+`f105933a` 의 판이 L_Map_2 의 올바른 베이크이고 `L_Map_2.umap` 은 그 뒤로 바뀌지 않았으므로, **재베이크는
+필요 없다.** 복구 후 L_Map_2 를 열어 데이터 검증(아래 §9)이 초록인지만 확인하면 된다.
 
 > 이 사고는 이제 검증기가 잡는다 — 베이크 에셋의 `소스 레벨` 이 그 레벨과 다르면 **에러**로 뜬다.
 
 ## 2. L_Map_3 리다이렉터 껍질 삭제
 
 `Content/Maps/L_Map_3.umap` 은 실제 맵이 아니라 **1.2KB 짜리 이름변경 흔적**(`ObjectRedirector` →
-`L_Map_Boss`)이다. 커밋된 적 없으니 그냥 지운다.
+`L_Map_Boss`)이다. PC 이동 스냅샷(`a6b1edc3`)에 함께 담겼으므로 이제는 추적되는 파일이다 — `git rm` 으로 지운다.
 
 ```bash
-rm Content/Maps/L_Map_3.umap
+git rm Content/Maps/L_Map_3.umap
 ```
 
 ## 3. 🔴 L_Map_Boss 의 위치를 비어 있는 자리로 옮긴다
@@ -179,3 +183,31 @@ rm Content/Maps/L_Map_3.umap
   적용된다. 의도된 동작이지만(보스전 = 가장 빡센 스테이지), 밸런싱 때 이 사실을 기억할 것.
 - **결산 내용은 이번 범위 밖**이다(사용자 결정 4). 기존 결과 위젯 → 로비 복귀로 루프만 닫는다.
   재화·해금은 메타 프로그레션 실물화(M3) 트랙.
+
+---
+
+## 부록 — 다른 PC에서 이어받기
+
+```bash
+git clone https://github.com/Hato-1998/FPSRoguelite.git
+cd FPSRoguelite
+git lfs install
+git checkout phase/boss-stage-transition
+git lfs pull
+```
+
+이미 클론이 있으면:
+
+```bash
+git fetch origin
+git checkout phase/boss-stage-transition
+git lfs pull
+```
+
+그 다음 **에디터를 열기 전에** 위 §1(베이크 원복)·§2(리다이렉터 삭제)를 먼저 처리한다.
+C++ 는 새 UPROPERTY(`아레나 역할`)와 새 UENUM 이 들어갔으므로 **에디터 첫 실행 전에 빌드해야 한다**
+(라이브 코딩 금지 — `Docs/SSOT/Workflow.md` §6-6):
+
+```bash
+"<엔진루트>/Engine/Build/BatchFiles/Build.bat" FPSRogueliteEditor Win64 Development -Project="<클론>/FPSRoguelite.uproject" -WaitMutex
+```
