@@ -1,4 +1,4 @@
-// Copyright Epic Games, Inc. All Rights Reserved.
+﻿// Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Misc/AutomationTest.h"
 #include "Enemy/FPSRHoverWindowCore.h"
@@ -19,7 +19,10 @@
 
 namespace
 {
-	FFPSRHoverWindowDims MakeDims(int32 DimX, int32 DimY, int32 DimZ)
+	// ⚠️ 이름이 파일별로 다른 것은 의도다 — 익명 네임스페이스는 **번역 단위**를 격리할 뿐이라,
+	//    유니티 빌드가 두 테스트 .cpp 를 한 블롭으로 합치면 동명 정의가 재정의(C2084)로 깨진다.
+	//    -DisableUnity 로는 절대 재현되지 않고 패키지(유니티) 빌드에서만 터진다 — 실사고 2026-08-28.
+	FFPSRHoverWindowDims MakeBenchDims(int32 DimX, int32 DimY, int32 DimZ)
 	{
 		FFPSRHoverWindowDims D;
 		D.DimX = DimX; D.DimY = DimY; D.DimZ = DimZ;
@@ -57,7 +60,7 @@ bool FFPSRHoverWindowCoreTest::RunTest(const FString& Parameters)
 	// ---- (1) Open 8x8x4 grid, single source at a corner: source integrates to 0, face neighbours to 1, the
 	//          opposite corner to the exact Manhattan distance (6-neighbour BFS == Manhattan on an open grid). ----
 	{
-		const FFPSRHoverWindowDims Dims = MakeDims(8, 8, 4);
+		const FFPSRHoverWindowDims Dims = MakeBenchDims(8, 8, 4);
 		const TArray<uint64> Occupancy = MakeOpenOccupancy(Dims);
 		const int32 SourceCell = Dims.CellIndex(0, 0, 0);
 		const TArray<int32> Sources = { SourceCell };
@@ -115,7 +118,7 @@ bool FFPSRHoverWindowCoreTest::RunTest(const FString& Parameters)
 	//          space top from bottom; punching ONE hole reconnects it, and the same (X,Y) column then carries
 	//          genuinely independent distances above vs. below the slab (a single column value could not). ----
 	{
-		const FFPSRHoverWindowDims Dims = MakeDims(8, 8, 5);
+		const FFPSRHoverWindowDims Dims = MakeBenchDims(8, 8, 5);
 		const int32 SourceCell = Dims.CellIndex(0, 0, 0);
 		const TArray<int32> Sources = { SourceCell };
 
@@ -175,7 +178,7 @@ bool FFPSRHoverWindowCoreTest::RunTest(const FString& Parameters)
 	// ---- (3) Complete enclosure: a source with all 6 face neighbours occupied cannot expand at all — only the
 	//          source cell itself integrates, everything else in the window stays unreached. ----
 	{
-		const FFPSRHoverWindowDims Dims = MakeDims(5, 5, 5);
+		const FFPSRHoverWindowDims Dims = MakeBenchDims(5, 5, 5);
 		TArray<uint64> Occupancy = MakeOpenOccupancy(Dims);
 		const int32 SourceCell = Dims.CellIndex(2, 2, 2);
 		for (const FIntVector& Offset : Offsets6)
@@ -196,7 +199,7 @@ bool FFPSRHoverWindowCoreTest::RunTest(const FString& Parameters)
 
 	// ---- (4) All sources occupied: nothing seeds -> Propagate returns 0. ----
 	{
-		const FFPSRHoverWindowDims Dims = MakeDims(4, 4, 4);
+		const FFPSRHoverWindowDims Dims = MakeBenchDims(4, 4, 4);
 		TArray<uint64> Occupancy = MakeOpenOccupancy(Dims);
 		const int32 SourceCell = Dims.CellIndex(1, 1, 1);
 		FPSRHoverWindow::SetOccupied(Occupancy, SourceCell);
@@ -211,7 +214,7 @@ bool FFPSRHoverWindowCoreTest::RunTest(const FString& Parameters)
 	//          26 table (uniform-cost diagonal moves), demonstrating why the neighbour table choice matters for
 	//          cost SPREAD even before any real-distance weighting decision (ADR 0009 decision item 1). ----
 	{
-		const FFPSRHoverWindowDims Dims = MakeDims(4, 4, 4);
+		const FFPSRHoverWindowDims Dims = MakeBenchDims(4, 4, 4);
 		const TArray<uint64> Occupancy = MakeOpenOccupancy(Dims);
 		const int32 SourceCell = Dims.CellIndex(0, 0, 0);
 		const int32 TargetCell = Dims.CellIndex(3, 3, 3);
@@ -338,7 +341,7 @@ bool FFPSRHoverWindowBenchTest::RunTest(const FString& Parameters)
 
 	for (const FWindowSize& Size : Sizes)
 	{
-		const FFPSRHoverWindowDims Dims = MakeDims(Size.DimX, Size.DimY, Size.DimZ);
+		const FFPSRHoverWindowDims Dims = MakeBenchDims(Size.DimX, Size.DimY, Size.DimZ);
 		const int32 NumCells = Dims.NumCells();
 		const int32 SourceCell = Dims.CellIndex(Dims.DimX / 2, Dims.DimY / 2, Dims.DimZ / 2);
 		const TArray<int32> Sources = { SourceCell };
@@ -394,7 +397,7 @@ bool FFPSRHoverWindowBenchTest::RunTest(const FString& Parameters)
 	// 96x96x32 open/6-neighbour propagations run back to back and summed. This is NOT the real staggered
 	// round-robin scheduler (invariant 5 defers that) — it's the crude "all four land in the same frame" ceiling.
 	{
-		const FFPSRHoverWindowDims Dims = MakeDims(96, 96, 32);
+		const FFPSRHoverWindowDims Dims = MakeBenchDims(96, 96, 32);
 		const int32 SourceCell = Dims.CellIndex(48, 48, 16);
 		const TArray<int32> Sources = { SourceCell };
 		const TArray<uint64> Occupancy = MakeBenchOccupancy(EFPSRHoverBenchPattern::Open, Dims, SourceCell);
