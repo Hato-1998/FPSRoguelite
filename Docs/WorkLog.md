@@ -9,6 +9,78 @@
 
 ---
 
+## 🔷 HB1 — 적 체력바 네이티브 승격 (2026-08-27, main 머지 `9118a622` + `5f54fa3f` + `f74f790e`)
+> 보드 행 = *"적 체력바 네이티브 승격 — 위젯 컴포넌트 + 바인딩을 C++ 로"*(M0 · 하이 · M · Fable 게이트).
+> 명세 = **`Docs/Specs/HB1_EnemyNativeHealthBar.md`**(rev3 + G2 P3 반영). 브랜치 `feat/enemy-native-healthbar`.
+> ⚠️ 상태 = `검증중` — 코드·콘텐츠·자동화는 끝났고 **PIE 실화면 확인만 남았다**.
+
+### 발단 — "Enemy 2(큐브형)는 애초에 HP바가 안 뜬다"
+
+LOD1 직후 사용자 PIE 보고. 조사 결과 **코드 버그가 아니라 콘텐츠 누락**이었다. 적 BP 3종 컴포넌트 실측:
+
+| BP | 메시 | 체력바 위젯 |
+|---|---|---|
+| `BP_EnemyMeleeBase` | `SM_EnemyProto_Bipyramid` | ✅ 수동 저작(`HealthBarWidget`, **Space=Screen**) |
+| **`BP_EnemyRangedBase`** | **`SM_EnemyProto_AtomCubes`**(= "큐브형") | ❌ **없음** |
+| `BP_EnemyEliteBase` | `SM_EnemyProto_AtomCubes` | ❌ **없음** |
+
+`InitHealthBarWidget` 이 `FindComponentByClass<UWidgetComponent>()` 로 찾으므로 컴포넌트가 없으면 null → **체력바가 뜬 적이 없다.** 로스터 순서(Melee/Ranged/Elite)상 "Enemy 2" = Ranged 확정.
+
+**사용자 결정 = C++ 네이티브 승격.** 근거 = 지금 구조는 BP 마다 사람이 잊지 않고 붙여야 성립하는데 **셋 중 둘이 잊혔다. 그게 이 구조에 대한 평가다.**
+
+### 구조 — 컴포넌트만 옮기면 절반짜리였다
+
+C0 에서 드러난 것: 바인딩이 `OnHealthBarReady`(BIE) → **각 BP 가** `GetUserWidgetObject → Cast → InitHealthComp` 를 손으로 배선하는 구조다. 컴포넌트만 네이티브화하면 **배선은 여전히 아키타입마다 잊힐 수 있다.** 그래서:
+
+- **`UFPSREnemyHealthBarWidget` 신설** = 바인딩 계약 1개(`BindHealthComponent`)만 담는 C++ 위젯 베이스. 이름이 `InitHealthComp` 가 **아닌** 것은 WBP 의 동명 BP 함수와 충돌을 피하기 위함(재부모화 시 깨진다).
+- **`AFPSREnemyBase::HealthBarWidgetComponent`** = 네이티브 ctor 서브오브젝트. 이름이 `HealthBarWidget` 이 **아닌** 것도 멜리 BP 의 동명 수동 컴포넌트와 충돌 회피(LOD1 실사고 재발 방지). ctor 기본값 8개 = 멜리 BP 실측값 전사 → 그 아키타입은 무회귀 마이그레이션.
+- **위젯 클래스 = config 소프트경로**(`UFPSREnemyRenderSettings::HealthBarWidgetClass`). BP 오버라이드가 이긴다. 양쪽 다 비면 **`SetTickMode(Disabled)` 후 반환** — 없으면 위젯 없는 스크린 공간 컴포넌트가 **캡 500 전원 영구 매프레임 틱**한다(위젯-없음 조기 종료가 요구하는 `bRenderCleared` 는 월드 공간 드로우에서만 set 되고, 자기-틱-차단은 `Widget &&` 를 요구 → 둘 다 미발화).
+
+### 🚨 같은 엔진 모델로 세 번 틀렸다 (G1 이 두 번 반려)
+
+전부 **`UWidgetComponent` 의 틱·수명주기 모델**이었고, 전부 설계자(Opus) 오류였다.
+
+1. **LOD1**: 절감을 "RT 드로우 + 컴포넌트 틱 정지"로 적었다 — 이 프로젝트 헬스바는 **스크린 공간**이라 RT 드로우 경로를 애초에 안 탄다.
+2. **HB1 rev1**: 위 오류를 고치려다 **"틱도 안 멈춘다, `SetTickMode` 는 no-op"** 으로 뒤집었다 → G1 P1 반려. 실제로는 멈춘다 — `SetHiddenInGame` → 스크린 레이어 제거(`RemoveWidgetFromScreen`) → 슬레이트 해제 → `UWidget::IsVisible()` 이 캐시 없어 false(`Widget.cpp:395-404`) → `:1262` 가드 발화. **맞는 절감을 지울 뻔했고**, 그대로 갔다면 다음 사람이 `SetTickMode(Automatic)` 을 죽은 코드로 보고 지워 숨은 바 300개가 매 프레임 도는 회귀가 났을 것이다.
+3. **HB1 rev2**: 재표시 홀 처방을 `ApplyHealthBarVisibility` **안**에 넣었다 → G1 신규 P1 반려. **두 세터의 값-가드가 Apply 앞에 있어** 목표 케이스(비사망 재사용, 두 축 모두 값 무변화)에서 **도달 불가**였다. 근거로 인용한 문장이 곧 처방을 무효화하는 문장이었다.
+
+**교훈**: "구조 상수인가"를 값마다 따로 묻지 않고 같은 헤더에 있다는 이유로 묶어 판정했던 LOD1 §9 오류와 같은 계열이다. 이 영역은 추론보다 소스 대조를 우선할 것.
+
+### 재표시 홀 — LOD1 잠재 결함을 여기서 닫았다
+
+**증상**: rear-drain 등 **사망을 거치지 않고** 풀로 돌아간 적이 **근거리에서 재사용되면 그 생애 내내 체력바가 안 뜬다.**
+**기전**: 숨겨진 위젯은 틱을 자기-차단하는데, 되켜는 경로(`OnHiddenInGameChanged`)는 `SetHiddenInGame` 이 **값을 바꿀 때만** 발화한다. 그런데 비사망 재사용은 `SetHealthBarAllowed(true)`·`SetHealthBarInRange(true)` **둘 다 값 무변화**라 `ApplyHealthBarVisibility` 자체가 안 불린다. **사망 경유는 엣지가 있어 안전** — LOD1 PIE ⑥ 통과가 이 구멍을 반증하지 못한 이유다.
+**처방(G1 A안)**: `Activate` 와 클라 언하이드 리셋에서 **값-가드를 우회해 직접 대입 + `Apply` 직접 호출**. 세터의 값-가드는 둘 다 유지(`SetHealthBarInRange` 는 0.2초 핫 경로).
+> ⚠️ `SetHealthBarAllowed` 독스트링이 이 변경으로 거짓이 됐고(호출처 3곳 → 실제 1곳), **그 거짓이 홀 재도입을 안내**한다는 것을 G2 가 잡았다 — 우회가 의도임을 못 박았다.
+
+### 검증
+
+빌드 `Result: Succeeded`(`-DisableUnity -NoXGE`) · **BP `Internal Compiler Error` 0건**(이름 회피 성공) · 헤드리스 자동화.
+
+**신규 자동화 = 유닛 완결 조건의 기계화.** `Enemy.BlueprintParent` 에 "적 BP 당 `UWidgetComponent` 총수(CDO 네이티브 + SCS) == 1" 검사를 추가했다. 머지 시점에는 **멜리 2 로 의도적 레드**(사용자 작업 전), 사용자 작업 후 **셋 다 1 로 그린**. 실측 추이:
+
+| 시점 | 엘리트 | 멜리 | 원거리 |
+|---|---|---|---|
+| 구현 직후 | 1 | **2** ❌ | 1 |
+| 사용자 작업 후 | 1 | **1** ✅ | 1 |
+
+### 사용자 작업(완료) — 이것 없이는 코드만으로 완결되지 않았다
+
+1. `WBP_EnemyHealthBar` 재부모화 → `UFPSREnemyHealthBarWidget` + `Event BindHealthComponent → InitHealthComp` 배선.
+2. `BP_EnemyMeleeBase` 정리 — 수동 컴포넌트 삭제 **+ `OnHealthBarReady` 그래프 배선 제거**(둘 다. 컴포넌트만 지우면 BP 컴파일이 깨진다).
+3. `DefaultGame.ini` 위젯 클래스 저작(`5f54fa3f`, 세션이 처리) — **클래스 소프트경로라 `_C` 접미사 필요**.
+
+**G2 P2(전환창 무기한)** = 코드 결함이 아니라 머지 순서 문제였다. 사용자가 머지 직후 작업을 이어받아 **전환창이 당일로 고정**되며 해소됐다.
+
+### 남은 것 / 파생
+
+- ⚠️ **PIE 실화면 확인**(명세 §12-8): 원거리·엘리트에 바가 뜨는가 · 멜리에 **하나만** 뜨는가 · 피격 시 줄고 사망 시 사라지는가 · **비사망 드레인 후 근거리 재사용 시 바가 즉시 뜨는가**(§6-3 이 닫은 홀) · **WBP 루트가 상시 Visible 인가**(§9 계약 — 자기-숨김 저작이면 휴면 풀의 스크린 레이어 엔트리가 잔류).
+- **LOD1 명세 정정 반영**: §3-2·§10(RT 드로우 주장 철회, 틱 정지 기전 교정, 스크린 레이어 제거 = 진짜 절감분) + §11 백로그의 **반대로 적힌 기전**.
+- ⚠️ **M0 성능 베이스라인은 이 유닛 이후에 재야 유효**하다 — 원거리·엘리트에 바가 새로 생겼다.
+- 관련 백로그: 「적 재스폰 시 체력바 잔존 표시 버그」(M1) = 비목표 유지 · 「비사망 휴면의 헬스바 틱 비대칭」(M0 백로그) = **HB1 §6-3 이 실질 해소**, 기전 서술 정정 + 재판정 대상.
+
+---
+
 ## 🔷 LOD1 — 적 프로토 메시 LOD·거리밴드 재정합 (2026-08-27, main 머지 `957928c2`)
 > 보드 행 = *"적 프로토 메시 LOD·거리밴드 재정합"*(M0 · 하이 · M · Fable 게이트). 구 이름 "VAT-4".
 > 명세 = **`Docs/Specs/LOD1_EnemyDistanceBand.md`**(rev3 + C3 정정 + §13 원장). 브랜치 `perf/enemy-lod-distanceband`.
