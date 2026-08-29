@@ -95,11 +95,21 @@ git rm Content/Maps/L_Map_3.umap
 
 → 아레나 정중앙에 **지름 25 m · 높이 약 2 m** 의 `WorldStatic` 콜리전을 놓는다(메시는 안 보이게 해도 된다).
 
+- 🔴 **반드시 `L_Map_Boss` 서브레벨에 놓는다 — 지속 레벨(`L_Arena`)이 아니다.** 베이크는 아레나 액터의
+  **자기 레벨만** 훑는다(`FPSRArenaBakeHash.cpp:151` — `Actor->GetLevel() != ArenaLevel` 이면 건너뛴다).
+  지속 레벨에 놓으면 **발판이 마스크에 안 들어간다.** 그런데 물리적으로는 존재하므로 **플레이어와 총알은
+  정상적으로 막혀** PIE 에서 잘 되는 것처럼 보이고, **스웜 적만 조용히 통과한다** — 발판을 놓은 목적이
+  정확히 그건데 그것만 실패한다. (실사고 2026-08-29)
+  - 이미 잘못 놓았으면: 액터 선택 → Levels 패널에서 `L_Map_Boss` 를 더블클릭해 Current Level 로 만든 뒤
+    `Actor > Level > Move Selected Actors to Level` → **그 다음 반드시 다시 굽는다.**
+  - 확인법: Levels 패널에서 `L_Map_Boss` 만 숨겼을 때 발판도 같이 사라지면 소속이 맞다.
 - **높이 2 m 인 이유**: 60 cm 이상이어야 플로우필드가 벽으로 인식하고(ADR 0010 불변식 4), 낮아야
   **총알이 그 위를 지나 보스 몸통에 맞는다**. 보스 전체 높이(50 m)로 막으면 벽 트레이스가 총알을
   먼저 멈춰 **보스를 아예 못 잡는다.**
 - 45 ~ 60 cm 는 저작 금지 구간이다(적이 끼는 밴드).
 - 지름은 보스 원기둥과 같게 — 25 m = 2500 cm.
+- 콜리전 요건(`FPSRArenaBakeHash.cpp:59-73` `ContributesToBake`): 오브젝트 타입 **`WorldStatic`** +
+  **`QueryOnly` 또는 `QueryAndPhysics`**. `PhysicsOnly`·`NoCollision` 은 프로브가 통과해 베이크에 안 들어간다.
 
 ### 5-2. 베이크
 

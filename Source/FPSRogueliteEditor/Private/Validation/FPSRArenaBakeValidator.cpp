@@ -85,7 +85,14 @@ EDataValidationResult UFPSRArenaBakeValidator::ValidateLoadedAsset_Implementatio
 			// SourceLevel 이 비어 있으면 "아직 안 구움"이고 위 NoAsset/NotBaked 가 이미 말한다.
 			// PIE 패키지 접두사(`UEDPIE_0_`)는 검증기 경로엔 나타나지 않는다(에디터 에셋 검사).
 			const FString BakedFrom = Bake->SourceLevel.GetLongPackageName();
-			const FString ThisLevel = World->GetPackage() ? World->GetPackage()->GetName() : FString();
+			// ⚠️ 비교 대상은 **아레나가 실제로 사는 레벨**이지, 검사 중인 월드가 아니다. FindAllInWorld 는
+			//    TActorIterator 라 **로드된 서브레벨을 전부** 훑으므로, 지속 레벨(L_Arena)을 검사하면 서브레벨
+			//    아레나가 전부 잡힌다. 검사 월드(=L_Arena)와 비교하면 그것들의 SourceLevel(=자기 서브레벨)이
+			//    당연히 달라 **모든 아레나가 매번 오탐**으로 걸리고, Invalid 라 지속 레벨 커밋이 영구 차단된다.
+			//    베이크가 쓰는 값과 같은 축으로 재야 한다(FPSRArenaAuthoringTool.cpp:783 —
+			//    `Asset->SourceLevel = FSoftObjectPath(Arena->GetTypedOuter<UWorld>())`). 실사고 2026-08-29.
+			const UWorld* ArenaWorld = Arena->GetTypedOuter<UWorld>();
+			const FString ThisLevel = (ArenaWorld && ArenaWorld->GetPackage()) ? ArenaWorld->GetPackage()->GetName() : FString();
 			if (!BakedFrom.IsEmpty() && !ThisLevel.IsEmpty() && BakedFrom != ThisLevel)
 			{
 				Context.AddError(FText::FromString(FString::Printf(
