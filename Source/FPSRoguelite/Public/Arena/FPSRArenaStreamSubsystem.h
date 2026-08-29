@@ -134,6 +134,21 @@ public:
 	 */
 	int32 GetNextStageOrder(int32 CurrentStageOrder) const;
 
+	/**
+	 * `GetNextStageOrder` 의 **순수 코어** — 로스터를 (StageOrder, Role) 두 배열로 편 것과 현재 StageOrder 를
+	 * 받아 다음 전투 아레나의 StageOrder 를 돌려준다. 월드도 로스터도 필요 없다.
+	 *
+	 * 분리한 이유는 검증가능성 하나다. `GetNextStageOrder` 는 스트리밍 서브레벨이 있는 월드를 요구해 헤드리스
+	 * 단위 테스트가 불가능했고, 그래서 순환 규칙을 `NextCombatArenaIndex` 호출로 통일한 리팩터가 **테스트
+	 * 없이** 지나갔다(레드팀 P3-1 이 지적한 공백 — 그때 동작 보존 근거는 PIE 시드 일치뿐이었다).
+	 * 인덱스 산술 · StageOrder 매핑 · 빈 로스터 · 길이 불일치 경로가 여기로 내려와 전부 테스트로 잠긴다.
+	 *
+	 * `Roles` 길이가 `StageOrders` 와 다르면 INDEX_NONE — 두 배열은 같은 로스터를 편 것이므로 어긋나면
+	 * 호출부 버그이고, 그때 인덱스로 다른 배열을 찌르는 것보다 "답 없음"이 안전하다.
+	 */
+	static int32 NextCombatStageOrder(TConstArrayView<int32> StageOrders, TConstArrayView<EFPSRArenaRole> Roles,
+									  int32 CurrentStageOrder);
+
 	/** Lowest StageOrder in the roster whose arena carries Role, or INDEX_NONE if the world has none. Used by the
 	 *  run director to find the boss arena for the BossTime transition and its pre-park. Answered from the roster
 	 *  (not AFPSRArenaActor::FindAllInWorld) for the usual reason: the boss arena is deliberately NOT visible yet

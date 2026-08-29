@@ -6,6 +6,7 @@
 #include "Core/FPSRGameState.h"
 #include "Enemy/FPSRFlowFieldComputer.h"
 #include "Arena/FPSRArenaTypes.h" // EFPSRArenaRole (NextCombatArenaIndex's role filter)
+#include "Arena/FPSRArenaStreamSubsystem.h" // NextCombatStageOrder (5c — 로스터 매핑의 순수 코어)
 #include "Containers/ArrayView.h" // TConstArrayView
 
 #if WITH_AUTOMATION_TESTS
@@ -137,6 +138,49 @@ bool FFPSRStageTransitionTest::RunTest(const FString& Parameters)
 		// An unknown current index (INDEX_NONE — no active arena yet) must still find a destination rather than
 		// stalling the run: the scan starts before the first entry.
 		TestEqual(TEXT("unknown current (-1) -> first combat arena"), U::NextCombatArenaIndex(INDEX_NONE, BossInMiddle), 0);
+	}
+
+	// --- (5c) UFPSRArenaStreamSubsystem::NextCombatStageOrder — the same cycle expressed in STAGE ORDERS, which is
+	//          what the roster actually hands out. (5b) locks the index arithmetic; this locks the roster mapping
+	//          around it (StageOrder -> index, index -> StageOrder, and the degenerate inputs).
+	//
+	//          이 블록이 있는 이유: 종전에는 이 매핑이 `GetNextStageOrder` 안에 있었고 그 함수는 스트리밍
+	//          서브레벨이 있는 월드를 요구해 **헤드리스로 검사할 방법이 없었다.** 그래서 순환 규칙 리팩터가
+	//          테스트 없이 지나갔다(레드팀 2026-08-29 P3-1). StageOrder 는 저작값이라 인덱스와 일부러
+	//          어긋나게(비연속·비정렬) 잡는다 — 둘을 혼동하는 회귀는 그때만 드러난다. ------------------------
+	{
+		using S = UFPSRArenaStreamSubsystem;
+		using ER = EFPSRArenaRole;
+
+		// 인덱스와 값이 절대 같지 않도록: 보스 아레나는 가이드가 권하는 100번대, 전투는 비연속.
+		const int32 Orders[] = { 10, 20, 100, 30 };
+		const ER Roles[] = { ER::Combat, ER::Combat, ER::Boss, ER::Combat };
+
+		TestEqual(TEXT("10 -> 20 (다음 전투)"), S::NextCombatStageOrder(Orders, Roles, 10), 20);
+		TestEqual(TEXT("20 -> 30 (보스 100 을 건너뛴다)"), S::NextCombatStageOrder(Orders, Roles, 20), 30);
+		TestEqual(TEXT("30 -> 10 (한 바퀴 돈다)"), S::NextCombatStageOrder(Orders, Roles, 30), 10);
+
+		// 보스 아레나를 현재로 넣어도(BossTime 착지 직후 억제기 질의) 순환은 전투로만 이어진다.
+		TestEqual(TEXT("100(보스) -> 30 (순환은 전투로만)"), S::NextCombatStageOrder(Orders, Roles, 100), 30);
+
+		// 로스터에 없는 StageOrder = "현재 아레나 미상" — 멈추지 않고 첫 전투 아레나로 간다.
+		TestEqual(TEXT("미지의 현재(999) -> 첫 전투 아레나"), S::NextCombatStageOrder(Orders, Roles, 999), 10);
+
+		// 전투 아레나 하나 + 보스 하나 = 최소 출하 구성. 전투는 자기 자신으로 순환한다(보스로 새지 않는다).
+		const int32 MinOrders[] = { 5, 100 };
+		const ER MinRoles[] = { ER::Combat, ER::Boss };
+		TestEqual(TEXT("전투1+보스1: 5 -> 5 (자기순환)"), S::NextCombatStageOrder(MinOrders, MinRoles, 5), 5);
+
+		// 축퇴·오용 입력. 전부 INDEX_NONE 이어야 하고, 특히 all-boss 는 보스 StageOrder 를 돌려주면 안 된다.
+		const int32 AllBossOrders[] = { 100, 200 };
+		const ER AllBossRoles[] = { ER::Boss, ER::Boss };
+		TestEqual(TEXT("전부 보스 -> INDEX_NONE"), S::NextCombatStageOrder(AllBossOrders, AllBossRoles, 100), INDEX_NONE);
+		TestEqual(TEXT("빈 로스터 -> INDEX_NONE"),
+			S::NextCombatStageOrder(TConstArrayView<int32>(), TConstArrayView<ER>(), 0), INDEX_NONE);
+
+		// 두 배열은 같은 로스터를 편 것이라 길이가 어긋나면 호출부 버그다 — 인덱스로 다른 배열을 찌르지 않는다.
+		TestEqual(TEXT("길이 불일치 -> INDEX_NONE (다른 배열을 찌르지 않는다)"),
+			S::NextCombatStageOrder(Orders, TConstArrayView<ER>(Roles, 2), 10), INDEX_NONE);
 	}
 
 	// --- (6) EFPSRStageTransitionPhase::None must be 0 — the safe replication default (a fresh GameState, or a

@@ -165,21 +165,34 @@ int32 UFPSRArenaStreamSubsystem::FindStartingStageOrder() const
 			return Slot.StageOrder;
 		}
 	}
-	return Roster.Num() > 0 ? Roster[0].StageOrder : INDEX_NONE;
+	// 여기까지 왔다 = 로스터가 비었거나 **전부 보스 아레나**다. 종전에는 마지막 폴백이 `Roster[0]` 이라
+	// all-Boss 축퇴 저작에서 **보스 아레나를 시작 아레나로 돌려줬다** — 바로 위 주석("나갈 길이 없다")과
+	// 정면으로 모순된다. PerformSwap 의 all-boss 중단은 순환만 막지 런 시작은 못 막는다.
+	// "시작할 수 있는 아레나가 없다"는 INDEX_NONE 으로 정직하게 말하는 편이 낫다 — 조용히 나갈 길 없는
+	// 스테이지에서 런을 시작하는 것보다, 호출부가 "시작 아레나 없음" 경로를 타는 쪽이 진단 가능하다.
+	// (레드팀 게이트 2026-08-29 범위 밖 발견 ③)
+	if (Roster.Num() > 0)
+	{
+		UE_LOG(LogFPSR, Error,
+			TEXT("[ArenaStream] No arena can start the run: %d arena(s) in the roster and every one of them is a BOSS arena. A boss arena carries no suppressor, so a run starting there has no way out. Author at least one 아레나 역할 = 전투 arena."),
+			Roster.Num());
+	}
+	return INDEX_NONE;
 }
 
-int32 UFPSRArenaStreamSubsystem::GetNextStageOrder(int32 CurrentStageOrder) const
+int32 UFPSRArenaStreamSubsystem::NextCombatStageOrder(
+	TConstArrayView<int32> StageOrders, TConstArrayView<EFPSRArenaRole> Roles, int32 CurrentStageOrder)
 {
-	RefreshRoster();
-	if (Roster.Num() == 0)
+	const int32 Num = StageOrders.Num();
+	if (Num == 0 || Roles.Num() != Num)
 	{
 		return INDEX_NONE;
 	}
-	const int32 Index = Roster.IndexOfByPredicate(
-		[CurrentStageOrder](const FFPSRArenaSlot& S) { return S.StageOrder == CurrentStageOrder; });
+
+	const int32 Index = StageOrders.IndexOfByKey(CurrentStageOrder);
 	// An unknown current arena starts the scan BEFORE the first entry rather than answering "no next": the roster is
 	// authored content and the caller has a transition to run either way, so advancing to a real arena beats
-	// stalling the run. (-1 so the first step below lands on index 0.)
+	// stalling the run. (-1 so the first step below lands on index 0 — NextArenaIndex(-1, N) == 0.)
 	const int32 Start = (Index == INDEX_NONE) ? -1 : Index;
 
 	// Walk the cycle until a COMBAT arena turns up (보스 스테이지, 2026-08-28 — see the header). One full lap:
@@ -189,19 +202,30 @@ int32 UFPSRArenaStreamSubsystem::GetNextStageOrder(int32 CurrentStageOrder) cons
 	//    stage, which the suppressor cycle must never enter.
 	//
 	// ⚠️ 이 walk 를 여기서 다시 구현하지 말 것 — `NextCombatArenaIndex` 를 **호출**한다. 종전에는 같은 규칙이
-	//    두 곳에 각각 구현돼 있었고(그쪽 주석은 "the cycle rule stays in ONE place"라고 적고 있었다), 단위
-	//    테스트는 그쪽만 잠근다. 역할이 늘면(enum 주석이 rest/shop 을 예고한다) 한쪽만 갱신될 표면이었다.
-	//    Start = -1 은 그대로 넘겨도 된다: NextArenaIndex(-1, N) == 0 이라 "미지의 현재 아레나는 0번부터
-	//    훑는다"는 기존 의미가 유지된다. (레드팀 게이트 2026-08-29 P3)
+	//    두 곳에 각각 구현돼 있었다(그쪽 주석은 "the cycle rule stays in ONE place"라고 적고 있었다).
+	const int32 NextIndex = UFPSRStageDirectorSubsystem::NextCombatArenaIndex(Start, Roles);
+	return StageOrders.IsValidIndex(NextIndex) ? StageOrders[NextIndex] : INDEX_NONE;
+}
+
+int32 UFPSRArenaStreamSubsystem::GetNextStageOrder(int32 CurrentStageOrder) const
+{
+	RefreshRoster();
+
+	// 로스터를 두 배열로 펴서 순수 코어에 넘긴다. 이 함수에 남는 일은 "로스터를 읽는 것"뿐이고, 판단은 전부
+	// NextCombatStageOrder 안에 있다 — 그쪽은 월드 없이 호출되므로 헤드리스 테스트로 잠긴다
+	// (`FPSRoguelite.Arena.StageTransition` (5c)). 종전에는 인덱스 산술·StageOrder 매핑·빈 로스터 경로가
+	// 전부 이 안에 있어 테스트가 닿지 못했다. (레드팀 게이트 2026-08-29 P3-1 후속)
+	TArray<int32, TInlineAllocator<8>> StageOrders;
 	TArray<EFPSRArenaRole, TInlineAllocator<8>> Roles;
+	StageOrders.Reserve(Roster.Num());
 	Roles.Reserve(Roster.Num());
 	for (const FFPSRArenaSlot& Slot : Roster)
 	{
+		StageOrders.Add(Slot.StageOrder);
 		Roles.Add(Slot.Role);
 	}
 
-	const int32 NextIndex = UFPSRStageDirectorSubsystem::NextCombatArenaIndex(Start, Roles);
-	return Roster.IsValidIndex(NextIndex) ? Roster[NextIndex].StageOrder : INDEX_NONE;
+	return NextCombatStageOrder(StageOrders, Roles, CurrentStageOrder);
 }
 
 int32 UFPSRArenaStreamSubsystem::FindStageOrderByRole(EFPSRArenaRole Role) const
