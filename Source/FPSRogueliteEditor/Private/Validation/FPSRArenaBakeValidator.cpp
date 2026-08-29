@@ -8,9 +8,13 @@
 #include "Arena/FPSRArenaDestructible.h"  // IsSuppressor (보스 아레나엔 억제기가 없어야 한다)
 #include "Boss/FPSRBossSpawnPoint.h"      // 보스 아레나 스폰포인트 유무 경고
 
+#include "AssetRegistry/AssetRegistryModule.h" // 베이크 참조 역질의 — 공유-베이크를 가해 시점에 잡는다
+#include "AssetRegistry/IAssetRegistry.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "Misc/DataValidation.h"
+#include "Modules/ModuleManager.h"
+#include "UObject/Package.h"
 
 #define LOCTEXT_NAMESPACE "FPSRArenaBakeValidator"
 
@@ -99,6 +103,52 @@ EDataValidationResult UFPSRArenaBakeValidator::ValidateLoadedAsset_Implementatio
 					TEXT("[%s] 베이크 에셋 '%s' 은 **다른 레벨**('%s')에서 구워졌습니다. 두 아레나 레벨이 한 베이크 에셋을 공유하면 나중에 구운 쪽이 앞선 쪽의 마스크를 덮어 버립니다(그 레벨에서 적이 벽을 통과합니다). 이 레벨 전용 베이크 에셋을 새로 만들어 `베이크 데이터` 에 걸고 다시 구우세요."),
 					*Arena->GetName(), *Bake->GetName(), *BakedFrom)));
 				Result = EDataValidationResult::Invalid;
+			}
+
+			// ── 같은 사고를 **가해 시점**에 잡는다 (레드팀 게이트 2026-08-29 범위 밖 발견 ①) ──────────────
+			// 위 SourceLevel 검사는 **피해 레벨이 검증될 때까지 탐지가 지연된다**: 덮은 쪽에서 보면 해시는
+			// 방금 구운 그대로(Fresh)고 SourceLevel 도 자기 자신이라 전부 초록이다. 피해는 반대쪽 레벨에서
+			// "적이 벽을 통과한다"로 나타나고, 그 레벨을 누가 열어보기 전까지 아무도 모른다.
+			// 참조를 **역으로** 물어보면 공유를 만든 바로 그 레벨에서, 굽기 전에 잡을 수 있다.
+			//
+			// ⚠️ 한계: 에셋 레지스트리는 **디스크 상태**를 답한다. 방금 참조를 건 레벨이 아직 저장 전이면
+			//    그 참조는 안 보인다 — 저장 다음 검증에서 잡힌다. 그래도 "피해 레벨을 열 때까지"보다 훨씬 이르다.
+			if (const UPackage* BakePackage = Bake->GetOutermost())
+			{
+				const IAssetRegistry& AssetRegistry =
+					FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry").Get();
+
+				TArray<FName> ReferencerPackages;
+				AssetRegistry.GetReferencers(BakePackage->GetFName(), ReferencerPackages,
+					UE::AssetRegistry::EDependencyCategory::Package);
+
+				// 레벨(UWorld) 패키지만 센다. 베이크를 참조하는 것이 레벨 하나뿐인 것이 정상이고, 둘 이상이면
+				// 그중 나중에 굽는 쪽이 앞선 쪽의 마스크를 덮는다.
+				TArray<FString> LevelReferencers;
+				for (const FName& ReferencerPackage : ReferencerPackages)
+				{
+					TArray<FAssetData> AssetsInPackage;
+					AssetRegistry.GetAssetsByPackageName(ReferencerPackage, AssetsInPackage,
+						/*bIncludeOnlyOnDiskAssets*/ true);
+					for (const FAssetData& AssetData : AssetsInPackage)
+					{
+						if (AssetData.AssetClassPath == UWorld::StaticClass()->GetClassPathName())
+						{
+							LevelReferencers.AddUnique(ReferencerPackage.ToString());
+							break;
+						}
+					}
+				}
+
+				if (LevelReferencers.Num() > 1)
+				{
+					LevelReferencers.Sort(); // 메시지가 실행마다 흔들리지 않게
+					Context.AddError(FText::FromString(FString::Printf(
+						TEXT("[%s] 베이크 에셋 '%s' 을 **레벨 %d개가 공유**하고 있습니다: %s. 한 베이크 에셋은 레벨 하나만 가리켜야 합니다 — 나중에 굽는 쪽이 앞선 쪽의 장애물 마스크를 덮어 버리고(그 레벨에서 적이 벽을 통과합니다), 덮은 쪽에서는 해시가 멀쩡해 보여 아무 경고도 뜨지 않습니다. 각 레벨에 전용 베이크 에셋을 만들어 `베이크 데이터` 에 걸고 다시 구우세요."),
+						*Arena->GetName(), *Bake->GetName(), LevelReferencers.Num(),
+						*FString::Join(LevelReferencers, TEXT(", ")))));
+					Result = EDataValidationResult::Invalid;
+				}
 			}
 		}
 

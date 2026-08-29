@@ -409,6 +409,36 @@ void UFPSRStageDirectorSubsystem::HandleRunStateChanged()
 
 	const EFPSRStageTransitionPhase Phase = GS->GetStageTransitionPhase();
 
+	// 런이 끝났으면 **어느 단계에 있든** 전환을 정리하고 나간다. PerformSwap 은 이미 이걸 하지만 그건 스왑까지
+	// 도달했을 때 얘기다 — Grace 중에 런이 끝나면 아래 Grace 분기가 종료를 그냥 "프리즈"로 읽어 딜링 타이머를
+	// **영구히 정지**시키고, 전환은 None 으로 돌아오지 못한 채 남는다. 지금은 런 종료가 곧 레벨 리로드라
+	// 무해하지만, 같은 월드에서 런을 재시작하는 흐름이 생기는 순간 `BeginTransition` 의 phase 가드
+	// (`GetStageTransitionPhase() != None` 이면 거부)에 막혀 **다음 런의 첫 전환이 조용히 거부된다.**
+	// 레벨 리로드에 기대는 상태를 남겨두지 않는다. (레드팀 게이트 2026-08-29 범위 밖 발견 ②)
+	if (Phase != EFPSRStageTransitionPhase::None && GS->HasRunEnded())
+	{
+		if (UWorld* World = GetWorld())
+		{
+			FTimerManager& TimerManager = World->GetTimerManager();
+			TimerManager.ClearTimer(DealingTimerHandle);
+			TimerManager.ClearTimer(FadeTimerHandle);
+			TimerManager.ClearTimer(SwapReadyTimerHandle);
+		}
+		if (bBoundRunStateChanged)
+		{
+			GS->OnRunStateChanged.RemoveDynamic(this, &UFPSRStageDirectorSubsystem::HandleRunStateChanged);
+			bBoundRunStateChanged = false;
+		}
+		bSwapDeferredByFreeze = false;
+		bWasRunPausedForDealing = false;
+		PendingDestinationStageOrder = INDEX_NONE;
+		GS->SetStageTransition(EFPSRStageTransitionPhase::None, 0.0f);
+		UE_LOG(LogFPSR, Log,
+			TEXT("[StageDirector] Run ended mid-transition (phase %d) — transition state cleared so a later run in this same world can start one."),
+			static_cast<int32>(Phase));
+		return;
+	}
+
 	if (Phase == EFPSRStageTransitionPhase::Pending)
 	{
 		TrySwap();
