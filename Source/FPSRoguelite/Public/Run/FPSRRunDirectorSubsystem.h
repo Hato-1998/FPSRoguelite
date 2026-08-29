@@ -100,7 +100,8 @@ private:
 	/** True when the arena the run is standing in right now is authored as the boss arena. */
 	bool IsInBossArena() const;
 	/** Spawn the boss (BossDefinition->BossClass, or the C++ AFPSRBossBase fallback) at a boss spawn point and
-	 *  apply its definition. Called by EnterBoss after the swarm is cleared. */
+	 *  apply its definition. Called by EnterBoss — which does NOT clear the swarm (it deliberately persists into the
+	 *  boss fight; see EnterBoss). */
 	void SpawnBoss();
 	/** Pick where the boss spawns. When bUseSpawnPoint, weighted-random among enabled AFPSRBossSpawnPoint actors
 	 *  (falling back to a player location + forward offset, with a warning, when none are placed). When false, the
@@ -161,6 +162,11 @@ private:
 	 *  concurrent suppressor transition finishing) takes seconds, and a director tick is 0.25s — a "3 attempts"
 	 *  budget would expire in under a second and degrade a perfectly healthy run to an in-place boss. */
 	float BossStageWaitElapsed = 0.0f;
+
+	/** `FPlatformTime::Seconds()` at the first boss-gate tick (0 = not entered yet). BossStageWaitElapsed is derived
+	 *  from this rather than accumulated per tick — see the gate's comment for why accumulation silently turns the
+	 *  30s budget into ~19 minutes of wall clock. */
+	double BossStageWaitStartSeconds = 0.0;
 
 	/** True once the boss arena's pre-park has been requested this run (see BossArenaParkLeadSeconds). */
 	bool bBossArenaParkRequested = false;

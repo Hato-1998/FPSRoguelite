@@ -174,6 +174,28 @@ bool UFPSRStageDirectorSubsystem::RequestBossTransition(int32 BossStageOrder)
 	{
 		return false; // the caller could not find a boss arena — nothing to start, and it will say so itself
 	}
+
+	// 목적지가 정말 보스 아레나인지 **여기서** 확인한다. BeginTransition 은 StageOrder 로만 슬롯을 집고 역할을
+	// 보지 않으므로, StageOrder 가 중복이면(=아레나 레벨을 복제하면 기본으로 그렇게 된다 —
+	// `Docs/BossStage_ContentGuide.md` §4 가 "복제본이라 지금은 같은 값일 것"이라고 적는다) 보스 전환이
+	// 조용히 **전투 아레나**에 착지한다. 그러면 IsInBossArena 가 계속 false 라 게이트가 매 틱 재요청하고,
+	// 파티는 보스 없는 전환을 반복해서 본다. 억제기 순환은 인덱스 순환이라 이만큼 취약하지 않았다 —
+	// 이 취약성은 역할 기반 라우팅이 새로 만든 것이다. (레드팀 게이트 2026-08-29)
+	if (const UWorld* World = GetWorld())
+	{
+		if (const UFPSRArenaStreamSubsystem* Stream = World->GetSubsystem<UFPSRArenaStreamSubsystem>())
+		{
+			FFPSRArenaSlot DestSlot;
+			if (Stream->FindSlot(BossStageOrder, DestSlot) && DestSlot.Role != EFPSRArenaRole::Boss)
+			{
+				UE_LOG(LogFPSR, Error,
+					TEXT("[StageDirector] Boss transition to stage order %d refused — that roster slot is a %s arena, not the boss arena. StageOrder must be UNIQUE across arena sublevels; a duplicated arena level keeps the original's value. Give the boss arena its own '스테이지 순서'."),
+					BossStageOrder, (DestSlot.Role == EFPSRArenaRole::Combat) ? TEXT("combat") : TEXT("non-boss"));
+				return false;
+			}
+		}
+	}
+
 	return BeginTransition(BossStageOrder);
 }
 

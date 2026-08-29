@@ -53,6 +53,7 @@ void UFPSRRunDirectorSubsystem::StartRun()
 	// the next run's boss straight into whatever arena the party happened to be standing in.
 	bBossStageResolved = false;
 	BossStageWaitElapsed = 0.0f;
+	BossStageWaitStartSeconds = 0.0; // 0 = 게이트에 아직 안 들어옴. 다음 런이 지난 런의 벽시계를 물려받지 않게 한다
 	bBossArenaParkRequested = false;
 
 	// Publish the schedule to the GameState so every client's HUD can lay out the run-timeline bar (window markers +
@@ -600,7 +601,12 @@ bool UFPSRRunDirectorSubsystem::IsInBossArena() const
 
 void UFPSRRunDirectorSubsystem::TryPreParkBossArena()
 {
-	if (bBossArenaParkRequested)
+	// bBossStageResolved 도 같이 본다: 보스 게이트가 답을 확정했으면(보스 아레나에 도착했거나, 이 월드엔
+	// 없다고 결론냈거나, 포기했거나) 사전 파킹할 대상이 더는 없다. 이게 없으면 **보스 아레나가 없는 월드**에서
+	// 아래 INDEX_NONE 미latch 경로가 BossTime−리드 시점부터 **런이 끝날 때까지** 4Hz 로 RefreshRoster 를
+	// 돌린다(스트리밍 레벨 전수 순회 + 정렬 + 배열 재구축). 보스전 내내도 DirectorTick 은 계속 돈다.
+	// (레드팀 게이트 2026-08-29 P3 — 헤더의 "cheap; fires once per run" 주장과도 어긋났다.)
+	if (bBossArenaParkRequested || bBossStageResolved)
 	{
 		return;
 	}
@@ -662,7 +668,20 @@ bool UFPSRRunDirectorSubsystem::TryEnterBossStage()
 	// Wall-clock, NOT game time: what is being waited on here is a level package loading and another transition
 	// finishing, neither of which speeds up with FPSR.RunTimeScale. Scaling this budget would let a debug
 	// fast-forward burn the whole allowance in a couple of ticks and degrade a perfectly healthy run.
-	BossStageWaitElapsed += DirectorInterval;
+	//
+	// ⚠️ 그래서 **진짜 벽시계**로 잰다 — `BossStageWaitElapsed += DirectorInterval` 로 누산하면 안 된다.
+	//    DirectorTick 은 전환이 도는 내내 통째로 정지하는데(위 IsStageTransitionActive 게이트), 이 예산이
+	//    막으려는 상태가 바로 "전환은 시작되는데 PerformSwap 에서 매번 중단되는" 것이다. 누산 방식이면 그
+	//    실패 1사이클(그레이스 + 페이드 ≈ 9s)당 0.25s 만 쌓여, 30s 예산을 태우는 데 **틱 120회 ≈ 19분**이
+	//    걸린다 — 그동안 파티는 페이드 암전이 반복되는 걸 본다. 중단 경로 자체는 저작 오류로 이미 수용돼
+	//    있고(`FPSRStageDirectorSubsystem.cpp` ServerRegenerate 실패 주석), 종전에는 요청자가 없어 1회
+	//    중단으로 끝났다 — 매 틱 재요청을 넣은 이 갈래가 그것을 폭풍으로 바꿨다. (레드팀 게이트 2026-08-29)
+	const double NowSeconds = FPlatformTime::Seconds();
+	if (BossStageWaitStartSeconds == 0.0)
+	{
+		BossStageWaitStartSeconds = NowSeconds;
+	}
+	BossStageWaitElapsed = static_cast<float>(NowSeconds - BossStageWaitStartSeconds);
 
 	// --- No boss arena to go to ------------------------------------------------------------------------------
 	// Two shapes reach here and both end the same way (spawn the boss in the current arena, which is exactly the
@@ -677,8 +696,12 @@ bool UFPSRRunDirectorSubsystem::TryEnterBossStage()
 			return true; // still might be loading — ask again next tick
 		}
 		bBossStageResolved = true;
+		// 등록 누락 힌트는 **여기**에 있어야 한다. 보스 서브레벨이 Always Loaded 로 등록되지 않으면 로스터가
+		// 영영 보지 못하므로 실패는 반드시 이 경로로 나온다 — 종전에는 이 힌트가 아래 타임아웃 Error 에만
+		// 달려 있었는데, 그쪽은 BossOrder != INDEX_NONE(=이미 로스터에 있음 = 등록됨)이어야 도달 가능해서
+		// **힌트가 가리키는 원인으로는 그 메시지에 닿을 수 없었다.** (레드팀 게이트 2026-08-29 P3)
 		UE_LOG(LogFPSR, Log,
-			TEXT("[Run] No boss arena in this world (%s) — spawning the boss in the current arena, as before the boss stage existed."),
+			TEXT("[Run] No boss arena in this world (%s) — spawning the boss in the current arena, as before the boss stage existed. If this world DOES have one, check that its sublevel is registered in the persistent level's streaming list as Always Loaded (loaded, not visible) — an unregistered sublevel never enters the roster."),
 			StageDirector ? TEXT("no AFPSRArenaActor authored with 아레나 역할 = 보스") : TEXT("no stage director"));
 		return false;
 	}
@@ -702,7 +725,7 @@ bool UFPSRRunDirectorSubsystem::TryEnterBossStage()
 	// so returning true forever would strand the party in an endless combat stage with no boss and no victory.
 	bBossStageResolved = true;
 	UE_LOG(LogFPSR, Error,
-		TEXT("[Run] Could not reach the boss arena (stage order %d) after %.1fs — spawning the boss in the CURRENT arena instead. Check that the boss sublevel is registered in the persistent level's streaming list (loaded, not visible) and that a stage transition is not stuck."),
+		TEXT("[Run] Could not reach the boss arena (stage order %d) after %.1fs of wall clock — spawning the boss in the CURRENT arena instead. The sublevel IS in the roster (so it is registered and loaded); the transition itself never completed — check the [StageDirector] lines above for a swap that kept aborting (a destination arena with missing/invalid 아레나 파라미터 aborts PerformSwap every attempt)."),
 		BossOrder, BossStageWaitElapsed);
 	return false;
 }
@@ -1212,6 +1235,15 @@ void UFPSRRunDirectorSubsystem::DebugSkipToBoss()
 	// The next DirectorTick sees RunClock >= BossTime and runs the real gate: transition to the boss arena first,
 	// then EnterBoss. On a world with no boss arena this is still equivalent to the old behaviour (the gate falls
 	// straight through to EnterBoss), just one tick later.
+	// 런이 없으면 시계만 옮겨봐야 아무 일도 안 일어난다 — DirectorTick 이 bRunActive 가드에서 멈춘다. 구버전은
+	// EnterBoss 직행이라 런 없이도 뭔가 했으므로, 조용히 무동작이면 "명령이 고장났다"로 읽힌다. (레드팀 P3)
+	if (!bRunActive)
+	{
+		UE_LOG(LogFPSR, Warning,
+			TEXT("[Run] FPSR.SkipToBoss — no active run, so nothing happens (the director tick is gated on an active run). Start a run first."));
+		return;
+	}
+
 	RunClock = GetBossTime();
 	if (AFPSRGameState* GS = GetGS())
 	{

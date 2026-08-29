@@ -3,6 +3,7 @@
 #include "Arena/FPSRArenaStreamSubsystem.h"
 #include "Arena/FPSRArenaActor.h"
 #include "Enemy/FPSREnemySpawnSubsystem.h" // 파킹 완료 시 스폰포인트 재캐시 — 아래 PollPending 주석 참고
+#include "Run/FPSRStageDirectorSubsystem.h" // NextCombatArenaIndex (순환 규칙 SSOT — GetNextStageOrder 주석 참고)
 #include "Core/FPSRLogChannels.h"
 #include "Engine/Level.h"
 #include "Engine/LevelStreaming.h"
@@ -103,13 +104,34 @@ void UFPSRArenaStreamSubsystem::RefreshRoster() const
 	Roster.Sort([](const FFPSRArenaSlot& A, const FFPSRArenaSlot& B)
 	{
 		// Ties broken by package name so the order does not depend on the streaming list's own order. Two arenas
-		// sharing a StageOrder is an authoring mistake the editor validator flags; this only guarantees the answer
-		// is stable, not that it matches the tie-break AFPSRArenaActor::FindAllInWorld picks (that one sorts by
-		// actor name, and the two lists exist for different jobs — this one includes arenas not yet in the world).
+		// sharing a StageOrder is an authoring mistake (the duplicate check right below says so); this only
+		// guarantees the answer is stable, not that it matches the tie-break AFPSRArenaActor::FindAllInWorld picks
+		// (that one sorts by actor name, and the two lists exist for different jobs — this one includes arenas not
+		// yet in the world).
 		return A.StageOrder != B.StageOrder
 			? A.StageOrder < B.StageOrder
 			: A.PackageName.LexicalLess(B.PackageName);
 	});
+
+	// StageOrder 유일성 검사. 종전에는 두 곳의 주석이 "에디터 검증기가 잡는다"고 주장했지만 **그런 검사는
+	// 없었다** — 그러면서 역할 기반 라우팅(FindStageOrderByRole → BeginTransition)이 이 유일성에 새로 의존하게
+	// 됐다. 게다가 중복은 예외 상황이 아니라 **기본 상태**다: 아레나 레벨을 복제하면 StageOrder 까지 복제되고,
+	// `Docs/BossStage_ContentGuide.md` §4 가 그걸 사람에게 고치라고 안내하는 게 유일한 방어였다.
+	// 정렬 직후라 중복은 반드시 인접하므로 한 번 훑으면 끝난다. (레드팀 게이트 2026-08-29)
+	if (!bWarnedDuplicateStageOrder)
+	{
+		for (int32 i = 1; i < Roster.Num(); ++i)
+		{
+			if (Roster[i].StageOrder == Roster[i - 1].StageOrder)
+			{
+				bWarnedDuplicateStageOrder = true; // 로스터는 사전 파킹 창에서 4Hz 로 재구축된다 — 한 번만 외친다
+				UE_LOG(LogFPSR, Error,
+					TEXT("[ArenaStream] Arenas '%s' and '%s' share 스테이지 순서 %d. It must be UNIQUE per arena sublevel: stage lookup picks by StageOrder alone, so a duplicate makes the boss transition (and every parked-successor query) land on whichever tied level sorts first. A duplicated arena level keeps the original's value — give the copy its own."),
+					*Roster[i - 1].PackageName.ToString(), *Roster[i].PackageName.ToString(), Roster[i].StageOrder);
+				break;
+			}
+		}
+	}
 }
 
 bool UFPSRArenaStreamSubsystem::FindSlot(int32 StageOrder, FFPSRArenaSlot& OutSlot) const
@@ -165,15 +187,21 @@ int32 UFPSRArenaStreamSubsystem::GetNextStageOrder(int32 CurrentStageOrder) cons
 	//    (UFPSRStageDirectorSubsystem::NextArenaIndex's self-cycle, unchanged);
 	//  - a roster with no combat arena at all falls out with INDEX_NONE rather than handing the caller the boss
 	//    stage, which the suppressor cycle must never enter.
-	for (int32 Step = 1; Step <= Roster.Num(); ++Step)
+	//
+	// ⚠️ 이 walk 를 여기서 다시 구현하지 말 것 — `NextCombatArenaIndex` 를 **호출**한다. 종전에는 같은 규칙이
+	//    두 곳에 각각 구현돼 있었고(그쪽 주석은 "the cycle rule stays in ONE place"라고 적고 있었다), 단위
+	//    테스트는 그쪽만 잠근다. 역할이 늘면(enum 주석이 rest/shop 을 예고한다) 한쪽만 갱신될 표면이었다.
+	//    Start = -1 은 그대로 넘겨도 된다: NextArenaIndex(-1, N) == 0 이라 "미지의 현재 아레나는 0번부터
+	//    훑는다"는 기존 의미가 유지된다. (레드팀 게이트 2026-08-29 P3)
+	TArray<EFPSRArenaRole, TInlineAllocator<8>> Roles;
+	Roles.Reserve(Roster.Num());
+	for (const FFPSRArenaSlot& Slot : Roster)
 	{
-		const int32 Candidate = (Start + Step + Roster.Num()) % Roster.Num();
-		if (Roster[Candidate].Role == EFPSRArenaRole::Combat)
-		{
-			return Roster[Candidate].StageOrder;
-		}
+		Roles.Add(Slot.Role);
 	}
-	return INDEX_NONE;
+
+	const int32 NextIndex = UFPSRStageDirectorSubsystem::NextCombatArenaIndex(Start, Roles);
+	return Roster.IsValidIndex(NextIndex) ? Roster[NextIndex].StageOrder : INDEX_NONE;
 }
 
 int32 UFPSRArenaStreamSubsystem::FindStageOrderByRole(EFPSRArenaRole Role) const

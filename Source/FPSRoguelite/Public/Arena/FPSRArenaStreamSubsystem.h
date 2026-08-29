@@ -139,8 +139,10 @@ public:
 	 *  (not AFPSRArenaActor::FindAllInWorld) for the usual reason: the boss arena is deliberately NOT visible yet
 	 *  when the director first has to ask about it, and FindAllInWorld cannot see a parked-only level.
 	 *
-	 *  Duplicates are an authoring error the editor validator flags; this returns the lowest so the answer is at
-	 *  least deterministic, and logs nothing (it is asked every director tick during the pre-park window). */
+	 *  Duplicates are an authoring error RefreshRoster reports (once per world, as an Error); this returns the lowest
+	 *  so the answer is at least deterministic, and logs nothing itself (it is asked every director tick during the
+	 *  pre-park window). RequestBossTransition additionally refuses a destination whose Role is not Boss, so a
+	 *  duplicate cannot silently route the boss transition into a combat arena. */
 	int32 FindStageOrderByRole(EFPSRArenaRole Role) const;
 
 	/** Roster entry for StageOrder. Rebuilds the roster on demand — arena sublevels finish loading asynchronously,
@@ -189,6 +191,11 @@ private:
 	/** Mutable because FindSlot/IsReadyForEveryone are const observers that still have to tolerate a roster that
 	 *  was not complete the first time it was built (sublevels load asynchronously). */
 	mutable TArray<FFPSRArenaSlot> Roster;
+
+	/** Latches once RefreshRoster has reported a duplicate StageOrder. Mutable for the same reason Roster is — the
+	 *  check runs inside the const rebuild, which happens up to 4x/s during the boss pre-park window, and an
+	 *  authoring error is not going to be fixed mid-session. One Error per world is the useful amount. */
+	mutable bool bWarnedDuplicateStageOrder = false;
 
 	FTimerHandle PollTimer;
 	int32 NextLatentUUID = 1;
