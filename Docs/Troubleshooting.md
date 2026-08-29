@@ -569,6 +569,34 @@ LOD `FPSRVATAnim::AnimFreezeRadiusSq` 에서만 걸린다). **비대칭이 아�
 "계약이 없다"가 아니라 "**아직 안 읽었다**"이다.
 (같은 계열 = G2 "빈 목록은 '비었다'의 증거가 아니다". 정본 계약 = `Docs/SSOT/RunFlow.md` §2-2 프리즈 절.)
 
+### G13. 빌드가 `Succeeded` 인데 **유니티 충돌은 검증되지 않았다** (2026-08-29, 보스 스테이지)
+익명 네임스페이스 동명 심볼 사고(선례 `f5b294ed`)가 **다시 터졌다.** 새 테스트
+`FPSRStageTransitionTest.cpp` 의 지역 `NL`·`Surf` 가 `FPSRFlowFieldUnitTest.cpp` 의 파일스코프
+`NL`·`Surf` 를 가려 유니티 블롭에서 **C4459**(`/WX` 라 에러)로 깨졌다. 두 번 당한 이유가 함정 둘이다.
+
+**함정 ① `-DisableUnity` 는 이 계열을 재현하지 않는다.** 브랜치는 "풀 논-유니티 `Result: Succeeded`"
+로 검증됐다고 기록돼 있었다. 논-유니티는 .cpp 마다 번역 단위가 갈리므로 **동명 충돌이 원리적으로
+안 생긴다.** 즉 그 초록은 이 계열에 대해 아무것도 말해주지 않는다. (`f5b294ed` 가 커밋 메시지에
+*"어느 한쪽만 돌리면 반쪽 검증이다"* 라고 남겼지만, **SSOT(§6-6)엔 반영되지 않아** 다음 사람이 또 밟았다.)
+
+**함정 ② 유니티로 돌려도 방금 고친 파일은 블롭에서 빠진다.** 고치고 다시 빌드하면
+`Result: Succeeded` 가 뜨는데, 로그에 이 줄이 있다:
+`[Adaptive Build] Excluded from FPSRoguelite unity file: <방금 고친 파일>.cpp`
+UBT의 **Adaptive Unity Build** 가 최근 수정 파일을 반복 빌드 속도를 위해 자동으로 유니티에서
+빼 준다. 그래서 **고친 직후의 초록은 구조적으로 이 계열을 못 잡는다** — 남이 클린 빌드할 때 터진다.
+
+→ **판정 명령은 이것 하나다**(둘 다 필요, 하나라도 빠지면 반쪽):
+```
+Build.bat FPSRogueliteEditor Win64 Development -Project="<클론>\FPSRoguelite.uproject" -WaitMutex -DisableAdaptiveUnity -ForceUnity
+```
+→ **로그에서 `[Adaptive Build] Excluded` 줄이 없는지 눈으로 확인**하고, 원래 깨졌던
+`Module.<모듈>.N.cpp` 가 실제로 컴파일 목록에 있는지 본다. `Succeeded` 만 보면 ②에 그대로 걸린다.
+
+→ 테스트 헬퍼 이름은 **파일별로 다르게** 짓는다(`StageNL`/`StageSurf` 처럼). 익명 네임스페이스는
+번역 단위만 격리할 뿐 유니티 블롭을 격리하지 않는다. 이름이 중복돼 보여도 **합치지 말 것** —
+정의부 주석에 사유를 남긴다.
+(같은 실패형 = G10 "exit 0인데 안 돌았다" — 초록의 **범위**를 확인하지 않고 통과로 읽는 것.)
+
 ---
 
 ## H. 로컬라이제이션 · 파이프라인 스크립트

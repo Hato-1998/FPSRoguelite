@@ -366,15 +366,15 @@ void FFPSRArenaAuthoringTool::ProposeStartingLayout()
 		FText::AsNumber(Arenas.Num()), FText::FromString(Report)));
 }
 
-void FFPSRArenaAuthoringTool::ValidateArenaInLevel()
+/**
+ * 검증 리포트의 **본문만** 만든다(다이얼로그를 띄우지 않는다).
+ *
+ * 베이크 직후 같은 다이얼로그에 이어 붙이려고 분리했다(사용자 결정 2026-08-29). 굽기와 검증을 두 번의
+ * 메뉴 클릭으로 나눠 두면 "굽고 검증은 안 한" 상태가 만들어지는데, 그게 정확히 ADR 0012 가 막으려는
+ * 상태다 — 화면과 적이 서로 다른 마스크를 보고, 그 증상은 실행해 보기 전까지 아무 데도 안 드러난다.
+ */
+static FString BuildArenaValidationBody(UWorld* World, const TArray<AFPSRArenaActor*>& Arenas)
 {
-	UWorld* World = GetEditorWorld();
-	TArray<AFPSRArenaActor*> Arenas;
-	if (!FindAllArenasOrComplain(World, Arenas))
-	{
-		return;
-	}
-
 	// Level-wide first: a wrong start-arena or an orphaned marker changes what every per-arena result below MEANS,
 	// so it has to be read before them, not appended after.
 	FString Body = CheckLevelWideArenaAuthoring(World, Arenas);
@@ -569,9 +569,21 @@ void FFPSRArenaAuthoringTool::ValidateArenaInLevel()
 		Body += TEXT("\n");
 	}
 
+	return Body;
+}
+
+void FFPSRArenaAuthoringTool::ValidateArenaInLevel()
+{
+	UWorld* World = GetEditorWorld();
+	TArray<AFPSRArenaActor*> Arenas;
+	if (!FindAllArenasOrComplain(World, Arenas))
+	{
+		return;
+	}
+
 	FMessageDialog::Open(EAppMsgType::Ok, FText::Format(
 		LOCTEXT("ValidateResult", "아레나 검증 ({0}개)\n\n{1}"),
-		FText::AsNumber(Arenas.Num()), FText::FromString(Body)));
+		FText::AsNumber(Arenas.Num()), FText::FromString(BuildArenaValidationBody(World, Arenas))));
 }
 
 namespace
@@ -826,7 +838,18 @@ void FFPSRArenaAuthoringTool::BakeArenasInLevel()
 		}
 	}
 
-	Body += TEXT("에셋은 더티 상태로 두었습니다 — 저장(Ctrl+S)해야 반영됩니다.\n다음: 'Tools > FPSR > 아레나 검증' 으로 연결성·통로폭을 확인하세요.");
+	Body += TEXT("에셋은 더티 상태로 두었습니다 — 저장(Ctrl+S)해야 반영됩니다.\n");
+
+	// 굽고 나면 **곧바로** 검증까지 돌린다(사용자 결정 2026-08-29). 종전에는 "다음: '아레나 검증' 을
+	// 실행하세요" 라는 안내 한 줄이었는데, 안내는 안 지켜도 아무도 모른다 — 그리고 안 지킨 상태가 정확히
+	// ADR 0012 가 막으려는 것이다(화면과 적이 다른 마스크를 본다). 방금 구운 해시로 검사하므로 스테일
+	// 대조는 여기서 항상 초록이고, 그래서 남는 지적은 전부 **지금 레벨의 진짜 문제**다.
+	// 하나도 못 구웠으면 붙이지 않는다 — 참조 미설정 같은 선행 문제를 검증 리포트가 덮어 버린다.
+	if (NumBaked > 0)
+	{
+		Body += TEXT("\n──────────── 이어서 아레나 검증 ────────────\n\n");
+		Body += BuildArenaValidationBody(World, Arenas);
+	}
 
 	FMessageDialog::Open(EAppMsgType::Ok, FText::Format(
 		LOCTEXT("BakeResult", "아레나 베이크 — 성공 {0} / 실패·건너뜀 {1}\n\n{2}"),

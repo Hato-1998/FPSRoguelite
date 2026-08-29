@@ -208,7 +208,7 @@ void FFPSRogueliteEditorModule::RegisterMenus()
 	Section.AddMenuEntry(
 		"FPSRArenaBake",
 		LOCTEXT("ArenaBakeTitle", "아레나 베이크"),
-		LOCTEXT("ArenaBakeTooltip", "레벨에 놓인 지오메트리의 콜리전(WorldStatic + Query)에서 적 이동 마스크를 구워 각 아레나의 '베이크 데이터' 에셋에 저장합니다. 런타임은 이 결과만 읽습니다 — 절차 생성도 월드 트레이스도 하지 않습니다 (ADR 0012). 셀 예산을 넘으면 조용히 성기게 굽는 대신 거부합니다. 에셋은 더티로 두므로 Ctrl+S 로 저장하세요."),
+		LOCTEXT("ArenaBakeTooltip", "레벨에 놓인 지오메트리의 콜리전(WorldStatic + Query)에서 적 이동 마스크를 구워 각 아레나의 '베이크 데이터' 에셋에 저장하고, **이어서 '아레나 검증' 까지 한 번에** 돌려 같은 리포트에 붙입니다. 런타임은 이 결과만 읽습니다 — 절차 생성도 월드 트레이스도 하지 않습니다 (ADR 0012). 셀 예산을 넘으면 조용히 성기게 굽는 대신 거부합니다. 에셋은 더티로 두므로 Ctrl+S 로 저장하세요."),
 		FSlateIcon(FAppStyle::GetAppStyleSetName(), "DeveloperTools.MenuIcon"),
 		FUIAction(FExecuteAction::CreateStatic(&FFPSRArenaAuthoringTool::BakeArenasInLevel))
 	);

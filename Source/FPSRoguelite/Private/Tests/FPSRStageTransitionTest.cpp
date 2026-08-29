@@ -5,6 +5,8 @@
 #include "Run/FPSRStageFadeSubsystem.h"
 #include "Core/FPSRGameState.h"
 #include "Enemy/FPSRFlowFieldComputer.h"
+#include "Arena/FPSRArenaTypes.h" // EFPSRArenaRole (NextCombatArenaIndex's role filter)
+#include "Containers/ArrayView.h" // TConstArrayView
 
 #if WITH_AUTOMATION_TESTS
 
@@ -14,6 +16,7 @@
 //   IsDealingOpen                       — the FIXED-time dealing window actually closes at its end timestamp.
 //   ComputeStageSeed                    — deterministic + adjacent stages diverge (server computes once, replicates).
 //   NextArenaIndex                      — cycling through N arenas, including the single-arena self-cycle case.
+//   NextCombatArenaIndex                — the same cycle with boss arenas SKIPPED (보스 스테이지 라우팅).
 //   EFPSRStageTransitionPhase::None==0  — the enum's default must be the "normal play" value (safe replication default).
 //   FadeOut/FadeIn appended AFTER Swapping — Phase A must not reorder the pre-existing ordinals.
 //   UFPSRFlowFieldComputer::FindNearestOpenCell — the Phase A carry-over snap's worldless ring-search core.
@@ -96,6 +99,46 @@ bool FFPSRStageTransitionTest::RunTest(const FString& Parameters)
 		TestEqual(TEXT("negative count -> INDEX_NONE"), U::NextArenaIndex(0, -1), INDEX_NONE);
 	}
 
+	// --- (5b) NextCombatArenaIndex: the same cycle, but the suppressor path must SKIP boss arenas (보스 스테이지,
+	//          2026-08-28). The boss stage carries no suppressor by design, so a party cycled into it early would be
+	//          stuck there with no boss and no way out — this predicate is the only thing standing between the
+	//          ordinary transition and that state. ------------------------------------------------------------------
+	{
+		using ER = EFPSRArenaRole;
+
+		// 3 combat arenas: identical to NextArenaIndex — the role filter must be a no-op when nothing is filtered.
+		const ER AllCombat[] = { ER::Combat, ER::Combat, ER::Combat };
+		TestEqual(TEXT("3 combat: 0 -> 1"), U::NextCombatArenaIndex(0, AllCombat), 1);
+		TestEqual(TEXT("3 combat: 2 -> 0 (wraps)"), U::NextCombatArenaIndex(2, AllCombat), 0);
+
+		// The realistic authoring shape: two combat arenas + one boss arena last. The cycle must bounce OVER index 2
+		// and come back to 0 — this is the case that would otherwise drop the party into the boss stage on the
+		// second suppressor break of every run.
+		const ER TwoCombatOneBoss[] = { ER::Combat, ER::Combat, ER::Boss };
+		TestEqual(TEXT("combat,combat,boss: 0 -> 1"), U::NextCombatArenaIndex(0, TwoCombatOneBoss), 1);
+		TestEqual(TEXT("combat,combat,boss: 1 -> 0 (skips the boss arena)"), U::NextCombatArenaIndex(1, TwoCombatOneBoss), 0);
+
+		// A boss arena in the MIDDLE is skipped the same way — the filter is by role, not by position.
+		const ER BossInMiddle[] = { ER::Combat, ER::Boss, ER::Combat };
+		TestEqual(TEXT("combat,boss,combat: 0 -> 2 (skips index 1)"), U::NextCombatArenaIndex(0, BossInMiddle), 2);
+		TestEqual(TEXT("combat,boss,combat: 2 -> 0 (wraps past index 1)"), U::NextCombatArenaIndex(2, BossInMiddle), 0);
+
+		// One combat arena + one boss arena = the minimum shippable boss-stage map. The combat arena must self-cycle
+		// (reseeded, same skeleton) rather than advance into the boss stage.
+		const ER OneCombatOneBoss[] = { ER::Combat, ER::Boss };
+		TestEqual(TEXT("combat,boss: 0 -> 0 (self-cycle, never the boss arena)"), U::NextCombatArenaIndex(0, OneCombatOneBoss), 0);
+
+		// Degenerate inputs. An all-boss world is an authoring fault, and INDEX_NONE is what makes PerformSwap abort
+		// loudly instead of swapping into the boss stage.
+		const ER AllBoss[] = { ER::Boss, ER::Boss };
+		TestEqual(TEXT("all boss -> INDEX_NONE"), U::NextCombatArenaIndex(0, AllBoss), INDEX_NONE);
+		TestEqual(TEXT("empty roles -> INDEX_NONE"), U::NextCombatArenaIndex(0, TConstArrayView<ER>()), INDEX_NONE);
+
+		// An unknown current index (INDEX_NONE — no active arena yet) must still find a destination rather than
+		// stalling the run: the scan starts before the first entry.
+		TestEqual(TEXT("unknown current (-1) -> first combat arena"), U::NextCombatArenaIndex(INDEX_NONE, BossInMiddle), 0);
+	}
+
 	// --- (6) EFPSRStageTransitionPhase::None must be 0 — the safe replication default (a fresh GameState, or a
 	//         client that hasn't yet received the real value, must read as "no transition in progress"). Phase A:
 	//         FadeOut/FadeIn must be appended AFTER Swapping, not interleaved with the pre-existing values — a
@@ -122,21 +165,25 @@ bool FFPSRStageTransitionTest::RunTest(const FString& Parameters)
 	//         Synthetic 5x5 grid, single layer (rank 0), NumLayers==2 so rank 1 is always absent everywhere. -------
 	{
 		using C = UFPSRFlowFieldComputer;
-		constexpr int32 NL = C::NumLayers; // 2
+		// ⚠️ StageNL / StageSurf 가 FPSRFlowFieldUnitTest.cpp 의 NL / Surf 와 이름이 다른 것은 의도다 —
+		//    익명 네임스페이스는 **번역 단위**를 격리할 뿐이라, 유니티 빌드가 두 테스트 .cpp 를 한 블롭으로
+		//    합치는 순간 이 지역 선언이 그쪽 파일스코프 선언을 가려 C4459(/WX 라 에러)로 깨진다.
+		//    -DisableUnity 로는 절대 재현되지 않는다 — 실사고 2026-08-29. 선례·경위: f5b294ed
+		constexpr int32 StageNL = C::NumLayers; // 2
 		constexpr int32 W = 5, H = 5;
 		constexpr int32 NumCells = W * H;
 
-		auto Surf = [](int32 Cell, int32 Rank) { return Cell * NL + Rank; };
+		auto StageSurf = [](int32 Cell, int32 Rank) { return Cell * StageNL + Rank; };
 		auto CellOf = [](int32 CX, int32 CY) { return CY * W + CX; };
 
 		// All rank-0 surfaces present + open by default; rank 1 absent everywhere (MAX_flt).
 		TArray<float> FloorZ;
-		FloorZ.Init(MAX_flt, NumCells * NL);
+		FloorZ.Init(MAX_flt, NumCells * StageNL);
 		TArray<bool> Blocked;
-		Blocked.Init(false, NumCells * NL);
+		Blocked.Init(false, NumCells * StageNL);
 		for (int32 Cell = 0; Cell < NumCells; ++Cell)
 		{
-			FloorZ[Surf(Cell, 0)] = 0.0f;
+			FloorZ[StageSurf(Cell, 0)] = 0.0f;
 		}
 
 		// (7a) Open self cell -> returns itself at radius 0.
@@ -146,7 +193,7 @@ bool FFPSRStageTransitionTest::RunTest(const FString& Parameters)
 		// (7b) Block the self cell -> nearest open cell is one of its radius-1 neighbours (still open); the FIXED
 		//      scan order (dy outer -1..1, dx outer -1..1 within the ring, ring-perimeter only) picks (1,1) first
 		//      (the smallest dy, then smallest dx, excluding the already-checked interior at radius 0).
-		Blocked[Surf(CellOf(2, 2), 0)] = true;
+		Blocked[StageSurf(CellOf(2, 2), 0)] = true;
 		TestEqual(TEXT("blocked self cell -> nearest open cell via radius-1 scan order"),
 			C::FindNearestOpenCell(FloorZ, Blocked, W, H, 2, 2, 8), CellOf(1, 1));
 
@@ -156,7 +203,7 @@ bool FFPSRStageTransitionTest::RunTest(const FString& Parameters)
 
 		// (7d) Every cell in the grid blocked -> no open cell anywhere -> INDEX_NONE even with a huge radius.
 		TArray<bool> AllBlocked;
-		AllBlocked.Init(true, NumCells * NL);
+		AllBlocked.Init(true, NumCells * StageNL);
 		TestEqual(TEXT("every cell blocked -> INDEX_NONE"),
 			C::FindNearestOpenCell(FloorZ, AllBlocked, W, H, 2, 2, 8), INDEX_NONE);
 
@@ -167,7 +214,7 @@ bool FFPSRStageTransitionTest::RunTest(const FString& Parameters)
 		{
 			for (int32 dx = -1; dx <= 1; ++dx)
 			{
-				RingBlocked[Surf(CellOf(2 + dx, 2 + dy), 0)] = true; // blocks the whole radius-1 ring too
+				RingBlocked[StageSurf(CellOf(2 + dx, 2 + dy), 0)] = true; // blocks the whole radius-1 ring too
 			}
 		}
 		TestEqual(TEXT("blocked within MaxRadiusCells -> INDEX_NONE (radius too small)"),

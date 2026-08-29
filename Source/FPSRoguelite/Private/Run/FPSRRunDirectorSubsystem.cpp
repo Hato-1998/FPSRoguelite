@@ -17,8 +17,11 @@
 #include "Boss/FPSRBossDefinitionDataAsset.h"
 #include "Arena/FPSRArenaActor.h" // ApplyStageDifficultyToArena's arena arg + FindActiveInWorld (stage 0)
 #include "Arena/FPSRArenaDestructible.h" // GetOwnedDestructibles' element type
+#include "Arena/FPSRArenaStreamSubsystem.h" // boss-arena roster lookup + pre-park (보스 스테이지)
+#include "Run/FPSRStageDirectorSubsystem.h" // RequestBossTransition (보스 스테이지)
 #include "Core/FPSRLogChannels.h"
 #include "Containers/ArrayView.h" // TConstArrayView (the evaluator contract — UFPSRRunScheduleDataAsset statics)
+#include "Components/CapsuleComponent.h" // boss capsule half-height (arena-centre spawn fallback)
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/Pawn.h"
@@ -45,6 +48,13 @@ void UFPSRRunDirectorSubsystem::StartRun()
 	PostBossElapsed = 0.0f;
 	bBossStarted = false;
 	NextRunLogTime = 30.0f;
+	// Boss-stage routing (보스 스테이지, 2026-08-28) — same re-run safety as bBossStarted above: a same-world re-run
+	// starts in the STARTING arena again, so a latched "already in the boss arena" from the previous run would send
+	// the next run's boss straight into whatever arena the party happened to be standing in.
+	bBossStageResolved = false;
+	BossStageWaitElapsed = 0.0f;
+	BossStageWaitStartSeconds = 0.0; // 0 = 게이트에 아직 안 들어옴. 다음 런이 지난 런의 벽시계를 물려받지 않게 한다
+	bBossArenaParkRequested = false;
 
 	// Publish the schedule to the GameState so every client's HUD can lay out the run-timeline bar (window markers +
 	// boss endpoint) (B2), and reset the replicated mission progress (B1).
@@ -370,10 +380,29 @@ void UFPSRRunDirectorSubsystem::DirectorTick()
 
 	UpdateSpawnIntensity();
 
+	// Make the boss arena visible ahead of BossTime (보스 스테이지, 2026-08-28). Before the boss gate below so the
+	// lead time is actually paid: asking on the same tick the gate fires would buy nothing.
+	TryPreParkBossArena();
+
 	// Boss supersedes missions: check it BEFORE spawning a due mission so a mission at/near BossTime (or a
 	// TimeScale jump past both) can't spawn a mission that EnterBoss immediately destroys (reward lost).
 	if (RunClock >= GetBossTime())
 	{
+		// Pin the survival clock at BossTime for the whole "moving to the boss stage" window. Before this branch
+		// existed the first tick past BossTime entered Boss phase immediately and the tick above froze the clock
+		// from then on; now that reaching the boss can take a few seconds, an unpinned clock would visibly run PAST
+		// the boss marker on the HUD run-timeline bar (B2) before stopping.
+		RunClock = GetBossTime();
+		GS->SetRunClockSeconds(RunClock);
+
+		// Boss stage first, boss second (보스 스테이지, 2026-08-28). TryEnterBossStage returns true while the party
+		// is still being moved into the boss arena — the run clock is already pinned here (RunClock stops advancing
+		// past BossTime) and the tick above early-returns for the whole transition, so this simply re-asks each
+		// tick until the swap has landed, then falls through and spawns the boss where it belongs.
+		if (TryEnterBossStage())
+		{
+			return;
+		}
 		EnterBoss();
 		return;
 	}
@@ -556,6 +585,151 @@ void UFPSRRunDirectorSubsystem::DestroyActiveMission()
 	}
 }
 
+int32 UFPSRRunDirectorSubsystem::FindBossArenaStageOrder() const
+{
+	const UWorld* World = GetWorld();
+	const UFPSRArenaStreamSubsystem* Stream = World ? World->GetSubsystem<UFPSRArenaStreamSubsystem>() : nullptr;
+	return Stream ? Stream->FindStageOrderByRole(EFPSRArenaRole::Boss) : INDEX_NONE;
+}
+
+bool UFPSRRunDirectorSubsystem::IsInBossArena() const
+{
+	const AFPSRGameState* GS = GetGS();
+	const AFPSRArenaActor* Arena = GS ? GS->GetActiveArena() : nullptr;
+	return Arena && Arena->GetArenaRole() == EFPSRArenaRole::Boss;
+}
+
+void UFPSRRunDirectorSubsystem::TryPreParkBossArena()
+{
+	// bBossStageResolved 도 같이 본다: 보스 게이트가 답을 확정했으면(보스 아레나에 도착했거나, 이 월드엔
+	// 없다고 결론냈거나, 포기했거나) 사전 파킹할 대상이 더는 없다. 이게 없으면 **보스 아레나가 없는 월드**에서
+	// 아래 INDEX_NONE 미latch 경로가 BossTime−리드 시점부터 **런이 끝날 때까지** 4Hz 로 RefreshRoster 를
+	// 돌린다(스트리밍 레벨 전수 순회 + 정렬 + 배열 재구축). 보스전 내내도 DirectorTick 은 계속 돈다.
+	// (레드팀 게이트 2026-08-29 P3 — 헤더의 "cheap; fires once per run" 주장과도 어긋났다.)
+	if (bBossArenaParkRequested || bBossStageResolved)
+	{
+		return;
+	}
+
+	const float Lead = ActiveSchedule ? ActiveSchedule->BossArenaParkLeadSeconds : 0.0f;
+	if (Lead <= 0.0f)
+	{
+		return; // pre-parking disabled by content — the transition waits on readiness instead (capped by its timeout)
+	}
+	// FMath::Max, not a bare subtraction: a lead longer than BossTime (a short test schedule, or a deliberately
+	// huge lead) resolves to "park at run start" rather than to a time already in the past that never fires.
+	if (RunClock < FMath::Max(0.0f, GetBossTime() - Lead))
+	{
+		return;
+	}
+
+	UWorld* World = GetWorld();
+	UFPSRArenaStreamSubsystem* Stream = World ? World->GetSubsystem<UFPSRArenaStreamSubsystem>() : nullptr;
+	if (!Stream)
+	{
+		bBossArenaParkRequested = true; // no streaming subsystem (test world) — nothing to park, stop asking
+		return;
+	}
+
+	const int32 BossOrder = Stream->FindStageOrderByRole(EFPSRArenaRole::Boss);
+	if (BossOrder == INDEX_NONE)
+	{
+		// The roster cannot answer YET (the package may still be loading) — leave the flag down and ask again next
+		// tick. This is not latched on purpose: latching here would permanently disable the pre-park for a world
+		// whose boss sublevel simply loaded a moment later, and the whole point of the lead time is to be early.
+		return;
+	}
+
+	Stream->RequestPark(BossOrder);
+	bBossArenaParkRequested = true;
+	UE_LOG(LogFPSR, Log, TEXT("[Run] Boss arena (stage order %d) pre-park requested at t=%.0fs (boss at %.0fs, lead %.0fs)."),
+		BossOrder, RunClock, GetBossTime(), Lead);
+}
+
+bool UFPSRRunDirectorSubsystem::TryEnterBossStage()
+{
+	if (bBossStageResolved)
+	{
+		return false; // settled: we are in the boss arena, this world has none, or we gave up — spawn the boss now
+	}
+
+	// Already standing in it (the swap landed on a previous tick, or the level simply starts there).
+	if (IsInBossArena())
+	{
+		bBossStageResolved = true;
+		UE_LOG(LogFPSR, Log, TEXT("[Run] Boss stage reached — spawning the boss here."));
+		return false;
+	}
+
+	const int32 BossOrder = FindBossArenaStageOrder();
+	UWorld* World = GetWorld();
+	UFPSRStageDirectorSubsystem* StageDirector = World ? World->GetSubsystem<UFPSRStageDirectorSubsystem>() : nullptr;
+
+	// Wall-clock, NOT game time: what is being waited on here is a level package loading and another transition
+	// finishing, neither of which speeds up with FPSR.RunTimeScale. Scaling this budget would let a debug
+	// fast-forward burn the whole allowance in a couple of ticks and degrade a perfectly healthy run.
+	//
+	// ⚠️ 그래서 **진짜 벽시계**로 잰다 — `BossStageWaitElapsed += DirectorInterval` 로 누산하면 안 된다.
+	//    DirectorTick 은 전환이 도는 내내 통째로 정지하는데(위 IsStageTransitionActive 게이트), 이 예산이
+	//    막으려는 상태가 바로 "전환은 시작되는데 PerformSwap 에서 매번 중단되는" 것이다. 누산 방식이면 그
+	//    실패 1사이클(그레이스 + 페이드 ≈ 9s)당 0.25s 만 쌓여, 30s 예산을 태우는 데 **틱 120회 ≈ 19분**이
+	//    걸린다 — 그동안 파티는 페이드 암전이 반복되는 걸 본다. 중단 경로 자체는 저작 오류로 이미 수용돼
+	//    있고(`FPSRStageDirectorSubsystem.cpp` ServerRegenerate 실패 주석), 종전에는 요청자가 없어 1회
+	//    중단으로 끝났다 — 매 틱 재요청을 넣은 이 갈래가 그것을 폭풍으로 바꿨다. (레드팀 게이트 2026-08-29)
+	const double NowSeconds = FPlatformTime::Seconds();
+	if (BossStageWaitStartSeconds == 0.0)
+	{
+		BossStageWaitStartSeconds = NowSeconds;
+	}
+	BossStageWaitElapsed = static_cast<float>(NowSeconds - BossStageWaitStartSeconds);
+
+	// --- No boss arena to go to ------------------------------------------------------------------------------
+	// Two shapes reach here and both end the same way (spawn the boss in the current arena, which is exactly the
+	// pre-boss-stage behaviour): the world genuinely has no boss arena (a single-arena test map, or content that
+	// has not authored one yet), and the boss sublevel's package has not finished loading. The roster cannot tell
+	// them apart, so give it a SHORT grace and then take the first reading — a full timeout here would delay the
+	// boss by 30s on every map that simply has no boss stage, which is most of them today.
+	if (!StageDirector || BossOrder == INDEX_NONE)
+	{
+		if (StageDirector && BossOrder == INDEX_NONE && BossStageWaitElapsed < BossArenaLookupGraceSeconds)
+		{
+			return true; // still might be loading — ask again next tick
+		}
+		bBossStageResolved = true;
+		// 등록 누락 힌트는 **여기**에 있어야 한다. 보스 서브레벨이 Always Loaded 로 등록되지 않으면 로스터가
+		// 영영 보지 못하므로 실패는 반드시 이 경로로 나온다 — 종전에는 이 힌트가 아래 타임아웃 Error 에만
+		// 달려 있었는데, 그쪽은 BossOrder != INDEX_NONE(=이미 로스터에 있음 = 등록됨)이어야 도달 가능해서
+		// **힌트가 가리키는 원인으로는 그 메시지에 닿을 수 없었다.** (레드팀 게이트 2026-08-29 P3)
+		UE_LOG(LogFPSR, Log,
+			TEXT("[Run] No boss arena in this world (%s) — spawning the boss in the current arena, as before the boss stage existed. If this world DOES have one, check that its sublevel is registered in the persistent level's streaming list as Always Loaded (loaded, not visible) — an unregistered sublevel never enters the roster."),
+			StageDirector ? TEXT("no AFPSRArenaActor authored with 아레나 역할 = 보스") : TEXT("no stage director"));
+		return false;
+	}
+
+	// --- The boss arena exists: get there --------------------------------------------------------------------
+	if (StageDirector->RequestBossTransition(BossOrder))
+	{
+		UE_LOG(LogFPSR, Log, TEXT("[Run] BossTime reached (t=%.0fs) — transitioning to the boss arena (stage order %d) before spawning."),
+			RunClock, BossOrder);
+		return true; // the transition owns the next few seconds; this tick is done
+	}
+
+	// Rejected, and every reason it can be rejected from here is transient: a suppressor transition started first
+	// and is still running, or the destination is not in the roster this instant. Keep asking.
+	if (BossStageWaitElapsed < BossStageResolveTimeoutSeconds)
+	{
+		return true;
+	}
+
+	// Gave up. A boss in the wrong arena is bad; a run that can never end is worse — nothing else calls EnterBoss,
+	// so returning true forever would strand the party in an endless combat stage with no boss and no victory.
+	bBossStageResolved = true;
+	UE_LOG(LogFPSR, Error,
+		TEXT("[Run] Could not reach the boss arena (stage order %d) after %.1fs of wall clock — spawning the boss in the CURRENT arena instead. The sublevel IS in the roster (so it is registered and loaded); the transition itself never completed — check the [StageDirector] lines above for a swap that kept aborting (a destination arena with missing/invalid 아레나 파라미터 aborts PerformSwap every attempt)."),
+		BossOrder, BossStageWaitElapsed);
+	return false;
+}
+
 void UFPSRRunDirectorSubsystem::EnterBoss()
 {
 	if (bBossStarted)
@@ -594,7 +768,7 @@ void UFPSRRunDirectorSubsystem::SpawnBoss()
 
 	// Honor the definition's spawn-mode (default true for the C++ fallback boss / no definition).
 	const bool bUseSpawnPoint = Def ? Def->bUseBossSpawnPoint : true;
-	const FTransform SpawnXform = SelectBossSpawnTransform(bUseSpawnPoint);
+	const FTransform SpawnXform = SelectBossSpawnTransform(bUseSpawnPoint, BossClassToSpawn);
 
 	FActorSpawnParameters SpawnParams;
 	SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
@@ -622,12 +796,24 @@ void UFPSRRunDirectorSubsystem::SpawnBoss()
 		*SpawnXform.GetLocation().ToCompactString(), RunClock);
 }
 
-FTransform UFPSRRunDirectorSubsystem::SelectBossSpawnTransform(bool bUseSpawnPoint) const
+FTransform UFPSRRunDirectorSubsystem::SelectBossSpawnTransform(bool bUseSpawnPoint, UClass* BossClass) const
 {
 	UWorld* World = GetWorld();
 	if (!World)
 	{
 		return FTransform::Identity;
+	}
+
+	// The arena the boss must appear in. Every spawn point outside it is rejected below, and it also provides the
+	// no-spawn-point fallback (its centre). ⚠️ This filter is not optional now that a world holds several arena
+	// sublevels at once (ADR 0012 invariant 4): TActorIterator walks the WHOLE world, so a boss spawn point sitting
+	// in a parked, hidden arena is just as visible to it as the live one — and picking that one would put the boss
+	// in a room nobody is standing in, with its collision switched off.
+	const AFPSRGameState* GS = GetGS();
+	const AFPSRArenaActor* ActiveArena = GS ? GS->GetActiveArena() : nullptr;
+	if (!ActiveArena)
+	{
+		ActiveArena = AFPSRArenaActor::FindActiveInWorld(World); // pre-first-swap / no GameState pointer yet
 	}
 
 	// Spawn points only when the definition opts in. Weighted-random among enabled, designer-placed boss spawn
@@ -640,11 +826,19 @@ FTransform UFPSRRunDirectorSubsystem::SelectBossSpawnTransform(bool bUseSpawnPoi
 		for (TActorIterator<AFPSRBossSpawnPoint> It(World); It; ++It)
 		{
 			AFPSRBossSpawnPoint* Point = *It;
-			if (Point && Point->IsEnabled() && Point->GetWeight() > 0.0f)
+			if (!Point || !Point->IsEnabled() || Point->GetWeight() <= 0.0f)
 			{
-				Candidates.Add({ Point, Point->GetWeight() });
-				TotalWeight += Point->GetWeight();
+				continue;
 			}
+			// ContainsWorldLocation is the ONE membership test every marker actor shares (see its header) — using it
+			// here keeps "which arena owns this spawn point" from drifting from every other spatial answer. With no
+			// arena at all (a bare test map) every point is accepted, which is the pre-multi-arena behaviour.
+			if (ActiveArena && !ActiveArena->ContainsWorldLocation(Point->GetActorLocation()))
+			{
+				continue;
+			}
+			Candidates.Add({ Point, Point->GetWeight() });
+			TotalWeight += Point->GetWeight();
 		}
 
 		if (Candidates.Num() > 0 && TotalWeight > 0.0f)
@@ -662,11 +856,32 @@ FTransform UFPSRRunDirectorSubsystem::SelectBossSpawnTransform(bool bUseSpawnPoi
 			return Candidates.Last().Point->GetActorTransform();
 		}
 
-		// Opted into spawn points but none placed — warn so the designer adds an AFPSRBossSpawnPoint, then fall back.
-		UE_LOG(LogFPSR, Warning, TEXT("[Run] No AFPSRBossSpawnPoint placed — spawning boss at a player fallback. Place a boss spawn point for content."));
+		// Opted into spawn points but none placed IN THIS ARENA — warn so the designer adds an AFPSRBossSpawnPoint,
+		// then fall back.
+		UE_LOG(LogFPSR, Warning, TEXT("[Run] No AFPSRBossSpawnPoint placed inside %s — falling back. Place a boss spawn point for content."),
+			ActiveArena ? *ActiveArena->GetPathName() : TEXT("the arena"));
 	}
 
-	// Fallback: in front of the first player so the boss is visible (definition opted out, or no point placed).
+	// Fallback 1: the ACTIVE ARENA'S CENTRE (보스 스테이지, 2026-08-28). A boss arena is authored around its boss —
+	// the arena actor sits at the arena centre by construction (see AFPSRArenaActor), so the centre is where a
+	// structure-shaped boss belongs and is a far better guess than "wherever the first player happens to stand".
+	// Z: the arena's own plane lifted by the boss capsule's half-height, so the body rests ON the floor instead of
+	// sinking halfway through it (the scaffold boss has gravity off, so nothing would settle it afterwards).
+	if (ActiveArena)
+	{
+		float HalfHeight = 200.0f; // AFPSRBossBase's own capsule default, used only if the CDO cannot be read
+		if (const AFPSRBossBase* BossCDO = BossClass ? BossClass->GetDefaultObject<AFPSRBossBase>() : nullptr)
+		{
+			if (const UCapsuleComponent* Capsule = BossCDO->GetCapsuleComponent())
+			{
+				HalfHeight = Capsule->GetScaledCapsuleHalfHeight();
+			}
+		}
+		const FVector Centre = ActiveArena->GetActorLocation();
+		return FTransform(FRotator::ZeroRotator, FVector(Centre.X, Centre.Y, Centre.Z + HalfHeight));
+	}
+
+	// Fallback 2: in front of the first player so the boss is visible (no arena in this world at all).
 	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
 	{
 		if (const APlayerController* PC = It->Get())
@@ -1006,10 +1221,35 @@ void UFPSRRunDirectorSubsystem::DebugClearMission()
 
 void UFPSRRunDirectorSubsystem::DebugSkipToBoss()
 {
-	if (HasServerAuthority())
+	if (!HasServerAuthority())
 	{
-		EnterBoss();
+		return;
 	}
+
+	// Fast-forward the CLOCK rather than calling EnterBoss directly (보스 스테이지, 2026-08-28). Now that the boss
+	// lives in its own arena, spawning it straight into whatever combat arena the tester happens to be standing in
+	// produces a state the game itself can never reach — a boss sharing an arena with a live suppressor, where
+	// breaking that suppressor is then rejected mid-boss. Debugging against an impossible state is worse than
+	// waiting the ~10s the real transition takes, and this way the command exercises the production path.
+	//
+	// The next DirectorTick sees RunClock >= BossTime and runs the real gate: transition to the boss arena first,
+	// then EnterBoss. On a world with no boss arena this is still equivalent to the old behaviour (the gate falls
+	// straight through to EnterBoss), just one tick later.
+	// 런이 없으면 시계만 옮겨봐야 아무 일도 안 일어난다 — DirectorTick 이 bRunActive 가드에서 멈춘다. 구버전은
+	// EnterBoss 직행이라 런 없이도 뭔가 했으므로, 조용히 무동작이면 "명령이 고장났다"로 읽힌다. (레드팀 P3)
+	if (!bRunActive)
+	{
+		UE_LOG(LogFPSR, Warning,
+			TEXT("[Run] FPSR.SkipToBoss — no active run, so nothing happens (the director tick is gated on an active run). Start a run first."));
+		return;
+	}
+
+	RunClock = GetBossTime();
+	if (AFPSRGameState* GS = GetGS())
+	{
+		GS->SetRunClockSeconds(RunClock);
+	}
+	UE_LOG(LogFPSR, Log, TEXT("[Run] FPSR.SkipToBoss — run clock jumped to BossTime (%.0fs); the boss gate runs on the next director tick."), RunClock);
 }
 
 // ---- Console Commands (debug; excluded from shipping) ----
@@ -1041,7 +1281,7 @@ static FAutoConsoleCommandWithWorldAndArgs GFPSRMissionClearCmd(
 
 static FAutoConsoleCommandWithWorldAndArgs GFPSRSkipToBossCmd(
 	TEXT("FPSR.SkipToBoss"),
-	TEXT("Skip directly to the boss (debug)."),
+	TEXT("Skip to the boss (debug): jumps the run clock to BossTime, so the boss-arena transition runs for real before the boss spawns."),
 	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic([](const TArray<FString>& Args, UWorld* World)
 	{
 		if (UFPSRRunDirectorSubsystem* Dir = World ? World->GetSubsystem<UFPSRRunDirectorSubsystem>() : nullptr)

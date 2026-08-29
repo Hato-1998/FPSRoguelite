@@ -118,6 +118,12 @@ public:
 	 *  the subsystem reads ULevel::Actors directly to know which level to park next. */
 	int32 GetStageOrder() const { return StageOrder; }
 
+	/** What this arena is FOR (보스 스테이지, 2026-08-28). Read on the same "loaded but not yet visible" path as
+	 *  GetStageOrder — the roster has to know an arena's role BEFORE the swap that needs it, and by then the level
+	 *  is only parked, not in the world. Combat arenas are the suppressor cycle; a Boss arena is skipped by it and
+	 *  reachable only through UFPSRStageDirectorSubsystem::RequestBossTransition. */
+	EFPSRArenaRole GetArenaRole() const { return ArenaRole; }
+
 	/** Height the editor's starting-layout tool gives a proposed blocker. Lives here rather than in the tool so the
 	 *  authored number stays in one place — the designer tunes it on the arena and every proposal follows. */
 	float GetClusterHeight() const { return ClusterHeight; }
@@ -212,6 +218,12 @@ protected:
 	/** 전환 순서(작은 값부터 진행). 같은 값이 둘이면 이름 순으로 갈린다. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "아레나", meta = (DisplayName = "스테이지 순서"))
 	int32 StageOrder = 0;
+
+	/** 이 아레나의 **역할**. `전투` = 억제기 순환이 도는 보통 아레나(기본값 — 기존 맵은 손댈 것이 없다).
+	 *  `보스` = 억제기 순환에서 **제외**되고, 런 디렉터의 BossTime 전환으로만 들어간다. 레벨에 하나만 두고
+	 *  그 레벨엔 억제기를 놓지 않는다(그래야 보스전에서 못 빠져나간다) — 둘 다 에디터 검증기가 잡는다. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "아레나", meta = (DisplayName = "아레나 역할"))
+	EFPSRArenaRole ArenaRole = EFPSRArenaRole::Combat;
 
 	/** 레벨 시작 시 이 아레나가 활성 상태인가. **레벨에 하나만 true 여야 한다** — 나머지는 예비 아레나로, 같은
 	 *  레벨의 떨어진 자리에서 렌더·콜리전이 꺼진 채 대기한다(2026-08-17 사용자 결정 — 클래스 주석 참고). */

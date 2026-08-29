@@ -50,6 +50,7 @@ void UFPSRStageDirectorSubsystem::Deinitialize()
 		World->GetTimerManager().ClearTimer(SwapReadyTimerHandle);
 		World->GetTimerManager().ClearTimer(FadeTimerHandle);
 	}
+	PendingDestinationStageOrder = INDEX_NONE;
 	Super::Deinitialize();
 }
 
@@ -58,6 +59,17 @@ int32 UFPSRStageDirectorSubsystem::GetCurrentStageOrder() const
 	const AFPSRGameState* GS = GetGS();
 	const AFPSRArenaActor* Arena = GS ? GS->GetActiveArena() : nullptr;
 	return Arena ? Arena->GetStageOrder() : INDEX_NONE;
+}
+
+int32 UFPSRStageDirectorSubsystem::GetDestinationStageOrder() const
+{
+	if (PendingDestinationStageOrder != INDEX_NONE)
+	{
+		return PendingDestinationStageOrder; // a named destination (the boss transition) — never cycled to
+	}
+	const UWorld* World = GetWorld();
+	const UFPSRArenaStreamSubsystem* Stream = World ? World->GetSubsystem<UFPSRArenaStreamSubsystem>() : nullptr;
+	return Stream ? Stream->GetNextStageOrder(GetCurrentStageOrder()) : INDEX_NONE;
 }
 
 void UFPSRStageDirectorSubsystem::ParkArenaAfter(int32 StageOrder) const
@@ -117,6 +129,28 @@ int32 UFPSRStageDirectorSubsystem::NextArenaIndex(int32 CurrentIndex, int32 Coun
 	return (CurrentIndex + 1) % Count;
 }
 
+int32 UFPSRStageDirectorSubsystem::NextCombatArenaIndex(int32 CurrentIndex, TConstArrayView<EFPSRArenaRole> Roles)
+{
+	const int32 Count = Roles.Num();
+	if (Count <= 0)
+	{
+		return INDEX_NONE;
+	}
+	// Built ON NextArenaIndex rather than re-deriving the modulo so the cycle rule stays in ONE place: this is
+	// "keep taking the next index until one is Combat", nothing more. A full lap (Count steps) ends back at
+	// CurrentIndex, which is what makes the lone-combat-arena self-cycle fall out for free.
+	int32 Candidate = CurrentIndex;
+	for (int32 Step = 0; Step < Count; ++Step)
+	{
+		Candidate = NextArenaIndex(Candidate, Count);
+		if (Roles.IsValidIndex(Candidate) && Roles[Candidate] == EFPSRArenaRole::Combat)
+		{
+			return Candidate;
+		}
+	}
+	return INDEX_NONE;
+}
+
 bool UFPSRStageDirectorSubsystem::IsDealingOpen(EFPSRStageTransitionPhase Phase, float NowServerTime, float DealingEndServerTime)
 {
 	return Phase == EFPSRStageTransitionPhase::Grace && NowServerTime < DealingEndServerTime;
@@ -128,14 +162,53 @@ bool UFPSRStageDirectorSubsystem::IsDealingOpen(EFPSRStageTransitionPhase Phase,
 
 void UFPSRStageDirectorSubsystem::RequestTransition()
 {
+	// The suppressor path: no named destination, so BeginTransition cycles to the next COMBAT arena. The return
+	// value is deliberately dropped — a rejected suppressor break has nothing to retry (the guards that reject it
+	// are "already transitioning" and "mid-boss", neither of which the suppressor can do anything about).
+	BeginTransition(INDEX_NONE);
+}
+
+bool UFPSRStageDirectorSubsystem::RequestBossTransition(int32 BossStageOrder)
+{
+	if (BossStageOrder == INDEX_NONE)
+	{
+		return false; // the caller could not find a boss arena — nothing to start, and it will say so itself
+	}
+
+	// 목적지가 정말 보스 아레나인지 **여기서** 확인한다. BeginTransition 은 StageOrder 로만 슬롯을 집고 역할을
+	// 보지 않으므로, StageOrder 가 중복이면(=아레나 레벨을 복제하면 기본으로 그렇게 된다 —
+	// `Docs/BossStage_ContentGuide.md` §4 가 "복제본이라 지금은 같은 값일 것"이라고 적는다) 보스 전환이
+	// 조용히 **전투 아레나**에 착지한다. 그러면 IsInBossArena 가 계속 false 라 게이트가 매 틱 재요청하고,
+	// 파티는 보스 없는 전환을 반복해서 본다. 억제기 순환은 인덱스 순환이라 이만큼 취약하지 않았다 —
+	// 이 취약성은 역할 기반 라우팅이 새로 만든 것이다. (레드팀 게이트 2026-08-29)
+	if (const UWorld* World = GetWorld())
+	{
+		if (const UFPSRArenaStreamSubsystem* Stream = World->GetSubsystem<UFPSRArenaStreamSubsystem>())
+		{
+			FFPSRArenaSlot DestSlot;
+			if (Stream->FindSlot(BossStageOrder, DestSlot) && DestSlot.Role != EFPSRArenaRole::Boss)
+			{
+				UE_LOG(LogFPSR, Error,
+					TEXT("[StageDirector] Boss transition to stage order %d refused — that roster slot is a %s arena, not the boss arena. StageOrder must be UNIQUE across arena sublevels; a duplicated arena level keeps the original's value. Give the boss arena its own '스테이지 순서'."),
+					BossStageOrder, (DestSlot.Role == EFPSRArenaRole::Combat) ? TEXT("combat") : TEXT("non-boss"));
+				return false;
+			}
+		}
+	}
+
+	return BeginTransition(BossStageOrder);
+}
+
+bool UFPSRStageDirectorSubsystem::BeginTransition(int32 DestinationStageOrder)
+{
 	if (!HasServerAuthority())
 	{
-		return;
+		return false;
 	}
 	AFPSRGameState* GS = GetGS();
 	if (!GS)
 	{
-		return;
+		return false;
 	}
 	// P2-1 (merge-gate 교정): hoisted from the old wrap-block further down so the arena-existence guard a few lines
 	// below (right after the boss-phase guard) can use it BEFORE this function commits to Grace / cancels the active
@@ -143,14 +216,16 @@ void UFPSRStageDirectorSubsystem::RequestTransition()
 	UWorld* World = GetWorld();
 	if (!World)
 	{
-		return;
+		return false;
 	}
 
 	// A transition is already running: several suppressors can exist in one arena, or one explosion can finish
 	// more than one at once — only the FIRST request may start the state machine, the rest are silently ignored.
+	// This is also what keeps a suppressor break and the BossTime transition from racing: whichever lands first
+	// runs, and the run director simply asks again on its next tick.
 	if (GS->GetStageTransitionPhase() != EFPSRStageTransitionPhase::None)
 	{
-		return;
+		return false;
 	}
 
 	// F4: a stage swap is not supported mid-boss. Destructibles (suppressors included) sit outside the transition
@@ -159,10 +234,14 @@ void UFPSRStageDirectorSubsystem::RequestTransition()
 	// swap during Boss phase would strand it alone in the old arena with its collision switched off, and the run
 	// could never end (no path to victory or defeat). Reject and let the suppressor stay broken but inert rather
 	// than run a transition with no way to finish it.
+	//
+	// This guard is ALSO what makes the BossTime transition safe (보스 스테이지, 2026-08-28): the run director
+	// requests that swap while still in Combat phase and only calls EnterBoss (which sets ERunPhase::Boss) once the
+	// swap has landed, so the boss never exists while a transition could strand it.
 	if (GS->GetRunPhase() != ERunPhase::Combat)
 	{
 		UE_LOG(LogFPSR, Log, TEXT("[StageDirector] Transition requested during Boss phase — ignored (arena swap is not supported mid-boss)."));
-		return;
+		return false;
 	}
 
 	// P2-1 (merge-gate 교정): same reason as the boss-phase guard just above — a transition that CANNOT finish once
@@ -174,8 +253,26 @@ void UFPSRStageDirectorSubsystem::RequestTransition()
 	if (Arenas.Num() == 0)
 	{
 		UE_LOG(LogFPSR, Warning, TEXT("[StageDirector] Transition requested but no AFPSRArenaActor exists in this world — ignored."));
-		return;
+		return false;
 	}
+
+	// Same "a transition that CANNOT finish must never start" rule, applied to the NAMED-destination path: verify
+	// the arena actually exists in the streaming roster BEFORE committing to Grace. Rejecting here (rather than
+	// aborting after the fade) is what lets the run director keep asking while the boss arena's package finishes
+	// loading, instead of burning a transition — and the player never sees a fade that goes nowhere.
+	if (DestinationStageOrder != INDEX_NONE)
+	{
+		const UFPSRArenaStreamSubsystem* Stream = World->GetSubsystem<UFPSRArenaStreamSubsystem>();
+		FFPSRArenaSlot DestSlot;
+		if (!Stream || !Stream->FindSlot(DestinationStageOrder, DestSlot))
+		{
+			UE_LOG(LogFPSR, Warning,
+				TEXT("[StageDirector] Transition to stage order %d requested but no such arena is in the roster yet — ignored (the caller retries)."),
+				DestinationStageOrder);
+			return false;
+		}
+	}
+	PendingDestinationStageOrder = DestinationStageOrder;
 
 	const float GraceSeconds = GS->GetRunSchedule() ? GS->GetRunSchedule()->StageGraceSeconds : DefaultStageGraceSeconds;
 	const float DealingEnd = GS->GetServerWorldTimeSeconds() + GraceSeconds;
@@ -258,7 +355,12 @@ void UFPSRStageDirectorSubsystem::RequestTransition()
 	// assume that invariant can never change.
 	bWasRunPausedForDealing = GS->IsRunPaused();
 
-	UE_LOG(LogFPSR, Log, TEXT("[StageDirector] Transition requested — dealing window %.1fs."), GraceSeconds);
+	UE_LOG(LogFPSR, Log, TEXT("[StageDirector] Transition requested (destination %s) — dealing window %.1fs."),
+		DestinationStageOrder == INDEX_NONE
+			? TEXT("= next combat arena")
+			: *FString::Printf(TEXT("= stage order %d"), DestinationStageOrder),
+		GraceSeconds);
+	return true;
 }
 
 bool UFPSRStageDirectorSubsystem::IsTransitioning() const
@@ -548,7 +650,7 @@ void UFPSRStageDirectorSubsystem::BeginSwap()
 	TArray<FString> NotReady;
 	if (const UFPSRArenaStreamSubsystem* Stream = World->GetSubsystem<UFPSRArenaStreamSubsystem>())
 	{
-		Stream->GetConnectionsNotReady(Stream->GetNextStageOrder(GetCurrentStageOrder()), NotReady);
+		Stream->GetConnectionsNotReady(GetDestinationStageOrder(), NotReady);
 	}
 	UE_LOG(LogFPSR, Warning,
 		TEXT("[StageDirector] Destination arena is not visible to %d connection(s) yet (%s) — holding the swap for up to %.1fs. The dealing window has already closed, so the reward was not extended."),
@@ -571,8 +673,9 @@ bool UFPSRStageDirectorSubsystem::TrySwapIfDestinationReady()
 	// Which arena the swap will land on has to come from the ROSTER, not from AFPSRArenaActor::FindAllInWorld:
 	// FindAllInWorld iterates the world, so an arena whose sublevel is not visible yet is invisible to it and the
 	// cycle would silently return the CURRENT arena — i.e. exactly the case this gate exists to catch would read
-	// as "ready".
-	const int32 NextOrder = Stream->GetNextStageOrder(GetCurrentStageOrder());
+	// as "ready". GetDestinationStageOrder folds in the boss transition's NAMED destination, so this gate waits on
+	// the arena the swap is actually headed for rather than on the one the cycle would have picked.
+	const int32 NextOrder = GetDestinationStageOrder();
 	if (!Stream->IsReadyForEveryone(NextOrder))
 	{
 		return false;
@@ -606,7 +709,7 @@ void UFPSRStageDirectorSubsystem::PollSwapReadiness()
 	TArray<FString> NotReady;
 	if (const UFPSRArenaStreamSubsystem* Stream = GetWorld() ? GetWorld()->GetSubsystem<UFPSRArenaStreamSubsystem>() : nullptr)
 	{
-		Stream->GetConnectionsNotReady(Stream->GetNextStageOrder(GetCurrentStageOrder()), NotReady);
+		Stream->GetConnectionsNotReady(GetDestinationStageOrder(), NotReady);
 	}
 	UE_LOG(LogFPSR, Error,
 		TEXT("[StageDirector] Destination arena still not visible to %d connection(s) (%s) after %.1fs — swapping anyway. Those clients will see the arena appear late."),
@@ -654,6 +757,7 @@ void UFPSRStageDirectorSubsystem::PerformSwap()
 		if (GS->HasRunEnded())
 		{
 			GS->SetStageTransition(EFPSRStageTransitionPhase::None, 0.0f);
+			PendingDestinationStageOrder = INDEX_NONE;
 			UE_LOG(LogFPSR, Error, TEXT("[StageDirector] Swap aborted: the run has ended — not swapping behind the result screen."));
 			return;
 		}
@@ -677,15 +781,64 @@ void UFPSRStageDirectorSubsystem::PerformSwap()
 	{
 		UE_LOG(LogFPSR, Warning, TEXT("[StageDirector] Swap requested but no AFPSRArenaActor exists in this world — aborting."));
 		GS->SetStageTransition(EFPSRStageTransitionPhase::None, 0.0f);
+		PendingDestinationStageOrder = INDEX_NONE;
 		return;
 	}
 	AFPSRArenaActor* Prev = AFPSRArenaActor::FindActiveInWorld(World);
 	const int32 PrevIndex = FMath::Max(0, Arenas.IndexOfByKey(Prev));
-	const int32 NextIndex = NextArenaIndex(PrevIndex, Arenas.Num());
-	AFPSRArenaActor* Next = Arenas.IsValidIndex(NextIndex) ? Arenas[NextIndex] : Prev;
-	// A single arena in the world cycles to ITSELF: the same skeleton with a freshly rolled seed IS the next stage
-	// (new prop layout) — the intended single-arena behavior (see NextArenaIndex's header comment), not an
-	// authoring gap, so this does NOT warn.
+
+	AFPSRArenaActor* Next = nullptr;
+	if (PendingDestinationStageOrder != INDEX_NONE)
+	{
+		// Named destination (the BossTime transition). Look it up by StageOrder rather than cycling — and if it is
+		// NOT in the world, ABORT instead of falling back to the cycle. Falling back would silently send the party
+		// to an ordinary combat arena and then spawn the boss there on the run director's next tick, which reads as
+		// "the boss stage didn't work" with nothing in the log to say why. BeginTransition already refused to start
+		// without a roster entry and BeginSwap already waited for visibility, so reaching this is a real fault.
+		const int32 WantOrder = PendingDestinationStageOrder;
+		AFPSRArenaActor* const* Found = Arenas.FindByPredicate([WantOrder](const AFPSRArenaActor* A)
+			{ return A && A->GetStageOrder() == WantOrder; });
+		Next = Found ? *Found : nullptr;
+		if (!Next)
+		{
+			UE_LOG(LogFPSR, Error,
+				TEXT("[StageDirector] Swap aborted: destination arena (stage order %d) is not in the world — staying on %s. The active mission was already cancelled at transition start and is NOT restored."),
+				PendingDestinationStageOrder, Prev ? *Prev->GetPathName() : TEXT("?"));
+			GS->SetStageTransition(EFPSRStageTransitionPhase::None, 0.0f);
+			PendingDestinationStageOrder = INDEX_NONE;
+			return;
+		}
+	}
+	else
+	{
+		// The suppressor cycle. Boss arenas are SKIPPED (보스 스테이지, 2026-08-28) — that stage carries no
+		// suppressor by design, so cycling into it early would strand the party there with no boss and no way out.
+		TArray<EFPSRArenaRole> Roles;
+		Roles.Reserve(Arenas.Num());
+		for (const AFPSRArenaActor* A : Arenas)
+		{
+			Roles.Add(A ? A->GetArenaRole() : EFPSRArenaRole::Combat);
+		}
+		const int32 NextIndex = NextCombatArenaIndex(PrevIndex, Roles);
+		// A single COMBAT arena cycles to ITSELF: the same skeleton with a freshly rolled seed IS the next stage
+		// (new prop layout) — the intended single-arena behavior (see NextCombatArenaIndex's header comment), not an
+		// authoring gap, so this does NOT warn. INDEX_NONE means every arena in the world is a boss arena, which IS
+		// an authoring fault: stay put rather than swap into the boss stage.
+		Next = Arenas.IsValidIndex(NextIndex) ? Arenas[NextIndex] : nullptr;
+		if (!Next)
+		{
+			UE_LOG(LogFPSR, Error,
+				TEXT("[StageDirector] Swap aborted: this world has no COMBAT arena to cycle to (every AFPSRArenaActor is authored as a boss arena) — staying on %s."),
+				Prev ? *Prev->GetPathName() : TEXT("?"));
+			GS->SetStageTransition(EFPSRStageTransitionPhase::None, 0.0f);
+			return;
+		}
+	}
+
+	// The named destination has been CONSUMED — clear it here, once Next is resolved, so every path from this point
+	// (success and both aborts below) leaves it clean with one assignment instead of three. Deliberately after the
+	// freeze-defer return above, which re-enters PerformSwap later and still needs the destination.
+	PendingDestinationStageOrder = INDEX_NONE;
 
 	const int32 NewStageIndex = GS->GetStageIndex() + 1;
 
@@ -868,5 +1021,16 @@ void UFPSRStageDirectorSubsystem::PerformSwap()
 	//    request cannot compete with the swap's own frame, and so GetCurrentStageOrder already reads the arena we
 	//    just moved into. The previous arena stays loaded and visible-but-hidden — unloading it would give back
 	//    the AddToWorld cost the moment the run cycles around to it again.
-	ParkArenaAfter(Next->GetStageOrder());
+	//
+	//    ...unless this IS the boss arena (보스 스테이지, 2026-08-28). There is no stage after the boss stage — the
+	//    run ends there — so pre-paying AddToWorld for an arena nobody will ever enter would spend a frame budget
+	//    and a level's worth of memory during the fight it is most expensive to spend them in.
+	if (Next->GetArenaRole() == EFPSRArenaRole::Boss)
+	{
+		UE_LOG(LogFPSR, Log, TEXT("[StageDirector] Landed in the boss arena — no successor to park (the run ends here)."));
+	}
+	else
+	{
+		ParkArenaAfter(Next->GetStageOrder());
+	}
 }
