@@ -165,6 +165,11 @@ Fable을 기본 주도자로 쓰면 **사용량이 감당되지 않는다**. 그
   `"<엔진루트>\Engine\Build\BatchFiles\Build.bat" FPSRogueliteEditor Win64 Development -Project="<작업 클론>\FPSRoguelite.uproject" -WaitMutex`
   - **클론이 여럿인 머신에서만** 빌드 대상 클론을 고른다 — D:/E: 머신의 현 코드 빌드 대상 = **`FPSRoguelite`**(정정 2026-08-11: 종전 `FPSRoguelite2`는 스테일이었다. 실측 = `FPSRoguelite2` HEAD가 한참 뒤처져 있고, 최근 세션들은 전부 `FPSRoguelite`에서 빌드·검증했다. `git worktree list`에도 없어 워크트리가 아니라 **독립 클론**이다). 클론이 하나인 머신은 그 클론이 곧 빌드 대상이다
   - ⚠️ **기본 규칙은 "코드를 고친 그 클론에서 빌드한다"** 이다 — 다른 클론을 빌드하면 내 변경이 안 들어간 바이너리를 검증하게 된다. 위 지목은 그 위의 예외가 아니라, 클론이 여럿일 때 **어느 쪽이 현 코드 트리인지**를 적어 둔 것이다
+  - ⚠️ **머지 전 1회는 `-DisableAdaptiveUnity -ForceUnity` 를 붙여 돌린다**(테스트·헬퍼를 추가·수정했으면 필수):
+    `… -WaitMutex -DisableAdaptiveUnity -ForceUnity`
+    - 기본 명령은 유니티지만 UBT의 **Adaptive Unity 가 "방금 고친 파일"을 블롭에서 자동으로 빼므로**, 수정 직후의 `Succeeded` 는 유니티 충돌(익명 네임스페이스 **동명 심볼** → C4459/C2084)을 **구조적으로 못 잡는다.** 로그에 `[Adaptive Build] Excluded from … unity file:` 줄이 있으면 그 초록은 해당 파일에 대해 무효다
+    - **`-DisableUnity` 의 초록을 이 계열의 근거로 쓰지 말 것** — 논-유니티는 .cpp 마다 번역 단위가 갈려 동명 충돌이 **원리적으로 안 생긴다**
+    - 2회 재발(`f5b294ed` 2026-08-28 · 2026-08-29 보스 스테이지). 증상·판정법 = `Docs/Troubleshooting.md` **G13**
 - 헤드리스 검증:
   `UnrealEditor-Cmd.exe <uproject> -unattended -nopause -nullrhi -nosplash -nosound -ExecCmds="Automation RunTests FPSRoguelite.Smoke.ModuleLoads" -TestExit="Automation Test Queue Empty" -abslog=...`
 - 새 UCLASS 다수면 Live Coding 불가 → 풀빌드(에디터 닫아야 함). 입력 IA 생성은 `Scripts/gen_input_assets.py`

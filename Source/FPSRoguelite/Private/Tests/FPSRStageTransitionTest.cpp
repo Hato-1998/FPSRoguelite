@@ -165,21 +165,25 @@ bool FFPSRStageTransitionTest::RunTest(const FString& Parameters)
 	//         Synthetic 5x5 grid, single layer (rank 0), NumLayers==2 so rank 1 is always absent everywhere. -------
 	{
 		using C = UFPSRFlowFieldComputer;
-		constexpr int32 NL = C::NumLayers; // 2
+		// ⚠️ StageNL / StageSurf 가 FPSRFlowFieldUnitTest.cpp 의 NL / Surf 와 이름이 다른 것은 의도다 —
+		//    익명 네임스페이스는 **번역 단위**를 격리할 뿐이라, 유니티 빌드가 두 테스트 .cpp 를 한 블롭으로
+		//    합치는 순간 이 지역 선언이 그쪽 파일스코프 선언을 가려 C4459(/WX 라 에러)로 깨진다.
+		//    -DisableUnity 로는 절대 재현되지 않는다 — 실사고 2026-08-29. 선례·경위: f5b294ed
+		constexpr int32 StageNL = C::NumLayers; // 2
 		constexpr int32 W = 5, H = 5;
 		constexpr int32 NumCells = W * H;
 
-		auto Surf = [](int32 Cell, int32 Rank) { return Cell * NL + Rank; };
+		auto StageSurf = [](int32 Cell, int32 Rank) { return Cell * StageNL + Rank; };
 		auto CellOf = [](int32 CX, int32 CY) { return CY * W + CX; };
 
 		// All rank-0 surfaces present + open by default; rank 1 absent everywhere (MAX_flt).
 		TArray<float> FloorZ;
-		FloorZ.Init(MAX_flt, NumCells * NL);
+		FloorZ.Init(MAX_flt, NumCells * StageNL);
 		TArray<bool> Blocked;
-		Blocked.Init(false, NumCells * NL);
+		Blocked.Init(false, NumCells * StageNL);
 		for (int32 Cell = 0; Cell < NumCells; ++Cell)
 		{
-			FloorZ[Surf(Cell, 0)] = 0.0f;
+			FloorZ[StageSurf(Cell, 0)] = 0.0f;
 		}
 
 		// (7a) Open self cell -> returns itself at radius 0.
@@ -189,7 +193,7 @@ bool FFPSRStageTransitionTest::RunTest(const FString& Parameters)
 		// (7b) Block the self cell -> nearest open cell is one of its radius-1 neighbours (still open); the FIXED
 		//      scan order (dy outer -1..1, dx outer -1..1 within the ring, ring-perimeter only) picks (1,1) first
 		//      (the smallest dy, then smallest dx, excluding the already-checked interior at radius 0).
-		Blocked[Surf(CellOf(2, 2), 0)] = true;
+		Blocked[StageSurf(CellOf(2, 2), 0)] = true;
 		TestEqual(TEXT("blocked self cell -> nearest open cell via radius-1 scan order"),
 			C::FindNearestOpenCell(FloorZ, Blocked, W, H, 2, 2, 8), CellOf(1, 1));
 
@@ -199,7 +203,7 @@ bool FFPSRStageTransitionTest::RunTest(const FString& Parameters)
 
 		// (7d) Every cell in the grid blocked -> no open cell anywhere -> INDEX_NONE even with a huge radius.
 		TArray<bool> AllBlocked;
-		AllBlocked.Init(true, NumCells * NL);
+		AllBlocked.Init(true, NumCells * StageNL);
 		TestEqual(TEXT("every cell blocked -> INDEX_NONE"),
 			C::FindNearestOpenCell(FloorZ, AllBlocked, W, H, 2, 2, 8), INDEX_NONE);
 
@@ -210,7 +214,7 @@ bool FFPSRStageTransitionTest::RunTest(const FString& Parameters)
 		{
 			for (int32 dx = -1; dx <= 1; ++dx)
 			{
-				RingBlocked[Surf(CellOf(2 + dx, 2 + dy), 0)] = true; // blocks the whole radius-1 ring too
+				RingBlocked[StageSurf(CellOf(2 + dx, 2 + dy), 0)] = true; // blocks the whole radius-1 ring too
 			}
 		}
 		TestEqual(TEXT("blocked within MaxRadiusCells -> INDEX_NONE (radius too small)"),
