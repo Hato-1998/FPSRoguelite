@@ -2101,12 +2101,57 @@ static FAutoConsoleCommandWithWorldAndArgs GFPSRSpawnEnemiesCmd(
 			}
 		}
 
-		// Spawn in ring pattern.
-		for (int32 i = 0; i < Count; ++i)
+		// Spawn in a ring pattern. AcquireEnemy REJECTS an attempt (returns null) at three gates, and this loop used
+		// to swallow that null and silently under-deliver. The binding one in practice is the ELITE CAP: whenever the
+		// current stage authors no MaxEliteAlive, the effective cap is 0, so every elite the roster rolls is refused —
+		// and because that gate's log is edge-triggered, the director's own first fill pass trips it one frame before
+		// this command runs, leaving every rejection here completely silent. Measured 2026-08-28: `300 6000` delivered
+		// 225/226 and `500 6000` delivered 394/398, i.e. short by exactly the roster's elite weight share, with no
+		// failure logged anywhere. A frame-budget judgment line defined at "적 300" cannot be measured at 225, so:
+		//   1. retry a rejected attempt until the requested count is met, and
+		//   2. always report what was actually delivered, with its composition.
+		// The retry is BOUNDED because two of the three gates (pool exhausted, SpawnActor failure) are deterministic —
+		// they never succeed on retry, and the budget stops the game thread spinning on them. A rejected attempt
+		// returns before it touches the pool, so even a fully consumed budget is cheap.
+		const int32 MaxAttempts = Count * 32 + 128;
+		int32 Spawned = 0;
+		int32 Attempts = 0;
+		TMap<const UClass*, int32> SpawnedByClass;
+		while (Spawned < Count && Attempts < MaxAttempts)
 		{
-			const float Angle = (2.0f * PI * i) / FMath::Max(1, Count);
+			++Attempts;
+			// Angle from the SPAWNED index, not the attempt index, so the delivered ring stays evenly spaced.
+			const float Angle = (2.0f * PI * Spawned) / FMath::Max(1, Count);
 			const FVector Offset(FMath::Cos(Angle) * Radius, FMath::Sin(Angle) * Radius, 100.0f);
-			Sub->AcquireEnemy(Center + Offset);
+			if (const AFPSREnemyBase* Enemy = Sub->AcquireEnemy(Center + Offset))
+			{
+				++Spawned;
+				++SpawnedByClass.FindOrAdd(Enemy->GetClass());
+			}
+		}
+
+		// Always report — measurement provenance. A composition line in game.log is what makes a shortfall like the
+		// 2026-08-28 one self-evident while the run is still in front of you, instead of an unexplained number later.
+		// Sorted by class name so two runs' lines diff cleanly (TMap iteration order is not stable).
+		TArray<FString> Parts;
+		Parts.Reserve(SpawnedByClass.Num());
+		for (const TPair<const UClass*, int32>& Pair : SpawnedByClass)
+		{
+			Parts.Add(FString::Printf(TEXT("%s x%d"), *Pair.Key->GetName(), Pair.Value));
+		}
+		Parts.Sort();
+		const FString Composition = Parts.Num() > 0 ? FString::Join(Parts, TEXT(", ")) : TEXT("(none)");
+		if (Spawned < Count)
+		{
+			UE_LOG(LogFPSR, Warning,
+				TEXT("[Spawn] FPSR.SpawnEnemies: requested %d, delivered %d in %d attempts — SHORT BY %d. Every remaining "
+				     "attempt was rejected by AcquireEnemy (elite cap / pool exhausted / spawn failure). Composition: %s"),
+				Count, Spawned, Attempts, Count - Spawned, *Composition);
+		}
+		else
+		{
+			UE_LOG(LogFPSR, Log, TEXT("[Spawn] FPSR.SpawnEnemies: delivered %d/%d in %d attempts. Composition: %s"),
+				Spawned, Count, Attempts, *Composition);
 		}
 	}));
 
