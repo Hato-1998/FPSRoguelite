@@ -9,6 +9,51 @@
 
 ---
 
+## 🔷 `FPSR.SpawnEnemies` 요청 수 미달 해소 — 엘리트 캡의 무음 거부 (2026-08-30, main 머지 `ac5ff629`) — **완료**
+> 보드 행 = *"디버그 스폰 명령이 요청 수를 못 채운다"*(M0, 하이·S). 브랜치 `fix/debug-spawn-count`.
+> 원인 근거는 전부 **이미 디스크에 있던 2026-08-28 측정 로그**(`Packaged/Measurements/*/game.log` 4개)에서 나왔다 — 재현 실행 없이 규명.
+
+### 증상
+`FPSR.SpawnEnemies 300 6000` → 실제 생존 **225·226**, `500 6000` → **394·398**(75~79%). 4회 전부 일관.
+`FPSREnemy/ServerAlive` 는 캡처 내내 **고정**(감소 아님)이고, KillZ·OutOfWorld·스폰 실패 로그는 **0건**.
+영향 = 판정선이 «적 300» 인데 300 에서 잴 수 없다 → 이 명령을 쓰는 모든 측정이 같은 오차를 갖는다.
+
+### 원인 — 3단이 겹쳐 "거부가 보이지 않았다"
+1. **캡이 0이다.** `AcquireEnemy` 의 엘리트 게이트는 `EffectiveEliteCap = min(스케줄 curve MaxEliteAlive, EliteHardCap 8)`.
+   스테이지 0 에 `MaxEliteAlive` 저작이 없어 **curve = 0** → 캡 0 → `ActiveEliteCount(0) >= 0` 이 처음부터 참.
+   측정 로그 4개 전부에 근거 줄이 있다: `[Spawn] Elite cap BINDING: 0/0 alive (stage 0, curve 0, hard cap 8)`.
+2. **로스터가 엘리트를 뽑는다.** `DA_EnemyRoster` = `BP_EnemyMeleeBase_C` · `BP_EnemyRangedBase_C` · **`BP_EnemyEliteBase_C`** 가중 랜덤.
+   엘리트가 뽑힐 때마다 `AcquireEnemy` 가 `nullptr` 을 반환한다.
+3. **그런데 로그가 안 남는다.** 그 경고는 엣지 트리거(`bEliteCapBlocking` 래치)다 — 디렉터의 첫 채움 패스가
+   **frame 0**(`11:18:27.728`)에 래치를 올리고, `FPSR.SpawnEnemies` 는 **frame 1**(`11:18:27.822`)에 실행된다.
+   명령이 겪은 거부는 **전부 무음**. 게다가 명령 루프가 `AcquireEnemy` 반환값을 버려 재시도·집계도 없었다.
+
+부수 확인 — 디버그 명령은 디렉터를 우회해 `GlobalAliveCap`(200)에 걸리지 않고, `DrainRearEnemies` 는 멀티맵 전용이라
+단일맵 측정에서 초과분을 되돌리지 않는다. 그래서 값이 감소 없이 고정됐던 것도 설명되고, **채운 뒤에도 유지된다.**
+
+### 고친 것 (디버그 명령만 — 캡 게이트 자체는 무변경)
+게이트는 옳다(ADR 0013 불변식 6). 계약을 어긴 건 명령 쪽이다.
+- **유계 재시도** — 거부된 시도를 다시 굴려 요청 수를 채운다. 결정적 실패(풀 고갈·`SpawnActor` 실패)는 재시도로
+  안 풀리므로 `Count * 32 + 128` 로 묶어 게임 스레드 스핀을 막는다.
+- **상시 보고** — 전달 수·시도 수·**클래스별 구성**을 항상 로그, 미달이면 Warning + `SHORT BY n`.
+  이 한 줄이 있었으면 이번 미달은 발생 즉시 드러났다.
+- **링 각도 보정** — 시도 인덱스가 아니라 실제 스폰 인덱스 기준 → 재시도가 섞여도 등간격 유지.
+
+### 검증
+- 빌드 `Build.bat FPSRogueliteEditor Win64 Development` → `Result: Succeeded`, 에러·경고 0.
+- 런타임(사용자 PIE, 2026-08-30):
+  `[Spawn] FPSR.SpawnEnemies: delivered 300/300 in 326 attempts. Composition: BP_EnemyMeleeBase_C x149, BP_EnemyRangedBase_C x151`
+
+### ⚠️ 미해소로 남긴 것 — 거부율이 환경마다 다르다
+PIE 검증의 거부율은 **26/326 = 8.0%** 인데, 2026-08-28 패키지 측정의 미달은 **75/300 = 25%** 였다. **3배 차이다.**
+`UFPSREnemySpawnRule_Static::GetWeight` 는 런 컨텍스트와 무관한 상수를 돌려주고 `DA_EnemyRoster` 도 그 사이 변경되지
+않았으므로(파일 타임스탬프 2026-08-27), **가중치만으로는 이 차이가 설명되지 않는다.**
+즉 엘리트 게이트는 미달의 **기구(mechanism)는 설명하지만, 패키지 측정 당시의 크기(magnitude)를 전부 설명하지는 못한다.**
+남은 ~17%p 의 후보(패키지 vs PIE 차이 · 스트리밍 서브레벨 상태 · 링이 지오메트리와 겹치는 위치)는 이번에 규명하지 않았다.
+**다만 이제 그 잔여가 조용히 지나가지 않는다** — 재측정이 미달하면 `SHORT BY n` + 구성 줄이 그 자리에 찍힌다.
+→ **공식 베이스라인 재측정(M0 EC ①) 때 이 줄을 반드시 확인할 것.**
+
+---
 ## 🔷 보스 스테이지(L_Map_Boss) 전용 아레나 전환 (2026-08-29, main 머지 `0f9df8fa` · `e8101b94`) — **완료**
 > 보드 행 = *"보스 스테이지(L_Map_Boss) 전용 아레나 전환"*(M3) + 후속 행 *"보스 스테이지 후속 — 레드팀 잔여 4건"*(M3).
 > 브랜치 `phase/boss-stage-transition` → `phase/boss-stage-followup`. 코드는 전 세션(`1037afae`)에 끝나 있었고,
