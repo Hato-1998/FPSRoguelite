@@ -289,6 +289,9 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 
 	const float Now = World->GetTimeSeconds();
 
+	// 이 패스에서 월드 밖으로 떨어져 회수된 적 수 — 루프 끝에서 1줄로 집계 로그를 낸다(KillZRecycleCount 참조).
+	int32 KillZRecycledThisPass = 0;
+
 	// Death-dwell sweep: hoisted here, ABOVE the ActiveEnemies==0 early-return just below, so a corpse's dwell window
 	// is still honored when it's the LAST enemy standing (BeginDying removes it from ActiveEnemies the instant it
 	// dies — a dying corpse is never counted here) or between spawns; this Tick()-driven pass runs every frame
@@ -729,7 +732,20 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 		if (Enemy->GetActorLocation().Z < WorldKillZ)
 		{
 			ReleaseEnemy(Enemy);
+			++KillZRecycledThisPass;
 		}
+	}
+
+	// 무음 금지. 이 회수가 로그 없이 돌던 탓에, 스폰 좌표 아래에 바닥이 없어 공중에 태어난 적이 조용히
+	// 사라졌고 그 손실이 성능 측정의 적 수를 말없이 깎았다(2026-08-30 M0 베이스라인: 요청 300 → 정상 스폰
+	// 300 → 4초 뒤 260). 패스당 1줄이라 상시 낙하 지형에서도 프레임당 1줄을 넘지 않는다.
+	if (KillZRecycledThisPass > 0)
+	{
+		KillZRecycleCount += KillZRecycledThisPass;
+		UE_LOG(LogFPSR, Warning,
+			TEXT("[Spawn] Kill-Z recycle: %d enemy(ies) fell out of the world this pass (cumulative %d). Their spawn "
+			     "location had no static floor beneath it — check the spawn ring radius / spawn point placement."),
+			KillZRecycledThisPass, KillZRecycleCount);
 	}
 }
 

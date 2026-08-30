@@ -417,6 +417,14 @@ private:
 	 *  있다는 뜻 — 그때는 클래스별 캡이나 로스터 배합을 재검토해야 한다. */
 	int32 EvictionCount = 0;
 
+	/** 킬-Z 회수 진단 카운터(서버 전용, 복제 안 함) — 적이 플레이 가능한 월드 밖으로 떨어져 회수될 때마다 누적.
+	 *  종전 이 회수는 **로그가 한 줄도 없었다**. 그래서 스폰 좌표 아래에 스태틱 바닥이 없으면(SnapToGround 는
+	 *  바닥을 못 찾으면 후보 좌표를 그대로 돌려준다 → 적이 공중에 태어난다) 3~4초 뒤 조용히 사라져도 아무도
+	 *  몰랐다. 2026-08-30 M0 베이스라인에서 `FPSR.SpawnEnemies 300` 이 정상적으로 300 을 스폰한 직후 260 으로
+	 *  주저앉은 원인이 이것이고, 로그가 없어 규명에 측정 두 번이 들었다. TickEnemyMovement 가 **패스당 1줄**
+	 *  집계 로그를 남긴다(건당 아님 — 상시 낙하 지형에서도 스팸이 되지 않는다). */
+	int32 KillZRecycleCount = 0;
+
 	/** Set of currently active (visible, enabled) enemies. */
 	UPROPERTY(Transient)
 	TSet<TObjectPtr<AFPSREnemyBase>> ActiveEnemies;
