@@ -36,7 +36,8 @@ bool FFPSREnemyFrontBudgetTest::RunTest(const FString& Parameters)
 		U::ComputeFrontReserved(50), U::ComputeFrontReserved(1000));
 
 	// --- (B) Physical steady HONESTY (gate #1): the front reserve is subtracted EXACTLY from the physical steady ---------
-	const int32 SteadyNoFront = U::ComputePhysicalSteady(Big, 0); // == GlobalAliveCap - SeedReserve
+	const int32 SteadyNoFront = U::ComputePhysicalSteady(Big, 0);
+	TestEqual(TEXT("SteadyNoFront == GlobalAliveCap - SeedReserve"), SteadyNoFront, U::GlobalAliveCap - U::SeedReserve);
 	TestTrue(TEXT("SteadyNoFront > 0"), SteadyNoFront > 0);
 	for (int32 n = 0; n <= 20; ++n)
 	{

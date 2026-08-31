@@ -61,6 +61,15 @@ public:
 	 *  subsystem can time-scale contact damage to the run timeline. */
 	float GetBossTime() const;
 
+	/** Fallback (no-schedule-asset) hard cap on alive enemies — see the other Fallback* fields below (private) for its
+	 *  siblings. Public, unlike them, so a file-scope static_assert in this class's own .cpp can verify at COMPILE TIME
+	 *  that it never exceeds UFPSREnemySpawnSubsystem::GlobalAliveCap - SeedReserve: UFPSRRunScheduleValidator only
+	 *  checks an AUTHORED UFPSRRunScheduleDataAsset, so this constant (which drives MaxAliveCount when NONE is
+	 *  assigned) is invisible to that runtime check and needs its own guard. Kept apart from its siblings (which have
+	 *  no such external reader) rather than making the whole Fallback* block public — the same "promote only what a
+	 *  cross-boundary reader needs" precedent as GlobalAliveCap/SeedReserve in FPSREnemySpawnSubsystem.h. */
+	static constexpr int32 FallbackMaxAliveCount = 240;
+
 private:
 	bool HasServerAuthority() const;
 	void DirectorTick();
@@ -199,11 +208,11 @@ private:
 	static constexpr float BossArenaLookupGraceSeconds = 2.0f;
 
 	// Fallback (test) schedule values when no schedule asset is assigned (no missions without content).
+	// FallbackMaxAliveCount lives in the public section above (see its comment) — a file-scope static_assert needs it.
 	static constexpr float FallbackBossTime = 300.0f;
 	static constexpr int32 FallbackBaseAliveCount = 40;
 	static constexpr float FallbackAliveCountPerMinute = 30.0f;
 	static constexpr float FallbackAliveCountPerMinuteAfterBoss = 50.0f;
-	static constexpr int32 FallbackMaxAliveCount = 300;
 	static constexpr int32 FallbackMaxSpawnPerTick = 3;
 	static constexpr float FallbackSpawnIntervalSeconds = 0.1f;
 };

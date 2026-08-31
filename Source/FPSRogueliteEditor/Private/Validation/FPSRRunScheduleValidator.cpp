@@ -139,6 +139,12 @@ EDataValidationResult UFPSRRunScheduleValidator::ValidateLoadedAsset_Implementat
 		}
 	}
 
+	// 스폰 서브시스템의 실효 알라이브 캡(밸리데이터가 아래 두 곳 — 앵커 포화 경고 + MaxAliveCount 자체 경고 —
+	// 에서 공유) — AcquireEnemy 의 필-루프가 실제로 강제하는 값은 GlobalAliveCap 그 자체가 아니라 이 차(差)다
+	// (SeedReserve 는 그 아래 항상 비워두는 진입-시드 헤드룸). 한 곳에서 계산해 두 경고 모두 같은 숫자를
+	// 쓴다 — 이번 작업이 고치는 바로 그 종류의 드리프트(문자열에 박힌 값)를 검사 코드 자신은 반복하지 않는다.
+	const int32 EffectiveAliveCap = UFPSREnemySpawnSubsystem::GlobalAliveCap - UFPSREnemySpawnSubsystem::SeedReserve;
+
 	int32 PreviousStageIndex = TNumericLimits<int32>::Min();
 	bool bHasPreviousStageIndex = false;
 	for (int32 Index = 0; Index < Schedule->StageDifficulty.Num(); ++Index)
@@ -213,10 +219,12 @@ EDataValidationResult UFPSRRunScheduleValidator::ValidateLoadedAsset_Implementat
 			if (SaturatedTarget > static_cast<float>(Schedule->MaxAliveCount))
 			{
 				Context.AddWarning(FText::Format(
-					LOCTEXT("StageAnchorSaturates", "StageDifficulty[{0}] (StageIndex {1}): (highest-level Count {2} + AliveCountBonus {3}) x AliveCountMultiplier {4} = {5}, which exceeds MaxAliveCount ({6}) — the swarm target clamps at this stage. Note MaxAliveCount is already a dead value above the spawn subsystem's effective ~192 alive cap (GlobalAliveCap 200 - SeedReserve 8) — the real clamp may bite even lower than {6}."),
+					LOCTEXT("StageAnchorSaturates", "StageDifficulty[{0}] (StageIndex {1}): (highest-level Count {2} + AliveCountBonus {3}) x AliveCountMultiplier {4} = {5}, which exceeds MaxAliveCount ({6}) — the swarm target clamps at this stage. The spawn subsystem's own effective cap is {9} (GlobalAliveCap {7} - SeedReserve {8}), so the real clamp is whichever of {6} and {9} is lower."),
 					FText::AsNumber(Index), FText::AsNumber(Anchor.StageIndex), FText::AsNumber(HighestLevelCount),
 					FText::AsNumber(Anchor.AliveCountBonus), FText::AsNumber(Anchor.AliveCountMultiplier),
-					FText::AsNumber(SaturatedTarget), FText::AsNumber(Schedule->MaxAliveCount)));
+					FText::AsNumber(SaturatedTarget), FText::AsNumber(Schedule->MaxAliveCount),
+					FText::AsNumber(UFPSREnemySpawnSubsystem::GlobalAliveCap), FText::AsNumber(UFPSREnemySpawnSubsystem::SeedReserve),
+					FText::AsNumber(EffectiveAliveCap)));
 			}
 
 			// 바닥 포화 — 천장 검사의 대칭. 음수 AliveCountBonus 가 저레벨 구간의 목표를 0 으로 깎으면 스웜이
@@ -305,6 +313,20 @@ EDataValidationResult UFPSRRunScheduleValidator::ValidateLoadedAsset_Implementat
 		Context.AddError(LOCTEXT("MaxAliveCountNotPositive", "MaxAliveCount <= 0 — the swarm's hard cap would allow no enemies alive at all."));
 		Result = EDataValidationResult::Invalid;
 	}
+
+	// 상한 포화(신설) — 위 앵커 루프의 StageAnchorSaturates 는 "곱연산이 MaxAliveCount 를 넘는지"만 본다. 이
+	// 검사는 그 아래층: MaxAliveCount 자체가 스폰 서브시스템의 실효 캡(EffectiveAliveCap, 위에서 계산) 보다
+	// 크면 AliveCountByLevel/AliveCountMultiplier 저작과 무관하게 그 초과분은 영원히 도달 못 하는 죽은
+	// 저작값이다(AcquireEnemy 의 필-루프가 ActiveEnemies.Num() < GlobalAliveCap 로 하드게이트하므로) — 같은
+	// 패턴(Warning, "죽은 저작값")을 쓰는 위 엘리트 캡 포화 검사와 대칭.
+	if (Schedule->MaxAliveCount > EffectiveAliveCap)
+	{
+		Context.AddWarning(FText::Format(
+			LOCTEXT("MaxAliveCountExceedsEffectiveCap", "MaxAliveCount ({0}) exceeds UFPSREnemySpawnSubsystem's effective alive cap (GlobalAliveCap {1} - SeedReserve {2} = {3}) — the authored value above {3} is dead data; actual spawns clamp at {3} regardless of what's authored here."),
+			FText::AsNumber(Schedule->MaxAliveCount), FText::AsNumber(UFPSREnemySpawnSubsystem::GlobalAliveCap),
+			FText::AsNumber(UFPSREnemySpawnSubsystem::SeedReserve), FText::AsNumber(EffectiveAliveCap)));
+	}
+
 	if (Schedule->MaxSpawnPerTick <= 0)
 	{
 		Context.AddError(LOCTEXT("MaxSpawnPerTickNotPositive", "MaxSpawnPerTick <= 0 — the director would never spawn a batch."));

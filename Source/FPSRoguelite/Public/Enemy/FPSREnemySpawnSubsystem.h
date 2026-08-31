@@ -62,6 +62,24 @@ public:
 	 *  the ADR); raise only after profiling actual elite-count replication cost. */
 	static constexpr int32 EliteHardCap = 8;
 
+	/** Global alive cap across ALL maps (the host worst-case budget — per-map caps are forbidden). The allocator splits
+	 *  this across occupied maps; the fill loop hard-gates every spawn on ActiveEnemies.Num() < GlobalAliveCap so the
+	 *  total never exceeds it. Tunable Tier-0 value = SSOT §5 250 — inside the M0 공식 베이스라인 실측 구간이 실제로
+	 *  커버한 범위다(2026-08-31, 정착 259마리에서 227fps · P95 4.82ms 실측). 300(구 스케줄 상한)은 그 실측 밖
+	 *  외삽이라 채택하지 않았다. Public for the SAME reason MaxActiveEnemies/EliteHardCap above are:
+	 *  UFPSRRunScheduleValidator lives in a DIFFERENT module (FPSRogueliteEditor) and must read the effective cap
+	 *  (GlobalAliveCap - SeedReserve) WITHOUT duplicating the number (a copy would drift the moment either side is
+	 *  tuned). */
+	static constexpr int32 GlobalAliveCap = 250;
+
+	/** Headroom held below GlobalAliveCap so a newly-occupied map can seed enemies immediately even when the rest of the
+	 *  budget is saturated (Codex R3: the 0-3s entry-seed promise). = Clamp(ceil(250*0.04), 4, 10) = 10. The steady
+	 *  per-map apportionment targets GlobalAliveCap - SeedReserve; the reserve is the free headroom for entry seeding.
+	 *  Public for the SAME reason GlobalAliveCap above is: UFPSRRunScheduleValidator lives in a DIFFERENT module
+	 *  (FPSRogueliteEditor) and must read the effective cap (GlobalAliveCap - SeedReserve) WITHOUT duplicating the
+	 *  number (a copy would drift the moment either side is tuned). */
+	static constexpr int32 SeedReserve = 10;
+
 	virtual bool ShouldCreateSubsystem(UObject* Outer) const override;
 	virtual void OnWorldBeginPlay(UWorld& InWorld) override;
 	virtual void Deinitialize() override;
@@ -440,10 +458,14 @@ private:
 	 *  (SweepDyingEnemies). */
 	UPROPERTY(Transient)
 	TArray<FFPSRDyingEnemy> DyingEnemies;
-	/** Hard cap on concurrent dwelling corpses — generous headroom at this project's ~200-300-alive swarm scale
-	 *  (Game.MD §5: GlobalAliveCap=200); BeginDying finishes the OLDEST entry immediately (the same FinishDyingEnemy
+	/** Hard cap on concurrent dwelling corpses. NOT sized to the steady-state death rate — that's governed by the
+	 *  fill rate instead (MaxSpawnPerTick / SpawnInterval); this bounds a WIPE-BURST dwell (many enemies dying in the
+	 *  same pass, e.g. an AoE) so the burst's corpses don't overflow the dwell list before their death cosmetic has
+	 *  had time to play. Sized to hold ~25% of the effective alive cap (GlobalAliveCap - SeedReserve) dwelling at
+	 *  once: 48/192 at the old 200/8 cap, 60/240 at the current 250/10 cap — the ratio, not the raw count, is what's
+	 *  preserved across the M0 cap raise. BeginDying finishes the OLDEST entry immediately (the same FinishDyingEnemy
 	 *  path SweepDyingEnemies uses) on overflow rather than growing this list unbounded. */
-	static constexpr int32 MaxDyingEnemies = 48;
+	static constexpr int32 MaxDyingEnemies = 60;
 
 	/** Timer handle for the director tick. */
 	FTimerHandle DirectorTimerHandle;
@@ -472,16 +494,9 @@ private:
 	bool bEliteCapBlocking = false;
 
 	// --- Map-aware allocator (multimap Tier 0, Performance §5 / Codex consult 2026-07-06) ---
-
-	/** Global alive cap across ALL maps (the host worst-case budget — per-map caps are forbidden). The allocator splits
-	 *  this across occupied maps; the fill loop hard-gates every spawn on ActiveEnemies.Num() < GlobalAliveCap so the
-	 *  total never exceeds it. Tunable Tier-0 value = SSOT §5 잠정 200 (was previously un-enforced; schedule could reach 300). */
-	static constexpr int32 GlobalAliveCap = 200;
-
-	/** Headroom held below GlobalAliveCap so a newly-occupied map can seed enemies immediately even when the rest of the
-	 *  budget is saturated (Codex R3: the 0-3s entry-seed promise). = Clamp(ceil(200*0.04), 4, 10). The steady per-map
-	 *  apportionment targets GlobalAliveCap - SeedReserve; the reserve is the free headroom for entry seeding. */
-	static constexpr int32 SeedReserve = 8;
+	// GlobalAliveCap · SeedReserve (this block's cap + headroom) were promoted to the public section above, right next
+	// to MaxActiveEnemies/EliteHardCap — UFPSRRunScheduleValidator (a DIFFERENT module) reads them from there without
+	// duplicating either number; see their own comments up top for why.
 
 	/** Temp Tier-0 weight bonus for a map with 2+ players (aggregate 2+ front > solo, without per-capita starvation).
 	 *  weight = players + (players>=2 ? MapGroupBonus : 0). The content-aware allocator policy is Tier 1. */
@@ -533,8 +548,12 @@ private:
 	/** Burst rear-drain rate (enemies/sec) when the swarm is cap-bound AND a physical/front deficit exists (rear is eating
 	 *  the cap the live front needs). Deliberately aggressive so an all-open endgame doesn't starve the front. */
 	static constexpr float BurstDrainRatePerSec = 20.0f;
-	/** ActiveEnemies within this many of GlobalAliveCap counts as "cap-bound" for the burst-drain trigger. */
-	static constexpr int32 CapBoundMargin = 10;
+	/** ActiveEnemies within this many of GlobalAliveCap counts as "cap-bound" for the burst-drain trigger. Kept 2
+	 *  above SeedReserve (CapBoundMargin - SeedReserve = +2 slack, unchanged from the pre-M0 10-8 pair) — at exactly
+	 *  SeedReserve the gate would have ZERO slack, so at a saturated cap a single enemy dying would flip cap-bound
+	 *  on, drain a burst, then flip back off next tick: BurstDrainRatePerSec (20/s) and BaseDrainRatePerSec (2/s)
+	 *  chattering against each other instead of holding a steady burst-drain state. */
+	static constexpr int32 CapBoundMargin = 12;
 	/** Clamp on the drain clock's per-tick elapsed (in director intervals) so a long freeze/pause can't accrue a burst of
 	 *  drain tokens that pops the whole rear on the first unfrozen tick (Codex P-E gate #4 / Opus P0). */
 	static constexpr int32 DrainDtClampTicks = 2;
