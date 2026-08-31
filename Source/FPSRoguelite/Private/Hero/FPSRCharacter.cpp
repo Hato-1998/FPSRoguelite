@@ -209,7 +209,7 @@ void AFPSRCharacter::DrawMovementDebug(UCanvas* Canvas, APlayerController* PC)
 	Canvas->DrawText(Font, SpeedText, Canvas->SizeX - LineWidth - RightMargin, 24.0f);
 
 	Canvas->StrLen(Font, StateText, LineWidth, LineHeight);
-	Canvas->SetDrawColor(FPSRMovement->IsOnWall() ? FColor::Cyan : (FPSRMovement->IsSliding() ? FColor::Orange : FColor::White));
+	Canvas->SetDrawColor(FPSRMovement->IsSliding() ? FColor::Orange : FColor::White);
 	Canvas->DrawText(Font, StateText, Canvas->SizeX - LineWidth - RightMargin, 24.0f + LineHeight + 2.0f);
 
 	// Only when it fires. A clamp that quietly eats an authored FirstPersonCameraOffset reads as "the value does nothing"
@@ -681,36 +681,10 @@ void AFPSRCharacter::RefreshWeaponVisibility(bool bForce)
 	const bool bHideForScope = IsLocallyControlled()
 		&& IsScopeVisualActive() && CachedScopeDescriptor.bHideWeaponWhileScoped;
 
-	const UFPSRCharacterMovementComponent* Move = GetFPSRMovement();
-	bool bHideForWall = Move && Move->IsOnWall();
-
-	// Holster-authored delay (§6): instead of vanishing the instant the wall gate closes, an authored weapon
-	// descends into its holster pose (ApplyWeaponStatePose) and the mesh stays visible until that descent actually
-	// finishes. This only ever DELAYS a wall-hide that was already decided above — it can never invent a new reason
-	// to hide or show the weapon, and it never touches bHideForScope. Three guards, all required:
-	//  1. bHideForWall already true — nothing to delay otherwise.
-	//  2. IsLocallyControlled() — HolsterBlendAlpha is advanced ONLY in ApplyWeaponStatePose, which itself early-outs
-	//     on anything but the owning client (owner-local cosmetic solve). A simulated proxy's alpha therefore never
-	//     leaves 0, which — left unguarded — would silently defeat this delay forever (0 < 1.0 never gates true) as
-	//     an accident of an unadvanced float rather than a deliberate choice. Made explicit here instead: remote
-	//     observers (3P) keep the PRE-EXISTING instant hide. The wall clip is bare-handed on every machine, so a
-	//     delayed hide would show the gun floating beside an empty hand for anyone watching — the opposite of what
-	//     this track exists to fix.
-	//  3. bFirstPersonSplitActive && bCachedHasHolsterPose — the delay is only honest when a descent will ACTUALLY be
-	//     rendered, so this has to match the condition the holster pose itself is composed on. That pose rides the
-	//     ARMS (UpdateAimDownSights, camera space), not the weapon, so the split being active is the whole
-	//     requirement — deliberately NOT bWeaponAttachIsGunAnchor, which gates the SLIDE/AIRBORNE poses in
-	//     ApplyWeaponStatePose. Gun-anchor is an attach detail of where the weapon hangs; the arms descend either way.
-	//     bCachedHasHolsterPose covers the other half: an unauthored weapon has no pose to show during a delay, so it
-	//     keeps the exact legacy instant-hide behavior (zero regression).
-	if (bHideForWall && IsLocallyControlled() && bFirstPersonSplitActive && bCachedHasHolsterPose)
-	{
-		bHideForWall = (HolsterBlendAlpha >= 1.0f);
-	}
-
-	// SetVisibility below and the bWeaponHidden latch remain THIS function's alone to write — the delay above only
-	// feeds an input into bHideForWall, it does not add a second visibility toggle or a second latch.
-	const bool bShouldHide = bHideForScope || bHideForWall;
+	// NOTE: the weapon used to be hidden for the whole of a wall hang (both hands on the wall), with an authored
+	// holster descent delaying the hide. Wall hanging was removed on 2026-08-31 (ADR 0001) — the wall is an impulse
+	// now, with no span to take the weapon away for — so the scope is the only remaining reason to hide it.
+	const bool bShouldHide = bHideForScope;
 	if (bShouldHide == bWeaponHidden && !bForce)
 	{
 		return; // toggle only on change, unless the components were rebuilt under us
@@ -1874,14 +1848,15 @@ void AFPSRCharacter::HandleRunStateChanged_Movement()
 
 	GetCharacterMovement()->StopMovementImmediately(); // kill residual velocity so the player is stopped
 
-	// Invariant 8 / movement-freeze parity: a slide or wall hang already in progress has to end too, whether the
-	// freeze is the card screen or a stage transition — either way movement input is about to go dead. (The
-	// movement component also self-exits on the same gate, so this is belt-and-braces for the authority side, which
-	// is the one that matters for position.)
+	// Invariant 8 / movement-freeze parity: a slide already in progress has to end too, whether the freeze is the card
+	// screen or a stage transition — either way movement input is about to go dead. (The movement component also
+	// self-exits on the same gate, so this is belt-and-braces for the authority side, which is the one that matters
+	// for position.)
+	// The wall needs no counterpart here: it is an instantaneous impulse with no span to interrupt, and its trigger
+	// already consults the same IsSpecialMovementAllowed() gate.
 	if (UFPSRCharacterMovementComponent* FPSRMovement = GetFPSRMovement())
 	{
 		FPSRMovement->StopSliding();
-		FPSRMovement->StopWallHang();
 	}
 }
 
@@ -3142,10 +3117,10 @@ void AFPSRCharacter::ApplyWeaponStatePose(float DeltaTime)
 	// Rising-edge only (Prev<1, Now>=1): the moment the holster descent FINISHES is the one instant
 	// RefreshWeaponVisibility has to re-run to actually hide the (now off-screen) mesh — everything in between this
 	// and the previous call is just the pose sliding, nothing to toggle. The FALLING edge (draw) needs no symmetric
-	// call: OnMovementModeChanged already fires RefreshWeaponVisibility() the instant the wall gate opens (bHideForWall
-	// goes false immediately, independent of HolsterBlendAlpha, so the mesh un-hides that same frame) and the pose
-	// simply rises into view from there — there is no "finished rising" moment that needs a visibility toggle, only a
-	// "started falling" one. Same "just ask the owner function to re-evaluate" pattern as UpdateScopeWeaponVisibility —
+	// call: RefreshWeaponVisibility re-evaluates on its own the instant the gate opens and the pose simply rises into
+	// view from there — there is no "finished rising" moment that needs a visibility toggle, only a "started falling"
+	// one. (Until 2026-08-31 the gate was the wall hang and the hide was delayed by this descent; the wall no longer
+	// hides the weapon at all, so bCachedForceHolsteredPose is what drives this now.) Same "just ask the owner function to re-evaluate" pattern as UpdateScopeWeaponVisibility —
 	// this never decides visibility itself, RefreshWeaponVisibility remains the single owner of bWeaponHidden and the
 	// SetVisibility calls.
 	if (PrevHolsterBlendAlpha < 1.0f && HolsterBlendAlpha >= 1.0f)
@@ -3156,12 +3131,13 @@ void AFPSRCharacter::ApplyWeaponStatePose(float DeltaTime)
 	// Reload (🚧 temporary arms-down stand-in for an unauthored first-person reload animation — see ReloadPose's
 	// DataAsset comment): same camera-space ARMS treatment as holster above, but its OWN alpha and OWN clock
 	// (ReloadBlendDuration) so reload and holster timing never pull on each other. Zeroing ReloadPose in the DA
-	// switches this off with no code change. Cannot overlap the holster pose in practice: entering a wall cancels
-	// any in-flight reload (OnMovementModeChanged) and StartReload refuses to begin one while wall-hung
-	// (UFPSRWeaponInventoryComponent::StartReload), so the two poses never have to be resolved against each other.
+	// switches this off with no code change. The two poses are still resolved against each other through the one
+	// predicate: AFPSRCharacter::OnMovementModeChanged cancels an in-flight reload and
+	// UFPSRWeaponInventoryComponent::StartReload refuses to begin one whenever CanFireInCurrentState() is false.
+	// (That predicate is currently always true — the wall hang was its only false case and it was removed
+	// 2026-08-31 — so today the pair can only meet on a force-holstered weapon.)
 	// No RefreshWeaponVisibility call here, unlike the holster edge above: reloading is not a reason to HIDE the
-	// mesh (the holster path's delayed-hide is gated on bHideForWall specifically) — this only moves it off-screen
-	// via the pose, visibility is untouched.
+	// mesh — this only moves it off-screen via the pose, visibility is untouched.
 	const bool bWantsReloadPose = bCachedHasReloadPose && IsReloading();
 	const float ReloadRate = 1.0f / FMath::Max(CachedHipMotion.ReloadBlendDuration, KINDA_SMALL_NUMBER);
 	ReloadBlendAlpha = FMath::FInterpConstantTo(ReloadBlendAlpha, bWantsReloadPose ? 1.0f : 0.0f, StateDt, ReloadRate);
@@ -3564,9 +3540,13 @@ void AFPSRCharacter::UpdateAimDownSights(float DeltaTime)
 
 	// Reload layer (🚧 temporary, see ApplyWeaponStatePose/ReloadPose comments) — same space, same full weight, same
 	// SmoothStep reshaping as the holster layer just above, only keyed off its own alpha. Not mutually exclusive with
-	// the holster term above (no else/early-out between them): simply summed, because the two alphas are never both
-	// non-zero at once — entering a wall cancels an in-flight reload and refuses a new one while wall-hung, so there
-	// is nothing here that needs arbitrating.
+	// the holster term above (no else/early-out between them): simply summed.
+	// ⚠️ The summing was justified by "the two alphas are never both non-zero at once", on the grounds that entering a
+	// wall cancelled an in-flight reload and refused a new one while wall-hung. That was never the whole story — a
+	// bCachedForceHolsteredPose weapon could always reload while holstered — and with the wall hang removed
+	// (2026-08-31, ADR 0001) the cancel path is unreachable, so the force-holstered case is now the ONLY way here.
+	// The two poses therefore CAN sum. Cosmetic only, and pre-existing rather than a regression, but do not read the
+	// old claim as a guarantee if you touch this.
 	if (ReloadBlendAlpha > KINDA_SMALL_NUMBER)
 	{
 		const float ReloadEase = FMath::SmoothStep(0.0f, 1.0f, ReloadBlendAlpha);

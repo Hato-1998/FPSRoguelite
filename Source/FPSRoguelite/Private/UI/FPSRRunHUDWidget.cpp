@@ -94,12 +94,12 @@ void UFPSRRunHUDWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTim
 	// Situational fade (reload etc.). Runs only here, i.e. only on frames where something is actually on screen.
 	UpdateCrosshairFade(InDeltaTime);
 
-	// Weapon layer. Wall-hanging takes the gun out of the player's hands (AFPSRCharacter::RefreshWeaponVisibility
-	// hides the mesh on exactly this condition, and UFPSRCharacterMovementComponent::CanFireInCurrentState() is false),
-	// so the weapon's crosshair has nothing to describe and drops out — leaving the base dot alone. Reads
-	// CanFireInCurrentState() directly (rather than re-deriving "wall = no weapon" from IsOnWall()) so this stays the
-	// SAME judgment source as the fire gate and the holster visual (a later phase of this track) — one predicate, no
-	// chance of the HUD disagreeing with what the gun can actually do.
+	// Weapon layer. When a locomotion state takes the gun out of the player's hands, the weapon's crosshair has
+	// nothing to describe and drops out — leaving the base dot alone. Reads CanFireInCurrentState() rather than
+	// re-deriving the condition, so this stays the SAME judgment source as the fire gate and the holster visual — one
+	// predicate, no chance of the HUD disagreeing with what the gun can actually do.
+	// ⚠️ That predicate is currently always true: the wall hang was its only false case and it was removed 2026-08-31
+	// (ADR 0001). This branch is therefore unreachable today and is kept as the seam, not as live behaviour.
 	const UFPSRCharacterMovementComponent* Move = OwningChar ? OwningChar->GetFPSRMovement() : nullptr;
 	const bool bWeaponInHand = !Move || Move->CanFireInCurrentState();
 

@@ -103,8 +103,11 @@ void UFPSRCharacterAnimInstance::UpdateFromCharacter(AFPSRCharacter& Character, 
 	Speed = Move ? Move->GetPlanarSpeed() : FVector(Velocity.X, Velocity.Y, 0.0f).Size();
 	bIsMoving = Speed > MovingSpeedThreshold;
 	bIsFalling = Move && Move->IsFalling();
-	bIsOnWall = Move && Move->IsOnWall();
-	bIsAirborne = bIsFalling || bIsOnWall;
+	// Wall hanging no longer exists (ADR 0001, 2026-08-31): the wall is an instantaneous impulse, so there is never a
+	// frame the character is "on" one. Both flags are kept and still published because ABP_Blu_Body reads them —
+	// removing them from C++ would break that graph's compile, which is a separate editor-side pass.
+	bIsOnWall = false;
+	bIsAirborne = bIsFalling;
 	StanceBlend = Move ? Move->GetStanceBlend() : 0.0f;
 
 	// IsSlidingForDisplay, not IsSliding: this graph runs on every machine and a teammate's slide is not derivable
@@ -303,47 +306,6 @@ void UFPSRCharacterAnimInstance::UpdateRootYawOffset(const AFPSRCharacter& Chara
 	if (bIsDowned)
 	{
 		RootYawOffset = 0.0f;
-		bTurningInPlace = false;
-		TurnDirection = 0.0f;
-		return;
-	}
-
-	// Wall BEFORE the moving/airborne reset, and this ordering is load-bearing. Nothing turns the capsule toward the
-	// wall (bUseControllerRotationYaw means it follows the view), so the pose has to be turned instead, and a wall hold
-	// keeps sliding or climbing along the surface — which makes bIsMoving true. Put this after the reset below and the
-	// wall alignment is wiped every single frame while looking correct in the code.
-	if (bIsOnWall)
-	{
-		const UFPSRCharacterMovementComponent* Move = Character.GetFPSRMovement();
-		if (Move)
-		{
-			// The clip stands side-on to the wall, so the body's target is the wall's facing turned by the authored
-			// side angle, on the side latched when the hold began.
-			// The angle lives on the movement component, which is also what latched the side. One number, read by
-			// both, so they cannot drift apart and pick opposite shoulders.
-			const float TargetBodyYaw =
-				Move->GetWallYawForDisplay() + (Move->GetWallSideSign() * Move->GetWallPoseSideAngle());
-			// Rotate Root Bone takes the correction from the capsule's yaw to where the body should be.
-			const float Desired = FRotator::NormalizeAxis(TargetBodyYaw - ActorYaw);
-			// Deliberately NOT clamped to RootYawOffsetMax. That budget buys the upper body room to twist back to the
-			// crosshair, and a wall hold has no aim to protect — CanFireInCurrentState() is false for its whole
-			// duration precisely because both hands are on the wall. Clamping here destroyed the alignment it was
-			// meant to protect: the side-on clip spends 86 of the 90 degrees just standing, so every view even
-			// slightly off the wall's facing hit the limit and the body froze there (2-client PIE 2026-08-03 —
-			// 30 degrees off the wall left the body 26 degrees wrong, along the wall 86).
-			// Full circle, so WallAlignBlendDuration is measured against the worst case the offset can now travel.
-			const float Rate = (WallAlignBlendDuration > KINDA_SMALL_NUMBER)
-				? (180.0f / WallAlignBlendDuration) : 0.0f;
-			// Eased rather than snapped so grabbing a wall turns the body into place instead of teleporting it — and
-			// eased along the SHORT arc, which only matters now that the clamp is gone. Stepping the offset as a
-			// plain number sends the body the long way round every time the target crosses +-180: 179 to -179 is two
-			// degrees of turn and 358 degrees of travel. FInterpConstantTo cannot know it is holding an angle.
-			const float ToTarget = FRotator::NormalizeAxis(Desired - RootYawOffset);
-			const float Step = Rate * DeltaSeconds;
-			RootYawOffset = (Rate > 0.0f && FMath::Abs(ToTarget) > Step)
-				? FRotator::NormalizeAxis(RootYawOffset + (FMath::Sign(ToTarget) * Step))
-				: Desired;
-		}
 		bTurningInPlace = false;
 		TurnDirection = 0.0f;
 		return;
