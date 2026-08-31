@@ -3540,9 +3540,13 @@ void AFPSRCharacter::UpdateAimDownSights(float DeltaTime)
 
 	// Reload layer (🚧 temporary, see ApplyWeaponStatePose/ReloadPose comments) — same space, same full weight, same
 	// SmoothStep reshaping as the holster layer just above, only keyed off its own alpha. Not mutually exclusive with
-	// the holster term above (no else/early-out between them): simply summed, because the two alphas are never both
-	// non-zero at once — entering a wall cancels an in-flight reload and refuses a new one while wall-hung, so there
-	// is nothing here that needs arbitrating.
+	// the holster term above (no else/early-out between them): simply summed.
+	// ⚠️ The summing was justified by "the two alphas are never both non-zero at once", on the grounds that entering a
+	// wall cancelled an in-flight reload and refused a new one while wall-hung. That was never the whole story — a
+	// bCachedForceHolsteredPose weapon could always reload while holstered — and with the wall hang removed
+	// (2026-08-31, ADR 0001) the cancel path is unreachable, so the force-holstered case is now the ONLY way here.
+	// The two poses therefore CAN sum. Cosmetic only, and pre-existing rather than a regression, but do not read the
+	// old claim as a guarantee if you touch this.
 	if (ReloadBlendAlpha > KINDA_SMALL_NUMBER)
 	{
 		const float ReloadEase = FMath::SmoothStep(0.0f, 1.0f, ReloadBlendAlpha);

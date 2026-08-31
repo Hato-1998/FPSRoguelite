@@ -477,7 +477,8 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Movement|Wall", meta = (ClampMin = "-1.0", ClampMax = "1.0"))
 	float WallJumpInputDot = 0.35f;
 
-	/** Base speed (cm/s) of the push when jumping off. Entry momentum still in hand is added to this. */
+	/** Base speed (cm/s) of the push. The planar speed the player is carrying at the moment of contact is added
+	 *  to this, bounded by WallJumpMaxSpeed — so arriving fast launches harder. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Movement|Wall", meta = (ClampMin = "0.0"))
 	float WallJumpPushSpeed = 780.0f;
 

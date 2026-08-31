@@ -27,7 +27,7 @@ static FAutoConsoleVariableRef CVarFPSRPlayerSpeedScale(
 	     "                    walk over props the swarm cannot, breaking the 45/60 authoring band (ADR 0010 inv. 4).\n"
 	     "  Jump / wall-jump UP speed - jump HEIGHT goes with v^2, so a 3x scale would be a 9x jump.\n"
 	     "  Wall probe distances/radii - geometry, not speed; scaling them is a different feature, not a faster one.\n"
-	     "  Hang/slip durations - a wall hang is a beat, not a distance.\n"
+	     "  Wall-jump cooldown - a beat, not a distance; the per-airborne cap is a count.\n"
 	     "Set the SAME value on server and client: CharacterMovement replays moves on correction, so a mismatch\n"
 	     "reads as constant rubber-banding. In multiplayer the WORST case is setting it on the listen host\n"
 	     "alone: the server replays every remote client's ServerMove against the scaled cap, so one\n"
@@ -277,7 +277,7 @@ void UFPSRCharacterMovementComponent::StopSliding()
 	}
 }
 
-// --- Wall hang -----------------------------------------------------------------------------------------------------
+// --- Auto wall jump ------------------------------------------------------------------------------------------------
 
 bool UFPSRCharacterMovementComponent::ProbeWall(const FVector& Direction, float HeightAboveCapsuleBottom, FHitResult& OutHit) const
 {
@@ -481,11 +481,21 @@ void UFPSRCharacterMovementComponent::UpdateCharacterStateBeforeMovement(float D
 	}
 
 	// Auto wall jump. Both bounds advance every frame — the cooldown decays off the predicted delta exactly like
-	// SlideCooldownRemaining above, and landing refills the per-airborne budget. Sliding is ground-only and the launch
-	// is air-only, so this and the slide block below can never both fire on one frame.
+	// SlideCooldownRemaining above, and landing refills the per-airborne budget.
 	FPSRWallJumpBounds::Advance(WallJumpCooldownRemaining, WallJumpsUsedThisAirborne, DeltaSeconds, IsMovingOnGround());
 
-	if (!IsMovingOnGround())
+	// !bIsSliding is load-bearing, NOT a redundant "a slide is on the ground anyway" check. There are frames where the
+	// character is airborne and the slide has not exited yet, because the slide's own exit is evaluated further down
+	// THIS function:
+	//   - sliding off a ledge — the previous frame's physics set MOVE_Falling, and bLeftGround is only read below;
+	//   - a slide jump-cancel — ControlledCharacterMove calls CheckJumpInput (engine cpp:6347) BEFORE PerformMovement
+	//     reaches UpdateCharacterStateBeforeMovement (engine cpp:2226), so DoJump has already switched to MOVE_Falling
+	//     while bIsSliding is still true.
+	// On such a frame the launch would fire and charge both bounds, and then the slide block below would overwrite
+	// Velocity.X/Y with the slide heading before exiting — silently eating the push and one of the two wall jumps.
+	// Deferring by the single frame the slide takes to exit costs nothing visible and keeps "these two never both act
+	// on one frame" true rather than merely intended.
+	if (!IsMovingOnGround() && !bIsSliding)
 	{
 		TryAutoWallJump();
 	}
@@ -587,8 +597,7 @@ void UFPSRCharacterMovementComponent::UpdateCharacterStateBeforeMovement(float D
 
 		// Exits, in the order they matter. The elapsed-time bound is invariant 7's guarantee: a downhill slide that
 		// keeps regaining speed would otherwise never satisfy the speed exit and the state would be inescapable. A
-		// steep downhill only DEFERS it — the slope block above rewinds the timer frame by frame, the same shape as
-		// wall-hang's "is the wall still there" — so once the hill ends the timer resumes and this exit is
+		// steep downhill only DEFERS it — the slope block above rewinds the timer frame by frame — so once the hill ends the timer resumes and this exit is
 		// unconditional again, with crouch-release, leaving the ground and the gate live the whole way down.
 		const bool bReleasedCrouch = !bWantsToCrouch;
 		const bool bLeftGround = !IsMovingOnGround();
@@ -1073,7 +1082,10 @@ FString UFPSRCharacterMovementComponent::GetLocomotionStateName() const
 	}
 	// Same reasoning for the wall: "nothing happened when I hit that wall" has two quite different causes — the budget
 	// for this airborne period is spent, or the cooldown has not elapsed — and they are otherwise the same silence.
-	if (WallJumpsUsedThisAirborne > 0)
+	// Either bound alone is a reason the wall did nothing, so BOTH have to be able to speak. Nesting the cooldown
+	// inside the used-count left one silence intact: landing clears the count but not the cooldown, so a wall touched
+	// within 0.35s of a landing was refused with nothing on screen.
+	if (WallJumpsUsedThisAirborne > 0 || WallJumpCooldownRemaining > 0.0f)
 	{
 		StateName += FString::Printf(TEXT("  (wall %d/%d"), WallJumpsUsedThisAirborne, MaxWallJumpsPerAirborne);
 		if (WallJumpCooldownRemaining > 0.0f)
@@ -1170,11 +1182,13 @@ bool FSavedMove_FPSR::CanCombineWith(const FSavedMovePtr& NewMove, ACharacter* I
 
 		// The auto wall jump needs a guard of its own, and this is the one place that can supply it.
 		//
-		// Super's test is built around INPUT EDGES — bPressedJump, bWasJumping, the compressed flags — and the auto
-		// wall jump has none: it fires from state, mid-fall, with the movement input unchanged and the mode Falling on
-		// both sides. Every one of Super's checks therefore passes across the very frame the impulse landed, and the
-		// acceleration-direction test passes especially well, because the trigger REQUIRES the input to keep pointing
-		// into the wall. (The slide escapes this by having a bWantsToCrouch edge the engine does notice.)
+		// Super's test DOES compare the packed movement mode (engine CharacterMovementComponent.cpp:12930-12939), and
+		// that is what used to catch the old wall hang for free — a hang was MOVE_Custom on one side and not on the
+		// other. An impulse changes no mode: Falling on both sides. What is left of Super's test that could notice this
+		// is INPUT EDGES — bPressedJump, bWasJumping, the compressed flags — and the auto wall jump has none, because
+		// it fires from state with the movement input unchanged. The acceleration-direction test passes especially
+		// well, since the trigger REQUIRES the input to keep pointing into the wall.
+		// (The slide escapes all this by having a bWantsToCrouch edge the engine does notice.)
 		//
 		// Folding across that frame is not merely a lost frame: FSavedMove_Character::CombineWith rewinds the pawn to
 		// the start of the older move and never calls PrepMoveFor, so the character goes back to before the launch
