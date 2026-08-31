@@ -8,19 +8,56 @@
 class UCurveFloat;
 
 /**
- * Sub-modes used with MOVE_Custom. Exactly one is needed: the slide stays in MOVE_Walking (ADR 0001 axis 1) because it
- * is still ground movement, whereas hanging on a wall has neither gravity nor a floor and would reuse nothing from
- * PhysWalking.
+ * Sub-modes used with MOVE_Custom. Currently EMPTY: the slide stays in MOVE_Walking (ADR 0001 axis 1) because it is
+ * still ground movement, and the wall — once a MOVE_Custom hang state — is now an instantaneous impulse rather than a
+ * state, so nothing here needs a physics mode of its own (ADR 0001, 2026-08-31 revision).
+ *
+ * Kept rather than deleted because CustomMovementMode is a uint8 the engine packs into every move regardless, and the
+ * next state that genuinely needs its own physics wants a named home to land in.
  */
 UENUM(BlueprintType)
 enum EFPSRCustomMovementMode : uint8
 {
 	/** CustomMovementMode's engine default value; never entered deliberately. */
 	CMOVE_None		UMETA(Hidden),
-
-	/** Attached to a wall: climbing while the input pushes into it, slipping down when it doesn't, jumping off it. */
-	CMOVE_WallHang	UMETA(DisplayName = "Wall Hang"),
 };
+
+/**
+ * Auto wall jump bookkeeping, as PURE functions.
+ *
+ * The two bounds are the whole reason the feature is safe — one stops it firing every frame, the other stops it
+ * lifting a player up a wall forever — and they are plain arithmetic over three numbers. Splitting them out here means
+ * that arithmetic can be tested without spinning up a world, which is the only part of this feature a worldless test
+ * can reach (the component's own members are protected, and everything around them needs a capsule and a level).
+ *
+ * The component still OWNS the state; these own only the rules for changing it.
+ */
+namespace FPSRWallJumpBounds
+{
+	/** True when both bounds allow another launch. */
+	inline bool CanFire(float CooldownRemaining, int32 JumpsUsed, int32 MaxJumps)
+	{
+		return (CooldownRemaining <= 0.0f) && (JumpsUsed < MaxJumps);
+	}
+
+	/** One launch spent: charge both bounds together, so no caller can take one without the other. */
+	inline void Consume(float& CooldownRemaining, int32& JumpsUsed, float Cooldown)
+	{
+		++JumpsUsed;
+		CooldownRemaining = Cooldown;
+	}
+
+	/** One frame of decay. Landing is the ONLY thing that refills the per-airborne budget — that is what makes the
+	 *  ascent bound hold, so no other condition may reset JumpsUsed. */
+	inline void Advance(float& CooldownRemaining, int32& JumpsUsed, float DeltaSeconds, bool bOnGround)
+	{
+		CooldownRemaining = FMath::Max(0.0f, CooldownRemaining - DeltaSeconds);
+		if (bOnGround)
+		{
+			JumpsUsed = 0;
+		}
+	}
+}
 
 /**
  * Player locomotion component — the SINGLE OWNER of the player's movement state (ADR 0001 invariant 1).
@@ -37,13 +74,19 @@ enum EFPSRCustomMovementMode : uint8
  *
  * Axis-1 decision (ADR 0001, deferred to implementation and resolved here): SLIDE stays in MOVE_Walking and only
  * overrides the speed/friction hooks, because sliding is ground movement that still needs the engine's floor
- * tracking, step-up, slope handling and wall sliding. WALL-HANG uses MOVE_Custom (CMOVE_WallHang) instead, since it
- * has neither gravity nor a floor and would reuse nothing from PhysWalking.
+ * tracking, step-up, slope handling and wall sliding.
  *
- * Network cost: ZERO custom compressed flags. Both states are entered from intents the engine already puts in every
- * move packet — bWantsToCrouch for the slide (the design calls for "crouch input while running = slide"), and the
- * movement input direction plus bPressedJump for the wall. Their derived state (timers, entry speed, the wall being
- * held) rides along in FSavedMove_FPSR for local replay only and is never sent.
+ * THE WALL IS NOT A STATE (ADR 0001, 2026-08-31 revision). It was CMOVE_WallHang — a hang with three exits (climb
+ * over, slip off, jump away). The user's decision replaced all of it with a single instantaneous impulse: falling
+ * into a wall with the input pushing into it launches the player straight back off. Nothing persists, so there is no
+ * mode, no per-frame physics, and no pose to tell a proxy about. What survives is the geometry (ProbeWall /
+ * IsSurfaceGrabbable / ComputeWallJumpDirection) and two counters that bound how often the impulse may fire.
+ *
+ * Network cost: ZERO custom compressed flags. The slide is entered from bWantsToCrouch, which the engine already puts
+ * in every move packet; the wall jump is derived entirely from state the move already carries (falling, input
+ * direction, velocity) plus the two counters below, which ride in FSavedMove_FPSR for local replay only and are never
+ * sent. Note the wall jump has no input EDGE of its own — see FSavedMove_FPSR::CanCombineWith, where that costs a
+ * guard the engine cannot supply.
  */
 UCLASS()
 class FPSROGUELITE_API UFPSRCharacterMovementComponent : public UCharacterMovementComponent
@@ -56,8 +99,13 @@ public:
 	//~ Read-only surface for firing / AnimBP / HUD. This is the ENTIRE public contract (ADR 0001 module boundary):
 	//~ callers never ask "which state am I in?", they ask what they actually need to know.
 
-	/** True when the current locomotion state permits firing. Wall-hang is the one state that returns false — both
-	 *  hands are on the wall. Everything else (stand/run/crouch/slide/airborne) allows it. */
+	/** True when the current locomotion state permits firing.
+	 *
+	 *  Currently ALWAYS TRUE. The wall hang was the one state that returned false (both hands on the wall), and it no
+	 *  longer exists — the wall is an instantaneous impulse now, so there is no span during which the weapon is away.
+	 *  The predicate is kept rather than inlined at its eleven call sites: it is the single judgment source shared by
+	 *  the fire gate, the holster pose, ADS, weapon swap and the HUD crosshair, and collapsing it would mean five
+	 *  systems re-deriving "can I shoot" independently the next time a state does need to block firing (invariant 4). */
 	UFUNCTION(BlueprintPure, Category = "FPSR|Movement")
 	bool CanFireInCurrentState() const;
 
@@ -107,44 +155,11 @@ public:
 	UFUNCTION(BlueprintPure, Category = "FPSR|Movement")
 	uint8 GetSlideVisualSerial() const { return SlideVisualSerial; }
 
-	/** Outward wall normal for the wall the character is holding. Local physics value: valid on the owner and the
-	 *  server, zero on a simulated proxy. For animation use GetWallYawForDisplay(). */
-	FVector GetWallNormal() const { return WallNormal; }
-
-	/** Wall facing as a yaw in degrees, valid on every machine.
-	 *
-	 *  A proxy receives the custom movement mode (so IsOnWall() works there) but nothing that says WHICH wall, and the
-	 *  normal cannot be recovered from the mode. Quantised to a byte: 1.4 degrees per step, under a degree of error
-	 *  after rounding, which is far below what the pose itself is authored to.
-	 *  Deliberately NOT fed back into WallNormal — the physics keeps its exact local value, because letting a
-	 *  quantised number into the wall-stick would need its own correctness pass. */
-	UFUNCTION(BlueprintPure, Category = "FPSR|Movement")
-	float GetWallYawForDisplay() const;
-
-	/** Which shoulder the wall pose presents to the wall: +1 or -1, chosen once when the hold begins.
-	 *
-	 *  The wall clip is authored side-on, so the body's target yaw is the wall yaw plus or minus that authored angle.
-	 *  Picking the nearer side every frame would flip the whole body whenever the player's view crosses the midpoint,
-	 *  so the choice is latched at entry and replicated with the yaw. */
-	UFUNCTION(BlueprintPure, Category = "FPSR|Movement")
-	float GetWallSideSign() const { return (WallSideSign < 0) ? -1.0f : 1.0f; }
-
-	/** The authored side angle of the wall pose. Exposed because the AnimBP needs the SAME number this component used
-	 *  to latch the side — two copies would eventually disagree and put the body on the wrong shoulder. */
-	UFUNCTION(BlueprintPure, Category = "FPSR|Movement")
-	float GetWallPoseSideAngle() const { return WallPoseSideAngle; }
-
 	/** How far the CURRENT stance change has run, 0 at the moment it started to 1 when it settles. Distinct from
 	 *  GetStanceBlend(): a change interrupted halfway restarts this at 0 from wherever the blend had reached, which is
 	 *  what lets the camera and the speed cap ease from their present values instead of jumping to a fresh curve. */
 	UFUNCTION(BlueprintPure, Category = "FPSR|Movement")
 	float GetStanceTransitionProgress() const;
-
-	/** True while hanging on a wall. Derived from the movement mode rather than kept in a flag of its own: the engine
-	 *  already ships the mode in every move packet and restores it on a correction, so a second copy could only ever
-	 *  drift out of agreement with it. */
-	UFUNCTION(BlueprintPure, Category = "FPSR|Movement")
-	bool IsOnWall() const { return (MovementMode == MOVE_Custom) && (CustomMovementMode == CMOVE_WallHang); }
 
 	/** Planar speed (cm/s). For the movement debug readout. */
 	UFUNCTION(BlueprintPure, Category = "FPSR|Movement")
@@ -202,21 +217,10 @@ public:
 	 *  would make grazing a wall accelerate the player far harder than the model intends. */
 	virtual FVector GetFallingLateralAcceleration(float DeltaTime) override;
 
-	/** Wall-hang physics. The engine's PhysCustom only fires a Blueprint event, so a custom mode has to move the
-	 *  capsule itself; this follows PhysFlying's shape (no gravity, no floor) rather than PhysWalking's. */
-	virtual void PhysCustom(float deltaTime, int32 Iterations) override;
-
-	/** Single funnel for entering and leaving the wall. Every exit — jump, slip, wall destroyed, timeout, freeze —
-	 *  goes through a movement-mode change, so putting the bookkeeping here is what stops one route from forgetting it. */
-	virtual void OnMovementModeChanged(EMovementMode PreviousMovementMode, uint8 PreviousCustomMode) override;
-
-	//~ Overriding one of an overload set hides the rest; the 1-argument DoJump forwards to this one, so keep both
-	//~ visible for anything that calls it through this class.
-	using UCharacterMovementComponent::DoJump;
-
-	/** Adds the push away from the wall on top of the engine's jump, and re-checks the wall first — see the
-	 *  implementation for why a frame-old wall is not safe to launch off. */
-	virtual bool DoJump(bool bReplayingMoves, float DeltaTime) override;
+	//~ NOTE: no OnMovementModeChanged override any more. Every line it held was wall-hang entry/exit bookkeeping
+	//~ (capture the entry velocity, refund a jump, charge the once-per-airborne budget), and the wall no longer has an
+	//~ entry or an exit to book. The slide is entered and left from UpdateCharacterStateBeforeMovement, not from a
+	//~ mode change, so it never needed this hook.
 
 	/** Ground-only crouch. The engine's version also allows crouching while FALLING; this design forbids crouch and
 	 *  slide in the air, and returning false here additionally makes the engine un-crouch automatically the moment the
@@ -240,17 +244,9 @@ public:
 	 *  not sliding. */
 	void StopSliding();
 
-	/** Force the wall-hang to end now, dropping into a normal fall. Used by the global run-freeze for the same reason
-	 *  as StopSliding (invariant 8 — gating the START of a state is not enough). Safe to call when not on a wall. */
-	void StopWallHang();
-
-	/** How far the wall clip's body is turned from facing the wall, degrees. The shipped pose stands side-on, so the
-	 *  body's target is the wall yaw plus this (times the latched side sign) rather than the wall yaw itself.
-	 *  ⚠️ Bounded by the AnimBP's RootYawOffsetMax (90): at 86 the upper body has almost no twist budget left, so a
-	 *  player looking the other way along the wall clamps. Raising this makes that worse, not better. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Movement|Wall",
-		meta = (ClampMin = "-90.0", ClampMax = "90.0"))
-	float WallPoseSideAngle = 86.0f;
+	//~ NOTE: there is no StopWallJump() counterpart. The wall jump is instantaneous, so invariant 8 ("gating the START
+	//~ of a state is not enough") has nothing to gate here — there is no span for a freeze to interrupt. The freeze
+	//~ blocks the TRIGGER through IsSpecialMovementAllowed(), which is the whole of it.
 
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 	virtual void OnMovementUpdated(float DeltaSeconds, const FVector& OldLocation, const FVector& OldVelocity) override;
@@ -453,18 +449,12 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Movement|Stance", meta = (ClampMin = "0.0"))
 	float SlideBlendDuration = 0.12f;
 
-	// --- Wall hang (ADR 0001: one state, three exits — climb / slip off / jump off) ---
+	// --- Auto wall jump (ADR 0001 as revised 2026-08-31: not a state — one impulse, bounded) ---
 
-	/** Height above the capsule's feet, in cm, at which the GRAB probe looks for a wall. Chest height on purpose: a
-	 *  knee-high crate is not something to hang off, and probing low would grab one. */
+	/** Height above the capsule's feet, in cm, at which the wall probe looks. Chest height on purpose: a knee-high
+	 *  crate is not something to launch off, and probing low would bounce the player off one. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Movement|Wall", meta = (ClampMin = "0.0"))
-	float WallGrabProbeHeight = 120.0f;
-
-	/** Height above the capsule's feet, in cm, at which the HOLD probe re-checks the wall every frame. Deliberately
-	 *  near the feet, which is what makes "the feet cleared the top" and "the wall was destroyed" the same missed
-	 *  probe — one check covers reaching the top AND invariant 7's escape route. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Movement|Wall", meta = (ClampMin = "0.0"))
-	float WallHoldProbeHeight = 25.0f;
+	float WallJumpProbeHeight = 120.0f;
 
 	/** How far PAST the capsule's own radius the probe reaches, in cm. Larger values grab from further away. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Movement|Wall", meta = (ClampMin = "0.0"))
@@ -480,51 +470,12 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Movement|Wall", meta = (ClampMin = "0.0", ClampMax = "90.0"))
 	float WallMinSteepnessDegrees = 70.0f;
 
-	/** How squarely the movement input has to point into the wall to count as "holding W" — 1 = dead-on, 0 = anything
-	 *  not pointing away. This one value decides both whether a wall can be grabbed and, once on it, whether the
-	 *  player is climbing or slipping. */
+	/** How squarely the movement input has to point into the wall for the auto wall jump to fire — 1 = dead-on,
+	 *  0 = anything not pointing away. This is what keeps the bounce INTENTIONAL: brushing past a wall while strafing
+	 *  is not a wall jump, and at 0.35 (a ~70 degree cone) a diagonal input still counts. Raise it to narrow the cone
+	 *  if grazing a wall mid-jump fires too readily. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Movement|Wall", meta = (ClampMin = "-1.0", ClampMax = "1.0"))
-	float WallClimbInputDot = 0.35f;
-
-	/** Climb speed up the wall (cm/s) while the input pushes into it. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Movement|Wall", meta = (ClampMin = "0.0"))
-	float WallClimbSpeed = 390.0f;
-
-	/** Downward speed (cm/s) the player settles to after letting go of the wall. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Movement|Wall", meta = (ClampMin = "0.0"))
-	float WallSlipSpeed = 270.0f;
-
-	/** How fast the vertical speed moves toward WallSlipSpeed (cm/s²). Snapping straight to it reads as the hands
-	 *  coming off rather than sliding — the design word is "미끄러져", a slip. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Movement|Wall", meta = (ClampMin = "0.0"))
-	float WallSlipAcceleration = 1350.0f;
-
-	/** Sideways speed along the wall face (cm/s) — the "제한적 좌우 이동" the design allows during a climb. Only the
-	 *  part of the input running ALONG the wall contributes, so this can never push the player off it. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Movement|Wall", meta = (ClampMin = "0.0"))
-	float WallLateralSpeed = 180.0f;
-
-	/** Gentle pull toward the wall (cm/s) that keeps the capsule in contact, which is what keeps the hold probe
-	 *  finding the surface. 0 lets the player drift off the wall on any bump. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Movement|Wall", meta = (ClampMin = "0.0"))
-	float WallStickSpeed = 90.0f;
-
-	/** Hard time limit on a single hang (invariant 7: every state needs a time bound or an unconditional exit).
-	 *  Also caps how far one grab can climb, since climb speed is constant. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Movement|Wall", meta = (ClampMin = "0.1"))
-	float WallHangMaxDuration = 1.5f;
-
-	/** How long the player may keep slipping after releasing the input before the hands come off. Pressing back into
-	 *  the wall within this window resumes the climb, so a momentary stutter of the key doesn't drop them. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Movement|Wall", meta = (ClampMin = "0.0"))
-	float WallSlipMaxDuration = 0.35f;
-
-	/** How long the speed carried into the wall survives the grab. During this window the player keeps gliding along
-	 *  the wall at the speed they arrived with, and a wall jump taken inside it launches with that speed added on top —
-	 *  so hitting a wall fast and reacting fast is rewarded instead of being a full stop. Both effects fade linearly to
-	 *  nothing across the window. 0 disables it and the grab kills all momentum outright. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Movement|Wall", meta = (ClampMin = "0.0"))
-	float WallEntryMomentumDuration = 0.25f;
+	float WallJumpInputDot = 0.35f;
 
 	/** Base speed (cm/s) of the push when jumping off. Entry momentum still in hand is added to this. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Movement|Wall", meta = (ClampMin = "0.0"))
@@ -553,15 +504,19 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Movement|Wall", meta = (ClampMin = "0.0"))
 	float WallJumpUpSpeed = 0.0f;
 
-	/** Forward speed (cm/s) granted when a climb clears the top of the wall. Without it the capsule is still beside
-	 *  the wall when the probe loses it and simply falls back down — the climb could never actually get anywhere. */
+	/** Minimum seconds between two auto wall jumps. Purely an ANTI-JITTER bound: without it the trigger re-evaluates
+	 *  the frame after it fires and, with the input still held into a wall that is still there, fires again immediately.
+	 *  It does NOT bound how high a player can climb — see MaxWallJumpsPerAirborne for why it cannot. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Movement|Wall", meta = (ClampMin = "0.0"))
-	float WallTopBoostForward = 260.0f;
+	float WallJumpCooldown = 0.35f;
 
-	/** Upward speed (cm/s) granted alongside WallTopBoostForward, so the capsule rises over the lip instead of
-	 *  clipping its edge on the way across. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Movement|Wall", meta = (ClampMin = "0.0"))
-	float WallTopBoostUp = 260.0f;
+	/** How many auto wall jumps one airborne period may spend, reset on landing. This is the bound on ASCENT, and a
+	 *  cooldown cannot replace it: the height gained per cycle is (Vz*T - g*T*T/2), which is positive for every
+	 *  T < 2*Vz/g -- and 2*Vz/g is the full airtime of a jump. So any cooldown short enough to feel responsive still
+	 *  lets a player ratchet up a wall (or between two walls) forever. Counting the jumps instead makes the total gain
+	 *  at most N times one cycle, by construction, whatever the cooldown is tuned to. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Movement|Wall", meta = (ClampMin = "1"))
+	int32 MaxWallJumpsPerAirborne = 2;
 
 	/** True when the given world direction points behind the pawn, per BackwardAngleThresholdDegrees. */
 	bool IsDirectionBackward(const FVector& Direction) const;
@@ -631,15 +586,6 @@ protected:
 	UPROPERTY(Transient, Replicated)
 	uint8 SlideVisualSerial = 0;
 
-	/** Wall facing, quantised to 1/256 of a turn. Refreshed only when the quantised value actually changes: the
-	 *  underlying normal is re-probed every frame, and marking a replicated property dirty at that rate is churn the
-	 *  correction path does not need. */
-	UPROPERTY(Transient, Replicated)
-	uint8 WallYawByte = 0;
-
-	/** Latched side the body presents to the wall, +1 / -1. See GetWallSideSign(). */
-	UPROPERTY(Transient, Replicated)
-	int8 WallSideSign = 1;
 
 	/** Server-side: push the three values above into agreement with the real state. Called after movement. */
 	void RefreshReplicatedVisualState();
@@ -736,7 +682,7 @@ protected:
 	 *  over that span and the slide pose would arrive early. Cheap to keep the animation clock honest. */
 	float SlideBlend = 0.0f;
 
-	// --- Wall hang ---
+	// --- Auto wall jump ---
 
 	/** One sphere sweep straight ahead, starting at HeightAboveCapsuleBottom cm up the capsule and reaching
 	 *  WallProbeDistance past its radius. Heights are measured from the feet so the same numbers keep meaning "chest"
@@ -747,53 +693,29 @@ protected:
 	/** True when the hit surface is steep enough to be a wall rather than a ramp (WallMinSteepnessDegrees). */
 	bool IsSurfaceGrabbable(const FHitResult& Hit) const;
 
-	/** True when the movement input pushes into the wall currently held — "is W still held" for a state that already
-	 *  knows which way the wall faces. Reads Acceleration, which is part of the predicted move, so client and server
-	 *  reach the same answer. */
-	bool IsInputIntoWall() const;
-
-	/** Evaluate the grab conditions for THIS frame and fill OutWallNormal when they pass. Pure read of already
-	 *  predicted state (airborne, input, the once-per-airborne budget) plus one probe, which is what makes the derived
-	 *  hang state replay-safe. */
-	bool CanGrabWall(FVector& OutWallNormal) const;
-
-	/** Enter the hang against the given wall. */
-	void StartWallHang(const FVector& InWallNormal);
-
-	/** Advance the hang: timers, the three exits, and the per-frame wall re-check. */
-	void UpdateWallHang(float DeltaSeconds);
-
-	/** How much of the speed carried into the wall is still in hand: 1 at the moment of the grab, falling linearly to
-	 *  0 over WallEntryMomentumDuration. Drives both the glide and the wall jump's bonus speed off one number, so the
-	 *  two can't disagree about how much momentum is left. */
-	float GetWallEntryMomentumAlpha() const;
+	/** Evaluate the auto wall jump for THIS frame and fire it when every condition passes. Returns true when it did.
+	 *
+	 *  Order matters and is not free to rearrange: the wall normal only exists AFTER the probe, so the "is the input
+	 *  pushing into this wall" test has to read the probe's hit normal rather than a stored one (there is no stored one
+	 *  any more). The two counters are checked before the probe purely so the common case costs no sweep.
+	 *
+	 *  Everything it reads is already part of the predicted move — IsFalling(), Acceleration, Velocity, and the two
+	 *  counters restored by FSavedMove_FPSR — so a correction replay reaches the same verdict, with the one caveat that
+	 *  the probe re-queries the live world (a wall destroyed in between diverges; see ADR 0001's failure flow). */
+	bool TryAutoWallJump();
 
 	/** Direction a wall jump travels: the pawn's facing and the wall normal mixed per WallJumpAimBlend, then re-aimed
 	 *  if needed so at least WallJumpMinOutward of it still points away from the wall. Horizontal. */
 	FVector ComputeWallJumpDirection(const FVector& InWallNormal) const;
 
-	/** Derived state, NOT replicated — same reasoning as the slide: both machines compute it from the same predicted
-	 *  inputs, and it rides in FSavedMove_FPSR so a correction replay restores it rather than re-deriving it.
-	 *  (Whether we are on a wall at all is NOT here — that is the movement mode, which the engine already owns.) */
-	float WallHangElapsed = 0.0f;
+	/** Seconds left before another auto wall jump may fire. Counted down in UpdateCharacterStateBeforeMovement off the
+	 *  predicted delta, exactly like SlideCooldownRemaining, and saved/restored so a replay cannot hand out a free
+	 *  re-fire. Anti-jitter only — MaxWallJumpsPerAirborne is what bounds ascent. */
+	float WallJumpCooldownRemaining = 0.0f;
 
-	/** Seconds spent slipping since the input last pushed into the wall; reset to 0 whenever it does. */
-	float WallSlipElapsed = 0.0f;
-
-	/** Outward normal of the wall being held, horizontal. Saved and restored because the jump exit reads it from
-	 *  CheckJumpInput, which runs BEFORE the frame's wall probe — a replay would otherwise read a stale or empty one. */
-	FVector WallNormal = FVector::ZeroVector;
-
-	/** Planar velocity the player arrived at the wall with, captured on the grab. Its along-the-wall part becomes the
-	 *  glide and its full LENGTH becomes the wall jump's bonus — keeping the length is what makes a head-on impact,
-	 *  whose along-the-wall part is nearly zero, still pay out on the jump. Saved for the same reason as WallNormal. */
-	FVector WallEntryVelocity = FVector::ZeroVector;
-
-	/** True once this airborne period's single wall grab has been spent; cleared on landing. A cooldown alone would
-	 *  not do: climbing for WallHangMaxDuration gains more height than the cooldown's fall loses it, so any wall could
-	 *  be climbed indefinitely a grab at a time. Requiring a landing makes that impossible by construction, and the
-	 *  same flag stops an instant re-grab of the wall just jumped off. */
-	bool bWallHangConsumed = false;
+	/** Auto wall jumps spent since leaving the ground; reset in UpdateCharacterStateBeforeMovement while walking. This
+	 *  is the ascent bound (see MaxWallJumpsPerAirborne for the arithmetic showing a cooldown cannot be one). */
+	int32 WallJumpsUsedThisAirborne = 0;
 
 	friend class FSavedMove_FPSR;
 };
@@ -826,14 +748,10 @@ public:
 	float SavedGroundAccelElapsed = 0.0f;
 	float SavedSlideSlopeSpeedBonus = 0.0f;
 
-	//~ Wall hang. bSavedOnWall duplicates the movement mode on purpose: the combine test below needs to know whether a
-	//~ move was a hang, and the engine's own test never looks at the packed movement mode.
-	uint8 bSavedOnWall : 1;
-	uint8 bSavedWallHangConsumed : 1;
-	float SavedWallHangElapsed = 0.0f;
-	float SavedWallSlipElapsed = 0.0f;
-	FVector SavedWallNormal = FVector::ZeroVector;
-	FVector SavedWallEntryVelocity = FVector::ZeroVector;
+	//~ Auto wall jump bounds. Local replay storage only — never sent. CanCombineWith below ALSO reads them, because
+	//~ the wall jump has no input edge for the engine's own combine test to notice.
+	float SavedWallJumpCooldownRemaining = 0.0f;
+	int32 SavedWallJumpsUsedThisAirborne = 0;
 
 	//~ Stance blending. The first three drive the walk-speed cap; the slide weight rides along so a replay can't run the
 	//~ animation clock at double speed over the span it re-simulates.

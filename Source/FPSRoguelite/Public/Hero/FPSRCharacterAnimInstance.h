@@ -50,16 +50,17 @@ public:
 	UPROPERTY(BlueprintReadOnly, Category = "FPSR|Anim")
 	bool bIsFalling = false;
 
-	/** Wall-hang (CMOVE_WallHang). Derived from the movement mode, so it is already correct on a simulated proxy.
-	 *  While this is true the body is turned to face the wall via RootYawOffset — see UpdateRootYawOffset. */
+	/** ⚠️ ALWAYS FALSE since 2026-08-31. Wall hanging was removed (ADR 0001): the wall is an instantaneous impulse
+	 *  now, so there is no frame the character is on one.
+	 *  Kept, rather than deleted, because ABP_Blu_Body still references it — dropping the C++ property would break that
+	 *  graph's compile. Its wall state is simply unreachable, and removing it there is a separate editor-side pass. */
 	UPROPERTY(BlueprintReadOnly, Category = "FPSR|Anim")
 	bool bIsOnWall = false;
 
-	/** Falling OR wall-hung — i.e. "not on the ground", which is the question the locomotion state machine actually asks.
-	 *  Combined HERE rather than in the graph because a state-machine transition rule can only read ONE variable: the
-	 *  ground/air pair needs `bIsFalling || bIsOnWall` on the way out and the negation of BOTH on the way back, and the
-	 *  negation is not expressible as two separate transitions. Without this, a wall-hung player keeps a grounded idle
-	 *  (bIsFalling is false in a custom movement mode) — the most visible way this graph can be wrong. */
+	/** "Not on the ground", which is the question the locomotion state machine actually asks. Now identical to
+	 *  bIsFalling (it was `bIsFalling || bIsOnWall` while hanging existed).
+	 *  Kept as its own variable for the reason it was introduced: a state-machine transition rule can only read ONE
+	 *  variable, and ABP_Blu_Body's ground/air transitions are written against this one. */
 	UPROPERTY(BlueprintReadOnly, Category = "FPSR|Anim")
 	bool bIsAirborne = false;
 
@@ -190,10 +191,6 @@ protected:
 	/** Angle error, degrees, that starts a turn in place. */
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Anim", meta = (ClampMin = "0.0"))
 	float TurnInPlaceStartAngle = 45.0f;
-
-	/** Seconds for the body to turn into the wall alignment on grabbing, instead of snapping there. */
-	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Anim|Wall", meta = (ClampMin = "0.0"))
-	float WallAlignBlendDuration = 0.15f;
 
 	/** Shortest time a slide is shown for once the serial says one happened. A slide can be over in two frames
 	 *  (jump-cancel); without a floor the pose would flicker or never appear at all on a teammate's screen. */

@@ -61,8 +61,8 @@ static FORCEINLINE float FPSRScaled(float AuthoredSpeed)
 
 UFPSRCharacterMovementComponent::UFPSRCharacterMovementComponent()
 {
-	// The shared body AnimBP runs on every machine, so a teammate's slide and the wall they are holding have to reach
-	// the machines that cannot derive them. Movement itself still travels in the move packets — this carries only the
+	// The shared body AnimBP runs on every machine, so a teammate's slide has to reach the machines that cannot derive
+	// it. Movement itself still travels in the move packets — this carries only the
 	// handful of bytes that are pure presentation. Same reason UFPSRWeaponFireComponent replicates bIsAiming.
 	SetIsReplicatedByDefault(true);
 	bSlidingVisual = 0;
@@ -166,8 +166,6 @@ void UFPSRCharacterMovementComponent::GetLifetimeReplicatedProps(TArray<FLifetim
 	Params.Condition = COND_SkipOwner;
 	DOREPLIFETIME_WITH_PARAMS_FAST(UFPSRCharacterMovementComponent, bSlidingVisual, Params);
 	DOREPLIFETIME_WITH_PARAMS_FAST(UFPSRCharacterMovementComponent, SlideVisualSerial, Params);
-	DOREPLIFETIME_WITH_PARAMS_FAST(UFPSRCharacterMovementComponent, WallYawByte, Params);
-	DOREPLIFETIME_WITH_PARAMS_FAST(UFPSRCharacterMovementComponent, WallSideSign, Params);
 }
 
 void UFPSRCharacterMovementComponent::OnMovementUpdated(float DeltaSeconds, const FVector& OldLocation,
@@ -210,20 +208,6 @@ void UFPSRCharacterMovementComponent::RefreshReplicatedVisualState()
 		MARK_PROPERTY_DIRTY_FROM_NAME(UFPSRCharacterMovementComponent, bSlidingVisual, this);
 	}
 
-	if (IsOnWall())
-	{
-		const FVector Normal2D = WallNormal.GetSafeNormal2D();
-		if (!Normal2D.IsNearlyZero())
-		{
-			const float WallYaw = FMath::RadiansToDegrees(FMath::Atan2(Normal2D.Y, Normal2D.X));
-			const uint8 NewByte = FRotator::CompressAxisToByte(WallYaw);
-			if (NewByte != WallYawByte)
-			{
-				WallYawByte = NewByte;
-				MARK_PROPERTY_DIRTY_FROM_NAME(UFPSRCharacterMovementComponent, WallYawByte, this);
-			}
-		}
-	}
 }
 
 bool UFPSRCharacterMovementComponent::IsSlidingForDisplay() const
@@ -235,18 +219,6 @@ bool UFPSRCharacterMovementComponent::IsSlidingForDisplay() const
 		return bIsSliding;
 	}
 	return bSlidingVisual != 0;
-}
-
-float UFPSRCharacterMovementComponent::GetWallYawForDisplay() const
-{
-	// The exact normal where it exists, the quantised copy where it does not. The two differ by well under a degree,
-	// so nobody sees a different body angle depending on whose screen it is.
-	const FVector Normal2D = WallNormal.GetSafeNormal2D();
-	if (!Normal2D.IsNearlyZero())
-	{
-		return FMath::RadiansToDegrees(FMath::Atan2(Normal2D.Y, Normal2D.X));
-	}
-	return FRotator::DecompressAxisFromByte(WallYawByte);
 }
 
 void UFPSRCharacterMovementComponent::StartSliding()
@@ -357,28 +329,23 @@ bool UFPSRCharacterMovementComponent::IsSurfaceGrabbable(const FHitResult& Hit) 
 	return FMath::Abs(Hit.ImpactNormal.Z) <= MaxNormalZ;
 }
 
-bool UFPSRCharacterMovementComponent::IsInputIntoWall() const
+bool UFPSRCharacterMovementComponent::TryAutoWallJump()
 {
-	const FVector InputDirection = Acceleration.GetSafeNormal2D();
-	if (InputDirection.IsNearlyZero() || WallNormal.IsNearlyZero())
-	{
-		return false;
-	}
-	return FVector::DotProduct(InputDirection, -WallNormal) >= WallClimbInputDot;
-}
-
-bool UFPSRCharacterMovementComponent::CanGrabWall(FVector& OutWallNormal) const
-{
-	OutWallNormal = FVector::ZeroVector;
-
 	// Every term is either replicated or already predicted, so client and server reach the same answer for the same
-	// move — the same property that makes the slide's derived state survive a correction replay.
-	if (!CharacterOwner || !IsFalling() || bWallHangConsumed || !IsSpecialMovementAllowed())
+	// move — the property that used to make the derived hang state replay-safe, kept for the impulse that replaced it.
+	if (!CharacterOwner || !IsFalling() || !IsSpecialMovementAllowed())
 	{
 		return false;
 	}
 
-	// A grab is an intent, so it needs input. Falling past a wall with no keys held is just falling.
+	// Bounds before geometry, so an ordinary airborne frame costs two comparisons instead of a sphere sweep.
+	if (!FPSRWallJumpBounds::CanFire(WallJumpCooldownRemaining, WallJumpsUsedThisAirborne, MaxWallJumpsPerAirborne))
+	{
+		return false;
+	}
+
+	// A bounce is an intent, so it needs input. Falling past a wall with no keys held is just falling — and now that
+	// the launch fires by itself, this test is the ENTIRE difference between "wall jump" and "shoved by scenery".
 	const FVector InputDirection = Acceleration.GetSafeNormal2D();
 	if (InputDirection.IsNearlyZero())
 	{
@@ -386,193 +353,59 @@ bool UFPSRCharacterMovementComponent::CanGrabWall(FVector& OutWallNormal) const
 	}
 
 	FHitResult WallHit;
-	if (!ProbeWall(InputDirection, WallGrabProbeHeight, WallHit) || !IsSurfaceGrabbable(WallHit))
+	if (!ProbeWall(InputDirection, WallJumpProbeHeight, WallHit) || !IsSurfaceGrabbable(WallHit))
 	{
 		return false;
 	}
 
+	// The normal has to come from THIS probe. There is no stored wall any more, which is why the dot test below cannot
+	// be hoisted above the sweep the way the old grab check read a normal it already had.
 	const FVector HitNormal = WallHit.ImpactNormal.GetSafeNormal2D();
 	if (HitNormal.IsNearlyZero())
 	{
 		return false;
 	}
 
-	// Must be pushing INTO the wall, not merely alongside it — brushing past a corner while strafing is not a grab.
-	if (FVector::DotProduct(InputDirection, -HitNormal) < WallClimbInputDot)
+	// Must be pushing INTO the wall, not merely alongside it — brushing past a corner while strafing is not a bounce.
+	if (FVector::DotProduct(InputDirection, -HitNormal) < WallJumpInputDot)
 	{
 		return false;
 	}
 
-	OutWallNormal = HitNormal;
-	return true;
-}
-
-void UFPSRCharacterMovementComponent::StartWallHang(const FVector& InWallNormal)
-{
-	// Set before the mode change: OnMovementModeChanged does the rest of the entry bookkeeping and the wall is the one
-	// piece it can't derive for itself.
-	WallNormal = InWallNormal;
-
-	// Latch which shoulder goes to the wall, ONCE, here. The clip is authored side-on, so there are two ways to stand
-	// against any wall; picking the nearer one every frame would spin the whole body through 172 degrees the moment
-	// the player's view crossed the midpoint. Choosing at entry means the body is committed for the length of the
-	// hold, which is at most WallHangMaxDuration.
-	const FVector Normal2D = WallNormal.GetSafeNormal2D();
-	if (CharacterOwner && !Normal2D.IsNearlyZero())
+	const FVector JumpDirection = ComputeWallJumpDirection(HitNormal);
+	if (!JumpDirection.IsNearlyZero())
 	{
-		const float WallYaw = FMath::RadiansToDegrees(FMath::Atan2(Normal2D.Y, Normal2D.X));
-		const float ActorYaw = CharacterOwner->GetActorRotation().Yaw;
-		const float ErrPlus = FMath::Abs(FRotator::NormalizeAxis((WallYaw + WallPoseSideAngle) - ActorYaw));
-		const float ErrMinus = FMath::Abs(FRotator::NormalizeAxis((WallYaw - WallPoseSideAngle) - ActorYaw));
-		const int8 NewSign = (ErrPlus <= ErrMinus) ? 1 : -1;
-		WallSideSign = NewSign;
-		// Dirty the yaw HERE as well as in RefreshReplicatedVisualState. The movement mode travels in the move packet
-		// while these travel as properties, so they can never be made truly atomic — but marking them on the entry
-		// frame is what keeps the gap to at most one update instead of leaving a proxy turning the body to the
-		// PREVIOUS wall's angle until the next time the quantised value happens to change.
-		WallYawByte = FRotator::CompressAxisToByte(WallYaw);
-		if (CharacterOwner->HasAuthority())
-		{
-			MARK_PROPERTY_DIRTY_FROM_NAME(UFPSRCharacterMovementComponent, WallSideSign, this);
-			MARK_PROPERTY_DIRTY_FROM_NAME(UFPSRCharacterMovementComponent, WallYawByte, this);
-		}
+		// The jump OWNS the horizontal velocity rather than adding to it, so the player goes exactly where
+		// ComputeWallJumpDirection says at exactly the speed below.
+		//
+		// Speed already in hand rides on top of the base push, so arriving fast still pays out. With the hang gone
+		// there is no entry velocity to capture and bleed off over a window: the velocity at the moment of contact IS
+		// the approach speed. Same reward, none of the bookkeeping.
+		//
+		// Both terms scale together: the carried speed comes from live velocity (already scaled), so leaving the
+		// authored pair at 1x would make a scaled-up player hit the ceiling instantly and lose the carry entirely.
+		const float CarriedSpeed = Velocity.Size2D();
+		const float JumpSpeed = FMath::Min(FPSRScaled(WallJumpPushSpeed) + CarriedSpeed, FPSRScaled(WallJumpMaxSpeed));
+		Velocity.X = JumpDirection.X * JumpSpeed;
+		Velocity.Y = JumpDirection.Y * JumpSpeed;
 	}
 
-	SetMovementMode(MOVE_Custom, CMOVE_WallHang);
-}
-
-void UFPSRCharacterMovementComponent::StopWallHang()
-{
-	if (!IsOnWall())
+	if (WallJumpUpSpeed > 0.0f)
 	{
-		return;
-	}
-	// Always into a fall, never straight into walking: the engine's falling step finds the floor and lands properly,
-	// whereas dropping into MOVE_Walking from mid-air would snap the capsule to whatever is below.
-	SetMovementMode(MOVE_Falling);
-}
-
-void UFPSRCharacterMovementComponent::UpdateWallHang(float DeltaSeconds)
-{
-	WallHangElapsed += DeltaSeconds;
-
-	const bool bClimbing = IsInputIntoWall();
-	WallSlipElapsed = bClimbing ? 0.0f : (WallSlipElapsed + DeltaSeconds);
-
-	// Invariant 8: a freeze or a DBNO stops the movement already in progress, not only its start.
-	if (!IsSpecialMovementAllowed())
-	{
-		StopWallHang();
-		return;
-	}
-
-	// Invariant 7: an unconditional time bound. A wall taller than one grab can climb would otherwise be a state with
-	// no way out as long as the player keeps holding the key.
-	if (WallHangElapsed >= WallHangMaxDuration)
-	{
-		StopWallHang();
-		return;
-	}
-
-	// Exit 2 — "미끄러져 떨어짐". Releasing the key slips down the wall for a moment before the hands come off, so a
-	// stutter of the key resumes the climb instead of dropping the player.
-	if (!bClimbing && WallSlipElapsed >= WallSlipMaxDuration)
-	{
-		StopWallHang();
-		return;
-	}
-
-	// One probe per frame, answering two questions at once: is the wall still there (a door destroyed underneath the
-	// player — ADR 0001's failure flow), and have the feet cleared its top (the climb succeeded). Re-reading the normal
-	// also lets a hang follow a gently curving surface instead of fighting it.
-	FHitResult WallHit;
-	if (ProbeWall(-WallNormal, WallHoldProbeHeight, WallHit) && IsSurfaceGrabbable(WallHit))
-	{
-		const FVector RefreshedNormal = WallHit.ImpactNormal.GetSafeNormal2D();
-		if (!RefreshedNormal.IsNearlyZero())
-		{
-			WallNormal = RefreshedNormal;
-		}
-		return;
-	}
-
-	// Exit 1 — the wall ran out while climbing into it, which means we went over the top. The nudge forward and up is
-	// what actually puts the player ON the ledge: at this point the capsule is still beside the wall, so without it the
-	// climb ends by falling straight back down and the whole state achieves nothing.
-	// Losing the wall while NOT climbing is the destroyed-wall case instead, and that one just falls.
-	if (bClimbing)
-	{
-		Velocity += (-WallNormal * WallTopBoostForward) + (FVector::UpVector * WallTopBoostUp);
-	}
-	StopWallHang();
-}
-
-void UFPSRCharacterMovementComponent::OnMovementModeChanged(EMovementMode PreviousMovementMode, uint8 PreviousCustomMode)
-{
-	const bool bWasOnWall = (PreviousMovementMode == MOVE_Custom) && (PreviousCustomMode == CMOVE_WallHang);
-
-	// Super clears the floor and the movement base for any non-walking mode, which is exactly what a wall hang wants;
-	// it also leaves Velocity alone on the way into a fall, so an exit boost applied beforehand survives.
-	Super::OnMovementModeChanged(PreviousMovementMode, PreviousCustomMode);
-
-	const bool bOnWallNow = IsOnWall();
-	if (bOnWallNow == bWasOnWall)
-	{
-		return;
-	}
-
-	if (bOnWallNow)
-	{
-		// Remember what the player arrived with BEFORE anything is thrown away — this is the whole basis of the entry
-		// momentum, and after this frame the incoming velocity is gone.
-		WallEntryVelocity = FVector(Velocity.X, Velocity.Y, 0.0f);
-		WallHangElapsed = 0.0f;
-		WallSlipElapsed = 0.0f;
-
-		// The grab arrests the FALL — carrying the plunge into the hang would drag the player straight back down the
-		// moment they caught the wall. What survives is the part that runs ALONG the wall, which is what the glide then
-		// bleeds off over WallEntryMomentumDuration. Killing the horizontal too was what made a fast approach read as
-		// hitting a brick wall.
-		Velocity = FVector::VectorPlaneProject(WallEntryVelocity, WallNormal);
-
-		if (CharacterOwner)
-		{
-			// Grabbing a wall hands back exactly one jump: the wall jump itself. It has to, or the jump exit is dead on
-			// arrival — a player who jumped to REACH the wall has already spent their only jump when JumpMaxCount is 1,
-			// and JumpIsAllowedInternal then refuses.
-			// Min() rather than 0 on purpose: zeroing would ALSO refund the extra air jumps a double-jump card grants
-			// (ADR 0001 card scope A), so jump -> air jump -> grab -> wall jump -> air jump would stack for free. This
-			// only ever tops the budget up to "one left" and never takes away what the player already had.
-			//
-			// It happens on the GRAB rather than inside DoJump because ACharacter::CheckJumpInput evaluates CanJump()
-			// — the budget check — before it calls DoJump at all, so a refund made there would arrive too late to
-			// authorise the very jump it exists for. The visible consequence is that touching a wall and then slipping
-			// off, instead of jumping, still leaves the refunded jump in hand. That is bounded at one per airborne
-			// period by bWallHangConsumed (no second grab until landing), so it reads as "touching a wall refreshes
-			// your jump" rather than as something to farm.
-			CharacterOwner->JumpCurrentCount = FMath::Min(CharacterOwner->JumpCurrentCount, FMath::Max(0, CharacterOwner->JumpMaxCount - 1));
-			CharacterOwner->JumpCurrentCountPreJump = CharacterOwner->JumpCurrentCount;
-		}
+		// An authored height of its own: assigned, so the bounce reads identically however the player arrived.
+		Velocity.Z = WallJumpUpSpeed;
 	}
 	else
 	{
-		// Charged on EVERY exit — climbed over, slipped off, jumped away, timed out, frozen — so no route dodges the
-		// once-per-airborne budget.
-		bWallHangConsumed = true;
-		WallHangElapsed = 0.0f;
-		WallSlipElapsed = 0.0f;
-		WallNormal = FVector::ZeroVector;
-		WallEntryVelocity = FVector::ZeroVector;
+		// Mirrors the engine's own DoJump, which takes the MAX rather than assigning. That distinction did not matter
+		// on the old jump-key path (a hang had already killed the climb before the jump could read it) but it matters
+		// now: this fires while RISING too, so assigning would let a wall graze CUT a jump the player already earned.
+		Velocity.Z = FMath::Max<FVector::FReal>(Velocity.Z, JumpZVelocity);
 	}
-}
 
-float UFPSRCharacterMovementComponent::GetWallEntryMomentumAlpha() const
-{
-	if (WallEntryMomentumDuration <= 0.0f)
-	{
-		return 0.0f;
-	}
-	return FMath::Clamp(1.0f - (WallHangElapsed / WallEntryMomentumDuration), 0.0f, 1.0f);
+	// Charged unconditionally on the one path that can fire, which is what makes the two bounds impossible to dodge.
+	FPSRWallJumpBounds::Consume(WallJumpCooldownRemaining, WallJumpsUsedThisAirborne, WallJumpCooldown);
+	return true;
 }
 
 FVector UFPSRCharacterMovementComponent::ComputeWallJumpDirection(const FVector& InWallNormal) const
@@ -615,164 +448,10 @@ FVector UFPSRCharacterMovementComponent::ComputeWallJumpDirection(const FVector&
 	return ((AlongWall * FMath::Sqrt(1.0f - (OutwardShare * OutwardShare))) + (OutwardDirection * OutwardShare)).GetSafeNormal2D();
 }
 
-void UFPSRCharacterMovementComponent::PhysCustom(float deltaTime, int32 Iterations)
-{
-	if (CustomMovementMode != CMOVE_WallHang)
-	{
-		Super::PhysCustom(deltaTime, Iterations); // leave any Blueprint-driven custom mode to the engine
-		return;
-	}
-	if (deltaTime < MIN_TICK_TIME || !CharacterOwner || !UpdatedComponent)
-	{
-		return;
-	}
-
-	// Simulated proxies do not run the hold, for the same reason they don't decide it (see the role gate in
-	// UpdateCharacterStateBeforeMovement) — but they DO arrive here, because MoveSmooth routes MOVE_Custom straight to
-	// PhysCustom for proxies as well. The wall itself never reaches them: WallNormal is deliberately left at zero on a
-	// proxy (see GetWallYawForDisplay), so the glide, the stick and the lateral projection below would every one of
-	// them be computed against a zero normal, and a slip onto the floor would reach StopWallHang and drive
-	// SetMovementMode against the very mode replication is feeding in. A proxy's position on the wall is owned by
-	// replication and net smoothing; predicting it forward from here can only fight that.
-	if (CharacterOwner->GetLocalRole() == ROLE_SimulatedProxy)
-	{
-		return;
-	}
-
-	RestorePreAdditiveRootMotionVelocity();
-
-	if (!HasAnimRootMotion() && !CurrentRootMotion.HasOverrideVelocity())
-	{
-		// The hang owns its velocity outright. There is no gravity here and CalcVelocity is deliberately never called,
-		// which is what stops input acceleration from pushing the player off the wall it is holding.
-		const bool bClimbing = IsInputIntoWall();
-
-		// Climbing is a flat speed; slipping eases toward its terminal speed so letting go reads as sliding down the
-		// surface rather than the hands snapping open.
-		const float VerticalSpeed = bClimbing
-			? FPSRScaled(WallClimbSpeed)
-			: FMath::FInterpConstantTo(Velocity.Z, -FPSRScaled(WallSlipSpeed), deltaTime, FPSRScaled(WallSlipAcceleration));
-
-		// Limited sideways movement (ADR 0001: 등반 중 제한적 좌우 이동). Only the part of the input running ALONG the
-		// wall counts, so pressing into it or away from it changes nothing about where the player goes.
-		FVector LateralVelocity = FVector::ZeroVector;
-		const FVector InputDirection = Acceleration.GetSafeNormal2D();
-		if (!InputDirection.IsNearlyZero())
-		{
-			LateralVelocity = FVector::VectorPlaneProject(InputDirection, WallNormal).GetSafeNormal2D() * FPSRScaled(WallLateralSpeed);
-		}
-
-		// Entry momentum: for a moment after the grab the player keeps sliding along the wall at the speed they came in
-		// with, then it hands over to the ordinary lateral speed. Crossfading rather than adding keeps the result
-		// bounded by whichever of the two is larger, so a fast entry can never stack on top of the steering.
-		const float MomentumAlpha = GetWallEntryMomentumAlpha();
-		if (MomentumAlpha > 0.0f)
-		{
-			const FVector GlideVelocity = FVector::VectorPlaneProject(WallEntryVelocity, WallNormal);
-			LateralVelocity = FMath::Lerp(LateralVelocity, GlideVelocity, MomentumAlpha);
-		}
-
-		// The pull toward the wall is what keeps the capsule in contact, and contact is what keeps the hold probe
-		// finding the surface next frame.
-		Velocity = LateralVelocity - (WallNormal * FPSRScaled(WallStickSpeed));
-		Velocity.Z = VerticalSpeed;
-	}
-
-	ApplyRootMotionToVelocity(deltaTime);
-
-	Iterations++;
-	bJustTeleported = false;
-
-	const FVector OldLocation = UpdatedComponent->GetComponentLocation();
-	const FVector Adjusted = Velocity * deltaTime;
-	FHitResult Hit(1.0f);
-	SafeMoveUpdatedComponent(Adjusted, UpdatedComponent->GetComponentQuat(), true, Hit);
-
-	// Read before sliding along: SlideAlongSurface re-uses Hit for its own sweep, so by the time it returns this is the
-	// result of the SECOND move — and slipping straight down onto a floor leaves that second sweep hitting nothing,
-	// which would silently lose the landing.
-	bool bLandedOnFloor = false;
-	if (Hit.Time < 1.0f)
-	{
-		bLandedOnFloor = IsWalkable(Hit);
-		HandleImpact(Hit, deltaTime, Adjusted);
-		SlideAlongSurface(Adjusted, (1.0f - Hit.Time), Hit.Normal, Hit, true);
-	}
-
-	if (!bJustTeleported && !HasAnimRootMotion() && !CurrentRootMotion.HasOverrideVelocity())
-	{
-		// Recover the velocity actually achieved, exactly as PhysFlying does: pressed against the wall, the into-wall
-		// part resolves to zero instead of building up into a shove.
-		Velocity = (UpdatedComponent->GetComponentLocation() - OldLocation) / deltaTime;
-	}
-
-	// Slipped down onto something walkable. Handing over to the falling step lands the player properly instead of
-	// grinding the capsule into the floor for the rest of the slip window.
-	if (bLandedOnFloor)
-	{
-		StopWallHang();
-	}
-}
-
-bool UFPSRCharacterMovementComponent::DoJump(bool bReplayingMoves, float DeltaTime)
-{
-	if (!IsOnWall())
-	{
-		return Super::DoJump(bReplayingMoves, DeltaTime);
-	}
-
-	// Read the wall BEFORE the engine's jump: DoJump switches to MOVE_Falling, and that clears this state.
-	const FVector PushNormal = WallNormal;
-
-	// CheckJumpInput runs before the movement step, so the last hold probe is a frame old. A door destroyed in that gap
-	// would otherwise launch the player off a wall that no longer exists. One extra sweep, only on the frame jump is
-	// pressed.
-	FHitResult WallHit;
-	if (PushNormal.IsNearlyZero() || !ProbeWall(-PushNormal, WallHoldProbeHeight, WallHit) || !IsSurfaceGrabbable(WallHit))
-	{
-		// There is nothing left to push off, so let go and fall. Falling through to Super here instead would hand out a
-		// plain vertical jump off thin air — and it would be a jump the player only has because grabbing the wall
-		// refunded one, which makes it look exactly like the wall jump that was just refused.
-		StopWallHang();
-		return false;
-	}
-
-	// Read the momentum before Super::DoJump, which changes the movement mode and clears it along with the rest.
-	const float CarriedSpeed = WallEntryVelocity.Size() * GetWallEntryMomentumAlpha();
-	const FVector JumpDirection = ComputeWallJumpDirection(PushNormal);
-
-	if (!Super::DoJump(bReplayingMoves, DeltaTime))
-	{
-		return false;
-	}
-
-	// The jump OWNS the horizontal velocity rather than adding to it. Adding would leave the glide, the stick that held
-	// the capsule to the wall, and the push all fighting over the direction; writing it outright means the player goes
-	// exactly where ComputeWallJumpDirection says, at exactly the speed below.
-	if (!JumpDirection.IsNearlyZero())
-	{
-		// Speed still in hand from the approach rides on top of the base push, so reacting fast to a fast impact pays
-		// out — capped so a full-speed slide into a wall can't launch beyond the rest of the movement set.
-		// Both terms scale together: CarriedSpeed comes from live velocity (already scaled), so leaving the authored
-		// pair at 1x would make a scaled-up player hit the ceiling instantly and lose the carry mechanic entirely.
-		const float JumpSpeed = FMath::Min(FPSRScaled(WallJumpPushSpeed) + CarriedSpeed, FPSRScaled(WallJumpMaxSpeed));
-		Velocity.X = JumpDirection.X * JumpSpeed;
-		Velocity.Y = JumpDirection.Y * JumpSpeed;
-	}
-
-	// Super already set Z to the character's ordinary jump height; only override when the wall jump has been given a
-	// height of its own.
-	if (WallJumpUpSpeed > 0.0f)
-	{
-		Velocity.Z = WallJumpUpSpeed;
-	}
-	return true;
-}
-
 void UFPSRCharacterMovementComponent::UpdateCharacterStateBeforeMovement(float DeltaSeconds)
 {
 	// Runs before the physics step on the owning client, the server, and every replayed move — the one place where the
-	// derived slide and wall-hang states are decided, so all three agree.
+	// derived slide state and the auto wall jump are decided, so all three agree.
 
 	// Stance weights. Advanced here rather than on a tick of their own because this runs on every role — the engine
 	// calls it from PerformMovement for the owning client and the server AND from SimulateMovement for remote proxies —
@@ -784,12 +463,12 @@ void UFPSRCharacterMovementComponent::UpdateCharacterStateBeforeMovement(float D
 	// proxy satisfies every entry condition below: bWantsToCrouch arrives through ACharacter::OnRep_IsCrouched, and
 	// MovementMode and Velocity are both replicated. Deriving the states there would RE-DECIDE them on the one machine
 	// with no authority over them — StartSliding would re-apply the entry impulse to an already-replicated velocity and
-	// SimulateMovement integrates the result through MoveSmooth, while wall hang would drive SetMovementMode against
-	// the very mode replication is feeding it, and run WallHangMaxDuration on a clock of its own so the proxy lets go
-	// while the server still says it is holding on.
-	// Proxies are TOLD these states instead: bSlidingVisual, WallYawByte and WallSideSign replicate for exactly that,
-	// and IsSlidingForDisplay()/GetWallYawForDisplay() read those copies. Leaving early also spares every remote player
-	// a per-frame CanGrabWall sweep.
+	// SimulateMovement integrates the result through MoveSmooth, while the wall jump would overwrite a replicated
+	// Velocity with an impulse the server never simulated, spending a bound on a machine that owns neither.
+	// Proxies are TOLD the slide instead: bSlidingVisual and SlideVisualSerial replicate for exactly that, and
+	// IsSlidingForDisplay() reads those copies. The wall jump needs no such copy — it is an impulse, not a pose, so
+	// what a proxy has to see is the resulting velocity, which movement replication already carries. Leaving early
+	// also spares every remote player a per-frame wall sweep.
 	if (CharacterOwner && CharacterOwner->GetLocalRole() == ROLE_SimulatedProxy)
 	{
 		Super::UpdateCharacterStateBeforeMovement(DeltaSeconds);
@@ -801,24 +480,14 @@ void UFPSRCharacterMovementComponent::UpdateCharacterStateBeforeMovement(float D
 		SlideCooldownRemaining = FMath::Max(0.0f, SlideCooldownRemaining - DeltaSeconds);
 	}
 
-	// Wall hang. Sliding is ground-only and hanging is air-only, so this and the slide block below can never both be
-	// active — but the budget does have to be refreshed on the ground, which is the one moment both are quiet.
-	if (IsMovingOnGround())
-	{
-		bWallHangConsumed = false;
-	}
+	// Auto wall jump. Both bounds advance every frame — the cooldown decays off the predicted delta exactly like
+	// SlideCooldownRemaining above, and landing refills the per-airborne budget. Sliding is ground-only and the launch
+	// is air-only, so this and the slide block below can never both fire on one frame.
+	FPSRWallJumpBounds::Advance(WallJumpCooldownRemaining, WallJumpsUsedThisAirborne, DeltaSeconds, IsMovingOnGround());
 
-	if (IsOnWall())
+	if (!IsMovingOnGround())
 	{
-		UpdateWallHang(DeltaSeconds);
-	}
-	else
-	{
-		FVector GrabbedWallNormal;
-		if (CanGrabWall(GrabbedWallNormal))
-		{
-			StartWallHang(GrabbedWallNormal);
-		}
+		TryAutoWallJump();
 	}
 
 	// GroundSpeedCurve's X axis. Held while airborne so a mid-sprint jump doesn't land back at a standing start, and
@@ -1369,9 +1038,9 @@ bool UFPSRCharacterMovementComponent::CanAttemptJump() const
 	// Standing back up is the engine's job and stays safe — going airborne makes CanCrouchInCurrentState() false, which
 	// triggers UnCrouch, and that keeps the crouched capsule if a ceiling is in the way.
 	//
-	// IsOnWall() is added because a wall hang is neither on the ground nor falling, so Super's pair of states would
-	// refuse the wall jump — one of the three exits the design requires.
-	return IsJumpAllowed() && (IsMovingOnGround() || IsFalling() || IsOnWall());
+	// No wall term here any more: the wall jump no longer goes through the jump input at all (it fires from
+	// UpdateCharacterStateBeforeMovement), so it neither needs this permission nor spends the jump budget.
+	return IsJumpAllowed() && (IsMovingOnGround() || IsFalling());
 }
 
 float UFPSRCharacterMovementComponent::GetPlanarSpeed() const
@@ -1382,22 +1051,7 @@ float UFPSRCharacterMovementComponent::GetPlanarSpeed() const
 FString UFPSRCharacterMovementComponent::GetLocomotionStateName() const
 {
 	FString StateName;
-	if (IsOnWall())
-	{
-		// Which half of the state we're in, and how close the hard time bound is — "the climb stopped" and "the wall
-		// ran out" look the same on screen otherwise.
-		StateName = FString::Printf(TEXT("Wall %s %.2f/%.2fs"),
-			IsInputIntoWall() ? TEXT("climb") : TEXT("slip"), WallHangElapsed, WallHangMaxDuration);
-
-		// How much launch speed is still on the table. Without it the entry-momentum window is invisible, and "I jumped
-		// too late" looks identical to "the momentum isn't working".
-		const float CarriedSpeed = WallEntryVelocity.Size() * GetWallEntryMomentumAlpha();
-		if (CarriedSpeed > 0.0f)
-		{
-			StateName += FString::Printf(TEXT("  +%.0f"), CarriedSpeed);
-		}
-	}
-	else if (IsFalling())   { StateName = TEXT("Air"); }
+	if (IsFalling())        { StateName = TEXT("Air"); }
 	else if (bIsSliding)
 	{
 		// Show elapsed / limit: without it, "the curve isn't being followed" and "the slide ended early" look identical.
@@ -1417,11 +1071,16 @@ FString UFPSRCharacterMovementComponent::GetLocomotionStateName() const
 	{
 		StateName += FString::Printf(TEXT("  (slide CD %.1f)"), SlideCooldownRemaining);
 	}
-	// Same reasoning for the wall: "the grab did nothing" and "this airborne period's grab is already spent" are
-	// otherwise the same silence.
-	if (!IsOnWall() && bWallHangConsumed)
+	// Same reasoning for the wall: "nothing happened when I hit that wall" has two quite different causes — the budget
+	// for this airborne period is spent, or the cooldown has not elapsed — and they are otherwise the same silence.
+	if (WallJumpsUsedThisAirborne > 0)
 	{
-		StateName += TEXT("  (wall used)");
+		StateName += FString::Printf(TEXT("  (wall %d/%d"), WallJumpsUsedThisAirborne, MaxWallJumpsPerAirborne);
+		if (WallJumpCooldownRemaining > 0.0f)
+		{
+			StateName += FString::Printf(TEXT(" CD %.2f"), WallJumpCooldownRemaining);
+		}
+		StateName += TEXT(")");
 	}
 	// Only while it is actually moving: settled at 0 or 1 it says nothing, but mid-transition it separates "the blend
 	// is running" from "the blend already finished and the speed still looks wrong".
@@ -1434,18 +1093,17 @@ FString UFPSRCharacterMovementComponent::GetLocomotionStateName() const
 
 bool UFPSRCharacterMovementComponent::CanFireInCurrentState() const
 {
-	// Sliding, crouching, jumping and airborne all allow fire by design. The wall hang is the single exception: both
-	// hands are on the wall, which the reference footage shows directly — the weapon leaves the screen entirely for the
-	// duration of the grab.
-	return !IsOnWall();
+	// Every locomotion state allows fire. The wall hang was the single exception — both hands on the wall, the weapon
+	// off screen for the duration of the grab — and it no longer exists: the wall is an instantaneous impulse, so
+	// there is no span to take the weapon away for. Kept as a predicate rather than folded into its callers; see the
+	// header for why five systems sharing one judgment source is worth a function that currently only says yes.
+	return true;
 }
 
 float UFPSRCharacterMovementComponent::GetSpreadMultiplier() const
 {
 	// Exclusive, not multiplied: a crouched player who walks off a ledge is "airborne", not "airborne × crouched".
-	// A wall hang counts as airborne even though IsFalling() is false there — firing is blocked anyway, so this only
-	// matters to anything that reads the multiplier for its own reasons, and "off the ground" is the honest answer.
-	if (IsFalling() || IsOnWall())
+	if (IsFalling())
 	{
 		return AirborneSpreadMultiplier;
 	}
@@ -1474,8 +1132,6 @@ FNetworkPredictionData_Client* UFPSRCharacterMovementComponent::GetPredictionDat
 
 FSavedMove_FPSR::FSavedMove_FPSR()
 	: bSavedIsSliding(0)
-	, bSavedOnWall(0)
-	, bSavedWallHangConsumed(0)
 {
 	// Bitfields get no in-class initializer, and a pooled move is reused before Clear() is guaranteed to have run on
 	// it — so initialize here rather than relying on the allocation being zeroed.
@@ -1491,12 +1147,8 @@ void FSavedMove_FPSR::Clear()
 	SavedGroundAccelElapsed = 0.0f;
 	SavedSlideSlopeSpeedBonus = 0.0f;
 
-	bSavedOnWall = 0;
-	bSavedWallHangConsumed = 0;
-	SavedWallHangElapsed = 0.0f;
-	SavedWallSlipElapsed = 0.0f;
-	SavedWallNormal = FVector::ZeroVector;
-	SavedWallEntryVelocity = FVector::ZeroVector;
+	SavedWallJumpCooldownRemaining = 0.0f;
+	SavedWallJumpsUsedThisAirborne = 0;
 
 	SavedStanceBlend = 0.0f;
 	SavedStanceBlendStart = 0.0f;
@@ -1516,15 +1168,27 @@ bool FSavedMove_FPSR::CanCombineWith(const FSavedMovePtr& NewMove, ACharacter* I
 			return false;
 		}
 
-		// Wall hangs are excluded from combining outright, not just across their edges. Super's test never looks at the
-		// packed movement mode, and everything that decides how a hang plays out — which wall, how long, whether this
-		// airborne period's grab is spent — lives only on this saved move. A hang lasts under two seconds, so giving up
-		// combining for its duration costs nothing measurable and removes the whole class of divergence.
-		if (bSavedOnWall || Other->bSavedOnWall)
+		// The auto wall jump needs a guard of its own, and this is the one place that can supply it.
+		//
+		// Super's test is built around INPUT EDGES — bPressedJump, bWasJumping, the compressed flags — and the auto
+		// wall jump has none: it fires from state, mid-fall, with the movement input unchanged and the mode Falling on
+		// both sides. Every one of Super's checks therefore passes across the very frame the impulse landed, and the
+		// acceleration-direction test passes especially well, because the trigger REQUIRES the input to keep pointing
+		// into the wall. (The slide escapes this by having a bWantsToCrouch edge the engine does notice.)
+		//
+		// Folding across that frame is not merely a lost frame: FSavedMove_Character::CombineWith rewinds the pawn to
+		// the start of the older move and never calls PrepMoveFor, so the character goes back to before the launch
+		// while these two counters keep their after-the-launch values. The re-simulation then refuses the jump the
+		// client has already drawn, and the player sees it swallowed. Combining happens whenever client framerate
+		// exceeds the send rate, which is the normal case.
+		//
+		// Same shape and same justification as the stance guard below — a 0.35s window, so refusing outright costs
+		// nothing measurable and removes the whole class of divergence.
+		if (SavedWallJumpCooldownRemaining > 0.0f || Other->SavedWallJumpCooldownRemaining > 0.0f)
 		{
 			return false;
 		}
-		if (bSavedWallHangConsumed != Other->bSavedWallHangConsumed)
+		if (SavedWallJumpsUsedThisAirborne != Other->SavedWallJumpsUsedThisAirborne)
 		{
 			return false;
 		}
@@ -1555,12 +1219,8 @@ void FSavedMove_FPSR::SetMoveFor(ACharacter* C, float InDeltaTime, FVector const
 		SavedGroundAccelElapsed = Movement->GroundAccelElapsed;
 		SavedSlideSlopeSpeedBonus = Movement->SlideSlopeSpeedBonus;
 
-		bSavedOnWall = Movement->IsOnWall() ? 1 : 0;
-		bSavedWallHangConsumed = Movement->bWallHangConsumed ? 1 : 0;
-		SavedWallHangElapsed = Movement->WallHangElapsed;
-		SavedWallSlipElapsed = Movement->WallSlipElapsed;
-		SavedWallNormal = Movement->WallNormal;
-		SavedWallEntryVelocity = Movement->WallEntryVelocity;
+		SavedWallJumpCooldownRemaining = Movement->WallJumpCooldownRemaining;
+		SavedWallJumpsUsedThisAirborne = Movement->WallJumpsUsedThisAirborne;
 
 		SavedStanceBlend = Movement->StanceBlend;
 		SavedStanceBlendStart = Movement->StanceBlendStart;
@@ -1584,15 +1244,12 @@ void FSavedMove_FPSR::PrepMoveFor(ACharacter* C)
 		Movement->GroundAccelElapsed = SavedGroundAccelElapsed;
 		Movement->SlideSlopeSpeedBonus = SavedSlideSlopeSpeedBonus;
 
-		// Whether we are on a wall is NOT restored here — that is the movement mode, which the correction itself has
-		// already set (ApplyNetworkMovementMode) and which the replayed moves re-derive from there. What has to come
-		// back is everything the replay cannot re-derive: the wall being held (the jump exit reads it before this
-		// frame's probe runs), the two timers, and the once-per-airborne budget.
-		Movement->bWallHangConsumed = (bSavedWallHangConsumed != 0);
-		Movement->WallHangElapsed = SavedWallHangElapsed;
-		Movement->WallSlipElapsed = SavedWallSlipElapsed;
-		Movement->WallNormal = SavedWallNormal;
-		Movement->WallEntryVelocity = SavedWallEntryVelocity;
+		// The wall itself is NOT restored — there is nothing to restore. The bounce leaves no state behind; what it
+		// leaves is velocity, which the correction has already set. Only the two BOUNDS come back, and they have to:
+		// they are history, not something a replayed frame can re-derive, and without them a replay would hand out a
+		// second launch the server never simulated.
+		Movement->WallJumpCooldownRemaining = SavedWallJumpCooldownRemaining;
+		Movement->WallJumpsUsedThisAirborne = SavedWallJumpsUsedThisAirborne;
 
 		// The stance weight feeds the walk-speed cap, so a replay has to resume from the same point on the blend or it
 		// re-simulates at a different speed. The slide weight rides along for a lesser reason: a replay re-runs time
