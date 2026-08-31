@@ -30,6 +30,16 @@
 #include "Engine/Engine.h"
 #include "EngineUtils.h"
 
+// Compile-time guard: the no-schedule-asset fallback must never exceed the spawn subsystem's actual hard ceiling.
+// UFPSRRunScheduleValidator (FPSRogueliteEditor module) only checks an AUTHORED UFPSRRunScheduleDataAsset — when
+// NONE is assigned (test runs / missing content), FallbackMaxAliveCount drives MaxAliveCount instead, and no
+// validator ever runs over it. Catch a future drift here, at compile time, instead of silently shipping a
+// fallback that targets more alive enemies than the spawn subsystem can ever actually hold.
+static_assert(UFPSRRunDirectorSubsystem::FallbackMaxAliveCount
+	<= UFPSREnemySpawnSubsystem::GlobalAliveCap - UFPSREnemySpawnSubsystem::SeedReserve,
+	"FallbackMaxAliveCount exceeds UFPSREnemySpawnSubsystem's effective cap (GlobalAliveCap - SeedReserve) — lower "
+	"FallbackMaxAliveCount or raise the spawn subsystem's cap so the two stay consistent.");
+
 bool UFPSRRunDirectorSubsystem::HasServerAuthority() const
 {
 	const UWorld* World = GetWorld();

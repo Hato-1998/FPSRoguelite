@@ -80,7 +80,9 @@ try:
     rs.set_editor_property("BaseAliveCount", 40)
     rs.set_editor_property("AliveCountPerMinute", 30.0)
     rs.set_editor_property("AliveCountPerMinuteAfterBoss", 50.0)
-    rs.set_editor_property("MaxAliveCount", 300)
+    # 240 = UFPSREnemySpawnSubsystem 의 실효 동시생존 천장(GlobalAliveCap 250 - SeedReserve 10, 2026-08-31 M1).
+    # 이 위로 적으면 그만큼은 스폰에 도달 못 하는 죽은 저작값이 되고 밸리데이터가 경고한다.
+    rs.set_editor_property("MaxAliveCount", 240)
     holdzone = EAL.load_asset("/Game/Mission/Data/DA_Mission_HoldZone")
     def window(t):
         w = unreal.FPSRMissionWindow()

@@ -2,6 +2,8 @@
 
 #include "Misc/AutomationTest.h"
 #include "Enemy/FPSREnemyAllocator.h"
+#include "Enemy/FPSREnemySpawnSubsystem.h" // GlobalAliveCap/SeedReserve — CONSTANTS only (case 1's target), no world
+                                           // access; the same read FPSREnemyFrontBudgetTest.cpp already does.
 
 #if WITH_AUTOMATION_TESTS
 
@@ -29,10 +31,13 @@ bool FFPSRAllocatorUnitTest::RunTest(const FString& Parameters)
 		}
 	};
 
-	// (1) Single occupied map gets the whole target.
+	// (1) Single occupied map gets the whole target. Target = the spawn subsystem's effective alive ceiling (the
+	//     real steady budget a single-map run apportions), read from the constants instead of copied as a literal —
+	//     otherwise this case silently stops meaning "the whole ceiling" the next time the cap is tuned.
 	{
-		TArray<int32> Out; RunCase({ 4 }, 192, Out);
-		TestEqual(TEXT("single map == target"), Out[0], 192);
+		const int32 EffectiveCap = UFPSREnemySpawnSubsystem::GlobalAliveCap - UFPSREnemySpawnSubsystem::SeedReserve;
+		TArray<int32> Out; RunCase({ 4 }, EffectiveCap, Out);
+		TestEqual(TEXT("single map == target"), Out[0], EffectiveCap);
 	}
 
 	// (2) 2/2 even split sums to target, both equal.

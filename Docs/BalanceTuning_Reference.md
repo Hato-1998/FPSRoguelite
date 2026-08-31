@@ -28,7 +28,7 @@
 | 미션 제한시간 TimeLimit | 0 (무제한) | DA-저작 `DA_Mission_*` | 0=실패없음 |
 | 시작 적 수 BaseAliveCount | 40 | DA-저작 `DA_RunSchedule` | 스폰 강도 베이스 |
 | 분당 적 증가 AliveCountPerMinute | 30/min | DA-저작 `DA_RunSchedule` | 시간 스케일링 |
-| 동시 적 상한 MaxAliveCount | 250 | DA-저작 `DA_RunSchedule` | 운영 상한(하드캡 500과 별개) |
+| 동시 적 상한 MaxAliveCount | **240** | C++ (라이브) `FPSRRunScheduleDataAsset.h` — `DA_RunSchedule`엔 미저작(이름테이블 0건, 실측 2026-08-31) | 운영 상한. 하드캡 500(`MaxActiveEnemies`)은 **풀 액터 상한**이지 동시 생존 상한이 아니다 — 동시 생존 실효 천장 = `GlobalAliveCap`−`SeedReserve` = **240**(`Performance.md §5`) |
 | 디렉터 틱 DirectorInterval | 0.25s | C++ const (RunDirector.h:107) | 런클럭/스폰 갱신 주기 |
 | 오프닝시드 대기 OpeningSeedWaitTimeout | 5s | C++ const | 카드선택 대기 anti-deadlock |
 | 런종료→로비 PostRunTravelDelay | 3s | C++ (GameMode.h:67) BP-override | 결과창 비트 |
@@ -132,7 +132,7 @@
 | 항목 | 값 | 위치 |
 |---|---|---|
 | **활성 적 하드캡 MaxActiveEnemies** | **500** | SpawnSubsystem.h:150 (const) — perf 예산 |
-| 운영 상한 MaxAliveCount | 250 | DA_RunSchedule |
+| 운영 상한 MaxAliveCount | **240** | C++ (라이브) `FPSRRunScheduleDataAsset.h` — `DA_RunSchedule` 미저작(이름테이블 0건, 실측 2026-08-31) |
 | 틱당 최대 스폰 / 스폰 간격 | 10 / 0.1s | h:153·156 |
 | 링 스폰 내/외반경 | 1200 / 1500cm | h:159·162 |
 | 공격 토큰 상한 | 10 | h:111 |

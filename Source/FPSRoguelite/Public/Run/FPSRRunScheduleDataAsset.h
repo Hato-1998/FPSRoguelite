@@ -186,9 +186,12 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Run")
 	float AliveCountPerMinuteAfterBoss = 50.0f;
 
-	/** Hard cap on the time-scaled target alive count. */
+	/** Hard cap on the time-scaled target alive count. Designer knob — can only TIGHTEN the swarm below the spawn
+	 *  subsystem's actual hard ceiling, never loosen it: UFPSREnemySpawnSubsystem::GlobalAliveCap - SeedReserve
+	 *  (currently 240) is the real ceiling and always wins. Defaulted to match that ceiling exactly, so raising this
+	 *  further has no effect (UFPSRRunScheduleValidator warns when it's authored above the effective cap). */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Run")
-	int32 MaxAliveCount = 300;
+	int32 MaxAliveCount = 240;
 
 	/** Per director-tick spawn cap = enemies spawned each director tick. Combined with SpawnIntervalSeconds this is the
 	 *  swarm FILL RATE (MaxSpawnPerTick / SpawnIntervalSeconds per second). Lower = enemies trickle in and the crowd
