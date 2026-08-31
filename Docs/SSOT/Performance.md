@@ -59,6 +59,17 @@
 > **다만 이것은 외삽이며, "적 300 에서 쟀다"고 인용하면 안 된다.** 링을 유효 바닥 위로만 배치하는 수정(`bRequireGround`)은
 > 별도 보드 행으로 이월했다.
 
+> ⚠️ **이 실측 = 이번 캡 상향(250·`SeedReserve`10)의 근거다 — 세 가지를 함께 읽을 것 (2026-08-31, M1).**
+> 1. **1인 리슨 호스트 단독 측정이다** — `Scripts/measure_swarm_render.ps1`의 `-ClientCount` 기본값은 **0**. 위 표 어디에도
+>    인원 축이 없다. **4인 복제 축은 이 표에 없다.**
+> 2. **4인 복제 = 미측정이지 미등록이 아니다** — `Docs/Specs/U14R_PerfMeasureRegistry.md` §5-A 에 시나리오·러너
+>    (`-ClientCount 3`)·판정선(`ServerReplicateActors` avg **≤1.5ms @300×4클라**)이 이미 등록돼 있다. 240은 그 봉투(300×4) 안이다.
+> 3. **이번 캡 상향이 그 미측정 부채를 25% 키운다.** 복제 부담은 alive 만이 아니라 **alive + dying(dwell 중 시체) 합**으로
+>    세야 정확하다 — dwell 중인 시체도 복제된다: (alive **192** + `MaxDyingEnemies` **48** = **240**) → (alive **240** +
+>    `MaxDyingEnemies` **60** = **300**) = 정확히 **+25%**. §5-A 판정선이 겨눈 부담 실체가 이번 변경으로 25% 늘었는데
+>    그 판정은 아직 실행되지 않았다. **되돌리기 비용은 낮다** — 상향된 상수(`GlobalAliveCap`·`SeedReserve`·
+>    `MaxDyingEnemies`·`CapBoundMargin`) 전부 코드 상수 몇 줄이라, §5-A 실측에서 초과가 나오면 상향분만 되돌리면 된다.
+
 > ~~아래 2026-08-28 블록은 위 실측으로 **대체**됐다~~ — 경위 보존용으로 남긴다(그 표의 미달 원인 규명이 위 결론의 근거다).
 > **📊 M0 잠정 베이스라인 실측 (2026-08-28, `perf/enemy-baseline-300-500`)** — 시나리오 = **`L_Arena?listen`**(ADR 0012 지속 레벨, 전투 공간은 스트리밍 서브레벨 `L_Map_1`) · `FPSR.SpawnEnemies N 6000` 60m 링 · PlayerStart 고정 카메라 · **Development 패키지** · `Scripts/measure_swarm_render.ps1`. 셀 축 off = `r.PostProcessing.DisableMaterials 1`(블렌더블만 차단, 톤매핑·블룸·노출 유지 — 패키지 빌드 1개로 교차 성립).
 >
@@ -92,8 +103,8 @@
 
 | 항목 | 잠정 목표 | 비고 |
 |---|---|---|
-| 최대 활성 적 수(서버) | 하드캡 500(`MaxActiveEnemies` constexpr, 코드 실측 2026-06-30), 통상=스케줄 `MaxAliveCount`/`AliveCountByLevel` 주도(코드 폴백캡 300) | 풀 고갈 시 스폰 보류. ⚠️"통상 200~350"은 잠정 문서값 — 실측 통상치는 활성 스케줄 에셋 MaxAliveCount |
-| 클라이언트별 관련(relevant) 적 | 상한 ~150 | relevancy cull |
+| 최대 활성 적 수(서버) | **3층 구조(갱신 2026-08-31, M1 캡 상향 — 근거는 아래 M0 공식 베이스라인 실측)**:<br>① `MaxActiveEnemies` = **500** — 풀 **액터** 상한(`TotalSpawned` 기준). 동시 생존 상한이 **아니다**.<br>② `GlobalAliveCap` **250** − `SeedReserve` **10** → **동시 생존 실효 천장 240**. 모든 스폰 경로가 무조건 통과하는 하드 게이트 = **엔지니어링 천장**(호스트 예산, 실측으로만 움직인다).<br>③ `MaxAliveCount`(DataAsset 필드) = **240** — 디자이너가 **더 조일 수만 있는** 운영 상한(현재 `DA_RunSchedule`엔 저작된 적 없음 = 이름테이블 0건, 라이브값=C++ 기본값 그대로 — 상세 `BalanceTuning_Reference.md` §0 표기).<br>⚠️ **정정**: 이 칸에 있던 "통상=스케줄 `MaxAliveCount`/`AliveCountByLevel` 주도(코드 폴백캡 300)"는 틀렸다 — 실제 주도자는 ②`GlobalAliveCap`이며 DA 값은 그 안에서만 유효하다 | 풀 고갈 시 스폰 보류. ~~⚠️"통상 200~350"은 잠정 문서값~~ — 위 ②·③이 정확한 수치이므로 폐기 |
+| 클라이언트별 관련(relevant) 적 | 상한 ~150 | relevancy cull — ⚠️ **괴리 (확인 2026-08-31, 이 행에서는 미해결)**: 단일맵 `NetCullRadius` 기본값 = **200m**(`FPSREnemyBase.h:573`)인데 현행 아레나는 **160×160m**(ADR 0011 E1) — 한 변이 반경보다 짧다. 즉 플레이어가 중앙 근처면 아레나 전체가 버블 안이라 **relevant ≈ alive 전량**이고, 코너에서 반대 코너를 볼 때(대각 ≈**226m**)만 일부가 컬된다. 실효 동시생존 192 시점에 이미 예산(~150) 초과였고, 이번 캡 상향(240)으로 괴리가 더 벌어진다. 해법 = §5가 이미 지정한 **RepGraph**(공간 relevancy) 소관 · 별도 후속 — **이 행에서 고치지 않는다** |
 | 적 NetCull | **P-H 구현**(2026-07-10): 멀티슬롯 유니파이드 = footprint 버블 균일 `R=max(무기사거리, min(무기사거리+seam, 슬롯대각+seam))`(현 132m 슬롯 ≈140m, 현 200m 대비 relevant 면적 ~2배↓); 단일맵 = ctor 기본 200m(BP `NetCullRadius` per-archetype 튜닝, BeginPlay 반영) | 대칭 거리컬이라 seam-only 불가(자기슬롯 완전커버 ⟺ 이웃 slot bleed) → **RepGraph=진짜 공간 relevancy 해법·별도 후속**(단계서 per-acquire 반경 적 재-bucket 필요). 클라 far-slot/seam 팝인=수용 D3 한계. 대역폭 PIE 실측=사용자 |
 | 적 NetUpdateFrequency | 위협도별 S0 30Hz / S1 10Hz / S2 5Hz / S3 2Hz (코드 실측 일치 2026-06-30) | 거리기반(최근접 플레이어), 티어변경시만 SetNetUpdateFrequency(적500 핫패스 가드, W1 P2) |
 | 적 Dormancy | 원거리·비활성 DORMANT, 접근 시 wake | |
@@ -112,7 +123,7 @@
 
 > 🔴 **이 "복제 = Push Model" 전제는 출시(패키지) 빌드에선 성립하지 않는다** — Push Model이 컴파일 단계에서 빠져 비교 기반 복제로 폴백한다(동작은 정상, 의도한 CPU 절감이 없음). 미해결·결정 대기 = **`Docs/OpenIssues_Network.md` N-1**. 호스트 프레임 예산을 계산할 때 이 차이를 빼고 세지 말 것. ✅ *측정 항목 등록 완료 2026-08-19(U14R)* — 메트릭·시나리오·잠정 판정 기준 = `Docs/Specs/U14R_PerfMeasureRegistry.md` §5-A, 실측 = §5-3 레지스트리.
 
-**다중맵 예산 모델 (설계 수렴 2026-07-05, `Docs/Review/20260705-multimap-budget-regroup.md`)** — ⚠️ **per-map 레지스트리·map-aware allocator 기구는 U 연속필드로 대체됨**(다음 문단; **전역 공유 캡 원칙은 U에 계승**). (원안 참고) 심리스 다중맵에서도 예산은 **전역 공유 캡**(맵 수 무관 호스트 전역 상한 — per-map 캡 금지=붕괴; 잠정 전역 200, perf 후 확정). 단일 `FPSREnemySpawnSubsystem` → **map-aware allocator**(점유맵 배분, "2인+ 맵 > 솔로 맵" 가중, 빈 맵 target=0+하드 드레인), U7 플로우필드 → **per-map 레지스트리**(`ULevel*` 키·stream-in bake·stream-out evict, bake는 ECC_WorldStatic 의존이라 콜리전 등록 후). 새 맵 진입 공백은 **예약 헤드룸(진입 시드) + 백그라운드 silent recycle**(Kill 아님·NetCull밖·LOS없음·최근교전/미션/엘리트 보호·drain rate ≤10-15%/10s·local pressure floor)로 채움. 복제 = **NetCull 구현(§5 1순위 미구현 레버) → RepGraph 앞당김**(다중맵+분산이 connection별 relevancy를 필수화). **map-aware allocator = 적 예산 + 콘텐츠(미션/보스/엘리트/이벤트) 배분 공동**(디렉터 결정 2026-07-05: 그룹 버프 전면 폐기 → "뭉치면 효율"은 고가치 콘텐츠를 2인+ 그룹에 집중시켜야만 성립, allocator가 설계의 심장). **맵 잔존(언로드X·LOD컬)**: 픽업/문/상자는 dormant/HISM 경량 잔존(이관/소멸 로직 불요, 백트래킹 유혹 방지 위해 큰 성장은 미션/보스/상자), **적만** 빈 맵 하드 드레인(예산 회수). Tier 0(코어)/1(예산 게임필·콘텐츠 allocator)/2(텔레포터·은근한 비효율) 스코프·시작 수치 = 리포트.
+**다중맵 예산 모델 (설계 수렴 2026-07-05, `Docs/Review/20260705-multimap-budget-regroup.md`)** — ⚠️ **per-map 레지스트리·map-aware allocator 기구는 U 연속필드로 대체됨**(다음 문단; **전역 공유 캡 원칙은 U에 계승**). (원안 참고) 심리스 다중맵에서도 예산은 **전역 공유 캡**(맵 수 무관 호스트 전역 상한 — per-map 캡 금지=붕괴; 당시 잠정값 전역 200 → 2026-08-31 실측 후 250 확정). 단일 `FPSREnemySpawnSubsystem` → **map-aware allocator**(점유맵 배분, "2인+ 맵 > 솔로 맵" 가중, 빈 맵 target=0+하드 드레인), U7 플로우필드 → **per-map 레지스트리**(`ULevel*` 키·stream-in bake·stream-out evict, bake는 ECC_WorldStatic 의존이라 콜리전 등록 후). 새 맵 진입 공백은 **예약 헤드룸(진입 시드) + 백그라운드 silent recycle**(Kill 아님·NetCull밖·LOS없음·최근교전/미션/엘리트 보호·drain rate ≤10-15%/10s·local pressure floor)로 채움. 복제 = **NetCull 구현(§5 1순위 미구현 레버) → RepGraph 앞당김**(다중맵+분산이 connection별 relevancy를 필수화). **map-aware allocator = 적 예산 + 콘텐츠(미션/보스/엘리트/이벤트) 배분 공동**(디렉터 결정 2026-07-05: 그룹 버프 전면 폐기 → "뭉치면 효율"은 고가치 콘텐츠를 2인+ 그룹에 집중시켜야만 성립, allocator가 설계의 심장). **맵 잔존(언로드X·LOD컬)**: 픽업/문/상자는 dormant/HISM 경량 잔존(이관/소멸 로직 불요, 백트래킹 유혹 방지 위해 큰 성장은 미션/보스/상자), **적만** 빈 맵 하드 드레인(예산 회수). Tier 0(코어)/1(예산 게임필·콘텐츠 allocator)/2(텔레포터·은근한 비효율) 스코프·시작 수치 = 리포트.
 
 **다중맵 U 대전환 — 단일필드 재계산 예산 (설계 2026-07-07 `Docs/Review/20260707-plan-continuous-field-arch.md` · 구현 완료·main 머지 `34b5eea`)**: 위 per-map 레지스트리 → **U(고정 3×3 단일 flow 그리드)**로 피벗(구조 `Architecture.md §4-1`, allocator FrontId=`RunFlow.md §2-1`). **재계산 예산**: 단일 그리드 셀수 = (3·슬롯셀/축)². **D1 확정 슬롯 100~132m/변** → 200cm 셀 기준 **100m=22,500셀 / 132m=39,204셀**(단일 30m맵 2,025셀의 **11~19배 BFS**). 문 열림마다 이 크기의 단일 `RunBFS`(+generation bump). **P-0 합성 벤치**(worldless ≈39k셀 `RecomputeField` 타이밍)로 콘텐츠 전 조기 반증 완료 → **프로덕션 near-cap/실맵 재계산 ms 정량은 실콘텐츠 perf 패스로 이월**(§5 적500 정량과 함께). 셀상한 게이트 = `MaxTotalCells=40000`·`MaxGridDimPerAxis=256`(코드 상수 `FPSRFlowFieldComputer.h`) **fail-fast 잠금**(오늘은 초과 시 조용히 CellSize coarsen=품질↓ → U는 콘텐츠 계약으로 차단). **NetCull(P-H 구현 2026-07-10)**: 죽은 offset contract 제거 → **Option A 교전/무기사거리 버블**(footprint 상한, 멀티슬롯 균일 `R=max(WeaponRange, min(WeaponRange+seam, SlotDiag+seam))`; 단일맵=ctor 200m). ⚠️**적대게이트 확증**: NetCull은 대칭 거리컬이라 "seam-only 복제"는 수학적 불가(자기슬롯 완전커버 R≥슬롯대각 ⟺ 그 R이 이웃 슬롯 통째 bleed) → 순수 NetCull은 교전버블+무기사거리 floor까지가 한계. **RepGraph(spatial grid relevancy) = 프로덕션 해법·별도 페이즈**(per-acquire NetCull 반경 적 재-bucket 핸드오프); 클라 far-slot/seam pop-in = 수용된 Tier-0 한계(서버 추격은 심리스, 클라 시각 이슈지 로직버그 아님). **World Partition Data Layer=미채택**(스트리밍/가시성 직교, per-enemy relevancy·flow 도구 아님).
 
