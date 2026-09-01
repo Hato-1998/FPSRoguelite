@@ -17,6 +17,7 @@
 - [G. 검증 방법 자체의 함정](#g-검증-방법-자체의-함정)
 - [H. 로컬라이제이션 · 파이프라인 스크립트](#h-로컬라이제이션--파이프라인-스크립트)
 - [I. 전투 · 콜리전](#i-전투--콜리전)
+- [J. 이동 · 무브먼트](#j-이동--무브먼트)
 
 ---
 
@@ -672,3 +673,42 @@ EC ② 판정처럼 **네임스페이스별 엔트리 수를 세는 검사**는 
 "C++ 상속"과 "BP 오버라이드"를 **구분할 수 없다** — 둘 다 Custom 으로 나온다.
 → 판정은 **오브젝트 타입 값을 직접 읽어서**: 재빌드·재기동 후 CDO와 배치 인스턴스 양쪽에서
 `get_collision_object_type()` 이 새 채널 값인지 확인한다(수정 전 값을 미리 재 둔 것이 대조군).
+
+---
+
+## J. 이동 · 무브먼트
+
+### J1. 슬라이드가 2층 가장자리에서 **딱 멈춘다** (속도 0, 안 떨어짐) (2026-09-01)
+**증상**: 2층 덱 가장자리로 슬라이드해 들어가면 낙하하지 않고 모서리에 **박혀 선다.** 속도 0.
+비스듬히 들어가면 대신 가장자리를 따라 옆으로 미끄러진다. 크라우치를 놓으면 그제야 떨어진다.
+
+**콜리전을 의심하지 말 것 — 난간도 소품도 아니다.** 멈추는 지점이 정확히 **걸을 수 있는 바닥의 끝**이다.
+
+**원인**: 엔진 기본값 `bCanWalkOffLedgesWhenCrouching = false`
+(`CharacterMovementComponent.cpp:753`). 슬라이드는 ADR 0001 축1에 따라 `MOVE_Walking` 에 머물며
+`bWantsToCrouch` 로 진입하므로 **슬라이드 내내 `IsCrouching()` 이 참**이고, 그게 곧 엔진이 낭떠러지 이탈을
+거부하는 조건이다. 그 뒤 5단계가 자동으로 이어진다:
+
+| # | 엔진 지점 | 무슨 일 |
+|---|---|---|
+| 1 | `CanWalkOffLedges()` cpp:5303 | `!bCanWalkOffLedgesWhenCrouching && IsCrouching()` → **false** |
+| 2 | `PhysWalking` cpp:5679 | `bCheckLedges = true` → 가장자리 분기 진입 |
+| 3 | `GetLedgeMove()` | 옆으로 빠지는 대체 이동. **수직 진입이면 ZeroVector**(비스듬하면 성공 → 옆 미끄러짐) |
+| 4 | `CheckFall()` cpp:5313 | 내부에서 `CanWalkOffLedges()` 를 **다시** 물어봄 → false → **낙하 시작 안 함** |
+| 5 | `RevertMove(bFailMove=true)` | `Velocity = 0; Acceleration = 0` — 여기가 "속도 0" |
+
+그 다음 프레임에 `ComputeSlideHeading()` 이 정규화할 방향을 잃어(`Velocity.GetSafeNormal2D()` = 0)
+ZeroVector 를 반환하고, 속도 블록이 통째로 건너뛰어져 **커브도 속도를 되살리지 못한다** → `bTooSlow` →
+`StopSliding()`. 크라우치를 쥔 채면 계속 앉은 상태라 그 뒤로도 못 걸어나간다.
+
+**해결**: `UFPSRCharacterMovementComponent` 생성자에서 `bCanWalkOffLedgesWhenCrouching = true`.
+시뮬레이션 상태가 아니라 CDO 설정 플래그라 예측·복제 표면이 없다.
+
+⚠️ **엔진 기본값을 "안전한 쪽"으로 믿지 말 것.** 이 기본값은 **잠입 게임의 앉기**를 전제한다("실수로
+떨어지면 안 됨"). 앉기가 슬라이드 진입 수단인 게임에서는 전제가 반대다. 같은 함정이 `AirControl`(0.05)·
+`MaxAcceleration` 에도 있었고 셋 다 같은 생성자에서 덮고 있다.
+
+⚠️ **정황 증거를 반대로 읽기 쉬운 사례.** `UpdateCharacterStateBeforeMovement` 의 기존 주석은 이미
+"sliding off a ledge" 를 다루고 있었다 — 코드가 그 경로를 **전제**하고 있었기 때문에, 주석만 보면
+"이미 처리됨"으로 읽힌다. 실제로는 `PhysWalking` 이 그 위에서 막아 **한 번도 도달한 적이 없는 경로**였다.
+주석이 다루는 것과 런타임이 도달하는 것은 다르다.

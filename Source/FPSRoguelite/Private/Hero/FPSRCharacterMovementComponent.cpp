@@ -71,6 +71,21 @@ UFPSRCharacterMovementComponent::UFPSRCharacterMovementComponent()
 	// ride on it without a custom flag — but it only works if crouching is actually enabled on the component.
 	NavAgentProps.bCanCrouch = true;
 
+	// Engine default is FALSE, and leaving it there caught every slide on every ledge (velocity 0, dead stop).
+	// The slide lives in MOVE_Walking on bWantsToCrouch (ADR 0001 axis 1), so IsCrouching() is true for its whole
+	// length — which is precisely what the engine's CanWalkOffLedges() refuses on (engine cpp:5303). PhysWalking then
+	// takes its ledge branch (engine cpp:5679): the sideways GetLedgeMove is zero for a square-on approach, CheckFall
+	// asks CanWalkOffLedges() again and so never starts the fall, and RevertMove(bFailMove=true) zeroes Velocity AND
+	// Acceleration. The next frame ComputeSlideHeading has no direction left to normalize, so the curve cannot restore
+	// the speed either, and the player is left parked on the lip for as long as crouch is held.
+	// The default's premise is a stealth game's crouch — "don't let the player fall while sneaking". Here crouch IS the
+	// slide entry, so that premise does not hold; standing already walks off ledges, so this also removes a
+	// stand/crouch inconsistency rather than introducing one.
+	// A CDO config flag, not simulation state: both machines hold the same value and every replayed move reads it
+	// identically, so it costs no compressed flag, no SavedMove field and nothing per frame. Overridable per-hero in
+	// the Blueprint — the engine already marks it EditAnywhere.
+	bCanWalkOffLedgesWhenCrouching = true;
+
 	// The engine default of 0.05 leaves essentially no air steering, which doesn't fit a design where the player
 	// jumps out of slides, fights mid-air and lands into cover. Overridable per-hero in the Blueprint.
 	AirControl = 0.4f;
