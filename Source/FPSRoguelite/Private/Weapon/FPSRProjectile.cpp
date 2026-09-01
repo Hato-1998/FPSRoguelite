@@ -216,11 +216,12 @@ void AFPSRProjectile::OnSphereHit(UPrimitiveComponent* HitComp, AActor* OtherAct
 		bool bKill = false;
 		bool bWasEnemy = false;
 		bool bDamaged = false;
-		if (TryDamageActor(OtherActor, 1.0f, bCrit, bKill, bWasEnemy, bDamaged) && bDamaged)
+		bool bShieldBroke = false;
+		if (TryDamageActor(OtherActor, 1.0f, bCrit, bKill, bWasEnemy, bDamaged, bShieldBroke) && bDamaged)
 		{
 			// Weakpoints never live on geometry, so bWeak is always false here; a destructible is not an enemy
 			// (bCountsAsKill false) so this resolves to a plain Hit marker, matching the other damage paths.
-			NotifyInstigatorHitMarker(bCrit && bWasEnemy, false, bKill);
+			NotifyInstigatorHitMarker(bCrit && bWasEnemy, false, bKill, bShieldBroke && bWasEnemy);
 		}
 	}
 
@@ -272,12 +273,13 @@ void AFPSRProjectile::OnSphereOverlap(UPrimitiveComponent* OverlappedComp, AActo
 	bool bKill = false;
 	bool bWasEnemy = false;
 	bool bDamaged = false;
+	bool bShieldBroke = false;
 	// Marker fires on any REAL damage to a destructible (enemy OR door) — a corpse re-hit (bDamaged false) is inert,
 	// and a friendly player raises no marker (the player damage branch leaves DamageDealt 0 -> bDamaged false). The hit
-	// is still consumed below (pierce decrements unconditionally). Kill/Crit/Weak upgrades are enemy-only (door = Hit).
-	if (TryDamageActor(OtherActor, WeakpointMult, bCrit, bKill, bWasEnemy, bDamaged) && bDamaged)
+	// is still consumed below (pierce decrements unconditionally). Kill/Crit/Weak/ShieldBreak upgrades are enemy-only (door = Hit).
+	if (TryDamageActor(OtherActor, WeakpointMult, bCrit, bKill, bWasEnemy, bDamaged, bShieldBroke) && bDamaged)
 	{
-		NotifyInstigatorHitMarker(bCrit && bWasEnemy, (WeakpointMult > 1.0f) && bWasEnemy, bKill);
+		NotifyInstigatorHitMarker(bCrit && bWasEnemy, (WeakpointMult > 1.0f) && bWasEnemy, bKill, bShieldBroke && bWasEnemy);
 	}
 	if (bWasEnemy && bDamaged)
 	{
@@ -324,7 +326,7 @@ void AFPSRProjectile::HandleImpact(const FVector& ImpactPoint)
 				const FPSRCombat::FExplosionResult Outcome = FPSRCombat::ApplyExplosion(
 					World, ImpactPoint, Params.ExplosionRadius, Params.Damage,
 					Params.CritChance, Params.CritMultiplier, Params.InstigatorActor,
-					/*bAllowSelf*/ Params.bSelfDamage, Params.KnockbackStrength);
+					/*bAllowSelf*/ Params.bSelfDamage, Params.KnockbackStrength, Params.DamageSpec);
 
 				// OnKill trigger (server): fire once per enemy this blast freshly killed (bazooka reload-on-kill etc.).
 				// Rebuild the FireContext from spawn params; the weak weapon ref no-ops the bridge if the weapon is gone.
@@ -367,7 +369,8 @@ void AFPSRProjectile::HandleImpact(const FVector& ImpactPoint)
 					bool bKill = false;
 					bool bWasEnemy = false;
 					bool bDamaged = false;
-					if (Target && !Damaged.Contains(Target) && TryDamageActor(Target, 1.0f, bCrit, bKill, bWasEnemy, bDamaged))
+					bool bShieldBroke = false;
+					if (Target && !Damaged.Contains(Target) && TryDamageActor(Target, 1.0f, bCrit, bKill, bWasEnemy, bDamaged, bShieldBroke))
 					{
 						Damaged.Add(Target);
 					}
@@ -417,12 +420,13 @@ bool AFPSRProjectile::IsHostileTarget(AActor* Target) const
 	return false;
 }
 
-bool AFPSRProjectile::TryDamageActor(AActor* Target, float WeakpointMultiplier, bool& bOutCrit, bool& bOutKill, bool& bOutWasEnemy, bool& bOutDamaged)
+bool AFPSRProjectile::TryDamageActor(AActor* Target, float WeakpointMultiplier, bool& bOutCrit, bool& bOutKill, bool& bOutWasEnemy, bool& bOutDamaged, bool& bOutShieldBroke)
 {
 	bOutCrit = false;
 	bOutKill = false;
 	bOutWasEnemy = false;
 	bOutDamaged = false;
+	bOutShieldBroke = false;
 	if (!HasAuthority() || !IsHostileTarget(Target))
 	{
 		return false;
@@ -460,10 +464,11 @@ bool AFPSRProjectile::TryDamageActor(AActor* Target, float WeakpointMultiplier, 
 		const float Resolved = FPSRCombat::ResolveDamage(Params.InstigatorActor, Target, FinalDamage, /*bAllowSelf*/ false, GetWorld(), &ImpactOrigin);
 		if (Resolved > 0.0f)
 		{
-			const FPSRCombat::FDamageResult Result = FPSRCombat::ApplyDamage(Target, Resolved, Params.InstigatorActor);
+			const FPSRCombat::FDamageResult Result = FPSRCombat::ApplyDamage(Target, Resolved, Params.InstigatorActor, Params.DamageSpec);
 			bOutKill = Result.bKilled;
 			bOutWasEnemy = Result.bWasEnemy;
 			bOutDamaged = Result.DamageDealt > 0.0f; // real health removed (0 for a corpse re-hit) — gates the marker
+			bOutShieldBroke = Result.bShieldBroke; // VIT1 requirement 6
 			// OnKill trigger (server): this direct hit freshly killed an enemy (sniper etc.). Rebuild a minimal
 			// FireContext from spawn params — the weak weapon ref no-ops the bridge if the weapon is gone.
 			if (Result.bKilled)
@@ -496,7 +501,7 @@ bool AFPSRProjectile::TryDamageActor(AActor* Target, float WeakpointMultiplier, 
 	return false;
 }
 
-void AFPSRProjectile::NotifyInstigatorHitMarker(bool bCrit, bool bWeak, bool bKill) const
+void AFPSRProjectile::NotifyInstigatorHitMarker(bool bCrit, bool bWeak, bool bKill, bool bShieldBreak) const
 {
 	// Hit-markers belong to the firing player's HUD; enemy-team projectiles have no HUD owner.
 	if (!HasAuthority() || Params.Team != EFPSRProjectileTeam::Player || !Params.InstigatorActor)
@@ -507,9 +512,7 @@ void AFPSRProjectile::NotifyInstigatorHitMarker(bool bCrit, bool bWeak, bool bKi
 	AController* InstigatorController = InstigatorPawn ? InstigatorPawn->GetController() : nullptr;
 	if (AFPSRPlayerController* OwnerPC = Cast<AFPSRPlayerController>(InstigatorController))
 	{
-		const EFPSRHitMarkerType MarkerType = bKill ? EFPSRHitMarkerType::Kill
-			: (bWeak ? EFPSRHitMarkerType::Weak
-			: (bCrit ? EFPSRHitMarkerType::Crit : EFPSRHitMarkerType::Hit));
+		const EFPSRHitMarkerType MarkerType = FPSRCombat::ResolveHitMarker(bKill, bShieldBreak, bWeak, bCrit);
 		OwnerPC->ClientNotifyHitMarker(MarkerType);
 	}
 }

@@ -7,6 +7,7 @@
 #include "GameplayTagContainer.h"
 #include "Weapon/FPSRWeaponDataAsset.h"
 #include "Anim/FPSRGunMotionCurves.h"
+#include "Combat/FPSRVitals.h"
 #include "FPSRCharacter.generated.h"
 
 class UAbilitySystemComponent;
@@ -25,6 +26,7 @@ class UMaterialInterface;
 class UFPSRPlayerFeedbackComponent;
 class UFPSRReviveComponent;
 class UFPSRBlindspotAudioComponent;
+class UFPSRVitalsProfileDataAsset;
 struct FInputActionValue;
 struct FMinimalViewInfo;
 class UStaticMeshComponent;
@@ -116,8 +118,51 @@ public:
 	/** Owner-client: request a server-authoritative reload (used by auto-reload when the mag empties). */
 	void RequestReload();
 
-	/** Server: apply contact damage from an enemy to this character's Health (clamped via HealthSet). */
-	void ApplyContactDamage(float DamageAmount, AActor* DamageInstigator, FGameplayTag DamageType = FGameplayTag());
+	/** Server: apply contact damage from an enemy to this character's shield/Health (VIT1 two-layer pool, clamped
+	 *  via HealthSet). Returns this hit's actual vitals outcome.
+	 *  🔴 VIT1 signature change: the trailing `FGameplayTag DamageType` is replaced by `FFPSRDamageSpec` (adds the
+	 *  anti-shield multiplier); the return type changes from void to FPSRVitals::FResult. */
+	FPSRVitals::FResult ApplyContactDamage(float DamageAmount, AActor* DamageInstigator, const FFPSRDamageSpec& Spec = FFPSRDamageSpec());
+
+	/** Server: heal Health only (the shield refills itself — VIT1 requirement 4). The single entry point for map
+	 *  health pickups, healing cards, and revive. No-op while DBNO/Dead (revive sets Health through its own path
+	 *  instead). Clamped to MaxHealth. */
+	void ApplyHealing(float Amount, AActor* HealInstigator);
+
+	/** VIT1 §5-4-1: RAII scope a vitals-system writer (the regen driver / ApplyContactDamage / profile init / revive)
+	 *  holds while it is the one setting the Shield attribute itself. While active, UFPSRHealthSet::PostAttributeChange
+	 *  skips the anchor rebase below — the writer already set (or is about to set) the anchor explicitly, and rebasing
+	 *  on top of that would double-count the very change this scope exists to make invisible to the rebase path. */
+	struct FScopedVitalsWrite
+	{
+		explicit FScopedVitalsWrite(AFPSRCharacter& InCharacter)
+			: Character(InCharacter), bPreviousValue(InCharacter.bVitalsWriting)
+		{
+			Character.bVitalsWriting = true;
+		}
+		~FScopedVitalsWrite()
+		{
+			Character.bVitalsWriting = bPreviousValue;
+		}
+		FScopedVitalsWrite(const FScopedVitalsWrite&) = delete;
+		FScopedVitalsWrite& operator=(const FScopedVitalsWrite&) = delete;
+
+	private:
+		AFPSRCharacter& Character;
+		bool bPreviousValue;
+	};
+
+	/** VIT1 §5-4-1 — called by UFPSRHealthSet::PostAttributeChange whenever Shield changes OUTSIDE a
+	 *  FScopedVitalsWrite scope (a card GE, the MaxShield-linked auto-increase, a future "instant recharge" effect):
+	 *  applies the same delta to the regen anchor (clamped to [0, current MaxShield]) so the regen driver's next tick
+	 *  can't silently erase what just happened. No-op while a vitals-system write is in progress (that writer already
+	 *  owns the anchor). Server-only in practice (the caller already gates on ASC authority). */
+	void RebaseShieldAnchorOnExternalWrite(float Delta);
+
+	/** VIT1 §5-5 revive row: reset the shield pool AND its regen anchor to the fully-broken state (Shield 0, anchor
+	 *  "right now") — called by UFPSRReviveComponent::PerformRevive right after it sets Health, so a revived player
+	 *  comes back with no shield (the longer broken-regen delay then covers most of the post-revive invuln window). */
+	void ResetShieldToBroken();
 
 	/** Push the card/meta move-speed multiplier layer into the movement component. Called by UFPSRCombatSet when
 	 *  MoveSpeedMultiplier changes (server + client). The resulting MaxWalkSpeed is composed there, not here. */
@@ -491,6 +536,13 @@ protected:
 
 	void InitAbilitySystem();
 
+	/** VIT1 §5-5/§8: bake VitalsProfile into the attribute set's initial values (Max/current Health and Shield) and
+	 *  this character's own regen-driver members, then anchor the regen clock at "just topped up". Called from
+	 *  InitAbilitySystem right after InitAbilityActorInfo, server-only (attribute writes must originate on the
+	 *  authority) — covers the initial spawn AND every respawn/run-reset possession (§8: "리스폰/런 리셋 시 재적용").
+	 *  VitalsProfile null = current no-shield behavior (MaxShield/Shield stay at the attribute set's own defaults). */
+	void ApplyVitalsProfile();
+
 	/** Server-authoritative run-start seam (U10): meta-progression stat effects are applied here, right after the ASC
 	 *  actor info is initialized. Empty at U10 — the real GameplayEffects land in P0-③. Server-authoritative because
 	 *  GAS attributes must be applied on the authority and replicate down; this does NOT commit to where the per-player
@@ -811,6 +863,39 @@ protected:
 	 *  Prevents a swarm from melting the player in one frame. Balance-tunable. */
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Combat")
 	float DamageInvulnerabilityDuration = 0.25f;
+
+	/** VIT1: this character's vitals spec (max health/shield + the three shield-regen values). One shared profile
+	 *  for now (user decision 2026-09-01 — a single hero, all per-player variance comes from cards); the same
+	 *  DataAsset type the swarm uses, so authoring UI + IsDataValid are shared. Null = current no-shield behavior. */
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Vitals")
+	TObjectPtr<UFPSRVitalsProfileDataAsset> VitalsProfile;
+
+	/** Server-only shield regen state — the SAME two values as UFPSREnemyHealthComponent's (one shared formula,
+	 *  FPSRVitals::ComputeRegeneratedShield). ShieldAtLastDamage 0 means "that hit broke it" (the longer delay
+	 *  applies); LastDamageCombatTime is read against AFPSRGameState::GetCombatClockSeconds() (§5-6), never
+	 *  World->GetTimeSeconds(), so a card-selection freeze can't give every player's shield a free charge. */
+	float ShieldAtLastDamage = 0.0f;
+	float LastDamageCombatTime = -1.0e9f;
+
+	/** Server-only: seconds accumulated toward the next regen-driver tick (Tick throttles to ShieldRegenUpdateHz). */
+	float ShieldRegenDriverAccum = 0.0f;
+
+	/** Server-only regen spec baked from VitalsProfile by ApplyVitalsProfile (VIT1 §5-5) — the SAME three values
+	 *  UFPSREnemyHealthComponent bakes from its own resolved spec, read by the identical FPSRVitals::
+	 *  ComputeRegeneratedShield formula in Tick's regen driver. */
+	float ShieldRegenPerSecond = 0.0f;
+	float ShieldRegenDelaySeconds = 3.0f;
+	float ShieldBrokenRegenDelaySeconds = 6.0f;
+
+	/** VIT1 §5-4-1 guard: true while a vitals-system writer (Tick's regen driver / ApplyContactDamage / profile init
+	 *  / revive) is itself setting the Shield attribute — see FScopedVitalsWrite. Server-only in effect (nothing
+	 *  reads it on a client). */
+	bool bVitalsWriting = false;
+
+	/** Server regen-driver update rate (VIT1 §5-5) — the player needs a periodically-refreshed HUD bar, unlike the
+	 *  tickless enemy (which only recomputes on a hit). At most 4 players, so even the max rate is cheap. */
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Vitals", meta = (ClampMin = "1.0", ClampMax = "60.0"))
+	float ShieldRegenUpdateHz = 10.0f;
 
 	/** Seconds of grace (invulnerable + enemy pass-through) granted when the card-selection freeze ENDS, so a player
 	 *  who unfreezes surrounded by the swarm isn't hit the instant the world resumes (U9 §2-13). Balance value; 0 disables. */

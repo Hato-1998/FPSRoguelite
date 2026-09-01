@@ -6,6 +6,8 @@
 #include "CollisionQueryParams.h"
 #include "Engine/HitResult.h"
 #include "GameplayTagContainer.h"
+#include "Combat/FPSRVitals.h"
+#include "Hero/FPSRFeedbackTypes.h"
 
 class AActor;
 class UWorld;
@@ -32,13 +34,19 @@ namespace FPSRCombat
 	 *   - bKilled   : this hit transitioned the enemy ALIVE -> DEAD (bJustKilled). A corpse re-hit reports false,
 	 *                 so kill-markers / knockback-exclusion / kill aggregates never double-fire on a corpse.
 	 *   - DamageDealt: actual health removed (clamped; 0 on a corpse re-hit, and the overkill excess is excluded).
-	 *                 Drives hit-markers, the DealtDamage GAS event, and lifesteal — the "real damage" axis. */
+	 *                 Drives hit-markers, the DealtDamage GAS event, and lifesteal — the "real damage" axis.
+	 *                 🔴 VIT1 redefinition — this is now `ShieldSpent + HealthSpent` (FPSRVitals::FResult::TotalSpent),
+	 *                 not `HealthBefore - HealthAfter`: a hit a shield fully absorbs still counts as real damage
+	 *                 (hit-markers / lifesteal / penetration checks must not go silent just because health didn't move).
+	 *   - bShieldBroke: this hit took the target's shield from >0 to 0 (VIT1 requirement 6 — propagates to the
+	 *                 attacker's hit-marker and, via replication, to the target's own cosmetics). */
 	struct FDamageResult
 	{
 		bool bApplied = false;
 		bool bKilled = false;
 		bool bWasEnemy = false;
 		float DamageDealt = 0.0f;
+		bool bShieldBroke = false;
 	};
 
 	/** Enemies an explosion freshly killed (alive->dead this blast). Inline-sized (<=8) to avoid a heap alloc on the
@@ -95,12 +103,22 @@ namespace FPSRCombat
 		bool bAllowSelf, const UWorld* World, const FVector* OriginOverride = nullptr);
 
 	/** Bridge FinalDamage to the receiver that matches Target's kind (enemy health component vs player GAS) and
-	 *  report what happened. No-op (bApplied=false) for FinalDamage <= 0 or an unrecognized target. */
-	FPSROGUELITE_API FDamageResult ApplyDamage(AActor* Target, float FinalDamage, AActor* Instigator, FGameplayTag DamageType = FGameplayTag());
+	 *  report what happened. No-op (bApplied=false) for FinalDamage <= 0 or an unrecognized target.
+	 *  🔴 VIT1 signature change: the trailing `FGameplayTag DamageType` U18a added is replaced by `FFPSRDamageSpec`
+	 *  (adds the anti-shield multiplier alongside the damage type) — the default value preserves every existing
+	 *  call site's behavior (empty DamageType = Physical, ShieldDamageMultiplier = 1.0). */
+	FPSROGUELITE_API FDamageResult ApplyDamage(AActor* Target, float FinalDamage, AActor* Instigator, const FFPSRDamageSpec& Spec = FFPSRDamageSpec());
 
 	/** Server: notify the instigating player's controller of a hit-marker (one strongest-outcome pulse). No-op for
-	 *  a non-player instigator. Mirrors the per-path aggregation: Kill > Crit > Hit (Game.MD §2-14). */
-	FPSROGUELITE_API void NotifyHitMarker(const AActor* Instigator, bool bCrit, bool bKill);
+	 *  a non-player instigator. Mirrors the per-path aggregation, now via ResolveHitMarker: Kill > ShieldBreak > Crit
+	 *  > Hit (Game.MD §2-14; no bWeak here — an explosion has no single targeted weakpoint). */
+	FPSROGUELITE_API void NotifyHitMarker(const AActor* Instigator, bool bCrit, bool bKill, bool bShieldBreak = false);
+
+	/** VIT1: the single owner of hit-marker PRIORITY, shared by all 5 damage paths (Hitscan / ChargeLaser / Melee /
+	 *  Projectile / NotifyHitMarker above) so adding ShieldBreak meant editing this once instead of the same 3-way
+	 *  ternary in 5 places (the exact "5-path scatter" CombatWeaponCard.md §2-3-5 warns about). Pure function.
+	 *  Priority: Kill > ShieldBreak > Weak > Crit > Hit. */
+	FPSROGUELITE_API EFPSRHitMarkerType ResolveHitMarker(bool bKill, bool bShieldBreak, bool bWeak, bool bCrit);
 
 	/** Radial explosion: overlap every damageable pawn in range, apply ResolveDamage/ApplyDamage with a per-target
 	 *  crit roll, fire ONE hit-marker if any enemy was hit, and apply knockback (independent of damage — see below).
@@ -110,7 +128,7 @@ namespace FPSRCombat
 	 *  falling off linearly to the rim. Applied EVEN when damage is 0 (FF-off friendly / self-no-damage) — only the
 	 *  freshly killed are excluded. Player knockback launches the character (rocket jump / ally launch). */
 	FPSROGUELITE_API FExplosionResult ApplyExplosion(UWorld* World, const FVector& Center, float Radius, float Damage,
-		float CritChance, float CritMultiplier, AActor* Instigator, bool bAllowSelf, float KnockbackStrength, FGameplayTag DamageType = FGameplayTag());
+		float CritChance, float CritMultiplier, AActor* Instigator, bool bAllowSelf, float KnockbackStrength, const FFPSRDamageSpec& Spec = FFPSRDamageSpec());
 
 	/** Dispatch a knockback velocity to Target: players -> additive LaunchCharacter (preserves jump for rocket
 	 *  jumping); swarm enemies -> AFPSREnemyBase decaying-velocity knockback (integrated by their movement tick). */

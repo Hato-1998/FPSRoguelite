@@ -252,6 +252,12 @@ void UFPSRGA_WeaponFire_Projectile::ActivateAbility(
 					Params.InstigatorActor = Avatar;
 					// Server-only weak back-ref so the projectile can fire the OnKill behavior hook at damage time (U18c).
 					Params.WeaponInstance = Instance;
+					// VIT1 §5-9 ④: baked at LAUNCH time from the SAME ResolvedStats already read above (Stats is
+					// re-derived per-Round/Pellet loop iteration below only via this outer Stats pointer, which is
+					// stable for the whole activation) — never re-read at impact, for the identical reason
+					// Pierce/GravityScale already travel this way: the weapon may be swapped or the stat re-resolved
+					// (a card eaten) before this projectile lands, seconds later.
+					Params.DamageSpec.ShieldDamageMultiplier = Stats ? Stats->ShieldDamageMultiplier : 1.0f;
 					// Per-activation OnMiss parity: only a single-projectile activation may fire the projectile miss hook
 					// (a multishot volley releases asynchronously and would otherwise refund per-projectile / on partial hits).
 					Params.bSingleProjectileActivation = (TotalProjectiles == 1);

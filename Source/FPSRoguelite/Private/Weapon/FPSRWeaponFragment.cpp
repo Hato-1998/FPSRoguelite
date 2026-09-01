@@ -67,8 +67,13 @@ void UFPSRFragment_ExplosiveRounds::OnImpact(const FFPSRFireContext& Context, co
 		return;
 	}
 
+	// VIT1 §5-9 ③ "Fragment 폭발" row: built here from Context.Instance's ALREADY-RESOLVED stats — no new lookup.
+	// DamageType stays empty (Physical); this splash inherits the host weapon's own anti-shield multiplier.
+	FFPSRDamageSpec DamageSpec;
+	DamageSpec.ShieldDamageMultiplier = Context.Instance ? Context.Instance->GetResolvedStats().ShieldDamageMultiplier : 1.0f;
+
 	const FPSRCombat::FExplosionResult Outcome = FPSRCombat::ApplyExplosion(Context.World, ImpactPoint, AOERadius, AOEDamage,
-		/*CritChance*/ 0.0f, /*CritMultiplier*/ 1.0f, Context.Avatar, bAllowSelf, KnockbackStrength);
+		/*CritChance*/ 0.0f, /*CritMultiplier*/ 1.0f, Context.Avatar, bAllowSelf, KnockbackStrength, DamageSpec);
 
 	// Report a connecting splash so the firing ability doesn't count this activation as a miss (the ExplosiveRounds +
 	// AmmoOnMiss combo must not refund ammo when the wall-splash actually hit an enemy).

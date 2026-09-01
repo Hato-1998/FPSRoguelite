@@ -253,10 +253,16 @@ void UFPSRGA_WeaponFire_ChargeLaser::FireBeam(float BeamDamage, bool bIsPayoffSh
 	bool bServerCrit = false;
 	bool bServerWeak = false;
 	bool bServerKill = false;
+	bool bServerShieldBroke = false;
 	bool bServerAnyDamage = false; // visual marker: enemies AND destructible doors (friendly players leave DamageDealt 0)
 
 	UFPSRWeaponInstance* Instance = CachedInstance.Get();
 	const TArray<TObjectPtr<UFPSRWeaponFragment>>* Fragments = Instance ? &Instance->GetActiveFragments() : nullptr;
+
+	// VIT1 §5-9 ③: built here (the single bridge call site below serves BOTH warm-up ticks and the payoff shot, per
+	// G1 2nd-pass real-code confirmation) from the SAME already-fetched Instance — no new lookup.
+	FFPSRDamageSpec DamageSpec;
+	DamageSpec.ShieldDamageMultiplier = Instance ? Instance->GetResolvedStats().ShieldDamageMultiplier : 1.0f;
 
 	// Apply beam damage to one target (server-authoritative); shared across all pierced targets. The beam pierces
 	// everything, so a friendly while FF is off simply resolves to 0 and the beam continues.
@@ -290,7 +296,7 @@ void UFPSRGA_WeaponFire_ChargeLaser::FireBeam(float BeamDamage, bool bIsPayoffSh
 		{
 			return;
 		}
-		const FPSRCombat::FDamageResult Result = FPSRCombat::ApplyDamage(HitActor, Resolved, Avatar);
+		const FPSRCombat::FDamageResult Result = FPSRCombat::ApplyDamage(HitActor, Resolved, Avatar, DamageSpec);
 		if (Result.DamageDealt > 0.0f)
 		{
 			bServerAnyDamage = true; // visual marker for enemies AND destructible doors (not friendly players)
@@ -301,6 +307,7 @@ void UFPSRGA_WeaponFire_ChargeLaser::FireBeam(float BeamDamage, bool bIsPayoffSh
 				if (Result.bKilled) { bServerKill = true; if (bIsPayoffShot) { FPSRWeaponHooks::NotifyKill(CachedFireCtx, HitActor); } }
 				else if (WeakpointMult > 1.0f) { bServerWeak = true; }
 				else if (bCrit) { bServerCrit = true; }
+				bServerShieldBroke |= Result.bShieldBroke; // VIT1 requirement 6 — a warm-up tick can break a shield too
 			}
 		}
 	};
@@ -361,14 +368,12 @@ void UFPSRGA_WeaponFire_ChargeLaser::FireBeam(float BeamDamage, bool bIsPayoffSh
 	// Hit-marker + post-fire hooks fire only on the payoff shot (warm-up ticks are silent to avoid marker/hook spam).
 	if (bIsPayoffShot)
 	{
-		// Fires on ANY damage dealt (door-only beam => plain Hit, since Kill/Weak/Crit are enemy-only above).
+		// Fires on ANY damage dealt (door-only beam => plain Hit, since Kill/ShieldBreak/Weak/Crit are enemy-only above).
 		if (bServerAnyDamage)
 		{
 			if (AFPSRPlayerController* OwnerPC = Cast<AFPSRPlayerController>(Controller))
 			{
-				const EFPSRHitMarkerType MarkerType = bServerKill ? EFPSRHitMarkerType::Kill
-					: (bServerWeak ? EFPSRHitMarkerType::Weak
-					: (bServerCrit ? EFPSRHitMarkerType::Crit : EFPSRHitMarkerType::Hit));
+				const EFPSRHitMarkerType MarkerType = FPSRCombat::ResolveHitMarker(bServerKill, bServerShieldBroke, bServerWeak, bServerCrit);
 				OwnerPC->ClientNotifyHitMarker(MarkerType);
 			}
 		}

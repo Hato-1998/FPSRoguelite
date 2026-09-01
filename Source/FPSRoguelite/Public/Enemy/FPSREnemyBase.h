@@ -20,6 +20,7 @@ class APlayerController;
 class UFPSREnemyAnimProfile;
 class UFPSRFlowFieldSubsystem;
 class AFPSRProjectile;
+class UFPSRVitalsProfileDataAsset;
 
 /** Per-pass batch context the spawn subsystem hands to each enemy's ServerTickAttack. The subsystem owns target
  *  selection (nearest ALIVE player) and the per-pass freeze gate (this is never called while run-paused); the enemy
@@ -222,6 +223,10 @@ public:
 	 *  WBPs can bind OnHealthChanged (client-fired via B12) and read GetHealth()/GetMaxHealth(). */
 	UFUNCTION(BlueprintPure, Category = "FPSR|Enemy")
 	UFPSREnemyHealthComponent* GetHealthComponent() const { return HealthComponent; }
+
+	/** VIT1: read-only accessor mirroring GetHealthComponent's shape — the spawn subsystem reads this archetype's
+	 *  survival spec (a different class, so the field itself stays EditDefaultsOnly/protected). */
+	const UFPSRVitalsProfileDataAsset* GetVitalsProfile() const { return VitalsProfile; }
 
 	/** The enemy's visual mesh — exposed read-only so the S4 readability metrics (UFPSREnemyMetricsSubsystem) can read
 	 *  this primitive's GetLastRenderTimeOnScreen(). The actor-level AActor::WasRecentlyRendered is NOT usable there:
@@ -503,6 +508,15 @@ protected:
 
 	UPROPERTY(VisibleAnywhere, Category = "FPSR|Enemy")
 	TObjectPtr<UFPSREnemyHealthComponent> HealthComponent;
+
+	/** VIT1: this archetype's survival spec (shared by every enemy of the same archetype — requirement 2). The spawn
+	 *  subsystem reads it (via GetVitalsProfile) right after Activate() to resolve profile x deck and bake the
+	 *  result into HealthComponent (InitializeVitals). Null = the current no-shield behavior (HealthComponent's own
+	 *  EditAnywhere MaxHealth default stays authoritative) — see VIT1 §11-1 for the migration to this field.
+	 *  ⚠️ [[cpp-uproperty-name-collides-with-bp]] — this is the ONLY new authoring field this unit adds to
+	 *  AFPSREnemyBase; FPSRoguelite.Enemy.BlueprintParent must still pass after adding it. */
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Enemy")
+	TObjectPtr<UFPSRVitalsProfileDataAsset> VitalsProfile;
 
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Enemy")
 	float MoveSpeed = 750.0f;

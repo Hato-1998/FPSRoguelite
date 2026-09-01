@@ -76,13 +76,18 @@ protected:
 
 	/** Try to apply (crit-rolled) damage to an actor. Server-only. Returns true if a damage path APPLIED (a receiver
 	 *  consumed the hit — drives pierce/release), and outputs whether the hit critted, killed, hit an ENEMY (a
-	 *  friendly-fire hit on another player must NOT raise the firing player's hit-marker), and whether REAL damage
-	 *  landed (bOutDamaged — a corpse re-hit applies but deals 0, so it gets no marker). */
-	bool TryDamageActor(AActor* Target, float WeakpointMultiplier, bool& bOutCrit, bool& bOutKill, bool& bOutWasEnemy, bool& bOutDamaged);
+	 *  friendly-fire hit on another player must NOT raise the firing player's hit-marker), whether REAL damage
+	 *  landed (bOutDamaged — a corpse re-hit applies but deals 0, so it gets no marker), and whether this hit broke
+	 *  the target's shield (bOutShieldBroke, VIT1 requirement 6 — 🔴 added beyond VIT1 §4's file list: without it,
+	 *  the projectile path can't report ShieldBreak to NotifyInstigatorHitMarker, the one thing every other damage
+	 *  path already gained via FPSRCombat::ResolveHitMarker's ShieldBreak tier — see the C2 report's judgment-call
+	 *  list). */
+	bool TryDamageActor(AActor* Target, float WeakpointMultiplier, bool& bOutCrit, bool& bOutKill, bool& bOutWasEnemy, bool& bOutDamaged, bool& bOutShieldBroke);
 
 	/** Server: notify the instigating player's controller of a hit-marker (Player-team projectiles only — enemy
-	 *  projectiles have no HUD owner). Strongest outcome wins: Kill > Weak > Crit > Hit (Game.MD §2-14). */
-	void NotifyInstigatorHitMarker(bool bCrit, bool bWeak, bool bKill) const;
+	 *  projectiles have no HUD owner). Strongest outcome resolved by the shared FPSRCombat::ResolveHitMarker:
+	 *  Kill > ShieldBreak > Weak > Crit > Hit (VIT1 §5-7 / Game.MD §2-14). */
+	void NotifyInstigatorHitMarker(bool bCrit, bool bWeak, bool bKill, bool bShieldBreak = false) const;
 
 	/** Release this projectile back to the pool. */
 	void ReleaseToPool();

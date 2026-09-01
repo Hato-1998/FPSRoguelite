@@ -114,7 +114,11 @@ float AFPSRMission_CarryNoHit::GetPawnHealth(APawn* Pawn) const
 	{
 		if (UFPSRAbilitySystemComponent* ASC = PS->GetFPSRAbilitySystemComponent())
 		{
-			return ASC->GetNumericAttribute(UFPSRHealthSet::GetHealthAttribute());
+			// VIT1 §6 regression guard: "hit" now means any drop in shield+health COMBINED — a hit a shield fully
+			// absorbs is still a hit that landed and must still break the no-hit streak (OnMissionTickServer's
+			// `CurrentHealth < LastCarrierHealth` check below is otherwise blind to shield-only damage).
+			return ASC->GetNumericAttribute(UFPSRHealthSet::GetHealthAttribute())
+				+ ASC->GetNumericAttribute(UFPSRHealthSet::GetShieldAttribute());
 		}
 	}
 	return -1.0f;

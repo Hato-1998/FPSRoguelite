@@ -274,6 +274,9 @@ void UFPSRWeaponInstance::RecomputeResolved()
 		case EFPSRWeaponStat::ReloadTime:
 			CachedResolved.ReloadTime = FMath::Max(0.0f, (CachedResolved.ReloadTime + Add) * Mult);
 			break;
+		case EFPSRWeaponStat::ShieldDamageMultiplier:
+			CachedResolved.ShieldDamageMultiplier = FMath::Max(0.0f, (CachedResolved.ShieldDamageMultiplier + Add) * Mult);
+			break;
 		default:
 			break;
 		}

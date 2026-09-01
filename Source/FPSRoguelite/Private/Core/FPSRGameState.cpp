@@ -224,11 +224,45 @@ void AFPSRGameState::SetRunPaused(bool bPaused)
 	{
 		return;
 	}
+
+	// VIT1 §5-6: accumulate the frozen span right on this edge — SetRunPaused is already the single, edge-guarded
+	// pause<->unpause transition point, so the combat clock costs nothing per-frame (no Tick).
+	if (UWorld* World = GetWorld())
+	{
+		if (bPaused)
+		{
+			FreezeStartedAtWorldTime = World->GetTimeSeconds();
+		}
+		else
+		{
+			AccumulatedFrozenSeconds += World->GetTimeSeconds() - FreezeStartedAtWorldTime;
+		}
+	}
+
 	bRunPaused = bPaused;
 	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRGameState, bRunPaused, this);
 	OnRunStateChanged.Broadcast();
 
 	UE_LOG(LogFPSR, Log, TEXT("[Run] %s"), bPaused ? TEXT("FREEZE (card selection)") : TEXT("RESUME"));
+}
+
+float AFPSRGameState::GetCombatClockSeconds() const
+{
+	// Server-authoritative only — every vitals calculation that reads this (shield regen, both storages) runs on the
+	// server; a client has no use for it and gets a stable 0 instead of a half-maintained local mirror.
+	if (!HasAuthority())
+	{
+		return 0.0f;
+	}
+	const UWorld* World = GetWorld();
+	if (!World)
+	{
+		return 0.0f;
+	}
+	const float Now = World->GetTimeSeconds();
+	// Subtract every frozen span accumulated so far, plus (if a freeze is up RIGHT NOW) the still-open current one —
+	// so the clock reads the same whether queried mid-freeze or after it ends.
+	return Now - AccumulatedFrozenSeconds - (bRunPaused ? (Now - FreezeStartedAtWorldTime) : 0.0f);
 }
 
 void AFPSRGameState::EndRunFreeze()
