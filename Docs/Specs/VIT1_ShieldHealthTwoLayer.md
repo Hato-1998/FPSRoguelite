@@ -201,9 +201,15 @@ bLethal      = (Pool.Health <= 0)
 ```
 
 > ⚠️ `ShieldKeep` 의 `MinKeep` 하한은 **`ShieldDamageMultiplier == 0`(실드 무시) 일 때는 적용하지 않는다.** 하한의 목적은 "완화 중첩으로 무적이 되는 것"을 막는 것이지, 설계자가 의도적으로 연 우회로를 막는 게 아니다. 이 경우 데미지는 전량 체력으로 간다.
-> 🔴 **불변식 V1 (정밀 서술 — G1 P3-5 반영)**: `Incoming > 0` 이고 `Health > 0` 이면 `Result.HealthSpent > 0`. 즉 **체력이 남아 있는 대상은 어떤 데이터 조합으로도 무적이 될 수 없다.**
->   - 종전 서술(`TotalSpent() > 0`)은 `Health == 0 && Shield > 0` 에서 `SDM == 0` 이면 거짓이 된다(게임 상태로는 도달 불가 — 적은 `Health<=0` 에 죽고 플레이어는 DBNO 로 간다 — 이지만 불변식은 정확해야 한다). 위 형태가 참인 이유: `HealthKeep >= MinKeep > 0` 이고 `SDM == 0` 이면 `Overflow == Incoming`, `SDM > 0` 이면 실드가 유한하므로 `Consumed < 1` 이거나 `Shield` 가 남아 흡수를 마친다.
->   - **`MaxTotalReduction < 1.0` 이 이 불변식의 유일한 안전판**이다 → §5-2 에서 데이터로 강제한다(`ClampMax = 0.99` + `IsDataValid`).
+> 🔴 **불변식 V1 — "무적 불가". 이 명세에서 V1 의 정의는 여기 하나뿐이다**(§11-5 가 인용하는 것도 이것).
+>   **V1**: `Incoming > 0` 이고 `(Shield > 0 || Health > 0)` 이면 `Result.TotalSpent() > 0`.
+>   *유일한 예외* — `SDM == 0 && Health == 0 && Shield > 0`. 실드 무시 무기가 체력이 이미 0 인 대상을 때리는 경우이고, **게임 상태로 도달 불가**하다(적은 `Health <= 0` 에 `bDead` 로 조기 반환, 플레이어는 `IsIncapacitatedLocal()` 로 조기 반환).
+>   보조 형태(테스트가 실제로 거는 단언):
+>   - **V1a** `Incoming > 0 ∧ Shield > 0 ∧ SDM > 0` → `ShieldSpent > 0`
+>   - **V1b** `Incoming > 0 ∧ Health > 0 ∧ Overflow > 0` → `HealthSpent > 0`
+>   증명(경우 분해): `MaxTotalReduction ≤ 0.99` 이므로 `MinKeep ≥ 0.01 > 0`, 따라서 `HealthKeep > 0` 이고 `SDM > 0` 이면 `ShieldKeep > 0`. ⓐ`SDM > 0 ∧ Shield > 0` → `WantShield > 0` → `ShieldSpent > 0`. ⓑ`SDM > 0 ∧ Shield == 0` → `Consumed = 0` → `Overflow = Incoming` → `Health > 0` 이면 `HealthSpent > 0`. ⓒ`SDM == 0` → `WantShield = 0` → `Consumed = 0`(가드) → `Overflow = Incoming` → `Health > 0` 이면 `HealthSpent > 0`, `Health == 0` 이면 위 예외.
+>   - ⚠️ **`HealthSpent > 0` 을 무조건 보장한다고 쓰면 거짓이다** — 실드가 타격을 전량 흡수하는 것(`Shield 100 · Health 50 · Incoming 10` → `HealthSpent = 0`)은 **정상 거동이지 무적이 아니다**(`ShieldSpent = 10`). G1 2차가 잡은 오류.
+>   - **`MaxTotalReduction < 1.0` 이 V1 의 유일한 안전판**이다 → §5-2 에서 데이터로 강제한다(`ClampMax = 0.99` + `IsDataValid` 에러).
 > 🔴 **불변식 V2**: `MaxShield == 0` → `ShieldSpent == 0` 이고 `Overflow == Incoming` (실드 없는 개체는 현행 `Health = Clamp(Health - Damage, 0, MaxHealth)` 와 산술적으로 동일). **요구 1의 유일한 구현 수단.**
 > ⚠️ **불변식 V3 (청킹 중립 — 설계자가 알고 있어야 하는 성질)**: 재생이 개입하지 않는 구간에서 이 산술은 **분할에 중립**이다 — 같은 총 데미지를 한 방으로 넣든 나눠 넣든 총 체력 피해가 같다. 이월은 **낭비를 없앨 뿐 보너스를 주지 않는다.** 저격 메리트의 실제 원천은 `ShieldDamageMultiplier` 데이터축이다(§2 목표 5).
 
@@ -417,7 +423,10 @@ private:
 | 초기화 / 부활 | **ON** | 명시 세팅(§5-5) |
 | **그 밖 전부** — 카드 GE, `MaxShield` 연동 증가, 향후 "실드 즉시 충전" 효과 | OFF | `ShieldAtLastDamage = Clamp(ShieldAtLastDamage + Δ, 0, MaxShield)` — **시각은 안 건드린다** |
 
+> **권위**: 이 규칙은 **서버 전용**이다(규칙 1 의 "권위 전용 가드"와 같은 문구 — `ASC->IsOwnerActorAuthoritative()`). 복제된 어트리뷰트 변경은 클라 `PostAttributeChange` 도 발화하지만 클라 앵커는 아무도 읽지 않으므로 무해하다. 그래도 명시적으로 막아 진실을 하나로 둔다.
+> **가드의 소유 위치** = `AFPSRCharacter`(앵커 두 멤버가 사는 곳). `UFPSRHealthSet::PostAttributeChange` 가 소유 캐릭터를 얻어 질의한다 — 어트리뷰트 셋은 PlayerState ASC 에 살고 폰 교체를 견뎌야 하므로 상태를 들지 않는다.
 > **왜 시각을 안 건드리나**: 카드를 먹은 것은 피격이 아니다. 남은 재생 지연은 그대로 흘러야 한다.
+> ⚠️ **후속 저작 주의(G1 2차 P3-c)** — 이 규칙은 **실드를 늘리는** 델타를 전제한다. 나중에 **실드를 깎는** 효과(디버프·"실드 흡수" 적 등)를 만들면, 마지막 피격이 오래전일 때 앵커만 낮아지고 시각은 그대로라 **다음 드라이버 틱에 즉시 만충 복귀**한다. 그런 효과는 **시각도 함께 재기저**해야 한다(= 피격으로 취급). 이 유닛의 카드에는 하향 효과가 없어 지금은 무해하다.
 > **완파 판정과의 정합**: 파손 여부는 `ShieldAtLastDamage <= 0` 으로 읽는다. 완파(앵커 0) 상태에서 카드가 +50 을 주면 앵커가 50 이 되어 다음 재생이 **짧은 지연**을 쓴다 — "실드를 보충받았으니 완파가 아니다"로 읽히므로 의도된 거동이다.
 > **이 규칙이 GAS 를 살린다**: `Shield` 를 어트리뷰트로 둔 값어치가 "GE 가 만질 수 있다"인데, 재기저 없이는 그 GE 가 전부 무력화된다.
 
@@ -765,7 +774,7 @@ FMitigation.HealthDefense = Profile->ResolveDefense(DamageType).Health  ×  GetH
 
 ### 11-5. M4 방향성 아머 결합 — **규칙만 확정, 구현은 M4**
 `FMitigation::DirectionalArmorDR` 자리를 이 유닛이 만든다. M4 는 그 값을 채우기만 하면 된다.
-🔴 **결합 규칙(확정)**: 아머 DR 과 층 계수는 **곱해지되 `MaxTotalReduction`(기본 0.95)으로 클램프**되고, `Incoming > 0` 이면 `TotalSpent() > 0` 이 **항상** 보장된다(불변식 V1). "실드 계수 × 아머 DR = 무적"은 산술적으로 불가능하다.
+🔴 **결합 규칙(확정)**: 아머 DR 과 층 계수는 **곱해지되 `MaxTotalReduction`(기본 0.95, 저작 상한 0.99)으로 클램프**된다 → **불변식 V1**(정의는 §5-1 한 곳 — `Incoming > 0` 이고 살아 있는 대상이면 `TotalSpent() > 0`)이 성립한다. "실드 계수 × 아머 DR = 무적"은 산술적으로 불가능하다.
 
 ### 11-6. 갭 처리 규칙 (고정)
 C2(Sonnet 구현) 중 명세에 없는 판단이 필요해지면 **추측해서 채우지 말고 멈추고 "명세 갭"으로 보고**한다. 갭은 C1 으로 돌아가 Opus 가 명세를 고친 뒤 재개하며, **갭이 구조를 바꾸면 G1 을 다시 태운다**(§6-5-2).
@@ -779,7 +788,7 @@ C2(Sonnet 구현) 중 명세에 없는 판단이 필요해지면 **추측해서 
 | 1 | 명세 대조 | §5·§6·§7 의 선언·시그니처·복제 설정이 코드와 1:1 일치. **특히 `ApplyDamage` 산술 블록을 그대로 구현했는가** |
 | 2 | 빌드 | 로그의 **`Result: Succeeded`** 로 판정([[build-exit-code-lies-grep-result]]). **2회 돌린다** — ①헤더 신규 3개라 누락 검출용 `-DisableUnity`([[nonunity-build-is-67-seconds]]) ②머지 전 1회 `-DisableAdaptiveUnity -ForceUnity`(§6-6 — Adaptive Unity 가 방금 고친 파일을 블롭에서 빼므로 일반 초록은 유니티 동명충돌을 구조적으로 못 잡는다. 자동화 테스트를 추가하므로 **필수**). 빌드 전 에디터 종료([[ue-editor-file-locks-block-git]]), 라이브코딩 금지([[no-live-coding]]) |
 | 3 | 헤드리스 스모크 | `FPSRoguelite.Smoke.ModuleLoads` **+ `FPSRoguelite.Enemy.BlueprintParent`**(적 BP 에 UPROPERTY 를 추가하므로 — [[cpp-uproperty-name-collides-with-bp]]) |
-| 4 | 순수함수 단위 검증 | `FPSRVitals` 자동화 테스트 신규: ①`MaxShield=0` → 현행 `Clamp(Health-Dmg)` 와 산술 동일(**V2**) ②`MaxTotalReduction=0.99` + 아머 DR 1.0 + 계수 0 조합에서도 `Health>0` 이면 `HealthSpent>0`(**V1**) ③`ComputeRegeneratedShield` **멱등**(같은 인자 2회 = 같은 값) ④**청킹 중립**(**V3**): 실드 30·체력 100 에 `100×1` 과 `50×2` 의 총 체력피해가 **같다** — ⚠️ "큰 한 방이 유리"를 검사하는 게 아니다(그건 산술이 아니라 SDM 데이터가 만든다). 검사 의도 = 이월이 낭비를 만들지 않음 ⑤`SDM=0` → `ShieldSpent==0` 이고 전량 체력 ⑥`SDM=2` 로 같은 명목 데미지를 넣으면 실드 소진이 2배(§5-9 배선이 실제로 도달함을 순수함수 층에서 고정) |
+| 4 | 순수함수 단위 검증 | `FPSRVitals` 자동화 테스트 신규: ①`MaxShield=0` → 현행 `Clamp(Health-Dmg)` 와 산술 동일(**V2**) ②**V1** — `MaxTotalReduction=0.99` + 아머 DR 1.0 + 층 계수 0 의 최악 조합에서 **두 픽스처**로 건다: ⓐ`Shield>0` → `TotalSpent()>0`(**`HealthSpent>0` 을 걸면 안 된다** — 실드 전량 흡수는 정상이다) ⓑ`Shield==0 ∧ Health>0` → `HealthSpent>0`. ⓑ가 없으면 ⓐ만으로는 공허 통과가 가능하다 ③`ComputeRegeneratedShield` **멱등**(같은 인자 2회 = 같은 값) ④**청킹 중립**(**V3**): 실드 30·체력 100 에 `100×1` 과 `50×2` 의 총 체력피해가 **같다** — ⚠️ "큰 한 방이 유리"를 검사하는 게 아니다(그건 산술이 아니라 SDM 데이터가 만든다). 검사 의도 = 이월이 낭비를 만들지 않음 ⑤`SDM=0` → `ShieldSpent==0` 이고 전량 체력 ⑥`SDM=2` 로 같은 명목 데미지를 넣으면 실드 소진이 2배 — ⚠️ 이건 **산술만** 고정한다. 무기 저작값이 실제로 여기까지 도달하는지(§5-9 배선)는 순수함수 테스트로 증명할 수 없다(테스트가 Spec 을 직접 만들므로). **배선 검증 = §12-10 PIE 2번** |
 | 5 | 회귀 — 데미지 | 실드 없는 적(`MaxShield=0`)에 대해 `DamageDealt`·`bKilled`·히트마커·흡혈·관통이 **변화 0** |
 | 6 | 회귀 — 미션·디렉터·흡혈 | `FPSRMission_CarryNoHit` 가 실드만 깎인 피격도 스트릭을 끊는다 / `NotifyPlayerDamageTaken` 이 **실드 포함 총 피해**를 먹는다 / 🔴 **흡혈 이벤트가 플레이어 대상에는 여전히 안 나간다**(§6 · §11-7 — 파밍 루프 방지) |
 | 7 | 데이터 검증 | 프로파일 미할당 적 BP 를 **경고**로 리포트(이관 진척 추적용, 실패는 아님) + `UFPSRVitalsProfileDataAsset::IsDataValid` **5항목**(특히 `MaxTotalReduction >= 1.0` = 에러) |
@@ -824,7 +833,23 @@ C2(Sonnet 구현) 중 명세에 없는 판단이 필요해지면 **추측해서 
 
 **추가 발견 (G1 이 실측으로 확인해 준 것, 기각 아님)**: 이월 산술은 **청킹 중립**이다 — 초안이 "한 방이 클수록 유리"라 쓴 것은 부정확했다. 이월은 실드 게이트가 만드는 **페널티를 제거**할 뿐이고, 저격 메리트의 본체는 `ShieldDamageMultiplier` 데이터축이다. §2 목표 5 · §5-1 V3 · §12-4 ④ 를 그에 맞게 고쳤다.
 
-**미검증으로 남은 것(G1 자기 보고)**: Notion 보드 행 원문(프롬프트 요약만 근거) · `DA_Card_Character_Lifesteal` 에셋 내부값 · GAS `Mixed` 모드 어트리뷰트 복제 세부.
+**미검증으로 남은 것(G1 1차 자기 보고)**: Notion 보드 행 원문(프롬프트 요약만 근거) · `DA_Card_Character_Lifesteal` 에셋 내부값 · GAS `Mixed` 모드 어트리뷰트 복제 세부.
+
+#### 13-0-2. G1 2차 (2026-09-01, `4637cb14` 델타 재판정)
+
+**1차 지적 10건 폐쇄 = 전건 확인.** 재검토 요청 4지점도 **전부 실측 통과**:
+- **앵커 재기저가 닫힌다** — `Shield` 기록자 전수 = 드라이버·데미지·초기화(가드 ON) / 카드·GE·`MaxShield` 연동(가드 OFF), 그 밖의 기록자 코드에 없음(흡혈·힐팩·부활 체력은 전부 `Health` 기록자). `+MaxShield` 카드의 **재기저는 정확히 1회**(앵커가 어트리뷰트가 아닌 평범한 멤버라 재진입 연쇄 없음), 순서도 안전(연동 증가 시점에 `MaxShield` 가 이미 신값이라 클램프 상한이 옳다).
+- **완파 판정 `ShieldAtLastDamage <= 0` 성립** — 지연 클래스는 사이클 단위 성질이라 재생 중 현재 실드가 0 을 벗어나도 앵커 0 유지가 옳고, 질의 API(현재값)와 지연 클래스(앵커)는 용도가 달라 충돌 없음.
+- **§5-9 5경로 배선 누락 0** — 브릿지 외부 호출자 전수 grep 이 명세 표와 정확히 일치, 인용 줄번호 6개 전부 실측 일치. **차지레이저 warm-up**: 그 파일의 브릿지 호출이 단일 지점이라 warm-up 칩뎀과 payoff 를 Spec 구성 1곳이 함께 덮는다. **보스 폭발**은 브릿지 미경유 별도 팀-경로이고 적→플레이어 공격이라 SDM 기본값 1.0 이 옳다 — 미등재가 맞다.
+
+| 심각도 | 지적 | 처리 | 반영 |
+|---|---|---|---|
+| P2 | **개정이 새로 만든 결함** — 1차 P3-5 를 고치면서 V1 을 `HealthSpent > 0` 형태로 재서술했는데 **통상 실드 흡수에서 거짓**(`Shield 100·Health 50·Incoming 10` → `HealthSpent = 0`). "무적 불가"를 "체력 관통 보장"으로 바꿔치기. §11-5 는 구 형태를 유지해 **한 명세에 V1 이 둘**. §12-4 ② 는 실드 있는 픽스처면 적색·없으면 공허 통과 | **수용** | §5-1 V1 을 `TotalSpent()` 형태로 복원 + 보조형태 V1a/V1b + **경우분해 증명** + 도달불가 예외 1개 명시 · §12-4 ② 를 두 픽스처(ⓐ`TotalSpent>0` ⓑ`Shield==0` 에서 `HealthSpent>0`)로 · §11-5 를 §5-1 단일정의 참조로 |
+| P3-a | §12-4 ⑥ 이 "배선 도달을 순수함수 층에서 고정"한다고 주장 — 테스트가 Spec 을 직접 만들므로 증명 불가 | **수용** | 주장 삭제, 배선 검증은 §12-10 PIE 2 소관으로 명시 |
+| P3-b | §5-4-1 에 권위 가드 명시 없음 · `bVitalsWriting` 소유 위치 미지정 | **수용** | 서버 전용 명문화 + 가드 소유 = `AFPSRCharacter`(앵커가 사는 곳), 어트리뷰트 셋은 상태를 안 든다 |
+| P3-c | 향후 **실드를 깎는** 효과가 생기면 앵커만 낮아지고 시각은 그대로라 다음 틱에 즉시 만충 복귀 | **수용** | §5-4-1 후속 저작 주의 |
+
+**미검증(G1 2차 자기 보고)**: 보드 행 갱신 주장(보드 미조회 — 메인 세션이 `4637cb14` 이전에 실행·확인) · ChargeLaser/Melee 의 `GetResolvedStats` 확보 줄(브릿지 호출 줄은 실측, 스탯 조회 줄은 Hitscan 만 실측).
 
 ### 13-1. G2 레드팀 지적 원장 (C3 에서 채운다)
 
