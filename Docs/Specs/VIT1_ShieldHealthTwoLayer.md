@@ -8,7 +8,7 @@
 | 브랜치 | `phase/m1-shield-2layer` |
 | 작성 모델 | `claude-opus-5` (§6-5-2 개정 2026-08-26 — C1 설계 담당은 Opus, Fable은 G1/G2 게이트) |
 | 작성일 / 최종 갱신 | 2026-09-01 / 2026-09-01 |
-| 상태 | `초안` (G1 플랜게이트 대기) |
+| 상태 | `초안` — **G1 1차 반려 → 보강 완료, 재제출 대기** (원장 = §13-0) |
 | 관련 SSOT | `CombatWeaponCard.md` §2-3-1·§2-3-5·§2-3-7·§2-3-8·§2-3-9 · `Enemy.md` §2-6·§2-10 · `PlayerFeel.md` §2-13·§2-14 · `RunFlow.md` §2-2·§2-8 · `Architecture/0013`·`0014` |
 | 관련 메모리 | `[[reason-in-multiplayer-terms]]` `[[production-structure-first]]` `[[code-is-immutable-structure-only]]` `[[push-model-off-in-packaged-build]]` `[[cpp-uproperty-name-collides-with-bp]]` `[[extensibility-first-designer-tooling]]` `[[da-edits-are-user-work]]` `[[do-not-launch-game]]` |
 | 보드 행 | [실드/체력 2층 데미지 구조](https://app.notion.com/3be3972ddd88813bb054d5c8ac0a3ee2) — M1 · 미듐 · M |
@@ -23,7 +23,9 @@
 2. **실드가 없는 개체가 자연스럽게 표현된다** — `MaxShield = 0` 이면 전량이 체력으로 간다. 보스·구조물·"실드 포기" 카드를 쓴 플레이어가 전부 이 한 값으로 표현된다(분기 없음).
 3. **실드는 피해를 안 입은 뒤 일정 시간이 지나면 스스로 찬다.** 지연은 **부분 손상 / 완파** 두 단계다. 시계는 **전역 프리즈(§2-2) 동안 멈춘다.**
 4. **체력은 스스로 차지 않는다.** 회복 경로는 ①맵 힐팩 ②흡혈 카드 ③부활(50%) ④`MaxHealth` 증가분 즉시 회복(§2-13) 넷뿐이다.
-5. **한 방이 클수록 실드 상대로 유리하다** — 초과분 이월 + 무기별 대실드 계수. 저격/관통 무기의 구조적 메리트.
+5. **저격/관통 무기가 실드 상대로 손해를 보지 않고, 데이터로 유리해진다.** 두 기제가 **역할이 다르다**:
+   - **초과분 이월 = 페널티 제거(필수)**. 이월이 없으면 얇은 실드가 큰 한 방을 통째로 삼켜(실드 게이트) 저격이 구조적으로 **불리**해진다 — 요청과 정반대. ⚠️ **이월 산술 자체는 청킹-중립이다**(G1 지적): 실드 30·체력 100에 `100 한 방` = 체력 −70, `50 두 방` = 체력 −70. **즉 이월은 메리트를 만들지 않는다. 낭비를 없앨 뿐이다.**
+   - **무기별 대실드 계수(`ShieldDamageMultiplier`) = 메리트 본체**. 저격이 실드에 강한 것은 **저작된 데이터**이지 산술의 부산물이 아니다. 여기에 재생 지연(느린 무기가 재생 창을 준다)이 반대 방향으로 작용하므로, 최종 밸런스는 이 계수와 재생속도의 저작으로 잡는다.
 6. **실드 파손이 양쪽에 전달된다** — 공격자에게 히트마커, 적에게는 클라 코스메틱, 플레이어 본인에게는 위험 경고. **신규 복제 프로퍼티 0으로.**
 7. **수치가 전부 데이터다** — 방어계수·최대량·재생속도·재생지연·파손 여부를 다른 시스템(카드·상태이상·디렉터)이 읽고 쓸 수 있다.
 
@@ -72,16 +74,26 @@
 | `Public/Core/FPSRGameState.h` | 수정 | **프리즈-멈춤 전투 시계**(틱 0) |
 | `Private/Core/FPSRGameState.cpp` | 수정 | `SetRunPaused` 엣지에서 동결시간 누적 |
 | `Public/Hero/FPSRFeedbackTypes.h` | 수정 | `EFPSRHitMarkerType::ShieldBreak` **말미 추가** |
-| `Public/Weapon/FPSRWeaponTypes.h` | 수정 | `ShieldDamageMultiplier` + `EFPSRWeaponStat` 축 1개 |
+| `Public/Weapon/FPSRWeaponTypes.h` | 수정 | `FFPSRWeaponStatBlock::ShieldDamageMultiplier` + `EFPSRWeaponStat` 축 **말미 추가** + `GetAxisValue` case |
 | `Private/Weapon/FPSRWeaponInstance.cpp` | 수정 | `RecomputeResolved` switch case 1개 |
+| `Public/Weapon/FPSRProjectileTypes.h` | 수정 | `FFPSRProjectileParams::DamageSpec` — 발사·폭발 시점까지 계수를 나른다(비복제 서버 상태라 안전) |
 | `Public/Pickup/FPSRHealthPickup.h` | **신규** | 맵 배치형 힐팩(`AFPSRXPPickup` 형제) |
 | `Private/Pickup/FPSRHealthPickup.cpp` | **신규** | 수집·회복·전투시계 기반 리스폰 |
 | `Private/Run/Mission/FPSRMission_CarryNoHit.cpp` | 수정 | 피격 판정을 "실드 포함 총 피해"로 |
-| `Private/AbilitySystem/Abilities/FPSRGA_WeaponFire_Hitscan.cpp` | 수정 | 마커 집계 일원화 + 실드파손 전달 |
+| `Private/Hero/FPSRReviveComponent.cpp` | 수정 | `PerformRevive`(`:129`)에서 실드 앵커를 완파 상태로 재설정 — 🔴 회귀함정 6 |
+| `Public/UI/FPSREnemyHealthBarWidget.h` · `Private/…cpp` | 수정 | `BindHealthComponent` 를 실드로 확장 + **초기 1회 동기화** [[umg-event-widget-initial-sync]] |
+| `Private/AbilitySystem/Abilities/FPSRGA_WeaponFire_Hitscan.cpp` | 수정 | **`FFPSRDamageSpec` 구성**(§5-9) + 마커 집계 일원화 + 실드파손 전달 |
 | `Private/AbilitySystem/Abilities/FPSRGA_WeaponFire_ChargeLaser.cpp` | 수정 | 〃 |
 | `Private/AbilitySystem/Abilities/FPSRGA_WeaponMelee.cpp` | 수정 | 〃 |
-| `Private/Weapon/FPSRProjectile.cpp` | 수정 | 〃 |
+| `Private/Weapon/FPSRProjectile.cpp` | 수정 | 〃 (`Params.DamageSpec` 를 직격·폭발 양쪽에 전달) |
+| `Private/Weapon/FPSRWeaponFragment.cpp` | 수정 | Fragment AOE(`:70`)도 `Params.DamageSpec` 전달 |
 | `Config/DefaultGameplayTags.ini` | 수정 | `Message.Player.ShieldBroken` 1줄 |
+| **`Docs/SSOT/CombatWeaponCard.md`** §2-3-5 | **문서** | "초당 체력 재생 = periodic GE" 지정에 **은퇴 정정** + 흡혈이 실드 데미지로도 발동함을 등재 |
+| **`Docs/SSOT/PlayerFeel.md`** §2-13·§2-14 | **문서** | 회복 경로 4종 확정 · 실드 규칙(DBNO/부활/i-frame) · 실드 파손 피드백 |
+| **`Docs/SSOT/Enemy.md`** §2-6·§2-10 | **문서** | 적 `MaxHealth` 저작처를 "BP 에디터 기본값" → 프로파일 DA 로 정정 · 2층 데미지 계약 |
+| **`Docs/Architecture/0014-…`** | **문서** | 덱이 「비율」에 더해 **개체 강도 배수**도 갖게 됨(불변식 1 "수의 소유자=디렉터"는 무변) |
+
+> 🔴 **문서가 먼저다** — CLAUDE.md 핵심원칙 3(*"설계 변경은 해당 `Docs/SSOT/` 도메인 파일 먼저"*). 위 4개 문서 갱신은 C2 구현과 **같은 커밋 묶음**에 들어가며, 코드보다 뒤에 오지 않는다.
 
 ---
 
@@ -188,9 +200,12 @@ bShieldBroke = (진입 시 Shield > 0) && (Pool.Shield <= 0)
 bLethal      = (Pool.Health <= 0)
 ```
 
-> ⚠️ `ShieldKeep` 의 `MinKeep` 하한은 **`ShieldDamageMultiplier == 0`(실드 무시) 일 때는 적용하지 않는다.** 하한의 목적은 "완화 중첩으로 무적이 되는 것"을 막는 것이지, 설계자가 의도적으로 연 우회로를 막는 게 아니다. 그리고 이 경우 데미지는 전량 체력으로 가므로 `TotalSpent() > 0` 은 여전히 성립한다.
-> 🔴 **불변식 V1**: `Incoming > 0` 이고 `(Shield > 0 || Health > 0)` 이면 `Result.TotalSpent() > 0`. 어떤 데이터 조합으로도 무적을 만들 수 없다.
-> 🔴 **불변식 V2**: `MaxShield == 0` → `ShieldSpent == 0` 이고 `Overflow == Incoming` (실드 없는 개체는 현행과 산술적으로 동일). **요구 1의 유일한 구현 수단.**
+> ⚠️ `ShieldKeep` 의 `MinKeep` 하한은 **`ShieldDamageMultiplier == 0`(실드 무시) 일 때는 적용하지 않는다.** 하한의 목적은 "완화 중첩으로 무적이 되는 것"을 막는 것이지, 설계자가 의도적으로 연 우회로를 막는 게 아니다. 이 경우 데미지는 전량 체력으로 간다.
+> 🔴 **불변식 V1 (정밀 서술 — G1 P3-5 반영)**: `Incoming > 0` 이고 `Health > 0` 이면 `Result.HealthSpent > 0`. 즉 **체력이 남아 있는 대상은 어떤 데이터 조합으로도 무적이 될 수 없다.**
+>   - 종전 서술(`TotalSpent() > 0`)은 `Health == 0 && Shield > 0` 에서 `SDM == 0` 이면 거짓이 된다(게임 상태로는 도달 불가 — 적은 `Health<=0` 에 죽고 플레이어는 DBNO 로 간다 — 이지만 불변식은 정확해야 한다). 위 형태가 참인 이유: `HealthKeep >= MinKeep > 0` 이고 `SDM == 0` 이면 `Overflow == Incoming`, `SDM > 0` 이면 실드가 유한하므로 `Consumed < 1` 이거나 `Shield` 가 남아 흡수를 마친다.
+>   - **`MaxTotalReduction < 1.0` 이 이 불변식의 유일한 안전판**이다 → §5-2 에서 데이터로 강제한다(`ClampMax = 0.99` + `IsDataValid`).
+> 🔴 **불변식 V2**: `MaxShield == 0` → `ShieldSpent == 0` 이고 `Overflow == Incoming` (실드 없는 개체는 현행 `Health = Clamp(Health - Damage, 0, MaxHealth)` 와 산술적으로 동일). **요구 1의 유일한 구현 수단.**
+> ⚠️ **불변식 V3 (청킹 중립 — 설계자가 알고 있어야 하는 성질)**: 재생이 개입하지 않는 구간에서 이 산술은 **분할에 중립**이다 — 같은 총 데미지를 한 방으로 넣든 나눠 넣든 총 체력 피해가 같다. 이월은 **낭비를 없앨 뿐 보너스를 주지 않는다.** 저격 메리트의 실제 원천은 `ShieldDamageMultiplier` 데이터축이다(§2 목표 5).
 
 ### 5-2. 저작 데이터 — `UFPSRVitalsProfileDataAsset`
 
@@ -247,12 +262,20 @@ public:
     UPROPERTY(EditAnywhere, Category = "Vitals|Defense")
     TArray<FFPSRVitalsDefenseEntry> DefenseByDamageType;
 
+    /** 🔴 **불변식 V1 의 안전판**(G1 P2-3). 이 개체에 대한 한 타격의 총 감쇠 상한.
+     *  M4 방향성 아머 DR × 층 계수가 곱해져 0 뎀이 되는 것을 산술로 막는다 —
+     *  `Enemy.md` §2-6 방패 아키타입의 "하드블록(0뎀) 금지"(0뎀이면 히트마커·흡혈·킬크레딧이
+     *  전부 침묵한다)를 데이터 층에서 강제하는 자리다. **1.0 을 저작할 수 없다**(ClampMax). */
+    UPROPERTY(EditAnywhere, Category = "Vitals|Defense", meta = (ClampMin = "0.0", ClampMax = "0.99"))
+    float MaxTotalReduction = 0.95f;
+
     /** 서버. DamageType 에 맞는 층 계수를 채운다(정확일치 → 기본엔트리 → 1.0 순). */
     void ResolveDefense(const FGameplayTag& DamageType, float& OutShieldDefense, float& OutHealthDefense) const;
 
 #if WITH_EDITOR
-    /** 중복 태그 · `DamageType.*` 아닌 태그 · MaxShield>0 인데 재생속도 0(영구 파손 = 대개 저작 실수) ·
-     *  엔트리 8개 초과(피격당 선형 스캔이라 상한을 경고) 를 잡는다. */
+    /** ①중복 태그(에러) ②`DamageType.*` 아닌 태그(에러) ③`MaxShield>0` 인데 재생속도 0 — 영구 파손,
+     *  대개 저작 실수(경고) ④엔트리 8개 초과 — 피격당 선형 스캔이라 상한을 경고 ⑤`MaxTotalReduction >= 1.0`
+     *  — **에러**(불변식 V1 붕괴. `ClampMax` 는 에디터 입력만 막지 임포트/스크립트 저작을 못 막는다). */
     virtual EDataValidationResult IsDataValid(FDataValidationContext& Context) const override;
 #endif
 };
@@ -369,9 +392,34 @@ private:
 
 `PreAttributeChange`/`PreAttributeBaseChange`: `Shield` 를 `[0, MaxShield]`, `MaxShield`/`ShieldDefense`/`HealthDefense` 를 `>= 0` 으로 클램프(기존 `ClampAttribute` 확장).
 
-`PostAttributeChange` 추가 규칙 **2개**:
-- **`MaxShield` 증가 → `Shield` 도 같은 양만큼 증가.** §2-13 의 `MaxHealth` 규칙과 **대칭**(권위 전용 가드도 동일 — 클라 이중적용 방지).
+`PostAttributeChange` 추가 규칙 **3개**:
+- **`MaxShield` 증가 → `Shield` 도 같은 양만큼 증가.** §2-13 의 `MaxHealth` 규칙(`FPSRHealthSet.cpp:79-84`)과 **대칭** — 권위 전용 가드도 동일(클라 이중적용 방지).
 - **`MaxShield` 가 0 으로 떨어지면 `Shield` 도 0.** "실드 포기하고 체력↑" 카드가 실드를 남기지 않게. (기존 `Shield` 클램프가 다음 변경 때 처리하지만, 그때까지 HUD 에 유령 실드가 남는다.)
+- 🔴 **`Shield` 가 재생 드라이버 **밖에서** 바뀌면 앵커를 재기저(rebase)한다** — 아래 §5-4-1.
+
+#### 5-4-1. 🔴 앵커 재기저 규칙 (G1 P2-1)
+
+**문제**: 재생 앵커(`ShieldAtLastDamage`, `LastDamageCombatTime`)에서 파생한 값을 드라이버가 `SetShield` 로 밀어넣으므로, **앵커를 모르는 쓰기는 다음 틱(≤0.1s)에 되덮인다.** 반례 — 최근 피격(앵커 40, 지연 중)에 레벨업 프리즈에서 "+MaxShield 50" 카드를 고르면 `Shield` 가 90 이 됐다가 드라이버가 40 으로 지운다. **가장 흔한 흐름(카드 선택)에서 카드 효과가 눈앞에서 증발한다.**
+
+**규칙 (하나)**: `Shield` 에 일어난 변화 중 **바이탈 시스템이 만들지 않은 것**은 그 델타를 앵커에도 그대로 더한다.
+
+```cpp
+    /** 바이탈 시스템 자신이 Shield 를 쓰는 동안 켜지는 스코프 가드. 켜져 있으면 PostAttributeChange
+     *  가 앵커를 건드리지 않는다(드라이버 값은 이미 앵커의 파생물이고, 데미지 경로는 앵커를 직접 세운다). */
+    struct FScopedVitalsWrite { /* RAII: bVitalsWriting 을 true 로 */ };
+    bool bVitalsWriting = false;
+```
+
+| 쓰기 주체 | 가드 | 앵커 처리 |
+|---|---|---|
+| 재생 드라이버(§5-5) | **ON** | 손대지 않는다 — 드라이버 값이 앵커의 파생물이다 |
+| `ApplyContactDamage` | **ON** | 명시 세팅: `ShieldAtLastDamage = 새 Shield`, `LastDamageCombatTime = CombatNow` (지연 재시작 = 이 시스템의 목적) |
+| 초기화 / 부활 | **ON** | 명시 세팅(§5-5) |
+| **그 밖 전부** — 카드 GE, `MaxShield` 연동 증가, 향후 "실드 즉시 충전" 효과 | OFF | `ShieldAtLastDamage = Clamp(ShieldAtLastDamage + Δ, 0, MaxShield)` — **시각은 안 건드린다** |
+
+> **왜 시각을 안 건드리나**: 카드를 먹은 것은 피격이 아니다. 남은 재생 지연은 그대로 흘러야 한다.
+> **완파 판정과의 정합**: 파손 여부는 `ShieldAtLastDamage <= 0` 으로 읽는다. 완파(앵커 0) 상태에서 카드가 +50 을 주면 앵커가 50 이 되어 다음 재생이 **짧은 지연**을 쓴다 — "실드를 보충받았으니 완파가 아니다"로 읽히므로 의도된 거동이다.
+> **이 규칙이 GAS 를 살린다**: `Shield` 를 어트리뷰트로 둔 값어치가 "GE 가 만질 수 있다"인데, 재기저 없이는 그 GE 가 전부 무력화된다.
 
 > **"실드 포기" 카드 = 신규 효과 클래스 0개.** `UCardEffect_CharacterGE` + `GE_Card_ForgoShield`(`MaxShield` Override 0 · `MaxHealth` Additive +N) 하나면 된다. §2-3-8 컨벤션 쿡북의 "기존 Attribute 범위 내 새 카드 = GE + DataAsset (코드 0)" 경로 그대로.
 
@@ -407,10 +455,24 @@ if (ShieldRegenDriverAccum >= 1/ShieldRegenUpdateHz && IsAlive() && MaxShield > 
     ShieldRegenDriverAccum = 0
     New = FPSRVitals::ComputeRegeneratedShield(ShieldAtLastDamage, MaxShield,
               CombatNow - LastDamageCombatTime, RegenRate, PartialDelay, BrokenDelay)
-    if (|New - Shield| > KINDA_SMALL_NUMBER) SetShield(New)
+    if (New > Shield + KINDA_SMALL_NUMBER)        // ← 단조 증가만. 아래 주석 참조
+    {
+        FScopedVitalsWrite Guard; SetShield(New)
+    }
 ```
+> 🔴 **드라이버는 실드를 절대 깎지 않는다**(`New > Shield` 비교, `|New - Shield|` 아님). 재기저(§5-4-1)가 정상 경로를 이미 닫지만, 이 단조성은 **어떤 재기저 누락이 있어도 카드/GE 가 준 실드를 드라이버가 지울 수 없게** 만드는 두 번째 안전망이다. 실드를 줄이는 주체는 데미지 하나뿐이다.
 > **프리즈 게이트가 따로 필요 없다** — `CombatNow` 가 프리즈 중 안 흐르므로 `New == Shield` 가 되어 쓰기 자체가 안 일어난다. 게이트를 코드로 또 두면 진실이 둘이 된다.
-> 🔴 **회귀함정 6**: `IsAlive()` 가 DBNO 를 false 로 본다(§2-13) → **DBNO 중 실드 재생 정지**. 부활(`PerformRevive`)은 체력 50% 세팅 뒤 `ShieldAtLastDamage = 0; LastDamageCombatTime = CombatNow` 로 **완파 상태에서 시작**한다(부활 직후 `PostReviveInvuln` 5초 동안 완파지연 6초가 거의 흘러, 무적이 풀린 직후 실드가 차기 시작한다).
+> 🔴 **회귀함정 6**: `IsAlive()` 가 DBNO 를 false 로 본다(§2-13) → **DBNO 중 실드 재생 정지**.
+
+**앵커 초기화 (G1 P2-1 후반 — 이걸 안 하면 스폰 첫 틱이 만충 실드를 지운다)**
+
+| 시점 | 앵커 세팅 | 이유 |
+|---|---|---|
+| `InitAbilityActorInfo`(프로파일 → 어트리뷰트 초기값 직후) | `ShieldAtLastDamage = MaxShield`, `LastDamageCombatTime = CombatNow` | 만충에서 시작. ⚠️ 기본 멤버값 `(0, -1e9)` 로 두면 `RegenPerSecond == 0` 저작(`IsDataValid` 가 **경고**만 낸다) 시 `ComputeRegeneratedShield` 가 0 을 돌려주고 드라이버가 실드를 지운다 — 단조성 안전망이 이것도 막지만, 앵커가 틀린 채 굴러가면 첫 피격 후 재생이 어긋난다 |
+| `PerformRevive`(`FPSRReviveComponent.cpp:129`, 체력 50% 세팅 직후) | `ShieldAtLastDamage = 0`, `LastDamageCombatTime = CombatNow` | **완파 상태에서 부활**. `PostReviveInvuln` 5초 동안 완파지연 6초가 거의 흘러, 무적이 풀린 직후 실드가 차기 시작한다 |
+| 런 리셋 / 리스폰 | `InitAbilityActorInfo` 와 동일 | |
+
+> 적 쪽 대응 = `ResetForReuse` 가 `ShieldAtLastDamage = MaxShield` 로 되돌린다(§8). **두 저장소가 같은 규칙**이다.
 
 플레이어 재생 수치의 저작 자리 = **`UFPSRHealthSet` 기본값이 아니라 캐릭터 BP 의 `EditDefaultsOnly`**:
 ```cpp
@@ -524,6 +586,36 @@ protected:
 > **수집자만 회복한다**(파티 전체 아님) — 4인 협동에서 "다친 사람이 가서 먹는다"가 협동 판단을 만든다. 전체 회복이면 아무나 밟는 자원이 되어 위치 선택이 무의미해진다.
 > DBNO/Dead 플레이어는 수집 불가(`IsAlive()` 게이트).
 
+### 5-9. 🔴 대실드 계수의 소스 → `FFPSRDamageSpec` 배선 (G1 P2-2)
+
+이것이 빠지면 **전 무기가 `ShieldDamageMultiplier = 1.0` 으로 고정된 채 컴파일되고**, §12-4 단위테스트는 전부 통과한다(순수함수는 인자를 받은 대로 계산하므로). 발각 시점이 사용자 PIE 뿐이다. C2 는 축자 구현이고 시그니처·필드 추가가 금지되므로 **여기서 전부 못박는다.**
+
+**① 저작 자리** — `FFPSRWeaponStatBlock`(`Weapon/FPSRWeaponTypes.h`)에 필드 1개:
+```cpp
+    /** 대실드 배수. 1 = 평범 · >1 = 실드에 강함(저격) · 0 = 실드 무시(전량 체력으로 이월).
+     *  체력 데미지에는 영향이 없다 — 실드 층에서만 곱해진다(§5-1). */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Damage", meta = (ClampMin = "0.0", UIMax = "4.0"))
+    float ShieldDamageMultiplier = 1.0f;
+```
+
+**② 카드 축** — `EFPSRWeaponStat` 에 `ShieldDamageMultiplier` 를 **말미에 추가**(P3-3).
+> ⚠️ **중간 삽입 금지** — `uint8` 이고 카드 DA(`UCardEffect_WeaponStat`)가 이 값을 **에셋에 저장**한다. 중간에 끼우면 기존 카드가 조용히 다른 축을 가리킨다. `EFPSRHitMarkerType`(§5-7)과 같은 규칙.
+> `FFPSRWeaponStatBlock::GetAxisValue` switch 와 `UFPSRWeaponInstance::RecomputeResolved` switch 에 case 각 1개(§2-3-8 컨벤션 쿡북의 "새 무기 stat 축 = enum + switch case, 컴파일체크 유지" 경로 그대로).
+
+**③ 5개 데미지 경로의 Spec 구성 지점** — 각 경로가 **이미 `ResolvedStats` 를 읽는 그 자리**에서 만든다. 신규 조회 0.
+
+| 경로 | Spec 을 만드는 곳 | 전달 |
+|---|---|---|
+| 히트스캔 | `FPSRGA_WeaponFire_Hitscan.cpp` — 이미 `Instance->GetResolvedStats()` 를 잡아 두는 지점(`:93`) | 펠릿 루프의 `FPSRCombat::ApplyDamage(HitActor, Resolved, Avatar, Spec)`(`:280`) |
+| 차지레이저 | `FPSRGA_WeaponFire_ChargeLaser.cpp` 동일 패턴 | `:293` |
+| 근접 | `FPSRGA_WeaponMelee.cpp` 동일 패턴 | `:203` |
+| 발사체(직격) | **발사 시점**에 `FFPSRProjectileParams::DamageSpec` 에 담아 보낸다 | `FPSRProjectile.cpp:463` 이 `Params.DamageSpec` 을 그대로 전달 |
+| 발사체·Fragment 폭발 | 〃 | `FPSRProjectile.cpp:324` · `FPSRWeaponFragment.cpp:70` 의 `ApplyExplosion(..., Params.DamageSpec)` |
+
+**④ 발사체가 계수를 나르는 이유** — 발사체는 발사자와 시간·공간이 분리돼 있어 착탄 시점에 무기 상태를 다시 읽으면 **그 사이 무기를 바꾸거나 카드를 먹은 값**을 쓰게 된다. `FFPSRProjectileParams` 는 이미 **서버 전용 비복제 상태**(`FPSRProjectileTypes.h:75` 주석)라 `FFPSRDamageSpec` 을 넣어도 와이어를 안 탄다 — `Pierce`·`GravityScale` 이 발사 시점 값을 나르는 것과 정확히 같은 이유·같은 자리다.
+
+**⑤ Fragment 훅과의 관계** — `UFPSRWeaponFragment::OnProjectileSpawn(Ctx, ParamsInOut)`(`FPSRWeaponFragment.h:74`)이 이미 `Params` 를 **수정 가능하게** 받는다 → **"이 프래그먼트를 달면 실드를 무시한다" 같은 무기 행동이 신규 배선 0으로 붙는다.** 이 유닛은 그런 Fragment 를 만들지 않는다(비목표) — 자리만 열린다.
+
 ---
 
 ## 6. 함수별 계약
@@ -541,7 +633,23 @@ protected:
 | `FPSRCombat::ResolveHitMarker` | 무관(순수) | 5 데미지 경로 | — | 전부 false → `Hit` |
 | `UFPSRVitalsProfileDataAsset::ResolveDefense` | 무관 | 두 저장소 | — | 미일치 → 1.0/1.0 |
 
-**`FPSRCombat::ApplyDamage` 의 두 분기가 이제 대칭이 된다** — 종전에는 플레이어 분기가 `bApplied=true` 만 세우고 `DamageDealt` 를 0 으로 남겼다(`FPSRCombatStatics.cpp:190-194`). 그래서 **FF 흡혈이 이미 침묵하고 있었다.** 실드가 만든 문제가 아니라 기존 비대칭이며, `ApplyContactDamage` 가 `FResult` 를 반환하게 되는 이 유닛에서 **함께 해소된다**(`DamageDealt = Result.TotalSpent()`). 거동 변화 = FF 를 켠 세션에서 아군 오사에 흡혈이 발동하게 됨 — `Enemy.md` §2-10 의 "협동 카드 시임" 의도와 같은 방향이므로 회귀가 아니라 결함 수정으로 본다. **§13 에 명시하고 G2 에 올린다.**
+**🔴 플레이어 분기의 `DamageDealt` — 채우되, 흡혈은 열지 않는다 (G1 P2-4, 초안 오진 정정)**
+
+종전 초안은 *"플레이어 분기가 `DamageDealt` 를 0 으로 남기는 것은 기존 결함이니 함께 고친다"* 고 썼다. **그 판단이 틀렸다.** 현행 게이트는 결함이 아니라 **의도된 반-파밍 장치**다 — 코드 주석이 명시한다: *"Gated on bWasEnemy too, so shooting a door … can't feed lifesteal / heal-on-damage (no farming health off a high-HP destructible)"* (`FPSRCombatStatics.cpp:177-181`). **유한 체력인 문짝조차 흡혈원으로 금지**돼 있는데, 이 유닛은 **스스로 재생되는** 실드를 만든다.
+
+열었을 때 실제로 생기는 것:
+- FF ON 세션에서 아군 실드를 쏘면 **아군 손실 0의 영구 회복 펌프**가 된다(실드는 알아서 다시 찬다).
+- 더 나쁜 것 — **자폭은 FF 플래그와 독립**이다(`ResolveDamage`: `Target == Instigator → bAllowSelf ? BaseDamage : 0`). 즉 **솔로에서도** 자기 발밑 로켓 → 자기 실드 흡혈 → 실드 재생 루프가 성립한다.
+- `CombatWeaponCard.md` §2-3-5 의 명문 경계와 정면 충돌: *"지속 '힐건'化 금지 = '아군을 쏴서 힐하는 게임' 붕괴 방지"*. 그리고 초안이 원용한 `Enemy.md` §2-10 협동 카드 시임은 **"FF 데미지 → 맞은 아군 회복"**(지원)이지 **"쏜 사람 회복"**(흡혈)이 아니다 — 방향이 반대다.
+
+**확정 규칙 — 두 가지를 분리한다:**
+
+| | 이 유닛에서 | 근거 |
+|---|---|---|
+| `FDamageResult::DamageDealt` (플레이어 대상) | **채운다** = `Result.TotalSpent()` | 미션 무피격 판정 · 디렉터 센서 · 관통 판정이 쓰는 "실제 입힌 피해" 축. 흡혈과 무관 |
+| 흡혈 이벤트(`GameplayEvent.Player.DealtDamage`) | **`bWasEnemy` 게이트 유지 — 플레이어 대상엔 안 보낸다** | 위 파밍 루프. 현행과 거동 변화 **0** |
+
+FF 흡혈을 열지 여부는 **사용자 결정 항목으로 승격**한다(§11-7). 이 유닛은 기본값(닫힘)으로 간다.
 
 ---
 
@@ -588,7 +696,18 @@ protected:
 | 힐팩 회복량 · 리스폰 · 반경 | `AFPSRHealthPickup` `EditAnywhere`(인스턴스별) | 25% / 45s / 120 | 맵마다 다르게 배치 |
 | i-frame `DamageInvulnerabilityDuration` | 기존 `AFPSRCharacter` | **0.25 (재조정 필요)** | 🔴 회귀함정 4 — §11-2 |
 
-> C++ 에 남는 것 = **2층 배분 산술 · 이월 규칙 · 완화 상한 불변식 · 재생 공식의 형태**. 전부 "구조상 안 바뀌는 것"이다. 숫자는 하나도 코드에 없다. [[code-is-immutable-structure-only]]
+**🔴 플레이어 층 계수의 합성 규칙 (G1 P3-4 — 두 소스가 있으므로 순서를 못박는다)**
+플레이어만 유일하게 계수 소스가 둘이다: 프로파일의 데미지타입별 값 + 어트리뷰트(`ShieldDefense`/`HealthDefense`).
+```
+FMitigation.ShieldDefense = Profile->ResolveDefense(DamageType).Shield  ×  GetShieldDefense()
+FMitigation.HealthDefense = Profile->ResolveDefense(DamageType).Health  ×  GetHealthDefense()
+```
+- **프로파일 = 이 캐릭터가 원래 어떤 속성에 강한가**(저작 · 런 중 불변).
+- **어트리뷰트 = 카드가 런 중에 얹는 배수**(base 1.0). "실드 방어 +20%" 카드 = `ShieldDefense` 를 0.8 로 만드는 GE 하나 — 프로파일을 안 건드리고, **모든 데미지 타입에 균일하게** 걸린다.
+- 적은 어트리뷰트가 없으므로 프로파일 값이 곧 최종값이다(곱할 것이 없다).
+- ⚠️ 값이 작을수록 단단하다(§5-1 `FMitigation` 주석) — 카드 저작 시 방향을 헷갈리지 않도록 `GetDescription` 에서 백분율로 뒤집어 보여줄 것.
+
+> C++ 에 남는 것 = **2층 배분 산술 · 이월 규칙 · 완화 상한 불변식 · 재생 공식의 형태 · 계수 합성 순서**. 전부 "구조상 안 바뀌는 것"이다. 숫자는 하나도 코드에 없다. [[code-is-immutable-structure-only]]
 > 에셋 경로 하드코딩 0 — 프로파일은 BP/DA 참조로만 들어온다.
 
 ---
@@ -614,14 +733,29 @@ protected:
 ### 11-1. 적 `MaxHealth` 전면 이관의 실행 범위 — **사용자 작업 구간**
 사용자가 "(나) 전면 이관"을 선택했다. 코드는 **양쪽을 다 받는다**(프로파일이 있으면 프로파일, 없으면 기존 BP `MaxHealth`) — 그래서 **코드 머지 시점에 회귀 0** 이고, 이관은 콘텐츠 작업으로 뒤따른다. [[da-edits-are-user-work]]
 - Claude 가 하는 것: 프로파일 클래스 · 해석 경로 · `IsDataValid` · **"프로파일 미할당 적" 경고 자동화**(§12-7).
-- 사용자가 하는 것: 적 BP 2종(`BP_EnemyMeleeBase`·나머지)에 `DA_Vitals_*` 저작·할당. 값은 현행 BP `MaxHealth` 를 그대로 옮기는 것부터(무회귀 기준선).
+- 사용자가 하는 것 **(전체 목록 — G1 P3-1)**:
+  1. 적 BP 2종(`BP_EnemyMeleeBase`·나머지)에 `DA_Vitals_*` 저작·할당. 값은 현행 BP `MaxHealth` 를 그대로 옮기는 것부터(무회귀 기준선).
+  2. 플레이어 캐릭터 BP 에 `DA_Vitals_Player` 저작·할당(실드 최대량·재생속도·이원 지연).
+  3. 적 로스터 DA 에 `VitalsModifier` 저작(등급별 덱이 생기기 전까지는 항등 1.0 이어도 무방).
+  4. 무기 DA 에 `ShieldDamageMultiplier` 저작 — **저격 >1**(이게 요구의 본체다, §2 목표 5).
+  5. 힐팩 액터를 아레나에 배치 + 회복량/리스폰 저작.
+  6. **HUD 콘텐츠 3종** — ①플레이어 본인·팀원 실드바(어트리뷰트 바인딩만) ②`ShieldBreak` 히트마커 비주얼 ③실드 파손 위험 경고 위젯(GMS `Message.Player.ShieldBroken` 구독). **§12-10 PIE 1·5번의 선행조건**이다.
+  7. `DA_CardPool` 에서 `DA_Card_Character_HealthRegen` 제거(요구 3).
 - ⚠️ 이관이 **끝나기 전까지 BP `MaxHealth` 가 진실**이다. 두 자리가 공존하는 이 구간을 짧게 가져갈 것.
+- [[da-edits-are-user-work]] — Claude 는 값과 위치만 알려주고 에셋에 손대지 않는다.
 
 ### 11-2. i-frame 재조정 — **사용자 판정 필요(런타임 체감)** 🔴 회귀함정 4
 `DamageInvulnerabilityDuration = 0.25s` 위에 실드가 얹히면 스웜 근접 압박이 사라질 수 있다. 코드는 값을 안 바꾼다. 사용자가 PIE 로 체감 후 결정할 것 — 권장 탐색 범위 **0.10~0.25s**(실드가 이미 "연속 피격 흡수" 역할을 하므로 i-frame 의 몫이 줄었다). 값 변경은 BP 저작.
 
 ### 11-3. periodic GE × 전역 프리즈 — **이 유닛에서 발견, 스코프 밖** 🔴
-`CombatWeaponCard.md` §2-3-5 가 "초당 체력 재생 = periodic infinite GE" 로 지정했고 플레이어 ASC 에는 `Enemy.md` §2-6 의 시간형-GE 가드가 **없다**. 즉 **기존 `HealthRegen` 카드는 지금도 프리즈 중에 회복된다.** 이 유닛은 그 카드를 풀에서 빼는 것으로 우회하지만, **`UCardEffect_CharacterGE` + periodic GE 조합 자체가 남아 있다.** → **보드 신규 행**으로 올린다(§12-8).
+`CombatWeaponCard.md` §2-3-5 가 "초당 체력 재생 = periodic infinite GE" 로 지정했고 플레이어 ASC 에는 `Enemy.md` §2-6 의 시간형-GE 가드가 **없다**. 즉 **기존 `HealthRegen` 카드는 지금도 프리즈 중에 회복된다** — 이 유닛이 만든 버그가 아니라 오늘도 존재하는 것이다. 이 유닛은 그 카드를 풀에서 빼는 것으로 우회하지만, **`UCardEffect_CharacterGE` + periodic GE 조합 자체가 남아 있다.** → **보드 신규 행**으로 올린다.
+
+### 11-7. FF/자가 흡혈을 열 것인가 — **사용자 결정 대기** (G1 P2-4 에서 승격)
+이 유닛은 **닫힌 채로** 간다(현행 거동 유지 = 회귀 0). 열면 아군 실드·자기 실드가 무한 회복원이 되고(§6), `CombatWeaponCard.md` §2-3-5 의 "지속 힐건化 금지"와 충돌한다. 열고 싶다면 그건 이 유닛이 아니라 **"FF 데미지 → 맞은 아군 회복"**(§2-10 협동 카드 시임, 방향이 반대다) 쪽 설계여야 한다.
+
+### 11-8. `DamageDealt` 의 단위가 섞인다 — **명시하고 G2 에 올린다** (G1 P3-2)
+1. `TotalSpent()` 의 `ShieldSpent` 는 **`ShieldDamageMultiplier`·`ShieldDefense` 로 스케일된 실드 포인트**다. 대실드 계수 2.0 저격이 100 을 쏘면 실드 200 이 깎이고 `DamageDealt = 200` 이 된다 → **흡혈이 명목 데미지의 2배로 발동**한다(사용자 결정 "흡혈 = 실드 포함 전체 데미지"의 직접 귀결). 이것을 시너지로 볼지 이중 이득으로 볼지는 밸런스 판정이다. **현 설계는 "풀에서 실제로 사라진 포인트"라는 하나의 정직한 정의를 유지**하고, 예외를 만들지 않는다.
+2. `NotifyPlayerDamageTaken` 이 먹는 값이 **원시 `DamageAmount`**(현행 `FPSRCharacter.cpp:1633`)에서 **완화·클램프 후 총 피해**로 바뀐다 → 폐루프 디렉터의 `IncomingDamageRate` 기준선이 이동한다. 방향은 옳다(디렉터는 "얼마나 아팠나"를 봐야 한다)지만 **기존 튜닝값이 그대로면 디렉터가 플레이어를 덜 위험하다고 읽는다**. 디렉터 임계값 재보정이 후속으로 필요.
 
 ### 11-4. 자매 행과의 상호작용 규칙 — **여기서 정하고 그쪽이 따른다**
 1. **"Shock 가 실드를 2배로 깎는다"** = `DefenseByDamageType[DamageType.Lightning].ShieldDefense = 2.0`. **신규 기제 0** — 이미 있는 데이터축이다.
@@ -645,27 +779,54 @@ C2(Sonnet 구현) 중 명세에 없는 판단이 필요해지면 **추측해서 
 | 1 | 명세 대조 | §5·§6·§7 의 선언·시그니처·복제 설정이 코드와 1:1 일치. **특히 `ApplyDamage` 산술 블록을 그대로 구현했는가** |
 | 2 | 빌드 | 로그의 **`Result: Succeeded`** 로 판정([[build-exit-code-lies-grep-result]]). **2회 돌린다** — ①헤더 신규 3개라 누락 검출용 `-DisableUnity`([[nonunity-build-is-67-seconds]]) ②머지 전 1회 `-DisableAdaptiveUnity -ForceUnity`(§6-6 — Adaptive Unity 가 방금 고친 파일을 블롭에서 빼므로 일반 초록은 유니티 동명충돌을 구조적으로 못 잡는다. 자동화 테스트를 추가하므로 **필수**). 빌드 전 에디터 종료([[ue-editor-file-locks-block-git]]), 라이브코딩 금지([[no-live-coding]]) |
 | 3 | 헤드리스 스모크 | `FPSRoguelite.Smoke.ModuleLoads` **+ `FPSRoguelite.Enemy.BlueprintParent`**(적 BP 에 UPROPERTY 를 추가하므로 — [[cpp-uproperty-name-collides-with-bp]]) |
-| 4 | 순수함수 단위 검증 | `FPSRVitals` 자동화 테스트 신규: ①`MaxShield=0` → 현행과 산술 동일(V2) ②완화 최대치에서도 `TotalSpent()>0`(V1) ③`ComputeRegeneratedShield` **멱등**(같은 인자 2회 = 같은 값) ④이월: 큰 한 방이 작은 여러 방보다 총 체력피해가 크거나 같다 ⑤`ShieldDamageMultiplier=0` → 전량 체력 |
+| 4 | 순수함수 단위 검증 | `FPSRVitals` 자동화 테스트 신규: ①`MaxShield=0` → 현행 `Clamp(Health-Dmg)` 와 산술 동일(**V2**) ②`MaxTotalReduction=0.99` + 아머 DR 1.0 + 계수 0 조합에서도 `Health>0` 이면 `HealthSpent>0`(**V1**) ③`ComputeRegeneratedShield` **멱등**(같은 인자 2회 = 같은 값) ④**청킹 중립**(**V3**): 실드 30·체력 100 에 `100×1` 과 `50×2` 의 총 체력피해가 **같다** — ⚠️ "큰 한 방이 유리"를 검사하는 게 아니다(그건 산술이 아니라 SDM 데이터가 만든다). 검사 의도 = 이월이 낭비를 만들지 않음 ⑤`SDM=0` → `ShieldSpent==0` 이고 전량 체력 ⑥`SDM=2` 로 같은 명목 데미지를 넣으면 실드 소진이 2배(§5-9 배선이 실제로 도달함을 순수함수 층에서 고정) |
 | 5 | 회귀 — 데미지 | 실드 없는 적(`MaxShield=0`)에 대해 `DamageDealt`·`bKilled`·히트마커·흡혈·관통이 **변화 0** |
-| 6 | 회귀 — 미션·디렉터 | `FPSRMission_CarryNoHit` 가 실드만 깎인 피격도 스트릭을 끊는다 / `NotifyPlayerDamageTaken` 이 **실드 포함 총 피해**를 먹는다 |
-| 7 | 데이터 검증 | 프로파일 미할당 적 BP 를 **경고**로 리포트(이관 진척 추적용, 실패는 아님) + `UFPSRVitalsProfileDataAsset::IsDataValid` 4항목 |
-| 8 | 레드팀 게이트 (G2) | §6-6-1 · **P1 잔존 시 머지 금지**. 지적과 처리 결과를 §13 에 남긴다. 프리즈 시계·복제 프로퍼티 증가·FF 흡혈 거동 변화 3건을 **명시적으로 올린다** |
-| 9 | PIE / 사용자 스모크 | 아래 목록 — **Claude 는 게임을 실행하지 않는다**([[do-not-launch-game]]). 보드는 `검증중` |
+| 6 | 회귀 — 미션·디렉터·흡혈 | `FPSRMission_CarryNoHit` 가 실드만 깎인 피격도 스트릭을 끊는다 / `NotifyPlayerDamageTaken` 이 **실드 포함 총 피해**를 먹는다 / 🔴 **흡혈 이벤트가 플레이어 대상에는 여전히 안 나간다**(§6 · §11-7 — 파밍 루프 방지) |
+| 7 | 데이터 검증 | 프로파일 미할당 적 BP 를 **경고**로 리포트(이관 진척 추적용, 실패는 아님) + `UFPSRVitalsProfileDataAsset::IsDataValid` **5항목**(특히 `MaxTotalReduction >= 1.0` = 에러) |
+| 8 | **SSOT 갱신** | §4 의 문서 4개(`CombatWeaponCard` §2-3-5 · `PlayerFeel` §2-13·§2-14 · `Enemy` §2-6·§2-10 · `ADR 0014`)가 **코드와 같은 커밋 묶음**에 갱신돼 있다. CLAUDE.md 핵심원칙 3 |
+| 9 | 레드팀 게이트 (G2) | §6-6-1 · **P1 잔존 시 머지 금지**. 지적과 처리 결과를 §13 에 남긴다. 아래 4건을 **명시적으로 올린다**: ①프리즈 전투시계 ②적 복제 프로퍼티 3→5 ③`DamageDealt` 단위 혼합(§11-8) ④디렉터 센서 기준선 이동(§11-8) |
+| 10 | PIE / 사용자 스모크 | 아래 목록 — **Claude 는 게임을 실행하지 않는다**([[do-not-launch-game]]). 보드는 `검증중` |
 
 **사용자 PIE 확인 목록 (2인 이상, `L_Lobby` 시작 — [[pie-2player-test-recipe]])**
 1. 실드 있는 적을 쏜다 → 실드바가 먼저 닳고, **다 깎이는 순간 전용 히트마커**가 뜬다. 그 뒤 체력이 닳는다.
-2. 저격(대실드 계수 >1)과 연사총으로 같은 총 데미지를 넣는다 → **저격이 체력을 더 많이 깎는다**(이월 효과).
+2. 저격(대실드 계수 >1)과 연사총으로 같은 총 데미지를 넣는다 → **저격이 실드를 더 빨리 걷어낸다**. ⚠️ 이건 **계수 저작이 도달했는지**를 보는 것이다(§5-9 배선) — 이월만으로는 차이가 안 난다(V3).
+2-1. 저격 한 방을 **실드보다 큰 데미지**로 넣는다 → 남은 만큼이 **체력까지 들어간다**(실드 게이트가 아니다). 이게 이월의 관찰 가능한 효과다.
 3. 적을 실드만 깎고 물러난다 → **완파 지연**이 지나야 다시 찬다. 부분만 깎고 물러나면 **더 빨리** 찬다.
 4. 🔴 **프리즈 검증**: 실드를 깎은 직후 레벨업 프리즈를 띄우고 **30초 이상 카드를 안 고른다** → 재개 직후 적/본인 실드가 **프리즈 전과 같은 수준**이어야 한다(공짜 충전 금지).
 5. 본인이 맞아 실드가 깨진다 → 화면에 위험 경고. 팀원 HUD 에도 그 사람 실드가 0 으로 보인다.
 6. DBNO 로 쓰러진다 → **다운 중 실드가 차지 않는다**. 부활하면 체력 50% + **실드 0** 에서 시작.
 7. 힐팩을 먹는다 → 체력만 오른다(실드는 무관). 체력이 가득하면 소모되지 않는다.
 8. 문/구조물을 부순다 → **현행과 완전히 동일**(실드 없음).
-9. FF 를 켜고 아군을 쏜다 → 흡혈이 발동한다(§6 의 의도된 결함 수정).
+9. 🔴 **앵커 재기저 검증**(§5-4-1): 실드를 **일부만** 깎인 직후(재생 지연이 아직 안 끝난 상태) 레벨업 프리즈에서 **`+MaxShield` 카드**를 고른다 → 늘어난 실드가 **그대로 남는다**(0.1초 뒤에 옛 값으로 되돌아가면 실패).
+10. FF 를 켜고 아군을 쏜다 → **흡혈이 발동하지 않는다**(§11-7 — 의도된 유지). 자기 발밑 로켓도 마찬가지.
 
 ---
 
-## 13. 레드팀 지적 원장 (C3 에서 채운다)
+## 13. 게이트 원장
+
+### 13-0. G1 플랜 게이트 원장 (2026-09-01, Fable) — **1차 반려 → 보강 완료**
+
+> 통과 판정: 구조 골격(순수함수 공유규칙 + 2저장소 + 프리즈-멈춤 전투시계 + 프로파일 DA + 적 무틱·무복제 지연재생 + 복제 3→5 상쇄 논거 + 자매 행 비차단 + 비목표 범위)은 **전부 검증 통과**. 반려 사유는 골격이 아니라 C2 가 즉시 부딪히는 명세 구멍.
+
+| 심각도 | 지적 | 처리 | 반영 위치 |
+|---|---|---|---|
+| P2-1 | 플레이어 재생 앵커 미폐쇄 — 드라이버가 카드/GE 의 실드 쓰기를 다음 틱에 되덮음. 앵커 초기화도 미명세 | **수용** | §5-4-1 재기저 규칙 신설 + 드라이버 **단조증가** 안전망 + §5-5 앵커 초기화 3경로 표 |
+| P2-2 | 대실드 계수의 소스→`FFPSRDamageSpec` 배선이 어디에도 없음 → 전 무기 1.0 고정으로 컴파일, 단위테스트 전부 통과 | **수용** | §5-9 신설(저작 자리·카드 축·5경로 구성 지점·발사체가 나르는 이유·Fragment 훅) + §4 파일 3개 추가 + §12-4 ⑥ |
+| P2-3 | `MaxTotalReduction` 이 §9 표에만 있고 DataAsset 선언에 없음 → 1.0 저작 시 V1 붕괴 | **수용** | §5-2 UPROPERTY(`ClampMax 0.99`) + `IsDataValid` 5번째(에러) |
+| P2-4 | FF/자가 흡혈을 "결함 수정"으로 분류한 것은 오진 — 현행은 의도된 반-파밍 게이트이고, 열면 **솔로 자폭 무한 회복 루프** | **수용(오진 정정)** | §6 전면 재작성 — `DamageDealt` 는 채우되 흡혈 이벤트는 `bWasEnemy` 게이트 유지. §11-7 로 사용자 결정 승격. §12-6·PIE 10 |
+| P2-5 | 설계 변경인데 SSOT/ADR 갱신이 파일 목록에 0건 | **수용** | §4 에 문서 4개 등재 + "문서가 먼저다" 못박음 + §12-8 검증항목 |
+| P3-1 | 파일 목록·사용자 작업 목록 불완전(`FPSRReviveComponent` · 체력바 위젯 · HUD 콘텐츠 3종) | **수용** | §4 · §11-1 사용자 작업 7항목 |
+| P3-2 | `DamageDealt` 단위 혼합(SDM 스케일된 실드 포인트) · 디렉터 센서 기준선 이동 | **수용** | §11-8 신설 + §12-9 로 G2 에 올림 |
+| P3-3 | `EFPSRWeaponStat` 말미 추가 규칙 미명시 | **수용** | §5-9 ② |
+| P3-4 | 플레이어 `FMitigation` 구성(프로파일 × 어트리뷰트) 모호 | **수용** | §9 합성 규칙 |
+| P3-5 | V1 각주가 `Health==0 && Shield>0` 에서 거짓 · `(§12-8)` 유령 참조 · 보드 행 원 스코프 문구 | **수용** | §5-1 V1 정밀 서술 + V3 신설 · §11-3 참조 삭제 · 보드 행은 2026-09-01 로그로 이미 갱신 |
+| P3-6 | (긍정 확인) 10Hz 드라이버 전제 성립(`FPSRPlayerState.cpp:28` NetUpdateFrequency 100) · 힐팩 per-actor Tick 은 기존 패턴 준수 | 지적 아님 | — |
+
+**추가 발견 (G1 이 실측으로 확인해 준 것, 기각 아님)**: 이월 산술은 **청킹 중립**이다 — 초안이 "한 방이 클수록 유리"라 쓴 것은 부정확했다. 이월은 실드 게이트가 만드는 **페널티를 제거**할 뿐이고, 저격 메리트의 본체는 `ShieldDamageMultiplier` 데이터축이다. §2 목표 5 · §5-1 V3 · §12-4 ④ 를 그에 맞게 고쳤다.
+
+**미검증으로 남은 것(G1 자기 보고)**: Notion 보드 행 원문(프롬프트 요약만 근거) · `DA_Card_Character_Lifesteal` 에셋 내부값 · GAS `Mixed` 모드 어트리뷰트 복제 세부.
+
+### 13-1. G2 레드팀 지적 원장 (C3 에서 채운다)
 
 > `Workflow.md` §6-6-1. **기각엔 근거가 필요하다** — 제1원리 조항 / 코드 인용 / 실측치 중 하나.
 
