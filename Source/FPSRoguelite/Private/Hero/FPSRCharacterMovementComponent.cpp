@@ -278,8 +278,24 @@ void UFPSRCharacterMovementComponent::StopSliding()
 	SlideElapsed = 0.0f;
 	SlideEntrySpeed = 0.0f;
 	SlideSlopeSpeedBonus = 0.0f;
-	// Charged on EVERY exit path, so jump-cancelling isn't a way to dodge the anti-spam lockout.
-	SlideCooldownRemaining = SlideCooldown;
+	// Charged on every exit the slide's OWN RULES produced — crouch released, too slow, timed out, gate closed. Those
+	// all happen with the player still on the floor, which is why the ground test is the whole condition.
+	//
+	// Leaving the ground is not one of those verdicts. It is traversal: a jump, a step down, a ledge. Charging the
+	// lockout there was destroying the player's speed on ordinary terrain, and the loss is much larger than "no slide
+	// for 0.8s" suggests. On landing the crouch key is normally still held, so a refused entry leaves a PLAIN CROUCH,
+	// and that is capped by MaxWalkSpeedCrouched (300 — the engine derives it from its own 600 default, and
+	// RefreshWalkSpeedCap only ever raises MaxWalkSpeed). PhysWalking then hands CalcVelocity GroundFriction 8, which
+	// BrakingFrictionFactor doubles to an effective 16 — the same constant ADR 0001 already records as taking
+	// 900 -> 250 cm/s in about 0.08s. So a 1200 cm/s landing was down to 300 within a tenth of a second.
+	//
+	// Anti-spam survives intact: tapping crouch on flat ground exits through bReleasedCrouch, which IS on the ground
+	// and still charges, so the entry impulse cannot be mashed. A slide-hop chain saturates at SlideMaxEntrySpeed
+	// rather than ratcheting, because StartSliding's impulse may only lift speed TOWARD that cap.
+	if (IsMovingOnGround())
+	{
+		SlideCooldownRemaining = SlideCooldown;
+	}
 
 	// Hand the run ramp back at its END, not at zero. A slide exits faster than running speed, so resuming the curve
 	// from t=0 would make GetMaxSpeed collapse and slam the player to a halt; from the end, the excess simply decays.
