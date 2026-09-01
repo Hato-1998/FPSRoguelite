@@ -8,7 +8,7 @@
 | 브랜치 | `phase/m1-shield-2layer` |
 | 작성 모델 | `claude-opus-5` (§6-5-2 개정 2026-08-26 — C1 설계 담당은 Opus, Fable은 G1/G2 게이트) |
 | 작성일 / 최종 갱신 | 2026-09-01 / 2026-09-01 |
-| 상태 | `초안` — **G1 1차 반려 → 보강 완료, 재제출 대기** (원장 = §13-0) |
+| 상태 | **`확정` — G1 플랜 게이트 통과**(3회차, 2026-09-01. P1 0 · P2 0 · 미폐쇄 P3 0). 다음 = 사용자 승인 → C2. 원장 = §13-0 |
 | 관련 SSOT | `CombatWeaponCard.md` §2-3-1·§2-3-5·§2-3-7·§2-3-8·§2-3-9 · `Enemy.md` §2-6·§2-10 · `PlayerFeel.md` §2-13·§2-14 · `RunFlow.md` §2-2·§2-8 · `Architecture/0013`·`0014` |
 | 관련 메모리 | `[[reason-in-multiplayer-terms]]` `[[production-structure-first]]` `[[code-is-immutable-structure-only]]` `[[push-model-off-in-packaged-build]]` `[[cpp-uproperty-name-collides-with-bp]]` `[[extensibility-first-designer-tooling]]` `[[da-edits-are-user-work]]` `[[do-not-launch-game]]` |
 | 보드 행 | [실드/체력 2층 데미지 구조](https://app.notion.com/3be3972ddd88813bb054d5c8ac0a3ee2) — M1 · 미듐 · M |
@@ -425,6 +425,10 @@ private:
 
 > **권위**: 이 규칙은 **서버 전용**이다(규칙 1 의 "권위 전용 가드"와 같은 문구 — `ASC->IsOwnerActorAuthoritative()`). 복제된 어트리뷰트 변경은 클라 `PostAttributeChange` 도 발화하지만 클라 앵커는 아무도 읽지 않으므로 무해하다. 그래도 명시적으로 막아 진실을 하나로 둔다.
 > **가드의 소유 위치** = `AFPSRCharacter`(앵커 두 멤버가 사는 곳). `UFPSRHealthSet::PostAttributeChange` 가 소유 캐릭터를 얻어 질의한다 — 어트리뷰트 셋은 PlayerState ASC 에 살고 폰 교체를 견뎌야 하므로 상태를 들지 않는다.
+> 🔴 **캐릭터에 닿는 법 (함정)** — **`GetOwningActor()` 는 캐릭터가 아니라 `AFPSRPlayerState` 를 돌려준다**(ASC 소유자가 PlayerState 다). 이걸 바로 `AFPSRCharacter` 로 캐스트하면 **조용히 nullptr** 이 되고 → 재기저가 영영 안 돌아 **P2-1 이 그대로 되살아난다**(컴파일도 되고 단위테스트도 통과하는 형태로). 두 경로 중 하나를 쓸 것:
+>   - **권장** `Cast<AFPSRCharacter>(GetOwningAbilitySystemComponent()->GetAvatarActor())` — `AFPSRCharacter::…::InitAbilityActorInfo(PS, this)`(`FPSRCharacter.cpp:506`)가 아바타를 캐릭터로 세운다(G1 실측). 한 홉.
+>   - 선례 `UFPSRCombatSet::ApplyMoveSpeedToOwner`(`FPSRCombatSet.cpp:81-97`)의 `GetOwningActor()` → `APlayerState::GetPawn()` → `Cast<AFPSRCharacter>`. 같은 리포에서 이미 도는 패턴이라 안전하지만 두 홉이다.
+>   어느 쪽이든 **널 체크 필수** — 폰 교체 창에서 아바타가 잠시 없다(그때는 no-op).
 > **왜 시각을 안 건드리나**: 카드를 먹은 것은 피격이 아니다. 남은 재생 지연은 그대로 흘러야 한다.
 > ⚠️ **후속 저작 주의(G1 2차 P3-c)** — 이 규칙은 **실드를 늘리는** 델타를 전제한다. 나중에 **실드를 깎는** 효과(디버프·"실드 흡수" 적 등)를 만들면, 마지막 피격이 오래전일 때 앵커만 낮아지고 시각은 그대로라 **다음 드라이버 틱에 즉시 만충 복귀**한다. 그런 효과는 **시각도 함께 재기저**해야 한다(= 피격으로 취급). 이 유닛의 카드에는 하향 효과가 없어 지금은 무해하다.
 > **완파 판정과의 정합**: 파손 여부는 `ShieldAtLastDamage <= 0` 으로 읽는다. 완파(앵커 0) 상태에서 카드가 +50 을 주면 앵커가 50 이 되어 다음 재생이 **짧은 지연**을 쓴다 — "실드를 보충받았으니 완파가 아니다"로 읽히므로 의도된 거동이다.
@@ -851,6 +855,18 @@ C2(Sonnet 구현) 중 명세에 없는 판단이 필요해지면 **추측해서 
 | P3-c | 향후 **실드를 깎는** 효과가 생기면 앵커만 낮아지고 시각은 그대로라 다음 틱에 즉시 만충 복귀 | **수용** | §5-4-1 후속 저작 주의 |
 
 **미검증(G1 2차 자기 보고)**: 보드 행 갱신 주장(보드 미조회 — 메인 세션이 `4637cb14` 이전에 실행·확인) · ChargeLaser/Melee 의 `GetResolvedStats` 확보 줄(브릿지 호출 줄은 실측, 스탯 조회 줄은 Hitscan 만 실측).
+
+#### 13-0-3. G1 3차 (2026-09-01, `16e810e6`) — ✅ **통과**
+
+2차 지적 4건 폐쇄 전건 확인 · **신규 결함 0** · 델타(+34/−8)가 주장한 절 밖을 안 건드림. 판정 근거로 G1 이 **직접 재검산·실측한 것**:
+- **V1 경우분해 증명이 참**(ⓐⓑⓒ 각각 재유도). 계수 0·아머 DR 1.0 조합에서도 `MinKeep` 하한이 받치고, `SDM==0` 우회가 **SDM 에만** 걸려 있어 증명 전제와 정합.
+- **예외의 도달 불가가 양쪽 코드로 실측됨** — 적: `FPSREnemyHealthComponent.cpp:40` `bDead` 조기반환 + `:54` 에서 체력 0 도달과 `bDead=true` 가 **같은 호출 안**이라 "0 체력·생존" 상태가 존재할 틈이 없다. 플레이어: `IsIncapacitatedLocal()` 조기반환 + DBNO 전이가 같은 타격 안에서 동기 완료.
+- **V1 정의 단일성** — 파일 전체 V1 언급 9곳 전수 확인, 형태가 다른 재진술 0. §11-5 의 인라인 요약("살아 있는 대상이면")은 `alive ⇒ Health>0 ⇒ 예외 비적용` 이라 **참인 따름정리**.
+- **§12-4 ② 두 픽스처가 비공허**하고, "`HealthSpent>0` 을 걸면 안 된다"를 테스트 문구에 못박은 것이 2차 오류의 재발을 테스트 층에서 차단한다.
+- **가드 소유 경로 성립** — `FPSRCharacter.cpp:506` `InitAbilityActorInfo(PS, this)` 로 아바타 = 캐릭터 실측.
+- **초기화 중 `SetMaxShield` 재진입 순서 무해** — 연동 증가가 먼저 실드를 올려도 `[0, MaxShield]` 클램프로 수렴하고 초기화 경로가 마지막에 앵커를 명시 세팅하므로 최종 상태가 같다(오늘 도는 `MaxHealth` 초기화와 동일 역학).
+
+**G1 통과 후 메인 세션이 추가한 것**(구조 무변경, 함정 방지 1건): §5-4-1 에 "`GetOwningActor()` 는 PlayerState 를 돌려준다" 경고 + 도달 경로 2안(`GetAvatarActor()` 권장 / `UFPSRCombatSet::ApplyMoveSpeedToOwner` 선례). 이걸 안 적으면 구현자가 바로 캐스트해 nullptr 을 받고 **재기저가 영영 안 돈다** — 컴파일·단위테스트를 통과하는 형태로 P2-1 이 되살아난다.
 
 ### 13-1. G2 레드팀 지적 원장 (C3 에서 채운다)
 
