@@ -100,6 +100,11 @@ void UFPSRGA_WeaponFire_Hitscan::ActivateAbility(
 		MaxPenetration = FMath::Max(1, Stats->MaxPenetration);
 	}
 
+	// VIT1 §5-9 ③: built once, right here where ResolvedStats is already read — no new lookup. DamageType stays
+	// empty (Physical); only the anti-shield multiplier is data-driven per weapon today.
+	FFPSRDamageSpec DamageSpec;
+	DamageSpec.ShieldDamageMultiplier = Stats ? Stats->ShieldDamageMultiplier : 1.0f;
+
 	// Server-authoritative gates: empty mag / reloading / fire-rate. Ammo is consumed later, once the fragment
 	// hooks have determined the round count (each round costs one magazine round; a round fires PelletCount pellets, §2-4-1).
 	if (Avatar->HasAuthority() && Inventory)
@@ -230,9 +235,11 @@ void UFPSRGA_WeaponFire_Hitscan::ActivateAbility(
 	bool bServerCrit = false;
 	bool bServerWeak = false;
 	bool bServerKill = false;
+	bool bServerShieldBroke = false;
 	// Visual hit-marker fires for ANY damageable that lost health — enemies AND destructible non-enemies (doors,
 	// bCountsAsKill=false). Distinct from bServerHit (enemy combat-credit: drives OnMiss / Kill·Crit·Weak / lifesteal).
-	// A friendly player never sets this: the player damage branch leaves DamageDealt = 0 (FPSRCombatStatics::ApplyDamage).
+	// A friendly player never sets this — gated explicitly on FDamageResult::bTargetIsPlayer below (VIT1 §6 made the
+	// player branch fill DamageDealt, so this can no longer rely on that value staying 0).
 	bool bServerAnyDamage = false;
 	// True if a per-impact fragment (e.g. ExplosiveRounds splash) dealt real damage to an enemy — folded into the
 	// miss check so a connecting wall-splash doesn't count as a miss (would otherwise refund AmmoOnMiss on a hit).
@@ -277,18 +284,21 @@ void UFPSRGA_WeaponFire_Hitscan::ActivateAbility(
 		{
 			return false; // friendly pass-through (FF off): don't stop the bullet, don't spend penetration
 		}
-		const FPSRCombat::FDamageResult Result = FPSRCombat::ApplyDamage(HitActor, Resolved, Avatar);
+		const FPSRCombat::FDamageResult Result = FPSRCombat::ApplyDamage(HitActor, Resolved, Avatar, DamageSpec);
 		// Markers / kill triggers key on DamageDealt (real health removed), so a corpse re-hit (DamageDealt 0) is inert;
 		// the bullet still spends penetration via bApplied below (geometry), it just produces no feedback or kill.
-		if (Result.DamageDealt > 0.0f)
+		// !bTargetIsPlayer: an FF hit on a teammate must raise no marker. VIT1 §6 fills DamageDealt on the player
+		// branch now, so the old "player => DamageDealt 0" implicit gate is gone — see FDamageResult::bTargetIsPlayer.
+		if (Result.DamageDealt > 0.0f && !Result.bTargetIsPlayer)
 		{
-			bServerAnyDamage = true; // visual marker for enemies AND destructible doors (not friendly players: DamageDealt 0)
+			bServerAnyDamage = true; // visual marker for enemies AND destructible doors
 			if (Result.bWasEnemy)
 			{
 				bServerHit = true;
 				if (Result.bKilled) { bServerKill = true; FPSRWeaponHooks::NotifyKill(FireCtx, HitActor); }
 				else if (WeakpointMult > 1.0f) { bServerWeak = true; }
 				else if (bCrit) { bServerCrit = true; }
+				bServerShieldBroke |= Result.bShieldBroke; // VIT1 requirement 6 — independent of the Kill/Weak/Crit tier above
 			}
 		}
 		return Result.bApplied;
@@ -402,15 +412,14 @@ void UFPSRGA_WeaponFire_Hitscan::ActivateAbility(
 		}
 	}
 
-	// Server delivers one marker per activation to the owning client — strongest outcome (Kill > Weak > Crit > Hit).
-	// Fires on ANY damage dealt (door-only hit => plain Hit, since Kill/Weak/Crit are enemy-only above).
+	// Server delivers one marker per activation to the owning client — strongest outcome, now resolved by the single
+	// shared FPSRCombat::ResolveHitMarker (Kill > ShieldBreak > Weak > Crit > Hit, VIT1 §5-7). Fires on ANY damage
+	// dealt (door-only hit => plain Hit, since Kill/ShieldBreak/Weak/Crit are enemy-only above).
 	if (FireCtx.bAuthority && bServerAnyDamage)
 	{
 		if (AFPSRPlayerController* OwnerPC = Cast<AFPSRPlayerController>(Controller))
 		{
-			const EFPSRHitMarkerType MarkerType = bServerKill ? EFPSRHitMarkerType::Kill
-				: (bServerWeak ? EFPSRHitMarkerType::Weak
-				: (bServerCrit ? EFPSRHitMarkerType::Crit : EFPSRHitMarkerType::Hit));
+			const EFPSRHitMarkerType MarkerType = FPSRCombat::ResolveHitMarker(bServerKill, bServerShieldBroke, bServerWeak, bServerCrit);
 			OwnerPC->ClientNotifyHitMarker(MarkerType);
 		}
 	}

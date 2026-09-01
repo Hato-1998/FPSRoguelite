@@ -125,6 +125,17 @@ public:
 	/** Server: set the global freeze flag directly (normally driven by RefreshPauseState). */
 	void SetRunPaused(bool bPaused);
 
+	/** VIT1: server-only monotonic clock (seconds) that STOPS during the §2-2 global freeze (card selection).
+	 *  🔴 Why a new clock — `World->GetTimeSeconds()` keeps running through a freeze (in 4-player co-op, one player
+	 *  spending 30s on a card pick would give EVERY player's/enemy's shield 30s of free regen), and
+	 *  `UFPSRRunDirectorSubsystem::RunClock` pins on boss entry (FPSRRunDirectorSubsystem.cpp:405) and is scaled by
+	 *  TimeScale (:385) — a survival/HUD clock, not a regen time axis.
+	 *  🔴 Why no Tick — SetRunPaused is already the single, edge-guarded transition point (server-authoritative); only
+	 *  the frozen SPAN needs accumulating there, so this costs nothing per-frame.
+	 *  Returns 0 on a client (every vitals calculation that reads this is server-authoritative only). */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Run")
+	float GetCombatClockSeconds() const;
+
 	/** Server-only: has the run hit its terminal end (EndRunFreeze latched bRunEnded)? Distinguishes the two
 	 *  reasons bRunPaused can be up — a permanent end-of-run freeze vs a transient card-selection freeze — for
 	 *  callers that must abort on the former but HOLD on the latter (UFPSRStageDirectorSubsystem::PerformSwap).
@@ -357,6 +368,14 @@ protected:
 	 *  RefreshPauseState early-out, so the world stays frozen behind the result screen. Not replicated — the
 	 *  visible freeze rides the replicated bRunPaused; this resets naturally on the next run (fresh GameState). */
 	bool bRunEnded = false;
+
+	// --- VIT1: freeze-paused combat clock (see GetCombatClockSeconds) — server-only, not replicated. ---------------
+
+	/** Total seconds spent frozen so far. Accumulated in SetRunPaused on the pause->unpause edge. */
+	float AccumulatedFrozenSeconds = 0.0f;
+
+	/** World-time stamp the CURRENT freeze started at (meaningful only while bRunPaused is true). */
+	float FreezeStartedAtWorldTime = 0.0f;
 
 	// ---- Stage transition (ADR 0010 D6) — see the public accessors above for what each field means. ------------
 

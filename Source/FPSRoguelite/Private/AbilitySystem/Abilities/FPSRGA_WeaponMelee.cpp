@@ -87,13 +87,18 @@ void UFPSRGA_WeaponMelee::ActivateAbility(
 	float MeleeAttackDelay = 0.0f;
 	UFPSRWeaponInventoryComponent* Inventory = Avatar->FindComponentByClass<UFPSRWeaponInventoryComponent>();
 	UFPSRWeaponInstance* Instance = Inventory ? Inventory->GetCurrentInstance() : nullptr;
+	float ShieldDamageMultiplier = 1.0f;
 	if (Instance)
 	{
 		const FFPSRWeaponStatBlock& Stats = Instance->GetResolvedStats();
 		Damage = Stats.Damage;
 		MeleeRadius = Stats.MeleeRadius;
 		MeleeAttackDelay = Stats.MeleeAttackDelay;
+		ShieldDamageMultiplier = Stats.ShieldDamageMultiplier;
 	}
+	// VIT1 §5-9 ③: built here, right where ResolvedStats is already read — no new lookup.
+	FFPSRDamageSpec DamageSpec;
+	DamageSpec.ShieldDamageMultiplier = ShieldDamageMultiplier;
 
 	FVector ViewLocation;
 	FRotator ViewRotation;
@@ -169,7 +174,8 @@ void UFPSRGA_WeaponMelee::ActivateAbility(
 
 		bool bAnyHit = false;
 		bool bAnyKill = false;
-		bool bAnyDamage = false; // visual marker: enemies AND destructible doors (friendly players leave DamageDealt 0)
+		bool bAnyShieldBroke = false;
+		bool bAnyDamage = false; // visual marker: enemies AND destructible doors only — never a player (gated on bTargetIsPlayer)
 		if (bAny)
 		{
 			TSet<AActor*> Processed;
@@ -200,31 +206,33 @@ void UFPSRGA_WeaponMelee::ActivateAbility(
 				{
 					continue;
 				}
-				const FPSRCombat::FDamageResult Result = FPSRCombat::ApplyDamage(HitActor, Resolved, Avatar);
+				const FPSRCombat::FDamageResult Result = FPSRCombat::ApplyDamage(HitActor, Resolved, Avatar, DamageSpec);
 				// Markers / kill trigger key on real damage (DamageDealt), so a corpse re-hit in the swing is inert.
-				if (Result.DamageDealt > 0.0f)
+				// !bTargetIsPlayer: an FF hit on a teammate must raise no marker. VIT1 §6 fills DamageDealt on the
+				// player branch now, so the old "player => DamageDealt 0" implicit gate is gone.
+				if (Result.DamageDealt > 0.0f && !Result.bTargetIsPlayer)
 				{
-					bAnyDamage = true; // visual marker for enemies AND destructible doors (not friendly players)
+					bAnyDamage = true; // visual marker for enemies AND destructible doors
 					if (Result.bWasEnemy)
 					{
 						bAnyHit = true;
 						if (Result.bKilled) { bAnyKill = true; FPSRWeaponHooks::NotifyKill(FireCtx, HitActor); }
 						if (WeakpointMult > 1.0f) { bAnyWeak = true; }
+						bAnyShieldBroke |= Result.bShieldBroke; // VIT1 requirement 6
 					}
 				}
 			}
 		}
 
 		// Melee has no client prediction (server-only overlap), so all markers come from the server here.
-		// One pulse per swing, strongest outcome (Kill > Weak > Crit > Hit). (Game.MD §2-14)
-		// Fires on ANY damage dealt (door-only swing => plain Hit, since Kill/Weak are enemy-only above).
+		// One pulse per swing, strongest outcome via the shared resolver (Kill > ShieldBreak > Weak > Crit > Hit,
+		// VIT1 §5-7 / Game.MD §2-14). Fires on ANY damage dealt (door-only swing => plain Hit, since Kill/ShieldBreak/
+		// Weak are enemy-only above).
 		if (bAnyDamage)
 		{
 			if (AFPSRPlayerController* OwnerPC = Cast<AFPSRPlayerController>(Controller))
 			{
-				const EFPSRHitMarkerType MarkerType = bAnyKill ? EFPSRHitMarkerType::Kill
-					: (bAnyWeak ? EFPSRHitMarkerType::Weak
-					: (bSwingCrit ? EFPSRHitMarkerType::Crit : EFPSRHitMarkerType::Hit));
+				const EFPSRHitMarkerType MarkerType = FPSRCombat::ResolveHitMarker(bAnyKill, bAnyShieldBroke, bAnyWeak, bSwingCrit);
 				OwnerPC->ClientNotifyHitMarker(MarkerType);
 			}
 		}

@@ -147,9 +147,10 @@ namespace FPSRCombat
 		}
 	}
 
-	FDamageResult ApplyDamage(AActor* Target, float FinalDamage, AActor* Instigator, FGameplayTag DamageType)
+	FDamageResult ApplyDamage(AActor* Target, float FinalDamage, AActor* Instigator, const FFPSRDamageSpec& Spec)
 	{
-		// U18a forward-compat seam: DamageType (empty = Physical) is threaded to leaf appliers for D3 elemental; no behavior change in U18a.
+		// VIT1: Spec (DamageType + anti-shield multiplier) is threaded to the leaf appliers, which resolve the layer
+		// coefficients from the target's vitals profile. Replaces U18a's forward-compat `FGameplayTag DamageType` seam.
 		FDamageResult Result;
 		if (!Target || FinalDamage <= 0.0f)
 		{
@@ -158,20 +159,24 @@ namespace FPSRCombat
 
 		if (UFPSREnemyHealthComponent* HealthComp = Target->FindComponentByClass<UFPSREnemyHealthComponent>())
 		{
-			// Capture pre-state so kill/damage are TRANSITIONS, not post-facto reads: a corpse re-hit (already dead,
-			// ApplyDamage no-ops) and an overkill (damage clamped to remaining health) both report DamageDealt = 0
-			// and bKilled = false — so feedback (markers / lifesteal event) never fires on a corpse or rewards overkill.
-			// bCountsAsKill gates the combat-CREDIT axes only. A destructible non-enemy (a door, bCountsAsKill=false)
-			// still takes damage and is destroyed — DamageDealt / bApplied / the health component's death all run
-			// unchanged — but it never counts as an enemy hit (bWasEnemy) or a kill (bKilled), so on-kill fragments,
-			// kill markers, and kill credit don't fire on it. Enemies default true → no behavior change.
+			// Capture pre-state so kill is a TRANSITION, not a post-facto read: a corpse re-hit (already dead,
+			// ApplyDamage no-ops) reports bKilled = false — kill markers / kill aggregates never double-fire on a
+			// corpse. bCountsAsKill gates the combat-CREDIT axes only. A destructible non-enemy (a door,
+			// bCountsAsKill=false) still takes damage and is destroyed — DamageDealt / bApplied / the health
+			// component's death all run unchanged — but it never counts as an enemy hit (bWasEnemy) or a kill
+			// (bKilled), so on-kill fragments, kill markers, and kill credit don't fire on it. Enemies default true
+			// -> no behavior change.
 			const bool bCountsAsKill = HealthComp->CountsAsKill();
 			const bool bWasDeadBefore = HealthComp->IsDead();
-			const float HealthBefore = HealthComp->GetHealth();
-			HealthComp->ApplyDamage(FinalDamage, Instigator, DamageType);
+			// 🔴 VIT1 combat regression trap 1: DamageDealt is now the VITALS result's TotalSpent() (shield + health
+			// actually removed), not HealthBefore-HealthAfter — a hit a shield fully absorbs must still count as real
+			// damage (hit-markers / lifesteal / penetration all key off this), and a corpse re-hit / overkill still
+			// naturally reports 0 / clamped (FPSRVitals::ApplyDamage no-ops on a dead target's already-empty pools).
+			const FPSRVitals::FResult VitalsResult = HealthComp->ApplyDamage(FinalDamage, Instigator, Spec);
 			Result.bApplied = true;
 			Result.bWasEnemy = bCountsAsKill;
-			Result.DamageDealt = FMath::Max(0.0f, HealthBefore - HealthComp->GetHealth());
+			Result.DamageDealt = VitalsResult.TotalSpent();
+			Result.bShieldBroke = VitalsResult.bShieldBroke;
 			Result.bKilled = bCountsAsKill && (!bWasDeadBefore && HealthComp->IsDead());
 
 			// GAS-native character behavior (lifesteal etc.): event carries the REAL damage dealt (corpse/overkill = 0).
@@ -189,22 +194,40 @@ namespace FPSRCombat
 			// Player death (DBNO) is a later phase and isn't reported back here, so bKilled stays false. FF is
 			// damage-only: the friendly-player check in ApplyExplosion's knockback loop suppresses the ally launch,
 			// so bKilled being false no longer means an ally gets moved (only that the corpse-skip doesn't apply).
-			Character->ApplyContactDamage(FinalDamage, Instigator, DamageType);
+			// 🔴 VIT1 G1 P2-4 (오진 정정): DamageDealt IS filled here (TotalSpent — misses/DBNO/i-frame all correctly
+			// resolve to 0 via ApplyContactDamage's early-outs), for the mission/director/penetration axes that read
+			// "real damage dealt" regardless of target kind. bWasEnemy stays false — the lifesteal event gate below
+			// is untouched, so "shoot a friendly to heal off their shield" stays impossible (§6 / §11-7).
+			const FPSRVitals::FResult VitalsResult = Character->ApplyContactDamage(FinalDamage, Instigator, Spec);
 			Result.bApplied = true;
+			Result.DamageDealt = VitalsResult.TotalSpent();
+			Result.bShieldBroke = VitalsResult.bShieldBroke;
+			// 🔴 The marker gate the filled DamageDealt above would otherwise re-open (see FDamageResult's own
+			// comment): every damage path keys its hit-marker on `DamageDealt > 0`, which used to be 0 here.
+			Result.bTargetIsPlayer = true;
 			return Result;
 		}
 
 		return Result;
 	}
 
-	void NotifyHitMarker(const AActor* Instigator, bool bCrit, bool bKill)
+	EFPSRHitMarkerType ResolveHitMarker(bool bKill, bool bShieldBreak, bool bWeak, bool bCrit)
+	{
+		if (bKill)        { return EFPSRHitMarkerType::Kill; }
+		if (bShieldBreak) { return EFPSRHitMarkerType::ShieldBreak; }
+		if (bWeak)        { return EFPSRHitMarkerType::Weak; }
+		if (bCrit)        { return EFPSRHitMarkerType::Crit; }
+		return EFPSRHitMarkerType::Hit;
+	}
+
+	void NotifyHitMarker(const AActor* Instigator, bool bCrit, bool bKill, bool bShieldBreak)
 	{
 		const APawn* InstigatorPawn = Cast<APawn>(Instigator);
 		AController* InstigatorController = InstigatorPawn ? InstigatorPawn->GetController() : nullptr;
 		if (AFPSRPlayerController* OwnerPC = Cast<AFPSRPlayerController>(InstigatorController))
 		{
-			const EFPSRHitMarkerType MarkerType = bKill ? EFPSRHitMarkerType::Kill
-				: (bCrit ? EFPSRHitMarkerType::Crit : EFPSRHitMarkerType::Hit);
+			// No bWeak here — an explosion has no single targeted weakpoint (ResolveHitMarker's shared priority order).
+			const EFPSRHitMarkerType MarkerType = ResolveHitMarker(bKill, bShieldBreak, /*bWeak*/ false, bCrit);
 			OwnerPC->ClientNotifyHitMarker(MarkerType);
 		}
 	}
@@ -231,9 +254,10 @@ namespace FPSRCombat
 	}
 
 	FExplosionResult ApplyExplosion(UWorld* World, const FVector& Center, float Radius, float Damage,
-		float CritChance, float CritMultiplier, AActor* Instigator, bool bAllowSelf, float KnockbackStrength, FGameplayTag DamageType)
+		float CritChance, float CritMultiplier, AActor* Instigator, bool bAllowSelf, float KnockbackStrength, const FFPSRDamageSpec& Spec)
 	{
-		// U18a forward-compat seam: DamageType (empty = Physical) is threaded to leaf appliers for D3 elemental; no behavior change in U18a.
+		// VIT1: Spec (DamageType + anti-shield multiplier) is forwarded to every per-target ApplyDamage below.
+		// Replaces U18a's forward-compat `FGameplayTag DamageType` seam.
 		FExplosionResult Outcome;
 		if (!World || Radius <= 0.0f)
 		{
@@ -260,7 +284,8 @@ namespace FPSRCombat
 		bool bAnyEnemyHit = false;
 		bool bAnyCrit = false;
 		bool bAnyKill = false;
-		bool bAnyDamageDealt = false; // visual marker: enemies AND destructible doors (friendly players leave DamageDealt 0)
+		bool bAnyShieldBroke = false;
+		bool bAnyDamageDealt = false; // visual marker: enemies AND destructible doors only — never a player (FF ally or self-damage)
 
 		for (const FOverlapResult& Overlap : Overlaps)
 		{
@@ -291,17 +316,20 @@ namespace FPSRCombat
 			FDamageResult Result;
 			if (FinalDamage > 0.0f)
 			{
-				Result = ApplyDamage(Target, FinalDamage, Instigator, DamageType);
+				Result = ApplyDamage(Target, FinalDamage, Instigator, Spec);
 			}
 
-			if (Result.DamageDealt > 0.0f)
+			// !bTargetIsPlayer: an FF ally — and, critically, the instigator's OWN self-damage (rocket jump), which
+			// is FF-independent — must not raise a hit-marker. See FDamageResult::bTargetIsPlayer.
+			if (Result.DamageDealt > 0.0f && !Result.bTargetIsPlayer)
 			{
-				bAnyDamageDealt = true; // visual marker for enemies AND destructible doors (not friendly players)
+				bAnyDamageDealt = true; // visual marker for enemies AND destructible doors
 				if (Result.bWasEnemy)
 				{
 					bAnyEnemyHit = true;
 					bAnyCrit |= bCrit;
 					bAnyKill |= Result.bKilled;
+					bAnyShieldBroke |= Result.bShieldBroke;
 				}
 			}
 			if (Result.bKilled)
@@ -332,10 +360,10 @@ namespace FPSRCombat
 			}
 		}
 
-		// Fires on ANY damage dealt — enemies AND destructible doors (door-only blast => plain Hit, Crit/Kill enemy-only).
+		// Fires on ANY damage dealt — enemies AND destructible doors (door-only blast => plain Hit, Crit/Kill/ShieldBreak enemy-only).
 		if (bAnyDamageDealt)
 		{
-			NotifyHitMarker(Instigator, bAnyCrit, bAnyKill); // one marker per explosion (strongest outcome)
+			NotifyHitMarker(Instigator, bAnyCrit, bAnyKill, bAnyShieldBroke); // one marker per explosion (strongest outcome)
 		}
 
 		Outcome.bAnyEnemyHit = bAnyEnemyHit;

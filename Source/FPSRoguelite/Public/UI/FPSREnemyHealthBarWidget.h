@@ -27,7 +27,14 @@ public:
 	 *  갖고 있어서, 부모에 동명 이벤트를 두면 재부모화 시 이름 충돌이 난다(같은 계열의 실사고 = LOD1 의
 	 *  HealthBarWidget 충돌, [[cpp-uproperty-name-collides-with-bp]]). 이 이벤트는 기존 함수를 **호출만** 하면 된다.
 	 *
-	 *  BlueprintImplementableEvent = C++ 기본 구현 없음. 구현하지 않은 WBP 는 조용히 아무 일도 하지 않는다(크래시 아님). */
+	 *  BlueprintImplementableEvent = C++ 기본 구현 없음. 구현하지 않은 WBP 는 조용히 아무 일도 하지 않는다(크래시 아님).
+	 *
+	 *  🔴 VIT1 확장 — 시그니처는 그대로다: `HealthComp` 가 이제 `GetShield()`/`GetMaxShield()`/`IsShieldBroken()` 도
+	 *  들고 있고, `OnHealthChanged` 가 실드 전용 변경에도 재발화한다(`OnRep_Shield` 가 같은 델리게이트를 공유 —
+	 *  체력이 안 바뀐 히트도 리페인트 신호를 받는다는 뜻). **초기 1회 동기화**([[umg-event-widget-initial-sync]]):
+	 *  이 이벤트가 발화하는 시점에 WBP 는 `HealthComp` 로부터 Shield/MaxShield 를 즉시 1회 읽어 그려야 한다 —
+	 *  `OnHealthChanged`/`OnShieldBrokenCosmetic` 구독만으로는 위젯이 나중에 붙는 경우(늦은 바인딩)를 못 덮는다.
+	 *  실드 바 콘텐츠 배선은 사용자 작업이다(VIT1 §11-1 HUD 콘텐츠 3종). */
 	UFUNCTION(BlueprintImplementableEvent, Category = "FPSR|Enemy")
 	void BindHealthComponent(UFPSREnemyHealthComponent* HealthComp);
 };

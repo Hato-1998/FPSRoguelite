@@ -11,6 +11,10 @@
 #include "AbilitySystem/Attributes/FPSRHealthSet.h"
 #include "AbilitySystem/Attributes/FPSRCombatSet.h"
 #include "AbilitySystemComponent.h"
+#include "Combat/FPSRVitals.h"
+#include "Combat/FPSRVitalsProfile.h"
+#include "Messages/FPSRGameplayMessageSubsystem.h" // VIT1 requirement 5: local shield-break warning channel
+#include "Messages/FPSRCosmeticMessages.h"
 #include "Weapon/FPSRWeaponInventoryComponent.h"
 #include "Weapon/FPSRWeaponInstance.h"
 #include "Weapon/FPSRWeaponFireComponent.h"
@@ -229,6 +233,47 @@ void AFPSRCharacter::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
 
+	// VIT1 §5-5: server-authoritative shield regen driver. Unlike the tickless swarm enemy (which only recomputes
+	// on a hit), the player needs a periodically-refreshed HUD bar, so this polls the same shared formula at
+	// ShieldRegenUpdateHz instead of only on damage. Throttled: at most 4 players x 10 Hz = 40 calls/sec total.
+	if (HasAuthority())
+	{
+		ShieldRegenDriverAccum += DeltaSeconds;
+		const float UpdateInterval = 1.0f / FMath::Max(ShieldRegenUpdateHz, 1.0f);
+		if (ShieldRegenDriverAccum >= UpdateInterval)
+		{
+			ShieldRegenDriverAccum = 0.0f;
+
+			UAbilitySystemComponent* ASC = GetAbilitySystemComponent();
+			const UFPSRHealthSet* HealthSet = ASC ? ASC->GetSet<UFPSRHealthSet>() : nullptr;
+			// 🔴 Regression trap 6: !IsIncapacitatedLocal() is this class's existing spelling of "IsAlive()" (its own
+			// doc comment defines it as "i.e. NOT alive (DBNO downed, or Dead)") — DBNO must stop shield regen the
+			// same way it stops contact damage below.
+			if (ASC && HealthSet && !IsIncapacitatedLocal())
+			{
+				const float MaxShieldNow = HealthSet->GetMaxShield();
+				const float ShieldNow = HealthSet->GetShield();
+				if (MaxShieldNow > 0.0f && ShieldNow < MaxShieldNow)
+				{
+					const AFPSRGameState* GameState = GetWorld() ? GetWorld()->GetGameState<AFPSRGameState>() : nullptr;
+					const float CombatNow = GameState ? GameState->GetCombatClockSeconds() : 0.0f;
+					const float NewShield = FPSRVitals::ComputeRegeneratedShield(ShieldAtLastDamage, MaxShieldNow,
+						CombatNow - LastDamageCombatTime, ShieldRegenPerSecond, ShieldRegenDelaySeconds, ShieldBrokenRegenDelaySeconds);
+
+					// 🔴 Monotonic increase ONLY (New > Shield, never |New - Shield|) — the second safety net behind
+					// anchor rebasing (§5-4-1): even if some future rebase call site is missed, the driver can never
+					// be the thing that ERASES a card/GE's shield gift. No separate freeze gate is needed either —
+					// CombatNow doesn't advance during a freeze, so New == ShieldNow and this simply doesn't write.
+					if (NewShield > ShieldNow + KINDA_SMALL_NUMBER)
+					{
+						FScopedVitalsWrite Guard(*this);
+						ASC->SetNumericAttributeBase(UFPSRHealthSet::GetShieldAttribute(), NewShield);
+					}
+				}
+			}
+		}
+	}
+
 	UpdateStanceCamera();
 	UpdateCameraFieldOfView(DeltaSeconds);
 	UpdateFirstPersonBodyVisibility();
@@ -398,6 +443,18 @@ void AFPSRCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 		bVisionDelegateBound = false;
 	}
 
+	// VIT1: the ASC + attribute set live on the PlayerState and outlive this pawn, so the Shield value-change binding
+	// must come off with the pawn — otherwise every respawn leaves another dead entry on that delegate.
+	if (ShieldWarningDelegateHandle.IsValid())
+	{
+		if (UAbilitySystemComponent* ASC = GetAbilitySystemComponent())
+		{
+			ASC->GetGameplayAttributeValueChangeDelegate(UFPSRHealthSet::GetShieldAttribute())
+				.Remove(ShieldWarningDelegateHandle);
+		}
+		ShieldWarningDelegateHandle.Reset();
+	}
+
 #if WITH_EDITOR
 	FCoreUObjectDelegates::OnObjectPropertyChanged.Remove(EditorSocketChangedHandle);
 #endif
@@ -505,6 +562,15 @@ void AFPSRCharacter::InitAbilitySystem()
 	{
 		AbilitySystemComponent->InitAbilityActorInfo(PS, this);
 
+		// VIT1 §5-5/§8: bake this character's vitals profile into the attribute set + the regen-driver members right
+		// after the avatar is set — covers the initial spawn AND every respawn/run-reset re-possession. Server-only:
+		// a client's InitAbilitySystem call (from OnRep_PlayerState) must never locally set attributes, only read
+		// the already-replicated values.
+		if (HasAuthority())
+		{
+			ApplyVitalsProfile();
+		}
+
 		// Run-start meta-progression stat seam (U10): server-authoritative, applied once the ASC actor info is ready.
 		if (HasAuthority())
 		{
@@ -521,6 +587,93 @@ void AFPSRCharacter::InitAbilitySystem()
 					HealthSet->OnOutOfHealth.AddUObject(this, &AFPSRCharacter::HandleOutOfHealth);
 				}
 			}
+		}
+
+		// VIT1 requirement 5: the player's own shield-break warning. Deliberately NOT authority-gated (unlike the
+		// out-of-health bind above) — the warning is a LOCAL cosmetic published on this machine's GMS bus, so it has
+		// to be raised on the machine that will draw it, which for a remote co-op player is that client. See
+		// HandleShieldValueChangedForWarning's own comment for why this uses the GAS value-change delegate rather
+		// than UFPSRHealthSet::OnShieldBroken. IsLocallyControlled() is checked at FIRE time inside the handler, not
+		// here: the controller isn't reliably set yet at every InitAbilitySystem entry (PossessedBy vs
+		// OnRep_PlayerState ordering differs by net role).
+		if (!ShieldWarningDelegateHandle.IsValid())
+		{
+			ShieldWarningDelegateHandle = AbilitySystemComponent
+				->GetGameplayAttributeValueChangeDelegate(UFPSRHealthSet::GetShieldAttribute())
+				.AddUObject(this, &AFPSRCharacter::HandleShieldValueChangedForWarning);
+		}
+	}
+}
+
+void AFPSRCharacter::HandleShieldValueChangedForWarning(const FOnAttributeChangeData& Data)
+{
+	// Break edge only (>0 -> 0), matching UFPSRHealthSet::OnShieldBroken's own edge test — a hit that merely chips
+	// the shield is not a warning, and a shield already at 0 must not re-warn on every subsequent hit.
+	if (!(Data.OldValue > 0.0f && Data.NewValue <= 0.0f))
+	{
+		return;
+	}
+
+	// Local player only. A dedicated server draws nothing, and another player's replicated proxy is not this
+	// machine's player — silencing both here keeps the binding itself unconditional (see InitAbilitySystem).
+	if (!IsLocallyControlled())
+	{
+		return;
+	}
+
+	if (UFPSRGameplayMessageSubsystem* GMS = UFPSRGameplayMessageSubsystem::Get(this))
+	{
+		static const FGameplayTag ShieldBrokenChannel = FGameplayTag::RequestGameplayTag(FName("Message.Player.ShieldBroken"));
+		// Reuses the existing cosmetic payload rather than declaring an empty struct for one channel (U8's bus is
+		// typed per-channel; a second near-identical type would just be one more thing a WBP author has to learn).
+		// WorldLocation is the only field that carries meaning here — it costs nothing and a directional/positional
+		// warning treatment may want it.
+		FFPSRCosmeticEventMessage Msg;
+		Msg.WorldLocation = GetActorLocation();
+		GMS->BroadcastMessage(ShieldBrokenChannel, Msg);
+	}
+}
+
+void AFPSRCharacter::ApplyVitalsProfile()
+{
+	UAbilitySystemComponent* ASC = GetAbilitySystemComponent();
+	if (!ASC)
+	{
+		return;
+	}
+
+	// Everything below is a vitals-system write (initialization, not a card/GE) — guarded so UFPSRHealthSet::
+	// PostAttributeChange's anchor-rebase branch doesn't fight the explicit anchor set at the end of this function.
+	FScopedVitalsWrite Guard(*this);
+
+	if (VitalsProfile)
+	{
+		ASC->SetNumericAttributeBase(UFPSRHealthSet::GetMaxHealthAttribute(), VitalsProfile->MaxHealth);
+		ASC->SetNumericAttributeBase(UFPSRHealthSet::GetHealthAttribute(), VitalsProfile->MaxHealth);
+		// MaxShield's own PostAttributeChange rule mirrors this into Shield too (still inside this guard scope, so
+		// it fires no anchor rebase) — the explicit SetShield right after makes the end state exact regardless
+		// (§5-4-1's worked example: a stale partial shield from a prior life must land at the NEW full value, not
+		// merely +Delta from wherever it happened to be).
+		ASC->SetNumericAttributeBase(UFPSRHealthSet::GetMaxShieldAttribute(), VitalsProfile->MaxShield);
+		ASC->SetNumericAttributeBase(UFPSRHealthSet::GetShieldAttribute(), VitalsProfile->MaxShield);
+
+		ShieldRegenPerSecond = VitalsProfile->ShieldRegenPerSecond;
+		ShieldRegenDelaySeconds = VitalsProfile->ShieldRegenDelaySeconds;
+		ShieldBrokenRegenDelaySeconds = VitalsProfile->ShieldBrokenRegenDelaySeconds;
+	}
+	// VitalsProfile null = current no-shield behavior (§11-1 migration in progress) — leave MaxHealth/Health/
+	// MaxShield/Shield at whatever the attribute set already holds (its own 100/100/0/0 construction defaults on a
+	// brand-new PlayerState); the regen fields stay at this character's class defaults (0 rate — moot at MaxShield 0).
+
+	// Anchor initialization (G1 P2-1 후반): a fresh possession starts fully charged with no pending regen delay, so
+	// an immediate query reads back MaxShield, not 0. Mirrors UFPSREnemyHealthComponent::InitializeVitals exactly —
+	// one shared rule, two storages.
+	ShieldAtLastDamage = ASC->GetNumericAttribute(UFPSRHealthSet::GetMaxShieldAttribute());
+	if (const UWorld* World = GetWorld())
+	{
+		if (const AFPSRGameState* GameState = World->GetGameState<AFPSRGameState>())
+		{
+			LastDamageCombatTime = GameState->GetCombatClockSeconds();
 		}
 	}
 }
@@ -1590,19 +1743,21 @@ void AFPSRCharacter::EndGraceWindow()
 	RefreshPawnCollisionResponse();
 }
 
-void AFPSRCharacter::ApplyContactDamage(float DamageAmount, AActor* DamageInstigator, FGameplayTag DamageType)
+FPSRVitals::FResult AFPSRCharacter::ApplyContactDamage(float DamageAmount, AActor* DamageInstigator, const FFPSRDamageSpec& Spec)
 {
-	(void)DamageType; // U18a seam (D3 elemental)
 	if (!HasAuthority() || DamageAmount <= 0.0f)
 	{
-		return;
+		return FPSRVitals::FResult();
 	}
 
 	// Non-alive players take no contact damage: a downed (DBNO) player is invulnerable while awaiting revive (a swarm
 	// would otherwise instakill the downed body), and a dead player takes no repeated corpse hits. (U9 §2-13)
+	// 🔴 Also the invariant V1 "unreachable state" exception (VIT1 §5-1): a Health==0 player is always incapacitated,
+	// so this early-out is what makes "SDM==0 hits a 0-health target" unreachable rather than something the vitals
+	// math has to special-case.
 	if (IsIncapacitatedLocal())
 	{
-		return;
+		return FPSRVitals::FResult();
 	}
 
 	const UWorld* World = GetWorld();
@@ -1613,31 +1768,81 @@ void AFPSRCharacter::ApplyContactDamage(float DamageAmount, AActor* DamageInstig
 	// Server-authoritative timestamp set in BeginGraceWindow.
 	if (Now < GraceUntil)
 	{
-		return;
+		return FPSRVitals::FResult();
 	}
 
 	// Invulnerability frames: ignore further hits within DamageInvulnerabilityDuration of the last
 	// accepted hit, so a swarm can't stack damage in a single window (per-player, server-authoritative).
 	if ((Now - LastDamagedTime) < DamageInvulnerabilityDuration)
 	{
-		return;
+		return FPSRVitals::FResult();
 	}
 	LastDamagedTime = Now;
+
+	UAbilitySystemComponent* ASC = GetAbilitySystemComponent();
+	const UFPSRHealthSet* HealthSet = ASC ? ASC->GetSet<UFPSRHealthSet>() : nullptr;
+	if (!ASC || !HealthSet)
+	{
+		return FPSRVitals::FResult();
+	}
+
+	// VIT1 two-layer distribution (§5-1) — the shared pure function, same as the swarm's health component.
+	FPSRVitals::FPool Pool;
+	Pool.Shield = HealthSet->GetShield();
+	Pool.MaxShield = HealthSet->GetMaxShield();
+	Pool.Health = HealthSet->GetHealth();
+	Pool.MaxHealth = HealthSet->GetMaxHealth();
+
+	// §9 composition rule — the ONLY receiver with two mitigation sources: the profile (what this hero is innately
+	// resistant to, authored, run-constant) times the ShieldDefense/HealthDefense attribute (what cards add this
+	// run, base 1.0). The swarm has no attribute layer, so its profile coefficient IS the final value.
+	FPSRVitals::FMitigation Mit;
+	float ProfileShieldDefense = 1.0f;
+	float ProfileHealthDefense = 1.0f;
+	if (VitalsProfile)
+	{
+		VitalsProfile->ResolveDefense(Spec.DamageType, ProfileShieldDefense, ProfileHealthDefense);
+		Mit.MaxTotalReduction = VitalsProfile->MaxTotalReduction;
+	}
+	Mit.ShieldDefense = ProfileShieldDefense * HealthSet->GetShieldDefense();
+	Mit.HealthDefense = ProfileHealthDefense * HealthSet->GetHealthDefense();
+
+	const FPSRVitals::FResult Result = FPSRVitals::ApplyDamage(Pool, DamageAmount, Spec, Mit);
+
+	{
+		// Vitals-system write: guarded so the Shield delta below doesn't get double-counted by the anchor-rebase
+		// branch in UFPSRHealthSet::PostAttributeChange — this function sets the anchor explicitly right after.
+		FScopedVitalsWrite Guard(*this);
+		if (Result.ShieldSpent > 0.0f)
+		{
+			ASC->ApplyModToAttribute(UFPSRHealthSet::GetShieldAttribute(), EGameplayModOp::Additive, -Result.ShieldSpent);
+		}
+		if (Result.HealthSpent > 0.0f)
+		{
+			ASC->ApplyModToAttribute(UFPSRHealthSet::GetHealthAttribute(), EGameplayModOp::Additive, -Result.HealthSpent);
+		}
+	}
+
+	// Re-anchor the regen clock to THIS hit (§5-4-1's "ApplyContactDamage" row — the delayed-regen restart IS the
+	// point of this system: any hit, even a Shield-only one, pushes the next regen tick back out).
+	ShieldAtLastDamage = HealthSet->GetShield();
+	if (const AFPSRGameState* GameState = World ? World->GetGameState<AFPSRGameState>() : nullptr)
+	{
+		LastDamageCombatTime = GameState->GetCombatClockSeconds();
+	}
 
 	// Closed-loop director sensor (P0a-0): record the ACCEPTED incoming hit for IncomingDamageRate. Server-only;
 	// the sensor classifies the source from DamageInstigator (enemy/boss counted; FF/self/door/mission/env
 	// excluded) — the damage-bridge signature is unchanged. (RunFlow §2-8-2)
+	// 🔴 VIT1 §11-8 point 2: feeds the RESOLVED total (shield + health actually spent), not the raw pre-mitigation
+	// DamageAmount — the director should read "how much this hit actually hurt", which the old raw value overstated
+	// once a shield exists. Director threshold re-tuning is a tracked follow-up (§11-8), not this unit's scope.
 	if (World)
 	{
 		if (UFPSRDirectorSensorSubsystem* Sensor = World->GetSubsystem<UFPSRDirectorSensorSubsystem>())
 		{
-			Sensor->NotifyPlayerDamageTaken(this, DamageAmount, DamageInstigator);
+			Sensor->NotifyPlayerDamageTaken(this, Result.TotalSpent(), DamageInstigator);
 		}
-	}
-
-	if (UAbilitySystemComponent* ASC = GetAbilitySystemComponent())
-	{
-		ASC->ApplyModToAttribute(UFPSRHealthSet::GetHealthAttribute(), EGameplayModOp::Additive, -DamageAmount);
 	}
 
 	// Tell the owning client which direction the hit came from (CoD-style damage indicator, §2-14). Cosmetic,
@@ -1647,6 +1852,66 @@ void AFPSRCharacter::ApplyContactDamage(float DamageAmount, AActor* DamageInstig
 		if (AFPSRPlayerController* PC = Cast<AFPSRPlayerController>(GetController()))
 		{
 			PC->ClientNotifyDamageFrom(DamageInstigator->GetActorLocation());
+		}
+	}
+
+	return Result;
+}
+
+void AFPSRCharacter::ApplyHealing(float Amount, AActor* HealInstigator)
+{
+	(void)HealInstigator; // no per-source behavior yet — kept for a future healer-credit hook (matches the DamageInstigator shape)
+	if (!HasAuthority() || Amount <= 0.0f || IsIncapacitatedLocal())
+	{
+		return;
+	}
+
+	UAbilitySystemComponent* ASC = GetAbilitySystemComponent();
+	if (!ASC)
+	{
+		return;
+	}
+
+	// Health only — the shield refills itself (requirement 4). This does NOT touch Shield/ShieldAtLastDamage at all,
+	// so no FScopedVitalsWrite is needed here (unlike ApplyContactDamage/the regen driver, this never writes Shield).
+	ASC->ApplyModToAttribute(UFPSRHealthSet::GetHealthAttribute(), EGameplayModOp::Additive, Amount);
+}
+
+void AFPSRCharacter::RebaseShieldAnchorOnExternalWrite(float Delta)
+{
+	// §5-4-1: no-op while a vitals-system writer (the regen driver / ApplyContactDamage / ApplyVitalsProfile /
+	// ResetShieldToBroken) is actively setting Shield itself — those writers already set the anchor explicitly, so
+	// rebasing on top of that would double-count the very change this guard exists to make invisible here. Everywhere
+	// ELSE a card GE / the MaxShield-linked auto-increase reaches this and DOES need the anchor nudged, or the regen
+	// driver's very next tick would silently erase whatever that write just added.
+	if (bVitalsWriting)
+	{
+		return;
+	}
+
+	float MaxShieldNow = 0.0f;
+	if (const UAbilitySystemComponent* ASC = GetAbilitySystemComponent())
+	{
+		MaxShieldNow = ASC->GetNumericAttribute(UFPSRHealthSet::GetMaxShieldAttribute());
+	}
+	// Deliberately does NOT touch LastDamageCombatTime — the card wasn't a hit, so the remaining regen delay (if
+	// any) keeps counting down exactly as it already was (§5-4-1: "왜 시각을 안 건드리나").
+	ShieldAtLastDamage = FMath::Clamp(ShieldAtLastDamage + Delta, 0.0f, MaxShieldNow);
+}
+
+void AFPSRCharacter::ResetShieldToBroken()
+{
+	FScopedVitalsWrite Guard(*this);
+	if (UAbilitySystemComponent* ASC = GetAbilitySystemComponent())
+	{
+		ASC->SetNumericAttributeBase(UFPSRHealthSet::GetShieldAttribute(), 0.0f);
+	}
+	ShieldAtLastDamage = 0.0f;
+	if (const UWorld* World = GetWorld())
+	{
+		if (const AFPSRGameState* GameState = World->GetGameState<AFPSRGameState>())
+		{
+			LastDamageCombatTime = GameState->GetCombatClockSeconds();
 		}
 	}
 }

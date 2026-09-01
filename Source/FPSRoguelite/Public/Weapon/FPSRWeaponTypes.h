@@ -51,6 +51,11 @@ struct FPSROGUELITE_API FFPSRWeaponStatBlock
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon")
 	float Damage = 10.0f;
 
+	/** Anti-shield multiplier (VIT1). 1 = ordinary · >1 = strong against shields (sniper) · 0 = shield-ignoring (the
+	 *  whole hit overflows to health). No effect on health damage — it only multiplies in the shield layer (§5-1). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Damage", meta = (ClampMin = "0.0", UIMax = "4.0"))
+	float ShieldDamageMultiplier = 1.0f;
+
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Fire")
 	EFPSRFireMode FireMode = EFPSRFireMode::FullAuto;
 
@@ -187,7 +192,10 @@ enum class EFPSRStatCompare : uint8
 
 /** Stat axis a weapon modifier targets. Maps 1:1 to an FFPSRWeaponStatBlock field (compile-checked switch in
  *  the resolver). P4-B-1 card pool uses MagSize / FireRate / RecoilVertical; extend by adding a case in
- *  UFPSRWeaponInstance::RecomputeResolved. */
+ *  UFPSRWeaponInstance::RecomputeResolved.
+ *  🔴 ShieldDamageMultiplier (VIT1) is appended LAST, never inserted in the middle — this uint8 is stored by value
+ *  on authored card DataAssets (UCardEffect_WeaponStat), so renumbering would silently repoint an existing card at
+ *  a different axis (same rule as EFPSRHitMarkerType). */
 UENUM(BlueprintType)
 enum class EFPSRWeaponStat : uint8
 {
@@ -196,7 +204,8 @@ enum class EFPSRWeaponStat : uint8
 	RecoilVertical UMETA(DisplayName = "Recoil (Vertical)"),
 	Damage         UMETA(DisplayName = "Damage"),
 	SpreadDegrees  UMETA(DisplayName = "Spread"),
-	ReloadTime     UMETA(DisplayName = "Reload Time")
+	ReloadTime     UMETA(DisplayName = "Reload Time"),
+	ShieldDamageMultiplier UMETA(DisplayName = "Shield Damage Multiplier")
 };
 
 /** Out-of-line: FFPSRWeaponStatBlock::GetAxisValue is declared above EFPSRWeaponStat (struct order in this header),
@@ -211,6 +220,7 @@ inline float FFPSRWeaponStatBlock::GetAxisValue(EFPSRWeaponStat Axis) const
 	case EFPSRWeaponStat::Damage:         return Damage;
 	case EFPSRWeaponStat::SpreadDegrees:  return SpreadDegrees;
 	case EFPSRWeaponStat::ReloadTime:     return ReloadTime;
+	case EFPSRWeaponStat::ShieldDamageMultiplier: return ShieldDamageMultiplier;
 	default:                              return 0.0f;
 	}
 }

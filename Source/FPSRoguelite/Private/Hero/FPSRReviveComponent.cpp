@@ -152,6 +152,11 @@ void UFPSRReviveComponent::PerformRevive()
 	{
 		OwnerChar->ApplyDownedLocomotion(false);
 
+		// VIT1 §5-5 revive row: come back with the shield fully BROKEN (0), not whatever it happened to hold before
+		// going down — the longer broken-regen delay then covers most of the post-revive invuln window below, so
+		// the shield starts refilling right as the player becomes vulnerable again, not the instant they stand up.
+		OwnerChar->ResetShieldToBroken();
+
 		// Post-revive grace (§2-13): a brief window of invulnerability + enemy pass-through so the player isn't
 		// instantly re-downed by the swarm at the spot they fell. Server-authoritative (we're on the server tick).
 		OwnerChar->BeginGraceWindow(PostReviveInvulnSeconds);

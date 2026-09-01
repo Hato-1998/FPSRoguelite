@@ -5,6 +5,7 @@
 #include "Engine/DataAsset.h"
 #include "Templates/SubclassOf.h"
 #include "Enemy/FPSREnemyBase.h" // full type: the inline spawn-rule accessors deref TSubclassOf<AFPSREnemyBase> (needs StaticClass)
+#include "Combat/FPSRVitalsProfile.h" // FFPSRVitalsDeckModifier (VIT1)
 #include "FPSREnemyRosterDataAsset.generated.h"
 
 /** Run context handed to a spawn rule so it can scale its weight by progression (Game.MD §2-12 — e.g. the ranged
@@ -71,6 +72,13 @@ public:
 	/** Polymorphic mix rules (instanced so designers pick a rule type per entry in the asset editor). */
 	UPROPERTY(EditAnywhere, Instanced, Category = "Roster")
 	TArray<TObjectPtr<UFPSREnemySpawnRule>> SpawnRules;
+
+	/** VIT1 / ADR 0014 — this roster's difficulty-tier "deck" vitals multiplier, shared by every enemy this roster
+	 *  spawns (user decision 2026-09-01: "the same deck shares one set"). Identity (all 1.0) until a difficulty pass
+	 *  authors per-tier rosters. The spawn subsystem folds this with each spawned enemy's own VitalsProfile once at
+	 *  spawn (FFPSRResolvedVitals::Resolve) — no per-enemy replication, no runtime re-lookup. */
+	UPROPERTY(EditAnywhere, Category = "Roster")
+	FFPSRVitalsDeckModifier VitalsModifier;
 
 	/** Server: weighted-random pick of an enemy class for the given run context. Returns null when no rule is
 	 *  eligible (the caller then falls back to its single configured class). */

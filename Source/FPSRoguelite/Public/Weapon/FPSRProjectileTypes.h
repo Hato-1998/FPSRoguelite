@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Combat/FPSRVitals.h"
 #include "FPSRProjectileTypes.generated.h"
 
 class UFPSRWeaponInstance;
@@ -85,4 +86,12 @@ struct FPSROGUELITE_API FFPSRProjectileParams
 	 *  avoiding over-/partial-refunds (AmmoOnMiss + MultiShot on a projectile weapon is an unsupported rare combo). */
 	UPROPERTY(Transient)
 	bool bSingleProjectileActivation = true;
+
+	/** VIT1: the anti-shield multiplier (and DamageType) baked from the weapon's resolved stats AT LAUNCH. A
+	 *  projectile is separated from its shooter in time and space — re-reading weapon state at IMPACT would pick up
+	 *  a weapon swap or a card eaten mid-flight, exactly the reason Pierce/GravityScale already travel this way
+	 *  instead of being re-resolved on arrival (VIT1 §5-9). Not a UPROPERTY (like the rest of this struct's plain
+	 *  members it needs no editor exposure), and safe to leave out of replication for the same reason WeaponInstance
+	 *  is: FFPSRProjectileParams is server-only state, never listed in GetLifetimeReplicatedProps. */
+	FFPSRDamageSpec DamageSpec;
 };

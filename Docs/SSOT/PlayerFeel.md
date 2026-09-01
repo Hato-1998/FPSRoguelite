@@ -52,12 +52,32 @@
     - ⚠️ **영향 구간 = V ∈ (600, 1000)**: 속도 카드·내리막 모멘텀·벽점프 착지 등으로 이 구간에서 슬라이드하면 진입속도가 오른다(예: V=650이면 900→975). V≤600과 V≥1000은 무변화. 되돌리려면 `SlideMaxEntrySpeed` 한 값만 900으로.
   - **후속**: 벽 매달리기·등반·벽점프(3단계) · GAS 어트리뷰트 연결(카드로 이동 수치 변경) · `GetSpreadMultiplier()`의 heat 시스템 소비 배선 · 대시 재제작.
 - **최대체력 증가 = 즉시 회복(확정 2026-06-02)**: `MaxHealth`가 증가하면(체력 카드 등) **증가분만큼 현재 `Health`도 함께 증가**(서버 권위, `UFPSRHealthSet::PostAttributeChange`에서 처리·새 최대치로 clamp). +체력 업그레이드 선택의 즉각적 체감. 감소 시는 다음 Health 변경 때 clamp로 캡.
+  - 🔁 **`MaxShield` 도 같은 규칙(2026-09-01, VIT1)** — 대칭으로 둔다(권위 전용 가드도 동일). 추가로 **`MaxShield` 가 0 이 되면 `Shield` 도 0** 이다("실드 포기하고 체력↑" 카드가 유령 실드를 남기지 않게).
+
+- 🔴 **생존 자원 = 실드 + 체력 2층 (확정 2026-09-01, VIT1 — 명세 `Docs/Specs/VIT1_ShieldHealthTwoLayer.md`)**
+  플레이어와 **모든 몬스터**가 같은 규칙을 쓴다. 실드가 먼저 닳고 **초과분이 체력으로 이월**되며, 층마다 데미지 타입별 방어 계수를 따로 갖는다. `MaxShield = 0` = 실드 없음(분기가 아니라 산술로 흡수된다).
+  - **체력은 스스로 안 찬다 / 실드는 스스로 찬다.** 회복 경로 4종 = 힐팩·흡혈 카드·부활 50%·`MaxHealth` 증가분 (`CombatWeaponCard.md` §2-3-5 「체력 회복 = 조건부」).
+  - **실드 재생 지연은 2단계** — 부분 손상보다 **완파(0 도달)가 더 오래** 멈춘다(헤일로식). "파손 여부"가 데이터축이라 카드가 붙을 자리가 된다.
+  - 🔴 **재생 시계는 §2-2 전역 프리즈 동안 멈춘다.** `AFPSRGameState` 의 프리즈-멈춤 전투시계(틱 0 — `SetRunPaused` 엣지에서 동결 구간만 누적)를 쓴다. **periodic GE·생 타이머로 만들면 안 된다** — 엔진이 월드 `FTimerManager` 로 돌려서, 4인 협동에서 한 명이 카드 고르는 동안 전원 실드가 공짜로 충전된다(`Enemy.md` §2-6 「시간축·상태이상 계약」과 같은 기제. 그 가드는 엘리트 ASC 에만 있고 **플레이어 ASC 에는 없다**).
+  - **DBNO 중 실드 재생 정지** · **부활 = 체력 50% + 실드 0(완파 상태)** 에서 시작. 부활 직후 `PostReviveInvuln` 5s 동안 완파 지연이 거의 흘러, 무적이 풀린 직후부터 차기 시작한다.
+  - ⚠️ **i-frame 재조정이 동반돼야 한다** — `DamageInvulnerabilityDuration`(현행 0.25s)이 이미 "연속 피격 흡수" 역할을 하고 있었는데 실드가 그 위에 얹히면 스웜 근접 압박이 사라질 수 있다. 값 결정 = PIE 체감 후 사용자(권장 탐색 0.10~0.25s).
+  - ⚠️ **하강 나선** — 체력이 단조 감소 자원이 되므로 힐팩 밀도가 난이도의 주 손잡이가 된다. 4인 협동에서 한 명이 계속 다운되는 스노우볼을 막는 유일한 장치다.
 
 ### 2-14. 게임필 / 피드백 / 공간 지각 (확정 2026-05-30)
 1인칭 스웜 특성상 사각지대(등 뒤·측면) 무방비를 해소하고 대량학살 쾌감을 극대화한다.
 - **공간 지각**: 사각지대(특히 등 뒤) 접근 시 괴성/경고 사운드 + **화면 테두리 방향성 위협 인디케이터(Threat Indicator) UI**(시야각 밖에서 적 접근/공격 판정 거리 진입 시)
 - **오디오**: 몬스터 발소리 구체화, 위협/경고 사운드(Significance 티어 연동 — §5-1)
 - **타격감(Juice)**: 크로스헤어 **히트마커** + 피격 사운드 / 적 처치 시 **경량 파편(Gibs)·팝 연출**(과도한 연산 금지) / 크리티컬·처치 시 **가볍고 맑은 핑(Ping)** 사운드
+- 🔴 **실드 파손 피드백 (확정 2026-09-01, VIT1)** — 3방향 전부 **신규 복제 프로퍼티 0 · 신규 RPC 0** 으로 만든다(전부 이미 복제되는 값의 `OnRep` 파생이다).
+  | 누구에게 | 무엇 | 어떻게 |
+  |---|---|---|
+  | **공격자** (적 실드를 깼다) | 전용 히트마커 | `EFPSRHitMarkerType::ShieldBreak`(enum **말미** 추가). 집계 우선순위 = **Kill > ShieldBreak > Weak > Crit > Hit** — 실드 파손은 적 한 마리당 한 번뿐인 이산 사건이라 매 타격 수식어(Weak/Crit)보다 위다 |
+  | **주변 클라** (적 연출) | 실드 깨지는 이펙트 | `OnRep_Shield` 의 0 교차 엣지 → 코스메틱 델리게이트. U20 의 `OnRep_bDead → OnDeathCosmetic` 과 같은 패턴 |
+  | **본인** (내 실드가 깨졌다) | 위험 경고 | 클라가 복제된 `Shield` 어트리뷰트에서 스스로 0 교차를 판정 → GMS 로컬 pub/sub(`Message.Player.ShieldBroken`, 페이로드 `FFPSRCosmeticEventMessage`). 서버 RPC 불요. 🔴 **훅 = `ASC->GetGameplayAttributeValueChangeDelegate(Shield)`** (`AFPSRCharacter::HandleShieldValueChangedForWarning`), **`UFPSRHealthSet::PostAttributeChange`/`OnShieldBroken` 이 아니다** — 후자는 그 클라가 해당 어트리뷰트의 애그리게이터를 들고 있을 때만 도는 경로라(엔진 `GameplayEffect.cpp:3682` `SetBaseAttributeValueFromReplication` 의 else 분기는 `AttributeValueChangeDelegates` 만 브로드캐스트한다) **원격 협동 플레이어가 경고를 못 받는다**. C3 전체대조에서 잡힘(2026-09-02) |
+  | **팀원** (누가 위험한가) | HUD 실드바 | PlayerState ASC 어트리뷰트라 이미 전원에게 복제된다 — **바인딩만** |
+  - ⚠️ 히트마커 집계 삼항 사슬이 종전 **5곳에 복붙**돼 있었다(Hitscan/ChargeLaser/Melee/Projectile/`NotifyHitMarker`) → VIT1 이 `FPSRCombat::ResolveHitMarker` 단일 소유자로 접었다. 새 마커 종류를 넣을 때 5곳을 똑같이 고치는 일은 이제 없다.
+  - 🔴 **히트마커는 플레이어를 때렸을 때 뜨지 않는다 — FF 아군도, 자폭도**(확정 2026-09-02, VIT1 C3). 판정축 = `FPSRCombat::FDamageResult::bTargetIsPlayer`. 종전에는 이 규칙이 *암묵적*이었다(플레이어 분기가 `DamageDealt` 를 0 으로 남겨서 5곳의 `DamageDealt > 0` 게이트가 저절로 닫혔다). VIT1 §6 이 미션·디렉터·관통을 위해 그 값을 **채우면서** 게이트가 조용히 열렸고, **자폭은 FF 설정과 무관**하므로(`ResolveDamage`: `Target == Instigator → bAllowSelf ? BaseDamage : 0`) **로켓 점프마다 자기 화면에 마커가 뜨는** 회귀가 됐다. 이제 5곳 전부 `bTargetIsPlayer` 로 **명시 게이트**한다 — 사라진 0 에 기대지 않는다.
+  - ⚠️ §2-14 「HUD 위협 큐 원칙」의 하드캡(시각 큐 동시 ≤3)과 충돌하지 않는지 볼 것 — 실드 파손 경고는 **본인 피격 계열**이라 잡몹 개별 표시가 아니고, 히트마커는 크로스헤어 자리라 큐를 안 먹는다.
 - 구현: 핵심(히트마커·핑·위협 인디케이터·기본 오디오) **P4**, 폴리시 **P7**
 - **구현 상태(P4-D)**: `UFPSRPlayerFeedbackComponent`(로컬·비복제·이벤트형) + PC Client RPC. ① **히트마커**(서버권위 Hit/Crit/Kill, 활성화당 1회, Unreliable) ② **피격 방향 인디케이터**(CoD식: `ApplyContactDamage`→오너클라, 카메라 기준 각도) ③ **원거리 타겟 사전경고**(다수소스 id별 추적·각도배열·추적Tick·Reliable; ~~생산자=원거리 적 AI는 후속~~ → 🔁 *정정 2026-08-13(M0 EC ④ 재대조)*: **생산자 배선은 완료됐다** — `AFPSRRangedEnemyBase`가 텔레그래프 시작/종료에 `SendRangedWarning(true/false)`를 호출한다(`FPSRRangedEnemyBase.cpp:74,100,219`, 구현 `:203`). 디버그 `FPSR.TestDamageDir`/`FPSR.TestRangedWarn`). WBP(GameHUD 컨테이너+RunHUD+HitMarker+ThreatIndicator). **설계 정제(2026-06-09)**: 근접/사각지대 위협의 *상시 시각 표시*는 번잡으로 제외 → **사운드 등 타 방식으로 이전**(오디오 단계). ~~핑/Gibs/사각오디오는 후속.~~ → 🔁 *정정 2026-08-13(M0 EC ④ 재대조)*: **사각 오디오는 V1 완료**(`UFPSRBlindspotAudioComponent`, `da761449` — 단 큐가 `/Engine/VREditor/…/Camera_Shutter` **엔진 에디터 에셋 플레이스홀더**라 프로덕션 사운드 교체가 **M2**, 쿡 생존 감사 = `Roadmap.md` §7-6 M0 (d)). **핑·Gibs는 여전히 미착수** — `Source/` 전체에 `Ping` 참조 **0**이다(킬/크릿 핑 사운드 → **M2** · 팀 핑(수동 1키 + 위험 자동) → **M4**. `Roadmap.md` §7-3 P4-D 각주와 동일). **히트마커 최종 연출**은 크로스헤어/발사체 작업 후 재확인.
 - **크로스헤어 — 2층 구조 + 플레이어 설정 (등재 2026-08-11)**

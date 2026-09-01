@@ -10,6 +10,8 @@
 #include "Enemy/FPSRFlowFieldComputer.h" // EFPSRFieldQuery (front-chase distance status, U P-D)
 #include "Enemy/FPSREnemyAllocator.h"
 #include "Enemy/FPSREnemyRosterDataAsset.h"
+#include "Enemy/FPSREnemyHealthComponent.h" // VIT1: InitializeVitals at Acquire time
+#include "Combat/FPSRVitalsProfile.h" // VIT1: FFPSRResolvedVitals::Resolve(profile x deck)
 #include "Run/FPSRRunScheduleDataAsset.h" // C3: EvalStageAt(...).MaxEliteAlive — AcquireEnemy's elite-cap gate
 #include "Hero/FPSRCharacter.h"
 #include "Core/FPSRLogChannels.h"
@@ -1568,6 +1570,19 @@ AFPSREnemyBase* UFPSREnemySpawnSubsystem::AcquireEnemy(const FVector& Location, 
 
 	// Activate and add to active set.
 	Enemy->Activate(SpawnLocation);
+
+	// VIT1 §8: resolve this archetype's survival spec (its own VitalsProfile x this roster's deck multiplier) and
+	// bake it into the health component. MUST run AFTER Activate() — Activate() calls HealthComponent::ResetForReuse()
+	// internally, which fills the pool from the STALE MaxHealth (a prior life's regime, or the BP editor default on
+	// a fresh spawn); InitializeVitals below overwrites it with the freshly-resolved spec. The spawn subsystem is the
+	// one place that knows both the enemy's own profile AND the active deck, so the fold happens here, once, rather
+	// than re-resolved on every hit.
+	if (UFPSREnemyHealthComponent* EnemyHealthComp = Enemy->GetHealthComponent())
+	{
+		const FFPSRVitalsDeckModifier Deck = EnemyRoster ? EnemyRoster->VitalsModifier : FFPSRVitalsDeckModifier();
+		const FFPSRResolvedVitals Resolved = FFPSRResolvedVitals::Resolve(Enemy->GetVitalsProfile(), Deck, EnemyHealthComp->GetMaxHealth());
+		EnemyHealthComp->InitializeVitals(Resolved);
+	}
 
 	// Multimap Tier 0: inherit the spawn point's MapId (unset = Default single-map). Set explicitly on every acquire so a
 	// pooled enemy reused in a different map never carries a stale MapId; the movement pass keeps it synced as it moves.
