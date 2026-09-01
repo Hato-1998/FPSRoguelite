@@ -8,7 +8,7 @@
 | 브랜치 | `phase/m1-shield-2layer` |
 | 작성 모델 | `claude-opus-5` (§6-5-2 개정 2026-08-26 — C1 설계 담당은 Opus, Fable은 G1/G2 게이트) |
 | 작성일 / 최종 갱신 | 2026-09-01 / 2026-09-01 |
-| 상태 | **`확정` — G1 플랜 게이트 통과**(3회차, 2026-09-01. P1 0 · P2 0 · 미폐쇄 P3 0). 다음 = 사용자 승인 → C2. 원장 = §13-0 |
+| 상태 | **`구현완료` — C2 착지 + C3 부분 검증 통과**(2026-09-01, `3815285f`). 남은 것 = **C3 전체 diff 대조 + G2 머지 게이트**. 원장 = §13-0(G1) · §13-2(C3) |
 | 관련 SSOT | `CombatWeaponCard.md` §2-3-1·§2-3-5·§2-3-7·§2-3-8·§2-3-9 · `Enemy.md` §2-6·§2-10 · `PlayerFeel.md` §2-13·§2-14 · `RunFlow.md` §2-2·§2-8 · `Architecture/0013`·`0014` |
 | 관련 메모리 | `[[reason-in-multiplayer-terms]]` `[[production-structure-first]]` `[[code-is-immutable-structure-only]]` `[[push-model-off-in-packaged-build]]` `[[cpp-uproperty-name-collides-with-bp]]` `[[extensibility-first-designer-tooling]]` `[[da-edits-are-user-work]]` `[[do-not-launch-game]]` |
 | 보드 행 | [실드/체력 2층 데미지 구조](https://app.notion.com/3be3972ddd88813bb054d5c8ac0a3ee2) — M1 · 미듐 · M |
@@ -880,3 +880,33 @@ C2(Sonnet 구현) 중 명세에 없는 판단이 필요해지면 **추측해서 
 
 - **레드팀에 무엇을 줬나**: (C3 에서 기입)
 - **G1↔G2 사이에 들어간 "플랜에 없던 구조 결정"**: (C3 에서 세어 기입 — §6-5-2 의 명시 요구)
+
+---
+
+## 13-2. C3 검증 원장 (2026-09-01, Opus · 커밋 `3815285f`)
+
+### 통과한 것 (도구 결과 원문)
+
+| # | 검사 | 결과 |
+|---|---|---|
+| 2 | 빌드 `-DisableUnity` | **`Result: Succeeded`** (35.69s) |
+| 2 | 빌드 `-DisableAdaptiveUnity -ForceUnity` | **`Result: Succeeded`** (14.29s). `[Adaptive Build] Excluded from … unity file:` 줄 **없음**, `C4459`/`C2084` **없음** |
+| 3 | `FPSRoguelite.Smoke.ModuleLoads` | `Result={Success}` |
+| 3 | `FPSRoguelite.Enemy.BlueprintParent` | `Result={Success}` — 적 BP 에 `VitalsProfile` UPROPERTY 를 추가했으므로 필수 가드([[cpp-uproperty-name-collides-with-bp]]) |
+| 4 | `FPSRoguelite.Combat.Vitals` | `Result={Success}` |
+
+### 표적 명세 대조 (전수 아님 — 아래 「남은 것」 참조)
+
+- ✅ **§5-1 산술** — `FPSRVitals.cpp` 가 의사코드와 1:1(`Consumed` 0-나눗셈 가드 · `MinKeep` 하한이 `SDM==0` 에 미적용 · `bShieldBroke` 를 진입 시 `Shield>0` 과의 전이로 판정).
+- ✅ **§5-4-1 함정 회피** — `FPSRHealthSet.cpp` 가 `GetOwningActor()` 가 아니라 **`ASC->GetAvatarActor()`** 를 쓰고, 왜 그런지(PlayerState 를 캐스트하면 조용히 nullptr → 재기저가 영영 안 돌아 P2-1 재발)를 주석에 남겼다. 서버 권위 게이트도 있다.
+- ✅ **enum 말미 추가** — `EFPSRHitMarkerType::ShieldBreak` · `EFPSRWeaponStat::ShieldDamageMultiplier` 둘 다 마지막 항목으로 들어갔다(중간 삽입 0 = 저작 에셋의 `uint8` 저장값 무이동).
+- ✅ **§12-4 6항목** — 테스트 파일이 6개를 전부 구현했고, ②는 **두 픽스처**이며 *"여기서 `HealthSpent>0` 을 걸면 안 된다"* 를 G1 2차 경위와 함께 주석으로 못박았다. ⑥의 한계(배선 도달은 순수함수로 증명 불가 → §12-10 PIE 2 소관)도 주석에 있다.
+- ✅ **`UFPSREnemyHealthBarWidget`** — `BlueprintImplementableEvent` 라 C++ 구현체가 없다. 헤더에 계약만 확장한 것이 **올바른 처리**이고 누락이 아니다(실드바 배선 = §11-1 사용자 콘텐츠 작업).
+
+### 🔴 남은 것 (다음 세션)
+
+1. **C3 전체 diff 대조** — 위는 고위험 지점 표적 검사다. `git diff 6886fbfc..3815285f` 전체를 §5·§6·§7·§8 과 1:1 대조해야 한다. 특히 **미확인**: §7 복제표의 `MARK_PROPERTY_DIRTY` 지점 전수 · §8 수명주기(`ResetForReuse` 앵커 리셋 · 이월 캐리가 바이탈을 안 건드리는지) · §5-9 5경로 Spec 구성이 실제로 `ResolvedStats` 를 읽는지 · 힐팩의 `IsAlive()` 게이트와 전투시계 사용.
+2. **C2 가 명세에 없이 판단한 것의 목록** — 구현 에이전트가 세션 중단으로 **최종 보고를 못 냈다**. §6-5-2 는 "플랜에 없던 구조 결정"을 세어 **G2 프롬프트에 명시**하라고 요구하므로, 위 전체 대조가 그 목록을 겸해야 한다.
+3. **G2 머지 게이트**(Fable, 코어 갈래 남은 1회) — §12-9 가 지정한 4건을 반드시 올릴 것: ①프리즈 전투시계 ②적 복제 3→5 ③`DamageDealt` 단위 혼합(§11-8) ④디렉터 센서 기준선 이동(§11-8).
+4. **머지**(§6-7 `--no-ff`) → 보드 완료 마킹 + `Docs/WorkLog.md` 이관.
+5. **사용자 런타임 검증**(§12-10 PIE 10항목) + **사용자 콘텐츠 작업 7항목**(§11-1) — 그 전까지 보드는 `검증중`.
