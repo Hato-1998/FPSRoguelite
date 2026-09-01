@@ -101,9 +101,12 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "FPSR|Enemy")
 	FFPSREnemyDeathCosmeticSignature OnDeathCosmetic;
 
-	/** Client cosmetic (VIT1): fires when Shield replicates down on the (>0 -> 0) break edge — the enemy-side half of
-	 *  requirement 6 (attacker gets a hit-marker, this enemy gets a cosmetic, the player's own break gets a warning).
-	 *  🔴 Zero new replication — this is a RepNotify on the already-replicated Shield, same pattern as OnDeathCosmetic. */
+	/** Shield-break cosmetic (VIT1): fires on the (>0 -> 0) break edge — the enemy-side half of requirement 6 (the
+	 *  attacker gets a hit-marker, this enemy gets a cosmetic, the player's own break gets a warning).
+	 *  🔴 Zero new replication — the client half is a RepNotify on the already-replicated Shield.
+	 *  🔴 Fires on BOTH sides, like OnHealthChanged and unlike OnDeathCosmetic: the authority raises it from
+	 *  ApplyDamage (OnRep never runs there, so a listen-server host would otherwise see no shield-break cosmetic all
+	 *  session, and standalone none at all — G2 red-team 2026-09-02), clients from OnRep_Shield's local edge check. */
 	UPROPERTY(BlueprintAssignable, Category = "FPSR|Enemy")
 	FFPSREnemyShieldBrokenSignature OnShieldBrokenCosmetic;
 

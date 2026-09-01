@@ -149,7 +149,8 @@ namespace FPSRCombat
 
 	FDamageResult ApplyDamage(AActor* Target, float FinalDamage, AActor* Instigator, const FFPSRDamageSpec& Spec)
 	{
-		// U18a forward-compat seam: DamageType (empty = Physical) is threaded to leaf appliers for D3 elemental; no behavior change in U18a.
+		// VIT1: Spec (DamageType + anti-shield multiplier) is threaded to the leaf appliers, which resolve the layer
+		// coefficients from the target's vitals profile. Replaces U18a's forward-compat `FGameplayTag DamageType` seam.
 		FDamageResult Result;
 		if (!Target || FinalDamage <= 0.0f)
 		{
@@ -255,7 +256,8 @@ namespace FPSRCombat
 	FExplosionResult ApplyExplosion(UWorld* World, const FVector& Center, float Radius, float Damage,
 		float CritChance, float CritMultiplier, AActor* Instigator, bool bAllowSelf, float KnockbackStrength, const FFPSRDamageSpec& Spec)
 	{
-		// U18a forward-compat seam: DamageType (empty = Physical) is threaded to leaf appliers for D3 elemental; no behavior change in U18a.
+		// VIT1: Spec (DamageType + anti-shield multiplier) is forwarded to every per-target ApplyDamage below.
+		// Replaces U18a's forward-compat `FGameplayTag DamageType` seam.
 		FExplosionResult Outcome;
 		if (!World || Radius <= 0.0f)
 		{

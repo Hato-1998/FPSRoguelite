@@ -104,6 +104,17 @@ FPSRVitals::FResult UFPSREnemyHealthComponent::ApplyDamage(float DamageAmount, A
 	// thresholds). Fired on the lethal hit too (NewHealth == 0), so the final stage runs ahead of OnDeath.
 	OnHealthChanged.Broadcast(Health, MaxHealth);
 
+	// 🔴 Authority-side half of the shield-break cosmetic (VIT1 requirement 6, G2 red-team finding 2026-09-02).
+	// OnRep_Shield below is the CLIENT half and never runs on the authority, so without this the listen-server HOST
+	// plays no shield-break cosmetic all session — and standalone/solo plays none at all. Same "fires on BOTH server
+	// and clients" shape as OnHealthChanged just above (AFPSREnemyBase.cpp:166-167); the death cosmetic hit exactly
+	// this trap first and documents it at AFPSREnemyBase::HandleDeath ("the host is the one machine that never plays
+	// the death state"). No double-fire: OnRep does not run on the authority.
+	if (Result.bShieldBroke)
+	{
+		OnShieldBrokenCosmetic.Broadcast();
+	}
+
 	if (Health <= 0.0f)
 	{
 		bDead = true;
