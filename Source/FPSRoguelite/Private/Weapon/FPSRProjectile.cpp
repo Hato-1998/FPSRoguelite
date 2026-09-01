@@ -275,7 +275,7 @@ void AFPSRProjectile::OnSphereOverlap(UPrimitiveComponent* OverlappedComp, AActo
 	bool bDamaged = false;
 	bool bShieldBroke = false;
 	// Marker fires on any REAL damage to a destructible (enemy OR door) — a corpse re-hit (bDamaged false) is inert,
-	// and a friendly player raises no marker (the player damage branch leaves DamageDealt 0 -> bDamaged false). The hit
+	// and a friendly player raises no marker (TryDamageActor gates bDamaged on FDamageResult::bTargetIsPlayer). The hit
 	// is still consumed below (pierce decrements unconditionally). Kill/Crit/Weak/ShieldBreak upgrades are enemy-only (door = Hit).
 	if (TryDamageActor(OtherActor, WeakpointMult, bCrit, bKill, bWasEnemy, bDamaged, bShieldBroke) && bDamaged)
 	{
@@ -467,7 +467,11 @@ bool AFPSRProjectile::TryDamageActor(AActor* Target, float WeakpointMultiplier, 
 			const FPSRCombat::FDamageResult Result = FPSRCombat::ApplyDamage(Target, Resolved, Params.InstigatorActor, Params.DamageSpec);
 			bOutKill = Result.bKilled;
 			bOutWasEnemy = Result.bWasEnemy;
-			bOutDamaged = Result.DamageDealt > 0.0f; // real health removed (0 for a corpse re-hit) — gates the marker
+			// Gates the marker: real damage landed (0 for a corpse re-hit) AND the receiver wasn't a player. VIT1 §6
+			// fills DamageDealt on the player branch now, so the old "player => DamageDealt 0" implicit gate is gone
+			// — see FDamageResult::bTargetIsPlayer. bDealtEnemyDamage (the other bOutDamaged consumer) is unaffected:
+			// it is additionally gated on bWasEnemy, which is always false for a player.
+			bOutDamaged = Result.DamageDealt > 0.0f && !Result.bTargetIsPlayer;
 			bOutShieldBroke = Result.bShieldBroke; // VIT1 requirement 6
 			// OnKill trigger (server): this direct hit freshly killed an enemy (sniper etc.). Rebuild a minimal
 			// FireContext from spawn params — the weak weapon ref no-ops the bridge if the weapon is gone.

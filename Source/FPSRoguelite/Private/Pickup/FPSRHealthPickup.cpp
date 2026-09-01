@@ -15,6 +15,11 @@
 
 AFPSRHealthPickup::AFPSRHealthPickup()
 {
+	// 🔴 AActor's own default is bCanEverTick = false (engine Actor.cpp:276) — TickInterval alone does NOTHING without
+	// this, and the collect-radius scan / respawn countdown below would never run at all. AFPSRMission_CarryNoHit is
+	// NOT the precedent to copy here: it inherits the enable from AFPSRMissionActor (FPSRMissionActor.cpp:22). The
+	// right sibling is AFPSRXPPickup (FPSRXPPickup.cpp:19), which derives straight from AActor and sets this itself.
+	PrimaryActorTick.bCanEverTick = true;
 	// A modest interval, not every-frame: collection isn't latency-sensitive (mirrors AFPSRMission_CarryNoHit's own
 	// 0.1s tick), and a map only ever holds a handful of these.
 	PrimaryActorTick.TickInterval = 0.1f;

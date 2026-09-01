@@ -238,7 +238,8 @@ void UFPSRGA_WeaponFire_Hitscan::ActivateAbility(
 	bool bServerShieldBroke = false;
 	// Visual hit-marker fires for ANY damageable that lost health — enemies AND destructible non-enemies (doors,
 	// bCountsAsKill=false). Distinct from bServerHit (enemy combat-credit: drives OnMiss / Kill·Crit·Weak / lifesteal).
-	// A friendly player never sets this: the player damage branch leaves DamageDealt = 0 (FPSRCombatStatics::ApplyDamage).
+	// A friendly player never sets this — gated explicitly on FDamageResult::bTargetIsPlayer below (VIT1 §6 made the
+	// player branch fill DamageDealt, so this can no longer rely on that value staying 0).
 	bool bServerAnyDamage = false;
 	// True if a per-impact fragment (e.g. ExplosiveRounds splash) dealt real damage to an enemy — folded into the
 	// miss check so a connecting wall-splash doesn't count as a miss (would otherwise refund AmmoOnMiss on a hit).
@@ -286,9 +287,11 @@ void UFPSRGA_WeaponFire_Hitscan::ActivateAbility(
 		const FPSRCombat::FDamageResult Result = FPSRCombat::ApplyDamage(HitActor, Resolved, Avatar, DamageSpec);
 		// Markers / kill triggers key on DamageDealt (real health removed), so a corpse re-hit (DamageDealt 0) is inert;
 		// the bullet still spends penetration via bApplied below (geometry), it just produces no feedback or kill.
-		if (Result.DamageDealt > 0.0f)
+		// !bTargetIsPlayer: an FF hit on a teammate must raise no marker. VIT1 §6 fills DamageDealt on the player
+		// branch now, so the old "player => DamageDealt 0" implicit gate is gone — see FDamageResult::bTargetIsPlayer.
+		if (Result.DamageDealt > 0.0f && !Result.bTargetIsPlayer)
 		{
-			bServerAnyDamage = true; // visual marker for enemies AND destructible doors (not friendly players: DamageDealt 0)
+			bServerAnyDamage = true; // visual marker for enemies AND destructible doors
 			if (Result.bWasEnemy)
 			{
 				bServerHit = true;

@@ -175,7 +175,7 @@ void UFPSRGA_WeaponMelee::ActivateAbility(
 		bool bAnyHit = false;
 		bool bAnyKill = false;
 		bool bAnyShieldBroke = false;
-		bool bAnyDamage = false; // visual marker: enemies AND destructible doors (friendly players leave DamageDealt 0)
+		bool bAnyDamage = false; // visual marker: enemies AND destructible doors only — never a player (gated on bTargetIsPlayer)
 		if (bAny)
 		{
 			TSet<AActor*> Processed;
@@ -208,9 +208,11 @@ void UFPSRGA_WeaponMelee::ActivateAbility(
 				}
 				const FPSRCombat::FDamageResult Result = FPSRCombat::ApplyDamage(HitActor, Resolved, Avatar, DamageSpec);
 				// Markers / kill trigger key on real damage (DamageDealt), so a corpse re-hit in the swing is inert.
-				if (Result.DamageDealt > 0.0f)
+				// !bTargetIsPlayer: an FF hit on a teammate must raise no marker. VIT1 §6 fills DamageDealt on the
+				// player branch now, so the old "player => DamageDealt 0" implicit gate is gone.
+				if (Result.DamageDealt > 0.0f && !Result.bTargetIsPlayer)
 				{
-					bAnyDamage = true; // visual marker for enemies AND destructible doors (not friendly players)
+					bAnyDamage = true; // visual marker for enemies AND destructible doors
 					if (Result.bWasEnemy)
 					{
 						bAnyHit = true;

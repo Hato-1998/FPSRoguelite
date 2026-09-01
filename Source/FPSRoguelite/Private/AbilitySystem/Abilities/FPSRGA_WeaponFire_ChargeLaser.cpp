@@ -254,7 +254,7 @@ void UFPSRGA_WeaponFire_ChargeLaser::FireBeam(float BeamDamage, bool bIsPayoffSh
 	bool bServerWeak = false;
 	bool bServerKill = false;
 	bool bServerShieldBroke = false;
-	bool bServerAnyDamage = false; // visual marker: enemies AND destructible doors (friendly players leave DamageDealt 0)
+	bool bServerAnyDamage = false; // visual marker: enemies AND destructible doors only — never a player (gated on bTargetIsPlayer)
 
 	UFPSRWeaponInstance* Instance = CachedInstance.Get();
 	const TArray<TObjectPtr<UFPSRWeaponFragment>>* Fragments = Instance ? &Instance->GetActiveFragments() : nullptr;
@@ -297,9 +297,11 @@ void UFPSRGA_WeaponFire_ChargeLaser::FireBeam(float BeamDamage, bool bIsPayoffSh
 			return;
 		}
 		const FPSRCombat::FDamageResult Result = FPSRCombat::ApplyDamage(HitActor, Resolved, Avatar, DamageSpec);
-		if (Result.DamageDealt > 0.0f)
+		// !bTargetIsPlayer: an FF hit on a teammate must raise no marker. VIT1 §6 fills DamageDealt on the player
+		// branch now, so the old "player => DamageDealt 0" implicit gate is gone — see FDamageResult::bTargetIsPlayer.
+		if (Result.DamageDealt > 0.0f && !Result.bTargetIsPlayer)
 		{
-			bServerAnyDamage = true; // visual marker for enemies AND destructible doors (not friendly players)
+			bServerAnyDamage = true; // visual marker for enemies AND destructible doors
 			if (Result.bWasEnemy)
 			{
 				bServerHit = true;

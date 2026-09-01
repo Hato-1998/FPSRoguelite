@@ -39,7 +39,16 @@ namespace FPSRCombat
 	 *                 not `HealthBefore - HealthAfter`: a hit a shield fully absorbs still counts as real damage
 	 *                 (hit-markers / lifesteal / penetration checks must not go silent just because health didn't move).
 	 *   - bShieldBroke: this hit took the target's shield from >0 to 0 (VIT1 requirement 6 — propagates to the
-	 *                 attacker's hit-marker and, via replication, to the target's own cosmetics). */
+	 *                 attacker's hit-marker and, via replication, to the target's own cosmetics).
+	 *   - bTargetIsPlayer: the receiver was another AFPSRCharacter (a friendly-fire hit, or the instigator's own
+	 *                 self-damage from an explosion). 🔴 Hit-markers must stay silent for these. Before VIT1 that
+	 *                 was implicit — the player branch left DamageDealt at 0, and all five damage paths gate their
+	 *                 marker on `DamageDealt > 0`. VIT1 §6 now FILLS DamageDealt on that branch (missions / the
+	 *                 director / penetration need the real number), which silently turned the marker back on: an
+	 *                 FF shot would mark, and self-damage is FF-independent (ResolveDamage returns BaseDamage for
+	 *                 Target == Instigator whenever bAllowSelf), so every rocket jump would flash a hit-marker at
+	 *                 the player who jumped. This flag restores the original gate explicitly instead of relying on
+	 *                 a zero that no longer happens. */
 	struct FDamageResult
 	{
 		bool bApplied = false;
@@ -47,6 +56,7 @@ namespace FPSRCombat
 		bool bWasEnemy = false;
 		float DamageDealt = 0.0f;
 		bool bShieldBroke = false;
+		bool bTargetIsPlayer = false;
 	};
 
 	/** Enemies an explosion freshly killed (alive->dead this blast). Inline-sized (<=8) to avoid a heap alloc on the

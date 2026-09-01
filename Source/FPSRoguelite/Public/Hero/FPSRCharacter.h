@@ -563,6 +563,17 @@ protected:
 	 *  wipe check (team-wipe -> Defeat). Revive back to Alive is UFPSRReviveComponent (U9 Phase 1B, Game.MD §2-13). */
 	void HandleOutOfHealth();
 
+	/** VIT1 requirement 5 (player-side half): publish the local "my shield just broke" warning on this machine's GMS
+	 *  bus when the replicated Shield attribute crosses >0 -> 0.
+	 *  🔴 Why the GAS value-change delegate and NOT UFPSRHealthSet::OnShieldBroken — OnShieldBroken is raised from
+	 *  PostAttributeChange, which on a CLIENT only runs when that client happens to hold an aggregator for the
+	 *  attribute (engine GameplayEffect.cpp:3682 SetBaseAttributeValueFromReplication takes an else-branch that
+	 *  broadcasts only AttributeValueChangeDelegates when there is none). A remote co-op player would therefore get
+	 *  no warning. AttributeValueChangeDelegates fires on BOTH paths (:3911 via InternalUpdateNumericalAttribute and
+	 *  :3721 in the else-branch), so this is the client-reliable hook — and it needs no new RPC or replicated
+	 *  property, keeping VIT1 §7's "신규 RPC 0개" literally true. */
+	void HandleShieldValueChangedForWarning(const struct FOnAttributeChangeData& Data);
+
 	//~ACharacter: no jumping while incapacitated (DBNO or Dead).
 	virtual bool CanJumpInternal_Implementation() const override;
 
@@ -896,6 +907,11 @@ protected:
 	 *  tickless enemy (which only recomputes on a hit). At most 4 players, so even the max rate is cheap. */
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Vitals", meta = (ClampMin = "1.0", ClampMax = "60.0"))
 	float ShieldRegenUpdateHz = 10.0f;
+
+	/** Handle for the Shield value-change binding (HandleShieldValueChangedForWarning). Removed in EndPlay: the ASC
+	 *  and its attribute set live on the PlayerState and OUTLIVE this pawn, so a respawn would otherwise leave a dead
+	 *  entry behind on every death. */
+	FDelegateHandle ShieldWarningDelegateHandle;
 
 	/** Seconds of grace (invulnerable + enemy pass-through) granted when the card-selection freeze ENDS, so a player
 	 *  who unfreezes surrounded by the swarm isn't hit the instant the world resumes (U9 §2-13). Balance value; 0 disables. */

@@ -13,6 +13,8 @@
 #include "AbilitySystemComponent.h"
 #include "Combat/FPSRVitals.h"
 #include "Combat/FPSRVitalsProfile.h"
+#include "Messages/FPSRGameplayMessageSubsystem.h" // VIT1 requirement 5: local shield-break warning channel
+#include "Messages/FPSRCosmeticMessages.h"
 #include "Weapon/FPSRWeaponInventoryComponent.h"
 #include "Weapon/FPSRWeaponInstance.h"
 #include "Weapon/FPSRWeaponFireComponent.h"
@@ -441,6 +443,18 @@ void AFPSRCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 		bVisionDelegateBound = false;
 	}
 
+	// VIT1: the ASC + attribute set live on the PlayerState and outlive this pawn, so the Shield value-change binding
+	// must come off with the pawn — otherwise every respawn leaves another dead entry on that delegate.
+	if (ShieldWarningDelegateHandle.IsValid())
+	{
+		if (UAbilitySystemComponent* ASC = GetAbilitySystemComponent())
+		{
+			ASC->GetGameplayAttributeValueChangeDelegate(UFPSRHealthSet::GetShieldAttribute())
+				.Remove(ShieldWarningDelegateHandle);
+		}
+		ShieldWarningDelegateHandle.Reset();
+	}
+
 #if WITH_EDITOR
 	FCoreUObjectDelegates::OnObjectPropertyChanged.Remove(EditorSocketChangedHandle);
 #endif
@@ -574,6 +588,49 @@ void AFPSRCharacter::InitAbilitySystem()
 				}
 			}
 		}
+
+		// VIT1 requirement 5: the player's own shield-break warning. Deliberately NOT authority-gated (unlike the
+		// out-of-health bind above) — the warning is a LOCAL cosmetic published on this machine's GMS bus, so it has
+		// to be raised on the machine that will draw it, which for a remote co-op player is that client. See
+		// HandleShieldValueChangedForWarning's own comment for why this uses the GAS value-change delegate rather
+		// than UFPSRHealthSet::OnShieldBroken. IsLocallyControlled() is checked at FIRE time inside the handler, not
+		// here: the controller isn't reliably set yet at every InitAbilitySystem entry (PossessedBy vs
+		// OnRep_PlayerState ordering differs by net role).
+		if (!ShieldWarningDelegateHandle.IsValid())
+		{
+			ShieldWarningDelegateHandle = AbilitySystemComponent
+				->GetGameplayAttributeValueChangeDelegate(UFPSRHealthSet::GetShieldAttribute())
+				.AddUObject(this, &AFPSRCharacter::HandleShieldValueChangedForWarning);
+		}
+	}
+}
+
+void AFPSRCharacter::HandleShieldValueChangedForWarning(const FOnAttributeChangeData& Data)
+{
+	// Break edge only (>0 -> 0), matching UFPSRHealthSet::OnShieldBroken's own edge test — a hit that merely chips
+	// the shield is not a warning, and a shield already at 0 must not re-warn on every subsequent hit.
+	if (!(Data.OldValue > 0.0f && Data.NewValue <= 0.0f))
+	{
+		return;
+	}
+
+	// Local player only. A dedicated server draws nothing, and another player's replicated proxy is not this
+	// machine's player — silencing both here keeps the binding itself unconditional (see InitAbilitySystem).
+	if (!IsLocallyControlled())
+	{
+		return;
+	}
+
+	if (UFPSRGameplayMessageSubsystem* GMS = UFPSRGameplayMessageSubsystem::Get(this))
+	{
+		static const FGameplayTag ShieldBrokenChannel = FGameplayTag::RequestGameplayTag(FName("Message.Player.ShieldBroken"));
+		// Reuses the existing cosmetic payload rather than declaring an empty struct for one channel (U8's bus is
+		// typed per-channel; a second near-identical type would just be one more thing a WBP author has to learn).
+		// WorldLocation is the only field that carries meaning here — it costs nothing and a directional/positional
+		// warning treatment may want it.
+		FFPSRCosmeticEventMessage Msg;
+		Msg.WorldLocation = GetActorLocation();
+		GMS->BroadcastMessage(ShieldBrokenChannel, Msg);
 	}
 }
 

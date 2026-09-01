@@ -8,7 +8,7 @@
 | 브랜치 | `phase/m1-shield-2layer` |
 | 작성 모델 | `claude-opus-5` (§6-5-2 개정 2026-08-26 — C1 설계 담당은 Opus, Fable은 G1/G2 게이트) |
 | 작성일 / 최종 갱신 | 2026-09-01 / 2026-09-01 |
-| 상태 | **`구현완료` — C2 착지 + C3 부분 검증 통과**(2026-09-01, `3815285f`). 남은 것 = **C3 전체 diff 대조 + G2 머지 게이트**. 원장 = §13-0(G1) · §13-2(C3) |
+| 상태 | **`검증완료` — C3 전체 diff 대조 통과**(2026-09-02). 대조가 P1 1건·P2 2건을 잡아 전부 수정·재검증했다. 남은 것 = **G2 머지 게이트 → `--no-ff` 머지**. 원장 = §13-0(G1) · §13-2(C3 표적) · **§13-3(C3 전수)** |
 | 관련 SSOT | `CombatWeaponCard.md` §2-3-1·§2-3-5·§2-3-7·§2-3-8·§2-3-9 · `Enemy.md` §2-6·§2-10 · `PlayerFeel.md` §2-13·§2-14 · `RunFlow.md` §2-2·§2-8 · `Architecture/0013`·`0014` |
 | 관련 메모리 | `[[reason-in-multiplayer-terms]]` `[[production-structure-first]]` `[[code-is-immutable-structure-only]]` `[[push-model-off-in-packaged-build]]` `[[cpp-uproperty-name-collides-with-bp]]` `[[extensibility-first-designer-tooling]]` `[[da-edits-are-user-work]]` `[[do-not-launch-game]]` |
 | 보드 행 | [실드/체력 2층 데미지 구조](https://app.notion.com/3be3972ddd88813bb054d5c8ac0a3ee2) — M1 · 미듐 · M |
@@ -69,8 +69,8 @@
 | `Private/Enemy/FPSREnemySpawnSubsystem.cpp` | 수정 | 스폰 시 프로파일×덱 해석 → `InitializeVitals` |
 | `Public/AbilitySystem/Attributes/FPSRHealthSet.h` | 수정 | 어트리뷰트 4개 추가 |
 | `Private/AbilitySystem/Attributes/FPSRHealthSet.cpp` | 수정 | 클램프·`OnRep_Shield`·`MaxShield` 증가분 즉시 충전 |
-| `Public/Hero/FPSRCharacter.h` | 수정 | 서버전용 재생 상태 2 + 드라이버 |
-| `Private/Hero/FPSRCharacter.cpp` | 수정 | `ApplyContactDamage` 2층화 + Tick 재생 드라이버 |
+| `Public/Hero/FPSRCharacter.h` | 수정 | 서버전용 재생 상태 2 + 드라이버 + **실드파손 경고 핸들러/핸들**(C3 추가, §5-5-1) |
+| `Private/Hero/FPSRCharacter.cpp` | 수정 | `ApplyContactDamage` 2층화 + Tick 재생 드라이버 + **경고 발행 배선**(C3 추가, §5-5-1) |
 | `Public/Core/FPSRGameState.h` | 수정 | **프리즈-멈춤 전투 시계**(틱 0) |
 | `Private/Core/FPSRGameState.cpp` | 수정 | `SetRunPaused` 엣지에서 동결시간 누적 |
 | `Public/Hero/FPSRFeedbackTypes.h` | 수정 | `EFPSRHitMarkerType::ShieldBreak` **말미 추가** |
@@ -496,6 +496,24 @@ if (ShieldRegenDriverAccum >= 1/ShieldRegenUpdateHz && IsAlive() && MaxShield > 
 ```
 `PossessedBy`/`InitAbilityActorInfo` 시점에 프로파일 → 어트리뷰트 초기값(`SetMaxHealth`/`SetMaxShield`/…) + 재생 3값을 캐릭터 멤버로 굽는다. 프로파일 null = 현행 기본값(`MaxShield = 0` → 실드 없음, 무회귀).
 
+#### 5-5-1. 🔴 요구 5 「본인 실드 파손 경고」의 발행 배선 (C3 전체대조 신설, 2026-09-02)
+
+**갭**: C2 까지의 명세는 `UFPSRHealthSet::OnShieldBroken`(§5-4)을 "요구 5 의 플레이어 경고 원천"이라 선언만 하고, **그것을 구독해 `Message.Player.ShieldBroken` 을 발행하는 자리를 §4 파일 목록에 넣지 않았다.** 결과 = 코드에 그 델리게이트의 **구독자가 0개**였고, `DefaultGameplayTags.ini` 의 태그는 아무도 발행하지 않는 죽은 태그였다. §11-1 사용자 작업 6-③(경고 위젯)은 GMS 구독인데 **UMG 는 C++ 비-다이내믹 델리게이트를 구독할 수 없어 콘텐츠로 메울 수 없다.** 갭 처리 = §11-6 → C1(Opus) 명세 수정 후 구현. 사용자 결정(2026-09-02): **이 유닛에서 배선한다.**
+
+**확정 배선**:
+```cpp
+// AFPSRCharacter::InitAbilitySystem — 권위 게이트 없음(로컬 코스메틱은 그릴 기계에서 나야 한다)
+ShieldWarningDelegateHandle = ASC->GetGameplayAttributeValueChangeDelegate(UFPSRHealthSet::GetShieldAttribute())
+    .AddUObject(this, &AFPSRCharacter::HandleShieldValueChangedForWarning);
+// 핸들러: (Old > 0 && New <= 0) 엣지 + IsLocallyControlled() → GMS BroadcastMessage(Message.Player.ShieldBroken, FFPSRCosmeticEventMessage{WorldLocation})
+// EndPlay 에서 Remove — ASC/어트리뷰트셋은 PlayerState 에 살아 폰보다 오래 산다(리스폰마다 죽은 엔트리가 쌓인다)
+```
+
+> 🔴 **왜 `OnShieldBroken` 이 아니라 GAS 값변경 델리게이트인가 (엔진 실측)** — `OnShieldBroken` 은 `PostAttributeChange` 에서 올라오는데, **클라에서는 그 클라가 해당 어트리뷰트의 애그리게이터를 들고 있을 때만** 그 경로가 돈다: 엔진 `GameplayEffect.cpp:3682` `SetBaseAttributeValueFromReplication` 은 애그리게이터가 없으면 **else 분기**로 빠져 `AttributeValueChangeDelegates` 만 브로드캐스트하고 `PostAttributeChange` 를 부르지 않는다(애그리게이터가 있을 때만 `:3702` → `SetNumericAttribute_Internal` → `AttributeSet.cpp:84` 로 도달). 즉 `OnShieldBroken` 에 붙이면 **원격 협동 플레이어는 경고를 못 받는다.** `AttributeValueChangeDelegates` 는 두 경로 모두에서 발화한다(`:3911` · `:3721`) — 유일하게 클라 신뢰 가능한 훅이다.
+> ⚠️ 부수 정정: §5-4-1 의 괄호 서술("복제된 어트리뷰트 변경은 클라 `PostAttributeChange` 도 발화하지만")은 **조건부로만 참**이다. 앵커 재기저는 권위 게이트가 걸려 있어 **영향 없음**(진술만 부정확했다).
+> **신규 복제 0 · 신규 RPC 0 유지** — 이미 복제되는 `Shield` 어트리뷰트에서 클라가 스스로 엣지를 읽는다. §7 의 "신규 RPC 0개"가 문자 그대로 유지된다.
+> `OnShieldBroken` 은 **폐기하지 않는다** — 서버측 훅으로 남는다(§5-4 선언 유지, 현재 구독자는 없다).
+
 ### 5-6. `AFPSRGameState` — 프리즈-멈춤 전투 시계 (틱 0)
 
 ```cpp
@@ -543,6 +561,14 @@ return Now - AccumulatedFrozenSeconds - (bRunPaused ? (Now - FreezeStartedAtWorl
         float DamageDealt = 0.0f;
         /** 이번 타격이 대상의 실드를 깼다(요구 5). */
         bool  bShieldBroke = false;
+        /** 🔴 **C3 전체대조 추가 (2026-09-02)** — 받은 쪽이 다른 `AFPSRCharacter` 였다(FF 아군 **또는 자폭**).
+         *  히트마커 5경로는 전부 `DamageDealt > 0` 으로 마커를 게이트하는데, "플레이어엔 마커 없음" 규칙이
+         *  종전에는 *암묵적*이었다 — 플레이어 분기가 `DamageDealt` 를 0 으로 남겼기 때문이다.
+         *  §6 이 그 값을 **채우기로 하면서 게이트가 조용히 열렸고**, 자폭은 FF 설정과 무관하므로
+         *  (`ResolveDamage`: `Target == Instigator → bAllowSelf ? BaseDamage : 0`)
+         *  **로켓 점프마다 자기 화면에 마커가 뜨는** 회귀가 됐다. 이 플래그로 5곳을 명시 게이트한다.
+         *  게임플레이 축은 무변 — 흡혈·킬크레딧은 `bWasEnemy` 가 그대로 막는다. */
+        bool  bTargetIsPlayer = false;
     };
 
     FPSROGUELITE_API FDamageResult ApplyDamage(AActor* Target, float FinalDamage, AActor* Instigator,
@@ -903,10 +929,48 @@ C2(Sonnet 구현) 중 명세에 없는 판단이 필요해지면 **추측해서 
 - ✅ **§12-4 6항목** — 테스트 파일이 6개를 전부 구현했고, ②는 **두 픽스처**이며 *"여기서 `HealthSpent>0` 을 걸면 안 된다"* 를 G1 2차 경위와 함께 주석으로 못박았다. ⑥의 한계(배선 도달은 순수함수로 증명 불가 → §12-10 PIE 2 소관)도 주석에 있다.
 - ✅ **`UFPSREnemyHealthBarWidget`** — `BlueprintImplementableEvent` 라 C++ 구현체가 없다. 헤더에 계약만 확장한 것이 **올바른 처리**이고 누락이 아니다(실드바 배선 = §11-1 사용자 콘텐츠 작업).
 
-### 🔴 남은 것 (다음 세션)
+---
 
-1. **C3 전체 diff 대조** — 위는 고위험 지점 표적 검사다. `git diff 6886fbfc..3815285f` 전체를 §5·§6·§7·§8 과 1:1 대조해야 한다. 특히 **미확인**: §7 복제표의 `MARK_PROPERTY_DIRTY` 지점 전수 · §8 수명주기(`ResetForReuse` 앵커 리셋 · 이월 캐리가 바이탈을 안 건드리는지) · §5-9 5경로 Spec 구성이 실제로 `ResolvedStats` 를 읽는지 · 힐팩의 `IsAlive()` 게이트와 전투시계 사용.
-2. **C2 가 명세에 없이 판단한 것의 목록** — 구현 에이전트가 세션 중단으로 **최종 보고를 못 냈다**. §6-5-2 는 "플랜에 없던 구조 결정"을 세어 **G2 프롬프트에 명시**하라고 요구하므로, 위 전체 대조가 그 목록을 겸해야 한다.
-3. **G2 머지 게이트**(Fable, 코어 갈래 남은 1회) — §12-9 가 지정한 4건을 반드시 올릴 것: ①프리즈 전투시계 ②적 복제 3→5 ③`DamageDealt` 단위 혼합(§11-8) ④디렉터 센서 기준선 이동(§11-8).
-4. **머지**(§6-7 `--no-ff`) → 보드 완료 마킹 + `Docs/WorkLog.md` 이관.
-5. **사용자 런타임 검증**(§12-10 PIE 10항목) + **사용자 콘텐츠 작업 7항목**(§11-1) — 그 전까지 보드는 `검증중`.
+## 13-3. C3 전체 diff 대조 원장 (2026-09-02, Opus · `6886fbfc..3815285f` 35파일 전수)
+
+### 명세 일치 확인 (§13-2 가 「미확인」으로 남긴 것 포함, 전건 통과)
+- **§7 `MARK_PROPERTY_DIRTY` 전수** — 표가 지정한 4지점(`ApplyDamage`·`InitializeVitals`·`ResetForReuse`·`CatchUpShieldRegen` 값변화시) 전부 존재. Push Model 파라미터도 `FDoRepLifetimeParams{bIsPushBased=true}` + `DOREPLIFETIME_WITH_PARAMS_FAST` 로 기존 3개와 동일.
+- **§8 수명주기** — `AcquireEnemy` 가 `Activate()`(내부 `ResetForReuse`) **뒤에** `InitializeVitals` 를 부른다(순서 요구 충족). 이월 캐리 `ServerResetEliteForStageCarry` 는 **무접촉**(diff 미포함, 호출 경로도 바이탈 미경유).
+- **§5-9 5경로가 실제로 `ResolvedStats` 를 읽는다** — Hitscan(`:93` `&Instance->GetResolvedStats()`) · ChargeLaser · Melee · **발사체 GA 발사시점**(`FPSRGA_WeaponFire_Projectile.cpp:255`) · Fragment(`Context.Instance->GetResolvedStats()`). 즉 **카드로 조정된 값**이 도달한다(원본 DA 값이 아니다).
+- **힐팩** — 수집 게이트 = `AFPSRPlayerState::IsAlive()`(`LifeState == Alive` → DBNO·Dead 제외, §5-8 요구 충족) · 리스폰/수집 전부 `GetCombatClockSeconds()` 기준.
+- 그 밖 §5-1~§5-8·§6·§12-4 전항 일치(§13-2 표적검사분 포함).
+
+### 🔴 전체대조가 새로 잡은 결함 3건
+
+| 심각도 | 지적 | 처리 |
+|---|---|---|
+| **P1** | **`AFPSRHealthPickup` 이 아예 틱하지 않는다.** 생성자가 `TickInterval` 만 세팅하고 `PrimaryActorTick.bCanEverTick = true` 를 빠뜨렸다. 엔진 기본값은 `false`(`Actor.cpp:276` 실측). C2 가 근거로 든 `AFPSRMission_CarryNoHit` 는 베이스 `AFPSRMissionActor.cpp:22` 에서 상속받는 것이고, 실제 형제 `AFPSRXPPickup.cpp:19` 는 직접 켠다. → 수집·리스폰 전무 = **요구 3(맵 힐팩) 전면 무동작**. 빌드·자동화 3종 전부 통과하므로 **PIE 아니면 안 잡힌다** | **수정**(1줄 + 함정 주석) |
+| **P2** | **FF 아군·자폭에 히트마커가 새로 뜬다(회귀).** §6 이 지시한 "플레이어 분기 `DamageDealt` 채우기"의 부작용. 5경로 마커 게이트가 전부 `DamageDealt > 0` 인데, 그 게이트 주석이 *"friendly players leave DamageDealt 0"* 이라는 **이제는 거짓인 전제**를 명시하고 있었다. 자폭은 FF 설정과 무관하므로 **로켓 점프마다 자기 마커**가 뜬다 | **수정** — `FDamageResult::bTargetIsPlayer` 신설(§5-7) + 5곳 명시 게이트 + 거짓 주석 5개 정정. 사용자 결정 2026-09-02 |
+| **P2** | **요구 5(본인 실드 파손 경고) 경로가 코드에서 끊겨 있다.** `OnShieldBroken` 구독자 0 · `Message.Player.ShieldBroken` 발행자 0. §4 파일 목록에 배선 자리가 없던 **명세 갭**(§11-6) — C2 는 명세를 충실히 따랐다 | **수정** — §5-5-1 신설 + 구현. 사용자 결정 2026-09-02. 엔진 실측으로 훅을 `PostAttributeChange` 가 아닌 GAS 값변경 델리게이트로 확정(원격 클라 도달성) |
+
+### C2 가 명세 없이 판단한 것 (§6-5-2 가 요구하는 「플랜에 없던 구조 결정」 목록 — 전부 **유지**)
+1. `AFPSRProjectile::TryDamageActor` 에 `bOutShieldBroke` out-param · `NotifyInstigatorHitMarker` 에 `bShieldBreak` 인자 — 없으면 발사체만 ShieldBreak 마커를 못 낸다. C2 가 코드 주석에 스스로 "added beyond VIT1 §4's file list" 라 명시.
+2. `FPSRCombat::NotifyHitMarker` 에 `bShieldBreak = false` 인자 — §5-7 은 `ResolveHitMarker` 신설만 명세. 폭발 경로가 ShieldBreak 를 내려면 필요.
+3. **`OnRep_Shield` 가 `OnHealthChanged` 를 재발화** — §8 은 "초기 1회 동기화"만 명세. 실드 전용 피격이 클라 체력바에 안 닿는 문제를 푼다. ⚠️ 부수효과 = 기존 구독자도 재호출된다. 실측: `AFPSRDestructible` 은 `MaxShield=0` 이라 도달 불가, `AFPSREnemyBase::HandleHealthChangedForHitFlash` 는 **감소-엣지 게이트**라 무해(대신 **실드 전용 피격에는 히트플래시가 안 뜬다** — 폴리시 항목, P3).
+4. `MARK_PROPERTY_DIRTY(Shield/MaxShield)` 를 §7 표보다 2곳 더 찍는다(`BeginPlay`·`InitializeMaxHealth`) — 각각 값 정의·회귀함정 7. 정당.
+5. `ResetForReuse` 의 `LastDamageCombatTime` 을 §8 지정 `-1e9` 가 아니라 **현재 전투시각**으로 — `Shield == MaxShield` 라 재생 경로가 조기 반환, 동작 동일하고 더 안전.
+6. `OnShieldBroken` 에 `bShieldBrokenBroadcast` 1회성 가드 — 기존 `bOutOfHealthBroadcast` 패턴 답습.
+7. `GetCombatClockSeconds` 에 `UFUNCTION(BlueprintPure)` 부여.
+8. `FFPSRResolvedVitals::Resolve` 가 `MaxHealth` 에 `Max(1.0f, …)` 하한(프로파일 `ClampMin=1.0` 과 정합).
+9. `ResolveDefense` 가 조기이탈 없이 전수 스캔(중복 정확일치 시 **마지막** 것이 이긴다) — `IsDataValid` 가 중복을 에러로 막으므로 무해.
+10. `ApplyVitalsProfile` / `ResetShieldToBroken` 함수 신설 — §5-5 앵커 초기화 3경로 표의 구현 형태.
+11. 힐팩이 `IsRunPaused()`/`IsStageTransitionActive()` 를 직접 게이트(`AFPSRXPPickup` 패턴 답습) · 플레이스홀더 메시를 잡지 않음(콘텐츠 할당 전제).
+12. §4 목록에 없는 파일 3개 — `FPSRGA_WeaponFire_Projectile.cpp`(§5-9 ④가 요구하나 §4 누락) · `FPSRVitalsTest.cpp`(§12-4 가 요구하나 §4 누락) · `FPSRProjectile.h`(위 1번).
+
+### C3 검증 재실행 (수정 3건 반영 후)
+| # | 검사 | 결과 |
+|---|---|---|
+| 2 | 빌드 `-DisableUnity` | **`Result: Succeeded`** |
+| 2 | 빌드 `-DisableAdaptiveUnity -ForceUnity` | **`Result: Succeeded`** · `[Adaptive Build] Excluded` 줄 없음 · `C4459`/`C2084` 없음 |
+| 3·4 | `Combat.Vitals` · `Enemy.BlueprintParent` · `Smoke.ModuleLoads` | 3건 전부 `Result={Success}` (`3 tests performed`) |
+| 6 | 흡혈 게이트 회귀 | `SendDealtDamageEvent` 는 여전히 `bWasEnemy && DamageDealt > 0` 안에 있고 **적 분기에서 return** 하므로 플레이어 분기는 도달 불가 — §6·§11-7 유지 확인 |
+
+### 남은 것
+1. **G2 머지 게이트**(Fable, 코어 갈래 남은 1회) — §12-9 지정 4건 + 위 P1/P2 3건을 함께 올린다.
+2. **머지**(§6-7 `--no-ff`) → 보드 완료 마킹 + `Docs/WorkLog.md` 이관.
+3. **사용자 런타임 검증**(§12-10 PIE 10항목) + **사용자 콘텐츠 작업 7항목**(§11-1) — 그 전까지 보드는 `검증중`.

@@ -201,6 +201,9 @@ namespace FPSRCombat
 			Result.bApplied = true;
 			Result.DamageDealt = VitalsResult.TotalSpent();
 			Result.bShieldBroke = VitalsResult.bShieldBroke;
+			// 🔴 The marker gate the filled DamageDealt above would otherwise re-open (see FDamageResult's own
+			// comment): every damage path keys its hit-marker on `DamageDealt > 0`, which used to be 0 here.
+			Result.bTargetIsPlayer = true;
 			return Result;
 		}
 
@@ -280,7 +283,7 @@ namespace FPSRCombat
 		bool bAnyCrit = false;
 		bool bAnyKill = false;
 		bool bAnyShieldBroke = false;
-		bool bAnyDamageDealt = false; // visual marker: enemies AND destructible doors (friendly players leave DamageDealt 0)
+		bool bAnyDamageDealt = false; // visual marker: enemies AND destructible doors only — never a player (FF ally or self-damage)
 
 		for (const FOverlapResult& Overlap : Overlaps)
 		{
@@ -314,9 +317,11 @@ namespace FPSRCombat
 				Result = ApplyDamage(Target, FinalDamage, Instigator, Spec);
 			}
 
-			if (Result.DamageDealt > 0.0f)
+			// !bTargetIsPlayer: an FF ally — and, critically, the instigator's OWN self-damage (rocket jump), which
+			// is FF-independent — must not raise a hit-marker. See FDamageResult::bTargetIsPlayer.
+			if (Result.DamageDealt > 0.0f && !Result.bTargetIsPlayer)
 			{
-				bAnyDamageDealt = true; // visual marker for enemies AND destructible doors (not friendly players)
+				bAnyDamageDealt = true; // visual marker for enemies AND destructible doors
 				if (Result.bWasEnemy)
 				{
 					bAnyEnemyHit = true;
