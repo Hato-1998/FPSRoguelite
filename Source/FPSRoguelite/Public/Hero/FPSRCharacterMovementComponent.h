@@ -327,9 +327,19 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Movement|Slide", meta = (ClampMin = "0.0"))
 	float SlideSlopeTimeRecoveryCap = 1.0f;
 
-	/** Lockout after a slide ENDS before another may start. Without it, tapping crouch repeatedly re-triggers the entry
-	 *  impulse over and over and the player rides a permanent speed boost. Applied on EVERY exit (released, too slow,
-	 *  timed out, jumped, gate closed) so no exit route dodges it. */
+	/** Lockout after a slide ENDS ON THE GROUND before another may start. Without it, tapping crouch repeatedly
+	 *  re-triggers the entry impulse over and over and the player rides a permanent speed boost.
+	 *
+	 *  Applied on every exit the slide's own rules produce — released, too slow, timed out, gate closed — because all
+	 *  of those happen with the player still on the floor. NOT applied when the slide ends by LEAVING THE GROUND
+	 *  (a jump, a step down, a ledge): that is traversal, not a verdict on the slide, and charging it there cost the
+	 *  player every bit of carried speed on ordinary terrain — the refused entry on landing leaves a plain crouch,
+	 *  which MaxWalkSpeedCrouched and an effective ground friction of 16 collapse in about a tenth of a second.
+	 *  See StopSliding() for the full chain.
+	 *
+	 *  Anti-spam is unaffected: a crouch tap exits through the released path, which is on the ground and still charges.
+	 *  A slide-hop chain saturates at SlideMaxEntrySpeed instead of ratcheting, since the entry impulse may only lift
+	 *  speed toward that cap. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "FPSR|Movement|Slide", meta = (ClampMin = "0.0"))
 	float SlideCooldown = 0.8f;
 
