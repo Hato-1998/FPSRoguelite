@@ -771,6 +771,9 @@ FMitigation.HealthDefense = Profile->ResolveDefense(DamageType).Health  ×  GetH
 ## 11. 미결정 항목 · 명세 갭 처리
 
 ### 11-1. 적 `MaxHealth` 전면 이관의 실행 범위 — **사용자 작업 구간**
+> 📘 **저작 절차서 = [`Docs/VIT1_ContentGuide.md`](../VIT1_ContentGuide.md)**(2026-09-02 작성) — 에셋 경로·필드 위치·값·순서·함정. 아래는 범위 정의, 그쪽이 실행 문서다.
+> ⚠️ 아래 1번의 "적 BP 2종"은 **실측 3종**이 맞다(`BP_EnemyMeleeBase`·`BP_EnemyRangedBase`·`BP_EnemyEliteBase`) — 가이드 §0 정정.
+> 🔴 아래 6-③(파손 경고 위젯)은 **현 코드로 수행 불가** — GMS 에 `UFUNCTION` 이 없어 WBP 가 구독할 수 없다. 가이드 §8 참조.
 사용자가 "(나) 전면 이관"을 선택했다. 코드는 **양쪽을 다 받는다**(프로파일이 있으면 프로파일, 없으면 기존 BP `MaxHealth`) — 그래서 **코드 머지 시점에 회귀 0** 이고, 이관은 콘텐츠 작업으로 뒤따른다. [[da-edits-are-user-work]]
 - Claude 가 하는 것: 프로파일 클래스 · 해석 경로 · `IsDataValid` · **"프로파일 미할당 적" 경고 자동화**(§12-7).
 - 사용자가 하는 것 **(전체 목록 — G1 P3-1)**:
