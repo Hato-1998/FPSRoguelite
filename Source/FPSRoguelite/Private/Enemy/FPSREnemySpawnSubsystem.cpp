@@ -17,6 +17,7 @@
 #include "Core/FPSRLogChannels.h"
 #include "Core/FPSRGameState.h"
 #include "Core/FPSRPlayerState.h"
+#include "Combat/FPSRTargeting.h"
 #include "Core/FPSRPlayerController.h"
 #include "Settings/FPSREnemySwarmSettings.h" // separation tuning (designer knob, read once per movement pass)
 #include "Arena/FPSRArenaActor.h" // ADR 0010 D6: arena-bounds spawn gate (PassesCommonSpawnGates)
@@ -344,22 +345,15 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 		{
 			if (APawn* PlayerPawn = PC->GetPawn())
 			{
-				// B17 (U9): enemies don't target non-alive players (DBNO downed or Dead) — a downed teammate stops
-				// drawing aggro and the swarm re-targets the living. (Downed players also take no contact damage.)
+				// The eligibility rule itself now lives in FPSRTargeting::IsEligibleTarget (BOSS1) so the boss's
+				// patterns apply exactly the same one — the two checks it folds (alive, topology ack) and their
+				// fail-open handling of a missing PlayerState are documented there. Only the RULE moved: this loop
+				// still makes a single pass and allocates nothing.
+				if (!FPSRTargeting::IsEligibleTarget(PC, Now, bUnified))
+				{
+					continue;
+				}
 				const AFPSRPlayerState* PS = PC->GetPlayerState<AFPSRPlayerState>();
-				if (PS && !PS->IsAlive())
-				{
-					continue;
-				}
-				// U (P-F): a late joiner that hasn't acked the current topology is excluded from the WHOLE movement+attack
-				// pass (targeting + contact/ranged damage in one choke) until its ack lands (or the fail-open timeout). Only
-				// with a unified field (multimap) — single-map has no topology to confirm, so it's a strict no-op there (no
-				// sub-RTT exclusion for a mid-combat single-map joiner). Host = local authority -> instantly satisfied.
-				// DBNO/Dead already excluded above; a revived player is already acked (marked long before), so it re-participates.
-				if (bUnified && PS && !PS->HasAckedJoinTopology(Now))
-				{
-					continue;
-				}
 				PlayerPawns.Add(PlayerPawn);
 				const FVector PlayerLoc = PlayerPawn->GetActorLocation();
 				PlayerLocations.Add(PlayerLoc);

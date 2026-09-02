@@ -5,7 +5,7 @@
 #include "Boss/FPSRBossBase.h"
 #include "Enemy/FPSREnemySpawnSubsystem.h"
 #include "Hero/FPSRCharacter.h"
-#include "Core/FPSRPlayerState.h"
+#include "Combat/FPSRTargeting.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/Pawn.h"
@@ -95,9 +95,10 @@ void UFPSRBossGA_Barrage::FireVolley(AFPSRBossBase* Boss) const
 		{
 			continue;
 		}
-		// 생존 판정 = AFPSRPlayerState::IsAlive() — DBNO/사망 둘 다 여기서 걸러진다(U9).
-		const AFPSRPlayerState* PlayerState = Character->GetPlayerState<AFPSRPlayerState>();
-		if (!PlayerState || !PlayerState->IsAlive())
+		// 대상 적격 판정은 스웜과 **같은 규칙**을 쓴다(FPSRTargeting::IsEligibleTarget) — 여기서 따로 쓰면
+		// "다운된 팀원은 어그로를 끌지 않는다"가 스웜엔 참이고 보스엔 거짓인 상태가 조용히 생긴다.
+		// 토폴로지 ack 는 통합(멀티맵) 필드 전용 개념이고 보스 아레나는 단일맵이라 false.
+		if (!FPSRTargeting::IsEligibleTarget(PC, Boss->GetPatternClockSeconds(), /*bRequireTopologyAck=*/false))
 		{
 			continue;
 		}
