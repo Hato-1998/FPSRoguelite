@@ -50,6 +50,7 @@ G1 1차 = 반려(P1 3 · P2 7 · P3 11) → 2차 = **반려하되 "골격은 통
 ### 비목표
 
 - 보스 이동 · AIController · StateTree (세 패턴 모두 "정지한 중앙 타워" 전제)
+- **패턴 동시 발동** — 선택기는 단일 활성이다(§5-3). 필요해지면 핸들 배열 + 어빌리티별 `BlockAbilitiesWithTag` 로 후속 확장 (G1-3 P3-1)
 - AttributeSet 신설 · 보스 실드(데이터 플립이면 켜지지만 요구가 아니다)
 - 보스가 스웜을 때리는 것 (§3-1)
 - `AFPSRProjectile` 적팀 AOE 루프(`FPSRProjectile.cpp:344-375`) 통합 — 라이브 경로, 후속 행
@@ -96,7 +97,7 @@ G1 1차 = 반려(P1 3 · P2 7 · P3 11) → 2차 = **반려하되 "골격은 통
 
 | 경로 | 신규/수정 | 설명 |
 |---|---|---|
-| `Public/Core/FPSRGameState.h` · `Private/...cpp` | 수정 | 프리즈 앵커 2필드 복제 + 게터(§5-7) — 클라가 전투시계를 **유도**하게 |
+| `Public/Core/FPSRGameState.h` · `Private/...cpp` | 수정 | 프리즈 2필드 **복제 승격** + `GetCombatClockSecondsForClients()`(§5-7). ⚠️ VIT1 이 남긴 *"server-only, not replicated"* 주석(`.h:372` · `.cpp:251-252`)도 같은 커밋에서 고친다 (G1-3 P3-6) |
 | `Public/AbilitySystem/FPSRAbilitySystemComponent.h` · `.cpp` | 수정 | `EnableTimeAxisGuard()` — 가드 **1벌**(엘리트에서 호이스트) |
 | `Public/Enemy/FPSREnemyEliteBase.h` · `.cpp` | 수정 | 인라인 등록 → `EnableTimeAxisGuard()` 호출 (거동 무변) |
 | `Public/AbilitySystem/Abilities/FPSREliteGameplayAbility.h` · `.cpp` | 수정 | 쿨다운 3오버라이드를 공통 베이스로 호이스트 (§5-4) |
@@ -196,7 +197,7 @@ namespace FPSRBossLaser
      *  `|Cur| <= W` 단독이면 빔이 한 프레임에 플레이어를 **건너뛸 때**(Prev=+5°, Cur=−5°, W=3°)
      *  `|Cur| > W` 라 false 가 되어 **영영 안 맞는다** — 부호반전 방식이 잡던 바로 그 케이스를
      *  엣지 트리거로 좁히면서 잃어버린 것이다. 그래서 "밖에 있었다" 를 게이트로 두고
-     *  "안에 들어왔거나 관통했다" 를 OR 로 받는다. 네 경우 전부 정확히 1회다:
+     *  "안에 들어왔거나 관통했다" 를 OR 로 받는다. 다섯 경우 전부 옳다 (1 / 1 / 0 / 1 / 0):
      *    · 느린 통과 = 진입 프레임 1회(이후 Prev 가 안이라 게이트가 막는다)
      *    · 빠른 관통 = 부호반전 1회
      *    · 밴드 안에서 방향 전환 = 0회(이미 셌다)
@@ -341,7 +342,8 @@ private:
     TArray<float> PhaseThresholds;
 
     TArray<TWeakObjectPtr<AActor>> SpawnedPatternActors;
-    struct FPendingLaserHit { TWeakObjectPtr<APawn> Target; float DueClock; float Damage; };
+    /** `Spec` 이 없으면 레이저만 `DamageType` 을 잃어 VIT1 의 per-layer 방어 계수 축이 끊긴다(G1-3 P2-3). */
+    struct FPendingLaserHit { TWeakObjectPtr<APawn> Target; float DueClock; float Damage; FFPSRDamageSpec Spec; };
     TArray<FPendingLaserHit> PendingLaserHits;
     TMap<TWeakObjectPtr<APawn>, float> LastAirborneClock;
 
@@ -460,10 +462,24 @@ UCLASS() class UFPSRBossGA_SweepLaser : public UFPSRBossGameplayAbility
      *  "회피는 점프뿐"과 충돌하고, 정점 90 cm(엔진 기본 JumpZVelocity 420)에서 유효 창이 0.3 s 뿐이다. */
     UPROPERTY(EditDefaultsOnly, meta=(ClampMin="0.0")) float BeamVisualHeightCm = 60.0f;
 
-    // 🔴 히트 = DidEnterBeam(...) ∧ !WasRecentlyAirborne(P) ∧ (r >= InnerRadiusCm) ∧ (클럭 >= WarmupEndClock)
-    //    → ServerScheduleLaserHit(P, Damage, Spec)  (늦은 점프 유예 뒤 결제)
-    // 상태: TMap<TWeakObjectPtr<APawn>, float> PrevRelByPawn — 이 GA 인스턴스 소유
+    // 🔴 히트 판정 = **노출 + 래치** (G1-3 P2-1 — 단순 AND 는 통과 하나를 통째로 건너뛴다)
+    //
+    // 엣지에 게이트를 AND 로 걸면, 엣지 프레임에 게이트가 닫혀 있다가 **밴드 안에서 열리는** 두 경우가
+    // 그 통과 전체를 0히트로 만든다: ① 웜업 중에도 빔은 돈다(BeamBaseAngleAt 이 BeamStartClock 기준)
+    // → WarmupEndClock 시점에 이미 밴드 안이던 플레이어 ② 공중에서 빔이 들어오고 **밴드 안에 착지**한
+    // 플레이어. ②는 §12-4 #3("빔 안으로 뛰어들면 맞는다")과 정면 충돌한다.
+    // 대안(게이트를 좁히고 ①을 감수)은 사용자 결정 "회피는 점프뿐"과 모순이라 기각 — 땅에 있으면 맞아야 한다.
+    //
+    //   bExposed = |CurRel| <= W || DidEnterBeam(...)      // 밴드 안이거나 이번 프레임에 관통했다
+    //   bGateOpen = !WasRecentlyAirborne(P) && r >= InnerRadiusCm && 클럭 >= WarmupEndClock
+    //   if (bExposed && !bLatched && bGateOpen) { ServerScheduleLaserHit(P, Damage, Spec); bLatched = true; }
+    //   if (!bExposed) { bLatched = false; }                // 밴드를 벗어나면 다음 통과를 위해 해제
+    //
+    // over-count 0 은 래치가 보장하고, under-count 0 은 DidEnterBeam 이 보장한다(§5-2).
+    // 상태: TMap<TWeakObjectPtr<APawn>, FBeamTrack{ float PrevRel; bool bLatched; }> — 이 GA 인스턴스 소유
     //       (InstancedPerActor, FPSRGameplayAbility.cpp:10 → 보스 1마리분). 이탈 폰은 매 틱 정리.
+    // 🔒 BeamCount·Period 는 **활성화 시점에 고정**한다(G1-3 P3-5) — 스윕 도중 페이즈가 올라 Period 가
+    //    바뀌면 PrevRel 이 다른 도메인의 값이 되어 무의미해진다. 늘어난 빔은 다음 발동부터.
 };
 
 UCLASS() class UFPSRBossGA_HomingOrbs : public UFPSRBossGameplayAbility
@@ -616,7 +632,7 @@ UFUNCTION(BlueprintPure, Category="FPSR|Run") float GetCombatClockSecondsForClie
 | `CurrentPhase` | 보스 | Push Model | 전환 시 1회 |
 | `BlastMarks` | 보스 | Push Model | 추가·제거 시 (~20 B/개) |
 | `BeamCount`/`BeamStartAngleDeg`/`BeamSpeedDegPerSec`/`BeamStartClock`/`BeamWarmupEndClock` | 보스 | Push Model | 활성화·해제 시 1회씩 |
-| `ReplicatedAccumulatedFrozenSeconds`/`ReplicatedFreezeStartedServerTime` | GameState | Push Model | **프리즈 엣지에서만** (8 B) |
+| `AccumulatedFrozenSeconds`/`FreezeStartedAtWorldTime` (**server-only → 복제 승격**, §5-7) | GameState | Push Model | **프리즈 엣지에서만** (8 B) |
 | 오브 위치 | 오브 | `SetReplicateMovement(true)` · `bAlwaysRelevant` | 엔진 기본 |
 
 > 🔴 **모든 코스메틱은 두 반쪽이다** — 클라 `OnRep` + **권위측 세터 직접 브로드캐스트**.
@@ -637,7 +653,17 @@ UFUNCTION(BlueprintPure, Category="FPSR|Run") float GetCombatClockSecondsForClie
 | **런 종료(승/패)** | `EndRunFreeze` 가 `bRunPaused` 를 **영구 고정**(`FPSRGameState.h:134-137`) → 회수를 **프리즈 게이트 앞**에 둔다(§5-3 Tick 순서 2번). 더 단순한 대안 = `GS->OnRunEnded` 구독(선례 `FPSRDirectorSensorSubsystem.cpp:139`) |
 | **런 재시작** | `StartRun` 이 `ActiveBoss->Destroy()`(`FPSRRunDirectorSubsystem.cpp:93-97`) → `EndPlay` 회수. `EndPlay` 는 클라에서도 도니 **`HasAuthority` 게이트** |
 | 스테이지 전환 | 보스 페이즈에서 **성립 불가**(StageDirector 가 거부 + BossTime 스왑은 `EnterBoss` 전에 종료). 게이트는 그래도 건다 |
-| 플레이어 이탈·JIP | `LastAirborneClock` · `PrevRelByPawn` · `PendingLaserHits` 에서 무효 항목 제거. JIP 는 복제 상태가 전부 |
+| 플레이어 이탈·JIP | `LastAirborneClock` · `BeamTrackByPawn` · `PendingLaserHits` 에서 무효 항목 제거. JIP 는 복제 상태가 전부 |
+
+> **보스 사망·런 종료에서 비우는 것 전량**(G1-3 P3-2 — 목표 5 "하나도 남지 않는다"의 열거):
+> `SpawnedPatternActors`(파괴) · `BlastMarks`(불발 제거) · `PendingLaserHits` · `LastAirborneClock` ·
+> `BeamTrackByPawn` · `ActivePatternHandle`. 틱이 꺼지므로 결제는 어차피 불가하지만, 열거에서 빠지면
+> "남지 않는다"가 검증 불가능한 문장이 된다.
+>
+> **지연 히트 취소 술어**(G1-3 P3-3) — `LastAirborneClock[T] > (DueClock − LateJumpGraceSeconds)`.
+> `WasRecentlyAirborne()` 를 그대로 쓰면 그 0.12 s 후행창이 **예약 *이전*의 공중**까지 잡아 취소가 과해진다.
+> 같은 대상에 대한 중복 예약은 허용한다(빔이 여럿이면 실제로 여러 번 노출된 것이고, i-frame 0.25 s 가 흡수한다).
+> `PendingLaserHits` 의 "항목 ≤4" 는 가정이 아니라 **관찰**이다 — 상한은 빔 수 × 생존자 수.
 
 ---
 
@@ -703,6 +729,16 @@ Build.bat FPSRogueliteEditor Win64 Development -Project=... -WaitMutex -DisableA
 10. 선택기 — 쿨다운·`MinPhase` 스킵, 라운드로빈 순환
 11. **시간축 가드** — `HasDuration` GE CDO 로 스펙을 만들어 `GameplayEffectApplicationQueries` 가 false 를
     돌려주는지. ⚠️ 현재 이 가드의 자동화 커버리지는 **0 건**이라 "기존 엘리트 테스트"만으로는 공허하다(G1-2 P3-6)
+12. 🔴 **결함을 실제로 잡는 케이스** (G1-3 P2-4) — ③④⑤ 는 프레임 스텝(1.0°·1.4°)이 밴드폭(6°)보다 작은
+    *느린* 통과라 **수정 전 코드에서도 녹색**이다. 실패할 수 있어야 테스트다:
+    - **빠른 관통** `Prev=+5, Cur=-5, W=3` → **1회** (수정 전 = 0회. §13-3 이 잡은 결함)
+    - **밴드 내 방향전환** `+5→+1→+2→+1` → **1회** (레벨 트리거였다면 4회)
+    - **첫 프레임** `Prev==Cur` → 밖이든 안이든 **0회**
+    - **래치 해제 후 재진입** `+5→+1→+5→+1` → **2회** (실제로 두 번째 노출)
+    - **웜업 종료 시 밴드 안** → 게이트가 열리는 프레임에 **1회** (단순 AND 였다면 0회. G1-3 P2-1)
+13. **`IsDataValid`** (G1-3 P3-1 — §5-3 이 "§12 IsDataValid" 를 가리키는데 §12 에 항목이 없었다):
+    `PhaseHealthThresholds` 내림차순·(0,1) 범위 · `4 × ⌈FuseSeconds/IntervalSeconds⌉ ≤ MaxConcurrentMarks`
+    (통과하면 런타임 FIFO 축출이 죽은 경로가 된다) · `BeamsPerPhase × 최대페이즈 ≤ MaxBeams`
 
 ### 12-3. 엘리트 무회귀
 쿨다운 계약을 공통 베이스로 호이스트 + 가드를 ASC 로 이동하므로 기존 엘리트 테스트 전부 + `FPSR.EliteDump` 대조.
@@ -764,14 +800,36 @@ P1 잔존 0 · 자동화 전부 녹색 · PIE 11항목 사용자 확인 · Fable
 ### 13-3. G1 3차 — 1회 중단 후 재시도 (2026-09-02)
 
 **첫 시도가 Fable 세션 한도(429)로 중단**됐다(16:30 KST 리셋). 중단 구간 동안 Opus 가 3차 질문표를
-코드로 직접 검증했고, **결함 1건 + 정정 2건**이 나왔다. 셋 다 반영 후 재제출한다.
+코드로 직접 검증했고, **결함 1건 + 정정 2건**이 나왔다. 셋 다 반영 후 재제출했다.
 
 | # | 발견 | 처리 |
 |---|---|---|
-| 🔴 결함 | **`DidEnterBeam` 이 빠른 관통을 놓친다.** 2차 지적(레벨 트리거 over-count)을 고치며 판정을 "밴드 진입"으로 좁혔는데, 빔이 한 프레임에 플레이어를 건너뛰면 `\|Cur\| > W` 라 **영영 히트가 안 난다** — 부호반전 방식이 잡던 케이스를 잃었다 | "밖에 있었다" 게이트 + "들어왔거나 관통했다" OR (§5-2). 5경우 전부 정확히 1회 |
+| 🔴 결함 | **`DidEnterBeam` 이 빠른 관통을 놓친다.** 2차 지적(레벨 트리거 over-count)을 고치며 판정을 "밴드 진입"으로 좁혔는데, 빔이 한 프레임에 플레이어를 건너뛰면 `\|Cur\| > W` 라 **영영 히트가 안 난다** — 부호반전 방식이 잡던 케이스를 잃었다 | "밖에 있었다" 게이트 + "들어왔거나 관통했다" OR (§5-2). 다섯 경우 전부 옳다(1/1/0/1/0) |
 | 정정 | §5-7 이 존재하지 않는 필드명(`ReplicatedFreezeStartedServerTime`)을 썼다. 실제는 `AccumulatedFrozenSeconds`·`FreezeStartedAtWorldTime`(`FPSRGameState.h:373-378`, server-only) | 실명으로 교체 + **복제 승격**임을 명시. 서버에선 `GetServerWorldTimeSeconds() == World->GetTimeSeconds()` 라 스탬프가 그대로 유효하고, 같은 관용구를 `StagePhaseEndServerTime` 이 이미 쓴다 |
 | 확인 | `APawn`→`AActor` 전환의 부수효과(2차 질문 5) — `ApplyKnockback` 은 `AFPSRCharacter`/`AFPSREnemyBase` 만 캐스트 | **전환 전후 동일(no-op)**. 약점·애님·significance 도 무관. §5-6 에 명시 |
 
-### 13-4. G1 3차 판정 — *(대기)*
+### 13-4. G1 3차 판정 (2026-09-02, Fable) — ✅ **통과 · P1 0건**
+
+> *"§13-3 의 결함 1건·정정 2건은 본문에 실제로 반영돼 있고, 2차가 남긴 P1-1 은 `FPSRBossBase.cpp:21` 이
+> 여전히 false 인 사실과 §5-3 · §12-2 ⑦ 이 정확히 맞물린다. P2 4건은 전부 골격 무변·10줄 이하다."*
+> §13-2 표 22행 중 19행 일치, 어긋난 3행도 아래에서 닫았다.
+
+| 지적 | 처리 |
+|---|---|
+| **P2-1** 히트 규칙 합성 구멍 — 엣지에 게이트를 AND 로 걸면 ①웜업 종료 시 밴드 안 ②밴드 안에 착지 두 경우가 **통과 전체를 0히트**로 만든다(②는 §12-4 #3 과 정면 충돌) | **노출 + 래치**로 재작성 (§5-5). 대안(게이트를 좁히고 ①감수)은 *"회피는 점프뿐"* 과 모순이라 기각 — 새 사용자 결정이 필요한 게 아니라 **기존 결정에서 답이 나온다** |
+| **P2-2** §7 복제표가 폐기된 이름을 씀 (§13-3 정정 #2 미전파) | 실명 + "복제 승격" 표기 (§7) |
+| **P2-3** `FPendingLaserHit` 에 `FFPSRDamageSpec` 없음 → 레이저만 `DamageType` 손실 | 필드 추가 (§5-3) |
+| **P2-4** 자동화 ③④⑤ 가 **수정 전 코드에서도 녹색** (스텝 1.0~1.4° < 밴드폭 6°) | 실패할 수 있는 5케이스를 ⑫로 추가 (§12-2) |
+| P3-1 `IsDataValid` 항목이 §12 에 없음 | ⑬ 신설 |
+| P3-2 teardown 열거 누락 | §8 인용 블록 |
+| P3-3 취소 술어 미선언 | §8 인용 블록 (`WasRecentlyAirborne` 를 그대로 쓰면 취소가 과해진다) |
+| P3-4 Tick 순서 — **순환 없음 확인.** 유일한 1프레임 지연 = 오브 PMC(≤46 cm, 해제 시 대칭) | 필요 시 `AddTickPrerequisiteActor(Boss)` — 지금은 감수 |
+| P3-5 스윕 중 페이즈 상승 | `BeamCount`·Period **활성화 시 고정** (§5-5) |
+| P3-6 VIT1 "server-only" 주석 | §4 파일 목록에 명시 |
+| P3-7 문구("네 경우" vs 5불릿) | §5-2 · §13-3 정정 |
+| P3-8 (nit) Prev 게이트의 W 변동 | 래치 구조가 "밖이었다"를 저장하므로 자동으로 닫힘 |
+
+**G1 종료.** 다음 = S1 구현(§6-5: Sonnet 구현 → Opus 검증 → G2 머지 게이트).
+단 **ASC 부착·프리즈 클럭·복제·수명주기는 Opus 직접**(프리즈 대칭은 하위 모델 위임 금지 영역).
 ### 13-5. C3 검증 원장 — *(구현 후)*
 ### 13-6. G2 머지 게이트 — *(머지 직전)*
