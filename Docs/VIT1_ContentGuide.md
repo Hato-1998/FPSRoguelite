@@ -139,7 +139,13 @@
 쓸 수 있는 노드(전부 `HealthComp` 대상, BlueprintPure): **`Get Shield`** · **`Get Max Shield`** · **`Is Shield Broken`** · `Get Health` · `Get Max Health`
 > `Max Shield` 가 0 이면 실드바를 **숨길 것**(실드 없는 개체가 정상이다).
 
-### ⑥-② `ShieldBreak` 히트마커 — `Content/UI/HUD/WBP_HitMarker`
+### ⑥-② `ShieldBreak` 히트마커 — `Content/UI/HUD/WBP_HitMarker` — ✅ **저작됨(2026-09-02, `776e8441`)**
+
+> 🔴 **이 문서는 지시서지 상태 기록이 아니다.** 아래 본문은 저작 *전에* 쓰였으므로 "아직 안 됐다"고 읽힌다 —
+> 실제로는 커밋 `776e8441`(main) 이 `WBP_HitMarker.uasset` 을 변경했고 메시지에 *"WBP_HitMarker — ShieldBreak
+> 마커 배선(§11-1 6-②)"* 라고 명시돼 있다. 그 이후 이 에셋을 건드린 커밋은 없다.
+> ⚠️ `.uasset` 은 바이너리라 **핀 연결 자체는 git 으로 증명할 수 없다** — 최종 확인은 에디터에서. 2026-09-02 세션이
+> 이 절을 상태로 오독해 "미완"으로 보고한 전례가 있다.
 
 `UFPSRPlayerFeedbackComponent::OnHitMarker`(파라미터 `EFPSRHitMarkerType`)를 이미 구독하고 있을 것이다. **enum 에 5번째 값 `Shield Break` 가 추가됐다.**
 
