@@ -8,7 +8,7 @@
 | 브랜치 | `phase/m1-shield-2layer` |
 | 작성 모델 | `claude-opus-5` (§6-5-2 개정 2026-08-26 — C1 설계 담당은 Opus, Fable은 G1/G2 게이트) |
 | 작성일 / 최종 갱신 | 2026-09-01 / 2026-09-01 |
-| 상태 | **`머지대기` — C3 전수 대조 + G2 머지 게이트 통과**(2026-09-02). C3 가 P1 1건·P2 2건, G2 가 P2 1건(+P3 6건)을 잡아 조건 전건 이행. 남은 것 = **`--no-ff` 머지 → 사용자 PIE(§12-10) · 콘텐츠(§11-1)**. 원장 = §13-0(G1) · §13-1(**G2**) · §13-2(C3 표적) · §13-3(C3 전수) |
+| 상태 | **`검증중` — 코드만 머지 완료**(2026-09-02, main `29f035d7` `--no-ff`). C3 가 P1 1건·P2 2건, G2 가 P2 1건(+P3 6건)을 잡아 조건 전건 이행. 🔴 **유닛은 아직 안 끝났다** — 프로파일 미할당 = 현행 거동이라 **이 시스템은 콘텐츠 저작 전까지 실제로 켜지지 않는다.** 남은 것 = **사용자 콘텐츠 7항목(§11-1) → 사용자 PIE 10항목(§12-10) → i-frame 재조정(§11-2)**. 원장 = §13-0(G1) · §13-1(G2) · §13-2(C3 표적) · §13-3(C3 전수) |
 | 관련 SSOT | `CombatWeaponCard.md` §2-3-1·§2-3-5·§2-3-7·§2-3-8·§2-3-9 · `Enemy.md` §2-6·§2-10 · `PlayerFeel.md` §2-13·§2-14 · `RunFlow.md` §2-2·§2-8 · `Architecture/0013`·`0014` |
 | 관련 메모리 | `[[reason-in-multiplayer-terms]]` `[[production-structure-first]]` `[[code-is-immutable-structure-only]]` `[[push-model-off-in-packaged-build]]` `[[cpp-uproperty-name-collides-with-bp]]` `[[extensibility-first-designer-tooling]]` `[[da-edits-are-user-work]]` `[[do-not-launch-game]]` |
 | 보드 행 | [실드/체력 2층 데미지 구조](https://app.notion.com/3be3972ddd88813bb054d5c8ac0a3ee2) — M1 · 미듐 · M |
