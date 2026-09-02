@@ -192,6 +192,17 @@ namespace FPSRBossLaser
      *  46프레임 ≈ 1.5 s 연속 발화 → i-frame 0.25 s 에서 **6히트**. "무적시간에 안 끌려다닌다"는
      *  이 명세 자신의 약속이 그 함수로 깨졌다.
      *
+     *  🔴 **진입 엣지만으로는 부족하다 — 두 조건을 OR 로 묶어야 한다** (자체검증 2026-09-02, G1-3 제출 전).
+     *  `|Cur| <= W` 단독이면 빔이 한 프레임에 플레이어를 **건너뛸 때**(Prev=+5°, Cur=−5°, W=3°)
+     *  `|Cur| > W` 라 false 가 되어 **영영 안 맞는다** — 부호반전 방식이 잡던 바로 그 케이스를
+     *  엣지 트리거로 좁히면서 잃어버린 것이다. 그래서 "밖에 있었다" 를 게이트로 두고
+     *  "안에 들어왔거나 관통했다" 를 OR 로 받는다. 네 경우 전부 정확히 1회다:
+     *    · 느린 통과 = 진입 프레임 1회(이후 Prev 가 안이라 게이트가 막는다)
+     *    · 빠른 관통 = 부호반전 1회
+     *    · 밴드 안에서 방향 전환 = 0회(이미 셌다)
+     *    · 나갔다 재진입 = 1회(실제로 두 번째 노출이므로 옳다)
+     *    · 첫 프레임 Prev=Cur → 밖이면 게이트 통과하나 OR 두 항 모두 false, 안이면 게이트가 막는다 = 무히트
+     *
      *  누락(under-count)은 0 이다: r 이 0 을 단조 통과하면 |Δr| < Period/2 아래 진입 엣지가 정확히 1회.
      *  랩 컷오프는 나이키스트 가정 — N=5(H=36°)에서 최대 상대각속도 ≈ 99°/s → 3.3°/프레임@30fps 이므로
      *  **360 ms 이상 히치에서만** 깨진다(§12-2 ⑥ 이 이 경계를 단언한다).
@@ -201,9 +212,10 @@ namespace FPSRBossLaser
      *  @param HalfWidthDeg    빔 반폭 + 플레이어 캡슐 각반경(CapsuleAngularRadiusDeg). */
     FORCEINLINE bool DidEnterBeam(float PrevRel, float CurRel, float MaxStep, float HalfWidthDeg)
     {
-        if (FMath::Abs(CurRel - PrevRel) > MaxStep) { return false; }          // 랩
-        if (FMath::Abs(CurRel) > HalfWidthDeg)      { return false; }          // 아직 밖
-        return FMath::Abs(PrevRel) > HalfWidthDeg;                             // 밖 → 안 = 진입 엣지
+        if (FMath::Abs(CurRel - PrevRel) > MaxStep) { return false; }          // 도메인 랩 — 교차 아님
+        if (FMath::Abs(PrevRel) <= HalfWidthDeg)    { return false; }          // 직전에 이미 안 — 셈 끝남
+        // 밖에 있었고 → 이번에 안으로 들어왔거나(느린 통과) 아예 관통했다(빠른 통과).
+        return FMath::Abs(CurRel) <= HalfWidthDeg || ((PrevRel < 0.0f) != (CurRel < 0.0f));
     }
 
     /** 플레이어 캡슐이 거리 r 에서 차지하는 각반경(도). 보스 코앞에서 얇은 빔이 캡슐을 시각적으로
@@ -538,6 +550,11 @@ protected:
 | 체력 0 (격추) | `bDead` 복제가 클라에 닿게 **`DeathDwellSeconds` dwell 뒤** 파괴 — 즉시 Destroy 하면 클라가 격추 연출을 못 낸다 |
 | 벽/프롭 Block 히트 | 파괴(자폭 없음) |
 
+> ℹ️ **`APawn` → `AActor` 전환이 바꾸지 않는 것** — `FPSRCombat::ApplyKnockback` 은
+> `AFPSRCharacter` → `AFPSREnemyBase` 순으로만 캐스트하므로(`FPSRCombatStatics.cpp` `ApplyKnockback`)
+> 오브는 **폰이든 아니든 no-op** 이다. 로켓이 오브를 밀지 못하는 것은 전환 전후가 같고 의도된 거동이다.
+> 약점(`UFPSRWeakpointComponent`)·적 애님·significance 는 전부 `AFPSREnemyBase` 계열에만 붙으므로 무관하다.
+
 > 🔴 `Health->SetCountsAsKill(false)` — 막는 것은 **흡혈 · DealtDamage 이벤트 · 킬 크레딧 · on-kill 프래그먼트**다
 > (`FPSRCombatStatics.cpp:168-183`). **XP 는 무관하다** — XP 는 `AFPSREnemyBase::HandleDeath` 에서만 떨어지고
 > 오브는 그 클래스가 아니다(G1-2 P3-1 — 종전 판의 "XP 무한 파밍" 근거는 틀렸다).
@@ -545,12 +562,23 @@ protected:
 ### 5-7. `AFPSRGameState` 추가분 (클라 시계 유도)
 
 ```cpp
-/** 클라가 전투시계를 **유도**하는 데 필요한 두 값. 프리즈 엣지에서만 dirty(엣지당 8 B).
- *  클라 = ServerWorldTime − Accum − (bRunPaused ? ServerWorldTime − FreezeStartedServerTime : 0).
- *  RTT 보정은 엔진이 하지 않으므로(`GameStateBase.cpp:164-194`) 잔차 = 편도 지연 L —
- *  코스메틱은 보스의 `MaxClientVisualLeadSeconds` 로 앞당기고, 판정 쪽은 지연 히트로 연다(§5-3). */
-UPROPERTY(Replicated) float ReplicatedAccumulatedFrozenSeconds = 0.0f;
-UPROPERTY(Replicated) float ReplicatedFreezeStartedServerTime = -1.0f;
+/** 현행 두 필드(`AccumulatedFrozenSeconds` · `FreezeStartedAtWorldTime`, `FPSRGameState.h:373-378`)는
+ *  VIT1 이 **server-only, not replicated** 로 선언했다. 클라가 전투시계를 유도하려면 이 둘이 필요하므로
+ *  **복제로 승격**한다(Push Model, `SetRunPaused` 엣지에서만 dirty — 엣지당 8 B).
+ *
+ *  🔑 이름을 바꾸지 않는다: 서버에서 `AGameStateBase::GetServerWorldTimeSeconds()` 는
+ *  `World->GetTimeSeconds()` 와 같은 값이므로, `FreezeStartedAtWorldTime` 은 그대로
+ *  **서버 월드시각 스탬프**로 읽힌다. 이 프로젝트는 이미 같은 방식의 스탬프를 쓰고 있다 —
+ *  `StagePhaseEndServerTime`(`FPSRGameState.h:388-390`) · `LobbyCountdownEndServerTime`(`:161`).
+ *
+ *  클라 유도식 = `GetServerWorldTimeSeconds() − AccumulatedFrozenSeconds
+ *                 − (bRunPaused ? GetServerWorldTimeSeconds() − FreezeStartedAtWorldTime : 0)`
+ *  → 서버의 `GetCombatClockSeconds()`(`FPSRGameState.cpp:249-266`)와 **같은 식**이고, 다른 것은
+ *  시간원이 `World->GetTimeSeconds()` 냐 `GetServerWorldTimeSeconds()` 냐 뿐이다.
+ *  RTT 보정은 엔진이 하지 않으므로 잔차 = 편도 지연 L — 코스메틱은 보스의
+ *  `MaxClientVisualLeadSeconds` 로 앞당기고, 판정 쪽은 지연 히트로 연다(§5-3). */
+UPROPERTY(Replicated) float AccumulatedFrozenSeconds = 0.0f;   // server-only → Replicated 로 승격
+UPROPERTY(Replicated) float FreezeStartedAtWorldTime = 0.0f;   // 서버에선 GetServerWorldTimeSeconds() 와 동일
 
 UFUNCTION(BlueprintPure, Category="FPSR|Run") float GetCombatClockSecondsForClients() const;
 ```
@@ -733,6 +761,17 @@ P1 잔존 0 · 자동화 전부 녹색 · PIE 11항목 사용자 확인 · Fable
 **2차가 확인해 준 것(건드리지 않음)** — 전역 전투시계 재사용 판단 · ASC 가드 1벌 호이스트 ·
 보스 소유 복제 배열 표식 · 주기 도메인 상대각 · 슬라이스 절단.
 
-### 13-3. G1 3차 — *(대기)*
-### 13-4. C3 검증 원장 — *(구현 후)*
-### 13-5. G2 머지 게이트 — *(머지 직전)*
+### 13-3. G1 3차 — 1회 중단 후 재시도 (2026-09-02)
+
+**첫 시도가 Fable 세션 한도(429)로 중단**됐다(16:30 KST 리셋). 중단 구간 동안 Opus 가 3차 질문표를
+코드로 직접 검증했고, **결함 1건 + 정정 2건**이 나왔다. 셋 다 반영 후 재제출한다.
+
+| # | 발견 | 처리 |
+|---|---|---|
+| 🔴 결함 | **`DidEnterBeam` 이 빠른 관통을 놓친다.** 2차 지적(레벨 트리거 over-count)을 고치며 판정을 "밴드 진입"으로 좁혔는데, 빔이 한 프레임에 플레이어를 건너뛰면 `\|Cur\| > W` 라 **영영 히트가 안 난다** — 부호반전 방식이 잡던 케이스를 잃었다 | "밖에 있었다" 게이트 + "들어왔거나 관통했다" OR (§5-2). 5경우 전부 정확히 1회 |
+| 정정 | §5-7 이 존재하지 않는 필드명(`ReplicatedFreezeStartedServerTime`)을 썼다. 실제는 `AccumulatedFrozenSeconds`·`FreezeStartedAtWorldTime`(`FPSRGameState.h:373-378`, server-only) | 실명으로 교체 + **복제 승격**임을 명시. 서버에선 `GetServerWorldTimeSeconds() == World->GetTimeSeconds()` 라 스탬프가 그대로 유효하고, 같은 관용구를 `StagePhaseEndServerTime` 이 이미 쓴다 |
+| 확인 | `APawn`→`AActor` 전환의 부수효과(2차 질문 5) — `ApplyKnockback` 은 `AFPSRCharacter`/`AFPSREnemyBase` 만 캐스트 | **전환 전후 동일(no-op)**. 약점·애님·significance 도 무관. §5-6 에 명시 |
+
+### 13-4. G1 3차 판정 — *(대기)*
+### 13-5. C3 검증 원장 — *(구현 후)*
+### 13-6. G2 머지 게이트 — *(머지 직전)*
