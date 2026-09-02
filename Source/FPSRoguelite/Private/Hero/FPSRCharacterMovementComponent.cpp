@@ -71,6 +71,21 @@ UFPSRCharacterMovementComponent::UFPSRCharacterMovementComponent()
 	// ride on it without a custom flag — but it only works if crouching is actually enabled on the component.
 	NavAgentProps.bCanCrouch = true;
 
+	// Engine default is FALSE, and leaving it there caught every slide on every ledge (velocity 0, dead stop).
+	// The slide lives in MOVE_Walking on bWantsToCrouch (ADR 0001 axis 1), so IsCrouching() is true for its whole
+	// length — which is precisely what the engine's CanWalkOffLedges() refuses on (engine cpp:5303). PhysWalking then
+	// takes its ledge branch (engine cpp:5679): the sideways GetLedgeMove is zero for a square-on approach, CheckFall
+	// asks CanWalkOffLedges() again and so never starts the fall, and RevertMove(bFailMove=true) zeroes Velocity AND
+	// Acceleration. The next frame ComputeSlideHeading has no direction left to normalize, so the curve cannot restore
+	// the speed either, and the player is left parked on the lip for as long as crouch is held.
+	// The default's premise is a stealth game's crouch — "don't let the player fall while sneaking". Here crouch IS the
+	// slide entry, so that premise does not hold; standing already walks off ledges, so this also removes a
+	// stand/crouch inconsistency rather than introducing one.
+	// A CDO config flag, not simulation state: both machines hold the same value and every replayed move reads it
+	// identically, so it costs no compressed flag, no SavedMove field and nothing per frame. Overridable per-hero in
+	// the Blueprint — the engine already marks it EditAnywhere.
+	bCanWalkOffLedgesWhenCrouching = true;
+
 	// The engine default of 0.05 leaves essentially no air steering, which doesn't fit a design where the player
 	// jumps out of slides, fights mid-air and lands into cover. Overridable per-hero in the Blueprint.
 	AirControl = 0.4f;
@@ -263,8 +278,24 @@ void UFPSRCharacterMovementComponent::StopSliding()
 	SlideElapsed = 0.0f;
 	SlideEntrySpeed = 0.0f;
 	SlideSlopeSpeedBonus = 0.0f;
-	// Charged on EVERY exit path, so jump-cancelling isn't a way to dodge the anti-spam lockout.
-	SlideCooldownRemaining = SlideCooldown;
+	// Charged on every exit the slide's OWN RULES produced — crouch released, too slow, timed out, gate closed. Those
+	// all happen with the player still on the floor, which is why the ground test is the whole condition.
+	//
+	// Leaving the ground is not one of those verdicts. It is traversal: a jump, a step down, a ledge. Charging the
+	// lockout there was destroying the player's speed on ordinary terrain, and the loss is much larger than "no slide
+	// for 0.8s" suggests. On landing the crouch key is normally still held, so a refused entry leaves a PLAIN CROUCH,
+	// and that is capped by MaxWalkSpeedCrouched (300 — the engine derives it from its own 600 default, and
+	// RefreshWalkSpeedCap only ever raises MaxWalkSpeed). PhysWalking then hands CalcVelocity GroundFriction 8, which
+	// BrakingFrictionFactor doubles to an effective 16 — the same constant ADR 0001 already records as taking
+	// 900 -> 250 cm/s in about 0.08s. So a 1200 cm/s landing was down to 300 within a tenth of a second.
+	//
+	// Anti-spam survives intact: tapping crouch on flat ground exits through bReleasedCrouch, which IS on the ground
+	// and still charges, so the entry impulse cannot be mashed. A slide-hop chain saturates at SlideMaxEntrySpeed
+	// rather than ratcheting, because StartSliding's impulse may only lift speed TOWARD that cap.
+	if (IsMovingOnGround())
+	{
+		SlideCooldownRemaining = SlideCooldown;
+	}
 
 	// Hand the run ramp back at its END, not at zero. A slide exits faster than running speed, so resuming the curve
 	// from t=0 would make GetMaxSpeed collapse and slam the player to a halt; from the end, the excess simply decays.

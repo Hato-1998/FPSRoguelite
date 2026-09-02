@@ -17,6 +17,7 @@
 - [G. 검증 방법 자체의 함정](#g-검증-방법-자체의-함정)
 - [H. 로컬라이제이션 · 파이프라인 스크립트](#h-로컬라이제이션--파이프라인-스크립트)
 - [I. 전투 · 콜리전](#i-전투--콜리전)
+- [J. 이동 · 무브먼트](#j-이동--무브먼트)
 
 ---
 
@@ -672,3 +673,71 @@ EC ② 판정처럼 **네임스페이스별 엔트리 수를 세는 검사**는 
 "C++ 상속"과 "BP 오버라이드"를 **구분할 수 없다** — 둘 다 Custom 으로 나온다.
 → 판정은 **오브젝트 타입 값을 직접 읽어서**: 재빌드·재기동 후 CDO와 배치 인스턴스 양쪽에서
 `get_collision_object_type()` 이 새 채널 값인지 확인한다(수정 전 값을 미리 재 둔 것이 대조군).
+
+---
+
+## J. 이동 · 무브먼트
+
+### J1. 슬라이드가 2층 가장자리에서 **딱 멈춘다** (속도 0, 안 떨어짐) (2026-09-01)
+**증상**: 2층 덱 가장자리로 슬라이드해 들어가면 낙하하지 않고 모서리에 **박혀 선다.** 속도 0.
+비스듬히 들어가면 대신 가장자리를 따라 옆으로 미끄러진다. 크라우치를 놓으면 그제야 떨어진다.
+
+**콜리전을 의심하지 말 것 — 난간도 소품도 아니다.** 멈추는 지점이 정확히 **걸을 수 있는 바닥의 끝**이다.
+
+**원인**: 엔진 기본값 `bCanWalkOffLedgesWhenCrouching = false`
+(`CharacterMovementComponent.cpp:753`). 슬라이드는 ADR 0001 축1에 따라 `MOVE_Walking` 에 머물며
+`bWantsToCrouch` 로 진입하므로 **슬라이드 내내 `IsCrouching()` 이 참**이고, 그게 곧 엔진이 낭떠러지 이탈을
+거부하는 조건이다. 그 뒤 5단계가 자동으로 이어진다:
+
+| # | 엔진 지점 | 무슨 일 |
+|---|---|---|
+| 1 | `CanWalkOffLedges()` cpp:5303 | `!bCanWalkOffLedgesWhenCrouching && IsCrouching()` → **false** |
+| 2 | `PhysWalking` cpp:5679 | `bCheckLedges = true` → 가장자리 분기 진입 |
+| 3 | `GetLedgeMove()` | 옆으로 빠지는 대체 이동. **수직 진입이면 ZeroVector**(비스듬하면 성공 → 옆 미끄러짐) |
+| 4 | `CheckFall()` cpp:5313 | 내부에서 `CanWalkOffLedges()` 를 **다시** 물어봄 → false → **낙하 시작 안 함** |
+| 5 | `RevertMove(bFailMove=true)` | `Velocity = 0; Acceleration = 0` — 여기가 "속도 0" |
+
+그 다음 프레임에 `ComputeSlideHeading()` 이 정규화할 방향을 잃어(`Velocity.GetSafeNormal2D()` = 0)
+ZeroVector 를 반환하고, 속도 블록이 통째로 건너뛰어져 **커브도 속도를 되살리지 못한다** → `bTooSlow` →
+`StopSliding()`. 크라우치를 쥔 채면 계속 앉은 상태라 그 뒤로도 못 걸어나간다.
+
+**해결**: `UFPSRCharacterMovementComponent` 생성자에서 `bCanWalkOffLedgesWhenCrouching = true`.
+시뮬레이션 상태가 아니라 CDO 설정 플래그라 예측·복제 표면이 없다.
+
+⚠️ **엔진 기본값을 "안전한 쪽"으로 믿지 말 것.** 이 기본값은 **잠입 게임의 앉기**를 전제한다("실수로
+떨어지면 안 됨"). 앉기가 슬라이드 진입 수단인 게임에서는 전제가 반대다. 같은 함정이 `AirControl`(0.05)·
+`MaxAcceleration` 에도 있었고 셋 다 같은 생성자에서 덮고 있다.
+
+⚠️ **정황 증거를 반대로 읽기 쉬운 사례.** `UpdateCharacterStateBeforeMovement` 의 기존 주석은 이미
+"sliding off a ledge" 를 다루고 있었다 — 코드가 그 경로를 **전제**하고 있었기 때문에, 주석만 보면
+"이미 처리됨"으로 읽힌다. 실제로는 `PhysWalking` 이 그 위에서 막아 **한 번도 도달한 적이 없는 경로**였다.
+주석이 다루는 것과 런타임이 도달하는 것은 다르다.
+
+### J2. 단차를 넘고 착지하면 **속도가 통째로 증발한다** (슬라이드/점프 후) (2026-09-02)
+**증상**: 슬라이드로 단차를 내려가거나 점프로 단차를 올라간 뒤 착지하면, 가지고 있던 속도가
+**0.1초 만에 사라진다.** 쿨다운 표기(`FPSR.LocomotionState` 의 `(slide CD x.x)`)가 떠 있다.
+
+**"슬라이드가 다시 안 걸린다"로 읽고 쿨다운만 보면 원인을 절반만 본 것이다.**
+쿨다운은 방아쇠일 뿐이고, 속도를 실제로 죽이는 건 **거부된 슬라이드가 남기는 "그냥 앉은 상태"**다.
+
+| # | 지점 | 무슨 일 |
+|---|---|---|
+| 1 | `StopSliding()` | 지면 이탈(`bLeftGround`) 종료에도 `SlideCooldownRemaining = SlideCooldown`(0.8s)을 물렸다 |
+| 2 | `CanEnterSlide()` | 착지 시 크라우치 키는 보통 아직 눌려 있다 → 쿨다운 때문에 거부 → **평범한 크라우치** |
+| 3 | `GetMaxSpeed()` | 크라우치라 `MaxWalkSpeedCrouched` = **300** |
+| 4 | `CalcVelocity` | `bVelocityOverMax` → `ApplyVelocityBraking(GroundFriction 8 × BrakingFrictionFactor 2 = **실효 16**)` |
+
+→ **1200 cm/s 착지가 약 0.1초 만에 300.** 이 "실효 마찰 16"은 ADR 0001이 다른 증상으로 이미 적어 둔
+상수다(900→250 cm/s ≈ 0.08s). 같은 상수가 두 번째 사고를 냈다.
+
+**해결**: `StopSliding()` 에서 **지면 위에서 끝난 슬라이드만** 쿨다운을 물린다(`IsMovingOnGround()`).
+지면 이탈은 슬라이드에 대한 판정이 아니라 트래버설이다. 평지 크라우치 연타는 `bReleasedCrouch` 경로라
+여전히 지면 위 → 차단 유지, 슬라이드-홉 체인은 `SlideMaxEntrySpeed` 에서 포화(래칫 아님).
+
+⚠️ **`MaxWalkSpeedCrouched` 가 300인 이유를 오해하지 말 것.** 누가 튜닝한 값이 아니라 **엔진 생성자가
+자기 기본값 `MaxWalkSpeed`(600)의 절반으로 잡아 둔 것**이고, 우리 `RefreshWalkSpeedCap()` 은
+`MaxWalkSpeed` 만 900으로 올린다. 그래서 실제 비율은 엔진 의도인 1/2 이 아니라 **1/3** 이고,
+**속도 카드 배수도 크라우치엔 전혀 안 먹는다**(카드는 `MaxWalkSpeed` 만 스케일한다).
+
+⚠️ **이 수정으로도 안 잡히는 잔여**: `SlideMinEnterSpeed`(680) **미만**으로 착지하면 쿨다운과 무관하게
+여전히 위 3~4단계를 그대로 탄다. "슬라이드가 못 된 크라우치는 즉시 300으로 제동된다"가 진짜 레버다.
