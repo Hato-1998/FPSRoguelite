@@ -9,6 +9,62 @@
 
 ---
 
+## 🔷 HUD C++ 표면 보강 — 본인/팀원 바이탈 접근자 + 무기 아이콘 + 파손경고 이관 (2026-09-02, main 머지 `0a649e9c`)
+> 보드 행 = *"HUD C++ 표면 보강 — 본인/팀원 바이탈 접근자 + 무기 아이콘 필드"*(M1, 하이). 브랜치 `feat/hud-surface`.
+> 커밋 = `c7f5f55e`(feat/hud, 13파일 +308/−37) · `305810cd`(fix/test, 1파일 +52/−4).
+> 갈래 = §6-5-2 T1~T5 미해당 → **게이트 없음**(구현=Sonnet 위임 / 검증=Opus 직접).
+>
+> **한 줄**: VIT1 콘텐츠 저작이 "코드에 표면이 없어 WBP 로 마감 불가"로 멈춘 4건을, **신규 복제 프로퍼티 0 · 신규 RPC 0** 으로 연다 — 전부 이미 복제되는 값을 읽거나 기존 델리게이트에 얹는 것뿐이다.
+
+### 무엇을 어디에 뒀는가 (비자명 결정 3건)
+
+1. **본인 바이탈 접근자는 위젯이 아니라 `AFPSRPlayerState` 에** — BlueprintPure 9종(`GetHealth/MaxHealth/Health01/Shield/MaxShield/Shield01/HasShield/IsShieldBroken/AreVitalsReady`).
+   ① 제1원리: 기준선이 4인 협동이라 같은 숫자를 DBNO 오버레이·리절트·네임플레이트가 다시 읽는다 — 위젯에 두면 각자 원시 GAS 폴링으로 재유도한다. ② 기존 인프라: PlayerState 가 이미 ASC·`UFPSRHealthSet` 소유자이고 `IsAlive()/GetLifeState()` 를 BlueprintPure 로 내주는 자리다(덮는 게 아니라 그 줄에 얹음). ③ RunHUD 는 종전 `GetPartyLevel` 패턴대로 얇은 미러만.
+   - `AreVitalsReady()`(= `MaxHealth > 0`) 가 **ASC 미준비 가드의 정본**이다. 초기화 GE 복제 전에는 0/0 이라, 이 플래그가 없으면 HUD 가 "죽기 직전"으로 오독한다.
+   - `HasShield()`(= `MaxShield > 0`) 가 §2-14 「`MaxShield==0` 이면 게이지·숫자를 **함께** 숨긴다」의 단일 판정축.
+2. **팀원 배열은 `AFPSRGameState`** — `GetPartyVitals(bIncludeLocalPlayer=false)` + `FFPSRPartyMemberVitals`. `PlayerArray` 를 이미 갖고 모든 클라에 존재하는 유일한 런 단위 객체다(대안이던 `UBlueprintFunctionLibrary` 는 이 리포에 전례 0 = 새 패턴 도입 비용).
+   - 🔴 **정렬 안정성 = `PlayerId` 오름차순.** `PlayerArray` 순서는 *복제 도착순*이라 클라마다 다르고 입장·퇴장·재접속마다 재배열된다 → 그대로 그리면 팀원 바가 프레임 사이에 슬롯을 바꾼다.
+   - 🔴 **제외 = 스펙테이터 + `IsInactive()`.** 후자는 접속이 끊긴 뒤 재접속 대기로 **엔진이 남겨 두는 유령 PlayerState** 다 — 안 거르면 나간 플레이어의 바가 계속 남는다.
+   - 생존상태를 `EFPSRLifeState` 가 아니라 **bool 2개**(`bIsAlive`/`bIsDBNO`)로 담았다. 이유는 스타일이 아니라 컴파일 비용 — 그래야 `FPSRGameState.h`(**includer 36개**)가 `FPSRPlayerState.h` 를 include 하지 않는다.
+   - ⚠️ 호출마다 배열을 할당한다. 위젯 Tick 금지(헤더·가이드 양쪽에 명시).
+3. **`UFPSRWeaponDataAsset::Icon` = `TSoftObjectPtr<UTexture2D>`** — 이 DA 의 다른 에셋 참조(`WeaponMesh`·`WeaponMeshStatic`·`WeaponAnimInstanceClass`)가 전부 소프트다. 무기 DA 는 **상시 로드 프라이머리 에셋**이라 하드 참조면 전 무기의 아이콘이 시작부터 상주한다.
+
+### 실드 파손 경고 이관 — VIT1 이 남긴 갭의 실제 폐쇄
+`UFPSRGameplayMessageSubsystem` 은 `Get`/`RegisterListener` 가 **전부 C++ 템플릿이라 `UFUNCTION` 이 하나도 없다** → WBP 가 구독할 방법이 없었고, VIT1 §11-1 6-③(경고 위젯)이 "콘텐츠로 메울 수 없는" 상태로 막혀 있었다. `UFPSRPlayerFeedbackComponent::OnShieldBroken`(BlueprintAssignable, 페이로드 없음)으로 옮겼다 — 그 컴포넌트가 이미 플레이어 로컬 HUD 코스메틱의 창구이고, **자기 헤더 주석이 GMS 를 "소비자가 여럿이 될 때의 업그레이드 경로"라 명시**해 뒀다. 실드 파손 경고는 정확히 그 전자(단일 소비자 로컬 코스메틱)다.
+- **훅·엣지 판정·`IsLocallyControlled()` 게이트는 무변경** — 바뀐 것은 발행 수단뿐이다. VIT1 이 엔진 실측으로 확정한 「`PostAttributeChange` 가 아니라 GAS 값변경 델리게이트」 근거(원격 클라 도달성)는 그대로 살아 있다.
+- 발행자가 사라진 `Message.Player.ShieldBroken` 태그 삭제(`Content/` 포함 리포 전체 잔여 참조 0 확인 후).
+
+### ⚠️ 이 항목의 값어치 = **검증 도구가 고장 나 있었다**
+
+1. 🔴 **`FPSRoguelite.Enemy.BlueprintParent` 가 main 에서 이미 실패하고 있었다 — 모든 브랜치의 머지 게이트를 막은 채로.**
+   이 테스트는 `Content/Character/Enemy` 아래 **모든 `.uasset` 을 블루프린트로 가정**하고 `/Game/<경로>.<이름>_C`(BP 생성 클래스)로 로드를 건다. VIT1 콘텐츠 저작(`776e8441`)이 `DA_Vitals_Enemy*` 3종을 그 폴더에 넣자, `_C` 가 없는 DataAsset 에서 `TestNotNull(... "CoreRedirect intact")` 이 3건 터졌다. **리다이렉트도 콘텐츠도 멀쩡했다 — 테스트의 가정이 틀렸다.**
+   → 수정 = `_C` 로드가 null 이면 에셋 자체를 열어 `UBlueprint` 인지 판별. BP 가 아니면 스킵, **에셋이 안 열리거나 BP 인데 `_C` 가 null 이면 기존대로 하드 실패**(CoreRedirect 가드 유지).
+   → 🔴 **그 스킵이 새 공허 통과 경로를 연다** — BP 가 전부 폴더 밖으로 나가고 DataAsset 만 남아도 전건 스킵으로 통과한다. 그래서 **검사한 BP 수가 0 이면 실패하는 가드**를 함께 넣었다(이 파일이 기존 0-파일 가드에서 이미 강조하던 원칙의 한 단계 아래). 실측 = `3 Blueprint(s) checked, 3 non-Blueprint asset(s) skipped (of 6 file(s) found)`.
+   → **교훈: 폴더 규약 스캔은 "그 폴더에 다른 종류의 에셋이 들어오는 날"을 반드시 상정해야 한다.** 콘텐츠 저작자는 코드 테스트의 가정을 모른다.
+
+2. 🔴 **헤드리스 자동화를 `RunTests A+B+C` 로 묶으면 러너가 아예 안 돈다.**
+   `-ExecCmds="Automation RunTests <3종을 + 로 연결>"` 로 돌렸더니 **`LogAutomationController` 가 단 한 줄도 안 나오고**(테스트 실패가 아니라 러너 미기동) `-TestExit` 이 영영 안 걸려 **에디터가 2시간 넘게 idle** 했다(로그 꼬리에 `LogDerivedDataCache: Maintenance` 가 1시간 간격으로 반복 = 살아 있었다는 증거). 강제 종료 외에 끝나지 않았고, 그 좀비 에디터는 `.uasset` 락을 잡아 이후 git 작업을 깰 수 있었다.
+   → **해결 = 테스트 1개씩 개별 호출.** `Docs/SSOT/Workflow.md` §6-6 과 리포의 모든 선례가 단일 테스트 형태인 이유가 이것이었다.
+   → 부수 함정: **PowerShell `Start-Process -ArgumentList` 로 넘기면 `-ExecCmds` 의 따옴표가 벗겨진다**(엔진이 `-ExecCmds=Automation` 과 `RunTests` 를 별개 토큰으로 받는다). 로그의 `LogInit: Command Line:` 줄에 따옴표가 있는지로 즉시 판별된다 — 없으면 그 실행은 무효다. **`.bat` 에 커맨드라인을 그대로 쓰고 `cmd /c` 로 실행**하면 보존된다.
+   → **교훈: "결과가 안 나온다"와 "도구가 안 돌았다"는 구분되지 않는다.** 대조군(문서에 적힌 단일 테스트)을 먼저 돌려 도구가 살아 있는지부터 확인했어야 했다.
+   → 엔진 부팅 중 찍히는 `LogAutomationTest: Error: Condition failed` 몇 줄은 **우리 테스트가 아니다** — `LogEngine: Initializing Engine...` **이전**에 나오는 엔진 자체 노이즈다. 테스트 실패로 오독하지 말 것.
+
+### HUD 레퍼런스 재대조 — §2-14 가 안 적어 둔 것 3건
+사용자 제공 스크린샷 2종을 다시 대조했다. 채택안(좌하단 바이탈 / 우하단 총기 + 숫자 병기, 실드가 체력 위)은 스크린샷과 일치했고, 다음 3건이 빠져 있어 §2-14 에 보강했다.
+1. 🔴 **캐릭터 초상의 데이터 소스가 없다** — 양 레퍼런스 모두 좌하단 바이탈 왼쪽에 초상이 있고 §2-14 도 그렇게 적어 뒀는데 「미충족 선행」에는 무기 아이콘만 있었다. 실측: `Source/` 전체에 초상/아이콘 필드 **0건**. 게다가 **필드 누락이 아니라 기획 미정**이다 — 플레이어 캐릭터 선택·클래스 개념 자체가 없다(로비는 `SelectedWeapon` 만 고른다). → **보드 백로그 신규 행.**
+2. **예비탄약 칸은 불필요** — Apex 는 `27 / ∞`(현재/예비) 2단이지만, `FFPSRWeaponStatBlock` 이 `reserve ammo is infinite (always refills to MagSize)` 로 **이미 결정**했다. 현재탄 / `MagSize` 만 그린다 = 새 코드 표면 0.
+3. **Apex 실드는 등급별 세그먼트 바**(미장착이면 X 표시). 우리 실드는 float 어트리뷰트 1개라 세그먼트 개념이 없다 — 그대로 베끼면 안 된다.
+
+### 검증
+- 빌드 **2회** `Result: Succeeded` — `-DisableUnity` / `-DisableAdaptiveUnity -ForceUnity`. 에러·경고 0, 후자에 `Adaptive Build ... Excluded` 줄 **0건**(제외됐다면 그 초록은 유니티 동명충돌에 대해 무효였다).
+- 자동화 **3종 전건** `Result={Success}` — `Combat.Vitals` · `Enemy.BlueprintParent` · `Smoke.ModuleLoads`.
+- 자기비판에서 잡아 정리한 것: 내 변경이 죽인 include 1개(`Messages/FPSRCosmeticMessages.h` in `FPSRCharacter.cpp` — GMS 블록을 걷어내자 `FFPSRCosmeticEventMessage` 참조가 0 이 됐다).
+
+### 후속 = 사용자 콘텐츠 작업
+`Docs/VIT1_ContentGuide.md` §5 ⑥-③(본인/팀원 실드바) · ⑥-④(파손 경고 위젯) · ⑥-⑤(총기 HUD, 신설)로 저작 절차가 열렸다. **VIT1 §12-10 PIE 1·5번의 선행조건이 해소됐다.** 남은 미충족 선행 = 캐릭터 초상(위 1번, 기획 결정 선행).
+
+---
+
 ## 🔷 VIT1 — 실드/체력 2층 바이탈 시스템 (2026-09-02, main 머지 `29f035d7`) — **코드 완료 / 런타임·콘텐츠는 사용자 몫**
 > 보드 행 = *"실드/체력 2층 데미지 구조 (컴포넌트 옵트인)"*(M1). 브랜치 `phase/m1-shield-2layer`.
 > 명세 정본 = **`Docs/Specs/VIT1_ShieldHealthTwoLayer.md`**(게이트 원장 §13 전체가 여기 있다 — 아래는 요약이 아니라 **길잡이**다).
