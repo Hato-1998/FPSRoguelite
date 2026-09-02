@@ -9,6 +9,35 @@
 
 ---
 
+## 🔷 HUD 위젯 3종 저작 (2026-09-02, main 머지 `a97068c7`) — **§2-14 레퍼런스 배치의 실체화**
+> 브랜치 `content/hud-widgets` · 커밋 `dab3e73b`. 바로 아래 「HUD C++ 표면 보강」(`0a649e9c`)이 연 표면을 소비하는 후속.
+> 저작 = VibeUE MCP(Claude) · 임베드/확인 = 사용자. 세 위젯 전부 **컴파일 0에러 0경고**.
+
+| 위젯 | 노드 | 쓰는 C++ 표면 |
+|---|---|---|
+| `WBP_PlayerVitals`(좌하단) | 50 | `GetShield01`·`GetHealth01`·`GetShield`·`GetMaxShield`·`GetHealth`·`GetMaxHealth`·`HasShield`·`AreVitalsReady` |
+| `WBP_WeaponPanel`(우하단) | 41 | `GetCurrentAmmo`·`GetCurrentMagSize`·`GetCurrentWeapon`→`Icon`·`GetOwnedWeapons`·`GetCurrentSlotIndex` |
+| `WBP_TeammateVitals` | 55 | `AFPSRGameState::GetPartyVitals()` |
+
+### 그래프에 박은 설계 판단 3건
+1. 🔴 **숨김 위젯은 Tick 이 안 돈다**(UMG 의 Tick 은 Paint 안에서 불린다 — [[umg-hidden-widgets-dont-tick]]). 그래서 세 위젯 모두 **루트 캔버스는 항상 페인트 상태**로 두고 안쪽 컨테이너만 접는다. 이걸 모르고 루트를 접으면 다시 켜 줄 코드가 영영 안 돈다.
+2. **무기 아이콘은 무기가 바뀐 프레임에만 갱신**(`IsValid(Weapon) AND Weapon != LastWeapon`). 소프트 텍스처 해석 + `SetBrushFromSoftTexture` 의 브러시 재생성은 매 프레임 할 일이 아니다(레이아웃 무효화까지 따라온다).
+3. **`AreVitalsReady()`(=`MaxHealth>0`) 로 초기화 전 상태를 게이트**한다 — 없으면 복제 전 0/0 을 HUD 가 "죽기 직전"으로 그린다.
+- §2-14 규칙 2개도 그래프가 강제한다: 실드가 체력 **위** · `MaxShield==0` 이면 게이지와 숫자를 **함께** 숨김(`HasShield()` 단일 판정축).
+- **캐릭터 초상은 일부러 안 만들었다** — 데이터 소스가 없고 플레이어 클래스 개념 자체가 미정이라(보드 백로그), 플레이스홀더를 넣으면 나중에 지워야 할 구조가 된다.
+
+### VibeUE 실측 — 이번에 처음 검증된 것 / 다시 밟은 함정
+- ✅ **`K2Node_BreakStruct` 를 프로그래매틱으로 만들 수 있다**: `create_node_by_key(bp, g, "NODE K2Node_BreakStruct", x, y)` → `configure_node(node, "StructType", "/Script/FPSRoguelite.FPSRPartyMemberVitals")` → 13개 필드 핀이 전부 나온다. (`"Struct"` 는 False 반환 — 프로퍼티명은 **`StructType`**.) 배열 원소는 `"NODE K2Node_GetArrayItem"` → 핀 `Array` / `Dimension 1` / `Output`.
+- ⚠️ **`discover_nodes` 는 팔레트 문맥 필터**다. `GetComponentByClass`·`Array_Length`·`GetPartyVitals` 가 전부 "없음"으로 나오지만 **`function_call` 로 클래스·함수명을 직접 주면 만들어진다.** "검색에 없다"를 "존재하지 않는다"로 읽지 말 것 — 엔진 소스로 확인하는 편이 빠르다.
+- ⚠️ **`AActor::GetComponentByClass` 는 pure 노드**라 exec 핀이 없다(`build_graph` 가 `execute`/`then` 연결 2건을 실패로 돌려준다). 데이터만 물리고 exec 는 Branch 로 직결할 것. `DeterminesOutputType` 덕에 `TSubclassOf<FPSRWeaponInventoryComponent>` 변수를 물리면 **캐스트 없이** 타입이 잡힌다(class 핀은 문자열로 못 박으므로 BP 변수 경유 — [[vibeue-mcp-capabilities]]).
+- ⚠️ **새 WidgetBlueprint 에는 고스트 `Pre Construct`/`Construct`/`Tick` 이 이미 있다.** `build_graph` 로 `event: Tick` 을 또 만들면 **Tick 노드가 둘**이 된다(컴파일은 0에러로 통과하므로 안 보인다). 템플릿 Tick 의 GUID 를 찾아 거기서 뻗을 것.
+- 🚨 **배치 정리(`fpsr_bp_layout.tidy`)를 MCP 로 부르면 채널이 물린다** — 상세·판정법 = [[bp-auto-layout-unusable]]. 이 세션에서 겹침만 보고 `auto_layout_graph` 를 "개선"이라 **오판**했고, tidy 로 재측정하니 그 상태의 **교차가 101개**(tidy 후 22)였다. **실패 모드는 겹침이 아니라 교차다.**
+
+### 남은 것 = VIT1 §11-1 6번의 ②③
+①(본인·팀원 실드바)만 끝났다. ②`ShieldBreak` 히트마커 비주얼(`WBP_HitMarker` 의 Switch 새 핀이 비어 있어 **실드를 깨도 마커가 안 뜬다**) · ③실드 파손 경고 위젯(코드 차단은 `0a649e9c` 에서 해소, 이제 `OnShieldBroken` 에 `OnHitMarker` 와 똑같이 바인드) → **보드 신규 행**. 그 둘이 끝나야 VIT1 §12-10 PIE 1·5번을 돌릴 수 있다.
+
+---
+
 ## 🔷 HUD C++ 표면 보강 — 본인/팀원 바이탈 접근자 + 무기 아이콘 + 파손경고 이관 (2026-09-02, main 머지 `0a649e9c`)
 > 보드 행 = *"HUD C++ 표면 보강 — 본인/팀원 바이탈 접근자 + 무기 아이콘 필드"*(M1, 하이). 브랜치 `feat/hud-surface`.
 > 커밋 = `c7f5f55e`(feat/hud, 13파일 +308/−37) · `305810cd`(fix/test, 1파일 +52/−4).
