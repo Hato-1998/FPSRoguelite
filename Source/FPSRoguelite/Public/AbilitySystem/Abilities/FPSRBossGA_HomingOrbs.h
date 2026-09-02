@@ -24,15 +24,11 @@ class FPSROGUELITE_API UFPSRBossGA_HomingOrbs : public UFPSRBossGameplayAbility
 public:
 	UFPSRBossGA_HomingOrbs();
 
-	virtual void ActivateAbility(
-		const FGameplayAbilitySpecHandle Handle,
-		const FGameplayAbilityActorInfo* ActorInfo,
-		const FGameplayAbilityActivationInfo ActivationInfo,
-		const FGameplayEventData* TriggerEventData) override;
-
-	virtual void ServerTickPattern(float DeltaSeconds) override;
-
 protected:
+	virtual void ServerBeginExecute() override;
+	virtual bool ServerTickExecute(float DeltaSeconds) override;
+	virtual void ServerEndExecute() override;
+
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Boss|Orbs", meta = (ClampMin = "1", ClampMax = "8"))
 	int32 OrbCount = 5;
 
@@ -43,21 +39,34 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Boss|Orbs", meta = (ClampMin = "0.1"))
 	float TrackSeconds = 8.0f;
 
-	/** Spacing between launches. 0 fires the whole flight on one frame — staggering reads better and gives the
-	 *  target a chance to start shooting the first one down. */
+	/** Spacing between spawns. 0 forms the whole ring on one frame — staggering reads better. */
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Boss|Orbs", meta = (ClampMin = "0.0"))
 	float SpawnIntervalSeconds = 0.25f;
 
-	/** Total spread of the launch fan, in degrees. */
+	/** The orbs form a RING around the boss and hover there before committing (the design's "보스 주위로 투사체가
+	 *  만들어지고"). A ring rather than a fan aimed at the target, so the party reads "the boss is loading up" from
+	 *  any angle instead of only from where the marked player happens to be standing. */
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Boss|Orbs", meta = (ClampMin = "0.0"))
-	float SpawnSpreadDeg = 40.0f;
+	float SpawnRingRadiusCm = 2200.0f;
 
-	/** Height above the boss origin the orbs are released from. */
+	/** Height above the boss origin the ring forms at. */
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Boss|Orbs")
 	float SpawnHeightCm = 1500.0f;
 
+	/** How long each orb hovers in the ring before it starts chasing. */
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Boss|Orbs", meta = (ClampMin = "0.0"))
+	float OrbGraceSeconds = 0.8f;
+
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Boss|Orbs")
 	float Damage = 20.0f;
+
+	/** Blast radius on impact. Every player inside takes it — that is what makes bunching up (or crowding a downed
+	 *  teammate the orbs are heading for) the wrong answer. */
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Boss|Orbs", meta = (ClampMin = "1.0"))
+	float BlastRadiusCm = 400.0f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Boss|Orbs", meta = (ClampMin = "0.0"))
+	float BlastKnockback = 0.0f;
 
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Boss|Orbs")
 	FGameplayTag DamageType;

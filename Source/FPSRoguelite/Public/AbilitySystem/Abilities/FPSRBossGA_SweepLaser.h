@@ -8,16 +8,6 @@
 
 class AFPSRBossBase;
 
-UENUM()
-enum class EFPSRBeamStartAngle : uint8
-{
-	/** Always start at the same world angle. Predictable, but can drop a beam straight onto someone. */
-	ArenaFixed,
-	/** Start in the middle of the WIDEST gap between the survivors' bearings — structurally prevents a beam from
-	 *  being born on top of a player, which no amount of warning time can fix. */
-	MaxGapCenter
-};
-
 /** BOSS1 pattern 2 — the sweeping laser (`Docs/Specs/BOSS1_AbilityPatternFramework.md` §5-5).
  *  Beams radiate from the boss and rotate; the counterplay is a jump, and terrain does not block them
  *  (user decision 2026-09-02 — "map-wide"). Beam count scales with the phase.
@@ -43,32 +33,22 @@ class FPSROGUELITE_API UFPSRBossGA_SweepLaser : public UFPSRBossGameplayAbility
 public:
 	UFPSRBossGA_SweepLaser();
 
-	virtual void ActivateAbility(
-		const FGameplayAbilitySpecHandle Handle,
-		const FGameplayAbilityActorInfo* ActorInfo,
-		const FGameplayAbilityActivationInfo ActivationInfo,
-		const FGameplayEventData* TriggerEventData) override;
-
-	virtual void EndAbility(
-		const FGameplayAbilitySpecHandle Handle,
-		const FGameplayAbilityActorInfo* ActorInfo,
-		const FGameplayAbilityActivationInfo ActivationInfo,
-		bool bReplicateEndAbility,
-		bool bWasCancelled) override;
-
-	virtual void ServerTickPattern(float DeltaSeconds) override;
-
 protected:
-	/** Beams render but deal nothing for this long after activation. Required by Enemy.md §2-6 — see class doc. */
+	virtual void ServerBeginExecute() override;
+	virtual bool ServerTickExecute(float DeltaSeconds) override;
+	virtual void ServerEndExecute() override;
+
+	/** The beam exists but stands STILL and deals nothing for this long. This is the pattern's own telegraph, on top
+	 *  of the base's system wind-up: a beam born at a random cardinal can land on someone, and this is the window
+	 *  that lets them walk out of it. Required in spirit by Enemy.md §2-6 — see class doc. */
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Boss|Laser", meta = (ClampMin = "0.0"))
-	float WarmupSeconds = 1.5f;
+	float BeamGraceSeconds = 1.5f;
 
+	/** Sweep speed per phase (index = phase - 1; phases past the end reuse the last entry). An ARRAY rather than a
+	 *  base value times a multiplier, so a designer sets the number they actually want to feel at each phase instead
+	 *  of solving for it. Empty = fall back to 30 deg/s. Positive sweeps clockwise. */
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Boss|Laser")
-	EFPSRBeamStartAngle StartAngleRule = EFPSRBeamStartAngle::MaxGapCenter;
-
-	/** Positive sweeps clockwise. 30 deg/s = one revolution per 12 s. */
-	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Boss|Laser")
-	float AngularSpeedDegPerSec = 30.0f;
+	TArray<float> AngularSpeedByPhase = { 30.0f, 45.0f, 60.0f };
 
 	/** Beam count = clamp(phase * this, 1, MaxBeams) — so "one more beam per phase" is authored, not hardcoded. */
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Boss|Laser", meta = (ClampMin = "1"))
@@ -121,19 +101,18 @@ private:
 	/** Beam count and period are frozen at activation. If the phase rose mid-sweep the period would change under the
 	 *  tracked angles, making every stored PrevRel a value from a different domain. Extra beams arrive next cast. */
 	int32 ActiveBeamCount = 1;
-	/** Warmup, damage window and end are ALL measured as (clock - StartClock). Keeping a second accumulator here
+	/** Grace, damage window and end are ALL measured against the pattern clock. Keeping a separate accumulator here
 	 *  would be a second freeze-correct source that can still disagree with the first. */
 	float SweepDurationSeconds = 0.0f;
 	float StartAngleDeg = 0.0f;
 	float StartClock = 0.0f;
+	float GraceEndClock = 0.0f;
+	float ActiveSpeedDegPerSec = 30.0f;
 	bool bWarningActive = false;
 
 	/** Bearing (deg) of Pawn around the boss, and its distance — one helper so the hit test and the start-angle
 	 *  rule cannot disagree about what "the player's angle" means. */
 	static bool GetPawnBearing(const AFPSRBossBase* Boss, const APawn* Pawn, float& OutDeg, float& OutDistanceCm);
-
-	/** MaxGapCenter: the middle of the widest gap between survivors' bearings, folded into the beam period. */
-	float ComputeStartAngle(const AFPSRBossBase* Boss) const;
 
 	/** Bracket the existing per-player ranged warning. Must be called with false on EVERY exit path — a warning left
 	 *  on sticks on the HUD forever (the ranged swarm's own abort path exists for exactly this reason). */

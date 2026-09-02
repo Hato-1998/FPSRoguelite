@@ -33,17 +33,13 @@ class FPSROGUELITE_API UFPSRBossGA_Barrage : public UFPSRBossGameplayAbility
 public:
 	UFPSRBossGA_Barrage();
 
-	virtual void ActivateAbility(
-		const FGameplayAbilitySpecHandle Handle,
-		const FGameplayAbilityActorInfo* ActorInfo,
-		const FGameplayAbilityActivationInfo ActivationInfo,
-		const FGameplayEventData* TriggerEventData) override;
-
-	/** 이 패턴의 유일한 시간원(베이스 헤더 참조) — 인터벌을 Δt 로 누산하고, `ShellsPerPlayer` 회를 다 쏘면
-	 *  스스로 `EndAbility` 한다. */
-	virtual void ServerTickPattern(float DeltaSeconds) override;
-
 protected:
+	/** 준비가 끝난 직후 — 첫 볼리를 즉시 낸다. */
+	virtual void ServerBeginExecute() override;
+
+	/** 인터벌마다 볼리. 마지막 신관까지 타면 true(→ 후딜). */
+	virtual bool ServerTickExecute(float DeltaSeconds) override;
+
 	/** 플레이어 1인당 총 발사 횟수(사용자 결정 = "전원 각각 5발"). */
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Boss|Barrage", meta = (ClampMin = "1"))
 	int32 ShellsPerPlayer = 5;
@@ -79,7 +75,7 @@ private:
 	 *  `ServerTickPattern` 이 이미 보장하므로 여기서 다시 확인하지 않는다. */
 	void FireVolley(AFPSRBossBase* Boss) const;
 
-	/** 이번 활성화에서 흐른 인터벌 누산 시간(초). `ActivateAbility` 가 매번 0 으로 되돌린다 — 이 어빌리티는
+	/** 이번 활성화에서 흐른 인터벌 누산 시간(초). `ServerBeginExecute` 가 매번 0 으로 되돌린다 — 이 어빌리티는
 	 *  `InstancedPerActor` 라 인스턴스가 활성화 사이에도 살아있고, 리셋을 안 하면 두 번째 발동의 첫 볼리가
 	 *  이전 활성화가 남긴 누산만큼 일찍(또는 늦게) 나간다. */
 	float IntervalAccumulatorSeconds = 0.0f;

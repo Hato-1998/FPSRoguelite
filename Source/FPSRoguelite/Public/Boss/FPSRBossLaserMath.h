@@ -72,9 +72,20 @@ namespace FPSRBossLaser
 	}
 
 	/** Beam angle at a given clock. Server and clients call THIS, rather than each integrating a delta — two
-	 *  integrators started from the same value drift apart, a closed form cannot. */
-	FORCEINLINE float BeamBaseAngleAt(float StartAngleDeg, float SpeedDegPerSec, float StartClock, float NowClock)
+	 *  integrators started from the same value drift apart, a closed form cannot.
+	 *
+	 *  Two segments: the beam stands STILL until GraceEndClock, then sweeps. The still segment is what makes a beam
+	 *  that spawns on top of someone survivable — it appears, holds, and only then becomes a moving hazard. A single
+	 *  segment (rotating from the moment it appears) would give the person it spawned on no window at all. */
+	FORCEINLINE float BeamBaseAngleAt(float StartAngleDeg, float SpeedDegPerSec, float GraceEndClock, float NowClock)
 	{
-		return StartAngleDeg + SpeedDegPerSec * (NowClock - StartClock);
+		return StartAngleDeg + SpeedDegPerSec * FMath::Max(0.0f, NowClock - GraceEndClock);
+	}
+
+	/** The four cardinals, in degrees. The design asks for beams to be born at 12/3/6/9 o'clock — a direction a
+	 *  player can name ("it's coming from three o'clock") rather than an arbitrary bearing. */
+	FORCEINLINE float RandomCardinalDeg()
+	{
+		return 90.0f * FMath::RandHelper(4);
 	}
 }

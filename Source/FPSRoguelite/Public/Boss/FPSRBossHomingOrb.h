@@ -39,12 +39,13 @@ public:
 	UFUNCTION(BlueprintPure, Category = "FPSR|Boss")
 	UFPSREnemyHealthComponent* GetHealthComponent() const { return Health; }
 
-	/** Server: hand the orb its target and tuning, and start it moving.
+	/** Server: hand the orb its target and tuning. It HOVERS first (Params.GraceSeconds) and only then chases —
+	 *  the pattern's own telegraph, on top of the boss's system wind-up.
 	 *  The damage INSTIGATOR is the orb itself, not the boss: the hit-direction indicator reads the instigator's
 	 *  LOCATION, so crediting the boss would draw every orb hit as coming from the arena centre even when the orb
 	 *  came up behind the player. Telemetry still classifies it as boss pressure through the owner fallback. */
-	void ServerLaunch(AFPSRBossBase* OwningBoss, APawn* Target, float InHealth, float InTrackSeconds,
-		float InDamage, const FFPSRDamageSpec& InSpec);
+	void ServerLaunch(AFPSRBossBase* OwningBoss, APawn* Target, const FFPSRBossOrbLaunchParams& Params,
+		const FFPSRDamageSpec& InSpec);
 
 	//~IFPSRPatternActor
 	virtual void SetSimulationPaused(bool bPaused) override;
@@ -65,9 +66,15 @@ protected:
 	UFUNCTION()
 	void HandleDeath(AActor* DeadActor, AActor* Killer);
 
-	/** Cosmetic hook for the shot-down beat. Presentation stays entirely in Blueprint. */
+	/** Shot down by the players — a break, with no blast. Presentation stays entirely in Blueprint. */
 	UFUNCTION(BlueprintImplementableEvent, Category = "FPSR|Boss")
 	void OnOrbDestroyedCosmetic();
+
+	/** Detonated — it reached a player, hit geometry, or arrived at where its target died. Distinct from the event
+	 *  above precisely because these two must LOOK different: one is the players winning the exchange, the other is
+	 *  the boss landing it. */
+	UFUNCTION(BlueprintImplementableEvent, Category = "FPSR|Boss")
+	void OnOrbDetonatedCosmetic();
 
 	UPROPERTY(VisibleAnywhere, Category = "FPSR|Boss|Orb")
 	TObjectPtr<USphereComponent> Sphere;
@@ -100,18 +107,38 @@ protected:
 	float DeathDwellSeconds = 0.15f;
 
 private:
-	/** Server: re-aim at the nearest surviving player; stops homing when nobody is left. Called on launch and
-	 *  whenever the current target stops being a legal target — an orb chasing a corpse reads as broken. */
-	void ServerRetarget();
+	/** What the orb is doing right now. Modelled explicitly because "chasing" and "heading for the spot where my
+	 *  target died" look identical from the outside but end differently. */
+	enum class EOrbState : uint8
+	{
+		/** Hovering by the boss, not yet chasing. */
+		Grace,
+		/** Homing on a live target. */
+		Chase,
+		/** The target is gone. Flying to where they last stood, to detonate THERE.
+		 *  🔴 This is why losing the hunted player is not a reprieve: the blast lands exactly where teammates would
+		 *  gather to revive them. Simply deleting the orbs would have made letting someone die the correct play. */
+		DivertToLastKnown,
+		/** Shot down; holding briefly so the death replicates before the actor goes. */
+		DeathDwell
+	};
+
+	/** Server: detonate here — a blast that damages EVERY player in radius — and destroy. */
+	void ServerDetonate();
 
 	TWeakObjectPtr<AFPSRBossBase> OwnerBoss;
 	TWeakObjectPtr<APawn> TargetPawn;
 	FFPSRDamageSpec DamageSpec;
+	FFPSRBossOrbLaunchParams LaunchParams;
 
-	float ContactDamage = 0.0f;
+	/** Where the target last legally stood. Refreshed every tick while chasing, so it is always current when the
+	 *  target is lost. */
+	FVector LastKnownTargetLocation = FVector::ZeroVector;
+
+	EOrbState State = EOrbState::Grace;
+	float StateElapsedSeconds = 0.0f;
 	float TrackSecondsRemaining = 0.0f;
 	float PostTrackSecondsRemaining = 0.0f;
-	float DeathDwellRemaining = -1.0f;
 	bool bSimulationPaused = false;
 	FVector PausedVelocity = FVector::ZeroVector;
 };

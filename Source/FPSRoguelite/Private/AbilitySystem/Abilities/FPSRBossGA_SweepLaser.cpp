@@ -8,6 +8,7 @@
 #include "Components/CapsuleComponent.h"
 #include "Core/FPSRPlayerController.h"
 #include "Engine/World.h"
+#include "GameFramework/Character.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerController.h"
 
@@ -30,58 +31,6 @@ bool UFPSRBossGA_SweepLaser::GetPawnBearing(const AFPSRBossBase* Boss, const APa
 	OutDeg = FMath::RadiansToDegrees(FMath::Atan2(Offset.Y, Offset.X));
 	OutDistanceCm = DistanceXY;
 	return true;
-}
-
-float UFPSRBossGA_SweepLaser::ComputeStartAngle(const AFPSRBossBase* Boss) const
-{
-	const UWorld* World = Boss ? Boss->GetWorld() : nullptr;
-	if (!World || StartAngleRule == EFPSRBeamStartAngle::ArenaFixed)
-	{
-		return 0.0f;
-	}
-
-	const float Period = 360.0f / FMath::Max(1, ActiveBeamCount);
-
-	// Fold every survivor's bearing into ONE beam period first: with N equally spaced beams, two players a period
-	// apart are in the same place as far as the beams are concerned, so the gap has to be measured in that domain or
-	// the "widest gap" would be a gap that does not actually exist.
-	TArray<float, TInlineAllocator<4>> Bearings;
-	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
-	{
-		APlayerController* PC = It->Get();
-		if (!FPSRTargeting::IsEligibleTarget(PC, Boss->GetPatternClockSeconds(), /*bRequireTopologyAck=*/false))
-		{
-			continue;
-		}
-		float Deg = 0.0f;
-		float Distance = 0.0f;
-		if (GetPawnBearing(Boss, PC->GetPawn(), Deg, Distance))
-		{
-			Bearings.Add(FPSRBossLaser::WrapToPeriod(Deg, Period));
-		}
-	}
-
-	if (Bearings.Num() == 0)
-	{
-		return 0.0f;
-	}
-
-	Bearings.Sort();
-
-	// Widest circular gap on the folded domain, including the wrap-around gap between last and first.
-	float BestGap = (Bearings[0] + Period) - Bearings.Last(); // the wrap-around gap
-	float BestStart = Bearings.Last();
-	for (int32 Index = 1; Index < Bearings.Num(); ++Index)
-	{
-		const float Gap = Bearings[Index] - Bearings[Index - 1];
-		if (Gap > BestGap)
-		{
-			BestGap = Gap;
-			BestStart = Bearings[Index - 1];
-		}
-	}
-
-	return FPSRBossLaser::WrapToPeriod(BestStart + BestGap * 0.5f, Period);
 }
 
 void UFPSRBossGA_SweepLaser::SetWarningActive(AFPSRBossBase* Boss, bool bActive)
@@ -111,74 +60,72 @@ void UFPSRBossGA_SweepLaser::SetWarningActive(AFPSRBossBase* Boss, bool bActive)
 	}
 }
 
-void UFPSRBossGA_SweepLaser::ActivateAbility(
-	const FGameplayAbilitySpecHandle Handle,
-	const FGameplayAbilityActorInfo* ActorInfo,
-	const FGameplayAbilityActivationInfo ActivationInfo,
-	const FGameplayEventData* TriggerEventData)
+void UFPSRBossGA_SweepLaser::ServerBeginExecute()
 {
-	// Committing is what stamps the freeze-paused cooldown — skipping it leaves this pattern permanently off cooldown.
-	if (!CommitAbility(Handle, ActorInfo, ActivationInfo))
-	{
-		EndAbility(Handle, ActorInfo, ActivationInfo, true, true);
-		return;
-	}
-
 	AFPSRBossBase* Boss = GetBoss();
-	if (!Boss || !Boss->HasAuthority())
+	if (!Boss)
 	{
-		EndAbility(Handle, ActorInfo, ActivationInfo, true, true);
 		return;
 	}
 
-	// InstancedPerActor: this object survives between activations, so every piece of per-cast state resets here.
 	BeamTrackByPawn.Reset();
 
-	// Frozen for the whole cast — see the header on why the period must not move under the tracked angles.
+	// Beam count and period are frozen for the whole cast. If the phase rose mid-sweep the period would change under
+	// the tracked relative angles, and every stored PrevRel would suddenly be a value from a different domain.
 	ActiveBeamCount = FMath::Clamp(Boss->GetCurrentPhase() * BeamsPerPhase, 1, FMath::Max(1, MaxBeams));
 
-	const float Speed = FMath::Abs(AngularSpeedDegPerSec) > KINDA_SMALL_NUMBER ? AngularSpeedDegPerSec : 30.0f;
-	SweepDurationSeconds = WarmupSeconds + (360.0f * Revolutions) / FMath::Abs(Speed);
+	// Speed comes from the phase table (clamped to the last entry), so "it spins faster later" is a number a designer
+	// writes down rather than one they have to solve for out of a multiplier.
+	ActiveSpeedDegPerSec = 30.0f;
+	if (AngularSpeedByPhase.Num() > 0)
+	{
+		const int32 Index = FMath::Clamp(Boss->GetCurrentPhase() - 1, 0, AngularSpeedByPhase.Num() - 1);
+		ActiveSpeedDegPerSec = AngularSpeedByPhase[Index];
+	}
+	if (FMath::Abs(ActiveSpeedDegPerSec) <= KINDA_SMALL_NUMBER)
+	{
+		ActiveSpeedDegPerSec = 30.0f; // a zero-speed sweep would never complete a revolution and never end
+	}
 
-	StartAngleDeg = ComputeStartAngle(Boss);
+	// First beam at a random cardinal (12/3/6/9); the rest evenly spaced from it — see the header for why every beam
+	// is NOT pinned to a cardinal.
+	StartAngleDeg = FPSRBossLaser::RandomCardinalDeg();
 	StartClock = Boss->GetPatternClockSeconds();
+	GraceEndClock = StartClock + BeamGraceSeconds;
+	SweepDurationSeconds = BeamGraceSeconds + (360.0f * Revolutions) / FMath::Abs(ActiveSpeedDegPerSec);
 
-	// Publish once. Clients recompute the angle from these values plus the clock (never by integrating), so their
+	// Published once. Clients recompute the angle from these values plus the clock (never by integrating), so their
 	// beam and the server's hit test cannot drift apart.
-	Boss->ServerSetBeamState(ActiveBeamCount, StartAngleDeg, Speed, StartClock, StartClock + WarmupSeconds);
+	Boss->ServerSetBeamState(ActiveBeamCount, StartAngleDeg, ActiveSpeedDegPerSec, StartClock, GraceEndClock);
 
-	// The warning goes up for the warmup window: the beams are visible but harmless, which is the "charge delay +
-	// indicator" Enemy.md §2-6 demands of anything that hits without a dodgeable projectile.
 	SetWarningActive(Boss, true);
 }
 
-void UFPSRBossGA_SweepLaser::ServerTickPattern(float DeltaSeconds)
+bool UFPSRBossGA_SweepLaser::ServerTickExecute(float DeltaSeconds)
 {
 	AFPSRBossBase* Boss = GetBoss();
 	UWorld* World = Boss ? Boss->GetWorld() : nullptr;
 	if (!Boss || !World)
 	{
-		return;
+		return true;
 	}
 
-	// 🔴 ONE time source. An earlier draft accumulated DeltaSeconds for the warmup/duration while deriving the beam
+	// 🔴 ONE time source. An earlier draft accumulated DeltaSeconds for the grace/duration while deriving the beam
 	// ANGLE from the clock — two freeze-correct sources that can still drift apart, because the combat clock keeps
-	// running through a stage transition while this tick does not. A boss-phase transition cannot happen today (the
-	// stage director refuses one), so that was latent rather than live; deriving everything from the clock removes
-	// the question instead of relying on that refusal staying true.
+	// running through a stage transition while this tick does not.
 	const float Clock = Boss->GetPatternClockSeconds();
 	const float Elapsed = Clock - StartClock;
-	const bool bWarmupOver = Elapsed >= WarmupSeconds;
-	if (bWarmupOver)
+	const bool bLive = Clock >= GraceEndClock;
+	if (bLive)
 	{
-		// Warning comes down the moment the beams become real — leaving it up through the damaging phase would train
-		// players to ignore it.
+		// The warning comes down the moment the beam starts moving and biting. Leaving it up through the damaging
+		// phase would teach players that the warning means nothing.
 		SetWarningActive(Boss, false);
 	}
 
 	const float Period = 360.0f / FMath::Max(1, ActiveBeamCount);
 	const float HalfPeriod = Period * 0.5f;
-	const float BeamAngle = FPSRBossLaser::BeamBaseAngleAt(StartAngleDeg, AngularSpeedDegPerSec, StartClock, Clock);
+	const float BeamAngle = FPSRBossLaser::BeamBaseAngleAt(StartAngleDeg, ActiveSpeedDegPerSec, GraceEndClock, Clock);
 
 	// Drop pawns that went away, so the map cannot grow across a long fight.
 	for (auto It = BeamTrackByPawn.CreateIterator(); It; ++It)
@@ -212,8 +159,8 @@ void UFPSRBossGA_SweepLaser::ServerTickPattern(float DeltaSeconds)
 		FBeamTrack& Track = BeamTrackByPawn.FindOrAdd(Pawn);
 		if (!Track.bSeeded)
 		{
-			// Seed from this frame so the very first sample can never look like a crossing. Someone who is standing
-			// inside a beam the instant it appears is covered by the exposure test below, not by a fake edge.
+			// Seed from this frame so the very first sample can never look like a crossing. Someone standing inside a
+			// beam the instant it appears is covered by the exposure test below, not by a fabricated edge.
 			Track.PrevRel = CurRel;
 			Track.bSeeded = true;
 		}
@@ -234,15 +181,16 @@ void UFPSRBossGA_SweepLaser::ServerTickPattern(float DeltaSeconds)
 		const bool bExposed = FMath::Abs(CurRel) <= HalfWidth
 			|| FPSRBossLaser::DidEnterBeam(Track.PrevRel, CurRel, HalfPeriod, HalfWidth);
 
-		const bool bGateOpen = bWarmupOver
+		const bool bGateOpen = bLive
 			&& DistanceCm >= InnerRadiusCm
 			&& !Boss->WasRecentlyAirborne(Pawn);
 
 		if (bExposed)
 		{
-			// The latch — not the edge — is what makes this one hit per pass. Checking the gates on the edge frame
-			// alone would drop the whole pass whenever a gate opens while the player is already inside the band
-			// (warmup ending on someone, or landing inside a beam).
+			// The latch — not the edge — is what makes this one hit per pass. Testing the gates only on the edge frame
+			// would drop the whole pass whenever a gate opens while the player is already inside the band: the grace
+			// ending on top of someone, or someone landing inside a beam. The second of those directly contradicts
+			// "jump INTO the beam and you get hit".
 			if (!Track.bLatched && bGateOpen)
 			{
 				Boss->ServerScheduleLaserHit(Pawn, Damage, Spec);
@@ -257,28 +205,18 @@ void UFPSRBossGA_SweepLaser::ServerTickPattern(float DeltaSeconds)
 		Track.PrevRel = CurRel;
 	}
 
-	if (Elapsed >= SweepDurationSeconds)
-	{
-		EndAbility(GetCurrentAbilitySpecHandle(), GetCurrentActorInfo(), GetCurrentActivationInfo(), true, false);
-	}
+	return Elapsed >= SweepDurationSeconds;
 }
 
-void UFPSRBossGA_SweepLaser::EndAbility(
-	const FGameplayAbilitySpecHandle Handle,
-	const FGameplayAbilityActorInfo* ActorInfo,
-	const FGameplayAbilityActivationInfo ActivationInfo,
-	bool bReplicateEndAbility,
-	bool bWasCancelled)
+void UFPSRBossGA_SweepLaser::ServerEndExecute()
 {
-	// EVERY exit runs through here, including the boss's death-time CancelAbilities. Both of these have to be undone
-	// unconditionally: a beam left published keeps rendering on clients, and a warning left up sticks on the HUD for
-	// the rest of the run.
+	// Both of these come down on EVERY exit, including the boss dying mid-sweep — the base routes a cancel through
+	// here too. A published beam keeps rendering on clients, and a warning left up sticks on the HUD for the rest of
+	// the run.
 	if (AFPSRBossBase* Boss = GetBoss())
 	{
 		SetWarningActive(Boss, false);
 		Boss->ServerSetBeamState(0, 0.0f, 0.0f, 0.0f, 0.0f);
 	}
 	BeamTrackByPawn.Reset();
-
-	Super::EndAbility(Handle, ActorInfo, ActivationInfo, bReplicateEndAbility, bWasCancelled);
 }

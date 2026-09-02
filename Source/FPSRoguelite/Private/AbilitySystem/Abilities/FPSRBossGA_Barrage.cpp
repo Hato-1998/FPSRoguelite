@@ -14,42 +14,26 @@ UFPSRBossGA_Barrage::UFPSRBossGA_Barrage()
 {
 }
 
-void UFPSRBossGA_Barrage::ActivateAbility(
-	const FGameplayAbilitySpecHandle Handle,
-	const FGameplayAbilityActorInfo* ActorInfo,
-	const FGameplayAbilityActivationInfo ActivationInfo,
-	const FGameplayEventData* TriggerEventData)
+void UFPSRBossGA_Barrage::ServerBeginExecute()
 {
-	// CommitAbility 를 건너뛰면 ApplyCooldown 이 안 찍혀 이 패턴의 쿨다운이 영원히 0으로 남는다 — BP 자식은
-	// ActivateAbility 를 통째로 덮지 않는다는 §9 규칙과 짝을 이루는 C++ 쪽 절반이라, 실패 분기와 무관하게
-	// 항상 먼저 부른다.
-	if (!CommitAbility(Handle, ActorInfo, ActivationInfo))
-	{
-		EndAbility(Handle, ActorInfo, ActivationInfo, true, true);
-		return;
-	}
-
-	// NetExecutionPolicy=ServerOnly(베이스 체인, UFPSRFreezeCooldownAbility) 라 사실상 항상 참이지만, 이
-	// 보스 패턴 시스템의 다른 모든 Server* 진입점과 동일하게 방어적으로 한 번 더 잠근다.
-	AFPSRBossBase* Boss = GetBoss();
-	if (!Boss || !Boss->HasAuthority())
-	{
-		EndAbility(Handle, ActorInfo, ActivationInfo, true, true);
-		return;
-	}
-
-	// InstancedPerActor 라 이 인스턴스는 활성화 사이에도 살아있다 — 리셋 없이 두 번째 발동을 맞으면 이전
-	// 활성화가 남긴 누산·카운트가 그대로 이어져 첫 볼리 타이밍과 총 발수가 어긋난다.
+	// 준비 단계는 베이스가 이미 굴렸다. 여기는 "보스가 모션을 끝내고 실제로 쏘기 시작하는" 지점이라,
+	// 첫 볼리를 곧바로 낸다 — 준비가 끝났는데 또 한 인터벌을 기다리면 준비 시간이 두 번 흐른 것처럼 보인다.
 	IntervalAccumulatorSeconds = 0.0f;
 	NumVolleysFired = 0;
+
+	if (AFPSRBossBase* Boss = GetBoss())
+	{
+		FireVolley(Boss);
+		++NumVolleysFired;
+	}
 }
 
-void UFPSRBossGA_Barrage::ServerTickPattern(float DeltaSeconds)
+bool UFPSRBossGA_Barrage::ServerTickExecute(float DeltaSeconds)
 {
 	AFPSRBossBase* Boss = GetBoss();
 	if (!Boss)
 	{
-		return;
+		return true;
 	}
 
 	IntervalAccumulatorSeconds += DeltaSeconds;
@@ -63,10 +47,11 @@ void UFPSRBossGA_Barrage::ServerTickPattern(float DeltaSeconds)
 		++NumVolleysFired;
 	}
 
-	if (NumVolleysFired >= ShellsPerPlayer)
-	{
-		EndAbility(GetCurrentAbilitySpecHandle(), GetCurrentActorInfo(), GetCurrentActivationInfo(), true, false);
-	}
+	// 마지막 볼리를 쏘자마자 끝내지 않는다 — 그 표식들의 신관이 아직 타는 중이고, 실행이 끝나면 곧바로
+	// 후딜(=보스가 무해해지는 구간)이 시작되기 때문이다. 마지막 신관이 터질 때까지는 실행 중이어야
+	// "폭발이 다 끝난 뒤에 숨 돌린다"는 리듬이 성립한다.
+	const bool bAllFired = NumVolleysFired >= ShellsPerPlayer;
+	return bAllFired && IntervalAccumulatorSeconds >= FuseSeconds;
 }
 
 void UFPSRBossGA_Barrage::FireVolley(AFPSRBossBase* Boss) const

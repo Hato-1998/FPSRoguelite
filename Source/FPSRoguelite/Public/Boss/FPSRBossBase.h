@@ -134,6 +134,24 @@ public:
 	 *  teardown, so a pattern actor never has to poll the freeze state itself. */
 	void ServerRegisterPatternActor(AActor* Actor);
 
+	// ---- Pattern stage / target announcement --------------------------------------------------------------------
+
+	/** Server: publish which part of a pattern the boss is in, so Blueprints can play a wind-up and a recovery.
+	 *  Called only from UFPSRBossGameplayAbility's stage machine — one publisher, so a new stage cannot be added
+	 *  without clients hearing about it. */
+	void ServerSetPatternStage(EFPSRBossPatternStage NewStage);
+
+	UFUNCTION(BlueprintPure, Category = "FPSR|Boss")
+	EFPSRBossPatternStage GetPatternStage() const { return PatternStage; }
+
+	/** Server: announce (or clear) the player a pattern has singled out. Replicated because the design calls for
+	 *  EVERYONE to see who is marked — that is what turns "one player is hunted" into a party problem rather than a
+	 *  private one. */
+	void ServerSetMarkedPlayer(APawn* Pawn);
+
+	UFUNCTION(BlueprintPure, Category = "FPSR|Boss")
+	APawn* GetMarkedPlayer() const { return MarkedPlayer; }
+
 #if !UE_BUILD_SHIPPING
 	/** Debug (FPSR.BossPattern): force-activate the pattern at Index in GrantedAbilities, bypassing cooldown/gap.
 	 *  Without this a slice cannot be verified in PIE without waiting out the authored cooldowns. */
@@ -170,6 +188,12 @@ protected:
 	UFUNCTION()
 	void OnRep_BeamState();
 
+	UFUNCTION()
+	void OnRep_PatternStage();
+
+	UFUNCTION()
+	void OnRep_MarkedPlayer();
+
 	// ---- Cosmetic hooks: presentation is 100% Blueprint (there is no decal/Niagara call anywhere in Source/) -------
 
 	UFUNCTION(BlueprintImplementableEvent, Category = "FPSR|Boss")
@@ -177,6 +201,14 @@ protected:
 
 	UFUNCTION(BlueprintImplementableEvent, Category = "FPSR|Boss")
 	void OnBeamStateChangedCosmetic(int32 InBeamCount, bool bWarmup);
+
+	/** Wind-up / recovery presentation. Fires on clients AND on the authority (the host gets no OnRep). */
+	UFUNCTION(BlueprintImplementableEvent, Category = "FPSR|Boss")
+	void OnPatternStageChangedCosmetic(EFPSRBossPatternStage NewStage);
+
+	/** Who is being hunted right now (null = nobody). Everyone sees this — that is the point. */
+	UFUNCTION(BlueprintImplementableEvent, Category = "FPSR|Boss")
+	void OnMarkedPlayerChangedCosmetic(APawn* NewMarked);
 
 	/** Optional montage played on the boss skeletal mesh on death (U20). Null = none (null-safe). Content-assigned. */
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Boss")
@@ -209,9 +241,20 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Boss|Patterns")
 	TArray<TSubclassOf<UFPSRBossGameplayAbility>> GrantedAbilities;
 
-	/** Minimum quiet time between one pattern ending and the next being tried. */
+	/** What makes the boss start its next pattern. Patterns do NOT run back to back — after a pattern's recovery the
+	 *  boss idles until one of these fires (§14-3).
+	 *  🔴 An EMPTY array would mean a boss that never attacks again, with no error anywhere. So an empty array falls
+	 *  back to one repeating Elapsed trigger of PatternGapSeconds, and IsDataValid warns about it. */
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Boss|Patterns")
+	TArray<FFPSRBossPatternTrigger> PatternTriggers;
+
+	/** Which pattern to start when a trigger fires. */
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Boss|Patterns")
+	EFPSRBossPatternSelection SelectionPolicy = EFPSRBossPatternSelection::Sequential;
+
+	/** Fallback cadence used only when PatternTriggers is empty (see that field). */
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Boss|Patterns", meta = (ClampMin = "0.0"))
-	float PatternGapSeconds = 2.0f;
+	float PatternGapSeconds = 6.0f;
 
 	/** How long after leaving the ground a pawn still counts as airborne (covers a late landing). */
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Boss|Patterns", meta = (ClampMin = "0.0"))
@@ -244,6 +287,9 @@ private:
 	/** Server: pick and activate the next eligible pattern, if any. */
 	void ServerTryActivateNextPattern();
 
+	/** Server: has any trigger fired this tick? Advances each trigger's own latch. */
+	bool ServerConsumeAnyTrigger();
+
 	/** Server: push the freeze state to every owned actor once, on the edge. */
 	void ServerPushSimulationPaused(bool bPaused);
 
@@ -268,6 +314,18 @@ private:
 	UPROPERTY(ReplicatedUsing = OnRep_BeamState)
 	float BeamWarmupEndClock = 0.0f;
 
+	UPROPERTY(ReplicatedUsing = OnRep_PatternStage)
+	EFPSRBossPatternStage PatternStage = EFPSRBossPatternStage::Finished;
+
+	UPROPERTY(ReplicatedUsing = OnRep_MarkedPlayer)
+	TObjectPtr<APawn> MarkedPlayer = nullptr;
+
+	/** Pattern-clock stamp the boss fight began at — the origin for Elapsed triggers. */
+	float FightStartClock = -1.0f;
+
+	/** How many patterns have run to completion. The stand-in for "after N attacks" until a basic attack exists. */
+	int32 PatternsPerformed = 0;
+
 	/** Cached from the definition asset. Empty = a single-phase boss. */
 	TArray<float> PhaseThresholds;
 
@@ -291,7 +349,6 @@ private:
 	TArray<FGameplayAbilitySpecHandle> GrantedAbilityHandles;
 	FGameplayAbilitySpecHandle ActivePatternHandle;
 	int32 NextPatternIndex = 0;
-	float LastPatternEndClock = -1.0f;
 	bool bWasFrozenLastTick = false;
 	bool bPatternStateReleased = false;
 };

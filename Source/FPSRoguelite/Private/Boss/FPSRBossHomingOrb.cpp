@@ -3,6 +3,7 @@
 #include "Boss/FPSRBossHomingOrb.h"
 
 #include "Boss/FPSRBossBase.h"
+#include "Combat/FPSRCombatStatics.h"
 #include "Combat/FPSRTargeting.h"
 #include "Components/SphereComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -15,16 +16,16 @@
 
 AFPSRBossHomingOrb::AFPSRBossHomingOrb()
 {
-	// 🔴 Explicit: AActor defaults this to false and nothing in this hierarchy turns it on. The orb's tracking,
-	// lifetime and death dwell all run off Tick, so losing this line makes a live-looking orb that never moves,
-	// never expires and never resolves — with a green build.
+	// 🔴 Explicit: AActor defaults this to false and nothing in this hierarchy turns it on. The orb's grace, chase,
+	// divert and death dwell all run off Tick, so losing this line makes a live-looking orb that never moves, never
+	// expires and never resolves — with a green build.
 	PrimaryActorTick.bCanEverTick = true;
 
 	bReplicates = true;
 	SetReplicateMovement(true);
-	// The arena diagonal (226 m) is larger than the default net-cull distance (150 m), so a distance-culled orb
-	// would simply vanish for the teammate on the far side of the arena. Five short-lived actors is a cheap price
-	// for "everyone can see the thing chasing their friend".
+	// The arena diagonal (226 m) is larger than the default net-cull distance (150 m), so a distance-culled orb would
+	// simply vanish for the teammate on the far side. Five short-lived actors is a cheap price for "everyone can see
+	// the thing chasing their friend" — which the pattern depends on, since the mark is announced to everyone.
 	bAlwaysRelevant = true;
 
 	Sphere = CreateDefaultSubobject<USphereComponent>(TEXT("Sphere"));
@@ -36,8 +37,8 @@ AFPSRBossHomingOrb::AFPSRBossHomingOrb()
 	// USphereComponent's default profile overlaps everything — which would let the orb drift through walls.
 	Sphere->SetCollisionObjectType(ECC_Pawn);
 	Sphere->SetCollisionResponseToAllChannels(ECR_Ignore);
-	Sphere->SetCollisionResponseToChannel(ECC_WorldStatic, ECR_Block);       // walls and props stop it
-	Sphere->SetCollisionResponseToChannel(ECC_FPSRDestructible, ECR_Block);  // suppressors/props are solid to it
+	Sphere->SetCollisionResponseToChannel(ECC_WorldStatic, ECR_Block);       // walls and props stop it (and it detonates)
+	Sphere->SetCollisionResponseToChannel(ECC_FPSRDestructible, ECR_Block);  // suppressors / arena props are solid to it
 	Sphere->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);        // aim traces must be able to hit it
 	Sphere->SetCollisionResponseToChannel(ECC_FPSRPlayerPawn, ECR_Overlap);  // contact, not body-blocking
 	Sphere->SetCollisionResponseToChannel(ECC_Pawn, ECR_Ignore);             // passes freely through the swarm
@@ -54,8 +55,8 @@ AFPSRBossHomingOrb::AFPSRBossHomingOrb()
 	Movement = CreateDefaultSubobject<UProjectileMovementComponent>(TEXT("Movement"));
 	Movement->bAutoActivate = false;
 	Movement->bRotationFollowsVelocity = true;
+	Movement->bShouldBounce = false;
 	Movement->ProjectileGravityScale = 0.0f;
-	Movement->bIsHomingProjectile = true;
 }
 
 void AFPSRBossHomingOrb::BeginPlay()
@@ -84,8 +85,8 @@ void AFPSRBossHomingOrb::BeginPlay()
 	SetActorTickEnabled(HasAuthority());
 }
 
-void AFPSRBossHomingOrb::ServerLaunch(AFPSRBossBase* OwningBoss, APawn* Target, float InHealth, float InTrackSeconds,
-	float InDamage, const FFPSRDamageSpec& InSpec)
+void AFPSRBossHomingOrb::ServerLaunch(AFPSRBossBase* OwningBoss, APawn* Target, const FFPSRBossOrbLaunchParams& Params,
+	const FFPSRDamageSpec& InSpec)
 {
 	if (!HasAuthority())
 	{
@@ -98,16 +99,17 @@ void AFPSRBossHomingOrb::ServerLaunch(AFPSRBossBase* OwningBoss, APawn* Target, 
 	SetOwner(OwningBoss);
 
 	TargetPawn = Target;
-	ContactDamage = InDamage;
+	LaunchParams = Params;
 	DamageSpec = InSpec;
-	TrackSecondsRemaining = InTrackSeconds;
+	TrackSecondsRemaining = Params.TrackSeconds;
 	PostTrackSecondsRemaining = PostTrackLifetimeSeconds;
+	LastKnownTargetLocation = Target ? Target->GetActorLocation() : GetActorLocation();
 
 	if (Health)
 	{
-		// InitializeMaxHealth also pins MaxShield to 0, which is what keeps the orb out of VIT1's shield-regen time
-		// axis entirely — one less clock to reason about under the freeze.
-		Health->InitializeMaxHealth(FMath::Max(1.0f, InHealth));
+		// InitializeMaxHealth also pins MaxShield to 0, which keeps the orb out of VIT1's shield-regen time axis
+		// entirely — one less clock to reason about under the freeze.
+		Health->InitializeMaxHealth(FMath::Max(1.0f, Params.Health));
 	}
 
 	if (Movement)
@@ -115,58 +117,14 @@ void AFPSRBossHomingOrb::ServerLaunch(AFPSRBossBase* OwningBoss, APawn* Target, 
 		Movement->InitialSpeed = InitialSpeed;
 		Movement->MaxSpeed = MaxSpeed;
 		Movement->HomingAccelerationMagnitude = HomingAccelerationMagnitude;
-		Movement->Velocity = GetActorForwardVector() * InitialSpeed;
-		Movement->Activate();
-	}
-
-	ServerRetarget();
-}
-
-void AFPSRBossHomingOrb::ServerRetarget()
-{
-	UWorld* World = GetWorld();
-	if (!World || !Movement)
-	{
-		return;
-	}
-
-	const float Clock = OwnerBoss.IsValid() ? OwnerBoss->GetPatternClockSeconds() : 0.0f;
-
-	APawn* Best = nullptr;
-	float BestDistanceSq = TNumericLimits<float>::Max();
-	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
-	{
-		APlayerController* PC = It->Get();
-		if (!FPSRTargeting::IsEligibleTarget(PC, Clock, /*bRequireTopologyAck=*/false))
-		{
-			continue;
-		}
-		APawn* Candidate = PC->GetPawn();
-		if (!Candidate)
-		{
-			continue;
-		}
-		const float DistanceSq = FVector::DistSquared(Candidate->GetActorLocation(), GetActorLocation());
-		if (DistanceSq < BestDistanceSq)
-		{
-			BestDistanceSq = DistanceSq;
-			Best = Candidate;
-		}
-	}
-
-	TargetPawn = Best;
-	if (Best)
-	{
-		Movement->HomingTargetComponent = Best->GetRootComponent();
-		Movement->bIsHomingProjectile = true;
-	}
-	else
-	{
-		// Nobody left to chase — keep flying straight rather than freezing in place or snapping to a corpse.
-		Movement->HomingTargetComponent = nullptr;
 		Movement->bIsHomingProjectile = false;
-		TrackSecondsRemaining = 0.0f;
+		Movement->Velocity = FVector::ZeroVector;
 	}
+
+	// Hovering, not yet chasing: the flight forms up around the boss so the party can read it before it commits.
+	// This is the pattern's own telegraph, distinct from the boss's system-level wind-up.
+	State = EOrbState::Grace;
+	StateElapsedSeconds = 0.0f;
 }
 
 void AFPSRBossHomingOrb::SetSimulationPaused(bool bPaused)
@@ -189,11 +147,29 @@ void AFPSRBossHomingOrb::SetSimulationPaused(bool bPaused)
 		PausedVelocity = Movement->Velocity;
 		Movement->Deactivate();
 	}
-	else
+	else if (State != EOrbState::Grace)
 	{
+		// Grace deliberately does not resume movement — it never had any to begin with.
 		Movement->Velocity = PausedVelocity;
 		Movement->Activate();
 	}
+}
+
+void AFPSRBossHomingOrb::ServerDetonate()
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+
+	// ONE blast path for every way an orb can end (player contact, geometry, or the spot where the target died), so
+	// the three cannot drift into three different damage rules. Radius damage rather than single-target: standing
+	// together — including standing together to revive someone — is exactly what this pattern punishes.
+	FPSRCombat::ApplyHostileExplosion(GetWorld(), GetActorLocation(), LaunchParams.BlastRadiusCm,
+		LaunchParams.BlastDamage, this, LaunchParams.BlastKnockback, DamageSpec);
+
+	OnOrbDetonatedCosmetic();
+	Destroy();
 }
 
 void AFPSRBossHomingOrb::Tick(float DeltaSeconds)
@@ -205,79 +181,120 @@ void AFPSRBossHomingOrb::Tick(float DeltaSeconds)
 		return;
 	}
 
-	// Shot down: hold briefly so the replicated death edge reaches clients and they can play the break, then go.
-	if (DeathDwellRemaining >= 0.0f)
+	StateElapsedSeconds += DeltaSeconds;
+
+	switch (State)
 	{
-		DeathDwellRemaining -= DeltaSeconds;
-		if (DeathDwellRemaining <= 0.0f)
+	case EOrbState::DeathDwell:
+		// Shot down: hold briefly so the replicated death edge reaches clients and they can play the break.
+		// Deliberately NO blast — an orb the players destroyed must not still deliver its payload, or shooting them
+		// down would stop being worth doing.
+		if (StateElapsedSeconds >= DeathDwellSeconds)
 		{
 			Destroy();
 		}
 		return;
-	}
 
-	// A target that died, went down or disconnected stops being chased immediately — the alternative is an orb
-	// circling a body.
-	if (TrackSecondsRemaining > 0.0f)
-	{
-		const APawn* Current = TargetPawn.Get();
-		const AController* Controller = Current ? Current->GetController() : nullptr;
-		const APlayerController* PC = Cast<APlayerController>(Controller);
-		const float Clock = OwnerBoss.IsValid() ? OwnerBoss->GetPatternClockSeconds() : 0.0f;
-		if (!Current || !FPSRTargeting::IsEligibleTarget(PC, Clock, /*bRequireTopologyAck=*/false))
+	case EOrbState::Grace:
+		if (StateElapsedSeconds >= LaunchParams.GraceSeconds)
 		{
-			ServerRetarget();
+			State = EOrbState::Chase;
+			StateElapsedSeconds = 0.0f;
+			if (Movement)
+			{
+				// Aim at where the target is NOW, not where it stood when the flight formed up.
+				APawn* Target = TargetPawn.Get();
+				const FVector Aim = Target ? (Target->GetActorLocation() - GetActorLocation()) : GetActorForwardVector();
+				Movement->Velocity = Aim.GetSafeNormal() * InitialSpeed;
+				Movement->HomingTargetComponent = Target ? Target->GetRootComponent() : nullptr;
+				Movement->bIsHomingProjectile = Target != nullptr;
+				Movement->Activate();
+			}
 		}
-	}
+		return;
 
-	if (TrackSecondsRemaining > 0.0f)
+	case EOrbState::Chase:
 	{
-		TrackSecondsRemaining -= DeltaSeconds;
-		if (TrackSecondsRemaining <= 0.0f && Movement)
+		APawn* Target = TargetPawn.Get();
+		const APlayerController* PC = Target ? Cast<APlayerController>(Target->GetController()) : nullptr;
+		const float Clock = OwnerBoss.IsValid() ? OwnerBoss->GetPatternClockSeconds() : 0.0f;
+		const bool bTargetGone = !Target || !FPSRTargeting::IsEligibleTarget(PC, Clock, /*bRequireTopologyAck=*/false);
+
+		if (bTargetGone)
 		{
-			// Tracking expired: keep the momentum, drop the steering. A player who has kited it this long has earned
-			// the orb flying past them.
-			Movement->bIsHomingProjectile = false;
-			Movement->HomingTargetComponent = nullptr;
+			// Divert to where they last stood and detonate THERE (user decision). Deleting the orbs instead would
+			// have made "let the marked player die" the correct play; this way the blast lands exactly where the
+			// party has to stand to pick them up.
+			State = EOrbState::DivertToLastKnown;
+			StateElapsedSeconds = 0.0f;
+			if (Movement)
+			{
+				Movement->bIsHomingProjectile = false;
+				Movement->HomingTargetComponent = nullptr;
+				Movement->Velocity = (LastKnownTargetLocation - GetActorLocation()).GetSafeNormal() * Movement->MaxSpeed;
+				Movement->Activate();
+			}
+			return;
+		}
+
+		LastKnownTargetLocation = Target->GetActorLocation();
+
+		TrackSecondsRemaining -= DeltaSeconds;
+		if (TrackSecondsRemaining <= 0.0f)
+		{
+			if (Movement && Movement->bIsHomingProjectile)
+			{
+				// Tracking expired: keep the momentum, drop the steering. A player who kited it this long has earned
+				// the orb sailing past them.
+				Movement->bIsHomingProjectile = false;
+				Movement->HomingTargetComponent = nullptr;
+			}
+			PostTrackSecondsRemaining -= DeltaSeconds;
+			if (PostTrackSecondsRemaining <= 0.0f)
+			{
+				// Fizzles out with no blast: it never reached anything, so there is nothing to punish.
+				Destroy();
+			}
 		}
 		return;
 	}
 
-	PostTrackSecondsRemaining -= DeltaSeconds;
-	if (PostTrackSecondsRemaining <= 0.0f)
-	{
-		Destroy();
+	case EOrbState::DivertToLastKnown:
+		// Detonate on arrival, or once the trip has clearly overrun. The spot can become unreachable (geometry, a
+		// closed door), and an orb that never resolves is worse than one that resolves a little early.
+		if (FVector::DistSquared(GetActorLocation(), LastKnownTargetLocation) <= FMath::Square(LaunchParams.BlastRadiusCm * 0.25f)
+			|| StateElapsedSeconds >= FMath::Max(1.0f, LaunchParams.TrackSeconds))
+		{
+			ServerDetonate();
+		}
+		return;
 	}
 }
 
 void AFPSRBossHomingOrb::HandleOverlap(UPrimitiveComponent* OverlappedComp, AActor* OtherActor, UPrimitiveComponent* OtherComp,
 	int32 OtherBodyIndex, bool bFromSweep, const FHitResult& Sweep)
 {
-	if (!HasAuthority() || DeathDwellRemaining >= 0.0f)
+	if (!HasAuthority() || State == EOrbState::DeathDwell || State == EOrbState::Grace)
 	{
 		return;
 	}
 
-	AFPSRCharacter* Character = Cast<AFPSRCharacter>(OtherActor);
-	if (!Character)
+	if (Cast<AFPSRCharacter>(OtherActor))
 	{
-		return;
+		// ANY player sets it off, not only the marked one — the orb is a physical object, and stepping in front of it
+		// for a teammate is a legitimate play. The blast radius keeps that from being a free save.
+		ServerDetonate();
 	}
-
-	// ApplyContactDamage owns every gate that decides whether this lands (dead / downed / grace / i-frames), so this
-	// deliberately re-checks none of them: a second copy of those rules is a second place for them to drift.
-	Character->ApplyContactDamage(ContactDamage, this, DamageSpec);
-	Destroy();
 }
 
 void AFPSRBossHomingOrb::HandleBlockingHit(UPrimitiveComponent* HitComp, AActor* OtherActor, UPrimitiveComponent* OtherComp,
 	FVector NormalImpulse, const FHitResult& Hit)
 {
-	if (HasAuthority() && DeathDwellRemaining < 0.0f)
+	if (HasAuthority() && State != EOrbState::DeathDwell && State != EOrbState::Grace)
 	{
-		// Hitting geometry ends it, with no blast: an orb that detonated on walls would make cover actively dangerous,
-		// which is the opposite of what cover is for here.
-		Destroy();
+		// Geometry detonates it (user decision). Cover therefore STOPS the orb without making you safe from it —
+		// you break the threat with distance, not by putting a wall at your back.
+		ServerDetonate();
 	}
 }
 
@@ -288,8 +305,8 @@ void AFPSRBossHomingOrb::HandleDeath(AActor* DeadActor, AActor* Killer)
 		return;
 	}
 
-	// Stop dead in place and start the dwell. Destroying right here would race the bDead replication and clients
-	// would simply see the orb blink out with no break at all.
+	// Stop dead in place and start the dwell. Destroying right here would race the bDead replication, and clients
+	// would just see the orb blink out with no break at all.
 	if (Movement)
 	{
 		Movement->StopMovementImmediately();
@@ -300,5 +317,6 @@ void AFPSRBossHomingOrb::HandleDeath(AActor* DeadActor, AActor* Killer)
 		Sphere->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	}
 	OnOrbDestroyedCosmetic();
-	DeathDwellRemaining = DeathDwellSeconds;
+	State = EOrbState::DeathDwell;
+	StateElapsedSeconds = 0.0f;
 }

@@ -94,6 +94,8 @@ void AFPSRBossBase::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLif
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRBossBase, BeamSpeedDegPerSec, Params);
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRBossBase, BeamStartClock, Params);
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRBossBase, BeamWarmupEndClock, Params);
+	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRBossBase, PatternStage, Params);
+	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRBossBase, MarkedPlayer, Params);
 }
 
 void AFPSRBossBase::PostInitializeComponents()
@@ -154,6 +156,19 @@ void AFPSRBossBase::BeginPlay()
 	// Server-only driver. Clients keep bCanEverTick true at the class level but never run the pattern tick — their
 	// beam/marker visuals are Blueprint-side and read the replicated state plus the derived clock.
 	SetActorTickEnabled(HasAuthority());
+
+	if (HasAuthority() && PatternTriggers.Num() == 0)
+	{
+		// 🔴 An empty trigger list means a boss that never attacks again — and nothing anywhere would report it.
+		// Fall back to a plain repeating cadence so an unauthored boss still fights; IsDataValid warns separately so
+		// the fallback is visible at author time rather than only in a play session.
+		FFPSRBossPatternTrigger& Fallback = PatternTriggers.AddDefaulted_GetRef();
+		Fallback.Kind = EFPSRBossTriggerKind::Elapsed;
+		Fallback.Threshold = FMath::Max(0.5f, PatternGapSeconds);
+		Fallback.bRepeating = true;
+		UE_LOG(LogFPSR, Warning, TEXT("[Boss] %s has no PatternTriggers — falling back to a repeating %.1fs cadence. Author them on the boss BP."),
+			*GetName(), Fallback.Threshold);
+	}
 
 	if (HasAuthority() && AbilitySystem)
 	{
@@ -229,6 +244,39 @@ void AFPSRBossBase::OnRep_CurrentPhase()
 void AFPSRBossBase::OnRep_BeamState()
 {
 	OnBeamStateChangedCosmetic(BeamCount, GetPatternClockSeconds() < BeamWarmupEndClock);
+}
+
+void AFPSRBossBase::OnRep_PatternStage()
+{
+	OnPatternStageChangedCosmetic(PatternStage);
+}
+
+void AFPSRBossBase::OnRep_MarkedPlayer()
+{
+	OnMarkedPlayerChangedCosmetic(MarkedPlayer);
+}
+
+void AFPSRBossBase::ServerSetPatternStage(EFPSRBossPatternStage NewStage)
+{
+	if (!HasAuthority() || PatternStage == NewStage)
+	{
+		return;
+	}
+	PatternStage = NewStage;
+	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRBossBase, PatternStage, this);
+	// Authority half — the host never receives its own OnRep, and the host exists in every co-op session.
+	OnPatternStageChangedCosmetic(PatternStage);
+}
+
+void AFPSRBossBase::ServerSetMarkedPlayer(APawn* Pawn)
+{
+	if (!HasAuthority() || MarkedPlayer == Pawn)
+	{
+		return;
+	}
+	MarkedPlayer = Pawn;
+	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRBossBase, MarkedPlayer, this);
+	OnMarkedPlayerChangedCosmetic(MarkedPlayer);
 }
 
 float AFPSRBossBase::GetPatternClockSeconds() const
@@ -524,6 +572,13 @@ void AFPSRBossBase::Tick(float DeltaSeconds)
 	}
 
 	const float Clock = GetPatternClockSeconds();
+	if (FightStartClock < 0.0f)
+	{
+		// First non-frozen server tick IS the start of the fight — the boss spawns and immediately begins ticking,
+		// and anchoring here (rather than at BeginPlay) means a freeze during the spawn beat cannot skew every
+		// Elapsed trigger for the rest of the fight.
+		FightStartClock = Clock;
+	}
 
 	// Airborne history — the "already jumped" half of the laser's dodge window. Recorded for every tracked player
 	// every tick so the laser never has to trace or guess.
@@ -566,12 +621,14 @@ void AFPSRBossBase::Tick(float DeltaSeconds)
 			Active->ServerTickPattern(DeltaSeconds);
 			return;
 		}
-		// The ability ended (on its own or via cancel) — start the inter-pattern gap from here.
+		// The ability ended (on its own or via cancel).
 		ActivePatternHandle = FGameplayAbilitySpecHandle();
-		LastPatternEndClock = Clock;
+		++PatternsPerformed;
 	}
 
-	if (LastPatternEndClock < 0.0f || (Clock - LastPatternEndClock) >= PatternGapSeconds)
+	// Patterns do NOT chain. The boss idles here until a trigger fires (§14-3) — that idle is the whole reason the
+	// fight has a rhythm instead of being a continuous stream.
+	if (ServerConsumeAnyTrigger())
 	{
 		ServerTryActivateNextPattern();
 	}
@@ -633,6 +690,29 @@ void AFPSRBossBase::ServerDetonateDueBlastMarks()
 	}
 }
 
+bool AFPSRBossBase::ServerConsumeAnyTrigger()
+{
+	const float Clock = GetPatternClockSeconds();
+	const float Elapsed = FightStartClock >= 0.0f ? (Clock - FightStartClock) : 0.0f;
+	const float HealthFraction = (HealthComponent && HealthComponent->GetMaxHealth() > 0.0f)
+		? HealthComponent->GetHealth() / HealthComponent->GetMaxHealth()
+		: 1.0f;
+
+	// The decision itself is a pure function (FPSRBoss::ShouldTriggerFire) so the whole fight's cadence can be
+	// verified with no world; this loop owns only writing the latch back.
+	bool bFired = false;
+	for (FFPSRBossPatternTrigger& Trigger : PatternTriggers)
+	{
+		int32 NewFireCount = Trigger.FireCount;
+		if (FPSRBoss::ShouldTriggerFire(Trigger, Elapsed, PatternsPerformed, HealthFraction, NewFireCount))
+		{
+			Trigger.FireCount = NewFireCount;
+			bFired = true;
+		}
+	}
+	return bFired;
+}
+
 void AFPSRBossBase::ServerTryActivateNextPattern()
 {
 	if (!AbilitySystem || GrantedAbilityHandles.Num() == 0)
@@ -640,24 +720,42 @@ void AFPSRBossBase::ServerTryActivateNextPattern()
 		return;
 	}
 
-	// Round-robin from where we left off, so one cheap pattern can't monopolise the rotation.
-	const int32 Count = GrantedAbilityHandles.Num();
-	for (int32 Step = 0; Step < Count; ++Step)
+	// Gather what is legal right now, then let the policy choose among those. Filtering first is what keeps Random
+	// from "rolling" a pattern that is on cooldown and then doing nothing that tick.
+	TArray<int32, TInlineAllocator<8>> Eligible;
+	for (int32 Index = 0; Index < GrantedAbilityHandles.Num(); ++Index)
 	{
-		const int32 Index = (NextPatternIndex + Step) % Count;
-		const FGameplayAbilitySpecHandle Handle = GrantedAbilityHandles[Index];
-		const FGameplayAbilitySpec* Spec = AbilitySystem->FindAbilitySpecFromHandle(Handle);
+		const FGameplayAbilitySpec* Spec = AbilitySystem->FindAbilitySpecFromHandle(GrantedAbilityHandles[Index]);
 		const UFPSRBossGameplayAbility* Ability = Spec ? Cast<UFPSRBossGameplayAbility>(Spec->Ability) : nullptr;
-		if (!Ability || CurrentPhase < Ability->GetMinPhase())
+		if (Ability && CurrentPhase >= Ability->GetMinPhase())
 		{
-			continue;
+			Eligible.Add(Index);
 		}
-		// TryActivateAbility runs the ability's own CheckCooldown/CheckCost, so the freeze-paused cooldown contract
-		// is honoured without this selector re-implementing it.
-		if (AbilitySystem->TryActivateAbility(Handle))
+	}
+	if (Eligible.Num() == 0)
+	{
+		return;
+	}
+
+	// Sequential keeps its own cursor so the rotation is learnable; Random starts from a random offset but still
+	// walks the list, so a cooldown-blocked roll falls through to the next candidate instead of wasting the trigger.
+	const int32 Start = (SelectionPolicy == EFPSRBossPatternSelection::Random)
+		? FMath::RandHelper(Eligible.Num())
+		: 0;
+
+	for (int32 Step = 0; Step < Eligible.Num(); ++Step)
+	{
+		const int32 Slot = (SelectionPolicy == EFPSRBossPatternSelection::Random)
+			? (Start + Step) % Eligible.Num()
+			: (NextPatternIndex + Step) % Eligible.Num();
+		const int32 Index = Eligible[Slot];
+
+		// TryActivateAbility runs the ability's own CheckCooldown, so the freeze-paused cooldown contract is honoured
+		// without this selector re-implementing it.
+		if (AbilitySystem->TryActivateAbility(GrantedAbilityHandles[Index]))
 		{
-			ActivePatternHandle = Handle;
-			NextPatternIndex = (Index + 1) % Count;
+			ActivePatternHandle = GrantedAbilityHandles[Index];
+			NextPatternIndex = (Slot + 1) % Eligible.Num();
 			return;
 		}
 	}
@@ -671,10 +769,11 @@ void AFPSRBossBase::DebugForcePattern(int32 Index)
 		UE_LOG(LogFPSR, Warning, TEXT("[Boss] FPSR.BossPattern %d — out of range (0..%d)."), Index, GrantedAbilityHandles.Num() - 1);
 		return;
 	}
-	// Cancel whatever is running so the forced pattern starts from a clean slate, then bypass the inter-pattern gap.
+	// Cancel whatever is running so the forced pattern starts from a clean slate. Triggers are deliberately NOT
+	// consumed here — this command exists to test a pattern in isolation, and making it burn a trigger would change
+	// the cadence you were trying to observe.
 	AbilitySystem->CancelAbilities();
 	ActivePatternHandle = FGameplayAbilitySpecHandle();
-	LastPatternEndClock = -1.0f;
 	if (AbilitySystem->TryActivateAbility(GrantedAbilityHandles[Index]))
 	{
 		ActivePatternHandle = GrantedAbilityHandles[Index];

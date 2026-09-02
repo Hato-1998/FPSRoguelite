@@ -151,12 +151,121 @@ bool FFPSRBossLaserSweepTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("angular radius does not blow up at zero distance"),
 		FMath::IsFinite(CapsuleAngularRadiusDeg(40.0f, 0.0f)) && CapsuleAngularRadiusDeg(40.0f, 0.0f) <= 90.0f);
 
-	// --- Closed-form angle -------------------------------------------------------------------------------------
+	// --- Closed-form angle, with the stationary grace segment --------------------------------------------------
 	// Server and client must agree exactly for the same clock, which is why nobody integrates a delta.
-	TestTrue(TEXT("angle is closed form in the clock"),
-		FMath::IsNearlyEqual(BeamBaseAngleAt(10.0f, 30.0f, 100.0f, 102.0f), 70.0f, 0.001f));
-	TestTrue(TEXT("angle at the start clock is the start angle"),
+	// GraceEnd = 100: the beam must NOT move before then. That still window is what makes a beam born at a random
+	// cardinal survivable for whoever it lands on.
+	TestTrue(TEXT("beam is stationary during the grace"),
+		FMath::IsNearlyEqual(BeamBaseAngleAt(10.0f, 30.0f, 100.0f, 98.0f), 10.0f, 0.001f));
+	TestTrue(TEXT("beam is still at the start angle exactly at the grace end"),
 		FMath::IsNearlyEqual(BeamBaseAngleAt(10.0f, 30.0f, 100.0f, 100.0f), 10.0f, 0.001f));
+	TestTrue(TEXT("beam sweeps only after the grace"),
+		FMath::IsNearlyEqual(BeamBaseAngleAt(10.0f, 30.0f, 100.0f, 102.0f), 70.0f, 0.001f));
+
+	// --- Cardinal spawn ------------------------------------------------------------------------------------------
+	// Beams are born at 12/3/6/9 so a player can name the direction it came from.
+	for (int32 Trial = 0; Trial < 32; ++Trial)
+	{
+		const float Cardinal = RandomCardinalDeg();
+		const bool bIsCardinal = FMath::IsNearlyEqual(Cardinal, 0.0f) || FMath::IsNearlyEqual(Cardinal, 90.0f)
+			|| FMath::IsNearlyEqual(Cardinal, 180.0f) || FMath::IsNearlyEqual(Cardinal, 270.0f);
+		TestTrue(TEXT("start angle is one of the four cardinals"), bIsCardinal);
+	}
+
+	return true;
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+//  Pattern triggers — the cadence of the whole fight
+// ---------------------------------------------------------------------------------------------------------------
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFPSRBossTriggerTest, "FPSRoguelite.Boss.Trigger",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FFPSRBossTriggerTest::RunTest(const FString& Parameters)
+{
+	using namespace FPSRBoss;
+
+	// Helper: run a trigger forward through a series of samples and count how many times it fires, writing the latch
+	// back exactly as AFPSRBossBase::ServerConsumeAnyTrigger does.
+	auto FireCountOverBp1 = [](FFPSRBossPatternTrigger Trigger, const TArray<float>& Elapsed,
+		const TArray<int32>& Patterns, const TArray<float>& Health) -> int32
+	{
+		const int32 Steps = FMath::Max3(Elapsed.Num(), Patterns.Num(), Health.Num());
+		int32 Fires = 0;
+		for (int32 Index = 0; Index < Steps; ++Index)
+		{
+			const float E = Elapsed.IsValidIndex(Index) ? Elapsed[Index] : 0.0f;
+			const int32 P = Patterns.IsValidIndex(Index) ? Patterns[Index] : 0;
+			const float H = Health.IsValidIndex(Index) ? Health[Index] : 1.0f;
+			int32 NewCount = Trigger.FireCount;
+			if (ShouldTriggerFire(Trigger, E, P, H, NewCount))
+			{
+				Trigger.FireCount = NewCount;
+				++Fires;
+			}
+		}
+		return Fires;
+	};
+
+	// --- Elapsed --------------------------------------------------------------------------------------------------
+	{
+		FFPSRBossPatternTrigger T;
+		T.Kind = EFPSRBossTriggerKind::Elapsed;
+		T.Threshold = 5.0f;
+		T.bRepeating = true;
+		// Ticking past 5, 10, 15 fires three times — once per threshold crossed, not once per tick spent above it.
+		TestEqual(TEXT("repeating Elapsed fires once per threshold"),
+			FireCountOverBp1(T, { 0.f, 4.9f, 5.1f, 7.f, 9.9f, 10.1f, 14.f, 15.2f }, {}, {}), 3);
+
+		// 🔴 A single sample that jumps far past several thresholds must still fire ONCE. If this latched to
+		// FireCount+1 instead of to the crossed count, a long pause would come back as a burst of patterns.
+		TestEqual(TEXT("a big jump does not produce a backlog burst"),
+			FireCountOverBp1(T, { 0.f, 100.0f }, {}, {}), 1);
+
+		T.bRepeating = false;
+		TestEqual(TEXT("non-repeating Elapsed fires exactly once"),
+			FireCountOverBp1(T, { 0.f, 5.1f, 9.f, 20.f, 60.f }, {}, {}), 1);
+	}
+
+	// --- PatternCount ---------------------------------------------------------------------------------------------
+	{
+		FFPSRBossPatternTrigger T;
+		T.Kind = EFPSRBossTriggerKind::PatternCount;
+		T.Threshold = 3.0f;
+		T.bRepeating = true;
+		TestEqual(TEXT("repeating PatternCount fires every N patterns"),
+			FireCountOverBp1(T, {}, { 0, 1, 2, 3, 4, 5, 6, 7 }, {}), 2);
+
+		T.bRepeating = false;
+		TestEqual(TEXT("non-repeating PatternCount fires once"),
+			FireCountOverBp1(T, {}, { 0, 3, 6, 9 }, {}), 1);
+	}
+
+	// --- HealthBelow ----------------------------------------------------------------------------------------------
+	{
+		FFPSRBossPatternTrigger T;
+		T.Kind = EFPSRBossTriggerKind::HealthBelow;
+		T.Threshold = 0.5f;
+		T.bRepeating = true; // deliberately true — it must STILL be one-shot
+		// Health only falls in a boss fight, so a repeating reading would mean "every tick forever after crossing".
+		TestEqual(TEXT("HealthBelow is one-shot even when marked repeating"),
+			FireCountOverBp1(T, {}, {}, { 1.0f, 0.8f, 0.49f, 0.4f, 0.2f, 0.0f }), 1);
+
+		TestEqual(TEXT("HealthBelow does not fire above the threshold"),
+			FireCountOverBp1(T, {}, {}, { 1.0f, 0.9f, 0.6f, 0.51f }), 0);
+	}
+
+	// --- Threshold hygiene ----------------------------------------------------------------------------------------
+	{
+		// A zero threshold must not divide by zero or fire unboundedly.
+		FFPSRBossPatternTrigger T;
+		T.Kind = EFPSRBossTriggerKind::Elapsed;
+		T.Threshold = 0.0f;
+		T.bRepeating = false;
+		const int32 Fires = FireCountOverBp1(T, { 0.f, 1.f, 2.f }, {}, {});
+		TestTrue(TEXT("a zero threshold stays bounded"), Fires <= 1);
+	}
 
 	return true;
 }

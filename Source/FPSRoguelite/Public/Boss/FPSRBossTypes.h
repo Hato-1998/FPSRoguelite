@@ -6,6 +6,89 @@
 #include "Combat/FPSRVitals.h"   // FFPSRDamageSpec (server-only payload below)
 #include "FPSRBossTypes.generated.h"
 
+/** Every boss pattern runs Prep -> Execute -> Recovery. Replicated so a Blueprint can play a wind-up and a
+ *  recovery beat; the boss is never mid-pattern without clients knowing which part they are looking at. */
+UENUM(BlueprintType)
+enum class EFPSRBossPatternStage : uint8
+{
+	/** Winding up. NOTHING has been spawned yet — this is the system half of "telegraph before you can be hurt". */
+	Prep,
+	/** The pattern proper. Each pattern's own grace (blast fuse / stationary beam / hovering orbs) lives in here,
+	 *  because those three mean different things and folding them into one number would flatten them. */
+	Execute,
+	/** Idle after the pattern. This is what stops patterns from running back to back. */
+	Recovery,
+	Finished
+};
+
+/** What makes the boss start its NEXT pattern. Patterns are not a queue that drains — the boss idles until one of
+ *  these fires (§14-3). */
+UENUM(BlueprintType)
+enum class EFPSRBossTriggerKind : uint8
+{
+	/** Seconds since the boss fight began. */
+	Elapsed,
+	/** Patterns performed so far.
+	 *  🔴 This stands in for the "after N basic attacks" the design asks for: the boss has NO basic attack yet, so
+	 *  there is nothing to count. When one is added it becomes a new kind here and nothing else changes. */
+	PatternCount,
+	/** Health fraction dropping to or below the threshold. Fires once.
+	 *  Deliberately NOT the same axis as an ability's MinPhase: MinPhase is a GATE ("usable from phase N on"),
+	 *  this is a CLOCK ("go now, once"). */
+	HealthBelow
+};
+
+USTRUCT(BlueprintType)
+struct FFPSRBossPatternTrigger
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, Category = "FPSR|Boss")
+	EFPSRBossTriggerKind Kind = EFPSRBossTriggerKind::Elapsed;
+
+	/** Seconds (Elapsed) / count (PatternCount) / health fraction 0..1 (HealthBelow). */
+	UPROPERTY(EditAnywhere, Category = "FPSR|Boss", meta = (ClampMin = "0.0"))
+	float Threshold = 6.0f;
+
+	/** Elapsed and PatternCount only: fire every Threshold rather than once. HealthBelow is one-shot by nature. */
+	UPROPERTY(EditAnywhere, Category = "FPSR|Boss")
+	bool bRepeating = true;
+
+	/** Server-side latch: how many times this trigger has already fired. Not replicated — trigger evaluation is
+	 *  server-only, and a client that knew would still have nothing to do with it. */
+	int32 FireCount = 0;
+};
+
+/** Which pattern to start once a trigger fires. */
+UENUM(BlueprintType)
+enum class EFPSRBossPatternSelection : uint8
+{
+	/** Round-robin through GrantedAbilities — predictable, so players can learn the rotation. */
+	Sequential,
+	/** Uniform among the eligible ones. */
+	Random
+};
+
+/** Everything a homing orb needs at launch. A struct rather than an eight-argument call, following the same
+ *  convention FFPSRServerAttackContext set: new per-launch inputs get added here instead of growing a signature. */
+struct FFPSRBossOrbLaunchParams
+{
+	/** Hover in place around the boss for this long before starting to chase — the pattern's own telegraph, which is
+	 *  separate from the boss's system-level wind-up. */
+	float GraceSeconds = 0.8f;
+
+	/** How long it steers before giving up and flying straight. */
+	float TrackSeconds = 8.0f;
+
+	float Health = 150.0f;
+
+	/** Blast on impact: damages every player in radius, not just whoever it touched. That is what makes clumping
+	 *  around the hunted player — or around their body — the wrong answer. */
+	float BlastDamage = 20.0f;
+	float BlastRadiusCm = 400.0f;
+	float BlastKnockback = 0.0f;
+};
+
 /** One pending delayed blast (BOSS1 barrage). The boss owns these as a REPLICATED ARRAY rather than spawning one
  *  actor per marker:
  *   ① The default NetCullDistance (150 m) is smaller than the arena diagonal (226 m for the 160x160 m arena,
@@ -67,4 +150,16 @@ namespace FPSRBoss
 
 	/** Monotonic latch so healing can never walk a phase back down. */
 	FORCEINLINE int32 LatchPhase(int32 Current, int32 Computed) { return FMath::Max(Current, Computed); }
+
+	/** Should this trigger fire right now? Pure, so the cadence of the whole fight is testable with no world.
+	 *
+	 *  `OutFireCount` is the trigger's new latch value and MUST be written back by the caller when this returns true
+	 *  — that latch is the only thing separating "fires once" from "fires every tick from now on".
+	 *
+	 *  🔴 Elapsed/PatternCount compare against an ACCUMULATED count rather than "time since the last fire". After a
+	 *  long level-up freeze the clock has not moved (it is the freeze-paused clock), but if this were written as a
+	 *  catch-up loop any drift would come out as a burst of patterns the instant the party unpauses. Counting
+	 *  thresholds crossed makes a burst impossible to express. */
+	FPSROGUELITE_API bool ShouldTriggerFire(const FFPSRBossPatternTrigger& Trigger, float ElapsedSeconds,
+		int32 PatternsPerformed, float HealthFraction, int32& OutFireCount);
 }
