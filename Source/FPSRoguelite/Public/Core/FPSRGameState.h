@@ -9,6 +9,8 @@ class AFPSRBossBase;
 class UFPSRMissionDataAsset;
 class UFPSRRunScheduleDataAsset;
 class AFPSRArenaActor;
+class AFPSRPlayerState; // GetPartyVitals() below — forward-declare only, do NOT include Core/FPSRPlayerState.h here
+                         // (36 includers of this header would all pay for it; the include lives in the .cpp).
 
 /** Macro run phase. Combat = normal run / mission window; Boss = final boss (no timer, no missions).
  *  Global freeze during card selection is the separate bRunPaused flag, independent of the phase. */
@@ -52,6 +54,63 @@ enum class EFPSRStageTransitionPhase : uint8 { None, Pending, Grace, Swapping, F
 /** Fired on every client (and the host) whenever StageTransitionPhase/StageIndex/ActiveArena changes (ADR 0010 D6).
  *  HUD stage-transition UI (dealing-window countdown, swap cue) binds here. */
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnStageTransitionChanged);
+
+/** One party member's vitals snapshot for the HUD teammate bars (feat/hud-surface, PlayerFeel.md §2-14 "팀원" row —
+ *  "HUD C++ surface" board item). A plain read-only value, not a live-bound reference: AFPSRGameState::GetPartyVitals
+ *  returns an array of these, and every health/shield field mirrors AFPSRPlayerState's own vitals accessors 1:1 so
+ *  there is exactly one place that defines "how much/ready/broken/alive" — this struct only carries that answer.
+ *  bIsAlive/bIsDBNO are two bools (not the EFPSRLifeState enum) specifically so this header never has to include
+ *  Core/FPSRPlayerState.h (see the forward declaration above). */
+USTRUCT(BlueprintType)
+struct FFPSRPartyMemberVitals
+{
+	GENERATED_BODY()
+
+	/** The source PlayerState this slot was read from. Only null on a default-constructed struct — GetPartyVitals
+	 *  never emits a null entry. Kept so a caller can act on the specific player (e.g. focus a nameplate). */
+	UPROPERTY(BlueprintReadOnly, Category = "FPSR|Run")
+	TObjectPtr<class AFPSRPlayerState> PlayerState = nullptr;
+
+	UPROPERTY(BlueprintReadOnly, Category = "FPSR|Run")
+	FText PlayerName;
+
+	UPROPERTY(BlueprintReadOnly, Category = "FPSR|Run")
+	float Health = 0.0f;
+
+	UPROPERTY(BlueprintReadOnly, Category = "FPSR|Run")
+	float MaxHealth = 0.0f;
+
+	UPROPERTY(BlueprintReadOnly, Category = "FPSR|Run")
+	float Health01 = 0.0f;
+
+	UPROPERTY(BlueprintReadOnly, Category = "FPSR|Run")
+	float Shield = 0.0f;
+
+	UPROPERTY(BlueprintReadOnly, Category = "FPSR|Run")
+	float MaxShield = 0.0f;
+
+	UPROPERTY(BlueprintReadOnly, Category = "FPSR|Run")
+	float Shield01 = 0.0f;
+
+	UPROPERTY(BlueprintReadOnly, Category = "FPSR|Run")
+	bool bHasShield = false;
+
+	UPROPERTY(BlueprintReadOnly, Category = "FPSR|Run")
+	bool bIsAlive = false;
+
+	UPROPERTY(BlueprintReadOnly, Category = "FPSR|Run")
+	bool bIsDBNO = false;
+
+	/** True if this slot is the local viewer's own PlayerState. GetPartyVitals excludes the local player by default
+	 *  (bIncludeLocalPlayer = false), so this is mainly meaningful when a caller opts in. */
+	UPROPERTY(BlueprintReadOnly, Category = "FPSR|Run")
+	bool bIsLocalPlayer = false;
+
+	/** Mirrors AFPSRPlayerState::AreVitalsReady() — false before this player's vitals-init GE has replicated
+	 *  (MaxHealth still 0). Widgets should grey out / hide the slot while this is false instead of reading 0/0. */
+	UPROPERTY(BlueprintReadOnly, Category = "FPSR|Run")
+	bool bVitalsReady = false;
+};
 
 /** Server-authoritative run progression state (shared XP, party level, run phase, global freeze).
  *  Redesign 2026-06-04 (Game.MD §2-2): on level-up (or mission clear) the run globally freezes — enemies
@@ -106,6 +165,15 @@ public:
 	 *  so it reads correctly on BOTH the host and remote clients (the lobby GameMode timer is server-only). (U11a) */
 	UFUNCTION(BlueprintPure, Category = "FPSR|Lobby")
 	float GetLobbyReadyCountdownRemaining() const;
+
+	/** Snapshot of every OTHER connected player's vitals for the HUD teammate bars (PlayerFeel.md §2-14 "팀원" row).
+	 *  bIncludeLocalPlayer = true additionally includes the caller's own slot (bIsLocalPlayer = true on it); default
+	 *  false because the local player's own vitals belong on the separate "본인" HUD element (AFPSRPlayerState's own
+	 *  accessors), not the teammate list. Excludes spectators and inactive (disconnected) PlayerStates. Sorted by
+	 *  PlayerId ascending — see the .cpp for why.
+	 *  🔴 Allocates a TArray on every call — call from an event or a low-frequency timer, never from a widget Tick. */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Run")
+	TArray<FFPSRPartyMemberVitals> GetPartyVitals(bool bIncludeLocalPlayer = false) const;
 
 	/** XP required to advance FROM the given level to the next. */
 	UFUNCTION(BlueprintPure, Category = "FPSR|Run")

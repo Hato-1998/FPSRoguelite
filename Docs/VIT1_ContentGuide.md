@@ -148,23 +148,35 @@
 우선순위는 C++ 이 정한다: **Kill > ShieldBreak > Weak > Crit > Hit**. 한 번의 발사에 여러 결과가 겹치면 가장 위 하나만 온다.
 > enum 은 **말미에 추가**했으므로 기존에 저작된 마커 값들은 그대로다(값 밀림 없음).
 
-### ⑥-③ 본인 실드바 / 팀원 실드바
+### ⑥-③ 본인 실드바 / 팀원 실드바 — ✅ 해소(2026-09-02, `feat/hud-surface`)
 
 플레이어 실드는 GAS 어트리뷰트(PlayerState ASC)라 **이미 전원에게 복제된다 — 바인딩만 하면 된다.**
 
-BP 경로: **`Get Float Attribute`**(GAS 라이브러리 노드)
-- `Actor` = 플레이어 캐릭터 또는 그 PlayerState (둘 다 `IAbilitySystemInterface` 구현)
-- `Attribute` = 픽커에서 **`FPSRHealthSet.Shield`** / **`FPSRHealthSet.MaxShield`**
-- 체력도 같은 방식(`Health` / `MaxHealth`)
+**본인** — 대상 = 플레이어의 **`PlayerState`**(`AFPSRPlayerState`). 다음 BlueprintPure 노드를 그대로 쓴다:
+`Get Health` · `Get Max Health` · `Get Health01` · `Get Shield` · `Get Max Shield` · `Get Shield01` · `Has Shield` · `Is Shield Broken` · `Are Vitals Ready`
 
-> ⚠️ **C++ 편의 접근자가 없다.** 적 실드바에는 `Get Shield` 같은 BlueprintPure 가 있지만 **플레이어 쪽은 아무것도 없어서** 위젯 Tick 에서 `Get Float Attribute` 를 폴링하는 형태가 된다. 원하면 Claude 가 `UFPSRRunHUDWidget` 에 BlueprintPure 접근자(`GetShield01` 등)를 추가할 수 있다 — **말해 줄 것**(코드 작업).
+**팀원** — **`GameState`**(`AFPSRGameState`)의 **`Get Party Vitals`** 노드 하나 → 반환되는 `FFPSRPartyMemberVitals` 구조체 배열을 **ForEach** 로 순회하면서 각 원소의 `Health01`/`Shield01`/`bHasShield`/`bIsAlive`/`bIsDBNO`/`bVitalsReady`/`PlayerName` 필드를 그대로 읽는다. `PlayerId` 오름차순으로 이미 정렬돼 있어 슬롯이 프레임마다 안 바뀐다.
+
+🔴 **`Get Float Attribute` 폴링은 더 이상 쓰지 말 것** — 위 접근자들로 완전히 대체됐다.
+> ⚠️ **`Are Vitals Ready`(본인) / `bVitalsReady`(팀원) 가 false 인 동안은 회색처리(또는 숨김)** — 바이탈 초기화 GE 가 아직 복제되지 않아 `MaxHealth`/`MaxShield` 가 과도기적으로 0 이다. 이 상태를 "체력 0"(죽기 직전)으로 잘못 그리지 말 것.
+> ⚠️ **`Get Party Vitals` 는 호출마다 배열을 새로 할당한다** — 위젯 **Tick 에서 매 프레임 부르지 말 것**. 이벤트 구독(바이탈 변경 등) 또는 저빈도 타이머로 갱신할 것.
 > ⚠️ **숨겨진 위젯은 Tick 이 안 돈다**(UMG 의 Tick 은 Paint 안에서 불린다). 실드바를 `Collapsed` 로 토글하는 구조면 루트는 항상 페인트 상태로 두고 안쪽만 숨길 것.
 
-### ⑥-④ 실드 파손 위험 경고 — 🔴 **지금은 코드가 막고 있다**
+### ⑥-④ 실드 파손 위험 경고 — ✅ 해소(2026-09-02, `feat/hud-surface`)
 
-명세 §11-1 은 이 위젯이 GMS 채널 `Message.Player.ShieldBroken` 을 구독하라고 적었지만, **`UFPSRGameplayMessageSubsystem` 에는 `UFUNCTION` 이 하나도 없다** — `Get`·`RegisterListener` 전부 C++ 템플릿이라 **WBP 에서 구독할 방법이 없다**(2026-09-02 실측).
+~~명세 §11-1 은 이 위젯이 GMS 채널 `Message.Player.ShieldBroken` 을 구독하라고 적었지만, `UFPSRGameplayMessageSubsystem` 에는 `UFUNCTION` 이 하나도 없다 — `Get`·`RegisterListener` 전부 C++ 템플릿이라 WBP 에서 구독할 방법이 없다(2026-09-02 실측).~~
 
-**→ 이 항목만 보류하고 나머지를 먼저 하라.** 처리 방안은 아래 §8 에 있다.
+**→ 이제 GMS 구독이 아니다.** 경고가 `UFPSRPlayerFeedbackComponent` 로 옮겨졌다 — 대상 = 캐릭터가 이미 갖고 있는 그 컴포넌트, 이벤트 = **`On Shield Broken`**(파라미터 없음). **`On Hit Marker` 와 똑같은 방식**으로 바인드하면 된다.
+
+### ⑥-⑤ 총기 HUD — ✅ 해소(2026-09-02, `feat/hud-surface`)
+
+무기 아이콘·장탄수·슬롯 3종 전부 **`WeaponInventory` 컴포넌트**(캐릭터의 `Get Component by Class`, 클래스 = `FPSRWeaponInventoryComponent`)에서 읽는다.
+
+- **무기 아이콘**: `Get Current Instance`(BlueprintPure) → `Get Source`(BlueprintPure, 그 인스턴스의 무기 DataAsset 반환) → **`Icon`**(소프트 텍스처) → **`Set Brush from Soft Texture`**. `Icon` 이 비어 있으면 아이콘 없음(이름만 표시) — 정상.
+- **장탄수**: `Get Current Ammo`(BlueprintPure, 정수) / 그 무기 DA 의 「무기\|기본」 → 「기본 스탯」 → **`Mag Size`**. 🔴 **예비탄약 칸은 만들지 말 것** — `BaseStats` 는 이미 "예비탄약 무한(재장전 시 항상 `Mag Size` 로 채움)" 으로 결정돼 있다. 현재탄/`Mag Size` 만 그리면 된다.
+- **슬롯(서브 무기 존재유무)**: `Get Owned Weapons`(BlueprintPure, `TArray<무기 DataAsset>`) — **소유한 것만** 슬롯 순서로 준다(맨손/미소유 슬롯은 배열에 없음). 배열 길이 > 1 로 "서브 무기가 있는가"를 바로 판정할 수 있다.
+
+> `Get Current Instance` / `Get Current Ammo` / `Get Owned Weapons` 는 전부 BlueprintPure — 무기 교체·재장전·습득 이벤트에서만 갱신하면 되고, 매 Tick 재계산할 필요는 없다.
 
 ---
 
@@ -207,8 +219,8 @@ BP 경로: **`Get Float Attribute`**(GAS 라이브러리 노드)
 
 | 항목 | 상태 |
 |---|---|
-| §5 ⑥-④ **실드 파손 경고 위젯** | **불가.** GMS 가 BP 에 노출돼 있지 않다 |
-| §5 ⑥-③ 본인 실드바 | 가능하지만 **원시 GAS 폴링**. C++ 접근자를 추가하면 훨씬 깔끔 |
+| §5 ⑥-④ **실드 파손 경고 위젯** | ~~불가. GMS 가 BP 에 노출돼 있지 않다~~ → ✅ **해소(2026-09-02, `feat/hud-surface`)** |
+| §5 ⑥-③ 본인 실드바 | ~~가능하지만 원시 GAS 폴링. C++ 접근자를 추가하면 훨씬 깔끔~~ → ✅ **해소(2026-09-02, `feat/hud-surface`)** |
 
 **권장 처리** — 경고를 `UFPSRPlayerFeedbackComponent` 로 옮긴다. 그 컴포넌트는 **이미 플레이어 로컬 HUD 코스메틱의 창구**이고(`OnHitMarker` · `OnDamageDirection` · `OnRangedTargetWarning` 전부 `BlueprintAssignable`), 자기 헤더 주석에 *"single-consumer local HUD, local, cosmetic → a pawn component + delegates is the minimal correct structure (no replication, no message bus). GameplayMessageSubsystem 은 소비자가 여럿이 될 때의 업그레이드 경로"* 라고 적어 뒀다. 실드 파손 경고는 정확히 전자다.
 → `OnShieldBroken` 을 `BlueprintAssignable` 로 추가하면 WBP 가 `OnHitMarker` 와 **똑같은 방식**으로 바인드한다.

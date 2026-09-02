@@ -8,6 +8,7 @@
 #include "Net/UnrealNetwork.h"
 #include "Net/Core/PushModel/PushModel.h"
 #include "Engine/World.h"
+#include "GameFramework/PlayerController.h" // GetPartyVitals(): IsLocalController()/PlayerState local-player match
 #include "HAL/IConsoleManager.h"
 #include "Core/FPSRLogChannels.h"
 
@@ -388,6 +389,76 @@ float AFPSRGameState::GetLobbyReadyCountdownRemaining() const
 	}
 	// Synced server clock on host and clients (AGameStateBase::GetServerWorldTimeSeconds) — no GameMode access needed.
 	return FMath::Max(0.0f, LobbyCountdownEndServerTime - GetServerWorldTimeSeconds());
+}
+
+TArray<FFPSRPartyMemberVitals> AFPSRGameState::GetPartyVitals(bool bIncludeLocalPlayer) const
+{
+	// 🔴 Allocates — see the header comment. Callers must not run this every Tick.
+	TArray<FFPSRPartyMemberVitals> Out;
+
+	const UWorld* World = GetWorld();
+
+	for (APlayerState* PS : PlayerArray)
+	{
+		AFPSRPlayerState* FPS = Cast<AFPSRPlayerState>(PS);
+		// IsOnlyASpectator: not a run participant. IsInactive: the ghost PlayerState the engine leaves behind for a
+		// disconnected-but-may-reconnect player — without this filter a left player's bar would stay on every HUD.
+		if (!FPS || FPS->IsOnlyASpectator() || FPS->IsInactive())
+		{
+			continue;
+		}
+
+		// Iterate + IsLocalController (NOT GetFirstPlayerController/GetOwningPlayerController — GameState has no
+		// single "owning" client, and split-screen can have more than one local controller). Same pattern as
+		// OnRep_TopologyGeneration above.
+		bool bIsLocalPlayer = false;
+		if (World)
+		{
+			for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+			{
+				const APlayerController* PC = It->Get();
+				if (PC && PC->IsLocalController() && PC->PlayerState == FPS)
+				{
+					bIsLocalPlayer = true;
+					break;
+				}
+			}
+		}
+		if (!bIncludeLocalPlayer && bIsLocalPlayer)
+		{
+			continue; // default: teammates only — the local player's own vitals live on the separate "본인" HUD element
+		}
+
+		// Reuse the PlayerState's own vitals accessors (Task 1) rather than re-deriving from HealthSet here — one
+		// definition of "how much/ready/broken" for both the 본인 and 팀원 HUD paths.
+		FFPSRPartyMemberVitals& Entry = Out.AddDefaulted_GetRef();
+		Entry.PlayerState = FPS;
+		Entry.PlayerName = FText::FromString(FPS->GetPlayerName());
+		Entry.Health = FPS->GetHealth();
+		Entry.MaxHealth = FPS->GetMaxHealth();
+		Entry.Health01 = FPS->GetHealth01();
+		Entry.Shield = FPS->GetShield();
+		Entry.MaxShield = FPS->GetMaxShield();
+		Entry.Shield01 = FPS->GetShield01();
+		Entry.bHasShield = FPS->HasShield();
+		Entry.bIsAlive = FPS->IsAlive();
+		Entry.bIsDBNO = FPS->IsDBNO();
+		Entry.bIsLocalPlayer = bIsLocalPlayer;
+		Entry.bVitalsReady = FPS->AreVitalsReady();
+	}
+
+	// PlayerArray's order is replication ARRIVAL order — different per client, and reshuffled by every join / leave /
+	// reconnect — so a HUD built straight off it would swap teammate bars between slots frame to frame. PlayerId is
+	// server-assigned and replicated: a stable key that gives every machine on this run the same slot order.
+	// (Null PlayerState can't reach here — already filtered above; MAX_int32 is only a defensive fallback.)
+	Out.Sort([](const FFPSRPartyMemberVitals& A, const FFPSRPartyMemberVitals& B)
+	{
+		const int32 IdA = A.PlayerState ? A.PlayerState->GetPlayerId() : MAX_int32;
+		const int32 IdB = B.PlayerState ? B.PlayerState->GetPlayerId() : MAX_int32;
+		return IdA < IdB;
+	});
+
+	return Out;
 }
 
 void AFPSRGameState::OnRep_RunState()

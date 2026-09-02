@@ -21,6 +21,7 @@ class UParticleSystem;
 class UMaterialInterface;
 class UFPSRWeaponFragment;
 class UUserWidget;
+class UTexture2D;
 
 /** Sniper-scope descriptor (W-U2) for a SIGHT part. Purely OWNER-LOCAL cosmetic: when this sight is active and the
  *  player aims, it drives a full-screen scope — strong FOV zoom + HUD reticle/vignette overlay + 1P weapon hidden.
@@ -302,6 +303,13 @@ class FPSROGUELITE_API UFPSRWeaponDataAsset : public UPrimaryDataAsset
 public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|기본", meta = (DisplayName = "무기 이름"))
 	FText DisplayName;
+
+	/** HUD 무기 아이콘(§2-14 우하단 총기 HUD의 "무기 형태"). 소프트 참조 — 이 DA 의 다른 에셋 참조(WeaponMesh·
+	 *  WeaponMeshStatic·WeaponAnimInstanceClass)와 같은 규약이다. 무기 DA 는 상시 로드 프라이머리 에셋이라 하드
+	 *  참조로 두면 전 무기의 아이콘 텍스처가 시작부터 메모리에 상주한다. 위젯은 UImage::SetBrushFromSoftTexture 로
+	 *  읽는다. null = 아이콘 없음(HUD 는 이름만 표시) — 정상 상태다. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|기본", meta = (DisplayName = "HUD 아이콘"))
+	TSoftObjectPtr<UTexture2D> Icon;
 
 	/** Weapon archetype now lives in BaseStats so per-archetype stat fields can drive EditCondition visibility. */
 	UFUNCTION(BlueprintPure, Category = "Weapon")
