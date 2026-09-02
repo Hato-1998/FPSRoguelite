@@ -45,6 +45,15 @@ void UFPSRPlayerFeedbackComponent::NotifyHitConfirmed(EFPSRHitMarkerType MarkerT
 	OnHitMarker.Broadcast(MarkerType);
 }
 
+void UFPSRPlayerFeedbackComponent::NotifyShieldBroken()
+{
+	if (!IsLocalView())
+	{
+		return;
+	}
+	OnShieldBroken.Broadcast();
+}
+
 void UFPSRPlayerFeedbackComponent::ReceiveDamageFromWorld(const FVector& InstigatorWorldLocation)
 {
 	if (!IsLocalView())

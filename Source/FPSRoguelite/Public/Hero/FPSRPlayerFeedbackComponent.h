@@ -11,6 +11,7 @@ class APawn;
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnFPSRHitMarker, EFPSRHitMarkerType, MarkerType);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnFPSRDamageDirection, float, AngleDeg);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnFPSRRangedTargetWarning, const TArray<float>&, AngleDegs);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnFPSRShieldBroken);
 
 /** Local-only player feedback (Game.MD §2-14): purely event-driven, NOT replicated, no tick.
  *  - Hit marker ("I hit an enemy"): crosshair confirm from the weapon GA / server confirm.
@@ -18,6 +19,8 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnFPSRRangedTargetWarning, const TA
  *    the owning client via the PlayerController; this computes the camera-relative angle and broadcasts it.
  *  - Ranged target warning ("a ranged enemy is aiming at me", §2-6 pre-warning): producer = ranged enemy AI
  *    (follow-up); a debug command (FPSR.TestRangedWarn) drives it until then.
+ *  - Shield broken ("my shield just broke", VIT1 requirement 5, feat/hud-surface): the owning client's ASC fires a
+ *    GAS value-change delegate on the replicated Shield attribute's >0 -> 0 edge; AFPSRCharacter forwards it here.
  *
  *  First-principles: single-consumer local HUD, local, cosmetic → a pawn component + delegates is the minimal
  *  correct structure (no replication, no message bus). GameplayMessageSubsystem (§3) is the upgrade path if
@@ -37,6 +40,10 @@ public:
 	/** Broadcast a hit-marker pulse (weapon GA local trace = Hit; PlayerController server confirm = Crit/Kill). */
 	UFUNCTION(BlueprintCallable, Category = "FPSR|Feedback")
 	void NotifyHitConfirmed(EFPSRHitMarkerType MarkerType);
+
+	/** Local: this player's own shield just broke (VIT1 requirement 5). Called by
+	 *  AFPSRCharacter::HandleShieldValueChangedForWarning on the replicated Shield attribute's >0 -> 0 edge. */
+	void NotifyShieldBroken();
 
 	/** Local: incoming damage came from InstigatorWorldLocation — broadcast its camera-relative angle. Called by
 	 *  the owning PlayerController's ClientNotifyDamageFrom RPC (and the debug command). */
@@ -58,6 +65,13 @@ public:
 	 *  every frame while any warning is active so the indicators track the player turning / sources moving. */
 	UPROPERTY(BlueprintAssignable, Category = "FPSR|Feedback")
 	FOnFPSRRangedTargetWarning OnRangedTargetWarning;
+
+	/** "My shield just broke" — the danger warning. No payload: the event is about the local player, who is always at
+	 *  the centre of their own screen, so there is no direction or source to carry (unlike OnDamageDirection).
+	 *  A WBP binds to this exactly the way it binds OnHitMarker — which is the whole point of moving it here off the
+	 *  GameplayMessageSubsystem, whose Get/RegisterListener are C++ templates with no UFUNCTION for UMG to reach. */
+	UPROPERTY(BlueprintAssignable, Category = "FPSR|Feedback")
+	FOnFPSRShieldBroken OnShieldBroken;
 
 protected:
 	/** True only when the owner is a pawn controlled by THIS machine's local player. */

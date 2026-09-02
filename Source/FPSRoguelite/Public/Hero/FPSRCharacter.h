@@ -563,8 +563,8 @@ protected:
 	 *  wipe check (team-wipe -> Defeat). Revive back to Alive is UFPSRReviveComponent (U9 Phase 1B, Game.MD §2-13). */
 	void HandleOutOfHealth();
 
-	/** VIT1 requirement 5 (player-side half): publish the local "my shield just broke" warning on this machine's GMS
-	 *  bus when the replicated Shield attribute crosses >0 -> 0.
+	/** VIT1 requirement 5 (player-side half): raise the local "my shield just broke" warning through
+	 *  UFPSRPlayerFeedbackComponent::OnShieldBroken when the replicated Shield attribute crosses >0 -> 0.
 	 *  🔴 Why the GAS value-change delegate and NOT UFPSRHealthSet::OnShieldBroken — OnShieldBroken is raised from
 	 *  PostAttributeChange, which on a CLIENT only runs when that client happens to hold an aggregator for the
 	 *  attribute (engine GameplayEffect.cpp:3682 SetBaseAttributeValueFromReplication takes an else-branch that

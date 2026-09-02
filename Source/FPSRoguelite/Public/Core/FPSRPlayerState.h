@@ -68,6 +68,53 @@ public:
 	UFUNCTION(BlueprintPure, Category = "FPSR|Run")
 	bool IsDBNO() const { return LifeState == EFPSRLifeState::DBNO; }
 
+	// --- VIT1 own-vitals accessors (feat/hud-surface) — PlayerState already owns the ASC + UFPSRHealthSet (see
+	//     GetHealthSet above) and already hands out IsAlive()/GetLifeState() as BlueprintPure, so this is the natural
+	//     place for "how much health/shield does THIS player have" too. Putting it on the widget instead would mean
+	//     the DBNO overlay, the result screen and nameplates each re-derive the same numbers from raw GAS polling.
+	//     These attributes are already replicated to every client (ASC replication mode Mixed — only the GEs
+	//     themselves are owner-only; the attributes replicate to all), so reading a teammate's values costs zero
+	//     new replication. ---
+
+	/** Current health. 0 if HealthSet is not yet constructed (null-safe — HealthSet only exists after this actor's
+	 *  constructor runs, which is before any BlueprintPure caller can reach it, but the null check costs nothing). */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Vitals")
+	float GetHealth() const;
+
+	UFUNCTION(BlueprintPure, Category = "FPSR|Vitals")
+	float GetMaxHealth() const;
+
+	/** Health / MaxHealth clamped to [0,1]. 0 (never a divide-by-zero) while MaxHealth <= 0. */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Vitals")
+	float GetHealth01() const;
+
+	UFUNCTION(BlueprintPure, Category = "FPSR|Vitals")
+	float GetShield() const;
+
+	UFUNCTION(BlueprintPure, Category = "FPSR|Vitals")
+	float GetMaxShield() const;
+
+	/** Shield / MaxShield clamped to [0,1]. 0 (never a divide-by-zero) while MaxShield <= 0. */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Vitals")
+	float GetShield01() const;
+
+	/** True if this player's vitals profile gives them a shield layer at all (MaxShield > 0). The single predicate
+	 *  PlayerFeel.md §2-14 uses to decide whether the shield gauge/number is drawn at all — false is a normal state
+	 *  (no shield layer), not an error. */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Vitals")
+	bool HasShield() const;
+
+	/** True the instant the shield layer is depleted (FPSRVitals::IsShieldBroken — false, not true, when there is no
+	 *  shield layer at all). Derived every call, never stored, so it always agrees with the replicated Shield/MaxShield. */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Vitals")
+	bool IsShieldBroken() const;
+
+	/** True once this player's vitals have replicated an initial value (MaxHealth > 0). Before the vitals-init GE
+	 *  lands, MaxHealth reads 0 — without this guard a HUD bar would misread that 0/0 as "about to die" rather than
+	 *  "not ready yet". The canonical ASC-not-ready gate: widgets should grey out / hide vitals while this is false. */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Vitals")
+	bool AreVitalsReady() const;
+
 	/** Server: set the life state. Idempotent. Replicates to all (owning client gates input via OnRep_LifeState). */
 	void SetLifeState(EFPSRLifeState NewState);
 

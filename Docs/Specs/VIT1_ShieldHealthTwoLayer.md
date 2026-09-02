@@ -506,9 +506,11 @@ if (ShieldRegenDriverAccum >= 1/ShieldRegenUpdateHz && IsAlive() && MaxShield > 
 // AFPSRCharacter::InitAbilitySystem — 권위 게이트 없음(로컬 코스메틱은 그릴 기계에서 나야 한다)
 ShieldWarningDelegateHandle = ASC->GetGameplayAttributeValueChangeDelegate(UFPSRHealthSet::GetShieldAttribute())
     .AddUObject(this, &AFPSRCharacter::HandleShieldValueChangedForWarning);
-// 핸들러: (Old > 0 && New <= 0) 엣지 + IsLocallyControlled() → GMS BroadcastMessage(Message.Player.ShieldBroken, FFPSRCosmeticEventMessage{WorldLocation})
+// 핸들러: (Old > 0 && New <= 0) 엣지 + IsLocallyControlled() → PlayerFeedback->NotifyShieldBroken()
 // EndPlay 에서 Remove — ASC/어트리뷰트셋은 PlayerState 에 살아 폰보다 오래 산다(리스폰마다 죽은 엔트리가 쌓인다)
 ```
+
+🔁 **이관(2026-09-02, `feat/hud-surface`)**: 위 배선의 마지막 단계가 GMS `BroadcastMessage(Message.Player.ShieldBroken, FFPSRCosmeticEventMessage)` 에서 `UFPSRPlayerFeedbackComponent::NotifyShieldBroken()`(→ `BlueprintAssignable` `OnShieldBroken`, 페이로드 없음)으로 바뀌었다. 사유 = GMS 는 `Get`/`RegisterListener` 가 전부 C++ 템플릿이라 `UFUNCTION` 이 없어 §11-1 사용자 작업 6-③(경고 위젯)을 WBP 로 메울 수 없었기 때문(`Docs/VIT1_ContentGuide.md` §8). `ASC->GetGameplayAttributeValueChangeDelegate(Shield)` 훅과 엣지 판정(`Old > 0 && New <= 0`)·`IsLocallyControlled()` 게이트는 **무변경** — 바뀐 것은 발행 수단뿐이다. `DefaultGameplayTags.ini` 의 `Message.Player.ShieldBroken` 태그는 발행자가 사라져 삭제했다.
 
 > 🔴 **왜 `OnShieldBroken` 이 아니라 GAS 값변경 델리게이트인가 (엔진 실측)** — `OnShieldBroken` 은 `PostAttributeChange` 에서 올라오는데, **클라에서는 그 클라가 해당 어트리뷰트의 애그리게이터를 들고 있을 때만** 그 경로가 돈다: 엔진 `GameplayEffect.cpp:3682` `SetBaseAttributeValueFromReplication` 은 애그리게이터가 없으면 **else 분기**로 빠져 `AttributeValueChangeDelegates` 만 브로드캐스트하고 `PostAttributeChange` 를 부르지 않는다(애그리게이터가 있을 때만 `:3702` → `SetNumericAttribute_Internal` → `AttributeSet.cpp:84` 로 도달). 즉 `OnShieldBroken` 에 붙이면 **원격 협동 플레이어는 경고를 못 받는다.** `AttributeValueChangeDelegates` 는 두 경로 모두에서 발화한다(`:3911` · `:3721`) — 유일하게 클라 신뢰 가능한 훅이다.
 > ⚠️ 부수 정정: §5-4-1 의 괄호 서술("복제된 어트리뷰트 변경은 클라 `PostAttributeChange` 도 발화하지만")은 **조건부로만 참**이다. 앵커 재기저는 권위 게이트가 걸려 있어 **영향 없음**(진술만 부정확했다).
@@ -773,7 +775,7 @@ FMitigation.HealthDefense = Profile->ResolveDefense(DamageType).Health  ×  GetH
 ### 11-1. 적 `MaxHealth` 전면 이관의 실행 범위 — **사용자 작업 구간**
 > 📘 **저작 절차서 = [`Docs/VIT1_ContentGuide.md`](../VIT1_ContentGuide.md)**(2026-09-02 작성) — 에셋 경로·필드 위치·값·순서·함정. 아래는 범위 정의, 그쪽이 실행 문서다.
 > ⚠️ 아래 1번의 "적 BP 2종"은 **실측 3종**이 맞다(`BP_EnemyMeleeBase`·`BP_EnemyRangedBase`·`BP_EnemyEliteBase`) — 가이드 §0 정정.
-> 🔴 아래 6-③(파손 경고 위젯)은 **현 코드로 수행 불가** — GMS 에 `UFUNCTION` 이 없어 WBP 가 구독할 수 없다. 가이드 §8 참조.
+> ~~🔴 아래 6-③(파손 경고 위젯)은 현 코드로 수행 불가 — GMS 에 `UFUNCTION` 이 없어 WBP 가 구독할 수 없다.~~ → ✅ **해소(2026-09-02, `feat/hud-surface`)** — 경고가 `UFPSRPlayerFeedbackComponent::OnShieldBroken` 으로 이관되어 WBP 구독 가능(§5-5-1). 가이드 §5 ⑥-④ 참조.
 사용자가 "(나) 전면 이관"을 선택했다. 코드는 **양쪽을 다 받는다**(프로파일이 있으면 프로파일, 없으면 기존 BP `MaxHealth`) — 그래서 **코드 머지 시점에 회귀 0** 이고, 이관은 콘텐츠 작업으로 뒤따른다. [[da-edits-are-user-work]]
 - Claude 가 하는 것: 프로파일 클래스 · 해석 경로 · `IsDataValid` · **"프로파일 미할당 적" 경고 자동화**(§12-7).
 - 사용자가 하는 것 **(전체 목록 — G1 P3-1)**:
@@ -782,7 +784,7 @@ FMitigation.HealthDefense = Profile->ResolveDefense(DamageType).Health  ×  GetH
   3. 적 로스터 DA 에 `VitalsModifier` 저작(등급별 덱이 생기기 전까지는 항등 1.0 이어도 무방).
   4. 무기 DA 에 `ShieldDamageMultiplier` 저작 — **저격 >1**(이게 요구의 본체다, §2 목표 5).
   5. 힐팩 액터를 아레나에 배치 + 회복량/리스폰 저작.
-  6. **HUD 콘텐츠 3종** — ①플레이어 본인·팀원 실드바(어트리뷰트 바인딩만) ②`ShieldBreak` 히트마커 비주얼 ③실드 파손 위험 경고 위젯(GMS `Message.Player.ShieldBroken` 구독). **§12-10 PIE 1·5번의 선행조건**이다.
+  6. **HUD 콘텐츠 3종** — ①플레이어 본인·팀원 실드바(어트리뷰트 바인딩만) ②`ShieldBreak` 히트마커 비주얼 ③실드 파손 위험 경고 위젯(~~GMS `Message.Player.ShieldBroken` 구독~~ → `UFPSRPlayerFeedbackComponent::OnShieldBroken` 구독, 해소 2026-09-02 `feat/hud-surface`). **§12-10 PIE 1·5번의 선행조건**이다.
   7. `DA_CardPool` 에서 `DA_Card_Character_HealthRegen` 제거(요구 3).
 - ⚠️ 이관이 **끝나기 전까지 BP `MaxHealth` 가 진실**이다. 두 자리가 공존하는 이 구간을 짧게 가져갈 것.
 - [[da-edits-are-user-work]] — Claude 는 값과 위치만 알려주고 에셋에 손대지 않는다.

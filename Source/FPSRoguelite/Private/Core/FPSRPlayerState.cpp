@@ -4,6 +4,7 @@
 #include "AbilitySystem/FPSRAbilitySystemComponent.h"
 #include "AbilitySystem/Attributes/FPSRHealthSet.h"
 #include "AbilitySystem/Attributes/FPSRCombatSet.h"
+#include "Combat/FPSRVitals.h" // VIT1 own-vitals accessors: IsShieldBroken()
 #include "GameplayEffect.h"
 #include "Weapon/FPSRWeaponInventoryComponent.h"
 #include "Weapon/FPSRWeaponFireComponent.h"
@@ -266,6 +267,53 @@ void AFPSRPlayerState::AddAllWeaponsModifier(const FFPSRWeaponStatMod& Mod)
 			}
 		}
 	}
+}
+
+float AFPSRPlayerState::GetHealth() const
+{
+	return HealthSet ? HealthSet->GetHealth() : 0.0f;
+}
+
+float AFPSRPlayerState::GetMaxHealth() const
+{
+	return HealthSet ? HealthSet->GetMaxHealth() : 0.0f;
+}
+
+float AFPSRPlayerState::GetHealth01() const
+{
+	const float Max = GetMaxHealth();
+	return Max > 0.0f ? FMath::Clamp(GetHealth() / Max, 0.0f, 1.0f) : 0.0f;
+}
+
+float AFPSRPlayerState::GetShield() const
+{
+	return HealthSet ? HealthSet->GetShield() : 0.0f;
+}
+
+float AFPSRPlayerState::GetMaxShield() const
+{
+	return HealthSet ? HealthSet->GetMaxShield() : 0.0f;
+}
+
+float AFPSRPlayerState::GetShield01() const
+{
+	const float Max = GetMaxShield();
+	return Max > 0.0f ? FMath::Clamp(GetShield() / Max, 0.0f, 1.0f) : 0.0f;
+}
+
+bool AFPSRPlayerState::HasShield() const
+{
+	return GetMaxShield() > 0.0f;
+}
+
+bool AFPSRPlayerState::IsShieldBroken() const
+{
+	return FPSRVitals::IsShieldBroken(GetShield(), GetMaxShield());
+}
+
+bool AFPSRPlayerState::AreVitalsReady() const
+{
+	return GetMaxHealth() > 0.0f;
 }
 
 void AFPSRPlayerState::SetLifeState(EFPSRLifeState NewState)
