@@ -38,6 +38,10 @@ void AFPSRGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLi
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRGameState, StageIndex, Params);
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRGameState, StagePhaseEndServerTime, Params);
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRGameState, ActiveArena, Params);
+	// BOSS1: the combat clock's two inputs. Dirty ONLY on a freeze edge (SetRunPaused), so this is 8 bytes per
+	// pause/unpause — not a per-frame mirror. See GetCombatClockSecondsForClients for why clients need them.
+	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRGameState, AccumulatedFrozenSeconds, Params);
+	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRGameState, FreezeStartedAtWorldTime, Params);
 }
 
 void AFPSRGameState::SetActiveBoss(AFPSRBossBase* InBoss)
@@ -232,10 +236,12 @@ void AFPSRGameState::SetRunPaused(bool bPaused)
 		if (bPaused)
 		{
 			FreezeStartedAtWorldTime = World->GetTimeSeconds();
+			MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRGameState, FreezeStartedAtWorldTime, this);
 		}
 		else
 		{
 			AccumulatedFrozenSeconds += World->GetTimeSeconds() - FreezeStartedAtWorldTime;
+			MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRGameState, AccumulatedFrozenSeconds, this);
 		}
 	}
 
@@ -262,6 +268,24 @@ float AFPSRGameState::GetCombatClockSeconds() const
 	const float Now = World->GetTimeSeconds();
 	// Subtract every frozen span accumulated so far, plus (if a freeze is up RIGHT NOW) the still-open current one —
 	// so the clock reads the same whether queried mid-freeze or after it ends.
+	return Now - AccumulatedFrozenSeconds - (bRunPaused ? (Now - FreezeStartedAtWorldTime) : 0.0f);
+}
+
+float AFPSRGameState::GetCombatClockSecondsForClients() const
+{
+	// BOSS1: the SAME formula as GetCombatClockSeconds above — only the time source differs. The server reads its own
+	// World->GetTimeSeconds(); a client reads AGameStateBase::GetServerWorldTimeSeconds(), which is that same axis
+	// synced across the wire. On the authority the two are identical, so this function is correct on every machine
+	// and the host does not need a separate path.
+	//
+	// 🔴 Why a client needs this at all: the boss's sweeping laser is a mechanic whose ONLY counterplay is a timed
+	// jump, so the beam a client SEES has to sit on the same clock as the server's hit test. Deriving it from the two
+	// replicated freeze anchors costs 8 bytes per freeze edge and needs no extrapolation state — a per-frame clock
+	// mirror would need an anchor + receipt time on every client and would still drift between updates.
+	//
+	// Residual error = one-way latency (the engine syncs ServerWorldTimeSeconds without RTT compensation). That is
+	// handled where it belongs: cosmetically by the boss's visual lead, and for input by the deferred laser hit.
+	const float Now = GetServerWorldTimeSeconds();
 	return Now - AccumulatedFrozenSeconds - (bRunPaused ? (Now - FreezeStartedAtWorldTime) : 0.0f);
 }
 

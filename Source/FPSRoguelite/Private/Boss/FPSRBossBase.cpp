@@ -15,10 +15,26 @@
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
 #include "Settings/FPSRPlaceholderVisualSettings.h"
+#include "Boss/FPSRPatternActorInterface.h"
+#include "AbilitySystem/FPSRAbilitySystemComponent.h"
+#include "AbilitySystem/Abilities/FPSRBossGameplayAbility.h"
+#include "AbilitySystemComponent.h"
+#include "GameplayAbilitySpec.h"
+#include "Combat/FPSRCombatStatics.h"
+#include "Core/FPSRGameState.h"
+#include "Hero/FPSRCharacter.h"
+#include "GameFramework/PlayerController.h"
+#include "GameFramework/PlayerState.h"
+#include "GameFramework/PawnMovementComponent.h"
+#include "Net/UnrealNetwork.h"
 
 AFPSRBossBase::AFPSRBossBase()
 {
-	PrimaryActorTick.bCanEverTick = false;
+	// 🔴 BOSS1: this was false while the boss was a health-only scaffold ("nothing to gate on the freeze"). The
+	// pattern driver lives in Tick, so leaving it false would leave the selector, blast fuses, the sweeping laser
+	// and the freeze-edge push ALL silently inert — with a green build and green automation. BeginPlay narrows it
+	// to the server (SetActorTickEnabled), so clients pay nothing; their cosmetics run off Blueprint ticks.
+	PrimaryActorTick.bCanEverTick = true;
 
 	// Always relevant so the boss + its replicated HealthComponent reach every client regardless of distance — the
 	// HUD boss bar (B11) must reflect boss health for all players, not just those near the boss. Cheap (one actor).
@@ -51,6 +67,49 @@ AFPSRBossBase::AFPSRBossBase()
 
 	// Non-GAS health — the single reason every weapon path damages the boss with no new damage code.
 	HealthComponent = CreateDefaultSubobject<UFPSREnemyHealthComponent>(TEXT("HealthComponent"));
+
+	// ASC owned by the actor itself, Minimal replication — the boss has no owning client, exactly like an elite
+	// (AFPSREnemyEliteBase's constructor does the same two lines for the same reason). No AttributeSet: health
+	// stays in HealthComponent so the D1 damage bridge keeps working untouched.
+	AbilitySystem = CreateDefaultSubobject<UFPSRAbilitySystemComponent>(TEXT("AbilitySystem"));
+	AbilitySystem->SetIsReplicated(true);
+	AbilitySystem->SetReplicationMode(EGameplayEffectReplicationMode::Minimal);
+}
+
+UAbilitySystemComponent* AFPSRBossBase::GetAbilitySystemComponent() const
+{
+	return AbilitySystem;
+}
+
+void AFPSRBossBase::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+
+	FDoRepLifetimeParams Params;
+	Params.bIsPushBased = true;
+	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRBossBase, CurrentPhase, Params);
+	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRBossBase, BlastMarks, Params);
+	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRBossBase, BeamCount, Params);
+	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRBossBase, BeamStartAngleDeg, Params);
+	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRBossBase, BeamSpeedDegPerSec, Params);
+	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRBossBase, BeamStartClock, Params);
+	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRBossBase, BeamWarmupEndClock, Params);
+}
+
+void AFPSRBossBase::PostInitializeComponents()
+{
+	Super::PostInitializeComponents();
+
+	// Owner == Avatar == self. Cannot move to the constructor (the CDO has no real actor for ActorInfo to point at);
+	// this runs exactly once per actor lifetime, which is all the boss needs since it is never pooled.
+	if (AbilitySystem)
+	{
+		AbilitySystem->InitAbilityActorInfo(this, this);
+
+		// Two-layer time-axis contract: the ability base replaces the cooldown path, and this guard blocks a
+		// duration/periodic GE from ever being applied to this ASC in the first place. Shared with elites.
+		AbilitySystem->EnableTimeAxisGuard();
+	}
 }
 
 void AFPSRBossBase::BeginPlay()
@@ -92,9 +151,27 @@ void AFPSRBossBase::BeginPlay()
 		Move->DisableMovement();
 	}
 
+	// Server-only driver. Clients keep bCanEverTick true at the class level but never run the pattern tick — their
+	// beam/marker visuals are Blueprint-side and read the replicated state plus the derived clock.
+	SetActorTickEnabled(HasAuthority());
+
+	if (HasAuthority() && AbilitySystem)
+	{
+		// Granted ONCE — the boss is never pooled, so there is no Activate/Deactivate re-grant cycle like elites have.
+		for (const TSubclassOf<UFPSRBossGameplayAbility>& AbilityClass : GrantedAbilities)
+		{
+			if (AbilityClass)
+			{
+				GrantedAbilityHandles.Add(AbilitySystem->GiveAbility(FGameplayAbilitySpec(AbilityClass, 1, INDEX_NONE, this)));
+			}
+		}
+	}
+
 	if (HealthComponent)
 	{
 		HealthComponent->OnDeath.AddDynamic(this, &AFPSRBossBase::HandleDeath);
+		// Server: phase transitions ride the same edge the damage bridge already fires (see HandleHealthChanged).
+		HealthComponent->OnHealthChanged.AddDynamic(this, &AFPSRBossBase::HandleHealthChanged);
 		// Client death cosmetic (U20): OnDeathCosmetic fires from OnRep_bDead on clients (the authority plays it from
 		// HandleDeath). Plays the boss death montage on the skeletal mesh. Harmless before content assigns a skel mesh.
 		HealthComponent->OnDeathCosmetic.AddDynamic(this, &AFPSRBossBase::HandleDeathCosmetic);
@@ -115,6 +192,172 @@ void AFPSRBossBase::InitializeFromDefinition(const UFPSRBossDefinitionDataAsset*
 	}
 
 	HealthComponent->InitializeMaxHealth(Definition->MaxHealth);
+
+	// Phase count is the array's length — cached here so the per-hit path never touches the asset.
+	PhaseThresholds = Definition->PhaseHealthThresholds;
+}
+
+void AFPSRBossBase::HandleHealthChanged(float NewHealth, float MaxHealth)
+{
+	if (!HasAuthority() || MaxHealth <= 0.0f)
+	{
+		return;
+	}
+
+	const int32 Computed = FPSRBoss::ComputePhase(NewHealth / MaxHealth, PhaseThresholds);
+	const int32 Latched = FPSRBoss::LatchPhase(CurrentPhase, Computed);
+	if (Latched == CurrentPhase)
+	{
+		return;
+	}
+
+	CurrentPhase = Latched;
+	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRBossBase, CurrentPhase, this);
+	// The listen-server host never gets an OnRep, so the cosmetic has to be fired from the setter as well — the
+	// same two-halves pattern the death cosmetic uses. Skipping this half is invisible in a 2-player PIE test
+	// (the client's screen looks right) and then never plays for the host, who exists in every co-op session.
+	OnPhaseChangedCosmetic(CurrentPhase);
+
+	UE_LOG(LogFPSR, Log, TEXT("[Boss] phase -> %d (%.0f/%.0f)"), CurrentPhase, NewHealth, MaxHealth);
+}
+
+void AFPSRBossBase::OnRep_CurrentPhase()
+{
+	OnPhaseChangedCosmetic(CurrentPhase);
+}
+
+void AFPSRBossBase::OnRep_BeamState()
+{
+	OnBeamStateChangedCosmetic(BeamCount, GetPatternClockSeconds() < BeamWarmupEndClock);
+}
+
+float AFPSRBossBase::GetPatternClockSeconds() const
+{
+	const AFPSRGameState* GS = GetWorld() ? GetWorld()->GetGameState<AFPSRGameState>() : nullptr;
+	if (!GS)
+	{
+		return 0.0f;
+	}
+	if (HasAuthority())
+	{
+		return GS->GetCombatClockSeconds();
+	}
+	// Client: derive from the replicated freeze anchors, then lead by (roughly) our own view lag so the beam we draw
+	// sits where the server's hit test currently has it. Cosmetic only — every damage decision is server-side.
+	float Lead = 0.0f;
+	if (MaxClientVisualLeadSeconds > 0.0f)
+	{
+		if (const APlayerController* PC = GetWorld()->GetFirstPlayerController())
+		{
+			if (const APlayerState* PS = PC->PlayerState)
+			{
+				Lead = FMath::Clamp(PS->GetPingInMilliseconds() * 0.0005f, 0.0f, MaxClientVisualLeadSeconds);
+			}
+		}
+	}
+	return GS->GetCombatClockSecondsForClients() + Lead;
+}
+
+bool AFPSRBossBase::GetBeamState(int32& OutBeamCount, float& OutBaseAngleDeg, bool& bOutWarmup) const
+{
+	OutBeamCount = BeamCount;
+	if (BeamCount <= 0)
+	{
+		OutBaseAngleDeg = 0.0f;
+		bOutWarmup = false;
+		return false;
+	}
+	const float Now = GetPatternClockSeconds();
+	// Recomputed from (start, speed, start clock) rather than integrated: an integrator on each machine drifts
+	// apart, this cannot.
+	OutBaseAngleDeg = BeamStartAngleDeg + BeamSpeedDegPerSec * (Now - BeamStartClock);
+	bOutWarmup = Now < BeamWarmupEndClock;
+	return true;
+}
+
+void AFPSRBossBase::ServerSetBeamState(int32 InBeamCount, float StartAngleDeg, float SpeedDegPerSec, float StartClock, float WarmupEndClock)
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+	BeamCount = FMath::Max(0, InBeamCount);
+	BeamStartAngleDeg = StartAngleDeg;
+	BeamSpeedDegPerSec = SpeedDegPerSec;
+	BeamStartClock = StartClock;
+	BeamWarmupEndClock = WarmupEndClock;
+	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRBossBase, BeamCount, this);
+	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRBossBase, BeamStartAngleDeg, this);
+	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRBossBase, BeamSpeedDegPerSec, this);
+	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRBossBase, BeamStartClock, this);
+	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRBossBase, BeamWarmupEndClock, this);
+
+	// Authority half of the cosmetic (the host gets no OnRep).
+	OnBeamStateChangedCosmetic(BeamCount, GetPatternClockSeconds() < BeamWarmupEndClock);
+}
+
+void AFPSRBossBase::ServerAddBlastMark(const FVector& Center, float Radius, float FuseSeconds, APawn* TargetPawn,
+	float Damage, float KnockbackStrength, const FFPSRDamageSpec& Spec)
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+
+	if (BlastMarks.Num() >= MaxConcurrentMarks)
+	{
+		// FIFO fizzle: drop the oldest WITHOUT detonating it. Authored values that pass IsDataValid never get here
+		// (4 players x ceil(Fuse/Interval) stays far under the cap), so this is a safety valve, not a game rule.
+		UE_LOG(LogFPSR, Warning, TEXT("[Boss] blast marks at cap (%d) — fizzling the oldest. Check the barrage's Fuse/Interval against MaxConcurrentMarks."), MaxConcurrentMarks);
+		BlastMarks.RemoveAt(0, EAllowShrinking::No);
+	}
+
+	FFPSRBossBlastMark& Mark = BlastMarks.AddDefaulted_GetRef();
+	Mark.Center = Center;
+	Mark.Radius = Radius;
+	Mark.DetonateAtClock = GetPatternClockSeconds() + FMath::Max(0.0f, FuseSeconds);
+	Mark.TargetPawn = TargetPawn;
+	Mark.Damage = Damage;
+	Mark.KnockbackStrength = KnockbackStrength;
+	Mark.Spec = Spec;
+	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRBossBase, BlastMarks, this);
+}
+
+void AFPSRBossBase::ServerRegisterPatternActor(AActor* Actor)
+{
+	if (HasAuthority() && Actor)
+	{
+		SpawnedPatternActors.Add(Actor);
+	}
+}
+
+void AFPSRBossBase::ServerScheduleLaserHit(APawn* Target, float Damage, const FFPSRDamageSpec& Spec)
+{
+	if (!HasAuthority() || !Target)
+	{
+		return;
+	}
+	FPendingLaserHit& Pending = PendingLaserHits.AddDefaulted_GetRef();
+	Pending.Target = Target;
+	Pending.DueClock = GetPatternClockSeconds() + FMath::Max(0.0f, LateJumpGraceSeconds);
+	Pending.Damage = Damage;
+	Pending.Spec = Spec;
+}
+
+bool AFPSRBossBase::WasRecentlyAirborne(const APawn* Pawn) const
+{
+	if (!Pawn)
+	{
+		return false;
+	}
+	if (const float* Last = LastAirborneClock.Find(const_cast<APawn*>(Pawn)))
+	{
+		return (GetPatternClockSeconds() - *Last) <= AirborneGraceSeconds;
+	}
+	// Never recorded (e.g. the boss has only just started ticking): fall back to the instantaneous state rather than
+	// asserting "on the ground", so a player already mid-jump is not punished for the missing history.
+	const UPawnMovementComponent* Move = Pawn->GetMovementComponent();
+	return Move && Move->IsFalling();
 }
 
 void AFPSRBossBase::PlayBossMontage(UAnimMontage* Montage, float PlayRate)
@@ -161,6 +404,306 @@ void AFPSRBossBase::HandleDeath(AActor* DeadActor, AActor* Killer)
 	UE_LOG(LogFPSR, Log, TEXT("[Boss] %s defeated by %s — run won"), *GetName(),
 		Killer ? *Killer->GetName() : TEXT("unknown"));
 
+	// 🔴 The boss is NOT destroyed here (see below), so its patterns have to be closed explicitly. Without this the
+	// corpse keeps shelling: the run-end freeze happens to stop the tick today, but that is EndRun's behaviour, not
+	// this class's contract, and a boss that dies for any other reason would keep firing.
+	ServerReleaseAllPatternState();
+	SetActorTickEnabled(false);
+
 	// No XP drop / pooling / Destroy: EndRunFreeze stops the world behind the result screen and the lobby travel
 	// tears the level down. Leaving the boss in place keeps it visible during the result beat.
 }
+
+void AFPSRBossBase::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	// Runs on clients too; the released state is all server-side, so gate it. StartRun destroys a leftover boss on a
+	// re-run (FPSRRunDirectorSubsystem), and the orbs it spawned are independent actors that would otherwise survive
+	// into the next run's world.
+	if (HasAuthority())
+	{
+		ServerReleaseAllPatternState();
+	}
+	Super::EndPlay(EndPlayReason);
+}
+
+void AFPSRBossBase::ServerReleaseAllPatternState()
+{
+	if (!HasAuthority() || bPatternStateReleased)
+	{
+		return;
+	}
+	bPatternStateReleased = true;
+
+	if (AbilitySystem)
+	{
+		AbilitySystem->CancelAbilities();
+	}
+	ActivePatternHandle = FGameplayAbilitySpecHandle();
+
+	// Beam off FIRST: this also fires the cosmetic that tells clients to stop drawing it.
+	ServerSetBeamState(0, 0.0f, 0.0f, 0.0f, 0.0f);
+
+	// Markers are removed WITHOUT detonating (a fizzle) — clients judge detonation by the clock, so a marker that
+	// disappears before its time simply never plays an explosion.
+	if (BlastMarks.Num() > 0)
+	{
+		BlastMarks.Reset();
+		MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRBossBase, BlastMarks, this);
+	}
+
+	for (const TWeakObjectPtr<AActor>& Spawned : SpawnedPatternActors)
+	{
+		if (AActor* Actor = Spawned.Get())
+		{
+			Actor->Destroy();
+		}
+	}
+	SpawnedPatternActors.Reset();
+
+	// Everything keyed by pawn goes too — "nothing of the boss outlives the boss" has to include the bookkeeping,
+	// or it is a claim no one can check.
+	PendingLaserHits.Reset();
+	LastAirborneClock.Reset();
+}
+
+void AFPSRBossBase::ServerPushSimulationPaused(bool bPaused)
+{
+	// One detector, N pushes — pattern actors never poll the freeze state themselves (the projectile subsystem
+	// solves the identical problem the same way).
+	for (int32 Index = SpawnedPatternActors.Num() - 1; Index >= 0; --Index)
+	{
+		AActor* Actor = SpawnedPatternActors[Index].Get();
+		if (!Actor)
+		{
+			SpawnedPatternActors.RemoveAtSwap(Index, EAllowShrinking::No);
+			continue;
+		}
+		if (IFPSRPatternActor* Pattern = Cast<IFPSRPatternActor>(Actor))
+		{
+			Pattern->SetSimulationPaused(bPaused);
+		}
+	}
+}
+
+void AFPSRBossBase::Tick(float DeltaSeconds)
+{
+	Super::Tick(DeltaSeconds);
+
+	// Order matters and is fixed (BOSS1 §5-3):
+	//   1 authority  2 run-end recovery  3 freeze edge push  4 freeze/transition gate  5 airborne + pending hits
+	//   6 blast fuses  7 selector / active pattern
+	// (2) sits AHEAD of (4) on purpose: EndRunFreeze pins bRunPaused ON, so a recovery placed after the gate would
+	// never run at all.
+	if (!HasAuthority())
+	{
+		return;
+	}
+
+	AFPSRGameState* GS = GetWorld() ? GetWorld()->GetGameState<AFPSRGameState>() : nullptr;
+	if (!GS)
+	{
+		return;
+	}
+
+	if (GS->HasRunEnded())
+	{
+		ServerReleaseAllPatternState();
+		SetActorTickEnabled(false);
+		return;
+	}
+
+	const bool bFrozen = GS->IsRunPaused() || GS->IsStageTransitionActive();
+	if (bFrozen != bWasFrozenLastTick)
+	{
+		bWasFrozenLastTick = bFrozen;
+		ServerPushSimulationPaused(bFrozen);
+	}
+	if (bFrozen)
+	{
+		return;
+	}
+
+	const float Clock = GetPatternClockSeconds();
+
+	// Airborne history — the "already jumped" half of the laser's dodge window. Recorded for every tracked player
+	// every tick so the laser never has to trace or guess.
+	//
+	// Stale keys are dropped in the same pass: the map is keyed by PAWN, and a player who dies and respawns leaves
+	// the old pawn behind, so without this the map would grow for the whole run. Same reasoning (and same fix) as
+	// the swarm's LastGroundedZByPlayer, which prunes inside its own collection loop.
+	for (auto It = LastAirborneClock.CreateIterator(); It; ++It)
+	{
+		if (!It.Key().IsValid())
+		{
+			It.RemoveCurrent();
+		}
+	}
+	for (FConstPlayerControllerIterator It = GetWorld()->GetPlayerControllerIterator(); It; ++It)
+	{
+		if (const APlayerController* PC = It->Get())
+		{
+			if (APawn* Pawn = PC->GetPawn())
+			{
+				const UPawnMovementComponent* Move = Pawn->GetMovementComponent();
+				if (Move && Move->IsFalling())
+				{
+					LastAirborneClock.Add(Pawn, Clock);
+				}
+			}
+		}
+	}
+
+	ServerSettlePendingLaserHits();
+	ServerDetonateDueBlastMarks();
+
+	// Drive the active pattern, or look for the next one.
+	if (ActivePatternHandle.IsValid() && AbilitySystem)
+	{
+		const FGameplayAbilitySpec* Spec = AbilitySystem->FindAbilitySpecFromHandle(ActivePatternHandle);
+		UFPSRBossGameplayAbility* Active = Spec ? Cast<UFPSRBossGameplayAbility>(Spec->GetPrimaryInstance()) : nullptr;
+		if (Spec && Spec->IsActive() && Active)
+		{
+			Active->ServerTickPattern(DeltaSeconds);
+			return;
+		}
+		// The ability ended (on its own or via cancel) — start the inter-pattern gap from here.
+		ActivePatternHandle = FGameplayAbilitySpecHandle();
+		LastPatternEndClock = Clock;
+	}
+
+	if (LastPatternEndClock < 0.0f || (Clock - LastPatternEndClock) >= PatternGapSeconds)
+	{
+		ServerTryActivateNextPattern();
+	}
+}
+
+void AFPSRBossBase::ServerSettlePendingLaserHits()
+{
+	const float Clock = GetPatternClockSeconds();
+	for (int32 Index = PendingLaserHits.Num() - 1; Index >= 0; --Index)
+	{
+		FPendingLaserHit& Pending = PendingLaserHits[Index];
+		APawn* Target = Pending.Target.Get();
+		if (!Target)
+		{
+			PendingLaserHits.RemoveAtSwap(Index, EAllowShrinking::No);
+			continue;
+		}
+		if (Clock < Pending.DueClock)
+		{
+			continue;
+		}
+
+		// Cancel if the target went airborne AFTER this hit was booked. Deliberately not WasRecentlyAirborne(): its
+		// trailing window also matches jumps from BEFORE the booking, which would forgive a hit the player never
+		// actually dodged.
+		const float* LastAirborne = LastAirborneClock.Find(Target);
+		const bool bJumpedInTime = LastAirborne && (*LastAirborne > (Pending.DueClock - LateJumpGraceSeconds));
+		if (!bJumpedInTime)
+		{
+			if (AFPSRCharacter* Character = Cast<AFPSRCharacter>(Target))
+			{
+				Character->ApplyContactDamage(Pending.Damage, this, Pending.Spec);
+			}
+		}
+		PendingLaserHits.RemoveAtSwap(Index, EAllowShrinking::No);
+	}
+}
+
+void AFPSRBossBase::ServerDetonateDueBlastMarks()
+{
+	const float Clock = GetPatternClockSeconds();
+	bool bAnyRemoved = false;
+	for (int32 Index = BlastMarks.Num() - 1; Index >= 0; --Index)
+	{
+		const FFPSRBossBlastMark& Mark = BlastMarks[Index];
+		if (Clock < Mark.DetonateAtClock)
+		{
+			continue;
+		}
+		// Instigator is THIS BOSS, not the marker — the marker is a struct, and the director's telemetry classifies
+		// incoming pressure by the instigator's class.
+		FPSRCombat::ApplyHostileExplosion(GetWorld(), Mark.Center, Mark.Radius, Mark.Damage, this, Mark.KnockbackStrength, Mark.Spec);
+		BlastMarks.RemoveAt(Index, EAllowShrinking::No);
+		bAnyRemoved = true;
+	}
+	if (bAnyRemoved)
+	{
+		MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRBossBase, BlastMarks, this);
+	}
+}
+
+void AFPSRBossBase::ServerTryActivateNextPattern()
+{
+	if (!AbilitySystem || GrantedAbilityHandles.Num() == 0)
+	{
+		return;
+	}
+
+	// Round-robin from where we left off, so one cheap pattern can't monopolise the rotation.
+	const int32 Count = GrantedAbilityHandles.Num();
+	for (int32 Step = 0; Step < Count; ++Step)
+	{
+		const int32 Index = (NextPatternIndex + Step) % Count;
+		const FGameplayAbilitySpecHandle Handle = GrantedAbilityHandles[Index];
+		const FGameplayAbilitySpec* Spec = AbilitySystem->FindAbilitySpecFromHandle(Handle);
+		const UFPSRBossGameplayAbility* Ability = Spec ? Cast<UFPSRBossGameplayAbility>(Spec->Ability) : nullptr;
+		if (!Ability || CurrentPhase < Ability->GetMinPhase())
+		{
+			continue;
+		}
+		// TryActivateAbility runs the ability's own CheckCooldown/CheckCost, so the freeze-paused cooldown contract
+		// is honoured without this selector re-implementing it.
+		if (AbilitySystem->TryActivateAbility(Handle))
+		{
+			ActivePatternHandle = Handle;
+			NextPatternIndex = (Index + 1) % Count;
+			return;
+		}
+	}
+}
+
+#if !UE_BUILD_SHIPPING
+void AFPSRBossBase::DebugForcePattern(int32 Index)
+{
+	if (!HasAuthority() || !AbilitySystem || !GrantedAbilityHandles.IsValidIndex(Index))
+	{
+		UE_LOG(LogFPSR, Warning, TEXT("[Boss] FPSR.BossPattern %d — out of range (0..%d)."), Index, GrantedAbilityHandles.Num() - 1);
+		return;
+	}
+	// Cancel whatever is running so the forced pattern starts from a clean slate, then bypass the inter-pattern gap.
+	AbilitySystem->CancelAbilities();
+	ActivePatternHandle = FGameplayAbilitySpecHandle();
+	LastPatternEndClock = -1.0f;
+	if (AbilitySystem->TryActivateAbility(GrantedAbilityHandles[Index]))
+	{
+		ActivePatternHandle = GrantedAbilityHandles[Index];
+		UE_LOG(LogFPSR, Log, TEXT("[Boss] FPSR.BossPattern %d — activated."), Index);
+	}
+	else
+	{
+		// Most often a MinPhase gate: the ability's own CheckCooldown was bypassed by the cancel above, so a refusal
+		// here is a real precondition, not a timing artefact.
+		UE_LOG(LogFPSR, Warning, TEXT("[Boss] FPSR.BossPattern %d — refused activation (MinPhase %d vs current %d?)."),
+			Index, CurrentPhase, CurrentPhase);
+	}
+}
+
+void AFPSRBossBase::DebugSetPhase(int32 Phase)
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+	const int32 Latched = FPSRBoss::LatchPhase(CurrentPhase, FMath::Max(1, Phase));
+	if (Latched == CurrentPhase)
+	{
+		UE_LOG(LogFPSR, Warning, TEXT("[Boss] FPSR.BossPhase %d — phases are monotonic; already at %d."), Phase, CurrentPhase);
+		return;
+	}
+	CurrentPhase = Latched;
+	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRBossBase, CurrentPhase, this);
+	OnPhaseChangedCosmetic(CurrentPhase);
+	UE_LOG(LogFPSR, Log, TEXT("[Boss] FPSR.BossPhase -> %d"), CurrentPhase);
+}
+#endif // !UE_BUILD_SHIPPING

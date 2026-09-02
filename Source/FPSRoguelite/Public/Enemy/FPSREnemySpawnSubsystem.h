@@ -202,6 +202,12 @@ public:
 	/** Server: release a previously-reserved ranged-attack slot. Safe to call with a stale/expired controller. */
 	void ReleaseRangedToken(const TWeakObjectPtr<AFPSRPlayerController>& TargetPC);
 
+	/** Server (BOSS1): Player's Z the last time it was standing on ground — false if this player isn't tracked yet.
+	 *  Exposed because the boss's barrage snaps its GROUND markers to it: a shell aimed at an airborne player must
+	 *  still land a marker on the floor, and this cache already answers that with zero traces (the swarm's altitude
+	 *  band reads the same value for the same reason). See LastGroundedZByPlayer for how it's maintained. */
+	bool GetLastGroundedZ(const AFPSRCharacter* Player, float& OutZ) const;
+
 	/** Set the target alive count (director will spawn/release to maintain this). */
 	void SetTargetAliveCount(int32 InTarget);
 

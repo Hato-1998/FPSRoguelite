@@ -2211,3 +2211,21 @@ static FAutoConsoleCommandWithWorldAndArgs GFPSREnemyTargetCmd(
 		Sub->SetTargetAliveCount(Target);
 	}));
 #endif // !UE_BUILD_SHIPPING
+
+bool UFPSREnemySpawnSubsystem::GetLastGroundedZ(const AFPSRCharacter* Player, float& OutZ) const
+{
+	if (!Player)
+	{
+		return false;
+	}
+	// The const_cast is a KEY-CONSTRUCTION requirement, not a mutation: TWeakObjectPtr's pointer constructor is
+	// constrained by UE_REQUIRES(std::is_convertible_v<U, T*>) (WeakObjectPtrTemplates.h), and a const pointer does
+	// not satisfy it. The lookup itself reads nothing through the pointer.
+	const TWeakObjectPtr<AFPSRCharacter> Key(const_cast<AFPSRCharacter*>(Player));
+	if (const float* Found = LastGroundedZByPlayer.Find(Key))
+	{
+		OutZ = *Found;
+		return true;
+	}
+	return false;
+}

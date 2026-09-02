@@ -71,6 +71,64 @@ namespace FPSRCombat
 		return GS ? GS->GetFriendlyFireDamageScale() : 0.5f;
 	}
 
+	void ApplyHostileExplosion(UWorld* World, const FVector& Center, float Radius, float Damage,
+		AActor* Instigator, float KnockbackStrength, const FFPSRDamageSpec& Spec)
+	{
+		if (!World || Radius <= 0.0f)
+		{
+			return;
+		}
+
+		// Players ONLY — see the header for why the swarm is deliberately not gathered. An object-type query also
+		// finds players whose Pawn RESPONSE is Ignore (grace / downed pass-through), which a channel query would miss.
+		FCollisionObjectQueryParams ObjectParams;
+		ObjectParams.AddObjectTypesToQuery(ECC_FPSRPlayerPawn);
+
+		FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(FPSRHostileExplosion), false, Instigator);
+
+		TArray<FOverlapResult> Overlaps;
+		World->OverlapMultiByObjectType(Overlaps, Center, FQuat::Identity, ObjectParams, FCollisionShape::MakeSphere(Radius), QueryParams);
+
+		TArray<AActor*> Handled;
+		Handled.Reserve(Overlaps.Num());
+		for (const FOverlapResult& Overlap : Overlaps)
+		{
+			AFPSRCharacter* Character = Cast<AFPSRCharacter>(Overlap.GetActor());
+			if (!Character || Handled.Contains(Character))
+			{
+				continue;
+			}
+			Handled.Add(Character);
+
+			// ApplyContactDamage owns every gate that decides whether this lands (dead / downed / grace window /
+			// invulnerability), so this loop deliberately re-checks none of them — duplicating those tests here is how
+			// the two copies drift apart.
+			if (Damage > 0.0f)
+			{
+				Character->ApplyContactDamage(Damage, Instigator, Spec);
+			}
+
+			// Knockback is independent of damage (a 0-damage blast can still shove), but NOT independent of life state:
+			// launching a downed or dead body reads as a physics glitch rather than feedback.
+			if (KnockbackStrength > 0.0f)
+			{
+				const AFPSRPlayerState* PS = Character->GetPlayerState<AFPSRPlayerState>();
+				if (PS && PS->IsAlive())
+				{
+					const FVector Offset = Character->GetActorLocation() - Center;
+					const float Distance = Offset.Size();
+					// Linear falloff to the rim, with an upward bias so a blast at the feet lifts rather than only shoving
+					// sideways — the same shape ApplyExplosion uses for the player-instigated case.
+					const float Falloff = FMath::Clamp(1.0f - (Distance / Radius), 0.0f, 1.0f);
+					const FVector Direction = Distance > KINDA_SMALL_NUMBER
+						? (Offset / Distance + FVector(0.0f, 0.0f, 0.5f)).GetSafeNormal()
+						: FVector::UpVector;
+					ApplyKnockback(Character, Direction * KnockbackStrength * Falloff);
+				}
+			}
+		}
+	}
+
 	void AddDamageablePawnObjectTypes(FCollisionObjectQueryParams& OutParams)
 	{
 		OutParams.AddObjectTypesToQuery(ECC_Pawn);            // swarm enemies
