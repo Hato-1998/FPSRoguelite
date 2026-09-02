@@ -833,3 +833,90 @@ P1 잔존 0 · 자동화 전부 녹색 · PIE 11항목 사용자 확인 · Fable
 단 **ASC 부착·프리즈 클럭·복제·수명주기는 Opus 직접**(프리즈 대칭은 하위 모델 위임 금지 영역).
 ### 13-5. C3 검증 원장 — *(구현 후)*
 ### 13-6. G2 머지 게이트 — *(머지 직전)*
+
+---
+
+## 14. 개정 — 공통 패턴 수명주기 + 트리거 축 (사용자 지시 2026-09-02, S1~S3 구현 후)
+
+> 배경: S1~S3 는 "패턴이 쿨다운이 되면 곧바로 이어서 나간다" 구조였다. 사용자 지시로 **모든 패턴에 공통인
+> 준비/후딜 구간**과 **패턴 시작을 결정하는 트리거 축**을 도입한다. 패턴 3종의 내부 로직도 함께 개정한다.
+
+### 14-1. 사용자 결정
+
+| # | 결정 | 비고 |
+|---|---|---|
+| 트리거 | **"패턴 N회 수행"으로 지금 구현**, 평타는 별도 슬라이스 | 보스에게 평타가 없어 "단순 공격 5회"를 셀 대상이 없었다. 스키마는 트리거 종류만 추가하면 되게 열어 둔다 |
+| 빔 배치 | **첫 빔만 12/3/6/9 중 랜덤**, 나머지는 등간격 | 방위 고정은 3개일 때 90/90/180 이 되어 180° 쪽에 넓은 안전지대가 고정된다. 등간격이면 페이즈가 오를수록 압박이 고르게 오른다 + 주기 도메인 접기(§5-2)가 그대로 산다 |
+| 미사일 타겟 사망 | **마지막 위치로 가서 폭발** | "전부 제거"는 *지목당한 동료를 살리지 않는 쪽이 이득*이 된다(DBNO 부활 압박 소거). 사망 지점 폭발은 반대로 **부활하러 모인 팀원을 노린다** — 뭉침을 벌하는 방향이라 협동 설계와 맞는다 |
+
+### 14-2. 공통 수명주기 — 준비 → 실행 → 후딜
+
+**3층으로 나눈다.** 시스템 준비(보스 모션, 아무것도 안 나옴) / 패턴 내부 유예(표식 신관·빔 정지·미사일 대기) /
+시스템 후딜(유휴). 가운데 층은 패턴마다 의미가 달라 **공통화하지 않는다** — 셋 다 별개 데이터다.
+
+```cpp
+UENUM() enum class EFPSRBossPatternStage : uint8 { Prep, Execute, Recovery, Finished };
+
+// UFPSRBossGameplayAbility (베이스가 상태기를 소유한다)
+UPROPERTY(EditDefaultsOnly) float PrepSeconds = 1.5f;      // 시스템 준비
+UPROPERTY(EditDefaultsOnly) float RecoverySeconds = 1.0f;  // 시스템 후딜
+
+// 파생이 채우는 것은 실행 구간뿐 — 준비/후딜을 각자 구현하면 세 벌이 어긋난다.
+virtual void ServerBeginExecute() {}
+virtual bool ServerTickExecute(float DeltaSeconds) { return true; }  // true = 실행 종료
+virtual void ServerEndExecute() {}
+```
+
+보스는 `EFPSRBossPatternStage` 를 복제해 BP 가 준비/후딜 모션을 재생할 수 있게 한다(§7 에 추가).
+
+### 14-3. 트리거 축
+
+패턴은 **연속으로 이어지지 않는다.** 후딜이 끝나면 보스는 유휴 상태로 들어가고, 트리거가 발화해야 다음 패턴이 나간다.
+
+```cpp
+UENUM() enum class EFPSRBossTriggerKind : uint8
+{
+    Elapsed,       // 보스전 경과 시간(초). bRepeating 이면 Threshold 마다 반복
+    PatternCount,  // 지금까지 수행한 패턴 수. bRepeating 이면 Threshold 배수마다
+    HealthBelow,   // 체력 비율이 Threshold 이하로 처음 떨어질 때 1회
+    // 후속: BasicAttackCount — 평타 슬라이스가 붙을 때 여기만 늘리면 된다
+};
+
+USTRUCT() struct FFPSRBossPatternTrigger { EFPSRBossTriggerKind Kind; float Threshold; bool bRepeating; };
+
+UENUM() enum class EFPSRBossPatternSelection : uint8 { Sequential, Random };
+```
+
+- 보스가 `TArray<FFPSRBossPatternTrigger> PatternTriggers` + `SelectionPolicy` 를 저작한다.
+- 트리거 발화 → `MinPhase` 를 만족하고 쿨다운이 찬 패턴 중 정책대로 하나 선택.
+- 🔴 **빈 트리거 배열 = 보스가 영원히 아무것도 안 한다.** 그 무성 실패를 막기 위해, 배열이 비면
+  `PatternGapSeconds` 주기의 반복 트리거 하나로 폴백하고 `IsDataValid` 가 경고한다.
+- `HealthBelow` 는 `MinPhase` 와 겹쳐 보이지만 다르다 — `MinPhase` 는 *그 페이즈부터 계속 사용 가능*(게이트)이고
+  `HealthBelow` 는 *그 순간 1회 발화*(시계)다. 축이 다르므로 둘 다 남긴다.
+
+### 14-4. 패턴별 개정
+
+**포격** — 구조 무변(준비/후딜만 베이스로 이관). 요구대로 준비가 끝나면 살아있는 전원의 현재 위치에 영역을
+깔고, 신관 뒤 폭발한다. 폭발은 반경 안 **모든 플레이어**를 때린다(단일 대상 아님 — 이미 그렇다).
+
+**레이저**
+- 첫 빔 = 12/3/6/9 중 랜덤, 추가 빔 = `360/N` 등간격(14-1).
+- 생성 후 **`BeamGraceSeconds` 동안 정지 + 무해**, 그 뒤 회전하며 살아난다.
+  종전의 `WarmupSeconds` 가 이 역할을 하되 **회전하지 않는다**(종전엔 웜업 중에도 돌았다).
+- 회전 속도 = `TArray<float> AngularSpeedByPhase`(인덱스 = 페이즈−1, 초과 시 마지막 값). 코드 상수 없음.
+- 각도식이 2구간이 되므로 서버·클라 공용 함수로 승격: `BeamAngleAt(Start, Speed, StartClock, GraceEnd, Now)`.
+
+**유도 미사일**
+- 준비가 끝나면 대상 1명 지정 → **전원에게 공지**. 보스에 복제 필드 + OnRep + BP 훅(연출 요구).
+- 미사일은 **보스 주위에 링으로 생성**되어 `OrbGraceSeconds` 동안 대기, 그 뒤 추적 시작.
+- 대상 사망/다운 → **마지막 위치로 이동해 그곳에서 폭발**(전부 제거 아님, 14-1).
+- 물체에 막히면 폭발 후 제거. 플레이어에 닿으면 **반경 내 모든 플레이어**에게 데미지 후 제거.
+- 폭발은 전부 `FPSRCombat::ApplyHostileExplosion` 한 경로를 탄다(인스티게이터 = 미사일, 오너 = 보스).
+
+### 14-5. 검증 추가
+
+- `FPSRoguelite.Boss.Trigger` — Elapsed/PatternCount/HealthBelow 각각의 발화 시점, 반복/1회, 빈 배열 폴백
+- `FPSRoguelite.Boss.Selection` — Sequential 순환, Random 이 `MinPhase`·쿨다운 미달을 건너뛰는지
+- `FPSRoguelite.Boss.LaserSweep` 에 **유예 구간 무회전** 케이스 추가(유예 중 각도 불변, 종료 직후부터 증가)
+- PIE: 준비/후딜 모션이 보이는가 · 유휴 구간에 보스가 정말 아무 데미지도 안 주는가 ·
+  미사일이 **부활 지점에서 터지는가**
