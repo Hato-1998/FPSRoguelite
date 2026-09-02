@@ -7,6 +7,7 @@
 #include "Enemy/FPSREnemyBase.h"
 #include "Core/FPSRLogChannels.h" // LogFPSR — the coverage lines below (see the scan-count comment for why)
 #include "Components/WidgetComponent.h" // HB1 §12-4: UWidgetComponent count check
+#include "Engine/Blueprint.h" // UBlueprint check: tells a non-Blueprint asset (e.g. a DataAsset sharing this folder) apart from an actual CoreRedirect break
 #include "Engine/BlueprintGeneratedClass.h" // HB1 §12-4: walk each BP level's own SCS (mirrors SFPSRBlockoutTab.cpp's CDO+SCS pattern)
 #include "Engine/SimpleConstructionScript.h"
 #include "Engine/SCS_Node.h"
@@ -51,7 +52,13 @@ bool FFPSREnemyBlueprintParentTest::RunTest(const FString& Parameters)
 	// returned one asset instead of two, every check below would still pass and the unchecked BP would look covered.
 	// A pass is only as trustworthy as the count it examined, so put that count (and each asset's resolved parent) in
 	// the log where a reviewer can read it back.
-	UE_LOG(LogFPSR, Log, TEXT("[Test] BlueprintParent: scanning %s — %d enemy Blueprint(s) found"), *EnemyDir, FoundFiles.Num());
+	UE_LOG(LogFPSR, Log, TEXT("[Test] BlueprintParent: scanning %s — %d .uasset file(s) found"), *EnemyDir, FoundFiles.Num());
+
+	// Counts for the second vacuous-pass guard (and coverage log) after the loop: once check (a) below can
+	// legitimately skip a found file that turns out not to be a Blueprint, "files found" no longer implies
+	// "Blueprints checked" — the two need to be tracked separately instead of assumed equal.
+	int32 BlueprintsChecked = 0;
+	int32 NonBlueprintAssetsSkipped = 0;
 
 	for (const FString& FilePath : FoundFiles)
 	{
@@ -75,11 +82,34 @@ bool FFPSREnemyBlueprintParentTest::RunTest(const FString& Parameters)
 		UClass* LoadedClass = LoadObject<UClass>(nullptr, *ObjectPath);
 
 		// (a) Loads at all — a CoreRedirect that failed to fire (stale/typo'd entry, removed target class, ...)
-		// surfaces here as a load failure, not as a silently-wrong class.
-		if (!TestNotNull(FString::Printf(TEXT("%s loads (%s) — CoreRedirect intact"), *AssetName, *ObjectPath), LoadedClass))
+		// surfaces here as a load failure, not as a silently-wrong class. But a null load here is not
+		// automatically that: VIT1 content authoring (776e8441) put non-Blueprint DataAssets (DA_Vitals_Enemy*)
+		// in this same folder by convention, and a DataAsset instance has no _C generated class to load — that
+		// miss is out of scope for this test, not a redirect break. Tell the two apart by loading the ASSET
+		// itself (no _C suffix) and checking what it actually is before deciding whether this is an error.
+		if (!LoadedClass)
 		{
-			continue; // nothing further to check against a null class
+			const FString AssetObjectPath = FString::Printf(TEXT("/Game/%s.%s"), *NoExt, *AssetName);
+			UObject* LoadedAsset = LoadObject<UObject>(nullptr, *AssetObjectPath);
+			if (LoadedAsset && !Cast<UBlueprint>(LoadedAsset))
+			{
+				// Loads fine and isn't a Blueprint (e.g. a UDataAsset sharing this folder by convention) — this
+				// test has nothing to check on it. Skip quietly; counted so the vacuous-pass guard after the
+				// loop can still catch the case where EVERY found file ends up skipped this way.
+				++NonBlueprintAssetsSkipped;
+				continue;
+			}
+
+			// Either the asset itself failed to load (deleted/moved without a redirect), or it loaded AND is a
+			// UBlueprint but its generated class (_C) still came back null — both are exactly the CoreRedirect
+			// failure this test exists to catch, so this stays a hard failure, not a skip.
+			AddError(FString::Printf(TEXT("%s (%s): CoreRedirect broken — %s"), *AssetName, *ObjectPath,
+				LoadedAsset ? TEXT("asset loads and is a Blueprint, but its generated class (_C) did not")
+							: TEXT("asset itself failed to load")));
+			continue;
 		}
+
+		++BlueprintsChecked;
 
 		// (b) Proves the reparent actually landed ON THE NEW TIER AXIS, not just "loads as something".
 		TestTrue(FString::Printf(TEXT("%s reparented onto AFPSREnemyBase"), *AssetName),
@@ -173,6 +203,24 @@ bool FFPSREnemyBlueprintParentTest::RunTest(const FString& Parameters)
 			WidgetComponentCount, 1);
 		UE_LOG(LogFPSR, Log, TEXT("[Test] BlueprintParent: %s UWidgetComponent count (native+SCS) = %d"),
 			*AssetName, WidgetComponentCount);
+	}
+
+	// Report the COVERAGE, not just the verdict (same principle as the file-count log above, one level
+	// deeper): once check (a) can legitimately skip a found file as non-Blueprint content, "N files found"
+	// no longer implies "N Blueprints checked" — log what was actually checked vs. skipped so a reviewer can
+	// read back real coverage, not just the upfront file count.
+	UE_LOG(LogFPSR, Log, TEXT("[Test] BlueprintParent: %d Blueprint(s) checked, %d non-Blueprint asset(s) skipped (of %d file(s) found)"),
+		BlueprintsChecked, NonBlueprintAssetsSkipped, FoundFiles.Num());
+
+	// Vacuous-pass guard #2 (required, not optional — same reasoning as the zero-files guard above, one level
+	// deeper): the skip branch added in check (a) opens a new way to pass vacuously that the file-count guard
+	// can't see. If every enemy Blueprint were renamed out of this folder or deleted while only DataAssets
+	// remained, every found file would take the skip path, BlueprintsChecked would stay 0, and the function
+	// would still fall through to "return true" with nothing actually verified.
+	if (BlueprintsChecked == 0)
+	{
+		AddError(FString::Printf(TEXT("Found %d .uasset file(s) under %s but 0 were Blueprints — the scan is broken, or every enemy Blueprint has left this folder"), FoundFiles.Num(), *EnemyDir));
+		return false;
 	}
 
 	return true;
