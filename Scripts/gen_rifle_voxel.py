@@ -193,6 +193,46 @@ def write_obj(path, cells, origin_cell, name):
 #   bb(x, y, z) = ue(x, z, y)  ← 여기서 변환해 내보내고, 임포트에서 되돌린다.
 BB_SLOT_COLOR = {"Body": 4, "Grip": 7, "Barrel": 6, "Emissive": 3}  # 아웃라이너 마커색
 
+# 🔴 Blockbench 는 `"texture": null` 인 면을 **투명하게** 그린다 — 그러면 와이어프레임만 보인다
+# (2026-09-03 실측). 그래서 16x16 팔레트 텍스처를 만들어 넣고, 슬롯별로 UV 를 4분면에 배정한다.
+# 이 텍스처는 **저작 편의용**이다. UE 로는 안 간다 — OBJ 변환이 슬롯을 큐브 **이름**에서 읽으므로
+# §2-3(텍스처 0장) 은 그대로 유지된다.
+BB_UV = {          # 16x16 텍스처의 4분면 (u0, v0, u1, v1)
+    "Body":     [0, 0, 8, 8],
+    "Grip":     [8, 0, 16, 8],
+    "Barrel":   [0, 8, 8, 16],
+    "Emissive": [8, 8, 16, 16],
+}
+BB_RGB = {"Body": (74, 91, 140), "Grip": (35, 38, 46),
+          "Barrel": (58, 62, 70), "Emissive": (200, 232, 90)}
+
+
+def _png_rgba(w, h, pixel):
+    """의존성 없는 최소 PNG 인코더(RGBA8). PIL 이 없어도 돌아야 한다."""
+    import zlib, struct
+    raw = bytearray()
+    for y in range(h):
+        raw.append(0)                      # 필터 없음
+        for x in range(w):
+            raw += bytes(pixel(x, y))
+    def chunk(tag, data):
+        return (struct.pack(">I", len(data)) + tag + data
+                + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF))
+    return (b"\x89PNG\r\n\x1a\n"
+            + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 6, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(bytes(raw), 9))
+            + chunk(b"IEND", b""))
+
+
+def _palette_data_uri():
+    import base64
+    def px(x, y):
+        for slot, (u0, v0, u1, v1) in BB_UV.items():
+            if u0 <= x < u1 and v0 <= y < v1:
+                return BB_RGB[slot] + (255,)
+        return (255, 0, 255, 255)          # 안 쓰이는 자리 = 눈에 띄는 마젠타
+    return "data:image/png;base64," + base64.b64encode(_png_rgba(16, 16, px)).decode("ascii")
+
 
 def write_bbmodel(path, parts_cells):
     """파츠별 그룹으로 묶은 Blockbench 모델. 셀 하나 = 큐브 하나 대신, 원본 박스 단위로 낸다
@@ -211,7 +251,8 @@ def write_bbmodel(path, parts_cells):
             # 셀 인덱스 -> Blockbench 좌표(Y 상방). to 는 x1+1 (양끝 포함이므로)
             frm = [x0, z0, y0]
             to = [x1 + 1, z1 + 1, y1 + 1]
-            faces = {f: {"uv": [0, 0, 16, 16], "texture": None}
+            uv = BB_UV.get(slot, [0, 0, 8, 8])
+            faces = {f: {"uv": list(uv), "texture": 0}      # texture 0 = 팔레트. null 이면 투명해진다
                      for f in ("north", "east", "south", "west", "up", "down")}
             elements.append({
                 "name": "%s_%s_%d" % (pname, slot, i), "box_uv": False, "type": "cube",
@@ -228,7 +269,13 @@ def write_bbmodel(path, parts_cells):
         "resolution": {"width": 16, "height": 16},
         "elements": elements,
         "outliner": outliner,
-        "textures": [],
+        "textures": [{
+            "id": "0", "name": "SlotPalette.png", "folder": "",
+            "namespace": "", "particle": False, "render_mode": "default",
+            "visible": True, "mode": "bitmap", "saved": False,
+            "uuid": "aaaaaaaa-0000-4000-8000-000000000001",
+            "source": _palette_data_uri(),
+        }],
     }
     with open(path, "w", encoding="utf-8") as f:
         json.dump(doc, f, ensure_ascii=False, indent=1)
