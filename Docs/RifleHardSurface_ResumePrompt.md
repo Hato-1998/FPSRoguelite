@@ -22,7 +22,9 @@ Docs/RifleHardSurface_ResumePrompt.md 를 읽고 진행한다.
 | §3-3 임포트 | ✅ `11e802aa` (3차) — 8/8 · `slots_ok=True` · **forward=+Y 게이트 pass** · `/Game/Assets/Weapons/RifleHS/`. 1차 `96fcdab8` 는 원점·축이, 2차 `5bd0b4d4` 는 Y 부호가 틀렸었다(D12) |
 | §3-2 C++ 가드 확장 | ⏳ **플랜 게이트 대기** — 이게 없으면 파츠 7개가 안 붙는다 |
 | §3-4 소켓 | ✅ `ffa6d5ca` — 몸통 8 · 총열 Muzzle · 조준경 2종 Aim, `sockets_ok=True` |
-| §3-5 머티리얼 · §3-6 DA · §3-7 PIE | ⏳ |
+| §3-6 DA | ◐ `f75ecc06` — 몸통만(사용자 입력: 스켈 None · 스태틱 `SM_RifleHS_Body` · ADS 오프셋 Yaw 90 유지). 파츠 7항목은 §3-2 뒤 |
+| §3-7 PIE | ◐ **몸통 위치·방향 통과**(사용자, 2026-09-04) — 원점·프레임·Y반전 상쇄가 런타임 실증. 파츠·ADS 정렬·총구화염·양손 IK 미판정 |
+| §3-5 머티리얼 | ⏳ (체커 그대로. 파츠가 붙은 뒤 판정하는 게 효율적) |
 
 ---
 
