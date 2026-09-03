@@ -20,6 +20,10 @@
 #
 # The pulse travels along +X on horizontal runs and +Y on vertical runs, so at a crossing the two
 # streams pass through each other rather than fighting.
+#
+# ⚠️ `line` is a RESERVED WORD in HLSL (geometry-shader primitive modifier, alongside point /
+#    triangle / lineadj / triangleadj). `float line = ...` fails with "modifiers must appear before
+#    type" and the whole material silently falls back to the Default Material. Verified 2026-09-03.
 
 import unreal
 
@@ -120,7 +124,7 @@ def hlsl():
 
     float lineH = bandH * saturate(extW + extE);
     float lineV = bandV * saturate(extN + extS);
-    float line  = saturate(lineH + lineV) * here;
+    float lineMask = saturate(lineH + lineV) * here;   // NOT 'line' — reserved word in HLSL
 
     // Travelling light. Horizontal runs flow along +X, vertical along +Y, so the two streams cross
     // a junction independently instead of cancelling.
@@ -133,7 +137,7 @@ def hlsl():
     float pV = exp(-(dV * dV) / (w * w));
 
     float pulse = saturate(pH * lineH + pV * lineV);
-    return float2(line, pulse);
+    return float2(lineMask, pulse);
 """.format(rows=ROWS, rows_1=ROWS - 1, cols=COLS, cols_1=COLS - 1,
            halfc=COLS // 2, halfr=ROWS / 2.0 + 0.5, body=body)
 
