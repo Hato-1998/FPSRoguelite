@@ -2,6 +2,21 @@
 
 #include "Boss/FPSRBossTypes.h"
 
+#if !UE_BUILD_SHIPPING
+#include "HAL/IConsoleManager.h"
+
+namespace
+{
+	static int32 GFPSRBossDebugDraw = 0;
+	static FAutoConsoleVariableRef CVarFPSRBossDebugDraw(
+		TEXT("FPSR.BossDebugDraw"),
+		GFPSRBossDebugDraw,
+		TEXT("Draw boss pattern state as debug shapes (0=off, 1=on). Blast markers, beams, the marked player and the ")
+		TEXT("current pattern stage. Runs on clients too, so a client's beam can be compared against the server's."),
+		ECVF_Cheat);
+}
+#endif
+
 namespace FPSRBoss
 {
 	int32 ComputePhase(float HealthFraction, TConstArrayView<float> Thresholds)
@@ -66,4 +81,11 @@ namespace FPSRBoss
 
 		return false;
 	}
+
+#if !UE_BUILD_SHIPPING
+	bool IsDebugDrawEnabled()
+	{
+		return GFPSRBossDebugDraw != 0;
+	}
+#endif
 }

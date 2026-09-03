@@ -27,6 +27,11 @@
 #include "GameFramework/PlayerState.h"
 #include "GameFramework/PawnMovementComponent.h"
 #include "Net/UnrealNetwork.h"
+#include "Boss/FPSRBossLaserMath.h"
+#if !UE_BUILD_SHIPPING
+#include "DrawDebugHelpers.h"
+#include "Arena/FPSRArenaActor.h"
+#endif
 
 AFPSRBossBase::AFPSRBossBase()
 {
@@ -94,6 +99,7 @@ void AFPSRBossBase::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLif
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRBossBase, BeamSpeedDegPerSec, Params);
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRBossBase, BeamStartClock, Params);
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRBossBase, BeamWarmupEndClock, Params);
+	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRBossBase, BeamVisualHeightCm, Params);
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRBossBase, PatternStage, Params);
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRBossBase, MarkedPlayer, Params);
 }
@@ -153,9 +159,10 @@ void AFPSRBossBase::BeginPlay()
 		Move->DisableMovement();
 	}
 
-	// Server-only driver. Clients keep bCanEverTick true at the class level but never run the pattern tick — their
-	// beam/marker visuals are Blueprint-side and read the replicated state plus the derived clock.
-	SetActorTickEnabled(HasAuthority());
+	// Ticks on every machine, but the pattern DRIVER below is server-only. Clients run nothing but the debug overlay
+	// (one branch on one actor) — and that client half is the point: it is the only way to see whether the beam a
+	// client is looking at agrees with the beam the server is testing against.
+	SetActorTickEnabled(true);
 
 	if (HasAuthority() && PatternTriggers.Num() == 0)
 	{
@@ -323,7 +330,8 @@ bool AFPSRBossBase::GetBeamState(int32& OutBeamCount, float& OutBaseAngleDeg, bo
 	return true;
 }
 
-void AFPSRBossBase::ServerSetBeamState(int32 InBeamCount, float StartAngleDeg, float SpeedDegPerSec, float StartClock, float WarmupEndClock)
+void AFPSRBossBase::ServerSetBeamState(int32 InBeamCount, float StartAngleDeg, float SpeedDegPerSec, float StartClock,
+	float WarmupEndClock, float VisualHeightCm)
 {
 	if (!HasAuthority())
 	{
@@ -334,11 +342,13 @@ void AFPSRBossBase::ServerSetBeamState(int32 InBeamCount, float StartAngleDeg, f
 	BeamSpeedDegPerSec = SpeedDegPerSec;
 	BeamStartClock = StartClock;
 	BeamWarmupEndClock = WarmupEndClock;
+	BeamVisualHeightCm = VisualHeightCm;
 	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRBossBase, BeamCount, this);
 	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRBossBase, BeamStartAngleDeg, this);
 	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRBossBase, BeamSpeedDegPerSec, this);
 	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRBossBase, BeamStartClock, this);
 	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRBossBase, BeamWarmupEndClock, this);
+	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRBossBase, BeamVisualHeightCm, this);
 
 	// Authority half of the cosmetic (the host gets no OnRep).
 	OnBeamStateChangedCosmetic(BeamCount, GetPatternClockSeconds() < BeamWarmupEndClock);
@@ -489,7 +499,7 @@ void AFPSRBossBase::ServerReleaseAllPatternState()
 	ActivePatternHandle = FGameplayAbilitySpecHandle();
 
 	// Beam off FIRST: this also fires the cosmetic that tells clients to stop drawing it.
-	ServerSetBeamState(0, 0.0f, 0.0f, 0.0f, 0.0f);
+	ServerSetBeamState(0, 0.0f, 0.0f, 0.0f, 0.0f, BeamVisualHeightCm);
 
 	// Markers are removed WITHOUT detonating (a fizzle) — clients judge detonation by the clock, so a marker that
 	// disappears before its time simply never plays an explosion.
@@ -542,6 +552,10 @@ void AFPSRBossBase::Tick(float DeltaSeconds)
 	//   6 blast fuses  7 selector / active pattern
 	// (2) sits AHEAD of (4) on purpose: EndRunFreeze pins bRunPaused ON, so a recovery placed after the gate would
 	// never run at all.
+#if !UE_BUILD_SHIPPING
+	DebugDrawPatterns();
+#endif
+
 	if (!HasAuthority())
 	{
 		return;
@@ -689,6 +703,94 @@ void AFPSRBossBase::ServerDetonateDueBlastMarks()
 		MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRBossBase, BlastMarks, this);
 	}
 }
+
+#if !UE_BUILD_SHIPPING
+void AFPSRBossBase::DebugDrawPatterns() const
+{
+	UWorld* World = GetWorld();
+	if (!World || !FPSRBoss::IsDebugDrawEnabled())
+	{
+		return;
+	}
+
+	// Everything below reads REPLICATED state and the derived clock, nothing server-only — that is what makes the
+	// client's overlay a real comparison against the server rather than a second opinion drawn from the same data.
+	const float Clock = GetPatternClockSeconds();
+	const FVector Origin = GetActorLocation();
+	// One frame's lifetime: this is called every tick, so persistent shapes would just pile up.
+	const float Life = -1.0f;
+
+	// ---- Blast markers ----------------------------------------------------------------------------------------
+	for (const FFPSRBossBlastMark& Mark : BlastMarks)
+	{
+		const float Remaining = Mark.DetonateAtClock - Clock;
+		// Green far out, red at the moment of detonation — the fuse has to be readable at a glance, because "did I
+		// have time to leave" is the only question these markers exist to answer.
+		const float T = FMath::Clamp(Remaining / 1.5f, 0.0f, 1.0f);
+		const FColor Colour = FColor(static_cast<uint8>(255 * (1.0f - T)), static_cast<uint8>(255 * T), 0);
+		DrawDebugCircle(World, Mark.Center + FVector(0, 0, 5.0f), Mark.Radius, 32, Colour, false, Life, 0, 4.0f,
+			FVector(1, 0, 0), FVector(0, 1, 0), /*bDrawAxis=*/false);
+		DrawDebugString(World, Mark.Center + FVector(0, 0, 120.0f),
+			FString::Printf(TEXT("%.1fs"), FMath::Max(0.0f, Remaining)), nullptr, Colour, 0.0f, true);
+	}
+
+	// ---- Beams ------------------------------------------------------------------------------------------------
+	if (BeamCount > 0)
+	{
+		// Long enough to leave the arena; falls back to a fixed length when the arena has no grid bounds yet.
+		float Length = 12000.0f;
+		if (const AFPSRGameState* GS = World->GetGameState<AFPSRGameState>())
+		{
+			if (const AFPSRArenaActor* Arena = GS->GetActiveArena())
+			{
+				FVector2D Min, Max;
+				if (Arena->GetGridBoundsXY(Min, Max))
+				{
+					Length = FVector2D::Distance(Min, Max);
+				}
+			}
+		}
+
+		const bool bWarmup = Clock < BeamWarmupEndClock;
+		// Yellow while it is standing still and harmless, red once it sweeps and bites. If these two ever look the
+		// same, the warning has stopped being a warning.
+		const FColor Colour = bWarmup ? FColor::Yellow : FColor::Red;
+		const float Base = FPSRBossLaser::BeamBaseAngleAt(BeamStartAngleDeg, BeamSpeedDegPerSec, BeamWarmupEndClock, Clock);
+		const float Step = 360.0f / BeamCount;
+		for (int32 Index = 0; Index < BeamCount; ++Index)
+		{
+			const float Rad = FMath::DegreesToRadians(Base + Index * Step);
+			const FVector Dir(FMath::Cos(Rad), FMath::Sin(Rad), 0.0f);
+			const FVector Start = Origin + Dir * 1250.0f + FVector(0, 0, BeamVisualHeightCm);
+			DrawDebugLine(World, Start, Origin + Dir * Length + FVector(0, 0, BeamVisualHeightCm), Colour, false, Life, 0, 12.0f);
+		}
+	}
+
+	// ---- Marked player ----------------------------------------------------------------------------------------
+	if (const APawn* Marked = MarkedPlayer)
+	{
+		const FVector Head = Marked->GetActorLocation() + FVector(0, 0, 140.0f);
+		DrawDebugLine(World, Head, Head + FVector(0, 0, 260.0f), FColor::Magenta, false, Life, 0, 6.0f);
+		DrawDebugString(World, Head + FVector(0, 0, 280.0f), TEXT("MARKED"), nullptr, FColor::Magenta, 0.0f, true);
+	}
+
+	// ---- Stage readout ----------------------------------------------------------------------------------------
+	// The stage is the one thing with no other tell: "the boss is winding up" and "the boss is recovering" look
+	// identical on an unanimated placeholder, and half the PIE checks are about exactly that distinction.
+	const TCHAR* StageName = TEXT("Finished");
+	switch (PatternStage)
+	{
+	case EFPSRBossPatternStage::Prep:     StageName = TEXT("PREP (nothing spawned yet)"); break;
+	case EFPSRBossPatternStage::Execute:  StageName = TEXT("EXECUTE"); break;
+	case EFPSRBossPatternStage::Recovery: StageName = TEXT("RECOVERY (harmless)"); break;
+	default: break;
+	}
+	DrawDebugString(World, Origin + FVector(0, 0, 3000.0f),
+		FString::Printf(TEXT("%s | phase %d | %s | clock %.1f"),
+			HasAuthority() ? TEXT("SERVER") : TEXT("CLIENT"), CurrentPhase, StageName, Clock),
+		nullptr, FColor::White, 0.0f, true);
+}
+#endif // !UE_BUILD_SHIPPING
 
 bool AFPSRBossBase::ServerConsumeAnyTrigger()
 {

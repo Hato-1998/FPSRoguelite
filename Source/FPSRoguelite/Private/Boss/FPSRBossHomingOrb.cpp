@@ -13,6 +13,9 @@
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/ProjectileMovementComponent.h"
 #include "Hero/FPSRCharacter.h"
+#if !UE_BUILD_SHIPPING
+#include "DrawDebugHelpers.h"
+#endif
 
 AFPSRBossHomingOrb::AFPSRBossHomingOrb()
 {
@@ -176,7 +179,38 @@ void AFPSRBossHomingOrb::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
 
-	if (!HasAuthority() || bSimulationPaused)
+	if (!HasAuthority())
+	{
+		return;
+	}
+
+#if !UE_BUILD_SHIPPING
+	// Drawn BEFORE the freeze gate on purpose: "do the orbs hold still during a level-up freeze" is one of the checks
+	// this overlay exists for, and an overlay that disappears exactly when the thing freezes cannot answer it.
+	if (FPSRBoss::IsDebugDrawEnabled())
+	{
+		// The blast radius is the thing you cannot see otherwise, and "how close is too close" is the whole question
+		// this pattern asks. The destination line matters just as much: it is the only way to watch the orbs commit
+		// to a dead player's last position instead of vanishing.
+		const TCHAR* Label = TEXT("?");
+		FColor Colour = FColor::White;
+		switch (State)
+		{
+		case EOrbState::Grace:              Label = TEXT("HOVER");  Colour = FColor::Yellow;  break;
+		case EOrbState::Chase:              Label = TEXT("CHASE");  Colour = FColor::Red;     break;
+		case EOrbState::DivertToLastKnown:  Label = TEXT("DEATH SITE"); Colour = FColor::Magenta; break;
+		case EOrbState::DeathDwell:         Label = TEXT("SHOT DOWN"); Colour = FColor::Green; break;
+		}
+		DrawDebugSphere(GetWorld(), GetActorLocation(), LaunchParams.BlastRadiusCm, 12, Colour, false, -1.0f, 0, 2.0f);
+		DrawDebugString(GetWorld(), GetActorLocation() + FVector(0, 0, 120.0f), Label, nullptr, Colour, 0.0f, true);
+		if (State == EOrbState::DivertToLastKnown)
+		{
+			DrawDebugLine(GetWorld(), GetActorLocation(), LastKnownTargetLocation, FColor::Magenta, false, -1.0f, 0, 4.0f);
+		}
+	}
+#endif
+
+	if (bSimulationPaused)
 	{
 		return;
 	}

@@ -96,7 +96,7 @@ void UFPSRBossGA_SweepLaser::ServerBeginExecute()
 
 	// Published once. Clients recompute the angle from these values plus the clock (never by integrating), so their
 	// beam and the server's hit test cannot drift apart.
-	Boss->ServerSetBeamState(ActiveBeamCount, StartAngleDeg, ActiveSpeedDegPerSec, StartClock, GraceEndClock);
+	Boss->ServerSetBeamState(ActiveBeamCount, StartAngleDeg, ActiveSpeedDegPerSec, StartClock, GraceEndClock, BeamVisualHeightCm);
 
 	SetWarningActive(Boss, true);
 }
@@ -216,7 +216,7 @@ void UFPSRBossGA_SweepLaser::ServerEndExecute()
 	if (AFPSRBossBase* Boss = GetBoss())
 	{
 		SetWarningActive(Boss, false);
-		Boss->ServerSetBeamState(0, 0.0f, 0.0f, 0.0f, 0.0f);
+		Boss->ServerSetBeamState(0, 0.0f, 0.0f, 0.0f, 0.0f, BeamVisualHeightCm);
 	}
 	BeamTrackByPawn.Reset();
 }

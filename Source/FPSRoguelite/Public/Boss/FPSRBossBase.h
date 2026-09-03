@@ -98,8 +98,12 @@ public:
 	UFUNCTION(BlueprintPure, Category = "FPSR|Boss")
 	bool GetBeamState(int32& OutBeamCount, float& OutBaseAngleDeg, bool& bOutWarmup) const;
 
-	/** Server: publish/clear beam state. BeamCount == 0 clears it. */
-	void ServerSetBeamState(int32 InBeamCount, float StartAngleDeg, float SpeedDegPerSec, float StartClock, float WarmupEndClock);
+	/** Server: publish/clear beam state. BeamCount == 0 clears it.
+	 *  VisualHeightCm rides along purely so every machine draws the beam at the SAME height the pattern authored —
+	 *  the hit test does not use it (that is decided by "were you airborne"), but a debug or Blueprint beam drawn at
+	 *  a different height than the authored one would teach players the wrong dodge. */
+	void ServerSetBeamState(int32 InBeamCount, float StartAngleDeg, float SpeedDegPerSec, float StartClock,
+		float WarmupEndClock, float VisualHeightCm);
 
 	/** Server: true when Pawn was airborne at any point within AirborneGraceSeconds — the "late landing" half of the
 	 *  jump window. The "late jump" half is handled by deferring the hit (ServerScheduleLaserHit). */
@@ -273,6 +277,12 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Boss|Patterns", meta = (ClampMin = "0.0", ClampMax = "0.3"))
 	float MaxClientVisualLeadSeconds = 0.15f;
 
+#if !UE_BUILD_SHIPPING
+	/** Draw the pattern state as debug shapes when FPSR.BossDebugDraw is on. Runs on EVERY machine — see
+	 *  FPSRBoss::IsDebugDrawEnabled for why the client half is the point rather than an extra. */
+	void DebugDrawPatterns() const;
+#endif
+
 private:
 	/** Server: everything this boss owns, released together. Called from HandleDeath, EndPlay and the run-end branch
 	 *  of Tick — "nothing of the boss outlives the boss" has to be one function or the list drifts. */
@@ -313,6 +323,9 @@ private:
 
 	UPROPERTY(ReplicatedUsing = OnRep_BeamState)
 	float BeamWarmupEndClock = 0.0f;
+
+	UPROPERTY(ReplicatedUsing = OnRep_BeamState)
+	float BeamVisualHeightCm = 60.0f;
 
 	UPROPERTY(ReplicatedUsing = OnRep_PatternStage)
 	EFPSRBossPatternStage PatternStage = EFPSRBossPatternStage::Finished;

@@ -12,10 +12,16 @@ class AFPSRBossBase;
  *  Beams radiate from the boss and rotate; the counterplay is a jump, and terrain does not block them
  *  (user decision 2026-09-02 — "map-wide"). Beam count scales with the phase.
  *
- *  🔴 **Warning first.** `Docs/SSOT/Enemy.md` §2-6 requires a charge delay plus a warning indicator for anything
- *  hitscan-like ("no unfair bullet-hell"). The beams render during `WarmupSeconds` but deal nothing, and the
- *  existing per-player ranged-warning RPC is bracketed around that window — zero new RPCs, the same reuse the
- *  ranged swarm does.
+ *  🔴 **Warning first, in two layers.** `Docs/SSOT/Enemy.md` §2-6 requires a charge delay plus a warning indicator
+ *  for anything hitscan-like ("no unfair bullet-hell"). The base's Prep stage is the first layer (the boss winds up,
+ *  no beam exists yet); `BeamGraceSeconds` is the second (the beam appears, STANDS STILL, and deals nothing). The
+ *  second layer is what makes a random cardinal spawn fair — a beam can be born on top of someone, and the still
+ *  window is their chance to step out. The existing per-player ranged-warning RPC brackets both — zero new RPCs.
+ *
+ *  🔴 **Beams are born at 12/3/6/9.** The first picks a cardinal at random; the rest are spaced evenly from it.
+ *  Pinning EVERY beam to a cardinal was considered and rejected: three beams would give 90/90/180, so a fixed
+ *  180-degree safe wedge would exist for the whole cast. Even spacing keeps the safe arcs uniform — each added beam
+ *  raises the pressure evenly — and it preserves the periodic-domain folding the hit test relies on.
  *
  *  🔴 **Hit rule = exposure + latch, not a bare edge.** Anding the crossing edge with the gates (warmup over,
  *  not airborne) loses a whole pass whenever the gate opens WHILE the player is already inside the band — which

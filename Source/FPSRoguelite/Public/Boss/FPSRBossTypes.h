@@ -162,4 +162,18 @@ namespace FPSRBoss
 	 *  thresholds crossed makes a burst impossible to express. */
 	FPSROGUELITE_API bool ShouldTriggerFire(const FFPSRBossPatternTrigger& Trigger, float ElapsedSeconds,
 		int32 PatternsPerformed, float HealthFraction, int32& OutFireCount);
+
+#if !UE_BUILD_SHIPPING
+	/** `FPSR.BossDebugDraw 1` — draw the boss's pattern state as debug shapes.
+	 *
+	 *  🔴 Why this exists: every pattern's presentation is Blueprint-side, so until the art is authored the patterns
+	 *  are literally invisible and NONE of the PIE checks can be judged — you would only be able to observe "damage
+	 *  arrived from nowhere". This lets the mechanics and the balance numbers be verified FIRST, and the art be built
+	 *  against behaviour that is already known-good, rather than the other way round (which means rebuilding the art
+	 *  when the numbers move).
+	 *
+	 *  Drawn on clients as well as the host, deliberately: the one thing a server-only overlay could never show is
+	 *  whether the beam a CLIENT sees agrees with the beam the server is testing against. */
+	FPSROGUELITE_API bool IsDebugDrawEnabled();
+#endif
 }
