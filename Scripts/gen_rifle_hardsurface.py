@@ -302,22 +302,33 @@ BODY_SOCKETS = {
 #   따라서 DA 의 ADSAimRotationOffset(Yaw 90) 은 **그대로 둔다** — 무기 전체가 Synty 와 같은 프레임에 있으므로.
 #   (§2-2 의 "0 으로 되돌린다"는 이 실측 전의 오판이었다. PIE §6-2 에서 ADS 가 90° 틀리면 그때 0 으로.)
 def to_engine(p):
+    """저작 → **엔진에 실제로 있어야 하는** 좌표. 소켓/manifest 는 파이썬이 직접 찍으므로 이걸 쓴다."""
     x, y, z = p
     return (-y, x, z)
+
+
+# 🔴 UE 의 OBJ 임포터는 **Y 를 부호 반전**한다(오른손 OBJ → 왼손 UE, 2026-09-04 실측:
+#    엔진 기대 Y −8..22.6 이 −22.6..8.0 으로 들어옴. X·Z 는 그대로). 크기(size)만 보면 절대 안 잡힌다 —
+#    반드시 바운드 min/max 로 볼 것(Troubleshooting D12). 그래서 OBJ 정점은 미리 Y 를 뒤집어 쓴다:
+#    file = (Xe, −Ye, Ze). 이 사상은 det −1 이라 파일 안에서 와인딩이 뒤집히므로 삼각 인덱스도 함께 뒤집어
+#    **파일 자체는 정상 오른손 OBJ(바깥 CCW)** 가 되게 한다. 임포터가 그걸 한 번 더 뒤집어 엔진에서 바르게 선다.
+def to_file(p):
+    ex, ey, ez = to_engine(p)
+    return (ex, -ey, ez)
 
 
 def write_obj(path, mesh, origin, name):
     ox, oy, oz = origin
     by_slot = {}
     for (a, b, c, slot) in mesh.tris:
-        by_slot.setdefault(slot, []).append((a, b, c))
+        by_slot.setdefault(slot, []).append((a, c, b))      # det −1 사상 → 와인딩 반전으로 바깥면 유지
     with open(path, "w", encoding="utf-8") as f:
-        f.write("# %s — gen_rifle_hardsurface.py (cm, engine frame: +Y forward / authored +X, bevel %.2f)\n"
-                % (name, BEVEL))
+        f.write("# %s — gen_rifle_hardsurface.py (cm; file=OBJ right-handed, engine=+Y forward after UE Y-flip; "
+                "authored +X; bevel %.2f)\n" % (name, BEVEL))
         f.write("o %s\n" % name)
         for (x, y, z) in mesh.v:
-            ex, ey, ez = to_engine((x - ox, y - oy, z - oz))
-            f.write("v %.4f %.4f %.4f\n" % (ex, ey, ez))
+            fx, fy, fz = to_file((x - ox, y - oy, z - oz))
+            f.write("v %.4f %.4f %.4f\n" % (fx, fy, fz))
         for slot in sorted(by_slot):
             f.write("usemtl %s\n" % slot)
             for (a, b, c) in by_slot[slot]:

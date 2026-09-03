@@ -37,14 +37,22 @@ for p in PARTS:
         print("[rifle] %-10s MISSING" % p); ok_all = False; continue
     sm = unreal.load_asset(path)
     bb = sm.get_bounding_box()
-    size = (bb.max.x - bb.min.x, bb.max.y - bb.min.y, bb.max.z - bb.min.z)
     sections = sm.get_num_sections(0)                       # usemtl 그룹 = 섹션 (§2-3 B안 검증)
     want = len(manifest.get("parts", {}).get(p, {}).get("slots", [])) or "?"
-    mark = "OK " if (want == "?" or sections == want) else "!! "
-    if want != "?" and sections != want:
+    good = (want == "?" or sections == want)
+    # 🔴 size 가 아니라 min/max — UE OBJ 임포터가 Y 를 부호 반전한다(Troubleshooting D12). size 는 부호를 못 본다.
+    print("[rifle] %s%-10s sections=%s (expect %s)  X %.1f..%.1f  Y %.1f..%.1f  Z %.1f..%.1f  tris=%d"
+          % ("OK " if good else "!! ", p, sections, want,
+             bb.min.x, bb.max.x, bb.min.y, bb.max.y, bb.min.z, bb.max.z, sm.get_num_triangles(0)))
+    if not good:
         ok_all = False
-    print("[rifle] %s%-10s sections=%s (expect %s)  size_cm=(%.1f, %.1f, %.1f)  tris=%d"
-          % (mark, p, sections, want, size[0], size[1], size[2], sm.get_num_triangles(0)))
+    if p == "Body":
+        # 몸통은 그립 마운트가 원점, 정면 = +Y. 기대 Y −8.0..22.6 — 뒤집혔으면 −22.6..8.0 이 나온다.
+        fwd_ok = bb.max.y > 15.0 and bb.min.y > -15.0
+        print("[rifle] %sBody forward=+Y check (expect Y -8.0..22.6): %s"
+              % ("OK " if fwd_ok else "!! ", "pass" if fwd_ok else "FLIPPED"))
+        if not fwd_ok:
+            ok_all = False
 
 print("[rifle] slots_ok=%s" % ok_all)
 print("[rifle] ALLDONE")
