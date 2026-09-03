@@ -431,7 +431,7 @@ connect_material_expressions(mask, "", scenetex, "")             # ✅ 0번 핀 
 | 2 | **`-ExecCmds` 의 상대 경로가 엔진 바이너리 폴더 기준으로 풀린다** | `Could not load Python file 'D:/…/Engine/Binaries/Win64/Scripts/x.py' (resolved from 'Scripts/x.py')` |
 
 → **정답 = `.bat` 파일 + 절대 경로.** (1)은 메모리 `automation-multi-test-plus-hangs` 가 이미 경고한 것이고,
-(2)는 이번에 새로 나왔다. 실물 = `Scripts/run_import_rifle_voxel.bat`.
+(2)는 이번에 새로 나왔다. 실물 = `Scripts/run_import_rifle_hardsurface.bat`(복셀 시절 `run_import_rifle_voxel.bat` 의 후속 — 복셀 트랙은 `4fc47fd7` 에서 폐기).
 
 🪤 **`.bat` 주석은 ASCII 로 쓸 것.** 한글 주석을 넣었더니 cmd 가 OEM 코드페이지로 읽어 파스가 깨지며
 `'Cmds' is not recognized` 같은 유령 에러를 뱉었다(임포트 자체는 됐지만 출력이 오염된다).
