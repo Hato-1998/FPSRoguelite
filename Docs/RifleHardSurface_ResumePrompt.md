@@ -133,10 +133,16 @@ Docs/RifleHardSurface_ResumePrompt.md 를 읽고 진행한다.
 
 파츠별 길이(비율 기준선): 총열 50.2 · 핸드가드 31.1 · 개머리판 24.0 · 그립 11.7 · 조준경 10.9 · 탄창 10.4 · 트리거 3.2.
 
-### 2-2. 총구가 향하는 축 — ✅ **결정됨: +X 정면** (사용자, 2026-09-03)
-현행 DA 는 `ADSAimRotationOffset = Yaw 90` 인데, 이건 **Synty 팩의 총구가 +Y 라서** 넣은 보정값이다.
-**하드서피스 라이플은 +X 정면으로 생성**되므로 이 값은 **0 으로 되돌려야 한다.**
-그대로 두면 ADS 에서 총이 90도 틀어진다 — 그리고 **경고 없이** 틀어진다(§6-2 가 판정 항목).
+### 2-2. 총구가 향하는 축 — ✅ **저작 = +X, 내보내기 = 엔진 프레임 +Y** (정정 2026-09-04)
+🔁 **정정.** 종전 문서는 *"+X 정면으로 생성하므로 `ADSAimRotationOffset` 을 0 으로 되돌린다"* 고 적었다.
+**틀렸다.** 이 프로젝트의 무기 프레임은 Synty 관례 = **+Y 정면**이고(DA 주석 *"this pack's weapon-forward
+is +Y"* · `SK_Wep_Mod_A_Body_01` 바운드 장축 Y 42.5 · 캐릭터 `SOCKET_Weapon`(hand_r, P/Y/R 0/75/−17)이
+그 관례로 튜닝됨 — 2026-09-04 실측). +X 메시를 그대로 붙이면 **총이 90° 옆을 본다.**
+
+→ **저작 공간은 +X 유지**(사람이 읽기 쉽다), **생성기가 내보낼 때 +90° yaw 를 건다**:
+`author(x,y,z) → engine(−y, x, z)` (det +1, 미러 없음). OBJ·`manifest.json` 소켓 좌표 전부 엔진 프레임이다.
+→ 무기 전체가 Synty 와 같은 프레임에 있으므로 **`ADSAimRotationOffset = Yaw 90` 은 그대로 둔다.**
+PIE §6-2 에서 ADS 가 90° 틀리면 그때 0 으로 — 그 반대가 아니다.
 
 ### 2-3. 색 — ✅ **결정됨: 머티리얼 슬롯, 텍스처 0장** (사용자, 2026-09-03) → 슬롯 **5종**으로 확장 (2026-09-04)
 지금 아케이드 룩은 **텍스처가 한 장도 없다** — 바닥·벽·적 전부 절차적 머티리얼이다
@@ -198,6 +204,13 @@ python Scripts/gen_rifle_hardsurface.py    →  Saved/RifleHardSurface/
 | 조준경 2x | 같은 언어, 더 높은 기둥 + 안쪽 모서리 발광 띠 + **세로/가로 눈금** + 하부 라이트바 |
 
 `Saved/` 는 gitignore 라 OBJ/SVG 는 커밋되지 않는다 — **소스는 스크립트**다. 다시 뽑으려면 위 한 줄.
+
+🔴 **원점·프레임 규약 (2026-09-04 실측으로 정한 것, 어기면 붙는 자리가 틀린다)**
+- **몸통 원점 = 그립 마운트 지점**(저작 공간 (30, 0, 15.5)). Synty 몸통이 그렇다(`SOCKET_Mount_Grip_0` = 본 원점).
+  캐릭터 `SOCKET_Weapon` 이 그 관례로 튜닝돼 있어, 원점을 개머리판 끝에 두면 총 전체가 ~30cm 앞·15cm 아래로 밀려 붙는다
+  (1차 임포트 `96fcdab8` 가 그 상태였다 — 바운드 x22~52.6 이 증거. 재임포트로 고쳤다).
+- **내보내기 프레임 = 엔진 +Y 정면**(§2-2). 저작은 +X 로 보고, OBJ/manifest 만 `to_engine()` 으로 돌린다.
+  `manifest.json` 의 `frame` 키가 이걸 명시한다. 미리보기 SVG 는 저작 공간 그대로다.
 
 **형태 수정 방법**: 파츠 함수(`p_body` 등)의 `box(...)`/`prism(...)`/`tube(...)`/`slats(...)` 한 줄이 부품 하나다.
 좌표는 공유 무기 공간(cm, 0 = 개머리판 뒤끝, 총구 = +X, `BORE=20` = 총열 축 높이). 미리보기로 확인하고 재임포트.
@@ -261,7 +274,9 @@ Scripts\run_import_rifle_hardsurface.bat
 규약(*"총구 = 파트 소켓"* · *"ADS 조준 = 사이트 파트 소켓"*)이고, 코드도 그 전제다(`FPSRCharacter.cpp:2472-2476`
 *"파트 우선, 없으면 `ActiveWeaponMesh`"*). 총열/조준경을 바꾸면 총구·조준선이 **따라 움직여야** 하므로 구조적으로 맞다.
 
-**좌표는 전부 `Saved/RifleHardSurface/manifest.json` 에 계산돼 있다**(파츠 로컬 cm, mount 가 원점):
+**좌표는 전부 `Saved/RifleHardSurface/manifest.json` 에 계산돼 있다**(파츠 로컬 cm, mount 가 원점,
+**엔진 프레임 +Y 정면** — §2-2). 찍는 스크립트 = **`Scripts/author_rifle_hs_sockets.py`**(켜진 에디터에서
+VibeUE `execute_python_code` 로 `exec(open(path).read())`; 멱등, `find_socket` 재조회로 검증, `sockets_ok=True`/`ALLDONE` 마커):
 
 | 메시 | 소켓 | 비고 |
 |---|---|---|
@@ -289,7 +304,7 @@ Synty 의 `SOCKET_Mount_Trigger_0` 은 만들지 않는다 — 트리거는 몸�
 ### 3-6. DA 배선 (에디터 켜짐) — ⏳
 `DA_Weapon_Rifle` 에서:
 - `WeaponMesh` 를 **비우고** `WeaponMeshStatic` = `SM_RifleHS_Body` (스켈레탈이 우선이라 **비우지 않으면 안 보인다**, `:2306-2308`)
-- `ADSAimRotationOffset` = **0** (§2-2)
+- `ADSAimRotationOffset` = **Yaw 90 그대로** (§2-2 정정 — 메시가 이미 엔진 +Y 프레임으로 내보내진다. PIE 에서 ADS 가 90° 틀리면 그때 0)
 - `weapon_parts` 7항목의 `Part` 를 `SM_RifleHS_*` 로, `Socket` 은 기존 `SOCKET_Mount_*_0` 유지.
   트리거 슬롯은 비운다. 조준경 슬롯 = `SM_RifleHS_SightRed`(기본) — 2x 는 진화 카드 쪽에서 교체.
 - 소켓 이름 5종(`SOCKET_Aim`·`Muzzle`·`LeftHand`·`RightHand`·`Weapon`)은 이름을 그대로 썼으므로 변경 없음.

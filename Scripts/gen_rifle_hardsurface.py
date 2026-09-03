@@ -263,7 +263,10 @@ def p_sight_2x(m):
 
 PARTS = {
     "Stock":     {"fn": p_stock,     "mount": (24.0, 0.0, 20.0)},
-    "Body":      {"fn": p_body,      "mount": (0.0, 0.0, 0.0)},          # 기준
+    # 몸통 원점 = **그립 마운트 지점**. Synty 몸통이 그렇다(SOCKET_Mount_Grip_0 = 본 원점 (0,0,0), 2026-09-03 실측)
+    # — 캐릭터의 SOCKET_Weapon 이 그 관례로 튜닝돼 있어서, 원점을 개머리판 끝(0,0,0)에 두면
+    # 총 전체가 ~30cm 앞으로 밀려 붙는다. 몸통 소켓 좌표는 이 점 기준으로 다시 잰다(manifest).
+    "Body":      {"fn": p_body,      "mount": (30.0, 0.0, 15.5)},
     "Grip":      {"fn": p_grip,      "mount": (30.0, 0.0, 15.5)},
     "Mag":       {"fn": p_mag,       "mount": (38.0, 0.0, 15.5)},
     "Handguard": {"fn": p_handguard, "mount": (50.0, 0.0, 20.0)},
@@ -290,16 +293,31 @@ BODY_SOCKETS = {
 
 
 # ---------------------------------------------------------------------------
+# 내보내기 프레임 — 저작 공간(+X 정면)을 **엔진 무기 프레임(+Y 정면)** 으로 돌린다.
+#   이 프로젝트의 무기 관례는 Synty 팩을 따른다: DA 주석 "this pack's weapon-forward is +Y",
+#   SK_Wep_Mod_A_Body_01 바운드 장축 Y(42.5cm), 캐릭터 SOCKET_Weapon(hand_r, P/Y/R 0/75/-17)이
+#   그 관례로 튜닝돼 있다(2026-09-04 실측). +X 정면 그대로 붙이면 총이 90° 옆을 본다.
+#   → 저작은 +X 로 하고(사람이 읽기 쉽다), OBJ·manifest 만 여기서 +90° yaw 를 건다:
+#     author(x, y, z) -> engine(-y, x, z)     [det = +1, 미러 없음]
+#   따라서 DA 의 ADSAimRotationOffset(Yaw 90) 은 **그대로 둔다** — 무기 전체가 Synty 와 같은 프레임에 있으므로.
+#   (§2-2 의 "0 으로 되돌린다"는 이 실측 전의 오판이었다. PIE §6-2 에서 ADS 가 90° 틀리면 그때 0 으로.)
+def to_engine(p):
+    x, y, z = p
+    return (-y, x, z)
+
+
 def write_obj(path, mesh, origin, name):
     ox, oy, oz = origin
     by_slot = {}
     for (a, b, c, slot) in mesh.tris:
         by_slot.setdefault(slot, []).append((a, b, c))
     with open(path, "w", encoding="utf-8") as f:
-        f.write("# %s — gen_rifle_hardsurface.py (cm, +X forward, bevel %.2f)\n" % (name, BEVEL))
+        f.write("# %s — gen_rifle_hardsurface.py (cm, engine frame: +Y forward / authored +X, bevel %.2f)\n"
+                % (name, BEVEL))
         f.write("o %s\n" % name)
         for (x, y, z) in mesh.v:
-            f.write("v %.4f %.4f %.4f\n" % (x - ox, y - oy, z - oz))
+            ex, ey, ez = to_engine((x - ox, y - oy, z - oz))
+            f.write("v %.4f %.4f %.4f\n" % (ex, ey, ez))
         for slot in sorted(by_slot):
             f.write("usemtl %s\n" % slot)
             for (a, b, c) in by_slot[slot]:
@@ -377,16 +395,20 @@ def main():
         nv, nt, slots = write_obj(path, m, spec["mount"], "SM_RifleHS_%s" % name)
         total_v += nv
         total_t += nt
+        mt = spec["mount"]
         manifest["parts"][name] = {
             "file": os.path.basename(path), "verts": nv, "tris": nt, "slots": slots,
-            "mount_cm": list(spec["mount"]),
-            "sockets": {k: [v[0] - spec["mount"][0], v[1] - spec["mount"][1], v[2] - spec["mount"][2]]
+            "mount_author_cm": list(mt),
+            # 소켓은 파츠 로컬(mount 원점) · **엔진 프레임** — UE 에서 그대로 찍는 값
+            "sockets": {k: list(to_engine((v[0] - mt[0], v[1] - mt[1], v[2] - mt[2])))
                         for k, v in spec.get("sockets", {}).items()},
         }
         print("  %-10s verts=%5d  tris=%5d  slots=%s" % (name, nv, nt, ",".join(slots)))
 
+    bm = PARTS["Body"]["mount"]          # 몸통 소켓은 몸통 로컬(= 그립 마운트 기준) · 엔진 프레임 cm
     for k, v in BODY_SOCKETS.items():
-        manifest["body_sockets"][k] = list(v)
+        manifest["body_sockets"][k] = list(to_engine((v[0] - bm[0], v[1] - bm[1], v[2] - bm[2])))
+    manifest["frame"] = "engine: +Y forward, +Z up (authored +X forward, exported with +90deg yaw)"
     manifest["assembled_size_cm"] = {"length_x": hi[0] - lo[0], "width_y": hi[1] - lo[1],
                                      "height_z": hi[2] - lo[2]}
     with open(os.path.join(out, "manifest.json"), "w", encoding="utf-8") as f:
