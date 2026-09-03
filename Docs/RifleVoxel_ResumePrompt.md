@@ -39,8 +39,8 @@ Docs/RifleVoxel_ResumePrompt.md 를 읽고 진행한다.
 | `WeaponMesh` (스켈레탈) | `/Game/PolygonMilitary/Meshes/Weapons/Modular/Weapon_A/SK_Wep_Mod_A_Body_01` |
 | `WeaponMeshStatic` | `None` |
 | `WeaponAttachSocket` | `SOCKET_Weapon` (**바디 스켈레톤** 쪽) |
-| `AimSocket` / `MuzzleSocket` | `SOCKET_Aim` / `SOCKET_Muzzle` (**무기 메시** 쪽) |
-| `LeftHandSocket` / `RightHandSocket` | `SOCKET_LeftHand` / `SOCKET_RightHand` (무기 메시 쪽) |
+| `AimSocket` / `MuzzleSocket` | `SOCKET_Aim` / `SOCKET_Muzzle` — 🔴 **몸통에 없다. 파트(조준경/총열)에 있다**(§3-4) |
+| `LeftHandSocket` / `RightHandSocket` | `SOCKET_LeftHand` / `SOCKET_RightHand` (몸통 메시에 실재 — 실측 확인) |
 | `ADSAimRotationOffset` | **Yaw 90** — 이 팩의 총구 방향이 **+Y** 이기 때문 |
 | `WeaponAnimInstanceClass` | **None** ← 중요, 아래 |
 
@@ -75,8 +75,8 @@ Docs/RifleVoxel_ResumePrompt.md 를 읽고 진행한다.
 | 반동 = CrystalRecoil 어댑터 | 카메라. 메시 무관 |
 | PWAS(절차적 무기 애니) | `Content/ProceduralWeaponAnimationSystem/.../DA_WPP_Rifle*` — **무기 전체**를 흔든다 |
 | 크로스헤어(절차적 SDF) | spread 값. 메시 무관 |
-| 총구 화염 | `MuzzleSocket` ← **복셀 메시에 이 소켓이 있어야 한다** |
-| 좌/우손 IK | `LeftHandSocket`/`RightHandSocket` ← 마찬가지 |
+| 총구 화염 | `MuzzleSocket` ← **총열 파트**에 있어야 한다(몸통 아님, §3-4) |
+| 좌/우손 IK | `LeftHandSocket`/`RightHandSocket` ← **몸통**에 |
 | ADS 정렬 | `AimSocket` + `ADSAimRotationOffset` ← §2-2 |
 | HUD 무기 아이콘 | DA 의 `WeaponIcon` 소프트 참조(별도 2D 에셋) |
 | 모듈러 파츠/진화 | `TSoftObjectPtr<UStaticMesh> Part` + 고정 `Socket` — **파츠는 원래 정적 메시다** |
