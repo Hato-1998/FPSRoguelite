@@ -35,6 +35,12 @@
 > (`L_Arena?listen` · `FPSR.SpawnEnemies N 6000` 60m 링 · PlayerStart 고정 카메라 · `Scripts/measure_swarm_render.ps1`) ·
 > 워밍업 10초 절삭. 셀 축 off = `r.PostProcessing.DisableMaterials 1`.
 >
+> ⚠️ **2026-09-03 이후 이 축은 더 이상 「셀만」 끄지 않는다.** `proto/arcade-look` 에서 아케이드 CRT 스캔라인
+> (`MI_PP_ArcadeCRT` — `PP_Arcade` 볼륨의 blendable, `AfterTonemapping`/priority `-10`)이 추가됐다.
+> `r.PostProcessing.DisableMaterials 1` 은 블렌더블을 **통째로** 차단하므로 **셀 아웃라인과 스캔라인이 같이 꺼진다**
+> — 이 축으로 잰 수치는 두 효과의 합이라 분리되지 않는다. 스캔라인만 남기거나 빼고 재려면 명령 대신
+> **볼륨 blendable 의 weight** 를 0/1 로 조작할 것.
+>
 > | 구성 | 요청 | **정착 생존** | 프레임 평균 | P95 | GameThread | GPUTime | 스웜 렌더 합(Base+Shadow+CD) | 드로우콜 |
 > |---|---|---|---|---|---|---|---|---|
 > | 300 · 셀 on  | 300 | **259** | 4.41ms(227fps) | 4.82ms | 2.58ms | 4.00ms | **1.19ms** | 168 |
