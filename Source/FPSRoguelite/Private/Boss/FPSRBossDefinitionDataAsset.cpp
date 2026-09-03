@@ -40,6 +40,28 @@ EDataValidationResult UFPSRBossDefinitionDataAsset::IsDataValid(FDataValidationC
 		Result = EDataValidationResult::Invalid;
 	}
 
+	// Phase thresholds must be strictly descending and strictly inside (0,1). ComputePhase itself is written to
+	// survive a mis-ordered array (it takes the deepest match rather than the first), so this is a designer-facing
+	// warning about intent rather than a crash guard — but a threshold of exactly 1.0 would put the boss in phase 2
+	// before it is ever hit, and one at 0.0 can only trigger on the death frame, so those two are errors.
+	for (int32 Index = 0; Index < PhaseHealthThresholds.Num(); ++Index)
+	{
+		const float Threshold = PhaseHealthThresholds[Index];
+		if (Threshold <= 0.0f || Threshold >= 1.0f)
+		{
+			Context.AddError(FText::Format(
+				LOCTEXT("PhaseThresholdRange", "PhaseHealthThresholds[{0}] = {1} — must be strictly between 0 and 1 (1.0 would start the boss in phase 2; 0.0 could only fire on the death frame)."),
+				FText::AsNumber(Index), FText::AsNumber(Threshold)));
+			Result = EDataValidationResult::Invalid;
+		}
+		if (Index > 0 && Threshold >= PhaseHealthThresholds[Index - 1])
+		{
+			Context.AddWarning(FText::Format(
+				LOCTEXT("PhaseThresholdOrder", "PhaseHealthThresholds[{0}] is not below the previous entry — the array is meant to descend (e.g. 0.66, 0.33)."),
+				FText::AsNumber(Index)));
+		}
+	}
+
 	return Result;
 }
 #endif // WITH_EDITOR

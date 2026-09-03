@@ -9,8 +9,6 @@
 
 class UFPSRAbilitySystemComponent;
 class UFPSREliteGameplayAbility;
-struct FActiveGameplayEffectsContainer;
-struct FGameplayEffectSpec;
 
 /** Elite tier (ADR 0013: Docs/Architecture/0013-enemy-tier-axis-and-elite-gas.md §「결정」, 후속 행 3 실행 1+2 —
  *  엘리트 ASC 실부착 + 4중 수명주기 폐쇄 + 어빌리티 부여 시임 + 프리즈-멈춤 쿨다운). Still the SAME
@@ -107,10 +105,12 @@ protected:
 	 *  절대 바뀌지 않으므로 재호출이 불필요하다(BeginPlay/EndPlay 가 "실제 수명당 1회"인 것과 동일한 근거,
 	 *  AFPSREnemyBase::EndPlay 의 S4 등록 해제 주석 참조).
 	 *
-	 *  실행 2: 여기서 시간축 런타임 가드도 함께 등록한다(AbilitySystem->GameplayEffectApplicationQueries.Add) —
-	 *  HasDuration 이거나 Period > 0 인 GE 의 **적용 자체를 엔진 레벨에서 차단**한다(RejectTimeBasedGameplayEffect
-	 *  참조). 마찬가지로 실제 액터당 1회면 충분: 콜백은 이 액터 인스턴스에 바인딩되고(CreateUObject), 델리게이트
-	 *  배열 자체가 이 ASC 인스턴스 소유라 풀 재사용으로 사라지지 않는다. */
+	 *  실행 2: 여기서 시간축 런타임 가드도 함께 켠다 — `AbilitySystem->EnableTimeAxisGuard()`.
+	 *  HasDuration 이거나 Period > 0 인 GE 의 **적용 자체를 엔진 레벨에서 차단**한다.
+	 *  🔁 **BOSS1 에서 가드 본체가 `UFPSRAbilitySystemComponent` 로 이동했다** — 보스도 같은 계약에 묶이는데
+	 *  구현이 엘리트 액터에 있으면 2벌이 되고, 두 벌은 언젠가 어긋난다. 거동은 무변이다(같은 콜백을 같은
+	 *  배열에 같은 시점에 등록한다). 마찬가지로 실제 액터당 1회면 충분: 델리게이트 배열이 ASC 인스턴스
+	 *  소유라 풀 재사용으로 사라지지 않는다. */
 	virtual void PostInitializeComponents() override;
 
 	/** 소유자 = 액터 자신(CreateDefaultSubobject, 플레이어의 PlayerState 소유 패턴과 다름 — 위 클래스 주석
@@ -140,14 +140,6 @@ private:
 	 *  CooldownElapsed 와 같은 성격 — 시각 효과가 아니라 서버 판정용 시계). */
 	float EliteCooldownClockSeconds = 0.0f;
 
-	/** PostInitializeComponents 가 AbilitySystem->GameplayEffectApplicationQueries 에 등록하는 시간축 런타임
-	 *  가드 — `false` 를 돌려주면 그 GE 는 아예 적용되지 못한다(엔진 호출부 =
-	 *  AbilitySystemComponent.cpp — ApplyGameplayEffectSpecToSelf 안의 GameplayEffectApplicationQueries 순회, 하나라도
-	 *  거부하면 즉시 FActiveGameplayEffectHandle() 반환). 거부 조건 = Spec.Def->DurationPolicy == HasDuration
-	 *  **또는** Spec.GetPeriod() > 0 — Period 를 반드시 같이 걸러야 하는 이유: Infinite(무기한) GE 도 Period 를
-	 *  가질 수 있어서(주기적으로 영원히 Execute) DurationPolicy 검사 하나만으로는 새는 구멍이 있다(이게 v1 계약이
-	 *  뚫렸던 지점 — GetPeriod() 는 Instant 이면 강제로 NO_PERIOD 를 돌려주므로 Instant GE 는 이 조건에 안
-	 *  걸린다, GameplayEffect.h). 개발 중에만 ensureMsgf 로 시끄럽게 + 로그 1줄(어떤 GE 가 거부됐는지) — 배포
-	 *  빌드에서는 크래시하지 않는다. */
-	bool RejectTimeBasedGameplayEffect(const FActiveGameplayEffectsContainer& ActiveGEContainer, const FGameplayEffectSpec& Spec) const;
+	// 시간축 런타임 가드의 본체는 UFPSRAbilitySystemComponent::RejectTimeBasedGameplayEffect 로 이동했다
+	// (BOSS1 — 보스가 같은 계약을 쓰므로 1벌로 통합). 등록은 PostInitializeComponents 의 EnableTimeAxisGuard().
 };

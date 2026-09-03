@@ -204,6 +204,13 @@ public:
 	UFUNCTION(BlueprintPure, Category = "FPSR|Run")
 	float GetCombatClockSeconds() const;
 
+	/** BOSS1: the combat clock as CLIENTS can derive it — same formula, but sourced from the synced
+	 *  GetServerWorldTimeSeconds() instead of the local world time. Correct on the server too (there the two time
+	 *  sources are identical), so callers that run on both sides use this one.
+	 *  Residual error vs the server = one-way latency; see the .cpp for where that is compensated. */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Run")
+	float GetCombatClockSecondsForClients() const;
+
 	/** Server-only: has the run hit its terminal end (EndRunFreeze latched bRunEnded)? Distinguishes the two
 	 *  reasons bRunPaused can be up — a permanent end-of-run freeze vs a transient card-selection freeze — for
 	 *  callers that must abort on the former but HOLD on the latter (UFPSRStageDirectorSubsystem::PerformSwap).
@@ -437,12 +444,19 @@ protected:
 	 *  visible freeze rides the replicated bRunPaused; this resets naturally on the next run (fresh GameState). */
 	bool bRunEnded = false;
 
-	// --- VIT1: freeze-paused combat clock (see GetCombatClockSeconds) — server-only, not replicated. ---------------
+	// --- VIT1: freeze-paused combat clock (see GetCombatClockSeconds). ------------------------------------------
+	// 🔁 BOSS1: these two were server-only; they are now REPLICATED (Push Model) so a client can derive the same
+	// clock via GetCombatClockSecondsForClients. Both are dirtied ONLY on a freeze edge inside SetRunPaused, so the
+	// cost is 8 bytes per pause/unpause rather than a per-frame mirror.
 
 	/** Total seconds spent frozen so far. Accumulated in SetRunPaused on the pause->unpause edge. */
+	UPROPERTY(Replicated)
 	float AccumulatedFrozenSeconds = 0.0f;
 
-	/** World-time stamp the CURRENT freeze started at (meaningful only while bRunPaused is true). */
+	/** World-time stamp the CURRENT freeze started at (meaningful only while bRunPaused is true).
+	 *  On the authority World->GetTimeSeconds() == GetServerWorldTimeSeconds(), so this doubles as a server-world-time
+	 *  stamp for clients — the same idiom StagePhaseEndServerTime and LobbyCountdownEndServerTime already use. */
+	UPROPERTY(Replicated)
 	float FreezeStartedAtWorldTime = 0.0f;
 
 	// ---- Stage transition (ADR 0010 D6) — see the public accessors above for what each field means. ------------

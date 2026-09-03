@@ -96,6 +96,23 @@ namespace FPSRCombat
 	/** Friendly-player damage multiplier from the GameState (default 0.5 if unavailable). */
 	FPSROGUELITE_API float GetFriendlyFireScale(const UWorld* World);
 
+	/** Server: a radial blast dealt BY a hostile (the boss) TO players. The counterpart to ApplyExplosion, which
+	 *  resolves damage through ResolveDamage and is therefore player-instigator only (see this header's top note).
+	 *
+	 *  Gathers ONLY the player pawn object channel, which settles three things at once:
+	 *   - the swarm is never hit (a boss attack that cleared the swarm would make the boss fight EASIER, and the
+	 *     boss fight is exactly where the swarm persists — BOSS1 §3-2),
+	 *   - the boss cannot damage itself,
+	 *   - a player in a pass-through window (grace / downed, Pawn-response Ignore) is still found, because an
+	 *     object-type query keys on the object channel rather than on responses.
+	 *
+	 *  Instigator should be the BOSS ACTOR, not the marker/orb that carried the blast: the director's telemetry
+	 *  classifies incoming pressure by the instigator's CLASS and drops anything unrecognised into Env, which
+	 *  CountsAsIncoming excludes. Knockback is applied to survivors when KnockbackStrength > 0, and skips downed /
+	 *  dead players (launching a body that cannot act is noise, not feedback). */
+	FPSROGUELITE_API void ApplyHostileExplosion(UWorld* World, const FVector& Center, float Radius, float Damage,
+		AActor* Instigator, float KnockbackStrength, const FFPSRDamageSpec& Spec = FFPSRDamageSpec());
+
 	/** Add BOTH damageable pawn object types — enemies (ECC_Pawn) and players (ECC_FPSRPlayerPawn) — to an object
 	 *  query, so a single overlap/trace finds every potential friendly-fire target. */
 	FPSROGUELITE_API void AddDamageablePawnObjectTypes(FCollisionObjectQueryParams& OutParams);
