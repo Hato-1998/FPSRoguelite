@@ -33,6 +33,10 @@ class FPSROGUELITE_API UFPSRBossGA_Barrage : public UFPSRBossGameplayAbility
 public:
 	UFPSRBossGA_Barrage();
 
+	/** Read by AFPSRBossBase::IsDataValid, which owns the marker cap these two numbers have to fit inside. */
+	float GetFuseSeconds() const { return FuseSeconds; }
+	float GetIntervalSeconds() const { return IntervalSeconds; }
+
 protected:
 	/** 준비가 끝난 직후 — 첫 볼리를 즉시 낸다. */
 	virtual void ServerBeginExecute() override;

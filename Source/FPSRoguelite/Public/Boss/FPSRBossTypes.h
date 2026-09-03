@@ -163,6 +163,39 @@ namespace FPSRBoss
 	FPSROGUELITE_API bool ShouldTriggerFire(const FFPSRBossPatternTrigger& Trigger, float ElapsedSeconds,
 		int32 PatternsPerformed, float HealthFraction, int32& OutFireCount);
 
+	/** What is wrong with an authored trigger, if anything. A pure enum rather than an FText so the rule is testable
+	 *  with no editor and no DataValidation context — AFPSRBossBase::IsDataValid is then a thin adapter that only
+	 *  chooses the wording. Same shape as ComputePhase/ShouldTriggerFire: the RULE is pure, the plumbing is not. */
+	enum class ETriggerAuthoringIssue : uint8
+	{
+		None,
+		/** Elapsed/PatternCount would be due on the very first tick and stay due forever; HealthBelow could only fire
+		 *  on the death frame. */
+		ThresholdNotPositive,
+		/** A HealthBelow trigger at >= 1 fires before the boss has taken a single point of damage. */
+		HealthThresholdFull
+	};
+
+	FPSROGUELITE_API ETriggerAuthoringIssue ValidateTrigger(const FFPSRBossPatternTrigger& Trigger);
+
+	/** Party size the authoring checks assume. The game is 1-4 players (Game.md §1), and validation has to reason
+	 *  about the WORST case or it would pass a setup that only breaks in a full party. */
+	inline constexpr int32 MaxSupportedPlayers = 4;
+
+	/** The order the selector visits eligible patterns in.
+	 *
+	 *  Pulled out as a pure function so the policy is testable without an ASC: Sequential must walk from the cursor
+	 *  and wrap, Random must start anywhere but STILL visit every candidate — the second property is the one that is
+	 *  easy to lose. A "roll once and give up" random would waste a trigger whenever the rolled pattern happened to
+	 *  be on cooldown, and the boss would just stand there for a beat with no way to tell why. */
+	FPSROGUELITE_API void BuildSelectionOrder(EFPSRBossPatternSelection Policy, int32 NumEligible, int32 Cursor,
+		int32 RandomStart, TArray<int32>& OutOrder);
+
+	/** Peak number of blast markers a barrage can have alive at once: one per player per interval, for as many
+	 *  intervals as fit inside a fuse. Used by IsDataValid so a designer hears about an over-cap combination while
+	 *  authoring rather than discovering it as silently fizzled shells mid-fight. */
+	FPSROGUELITE_API int32 EstimatePeakBlastMarks(int32 MaxPlayers, float FuseSeconds, float IntervalSeconds);
+
 #if !UE_BUILD_SHIPPING
 	/** `FPSR.BossDebugDraw 1` — draw the boss's pattern state as debug shapes.
 	 *

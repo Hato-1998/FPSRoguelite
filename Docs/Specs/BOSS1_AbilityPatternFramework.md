@@ -726,9 +726,13 @@ Build.bat FPSRogueliteEditor Win64 Development -Project=... -WaitMutex -DisableA
    (+ `AFPSRBossHomingOrb` 도 동일) — G1-2 P1-1 재발 방지
 8. `WrapToPeriod` — N=1~5 등간격 빔이 한 점으로 접히는지
 9. `CapsuleAngularRadiusDeg` — r→0 에서 발산 없음
-10. 선택기 — 쿨다운·`MinPhase` 스킵, 라운드로빈 순환
-11. **시간축 가드** — `HasDuration` GE CDO 로 스펙을 만들어 `GameplayEffectApplicationQueries` 가 false 를
-    돌려주는지. ⚠️ 현재 이 가드의 자동화 커버리지는 **0 건**이라 "기존 엘리트 테스트"만으로는 공허하다(G1-2 P3-6)
+10. 선택기 `FPSRBoss::BuildSelectionOrder` (`Boss.Selection`) — Sequential 은 커서에서 출발해 순환 ·
+    **Random 도 후보를 전부 방문**(한 번 굴리고 포기하면 쿨다운에 걸린 후보 하나 때문에 트리거가 낭비된다) ·
+    두 정책이 서로의 입력(커서/난수)을 침범하지 않음 · 범위 밖 커서가 접힘 · `NumEligible == 0`
+11. **시간축 가드** (`Boss.TimeAxisGuard`) — `EnableTimeAxisGuard` 멱등(2회 호출 → 쿼리 1개) ·
+    `FPSRAbilitySystem::IsTimeBasedEffect` 가 Instant=false / `HasDuration`=true / **Infinite+Period=true** ·
+    등록된 델리게이트가 Instant 를 통과시킴. 거부 경로를 델리게이트로 직접 돌리지 않는 이유는 §13-7 ② 참조
+    (G1-2 P3-6 이 지적한 커버리지 0 건은 이로써 해소)
 12. 🔴 **결함을 실제로 잡는 케이스** (G1-3 P2-4) — ③④⑤ 는 프레임 스텝(1.0°·1.4°)이 밴드폭(6°)보다 작은
     *느린* 통과라 **수정 전 코드에서도 녹색**이다. 실패할 수 있어야 테스트다:
     - **빠른 관통** `Prev=+5, Cur=-5, W=3` → **1회** (수정 전 = 0회. §13-3 이 잡은 결함)
@@ -736,9 +740,12 @@ Build.bat FPSRogueliteEditor Win64 Development -Project=... -WaitMutex -DisableA
     - **첫 프레임** `Prev==Cur` → 밖이든 안이든 **0회**
     - **래치 해제 후 재진입** `+5→+1→+5→+1` → **2회** (실제로 두 번째 노출)
     - **웜업 종료 시 밴드 안** → 게이트가 열리는 프레임에 **1회** (단순 AND 였다면 0회. G1-3 P2-1)
-13. **`IsDataValid`** (G1-3 P3-1 — §5-3 이 "§12 IsDataValid" 를 가리키는데 §12 에 항목이 없었다):
-    `PhaseHealthThresholds` 내림차순·(0,1) 범위 · `4 × ⌈FuseSeconds/IntervalSeconds⌉ ≤ MaxConcurrentMarks`
-    (통과하면 런타임 FIFO 축출이 죽은 경로가 된다) · `BeamsPerPhase × 최대페이즈 ≤ MaxBeams`
+13. **`IsDataValid` 의 순수 규칙** (`Boss.Authoring` — G1-3 P3-1 · G2 P3-2):
+    `FPSRBoss::ValidateTrigger` 가 `Threshold <= 0` 과 `HealthBelow >= 1` 만 잡고 **정상 케이스는 통과**시키는지
+    (임계 > 1 은 `PatternCount` 에선 정상이므로 두 축을 혼동하면 안 된다) ·
+    `FPSRBoss::EstimatePeakBlastMarks` = `MaxPlayers × (⌊Fuse/Interval⌋ + 1)`, 0 인자에서 나눗셈 없이 0.
+    이 값이 `MaxConcurrentMarks` 이하이면 런타임 FIFO 축출이 죽은 경로가 된다.
+    `IsDataValid` 자체는 이 규칙들 위의 얇은 어댑터라 문구만 고른다(§13-7).
 
 ### 12-3. 엘리트 무회귀
 쿨다운 계약을 공통 베이스로 호이스트 + 가드를 ASC 로 이동하므로 기존 엘리트 테스트 전부 + `FPSR.EliteDump` 대조.
@@ -878,14 +885,41 @@ P2 3건 전량 + P3 5건 중 4건 반영. 게이트가 "확인했으나 지적 �
 | P3-3 표식 Z 가 캡슐 **중심**(≈+90cm) | 캡슐 half-height 를 빼서 실제 지면으로 |
 | P3-4 `MarkedPlayer` 가 원거리 클라에 null 로 도착 | 폰 → **`APlayerState`** 로 복제(항상 관련). `GetMarkedPawn()` 은 편의용이고 null 이 "지목 없음"이 아님을 가이드에 명시 |
 | P3-5 죽은 약참조가 프리즈 엣지에서만 정리 | 등록 시에도 정리 |
-| P3-2 누락 테스트 + `IsDataValid` 가 없는데 헤더가 있다고 적음 | **미이행** — 아래 참조 |
+| P3-2 누락 테스트 + `IsDataValid` 가 없는데 헤더가 있다고 적음 | **이행 완료** — §13-7 |
 | (범위 밖) 가이드의 `Event ActivateAbility` 설명이 부정확 | 정정 — 베이스가 `Super` 를 안 부르므로 그 BP 이벤트는 *애초에 실행되지 않는다* |
 
-🔴 **P3-2 는 남겨 둔다(후속).** 명세 §12-2 ⑦⑩⑪⑬ · §14-5 `Boss.Selection` 테스트와 보스/GA 의
-`IsDataValid` 가 실제로 없다. 런타임은 FIFO·clamp·폴백으로 안전해서 P3 지만, **헤더와 §14-3 의
-"IsDataValid 가 경고한다"는 지금 거짓 문장**이다. 코드를 고치든 문구를 고치든 하나는 해야 한다.
-
 **검증** — 빌드 통과 · 전체 63개 중 61 통과(실패 2건은 §13-5 의 선행 건, 무변).
+
+### 13-7. G2 P3-2 이행 (사용자 지시 2026-09-03 — "1번으로 간다")
+
+머지 게이트가 남긴 유일한 미이행 항목. **헤더와 §14-3 이 "`IsDataValid` 가 경고한다"고 적어 두고 실제로는
+없었던** 상태를 해소한다. 런타임은 FIFO·clamp·폴백으로 안전했으므로 P3 였지만, *문서가 약속한 것이 존재하지
+않는* 상태 자체가 결함이다.
+
+**① `AFPSRBossBase::IsDataValid`(`WITH_EDITOR`) 신설** — 경고 = `GrantedAbilities` 빈 배열 · `PatternTriggers`
+빈 배열(= 보스가 영영 공격하지 않거나, 의도치 않은 폴백 케이던스로 도는 두 경우) · **포격의
+`4 × (⌊Fuse/Interval⌋+1)` 이 `MaxConcurrentMarks` 를 넘는 조합**. 오류 = `Threshold <= 0` ·
+`HealthBelow >= 1`.
+
+**② 판정 규칙은 순수 함수로 분리한다.** `FPSRBoss::ValidateTrigger`(→ `ETriggerAuthoringIssue`) ·
+`FPSRBoss::EstimatePeakBlastMarks` · `FPSRBoss::BuildSelectionOrder` · `FPSRAbilitySystem::IsTimeBasedEffect`.
+`IsDataValid` 와 선택기·가드는 그 위의 **얇은 어댑터**만 남는다 — `namespace FPSRVitals`(VIT1) 및 이 명세가
+이미 `ComputePhase`/`ShouldTriggerFire` 에 쓴 형식과 같다.
+
+> 🔴 `IsTimeBasedEffect` 를 굳이 뽑아낸 실무적 이유: 가드의 거부 경로는 **의도적으로 `ensureMsgf` 를
+> 발화**하는데, 자동화 러너가 그 ensure 의 콜스택을 **테스트 에러로 캡처**해 테스트를 실패시킨다(1차 실행에서
+> 실제로 그렇게 실패했다). `AddExpectedError` 로 콜스택 라인을 전부 매칭하는 것은 취약하므로 **규칙을 ensure
+> 밖으로 꺼냈다.** 어댑터 극성은 살아있는 델리게이트의 *허용* 경로로 계속 단언한다 — 반환을 뒤집으면 그쪽이
+> 깨진다.
+
+**③ `BuildSelectionOrder` 는 난수를 인자로 받는다.** 선택기가 `FMath::RandHelper` 를 호출하는 것은
+`Random` 일 때뿐 — 전역 스트림을 `Sequential` 보스가 흔들지 않게 한다.
+
+**신규 테스트 3종** — `FPSRoguelite.Boss.{Selection, Authoring, TimeAxisGuard}` + `Boss.TickEnabled` 에
+**오브 CDO** 단언 추가(§12-2 ⑦ 의 나머지 절반). 이로써 §12-2 ⑦⑩⑪⑬ · §14-5 `Boss.Selection` 이 모두 실재한다.
+
+**검증** — 빌드 통과 · 전체 66개 중 64 통과. 실패 2건은 §13-5 와 동일한 선행 건
+(`Editor.CardCsv.RoundTrip` · `Enemy.BlueprintParent`, VIT1 `776e8441`) 이며 이 브랜치와 무관하다.
 
 ---
 

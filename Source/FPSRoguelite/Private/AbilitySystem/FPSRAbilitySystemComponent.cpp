@@ -22,14 +22,23 @@ void UFPSRAbilitySystemComponent::EnableTimeAxisGuard()
 		FGameplayEffectApplicationQuery::CreateUObject(this, &UFPSRAbilitySystemComponent::RejectTimeBasedGameplayEffect));
 }
 
+namespace FPSRAbilitySystem
+{
+	bool IsTimeBasedEffect(const FGameplayEffectSpec& Spec)
+	{
+		const bool bHasDuration = Spec.Def && Spec.Def->DurationPolicy == EGameplayEffectDurationType::HasDuration;
+		const bool bHasPeriod = Spec.GetPeriod() > 0.0f;
+		return bHasDuration || bHasPeriod;
+	}
+}
+
 bool UFPSRAbilitySystemComponent::RejectTimeBasedGameplayEffect(const FActiveGameplayEffectsContainer& ActiveGEContainer, const FGameplayEffectSpec& Spec) const
 {
-	const bool bHasDuration = Spec.Def && Spec.Def->DurationPolicy == EGameplayEffectDurationType::HasDuration;
-	const bool bHasPeriod = Spec.GetPeriod() > 0.0f;
-	if (!bHasDuration && !bHasPeriod)
+	if (!FPSRAbilitySystem::IsTimeBasedEffect(Spec))
 	{
 		return true; // Instant, or Infinite with NO period — allowed (see header doc for why Period must be checked too)
 	}
+	const bool bHasDuration = Spec.Def && Spec.Def->DurationPolicy == EGameplayEffectDurationType::HasDuration;
 
 	// Dev-time noise only (ensureMsgf never crashes, in Shipping or otherwise — that's the whole point of using it
 	// instead of check/checkf here) + an always-fires log line so a live server's repeat offenders aren't silenced

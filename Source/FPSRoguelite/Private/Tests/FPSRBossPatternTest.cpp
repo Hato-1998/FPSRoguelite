@@ -4,9 +4,12 @@
 
 #if WITH_AUTOMATION_TESTS
 
+#include "AbilitySystem/FPSRAbilitySystemComponent.h"
 #include "Boss/FPSRBossBase.h"
+#include "Boss/FPSRBossHomingOrb.h"
 #include "Boss/FPSRBossLaserMath.h"
 #include "Boss/FPSRBossTypes.h"
+#include "GameplayEffect.h"
 
 // Worldless: every predicate under test is pure arithmetic, plus one CDO read. No SpawnActor, no world.
 //
@@ -310,6 +313,179 @@ bool FFPSRBossTickEnabledTest::RunTest(const FString& Parameters)
 		TestTrue(TEXT("boss CDO has bCanEverTick — the pattern driver is in Tick"),
 			BossCDO->PrimaryActorTick.bCanEverTick);
 	}
+
+	// The same trap with a worse blast radius: the orb derives straight from AActor (where bCanEverTick defaults to
+	// false), and its whole grace/chase/divert/dwell state machine lives in Tick. Without the flag it would spawn,
+	// hang in the air forever, and never chase, damage, or clean itself up — green build, green automation.
+	const AFPSRBossHomingOrb* OrbCDO = GetDefault<AFPSRBossHomingOrb>();
+	TestNotNull(TEXT("orb CDO"), OrbCDO);
+	if (OrbCDO)
+	{
+		TestTrue(TEXT("orb CDO has bCanEverTick — its whole state machine is in Tick"),
+			OrbCDO->PrimaryActorTick.bCanEverTick);
+	}
+
+	return true;
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+//  Selection order
+// ---------------------------------------------------------------------------------------------------------------
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFPSRBossSelectionTest, "FPSRoguelite.Boss.Selection",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FFPSRBossSelectionTest::RunTest(const FString& Parameters)
+{
+	TArray<int32> Order;
+
+	// Nothing eligible -> nothing to visit. The selector must not index an empty array.
+	FPSRBoss::BuildSelectionOrder(EFPSRBossPatternSelection::Sequential, 0, 0, 0, Order);
+	TestEqual(TEXT("no eligible patterns -> empty order"), Order.Num(), 0);
+
+	// Sequential starts AT the cursor and wraps.
+	FPSRBoss::BuildSelectionOrder(EFPSRBossPatternSelection::Sequential, 3, 1, 0, Order);
+	TestEqual(TEXT("sequential visits all three"), Order.Num(), 3);
+	TestEqual(TEXT("sequential starts at the cursor"), Order[0], 1);
+	TestEqual(TEXT("sequential steps forward"), Order[1], 2);
+	TestEqual(TEXT("sequential wraps to the front"), Order[2], 0);
+
+	// 🔴 The property that is easy to lose: Random must still visit EVERY candidate. A "roll once and give up"
+	// random would waste the trigger whenever the rolled pattern happened to be on cooldown, and the boss would
+	// stand idle for a beat with nothing in the log to explain it.
+	for (int32 RandomStart = 0; RandomStart < 3; ++RandomStart)
+	{
+		FPSRBoss::BuildSelectionOrder(EFPSRBossPatternSelection::Random, 3, 0, RandomStart, Order);
+		TestEqual(TEXT("random visits all three"), Order.Num(), 3);
+		TestEqual(TEXT("random honours its start"), Order[0], RandomStart);
+
+		TArray<int32> Sorted = Order;
+		Sorted.Sort();
+		TestEqual(TEXT("random visits index 0 exactly once"), Sorted[0], 0);
+		TestEqual(TEXT("random visits index 1 exactly once"), Sorted[1], 1);
+		TestEqual(TEXT("random visits index 2 exactly once"), Sorted[2], 2);
+	}
+
+	// Random ignores the sequential cursor and Sequential ignores the roll — otherwise the two policies bleed into
+	// each other and "Sequential" quietly stops being learnable.
+	FPSRBoss::BuildSelectionOrder(EFPSRBossPatternSelection::Random, 4, 3, 1, Order);
+	TestEqual(TEXT("random uses the roll, not the cursor"), Order[0], 1);
+	FPSRBoss::BuildSelectionOrder(EFPSRBossPatternSelection::Sequential, 4, 3, 1, Order);
+	TestEqual(TEXT("sequential uses the cursor, not the roll"), Order[0], 3);
+
+	// A cursor that has run past the array (patterns removed from GrantedAbilities between activations, or an
+	// eligibility list that shrank when a MinPhase gate closed) must fold back into range rather than producing an
+	// out-of-bounds index into Eligible.
+	FPSRBoss::BuildSelectionOrder(EFPSRBossPatternSelection::Sequential, 3, 7, 0, Order);
+	TestEqual(TEXT("oversized cursor folds in range"), Order[0], 1);
+	FPSRBoss::BuildSelectionOrder(EFPSRBossPatternSelection::Sequential, 3, -1, 0, Order);
+	TestEqual(TEXT("negative cursor folds in range"), Order[0], 2);
+
+	return true;
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+//  Authoring rules (the pure half of IsDataValid)
+// ---------------------------------------------------------------------------------------------------------------
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFPSRBossAuthoringTest, "FPSRoguelite.Boss.Authoring",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FFPSRBossAuthoringTest::RunTest(const FString& Parameters)
+{
+	using EIssue = FPSRBoss::ETriggerAuthoringIssue;
+
+	FFPSRBossPatternTrigger Trigger;
+	Trigger.Kind = EFPSRBossTriggerKind::Elapsed;
+	Trigger.Threshold = 8.0f;
+	TestTrue(TEXT("a normal elapsed trigger is fine"), FPSRBoss::ValidateTrigger(Trigger) == EIssue::None);
+
+	Trigger.Threshold = 0.0f;
+	TestTrue(TEXT("threshold 0 is rejected"), FPSRBoss::ValidateTrigger(Trigger) == EIssue::ThresholdNotPositive);
+
+	Trigger.Kind = EFPSRBossTriggerKind::HealthBelow;
+	Trigger.Threshold = 0.66f;
+	TestTrue(TEXT("a normal health trigger is fine"), FPSRBoss::ValidateTrigger(Trigger) == EIssue::None);
+
+	Trigger.Threshold = 1.0f;
+	TestTrue(TEXT("HealthBelow at full health is rejected"),
+		FPSRBoss::ValidateTrigger(Trigger) == EIssue::HealthThresholdFull);
+
+	// A threshold above 1 is only wrong for HealthBelow — "every 5 patterns" is perfectly normal authoring, and the
+	// rule must not confuse the two axes.
+	Trigger.Kind = EFPSRBossTriggerKind::PatternCount;
+	Trigger.Threshold = 5.0f;
+	TestTrue(TEXT("a count trigger above 1 is fine"), FPSRBoss::ValidateTrigger(Trigger) == EIssue::None);
+
+	// Marker peak: 4 players with a 1.4 s fuse and a 2.0 s interval means only the volley just fired is ever alive.
+	TestEqual(TEXT("fuse shorter than the interval -> one volley alive"),
+		FPSRBoss::EstimatePeakBlastMarks(4, 1.4f, 2.0f), 4);
+	// A fuse three intervals long keeps three earlier volleys up alongside the new one.
+	TestEqual(TEXT("fuse of three intervals -> four volleys alive"),
+		FPSRBoss::EstimatePeakBlastMarks(4, 6.0f, 2.0f), 16);
+	TestEqual(TEXT("solo play scales down"), FPSRBoss::EstimatePeakBlastMarks(1, 6.0f, 2.0f), 4);
+	// Degenerate authoring must return 0 rather than dividing by zero.
+	TestEqual(TEXT("zero interval is not a division"), FPSRBoss::EstimatePeakBlastMarks(4, 6.0f, 0.0f), 0);
+	TestEqual(TEXT("no players -> no markers"), FPSRBoss::EstimatePeakBlastMarks(0, 6.0f, 2.0f), 0);
+
+	return true;
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+//  Time-axis guard
+// ---------------------------------------------------------------------------------------------------------------
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFPSRBossTimeAxisGuardTest, "FPSRoguelite.Boss.TimeAxisGuard",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FFPSRBossTimeAxisGuardTest::RunTest(const FString& Parameters)
+{
+	// 🔴 This guard is the ONLY runtime enforcement of the §2-2 freeze contract on the actor-owned ASCs — everything
+	// else about "no duration or periodic GEs" is a comment. It is also silent when it breaks: a duration GE that
+	// slips through simply keeps counting down during a level-up freeze, which surfaces as a balance complaint
+	// months later rather than as a bug.
+	UFPSRAbilitySystemComponent* ASC = NewObject<UFPSRAbilitySystemComponent>(GetTransientPackage());
+	TestNotNull(TEXT("ASC"), ASC);
+	if (!ASC)
+	{
+		return false;
+	}
+
+	TestEqual(TEXT("no queries before opting in"), ASC->GameplayEffectApplicationQueries.Num(), 0);
+	ASC->EnableTimeAxisGuard();
+	ASC->EnableTimeAxisGuard();
+	TestEqual(TEXT("EnableTimeAxisGuard is idempotent"), ASC->GameplayEffectApplicationQueries.Num(), 1);
+	if (ASC->GameplayEffectApplicationQueries.Num() != 1)
+	{
+		return false;
+	}
+
+	UGameplayEffect* InstantGE = NewObject<UGameplayEffect>(GetTransientPackage());
+	InstantGE->DurationPolicy = EGameplayEffectDurationType::Instant;
+	const FGameplayEffectSpec InstantSpec(InstantGE, FGameplayEffectContextHandle(), 1.0f);
+
+	UGameplayEffect* DurationGE = NewObject<UGameplayEffect>(GetTransientPackage());
+	DurationGE->DurationPolicy = EGameplayEffectDurationType::HasDuration;
+	DurationGE->DurationMagnitude = FGameplayEffectModifierMagnitude(FScalableFloat(5.0f));
+	const FGameplayEffectSpec DurationSpec(DurationGE, FGameplayEffectContextHandle(), 1.0f);
+
+	// Infinite + Period is the hole a DurationPolicy-only check leaves open: it never expires, so a policy check
+	// waves it through, but it re-executes forever on the world timer.
+	UGameplayEffect* PeriodicGE = NewObject<UGameplayEffect>(GetTransientPackage());
+	PeriodicGE->DurationPolicy = EGameplayEffectDurationType::Infinite;
+	PeriodicGE->Period = FScalableFloat(1.0f);
+	const FGameplayEffectSpec PeriodicSpec(PeriodicGE, FGameplayEffectContextHandle(), 1.0f);
+
+	TestFalse(TEXT("an instant GE carries no unpausable timer"), FPSRAbilitySystem::IsTimeBasedEffect(InstantSpec));
+	TestTrue(TEXT("a HasDuration GE does"), FPSRAbilitySystem::IsTimeBasedEffect(DurationSpec));
+	TestTrue(TEXT("an infinite PERIODIC GE does too"), FPSRAbilitySystem::IsTimeBasedEffect(PeriodicSpec));
+
+	// Drive the ALLOW path through the live delegate, so registration and the adapter's polarity are both covered.
+	// The reject path is asserted on the pure rule above instead: the delegate deliberately ensure()s there, and an
+	// automation run captures that ensure's whole callstack as test errors — which is why the rule was split out.
+	// An inverted return in the adapter still fails here, because the same two lines serve both directions.
+	TestTrue(TEXT("the registered query lets an instant GE through"),
+		ASC->GameplayEffectApplicationQueries[0].Execute(ASC->GetActiveGameplayEffects(), InstantSpec));
 
 	return true;
 }

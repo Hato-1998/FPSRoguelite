@@ -19,6 +19,10 @@
 #include "AbilitySystem/FPSRAbilitySystemComponent.h"
 #include "AbilitySystem/Abilities/FPSRBossGameplayAbility.h"
 #include "AbilitySystem/Abilities/FPSRFreezeCooldownAbility.h"
+#include "AbilitySystem/Abilities/FPSRBossGA_Barrage.h"
+#if WITH_EDITOR
+#include "Misc/DataValidation.h"
+#endif
 #include "AbilitySystemComponent.h"
 #include "GameplayAbilitySpec.h"
 #include "Combat/FPSRCombatStatics.h"
@@ -866,17 +870,21 @@ void AFPSRBossBase::ServerTryActivateNextPattern()
 		return;
 	}
 
-	// Sequential keeps its own cursor so the rotation is learnable; Random starts from a random offset but still
-	// walks the list, so a cooldown-blocked roll falls through to the next candidate instead of wasting the trigger.
-	const int32 Start = (SelectionPolicy == EFPSRBossPatternSelection::Random)
+	// The visit order is a pure function so the policy is testable with no ASC and no world
+	// (FPSRBoss::BuildSelectionOrder). Both policies walk EVERY candidate — only the starting point differs — which
+	// is what stops a cooldown-blocked pick from wasting the trigger that fired.
+	//
+	// The roll is taken only for Random: BuildSelectionOrder ignores it otherwise, but FMath::RandHelper draws from
+	// the global stream, and a Sequential boss must not perturb that stream for everything else in the run.
+	const int32 RandomStart = (SelectionPolicy == EFPSRBossPatternSelection::Random)
 		? FMath::RandHelper(Eligible.Num())
 		: 0;
 
-	for (int32 Step = 0; Step < Eligible.Num(); ++Step)
+	TArray<int32> Order;
+	FPSRBoss::BuildSelectionOrder(SelectionPolicy, Eligible.Num(), NextPatternIndex, RandomStart, Order);
+
+	for (const int32 Slot : Order)
 	{
-		const int32 Slot = (SelectionPolicy == EFPSRBossPatternSelection::Random)
-			? (Start + Step) % Eligible.Num()
-			: (NextPatternIndex + Step) % Eligible.Num();
 		const int32 Index = Eligible[Slot];
 
 		// TryActivateAbility runs the ability's own CheckCooldown, so the freeze-paused cooldown contract is honoured
@@ -889,6 +897,74 @@ void AFPSRBossBase::ServerTryActivateNextPattern()
 		}
 	}
 }
+
+#if WITH_EDITOR
+EDataValidationResult AFPSRBossBase::IsDataValid(FDataValidationContext& Context) const
+{
+	EDataValidationResult Result = Super::IsDataValid(Context);
+
+	if (GrantedAbilities.Num() == 0)
+	{
+		Context.AddWarning(NSLOCTEXT("FPSRBoss", "NoPatterns",
+			"Boss has no GrantedAbilities — the selector has nothing to choose from, so this boss will never attack."));
+	}
+
+	if (PatternTriggers.Num() == 0)
+	{
+		Context.AddWarning(NSLOCTEXT("FPSRBoss", "NoTriggers",
+			"Boss has no PatternTriggers. At runtime this falls back to a repeating PatternGapSeconds cadence, but that "
+			"fallback is a safety net rather than a design — author the triggers you actually want."));
+	}
+
+	// The RULE lives in FPSRBoss::ValidateTrigger (pure, unit-tested); this loop only chooses the wording.
+	for (const FFPSRBossPatternTrigger& Trigger : PatternTriggers)
+	{
+		switch (FPSRBoss::ValidateTrigger(Trigger))
+		{
+		case FPSRBoss::ETriggerAuthoringIssue::ThresholdNotPositive:
+			Context.AddError(NSLOCTEXT("FPSRBoss", "TriggerThresholdZero",
+				"A PatternTrigger has Threshold <= 0. Elapsed/PatternCount would be due on the first tick and never stop "
+				"being due; HealthBelow could only ever fire on the death frame."));
+			Result = EDataValidationResult::Invalid;
+			break;
+
+		case FPSRBoss::ETriggerAuthoringIssue::HealthThresholdFull:
+			Context.AddError(NSLOCTEXT("FPSRBoss", "TriggerHealthFull",
+				"A HealthBelow trigger has Threshold >= 1, so it fires before the boss has taken any damage at all."));
+			Result = EDataValidationResult::Invalid;
+			break;
+
+		default:
+			break;
+		}
+	}
+
+	// The marker cap lives on the boss but the numbers that fill it live on the barrage, so this is the only place
+	// both are visible.
+	for (const TSubclassOf<UFPSRBossGameplayAbility>& AbilityClass : GrantedAbilities)
+	{
+		const UFPSRBossGA_Barrage* Barrage = AbilityClass
+			? Cast<UFPSRBossGA_Barrage>(AbilityClass->GetDefaultObject())
+			: nullptr;
+		if (!Barrage)
+		{
+			continue;
+		}
+		const int32 Peak = FPSRBoss::EstimatePeakBlastMarks(FPSRBoss::MaxSupportedPlayers,
+			Barrage->GetFuseSeconds(), Barrage->GetIntervalSeconds());
+		if (Peak > MaxConcurrentMarks)
+		{
+			Context.AddWarning(FText::Format(
+				NSLOCTEXT("FPSRBoss", "MarksOverCap",
+					"{0} can have up to {1} markers alive at once (players x fuse/interval) but MaxConcurrentMarks is {2}. "
+					"The oldest would be fizzled without detonating — raise the cap or shorten the fuse."),
+				FText::FromString(AbilityClass->GetName()), FText::AsNumber(Peak), FText::AsNumber(MaxConcurrentMarks)));
+		}
+	}
+
+	return Result;
+}
+#endif // WITH_EDITOR
 
 #if !UE_BUILD_SHIPPING
 void AFPSRBossBase::DebugForcePattern(int32 Index)

@@ -54,6 +54,13 @@ public:
 
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
+#if WITH_EDITOR
+	/** Authoring guard. The header and the spec both promise "IsDataValid warns about an empty trigger list" — this
+	 *  is what makes that true. An unauthored boss is not a crash, it is a boss that stands still forever, and that
+	 *  is precisely the kind of failure nothing else reports. */
+	virtual EDataValidationResult IsDataValid(class FDataValidationContext& Context) const override;
+#endif
+
 	/** The boss's non-GAS health component — exposed so the HUD boss bar (B11) can bind OnHealthChanged (now
 	 *  client-fired via B12) and read GetHealth()/GetMaxHealth(). */
 	UFUNCTION(BlueprintPure, Category = "FPSR|Boss")

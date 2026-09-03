@@ -8,6 +8,19 @@
 struct FActiveGameplayEffectsContainer;
 struct FGameplayEffectSpec;
 
+namespace FPSRAbilitySystem
+{
+	/** Does this spec carry a timer the §2-2 freeze cannot pause? Pure, and separated from the delegate below on
+	 *  purpose: the delegate's rejection path deliberately `ensure`s, and an automation run captures that ensure's
+	 *  callstack as test errors — so the RULE has to be reachable without firing it. Same split as
+	 *  FPSRBoss::ValidateTrigger vs AFPSRBossBase::IsDataValid.
+	 *
+	 *  True for `HasDuration` **or** `GetPeriod() > 0`. Period must be checked separately because an Infinite GE can
+	 *  also be periodic (re-executing forever on the world timer), which a DurationPolicy-only test would wave
+	 *  through. `GetPeriod()` returns NO_PERIOD for Instant specs, so Instant never trips this. */
+	FPSROGUELITE_API bool IsTimeBasedEffect(const FGameplayEffectSpec& Spec);
+}
+
 /** Project AbilitySystemComponent. THREE owners with DIFFERENT patterns (do not assume PlayerState):
  *  - Players: owned by AFPSRPlayerState (survives respawn/seamless travel), replication mode Mixed.
  *  - Elite-tier enemies: owned by the ACTOR itself (AFPSREnemyEliteBase — enemies have no PlayerState),
