@@ -9,6 +9,44 @@
 
 ---
 
+## 🔷 U22a 도시 트랙 잔존물 정리 (2026-09-03, main 머지 `f6d9aa65`) — **폐기된 트랙이 살아있는 문서·런타임 모듈에 남아 있던 것 해소**
+> 브랜치 `chore/u22a-citygen-retire` · 작업 커밋 `3ae409c9`. 보드 행 = 「U22a/CityGen 잔존물 정리」(크기 `S` · 마일스톤 미배정 — 드리프트 정정 성격, 선례 = 「BalanceTuning_Reference.md 스테일 일괄 정리」).
+> 발단 = 아트 방향 재논의 중 사용자가 *"U22a 관련 내용 확인해봐 해당 내용 폐기했을텐데"* 라고 지적한 것.
+
+### 이 건의 실질 산출 = 문서↔코드 드리프트 5건
+아트 방향을 상담하다 **낡은 메모리를 근거로 두 번 틀린 조언**을 했고, 그 정정 과정에서 드리프트가 드러났다.
+1. 🔴 **`Map_CyberCity`·`L_Map1_City`·`PolygonCyberCity`(1,537)·`PolygonScifi` 가 이미 없는데** "지금 지우면 참조가 깨진다"고 경고했다 — 전부 2026-08-05~08-21 사이에 삭제 완료돼 있었다.
+2. 🔴 **"SRS 셀 셰이딩은 안 쓰기로 했다"**(2026-07-18 결정)를 근거로 삼았으나, 그 결정은 *삭제된 맵 기준이라 사용자가 폐기*했고 현재는 `L_Map_1` 에 `Only on Custom Depth=False` = **씬 전체 셀이 켜져 있다**.
+3. 🔴 **"VAT 파이프라인 유지"** 라고 했으나 VAT 백엔드는 ADR 0007 로 삭제되고 적 렌더가 **절차적 스태틱 메시**(`UFPSREnemyAnimProfile_Proc`)로 대체돼 있었다(2026-08-24).
+4. `Docs/TaskPrompts_Master.md` 의 U22a 행이 **"다음 착수"** 로 남아 있었다 — 살아있는 문서가 3주 전 종결된 트랙을 가리키고 있었다.
+5. `Config/DefaultEditor.ini:7` 블록아웃 팔레트가 `/Game/PolygonCyberCity` 를 가리켰다 — 그 팩은 2026-08-05 삭제라 **스캔 대상 0개**. 즉 툴을 열면 팔레트가 비어 있었다.
+
+**교훈**: 아트/레벨처럼 결정이 자주 뒤집히는 영역은 메모리·프롬프트 문서가 조용히 낡는다. `ADR` 과 `git log` 를 먼저 대조할 것. (메모리 `citybuild-tool-and-u22a-state` 는 삭제하고 `arena-and-art-direction-current-state` 로 교체했다.)
+
+### 삭제 — 참조 0건 실측 후
+- `Source/FPSRoguelite/{Public,Private}/CityGen/`(`FPSRCityGenConfig.h/.cpp` · `FPSRCityGenKit.h`).
+  ⚠️ **런타임 모듈**이라 아무도 안 쓰는 `UPrimaryDataAsset` 이 출시 빌드에 쿡되고 있었다. `DA_CityGen*` 인스턴스 0건이라 로드 에러 위험 없음.
+- `Content/Python/fpsr_citygen.py` + **`fpsr_citylayout.py`**(후자가 전자를 4곳에서 import 하는 짝 도구 — 같이 지워야 했다).
+- `Content/Tools/CityGen/EUW_CityGen.uasset`. 삭제 전 **에디터 종료 확인**(`.uasset` 락).
+
+### 보존 / 이관 경계 (삭제하지 않은 것과 이유)
+- 📌 **`Docs/U22a-B_TronVisual_Prompt.md` 는 남겼다.** 2026-07-23 사용자 확정 *"변주 있는 Tron"* 의 **§1 제1원리 5건**(디테일 텍스처 불요 / 발광+블룸이 싸다 / **스웜 가독성 최고** — *"화면의 화려함은 환경이 아니라 전투가 낸다. 환경이 차분한 건 밋밋이 아니라 무대"* / 머티리얼 난제 소멸 / 블록 지오메트리 정합)과 **§3 밋밋 방지 5레버**(구역 색·밝기 대비·밀도 변주·반사·실루엣)가 후속 `ArtDirection.md` 확장의 재료다. 그 문서의 **P2("게임 전체 전환, 조건부")가 미결로 남아 있었고, 2026-09-03 결정이 그것을 닫은 것**이다.
+- 문서 11종은 **삭제가 아니라 `Docs/Archive/prompts/` 이관**(기존 관례, rename 이라 이력 100% 보존).
+- `fpsr_bp_layout.py` 의 `EXTERNAL_PACKS` — "외부 팩은 건드리지 마라"는 **방어적 제외 목록**이라 없는 경로가 남아도 무해하고(이미 삭제된 `Rifle_01` 도 들어 있다), 팩이 재임포트되면 오히려 필요하다 → 손대지 않았다.
+
+### 함정 2건 (같은 세션에서 실제로 밟음)
+- 🔴 **세션 도중 워크트리 브랜치가 `main` → `content/hud-synty-art` 로 바뀌어 있었다**(다른 세션이 점유). 미커밋 변경 131건에 두 세션 것이 섞여 커밋을 보류했다. 결과적으로 그 세션이 삭제분 127개를 `c7ea47d1` 로 **따로** 커밋해 이력 오염은 없었다. 메모리 `shared-worktree-branch-collision` 이 실증된 사례 — **커밋 전 `git branch --show-current` 는 형식이 아니라 실효 검사다.**
+- ⚠️ **보드 클레임 없이 착수했다**(하드 게이트 위반). `/board` 감사가 잡아내 사후 클레임했다. 순서는 클레임 → 브랜치 → 작업이다.
+
+### 검증
+`Build.bat FPSRogueliteEditor Win64 Development -DisableUnity` → **`Result: Succeeded`**(295초). 런타임 모듈에서 헤더를 지웠으므로 유니티 블롭이 가릴 수 있는 누락을 잡으려 `-DisableUnity` 를 썼다. 판정은 종료코드가 아니라 `Result:` 줄로(메모리 `build-exit-code-lies-grep-result`).
+
+### 남은 것
+- `TaskPrompts_Master.md` 의 **U22b 행**은 선행이 폐기된 U22a 라 사실상 막혀 있다 — 이 문서 자체가 레거시(작업 SSOT = Notion 보드)라 최소 개입만 했다.
+- 다음 = **아트 방향 `ArtDirection.md` 확장**(보드 행 = M1 · 추천모델 Fable[T3 — 적 렌더 성능 경로가 얽힌 설계]).
+
+---
+
 ## 🔷 GitHub README 저작 (2026-09-03, main 머지 `c7950352`) — **리포 첫 화면이 파일 트리뿐이던 상태 해소**
 > 브랜치 `docs/readme` · 작업 커밋 `6f5ac28b` · 산출물 `README.md`(신규 620줄). 보드 행 = 「GitHub README 저작」(크기 `S` · 마일스톤 **미배정**).
 > 사용자 지정 4개 축 = ①Notion 일감 관리 ②엔진 기능 활용 ③엔진 밖 자체 구현 + 트레이드오프 ④스웜·카드 분석.
