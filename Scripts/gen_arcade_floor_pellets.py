@@ -16,6 +16,10 @@
 #   Trade-off: the material is now coupled to THIS maze. That is acceptable because the constant is
 #   generated here from the same MAZE table the level builder uses — change the maze, re-run this.
 #
+# ⚠️ SUPERSEDED by gen_arcade_floor_guideline.py (2026-09-03: dots spread attention evenly;
+#    a centre line with a travelling pulse gives the eye a direction instead). It also carries
+#    the Y-constant bug fixed there — cell index and cell centre need DIFFERENT halves.
+#
 # Pellets are drawn procedurally from world position (not baked), so they stay crisp at any
 # distance. The maze spans 280 m; a baked dot texture would smear up close.
 

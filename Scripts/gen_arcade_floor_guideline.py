@@ -95,7 +95,7 @@ def hlsl():
         ? (float)((MazeRow[clamp((r), 0, {rows_1})] >> (uint)clamp((c), 0, {cols_1})) & 1u) : 0.0 )
 
     int cx = (int)floor(WP.x / CellSize) + {halfc};
-    int cy = (int)floor({halfr} - WP.y / CellSize);
+    int cy = (int)floor({halfri} - WP.y / CellSize);
 
     float here = WALK(cy, cx);
     float nL   = WALK(cy, cx - 1);
@@ -103,9 +103,19 @@ def hlsl():
     float nN   = WALK(cy - 1, cx);      // image row-1 is world +Y (north)
     float nS   = WALK(cy + 1, cx);
 
+    // Room test: a cell inside ANY fully-open 2x2 block is open space, not a corridor.
+    // A one-cell-wide corridor can never form a 2x2, so rooms (the ghost house, the side
+    // pockets) drop out on their own and only real corridors keep a guide line.
+    float room = 0.0;
+    room = max(room, here * nL * nN * WALK(cy - 1, cx - 1));
+    room = max(room, here * nR * nN * WALK(cy - 1, cx + 1));
+    room = max(room, here * nL * nS * WALK(cy + 1, cx - 1));
+    room = max(room, here * nR * nS * WALK(cy + 1, cx + 1));
+    float corridor = here * (1.0 - room);
+
     // Offset from this cell's centre, in world cm (no frac() so there is no half-cell phase error).
     float2 c = float2(((float)cx - {halfc} + 0.5) * CellSize,
-                      ({halfr} - 0.5 - (float)cy) * CellSize);
+                      ({halfrc} - (float)cy) * CellSize);
     float2 q = WP.xy - c;
 
     float hw = max(LineWidth, 1.0) * 0.5;
@@ -124,7 +134,7 @@ def hlsl():
 
     float lineH = bandH * saturate(extW + extE);
     float lineV = bandV * saturate(extN + extS);
-    float lineMask = saturate(lineH + lineV) * here;   // NOT 'line' — reserved word in HLSL
+    float lineMask = saturate(lineH + lineV) * corridor;   // NOT 'line' — reserved word in HLSL
 
     // Travelling light. Horizontal runs flow along +X, vertical along +Y, so the two streams cross
     // a junction independently instead of cancelling.
@@ -136,10 +146,16 @@ def hlsl():
     float pH = exp(-(dH * dH) / (w * w));
     float pV = exp(-(dV * dV) / (w * w));
 
-    float pulse = saturate(pH * lineH + pV * lineV);
+    float pulse = saturate(pH * lineH + pV * lineV) * corridor;
     return float2(lineMask, pulse);
 """.format(rows=ROWS, rows_1=ROWS - 1, cols=COLS, cols_1=COLS - 1,
-           halfc=COLS // 2, halfr=ROWS / 2.0 + 0.5, body=body)
+           halfc=COLS // 2,
+           # TWO different Y constants — conflating them put every horizontal line half a cell
+           # (500 cm) off, i.e. exactly on the wall edge (found 2026-09-03, verified against the
+           # level's actual wall positions). X was right, which is why only horizontals looked wrong.
+           halfri=ROWS / 2.0,          # cell INDEX  : cy = floor(ROWS/2 - y/CELL)
+           halfrc=ROWS / 2.0 - 0.5,    # cell CENTRE : y  = (ROWS/2 - 0.5 - cy) * CELL
+           body=body)
 
 
 def scalar(mat, n, v, x, y):
