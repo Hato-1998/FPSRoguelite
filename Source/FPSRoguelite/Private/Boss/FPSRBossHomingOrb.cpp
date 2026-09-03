@@ -13,6 +13,7 @@
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/ProjectileMovementComponent.h"
 #include "Hero/FPSRCharacter.h"
+#include "Net/UnrealNetwork.h"
 #if !UE_BUILD_SHIPPING
 #include "DrawDebugHelpers.h"
 #endif
@@ -62,6 +63,15 @@ AFPSRBossHomingOrb::AFPSRBossHomingOrb()
 	Movement->ProjectileGravityScale = 0.0f;
 }
 
+void AFPSRBossHomingOrb::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+
+	FDoRepLifetimeParams Params;
+	Params.bIsPushBased = true;
+	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRBossHomingOrb, bDetonated, Params);
+}
+
 void AFPSRBossHomingOrb::BeginPlay()
 {
 	Super::BeginPlay();
@@ -72,6 +82,11 @@ void AFPSRBossHomingOrb::BeginPlay()
 		// nothing to do with XP — XP only drops from AFPSREnemyBase::HandleDeath, and this is not one.) Without it a
 		// boss that keeps summoning orbs becomes a renewable source of on-kill procs.
 		Health->SetCountsAsKill(false);
+
+		// The CLIENT half of the shot-down cosmetic: OnDeathCosmetic is broadcast from OnRep_bDead, which only ever
+		// runs on non-authority machines. Bound unconditionally; the authority calls HandleDestroyedCosmetic itself
+		// from HandleDeath, because a listen-server host never receives its own OnRep.
+		Health->OnDeathCosmetic.AddDynamic(this, &AFPSRBossHomingOrb::HandleDestroyedCosmetic);
 
 		if (HasAuthority())
 		{
@@ -171,8 +186,49 @@ void AFPSRBossHomingOrb::ServerDetonate()
 	FPSRCombat::ApplyHostileExplosion(GetWorld(), GetActorLocation(), LaunchParams.BlastRadiusCm,
 		LaunchParams.BlastDamage, this, LaunchParams.BlastKnockback, DamageSpec);
 
-	OnOrbDetonatedCosmetic();
-	Destroy();
+	// Publish the detonation BEFORE dying so clients get an edge to react to — destroying here would leave them with
+	// an actor that simply vanished, and the blast (the boss landing its hit) would be invisible to everyone but the
+	// host. The despawn is deferred by the same dwell the shot-down path uses, for the same reason.
+	if (!bDetonated)
+	{
+		bDetonated = true;
+		MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRBossHomingOrb, bDetonated, this);
+		OnOrbDetonatedCosmetic(); // authority half — the host gets no OnRep
+	}
+
+	// Stop dead and stop interacting; the actor lingers only long enough for the flag to replicate.
+	if (Movement)
+	{
+		Movement->StopMovementImmediately();
+		Movement->Deactivate();
+	}
+	if (Sphere)
+	{
+		Sphere->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	}
+	if (Mesh)
+	{
+		Mesh->SetHiddenInGame(true);
+	}
+	DetonateDespawnRemaining = FMath::Max(0.05f, DeathDwellSeconds);
+}
+
+void AFPSRBossHomingOrb::OnRep_Detonated()
+{
+	if (bDetonated)
+	{
+		OnOrbDetonatedCosmetic();
+	}
+}
+
+void AFPSRBossHomingOrb::HandleDestroyedCosmetic()
+{
+	// Fires on clients via OnRep_bDead and on the authority via HandleDeath. A detonation is NOT a shot-down, so an
+	// orb that already blew up must not also play the break.
+	if (!bDetonated)
+	{
+		OnOrbDestroyedCosmetic();
+	}
 }
 
 void AFPSRBossHomingOrb::Tick(float DeltaSeconds)
@@ -212,6 +268,16 @@ void AFPSRBossHomingOrb::Tick(float DeltaSeconds)
 
 	if (bSimulationPaused)
 	{
+		return;
+	}
+
+	if (DetonateDespawnRemaining >= 0.0f)
+	{
+		DetonateDespawnRemaining -= DeltaSeconds;
+		if (DetonateDespawnRemaining <= 0.0f)
+		{
+			Destroy();
+		}
 		return;
 	}
 
@@ -350,7 +416,7 @@ void AFPSRBossHomingOrb::HandleDeath(AActor* DeadActor, AActor* Killer)
 	{
 		Sphere->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	}
-	OnOrbDestroyedCosmetic();
+	HandleDestroyedCosmetic(); // authority half; clients get theirs from OnRep_bDead
 	State = EOrbState::DeathDwell;
 	StateElapsedSeconds = 0.0f;
 }

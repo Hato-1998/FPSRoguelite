@@ -109,8 +109,9 @@ Selection Policy: Sequential
 > 폭심지에 있게 된다. 이게 이 패턴이 뭉침을 벌하는 방식이다.
 
 > 🔴 **BP 에서 하지 말 것 (둘 다 조용히 깨진다)**
-> 1. **`Event ActivateAbility` 를 구현하지 마라.** C++ 부모가 거기서 `CommitAbility` 를 부르고 준비 단계를
->    시작한다. 덮으면 쿨다운이 영영 안 찍히고 준비 구간도 사라진다.
+> 1. **`Event ActivateAbility` 로는 아무것도 할 수 없다.** C++ 베이스가 `Super::ActivateAbility` 를 부르지 않으므로
+>    그 BP 이벤트는 **애초에 실행되지 않는다**(거기서 `CommitAbility` 와 준비 단계가 돌기 때문에 의도된 것이다).
+>    거기에 로직을 넣으면 조용히 아무 일도 안 일어난다 — 확장은 `ServerTickPattern` 과 코스메틱 이벤트로 한다.
 > 2. **`Delay` · `WaitDelay` · `PlayMontageAndWait` 같은 시간 노드를 쓰지 마라.** 월드 타이머로 돌아서
 >    레벨업 프리즈를 그냥 뚫는다(카드 고르는 동안 보스가 계속 공격한다).
 
@@ -151,7 +152,13 @@ Selection Policy: Sequential
 
 ### 4-3. 지목 공지 (§14 신규)
 `Event On Marked Player Changed Cosmetic (New Marked)` — 미사일 패턴이 대상을 고르면 **전원에게** 불린다.
-`New Marked` 가 내 폰이면 다르게(경고음·화면 테두리), 남이면 그 사람 위에 마커. `null` 이면 해제.
+`New Marked` 가 내 것이면 다르게(경고음·화면 테두리), 남이면 그 사람 위에 마커. `null` 이면 해제.
+
+> ⚠️ **`New Marked` 는 폰이 아니라 `PlayerState` 다.** 플레이어 폰은 항상 관련(always-relevant)이 아니라서,
+> 160m 아레나에서 멀리 떨어진 팀원에게는 폰이 `null` 로 도착한다 — *"저쪽에서 누가 지목당했다"* 를 가장 알아야 할
+> 사람이 바로 그 멀리 있는 사람인데 말이다. `PlayerState` 는 항상 관련이라 공지가 전원에게 닿는다.
+> 월드 위치가 필요하면 `Get Marked Pawn` 을 쓰되, **가까이 있을 때만 유효**하다 — `null` 이면 "지목 없음"이 아니라
+> "그 폰이 여기서는 안 보인다"는 뜻이므로, 화면 가장자리 표시 같은 걸로 대체한다.
 
 > 이게 없으면 지목당한 사람만 상황을 알고 나머지 셋은 왜 미사일이 저기로 가는지 모른다.
 

@@ -18,6 +18,7 @@
 #include "Boss/FPSRPatternActorInterface.h"
 #include "AbilitySystem/FPSRAbilitySystemComponent.h"
 #include "AbilitySystem/Abilities/FPSRBossGameplayAbility.h"
+#include "AbilitySystem/Abilities/FPSRFreezeCooldownAbility.h"
 #include "AbilitySystemComponent.h"
 #include "GameplayAbilitySpec.h"
 #include "Combat/FPSRCombatStatics.h"
@@ -101,7 +102,7 @@ void AFPSRBossBase::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLif
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRBossBase, BeamWarmupEndClock, Params);
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRBossBase, BeamVisualHeightCm, Params);
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRBossBase, PatternStage, Params);
-	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRBossBase, MarkedPlayer, Params);
+	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRBossBase, MarkedPlayerState, Params);
 }
 
 void AFPSRBossBase::PostInitializeComponents()
@@ -260,7 +261,15 @@ void AFPSRBossBase::OnRep_PatternStage()
 
 void AFPSRBossBase::OnRep_MarkedPlayer()
 {
-	OnMarkedPlayerChangedCosmetic(MarkedPlayer);
+	OnMarkedPlayerChangedCosmetic(MarkedPlayerState);
+}
+
+APawn* AFPSRBossBase::GetMarkedPawn() const
+{
+	// Null on a machine where the marked player's pawn is not relevant — the MARK is still known there (that is the
+	// point of replicating the PlayerState), so a caller that needs a world position should fall back to something
+	// else rather than treating this as "nobody is marked".
+	return MarkedPlayerState ? MarkedPlayerState->GetPawn() : nullptr;
 }
 
 void AFPSRBossBase::ServerSetPatternStage(EFPSRBossPatternStage NewStage)
@@ -277,13 +286,15 @@ void AFPSRBossBase::ServerSetPatternStage(EFPSRBossPatternStage NewStage)
 
 void AFPSRBossBase::ServerSetMarkedPlayer(APawn* Pawn)
 {
-	if (!HasAuthority() || MarkedPlayer == Pawn)
+	APlayerState* NewState = Pawn ? Pawn->GetPlayerState() : nullptr;
+	if (!HasAuthority() || MarkedPlayerState == NewState)
 	{
 		return;
 	}
-	MarkedPlayer = Pawn;
-	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRBossBase, MarkedPlayer, this);
-	OnMarkedPlayerChangedCosmetic(MarkedPlayer);
+	MarkedPlayerState = NewState;
+	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRBossBase, MarkedPlayerState, this);
+	// Authority half — the host never receives its own OnRep.
+	OnMarkedPlayerChangedCosmetic(MarkedPlayerState);
 }
 
 float AFPSRBossBase::GetPatternClockSeconds() const
@@ -323,9 +334,14 @@ bool AFPSRBossBase::GetBeamState(int32& OutBeamCount, float& OutBaseAngleDeg, bo
 		return false;
 	}
 	const float Now = GetPatternClockSeconds();
-	// Recomputed from (start, speed, start clock) rather than integrated: an integrator on each machine drifts
-	// apart, this cannot.
-	OutBaseAngleDeg = BeamStartAngleDeg + BeamSpeedDegPerSec * (Now - BeamStartClock);
+	// 🔴 The SAME function the server's hit test uses (FPSRBossGA_SweepLaser) and the debug overlay draws with.
+	// This used to inline a one-segment formula, and when §14 gave the beam a stationary grace the judgment and the
+	// overlay were updated while this accessor was not — so the beam Blueprints draw ran ahead of the beam that
+	// actually bites by Speed x BeamGraceSeconds (45 deg at phase 1, 90 at phase 3). A player would have jumped
+	// through empty air and then been hit standing still, and nothing on screen would have explained it. The debug
+	// overlay hid it precisely because the overlay was on the correct side of the split.
+	// The rule this leaves behind: every consumer of the beam angle calls BeamBaseAngleAt — never its own arithmetic.
+	OutBaseAngleDeg = FPSRBossLaser::BeamBaseAngleAt(BeamStartAngleDeg, BeamSpeedDegPerSec, BeamWarmupEndClock, Now);
 	bOutWarmup = Now < BeamWarmupEndClock;
 	return true;
 }
@@ -334,6 +350,13 @@ void AFPSRBossBase::ServerSetBeamState(int32 InBeamCount, float StartAngleDeg, f
 	float WarmupEndClock, float VisualHeightCm)
 {
 	if (!HasAuthority())
+	{
+		return;
+	}
+	// No-op on an unchanged clear. Teardown deliberately clears from two places (the pattern's own ServerEndExecute
+	// and the boss's release-everything path), which is right — but without this guard the host would fire the
+	// "beams off" cosmetic twice while clients, seeing no property change, fire it once.
+	if (BeamCount == FMath::Max(0, InBeamCount) && BeamCount == 0)
 	{
 		return;
 	}
@@ -383,10 +406,14 @@ void AFPSRBossBase::ServerAddBlastMark(const FVector& Center, float Radius, floa
 
 void AFPSRBossBase::ServerRegisterPatternActor(AActor* Actor)
 {
-	if (HasAuthority() && Actor)
+	if (!HasAuthority() || !Actor)
 	{
-		SpawnedPatternActors.Add(Actor);
+		return;
 	}
+	// Prune here as well as on the freeze edge: a boss fight with no level-up in it would otherwise accumulate an
+	// entry per orb for the whole fight, and the freeze edge is not something the code gets to count on.
+	SpawnedPatternActors.RemoveAllSwap([](const TWeakObjectPtr<AActor>& Ref) { return !Ref.IsValid(); }, EAllowShrinking::No);
+	SpawnedPatternActors.Add(Actor);
 }
 
 void AFPSRBossBase::ServerScheduleLaserHit(APawn* Target, float Damage, const FFPSRDamageSpec& Spec)
@@ -767,7 +794,7 @@ void AFPSRBossBase::DebugDrawPatterns() const
 	}
 
 	// ---- Marked player ----------------------------------------------------------------------------------------
-	if (const APawn* Marked = MarkedPlayer)
+	if (const APawn* Marked = GetMarkedPawn())
 	{
 		const FVector Head = Marked->GetActorLocation() + FVector(0, 0, 140.0f);
 		DrawDebugLine(World, Head, Head + FVector(0, 0, 260.0f), FColor::Magenta, false, Life, 0, 6.0f);
@@ -876,6 +903,17 @@ void AFPSRBossBase::DebugForcePattern(int32 Index)
 	// the cadence you were trying to observe.
 	AbilitySystem->CancelAbilities();
 	ActivePatternHandle = FGameplayAbilitySpecHandle();
+
+	// Cancelling does not clear a cooldown, so without this the command refuses exactly when you want it most —
+	// right after the pattern you are iterating on has just run.
+	if (const FGameplayAbilitySpec* Spec = AbilitySystem->FindAbilitySpecFromHandle(GrantedAbilityHandles[Index]))
+	{
+		if (UFPSRFreezeCooldownAbility* Instance = Cast<UFPSRFreezeCooldownAbility>(Spec->GetPrimaryInstance()))
+		{
+			Instance->DebugClearCooldown();
+		}
+	}
+
 	if (AbilitySystem->TryActivateAbility(GrantedAbilityHandles[Index]))
 	{
 		ActivePatternHandle = GrantedAbilityHandles[Index];
@@ -883,10 +921,11 @@ void AFPSRBossBase::DebugForcePattern(int32 Index)
 	}
 	else
 	{
-		// Most often a MinPhase gate: the ability's own CheckCooldown was bypassed by the cancel above, so a refusal
-		// here is a real precondition, not a timing artefact.
-		UE_LOG(LogFPSR, Warning, TEXT("[Boss] FPSR.BossPattern %d — refused activation (MinPhase %d vs current %d?)."),
-			Index, CurrentPhase, CurrentPhase);
+		// The cooldown was cleared just above, so a refusal here is a real precondition — most often MinPhase.
+		const FGameplayAbilitySpec* Spec = AbilitySystem->FindAbilitySpecFromHandle(GrantedAbilityHandles[Index]);
+		const UFPSRBossGameplayAbility* Ability = Spec ? Cast<UFPSRBossGameplayAbility>(Spec->Ability) : nullptr;
+		UE_LOG(LogFPSR, Warning, TEXT("[Boss] FPSR.BossPattern %d — refused (MinPhase %d, boss is phase %d)."),
+			Index, Ability ? Ability->GetMinPhase() : -1, CurrentPhase);
 	}
 }
 

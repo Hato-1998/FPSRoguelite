@@ -162,6 +162,26 @@ bool FFPSRBossLaserSweepTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("beam sweeps only after the grace"),
 		FMath::IsNearlyEqual(BeamBaseAngleAt(10.0f, 30.0f, 100.0f, 102.0f), 70.0f, 0.001f));
 
+	// --- The accessor and the hit test must agree ----------------------------------------------------------------
+	// 🔴 G2 P2-1 regression. AFPSRBossBase::GetBeamState (what Blueprints draw with) once inlined a one-segment
+	// formula while the hit test used the two-segment one, so the drawn beam ran ahead of the biting beam by
+	// Speed x Grace — 45 deg at phase 1, 90 at phase 3. A player would jump through empty air and then be hit
+	// standing still. PIE could not catch it because the debug overlay happened to use the correct side.
+	// This asserts the property that makes that class of bug impossible: everyone calls the same function.
+	{
+		const float Start = 90.0f, Speed = 30.0f, GraceEnd = 105.0f;
+		// Inside the grace the beam has not moved at all — the broken formula returned Start + Speed*(Now-StartClock).
+		TestTrue(TEXT("no rotation before the grace ends"),
+			FMath::IsNearlyEqual(BeamBaseAngleAt(Start, Speed, GraceEnd, 100.0f), Start, 0.001f));
+		// And after it, the angle is measured from the GRACE END, not from the activation.
+		TestTrue(TEXT("rotation is measured from the grace end"),
+			FMath::IsNearlyEqual(BeamBaseAngleAt(Start, Speed, GraceEnd, 107.0f), Start + 60.0f, 0.001f));
+		// The size of the bug that was: judged-from-activation would have been 45 degrees ahead here.
+		const float BrokenOneSegment = Start + Speed * (107.0f - 100.0f);
+		TestTrue(TEXT("the one-segment formula really does differ (guard against a silent revert)"),
+			!FMath::IsNearlyEqual(BrokenOneSegment, BeamBaseAngleAt(Start, Speed, GraceEnd, 107.0f), 1.0f));
+	}
+
 	// --- Cardinal spawn ------------------------------------------------------------------------------------------
 	// Beams are born at 12/3/6/9 so a player can name the direction it came from.
 	for (int32 Trial = 0; Trial < 32; ++Trial)

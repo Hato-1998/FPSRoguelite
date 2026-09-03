@@ -5,6 +5,7 @@
 #include "Boss/FPSRBossBase.h"
 #include "Enemy/FPSREnemySpawnSubsystem.h"
 #include "Hero/FPSRCharacter.h"
+#include "Components/CapsuleComponent.h"
 #include "Combat/FPSRTargeting.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
@@ -92,7 +93,11 @@ void UFPSRBossGA_Barrage::FireVolley(AFPSRBossBase* Boss) const
 		float GroundedZ = 0.0f;
 		if (SpawnSubsystem && SpawnSubsystem->GetLastGroundedZ(Character, GroundedZ))
 		{
-			Center.Z = GroundedZ;
+			// The cache stores the ACTOR location's Z from when the player was grounded — that is the capsule CENTRE,
+			// about a half-height above the floor. Subtracting it is what actually puts the marker on the ground;
+			// without this the decal hovers at chest height and reads as belonging to nothing.
+			const UCapsuleComponent* Capsule = Character->GetCapsuleComponent();
+			Center.Z = GroundedZ - (Capsule ? Capsule->GetScaledCapsuleHalfHeight() : 0.0f);
 		}
 
 		// 페이로드는 표식과 함께 간다 — 신관이 다 타는 시점엔 이 어빌리티가 이미 끝났거나 취소됐을 수 있어서,

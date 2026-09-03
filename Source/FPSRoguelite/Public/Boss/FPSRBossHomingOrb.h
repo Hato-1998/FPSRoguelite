@@ -36,6 +36,8 @@ class FPSROGUELITE_API AFPSRBossHomingOrb : public AActor, public IFPSRPatternAc
 public:
 	AFPSRBossHomingOrb();
 
+	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
+
 	UFUNCTION(BlueprintPure, Category = "FPSR|Boss")
 	UFPSREnemyHealthComponent* GetHealthComponent() const { return Health; }
 
@@ -65,6 +67,15 @@ protected:
 
 	UFUNCTION()
 	void HandleDeath(AActor* DeadActor, AActor* Killer);
+
+	/** Bound on EVERY machine to the health component's OnDeathCosmetic, which clients fire from OnRep_bDead.
+	 *  The authority calls it from HandleDeath. Two halves, same as the boss's own death cosmetic — without the
+	 *  client half only the listen-server host ever sees an orb break, and the host is one player in four. */
+	UFUNCTION()
+	void HandleDestroyedCosmetic();
+
+	UFUNCTION()
+	void OnRep_Detonated();
 
 	/** Shot down by the players — a break, with no blast. Presentation stays entirely in Blueprint. */
 	UFUNCTION(BlueprintImplementableEvent, Category = "FPSR|Boss")
@@ -134,6 +145,15 @@ private:
 	/** Where the target last legally stood. Refreshed every tick while chasing, so it is always current when the
 	 *  target is lost. */
 	FVector LastKnownTargetLocation = FVector::ZeroVector;
+
+	/** Replicated so the detonation cosmetic reaches clients at all: the orb is destroyed the instant it detonates,
+	 *  and a plain function call on the server leaves clients with nothing but an actor vanishing. Set one frame
+	 *  before the destroy so the flag has a bunch to travel in. */
+	UPROPERTY(ReplicatedUsing = OnRep_Detonated)
+	bool bDetonated = false;
+
+	/** Server: frames left before the actor goes, after a detonation was published. */
+	float DetonateDespawnRemaining = -1.0f;
 
 	EOrbState State = EOrbState::Grace;
 	float StateElapsedSeconds = 0.0f;

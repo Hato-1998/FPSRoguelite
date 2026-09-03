@@ -153,8 +153,17 @@ public:
 	 *  private one. */
 	void ServerSetMarkedPlayer(APawn* Pawn);
 
+	/** 🔴 The mark travels as a PLAYER STATE, not a pawn. Player pawns are not always-relevant, so on a 160 m arena a
+	 *  teammate more than the net-cull distance away would receive the announcement as null — the one player who most
+	 *  needs to know "it is hunting someone over there" is the one furthest from them. PlayerStates are always
+	 *  relevant, so the announcement reaches everyone. */
 	UFUNCTION(BlueprintPure, Category = "FPSR|Boss")
-	APawn* GetMarkedPlayer() const { return MarkedPlayer; }
+	APlayerState* GetMarkedPlayerState() const { return MarkedPlayerState; }
+
+	/** Convenience: the marked pawn IF it is relevant on this machine (null on a client too far to see it, even
+	 *  though the mark itself is known). Draw the marker off the PlayerState when this is null. */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Boss")
+	APawn* GetMarkedPawn() const;
 
 #if !UE_BUILD_SHIPPING
 	/** Debug (FPSR.BossPattern): force-activate the pattern at Index in GrantedAbilities, bypassing cooldown/gap.
@@ -212,7 +221,7 @@ protected:
 
 	/** Who is being hunted right now (null = nobody). Everyone sees this — that is the point. */
 	UFUNCTION(BlueprintImplementableEvent, Category = "FPSR|Boss")
-	void OnMarkedPlayerChangedCosmetic(APawn* NewMarked);
+	void OnMarkedPlayerChangedCosmetic(APlayerState* NewMarked);
 
 	/** Optional montage played on the boss skeletal mesh on death (U20). Null = none (null-safe). Content-assigned. */
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Boss")
@@ -309,29 +318,37 @@ private:
 	UPROPERTY(Replicated)
 	TArray<FFPSRBossBlastMark> BlastMarks;
 
+	/** 🔴 ONE RepNotify property, not six.
+	 *  Six properties sharing a single ReplicatedUsing does NOT mean one call: the engine queues RepNotifies per
+	 *  PROPERTY and invokes the function once per queued entry, so a beam starting (5-6 fields changing at once)
+	 *  fired OnRep_BeamState five or six times on a client while the authority path fired it exactly once. A
+	 *  Blueprint spawning a sound or a Niagara burst on that event would stack five on clients and one on the host —
+	 *  the very host/client asymmetry this class keeps closing everywhere else.
+	 *  Only BeamCount carries the notify; the rest ride the same bunch, so their values have already landed when it
+	 *  runs. Beam state is only ever published as a whole (ServerSetBeamState), so there is no partial-update case. */
 	UPROPERTY(ReplicatedUsing = OnRep_BeamState)
 	int32 BeamCount = 0;
 
-	UPROPERTY(ReplicatedUsing = OnRep_BeamState)
+	UPROPERTY(Replicated)
 	float BeamStartAngleDeg = 0.0f;
 
-	UPROPERTY(ReplicatedUsing = OnRep_BeamState)
+	UPROPERTY(Replicated)
 	float BeamSpeedDegPerSec = 0.0f;
 
-	UPROPERTY(ReplicatedUsing = OnRep_BeamState)
+	UPROPERTY(Replicated)
 	float BeamStartClock = 0.0f;
 
-	UPROPERTY(ReplicatedUsing = OnRep_BeamState)
+	UPROPERTY(Replicated)
 	float BeamWarmupEndClock = 0.0f;
 
-	UPROPERTY(ReplicatedUsing = OnRep_BeamState)
+	UPROPERTY(Replicated)
 	float BeamVisualHeightCm = 60.0f;
 
 	UPROPERTY(ReplicatedUsing = OnRep_PatternStage)
 	EFPSRBossPatternStage PatternStage = EFPSRBossPatternStage::Finished;
 
 	UPROPERTY(ReplicatedUsing = OnRep_MarkedPlayer)
-	TObjectPtr<APawn> MarkedPlayer = nullptr;
+	TObjectPtr<APlayerState> MarkedPlayerState = nullptr;
 
 	/** Pattern-clock stamp the boss fight began at — the origin for Elapsed triggers. */
 	float FightStartClock = -1.0f;

@@ -57,6 +57,15 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Cooldown", meta = (ClampMin = "0.0"))
 	float CooldownSeconds = 0.0f;
 
+public:
+#if !UE_BUILD_SHIPPING
+	/** Debug only: forget this instance's cooldown stamp so the next CheckCooldown passes.
+	 *  🔴 Cancelling an ability does NOT clear its cooldown (the stamp lives on the instance, and CancelAbilities
+	 *  never touches it), so a "force this pattern now" console command was silently refused whenever the pattern
+	 *  had run within its cooldown — which is exactly when you are most likely to be testing it. */
+	void DebugClearCooldown() { LastActivationClockSeconds = -1.0f; }
+#endif
+
 private:
 	/** 마지막으로 ApplyCooldown 이 스탬프한 시계 값. -1 = 이 인스턴스에서 아직 한 번도 활성화되지 않음 —
 	 *  그 경우 CheckCooldown 은 무조건 허용한다(그렇지 않으면 "-1 과 지금 시계 값의 차"가 우연히
