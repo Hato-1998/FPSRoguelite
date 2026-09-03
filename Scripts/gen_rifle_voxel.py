@@ -181,6 +181,60 @@ def write_obj(path, cells, origin_cell, name):
     return len(verts), sum(len(q) * 2 for q in groups.values()), sorted(groups)
 
 
+# --- Blockbench 저작용 .bbmodel ------------------------------------------------
+# 사용자가 열어서 직접 다듬는 **출발점**이다. 이 스크립트의 출력 중 유일하게 "사람이 편집할 것".
+#
+# 단위 계약: **Blockbench 1칸 = 복셀 1칸 = 2.5cm.**
+#   Blockbench 기본 스냅이 1칸이라, 이렇게 두면 드래그만 해도 복셀 격자를 벗어날 수 없다.
+#   (1칸=1cm 로 두면 2.5 배수로 직접 타이핑해야 해서 사람이 격자를 깨기 쉽다.)
+#   → 임포트 때 ×2.5 로 되돌린다. 그 환산이 맞았는지는 바운드 실측으로 검증한다(§5-4).
+#
+# 축 계약: Blockbench 는 **Y 상방**, 이 프로젝트는 **Z 상방 · +X 정면**.
+#   bb(x, y, z) = ue(x, z, y)  ← 여기서 변환해 내보내고, 임포트에서 되돌린다.
+BB_SLOT_COLOR = {"Body": 4, "Grip": 7, "Barrel": 6, "Emissive": 3}  # 아웃라이너 마커색
+
+
+def write_bbmodel(path, parts_cells):
+    """파츠별 그룹으로 묶은 Blockbench 모델. 셀 하나 = 큐브 하나 대신, 원본 박스 단위로 낸다
+    (셀마다 큐브를 만들면 612개가 되어 편집이 불가능하다)."""
+    elements, outliner = [], []
+    uid = [0]
+
+    def new_uuid(tag):
+        uid[0] += 1
+        return "%08x-0000-4000-8000-%012x" % (abs(hash(tag)) & 0xFFFFFFFF, uid[0])
+
+    for pname, spec in PARTS.items():
+        kids = []
+        for i, (x0, x1, y0, y1, z0, z1, slot) in enumerate(spec["boxes"]):
+            u = new_uuid("%s_%d" % (pname, i))
+            # 셀 인덱스 -> Blockbench 좌표(Y 상방). to 는 x1+1 (양끝 포함이므로)
+            frm = [x0, z0, y0]
+            to = [x1 + 1, z1 + 1, y1 + 1]
+            faces = {f: {"uv": [0, 0, 16, 16], "texture": None}
+                     for f in ("north", "east", "south", "west", "up", "down")}
+            elements.append({
+                "name": "%s_%s_%d" % (pname, slot, i), "box_uv": False, "type": "cube",
+                "uuid": u, "from": frm, "to": to, "origin": [0, 0, 0],
+                "color": BB_SLOT_COLOR.get(slot, 0), "faces": faces,
+            })
+            kids.append(u)
+        outliner.append({"name": pname, "uuid": new_uuid("grp_" + pname),
+                         "origin": [0, 0, 0], "color": 0, "isOpen": False, "children": kids})
+
+    doc = {
+        "meta": {"format_version": "4.5", "model_format": "free", "box_uv": False},
+        "name": "RifleVoxel",
+        "resolution": {"width": 16, "height": 16},
+        "elements": elements,
+        "outliner": outliner,
+        "textures": [],
+    }
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(doc, f, ensure_ascii=False, indent=1)
+    return len(elements), len(outliner)
+
+
 # 미리보기 전용 색(§4-1 실제 색이 아니다 — UE 절차적 MI 가 정한다). 슬롯 구분용.
 PREVIEW_COLORS = {"Body": "#4A5B8C", "Grip": "#23262E", "Barrel": "#3A3E46", "Emissive": "#C8E85A"}
 
@@ -260,6 +314,8 @@ def main():
     with open(os.path.join(out, "manifest.json"), "w", encoding="utf-8") as f:
         json.dump(manifest, f, ensure_ascii=False, indent=2)
     write_preview_svg(os.path.join(out, "preview.svg"), all_cells)
+    ne, ng = write_bbmodel(os.path.join(out, "RifleVoxel.bbmodel"), PARTS)
+    print("bbmodel: 큐브 %d개 / 그룹 %d개 (Blockbench 1칸 = 2.5cm, Y상방)" % (ne, ng))
 
     print("\n조립 크기: 전장 %.1fcm(%d칸) × 폭 %.1fcm × 높이 %.1fcm"
           % (dims[0], round(dims[0] / CELL), dims[1], dims[2]))

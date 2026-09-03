@@ -198,9 +198,26 @@ Synty 메시가 아직 DA 에 물려 있는 것은 **전환 전 상태가 남아
 그리고 확정된 칸 크기(2.5cm)를 **`Docs/SSOT/ArtDirection.md` 에 전역 복셀 격자로 올린다**(§2-1).
 
 ### 3-1. 규격서 → 사용자 저작 (Blockbench, 프로젝트 밖) — **§3-2 와 병렬**
-🔁 **이 단계는 자동화됐다(2026-09-03).** 사용자가 Blockbench 로 저작하는 대신
-`python Scripts/gen_rifle_voxel.py` 가 파츠 7종 OBJ + `manifest.json`(소켓 좌표) + `preview.svg`
-(직교 2면도)를 `Saved/RifleVoxel/` 에 뽑는다. 형태 수정은 그 스크립트 상단 `PARTS` 의 셀 박스 목록에서 한다.
+**역할 분담(2026-09-03 사용자 확인)** — Claude 가 *완성*하는 게 아니라 **출발점을 만들고**,
+사용자가 Blockbench 에서 다듬고, 그 최종본을 Claude 가 받아 임포트·배선한다.
+
+```
+python Scripts/gen_rifle_voxel.py     →  Saved/RifleVoxel/
+    RifleVoxel.bbmodel   ← 🎯 사용자가 여는 것. 파츠 7그룹 · 큐브 24개
+    preview.svg          ← 직교 2면도(비율 확인용)
+    SM_RifleVoxel_*.obj  ← 초안 임포트용(사용자 최종본이 오면 덮인다)
+    manifest.json        ← 소켓 좌표
+```
+
+🔴 **`.bbmodel` 의 단위·축 계약** (어기면 임포트에서 크기·방향이 틀어진다)
+- **Blockbench 1칸 = 복셀 1칸 = 2.5cm.** 기본 스냅이 1칸이라 **드래그만 해도 격자를 못 벗어난다.**
+  (1칸=1cm 로 잡으면 2.5 배수를 직접 타이핑해야 해서 사람이 격자를 깨기 쉽다.)
+- **Blockbench 는 Y 상방**, 이 프로젝트는 **Z 상방 · +X 정면**. 생성기가 `bb(x,y,z) = ue(x,z,y)` 로
+  변환해 내보내므로, **Blockbench 안에서는 총구가 +X, 위가 +Y** 로 보인다.
+- 임포트에서 되돌린다. ⚠️ **첫 왕복에서 반드시 바운드를 실측해 계약이 맞았는지 확인할 것**(§5-4) —
+  "들어왔다"는 "맞게 들어왔다"가 아니다.
+
+큐브는 셀 단위가 아니라 **원본 박스 단위**(24개)로 낸다. 셀마다 큐브를 만들면 612개가 되어 편집이 불가능하다.
 
 **아래 규격이 그 스크립트에 이미 반영돼 있다.**
 
@@ -254,7 +271,8 @@ Synty 메시가 아직 DA 에 물려 있는 것은 **전환 전 상태가 남아
 
 ### 3-3. 임포트 (🔴 **에디터 꺼짐** — §5-1) — ✅ **1차 완료 2026-09-03 (`35bd5d61`)**
 ```bash
-Scriptsun_import_rifle_voxel.bat
+Scripts
+un_import_rifle_voxel.bat
 ```
 목적지 = `/Game/Assets/Weapons/RifleVoxel/` (적 프로토 `/Game/Assets/Characters/EnemyProto/` 와 대칭).
 판정은 **종료 코드가 아니라 `ALLDONE` 마커 + 섹션 수 + 바운드**로(§5-2). 1차 결과 = 7/7 임포트,
