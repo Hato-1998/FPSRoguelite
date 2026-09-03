@@ -21,7 +21,7 @@ Docs/RifleHardSurface_ResumePrompt.md 를 읽고 진행한다.
 | §3-1 절차적 생성 | ✅ `4fc47fd7` — 파츠 8종 · 삼각 4,604 |
 | §3-3 임포트 | ✅ `11e802aa` (3차) — 8/8 · `slots_ok=True` · **forward=+Y 게이트 pass** · `/Game/Assets/Weapons/RifleHS/`. 1차 `96fcdab8` 는 원점·축이, 2차 `5bd0b4d4` 는 Y 부호가 틀렸었다(D12) |
 | §3-2 C++ 가드 확장 | ⏳ **플랜 게이트 대기** — 이게 없으면 파츠 7개가 안 붙는다 |
-| §3-4 소켓 | ⏳ 좌표는 `Saved/RifleHardSurface/manifest.json` 에 이미 계산됨 |
+| §3-4 소켓 | ✅ `ffa6d5ca` — 몸통 8 · 총열 Muzzle · 조준경 2종 Aim, `sockets_ok=True` |
 | §3-5 머티리얼 · §3-6 DA · §3-7 PIE | ⏳ |
 
 ---
@@ -272,7 +272,9 @@ Scripts\run_import_rifle_hardsurface.bat
    'D:/…/Engine/Binaries/Win64/Scripts/…'`. 절대 경로로 줘야 한다.
 ⚠️ `.bat` 주석은 **ASCII 로**. 한글을 넣으면 cmd 가 OEM 코드페이지로 읽어 파스가 깨진다.
 
-### 3-4. 소켓 (에디터 켜짐 또는 헤드리스) — ⏳
+### 3-4. 소켓 (에디터 켜짐 또는 헤드리스) — ✅ 완료 (`ffa6d5ca`)
+실측 부수 사실: `replace_existing` 재임포트가 정적 메시 소켓을 **보존**한다(3차 재임포트 뒤 12개 전부 `upd`, `add` 0).
+형태를 고쳐 재임포트해도 소켓은 다시 찍지 않아도 되지만, 스크립트가 멱등이라 돌려도 해가 없다.
 🔴 **소켓을 전부 몸통에 만들면 안 된다.** 현행 라이플 실측(2026-09-03)이 규약을 보여준다 —
 몸통 `SK_Wep_Mod_A_Body_01` 의 소켓은 **9개뿐**이고, 그중 **`SOCKET_Aim`·`SOCKET_Muzzle` 은 없다**.
 **`SOCKET_Muzzle` 은 총열 파트에, `SOCKET_Aim` 은 조준경 파트에 산다.** `Docs/WeaponPack_Integration.md` 의
