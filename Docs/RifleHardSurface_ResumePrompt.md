@@ -19,7 +19,7 @@ Docs/RifleHardSurface_ResumePrompt.md 를 읽고 진행한다.
 | 단계 | 상태 |
 |---|---|
 | §3-1 절차적 생성 | ✅ `4fc47fd7` — 파츠 8종 · 삼각 4,604 |
-| §3-3 임포트 | ✅ `96fcdab8` — 8/8 · `slots_ok=True` · `/Game/Assets/Weapons/RifleHS/` |
+| §3-3 임포트 | ✅ `11e802aa` (3차) — 8/8 · `slots_ok=True` · **forward=+Y 게이트 pass** · `/Game/Assets/Weapons/RifleHS/`. 1차 `96fcdab8` 는 원점·축이, 2차 `5bd0b4d4` 는 Y 부호가 틀렸었다(D12) |
 | §3-2 C++ 가드 확장 | ⏳ **플랜 게이트 대기** — 이게 없으면 파츠 7개가 안 붙는다 |
 | §3-4 소켓 | ⏳ 좌표는 `Saved/RifleHardSurface/manifest.json` 에 이미 계산됨 |
 | §3-5 머티리얼 · §3-6 DA · §3-7 PIE | ⏳ |
@@ -255,7 +255,7 @@ python Scripts/gen_rifle_hardsurface.py    →  Saved/RifleHardSurface/
 회귀 확인 = **나이프**(기존 정적 무기)가 파츠 0개인 채로 여전히 정상인지, **Synty 라이플**(스켈레탈)의
 파츠가 그대로 붙는지 둘 다.
 
-### 3-3. 임포트 (🔴 **에디터 꺼짐** — §5-1) — ✅ 완료 (`96fcdab8`)
+### 3-3. 임포트 (🔴 **에디터 꺼짐** — §5-1) — ✅ 완료 (3차 `11e802aa`; 1차 `96fcdab8` 원점·축 오류 → 2차 `5bd0b4d4` Y 부호 오류 → 3차 min/max 검증 통과)
 ```
 Scripts\run_import_rifle_hardsurface.bat
 ```
