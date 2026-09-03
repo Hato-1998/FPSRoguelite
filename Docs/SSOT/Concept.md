@@ -97,5 +97,5 @@
   - **적 스웜** = **별도 저코스트 트랙**(저폴리 VAT — 애니 캐릭터 리스킨 금지; 제1원리 per-actor 최소).
   - **FP 팔** = 애니 캐릭터 팔 추출 + PWAS(절차 무기 애니, 무기 비종속).
   - **UI** = Synty INTERFACE Sci-Fi Soldier HUD + 아이콘.
-  - 상세·임포트 리스트·파일럿 게이트 = `Roadmap.md §8` + `Docs/U22_AssetReplacement_Prompt.md`(U22의 유일한 실행 프롬프트). ⚠️ 구 `AssetReplacement_Synty_ResumePrompt.md`는 **폐기본**이라 `Docs/Archive/prompts/`로 내렸다 — 읽지 말 것.
+  - 상세·임포트 리스트·파일럿 게이트 = `Roadmap.md §8` + `Docs/Archive/prompts/U22_AssetReplacement_Prompt.md`(**폐기본** — 도시 트랙이 ADR 0010 에서 아레나로 대체됨, 2026-09-03. 아트 방향 현행 = `ArtDirection.md`). ⚠️ 구 `AssetReplacement_Synty_ResumePrompt.md`는 **폐기본**이라 `Docs/Archive/prompts/`로 내렸다 — 읽지 말 것.
   - ⚠️ **제1원리 리스크**: ①셀 아웃라인 = post-process/스크린스페이스(inverted-hull 금지 — 스웜 드로우콜 2배) ②셀셰이더 × VAT 스웜 정합 실측 ③애니 고폴리를 200-300 스웜에 리스킨 금지 ④Synty 5.4→5.7 마이그레이션.
