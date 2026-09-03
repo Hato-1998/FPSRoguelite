@@ -418,6 +418,28 @@ connect_material_expressions(mask, "", scenetex, "")             # ✅ 0번 핀 
 → 배선은 전부 `link()` 헬퍼로 감싸 **실패를 수집**하고, 끝나면 개수를 찍어라. 반환값은 자문이 아니다 —
 `ConnectMaterialExpressions` 는 `Input->Connect()` 를 실행한 뒤에만 True 를 낸다(같은 파일 `:700-706`).
 
+### D11. 헤드리스 정식 에디터가 **기동은 하는데 스크립트가 안 돈다** (2026-09-03, 복셀 라이플 임포트)
+
+`UnrealEditor-Cmd.exe <uproject> -nullrhi -unattended -nosplash -ExecCmds="py <script>"` 는
+임포트를 하는 **유일하게 안전한 실행 모드**다(D1-a 라이브 데드락 · D1-b 커맨드렛 즉사를 둘 다 피한다).
+그런데 여기서 **두 번 연속으로 다른 이유로 실패**했다. 증상이 둘 다 *"에디터는 멀쩡히 떴는데 아무 일도 안 남"*
+이라 **"느린 것"과 구별되지 않는다.**
+
+| # | 원인 | 로그에 남는 것 |
+|---|---|---|
+| 1 | **PowerShell 로 넘기면 `-ExecCmds` 의 따옴표가 벗겨진다** | `Cmd:` 줄도 `LogPython` 도 **아예 없음**. 에셋 레지스트리까지만 찍히고 idle |
+| 2 | **`-ExecCmds` 의 상대 경로가 엔진 바이너리 폴더 기준으로 풀린다** | `Could not load Python file 'D:/…/Engine/Binaries/Win64/Scripts/x.py' (resolved from 'Scripts/x.py')` |
+
+→ **정답 = `.bat` 파일 + 절대 경로.** (1)은 메모리 `automation-multi-test-plus-hangs` 가 이미 경고한 것이고,
+(2)는 이번에 새로 나왔다. 실물 = `Scripts/run_import_rifle_voxel.bat`.
+
+🪤 **`.bat` 주석은 ASCII 로 쓸 것.** 한글 주석을 넣었더니 cmd 가 OEM 코드페이지로 읽어 파스가 깨지며
+`'Cmds' is not recognized` 같은 유령 에러를 뱉었다(임포트 자체는 됐지만 출력이 오염된다).
+
+**진단 순서**: ① 로그에 `Cmd: py …` 줄이 있나 → 없으면 (1) ② 있으면 그 다음 줄에
+`Could not load Python file` 이 있나 → 있으면 (2) ③ 둘 다 아니면 그때가 진짜 "느린 것"이다.
+(같은 실패형 = G10 "exit 0인데 아무것도 안 돌았다" — **초록을 범위 확인 없이 통과로 읽는 것**.)
+
 ## E. 데이터 · 컴포넌트 · BP
 
 ### E0. BP 에셋을 열 때마다 에디터가 스택 오버플로로 죽는다
