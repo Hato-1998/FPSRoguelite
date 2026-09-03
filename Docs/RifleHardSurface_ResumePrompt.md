@@ -228,12 +228,16 @@ python Scripts/gen_rifle_hardsurface.py    →  Saved/RifleHardSurface/
 ### 3-2. C++ 가드 확장 — 정적 무기도 파츠를 받게 (§2-4) 🔒 **플랜 게이트 대상** — ⏳ 다음 착수
 **이게 없으면 임포트한 파츠 7개(몸통 제외)가 하나도 안 붙는다.** 지금 가장 먼저 할 일.
 
-**변경 지점 3곳** (실측 2026-09-03, `Source/FPSRoguelite/Private/Hero/FPSRCharacter.cpp` — 줄 번호는 재확인):
-| 줄 | 현재 | 바꿀 것 |
-|---|---|---|
-| `:2529` | `if (!Weapon \|\| !WeaponMesh \|\| ActiveWeaponMesh != WeaponMesh)` | 스켈레탈 강제를 풀고 `!ActiveWeaponMesh` 로 |
-| `:2573` | `if (!WeaponMesh) { return; }` | `ActiveWeaponMesh` 기준으로 |
-| `:2608` | `PartComp->AttachToComponent(WeaponMesh, ...)` | 부모를 `ActiveWeaponMesh` 로 |
+**변경 지점 5곳** (🔁 2026-09-04 전수 grep `\bWeaponMesh\b` 로 3곳 → 5곳. `Source/FPSRoguelite/Private/Hero/FPSRCharacter.cpp`, 줄 번호는 재확인):
+| 줄 | 함수 | 현재 | 바꿀 것 |
+|---|---|---|---|
+| `:2530` | `RefreshWeaponPartComponents` | `if (!Weapon \|\| !WeaponMesh \|\| ActiveWeaponMesh != WeaponMesh)` | 스켈레탈 강제를 풀고 `!ActiveWeaponMesh` 로 |
+| `:2573` | `RebuildPartsFromSelection` | `if (!WeaponMesh) { return; }` | `ActiveWeaponMesh` 기준으로 |
+| `:2608` | `RebuildPartsFromSelection` | `PartComp->AttachToComponent(WeaponMesh, ...)` | 부모를 `ActiveWeaponMesh` 로 |
+| `:3044` `:3068` | `RefreshPartFramesInGunSpaceCache` | 게이트 `!WeaponMesh` + `WeaponMesh->GetSocketTransform(Socket, RTS_Component)` | 둘 다 `ActiveWeaponMesh` — 파츠 프레임을 **팔 IK 블렌드**(그립↔파츠 타깃) 공간으로 올리는 곳. 빠지면 파츠는 보이는데 손이 파츠를 못 잡는다 |
+| `:3152` | `ProcessPendingWeaponPartsRebuild` | 같은 모양의 가드 | 🔴 **가장 놓치기 쉬운 곳.** 프래그먼트 변경 뒤 *다음 틱* 재빌드 경로다. 여기만 남기면 즉시 경로는 붙고 지연 경로는 조용히 빠져 **"진화하면 파츠가 사라진다"** 는 간헐 버그가 된다 |
+
+무기 자체 AnimBP 호출(`:3221` `:3272` `:3869` — 재장전/발사 몽타주)은 **그대로 둔다** — 정적 무기에서 `WeaponMesh->GetAnimInstance()` 가 null 이라 이미 안전하게 no-op 다.
 
 **이미 확인된 것 (다시 조사하지 말 것)**
 - 🟢 **순서 위험 없음** — `ActiveWeaponMesh` 는 `:2348` 에서 채워지고 `RefreshWeaponPartComponents` 는
