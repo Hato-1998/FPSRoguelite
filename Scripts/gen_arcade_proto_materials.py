@@ -82,14 +82,31 @@ PAL = {
     "contrast_dk": C("#5A2E63"),
 }
 
+# Triplanar. The first pass projected WP.xy only, which is correct on floors but degenerates to
+# VERTICAL STRIPES on walls (one axis is constant on a vertical face, so only one line family shows).
+# Verified in the editor 2026-09-03: all four boundary walls now carry a real grid.
 GRID_HLSL = """
 float gs = max(GridSize, 1.0);
-float2 uv = WP.xy / gs;
-float2 g = abs(frac(uv) - 0.5) * gs;      // cm to the nearest line on each axis
-float d  = min(g.x, g.y);
 float hw = max(LineWidth, 0.1) * 0.5;
-float aa = max(fwidth(d), 0.001);
-return 1.0 - smoothstep(hw - aa, hw + aa, d);
+
+float3 n = abs(N);
+n /= max(n.x + n.y + n.z, 1e-4);          // axis weights = which plane the surface faces
+
+float2 uvs[3];
+uvs[0] = WP.yz;                            // X-facing (wall)
+uvs[1] = WP.xz;                            // Y-facing (wall)
+uvs[2] = WP.xy;                            // Z-facing (floor / ceiling)
+float w[3] = { n.x, n.y, n.z };
+
+float acc = 0.0;
+for (int i = 0; i < 3; ++i)
+{
+    float2 g = abs(frac(uvs[i] / gs) - 0.5) * gs;   // cm to the nearest line
+    float d  = min(g.x, g.y);
+    float aa = max(fwidth(d), 0.001);
+    acc += (1.0 - smoothstep(hw - aa, hw + aa, d)) * w[i];
+}
+return acc;
 """
 
 
@@ -150,12 +167,15 @@ def build_grid_master():
 
     mask = None
     try:
-        cus = custom_node(mat, "ArcadeGrid", GRID_HLSL, ["WP", "GridSize", "LineWidth"],
+        cus = custom_node(mat, "ArcadeGrid", GRID_HLSL, ["WP", "GridSize", "LineWidth", "N"],
                           unreal.CustomMaterialOutputType.CMOT_FLOAT1, -1080, -270)
         wp = MEL.create_material_expression(mat, unreal.MaterialExpressionWorldPosition, -1320, -380)
+        # VertexNormalWS (not PixelNormalWS) - geometric normal, no normal-map feedback loop.
+        nrm = MEL.create_material_expression(mat, unreal.MaterialExpressionVertexNormalWS, -1320, -180)
         ok = link(wp, "", cus, "WP", "WorldPosition->grid")
         ok &= link(p_size, "", cus, "GridSize", "GridSize->grid")
         ok &= link(p_width, "", cus, "LineWidth", "LineWidth->grid")
+        ok &= link(nrm, "", cus, "N", "VertexNormalWS->grid")
         mask = cus if ok else None
         if mask is None:
             bad("grid inputs not fully wired - an unwired Custom pin would be a compile error, dropping node")
