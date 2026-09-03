@@ -91,6 +91,18 @@
   - ⚠️ **`MaxShield == 0` 이면 실드 게이지·숫자를 함께 숨긴다** — 실드 없는 상태가 정상이고(레퍼런스 두 작품은 실드가 상시 존재하는 전제라 이 케이스가 없다) "실드 포기" 카드도 여기로 수렴한다.
   - ~~⚠️ **미충족 선행**: 무기 아이콘은 `UFPSRWeaponDataAsset` 에 **텍스처 필드가 아예 없어** 현재 표시 불가. 본인/팀원 바이탈도 BlueprintPure 접근자가 없어 WBP 가 `Get Float Attribute` 원시 폴링뿐이다.~~ → **해소(2026-09-02, `feat/hud-surface`)** — 무기 아이콘 = `UFPSRWeaponDataAsset::Icon`(소프트 텍스처) 신설. 본인 바이탈 = `AFPSRPlayerState` 의 `GetHealth01`/`GetShield01`/`HasShield`/`IsShieldBroken`/`AreVitalsReady` 등 BlueprintPure 접근자 신설. 팀원 바이탈 = `AFPSRGameState::GetPartyVitals()`(구조체 배열, `PlayerId` 오름차순 안정 정렬) 신설. 보드 행 **「HUD C++ 표면 보강」** 해소. 저작 절차 = `Docs/VIT1_ContentGuide.md` §5.
   - 🔴 **신규 미충족 선행(2026-09-02)**: 캐릭터 초상 아이콘(양 레퍼런스 모두 좌하단 바이탈 좌측에 있음)의 데이터 소스가 없다 — 필드 누락이 아니라 **플레이어 캐릭터 선택/클래스 개념 자체가 미정**(로비는 `SelectedWeapon` 만 고른다). 보드 백로그.
+- 🔴 **HUD 아트 = Synty `UISciFiSoldierHUD` 팩 채택 (확정 2026-09-03, 사용자 결정)** — 위 레퍼런스가 정한 건 **배치**였고, **룩**을 정하는 기록은 여기까지 없었다(팩은 아트 스택 커밋 `ff191fec` 에 딸려 들어와 있었을 뿐). 이 항목이 그 결정이다.
+  - **방식 = 팩 위젯을 자식으로 임베드하고 팩이 제공하는 세터를 호출**한다(대안이던 "비주얼만 차용"은 기각 — 팩의 슬랜티드 프레임 형태를 재현 못 해 어중간해진다). 팩의 데이터 계약은 인터페이스/DataTable 이 아니라 **공개 변수 + 세터 함수**다:
+    | 팩 위젯 | 세터 | 우리가 넣는 값 |
+    |---|---|---|
+    | `Players_Health_Equipment/HUD_SciFiSoldier_HealthBar_01`(760×80, 아이콘 有) | `SetFillPercent` · 변수 `Color_Fill`·`Texture_Icon` | `GetShield01()`/`GetHealth01()` |
+    | `NPC_HealthBars_EnemyData/_Parts/HUD_SciFiSoldier_HealthBar_Enemy_01`(760×30, 아이콘 無) | `SetFillPercent` · `Color_Fill` | 팀원 행 — 작은 문맥용이라 아이콘이 없다 |
+    | `Players_Health_Equipment/HUD_SciFiSoldier_CurrentWeapon_01`(350×220) | `SetIcon` · `SetAmmo` | `Icon` / `GetCurrentAmmo`+`GetCurrentMagSize` |
+  - 🔴 **`bDemoActive` 기본값이 `True`** 다. 끄지 않으면(또는 `PauseDemo`) 바가 게임과 무관하게 혼자 왕복 애니메이션한다. 팩 위젯을 새로 임베드할 때마다 꺼야 한다.
+  - 🔴 **팩 위젯의 SizeBox 는 크기 하드 오버라이드**라 캔버스 슬롯을 작게 줘도 **스케일이 아니라 잘린다**(70px 아이콘이 사라지는 증상). **자연 크기를 슬롯에 주고 `RenderTransform` 스케일로 축소**할 것(피벗 `(0,0)`).
+  - **색은 `ArtDirection.md` §A-3-7 을 따른다** — 실드/진행 `#5FE0D2`, 체력/경고 `#FF4D5E`. HEX 는 **sRGB 로 읽고 리니어로 변환**해 넣는다(팔레트를 코드/에셋에 처음 적용한 것이 이 작업이라 여기 규약을 남긴다).
+  - **숫자 병기는 우리 `TextBlock` 이 계속 맡는다** — 팩 `HealthBar_01` 에는 TextBlock 이 없다. 반대로 `CurrentWeapon_01` 은 자체 탄약 라벨을 갖고 있어 우리 탄약 텍스트 체인은 걷어냈다.
+  - **범위 밖 = 크로스헤어.** U12 절차적 SDF("퍼짐 = 실제 탄퍼짐의 화면 투영")가 설계 핵심이라 정적 레티클로 되돌리지 않는다. 팩 `Reticle_*` 은 **스코프 오버레이 아트로만** 쓴다(`FPSRRunHUDWidget.h` `ScopeOverlayWidgetClass` 폴백).
 - **구현 상태(P4-D)**: `UFPSRPlayerFeedbackComponent`(로컬·비복제·이벤트형) + PC Client RPC. ① **히트마커**(서버권위 Hit/Crit/Kill, 활성화당 1회, Unreliable) ② **피격 방향 인디케이터**(CoD식: `ApplyContactDamage`→오너클라, 카메라 기준 각도) ③ **원거리 타겟 사전경고**(다수소스 id별 추적·각도배열·추적Tick·Reliable; ~~생산자=원거리 적 AI는 후속~~ → 🔁 *정정 2026-08-13(M0 EC ④ 재대조)*: **생산자 배선은 완료됐다** — `AFPSRRangedEnemyBase`가 텔레그래프 시작/종료에 `SendRangedWarning(true/false)`를 호출한다(`FPSRRangedEnemyBase.cpp:74,100,219`, 구현 `:203`). 디버그 `FPSR.TestDamageDir`/`FPSR.TestRangedWarn`). WBP(GameHUD 컨테이너+RunHUD+HitMarker+ThreatIndicator). **설계 정제(2026-06-09)**: 근접/사각지대 위협의 *상시 시각 표시*는 번잡으로 제외 → **사운드 등 타 방식으로 이전**(오디오 단계). ~~핑/Gibs/사각오디오는 후속.~~ → 🔁 *정정 2026-08-13(M0 EC ④ 재대조)*: **사각 오디오는 V1 완료**(`UFPSRBlindspotAudioComponent`, `da761449` — 단 큐가 `/Engine/VREditor/…/Camera_Shutter` **엔진 에디터 에셋 플레이스홀더**라 프로덕션 사운드 교체가 **M2**, 쿡 생존 감사 = `Roadmap.md` §7-6 M0 (d)). **핑·Gibs는 여전히 미착수** — `Source/` 전체에 `Ping` 참조 **0**이다(킬/크릿 핑 사운드 → **M2** · 팀 핑(수동 1키 + 위험 자동) → **M4**. `Roadmap.md` §7-3 P4-D 각주와 동일). **히트마커 최종 연출**은 크로스헤어/발사체 작업 후 재확인.
 - **크로스헤어 — 2층 구조 + 플레이어 설정 (등재 2026-08-11)**
   - 🚫 **크기는 설정이 아니다(의도).** 종전 여기 "크기 조절 0.5~2.5배 설정(U17)"이라 적혀 있었으나 **그런 설정은 코드에 없다**. 근거가 `FPSRGameUserSettings.h`에 명시돼 있다 — *크로스헤어는 정직하다: 퍼짐 = 무기의 실제 탄퍼짐이 화면에 투영된 것.* 그래서 **겉모습만** 플레이어가 만진다. **두께**도 같은 이유로 설정이 아니다(스타일 에셋에 저작).
