@@ -61,6 +61,22 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Enemy Spawn", meta = (DisplayName = "탈출 중 지오메트리 통과"))
 	bool bPhaseThroughWorldWhileExiting = true;
 
+	/**
+	 * MovePoint — 스폰 직후 따라갈 탈출 경로 지점들, **액터 로컬 좌표**. 배열 요소마다 뷰포트에 드래그
+	 * 핸들이 뜨므로(MakeEditWidget) 디테일 패널에서 `+` 로 늘리고 위치는 뷰포트에서 잡는다.
+	 *
+	 * `ExitPathRoot` 웨이포인트와 나뉘는 이유 = **맵 배치별 오버라이드**. 웨이포인트는 컴포넌트라 BP 안에서만
+	 * 저작되고 그 BP를 놓은 모든 복사본이 같은 경로를 쓴다. 이건 프로퍼티라서 레벨 인스턴스마다 표준
+	 * 블루프린트 인스턴스 오버라이드로 저장된다 — BP 기본값에 1개를 저작해 두고, 맵에 놓은 개체마다 필요한
+	 * 만큼 더한다.
+	 *
+	 * 로컬 좌표라 스포너를 옮기거나 돌리면 경로도 같이 따라온다. 컴포넌트 웨이포인트 **뒤에 이어 붙는다**
+	 * (대체가 아니라 추가 — 기존 구조형 스포너 콘텐츠 무회귀).
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Enemy Spawn",
+		meta = (DisplayName = "MovePoint (탈출 경로)", MakeEditWidget = true))
+	TArray<FVector> ExitPathPoints;
+
 	FGameplayTag GetZoneTag() const { return ZoneTag; }
 	const FGameplayTag& GetMapId() const { return MapId; }
 	float GetMinPlayerDistance() const { return MinPlayerDistance; }
@@ -75,13 +91,17 @@ public:
 	 * structured spawner, ending at the hand-off point to flow-field player-chase. No waypoints = no path (the
 	 * enemy chases immediately). (C1)
 	 *
-	 * Two authoring places, checked in this order:
+	 * Three authoring places. (1) and (2) are alternatives — (2) is the fallback used only when (1) is empty —
+	 * and (3) is always APPENDED after whichever of them answered:
 	 *   1. Scene components attached to the **UChildActorComponent that spawned this point**, i.e. authored in the
 	 *      SPAWNER Blueprint. Use this when one mesh has several holes that exit in DIFFERENT directions — each
 	 *      ChildActorComponent carries its own route, dragged in that BP's viewport.
 	 *   2. Scene components under this actor's own **ExitPathRoot**. Used by a directly-placed spawn point, and as
 	 *      the shared default a structured spawner inherits when a hole has no route of its own (identical routes
 	 *      differing only by rotation are covered by rotating the ChildActorComponent).
+	 *   3. The **ExitPathPoints** array (actor-local). Both of the above are COMPONENTS, so they are authored in a
+	 *      Blueprint and every placement of that Blueprint shares the one route; this is a property, so it is
+	 *      overridden per level instance — the only way to extend ONE placed point's route in a map.
 	 */
 	void GetExitPathWorldPoints(TArray<FVector>& Out) const;
 
