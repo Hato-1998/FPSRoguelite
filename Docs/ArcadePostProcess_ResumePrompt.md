@@ -122,7 +122,7 @@ PP 머티리얼을 추가하면 그 명령에 **스캔라인도 같이 꺼진다
 | `connect_material_expressions` 반환값 무시 | 머티리얼이 반쯤 배선된 채 **조용히 검정** | 모든 배선을 `link()` 헬퍼로 감싸 실패 수집 |
 | Custom 노드 **이름 붙은 입력 미연결** | 컴파일 에러 | `inputs` 를 통째로 교체(기본 핀 `"1"` 제거) |
 | Custom 노드 출력은 **하나** | `"R"`/`"G"` 핀 이름으로 못 뽑음 | `ComponentMask` 로 분리 |
-| **커맨드렛은 셰이더 통계를 안 낸다** | `VS=0 PS=0` 이 정상처럼 보임 | **에디터에서** `get_statistics` 재확인 |
+| **커맨드렛은 셰이더 통계를 안 낸다** | `VS=0 PS=0` 이 정상처럼 보임 | 🔁 **정정 2026-09-03: 에디터의 `get_statistics` 도 못 쓴다** — 그래프를 바꿔도 생성 시점 값에 고정된다(실증: `sin`/`cos` 8회 루프를 넣어도 `PS=85` 불변). 대신 `MaterialNodeService.get_material_diagnostics()`(`.is_compiled_ok`/`.compile_errors`) + `export_material_graph()`(연결 전량). = `Troubleshooting.md` G14 |
 | `save_asset` 기본 `only_if_is_dirty=True` | 로그엔 `save=True`, 디스크는 그대로 | `only_if_is_dirty=False` + **`git status` 대조** |
 | 파이썬 액터 편집이 맵을 더티로 안 만듦 | `save_current_level()` 이 조용히 건너뜀 | `save_dirty_packages(True,True)` + `save_asset(map, False)` + git 대조 |
 
