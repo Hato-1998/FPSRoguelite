@@ -56,8 +56,8 @@
 
 | ID | 유닛 | 구분 | 선행/게이트 | 상태 | 실행 프롬프트 |
 |---|---|---|---|---|---|
-| **U21** | Synty 아트 파일럿 게이트 (셀/툰 렌더러·무기모듈·Blu팔+PWAS·스웜 200-300 perf, throwaway). **산출에 아트 정체성 결정 포함** = Infima 유지 vs Synty Military 전환 vs Blu+PWAS 손저작 AnimBP 대체 | 에셋/PIE | — | ✅**완료**(2026-07-18 사용자 판정: S1/S3/S4 통과·perf OK·SRS 아웃라인 헤이즈 수정. **하위결정 2건도 같은 날 확정** = 무기 백본 Synty Military 전환 / 캐릭터 3P Blu·1P PWAS — 상세 §A. ⚠️S4는 **정성 판정만** 남고 정량 수치는 리포 어디에도 없음 → U22 전후 비교 기준선 부재, U22 첫 단계에서 현 상태 캡처 필요) | `Docs/SyntyArtPilot_Scoped_ResumePrompt.md` + `Docs/SyntyArtPilot_S1_CityBuildGuide.md` |
-| **U22a** | Synty 에셋교체 ① **환경 = 맵1 CyberCity만**(맵2 숲·맵3 우주는 범위 밖) + **맵 승격**(`L_GameFloor`→`L_Map_Center`, `RunMap` 전환, `L_Sandbox` 제거) | 에셋 | U21 ✅통과 | **다음 착수** | [`Docs/U22_AssetReplacement_Prompt.md`](U22_AssetReplacement_Prompt.md) §3 |
+| **U21** | Synty 아트 파일럿 게이트 (셀/툰 렌더러·무기모듈·Blu팔+PWAS·스웜 200-300 perf, throwaway). **산출에 아트 정체성 결정 포함** = Infima 유지 vs Synty Military 전환 vs Blu+PWAS 손저작 AnimBP 대체 | 에셋/PIE | — | ✅**완료**(2026-07-18 사용자 판정: S1/S3/S4 통과·perf OK·SRS 아웃라인 헤이즈 수정. **하위결정 2건도 같은 날 확정** = 무기 백본 Synty Military 전환 / 캐릭터 3P Blu·1P PWAS — 상세 §A. ⚠️S4는 **정성 판정만** 남고 정량 수치는 리포 어디에도 없음 → U22 전후 비교 기준선 부재, U22 첫 단계에서 현 상태 캡처 필요) | `Docs/SyntyArtPilot_Scoped_ResumePrompt.md` + `Docs/Archive/prompts/SyntyArtPilot_S1_CityBuildGuide.md` |
+| **U22a** | Synty 에셋교체 ① **환경 = 맵1 CyberCity만**(맵2 숲·맵3 우주는 범위 밖) + **맵 승격**(`L_GameFloor`→`L_Map_Center`, `RunMap` 전환, `L_Sandbox` 제거) | 에셋 | U21 ✅통과 | ⛔**폐기**(2026-09-03 — 도시맵이 ADR 0010 에서 기각되고 아레나 위상으로 전환. 아트 방향은 레트로 아케이드 사이버스페이스로 대체, `Docs/SSOT/ArtDirection.md`) | [`Docs/Archive/prompts/U22_AssetReplacement_Prompt.md`](Archive/prompts/U22_AssetReplacement_Prompt.md) §3 |
 | **U22b** | Synty 에셋교체 ② 무기 7정·캐릭터(3P Blu/1P PWAS)·적 저코스트 VAT·UI 리스킨·VFX | 에셋 | **U22a 사용자 육안 게이트** | 대기 | 같은 문서 §4 |
 | **U15/U19/U20** | 통합 애니 콘텐츠 저작 (A 1P무기·B 3P팀원·C 적VAT+보스스켈). 코드 인프라 ✅, 콘텐츠 미저작 | 콘텐츠 | **⚠️HOLD**: U21 아트정체성 결정 (U20 VAT 베이크 = U22 적교체 후) | HOLD | `Docs/AnimationPass_ContentGuide.md`(자족 A/B/C) |
 | **U12** | UI/필 잔여 (카드 아이콘 콘텐츠 · 무기별 팔 AnimBP=U15 흡수 · 서버권위 bloom=장기백로그) | 콘텐츠 | — | 잔여 hold | §C U12(잔여) |
@@ -126,7 +126,7 @@
 
 ### U21 — Synty 아트 파일럿 게이트
 
-> **실행 프롬프트 원본(자족) = [`Docs/SyntyArtPilot_Scoped_ResumePrompt.md`](SyntyArtPilot_Scoped_ResumePrompt.md)**(+ 맵 작업 시 [`Docs/SyntyArtPilot_S1_CityBuildGuide.md`](SyntyArtPilot_S1_CityBuildGuide.md)) — 그 문서를 새 세션에 붙여넣는다(여기 중복 안 함, SSOT 분리).
+> **실행 프롬프트 원본(자족) = [`Docs/SyntyArtPilot_Scoped_ResumePrompt.md`](SyntyArtPilot_Scoped_ResumePrompt.md)**(+ 맵 작업 시 [`Docs/Archive/prompts/SyntyArtPilot_S1_CityBuildGuide.md`](Archive/prompts/SyntyArtPilot_S1_CityBuildGuide.md)) — 그 문서를 새 세션에 붙여넣는다(여기 중복 안 함, SSOT 분리).
 > ⚠️ **구 `Docs/SyntyArtPilot_ResumePrompt.md` = 폐기본**(SRS를 "최후 폴백 유료옵션"이라 하는 등 SSOT와 모순) — 읽지 말 것. **Scoped 판이 최신**(스코프 축소 = 단일 CyberCity 화이트박스 + 라이플 + 스웜 200 + SRS 셀 실측).
 
 - **목적**: 대량 채택·콘텐츠 저작 **전에** 셀/툰 아트 스택이 제1원리(적 200-300 싸게)를 지키는지 + 룩을 실측/육안 게이트. throwaway 파일럿, 통과분만 LFS 커밋.
@@ -137,7 +137,7 @@
 
 ### U22a / U22b — Synty 셀/툰 에셋 교체
 
-> **실행 프롬프트(자족) = [`Docs/U22_AssetReplacement_Prompt.md`](U22_AssetReplacement_Prompt.md)** — 그 문서를 새 세션에 붙여넣는다(여기 중복 안 함, SSOT 분리). 2026-07-19 작성, 7에이전트 조사 + 적대 검증(주장 13건 반박·정정) 기반.
+> **실행 프롬프트(자족) = [`Docs/Archive/prompts/U22_AssetReplacement_Prompt.md`](Archive/prompts/U22_AssetReplacement_Prompt.md)**(폐기본) — 그 문서를 새 세션에 붙여넣는다(여기 중복 안 함, SSOT 분리). 2026-07-19 작성, 7에이전트 조사 + 적대 검증(주장 13건 반박·정정) 기반.
 > ⚠️ 구 `AssetReplacement_Synty_ResumePrompt.md` = **폐기본**(SSOT와 모순) — 읽지 말 것. `Docs/Archive/prompts/`로 내렸다(2026-08-11).
 
 - **분할**(사용자 결정 2026-07-19): **U22a 환경 → 사용자 육안 게이트 → U22b 나머지**. 아트 판정이 전부 사용자 육안이라 유닛 끝 1회 판정으로 두면 룩이 어긋났을 때 전량 재작업이 된다.
