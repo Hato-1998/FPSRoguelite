@@ -918,8 +918,14 @@ P2 3건 전량 + P3 5건 중 4건 반영. 게이트가 "확인했으나 지적 �
 **신규 테스트 3종** — `FPSRoguelite.Boss.{Selection, Authoring, TimeAxisGuard}` + `Boss.TickEnabled` 에
 **오브 CDO** 단언 추가(§12-2 ⑦ 의 나머지 절반). 이로써 §12-2 ⑦⑩⑪⑬ · §14-5 `Boss.Selection` 이 모두 실재한다.
 
-**검증** — 빌드 통과 · 전체 66개 중 64 통과. 실패 2건은 §13-5 와 동일한 선행 건
-(`Editor.CardCsv.RoundTrip` · `Enemy.BlueprintParent`, VIT1 `776e8441`) 이며 이 브랜치와 무관하다.
+**검증** — 빌드 통과 · 브랜치 기준 66개 중 64 통과(실패 2건은 §13-5 와 동일한 선행 건).
+
+**머지 후 재검증** — `origin/main` 이 21커밋 앞서 있어(HUD 아트·README·U22a 정리) 스테일 로컬 main 이 아니라
+**현재 `origin/main` 위로** `--no-ff` 머지했다. 머지 커밋 = `2a8a5351`.
+머지 트리 풀빌드 `Result: Succeeded`(178초 — 유니티 재편이 forward-decl UPROPERTY 를 incomplete-type 으로
+표면화하는 함정 때문에 머지 후 풀빌드는 형식이 아니라 실효 검사다) · 자동화 **66개 중 65 통과**.
+잔여 실패 1건은 `Editor.CardCsv.RoundTrip`(카드 CSV 임포트가 패키지를 더럽힘) 뿐이며 이 유닛과 무관하다 —
+나머지 1건 `Enemy.BlueprintParent` 는 그 21커밋 안의 `305810cd` 가 이미 고쳐 놨다.
 
 ---
 
