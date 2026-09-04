@@ -20,10 +20,10 @@ Docs/RifleHardSurface_ResumePrompt.md 를 읽고 진행한다.
 |---|---|
 | §3-1 절차적 생성 | ✅ `4fc47fd7` — 파츠 8종 · 삼각 4,604 |
 | §3-3 임포트 | ✅ `11e802aa` (3차) — 8/8 · `slots_ok=True` · **forward=+Y 게이트 pass** · `/Game/Assets/Weapons/RifleHS/`. 1차 `96fcdab8` 는 원점·축이, 2차 `5bd0b4d4` 는 Y 부호가 틀렸었다(D12) |
-| §3-2 C++ 가드 확장 | ⏳ **플랜 게이트 대기** — 이게 없으면 파츠 7개가 안 붙는다 |
-| §3-4 소켓 | ✅ `ffa6d5ca` — 몸통 8 · 총열 Muzzle · 조준경 2종 Aim, `sockets_ok=True` |
+| §3-2 C++ 가드 | ✅ **WPN1** `e181d137` — 명세 `Docs/Specs/WPN1_StaticWeaponParts.md`(G1 Fable 2회 반려→rev3 승인) · Sonnet 축자 구현 · 빌드 `Result: Succeeded` · 스모크 ModuleLoads 통과 · PIE #1 파츠 부착·스코프 교체 ✓ · **G2 머지 게이트 = PIE 완료 뒤** |
+| §3-4 소켓 | ✅ `ffa6d5ca` — 몸통 8 · 총열 Muzzle · 조준경 2종 Aim, `sockets_ok=True`. **+ 손 소켓 회전** `2fbc6af4`(Synty 회전 기저 변환 이식) → 데이터 경로 `6b0fbb2b`(생성기 `BODY_SOCKET_ROTATIONS` → manifest `body_socket_rotations` → 스크립트 add/upd·verify 회전 포함, 라운드트립 12/12). Troubleshooting F4 |
 | §3-6 DA | ◐ `f75ecc06` — 몸통만(사용자 입력: 스켈 None · 스태틱 `SM_RifleHS_Body` · ADS 오프셋 Yaw 90 유지). 파츠 7항목은 §3-2 뒤 |
-| §3-7 PIE | ◐ **몸통 위치·방향 통과**(사용자, 2026-09-04) — 원점·프레임·Y반전 상쇄가 런타임 실증. 파츠·ADS 정렬·총구화염·양손 IK 미판정 |
+| §3-7 PIE | ◐ **몸통 위치·방향 통과**(2026-09-04) → **WPN1 PIE #1: 파츠 부착 ✓ · 스코프 교체 ✓ · 손 방향 이상** = 몸통 손 소켓 회전 누락(코드 아님) → 수정 후 **재판정 대기**(방향 정상? 위치 오차 cm?). ⓑ 원격 클라·스왑 · ⓓ 왼손 몸통 소켓 · ⓔ ADS 정렬 · ⓕ 총구화염 · 로그 `:2480` 부재 · 대조군 4종 = 미판정(명세 §12-6·§13) |
 | §3-5 머티리얼 | ⏳ (체커 그대로. 파츠가 붙은 뒤 판정하는 게 효율적) |
 
 ---
@@ -225,7 +225,7 @@ python Scripts/gen_rifle_hardsurface.py    →  Saved/RifleHardSurface/
 - 🪤 **좌우 대칭은 `sy=±1` 로 찍되 rect 가 뒤집혀도 된다** — `prism()` 이 정규화한다(안 하면 모따기가 바깥으로 나간다. 1차에 실제로 났던 버그).
 - 🪤 **모따기는 가장 얇은 치수의 1/3 로 자동 제한** — 얇은 슬랫에 0.3 을 그대로 주면 면이 뒤집힌다.
 
-### 3-2. C++ 가드 확장 — 정적 무기도 파츠를 받게 (§2-4) 🔒 **플랜 게이트 대상** — ⏳ 다음 착수
+### 3-2. C++ 가드 확장 — 정적 무기도 파츠를 받게 (§2-4) 🔒 플랜 게이트 대상 — ✅ **WPN1 완료** (`e181d137`; 명세·원장 = `Docs/Specs/WPN1_StaticWeaponParts.md` §13, G2 = PIE 뒤)
 **이게 없으면 임포트한 파츠 7개(몸통 제외)가 하나도 안 붙는다.** 지금 가장 먼저 할 일.
 
 **변경 지점 5곳** (🔁 2026-09-04 전수 grep `\bWeaponMesh\b` 로 3곳 → 5곳. `Source/FPSRoguelite/Private/Hero/FPSRCharacter.cpp`, 줄 번호는 재확인):
