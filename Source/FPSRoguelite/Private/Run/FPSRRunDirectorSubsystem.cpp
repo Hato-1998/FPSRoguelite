@@ -1300,6 +1300,39 @@ static FAutoConsoleCommandWithWorldAndArgs GFPSRSkipToBossCmd(
 		}
 	}));
 
+// BOSS1: without these two, verifying a boss pattern in PIE means waiting out its authored cooldown and chipping the
+// boss down to a phase threshold first — which makes each slice practically untestable by hand. Same reasoning (and
+// same shape) as FPSR.SkipToBoss above.
+static FAutoConsoleCommandWithWorldAndArgs GFPSRBossPatternCmd(
+	TEXT("FPSR.BossPattern"),
+	TEXT("Force-activate one of the active boss's patterns by index, ignoring cooldown and the inter-pattern gap. Usage: FPSR.BossPattern [index]"),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic([](const TArray<FString>& Args, UWorld* World)
+	{
+		AFPSRGameState* GS = World ? World->GetGameState<AFPSRGameState>() : nullptr;
+		AFPSRBossBase* Boss = GS ? GS->GetActiveBoss() : nullptr;
+		if (!Boss)
+		{
+			UE_LOG(LogFPSR, Warning, TEXT("[Boss] FPSR.BossPattern — no active boss. Run FPSR.SkipToBoss first."));
+			return;
+		}
+		Boss->DebugForcePattern(Args.Num() > 0 ? FCString::Atoi(*Args[0]) : 0);
+	}));
+
+static FAutoConsoleCommandWithWorldAndArgs GFPSRBossPhaseCmd(
+	TEXT("FPSR.BossPhase"),
+	TEXT("Set the active boss's phase (monotonic — it cannot go back down). Usage: FPSR.BossPhase [phase]"),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic([](const TArray<FString>& Args, UWorld* World)
+	{
+		AFPSRGameState* GS = World ? World->GetGameState<AFPSRGameState>() : nullptr;
+		AFPSRBossBase* Boss = GS ? GS->GetActiveBoss() : nullptr;
+		if (!Boss)
+		{
+			UE_LOG(LogFPSR, Warning, TEXT("[Boss] FPSR.BossPhase — no active boss. Run FPSR.SkipToBoss first."));
+			return;
+		}
+		Boss->DebugSetPhase(Args.Num() > 0 ? FCString::Atoi(*Args[0]) : 2);
+	}));
+
 static FAutoConsoleCommandWithWorldAndArgs GFPSRRunTimeScaleCmd(
 	TEXT("FPSR.RunTimeScale"),
 	TEXT("Set the run-clock time scale (1=normal, 10=10x). Usage: FPSR.RunTimeScale [scale]"),

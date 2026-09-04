@@ -62,6 +62,23 @@ EFPSRDamageSourceClass FPSRTelemetry::ClassifyDamageSource(const AActor* Instiga
 	{
 		return EFPSRDamageSourceClass::Mission;
 	}
+
+	// BOSS1: a boss pattern can put its own spawned actor forward as the instigator (the homing orb does, so the
+	// hit-direction indicator points at the orb rather than at the arena centre). Those actors are OWNED by the boss,
+	// so fall back to the owner before giving up. Without this the hit lands in Env, which CountsAsIncoming excludes,
+	// and the entire boss fight would read as zero incoming pressure in the director's telemetry — a silent failure
+	// with no symptom anywhere else.
+	//
+	// One level only, and only when the owner is a different actor: this is a targeted fallback, not a general
+	// walk up an ownership chain that nothing else in this project builds.
+	if (const AActor* Owner = Instigator->GetOwner())
+	{
+		if (Owner != Instigator && Cast<AFPSRBossBase>(Owner))
+		{
+			return EFPSRDamageSourceClass::Boss;
+		}
+	}
+
 	return EFPSRDamageSourceClass::Env;
 }
 

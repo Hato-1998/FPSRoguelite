@@ -36,6 +36,15 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Boss")
 	bool bUseBossSpawnPoint = true;
 
+	/** Health fractions (DESCENDING, exclusive of 0 and 1) at which the boss advances a phase.
+	 *
+	 *  🔴 The LENGTH of this array is what decides how many phases this boss has — phase count is data, not a C++
+	 *  constant, so a second boss with a different number of phases needs no code change (BOSS1, user decision
+	 *  2026-09-02). {0.66, 0.33} = three phases; an empty array = a single-phase boss.
+	 *  Phase transitions are monotonic: healing never walks one back down. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Boss", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	TArray<float> PhaseHealthThresholds;
+
 #if WITH_EDITOR
 	/** One-line summary for designer tooling / catalog (auto-description directive). */
 	UFUNCTION(BlueprintPure, Category = "Boss")

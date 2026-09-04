@@ -80,6 +80,113 @@
 
 ---
 
+## 🔷 BOSS1 보스 공격 패턴 3종 + 패턴 구동 기반 (2026-09-03, main 머지 `2a8a5351`) — **보스가 "체력만 있는 정지 스캐폴드"에서 실제로 싸우는 상태로**
+> 브랜치 `feat/boss-patterns` · 14커밋 · 보드 행 = BOSS1-S1/S2/S3(M3 · L/M/M · 부모 「실보스 1종」의 분할물).
+> 명세 = `Docs/Specs/BOSS1_AbilityPatternFramework.md`(§13 = 게이트 원장) · 저작 절차 = `Docs/BOSS1_ContentGuide.md`.
+> 사용자 요청 = ①플레이어 위치 2초 간격 포격 5회 ②시계방향 맵 전체 회전 레이저(점프로 회피, 페이즈마다 1줄 추가)
+> ③플레이어 1명을 추적하는 체력 150 투사체 5기. 이후 **"모든 패턴에 통용되는 시스템을 먼저"** 지시로 §14 개정.
+
+### 이 유닛의 실체 = 패턴 3종이 아니라 "프리즈-정확한 서버 구동축"
+세 패턴 전부 *시간에 걸쳐 진행되는* 공격이다. 그런데 §2-2 전역 프리즈(1인 레벨업 = 전원 프리즈)는
+**상태 게이트이지 `TimeDilation` 이 아니다** — 엔진은 GE duration/period 와 AbilityTask 를 월드
+`FTimerManager` 로 돌리므로 **프리즈를 그냥 뚫는다**. 그래서 이 유닛의 모든 타이밍(2초 간격·회전 각도·추적
+시간·쿨다운·준비/후딜)은 **Tick Δt 와 프리즈-멈춤 전투 시계** 두 가지에서만 나온다.
+`FTimerManager`·`WaitDelay`·duration GE 는 패턴 경로에 **0건**(grep 실측).
+
+- **클럭은 새로 만들지 않았다.** VIT1 이 이미 `AFPSRGameState::GetCombatClockSeconds()`(월드 시간 − 누적 동결
+  시간, 틱 없음, 서버 전용)로 같은 문제를 풀어 뒀다. 보스 전용 누산기를 만들려던 초안을 폐기했고, 그 결과
+  엘리트 어빌리티를 건드리는 리팩토링도 함께 소멸했다.
+- **쿨다운 계약을 공통 베이스로 호이스트** — `UFPSRFreezeCooldownAbility`(`CheckCooldown`/`ApplyCooldown`/
+  `GetCooldownGameplayEffect`=항상 null). 엘리트가 이미 검증해 둔 계약을 보스가 **상속**한다(재발명 아님).
+- **시간축 가드를 ASC 로 이동** — `EnableTimeAxisGuard()` 가 `HasDuration || Period>0` GE 의 *적용 자체*를
+  엔진 레벨에서 거부한다. 문서 약속 + 런타임 가드 두 겹. 액터 소유 ASC(엘리트·보스)만 옵트인하고
+  플레이어 ASC 는 켜지 않는다(카드 GE 는 정당하게 시간형이다).
+
+### §14 개정 — 공통 수명주기 + 트리거 축 (사용자 지시로 S1~S3 구현 후 재설계)
+S1~S3 는 "패턴이 쿨다운되면 곧바로 이어서 나간다" 구조였다. 사용자 지시로 뒤집었다.
+- `UFPSRBossGameplayAbility` 가 **Prep → Execute → Recovery** 상태기계를 소유한다. 준비/후딜 초는
+  패턴별 `EditDefaultsOnly`. 패턴 본체는 `ServerBeginExecute`/`ServerTickExecute`/`ServerEndExecute` 만 구현한다.
+- **패턴은 큐가 아니다** — 트리거(`Elapsed` / `PatternCount` / `HealthBelow`)가 발화할 때까지 보스는 유휴다.
+  🔴 `Elapsed`/`PatternCount` 는 "마지막 발화 이후 경과"가 아니라 **누적 임계 통과 횟수**로 센다. 긴 프리즈
+  뒤에 밀린 발화가 **버스트로 쏟아지는 것을 표현 자체가 불가능하게** 만들기 위해서다.
+- `PatternCount` 는 사용자가 말한 "평타 5회 이후"의 자리표다 — 보스에 평타가 아직 없어 셀 것이 없다.
+
+### 레이저 판정 — 트레이스가 아니라 상대각, 그리고 "호 교차"도 아니다
+초안은 *빔이 쓸고 간 호*에 플레이어가 들어왔는지 봤다. Fable 플랜 게이트가 잡았다: **빔이 거의 멈춰 있고
+플레이어가 빔을 가로질러 달리는 경우를 못 잡는다**(호가 0폭이라 플레이어 각도를 담지 못함) → 레이저 안으로
+뛰어들면 안 맞는다. 상대각 `Δ = wrap180(플레이어방위 − 빔각)` 의 **부호 반전**으로 바꿔 두 움직임을 한 값에
+합쳤다. 그 뒤 **내 자체검증이 두 번째 구멍**을 잡았다 — 밴드 진입만 보면 한 프레임에 빔을 훌쩍 넘어간
+*빠른 통과*가 0회로 샌다. 최종형은 `밴드 안 || 부호 반전` 의 OR + 래치다.
+- 비용 = 플레이어 4 × 빔 3 = 12회 비교/프레임, **트레이스 0회**. 지형 관통(사용자 결정)이라 LOS 계산도 없다.
+- 웜업(경고) 구간 + 유예 후 회전 시작. 각도식은 **2구간**(`Start + Speed × max(0, Now − GraceEnd)`).
+
+### 유도 오브 — `APawn` 이 아니라 `AActor`
+🔴 Fable 게이트 P2: `FPSRCombat::CanAffectTarget` 의 P-C 도달성 게이트는 **Pawn 에만** 걸린다. 오브를 `APawn`
+으로 만들면 막힌 셀 위에서 **무적**이 된다. `AActor` + `ECC_Pawn` 스피어로 바꿔 모든 무기 질의가 이미
+수집하게 하면서 게이트는 타지 않게 했다. `SetCountsAsKill(false)` — 반복 소환되는 오브가 XP 무한 파밍이 되면
+안 된다. 대상 사망 시 **마지막 사망 지점으로 가서 폭발**(사용자 결정).
+
+### 게이트가 실제로 잡은 것 — "녹색 빌드 + 녹색 자동화"가 결함을 가린 사례 5건
+이 유닛에서만 다섯 번, 빌드도 자동화도 전부 통과한 상태에서 결함이 살아 있었다.
+1. 🔴 **`FPSRBossBase.cpp` 생성자가 `bCanEverTick = false` 를 명시 중**이었고 명세가 그것을 뒤집지 않았다.
+   그대로 갔으면 선택기·블라스트 신관·레이저·프리즈 엣지 푸시가 **전부 무동작**인 채 전부 녹색이었다.
+   → 생성자 수정 + **CDO 단언 테스트**(`Boss.TickEnabled`). 오브도 같은 함정이라 같이 단언한다.
+2. 🔴 **`GetBeamState()`(BP 접근자)가 옛 1구간 각도식**을 쓰고 있었다 — §14 에서 2구간으로 바꾸며 판정과
+   디버그 오버레이만 고쳤다. BP 빔이 판정 빔보다 `Speed × Grace`(페이즈 3에서 **90°**) 앞서서,
+   **점프는 빈 공기를 넘고 그 뒤 보이지 않는 빔에 맞는다.** 내 디버그 오버레이가 *올바른 쪽* 식을 써서
+   PIE 로도 안 보였다. → 모든 소비자가 `BeamBaseAngleAt` 하나를 부르게 통일 + 회귀 테스트.
+3. **오브 코스메틱이 권위 반쪽뿐** — 격추·폭발 둘 다 호스트만 봤다. RepNotify 는 권위 머신에서 돌지 않는다.
+   협동 기준형이 리슨서버라 **호스트는 매 세션 존재하는 1/4** 인데, 2인 PIE 에서 클라 화면만 보면 정상으로 보인다.
+4. **자동화 ③④⑤ 가 수정 전 코드에서도 녹색**이었다(프레임 스텝 1.0~1.4° < 밴드폭 6° = 느린 통과만 검사).
+   실패할 수 있어야 테스트다 → 빠른 관통·밴드 내 방향전환·첫 프레임·래치 재진입·웜업 종료 5케이스 추가.
+5. **빌드 실패를 성공으로 오독** — `Result: Failed (OtherCompilationError)` 인데 grep 파이프 때문에 종료코드가 0.
+   **판정은 종료코드가 아니라 `Result:` 줄로**(메모리 `build-exit-code-lies-grep-result`).
+
+### G2 P3-2 이행 — "문서가 약속한 것이 존재하지 않던" 상태 (커밋 `a3bac359`)
+머지 게이트가 남긴 유일한 미이행 항목. 헤더와 §14-3 이 **"`IsDataValid` 가 경고한다"고 적어 두고 실제로는
+없었다.** 런타임은 FIFO·clamp·폴백으로 안전했으므로 P3 였지만, 그 상태 자체가 결함이다.
+- `AFPSRBossBase::IsDataValid` 신설 — 경고 = `GrantedAbilities`/`PatternTriggers` 빈 배열(보스가 영영 공격하지
+  않거나 의도치 않은 폴백 케이던스로 돈다) · 포격의 `4 × (⌊Fuse/Interval⌋+1)` 이 `MaxConcurrentMarks` 초과.
+  오류 = `Threshold <= 0` · `HealthBelow >= 1`.
+- **판정 규칙은 전부 순수 함수로 분리** — `FPSRBoss::{ValidateTrigger, EstimatePeakBlastMarks,
+  BuildSelectionOrder}` · `FPSRAbilitySystem::IsTimeBasedEffect`. `IsDataValid`·선택기·가드는 얇은 어댑터만 남는다.
+- 🔴 `IsTimeBasedEffect` 를 뽑아낸 실무적 이유: 가드의 거부 경로는 **의도적으로 `ensureMsgf` 를 발화**하는데,
+  **자동화 러너가 그 ensure 의 콜스택을 테스트 에러로 캡처해 테스트를 실패시킨다**(1차 실행에서 실제로 그렇게
+  실패했다). `AddExpectedError` 로 콜스택 라인을 전부 매칭하는 것은 취약하므로 규칙을 ensure 밖으로 꺼냈다.
+  어댑터 극성은 살아있는 델리게이트의 *허용* 경로로 계속 단언한다 — 반환을 뒤집으면 그쪽이 깨진다.
+- 선택기는 `Random` 일 때만 `FMath::RandHelper` 를 호출한다 — `Sequential` 보스가 전역 난수 스트림을 흔들지 않게.
+
+### 디버그 드로우 (`FPSR.BossDebugDraw 1`, 커밋 `ea0d819d`)
+연출이 전부 BP 소관이라 **저작 전에는 패턴이 문자 그대로 보이지 않는다** — "어디선가 데미지가 왔다"만 관측
+가능하다. 그래서 역학·수치를 **먼저** 검증하고 아트를 이미 known-good 인 거동 위에 얹게 했다(반대로 하면
+수치가 움직일 때마다 아트를 다시 만든다). 클라이언트에서도 그린다 — **클라가 보는 빔과 서버가 판정하는 빔이
+일치하는지**는 서버 전용 오버레이로는 영영 볼 수 없는 유일한 항목이라서.
+
+### 함정 — 클론이 17커밋 뒤처져 있었다
+착수 조사 중 발견. 보드가 지목한 커밋이 이 클론엔 없고 **형제 클론 `E:\Git_Project\FPSRoguelite`** 에 있었다.
+빠진 17커밋 = VIT1 실드/체력 2층 바이탈 — 하필 **`FPSRCombat::ResolveDamage` 와
+`UFPSREnemyHealthComponent`**, 보스 본체와 오브가 공유하는 그 둘을 고친 작업이었다. fast-forward 로 해소.
+머지 시점에도 `origin/main` 이 **21커밋** 앞서 있었다(HUD 아트·README·U22a 정리) → 스테일 로컬 main 이 아니라
+**현재 origin/main 위로** 머지했다. 메모리 `fetch-before-branching-clone2-stale` 가 두 번 실증됐다.
+부수 소득: 그 21커밋 안의 `305810cd` 가 `Enemy.BlueprintParent` 선행 실패를 이미 고쳐 놨다.
+
+### 검증
+- 빌드 `Result: Succeeded`(머지 후 178초 — 유니티 블록 재편이 forward-decl 만 있는 UPROPERTY 를
+  incomplete-type 으로 표면화하는 함정이 있어 **머지 후 풀빌드는 형식이 아니라 실효 검사**다).
+- 자동화 **66개 중 65 통과**. 잔여 실패 1건 = `FPSRoguelite.Editor.CardCsv.RoundTrip`(카드 CSV 임포트가
+  패키지를 더럽힘) — 이 유닛과 무관한 선행 결함이며 조상 커밋까지 확인했다.
+- 신규 `FPSRoguelite.Boss.{Phase, LaserSweep, TickEnabled, Trigger, Selection, Authoring, TimeAxisGuard}` 7종 전부 통과.
+- PIE 사용자 확인 — **패턴 3종 전부 정상 동작 · 미사일이 사망 지점으로 가서 폭발**.
+
+### 남은 것 (보드에 행으로 분리)
+- **PIE 잔여검증 2건**(신규 행, 하이·M3·S) = ①패턴 진행 중 레벨업 프리즈 30초에 신관·회전각·오브 진행이 0인가
+  ②리슨서버 호스트 / 2인 클라에서 보이는 빔과 맞는 순간이 일치하는가.
+- **BOSS1-S4 콘텐츠 저작**(대기, 선행 해제됨) = 연출(VFX/사운드/애님) 전량 · ADR 0015 신설 ·
+  RunFlow/Enemy/Game.md 갱신. 절차서 = `Docs/BOSS1_ContentGuide.md`.
+- **보스 이동·StateTree 는 여전히 미구현** — 이번 범위 밖이며 부모 행 「실보스 1종」에 남는다.
+
+---
+
 ## 🔷 U22a 도시 트랙 잔존물 정리 (2026-09-03, main 머지 `f6d9aa65`) — **폐기된 트랙이 살아있는 문서·런타임 모듈에 남아 있던 것 해소**
 > 브랜치 `chore/u22a-citygen-retire` · 작업 커밋 `3ae409c9`. 보드 행 = 「U22a/CityGen 잔존물 정리」(크기 `S` · 마일스톤 미배정 — 드리프트 정정 성격, 선례 = 「BalanceTuning_Reference.md 스테일 일괄 정리」).
 > 발단 = 아트 방향 재논의 중 사용자가 *"U22a 관련 내용 확인해봐 해당 내용 폐기했을텐데"* 라고 지적한 것.

@@ -6,7 +6,6 @@
 #include "AbilitySystemComponent.h"
 #include "GameplayEffect.h"
 #include "GameplayAbilitySpec.h"
-#include "Core/FPSRLogChannels.h"
 
 AFPSREnemyEliteBase::AFPSREnemyEliteBase()
 {
@@ -33,10 +32,10 @@ void AFPSREnemyEliteBase::PostInitializeComponents()
 	{
 		AbilitySystem->InitAbilityActorInfo(this, this);
 
-		// 실행 2 시간축 런타임 가드 등록 — see header doc (this override + RejectTimeBasedGameplayEffect's own
-		// comment). Once per actor real-lifetime, same as InitAbilityActorInfo just above.
-		AbilitySystem->GameplayEffectApplicationQueries.Add(
-			FGameplayEffectApplicationQuery::CreateUObject(this, &AFPSREnemyEliteBase::RejectTimeBasedGameplayEffect));
+		// 실행 2 시간축 런타임 가드 — 본체는 UFPSRAbilitySystemComponent 로 이동했다(BOSS1: 보스가 같은 계약을
+		// 쓰므로 1벌로 통합). Once per actor real-lifetime, same as InitAbilityActorInfo just above; the call is
+		// idempotent anyway.
+		AbilitySystem->EnableTimeAxisGuard();
 	}
 }
 
@@ -140,26 +139,4 @@ void AFPSREnemyEliteBase::ServerTickAttack(const FFPSRServerAttackContext& Ctx)
 	// branch alike (UFPSREnemySpawnSubsystem's two ServerTickAttack call sites), so gating this behind a target
 	// check would silently stall the cooldown clock whenever this elite has no target in range.
 	EliteCooldownClockSeconds += Ctx.DeltaSeconds;
-}
-
-bool AFPSREnemyEliteBase::RejectTimeBasedGameplayEffect(const FActiveGameplayEffectsContainer& ActiveGEContainer, const FGameplayEffectSpec& Spec) const
-{
-	const bool bHasDuration = Spec.Def && Spec.Def->DurationPolicy == EGameplayEffectDurationType::HasDuration;
-	const bool bHasPeriod = Spec.GetPeriod() > 0.0f;
-	if (!bHasDuration && !bHasPeriod)
-	{
-		return true; // Instant, or Infinite with NO period — allowed (see header doc for why Period must be checked too)
-	}
-
-	// Dev-time noise only (ensureMsgf never crashes, in Shipping or otherwise — that's the whole point of using it
-	// instead of check/checkf here) + an always-fires log line so a live server's repeat offenders aren't silenced
-	// after ensure's own one-shot-per-callsite suppression.
-	ensureMsgf(false, TEXT("[Elite ASC] Rejected GE '%s' on %s — HasDuration/periodic GE timers run on the world ")
-		TEXT("FTimerManager and are NOT paused by the §2-2 freeze gate. Use UFPSREliteGameplayAbility::")
-		TEXT("CooldownSeconds, or ServerTickAttack's freeze-paused accumulator, instead."),
-		*GetNameSafe(Spec.Def), *GetName());
-	UE_LOG(LogFPSR, Warning,
-		TEXT("[Elite ASC] Rejected time-based GE '%s' on %s (HasDuration=%d, Period=%.2f)."),
-		*GetNameSafe(Spec.Def), *GetName(), bHasDuration ? 1 : 0, Spec.GetPeriod());
-	return false;
 }
