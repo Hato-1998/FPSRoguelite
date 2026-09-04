@@ -190,7 +190,7 @@ void RefreshWeaponPartComponents(const UFPSRWeaponDataAsset* Weapon);
   2. `FPSR.DrawCards` 는 **쓰지 않는다** — 레벨업 풀(`WeaponCards`)에 이 카드가 없어 영원히 안 나온다(rev3 의 "3회 시도" 절차는 폐기).
   3. **기대**: 다음 틱 Reddot 슬롯이 `SM_Wep_Mod_Reddot_01` → `SM_Wep_Mod_Scope_09` 로 교체, **나머지 6개 파츠가 그대로**. 원격 클라(호스트 라이플을 관전하는 **시뮬레이티드 반쪽**)에서도 `OnRep_ActiveFragments`(`FPSRWeaponInstance.cpp:164-167`)로 같은 교체. ⚠️ 원격 클라 **자기** 라이플의 오너 반쪽은 콘솔로 불가(`Frag.Fill` 은 `HasAuthority()` 게이트 `:651`) — 실제 미션 해금 UI 로만.
   4. 제거 방향은 관측 불가 — `Frag.Fill` 재실행은 같은 집합을 Remove→Add 하므로 다음 틱 시그니처가 같아 `:3163` 에서 조기 반환(무변화가 정상). ⑤ 의 가드는 추가/제거 공통 경로이므로 3단계가 ⑤ 를 검증한다.
-- **ⓓ 그립 해석** — 왼손이 **몸통 `SOCKET_LeftHand`** 로 떨어져 붙는다(Synty `Handguard_03` 에 좌손 소켓 없음; `ResolveLeftHandGripComponent` 폴백 `:2706`). 기존 폴백의 확인이지 ④ 검증이 아니다. 팔 ABP 의 좌손 IK 배선이 살아 있어야 관측 가능(미검증).
+- **ⓓ 그립 해석** — 왼손이 **몸통 `SOCKET_LeftHand`** 로 떨어져 붙는다(Synty `Handguard_03` 에 좌손 소켓 없음; `ResolveLeftHandGripComponent` 폴백 `:2706`). 기존 폴백의 확인이지 ④ 검증이 아니다. 팔 ABP 의 좌손 IK 배선이 살아 있어야 관측 가능(미검증). → **해당 없음(2026-09-04, ARM1)**: 사용자가 `DA_Weapon_Rifle` 의 양손 그립 소켓을 None 으로 비워 손 IK 를 데이터로 퇴역시켰다(1P = 손만 표시 + 기본 애니). 이 항목은 검증 대상에서 제외. 몸통 소켓 자체는 보존(조립툴·향후용).
 - **④ 런타임 미검증** — 소비자 0. 검증 = #1(`ActiveWeaponMesh->GetSocketTransform(Socket, RTS_Component)` 문자열).
 - **ⓔ ADS**(rev3, P3-7) — 통과 기준: 조준 중 활성 사이트 파츠(`Reddot_01`/`Scope_09`)의 렌즈 중심이 화면 중앙 **±20px** 안. `ADSAimRotationOffset` 판정(`RifleHardSurface_ResumePrompt.md` §6-2)과 같이 본다.
 - **ⓕ 총구화염** — `Barrel_04` 의 `SOCKET_Muzzle` 에서(`CachedMuzzleComponent`). 위치만 — 서버 트레이스는 `CachedMuzzleComponent` 를 쓰지 않아 게임플레이 영향 없음(`:3313` `:3862`).

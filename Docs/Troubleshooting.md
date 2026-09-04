@@ -418,6 +418,8 @@ connect_material_expressions(mask, "", scenetex, "")             # ✅ 0번 핀 
 → 배선은 전부 `link()` 헬퍼로 감싸 **실패를 수집**하고, 끝나면 개수를 찍어라. 반환값은 자문이 아니다 —
 `ConnectMaterialExpressions` 는 `Input->Connect()` 를 실행한 뒤에만 True 를 낸다(같은 파일 `:700-706`).
 
+- **입력 이름 규칙(2026-09-04 엔진 소스 확인, `MaterialEditingLibrary.cpp:45-75` · `MaterialGraphNode.cpp:596-636`)**: `connect_material_expressions` 는 노드의 `GetInputName()` 을 **`UMaterialGraphNode::GetShortenPinName` 으로 줄인 뒤** 비교한다. 빈 이름 = 0번 입력, 빈 출력 이름 = 0번 출력. 줄임표: `Coordinates→UVs` · `TextureObject→Tex` · `Input→(빈 이름)` · `Exponent→Exp` · `AGreaterThanB→"A > B"` · `AEqualsB→"A == B"` · `ALessThanB→"A < B"` · `MipLevel→Level` · `MipBias→Bias`. 그 외는 UPROPERTY 이름 그대로(`A`,`B`,`X`,`Y`…). 반환값을 모아 판정하는 `link()` 헬퍼는 `Scripts/author_fparms_handsonly_material.py` 참조.
+
 ### D11. 헤드리스 정식 에디터가 **기동은 하는데 스크립트가 안 돈다** (2026-09-03, 복셀 라이플 임포트)
 
 `UnrealEditor-Cmd.exe <uproject> -nullrhi -unattended -nosplash -ExecCmds="py <script>"` 는
@@ -485,6 +487,13 @@ config/DataAsset은 **슬롯이 비었을 때만** 채우는 폴백으로 둔다
 `EditDefaultsOnly` 멤버를 가진 struct를 파이썬이 "인스턴스"로 보고 `DisableEditOnInstance` 필드 쓰기를 거부한다. 멤버만 `EditAnywhere`로 두면 된다(컨테이너가 `EditDefaultsOnly`면 편집 가능 범위는 그대로).
 
 ---
+
+### E5. 손 IK 를 데이터로 껐더니(DA 그립 소켓 None) **총이 가슴 앞에 뜬다** (2026-09-04, ARM1 착수 전 진단)
+- **증상**: 무기 DA 의 오른손 그립 소켓을 None 으로 비우면(=오른손 IK 알파 0, 설계된 스위치) 1P 총이 손이 아니라 가슴 앞 허공에 고정된다. 라이플 외 8종은 원래 None 이라 같은 증상이 잠복해 있었다.
+- **원인**: `ABP_FP_Base` 의 총 앵커 Copy Bone(hand_r → ik_hand_gun) 노드 Alpha 핀이 `RightHandIKAlpha` 에 바인딩돼 있었다(그래프 T3D 덤프로 확인). `AttachWeaponMeshes` 는 팔에 ik_hand_gun 본이 있으면 **항상** 그 본에 총을 붙이므로(`FPSRCharacter.cpp:977-1025`), 복사가 꺼지면 ik_hand_gun 은 리타깃 트랙의 정적 잔여값(기준 포즈 hand_r 위치 (-56.6, -0.3, 111.7))에 남고 총이 거기 붙는다. IK 알파는 손 IK 노드(Modify Bone·Two Bone IK)만 게이트해야 한다.
+- **해결(사용자, BP)**: Copy Bone 노드 Alpha 바인딩 제거 → 1.0 고정. 그 뒤 DA 소켓 None 으로 IK 를 끈다. 총 앵커와 손 IK 는 서로 다른 스위치다.
+- **읽는 법**: 애님 그래프는 파이썬에 노출되지 않는다 — `AssetExportTask` 로 ABP 를 T3D(UTF-16) 내보내 `PropertyBindings`·`PropertyPath` 를 grep 하면 핀 바인딩이 보인다(메모리 t3d-export-reads-protected-properties 의 확장).
+
 
 ## F. 단위 · 좌표계
 
