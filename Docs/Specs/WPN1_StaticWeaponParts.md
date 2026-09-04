@@ -244,4 +244,15 @@ void RefreshWeaponPartComponents(const UFPSRWeaponDataAsset* Weapon);
 
 - **G1 에 무엇을 줬나(1·2회차 공통)**: 명세 · 코드 경로 · 엔진 소스 경로 · `Docs/InternalRedTeamReview.md`. 설계 변호 없음. 2회차는 "1회차 처리가 해소됐는가 + ②의 새 형태가 새 결함을 들여왔는가"를 초점으로 명시.
 - **G1 3회차**: **태우지 않음** — 2회차 잔여 P2 가 검증표 문구 1건이고 리뷰어가 승인 단계 진행을 권고. §6-5-2 (5) "3회차부터 사용자 보고" 규칙에 따라 이 문서로 보고하고 사용자 승인으로 넘긴다.
+
+### C2 · C3 진행 (2026-09-04)
+
+| 단계 | 결과 |
+|---|---|
+| C2 Sonnet 축자 구현 | 완료 — 갭 0건. `FPSRCharacter.cpp` +48/−49, `.h` 3줄. 커밋·빌드·`git add` 없음(지시대로) |
+| C3 #1 명세 대조 | **통과** — ①⑤ 가드 문자열 일치 · ② 조기 반환 삭제 + 루프 전체(`NewObject`~`MakePartCurveNames`) `if (ActiveWeaponMesh)` 안, 재해석 4곳(`:2618` `:2636` `:2657` `:2673`)·`RefreshHandGripInGunFrameCache`·`RefreshPartFramesInGunSpaceCache` 는 가드 밖 잔존 → **목표 5 검증 완료** · ③ 부모 `ActiveWeaponMesh` · ④ 가드+`GetSocketTransform` 둘 다 · `.h` 주석 2곳 §5-1 과 동일 · `.cpp:2447` 주석 · 그 외 hunk 0(큰 +/− 는 루프 본문 재들여쓰기, 내용 줄 단위 동일) · 헤더 시그니처 변경 0. **플랜에 없던 구조 결정 = 0건**(②자리 주석을 1줄→2줄로 래핑한 서식 판단 1건뿐 — G2 프롬프트에 명시 대상 아님) |
+| C3 #2 빌드 | (기준선 캡처 뒤 실행 — 대기) |
+| C3 #3 스모크 | (대기) |
+| §11 카드 배치 에디터 실측 | (에디터 켜질 때 — 대기) |
+
 - **레드팀(G2)에 무엇을 줬나**: (C3 후 기입)
