@@ -119,7 +119,7 @@ G1 1차 = 반려(P1 3 · P2 7 · P3 11) → 2차 = **반려하되 "골격은 통
 | `Abilities/FPSRBossGA_SweepLaser.h/.cpp` · `Boss/FPSRBossLaserMath.h` | S2 |
 | `Boss/FPSRBossHomingOrb.h/.cpp` · `Abilities/FPSRBossGA_HomingOrbs.h/.cpp` | S3 |
 | `Private/Director/FPSRDirectorSensorSubsystem.cpp` (`GetOwner()` 폴백) | **S3** — 오브가 첫 소비자 |
-| `Config/DefaultGameplayTags.ini` (**죽은 `Boss.Phase.One/Two` 제거**) · BP·DA 저작 · ADR 0015 신설 · 0013 개정 · SSOT 3곳 | S4 |
+| `Config/DefaultGameplayTags.ini` (**죽은 `Boss.Phase.One/Two` 제거**) · BP·DA 저작 · ADR 0015 신설(→ 번호는 **0016** 을 쓸 것 — 0015 는 2026-09-04 「1P 총만 표시」 ADR 이 사용했다) · 0013 개정 · SSOT 3곳 | S4 |
 
 > **S1 이 보스 헤더에 S2/S3 필드까지 한 번에 싣는다** — 헤더 변경은 대규모 재컴파일(+OOM 위험,
 > 메모리 `[[build-header-change-oom-parallelism]]`)이라 3주에 걸쳐 3번 하는 것보다 1번이 싸다.
