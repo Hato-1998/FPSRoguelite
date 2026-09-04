@@ -516,6 +516,12 @@ ADR 0002의 *"head 본은 발에서 155.1cm"* 는 **스케일 적용 전 스켈�
 
 ---
 
+### F4. 정적 메시 손 소켓을 **위치만** 찍으면 손이 엉뚱한 방향으로 총을 잡는다 (2026-09-04, 하드서피스 라이플 PIE)
+- **증상**: WPN1 PIE — 파츠 부착·스코프 교체는 정상인데 1P 양손 자세가 이상하다. 코드(WPN1 `e181d137`) 의심 → 아니었다.
+- **원인**: 팔 IK 는 그립 소켓의 **전체 트랜스폼**(회전 포함)을 쓴다(`ResolveLeft/RightHandGripComponent` → `GetSocketTransform`). Synty 몸통 `SK_Wep_Mod_A_Body_01` 의 `SOCKET_LeftHand/RightHand` 는 회전을 갖는다(본 공간 L P80/Y180/R−90 · R P−70.1/Y−52.4/R−35.9). 내 몸통 `SM_RifleHS_Body` 의 소켓 저작(`ffa6d5ca`)은 매니페스트에 **위치만** 있어 회전이 (0,0,0) → 손바닥 기준축이 identity.
+- **해결**: Synty 회전만 기저 변환해 이식(`Mrot = make_rotation_from_axes(+X, −Z, +Y)`, `Te = Minv·Ts·M`; 검증 = Synty +Z→(0,1,0), −Y→(0,0,1)) `2fbc6af4`. 값은 생성기 `BODY_SOCKET_ROTATIONS` → manifest `body_socket_rotations` → `Scripts/author_rifle_hs_sockets.py`(add/upd 모두 회전 적용, verify 가 위치+회전 대조)로 데이터 경로에 고정 `6b0fbb2b`. **위치는 이식하지 않는다** — 몸통 형상이 달라 HS 값(`BODY_SOCKETS`) 유지, 미세조정은 그 표만 고쳐 스크립트 재실행.
+- **교훈**: `find_socket` 로 "소켓 있다"를 확인한 것은 "소켓 맞다"가 아니다(G 절 · 메모리 verify-with-control-group). 소켓을 다른 메시에서 옮겨 저작할 땐 원본이 **어떤 필드를 쓰는지**(위치·회전·스케일) 먼저 덤프해 대조군으로 삼을 것. `unreal.Rotator(a,b,c)` 는 (Roll, Pitch, Yaw) 순서(D6).
+
 ## G. 검증 방법 자체의 함정
 
 > 이 절이 가장 비싸다. **틀린 검증은 결함을 통과시키고, 통과했다는 기록까지 남긴다.**

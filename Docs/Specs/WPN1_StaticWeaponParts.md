@@ -257,6 +257,7 @@ void RefreshWeaponPartComponents(const UFPSRWeaponDataAsset* Weapon);
 | 코드 커밋 | `e181d137` feat(weapon): WPN1 — 두 파일만, 명세 대조·빌드·스모크 통과 후 |
 | §11 카드 배치 에디터 실측 | **완료 2026-09-04** — `DA_CardModifiers_SniperScope` ∈ **`UnlockableFeatures`**(1장, LEGENDARY) / `WeaponCards` = 스탯 카드 2장 / `MaxFragmentSlots=3` / Reddot 슬롯 stage `min_stacks=1 → SM_Wep_Mod_Scope_09`. → ⓒ = **`FPSR.Frag.Fill`** 확정(`DrawCards` 폐기). rev2·rev3 의 "WeaponCards" 가정은 틀렸었다(G1 2회차 P3-2 적중) |
 | §12-5/6 사용자 PIE | (대기 — 리슨 호스트 + 원격 클라) |
+| 사용자 PIE #1 (리슨 호스트, 2026-09-04) | **부분 통과** — ⓐ 파츠 배치 ✓(파츠 붙음) · ⓒ 스코프 교체 ✓(`SM_Wep_Mod_Scope_09`) · **손 방향 이상 관측** → 원인 = WPN1 코드가 아니라 **소켓 데이터 누락**: HS 몸통 `SOCKET_LeftHand/RightHand` 회전이 (0,0,0) — Synty 몸통 `SK_Wep_Mod_A_Body_01` 손 소켓은 회전을 갖는데(L P80/Y180/R−90 · R P−70.1/Y−52.4/R−35.9, 본 공간) `ffa6d5ca` 저작이 위치만 찍었다. 손 IK 는 소켓 **전체 트랜스폼**(회전 포함)을 쓰므로 identity 회전 = 손바닥 방향 붕괴. 수정 = Synty 회전을 기저 변환(`Te = Minv·Ts·M`)해 이식 `2fbc6af4`, 데이터 경로 고정 = 생성기 `BODY_SOCKET_ROTATIONS` → manifest `body_socket_rotations` → 소켓 스크립트(add/upd 회전 적용·verify 위치+회전) `6b0fbb2b`, 에디터 라운드트립 12/12 `sockets_ok=True`. **재판정 대기**(손 방향 정상 여부 · 위치 오차 cm — 위치는 HS 형상 기준 `BODY_SOCKETS` 값 유지). ⓑ · ⓓ · ⓔ · ⓕ · 로그 `:2480` 경고 부재 · 대조군(SMG·Shotgun·나이프·비무장) = **미판정** |
 | G2 머지 게이트 | (PIE 뒤) |
 
 - **레드팀(G2)에 무엇을 줬나**: (C3 후 기입)
