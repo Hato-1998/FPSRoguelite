@@ -162,6 +162,9 @@ void RefreshWeaponPartComponents(const UFPSRWeaponDataAsset* Weapon);
 - **조립툴 정적 몸통 미지원** — `FPSRWeaponAssemblerViewportClient.cpp:94-96` · `Helpers.cpp:52-58`. 라이플 파츠 8종 DA 저작은 **Details 수기 입력**. 툴의 현행 소켓 명명 `SOCKET_Mount_<Base36Guid>`(`Helpers.cpp:115`) vs DA 의 `SOCKET_Mount_<Slot>_0` 드리프트 — 재베이크 시 이름이 바뀔 수 있다.
 - **DA 검증기 정적 대칭화** — `FPSRWeaponDataAsset.cpp:197` `:306-308` `:370-372`(`SkelWeapon` 게이트). 라이플의 `SOCKET_Mount_Trigger_0` 원점 부착이 스켈레탈이었으면 경고, 정적에선 무음.
 - **stale 주석** — `FPSRWeaponDataAsset.h:124` · `.cpp:190` · `FPSRCharacter.h:1251-1253`(오른손 누락, 기존).
+- **(G2 2026-09-04 P3-2) DA 검증기 정적 대칭화** — `FPSRWeaponDataAsset.cpp:188-197`·`:306-308`·`:370-372` 의 리시버 조회를 `WeaponMeshStatic` 소켓(`UStaticMesh::FindSocket`)까지 넓힌다. 지금은 정적+파츠 = 무음, 정적 몸통의 총구/조준 소켓 = 거짓 경고(`:340-345`·`:404-409`). 후속 보드 행.
+- **(G2 범위 밖 ①) 파츠 재빌드 뒤 가시성 재적용 누락** — `ProcessPendingWeaponPartsRebuild`(`FPSRCharacter.cpp:3147-3168`)가 `RefreshWeaponVisibility(/*bForce=*/true)` 를 안 불러, 스코프 숨김 중 프래그먼트 변경이 오면 새 파츠가 보이는 채로 생성된다(`SetVisibility` 전파는 호출 시점 자식만). 기존 결함, WPN1 로 정적에도 동일. 후속 보드 행.
+- **(G2 범위 밖 ③) 스폰포인트 (1) CAC 경로**(`FPSREnemySpawnPoint.cpp:65-74`)는 CAC 아래 붙은 **모든** 비-자기 컴포넌트를 웨이포인트로 읽는다(라이트·메시 포함). 기존, 현재 CAC 콘텐츠 0.
 - **④ 런타임 소비자 부재** — `FPSRGunMotionStudioData` 참조 콘텐츠 에셋 0개(2026-09-04 재실측 2회). 총모션 스튜디오 데이터가 저작되는 유닛의 검증 항목으로.
 - ~~**`DA_Weapon_Rifle` 카드 배치 확인**(rev3, P3-2)~~ → **해소(에디터 실측 2026-09-04)**: `DA_CardModifiers_SniperScope` ∈ `UnlockableFeatures`. `WeaponCards` 에는 WeaponBehavior 카드가 없으므로 `FPSRWeaponValidator.cpp:50` 오류 상태 **아님**. ⓒ = `FPSR.Frag.Fill`. (교훈 재확인: 멤버십은 이름표로 판별 불가 — `[[uasset-strings-name-table-only]]`. rev2·rev3 가 그걸 어기고 단정했었다.)
 - **범위 밖 발견(G1)**: `FPSRCardSubsystem.cpp:110` 주석과 `:134` 코드 불일치(티어 가진 WeaponBehavior 카드는 레벨업 풀에서 뽑힌다) / 데디서버는 장착 시 파츠를 만들지만 진화는 무시(`:3128`, 기존) / `AttachWeaponMeshes` 가 `ActiveWeaponMesh` 대입 전에 그립 캐시를 한 번 갱신(`:1094`→`:2522` 가 덮음, 기존).
@@ -259,6 +262,23 @@ void RefreshWeaponPartComponents(const UFPSRWeaponDataAsset* Weapon);
 | §12-5/6 사용자 PIE | (대기 — 리슨 호스트 + 원격 클라) |
 | 사용자 PIE #1 (리슨 호스트, 2026-09-04) | **부분 통과** — ⓐ 파츠 배치 ✓(파츠 붙음) · ⓒ 스코프 교체 ✓(`SM_Wep_Mod_Scope_09`) · **손 방향 이상 관측** → 원인 = WPN1 코드가 아니라 **소켓 데이터 누락**: HS 몸통 `SOCKET_LeftHand/RightHand` 회전이 (0,0,0) — Synty 몸통 `SK_Wep_Mod_A_Body_01` 손 소켓은 회전을 갖는데(L P80/Y180/R−90 · R P−70.1/Y−52.4/R−35.9, 본 공간) `ffa6d5ca` 저작이 위치만 찍었다. 손 IK 는 소켓 **전체 트랜스폼**(회전 포함)을 쓰므로 identity 회전 = 손바닥 방향 붕괴. 수정 = Synty 회전을 기저 변환(`Te = Minv·Ts·M`)해 이식 `2fbc6af4`, 데이터 경로 고정 = 생성기 `BODY_SOCKET_ROTATIONS` → manifest `body_socket_rotations` → 소켓 스크립트(add/upd 회전 적용·verify 위치+회전) `6b0fbb2b`, 에디터 라운드트립 12/12 `sockets_ok=True`. **재판정 대기**(손 방향 정상 여부 · 위치 오차 cm — 위치는 HS 형상 기준 `BODY_SOCKETS` 값 유지). ⓑ · ⓓ · ⓔ · ⓕ · 로그 `:2480` 경고 부재 · 대조군(SMG·Shotgun·나이프·비무장) = **미판정** |
 | **마감(2026-09-04)** | 사용자가 `DA_Weapon_Rifle` 을 **원래 스켈레탈 모델로 원복**(`WeaponMesh=SK_Wep_Mod_A_Body_01`, `WeaponMeshStatic=None`, Synty 파츠 7 유지, 양손 그립 소켓 None). 사유 = HS 몸통용 파츠 미저작 + *"모델링 자체도 다시 만들어야"*(하드서피스 트랙 재작업 예정). → **정적 경로 검증은 ⓐ·ⓒ ✓ 상태로 동결**, ⓑ·ⓔ·ⓕ·로그·대조군 미판정. 코드 `e181d137` 은 브랜치에 유지(정적 경로는 휴면, 스켈레탈 경로 회귀 = 사용자 PIE 에서 원래 라이플 + 파츠 7 정상 표시·모션 — 비공식 통과). ⓓ 는 ADR 0015 로 해당 없음. |
-| G2 머지 게이트 | **보류** — `proto/arcade-look` 을 main 에 머지하는 시점, 또는 하드서피스 트랙 재개로 정적 경로 PIE 를 다시 돌린 뒤. Fable 호출 잔여 = 코어 갈래당 2회 상한 중 G1 2회 사용(반려 재제출은 산입 제외) → G2 1회 가능 |
+| G2 머지 게이트 | **실행 2026-09-04**(Fable 레드팀 1개, 대상 = 머지 단위 전체 코드 diff `origin/main...HEAD` = WPN1 `e181d137` + 스폰포인트 `68da5543`, 파일 4) — **P1 0 · P2 2 · P3 5 · 범위 밖 3**(약 14분, 도구 61회). 판정 = 아래 「G2 판정 원장」. 이행 커밋 `1f32b156`(주석·문구만, 동작 불변). 통합 트리(origin/main BOSS1 16커밋 머지 `ef57c164`) 빌드 `Result: Succeeded`(512s, error 0, Adaptive Excluded 0) + 스모크 `Result={Success}` → `1f32b156` 재빌드·스모크는 아래 행 |
+
+### G2 (2026-09-04) — 판정 원장 (레드팀 지적 → 세션 판정)
+
+| 지적 | 판정 | 근거·처리 |
+|---|---|---|
+| **P2-1** 머지 단위 스테일 — 리뷰 tip·기준 main 이 낡았고 통합 트리에 빌드 기록 없음 | **해소(근거 제시, 기각 아님)** | 지적 시점엔 맞았다. 통합 머지 `ef57c164` 뒤 `Build.bat FPSRogueliteEditor Win64 Development -WaitMutex -DisableAdaptiveUnity -ForceUnity` → `Saved/merge_build.log` `Result: Succeeded`(512s, `error C/LNK` 0, `[Adaptive Build] Excluded` 0), `run_smoke_moduleloads.bat` → `Test Completed. Result={Success} Name={ModuleLoads}`. 머지 기준 = `origin/main`(로컬 main ff 후 `--no-ff`). 리뷰어가 제시한 해소 조건("로그가 있으면 기각") 충족 |
+| **P2-2** `ExitPathPoints`(68da5543) 가 평면 스폰포인트에 열렸는데 `bPhaseThroughWorldWhileExiting` 기본 켜짐 + 직진 조향 → 모퉁이 너머 MovePoint 하나로 적이 벽을 뚫음. 맵1 저작 `fdfd4ade` 은 PIE 미관측 | **부분 수용** | (1) 필드 주석에 토글·직진 조향 연동과 "모퉁이면 토글을 꺼라"를 명시 `1f32b156`. (2) 검증툴 경고("컴포넌트 경로 없이 MovePoint 만 있는데 통과 ON") + 맵1 MovePoint 배치 PIE 1회 관측 = **후속 보드 행**(스폰 트랙, 하이). **잔여 위험을 숨기지 않는다**: 관측 전까지 맵1 15곳 중 모퉁이를 넘는 MovePoint 가 있으면 벽 관통이 실제로 난다. 이 diff 가 토글 기본값을 바꾼 것은 아니며(C1 2026-06-29 기존), 새로 연 것은 저작면이다 — 그래서 코드 동작 변경 없이 계약+후속으로 닫는다 |
+| **P3-1** 헤더 주장 2건(“the only way” · “BP 기본값에 1개 저작”)이 자기 코드와 어긋남 | 수용 | `1f32b156` — CAC 경로는 `ChildActorTemplate`(VisibleDefaultsOnly)이라 배치별 오버라이드 불가 명시, 기본값은 비워 두라고 정정 |
+| **P3-2** DA 검증기 3검사가 정적 리시버를 반대로 읽음(정적+파츠 = 무음 / 정적 소켓 = 거짓 경고) | 수용(후속) | 명세 §11 에 이미 있던 항목을 G2 실측으로 구체화. **후속 보드 행**(백로그). 지금 정적+파츠 DA 0건 |
+| **P3-3 / P3-4** `FFPSRWeaponPartAttachment` 헤더·`Socket` 툴팁이 새 런타임과 반대 | 수용 | `1f32b156` — ActiveWeaponMesh 기준으로 갱신(정적 리시버도 파츠 부착) |
+| **P3-5** 아레나 검증툴 안내 문구가 MovePoint 를 모름 | 수용 | `1f32b156` — 문구에 MovePoint(ExitPathPoints)·통과 토글 끄기 추가 |
+| **P3-6** ⓑ(원격 클라) 미관측 상태로 정적 경로가 휴면 머지 | 수용 | HS 재개 시 **첫 PIE 항목 = ⓑ**(`RifleHardSurface_ResumePrompt.md` §0-A). 코드상 각 머신이 같은 순서(`:2348`→`:2448`)로 로컬 재생성 — 구조적 불일치 근거는 리뷰어도 못 찾음 |
+| 범위 밖 ① `ProcessPendingWeaponPartsRebuild`(`:3147-3168`)가 재빌드 뒤 `RefreshWeaponVisibility(bForce)` 를 안 불러 스코프 숨김 중 프래그먼트 변경 시 새 파츠가 보임(기존 결함) | 기록 → **후속 보드 행**(백로그) | §11 |
+| 범위 밖 ② 데디서버 파츠 생성/진화 무시 비대칭(`:3128`) · ③ 스폰포인트 (1) CAC 경로가 모든 비-자기 컴포넌트를 웨이포인트로 읽음(콘텐츠 0) | 기록 | §11 |
+
+리뷰어가 안전하다고 본 것(요지): WPN1 가드 진리표(스켈레탈 = 동일 객체·동일 분기, 나이프 = 파츠 0, 비무장 = null 로 종전과 같은 빈 재빌드+꼬리, 조기 반환 없음), `ActiveWeaponMesh` 대입이 두 호출 지점보다 항상 선행, 정적 부모의 `GetSocketTransform/DoesSocketExist` 엔진 동형, 스코프 숨김 두 메시 모두 자식 전파, 크래시 경로 없음 / 68da5543 의미 불변·서버 전용·복제 표면 0.
+
 
 - **레드팀(G2)에 무엇을 줬나**: (C3 후 기입)

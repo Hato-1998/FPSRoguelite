@@ -23,7 +23,7 @@ Docs/RifleHardSurface_ResumePrompt.md 를 읽고 진행한다.
 |---|---|---|
 | 인게임 라이플 | **원래 Synty 스켈레탈** `SK_Wep_Mod_A_Body_01` + Synty 파츠 7(`WeaponMeshStatic=None`, 양손 그립 소켓 None) | HS 몸통으로 되돌리려면 `WeaponMesh=None` · `WeaponMeshStatic=SM_RifleHS_Body`(`f75ecc06` 이력) — 단, 파츠는 HS 용으로 **미저작** |
 | HS 에셋 | `Content/Assets/Weapons/RifleHS/SM_RifleHS_*` 8종(3차 임포트, 소켓 12·회전 포함), 생성기·매니페스트·소켓 스크립트 전부 브랜치에 있음 | 사용자 판정 = **모델링 자체 재작업**. 생성기는 출발점이지 결과물이 아니다 |
-| WPN1 코드 | `e181d137` 브랜치 유지. 정적 경로 PIE = ⓐ·ⓒ ✓ 에서 동결, G2 보류(명세 §13) | HS 재개 후 정적 경로 PIE 재실행 → G2(Fable 1회 잔여) |
+| WPN1 코드 | `e181d137` 브랜치 유지. 정적 경로 PIE = ⓐ·ⓒ ✓ 에서 동결, G2 보류(명세 §13) | HS 재개 후 정적 경로 PIE 재실행 → G2(Fable 1회 잔여) **재개 첫 PIE 항목 = ⓑ 리슨 호스트 + 원격 클라**(G2 P3-6 — 4인 기준 실측 0인 채 휴면 머지됨) |
 | 1P 비주얼 전제 | **ADR 0015 — 팔 없음, 총만.** 손 소켓·손 IK 는 휴면 | 무기 형상·§3-5 머티리얼이 1P 의 전부 → 아케이드 룩(자체발광·림, `ArtDirection.md` 색 대역)과 같이 설계 |
 | 나머지 무기 8종 | 미착수 | 라이플 재작업과 같은 생성기 규약(+X 저작 → `to_engine` +Y 정면, 그립 마운트 = 원점, OBJ Y 반전 상쇄) |
 
