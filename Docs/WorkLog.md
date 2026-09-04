@@ -9,6 +9,77 @@
 
 ---
 
+## 🔷 1인칭 무기 트랙 마감 — WPN1 정적 파츠 코드 · 손 소켓 회전 · ARM1 총만 표시(ADR 0015) · 손만 표시 보류(ARM2) (2026-09-04, `proto/arcade-look`, 코드 `e181d137` · 콘텐츠 `2fbc6af4` `6b0fbb2b` `90b91f20` · 문서 `55e9d72e` `0c99483f` `e977de95` `83dfd346` `5d1b8967` `f45dc965` `94a5aca0`)
+> 실행 문서 = `Docs/RifleHardSurface_ResumePrompt.md`(하드서피스 트랙) · `Docs/Specs/WPN1_StaticWeaponParts.md`(§6-5-2 명세·원장) · `Docs/FPArms_HandsOnly_ResumePrompt.md`(보류 트랙). 보드 = 「아케이드 룩 프로토 + 육안 게이트」(WPN1 = 스코프 2) · ARM1(완료) · ARM2(백로그·보류).
+> 마감 사유(사용자): *"기존 원래 쓰던 모델링으로 바꿨어. 지금은 파츠도 저작 안 되어 있고 모델링 자체도 다시 만들어야 하니까 여기서 마무리해."*
+
+### 1. WPN1 — 정적 무기 메시에도 모듈러 파츠 (코드 `e181d137`)
+- 파이프라인(§6-5-2): C1 명세 → **G1 Fable 2회**(1회차 P2 3·P3 4 반려 → rev2 / 2회차 P2 1·P3 8 반려 → rev3, *"설계 자체의 결함은 못 찾았다"*) → 사용자 승인 → C2 Sonnet 축자 구현(갭 0, `FPSRCharacter.cpp` +48/−49 · `.h` 3줄) → C3 Opus: diff 대조 통과 · 빌드 `Result: Succeeded`(450s, `-WaitMutex -DisableAdaptiveUnity -ForceUnity`) · 스모크 `FPSRoguelite.Smoke.ModuleLoads` 통과(`Scripts/run_smoke_moduleloads.bat`).
+- 변경 5개 지점: 가드 ①⑤(`!Weapon || !ActiveWeaponMesh`) · ② 죽은 `if (!WeaponMesh) return;` 삭제 + 부착 루프 전체를 `if (ActiveWeaponMesh)` 로(재해석 4곳·캐시 리프레시는 밖) · ③ 부모 `ActiveWeaponMesh` · ④ `RefreshPartFramesInGunSpaceCache` 가드 + `GetSocketTransform`. **G1 핵심 적중** = ②를 조기 반환으로 짜면 언이큅 캐시 초기화가 사라진다 → 루프 가드로.
+- PIE #1(리슨 호스트, HS 몸통 `SM_RifleHS_Body` + Synty 파츠 7): 파츠 부착 ✓ · 스코프 교체(`FPSR.Frag.Fill` → `SM_Wep_Mod_Scope_09`) ✓. 손 방향 이상 → 코드 아님(아래 2). 카드 실측 교훈: **멤버십은 이름표로 판별 불가** — rev2·rev3 가 `WeaponCards` 로 단정했다가 에디터 실측으로 `UnlockableFeatures` 확인(메모리 uasset-strings-name-table-only).
+- 마감 상태: 사용자가 라이플 DA 를 원래 스켈레탈(`SK_Wep_Mod_A_Body_01`)로 원복 → **정적 경로 검증 동결**(ⓐ·ⓒ ✓, ⓑ·ⓔ·ⓕ·로그·대조군 미판정). 코드는 브랜치 유지(스켈레탈 경로 회귀 = 원래 라이플 + 파츠 7 정상 표시·모션 — 비공식). **G2 보류**(브랜치 머지 시점 또는 HS 재개 후 재 PIE). Fable 잔여 = G2 1회.
+
+### 2. 손 소켓 회전 — 데이터 누락 진단·수정 (`2fbc6af4` · `6b0fbb2b`, Troubleshooting F4)
+- 증상 = 1P 양손 자세 이상. 원인 = HS 몸통 `SOCKET_Left/RightHand` 회전 (0,0,0) — 소켓 스크립트가 위치만 찍었고 Synty 몸통 손 소켓은 회전을 갖는다(본 공간 L P80/Y180/R−90 · R P−70.1/Y−52.4/R−35.9). 손 IK 는 소켓 **전체 트랜스폼** 소비(`ComputeGripInGunFrame` `:2797`).
+- 수정 = Synty 회전만 기저 변환(`Mrot = make_rotation_from_axes(+X, −Z, +Y)`, `Te = Minv·Ts·M`) 이식 → 생성기 `BODY_SOCKET_ROTATIONS` → manifest `body_socket_rotations` → `author_rifle_hs_sockets.py`(add/upd 회전 적용·verify 위치+회전), 에디터 라운드트립 12/12 `sockets_ok=True`.
+- 결과: 손목이 여전히 돌아감 — 오른손 IK 의 effector 회전(이식값)이 PWAS 포즈와 충돌. 사용자 결정으로 IK 자체 퇴역(3). 이 소켓 2개는 런타임 미사용·보존(조립툴·복귀용).
+
+### 3. ARM1 — 손 IK 퇴역 + (경유) 손만 마스크 → **총만 표시 = ADR 0015**
+- 사용자 1차 결정: IK 빼고 How to Fish 식 떠 있는 손 + 기본 애니. 실측: **DA 양손 그립 소켓 None 이 곧 IK 알파 0**(설계된 데이터 스위치 — 라이플만 채워져 있었고 나머지 8종은 원래 None). **함정(Troubleshooting E5)**: `ABP_FP_Base` 총 앵커 Copy Bone(hand_r→ik_hand_gun) Alpha 가 `RightHandIKAlpha` 에 바인딩 → IK 끄면 총이 가슴 앞(ik_hand_gun 기준 포즈 (−56.6,−0.3,111.7))에 뜬다. 그래프는 파이썬에 미노출 → `AssetExportTask` T3D(UTF-16) 덤프로 `PropertyBindings` 읽음. 사용자가 바인딩 제거(1.0 고정) + DA 소켓 None → 덤프 재확인 L2/R2.
+- 손만 마스크 `M_/MI_FPArms_HandsOnly`(`90b91f20`): 팔 메시 `SK_LPAMG_Arms_Base_Smooth` 는 섹션 Arms 1개(+Nails)라 섹션 숨김 불가, HideBone 은 손까지 지움, 팩에 손만 메시 없음(Gloves 변형뿐) → PreSkinnedPosition 팔별 손목 평면(바인드 포즈 실측 hand_l (56.6,−0.3,111.7), 전완 방향 (0.72,0.43,−0.55)) Masked·양면, `HandsOnly_CutOffset` 파라미터. 헤드리스 저작(D11) — 1차 실패 = 마스터 경로를 `Arms/` 로 추정(실물 `Materials/`) → MI base material 에서 해석하도록 수정. 핀 이름 규칙 = `GetShortenPinName`(Troubleshooting D10 보강).
+- 인게임: 손이 **안 보였고**(원인 미판별 — 전부 클립 vs 어두운 맵) 사용자: *"아예 손이 안 보이고 총만 보이는데 이게 차라리 더 좋다."* → **ADR 0015**(`83dfd346`·`5d1b8967`·`f45dc965`): 1P = 총만, 팔 = `Hidden in Game` 모션 드라이버. 금지 3건 = `SetVisibility`(`RefreshFirstPersonRendering` 이 자식=총까지 전파) · 메시 슬롯 비우기(1P/3P 분할 조건) · 틱 옵션 변경(5.7 기본값 항상 틱을 불변식으로 — 소스 `SkinnedMeshComponent.cpp:460`). PIE ✅ 총 모션 생존·팔 비표시(사용자). 손만 표시 = **폐기 아닌 보류**(ARM2 백로그, `Docs/FPArms_HandsOnly_ResumePrompt.md`, 재개 첫 작업 = 대조군으로 미판별 원인 가르기). BP 슬롯 `MI_FPArms_HandsOnly` 배선 유지(숨김이라 무영향).
+
+### 4. 하드서피스 라이플 트랙 — 상태
+- 브랜치에 있음: 생성기 `Scripts/gen_rifle_hardsurface.py`(8파츠·모따기 프리즘·N각 튜브·슬랫) · 3차 임포트 `Content/Assets/Weapons/RifleHS/SM_RifleHS_*`(Y 반전 상쇄 실증) · 소켓 12(회전 포함) · manifest. 인게임은 원래 Synty 라이플로 원복.
+- 재개 전제가 바뀌었다: **총이 1P 비주얼의 전부**(ADR 0015) → 모델링 재작업 + §3-5 머티리얼(아케이드 룩 자체발광·림)을 한 묶음으로. 사용자: *"모델링 자체도 다시 만들어야."*
+
+### 미커밋(사용자 콘텐츠) — 마감 시점
+`ABP_FP_Base`(Copy Bone 알파 1.0 고정) · `BP_FPSRPlayer`(FirstPersonArms `Hidden in Game`, 슬롯 `MI_FPArms_HandsOnly`) · `DA_Weapon_Rifle`(원복 + 양손 그립 소켓 None). `Config/DefaultEditor.ini` 는 CRLF 만 바뀜(제외).
+
+---
+
+## 🔷 아케이드 포스트프로세싱 1패스 (2026-09-03, `proto/arcade-look` 작업 커밋 `401ae6f8`) — **블룸 임계 · CRT 스캔라인 · 색수차 · 비네트**
+> 실행 문서 = `Docs/ArcadePostProcess_ResumePrompt.md`(§3 순서 그대로). 보드 행 = 「아케이드 룩 프로토 + 육안 게이트」의 4번째 스코프.
+> `L_Map_1` 의 `PP_Arcade` 볼륨 **1개(unbound)만** 편집했다 — 볼륨을 새로 만들지 않았다(2026-09-03 오전에 볼륨 2개가 노출을 매 프레임 뒤집던 사고의 재발 방지).
+> 방식 = **한 번 바꾸고 사용자 화면 판정 → 다음**. 네 단계 전부 이 리듬으로 갔다.
+
+### 인계문서의 전제 3건이 실측과 달랐다 — 값보다 이게 이번의 실질 산출이다
+1. 🔴 **"노출 bias 11 이라 씬이 크게 부스트돼 있다" → 아니다.** `apply_physical_camera_exposure=True` 에 셔터60·ISO100·f4 = EV100≈9.91 → 물리 노출이 **×1/1152**. 여기에 bias +11(×2048)이 얹혀 **최종 ≈×1.78**. bias 11 은 부스트가 아니라 **물리 노출 상쇄값**이다. 덕분에 임계 1.0 이 머티리얼 발광 ≈0.56 에 대응하는 **정확한 눈금**이었다(문서의 "1.0부터 올려보라"가 결과적으로 맞았지만 이유가 달랐다).
+2. 🔴 **"임계가 없어 검정까지 번진다" → 기계적으로 틀렸다.** 순수 검정(0)은 임계와 무관하게 블룸 기여가 0이다(0에 뭘 곱해도 0). 진짜 범인은 **어둡지만 0이 아닌 면들** — 벽면·가이드라인 꼬리·적 림의 스치는 각도 — 이고, 거기에 `bloom4/5/6 = 10/30/64` × `size_scale 4`(반경 최대 256)와 강도 2.5(엔진 기본 0.675의 3.7배)가 겹쳐 사방으로 번진 것이다. **처방은 옳고 이유가 달랐다.** 이 구분을 미리 예측으로 세워 두었기에("임계를 올려도 검정이 들뜨면 원인은 블룸이 아니다") 판정이 원인 확정까지 겸했다.
+3. 🔴 **"비네트는 override 가 꺼져 있으니 켤지 판단" → 이미 켜져 있었다.** `Scene.cpp:538` 에서 `VignetteIntensity` 의 **엔진 기본값이 0.4**다. override 를 0.4로 켜봐야 화면은 하나도 안 변한다. 실제 질문은 "0.4가 이 게임에 맞는가"였고, 사방에서 몰려오는 스웜의 **주변부 인지**를 우선해 **0.2로 낮췄다**(§2-2). override 는 켠 채로 뒀다 — 값이 **의도된 선택**이라는 게 남아야 다음 사람이 엔진 기본값과 구분한다.
+
+### 확정값
+| 항목 | 값 | 비고 |
+|---|---|---|
+| `bloom_threshold` | **-1.0 → 1.0** | 강도 2.5·노출 MANUAL/11 은 불변 |
+| `MI_PP_ArcadeCRT` | Count **270** · Strength **0.15** · Curvature **0** | 270 = 1080p 4픽셀 주기(안정). 더 촘촘하면 지글거린다 |
+| `scene_fringe_intensity` | **1.0** | 1.5 로 보여 드린 뒤 사용자가 1.0 선택 |
+| `chromatic_aberration_start_offset` | **0.5** | 문서엔 없던 항목 — 아래 |
+| `vignette_intensity` | **0.4 → 0.2** (override ON) | 엔진 기본이 0.4였다 |
+
+### 문서에 없던 두 결정
+- **색수차 `StartOffset` 0.5** — 기본 0이면 색수차가 **화면 중앙, 즉 크로스헤어와 조준 중인 적 위에도** 걸린다. §2-2 가 경고하는 "적 엣지가 갈라진다"가 하필 제일 중요한 지점에서 난다. 셰이더가 `CAUV = LensUV - sign(LensUV) * saturate(|LensUV| - StartOffset) * CAScale` 라(`PostProcessTonemap.usf:327`) 오프셋 안쪽은 **정확히 0**이고, C++ 가 `Multiplier = 1/(1-StartOffset)` 로 **재정규화**해(`PostProcessTonemap.cpp:675`) **가장자리 세기는 그대로 유지된다.** 트레이드오프가 아니라 순이득 — 실제 렌즈 수차도 방사형이다. 사용자 판정: "가장자리 번지는 게 보이고 중앙은 깨끗하다".
+- **스캔라인 `blendable_priority = -10`** — 엔진이 blendable 을 **우선순위 오름차순**으로 체인에 쌓는다(`BlendableInterface.h:138-150`, `Algo::StableSort`). `M_PP_StageFade` 가 priority **0**(`AfterTonemapping`)이므로 스캔라인이 그 아래로 깔려야 스테이지 페이드가 화면을 온전히 덮는다(§2-4). 둘을 같은 0으로 두면 **StableSort 라 볼륨 것과 카메라모디파이어 것의 순서가 비결정적**이 된다 — StageFade 는 볼륨이 아니라 `UFPSRStageFadeCameraModifier::ModifyPostProcess` 가 런타임에 `AddBlendable` 로 넣는다.
+
+### 스캔라인은 세 번 판정해 정했다
+0.05(문서 권장 상한)는 사용자 판정 **"이전과 구별되지 않는다"** — 지각 한계 아래였다. 이 상태는 *"너무 옅다"* 와 *"머티리얼이 조용히 깨졌다"* 가 **구분되지 않아** 그대로 통과시킬 수 없었다. 진단값 **Count 20 / Strength 0.9**(굵은 띠 20개)를 넣어 *"보인다, 너무 굵다"* 를 받아 **머티리얼이 살아 있음을 먼저 확정**한 뒤, 실제 설계점 **270/0.15** 로 내려 확정했다. 진단값은 저장하지 않고 즉시 되돌렸다.
+> 교훈: **"안 보인다"는 판정을 그대로 받으면 안 된다.** 효과가 없는 것과 코드가 안 도는 것은 화면상 같다 — 메모리 `value-does-nothing-check-execution-path` 와 같은 형태다. 세기를 극단으로 올려 살아있음을 먼저 증명하는 데 판정 1회를 쓰는 것이 싸다.
+
+### 저작 함정 2건 (전부 실제로 밟음 → `Troubleshooting.md` D10 · G14)
+- 🔴 **`connect_material_expressions(mask, "", scenetex, "Coordinates")` 가 False.** 헤더도 그래프 익스포트도 이름이 `Coordinates` 인데 매칭이 안 된다 — 빈 이름(=0번 핀)으로 붙여야 한다. **위험한 건 실패가 아니라 실패가 안 보인다는 것**이다. 이 배선이 빠지면 곡률이 죽는데 **곡률 기본값이 0이라 화면이 정상과 완전히 같다.** 모든 배선을 `link()` 로 감싸 실패를 수집했기에 잡혔다(§4-3 이 지시한 그대로 — 그리고 그 지시가 실제로 값을 했다).
+- 🔴 **`get_statistics` 가 검증 도구로 고장나 있다.** 배선 전후가 `PS=85/VS=148` 로 동일해 "연결이 공짜"로 읽을 뻔했다. `sin`/`cos` 8회 루프를 일부러 넣고 재컴파일해도 **숫자가 미동도 안 했다** — 생성 시점 값에 고정돼 있다(PP 머티리얼에 `VS=148` 이 나온 것부터 신호였다). **대조군이 결론을 뒤집었다.**
+  → 올바른 도구는 `MaterialNodeService.get_material_diagnostics()`(`.is_compiled_ok`/`.compile_errors`)와 `export_material_graph()`(연결 전량). 이걸로 **`is_compiled_ok=True` · 에러 0 · 연결 11개 + `EmissiveColor` 출력**을 실측 확인했다. ⚠️ **인계문서 §4-3 표의 "에디터에서 `get_statistics` 재확인" 항목은 틀렸다** — 그 조언을 따르면 못 잡는다.
+
+### 부수 의무 / 동반 커밋
+- `Docs/SSOT/Performance.md` — `r.PostProcessing.DisableMaterials 1` 이 이제 **셀 아웃라인과 스캔라인을 같이 끈다**. 이 축으로 잰 수치는 두 효과의 합이라 분리되지 않는다. 스캔라인만 빼고 재려면 명령이 아니라 **볼륨 blendable 의 weight** 를 조작할 것(§2-3).
+- **사용자 저작분 동반 커밋** = `BP_SpawnPoint`(신규, 레벨에 13개 배치) · `DA_Map_1_ArenaBake`(수정). `L_Map_1` 이 **하드 참조**라 분리하면 참조가 깨진다(에셋 레지스트리 실측) — 사용자 승인 후 한 커밋으로 묶었다.
+
+### 남은 것
+- **곡률은 파라미터만 만들어 두고 0으로 껐다.** 화면 가장자리에서 적 실루엣이 휘는 것이 §2-2 와 충돌할 수 있어 판정을 미뤘다. 셰이더 재저작 없이 `MI_PP_ArcadeCRT` 의 숫자만 올리면 판정 가능하다.
+- 스캔라인 **모아레**는 1080p 기준으로만 봤다. 다른 해상도·창 크기에서 지글거릴 수 있다(`Count` 가 화면 높이에 가까워질수록 악화).
+
+---
+
 ## 🔷 BOSS1 보스 공격 패턴 3종 + 패턴 구동 기반 (2026-09-03, main 머지 `2a8a5351`) — **보스가 "체력만 있는 정지 스캐폴드"에서 실제로 싸우는 상태로**
 > 브랜치 `feat/boss-patterns` · 14커밋 · 보드 행 = BOSS1-S1/S2/S3(M3 · L/M/M · 부모 「실보스 1종」의 분할물).
 > 명세 = `Docs/Specs/BOSS1_AbilityPatternFramework.md`(§13 = 게이트 원장) · 저작 절차 = `Docs/BOSS1_ContentGuide.md`.
@@ -110,7 +181,7 @@ S1~S3 는 "패턴이 쿨다운되면 곧바로 이어서 나간다" 구조였다
 ### 남은 것 (보드에 행으로 분리)
 - **PIE 잔여검증 2건**(신규 행, 하이·M3·S) = ①패턴 진행 중 레벨업 프리즈 30초에 신관·회전각·오브 진행이 0인가
   ②리슨서버 호스트 / 2인 클라에서 보이는 빔과 맞는 순간이 일치하는가.
-- **BOSS1-S4 콘텐츠 저작**(대기, 선행 해제됨) = 연출(VFX/사운드/애님) 전량 · ADR 0015 신설 ·
+- **BOSS1-S4 콘텐츠 저작**(대기, 선행 해제됨) = 연출(VFX/사운드/애님) 전량 · ADR 0015 신설(→ 번호는 **0016** 을 쓸 것 — 0015 는 2026-09-04 「1P 총만 표시」 ADR 이 사용했다) ·
   RunFlow/Enemy/Game.md 갱신. 절차서 = `Docs/BOSS1_ContentGuide.md`.
 - **보스 이동·StateTree 는 여전히 미구현** — 이번 범위 밖이며 부모 행 「실보스 1종」에 남는다.
 

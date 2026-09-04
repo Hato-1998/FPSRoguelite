@@ -46,6 +46,10 @@ FVector AFPSREnemySpawnPoint::GetSpawnLocation() const
 
 void AFPSREnemySpawnPoint::GetExitPathWorldPoints(TArray<FVector>& Out) const
 {
+	// Out may already carry a caller's points — measure our own contribution from here so the "(1) found nothing"
+	// test below can never be fooled by them.
+	const int32 StartNum = Out.Num();
+
 	// (1) PREFERRED when this point is a child actor of a structured-spawner BP: waypoints attached to the
 	//     UChildActorComponent that spawned us. Those components live in the SPAWNER's Blueprint, so each hole in
 	//     one mesh can have its OWN route, dragged in that BP's viewport.
@@ -68,28 +72,43 @@ void AFPSREnemySpawnPoint::GetExitPathWorldPoints(TArray<FVector>& Out) const
 				Out.Add(Child->GetComponentLocation());
 			}
 		}
-		if (Out.Num() > 0)
-		{
-			return;
-		}
 		// None authored on the component — fall through so the spawn-point BP's own path can act as the default.
 	}
 
-	// (2) The point's own ExitPathRoot children. This is the path for a standalone (directly placed) spawn point,
-	//     and the per-hole default a structured spawner inherits when its ChildActorComponent has no waypoints.
-	if (!ExitPathRoot)
+	// (2) The point's own ExitPathRoot children, used ONLY when (1) contributed nothing. This is the path for a
+	//     standalone (directly placed) spawn point, and the per-hole default a structured spawner inherits when its
+	//     ChildActorComponent has no waypoints.
+	if (Out.Num() == StartNum && ExitPathRoot)
 	{
-		return;
+		// Each direct child scene component is a waypoint; attach order = order (same idiom as AFPSRMissionPointSet).
+		const TArray<TObjectPtr<USceneComponent>>& Waypoints = ExitPathRoot->GetAttachChildren();
+		Out.Reserve(Out.Num() + Waypoints.Num());
+		for (const USceneComponent* Child : Waypoints)
+		{
+			if (Child)
+			{
+				Out.Add(Child->GetComponentLocation());
+			}
+		}
 	}
 
-	// Each direct child scene component is a waypoint; attach order = order (same idiom as AFPSRMissionPointSet).
-	const TArray<TObjectPtr<USceneComponent>>& Waypoints = ExitPathRoot->GetAttachChildren();
-	Out.Reserve(Out.Num() + Waypoints.Num());
-	for (const USceneComponent* Child : Waypoints)
+	// (3) ExitPathPoints, appended LAST — the only authoring surface that survives per PLACEMENT. (1) and (2) are
+	//     components, so they live in a Blueprint and are identical for every copy of it in every map; a property
+	//     array is overridden per level instance by the standard Blueprint-instance mechanism, so a designer extends
+	//     ONE placed spawner's route without touching the others.
+	//
+	//     Appended rather than replacing, so existing structured-spawner content is untouched (purely additive).
+	//     Local->world through the ACTOR transform because that is the space the viewport handles edit in:
+	//     MakeEditWidget resolves local space as the selected actor's ROOT COMPONENT transform
+	//     (LegacyEdModeWidgetHelpers.cpp, GetItemToTryDisplayingWidgetsFor). Moving or rotating the spawner
+	//     therefore carries its route with it — which a world-space authoring surface would not.
+	if (ExitPathPoints.Num() > 0)
 	{
-		if (Child)
+		const FTransform ToWorld = GetActorTransform();
+		Out.Reserve(Out.Num() + ExitPathPoints.Num());
+		for (const FVector& LocalPoint : ExitPathPoints)
 		{
-			Out.Add(Child->GetComponentLocation());
+			Out.Add(ToWorld.TransformPosition(LocalPoint));
 		}
 	}
 }

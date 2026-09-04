@@ -2444,7 +2444,7 @@ void AFPSRCharacter::RefreshEquippedWeaponVisual()
 	}
 	AirborneBlendAlpha = (SwapMove && SwapMove->IsFalling()) ? 1.0f : 0.0f;
 
-	// Rebuild modular cosmetic parts on the (skeletal) weapon mesh from the weapon's part list.
+	// Rebuild modular cosmetic parts on the active weapon mesh (skeletal or static) from the weapon's part list.
 	RefreshWeaponPartComponents(Weapon);
 
 	// An ADS weapon whose AimSocket can't actually resolve fails completely silently today: the bAiming gate in
@@ -2524,10 +2524,9 @@ void AFPSRCharacter::RefreshEquippedWeaponVisual()
 
 void AFPSRCharacter::RefreshWeaponPartComponents(const UFPSRWeaponDataAsset* Weapon)
 {
-	// No weapon / non-skeletal: tear down and reset signature. Parts attach to the SKELETAL weapon mesh only —
-	// static/melee/preview weapons carry no modular parts, and the pack part sockets live on SKEL_LPAMG_<W>.
-	// ActiveWeaponMesh == WeaponMesh means a skeletal weapon is shown.
-	if (!Weapon || !WeaponMesh || ActiveWeaponMesh != WeaponMesh)
+	// No weapon / no shown mesh: tear down and reset signature. Parts attach to ActiveWeaponMesh — whichever of
+	// WeaponMesh (skeletal) or WeaponMeshStatic (static) is shown; null means nothing is equipped (unequip path).
+	if (!Weapon || !ActiveWeaponMesh)
 	{
 		RebuildPartsFromSelection(TArray<FFPSRWeaponPartAttachment>());
 		LastWeaponPartSignature = 0;
@@ -2569,50 +2568,49 @@ void AFPSRCharacter::RebuildPartsFromSelection(const TArray<FFPSRWeaponPartAttac
 	CachedRightHandComponent = nullptr;
 	CachedScopeDescriptor = FFPSRWeaponScopeDescriptor();
 
-	// Parts attach to the skeletal weapon mesh only (guarded by the caller: ActiveWeaponMesh == WeaponMesh).
-	if (!WeaponMesh)
-	{
-		return;
-	}
-
 	// Parallel to WeaponPartComponents (both appended together in the loop): each attached part's scope descriptor,
 	// so the aim-resolution below can capture the ACTIVE sight's descriptor by index. (W-U2)
 	TArray<FFPSRWeaponScopeDescriptor> AddedScopeDescriptors;
 	AddedScopeDescriptors.Reserve(Selected.Num());
 
-	for (const FFPSRWeaponPartAttachment& PartDef : Selected)
+	// Parts hang off whichever weapon mesh is shown (skeletal WeaponMesh or static WeaponMeshStatic). Nothing shown =
+	// nothing to attach — but the re-resolves and cache refreshes below still run: the unequip path relies on them.
+	if (ActiveWeaponMesh)
 	{
-		if (PartDef.Part.IsNull())
+		for (const FFPSRWeaponPartAttachment& PartDef : Selected)
 		{
-			continue; // null entry — skip (null-safe)
+			if (PartDef.Part.IsNull())
+			{
+				continue; // null entry — skip (null-safe)
+			}
+			UStaticMesh* PartMesh = PartDef.Part.LoadSynchronous();
+			if (!PartMesh)
+			{
+				continue;
+			}
+			UStaticMeshComponent* PartComp = NewObject<UStaticMeshComponent>(this);
+			PartComp->SetStaticMesh(PartMesh);
+			// No visibility override (ADR 0002): parts are visible to whoever can see the weapon they hang off, which is now
+			// everyone. The old SetOnlyOwnerSee(true) existed only to match an owner-only 1P weapon mesh.
+			PartComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+			// Match the weapon it hangs off: the render tag isn't inherited through attachment, so a part created while the
+			// first-person arms are up would otherwise cast a world shadow from camera space (ADR 0003).
+			PartComp->SetFirstPersonPrimitiveType(GetWeaponFirstPersonPrimitiveType());
+			// Stage-fade PP exclusion mask (Phase B, M_PP_StageFade): same reason as WeaponMesh/WeaponMeshStatic above —
+			// this doesn't inherit through attachment either, and unlike those two fixed components, parts are torn
+			// down and rebuilt fresh on every equip/modifier change (RebuildPartsFromSelection's top of function), so
+			// the flag has to be set HERE at creation rather than once in the constructor.
+			PartComp->SetRenderCustomDepth(true);
+			PartComp->RegisterComponent();
+			PartComp->AttachToComponent(ActiveWeaponMesh, FAttachmentTransformRules::KeepRelativeTransform, PartDef.Socket);
+			PartComp->SetRelativeTransform(PartDef.Offset);
+			WeaponPartComponents.Add(PartComp);
+			AddedScopeDescriptors.Add(PartDef.Scope);
+			// P2 (GunMotionTool_Spec.md §4-2): snapshot the authored base placement and pre-build this part's curve
+			// names — index-aligned with WeaponPartComponents (appended together, same as AddedScopeDescriptors above).
+			WeaponPartBaseOffsets.Add(PartDef.Offset);
+			WeaponPartCurveNames.Add(FPSRGunMotionCurves::MakePartCurveNames(PartDef.Socket));
 		}
-		UStaticMesh* PartMesh = PartDef.Part.LoadSynchronous();
-		if (!PartMesh)
-		{
-			continue;
-		}
-		UStaticMeshComponent* PartComp = NewObject<UStaticMeshComponent>(this);
-		PartComp->SetStaticMesh(PartMesh);
-		// No visibility override (ADR 0002): parts are visible to whoever can see the weapon they hang off, which is now
-		// everyone. The old SetOnlyOwnerSee(true) existed only to match an owner-only 1P weapon mesh.
-		PartComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-		// Match the weapon it hangs off: the render tag isn't inherited through attachment, so a part created while the
-		// first-person arms are up would otherwise cast a world shadow from camera space (ADR 0003).
-		PartComp->SetFirstPersonPrimitiveType(GetWeaponFirstPersonPrimitiveType());
-		// Stage-fade PP exclusion mask (Phase B, M_PP_StageFade): same reason as WeaponMesh/WeaponMeshStatic above —
-		// this doesn't inherit through attachment either, and unlike those two fixed components, parts are torn
-		// down and rebuilt fresh on every equip/modifier change (RebuildPartsFromSelection's top of function), so
-		// the flag has to be set HERE at creation rather than once in the constructor.
-		PartComp->SetRenderCustomDepth(true);
-		PartComp->RegisterComponent();
-		PartComp->AttachToComponent(WeaponMesh, FAttachmentTransformRules::KeepRelativeTransform, PartDef.Socket);
-		PartComp->SetRelativeTransform(PartDef.Offset);
-		WeaponPartComponents.Add(PartComp);
-		AddedScopeDescriptors.Add(PartDef.Scope);
-		// P2 (GunMotionTool_Spec.md §4-2): snapshot the authored base placement and pre-build this part's curve
-		// names — index-aligned with WeaponPartComponents (appended together, same as AddedScopeDescriptors above).
-		WeaponPartBaseOffsets.Add(PartDef.Offset);
-		WeaponPartCurveNames.Add(FPSRGunMotionCurves::MakePartCurveNames(PartDef.Socket));
 	}
 
 	// Re-resolve modular muzzle source: the muzzle socket lives on a cosmetic part (barrel/forestock), so prefer the
@@ -3041,7 +3039,7 @@ void AFPSRCharacter::RefreshPartFramesInGunSpaceCache()
 	CachedPartFramesInGunSpace.Reset();
 
 	FTransform WeaponInGunFrame;
-	if (!WeaponMesh || !GetWeaponRootPlacementInGunFrame(WeaponInGunFrame))
+	if (!ActiveWeaponMesh || !GetWeaponRootPlacementInGunFrame(WeaponInGunFrame))
 	{
 		return;
 	}
@@ -3065,7 +3063,7 @@ void AFPSRCharacter::RefreshPartFramesInGunSpaceCache()
 		// this in the EXACT SAME frame as CachedRightGripInGun / CachedLeftGripInGun (ik_hand_gun bone-parent space),
 		// which is what lets the arms AnimInstance lerp/slerp between a grip target and a part target (§2-1 Blend
 		// semantics) without a space mismatch.
-		const FTransform PartInWeaponSpace = WeaponPartBaseOffsets[i] * WeaponMesh->GetSocketTransform(Socket, RTS_Component);
+		const FTransform PartInWeaponSpace = WeaponPartBaseOffsets[i] * ActiveWeaponMesh->GetSocketTransform(Socket, RTS_Component);
 		CachedPartFramesInGunSpace.Add(Socket, PartInWeaponSpace * WeaponInGunFrame);
 	}
 }
@@ -3149,7 +3147,7 @@ void AFPSRCharacter::ProcessPendingWeaponPartsRebuild()
 {
 	bWeaponPartsRebuildPending = false; // clear first (Process may early-return)
 	const UFPSRWeaponDataAsset* Weapon = WeaponInventory ? WeaponInventory->GetCurrentWeapon() : nullptr;
-	if (!Weapon || !WeaponMesh || ActiveWeaponMesh != WeaponMesh)
+	if (!Weapon || !ActiveWeaponMesh)
 	{
 		return;
 	}

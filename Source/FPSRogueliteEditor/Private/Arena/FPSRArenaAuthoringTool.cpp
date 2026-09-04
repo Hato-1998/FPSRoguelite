@@ -484,7 +484,8 @@ static FString BuildArenaValidationBody(UWorld* World, const TArray<AFPSRArenaAc
 			{
 				Body += FString::Printf(
 					TEXT("  [오류] 막힌 셀에 있으면서 탈출 경로가 없는 스폰포인트 %d개: %s\n"
-					     "  적이 구조물 안에 갇힙니다. 구조형 스포너라면 ExitPathRoot 아래에 웨이포인트를 놓으세요(Enemy.md C1).\n"),
+					     "  적이 구조물 안에 갇힙니다. 구조형 스포너라면 ExitPathRoot 아래에 웨이포인트를, 배치 하나만 고치려면\n"
+					     "  그 스폰포인트의 MovePoint(ExitPathPoints)를 쓰세요(Enemy.md C1). 모퉁이 너머로 보낼 때는 '탈출 중 지오메트리 통과'를 끄세요.\n"),
 					TrappedNoPath.Num(), *FString::Join(TrappedNoPath, TEXT(", ")));
 			}
 			if (PathEndsBlocked.Num() > 0)

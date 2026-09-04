@@ -400,6 +400,64 @@ Riot Client가 **8558 포트**를 점유해 ZenServer가 못 뜬 것. Riot을 �
 > 🪤 조회 API 이름을 틀린 채 `try/except` 로 감싸면 **"없다"와 "못 읽었다"가 구분되지 않는다.**
 > 실제로 체인이 15개 멀쩡히 있는데 0개로 오판해 엉뚱한 곳을 팠다.
 
+### D10. `connect_material_expressions` 가 **입력 이름을 못 찾아 조용히 실패**한다 (2026-09-03)
+
+`SceneTexture` 노드의 UV 입력은 헤더상 `Coordinates` 이고(`MaterialExpressionSceneTexture.h:20`)
+그래프 익스포트도 `target_input: "Coordinates"` 로 보여준다. 그런데 그 이름으로 부르면 **False** 다:
+
+```python
+connect_material_expressions(mask, "", scenetex, "Coordinates")  # ❌ False
+connect_material_expressions(mask, "", scenetex, "")             # ✅ 0번 핀 = Coordinates
+```
+`GetExpressionInputByName` 은 이름이 비면 `GetInput(0)` 을 그냥 돌려주고, 아니면
+`GetInputName(i)` 와 문자열 비교를 한다(`MaterialEditingLibrary.cpp:45-70`) — 이 둘이 어긋난다.
+
+🪤 **위험한 건 실패 자체가 아니라 실패가 안 보인다는 것이다.** 이 배선이 빠지면 곡률 파라미터가
+죽는데, 곡률 기본값이 0이라 **화면이 정상과 완전히 똑같다.** 반환값을 안 모았으면 "완료"로 보고됐다.
+
+→ 배선은 전부 `link()` 헬퍼로 감싸 **실패를 수집**하고, 끝나면 개수를 찍어라. 반환값은 자문이 아니다 —
+`ConnectMaterialExpressions` 는 `Input->Connect()` 를 실행한 뒤에만 True 를 낸다(같은 파일 `:700-706`).
+
+- **입력 이름 규칙(2026-09-04 엔진 소스 확인, `MaterialEditingLibrary.cpp:45-75` · `MaterialGraphNode.cpp:596-636`)**: `connect_material_expressions` 는 노드의 `GetInputName()` 을 **`UMaterialGraphNode::GetShortenPinName` 으로 줄인 뒤** 비교한다. 빈 이름 = 0번 입력, 빈 출력 이름 = 0번 출력. 줄임표: `Coordinates→UVs` · `TextureObject→Tex` · `Input→(빈 이름)` · `Exponent→Exp` · `AGreaterThanB→"A > B"` · `AEqualsB→"A == B"` · `ALessThanB→"A < B"` · `MipLevel→Level` · `MipBias→Bias`. 그 외는 UPROPERTY 이름 그대로(`A`,`B`,`X`,`Y`…). 반환값을 모아 판정하는 `link()` 헬퍼는 `Scripts/author_fparms_handsonly_material.py` 참조.
+
+### D11. 헤드리스 정식 에디터가 **기동은 하는데 스크립트가 안 돈다** (2026-09-03, 복셀 라이플 임포트)
+
+`UnrealEditor-Cmd.exe <uproject> -nullrhi -unattended -nosplash -ExecCmds="py <script>"` 는
+임포트를 하는 **유일하게 안전한 실행 모드**다(D1-a 라이브 데드락 · D1-b 커맨드렛 즉사를 둘 다 피한다).
+그런데 여기서 **두 번 연속으로 다른 이유로 실패**했다. 증상이 둘 다 *"에디터는 멀쩡히 떴는데 아무 일도 안 남"*
+이라 **"느린 것"과 구별되지 않는다.**
+
+| # | 원인 | 로그에 남는 것 |
+|---|---|---|
+| 1 | **PowerShell 로 넘기면 `-ExecCmds` 의 따옴표가 벗겨진다** | `Cmd:` 줄도 `LogPython` 도 **아예 없음**. 에셋 레지스트리까지만 찍히고 idle |
+| 2 | **`-ExecCmds` 의 상대 경로가 엔진 바이너리 폴더 기준으로 풀린다** | `Could not load Python file 'D:/…/Engine/Binaries/Win64/Scripts/x.py' (resolved from 'Scripts/x.py')` |
+
+→ **정답 = `.bat` 파일 + 절대 경로.** (1)은 메모리 `automation-multi-test-plus-hangs` 가 이미 경고한 것이고,
+(2)는 이번에 새로 나왔다. 실물 = `Scripts/run_import_rifle_hardsurface.bat`(복셀 시절 `run_import_rifle_voxel.bat` 의 후속 — 복셀 트랙은 `4fc47fd7` 에서 폐기).
+
+🪤 **`.bat` 주석은 ASCII 로 쓸 것.** 한글 주석을 넣었더니 cmd 가 OEM 코드페이지로 읽어 파스가 깨지며
+`'Cmds' is not recognized` 같은 유령 에러를 뱉었다(임포트 자체는 됐지만 출력이 오염된다).
+
+**진단 순서**: ① 로그에 `Cmd: py …` 줄이 있나 → 없으면 (1) ② 있으면 그 다음 줄에
+`Could not load Python file` 이 있나 → 있으면 (2) ③ 둘 다 아니면 그때가 진짜 "느린 것"이다.
+(같은 실패형 = G10 "exit 0인데 아무것도 안 돌았다" — **초록을 범위 확인 없이 통과로 읽는 것**.)
+
+### D12. OBJ 임포트가 **Y 축을 부호 반전**한다 — 크기만 보면 절대 못 잡는다 (2026-09-04, 하드서피스 라이플)
+
+파이썬이 직접 쓴 OBJ 를 헤드리스로 임포트하고 `size_cm` 으로 검증해 두 번 "통과"시켰다. 세 번째에
+**바운드 min/max** 를 찍어 보니 엔진 기대 `Y −8.0..22.6` 이 `Y −22.6..8.0` 으로 들어와 있었다 — X·Z 는 그대로.
+**UE OBJ 임포터가 오른손→왼손 변환으로 Y 를 뒤집는다.** 크기(max−min)는 부호에 둔감해서 **두 번 다 정상으로 보였다.**
+
+결과 = 메시는 −Y 를 보는데, 파이썬으로 직접 찍은 소켓(임포터를 안 거침)은 +Y 앞에 있어 **총열 소켓이 총 뒤 40cm 에 떠 있었다.**
+같은 이유로 좌우 비대칭 디테일(탄피 배출구)도 반대편에 가 있었다 — 첫 임포트부터 그랬는데 아무도 못 봤다.
+
+→ **임포트 검증은 `size` 가 아니라 `get_bounding_box().min/max` 로**, 그리고 **기대값을 먼저 적어 두고 대조**할 것
+(기대값 없이 숫자를 보면 뒤집힌 것도 그럴듯해 보인다).
+→ 생성기 쪽 정석 = 정점을 쓸 때 **Y 를 미리 뒤집고**(임포터가 되돌린다), 그 사상이 det −1 이므로 **삼각 인덱스도 같이 뒤집어**
+파일 자체가 정상 오른손 OBJ(바깥 CCW)가 되게 한다. 소켓/manifest 는 임포터를 안 거치니 엔진 좌표 그대로.
+실물 = `Scripts/gen_rifle_hardsurface.py` 의 `to_engine()`(소켓용) / `to_file()`(정점용) 분리.
+(같은 실패형 = G7 "대조군 없이 단정" · G14 "측정 도구가 그 차이를 못 본다" — 여기서는 **측정 지표 자체가 부호를 못 본 것**.)
+
 ## E. 데이터 · 컴포넌트 · BP
 
 ### E0. BP 에셋을 열 때마다 에디터가 스택 오버플로로 죽는다
@@ -430,6 +488,13 @@ config/DataAsset은 **슬롯이 비었을 때만** 채우는 폴백으로 둔다
 
 ---
 
+### E5. 손 IK 를 데이터로 껐더니(DA 그립 소켓 None) **총이 가슴 앞에 뜬다** (2026-09-04, ARM1 착수 전 진단)
+- **증상**: 무기 DA 의 오른손 그립 소켓을 None 으로 비우면(=오른손 IK 알파 0, 설계된 스위치) 1P 총이 손이 아니라 가슴 앞 허공에 고정된다. 라이플 외 8종은 원래 None 이라 같은 증상이 잠복해 있었다.
+- **원인**: `ABP_FP_Base` 의 총 앵커 Copy Bone(hand_r → ik_hand_gun) 노드 Alpha 핀이 `RightHandIKAlpha` 에 바인딩돼 있었다(그래프 T3D 덤프로 확인). `AttachWeaponMeshes` 는 팔에 ik_hand_gun 본이 있으면 **항상** 그 본에 총을 붙이므로(`FPSRCharacter.cpp:977-1025`), 복사가 꺼지면 ik_hand_gun 은 리타깃 트랙의 정적 잔여값(기준 포즈 hand_r 위치 (-56.6, -0.3, 111.7))에 남고 총이 거기 붙는다. IK 알파는 손 IK 노드(Modify Bone·Two Bone IK)만 게이트해야 한다.
+- **해결(사용자, BP)**: Copy Bone 노드 Alpha 바인딩 제거 → 1.0 고정. 그 뒤 DA 소켓 None 으로 IK 를 끈다. 총 앵커와 손 IK 는 서로 다른 스위치다.
+- **읽는 법**: 애님 그래프는 파이썬에 노출되지 않는다 — `AssetExportTask` 로 ABP 를 T3D(UTF-16) 내보내 `PropertyBindings`·`PropertyPath` 를 grep 하면 핀 바인딩이 보인다(메모리 t3d-export-reads-protected-properties 의 확장).
+
+
 ## F. 단위 · 좌표계
 
 ### F1. Blender 1cm ≠ UE 1cm
@@ -459,6 +524,12 @@ ADR 0002의 *"head 본은 발에서 155.1cm"* 는 **스케일 적용 전 스켈�
 **부모 본 기준**이다. 좌표계를 추론하지 말고 **액터를 실제로 스폰해 월드 좌표를 읽는 편이 빠르고 옳다.**
 
 ---
+
+### F4. 정적 메시 손 소켓을 **위치만** 찍으면 손이 엉뚱한 방향으로 총을 잡는다 (2026-09-04, 하드서피스 라이플 PIE)
+- **증상**: WPN1 PIE — 파츠 부착·스코프 교체는 정상인데 1P 양손 자세가 이상하다. 코드(WPN1 `e181d137`) 의심 → 아니었다.
+- **원인**: 팔 IK 는 그립 소켓의 **전체 트랜스폼**(회전 포함)을 쓴다(`ResolveLeft/RightHandGripComponent` → `GetSocketTransform`). Synty 몸통 `SK_Wep_Mod_A_Body_01` 의 `SOCKET_LeftHand/RightHand` 는 회전을 갖는다(본 공간 L P80/Y180/R−90 · R P−70.1/Y−52.4/R−35.9). 내 몸통 `SM_RifleHS_Body` 의 소켓 저작(`ffa6d5ca`)은 매니페스트에 **위치만** 있어 회전이 (0,0,0) → 손바닥 기준축이 identity.
+- **해결**: Synty 회전만 기저 변환해 이식(`Mrot = make_rotation_from_axes(+X, −Z, +Y)`, `Te = Minv·Ts·M`; 검증 = Synty +Z→(0,1,0), −Y→(0,0,1)) `2fbc6af4`. 값은 생성기 `BODY_SOCKET_ROTATIONS` → manifest `body_socket_rotations` → `Scripts/author_rifle_hs_sockets.py`(add/upd 모두 회전 적용, verify 가 위치+회전 대조)로 데이터 경로에 고정 `6b0fbb2b`. **위치는 이식하지 않는다** — 몸통 형상이 달라 HS 값(`BODY_SOCKETS`) 유지, 미세조정은 그 표만 고쳐 스크립트 재실행.
+- **교훈**: `find_socket` 로 "소켓 있다"를 확인한 것은 "소켓 맞다"가 아니다(G 절 · 메모리 verify-with-control-group). 소켓을 다른 메시에서 옮겨 저작할 땐 원본이 **어떤 필드를 쓰는지**(위치·회전·스케일) 먼저 덤프해 대조군으로 삼을 것. `unreal.Rotator(a,b,c)` 는 (Roll, Pitch, Yaw) 순서(D6).
 
 ## G. 검증 방법 자체의 함정
 
@@ -597,6 +668,26 @@ Build.bat FPSRogueliteEditor Win64 Development -Project="<클론>\FPSRoguelite.u
 번역 단위만 격리할 뿐 유니티 블롭을 격리하지 않는다. 이름이 중복돼 보여도 **합치지 말 것** —
 정의부 주석에 사유를 남긴다.
 (같은 실패형 = G10 "exit 0인데 안 돌았다" — 초록의 **범위**를 확인하지 않고 통과로 읽는 것.)
+
+### G14. 머티리얼 `get_statistics` 는 그래프를 바꿔도 **같은 숫자를 계속 돌려준다** (2026-09-03, 아케이드 PP)
+
+새로 만든 포스트프로세스 머티리얼의 배선을 확인하려고 `MaterialEditingLibrary.get_statistics()` 의
+명령어 수를 대조군으로 썼다. 배선 전후가 `PS=85 / VS=148` 로 **완전히 같아서** "연결이 공짜다"로
+읽을 뻔했다.
+
+**대조군을 하나 더 만들어 도구를 의심한 것이 결론을 뒤집었다** — Custom 노드에 `sin`/`cos`
+8회 루프를 일부러 넣고 재컴파일해도 `PS=85` 가 미동도 하지 않았다. 즉 배선에 대한 증거가 아니라
+**측정 도구가 고장난 것**이었다(생성 시점 값에 고정. PP 머티리얼인데 `VS=148` 인 것부터가 신호였다 —
+풀스크린 패스에 그만한 정점 명령이 나올 수 없다).
+
+→ **머티리얼 검증에 `get_statistics` 를 쓰지 말 것.** 대신:
+```python
+d = unreal.MaterialNodeService.get_material_diagnostics(path)   # .is_compiled_ok / .compile_errors
+g = json.loads(unreal.MaterialNodeService.export_material_graph(path))  # connections 전량
+```
+`get_material_diagnostics` 는 실제 컴파일 상태를, `export_material_graph` 는 **연결 전량**을 준다.
+이 둘로 11개 연결 + `EmissiveColor` 출력을 전부 실측 확인했다.
+(같은 실패형 = G7 "대조군 없이 원인 단정". 여기서는 대조군이 **도구 자체**를 겨눴다.)
 
 ---
 

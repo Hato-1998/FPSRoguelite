@@ -1218,9 +1218,9 @@ protected:
 	 *  in (see its own comment). Reset alongside it on unequip/clear. */
 	bool bCachedHasReloadPose = false;
 
-	/** Runtime-created modular weapon-part components (U15), child-attached to WeaponMesh and rebuilt on each weapon
-	 *  change. Visible to everyone, like the weapon they hang off (ADR 0002 — they used to be OnlyOwnerSee). Empty for
-	 *  static/melee/partless weapons. */
+	/** Runtime-created modular weapon-part components (U15), child-attached to ActiveWeaponMesh (the shown weapon mesh —
+	 *  skeletal WeaponMesh or static WeaponMeshStatic) and rebuilt on each weapon change. Visible to everyone, like the
+	 *  weapon they hang off (ADR 0002 — they used to be OnlyOwnerSee). Empty for partless weapons / no weapon. */
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<UStaticMeshComponent>> WeaponPartComponents;
 
@@ -1244,8 +1244,9 @@ protected:
 	 *  Transient, NOT replicated, NOT saved (§2-A gate②) — each machine recomputes from replicated stats/fragments. */
 	uint32 LastWeaponPartSignature = 0;
 
-	/** Destroy any existing modular part components and rebuild them from the equipped weapon's WeaponParts list
-	 *  (only when a SKELETAL weapon mesh is shown; static/melee/empty attach nothing). Called from the weapon refresh. */
+	/** Destroy any existing modular part components and rebuild them from the equipped weapon's WeaponParts list.
+	 *  Attaches to ActiveWeaponMesh — whichever of WeaponMesh (skeletal) / WeaponMeshStatic (static) is shown; no weapon
+	 *  or no active mesh attaches nothing. Called from the weapon refresh. */
 	void RefreshWeaponPartComponents(const UFPSRWeaponDataAsset* Weapon);
 
 	/** W-U1: rebuild the modular parts from an already-computed selection (shared by equip + modifier-change paths).
