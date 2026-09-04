@@ -163,7 +163,7 @@ void RefreshWeaponPartComponents(const UFPSRWeaponDataAsset* Weapon);
 - **DA 검증기 정적 대칭화** — `FPSRWeaponDataAsset.cpp:197` `:306-308` `:370-372`(`SkelWeapon` 게이트). 라이플의 `SOCKET_Mount_Trigger_0` 원점 부착이 스켈레탈이었으면 경고, 정적에선 무음.
 - **stale 주석** — `FPSRWeaponDataAsset.h:124` · `.cpp:190` · `FPSRCharacter.h:1251-1253`(오른손 누락, 기존).
 - **④ 런타임 소비자 부재** — `FPSRGunMotionStudioData` 참조 콘텐츠 에셋 0개(2026-09-04 재실측 2회). 총모션 스튜디오 데이터가 저작되는 유닛의 검증 항목으로.
-- **`DA_Weapon_Rifle` 카드 배치 확인**(rev3, P3-2) — `DA_CardModifiers_SniperScope` 가 `WeaponCards` 에 있는지 `UnlockableFeatures` 에 있는지는 **네임테이블로 판별 불가**(둘 다 이름표에 있고 멤버십은 안 보인다 — `[[uasset-strings-name-table-only]]`). `FPSRWeaponValidator.cpp:50` 은 `WeaponCards` 의 WeaponBehavior 카드를 **Error** 로 본다 — 만약 거기 있다면 그 DA 는 이미 검증 오류 상태(기존, 이 유닛 밖). **C2 착수 전 에디터에서 1회 읽어 C0 에 기입**(§12 ⓒ 절차가 그 결과로 갈린다).
+- ~~**`DA_Weapon_Rifle` 카드 배치 확인**(rev3, P3-2)~~ → **해소(에디터 실측 2026-09-04)**: `DA_CardModifiers_SniperScope` ∈ `UnlockableFeatures`. `WeaponCards` 에는 WeaponBehavior 카드가 없으므로 `FPSRWeaponValidator.cpp:50` 오류 상태 **아님**. ⓒ = `FPSR.Frag.Fill`. (교훈 재확인: 멤버십은 이름표로 판별 불가 — `[[uasset-strings-name-table-only]]`. rev2·rev3 가 그걸 어기고 단정했었다.)
 - **범위 밖 발견(G1)**: `FPSRCardSubsystem.cpp:110` 주석과 `:134` 코드 불일치(티어 가진 WeaponBehavior 카드는 레벨업 풀에서 뽑힌다) / 데디서버는 장착 시 파츠를 만들지만 진화는 무시(`:3128`, 기존) / `AttachWeaponMeshes` 가 `ActiveWeaponMesh` 대입 전에 그립 캐시를 한 번 갱신(`:1094`→`:2522` 가 덮음, 기존).
 
 **갭 처리 규칙(고정)**: 구현 중 명세에 없는 판단이 필요해지면 **추측해서 채우지 말고 멈추고 "명세 갭"으로 보고**한다. 위치는 줄 번호가 아니라 **표 5-2 의 (함수명, 코드 문자열)** 쌍으로 잡는다 — ①과 ⑤는 문자열이 같으므로 **함수명 안에서 유일하면 진행**(rev3, P3-3); 같은 함수 안에 두 번 나오면 갭으로 보고.
@@ -185,11 +185,11 @@ void RefreshWeaponPartComponents(const UFPSRWeaponDataAsset* Weapon);
 ### 12-6 정적 라이플 세부
 - **ⓐ 배치·방향** — 장착 시 Synty 파츠 **6개가 각 마운트 위치**에(총열 앞, 개머리판 뒤, 탄창 아래, 핸드가드 앞, 그립 아래, 레드닷 위), **Trigger 1개만 몸통 원점**(예상). 7개가 전부 원점이면 소켓 이름 불일치 = 실패. ⚠️ **Grip 마운트 = 몸통 원점**이라 `SOCKET_Mount_Grip_0` 불일치는 위치로 안 보인다 → **Grip 파츠의 방향**(Synty 규약 +Y 정면, 아래로 뻗음)을 육안 항목에 추가(rev3, P3-5).
 - **ⓑ 원격 클라 반쪽 + 건-앵커 캐시 재해석**(rev3 라벨 정정 — 목표 5 검증 아님) — 원격 클라 화면에서 ⓐ 와 동일. 원격 클라 쪽에서 무기 스왑(라이플 ↔ SMG ↔ 라이플)을 해 **해체·재빌드와 건-앵커 그립/파츠 캐시가 새 무기 기준으로 재해석**되는지 본다(스왑 뒤 손 위치가 이전 무기에 남지 않음). ⚠️ 이 절차는 `Weapon` 이 항상 non-null 이라 **언이큅 분기(`:2297`)를 타지 않는다** — 목표 5 는 #1 로만 검증된다.
-- **ⓒ 지연 재빌드(⑤) — 유계 절차**(rev3, P3-2). 전제 = §11 의 **카드 배치 에디터 실측**이 C0 에 기입돼 있을 것.
-  1. 호스트 콘솔 `FPSR.DrawCards 10` → 로그 `[Card] [i] DA_CardModifiers_SniperScope (...)`(`FPSRCardSubsystem.cpp:659`)에서 `i`. **최대 3회**(Legendary 기본 가중치 0.05, `FPSRCardPoolDataAsset.h:36`). 나오면 `FPSR.ApplyCard i`(OpeningSeed 적용 `:727`).
-  2. 3회 내 안 나오면(카드가 `UnlockableFeatures` 에 있는 경우) `FPSR.Frag.Fill` — `DebugFillFragmentSlots` 는 `UnlockableFeatures` 의 WeaponBehavior 카드를 모아 Remove→Add 루프(`FPSRPlayerController.cpp:688-700`)로 **먼저** 붙인다(`:711-715` 는 그 뒤의 교체 오퍼 가능 여부 판단이지 거부 게이트가 아니다 — rev2 오독 정정).
-  3. **기대**: 다음 틱 Reddot 슬롯이 `SM_Wep_Mod_Reddot_01` → `SM_Wep_Mod_Scope_09` 로 교체, **나머지 6개 파츠가 그대로**. 원격 클라(호스트 라이플을 관전하는 **시뮬레이티드 반쪽**)에서도 `OnRep_ActiveFragments`(`FPSRWeaponInstance.cpp:164-167`)로 같은 교체. ⚠️ 원격 클라 **자기** 라이플의 오너 반쪽은 콘솔로 불가(`ApplyCard :239` `NM_Client` 거부) — 실제 레벨업 UI 로만.
-  4. 제거 방향은 현 디버그 도구로 관측 불가. ⑤ 의 가드는 추가/제거 공통 경로이므로 3단계가 ⑤ 를 검증한다.
+- **ⓒ 지연 재빌드(⑤) — 결정적 절차**(rev3 → **rev3a 에디터 실측 2026-09-04 로 확정**). 실측: `DA_CardModifiers_SniperScope`(`CardEffect_WeaponBehavior` → `DA_Fragment_Rifle_SniperScope`, `offer_rarities=[LEGENDARY]`)는 **`UnlockableFeatures`** 에 있다(`WeaponCards` 2장은 `DA_Card_MagSize_ThisWeapon`·`DA_Card_FireRate_ThisWeapon` = 스탯 카드). `MaxFragmentSlots=3`. Reddot 슬롯[6] = `EvolutionFragment=DA_Fragment_Rifle_SniperScope`, stage `FragmentStacks min_stacks=1 → SM_Wep_Mod_Scope_09`. → rev2·rev3 의 "WeaponCards 에 있다" 가정은 **틀렸다**(G1 2회차 P3-2 가 옳았다). `FPSRWeaponValidator.cpp:50` 오류 상태 우려는 **해당 없음**(검증기가 요구하는 배치 그대로).
+  1. 호스트 콘솔 **`FPSR.Frag.Fill`** — `DebugFillFragmentSlots` 가 `UnlockableFeatures` 의 WeaponBehavior 카드를 모아(`PoolFrags` = `[SniperScope]`) Remove→Add 루프(`FPSRPlayerController.cpp:688-700`)로 **먼저 붙인다**(Cap 3 ≥ 1). 이어지는 `PoolCards.Num()(1) <= Cap(3)` 분기(`:711-715`)는 "교체 오퍼를 못 낸다"는 **경고 로그**를 남길 뿐, 추가는 이미 끝났다. 기대 로그: `[Frag] Fill: 'DA_Weapon_Rifle' now holds 1/3 distinct fragment(s):` / `slot[0] = DA_Fragment_Rifle_SniperScope` / 그 뒤 `cannot present a replacement offer` 경고(정상).
+  2. `FPSR.DrawCards` 는 **쓰지 않는다** — 레벨업 풀(`WeaponCards`)에 이 카드가 없어 영원히 안 나온다(rev3 의 "3회 시도" 절차는 폐기).
+  3. **기대**: 다음 틱 Reddot 슬롯이 `SM_Wep_Mod_Reddot_01` → `SM_Wep_Mod_Scope_09` 로 교체, **나머지 6개 파츠가 그대로**. 원격 클라(호스트 라이플을 관전하는 **시뮬레이티드 반쪽**)에서도 `OnRep_ActiveFragments`(`FPSRWeaponInstance.cpp:164-167`)로 같은 교체. ⚠️ 원격 클라 **자기** 라이플의 오너 반쪽은 콘솔로 불가(`Frag.Fill` 은 `HasAuthority()` 게이트 `:651`) — 실제 미션 해금 UI 로만.
+  4. 제거 방향은 관측 불가 — `Frag.Fill` 재실행은 같은 집합을 Remove→Add 하므로 다음 틱 시그니처가 같아 `:3163` 에서 조기 반환(무변화가 정상). ⑤ 의 가드는 추가/제거 공통 경로이므로 3단계가 ⑤ 를 검증한다.
 - **ⓓ 그립 해석** — 왼손이 **몸통 `SOCKET_LeftHand`** 로 떨어져 붙는다(Synty `Handguard_03` 에 좌손 소켓 없음; `ResolveLeftHandGripComponent` 폴백 `:2706`). 기존 폴백의 확인이지 ④ 검증이 아니다. 팔 ABP 의 좌손 IK 배선이 살아 있어야 관측 가능(미검증).
 - **④ 런타임 미검증** — 소비자 0. 검증 = #1(`ActiveWeaponMesh->GetSocketTransform(Socket, RTS_Component)` 문자열).
 - **ⓔ ADS**(rev3, P3-7) — 통과 기준: 조준 중 활성 사이트 파츠(`Reddot_01`/`Scope_09`)의 렌즈 중심이 화면 중앙 **±20px** 안. `ADSAimRotationOffset` 판정(`RifleHardSurface_ResumePrompt.md` §6-2)과 같이 본다.
@@ -205,8 +205,8 @@ void RefreshWeaponPartComponents(const UFPSRWeaponDataAsset* Weapon);
 - **엔진**: `StaticMeshComponent.cpp:1334` `:1365` `:1389-1392` · `SceneComponent.cpp:2312`(부모 null) · `:2295-2420`(소켓 부재 경고 없음) · `:2946-2962`(원점 폴백) · `:114`(기본 Movable).
 - **복제**: `Slots`·`CurrentSlotIndex`(`InventoryComponent.cpp:131-134`)·`ActiveFragments`(`WeaponInstance.cpp:22`) 조건 없음.
 - **④ 소비자**: `FPSRGunMotionStudioData` 참조 콘텐츠 에셋 **0개**(2회 재실측). 게이트 `FPSRFirstPersonArmsAnimInstance.cpp:168-171`.
-- **카드(이름표 2026-09-04 — 멤버십은 미검증)**: `DA_CardModifiers_SniperScope` → `CardEffect_WeaponBehavior` → `DA_Fragment_Rifle_SniperScope`; `DA_CardUnlock_Rifle` → `CardEffect_GrantWeapon`. **어느 배열에 들어 있는지는 에디터 실측 대기**(§11).
-- **미검증**: `Card->Weight`.
+- **카드 배치(에디터 실측 2026-09-04)**: `DA_Weapon_Rifle.UnlockableFeatures` = [`DA_CardModifiers_SniperScope`](`CardEffect_WeaponBehavior` → `DA_Fragment_Rifle_SniperScope`, `offer_rarities=[LEGENDARY]`, `weight=0`) / `WeaponCards` = [`DA_Card_MagSize_ThisWeapon`, `DA_Card_FireRate_ThisWeapon`](스탯 카드, WeaponBehavior 없음) / `MaxFragmentSlots=3` / Reddot 슬롯 stage `FragmentStacks min_stacks=1 → SM_Wep_Mod_Scope_09`, 나머지 6슬롯 `EvolutionFragment=None`. (`DA_CardUnlock_Rifle` 은 이 DA 의 어느 배열에도 없다 — 이름표에 보였던 건 다른 참조였다.)
+- **미검증**: 없음(`Card->Weight` 도 0 으로 읽힘 — `Frag.Fill` 경로는 가중치를 쓰지 않는다).
 
 ---
 
@@ -255,7 +255,7 @@ void RefreshWeaponPartComponents(const UFPSRWeaponDataAsset* Weapon);
 | C3 #2 빌드 | **통과** — `Build.bat FPSRogueliteEditor Win64 Development -WaitMutex -DisableAdaptiveUnity -ForceUnity` → 로그 `Result: Succeeded`(450s, XGE) · `[Adaptive Build] Excluded` **0** · `error C`/`LNK` **0**. 판정은 종료 코드가 아니라 로그 줄 |
 | C3 #3 스모크 | **통과** — `Scripts/run_smoke_moduleloads.bat` → `Test Completed. Result={Success} Name={ModuleLoads}` · `1 tests performed` · `TestExit: Automation Test Queue Empty` (`Saved/wpn1_smoke.log`) |
 | 코드 커밋 | `e181d137` feat(weapon): WPN1 — 두 파일만, 명세 대조·빌드·스모크 통과 후 |
-| §11 카드 배치 에디터 실측 | (에디터 켜질 때 — 대기. §12-6 ⓒ 의 경로를 가른다) |
+| §11 카드 배치 에디터 실측 | **완료 2026-09-04** — `DA_CardModifiers_SniperScope` ∈ **`UnlockableFeatures`**(1장, LEGENDARY) / `WeaponCards` = 스탯 카드 2장 / `MaxFragmentSlots=3` / Reddot 슬롯 stage `min_stacks=1 → SM_Wep_Mod_Scope_09`. → ⓒ = **`FPSR.Frag.Fill`** 확정(`DrawCards` 폐기). rev2·rev3 의 "WeaponCards" 가정은 틀렸었다(G1 2회차 P3-2 적중) |
 | §12-5/6 사용자 PIE | (대기 — 리슨 호스트 + 원격 클라) |
 | G2 머지 게이트 | (PIE 뒤) |
 
