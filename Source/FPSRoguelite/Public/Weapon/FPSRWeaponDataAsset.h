@@ -107,9 +107,10 @@ struct FFPSRWeaponPartStage
 	FFPSRWeaponScopeDescriptor Scope;
 };
 
-/** One modular cosmetic part slot attached to the 1P skeletal weapon mesh at a named socket (U15). Purely visual: the
- *  part is a static mesh (barrel / forestock / magazine / sight from the pack) child-attached to the equipped
- *  skeletal weapon. Null Part = skipped (null-safe). Static/melee weapons and empty lists attach nothing. A slot may
+/** One modular cosmetic part slot attached to the equipped weapon mesh at a named socket (U15). Purely visual: the
+ *  part is a static mesh (barrel / forestock / magazine / sight from the pack) child-attached to whichever weapon
+ *  mesh is shown — the skeletal WeaponMesh OR the static WeaponMeshStatic (WPN1: parts parent to ActiveWeaponMesh,
+ *  so a static receiver takes parts too). Null Part = skipped (null-safe). Empty lists attach nothing. A slot may
  *  be purely structural (no evolution) or may evolve (W-U1b): the base Part below is stage 0, and Stages lists
  *  higher stack-gated replacements — the slot's Socket stays FIXED across every stage. */
 USTRUCT(BlueprintType)
@@ -121,8 +122,10 @@ struct FFPSRWeaponPartAttachment
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|모듈 파츠", meta = (DisplayName = "파츠 메시"))
 	TSoftObjectPtr<UStaticMesh> Part;
 
-	/** Socket on the WEAPON mesh (SKEL_LPAMG_<W>) the part attaches to. NAME_None = weapon mesh root. FIXED mount —
-	 *  the tool bakes this as a stable SOCKET_Mount_<자동id> and it stays unchanged even as the slot evolves. */
+	/** Socket on the shown WEAPON mesh (skeletal WeaponMesh or static WeaponMeshStatic) the part attaches to.
+	 *  NAME_None = weapon mesh root. FIXED mount — the assembler tool bakes this as a stable SOCKET_Mount_<자동id> on a
+	 *  skeletal receiver; on a static receiver author it in the Static Mesh editor (or the socket script). It stays
+	 *  unchanged even as the slot evolves. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|모듈 파츠", meta = (DisplayName = "부착 소켓"))
 	FName Socket = NAME_None;
 

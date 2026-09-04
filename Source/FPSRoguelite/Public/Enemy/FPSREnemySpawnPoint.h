@@ -67,8 +67,13 @@ public:
 	 *
 	 * `ExitPathRoot` 웨이포인트와 나뉘는 이유 = **맵 배치별 오버라이드**. 웨이포인트는 컴포넌트라 BP 안에서만
 	 * 저작되고 그 BP를 놓은 모든 복사본이 같은 경로를 쓴다. 이건 프로퍼티라서 레벨 인스턴스마다 표준
-	 * 블루프린트 인스턴스 오버라이드로 저장된다 — BP 기본값에 1개를 저작해 두고, 맵에 놓은 개체마다 필요한
-	 * 만큼 더한다.
+	 * 블루프린트 인스턴스 오버라이드로 저장된다 — **BP 기본값은 비워 두고**, 맵에 놓은 개체에서만 더한다.
+	 * (기본값에 1개라도 넣으면 그 BP 의 모든 배치가 스폰마다 탈출 상태 — 아래 통과·분리 무시 — 로 시작한다.)
+	 *
+	 * ⚠️ 탈출 경로가 있는 동안 적은 `bPhaseThroughWorldWhileExiting`(기본 **켜짐**) 에 따라 WorldStatic 을
+	 * 무시하고 웨이포인트를 향해 **직진**하며 플로우필드·분리도 쓰지 않는다. 그러므로 여기에 모퉁이 너머
+	 * 지점을 찍으면 적이 벽을 뚫고 나온다 — 열린 바닥에서 "돌려보내는" 용도로 쓸 때는 위 토글을 **꺼라**.
+	 * 이 연동은 그 토글의 주석("끄는 경우")과 같은 규칙이다(G2 2026-09-04).
 	 *
 	 * 로컬 좌표라 스포너를 옮기거나 돌리면 경로도 같이 따라온다. 컴포넌트 웨이포인트 **뒤에 이어 붙는다**
 	 * (대체가 아니라 추가 — 기존 구조형 스포너 콘텐츠 무회귀).
@@ -101,7 +106,10 @@ public:
 	 *      differing only by rotation are covered by rotating the ChildActorComponent).
 	 *   3. The **ExitPathPoints** array (actor-local). Both of the above are COMPONENTS, so they are authored in a
 	 *      Blueprint and every placement of that Blueprint shares the one route; this is a property, so it is
-	 *      overridden per level instance — the only way to extend ONE placed point's route in a map.
+	 *      overridden per level instance — for a DIRECTLY-PLACED point (or a point subclass) this is how ONE
+	 *      placement's route is extended in a map. It does NOT give per-placement routes to a point spawned through
+	 *      a ChildActorComponent (path 1): there the property lives in the ChildActorTemplate, which is
+	 *      VisibleDefaultsOnly and cannot be overridden per placement.
 	 */
 	void GetExitPathWorldPoints(TArray<FVector>& Out) const;
 
