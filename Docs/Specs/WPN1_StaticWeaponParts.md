@@ -251,7 +251,8 @@ void RefreshWeaponPartComponents(const UFPSRWeaponDataAsset* Weapon);
 |---|---|
 | C2 Sonnet 축자 구현 | 완료 — 갭 0건. `FPSRCharacter.cpp` +48/−49, `.h` 3줄. 커밋·빌드·`git add` 없음(지시대로) |
 | C3 #1 명세 대조 | **통과** — ①⑤ 가드 문자열 일치 · ② 조기 반환 삭제 + 루프 전체(`NewObject`~`MakePartCurveNames`) `if (ActiveWeaponMesh)` 안, 재해석 4곳(`:2618` `:2636` `:2657` `:2673`)·`RefreshHandGripInGunFrameCache`·`RefreshPartFramesInGunSpaceCache` 는 가드 밖 잔존 → **목표 5 검증 완료** · ③ 부모 `ActiveWeaponMesh` · ④ 가드+`GetSocketTransform` 둘 다 · `.h` 주석 2곳 §5-1 과 동일 · `.cpp:2447` 주석 · 그 외 hunk 0(큰 +/− 는 루프 본문 재들여쓰기, 내용 줄 단위 동일) · 헤더 시그니처 변경 0. **플랜에 없던 구조 결정 = 0건**(②자리 주석을 1줄→2줄로 래핑한 서식 판단 1건뿐 — G2 프롬프트에 명시 대상 아님) |
-| C3 #2 빌드 | (기준선 캡처 뒤 실행 — 대기) |
+| 기준선 캡처(§12-5·#7 의 비교 대상) | **생략 — 사용자 결정 2026-09-04.** 결과: §12-7(a) 대조군 로그 판정은 비교 대상 없음 → 판정 항목에서 제외, §12-5 스켈레탈 회귀는 **육안(종전 알려진 정상 배치 대비)** 으로만, §12-7(b) 라이플 `:2480` 경고는 **"변경 후 없음"** 만 확인(기준선의 "있음"은 미확인) |
+| C3 #2 빌드 | 실행 중 — `Build.bat FPSRogueliteEditor Win64 Development -WaitMutex -DisableAdaptiveUnity -ForceUnity`, 판정 = 로그 `Result:` 줄 + `[Adaptive Build] Excluded` 부재 |
 | C3 #3 스모크 | (대기) |
 | §11 카드 배치 에디터 실측 | (에디터 켜질 때 — 대기) |
 
