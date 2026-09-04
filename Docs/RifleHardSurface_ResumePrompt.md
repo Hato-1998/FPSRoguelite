@@ -256,8 +256,9 @@ python Scripts/gen_rifle_hardsurface.py    →  Saved/RifleHardSurface/
 조사는 위 표로 이미 끝나 있으니, 플랜은 **"스켈레탈 전용을 가정한 다른 지점이 더 없는지 훑는 것"** 이
 본론이다(위 4건 외에 `CachedLeftHandComponent`/`CachedRightHandComponent`·렌더 태그 상속 경로).
 
-**검증**: 빌드는 `-DisableUnity -ForceUnity` 로(메모리 `nonunity-build-is-67-seconds`,
-`Troubleshooting.md` G13 — 그냥 `Succeeded` 는 유니티 충돌을 검증하지 못한다).
+**검증**: 빌드는 `-DisableAdaptiveUnity -ForceUnity` 로(`Troubleshooting.md` G13 — 그냥 `Succeeded` 는 유니티 충돌을
+검증하지 못한다. 🔁 정정 2026-09-04: 종전 `-DisableUnity -ForceUnity` 는 상호 모순 — G1 지적. include 를 건드릴 때만
+별도로 `-DisableUnity` 풀빌드를 한 번 더, 메모리 `nonunity-build-is-67-seconds`).
 회귀 확인 = **나이프**(기존 정적 무기)가 파츠 0개인 채로 여전히 정상인지, **Synty 라이플**(스켈레탈)의
 파츠가 그대로 붙는지 둘 다.
 
