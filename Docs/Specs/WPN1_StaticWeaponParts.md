@@ -8,7 +8,7 @@
 | 브랜치 | `proto/arcade-look` (라이플 하드서피스 트랙의 하위 유닛. 머지 단위는 트랙 전체) |
 | 작성 모델 | `claude-fable-5-1` — ⚠️ 폴백 표기: §6-5-2 는 C1 설계 주체를 Opus 로 두지만, 이 세션은 사용자가 `/model` 로 Fable 로 전환한 상태에서 진행됐다(2026-09-04). G1 게이트는 **별도 Fable 서브에이전트**로 띄워 설계자≠검증자를 유지했다 |
 | 작성일 / 최종 갱신 | 2026-09-04 (**rev3 — G1 2회차 반려(P2 1·P3 8) 반영. 승인 제출본**) |
-| 상태 | `초안` — **사용자 승인 대기**. G1 1회차 반려(P2 3) → rev2 → G1 2회차 반려(P2 1 = 검증표 문구; *"설계 자체의 결함은 못 찾았다 … rev3는 Opus 대조만으로 승인 단계로 가도 무방"*) → rev3. 3회차는 태우지 않는다(§6-5-2 (5): 3회차부터 사용자 보고 대상 — 이 문서가 그 보고다) |
+| 상태 | `확정` — **사용자 승인 2026-09-04**(rev3 `6081cd14`). 경위: G1 1회차 반려(P2 3) → rev2 → G1 2회차 반려(P2 1 = 검증표 문구; *"설계 자체의 결함은 못 찾았다 … rev3는 Opus 대조만으로 승인 단계로 가도 무방"*) → rev3 → 3회차 미실행(§6-5-2 (5) 사용자 보고로 갈음) → 승인. 다음 = C2 Sonnet 축자 구현 → C3 → PIE → G2 |
 | 관련 SSOT | `Docs/RifleHardSurface_ResumePrompt.md` §1-2·§2-4·§3-2 · `Docs/WeaponPack_Integration.md`(총구=파트 소켓·조준=사이트 파트 소켓 규약) · `Docs/SSOT/Workflow.md` §6-5-2 |
 | 관련 메모리 | `[[reason-in-multiplayer-terms]]` · `[[code-is-immutable-structure-only]]` · `[[production-structure-first]]` · `[[event-halves-authority-vs-client]]` · `[[card-pool-routing]]` · `[[uasset-strings-name-table-only]]` |
 | 보드 행 | 「아케이드 룩 프로토 + 육안 게이트」 `3d03972d-dd88-81ff-87d6-f5730a06e7a4` 스코프 2/4 |
