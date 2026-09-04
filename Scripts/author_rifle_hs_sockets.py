@@ -18,6 +18,12 @@ PLAN = {"Body": M["body_sockets"]}
 for part, d in M["parts"].items():
     if d.get("sockets"):
         PLAN[part] = d["sockets"]
+# 회전(엔진 프레임 P/Y/R). 매니페스트에 없는 소켓은 (0,0,0). 팔 IK 가 손 소켓 회전으로 손바닥 방향을 잡는다
+# (2026-09-04 PIE 실측 — 회전 누락 = 손이 엉뚱한 방향). unreal.Rotator(...) 는 (Roll, Pitch, Yaw) 순서다.
+ROT = {"Body": M.get("body_socket_rotations", {})}
+def rot_for(part, name):
+    p, y, r = ROT.get(part, {}).get(name, (0.0, 0.0, 0.0))
+    return unreal.Rotator(r, p, y)
 
 report = []
 for part, socks in PLAN.items():
@@ -29,31 +35,37 @@ for part, socks in PLAN.items():
         existing = sm.find_socket(name)
         if existing:
             existing.set_editor_property("relative_location", unreal.Vector(x, y, z))
+            existing.set_editor_property("relative_rotation", rot_for(part, name))
             action = "upd"
         else:
             s = unreal.StaticMeshSocket(outer=sm)
             s.set_editor_property("socket_name", name)
             s.set_editor_property("relative_location", unreal.Vector(x, y, z))
-            s.set_editor_property("relative_rotation", unreal.Rotator(0, 0, 0))
+            s.set_editor_property("relative_rotation", rot_for(part, name))
             sm.add_socket(s)
             action = "add"
-        report.append("[sock] %-10s %-26s %s (%.1f, %.1f, %.1f)" % (part, name, action, x, y, z))
+        rr = rot_for(part, name)
+        report.append("[sock] %-10s %-26s %s loc(%.1f, %.1f, %.1f) rotPYR(%.1f, %.1f, %.1f)"
+                      % (part, name, action, x, y, z, rr.pitch, rr.yaw, rr.roll))
     sm.modify()
     saved = unreal.EditorAssetLibrary.save_asset(path, only_if_is_dirty=False)
     report.append("[sock] %-10s save=%s" % (part, saved))
 
-# 검증 — 기대한 이름이 전부 실재하는지 재조회
+# 검증 — 기대한 이름이 전부 실재하고 위치·회전이 매니페스트와 일치하는지 재조회
 ok = True
 for part, socks in PLAN.items():
     sm = unreal.EditorAssetLibrary.load_asset("%s/SM_RifleHS_%s" % (DEST, part))
     have = []
-    for name in socks:
+    for name, (x, y, z) in socks.items():
         s = sm.find_socket(name) if sm else None
-        if s:
-            L = s.get_editor_property("relative_location")
-            have.append("%s(%.1f,%.1f,%.1f)" % (name, L.x, L.y, L.z))
-        else:
-            ok = False; have.append("!!MISSING " + name)
+        if not s:
+            ok = False; have.append("!!MISSING " + name); continue
+        L = s.get_editor_property("relative_location"); R = s.get_editor_property("relative_rotation")
+        want = rot_for(part, name)
+        good = (abs(L.x-x) < 0.05 and abs(L.y-y) < 0.05 and abs(L.z-z) < 0.05
+                and abs(R.pitch-want.pitch) < 0.05 and abs(R.yaw-want.yaw) < 0.05 and abs(R.roll-want.roll) < 0.05)
+        if not good: ok = False
+        have.append("%s%s(%.1f,%.1f,%.1f|%.0f,%.0f,%.0f)" % ("" if good else "!!", name, L.x, L.y, L.z, R.pitch, R.yaw, R.roll))
     report.append("[sock] verify %-10s %s" % (part, " ".join(have)))
 
 for line in report:

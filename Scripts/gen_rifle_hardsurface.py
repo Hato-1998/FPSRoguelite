@@ -291,6 +291,15 @@ BODY_SOCKETS = {
     "SOCKET_LeftHand":          (60.0, 0.0, 15.0),
 }
 
+# 손 소켓 **회전** (엔진 프레임 P/Y/R, 도). 팔 IK 가 소켓 전체 트랜스폼으로 손바닥 방향을 잡으므로 회전이 없으면
+# 손이 엉뚱한 방향을 본다(2026-09-04 PIE 실측). 값 = Synty SK_Wep_Mod_A_Body_01 손 소켓 회전을 본 공간
+# (정면 +Z, 위 -Y) → 엔진 프레임(정면 +Y, 위 +Z) 으로 기저 변환(Te = Minv*Ts*M)한 것. 위치는 몸통 형상이
+# 달라 위 BODY_SOCKETS 값을 쓴다. 미세 조정은 PIE 판정 후 사용자와 — 이 표만 고치고 소켓 스크립트를 재실행.
+BODY_SOCKET_ROTATIONS = {
+    "SOCKET_LeftHand":  (0.0, 100.0, 90.0),
+    "SOCKET_RightHand": (15.6, -77.5, -86.6),
+}
+
 
 # ---------------------------------------------------------------------------
 # 내보내기 프레임 — 저작 공간(+X 정면)을 **엔진 무기 프레임(+Y 정면)** 으로 돌린다.
@@ -419,6 +428,8 @@ def main():
     bm = PARTS["Body"]["mount"]          # 몸통 소켓은 몸통 로컬(= 그립 마운트 기준) · 엔진 프레임 cm
     for k, v in BODY_SOCKETS.items():
         manifest["body_sockets"][k] = list(to_engine((v[0] - bm[0], v[1] - bm[1], v[2] - bm[2])))
+    # 회전은 이미 엔진 프레임 P/Y/R 로 적혀 있다 — 변환 없이 그대로 기록(소켓 스크립트가 그대로 찍는다)
+    manifest["body_socket_rotations"] = {k: list(v) for k, v in BODY_SOCKET_ROTATIONS.items()}
     manifest["frame"] = "engine: +Y forward, +Z up (authored +X forward, exported with +90deg yaw)"
     manifest["assembled_size_cm"] = {"length_x": hi[0] - lo[0], "width_y": hi[1] - lo[1],
                                      "height_z": hi[2] - lo[2]}
