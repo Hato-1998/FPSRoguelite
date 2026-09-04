@@ -9,6 +9,35 @@
 
 ---
 
+## 🔷 1인칭 무기 트랙 마감 — WPN1 정적 파츠 코드 · 손 소켓 회전 · ARM1 총만 표시(ADR 0015) · 손만 표시 보류(ARM2) (2026-09-04, `proto/arcade-look`, 코드 `e181d137` · 콘텐츠 `2fbc6af4` `6b0fbb2b` `90b91f20` · 문서 `55e9d72e` `0c99483f` `e977de95` `83dfd346` `5d1b8967` `f45dc965` `94a5aca0`)
+> 실행 문서 = `Docs/RifleHardSurface_ResumePrompt.md`(하드서피스 트랙) · `Docs/Specs/WPN1_StaticWeaponParts.md`(§6-5-2 명세·원장) · `Docs/FPArms_HandsOnly_ResumePrompt.md`(보류 트랙). 보드 = 「아케이드 룩 프로토 + 육안 게이트」(WPN1 = 스코프 2) · ARM1(완료) · ARM2(백로그·보류).
+> 마감 사유(사용자): *"기존 원래 쓰던 모델링으로 바꿨어. 지금은 파츠도 저작 안 되어 있고 모델링 자체도 다시 만들어야 하니까 여기서 마무리해."*
+
+### 1. WPN1 — 정적 무기 메시에도 모듈러 파츠 (코드 `e181d137`)
+- 파이프라인(§6-5-2): C1 명세 → **G1 Fable 2회**(1회차 P2 3·P3 4 반려 → rev2 / 2회차 P2 1·P3 8 반려 → rev3, *"설계 자체의 결함은 못 찾았다"*) → 사용자 승인 → C2 Sonnet 축자 구현(갭 0, `FPSRCharacter.cpp` +48/−49 · `.h` 3줄) → C3 Opus: diff 대조 통과 · 빌드 `Result: Succeeded`(450s, `-WaitMutex -DisableAdaptiveUnity -ForceUnity`) · 스모크 `FPSRoguelite.Smoke.ModuleLoads` 통과(`Scripts/run_smoke_moduleloads.bat`).
+- 변경 5개 지점: 가드 ①⑤(`!Weapon || !ActiveWeaponMesh`) · ② 죽은 `if (!WeaponMesh) return;` 삭제 + 부착 루프 전체를 `if (ActiveWeaponMesh)` 로(재해석 4곳·캐시 리프레시는 밖) · ③ 부모 `ActiveWeaponMesh` · ④ `RefreshPartFramesInGunSpaceCache` 가드 + `GetSocketTransform`. **G1 핵심 적중** = ②를 조기 반환으로 짜면 언이큅 캐시 초기화가 사라진다 → 루프 가드로.
+- PIE #1(리슨 호스트, HS 몸통 `SM_RifleHS_Body` + Synty 파츠 7): 파츠 부착 ✓ · 스코프 교체(`FPSR.Frag.Fill` → `SM_Wep_Mod_Scope_09`) ✓. 손 방향 이상 → 코드 아님(아래 2). 카드 실측 교훈: **멤버십은 이름표로 판별 불가** — rev2·rev3 가 `WeaponCards` 로 단정했다가 에디터 실측으로 `UnlockableFeatures` 확인(메모리 uasset-strings-name-table-only).
+- 마감 상태: 사용자가 라이플 DA 를 원래 스켈레탈(`SK_Wep_Mod_A_Body_01`)로 원복 → **정적 경로 검증 동결**(ⓐ·ⓒ ✓, ⓑ·ⓔ·ⓕ·로그·대조군 미판정). 코드는 브랜치 유지(스켈레탈 경로 회귀 = 원래 라이플 + 파츠 7 정상 표시·모션 — 비공식). **G2 보류**(브랜치 머지 시점 또는 HS 재개 후 재 PIE). Fable 잔여 = G2 1회.
+
+### 2. 손 소켓 회전 — 데이터 누락 진단·수정 (`2fbc6af4` · `6b0fbb2b`, Troubleshooting F4)
+- 증상 = 1P 양손 자세 이상. 원인 = HS 몸통 `SOCKET_Left/RightHand` 회전 (0,0,0) — 소켓 스크립트가 위치만 찍었고 Synty 몸통 손 소켓은 회전을 갖는다(본 공간 L P80/Y180/R−90 · R P−70.1/Y−52.4/R−35.9). 손 IK 는 소켓 **전체 트랜스폼** 소비(`ComputeGripInGunFrame` `:2797`).
+- 수정 = Synty 회전만 기저 변환(`Mrot = make_rotation_from_axes(+X, −Z, +Y)`, `Te = Minv·Ts·M`) 이식 → 생성기 `BODY_SOCKET_ROTATIONS` → manifest `body_socket_rotations` → `author_rifle_hs_sockets.py`(add/upd 회전 적용·verify 위치+회전), 에디터 라운드트립 12/12 `sockets_ok=True`.
+- 결과: 손목이 여전히 돌아감 — 오른손 IK 의 effector 회전(이식값)이 PWAS 포즈와 충돌. 사용자 결정으로 IK 자체 퇴역(3). 이 소켓 2개는 런타임 미사용·보존(조립툴·복귀용).
+
+### 3. ARM1 — 손 IK 퇴역 + (경유) 손만 마스크 → **총만 표시 = ADR 0015**
+- 사용자 1차 결정: IK 빼고 How to Fish 식 떠 있는 손 + 기본 애니. 실측: **DA 양손 그립 소켓 None 이 곧 IK 알파 0**(설계된 데이터 스위치 — 라이플만 채워져 있었고 나머지 8종은 원래 None). **함정(Troubleshooting E5)**: `ABP_FP_Base` 총 앵커 Copy Bone(hand_r→ik_hand_gun) Alpha 가 `RightHandIKAlpha` 에 바인딩 → IK 끄면 총이 가슴 앞(ik_hand_gun 기준 포즈 (−56.6,−0.3,111.7))에 뜬다. 그래프는 파이썬에 미노출 → `AssetExportTask` T3D(UTF-16) 덤프로 `PropertyBindings` 읽음. 사용자가 바인딩 제거(1.0 고정) + DA 소켓 None → 덤프 재확인 L2/R2.
+- 손만 마스크 `M_/MI_FPArms_HandsOnly`(`90b91f20`): 팔 메시 `SK_LPAMG_Arms_Base_Smooth` 는 섹션 Arms 1개(+Nails)라 섹션 숨김 불가, HideBone 은 손까지 지움, 팩에 손만 메시 없음(Gloves 변형뿐) → PreSkinnedPosition 팔별 손목 평면(바인드 포즈 실측 hand_l (56.6,−0.3,111.7), 전완 방향 (0.72,0.43,−0.55)) Masked·양면, `HandsOnly_CutOffset` 파라미터. 헤드리스 저작(D11) — 1차 실패 = 마스터 경로를 `Arms/` 로 추정(실물 `Materials/`) → MI base material 에서 해석하도록 수정. 핀 이름 규칙 = `GetShortenPinName`(Troubleshooting D10 보강).
+- 인게임: 손이 **안 보였고**(원인 미판별 — 전부 클립 vs 어두운 맵) 사용자: *"아예 손이 안 보이고 총만 보이는데 이게 차라리 더 좋다."* → **ADR 0015**(`83dfd346`·`5d1b8967`·`f45dc965`): 1P = 총만, 팔 = `Hidden in Game` 모션 드라이버. 금지 3건 = `SetVisibility`(`RefreshFirstPersonRendering` 이 자식=총까지 전파) · 메시 슬롯 비우기(1P/3P 분할 조건) · 틱 옵션 변경(5.7 기본값 항상 틱을 불변식으로 — 소스 `SkinnedMeshComponent.cpp:460`). PIE ✅ 총 모션 생존·팔 비표시(사용자). 손만 표시 = **폐기 아닌 보류**(ARM2 백로그, `Docs/FPArms_HandsOnly_ResumePrompt.md`, 재개 첫 작업 = 대조군으로 미판별 원인 가르기). BP 슬롯 `MI_FPArms_HandsOnly` 배선 유지(숨김이라 무영향).
+
+### 4. 하드서피스 라이플 트랙 — 상태
+- 브랜치에 있음: 생성기 `Scripts/gen_rifle_hardsurface.py`(8파츠·모따기 프리즘·N각 튜브·슬랫) · 3차 임포트 `Content/Assets/Weapons/RifleHS/SM_RifleHS_*`(Y 반전 상쇄 실증) · 소켓 12(회전 포함) · manifest. 인게임은 원래 Synty 라이플로 원복.
+- 재개 전제가 바뀌었다: **총이 1P 비주얼의 전부**(ADR 0015) → 모델링 재작업 + §3-5 머티리얼(아케이드 룩 자체발광·림)을 한 묶음으로. 사용자: *"모델링 자체도 다시 만들어야."*
+
+### 미커밋(사용자 콘텐츠) — 마감 시점
+`ABP_FP_Base`(Copy Bone 알파 1.0 고정) · `BP_FPSRPlayer`(FirstPersonArms `Hidden in Game`, 슬롯 `MI_FPArms_HandsOnly`) · `DA_Weapon_Rifle`(원복 + 양손 그립 소켓 None). `Config/DefaultEditor.ini` 는 CRLF 만 바뀜(제외).
+
+---
+
 ## 🔷 아케이드 포스트프로세싱 1패스 (2026-09-03, `proto/arcade-look` 작업 커밋 `401ae6f8`) — **블룸 임계 · CRT 스캔라인 · 색수차 · 비네트**
 > 실행 문서 = `Docs/ArcadePostProcess_ResumePrompt.md`(§3 순서 그대로). 보드 행 = 「아케이드 룩 프로토 + 육안 게이트」의 4번째 스코프.
 > `L_Map_1` 의 `PP_Arcade` 볼륨 **1개(unbound)만** 편집했다 — 볼륨을 새로 만들지 않았다(2026-09-03 오전에 볼륨 2개가 노출을 매 프레임 뒤집던 사고의 재발 방지).
