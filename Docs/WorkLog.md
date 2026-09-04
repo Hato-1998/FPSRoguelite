@@ -12,6 +12,7 @@
 ## 🔷 1인칭 무기 트랙 마감 — WPN1 정적 파츠 코드 · 손 소켓 회전 · ARM1 총만 표시(ADR 0015) · 손만 표시 보류(ARM2) (2026-09-04, `proto/arcade-look`, 코드 `e181d137` · 콘텐츠 `2fbc6af4` `6b0fbb2b` `90b91f20` · 문서 `55e9d72e` `0c99483f` `e977de95` `83dfd346` `5d1b8967` `f45dc965` `94a5aca0`)
 > 실행 문서 = `Docs/RifleHardSurface_ResumePrompt.md`(하드서피스 트랙) · `Docs/Specs/WPN1_StaticWeaponParts.md`(§6-5-2 명세·원장) · `Docs/FPArms_HandsOnly_ResumePrompt.md`(보류 트랙). 보드 = 「아케이드 룩 프로토 + 육안 게이트」(WPN1 = 스코프 2) · ARM1(완료) · ARM2(백로그·보류).
 > 마감 사유(사용자): *"기존 원래 쓰던 모델링으로 바꿨어. 지금은 파츠도 저작 안 되어 있고 모델링 자체도 다시 만들어야 하니까 여기서 마무리해."*
+> **main 머지 `037e681f`(2026-09-04, `--no-ff`)** — 절차: origin/main 이 다른 클론의 BOSS1 16커밋만큼 앞서 있어 먼저 브랜치에 통합(`ef57c164`, 충돌 = WorkLog 1건) → 통합 트리 빌드 `Result: Succeeded`(512s) + 스모크 ModuleLoads Success → **G2 Fable 레드팀**(P1 0 · P2 2 · P3 5 · 범위 밖 3; P2-1 = 통합 빌드 로그로 해소, P2-2 = 주석 계약 정정 `1f32b156` + 후속 행) → 재빌드·스모크 재통과 → main ff → 머지 → push(main·브랜치). 원장 = WPN1 명세 §13. ADR 번호 충돌 예방 `3cfa3dba`(BOSS1 트랙의 '0015 예정' → 0016).
 
 ### 1. WPN1 — 정적 무기 메시에도 모듈러 파츠 (코드 `e181d137`)
 - 파이프라인(§6-5-2): C1 명세 → **G1 Fable 2회**(1회차 P2 3·P3 4 반려 → rev2 / 2회차 P2 1·P3 8 반려 → rev3, *"설계 자체의 결함은 못 찾았다"*) → 사용자 승인 → C2 Sonnet 축자 구현(갭 0, `FPSRCharacter.cpp` +48/−49 · `.h` 3줄) → C3 Opus: diff 대조 통과 · 빌드 `Result: Succeeded`(450s, `-WaitMutex -DisableAdaptiveUnity -ForceUnity`) · 스모크 `FPSRoguelite.Smoke.ModuleLoads` 통과(`Scripts/run_smoke_moduleloads.bat`).
