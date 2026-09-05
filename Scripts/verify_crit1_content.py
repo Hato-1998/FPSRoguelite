@@ -48,6 +48,30 @@ for part in parts:
 
 check("스코프 진화 트리거", stat_stage_count >= 1,
       "스탯 임계 단계 %d개 %s / 프래그먼트 스택 단계 %d개" % (stat_stage_count, threshold_desc, frag_stage_count))
+
+# "있다" 검사는 "맞다" 검사가 아니다 — 단계가 존재해도 임계값이 도달 불가능하면 스코프는 영원히 안 나온다.
+# ADSFieldOfView 는 **도(degree) 단위 절대값**이고 RecomputeResolved 가 [5, 170] 으로 클램한다
+# (FPSRWeaponInstance.cpp:387). 기본값의 비율(0.65 같은 값)을 그대로 적으면 조용히 죽는다 — 실제로 밟은 함정이다.
+ADS_FOV_CLAMP_MIN = 5.0
+base_stats = rifle.get_editor_property("base_stats")
+base_ads_fov = base_stats.get_editor_property("ads_field_of_view")
+print("[CRIT1-VERIFY] INFO 기본 조준 FOV(BaseStats.ADSFieldOfView) = %.2f도" % base_ads_fov)
+for part in parts:
+    for stage in (part.get_editor_property("stages") or []):
+        if stage.get_editor_property("trigger") != unreal.FPSRPartStageTrigger.STAT_THRESHOLD:
+            continue
+        if stage.get_editor_property("stat_axis") != unreal.FPSRWeaponStat.ADS_FIELD_OF_VIEW:
+            continue
+        value = stage.get_editor_property("stat_value")
+        compare = stage.get_editor_property("stat_compare")
+        if compare == unreal.FPSRStatCompare.LESS_OR_EQUAL:
+            reachable = value >= ADS_FOV_CLAMP_MIN and value < base_ads_fov
+            detail = ("기준값 %.2f도 — 도달하려면 클램 하한 %.0f도 ≤ 기준값 < 기본 %.1f도. 권장 = 기본×0.65 ≈ %.0f도"
+                      % (value, ADS_FOV_CLAMP_MIN, base_ads_fov, base_ads_fov * 0.65))
+        else:
+            reachable = True
+            detail = "기준값 %.2f / 비교 %s (도달성 미판정)" % (value, compare)
+        check("스코프 임계값 도달 가능성", reachable, detail)
 check("SniperScope 프래그먼트 참조 해제", sniper_refs == 0, "남은 참조 %d건 (기대 0)" % sniper_refs)
 
 # ③ 치명타 카드 5장이 미션 풀에 있는가 + SniperScope 카드는 빠졌는가
