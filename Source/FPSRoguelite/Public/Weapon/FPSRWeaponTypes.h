@@ -205,7 +205,12 @@ enum class EFPSRWeaponStat : uint8
 	Damage         UMETA(DisplayName = "Damage"),
 	SpreadDegrees  UMETA(DisplayName = "Spread"),
 	ReloadTime     UMETA(DisplayName = "Reload Time"),
-	ShieldDamageMultiplier UMETA(DisplayName = "Shield Damage Multiplier")
+	ShieldDamageMultiplier UMETA(DisplayName = "Shield Damage Multiplier"),
+	/** (P-C) Aim-down-sights camera FOV in degrees. Smaller = more zoom, so a strengthening card authors a NEGATIVE
+	 *  percent (same convention RecoilVertical cards already use for "lower is better"). A part slot's StatThreshold
+	 *  stage trigger reads this axis (via GetAxisValue below) to evolve a sight into a scope (W-U1b). Appended last,
+	 *  same reason ShieldDamageMultiplier was — this uint8 is stored by value on authored cards. */
+	ADSFieldOfView UMETA(DisplayName = "ADS Field of View")
 };
 
 /** Out-of-line: FFPSRWeaponStatBlock::GetAxisValue is declared above EFPSRWeaponStat (struct order in this header),
@@ -221,6 +226,7 @@ inline float FFPSRWeaponStatBlock::GetAxisValue(EFPSRWeaponStat Axis) const
 	case EFPSRWeaponStat::SpreadDegrees:  return SpreadDegrees;
 	case EFPSRWeaponStat::ReloadTime:     return ReloadTime;
 	case EFPSRWeaponStat::ShieldDamageMultiplier: return ShieldDamageMultiplier;
+	case EFPSRWeaponStat::ADSFieldOfView: return ADSFieldOfView;
 	default:                              return 0.0f;
 	}
 }

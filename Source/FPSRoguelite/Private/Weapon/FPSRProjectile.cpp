@@ -325,7 +325,7 @@ void AFPSRProjectile::HandleImpact(const FVector& ImpactPoint)
 				// clears it); knockback is independent of damage (still launches at 0 damage, excludes the killed).
 				const FPSRCombat::FExplosionResult Outcome = FPSRCombat::ApplyExplosion(
 					World, ImpactPoint, Params.ExplosionRadius, Params.Damage,
-					Params.CritChance, Params.CritMultiplier, Params.InstigatorActor,
+					Params.Crit, Params.InstigatorActor,
 					/*bAllowSelf*/ Params.bSelfDamage, Params.KnockbackStrength, Params.DamageSpec);
 
 				// OnKill trigger (server): fire once per enemy this blast freshly killed (bazooka reload-on-kill etc.).
@@ -432,13 +432,14 @@ bool AFPSRProjectile::TryDamageActor(AActor* Target, float WeakpointMultiplier, 
 		return false;
 	}
 
-	// Roll crit per impact using the chance/multiplier baked from the instigator's ASC at spawn (mirrors the
-	// hitscan ability's per-hit crit; enemy projectiles carry CritChance 0 so they never crit).
+	// Roll crit per impact using the context baked from the instigator's ASC at spawn (mirrors the hitscan ability's
+	// per-hit crit; enemy projectiles carry a default Crit{} so they never crit). WeakpointMultiplier is already the
+	// resolved per-target multiplier the caller computed, so a weakpoint-always-crit card (card 4) applies here too.
 	float FinalDamage = Params.Damage;
-	if (Params.CritChance > 0.0f && FMath::FRand() < Params.CritChance)
+	bOutCrit = FPSRCombat::RollCrit(Params.Crit, WeakpointMultiplier);
+	if (bOutCrit)
 	{
-		FinalDamage *= Params.CritMultiplier;
-		bOutCrit = true;
+		FinalDamage *= Params.Crit.Multiplier;
 	}
 
 	if (Params.Team == EFPSRProjectileTeam::Player)
@@ -464,7 +465,17 @@ bool AFPSRProjectile::TryDamageActor(AActor* Target, float WeakpointMultiplier, 
 		const float Resolved = FPSRCombat::ResolveDamage(Params.InstigatorActor, Target, FinalDamage, /*bAllowSelf*/ false, GetWorld(), &ImpactOrigin);
 		if (Resolved > 0.0f)
 		{
-			const FPSRCombat::FDamageResult Result = FPSRCombat::ApplyDamage(Target, Resolved, Params.InstigatorActor, Params.DamageSpec);
+			FPSRCombat::FDamageResult Result = FPSRCombat::ApplyDamage(Target, Resolved, Params.InstigatorActor, Params.DamageSpec);
+			// CRIT1: a crit that landed real damage may trigger the bonus-instance / lifesteal riders. Fold the
+			// second instance's kill/shield-break into Result BEFORE anything below reads them, so a target the
+			// RIDER (not the direct hit) finishes off still counts as killed everywhere downstream.
+			if (bOutCrit)
+			{
+				FPSRCombat::FDamageResult Bonus;
+				FPSRCombat::ApplyCritRiders(Params.Crit, Params.InstigatorActor, Target, Result, Params.DamageSpec, Bonus);
+				Result.bKilled |= Bonus.bKilled;
+				Result.bShieldBroke |= Bonus.bShieldBroke;
+			}
 			bOutKill = Result.bKilled;
 			bOutWasEnemy = Result.bWasEnemy;
 			// Gates the marker: real damage landed (0 for a corpse re-hit) AND the receiver wasn't a player. VIT1 §6

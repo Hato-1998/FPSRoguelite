@@ -1104,8 +1104,7 @@ void AFPSREnemyBase::FireProjectile(const FFPSRServerAttackContext& Ctx)
 	Params.Team = EFPSRProjectileTeam::Enemy;
 	Params.InstigatorActor = this;
 	Params.Damage = ProjectileDamage;
-	Params.CritChance = 0.0f;       // enemy fire never crits (Game.MD §2-10)
-	Params.CritMultiplier = 1.0f;
+	// Crit stays default-constructed (Chance 0) — enemy fire never crits (Game.MD §2-10).
 	Params.InitialSpeed = ProjectileSpeed;
 	Params.Lifetime = ProjectileLifetime;
 	Params.GravityScale = ProjectileGravityScale;

@@ -207,18 +207,20 @@ void UFPSRGA_WeaponFire_Projectile::ActivateAbility(
 	// Server-authoritative spawn: AcquireProjectile returns null on clients (cosmetic prediction is a follow-up).
 	if (FireCtx.bAuthority)
 	{
-		// Global damage multiplier + crit (chance/multiplier) baked at spawn; the projectile rolls crit per impact
+		// Global damage multiplier + crit context baked at spawn; the projectile rolls crit per impact
 		// server-authoritatively and notifies the owner's hit-marker. Per-hit OnHitActor fragments already fire for
 		// direct-hit/piercing projectiles (see AFPSRProjectile::TryDamageActor); only the AOE splash path
 		// (FPSRCombatStatics::ApplyExplosion) does not yet run per-target OnHitActor hooks.
+		// CRIT1: BuildCritContext is the ONLY place a crit context gets baked — reading GlobalCritChance/Multiplier
+		// straight off the ASC here (as this used to) would silently skip every fragment's ModifyCrit AND this
+		// weapon's active timed crit buffs, so the CRIT1 card set would never work on a Projectile-archetype weapon
+		// (this GA is the Rifle's actual fire ability — confirmed via DA_Weapon_Rifle's FireAbility reference).
 		float DamageMultiplier = 1.0f;
-		float CritChance = 0.0f;
-		float CritMultiplier = 1.0f;
+		FFPSRCritContext Crit;
 		if (UAbilitySystemComponent* ASC = GetAbilitySystemComponentFromActorInfo())
 		{
 			DamageMultiplier = ASC->GetNumericAttribute(UFPSRCombatSet::GetGlobalDamageMultiplierAttribute());
-			CritChance = ASC->GetNumericAttribute(UFPSRCombatSet::GetGlobalCritChanceAttribute());
-			CritMultiplier = ASC->GetNumericAttribute(UFPSRCombatSet::GetGlobalCritMultiplierAttribute());
+			Crit = FPSRWeaponHooks::BuildCritContext(FireCtx, ASC);
 		}
 
 		UFPSRProjectileSubsystem* ProjSub = World->GetSubsystem<UFPSRProjectileSubsystem>();
@@ -239,8 +241,7 @@ void UFPSRGA_WeaponFire_Projectile::ActivateAbility(
 					Params.InitialSpeed = ProjectileSpeed;
 					Params.GravityScale = GravityScale;
 					Params.Damage = Damage * DamageMultiplier;
-					Params.CritChance = CritChance;
-					Params.CritMultiplier = CritMultiplier;
+					Params.Crit = Crit;
 					Params.Lifetime = Lifetime;
 					Params.ExplosionRadius = AOERadius;
 					Params.Pierce = ProjectilePierce;

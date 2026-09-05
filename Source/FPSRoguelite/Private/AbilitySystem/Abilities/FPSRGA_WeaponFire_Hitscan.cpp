@@ -208,16 +208,15 @@ void UFPSRGA_WeaponFire_Hitscan::ActivateAbility(
 		Recoil->AdvanceHeatForAcceptedShot();
 	}
 
-	// Crit/damage multipliers from the ASC are fetched once; crit is rolled per hit so each pellet / pierced
-	// enemy can crit independently.
+	// Damage multiplier + crit context from the ASC are built once; crit is rolled per hit so each pellet / pierced
+	// enemy can crit independently. BuildCritContext is the single place a crit context gets baked (CRIT1) — it
+	// also folds in this weapon's active timed crit buffs and every fragment's ModifyCrit.
 	float DamageMultiplier = 1.0f;
-	float CritChance = 0.0f;
-	float CritMultiplier = 1.0f;
+	FFPSRCritContext Crit;
 	if (UAbilitySystemComponent* ASC = GetAbilitySystemComponentFromActorInfo())
 	{
-		CritChance = ASC->GetNumericAttribute(UFPSRCombatSet::GetGlobalCritChanceAttribute());
-		CritMultiplier = ASC->GetNumericAttribute(UFPSRCombatSet::GetGlobalCritMultiplierAttribute());
 		DamageMultiplier = ASC->GetNumericAttribute(UFPSRCombatSet::GetGlobalDamageMultiplierAttribute());
+		Crit = FPSRWeaponHooks::BuildCritContext(FireCtx, ASC);
 	}
 
 	// Trace from the player view point; each pellet is randomized within the spread cone.
@@ -264,11 +263,10 @@ void UFPSRGA_WeaponFire_Hitscan::ActivateAbility(
 			return false;
 		}
 		float FinalDamage = Damage * DamageMultiplier;
-		bool bCrit = false;
-		if (CritChance > 0.0f && FMath::FRand() < CritChance)
+		const bool bCrit = FPSRCombat::RollCrit(Crit, WeakpointMult);
+		if (bCrit)
 		{
-			FinalDamage *= CritMultiplier;
-			bCrit = true;
+			FinalDamage *= Crit.Multiplier;
 		}
 		if (Fragments)
 		{
@@ -284,7 +282,17 @@ void UFPSRGA_WeaponFire_Hitscan::ActivateAbility(
 		{
 			return false; // friendly pass-through (FF off): don't stop the bullet, don't spend penetration
 		}
-		const FPSRCombat::FDamageResult Result = FPSRCombat::ApplyDamage(HitActor, Resolved, Avatar, DamageSpec);
+		FPSRCombat::FDamageResult Result = FPSRCombat::ApplyDamage(HitActor, Resolved, Avatar, DamageSpec);
+		// CRIT1: a crit that landed real damage may trigger the bonus-instance / lifesteal riders. Fold the second
+		// instance's kill/shield-break into Result BEFORE the aggregation below reads them, so a target the RIDER
+		// (not the direct hit) finishes off still counts as killed everywhere downstream (the spec's OR table).
+		if (bCrit)
+		{
+			FPSRCombat::FDamageResult Bonus;
+			FPSRCombat::ApplyCritRiders(Crit, Avatar, HitActor, Result, DamageSpec, Bonus);
+			Result.bKilled |= Bonus.bKilled;
+			Result.bShieldBroke |= Bonus.bShieldBroke;
+		}
 		// Markers / kill triggers key on DamageDealt (real health removed), so a corpse re-hit (DamageDealt 0) is inert;
 		// the bullet still spends penetration via bApplied below (geometry), it just produces no feedback or kill.
 		// !bTargetIsPlayer: an FF hit on a teammate must raise no marker. VIT1 §6 fills DamageDealt on the player

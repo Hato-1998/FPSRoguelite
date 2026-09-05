@@ -5,6 +5,7 @@
 #include "Engine/DataAsset.h"
 #include "GameplayTagContainer.h"
 #include "Weapon/FPSRWeaponTypes.h"
+#include "Combat/FPSRCritTypes.h"
 #include "FPSRWeaponFragment.generated.h"
 
 class APawn;
@@ -12,6 +13,7 @@ class AActor;
 class AController;
 class UWorld;
 class UFPSRWeaponInstance;
+class UAbilitySystemComponent;
 struct FFPSRProjectileParams;
 
 /**
@@ -101,6 +103,19 @@ public:
 	virtual void OnMiss(const FFPSRFireContext& Context) const {}
 	virtual void OnKill(const FFPSRFireContext& Context, AActor* KilledActor) const {}
 	virtual void OnStatusKill(const FFPSRFireContext& Context, AActor* KilledActor) const {}
+
+	/** Crit-rule hook (CRIT1): runs once per activation, right before the fire ability bakes its FFPSRCritContext —
+	 *  a "resolution stage" hook at the same level as ModifyFireMode, not a per-hit one (cards 1/2/4 live here).
+	 *  ⚠️ Stack-composition rule (fixed, G1 P2-5): ActiveFragments holds one element PER STACK (the same convention
+	 *  MultiShot's per-stack ExtraShots relies on), so an override MUST combine as: ratios/adds with `+=`, bools
+	 *  with `|=`, and HealEffect only if it is still unset (first one wins). */
+	virtual void ModifyCrit(const FFPSRFireContext& Context, FFPSRCritContext& CritInOut) const {}
+
+	/** Reload-COMPLETE hook (a cancelled reload via CancelReload never fires this). Server-authoritative. */
+	virtual void OnReloadFinished(const FFPSRFireContext& Context) const {}
+
+	/** Slide-ENTRY hook (rising edge only, fired once per slide). Server-authoritative. */
+	virtual void OnSlideStarted(const FFPSRFireContext& Context) const {}
 };
 
 /**
@@ -119,6 +134,21 @@ namespace FPSRWeaponHooks
 	FPSROGUELITE_API void NotifyKill(const FFPSRFireContext& Context, AActor* KilledActor);
 	/** Fire OnAim on every active fragment (ADS press/release). */
 	FPSROGUELITE_API void NotifyAim(const FFPSRFireContext& Context, bool bAiming);
+
+	/** The ONLY place a crit context gets built (CRIT1): combines the ASC's global crit attributes with the weapon
+	 *  instance's active timed buffs, then runs every active fragment's ModifyCrit over the result. ASC null ->
+	 *  {Chance 0, Multiplier 1} (an enemy projectile / non-GAS instigator never crits — the existing contract). */
+	FPSROGUELITE_API FFPSRCritContext BuildCritContext(const FFPSRFireContext& Context, const UAbilitySystemComponent* ASC);
+
+	/** Notify the current weapon's fragments that a reload just completed. There is no live activation to carry a
+	 *  context, so this synthesizes one (same shape as AFPSRCharacter::ServerSetAiming_Implementation's OnAim one). */
+	FPSROGUELITE_API void NotifyReloadFinished(APawn* Avatar, UFPSRWeaponInstance* Instance);
+
+	/** Notify a slide entry. Resolves Avatar -> inventory -> the CURRENTLY EQUIPPED instance itself (keeps the CMC
+	 *  from having to know about weapons at all — the call site is one line). No-op without authority.
+	 *  ⚠️ Deliberate boundary: the buff only lands on whichever weapon was in hand AT the moment of the slide — sliding
+	 *  with an SMG equipped gives the rifle nothing (matches the card's "while holding this weapon" wording). */
+	FPSROGUELITE_API void NotifySlideStarted(APawn* Avatar);
 }
 
 /** Reference fragment: fires extra shots/pellets per activation (e.g. 2-round multishot, shotgun spread). */
@@ -250,4 +280,71 @@ UCLASS()
 class FPSROGUELITE_API UFPSRFragment_Marker : public UFPSRWeaponFragment
 {
 	GENERATED_BODY()
+};
+
+/** CRIT1 card 1 — Critical Overkill: re-lands a fraction of a crit's actual damage on the same target as a second
+ *  instance. That second instance is not itself a crit and never re-triggers a rider (deliberately interacts with
+ *  lifesteal / OnHitActor-style fragments — user decision 2026-09-05). */
+UCLASS()
+class FPSROGUELITE_API UFPSRFragment_CritBonusInstance : public UFPSRWeaponFragment
+{
+	GENERATED_BODY()
+public:
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Fragment", meta = (ClampMin = "0.0"))
+	float BonusRatio = 0.5f;
+	virtual void ModifyCrit(const FFPSRFireContext& Context, FFPSRCritContext& CritInOut) const override;
+};
+
+/** CRIT1 card 2 — Critical Leech. The heal GE can be the same asset an existing lifesteal card already uses (both
+ *  read the same SetByCaller contract). */
+UCLASS()
+class FPSROGUELITE_API UFPSRFragment_CritLifesteal : public UFPSRWeaponFragment
+{
+	GENERATED_BODY()
+public:
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Fragment", meta = (ClampMin = "0.0"))
+	float HealRatio = 0.10f;
+	/** Instant heal GE. Null = the heal quietly no-ops (an unauthored DA can't break the build or a smoke test). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Fragment")
+	TSubclassOf<UGameplayEffect> HealEffect;
+	virtual void ModifyCrit(const FFPSRFireContext& Context, FFPSRCritContext& CritInOut) const override;
+};
+
+/** CRIT1 card 3 — Reload Rush. */
+UCLASS()
+class FPSROGUELITE_API UFPSRFragment_CritOnReload : public UFPSRWeaponFragment
+{
+	GENERATED_BODY()
+public:
+	/** Absolute add to crit CHANCE (0.20 = +20%p — same unit as the existing CritChance card). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Fragment", meta = (ClampMin = "0.0"))
+	float CritChanceAdd = 0.20f;
+	/** Absolute add to crit MULTIPLIER (0.20 = 1.5 -> 1.7 — same unit as the existing CritMult card). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Fragment", meta = (ClampMin = "0.0"))
+	float CritMultiplierAdd = 0.20f;
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Fragment", meta = (ClampMin = "0.0"))
+	float Duration = 5.0f;
+	virtual void OnReloadFinished(const FFPSRFireContext& Context) const override;
+};
+
+/** CRIT1 card 4 — Weakpoint Precision. No tunable magnitude (a marker-shaped rule). */
+UCLASS()
+class FPSROGUELITE_API UFPSRFragment_WeakpointAlwaysCrit : public UFPSRWeaponFragment
+{
+	GENERATED_BODY()
+public:
+	virtual void ModifyCrit(const FFPSRFireContext& Context, FFPSRCritContext& CritInOut) const override;
+};
+
+/** CRIT1 card 5 — Slide Focus. */
+UCLASS()
+class FPSROGUELITE_API UFPSRFragment_CritOnSlide : public UFPSRWeaponFragment
+{
+	GENERATED_BODY()
+public:
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Fragment", meta = (ClampMin = "0.0"))
+	float CritChanceAdd = 0.40f;
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Fragment", meta = (ClampMin = "0.0"))
+	float Duration = 5.0f;
+	virtual void OnSlideStarted(const FFPSRFireContext& Context) const override;
 };

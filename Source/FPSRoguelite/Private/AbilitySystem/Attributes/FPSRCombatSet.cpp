@@ -9,7 +9,7 @@
 UFPSRCombatSet::UFPSRCombatSet()
 {
 	InitGlobalCritChance(0.05f);
-	InitGlobalCritMultiplier(2.0f);
+	InitGlobalCritMultiplier(1.5f); // CRIT1: was 2.0 (+100%); spec'd down to +50% now that crit riders exist
 	InitGlobalDamageMultiplier(1.0f);
 	InitLuck(0.0f);
 	InitPickupRadius(1.0f);

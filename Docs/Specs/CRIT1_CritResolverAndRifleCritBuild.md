@@ -532,7 +532,29 @@ Explosion:  대상 루프 안에서 RollCrit(Crit, 1.0f) — 폭발은 약점을
 | P2-6 | OR 목록에 `bShieldBroke`·`NotifyKill` 누락 | **수용** | §6 OR 표 |
 | P3 | §8 문구 모순 · `SumActiveCritBuffs` 권위 계약 · 프리즈/재장전 · 카드 2 기준값 · 카드 5 무기 귀속 · 보스 커버리지 · `BlueprintReadWrite` | **수용** | §5·§8·§11 반영 |
 
-### G2 머지 게이트 — *(C3 에서 채운다)*
+### C3 검증 (2026-09-05, Opus) — 통과
+
+| 검사 | 결과 |
+|---|---|
+| 빌드 `-DisableUnity` | **`Result: Succeeded`** |
+| `FPSRoguelite.Combat.CritResolver`(신규) | **`Result={Success}`** |
+| `FPSRoguelite.Smoke.ModuleLoads` | **`Result={Success}`** |
+| `FPSRoguelite.Combat.Vitals`(데미지 경로 인접 회귀) | **`Result={Success}`** |
+| `FPSRoguelite.Boss.TickEnabled`(보스 include 수정분 회귀) | **`Result={Success}`** |
+
+> 🚨 **판정 도구 함정** — `-abslog` 파일은 `-TestExit` 종료 시 잘려서 판정 줄이 안 남는다(대조군 스모크도 동일하게 잘림). **stdout 을 받아야** `Result={...}` 가 보인다. 기동 구간의 `LogAutomationTest: Error: Condition failed` 4줄은 모든 실행에 있는 노이즈다(대조군 확인). `Scripts/run_crit1_tests.bat` 주석에 못박음. 메모리 [[automation-abslog-truncated-read-stdout]].
+
+### 🔴 플랜에 없던 결정 — **G2 프롬프트에 그대로 올릴 것** (`Workflow.md` §6-5-2 요구)
+
+| # | 무엇 | C3 판정 |
+|---|---|---|
+| 1 | **`FPSRGA_WeaponFire_Projectile.cpp` 를 §4 표 밖에서 수정.** 이 GA 가 `Params.CritChance/Multiplier` 를 직접 채우고 있었고, **모든 플레이어 무기가 Projectile 아키타입**이다(Rifle·Sniper·Shotgun·Bazooka 4종 DA 를 바이너리 대조 — `FPSRGA_WeaponFire_Projectile` 1건 / Hitscan 0건). ASC 직독 shim 으로 두면 **카드 5장이 라이플에서 전부 무동작**이 된다 | **유지** — 명세 §4 표의 누락이지 재량이 아니다. §6 이 "`BuildCritContext` = 유일한 컨텍스트 생성 지점"이라고 못박은 것과 일치 |
+| 2 | `FPSRCritTypes.h` 가 `GameplayEffect.h` 를 include(명세는 전방선언) — `TSubclassOf::operator*()` 가 `T::StaticClass()` 를 호출해서(`SubclassOf.h:110`, 엔진 소스 대조) 인라인 `HasRiders()` 가 완전한 타입을 요구 | **C3 에서 되돌림** — 무거운 GAS 헤더가 combat 모듈 대부분에 실리므로, 전방선언을 복원하고 `HasRiders()` 본문만 신규 `Private/Combat/FPSRCritTypes.cpp` 로 뺐다(호출처 1곳, 전부 .cpp) |
+| 3 | `FPSRBossHomingOrb.h` 에 `#include "Boss/FPSRBossTypes.h"` 추가 — **CRIT1 무관 선행 결함**(유니티 블롭에 가려져 있던 것) | **유지 + 확대**: C3 의 헤더 정리가 전이 include 사슬을 끊자 `FPSRBossHomingOrb.cpp` 의 `MARK_PROPERTY_DIRTY_FROM_NAME` 도 깨졌다 → `Net/Core/PushModel/PushModel.h` 추가. 같은 매크로를 쓰는 8파일 중 6파일이 이미 명시 include 를 갖고 있다(대조군) — 보스 2파일만 예외였다. ⚠️ **`FPSRBossBase.cpp` 도 같은 누락이 남아 있다**(지금은 다른 경로로 얻어 컴파일됨) = 후속 |
+| 4 | `ApplyTimedCritBuff` 정의부 매개변수명 `Source` → `BuffSource`(클래스 멤버 `Source` 와 겹침) | **유지** — 시그니처 무영향 |
+| 5 | `ClearTimedCritBuffs()` 호출을 `InitializeWithSource()` 한 곳에만 배치(§8 의 "런 종료 리셋"은 인스턴스가 매 런 새로 생성되므로 자동 충족) | **유지** — §8 이 조건부로 적어 둔 전제와 일치 |
+
+### G2 머지 게이트 — *(푸시 직전에 채운다)*
 
 ---
 

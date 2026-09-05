@@ -8,6 +8,7 @@
 #include "GameFramework/Character.h"
 #include "HAL/IConsoleManager.h"
 #include "Hero/FPSRCharacter.h"
+#include "Weapon/FPSRWeaponFragment.h"
 #include "Net/UnrealNetwork.h"
 #include "Net/Core/PushModel/PushModel.h"
 
@@ -219,6 +220,11 @@ void UFPSRCharacterMovementComponent::RefreshReplicatedVisualState()
 			// Wraps, deliberately: the receiver only ever asks "is this different from the last one I saw".
 			++SlideVisualSerial;
 			MARK_PROPERTY_DIRTY_FROM_NAME(UFPSRCharacterMovementComponent, SlideVisualSerial, this);
+
+			// CRIT1 card 5 (Slide Focus): this branch is the authoritative slide-ENTRY edge (only reached on the
+			// false->true transition), so it is the one hook point for the timed crit buff. The bridge resolves
+			// Avatar -> inventory -> current weapon itself, keeping this component from having to know weapons exist.
+			FPSRWeaponHooks::NotifySlideStarted(CharacterOwner);
 		}
 		MARK_PROPERTY_DIRTY_FROM_NAME(UFPSRCharacterMovementComponent, bSlidingVisual, this);
 	}

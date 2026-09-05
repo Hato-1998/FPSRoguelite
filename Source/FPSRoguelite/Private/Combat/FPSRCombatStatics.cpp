@@ -13,6 +13,7 @@
 #include "Core/FPSRPlayerState.h"
 #include "AbilitySystem/FPSRAbilitySystemComponent.h"
 #include "AbilitySystemComponent.h"
+#include "GameplayEffect.h"
 
 #include "GameFramework/Pawn.h"
 #include "GameFramework/Controller.h"
@@ -311,8 +312,77 @@ namespace FPSRCombat
 		}
 	}
 
+	bool RollCrit(const FFPSRCritContext& Crit, float WeakpointMult)
+	{
+		// Weakpoint-guaranteed crit skips the roll entirely — a designed hit should never be denied by an unlucky
+		// FRand(), and NOT consuming the RNG here keeps this branch free of the "did this eat a random number"
+		// question that would otherwise complicate reasoning about roll order.
+		if (Crit.bWeakpointAlwaysCrit && WeakpointMult > 1.0f)
+		{
+			return true;
+		}
+		// Same short-circuit every path already had (Chance<=0 never calls FRand()).
+		return Crit.Chance > 0.0f && FMath::FRand() < Crit.Chance;
+	}
+
+	void ComputeCritRiderMagnitudes(const FFPSRCritContext& Crit, float DamageDealt, float& OutBonusDamage, float& OutHealAmount)
+	{
+		if (DamageDealt <= 0.0f)
+		{
+			OutBonusDamage = 0.0f;
+			OutHealAmount = 0.0f;
+			return;
+		}
+		OutBonusDamage = DamageDealt * Crit.BonusInstanceRatio;
+		OutHealAmount = DamageDealt * Crit.HealRatio;
+	}
+
+	void ApplyCritRiders(const FFPSRCritContext& Crit, AActor* Instigator, AActor* Target,
+		const FDamageResult& CritHitResult, const FFPSRDamageSpec& Spec, FDamageResult& OutBonus)
+	{
+		OutBonus = FDamageResult();
+		if (!Instigator || !Target || !Crit.HasRiders() || CritHitResult.DamageDealt <= 0.0f
+			|| !CritHitResult.bWasEnemy || CritHitResult.bTargetIsPlayer)
+		{
+			return; // no rider configured, no real damage to base it on, or the hit wasn't a clean enemy crit (FF/self excluded)
+		}
+
+		float BonusDamage = 0.0f;
+		float HealAmount = 0.0f;
+		ComputeCritRiderMagnitudes(Crit, CritHitResult.DamageDealt, BonusDamage, HealAmount);
+
+		// Card 1 — second, independent ApplyDamage on the SAME target. This does not roll its own crit and does not
+		// recurse back into ApplyCritRiders, which is exactly what stops a rider from chaining off itself.
+		if (BonusDamage > 0.0f)
+		{
+			OutBonus = ApplyDamage(Target, BonusDamage, Instigator, Spec);
+		}
+
+		// Card 2 — instant heal GE on the INSTIGATOR's own ASC. Mirrors SendDealtDamageEvent's Instigator -> APawn ->
+		// PlayerState -> ASC resolution just above (that helper reacts to damage dealt; this one reacts to a crit).
+		if (HealAmount > 0.0f && Crit.HealEffect)
+		{
+			const APawn* InstigatorPawn = Cast<APawn>(Instigator);
+			const AFPSRPlayerState* PS = InstigatorPawn ? InstigatorPawn->GetPlayerState<AFPSRPlayerState>() : nullptr;
+			if (UAbilitySystemComponent* ASC = PS ? PS->GetFPSRAbilitySystemComponent() : nullptr)
+			{
+				FGameplayEffectContextHandle Ctx = ASC->MakeEffectContext();
+				Ctx.AddSourceObject(Instigator);
+				FGameplayEffectSpecHandle HealSpec = ASC->MakeOutgoingSpec(Crit.HealEffect, 1.0f, Ctx);
+				if (HealSpec.IsValid())
+				{
+					// SetByCaller tag matches the existing card-effect convention (UCardEffect_CharacterGE) — harmless
+					// for a fixed-magnitude GE, required for one authored to read this tag.
+					static const FGameplayTag CardMagnitudeTag = FGameplayTag::RequestGameplayTag(FName("SetByCaller.CardMagnitude"));
+					HealSpec.Data->SetSetByCallerMagnitude(CardMagnitudeTag, HealAmount);
+					ASC->ApplyGameplayEffectSpecToSelf(*HealSpec.Data.Get());
+				}
+			}
+		}
+	}
+
 	FExplosionResult ApplyExplosion(UWorld* World, const FVector& Center, float Radius, float Damage,
-		float CritChance, float CritMultiplier, AActor* Instigator, bool bAllowSelf, float KnockbackStrength, const FFPSRDamageSpec& Spec)
+		const FFPSRCritContext& Crit, AActor* Instigator, bool bAllowSelf, float KnockbackStrength, const FFPSRDamageSpec& Spec)
 	{
 		// VIT1: Spec (DamageType + anti-shield multiplier) is forwarded to every per-target ApplyDamage below.
 		// Replaces U18a's forward-compat `FGameplayTag DamageType` seam.
@@ -361,13 +431,13 @@ namespace FPSRCombat
 				continue;
 			}
 
-			// Per-target crit roll, then self/friendly resolution (may be 0 = no damage but knockback can still apply).
+			// Per-target crit roll (explosions never collect a weakpoint — WeakpointMult is always 1.0, current
+			// behavior preserved), then self/friendly resolution (may be 0 = no damage but knockback can still apply).
 			float BaseDamage = Damage;
-			bool bCrit = false;
-			if (CritChance > 0.0f && FMath::FRand() < CritChance)
+			const bool bCrit = RollCrit(Crit, 1.0f);
+			if (bCrit)
 			{
-				BaseDamage *= CritMultiplier;
-				bCrit = true;
+				BaseDamage *= Crit.Multiplier;
 			}
 
 			const float FinalDamage = ResolveDamage(Instigator, Target, BaseDamage, bAllowSelf, World, &Center);
@@ -375,6 +445,19 @@ namespace FPSRCombat
 			if (FinalDamage > 0.0f)
 			{
 				Result = ApplyDamage(Target, FinalDamage, Instigator, Spec);
+			}
+
+			// CRIT1: a crit that landed real damage may trigger the bonus-instance / lifesteal riders. Fold the
+			// second instance's kill/shield-break into Result BEFORE the aggregation below reads them, so a target
+			// the RIDER (not the primary blast) finishes off still counts as killed everywhere downstream — the
+			// OR table this spec calls out (kill aggregate, NotifyKill, shield-break, hit-marker, KilledEnemies,
+			// and the knockback-exclusion check further down all key off this single merged Result).
+			if (bCrit)
+			{
+				FDamageResult Bonus;
+				ApplyCritRiders(Crit, Instigator, Target, Result, Spec, Bonus);
+				Result.bKilled |= Bonus.bKilled;
+				Result.bShieldBroke |= Bonus.bShieldBroke;
 			}
 
 			// !bTargetIsPlayer: an FF ally — and, critically, the instigator's OWN self-damage (rocket jump), which

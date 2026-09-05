@@ -145,19 +145,22 @@ void UFPSRGA_WeaponMelee::ActivateAbility(
 		}
 
 		float FinalDamage = Damage;
+		FFPSRCritContext Crit;
 		bool bSwingCrit = false;
 		bool bAnyWeak = false;
 		if (UAbilitySystemComponent* ASC = GetAbilitySystemComponentFromActorInfo())
 		{
-			const float CritChance = ASC->GetNumericAttribute(UFPSRCombatSet::GetGlobalCritChanceAttribute());
-			const float CritMultiplier = ASC->GetNumericAttribute(UFPSRCombatSet::GetGlobalCritMultiplierAttribute());
 			const float DamageMultiplier = ASC->GetNumericAttribute(UFPSRCombatSet::GetGlobalDamageMultiplierAttribute());
+			// BuildCritContext is the single place a crit context gets baked (CRIT1) — folds in timed buffs + fragments.
+			Crit = FPSRWeaponHooks::BuildCritContext(FireCtx, ASC);
 
 			FinalDamage *= DamageMultiplier;
-			if (FMath::FRand() < CritChance)
+			// Melee keeps its existing unit: ONE roll per swing (WeakpointMult=1.0 here — a targeted weakpoint hit is
+			// not known yet at swing time, so card 4's weakpoint-always-crit deliberately never fires on melee).
+			bSwingCrit = FPSRCombat::RollCrit(Crit, 1.0f);
+			if (bSwingCrit)
 			{
-				FinalDamage *= CritMultiplier;
-				bSwingCrit = true;
+				FinalDamage *= Crit.Multiplier;
 			}
 		}
 
@@ -206,7 +209,17 @@ void UFPSRGA_WeaponMelee::ActivateAbility(
 				{
 					continue;
 				}
-				const FPSRCombat::FDamageResult Result = FPSRCombat::ApplyDamage(HitActor, Resolved, Avatar, DamageSpec);
+				FPSRCombat::FDamageResult Result = FPSRCombat::ApplyDamage(HitActor, Resolved, Avatar, DamageSpec);
+				// CRIT1: the swing rolled ONE crit (bSwingCrit) but riders apply per TARGET the swing actually hit —
+				// a multi-enemy swing can trigger the bonus instance / lifesteal on each enemy it landed real damage
+				// on. Fold the second instance's kill/shield-break into Result BEFORE the aggregation below (OR table).
+				if (bSwingCrit)
+				{
+					FPSRCombat::FDamageResult Bonus;
+					FPSRCombat::ApplyCritRiders(Crit, Avatar, HitActor, Result, DamageSpec, Bonus);
+					Result.bKilled |= Bonus.bKilled;
+					Result.bShieldBroke |= Bonus.bShieldBroke;
+				}
 				// Markers / kill trigger key on real damage (DamageDealt), so a corpse re-hit in the swing is inert.
 				// !bTargetIsPlayer: an FF hit on a teammate must raise no marker. VIT1 §6 fills DamageDealt on the
 				// player branch now, so the old "player => DamageDealt 0" implicit gate is gone.

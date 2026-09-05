@@ -3,6 +3,7 @@
 #pragma once
 
 #include "Boss/FPSRPatternActorInterface.h"
+#include "Boss/FPSRBossTypes.h"
 #include "Combat/FPSRVitals.h"
 #include "GameFramework/Actor.h"
 #include "FPSRBossHomingOrb.generated.h"

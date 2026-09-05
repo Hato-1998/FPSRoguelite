@@ -5,6 +5,8 @@
 #include "Weapon/FPSRWeaponFragment.h"
 #include "Weapon/FPSRWeaponInventoryComponent.h"
 #include "Core/FPSRPlayerState.h"
+#include "Core/FPSRGameState.h"
+#include "Core/FPSRLogChannels.h"
 #include "Hero/FPSRCharacter.h"
 
 #include "GameFramework/Pawn.h"
@@ -29,6 +31,10 @@ void UFPSRWeaponInstance::InitializeWithSource(UFPSRWeaponDataAsset* InSource)
 	Source = InSource;
 	MARK_PROPERTY_DIRTY_FROM_NAME(UFPSRWeaponInstance, Source, this);
 	MarkResolvedDirty();
+	// CRIT1 §8 reset point ① (instance (re)initialization). In practice every instance is a fresh NewObject with an
+	// already-empty ActiveCritBuffs (FPSRWeaponInventoryComponent.cpp's sole call site), so this is a defensive
+	// no-op today — it only matters if InitializeWithSource is ever called again on a reused instance.
+	ClearTimedCritBuffs();
 }
 
 void UFPSRWeaponInstance::AddModifier(const FFPSRWeaponStatMod& Mod)
@@ -148,6 +154,104 @@ void UFPSRWeaponInstance::SetReloading(bool bNewReloading)
 	// (HandleReloadStateChanged no-ops on a dedicated server where nothing is rendered). Remote clients still get the
 	// real replicated OnRep exactly once, so there is no double-play.
 	OnRep_Reloading();
+}
+
+void UFPSRWeaponInstance::ApplyTimedCritBuff(const UFPSRWeaponFragment* BuffSource, float ChanceAdd, float MultiplierAdd, float Duration)
+{
+	// Parameter named BuffSource (not Source) purely to avoid shadowing this class's own Source member (the weapon
+	// DataAsset) — the declared parameter name in the header is `Source`, per the spec; only this definition's local
+	// name differs, which changes nothing about the signature callers see.
+	if (!BuffSource || Duration <= 0.0f)
+	{
+		return;
+	}
+	// The instance lives inside a pawn's weapon inventory component, so the nearest AActor outer IS the owning pawn.
+	const AActor* OwnerActor = GetTypedOuter<AActor>();
+	if (!OwnerActor || !OwnerActor->HasAuthority())
+	{
+		return;
+	}
+
+	const AFPSRGameState* GameState = OwnerActor->GetWorld() ? OwnerActor->GetWorld()->GetGameState<AFPSRGameState>() : nullptr;
+	const float Now = GameState ? GameState->GetCombatClockSeconds() : 0.0f;
+	const float Expiry = Now + Duration;
+
+	for (FFPSRTimedCritBuff& Buff : ActiveCritBuffs)
+	{
+		if (Buff.Source == BuffSource)
+		{
+			// Same fragment re-applying OVERWRITES (card 5's "sliding again resets the duration").
+			Buff.ChanceAdd = ChanceAdd;
+			Buff.MultiplierAdd = MultiplierAdd;
+			Buff.ExpiryCombatTime = Expiry;
+			UE_LOG(LogFPSR, Verbose, TEXT("[Crit] Timed buff refreshed: Source=%s ChanceAdd=%.3f MultiplierAdd=%.3f Now=%.2f Expiry=%.2f"),
+				*GetNameSafe(BuffSource), ChanceAdd, MultiplierAdd, Now, Expiry);
+			return;
+		}
+	}
+
+	if (ActiveCritBuffs.Num() >= 4)
+	{
+		// Should-never-happen safety valve (realistic concurrent count is 2) — evict the soonest-to-expire entry.
+		int32 SoonestIndex = 0;
+		for (int32 Index = 1; Index < ActiveCritBuffs.Num(); ++Index)
+		{
+			if (ActiveCritBuffs[Index].ExpiryCombatTime < ActiveCritBuffs[SoonestIndex].ExpiryCombatTime)
+			{
+				SoonestIndex = Index;
+			}
+		}
+		ActiveCritBuffs.RemoveAt(SoonestIndex);
+	}
+
+	FFPSRTimedCritBuff NewBuff;
+	NewBuff.Source = BuffSource;
+	NewBuff.ChanceAdd = ChanceAdd;
+	NewBuff.MultiplierAdd = MultiplierAdd;
+	NewBuff.ExpiryCombatTime = Expiry;
+	ActiveCritBuffs.Add(NewBuff);
+	UE_LOG(LogFPSR, Verbose, TEXT("[Crit] Timed buff applied: Source=%s ChanceAdd=%.3f MultiplierAdd=%.3f Now=%.2f Expiry=%.2f"),
+		*GetNameSafe(BuffSource), ChanceAdd, MultiplierAdd, Now, Expiry);
+}
+
+void UFPSRWeaponInstance::SumActiveCritBuffs(float& OutChanceAdd, float& OutMultiplierAdd)
+{
+	OutChanceAdd = 0.0f;
+	OutMultiplierAdd = 0.0f;
+	if (ActiveCritBuffs.Num() == 0)
+	{
+		return; // also the natural client-side path — clients never populate this array at all
+	}
+
+	const AActor* OwnerActor = GetTypedOuter<AActor>();
+	const AFPSRGameState* GameState = (OwnerActor && OwnerActor->GetWorld()) ? OwnerActor->GetWorld()->GetGameState<AFPSRGameState>() : nullptr;
+	if (!GameState)
+	{
+		// No run clock to measure against (lobby / not-yet-running world) — treat every buff as expired rather than
+		// comparing against a Now=0 that would make a positive ExpiryCombatTime look like it hasn't happened yet.
+		return;
+	}
+	const float Now = GameState->GetCombatClockSeconds();
+
+	// Lazy prune (§10 "zero new ticks"): drop expired entries the moment anyone asks for the sum, instead of a
+	// dedicated timer. Reverse iteration so RemoveAt doesn't skip the next element.
+	for (int32 Index = ActiveCritBuffs.Num() - 1; Index >= 0; --Index)
+	{
+		if (ActiveCritBuffs[Index].ExpiryCombatTime <= Now)
+		{
+			UE_LOG(LogFPSR, Verbose, TEXT("[Crit] Timed buff expired: Source=%s ExpiryCombatTime=%.2f Now=%.2f"),
+				*GetNameSafe(ActiveCritBuffs[Index].Source), ActiveCritBuffs[Index].ExpiryCombatTime, Now);
+			ActiveCritBuffs.RemoveAt(Index);
+			continue;
+		}
+		OutChanceAdd += ActiveCritBuffs[Index].ChanceAdd;
+		OutMultiplierAdd += ActiveCritBuffs[Index].MultiplierAdd;
+	}
+}
+
+void UFPSRWeaponInstance::ClearTimedCritBuffs()
+{
+	ActiveCritBuffs.Reset();
 }
 
 void UFPSRWeaponInstance::OnRep_Source()
@@ -276,6 +380,11 @@ void UFPSRWeaponInstance::RecomputeResolved()
 			break;
 		case EFPSRWeaponStat::ShieldDamageMultiplier:
 			CachedResolved.ShieldDamageMultiplier = FMath::Max(0.0f, (CachedResolved.ShieldDamageMultiplier + Add) * Mult);
+			break;
+		case EFPSRWeaponStat::ADSFieldOfView:
+			// Clamp is mandatory (P-C): FOV stacking to 0/negative would break the camera. Lower bound 5 degrees is
+			// roughly a 20x zoom — far past any authored scope tier, so it only ever fires on a pathological stack.
+			CachedResolved.ADSFieldOfView = FMath::Clamp((CachedResolved.ADSFieldOfView + Add) * Mult, 5.0f, 170.0f);
 			break;
 		default:
 			break;

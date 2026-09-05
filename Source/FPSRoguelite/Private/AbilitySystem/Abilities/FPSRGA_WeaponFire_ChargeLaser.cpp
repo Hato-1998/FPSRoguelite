@@ -226,15 +226,14 @@ void UFPSRGA_WeaponFire_ChargeLaser::FireBeam(float BeamDamage, bool bIsPayoffSh
 	// Global damage multiplier + crit apply to the PAYOFF shot only. Warm-up ticks are pure fixed chip damage
 	// (multiplier stays 1.0, no crit) so a "+damage" card raises the final beam but never the warm-up ticks.
 	float DamageMultiplier = 1.0f;
-	float CritChance = 0.0f;
-	float CritMultiplier = 1.0f;
+	FFPSRCritContext Crit;
 	if (bIsPayoffShot)
 	{
 		if (UAbilitySystemComponent* ASC = GetAbilitySystemComponentFromActorInfo())
 		{
 			DamageMultiplier = ASC->GetNumericAttribute(UFPSRCombatSet::GetGlobalDamageMultiplierAttribute());
-			CritChance = ASC->GetNumericAttribute(UFPSRCombatSet::GetGlobalCritChanceAttribute());
-			CritMultiplier = ASC->GetNumericAttribute(UFPSRCombatSet::GetGlobalCritMultiplierAttribute());
+			// BuildCritContext is the single place a crit context gets baked (CRIT1) — folds in timed buffs + fragments.
+			Crit = FPSRWeaponHooks::BuildCritContext(CachedFireCtx, ASC);
 		}
 	}
 
@@ -273,11 +272,10 @@ void UFPSRGA_WeaponFire_ChargeLaser::FireBeam(float BeamDamage, bool bIsPayoffSh
 			return;
 		}
 		float FinalDamage = BeamDamage * DamageMultiplier;
-		bool bCrit = false;
-		if (bIsPayoffShot && CritChance > 0.0f && FMath::FRand() < CritChance)
+		const bool bCrit = bIsPayoffShot && FPSRCombat::RollCrit(Crit, WeakpointMult);
+		if (bCrit)
 		{
-			FinalDamage *= CritMultiplier;
-			bCrit = true;
+			FinalDamage *= Crit.Multiplier;
 		}
 
 		// Per-hit behavior hooks (e.g. bonus/leech) run on the PAYOFF shot only — warm-up ticks are pure chip damage.
@@ -296,7 +294,17 @@ void UFPSRGA_WeaponFire_ChargeLaser::FireBeam(float BeamDamage, bool bIsPayoffSh
 		{
 			return;
 		}
-		const FPSRCombat::FDamageResult Result = FPSRCombat::ApplyDamage(HitActor, Resolved, Avatar, DamageSpec);
+		FPSRCombat::FDamageResult Result = FPSRCombat::ApplyDamage(HitActor, Resolved, Avatar, DamageSpec);
+		// CRIT1: a crit that landed real damage may trigger the bonus-instance / lifesteal riders (payoff shot only —
+		// bCrit is already false on a warm-up tick). Fold the second instance's kill/shield-break into Result BEFORE
+		// the aggregation below reads them, so a target the RIDER finishes off still counts as killed downstream.
+		if (bCrit)
+		{
+			FPSRCombat::FDamageResult Bonus;
+			FPSRCombat::ApplyCritRiders(Crit, Avatar, HitActor, Result, DamageSpec, Bonus);
+			Result.bKilled |= Bonus.bKilled;
+			Result.bShieldBroke |= Bonus.bShieldBroke;
+		}
 		// !bTargetIsPlayer: an FF hit on a teammate must raise no marker. VIT1 §6 fills DamageDealt on the player
 		// branch now, so the old "player => DamageDealt 0" implicit gate is gone — see FDamageResult::bTargetIsPlayer.
 		if (Result.DamageDealt > 0.0f && !Result.bTargetIsPlayer)

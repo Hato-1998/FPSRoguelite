@@ -7,6 +7,7 @@
 #include "Engine/HitResult.h"
 #include "GameplayTagContainer.h"
 #include "Combat/FPSRVitals.h"
+#include "Combat/FPSRCritTypes.h"
 #include "Hero/FPSRFeedbackTypes.h"
 
 class AActor;
@@ -147,15 +148,50 @@ namespace FPSRCombat
 	 *  Priority: Kill > ShieldBreak > Weak > Crit > Hit. */
 	FPSROGUELITE_API EFPSRHitMarkerType ResolveHitMarker(bool bKill, bool bShieldBreak, bool bWeak, bool bCrit);
 
+	/** One hit's crit judgment. **Pure function** (consumes RNG, nothing else) — the roll UNIT (per-hit / per-swing)
+	 *  is the caller's choice. WeakpointMult > 1 means this hit landed on a weakpoint: if bWeakpointAlwaysCrit, that
+	 *  alone returns true and the roll is skipped entirely (no RNG consumed). Chance <= 0 returns false immediately
+	 *  (preserves the existing `CritChance > 0.0f &&` short-circuit every path already had). */
+	FPSROGUELITE_API bool RollCrit(const FFPSRCritContext& Crit, float WeakpointMult);
+
+	/** Just the rider ARITHMETIC (CRIT1 G1 P1-2 — what the automation targets), split out so it touches no actor/
+	 *  world/GE: OutBonusDamage = DamageDealt x BonusInstanceRatio, OutHealAmount = DamageDealt x HealRatio.
+	 *  DamageDealt <= 0 zeroes both. */
+	FPSROGUELITE_API void ComputeCritRiderMagnitudes(const FFPSRCritContext& Crit, float DamageDealt,
+		float& OutBonusDamage, float& OutHealAmount);
+
+	/** Call this right after a crit hit lands REAL damage. Applies the two card riders using the arithmetic above:
+	 *   (1) BonusDamage > 0 -> a second ApplyDamage on the SAME target. This second hit does not itself roll a
+	 *       crit and does not re-enter this function — no recursion, so a stacked rider cannot chain off itself.
+	 *   (2) HealAmount > 0 && HealEffect -> an instant heal GE on the instigator's ASC (SetByCaller = HealAmount).
+	 *
+	 *  The basis is CritHitResult.DamageDealt (actual health/shield spent, not nominal damage), so an overkill or
+	 *  corpse re-hit yields 0 riders — the same anti-farming shape the existing lifesteal card already has.
+	 *  Fires ONLY on a crit that hit an enemy (`bWasEnemy && !bTargetIsPlayer`) — friendly fire / self-damage must
+	 *  never become a heal or damage pump.
+	 *
+	 *  OutBonus carries the second instance's own result (default if there was none): **callers must fold it into
+	 *  their kill / shield-break aggregation and hit-marker inputs** — a bonus instance can be the hit that actually
+	 *  kills or breaks a shield. Server-only: the caller is assumed to already be inside an authority scope. */
+	FPSROGUELITE_API void ApplyCritRiders(
+		const FFPSRCritContext& Crit, AActor* Instigator, AActor* Target,
+		const FDamageResult& CritHitResult, const FFPSRDamageSpec& Spec, FDamageResult& OutBonus);
+
 	/** Radial explosion: overlap every damageable pawn in range, apply ResolveDamage/ApplyDamage with a per-target
 	 *  crit roll, fire ONE hit-marker if any enemy was hit, and apply knockback (independent of damage — see below).
 	 *  bAllowSelf gates instigator self-damage. Does NOT ignore the instigator (so self-damage/self-knockback work).
 	 *
 	 *  Knockback (KnockbackStrength > 0): a radial impulse pushing every survivor outward from Center, magnitude
 	 *  falling off linearly to the rim. Applied EVEN when damage is 0 (FF-off friendly / self-no-damage) — only the
-	 *  freshly killed are excluded. Player knockback launches the character (rocket jump / ally launch). */
+	 *  freshly killed are excluded. Player knockback launches the character (rocket jump / ally launch).
+	 *
+	 *  🔁 CRIT1 signature change: (float CritChance, float CritMultiplier) -> (const FFPSRCritContext&). Deliberately
+	 *  NO default value on Crit — both real call sites (FPSRProjectile.cpp, FPSRWeaponFragment.cpp's ExplosiveRounds)
+	 *  must fail to compile and get touched explicitly, so neither silently keeps rolling the old way. Crit riders
+	 *  apply here too (each target rolls independently): fold OutBonus into KilledEnemies / bAnyEnemyHit / the
+	 *  knockback-exclusion check exactly like every other path (see the CRIT1 spec's OR table). */
 	FPSROGUELITE_API FExplosionResult ApplyExplosion(UWorld* World, const FVector& Center, float Radius, float Damage,
-		float CritChance, float CritMultiplier, AActor* Instigator, bool bAllowSelf, float KnockbackStrength, const FFPSRDamageSpec& Spec = FFPSRDamageSpec());
+		const FFPSRCritContext& Crit, AActor* Instigator, bool bAllowSelf, float KnockbackStrength, const FFPSRDamageSpec& Spec = FFPSRDamageSpec());
 
 	/** Dispatch a knockback velocity to Target: players -> additive LaunchCharacter (preserves jump for rocket
 	 *  jumping); swarm enemies -> AFPSREnemyBase decaying-velocity knockback (integrated by their movement tick). */

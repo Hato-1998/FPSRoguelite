@@ -4,6 +4,7 @@
 #include "Weapon/FPSRWeaponDataAsset.h"
 #include "Weapon/FPSRWeaponInstance.h"
 #include "Weapon/FPSRWeaponFireComponent.h"
+#include "Weapon/FPSRWeaponFragment.h"
 #include "Hero/FPSRCharacter.h"
 #include "Hero/FPSRCharacterMovementComponent.h"
 #include "Core/FPSRGameState.h"
@@ -15,6 +16,7 @@
 #include "AbilitySystemGlobals.h"
 #include "Abilities/GameplayAbility.h"
 #include "GameplayAbilitySpec.h"
+#include "GameFramework/Pawn.h"
 #include "Net/UnrealNetwork.h"
 #include "Net/Core/PushModel/PushModel.h"
 
@@ -649,6 +651,9 @@ void UFPSRWeaponInventoryComponent::FinishReload()
 	{
 		Instance->SetCurrentAmmo(Instance->GetResolvedStats().MagSize); // infinite reserve: always full
 		Instance->SetReloading(false);
+		// CRIT1 card 3 (Reload Rush) — completion only; CancelReload never reaches here, so a cancelled reload never
+		// grants the buff.
+		FPSRWeaponHooks::NotifyReloadFinished(Cast<APawn>(GetOwner()), Instance);
 	}
 }
 

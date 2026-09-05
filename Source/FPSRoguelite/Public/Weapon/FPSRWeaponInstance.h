@@ -11,6 +11,25 @@ class UFPSRWeaponFragment;
 class AFPSRPlayerState;
 
 /**
+ * One server-only timed crit buff (cards 3/5). Fragments are stateless shared assets, so the remaining duration has
+ * nowhere to live but the weapon INSTANCE — which is exactly why the buff does not follow the weapon across a swap.
+ * Expiry is measured against the freeze-paused combat clock (AFPSRGameState::GetCombatClockSeconds, VIT1), not world
+ * time, so a card-selection freeze cannot eat into it.
+ */
+struct FFPSRTimedCritBuff
+{
+	/** Refresh key = the fragment ASSET that granted this buff (G1 P1-1), not a tag — this repo's fragment identity
+	 *  convention is already "identity = asset pointer" (UFPSRWeaponInstance::HasFragment), so no extra authoring is
+	 *  needed and two different cards can never stomp each other. The SAME fragment re-applying OVERWRITES (= card 5's
+	 *  "sliding again resets the duration"); two DIFFERENT fragments' contributions ADD. */
+	const UFPSRWeaponFragment* Source = nullptr;
+	float ChanceAdd = 0.0f;
+	float MultiplierAdd = 0.0f;
+	/** Expiry, in combat-clock seconds. */
+	float ExpiryCombatTime = 0.0f;
+};
+
+/**
  * Runtime container for one equipped weapon (replicated subobject of UFPSRWeaponInventoryComponent).
  * Holds the source DataAsset, accumulated ThisWeapon stat modifiers, live ammo/reload state, and a cached
  * resolved stat block. Single home for both stat modifiers (P4-B-1) and behavior fragments (P4-B-2).
@@ -86,6 +105,26 @@ public:
 	/** Server: set reloading flag (marks dirty for replication). */
 	void SetReloading(bool bNewReloading);
 
+	// --- Timed crit buffs (CRIT1 cards 3/5): server-only, non-replicated (§7 — clients never learn about these) ---
+
+	/** Server: add or refresh a timed crit buff. A buff with the same Source already active has its numbers and
+	 *  expiry OVERWRITTEN; a different Source ADDS a new entry. No-op when `Source == nullptr`, `Duration <= 0`,
+	 *  or this instance is not on the authority (authority = `GetTypedOuter<AActor>()->HasAuthority()` — the
+	 *  instance lives inside a pawn's weapon inventory). If the slot is already full (4), the soonest-to-expire
+	 *  entry is evicted first. */
+	void ApplyTimedCritBuff(const UFPSRWeaponFragment* Source, float ChanceAdd, float MultiplierAdd, float Duration);
+
+	/** Sum of every still-alive buff's contribution. Lazily prunes expired entries on the way, so **this unit adds
+	 *  zero per-actor ticks**. Authority-independent — on a client the array is simply always empty, so this
+	 *  naturally returns 0,0. Falls back to combat-clock 0 (i.e. treats every buff as expired) if no GameState can
+	 *  be found (lobby / not-yet-running world). */
+	void SumActiveCritBuffs(float& OutChanceAdd, float& OutMultiplierAdd);
+
+	/** Clears every timed buff. Call sites: ① the weapon instance is (re)initialized — a fresh InitializeWithSource
+	 *  ② a run ends and state resets. Deliberately NOT called on holster/weapon-swap — the buff belongs to the
+	 *  INSTANCE (§3-③), so holstering and re-equipping the same weapon must not lose it. */
+	void ClearTimedCritBuffs();
+
 protected:
 	UFUNCTION()
 	void OnRep_Source();
@@ -131,4 +170,11 @@ protected:
 	// --- Transient resolved-stat cache (not replicated; computed on demand on both server and clients) ---
 	FFPSRWeaponStatBlock CachedResolved;
 	bool bResolvedDirty = true;
+
+private:
+	/** Server-only, **non-replicated**. The one UObject-shaped field, Source, is a raw const pointer to an
+	 *  always-loaded fragment DA that this array only ever COMPARES against (never dereferences) — a plain (not
+	 *  UPROPERTY) pointer is safe for that. Inline-4: the hot path never allocates (2 concurrent buffs is the
+	 *  realistic ceiling; 4 is a safety margin, not a designed number). */
+	TArray<FFPSRTimedCritBuff, TInlineAllocator<4>> ActiveCritBuffs;
 };

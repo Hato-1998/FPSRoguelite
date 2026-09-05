@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Combat/FPSRVitals.h"
+#include "Combat/FPSRCritTypes.h"
 #include "FPSRProjectileTypes.generated.h"
 
 class UFPSRWeaponInstance;
@@ -32,14 +33,11 @@ struct FPSROGUELITE_API FFPSRProjectileParams
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Projectile")
 	float Damage = 50.0f;
 
-	/** Crit chance [0,1], baked from the instigator's ASC at spawn and rolled per impact. 0 = never crit
-	 *  (enemy-fired projectiles leave this 0; only player weapons carry crit). */
+	/** CRIT1: the full crit rule, baked from the instigator's ASC (+ weapon fragments/timed buffs) at spawn and
+	 *  rolled per impact. Default {Chance 0, Multiplier 1} = never crit (enemy-fired projectiles leave this at
+	 *  default; only player weapons carry crit). Replaces the former separate CritChance/CritMultiplier floats. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Projectile")
-	float CritChance = 0.0f;
-
-	/** Damage multiplier applied on a successful crit roll. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Projectile")
-	float CritMultiplier = 1.0f;
+	FFPSRCritContext Crit;
 
 	/** Lifetime before auto-release (seconds). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Projectile")
