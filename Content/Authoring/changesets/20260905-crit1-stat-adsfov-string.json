@@ -1,0 +1,16 @@
+{
+  "description": "CRIT1 후속 — 신규 스탯 축 ADSFieldOfView 의 문자열 테이블 키. 임포터가 잡았다: 키가 없으면 UCardEffect_WeaponStat::GetDescription 의 'Stat.<enum>' 조회가 실패해 카드가 IsDataValid 에서 떨어지고 무기 풀에서 빠진다(빌드·자동화는 못 잡는다 = WITH_EDITOR 검증). 라벨은 '배율'이 아니라 '시야'다 — 값이 작아질수록 확대되므로 Fmt.WeaponStat 이 붙이는 음수 퍼센트가 '시야 -5%'로 읽혀야 맞다(수직 반동 카드와 같은 규약: 스탯 이름은 이득이 아니라 숫자가 재는 것을 말한다). 플레이어에게 보이는 이득 문구는 카드 자신의 Description 이 담당한다.",
+  "changes": [
+    {
+      "sheet": "ST_CardEffect",
+      "upsert": [
+        {
+          "Key": "Stat.ADSFieldOfView",
+          "SourceString": "조준 시야",
+          "en": "Aim FOV",
+          "ja": "照準視野"
+        }
+      ]
+    }
+  ]
+}

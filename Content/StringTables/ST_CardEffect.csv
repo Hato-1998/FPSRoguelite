@@ -16,3 +16,4 @@ Stat.Damage,데미지,Damage,ダメージ
 Stat.SpreadDegrees,탄퍼짐,Spread,拡散
 Stat.ReloadTime,재장전 시간,Reload Time,リロード時間
 Fallback.UnknownWeapon,무기,Weapon,武器
+Stat.ADSFieldOfView,조준 시야,Aim FOV,照準視野
