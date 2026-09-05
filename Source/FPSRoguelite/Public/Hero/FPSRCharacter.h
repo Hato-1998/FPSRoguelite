@@ -231,7 +231,7 @@ public:
 	 *  HipTargetFOV is the UNAIMED target the caller composed (base FOV plus any stance offset), so returning it is what
 	 *  makes an aiming weapon REPLACE those offsets rather than stack with them — a scope sits near 30 degrees, where a
 	 *  few degrees of stance offset would be a visible change of magnification. (W-U2) */
-	float ResolveADSTargetFOV(float HipTargetFOV, float BaseADSFOV, bool bBaseWantsADS) const;
+	float ResolveADSTargetFOV(float HipTargetFOV, float BaseADSFOV, bool bBaseWantsADS, float SightZoomScale = 1.0f) const;
 
 	/** The unaimed camera FOV this character composes everything else on top of — captured from the camera component's
 	 *  authored value at BeginPlay, and the single value a future settings menu has to move. */

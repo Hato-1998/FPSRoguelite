@@ -784,7 +784,7 @@ bool AFPSRCharacter::IsADSFOVActive() const
 	return !(WeaponInventory && WeaponInventory->IsReloading());
 }
 
-float AFPSRCharacter::ResolveADSTargetFOV(float HipTargetFOV, float BaseADSFOV, bool bBaseWantsADS) const
+float AFPSRCharacter::ResolveADSTargetFOV(float HipTargetFOV, float BaseADSFOV, bool bBaseWantsADS, float SightZoomScale) const
 {
 	if (!bBaseWantsADS)
 	{
@@ -802,7 +802,16 @@ float AFPSRCharacter::ResolveADSTargetFOV(float HipTargetFOV, float BaseADSFOV, 
 	// Per-sight magnification: the ACTIVE sight's own AimFieldOfView (iron / reddot / scope each carry their own zoom),
 	// falling back to the weapon's default ADS FOV when this sight authors none (<=0). No active sight descriptor =>
 	// AimFieldOfView 0 => weapon default, so weapons without an authored sight are unchanged.
-	return CachedScopeDescriptor.AimFieldOfView > 0.0f ? CachedScopeDescriptor.AimFieldOfView : BaseADSFOV;
+	//
+	// SightZoomScale carries the ADSFieldOfView stat axis (magnification cards) onto the sight's own number. Without
+	// it a sight that authors any AimFieldOfView wins OUTRIGHT, so a "+aim magnification" card would move the resolved
+	// stat (and therefore a part's StatThreshold evolution) while the camera never budged — the card would read as
+	// doing nothing until the scope stage swapped in. Same clamp as the stat resolution (FOV must stay usable).
+	if (CachedScopeDescriptor.AimFieldOfView > 0.0f)
+	{
+		return FMath::Clamp(CachedScopeDescriptor.AimFieldOfView * SightZoomScale, 5.0f, 170.0f);
+	}
+	return BaseADSFOV;
 }
 
 void AFPSRCharacter::UpdateScopeWeaponVisibility()
@@ -1364,7 +1373,18 @@ void AFPSRCharacter::UpdateCameraFieldOfView(float DeltaSeconds)
 			&& (!FPSRMovement || FPSRMovement->CanFireInCurrentState());
 		// REPLACES the hip target rather than adding to it: while aiming, the sight's magnification is the whole point
 		// and a stance offset stacked on top of a ~30 degree scope would read as the zoom changing.
-		TargetFOV = ResolveADSTargetFOV(HipTargetFOV, Stats.ADSFieldOfView, bBaseWantsADS);
+		// How far the ADSFieldOfView axis has been moved from what the weapon authored (1 = untouched). Passed on so a
+		// sight's own magnification scales with the card instead of overriding it (see ResolveADSTargetFOV).
+		float SightZoomScale = 1.0f;
+		if (const UFPSRWeaponDataAsset* WeaponSource = Instance->GetSource())
+		{
+			const float AuthoredADSFOV = WeaponSource->BaseStats.ADSFieldOfView;
+			if (AuthoredADSFOV > 0.0f)
+			{
+				SightZoomScale = Stats.ADSFieldOfView / AuthoredADSFOV;
+			}
+		}
+		TargetFOV = ResolveADSTargetFOV(HipTargetFOV, Stats.ADSFieldOfView, bBaseWantsADS, SightZoomScale);
 		InterpSpeed = Stats.ADSInterpSpeed;
 	}
 

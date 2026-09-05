@@ -178,7 +178,7 @@ void UFPSRWeaponInstance::ApplyTimedCritBuff(const UFPSRWeaponFragment* BuffSour
 
 	for (FFPSRTimedCritBuff& Buff : ActiveCritBuffs)
 	{
-		if (Buff.Source == BuffSource)
+		if (Buff.Source.Get() == BuffSource)
 		{
 			// Same fragment re-applying OVERWRITES (card 5's "sliding again resets the duration").
 			Buff.ChanceAdd = ChanceAdd;
@@ -240,7 +240,7 @@ void UFPSRWeaponInstance::SumActiveCritBuffs(float& OutChanceAdd, float& OutMult
 		if (ActiveCritBuffs[Index].ExpiryCombatTime <= Now)
 		{
 			UE_LOG(LogFPSR, Verbose, TEXT("[Crit] Timed buff expired: Source=%s ExpiryCombatTime=%.2f Now=%.2f"),
-				*GetNameSafe(ActiveCritBuffs[Index].Source), ActiveCritBuffs[Index].ExpiryCombatTime, Now);
+				*GetNameSafe(ActiveCritBuffs[Index].Source.Get()), ActiveCritBuffs[Index].ExpiryCombatTime, Now);
 			ActiveCritBuffs.RemoveAt(Index);
 			continue;
 		}

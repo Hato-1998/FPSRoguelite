@@ -4,9 +4,9 @@ REM ASCII-only comments on purpose (cmd.exe OEM codepage). Run from a .bat, not 
 REM (PowerShell strips the -ExecCmds quotes -> runner never starts, editor idles forever: Troubleshooting D11,
 REM  memory automation-multi-test-plus-hangs). ONE test per invocation - joining tests with '+' also hangs.
 REM Verdict = log line "Result={Success}" and "Automation Test Queue Empty", NOT the exit code (Troubleshooting C4).
-REM 🚨 READ THE VERDICT FROM STDOUT, NOT FROM -abslog. The abslog file is truncated when the process exits on
+REM !! READ THE VERDICT FROM STDOUT, NOT FROM -abslog. The abslog file is truncated when the process exits on
 REM -TestExit, so it stops BEFORE the Result= line and a passing run reads as a failure. Always redirect:
-REM     cmd /c Scriptsun_crit1_tests.bat > Saved\crit1_stdout.txt 2>&1
+REM     cmd /c Scripts\run_crit1_tests.bat > Saved\crit1_stdout.txt 2>&1
 REM Also note: 4 "LogAutomationTest: Error: Condition failed" lines appear during engine startup in EVERY run
 REM (control-checked against the known-good ModuleLoads smoke) - they are not this test.
 set ENGINE=D:\UnrealEngine\UE_5.7\Engine\Binaries\Win64\UnrealEditor-Cmd.exe

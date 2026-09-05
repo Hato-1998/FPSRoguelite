@@ -490,6 +490,7 @@ Explosion:  대상 루프 안에서 RollCrit(Crit, 1.0f) — 폭발은 약점을
 |---|---|---|
 | 1 | 명세 대조 | §5·§6·§7 선언·시그니처가 코드와 1:1. **`ApplyExplosion` 에 기본값 인자를 만들지 않았을 것** |
 | 2 | 빌드 | `Build.bat FPSRogueliteEditor Win64 Development` → 로그의 **`Result: Succeeded`** (종료코드 아님). 헤더 신설이 있으므로 **`-DisableUnity` 필수** |
+| 2b | 빌드(유니티) | **`-DisableAdaptiveUnity -ForceUnity` 도 필수** — 이 유닛은 테스트·헬퍼(`FPSRCritResolverTest.cpp`·`FPSRCritTypes.cpp`)를 **추가**했고, §6-6 은 그럴 때 유니티 블롭 컴파일까지 요구한다(`-DisableUnity` 의 초록을 이 계열의 근거로 쓰지 말 것) |
 | 3 | 헤드리스 스모크 | `FPSRoguelite.Smoke.ModuleLoads` 통과 |
 | 4 | 신규 자동화 `FPSRoguelite.Combat.CritResolver` | ⓐ `Chance=0` → 항상 false ⓑ `Chance=1` → 항상 true ⓒ `bWeakpointAlwaysCrit && WeakpointMult>1` → `Chance=0` 이어도 true ⓓ `bWeakpointAlwaysCrit && WeakpointMult==1` → 굴림대로 ⓔ `ComputeCritRiderMagnitudes` 산식(0·양수·`DamageDealt<=0`) |
 | 5 | 회귀 | 카드 미보유 시 5경로의 피해·히트마커·킬 집계 종전과 동일. ⚠️ **의도된 변화 = 치명타 배수 2.0→1.5 뿐** |
@@ -554,7 +555,41 @@ Explosion:  대상 루프 안에서 RollCrit(Crit, 1.0f) — 폭발은 약점을
 | 4 | `ApplyTimedCritBuff` 정의부 매개변수명 `Source` → `BuffSource`(클래스 멤버 `Source` 와 겹침) | **유지** — 시그니처 무영향 |
 | 5 | `ClearTimedCritBuffs()` 호출을 `InitializeWithSource()` 한 곳에만 배치(§8 의 "런 종료 리셋"은 인스턴스가 매 런 새로 생성되므로 자동 충족) | **유지** — §8 이 조건부로 적어 둔 전제와 일치 |
 
-### G2 머지 게이트 — *(푸시 직전에 채운다)*
+### G2 게이트 (2026-09-05, `claude-fable-5`, 대상 `origin/main..HEAD`) — **P1 0건 → 푸시 가능**
+
+**리뷰 범위 고지**: 게이트에 넘긴 diff = 커밋 `66de9bc6`·`8b0c2918` 2개. 커밋 **`4397a457`(프래그먼트 DA 5종 껍데기 + 헤드리스 저작 스크립트)는 게이트를 띄운 뒤에 만들어져 리뷰 밖**이다(§6-6-1 "조용한 축소 금지"에 따라 명시). 레드팀도 그 스크립트를 untracked 상태로 목격하고 "커밋 누락 후보"로 지적했다. 코드 경로 무접촉(에셋 + 저작 스크립트)이라 P1 위험은 없다고 판단하나, **이 판단 자체가 게이트를 안 거쳤다.**
+
+| 심각도 | 지적 (요약) | 처리 | 근거 / 수정 |
+|---|---|---|---|
+| **P1** | **0건** | — | 레드팀이 본 것 = 신규·수정 26파일 + 호출 문맥(권위 게이트·OR 표 5경로·복제 0·크래시 경로·성능). 근거 인용 포함 |
+| P2 | **조준 배율 카드가 카메라에 안 닿는다** — `ResolveADSTargetFOV`(`FPSRCharacter.cpp:805`)는 사이트의 `AimFieldOfView>0` 이면 그 값이 **무조건 이긴다**. 카드는 `Resolved.ADSFieldOfView` 만 움직이므로, 사이트가 자기 배율을 저작한 순간 카드는 **스코프 임계를 넘길 때까지 눈에 보이는 효과 0** + 문구는 거짓 | **수용·수정** | `ResolveADSTargetFOV` 에 `SightZoomScale`(=해결/저작 비율) 인자 추가 → 사이트 배율에 **비율로 곱한다**. 카드가 항상 보이고, 스테이지 임계 판정과 카메라가 같은 축을 읽는다 |
+| P2 | **타임드 버프 훅이 프래그먼트 스택 계약을 어긴다** — 베이스 계약은 "스택마다 훅 재적용"인데 `ApplyTimedCritBuff` 는 같은 Source 를 **덮어쓴다** → `MaxStacks=2` 저작 시 2스택이 1스택과 동일 | **수용·수정** | 지원되는 척하는 노브를 없앤다: `UFPSRFragment_CritOnReload`·`_CritOnSlide` 에 `IsDataValid` 신설 — `MaxStacks>1` = Error |
+| P2 | §6-4 가 여전히 `phase/` 브랜치를 지시 — 같은 SSOT 안에서 §6-7 과 정면충돌 | **수용·수정** | `Workflow.md:51` 트렁크 규칙으로 교체 |
+| P2 | `/handoff` 스킬이 **게이트 없는 `origin/main` 푸시 경로**를 남긴다(1·4·5단계) | **수용·수정** | 5단계에 "코어 갈래인데 G2 미실행이면 푸시 금지, 인계는 푸시의 사유가 아니다" 명시. 재개 템플릿의 `phase/<브랜치>`·폐지된 Codex 게이트도 정정 |
+| P2 | `/pm` 페르소나가 폐지된 `--no-ff` 절차를 지시 | **수용·수정** | `ProjectPromptManager.md` §4 4줄 교체(+ 발견 시 함께 잡은 스테일 모델정책 1줄 = 2026-08-26 개정 미반영분) |
+| P2 | **§6-7 라이프사이클에 "로컬 `main` 이 이미 앞서 있을 때"가 없다** — 공유 워킹트리 전제와 모순. 브랜치 충돌이 "공유 로컬 main 에 얹힘"으로 **옮겨졌을 뿐** | **수용·수정** | 가장 아픈 지적이다. 5단계에 `git log --oneline origin/main..HEAD` 범위 확인 + "남의 미검증 커밋을 내 게이트에 태워 같이 밀지 말 것" 추가 |
+| P2 | PM 보드 `브랜치` 속성과 드리프트 감사 D1/D2/D4 가 트렁크에서 **대상을 잃는다**(D4 는 `merge(phase):` 를 찾으므로 영원히 미발화) | **수용·수정** | `Workflow.md` §6-9 + `.claude/agents/pm-board.md` 의 D1(담당 기준)·D2(scope 커밋 기준)·D3(origin/main)·D4(커밋 scope ID 대조) 재정의 |
+| P3 | `Source` 를 "역참조하지 않는다"고 해놓고 Verbose 로그가 `GetNameSafe` 로 역참조 — 카드 교체로 DA 가 GC 되면 해제 메모리 판독 | **수용·수정** | `TWeakObjectPtr<const UFPSRWeaponFragment>` 로 전환(비교 `.Get()==`) + 헤더 안전 논거 재작성 |
+| P3 | `FMath::FRand()` 는 [0,1] **포함**이라 `< 1.0f` 는 100% 크리를 ~1670만분의 1 확률로 부정 — 명세 §12-4 ⓑ 가 구현에 없는 성질을 검증 기준으로 적었다 | **수용·수정** | `RollCrit` 을 `<=` 로(`Chance>0` 단축이 0 을 이미 배제) |
+| P3 | `run_crit1_tests.bat` 이 자기 규칙(ASCII-only)을 어기고, 안내 명령 경로에 리터럴 CR 이 박혀 복사하면 실패 | **수용·수정** | 이모지 제거 + CR 제거(비-ASCII 바이트 0 확인) |
+| P3 | "머지" 문구 잔존 — 이제 없는 이벤트를 가리킴 | **수용·수정(일부)** | `Workflow.md` 4곳 "푸시"로. ⚠️ `Docs/InternalRedTeamReview.md` 는 **원문 보존 문서**(Game.md §0 "설명문 추가 금지")라 손대지 않았다 — 문구 정정이 필요하면 별도 결정 |
+| P3 | §12-2 가 §6-6 필수인 `-DisableAdaptiveUnity -ForceUnity` 를 빠뜨렸다(테스트·헬퍼를 추가했으므로 필수) | **수용·수정** | §12 표에 행 추가 + **직접 실행 → `Result: Succeeded`** |
+| P3 | 카드 2 `HealEffect` null = 조용한 no-op, 잡는 검증 시임 없음 | **수용·수정** | `UFPSRFragment_CritLifesteal::IsDataValid` 신설 — `HealRatio>0 && !HealEffect` = Error |
+
+**기각 0건.**
+
+**범위 밖 발견 (후속)**
+- `FPSRBossBase.cpp` 에 같은 PushModel include 누락이 남아 있다(지금은 다른 경로로 얻어 컴파일된다) — 손대지 않았다.
+- `Content/Authoring/*.csv` 에 SniperScope 행 잔존 = 시트 마스터 동기화 대기(사용자, §14).
+- 근접 경로: 종전엔 `Chance=0` 에서도 `FRand()` 를 소비했는데 이제 안 한다 — RNG 스트림만 바뀌고 결과 무영향.
+
+### G2 후 재검증 (2026-09-05)
+
+| 검사 | 결과 |
+|---|---|
+| 빌드 `-DisableUnity` | **`Result: Succeeded`** |
+| 빌드 `-DisableAdaptiveUnity -ForceUnity` (§6-6 필수) | **`Result: Succeeded`** |
+| `Combat.CritResolver` · `Smoke.ModuleLoads` · `Combat.Vitals` · `Boss.TickEnabled` | **4종 전부 `Result={Success}`**
 
 ---
 

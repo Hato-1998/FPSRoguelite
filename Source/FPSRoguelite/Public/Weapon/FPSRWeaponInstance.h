@@ -21,8 +21,10 @@ struct FFPSRTimedCritBuff
 	/** Refresh key = the fragment ASSET that granted this buff (G1 P1-1), not a tag — this repo's fragment identity
 	 *  convention is already "identity = asset pointer" (UFPSRWeaponInstance::HasFragment), so no extra authoring is
 	 *  needed and two different cards can never stomp each other. The SAME fragment re-applying OVERWRITES (= card 5's
-	 *  "sliding again resets the duration"); two DIFFERENT fragments' contributions ADD. */
-	const UFPSRWeaponFragment* Source = nullptr;
+	 *  "sliding again resets the duration"); two DIFFERENT fragments' contributions ADD.
+	 *  WEAK, not raw: the verification logs name this asset (GetNameSafe), which is a dereference — and a card
+	 *  replacement (RemoveFragment) can drop the DA's last reference while a <=5s buff is still ticking (G2 P3). */
+	TWeakObjectPtr<const UFPSRWeaponFragment> Source;
 	float ChanceAdd = 0.0f;
 	float MultiplierAdd = 0.0f;
 	/** Expiry, in combat-clock seconds. */
@@ -172,9 +174,9 @@ protected:
 	bool bResolvedDirty = true;
 
 private:
-	/** Server-only, **non-replicated**. The one UObject-shaped field, Source, is a raw const pointer to an
-	 *  always-loaded fragment DA that this array only ever COMPARES against (never dereferences) — a plain (not
-	 *  UPROPERTY) pointer is safe for that. Inline-4: the hot path never allocates (2 concurrent buffs is the
-	 *  realistic ceiling; 4 is a safety margin, not a designed number). */
+	/** Server-only, **non-replicated**. Its one UObject-shaped field is a TWeakObjectPtr, so this array needs no
+	 *  UPROPERTY to stay safe and cannot resurrect a fragment DA that a card replacement has dropped.
+	 *  Inline-4: the hot path never allocates (2 concurrent buffs is the realistic ceiling; 4 is a safety margin,
+	 *  not a designed number). */
 	TArray<FFPSRTimedCritBuff, TInlineAllocator<4>> ActiveCritBuffs;
 };

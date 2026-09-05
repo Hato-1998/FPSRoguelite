@@ -6,6 +6,9 @@
 #include "GameplayTagContainer.h"
 #include "Weapon/FPSRWeaponTypes.h"
 #include "Combat/FPSRCritTypes.h"
+#if WITH_EDITOR
+#include "Misc/DataValidation.h"
+#endif
 #include "FPSRWeaponFragment.generated.h"
 
 class APawn;
@@ -308,6 +311,13 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Fragment")
 	TSubclassOf<UGameplayEffect> HealEffect;
 	virtual void ModifyCrit(const FFPSRFireContext& Context, FFPSRCritContext& CritInOut) const override;
+
+#if WITH_EDITOR
+	/** A HealRatio with no HealEffect is a card that heals nothing and says nothing (the runtime silently
+	 *  no-ops). The whole point of this seam is that the failure is loud at authoring time (G2 P3). */
+	virtual EDataValidationResult IsDataValid(class FDataValidationContext& Context) const override;
+#endif
+
 };
 
 /** CRIT1 card 3 — Reload Rush. */
@@ -325,6 +335,14 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Fragment", meta = (ClampMin = "0.0"))
 	float Duration = 5.0f;
 	virtual void OnReloadFinished(const FFPSRFireContext& Context) const override;
+
+#if WITH_EDITOR
+	/** A timed buff REFRESHES on re-application, so a second stack would silently add nothing — that contradicts
+	 *  the base class's "each stack re-applies the hooks" contract (G2 P2). Reject MaxStacks > 1 at authoring time
+	 *  rather than shipping a knob that reads as supported and isn't. */
+	virtual EDataValidationResult IsDataValid(class FDataValidationContext& Context) const override;
+#endif
+
 };
 
 /** CRIT1 card 4 — Weakpoint Precision. No tunable magnitude (a marker-shaped rule). */
@@ -347,4 +365,12 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Fragment", meta = (ClampMin = "0.0"))
 	float Duration = 5.0f;
 	virtual void OnSlideStarted(const FFPSRFireContext& Context) const override;
+
+#if WITH_EDITOR
+	/** A timed buff REFRESHES on re-application, so a second stack would silently add nothing — that contradicts
+	 *  the base class's "each stack re-applies the hooks" contract (G2 P2). Reject MaxStacks > 1 at authoring time
+	 *  rather than shipping a knob that reads as supported and isn't. */
+	virtual EDataValidationResult IsDataValid(class FDataValidationContext& Context) const override;
+#endif
+
 };

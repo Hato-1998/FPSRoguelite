@@ -258,3 +258,47 @@ void UFPSRFragment_CritOnSlide::OnSlideStarted(const FFPSRFireContext& Context) 
 	// that reset-on-reslide is the card's own wording, not a bug to guard against.
 	Context.Instance->ApplyTimedCritBuff(this, CritChanceAdd, 0.0f, Duration);
 }
+
+
+#if WITH_EDITOR
+#define LOCTEXT_NAMESPACE "FPSRWeaponFragment"
+
+/** Shared by the two timed-buff fragments: their hook refreshes an existing buff instead of adding to it. */
+static EDataValidationResult FPSRValidateSingleStackTimedBuff(
+	const UFPSRWeaponFragment& Fragment, EDataValidationResult InResult, FDataValidationContext& Context)
+{
+	if (Fragment.MaxStacks > 1)
+	{
+		Context.AddError(FText::Format(
+			LOCTEXT("TimedBuffNoStacks", "'{0}' grants a TIMED crit buff, which REFRESHES on re-application instead of adding — a second stack would silently do nothing. Set MaxStacks to 1."),
+			FText::FromString(Fragment.GetName())));
+		return EDataValidationResult::Invalid;
+	}
+	return InResult;
+}
+
+EDataValidationResult UFPSRFragment_CritOnReload::IsDataValid(FDataValidationContext& Context) const
+{
+	return FPSRValidateSingleStackTimedBuff(*this, Super::IsDataValid(Context), Context);
+}
+
+EDataValidationResult UFPSRFragment_CritOnSlide::IsDataValid(FDataValidationContext& Context) const
+{
+	return FPSRValidateSingleStackTimedBuff(*this, Super::IsDataValid(Context), Context);
+}
+
+EDataValidationResult UFPSRFragment_CritLifesteal::IsDataValid(FDataValidationContext& Context) const
+{
+	EDataValidationResult Result = Super::IsDataValid(Context);
+	if (HealRatio > 0.0f && !HealEffect)
+	{
+		Context.AddError(FText::Format(
+			LOCTEXT("CritLifestealNoHealEffect", "'{0}' has HealRatio {1} but no HealEffect, so the crit heal silently does nothing at runtime. Assign the instant heal GE (GE_Card_LifestealHeal reuses the same SetByCaller.CardMagnitude contract)."),
+			FText::FromString(GetName()), FText::AsNumber(HealRatio)));
+		Result = EDataValidationResult::Invalid;
+	}
+	return Result;
+}
+
+#undef LOCTEXT_NAMESPACE
+#endif // WITH_EDITOR

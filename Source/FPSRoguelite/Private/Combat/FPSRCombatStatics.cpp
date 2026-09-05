@@ -321,8 +321,10 @@ namespace FPSRCombat
 		{
 			return true;
 		}
-		// Same short-circuit every path already had (Chance<=0 never calls FRand()).
-		return Crit.Chance > 0.0f && FMath::FRand() < Crit.Chance;
+		// Same short-circuit every path already had (Chance<=0 never calls FRand(), so <= below can never fire at 0).
+		// <= not <: FMath::FRand() is [0,1] INCLUSIVE, so `< 1.0f` would deny a guaranteed crit roughly once every
+		// 16.7M draws (G2 P3) — a 100%-crit build must actually be 100%.
+		return Crit.Chance > 0.0f && FMath::FRand() <= Crit.Chance;
 	}
 
 	void ComputeCritRiderMagnitudes(const FFPSRCritContext& Crit, float DamageDealt, float& OutBonusDamage, float& OutHealAmount)
