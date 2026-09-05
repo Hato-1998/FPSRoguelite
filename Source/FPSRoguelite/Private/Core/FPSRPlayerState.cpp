@@ -9,6 +9,8 @@
 #include "Weapon/FPSRWeaponInventoryComponent.h"
 #include "Weapon/FPSRWeaponFireComponent.h"
 #include "Weapon/FPSRWeaponDataAsset.h"
+#include "Card/FPSRCardDataAsset.h" // CRIT2: BuildTagCountMap reads Card->BuildTags/Effects
+#include "Card/FPSRCardEffect.h"    // CRIT2: UCardEffect_WeaponBehavior — functional-card predicate (see BuildTagCountMap)
 #include "Hero/FPSRCharacter.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/Controller.h" // U P-F: GetOwningController()->IsLocalController()/HasAuthority() for the ack gate
@@ -53,6 +55,7 @@ void AFPSRPlayerState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Out
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRPlayerState, RunRerollCharges, Params);
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRPlayerState, CardPicksPending, Params);
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRPlayerState, WeaponUnlockPicksPending, Params);
+	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRPlayerState, AcquiredCards, Params);
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRPlayerState, AllWeaponsMods, Params);
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRPlayerState, SelectedWeapon, Params);
 	DOREPLIFETIME_WITH_PARAMS_FAST(AFPSRPlayerState, bReady, Params);
@@ -243,6 +246,66 @@ bool AFPSRPlayerState::ConsumeWeaponUnlockPick()
 void AFPSRPlayerState::OnRep_CardPicksPending()
 {
 	OnCardPicksChanged.Broadcast();
+}
+
+void AFPSRPlayerState::RecordAcquiredCard(UFPSRCardDataAsset* Card, ECardRarity Rarity, UFPSRWeaponDataAsset* TargetWeapon)
+{
+	if (!HasAuthority() || !Card)
+	{
+		return;
+	}
+
+	FFPSRAcquiredCard Entry;
+	Entry.Card = Card;
+	Entry.Rarity = Rarity;
+	Entry.TargetWeapon = TargetWeapon;
+	AcquiredCards.Add(Entry);
+	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRPlayerState, AcquiredCards, this);
+
+	// Listen-server host gets no OnRep — broadcast directly (mirrors SetSelectedWeapon/SetReady above,
+	// [[event-halves-authority-vs-client]]) so a future Tab overlay on the host updates too.
+	OnAcquiredCardsChanged.Broadcast();
+}
+
+void AFPSRPlayerState::BuildTagCountMap(TMap<FName, int32>& OutCounts) const
+{
+	OutCounts.Reset();
+	for (const FFPSRAcquiredCard& Acquired : AcquiredCards)
+	{
+		const UFPSRCardDataAsset* Card = Acquired.Card;
+		if (!Card)
+		{
+			continue;
+		}
+
+		// 기능 카드만 센다(사용자 결정 2026-09-06, CRIT2 §11-2) — 판정 = "행동 프래그먼트를 부여하는 효과가 있는가",
+		// FPSRCardSubsystem.cpp 의 파일-로컬 GetCardBehaviorFragment 와 동일 기준이다. 그 헬퍼는 익명 네임스페이스
+		// (내부 링크)라 이 TU 에서 못 불러온다 — 명세에 없는 공개 시그니처를 새로 만드는 대신 판정만 인라인으로
+		// 재현한다. 스탯 카드는 BuildTags 를 달고 있어도 여기서 걸러진다 — 그 태그의 유일한 소비자는 Tab 정보창이다.
+		bool bIsFunctionalCard = false;
+		for (const TObjectPtr<UFPSRCardEffect>& Effect : Card->Effects)
+		{
+			if (Cast<UCardEffect_WeaponBehavior>(Effect))
+			{
+				bIsFunctionalCard = true;
+				break;
+			}
+		}
+		if (!bIsFunctionalCard)
+		{
+			continue;
+		}
+
+		for (const FName& Tag : Card->BuildTags)
+		{
+			++OutCounts.FindOrAdd(Tag);
+		}
+	}
+}
+
+void AFPSRPlayerState::OnRep_AcquiredCards()
+{
+	OnAcquiredCardsChanged.Broadcast();
 }
 
 void AFPSRPlayerState::AddAllWeaponsModifier(const FFPSRWeaponStatMod& Mod)
@@ -496,6 +559,12 @@ void AFPSRPlayerState::ResetRunState()
 			UFPSRHealthSet::GetHealthAttribute(),
 			AbilitySystemComponent->GetNumericAttribute(UFPSRHealthSet::GetMaxHealthAttribute()));
 	}
+
+	// CRIT2: the acquired-card ledger is per-run progression (same class as the picks/mods above, §8) — clear it
+	// on every lobby (re)entry so a fresh run doesn't start already "converged" on the previous run's build.
+	AcquiredCards.Empty();
+	MARK_PROPERTY_DIRTY_FROM_NAME(AFPSRPlayerState, AcquiredCards, this);
+	OnAcquiredCardsChanged.Broadcast();
 }
 
 void AFPSRPlayerState::AddCardGrantedAbility(FGameplayAbilitySpecHandle Handle, bool bIsDamageEventListener)

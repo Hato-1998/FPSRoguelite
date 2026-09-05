@@ -57,7 +57,7 @@ python Scripts/authoring_sheet.py apply Content/Authoring/changesets/<파일>.js
 ```
 
 - **키 = 헤더의 첫 컬럼**(Cards=`CardId` · CardCatalog=`AttrId` · ST_*=`Key`). `"key"` 로 덮어쓸 수 있다.
-- `upsert` 는 **병합**이다 — 준 컬럼만 덮어쓰고 나머지는 보존한다(새 행이면 빈 문자열). 22개 컬럼을 다 적을 필요가 없고, **콤마 세는 실수가 원천적으로 없다**.
+- `upsert` 는 **병합**이다 — 준 컬럼만 덮어쓰고 나머지는 보존한다(새 행이면 빈 문자열). 23개 컬럼을 다 적을 필요가 없고, **콤마 세는 실수가 원천적으로 없다**.
 - 헤더는 `Config/AuthoringSheets.json` 의 `expectedHeader` 와 대조해 **어긋나면 즉시 죽는다**. 조용히 잘못된 열에 쓰는 것보다 낫다.
 - **멱등**: 결과가 이미 목표와 같으면 파일을 건드리지 않는다(2회 연속 실행 = diff 0).
 

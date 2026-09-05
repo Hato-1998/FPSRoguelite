@@ -91,3 +91,29 @@ struct FFPSRCardDraw
 	UPROPERTY(BlueprintReadOnly, Category = "Card")
 	TObjectPtr<UFPSRWeaponDataAsset> TargetWeapon = nullptr;
 };
+
+/**
+ * 이 플레이어가 이번 런에 획득한 카드 1장 (CRIT2). **복제된다** — Tab 정보창이 남의 빌드까지 보여주기 때문이다
+ * (그래서 서버 전용으로 두지 않았다. 나중에 복제로 바꾸는 것은 임시 구조 금지에 걸린다).
+ * 획득 순서 = 배열 인덱스. 같은 카드를 두 번 고르면 원소가 둘 생긴다(스택형 카드의 투자도 투자다).
+ */
+USTRUCT(BlueprintType)
+struct FFPSRAcquiredCard
+{
+	GENERATED_BODY()
+
+	/** 획득한 카드. 카드 DA 포인터 복제는 이미 ClientPresentCards 가 쓰는 검증된 경로다(CRIT2 C0 실측 7). */
+	UPROPERTY(BlueprintReadOnly, Category = "Card")
+	TObjectPtr<UFPSRCardDataAsset> Card = nullptr;
+
+	/** 굴린 레어도 — 정보창이 "치명타 확률 (에픽)"처럼 보여주려면 필요하다. */
+	UPROPERTY(BlueprintReadOnly, Category = "Card")
+	ECardRarity Rarity = ECardRarity::Common;
+
+	/** 이 카드가 적용된 무기(캐릭터·전체무기 오퍼는 null). **나중에 넣을 수 없다** —
+	 *  복제 struct 를 나중에 바꾸는 것은 이 유닛이 애초에 복제형을 택한 이유(임시 구조 금지)와 정면 충돌한다(CRIT2 G1 P2-6).
+	 *  출처 풀 라벨(§2-4-1, 2026-08-13 확정)이 카드 표시에 `TargetWeapon->DisplayName` 을 쓰므로,
+	 *  정보창이 "연사 속도(라이플, 레어)" 를 그리려면 지금 있어야 한다. */
+	UPROPERTY(BlueprintReadOnly, Category = "Card")
+	TObjectPtr<UFPSRWeaponDataAsset> TargetWeapon = nullptr;
+};

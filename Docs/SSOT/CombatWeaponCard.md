@@ -42,7 +42,10 @@
 
 #### 2-3-3. 추첨·적용 (서버권위)
 - **레벨업 프리즈(§2-2)**: 캐릭터군 + 보유 무기군 풀 전체에서 **3장 랜덤**, **리롤 3회**(`RunRerollCharges`, 서버 차감) 또는 선택, **런 종료까지 영구**. 무기 stat 카드는 무기 보유 시 동적 합류(Gunfire Reborn식). 등급 4단계(Common/Rare/Epic/Legendary), **Luck**이 상위등급 가중치(※ RarityBonus는 Luck 통합·폐지 2026-06-02).
-- **무기 해금**(§2-3-4) = 별도 풀·트리거.
+- **무기 해금**(§2-3-4) = 별도 풀·트리거. 🔴 **카드 선택은 가중 추첨이다**(CRIT2, 2026-09-06) — 종전엔 이 풀만 균등
+  Fisher-Yates 셔플이라 `Card->Weight`가 무시됐다(레어도 굴림은 그때도 지금도 **선택 후**, 여기는 안 바뀜). 가중치·
+  빌드 시너지의 실제 계산은 §2-3-4·§2-3-9 참조 — 레벨업(스탯) 풀(위 항목)은 이 전환의 영향을 받지 않는다(사용자
+  결정, `GetEffectiveWeight` 무접촉).
 - **카드 소비 시점**(§2-2): 오프닝 시드(런 시작) + 레벨업 프리즈 + 미션/마일스톤(해금). 모두 전역 프리즈 중 선택.
 - **`FFPSRCardDraw` 변경**: 단일 `Magnitude` 제거(클라가 효과별 `GetDescription`/magnitude를 로컬 asset에서 조회). ⚠️ **블라스트 라디우스**(Codex 게이트): UI(`FPSRCardEntryWidget`)뿐 아니라 **debug 캐시(`FDebugCardOffer`)·`BuildSingleDraw`·`ClientPresentCards` RPC payload·`ServerSelectCard` apply 계약** 전부 점검 — U18a 검증 항목.
 - **보안 불변(테스트 항목)**: 클라는 `Index`+`OfferId`만 전송, 카드/효과/수치 포인터 미전송(`FPSRCardSubsystem.cpp` 서버 빌드 오퍼 인덱싱). family 상호배제·SetByCaller·`AllWeaponsStatExclusions`(§2-4-1) 보존.
@@ -54,6 +57,15 @@
 - **새 무기 풀** = `UFPSRCardPoolDataAsset.WeaponUnlockCards[]`.
 - **트리거**: 미션 클리어(기존 `GrantMissionReward` 분리) + **레벨 20/30/40**(신규 마일스톤 훅 = `FPSRGameState::AddSharedXP` 레벨업 루프). `PresentNextOfferIfNeeded`에 unlock 슬롯. 마일스톤 레벨엔 레벨업+해금 **순차 2프리즈**(데드락 없음).
 - **3정 차단 = 새 무기 후보만**(사용자 결정 2026-06-20). 기능 해금은 3정 후 계속.
+- 🔴 **가중 추첨 + 빌드 시너지 (CRIT2, 2026-09-06)** — 후보 수집(3정 캡·슬롯 캡·스택 상한·`(카드,무기)` 디듑)은
+  그대로다. 선택만 바뀐다: **그룹 비중 보존 2단 추출**(`UFPSRCardSubsystem::WeightedSampleWithoutReplacement`) —
+  ① 남은 그룹(A=새 무기 후보 / B=기능 카드 후보)을 시너지 **제외** 가중치 합에 비례해 고르고 ② 그 그룹 안에서
+  시너지 **포함** 가중치로 카드를 고른다. 그룹 단위로 나누는 이유 = 시너지가 B(같은 빌드 기능 카드)만 부풀려도
+  A(새 무기)의 몫이 매 추첨에서 정확히 보존되게 하기 위해서 — 정규화 방식(가중치 재계산)은 첫 추첨에서만
+  근사적이라 기각했다. 카드별 최종 가중치 = `Card->Weight × ComputeSynergyMultiplier(...)`
+  (`UFPSRCardSubsystem::GetUnlockDrawWeight` — 시너지가 곱해지는 유일한 지점). 선택 후 레어도를 굴리는 순서는
+  안 바뀐다. **배제 술어는 없다**(자기 제거만) — `(카드,무기)` 디듑만으로 이미 "같은 카드가 무기만 달리해 한
+  오퍼에 공존"이 §2-3-2 v4 의 의도이기 때문이다. 상세 = §2-3-9, `Docs/Specs/CRIT2_BuildSynergyDrawConvergence.md`.
 - **U3 시임**: 보스 킬은 `ApplyDamage`(EnemyHealthComponent) 미경유 GAS 경로 → 무기 OnKill 시임이 보스엔 미발화 → **보스 OnKill = U3가 별도 배선**.
 
 #### 2-3-5. 행동 트리거 (무기 훅 + 캐릭터 행동)
@@ -94,15 +106,28 @@
 
 #### 2-3-9. 빌드 시너지 · 경계
 - **빌드 시너지 설계 (기획 2026-06-10)**: 카드 *메커니즘*과 별개로 **무엇이 빌드를 다르게 느끼게 하는가**(시너지 축: 원소/상태이상, 투사체수↔단발위력, 크리↔지속피해, AOE↔관통)를 별도 설계 — 뱀서 핵심 리텐션. **Fragment 상호작용(§2-4-1) + 멀티효과 트레이드오프가 1차 수단**. 시너지 패스 = 재미 게이트(§7-5) 전후.
-- **경계/시임**: 상태창 UI(사양9)=후속(데이터 노출 시임만). 상태이상 본체·OnStatusKill 배선·elemental 거동=**D3**. 보스 OnKill=**U3**. AllWeapons 복제=**U11b**. CardId=**U10**.
+- 🔴 **1차 구현 = 추첨 수렴 (CRIT2, 2026-09-06)** — 위 기획이 예약해 둔 "빌드 시너지"의 첫 코드다. 위 Fragment·
+  트레이드오프가 빌드를 "다르게 *느끼게*" 만드는 축이라면, 이건 빌드를 "*완성 가능하게*" 만드는 축이다: 카드가
+  `BuildTags`(`TArray<FName>`, 한 카드가 여러 빌드에 속할 수 있다)를 달고, 플레이어가 획득한 카드는
+  `AFPSRPlayerState::AcquiredCards`(**복제** 원장, §2-4-1 참조)에 남는다. **미션/해금 풀에서만**(§2-3-4) — 이미
+  고른 빌드의 *기능* 카드가 원장의 태그 카운트에 비례해 더 자주 제시된다. **레벨업(스탯) 풀은 균등 그대로**
+  (사용자 결정) — 스탯 카드가 `BuildTags`를 달아도 진행도엔 안 세고(기능 카드만, 판정 =
+  `GetCardBehaviorFragment(Card) != nullptr`), 그 태그의 유일한 소비자는 아래 Tab 정보창이다. 세기
+  (`SynergyBonusPerCard`/`SynergyMaxStacks`)·허용 태그 어휘(`BuildTagVocabulary`)는 `DA_Character_CardPool`
+  콘텐츠 값(오타 가드 = 풀 DA 어휘 + `FPSRCardPoolValidator` 교차검증).
+- **경계/시임**: **Tab 정보창 위젯 = 후속 유닛**(원장은 이미 전원에게 복제돼 있다 — CRIT2는 데이터까지, 위젯·입력
+  바인딩만 남는다). 상태이상 본체·OnStatusKill 배선·elemental 거동=**D3**. 보스 OnKill=**U3**. AllWeapons
+  복제=**U11b**. CardId=**U10**. 빌드 *간* 상충(한 빌드를 고르면 다른 빌드가 덜 나옴)·피티(pity)는 미도입 —
+  수렴만으로 충분한지 실측이 먼저다(CRIT2 비목표).
 
 #### 2-3-10. 카드 CSV 저작 파이프라인 (2026-08-12 사용자 확정 — DA 저작 → CSV/시트 저작)
 
 > 진실 사슬 **(개정 2026-09-05)**: **`Content/Authoring/*.csv`(저작 마스터) → 에디터 임포터 → `DA_Card_*`(파생물)**. 카드 저작 = **변경셋 JSON 1개**(`Scripts/authoring_sheet.py apply`) — 사람이 행을 하나씩 만들지 않는다. 구글 시트는 **미러**로 남고(`authoring_sheet.py push`), 사람이 시트에서 편집한 경우에만 `Scripts/sync-authoring-csv.ps1` 로 당겨온다(로컬이 앞서면 거부). 설정·가드 = `Docs/AuthoringSheetWriteback.md`. ~~종전: 구글 시트가 저작 마스터~~. 공통 규약(단방향 동기화·provenance·인코딩 갓차) = `Docs/SSOT/Localization.md` L-4·L-5. 설계 명세 = `Docs/Specs/CARDCSV_ImporterPipeline.md`.
 
-- **Cards.csv 스키마** (멀티이펙트 = 컬럼 반복 N=3 — 카드 1장=행 1개가 엑셀 저작·diff 최소 인지 단위; 현행 최대 효과 수 2; 초과 시 헤더 감지 버전업):
-  `CardId, AssetName, Group, Route, OwnerWeapon, Weight, Family, DisplayName_ko/en/ja, Description_ko/en/ja, E1_Attr, E1_Override, E1_Tiers, E2_*, E3_*`
+- **Cards.csv 스키마** (멀티이펙트 = 컬럼 반복 N=3 — 카드 1장=행 1개가 엑셀 저작·diff 최소 인지 단위; 현행 최대 효과 수 2; 초과 시 헤더 감지 버전업; **23개 컬럼**, CRIT2 가 `BuildTags` 1개를 `Family` 뒤에 추가 2026-09-06):
+  `CardId, AssetName, Group, Route, OwnerWeapon, Weight, Family, BuildTags, DisplayName_ko/en/ja, Description_ko/en/ja, E1_Attr, E1_Override, E1_Tiers, E2_*, E3_*`
   - `OwnerWeapon` = 무기 DA 에셋명 **세미콜론 리스트**(다중 무기 풀 동시 소속 보존 — 현행 카드 7장이 복수 무기에 물려 있어 단일 값이면 무회귀 위반. 2026-08-13 교정).
+  - `BuildTags` = 이 카드가 속한 빌드(§2-3-9) **세미콜론 리스트**(`OwnerWeapon`과 같은 표기), DA `TArray<FName> BuildTags`로 그대로 주입. 위치가 `Family` 바로 뒤인 이유 = 카드 레벨 메타끼리 모은다(E1..E3는 그대로 꼬리). 허용 어휘는 카드 CSV 가 아니라 `DA_Character_CardPool.BuildTagVocabulary`(콘텐츠 값)에 있다.
   - `CardId` = 행 키 = 세이브 키(기존 필드) = 로컬라이징 키 접두(`<CardId>.DisplayName`). `E*_Tiers` = `C:15;R:30;E:60;L:100`(티어 존재 = 레어도 노출범위, OfferRarities 자동 파생 현행 유지). `E*_Override` = 카탈로그 기본값 덮어쓰기(`k=v;`, 드묾).
 - **CardCatalog.csv (속성 카탈로그)**: `AttrId, EffectType, Payload, DefaultOp, DefaultThisWeaponOnly, ShowAsPercent, Notes`. EffectType 5종 = `UCardEffect_*` 서브클래스 1:1(임포터가 NewObject+Payload 주입 — 런타임 폴리모픽 무변경 = 무회귀). **새 효과 타입 = 서브클래스 1개 + 타입 팩토리 map 1행**(OCP 유지, §2-3-1 directive 존속). 사용자 2분류 스키마 대응: "전체무기 vs 개별무기"=`DefaultThisWeaponOnly`, "무기 해금 vs 기능추가"=`GrantWeapon` vs `WeaponBehavior`.
 - **임포터 계약**: 기존 에셋 in-place 갱신(변경분만 dirty = **멱등**, 재임포트 diff 0이 무회귀 기준선), Instanced 효과 = 결정적 네이밍(`Effect_0..`) + 클래스 불일치 시 트래시→재생성. DisplayName/Description = `FText::FromStringTable("Card", "<CardId>.*")` 세팅 + `ST_Card.csv` 동시 생성(Cards.csv의 ko/en/ja 컬럼이 원천 — ST_Card는 저작물이 아니라 파생물). 진입점 = Tools 메뉴 + 헤드리스 커맨드렛.

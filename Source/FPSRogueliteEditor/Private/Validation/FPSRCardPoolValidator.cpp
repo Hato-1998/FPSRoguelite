@@ -183,6 +183,37 @@ EDataValidationResult UFPSRCardPoolValidator::ValidateCrossPoolChecks(const UFPS
 		Result = EDataValidationResult::Invalid;
 	}
 
+	// --- BuildTags vocabulary (CRIT2 §11-3, 안 A): every card asset's BuildTags must be a subset of THIS pool's
+	//     BuildTagVocabulary, or an authored typo ("crti" for "crit") would never match any synergy tag count and
+	//     never get caught anywhere else. Scans EVERY card asset in the project via AllCardAssets (already fetched
+	//     above for the CardId pass), NOT just Pool->Cards/WeaponUnlockCards — the tagging set spans two separate
+	//     draw pools (§11-1: mission feature cards live on weapon UnlockableFeatures, not this pool's own arrays),
+	//     so a values-only scan over this pool's arrays would leave most of the tagged cards unchecked (G1 P2-5). ---
+	for (const FAssetData& CardAssetData : AllCardAssets)
+	{
+		if (FFPSRAnchoredValidationService::IsExcludedPath(CardAssetData.PackagePath))
+		{
+			continue; // same scratch/Dev/Test exclusion as the CardId pass above
+		}
+		const UFPSRCardDataAsset* CardAsset = Cast<UFPSRCardDataAsset>(CardAssetData.GetAsset());
+		if (!CardAsset)
+		{
+			continue;
+		}
+		for (const FName& Tag : CardAsset->BuildTags)
+		{
+			if (Pool->BuildTagVocabulary.Contains(Tag))
+			{
+				continue;
+			}
+			const FText CardLabel = CardAsset->CardId.IsNone() ? FText::FromString(CardAsset->GetName()) : FText::FromName(CardAsset->CardId);
+			Context.AddError(FText::Format(
+				LOCTEXT("BuildTagNotInVocabulary", "카드 '{0}' 의 BuildTag '{1}' 가 이 풀의 BuildTagVocabulary 에 없습니다 — 오타이거나 어휘 등록 누락입니다."),
+				CardLabel, FText::FromName(Tag)));
+			Result = EDataValidationResult::Invalid;
+		}
+	}
+
 	// --- CardFamily conflict: no established mutual-exclusion rule beyond "same family = pick one" (see
 	//     FPSRCardDataAsset.cpp's MultiNoFamily check, which already requires multi-effect cards to set CardFamily).
 	//     There is currently no documented rule for what makes two DIFFERENT families "conflict" with each other, so

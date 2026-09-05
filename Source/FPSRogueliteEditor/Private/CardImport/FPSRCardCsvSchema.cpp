@@ -14,7 +14,7 @@ namespace
 	const TArray<FString>& GetCardsExpectedHeaderInternal()
 	{
 		static const TArray<FString> Header = {
-			TEXT("CardId"), TEXT("AssetName"), TEXT("Group"), TEXT("Route"), TEXT("OwnerWeapon"), TEXT("Weight"), TEXT("Family"),
+			TEXT("CardId"), TEXT("AssetName"), TEXT("Group"), TEXT("Route"), TEXT("OwnerWeapon"), TEXT("Weight"), TEXT("Family"), TEXT("BuildTags"),
 			TEXT("DisplayName_ko"), TEXT("DisplayName_en"), TEXT("DisplayName_ja"),
 			TEXT("Description_ko"), TEXT("Description_en"), TEXT("Description_ja"),
 			TEXT("E1_Attr"), TEXT("E1_Override"), TEXT("E1_Tiers"),
@@ -328,17 +328,38 @@ bool FPSRCardCsv::ParseCards(const FString& CardsCsvText, const TArray<FFPSRCard
 			Row.Family = FamilyStr.IsEmpty() ? NAME_None : FName(*FamilyStr);
 		}
 
+		// BuildTags — semicolon-separated list, right after Family (CRIT2 §11-7 — 카드 레벨 메타끼리 모은다).
+		// Same split/trim/cull-empty convention as OwnerWeapon above; vocabulary membership is NOT checked here
+		// (this layer is pure text validation — FPSRCardPoolValidator cross-checks against the pool DA's
+		// BuildTagVocabulary once the tags actually reach a DA, §11-3 안 A).
+		{
+			const FString BuildTagsCell = GetCell(Cells, 7);
+			TArray<FString> RawEntries;
+			BuildTagsCell.ParseIntoArray(RawEntries, TEXT(";"), /*InCullEmpty=*/true);
+			for (FString& Entry : RawEntries)
+			{
+				Entry.TrimStartAndEndInline();
+				if (!Entry.IsEmpty())
+				{
+					Row.BuildTags.Add(Entry);
+				}
+			}
+		}
+
 		// DisplayName / Description (ko,en,ja) — no syntax to validate here (blank tolerated; [KO-TODO] markers
 		// are an exporter/authoring convention, not a parser rule).
-		Row.DisplayName[0] = GetCellRaw(Cells, 7);
-		Row.DisplayName[1] = GetCellRaw(Cells, 8);
-		Row.DisplayName[2] = GetCellRaw(Cells, 9);
-		Row.Description[0] = GetCellRaw(Cells, 10);
-		Row.Description[1] = GetCellRaw(Cells, 11);
-		Row.Description[2] = GetCellRaw(Cells, 12);
+		// ⚠️ Indices shifted 7..12 -> 8..13 by the BuildTags column insertion above (CRIT2 G1 P2-3/2회차) — GetCell
+		// silently returns "" out of range with no row-width check, so an unshifted index here would misalign every
+		// card by one column with ZERO parse errors. FPSRCardCsvSchemaTest.Normal asserts DisplayName to guard this.
+		Row.DisplayName[0] = GetCellRaw(Cells, 8);
+		Row.DisplayName[1] = GetCellRaw(Cells, 9);
+		Row.DisplayName[2] = GetCellRaw(Cells, 10);
+		Row.Description[0] = GetCellRaw(Cells, 11);
+		Row.Description[1] = GetCellRaw(Cells, 12);
+		Row.Description[2] = GetCellRaw(Cells, 13);
 
 		// E1..E3 effect column groups — a slot is "used" only when its *_Attr cell is non-empty.
-		static constexpr int32 EffectBaseColumn = 13;
+		static constexpr int32 EffectBaseColumn = 14; // shifted 13->14 by the BuildTags column insertion (CRIT2)
 		for (int32 EffectSlot = 0; EffectSlot < 3; ++EffectSlot)
 		{
 			const int32 AttrColumn = EffectBaseColumn + EffectSlot * 3;

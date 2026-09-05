@@ -473,7 +473,7 @@ bool FPSRCardCsvExport::ExportAll(const FString& OutCardsCsvPath, const FString&
 
 	struct FOutputCardRow
 	{
-		FString CardId, AssetName, Group, Route, Weight, Family;
+		FString CardId, AssetName, Group, Route, Weight, Family, BuildTags;
 		TArray<FString> OwnerWeapons; // joined with ';' at CSV-write time
 		FString DisplayName[3];
 		FString Description[3];
@@ -502,6 +502,18 @@ bool FPSRCardCsvExport::ExportAll(const FString& OutCardsCsvPath, const FString&
 		Row.AssetName = Card->GetName();
 		Row.Group = StaticEnum<ECardGroup>()->GetNameStringByValue(static_cast<int64>(Card->Group));
 		Row.Weight = FString::SanitizeFloat(Card->Weight);
+
+		// BuildTags (CRIT2) — authored ORDER preserved, not sorted (§11 P3: round-trip stability means "untouched"
+		// should stay byte-identical, not get alphabetized like OwnerWeapon's determinism sort below needs).
+		{
+			TArray<FString> Tags;
+			Tags.Reserve(Card->BuildTags.Num());
+			for (const FName& Tag : Card->BuildTags)
+			{
+				Tags.Add(Tag.ToString());
+			}
+			Row.BuildTags = FString::Join(Tags, TEXT(";"));
+		}
 
 		const FMembership* Found = Membership.Find(Card);
 		if (Found && Found->bFound)
@@ -622,7 +634,7 @@ bool FPSRCardCsvExport::ExportAll(const FString& OutCardsCsvPath, const FString&
 	{
 		TArray<FString> Lines;
 		Lines.Add(JoinCsvRow({
-			TEXT("CardId"), TEXT("AssetName"), TEXT("Group"), TEXT("Route"), TEXT("OwnerWeapon"), TEXT("Weight"), TEXT("Family"),
+			TEXT("CardId"), TEXT("AssetName"), TEXT("Group"), TEXT("Route"), TEXT("OwnerWeapon"), TEXT("Weight"), TEXT("Family"), TEXT("BuildTags"),
 			TEXT("DisplayName_ko"), TEXT("DisplayName_en"), TEXT("DisplayName_ja"),
 			TEXT("Description_ko"), TEXT("Description_en"), TEXT("Description_ja"),
 			TEXT("E1_Attr"), TEXT("E1_Override"), TEXT("E1_Tiers"),
@@ -642,7 +654,7 @@ bool FPSRCardCsvExport::ExportAll(const FString& OutCardsCsvPath, const FString&
 			const FString OwnerWeaponCell = FString::Join(SortedOwnerWeapons, TEXT(";"));
 
 			TArray<FString> Cells = {
-				Row.CardId, Row.AssetName, Row.Group, Row.Route, OwnerWeaponCell, Row.Weight, Row.Family,
+				Row.CardId, Row.AssetName, Row.Group, Row.Route, OwnerWeaponCell, Row.Weight, Row.Family, Row.BuildTags,
 				Row.DisplayName[0], Row.DisplayName[1], Row.DisplayName[2],
 				Row.Description[0], Row.Description[1], Row.Description[2]
 			};

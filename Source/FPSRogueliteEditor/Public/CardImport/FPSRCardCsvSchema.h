@@ -17,6 +17,9 @@ struct FFPSRCardCsvRow
 	                                     // 풀 동시 소속 보존, §5/C2 2026-08-13). 그 외 루트는 빈 배열.
 	float    Weight = 1.0f;
 	FName    Family;                    // 공란 = E1 AttrId에서 파생(§2-3-2 v3)
+	TArray<FString> BuildTags;          // 카드 레벨 메타(Family 바로 뒤, CRIT2 §11-7) — 세미콜론 리스트, DA
+	                                     // `BuildTags`(TArray<FName>)로 그대로 주입. 어휘 검증은 임포터가 아니라
+	                                     // FPSRCardPoolValidator(풀 DA `BuildTagVocabulary` 교차검증)가 한다.
 	FString  DisplayName[3];            // ko,en,ja (ST_Card.csv 원천 — DA에는 FromStringTable 참조가 들어간다)
 	FString  Description[3];
 	struct FEffectCol { FName AttrId; FString Override; FString Tiers; };  // Tiers 예: "C:15;R:30;E:60;L:100"

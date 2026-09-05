@@ -51,6 +51,23 @@ public:
 	UPROPERTY(EditDefaultsOnly, Category = "Card Pool|Luck")
 	float LuckPerRarity_Legendary = 0.01f;
 
+	/** Build synergy (CRIT2, §2-3-9): mission/unlock-pool draw weight multiplier per card already held that shares a
+	 *  BuildTag with the candidate, added per stack up to SynergyMaxStacks. **Mission/unlock pool only** — the
+	 *  level-up (stat) pool stays uniform by user decision, so this never reaches `GetEffectiveWeight`.
+	 *  0.5/4 is a tuning STARTING POINT (4 stacks -> 3x), not a final value — PIE playtest sets the real number. */
+	UPROPERTY(EditDefaultsOnly, Category = "Card Pool|Synergy")
+	float SynergyBonusPerCard = 0.5f;
+
+	/** Stack cap for the build-synergy bonus above (CRIT2). */
+	UPROPERTY(EditDefaultsOnly, Category = "Card Pool|Synergy")
+	int32 SynergyMaxStacks = 4;
+
+	/** Closed vocabulary of BuildTags a card may declare (CRIT2 §11-3, 안 A — typo guard: FPSRCardPoolValidator
+	 *  errors on any card's BuildTag that isn't in this list). Adding a new build = append a tag here + author it
+	 *  onto the relevant cards' BuildTags in the sheet; no code change. */
+	UPROPERTY(EditDefaultsOnly, Category = "Card Pool|Synergy")
+	TArray<FName> BuildTagVocabulary;
+
 	/** Returns the base weight for the given rarity. */
 	UFUNCTION(BlueprintPure, Category = "Card Pool")
 	float GetRarityBaseWeight(ECardRarity Rarity) const;

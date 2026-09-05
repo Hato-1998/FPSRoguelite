@@ -977,6 +977,22 @@ FFPSRCardImportResult FPSRCardCsvImport::ImportAll(bool bSaveAssets)
 			bCardChanged = true;
 		}
 
+		// BuildTags (CRIT2 §5) — semicolon list -> FName array, diffed like every other scalar field on this card.
+		{
+			TArray<FName> DesiredBuildTags;
+			DesiredBuildTags.Reserve(Row.BuildTags.Num());
+			for (const FString& Tag : Row.BuildTags)
+			{
+				DesiredBuildTags.Add(FName(*Tag));
+			}
+			if (Card->BuildTags != DesiredBuildTags)
+			{
+				Card->Modify();
+				Card->BuildTags = MoveTemp(DesiredBuildTags);
+				bCardChanged = true;
+			}
+		}
+
 		const FString DisplayNameKey = FString::Printf(TEXT("%s.DisplayName"), *Row.CardId.ToString());
 		if (ApplyLocalizedField(Card, Card->DisplayName, Row.DisplayName, DisplayNameKey))
 		{

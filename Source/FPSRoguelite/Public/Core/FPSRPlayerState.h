@@ -7,6 +7,7 @@
 #include "Abilities/GameplayAbilityTypes.h"
 #include "GameplayTagContainer.h"
 #include "Weapon/FPSRWeaponTypes.h"
+#include "Card/FPSRCardTypes.h"
 #include "FPSRPlayerState.generated.h"
 
 class UFPSRAbilitySystemComponent;
@@ -152,6 +153,29 @@ public:
 	/** Server: consume one pending weapon-unlock pick. Returns true if successful. */
 	bool ConsumeWeaponUnlockPick();
 
+	/** 서버: 카드 1장을 **성공적으로 적용한 뒤** 원장에 남긴다(CRIT2 §7 증가 시점 계약 — `ApplyCard`의 픽 소비 뒤,
+	 *  return true 앞에서만 호출된다. 제시만 받은 카드·거부된 픽·리롤로 버린 카드는 기록되지 않는다).
+	 *  원장은 **스탯·기능을 가리지 않고 전부** 담는다 — 정보창이 전부를 보여줘야 하기 때문이다.
+	 *  가중치에 썰지 여부는 `BuildTagCountMap` 이 걸러낸다.
+	 *  ⚠️ 시그니처 편차(명세 갭) — CRIT2 §6 스케치는 `(Card, Rarity)` 2개 인자만 보이지만, `FFPSRAcquiredCard::TargetWeapon`
+	 *  필드(§6, G1 P2-6 로 추가됨)를 채울 방법이 그것뿐이라 `TargetWeapon` 을 3번째 인자로 추가했다 — 자세한 사유는
+	 *  CRIT2 구현 보고서 참조. */
+	void RecordAcquiredCard(UFPSRCardDataAsset* Card, ECardRarity Rarity, UFPSRWeaponDataAsset* TargetWeapon);
+
+	/** 원장 읽기 — 추첨 가중치의 입력이자 정보창의 데이터 원천. */
+	const TArray<FFPSRAcquiredCard>& GetAcquiredCards() const { return AcquiredCards; }
+
+	/** 원장에서 빌드 태그별 개수를 만든다. **별도 상태를 두지 않는 이유** = 원장이 단일 진실이면
+	 *  리셋 지점도 하나뿐이고 둘이 어긋날 수 없다. 카드 수십 장 × 태그 한두 개라 추첨 1회당 1번 만들면 충분하다.
+	 *  **기능 카드만 센다**(사용자 결정 2026-09-06). 스탯 카드가 `BuildTags` 를 달고 있어도 여기서 제외된다 —
+	 *  그 태그의 소비자는 정보창뿐이다(§11-2). */
+	void BuildTagCountMap(TMap<FName, int32>& OutCounts) const;
+
+	/** 원장이 바뀌었다 — 정보창 위젯이 구독한다(별도 유닛). 주의: **리슨 호스트는 OnRep 을 받지 못한다** — 권위
+	 *  경로(RecordAcquiredCard/ResetRunState)에서도 직접 브로드캐스트해야 한다([[event-halves-authority-vs-client]]). */
+	DECLARE_MULTICAST_DELEGATE(FFPSROnAcquiredCardsChanged);
+	FFPSROnAcquiredCardsChanged OnAcquiredCardsChanged;
+
 	/** AllWeapons-scope stat modifiers (apply to every owned weapon). Lives on the PlayerState so it is
 	 *  character-wide and survives pawn respawn, consistent with the run state (CardPicksPending). */
 	const FFPSRWeaponModContainer& GetAllWeaponsMods() const { return AllWeaponsMods; }
@@ -278,6 +302,9 @@ protected:
 	UFUNCTION()
 	void OnRep_Ready();
 
+	UFUNCTION()
+	void OnRep_AcquiredCards();
+
 private:
 	UPROPERTY(VisibleAnywhere, Category = "FPSR|Abilities")
 	TObjectPtr<UFPSRAbilitySystemComponent> AbilitySystemComponent;
@@ -302,6 +329,11 @@ private:
 
 	UPROPERTY(ReplicatedUsing = OnRep_CardPicksPending)
 	int32 WeaponUnlockPicksPending = 0;
+
+	/** 획득 카드 원장(CRIT2). **복제**(COND_None — 모든 클라가 모든 플레이어의 원장을 본다. Tab 정보창의 요구).
+	 *  Push Model: RecordAcquiredCard / ResetRunState 에서 MARK_PROPERTY_DIRTY. */
+	UPROPERTY(ReplicatedUsing = OnRep_AcquiredCards)
+	TArray<FFPSRAcquiredCard> AcquiredCards;
 
 	UPROPERTY(ReplicatedUsing = OnRep_AllWeaponsMods)
 	FFPSRWeaponModContainer AllWeaponsMods;

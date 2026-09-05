@@ -54,6 +54,14 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Card|Identity")
 	FName CardId;
 
+	/** Which build(s) this card belongs to (CRIT2, §2-3-9). Free-form tags cross-checked against the owning pool's
+	 *  `BuildTagVocabulary` (typo guard, IsDataValid can't see the pool so FPSRCardPoolValidator does the vocabulary
+	 *  check). A card may declare more than one build. Consumed by `UFPSRCardSubsystem::GetUnlockDrawWeight` for the
+	 *  mission/unlock pool only — the level-up (stat) pool stays uniform (사용자 결정), so a stat card's BuildTags sit
+	 *  unread there; their only consumer today is the (future) Tab build-summary widget. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Card")
+	TArray<FName> BuildTags;
+
 	/** The stable meta-save key for this card. */
 	UFUNCTION(BlueprintPure, Category = "Card|Identity")
 	FName GetStableKey() const { return CardId; }

@@ -53,6 +53,33 @@ EDataValidationResult UFPSRCardDataAsset::IsDataValid(FDataValidationContext& Co
 		Result = EDataValidationResult::Invalid;
 	}
 
+	// BuildTags lint (CRIT2 §5): a blank entry is a stray semicolon from CSV authoring ("crit;") and a duplicate
+	// double-counts in BuildTagCountMap (e.g. "crit;crit" reads as 2 picks of the same tag from 1 card) — both are
+	// authoring mistakes IsDataValid should catch before they reach the draw. Vocabulary membership (is "crti" a typo
+	// for "crit"?) is NOT checked here — this asset doesn't know its owning pool's BuildTagVocabulary, so that cross-
+	// check lives in FPSRCardPoolValidator instead (§11-3, 안 A).
+	{
+		TSet<FName> SeenBuildTags;
+		for (const FName& Tag : BuildTags)
+		{
+			if (Tag.IsNone())
+			{
+				Context.AddError(LOCTEXT("EmptyBuildTag", "BuildTags has a blank entry — remove it (check for a stray ';' in the CSV cell)."));
+				Result = EDataValidationResult::Invalid;
+				continue;
+			}
+			bool bAlreadySeen = false;
+			SeenBuildTags.Add(Tag, &bAlreadySeen);
+			if (bAlreadySeen)
+			{
+				Context.AddError(FText::Format(
+					LOCTEXT("DuplicateBuildTag", "BuildTags has duplicate entry '{0}' — it would be double-counted toward that build's synergy stacks."),
+					FText::FromName(Tag)));
+				Result = EDataValidationResult::Invalid;
+			}
+		}
+	}
+
 	if (Effects.Num() == 0)
 	{
 		Context.AddError(LOCTEXT("NoEffects", "Card has no Effects — it applies nothing. Add at least one effect."));

@@ -9,7 +9,7 @@ namespace
 {
 	// Anonymous-namespace helpers merge across translation units in a unity build (project's
 	// test-unity-anon-namespace-collision memory) — "CardCsvSchemaTest" suffix keeps these names unique to this file.
-	const FString CardsHeaderCardCsvSchemaTest = TEXT("CardId,AssetName,Group,Route,OwnerWeapon,Weight,Family,DisplayName_ko,DisplayName_en,DisplayName_ja,Description_ko,Description_en,Description_ja,E1_Attr,E1_Override,E1_Tiers,E2_Attr,E2_Override,E2_Tiers,E3_Attr,E3_Override,E3_Tiers");
+	const FString CardsHeaderCardCsvSchemaTest = TEXT("CardId,AssetName,Group,Route,OwnerWeapon,Weight,Family,BuildTags,DisplayName_ko,DisplayName_en,DisplayName_ja,Description_ko,Description_en,Description_ja,E1_Attr,E1_Override,E1_Tiers,E2_Attr,E2_Override,E2_Tiers,E3_Attr,E3_Override,E3_Tiers");
 	const FString CatalogHeaderCardCsvSchemaTest = TEXT("AttrId,EffectType,Payload,DefaultOp,DefaultThisWeaponOnly,ShowAsPercent,Notes");
 
 	// One catalog row wired to char.maxhealth (CharGE) so Cards.csv fixtures can reference a real AttrId.
@@ -36,7 +36,7 @@ bool FFPSRCardCsvSchemaNormalTest::RunTest(const FString& Parameters)
 	const TArray<FFPSRCardCatalogRow> Catalog = ParseOneValidCatalogCardCsvSchemaTest(*this);
 
 	const FString CardsCsv = CardsHeaderCardCsvSchemaTest + TEXT("\n")
-		+ TEXT("Card.MaxHealth,DA_Card_MaxHealth,Character,LevelUpGlobal,,1.0,,체력,Health,体力,설명,Desc,説明,char.maxhealth,,C:15;R:30;E:60;L:100,,,,,,");
+		+ TEXT("Card.MaxHealth,DA_Card_MaxHealth,Character,LevelUpGlobal,,1.0,,,체력,Health,体力,설명,Desc,説明,char.maxhealth,,C:15;R:30;E:60;L:100,,,,,,");
 
 	FFPSRCardCsvParseResult Result;
 	const bool bOk = FPSRCardCsv::ParseCards(CardsCsv, Catalog, Result);
@@ -53,6 +53,11 @@ bool FFPSRCardCsvSchemaNormalTest::RunTest(const FString& Parameters)
 		TestTrue(TEXT("Route == LevelUpGlobal"), Row.Route == EFPSRCardRoute::LevelUpGlobal);
 		TestEqual(TEXT("Weight parsed"), Row.Weight, 1.0f);
 		TestTrue(TEXT("Family blank -> NAME_None (importer derives)"), Row.Family.IsNone());
+		// CRIT2 anti-regression guard (G1 P2-3): the ONLY assertion that catches a missed BuildTags column-index
+		// shift. Without it, an unshifted parser would silently read this column-7 blank as DisplayName_ko and
+		// misalign every field after it by one — GetCell tolerates the out-of-range read with no error, so nothing
+		// else here would fail loudly.
+		TestEqual(TEXT("DisplayName ko (shifted 7->8 by the BuildTags column)"), Row.DisplayName[0], FString(TEXT("체력")));
 		TestEqual(TEXT("exactly one effect column used (E1)"), Row.Effects.Num(), 1);
 		if (Row.Effects.Num() == 1)
 		{
@@ -80,7 +85,7 @@ bool FFPSRCardCsvSchemaMultiEffectTest::RunTest(const FString& Parameters)
 	// several weapons' pools at once, e.g. content shared across Rifle and SMG, must round-trip as a LIST not a
 	// single value or the migration collapses real multi-weapon membership).
 	const FString CardsCsv = CardsHeaderCardCsvSchemaTest + TEXT("\n")
-		+ TEXT("Card.FireRateMagTradeoff,DA_Card_FireRate_MagTradeoff,Weapon,LevelUpWeapon,DA_Weapon_Rifle;DA_Weapon_SMG,1.0,Card.Family.RifleTradeoff,연사+/장탄-,Fire+/Mag-,連射+/弾-,,,,")
+		+ TEXT("Card.FireRateMagTradeoff,DA_Card_FireRate_MagTradeoff,Weapon,LevelUpWeapon,DA_Weapon_Rifle;DA_Weapon_SMG,1.0,Card.Family.RifleTradeoff,,연사+/장탄-,Fire+/Mag-,連射+/弾-,,,,")
 		+ TEXT("weapon.firerate,,C:0.05;R:0.10,weapon.magsize,Op=Additive;ThisWeaponOnly=true,C:-2;R:-4,,,");
 
 	FFPSRCardCsvParseResult Result;
@@ -116,8 +121,8 @@ bool FFPSRCardCsvSchemaBadHeaderTest::RunTest(const FString& Parameters)
 {
 	// Cards.csv: a column renamed/reordered must fail with a header-mismatch error, not silently misalign columns.
 	{
-		const FString BadCardsCsv = FString(TEXT("CardId,AssetName,Group,Route,OwnerWeapon,Weight,Family,DisplayName_ko,DisplayName_en,DisplayName_ja,Description_ko,Description_en,Description_ja,E1_Attr,E1_Override,E1_Tiers,E2_Attr,E2_Override,E2_Tiers,E3_Attr,E3_Override\n"))
-			+ TEXT("x,y,Character,LevelUpGlobal,,1,,,,,,,,,,,,,,,");
+		const FString BadCardsCsv = FString(TEXT("CardId,AssetName,Group,Route,OwnerWeapon,Weight,Family,BuildTags,DisplayName_ko,DisplayName_en,DisplayName_ja,Description_ko,Description_en,Description_ja,E1_Attr,E1_Override,E1_Tiers,E2_Attr,E2_Override,E2_Tiers,E3_Attr,E3_Override\n"))
+			+ TEXT("x,y,Character,LevelUpGlobal,,1,,,,,,,,,,,,,,,,");
 		FFPSRCardCsvParseResult Result;
 		const bool bOk = FPSRCardCsv::ParseCards(BadCardsCsv, {}, Result);
 		TestFalse(TEXT("Cards.csv missing a trailing column fails"), bOk);
@@ -145,8 +150,8 @@ bool FFPSRCardCsvSchemaDuplicateKeyTest::RunTest(const FString& Parameters)
 	{
 		const TArray<FFPSRCardCatalogRow> Catalog = ParseOneValidCatalogCardCsvSchemaTest(*this);
 		const FString CardsCsv = CardsHeaderCardCsvSchemaTest + TEXT("\n")
-			+ TEXT("Card.Dup,DA_Card_A,Character,LevelUpGlobal,,1,,,,,,,,char.maxhealth,,C:1,,,,,,\n")
-			+ TEXT("Card.Dup,DA_Card_B,Character,LevelUpGlobal,,1,,,,,,,,char.maxhealth,,C:2,,,,,,");
+			+ TEXT("Card.Dup,DA_Card_A,Character,LevelUpGlobal,,1,,,,,,,,,char.maxhealth,,C:1,,,,,,\n")
+			+ TEXT("Card.Dup,DA_Card_B,Character,LevelUpGlobal,,1,,,,,,,,,char.maxhealth,,C:2,,,,,,");
 		FFPSRCardCsvParseResult Result;
 		const bool bOk = FPSRCardCsv::ParseCards(CardsCsv, Catalog, Result);
 		TestFalse(TEXT("duplicate CardId fails"), bOk);
@@ -184,7 +189,7 @@ bool FFPSRCardCsvSchemaTiersSyntaxTest::RunTest(const FString& Parameters)
 	auto MakeCardsCsv = [](const FString& Tiers)
 	{
 		return CardsHeaderCardCsvSchemaTest + TEXT("\n")
-			+ FString::Printf(TEXT("Card.Test,DA_Card_Test,Character,LevelUpGlobal,,1,,,,,,,,char.maxhealth,,%s,,,,,,"), *Tiers);
+			+ FString::Printf(TEXT("Card.Test,DA_Card_Test,Character,LevelUpGlobal,,1,,,,,,,,,char.maxhealth,,%s,,,,,,"), *Tiers);
 	};
 
 	// Invalid rarity initial.
@@ -228,7 +233,7 @@ bool FFPSRCardCsvSchemaMissingAttrTest::RunTest(const FString& Parameters)
 	const TArray<FFPSRCardCatalogRow> Catalog = ParseOneValidCatalogCardCsvSchemaTest(*this); // only has char.maxhealth
 
 	const FString CardsCsv = CardsHeaderCardCsvSchemaTest + TEXT("\n")
-		+ TEXT("Card.Ghost,DA_Card_Ghost,Character,LevelUpGlobal,,1,,,,,,,,attr.does.not.exist,,C:1,,,,,,");
+		+ TEXT("Card.Ghost,DA_Card_Ghost,Character,LevelUpGlobal,,1,,,,,,,,,attr.does.not.exist,,C:1,,,,,,");
 
 	FFPSRCardCsvParseResult Result;
 	const bool bOk = FPSRCardCsv::ParseCards(CardsCsv, Catalog, Result);
@@ -255,7 +260,7 @@ bool FFPSRCardCsvSchemaOwnerWeaponBlankTest::RunTest(const FString& Parameters)
 	// Route=LevelUpWeapon but OwnerWeapon is blank — must fail (§5 interface sketch).
 	{
 		const FString CardsCsv = CardsHeaderCardCsvSchemaTest + TEXT("\n")
-			+ TEXT("Card.NoOwner,DA_Card_NoOwner,Weapon,LevelUpWeapon,,1,,,,,,,,char.maxhealth,,C:1,,,,,,");
+			+ TEXT("Card.NoOwner,DA_Card_NoOwner,Weapon,LevelUpWeapon,,1,,,,,,,,,char.maxhealth,,C:1,,,,,,");
 		FFPSRCardCsvParseResult Result;
 		const bool bOk = FPSRCardCsv::ParseCards(CardsCsv, Catalog, Result);
 		TestFalse(TEXT("LevelUpWeapon route with blank OwnerWeapon fails"), bOk);
@@ -263,7 +268,7 @@ bool FFPSRCardCsvSchemaOwnerWeaponBlankTest::RunTest(const FString& Parameters)
 	// Route=MissionClearWeaponFeature but OwnerWeapon is blank — same rule.
 	{
 		const FString CardsCsv = CardsHeaderCardCsvSchemaTest + TEXT("\n")
-			+ TEXT("Card.NoOwner2,DA_Card_NoOwner2,Weapon,MissionClearWeaponFeature,,1,,,,,,,,char.maxhealth,,C:1,,,,,,");
+			+ TEXT("Card.NoOwner2,DA_Card_NoOwner2,Weapon,MissionClearWeaponFeature,,1,,,,,,,,,char.maxhealth,,C:1,,,,,,");
 		FFPSRCardCsvParseResult Result;
 		const bool bOk = FPSRCardCsv::ParseCards(CardsCsv, Catalog, Result);
 		TestFalse(TEXT("MissionClearWeaponFeature route with blank OwnerWeapon fails"), bOk);
@@ -271,7 +276,7 @@ bool FFPSRCardCsvSchemaOwnerWeaponBlankTest::RunTest(const FString& Parameters)
 	// Route=LevelUpGlobal (not a weapon route) with blank OwnerWeapon is fine.
 	{
 		const FString CardsCsv = CardsHeaderCardCsvSchemaTest + TEXT("\n")
-			+ TEXT("Card.NoOwnerOk,DA_Card_NoOwnerOk,Character,LevelUpGlobal,,1,,,,,,,,char.maxhealth,,C:1,,,,,,");
+			+ TEXT("Card.NoOwnerOk,DA_Card_NoOwnerOk,Character,LevelUpGlobal,,1,,,,,,,,,char.maxhealth,,C:1,,,,,,");
 		FFPSRCardCsvParseResult Result;
 		const bool bOk = FPSRCardCsv::ParseCards(CardsCsv, Catalog, Result);
 		TestTrue(TEXT("LevelUpGlobal route with blank OwnerWeapon succeeds"), bOk);
@@ -286,7 +291,7 @@ bool FFPSRCardCsvSchemaZeroEffectsTest::RunTest(const FString& Parameters)
 {
 	const TArray<FFPSRCardCatalogRow> Catalog = ParseOneValidCatalogCardCsvSchemaTest(*this);
 	const FString CardsCsv = CardsHeaderCardCsvSchemaTest + TEXT("\n")
-		+ TEXT("Card.Empty,DA_Card_Empty,Character,LevelUpGlobal,,1,,,,,,,,,,,,,,,,");
+		+ TEXT("Card.Empty,DA_Card_Empty,Character,LevelUpGlobal,,1,,,,,,,,,,,,,,,,,");
 
 	FFPSRCardCsvParseResult Result;
 	const bool bOk = FPSRCardCsv::ParseCards(CardsCsv, Catalog, Result);
