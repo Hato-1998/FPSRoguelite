@@ -150,7 +150,9 @@ struct FFPSRAcquiredCard
 
 // ── Public/Core/FPSRPlayerState.h ───────────────────────────────────────────
 public:
-    /** 서버: 카드 1장을 **성공적으로 적용한 뒤** 원장에 남긴다(§7 증가 시점 계약). */
+    /** 서버: 카드 1장을 **성공적으로 적용한 뒤** 원장에 남긴다(§7 증가 시점 계약).
+     *  원장은 **스탯·기능을 가리지 않고 전부** 담는다 — 정보창이 전부를 보여줘야 하기 때문이다.
+     *  가중치에 썰지 여부는 `BuildTagCountMap` 이 걸러낸다. */
     void RecordAcquiredCard(UFPSRCardDataAsset* Card, ECardRarity Rarity);
 
     /** 원장 읽기 — 추첨 가중치의 입력이자 정보창의 데이터 원천. */
@@ -158,6 +160,8 @@ public:
 
     /** 원장에서 빌드 태그별 개수를 만든다. **별도 상태를 두지 않는 이유** = 원장이 단일 진실이면
      *  리셋 지점도 하나뿐이고 둘이 어긋날 수 없다. 카드 수십 장 × 태그 한두 개라 추첨 1회당 1번 만들면 충분하다. */
+    /** **기능 카드만 센다**(사용자 결정 2026-09-06). 판정 = `GetCardBehaviorFragment(Card) != nullptr`.
+     *  스탯 카드가 `BuildTags` 를 달고 있어도 여기서 제외된다 — 그 태그의 소비자는 정보창뿐이다(§11-2). */
     void BuildTagCountMap(TMap<FName, int32>& OutCounts) const;
 
 private:
@@ -292,11 +296,15 @@ private:
 
 ## 11. 미결정 · 결정된 것
 
-**사용자 결정 필요 (설계가 회피할 수 없는 것)**
+**사용자 결정 (2026-09-06) — 셋 다 확정**
 
-1. **태깅 세트** (G1 P2-4) — 초안: 미션 풀 5장(`CritOverkill`·`CritLifesteal`·`CritOnReload`·`WeakpointCrit`·`CritOnSlide`) + 카운트 기여용 스탯 카드(`DA_Card_CritChance`·`DA_Card_CritMult`). `DA_Card_Damage`(범용)·`DA_Card_ADSZoom_ThisWeapon`(정밀 축) 포함 여부는 사용자 판단. **변경셋 JSON 의 내용이 곧 이 결정이다.**
-2. **스탯 카드가 카운트에 기여하는가** — 초안 **기여한다**(치명타 확률을 3장 쌓았으면 치명타 *기능* 카드가 더 자주 떠야 자연스럽다). 스탯 카드는 시너지를 *받지는* 않는다(사용자 결정). 이 비대칭이 의도인지 확인 필요.
-3. **태그 어휘 가드 방식** (G1 P2-5) — 초안 **안 A**(풀 DA 어휘 + `FPSRCardPoolValidator` 교차검증, 데이터만). 대안 B = `FGameplayTag Build.*`(엔진 네이티브, ini 1줄/빌드). `CardFamily` 가 FName 인 사유(자동 파생 ↔ ini 정적 등록 마찰, §2-3-2 v3)는 **손저작인 BuildTags 엔 적용되지 않으므로** B 도 정당하다.
+1. **태깅 세트 = 미션 기능 카드 5장 + 스탯 2장**(`DA_Card_CritChance`·`DA_Card_CritMult`). `DA_Card_Damage`(범용)·`DA_Card_ADSZoom_ThisWeapon`(정밀 축)은 **제외** — 범용 카드에 이름표를 붙이면 치명타를 의도하지 않은 플레이어까지 치명타 기능 카드로 끌려간다. 넓히고 싶으면 시트 셀 하나.
+2. 🔴 **진행도에 세는 것은 기능 카드뿐이다.** 스탯 카드는 이름표를 달아도 **추첨 가중치에 기여하지 않는다.**
+   - 판정 = `GetCardBehaviorFragment(Card) != nullptr`(`FPSRCardSubsystem.cpp:467` 의 기존 헬퍼 재사용 — 오퍼 타입을 원장에 따로 담지 않아도 카드 자체로 구분된다).
+   - **따라서 스탯 카드의 `BuildTags` 는 이 유닛에서 소비자가 없다.** 유일한 예정 소비자 = **Tab 정보창**(빌드별 묶음 표시). 죽은 데이터가 아니라 *아직 소비자가 안 온* 데이터다 — 이 문장이 없으면 다음 사람이 "왜 안 먹지"에서 시간을 버린다.
+   - 의미: **빌드를 선언하는 것은 기능 카드다.** 수렴은 첫 치명타 *기능* 카드를 얻은 뒤 시작된다.
+   - ⚠️ 현 콘텐츠 한계(결정 탓이 아니라 물량 탓): 라이플 기능 카드가 치명타 5장뿐이라 B 그룹 내부 재분배가 무의미하다. **두 번째 무기의 기능 카드가 후보에 섞이는 시점부터** 체감이 생긴다. §12 PIE 1 은 그 조건에서 판정한다.
+3. **오타 가드 = 안 A**(풀 DA `BuildTagVocabulary` + `FPSRCardPoolValidator` 교차검증). 설정 파일을 안 건드려 "새 빌드 = 시트 작업"이 유지된다. 안 B(`Build.*` GameplayTag)도 정당했으나 기각 사유 = ini 등록 축이 늘어난다.
 
 **결정됨 (노트로 강등, G1 판정 반영)**
 
