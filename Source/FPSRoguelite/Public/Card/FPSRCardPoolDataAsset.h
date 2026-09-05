@@ -54,12 +54,17 @@ public:
 	/** Build synergy (CRIT2, §2-3-9): mission/unlock-pool draw weight multiplier per card already held that shares a
 	 *  BuildTag with the candidate, added per stack up to SynergyMaxStacks. **Mission/unlock pool only** — the
 	 *  level-up (stat) pool stays uniform by user decision, so this never reaches `GetEffectiveWeight`.
-	 *  0.5/4 is a tuning STARTING POINT (4 stacks -> 3x), not a final value — PIE playtest sets the real number. */
-	UPROPERTY(EditDefaultsOnly, Category = "Card Pool|Synergy")
+	 *  0.5/4 is a tuning STARTING POINT (4 stacks -> 3x), not a final value — PIE playtest sets the real number.
+	 *  ClampMin=0 (P2-1 머지 게이트) guards the editor slider only — a serialized asset or script write can still
+	 *  land a negative value under it, so IsDataValid hard-errors on that case too (a negative value here collapses
+	 *  GetUnlockDrawWeight toward <=0, turning the mission-pool draw into a deterministic pick instead of a weighted
+	 *  one). */
+	UPROPERTY(EditDefaultsOnly, Category = "Card Pool|Synergy", meta = (ClampMin = "0.0"))
 	float SynergyBonusPerCard = 0.5f;
 
-	/** Stack cap for the build-synergy bonus above (CRIT2). */
-	UPROPERTY(EditDefaultsOnly, Category = "Card Pool|Synergy")
+	/** Stack cap for the build-synergy bonus above (CRIT2). ClampMin=0 for the same reason as SynergyBonusPerCard
+	 *  above (P2-1) — IsDataValid is the actual hard gate; this only stops the slider. */
+	UPROPERTY(EditDefaultsOnly, Category = "Card Pool|Synergy", meta = (ClampMin = "0"))
 	int32 SynergyMaxStacks = 4;
 
 	/** Closed vocabulary of BuildTags a card may declare (CRIT2 §11-3, 안 A — typo guard: FPSRCardPoolValidator

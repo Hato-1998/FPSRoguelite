@@ -9,8 +9,7 @@
 #include "Weapon/FPSRWeaponInventoryComponent.h"
 #include "Weapon/FPSRWeaponFireComponent.h"
 #include "Weapon/FPSRWeaponDataAsset.h"
-#include "Card/FPSRCardDataAsset.h" // CRIT2: BuildTagCountMap reads Card->BuildTags/Effects
-#include "Card/FPSRCardEffect.h"    // CRIT2: UCardEffect_WeaponBehavior — functional-card predicate (see BuildTagCountMap)
+#include "Card/FPSRCardDataAsset.h" // CRIT2: BuildTagCountMap reads Card->BuildTags/GetBehaviorFragment()
 #include "Hero/FPSRCharacter.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/Controller.h" // U P-F: GetOwningController()->IsLocalController()/HasAuthority() for the ack gate
@@ -278,20 +277,13 @@ void AFPSRPlayerState::BuildTagCountMap(TMap<FName, int32>& OutCounts) const
 			continue;
 		}
 
-		// 기능 카드만 센다(사용자 결정 2026-09-06, CRIT2 §11-2) — 판정 = "행동 프래그먼트를 부여하는 효과가 있는가",
-		// FPSRCardSubsystem.cpp 의 파일-로컬 GetCardBehaviorFragment 와 동일 기준이다. 그 헬퍼는 익명 네임스페이스
-		// (내부 링크)라 이 TU 에서 못 불러온다 — 명세에 없는 공개 시그니처를 새로 만드는 대신 판정만 인라인으로
-		// 재현한다. 스탯 카드는 BuildTags 를 달고 있어도 여기서 걸러진다 — 그 태그의 유일한 소비자는 Tab 정보창이다.
-		bool bIsFunctionalCard = false;
-		for (const TObjectPtr<UFPSRCardEffect>& Effect : Card->Effects)
-		{
-			if (Cast<UCardEffect_WeaponBehavior>(Effect))
-			{
-				bIsFunctionalCard = true;
-				break;
-			}
-		}
-		if (!bIsFunctionalCard)
+		// 기능 카드만 센다(사용자 결정 2026-09-06, CRIT2 §11-2) — 판정 = Card->GetBehaviorFragment() != nullptr
+		// (CRIT2 P3-3, 머지 게이트: 이전엔 여기가 "WeaponBehavior 효과가 있는가"를, FPSRCardSubsystem.cpp 의
+		// 파일-로컬 GetCardBehaviorFragment 가 "Fragment 포인터가 있는가"를 각자 인라인으로 재현해, Fragment 가
+		// null인 WeaponBehavior 카드에서 둘의 판정이 갈렸다. UFPSRCardDataAsset::GetBehaviorFragment() 하나로
+		// 합쳐 판정이 한 곳에만 산다). 스탯 카드는 BuildTags 를 달고 있어도 여기서 걸러진다 — 그 태그의 유일한
+		// 소비자는 Tab 정보창이다.
+		if (!Card->GetBehaviorFragment())
 		{
 			continue;
 		}

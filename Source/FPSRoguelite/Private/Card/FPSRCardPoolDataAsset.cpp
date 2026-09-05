@@ -75,6 +75,21 @@ EDataValidationResult UFPSRCardPoolDataAsset::IsDataValid(FDataValidationContext
 	CheckList(Cards);
 	CheckList(WeaponUnlockCards);
 
+	// P2-1 (머지 게이트): the ClampMin=0 UPROPERTY meta only stops the editor slider — a serialized asset saved before
+	// the clamp existed, or a script/importer write, can still carry a negative value. A negative SynergyBonusPerCard
+	// or SynergyMaxStacks drives GetUnlockDrawWeight's multiplier to <=0, which collapses the mission-pool draw from
+	// a weighted choice into a deterministic "always the group's first element" pick — hard error, not a warning.
+	if (SynergyBonusPerCard < 0.0f)
+	{
+		Context.AddError(LOCTEXT("NegativeSynergyBonusPerCard", "SynergyBonusPerCard is negative — it would push the mission-pool draw weight of higher-investment cards toward zero or below, collapsing the draw to a deterministic pick instead of a weighted one. Set it to 0 or higher."));
+		Result = EDataValidationResult::Invalid;
+	}
+	if (SynergyMaxStacks < 0)
+	{
+		Context.AddError(LOCTEXT("NegativeSynergyMaxStacks", "SynergyMaxStacks is negative — combined with a positive SynergyBonusPerCard this flips the synergy multiplier negative/zero for any held build tag, collapsing the mission-pool draw to a deterministic pick. Set it to 0 or higher."));
+		Result = EDataValidationResult::Invalid;
+	}
+
 	return Result;
 }
 

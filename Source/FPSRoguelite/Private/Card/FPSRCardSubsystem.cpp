@@ -39,21 +39,13 @@ namespace
 			[](const TObjectPtr<UFPSRCardEffect>& E) { return E && E->RequiresWeapon(); });
 	}
 
-	// Returns the behavior fragment a card grants (first UCardEffect_WeaponBehavior's Fragment), or null.
+	// CRIT2 P3-3 (머지 게이트): delegates to UFPSRCardDataAsset::GetBehaviorFragment so this file and
+	// AFPSRPlayerState::BuildTagCountMap judge "does this card grant a fragment" from the SAME place instead of each
+	// re-walking Effects — a WeaponBehavior effect with a null Fragment used to read as "functional" over there
+	// (effect-class check) but "not functional" here (Fragment-pointer check).
 	UFPSRWeaponFragment* GetCardBehaviorFragment(const UFPSRCardDataAsset* Card)
 	{
-		if (!Card)
-		{
-			return nullptr;
-		}
-		for (const TObjectPtr<UFPSRCardEffect>& E : Card->Effects)
-		{
-			if (const UCardEffect_WeaponBehavior* Beh = Cast<UCardEffect_WeaponBehavior>(E))
-			{
-				return Beh->Fragment;
-			}
-		}
-		return nullptr;
+		return Card ? Card->GetBehaviorFragment() : nullptr;
 	}
 }
 
@@ -80,6 +72,18 @@ void UFPSRCardSubsystem::WeightedSampleWithoutReplacement(
 	TArray<FFPSRCardDraw>& OutPicked)
 {
 	OutPicked.Reset();
+
+	// P3-6 (머지 게이트): public static 으로 연 이유가 외부(자동화) 호출이라(§6 G1 P2-7) — 그 호출자는 이 함수의 배열
+	// 정렬 전제(Weights 는 Candidates 와 동수, GroupIds 는 비었거나 Candidates 와 동수 + 그때는 BaselineWeights 도
+	// 동수)를 컴파일러가 강제해 주지 않는다. 어긋난 채로 진행하면 아래 인덱싱(InOutBaselineWeights[j]/InOutGroupIds[j]
+	// 등)이 범위를 벗어난다 — ensure 로 개발 빌드에서 즉시 드러내고, 어떤 빌드에서도 조용히 계속 진행하지 않는다.
+	const bool bLengthsConsistent = InOutWeights.Num() == InOutCandidates.Num()
+		&& (InOutGroupIds.Num() == 0 || (InOutGroupIds.Num() == InOutCandidates.Num() && InOutBaselineWeights.Num() == InOutCandidates.Num()));
+	if (!ensure(bLengthsConsistent))
+	{
+		return;
+	}
+
 	// Bound the reservation by the candidate pool, not by the raw Count (현행 계약 승계, §6). The Max(0) is not
 	// cosmetic: TArray::Reserve routes a negative size to OnInvalidArrayNum (Array.h), so "FPSR.DrawCards -1"
 	// would take down the process rather than just drawing nothing.
@@ -512,7 +516,10 @@ float UFPSRCardSubsystem::GetUnlockDrawWeight(const UFPSRCardDataAsset* Card, co
 		return Card->Weight; // §7 계약: 풀 null -> Card->Weight(시너지 계수 없이 원 가중치로 폴백)
 	}
 	const float Synergy = ComputeSynergyMultiplier(Card->BuildTags, TagCounts, ActivePool->SynergyBonusPerCard, ActivePool->SynergyMaxStacks);
-	return Card->Weight * Synergy;
+	// P2-1 (머지 게이트): clamp like the sibling GetEffectiveWeight(:724) does — IsDataValid rejects a negative
+	// SynergyBonusPerCard/SynergyMaxStacks on save, but a serialized asset from before that check existed could
+	// still carry one, and a negative product here would make the mission-pool draw deterministic rather than 0.
+	return FMath::Max(Card->Weight * Synergy, 0.0f);
 }
 
 TArray<FFPSRCardDraw> UFPSRCardSubsystem::DrawWeaponUnlockOffer(AController* ForPlayer, int32 Count)
@@ -532,7 +539,8 @@ TArray<FFPSRCardDraw> UFPSRCardSubsystem::DrawWeaponUnlockOffer(AController* For
 	}
 
 	// CRIT2 §7: 원장에서 빌드 태그별 개수를 뽑아온다 — 이 추첨의 유일한 시너지 입력. PS 가 없으면(방어적) 빈 맵으로
-	// 진행 = 시너지 1.0(무효과) = 종전 균등 거동과 동일(§12-6 회귀 기준).
+	// 진행 = 시너지 1.0(무효과) = (모든 `Card->Weight` 가 같을 때) 종전 균등 거동과 동일(§12-6 회귀 기준, P3-1 —
+	// Weight 가 카드마다 다르면 종전 Fisher-Yates 셔플과는 갈린다. FPSRCardSubsystem.h 의 헬퍼 주석 참조).
 	AFPSRPlayerState* PS = ForPlayer ? ForPlayer->GetPlayerState<AFPSRPlayerState>() : nullptr;
 	TMap<FName, int32> TagCounts;
 	if (PS)

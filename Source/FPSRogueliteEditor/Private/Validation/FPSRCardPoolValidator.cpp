@@ -183,12 +183,34 @@ EDataValidationResult UFPSRCardPoolValidator::ValidateCrossPoolChecks(const UFPS
 		Result = EDataValidationResult::Invalid;
 	}
 
-	// --- BuildTags vocabulary (CRIT2 §11-3, 안 A): every card asset's BuildTags must be a subset of THIS pool's
-	//     BuildTagVocabulary, or an authored typo ("crti" for "crit") would never match any synergy tag count and
-	//     never get caught anywhere else. Scans EVERY card asset in the project via AllCardAssets (already fetched
-	//     above for the CardId pass), NOT just Pool->Cards/WeaponUnlockCards — the tagging set spans two separate
-	//     draw pools (§11-1: mission feature cards live on weapon UnlockableFeatures, not this pool's own arrays),
-	//     so a values-only scan over this pool's arrays would leave most of the tagged cards unchecked (G1 P2-5). ---
+	// --- BuildTags vocabulary (CRIT2 §11-3, 안 A; P3-5 머지 게이트): every card asset's BuildTags must be a subset of
+	//     the UNION of every UFPSRCardPoolDataAsset's BuildTagVocabulary in the project — not just THIS pool's. A
+	//     second pool DA (this project has only one today, but the check must not assume that) would otherwise make
+	//     every tag that only the FIRST pool declares read as a typo when validated against the second pool's empty-
+	//     by-default vocabulary. Scans EVERY card pool asset via AssetRegistry (this file already runs one such scan
+	//     for AllCardAssets above) rather than reading just the single `Pool` this validator instance was called for.
+	//     Card-side scan is unchanged: EVERY card asset in the project via AllCardAssets, NOT just
+	//     Pool->Cards/WeaponUnlockCards — the tagging set spans two separate draw pools (§11-1: mission feature cards
+	//     live on weapon UnlockableFeatures, not this pool's own arrays), so a values-only scan over this pool's
+	//     arrays would leave most of the tagged cards unchecked (G1 P2-5). ---
+	FARFilter PoolFilter;
+	PoolFilter.ClassPaths.Add(UFPSRCardPoolDataAsset::StaticClass()->GetClassPathName());
+	TArray<FAssetData> AllPoolAssets;
+	AssetRegistry.GetAssets(PoolFilter, AllPoolAssets);
+
+	TSet<FName> ProjectBuildTagVocabulary;
+	for (const FAssetData& PoolAssetData : AllPoolAssets)
+	{
+		if (FFPSRAnchoredValidationService::IsExcludedPath(PoolAssetData.PackagePath))
+		{
+			continue; // same scratch/Dev/Test exclusion as the card passes above
+		}
+		if (const UFPSRCardPoolDataAsset* PoolAsset = Cast<UFPSRCardPoolDataAsset>(PoolAssetData.GetAsset()))
+		{
+			ProjectBuildTagVocabulary.Append(PoolAsset->BuildTagVocabulary);
+		}
+	}
+
 	for (const FAssetData& CardAssetData : AllCardAssets)
 	{
 		if (FFPSRAnchoredValidationService::IsExcludedPath(CardAssetData.PackagePath))
@@ -202,13 +224,13 @@ EDataValidationResult UFPSRCardPoolValidator::ValidateCrossPoolChecks(const UFPS
 		}
 		for (const FName& Tag : CardAsset->BuildTags)
 		{
-			if (Pool->BuildTagVocabulary.Contains(Tag))
+			if (ProjectBuildTagVocabulary.Contains(Tag))
 			{
 				continue;
 			}
 			const FText CardLabel = CardAsset->CardId.IsNone() ? FText::FromString(CardAsset->GetName()) : FText::FromName(CardAsset->CardId);
 			Context.AddError(FText::Format(
-				LOCTEXT("BuildTagNotInVocabulary", "카드 '{0}' 의 BuildTag '{1}' 가 이 풀의 BuildTagVocabulary 에 없습니다 — 오타이거나 어휘 등록 누락입니다."),
+				LOCTEXT("BuildTagNotInVocabulary", "카드 '{0}' 의 BuildTag '{1}' 가 프로젝트의 어떤 카드풀 BuildTagVocabulary 에도 없습니다 — 오타이거나 어휘 등록 누락입니다."),
 				CardLabel, FText::FromName(Tag)));
 			Result = EDataValidationResult::Invalid;
 		}

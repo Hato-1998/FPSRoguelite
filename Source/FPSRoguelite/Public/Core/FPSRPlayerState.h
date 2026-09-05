@@ -20,6 +20,9 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnCardPicksChanged);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnRerollChargesChanged);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnLoadoutChanged);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnReadyChanged);
+// CRIT2 P3-2 (머지 게이트): matches the 4 siblings above (dynamic, not native) — the ledger's one planned consumer
+// (the Tab info widget) is very likely a BP widget, and only a dynamic delegate is bindable/visible from Blueprint.
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FFPSROnAcquiredCardsChanged);
 
 /** Per-player life state (U9 DBNO, Phase 1B). The run keys off IsAlive() == (LifeState == Alive):
  *  - Alive: full participant.
@@ -163,6 +166,7 @@ public:
 	void RecordAcquiredCard(UFPSRCardDataAsset* Card, ECardRarity Rarity, UFPSRWeaponDataAsset* TargetWeapon);
 
 	/** 원장 읽기 — 추첨 가중치의 입력이자 정보창의 데이터 원천. */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Run")
 	const TArray<FFPSRAcquiredCard>& GetAcquiredCards() const { return AcquiredCards; }
 
 	/** 원장에서 빌드 태그별 개수를 만든다. **별도 상태를 두지 않는 이유** = 원장이 단일 진실이면
@@ -172,8 +176,10 @@ public:
 	void BuildTagCountMap(TMap<FName, int32>& OutCounts) const;
 
 	/** 원장이 바뀌었다 — 정보창 위젯이 구독한다(별도 유닛). 주의: **리슨 호스트는 OnRep 을 받지 못한다** — 권위
-	 *  경로(RecordAcquiredCard/ResetRunState)에서도 직접 브로드캐스트해야 한다([[event-halves-authority-vs-client]]). */
-	DECLARE_MULTICAST_DELEGATE(FFPSROnAcquiredCardsChanged);
+	 *  경로(RecordAcquiredCard/ResetRunState)에서도 직접 브로드캐스트해야 한다([[event-halves-authority-vs-client]]).
+	 *  CRIT2 P3-2(머지 게이트): 형제 4개(OnCardPicksChanged 등, 위 :19-22·:126·:209·:280·:284)와 같은 패턴으로
+	 *  BlueprintAssignable — BP 정보창 위젯이 바인딩할 수 있어야 한다. */
+	UPROPERTY(BlueprintAssignable, Category = "FPSR|Run")
 	FFPSROnAcquiredCardsChanged OnAcquiredCardsChanged;
 
 	/** AllWeapons-scope stat modifiers (apply to every owned weapon). Lives on the PlayerState so it is

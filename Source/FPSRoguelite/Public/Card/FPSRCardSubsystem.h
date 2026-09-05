@@ -71,7 +71,10 @@ public:
 	 *    1단계 — 남은 그룹을 **`BaselineWeights` 합**에 비례해 고른다(= 시너지가 없었다면 가졌을 비중).
 	 *    2단계 — 그 그룹 안에서 **`InOutWeights`**(시너지 포함)에 비례해 고른다.
 	 *  이러면 시너지가 **그룹 안에서만 재분배**되고 새 무기 그룹의 몫 비중은 매 추출에서 정확히 보존된다.
-	 *  모든 시너지가 1 이면 2단 추출은 종래 균등 추출과 **분포가 같다**(§12-6 회귀 기준). */
+	 *  모든 시너지가 1 이고 **(모든 `Card->Weight` 가 같을 때)** 2단 추출은 종래 균등 추출과 **분포가 같다**(§12-6
+	 *  회귀 기준). 종전 Fisher-Yates 는 `Card->Weight` 를 아예 안 봤다 — 현 CSV 는 전부 1이라 오늘은 차이가 0이지만,
+	 *  Weight 를 카드마다 다르게 튠하면 새 경로는 그것을 반영하고 종전 셔플은 그러지 못했으므로 이 등가는 깨진다.
+	 *  그 갈림을 회귀로 오진하지 말 것(P3-1). */
 	static void WeightedSampleWithoutReplacement(
 		TArray<FFPSRCardDraw>& InOutCandidates, TArray<float>& InOutWeights,
 		TArray<float>& InOutBaselineWeights, TArray<int32>& InOutGroupIds, int32 Count,

@@ -3,6 +3,21 @@
 #include "Card/FPSRCardDataAsset.h"
 #include "Card/FPSRCardEffect.h"
 
+// CRIT2 P3-3 (머지 게이트): runtime gameplay code (FPSRCardSubsystem::DrawWeaponUnlockOffer, server-authoritative)
+// calls this, so it must compile in packaged/game builds too — kept OUTSIDE the WITH_EDITOR block below (unlike the
+// rest of this file, which is editor-tooling-only).
+UFPSRWeaponFragment* UFPSRCardDataAsset::GetBehaviorFragment() const
+{
+	for (const TObjectPtr<UFPSRCardEffect>& Effect : Effects)
+	{
+		if (const UCardEffect_WeaponBehavior* Behavior = Cast<UCardEffect_WeaponBehavior>(Effect))
+		{
+			return Behavior->Fragment;
+		}
+	}
+	return nullptr;
+}
+
 #if WITH_EDITOR
 #include "Misc/DataValidation.h"
 

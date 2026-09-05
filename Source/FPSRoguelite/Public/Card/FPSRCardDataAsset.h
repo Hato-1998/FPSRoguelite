@@ -7,6 +7,7 @@
 #include "FPSRCardDataAsset.generated.h"
 
 class UFPSRCardEffect;
+class UFPSRWeaponFragment;
 
 /** Data-driven card definition (U18a v2): a card owns one or more polymorphic Instanced effects. The draw rolls a
  *  single rarity (OfferRarities); each effect resolves its own magnitude (RarityTiers) at that rarity. */
@@ -65,6 +66,15 @@ public:
 	/** The stable meta-save key for this card. */
 	UFUNCTION(BlueprintPure, Category = "Card|Identity")
 	FName GetStableKey() const { return CardId; }
+
+	/** First `UCardEffect_WeaponBehavior` effect's Fragment, or null if this card grants no behavior fragment
+	 *  (CRIT2 P3-3 — merge-gate fix). Single source of truth for "does this card grant a fragment": before this,
+	 *  FPSRCardSubsystem.cpp's file-local GetCardBehaviorFragment (Fragment-pointer check) and
+	 *  AFPSRPlayerState::BuildTagCountMap (WeaponBehavior-effect-class check) each re-walked Effects with a
+	 *  slightly different question, so a WeaponBehavior effect authored with a null Fragment (ValidateEffect only
+	 *  catches that WITH_EDITOR, so a stale/scripted runtime asset can still carry one) judged "functional" in one
+	 *  place and "not functional" in the other. Both now call this instead. */
+	UFPSRWeaponFragment* GetBehaviorFragment() const;
 
 	// (v1 legacy fields + PostLoad migration removed in U18a-legacy-cleanup — every card asset was re-saved to v2.)
 
