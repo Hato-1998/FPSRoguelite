@@ -1,7 +1,12 @@
 ﻿<#
 .SYNOPSIS
-  구글 시트(저작 마스터) -> 리포 CSV(빌드 스냅샷) 동기화 (LOC0 §5).
+  구글 시트 -> 리포 CSV 동기화 (LOC0 §5). ** 사람이 시트에서 편집한 것을 리포로 당겨오는 경로 ** 다.
 .DESCRIPTION
+  ⚠️ 방향 주의 (2026-09-05 개정): 마스터는 이제 **리포 CSV** 이고 시트는 미러다. 자동화는
+  Scripts/authoring_sheet.py apply 로 리포 CSV를 고치고, Scripts/authoring_sheet.py push 로 시트에 민다.
+  이 스크립트는 그 반대 방향 - 사람이 시트에서 편집했을 때 그것을 리포로 가져오는 import 경로다.
+  로컬 CSV가 매니페스트와 다르면 덮어쓰기를 거부한다(-Force 로만 강제).
+
   Config/AuthoringSheets.json에 나열된 각 시트에 대해 공개 export URL
   (https://docs.google.com/spreadsheets/d/<sheetId>/export?format=csv&gid=<gid>)을 무인증 GET한다.
   받은 CSV의 1행 헤더가 expectedHeader와 정확히 일치하지 않으면 그 시트는 스킵하고(기존 파일 무접촉)
@@ -18,7 +23,11 @@
 #>
 [CmdletBinding()]
 param(
-    [string]$SheetName
+    [string]$SheetName,
+
+    # 로컬 CSV가 매니페스트와 다르면(=자동화나 사람이 리포에서 먼저 고쳤으면) 기본적으로 덮어쓰기를 거부한다.
+    # 그 변경을 버리고 시트 내용으로 되돌릴 의도가 확실할 때만 이 스위치를 쓴다.
+    [switch]$Force
 )
 
 $ErrorActionPreference = 'Stop'
@@ -117,6 +126,22 @@ foreach ($Sheet in $Sheets) {
         Write-Warning "[$Name] 헤더 불일치 (기대: $($ExpectedHeader -join ','), 실제: $($ActualHeader -join ',')) — 이 파일 스킵, 기존 파일 무접촉."
         $bHadFailure = $true
         continue
+    }
+
+    # 로컬-앞섬 가드: 리포 CSV가 마지막으로 당겨온 내용(매니페스트 sha256)과 다르면, 그건 자동화
+    # (Scripts/authoring_sheet.py apply)나 사람이 리포에서 먼저 고쳤다는 뜻이다. 그대로 덮으면 그 변경이
+    # 흔적 없이 사라진다 — 시트가 마스터이던 시절엔 있을 수 없던 상황이지만, 지금은 쓰는 쪽이 둘이다.
+    # (마스터 규칙 = 리포 CSV. 시트는 미러. Localization.md L-5)
+    if (-not $Force -and (Test-Path $TargetPath) -and $ManifestEntries.ContainsKey($Name)) {
+        $LocalSha = (Get-FileHash -Path $TargetPath -Algorithm SHA256).Hash
+        if ($LocalSha -ne $ManifestEntries[$Name].sha256) {
+            Write-Warning "[$Name] 로컬 CSV가 마지막 pull보다 앞서 있습니다 — 덮어쓰기를 거부합니다(기존 파일 무접촉)."
+            Write-Warning "         무엇이 다른지: git diff -- $TargetRelative"
+            Write-Warning "         시트에 반영: python Scripts/authoring_sheet.py push"
+            Write-Warning "         로컬 변경을 버리고 시트로 되돌리려면: -Force"
+            $bHadFailure = $true
+            continue
+        }
     }
 
     # 헤더 검증 통과 — 받은 원시 바이트를 그대로 저장(재직렬화·재인코딩 없음. Sheets export는 BOM 없는 UTF-8).

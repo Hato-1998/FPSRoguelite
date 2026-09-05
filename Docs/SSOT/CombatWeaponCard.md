@@ -98,7 +98,7 @@
 
 #### 2-3-10. 카드 CSV 저작 파이프라인 (2026-08-12 사용자 확정 — DA 저작 → CSV/시트 저작)
 
-> 진실 사슬: **구글 시트(저작 마스터) → `Content/Authoring/*.csv`(빌드 스냅샷, `Scripts/sync-authoring-csv.ps1`) → 에디터 임포터 → `DA_Card_*`(파생물)**. 공통 규약(단방향 동기화·provenance·인코딩 갓차) = `Docs/SSOT/Localization.md` L-4·L-5. 설계 명세 = `Docs/Specs/CARDCSV_ImporterPipeline.md`.
+> 진실 사슬 **(개정 2026-09-05)**: **`Content/Authoring/*.csv`(저작 마스터) → 에디터 임포터 → `DA_Card_*`(파생물)**. 카드 저작 = **변경셋 JSON 1개**(`Scripts/authoring_sheet.py apply`) — 사람이 행을 하나씩 만들지 않는다. 구글 시트는 **미러**로 남고(`authoring_sheet.py push`), 사람이 시트에서 편집한 경우에만 `Scripts/sync-authoring-csv.ps1` 로 당겨온다(로컬이 앞서면 거부). 설정·가드 = `Docs/AuthoringSheetWriteback.md`. ~~종전: 구글 시트가 저작 마스터~~. 공통 규약(단방향 동기화·provenance·인코딩 갓차) = `Docs/SSOT/Localization.md` L-4·L-5. 설계 명세 = `Docs/Specs/CARDCSV_ImporterPipeline.md`.
 
 - **Cards.csv 스키마** (멀티이펙트 = 컬럼 반복 N=3 — 카드 1장=행 1개가 엑셀 저작·diff 최소 인지 단위; 현행 최대 효과 수 2; 초과 시 헤더 감지 버전업):
   `CardId, AssetName, Group, Route, OwnerWeapon, Weight, Family, DisplayName_ko/en/ja, Description_ko/en/ja, E1_Attr, E1_Override, E1_Tiers, E2_*, E3_*`

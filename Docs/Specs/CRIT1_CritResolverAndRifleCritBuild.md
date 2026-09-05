@@ -595,7 +595,11 @@ Explosion:  대상 루프 안에서 RollCrit(Crit, 1.0f) — 폭발은 약점을
 
 ## 14. 시트 저작 초안 (사용자 붙여넣기용)
 
-> ⚠️ **구글 시트에 넣는다.** 리포 `Content/Authoring/*.csv` 직접 편집 금지(`Localization.md` L-5).
+> **적용 완료 (2026-09-05)** — 아래 행들은 이미 리포 CSV 에 들어갔다. 수단 = 신규 변경셋 도구
+> `python Scripts/authoring_sheet.py apply Content/Authoring/changesets/20260905-crit1-rifle-crit-build.json`
+> (시트당 6행 추가 + 1행 삭제, 멱등 확인). **사용자가 시트에 손으로 붙여넣을 필요가 없다.**
+> 저작 마스터가 **리포 CSV** 로 넘어왔고(구글 시트 = 미러), 절차·가드 = `Docs/AuthoringSheetWriteback.md` · `Localization.md` L-5.
+> 아래 원문은 시트에 직접 붙여넣고 싶을 때의 참조용으로 남겨 둔다.
 
 ### CardCatalog 시트 — 6행 추가 / 1행 삭제
 

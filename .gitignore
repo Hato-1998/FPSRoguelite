@@ -51,6 +51,10 @@ SourceArt/**/*.tga
 FeaturePacks/
 
 # =============================================================================
+# 저작 시트 쓰기 자격증명(배포 URL + 공유 토큰) — 절대 커밋하지 않는다.
+# 템플릿은 Config/AuthoringSheets.writeback.example.json 로 체크인돼 있다.
+Config/AuthoringSheets.writeback.json
+
 # Config (에디터 생성 로컬 설정만 제외)
 # =============================================================================
 Config/Layouts/

@@ -1,0 +1,146 @@
+{
+  "description": "CRIT1 — 라이플 치명타 빌드 세트. 기능(해금) 카드 5장 + 조준 배율 스탯 카드 1장 추가, SniperScope 카드/프래그먼트 은퇴(스코프가 프래그먼트 스택 진화 → 조준 배율 스탯 임계 진화로 이관됐다). 명세 = Docs/Specs/CRIT1_CritResolverAndRifleCritBuild.md §14",
+  "changes": [
+    {
+      "sheet": "CardCatalog",
+      "upsert": [
+        {
+          "AttrId": "weapon.frag.critbonus",
+          "EffectType": "WeaponBehavior",
+          "Payload": "/Game/Cards/Weapons/Modifiers/DA_Fragment_Rifle_CritOverkill.DA_Fragment_Rifle_CritOverkill"
+        },
+        {
+          "AttrId": "weapon.frag.critlifesteal",
+          "EffectType": "WeaponBehavior",
+          "Payload": "/Game/Cards/Weapons/Modifiers/DA_Fragment_Rifle_CritLifesteal.DA_Fragment_Rifle_CritLifesteal"
+        },
+        {
+          "AttrId": "weapon.frag.critonreload",
+          "EffectType": "WeaponBehavior",
+          "Payload": "/Game/Cards/Weapons/Modifiers/DA_Fragment_Rifle_CritOnReload.DA_Fragment_Rifle_CritOnReload"
+        },
+        {
+          "AttrId": "weapon.frag.weakpointcrit",
+          "EffectType": "WeaponBehavior",
+          "Payload": "/Game/Cards/Weapons/Modifiers/DA_Fragment_Rifle_WeakpointCrit.DA_Fragment_Rifle_WeakpointCrit"
+        },
+        {
+          "AttrId": "weapon.frag.critonslide",
+          "EffectType": "WeaponBehavior",
+          "Payload": "/Game/Cards/Weapons/Modifiers/DA_Fragment_Rifle_CritOnSlide.DA_Fragment_Rifle_CritOnSlide"
+        },
+        {
+          "AttrId": "weapon.adsfov",
+          "EffectType": "WeaponStat",
+          "Payload": "ADSFieldOfView",
+          "DefaultOp": "PercentMultiply",
+          "DefaultThisWeaponOnly": "TRUE",
+          "Notes": "값이 작을수록 배율이 높다 — 강화 카드는 음수로 저작(RecoilVertical 규약과 동일). 사이트 파츠의 스탯 임계 진화(스코프)가 이 축을 읽는다."
+        }
+      ],
+      "delete": ["weapon.frag.riflesniperscope"]
+    },
+    {
+      "sheet": "Cards",
+      "upsert": [
+        {
+          "CardId": "DA_CardModifiers_CritOverkill",
+          "AssetName": "DA_CardModifiers_CritOverkill",
+          "Group": "Weapon",
+          "Route": "MissionClearWeaponFeature",
+          "OwnerWeapon": "DA_Weapon_Rifle",
+          "Weight": "1",
+          "DisplayName_ko": "치명타 추가타",
+          "DisplayName_en": "Critical Overkill",
+          "DisplayName_ja": "クリティカル追撃",
+          "Description_ko": "치명타가 입힌 피해의 50%를 한 번 더 입힌다",
+          "Description_en": "Crits deal an extra 50% of the damage they dealt",
+          "Description_ja": "クリティカルで与えたダメージの50%を追加で与える",
+          "E1_Attr": "weapon.frag.critbonus",
+          "E1_Tiers": "L:0.0"
+        },
+        {
+          "CardId": "DA_CardModifiers_CritLifesteal",
+          "AssetName": "DA_CardModifiers_CritLifesteal",
+          "Group": "Weapon",
+          "Route": "MissionClearWeaponFeature",
+          "OwnerWeapon": "DA_Weapon_Rifle",
+          "Weight": "1",
+          "DisplayName_ko": "치명타 흡혈",
+          "DisplayName_en": "Critical Leech",
+          "DisplayName_ja": "クリティカル吸血",
+          "Description_ko": "치명타가 입힌 피해의 10%만큼 회복한다",
+          "Description_en": "Heal for 10% of the damage your crits deal",
+          "Description_ja": "クリティカルで与えたダメージの10%を回復する",
+          "E1_Attr": "weapon.frag.critlifesteal",
+          "E1_Tiers": "L:0.0"
+        },
+        {
+          "CardId": "DA_CardModifiers_CritOnReload",
+          "AssetName": "DA_CardModifiers_CritOnReload",
+          "Group": "Weapon",
+          "Route": "MissionClearWeaponFeature",
+          "OwnerWeapon": "DA_Weapon_Rifle",
+          "Weight": "1",
+          "DisplayName_ko": "재장전 각성",
+          "DisplayName_en": "Reload Rush",
+          "DisplayName_ja": "リロード覚醒",
+          "Description_ko": "재장전을 마치면 5초간 치명타 확률 +20%·치명타 피해 +20%",
+          "Description_en": "Finishing a reload grants +20% crit chance and +20% crit damage for 5s",
+          "Description_ja": "リロード完了後5秒間 クリティカル率+20%・クリティカルダメージ+20%",
+          "E1_Attr": "weapon.frag.critonreload",
+          "E1_Tiers": "L:0.0"
+        },
+        {
+          "CardId": "DA_CardModifiers_WeakpointCrit",
+          "AssetName": "DA_CardModifiers_WeakpointCrit",
+          "Group": "Weapon",
+          "Route": "MissionClearWeaponFeature",
+          "OwnerWeapon": "DA_Weapon_Rifle",
+          "Weight": "1",
+          "DisplayName_ko": "약점 관통",
+          "DisplayName_en": "Weakpoint Precision",
+          "DisplayName_ja": "弱点貫通",
+          "Description_ko": "약점에 맞힌 사격은 반드시 치명타가 된다",
+          "Description_en": "Shots that hit a weakpoint always crit",
+          "Description_ja": "弱点に当てた射撃は必ずクリティカルになる",
+          "E1_Attr": "weapon.frag.weakpointcrit",
+          "E1_Tiers": "L:0.0"
+        },
+        {
+          "CardId": "DA_CardModifiers_CritOnSlide",
+          "AssetName": "DA_CardModifiers_CritOnSlide",
+          "Group": "Weapon",
+          "Route": "MissionClearWeaponFeature",
+          "OwnerWeapon": "DA_Weapon_Rifle",
+          "Weight": "1",
+          "DisplayName_ko": "활강 집중",
+          "DisplayName_en": "Slide Focus",
+          "DisplayName_ja": "滑走集中",
+          "Description_ko": "이 무기를 든 채 슬라이딩하면 5초간 치명타 확률 +40% (슬라이딩할 때마다 초기화)",
+          "Description_en": "Sliding while holding this weapon grants +40% crit chance for 5s (refreshed each slide)",
+          "Description_ja": "この武器を持ってスライディングすると5秒間 クリティカル率+40%（スライディングのたびに更新）",
+          "E1_Attr": "weapon.frag.critonslide",
+          "E1_Tiers": "L:0.0"
+        },
+        {
+          "CardId": "DA_Card_ADSZoom_ThisWeapon",
+          "AssetName": "DA_Card_ADSZoom_ThisWeapon",
+          "Group": "Weapon",
+          "Route": "LevelUpWeapon",
+          "OwnerWeapon": "DA_Weapon_Rifle",
+          "Weight": "1",
+          "DisplayName_ko": "조준 배율",
+          "DisplayName_en": "Aim Magnification",
+          "DisplayName_ja": "照準倍率",
+          "Description_ko": "이 무기의 조준 배율 증가",
+          "Description_en": "Aim magnification up for this weapon",
+          "Description_ja": "この武器の照準倍率アップ",
+          "E1_Attr": "weapon.adsfov",
+          "E1_Tiers": "C:-0.05;R:-0.08;E:-0.12;L:-0.15"
+        }
+      ],
+      "delete": ["DA_CardModifiers_SniperScope"]
+    }
+  ]
+}

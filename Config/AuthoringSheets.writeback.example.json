@@ -1,0 +1,10 @@
+{
+  "_comment": "Config/AuthoringSheets.writeback.json 으로 복사해 쓴다. 실제 파일은 .gitignore 에 있다 — 토큰과 배포 URL 은 커밋하지 않는다. 설정 절차 = Docs/AuthoringSheetWriteback.md",
+  "token": "여기에-Apps-Script-의-SHARED_TOKEN-과-같은-값",
+  "endpoints": {
+    "Cards": "https://script.google.com/macros/s/<Cards 시트 배포 ID>/exec",
+    "CardCatalog": "https://script.google.com/macros/s/<CardCatalog 시트 배포 ID>/exec",
+    "ST_UI": "",
+    "ST_CardEffect": ""
+  }
+}

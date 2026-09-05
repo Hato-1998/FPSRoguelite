@@ -23,7 +23,12 @@ weapon.frag.multishot,WeaponBehavior,/Game/Cards/Weapons/Modifiers/DA_Fragment_M
 weapon.frag.noselfdamage,WeaponBehavior,/Game/Cards/Weapons/Modifiers/DA_Fragment_NoSelfDamage.DA_Fragment_NoSelfDamage,,,,
 weapon.frag.reloadonkill,WeaponBehavior,/Game/Cards/Weapons/Modifiers/DA_Fragment_ReloadOnKill.DA_Fragment_ReloadOnKill,,,,
 weapon.frag.rifleburst,WeaponBehavior,/Game/Cards/Weapons/Modifiers/DA_Fragment_Rifle_Burst.DA_Fragment_Rifle_Burst,,,,
-weapon.frag.riflesniperscope,WeaponBehavior,/Game/Cards/Weapons/Modifiers/DA_Fragment_Rifle_SniperScope.DA_Fragment_Rifle_SniperScope,,,,
 weapon.magsize,WeaponStat,MagSize,PercentMultiply,FALSE,,
 weapon.recoilvertical,WeaponStat,RecoilVertical,PercentMultiply,FALSE,,
 weapon.reloadtime,WeaponStat,ReloadTime,Additive,TRUE,,
+weapon.frag.critbonus,WeaponBehavior,/Game/Cards/Weapons/Modifiers/DA_Fragment_Rifle_CritOverkill.DA_Fragment_Rifle_CritOverkill,,,,
+weapon.frag.critlifesteal,WeaponBehavior,/Game/Cards/Weapons/Modifiers/DA_Fragment_Rifle_CritLifesteal.DA_Fragment_Rifle_CritLifesteal,,,,
+weapon.frag.critonreload,WeaponBehavior,/Game/Cards/Weapons/Modifiers/DA_Fragment_Rifle_CritOnReload.DA_Fragment_Rifle_CritOnReload,,,,
+weapon.frag.weakpointcrit,WeaponBehavior,/Game/Cards/Weapons/Modifiers/DA_Fragment_Rifle_WeakpointCrit.DA_Fragment_Rifle_WeakpointCrit,,,,
+weapon.frag.critonslide,WeaponBehavior,/Game/Cards/Weapons/Modifiers/DA_Fragment_Rifle_CritOnSlide.DA_Fragment_Rifle_CritOnSlide,,,,
+weapon.adsfov,WeaponStat,ADSFieldOfView,PercentMultiply,TRUE,,값이 작을수록 배율이 높다 — 강화 카드는 음수로 저작(RecoilVertical 규약과 동일). 사이트 파츠의 스탯 임계 진화(스코프)가 이 축을 읽는다.

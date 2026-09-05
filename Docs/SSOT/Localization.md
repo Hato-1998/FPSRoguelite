@@ -63,7 +63,12 @@
 
 - 매핑 = `Config/AuthoringSheets.json` (sheetId/gid/target/expectedHeader). 공유 폴더ID `1jdMK1VlVI2t71nMc89DWCPxuw-jQjnLv`.
 - 시트 권한 = "링크 보유자 보기 가능"(무인증 export URL — 2026-08-12 HTTP 200 검증). 민감해지면 서비스 계정 인증으로 승격.
-- **초기 시딩(리포→시트)은 테이블당 1회만**(마이그레이션 시점). 이후 시트=마스터, 동기화=단방향. 양방향 동기화 금지.
+- 🔁 **방향 개정 (2026-09-05, 사용자 결정)** — 마스터가 **시트 → 리포 CSV** 로 넘어왔다. 사유: 시트가 마스터면 카드 1장을 넣는 데 반드시 사람이 끼어야 해서 **자동화가 원천적으로 불가능**했고, 그게 카드 물량 로드맵(§7-6)의 병목이었다.
+  - **쓰는 길(자동화)** = `Scripts/authoring_sheet.py apply <변경셋.json>` → 리포 CSV. 설정 0.
+  - **미러링** = `Scripts/authoring_sheet.py push` → 시트(1회 설정 필요, `Docs/AuthoringSheetWriteback.md`).
+  - **읽는 길(사람이 시트에서 편집했을 때)** = 기존 `sync-authoring-csv.ps1` 그대로. 단 **로컬 CSV 가 매니페스트와 다르면 덮어쓰기를 거부**한다(`-Force` 로만 강제) — 자동화가 쓴 것을 조용히 잃지 않기 위해서다.
+  - **양쪽이 동시에 마스터인 상태는 여전히 금지**다. 위 가드 2개가 그것을 강제한다. 어느 쪽이 앞서 있는지는 `authoring_sheet.py status`.
+- ~~초기 시딩(리포→시트)은 테이블당 1회만. 이후 시트=마스터, 동기화=단방향~~ (위 개정으로 대체)
 - provenance = `Config/AuthoringSheets.manifest.json`(다운로드 UTC·sha256) — 스냅샷 커밋에 동봉. (Content/StringTables/ 안에 두면 UFS 스테이징에 걸려 pak에 실리므로 Config/에 둔다.)
 
 ## L-6. 경계
