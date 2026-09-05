@@ -431,9 +431,13 @@ connect_material_expressions(mask, "", scenetex, "")             # ✅ 0번 핀 
 |---|---|---|
 | 1 | **PowerShell 로 넘기면 `-ExecCmds` 의 따옴표가 벗겨진다** | `Cmd:` 줄도 `LogPython` 도 **아예 없음**. 에셋 레지스트리까지만 찍히고 idle |
 | 2 | **`-ExecCmds` 의 상대 경로가 엔진 바이너리 폴더 기준으로 풀린다** | `Could not load Python file 'D:/…/Engine/Binaries/Win64/Scripts/x.py' (resolved from 'Scripts/x.py')` |
+| 3 | **스크립트가 예외로 죽으면 `quit_editor()` 에 못 가서 영원히 idle** (2026-09-05, `MaterialStatistics` 필드명 오타 한 줄로 재현) | `LogPython: Error: Traceback …` 뒤로 `Cmd:` 없이 EOS 하트비트만 반복 |
+| 4 | **죽은 프로세스의 로그 리다이렉트가 파일을 잠가** 다음 실행의 `> 같은파일` 이 `Device or resource busy` 로 실패 → 명령 자체가 안 돈다 | 셸에 `Device or resource busy`, 에디터 로그엔 아무 기동 흔적 없음 |
 
-→ **정답 = `.bat` 파일 + 절대 경로.** (1)은 메모리 `automation-multi-test-plus-hangs` 가 이미 경고한 것이고,
-(2)는 이번에 새로 나왔다. 실물 = `Scripts/run_import_rifle_hardsurface.bat`(복셀 시절 `run_import_rifle_voxel.bat` 의 후속 — 복셀 트랙은 `4fc47fd7` 에서 폐기).
+→ **정답 = `.bat` 파일 + 절대 경로 + 스크립트 본문을 `try/finally: quit_editor()` 로 감싸기 + 실행마다 새 로그 이름.**
+(1)은 메모리 `automation-multi-test-plus-hangs` 가 이미 경고한 것이고, (2)는 2026-09-03 에 새로 나왔고, (3)(4)는 2026-09-05 복셀 유령
+임포트에서 (1)(2)를 **또** 밟은 끝에 추가됐다 — 이 표가 있는데도 밟은 이유는 `.bat` 을 안 쓰고 셸에서 직접 쳤기 때문이다.
+실물 = `Scripts/run_voxel_chomper_pipeline.bat`. 실물 = `Scripts/run_import_rifle_hardsurface.bat`(복셀 시절 `run_import_rifle_voxel.bat` 의 후속 — 복셀 트랙은 `4fc47fd7` 에서 폐기).
 
 🪤 **`.bat` 주석은 ASCII 로 쓸 것.** 한글 주석을 넣었더니 cmd 가 OEM 코드페이지로 읽어 파스가 깨지며
 `'Cmds' is not recognized` 같은 유령 에러를 뱉었다(임포트 자체는 됐지만 출력이 오염된다).
