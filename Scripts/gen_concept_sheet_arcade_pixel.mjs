@@ -534,7 +534,7 @@ function formBoard() {
   const grid = panel(
     T.h2('VOXEL GRID HIERARCHY  (1 m)') +
     ruler(5, P.wireWide, 'ENV 5cm', '환경(블로커·벽·프롭). 콜리전 셀 100cm·문턱 45cm·60cm 이 <b>전부 정수배</b>(20·9·12). 면은 평평, 격자는 머티리얼 선으로.') +
-    ruler(7.5, P.enemyRim, 'ENEMY 7.5cm', '적·픽업(쩝쩝이 기존값). 165cm 키 = 22층. 실루엣이 먼 거리에서도 덩어리로 읽히는 굵기.') +
+    ruler(7.5, P.enemyRim, 'ENEMY 7.5cm', '적·픽업(쩝쩝이). 시트 스프라이트 18층 = 135cm. 실루엣이 먼 거리에서도 덩어리로 읽히는 굵기.') +
     ruler(2.5, P.self, '1P GUN 2.5cm', '1인칭 총. 카메라 30~60cm 앞이라 적 격자의 1/3. 화면상 픽셀 크기는 적과 비슷해진다.') +
     T.sub('규칙 ① 한 오브젝트 안에서 격자는 하나(믹셀 금지). ② 클래스 사이 격자 차이는 허용 — 거리가 화면 픽셀 크기를 맞춰 준다. ③ 수치는 제안 초기값이며 PIE 육안으로 조정한다.'),
     '100%');
@@ -762,10 +762,10 @@ BBBBBBBBBBBBBBBBBBBBBBBBBBBBBB
     T.h2('LINEUP  (1px = 1cm)') +
     h('div', `display: flex; flex-direction: row; gap: 24px; align-items: flex-end; justify-content: space-between`,
       stage(PLAYER, { H: P.ally }, 'PLAYER 180', '아군 = 청록 아웃라인. 실루엣만 — 3P 바디는 NEON-V 트랙') +
-      stage(CHOMPER_OPEN, LEG_CH, 'CHOMPER 165', '일반 · 구 실루엣 · 22층 · 입 개폐 공격') +
+      stage(CHOMPER_OPEN, LEG_CH, 'CHOMPER 135', '일반 · 구 실루엣 · 18층(7.5cm) · 입 개폐 공격 · 시트 스프라이트 = 메시 정본') +
       stage(BEETLE, LEG_CH, 'BEETLE 90', '일반 · 각 실루엣 · 낮고 넓음 · ≤45cm 넘어감 아님(적)') +
       stage(SPIKE, LEG_CH, 'GLITCH 150', '일반 · 침 실루엣 · 빠름') +
-      stage(CHOMPER_OPEN, LEG_CH_ELITE, 'ELITE 215', '×1.3 · 림 #FF1E7A · 코어 2개 · GAS(ADR 0013)', cell * 1.3) +
+      stage(CHOMPER_OPEN, LEG_CH_ELITE, 'ELITE 175', '×1.3 · 림 #FF1E7A · 코어 2개 · GAS(ADR 0013)', cell * 1.3) +
       stage(BOSS, LEG_BOSS, 'CABINET CORE 240', '억제기/보스 = 캐비닛. 화면 = 얼굴. 파괴 = STAGE CLEAR')) +
     T.sub('라인업의 형태는 방향 제시다. 쩝쩝이 외 3종은 실루엣 패밀리 예시이며 실제 메시는 후속 행에서 저작한다.'),
     '100%');
