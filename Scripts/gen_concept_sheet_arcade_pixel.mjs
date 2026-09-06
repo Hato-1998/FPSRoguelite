@@ -828,3 +828,178 @@ const canvas = {
 };
 writeFileSync('canvas.json', JSON.stringify(canvas, null, 2));
 console.log('wrote canvas.json');
+
+// =====================================================================
+// 7. Map — 팩맨 미로 기반 탑다운 (Scripts/gen_pacmaze_proto.py MAZE 그대로) + 구석 특수 에리어 4곳(제안)
+// =====================================================================
+const MAZE = [
+  '############################', '#............##............#', '#.####.#####.##.#####.####.#',
+  '#.####.#####.##.#####.####.#', '#.####.#####.##.#####.####.#', '#..........................#',
+  '#.####.##.########.##.####.#', '#.####.##.########.##.####.#', '#......##....##....##......#',
+  '######.##### ## #####.######', '     #.##### ## #####.#     ', '     #.##          ##.#     ',
+  '     #.## ######## ##.#     ', '######.## #      # ##.######', '      .   #      #   .      ',
+  '######.## #      # ##.######', '     #.## ######## ##.#     ', '     #.##          ##.#     ',
+  '     #.## ######## ##.#     ', '######.## ######## ##.######', '#............##............#',
+  '#.####.#####.##.#####.####.#', '#.####.#####.##.#####.####.#', '#...##................##...#',
+  '###.##.##.########.##.##.###', '###.##.##.########.##.##.###', '#......##....##....##......#',
+  '#.##########.##.##########.#', '#.##########.##.##########.#', '#..........................#',
+  '############################'];
+const MCOLS = 28, MROWS = 31;
+// 구석 특수 에리어(제안): 3×3 타일을 파낸다
+const ROOMS = [
+  { r: 1, c: 1, key: 'A', name: 'POWER-UP BOOTH', tint: '#1F1A3A', icon: () => px(CARD, LEG_CARD, 4, 0, 0), iw: 12 * 4, col: P.uiReward, note: '레벨업 카드 제단 — 아케이드 파워업 캡슐. 카드 3택을 여기서 뽑게 하면 "가서 받는" 동선이 생긴다' },
+  { r: 1, c: 24, key: 'B', name: 'CONTINUE BOOTH', tint: '#171F36', icon: () => px(HEART, { C: P.uiOk }, 5, 0, 0), iw: 8 * 5, col: P.uiOk, note: 'DBNO 부활·회복 부스. CONTINUE? 카운트다운의 물리적 자리(차가운 쪽 = 아군 계열)' },
+  { r: 27, c: 1, key: 'C', name: 'BONUS ZONE', tint: '#241D2E', icon: () => px(COIN, LEG_COIN, 5, 0, 0), iw: 8 * 5, col: P.uiReward, note: '보너스 스테이지 — 미션 HoldZone/CollectOrbs 가 붙는 자리. 코인 러시·시간제 보상' },
+  { r: 27, c: 24, key: 'D', name: 'WEAPON CABINET', tint: '#1D1F38', icon: () => px(CABINET, LEG_CAB, 3, 0, 0), iw: 12 * 3, col: P.uiOk, note: '무기 언락·교체 캐비닛(UnlockableFeatures 경로). 아케이드 캐비닛 = 상호작용 오브젝트' },
+];
+const inRoom = (r, c) => ROOMS.find(R => r >= R.r && r < R.r + 3 && c >= R.c && c < R.c + 3);
+const cellAt = (r, c) => (r < 0 || r >= MROWS || c < 0 || c >= MCOLS) ? ' ' : MAZE[r][c];
+const isHouse = (r, c) => r >= 13 && r <= 15 && c >= 11 && c <= 16;
+const isWalk = (r, c) => { if (inRoom(r, c)) return true; if (isHouse(r, c)) return false; const ch = cellAt(r, c); return ch === '.' || (ch === ' ' && r >= 9 && r <= 19 && c >= 0 && c < MCOLS); };
+
+function mapBoard() {
+  const c = 24, W = MCOLS * c, H = MROWS * c;
+  let s = `<rect width="${W}" height="${H}" fill="${P.void}"></rect>`;
+  for (let r = 0; r < MROWS; r++) for (let col = 0; col < MCOLS; col++) {
+    const x = col * c, y = r * c, ch = cellAt(r, col), room = inRoom(r, col);
+    if (isHouse(r, col)) { s += `<rect x="${x}" y="${y}" width="${c}" height="${c}" fill="${P.floor}"></rect>`; continue; }
+    if (room) { s += `<rect x="${x}" y="${y}" width="${c}" height="${c}" fill="${room.tint}"></rect>`; continue; }
+    if (ch === '#') {
+      s += `<rect x="${x}" y="${y}" width="${c}" height="${c}" fill="${P.side}"></rect><rect x="${x + 0.5}" y="${y + 0.5}" width="${c - 1}" height="${c - 1}" fill="none" stroke="${P.floorDark}" stroke-width="1"></rect>`;
+      if (cellAt(r - 1, col) !== '#') s += `<rect x="${x}" y="${y}" width="${c}" height="3" fill="${P.top}"></rect>`;
+    } else if (isWalk(r, col)) {
+      s += `<rect x="${x}" y="${y}" width="${c}" height="${c}" fill="${P.floorDark}"></rect>`;
+    }
+  }
+  // 통로 가이드 라인(배선) — 열린 이웃 쪽으로 반칸씩, 정션 비아
+  for (let r = 0; r < MROWS; r++) for (let col = 0; col < MCOLS; col++) {
+    if (!isWalk(r, col) || inRoom(r, col)) continue;
+    const cx = col * c + c / 2, cy = r * c + c / 2, w = 3;
+    const nb = [[0, -1], [0, 1], [-1, 0], [1, 0]].map(([dr, dc]) => isWalk(r + dr, col + dc));
+    const tunnel = r === 14 && (col <= 5 || col >= 22);
+    const colr = tunnel ? P.wireFar : P.wire;
+    if (nb[0]) s += `<rect x="${cx - c / 2}" y="${cy - w / 2}" width="${c / 2}" height="${w}" fill="${colr}"></rect>`;
+    if (nb[1]) s += `<rect x="${cx}" y="${cy - w / 2}" width="${c / 2}" height="${w}" fill="${colr}"></rect>`;
+    if (nb[2]) s += `<rect x="${cx - w / 2}" y="${cy - c / 2}" width="${w}" height="${c / 2}" fill="${colr}"></rect>`;
+    if (nb[3]) s += `<rect x="${cx - w / 2}" y="${cy}" width="${w}" height="${c / 2}" fill="${colr}"></rect>`;
+    if (nb.filter(Boolean).length >= 3) s += `<rect x="${cx - 4}" y="${cy - 4}" width="8" height="8" fill="${P.via}"></rect>`;
+  }
+  s += `<g font-family="'Press Start 2P', monospace" font-size="7" fill="${P.uiSub}"><text x="4" y="${14 * c - 6}">WARP</text><text x="${23 * c + 6}" y="${14 * c - 6}">WARP</text></g>`;
+  // 중앙 고스트 하우스 = 캐비닛 코어(억제기) + 글리치 스폰
+  s += `<rect x="${10 * c}" y="${12 * c}" width="${8 * c}" height="${5 * c}" fill="none" stroke="${P.destr}" stroke-width="2" opacity="0.7"></rect>`;
+  s += `<g transform="translate(${12.5 * c} ${12.6 * c})">${px(CABINET, LEG_CAB, 6, 0, 0)}</g>`;
+  s += `<rect x="${13.5 * c + 8}" y="${13 * c + 4}" width="14" height="10" fill="${P.destrHot}"></rect>`;
+  s += px(GLITCH, LEG_GLITCH, 2, 10.4 * c, 13.4 * c) + px(GLITCH, LEG_GLITCH, 2, 16.6 * c, 13.4 * c);
+  ROOMS.forEach(R => {
+    const x = R.c * c, y = R.r * c;
+    s += `<rect x="${x + 1}" y="${y + 1}" width="${3 * c - 2}" height="${3 * c - 2}" fill="none" stroke="${R.col}" stroke-width="2"></rect>`;
+    s += `<g transform="translate(${x + (3 * c - R.iw) / 2} ${y + 10})">${R.icon()}</g>`;
+    s += `<text x="${x + 3 * c / 2}" y="${y + 3 * c - 5}" text-anchor="middle" font-family="'Press Start 2P', monospace" font-size="9" fill="${R.col}">${R.key}</text>`;
+  });
+  const START = `
+..HH..
+.HHHH.
+..HH..
+.HHHH.
+.H..H.`;
+  s += `<g transform="translate(${13.5 * c - 8} ${23 * c + 4})">${px(START, { H: P.ally }, 3, 0, 0)}</g><text x="${13.5 * c + 14}" y="${23 * c + 16}" font-family="'Press Start 2P', monospace" font-size="7" fill="${P.ally}">START</text>`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" shape-rendering="crispEdges">${s}</svg>`;
+
+  const row = (k, col, name, note) => h('div', `display: flex; flex-direction: row; gap: 12px; align-items: flex-start`,
+    h('div', `width: 28px; height: 28px; border: 2px solid ${col}; color: ${col}; font-family: 'Press Start 2P', monospace; font-size: 11px; display: flex; align-items: center; justify-content: center; flex-shrink: 0`, k) +
+    h('div', `display: flex; flex-direction: column; gap: 3px`, h('div', `font-family: 'Press Start 2P', monospace; font-size: 9px; line-height: 13px; color: ${col}`, name) + h('div', `font-size: 12px; line-height: 17px; color: ${P.uiText}`, note)));
+  const legend = panel(
+    T.h2('PAC-MAZE  28 x 31 TILES') +
+    T.kr('<b>통로 = 1타일 폭.</b> 프로토 값(2026-09-03 사용자): 타일 <b>10 m</b> · 벽 <b>12 m</b>. 벽은 복셀 면(§A-3-1) + 상단 엣지 1줄, 통로 바닥은 가운데 배선 1줄(가이드 라인, 정션 = 비아). 배선은 통행 판독 규칙이라 유지.') +
+    T.kr('<b>중앙 고스트 하우스 = 캐비닛 코어(억제기) + 글리치 스폰.</b> 팩맨의 유령 집이 이 게임에선 스테이지 보스 코어 자리다 — 부수면 STAGE CLEAR. 좌우 <b>워프 터널</b>은 유지(양쪽 끝 연결).') +
+    h('div', `height: 2px; background: ${P.side}`) +
+    T.h2('CORNER SPECIAL AREAS  (제안 — 지금은 없음)') +
+    T.sub('팩맨의 파워 펠릿 자리. 구석 블록 3×3 을 파내 방으로 만든다. 내용은 사용자 결정 — 아래는 기존 시스템에 붙는 후보 4종.') +
+    ROOMS.map(R => row(R.key, R.col, R.name, R.note)).join('') +
+    T.sub('방 바닥 색은 substrate 안에서 살짝 다른 면(각 방 고유 틴트), 프레임·아이콘만 UI 대역. 방 안 적 스폰 여부·안전지대 여부는 결정 대상.') +
+    h('div', `height: 2px; background: ${P.side}`) +
+    T.h2('FLAGS') +
+    T.kr('① <b>규모</b>: 타일 10 m 면 280 × 310 m — ADR 0012 상한(160 × 160 m · 25,600 셀)의 <b>약 3.4배</b>(86,800 셀). 타일 5 m(140 × 155 m)면 맞는다. 컨셉은 비율만 정한다 — <b>타일 크기는 ADR 0012 개정 또는 5 m 로 별도 결정</b>.') +
+    T.kr('② <b>위상</b>: ADR 0010 D1(다중 코어 교차 동선)이 통로 미로로 바뀐다 — 스타일이 아니라 위상 결정이라 별도 ADR(0017) 대상.'),
+    640);
+  const body = h('div', `display: flex; flex-direction: column; gap: 20px; padding: 32px; width: 1440px; box-sizing: border-box; background: ${P.void}`,
+    h('div', `display: flex; flex-direction: row; gap: 20px; align-items: baseline`, T.h1('ARENA MAP  ·  PAC-MAZE') + T.sub('Scripts/gen_pacmaze_proto.py 의 MAZE 그대로. 구석 3×3 만 제안으로 파냈다.')) +
+    h('div', `display: flex; flex-direction: row; gap: 24px; align-items: flex-start`, h('div', `flex-shrink: 0; border: 2px solid ${P.side}`, svg) + legend));
+  return doc(body);
+}
+
+// =====================================================================
+// 8. Corridor — 1인칭 통로 뷰 (10 m 폭 · 12 m 벽) + 구석 특수 에리어 입구
+// =====================================================================
+function corridorBoard() {
+  const W = 1440, H = 810, VX = 720, VY = 400;
+  const fw = 120, fwallTop = VY - 120, fwallBot = VY + 12, nearTop = -200;
+  let s = `<rect width="${W}" height="${H}" fill="${P.void}"></rect>`;
+  s += parallax(W, fwallTop + 40, 5, { dense: 0.7 });
+  s += `<polygon points="0,${H} ${W},${H} ${VX + fw / 2},${fwallBot} ${VX - fw / 2},${fwallBot}" fill="${P.floorDark}"></polygon>`;
+  s += `<polygon points="0,${H} ${VX - fw / 2},${fwallBot} ${VX - fw / 2},${fwallTop} 0,${nearTop}" fill="${P.side}"></polygon>`;
+  s += `<polygon points="${W},${H} ${VX + fw / 2},${fwallBot} ${VX + fw / 2},${fwallTop} ${W},${nearTop}" fill="${P.side}"></polygon>`;
+  s += `<polygon points="0,${nearTop} ${VX - fw / 2},${fwallTop} ${VX - fw / 2},${fwallTop + 3} 0,${nearTop + 5}" fill="${P.top}"></polygon>`;
+  s += `<polygon points="${W},${nearTop} ${VX + fw / 2},${fwallTop} ${VX + fw / 2},${fwallTop + 3} ${W},${nearTop + 5}" fill="${P.top}"></polygon>`;
+  s += `<g stroke="${P.floorDark}" stroke-width="1" opacity="0.9">`;
+  const depths = [0.04, 0.09, 0.15, 0.22, 0.3, 0.4, 0.52, 0.66, 0.82, 1.0];
+  depths.forEach(t => {
+    const xl = (VX - fw / 2) * t, xr = W - (W - VX - fw / 2) * t;
+    const yb = H - (H - fwallBot) * t, yt = nearTop + (fwallTop - nearTop) * t;
+    s += `<line x1="${xl}" y1="${yb}" x2="${xl}" y2="${yt}"></line><line x1="${xr}" y1="${yb}" x2="${xr}" y2="${yt}"></line><line x1="${xl}" y1="${yb}" x2="${xr}" y2="${yb}"></line>`;
+  });
+  [0.15, 0.3, 0.45, 0.6, 0.75, 0.9].forEach(k => {
+    const y0 = H - (H - nearTop) * k, y1 = fwallBot - (fwallBot - fwallTop) * k;
+    s += `<line x1="0" y1="${y0}" x2="${VX - fw / 2}" y2="${y1}"></line><line x1="${W}" y1="${y0}" x2="${VX + fw / 2}" y2="${y1}"></line>`;
+  });
+  s += `</g>`;
+  // 먼 끝 T자 교차로
+  s += `<rect x="${VX - fw / 2}" y="${fwallTop}" width="${fw}" height="${fwallBot - fwallTop}" fill="${P.floor}"></rect><rect x="${VX - fw / 2}" y="${fwallTop}" width="${fw}" height="2" fill="${P.top}"></rect>`;
+  s += `<rect x="${VX - fw / 2 - 40}" y="${fwallBot - 6}" width="${fw + 80}" height="6" fill="${P.floorDark}"></rect>`;
+  // 가이드 라인 + 펄스 + 비아
+  s += `<polygon points="${VX - 12},${H} ${VX + 12},${H} ${VX + 2},${fwallBot} ${VX - 2},${fwallBot}" fill="${P.wire}"></polygon>`;
+  [0.12, 0.34, 0.62].forEach(t => { const y = H - (H - fwallBot) * t, w = 26 - 20 * t; s += `<rect x="${VX - w / 2}" y="${y - w / 2}" width="${w}" height="${w / 2}" fill="${P.wireWide}"></rect>`; });
+  s += `<rect x="${VX - 6}" y="${fwallBot - 4}" width="12" height="8" fill="${P.via}"></rect>`;
+  // 우측 벽 — 구석 특수 에리어(A) 입구
+  const t0 = 0.36, t1 = 0.5;
+  const xr0 = W - (W - VX - fw / 2) * t0, xr1 = W - (W - VX - fw / 2) * t1;
+  const yb0 = H - (H - fwallBot) * t0, yb1 = H - (H - fwallBot) * t1;
+  const yt0 = yb0 - 220 * (1 - t0), yt1 = yb1 - 220 * (1 - t1);
+  s += `<polygon points="${xr0},${yb0} ${xr1},${yb1} ${xr1},${yt1} ${xr0},${yt0}" fill="#1F1A3A"></polygon>`;
+  s += `<polygon points="${xr0},${yb0} ${xr1},${yb1} ${xr1},${yt1} ${xr0},${yt0}" fill="none" stroke="${P.uiReward}" stroke-width="3"></polygon>`;
+  s += `<g transform="translate(${(xr0 + xr1) / 2 - 24} ${(yt0 + yt1) / 2 + 10})">${px(CARD, LEG_CARD, 4, 0, 0)}</g>`;
+  s += `<text x="${(xr0 + xr1) / 2}" y="${yt1 - 12}" text-anchor="middle" font-family="'Press Start 2P', monospace" font-size="8" fill="${P.uiReward}">POWER-UP</text>`;
+  const chompS = (x, y, c, open, elite = false) => px(open ? CHOMPER_OPEN : CHOMPER_CLOSED, elite ? LEG_CH_ELITE : LEG_CH, c, x, y);
+  s += chompS(VX - 22, fwallBot - 30, 2, false) + chompS(VX + 6, fwallBot - 32, 2, false) + chompS(VX - 60, fwallBot + 6, 3, false) + chompS(VX + 30, fwallBot + 20, 4, true);
+  s += chompS(VX - 200, fwallBot + 60, 6, true) + chompS(VX + 120, fwallBot + 110, 8, true, true);
+  s += chompS(VX - 520, fwallBot + 140, 11, true);
+  const ALLY = `
+...HH...
+..HHHH..
+...HH...
+.HHHHHH.
+HHHHHHHH
+H.HHHH.H
+..HHHH..
+..H..H..
+..H..H..
+.HH..HH.`;
+  s += `<g transform="translate(${VX + 300} ${fwallBot + 50})">${px(ALLY, { H: P.ally }, 5, 0, 0)}<text x="20" y="-8" text-anchor="middle" font-family="'Press Start 2P', monospace" font-size="9" fill="${P.ally}">P3</text></g>`;
+  s += px(GUN, LEG_GUN, 12, 860, 440);
+  s += px(FLASH, LEG_FLASH, 9, 968, 372);
+  s += `<g font-family="'Press Start 2P', monospace" fill="${P.uiText}"><text x="${VX}" y="44" text-anchor="middle" font-size="14">STAGE 1</text><text x="${VX}" y="66" text-anchor="middle" font-size="9" fill="${P.uiSub}">WAVE 03   01:48</text></g>`;
+  s += `<g fill="${P.uiText}"><rect x="${VX - 1}" y="${VY - 8}" width="3" height="10"></rect><rect x="${VX - 1}" y="${VY + 18}" width="3" height="10"></rect><rect x="${VX - 18}" y="${VY + 9}" width="10" height="3"></rect><rect x="${VX + 8}" y="${VY + 9}" width="10" height="3"></rect></g>`;
+  s += `<defs><pattern id="scan4" width="4" height="4" patternUnits="userSpaceOnUse"><rect width="4" height="2" fill="#000" opacity="0.15"></rect></pattern><radialGradient id="vig4" cx="50%" cy="50%" r="72%"><stop offset="60%" stop-color="#000" stop-opacity="0"></stop><stop offset="100%" stop-color="#000" stop-opacity="0.55"></stop></radialGradient></defs>`;
+  s += `<rect width="${W}" height="${H}" fill="url(#scan4)"></rect><rect width="${W}" height="${H}" fill="url(#vig4)"></rect>`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" shape-rendering="crispEdges">${s}</svg>`;
+  return doc(h('div', `width: ${W}px; height: ${H}px; background: ${P.void}; overflow: hidden`, svg));
+}
+
+out('Map.dc.html', mapBoard());
+out('Corridor.dc.html', corridorBoard());
+canvas.artboards.push(
+  { file: 'Map.dc.html', title: '7 · 아레나 맵 (팩맨 미로 + 구석 특수 에리어)', x: 0, y: 3200, w: 1440, h: 900 },
+  { file: 'Corridor.dc.html', title: '8 · 통로 1P 뷰 + 특수 에리어 입구', x: 1560, y: 3200, w: 1440, h: 810 });
+canvas.annotations.push({ id: 'map-note', x: 0, y: 3110, w: 900, text: '맵 = 팩맨 미로 기반(사용자 2026-09-06). 통로 1타일 폭, 중앙 고스트 하우스 = 캐비닛 코어, 구석 4곳 = 특수 에리어(지금은 없음 → 제안 A~D, 내용은 사용자 결정). 타일 10 m 면 ADR 0012 규모 상한 3.4배 — 5 m 또는 ADR 개정 필요.' });
+writeFileSync('canvas.json', JSON.stringify(canvas, null, 2));
+console.log('wrote canvas.json (8 artboards)');
