@@ -12,7 +12,7 @@
 #   MI_EnemyVoxel_Chomper    — 위 머티리얼의 인스턴스(오버라이드 없음). 색·선폭 조정은 여기서(사용자).
 #   SM_EnemyVoxel_Chomper    — 슬롯 0 에 MI 배선.
 #
-# 요소 ID / 그룹 계약 정본 = Scripts/gen_voxel_chomper.py 헤더. JAW = {1,4,8,9,10,11}.
+# 요소 ID / 그룹 계약 정본 = Scripts/gen_voxel_chomper.py 헤더. JAW = {1,4,8,9,10,11} (8 = 입선 띠).
 # JawOpen 은 지금은 **스칼라 파라미터**(에디터에서 슬라이더로 뻐끔 확인용). 런타임 공격 연동은 후속 —
 #   FPSRAnimCPDParams.h 슬롯 0(StateId)·1(EnterTime)·2(Rate) 로 JawOpen 을 (Time-EnterTime)*Rate 의 함수로 바꾸면 된다
 #   (author_proto_state_material.py S4 배선과 같은 방식). 휴식(JawOpen=0) 변위 0 = C0-at-entry 계약 유지.
@@ -30,22 +30,22 @@ EAL = unreal.EditorAssetLibrary
 PROBLEMS = []
 
 # gen_voxel_chomper.py 와 맞춘 계약값(생성기 콘솔이 SEAM_Z_CM / JAW_DROP_CM 을 찍는다)
-JAW_DROP_CM = 37.5
+JAW_DROP_CM = 30.0   # = gen_voxel_chomper.JAW_DROP_VOX(4) × VOXEL(7.5)
 
 # 기본색 — 적 대역(ArtDirection A-3-4 뜨거운 쪽) 안에서 미리보기 값과 같게. 확정은 사용자(MI).
-COLORS = [
-    ("ColorHead",       (0.98, 0.46, 0.76)),
-    ("ColorJaw",        (0.92, 0.38, 0.68)),
-    ("ColorSclera",     (0.97, 0.97, 1.00)),
-    ("ColorPupil",      (0.16, 0.04, 0.14)),   # 어두운 자두 — 아군 파랑 예약(A-3-5) 회피. 파랑 원하면 MI 에서
-    ("ColorCore",       (1.00, 0.12, 0.48)),
-    ("ColorUpperTooth", (1.00, 1.00, 0.94)),
-    ("ColorDark",       (0.17, 0.05, 0.15)),
-    ("ColorArm",        (0.95, 0.42, 0.72)),
-    ("ColorSkirt",      (0.86, 0.31, 0.63)),
-    ("ColorTongue",     (0.96, 0.16, 0.22)),
-    ("ColorLowerTooth", (1.00, 1.00, 0.94)),
-    ("ColorDarkJaw",    (0.17, 0.05, 0.15)),
+COLORS = [   # 순서 = 요소 ID. 값 = 컨셉 시트 팔레트(gen_concept_sheet_arcade_pixel.mjs LEG_CH / P.*), gen_voxel_chomper.PREVIEW_KD 와 동일
+    ("ColorHead",       (0.620, 0.271, 0.376)),   # #9E4560 enemyBody
+    ("ColorJaw",        (0.541, 0.227, 0.322)),   # #8A3A52
+    ("ColorSclera",     (0.910, 0.894, 0.941)),   # #E8E4F0
+    ("ColorPupil",      (0.102, 0.063, 0.141)),   # #1A1024
+    ("ColorCore",       (1.000, 0.420, 0.173)),   # #FF6B2C 적 공격 텔레그래프(A-3-4)
+    ("ColorUpperTooth", (0.918, 0.875, 0.910)),   # #EADFE8
+    ("ColorDark",       (0.165, 0.055, 0.094)),   # #2A0E18 입천장
+    ("ColorArm",        (0.620, 0.271, 0.376)),   # 예약(1차 디자인 팔) — 미사용
+    ("ColorSeam",       (0.431, 0.180, 0.267)),   # #6E2E44 enemyShade 닫힌 입선 띠
+    ("ColorTongue",     (0.784, 0.196, 0.290)),   # #C8324A
+    ("ColorLowerTooth", (0.918, 0.875, 0.910)),
+    ("ColorDarkJaw",    (0.165, 0.055, 0.094)),   # 입 안 보울
 ]
 
 

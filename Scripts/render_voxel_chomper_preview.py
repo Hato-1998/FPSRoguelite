@@ -35,7 +35,7 @@ def tune_materials():
             continue
         bsdf.inputs["Roughness"].default_value = 0.55
         if m.name.startswith("E4_"):   # 코어 발광
-            bsdf.inputs["Emission Color"].default_value = (1.0, 0.12, 0.48, 1.0)
+            bsdf.inputs["Emission Color"].default_value = (1.0, 0.42, 0.17, 1.0)
             bsdf.inputs["Emission Strength"].default_value = 6.0
 
 
