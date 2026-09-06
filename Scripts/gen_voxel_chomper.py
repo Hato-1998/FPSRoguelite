@@ -1,8 +1,8 @@
 # gen_voxel_chomper.py — 복셀 유령 적 "쩝쩝이(Chomper)" 절차 생성 (ADR 0016 D7 ① 경로의 기준 구현)
 #
 # 2026-09-06 재설계: 컨셉 시트(Scripts/gen_concept_sheet_arcade_pixel.mjs 의 CHOMPER_CLOSED / CHOMPER_OPEN 16×18)를
-# **단일 소스**로 삼아 3D 로 올린다. 실루엣 = 스프라이트 행 반폭을 반경으로 한 회전체, 얼굴 = 정면(+X) 표면에 스프라이트
-# 열을 투영, 밑단 = 스프라이트 하단 2행의 홈 패턴을 원주 방향으로 반복. 1차 디자인(팔·정수리 술·눈썹·입선 홈·이빨 13개)은
+# **단일 소스**로 삼아 3D 로 올린다. 실루엣 = 행 반폭을 b 로 한 초타원 단면(N=6: 앞면·옆면 평평, 모서리만 둥글게 — 얼굴이
+# 한 평면에 놓여 좌우가 같다), 얼굴 = 정면(+X) 평면에 스프라이트 열을 그대로, 밑단 = 하단 2행의 홈 패턴을 |각도| 기준으로 반복. 1차 디자인(팔·정수리 술·눈썹·입선 홈·이빨 13개)은
 # 사용자 판정 "너무 디테일하다"(2026-09-06)로 폐기 — ArtDirection §B-5 "덩어리가 먼저, 디테일은 복셀 1칸 단위로만".
 #
 # 스켈레톤·VAT 없음 — 요소(Element) ID 를 UV.u 정수 타일로 인코딩(ElementId = floor(u)) 하고 머티리얼(Custom HLSL WPO)이
@@ -36,7 +36,10 @@ from collections import deque
 VOXEL = 7.5            # cm. ArtDirection §B-3 적 격자. 스프라이트 18행 → 135cm. (라인업 표기 "165·22층"은 1차 디자인 값 — 시트 스프라이트가 정본)
 JAW_DROP_VOX = 4       # 공격 시 턱 하강(복셀) = 열림 스프라이트의 입 안 4행. 30cm
 SKIRT_TEETH = 9        # 밑단 홈 반복 수(원주 방향). 정면 16칸에 홈 3개 = 스프라이트와 같은 밀도
-BOWL_R, HOLLOW_R = 5.5, 6.0
+BOWL_R = 5.5
+DEPTH_MAX = 5.9        # 앞뒤 반깊이(복셀). 몸통 폭 16 에 깊이 12 — 레퍼런스 램프처럼 앞면이 평평한 상자 단면
+SHAPE_N = 6            # 단면 = 초타원 |x/a|^N + |y/b|^N ≤ 1. N=6 → 앞면·옆면 평평, 모서리만 1칸 둥글게.
+                       # 원(N=2)이면 눈 열이 곡면에 투영돼 안팎 열 깊이가 달라진다(사용자 판정 "짝짝이", 2026-09-06)
 
 # 컨셉 시트 스프라이트(정본 = gen_concept_sheet_arcade_pixel.mjs). 위가 정수리. H 머리 J 턱 S 입선/음영 W 흰자 P 동공.
 CHOMPER_CLOSED = """
@@ -105,6 +108,15 @@ def in_disc(ix, iy, r):
     return cc(ix) ** 2 + cc(iy) ** 2 <= r * r
 
 
+def in_shape(ix, iy, half_w, inset=0.0):
+    """단면 판정. b = 행 반폭(스프라이트), a = min(DEPTH_MAX, b). 앞면(+X)이 평평해야 얼굴이 한 평면에 놓인다."""
+    b = half_w - inset
+    a = min(DEPTH_MAX, half_w) - inset
+    if a <= 0 or b <= 0:
+        return False
+    return (abs(cc(ix)) / a) ** SHAPE_N + (abs(cc(iy)) / b) ** SHAPE_N <= 1.0
+
+
 def angle_deg(ix, iy):
     return math.degrees(math.atan2(cc(iy), cc(ix)))
 
@@ -130,7 +142,7 @@ def build_cells():
     def put(ix, iy, iz, e, g):
         cells[(ix, iy, iz)] = (e, g)
 
-    # 1) 회전체: 행 반폭 = 반경. 밑단 2행은 바깥 링만 + 원주 홈 패턴(스프라이트 홈 폭 2/3 → 9회 반복)
+    # 1) 몸통: 행 반폭 = 단면 b(초타원, 앞면 평평). 밑단 2행은 바깥 2칸 링만 + 홈 패턴(스프라이트 홈 폭 2/3 → 9회 반복)
     for iz in range(N_LAYERS):
         row = row_of(iz)
         r = row_radius(row)
@@ -139,12 +151,13 @@ def build_cells():
         hem = iz <= 1
         for ix in range(-span, span):
             for iy in range(-span, span):
-                if not in_disc(ix, iy, r):
+                if not in_shape(ix, iy, r):
                     continue
                 if hem:
-                    if in_disc(ix, iy, HOLLOW_R):
+                    if in_shape(ix, iy, r, inset=2.0):
                         continue
-                    t = ((angle_deg(ix, iy) / 360.0) % 1.0) * SKIRT_TEETH % 1.0
+                    # 홈 패턴은 |각도| 기준 — 부호 있는 각도를 쓰면 좌우 홈 위치가 어긋난다(대칭 단언이 잡는다)
+                    t = (abs(angle_deg(ix, iy)) / 360.0) * SKIRT_TEETH % 1.0
                     if t >= (0.7 if iz == 1 else 0.45):
                         continue
                 put(ix, iy, iz, base, grp)
@@ -178,14 +191,15 @@ def build_cells():
         for iy in (-1, 0):
             put(ix, iy, SEAM_IZ, E_CORE, G_JAW)
 
-    # 4) 이빨 맞물림: 아랫니(턱) = 머리 밑층 구멍에 / 윗니(머리) = 입선 띠 구멍에. 정면 4개씩(스프라이트 열 1·5·10·14)
-    r_teeth = row_radius(row_of(SEAM_IZ)) - 1.5
+    # 4) 이빨 맞물림: 앞면 벽 바로 뒤 열(ix = 앞면-1)에 스프라이트 열 1·5·10·14 그대로 — 평면이라 좌우 대칭이 자동
+    #    아랫니(턱 소속) = 머리 밑층의 그 자리 / 윗니(머리 소속) = 입선 띠 층의 같은 자리(위아래로 쌓임 → 열리면 3칸 벌어진다)
     for c in TOOTH_COLS:
-        deg = math.degrees(math.asin(max(-1.0, min(1.0, cc(col_to_iy(c)) / r_teeth))))
-        ix, iy = ring_cell_at(r_teeth, deg)
-        put(ix, iy, HEAD_IZ, E_LTOOTH, G_JAW)
-        ix2, iy2 = ring_cell_at(r_teeth, deg + (9 if deg >= 0 else -9))   # 윗니는 옆으로 반 칸 어긋나게
-        put(ix2, iy2, SEAM_IZ, E_UTOOTH, G_HEAD)
+        iy = col_to_iy(c)
+        fx = front_ix(iy, HEAD_IZ)
+        if fx is None:
+            continue
+        put(fx - 1, iy, HEAD_IZ, E_LTOOTH, G_JAW)
+        put(fx - 1, iy, SEAM_IZ, E_UTOOTH, G_HEAD)
     return cells, bowl
 
 
@@ -312,6 +326,10 @@ def report_elements(tag, faces):
 def main(out_dir):
     os.makedirs(out_dir, exist_ok=True)
     cells, dark = build_cells()
+    # 좌우 대칭 단언(iy ↔ -1-iy): 눈·이빨·홈이 한 칸이라도 어긋나면 여기서 죽는다
+    asym = [k for k, v in cells.items() if cells.get((k[0], -1 - k[1], k[2])) != v]
+    assert not asym, f"left/right asymmetry: {len(asym)} cells, e.g. {asym[:5]}"
+    print(f"[gen] symmetry OK")
     print(f"[gen] sprite {SPR_W}x{N_LAYERS} -> cells={len(cells)} head={sum(1 for c in cells.values() if c[1] == G_HEAD)} "
           f"jaw={sum(1 for c in cells.values() if c[1] == G_JAW)}  height={N_LAYERS * VOXEL:.1f}cm width={2 * row_radius(row_of(SEAM_IZ)) * VOXEL:.0f}cm")
 
