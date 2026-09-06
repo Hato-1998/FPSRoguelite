@@ -1,0 +1,820 @@
+// 산출 = Docs/Architecture/0016 시각 부록(아티팩트 「FPSRoguelite Arcade Pixel Concept Sheet」). 실행: 작업 폴더에서 `node gen_concept_sheet_arcade_pixel.mjs` → *.dc.html + canvas.json → design 스킬 seed-canvas.mjs 로 조립.
+// 컨셉 시트 아트보드 생성기 — ASCII 픽셀맵 → SVG rect. 산출 = *.dc.html + canvas.json
+import { writeFileSync } from 'node:fs';
+
+// ---------- 팔레트 (Docs/SSOT/ArtDirection.md §A-3 그대로) ----------
+const P = {
+  void: '#0A0912', floorDark: '#151329', floor: '#221E3D', side: '#332B57', top: '#41386B',
+  wireFar: '#1E5A66', wire: '#2A8A96', wireWide: '#39B8B0', via: '#5FE0D2',
+  destrFar: '#6FA82E', destr: '#9BE33C', destrHot: '#C8FF5A',
+  enemyRim: '#FF3B4E', enemyTel: '#FF6B2C', elite: '#FF1E7A',
+  ally: '#4FD8FF', allyPing: '#2E9BFF', self: '#8B6BFF',
+  plumDark: '#5A2E63', plum: '#9B3F86',
+  uiText: '#EAF6FF', uiSub: '#8FA8C4', uiOk: '#5FE0D2', uiReward: '#FFC24A', uiWarn: '#FF4D5E',
+  // 캐릭터 대역(V25-70·S30-60) 안의 적 몸통 — 파일럿 MI 색은 사용자 확정 대기(ART-후속)
+  enemyBody: '#9E4560', enemyShade: '#6E2E44', tooth: '#EADFE8', eyeW: '#E8E4F0', pupil: '#1A1024', tongue: '#C8324A',
+  gun: '#2A2545', gunDark: '#1B1830', gunLight: '#3B3560',
+  flash: '#FFF3C4', flash2: '#FFC24A',
+};
+
+// ---------- 픽셀맵 → rect (가로 런 병합) ----------
+function px(map, legend, cell, ox = 0, oy = 0, extra = '') {
+  const rows = map.trim().split('\n').map(r => r.replace(/\s+$/, ''));
+  let out = '';
+  rows.forEach((row, y) => {
+    let x = 0;
+    while (x < row.length) {
+      const ch = row[x];
+      if (ch === '.' || !(ch in legend)) { x++; continue; }
+      let x2 = x;
+      while (x2 + 1 < row.length && row[x2 + 1] === ch) x2++;
+      out += `<rect x="${ox + x * cell}" y="${oy + y * cell}" width="${(x2 - x + 1) * cell}" height="${cell}" fill="${legend[ch]}"${extra}></rect>`;
+      x = x2 + 1;
+    }
+  });
+  return out;
+}
+const dims = (map) => { const rows = map.trim().split('\n'); return [Math.max(...rows.map(r => r.trimEnd().length)), rows.length]; };
+
+// ---------- 스프라이트 ----------
+const CHOMPER_OPEN = `
+......HHHH......
+....HHHHHHHH....
+...HHHHHHHHHH...
+..HHHHHHHHHHHH..
+.HHHHHHHHHHHHHH.
+.HHWWWHHHHWWWHH.
+HHHWPWHHHHWPWHHH
+HHHWWWHHHHWWWHHH
+HHHHHHHHHHHHHHHS
+HHHHHHHHHHHHHHHS
+HTDDDTDDDDTDDDTS
+DDDDDDDCCDDDDDDD
+DDDRRRDCCDRRRDDD
+JTDDDTDDDDTDDDTS
+JJJJJJJJJJJJJJJS
+JJJJJJJJJJJJJJJS
+JJ.JJJJ..JJJJ.JS
+J...JJJ..JJJ...S`;
+const CHOMPER_CLOSED = `
+......HHHH......
+....HHHHHHHH....
+...HHHHHHHHHH...
+..HHHHHHHHHHHH..
+.HHHHHHHHHHHHHH.
+.HHWWWHHHHWWWHH.
+HHHWPWHHHHWPWHHH
+HHHWWWHHHHWWWHHH
+HHHHHHHHHHHHHHHS
+HHHHHHHHHHHHHHHS
+HHHHHHHHHHHHHHHS
+SSSSSSSSSSSSSSSS
+JJJJJJJJJJJJJJJS
+JJJJJJJJJJJJJJJS
+JJJJJJJJJJJJJJJS
+JJJJJJJJJJJJJJJS
+JJ.JJJJ..JJJJ.JS
+J...JJJ..JJJ...S`;
+const LEG_CH = { H: P.enemyBody, S: P.enemyShade, W: P.eyeW, P: P.pupil, D: '#2A0E18', T: P.tooth, R: P.tongue, C: P.enemyTel, J: '#8A3A52' };
+const LEG_CH_ELITE = { ...LEG_CH, H: '#8C2E5A', J: '#742548', S: '#4E1A34', C: P.elite };
+
+// 각진 비틀(각 실루엣) 18×12
+const BEETLE = `
+..HHHH......HHHH..
+.HHHHHH....HHHHHH.
+HHHHHHHHHHHHHHHHHH
+HHWWHHHHHHHHHHWWHH
+HHWPHHHHCCHHHHPWHH
+HHHHHHHCCCCHHHHHHH
+HHHHHHHHCCHHHHHHHS
+SHHHHHHHHHHHHHHHHS
+SSHHHHHHHHHHHHHHSS
+..SS.SS.SS.SS.SS..
+..SS.SS.SS.SS.SS..
+.SS..SS..SS..SS..S`;
+// 스파이크 글리치(침 실루엣) 10×20
+const SPIKE = `
+....HH....
+....HH....
+...HHHH...
+...HHHH...
+..HHHHHH..
+..HWWHHH..
+..HPWHHH..
+.HHHHHHHH.
+.HHHCCHHH.
+.HHCCCCHH.
+.HHHCCHHH.
+HHHHHHHHHS
+HHHHHHHHHS
+.HHHHHHHS.
+.HHHHHHHS.
+..HHHHHS..
+..HHHHHS..
+...HHHS...
+..H.HH.H..
+.H..HH..H.`;
+
+const COIN = `
+..GGGG..
+.GhGGGg.
+GhGGGGgG
+GhGGGGgG
+GGGGGGgG
+GGGGGggG
+.GGgggg.
+..gggg..`;
+const LEG_COIN = { G: P.uiReward, g: '#B8801E', h: '#FFE9A8' };
+const STAR = `
+....Y....
+...YYY...
+YYYYYYYYY
+.YYYYYYY.
+..YYYYY..
+.YYYYYYY.
+.YYY.YYY.
+YY.....YY`;
+const HEART = `
+.CC..CC.
+CCCCCCCC
+CCCCCCCC
+CCCCCCCC
+.CCCCCC.
+..CCCC..
+...CC...`;
+const CABINET = `
+.BBBBBBBBBB.
+BBBBBBBBBBBB
+BBSSSSSSSSBB
+BBSGGGGGGSBB
+BBSGGggGGSBB
+BBSGGGGGGSBB
+BBSSSSSSSSBB
+BBBBBBBBBBBB
+BBBBRRBBOOBB
+BBBBBBBBBBBB
+.BBBBBBBBBB.
+.BBBBBBBBBB.
+.BB......BB.`;
+const LEG_CAB = { B: '#332B57', S: '#151329', G: '#2A8A96', g: '#5FE0D2', R: P.uiWarn, O: P.uiReward };
+const JOY = `
+....RR....
+...RRRR...
+...RRRR...
+....RR....
+....SS....
+....SS....
+....SS....
+.BBBBBBBB.
+BBBBBBBBBB
+BBBBBBBBBB`;
+const LEG_JOY = { R: P.uiWarn, S: '#8FA8C4', B: '#332B57' };
+const GLITCH = `
+MM..MMMM..
+..MM..MMMM
+MMMM..MM..
+..MMMM..MM
+MM..MM....
+....MMMM..
+MMMM..MMMM
+..MM....MM`;
+const LEG_GLITCH = { M: P.plum };
+const CARD = `
+.WWWWWWWWWW.
+WWSSSSSSSSWW
+WWSSYYYYSSWW
+WWSSYYYYSSWW
+WWSSSYYSSSWW
+WWSSSSSSSSWW
+WWSSSSSSSSWW
+WWSSSSSSSSWW
+WWSWWWWWWSWW
+WWSSSSSSSSWW
+.WWWWWWWWWW.`;
+const LEG_CARD = { W: P.uiReward, S: '#221E3D', Y: '#FFE9A8' };
+const SHIELD = `
+.CCCCCCC.
+CCCCCCCCC
+CCCCCCCCC
+CCCCCCCCC
+.CCCCCCC.
+..CCCCC..
+...CCC...
+....C....`;
+const RIFLE_ICON = `
+..............GGGG.......
+.....GGGGGGGGGGGGGGGGGGGG
+GGGGGGGGGGGGGGGGGGGGGGGGG
+GGGGGGGPPPPPPGGGGGGGGGGGG
+.....GGGGGGG.....GGGG....
+....GGGG.........GGG.....
+....GGG..................`;
+const LEG_RIFLE = { G: '#8FA8C4', P: P.self };
+const CROSS = `
+....C....
+....C....
+.........
+.........
+C.......C
+.........
+.........
+....C....
+....C....`;
+
+// 1P 복셀 라이플 — 뒤에서 본 시점(총구 위·개머리판 아래), 26×34
+const GUN = `
+...........LLLL...........
+...........GGGG...........
+..........LGGGGL..........
+..........GGGGGG..........
+..........GGGGGG..........
+.........LGGGGGGL.........
+.........GGEEEEGG.........
+.........GGEEEEGG.........
+.........GGGGGGGG.........
+.........GGGGGGGG.........
+........LGGGGGGGGL........
+........GGGGGGGGGG........
+........GGDDDDDDGG........
+........GGDDDDDDGG........
+........GGGGGGGGGG........
+.......LGGGGGGGGGGL.......
+.......GGGGGGGGGGGG.......
+.......GGGEEEEEEGGG.......
+.......GGGEEEEEEGGG.......
+.......GGGGGGGGGGGG.......
+......LGGGGGGGGGGGGL......
+......GGGGGGGGGGGGGG......
+......GGGGDDDDDDGGGG......
+......GGGGDAAAADGGGG......
+......GGGGDDDDDDGGGG......
+......GGGGGGGGGGGGGG......
+.....LGGGGGGGGGGGGGGL.....
+.....GGGGGGGGGGGGGGGG.....
+....GGGGGGGGGGGGGGGGGG....
+...GGGGGGGGGGGGGGGGGGGG...
+..GGGGGGGGGGGGGGGGGGGGGG..
+.GGGGGGGGGGGGGGGGGGGGGGGG.
+GGGGGGGGGGGGGGGGGGGGGGGGGG
+DDDDDDDDDDDDDDDDDDDDDDDDDD`;
+const LEG_GUN = { L: P.gunLight, G: P.gun, D: P.gunDark, E: P.self, A: P.allyPing };
+const FLASH = `
+.....F.....
+...F.F.F...
+....FFF....
+.F.FFfFF.F.
+..FFfffFF..
+FFFfffffFFF
+..FFfffFF..
+.F.FFfFF.F.
+....FFF....
+...F.F.F...
+.....F.....`;
+const LEG_FLASH = { F: P.flash2, f: P.flash };
+
+// ---------- 공통 헤드 ----------
+const FONTS = `<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&amp;family=Noto+Sans+KR:wght@400;500;700&amp;display=swap" rel="stylesheet">`;
+const BASE_CSS = `
+    body { margin: 0; background: ${P.void}; color: ${P.uiText}; font-family: 'Noto Sans KR', 'Malgun Gothic', system-ui, sans-serif; }
+    a { color: ${P.uiOk}; } a:hover { color: ${P.uiReward}; }
+    .px { font-family: 'Press Start 2P', 'Courier New', monospace; }
+    .sub { color: ${P.uiSub}; }
+    svg { display: block; }
+`;
+function doc(body, extraCss = '', script = '') {
+  return `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  ${FONTS}
+  <style>${BASE_CSS}${extraCss}</style>
+</helmet>
+${body}
+</x-dc>${script}
+</body>
+</html>`;
+}
+const h = (tag, style, inner = '', attrs = '') => `<${tag} style="${style}"${attrs ? ' ' + attrs : ''}>${inner}</${tag}>`;
+const T = {
+  h1: (t) => h('div', `font-family: 'Press Start 2P', monospace; font-size: 22px; line-height: 34px; color: ${P.uiText}; letter-spacing: 1px`, t),
+  h2: (t) => h('div', `font-family: 'Press Start 2P', monospace; font-size: 12px; line-height: 20px; color: ${P.uiOk}; letter-spacing: 1px`, t),
+  kr: (t, extra = '') => h('div', `font-size: 15px; line-height: 24px; color: ${P.uiText}; ${extra}`, t),
+  sub: (t, extra = '') => h('div', `font-size: 13px; line-height: 20px; color: ${P.uiSub}; ${extra}`, t),
+  tag: (t, c = P.uiOk) => h('span', `display: inline-block; padding: 4px 8px; border: 2px solid ${c}; color: ${c}; font-family: 'Press Start 2P', monospace; font-size: 9px; line-height: 12px`, t),
+};
+const panel = (inner, w = 'auto', extra = '') => h('div', `display: flex; flex-direction: column; gap: 12px; padding: 20px; background: ${P.floorDark}; border: 2px solid ${P.side}; width: ${w}; box-sizing: border-box; ${extra}`, inner);
+const swatch = (hex, label, note = '', big = false) => h('div', `display: flex; flex-direction: column; gap: 6px; width: ${big ? 132 : 108}px`,
+  h('div', `height: ${big ? 64 : 44}px; background: ${hex}; border: 2px solid ${P.side}`) +
+  h('div', `font-family: 'Press Start 2P', monospace; font-size: 8px; line-height: 12px; color: ${P.uiSub}`, hex) +
+  h('div', `font-size: 12px; line-height: 17px; color: ${P.uiText}`, label) +
+  (note ? h('div', `font-size: 11px; line-height: 15px; color: ${P.uiSub}`, note) : ''));
+
+// =====================================================================
+// 1. Main — 키 비주얼 1인칭 프레임 1440×810
+// =====================================================================
+function mainBoard() {
+  const W = 1440, H = 810, VX = 720, VY = 380; // 소실점
+  let s = '';
+  // 보이드 + 경계 밖 배경 회로(자두, 저채도) + 와이어프레임 부유 기하
+  s += `<rect width="${W}" height="${H}" fill="${P.void}"></rect>`;
+  s += `<g stroke="${P.plumDark}" stroke-width="2" fill="none" opacity="0.7">`;
+  for (let i = 0; i < 14; i++) { const x = 40 + i * 104; s += `<path d="M${x} 60 V ${140 + (i % 3) * 40} H ${x + 60} V ${300}" ></path>`; }
+  s += `<path d="M0 200 H 300 V 260 H 520 M 900 240 H 1180 V 180 H 1440"></path>`;
+  s += `</g>`;
+  s += `<g fill="${P.plum}" opacity="0.8">`;
+  [[120, 140], [360, 262], [1010, 242], [1300, 182], [640, 300]].forEach(([x, y]) => { s += `<rect x="${x - 4}" y="${y - 4}" width="8" height="8"></rect>`; });
+  s += `</g>`;
+  // 와이어프레임 큐브(경계 밖 부유)
+  const wcube = (x, y, sz, c, op) => `<g stroke="${c}" stroke-width="2" fill="none" opacity="${op}"><rect x="${x}" y="${y}" width="${sz}" height="${sz}"></rect><rect x="${x + sz * 0.35}" y="${y - sz * 0.35}" width="${sz}" height="${sz}"></rect><path d="M${x} ${y} l${sz * 0.35} ${-sz * 0.35} M${x + sz} ${y} l${sz * 0.35} ${-sz * 0.35} M${x} ${y + sz} l${sz * 0.35} ${-sz * 0.35} M${x + sz} ${y + sz} l${sz * 0.35} ${-sz * 0.35}"></path></g>`;
+  s += wcube(180, 120, 70, P.plum, 0.55) + wcube(1120, 90, 90, P.plum, 0.5) + wcube(820, 150, 40, P.wireFar, 0.6) + wcube(470, 110, 50, P.wireFar, 0.5);
+  // 경계벽(먼 곳) — 어두운 면 + 상단 라인
+  s += `<rect x="0" y="${VY - 60}" width="${W}" height="60" fill="${P.floor}"></rect>`;
+  s += `<rect x="0" y="${VY - 62}" width="${W}" height="4" fill="${P.top}"></rect>`;
+  s += `<rect x="0" y="${VY - 60}" width="${W}" height="2" fill="${P.plum}" opacity="0.8"></rect>`;
+  // 벽면 복셀 격자선(5cm 격자 = 벽에선 촘촘한 어두운 선)
+  s += `<g stroke="${P.side}" stroke-width="1" opacity="0.9">`;
+  for (let x = 0; x <= W; x += 36) s += `<line x1="${x}" y1="${VY - 60}" x2="${x}" y2="${VY}"></line>`;
+  s += `<line x1="0" y1="${VY - 30}" x2="${W}" y2="${VY - 30}"></line></g>`;
+  // 바닥
+  s += `<rect x="0" y="${VY}" width="${W}" height="${H - VY}" fill="${P.floorDark}"></rect>`;
+  // 바닥 격자(원근) — 환경 최하 대역
+  s += `<g stroke="${P.floor}" stroke-width="2">`;
+  for (let i = -14; i <= 14; i++) { const xb = VX + i * 160; s += `<line x1="${VX + i * 12}" y1="${VY}" x2="${xb}" y2="${H}"></line>`; }
+  [400, 428, 470, 530, 615, 730, 810].forEach(y => { s += `<line x1="0" y1="${y}" x2="${W}" y2="${y}"></line>`; });
+  s += `</g>`;
+  // L2 배선(통행 가능 = 밝은 라인) + 비아
+  s += `<g fill="none" stroke-linecap="square">`;
+  s += `<path d="M${VX - 6} ${VY + 8} L 560 ${H}" stroke="${P.wireWide}" stroke-width="10"></path>`;
+  s += `<path d="M${VX + 6} ${VY + 8} L 1120 ${H}" stroke="${P.wire}" stroke-width="7"></path>`;
+  s += `<path d="M ${VX - 40} ${VY + 60} L 240 ${VY + 60} M ${VX + 30} ${VY + 130} L 1260 ${VY + 130}" stroke="${P.wireFar}" stroke-width="5"></path>`;
+  s += `</g>`;
+  [[240, VY + 60], [VX - 40, VY + 60], [1260, VY + 130], [VX + 30, VY + 130], [640, 560]].forEach(([x, y]) => { s += `<rect x="${x - 7}" y="${y - 7}" width="14" height="14" fill="${P.via}"></rect>`; });
+  // 블로커(복셀 면) — 좌
+  const block = (x, y, w, hgt, depth) => {
+    let b = `<rect x="${x}" y="${y}" width="${w}" height="${hgt}" fill="${P.side}"></rect>`;
+    b += `<polygon points="${x},${y} ${x + depth},${y - depth * 0.55} ${x + w + depth},${y - depth * 0.55} ${x + w},${y}" fill="${P.top}"></polygon>`;
+    b += `<polygon points="${x + w},${y} ${x + w + depth},${y - depth * 0.55} ${x + w + depth},${y + hgt - depth * 0.55} ${x + w},${y + hgt}" fill="${P.floor}"></polygon>`;
+    // 복셀 격자선
+    b += `<g stroke="${P.floorDark}" stroke-width="1" opacity="0.8">`;
+    for (let gx = x + 20; gx < x + w; gx += 20) b += `<line x1="${gx}" y1="${y}" x2="${gx}" y2="${y + hgt}"></line>`;
+    for (let gy = y + 20; gy < y + hgt; gy += 20) b += `<line x1="${x}" y1="${gy}" x2="${x + w}" y2="${gy}"></line>`;
+    b += `</g>`;
+    // 상단 하이라이트 엣지(얇게)
+    b += `<rect x="${x}" y="${y}" width="${w}" height="3" fill="${P.top}"></rect>`;
+    return b;
+  };
+  s += block(60, 330, 260, 300, 40);
+  s += block(1180, 350, 220, 200, 34);
+  s += block(880, 372, 90, 60, 14);
+  // 파괴 가능 블록(작은 연두 코어) — 중앙 우
+  s += block(980, 400, 120, 110, 22);
+  s += `<rect x="1026" y="436" width="28" height="28" fill="${P.destr}"></rect><rect x="1034" y="444" width="12" height="12" fill="${P.destrHot}"></rect>`;
+  s += `<rect x="1016" y="426" width="48" height="48" fill="none" stroke="${P.destrFar}" stroke-width="2" opacity="0.7"></rect>`;
+  // 아군(청록 아웃라인 실루엣) — 중거리 좌
+  const ally = (x, y, sc) => {
+    const m = `
+...HH...
+..HHHH..
+...HH...
+.HHHHHH.
+HHHHHHHH
+H.HHHH.H
+..HHHH..
+..H..H..
+..H..H..
+.HH..HH.`;
+    return `<g>${px(m, { H: '#0F1C2A' }, sc, x, y)}${px(m, { H: P.ally }, sc, x, y, ' opacity="0.0"')}<g stroke="${P.ally}" stroke-width="2" fill="none"><rect x="${x - 2}" y="${y - 2}" width="${8 * sc + 4}" height="${10 * sc + 4}" opacity="0"></rect></g></g>`
+      + `<g>${px(m, { H: P.ally }, sc, x, y)}${px(m, { H: '#123044' }, sc - 2, x + 1, y + 1)}</g>`
+      + `<text x="${x + 4 * sc}" y="${y - 10}" text-anchor="middle" fill="${P.ally}" font-family="'Press Start 2P', monospace" font-size="10">P2</text>`
+      + `<rect x="${x - 6}" y="${y - 8}" width="${8 * sc + 12}" height="4" fill="${P.ally}" opacity="0.85"></rect>`;
+  };
+  s += ally(430, 348, 6);
+  // 적 스웜 — 원거리 작은 것부터
+  const [cw, chh] = dims(CHOMPER_OPEN);
+  const chomp = (x, y, c, open = true, elite = false) => `<g>${px(open ? CHOMPER_OPEN : CHOMPER_CLOSED, elite ? LEG_CH_ELITE : LEG_CH, c, x, y)}` +
+    `<rect x="${x - 1}" y="${y + 4 * c}" width="1" height="${(chh - 4) * c}" fill="${elite ? P.elite : P.enemyRim}"></rect><rect x="${x + cw * c}" y="${y + 4 * c}" width="1" height="${(chh - 4) * c}" fill="${elite ? P.elite : P.enemyRim}"></rect></g>`;
+  // 원거리 열
+  [[560, 356], [610, 352], [790, 350], [830, 356], [930, 352], [700, 350]].forEach(([x, y]) => { s += chomp(x, y, 2, false); });
+  [[660, 372], [880, 380], [520, 384]].forEach(([x, y]) => { s += chomp(x, y, 3, x === 880); });
+  s += chomp(760, 400, 5, true);
+  s += chomp(1230, 480, 7, true, true);
+  s += chomp(330, 460, 8, true);
+  s += chomp(560, 520, 11, true);
+  // 적 림(가까운 것만 1px 발광 테두리 강조) — 가장 가까운 개체 눈 위치에 텔레그래프 코어 글로우
+  s += `<rect x="${560 + 7 * 11}" y="${520 + 11 * 11}" width="22" height="22" fill="${P.enemyTel}" opacity="0.35"></rect>`;
+  // 픽업 — 코인·별
+  s += px(COIN, LEG_COIN, 5, 610, 640);
+  s += px(COIN, LEG_COIN, 3, 470, 600);
+  s += px(STAR, { Y: P.uiReward }, 3, 1160, 610);
+  // 1P 총(우하단) + 총구 화염(픽셀 스프라이트)
+  s += px(GUN, LEG_GUN, 12, 860, 440);
+  s += px(FLASH, LEG_FLASH, 9, 968, 372);
+  // HUD
+  const hud = `<g font-family="'Press Start 2P', monospace" fill="${P.uiText}">
+    <text x="${VX}" y="44" text-anchor="middle" font-size="14">STAGE 2</text>
+    <text x="${VX}" y="66" text-anchor="middle" font-size="9" fill="${P.uiSub}">WAVE 07   04:12</text>
+    <text x="40" y="44" font-size="8" fill="${P.ally}">P2</text><rect x="70" y="36" width="120" height="8" fill="${P.floor}"></rect><rect x="70" y="36" width="88" height="8" fill="${P.ally}"></rect>
+    <text x="40" y="64" font-size="8" fill="${P.ally}">P3</text><rect x="70" y="56" width="120" height="8" fill="${P.floor}"></rect><rect x="70" y="56" width="40" height="8" fill="${P.uiWarn}"></rect>
+    <text x="40" y="84" font-size="8" fill="${P.ally}">P4</text><rect x="70" y="76" width="120" height="8" fill="${P.floor}"></rect><rect x="70" y="76" width="112" height="8" fill="${P.ally}"></rect>
+    <g transform="translate(40 700)">
+      <text x="0" y="0" font-size="8" fill="${P.uiSub}">SHIELD</text>
+      ${Array.from({ length: 10 }, (_, i) => `<rect x="${i * 26}" y="8" width="22" height="14" fill="${i < 6 ? P.uiOk : P.floor}"></rect>`).join('')}
+      <text x="0" y="44" font-size="8" fill="${P.uiSub}">HP</text>
+      ${Array.from({ length: 10 }, (_, i) => `<rect x="${i * 26}" y="52" width="22" height="18" fill="${i < 8 ? P.uiText : P.floor}"></rect>`).join('')}
+    </g>
+    <g transform="translate(1160 690)">
+      ${px(RIFLE_ICON, LEG_RIFLE, 3, 0, 0)}
+      <text x="238" y="66" text-anchor="end" font-size="30">24</text>
+      <text x="238" y="86" text-anchor="end" font-size="10" fill="${P.uiSub}">/ 30</text>
+      <rect x="0" y="40" width="10" height="10" fill="${P.uiOk}"></rect><rect x="16" y="40" width="10" height="10" fill="${P.side}"></rect><rect x="32" y="40" width="10" height="10" fill="${P.side}"></rect>
+    </g>
+    <g transform="translate(1210 640)"><rect x="0" y="0" width="14" height="14" fill="${P.uiReward}"></rect><text x="22" y="12" font-size="9" fill="${P.uiReward}">+1 CARD</text></g>
+  </g>`;
+  s += hud;
+  // 크로스헤어(절차 SDF 4선)
+  s += `<g fill="${P.uiText}"><rect x="${VX - 1}" y="${VY + 10 - 18}" width="3" height="10"></rect><rect x="${VX - 1}" y="${VY + 10 + 8}" width="3" height="10"></rect><rect x="${VX - 18}" y="${VY + 9}" width="10" height="3"></rect><rect x="${VX + 8}" y="${VY + 9}" width="10" height="3"></rect></g>`;
+  // 스캔라인 + 비네트(PP_Arcade 재현: 4px 주기 · 0.15)
+  s += `<defs><pattern id="scan" width="4" height="4" patternUnits="userSpaceOnUse"><rect width="4" height="2" fill="#000" opacity="0.15"></rect></pattern><radialGradient id="vig" cx="50%" cy="50%" r="72%"><stop offset="60%" stop-color="#000" stop-opacity="0"></stop><stop offset="100%" stop-color="#000" stop-opacity="0.55"></stop></radialGradient></defs>`;
+  s += `<rect width="${W}" height="${H}" fill="url(#scan)"></rect><rect width="${W}" height="${H}" fill="url(#vig)"></rect>`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" shape-rendering="crispEdges">${s}</svg>`;
+  return doc(h('div', `width: ${W}px; height: ${H}px; background: ${P.void}; overflow: hidden`, svg));
+}
+
+// =====================================================================
+// 2. Palette — 레퍼런스 → 대역 재매핑
+// =====================================================================
+function paletteBoard() {
+  const refRow = (refHex, refName, arrowTo) => h('div', `display: flex; flex-direction: row; gap: 18px; align-items: flex-start`,
+    h('div', `display: flex; flex-direction: column; gap: 6px; width: 120px`,
+      h('div', `height: 56px; background: ${refHex}; border: 2px solid ${P.side}`) +
+      h('div', `font-size: 12px; line-height: 17px; color: ${P.uiText}`, refName) +
+      h('div', `font-size: 11px; line-height: 15px; color: ${P.uiSub}`, '레퍼런스 원색')) +
+    h('div', `width: 40px; padding-top: 20px; font-family: 'Press Start 2P', monospace; font-size: 12px; color: ${P.uiSub}`, '&gt;') +
+    h('div', `display: flex; flex-direction: row; gap: 14px; flex-wrap: wrap`, arrowTo.map(a => swatch(a[0], a[1], a[2])).join('')));
+  const left = panel(
+    T.h2('REFERENCE HUE  &gt;  BAND REMAP') +
+    T.kr('롤 아케이드 스킨은 아래 색을 배경 전면에 최대 채도로 쓴다. 이 게임에서는 <b>색상(hue)만 가져오고 명도·채도를 A-1 대역에 다시 매핑</b>한다. 뜨거운 색은 적 예약 대역이라 환경에서 쫓아낸다.') +
+    refRow('#FF7A1A', '주황 (스킨 배경·에너지)', [[P.enemyTel, '적 공격 텔레그래프', '🔒 A-3-4 적 대역'], [P.uiReward, 'UI 보상·카드', '스크린 공간에서만']]) +
+    refRow('#FF2FA8', '마젠타 (픽셀 파티클)', [[P.elite, '엘리트·보스', '🔒 A-3-4'], [P.plum, '경계벽 밖 배경', '플레이 공간 금지'], [P.plumDark, '바닥 실크스크린', '≤45cm 평면 장식']]) +
+    refRow('#39FF6A', '연두 (에너지·콘솔 LED)', [[P.destr, '파괴 가능 코어', '작게·발광만'], [P.destrHot, '파괴 임계 직전', '펄스 상한']]) +
+    refRow('#2FE8FF', '시안 (전자·홀로)', [[P.ally, '아군 아웃라인', '🔒 A-3-5'], [P.wireWide, '넓은 통로 배선', '환경 상단'], [P.via, '정션·UI 긍정', '']]) +
+    refRow('#7A3CFF', '보라 (하늘·그림자)', [[P.floor, '기판 바닥', '화면 70%'], [P.side, '블로커 측면', ''], [P.self, '자기 자신', '아군과 구분']]) +
+    refRow('#FFD23F', '금색 (코인·별)', [[P.uiReward, '코인·별·카드 픽업', '월드에선 작게'], ['#B8801E', '코인 음영', '']]),
+    900);
+
+  // 대역 사다리(명도 V 0-100)
+  const band = (name, v0, v1, s0, s1, sw, note) => h('div', `display: flex; flex-direction: row; gap: 14px; align-items: center`,
+    h('div', `width: 96px; font-size: 12px; line-height: 16px; color: ${P.uiText}`, name) +
+    h('div', `position: relative; width: 300px; height: 22px; background: ${P.floor}; border: 2px solid ${P.side}`,
+      h('div', `position: absolute; left: ${v0}%; width: ${v1 - v0}%; top: 0; bottom: 0; background: ${sw}`)) +
+    h('div', `width: 70px; font-family: 'Press Start 2P', monospace; font-size: 8px; color: ${P.uiSub}`, `V ${v0}-${v1}`) +
+    h('div', `width: 70px; font-family: 'Press Start 2P', monospace; font-size: 8px; color: ${P.uiSub}`, `S ${s0}-${s1}`) +
+    h('div', `font-size: 11px; line-height: 15px; color: ${P.uiSub}; width: 150px`, note));
+  const right = panel(
+    T.h2('A-1 VALUE LADDER') +
+    T.sub('가로축 = 명도 V 0→100. 대역이 넓을수록 시선을 끈다. 0·100 은 어디에도 없다.') +
+    band('환경', 6, 40, 15, 40, P.side, '바닥·블로커·벽 — 화면 70%+') +
+    band('L2 배선', 35, 60, 45, 70, P.wire, '통행 가능 = 밝은 선') +
+    band('캐릭터', 25, 70, 30, 60, P.enemyBody, '적 몸통·1P 총') +
+    band('VFX', 15, 95, 20, 90, P.enemyTel, '가장 넓다 — 헤드룸') +
+    band('UI', 65, 95, 35, 80, P.uiText, '스크린 공간') +
+    h('div', `height: 2px; background: ${P.side}; margin: 6px 0`) +
+    T.h2('SCREEN AREA BUDGET') +
+    h('div', `display: flex; flex-direction: row; height: 34px; border: 2px solid ${P.side}`,
+      h('div', `width: 70%; background: ${P.floor}; display: flex; align-items: center; justify-content: center; font-size: 11px; color: ${P.uiSub}`, '환경 substrate 70%') +
+      h('div', `width: 12%; background: ${P.wire}; display: flex; align-items: center; justify-content: center; font-size: 10px; color: ${P.void}`, '배선') +
+      h('div', `width: 10%; background: ${P.enemyBody}; display: flex; align-items: center; justify-content: center; font-size: 10px; color: ${P.uiText}`, '적') +
+      h('div', `width: 5%; background: ${P.enemyTel}`) +
+      h('div', `width: 3%; background: ${P.uiReward}`)) +
+    T.sub('팝한 색(주황·금·연두·마젠타)은 합쳐서 <b>화면의 10% 미만</b>. 어두운 무대 위에 액센트로만 얹는다 — 사용자 결정 2026-09-06.') +
+    h('div', `height: 2px; background: ${P.side}; margin: 6px 0`) +
+    T.h2('LOCKED') +
+    h('div', `display: flex; flex-direction: row; gap: 10px; flex-wrap: wrap`,
+      T.tag('ENEMY = HOT', P.enemyRim) + T.tag('ALLY = COLD', P.ally) + T.tag('NO 0% / 100%', P.uiSub) + T.tag('DESTRUCTIBLE = LIME', P.destr)),
+    480);
+  const body = h('div', `display: flex; flex-direction: column; gap: 20px; padding: 32px; width: 1440px; box-sizing: border-box; background: ${P.void}`,
+    h('div', `display: flex; flex-direction: row; gap: 20px; align-items: baseline`, T.h1('PALETTE REMAP') + T.sub('ArtDirection.md §A-1 · §A-3 — 수치·hue 무변. 이 시트는 레퍼런스가 어느 칸으로 가는지만 정한다.')) +
+    h('div', `display: flex; flex-direction: row; gap: 20px; align-items: flex-start`, left + right));
+  return doc(body);
+}
+
+// =====================================================================
+// 3. Form — 형태 언어
+// =====================================================================
+function formBoard() {
+  // 격자 계층 시각화: 1m 자 위에 5 / 7.5 / 2.5cm 눈금
+  const ruler = (cm, color, label, note) => {
+    const n = Math.round(100 / cm); const cw = 360 / n;
+    let ticks = '';
+    for (let i = 0; i < n; i++) ticks += `<rect x="${i * cw}" y="0" width="${Math.max(1, cw - 1)}" height="22" fill="${i % 2 ? color : P.floor}"></rect>`;
+    return h('div', `display: flex; flex-direction: row; gap: 16px; align-items: center`,
+      h('div', `width: 110px; font-family: 'Press Start 2P', monospace; font-size: 10px; line-height: 14px; color: ${color}`, label) +
+      `<svg width="360" height="22" viewBox="0 0 360 22" shape-rendering="crispEdges">${ticks}</svg>` +
+      h('div', `font-size: 12px; line-height: 17px; color: ${P.uiSub}; width: 330px`, note));
+  };
+  const grid = panel(
+    T.h2('VOXEL GRID HIERARCHY  (1 m)') +
+    ruler(5, P.wireWide, 'ENV 5cm', '환경(블로커·벽·프롭). 콜리전 셀 100cm·문턱 45cm·60cm 이 <b>전부 정수배</b>(20·9·12). 면은 평평, 격자는 머티리얼 선으로.') +
+    ruler(7.5, P.enemyRim, 'ENEMY 7.5cm', '적·픽업(쩝쩝이 기존값). 165cm 키 = 22층. 실루엣이 먼 거리에서도 덩어리로 읽히는 굵기.') +
+    ruler(2.5, P.self, '1P GUN 2.5cm', '1인칭 총. 카메라 30~60cm 앞이라 적 격자의 1/3. 화면상 픽셀 크기는 적과 비슷해진다.') +
+    T.sub('규칙 ① 한 오브젝트 안에서 격자는 하나(믹셀 금지). ② 클래스 사이 격자 차이는 허용 — 거리가 화면 픽셀 크기를 맞춰 준다. ③ 수치는 제안 초기값이며 PIE 육안으로 조정한다.'),
+    '100%');
+
+  // 선 vs 면
+  const lineface = panel(
+    T.h2('FACE INSIDE  ·  LINE OUTSIDE') +
+    `<svg width="600" height="230" viewBox="0 0 600 230" shape-rendering="crispEdges">
+      <rect width="600" height="230" fill="${P.void}"></rect>
+      <g stroke="${P.plumDark}" stroke-width="2" fill="none" opacity="0.8">
+        <rect x="20" y="30" width="60" height="60"></rect><rect x="42" y="12" width="60" height="60"></rect><path d="M20 30 l22 -18 M80 30 l22 -18 M20 90 l22 -18 M80 90 l22 -18"></path>
+        <path d="M20 150 H 90 V 200 H 140 M 40 120 V 200"></path>
+        <rect x="500" y="40" width="70" height="70"></rect><rect x="524" y="20" width="70" height="70"></rect><path d="M500 40 l24 -20 M570 40 l24 -20 M500 110 l24 -20 M570 110 l24 -20"></path>
+        <path d="M480 160 H 560 V 210"></path>
+      </g>
+      <rect x="160" y="10" width="14" height="210" fill="${P.floor}"></rect><rect x="160" y="10" width="14" height="3" fill="${P.top}"></rect>
+      <rect x="426" y="10" width="14" height="210" fill="${P.floor}"></rect><rect x="426" y="10" width="14" height="3" fill="${P.top}"></rect>
+      <rect x="174" y="10" width="252" height="210" fill="${P.floorDark}"></rect>
+      <g stroke="${P.floor}" stroke-width="1">${Array.from({ length: 12 }, (_, i) => `<line x1="${174 + i * 21}" y1="10" x2="${174 + i * 21}" y2="220"></line>`).join('')}${Array.from({ length: 10 }, (_, i) => `<line x1="174" y1="${10 + i * 21}" x2="426" y2="${10 + i * 21}"></line>`).join('')}</g>
+      <path d="M174 130 H 426" stroke="${P.wire}" stroke-width="5"></path><rect x="294" y="124" width="12" height="12" fill="${P.via}"></rect>
+      <rect x="210" y="60" width="70" height="52" fill="${P.side}"></rect><polygon points="210,60 222,52 292,52 280,60" fill="${P.top}"></polygon><polygon points="280,60 292,52 292,104 280,112" fill="${P.floor}"></polygon>
+      <g stroke="${P.floorDark}" stroke-width="1"><line x1="228" y1="60" x2="228" y2="112"></line><line x1="246" y1="60" x2="246" y2="112"></line><line x1="264" y1="60" x2="264" y2="112"></line><line x1="210" y1="78" x2="280" y2="78"></line><line x1="210" y1="96" x2="280" y2="96"></line></g>
+      <rect x="340" y="150" width="46" height="46" fill="${P.side}"></rect><rect x="356" y="166" width="14" height="14" fill="${P.destr}"></rect>
+      ${px(CHOMPER_CLOSED, LEG_CH, 3, 360, 60)}
+      <g font-family="'Press Start 2P', monospace" font-size="8" fill="${P.uiSub}"><text x="20" y="222">OUTSIDE = WIRE</text><text x="200" y="222">PLAY SPACE = VOXEL FACE</text><text x="470" y="222">OUTSIDE = WIRE</text></g>
+    </svg>` +
+    T.kr('<b>플레이 공간 = 면.</b> 복셀 평면 채색 + 어두운 격자선(같은 대역 안, 명도차 작게). 통행 정보는 오직 <b>배선(밝은 선)</b>이 든다.') +
+    T.kr('<b>경계벽 밖 = 선.</b> 회로기판 트레이스·와이어프레임 부유 기하(Tron 유산). 마젠타는 여기서만 강하게. 콜리전 없음 → 불변식 "렌더 메시는 껍데기" 유지.'),
+    620);
+
+  // 실루엣 3분류
+  const sil = (map, leg, c, name, note) => h('div', `display: flex; flex-direction: column; gap: 8px; align-items: center; width: 150px`,
+    `<svg width="130" height="120" viewBox="0 0 130 120" shape-rendering="crispEdges"><rect width="130" height="120" fill="${P.floorDark}"></rect>${px(map, leg, c, (130 - dims(map)[0] * c) / 2, (120 - dims(map)[1] * c) / 2)}</svg>` +
+    h('div', `font-family: 'Press Start 2P', monospace; font-size: 9px; line-height: 13px; color: ${P.enemyRim}; text-align: center`, name) +
+    h('div', `font-size: 11px; line-height: 15px; color: ${P.uiSub}; text-align: center`, note));
+  const silhouette = panel(
+    T.h2('SILHOUETTE = 3 FAMILIES') +
+    h('div', `display: flex; flex-direction: row; gap: 14px; justify-content: space-between`,
+      sil(CHOMPER_OPEN, LEG_CH, 5, 'ROUND', '구 — 유령·쩝쩝이. 기본 일반') +
+      sil(BEETLE, LEG_CH, 5, 'BLOCK', '각 — 비틀·탱커. 느리고 단단') +
+      sil(SPIKE, LEG_CH, 5, 'SPIKE', '침 — 글리치. 빠르고 얇음')) +
+    T.kr('덩어리 실루엣이 먼저, 디테일은 <b>복셀 1칸</b> 단위로만. 읽힘점 = <b>발광 코어 1개</b>(공격 텔레그래프 색 `#FF6B2C`). 엘리트는 같은 실루엣에 크기 ×1.3 + 림 `#FF1E7A`.') +
+    T.kr('<b>텍스처 없음.</b> 색 = 요소ID LUT(쩝쩝이 12요소 방식) + 격자선 + 이미시브. "복셀 1칸 = 색 1개." 사진·노이즈 텍스처는 금지(§A-5).'),
+    '100%');
+  const body = h('div', `display: flex; flex-direction: column; gap: 20px; padding: 32px; width: 1440px; box-sizing: border-box; background: ${P.void}`,
+    h('div', `display: flex; flex-direction: row; gap: 20px; align-items: baseline`, T.h1('FORM LANGUAGE') + T.sub('복셀 = 3D 픽셀. 격자·선/면·실루엣·텍셀 네 규칙.')) +
+    grid +
+    h('div', `display: flex; flex-direction: row; gap: 20px; align-items: stretch`, lineface + h('div', `flex-grow: 1`, silhouette)));
+  return doc(body);
+}
+
+// =====================================================================
+// 4. Motifs — 모티프 + 로그라이트 매핑
+// =====================================================================
+function motifsBoard() {
+  const icon = (map, leg, c, name, maps) => h('div', `display: flex; flex-direction: row; gap: 14px; align-items: center; padding: 12px; background: ${P.floorDark}; border: 2px solid ${P.side}`,
+    `<svg width="72" height="72" viewBox="0 0 72 72" shape-rendering="crispEdges"><rect width="72" height="72" fill="${P.floor}"></rect>${px(map, leg, c, (72 - dims(map)[0] * c) / 2, (72 - dims(map)[1] * c) / 2)}</svg>` +
+    h('div', `display: flex; flex-direction: column; gap: 4px; width: 250px`,
+      h('div', `font-family: 'Press Start 2P', monospace; font-size: 9px; line-height: 13px; color: ${P.uiReward}`, name) +
+      h('div', `font-size: 12px; line-height: 17px; color: ${P.uiText}`, maps)));
+  const icons = h('div', `display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px`,
+    icon(COIN, LEG_COIN, 6, 'COIN', 'XP·재화 픽업. 월드에선 8px 스프라이트 크기, 자석 흡수') +
+    icon(STAR, { Y: P.uiReward }, 6, 'STAR', '카드 희귀도 표시(★1~3). 레벨업 3택 상단') +
+    icon(HEART, { C: P.uiOk }, 7, '1UP', 'DBNO 부활 완료 · 회복 픽업. 차가운 쪽(아군 계열)') +
+    icon(CARD, LEG_CARD, 5, 'POWER-UP CARD', '레벨업 카드 = 아케이드 파워업 캡슐. 금색 테두리') +
+    icon(CABINET, LEG_CAB, 5, 'CABINET', '억제기 = 스테이지 보스 캐비닛. 화면이 얼굴, 부수면 STAGE CLEAR') +
+    icon(GLITCH, LEG_GLITCH, 6, 'GLITCH', '적 스폰 지점·버그 픽션. 자두색 = 경계 밖 대역') +
+    icon(JOY, LEG_JOY, 6, 'JOYSTICK', '핑·상호작용 프롬프트 아이콘') +
+    icon(SHIELD, { C: P.uiOk }, 7, 'SHIELD', '실드 세그먼트. 체력 위는 실드(VIT1 2층)') +
+    icon(CROSS, { C: P.uiText }, 7, 'CROSSHAIR', '절차 SDF 4선 유지(U12). 픽셀 스냅만 추가'));
+  const screen = (title, inner) => h('div', `display: flex; flex-direction: column; gap: 8px`,
+    T.h2(title) + h('div', `width: 440px; height: 248px; background: ${P.void}; border: 2px solid ${P.side}; position: relative; overflow: hidden`, inner));
+  const scan = `<div style="position: absolute; left: 0; top: 0; right: 0; bottom: 0; background: repeating-linear-gradient(#000 0 2px, transparent 2px 4px); opacity: 0.15"></div>`;
+  const stageClear = screen('STAGE CLEAR  (스테이지 전환 = Ultimate)',
+    h('div', `position: absolute; left: 0; right: 0; top: 70px; text-align: center; font-family: 'Press Start 2P', monospace; font-size: 26px; color: ${P.destrHot}`, 'STAGE CLEAR') +
+    h('div', `position: absolute; left: 0; right: 0; top: 122px; text-align: center; font-family: 'Press Start 2P', monospace; font-size: 10px; color: ${P.uiSub}`, 'BONUS  x4 PLAYERS   +2000') +
+    h('div', `position: absolute; left: 0; right: 0; top: 176px; text-align: center; font-family: 'Press Start 2P', monospace; font-size: 10px; color: ${P.uiOk}`, 'NEXT: STAGE 3') + scan);
+  const cont = screen('CONTINUE?  (DBNO 협동 부활 창)',
+    h('div', `position: absolute; left: 0; right: 0; top: 60px; text-align: center; font-family: 'Press Start 2P', monospace; font-size: 22px; color: ${P.uiText}`, 'CONTINUE?') +
+    h('div', `position: absolute; left: 0; right: 0; top: 104px; text-align: center; font-family: 'Press Start 2P', monospace; font-size: 46px; color: ${P.uiWarn}`, '7') +
+    h('div', `position: absolute; left: 0; right: 0; top: 180px; text-align: center; font-family: 'Press Start 2P', monospace; font-size: 9px; color: ${P.ally}`, 'P3 IS COMING  ·  HOLD [E] TO REVIVE') + scan);
+  const insert = screen('INSERT COIN  (로비·대기)',
+    h('div', `position: absolute; left: 0; right: 0; top: 40px; text-align: center; font-family: 'Press Start 2P', monospace; font-size: 18px; color: ${P.uiText}`, 'FPSROGUELITE') +
+    h('div', `position: absolute; left: 0; right: 0; top: 120px; text-align: center; font-family: 'Press Start 2P', monospace; font-size: 12px; color: ${P.uiReward}`, 'INSERT COIN') +
+    h('div', `position: absolute; left: 0; right: 0; top: 160px; text-align: center; font-family: 'Press Start 2P', monospace; font-size: 8px; color: ${P.uiSub}`, 'P1 READY   P2 READY   P3 ---   P4 ---') +
+    h('div', `position: absolute; left: 0; right: 0; top: 206px; text-align: center; font-family: 'Press Start 2P', monospace; font-size: 8px; color: ${P.uiSub}`, 'CREDIT 03') + scan);
+  const fiction = panel(
+    T.h2('FICTION HOOK') +
+    T.kr('<b>게임 세계 다이브</b>(Concept.md §1-C-9) + <b>"게임 세계를 지키는 수호자"</b>(전자오락수호대 모티프). 플레이어 4인 = 접속한 히어로(차가운 색). 적 = 세계를 갉아먹는 <b>버그·글리치·해적판 몬스터</b>(뜨거운 색). 억제기 = 스테이지를 지배하는 캐비닛 코어.') +
+    T.kr('로그라이트 어휘를 아케이드 어휘로 번역한다: 런 = 1코인 플레이 · 레벨업 카드 = 파워업 · 스테이지 전환 = STAGE CLEAR · DBNO = CONTINUE? 카운트다운(동료가 오면 멈춤) · 런 종료 = GAME OVER + 하이스코어.') +
+    T.sub('레퍼런스에서 가져오지 않는 것: 롤 캐릭터 디자인·의상·포즈·특정 게임 로고. 웹툰의 캐릭터·서사. 모티프와 색감만.'),
+    '100%');
+  const body = h('div', `display: flex; flex-direction: column; gap: 20px; padding: 32px; width: 1440px; box-sizing: border-box; background: ${P.void}`,
+    h('div', `display: flex; flex-direction: row; gap: 20px; align-items: baseline`, T.h1('MOTIFS  &amp;  ROGUELITE MAP') + T.sub('픽셀 스프라이트 = 8~13px 격자, 포인트 필터, 팔레트 제한. 아이콘은 UI 대역·픽업은 VFX 대역.')) +
+    h('div', `display: flex; flex-direction: row; gap: 20px; align-items: flex-start`,
+      h('div', `width: 960px`, icons) +
+      h('div', `display: flex; flex-direction: column; gap: 16px`, stageClear + cont)) +
+    h('div', `display: flex; flex-direction: row; gap: 20px; align-items: flex-start`, h('div', `width: 460px`, insert) + h('div', `flex-grow: 1`, fiction)));
+  return doc(body);
+}
+
+// =====================================================================
+// 5. HUD — 픽셀 HUD 모크 1440×810
+// =====================================================================
+function hudBoard() {
+  const W = 1440, H = 810;
+  let s = `<rect width="${W}" height="${H}" fill="${P.void}"></rect><rect x="0" y="380" width="${W}" height="430" fill="${P.floorDark}"></rect>`;
+  s += `<g stroke="${P.floor}" stroke-width="2">${Array.from({ length: 29 }, (_, i) => `<line x1="${720 + (i - 14) * 12}" y1="380" x2="${720 + (i - 14) * 160}" y2="810"></line>`).join('')}</g>`;
+  s += `<rect x="0" y="320" width="${W}" height="60" fill="${P.floor}"></rect>`;
+  s += px(CHOMPER_OPEN, LEG_CH, 6, 900, 330) + px(CHOMPER_CLOSED, LEG_CH, 3, 600, 350) + px(CHOMPER_CLOSED, LEG_CH, 3, 660, 356);
+  s += px(GUN, LEG_GUN, 12, 860, 440);
+  const seg = (x, y, n, on, c, w = 22, hh = 14, gap = 4) => Array.from({ length: n }, (_, i) => `<rect x="${x + i * (w + gap)}" y="${y}" width="${w}" height="${hh}" fill="${i < on ? c : P.floor}" stroke="${P.side}" stroke-width="1"></rect>`).join('');
+  s += `<g font-family="'Press Start 2P', monospace" fill="${P.uiText}">
+    <!-- 상단 중앙: 스테이지·웨이브·타이머 -->
+    <rect x="600" y="20" width="240" height="60" fill="${P.void}" opacity="0.6"></rect>
+    <text x="720" y="46" text-anchor="middle" font-size="16">STAGE 2</text>
+    <text x="720" y="70" text-anchor="middle" font-size="9" fill="${P.uiSub}">WAVE 07     04:12</text>
+    <!-- 좌상단: 파티 -->
+    <g transform="translate(40 36)">
+      <text x="0" y="10" font-size="8" fill="${P.ally}">P2  NOVA</text>${seg(110, 0, 8, 6, P.ally, 14, 10, 2)}
+      <text x="0" y="34" font-size="8" fill="${P.ally}">P3  BIT</text>${seg(110, 24, 8, 2, P.uiWarn, 14, 10, 2)}<text x="245" y="34" font-size="7" fill="${P.uiWarn}">DOWN 7</text>
+      <text x="0" y="58" font-size="8" fill="${P.ally}">P4  RAM</text>${seg(110, 48, 8, 7, P.ally, 14, 10, 2)}
+    </g>
+    <!-- 좌하단: 실드 / HP -->
+    <g transform="translate(40 690)">
+      <text x="0" y="0" font-size="8" fill="${P.uiOk}">SHIELD</text>${seg(0, 8, 10, 6, P.uiOk)}
+      <text x="0" y="46" font-size="8" fill="${P.uiSub}">HP</text>${seg(0, 54, 10, 8, P.uiText, 22, 18)}
+      <text x="270" y="70" font-size="12">80</text>
+    </g>
+    <!-- 우하단: 무기·탄약·슬롯 -->
+    <g transform="translate(1140 680)">
+      ${px(RIFLE_ICON, LEG_RIFLE, 3, 0, 0)}
+      <text x="258" y="60" text-anchor="end" font-size="34">24</text>
+      <text x="258" y="80" text-anchor="end" font-size="10" fill="${P.uiSub}">/ 30   RELOAD [R]</text>
+      <g transform="translate(0 44)"><rect x="0" y="0" width="12" height="12" fill="${P.uiOk}"></rect><rect x="18" y="0" width="12" height="12" fill="${P.side}"></rect><rect x="36" y="0" width="12" height="12" fill="${P.side}"></rect><text x="0" y="26" font-size="7" fill="${P.uiSub}">1  2  3</text></g>
+    </g>
+    <!-- 우상단: 코인·카드 -->
+    <g transform="translate(1250 36)">
+      ${px(COIN, LEG_COIN, 3, 0, 0)}<text x="34" y="20" font-size="10" fill="${P.uiReward}">1 240</text>
+      ${px(STAR, { Y: P.uiReward }, 3, 0, 34)}<text x="34" y="54" font-size="10" fill="${P.uiReward}">LV 6</text>
+      <rect x="0" y="66" width="150" height="6" fill="${P.floor}"></rect><rect x="0" y="66" width="96" height="6" fill="${P.uiReward}"></rect>
+    </g>
+    <!-- 픽업 토스트 -->
+    <g transform="translate(640 560)"><text x="0" y="0" font-size="9" fill="${P.uiReward}">+CARD  ★★</text></g>
+    <!-- 적 체력바(월드 위 UI = 뜨거운 색 금지 → 흰/회 세그먼트) -->
+    <g transform="translate(920 318)">${seg(0, 0, 6, 4, P.uiText, 14, 5, 2)}</g>
+    <!-- 억제기 방향 마커 -->
+    <g transform="translate(1000 300)"><rect x="0" y="0" width="10" height="10" fill="${P.destr}"></rect><text x="16" y="9" font-size="7" fill="${P.destr}">CORE 62m</text></g>
+  </g>`;
+  s += `<g fill="${P.uiText}"><rect x="719" y="372" width="3" height="10"></rect><rect x="719" y="398" width="3" height="10"></rect><rect x="702" y="389" width="10" height="3"></rect><rect x="728" y="389" width="10" height="3"></rect></g>`;
+  s += `<defs><pattern id="scan2" width="4" height="4" patternUnits="userSpaceOnUse"><rect width="4" height="2" fill="#000" opacity="0.15"></rect></pattern></defs><rect width="${W}" height="${H}" fill="url(#scan2)"></rect>`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" shape-rendering="crispEdges">${s}</svg>`;
+  return doc(h('div', `width: ${W}px; height: ${H}px; background: ${P.void}; overflow: hidden`, svg));
+}
+
+// =====================================================================
+// 6. Lineup — 적 라인업 + 3구역 무드
+// =====================================================================
+function lineupBoard() {
+  // 스케일 라인업: 1px = 1cm → 캐릭터 180cm = 180px. 복셀 7.5cm = 7.5px... 스프라이트 셀 = 7.5px 대신 c=8(≈)
+  const cell = 7.5;
+  const stage = (map, leg, name, note, c = cell, extra = '') => {
+    const [w, hh] = dims(map);
+    return h('div', `display: flex; flex-direction: column; gap: 8px; align-items: center`,
+      `<svg width="${Math.max(120, w * c + 20)}" height="260" viewBox="0 0 ${Math.max(120, w * c + 20)} 260" shape-rendering="crispEdges">${px(map, leg, c, (Math.max(120, w * c + 20) - w * c) / 2, 250 - hh * c)}${extra}</svg>` +
+      h('div', `font-family: 'Press Start 2P', monospace; font-size: 9px; line-height: 13px; color: ${P.uiText}; text-align: center`, name) +
+      h('div', `font-size: 11px; line-height: 15px; color: ${P.uiSub}; text-align: center; width: 150px`, note));
+  };
+  const PLAYER = `
+...HHHH...
+..HHHHHH..
+..HHHHHH..
+...HHHH...
+.HHHHHHHH.
+HHHHHHHHHH
+HHHHHHHHHH
+H.HHHHHH.H
+H.HHHHHH.H
+..HHHHHH..
+..HHHHHH..
+..HH..HH..
+..HH..HH..
+..HH..HH..
+..HH..HH..
+..HH..HH..
+..HH..HH..
+..HH..HH..
+..HH..HH..
+..HH..HH..
+..HH..HH..
+..HH..HH..
+.HHH..HHH.
+.HHH..HHH.`;
+  const BOSS = `
+..BBBBBBBBBBBBBBBBBBBBBBBBBB..
+.BBBBBBBBBBBBBBBBBBBBBBBBBBBB.
+BBBBBBBBBBBBBBBBBBBBBBBBBBBBBB
+BBSSSSSSSSSSSSSSSSSSSSSSSSSSBB
+BBSSSSSSSSSSSSSSSSSSSSSSSSSSBB
+BBSSSWWWWSSSSSSSSSSSWWWWSSSSBB
+BBSSSWPPWSSSSSSSSSSSWPPWSSSSBB
+BBSSSWWWWSSSSSSSSSSSWWWWSSSSBB
+BBSSSSSSSSSSSSSSSSSSSSSSSSSSBB
+BBSSSSSSSSSCCCCCCCCSSSSSSSSSBB
+BBSSSSSSSSCCCCCCCCCCSSSSSSSSBB
+BBSSSSSSSSSCCCCCCCCSSSSSSSSSBB
+BBSSSSSSSSSSSSSSSSSSSSSSSSSSBB
+BBBBBBBBBBBBBBBBBBBBBBBBBBBBBB
+BBBBBBBBBBBBBBBBBBBBBBBBBBBBBB
+BBBBBBBRRBBBBOOBBBBGGBBBBBBBBB
+BBBBBBBBBBBBBBBBBBBBBBBBBBBBBB
+BBBBBBBBBBBBBBBBBBBBBBBBBBBBBB
+BBBBBBBBBBBBBBBBBBBBBBBBBBBBBB
+BBBBBBBBBBBBBBBBBBBBBBBBBBBBBB
+BBBBBBBBBBBBBBBBBBBBBBBBBBBBBB
+BBBBBBBBBBBBBBBBBBBBBBBBBBBBBB
+BBBBBBBBBBBBBBBBBBBBBBBBBBBBBB
+BBBBBBBBBBBBBBBBBBBBBBBBBBBBBB
+BBBBBBBBBBBBBBBBBBBBBBBBBBBBBB
+BBBBBBBBBBBBBBBBBBBBBBBBBBBBBB
+BBBBBBBBBBBBBBBBBBBBBBBBBBBBBB
+BBBBBBBBBBBBBBBBBBBBBBBBBBBBBB
+BBBBBBBBBBBBBBBBBBBBBBBBBBBBBB
+BBBBBBBBBBBBBBBBBBBBBBBBBBBBBB
+.BBB......................BBB.
+.BBB......................BBB.`;
+  const LEG_BOSS = { B: '#3A2748', S: '#120A1A', W: P.eyeW, P: P.pupil, C: P.elite, R: P.uiWarn, O: P.uiReward, G: P.destr };
+  const lineup = panel(
+    T.h2('LINEUP  (1px = 1cm)') +
+    h('div', `display: flex; flex-direction: row; gap: 24px; align-items: flex-end; justify-content: space-between`,
+      stage(PLAYER, { H: P.ally }, 'PLAYER 180', '아군 = 청록 아웃라인. 실루엣만 — 3P 바디는 NEON-V 트랙') +
+      stage(CHOMPER_OPEN, LEG_CH, 'CHOMPER 165', '일반 · 구 실루엣 · 22층 · 입 개폐 공격') +
+      stage(BEETLE, LEG_CH, 'BEETLE 90', '일반 · 각 실루엣 · 낮고 넓음 · ≤45cm 넘어감 아님(적)') +
+      stage(SPIKE, LEG_CH, 'GLITCH 150', '일반 · 침 실루엣 · 빠름') +
+      stage(CHOMPER_OPEN, LEG_CH_ELITE, 'ELITE 215', '×1.3 · 림 #FF1E7A · 코어 2개 · GAS(ADR 0013)', cell * 1.3) +
+      stage(BOSS, LEG_BOSS, 'CABINET CORE 240', '억제기/보스 = 캐비닛. 화면 = 얼굴. 파괴 = STAGE CLEAR')) +
+    T.sub('라인업의 형태는 방향 제시다. 쩝쩝이 외 3종은 실루엣 패밀리 예시이며 실제 메시는 후속 행에서 저작한다.'),
+    '100%');
+  const mood = (name, bg, floor, wire, accent, note, extraSvg = '') => h('div', `display: flex; flex-direction: column; gap: 8px; width: 440px`,
+    `<svg width="440" height="180" viewBox="0 0 440 180" shape-rendering="crispEdges">
+      <rect width="440" height="180" fill="${bg}"></rect>
+      <rect x="0" y="90" width="440" height="90" fill="${floor}"></rect>
+      <rect x="0" y="84" width="440" height="6" fill="${P.side}"></rect>
+      <g stroke="${P.floor}" stroke-width="1">${Array.from({ length: 15 }, (_, i) => `<line x1="${220 + (i - 7) * 6}" y1="90" x2="${220 + (i - 7) * 60}" y2="180"></line>`).join('')}</g>
+      <path d="M216 92 L 150 180 M224 92 L 300 180" stroke="${wire}" stroke-width="4"></path>
+      ${extraSvg}
+      <rect x="40" y="60" width="60" height="50" fill="${P.side}"></rect><rect x="40" y="60" width="60" height="3" fill="${P.top}"></rect>
+      <rect x="330" y="70" width="70" height="40" fill="${P.side}"></rect><rect x="330" y="70" width="70" height="3" fill="${P.top}"></rect>
+      ${px(CHOMPER_CLOSED, LEG_CH, 2, 250, 66)}${px(CHOMPER_CLOSED, LEG_CH, 2, 290, 70)}
+      <rect x="0" y="0" width="440" height="180" fill="url(#scan3)"></rect>
+    </svg>` +
+    h('div', `font-family: 'Press Start 2P', monospace; font-size: 9px; line-height: 13px; color: ${accent}`, name) +
+    h('div', `font-size: 12px; line-height: 17px; color: ${P.uiSub}`, note));
+  const defs = `<svg width="0" height="0" style="position: absolute"><defs><pattern id="scan3" width="4" height="4" patternUnits="userSpaceOnUse"><rect width="4" height="2" fill="#000" opacity="0.15"></rect></pattern></defs></svg>`;
+  const moods = panel(
+    T.h2('3 ZONES  (같은 규칙 · 다른 변주)') +
+    h('div', `display: flex; flex-direction: row; gap: 20px`,
+      mood('L_MAP_1  MAINBOARD', P.void, P.floorDark, P.wireWide, P.via, '기본. 청보라 기판 + 시안 배선. 경계 밖 = 자두 회로. 밝기·밀도 중간.',
+        `<g stroke="${P.plumDark}" stroke-width="2" fill="none"><path d="M10 20 H 80 V 50 H 130 M 300 30 H 380 V 12"></path></g>`) +
+      mood('L_MAP_2  GLITCH SECTOR', '#0C0A16', '#141226', P.wire, P.plum, '위험. 배선은 어둡고 경계 밖 와이어프레임·글리치 블록이 강해짐. 밀도 높음.',
+        `<g stroke="${P.plum}" stroke-width="2" fill="none" opacity="0.8"><rect x="20" y="14" width="40" height="40"></rect><rect x="34" y="4" width="40" height="40"></rect><rect x="360" y="20" width="50" height="50"></rect></g>${px(GLITCH, LEG_GLITCH, 3, 150, 20)}${px(GLITCH, LEG_GLITCH, 3, 380, 40)}`) +
+      mood('L_MAP_BOSS  CABINET HALL', '#08070F', '#100E1E', P.wireFar, P.destr, '가장 어둡다. 배선 최소, 중앙 억제기 연두 맥동이 유일한 광원 = Ultimate 자리.',
+        `${px(CABINET, LEG_CAB, 4, 196, 30)}<rect x="212" y="46" width="16" height="12" fill="${P.destrHot}"></rect><rect x="196" y="30" width="48" height="52" fill="none" stroke="${P.destr}" stroke-width="2" opacity="0.6"></rect>`)),
+    '100%');
+  const body = h('div', `display: flex; flex-direction: column; gap: 20px; padding: 32px; width: 1440px; box-sizing: border-box; background: ${P.void}; position: relative`,
+    defs +
+    h('div', `display: flex; flex-direction: row; gap: 20px; align-items: baseline`, T.h1('ENEMY LINEUP  &amp;  ZONES') + T.sub('적 = 뜨거운 쪽(🔒). 크기·실루엣·코어 수로 티어를 읽게 한다(ADR 0013).')) +
+    lineup + moods);
+  return doc(body);
+}
+
+// ---------- 출력 ----------
+const out = (name, html) => { writeFileSync(name, html); console.log('wrote', name, html.length); };
+out('Main.dc.html', mainBoard());
+out('Palette.dc.html', paletteBoard());
+out('Form.dc.html', formBoard());
+out('Motifs.dc.html', motifsBoard());
+out('HUD.dc.html', hudBoard());
+out('Lineup.dc.html', lineupBoard());
+
+const canvas = {
+  artboards: [
+    { file: 'Main.dc.html', title: '1 · 키 비주얼 (1P 프레임)', x: 0, y: 0, w: 1440, h: 810 },
+    { file: 'HUD.dc.html', title: '5 · HUD 픽셀 모크', x: 1560, y: 0, w: 1440, h: 810 },
+    { file: 'Palette.dc.html', title: '2 · 팔레트 재매핑', x: 0, y: 960, w: 1440, h: 1000 },
+    { file: 'Form.dc.html', title: '3 · 형태 언어', x: 1560, y: 960, w: 1440, h: 1000 },
+    { file: 'Motifs.dc.html', title: '4 · 모티프 · 로그라이트 매핑', x: 0, y: 2100, w: 1440, h: 980 },
+    { file: 'Lineup.dc.html', title: '6 · 적 라인업 · 3구역', x: 1560, y: 2100, w: 1440, h: 980 },
+  ],
+  annotations: [
+    { id: 'brief', x: 0, y: -170, w: 700, text: 'FPS · 아케이드 · 픽셀 · 로그라이트 — 메인 비주얼 컨셉 시트 (2026-09-06)\n레퍼런스 = 롤 아케이드 스킨(컨셉·픽셀 요소·색감만) + 웹툰 전자오락수호대(게임 세계 수호 모티프).\n결정: 픽셀 = 복셀+스프라이트+CRT(전체 픽셀화 PP 기각) · 환경 = 어두운 무대 + 팝 액센트.\n색 규칙은 Docs/SSOT/ArtDirection.md §A 그대로, 이 시트는 §B(모티프·형태)의 시각 부록. ADR 0016.' },
+    { id: 'main-note', x: 760, y: -110, w: 640, text: '키 비주얼 읽는 법: 화면의 70%는 청보라 substrate. 밝은 것은 배선(통로)·적 코어·픽업·총구화염·HUD 뿐. 경계벽 너머 자두색 회로·와이어프레임은 "플레이 불가" 신호. 스캔라인 4px·0.15 = PP_Arcade 현행값.' },
+  ],
+  launch: { view: 'canvas' },
+};
+writeFileSync('canvas.json', JSON.stringify(canvas, null, 2));
+console.log('wrote canvas.json');

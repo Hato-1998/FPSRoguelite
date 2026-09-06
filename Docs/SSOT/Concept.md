@@ -90,7 +90,8 @@
   **맵1 아트도 Synty Sci-Fi Cyber City → 회로 기판으로 교체**(0010 D8; 맵마다 테마가 다른 것 자체는 위 원칙 그대로).
   레벨 구조 = `RunFlow.md §2-1`.
 - **The Spell Brigade 포지셔닝 정합 노트**: 레퍼런스(The Spell Brigade)는 판타지 세팅이나, **USP(1인칭 정보비대칭 협동)는 세팅 독립**이다. 따라서 세팅 교체는 §1-C-5 경쟁 포지셔닝 표(시점/동시규모/협동성격 축)를 **바꾸지 않는다** — 차별점은 여전히 *"서바이버 스케일(수백 적) × 1인칭 협동 상호의존"*.
-- **아트 방향 (2026-07-10 확정, 사용자 결정)**: **전체 셀/툰(애니) 통일 룩** — 월드·무기·캐릭터를 scene-wide 셀 아웃라인으로 묶는다. **✅ 렌더러 = SRS(Stylized Rendering System) 확정**(2026-07-10 파일럿 실측 합격). ⚠️ **SRS 통합 계약**: 셀/아웃라인은 순수 전역 PP가 아니라 **per-mesh Custom Depth-Stencil 마스킹** — 효과 받을 메시는 `render_custom_depth=True` + `r.CustomDepth=3`(Enabled with Stencil). **제1원리 실측**: 적 300 스웜(BroBot VAT)에 커스텀뎁스 켜도 Custom Depth 패스 **1.33ms**(예산 내, GPU 여유) → 스웜 채택 OK. 불통 시 대안 = DIY 스크린스페이스 Sobel+포스터라이즈(고정비용).
+- **아트 방향 (현행 — 2026-09-03 전환 · 2026-09-06 확정, [ADR 0016](../Architecture/0016-art-direction-retro-arcade-pixel.md))**: **레트로 아케이드 픽셀** — 키워드 FPS · 아케이드 · 픽셀 · 로그라이트. 형태 = 복셀(3D 픽셀) / 평면 = 픽셀 스프라이트 / 화면 = CRT PP. 환경 = 어두운 무대 + 팝 액센트(`ArtDirection.md §A` 대역 무변, 저작 규칙 = `§B`). 픽션 = 게임 세계 다이브 + "게임 세계를 지키는 수호자"(적 = 버그·글리치). 아래 2026-07-10 셀/툰 항목은 **폐기**(기록 보존).
+- ~~**아트 방향 (2026-07-10 확정, 사용자 결정)**~~ ⚠️ **폐기(2026-09-03 → ADR 0016)**: **전체 셀/툰(애니) 통일 룩** — 월드·무기·캐릭터를 scene-wide 셀 아웃라인으로 묶는다. **✅ 렌더러 = SRS(Stylized Rendering System) 확정**(2026-07-10 파일럿 실측 합격). ⚠️ **SRS 통합 계약**: 셀/아웃라인은 순수 전역 PP가 아니라 **per-mesh Custom Depth-Stencil 마스킹** — 효과 받을 메시는 `render_custom_depth=True` + `r.CustomDepth=3`(Enabled with Stencil). **제1원리 실측**: 적 300 스웜(BroBot VAT)에 커스텀뎁스 켜도 Custom Depth 패스 **1.33ms**(예산 내, GPU 여유) → 스웜 채택 OK. 불통 시 대안 = DIY 스크린스페이스 Sobel+포스터라이즈(고정비용).
   - **환경** = Synty POLYGON Sci-Fi Cyber City(맵1 베이스, 로우폴리) + 셀 아웃라인. (2·3맵 Nature/Space = 다중맵 단계)
   - **무기** = Synty POLYGON Military Pack **모듈 백본 + 사이버 리스킨**(Infima 교체) · ChargeLaser = Cyber City Laser Gun.
   - **캐릭터(플레이어/팀원)** = 애니 셀 베이스('Anime Girl Blu') 리스킨.
