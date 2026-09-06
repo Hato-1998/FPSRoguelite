@@ -272,6 +272,30 @@ FFFfffffFFF
 .....F.....`;
 const LEG_FLASH = { F: P.flash2, f: P.flash };
 
+// ---------- 픽셀 패럴랙스 배경(경계 밖) — 결정적 의사난수, 단색 실루엣만 ----------
+function parallax(W, horizon, seed = 0, opts = {}) {
+  const { starColor = P.side, farColor = P.plumDark, nearColor = '#3E2244', blockColor = P.plumDark, dense = 1, stars = 1 } = opts;
+  let r = 1234 + seed * 7919; const rnd = () => { r = (r * 1103515245 + 12345) & 0x7fffffff; return r / 0x7fffffff; };
+  let s = '';
+  // 픽셀 별(2px)
+  s += `<g fill="${starColor}">`;
+  for (let i = 0; i < 70 * stars; i++) { const x = Math.floor(rnd() * W / 4) * 4, y = Math.floor(rnd() * (horizon - 120) / 4) * 4; s += `<rect x="${x}" y="${y}" width="${rnd() < 0.2 ? 4 : 2}" height="${2}"></rect>`; }
+  s += `</g>`;
+  // 먼 스카이라인(계단 실루엣, 8px 격자)
+  s += `<g fill="${farColor}">`;
+  for (let x = 0; x < W;) { const w = 24 + Math.floor(rnd() * 8) * 8, hgt = 40 + Math.floor(rnd() * 12 * dense) * 8; s += `<rect x="${x}" y="${horizon - hgt}" width="${w}" height="${hgt}"></rect>`; if (rnd() < 0.4) s += `<rect x="${x + 8}" y="${horizon - hgt - 16}" width="${Math.max(8, w - 16)}" height="16"></rect>`; x += w; }
+  s += `</g>`;
+  // 가까운 스카이라인(더 낮고 더 밝은 자두)
+  s += `<g fill="${nearColor}">`;
+  for (let x = -16; x < W;) { const w = 40 + Math.floor(rnd() * 10) * 8, hgt = 16 + Math.floor(rnd() * 6 * dense) * 8; s += `<rect x="${x}" y="${horizon - hgt}" width="${w}" height="${hgt}"></rect>`; x += w + Math.floor(rnd() * 4) * 8; }
+  s += `</g>`;
+  // 부유 픽셀 블록(단색 실루엣, 계단형)
+  s += `<g fill="${blockColor}">`;
+  for (let i = 0; i < 6 * dense; i++) { const x = Math.floor(rnd() * W / 8) * 8, y = 40 + Math.floor(rnd() * (horizon - 200) / 8) * 8, sz = 16 + Math.floor(rnd() * 4) * 8; s += `<rect x="${x}" y="${y}" width="${sz}" height="${sz}"></rect><rect x="${x + sz}" y="${y + sz / 2}" width="${sz / 2}" height="${sz / 2}"></rect>`; }
+  s += `</g>`;
+  return s;
+}
+
 // ---------- 공통 헤드 ----------
 const FONTS = `<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&amp;family=Noto+Sans+KR:wght@400;500;700&amp;display=swap" rel="stylesheet">`;
 const BASE_CSS = `
@@ -320,22 +344,12 @@ const swatch = (hex, label, note = '', big = false) => h('div', `display: flex; 
 function mainBoard() {
   const W = 1440, H = 810, VX = 720, VY = 380; // 소실점
   let s = '';
-  // 보이드 + 경계 밖 배경 회로(자두, 저채도) + 와이어프레임 부유 기하
+  // 보이드 + 경계 밖 = 픽셀 패럴랙스 배경(레트로 게임 배경 레이어: 픽셀 별 · 먼 스카이라인 실루엣 · 부유 픽셀 블록). 전부 단색 실루엣, 선 없음
   s += `<rect width="${W}" height="${H}" fill="${P.void}"></rect>`;
-  s += `<g stroke="${P.plumDark}" stroke-width="2" fill="none" opacity="0.7">`;
-  for (let i = 0; i < 14; i++) { const x = 40 + i * 104; s += `<path d="M${x} 60 V ${140 + (i % 3) * 40} H ${x + 60} V ${300}" ></path>`; }
-  s += `<path d="M0 200 H 300 V 260 H 520 M 900 240 H 1180 V 180 H 1440"></path>`;
-  s += `</g>`;
-  s += `<g fill="${P.plum}" opacity="0.8">`;
-  [[120, 140], [360, 262], [1010, 242], [1300, 182], [640, 300]].forEach(([x, y]) => { s += `<rect x="${x - 4}" y="${y - 4}" width="8" height="8"></rect>`; });
-  s += `</g>`;
-  // 와이어프레임 큐브(경계 밖 부유)
-  const wcube = (x, y, sz, c, op) => `<g stroke="${c}" stroke-width="2" fill="none" opacity="${op}"><rect x="${x}" y="${y}" width="${sz}" height="${sz}"></rect><rect x="${x + sz * 0.35}" y="${y - sz * 0.35}" width="${sz}" height="${sz}"></rect><path d="M${x} ${y} l${sz * 0.35} ${-sz * 0.35} M${x + sz} ${y} l${sz * 0.35} ${-sz * 0.35} M${x} ${y + sz} l${sz * 0.35} ${-sz * 0.35} M${x + sz} ${y + sz} l${sz * 0.35} ${-sz * 0.35}"></path></g>`;
-  s += wcube(180, 120, 70, P.plum, 0.55) + wcube(1120, 90, 90, P.plum, 0.5) + wcube(820, 150, 40, P.wireFar, 0.6) + wcube(470, 110, 50, P.wireFar, 0.5);
-  // 경계벽(먼 곳) — 어두운 면 + 상단 라인
+  s += parallax(W, VY - 60, 0);
   s += `<rect x="0" y="${VY - 60}" width="${W}" height="60" fill="${P.floor}"></rect>`;
+  // 경계벽(먼 곳) — 어두운 면 + 상단 엣지 1줄
   s += `<rect x="0" y="${VY - 62}" width="${W}" height="4" fill="${P.top}"></rect>`;
-  s += `<rect x="0" y="${VY - 60}" width="${W}" height="2" fill="${P.plum}" opacity="0.8"></rect>`;
   // 벽면 복셀 격자선(5cm 격자 = 벽에선 촘촘한 어두운 선)
   s += `<g stroke="${P.side}" stroke-width="1" opacity="0.9">`;
   for (let x = 0; x <= W; x += 36) s += `<line x1="${x}" y1="${VY - 60}" x2="${x}" y2="${VY}"></line>`;
@@ -527,15 +541,10 @@ function formBoard() {
 
   // 선 vs 면
   const lineface = panel(
-    T.h2('FACE INSIDE  ·  LINE OUTSIDE') +
+    T.h2('FACE INSIDE  ·  PARALLAX OUTSIDE') +
     `<svg width="600" height="230" viewBox="0 0 600 230" shape-rendering="crispEdges">
       <rect width="600" height="230" fill="${P.void}"></rect>
-      <g stroke="${P.plumDark}" stroke-width="2" fill="none" opacity="0.8">
-        <rect x="20" y="30" width="60" height="60"></rect><rect x="42" y="12" width="60" height="60"></rect><path d="M20 30 l22 -18 M80 30 l22 -18 M20 90 l22 -18 M80 90 l22 -18"></path>
-        <path d="M20 150 H 90 V 200 H 140 M 40 120 V 200"></path>
-        <rect x="500" y="40" width="70" height="70"></rect><rect x="524" y="20" width="70" height="70"></rect><path d="M500 40 l24 -20 M570 40 l24 -20 M500 110 l24 -20 M570 110 l24 -20"></path>
-        <path d="M480 160 H 560 V 210"></path>
-      </g>
+      <g>${parallax(600, 215, 3, { dense: 0.8 })}</g>
       <rect x="160" y="10" width="14" height="210" fill="${P.floor}"></rect><rect x="160" y="10" width="14" height="3" fill="${P.top}"></rect>
       <rect x="426" y="10" width="14" height="210" fill="${P.floor}"></rect><rect x="426" y="10" width="14" height="3" fill="${P.top}"></rect>
       <rect x="174" y="10" width="252" height="210" fill="${P.floorDark}"></rect>
@@ -545,10 +554,11 @@ function formBoard() {
       <g stroke="${P.floorDark}" stroke-width="1"><line x1="228" y1="60" x2="228" y2="112"></line><line x1="246" y1="60" x2="246" y2="112"></line><line x1="264" y1="60" x2="264" y2="112"></line><line x1="210" y1="78" x2="280" y2="78"></line><line x1="210" y1="96" x2="280" y2="96"></line></g>
       <rect x="340" y="150" width="46" height="46" fill="${P.side}"></rect><rect x="356" y="166" width="14" height="14" fill="${P.destr}"></rect>
       ${px(CHOMPER_CLOSED, LEG_CH, 3, 360, 60)}
-      <g font-family="'Press Start 2P', monospace" font-size="8" fill="${P.uiSub}"><text x="20" y="222">OUTSIDE = WIRE</text><text x="200" y="222">PLAY SPACE = VOXEL FACE</text><text x="470" y="222">OUTSIDE = WIRE</text></g>
+      <rect x="0" y="215" width="600" height="15" fill="${P.void}"></rect>
+      <g font-family="'Press Start 2P', monospace" font-size="8" fill="${P.uiSub}"><text x="14" y="226">OUTSIDE = PARALLAX</text><text x="200" y="226">PLAY SPACE = VOXEL FACE</text><text x="452" y="226">OUTSIDE = PARALLAX</text></g>
     </svg>` +
-    T.kr('<b>플레이 공간 = 면.</b> 복셀 평면 채색 + 어두운 격자선(같은 대역 안, 명도차 작게). 통행 정보는 오직 <b>배선(밝은 선)</b>이 든다.') +
-    T.kr('<b>경계벽 밖 = 선.</b> 회로기판 트레이스·와이어프레임 부유 기하(Tron 유산). 마젠타는 여기서만 강하게. 콜리전 없음 → 불변식 "렌더 메시는 껍데기" 유지.'),
+    T.kr('<b>플레이 공간 = 면.</b> 복셀 평면 채색 + 어두운 격자선(같은 대역 안, 명도차 작게). 통행 정보는 오직 <b>바닥 배선(밝은 선)</b>이 든다 — 사용자 결정 2026-09-06 "배선은 유지".') +
+    T.kr('<b>경계벽 밖 = 픽셀 패럴랙스 배경.</b> 레트로 게임 배경 레이어 — 픽셀 별 · 먼 스카이라인 · 부유 픽셀 블록, <b>전부 단색 실루엣</b>(선·와이어프레임·회로 없음). 마젠타는 여기서만. 구역마다 레이어를 바꿔 무드 변주. 콜리전 없음.'),
     620);
 
   // 실루엣 3분류
@@ -778,12 +788,12 @@ BBBBBBBBBBBBBBBBBBBBBBBBBBBBBB
   const moods = panel(
     T.h2('3 ZONES  (같은 규칙 · 다른 변주)') +
     h('div', `display: flex; flex-direction: row; gap: 20px`,
-      mood('L_MAP_1  MAINBOARD', P.void, P.floorDark, P.wireWide, P.via, '기본. 청보라 기판 + 시안 배선. 경계 밖 = 자두 회로. 밝기·밀도 중간.',
-        `<g stroke="${P.plumDark}" stroke-width="2" fill="none"><path d="M10 20 H 80 V 50 H 130 M 300 30 H 380 V 12"></path></g>`) +
-      mood('L_MAP_2  GLITCH SECTOR', '#0C0A16', '#141226', P.wire, P.plum, '위험. 배선은 어둡고 경계 밖 와이어프레임·글리치 블록이 강해짐. 밀도 높음.',
-        `<g stroke="${P.plum}" stroke-width="2" fill="none" opacity="0.8"><rect x="20" y="14" width="40" height="40"></rect><rect x="34" y="4" width="40" height="40"></rect><rect x="360" y="20" width="50" height="50"></rect></g>${px(GLITCH, LEG_GLITCH, 3, 150, 20)}${px(GLITCH, LEG_GLITCH, 3, 380, 40)}`) +
-      mood('L_MAP_BOSS  CABINET HALL', '#08070F', '#100E1E', P.wireFar, P.destr, '가장 어둡다. 배선 최소, 중앙 억제기 연두 맥동이 유일한 광원 = Ultimate 자리.',
-        `${px(CABINET, LEG_CAB, 4, 196, 30)}<rect x="212" y="46" width="16" height="12" fill="${P.destrHot}"></rect><rect x="196" y="30" width="48" height="52" fill="none" stroke="${P.destr}" stroke-width="2" opacity="0.6"></rect>`)),
+      mood('L_MAP_1  ARCADE FLOOR', P.void, P.floorDark, P.wireWide, P.via, '기본. 청보라 복셀 면 + 시안 배선. 경계 밖 = 자두 픽셀 스카이라인·별. 밝기·밀도 중간.',
+        parallax(440, 84, 11, { dense: 0.6 })) +
+      mood('L_MAP_2  GLITCH SECTOR', '#0C0A16', '#141226', P.wire, P.plum, '위험. 배선은 어둡고 경계 밖 스카이라인이 높고 빽빽해지며 글리치 블록 스폰이 늘어남.',
+        parallax(440, 84, 22, { dense: 1.2, nearColor: '#4A2650', blockColor: P.plum }) + `${px(GLITCH, LEG_GLITCH, 3, 150, 20)}${px(GLITCH, LEG_GLITCH, 3, 380, 40)}`) +
+      mood('L_MAP_BOSS  CABINET HALL', '#08070F', '#100E1E', P.wireFar, P.destr, '가장 어둡다. 배경은 별만, 배선 최소, 중앙 억제기 연두 맥동이 유일한 광원 = Ultimate 자리.',
+        parallax(440, 84, 33, { dense: 0.3, stars: 0.6, farColor: '#1A1026', nearColor: '#1A1026' }) + `${px(CABINET, LEG_CAB, 4, 196, 30)}<rect x="212" y="46" width="16" height="12" fill="${P.destrHot}"></rect><rect x="196" y="30" width="48" height="52" fill="none" stroke="${P.destr}" stroke-width="2" opacity="0.6"></rect>`)),
     '100%');
   const body = h('div', `display: flex; flex-direction: column; gap: 20px; padding: 32px; width: 1440px; box-sizing: border-box; background: ${P.void}; position: relative`,
     defs +
@@ -811,8 +821,8 @@ const canvas = {
     { file: 'Lineup.dc.html', title: '6 · 적 라인업 · 3구역', x: 1560, y: 2100, w: 1440, h: 980 },
   ],
   annotations: [
-    { id: 'brief', x: 0, y: -170, w: 700, text: 'FPS · 아케이드 · 픽셀 · 로그라이트 — 메인 비주얼 컨셉 시트 (2026-09-06)\n레퍼런스 = 롤 아케이드 스킨(컨셉·픽셀 요소·색감만) + 웹툰 전자오락수호대(게임 세계 수호 모티프).\n결정: 픽셀 = 복셀+스프라이트+CRT(전체 픽셀화 PP 기각) · 환경 = 어두운 무대 + 팝 액센트.\n색 규칙은 Docs/SSOT/ArtDirection.md §A 그대로, 이 시트는 §B(모티프·형태)의 시각 부록. ADR 0016.' },
-    { id: 'main-note', x: 760, y: -110, w: 640, text: '키 비주얼 읽는 법: 화면의 70%는 청보라 substrate. 밝은 것은 배선(통로)·적 코어·픽업·총구화염·HUD 뿐. 경계벽 너머 자두색 회로·와이어프레임은 "플레이 불가" 신호. 스캔라인 4px·0.15 = PP_Arcade 현행값.' },
+    { id: 'brief', x: 0, y: -170, w: 700, text: 'FPS · 아케이드 · 픽셀 · 로그라이트 — 메인 비주얼 컨셉 시트 (2026-09-06)\n레퍼런스 = 롤 아케이드 스킨(컨셉·픽셀 요소·색감만) + 웹툰 전자오락수호대(게임 세계 수호 모티프).\n결정: 픽셀 = 복셀+스프라이트+CRT(전체 픽셀화 PP 기각) · 환경 = 어두운 무대 + 팝 액센트 · Tron 네온선·와이어프레임·회로기판 픽션 폐기(바닥 배선만 유지).\n색 규칙은 Docs/SSOT/ArtDirection.md §A 그대로, 이 시트는 §B(모티프·형태)의 시각 부록. ADR 0016.' },
+    { id: 'main-note', x: 760, y: -110, w: 640, text: '키 비주얼 읽는 법: 화면의 70%는 청보라 복셀 면. 밝은 것은 바닥 배선(통로)·적 코어·픽업·총구화염·HUD 뿐. 경계벽 너머 자두색 픽셀 스카이라인·별·부유 블록 = 패럴랙스 배경 = "플레이 불가" 신호. 스캔라인 4px·0.15 = PP_Arcade 현행값.' },
   ],
   launch: { view: 'canvas' },
 };

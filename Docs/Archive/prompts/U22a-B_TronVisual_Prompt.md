@@ -1,3 +1,5 @@
+> ⛔ **폐기본 (2026-09-06, 사용자 결정 — ADR 0016 정정(b))**: Tron 네온 엣지·와이어프레임·회로기판 모티프 **전면 폐기**. 현행 아트 방향 = `Docs/Architecture/0016-art-direction-retro-arcade-pixel.md` + `Docs/SSOT/ArtDirection.md §B`. 이 문서는 기록 보존용이며 읽지 말 것.
+
 # U22a-B — Tron 비주얼 방향 전환 · 실행 프롬프트
 
 > 작성 2026-07-23. **새 세션이 그대로 복붙해 착수**하는 실행 프롬프트다.

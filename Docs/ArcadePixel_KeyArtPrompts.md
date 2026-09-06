@@ -14,7 +14,7 @@ retro arcade cyberspace, dark stage with pop accents, voxel (3D pixel) forms wit
 flat colored voxel faces with thin dark grid lines, NO photo textures, NO gradients on surfaces,
 dominant palette: deep indigo/violet substrate (#151329 #221E3D #332B57) covering 70% of frame,
 bright teal circuit traces on the floor (#2A8A96 #39B8B0 #5FE0D2) as walkable paths,
-outside the arena boundary: dim plum circuit-board traces and magenta wireframe floating cubes (#5A2E63 #9B3F86),
+outside the arena boundary: a retro-game pixel parallax backdrop — 2px pixel stars, stepped pixel skyline silhouettes and floating pixel blocks in dim plum (#5A2E63 #9B3F86), ALL flat single-color silhouettes, NO wireframes, NO circuit traces, NO neon edges on walls or blocks,
 enemies ONLY in hot colors (pink/red/orange #FF3B4E #FF6B2C #FF1E7A) with one glowing core each,
 allies ONLY in cold colors (cyan/blue/violet #4FD8FF #2E9BFF #8B6BFF),
 destructible objects marked by small lime glowing cores (#9BE33C),
@@ -24,7 +24,7 @@ no pure white, no pure black, no photoreal, no smooth cel-shading, no anime char
 
 네거티브(지원하는 도구에서):
 ```
---no orange background, magenta background, bright environment, photo texture, realistic lighting, anime face, cel shading, smooth gradients, blur, motion blur, lens flare, text, logo, watermark
+--no orange background, magenta background, wireframe, circuit board, neon edge lines, tron, bright environment, photo texture, realistic lighting, anime face, cel shading, smooth gradients, blur, motion blur, lens flare, text, logo, watermark
 ```
 
 ## 1. 키 비주얼 A — 1인칭 프레임 (스토어 캡슐 · 메인 이미지)
@@ -37,7 +37,7 @@ a swarm of round voxel ghost enemies with open jaws and glowing orange cores (#F
 one large enemy in the near left, dozens receding to the horizon,
 one teammate silhouette outlined in cyan (#4FD8FF) standing mid-distance to the left with a small "P2" tag,
 voxel blocker walls in indigo with thin dark grid lines, one block with a small lime glowing core,
-teal circuit traces on the floor converging to the horizon, a low boundary wall, beyond it plum circuit traces and magenta wireframe cubes floating in the void,
+teal circuit traces on the floor converging to the horizon, a low boundary wall, beyond it a plum pixel skyline, pixel stars and floating pixel blocks as flat silhouettes,
 minimal pixel HUD: segmented shield/health bars bottom-left, big ammo digits bottom-right, "STAGE 2" top center,
 16:9, wide angle 90 fov, eye level
 ```
@@ -50,7 +50,7 @@ four voxel hero figures seen from behind and slightly above, standing back-to-ba
 each outlined in a cold color (cyan, blue, violet, teal), holding blocky voxel guns with blue emissive accents,
 surrounded on all sides by a ring of hot-colored voxel ghost enemies (pink/red) with glowing orange cores, hundreds receding into darkness,
 teal circuit traces radiating from the center, one giant arcade-cabinet-shaped boss core in the far background pulsing lime green,
-plum circuit-board traces and magenta wireframe cubes floating outside the arena boundary,
+plum pixel skyline and floating pixel block silhouettes outside the arena boundary,
 16:9, dramatic but readable — the four cold silhouettes must pop against the hot swarm
 ```
 
@@ -67,9 +67,9 @@ pixel text "STAGE CLEAR" floating above in lime green, CRT scanlines,
 
 ## 4. 무드 스트립 3종 (구역별 · 컨셉 시트 「3 ZONES」 대응)
 
-- **L_Map_1 메인보드**: `[공통 블록] + wide establishing shot of the arena from a high corner, teal traces medium density, medium brightness, calm`
-- **L_Map_2 글리치 섹터**: `[공통 블록] + darker traces, denser magenta wireframe and glitch-block spawn points along the boundary, corrupted pixel-noise patches on the floor in plum, tense`
-- **L_Map_Boss 캐비닛 홀**: `[공통 블록] + almost no floor traces, the only light source is a giant lime-pulsing arcade cabinet core at the center, darkest of the three`
+- **L_Map_1 아케이드 플로어**: `[공통 블록] + wide establishing shot of the arena from a high corner, teal traces medium density, medium brightness, calm`
+- **L_Map_2 글리치 섹터**: `[공통 블록] + darker floor traces, a taller and denser magenta pixel skyline beyond the boundary, glitch-block spawn points along the wall, corrupted pixel-noise patches on the floor in plum, tense`
+- **L_Map_Boss 캐비닛 홀**: `[공통 블록] + almost no floor traces, only sparse pixel stars beyond the boundary, the only light source is a giant lime-pulsing arcade cabinet core at the center, darkest of the three`
 
 ## 5. 적 라인업 시트 (컨셉 시트 「LINEUP」 페인팅판)
 
