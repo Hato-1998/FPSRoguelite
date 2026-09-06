@@ -292,7 +292,7 @@ D4 는 높이(넘을 수 있나) × 파괴가능 두 축을 **1인칭에서 즉�
 
 ### B-10. 방향성 기준 키아트 번역표 (ADR 0016 D10, 2026-09-06(d))
 
-기준 이미지 = `Docs/Concept/ArcadePixel_KeyArt_UserRef_2026-09-06.png`(사용자 제공). **복제가 아니라 번역** — 아래 표가 저작 시 판정 기준.
+기준 이미지 = `Docs/Concept/ArcadePixel_KeyArt_UserRef_2026-09-06_v2_HUD.png`(사용자 최종안, HUD 배치 포함; v1 은 기록). **복제가 아니라 번역** — 아래 표가 저작 시 판정 기준.
 
 | 이미지 | 저작 규칙 |
 |---|---|
@@ -302,6 +302,27 @@ D4 는 높이(넘을 수 있나) × 파괴가능 두 축을 **1인칭에서 즉�
 | 쿼드 드론 적 | 형태 채택, 색은 뜨거운 쪽만(`#FF3B4E` 라이트 · `#FF6B2C` 텔레그래프 · `#FF1E7A` 엘리트). **시안 금지.** 몸통 = 캐릭터 대역 어두운 자주(`#3A2748`·`#2A1E36`·`#6E2E44`). 실행 = `Docs/DroneEnemy_ResumePrompt.md` |
 | 복셀 권총(시안+핑크) | 시안·보라 악센트만(B-5 무기 예외). 핑크 → `#8B6BFF` |
 | HUD: HIGH SCORE · KILL · COMBO · 레벨명 배너 | B-6 어휘에 추가. 스크린 공간(§A-3-7). 콤보 색 = 보상 금 `#FFC24A`, 레벨명 배너 = 본문 `#EAF6FF` |
+
+### B-11. HUD 배치 최종안 ↔ 시스템 대조 (사용자 최종안 2026-09-06(e), `Docs/Concept/ArcadePixel_KeyArt_UserRef_2026-09-06_v2_HUD.png`)
+
+배치 자체는 현행 위젯 자리와 맞는다 — 좌상 팀/아이템 · 좌하 바이탈 · 우하 무기 · 상단 중앙 진행 · 우상 스테이지 · 하단 중앙 배너. 요소별 데이터 소스와 상태:
+
+| 이미지 요소 | 데이터 소스(현행) | 상태 | 저작 시 규칙 |
+|---|---|---|---|
+| COLLECTED ITEMS 아이콘 그리드 | 획득 카드 원장 `FFPSRAcquiredCard` + `OnAcquiredCardsChanged`(PlayerState, CRIT2) | 데이터 ✅ · 위젯 ❌ | 카드별 픽셀 아이콘(§B-6 스프라이트 규칙). 희귀도 = ★ |
+| 팀원 초상(픽셀) | — | ❌(3P 캐릭터 미정, NEON-V 트랙) | 초상 = 8×8/16×16 픽셀, 아군 색 테두리 |
+| TEAM STATUS 패널 ×3 | `AFPSRGameState::GetPartyVitals()` · `WBP_TeammateVitals` | ✅ | **패널 1개 = 팀원 1명**(이미지의 P1/P2/P3 반복은 오류). 자기 자신은 좌하 바이탈. 다운 = `#FF4D5E` 경고 |
+| STAGE PROGRESS TO BOSS 바 | 런 디렉터 BossTime(`UFPSRRunScheduleDataAsset`) + `GetRunClockSeconds/GetRunPhase` | ✅(산출 필요) | 정의 = **보스타임까지 시간 진행률**. 억제기 파괴(스테이지 전환)와 별개 축. 색 = 긍정 `#5FE0D2` |
+| CURRENT STAGE 5-1 | `AFPSRGameState::GetStageIndex()` + 서브레벨(Map_1/Map_2/Boss) | ✅ | "5-1" = 스테이지 5 · 맵 1. 문자열 = LOC0 |
+| XP BAR · LV 12/15 | `GetPartyLevel · GetSharedXP · GetRequiredXPForNextLevel · GetXPProgress01`(RunHUD) | ✅ | 레벨 상한 없음 → "LV 12" + 바 또는 XP/필요XP. 색 = 보상 금 `#FFC24A` |
+| HP 150/150 · SHIELD 50/50 | VIT1 2층 · `WBP_PlayerVitals` | ✅ | ⚠️ **HP 녹색 금지**(연두 = 파괴물 예약 §A-3-3) → HP = 본문 `#EAF6FF` 세그먼트, 위험 시 `#FF4D5E`. 실드 파랑 `#2E9BFF` OK |
+| MAIN SKILL 슬롯 | 플레이어 GAS 있음 · "메인 스킬" 액티브 슬롯 정의 없음 | ❌ 기획 결정 | 슬롯을 둘지, 무엇을 넣을지 = `CombatWeaponCard.md` 결정 후 |
+| DASH 12s 쿨다운 | 기획 유효 · 구현 폐기(2026-07-28, CMC 재제작 예정, `PlayerFeel.md §2-13`) | ❌ 코드 없음 | 재제작 후 배선. 12s 는 이미지값(밸런스 아님) |
+| LEVEL 5 - CORES OF THE VOID 배너 | `WBP_MissionBanner`(미션 배너) 재사용 · 스테이지명 데이터 없음 | 위젯 ✅ · 데이터 ❌ | 스테이지명 = LOC0 문자열 테이블 신규. 색 = 본문 |
+| AMMO 2 · RESERVE 2400 · 무기 아이콘 | `WBP_WeaponPanel`(`GetCurrentAmmo/GetCurrentMagSize/Icon`) | 탄창 ✅ · **예비탄 표면 없음** | 예비탄 개념 도입 여부 = 무기 설계 결정. 없으면 RESERVE 생략 |
+| 크로스헤어 | U12 절차 SDF | 이미지에 없음 — **필수 유지** | 픽셀 스냅만 |
+| 코어(억제기) 방향 마커 | `AFPSRArenaLandmark`·억제기 | 이미지에 없음 — 팩맨 미로에서 **필요** | 연두 마커 + 거리(이전 시트 HUD 모크 참조) |
+| 한글 표기("경험치IENCE BAR" 등) | — | 이미지 생성 오류 | 한글 = Galmuri 계열 픽셀 폰트(D8) |
 
 ### B-8. 미해결 / 다음
 

@@ -1,4 +1,4 @@
-// 산출 = Docs/Architecture/0016 시각 부록(아티팩트 「FPSRoguelite Arcade Pixel Concept Sheet」). 실행: 작업 폴더에서 `node gen_concept_sheet_arcade_pixel.mjs` → *.dc.html + canvas.json → design 스킬 seed-canvas.mjs 로 조립(--image keyart_ref.jpg = Docs/Concept 키아트 960px JPEG).
+// 산출 = Docs/Architecture/0016 시각 부록(아티팩트 「FPSRoguelite Arcade Pixel Concept Sheet」). 실행: 작업 폴더에서 `node gen_concept_sheet_arcade_pixel.mjs` → *.dc.html + canvas.json → design 스킬 seed-canvas.mjs 로 조립(--image keyart_ref.jpg = Docs/Concept 키아트 v2 960px JPEG).
 // 컨셉 시트 아트보드 생성기 — ASCII 픽셀맵 → SVG rect. 산출 = *.dc.html + canvas.json
 import { writeFileSync } from 'node:fs';
 
@@ -814,7 +814,7 @@ out('Lineup.dc.html', lineupBoard());
 const canvas = {
   artboards: [
     { file: 'Main.dc.html', title: '1 · 키 비주얼 (1P 프레임)', x: 0, y: 0, w: 1440, h: 810 },
-    { file: 'HUD.dc.html', title: '5 · HUD 픽셀 모크', x: 1560, y: 0, w: 1440, h: 810 },
+    { file: 'HUD.dc.html', title: '5 · HUD 픽셀 모크 (v2 배치로 대체 — 색·세그먼트 규칙 참고용)', x: 1560, y: 0, w: 1440, h: 810 },
     { file: 'Palette.dc.html', title: '2 · 팔레트 재매핑', x: 0, y: 960, w: 1440, h: 1000 },
     { file: 'Form.dc.html', title: '3 · 형태 언어', x: 1560, y: 960, w: 1440, h: 1000 },
     { file: 'Motifs.dc.html', title: '4 · 모티프 · 로그라이트 매핑', x: 0, y: 2100, w: 1440, h: 980 },
@@ -1019,11 +1019,11 @@ function keyArtBoard() {
     tr('별·성운 하늘', '픽셀 패럴랙스 그대로. 성운 = 자두 단색 실루엣 층', 'ok') +
     tr('복셀 쿼드 드론 적 (시안 라이트)', '형태 채택 → 쩝쩝이 대체. 라이트·코어 = 뜨거운 쪽만(#FF3B4E · #FF6B2C · 엘리트 #FF1E7A). 시안 금지 = 아군 색', 'no') +
     tr('복셀 권총 (시안 + 핑크)', '시안·보라 악센트만(무기 = 캐릭터의 일부 예외). 핑크 → #8B6BFF', 'no') +
-    tr('HUD: HIGH SCORE · KILL · COMBO ×15 · 레벨명 배너', '어휘에 추가. 콤보 = 금 #FFC24A, 배너 = 본문 #EAF6FF. 스크린 공간', 'ok') +
+    tr('HUD v2 배치: 좌상 아이템·팀 / 좌하 XP·HP·실드 / 하단 대시·배너 / 우하 탄약 / 상단 보스 진행 / 우상 스테이지', '배치 채택. 대조표 §B-11 — HP 녹색 금지(파괴물 예약색), 팀 패널 1개 = 팀원 1명, 대시·메인 스킬·예비탄은 시스템 미존재, 크로스헤어·코어 마커 필수 유지', 'part') +
     tr('전체 채도·밝기', '히어로 아트라 채도를 다 쓴다. 팝 면적 10% 상한 유지, 격자선 만큼 환경 상단 대역은 PIE 재측정', 'part'),
     600);
   const body = h('div', `display: flex; flex-direction: column; gap: 20px; padding: 32px; width: 1440px; box-sizing: border-box; background: ${P.void}`,
-    h('div', `display: flex; flex-direction: row; gap: 20px; align-items: baseline`, T.h1('KEY ART  ·  USER REFERENCE') + T.sub('2026-09-06 사용자 제공 · Docs/Concept/ArcadePixel_KeyArt_UserRef_2026-09-06.png · ADR 0016 D10')) +
+    h('div', `display: flex; flex-direction: row; gap: 20px; align-items: baseline`, T.h1('KEY ART  ·  USER REFERENCE') + T.sub('2026-09-06 사용자 최종안(HUD 배치 포함) · Docs/Concept/ArcadePixel_KeyArt_UserRef_2026-09-06_v2_HUD.png · ADR 0016 D10 · HUD 대조 = ArtDirection §B-11')) +
     h('div', `display: flex; flex-direction: row; gap: 24px; align-items: flex-start`,
       h('div', `width: 760px; flex-shrink: 0; border: 2px solid ${P.side}`, `<img src="keyart_ref.jpg" style="width: 760px; display: block" alt="">`) + table));
   return doc(body);
