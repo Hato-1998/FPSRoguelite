@@ -1,9 +1,13 @@
-# STAT1 — 경량 상태이상 기반 (약한 4종 + 강한 2종 + 라이플 부여 카드 4장) · **rev3**
+# STAT1 — 경량 상태이상 기반 (약한 4종 + 강한 2종 + 라이플 부여 카드 4장) · **rev4**
 
 > 보드 행: [경량 적 상태이상 서브시스템 (비-GE)](https://app.notion.com/3b93972ddd8881c09b88ee600cc486f0) · 마일스톤 **M1** · 갈래 **코어(T1·T3·T5)**
 > 상위 계약: `Docs/SSOT/Enemy.md` §2-6 · `Docs/SSOT/Roadmap.md` §7-6 M1 · `Docs/SSOT/Performance.md` §5 · `Docs/Specs/VIT1_ShieldHealthTwoLayer.md`
 >
 > **rev1 → rev2**: G1 1회차(Opus 레드팀 15건 + Codex 9건) 전건 반영.
+> **rev3 → rev4**: G1 3회차(새 Opus 인스턴스 14 + Codex 7) 반영 + **사용자 결정으로 배타 축 철회**.
+> 🔴 시간축 처방이 **세 번 연속** 틀렸다(rev1 전제 · rev2 앵커쌍 · rev3 refcount·실드앵커) — 구현 시 이 축을
+> 최우선 검증 대상으로 볼 것. 원장 = §12.
+>
 > **rev2 → rev3**: G1 2회차(이행검증 + 신규 11건) 반영. 🔴 **rev2 의 시간축 처방이 그 자체로 버그였다** —
 > 전투시계 확장은 프리즈·전환 중첩에서 시계를 역행시키고(앵커 1쌍), 애초에 "잠복 버그 해소"라는 전제가
 > 틀렸다(전환은 사격을 안 막으므로 VIT1 의 근거가 성립하지 않는다). **상태 전용 시계로 교체**했다. 원장 = §12.
@@ -22,7 +26,7 @@
 |---|---|
 | 약한 4종 | 둔화 · 도트데미지 · 방어력감소 · 공격속도저하 |
 | 강한 2종 | 실명(공격불가) = 둔화+도트 · 속박(이동불가) = 도트+방어력감소 |
-| 부여 | 라이플 `UnlockableFeatures` 에 4장 (무기당 1개 배타) |
+| 부여 | 라이플 `UnlockableFeatures` 에 4장 (**배타 없음** — 사용자 결정 2026-09-06 3회차) |
 | 가시성 | `StatusBits` 복제 + **OnRep 클라 반쪽** + GMS 이벤트 + 플레이스홀더 큐 |
 
 **범위 = 6축 유지**(사용자 결정 2026-09-06). `Roadmap.md:194` 는 M1 에 상태축 2~3개를 적었으나, 사용자가
@@ -39,6 +43,9 @@
   건드리지 않고 미사용으로 남긴다** — 기제를 둘로 만들지 않기 위해서다(G1-7).
 - **프로덕션 VFX·오디오** — M2. 이번엔 플레이스홀더.
 - 라이플 외 무기의 부여 카드.
+- 🔴 **프래그먼트 배타 축(`ExclusionGroup`)** — 사용자 결정으로 **철회**(§3-D). 그 결과 이 유닛은 공용 헤더
+  `UFPSRWeaponFragment` · `FPSRCardSubsystem` 추첨부 · `UCardEffect_WeaponBehavior::CanApply` 를 **전혀
+  건드리지 않는다.** 직전 유닛(CRIT2)이 방금 손댄 시너지 가중·2단 추출과의 충돌 위험도 함께 소멸한다.
 
 ## 3. C0 조사 실측
 
@@ -92,22 +99,29 @@
 | 적 브랜치가 데미지 브릿지를 안 탐 | `FPSRProjectile.cpp:499-514` |
 | 적 근접 축은 죽은 코드로 제거됨(ADR 0013 C0) | `FPSREnemyBase.h:26-28` |
 
-### 3-D. 락다운 방지 — 사용자 결정과 그 한계 (G1-12, 갱신)
+### 3-D. 락다운 방지 — 배타 철회, 쿨다운 단일 손잡이 (사용자 결정 3회차)
 
-사용자 결정(2026-09-06 · 2회차): **배타 유지 + 재발동 쿨다운 필드만 예약(기본값 0).**
+**결정 경위** — 3회차 레드팀이 반증한 것을 사용자가 받아 뒤집었다:
 
-- **현행 카드 배타는 이 목적에 못 쓴다**: family 배타는 추첨 시점 + **같은 레어도** 한정이고
-  (*"same family at a different rarity co-presents"*, `FPSRCardSubsystem.cpp:25-28, 340-344`) 다음 오퍼에서
-  또 받는 것을 막지 않으며, 프래그먼트는 `MaxFragmentSlots = 3`(`FPSRWeaponDataAsset.h:392`)이다.
-- **배타가 실제로 사는 것은 "무기 1정이냐 2정이냐"뿐이다**(레드팀 반증). 무기 슬롯 3개 + 면역창 0 이면
-  `둔화(라이플) → 무기교체 → 도트(SMG)` 사이클(≈2~3초)로 5초짜리 실명을 **혼자 무한 유지**할 수 있다.
-- 그래도 배타를 넣는 이유 = **"한 무기 = 하나의 정체성"이라는 빌드 설계**(사용자). 락다운은 쿨다운이 맡는다.
-- 🔴 **쿨다운은 필드만 만들고 기본값 0** — 오늘 거동은 사용자 결정(무한 유지 상정) 그대로이고, PIE 에서
-  게임이 안 되면 **DataAsset 숫자 하나**로 해결된다. 지금 안 열면 나중에 코드 재작업이다.
-- **레드팀이 반증하지 못한 것(=처방의 경로 커버리지는 성립)**: 오퍼는 서버가 짓고 픽 1회마다 재추첨하며
-  WeaponUnlock 은 리롤 불가(`FPSRPlayerController.cpp:399-425, 452-455`), 오프닝시드·레벨업 풀은 라우팅
-  검증기가 행동 프래그먼트를 차단한다(`FPSRCardPoolValidator.cpp:81-100`). **치트 벡터는 아니다.**
-  남는 우회로는 **디버그 `FPSR.ApplyCard` 와 교체 흐름**뿐이고 §5-5 가 그것을 닫는다.
+1. rev3 까지의 안 = "무기당 상태이상 1개 배타". 그런데 **배타가 무기당이고 이 유닛은 라이플만 카드를 내므로,
+   한 플레이어가 가질 수 있는 약한 상태 소스가 정확히 1개**가 된다 →
+   - **솔로에서 강한 상태가 원리적으로 발동 불가**(재료 2개를 못 모은다). 그런데 §1 은 강한 2종을 산출물로
+     올리고 PIE 는 "무기 2정으로 실명 발동"을 검증 항목으로 적었다 — **그 2정을 만들 카드가 이 유닛에 없다.**
+     산출물과 검증이 성립하지 않는 상태였다.
+   - **4인에서는 정반대** — 4명이 각각 다른 축을 고르면 약한 4비트가 상시 켜지고, 쿨다운 0 + 재료 소모이므로
+     소모→즉시 재충전→재발동 루프가 된다. rev3 의 락다운 분석은 성립하지 않는 솔로 시나리오 위에 서 있었고,
+     정작 기준선인 4인 협동(`CLAUDE.md` 핵심원칙 3 · [[reason-in-multiplayer-terms]])을 안 셌다.
+2. **사용자 결정 = 배타를 무르고 솔로 조합을 허용한다.** 라이플 하나로 `MaxFragmentSlots`(3) 범위에서 약한
+   상태를 여러 개 들 수 있고, 솔로도 강한 상태를 본다.
+
+**따라서 락다운을 막는 손잡이는 `RetriggerCooldownSeconds` 하나뿐이다**(§5-1, 기본값 0).
+- 기본값 0 = "무한 유지를 상정한다"는 사용자 결정(2회차)을 유지한다.
+- ⚠️ **레드팀이 두 라운드 연속 지적한 사항을 기록으로 남긴다**: 배타까지 사라졌으므로 4인에서 실명(공격불가)
+  +속박(이동불가)이 스웜 전체에 상시 걸리는 것이 **더 쉬워졌다.** 이건 밸런스 판정이고 코드가 아니라 값으로
+  해결된다 — **§10 PIE 에 락다운 전용 판정 항목**을 넣어 플레이테스트에서 반드시 눈으로 확인하게 한다.
+
+**상태 비트는 시전자를 구분하지 않는다** — 서로 다른 플레이어가 건 약한 상태가 같은 적에서 **합쳐져** 조합을
+성립시킨다(4인 기준선의 정상 거동). 이 문장이 rev3 까지 어디에도 없어서 4인 분석이 통째로 빠져 있었다.
 
 ## 4. 제1원리 3줄
 
@@ -143,10 +157,15 @@ UCLASS() class UFPSRStatusEffectDataAsset : public UPrimaryDataAsset
     UPROPERTY(EditDefaultsOnly) float AttackIntervalMultiplier = 1.f;  // >1 = 느려짐
     UPROPERTY(EditDefaultsOnly) float IncomingDamageMultiplier = 1.f;  // 방어력감소 = >1
     UPROPERTY(EditDefaultsOnly) float DamagePerSecond          = 0.f;
+    /** 도트 적용 주기. 0 이면 매 프레임 ApplyDamage 가 되어 §8 회계가 깨진다(ClampMin 으로 막는다). */
+    UPROPERTY(EditDefaultsOnly, meta=(ClampMin="0.05")) float DotTickIntervalSeconds = 0.5f;
     UPROPERTY(EditDefaultsOnly) bool  bDisableAttack           = false;
     UPROPERTY(EditDefaultsOnly) bool  bDisableMovement         = false;
 
     // Strong 전용 (EditCondition: Kind==Strong)
+    /** 🔴 이것은 **발동 재료쌍**이지 "합성"이 아니다(G1r3). 강한 상태가 발동하면 재료 2비트가 꺼지므로
+     *  그 적은 더 이상 느려지지도, 도트를 받지도 않는다. 강한 상태가 약한 효과를 **계속 갖게** 하려면
+     *  이 DA 의 효과 축(위)에 그 값을 직접 저작한다 — 즉 "실명이면서 여전히 느림"은 데이터로 만든다. */
     UPROPERTY(EditDefaultsOnly) TArray<uint8> RequiredWeakSlots;       // 정확히 2개
     UPROPERTY(EditDefaultsOnly) bool  bConsumeSources = true;          // 사용자 결정
     /** 이 대상에 다시 걸릴 수 있게 되기까지의 시간. **기본값 0 = 쿨다운 없음**(사용자 결정 2026-09-06 —
@@ -183,9 +202,10 @@ uint8 StatusBits = 0;                          // 복제되는 유일한 상태 
 // 서버 전용(비-UPROPERTY 서버 상태 — TWeakObjectPtr 포함이라 POD 는 아니다, G2 정정)
 struct FFPSRStatusServerState
 {
-    float SlotExpiry[8]        = {};           // 전투시계 타임스탬프
-    float SlotCooldownUntil[8] = {};           // 재발동 쿨다운(기본 0 = 즉시 가능)
-    float DotAccumulator       = 0.f;
+    float SlotExpiry[8]        = {};           // 🔴 **상태 시계**(§6-1) 타임스탬프 — 전투시계가 아니다
+    float SlotCooldownUntil[8] = {};           // 동 축. 재발동 쿨다운(기본 0 = 즉시 가능)
+    float LastStatusStepClock  = 0.f;          // 직전 상태 스텝의 상태 시계 시각(§7-4 의 구간 시작점)
+    float DotAccumulator       = 0.f;          // 다음 도트 적용까지 남은 초
     TWeakObjectPtr<AActor>              DotInstigator;   // 킬 크레딧(§7-4)
     TWeakObjectPtr<UFPSRWeaponInstance> DotSourceWeapon; // OnStatusKill 이 컨텍스트를 만들려면 필요(G1-15)
 };
@@ -202,8 +222,10 @@ namespace FPSRStatus
     bool Apply(uint8& InOutBits, FFPSRStatusServerState&, const UFPSRStatusCatalogDataAsset&,
                uint8 Slot, float NowStatusClock, float WeakResist, float StrongResist,
                TArray<uint8, TInlineAllocator<8>>& OutFired);   // 슬롯 상한이 8이라 힙 0 (G2-I)
+    /** 구간 = [State.LastStatusStepClock, NowStatusClock]. 함수가 끝나며 LastStatusStepClock 을 갱신한다. */
     bool Advance(uint8& InOutBits, FFPSRStatusServerState&, const UFPSRStatusCatalogDataAsset&,
-                 float NowStatusClock, TArray<uint8, TInlineAllocator<8>>& OutExpired,
+                 float NowStatusClock, float& OutDotDamage,
+                 TArray<uint8, TInlineAllocator<8>>& OutExpired,
                  TArray<uint8, TInlineAllocator<8>>& OutFired);
     FFPSRResolvedStatus Resolve(uint8 Bits, const UFPSRStatusCatalogDataAsset&);
 }
@@ -223,6 +245,9 @@ virtual void OnDamageApplied(const FFPSRFireContext&, AActor* Target, const FDam
 //   가 없고 FExplosionResult 는 KilledEnemies 만 담으며(FPSRCombatStatics.h:64-67), Combat 레이어는 무기
 //   프래그먼트 헤더를 include 하지 않는다. 폭발 부여를 넣으려면 Combat→Weapon 역의존 신설이나 per-target
 //   결과 배열 반환(스웜 240 × 로켓 = 프레임당 수백 엔트리)이 필요하다 → **이번 유닛 비목표**(§2).
+// 🔴 이 훅은 FPSRWeaponHooks 의 "5경로 균일" 계약(FPSRWeaponFragment.h:126-129)에서 **의도적으로 이탈**한다.
+//   구현 산출물에 그 헤더 주석의 예외 표기를 포함할 것 — 안 그러면 다음 유닛이 그 주석을 믿는다(G1r3).
+//   체감 규칙: **상태 부여는 직격 피해에만 적용되고 스플래시에는 적용되지 않는다.** 카드 문구와 PIE 에 명시.
 
 UCLASS() class UFPSRStatusApplyFragment : public UFPSRWeaponFragment
 {
@@ -230,23 +255,19 @@ UCLASS() class UFPSRStatusApplyFragment : public UFPSRWeaponFragment
     UPROPERTY(EditDefaultsOnly) float ApplyChance = 1.f;
     UPROPERTY(EditDefaultsOnly) bool  bRequireHealthDamage = true;  // 실드에 막힌 타격은 부여 안 함
     virtual void OnDamageApplied(...) const override;
-    // IsDataValid: MaxStacks 는 반드시 1 (G1-12 — 배타와 스택이 서로를 무효화한다)
+    // IsDataValid: MaxStacks 는 1 (스택이 늘어도 같은 슬롯이라 지속시간 갱신뿐 — 저작 혼동 방지)
 };
-
-// UFPSRWeaponFragment 에 추가
-UPROPERTY(EditDefaultsOnly) FGameplayTag ExclusionGroup;   // 같은 그룹은 무기당 1개
 ```
+🔴 **배타 축은 없다**(§2·§3-D, 사용자 결정 3회차). 라이플이 `MaxFragmentSlots`(3) 안에서 약한 상태를 여러 개
+들 수 있고, 그것이 솔로 조합의 유일한 경로다. 공용 헤더·추첨부·`CanApply` 무접촉.
 
-**배타는 두 곳에서 강제한다** (G1-12 · Codex-2):
-1. **오퍼 후보 수집 단계** — `DrawWeaponUnlockOffer` 가 후보를 모을 때. 🔴 **그룹 id·`BaselineWeights` 를
-   만들기 *전*에 걸러야 한다** — 뒤에 걸면 비워진 그룹의 몫이 남아 CRIT2 2단 추출의 재분배가 왜곡된다.
-2. **취득 확정 게이트** — `UCardEffect_WeaponBehavior::CanApply`. 디버그 `FPSR.ApplyCard` 와 교체 흐름이
-   `ApplyCard` 공통 경로를 함께 타므로(`FPSRCardSubsystem.cpp:422-449`) 오퍼 필터만으로는 안 닫힌다.
-   교체 흐름은 **"교체로 제거될 프래그먼트"를 제외한 상태**로 검사한다.
-
-⚠️ **알려진 분포 부작용(수용)**: 후보 제거는 그룹 B(기능 카드)의 baseline 합을 줄이므로 그룹 A(새 무기) 몫이
-자동으로 커진다. CRIT2 가 보존을 약속한 것은 "시너지 때문에 몫이 줄지 않는 것"이라 계약 위반은 아니다.
-§10 에 회귀 케이스를 추가한다.
+🔴 **`FDamageResult` 를 확장해야 한다**(G1r3). §5-5 가 인용한 VIT1 규칙(*"부여 판정은 `HealthSpent > 0` 을
+본다"*)을 현재 `FPSRCombat::FDamageResult` 로는 **표현할 수 없다** — 필드가
+`bApplied / bKilled / bWasEnemy / DamageDealt / bShieldBroke / bTargetIsPlayer` 뿐이고, `DamageDealt` 는 VIT1 이
+**의도적으로** `ShieldSpent + HealthSpent` 로 재정의한 값이다(`FPSRCombatStatics.cpp:229-233`). 실드가 전부
+흡수한 타격도 `DamageDealt > 0` 이라 `bRequireHealthDamage` 가 **조용히 무효**가 된다.
+→ `FDamageResult` 에 `float ShieldSpent` · `float HealthSpent` 를 추가하고 4경로에서 채운다.
+**이 유닛의 훅면 비용은 1개가 아니라 "훅면 1 + 결과 struct 2필드"다.**
 
 ### 5-6. 대상 게이트 — 드라이버 없는 액터에 걸리지 않는다 (G1-3)
 
@@ -266,7 +287,8 @@ UPROPERTY(EditDefaultsOnly) FGameplayTag ExclusionGroup;   // 같은 그룹은 �
 | 보스 | `SetActorTickEnabled(true)` 와 같은 자리 | **두 곳 모두** — 격파(`FPSRBossBase.cpp:500`)와 런 종료(`:604`) |
 | `AFPSRBossHomingOrb` | **비대상** — 수명이 짧고 상태이상을 걸 이유가 없다. 플래그를 안 켜므로 조용히 거부된다 |
 
-계약: **플래그가 켜져 있는 동안 매 프레임 `AdvanceStatus` 가 보장된다.** §3-B 정정 ③ 표·§9 의 "드라이버 2개"
+계약: **서버에서, 플래그가 켜져 있는 동안 매 프레임 `AdvanceStatus` 가 보장된다.**
+(보스의 `SetActorTickEnabled(true)` 자리는 **모든 머신에서** 실행되므로 `HasAuthority()` 조건이 필요하다 — G1r3.) §3-B 정정 ③ 표·§9 의 "드라이버 2개"
 서술은 이 표를 정본으로 한다(rev2 는 세 절이 서로 다르게 말했다).
 
 ## 6. 배선 지점
@@ -280,10 +302,10 @@ UPROPERTY(EditDefaultsOnly) FGameplayTag ExclusionGroup;   // 같은 그룹은 �
 **조합 발동(`Advance`) 둘 다**(G2 잔여) — 를 부르고 그 다음 패스부터 early-out. 이 쌍은 `Deactivate()` 가
 쓰는 검증된 조합이다(`FPSREnemyBase.cpp:701-702`). 🔴 진입부에서만 return 하면 토큰(`RangedAttackTokenLimit=3`)과 클라 방향경고가 실명 내내 붙잡혀 그 플레이어를 향한 스웜 사격이 통째로 멈춘다(G1-8) |
 | 방어력감소 | `UFPSREnemyHealthComponent::ApplyDamage`(`.cpp:81-89`) | `FMitigation` 합성 시 per-instance 층을 곱한다. `DirectionalArmorDR`(열려만 있고 항상 0) 선례. VIT1 불변식 V1 은 안 깨진다(증폭은 `MinKeep` 하한을 통과) |
-| 도트 | 배치 패스 → `ApplyDamage(Dot, DotInstigator, Spec)` | `Spec.DamageType` = **빈 태그(무속성)**. 🔴 **근거 정정(G2-J)**: rev2 는 "검증기가 `DamageType.Status` 를 막는다"고 적었으나 **틀렸다** — 그 검증기(`FPSRVitalsProfile.cpp:81-88`)가 막는 것은 `DamageType.` 으로 **시작하지 않는** 태그뿐이라 `DamageType.Status` 는 통과한다. 실제 이유는 ①그 태그가 `DefaultGameplayTags.ini` 에 미선언(한 줄로 해소 가능) ②**속성 트리거를 살리면 기제가 둘이 된다**는 설계 결정(§2)이다. **그리고 `Spec.bSuppressRegenDelayOnly = true`**(§6-2) |
-| 진행·조합 | 배치 패스 **`bFrozen` 판정 직후(`:306`)·`PlayerPawns` 수집 앞** | 전원 DBNO 에 안 걸리게(G1-2). Out 배열은 **서브시스템 멤버 스크래치**(`:409-411` 선례 — 프레임당 480회 할당 방지, G1-13) |
+| 도트 | 배치 패스 → **`FPSRCombat::ApplyDamage`**(브릿지 경유 — 흡혈·`bWasEnemy`·미션/디렉터 축이 살아야 한다). 🔴 단 `Spec.bSuppressDealtDamageEvent = true` — 안 하면 **매 도트 틱마다 `SendDealtDamageEvent` 가 시전자 ASC 로 `GameplayEvent.Player.DealtDamage` 를 쏘고**, 그건 흡혈 패시브의 어빌리티 트리거다(`FPSRPassiveAbility.cpp:56-62`). 240마리 × 0.5s 주기 = **초당 480회 `TryActivateAbility`** 가 한 플레이어 ASC 에 몰린다(G1r3) | `Spec.DamageType` = **빈 태그(무속성)**. 🔴 **근거 정정(G2-J)**: rev2 는 "검증기가 `DamageType.Status` 를 막는다"고 적었으나 **틀렸다** — 그 검증기(`FPSRVitalsProfile.cpp:81-88`)가 막는 것은 `DamageType.` 으로 **시작하지 않는** 태그뿐이라 `DamageType.Status` 는 통과한다. 실제 이유는 ①그 태그가 `DefaultGameplayTags.ini` 에 미선언(한 줄로 해소 가능) ②**속성 트리거를 살리면 기제가 둘이 된다**는 설계 결정(§2)이다. **그리고 `Spec.bSuppressRegenDelayOnly = true`**(§6-2) |
+| 진행·조합 | 배치 패스 **`bFrozen` 판정 직후(`:306`)·`PlayerPawns` 수집 앞**, `!bFrozen` 게이트 안 | 전원 DBNO 에 안 걸리되 프리즈·전환에는 안 돌게(G1-2 · G1r3). 🔴 **`ActiveEnemies` 전수를 돌지 않는다** — 서브시스템에 **"상태 보유 적" 압축 리스트**를 두어 비용을 **O(감염된 적)** 으로 만든다(첫 부여에서 등록, 전 비트 소거·드라이버 해제에서 제거). 전수 루프는 제1원리(액터당 비용 최소화)에 어긋나고, `Agents`/`Locations` 스크래치가 만들어지기 전이라 기존 루프에 얹히지도 않는다. Out 배열은 서브시스템 멤버 스크래치(`:409-411` 선례) |
 | 보스 | `AFPSRBossBase::Tick` 에서 같은 `AdvanceStatus` | 프리즈 조건식이 배치 패스와 동일(`FPSRBossBase.cpp:608`)이라 대칭 성립. 런 종료 시 자기 틱을 끄므로(`:601-606`) 상태는 영구 동결 — 코스메틱이라 무해, 명시만 한다(G1-17) |
-| 저항 | `UFPSRVitalsProfileDataAsset` 에 **`WeakResistScale` · `StrongResistScale`** 2개 | 단일 스케일로는 "보스는 하드 CC 면역, 도트는 받음"을 표현 못 한다(G1-P3-1) |
+| 저항 | `UFPSRVitalsProfileDataAsset` 에 **`WeakResistScale` · `StrongResistScale`** 2개 | 단일 스케일로는 "보스는 하드 CC 면역, 도트는 받음"을 표현 못 한다. 🔴 **둘 다 기본값 1.0 이고 프로파일이 null 이면 1.0/1.0 폴백**(`ResolveDefense` 와 같은 규칙, `FPSREnemyHealthComponent.cpp:81-87`) — 0 으로 잡으면 **오늘 프로파일이 저작돼 있지 않은 스웜 전체가 상태이상 완전면역**이 되고 PIE 가 전부 "아무 일도 안 일어남"으로 나온다(G1r3) |
 | 킬 시임 | `FPSRWeaponHooks::NotifyStatusKill` | `DotSourceWeapon` 이 있어야 `FFPSRFireContext.Instance` 를 채울 수 있다 — 없으면 훅이 빈 목록에 대고 도는 no-op(G1-15) |
 
 ### 6-1. 🔴 시간축 — **상태 전용 시계를 신설한다. 전투시계는 건드리지 않는다** (G1-1 · G2-A/B/C)
@@ -318,9 +340,19 @@ UPROPERTY(EditDefaultsOnly) FGameplayTag ExclusionGroup;   // 같은 그룹은 �
 float GetStatusClockSeconds() const;   // 서버 전용
 ```
 
-- 🔴 **중첩 안전**: 동결 사유를 **refcount** 로 센다(프리즈 진입/해제 · 전환 진입/해제 각각 ±1). 첫 진입에서
-  앵커를 찍고 **마지막 해제에서만** 누산한다 → 겹쳐도 이중 차감이 없고 **단조증가가 보장**된다.
-  `AccumulatedFrozenSeconds` 방식(엣지 1쌍)을 그대로 베끼면 ① 이 재발한다.
+- 🔴 **중첩 안전 = 합성 불린 1개의 엣지 감지**(refcount 아님, G1r3). 두 세터(`SetRunPaused`·
+  `SetStageTransition`) **끝에서** `bStatusFrozen = IsRunPaused() || IsStageTransitionActive()` 를 재계산해
+  `false→true` 에서만 앵커를 찍고 `true→false` 에서만 누산한다.
+  ⚠️ **refcount 는 반드시 샌다** — `SetStageTransition` 은 6값 phase 세터(`None/Pending/Grace/Swapping/
+  FadeOut/FadeIn`)이고 호출부가 13곳이며, 전환 1회가 비-None 을 **4~5회** 지난다
+  (`Grace → Pending → FadeOut → Swapping → FadeIn → None`). 게다가 `FPSRStageDirectorSubsystem.cpp:504` 는
+  **이미 Grace 인 상태에서 Grace 를 다시** 세운다. "비-None ++ / None --" 로 짜면 첫 전환에 잔여 3~4가 남아
+  **상태 시계가 영구 정지 → 실명·속박이 스웜 전체에 영구 고착**한다. 소스가 2개뿐이라 refcount 는 더 안전하지
+  않고 이 누수만 새로 만든다.
+- 🔴 **런 종료·재시작 계약**: `EndRunFreeze` 는 **해제되지 않는 영구 동결**이다(`FPSRGameState.cpp:293-302`).
+  같은 월드에서 런을 다시 시작하면 `bStatusFrozen` 이 true 로 남아 시계가 영원히 멈춘다.
+  → `ResetStatusClockForNewRun()` 을 런 시작 경로에 둔다. (현행 코드는 *"resets naturally on the next run
+  (fresh GameState)"* 로 레벨 리로드에 기대는데, 신설 시계가 그 전제를 그대로 상속하면 안 된다.)
 - **클라 식은 필요 없다** — 만료 판정은 전부 서버 권위이고 클라는 `StatusBits` 만 본다. rev2 가 전투시계를
   건드리려다 만들 뻔한 클라/서버 괴리(G2-B)가 여기서는 성립하지 않는다.
 - **적 공격 타이밍은 world time 축**이다(`Ctx.Now = World->GetTimeSeconds()`, `FPSREnemySpawnSubsystem.cpp:293`).
@@ -333,13 +365,29 @@ float GetStatusClockSeconds() const;   // 서버 전용
 읽혔는데, 그러면 실드 앵커가 옛 높은 값에 남아 `ComputeRegeneratedShield` 가 **도트가 깎은 실드를 되돌려
 준다**(`.cpp:133-141` 단조증가 가드를 통과한다). 실드 있는 적에게 도트가 사실상 무효가 된다.
 
-→ `FFPSRDamageSpec::bSuppressRegenDelayOnly = false` 로 **의미를 좁힌다**:
-**시간 앵커(`LastDamageCombatTime`)만 유지하고, `ShieldAtLastDamage` 는 현재 실드로 재앵커한다.**
-규칙 문장 = "도트는 실드 재생 **지연을 새로 걸지 않지만**, 자기가 깎은 실드는 되돌려주지 않는다."
-§10 단위테스트에 "실드 보유 적에 도트 → 실드가 **순감소**" 케이스를 넣는다.
+🔴 **rev3 의 처방("시간 앵커만 유지")도 틀렸다 — 그건 실드를 만충으로 폭증시킨다**(G1r3).
+`ComputeRegeneratedShield` 는 증분이 아니라 **절대식**이다:
+`Clamp(ShieldAtLastDamage + RegenPerSecond × (Elapsed − Delay))`(`FPSRVitals.cpp:48-68`).
+두 앵커는 **같이 움직여야만** 성립한다. 시간만 유지하면 `Now − LastDamageCombatTime` 이 계속 커지는데 값
+앵커는 이미 앞선 회복분을 포함한 값으로 갱신돼 **회복이 복리로 누적**된다 — 검산(MaxShield 100, Regen 10/s,
+Delay 3s, 도트 5/0.5s, t=0 실드 50): t=3.5 → 25 · t=4.5 → 40 · t=5.5 → 75 · **t=6.0 → 100(만충)**.
+게다가 `Delay` 는 함수 안에서 `ShieldAtLastDamage <= 0 ? BrokenDelay : PartialDelay` 로 **값 앵커에서
+파생**되므로 도트가 실드를 0으로 만들면 지연이 바뀐다.
+
+→ **두 앵커를 함께 옮기되 시간 앵커를 역날짜로 찍는다**:
+```cpp
+// bDotAnchorPolicy = true 일 때 (FFPSRDamageSpec 신규 플래그)
+ShieldAtLastDamage   = Shield;
+LastDamageCombatTime = Now - (Shield <= 0.f ? ShieldBrokenRegenDelaySeconds : ShieldRegenDelaySeconds);
+```
+= "**새 지연을 걸지 않되 회복은 지금부터 증분으로**". 어느 지연을 빼는지는 값 앵커가 결정한다(위 파생과 동일).
+§10 단위테스트에 "실드 보유 적에 도트 → **지연을 넘긴 뒤까지 굴려도** 실드가 순감소" 케이스를 넣는다
+(지연 안에서 끝나는 테스트는 이 버그를 통과시킨다).
 ## 7. 함수별 계약
 
 1. **`Apply`** — 재적용은 지속시간 갱신(기본값). 스택 없음. `SlotCooldownUntil` 이 미래면 거부.
+   **재적용 시 시전자는 갱신한다**(마지막 시전자 승계) — 4인에서 A가 걸고 B가 재적용하면 이후 도트 킬 크레딧은
+   B 것이다. 최초 시전자 고정보다 단순하고, "마지막으로 손댄 사람"이 협동에서 덜 이상하다(G1r3).
    저항은 `Kind` 에 따라 `WeakResistScale`/`StrongResistScale` 을 지속시간에 곱하고, 0 이면 부여 거부.
    🔴 **조합 판정을 `Apply` 안에서 즉시 한다**(G1-P2-1 · Codex) — 조합은 엣지 이벤트라 배치 패스에만 두면
    S3 에서 최대 8프레임(≈130ms) 늦고, 그 사이 만료된 재료 쌍을 놓친다.
@@ -349,21 +397,25 @@ float GetStatusClockSeconds() const;   // 서버 전용
 3. **조합 = 재료 소모**(사용자 결정). 강한 상태 발동 시 `RequiredWeakSlots` 2개의 비트를 끈다.
    다중 성립(둔화+도트+방어력감소)은 **카탈로그 배열 순서대로 판정하고 재료가 소모된 조합은 미성립** →
    앞선 것 하나만. 순서 = 데이터.
-4. **DoT** — 🔴 **rev2 의 "stride 구간" 표현을 철회한다**(G2-H). 상태 스텝의 삽입 위치(`:306` 직후)에는
-   `UpdateStride`/`AttackStride` 가 **아직 존재하지 않는다** — 그 값들은 한참 뒤 per-enemy 루프에서 플레이어
-   거리로 계산된다(`FPSREnemySpawnSubsystem.cpp:556-562`). 규칙을 다시 쓴다: **"직전 상태 스텝 이후 경과분"**
-   을 누산하고, 그 구간 안에서 만료됐으면 **만료 시각까지만** 적용한다(활성 구간 클램프).
-   **도트 적용 주기는 데이터**(`DotTickIntervalSeconds`, 기본 0.5s) — `ApplyDamage` 는 호출마다
-   `CatchUpShieldRegen` + `OnHealthChanged` 브로드캐스트 + dirty 2건을 낸다(`FPSREnemyHealthComponent.cpp:73, 95-105`)
-   므로 매 프레임 호출은 §8 회계를 깨뜨린다. 킬 크레딧은 `DotInstigator`(약참조); 풀리면 **DoT 는 계속 굴리되
-   Instigator=null** 로 넘긴다(중단시키면 "시전자가 죽으면 적이 살아난다"는 더 나쁜 거동).
+4. **DoT** — 구간은 **`[State.LastStatusStepClock, NowStatusClock]`** 이고 축은 **상태 시계**다(§6-1).
+   🔴 world time 으로 재면 `StageGraceSeconds=8.0` 전환 직후 첫 스텝에서 **8초치 도트가 한 번에** 들어가
+   스웜이 통째로 즉사한다(G1r3). 적용량 = 그 구간과 **`[부여시각, 만료시각]` 의 교집합**만 누산한다(활성 구간
+   클램프). `DotAccumulator` 는 **다음 적용까지 남은 초**이고, `DotTickIntervalSeconds`(데이터, 기본 0.5s,
+   `ClampMin 0.05`)마다 `ApplyDamage` 를 부른다 — 매 프레임 호출은 §8 회계를 깨뜨린다(호출마다
+   `CatchUpShieldRegen` + `OnHealthChanged` + dirty 2건, `FPSREnemyHealthComponent.cpp:73, 95-105`).
+   `LastStatusStepClock` 은 **§7-6 폐쇄 지점에서 반드시 리셋**한다 — 안 하면 풀 재사용 적이 전생의 스텝 시각을
+   물고 첫 프레임에 도트 폭탄을 맞는다.
+   킬 크레딧은 `DotInstigator`(약참조); 풀리면 **DoT 는 계속 굴리되 Instigator=null** 로 넘긴다.
 5. **`Resolve` 합성** — 배율은 곱, 불리언은 OR. 캐시 무효화는 `StatusBits` 변화 시에만
    (재적용은 `SlotExpiry` 만 바꾸므로 무효화 안 함 — 레드팀이 비용 안전을 확인).
-6. **🔴 수명주기 = 4중 폐쇄** (G1-4 — `Enemy.md:55-57` 이 같은 문제에 이미 두 번 요구한 패턴):
-   `ResetForReuse`(풀 재사용) · `Deactivate` · `Activate`(방어적 재클리어) · `ServerResetEliteForStageCarry`
-   (이월 엘리트는 `Activate`/`Deactivate` 를 **둘 다 안 밟는다**). 각 지점에서 `StatusBits=0` ·
-   `SlotExpiry/SlotCooldownUntil` 클리어 · `DotAccumulator=0` · 약참조 2개 null · `ResolvedStatus` 리셋 ·
-   **Push Model dirty 마킹**까지.
+6. **🔴 수명주기 폐쇄 — 실제 지점은 넷이고 rev3 이 첫 번째를 빠뜨렸다**(G1r3).
+   `ResetForReuse` 는 `AFPSREnemyBase::Activate` **안에서만** 불리므로(`FPSREnemyBase.cpp:483`, 리포 유일
+   호출부) rev3 의 목록은 독립 지점이 셋뿐이었다. `Enemy.md:55-57` 의 4중은 **`EnterDyingState`** ·
+   `Deactivate` · `Activate` · `ServerResetEliteForStageCarry` 다.
+   → **`EnterDyingState` 를 폐쇄 지점에 추가**한다. 안 넣으면 시체가 `GetDeathDwellSeconds()` 동안
+   `StatusBits` 를 켠 채 복제돼 **원격 3인에게 시체가 상태 아이콘을 달고 서 있다**(누수는 아니지만 보인다).
+   각 지점에서 `StatusBits=0` · `SlotExpiry`/`SlotCooldownUntil` 클리어 · **`LastStatusStepClock=0`** ·
+   `DotAccumulator=0` · 약참조 2개 null · `ResolvedStatus` 리셋 · **Push Model dirty 마킹**.
 7. **공개 API 로 제한** (G1-P3-2) — 외부는 `ApplyStatus / AdvanceStatus / GetResolvedStatus /
    ClearStatusForReuse / HasStatus` 만 쓴다. 상태 필드 직접 접근 금지.
 
@@ -402,7 +454,9 @@ VIT1 이 정확히 이 함정을 G2 에서 맞았다(`FPSREnemyHealthComponent.c
 - **코드**: 비트 저장 · 시간축(**상태 전용 시계** + 4중 폐쇄) · 배치 진행 · 조합 알고리즘 · 해석 캐시 · §6 배선 지점 ·
   효과 축 6종 · **진행 드라이버가 2개(배치 패스·보스 틱)라는 사실**.
 - **데이터**: 이름 · 태그 · 슬롯 번호 · 지속시간 · 전 배율 · 조합 재료쌍 · 소모 여부 · **재발동 쿨다운** ·
-  판정 순서 · 저항 2종 · 배타 그룹 · 카드 레어도 티어.
+  **`DotTickIntervalSeconds`** · **`ApplyChance`** · **`bRequireHealthDamage`** · 판정 순서 · 저항 2종 ·
+  카드 레어도 티어 · (§8 이 여는 손잡이) 상태 지속시간 하한 · 상태 보유 시 NetFreq 하한.
+  ~~배타 그룹~~ — 철회(§3-D).
 
 ## 10. 검증 기준
 
@@ -410,20 +464,27 @@ VIT1 이 정확히 이 함정을 G2 에서 맞았다(`FPSREnemyHealthComponent.c
 1. 재적용 = 지속시간 갱신, 스택 없음 · 2. 조합 성립 → 강한 ON + 재료 2비트 OFF · 3. 재료 하나로는 미성립 ·
 4. 다중 성립 시 앞선 것 하나만 · 5. 저항 0=거부 / 0.5=절반, Weak·Strong 독립 · 6. `Resolve` 축별 곱·OR ·
 7. 쿨다운 미래면 부여 거부 · 8. **강한 상태 재발동이 기존 강한 비트의 만료를 갱신** ·
-9. **DoT 가 활성 구간으로 클램프**(stride 구간 중간 만료) · 10. 카탈로그 `IsDataValid` 음성 검사
+9. **DoT 가 활성 구간으로 클램프** — `[LastStatusStepClock, Now]` ∩ `[부여, 만료]` 만 적용 ·
+10. 카탈로그 `IsDataValid` 음성 검사 · 11. **프로파일 null 이면 저항 1.0/1.0**(완전면역 사고 방지) ·
+12. **실드 보유 적에 도트 → 재생 지연을 넘긴 뒤까지 굴려도 실드가 순감소**(§6-2 복리 회복 버그를 잡는
+    유일한 테스트 — 지연 안에서 끝나면 통과해 버린다) ·
+13. **`bRequireHealthDamage`** — 실드가 전부 흡수한 타격은 부여 안 함(`HealthSpent==0`) ·
+14. 강한 상태 `Resolve` 가 §1 의 의미와 일치 — **재료를 소모하므로 약한 효과는 사라진다**(§5-1 재료쌍 주석)
 
 **월드 자동화 (신규 — 순수 함수로는 위험의 대부분을 못 잡는다, G1-P3-3)**
 11. `ResetForReuse` 후 `StatusBits == 0`(풀 재사용 누수)
-12. **상태 시계 단조증가** — 전환 진행 중 카드 프리즈 진입/해제를 **겹쳐서** 끼운 뒤에도 시계가 뒤로 가지
-    않는가(§6-1 refcount). rev2 의 처방이 정확히 여기서 역행했다 — "회귀를 넣었다"가 "그 회귀를 잡는다"가
-    아니므로 겹침을 **명시적으로 만드는** 케이스여야 한다(G2-(3))
+12. **상태 시계 단조증가** — 겹침을 **명시적으로 만드는** 케이스여야 한다:
+    ① 전환 진행 중 카드 프리즈 진입/해제를 겹쳐서 끼움 ② `Grace → Pending → FadeOut → Swapping → FadeIn
+    → None` 전 phase 순회 ③ `EndRunFreeze` 중간 진입 ④ 실패한 `RequestTransition`(카운트 변화 0).
+    rev2 는 ①에서, rev3 은 ②에서 터졌다
 12-b. **전환을 끼운 만료** — 전환 8초 뒤 남은 시간 불변 · 그 사이 **전투시계는 정상 진행**(크릿 버프·힐팩이
     영향을 안 받는지 = §6-1 이 전투시계를 안 건드린다는 것의 확인)
 13. **드라이버 없는 액터(문)에 부여가 거부**되는가(§5-6)
 14. 전원 DBNO 구간을 끼운 만료 — 상태 진행이 멈추지 않는가(§6 삽입 위치)
 
-**기존 회귀** — `Enemy.*`(5) · **`Combat.Vitals`**(§6-1 시계 확장 파급) · `Boss.*` · **`Card.Synergy`**
-(배타 필터 후 그룹 몫 계약, §5-5) · `Editor.CardCsv.*` · `Smoke.ModuleLoads`
+**기존 회귀** — `Enemy.*`(5) · **`Combat.Vitals`**(§6-2 **앵커 변경** 파급 — rev3 의 "시계 확장 파급"은
+철회된 사유다) · `Boss.*` · `Editor.CardCsv.*` · `Smoke.ModuleLoads`.
+`Card.Synergy` 는 **더 이상 관련 없다** — 배타 철회로 추첨부를 안 건드린다.
 
 **PIE 사용자 스모크**
 1. 둔화 — 적이 눈에 띄게 느려지는가 · 2. 도트 — 사격을 멈춰도 깎이는가 · **레벨업 프리즈 중 멈추는가** ·
@@ -434,7 +495,10 @@ VIT1 이 정확히 이 함정을 G2 에서 맞았다(`FPSREnemyHealthComponent.c
 6. 무기 2정으로 **실명 발동** — 공격이 멈추는가, 재료 2개가 사라지는가, **다른 적의 사격이 정상인가**(토큰) ·
 7. 도트 킬이 XP 를 주는가 · 8. 보스에 하드 CC 가 안 걸리고 **도트는 걸리는가** ·
 9. **원격 클라(호스트 아님)에서 상태가 보이는가** — 2인 PIE, **S2/S3 거리의 적 포함**(G2-F) ·
-10. **도트를 다수에 건 상태**로 적 200+ 프레임 예산 유지
+10. **도트를 다수에 건 상태**로 적 200+ 프레임 예산 유지 ·
+11. 🔴 **락다운 판정** — 4인에서 약한 4종을 나눠 들고 교전했을 때 스웜이 실명·속박으로 **상시 고착되는가.**
+    고착되면 `RetriggerCooldownSeconds` 를 0 에서 올린다(§3-D — 이 값이 유일한 손잡이다) ·
+12. **솔로에서도 강한 상태가 발동하는가**(배타 철회의 목적. 라이플 하나에 약한 2종을 얹어 확인)
 
 ## 11. 미결정
 
@@ -510,5 +574,40 @@ VIT1 불변식 V1 을 안 깬다 · 배타의 **경로 커버리지 자체는 �
 
 **범위 밖(수용, §6-1 에 반영)**: 적 공격 타이밍은 world time 축이라 긴 프리즈 뒤 전 적의 쿨다운이 동시 만료된다.
 STAT1 이 만든 문제는 아니나 공격속도저하가 그 축에 얹히므로 시계 축을 §6-1 에 명시했다.
+
+### G1 3회차 (2026-09-06, 새 Opus 인스턴스 14 + Codex 7) — **반려** · 상한 P2 · 기각 0
+
+> 사용자 결정으로 3회차를 태웠다(§6-5-2 (5) 보고 후). Fable 은 여전히 한도라 **이 명세를 처음 보는 새 Opus
+> 인스턴스**(앞 두 라운드에 투자되지 않은 눈)와 **Codex** 를 함께 돌렸다. 두 리뷰어가 독립적으로 같은 P1급
+> 2건(refcount 누수 · 도트 스텝 시각 부재)에 도달했다.
+
+🔴 **이번 라운드의 결론**: rev3 의 시간축 처방이 **또** 틀렸다. rev1(전제) · rev2(앵커쌍) · rev3(refcount·
+실드앵커)로 **세 번 연속**이다. 구현 시 이 축이 최우선 검증 대상이다.
+
+| # | 지적 | 처리 |
+|---|---|---|
+| **R3-1** | **refcount 는 반드시 샌다** — `SetStageTransition` 은 6값 phase 세터(호출부 13곳)이고 전환 1회가 비-None 을 4~5회 지난다. 잔여 3~4 → 상태 시계 영구 정지 → 실명·속박 영구 고착 | **수용** — §6-1 을 **합성 불린 엣지 감지**로 교체 |
+| **R3-2** | `EndRunFreeze` 는 해제 없는 영구 동결 — 같은 월드 재시작에서 시계가 영원히 멈춘다 | **수용** — §6-1 `ResetStatusClockForNewRun()` |
+| **R3-3** | **§6-2 처방이 실드를 만충으로 폭증시킨다** — `ComputeRegeneratedShield` 는 절대식이라 두 앵커가 같이 움직여야 한다. 검산: 실드 50 → 6초 만에 100 | **수용** — 두 앵커 동시 이동 + **시간 앵커 역날짜** |
+| **R3-4** | `FDamageResult` 에 `HealthSpent` 가 없어 VIT1 의 "실드에 막힌 타격은 상태이상도 막는다"가 조용히 무효 | **수용** — `ShieldSpent`/`HealthSpent` 2필드 추가 |
+| **R3-5** | **배타 + 라이플 전용 ⇒ 한 명이 약한 상태 1개 ⇒ 솔로는 강한 상태 원리적 발동 불가 / 4인은 상시 고착.** 산출물과 검증(PIE 6)이 성립하지 않았고, 락다운 분석이 4인을 안 셌다 | **사용자 결정으로 배타 철회** — §2·§3-D·§5-5. 지적 3건(G1-12·G2-2·Codex-2)이 함께 소멸 |
+| **R3-6** | DoT 의 "직전 스텝 시각"을 담을 필드도 계산할 인자도 없다. 시계 축도 미정 — world time 으로 재면 전환 직후 8초치가 한 번에 들어간다 | **수용** — `LastStatusStepClock` 신설, `Advance` 가 구간을 소유 |
+| **R3-7** | 저항 기본값·프로파일 null 경로 미정 — 0 이면 **오늘 프로파일 없는 스웜 전체가 완전면역** | **수용** — 기본 1.0, null = 1.0/1.0 |
+| **R3-8** | 도트가 `FPSRCombat::ApplyDamage` 를 타면 **초당 480회 흡혈 어빌리티 트리거**가 한 ASC 에 몰린다 | **수용** — `bSuppressDealtDamageEvent` |
+| **R3-9** | 상태 스텝이 새 O(alive) 전수 루프인데 회계에 없고 `bFrozen` 게이트 앞이다 | **수용** — **상태 보유 적 압축 리스트**로 O(감염된 적), `!bFrozen` 게이트 |
+| **R3-10** | 폐쇄 지점이 실제로 3중 — `EnterDyingState` 누락 → 시체가 상태 비트를 켠 채 복제 | **수용** — §7-6 |
+| **R3-11** | §5-3 이 `SlotExpiry` 를 "전투시계"라 적어 §6-1 과 정면 충돌 | **수용** — 주석 정정 |
+| **R3-12** | §6-2 가 약속한 테스트가 §10 에 없다 · `bRequireHealthDamage` 검증도 없다 | **수용** — 단위 11~14 |
+| **R3-13** | 5경로 균일 계약 이탈이 명시되지 않음 · 스플래시 부여 규칙 미정 | **수용** — §5-5 주석 + 카드 문구 규칙 |
+| **R3-14** | 재적용 시 시전자 갱신 여부 미정(4인 크레딧) | **수용** — §7-1 마지막 시전자 승계 |
+| **R3-15** | §9 데이터 목록·§10 잔여 stale(철회된 "stride 구간" 표현, `Combat.Vitals` 사유) | **수용** |
+| **R3-16** | 강한 상태가 "합성"인지 "재료쌍"인지 갈림 | **수용** — §5-1 재료쌍으로 확정, 약한 축은 데이터로 저작 가능 |
+
+**기각 0건.** 레드팀 **안전 확인**: §3-A 스캐폴드 태그 3종 · §3-B 액터 틱 0·이동속도 후크 2곳·넉백 직접 이동 ·
+`Deactivate` 의 홀드 해제 쌍 · §5-6 보스 끄는 곳 2개 · §6 삽입 위치가 두 게이트보다 앞이라는 점 ·
+§8 의 복제 5→6 과 `Performance.md:117` 이 아직 3이라는 지적 · G2-J 의 검증기 정정.
+
+**범위 밖(수용, 기록만)**: 같은 월드 런 재시작에서 `bRunEnded`/`bRunPaused` 를 푸는 경로가 없고 현행 코드는
+레벨 리로드에 기댄다 — 신설 상태 시계가 그 전제를 상속하지 않도록 R3-2 로 닫았다.
 
 ### G2 머지 게이트 — *(푸시 직전 · Fable)*
