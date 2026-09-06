@@ -1,4 +1,4 @@
-// 산출 = Docs/Architecture/0016 시각 부록(아티팩트 「FPSRoguelite Arcade Pixel Concept Sheet」). 실행: 작업 폴더에서 `node gen_concept_sheet_arcade_pixel.mjs` → *.dc.html + canvas.json → design 스킬 seed-canvas.mjs 로 조립(--image keyart_ref.jpg = Docs/Concept 키아트 v2 960px JPEG).
+// 산출 = Docs/Architecture/0016 시각 부록(아티팩트 「FPSRoguelite Arcade Pixel Concept Sheet」). 실행: 작업 폴더에서 `node gen_concept_sheet_arcade_pixel.mjs` → *.dc.html + canvas.json → design 스킬 seed-canvas.mjs 로 조립(--image keyart_ref.jpg ref_v3a.jpg ref_v3b.jpg = Docs/Concept 키아트 v2/v3a/v3b 축소 JPEG).
 // 컨셉 시트 아트보드 생성기 — ASCII 픽셀맵 → SVG rect. 산출 = *.dc.html + canvas.json
 import { writeFileSync } from 'node:fs';
 
@@ -1025,12 +1025,18 @@ function keyArtBoard() {
   const body = h('div', `display: flex; flex-direction: column; gap: 20px; padding: 32px; width: 1440px; box-sizing: border-box; background: ${P.void}`,
     h('div', `display: flex; flex-direction: row; gap: 20px; align-items: baseline`, T.h1('KEY ART  ·  USER REFERENCE') + T.sub('2026-09-06 사용자 최종안(HUD 배치 포함) · Docs/Concept/ArcadePixel_KeyArt_UserRef_2026-09-06_v2_HUD.png · ADR 0016 D10 · HUD 대조 = ArtDirection §B-11')) +
     h('div', `display: flex; flex-direction: row; gap: 24px; align-items: flex-start`,
-      h('div', `width: 760px; flex-shrink: 0; border: 2px solid ${P.side}`, `<img src="keyart_ref.jpg" style="width: 760px; display: block" alt="">`) + table));
+      h('div', `display: flex; flex-direction: column; gap: 12px; width: 760px; flex-shrink: 0`,
+        h('div', `border: 2px solid ${P.side}`, `<img src="keyart_ref.jpg" style="width: 760px; display: block" alt="">`) +
+        T.h2('SUB-REFERENCES  (density: v3b  &lt;=  target v2  &lt;=  v3a)') +
+        h('div', `display: flex; flex-direction: row; gap: 12px`,
+          h('div', `display: flex; flex-direction: column; gap: 6px; width: 374px`, h('div', `border: 2px solid ${P.side}`, `<img src="ref_v3a.jpg" style="width: 374px; display: block" alt="">`) + T.sub('v3a 빽빽·고채도 — 가져옴: 픽셀 간판·슬로건(저명도), 지상 탱크 = BLOCK 패밀리, 빨간 라이트 적 = 규칙 정답, 해골 마커, 스킬 잠금. 버림: 전면 고채도, 총 빨간 디스플레이, HP 녹색')) +
+          h('div', `display: flex; flex-direction: column; gap: 6px; width: 374px`, h('div', `border: 2px solid ${P.side}`, `<img src="ref_v3b.jpg" style="width: 374px; display: block" alt="">`) + T.sub('v3b 어둡고 성김 — 가져옴: 대시 쿨다운 링, 진행 마커+%, WEAPON 헤더, 플레이어별 프레임 색(차가운 변형만). 버림: 순수 와이어프레임 환경, 빨강·노랑 프레임')))) +
+      table));
   return doc(body);
 }
 out('KeyArtRef.dc.html', keyArtBoard());
-canvas.artboards.unshift({ file: 'KeyArtRef.dc.html', title: '0 · 키아트 레퍼런스 (사용자 제공 · 방향성 기준)', x: 0, y: -1100, w: 1440, h: 720 });
-canvas.annotations.push({ id: 'keyart-note', x: 1560, y: -1100, w: 700, text: '방향성 기준 이미지(사용자 2026-09-06). 시트의 다른 아트보드는 이 이미지를 §A 규칙으로 번역한 결과여야 한다. 적은 쩝쩝이 → 복셀 드론으로 교체 예정(Docs/DroneEnemy_ResumePrompt.md, 다른 세션) — 라인업·키 비주얼·통로 뷰의 유령 스프라이트는 그 세션이 갱신한다.' });
+canvas.artboards.unshift({ file: 'KeyArtRef.dc.html', title: '0 · 키아트 레퍼런스 (사용자 제공 · 방향성 기준 v2 + 보조 v3a/v3b)', x: 0, y: -1160, w: 1440, h: 1000 });
+canvas.annotations.push({ id: 'keyart-note', x: 1560, y: -1160, w: 700, text: '방향성 기준 이미지(사용자 2026-09-06). 시트의 다른 아트보드는 이 이미지를 §A 규칙으로 번역한 결과여야 한다. 적은 쩝쩝이 → 복셀 드론으로 교체 예정(Docs/DroneEnemy_ResumePrompt.md, 다른 세션) — 라인업·키 비주얼·통로 뷰의 유령 스프라이트는 그 세션이 갱신한다.' });
 canvas.annotations.find(a => a.id === 'brief').y = -170;
 writeFileSync('canvas.json', JSON.stringify(canvas, null, 2));
 console.log('wrote canvas.json (9 artboards)');
