@@ -415,4 +415,4 @@ private:
 **범위 밖 지적(수용)** — `origin/main..HEAD` 에 다른 세션의 커밋 2건(`a2f06fb6` 복셀 적 콘텐츠 · `c90e5e64` NEON-V 인계 문서)이 섞여 있다(§6-7 5단계 함정). 확인 결과 **둘 다 C++ 0줄·게이트 면제 갈래**이고 리뷰 diff 에도 안 섞였으며, 보드상 두 행 모두 그 세션이 이미 손을 뗀 상태(`검증중`/`대기`)라 트렁크 기반에서 함께 미는 것이 정상 경로로 판정.
 
 **검증 재실행(Opus 직접, 2026-09-06)** — 논-유니티 증분 빌드 `Result: Succeeded` · `Card.Synergy` ✅ · `Editor.CardCsv.Schema` 9/9 ✅ · `Smoke.ModuleLoads` ✅ · `Combat.CritResolver` ✅(CRIT1 회귀).
-⚠️ `Editor.CardCsv.RoundTrip` **실패 — 이 유닛과 무관한 선재 결함**: `DA_CardModifiers_SniperScope.uasset` 이 CSV 행 없이 남은 고아 에셋(CRIT1 `b7010a68` 에서 스코프를 스탯 진화로 이관하며 행만 지우고 에셋을 안 지웠다). `origin/main` 에서도 동일하게 실패하며 참조 0건(게임 영향 없음). 별도 행으로 분리.
+`Editor.CardCsv.RoundTrip` 은 처음 실패했다 — **이 유닛과 무관한 선재 결함**이었다: `DA_CardModifiers_SniperScope.uasset` 이 CSV 행 없이 남은 고아 에셋(CRIT1 `b7010a68` 에서 스코프를 스탯 진화로 이관하며 행만 지우고 에셋을 안 지웠다). `origin/main` 에서도 동일하게 실패했고 참조는 0건이었다. **사용자 결정(2026-09-06)으로 고아 에셋 2개(카드+프래그먼트)를 삭제**해 함께 정리했고, 그 뒤 `RoundTrip` ✅ · `CardCsv.FamilyDerivation` 2/2 ✅ · `DataEditor` 5/5 ✅ · `Localization.StringTableCsv` ✅ 로 전부 초록이다.
