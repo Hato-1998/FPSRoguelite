@@ -78,6 +78,44 @@ J...JJJ..JJJ...S`;
 const LEG_CH = { H: P.enemyBody, S: P.enemyShade, W: P.eyeW, P: P.pupil, D: '#2A0E18', T: P.tooth, R: P.tongue, C: P.enemyTel, J: '#8A3A52' };
 const LEG_CH_ELITE = { ...LEG_CH, H: '#8C2E5A', J: '#742548', S: '#4E1A34', C: P.elite };
 
+// 복셀 드론(쩝쩝이 대체, ADR 0016 정정(d) · Docs/DroneEnemy_ResumePrompt.md). ⚠️ 정본 = Scripts/gen_voxel_drone.py 의 층 기술 —
+// 아래 3뷰는 `python Scripts/gen_voxel_drone.py Saved/EnemyVoxel --sprites` 가 파생한 것을 그대로 붙인다(손으로 고치지 말 것).
+// B 몸통 윗면 · S 몸통 옆면 · F 코어 프레임 · C 코어(뜨거운 쪽) · A 팔 · H 허브 · R 로터 · L 밑면 라이트 · N 꼬리 핀
+const DRONE_FRONT = `
+RRRRR......RRRRR
+.HHHSSFFFFSSHHH.
+.HHHASFCCFSAHHH.
+.HHHASFCCFSAHHH.
+..L.SSFFFFSS.L..
+....SSSSSSSS....`;
+const DRONE_TOP = `
+..R..........R..
+.HRH........HRH.
+RRRRR......RRRRR
+.HRHA......AHRH.
+..RASSFFFFSSAR..
+....SSSSSSSS....
+....SSSSSSSS....
+....SSSSSSSS....
+....SSSSSSSS....
+....SSSSSSSS....
+....SSSSSSSS....
+..RASSSSSSSSAR..
+.HRHA..NN..AHRH.
+RRRRR......RRRRR
+.HRH........HRH.
+..R..........R..`;
+const DRONE_SIDE = `
+RRRRR......RRRRR
+.HHHSSSSSSSSHHH.
+.HHHASSSSSSAHHH.
+.HHHASSSSSSAHHH.
+..L.SSSSSSSS.L..
+....SSSSSSSS....`;
+const LEG_DR = { B: '#3A2748', S: '#2A1E36', F: '#1A1024', C: P.enemyRim, A: '#6E2E44', H: '#2A1E36', R: '#8A3A52', L: P.enemyRim, N: '#6E2E44' };
+const LEG_DR_TEL = { ...LEG_DR, C: P.enemyTel, L: P.enemyTel };            // 공격 텔레그래프 = 코어·라이트 색 전환
+const LEG_DR_ELITE = { ...LEG_DR, B: '#4A2E58', S: '#36243F', C: P.elite, L: P.elite };
+
 // 각진 비틀(각 실루엣) 18×12
 const BEETLE = `
 ..HHHH......HHHH..
@@ -409,8 +447,8 @@ H.HHHH.H
   };
   s += ally(430, 348, 6);
   // 적 스웜 — 원거리 작은 것부터
-  const [cw, chh] = dims(CHOMPER_OPEN);
-  const chomp = (x, y, c, open = true, elite = false) => `<g>${px(open ? CHOMPER_OPEN : CHOMPER_CLOSED, elite ? LEG_CH_ELITE : LEG_CH, c, x, y)}` +
+  const [cw, chh] = dims(DRONE_FRONT);
+  const chomp = (x, y, c, open = true, elite = false) => `<g>${px(DRONE_FRONT, elite ? LEG_DR_ELITE : (open ? LEG_DR_TEL : LEG_DR), c, x, y)}` +
     `<rect x="${x - 1}" y="${y + 4 * c}" width="1" height="${(chh - 4) * c}" fill="${elite ? P.elite : P.enemyRim}"></rect><rect x="${x + cw * c}" y="${y + 4 * c}" width="1" height="${(chh - 4) * c}" fill="${elite ? P.elite : P.enemyRim}"></rect></g>`;
   // 원거리 열
   [[560, 356], [610, 352], [790, 350], [830, 356], [930, 352], [700, 350]].forEach(([x, y]) => { s += chomp(x, y, 2, false); });
@@ -420,7 +458,7 @@ H.HHHH.H
   s += chomp(330, 460, 8, true);
   s += chomp(560, 520, 11, true);
   // 적 림(가까운 것만 1px 발광 테두리 강조) — 가장 가까운 개체 눈 위치에 텔레그래프 코어 글로우
-  s += `<rect x="${560 + 7 * 11}" y="${520 + 11 * 11}" width="22" height="22" fill="${P.enemyTel}" opacity="0.35"></rect>`;
+  s += `<rect x="${560 + 6 * 11}" y="${520 + 2 * 11}" width="22" height="22" fill="${P.enemyTel}" opacity="0.35"></rect>`;
   // 픽업 — 코인·별
   s += px(COIN, LEG_COIN, 5, 610, 640);
   s += px(COIN, LEG_COIN, 3, 470, 600);
@@ -553,7 +591,7 @@ function formBoard() {
       <rect x="210" y="60" width="70" height="52" fill="${P.side}"></rect><polygon points="210,60 222,52 292,52 280,60" fill="${P.top}"></polygon><polygon points="280,60 292,52 292,104 280,112" fill="${P.floor}"></polygon>
       <g stroke="${P.floorDark}" stroke-width="1"><line x1="228" y1="60" x2="228" y2="112"></line><line x1="246" y1="60" x2="246" y2="112"></line><line x1="264" y1="60" x2="264" y2="112"></line><line x1="210" y1="78" x2="280" y2="78"></line><line x1="210" y1="96" x2="280" y2="96"></line></g>
       <rect x="340" y="150" width="46" height="46" fill="${P.side}"></rect><rect x="356" y="166" width="14" height="14" fill="${P.destr}"></rect>
-      ${px(CHOMPER_CLOSED, LEG_CH, 3, 360, 60)}
+      ${px(DRONE_FRONT, LEG_DR, 3, 360, 78)}
       <rect x="0" y="215" width="600" height="15" fill="${P.void}"></rect>
       <g font-family="'Press Start 2P', monospace" font-size="8" fill="${P.uiSub}"><text x="14" y="226">OUTSIDE = PARALLAX</text><text x="200" y="226">PLAY SPACE = VOXEL FACE</text><text x="452" y="226">OUTSIDE = PARALLAX</text></g>
     </svg>` +
@@ -569,7 +607,7 @@ function formBoard() {
   const silhouette = panel(
     T.h2('SILHOUETTE = 3 FAMILIES') +
     h('div', `display: flex; flex-direction: row; gap: 14px; justify-content: space-between`,
-      sil(CHOMPER_OPEN, LEG_CH, 5, 'ROUND', '구 — 유령·쩝쩝이. 기본 일반') +
+      sil(DRONE_FRONT, LEG_DR, 5, 'QUAD', '십자 — 드론. 기본 일반(쩝쩝이 대체, 0016 정정(d))') +
       sil(BEETLE, LEG_CH, 5, 'BLOCK', '각 — 비틀·탱커. 느리고 단단') +
       sil(SPIKE, LEG_CH, 5, 'SPIKE', '침 — 글리치. 빠르고 얇음')) +
     T.kr('덩어리 실루엣이 먼저, 디테일은 <b>복셀 1칸</b> 단위로만. 읽힘점 = <b>발광 코어 1개</b>(공격 텔레그래프 색 `#FF6B2C`). 엘리트는 같은 실루엣에 크기 ×1.3 + 림 `#FF1E7A`.') +
@@ -640,7 +678,7 @@ function hudBoard() {
   let s = `<rect width="${W}" height="${H}" fill="${P.void}"></rect><rect x="0" y="380" width="${W}" height="430" fill="${P.floorDark}"></rect>`;
   s += `<g stroke="${P.floor}" stroke-width="2">${Array.from({ length: 29 }, (_, i) => `<line x1="${720 + (i - 14) * 12}" y1="380" x2="${720 + (i - 14) * 160}" y2="810"></line>`).join('')}</g>`;
   s += `<rect x="0" y="320" width="${W}" height="60" fill="${P.floor}"></rect>`;
-  s += px(CHOMPER_OPEN, LEG_CH, 6, 900, 330) + px(CHOMPER_CLOSED, LEG_CH, 3, 600, 350) + px(CHOMPER_CLOSED, LEG_CH, 3, 660, 356);
+  s += px(DRONE_FRONT, LEG_DR_TEL, 6, 900, 342) + px(DRONE_FRONT, LEG_DR, 3, 600, 356) + px(DRONE_FRONT, LEG_DR, 3, 660, 360);
   s += px(GUN, LEG_GUN, 12, 860, 440);
   const seg = (x, y, n, on, c, w = 22, hh = 14, gap = 4) => Array.from({ length: n }, (_, i) => `<rect x="${x + i * (w + gap)}" y="${y}" width="${w}" height="${hh}" fill="${i < on ? c : P.floor}" stroke="${P.side}" stroke-width="1"></rect>`).join('');
   s += `<g font-family="'Press Start 2P', monospace" fill="${P.uiText}">
@@ -762,12 +800,12 @@ BBBBBBBBBBBBBBBBBBBBBBBBBBBBBB
     T.h2('LINEUP  (1px = 1cm)') +
     h('div', `display: flex; flex-direction: row; gap: 24px; align-items: flex-end; justify-content: space-between`,
       stage(PLAYER, { H: P.ally }, 'PLAYER 180', '아군 = 청록 아웃라인. 실루엣만 — 3P 바디는 NEON-V 트랙') +
-      stage(CHOMPER_OPEN, LEG_CH, 'CHOMPER 135', '일반 · 구 실루엣 · 18층(7.5cm) · 입 개폐 공격 · 시트 스프라이트 = 메시 정본') +
+      stage(DRONE_FRONT, LEG_DR_TEL, 'DRONE 45', '일반 · 십자 실루엣 · 120×120×45(7.5cm) · 로터 회전 · 코어·라이트 텔레그래프 · 지상(고도 연출) · 초단사거리 돌진') +
       stage(BEETLE, LEG_CH, 'BEETLE 90', '일반 · 각 실루엣 · 낮고 넓음 · ≤45cm 넘어감 아님(적)') +
       stage(SPIKE, LEG_CH, 'GLITCH 150', '일반 · 침 실루엣 · 빠름') +
-      stage(CHOMPER_OPEN, LEG_CH_ELITE, 'ELITE 175', '×1.3 · 림 #FF1E7A · 코어 2개 · GAS(ADR 0013)', cell * 1.3) +
+      stage(DRONE_FRONT, LEG_DR_ELITE, 'ELITE 60', '×1.3 · 림 #FF1E7A · 코어 2개 · GAS(ADR 0013)', cell * 1.3) +
       stage(BOSS, LEG_BOSS, 'CABINET CORE 240', '억제기/보스 = 캐비닛. 화면 = 얼굴. 파괴 = STAGE CLEAR')) +
-    T.sub('라인업의 형태는 방향 제시다. 쩝쩝이 외 3종은 실루엣 패밀리 예시이며 실제 메시는 후속 행에서 저작한다.'),
+    T.sub('라인업의 형태는 방향 제시다. 드론 외 3종은 실루엣 패밀리 예시이며 실제 메시는 후속 행에서 저작한다. 쩝쩝이(구)는 2026-09-06 드론으로 대체.'),
     '100%');
   const mood = (name, bg, floor, wire, accent, note, extraSvg = '') => h('div', `display: flex; flex-direction: column; gap: 8px; width: 440px`,
     `<svg width="440" height="180" viewBox="0 0 440 180" shape-rendering="crispEdges">
@@ -779,7 +817,7 @@ BBBBBBBBBBBBBBBBBBBBBBBBBBBBBB
       ${extraSvg}
       <rect x="40" y="60" width="60" height="50" fill="${P.side}"></rect><rect x="40" y="60" width="60" height="3" fill="${P.top}"></rect>
       <rect x="330" y="70" width="70" height="40" fill="${P.side}"></rect><rect x="330" y="70" width="70" height="3" fill="${P.top}"></rect>
-      ${px(CHOMPER_CLOSED, LEG_CH, 2, 250, 66)}${px(CHOMPER_CLOSED, LEG_CH, 2, 290, 70)}
+      ${px(DRONE_FRONT, LEG_DR, 2, 250, 78)}${px(DRONE_FRONT, LEG_DR, 2, 290, 82)}
       <rect x="0" y="0" width="440" height="180" fill="url(#scan3)"></rect>
     </svg>` +
     h('div', `font-family: 'Press Start 2P', monospace; font-size: 9px; line-height: 13px; color: ${accent}`, name) +
@@ -969,7 +1007,7 @@ function corridorBoard() {
   s += `<polygon points="${xr0},${yb0} ${xr1},${yb1} ${xr1},${yt1} ${xr0},${yt0}" fill="none" stroke="${P.uiReward}" stroke-width="3"></polygon>`;
   s += `<g transform="translate(${(xr0 + xr1) / 2 - 24} ${(yt0 + yt1) / 2 + 10})">${px(CARD, LEG_CARD, 4, 0, 0)}</g>`;
   s += `<text x="${(xr0 + xr1) / 2}" y="${yt1 - 12}" text-anchor="middle" font-family="'Press Start 2P', monospace" font-size="8" fill="${P.uiReward}">POWER-UP</text>`;
-  const chompS = (x, y, c, open, elite = false) => px(open ? CHOMPER_OPEN : CHOMPER_CLOSED, elite ? LEG_CH_ELITE : LEG_CH, c, x, y);
+  const chompS = (x, y, c, open, elite = false) => px(DRONE_FRONT, elite ? LEG_DR_ELITE : (open ? LEG_DR_TEL : LEG_DR), c, x, y);
   s += chompS(VX - 22, fwallBot - 30, 2, false) + chompS(VX + 6, fwallBot - 32, 2, false) + chompS(VX - 60, fwallBot + 6, 3, false) + chompS(VX + 30, fwallBot + 20, 4, true);
   s += chompS(VX - 200, fwallBot + 60, 6, true) + chompS(VX + 120, fwallBot + 110, 8, true, true);
   s += chompS(VX - 520, fwallBot + 140, 11, true);
