@@ -3,6 +3,8 @@
 #include "Enemy/FPSREnemyHealthComponent.h"
 #include "Core/FPSRGameState.h"
 #include "Core/FPSRLogChannels.h"
+#include "Status/FPSRStatus.h"
+#include "Weapon/FPSRWeaponInstance.h" // full type needed: TWeakObjectPtr<UFPSRWeaponInstance>::operator= requires a complete type
 #include "Net/UnrealNetwork.h"
 #include "Net/Core/PushModel/PushModel.h"
 
@@ -17,6 +19,18 @@ namespace
 		const UWorld* World = Owner ? Owner->GetWorld() : nullptr;
 		const AFPSRGameState* GameState = World ? World->GetGameState<AFPSRGameState>() : nullptr;
 		return GameState ? GameState->GetCombatClockSeconds() : 0.0f;
+	}
+
+	/** STAT1 §6-1: the STATUS-only clock — deliberately separate from GetCombatClockNow above (see
+	 *  AFPSRGameState::GetStatusClockSeconds's own header comment for why widening the combat clock's freeze axis
+	 *  instead would be a design change, not a bugfix). Every status timestamp (SlotExpiry/SlotCooldownUntil/
+	 *  LastStatusStepClock) lives on THIS axis, never the combat clock. */
+	float GetStatusClockNow(const UActorComponent* Component)
+	{
+		const AActor* Owner = Component ? Component->GetOwner() : nullptr;
+		const UWorld* World = Owner ? Owner->GetWorld() : nullptr;
+		const AFPSRGameState* GameState = World ? World->GetGameState<AFPSRGameState>() : nullptr;
+		return GameState ? GameState->GetStatusClockSeconds() : 0.0f;
 	}
 }
 
@@ -59,6 +73,8 @@ void UFPSREnemyHealthComponent::GetLifetimeReplicatedProps(TArray<FLifetimePrope
 	DOREPLIFETIME_WITH_PARAMS_FAST(UFPSREnemyHealthComponent, bDead, Params);
 	DOREPLIFETIME_WITH_PARAMS_FAST(UFPSREnemyHealthComponent, Shield, Params);
 	DOREPLIFETIME_WITH_PARAMS_FAST(UFPSREnemyHealthComponent, MaxShield, Params);
+	// STAT1 §8: the 6th Push Model property — see StatusBits's own header comment for why it must stay class-direct.
+	DOREPLIFETIME_WITH_PARAMS_FAST(UFPSREnemyHealthComponent, StatusBits, Params);
 }
 
 FPSRVitals::FResult UFPSREnemyHealthComponent::ApplyDamage(float DamageAmount, AActor* DamageInstigator, const FFPSRDamageSpec& Spec)
@@ -168,6 +184,12 @@ void UFPSREnemyHealthComponent::ResetForReuse()
 	bDead = false;
 	MARK_PROPERTY_DIRTY_FROM_NAME(UFPSREnemyHealthComponent, bDead, this);
 
+	// STAT1 §7-6: one of the 4 lifecycle closure points — this is the repo's ONLY existing ResetForReuse call site
+	// (AFPSREnemyBase::Activate). The other 3 (EnterDyingState / Deactivate / ServerResetEliteForStageCarry) are
+	// C단계's job to also wire — ClearStatusForReuse is public and idempotent specifically so that wiring is a
+	// one-line call each, no new plumbing needed here.
+	ClearStatusForReuse();
+
 	// Repaint the bound health bar to full on the LISTEN-SERVER HOST (A1). The host has no OnRep, so without this it
 	// would keep the last ~0% paint from the prior life until the next hit. Clients already get this for free: the
 	// reused actor's Health replicates 0 -> MaxHealth and OnRep_Health fires the same broadcast, so this is purely
@@ -272,4 +294,119 @@ void UFPSREnemyHealthComponent::OnRep_Shield()
 		OnShieldBrokenCosmetic.Broadcast();
 	}
 	LastKnownShieldForCosmetic = Shield;
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// STAT1 (B단계 — data/pure-function core + storage only). See FPSRStatus.h for the pure-function contract; the 6
+// methods below are the ONLY public surface (§7-7) — everything else (movement/attack/damage hooks, the batch pass,
+// cards, boss Tick, the OnRep_StatusBits cosmetic broadcast) is C단계/D단계 wiring, not this phase's.
+// ---------------------------------------------------------------------------------------------------------------
+
+bool UFPSREnemyHealthComponent::ApplyStatus(const UFPSRStatusCatalogDataAsset* Catalog, uint8 Slot,
+	float WeakResist, float StrongResist, AActor* Instigator, UFPSRWeaponInstance* SourceWeapon,
+	TArray<uint8, TInlineAllocator<8>>& OutFired)
+{
+	OutFired.Reset();
+
+	// §5-6: the target gate. bStatusDriverPresent false means nothing will ever call AdvanceStatus for this actor
+	// (a door / mission-flee-target / homing orb sharing this component with no C단계 driver registered) — applying
+	// here would set a bit that can never expire, so this rejects silently rather than half-applying.
+	if (!GetOwner() || !GetOwner()->HasAuthority() || !bStatusDriverPresent || !Catalog)
+	{
+		return false;
+	}
+
+	const uint8 BitsBefore = StatusBits;
+	const bool bApplied = FPSRStatus::Apply(StatusBits, StatusServer, *Catalog, Slot,
+		GetStatusClockNow(this), WeakResist, StrongResist, OutFired);
+
+	if (bApplied)
+	{
+		// §7-1 "마지막 시전자 승계": FPSRStatus::Apply never touches actor/weapon references (see FPSRStatus.h's
+		// header comment on why), so this wrapper owns DoT kill-credit bookkeeping — unconditionally on every
+		// successful apply, since there is only one shared DoT-credit slot (§5-3), not one per status/slot.
+		StatusServer.DotInstigator = Instigator;
+		StatusServer.DotSourceWeapon = SourceWeapon;
+
+		if (StatusBits != BitsBefore)
+		{
+			MARK_PROPERTY_DIRTY_FROM_NAME(UFPSREnemyHealthComponent, StatusBits, this);
+			ResolvedStatus = FPSRStatus::Resolve(StatusBits, *Catalog); // §7-5: only recompute when bits actually moved
+		}
+	}
+
+	return bApplied;
+}
+
+bool UFPSREnemyHealthComponent::AdvanceStatus(const UFPSRStatusCatalogDataAsset* Catalog,
+	float WeakResist, float StrongResist, float& OutDotDamage,
+	TArray<uint8, TInlineAllocator<8>>& OutExpired, TArray<uint8, TInlineAllocator<8>>& OutFired)
+{
+	OutDotDamage = 0.0f;
+	OutExpired.Reset();
+	OutFired.Reset();
+
+	if (!GetOwner() || !GetOwner()->HasAuthority() || !bStatusDriverPresent || !Catalog)
+	{
+		return false;
+	}
+
+	const uint8 BitsBefore = StatusBits;
+	const bool bChanged = FPSRStatus::Advance(StatusBits, StatusServer, *Catalog,
+		GetStatusClockNow(this), WeakResist, StrongResist, OutDotDamage, OutExpired, OutFired);
+
+	// §6 DoT row: this component deliberately does NOT call ApplyDamage itself with OutDotDamage — the batch pass
+	// (C단계) routes it through FPSRCombat::ApplyDamage so lifesteal/bWasEnemy/mission-tracking axes stay alive.
+
+	if (StatusBits != BitsBefore)
+	{
+		MARK_PROPERTY_DIRTY_FROM_NAME(UFPSREnemyHealthComponent, StatusBits, this);
+		ResolvedStatus = FPSRStatus::Resolve(StatusBits, *Catalog);
+	}
+
+	return bChanged;
+}
+
+void UFPSREnemyHealthComponent::ClearStatusForReuse()
+{
+	if (!GetOwner() || !GetOwner()->HasAuthority())
+	{
+		return;
+	}
+
+	// §7-6 closure checklist, applied verbatim. Public + idempotent (safe to call on an already-clear state, e.g.
+	// an actor that never had a status applied) so C단계 can wire the remaining 3 closure points as a one-line call
+	// each with no extra guarding.
+	if (StatusBits != 0)
+	{
+		StatusBits = 0;
+		MARK_PROPERTY_DIRTY_FROM_NAME(UFPSREnemyHealthComponent, StatusBits, this);
+	}
+
+	for (float& Expiry : StatusServer.SlotExpiry)
+	{
+		Expiry = 0.0f;
+	}
+	for (float& CooldownUntil : StatusServer.SlotCooldownUntil)
+	{
+		CooldownUntil = 0.0f;
+	}
+	// 🔴 §7-4 / this file's cold-start anchor note: a stale LastStatusStepClock is exactly what turns a reused
+	// actor's first DoT step into a multi-second burst — this reset is the half of the fix that covers REUSE
+	// (FPSRStatus::Apply's own dormant-wake anchor covers a first-ever-spawn actor that never reaches this at all).
+	StatusServer.LastStatusStepClock = 0.0f;
+	StatusServer.DotAccumulator = 0.0f;
+	StatusServer.DotInstigator = nullptr;
+	StatusServer.DotSourceWeapon = nullptr;
+
+	ResolvedStatus = FFPSRResolvedStatus();
+}
+
+void UFPSREnemyHealthComponent::OnRep_StatusBits()
+{
+	// STAT1 (B단계): intentionally empty. The cosmetic client-edge broadcast (GMS pub/sub so the 3 remote co-op
+	// clients can SEE a status icon/audio cue, §8 — mirrors OnRep_Shield's break-edge pattern above) is D단계 wiring.
+	// Declaring this RepNotify now, rather than adding it whole in D단계, is what lets StatusBits replicate
+	// correctly TODAY without a later signature change — an empty RepNotify is a legal, well-defined no-op: the
+	// property still replicates and OnRep still fires, only the client-side reaction is deferred.
 }

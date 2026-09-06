@@ -6,6 +6,7 @@
 #include "GameplayTagContainer.h"
 #include "Combat/FPSRVitals.h"
 #include "Combat/FPSRVitalsProfile.h"
+#include "Status/FPSRStatusTypes.h"
 #include "FPSREnemyHealthComponent.generated.h"
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FFPSREnemyDeathSignature, AActor*, DeadActor, AActor*, Killer);
@@ -83,6 +84,55 @@ public:
 	/** Server/setup: set whether this owner counts as an enemy for combat credit (default true = swarm enemy). */
 	void SetCountsAsKill(bool bInCountsAsKill) { bCountsAsKill = bInCountsAsKill; }
 
+	// --- STAT1 (B단계 — data/pure-function core; movement/attack/damage hooks, the batch pass, cards and boss Tick
+	//     are C단계): public API only (§7-7) — StatusBits/StatusServer/ResolvedStatus/bStatusDriverPresent below stay
+	//     private/protected, everything outside this component reaches status state through these 6 entry points. ---
+
+	/** Server: apply/refresh Slot from Catalog (see FPSRStatus::Apply for the reject/refresh/combo contract).
+	 *  Silently rejects (§5-6) when bStatusDriverPresent is false — that flag is the target-actor gate: a door or
+	 *  mission-flee-target shares this component but has no C단계 driver ever calling AdvanceStatus, so a bit that
+	 *  landed on one of them would never expire. WeakResist/StrongResist are the caller's already-resolved profile
+	 *  scale (kept a parameter, same reason Catalog is one — resolving them from a profile is C단계's job, §9).
+	 *  Instigator/SourceWeapon are stored for DoT kill-credit ONLY (§7-1 "마지막 시전자 승계") — the pure
+	 *  FPSRStatus::Apply function never touches actor/weapon references, so this wrapper owns that bookkeeping,
+	 *  unconditionally on every successful apply (there is only one shared DoT-credit slot, §5-3). Returns whatever
+	 *  FPSRStatus::Apply returned (false = rejected by cooldown/resist/no-catalog-entry, or the driver gate above). */
+	bool ApplyStatus(const UFPSRStatusCatalogDataAsset* Catalog, uint8 Slot, float WeakResist, float StrongResist,
+		AActor* Instigator, UFPSRWeaponInstance* SourceWeapon, TArray<uint8, TInlineAllocator<8>>& OutFired);
+
+	/** Server: advance this actor's status state one step (see FPSRStatus::Advance). Re-derives ResolvedStatus (§7-5
+	 *  cache) whenever StatusBits actually changed. OutDotDamage is handed back RAW — this component deliberately
+	 *  does NOT call ApplyDamage itself; §6 routes DoT through the batch pass -> FPSRCombat::ApplyDamage bridge so
+	 *  lifesteal/bWasEnemy/mission-tracking axes stay alive (a direct call here would bypass all of that). No-op
+	 *  (false, OutDotDamage 0) off-authority or when bStatusDriverPresent is false. */
+	bool AdvanceStatus(const UFPSRStatusCatalogDataAsset* Catalog, float WeakResist, float StrongResist,
+		float& OutDotDamage,
+		TArray<uint8, TInlineAllocator<8>>& OutExpired, TArray<uint8, TInlineAllocator<8>>& OutFired);
+
+	/** The cached per-frame-cheap resolved multipliers/flags (§7-5) — safe to read on either side, but every
+	 *  documented consumer (§6's wiring table) is a SERVER authoritative code path, so a client reads only the
+	 *  default no-op struct (nothing ever populates it there; StatusBits itself is what replicates for cosmetics). */
+	const FFPSRResolvedStatus& GetResolvedStatus() const { return ResolvedStatus; }
+
+	/** Server: the §7-6 lifecycle closure — clears every status field back to its cold/never-applied state. Public
+	 *  and idempotent so it is safe to call from all 4 closure points (STAT1 §7-6): this phase wires it into
+	 *  ResetForReuse() only; EnterDyingState/Deactivate/ServerResetEliteForStageCarry are C단계's job to also call
+	 *  this from. Calling it on an already-clear state (e.g. an actor that never had a status applied) is a cheap
+	 *  no-op, not an error. */
+	void ClearStatusForReuse();
+
+	/** True if Slot's bit is currently set. Reads the replicated StatusBits, so this is valid on both server and
+	 *  client (unlike GetResolvedStatus, which is server-only in practice). */
+	bool HasStatus(uint8 Slot) const { return Slot < 8 && (StatusBits & (1 << Slot)) != 0; }
+
+	/** Server/setup: the §5-6 target gate. Set true exactly when this actor gains a status-progression driver
+	 *  (AFPSREnemyBase entering ActiveEnemies membership; AFPSRBossBase enabling its own Tick under HasAuthority())
+	 *  and false the moment that driver goes away (§5-6's table — including the swarm's death-dwell window, which is
+	 *  NOT "still in ActiveEnemies"). A door / AFPSRMissionFleeTarget / AFPSRBossHomingOrb never calls this, so
+	 *  ApplyStatus silently no-ops on them forever — see ApplyStatus's own comment. Wiring the call sites themselves
+	 *  is C단계; this phase only needs the flag and the gate it drives to exist and be correct. */
+	void SetStatusDriverPresent(bool bInPresent) { bStatusDriverPresent = bInPresent; }
+
 	UPROPERTY(BlueprintAssignable, Category = "FPSR|Enemy")
 	FFPSREnemyDeathSignature OnDeath;
 
@@ -130,6 +180,13 @@ protected:
 	 *  OnShieldBrokenCosmetic on the break edge. */
 	UFUNCTION()
 	void OnRep_Shield();
+
+	/** STAT1 (B단계): declared now, body deliberately EMPTY — the cosmetic client-edge broadcast (mirrors
+	 *  OnRep_Shield's break-edge GMS pattern, §8) is D단계 wiring, not this phase's. Declaring it here now (rather
+	 *  than in D단계) is what lets StatusBits use ReplicatedUsing today without a forward-declared-then-defined-later
+	 *  RepNotify split. */
+	UFUNCTION()
+	void OnRep_StatusBits();
 
 	/** Replicated so clients compute a correct NewHealth/MaxHealth percent for the health bar (B12). Swarm enemies
 	 *  author it as the editor default; content actors (boss/door) set it at runtime via InitializeMaxHealth. Shares
@@ -179,4 +236,24 @@ protected:
 	/** Client-only, non-replicated: the last Shield value THIS CLIENT observed, so OnRep_Shield can detect the
 	 *  (>0 -> 0) break edge locally without a dedicated "did it just break" flag over the wire. */
 	float LastKnownShieldForCosmetic = 0.0f;
+
+	// --- STAT1: lightweight status effects (B단계 — data/pure-function core + storage only; §5-3/§8). ---------------
+
+	/** The ONLY status field that replicates (§8 복제표 — the 6th Push Model property on this component). Must stay
+	 *  a DIRECT member (not a struct field) — this repo's MARK_PROPERTY_DIRTY_FROM_NAME/DOREPLIFETIME_WITH_PARAMS_
+	 *  FAST calls only ever take class-direct UPROPERTYs (§5-3 / G1-11), matching every other property below. */
+	UPROPERTY(ReplicatedUsing = OnRep_StatusBits)
+	uint8 StatusBits = 0;
+
+	/** Server-only, non-replicated (§5-3). Not POD (2 TWeakObjectPtr members) — see FFPSRStatusServerState's own
+	 *  header comment for why that still needs no UPROPERTY/GC tracking. */
+	FFPSRStatusServerState StatusServer;
+
+	/** Server-only cache, re-derived by AdvanceStatus/ApplyStatus whenever StatusBits changes (§7-5). */
+	FFPSRResolvedStatus ResolvedStatus;
+
+	/** §5-6 target gate — see SetStatusDriverPresent's header comment. Default false: a freshly-constructed actor
+	 *  (of ANY of the 5 kinds sharing this component, §3-B) has no driver until something explicitly registers one,
+	 *  so ApplyStatus silently no-ops until that happens — the safe default for "unknown until proven otherwise". */
+	bool bStatusDriverPresent = false;
 };

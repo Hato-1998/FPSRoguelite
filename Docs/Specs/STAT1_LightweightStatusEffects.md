@@ -222,9 +222,12 @@ namespace FPSRStatus
     bool Apply(uint8& InOutBits, FFPSRStatusServerState&, const UFPSRStatusCatalogDataAsset&,
                uint8 Slot, float NowStatusClock, float WeakResist, float StrongResist,
                TArray<uint8, TInlineAllocator<8>>& OutFired);   // 슬롯 상한이 8이라 힙 0 (G2-I)
-    /** 구간 = [State.LastStatusStepClock, NowStatusClock]. 함수가 끝나며 LastStatusStepClock 을 갱신한다. */
+    /** 구간 = [State.LastStatusStepClock, NowStatusClock]. 함수가 끝나며 LastStatusStepClock 을 갱신한다.
+     *  🔴 저항을 Apply 와 **똑같이** 받는다(구현 중 교정) — §7-2 가 Advance 에 독립적인 조합 재판정을 시키는데,
+     *  Strong 은 직접 부여되는 일이 없고 오직 조합으로만 켜지므로, 저항을 모르는 Advance 는 §6 의
+     *  "보스는 하드 CC 면역"을 뚫는 유일한 경로가 된다. */
     bool Advance(uint8& InOutBits, FFPSRStatusServerState&, const UFPSRStatusCatalogDataAsset&,
-                 float NowStatusClock, float& OutDotDamage,
+                 float NowStatusClock, float WeakResist, float StrongResist, float& OutDotDamage,
                  TArray<uint8, TInlineAllocator<8>>& OutExpired,
                  TArray<uint8, TInlineAllocator<8>>& OutFired);
     FFPSRResolvedStatus Resolve(uint8 Bits, const UFPSRStatusCatalogDataAsset&);
