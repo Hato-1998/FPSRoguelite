@@ -89,6 +89,11 @@ void UFPSRRunDirectorSubsystem::StartRun()
 		// the alive-count stage anchor and the suppressor durability axis key off GetStageIndex()). A first run is
 		// unaffected (StageIndex starts at its UPROPERTY default, 0).
 		GS->SetStageIndex(0);
+
+		// 🔴 Re-run safety, STAT1 §6-1 status clock (신설): EndRunFreeze is a permanent, never-released freeze, so a
+		// same-world re-run would otherwise inherit bStatusFrozen==true from the PREVIOUS run's end and the status
+		// clock would never accumulate again. A first run is unaffected (the fields start at their defaults).
+		GS->ResetStatusClockForNewRun();
 	}
 	if (ActiveBoss)
 	{

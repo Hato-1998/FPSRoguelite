@@ -211,6 +211,20 @@ public:
 	UFUNCTION(BlueprintPure, Category = "FPSR|Run")
 	float GetCombatClockSecondsForClients() const;
 
+	/** STAT1 §6-1: status-effect-only expiry clock. Same SHAPE as GetCombatClockSeconds (server-authoritative,
+	 *  stops accumulating while frozen) but stops on a DIFFERENT axis — see bStatusFrozen below for why the two
+	 *  clocks cannot share a freeze span. No client variant exists (unlike the combat clock's ...ForClients
+	 *  sibling): every status-expiry decision is server-side, so a client never needs to derive this locally.
+	 *  Returns 0 on a client, same contract as GetCombatClockSeconds. */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Run")
+	float GetStatusClockSeconds() const;
+
+	/** Server: clear the status clock's freeze bookkeeping for a fresh run. Required because EndRunFreeze is a
+	 *  permanent, never-released freeze (see bStatusFrozen) — without this, a same-world run restart would inherit
+	 *  bStatusFrozen==true from the previous run and the status clock would never move again. Called from
+	 *  UFPSRRunDirectorSubsystem::StartRun. */
+	void ResetStatusClockForNewRun();
+
 	/** Server-only: has the run hit its terminal end (EndRunFreeze latched bRunEnded)? Distinguishes the two
 	 *  reasons bRunPaused can be up — a permanent end-of-run freeze vs a transient card-selection freeze — for
 	 *  callers that must abort on the former but HOLD on the latter (UFPSRStageDirectorSubsystem::PerformSwap).
@@ -458,6 +472,31 @@ protected:
 	 *  stamp for clients — the same idiom StagePhaseEndServerTime and LobbyCountdownEndServerTime already use. */
 	UPROPERTY(Replicated)
 	float FreezeStartedAtWorldTime = 0.0f;
+
+	// --- STAT1 §6-1: status-effect-only expiry clock. Deliberately separate from the VIT1 combat clock above. ------
+	// Why a second clock instead of widening the one above: the status-progress batch pass stops on IsRunPaused()
+	// **OR** IsStageTransitionActive(), but the combat clock above only ever looks at bRunPaused. A stage transition
+	// does NOT stop player firing (only movement), so stopping the COMBAT clock for a transition would also gift
+	// crit buffs, health-pack respawns, and both storages' shield regen a free window they were never designed to
+	// get — a design change, not a bug fix (§6-1 rev2's mistake). Widening this clock's consumer is a single status
+	// system, so the blast radius is zero by comparison.
+
+	/** True while ANY status-freezing condition is up (bRunPaused OR a stage transition). A composite bool with an
+	 *  edge-detected refresh (RefreshStatusFreezeState), NOT a refcount — see that function for why a refcount leaks. */
+	bool bStatusFrozen = false;
+
+	/** World-time stamp the CURRENT status freeze started at (meaningful only while bStatusFrozen is true). */
+	float StatusFreezeStartedAtWorldTime = 0.0f;
+
+	/** Total seconds spent status-frozen so far. Accumulated in RefreshStatusFreezeState on the true->false edge. */
+	float AccumulatedStatusFrozenSeconds = 0.0f;
+
+	/** Server: recompute bStatusFrozen from (bRunPaused || IsStageTransitionActive()) and anchor/accumulate on the
+	 *  edge — called from the END of SetRunPaused and SetStageTransition, once each has already applied its own
+	 *  state change. Not called from OnRep_StageTransition: both call sites already gate on HasAuthority(), so this
+	 *  never runs on a client (bStatusFrozen/the two fields above stay at their default there, which is correct —
+	 *  STAT1 §6-1 needs no client-side status clock at all). */
+	void RefreshStatusFreezeState();
 
 	// ---- Stage transition (ADR 0010 D6) — see the public accessors above for what each field means. ------------
 

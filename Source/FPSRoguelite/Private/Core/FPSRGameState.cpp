@@ -251,6 +251,11 @@ void AFPSRGameState::SetRunPaused(bool bPaused)
 	OnRunStateChanged.Broadcast();
 
 	UE_LOG(LogFPSR, Log, TEXT("[Run] %s"), bPaused ? TEXT("FREEZE (card selection)") : TEXT("RESUME"));
+
+	// STAT1 §6-1: refresh the status clock's OWN freeze axis (bRunPaused OR IsStageTransitionActive()) now that
+	// bRunPaused has its new value — see RefreshStatusFreezeState for why this can't just reuse the accumulation
+	// above (the two clocks stop on different axes).
+	RefreshStatusFreezeState();
 }
 
 float AFPSRGameState::GetCombatClockSeconds() const
@@ -288,6 +293,76 @@ float AFPSRGameState::GetCombatClockSecondsForClients() const
 	// handled where it belongs: cosmetically by the boss's visual lead, and for input by the deferred laser hit.
 	const float Now = GetServerWorldTimeSeconds();
 	return Now - AccumulatedFrozenSeconds - (bRunPaused ? (Now - FreezeStartedAtWorldTime) : 0.0f);
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// STAT1 §6-1: status-effect-only expiry clock. Deliberately separate from the VIT1 combat clock above — see the
+// header comment on bStatusFrozen for why widening the combat clock's freeze axis instead would be a design change.
+// ---------------------------------------------------------------------------------------------------------------
+
+void AFPSRGameState::RefreshStatusFreezeState()
+{
+	// Composite-bool edge detection, NOT a refcount. SetStageTransition is a 6-value phase setter called from 13
+	// sites, and a single transition passes through 4-5 non-None phases (Grace -> Pending -> FadeOut -> Swapping ->
+	// FadeIn -> None) — UFPSRStageDirectorSubsystem even re-sets an ALREADY-Grace phase with a new end-time
+	// mid-transition. "non-None++ / None--" is guaranteed to leak on that re-set (it isn't a phase CHANGE, so a
+	// naive increment/decrement pairing loses track of how many increments actually happened), leaving the status
+	// clock frozen forever after the very first transition. Recomputing the OR fresh every call sidesteps counting
+	// entirely: any move between two non-None phases (or a same-phase re-set) leaves bNowFrozen unchanged, so the
+	// guard below turns it into a no-op — exactly the same reason the guard also swallows the freeze OVERLAP case
+	// (a card-selection pause opening/closing while a transition is already active).
+	const bool bNowFrozen = bRunPaused || IsStageTransitionActive();
+	if (bNowFrozen == bStatusFrozen)
+	{
+		return;
+	}
+
+	if (UWorld* World = GetWorld())
+	{
+		if (bNowFrozen)
+		{
+			StatusFreezeStartedAtWorldTime = World->GetTimeSeconds();
+		}
+		else
+		{
+			AccumulatedStatusFrozenSeconds += World->GetTimeSeconds() - StatusFreezeStartedAtWorldTime;
+		}
+	}
+	bStatusFrozen = bNowFrozen;
+}
+
+float AFPSRGameState::GetStatusClockSeconds() const
+{
+	// Same shape as GetCombatClockSeconds above — server-authoritative only, no per-frame Tick (RefreshStatusFreezeState
+	// is the single edge-guarded transition point, called from SetRunPaused/SetStageTransition). No client variant:
+	// every status-expiry decision is server-side, so a client has no use for this at all.
+	if (!HasAuthority())
+	{
+		return 0.0f;
+	}
+	const UWorld* World = GetWorld();
+	if (!World)
+	{
+		return 0.0f;
+	}
+	const float Now = World->GetTimeSeconds();
+	return Now - AccumulatedStatusFrozenSeconds - (bStatusFrozen ? (Now - StatusFreezeStartedAtWorldTime) : 0.0f);
+}
+
+void AFPSRGameState::ResetStatusClockForNewRun()
+{
+	// Same HasAuthority() guard every other public setter on this class uses. EndRunFreeze is a permanent,
+	// never-released freeze (bRunPaused stays true forever once latched — see bRunEnded) — without this reset, a
+	// same-world run restart would inherit bStatusFrozen==true from the previous run's end and the status clock
+	// would never accumulate again. GetCombatClockSeconds's header comment leans on "resets naturally on the next
+	// run (fresh GameState)"; this clock can't inherit that assumption for free, so StartRun clears it explicitly.
+	if (!HasAuthority())
+	{
+		return;
+	}
+	bStatusFrozen = false;
+	StatusFreezeStartedAtWorldTime = 0.0f;
+	AccumulatedStatusFrozenSeconds = 0.0f;
 }
 
 void AFPSRGameState::EndRunFreeze()
@@ -508,6 +583,13 @@ void AFPSRGameState::SetStageTransition(EFPSRStageTransitionPhase NewPhase, floa
 
 	UE_LOG(LogFPSR, Log, TEXT("[Stage] Transition phase -> %d (phase-end server-t=%.1f)"),
 		static_cast<int32>(StageTransitionPhase), StagePhaseEndServerTime);
+
+	// STAT1 §6-1: refresh the status clock's freeze axis now that StageTransitionPhase has its new value — a
+	// transition entering/leaving None is the OTHER half of (bRunPaused || IsStageTransitionActive()). Safe to call
+	// even on the same-phase-different-end-time re-set this function's own early-out lets through when the phase
+	// doesn't actually change (Grace re-armed with a new PhaseEndServerTime): IsStageTransitionActive() reads
+	// unchanged, so RefreshStatusFreezeState's own edge guard no-ops.
+	RefreshStatusFreezeState();
 }
 
 void AFPSRGameState::SetStageIndex(int32 NewStageIndex)
