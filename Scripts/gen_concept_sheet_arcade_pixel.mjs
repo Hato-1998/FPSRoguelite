@@ -1,4 +1,4 @@
-// 산출 = Docs/Architecture/0016 시각 부록(아티팩트 「FPSRoguelite Arcade Pixel Concept Sheet」). 실행: 작업 폴더에서 `node gen_concept_sheet_arcade_pixel.mjs` → *.dc.html + canvas.json → design 스킬 seed-canvas.mjs 로 조립.
+// 산출 = Docs/Architecture/0016 시각 부록(아티팩트 「FPSRoguelite Arcade Pixel Concept Sheet」). 실행: 작업 폴더에서 `node gen_concept_sheet_arcade_pixel.mjs` → *.dc.html + canvas.json → design 스킬 seed-canvas.mjs 로 조립(--image keyart_ref.jpg = Docs/Concept 키아트 960px JPEG).
 // 컨셉 시트 아트보드 생성기 — ASCII 픽셀맵 → SVG rect. 산출 = *.dc.html + canvas.json
 import { writeFileSync } from 'node:fs';
 
@@ -1003,3 +1003,34 @@ canvas.artboards.push(
 canvas.annotations.push({ id: 'map-note', x: 0, y: 3110, w: 900, text: '맵 = 팩맨 미로 기반(사용자 2026-09-06). 통로 1타일 폭, 중앙 고스트 하우스 = 캐비닛 코어, 구석 4곳 = 특수 에리어(지금은 없음 → 제안 A~D, 내용은 사용자 결정). 타일 10 m 면 ADR 0012 규모 상한 3.4배 — 5 m 또는 ADR 개정 필요.' });
 writeFileSync('canvas.json', JSON.stringify(canvas, null, 2));
 console.log('wrote canvas.json (8 artboards)');
+
+// =====================================================================
+// 0. KeyArtRef — 사용자 제공 키아트(방향성 기준) + 규칙 번역표 (ADR 0016 D10)
+// =====================================================================
+function keyArtBoard() {
+  const tr = (img, rule, ok) => h('div', `display: flex; flex-direction: row; gap: 12px; align-items: flex-start; padding: 8px 0; border-bottom: 1px solid ${P.side}`,
+    h('div', `width: 64px; flex-shrink: 0; font-family: 'Press Start 2P', monospace; font-size: 8px; line-height: 12px; color: ${ok === 'ok' ? P.uiOk : ok === 'part' ? P.uiReward : P.uiWarn}`, ok === 'ok' ? 'KEEP' : ok === 'part' ? 'TRANSLATE' : 'RECOLOR') +
+    h('div', `display: flex; flex-direction: column; gap: 3px`, h('div', `font-size: 12px; line-height: 17px; color: ${P.uiText}`, img) + h('div', `font-size: 12px; line-height: 17px; color: ${P.uiSub}`, rule)));
+  const table = panel(
+    T.h2('IMAGE  &gt;  RULE TRANSLATION  (ArtDirection §B-10)') +
+    T.sub('사용자: "가장 이상적인 게임 모습. 최종은 달라질 수 있지만 이 아트를 방향성으로." 복제가 아니라 §A 색 규칙으로 번역한다.') +
+    tr('복셀 벽·블록의 네온 격자선', '허용 복귀(저명도). 청·보라 계열, 통로 배선보다 어둡게. 마젠타 선 = 자두. 1m 눈금 굵게 · 5cm 눈금 가늘게', 'part') +
+    tr('통로 중앙 밝은 이중 라인(시안 + 핑크)', '배선 시안 유지. 핑크 짝 라인은 적 대역 → 보라 저명도 또는 생략', 'part') +
+    tr('별·성운 하늘', '픽셀 패럴랙스 그대로. 성운 = 자두 단색 실루엣 층', 'ok') +
+    tr('복셀 쿼드 드론 적 (시안 라이트)', '형태 채택 → 쩝쩝이 대체. 라이트·코어 = 뜨거운 쪽만(#FF3B4E · #FF6B2C · 엘리트 #FF1E7A). 시안 금지 = 아군 색', 'no') +
+    tr('복셀 권총 (시안 + 핑크)', '시안·보라 악센트만(무기 = 캐릭터의 일부 예외). 핑크 → #8B6BFF', 'no') +
+    tr('HUD: HIGH SCORE · KILL · COMBO ×15 · 레벨명 배너', '어휘에 추가. 콤보 = 금 #FFC24A, 배너 = 본문 #EAF6FF. 스크린 공간', 'ok') +
+    tr('전체 채도·밝기', '히어로 아트라 채도를 다 쓴다. 팝 면적 10% 상한 유지, 격자선 만큼 환경 상단 대역은 PIE 재측정', 'part'),
+    600);
+  const body = h('div', `display: flex; flex-direction: column; gap: 20px; padding: 32px; width: 1440px; box-sizing: border-box; background: ${P.void}`,
+    h('div', `display: flex; flex-direction: row; gap: 20px; align-items: baseline`, T.h1('KEY ART  ·  USER REFERENCE') + T.sub('2026-09-06 사용자 제공 · Docs/Concept/ArcadePixel_KeyArt_UserRef_2026-09-06.png · ADR 0016 D10')) +
+    h('div', `display: flex; flex-direction: row; gap: 24px; align-items: flex-start`,
+      h('div', `width: 760px; flex-shrink: 0; border: 2px solid ${P.side}`, `<img src="keyart_ref.jpg" style="width: 760px; display: block" alt="">`) + table));
+  return doc(body);
+}
+out('KeyArtRef.dc.html', keyArtBoard());
+canvas.artboards.unshift({ file: 'KeyArtRef.dc.html', title: '0 · 키아트 레퍼런스 (사용자 제공 · 방향성 기준)', x: 0, y: -1100, w: 1440, h: 720 });
+canvas.annotations.push({ id: 'keyart-note', x: 1560, y: -1100, w: 700, text: '방향성 기준 이미지(사용자 2026-09-06). 시트의 다른 아트보드는 이 이미지를 §A 규칙으로 번역한 결과여야 한다. 적은 쩝쩝이 → 복셀 드론으로 교체 예정(Docs/DroneEnemy_ResumePrompt.md, 다른 세션) — 라인업·키 비주얼·통로 뷰의 유령 스프라이트는 그 세션이 갱신한다.' });
+canvas.annotations.find(a => a.id === 'brief').y = -170;
+writeFileSync('canvas.json', JSON.stringify(canvas, null, 2));
+console.log('wrote canvas.json (9 artboards)');
