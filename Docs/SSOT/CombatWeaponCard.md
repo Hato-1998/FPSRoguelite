@@ -134,6 +134,8 @@
 - **익스포터(마이그레이션 전용)**: 기존 49 uasset → Cards/CardCatalog.csv 역추출(영어 FText→en 컬럼, SourceString에 `[KO-TODO]` 마커) → 시트 1회 시딩 → **역추출→재임포트→에셋 diff 0 왕복으로 무회귀 증명**. 이후 시트=마스터.
 - **풀 멤버십 동기화**: `Route`/`OwnerWeapon` 컬럼 → `UFPSRCardPoolDataAsset.Cards/WeaponUnlockCards`·무기 DA `WeaponCards/UnlockableFeatures` 배열 갱신 + `GetEditorEligibleRoutes()` 교차검증을 임포트 시점으로 전진.
 - **경계**: `Content/Authoring/`은 쿠킹/스테이징 제외(에디터 전용 저작물). 카드 신규 추가 = 시트 1행(+필요시 카탈로그 1행) → sync → 임포트 — 에디터 DA 수작업 저작은 폐지(DataEditor 툴은 조회·밸런스 점검 용도로 존속).
+- **카드 은퇴 = CSV 행 + `.uasset` 동시 삭제 (2026-09-06 실사고로 명문화)**: 임포터는 CSV 에 없는 카드를 **지우지 않는다** — 행만 지우면 `.uasset` 이 고아로 남고 `FPSRoguelite.Editor.CardCsv.RoundTrip` 이 조용히 빨개진다(불변식 = **CSV 데이터 행 수 == `UFPSRCardDataAsset` 에셋 수**). 증상은 `"every card reports Unchanged to be N, but it was N-1"` 과 임포트마다 뜨는 `LogStringTable: Failed to find string table entry` 경고다. 전용 Fragment DA 가 있으면 그것까지 함께 지운다. **실사고**: `b7010a68` 이 스코프를 스탯 진화로 이관하며 행만 지워 `DA_CardModifiers_SniperScope` + `DA_Fragment_Rifle_SniperScope` 가 고아로 남았고, `origin/main` 이 빨간 채 방치됐다(`3504abb3` 에서 정리).
+- **카드 CSV 스키마·인덱스·저작 도구를 건드렸으면 돌려야 하는 자동화**: `Editor.CardCsv.RoundTrip` · `Editor.CardCsv.FamilyDerivation` · `Editor.DataEditor` · `Editor.Localization.StringTableCsv`. `CardCsv.Schema`(파서 단위)만 초록인 것은 **왕복 정합을 전혀 증명하지 않는다** — 그 테스트는 손으로 만든 문자열을 파싱할 뿐 실제 에셋을 안 본다. 러너 = `Scripts/run_crit2_tests.bat <테스트경로>`.
 
 ### 2-4. 무기 시스템
 - 최대 **3개 동시 보유** = **원거리 2 + 근접/맨손 1**(슬롯 역할 분리 2026-07-29, 아래 참조). 5렙/20렙 등에 무기 카드 등장
