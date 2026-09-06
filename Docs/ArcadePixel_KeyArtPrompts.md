@@ -11,7 +11,7 @@
 
 ```
 retro arcade cyberspace, dark stage with pop accents, voxel (3D pixel) forms with strict single grid per object,
-flat colored voxel faces with thin dark grid lines, NO photo textures, NO gradients on surfaces,
+flat colored voxel faces (flat albedo) with thin dark grid lines, NO photo textures, NO painted gradients on surfaces — but lit with global illumination: emissive neon panels and floor traces bounce colored light onto nearby voxel walls and floor, floor has a soft low-roughness reflection (never mirror-like),
 dominant palette: deep indigo/violet substrate (#151329 #221E3D #332B57) covering 70% of frame,
 bright teal circuit traces on the floor (#2A8A96 #39B8B0 #5FE0D2) as walkable paths,
 outside the arena boundary: a retro-game pixel parallax backdrop — 2px pixel stars, stepped pixel skyline silhouettes and floating pixel blocks in dim plum (#5A2E63 #9B3F86), ALL flat single-color silhouettes, NO wireframes, NO circuit traces, NO neon edges on walls or blocks,
@@ -19,12 +19,12 @@ enemies ONLY in hot colors (pink/red/orange #FF3B4E #FF6B2C #FF1E7A) with one gl
 allies ONLY in cold colors (cyan/blue/violet #4FD8FF #2E9BFF #8B6BFF),
 destructible objects marked by small lime glowing cores (#9BE33C),
 gold pixel coins and stars as pickups (#FFC24A), CRT scanlines subtle, slight chromatic aberration, vignette,
-no pure white, no pure black, no photoreal, no smooth cel-shading, no anime characters
+enemy glow must not tint the floor (only environment neon bounces), no pure white, no pure black, no photoreal, no smooth cel-shading, no anime characters
 ```
 
 네거티브(지원하는 도구에서):
 ```
---no orange background, magenta background, wireframe, circuit board, neon edge lines, tron, bright environment, photo texture, realistic lighting, anime face, cel shading, smooth gradients, blur, motion blur, lens flare, text, logo, watermark
+--no orange background, magenta background, wireframe, circuit board, tron, bright environment, photo texture, mirror floor, anime face, cel shading, smooth gradients, blur, motion blur, lens flare, text, logo, watermark
 ```
 
 ## 1. 키 비주얼 A — 1인칭 프레임 (스토어 캡슐 · 메인 이미지)
