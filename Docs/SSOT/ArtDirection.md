@@ -273,10 +273,54 @@ D4 는 높이(넘을 수 있나) × 파괴가능 두 축을 **1인칭에서 즉�
 **어휘 번역**(문구 = LOC0 String Table 콘텐츠): 런 = 1코인 플레이 · 레벨업 카드 = 파워업 · 스테이지 전환 = **STAGE CLEAR**(§A-2 Ultimate) · DBNO = **CONTINUE? 9→0**(동료가 오면 정지) · 로비 = INSERT COIN · 런 종료 = GAME OVER + 하이스코어.
 **픽션**: 게임 세계 다이브(`Concept.md §1-C-9`) + 수호자 — 플레이어 4인 = 접속한 히어로(차가운 색), 적 = 세계를 갉아먹는 버그·글리치(뜨거운 색).
 
-### B-7. 폰트 · UI 스킨 (후속 행에서 확정)
+### B-7. 폰트 · UI 스킨 (✅ 확정 2026-09-07, HUD 재스킨 세션)
 
-- Latin·숫자 = Press Start 2P 계열(OFL) / 한글 = Galmuri 계열(OFL) **후보**. 확정 = LOC0 정합과 함께 별도 행.
-- HUD 위젯 3종(`WBP_PlayerVitals`·`WBP_WeaponPanel`·`WBP_TeammateVitals`)은 세터·값 소스·가시성 규칙 유지, **스킨만** 교체 — 세그먼트 바(체력 10칸·실드 10칸), 픽셀 아이콘, 탄약 큰 숫자. 월드에 겹치는 UI(적 체력바·비네트)에는 뜨거운 색 금지(§A-3-7 경고 그대로).
+**폰트 = Galmuri11 (OFL)** — 사용자 결정 2026-09-07. 후보였던 "Press Start 2P + Galmuri" 조합은 **기각**: Press Start 2P 는
+한글 글리프가 **0자**(실측)라 반드시 2폰트 폴백이 되고 가로폭이 커서 좌하 `150 / 150` 이 칸에 안 들어간다.
+Galmuri 는 라틴·숫자·한글을 **한 가족**으로 덮으므로 이음매가 없다(실측: 한글 음절 11,172/11,172 · 자모 51 · `★ ☆ — · … ×` 포함).
+
+| 에셋 | 값 |
+|---|---|
+| `Content/Assets/Font/Galmuri11` · `Galmuri11-Bold` | FontFace. **`Hinting = Monochrome`** — 안티에일리어싱을 꺼야 픽셀이 안 뭉갠다 |
+| `Content/Assets/Font/F_Galmuri` | Font 에셋 1개에 타입페이스 둘(`Regular`/`Bold`). Runtime 캐시 |
+| `Docs/Licenses/Galmuri-OFL-1.1.txt` | OFL 1.1 원문 + 출처 |
+
+- **크기는 설계 11px 의 정배수만**(11 / 22 / 33). 비정수 배율은 픽셀 격자를 깬다.
+- **굵기로 위계를 낸다** — 본문·값 = Bold / 보조·비활성 = Regular. §A-3-7 의 본문 `#EAF6FF` ↔ 보조 `#8FA8C4` 와 축이 겹쳐 서로를 보강한다.
+- 리포에 이미 있던 `DNFBitBitv2`(데미지 넘버·설정 위젯 사용 중)는 **HUD 에 쓰지 않는다** — 커버리지는 완전하지만 모서리가 둥근 벡터라
+  픽셀 격자가 없고 굵기가 한 종뿐이다. 메뉴·로비 재작업 행에서 한 번에 정합을 맞춘다.
+
+**텍스트 스타일 SSOT = `UCommonTextStyle` BP 8종** (`Content/UI/Style/`). CommonUI 는 이미 ON 이고 `UFPSRRunHUDWidget` 이
+`UCommonUserWidget` 이라 새 인프라가 아니다. ⚠️ `UCommonTextBlock::UpdateFromStyle()` 이 `SetColorAndOpacity(TextStyle->Color)` 로
+**색까지 강제**하므로(엔진 소스 확인), 스타일은 "크기 3종"이 아니라 **의미 역할별**이어야 SSOT 가 성립한다 — 각 스타일이 §A-3-7 색 하나에 1:1.
+
+| 스타일 | 크기·굵기 | 색 (§A-3-7) | 쓰임 |
+|---|---|---|---|
+| `TS_HUD_Label` | 11 Bold | `#EAF6FF` | 패널 라벨·제목 |
+| `TS_HUD_LabelDim` | 11 Regular | `#8FA8C4` | 보조·비활성·잠김 |
+| `TS_HUD_Value` | 11 Bold | `#EAF6FF` | 값 숫자 |
+| `TS_HUD_Positive` | 11 Bold | `#5FE0D2` | 긍정·진행·실드 |
+| `TS_HUD_Reward` | 11 Bold | `#FFC24A` | 보상·XP·카드 |
+| `TS_HUD_Warn` | 11 Bold | `#FF4D5E` | 경고·체력 위험 |
+| `TS_HUD_Title` | 22 Bold | `#EAF6FF` | 배너·스테이지명 |
+| `TS_HUD_Big` | 33 Bold | `#EAF6FF` | 큰 숫자(탄창·LV·스테이지) |
+
+- HEX 는 **sRGB 로 읽어 리니어로 변환**해 넣는다(§A-3-7 규약). 전 스타일에 **1px 하드 그림자**(오프셋 (1,1), 검정 α0.75) —
+  픽셀 UI 관례이자 §2-14 의 「적 200 + VFX 위에서 읽혀야 한다」 요구.
+
+**부품 = 세그먼트 바 1종이 모든 바를 그린다.** `WBP_PixelSegBar` + `M_HUDSegBar`(UI 도메인, **텍스처 0장**).
+파라미터 `SegmentCount`/`Percent`/`GapFrac`/`FilledColor`/`EmptyColor` → HP·실드 10칸 / XP 12칸 / 보스 진행 24칸을 같은 부품으로.
+꺼진 칸 = 보조색 `#8FA8C4` α0.22. 채움 개수 = `ceil(Percent × SegmentCount)`(살아 있으면 최소 1칸이 남는다).
+⚠️ 칸을 이미지 N개로 만들지 말 것 — 24칸 × 4바를 Tick 마다 도는 ForEach 는 제1원리(액터당 비용 최소화)에 어긋난다. 세터 1회·드로우콜 1개가 맞다.
+
+**카드 희귀도 = ★1~4** (사용자 결정 2026-09-07 — `ECardRarity` 가 Common/Rare/Epic/Legendary **4단계**라 ★1~3 은 매핑이 안 맞는다).
+테두리 색 사다리 = Common `#8FA8C4` → Rare `#2E9BFF` → Epic `#8B6BFF` → Legendary `#FFC24A`.
+전부 기존 팔레트(§A-3-7 + §A-3-5 아군 차가운 쪽 변형) 안이고, **빨강은 적 대역이라 희귀도에 쓰지 않는다.**
+
+- HUD 위젯은 세터·값 소스·가시성 규칙 유지, **스킨만** 교체 — 세그먼트 바, 픽셀 아이콘, 탄약 큰 숫자.
+  월드에 겹치는 UI(적 체력바·비네트)에는 뜨거운 색 금지(§A-3-7 경고 그대로).
+- **Synty `UISciFiSoldierHUD` 팩 위젯은 더 쓰지 않는다**(사용자 결정 2026-09-07) — 아트 컨셉 확정 전에 붙인 것이고
+  아케이드 픽셀과 언어가 다르다. `_Clean` 무기 아이콘 텍스처만 재사용.
 
 ### B-9. 맵 저작 규칙 — 팩맨 미로 + 구석 특수 에리어 (ADR 0016 D9, 2026-09-06)
 
@@ -320,7 +364,7 @@ D4 는 높이(넘을 수 있나) × 파괴가능 두 축을 **1인칭에서 즉�
 
 | 이미지 요소 | 데이터 소스(현행) | 상태 | 저작 시 규칙 |
 |---|---|---|---|
-| COLLECTED ITEMS 아이콘 그리드 | 획득 카드 원장 `FFPSRAcquiredCard` + `OnAcquiredCardsChanged`(PlayerState, CRIT2) | 데이터 ✅ · 위젯 ❌ | 카드별 픽셀 아이콘(§B-6 스프라이트 규칙). 희귀도 = ★ |
+| COLLECTED ITEMS 아이콘 그리드 | 획득 카드 원장 `FFPSRAcquiredCard` + `OnAcquiredCardsChanged`(PlayerState, CRIT2) — 둘 다 BlueprintPure/BlueprintAssignable 로 이미 열려 있다(실측 2026-09-07) | 데이터 ✅ · 위젯 ❌ | ⚠️ **카드 DA 에 아이콘 필드가 없다**(`Source/.../Card/*.h` grep 확인) → 1차는 **희귀도 ★1~4 + 테두리 색**만(§B-7). 카드별 고유 픽셀 아이콘은 C++ 필드 추가 + CSV 임포터 정합이 필요한 **후속 행** |
 | 팀원 초상(픽셀) | — | ❌(3P 캐릭터 미정, NEON-V 트랙) | 초상 = 8×8/16×16 픽셀, 아군 색 테두리 |
 | TEAM STATUS 패널 ×3 | `AFPSRGameState::GetPartyVitals()` · `WBP_TeammateVitals` | ✅ | **패널 1개 = 팀원 1명**(이미지의 P1/P2/P3 반복은 오류). 자기 자신은 좌하 바이탈. 다운 = `#FF4D5E` 경고 |
 | STAGE PROGRESS TO BOSS 바 | 런 디렉터 BossTime(`UFPSRRunScheduleDataAsset`) + `GetRunClockSeconds/GetRunPhase` | ✅(산출 필요) | 정의 = **보스타임까지 시간 진행률**. 억제기 파괴(스테이지 전환)와 별개 축. 색 = 긍정 `#5FE0D2` |
@@ -333,7 +377,17 @@ D4 는 높이(넘을 수 있나) × 파괴가능 두 축을 **1인칭에서 즉�
 | AMMO 2 · RESERVE 2400 · 무기 아이콘 | `WBP_WeaponPanel`(`GetCurrentAmmo/GetCurrentMagSize/Icon`) | 탄창 ✅ · ✅ 결정(2026-09-06): **예비탄 없음, 탄약 무한** | HUD 는 탄창 숫자만. RESERVE 줄 삭제 |
 | 크로스헤어 | U12 절차 SDF | 이미지에 없음 — **필수 유지** | 픽셀 스냅만 |
 | 코어(억제기) 방향 마커 | `AFPSRArenaLandmark`·억제기 | 이미지에 없음 — 팩맨 미로에서 **필요** | 연두 마커 + 거리(이전 시트 HUD 모크 참조) |
-| 한글 표기("경험치IENCE BAR" 등) | — | 이미지 생성 오류 | 한글 = Galmuri 계열 픽셀 폰트(D8) |
+| 한글 표기("경험치IENCE BAR" 등) | — | 이미지 생성 오류 | ✅ 확정 = **Galmuri11**(§B-7). 라벨은 LOC0 String Table 키로 — 하드코딩 문자열 0 |
+
+**표면 실측 (2026-09-07) — 이 표의 "✅(산출 필요)" 3건은 전부 C++ 신규 0줄로 해결된다:**
+
+| 필요한 것 | 이미 있는 표면 |
+|---|---|
+| 보스 진행률 | `AFPSRGameState::GetRunTotalDuration()` **BlueprintPure** — 주석이 *"The timeline bar fills GetRunClockSeconds()/this and the boss icon sits at the end"* 라고 이 바를 위해 만들었다고 명시(`FPSRGameState.h:299`) |
+| 스테이지 `n-m` | `GetStageIndex()` · `GetActiveArena()` BlueprintPure + 아레나의 `StageOrder`·`ArenaRole` BlueprintReadOnly. 갱신 훅 = `OnStageTransitionChanged`(BlueprintAssignable) 라 Tick 불요 |
+| 카드 원장 | `GetAcquiredCards()` BlueprintPure + `OnAcquiredCardsChanged` BlueprintAssignable |
+
+셋 다 `OnRep_StageTransition`/`OnRep_RunState` 로 **복제**되므로 4인 원격 클라에서도 산다.
 
 ### B-12. 조명 — 네온은 장식이 아니라 광원이다 (사용자 GI 레퍼런스 2026-09-06(g), ADR 0016 D11)
 

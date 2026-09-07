@@ -67,3 +67,56 @@
 - 위젯 BP 를 프로그램으로 컴파일·저장하면 컨테이너 위젯이 깨질 수 있다(메모리 `vibeue-render-target-gpu-hazard`) — 복구 = git + LFS restore.
 - Push Model 은 패키지 빌드에서 꺼진다(메모리 `push-model-off-in-packaged-build`) — PIE 에서만 보이는 복제 타이밍에 기대지 말 것.
 - 헤드리스 저작은 에디터가 켜져 있으면 조용히 저장 실패(`save_asset` False, `DONE` 은 찍힘).
+
+---
+
+## §7 진행 기록 · 인계물 (2026-09-07 세션)
+
+### §7-1 확정된 결정 (사용자, 이 세션)
+
+| # | 결정 | 근거 |
+|---|---|---|
+| 1 | **폰트 = Galmuri11 Bold/Regular** (Press Start 2P 조합 기각) | Press Start 2P 는 한글 0자(실측) → 2폰트 폴백 강제 + 가로폭 과다. Galmuri 는 한글 11,172자 전부 + 라틴 + `★☆—·…` 커버. 상세 = `ArtDirection.md` §B-7 |
+| 2 | **카드 희귀도 = ★1~4** (프롬프트의 ★1~3 정정) | `ECardRarity` 가 Common/Rare/Epic/Legendary **4단계** |
+| 3 | **기존 3위젯을 같은 경로에서 통째로 재작성** | Synty 잔재를 피해 수술하는 대신 깨끗이. 임베드 재작업 0 |
+| 4 | **Synty 팩 위젯 전면 미사용** | 아트 컨셉 확정 전에 붙인 것. `_Clean` 무기 아이콘 텍스처만 재사용 |
+
+### §7-2 §3-4 삭제 — C++ 신규 0줄
+
+프롬프트가 예정한 "표면 부족분 3건 → Sonnet 위임"은 **불필요**하다. 전부 이미 BP 에 열려 있다(실측):
+`GetRunTotalDuration()` · `GetStageIndex()`/`GetActiveArena()→StageOrder`·`ArenaRole` · `GetAcquiredCards()`/`OnAcquiredCardsChanged`.
+갱신 훅 `OnStageTransitionChanged`(BlueprintAssignable)까지 있어 Tick 없이 이벤트 구동이 된다. 대조표 = `ArtDirection.md` §B-11 하단.
+
+### §7-3 완료물
+
+| 에셋 | 상태 |
+|---|---|
+| `Content/Assets/Font/Galmuri11` · `Galmuri11-Bold` · `F_Galmuri` | ✅ Monochrome 힌팅, Regular/Bold 한 에셋 |
+| `Docs/Licenses/Galmuri-OFL-1.1.txt` | ✅ OFL 1.1 원문 |
+| `Content/UI/Style/TS_HUD_*` ×8 | ✅ 컴파일·리니어 색 대조 완료 |
+| `Content/UI/HUD/Parts/M_HUDSegBar` | ✅ UI 도메인 · 텍스처 0 · 컴파일 에러 0 |
+| `Content/UI/HUD/Parts/WBP_PixelSegBar` | ✅ EventGraph 20연결 · `SetFillPercent` 8연결 전수 확인 |
+
+### §7-4 `WBP_GameHUD` 배치표 (사용자 작업 — 1920×1080 기준, 안전 영역 32px)
+
+전부 **캔버스 슬롯**. 앵커를 화면 모서리에 붙였으므로 해상도가 바뀌어도 모서리 기준이 유지된다.
+
+| 자식 위젯 | 앵커 (Min=Max) | 정렬 | 위치 (X, Y) | 크기 (X, Y) |
+|---|---|---|---|---|
+| `WBP_CardLedger` | (0, 0) 좌상 | (0, 0) | 32, 32 | 320, 220 |
+| `WBP_TeammateVitals` | (0, 0) 좌상 | (0, 0) | 32, 268 | 300, 210 |
+| `WBP_BossProgress` | (0.5, 0) 상단중앙 | (0.5, 0) | 0, 32 | 760, 56 |
+| `WBP_StageLabel` | (1, 0) 우상 | (1, 0) | −32, 32 | 220, 64 |
+| `WBP_PlayerVitals` | (0, 1) 좌하 | (0, 1) | 32, −140 | 420, 108 |
+| `WBP_SkillBar` | (0, 1) 좌하 | (0, 1) | 32, −32 | 220, 48 |
+| `WBP_SkillHex` | (0.5, 1) 하단중앙 | (0.5, 1) | 0, −120 | 112, 128 |
+| `WBP_MissionBanner` | (0.5, 1) 하단중앙 | (0.5, 1) | 0, −32 | 720, 40 |
+| `WBP_WeaponPanel` | (1, 1) 우하 | (1, 1) | −32, −32 | 300, 140 |
+| 크로스헤어 · 코어 마커 | 기존 유지 | — | — | 손대지 않음 |
+
+⚠️ **Synty 팩 위젯의 SizeBox 하드 오버라이드 함정은 여기 해당 없음** — 새 위젯은 전부 캔버스 앵커라 슬롯 크기를 그대로 따른다.
+
+### §7-5 다음 세션이 이어받을 것
+
+부품 `WBP_PixelSlot`(카드 칸·스킬 칸 공용) → 화면 요소 8종 조립 → §4 검증 → 사용자 임베드·PIE.
+**저작 중 PIE 를 켜면 에셋 API 가 전부 조용히 막힌다**(메모리 `vibeue-verification-blind-spots`) — 켜기 전에 한마디 주고받을 것.
