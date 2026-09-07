@@ -19,6 +19,7 @@
 | 파이프라인 | ✅ `render_voxel_drone_preview.py`(5앵글) · `import_voxel_drone.py` · `run_voxel_drone_pipeline.bat` |
 | 컨셉 시트 | ✅ mjs 에 `DRONE_*` + `LEG_DR/LEG_DR_TEL/LEG_DR_ELITE`, CHOMPER 사용처 7곳 교체, 같은 URL 재게시(라벨 "Drone replaces Chomper") |
 | 색 판정 | ✅ LUT 7색 전부 자주/뜨거운 쪽, 시안·파랑 0(hue 160~260 검사) |
+| **⚠️ BP 교체 함정(2026-09-07 실측)** | `BP_EnemyMeleeBase` 의 Mesh 컴포넌트에 **머티리얼 오버라이드 `MI_EnemyProto_Bipyramid`** 가 남아 있어 메시만 드론으로 바꿔도 프로토 머티리얼(자체 spin WPO·빨강)이 그려진다 — 사용자 영상 "자체적으로 돌고 있어" 의 정체. 헤드리스 CDO 프로브로 확인(`override_materials=[MI_EnemyProto_Bipyramid]`). **메시 교체 시 Materials Element 0 오버라이드를 비워야**(기본값 리셋) 슬롯의 `MI_EnemyVoxel_Drone` 이 쓰인다. BP 편집 = 사용자 |
 | **남은 것** | 🔲 적 300 병합 실측(`stat RHI`, ROTOR WPO 가 인스턴싱을 안 깨는지) 🔲 PIE(사용자): `BP_EnemyMeleeBase` 메시 슬롯 → `SM_EnemyVoxel_Drone`, `HoverHeight` 120~180 저작, 텔레그래프 가독 🔲 `Telegraph`·`RotorRate` ↔ CPD 상태 슬롯 연동(후속) 🔲 엘리트 변형(9~11 예비 요소) |
 
 ## §0 세션 시작 방법
