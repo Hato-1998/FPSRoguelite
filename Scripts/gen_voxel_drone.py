@@ -27,7 +27,7 @@
 # 격자 7.5cm(ArtDirection §B-3 적 클래스). 발자국 16×16 칸 = 120cm(로터 포함), 높이 6층 = 45cm. 몸통 8×8×5 · 허브 3×3 · 로터 십자 5×5. 원점 = 발자국 중심·높이 중심.
 # 층(z, 바닥 0): 0~4 몸통(라이트는 허브 밑 1층) · 2~4 허브 · 2~3 팔 · 5 로터 날개. 로터는 몸통·허브보다 한 층 위라 어떤 회전각에서도 같은 층의
 # 다른 셀과 겹치지 않는다(단언이 0°·45°·90° 에서 검사).
-# ⚠️ OBJ 임포터 Y 반전(Troubleshooting D12): 이 메시는 좌우 대칭 — 무영향.
+# ⚠️ OBJ 임포터 Y 반전(Troubleshooting D12): 이 메시는 좌우 대칭 — 무영향. **UV V 도 1-v 로 뒤집힌다** → file_v() 로 선반전(D14).
 # 사용: python Scripts/gen_voxel_drone.py [출력폴더=Saved/EnemyVoxel] [--sprites]
 import math, os, sys
 from collections import deque
@@ -162,6 +162,13 @@ def extract_faces(cells):
     return faces
 
 
+def file_v(v_engine):
+    """OBJ 에 쓸 v. UE OBJ 임포터는 V 를 1-v 로 뒤집어 저장한다(2026-09-07 실측: 소스 v 0.01 → UE 0.99, 익스포터가 다시 1-v 로 써서
+    왕복으론 안 보였다 — EditorExporters.cpp:1415 `1.0f - uv.Y`). 엔진에서 읽고 싶은 값 v_engine 을 미리 뒤집어 쓴다.
+    정수부(허브 번호 k)도 그대로 살아남는다: 1-(k+fy) 를 UE 가 다시 1-… 하면 k+fy. 요소 ID(u)는 무영향."""
+    return 1.0 - v_engine
+
+
 def quad_corners(cell, d):
     ix, iy, iz = cell
     V = VOXEL
@@ -204,11 +211,11 @@ def write_obj(path, faces, name, with_mtl=False):
                 dx, dy = px - cx * VOXEL, py - cy * VOXEL
                 fx, fy = 0.5 + dx / ROTOR_UV_SPAN_CM, 0.5 + dy / ROTOR_UV_SPAN_CM
                 assert 0.02 < fx < 0.98 and 0.02 < fy < 0.98, (cell, dx, dy)
-                uvs.append((elem + fx, hub + fy))
+                uvs.append((elem + fx, file_v(hub + fy)))
             vt.extend(uvs)
         else:
             u0, u1 = elem + 0.01, elem + 0.99
-            vt.extend([(u0, 0.01), (u1, 0.01), (u1, 0.99), (u0, 0.99)])
+            vt.extend([(u0, file_v(0.01)), (u1, file_v(0.01)), (u1, file_v(0.99)), (u0, file_v(0.99))])
         vn.append(d)
         if with_mtl and cur != elem:
             cur = elem
