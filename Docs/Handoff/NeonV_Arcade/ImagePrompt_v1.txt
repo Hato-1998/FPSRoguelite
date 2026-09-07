@@ -1,0 +1,70 @@
+====================================================================
+NEON-V 3인칭 캐릭터 — 삼면도 생성 프롬프트 v1  (2026-09-07)
+====================================================================
+쓰는 법
+  - 아래 [A] 또는 [B] 중 "하나만" 통째로 복사해 이미지 생성 AI 에 붙여넣는다.
+  - [A] 영어 권장 — 이미지 AI 는 영어 학습량이 압도적이라 디테일을 더 잘 지킨다.
+  - 도구 1순위 = Gemini(Nano Banana 계열) · 대안 = ChatGPT(GPT Image). 근거 = 참조 구조 보존력.
+  - 이 파일의 이 머리말(===== 위쪽)은 복사하지 않는다. 프롬프트 본문만.
+
+⚠️ 스펙 정본·판정 체크리스트·크롭 절차는 Docs/NeonVCharacter_ResumePrompt.md 에 있다.
+   그 문서는 "다음 작업 AI 세션"용이지 이미지 AI 용이 아니다 — 통째로 넣지 말 것.
+
+재시도 요령 (§6)
+  - 고칠 게 있으면 "이 그림에서 X만 제거하고 나머지는 한 픽셀도 바꾸지 마라" 식으로 지시한다.
+  - "다시 그려줘" / "스타일 바꿔줘" 같은 재스타일 요청은 형태를 흐린다. 하지 말 것.
+  - 이미지 AI 는 "5.375등신"·"53%" 같은 숫자를 못 지킨다. 실제로 형태를 잡는 건
+    "머리 폭 > 어깨 폭", "보브가 얼굴보다 넓다", "부츠가 과장되게 크다" 같은 시각적 지시다.
+    수치 준수는 그림에서 못 읽으므로 검수는 §6 체크리스트로 한다.
+
+--------------------------------------------------------------------
+[A] ENGLISH  (권장)
+--------------------------------------------------------------------
+Game character design sheet: three views — front, side, and back — side by side on one canvas, same scale, aligned to the same height (top of head and sole of feet on the same horizontal line in all three), flat neutral-gray background, no shadows, no text, no dimension lines or arrows.
+
+Pose: A-pose — both arms held out from the torso at roughly 45 degrees, fingers open and relaxed (not fists), legs slightly apart at shoulder width. Empty hands, no weapon held. Neutral or mildly determined front-facing expression.
+
+Subject: a cyberpunk "grid striker" character. A short bob haircut with strong lateral volume — it does not reach the shoulders in length, but it is noticeably wider than the face — with 2-3 thick, blunt-tipped strands of hair flowing backward (no thin wispy strands — thick like a bundle of cables), a wraparound visor covering the eyes (angular lenses, headset band). A cropped tactical jacket (short enough to bare the midriff, popped collar) over a strapped chest-armor piece, high-waisted hot pants with a pouched tactical belt, strapped leg gear on the bare thighs, and exaggeratedly large platform combat boots reaching the ankle.
+
+Proportions (exact): overall body is 5.375 heads tall — the head (hair included) is large, and the head's width is wider than the shoulders (the single most important rule). Shoulders are narrow, limbs are slim but not stick-thin (keep visible cylindrical thickness). Legs (thighs + calves + boots) make up about 53% of total height.
+
+Colors: clothing stays dark navy/near-black. All glowing trim lines along the jacket seams, belt, boots, and leg gear are unified into one bright sky-cyan accent color (a single, cleanly separable color — it will be recolored later). The old flowing ribbon at the back of the waist is completely removed; replace it with a rectangular glowing panel on the back (a "power unit" module). Secondary accents are a slightly darker muted blue. Any white is a very pale, faintly cool off-white, never pure white. Skin is a strongly desaturated, neutral pale tone (no rosy warmth). No orange, red, magenta, or pink anywhere in the image.
+
+Style and exclusions: smooth cel-shaded anime style (not blocky voxels or pixel art), flat coloring with minimal shading. No weapon in hand (gun/blade/grenade), no flowing ribbon, no tentacle/squid/ink/cap motifs, no pure white/pure black, no background props.
+
+--------------------------------------------------------------------
+[B] 한국어
+--------------------------------------------------------------------
+게임 캐릭터 디자인 시트, 정면·측면·후면 3뷰를 한 장에 나란히, 같은 배율과 같은 높이 정렬(세 뷰 모두 정수리와 발바닥이 같은 수평선), 균일한 회색 단색 배경, 그림자 없음, 글자·치수선·화살표 없음.
+
+포즈: A포즈 — 양팔을 몸통에서 약 45도로 자연스럽게 벌리고 손가락은 편 채(주먹 아님), 다리는 어깨너비로 살짝 벌린다. 무기를 들지 않은 빈손. 정면은 무표정 또는 살짝 결연한 표정.
+
+대상: 사이버펑크 그리드 스트라이커 캐릭터. 옆으로 볼륨 있게 부푼 짧은 단발 보브 헤어 — 길이는 어깨에 안 닿지만 폭은 얼굴보다 눈에 띄게 넓다 — 에 뒤로 흐르는 두껍고 뭉툭한 머리카락 가닥 2~3줄(가는 잔머리 없이 케이블 다발처럼 굵게), 눈을 덮는 랩어라운드 바이저(각진 렌즈, 헤드셋 밴드). 크롭 재킷(배꼽이 드러나는 길이, 카라를 세운 형태)과 그 아래 스트랩형 가슴 보호대, 하이웨이스트 핫팬츠(파우치 달린 택티컬 벨트), 허벅지에 스트랩형 다리 기어, 발목까지 오는 과장되게 큰 플랫폼 컴뱃 부츠.
+
+비례(정확히): 전체 5.375등신 — 머리(머리카락 포함)가 크고, 머리 폭이 어깨 폭보다 넓다(가장 중요한 규칙). 어깨는 좁게, 팔다리는 가늘되 완전한 막대는 아니게(원통형 두께감 유지). 다리(허벅지+종아리+부츠)가 전체 키의 약 53%.
+
+색: 의상은 짙은 남색·검정. 재킷 솔기·벨트·부츠·다리 기어를 따라 흐르는 발광 트림 라인은 밝은 하늘색 시안 한 가지로 통일(다른 요소와 분리되는 단일 색 — 나중에 교체됨). 허리 뒤로 흐르던 리본은 완전히 제거하고 대신 등에 사각형 발광 패널(파워 유닛 모듈)을 넣는다. 보조 색은 살짝 어두운 블루. 흰색 대신 아주 옅은 오프화이트. 피부는 채도를 크게 낮춘 창백하고 중립적인 톤(붉은기 없이). 주황·빨강·마젠타·핑크는 화면에 한 픽셀도 넣지 않는다.
+
+스타일과 금지: 매끈한 셀 셰이딩 애니메 스타일(각진 복셀이나 픽셀 형태 아님), 평면 채색 + 최소한의 음영. 무기(총·검·수류탄) 들지 않기, 흐르는 리본 없음, 촉수·오징어·잉크·모자 모티프 없음, 순백·순흑 없음, 배경 소품 없음.
+
+--------------------------------------------------------------------
+결과를 받은 뒤 (§6 판정 체크리스트 — 12항목)
+--------------------------------------------------------------------
+[ ] 3뷰(정면·측면·후면) 배율·높이 일치
+[ ] ★ 세 뷰의 디자인이 같은 캐릭터인가 (한 장 3뷰의 최대 실패 모드 — 후면에서 백 모듈이
+      사라지거나 부츠 색·머리카락 가닥 수가 바뀐다. Meshy 는 세 장이 같은 캐릭터라고
+      가정하므로 여기가 어긋나면 3D 가 뭉개진다. 부위별로 세 뷰를 하나씩 대조할 것)
+[ ] A포즈(팔 45도, 손가락 편 상태, 다리 살짝 벌림)
+[ ] 맨팔 굵기가 막대처럼 가늘지 않은가
+[ ] 헤드 매스(머리카락 포함) 폭이 어깨보다 넓은가
+[ ] 신발 과장이 유지됐는가
+[ ] 무기 0 (빈손)
+[ ] 리본 0
+[ ] 촉수·오징어·잉크·캡 요소 0
+[ ] 주황·빨강·마젠타 픽셀 0   (금지 대상 = #FF3B4E · #FF6B2C · #FF1E7A 계열)
+[ ] 순백 픽셀 0
+[ ] 배경 단색·글자 없음 / 바이저가 정면 중앙
+
+통과하면 → 한 장을 정면·측면·후면 3장으로 잘라 이 폴더(Docs/Handoff/NeonV_Arcade/)에
+NeonVArcade_source.png · NeonVArcade_front.png · NeonVArcade_side.png · NeonVArcade_back.png
+로 저장한다. 그 다음이 Meshy 프롬프트 토론(별도 세션).
