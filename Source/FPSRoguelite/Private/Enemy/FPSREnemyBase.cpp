@@ -1375,8 +1375,17 @@ void AFPSREnemyBase::TickServerMovement(const FFPSRServerMoveContext& Ctx)
 			GroundRecheckTimer = 0.0f;
 		}
 
-		// Face the PLAYER (Ctx.FaceDir), not the move direction: at StopDistance the move is separation-only and its
-		// direction jitters, which would spin the enemy 360deg in place. Ctx.FaceDir is stable (toward the target).
+	}
+
+	// Face the PLAYER (Ctx.FaceDir), not the move direction: at StopDistance the move is separation-only and its
+	// direction jitters, which would spin the enemy 360deg in place. Ctx.FaceDir is stable (toward the target).
+	// This lives OUTSIDE the steering block on purpose (2026-09-07, voxel drone PIE): with no neighbours the stop-ring
+	// steering vector is exactly zero, so a facing update inside that block never ran and an enemy holding at attack
+	// range kept its last heading while the player strafed. Every archetype before the drone was rotationally
+	// symmetric, which is why this went unnoticed. Knockback still suppresses it (a shoved enemy keeps its heading
+	// until the push decays — same as before, the block above is skipped during knockback too).
+	if (!bKnockbackActive)
+	{
 		FVector FaceXY = Ctx.FaceDir;
 		FaceXY.Z = 0.0f;
 		if (!FaceXY.IsNearlyZero())
