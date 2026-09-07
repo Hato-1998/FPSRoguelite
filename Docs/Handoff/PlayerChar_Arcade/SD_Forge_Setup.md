@@ -8,11 +8,49 @@
 | 항목 | 값 |
 |---|---|
 | 프론트엔드 | **SD WebUI Forge** (`F:\StableDiffusion\stable-diffusion-webui-forge`), `python launch.py`, 포트 **7860** |
-| 체크포인트 | **`sd_xl_base_1.0.safetensors` 하나뿐** (6.5 GB) |
-| LoRA / VAE / 확장 | **없음** |
-| ControlNet | 확장은 Forge 내장, **모델 0개**(`/controlnet/model_list` → `["None"]`) |
+| 체크포인트 | ~~`sd_xl_base_1.0` 하나뿐~~ → **✅ 2026-09-08 3종 추가**(§0-1) |
+| LoRA / VAE / 확장 | **없음** (LoRA 는 Civitai 인증이 필요해 보류) |
+| ControlNet | 확장은 Forge 내장. ~~모델 0개~~ → **✅ Union ProMax + IP-Adapter 배치**(§0-1) |
 | API | **꺼져 있었음** → `webui-user.bat` 의 `COMMANDLINE_ARGS=--api` 로 켜 둠(백업 `.bak` 생성). **재시작 필요** |
 | GPU | RTX 4070 Ti 12 GB — SDXL 계열 구동에 충분 |
+
+## 0-1. ✅ 설치 완료 (2026-09-08 03:38, 13분 소요)
+
+전부 **huggingface.co 공식 리포지토리에서 인증 없이** 받았다. 스크립트 = 이어받기(`curl -C -`) + 재시도 6회 + 용량 검증.
+받은 뒤 **safetensors 헤더를 파싱해 무결성 검증**(HTML 에러 페이지가 받아지는 흔한 실패를 배제).
+
+| 파일 | 용량 | 텐서 | 경로 | 출처 |
+|---|---|---|---|---|
+| `Illustrious-XL-v1.1.safetensors` | 6.46 GB | 2,514 | `models\Stable-diffusion\` | `OnomaAIResearch/Illustrious-XL-v1.1` |
+| `NoobAI-XL-v1.1-eps.safetensors` | 6.62 GB | 2,514 | `models\Stable-diffusion\` | `Laxhar/noobai-XL-1.1` (**EPS** — V-Pred 아님) |
+| `animagine-xl-4.0.safetensors` | 6.46 GB | 2,514 | `models\Stable-diffusion\` | `cagliostrolab/animagine-xl-4.0` |
+| `controlnet-union-sdxl-1.0-promax.safetensors` | 2.34 GB | 863 | `models\ControlNet\` | `xinsir/controlnet-union-sdxl-1.0` |
+| `ip-adapter-plus_sdxl_vit-h.safetensors` | 0.79 GB | 191 | `models\ControlNet\` | `h94/IP-Adapter` |
+
+> 🔴 **파일명을 바꾸지 말 것.** Forge 의 ControlNet 은 **파일명으로 계열을 인식**한다 —
+> `ip-adapter` 접두어가 없으면 IP-Adapter 로 안 잡히고, `union`/`promax` 가 없으면 union 계열로 안 잡힌다.
+
+**체크포인트를 3개 받은 이유** = 어느 것이 이 프로젝트 화풍(굵은 외곽선·평면 채색·데포르메)에 맞는지는
+**돌려보기 전엔 단정할 수 없다.** 같은 프롬프트·같은 시드로 3개를 돌려 비교한 뒤 하나를 고른다(A/B/C 테스트).
+
+**다음 단계** = **Forge 재시작**(사용자). 그래야 새 모델이 목록에 잡히고 `--api` 도 함께 적용된다.
+
+### 0-2. 사용자가 받아온 목록에 대한 판정 (2026-09-08)
+
+다른 AI 가 제시한 목록을 검토한 결과 — 방향은 맞으나 **절반은 빼야 했고 핵심 하나가 빠져 있었다.**
+
+| # | 지적 | 판정 |
+|---|---|---|
+| 1 | **SD 1.5 트랙(Anything V5) 전체** | ❌ **제거.** SD1.5 는 512 네이티브라 삼면도처럼 넓거나 긴 캔버스에서 **인물이 복제되고 해부학이 무너진다.** 게다가 베이스를 둘로 나누면 ControlNet·LoRA 가 전부 두 세트가 된다. 4070 Ti 12 GB 면 SDXL 로 충분하다 |
+| 2 | "Anything-XL" | ❌ 사실상 존재하지 않는 조합. Anything 은 SD1.5 계보 |
+| 3 | ControlNet 4종 × 2베이스 = 8개 | ❌ **과잉.** Union ProMax 하나(2.34 GB)가 openpose·depth·canny·lineart 를 커버. 개별로 받으면 10 GB+ |
+| 4 | "Lineart Anime" | ❌ **SD1.5 전용 모델명**(`control_v11p_sd15s2_lineart_anime`). SDXL 에 동급이 없다 → Union 의 lineart 모드로 대체 |
+| 5 | "ZoeDepth" | ⚠️ ControlNet 모델이 아니라 depth **전처리기**. 항목이 섞였다 |
+| 6 | 경로 `extensions/sd-webui-controlnet/models/` | ⚠️ **A1111 경로.** Forge 는 ControlNet 내장이라 `models/ControlNet/`. 이 설치의 `extensions/` 는 실제로 비어 있다 |
+| 7 | **IP-Adapter 누락** | 🔴 **가장 큰 문제.** 레퍼런스 4장의 스타일·디자인을 물리는 기능이고, 제미나이 경로의 핵심을 SD 에서 재현하는 **유일한 수단**인데 목록에 없었다 |
+| 8 | "Civitai 자동 다운로드" | ⚠️ Civitai 는 **307 인증 리다이렉트** — 스크립트 전자동이 안 된다. 다행히 필요한 것이 전부 HuggingFace 에 공개돼 있었다 |
+
+---
 
 ## 1. 🔴 착수 전 판정 — 지금 상태로는 제미나이보다 나쁘다
 
