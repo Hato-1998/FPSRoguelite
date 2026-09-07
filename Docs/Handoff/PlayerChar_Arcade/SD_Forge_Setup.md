@@ -36,6 +36,49 @@
 
 설치 위치: 체크포인트 → `models\Stable-diffusion\` · ControlNet → `models\ControlNet\` · LoRA → `models\Lora\`
 
+### 1-2. 체크포인트 후보 (2026-09-08 정리 · 지식 기준 2026-05, **버전은 사이트에서 최신으로 확인할 것**)
+
+선정 기준 = 이 프로젝트가 요구하는 것: **굵은 외곽선 · 평면 채색 · 데포르메 비례 · 태그로 색을 통제할 수 있을 것.**
+
+| 순위 | 계열 | 맞는 이유 | 주의 |
+|---|---|---|---|
+| **1** | **Illustrious XL**(OnomaAI) | **danbooru 태그 네이티브** — `thick outline`·`flat color`·`from behind` 가 그대로 먹는다. 선이 깨끗하고 평면 채색이 기본값에 가깝다. §3 프롬프트가 이 계열 기준으로 쓰였다 | 파생이 워낙 많아 **베이스보다 파생이 나은 경우가 흔하다** |
+| **2** | **NoobAI-XL**(Illustrious 기반) | 태그 이해도가 더 넓고 구도 지시를 잘 받는다 | 🔴 **V-Pred 변형은 설정이 까다롭다**(`v_prediction` + ZSNR config 필요) → **EPS 버전을 받을 것** |
+| **3** | **Animagine XL**(Cagliostro) | "공식 애니 일러스트" 톤, 색이 차분하고 대비가 안정적 | 데포르메·과장 실루엣은 Illustrious 계열보다 약하다 |
+| 대안 | **Pony Diffusion V6 XL** | 스타일라이즈드·장난감 형태에 강하고 LoRA 생태계가 가장 크다 | 🟡 `score_9, score_8_up, score_7_up` **접두어 필수**. 고유 화풍 편향이 있어 "깨끗한 셀"은 Illustrious 쪽이 낫다 |
+
+**고르는 요령** — 베이스보다 잘 튜닝된 **파생**이 대개 낫다. `Illustrious` 필터 + 다운로드순 상위에서, **샘플 이미지가 "굵은 선 + 평면 채색"인 것**을 고른다. 샘플이 부드러운 그라데이션·사실적 음영 위주면 우리 방향과 정반대다.
+
+### 1-3. ControlNet 후보 — 다 받을 필요 없다
+
+| 우선 | 모델 | 용량 | 용도 |
+|---|---|---|---|
+| **1순위** | **xinsir ControlNet-Union SDXL (ProMax)** | ~2.5 GB | **한 모델로 openpose·depth·canny·lineart·tile 커버.** 개별로 받으면 2.5 GB × 5 |
+| 개별 | xinsir **OpenPose SDXL** | ~2.5 GB | A포즈 강제만 필요할 때 |
+| **레퍼런스** | **IP-Adapter SDXL**(`ip-adapter-plus_sdxl_vit-h`) | ~1 GB + CLIP vision 인코더 | 제미나이의 "레퍼런스 첨부"에 해당 — 레퍼런스 4장의 스타일·디자인을 물린다 |
+| 경량 대안 | **T2I-Adapter SDXL**(TencentARC) | **~300 MB** | openpose/canny/lineart. 정밀도는 낮지만 10배 가볍다 |
+| **무료** | `reference_only` | 0 | 전처리기 전용. 정면 → 측면·후면 일관성(§2 전략) |
+
+→ **최소 조합 = Union ProMax + IP-Adapter ≈ 3.5 GB.** A포즈 강제 + 레퍼런스 물리기 + 뷰 일관성이 전부 커버된다.
+
+### 1-4. LoRA — 이름이 자주 바뀌므로 검색 키워드로
+
+- **`flat color`** / **`cel shading`** / **`thick outline`** / **`vector art`** — 우리가 원하는 화풍의 핵심
+- **`chibi`** / **`deformed`** / **`minigirl`** — 등신 데포르메 강제
+- ★ **`character sheet`** / **`turnaround`** / **`multiple views`** — **삼면도 자체를 학습한 LoRA. 이 프로젝트에 가장 값어치 있다**
+
+⚠️ 체크포인트와 **베이스가 맞아야** 한다(Illustrious용 LoRA를 Pony 에 쓰면 잘 안 먹는다).
+
+### 1-5. 🔑 삼면도를 기하학적으로 강제하는 트릭 (OpenPose/Union 을 받으면)
+
+**컨트롤 이미지 한 장에 OpenPose 스켈레톤을 3개 나란히** 넣는다(정면·측면·후면 포즈).
+그러면 SD 가 세 뷰를 **같은 캔버스에, 같은 높이로, 지정한 포즈로** 그린다.
+
+→ "3뷰 배율·높이 일치"와 "A포즈"가 **프롬프트 부탁이 아니라 기하학적 구속**이 된다.
+이 트랙에서 반복적으로 깨진 두 항목이 한 번에 닫힌다. §2 의 "정면 확정 → reference_only 파생"
+전략보다 이쪽이 더 강하므로, Union 을 받으면 **이 방법을 우선한다.**
+
+
 ## 2. 🔑 전략 — 한 장에 3뷰를 욕심내지 않는다
 
 제미나이 경로는 "한 장에 3뷰"였다. 일관성을 AI 의 선의에 맡기는 방식이라 v1 에서 실제로 깨졌다.
