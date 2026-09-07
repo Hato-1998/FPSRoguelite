@@ -379,7 +379,7 @@ Delay 3s, 도트 5/0.5s, t=0 실드 50): t=3.5 → 25 · t=4.5 → 40 · t=5.5 �
 
 → **두 앵커를 함께 옮기되 시간 앵커를 역날짜로 찍는다**:
 ```cpp
-// bDotAnchorPolicy = true 일 때 (FFPSRDamageSpec 신규 플래그)
+// bDotRegenAnchorPolicy = true 일 때 (FFPSRDamageSpec 신규 플래그)
 ShieldAtLastDamage   = Shield;
 LastDamageCombatTime = Now - (Shield <= 0.f ? ShieldBrokenRegenDelaySeconds : ShieldRegenDelaySeconds);
 ```

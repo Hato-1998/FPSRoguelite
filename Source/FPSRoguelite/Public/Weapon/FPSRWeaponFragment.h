@@ -6,6 +6,7 @@
 #include "GameplayTagContainer.h"
 #include "Weapon/FPSRWeaponTypes.h"
 #include "Combat/FPSRCritTypes.h"
+#include "Status/FPSRStatusTypes.h"
 #if WITH_EDITOR
 #include "Misc/DataValidation.h"
 #endif
@@ -18,6 +19,7 @@ class UWorld;
 class UFPSRWeaponInstance;
 class UAbilitySystemComponent;
 struct FFPSRProjectileParams;
+namespace FPSRCombat { struct FDamageResult; }
 
 /**
  * Transient per-activation firing context passed to weapon behavior-fragment hooks. Plain struct (not a
@@ -107,6 +109,13 @@ public:
 	virtual void OnKill(const FFPSRFireContext& Context, AActor* KilledActor) const {}
 	virtual void OnStatusKill(const FFPSRFireContext& Context, AActor* KilledActor) const {}
 
+	/** STAT1 §5-5 (G1-6): fired right after FPSRCombat::ApplyDamage resolves ONE landed hit, so a fragment can judge
+	 *  status-effect application off the REAL vitals outcome (Result.ShieldSpent/HealthSpent) rather than the
+	 *  pre-mitigation number OnHitActor sees. 🔴 Deliberately NOT part of the "every damage path" contract the
+	 *  FPSRWeaponHooks bridge below promises — see that namespace's own header comment for the 4-vs-5-path exception
+	 *  this hook carves out. UFPSRStatusApplyFragment (bottom of this file) is its first consumer. */
+	virtual void OnDamageApplied(const FFPSRFireContext& Context, AActor* Target, const FPSRCombat::FDamageResult& Result) const {}
+
 	/** Crit-rule hook (CRIT1): runs once per activation, right before the fire ability bakes its FFPSRCritContext —
 	 *  a "resolution stage" hook at the same level as ModifyFireMode, not a per-hit one (cards 1/2/4 live here).
 	 *  ⚠️ Stack-composition rule (fixed, G1 P2-5): ActiveFragments holds one element PER STACK (the same convention
@@ -126,6 +135,14 @@ public:
  * Melee / Projectile / Explosion) fires the trigger hooks identically instead of re-deriving the fragment list.
  * Each helper resolves the active fragments from Context.Instance and early-outs when there are none — empty-fast on
  * the hot path. The hooks themselves gate on Context.bAuthority; callers already invoke these inside server-only scopes.
+ *
+ * 🔴 EXCEPTION (STAT1 §5-5, G1r3/G2-D): NotifyDamageApplied below is 4-path, not 5-path — it fires from Hitscan /
+ * ChargeLaser / Melee / Projectile-direct-hit only, and deliberately NEVER from Explosion. ApplyExplosion has no
+ * FFPSRFireContext to build one from (it isn't a fragment-hook call site) and its FExplosionResult carries only
+ * KilledEnemies (FPSRCombatStatics.h) — not a per-target FDamageResult — so there is nothing to hand this hook per
+ * splash victim without either a new Combat->Weapon dependency or a per-target result array on the swarm's hottest
+ * AOE path (240 enemies x a rocket = hundreds of entries/frame). Splash-applied status effects are this unit's
+ * non-goal (STAT1 §2): a status-granting card's text/PIE must say "직격만" (direct hits only).
  */
 namespace FPSRWeaponHooks
 {
@@ -135,6 +152,9 @@ namespace FPSRWeaponHooks
 	FPSROGUELITE_API void NotifyMiss(const FFPSRFireContext& Context);
 	/** Fire OnKill on every active fragment for one freshly-killed enemy. */
 	FPSROGUELITE_API void NotifyKill(const FFPSRFireContext& Context, AActor* KilledActor);
+	/** Fire OnDamageApplied on every active fragment for one landed hit (STAT1 §5-5) — see this namespace's own
+	 *  header comment above for why this is 4-path, not 5-path. */
+	FPSROGUELITE_API void NotifyDamageApplied(const FFPSRFireContext& Context, AActor* Target, const FPSRCombat::FDamageResult& Result);
 	/** Fire OnAim on every active fragment (ADS press/release). */
 	FPSROGUELITE_API void NotifyAim(const FFPSRFireContext& Context, bool bAiming);
 
@@ -373,4 +393,45 @@ public:
 	virtual EDataValidationResult IsDataValid(class FDataValidationContext& Context) const override;
 #endif
 
+};
+
+/** STAT1 §5-5 — grants ONE status-effect slot on a landed DIRECT hit (see OnDamageApplied's own comment above for
+ *  the 4-path/no-splash boundary). 🔴 No exclusion axis (§3-D, user decision — the ONLY lockdown-prevention lever is
+ *  Status->RetriggerCooldownSeconds, not a card-pick restriction): a weapon can carry more than one of these within
+ *  MaxFragmentSlots, and carrying two DIFFERENT Weak-slot cards on one rifle is how a SOLO player reaches a Strong
+ *  combo (STAT1 §3-D R3-5) — the base class's stacking machinery needs no change for this to work. */
+UCLASS()
+class FPSROGUELITE_API UFPSRStatusApplyFragment : public UFPSRWeaponFragment
+{
+	GENERATED_BODY()
+
+public:
+	/** Which catalog slot this card grants — SlotIndex/Kind/duration/effect-axes all live on the asset (STAT1 §5-1).
+	 *  The catalog itself is resolved separately, from a project-wide config soft path (STAT1 §5-2/§9,
+	 *  UFPSRStatusEffectSettings) — so this card only ever needs to know ITS OWN status, never the whole table. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Fragment")
+	TObjectPtr<UFPSRStatusEffectDataAsset> Status;
+
+	/** Roll per landed hit — same convention as FFPSRCritContext::Chance (FPSRCombat::RollCrit's own
+	 *  `Chance > 0 && FRand() <= Chance`). Default 1.0 = always; most Weak-status cards are meant to be reliable, so
+	 *  a card that wants a coin-flip authors this down explicitly rather than the reverse. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Fragment", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float ApplyChance = 1.0f;
+
+	/** STAT1 §5-5 / VIT1 §11-4 (3): true (default) means a hit the target's shield fully absorbed
+	 *  (Result.HealthSpent == 0) grants NO status — "실드에 막힌 타격은 상태이상도 막힌다". Left open (rather than
+	 *  hardcoded) so a future card that deliberately wants shield hits to count too has somewhere to say so without a
+	 *  new fragment class. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Fragment")
+	bool bRequireHealthDamage = true;
+
+	virtual void OnDamageApplied(const FFPSRFireContext& Context, AActor* Target, const FPSRCombat::FDamageResult& Result) const override;
+
+#if WITH_EDITOR
+	/** (1) Status required — an unset card silently grants nothing at runtime, the same "loud at authoring time"
+	 *  standard UFPSRFragment_CritLifesteal's own IsDataValid already holds cards to (G2 P3). (2) MaxStacks must stay
+	 *  1 — STAT1 §5-1's EFPSRStatusRefresh::RefreshDuration rule means a second copy of the SAME status on the SAME
+	 *  slot only refreshes its duration, so a MaxStacks > 1 card would read as supported and silently isn't. */
+	virtual EDataValidationResult IsDataValid(FDataValidationContext& Context) const override;
+#endif
 };

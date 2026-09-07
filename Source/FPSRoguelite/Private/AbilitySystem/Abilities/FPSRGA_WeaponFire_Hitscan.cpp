@@ -283,6 +283,9 @@ void UFPSRGA_WeaponFire_Hitscan::ActivateAbility(
 			return false; // friendly pass-through (FF off): don't stop the bullet, don't spend penetration
 		}
 		FPSRCombat::FDamageResult Result = FPSRCombat::ApplyDamage(HitActor, Resolved, Avatar, DamageSpec);
+		// STAT1 §5-5: status-apply fragments (e.g. UFPSRStatusApplyFragment) react to this landed hit here — right
+		// after ApplyDamage, on the RAW primary-hit Result (before any crit-rider bonus instance below folds in).
+		FPSRWeaponHooks::NotifyDamageApplied(FireCtx, HitActor, Result);
 		// CRIT1: a crit that landed real damage may trigger the bonus-instance / lifesteal riders. Fold the second
 		// instance's kill/shield-break into Result BEFORE the aggregation below reads them, so a target the RIDER
 		// (not the direct hit) finishes off still counts as killed everywhere downstream (the spec's OR table).

@@ -295,6 +295,12 @@ void UFPSRGA_WeaponFire_ChargeLaser::FireBeam(float BeamDamage, bool bIsPayoffSh
 			return;
 		}
 		FPSRCombat::FDamageResult Result = FPSRCombat::ApplyDamage(HitActor, Resolved, Avatar, DamageSpec);
+		// STAT1 §5-5: status-apply fragments react to a landed hit here — PAYOFF SHOT ONLY, mirroring OnHitActor
+		// above and NotifyKill below (warm-up ticks are pure chip damage and skip every fragment hook, §2-3-5).
+		if (bIsPayoffShot)
+		{
+			FPSRWeaponHooks::NotifyDamageApplied(CachedFireCtx, HitActor, Result);
+		}
 		// CRIT1: a crit that landed real damage may trigger the bonus-instance / lifesteal riders (payoff shot only —
 		// bCrit is already false on a warm-up tick). Fold the second instance's kill/shield-break into Result BEFORE
 		// the aggregation below reads them, so a target the RIDER finishes off still counts as killed downstream.

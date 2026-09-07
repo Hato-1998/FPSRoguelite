@@ -58,6 +58,15 @@ namespace FPSRCombat
 		float DamageDealt = 0.0f;
 		bool bShieldBroke = false;
 		bool bTargetIsPlayer = false;
+
+		/** STAT1 §5-5 (G1r3 R3-4): the FPSRVitals::FResult this hit produced, copied straight through by both
+		 *  branches of ApplyDamage below. Needed BECAUSE DamageDealt above is VIT1's OWN intentional
+		 *  `ShieldSpent + HealthSpent` redefinition (see that field's comment) — a hit a shield fully absorbed still
+		 *  reports DamageDealt > 0, which is exactly right for hit-markers/lifesteal/penetration and exactly wrong
+		 *  for "did this hit reach HEALTH", which status-effect application must gate on (VIT1 §11-4 (3) —
+		 *  "실드에 막힌 타격은 상태이상도 막힌다" — UFPSRStatusApplyFragment::bRequireHealthDamage). */
+		float ShieldSpent = 0.0f;
+		float HealthSpent = 0.0f;
 	};
 
 	/** Enemies an explosion freshly killed (alive->dead this blast). Inline-sized (<=8) to avoid a heap alloc on the

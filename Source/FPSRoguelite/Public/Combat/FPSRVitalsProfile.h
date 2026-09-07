@@ -71,6 +71,21 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Vitals|Defense", meta = (ClampMin = "0.0", ClampMax = "0.99"))
 	float MaxTotalReduction = 0.95f;
 
+	/** STAT1 §6 저항 행 (G1r3 R3-7): this entity kind's resistance to the WEAK status axis (slow / dot /
+	 *  armor-reduction / attack-slow). A DURATION scale FPSRStatus::Apply multiplies DurationSeconds by before
+	 *  applying — 0 = complete immunity (Apply rejects the application outright, STAT1 §10 unit test 5), 1.0 = full
+	 *  duration, <1 = resists (shorter), >1 = extra vulnerable (longer). Default 1.0, and
+	 *  UFPSREnemyHealthComponent::GetVitalsProfile's null-profile fallback is ALSO 1.0 — never 0, which would make
+	 *  every enemy without an authored profile completely status-immune the day this ships. */
+	UPROPERTY(EditAnywhere, Category = "Vitals|Status Resist", meta = (ClampMin = "0.0", UIMax = "2.0"))
+	float WeakResistScale = 1.0f;
+
+	/** Same axis, for the STRONG status pair (blind/root) — kept SEPARATE from WeakResistScale (not one shared
+	 *  number) so a boss can be authored hard-CC-immune (StrongResistScale 0) while still burning from the Weak dot
+	 *  that feeds it (WeakResistScale 1.0); a single scale cannot express both (STAT1 §6 저항 행 / Codex-7). */
+	UPROPERTY(EditAnywhere, Category = "Vitals|Status Resist", meta = (ClampMin = "0.0", UIMax = "2.0"))
+	float StrongResistScale = 1.0f;
+
 	/** Server/either side: resolve the layer coefficients for a DamageType (exact match -> default entry -> 1.0). */
 	void ResolveDefense(const FGameplayTag& DamageType, float& OutShieldDefense, float& OutHealthDefense) const;
 

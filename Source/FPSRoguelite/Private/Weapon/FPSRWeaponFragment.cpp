@@ -9,6 +9,10 @@
 #include "GameFramework/Pawn.h"
 #include "GameFramework/Controller.h"
 #include "AbilitySystemComponent.h"
+#include "Enemy/FPSREnemyHealthComponent.h"
+#include "Combat/FPSRVitalsProfile.h"
+#include "Settings/FPSRStatusEffectSettings.h"
+#include "Core/FPSRLogChannels.h"
 
 namespace FPSRWeaponHooks
 {
@@ -48,6 +52,15 @@ namespace FPSRWeaponHooks
 		for (const TObjectPtr<UFPSRWeaponFragment>& Frag : Context.Instance->GetActiveFragments())
 		{
 			if (Frag) { Frag->OnKill(Context, KilledActor); }
+		}
+	}
+
+	void NotifyDamageApplied(const FFPSRFireContext& Context, AActor* Target, const FPSRCombat::FDamageResult& Result)
+	{
+		if (!Context.Instance || !Target) { return; }
+		for (const TObjectPtr<UFPSRWeaponFragment>& Frag : Context.Instance->GetActiveFragments())
+		{
+			if (Frag) { Frag->OnDamageApplied(Context, Target, Result); }
 		}
 	}
 
@@ -259,6 +272,76 @@ void UFPSRFragment_CritOnSlide::OnSlideStarted(const FFPSRFireContext& Context) 
 	Context.Instance->ApplyTimedCritBuff(this, CritChanceAdd, 0.0f, Duration);
 }
 
+namespace
+{
+	/** STAT1 §5-2/§9: the catalog is ONE project-wide config soft path (UFPSRStatusEffectSettings, mirroring
+	 *  FPSREnemyRenderSettings.h's HealthBarWidgetClass idiom) — resolved here rather than cached at startup because
+	 *  TSoftObjectPtr::LoadSynchronous() is already cheap once resolved (an IsValid() + Get(), no re-hit of the asset
+	 *  registry). Logs the unset/unloadable case exactly ONCE, ever: this runs on the per-hit damage path, so a
+	 *  per-call warning would spam the log for the rest of the session over a content-authoring gap that
+	 *  UFPSRStatusApplyFragment's own null check already makes a harmless no-grant. */
+	const UFPSRStatusCatalogDataAsset* ResolveStatusCatalog()
+	{
+		static bool bHasLoggedMissingCatalog = false;
+		const UFPSRStatusEffectSettings* Settings = GetDefault<UFPSRStatusEffectSettings>();
+		const UFPSRStatusCatalogDataAsset* Catalog = Settings ? Settings->StatusCatalog.LoadSynchronous() : nullptr;
+		if (!Catalog && !bHasLoggedMissingCatalog)
+		{
+			UE_LOG(LogFPSR, Warning, TEXT("[Status] FPSRStatusEffectSettings.StatusCatalog is unset or failed to ")
+				TEXT("load — status-effect application is a silent no-op until a catalog is authored (STAT1 §5-2)."));
+			bHasLoggedMissingCatalog = true;
+		}
+		return Catalog;
+	}
+}
+
+void UFPSRStatusApplyFragment::OnDamageApplied(const FFPSRFireContext& Context, AActor* Target, const FPSRCombat::FDamageResult& Result) const
+{
+	// Context.bAuthority: state-mutating hook, mirrors every other OnXxx override in this file (e.g.
+	// UFPSRFragment_ExplosiveRounds::OnImpact) even though every one of the 4 call sites already gates on authority.
+	if (!Context.bAuthority || !Target || !Status)
+	{
+		return;
+	}
+	// Cheapest/most-common reject first: a friendly-fire or self-damage hit (Target has no shared health component,
+	// §2 비목표 — only an enemy sharing UFPSREnemyHealthComponent is ever a status-apply receiver) bails before
+	// spending an RNG draw or a HealthSpent check that a player-target Result may otherwise satisfy.
+	UFPSREnemyHealthComponent* HealthComp = Target->FindComponentByClass<UFPSREnemyHealthComponent>();
+	if (!HealthComp)
+	{
+		return;
+	}
+	// STAT1 §5-5 / VIT1 §11-4 (3): "실드에 막힌 타격은 상태이상도 막힌다" — see FDamageResult::HealthSpent's comment
+	// for why DamageDealt alone cannot express this.
+	if (bRequireHealthDamage && Result.HealthSpent <= 0.0f)
+	{
+		return;
+	}
+	// Same roll convention as FPSRCombat::RollCrit (Chance > 0 && FRand() <= Chance) — ApplyChance's own comment.
+	if (!(ApplyChance > 0.0f && FMath::FRand() <= ApplyChance))
+	{
+		return;
+	}
+
+	const UFPSRStatusCatalogDataAsset* Catalog = ResolveStatusCatalog();
+	if (!Catalog)
+	{
+		return; // unset/unloadable catalog — already logged once by ResolveStatusCatalog
+	}
+
+	// STAT1 §6 저항 행 (G1r3 R3-7): resolve BOTH scales from the SAME profile instance ApplyDamage already mitigates
+	// this target's damage against (UFPSREnemyHealthComponent::GetVitalsProfile), so status resist and damage
+	// mitigation can never disagree. Null profile -> 1.0/1.0, NEVER 0 — a 0 fallback would make every enemy without
+	// an authored profile completely status-immune the day this ships.
+	const UFPSRVitalsProfileDataAsset* Profile = HealthComp->GetVitalsProfile();
+	const float WeakResist = Profile ? Profile->WeakResistScale : 1.0f;
+	const float StrongResist = Profile ? Profile->StrongResistScale : 1.0f;
+
+	// §5-6 target gate (door / mission-flee-target / homing orb) and every other reject reason (cooldown/no-catalog-
+	// entry) live inside ApplyStatus itself — this fragment does not duplicate any of that here.
+	TArray<uint8, TInlineAllocator<8>> OutFired;
+	HealthComp->ApplyStatus(Catalog, Status->SlotIndex, WeakResist, StrongResist, Context.Avatar, Context.Instance, OutFired);
+}
 
 #if WITH_EDITOR
 #define LOCTEXT_NAMESPACE "FPSRWeaponFragment"
@@ -295,6 +378,26 @@ EDataValidationResult UFPSRFragment_CritLifesteal::IsDataValid(FDataValidationCo
 		Context.AddError(FText::Format(
 			LOCTEXT("CritLifestealNoHealEffect", "'{0}' has HealRatio {1} but no HealEffect, so the crit heal silently does nothing at runtime. Assign the instant heal GE (GE_Card_LifestealHeal reuses the same SetByCaller.CardMagnitude contract)."),
 			FText::FromString(GetName()), FText::AsNumber(HealRatio)));
+		Result = EDataValidationResult::Invalid;
+	}
+	return Result;
+}
+
+EDataValidationResult UFPSRStatusApplyFragment::IsDataValid(FDataValidationContext& Context) const
+{
+	EDataValidationResult Result = Super::IsDataValid(Context);
+	if (!Status)
+	{
+		Context.AddError(FText::Format(
+			LOCTEXT("StatusApplyMissingStatus", "'{0}' has no Status assigned, so it silently grants nothing at runtime. Assign the UFPSRStatusEffectDataAsset this card should apply (STAT1 §5-5)."),
+			FText::FromString(GetName())));
+		Result = EDataValidationResult::Invalid;
+	}
+	if (MaxStacks != 1)
+	{
+		Context.AddError(FText::Format(
+			LOCTEXT("StatusApplyMaxStacksMustBeOne", "'{0}' has MaxStacks {1}, but a second copy of the SAME status on the SAME slot only refreshes its duration (STAT1 §5-1 EFPSRStatusRefresh::RefreshDuration) — it never stacks. Set MaxStacks to 1."),
+			FText::FromString(GetName()), FText::AsNumber(MaxStacks)));
 		Result = EDataValidationResult::Invalid;
 	}
 	return Result;

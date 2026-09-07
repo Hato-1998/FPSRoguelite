@@ -113,8 +113,22 @@ FPSRVitals::FResult UFPSREnemyHealthComponent::ApplyDamage(float DamageAmount, A
 
 	// Re-anchor the regen clock to THIS hit. The enemy has no card/GE layer to rebase against (§5-4-1 is a
 	// player-only concern) — ApplyDamage is simultaneously the only spender AND the only anchor-setter here.
+	// STAT1 §6-2 (G1r3 R3-3): Spec.bDotRegenAnchorPolicy — set true by the C2 DoT batch pass ONLY — backdates the
+	// TIME anchor instead of stamping "now"; the VALUE anchor is re-stamped to the current Shield EITHER WAY. Do not
+	// "fix" this by merely freezing/skipping LastDamageCombatTime while still moving ShieldAtLastDamage:
+	// ComputeRegeneratedShield is an ABSOLUTE formula (ShieldAtLastDamage + RegenPerSecond * elapsed), not an
+	// incremental one, so a frozen time anchor plus a repeatedly-lowered value anchor compounds every earlier tick's
+	// regen back in on the NEXT tick. Worked example that a "freeze time" policy fails (MaxShield 100, Regen 10/s,
+	// PartialDelay 3s, BrokenDelay 6s, a 5-dmg DoT tick every 0.5s starting from Shield 50 at t=0): t=3.5 -> 25,
+	// t=4.5 -> 40, t=5.5 -> 75, t=6.0 -> 100 (fully regenerated while still taking damage every tick, §10 unit test
+	// 12). Backdating the time anchor by exactly the delay the post-damage state demands instead reads as "impose no
+	// NEW delay, but don't grant free elapsed regen time either" — regen resumes incrementally from here, as if this
+	// hit had landed that many seconds ago rather than right now.
 	ShieldAtLastDamage = Shield;
-	LastDamageCombatTime = GetCombatClockNow(this);
+	const float Now = GetCombatClockNow(this);
+	LastDamageCombatTime = Spec.bDotRegenAnchorPolicy
+		? Now - (Shield <= 0.0f ? ShieldBrokenRegenDelaySeconds : ShieldRegenDelaySeconds)
+		: Now;
 
 	// Server-side health-change notification (before death) — drives cosmetic damage stages (e.g. door crack/break
 	// thresholds). Fired on the lethal hit too (NewHealth == 0), so the final stage runs ahead of OnDeath.

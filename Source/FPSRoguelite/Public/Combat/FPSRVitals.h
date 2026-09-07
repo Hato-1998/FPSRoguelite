@@ -20,6 +20,24 @@ struct FFPSRDamageSpec
 	 *  shields · 0 = cannot dent the shield at all (the whole hit overflows straight to health — "shield-ignoring"
 	 *  is data-expressible too). */
 	float ShieldDamageMultiplier = 1.0f;
+
+	/** STAT1 §6 도트 행 (G1r3 R3-8). Default false = current behavior (every damage path fires the lifesteal-trigger
+	 *  event below normally). The DoT batch pass (STAT1 C2) sets this true on every tick it routes through
+	 *  FPSRCombat::ApplyDamage — that event is the lifesteal passive's OWN ability-activation trigger
+	 *  (FPSRPassiveAbility.cpp's UFPSRPassiveAbility_Lifesteal, `GameplayEvent.Player.DealtDamage`), and a DoT ticks
+	 *  independently per infected enemy every DotTickIntervalSeconds (default 0.5s) — left ungated, 240 infected
+	 *  enemies would fire ~480 TryActivateAbility calls/second at ONE player's ASC for a tick that was never "the
+	 *  player pulled the trigger". */
+	bool bSuppressDealtDamageEvent = false;
+
+	/** STAT1 §6-2 (G1r3 R3-3). Default false = current behavior (UFPSREnemyHealthComponent::ApplyDamage re-anchors
+	 *  the delayed shield-regen clock to right now on every hit). true is for a DoT tick ONLY (STAT1 C2's batch
+	 *  pass): the VALUE anchor still re-stamps to the current (just-lowered) shield either way, but the TIME anchor
+	 *  is BACKDATED by exactly the regen delay that post-damage shield state demands, instead of stamped to "now" —
+	 *  "impose no NEW delay, but don't grant free elapsed regen time either". See that ApplyDamage's own comment for
+	 *  why merely freezing/ignoring the time anchor here would let a delayed-regen shield compound every earlier
+	 *  DoT tick's regen back in and reach full while still being hit every tick. */
+	bool bDotRegenAnchorPolicy = false;
 };
 
 /** Shared two-layer vitals rules (VIT1 — Shield/Health Two-Layer Vitals). Both damage receivers — the swarm's

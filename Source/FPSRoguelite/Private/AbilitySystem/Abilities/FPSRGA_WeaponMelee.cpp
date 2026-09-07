@@ -210,6 +210,9 @@ void UFPSRGA_WeaponMelee::ActivateAbility(
 					continue;
 				}
 				FPSRCombat::FDamageResult Result = FPSRCombat::ApplyDamage(HitActor, Resolved, Avatar, DamageSpec);
+				// STAT1 §5-5: status-apply fragments react to this landed hit here — right after ApplyDamage, on the
+				// RAW primary-hit Result (before any crit-rider bonus instance below folds in).
+				FPSRWeaponHooks::NotifyDamageApplied(FireCtx, HitActor, Result);
 				// CRIT1: the swing rolled ONE crit (bSwingCrit) but riders apply per TARGET the swing actually hit —
 				// a multi-enemy swing can trigger the bonus instance / lifesteal on each enemy it landed real damage
 				// on. Fold the second instance's kill/shield-break into Result BEFORE the aggregation below (OR table).

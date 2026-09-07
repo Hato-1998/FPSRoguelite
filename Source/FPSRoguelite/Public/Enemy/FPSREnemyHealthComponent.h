@@ -84,6 +84,14 @@ public:
 	/** Server/setup: set whether this owner counts as an enemy for combat credit (default true = swarm enemy). */
 	void SetCountsAsKill(bool bInCountsAsKill) { bCountsAsKill = bInCountsAsKill; }
 
+	/** STAT1 §6 저항 행: read-only accessor mirroring AFPSREnemyBase::GetVitalsProfile's shape — the resolved
+	 *  profile THIS COMPONENT already mitigates ApplyDamage against (below), so a caller resolving
+	 *  WeakResistScale/StrongResistScale off this can never disagree with the damage-mitigation coefficients the same
+	 *  hit used. Null = no profile authored yet (VIT1 §11-1) — callers must fall back to 1.0/1.0, never 0
+	 *  (ResolveDefense's own null rule, this component's ApplyDamage) — a 0 fallback would make every enemy without
+	 *  an authored profile completely status-immune. */
+	const UFPSRVitalsProfileDataAsset* GetVitalsProfile() const { return VitalsProfile; }
+
 	// --- STAT1 (B단계 — data/pure-function core; movement/attack/damage hooks, the batch pass, cards and boss Tick
 	//     are C단계): public API only (§7-7) — StatusBits/StatusServer/ResolvedStatus/bStatusDriverPresent below stay
 	//     private/protected, everything outside this component reaches status state through these 6 entry points. ---

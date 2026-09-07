@@ -237,11 +237,17 @@ namespace FPSRCombat
 			Result.DamageDealt = VitalsResult.TotalSpent();
 			Result.bShieldBroke = VitalsResult.bShieldBroke;
 			Result.bKilled = bCountsAsKill && (!bWasDeadBefore && HealthComp->IsDead());
+			// STAT1 §5-5 (G1r3 R3-4): copy the vitals result's own two components through — see FDamageResult's own
+			// comment for why DamageDealt alone cannot answer "did this reach HEALTH".
+			Result.ShieldSpent = VitalsResult.ShieldSpent;
+			Result.HealthSpent = VitalsResult.HealthSpent;
 
 			// GAS-native character behavior (lifesteal etc.): event carries the REAL damage dealt (corpse/overkill = 0).
 			// Gated on bWasEnemy too, so shooting a door (bCountsAsKill=false) can't feed lifesteal / heal-on-damage
 			// (no farming health off a high-HP destructible).
-			if (Result.bWasEnemy && Result.DamageDealt > 0.0f)
+			// STAT1 §6 도트 행 (G1r3 R3-8): Spec.bSuppressDealtDamageEvent lets the DoT batch pass opt OUT of this
+			// trigger — see FFPSRDamageSpec's own header comment for why (lifesteal ability-activation storm).
+			if (Result.bWasEnemy && Result.DamageDealt > 0.0f && !Spec.bSuppressDealtDamageEvent)
 			{
 				SendDealtDamageEvent(Instigator, Result.DamageDealt);
 			}
@@ -264,6 +270,10 @@ namespace FPSRCombat
 			// 🔴 The marker gate the filled DamageDealt above would otherwise re-open (see FDamageResult's own
 			// comment): every damage path keys its hit-marker on `DamageDealt > 0`, which used to be 0 here.
 			Result.bTargetIsPlayer = true;
+			// STAT1 §5-5 (G1r3 R3-4): same two fields as the enemy branch above. Harmless here — a player is never a
+			// status-apply receiver (§2 비목표) — kept filled for consistency rather than left at 0 on this one branch.
+			Result.ShieldSpent = VitalsResult.ShieldSpent;
+			Result.HealthSpent = VitalsResult.HealthSpent;
 			return Result;
 		}
 

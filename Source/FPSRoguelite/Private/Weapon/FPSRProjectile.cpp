@@ -466,6 +466,10 @@ bool AFPSRProjectile::TryDamageActor(AActor* Target, float WeakpointMultiplier, 
 		if (Resolved > 0.0f)
 		{
 			FPSRCombat::FDamageResult Result = FPSRCombat::ApplyDamage(Target, Resolved, Params.InstigatorActor, Params.DamageSpec);
+			// STAT1 §5-5: status-apply fragments react to this landed hit here — right after ApplyDamage, on the RAW
+			// primary-hit Result (before any crit-rider bonus instance below folds in). Rebuild a minimal context
+			// from spawn params (mirrors the NotifyKill call further down): the live firing ability ended at launch.
+			FPSRWeaponHooks::NotifyDamageApplied(MakeProjectileFireContext(Params, GetWorld()), Target, Result);
 			// CRIT1: a crit that landed real damage may trigger the bonus-instance / lifesteal riders. Fold the
 			// second instance's kill/shield-break into Result BEFORE anything below reads them, so a target the
 			// RIDER (not the direct hit) finishes off still counts as killed everywhere downstream.
