@@ -53,12 +53,14 @@ ENE — 플레이어 3P 캐릭터 · 삼면도 생성 프롬프트 v4  (2026-09-
 --------------------------------------------------------------------
   순서대로 4장을 올리고 아래 프롬프트를 붙인다. 프롬프트가 "1번=헤어·형태,
   2번=의상, 3번=비례, 4번=헤드기어"를 AI 에게 직접 알려 준다.
-  📁 이 폴더의 현황 (2026-09-08)
-     ✅ [3] 체형      = Ref3_Proportion_InklingCap.webp  ← 이미 있다(어제 4장 중 1장)
-     ❌ [1] 헤어·형태 = Ref1_Leiya.*     — 아직 없다. 사용자가 저장할 것
-     ❌ [2] 의상      = Ref2_Costume.*   — 아직 없다
-     ❌ [4] 헤드기어  = Ref4_Headgear.*  — 아직 없다
-     참고용 보조(어제 스플래툰 4장의 나머지) = SplatoonRef_1_OctolingBeanie.webp ·
+  📁 이 폴더에 4장 전부 있다 (2026-09-08 커밋 완료). 이 순서 그대로 올린다:
+     [1] 헤어·형태 = Ref1_Leiya_Hair_ShapeLanguage.webp
+     [2] 의상      = Ref2_Costume_CropJacketBodysuit.png
+     [3] 체형      = Ref3_Proportion_InklingCap.webp
+     [4] 헤드기어  = Ref4_Headgear_GogglesHeadphones.webp
+     🔴 올리는 순서가 곧 프롬프트의 "Reference 1/2/3/4" 번호다. 순서가 어긋나면
+        AI 가 역할을 뒤바꿔 적용한다.
+     참고용 보조(2026-09-07 스플래툰 4장의 나머지) = SplatoonRef_1_OctolingBeanie.webp ·
      SplatoonRef_3_OctolingPair.webp · SplatoonRef_4_InklingTurnaround.webp
      (사용자 2026-09-08 "기존 레퍼런스들은 참고해도 된다")
 
