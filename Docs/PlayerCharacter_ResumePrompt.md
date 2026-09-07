@@ -1,13 +1,14 @@
-# NEON-V 3인칭 캐릭터 — 스플래툰 체형 × 아케이드 복셀 삼면도 → Meshy (새 세션 실행 프롬프트)
+# 플레이어 3인칭 캐릭터 — 아케이드 복셀 삼면도 → Meshy (새 세션 실행 프롬프트)
 
-> 작성 2026-09-07(Sonnet, 문서 갱신 세션). **새 세션이 그대로 복붙해 착수**하는 실행 문서다.
-> **트랙 재정의**: 원래 Tripo 다시점 생성 트랙(구 파일명 `NeonV_Tripo_ResumePrompt.md`)이었으나, 3D화 도구가 **Meshy Image-to-3D**로 확정되고 체형·격자·피부·리본·복셀화 트랙 5건이 사용자 결정을 마치면서(ADR 0016 「사용자 결정 기록 — 2026-09-07」) 이 문서로 재정의됐다.
+> 작성 2026-09-07(Sonnet, 문서 갱신 세션) · **개정 2026-09-08(NEON-V 철회 반영, 파일명 변경)**. **새 세션이 그대로 복붙해 착수**하는 실행 문서다.
+> 🔴 **2026-09-08 NEON-V 철회(사용자 결정, 재논의 금지)** — 체형·헤어·의상·헤드기어를 레퍼런스 4장 조합으로 재설계했다. 전환 경위·판단 3건 = §4-0-c. 격자·캡슐 등 수치 인프라는 무변(§2).
+> **트랙 이력**: Tripo 다시점 생성(구 파일명 `NeonV_Tripo_ResumePrompt.md`) → 3D화 도구 **Meshy Image-to-3D** 확정 + 체형·격자·피부·리본·복셀화 트랙 5건 결정(ADR 0016 「사용자 결정 기록 — 2026-09-07」)으로 `NeonVCharacter_ResumePrompt.md` 재정의 → **2026-09-08 NEON-V 철회, 레퍼런스 4장 조합으로 재설계**하며 이 문서로 개명.
 > 이번 행의 산출물은 **삼면도 생성용 이미지AI 프롬프트까지**다(§4). Meshy 프롬프트 자체는 삼면도가 나온 뒤 **별도 세션**에서 토론한다(§8①).
-> 보드 = 「NEON-V 3인칭 캐릭터 — 삼면도 설계 프롬프트 → Meshy 3D화 (Tripo 트랙 재정의)」.
+> 보드 = 「NEON-V 3인칭 캐릭터 — 삼면도 설계 프롬프트 → Meshy 3D화 (Tripo 트랙 재정의)」 — 🔴 **행 이름에 아직 구 코드네임이 남아 있다.** 코드네임이 정해지기 전까지는 이 문서 제목·경로로 대조할 것(§8④).
 
 **복붙용 첫 지시문**
 ```
-Docs/NeonVCharacter_ResumePrompt.md 를 읽고 진행한다. main 에서 직접 작업(트렁크). 보드 클레임부터(§0).
+Docs/PlayerCharacter_ResumePrompt.md 를 읽고 진행한다. main 에서 직접 작업(트렁크). 보드 클레임부터(§0).
 이 문서 하나로 충족된다 — 부록 A~C 에 필요한 외부 규칙 전문이 들어 있으니 다른 문서를 열지 않고 진행해도 된다. 리포 접근이 가능하면 §0 라우팅으로 원문을 대조하면 더 좋다.
 §1 전제(스켈레탈 메시·캡슐 162cm 근거·함정 6종, 전문 = 부록 C)를 먼저 읽는다. §2 스펙 정본(높이·폭 표, 색 번역표)이 이 문서 전체의 진실원천이다.
 이번 행의 산출물 = §4 삼면도 이미지AI 프롬프트(한/영 2벌) 확정 → 사용자가 이미지 생성 → §6 판정 → §7 크롭까지.
@@ -17,7 +18,7 @@ Docs/NeonVCharacter_ResumePrompt.md 를 읽고 진행한다. main 에서 직접 
 ## §0 세션 시작 방법
 
 1. `Game.md` §0-1 라우팅 → `Docs/SSOT/ArtDirection.md §A`(색 대역) · `§B-3`(격자 계층, 3.75cm 행) · `§B-13`(피부 대역, 신설) · [ADR 0016](Architecture/0016-art-direction-retro-arcade-pixel.md)(D4·D7·I1~I8, 「사용자 결정 기록 — 2026-09-07」) · [ADR 0015](Architecture/0015-first-person-gun-only-hidden-arms-driver.md)(1P = 총만) · `Docs/MeshyDronePipeline_ResumePrompt.md`(같은 파이프라인의 선행 사례 — 프롬프트·크롭 절차의 형식 본보기, §2 4단계·§6 결과표 = 트랙 A/B′ 비교의 선행 답이 나올 자리, 이 문서 작성 시점 미기입). **이 항목들의 전문은 전부 부록 A(색)·부록 B(ADR 0016/0015/0012)·부록 C(함정)에 옮겨져 있다 — 리포 접근이 없어도 아래로 진행 가능하다.**
-2. **보드 클레임(§6-9)** — 행 「NEON-V 3인칭 캐릭터 — 삼면도 설계 프롬프트 → Meshy 3D화 (Tripo 트랙 재정의)」를 이어받는다(구 행 「NEON-V 3인칭 캐릭터 — Tripo 다시점 생성 → Blu 리그 통합 검토」의 재정의). 담당 갱신 후 재조회로 경합 확인.
+2. **보드 클레임(§6-9)** — 행 「NEON-V 3인칭 캐릭터 — 삼면도 설계 프롬프트 → Meshy 3D화 (Tripo 트랙 재정의)」를 이어받는다(구 행 「NEON-V 3인칭 캐릭터 — Tripo 다시점 생성 → Blu 리그 통합 검토」의 재정의 — 이 역시 구 코드네임이다). 담당 갱신 후 재조회로 경합 확인. **행 이름 자체를 코드네임 확정 후 갱신할지는 사용자 결정 대기(§8④)** — 지금은 내용(삼면도 설계 프롬프트)으로 식별한다.
 3. **에디터는 사용자가 켠다/닫는다.** 이미지 생성·Meshy 실행도 사용자 계정(§9). 이 세션은 프롬프트 저작·크롭·문서만 한다.
 4. `git status` 로 다른 세션의 미커밋 작업을 확인하고 **건드리지 말 것**. 커밋은 자기 파일만 명시 경로로.
 
@@ -25,7 +26,7 @@ Docs/NeonVCharacter_ResumePrompt.md 를 읽고 진행한다. main 에서 직접 
 
 - **3인칭 몸체 = Blu 스켈레톤(108본) 스켈레탈 메시.** 그 위에 얹힌 애니 = **슬라이드 4클립**(`slide_enter` / `slide_loop` / `slide_exit_crouch` / `slide_exit_stand`) · **벽 4자세**(`wall_hang` / `wall_slip` / `wall_climb` / `wall_topout`) · 로코모션(`Docs/Architecture/0002*`, 메모리 `blender-locomotion-anim-authoring`). **애니의 진실원천은 이 리포가 아니라 별도 Blender repo** — `C:\Users\koras\Desktop\작업\개발작업\블랜더\NeonV_locomotion.blend`(액션 8개의 원본). 액션 편집은 거기서만 한다 — `.blend` 밖(예: FBX/glTF 왕복 중)에서 이름·포즈를 고치면 조용히 갈라진다. Meshy 결과는 새 메시(+선택적 자체 리깅)라 **임포트만으로는 못 쓴다** — 스키닝·웨이트 전이가 반드시 필요하다(§8③).
 - **1P = 총만 표시**([ADR 0015](Architecture/0015-first-person-gun-only-hidden-arms-driver.md)) → 이 몸체는 **협동 팀원 시점(3P)** 과 로비/초상화에서만 보인다. 투자 규모를 여기에 맞춰 판단한다.
-- **아트 방향 = 확정.** 구 트랙(Tripo) 당시엔 미결이었지만, 2026-09-03 레트로 아케이드 픽셀로 전환 → [ADR 0016](Architecture/0016-art-direction-retro-arcade-pixel.md) 채택 → 2026-09-07 NEON-V 3P 캐릭터 결정 5건(체형·격자·피부·리본·트랙)까지 끝났다. 이 몸체의 룩 = **스플래툰 비례 실루엣 + 복셀 3.75cm 격자**(§2). 이제 이 트랙이 아트 방향을 선점하는 게 아니라 — **ADR 0016 이 정한 규칙을 따르는 쪽**이다.
+- **아트 방향 = 확정.** 구 트랙(Tripo) 당시엔 미결이었지만, 2026-09-03 레트로 아케이드 픽셀로 전환 → [ADR 0016](Architecture/0016-art-direction-retro-arcade-pixel.md) 채택 → 2026-09-07 NEON-V 3P 캐릭터 결정 5건(체형·격자·피부·리본·트랙) → **2026-09-08 NEON-V 철회, 레퍼런스 4장 조합으로 재설계**(§2-4·§4-0-c — 체형 비례·격자·리본 결정은 존치, 노출 결정만 무효화)까지 끝났다. 이 몸체의 룩 = **스플래툰 비례(등신·다리 길이) + [1] 동글동글한 형태 언어 + 복셀 3.75cm 격자**(§2). 이제 이 트랙이 아트 방향을 선점하는 게 아니라 — **ADR 0016 이 정한 규칙을 따르는 쪽**이다.
 
 🔴 **키 근거(캡슐 = 162cm, 무변) — 이 문서의 모든 cm 수치가 여기서 출발한다.**
 C++ `AFPSRCharacter` 는 `InitCapsuleSize(34.0f, 88.0f)`(=176cm, `Source/FPSRoguelite/Private/Hero/FPSRCharacter.cpp:66` 실측 확인)지만 **BP 가 오버라이드해 게임 실제 값은 162cm**다(적 진영에도 같은 패턴 전례가 있다 — `FPSREnemyMetricsSubsystem.cpp` 주석: C++ 은 `InitCapsuleSize(40, 90)`을 주장하지만 `BP_EnemyMeleeBase` 가 30/80 으로 덮어쓴다). 교차검증 = `Docs/Troubleshooting.md`(F1) "리그는 Blender에서 **키 184.0cm**인데 UE는 `CharacterMesh0`를 **0.8806배**로 넣어 162cm를 만든다" + 캡슐 **162 ÷ 0.8806 = 184cm**(리그 키와 일치). 레퍼런스 시트(`NeonV_CharacterSheet_source.png`)의 신장 표기 162cm 와도 이미 통일돼 있다.
@@ -39,7 +40,16 @@ C++ `AFPSRCharacter` 는 `InitCapsuleSize(34.0f, 88.0f)`(=176cm, `Source/FPSRogu
 5. IK 리타게터 무음 실패(`ik-retargeter-op-chain-mapping`)
 6. Blender 1cm ≠ UE 1cm, 환산 0.8806배
 
-⚠️ **체형 레퍼런스 이미지는 리포에 없다.** 스플래툰 인클링/옥토링 팬아트 4장은 2026-09-07 대화에서만 제시됐고 파일로 남지 않았다. **따라서 §2 의 수치표가 체형의 유일한 정본이다** — "스플래툰처럼"이라는 말에 기대지 말고 §2 의 칸·cm 를 그대로 따를 것. 참고로 그 레퍼런스들의 공통 특징 = 머리(머리카락 포함) 덩어리가 어깨보다 넓다 · 목이 거의 없다 · 어깨가 좁다 · 팔다리가 가늘고 길다 · 신발이 과장되게 크다 · 다리가 전체 키의 절반 이상.
+⚠️ **레퍼런스 이미지 4장은 리포에 없다.** 2026-09-08 사용자 결정으로 NEON-V 원안을 철회하고, 아래 4장의 역할 분담으로 재설계한다(전문 = `Docs/Handoff/PlayerChar_Arcade/ImagePrompt_v4.txt`, 경위 = §4-0-c). **저장 경로(예정) = `Docs/Handoff/PlayerChar_Arcade/Ref1_Leiya.png` · `Ref2_Costume.png` · `Ref3_Proportion.png` · `Ref4_Headgear.png`** — 4장 모두 아직 파일로 남지 않았다.
+
+| 레퍼런스 | 역할 |
+|---|---|
+| [1] LEIYA (흰 우주복 3D 치비 소녀) | 헤어 모양 + **형태 언어(동글동글)** |
+| [2] 크림 크롭재킷 + 검정 보디수트 (정면/후면) | 의상 |
+| [3] 스플래툰 인클링 (캡 + 백팩) | 체형 비례(등신·다리 길이·어깨 폭) |
+| [4] 보라머리 + 주황 고글 + 헤드폰 | 헤드기어 형태(🔴 색은 시안으로 치환, §2-4·§2-6) |
+
+**따라서 §2 의 수치표가 체형의 유일한 정본이다** — 그림 인상에 기대지 말고 §2 의 칸·cm 를 그대로 따를 것(단 §2-2·§2-3 의 팔다리 굵기·등신은 v3 판정(§4-0-b)의 교훈대로 **하한선**으로 읽는다 — 형태 언어 없이 숫자만 지시하면 "가늘고 곧은 관"이 재발한다). 구 스플래툰 팬아트 4장(인클링/옥토링, 2026-09-07 제시)은 폐기되지 않았다 — **참고는 가능하다**(사용자 2026-09-08 "기존 레퍼런스들은 참고해도 된다"). 그 공통 특징(머리 덩어리가 어깨보다 넓다 · 목이 거의 없다 · 어깨가 좁다 · 팔다리가 가늘고 길다 · 신발이 과장되게 크다 · 다리가 전체 키의 절반 이상)은 여전히 유효한 참고점이다.
 
 ## §2 스펙 정본
 
@@ -95,32 +105,47 @@ C++ `AFPSRCharacter` 는 `InitCapsuleSize(34.0f, 88.0f)`(=176cm, `Source/FPSRogu
 - 실루엣 최대 높이 = 44층 = 165cm(정수리 위 머리카락 1층). 캡슐 162 위로 3cm 나가지만 **콜리전은 캡슐이 지므로 무해**
 - **Blender 작업 값 = UE cm ÷ 0.8806** → 161.25 ÷ 0.8806 = **183.1cm**
 
-### §2-4 스플래툰 요소의 번역
+### §2-4 레퍼런스 4장의 번역 (2026-09-08 NEON-V 철회 — 재설계)
 
-| 스플래툰 | 채택 | 번역 |
+| 레퍼런스 | 채택 | 번역 |
 |---|---|---|
-| 촉수 머리카락(큰 헤드 매스) | ✅ 볼륨만 / ❌ 오징어 픽션 | NEON-V 보브 헤어를 헤드 매스 11×11×12칸으로 확대 + 뒤로 흐르는 **굵은 가닥 2~3개**(끝을 뭉툭하게, **최소 3칸 두께** — 가늘어지면 복셀에서 계단으로 부서진다). 모티프 = 오징어가 아니라 **뉴럴 링크 케이블 다발**(NEON-V 원안 "Neural Link" + ADR 0016 D6 다이브 픽션 정합) |
-| 과장된 신발 | ✅ 적극 채택 | 30cm(8칸). **아래쪽 실루엣 앵커**가 생겨 20m에서 팀원 발 위치가 바닥에 안 묻힌다 |
-| 좁은 어깨·가는 사지 | ✅ | §2-2 스펙표. 단 2칸 하한 사수 |
-| 짧은 목·큰 머리 | ✅ | 로비 근거리에서 바이저가 화면을 채운다 = 미소녀 채널 |
-| 잉크·캡·오징어 이빨 | ❌ | 픽션 불일치 |
+| [1] LEIYA 헤어 | ✅ | 턱선까지 오는 묵직한 일자컷 보브 + 일자 앞머리. 개별 가닥이 아니라 **하나의 둥근 덩어리**로 읽힌다. 색 = 짙은 남색~거의 검정 + 앞머리에 오프화이트 줄기 1개 |
+| [1] LEIYA 형태 언어(동글동글) | ✅ 전면 채택 | 팔다리는 원통이 아니라 **부풀었다 좁아진다**(소매→손목, 허벅지→무릎→종아리), 신발은 풍선처럼 아래로 퍼짐, 손은 벙어리장갑형, 관절은 각지지 않고 둥글다. §2-2 의 굵기·형태 수치는 이제 **하한선**(v3 판정 §4-0-b 교훈 — 형태 언어 없이 숫자만으로는 "가늘고 곧은 관"이 재발한다) |
+| [2] 크림 재킷 + 검정 보디수트 | ✅ | 크롭 재킷(오프화이트, 캐릭터 대역 상단 V 65~70) + 가슴 하네스 + **발목까지 덮는 어두운 보디수트**(맨다리 없음). 신발·색 배선은 §2-5·§2-6 |
+| [3] 스플래툰 인클링 비례만 | ✅ 비례만 / ❌ 의상·머리·모자·촉수·백팩 | 등신·어깨 폭·다리 길이·과장된 신발 크기의 **숫자만** 가져온다(§2-1~§2-3 무변). 부피감·형태는 [1]이 정한다(판단 ③) |
+| [4] 헤드기어 형태만 | ✅ 형태 / 🔴 색 전면 치환 | 눈을 덮는 투명 틴트 고글 + 오버이어 헤드폰 + 플러그 케이블의 **형태만**. 🔴 **원본 주황 틴트 → 시안/블루로 치환** — 주황은 `§A-3-4` 적 공격 텔레그래프 예약색(`#FF6B2C`)과 정면 충돌, ADR 0016 I1(복구 불가 등급) 위반. **협상 대상 아님** |
+| 잉크·촉수·캡·백팩(스플래툰 픽션) | ❌ | [3]에서는 비례만 오고 픽션은 오지 않는다 |
+| 무기·리본 | ❌ | §5 금지 목록 그대로 유지(2026-09-07 결정④ — 리본 → 등 백 모듈 발광 패널, 존치) |
+
+**판단 3건(메인 세션 기결, 재논의 금지 — `ImagePrompt_v4.txt`에 이미 반영됨)**
+
+| # | 판단 | 근거 |
+|---|---|---|
+| 1 🔴 | 헤드기어 색 = 주황 → 시안/블루 | `§A-3-4` 적 예약(`#FF6B2C`)과 정면 충돌. 발광 주황 바이저를 플레이어 얼굴에 달면 적 200~300 속에서 머리만 적으로 읽힌다. ADR 0016 I1 위반. 협상 대상 아님 |
+| 2 ✅ | 노출 문제 소멸 | [2]가 다리를 검정 보디수트로 발목까지 덮는다 → 2026-09-07 결정 「노출 유지 + 살색 저채도화」가 의상 교체만으로 무효화된다. 노출부 = 얼굴·손뿐. `§B-13`(피부 대역) 규칙 자체는 유효하나 위험 면적이 거의 0 |
+| 3 ⚠️ | 체형 충돌 분리 | [3]은 사지가 가늘고 [1]은 동글동글하다. 그대로 합치면 v2 가 실패한 "가늘고 곧은 관"이 재발한다 → **비례(등신·다리 길이·어깨 폭) = [3] / 부피감(둥글게 부푼 형태) = [1]** 로 분리. [1]은 헤어뿐 아니라 형태 언어의 기준으로도 쓴다 |
+
+📐 **의상 밝기 판단** — 크림색을 캐릭터 대역 상단(V 65~70)으로 누른다. 순백은 `§A-1` 절대규칙 1(0%·100% 금지) 위반이고, 어둡게 하면 어두운 무대에서 히어로가 안 뜬다. 밝은 상의 + 어두운 하의는 적(어두운 몸통 + 뜨거운 코어)과 실루엣이 정반대라 오히려 판독에 유리하다.
 
 ### §2-5 신발 색 주의
 
-🔴 `ArtDirection.md §A-3-2` 바닥 배선 4단계(비활성·먼 거리 `#1E5A66` / 기본 `#2A8A96` / 넓은 통로 `#39B8B0` / 정션·비아 `#5FE0D2`, 전문 = 부록 A-2)가 밝은 시안이다. 규칙 원문: **"배선은 바닥보다 확실히 밝되 플레이어·적보다는 어둡다."** 신발을 아군 시안으로 칠하면 **발이 배선에 묻힌다**(ADR 0016 검증 시나리오의 "아군 아웃라인이 배선과 안 섞이는가"가 이미 경고한 항목). → **신발 본체 = 어두운 대역, 액센트만 보라 `#8B6BFF` 얇게. 시안 대면적 금지.**
+🔴 `ArtDirection.md §A-3-2` 바닥 배선 4단계(비활성·먼 거리 `#1E5A66` / 기본 `#2A8A96` / 넓은 통로 `#39B8B0` / 정션·비아 `#5FE0D2`, 전문 = 부록 A-2)가 밝은 시안이다. 규칙 원문: **"배선은 바닥보다 확실히 밝되 플레이어·적보다는 어둡다."** 신발을 아군 시안으로 칠하면 **발이 배선에 묻힌다**(ADR 0016 검증 시나리오의 "아군 아웃라인이 배선과 안 섞이는가"가 이미 경고한 항목).
+**2026-09-08 재설계로 신발 본체가 오프화이트(§2-6, 캐릭터 대역 상단 V 65~70)로 바뀌면서 이 경고가 더 중요해졌다** — 오프화이트 자체는 배선보다 밝아 묻히지 않지만, [2] 의상의 시안 액센트가 신발까지 대면적으로 번지면 발밑 배선과 색이 겹쳐 실루엣 경계가 흐려진다. → **신발 본체 = 오프화이트(어두운 밑창), 시안은 트림·밑창 라인 등 얇은 선에만. 시안 대면적 금지 — 배선 위를 지날 때도 신발 덩어리(오프화이트)가 우선 판독돼야 한다.**
 
-### §2-6 색 번역표
+### §2-6 색 번역표 (2026-09-08 재설계)
 
 > 🔒 `§A-3-4`(적)·`§A-3-5`(아군) 봉인 조항 원문(전문 = 부록 A-2, ADR 0016 I1): *"A-3-4 와 A-3-5 는 가이드 p26 의 유일한 절대 규칙이다. 환경·프롭·UI 장식 어디에도 이 두 대역의 고채도·고명도 색을 쓰지 않는다. 4인 협동 + 스웜에서 이게 무너지면 복구할 방법이 없다."*
 
-| 레퍼런스(NEON-V) | 번역 | 근거 |
+| 레퍼런스(4장 조합) | 번역 | 근거 |
 |---|---|---|
-| `#00F0FF` 시안 발광 트림 | `#4FD8FF`(팀원 아웃라인) / `#8B6BFF`(자기 자신) | `§A-3-5` 예약색. **단일 요소로 묶어 런타임 팀 컬러 교체** |
-| `#00B0FF` 보조 블루 | `#2E9BFF` 저채도(아군 인디케이터·핑) | `§A-3-5` |
-| `#1A1F2E` / `#0A0E16` 의상 다크 | 그대로 | 이미 캐릭터 대역 안 |
-| `#FFFFFF` 순백 | **금지** → `#EAF6FF` | `§A-1` 절대규칙 1(0%·100% 금지) |
-| 살색 | V 45~55 / S 12~20 저채도 뉴트럴 | `§B-13`(신설, 전문 = 부록 A-3) |
-| 주황·빨강·마젠타 | **전면 금지** — 적 예약색 `#FF3B4E`(실루엣 림·피격) / `#FF6B2C`(공격 텔레그래프) / `#FF1E7A`(엘리트·보스) | `§A-3-4` 적 예약 대역 |
+| [2] 크림 재킷 오프화이트 | 캐릭터 대역 **상단 V 65~70**(순백 아님) | `§A-1` 절대규칙 1(0%·100% 금지) + 어두운 무대에서 히어로가 뜨려면 대역 상단이 필요 |
+| [2] 검정 보디수트 | 짙은 남색 `#1A1F2E` ~ 거의 검정 `#0A0E16` | 이미 캐릭터 대역 안. 밝은 상의 + 어두운 하의 = 적(어두운 몸통 + 뜨거운 코어)과 실루엣 반대라 판독 유리 |
+| [4] 고글·헤드폰 시안 액센트 | `#4FD8FF`(팀원 아웃라인) / `#8B6BFF`(자기 자신) | `§A-3-5` 예약색. **단일 요소로 묶어 런타임 팀 컬러 교체** |
+| 🔴 [4] 헤드기어 고글 틴트(원본 = 주황) | **전면 치환 → 시안/블루**(위 행과 동일 색) | `§A-3-4` 적 예약 대역(`#FF6B2C` 공격 텔레그래프)과 정면 충돌. ADR 0016 I1(복구 불가 등급) 위반 — 협상 대상 아님 |
+| 보조 블루 | `#2E9BFF` 저채도(아군 인디케이터·핑) | `§A-3-5` |
+| `#FFFFFF` 순백 | **금지** → `#EAF6FF`(또는 오프화이트 V 65~70) | `§A-1` 절대규칙 1(0%·100% 금지) |
+| 살색(얼굴·손) | V 45~55 / S 12~20 저채도 뉴트럴 | `§B-13`(전문 = 부록 A-3). **노출부가 얼굴·손뿐이라 위험 면적이 거의 0**(의상이 다리를 발목까지 덮는다 — 판단②, §2-4) |
+| 주황·빨강·마젠타·핑크·호박·노랑 | **전면 금지** — 적 예약색 `#FF3B4E`(실루엣 림·피격) / `#FF6B2C`(공격 텔레그래프) / `#FF1E7A`(엘리트·보스) | `§A-3-4` 적 예약 대역 |
 
 ## §3 복셀화 트랙 (열린 결정)
 
@@ -161,12 +186,12 @@ C++ `AFPSRCharacter` 는 `InitCapsuleSize(34.0f, 88.0f)`(=176cm, `Source/FPSRogu
 두 언어로 준비한다. 이미지 생성 AI 는 사용자 계정에서 실행(§9) — 아래 프롬프트를 그대로 붙여 넣는다.
 
 > 🔴 **이 문서를 통째로 이미지 AI 에 넣지 말 것.** 이 문서는 *다음 작업 AI 세션*용이다(보드·git·Blender·스켈레톤 함정·ADR 불변식). 이미지 AI 에는 **아래 인용 블록 하나만** 넣는다 — 한국어판·영어판 중 하나, 둘 다 넣지 않는다.
-> 복사 전용 파일 = **`Docs/Handoff/NeonV_Arcade/ImagePrompt_v3.txt`**(최신. v1·v2 는 판정 이력으로 남긴다).
+> 복사 전용 파일 = **`Docs/Handoff/PlayerChar_Arcade/ImagePrompt_v4.txt`**(최신 — 2026-09-08 NEON-V 철회 이후 레퍼런스 4장 조합판, §4-0-c. v1·v2·v3 는 판정 이력으로 남긴다).
 > 도구 = **Gemini(Nano Banana 계열)**. **영어판 권장**(이미지 AI 는 영어 학습량이 압도적이라 디테일을 더 잘 지킨다).
 >
-> 🔑 **텍스트만 넣지 말고 레퍼런스를 첨부한다.** "스플래툰답게"는 말로 설명하는 것보다 **그림을 보여주는 쪽**이 압도적으로 잘 먹고, 제미나이는 레퍼런스 조건화가 강점이다. 첨부 = ① 스플래툰 팬아트(비례·선 두께 기준) ② 직전 결과물(디자인 계승). v2 프롬프트 첫 문단이 "앞쪽 = 스타일 레퍼런스, 마지막 = 디자인 레퍼런스"를 AI 에게 알려 준다.
+> 🔑 **텍스트만 넣지 말고 레퍼런스 4장을 첨부한다(v4 이후 필수 — 이전 v1~v3 의 "스타일 1장 + 직전 결과 1장" 방식에서 확대됐다).** 순서대로 [1] LEIYA(헤어·형태 언어) [2] 크림 재킷 의상 [3] 스플래툰 비례 [4] 헤드기어 형태를 올리고 프롬프트를 붙인다 — 프롬프트 자체가 "1번=헤어·형태, 2번=의상, 3번=비례, 4번=헤드기어"를 AI 에게 알려 준다(`ImagePrompt_v4.txt` 첨부 안내 절). ⚠️ 4장 모두 아직 리포에 없다 — §1 저장 경로 참고.
 >
-> **다른 모델 검토(2026-09-08)** — 스타일만 보면 Midjourney `--niji 6`·애니 특화 SDXL(Illustrious/Pony + 스플래툰 LoRA)이 "스플래툰 느낌"을 더 잘 낸다. 그러나 이 작업에서 깨지면 안 되는 건 전부 **지시 준수** 쪽이다(세 뷰 일치 · 주황·빨강·마젠타 배제 · 머리 폭 > 어깨 폭 · 디자인 계승). Niji 는 스타일은 이기지만 앞의 둘을 못 지키고, **그 둘이 깨지면 다음 단계 Meshy 가 통째로 망가진다** — 스타일은 재시도로 만회되지만 삼면도 불일치는 3D 를 못 쓰게 만든다. **차선책**: 2~3회 시도해도 스타일이 안 나오면 Niji 로 **정면 한 장만** 뽑아 스타일을 확정하고, 그 그림을 제미나이에 스타일 레퍼런스로 물려 삼면도를 만드는 2단계로 간다.
+> **다른 모델 검토(2026-09-08)** — 스타일만 보면 Midjourney `--niji 6`·애니 특화 SDXL(Illustrious/Pony + 스플래툰 LoRA)이 "스플래툰 느낌"을 더 잘 낸다. 그러나 이 작업에서 깨지면 안 되는 건 전부 **지시 준수** 쪽이다(세 뷰 일치 · 주황·빨강·마젠타 배제 · 머리 폭 > 어깨 폭 · 디자인 계승). Niji 는 스타일은 이기지만 앞의 둘을 못 지키고, **그 둘이 깨지면 다음 단계 Meshy 가 통째로 망가진다** — 스타일은 재시도로 만회되지만 삼면도 불일치는 3D 를 못 쓰게 만든다. **차선책**: 2~3회 시도해도 스타일이 안 나오면 Niji 로 **정면 한 장만** 뽑아 스타일을 확정하고, 그 그림을 제미나이에 스타일 레퍼런스로 물려 삼면도를 만드는 2단계로 간다. (2026-09-08 NEON-V 철회 이후 목표 스타일은 "스플래툰 느낌"이 아니라 **[1] LEIYA 식 동글동글한 비닐 토이 조형**이다 — 전용 LoRA를 찾는다면 스플래툰이 아니라 이쪽을 기준으로 판단할 것.)
 
 ### §4-0 v1 생성 결과 판정 (2026-09-08, 사용자 1차 생성물)
 
@@ -197,6 +222,28 @@ C++ `AFPSRCharacter` 는 `InitCapsuleSize(34.0f, 88.0f)`(=176cm, `Source/FPSRogu
 📐 **복셀 관점 이득** — 더 동글동글해지면 사지가 굵어지므로 3.75cm 격자의 **맨팔 2칸 하한이 훨씬 여유롭게 충족된다.** 데포르메가 강해질수록 복셀화가 쉬워진다.
 🔴 **다만 최종안이 확정되면 §2-2·§2-3 의 팔·다리 굵기와 등신 수치를 실측값으로 갱신해야 한다** — 현 스펙(5.375등신 · 맨팔 2칸 · 다리 53.5%)은 v3 이후의 그림과 어긋날 가능성이 크다. 갱신 전까지 §2 는 **하한선**으로만 읽을 것.
 
+### §4-0-c v3 이후 전환 기록 — NEON-V 철회 (2026-09-08)
+
+**v3 는 사용자가 실행하기 전에 설계가 전환됐다 — 생성 결과 없음.** §4-0-b 가 처방한 v3(SHAPE LANGUAGE 블록 신설·다리 짧고 굵게·손 벙어리장갑 강화·피부 재교정)는 `ImagePrompt_v3.txt`로 작성만 되고 이미지 AI 에 넣어 보기 전에, 사용자가 레퍼런스 자체를 바꾸는 결정을 내렸다.
+
+**전환 사유(사용자 지시 원문, 2026-09-08)**:
+> *"1번 레퍼런스의 단발 모양에 2번 레퍼런스의 의상, 체형은 3번 레퍼런스로, 헤드기어는 4번 레퍼런스. **NEON-V 철회하고** 이 레퍼런스 기반으로 다시 작업해봐. 기존 레퍼런스들은 참고해도 된다."*
+
+**새 레퍼런스 4장 역할표**(§1·§2-4 본문과 동일, 여기 다시 인용):
+
+| 레퍼런스 | 역할 |
+|---|---|
+| [1] LEIYA (흰 우주복 3D 치비 소녀) | 헤어 모양 + **형태 언어(동글동글)** |
+| [2] 크림 크롭재킷 + 검정 보디수트 (정면/후면) | 의상 |
+| [3] 스플래툰 인클링 (캡 + 백팩) | 체형 비례 |
+| [4] 보라머리 + 주황 고글 + 헤드폰 | 헤드기어 형태 |
+
+**판단 3건** — ① 🔴 헤드기어 주황 → 시안/블루 치환(적 예약 대역 `#FF6B2C` 충돌, ADR 0016 I1, 협상 대상 아님) ② ✅ 노출 문제 소멸([2]가 다리를 보디수트로 발목까지 덮어 2026-09-07 노출 결정이 무효화, `§B-13` 규칙은 존치·위험 면적만 축소) ③ ⚠️ 체형 충돌 분리(비례 = [3], 부피감 = [1] — 상세 = §2-4).
+
+🔴 **미해결 — 코드네임.** NEON-V 를 철회했으므로 파일명·보드 행·에셋 이름에 쓸 새 이름이 필요하다. 이미지 생성은 이름 없이 진행 가능하므로 **차단 항목은 아니다** — 사용자 결정 대기(§8④).
+
+→ **v4** = `ImagePrompt_v4.txt`(§4 포인터). v1~v3 의 판정(등신·머리 폭·세 뷰 일치·형태 언어)은 전부 유효한 교훈으로 v4 에 승계됐다 — 레퍼런스만 바뀌었을 뿐 실패를 되짚는 방식은 그대로다.
+
 > ⚠️ **스플래툰의 고채도 팝한 색은 가져오지 않는다.** 아군 캐릭터는 캐릭터 대역(V 25~70 / S 30~60, 부록 A-1)에 묶여 있고 풀면 적 스웜 판독이 깨진다(I1). 가져오는 것은 **형태·선·셰이딩**뿐이다.
 >
 > ⚠️ **이미지 AI 는 숫자 비례를 지키지 않는다.** "5.375등신"·"53%" 같은 수치는 걸어 두되 기대하지 말고,
@@ -204,20 +251,86 @@ C++ `AFPSRCharacter` 는 `InitCapsuleSize(34.0f, 88.0f)`(=176cm, `Source/FPSRogu
 > 수치 준수 여부는 그림에서 못 읽으므로 **검수는 §6 체크리스트로** 한다.
 
 **한국어**
-> 게임 캐릭터 디자인 시트, **정면·측면·후면 3뷰**를 한 장에 나란히, 같은 배율과 같은 높이 정렬(세 뷰 모두 정수리와 발바닥이 같은 수평선), 균일한 회색 단색 배경, 그림자 없음, 글자·치수선·화살표 없음.
-> 포즈: A포즈 — 양팔을 몸통에서 약 45도로 자연스럽게 벌리고 손가락은 편 채(주먹 아님), 다리는 어깨너비로 살짝 벌린다. 무기를 들지 않은 빈손. 정면은 무표정 또는 살짝 결연한 표정.
-> 대상: 사이버펑크 그리드 스트라이커 캐릭터. **옆으로 볼륨 있게 부푼** 짧은 단발 보브 헤어 — 길이는 어깨에 안 닿지만 **폭은 얼굴보다 눈에 띄게 넓다** — 에 뒤로 흐르는 두껍고 뭉툭한 머리카락 가닥 2~3줄(가는 잔머리 없이 케이블 다발처럼 굵게), 눈을 덮는 랩어라운드 바이저(각진 렌즈, 헤드셋 밴드). 크롭 재킷(배꼽이 드러나는 길이, 카라를 세운 형태)과 그 아래 스트랩형 가슴 보호대, 하이웨이스트 핫팬츠(파우치 달린 택티컬 벨트), 허벅지에 스트랩형 다리 기어, 발목까지 오는 과장되게 큰 플랫폼 컴뱃 부츠.
-> 비례(정확히): 전체 5.375등신 — 머리(머리카락 포함)가 크고, **머리 폭이 어깨 폭보다 넓다**(가장 중요한 규칙). 어깨는 좁게, 팔다리는 가늘되 완전한 막대는 아니게(원통형 두께감 유지). 다리(허벅지+종아리+부츠)가 전체 키의 약 53%.
-> 색: 의상은 짙은 남색·검정. 재킷 솔기·벨트·부츠·다리 기어를 따라 흐르는 발광 트림 라인은 밝은 하늘색 시안 한 가지로 통일(다른 요소와 분리되는 단일 색 — 나중에 교체됨). 허리 뒤로 흐르던 리본은 완전히 제거하고 대신 등에 사각형 발광 패널(파워 유닛 모듈)을 넣는다. 보조 색은 살짝 어두운 블루. 흰색 대신 아주 옅은 오프화이트. 피부는 채도를 크게 낮춘 창백하고 중립적인 톤(붉은기 없이). **주황·빨강·마젠타·핑크는 화면에 한 픽셀도 넣지 않는다.**
-> 스타일과 금지: 매끈한 셀 셰이딩 애니메 스타일(각진 복셀이나 픽셀 형태 아님), 평면 채색 + 최소한의 음영. 무기(총·검·수류탄) 들지 않기, 흐르는 리본 없음, 촉수·오징어·잉크·모자 모티프 없음, 순백·순흑 없음, 배경 소품 없음.
+> 레퍼런스 이미지 4장을 첨부한다. 각 이미지는 지정된 용도로만 쓰고 나머지는 전부 무시하라.
+> - 1번(흰 우주복을 입은 둥글둥글한 3D 치비 소녀): 헤어스타일과, 무엇보다 둥근 형태 언어를 가져온다. 우주복·색·얼굴은 가져오지 마라.
+> - 2번(크림색 크롭 재킷에 검정 보디수트를 입은 소녀): 의상을 가져온다. 비례·머리·얼굴은 가져오지 마라.
+> - 3번(모자를 쓰고 백팩을 멘 캐릭터): 신체 비례만 가져온다 — 머리 대 몸 비율, 어깨 폭, 다리 길이, 과장된 신발. 의상·머리·모자·촉수·잉크 요소는 가져오지 마라.
+> - 4번(틴트 고글과 헤드폰을 쓴 캐릭터): 헤드기어의 형태만 가져온다 — 눈을 덮는 큰 투명 틴트 고글과, 플러그 케이블이 달린 오버이어 헤드폰. 머리·색·의상은 가져오지 마라.
+>
+> 가장 중요한 지시 — 형태 언어, 1번에서 가져온다. 직전 시도들은 팔다리가 가늘고 곧은 관이라 실패했다:
+> - 실루엣은 둥글고 부푼 덩어리들로 이루어진다. 윤곽선에 직선이 거의 없다 — 모든 외곽이 부드러운 볼록 곡선이고, 캐릭터 전체에 공기가 살짝 들어간 것처럼 보인다.
+> - 팔다리는 원통이 아니다. 부풀었다 좁아진다 — 소매는 위팔에서 부풀고 손목에서 급히 좁아지며, 허벅지는 통통하다가 무릎에서 가늘어지고, 종아리는 신발 위에서 다시 부푼다.
+> - 신발은 아래로 풍선처럼 퍼진다. 밑창이 발목보다 훨씬 넓고 장난감 운동화처럼 밖으로 벌어진다. 다리에 비해 일부러 너무 무겁고 커 보여야 한다.
+> - 손은 둥글고 벙어리장갑 같다 — 두툼하고 통통하며 손가락이 거의 갈라지지 않는다. 가늘고 사실적인 손가락을 그리지 마라.
+> - 어깨·팔꿈치·무릎은 부드럽게 둥근 관절이며 절대 각지지 않는다.
+> - 전체 인상: 비닐 디자이너 토이. 위에 큰 둥근 덩어리(머리와 헤드기어), 아래에 큰 둥근 덩어리(신발), 그 사이에 아담한 몸통.
+> - 피할 것: 가늘고 곧은 관 모양 팔다리, 날카롭고 각진 장갑판, 사실적인 인체 해부학, 패션 일러스트의 우아함.
+>
+> 비례, 3번에서 가져온다:
+> - 머리카락을 포함한 머리가 전체 키의 약 5분의 1이다. 머리가 크다.
+> - 머리카락을 포함한 머리 덩어리의 폭이 어깨 폭보다 확실히 넓다.
+> - 목은 거의 보이지 않는다. 머리가 어깨 위에 바로 얹혀 있다.
+> - 어깨는 좁고 몸통은 짧고 아담하다.
+> - 다리는 몸통에 비해 길지만, 둥글고 통통하며 절대 가는 막대가 아니다 — 3번의 길이에 1번의 부피를 준다.
+>
+> 헤어, 1번에서 가져온다: 턱선까지 오는 묵직하고 윤기 있는 일자컷 보브에, 이마를 가로질러 일자로 자른 앞머리. 개별 머리카락이 아니라 하나의 둥근 덩어리로 읽힌다 — 두껍고 매끄러우며 가는 잔머리가 없다. 색은 아주 어둡고 채도가 낮은 남색으로 거의 검정에 가깝고, 앞머리에 옅은 오프화이트 줄기가 하나 지나간다. 한쪽에 각진 하늘색 기하학 헤어핀 몇 개.
+>
+> 헤드기어, 형태는 4번에서 가져오되 색은 바꾼다: 눈을 덮는 큰 투명 틴트 고글(둥근 렌즈와 눈에 보이는 프레임), 그리고 짧은 플러그 케이블이 늘어진 두툼한 오버이어 헤드폰. 고글 틴트는 시안 또는 옅은 파랑이며, 절대 주황·호박색·노랑이 아니다. 헤드폰 몸체는 차가운 옅은 회색이고 순백이 아니다.
+>
+> 의상, 2번에서 가져온다: 차가운 기가 도는 오프화이트 크롭 재킷 — 짧고 케이프처럼 퍼지며, 넓은 카라와 손목에서 좁아지는 풍성한 긴 소매. 오프화이트는 살짝 회색이 섞인 차분한 크림색이고, 나머지 부분보다 확실히 밝지만 절대 순백이 아니다. 그 아래 몸통을 가로지르는 스트랩과 작은 원형 엠블럼이 달린 가슴 하네스. 재킷 아래로는 거의 검정에 가까운 어두운 보디수트가 몸통·엉덩이·양다리를 발목까지 완전히 덮는다 — 다리에 맨살이 없다. 허벅지 바깥쪽을 따라 얇은 발광 액센트 라인. 같은 오프화이트에 어두운 밑창의 크고 두툼한 운동화.
+>
+> 색: 팔레트는 오프화이트·짙은 남색·거의 검정에, 밝은 하늘색 시안 액센트 하나. 발광하는 모든 요소 — 고글 틴트, 허벅지 액센트 라인, 신발 트림, 등에 붙은 작은 사각 발광 패널 — 는 전부 그 같은 시안 하나를 쓰고 세 뷰에서 동일하다. 피부는 채도가 낮은 창백한 톤이되 회색도 흰색도 아니다 — 부드럽고 살짝 차가운 옅은 베이지로 생기가 조금은 남아 있어야 한다.
+>
+> 배치: 게임 캐릭터 디자인 시트 — 정면·측면·후면 3뷰를 한 장에 나란히, 같은 배율과 같은 높이 정렬(세 뷰 모두 정수리와 발바닥이 같은 수평선), 균일한 회색 단색 배경, 바닥 그림자 없음, 글자·치수선·화살표 없음.
+>
+> 가장 중요한 규칙 — 세 뷰는 완전히 같은 캐릭터여야 한다. 머리 모양, 고글과 헤드폰, 하네스 스트랩과 엠블럼, 발광 액센트 라인의 위치, 신발까지 세 뷰에서 똑같이 나와야 한다. 한 뷰에만 있고 다른 뷰엔 없는 요소를 만들지 말 것.
+>
+> 포즈: A포즈 — 양팔을 몸통에서 약 45도로 자연스럽게 벌리고 손가락은 편 채(주먹 아님), 다리는 어깨너비로 살짝 벌린다. 무기를 들지 않은 빈손.
+>
+> 스타일: 모든 형태 둘레에 굵고 일정한 어두운 외곽선, 셀 애니메이션된 닌텐도 캐릭터처럼. 경계가 딱 떨어지는 2톤 셀 셰이딩. 부드러운 그라데이션 금지, 에어브러시 렌더링 금지, 사실적인 피부 음영 금지. 넓적한 얼굴에 짧은 턱. 평면 채색, 디테일 최소.
+>
+> 금지: 주황·빨강·마젠타·핑크·호박색·노랑은 화면에 한 픽셀도 넣지 않는다. 무기 들지 않기. 흐르는 리본이나 스카프 없음. 촉수·오징어·잉크·모자·백팩 없음. 맨다리 없음. 순백·순흑 없음. 배경 소품 없음. 각진 복셀이나 픽셀 아트가 아니다.
 
 **영어**
-> Game character design sheet: **three views — front, side, and back** — side by side on one canvas, same scale, aligned to the same height (top of head and sole of feet on the same horizontal line in all three), flat neutral-gray background, no shadows, no text, no dimension lines or arrows.
-> Pose: A-pose — both arms held out from the torso at roughly 45 degrees, fingers open and relaxed (not fists), legs slightly apart at shoulder width. Empty hands, no weapon held. Neutral or mildly determined front-facing expression.
-> Subject: a cyberpunk "grid striker" character. A short bob haircut **with strong lateral volume** — it does not reach the shoulders in length, but it is **noticeably wider than the face** — with 2-3 thick, blunt-tipped strands of hair flowing backward (no thin wispy strands — thick like a bundle of cables), a wraparound visor covering the eyes (angular lenses, headset band). A cropped tactical jacket (short enough to bare the midriff, popped collar) over a strapped chest-armor piece, high-waisted hot pants with a pouched tactical belt, strapped leg gear on the bare thighs, and exaggeratedly large platform combat boots reaching the ankle.
-> Proportions (exact): overall body is 5.375 heads tall — the head (hair included) is large, and **the head's width is wider than the shoulders** (the single most important rule). Shoulders are narrow, limbs are slim but not stick-thin (keep visible cylindrical thickness). Legs (thighs + calves + boots) make up about 53% of total height.
-> Colors: clothing stays dark navy/near-black. All glowing trim lines along the jacket seams, belt, boots, and leg gear are unified into one bright sky-cyan accent color (a single, cleanly separable color — it will be recolored later). The old flowing ribbon at the back of the waist is completely removed; replace it with a rectangular glowing panel on the back (a "power unit" module). Secondary accents are a slightly darker muted blue. Any white is a very pale, faintly cool off-white, never pure white. Skin is a strongly desaturated, neutral pale tone (no rosy warmth). **No orange, red, magenta, or pink anywhere in the image.**
-> Style and exclusions: smooth cel-shaded anime style (not blocky voxels or pixel art), flat coloring with minimal shading. No weapon in hand (gun/blade/grenade), no flowing ribbon, no tentacle/squid/ink/cap motifs, no pure white/pure black, no background props.
+> I am attaching four reference images. Use each one for a specific purpose only, and ignore everything else in it:
+> - Reference 1 (the rounded 3D chibi girl in a white spacesuit): use her HAIRSTYLE and, most importantly, her ROUNDED SHAPE LANGUAGE. Do not copy her spacesuit, her colors, or her face.
+> - Reference 2 (the girl in a cream cropped jacket over a black bodysuit): use her OUTFIT. Do not copy her proportions, her hair, or her face.
+> - Reference 3 (the character with a cap and backpack): use her BODY PROPORTIONS only — head-to-body ratio, shoulder width, leg length, oversized shoes. Do not copy her outfit, hair, cap, tentacles, or any squid or ink elements.
+> - Reference 4 (the character with tinted goggles and headphones): use only the SHAPE of her headgear — the large transparent tinted goggles over the eyes and the over-ear headphones with visible plug cables. Do not copy her hair, her colors, or her outfit.
+>
+> THE MOST IMPORTANT INSTRUCTION — SHAPE LANGUAGE, taken from Reference 1. Previous attempts failed because the limbs were thin straight tubes:
+> - The silhouette is built from rounded, inflated masses. There are almost NO straight lines in the outline — every contour is a soft convex curve, as if the character were slightly inflated with air.
+> - Limbs are not tubes. They swell and taper: the sleeve puffs out at the upper arm and narrows sharply at the cuff; the thigh is full and rounds into a narrower knee; the calf swells again above the shoe.
+> - The shoes BALLOON outward. The sole is far wider than the ankle and flares out like an inflated toy sneaker. They should look deliberately too heavy and too big for the legs.
+> - Hands are rounded and mitten-like — chunky, puffy, fingers barely separated. Do NOT draw slim realistic fingers.
+> - Shoulders, elbows and knees are soft rounded joints, never angular.
+> - Overall read: a vinyl designer toy. A big rounded mass on top (the hair and headgear), a big rounded mass at the bottom (the shoes), and a compact torso between them.
+> - Avoid: thin straight tubular limbs, sharp angular armor plates, realistic human anatomy, fashion-illustration elegance.
+>
+> Proportions, taken from Reference 3:
+> - The head INCLUDING the hair is about one fifth of the total height. The head is BIG.
+> - The head mass including hair is clearly WIDER than the shoulders.
+> - The neck is almost invisible; the head sits nearly directly on the shoulders.
+> - Shoulders are narrow, the torso is short and compact.
+> - The legs are long relative to the torso, but they are ROUNDED AND FULL, never thin sticks — give them the volume of Reference 1 at the length of Reference 3.
+>
+> Hair, taken from Reference 1: a heavy, glossy, blunt-cut bob that reaches the jawline, with straight blunt bangs cut across the forehead. It reads as one solid rounded mass, not as individual strands — thick and smooth, with no thin wispy hairs. Color is a very dark desaturated navy, almost black, with a single pale off-white streak running through the bangs. A few small angular light-blue geometric hair clips on one side.
+>
+> Headgear, shape taken from Reference 4 but recolored: large transparent tinted goggles covering the eyes, with rounded lenses and a visible frame, plus chunky over-ear headphones with short plug cables hanging from them. THE GOGGLE TINT IS CYAN OR PALE BLUE, never orange, never amber, never yellow. The headphone shells are pale cool gray, not pure white.
+>
+> Outfit, taken from Reference 2: a cropped jacket in a cool-leaning off-white — short and cape-like, with a wide collar and full puffed long sleeves that narrow at the cuffs. The off-white is a muted, slightly gray cream, clearly brighter than the rest of the figure but never pure white. Under it, a chest harness with a strap running diagonally across the torso and a small circular emblem. Below the jacket, a dark near-black bodysuit that covers the torso, hips and both legs completely down to the ankles — no bare skin on the legs. Thin glowing accent lines run along the outer thighs. Chunky oversized sneakers in the same off-white with dark soles.
+>
+> Colors: the palette is off-white, dark navy and near-black, with a single bright sky-cyan accent. All glowing elements — the goggle tint, the thigh accent lines, the trim on the shoes, and a small rectangular glowing panel on the back — use that one same cyan, identical in all three views. Skin is a low-saturation pale tone but NOT gray and NOT white — a soft, faintly cool light beige with a little life in it.
+>
+> Layout: game character design sheet — three views, front, side, and back, side by side on one canvas, same scale, aligned to the same height (top of head and sole of feet on the same horizontal line in all three), flat neutral-gray background, no ground shadows, no text, no dimension lines or arrows.
+>
+> CRITICAL RULE — the three views must show the EXACT SAME character. Every element must appear identically in all three: the same hair shape, the same goggles and headphones, the same harness strap and emblem, the same glowing accent lines in the same places, the same shoes. Do not add anything in one view that is missing in another.
+>
+> Pose: A-pose — both arms held out from the torso at roughly 45 degrees, fingers open and relaxed (not fists), legs slightly apart at shoulder width. Empty hands, no weapon held.
+>
+> Style: thick, uniform dark outlines around every shape, like a cel-animated Nintendo character. Hard two-tone cel shading with crisp shadow edges. NO soft gradients, NO airbrushed rendering, NO realistic skin shading. Wide face with a short chin. Flat color fills with minimal detail.
+>
+> Exclusions: no orange, no red, no magenta, no pink, no amber, no yellow anywhere in the image. No weapon in hand. No flowing ribbon or scarf. No tentacle, squid, ink, cap, or backpack. No bare legs. No pure white and no pure black. No background props. Not blocky voxels and not pixel art.
 
 칸 수 주석(문서 참고용 — 프롬프트 문장에는 넣지 않는다, §2 발췌): 헤드 매스 11×11×12칸(41.25×41.25×45cm) vs 어깨 8칸(30cm) · 다리 총 23층(86.25cm) = 53.5% · 등신 43÷8 = 5.375 · 맨팔 2칸(7.5cm) 하한.
 
@@ -231,42 +344,62 @@ C++ `AFPSRCharacter` 는 `InitCapsuleSize(34.0f, 88.0f)`(=176cm, `Source/FPSRogu
 - 사진 질감·노이즈 텍스처 — `§A-5` · ADR 0016 I7(텍스처 없음, 평면 채색만).
 - 배경 소품·글자·치수선·화살표.
 
-## §6 판정 체크리스트
+## §6 판정 체크리스트 (v4, 2026-09-08 — 색 4항목이 최우선)
 
-- [ ] 3뷰(정면·측면·후면) 배율·높이 일치
-- [ ] 🔴 **세 뷰의 디자인이 같은 캐릭터인가** — 한 장 3뷰의 최대 실패 모드다. 이미지 AI 는 후면 뷰에서 요소를 조용히 바꾼다(등 백 모듈이 사라짐 · 부츠 색·형태가 달라짐 · 머리카락 가닥 수가 바뀜 · 벨트 파우치 위치 이동). **Meshy multi-view 는 세 장이 같은 캐릭터라고 가정**하므로 여기가 어긋나면 3D 가 뭉개진다. 부위별로 세 뷰를 하나씩 대조할 것
+🔴 **색(가장 먼저 본다 — 여기서 걸리면 나머지를 볼 필요 없다)**
+- [ ] 고글 틴트가 시안/파랑인가 — 주황·호박·노랑이면 즉시 재시도(적 예약 대역, ADR 0016 I1)
+- [ ] 주황·빨강·마젠타 픽셀 0(금지 = `#FF3B4E` · `#FF6B2C` · `#FF1E7A` 계열)
+- [ ] 순백 픽셀 0 — 재킷·헤드폰이 순백으로 튀지 않았는가
+- [ ] 발광 요소가 전부 같은 시안 하나인가(세 뷰 동일)
+
+**형태 언어(v2·v3 가 넘어진 자리)**
+- [ ] ★ 팔다리 윤곽에 직선 구간이 거의 없는가 — 곧은 관이면 실패
+- [ ] ★ 팔다리가 부풀었다 좁아지는가(소매→손목, 허벅지→무릎→종아리)
+- [ ] ★ 신발 밑창이 발목보다 확실히 넓게 퍼지는가
+- [ ] ★ 손이 벙어리장갑처럼 뭉툭한가
+
+**레퍼런스 분담이 지켜졌는가**
+- [ ] 헤어 = 일자 앞머리 + 턱선 일자컷 보브, 하나의 덩어리로 읽히는가([1])
+- [ ] 헤드기어 = 투명 틴트 고글 + 케이블 달린 오버이어 헤드폰([4]의 형태)
+- [ ] 의상 = 오프화이트 크롭 재킷 + 가슴 하네스 + 발목까지 덮는 어두운 보디수트([2])
+- [ ] [3]에서 비례만 왔는가 — 촉수·모자·백팩이 딸려오지 않았는가
+- [ ] 맨다리 0(보디수트가 발목까지 덮는가)
+
+**비례**
+- [ ] 머리(머리카락 포함) 폭 > 어깨 폭
+- [ ] 머리 높이가 전체의 1/5 인가
+- [ ] 다리가 길되 둥글고 통통한가 — 가는 막대면 실패
+- [ ] 목이 거의 안 보이는가
+
+**일관성·규칙**
+- [ ] 3뷰 배율·높이 일치
+- [ ] ★ 세 뷰가 같은 캐릭터인가(헤어·고글·하네스 엠블럼·액센트 라인 위치·신발 대조) — 한 장 3뷰의 최대 실패 모드다. 이미지 AI 는 후면 뷰에서 요소를 조용히 바꾼다. **Meshy multi-view 는 세 장이 같은 캐릭터라고 가정**하므로 여기가 어긋나면 3D 가 뭉개진다
 - [ ] A포즈(팔 45도, 손가락 편 상태, 다리 살짝 벌림)
-- [ ] 맨팔 굵기가 2칸(7.5cm) 아래로 안 내려갔는가(막대처럼 가늘지 않은가)
-- [ ] 헤드 매스(머리카락 포함) 폭이 어깨보다 넓은가
-- [ ] 신발 길이 30cm 급의 과장이 유지됐는가
-- [ ] 무기 0(빈손)
-- [ ] 리본 0
-- [ ] 촉수·오징어·잉크·캡 요소 0
-- [ ] 주황·빨강·마젠타 픽셀 0
-- [ ] 순백 픽셀 0
-- [ ] 배경 단색·글자 없음
-- [ ] 바이저가 정면 중앙
+- [ ] 굵은 외곽선 + 딱 떨어지는 2톤 셀 셰이딩(그라데이션이 보이면 실패)
+- [ ] 무기 0 · 리본 0
+- [ ] 배경 단색·글자 없음 / 고글이 정면 중앙
 
-실패 시 재지시 요령 = **"이 그림에서 X만 제거하고 나머지는 한 픽셀도 바꾸지 마라"**(제거·유지 편집이 이미지 AI 가 가장 잘하는 종류다). **재스타일 요청("다시 그려줘", "스타일 바꿔줘")은 형태를 흐린다** — 하지 말 것.
+재시도 요령 — **"이 그림에서 X만 제거하고 나머지는 한 픽셀도 바꾸지 마라"** 식으로 지시한다(제거·유지 편집이 이미지 AI 가 가장 잘하는 종류다). **"다시 그려줘"/"스타일 바꿔줘" 같은 재스타일 요청은 형태를 흐린다** — 하지 말 것. 레퍼런스가 섞이면 어느 레퍼런스에서 무엇만 가져오는지 다시 못박는다("3번에서는 비례만, 의상은 절대 가져오지 마라").
 
 ## §7 크롭 절차
 
-이미지 AI 는 한 장에 3뷰를 함께 그려야 일관성(같은 얼굴·같은 의상)이 유지된다. Meshy Multi-view 입력은 뷰당 별도 파일을 받으므로, 나온 한 장을 3장으로 잘라 `Docs/Handoff/NeonV_Arcade/`에 저장한다.
+이미지 AI 는 한 장에 3뷰를 함께 그려야 일관성(같은 얼굴·같은 의상)이 유지된다. Meshy Multi-view 입력은 뷰당 별도 파일을 받으므로, 나온 한 장을 3장으로 잘라 `Docs/Handoff/PlayerChar_Arcade/`에 저장한다.
 
-**선례 재료표**(`Docs/Handoff/NeonV_Tripo/` — 재정의된 구 Tripo 트랙이 남긴 재료. 이번 삼면도는 새 이미지라 좌표는 다시 재야 하지만 **방식은 그대로 계승**한다):
+**선례 재료표**(`Docs/Handoff/NeonV_Tripo/` — 재정의된 구 Tripo 트랙이 남긴 재료. **NEON-V 시절 산출물이라 폴더명은 그대로 둔다**(이 문서 갱신 세션의 결정 — 건드리지 말 것). 이번 삼면도는 새 이미지라 좌표는 다시 재야 하지만 **방식은 그대로 계승**한다):
 
 | 파일 | 무엇 |
 |---|---|
 | `NeonV_CharacterSheet_source.png` | 사용자가 준 캐릭터 시트 원본(1672×941). MODEL SHEET 패널 = 정면/측면/후면, 세 뷰의 머리 꼭대기·발바닥 y 가 같다(배율 정합) |
 | `NeonV_front.png` / `NeonV_side.png` / `NeonV_back.png` | 다시점 3D화 입력용 1024² 3장. 원본에서 자른 좌표 = 정면 (655,95)-(845,540) · 측면 (850,95)-(945,540) · 후면 (965,95)-(1140,540), 캐릭터 높이 = 캔버스 88% 로 통일, 배경 = 패널 내부 평균색 (2,14,29) |
 
-권장 파일명(이번 삼면도용, 계승 규약 — 강제 아님): `NeonVArcade_source.png` + `NeonVArcade_front.png` / `NeonVArcade_side.png` / `NeonVArcade_back.png` → `Docs/Handoff/NeonV_Arcade/`.
+권장 파일명(이번 삼면도용, 계승 규약 — 강제 아님. NEON-V 철회에 맞춰 접두어를 중립화했다): `PlayerCharArcade_source.png` + `PlayerCharArcade_front.png` / `PlayerCharArcade_side.png` / `PlayerCharArcade_back.png` → `Docs/Handoff/PlayerChar_Arcade/`.
 
 ## §8 다음 행에 넘길 것
 
 ① **Meshy 프롬프트 토론** — 이번 세션 범위 밖(사용자 지시). 삼면도가 나온 뒤 별도 세션에서.
 ② **복셀화 트랙 A/B′ 결정 + 스키닝 통합 경로 결정**(§3·§3-1) — 드론 A/B 테스트(`Docs/MeshyDronePipeline_ResumePrompt.md §6` — 같은 파이프라인을 정적 메시로 먼저 Voxel 프리셋 vs Remesh Blocks 두 갈래로 비교 중, §3 참고) 결과가 나오면 함께 확정.
 ③ **알려진 절벽 — 스켈레탈 메시 정합**: 캐릭터는 정적 메시가 아니라 스켈레탈 메시라, Meshy 산출물에서 리깅·스키닝·기존 Blu 스켈레톤(108본, 본 이름·계층·ref pose) 정합이 전부 사람 손이다. §1의 함정 6종이 전부 이 단계에 있다. 이 문서(삼면도)는 이 절벽 앞에서 멈춘다 — 실측 절차·Blender 작업 파일 경로는 §3-1 에 준비돼 있다.
+④ 🔴 **코드네임 결정 — 사용자 결정 대기.** NEON-V 철회로 파일명(`PlayerCharacter_ResumePrompt.md`·`PlayerChar_Arcade/`)·보드 행("NEON-V 3인칭 캐릭터...")·향후 에셋 이름(스켈레탈 메시·머티리얼·BP)에 쓸 새 코드네임이 필요하다. 이미지 생성 자체는 이름 없이 진행 가능하므로 **차단 항목은 아니다** — 정해지면 이 문서·ADR 0016·보드 행을 일괄 갱신하는 후속 행이 필요하다(파일 재이동 포함).
 
 ## §9 범위 밖
 
@@ -343,7 +476,7 @@ C++ `AFPSRCharacter` 는 `InitCapsuleSize(34.0f, 88.0f)`(=176cm, `Source/FPSRogu
 | `#FFC24A` | 보상 · 카드 · 하이라이트 |
 | `#FF4D5E` | 경고 · 체력 위험 |
 
-### A-3. 피부 대역 전문 (`§B-13`, NEON-V 3P 캐릭터 전용, 사용자 결정 2026-09-07)
+### A-3. 피부 대역 전문 (`§B-13`, 플레이어 3P 캐릭터 전용, 사용자 결정 2026-09-07 · 2026-09-08 적용 범위 갱신)
 
 캐릭터 노출부(허벅지·복부·팔의 맨살)는 색상(hue)이 따뜻한 계열이라 `§A-3-4` 적 예약 대역과 겹칠 위험이 있다. 4인 협동 × 적 200~300 화면에서 이게 무너지면 ADR 0016 I1(룩과 독립인 절대 규칙, 부록 B)을 어기고 이 등급은 복구 불가다.
 
@@ -351,6 +484,7 @@ C++ `AFPSRCharacter` 는 `InitCapsuleSize(34.0f, 88.0f)`(=176cm, `Source/FPSRogu
 - **판독 책임은 살색이 아니라 아군 아웃라인 `#4FD8FF` 가 진다.** 살색으로 아군을 식별하게 만들지 않는다 — 살색은 어디까지나 중립화된 배경 색일 뿐이다.
 - 노출 면적·실루엣은 디자인 자유(사용자 결정 2026-09-07) — 이 규칙이 거는 제약은 **색뿐**이다.
 - 적용 대상 = 플레이어 3P 캐릭터 · 로비 전시 · UI 초상. **적에는 적용하지 않는다**(적은 `§A-3-4` 그대로).
+- (2026-09-08 설계 전환 — 의상이 다리를 발목까지 덮게 되어 노출부가 얼굴·손뿐이다. 이 규칙은 존치하되 적용 면적이 크게 줄었다.)
 
 ### A-4. 텍스처·VFX 헤드룸 규칙 (`§A-5`)
 
