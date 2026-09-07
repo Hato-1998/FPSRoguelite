@@ -6,6 +6,7 @@
 #include "AbilitySystemComponent.h"
 #include "GameplayEffect.h"
 #include "GameplayAbilitySpec.h"
+#include "Enemy/FPSREnemyHealthComponent.h" // STAT1 §7-6 closure point 3/4: ServerResetEliteForStageCarry's ClearStatusForReuse
 
 AFPSREnemyEliteBase::AFPSREnemyEliteBase()
 {
@@ -128,6 +129,15 @@ void AFPSREnemyEliteBase::ServerResetEliteForStageCarry()
 	if (AbilitySystem)
 	{
 		AbilitySystem->CancelAbilities();
+	}
+
+	// STAT1 §7-6 폐쇄 지점 3/4: a carried elite KEEPS its ActiveEnemies membership (the status driver stays ON —
+	// §5-6's table has no entry for a carry-over teardown), so this is the one closure point that clears status
+	// VALUES without touching the driver flag at all. A fresh stage starts this elite's status clean instead of
+	// carrying a leftover DoT/slow/etc. across the stage swap.
+	if (UFPSREnemyHealthComponent* Health = GetHealthComponent())
+	{
+		Health->ClearStatusForReuse();
 	}
 }
 

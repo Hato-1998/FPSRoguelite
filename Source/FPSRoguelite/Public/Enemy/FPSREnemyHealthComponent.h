@@ -112,9 +112,16 @@ public:
 	 *  cache) whenever StatusBits actually changed. OutDotDamage is handed back RAW — this component deliberately
 	 *  does NOT call ApplyDamage itself; §6 routes DoT through the batch pass -> FPSRCombat::ApplyDamage bridge so
 	 *  lifesteal/bWasEnemy/mission-tracking axes stay alive (a direct call here would bypass all of that). No-op
-	 *  (false, OutDotDamage 0) off-authority or when bStatusDriverPresent is false. */
+	 *  (false, OutDotDamage 0) off-authority or when bStatusDriverPresent is false.
+	 *  🔴 C2단계 addition: OutDotInstigator/OutDotSourceWeapon resolve StatusServer's two weak refs (protected — no
+	 *  external accessor) so the batch pass / boss Tick driver can route OutDotDamage through
+	 *  FPSRCombat::ApplyDamage with the right kill-credit Instigator and build FPSRWeaponHooks::NotifyStatusKill's
+	 *  FFPSRFireContext (§7-4 / §6 킬 시임) — without adding a 7th public accessor beyond §7-7's closed 6-method
+	 *  list, since this rides AdvanceStatus's own existing "hand back what this step produced" contract. Both are
+	 *  only meaningful when OutDotDamage > 0 (possibly null otherwise — a null instigator/weapon is itself a valid,
+	 *  expected outcome once a weak ref has gone stale; see FFPSRStatusServerState::DotInstigator's own comment). */
 	bool AdvanceStatus(const UFPSRStatusCatalogDataAsset* Catalog, float WeakResist, float StrongResist,
-		float& OutDotDamage,
+		float& OutDotDamage, AActor*& OutDotInstigator, UFPSRWeaponInstance*& OutDotSourceWeapon,
 		TArray<uint8, TInlineAllocator<8>>& OutExpired, TArray<uint8, TInlineAllocator<8>>& OutFired);
 
 	/** The cached per-frame-cheap resolved multipliers/flags (§7-5) — safe to read on either side, but every

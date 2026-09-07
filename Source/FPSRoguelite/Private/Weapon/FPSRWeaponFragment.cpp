@@ -10,6 +10,8 @@
 #include "GameFramework/Controller.h"
 #include "AbilitySystemComponent.h"
 #include "Enemy/FPSREnemyHealthComponent.h"
+#include "Enemy/FPSREnemyBase.h" // STAT1 C2: RegisterStatusActive's Cast<AFPSREnemyBase> target-kind gate
+#include "Enemy/FPSREnemySpawnSubsystem.h" // STAT1 C2: RegisterStatusActive (compact "상태 보유 적" list, §6)
 #include "Combat/FPSRVitalsProfile.h"
 #include "Settings/FPSRStatusEffectSettings.h"
 #include "Core/FPSRLogChannels.h"
@@ -52,6 +54,18 @@ namespace FPSRWeaponHooks
 		for (const TObjectPtr<UFPSRWeaponFragment>& Frag : Context.Instance->GetActiveFragments())
 		{
 			if (Frag) { Frag->OnKill(Context, KilledActor); }
+		}
+	}
+
+	void NotifyStatusKill(const FFPSRFireContext& Context, AActor* KilledActor)
+	{
+		// STAT1 G1-15: Context.Instance is null whenever the status's stored DotSourceWeapon weak ref has gone
+		// stale (weapon dropped/swapped mid-DoT) — a quiet no-op, exactly like NotifyKill's own guard above, NOT an
+		// error: the DoT itself keeps ticking regardless (see FFPSRStatusServerState::DotSourceWeapon's comment).
+		if (!Context.Instance || !KilledActor) { return; }
+		for (const TObjectPtr<UFPSRWeaponFragment>& Frag : Context.Instance->GetActiveFragments())
+		{
+			if (Frag) { Frag->OnStatusKill(Context, KilledActor); }
 		}
 	}
 
@@ -272,29 +286,6 @@ void UFPSRFragment_CritOnSlide::OnSlideStarted(const FFPSRFireContext& Context) 
 	Context.Instance->ApplyTimedCritBuff(this, CritChanceAdd, 0.0f, Duration);
 }
 
-namespace
-{
-	/** STAT1 §5-2/§9: the catalog is ONE project-wide config soft path (UFPSRStatusEffectSettings, mirroring
-	 *  FPSREnemyRenderSettings.h's HealthBarWidgetClass idiom) — resolved here rather than cached at startup because
-	 *  TSoftObjectPtr::LoadSynchronous() is already cheap once resolved (an IsValid() + Get(), no re-hit of the asset
-	 *  registry). Logs the unset/unloadable case exactly ONCE, ever: this runs on the per-hit damage path, so a
-	 *  per-call warning would spam the log for the rest of the session over a content-authoring gap that
-	 *  UFPSRStatusApplyFragment's own null check already makes a harmless no-grant. */
-	const UFPSRStatusCatalogDataAsset* ResolveStatusCatalog()
-	{
-		static bool bHasLoggedMissingCatalog = false;
-		const UFPSRStatusEffectSettings* Settings = GetDefault<UFPSRStatusEffectSettings>();
-		const UFPSRStatusCatalogDataAsset* Catalog = Settings ? Settings->StatusCatalog.LoadSynchronous() : nullptr;
-		if (!Catalog && !bHasLoggedMissingCatalog)
-		{
-			UE_LOG(LogFPSR, Warning, TEXT("[Status] FPSRStatusEffectSettings.StatusCatalog is unset or failed to ")
-				TEXT("load — status-effect application is a silent no-op until a catalog is authored (STAT1 §5-2)."));
-			bHasLoggedMissingCatalog = true;
-		}
-		return Catalog;
-	}
-}
-
 void UFPSRStatusApplyFragment::OnDamageApplied(const FFPSRFireContext& Context, AActor* Target, const FPSRCombat::FDamageResult& Result) const
 {
 	// Context.bAuthority: state-mutating hook, mirrors every other OnXxx override in this file (e.g.
@@ -323,10 +314,10 @@ void UFPSRStatusApplyFragment::OnDamageApplied(const FFPSRFireContext& Context, 
 		return;
 	}
 
-	const UFPSRStatusCatalogDataAsset* Catalog = ResolveStatusCatalog();
+	const UFPSRStatusCatalogDataAsset* Catalog = UFPSRStatusEffectSettings::ResolveCatalog();
 	if (!Catalog)
 	{
-		return; // unset/unloadable catalog — already logged once by ResolveStatusCatalog
+		return; // unset/unloadable catalog — already logged once by ResolveCatalog
 	}
 
 	// STAT1 §6 저항 행 (G1r3 R3-7): resolve BOTH scales from the SAME profile instance ApplyDamage already mitigates
@@ -340,7 +331,24 @@ void UFPSRStatusApplyFragment::OnDamageApplied(const FFPSRFireContext& Context, 
 	// §5-6 target gate (door / mission-flee-target / homing orb) and every other reject reason (cooldown/no-catalog-
 	// entry) live inside ApplyStatus itself — this fragment does not duplicate any of that here.
 	TArray<uint8, TInlineAllocator<8>> OutFired;
-	HealthComp->ApplyStatus(Catalog, Status->SlotIndex, WeakResist, StrongResist, Context.Avatar, Context.Instance, OutFired);
+	if (!HealthComp->ApplyStatus(Catalog, Status->SlotIndex, WeakResist, StrongResist, Context.Avatar, Context.Instance, OutFired))
+	{
+		return;
+	}
+
+	// STAT1 §6 진행·조합 (C2단계): register with the spawn subsystem's "상태 보유 적" compact list on a successful
+	// apply — see UFPSREnemySpawnSubsystem::RegisterStatusActive's own comment for why list OWNERSHIP lives on the
+	// subsystem (not a callback this component fires; it must not know the subsystem exists). The Cast below fails
+	// (returns null, a harmless no-op) for anything that ISN'T a swarm/elite AFPSREnemyBase — in particular a BOSS
+	// shares this exact component/hook but drives its OWN AdvanceStatus from AFPSRBossBase::Tick every frame
+	// unconditionally, so adding it to this list too would double-drive it (expire/DoT-tick twice in one frame).
+	if (AFPSREnemyBase* EnemyBase = Cast<AFPSREnemyBase>(Target))
+	{
+		if (UFPSREnemySpawnSubsystem* SpawnSub = Target->GetWorld() ? Target->GetWorld()->GetSubsystem<UFPSREnemySpawnSubsystem>() : nullptr)
+		{
+			SpawnSub->RegisterStatusActive(EnemyBase);
+		}
+	}
 }
 
 #if WITH_EDITOR

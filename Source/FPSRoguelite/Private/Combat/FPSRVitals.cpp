@@ -14,6 +14,9 @@ namespace FPSRVitals
 		}
 
 		const float ArmorKeep = 1.0f - FMath::Clamp(Mit.DirectionalArmorDR, 0.0f, 1.0f);
+		// STAT1 §6 방어력감소: a second per-instance keep factor, orthogonal to armor — see FMitigation::
+		// IncomingDamageMultiplier's own comment for why this can't just reuse DirectionalArmorDR's [0,1) range.
+		const float StatusKeep = FMath::Max(Mit.IncomingDamageMultiplier, 0.0f);
 		// Invulnerability floor (unvariant V1 — VIT1 §5-1): no mitigation STACK may zero out a hit. MaxTotalReduction
 		// is clamped to <= 0.99 by the profile's UPROPERTY + IsDataValid, so MinKeep is always > 0.
 		const float MinKeep = 1.0f - FMath::Clamp(Mit.MaxTotalReduction, 0.0f, 1.0f);
@@ -23,8 +26,8 @@ namespace FPSRVitals
 		// stop unintended overlap from reaching invulnerability, not to close a deliberately-opened bypass.
 		const float ShieldKeep = (Spec.ShieldDamageMultiplier == 0.0f)
 			? 0.0f
-			: FMath::Max(Spec.ShieldDamageMultiplier * Mit.ShieldDefense * ArmorKeep, MinKeep);
-		const float HealthKeep = FMath::Max(Mit.HealthDefense * ArmorKeep, MinKeep);
+			: FMath::Max(Spec.ShieldDamageMultiplier * Mit.ShieldDefense * ArmorKeep * StatusKeep, MinKeep);
+		const float HealthKeep = FMath::Max(Mit.HealthDefense * ArmorKeep * StatusKeep, MinKeep);
 
 		const float WantShield = Incoming * ShieldKeep;
 		Result.ShieldSpent = FMath::Min(InOutPool.Shield, WantShield);

@@ -112,6 +112,20 @@ public:
 	 *  an immediate ReleaseEnemy. Null-safe. */
 	void BeginDying(AFPSREnemyBase* Enemy);
 
+	/** Server (STAT1 §6 진행·조합, C2단계): register Enemy in the "상태 보유 적" compact list
+	 *  (UFPSREnemySpawnSubsystem::AdvanceStatusEffects below iterates ONLY this list, never the full ActiveEnemies —
+	 *  §6's own cost contract: O(감염된 적), not O(alive)). Called by UFPSRStatusApplyFragment::OnDamageApplied right
+	 *  after a successful UFPSREnemyHealthComponent::ApplyStatus — this is deliberately a method ON THE SUBSYSTEM
+	 *  (not a callback the health component fires) because the compact list's OWNER is the subsystem, and the
+	 *  component must not need to know the subsystem exists (mirrors why SetStatusDriverPresent is a plain flag the
+	 *  component just carries, never a lookup it performs itself). Idempotent (backed by a TSet) — a second status
+	 *  landing on an already-registered enemy is a safe no-op, which is what lets EVERY successful ApplyStatus call
+	 *  this rather than only the "first ever" one (§6 문서의 "첫 부여에서 등록"과 관측적으로 동치). Removed again
+	 *  at the two ActiveEnemies.Remove sites (ReleaseEnemy / BeginDying, §5-6's driver-off pairing) or lazily, inside
+	 *  AdvanceStatusEffects, the pass after every one of Enemy's status bits has expired. No-op off-authority or on
+	 *  a null Enemy. */
+	void RegisterStatusActive(AFPSREnemyBase* Enemy);
+
 	/** Release every active enemy back to the dormant pool (server). Used by mission/debug flows. Also flushes any
 	 *  corpse still dwelling (BeginDying already pulled it out of ActiveEnemies, so this doesn't happen for free —
 	 *  see the .cpp) so a "clear the board now" call can't leave a corpse to leak into the next run/stage. */
@@ -317,6 +331,16 @@ private:
 	 *  pass gets that for free). */
 	void SweepDyingEnemies(float Now);
 
+	/** Server (STAT1 §6 진행·조합, C2단계): advance every enemy in StatusActiveEnemies one status step
+	 *  (UFPSREnemyHealthComponent::AdvanceStatus), route any owed DoT through FPSRCombat::ApplyDamage (so
+	 *  lifesteal/bWasEnemy/mission-tracking axes stay alive — the batch pass -> bridge shape §6 requires), fire
+	 *  FPSRWeaponHooks::NotifyStatusKill on a DoT kill, and drop an enemy from the list once none of its 8 slots are
+	 *  still set. Called from TickEnemyMovement's `!bFrozen` block, AHEAD of the ActiveEnemies==0 / PlayerPawns
+	 *  early-returns (§10 월드 14 — status keeps progressing through a full-DBNO window) and without needing the
+	 *  Agents/Locations movement scratch (built further down in that same pass). O(StatusActiveEnemies.Num()), never
+	 *  O(ActiveEnemies.Num()) — the whole reason this compact list exists (제1원리, 액터당 비용 최소화). */
+	void AdvanceStatusEffects();
+
 	/** Server: the shared "a corpse's dwell is over" recovery point (Deactivate + DormantPool.Add). Used by
 	 *  SweepDyingEnemies (deadline reached), BeginDying (MaxDyingEnemies overflow eviction), and ReleaseAllEnemies
 	 *  (bulk-flush the whole dwell list). No-op on an already-invalid Enemy. */
@@ -452,6 +476,25 @@ private:
 	/** Set of currently active (visible, enabled) enemies. */
 	UPROPERTY(Transient)
 	TSet<TObjectPtr<AFPSREnemyBase>> ActiveEnemies;
+
+	/** STAT1 §6 진행·조합 (C2단계) — the "상태 보유 적" compact list AdvanceStatusEffects iterates, a STRICT SUBSET
+	 *  of ActiveEnemies (never populated for a boss — bosses drive their OWN AdvanceStatus from AFPSRBossBase::Tick
+	 *  and are never IN ActiveEnemies at all, §5-6). Populated by RegisterStatusActive (idempotent — a TSet, not a
+	 *  TArray, so a second status landing on an already-listed enemy costs nothing extra), drained by
+	 *  AdvanceStatusEffects once an enemy's last status bit expires, and force-cleared at both ActiveEnemies.Remove
+	 *  sites below (ReleaseEnemy / BeginDying) so a dead/pooled enemy can never linger here. UPROPERTY(Transient) for
+	 *  the SAME reason ActiveEnemies itself is one (GC safety for a container that, unlike the per-pass movement
+	 *  scratch arrays below, persists across frames rather than being rebuilt each one). */
+	UPROPERTY(Transient)
+	TSet<TObjectPtr<AFPSREnemyBase>> StatusActiveEnemies;
+
+	/** Per-pass scratch for AdvanceStatusEffects's iterate-a-snapshot (a DoT kill synchronously reaches BeginDying,
+	 *  which mutates StatusActiveEnemies mid-walk). A MEMBER, not a local with TInlineAllocator, for exactly the
+	 *  reason the movement pass's own scratch arrays below are members: Reset() keeps capacity, so a wide AoE status
+	 *  build that infects far more than any inline budget stops heap-allocating every single frame (W1 P2-4's
+	 *  finding, generalized). Not a UPROPERTY — it is rebuilt from scratch every pass and never outlives the call,
+	 *  same as the movement scratch. */
+	TArray<AFPSREnemyBase*> StatusStepScratch;
 
 	// --- Death-dwell (server-only). A corpse leaves ActiveEnemies THE INSTANT it dies (BeginDying) but isn't
 	//     returned to DormantPool until its Death cosmetic has had time to actually be seen. A THIRD bucket rather

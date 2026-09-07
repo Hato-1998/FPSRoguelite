@@ -60,6 +60,16 @@ namespace FPSRVitals
 		/** M4 directional armor damage reduction [0,1). This unit always passes 0 (the hook is opened, not filled). */
 		float DirectionalArmorDR = 0.0f;
 
+		/** STAT1 §6 방어력감소: a per-instance multiplier the caller composes in at the SAME call site
+		 *  DirectionalArmorDR above is opened at (UFPSREnemyHealthComponent::ApplyDamage's Mit composition — never
+		 *  resolved from the profile). Unlike DirectionalArmorDR (a bounded [0,1) REDUCTION), this one can also
+		 *  AMPLIFY (>1 = takes MORE damage) — a status debuff needs the opposite sign from an armor buff, and an
+		 *  armor-reduction status is authored as >1 (UFPSRStatusEffectDataAsset::IncomingDamageMultiplier). 1.0 = the
+		 *  no-op default every non-STAT1 caller keeps (zero regression). Composes multiplicatively with ArmorKeep
+		 *  below, so it still respects the MaxTotalReduction floor when < 1 (V1 invariant) and needs no floor at all
+		 *  when > 1 (amplifying can only ever RAISE the kept fraction past MinKeep, never require clamping toward it). */
+		float IncomingDamageMultiplier = 1.0f;
+
 		/** 🔴 Invariant: no combination of mitigations may reduce a single hit's total by more than this. Backs the
 		 *  `Enemy.md` §2-6 shield-archetype rule "no hard-block (0 damage)" — a DamageDealt of 0 silences hit-markers,
 		 *  lifesteal, and kill-credit alike. */

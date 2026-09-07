@@ -28,6 +28,8 @@
 #include "Combat/FPSRCombatStatics.h"
 #include "Core/FPSRGameState.h"
 #include "Hero/FPSRCharacter.h"
+#include "Weapon/FPSRWeaponFragment.h" // STAT1 C2: FPSRWeaponHooks::NotifyStatusKill + FFPSRFireContext
+#include "Settings/FPSRStatusEffectSettings.h" // STAT1 C2: UFPSRStatusEffectSettings::ResolveCatalog
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/PlayerState.h"
 #include "GameFramework/PawnMovementComponent.h"
@@ -168,6 +170,16 @@ void AFPSRBossBase::BeginPlay()
 	// (one branch on one actor) — and that client half is the point: it is the only way to see whether the beam a
 	// client is looking at agrees with the beam the server is testing against.
 	SetActorTickEnabled(true);
+
+	// STAT1 §5-6: the boss's status-progression driver gate. SetActorTickEnabled above runs on EVERY machine (see
+	// this comment block's own note) — but AdvanceStatus only ever runs from Tick's server-only pattern-driver
+	// branch further down, so this flag must ALSO gate on HasAuthority(), or a client would believe it has a driver
+	// that never actually calls AdvanceStatus (exactly the "bit set but never expires" bug §5-6's gate exists to
+	// prevent).
+	if (HasAuthority() && HealthComponent)
+	{
+		HealthComponent->SetStatusDriverPresent(true);
+	}
 
 	if (HasAuthority() && PatternTriggers.Num() == 0)
 	{
@@ -498,6 +510,12 @@ void AFPSRBossBase::HandleDeath(AActor* DeadActor, AActor* Killer)
 	// this class's contract, and a boss that dies for any other reason would keep firing.
 	ServerReleaseAllPatternState();
 	SetActorTickEnabled(false);
+	// STAT1 §5-6: driver OFF at defeat (this function only ever runs on the server — OnDeath broadcasts from the
+	// authority-gated ApplyDamage path, per this function's own comment above — so no extra HasAuthority() guard).
+	if (HealthComponent)
+	{
+		HealthComponent->SetStatusDriverPresent(false);
+	}
 
 	// No XP drop / pooling / Destroy: EndRunFreeze stops the world behind the result screen and the lobby travel
 	// tears the level down. Leaving the boss in place keeps it visible during the result beat.
@@ -602,6 +620,13 @@ void AFPSRBossBase::Tick(float DeltaSeconds)
 	{
 		ServerReleaseAllPatternState();
 		SetActorTickEnabled(false);
+		// STAT1 §5-6: driver OFF at run end — the second of the table's "두 곳 모두" pair (HandleDeath is the
+		// other). Harmless if HandleDeath already ran (idempotent flag write); covers a run ending WITHOUT this
+		// boss having been the one defeated (e.g. every player wiped).
+		if (HealthComponent)
+		{
+			HealthComponent->SetStatusDriverPresent(false);
+		}
 		return;
 	}
 
@@ -614,6 +639,51 @@ void AFPSRBossBase::Tick(float DeltaSeconds)
 	if (bFrozen)
 	{
 		return;
+	}
+
+	// STAT1 §6 보스 진행: the SAME AdvanceStatus the swarm batch pass drives, under the SAME freeze gate just above
+	// (프리즈 조건이 배치 패스와 동일하므로 대칭 성립) — a boss is never IN ActiveEnemies, so it needs its own call
+	// site rather than riding UFPSREnemySpawnSubsystem::AdvanceStatusEffects' compact list (§9's "진행 드라이버가
+	// 2개"). Run-end permanently stops this Tick (SetActorTickEnabled(false) above), so status is left wherever it
+	// was — cosmetic-only at that point (no further ApplyDamage ever reaches a run-ended boss), explicitly harmless.
+	if (HealthComponent)
+	{
+		const UFPSRStatusCatalogDataAsset* Catalog = UFPSRStatusEffectSettings::ResolveCatalog();
+		const UFPSRVitalsProfileDataAsset* Profile = HealthComponent->GetVitalsProfile();
+		// STAT1 §6 저항 행: WeakResistScale/StrongResistScale null-fallback to 1.0/1.0, NEVER 0 — a 0 fallback would
+		// make an unauthored boss profile completely status-immune (including the Weak DoT §1 says should still
+		// land even when hard CC doesn't).
+		const float WeakResist = Profile ? Profile->WeakResistScale : 1.0f;
+		const float StrongResist = Profile ? Profile->StrongResistScale : 1.0f;
+
+		float DotDamage = 0.0f;
+		AActor* DotInstigator = nullptr;
+		UFPSRWeaponInstance* DotSourceWeapon = nullptr;
+		TArray<uint8, TInlineAllocator<8>> Expired;
+		TArray<uint8, TInlineAllocator<8>> Fired;
+		HealthComponent->AdvanceStatus(Catalog, WeakResist, StrongResist, DotDamage, DotInstigator, DotSourceWeapon, Expired, Fired);
+
+		if (DotDamage > 0.0f)
+		{
+			FFPSRDamageSpec Spec;
+			// STAT1 §6 도트 행 — same two flags the swarm batch pass sets, for the same reasons (see
+			// UFPSREnemySpawnSubsystem::AdvanceStatusEffects' own comment): suppress the lifesteal-trigger event and
+			// backdate the shield-regen time anchor rather than freezing it (§6-2).
+			Spec.bSuppressDealtDamageEvent = true;
+			Spec.bDotRegenAnchorPolicy = true;
+			const FPSRCombat::FDamageResult Result = FPSRCombat::ApplyDamage(this, DotDamage, DotInstigator, Spec);
+			if (Result.bKilled)
+			{
+				FFPSRFireContext KillCtx;
+				KillCtx.Avatar = Cast<APawn>(DotInstigator);
+				KillCtx.Controller = KillCtx.Avatar ? KillCtx.Avatar->GetController() : nullptr;
+				KillCtx.World = GetWorld();
+				KillCtx.Instance = DotSourceWeapon;
+				KillCtx.ShotCount = 1;
+				KillCtx.bAuthority = true; // this whole branch already runs inside Tick's own HasAuthority() gate
+				FPSRWeaponHooks::NotifyStatusKill(KillCtx, this);
+			}
+		}
 	}
 
 	const float Clock = GetPatternClockSeconds();

@@ -102,7 +102,11 @@ public:
 	 *  - OnFire  : once per activation, right after the ammo commit (NOT PostFire — avoids the on-fire/on-hit race).
 	 *  - OnMiss  : once per activation that landed no damage on any enemy (synchronous paths only).
 	 *  - OnKill  : once per enemy this activation freshly killed (alive->dead; corpse re-hits excluded by bJustKilled).
-	 *  - OnStatusKill : empty seam — D3 (status-effect kills) wires the call site; declared here only. */
+	 *  - OnStatusKill : once per enemy a STATUS EFFECT (DoT) just killed (STAT1 §6, C2단계) — mirrors OnKill above,
+	 *    but fired from FPSRWeaponHooks::NotifyStatusKill by the batch pass / boss Tick driver, NOT from any of the
+	 *    5 direct-hit damage paths (a DoT tick has no live FFPSRFireContext to carry — the context is rebuilt from
+	 *    the status's stored DotSourceWeapon, the same "reconstruct after the live one is gone" precedent
+	 *    FPSRProjectile.cpp's MakeProjectileFireContext already uses for a delayed projectile kill). */
 	virtual void OnAim(const FFPSRFireContext& Context, bool bAiming) const {}
 	virtual void OnFire(const FFPSRFireContext& Context) const {}
 	virtual void OnMiss(const FFPSRFireContext& Context) const {}
@@ -152,6 +156,9 @@ namespace FPSRWeaponHooks
 	FPSROGUELITE_API void NotifyMiss(const FFPSRFireContext& Context);
 	/** Fire OnKill on every active fragment for one freshly-killed enemy. */
 	FPSROGUELITE_API void NotifyKill(const FFPSRFireContext& Context, AActor* KilledActor);
+	/** Fire OnStatusKill on every active fragment for one enemy a status-effect DoT just killed (STAT1 §6) — the
+	 *  status-kill mirror of NotifyKill above, called from the batch pass / boss Tick, not from any fire ability. */
+	FPSROGUELITE_API void NotifyStatusKill(const FFPSRFireContext& Context, AActor* KilledActor);
 	/** Fire OnDamageApplied on every active fragment for one landed hit (STAT1 §5-5) — see this namespace's own
 	 *  header comment above for why this is 4-path, not 5-path. */
 	FPSROGUELITE_API void NotifyDamageApplied(const FFPSRFireContext& Context, AActor* Target, const FPSRCombat::FDamageResult& Result);

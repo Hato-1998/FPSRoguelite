@@ -103,6 +103,11 @@ FPSRVitals::FResult UFPSREnemyHealthComponent::ApplyDamage(float DamageAmount, A
 		VitalsProfile->ResolveDefense(Spec.DamageType, Mit.ShieldDefense, Mit.HealthDefense);
 		Mit.MaxTotalReduction = VitalsProfile->MaxTotalReduction;
 	}
+	// STAT1 §6 방어력감소: per-instance layer, composed HERE (never from the profile) — same "opened at the
+	// ApplyDamage call site" shape FMitigation::DirectionalArmorDR already establishes (that field's own comment).
+	// ApplyDamage only ever runs on the server (checked at this function's own entry above), so ResolvedStatus is
+	// always this component's live, server-authoritative cache here — never the client's default no-op struct.
+	Mit.IncomingDamageMultiplier = ResolvedStatus.IncomingDamageMultiplier;
 
 	const FPSRVitals::FResult Result = FPSRVitals::ApplyDamage(Pool, DamageAmount, Spec, Mit);
 
@@ -353,10 +358,13 @@ bool UFPSREnemyHealthComponent::ApplyStatus(const UFPSRStatusCatalogDataAsset* C
 }
 
 bool UFPSREnemyHealthComponent::AdvanceStatus(const UFPSRStatusCatalogDataAsset* Catalog,
-	float WeakResist, float StrongResist, float& OutDotDamage,
+	float WeakResist, float StrongResist, float& OutDotDamage, AActor*& OutDotInstigator,
+	UFPSRWeaponInstance*& OutDotSourceWeapon,
 	TArray<uint8, TInlineAllocator<8>>& OutExpired, TArray<uint8, TInlineAllocator<8>>& OutFired)
 {
 	OutDotDamage = 0.0f;
+	OutDotInstigator = nullptr;
+	OutDotSourceWeapon = nullptr;
 	OutExpired.Reset();
 	OutFired.Reset();
 
@@ -371,6 +379,15 @@ bool UFPSREnemyHealthComponent::AdvanceStatus(const UFPSRStatusCatalogDataAsset*
 
 	// §6 DoT row: this component deliberately does NOT call ApplyDamage itself with OutDotDamage — the batch pass
 	// (C단계) routes it through FPSRCombat::ApplyDamage so lifesteal/bWasEnemy/mission-tracking axes stay alive.
+
+	// C2단계: hand back the DoT's stored kill-credit refs ALONGSIDE the raw damage (see this method's header
+	// comment) — resolved from the weak refs HERE, at the moment of the call, so the caller never holds a pointer
+	// that could go stale between this step and its own later use of it this same frame.
+	if (OutDotDamage > 0.0f)
+	{
+		OutDotInstigator = StatusServer.DotInstigator.Get();
+		OutDotSourceWeapon = StatusServer.DotSourceWeapon.Get();
+	}
 
 	if (StatusBits != BitsBefore)
 	{

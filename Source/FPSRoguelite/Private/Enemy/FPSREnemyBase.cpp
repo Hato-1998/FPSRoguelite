@@ -46,11 +46,26 @@ static FAutoConsoleVariableRef CVarFPSREnemySpeedScale(
 
 float AFPSREnemyBase::GetEffectiveMoveSpeed() const
 {
+	float Speed = CurrentMoveSpeed;
 #if !UE_BUILD_SHIPPING
-	return CurrentMoveSpeed * FMath::Max(0.0f, GFPSREnemySpeedScale);
-#else
-	return CurrentMoveSpeed;
+	Speed *= FMath::Max(0.0f, GFPSREnemySpeedScale);
 #endif
+	// STAT1 §6 둔화/속박: the SOLE choke point both TickServerMovement call sites read (the steer-distance calc and
+	// the walk/idle bMoved heuristic) — the status axis composes here once instead of twice. bDisableMovement
+	// (속박) hard-zeroes movement rather than merely scaling toward 0, so the bMoved heuristic also reads a rooted
+	// enemy as fully stopped, not just slow. Knockback is a SEPARATE suppression — TickServerMovement's own
+	// knockback block reads bDisableMovement directly, because knockback moves the actor with a direct
+	// AddActorWorldOffset that never calls this function.
+	if (const UFPSREnemyHealthComponent* Health = GetHealthComponent())
+	{
+		const FFPSRResolvedStatus& Status = Health->GetResolvedStatus();
+		if (Status.bDisableMovement)
+		{
+			return 0.0f;
+		}
+		Speed *= Status.MoveSpeedMultiplier;
+	}
+	return Speed;
 }
 
 AFPSREnemyBase::AFPSREnemyBase()
@@ -455,6 +470,16 @@ void AFPSREnemyBase::EnterDyingState()
 	ReleaseRangedHold();
 	ResetRangedCycle();
 
+	// STAT1 §7-6 폐쇄 지점 1/4 (rev4가 처음 지목한 것 — B단계는 ResetForReuse 에만 걸어 두었다): without this, a
+	// corpse dwells for GetDeathDwellSeconds() with StatusBits still ON and still replicating — a remote client
+	// sees a status icon on a body that already stopped taking further hits/progression. The driver itself turns
+	// off a moment earlier, in UFPSREnemySpawnSubsystem::BeginDying's own ActiveEnemies.Remove (the caller of this
+	// function) — this call closes the status VALUES, that one closes the ADVANCE privilege.
+	if (HealthComponent)
+	{
+		HealthComponent->ClearStatusForReuse();
+	}
+
 	// Gameplay ends NOW; presentation does not — see this function's header doc for the full EnterDyingState vs.
 	// Deactivate role split. No hide / no SetNetDormancy here (unlike Deactivate): bDead already replicated before
 	// HandleDeath ever ran (the health component's ApplyDamage->OnDeath fires first), so a remote client's own
@@ -703,6 +728,17 @@ void AFPSREnemyBase::Deactivate()
 	// Reliable 'off' is never dropped and the concurrency count never leaks.
 	ReleaseRangedHold();
 	ResetRangedCycle();
+
+	// STAT1 §7-6 폐쇄 지점 2/4: EnterDyingState already closes the DEATH path's status state; this covers every
+	// OTHER teardown that reaches Deactivate WITHOUT going through EnterDyingState first (pool release / rear-drain
+	// / kill-Z recycle / stage-carry overflow — this function's own header doc) — none of those call
+	// EnterDyingState, so without this a rear-drained infected enemy would return to the dormant pool still
+	// carrying live StatusBits into its NEXT life. Idempotent on an already-clear state (the ordinary death path,
+	// where EnterDyingState got there first).
+	if (HealthComponent)
+	{
+		HealthComponent->ClearStatusForReuse();
+	}
 
 	SetActorHiddenInGame(true);
 	SetActorEnableCollision(false);
@@ -982,6 +1018,24 @@ void AFPSREnemyBase::ServerTickAttack(const FFPSRServerAttackContext& Ctx)
 		return;
 	}
 
+	// STAT1 §6 실명 (bDisableAttack): true on EVERY pass this holds, release the ranged hold/token and skip the
+	// whole cycle below. ReleaseRangedHold/ResetRangedCycle are BOTH documented idempotent (see their own comments),
+	// so calling them every pass — not just the onset edge — is behaviorally identical to "onset then early-out"
+	// (nothing else can move ChargeState/the token/the warning while we keep returning here first) and needs no new
+	// onset-edge-tracking member. 🔴 Releasing the hold is NOT optional here (G1-8): an early-out that only skipped
+	// the switch below would leave the token (RangedAttackTokenLimit=3) and the target's directional warning held
+	// for the WHOLE blind duration, stalling that player's incoming fire from the REST of the swarm too — this is
+	// the same pair Deactivate()/EnterDyingState() use. Covers both paths blind can turn on from (ApplyStatus's
+	// immediate combo check, AdvanceStatus's periodic re-check) because this reads the RESOLVED bit, not which call
+	// flipped it.
+	const FFPSRResolvedStatus AttackStatus = HealthComponent ? HealthComponent->GetResolvedStatus() : FFPSRResolvedStatus();
+	if (AttackStatus.bDisableAttack)
+	{
+		ReleaseRangedHold();
+		ResetRangedCycle();
+		return;
+	}
+
 	// Promoted from AFPSRRangedEnemyBase (ADR 0013 C1). The subsystem already early-returns the whole pass while the
 	// run is frozen, so DeltaSeconds only accrues during active gameplay — the charge/cooldown accumulators below
 	// are freeze-paused for free.
@@ -989,6 +1043,13 @@ void AFPSREnemyBase::ServerTickAttack(const FFPSRServerAttackContext& Ctx)
 	const bool bHaveTarget = (Ctx.TargetChar != nullptr) && (Ctx.TargetController != nullptr);
 	const bool bInRange = bHaveTarget
 		&& FVector::DistSquared(GetActorLocation(), Ctx.TargetLocation) <= FMath::Square(RangedEngageRange);
+
+	// STAT1 §6 공격속도저하 (AttackIntervalMultiplier, >1 = slower): read AT USE, on the THRESHOLD side of the
+	// compare, never baked into RangedChargeTime/RangedFireCooldown themselves — those are ACTOR-INSTANCE
+	// UPROPERTYs, so multiplying them in place would leak into this pooled actor's NEXT life the moment
+	// ClearStatusForReuse resets the status but leaves the (already-mutated) field behind.
+	const float EffectiveChargeTime = RangedChargeTime * AttackStatus.AttackIntervalMultiplier;
+	const float EffectiveFireCooldown = RangedFireCooldown * AttackStatus.AttackIntervalMultiplier;
 
 	switch (ChargeState)
 	{
@@ -1008,14 +1069,14 @@ void AFPSREnemyBase::ServerTickAttack(const FFPSRServerAttackContext& Ctx)
 				LastWarnLocation = GetActorLocation();
 				SendRangedWarning(true); // telegraph: the target gets a directional warning to dodge
 
-				// Drive the Attack cosmetic at the CHARGE-length rate so the material's (Time-EnterTime)*Rate
-				// progress reaches exactly 1.0 the moment the shot fires (not the melee AttackAnimHoldSeconds
-				// default), and hold it there for the same span so TickServerMovement's walk/idle branch can't stomp
-				// it mid-charge (a stationary/slow-repositioning charger can still read as bMoved on a separation-
-				// jitter pass).
-				const float ChargeRate = 1.0f / FMath::Max(KINDA_SMALL_NUMBER, RangedChargeTime);
+				// Drive the Attack cosmetic at the EFFECTIVE charge-length rate so the material's
+				// (Time-EnterTime)*Rate progress reaches exactly 1.0 the moment the shot fires (not the melee
+				// AttackAnimHoldSeconds default), and hold it there for the same span so TickServerMovement's
+				// walk/idle branch can't stomp it mid-charge (a stationary/slow-repositioning charger can still read
+				// as bMoved on a separation-jitter pass).
+				const float ChargeRate = 1.0f / FMath::Max(KINDA_SMALL_NUMBER, EffectiveChargeTime);
 				SetAnimState(EFPSRAnimState::Attack, ChargeRate);
-				AttackAnimHoldUntil = Ctx.Now + RangedChargeTime;
+				AttackAnimHoldUntil = Ctx.Now + EffectiveChargeTime;
 
 				// Non-targeted client telegraph (user decision, see bCharging's own comment): replicate the charge
 				// to EVERY client, not just the Reliable-RPC'd target.
@@ -1041,6 +1102,18 @@ void AFPSREnemyBase::ServerTickAttack(const FFPSRServerAttackContext& Ctx)
 
 		ChargeElapsed += Dt;
 
+		// STAT1 §6 (G1-9): keep the movement-anim hold tracking the CURRENT effective charge time every pass, not
+		// just the value stamped once at the Idle->Charging transition above — if AttackIntervalMultiplier changes
+		// MID-CHARGE (a slow debuff lands or expires while already telegraphing), a hold window fixed at entry would
+		// expire before the (now longer) real charge completes, and TickServerMovement's walk/idle branch would
+		// stomp the Attack pose mid-telegraph. The visual clip's own playback RATE (set once at entry via
+		// SetAnimState) deliberately does NOT get re-derived here: SetAnimState's one-shot re-entry guard refuses to
+		// rewind an already-playing clip (see its own comment), so re-asserting a new rate here would either no-op
+		// through that guard or fight it — the HOLD-WINDOW timestamp has no such guard and is exactly what the
+		// walk/idle-stomp bug this note describes keys on. When the multiplier hasn't changed, this recompute is a
+		// no-op relative to the entry stamp (Ctx.Now advances by the same Dt ChargeElapsed does, so they cancel).
+		AttackAnimHoldUntil = Ctx.Now + FMath::Max(0.0f, EffectiveChargeTime - ChargeElapsed);
+
 		// Track the moving source: re-send the warning location once we've drifted (separation nudges us while we
 		// hold), so the indicator points at where we actually are. Throttled by distance (no per-frame Reliable spam).
 		if (FVector::DistSquared(GetActorLocation(), LastWarnLocation) > WarnResendDistSq)
@@ -1049,7 +1122,7 @@ void AFPSREnemyBase::ServerTickAttack(const FFPSRServerAttackContext& Ctx)
 			SendRangedWarning(true);
 		}
 
-		if (ChargeElapsed >= RangedChargeTime)
+		if (ChargeElapsed >= EffectiveChargeTime)
 		{
 			FireProjectile(Ctx);
 			NotifyAttacked(Ctx.Now); // ADR 0008: unify the melee/ranged "attack succeeded" signal for stall detection
@@ -1062,7 +1135,7 @@ void AFPSREnemyBase::ServerTickAttack(const FFPSRServerAttackContext& Ctx)
 	case EFPSRRangedChargeState::Cooldown:
 	{
 		CooldownElapsed += Dt;
-		if (CooldownElapsed >= RangedFireCooldown)
+		if (CooldownElapsed >= EffectiveFireCooldown)
 		{
 			ChargeState = EFPSRRangedChargeState::Idle;
 		}
@@ -1394,7 +1467,12 @@ void AFPSREnemyBase::TickServerMovement(const FFPSRServerMoveContext& Ctx)
 		}
 	}
 
-	if (bKnockbackActive)
+	// STAT1 §6 속박 (bDisableMovement): knockback moves the actor with a direct AddActorWorldOffset just below,
+	// which never reads GetEffectiveMoveSpeed() — so root needs its OWN gate here, or a rooted enemy still gets
+	// launched by an explosion (이동불가가 반쪽이 됨, spec's own wording). Suppressed, not decayed, while rooted: an
+	// already-in-flight impulse simply resumes decaying the instant root lifts, rather than being silently discarded.
+	const bool bRootedByStatus = HealthComponent && HealthComponent->GetResolvedStatus().bDisableMovement;
+	if (bKnockbackActive && !bRootedByStatus)
 	{
 		AddActorWorldOffset(KnockbackVelocityXY * Ctx.ScaledDelta, true); // swept: blocks against walls
 		const float DecayFactor = FMath::Exp(-Ctx.ScaledDelta / FMath::Max(KnockbackDecayTime, 0.01f));

@@ -12,6 +12,9 @@
 #include "Enemy/FPSREnemyRosterDataAsset.h"
 #include "Enemy/FPSREnemyHealthComponent.h" // VIT1: InitializeVitals at Acquire time
 #include "Combat/FPSRVitalsProfile.h" // VIT1: FFPSRResolvedVitals::Resolve(profile x deck)
+#include "Combat/FPSRCombatStatics.h" // STAT1 C2: FPSRCombat::ApplyDamage — the DoT batch pass's damage bridge
+#include "Weapon/FPSRWeaponFragment.h" // STAT1 C2: FPSRWeaponHooks::NotifyStatusKill + FFPSRFireContext
+#include "Settings/FPSRStatusEffectSettings.h" // STAT1 C2: UFPSRStatusEffectSettings::ResolveCatalog
 #include "Run/FPSRRunScheduleDataAsset.h" // C3: EvalStageAt(...).MaxEliteAlive — AcquireEnemy's elite-cap gate
 #include "Hero/FPSRCharacter.h"
 #include "Core/FPSRLogChannels.h"
@@ -307,6 +310,12 @@ void UFPSREnemySpawnSubsystem::TickEnemyMovement(float DeltaTime)
 	if (!bFrozen)
 	{
 		SweepDyingEnemies(Now);
+		// STAT1 §6 진행·조합 (C2단계): same !bFrozen gate as SweepDyingEnemies right above (프리즈·전환에는 안
+		// 돈다), placed AHEAD of the ActiveEnemies==0 / PlayerPawns early-returns below so status still progresses
+		// through a full-DBNO window (§10 월드 14) and doesn't need the Agents/Locations movement scratch built
+		// further down this pass. Iterates StatusActiveEnemies ONLY — never ActiveEnemies in full — so its cost is
+		// O(감염된 적), not O(alive) (제1원리, 액터당 비용 최소화).
+		AdvanceStatusEffects();
 	}
 
 	if (ActiveEnemies.Num() == 0)
@@ -1616,6 +1625,14 @@ AFPSREnemyBase* UFPSREnemySpawnSubsystem::AcquireEnemy(const FVector& Location, 
 	}
 
 	ActiveEnemies.Add(Enemy);
+	// STAT1 §5-6: the swarm/elite half of the status-progression driver gate — turned ON the INSTANT this enemy
+	// joins ActiveEnemies (the set AdvanceStatusEffects/TickEnemyMovement iterate), turned OFF at both
+	// ActiveEnemies.Remove sites below (ReleaseEnemy / BeginDying) so a status bit can never land on an actor
+	// nothing will ever advance again.
+	if (UFPSREnemyHealthComponent* EnemyHealth = Enemy->GetHealthComponent())
+	{
+		EnemyHealth->SetStatusDriverPresent(true);
+	}
 	if (bIsEliteClass)
 	{
 		++ActiveEliteCount; // paired decrement: BeginDying (death) / ReleaseEnemy (every other teardown) — see their own comments
@@ -1631,6 +1648,14 @@ void UFPSREnemySpawnSubsystem::ReleaseEnemy(AFPSREnemyBase* Enemy)
 	}
 
 	ActiveEnemies.Remove(Enemy);
+	// STAT1 §5-6/§6: driver OFF + leave the status compact list — see AcquireEnemy's own comment for the pairing.
+	// Both are idempotent (SetStatusDriverPresent is a plain flag write; TSet::Remove on an absent key is a
+	// documented safe no-op), so this costs nothing extra for the common case of an enemy that was never infected.
+	if (UFPSREnemyHealthComponent* EnemyHealth = Enemy->GetHealthComponent())
+	{
+		EnemyHealth->SetStatusDriverPresent(false);
+	}
+	StatusActiveEnemies.Remove(Enemy);
 	// Elite cap accounting (C3): every teardown path EXCEPT death routes through here (pool release / rear-drain /
 	// kill-Z recycle / stage-carry overflow / ReleaseAllEnemies) — the death path decrements in BeginDying instead
 	// (it never reaches this function), so the two decrement points never double-count the same enemy.
@@ -1667,6 +1692,16 @@ void UFPSREnemySpawnSubsystem::BeginDying(AFPSREnemyBase* Enemy)
 	// (EnterDyingState) can never front-line-shield the enemies behind it. It also frees its GlobalAliveCap /
 	// MaxActiveEnemies slot at once, so a corpse dwelling does NOT starve the spawner.
 	ActiveEnemies.Remove(Enemy);
+	// STAT1 §5-6/§6: driver OFF + leave the status compact list — the DEATH path's own removal site, paired with
+	// ReleaseEnemy's (see AcquireEnemy's own comment). Must run BEFORE EnterDyingState below, which separately
+	// closes this enemy's status VALUES (§7-6 closure point) — that call needs no driver-flag help from here, but
+	// the ORDER matters conceptually: the driver that would have advanced this corpse's status is gone the instant
+	// it leaves ActiveEnemies, exactly like every other "may move/attack this pass" privilege BeginDying revokes here.
+	if (UFPSREnemyHealthComponent* EnemyHealth = Enemy->GetHealthComponent())
+	{
+		EnemyHealth->SetStatusDriverPresent(false);
+	}
+	StatusActiveEnemies.Remove(Enemy);
 	// Elite cap accounting (C3): the death path's decrement point (paired with ReleaseEnemy's — see that function's
 	// comment for why the two never double-count). Decremented HERE, at the same instant the enemy leaves
 	// ActiveEnemies, rather than later at FinishDyingEnemy/Deactivate — for the SAME reason ActiveEnemies itself
@@ -1702,6 +1737,119 @@ void UFPSREnemySpawnSubsystem::BeginDying(AFPSREnemyBase* Enemy)
 		}
 		FinishDyingEnemy(DyingEnemies[EarliestIndex].Enemy.Get());
 		DyingEnemies.RemoveAtSwap(EarliestIndex);
+	}
+}
+
+void UFPSREnemySpawnSubsystem::RegisterStatusActive(AFPSREnemyBase* Enemy)
+{
+	if (!Enemy || !HasServerAuthority())
+	{
+		return;
+	}
+	// A TSet, not a TArray: idempotent by construction, which is what lets every successful ApplyStatus call this
+	// (not just a tracked "first ever" one) — see this method's own header comment for why that is observationally
+	// the same as "register on first apply".
+	StatusActiveEnemies.Add(Enemy);
+}
+
+void UFPSREnemySpawnSubsystem::AdvanceStatusEffects()
+{
+	if (StatusActiveEnemies.Num() == 0)
+	{
+		return; // O(0) — the common case once nothing on the field is infected (§6 압축 리스트의 비용 계약).
+	}
+
+	const UFPSRStatusCatalogDataAsset* Catalog = UFPSRStatusEffectSettings::ResolveCatalog();
+	UWorld* World = GetWorld();
+
+	// Snapshot before iterating: a DoT kill dealt below can synchronously reach BeginDying (HealthComponent::
+	// ApplyDamage -> OnDeath -> ... -> BeginDying), which removes THAT SAME enemy from StatusActiveEnemies mid-walk
+	// — ranging over the live TSet while this loop's own body can mutate it is the classic "modify container while
+	// iterating" hazard. Uses the MEMBER scratch (Reset keeps capacity) rather than a local inline array: a wide-AoE
+	// status build can infect a large fraction of the field, and an inline budget that spills would then heap-
+	// allocate EVERY frame — the same reason the movement pass below keeps its own scratch as members (W1 P2-4).
+	TArray<AFPSREnemyBase*>& Snapshot = StatusStepScratch;
+	Snapshot.Reset(StatusActiveEnemies.Num());
+	for (const TObjectPtr<AFPSREnemyBase>& EnemyPtr : StatusActiveEnemies)
+	{
+		if (AFPSREnemyBase* Enemy = EnemyPtr.Get())
+		{
+			Snapshot.Add(Enemy);
+		}
+	}
+
+	for (AFPSREnemyBase* Enemy : Snapshot)
+	{
+		UFPSREnemyHealthComponent* HealthComp = IsValid(Enemy) ? Enemy->GetHealthComponent() : nullptr;
+		if (!HealthComp)
+		{
+			StatusActiveEnemies.Remove(Enemy); // stale/invalid entry (defensive — see BeginDying/ReleaseEnemy, which
+			continue;                          // should already have removed any enemy that reaches this state).
+		}
+
+		// STAT1 §6 저항 행: the SAME profile ApplyDamage already mitigates this target's damage against — status
+		// resist and damage mitigation can never disagree. Null -> 1.0/1.0, never 0 (a 0 fallback would make every
+		// enemy without an authored profile completely status-immune).
+		const UFPSRVitalsProfileDataAsset* Profile = HealthComp->GetVitalsProfile();
+		const float WeakResist = Profile ? Profile->WeakResistScale : 1.0f;
+		const float StrongResist = Profile ? Profile->StrongResistScale : 1.0f;
+
+		float DotDamage = 0.0f;
+		AActor* DotInstigator = nullptr;
+		UFPSRWeaponInstance* DotSourceWeapon = nullptr;
+		TArray<uint8, TInlineAllocator<8>> Expired;
+		TArray<uint8, TInlineAllocator<8>> Fired;
+		HealthComp->AdvanceStatus(Catalog, WeakResist, StrongResist, DotDamage, DotInstigator, DotSourceWeapon, Expired, Fired);
+
+		if (DotDamage > 0.0f)
+		{
+			FFPSRDamageSpec Spec;
+			// STAT1 §6 도트 행: suppress the lifesteal ability-activation trigger (240 infected enemies x a 0.5s
+			// tick would otherwise storm one player's ASC with TryActivateAbility calls every second — see
+			// FFPSRDamageSpec::bSuppressDealtDamageEvent's own comment) and BACKDATE the shield-regen time anchor
+			// rather than freezing it (§6-2 — see bDotRegenAnchorPolicy's own comment for why "freeze" alone lets a
+			// delayed-regen shield compound back to full while still being hit every tick).
+			Spec.bSuppressDealtDamageEvent = true;
+			Spec.bDotRegenAnchorPolicy = true;
+			// Spec.DamageType stays the empty/default tag (무속성) — STAT1 §6/G2-J: the profile validator only
+			// blocks tags that do NOT start with "DamageType.", so an authored DamageType.Status was never actually
+			// blocked; this unit simply doesn't attribute a damage TYPE to a status DoT (§2 비목표).
+			const FPSRCombat::FDamageResult Result = FPSRCombat::ApplyDamage(Enemy, DotDamage, DotInstigator, Spec);
+			if (Result.bKilled)
+			{
+				// STAT1 §6 킬 시임: rebuild a minimal FireContext from the status's own stored weak refs — the SAME
+				// "the live context is long gone" precedent FPSRProjectile.cpp's MakeProjectileFireContext uses for
+				// a delayed projectile kill (NotifyStatusKill's own header comment). A stale/expired DotSourceWeapon
+				// resolves to a null Instance, which NotifyStatusKill's own guard turns into a quiet no-op — the DoT
+				// itself still killed the enemy either way (G1-15).
+				FFPSRFireContext KillCtx;
+				KillCtx.Avatar = Cast<APawn>(DotInstigator);
+				KillCtx.Controller = KillCtx.Avatar ? KillCtx.Avatar->GetController() : nullptr;
+				KillCtx.World = World;
+				KillCtx.Instance = DotSourceWeapon;
+				KillCtx.ShotCount = 1;
+				KillCtx.bAuthority = true; // this whole pass already runs inside TickEnemyMovement's own HasServerAuthority() gate
+				FPSRWeaponHooks::NotifyStatusKill(KillCtx, Enemy);
+			}
+		}
+
+		// §6 압축 리스트: leave the list once none of the 8 slots are still set. HasStatus(0..7) is used rather than
+		// a new aggregate accessor — §7-7 caps UFPSREnemyHealthComponent's public surface at 6 entry points, and
+		// HasStatus is already one of them; 8 cheap bit tests cost nothing next to the ApplyDamage call this same
+		// iteration may already have paid for.
+		bool bStillInfected = false;
+		for (uint8 Slot = 0; Slot < 8; ++Slot)
+		{
+			if (HealthComp->HasStatus(Slot))
+			{
+				bStillInfected = true;
+				break;
+			}
+		}
+		if (!bStillInfected)
+		{
+			StatusActiveEnemies.Remove(Enemy);
+		}
 	}
 }
 
