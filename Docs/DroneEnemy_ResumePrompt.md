@@ -20,6 +20,7 @@
 | 컨셉 시트 | ✅ mjs 에 `DRONE_*` + `LEG_DR/LEG_DR_TEL/LEG_DR_ELITE`, CHOMPER 사용처 7곳 교체, 같은 URL 재게시(라벨 "Drone replaces Chomper") |
 | 색 판정 | ✅ LUT 7색 전부 자주/뜨거운 쪽, 시안·파랑 0(hue 160~260 검사) |
 | **⚠️ BP 교체 함정(2026-09-07 실측)** | `BP_EnemyMeleeBase` 의 Mesh 컴포넌트에 **머티리얼 오버라이드 `MI_EnemyProto_Bipyramid`** 가 남아 있어 메시만 드론으로 바꿔도 프로토 머티리얼(자체 spin WPO·빨강)이 그려진다 — 사용자 영상 "자체적으로 돌고 있어" 의 정체. 헤드리스 CDO 프로브로 확인(`override_materials=[MI_EnemyProto_Bipyramid]`). **메시 교체 시 Materials Element 0 오버라이드를 비워야**(기본값 리셋) 슬롯의 `MI_EnemyVoxel_Drone` 이 쓰인다. BP 편집 = 사용자 |
+| **⚠️ BP 교체 함정 2 — 메시 상대 회전(2026-09-07 실측)** | `BP_EnemyMeleeBase` Mesh 컴포넌트에 **상대 회전 Yaw −90°** 가 남아 있다(옛 메시의 정면이 +Y 였던 시절 값). 코드는 액터를 플레이어/이동 방향으로 돌린다(`TickServerMovement` → `SetActorRotation(Ctx.FaceDir)`, FaceDir = 플로우 방향 · 탈출 경로 방향 · 정지 링에선 플레이어 방향)지만, 메시가 액터 안에서 −90° 돌아 있어 드론 코어가 **오른쪽 옆구리**를 향한다. 해소 = Mesh 컴포넌트 트랜스폼 회전의 **세 번째 칸(Yaw, 파란색) −90 → 0**. 드론 정면 = 메시 +X = 액터 전방. `BP_EnemyRangedBase` 는 Pitch −90 이 있으니 그쪽 교체 때도 같은 확인. BP 편집 = 사용자 |
 | **남은 것** | 🔲 적 300 병합 실측(`stat RHI`, ROTOR WPO 가 인스턴싱을 안 깨는지) 🔲 PIE(사용자): `BP_EnemyMeleeBase` 메시 슬롯 → `SM_EnemyVoxel_Drone`, `HoverHeight` 120~180 저작, 텔레그래프 가독 🔲 `Telegraph`·`RotorRate` ↔ CPD 상태 슬롯 연동(후속) 🔲 엘리트 변형(9~11 예비 요소) |
 
 ## §0 세션 시작 방법
