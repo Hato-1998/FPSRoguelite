@@ -35,18 +35,19 @@ def _from_obj_header(key, default):
         pass
     unreal.log_warning(f"[DRONE-MAT] {key} not found in OBJ header — using default {default}")
     return default
-HUB_OFFSET_CM = _from_obj_header("HUB_CM", 41.25)
+HUB_OFFSET_CM = _from_obj_header("HUB_CM", 41.25)          # 기록용(회전 계산엔 더 이상 안 씀)
 ROTOR_RATE_TPS = _from_obj_header("ROTOR_RATE_TPS", 3.0)
+ROTOR_UV_SPAN_CM = _from_obj_header("ROTOR_UV_SPAN_CM", 60.0)
 
 # 순서 = 요소 ID. 값 = ArtDirection §A/§B-10 번역표(DroneEnemy_ResumePrompt §4). 시안·파랑 없음(§A-3-5 예약).
 COLORS = [
     ("ColorBodyTop",   "#3A2748"),
     ("ColorBodySide",  "#2A1E36"),
     ("ColorCoreFrame", "#1A1024"),
-    ("ColorCore",      "#FF3B4E"),   # 기본 라이트 색. 텔레그래프 시 ColorTelegraph 로 보간
-    ("ColorArm",       "#6E2E44"),
+    ("ColorCore",      "#FF6B2C"),   # 약점 = 읽힘점(§B-5 텔레그래프 색). 텔레그래프 시 ColorTelegraph 로 보간+펄스
+    ("ColorArm",       "#4A2E58"),
     ("ColorHub",       "#2A1E36"),
-    ("ColorRotor",     "#8A3A52"),
+    ("ColorRotor",     "#B34A70"),   # 몸통(#3A2748)과 확실히 갈리는 밝은 자주 — 사용자 지적 2026-09-07
     ("ColorLight",     "#FF3B4E"),
     ("ColorFin",       "#6E2E44"),
     ("ColorRsv9",      "#3A2748"),
@@ -147,6 +148,7 @@ def build_material():
     p_lw = scalar(mat, "LineWidth", 0.06, -2100, 800)
     p_ld = scalar(mat, "LineDarken", 0.35, -2100, 900)
     grid = custom_node(mat, "GridMask",
+                       "if ((int)floor(UV.x) == 6) return 0.0;\n"   # 로터 면의 UV 소수부는 오프셋 인코딩이라 격자선 없음
                        "float2 f = frac(UV);\nfloat2 e = min(f, 1.0 - f);\nreturn (min(e.x, e.y) < W) ? 1.0 : 0.0;",
                        ["UV", "W"], F1, -1500, 800)
     link(uv, "", grid, "UV", "UV->GridMask")
@@ -157,10 +159,10 @@ def build_material():
     link(p_ld, "", base, "Darken", "LineDarken->BaseShade")
 
     # 이미시브: 코어(3)·라이트(7). Telegraph 0..1 → 색을 텔레그래프 색으로 보간 + 펄스 ------------------------
-    p_ce = scalar(mat, "CoreEmissive", 5.0, -2100, 1000)
+    p_ce = scalar(mat, "CoreEmissive", 8.0, -2100, 1000)
     p_le = scalar(mat, "LightEmissive", 3.0, -2100, 1100)
     p_tel = scalar(mat, "Telegraph", 0.0, -2100, 1200)
-    c_tel = vector(mat, "ColorTelegraph", "#FF6B2C", -2100, 1300)
+    c_tel = vector(mat, "ColorTelegraph", "#FFB347", -2100, 1300)   # 텔레그래프 = 코어보다 더 뜨겁게(밝은 주황) + 펄스
     tnode = MEL.create_material_expression(mat, unreal.MaterialExpressionTime, -2100, 1450)
     emis = custom_node(mat, "DroneEmissive",
                        "int id = (int)floor(UV.x);\n"
@@ -179,27 +181,22 @@ def build_material():
     link(p_tel, "", emis, "Tel", "Telegraph->Emissive")
     link(tnode, "", emis, "T", "Time->Emissive")
 
-    # 로터 회전 WPO: 요소 6, 허브 k = floor(UV.v), 허브 중심 (±Hub, ±Hub) 로컬, +Z 축 회전 → 로컬 delta → 월드 벡터 ----
+    # 로터 회전 WPO: 요소 6, 허브 k = floor(UV.y), 허브 오프셋 d = (frac(UV) - 0.5) × Span (생성기가 UV 소수부에 인코딩).
+    # 정점 위치·좌표 변환을 쓰지 않는다 — 2026-09-07 실사고: WorldPos→Local 경로는 정점별 로컬 위치가 상수로 들어와
+    # 십자 4개가 통째로 드론 중심을 돌았다. 로컬 오프셋 → Transform(Local→World 벡터) 만 남긴다.
     p_rate = scalar(mat, "RotorRate", ROTOR_RATE_TPS, -2100, 1600)
-    p_hub = scalar(mat, "HubOffsetCm", HUB_OFFSET_CM, -2100, 1700)
-    lpos = MEL.create_material_expression(mat, unreal.MaterialExpressionWorldPosition, -2100, 1850)
-    to_local = MEL.create_material_expression(mat, unreal.MaterialExpressionTransformPosition, -1800, 1850)
-    to_local.set_editor_property("transform_source_type", unreal.MaterialPositionTransformSource.TRANSFORMPOSSOURCE_WORLD)
-    to_local.set_editor_property("transform_type", unreal.MaterialPositionTransformSource.TRANSFORMPOSSOURCE_LOCAL)
-    link(lpos, "", to_local, "", "WorldPos->Local")
+    p_span = scalar(mat, "RotorUvSpanCm", ROTOR_UV_SPAN_CM, -2100, 1700)
     rot = custom_node(mat, "RotorWPO",
                       "int id = (int)floor(UV.x);\n"
                       "if (id != 6) return float3(0, 0, 0);\n"
                       "int k = (int)floor(UV.y);\n"
-                      "float2 c = float2((k & 1) == 0 ? Hub : -Hub, (k & 2) == 0 ? Hub : -Hub);\n"
+                      "float2 d = (frac(UV) - 0.5) * Span;\n"
                       "float a = T * Rate * 6.2831853 + k * 1.5707963;\n"
-                      "float2 d = LocalPos.xy - c;\n"
                       "float2 r = float2(d.x * cos(a) - d.y * sin(a), d.x * sin(a) + d.y * cos(a));\n"
                       "return float3(r - d, 0);",
-                      ["UV", "LocalPos", "Hub", "Rate", "T"], F3, -1500, 1700)
+                      ["UV", "Span", "Rate", "T"], F3, -1500, 1700)
     link(uv, "", rot, "UV", "UV->RotorWPO")
-    link(to_local, "", rot, "LocalPos", "LocalPos->RotorWPO")
-    link(p_hub, "", rot, "Hub", "HubOffsetCm->RotorWPO")
+    link(p_span, "", rot, "Span", "RotorUvSpanCm->RotorWPO")
     link(p_rate, "", rot, "Rate", "RotorRate->RotorWPO")
     link(tnode, "", rot, "T", "Time->RotorWPO")
     to_world = MEL.create_material_expression(mat, unreal.MaterialExpressionTransform, -1000, 1700)
@@ -214,7 +211,7 @@ def build_material():
     link_prop(p_rough, unreal.MaterialProperty.MP_ROUGHNESS, "Roughness")
     MEL.recompile_material(mat)
     ok = EAL.save_asset(mat.get_path_name())
-    log(f"{MAT_NAME} built (save={ok}, HubOffsetCm={HUB_OFFSET_CM}, RotorRate={ROTOR_RATE_TPS})")
+    log(f"{MAT_NAME} built (save={ok}, RotorUvSpanCm={ROTOR_UV_SPAN_CM}, RotorRate={ROTOR_RATE_TPS})")
     return mat
 
 

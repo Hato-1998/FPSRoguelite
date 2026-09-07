@@ -112,8 +112,8 @@ RRRRR......RRRRR
 .HHHASSSSSSAHHH.
 ..L.SSSSSSSS.L..
 ....SSSSSSSS....`;
-const LEG_DR = { B: '#3A2748', S: '#2A1E36', F: '#1A1024', C: P.enemyRim, A: '#6E2E44', H: '#2A1E36', R: '#8A3A52', L: P.enemyRim, N: '#6E2E44' };
-const LEG_DR_TEL = { ...LEG_DR, C: P.enemyTel, L: P.enemyTel };            // 공격 텔레그래프 = 코어·라이트 색 전환
+const LEG_DR = { B: '#3A2748', S: '#2A1E36', F: '#1A1024', C: P.enemyTel, A: '#4A2E58', H: '#2A1E36', R: '#B34A70', L: P.enemyRim, N: '#4A2E58' };   // 코어 = 약점 = 텔레그래프 색, 로터 = 밝은 자주(2026-09-07)
+const LEG_DR_TEL = { ...LEG_DR, C: '#FFB347', L: P.enemyTel };            // 공격 텔레그래프 = 코어·라이트 색 전환
 const LEG_DR_ELITE = { ...LEG_DR, B: '#4A2E58', S: '#36243F', C: P.elite, L: P.elite };
 
 // 각진 비틀(각 실루엣) 18×12

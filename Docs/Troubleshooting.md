@@ -462,6 +462,17 @@ connect_material_expressions(mask, "", scenetex, "")             # ✅ 0번 핀 
 실물 = `Scripts/gen_rifle_hardsurface.py` 의 `to_engine()`(소켓용) / `to_file()`(정점용) 분리.
 (같은 실패형 = G7 "대조군 없이 단정" · G14 "측정 도구가 그 차이를 못 본다" — 여기서는 **측정 지표 자체가 부호를 못 본 것**.)
 
+### D13. WPO 에서 "정점의 로컬 위치"를 WorldPosition→TransformPosition(World→Local) 로 구하면 정점별 값이 안 나온다 (2026-09-07, 복셀 드론 로터)
+
+로터를 허브 축으로 돌리려고 `WorldPosition → TransformPosition(World→Local)` 을 Custom 노드에 넣어 `d = LocalPos.xy − hub` 로 회전시켰다.
+그래프·T3D·UV·HLSL 전부 의도대로였는데 스태틱 메시 에디터에서는 **십자 4개가 통째로 드론 중심을 도는** 모양이 났다(사용자: *"전체가 제자리에서 도는데 로터는 안 돈다"*).
+정점별 `LocalPos` 가 상수(≈0)로 들어오면 `R(θ)(−c)+c` = 허브별 동일 평행이동이 되어 정확히 그 모양이 된다. 헤드리스로는 재현이 안 되고(뷰포트 스크린샷 검정), 원인 규명보다 **경로 제거**가 빨랐다.
+
+→ **정석 = 정점 위치를 쓰지 않는다.** 필요한 오프셋(허브 중심으로부터의 dx,dy)을 **생성기가 UV 소수부에 인코딩**(`frac(UV) = 0.5 + d/SPAN`, 정수부는 요소ID·허브번호 그대로)하고 머티리얼은 `d = (frac(UV)−0.5)·SPAN` 만 읽는다. 로컬 오프셋 → `Transform(Local→World, 벡터)` 하나만 남는다.
+실물 = `Scripts/gen_voxel_drone.py`(인코딩) · `Scripts/author_voxel_drone_material.py`(RotorWPO) · 검증 = OBJ 를 파싱해 소수부에서 복원한 오프셋 vs 실제 코너 위치 최대 오차 0.000cm(스크래치 `check_rotor_uv.py` 방식).
+같은 계열: 쩝쩝이 JAW 그룹도 요소ID 만으로 갈랐다(정점 z 로 안 가름) — **"그룹·오프셋은 전부 UV 에서"** 가 이 파이프라인의 규칙이다.
+(같은 실패형 = G14 "측정 도구가 그 차이를 못 본다" — 노드 속성·코드가 다 맞아도 셰이더 안 값은 못 본다. 사용자 관찰이 유일한 계측이었다.)
+
 ## E. 데이터 · 컴포넌트 · BP
 
 ### E0. BP 에셋을 열 때마다 에디터가 스택 오버플로로 죽는다

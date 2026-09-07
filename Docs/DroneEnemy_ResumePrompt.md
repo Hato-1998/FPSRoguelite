@@ -13,8 +13,8 @@
 | 항목 | 상태 |
 |---|---|
 | 생성기 `Scripts/gen_voxel_drone.py` | ✅ 격자 7.5 · 16×16×6 칸(120×120×45) · 몸통 8×8×5 · X자 허브 3×3 ×4 · 십자 로터 5×5 ×4(허브 위 한 층) · 정면 4×4 프레임 + 2×2 코어 · 밑면 라이트 4 · 꼬리 핀. 단언 = 좌우 대칭 · 로터 0/45/90° 자기교차 0 · 요소 누락. **정본 = 이 파일의 층 기술**, 시트 3뷰(`DRONE_TOP/FRONT/SIDE`)는 `--sprites` 로 파생(§3 의 "mjs 가 정본"을 뒤집음 — 3D 는 2D 3장으로 유일 복원이 안 된다) |
-| 요소ID | 0 몸통윗면(+Z 면) · 1 몸통옆/밑면 · 2 코어프레임 · 3 코어 · 4 팔 · 5 허브 · 6 로터 · 7 라이트 · 8 꼬리핀 · 9~11 예비. **0/1 은 면 방향으로 갈린다.** 로터 허브 번호 = `floor(UV.v)`(k&1 → x 부호, k&2 → y 부호) |
-| 머티리얼 `M_FPSREnemyVoxelDrone` / `MI_EnemyVoxel_Drone` | ✅ LUT 12 + 격자선 + 코어·라이트 이미시브(`Telegraph` 0..1 → `#FF6B2C` 보간 + 펄스) + **로터 회전 WPO**(WorldPos→Local, 허브 축 +Z 회전, Local→World 벡터). `HubOffsetCm`·`RotorRate` 는 생성기 OBJ 헤더에서 읽음(상수 드리프트 실사고 1회). 실 RHI get_statistics VS 241 / PS 249 에러 0 |
+| 요소ID | 0 몸통윗면(+Z 면) · 1 몸통옆/밑면 · 2 코어프레임 · 3 코어(**약점**, `#FF6B2C`) · 4 팔 · 5 허브 · 6 로터(`#B34A70`) · 7 라이트 · 8 꼬리핀 · 9~11 예비. **0/1 은 면 방향으로 갈린다.** 로터 = 정수부(6, 허브 k) + **소수부 = 허브 오프셋**(`0.5 + d/60cm`) — 2026-09-07 수정, Troubleshooting D13 |
+| 머티리얼 `M_FPSREnemyVoxelDrone` / `MI_EnemyVoxel_Drone` | ✅ LUT 12 + 격자선(로터 면 제외) + 코어·라이트 이미시브(`Telegraph` 0..1 → `#FFB347` 보간 + 펄스, 코어 이미시브 8) + **로터 회전 WPO = UV 소수부 오프셋만 사용**(위치 변환 없음 — 1차의 WorldPos→Local 경로는 십자 4개가 통째로 도는 실사고, D13). `RotorUvSpanCm`·`RotorRate` 는 생성기 OBJ 헤더에서 읽음. 실 RHI get_statistics 에러 0 |
 | 에셋 | ✅ `SM_EnemyVoxel_Drone` sections=1 · 1,310 tris · bbox ±60/±60/±22.5, 슬롯 0 = MI |
 | 파이프라인 | ✅ `render_voxel_drone_preview.py`(5앵글) · `import_voxel_drone.py` · `run_voxel_drone_pipeline.bat` |
 | 컨셉 시트 | ✅ mjs 에 `DRONE_*` + `LEG_DR/LEG_DR_TEL/LEG_DR_ELITE`, CHOMPER 사용처 7곳 교체, 같은 URL 재게시(라벨 "Drone replaces Chomper") |
