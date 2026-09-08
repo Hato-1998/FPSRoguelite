@@ -8,6 +8,12 @@ REM  non-ASCII in .bat files.
 REM ============================================================
 setlocal
 
+REM Some non-interactive shells (e.g. an agent's tool shell) set this to 1,
+REM which stops cmd from resolving batch files in the CURRENT directory.
+REM Forge's own webui-user.bat does a bare "call webui.bat", so it dies there.
+REM A normal user double-click never has this set; clearing it makes both work.
+set "NoDefaultCurrentDirectoryInExePath="
+
 set "FORGE_DIR=F:\StableDiffusion\stable-diffusion-webui-forge"
 set "URL=http://127.0.0.1:7860"
 
