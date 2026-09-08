@@ -59,7 +59,7 @@ cap(CX - tw, NECK, CX + tw, HIP + cm(4), int(cm(6)), 170)
 # A trapezoid that narrows downward reads as a jacket closing toward the waist.
 jw = SHO_W / 2 * 1.15
 JT = NECK + cm(2)                 # jacket top
-JB = HIP + cm(16)                 # LONG closed jacket - hem down to mid-thigh
+JB = HIP + cm(30)                 # FULLY closed jacket - hem well past mid-thigh (hides bottoms)
 # Keep tapering all the way down. A wide panel that ends abruptly at hip height is
 # exactly what produced the protruding side flaps before; a continuous taper past
 # the hip reads as one closed garment instead.
