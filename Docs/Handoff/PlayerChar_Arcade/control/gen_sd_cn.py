@@ -1,7 +1,7 @@
 # ENE turnaround - txt2img with ControlNet (depth blockout) via Forge REST API.
 # Prompt is READ FROM THE DOC so the doc stays the single source of truth.
 #
-#   python gen_sd_cn.py <depth.png> <tag> <weight> <seed> <width> <view> [ref.png|-] [ref_w]
+#   python gen_sd_cn.py <depth.png> <tag> <weight> <seed> <width> <view> [ref.png|-] [style_fidelity]
 #
 import io, os, re, sys, json, base64, urllib.request, datetime
 
@@ -29,6 +29,10 @@ neg = block('### 3-2.', '### 3-3.')
 # per-view extra negatives (doc 3-3-2). Swapping the view clause alone does not
 # beat the model's front-facing prior - the front has to be suppressed too.
 VIEW_NEG_MARK = {'side': u'**\uce21\uba74(`side`)**', 'back': u'**\ud6c4\uba74(`back`)**'}
+# ...and per-view POSITIVE reinforcement (doc 3-3-2-P): elements that DO exist in
+# the confirmed front sheet but that the profile/back prior quietly drops. Never
+# a new design element - only re-raising something v19 already has.
+VIEW_POS_MARK = {'side': u'**\uce21\uba74 \ud3ec\uc9c0\ud2f0\ube0c**', 'back': u'**\ud6c4\uba74 \ud3ec\uc9c0\ud2f0\ube0c**'}
 
 def post(path, payload, timeout=1200):
     req = urllib.request.Request(API + path, data=json.dumps(payload).encode('utf-8'),
@@ -42,7 +46,7 @@ def get(path):
 
 VIEWS = {
     'front': 'front view, facing viewer',
-    'side' : 'from side, profile, facing right',
+    'side' : 'from side, profile, facing left',
     'back' : 'from behind, back view, facing away from viewer',
 }
 pose_path = sys.argv[1]
@@ -52,7 +56,7 @@ seed      = int(sys.argv[4]) if len(sys.argv) > 4 else 1234567
 width     = int(sys.argv[5]) if len(sys.argv) > 5 else 832
 view      = (sys.argv[6] if len(sys.argv) > 6 else 'front').lower()
 ref_path  = sys.argv[7] if len(sys.argv) > 7 else '-'
-ref_w     = float(sys.argv[8]) if len(sys.argv) > 8 else 0.45
+ref_sf    = float(sys.argv[8]) if len(sys.argv) > 8 else 0.5
 
 # swap ONLY the view clause; every other token stays byte-identical across views
 # (that is what keeps the three sheets the same character). Side/back get 1.5:
@@ -65,6 +69,7 @@ if view != 'front':
         assert VIEWS['front'] in pos, 'front view clause not found in prompt'
         pos = pos.replace(VIEWS['front'], '(%s:1.5)' % VIEWS[view])
     neg = neg + ', ' + fence_after(VIEW_NEG_MARK[view], DOCTEXT.index('### 3-3-2.'))
+    pos = pos + ', ' + fence_after(VIEW_POS_MARK[view], DOCTEXT.index('### 3-3-2-P.'))
 
 print('view     :', view, '->', VIEWS[view])
 print('view neg :', 'appended' if view != 'front' else '(none)')
@@ -94,9 +99,12 @@ units = [{
 }]
 
 # reference_only - doc 2 step 2, finally implemented (doc 3-3-4). Without it the
-# side/back sheets came back as a different outfit entirely (v8b). It cuts both
-# ways: feeding a FRONT reference also drags the composition back toward front,
-# so it releases early (0.55) and its weight is the first dial to drop.
+# side/back sheets came back as a different outfit entirely (v8b/v23).
+# MEASURED 2026-09-08: this Forge build IGNORES 'weight' for reference modules -
+# w=0.45 and w=0.65 gave byte-for-byte identical images, while dropping the unit
+# entirely changed 99.6% of pixels. The dial that works is threshold_a
+# (= "Style Fidelity" in the UI, Balanced mode only). Do not tune 'weight' here
+# and conclude anything from it.
 if ref_path not in ('-', '', 'none'):
     mods = get('/controlnet/module_list')['module_list']
     pick = (next((m for m in mods if m.lower() == 'reference_only'), None)
@@ -110,15 +118,23 @@ if ref_path not in ('-', '', 'none'):
         'image': ref_b64,
         'module': pick,
         'model': 'None',
-        'weight': ref_w,
+        'weight': 1.0,         # ignored by Forge for reference modules (measured)
         'resize_mode': 'Just Resize',
         'control_mode': 'Balanced',
         'pixel_perfect': True,
+        # Window is NOT tunable away from this. Measured 2026-09-08: the
+        # reference's identity work IS the early layout work. Starting late
+        # (0.30) brought the goggles back but lost the outfit and silhouette
+        # entirely (v25 == the no-reference look); running it late-and-strong
+        # is strictly worse than running it early. Composition drift at high
+        # style fidelity (v24) is fixed by lowering fidelity, not by moving
+        # this window.
         'guidance_start': 0.0,
         'guidance_end': 0.55,
-        'threshold_a': 0.5,    # Forge: reference "Style Fidelity" (Balanced only)
+        'threshold_a': ref_sf, # Forge: reference "Style Fidelity" - the real dial
     })
-    print('ref unit : %s  w=%s  %s' % (pick, ref_w, os.path.basename(ref_path)))
+    print('ref unit : %s  style_fidelity=%s  %s' % (pick, ref_sf, os.path.basename(ref_path)))
+    print('ref mods :', [m for m in mods if 'reference' in m.lower()])
 
 payload = {
     'prompt': pos, 'negative_prompt': neg,

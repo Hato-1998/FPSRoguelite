@@ -74,6 +74,13 @@ if VIEW == 'side':
     d.ellipse([hx - HEAD_W / 2, CHIN - cm(15), hx + cm(3), CHIN + cm(5)], fill=200)
     d.ellipse([hx - HEAD_W / 2, TOP, hx + HEAD_W / 2, CHIN], fill=210)
     d.ellipse([hx + cm(7), CHIN - cm(21), hx + cm(23), CHIN - cm(3)], fill=214)
+    # ...then mirror the whole thing. Drawn facing right because that is easier
+    # to reason about (+x = forward), emitted facing LEFT because that is what
+    # the model actually draws for "profile": v20_side came back facing left off
+    # a right-facing blockout, so depth at 0.45 was fighting the output instead
+    # of constraining it - and the goggles, whose depth bump then sat on the
+    # back of the head, vanished entirely.
+    img = img.transpose(Image.FLIP_LEFT_RIGHT)
 else:
     # ---- front / back ------------------------------------------------------
     # 'back' is the mirror of 'front' and shares this geometry on purpose:
