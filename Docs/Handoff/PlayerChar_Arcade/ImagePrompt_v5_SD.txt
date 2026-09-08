@@ -44,6 +44,7 @@ v5 초판(Illustrious) 결과가 "우주복·의료복"으로 읽혔다 — 흰 
 masterpiece, best quality, very aesthetic, official art,
 
 (thick outline:1.3), (flat color:1.35), (cel shading:1.2), hard shadow, limited palette, bold lineart,
+(front view, facing viewer:1.3), (full body:1.2),
 (sky blue glowing trim:1.35), (light blue accents:1.25), (pale blue hair:1.25), (light blue tinted goggles:1.3),
 
 (head wider than shoulders:1.35), (large head:1.35), (short legs:1.3), (petite:1.2), (chibi:0.5),
@@ -51,7 +52,7 @@ short neck, narrow shoulders, chibi-like proportions, rounded body,
 (thick rounded limbs:1.25), (puffy sleeves:1.2), toy-like, (oversized shoes:1.25),
 
 1girl, solo, full body, standing, a-pose, arms slightly away from body, open relaxed hands, empty hands,
-front view, facing viewer, simple background, grey background,
+simple background, grey background,
 
 blunt bangs, chin-length bob cut, single pale streak in bangs,
 over-ear headphones, cable,

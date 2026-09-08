@@ -24,11 +24,24 @@ def get(path):
     with urllib.request.urlopen(API + path, timeout=60) as r:
         return json.loads(r.read().decode('utf-8'))
 
+VIEWS = {
+    'front': 'front view, facing viewer',
+    'side' : 'from side, profile, facing right',
+    'back' : 'from behind, back view, facing away from viewer',
+}
 pose_path = sys.argv[1]
 tag       = sys.argv[2] if len(sys.argv) > 2 else 'cn'
 weight    = float(sys.argv[3]) if len(sys.argv) > 3 else 1.0
 seed      = int(sys.argv[4]) if len(sys.argv) > 4 else 1234567
 width     = int(sys.argv[5]) if len(sys.argv) > 5 else 832
+view      = (sys.argv[6] if len(sys.argv) > 6 else 'front').lower()
+
+# swap ONLY the view clause; every other token stays byte-identical across views
+# (that is what keeps the three sheets the same character)
+if view != 'front':
+    assert VIEWS['front'] in pos, 'front view clause not found in prompt'
+    pos = pos.replace(VIEWS['front'], VIEWS[view])
+print('view     :', view)
 
 with open(pose_path, 'rb') as f:
     pose_b64 = base64.b64encode(f.read()).decode('ascii')

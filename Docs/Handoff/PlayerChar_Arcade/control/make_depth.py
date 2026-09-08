@@ -4,6 +4,8 @@
 import sys, math
 from PIL import Image, ImageDraw, ImageFilter
 
+VIEW = (sys.argv[2] if len(sys.argv) > 2 else 'front').lower()
+
 W, H = 832, 1216
 TOP, SOLE = 70, 1150
 FIG = SOLE - TOP
@@ -25,15 +27,22 @@ def cap(x0, y0, x1, y1, r, v):     # rounded capsule
     r = int(max(0, min(r, (x1 - x0) / 2 - 1, (y1 - y0) / 2 - 1)))
     d.rounded_rectangle([x0, y0, x1, y1], radius=r, fill=v)
 
+SIDE = (VIEW == 'side')
+if SIDE:
+    # side view: torso DEPTH becomes the width; head keeps its depth (still big)
+    HEAD_W = cm(41.25)
+    SHO_W  = cm(18.75)
+
 # legs (leggings) - thin, they are the part that must NOT dominate
 lw = cm(11) / 2
-for s in (-1, 1):
-    x = CX + s * cm(9)
+LEG_XS = [0] if SIDE else [-cm(9), cm(9)]
+for lx in LEG_XS:
+    x = CX + lx
     cap(x - lw, HIP, x + lw, ANKLE, int(lw), 150)
 # boots - oversized, wider than the leg
-bw, bh = cm(17) / 2, cm(15)
-for s in (-1, 1):
-    x = CX + s * cm(9)
+bw, bh = (cm(30) / 2 if SIDE else cm(17) / 2), cm(15)
+for lx in LEG_XS:
+    x = CX + lx + (cm(5) if SIDE else 0)   # side: boot toe points forward
     cap(x - bw, SOLE - bh, x + bw, SOLE, int(bh * 0.45), 175)
 # torso
 tw = cm(26) / 2
@@ -44,7 +53,7 @@ cap(CX - jw, NECK + cm(2), CX + jw, HIP - cm(6), int(cm(8)), 165)
 # arms, A-pose 45 deg
 UA, FA, aw = cm(26), cm(22), cm(9) / 2
 dd = math.sqrt(0.5)
-for s in (-1, 1):
+for s in ([1] if SIDE else [-1, 1]):
     sx, sy = CX + s * jw * 0.9, NECK + cm(6)
     ex, ey = sx + s * UA * dd, sy + UA * dd
     wx, wy = ex + s * FA * dd, ey + FA * dd
@@ -55,8 +64,9 @@ for s in (-1, 1):
 d.ellipse([CX - HEAD_W / 2, TOP, CX + HEAD_W / 2, CHIN], fill=210)
 
 img = img.filter(ImageFilter.GaussianBlur(6))
-out = sys.argv[1] if len(sys.argv) > 1 else 'depth_ene_front.png'
+out = sys.argv[1] if len(sys.argv) > 1 else ('depth_ene_%s.png' % VIEW)
 img.convert('RGB').save(out)
+print('view      :', VIEW)
 print('saved     :', out)
 print('heads     : %.2f' % (FIG / HEAD_H))
 print('head/shldr: %.2f  (target 1.35)' % (HEAD_W / SHO_W))
