@@ -30,9 +30,14 @@ Meshy Phase 1~5 는 끝났다(§0-A) — 다운로드·A/B 판정(B 채택)·비
 | 후면 | `sd_out/v28_back_hem_w045_seed1234567_120930.png` |
 | 비교 시트(높이 정규화) | `Docs/Handoff/PlayerChar_Arcade/ENE_turnaround_compare.png` |
 
-세 장 다 **문서에서 바이트 단위로 재현된다**(재생성 diff mean 0.000 실측) — 프롬프트 정본은
-`ImagePrompt_v5_SD.txt`, 생성은 `control/gen_sd_cn.py`. 재현 명령:
+🔴 **정정(2026-09-08 실측) — 정면은 커밋된 블록아웃으로 재현되지 않는다.** `depth_ene_front.png` 는
+v19 생성(11:28) *이후* 커밋 `85c7e737`(11:56)에서 내용이 교체됐다. 지금 것으로 돌리면 픽셀의 15%가
+달라진다(max 250). v19 당시의 블록아웃을 **`control/depth_ene_front_v19adopted.png`** 로 보존해 뒀고,
+그걸로 돌리면 **diff 0** 이다(실증). 측면·후면은 교체 이후에 생성돼서 영향 없다.
+→ 정면을 다시 뽑을 일이 생기면 반드시 보존본을 쓸 것. 안 그러면 §7 크롭·Meshy 투입물이 조용히 다른
+인물이 된다. 프롬프트 정본은 `ImagePrompt_v5_SD.txt`, 생성은 `control/gen_sd_cn.py`. 재현 명령:
 ```
+python gen_sd_cn.py depth_ene_front_v19adopted.png <tag> 0.45 1234567 832 front          # 정면: 보존본이어야 한다
 python gen_sd_cn.py depth_ene_side.png <tag> 0.45 1234567 832 side ../sd_out/v19_fullclosed_w045_seed1234567_112834.png 0.5
 python gen_sd_cn.py depth_ene_back.png <tag> 0.45 1234567 832 back ../sd_out/v19_fullclosed_w045_seed1234567_112834.png 0.5
 ```
@@ -158,10 +163,21 @@ python gen_sd_cn.py depth_ene_back.png <tag> 0.45 1234567 832 back ../sd_out/v19
    좌우 반대로 걸려 얼굴 돌출부가 뒤통수에 가고 **고글이 통째로 사라진다**. 블록아웃을 모델이
    선호하는 방향에 맞춰라(`make_depth.py` 는 오른쪽으로 그린 뒤 마지막에 좌우 반전한다).
 
+16. **팔레트 잠금은 모델이 아니라 프롬프트의 성질이다.** 체크포인트 4종 12장 전부 적 예약색 유입이
+   사실상 0(최대 0.27%). §3-2 네거티브는 모델을 안 가린다 — 모델을 바꿔도 이 축은 안 무너진다.
+17. **danbooru 태그 어휘가 없는 모델에서는 아트 방향이 통째로 붕괴한다.** `sd_xl_base_1.0` 은 플랫셀·
+   굵은 아웃라인·의상 지시를 전부 무시하고 3D 인형 렌더 + 흰 바닥판을 냈다. 이 프롬프트는 애니 태그
+   모델 전용이라고 못 박아 둔다.
+18. **체크포인트를 바꾸면 등신이 먼저 움직인다 — 그리고 후보들은 전부 나쁜 쪽으로 움직인다.**
+   같은 depth·같은 시드로 5.19(Illustrious) ↔ 6.60(NoobAI). 「태그로는 더 안 내려간다」는 아래 미결
+   항목은 **모델 교체로도 안 내려간다**로 강화됐다. 전문 = `ImagePrompt_v5_SD.txt` §6.
+
 **도구** — Forge 는 `F:\StableDiffusion
 un_sd_forge.bat`(리포 밖). `--api` 켜져 있다.
 생성은 `control/gen_sd_cn.py`(프롬프트를 문서에서 읽으므로 문서와 갈라지지 않는다),
-검수는 `control/measure.py`(복셀 칸 환산) + `control/ratio.py`(상·하체 폭).
+검수는 `control/measure.py`(복셀 칸 환산) + `control/ratio.py`(상·하체 폭)
++ **`control/measure_proportions.py`**(등신·머리/어깨 — 실루엣에서 목 핀치를 찾아 재므로 판끼리 비교 가능,
+`--debug` 로 눈금 위치 확인) + **`control/compare_models.py`**(체크포인트 비교 시트).
 ⚠️ `measure.py` 는 고정 높이에서 자르므로 실루엣이 바뀌면 엉뚱한 곳을 잰다 — **반드시 그림과 대조**.
 
 ---

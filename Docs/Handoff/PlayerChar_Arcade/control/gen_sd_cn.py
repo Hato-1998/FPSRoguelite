@@ -1,7 +1,7 @@
 # ENE turnaround - txt2img with ControlNet (depth blockout) via Forge REST API.
 # Prompt is READ FROM THE DOC so the doc stays the single source of truth.
 #
-#   python gen_sd_cn.py <depth.png> <tag> <weight> <seed> <width> <view> [ref.png|-] [style_fidelity]
+#   python gen_sd_cn.py <depth.png> <tag> <weight> <seed> <width> <view> [ref.png|-] [style_fidelity] [checkpoint]
 #
 import io, os, re, sys, json, base64, urllib.request, datetime
 
@@ -57,6 +57,7 @@ width     = int(sys.argv[5]) if len(sys.argv) > 5 else 832
 view      = (sys.argv[6] if len(sys.argv) > 6 else 'front').lower()
 ref_path  = sys.argv[7] if len(sys.argv) > 7 else '-'
 ref_sf    = float(sys.argv[8]) if len(sys.argv) > 8 else 0.5
+ckpt      = sys.argv[9] if len(sys.argv) > 9 else '-'
 
 # swap ONLY the view clause; every other token stays byte-identical across views
 # (that is what keeps the three sheets the same character). Side/back get 1.5:
@@ -144,11 +145,18 @@ payload = {
     'seed': seed, 'batch_size': 1, 'n_iter': 1, 'save_images': False,
     'alwayson_scripts': {'controlnet': {'args': units}},
 }
+# Forge is a long-running process shared with the user, who has a checkpoint loaded
+# in the UI; a per-request override restores their model when this request finishes,
+# whereas POSTing to /sdapi/v1/options would change it globally out from under them.
+if ckpt not in ('-', '', 'none'):
+    payload['override_settings'] = {'sd_model_checkpoint': ckpt}
+    payload['override_settings_restore_afterwards'] = True
+    print('ckpt     :', ckpt)
 r = post('/sdapi/v1/txt2img', payload)
 
-os.makedirs(OUT, exist_ok=True)
 stamp = datetime.datetime.now().strftime('%H%M%S')
 p = os.path.join(OUT, '%s_w%s_seed%d_%s.png' % (tag, str(weight).replace('.', ''), seed, stamp))
+os.makedirs(os.path.dirname(p), exist_ok=True)
 with open(p, 'wb') as f:
     f.write(base64.b64decode(r['images'][0].split(',', 1)[-1]))
 print('saved    :', p)
