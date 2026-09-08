@@ -35,7 +35,8 @@ if SIDE:
 
 # legs (leggings) - thin, they are the part that must NOT dominate
 lw = cm(11) / 2
-LEG_XS = [0] if SIDE else [-cm(6), cm(6)]   # pull legs inward: hips must not exceed shoulders
+LEG_XS = [0] if SIDE else [-cm(4.5), cm(4.5)]  # hips must NOT exceed the torso (26cm):
+                                               # span = 2*(4.5+8.5) = 26cm exactly
 # taper: thigh 15cm -> calf 11cm. The model drew 6.5/5.8cm from an 11cm capsule,
 # so the blockout has to overshoot the spec, not merely match it.
 TH, CA = cm(17) / 2, cm(12) / 2
