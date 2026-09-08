@@ -50,7 +50,7 @@ masterpiece, best quality, very aesthetic, official art,
 
 (head wider than shoulders:1.35), (large head:1.35), (short legs:1.3), (petite:1.2), (chibi:0.5),
 short neck, narrow shoulders, chibi-like proportions, rounded body,
-(thick rounded limbs:1.25), (puffy sleeves:1.2), (thick thighs:1.3), (thick legs:1.25), toy-like, (oversized shoes:1.25),
+(thick rounded limbs:1.25), (puffy sleeves:1.2), (thick thighs:1.15), (thick legs:1.25), (narrow hips:1.25), (slim waist:1.1), toy-like, (oversized shoes:1.25),
 
 1girl, solo, full body, standing, a-pose, arms slightly away from body, open relaxed hands, empty hands,
 simple background, grey background,
