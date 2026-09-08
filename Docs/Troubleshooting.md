@@ -709,7 +709,7 @@ g = json.loads(unreal.MaterialNodeService.export_material_graph(path))  # connec
 ## H. 로컬라이제이션 · 파이프라인 스크립트
 
 ### H1. .ps1 실행이 "문자열 터미네이터 없음" 파서 에러로 죽는다
-**원인**: 한글 주석이 든 스크립트가 **BOM 없는 UTF-8** — Windows PowerShell 5.1은 BOM 없는 파일을 CP949로 읽어 문자열 리터럴이 깨진다. → 스크립트는 **UTF-8 BOM**으로 저장(2026-08-12 LOC0 실측).
+**원인**: 한글 주석이 든 스크립트가 **BOM 없는 UTF-8** — Windows PowerShell 5.1은 BOM 없는 파일을 CP949로 읽어 문자열 리터럴이 깨진다. → 스크립트는 **UTF-8 BOM**으로 저장(2026-08-12 LOC0 실측). **BOM 만으로는 안 끝난다** — 훅이 stdin 을 받는다면 H8 도 같이 볼 것.
 
 ### H2. 웹에서 받은 CSV의 한글/일본어가 ã‚·ë¡œ 깨져 저장된다
 **원인**: PS5.1 `Invoke-WebRequest`의 `$Response.Content`(문자열)는 charset 미지정 응답을 **Latin-1로 디코드** → UTF-8 재저장 시 이중 인코딩. → `RawContentStream.ToArray()`로 원시 바이트를 받아 그대로 `WriteAllBytes`(LOC0 sync 스크립트가 레퍼런스).
@@ -732,6 +732,46 @@ g = json.loads(unreal.MaterialNodeService.export_material_graph(path))  # connec
 `python -c "open(out,'w',encoding='utf-8').write(open(p,encoding='utf-16').read())"`.
 EC ② 판정처럼 **네임스페이스별 엔트리 수를 세는 검사**는 반드시 이 경로로 한다(2026-08-19 실측: 총 98엔트리 =
 `Card` 52 / `CardEffect` 16 / `UI` 25 / `FPSRBossDefinition` 4 / `FPSRCardEffect` 1 — 뒤 둘이 C++ LOCTEXT 잔여).
+
+### H8. 훅 승인창이 한글 작업에서만 계속 뜬다 (사유 문구도 깨져 있다)
+`확인됨` **PS 5.1 훅의 한글 경로는 두 군데고, BOM 하나만 고치면 증상이 안 사라진다.**
+
+**증상**: PreToolUse 훅이 걸린 도구(`notion-update-page` 등)를 쓸 때마다 "훅 입력을 파싱하지 못해 호출 주체를
+확인할 수 없습니다" 승인창이 뜬다. 영어만 든 페이로드는 조용히 지나가고, **한국어 로그를 넣으면 거의 매번** 뜬다.
+
+**원인(진범)**: `[Console]::In.ReadToEnd()` 는 stdin 을 **콘솔 코드페이지**(한국어 Windows = cp949)로 읽는데
+훅 페이로드는 **UTF-8** 이다. 한글 3바이트의 끝 바이트가 **뒤따르는 ASCII 큰따옴표를 트레일 바이트로 삼켜**
+JSON 이 닫히지 않는다 → `ConvertFrom-Json` 실패 → `catch` 의 `ask` 발화.
+
+```
+{"content":"한글만 있는 내용입니다"}}   ← 보낸 것
+{"content":"?��?�??�는 ?�용?�니??}}    ← 훅이 본 것 (닫는 " 가 삼켜짐)
+```
+
+한글이 구조문자 **바로 앞**에 오는지에 따라 갈리므로 "항상"이 아니라 "계속" 뜬다.
+
+**같이 죽는 것**: 파싱이 실패하면 `agent_type` 도 못 읽는다 → 가드가 **deny 대신 ask 로 격하**된다. 확인창이
+잦아 습관적으로 "한 번만 허용"을 누르는 순간 경계가 그대로 뚫린다. **성가심이 아니라 안전장치 고장이다.**
+
+**해결**: 콘솔에 맡기지 말고 스트림을 직접 다룬다(2026-09-08, `78bdb146`).
+
+```powershell
+$Utf8   = New-Object System.Text.UTF8Encoding($false)
+$buffer = New-Object System.IO.MemoryStream
+[Console]::OpenStandardInput().CopyTo($buffer)
+$raw    = $Utf8.GetString($buffer.ToArray()).TrimStart([char]0xFEFF)
+# 출력도 Write-Output 말고 바이트로 직접
+$out = [Console]::OpenStandardOutput(); $bytes = $Utf8.GetBytes($json)
+$out.Write($bytes, 0, $bytes.Length); $out.Flush()
+```
+
+파일을 읽는 훅이면 `Get-Content` 에 **`-Encoding UTF8`** 도 빠뜨리지 말 것 — 이게 없어 SessionStart 훅이
+매 세션 `PROGRESS.md` 를 깨진 채 컨텍스트에 주입하고 있었다. 사유 문구가 깨져 보이는 것은 **별개 원인 = H1(BOM)**.
+
+**🚨 검증을 ASCII 로 하면 절대 안 잡힌다.** 이 훅의 문서화된 드라이런이 `echo '{"agent_type":"pm-board",...}'`
+로 전부 ASCII 라서, 2026-09-05 에 BOM 만 고치고 "통과" 판정이 났고 증상은 그대로 남았다. 인코딩 검증은
+**`chcp 949` 를 강제하고 한글이 든 JSON** 을 물려야 한다 — 코드페이지 3종(949/65001/437) × 페이로드 5종으로 확인.
+(같은 실패형 = G7 "대조군 없이 원인 단정".)
 
 ---
 
