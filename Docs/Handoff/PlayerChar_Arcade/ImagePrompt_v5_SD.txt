@@ -44,7 +44,7 @@ v5 초판(Illustrious) 결과가 "우주복·의료복"으로 읽혔다 — 흰 
 masterpiece, best quality, very aesthetic, official art,
 
 (thick outline:1.3), (flat color:1.35), (cel shading:1.2), hard shadow, limited palette, bold lineart,
-(sky blue glowing trim:1.35), (light blue accents:1.3), (dark navy hair:1.2), (light blue tinted goggles:1.3),
+(sky blue glowing trim:1.35), (light blue accents:1.25), (pale blue hair:1.25), (light blue tinted goggles:1.3),
 
 (head wider than shoulders:1.35), (large head:1.35), (short legs:1.3), (petite:1.2), (chibi:0.5),
 short neck, narrow shoulders, chibi-like proportions, rounded body,
@@ -59,7 +59,7 @@ over-ear headphones, cable,
 (layered clothes:1.25), (oversized jacket:1.2), cropped jacket, standing collar, wide collar,
 off-white jacket, panel lines, asymmetrical shoulder pad, fingerless gloves, arm guard,
 (chest harness:1.2), thick belt, (large utility pouch:1.2), thigh pouch, buckle, d-ring,
-black bodysuit, black leggings, covered legs,
+(black tank top:1.25), (short pants:1.25), (black leggings under shorts:1.3), covered legs, midriff,
 oversized platform sneakers, chunky sneakers,
 
 glowing accents, back panel
@@ -97,7 +97,7 @@ text, watermark, signature, logo, dimension lines, arrows, border,
 multiple girls, 2girls, extra limbs, bad hands, bad anatomy, worst quality, low quality, jpeg artifacts,
 
 fur trim, fur collar, fishnet, chain, thin straps, lace, frills, gradient clothes, holographic,
-midriff, navel, crop top only, bare shoulders, bare thighs
+(bare thighs:1.3), (bare legs:1.3), naked legs, skirt, dress, one-piece bodysuit
 ```
 > 🔴 네거티브 첫 줄이 **`§A-3-4` 적 예약 대역 차단**이다. `#FF3B4E`·`#FF6B2C`·`#FF1E7A` 가 화면에
 > 들어오면 4인 협동 × 적 200~300 에서 아군이 적으로 읽힌다(ADR 0016 **I1**, 복구 불가 등급).
