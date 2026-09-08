@@ -59,16 +59,11 @@ cap(CX - tw, NECK, CX + tw, HIP + cm(4), int(cm(6)), 170)
 # A trapezoid that narrows downward reads as a jacket closing toward the waist.
 jw = SHO_W / 2 * 1.15
 JT = NECK + cm(2)                 # jacket top
-JB = HIP + cm(16)                 # LONG closed jacket - hem down to mid-thigh
-# Keep tapering all the way down. A wide panel that ends abruptly at hip height is
-# exactly what produced the protruding side flaps before; a continuous taper past
-# the hip reads as one closed garment instead.
-d.polygon([(CX - jw,        JT),
-           (CX + jw,        JT),
-           (CX + jw * 0.70, HIP),
-           (CX + jw * 0.55, JB),
-           (CX - jw * 0.55, JB),
-           (CX - jw * 0.70, HIP)], fill=165)
+JB = NECK + cm(30)                # jacket hem - cropped, above the navel
+d.polygon([(CX - jw,      JT),
+           (CX + jw,      JT),
+           (CX + jw * 0.62, JB),  # taper inward at the hem
+           (CX - jw * 0.62, JB)], fill=165)
 # arms, A-pose 45 deg
 UA, FA, aw = cm(26), cm(22), cm(9) / 2
 dd = math.sqrt(0.5)
