@@ -172,6 +172,17 @@ python gen_sd_cn.py depth_ene_back.png <tag> 0.45 1234567 832 back ../sd_out/v19
    같은 depth·같은 시드로 5.19(Illustrious) ↔ 6.60(NoobAI). 「태그로는 더 안 내려간다」는 아래 미결
    항목은 **모델 교체로도 안 내려간다**로 강화됐다. 전문 = `ImagePrompt_v5_SD.txt` §6.
 
+19. 🔴 **이 Forge 빌드는 Hires fix 를 그냥 켜면 무조건 500 이다.** `enable_hr` 만 보내면
+   ControlNet 없이도, 업스케일러를 바꿔도 `TypeError` 로 죽는다 — Forge 가 `hr_additional_modules`
+   를 None 인 채 순회한다. **빈 리스트를 명시적으로 보내야** 한다. 문서가 Hires fix 를 "선택"으로만
+   적어 두고 아무도 안 켰던 이유가 이것일 것이다. 그리고 **200 응답은 hires 가 돌았다는 증거가 아니다**
+   — 반환 이미지 크기가 1.5배인지 봐라(규칙 9 의 재판).
+20. **Hires fix 는 켜는 게 맞다 — 그리고 denoise 0.5 는 열등지배다.** §7 크롭 크기로 정규화해서 재면
+   선 에너지가 정면 +23% · 측면 +27.7% · 후면 +37.4% 오른다. denoise 0.5 는 디테일이 제일 낮은데
+   실루엣은 제일 많이 움직인다(IoU 0.979 vs 0.986). **0.35 를 쓴다.** 전문 = `ImagePrompt_v5_SD.txt` §7.
+21. **"얼마나 벗어났나"를 정규화 크롭의 픽셀 차이로 재지 마라 — 서브픽셀 정렬이 지배한다.**
+   그 지표는 d0.25 를 d0.35 보다 더 벗어난 것으로 뒤집어 보고했다(눈으로는 정반대). **실루엣 IoU** 로 재라.
+
 **도구** — Forge 는 `F:\StableDiffusion
 un_sd_forge.bat`(리포 밖). `--api` 켜져 있다.
 생성은 `control/gen_sd_cn.py`(프롬프트를 문서에서 읽으므로 문서와 갈라지지 않는다),

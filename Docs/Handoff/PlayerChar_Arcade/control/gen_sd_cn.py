@@ -1,7 +1,7 @@
 # ENE turnaround - txt2img with ControlNet (depth blockout) via Forge REST API.
 # Prompt is READ FROM THE DOC so the doc stays the single source of truth.
 #
-#   python gen_sd_cn.py <depth.png> <tag> <weight> <seed> <width> <view> [ref.png|-] [style_fidelity] [checkpoint]
+#   python gen_sd_cn.py <depth.png> <tag> <weight> <seed> <width> <view> [ref.png|-] [style_fidelity] [checkpoint] [hires_denoise]
 #
 import io, os, re, sys, json, base64, urllib.request, datetime
 
@@ -58,6 +58,7 @@ view      = (sys.argv[6] if len(sys.argv) > 6 else 'front').lower()
 ref_path  = sys.argv[7] if len(sys.argv) > 7 else '-'
 ref_sf    = float(sys.argv[8]) if len(sys.argv) > 8 else 0.5
 ckpt      = sys.argv[9] if len(sys.argv) > 9 else '-'
+hires     = sys.argv[10] if len(sys.argv) > 10 else '-'
 
 # swap ONLY the view clause; every other token stays byte-identical across views
 # (that is what keeps the three sheets the same character). Side/back get 1.5:
@@ -152,6 +153,30 @@ if ckpt not in ('-', '', 'none'):
     payload['override_settings'] = {'sd_model_checkpoint': ckpt}
     payload['override_settings_restore_afterwards'] = True
     print('ckpt     :', ckpt)
+
+# hires fix - doc 3-4 already prescribes this (1.5x, R-ESRGAN 4x+ Anime6B, that
+# upscaler confirmed installed on this Forge) but it was only ever listed as
+# optional and never actually switched on - every plate through 2026-09-08 is a
+# raw first pass. denoise is the argument (not hardcoded) because it's the one
+# dial trading added linework detail against drifting off the approved
+# composition (doc 3-4 starting point: 0.35). ControlNet already runs both
+# passes here (Forge reports `Hr Option: HiResFixOption.BOTH` in the output
+# metadata), so the depth constraint isn't lost in the second pass.
+if hires not in ('-', '', 'none'):
+    hires_denoise = float(hires)
+    payload['enable_hr'] = True
+    payload['hr_scale'] = 1.5
+    payload['hr_upscaler'] = 'R-ESRGAN 4x+ Anime6B'
+    payload['hr_second_pass_steps'] = 0   # 0 = reuse the first-pass step count
+    payload['denoising_strength'] = hires_denoise
+    # MEASURED 2026-09-08: this Forge build (f2.0.1v1.10.1) answers 500 with a bare
+    # TypeError to ANY enable_hr request - no ControlNet needed to reproduce it, and
+    # changing the upscaler does not help. It iterates hr_additional_modules without
+    # a None guard, so the field has to be sent explicitly as an empty list. Do not
+    # drop this line because "it looks like a no-op". Proven by output size:
+    # 512x768 -> 768x1152 the moment it is present, 500 the moment it is absent.
+    payload['hr_additional_modules'] = []
+    print('hires    : 1.5x R-ESRGAN 4x+ Anime6B  denoise=%s' % hires_denoise)
 r = post('/sdapi/v1/txt2img', payload)
 
 stamp = datetime.datetime.now().strftime('%H%M%S')
