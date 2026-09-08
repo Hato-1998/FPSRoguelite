@@ -10,4 +10,4 @@ Write-Output '--- uncommitted ---'
 git status --short
 Write-Output ''
 Write-Output '=== PROGRESS.md (top) - PM board hard gate: claim via /board before any commit-producing work ==='
-if (Test-Path PROGRESS.md) { Get-Content PROGRESS.md -TotalCount 24 } else { Write-Output '(PROGRESS.md not found)' }
+if (Test-Path PROGRESS.md) { Get-Content PROGRESS.md -TotalCount 24 -Encoding UTF8 } else { Write-Output '(PROGRESS.md not found)' }

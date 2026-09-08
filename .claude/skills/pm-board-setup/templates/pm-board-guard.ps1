@@ -14,8 +14,14 @@
 # 드라이런:
 #   echo '{"agent_type":"pm-board","tool_input":{"command":"update_properties"}}' | powershell -NoProfile -File Scripts/pm-board-guard.ps1
 #   → permissionDecision deny JSON. command 를 insert_content 로 바꾸면 출력 없이 종료(허용).
+#   ⚠️ 이 드라이런은 ASCII 라 인코딩 버그를 못 잡는다 — 실제 페이로드처럼 한글이 든 JSON 으로도 한 번 돌려볼 것.
 
 $ErrorActionPreference = 'Stop'
+
+# 훅 입출력은 UTF-8 이지만 [Console]::In/Out 은 콘솔 코드페이지를 따른다. cp949 콘솔에서 UTF-8 페이로드를
+#   읽으면 한글 3바이트 시퀀스의 끝 바이트가 뒤따르는 ASCII 따옴표를 트레일 바이트로 삼켜 JSON 이 깨지고,
+#   catch 가 항상 발화해 한글이 든 모든 갱신이 'ask' 로 떨어진다. 스트림을 직접 다뤄 콘솔 인코딩을 우회한다.
+$Utf8 = New-Object System.Text.UTF8Encoding($false)
 
 function Write-Decision {
     param([string]$Decision, [string]$Reason)
@@ -26,11 +32,17 @@ function Write-Decision {
             permissionDecisionReason = $Reason
         }
     }
-    $payload | ConvertTo-Json -Depth 5 -Compress | Write-Output
+    $json  = $payload | ConvertTo-Json -Depth 5 -Compress
+    $bytes = $Utf8.GetBytes($json)
+    $out   = [Console]::OpenStandardOutput()
+    $out.Write($bytes, 0, $bytes.Length)
+    $out.Flush()
     exit 0
 }
 
-$raw = [Console]::In.ReadToEnd()
+$buffer = New-Object System.IO.MemoryStream
+[Console]::OpenStandardInput().CopyTo($buffer)
+$raw = $Utf8.GetString($buffer.ToArray()).TrimStart([char]0xFEFF)
 
 try {
     $hook = $raw | ConvertFrom-Json

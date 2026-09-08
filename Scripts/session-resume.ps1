@@ -11,4 +11,4 @@ Write-Output '--- uncommitted (Content/* = user asset work; code should already 
 git status --short
 Write-Output ''
 Write-Output '=== PROGRESS.md (top) - open the FULL file + Game.md before working (CLAUDE.md rule) ==='
-if (Test-Path PROGRESS.md) { Get-Content PROGRESS.md -TotalCount 24 } else { Write-Output '(PROGRESS.md not found)' }
+if (Test-Path PROGRESS.md) { Get-Content PROGRESS.md -TotalCount 24 -Encoding UTF8 } else { Write-Output '(PROGRESS.md not found)' }
