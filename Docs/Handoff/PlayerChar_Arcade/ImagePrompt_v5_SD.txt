@@ -29,50 +29,75 @@ SD 가 제미나이보다 유리한 지점 = **네거티브 프롬프트**. 제�
 
 ## 3. 프롬프트 (Illustrious / NoobAI 계열 기준 · danbooru 태그)
 
-### 3-1. Positive - 정면
+### 3-1. Positive - 정면  (v6 의상개정 2026-09-08)
 
-🔴 **토큰 순서가 곧 가중치다.** CLIP 은 75토큰 단위로 잘려 처리되고 뒤쪽 청크일수록 영향이 약하다.
-그래서 **스타일·비례를 맨 앞(1번째 청크)에** 두고 의상·소품을 뒤로 보낸다.
-(v5 초판은 스타일 토큰이 57개 중 52~57번째 = 3번째 청크에 있었다 — 이 트랙이 세 번 실패한
-항목이 가장 약한 자리에 있었다. 2026-09-08 정정.)
-**대문자 강조는 CLIP 에서 무의미하다** — 강조는 `(term:1.3)` 가중치 문법으로만 준다.
+🔴 **토큰 순서가 곧 가중치다.** CLIP 은 75토큰 단위로 잘려 뒤쪽 청크일수록 영향이 약하다.
+스타일·비례를 **1번째 청크**에 두고 의상·소품을 뒤로 보낸다. 대문자 강조는 CLIP 에서 무의미하며
+강조는 `(term:1.3)` 문법으로만 준다. **1.4 이상은 쓰지 않는다**(SDXL 에서 형태가 탄다).
+
+**v6 변경** = 의상을 **미니멀 → 레이어드 사이버펑크 스트리트**로. 키워드 = 사이버펑크 × 스트리트.
+v5 초판(Illustrious) 결과가 "우주복·의료복"으로 읽혔다 — 흰 크롭재킷 + 검정 보디수트만으로는
+스트리트가 안 된다. 레이어·하네스·파우치·볼륨 칼라가 그 인상을 만든다.
+등신·머리폭·사지 테이퍼는 v5 에서 미달이라 **가중치를 올렸다**.
 
 ```
 masterpiece, best quality, very aesthetic, official art,
 
-(thick outline:1.3), (bold lineart:1.3), (flat color:1.25), cel shading, hard shadow, limited palette,
+(thick outline:1.3), (flat color:1.35), (cel shading:1.2), hard shadow, limited palette, bold lineart,
+(sky blue glowing trim:1.35), (light blue accents:1.3), (dark navy hair:1.2), (light blue tinted goggles:1.3),
 
-(head wider than shoulders:1.3), (large head:1.2), short neck, narrow shoulders,
-chibi-like proportions, rounded body, (thick rounded limbs:1.15), toy-like, (oversized shoes:1.2),
+(head wider than shoulders:1.35), (large head:1.35), (short legs:1.3), (petite:1.2), (chibi:0.5),
+short neck, narrow shoulders, chibi-like proportions, rounded body,
+(thick rounded limbs:1.25), (puffy sleeves:1.2), toy-like, (oversized shoes:1.25),
 
 1girl, solo, full body, standing, a-pose, arms slightly away from body, open relaxed hands, empty hands,
 front view, facing viewer, simple background, grey background,
 
-blunt bangs, chin-length bob cut, very dark blue hair, single pale streak in bangs, blue hair ornament,
-tinted goggles, cyan tinted goggles, over-ear headphones, cable,
+blunt bangs, chin-length bob cut, single pale streak in bangs,
+over-ear headphones, cable,
 
-off-white cropped jacket, puffy long sleeves, chest harness, strap, emblem,
-black bodysuit, black leggings, covered legs, thigh strap,
+(layered clothes:1.25), (oversized jacket:1.2), cropped jacket, standing collar, wide collar,
+off-white jacket, panel lines, asymmetrical shoulder pad, fingerless gloves, arm guard,
+(chest harness:1.2), thick belt, (large utility pouch:1.2), thigh pouch, buckle, d-ring,
+black bodysuit, black leggings, covered legs,
 oversized platform sneakers, chunky sneakers,
-cyan glowing trim, glowing accents, back panel
+
+glowing accents, back panel
 ```
 
-> 가중치는 초기값이다. 1.3 을 넘기면 SDXL 에서 형태가 타므로 **1.4 이상은 쓰지 않는다.**
-> 스타일이 부족하면 가중치를 올리기 전에 **체크포인트를 바꿔 본다**(A/B/C 비교가 먼저인 이유).
+**의상 설계 의도(그림에서 확인할 것)**
+- **레이어가 스트리트를 만든다** — 보디수트(베이스) → 크롭 재킷(오버사이즈) → 하네스·벨트(위에 얹힘).
+  세 층이 겹쳐 보여야 한다. 한 겹이면 v5 처럼 우주복으로 읽힌다.
+- **덩어리 소품 소수** — 파우치 2~3개를 **크게**. 얇은 끈·체인·피시넷은 넣지 않는다
+  (복셀 3.75cm 에서 1칸 미만은 소멸한다 - §복셀 제약).
+- **퍼 칼라 대신 각진 볼륨 칼라** — 털은 복셀에서 표현 불가.
+- **비대칭은 어깨패드 하나만** — 좌우 비대칭을 늘리면 복셀 생성기의 좌우대칭 단언을 못 쓴다.
+
+🔴 **색 제약(레퍼런스에서 가장 크게 번역되는 부분)**
+레퍼런스는 보라·블루 그라디언트가 주도한다. 그러나 보라 `#8B6BFF` 는 §A-3-5 에서
+**"자기 자신"** 예약색이다 — 대면적으로 쓰면 4인 협동에서 팀원 구분 신호와 충돌한다.
+→ **시안 `#4FD8FF` 가 주도하고 보라는 소면적 액센트**(`small purple accent` 한 토큰만 준 이유).
+그라디언트 자체도 §A-5·I7(평면 채색) 위반이라 쓰지 않는다.
 
 ### 3-2. Negative (여기가 SD 의 진짜 강점이다 — 문장이 아니라 억제 메커니즘)
 ```
 orange, red, magenta, pink, amber, yellow, warm colors, orange tint, red glow,
+(purple:1.3), violet, lavender, purple hair, purple tint, gradient,
+(green:1.35), lime, neon green, spring green, teal, turquoise, green glow,
+(lineart:1.2), sketch, monochrome, uncolored, white clothes only, sticker, white border, outline border,
 pure white, pure black, white background,
 
 photorealistic, realistic, 3d render, photo, gradient, soft shading, airbrush, blurry, noise, texture, film grain,
-thin limbs, skinny, slender, tall, long legs, realistic anatomy, fashion illustration, elegant proportions,
+thin limbs, skinny, slender, (tall:1.2), (long legs:1.35), realistic anatomy, fashion illustration, elegant proportions, small head,
 
 weapon, gun, sword, grenade, holding, ribbon, scarf, tentacle, squid, ink, hat, cap, backpack,
 bare legs, bare thighs, thighs, exposed skin on legs,
 
 text, watermark, signature, logo, dimension lines, arrows, border,
-multiple girls, 2girls, extra limbs, bad hands, bad anatomy, worst quality, low quality, jpeg artifacts
+multiple girls, 2girls, extra limbs, bad hands, bad anatomy, worst quality, low quality, jpeg artifacts,
+
+fur trim, fur collar, fishnet, chain, thin straps, lace, frills, gradient clothes, holographic,
+midriff, navel, crop top only, bare shoulders, bare thighs
 ```
 > 🔴 네거티브 첫 줄이 **`§A-3-4` 적 예약 대역 차단**이다. `#FF3B4E`·`#FF6B2C`·`#FF1E7A` 가 화면에
 > 들어오면 4인 협동 × 적 200~300 에서 아군이 적으로 읽힌다(ADR 0016 **I1**, 복구 불가 등급).
