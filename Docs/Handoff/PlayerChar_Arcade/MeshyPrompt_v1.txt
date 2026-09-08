@@ -1,0 +1,160 @@
+====================================================================
+ENE — Meshy Image-to-3D 투입 지침 v1 (2026-09-08)
+====================================================================
+무엇을 넣고 무엇을 쓰는지만 다룬다. 캐릭터 스펙 정본 = `Docs/PlayerCharacter_ResumePrompt.md` §2.
+삼면도 생성(SD) 쪽 정본 = `ImagePrompt_v5_SD.txt`. 이 문서는 그 다음 단계다.
+
+⚠️ 이 문서의 Meshy UI 관련 서술은 **2026-09-08 사용자 화면 캡처 + `Docs/Research/ExternalModelingTools_2026-09-06.md`
+   조사분**에 근거한다. 이 프로젝트는 **Meshy 를 아직 한 번도 돌린 적이 없다**(드론 행
+   `MeshyDronePipeline_ResumePrompt.md` §6 결과표가 통째로 비어 있다). 옵션 이름·동작은
+   화면에서 확인하며 진행하고, 다르면 이 문서를 고친다.
+
+
+--------------------------------------------------------------------
+## 1. 넣을 파일 (§7 크롭 완료본)
+
+전부 `Docs/Handoff/PlayerChar_Arcade/` 에 있다. 1024×1024, 인물 높이 = 캔버스 88%(900px),
+세 장 **같은 배율·같은 발높이**, 배경 투명(RGBA).
+
+| 파일 | 뷰 | 비고 |
+|---|---|---|
+| `PlayerCharArcade_front.png` | 정면 | 원본 = `sd_out/v19_fullclosed_*` |
+| `PlayerCharArcade_side.png`  | 측면 | **왼쪽 향함**(= 캐릭터의 좌측면). 원본 = `sd_out/v26_side_goggles_*` |
+| `PlayerCharArcade_back.png`  | 후면 | 원본 = `sd_out/v28_back_hem_*` |
+
+배경이 투명이라 툴의 자동 배경제거를 아예 안 거친다. **투명 PNG 를 거부하는 경우에만**
+같은 폴더의 `*_ongrey.png`(어두운 회색 배경 합성본)를 쓴다.
+🔴 밝은 배경본은 만들지 않았다 — 의상이 오프화이트라 밝은 배경에서는 실루엣 대비가 없다.
+
+🔴 **한 장에 세 뷰가 나란한 "삼면도 시트"는 만들지 않았고, 만들면 안 된다.** 그런 시트를
+   단일 이미지 모드에 넣으면 캐릭터 셋을 만들거나 납작한 부조가 나온다. 다시점 모드는
+   **뷰당 낱장 파일**을 받는다 — 위 3장이 그 형태다.
+
+
+--------------------------------------------------------------------
+## 2. 두 번 돌린다 (A/B) — 어느 쪽이 나은지 아직 모른다
+
+다시점이 단일 이미지보다 낫다는 건 **일치가 완벽할 때** 성립한다. 우리 3장은 "같은 캐릭터"
+까지는 왔지만 직교 투영이 아니고 뷰 간 재킷 볼륨이 다르다. 반대로 이 캐릭터는 좌우 대칭 +
+완전 봉쇄 재킷 + 3색이라 정면 한 장만으로도 추론 여지가 크다. **재 보는 게 싸다.**
+
+| 갈래 | 스킬 | 입력 |
+|---|---|---|
+| **A** | `이미지→3D` | `PlayerCharArcade_front.png` **한 장만** |
+| **B** | `멀티뷰를 3D로` | 위 3장 전부(front / side / back 슬롯에 각각) |
+
+같은 프롬프트로 두 번. 결과를 나란히 놓고 §5 로 판정한다.
+※ 2026-09-08 시점 배너에 "3D Agent 이벤트 — 모든 프리미엄 기능 잠금 해제"가 떠 있어
+  `멀티뷰를 3D로`(유료 표시)가 열려 있다. **이 창이 닫히기 전에 B 를 돌려 둘 것.**
+
+
+--------------------------------------------------------------------
+## 3. 프롬프트
+
+이미지가 형태를 정하고, 텍스트는 **재질·색·금지사항**을 잡는다. 형태를 텍스트로 다시 설명하려
+들면 이미지와 싸운다 — 아래는 그래서 재질·색 위주다.
+
+### 3-1. 영문 (정본 — 이걸 넣는다)
+```
+Stylized chibi game character. Flat solid colors, hard-edged cel shading, crisp
+outlines. No gradients, no photographic texture, no noise, no grunge, no wear.
+
+Strictly three colors: off-white, near-black, and sky blue.
+No orange, no red, no magenta, no pink, no green, no purple. No pure white, no pure black.
+
+Closed oversized long jacket covering torso and hips, high standing collar,
+black centre zip line, glowing sky-blue band along the hem. Black leggings.
+Chunky platform sneakers, sky-blue trim, dark soles. Light blue bob hair with
+blunt bangs. Sky-blue tinted goggles over the eyes, over-ear headphones.
+
+Left-right symmetrical. A-pose, arms slightly away from the body, empty hands.
+Simple readable silhouette, chunky rounded forms, no thin parts.
+
+No weapons, no accessories, no belt, no straps, no pouches, no bag, no gloves,
+no text, no logo, no base, no stand.
+```
+
+### 3-2. 짧은 판 (입력 길이 제한에 걸리면)
+```
+Chibi game character, flat solid colors, hard cel shading, no texture, no gradient.
+Only off-white, near-black and sky blue - no orange, red, magenta, pure white or pure black.
+Closed oversized long white jacket with glowing sky-blue hem band, black leggings,
+chunky sneakers, light blue bob hair, sky-blue goggles and headphones.
+Symmetrical, A-pose, no accessories, no weapons, no base.
+```
+
+### 3-3. 한국어 참고 (넣지 말 것 — 대조용)
+평면 단색 + 하드 셀셰이딩, 그라디언트·텍스처·노이즈 없음. 색은 오프화이트/거의 검정/하늘색
+**3색만** — 주황·빨강·마젠타 금지(적 예약 대역), 순백·순흑 금지. 완전히 잠긴 오버사이즈 롱
+재킷(높은 스탠딩 칼라, 중앙 검정 지퍼선, 밑단 하늘색 발광 띠) + 검정 레깅스 + 청키 플랫폼
+스니커즈. 하늘색 보브 + 일자 앞머리, 하늘색 틴트 고글, 오버이어 헤드폰. 좌우 대칭, A포즈,
+빈손. 무기·액세서리·벨트·스트랩·파우치·가방·글러브·글자·받침대 전부 없음.
+
+🔴 **주황 금지는 취향이 아니라 규칙이다** — `ArtDirection.md §A-3-4` 의 `#FF6B2C` 는 적 공격
+   텔레그래프 예약색이고, 플레이어에 쓰면 적 200~300 속에서 아군이 적으로 읽힌다
+   (ADR 0016 **I1**, 복구 불가 등급). 결과에 주황이 섞여 나오면 그 결과는 버린다.
+
+
+--------------------------------------------------------------------
+## 4. 설정
+
+| 항목 | 값 | 이유 |
+|---|---|---|
+| 텍스처/PBR | 켜도 됨(**테스트 한정**) | ADR 0016 **I7 = 텍스처 없음, 평면 채색만**. 채택 시 색 LUT 로 재저작해야 한다 — 드론 행이 잡아둔 것과 같은 입장 |
+| 리메시 | **낮게 잡지 말 것** | 실루엣이 복셀 격자를 표현해야 한다. 폴리 예산은 여기서 병목이 아니다 — **플레이어는 동시 1~4명**이고, 액터당 비용 최소화 원칙은 적 스웜(200~300)에 걸리는 규칙이다 |
+| export | **FBX + GLB 둘 다** | 후속 경로가 갈린다. FBX = 언리얼 임포트, GLB = Blender 왕복 |
+| 시드/재시도 | 같은 입력으로 여러 번 | 화면에 `무료 재시도` 칩이 있다 |
+
+**복셀 스킬(`픽셀 블록 친구`)을 시험한다면 — 이 숫자를 요구할 것:**
+> **세로 43블록** (= 161.25cm ÷ 3.75cm 격자, `PlayerCharacter_ResumePrompt.md` §2-0·§2-1)
+
+격자 크기나 블록 수를 지정할 수 없으면 **복셀화 트랙 A 는 탈락**이고 B′(매끈하게 뽑아
+Blender Remesh Blocks 로 복셀화)로 간다. 이게 §3 트랙 A/B′ 미결 결정의 실질적 판정 기준이다.
+※ 우리 삼면도는 의도적으로 **매끈한 애니 그림체**로 그렸다(각진 복셀 그림으로는 B′의 매끈한
+  모델을 못 얻는다) — 그래서 A/B′ 어느 쪽으로 가든 그대로 입력으로 쓸 수 있다.
+
+
+--------------------------------------------------------------------
+## 5. 판정 (결과를 받으면 이 순서로)
+
+🔴 색 — 여기서 걸리면 나머지를 볼 필요 없다
+- [ ] 주황·빨강·마젠타 픽셀 0 (`#FF3B4E`·`#FF6B2C`·`#FF1E7A` 계열)
+- [ ] 고글 틴트가 하늘색/파랑
+- [ ] 순백·순흑 없음
+- [ ] 3색 유지 — 재킷 오프화이트 / 레깅스·솔 거의 검정 / 액센트 하늘색
+
+형태
+- [ ] 재킷이 **닫혀 있고** 골반 아래까지 내려오는가(열리거나 짧아지면 실루엣 계약 파기)
+- [ ] 고글 + 헤드폰이 **머리에 붙어** 있는가(공중에 뜬 링이면 실패)
+- [ ] 좌우 대칭인가
+- [ ] 손·발이 뭉툭하고 얇은 파트가 없는가
+- [ ] 받침대·바닥판이 붙어 나오지 않았는가
+
+구조(임포트 전에 확인)
+- [ ] 섹션 1개 / 머티리얼 1개인가
+- [ ] 뒤통수·등이 뭉개지지 않았는가 ← **A(단일)와 B(다시점)를 가르는 항목**
+- [ ] 다리가 재킷과 융합되지 않고 분리돼 있는가 ← 스키닝 가능성이 여기 걸린다
+
+
+--------------------------------------------------------------------
+## 6. 받은 뒤 반드시 손대야 하는 것 (기대치 조정)
+
+**① 좌표계** — Meshy 는 Y-up · 미터 · 정면 임의. Blender 에서 **cm · Z-up · 정면 +X · 원점 중심**
+으로 정규화한 뒤 FBX. 임포트 후 **바운드 min/max 로 정면 축을 반드시 확인**할 것
+(`Docs/PlayerCharacter_ResumePrompt.md` §1 함정 2, `fbx-metre-cm-armature-scale-trap`).
+
+**② 🔴 `리그` 스킬은 우리 문제를 안 풀어준다.** 3P 몸체는 **Blu 스켈레톤(108본)** 위에 슬라이드
+4클립 · 벽 4자세 · 로코모션이 얹혀 있다. Meshy 오토리그는 자기 본 구조를 만들므로 그 애니
+8종과 맞지 않는다. **스키닝·웨이트 전이는 여전히 사람 손**이다(§8③). 눌러보는 건 자유지만
+그 결과로 리깅 작업이 없어졌다고 판단하지 말 것.
+
+**③ 라이선스** — Meshy Free = **CC BY 4.0(Meshy 크레딧 표기 필수)**, Pro($20/월) 무표기.
+   이벤트로 프리미엄 기능이 열린 것이 **라이선스까지 바꿔주는지는 별개이고 미확인**이다.
+   출시 에셋으로 쓸 거면 이건 확인하고 넘어가야 한다(`Docs/Research/ExternalModelingTools_2026-09-06.md` §3).
+
+**④ 이미시브** — 밑단 띠·고글의 발광은 Meshy 가 텍스처의 밝은 색으로만 낸다. 실제 발광은
+   우리 머티리얼에서 다시 배선해야 한다.
+
+**⑤ 등 발광 패널이 후면 원본에 없다.** SD 단계에서 밑단 띠·중앙 봉제선과 상충해 포기했다
+   (§2-4 결정④는 유효, 이월). Meshy 가 대화형이므로 **3D 단계에서 후속 지시로 되찾는 것**을
+   먼저 시도해 볼 만하다 — "등 중앙에 발광 사각 패널 추가".
