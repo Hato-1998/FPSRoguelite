@@ -53,9 +53,17 @@ for lx in LEG_XS:
 # torso
 tw = cm(26) / 2
 cap(CX - tw, NECK, CX + tw, HIP + cm(4), int(cm(6)), 170)
-# jacket shoulders (oversized) - still narrower than the head mass
+# jacket - CROPPED: wide at the shoulders, tapering in, ending ABOVE the navel.
+# A wide capsule that stops abruptly near the hip is what made the model draw
+# rectangular flaps jutting out sideways at hip height (user: "하단이 튀어나와 있다").
+# A trapezoid that narrows downward reads as a jacket closing toward the waist.
 jw = SHO_W / 2 * 1.15
-cap(CX - jw, NECK + cm(2), CX + jw, HIP - cm(6), int(cm(8)), 165)
+JT = NECK + cm(2)                 # jacket top
+JB = NECK + cm(30)                # jacket hem - cropped, above the navel
+d.polygon([(CX - jw,      JT),
+           (CX + jw,      JT),
+           (CX + jw * 0.62, JB),  # taper inward at the hem
+           (CX - jw * 0.62, JB)], fill=165)
 # arms, A-pose 45 deg
 UA, FA, aw = cm(26), cm(22), cm(9) / 2
 dd = math.sqrt(0.5)
