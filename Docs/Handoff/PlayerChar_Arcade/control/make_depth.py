@@ -36,9 +36,14 @@ if SIDE:
 # legs (leggings) - thin, they are the part that must NOT dominate
 lw = cm(11) / 2
 LEG_XS = [0] if SIDE else [-cm(9), cm(9)]
+# taper: thigh 15cm -> calf 11cm. The model drew 6.5/5.8cm from an 11cm capsule,
+# so the blockout has to overshoot the spec, not merely match it.
+TH, CA = cm(17) / 2, cm(12) / 2
+KNEE = HIP + (ANKLE - HIP) * 0.52
 for lx in LEG_XS:
     x = CX + lx
-    cap(x - lw, HIP, x + lw, ANKLE, int(lw), 150)
+    cap(x - TH, HIP, x + TH, KNEE, int(TH), 150)
+    cap(x - CA, KNEE - cm(3), x + CA, ANKLE, int(CA), 150)
 # boots - oversized, wider than the leg
 bw, bh = (cm(30) / 2 if SIDE else cm(17) / 2), cm(15)
 for lx in LEG_XS:

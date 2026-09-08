@@ -49,7 +49,7 @@ masterpiece, best quality, very aesthetic, official art,
 
 (head wider than shoulders:1.35), (large head:1.35), (short legs:1.3), (petite:1.2), (chibi:0.5),
 short neck, narrow shoulders, chibi-like proportions, rounded body,
-(thick rounded limbs:1.25), (puffy sleeves:1.2), toy-like, (oversized shoes:1.25),
+(thick rounded limbs:1.25), (puffy sleeves:1.2), (thick thighs:1.3), (thick legs:1.25), toy-like, (oversized shoes:1.25),
 
 1girl, solo, full body, standing, a-pose, arms slightly away from body, open relaxed hands, empty hands,
 simple background, grey background,
@@ -89,7 +89,7 @@ orange, red, magenta, pink, amber, yellow, warm colors, orange tint, red glow,
 pure white, pure black, white background,
 
 photorealistic, realistic, 3d render, photo, gradient, soft shading, airbrush, blurry, noise, texture, film grain,
-thin limbs, skinny, slender, (tall:1.2), (long legs:1.35), realistic anatomy, fashion illustration, elegant proportions, small head,
+(thin limbs:1.3), (skinny legs:1.35), (thin thighs:1.3), stick legs, skinny, slender, (tall:1.2), (long legs:1.35), realistic anatomy, fashion illustration, elegant proportions, small head,
 
 weapon, gun, sword, grenade, holding, ribbon, scarf, tentacle, squid, ink, hat, cap, backpack,
 bare legs, bare thighs, thighs, exposed skin on legs,
