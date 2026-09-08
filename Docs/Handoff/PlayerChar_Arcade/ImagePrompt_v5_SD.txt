@@ -43,7 +43,8 @@ v5 초판(Illustrious) 결과가 "우주복·의료복"으로 읽혔다 — 흰 
 ```
 masterpiece, best quality, very aesthetic, official art,
 
-(thick outline:1.3), (flat color:1.35), (cel shading:1.2), hard shadow, limited palette, bold lineart,
+(thick outline:1.3), (flat color:1.35), (cel shading:1.2), hard shadow, bold lineart,
+(limited palette:1.4), (three color scheme:1.3), off-white and black and light blue only,
 (front view, facing viewer:1.3), (full body:1.2),
 (sky blue glowing trim:1.35), (light blue accents:1.25), (pale blue hair:1.25), (light blue tinted goggles:1.3),
 
@@ -57,10 +58,10 @@ simple background, grey background,
 blunt bangs, chin-length bob cut, single pale streak in bangs,
 over-ear headphones, cable,
 
-(layered clothes:1.25), (oversized jacket:1.2), cropped jacket, standing collar, wide collar,
+(layered clothes:1.25), (oversized jacket:1.2), (open jacket:1.35), unzipped, cropped jacket, standing collar, wide collar,
 off-white jacket, panel lines, asymmetrical shoulder pad, fingerless gloves, arm guard,
 (chest harness:1.2), thick belt, (large utility pouch:1.2), thigh pouch, buckle, d-ring,
-(black tank top:1.25), (short pants:1.25), (black leggings under shorts:1.3), covered legs, midriff,
+(black tank top:1.25), (off-white short pants:1.35), (black leggings under shorts:1.3), covered legs, midriff,
 oversized platform sneakers, chunky sneakers,
 
 glowing accents, back panel
@@ -84,6 +85,8 @@ glowing accents, back panel
 ```
 orange, red, magenta, pink, amber, yellow, warm colors, orange tint, red glow,
 (purple:1.3), violet, lavender, purple hair, purple tint, gradient,
+(denim:1.35), jeans, blue jeans, blue pants, brown, beige, khaki, olive, multicolored, colorful,
+closed jacket, zipped jacket, buttoned,
 (green:1.35), lime, neon green, spring green, teal, turquoise, green glow,
 (lineart:1.2), sketch, monochrome, uncolored, white clothes only, sticker, white border, outline border,
 pure white, pure black, white background,
