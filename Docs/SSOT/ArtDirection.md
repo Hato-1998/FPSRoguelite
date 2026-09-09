@@ -234,7 +234,7 @@ D4 는 높이(넘을 수 있나) × 파괴가능 두 축을 **1인칭에서 즉�
 |---|---|---|
 | 환경(블로커·벽·프롭) | **5 cm** | 콜리전 셀 100 · 문턱 45 · 60 이 전부 정수배(20 · 9 · 12). 면은 평평, 격자는 머티리얼 선 |
 | 적 · 픽업 | **7.5 cm** | 드론 = 16×16×6 칸(120×120×45cm, `gen_voxel_drone.py` 층 기술 = 정본, 시트 3뷰는 파생). 구 쩝쩝이 18층·135cm 는 대체됨(2026-09-06) |
-| **3P 플레이어 캐릭터** | **3.75 cm** | 적 격자의 정확히 1/2 = 아군이 2배 세밀하게 읽힌다 · 병목은 사지 굵기라 맨팔 2칸(7.5cm)이 하한 · 161.25cm = 43층. 스펙 정본 = `Docs/PlayerCharacter_ResumePrompt.md`(2026-09-08 NEON-V 철회 이후 재설계, 격자·수치는 무변) |
+| **3P 플레이어 캐릭터** | **3.75 cm** | 적 격자의 정확히 1/2 = 아군이 2배 세밀하게 읽힌다 · 병목은 사지 굵기라 맨팔 2칸(7.5cm)이 하한 · 161.25cm = 43층. 스펙 정본 = [ADR 0016](../Architecture/0016-art-direction-retro-arcade-pixel.md) D4 · 「사용자 결정 기록」. ※ 종전 정본이던 `Docs/PlayerCharacter_ResumePrompt.md` 는 **삭제됐다**(2026-09-09, 사용자 결정 — 3P 캐릭터 저작이 외부 툴로 이관). 격자·비례 수치는 무변이며 ADR 0016 이 들고 있다 |
 | 1P 무기 | **2.5 cm** | 카메라 30~60cm 앞 — 화면 픽셀 크기가 적과 비슷해진다 |
 
 - **한 오브젝트 한 격자**(믹셀 금지, ADR 0016 I4). 클래스 사이 차이는 거리가 보정한다.
@@ -367,7 +367,7 @@ Galmuri 는 라틴·숫자·한글을 **한 가족**으로 덮으므로 이음�
 | 이미지 요소 | 데이터 소스(현행) | 상태 | 저작 시 규칙 |
 |---|---|---|---|
 | COLLECTED ITEMS 아이콘 그리드 | 획득 카드 원장 `FFPSRAcquiredCard` + `OnAcquiredCardsChanged`(PlayerState, CRIT2) — 둘 다 BlueprintPure/BlueprintAssignable 로 이미 열려 있다(실측 2026-09-07) | 데이터 ✅ · 위젯 ❌ | ⚠️ **카드 DA 에 아이콘 필드가 없다**(`Source/.../Card/*.h` grep 확인) → 1차는 **희귀도 ★1~4 + 테두리 색**만(§B-7). 카드별 고유 픽셀 아이콘은 C++ 필드 추가 + CSV 임포터 정합이 필요한 **후속 행** |
-| 팀원 초상(픽셀) | — | ❌(3P 캐릭터 미정 — `Docs/PlayerCharacter_ResumePrompt.md` 트랙) | 초상 = 8×8/16×16 픽셀, 아군 색 테두리 |
+| 팀원 초상(픽셀) | — | ❌(3P 캐릭터 미정 — 저작이 외부 툴로 이관, 2026-09-09. 에셋 임포트 후 재개) | 초상 = 8×8/16×16 픽셀, 아군 색 테두리 |
 | TEAM STATUS 패널 ×3 | `AFPSRGameState::GetPartyVitals()` · `WBP_TeammateVitals` | ✅ | **패널 1개 = 팀원 1명**(이미지의 P1/P2/P3 반복은 오류). 자기 자신은 좌하 바이탈. 다운 = `#FF4D5E` 경고 |
 | STAGE PROGRESS TO BOSS 바 | 런 디렉터 BossTime(`UFPSRRunScheduleDataAsset`) + `GetRunClockSeconds/GetRunPhase` | ✅(산출 필요) | 정의 = **보스타임까지 시간 진행률**. 억제기 파괴(스테이지 전환)와 별개 축. 색 = 긍정 `#5FE0D2` |
 | CURRENT STAGE 5-1 | `AFPSRGameState::GetStageIndex()` + 서브레벨(Map_1/Map_2/Boss) | ✅ | "5-1" = 스테이지 5 · 맵 1. 문자열 = LOC0 |
