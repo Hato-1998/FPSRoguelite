@@ -26,8 +26,11 @@
 
 $ErrorActionPreference = 'Stop'
 
-$TokenFile     = '.claude/notion-token.txt'
-$OutputFile    = '.claude/board-snapshot.md'
+# 경로는 **실행 위치가 아니라 스크립트 위치**에서 푼다. 상대경로로 두면 프로젝트 루트가
+# 아닌 곳에서 부를 때 토큰을 못 찾거나 스냅샷을 엉뚱한 데 떨군다(2026-09-09 사용자가 실제로 밟음).
+$RepoRoot      = Split-Path -Parent $PSScriptRoot
+$TokenFile     = Join-Path $RepoRoot '.claude/notion-token.txt'
+$OutputFile    = Join-Path $RepoRoot '.claude/board-snapshot.md'
 $TempFile      = "$OutputFile.tmp"
 $DataSourceId  = '063de2a5-482d-46be-9cbb-6a6610b7f141'
 $ApiUrl        = "https://api.notion.com/v1/data_sources/$DataSourceId/query"
@@ -191,7 +194,7 @@ try {
     $lines | Out-File -LiteralPath $TempFile -Encoding utf8 -Force
     Move-Item -LiteralPath $TempFile -Destination $OutputFile -Force
 
-    Write-Output "[board-snapshot] 스냅샷 갱신 완료 — 총 ${total}건 ($OutputFile)."
+    Write-Output "[board-snapshot] 스냅샷 갱신 완료 — 총 ${total}건 (.claude/board-snapshot.md)."
 }
 catch {
     # 네트워크/HTTP 오류 등 무엇이 실패하든: 기존 스냅샷 파일은 건드리지 않고,
