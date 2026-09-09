@@ -33,4 +33,15 @@ struct FFPSRCosmeticEventMessage
 	/** True if this event was a kill (death cosmetic / Gibs); false for a non-lethal hit. */
 	UPROPERTY(BlueprintReadWrite, Category = "FPSR|Cosmetic")
 	bool bWasKill = false;
+
+	/** STAT1 §8 (D단계): which status slot (0..7) changed — only meaningful on the GameplayEvent.EnemyStatusChanged
+	 *  channel (every other existing producer leaves this at its 0 default, unspecified). */
+	UPROPERTY(BlueprintReadWrite, Category = "FPSR|Cosmetic")
+	uint8 StatusSlot = 0;
+
+	/** STAT1 §8 (D단계): true = StatusSlot just turned ON (applied, or fired as part of a combo); false = it just
+	 *  turned OFF (expired, consumed as a combo's material, or cleared for pooled reuse). Only meaningful alongside
+	 *  StatusSlot above, on the same channel. */
+	UPROPERTY(BlueprintReadWrite, Category = "FPSR|Cosmetic")
+	bool bStatusSlotOn = false;
 };

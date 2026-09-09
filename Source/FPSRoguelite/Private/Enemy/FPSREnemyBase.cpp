@@ -27,6 +27,7 @@
 #include "ProfilingDebugging/CsvProfiler.h" // CSV_PROFILER_STATS gate for the metrics registry calls below
 #include "Settings/FPSRPlaceholderVisualSettings.h"
 #include "Settings/FPSREnemyRenderSettings.h" // HB1: HealthBarWidgetClass soft path (InitHealthBarWidget)
+#include "Settings/FPSRStatusEffectSettings.h" // STAT1 §8 D단계 debug command: ResolveCatalog (FPSR.Status.Apply)
 #include "HAL/IConsoleManager.h"
 #include "CollisionQueryParams.h"
 #include "Net/UnrealNetwork.h"
@@ -1818,5 +1819,148 @@ static FAutoConsoleCommandWithWorldAndArgs GFPSRForceAnimStateCmd(
 		}
 		UE_LOG(LogFPSR, Log, TEXT("[Enemy] ForceAnimState %d (pin=%d) applied to %d enemies."),
 			static_cast<int32>(State), bPin ? 1 : 0, Count);
+	}));
+#endif // !UE_BUILD_SHIPPING
+
+#if !UE_BUILD_SHIPPING
+namespace
+{
+	// STAT1 §8/§11-2 검증 전용 폴백 카탈로그 — FPSR.Status.Apply 가 콘텐츠(UFPSRStatusEffectSettings.StatusCatalog)
+	// 없이도 배선(권위 브로드캐스트·OnRep 클라 반쪽·GMS 발행·헬스바 게터)을 눈으로 보게 하는 것이 유일한 목적이다.
+	// 슬롯 순서·조합 재료쌍은 명세 §1 표 그대로(둔화·도트·방어력감소·공속저하 / 실명=0+1, 속박=1+2)지만 지속시간·
+	// 배율 수치는 전부 미확정 플레이스홀더(§1 "이름·설명·수치는 미확정") — 콘텐츠가 나중에 정할 값을 대신 채운
+	// 것뿐이므로 출시 코드로 취급하지 말 것. 매 호출마다 새로 만들고 버린다(FPSRStatusWorldTest.cpp 의
+	// MakeStatus/MakeCatalog 와 같은 트랜지언트 수명 — 리턴 이후 아무도 포인터를 들고 있지 않아 GC 세이프하다).
+	// 프로젝트 카탈로그가 이미 설정돼 있으면 그쪽을 그대로 쓴다(콘텐츠가 채워지는 순간 이 폴백은 자동으로 안 쓰인다).
+	const UFPSRStatusCatalogDataAsset* ResolveOrBuildDebugStatusCatalog()
+	{
+		if (const UFPSRStatusCatalogDataAsset* Configured = UFPSRStatusEffectSettings::ResolveCatalog())
+		{
+			return Configured;
+		}
+
+		UFPSRStatusEffectDataAsset* Slow = NewObject<UFPSRStatusEffectDataAsset>();
+		Slow->SlotIndex = 0;
+		Slow->Kind = EFPSRStatusKind::Weak;
+		Slow->DurationSeconds = 5.0f;
+		Slow->MoveSpeedMultiplier = 0.5f;
+
+		UFPSRStatusEffectDataAsset* Dot = NewObject<UFPSRStatusEffectDataAsset>();
+		Dot->SlotIndex = 1;
+		Dot->Kind = EFPSRStatusKind::Weak;
+		Dot->DurationSeconds = 5.0f;
+		Dot->DamagePerSecond = 5.0f;
+		Dot->DotTickIntervalSeconds = 0.5f;
+
+		UFPSRStatusEffectDataAsset* ArmorBreak = NewObject<UFPSRStatusEffectDataAsset>();
+		ArmorBreak->SlotIndex = 2;
+		ArmorBreak->Kind = EFPSRStatusKind::Weak;
+		ArmorBreak->DurationSeconds = 5.0f;
+		ArmorBreak->IncomingDamageMultiplier = 1.5f;
+
+		UFPSRStatusEffectDataAsset* AttackSlow = NewObject<UFPSRStatusEffectDataAsset>();
+		AttackSlow->SlotIndex = 3;
+		AttackSlow->Kind = EFPSRStatusKind::Weak;
+		AttackSlow->DurationSeconds = 5.0f;
+		AttackSlow->AttackIntervalMultiplier = 2.0f;
+
+		UFPSRStatusEffectDataAsset* Blind = NewObject<UFPSRStatusEffectDataAsset>();
+		Blind->SlotIndex = 4;
+		Blind->Kind = EFPSRStatusKind::Strong;
+		Blind->DurationSeconds = 5.0f;
+		Blind->bDisableAttack = true;
+		Blind->RequiredWeakSlots.Add(0);
+		Blind->RequiredWeakSlots.Add(1);
+
+		UFPSRStatusEffectDataAsset* Root = NewObject<UFPSRStatusEffectDataAsset>();
+		Root->SlotIndex = 5;
+		Root->Kind = EFPSRStatusKind::Strong;
+		Root->DurationSeconds = 5.0f;
+		Root->bDisableMovement = true;
+		Root->RequiredWeakSlots.Add(1);
+		Root->RequiredWeakSlots.Add(2);
+
+		UFPSRStatusCatalogDataAsset* DebugCatalog = NewObject<UFPSRStatusCatalogDataAsset>();
+		DebugCatalog->Statuses.Add(Slow);
+		DebugCatalog->Statuses.Add(Dot);
+		DebugCatalog->Statuses.Add(ArmorBreak);
+		DebugCatalog->Statuses.Add(AttackSlow);
+		DebugCatalog->Statuses.Add(Blind);
+		DebugCatalog->Statuses.Add(Root);
+		return DebugCatalog;
+	}
+}
+
+// STAT1 §8/§11-2 가시성 배선 검증 명령 — 카탈로그·카드가 아직 저작되지 않은 상태에서도 권위 브로드캐스트·OnRep
+// 클라 반쪽·GMS 발행·헬스바 위젯 게터가 실제로 도는지 눈으로 확인하기 위한 것. 무기 히트/카드 부여 경로(§5-5 훅면)
+// 를 완전히 우회해 지정한 슬롯을 로컬 플레이어 반경 내 적 전원에게 직접 ApplyStatus 한다.
+//   FPSR.Status.Apply 0        → 반경 2000uu 내 적에게 슬롯 0(둔화) 적용
+//   FPSR.Status.Apply 1 3000   → 반경 3000uu 내 적에게 슬롯 1(도트) 적용
+// 보스(AFPSRBossBase)는 대상이 아니다 — 배치 패스가 아니라 자기 틱으로 진행되는 별도 드라이버라 이 명령의
+// RegisterStatusActive 배선이 안 맞는다(§5-6 표); 필요하면 별도 명령으로 다룰 것.
+static FAutoConsoleCommandWithWorldAndArgs GFPSRStatusApplyCmd(
+	TEXT("FPSR.Status.Apply"),
+	TEXT("STAT1 §8/§11-2 visibility-wiring check: force-apply a status slot to every AFPSREnemyBase within radius of "
+	     "the local player (bypasses the weapon-hit/card path entirely; server/host-only). Falls back to a built-in "
+	     "debug catalog (slots 0-5, §1 표) when the project catalog is unset. Usage: FPSR.Status.Apply <Slot 0-7> [Radius=2000]"),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic([](const TArray<FString>& Args, UWorld* World)
+	{
+		if (!World || Args.Num() == 0)
+		{
+			UE_LOG(LogFPSR, Warning, TEXT("[Status] FPSR.Status.Apply requires a slot argument. Usage: FPSR.Status.Apply <Slot 0-7> [Radius=2000]"));
+			return;
+		}
+
+		APlayerController* PC = World->GetFirstPlayerController();
+		if (!PC || !PC->HasAuthority())
+		{
+			UE_LOG(LogFPSR, Warning, TEXT("[Status] FPSR.Status.Apply is server/host-only (ApplyStatus is authority-gated, §5-6)."));
+			return;
+		}
+
+		APawn* LocalPawn = PC->GetPawn();
+		if (!LocalPawn)
+		{
+			UE_LOG(LogFPSR, Warning, TEXT("[Status] FPSR.Status.Apply: no local pawn to center the radius search on."));
+			return;
+		}
+
+		const uint8 Slot = static_cast<uint8>(FMath::Clamp(FCString::Atoi(*Args[0]), 0, 7));
+		const float Radius = Args.Num() > 1 ? FCString::Atof(*Args[1]) : 2000.0f;
+		const FVector Center = LocalPawn->GetActorLocation();
+		const float RadiusSq = FMath::Square(Radius);
+
+		const UFPSRStatusCatalogDataAsset* Catalog = ResolveOrBuildDebugStatusCatalog();
+		UFPSREnemySpawnSubsystem* SpawnSub = World->GetSubsystem<UFPSREnemySpawnSubsystem>();
+
+		int32 Count = 0;
+		for (TActorIterator<AFPSREnemyBase> It(World); It; ++It)
+		{
+			AFPSREnemyBase* Enemy = *It;
+			UFPSREnemyHealthComponent* Health = (IsValid(Enemy) && !Enemy->IsHidden()) ? Enemy->GetHealthComponent() : nullptr;
+			if (!Health || FVector::DistSquared(Enemy->GetActorLocation(), Center) > RadiusSq)
+			{
+				continue;
+			}
+
+			// WeakResist/StrongResist 는 1.0 그대로 우회한다 — §6 저항 행의 프로파일 조회는 실제 부여 경로
+			// (UFPSRStatusApplyFragment::OnDamageApplied)의 몫이고, 이 명령의 목적은 배선 확인이지 저항 판정 검증이
+			// 아니다.
+			TArray<uint8, TInlineAllocator<8>> Fired;
+			if (Health->ApplyStatus(Catalog, Slot, 1.0f, 1.0f, LocalPawn, nullptr, Fired))
+			{
+				// §6 압축 리스트 등록 — 실제 부여 경로의 진짜 호출부는 UFPSRStatusApplyFragment::OnDamageApplied
+				// (FPSRWeaponFragment.cpp) 이고, 이 디버그 명령은 그 호출을 대신한다. 안 하면 배치 패스가 이 적을
+				// 영원히 못 보고, 슬롯이 켜진 채(카탈로그 미설정이면 애초에 만료도 없지만) StatusActiveEnemies 밖에
+				// 남는다.
+				if (SpawnSub)
+				{
+					SpawnSub->RegisterStatusActive(Enemy);
+				}
+				++Count;
+			}
+		}
+
+		UE_LOG(LogFPSR, Log, TEXT("[Status] FPSR.Status.Apply slot=%d radius=%.0f: %d enemy(ies) affected."), Slot, Radius, Count);
 	}));
 #endif // !UE_BUILD_SHIPPING

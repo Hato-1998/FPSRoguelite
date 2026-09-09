@@ -5,6 +5,8 @@
 #include "Core/FPSRLogChannels.h"
 #include "Status/FPSRStatus.h"
 #include "Weapon/FPSRWeaponInstance.h" // full type needed: TWeakObjectPtr<UFPSRWeaponInstance>::operator= requires a complete type
+#include "Messages/FPSRGameplayMessageSubsystem.h" // STAT1 §8 (D단계): BroadcastStatusChangedCosmetic's GMS half
+#include "Messages/FPSRCosmeticMessages.h" // FFPSRCosmeticEventMessage — STAT1 reuses U8's existing payload (§8)
 #include "Net/UnrealNetwork.h"
 #include "Net/Core/PushModel/PushModel.h"
 
@@ -31,6 +33,18 @@ namespace
 		const UWorld* World = Owner ? Owner->GetWorld() : nullptr;
 		const AFPSRGameState* GameState = World ? World->GetGameState<AFPSRGameState>() : nullptr;
 		return GameState ? GameState->GetStatusClockSeconds() : 0.0f;
+	}
+
+	/** STAT1 §8 (D단계): the GMS channel for status-cosmetic events — declared fresh (Config/DefaultGameplayTags.ini)
+	 *  rather than reusing the 3 ghost Status.Burning/Slowed/Stunned tags, which the spec reserves for future status
+	 *  DEFINITION identity (UFPSRStatusEffectDataAsset::StatusTag), not for a pub/sub channel. Cached in a function-
+	 *  local static (mirrors this file's own resist/clock lookups' cost-consciousness, 핵심원칙 1) — a status change
+	 *  can fire once per infected enemy per batch-pass step, so re-resolving the FName/tag lookup every call would
+	 *  scale with infected-enemy count for no reason. */
+	FGameplayTag GetStatusChangedCosmeticChannel()
+	{
+		static const FGameplayTag Channel = FGameplayTag::RequestGameplayTag(FName(TEXT("GameplayEvent.EnemyStatusChanged")));
+		return Channel;
 	}
 }
 
@@ -316,9 +330,11 @@ void UFPSREnemyHealthComponent::OnRep_Shield()
 }
 
 // ---------------------------------------------------------------------------------------------------------------
-// STAT1 (B단계 — data/pure-function core + storage only). See FPSRStatus.h for the pure-function contract; the 6
-// methods below are the ONLY public surface (§7-7) — everything else (movement/attack/damage hooks, the batch pass,
-// cards, boss Tick, the OnRep_StatusBits cosmetic broadcast) is C단계/D단계 wiring, not this phase's.
+// STAT1. See FPSRStatus.h for the pure-function contract; ApplyStatus/AdvanceStatus/GetResolvedStatus/
+// ClearStatusForReuse/HasStatus/SetStatusDriverPresent are the 6-method STATUS-MUTATION surface (§7-7 — B단계).
+// Movement/attack/damage hooks, the batch pass, cards, and boss Tick are C단계 wiring (elsewhere). The cosmetic
+// broadcast below (OnStatusChangedCosmetic + its GMS half, GetActiveStatusSlots/GetStatusBits read-only getters) is
+// D단계 — a separate, additive concern from the 6-method cap above (see this component's header comment on why).
 // ---------------------------------------------------------------------------------------------------------------
 
 bool UFPSREnemyHealthComponent::ApplyStatus(const UFPSRStatusCatalogDataAsset* Catalog, uint8 Slot,
@@ -351,6 +367,10 @@ bool UFPSREnemyHealthComponent::ApplyStatus(const UFPSRStatusCatalogDataAsset* C
 		{
 			MARK_PROPERTY_DIRTY_FROM_NAME(UFPSREnemyHealthComponent, StatusBits, this);
 			ResolvedStatus = FPSRStatus::Resolve(StatusBits, *Catalog); // §7-5: only recompute when bits actually moved
+			// STAT1 §8 (D단계): authority half of the status cosmetic — see BroadcastStatusChangedCosmetic's own
+			// comment for why this fires here directly rather than relying on OnRep_StatusBits alone (a listen-server
+			// host never runs its own OnRep).
+			BroadcastStatusChangedCosmetic(BitsBefore, StatusBits);
 		}
 	}
 
@@ -393,6 +413,9 @@ bool UFPSREnemyHealthComponent::AdvanceStatus(const UFPSRStatusCatalogDataAsset*
 	{
 		MARK_PROPERTY_DIRTY_FROM_NAME(UFPSREnemyHealthComponent, StatusBits, this);
 		ResolvedStatus = FPSRStatus::Resolve(StatusBits, *Catalog);
+		// STAT1 §8 (D단계): authority half — see ApplyStatus's identical call for why (this is the expire/combo path,
+		// ApplyStatus above is the apply/refresh path; both change StatusBits and both need the same broadcast).
+		BroadcastStatusChangedCosmetic(BitsBefore, StatusBits);
 	}
 
 	return bChanged;
@@ -410,8 +433,14 @@ void UFPSREnemyHealthComponent::ClearStatusForReuse()
 	// each with no extra guarding.
 	if (StatusBits != 0)
 	{
+		const uint8 BitsBefore = StatusBits;
 		StatusBits = 0;
 		MARK_PROPERTY_DIRTY_FROM_NAME(UFPSREnemyHealthComponent, StatusBits, this);
+		// STAT1 §8/§11-2 (D단계): without this, a corpse dwelling through EnterDyingState's death-dwell window
+		// (one of this method's 4 call sites, §7-6) would have StatusBits correctly replicate to 0, but the HOST
+		// itself (which never runs OnRep) would keep showing the icon it already painted until the actor is reused —
+		// exactly the "시체가 상태 아이콘을 달고 서 있다" symptom §7-6's own EnterDyingState note warns about.
+		BroadcastStatusChangedCosmetic(BitsBefore, StatusBits);
 	}
 
 	for (float& Expiry : StatusServer.SlotExpiry)
@@ -435,9 +464,62 @@ void UFPSREnemyHealthComponent::ClearStatusForReuse()
 
 void UFPSREnemyHealthComponent::OnRep_StatusBits()
 {
-	// STAT1 (B단계): intentionally empty. The cosmetic client-edge broadcast (GMS pub/sub so the 3 remote co-op
-	// clients can SEE a status icon/audio cue, §8 — mirrors OnRep_Shield's break-edge pattern above) is D단계 wiring.
-	// Declaring this RepNotify now, rather than adding it whole in D단계, is what lets StatusBits replicate
-	// correctly TODAY without a later signature change — an empty RepNotify is a legal, well-defined no-op: the
-	// property still replicates and OnRep still fires, only the client-side reaction is deferred.
+	// STAT1 §8 (D단계): client half. Guarded the same way every other edge-detector in this file is (OnRep_Shield's
+	// break check, OnRep_bDead's death check) — LastKnownStatusBits defaults to 0, so a late-joining client's FIRST
+	// call here still computes a correct (0 -> current) edge rather than silently skipping it.
+	if (LastKnownStatusBits != StatusBits)
+	{
+		BroadcastStatusChangedCosmetic(LastKnownStatusBits, StatusBits);
+		LastKnownStatusBits = StatusBits;
+	}
+}
+
+TArray<uint8> UFPSREnemyHealthComponent::GetActiveStatusSlots() const
+{
+	// §11-2 (D단계): O(8) bit tests — cheap enough to call from a widget's own repaint handler without the component
+	// needing to maintain a separate cached slot list alongside StatusBits itself.
+	TArray<uint8> ActiveSlots;
+	for (uint8 Slot = 0; Slot < 8; ++Slot)
+	{
+		if (HasStatus(Slot))
+		{
+			ActiveSlots.Add(Slot);
+		}
+	}
+	return ActiveSlots;
+}
+
+void UFPSREnemyHealthComponent::BroadcastStatusChangedCosmetic(uint8 PreviousBits, uint8 NewBits)
+{
+	OnStatusChangedCosmetic.Broadcast(PreviousBits, NewBits);
+
+	// STAT1 §8: GMS is purely local per machine (zero replication) — every call site of this function already runs
+	// independently on ITS OWN machine (the 3 authority call sites fire here directly on the server/host;
+	// OnRep_StatusBits fires this on each remote client's own machine), so a plain local broadcast from each is what
+	// the §8 warning means by "OnRep 클라 반쪽이 없으면 호스트만 본다" being answered by both halves existing.
+	UFPSRGameplayMessageSubsystem* GMS = UFPSRGameplayMessageSubsystem::Get(GetOwner());
+	const uint8 Changed = PreviousBits ^ NewBits;
+	if (!GMS || Changed == 0)
+	{
+		return;
+	}
+
+	// Decompose the edge per-slot rather than handing listeners the raw bitmask — a combo firing can flip more than
+	// one bit in the same edge (2 material bits off + 1 Strong bit on, §7-3), and a future audio-cue subsystem
+	// (§11-2's OTHER placeholder channel, not this phase's job to wire) wants "slot X just turned on/off" so it can
+	// map straight to that slot's own sound, not a bitmask it would have to diff against its own last-seen copy.
+	FFPSRCosmeticEventMessage Msg;
+	Msg.WorldLocation = GetOwner() ? GetOwner()->GetActorLocation() : FVector::ZeroVector;
+
+	const FGameplayTag Channel = GetStatusChangedCosmeticChannel();
+	for (uint8 Slot = 0; Slot < 8; ++Slot)
+	{
+		const uint8 Mask = static_cast<uint8>(1 << Slot);
+		if ((Changed & Mask) != 0)
+		{
+			Msg.StatusSlot = Slot;
+			Msg.bStatusSlotOn = (NewBits & Mask) != 0;
+			GMS->BroadcastMessage(Channel, Msg);
+		}
+	}
 }

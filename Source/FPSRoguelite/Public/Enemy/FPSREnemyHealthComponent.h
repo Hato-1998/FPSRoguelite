@@ -16,6 +16,14 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE(FFPSREnemyDeathCosmeticSignature);
  *  no payload, the widget re-reads GetShield()/GetMaxShield() itself. Zero new replication (§7 — a RepNotify on the
  *  already-replicated Shield). */
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FFPSREnemyShieldBrokenSignature);
+/** STAT1 §8 (D단계): the status-cosmetic EDGE — (PreviousBits, NewBits), not just "something changed" — so a
+ *  listener can tell exactly which slot(s) turned on/off itself (a combo firing can flip more than one bit in the
+ *  same edge: 2 material bits off + 1 Strong bit on, §7-3). Fires on BOTH server and client, like
+ *  OnShieldBrokenCosmetic above and UNLIKE OnDeathCosmetic's client-only shape — StatusBits only ever changes via
+ *  authoritative gameplay (weapon hits / DoT / expiry / combo), never a client-exclusive path, so a listen-server
+ *  HOST would see no status cosmetic all session without an authority-side broadcast too
+ *  ([[event-halves-authority-vs-client]] — the exact G2 trap this file's ApplyDamage comment documents). */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FFPSREnemyStatusChangedSignature, uint8, PreviousStatusBits, uint8, NewStatusBits);
 
 /** Lightweight, non-GAS health for swarm enemies. Server-authoritative; damage applied via the GAS->bridge. */
 UCLASS(ClassGroup = (FPSR), meta = (BlueprintSpawnableComponent))
@@ -94,7 +102,11 @@ public:
 
 	// --- STAT1 (B단계 — data/pure-function core; movement/attack/damage hooks, the batch pass, cards and boss Tick
 	//     are C단계): public API only (§7-7) — StatusBits/StatusServer/ResolvedStatus/bStatusDriverPresent below stay
-	//     private/protected, everything outside this component reaches status state through these 6 entry points. ---
+	//     private/protected, everything outside this component MUTATES status state through these 6 entry points
+	//     only. (D단계 adds GetStatusBits/GetActiveStatusSlots + OnStatusChangedCosmetic below, purely for
+	//     Blueprint/cosmetic READ access — HasStatus already exposes the same bits one slot at a time, so these are
+	//     ergonomics on an already-public read, not a new mutation/bypass surface; §7-7's cap is about preventing
+	//     external code from reaching into StatusServer/ResolvedStatus directly, which none of the D단계 additions do.) ---
 
 	/** Server: apply/refresh Slot from Catalog (see FPSRStatus::Apply for the reject/refresh/combo contract).
 	 *  Silently rejects (§5-6) when bStatusDriverPresent is false — that flag is the target-actor gate: a door or
@@ -138,7 +150,19 @@ public:
 
 	/** True if Slot's bit is currently set. Reads the replicated StatusBits, so this is valid on both server and
 	 *  client (unlike GetResolvedStatus, which is server-only in practice). */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Enemy")
 	bool HasStatus(uint8 Slot) const { return Slot < 8 && (StatusBits & (1 << Slot)) != 0; }
+
+	/** STAT1 §11-2 (D단계): the raw replicated bitmask, valid on both server and client (same read as HasStatus,
+	 *  just undecomposed) — for a widget that wants to cache/compare the whole mask itself rather than test 8 bits. */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Enemy")
+	uint8 GetStatusBits() const { return StatusBits; }
+
+	/** STAT1 §11-2 (D단계): StatusBits decomposed into a slot-index list (0..7, only the SET bits) — for a widget
+	 *  that wants to foreach-spawn one icon per active status instead of hand-testing all 8 bits. Valid on both
+	 *  server and client, same as HasStatus/GetStatusBits above. */
+	UFUNCTION(BlueprintPure, Category = "FPSR|Enemy")
+	TArray<uint8> GetActiveStatusSlots() const;
 
 	/** Server/setup: the §5-6 target gate. Set true exactly when this actor gains a status-progression driver
 	 *  (AFPSREnemyBase entering ActiveEnemies membership; AFPSRBossBase enabling its own Tick under HasAuthority())
@@ -175,6 +199,14 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "FPSR|Enemy")
 	FFPSREnemyShieldBrokenSignature OnShieldBrokenCosmetic;
 
+	/** STAT1 §8/§11-2 (D단계) — the enemy health-bar widget's status hook (§11-2 결정: 1차 가시성 = 헬스바 아이콘,
+	 *  CPD 틴트는 M2 로 이월). Bind this alongside BindHealthComponent's existing OnHealthChanged/
+	 *  OnShieldBrokenCosmetic wiring. This event is only the "something changed, repaint" edge signal (same division
+	 *  of labor as those two) — GetStatusBits()/GetActiveStatusSlots()/HasStatus() below answer "what's active RIGHT
+	 *  NOW" for the initial paint a late-binding widget needs ([[umg-event-widget-initial-sync]]). */
+	UPROPERTY(BlueprintAssignable, Category = "FPSR|Enemy")
+	FFPSREnemyStatusChangedSignature OnStatusChangedCosmetic;
+
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 protected:
@@ -196,12 +228,23 @@ protected:
 	UFUNCTION()
 	void OnRep_Shield();
 
-	/** STAT1 (B단계): declared now, body deliberately EMPTY — the cosmetic client-edge broadcast (mirrors
-	 *  OnRep_Shield's break-edge GMS pattern, §8) is D단계 wiring, not this phase's. Declaring it here now (rather
-	 *  than in D단계) is what lets StatusBits use ReplicatedUsing today without a forward-declared-then-defined-later
-	 *  RepNotify split. */
+	/** STAT1 §8 (D단계): the CLIENT half of the status cosmetic — mirrors OnRep_Shield's break-edge pattern above.
+	 *  The authority call sites (ApplyStatus/AdvanceStatus/ClearStatusForReuse) already broadcast this component's
+	 *  own edge directly; this RepNotify never fires on the authority itself (a listen-server host has no OnRep —
+	 *  same reason ApplyDamage broadcasts OnShieldBrokenCosmetic itself rather than relying on OnRep_Shield alone),
+	 *  so this is what lets the 3 remote co-op clients see the SAME edge. Computes the edge against
+	 *  LastKnownStatusBits (below) since only the CURRENT StatusBits value is on the wire, not a "here's what just
+	 *  changed" bit. */
 	UFUNCTION()
 	void OnRep_StatusBits();
+
+	/** STAT1 §8/§11-2 (D단계): shared by every StatusBits-changing call site — the 3 authority ones
+	 *  (ApplyStatus/AdvanceStatus/ClearStatusForReuse) and OnRep_StatusBits's client half above — so "broadcast the
+	 *  BP delegate, then decompose the edge into per-slot GMS events" lives in exactly one place instead of 4 copies.
+	 *  Every call site only invokes this when PreviousBits != NewBits (mirrors this file's existing dirty-mark
+	 *  guards); the GMS decomposition loop (see .cpp) additionally no-ops on an equal pair as a defensive fallback,
+	 *  not a documented contract callers may rely on. */
+	void BroadcastStatusChangedCosmetic(uint8 PreviousBits, uint8 NewBits);
 
 	/** Replicated so clients compute a correct NewHealth/MaxHealth percent for the health bar (B12). Swarm enemies
 	 *  author it as the editor default; content actors (boss/door) set it at runtime via InitializeMaxHealth. Shares
@@ -259,6 +302,14 @@ protected:
 	 *  FAST calls only ever take class-direct UPROPERTYs (§5-3 / G1-11), matching every other property below. */
 	UPROPERTY(ReplicatedUsing = OnRep_StatusBits)
 	uint8 StatusBits = 0;
+
+	/** Client-only, non-replicated: the last StatusBits value THIS CLIENT observed (mirrors LastKnownShieldForCosmetic
+	 *  above) — so OnRep_StatusBits can compute its own local (previous, new) edge without a dedicated "here's what
+	 *  just changed" field on the wire (only the current StatusBits value replicates, §8). Defaults to 0, matching a
+	 *  freshly-constructed/never-yet-relevant actor's true prior state, so a late-joining client's FIRST
+	 *  OnRep_StatusBits still computes a correct (0 -> current) edge instead of suppressing it
+	 *  ([[umg-event-widget-initial-sync]]). */
+	uint8 LastKnownStatusBits = 0;
 
 	/** Server-only, non-replicated (§5-3). Not POD (2 TWeakObjectPtr members) — see FFPSRStatusServerState's own
 	 *  header comment for why that still needs no UPROPERTY/GC tracking. */
