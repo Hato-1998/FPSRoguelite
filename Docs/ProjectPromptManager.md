@@ -14,7 +14,7 @@
 
 ## 1. 부팅 (세션 시작 시 항상)
 
-1. `Game.md`(SSOT 허브)를 읽고 + **PM 보드를 전수 조회**한다(`Docs/SSOT/Workflow.md` §6-9 SQL — 진행중/대기/차단/결정대기). 보류 로드맵이 필요하면 `Docs/TaskPrompts_Master.md`(아카이브)도.
+1. `Game.md`(SSOT 허브)를 읽고 + **PM 보드를 전역 조회**한다 — DAG 유지가 일이라 §6-9 (2)의 ①작업집합 조회로는 부족한, "보드 전체를 훑는 작업"에 해당한다. **`has_more`가 `false`가 될 때까지 `LIMIT/OFFSET`으로 페이지네이션할 것**(2026-09-09: 100행 잘림으로 진행중 행을 놓친 사고). 보류 로드맵이 필요하면 `Docs/TaskPrompts_Master.md`(아카이브)도.
 2. **보드 말고 실제 상태를 확인한다**: `git log --oneline -15`, `git status -sb`, `git branch -a`, `git worktree list`. 보드·문서는 stale일 수 있으니 git을 1차 진실로 본다.
 3. 불일치(보드엔 미완인데 git엔 머지됨, 또는 그 반대)를 발견하면 먼저 보고하고 보드를 동기화한다.
 4. **컨설팅 결과 인입 확인**: `Docs/Review/`에 `TaskPrompts_Master.md §E 인입 표`에 아직 없는 신규 리포트가 있는지 본다. 있으면 그 `📌 액션 아이템`·`🙋 사용자 결정 필요`를 §E에 등재하고 대상 유닛(§C)에 반영(자문 전용 — 코드 변경 X, 채택 시 해당 SSOT 먼저). 프로토콜=`Docs/ConsultLoop.md`.

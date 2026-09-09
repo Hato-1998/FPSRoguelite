@@ -134,6 +134,8 @@ ehthumbs.db
 !.claude/skills/
 !.claude/commands/
 !.claude/agents/
+# ⚠️ 시크릿 — 위 .claude/* 로 이미 덮이지만 명시한다(부정 패턴이 늘어나도 절대 새면 안 되는 파일)
+.claude/notion-token.txt
 
 # =============================================================================
 # Codex 코드리뷰 결과 (로컬 전용)
@@ -153,6 +155,11 @@ Docs/Review/_raw/
 # 서드파티 툴 플러그인 (게임 산출물 아님 — 로컬 설치, 공유 금지)
 # =============================================================================
 Plugins/VibeUE/
+# Tripo3D DCC 브리지 — 엔진 마이너 버전별 패키지이고 벤더 ThirdParty(IXWebSocket.lib)가 있어야 빌드된다
+Plugins/Tripo3DUEBridge/
+# Reallusion CC/iClone Auto Setup — 소스 없는 벤더 바이너리(.cpp 0개, 엔진 BuildId 락, PDB 103MB).
+#   산출물인 Content/CC_Shaders/ 는 게임 에셋이므로 커밋한다
+Plugins/RLPlugin/
 
 # =============================================================================
 # Synty 셀/툰 아트 파일럿 스로어웨이(2026-07-10) — 검증용 테스트 에셋, 커밋 금지
