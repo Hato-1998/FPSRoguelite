@@ -1,0 +1,7 @@
+{
+  "description": "STAT1 — 강한 상태 2종(실명·속박)의 Kind 를 Strong 으로. 저작 스크립트(author_stat1_content.py)가 이 필드만 못 채웠다: UE Python 이 EnumProperty 에 열거형 객체(unreal.EFPSRStatusKind 는 UENUM(BlueprintType) 인데도 바인딩이 안 잡힌다)도 정수도 받지 않는다. Kind 가 Weak 로 남으면 FPSRStatus::EvaluateCombos 가 Kind==Strong 후보만 훑으므로 조합이 영원히 성립하지 않는다 — 실명·속박이 절대 안 걸린다. 나머지 필드(슬롯·지속시간·배율·재료쌍·카탈로그 등록)는 파이썬으로 정상 저작됐다.",
+  "edits": [
+    { "asset": "/Game/Status/DA_Status_Blind", "property": "Kind", "value": "Strong" },
+    { "asset": "/Game/Status/DA_Status_Root",  "property": "Kind", "value": "Strong" }
+  ]
+}

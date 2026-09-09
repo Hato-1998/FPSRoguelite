@@ -1,0 +1,51 @@
+{
+  "description": "STAT1 — 라이플 상태이상 부여 카드 4장(약한 4종). 미션 클리어 기능 해금 풀(MissionClearWeaponFeature)로 라우팅한다 — 행동 프래그먼트는 레벨업 풀에 들어가면 안 된다(card-pool-routing, 라우팅 검증기가 강제). BuildTags='status' 로 묶어 CRIT2 빌드 시너지가 상태이상 축을 하나의 빌드로 인식하게 한다. 배타 축은 사용자 결정(2026-09-06 3회차)으로 철회했으므로 한 무기가 여러 장을 들 수 있고, 그게 솔로 조합의 유일한 경로다(명세 §3-D). 강한 2종(실명·속박)은 카드로 주지 않는다 — 조합으로만 켜진다. 이름·설명은 컨셉 미확정이라 임시다.",
+  "changes": [
+    {
+      "sheet": "CardCatalog",
+      "upsert": [
+        { "AttrId": "weapon.frag.statusslow",        "EffectType": "WeaponBehavior", "Payload": "/Game/Cards/Weapons/Modifiers/DA_Fragment_Rifle_StatusSlow.DA_Fragment_Rifle_StatusSlow" },
+        { "AttrId": "weapon.frag.statusdot",         "EffectType": "WeaponBehavior", "Payload": "/Game/Cards/Weapons/Modifiers/DA_Fragment_Rifle_StatusDot.DA_Fragment_Rifle_StatusDot" },
+        { "AttrId": "weapon.frag.statusdefensedown", "EffectType": "WeaponBehavior", "Payload": "/Game/Cards/Weapons/Modifiers/DA_Fragment_Rifle_StatusDefenseDown.DA_Fragment_Rifle_StatusDefenseDown" },
+        { "AttrId": "weapon.frag.statusattackslow",  "EffectType": "WeaponBehavior", "Payload": "/Game/Cards/Weapons/Modifiers/DA_Fragment_Rifle_StatusAttackSlow.DA_Fragment_Rifle_StatusAttackSlow" }
+      ]
+    },
+    {
+      "sheet": "Cards",
+      "upsert": [
+        {
+          "CardId": "DA_CardModifiers_StatusSlow", "AssetName": "DA_CardModifiers_StatusSlow",
+          "Group": "Weapon", "Route": "MissionClearWeaponFeature", "OwnerWeapon": "DA_Weapon_Rifle",
+          "Weight": "1", "BuildTags": "status",
+          "DisplayName_ko": "감속 탄(임시)", "DisplayName_en": "Slowing Rounds (WIP)", "DisplayName_ja": "減速弾(仮)",
+          "Description_ko": "명중한 적을 잠시 느리게 만든다", "Description_en": "Hits slow the target for a short time", "Description_ja": "命中した敵をしばらく減速させる",
+          "E1_Attr": "weapon.frag.statusslow", "E1_Tiers": "L:0.0"
+        },
+        {
+          "CardId": "DA_CardModifiers_StatusDot", "AssetName": "DA_CardModifiers_StatusDot",
+          "Group": "Weapon", "Route": "MissionClearWeaponFeature", "OwnerWeapon": "DA_Weapon_Rifle",
+          "Weight": "1", "BuildTags": "status",
+          "DisplayName_ko": "지속피해 탄(임시)", "DisplayName_en": "Lingering Rounds (WIP)", "DisplayName_ja": "継続ダメージ弾(仮)",
+          "Description_ko": "명중한 적이 잠시 지속 피해를 입는다", "Description_en": "Hits leave the target taking damage over time", "Description_ja": "命中した敵がしばらく継続ダメージを受ける",
+          "E1_Attr": "weapon.frag.statusdot", "E1_Tiers": "L:0.0"
+        },
+        {
+          "CardId": "DA_CardModifiers_StatusDefenseDown", "AssetName": "DA_CardModifiers_StatusDefenseDown",
+          "Group": "Weapon", "Route": "MissionClearWeaponFeature", "OwnerWeapon": "DA_Weapon_Rifle",
+          "Weight": "1", "BuildTags": "status",
+          "DisplayName_ko": "방어관통 탄(임시)", "DisplayName_en": "Sundering Rounds (WIP)", "DisplayName_ja": "防御貫通弾(仮)",
+          "Description_ko": "명중한 적이 잠시 더 큰 피해를 받는다", "Description_en": "Hits make the target take more damage for a short time", "Description_ja": "命中した敵がしばらく被ダメージ増加",
+          "E1_Attr": "weapon.frag.statusdefensedown", "E1_Tiers": "L:0.0"
+        },
+        {
+          "CardId": "DA_CardModifiers_StatusAttackSlow", "AssetName": "DA_CardModifiers_StatusAttackSlow",
+          "Group": "Weapon", "Route": "MissionClearWeaponFeature", "OwnerWeapon": "DA_Weapon_Rifle",
+          "Weight": "1", "BuildTags": "status",
+          "DisplayName_ko": "제압 탄(임시)", "DisplayName_en": "Suppressing Rounds (WIP)", "DisplayName_ja": "制圧弾(仮)",
+          "Description_ko": "명중한 적의 공격 간격이 잠시 벌어진다", "Description_en": "Hits slow the target's attack rate for a short time", "Description_ja": "命中した敵の攻撃間隔がしばらく広がる",
+          "E1_Attr": "weapon.frag.statusattackslow", "E1_Tiers": "L:0.0"
+        }
+      ]
+    }
+  ]
+}

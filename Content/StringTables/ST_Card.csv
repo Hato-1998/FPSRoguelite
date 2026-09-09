@@ -61,3 +61,11 @@ DA_CardModifiers_CritOnSlide.DisplayName,활강 집중,Slide Focus,滑走集中
 DA_CardModifiers_CritOnSlide.Description,이 무기를 든 채 슬라이딩하면 5초간 치명타 확률 +40% (슬라이딩할 때마다 초기화),Sliding while holding this weapon grants +40% crit chance for 5s (refreshed each slide),この武器を持ってスライディングすると5秒間 クリティカル率+40%（スライディングのたびに更新）
 DA_Card_ADSZoom_ThisWeapon.DisplayName,조준 배율,Aim Magnification,照準倍率
 DA_Card_ADSZoom_ThisWeapon.Description,이 무기의 조준 배율 증가,Aim magnification up for this weapon,この武器の照準倍率アップ
+DA_CardModifiers_StatusSlow.DisplayName,감속 탄(임시),Slowing Rounds (WIP),減速弾(仮)
+DA_CardModifiers_StatusSlow.Description,명중한 적을 잠시 느리게 만든다,Hits slow the target for a short time,命中した敵をしばらく減速させる
+DA_CardModifiers_StatusDot.DisplayName,지속피해 탄(임시),Lingering Rounds (WIP),継続ダメージ弾(仮)
+DA_CardModifiers_StatusDot.Description,명중한 적이 잠시 지속 피해를 입는다,Hits leave the target taking damage over time,命中した敵がしばらく継続ダメージを受ける
+DA_CardModifiers_StatusDefenseDown.DisplayName,방어관통 탄(임시),Sundering Rounds (WIP),防御貫通弾(仮)
+DA_CardModifiers_StatusDefenseDown.Description,명중한 적이 잠시 더 큰 피해를 받는다,Hits make the target take more damage for a short time,命中した敵がしばらく被ダメージ増加
+DA_CardModifiers_StatusAttackSlow.DisplayName,제압 탄(임시),Suppressing Rounds (WIP),制圧弾(仮)
+DA_CardModifiers_StatusAttackSlow.Description,명중한 적의 공격 간격이 잠시 벌어진다,Hits slow the target's attack rate for a short time,命中した敵の攻撃間隔がしばらく広がる

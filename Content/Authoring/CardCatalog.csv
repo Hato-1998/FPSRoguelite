@@ -32,3 +32,7 @@ weapon.frag.critonreload,WeaponBehavior,/Game/Cards/Weapons/Modifiers/DA_Fragmen
 weapon.frag.weakpointcrit,WeaponBehavior,/Game/Cards/Weapons/Modifiers/DA_Fragment_Rifle_WeakpointCrit.DA_Fragment_Rifle_WeakpointCrit,,,,
 weapon.frag.critonslide,WeaponBehavior,/Game/Cards/Weapons/Modifiers/DA_Fragment_Rifle_CritOnSlide.DA_Fragment_Rifle_CritOnSlide,,,,
 weapon.adsfov,WeaponStat,ADSFieldOfView,PercentMultiply,TRUE,,값이 작을수록 배율이 높다 — 강화 카드는 음수로 저작(RecoilVertical 규약과 동일). 사이트 파츠의 스탯 임계 진화(스코프)가 이 축을 읽는다.
+weapon.frag.statusslow,WeaponBehavior,/Game/Cards/Weapons/Modifiers/DA_Fragment_Rifle_StatusSlow.DA_Fragment_Rifle_StatusSlow,,,,
+weapon.frag.statusdot,WeaponBehavior,/Game/Cards/Weapons/Modifiers/DA_Fragment_Rifle_StatusDot.DA_Fragment_Rifle_StatusDot,,,,
+weapon.frag.statusdefensedown,WeaponBehavior,/Game/Cards/Weapons/Modifiers/DA_Fragment_Rifle_StatusDefenseDown.DA_Fragment_Rifle_StatusDefenseDown,,,,
+weapon.frag.statusattackslow,WeaponBehavior,/Game/Cards/Weapons/Modifiers/DA_Fragment_Rifle_StatusAttackSlow.DA_Fragment_Rifle_StatusAttackSlow,,,,
