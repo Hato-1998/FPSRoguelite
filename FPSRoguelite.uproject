@@ -91,6 +91,13 @@
 		{
 			"Name": "ImGui",
 			"Enabled": true
+		},
+		{
+			"Name": "RLPlugin",
+			"Enabled": true,
+			"TargetAllowList": [
+				"Editor"
+			]
 		}
 	]
 }
