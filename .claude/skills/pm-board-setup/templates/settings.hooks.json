@@ -18,6 +18,11 @@
         "hooks": [
           {
             "type": "command",
+            "command": "powershell -NoProfile -ExecutionPolicy Bypass -File Scripts/board-snapshot.ps1",
+            "timeout": 30
+          },
+          {
+            "type": "command",
             "command": "powershell -NoProfile -ExecutionPolicy Bypass -File Scripts/session-resume.ps1",
             "timeout": 15
           }
