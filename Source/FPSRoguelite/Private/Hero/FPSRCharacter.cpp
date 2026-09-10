@@ -968,6 +968,26 @@ void AFPSRCharacter::AttachWeaponMeshes()
 	const FName AttachSocket = ResolveWeaponAttachSocket(Weapon);
 	const float AttachScale = Weapon ? Weapon->WeaponAttachScale : 1.0f;
 
+	// WeaponAttachScale says how big the GUN is — not how big it is relative to whatever hand happens to hold it.
+	// Attaching multiplies a component's relative scale by its parent's, and the two grip parents chosen above are not
+	// guaranteed to carry the same scale: the arms ride the camera, the body mesh is a Blueprint slot an artist owns.
+	// When those two disagree, one DA value renders a correctly sized gun in the owner's own view and a wrong-sized one
+	// on the body — and that half is on the exact path the owner can never see themselves, so in 4-player co-op only
+	// everyone ELSE sees it. Divide the grip mesh's own scale back out so the world size is the one the DataAsset asked
+	// for.
+	// As measured 2026-09-10 this division is a NO-OP: after the metre-rig cleanup, CharacterMesh0 is SKM_VoxelChar at
+	// relative scale (1,1,1) and the arms sit on the camera at 1.0 (the Rig_Tripo-at-1.8 body this comment used to
+	// describe is gone — that component no longer exists). It stays because the failure it prevents is silent and
+	// one-sided: the moment a body mesh comes back with an art scale on its BP slot, the gun quietly splits in two
+	// sizes and the person who could report it is the one person who cannot see it.
+	// RELATIVE, not GetComponentScale(): cancelling the grip component's art scale is the intent, whereas an
+	// actor-level scale (a scaled-up variant of the whole pawn) SHOULD carry its weapon with it.
+	const FVector GripRelativeScale = GripMesh->GetRelativeScale3D();
+	const FVector AttachScale3D(
+		FMath::IsNearlyZero(GripRelativeScale.X) ? AttachScale : AttachScale / GripRelativeScale.X,
+		FMath::IsNearlyZero(GripRelativeScale.Y) ? AttachScale : AttachScale / GripRelativeScale.Y,
+		FMath::IsNearlyZero(GripRelativeScale.Z) ? AttachScale : AttachScale / GripRelativeScale.Z);
+
 	// Gun-anchor IK (fparms-gunanchor-ik): true first-person arms authored with the two-bone hand-IK rig
 	// (ik_hand_root > ik_hand_gun > ik_hand_l/r) anchor the weapon to the ik_hand_gun BONE instead of the grip socket.
 	// ik_hand_gun sits OUTSIDE the arm's FK chain (a child of ik_hand_root, not of the elbow/wrist), so once the arms'
@@ -1030,7 +1050,7 @@ void AFPSRCharacter::AttachWeaponMeshes()
 				// offset reproduces the old hand_r-socket world position the instant ik_hand_gun's CopyBone makes
 				// it equal hand_r again.
 				bUseGunBoneAnchor = true;
-				GunBoneRelativeTransform = FTransform(SocketLocalTransform.GetRotation(), SocketLocalTransform.GetLocation(), FVector(AttachScale));
+				GunBoneRelativeTransform = FTransform(SocketLocalTransform.GetRotation(), SocketLocalTransform.GetLocation(), AttachScale3D);
 			}
 		}
 	}
@@ -1056,7 +1076,7 @@ void AFPSRCharacter::AttachWeaponMeshes()
 	// gun lives in CAMERA space, so a shadow from it would be cast from the viewer's eye into the world — the accepted
 	// cost of ADR 0003 axis 2 is "no gun in your own shadow", not "a gun-shaped smear beside you". On the body it keeps
 	// its shadow, because there it IS a world object.
-	auto AttachOne = [GripMesh, AttachSocket, AttachScale, bUseGunBoneAnchor, GunBoneRelativeTransform, this](UMeshComponent* Comp)
+	auto AttachOne = [GripMesh, AttachSocket, AttachScale3D, bUseGunBoneAnchor, GunBoneRelativeTransform, this](UMeshComponent* Comp)
 	{
 		if (!Comp)
 		{
@@ -1066,7 +1086,7 @@ void AFPSRCharacter::AttachWeaponMeshes()
 		{
 			// SnapToTargetNotIncludingScale here only decides the FIRST relative transform the attach computes — it is
 			// immediately overwritten below by the exact offset baked above. The single SetRelativeTransform call (not
-			// a separate SetRelativeScale3D) is deliberate: this FTransform already carries AttachScale, so a second
+			// a separate SetRelativeScale3D) is deliberate: this FTransform already carries AttachScale3D, so a second
 			// scale call would double-apply it.
 			Comp->AttachToComponent(GripMesh, FAttachmentTransformRules::SnapToTargetNotIncludingScale, IkHandGunBoneName);
 			Comp->SetRelativeTransform(GunBoneRelativeTransform);
@@ -1076,7 +1096,7 @@ void AFPSRCharacter::AttachWeaponMeshes()
 			// Body, an arms mesh without the ik_hand_gun bone, or the socket-verification checks above failed (see
 			// the UE_LOG Warning sites) — unchanged fallback, Snap straight onto the grip socket.
 			Comp->AttachToComponent(GripMesh, FAttachmentTransformRules::SnapToTargetNotIncludingScale, AttachSocket);
-			Comp->SetRelativeScale3D(FVector(AttachScale));
+			Comp->SetRelativeScale3D(AttachScale3D);
 		}
 		Comp->SetFirstPersonPrimitiveType(GetWeaponFirstPersonPrimitiveType());
 	};
