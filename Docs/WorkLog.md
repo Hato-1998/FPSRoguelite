@@ -9,6 +9,64 @@
 
 ---
 
+## 🔷 VoxelChar 미터 스케일 정리 + 미사용 에셋 1,574건 대청소 (2026-09-10, `main`, 보드 「VoxelChar 스켈레톤 미터 스케일 정리」 **완료** — `b7b5be76` · `838c78c1`)
+
+> 증상은 "스켈레톤 에디터에서 `SOCKET_Weapon` 에 붙인 라이플이 손이 아니라 발밑에 떴다" 였는데, 그 아래에 **터지기 직전의 결함**이 있었다.
+
+**■ 진단 — 둘이 겹쳐 있었다**
+1. *프리뷰 증상(경미)* — 스켈레톤 에디터의 프리뷰 메시가 `__old_SKM_VoxelChar` 였고, 이 메시는 `SK_Mannequin` 을 쓴다(「다른 스켈레톤 허용」으로 붙어 있었다). `SK_Mannequin` 에는 `SOCKET_Weapon` 이 없어 프리뷰가 컴포넌트 원점(바닥)에 떨어뜨렸다.
+2. 🚨 *진짜 결함* — `SKM_VoxelChar_Skeleton` 이 **root 본에 ×100 을 업은 미터 리그**였다. 뼈 **위치는 맞아서**(pelvis 95.9 = `SK_Mannequin` 동일) 겉보기 180cm 로 보였을 뿐이다. 메모리 `fbx-metre-cm-armature-scale-trap` 그대로고 이 프로젝트에서 **세 번째**다(Blu 리그 · 1인칭 팔 · 이번).
+
+**지금까지 안 터진 이유 = 이 리그에서 애니메이션이 한 번도 돈 적이 없어서다**(종전 ABP 는 스켈레톤 불일치로 초기화조차 안 됐다). `da409893` 으로 ABP 가 붙었으니 **다음 PIE 가 첫 재생**이었고, 매너퀸 클립은 root scale 1 이라 ×100 이 덮여 사라지고 스키닝은 미터 ref pose 에 묶여 캐릭터가 **1/100(1.8cm)로 쪼그라들** 상태였다. 소켓 world scale 100 → 붙는 무기 100배도 같은 뿌리.
+
+**■ 목표 수치 전부 PASS** (SkeletalMesh · USkeleton 양쪽) — `root` scale 100→**1** · `pelvis` z 0.959→**95.8968** · `hand_r` x −0.1363→**−13.6256** · `hand_r` 컴포넌트 scale 100→**1** · `SKM_VoxelChar` extent z **90 불변**. 보존 확인 = 머티리얼 `tripo_mat_12bcd575` · PhysicsAsset · `SOCKET_Weapon`(스켈레톤 소유) · 파츠 extent 전부. 리타깃 모드는 `SK_Mannequin` 과 **89본 전수 1:1 대조, 불일치 0**(`Animation` 10 = root·ik_\*·interaction·center_of_mass / `AnimationScaled` 77 / `Skeleton` 2 = ball_l·ball_r). ⚙ 스켈레톤 트리의 리타게팅 항목은 **기본 숨김** — ⚙ → 「리타게팅 옵션 표시」를 켜야 우클릭 메뉴에 나온다.
+
+**■ 🔑 5번째 시도에서 뚫린 지점 — 플래그는 「에셋에 저장」 + 「options 없이」**
+UE 5.7 의 `AssetImportTask` 는 Interchange 로 가고, `InterchangeFbxAssetImportDataConverter.cpp` 의 변환기가 **두 갈래인데 한쪽만 플래그를 실어 나른다**:
+
+| 경로 | 타는 함수 | `bUpdateSkeletonReferencePose` |
+|---|---|---|
+| `options` = `UFbxImportUI` | `:873` → `…FromFbxMeshImportData`(베이스) | ❌ 대입 자체가 없다 |
+| **options 없이 재임포트** | `:1045` → `…FromFbxSkeletalMeshImportData`(`:342`) | ✅ `:361` 에서 대입 |
+
+→ `mesh.asset_import_data.update_skeleton_reference_pose = True` + `import_content_type = FBXICT_ALL` → **에셋 저장** → `options` **미설정** 재임포트. **재시도 금지 4경로**: ①`options=FbxImportUI` ②`StackOverride`(트랜지언트) ③파이프라인 에셋 저장 후 `add_pipeline`/`SoftObjectPath`/`InterchangeManager.import_asset` ④기본 스택 파이프라인 메모리 패치(재임포트는 기본 스택이 아니라 **에셋 저장 데이터**를 읽는다). 에디터 UI 로 하려면 `Project Settings → Interchange → Show Reimport Dialog` 를 켜야 한다(**엔진 기본값 false** — 그래서 사용자 재임포트 2회에서 옵션 창이 안 떴다).
+
+**■ 🪤 계측 함정 2종 (둘 다 실제로 밟았다)**
+1. **존재하지 않는 에셋 경로에 `SkeletonService.get_bone_transform` 을 물으면 예외가 아니라 쓰레기 값이 나온다.** 스크래치 스켈레톤이 디스크에 없는 상태에서 `root scale 100`·`160` 이 나왔고 그걸로 **2군 실험 4개가 통째로 무효**였다 → 모든 측정 앞에 `does_asset_exist` 가드. (등록되지 않은 트랜지언트 `SkeletalMeshComponent` 의 `get_socket_transform` 이 identity 를 돌려주는 것도 같은 부류 — "1.0 이 나왔다"가 "고쳐졌다"가 아니다.)
+2. **`FSoftObjectPath` 는 Python 노출 필드가 없어 유효하든 아니든 항상 `{}` 로 찍힌다.** 앞선 진단 「오버라이드에 실린 경로가 비어 무시됐다」는 **오진**이었다.
+
+**■ Blender 단계** — 지오메트리·본에 ×100 굽기 + **최상위 아마추어 오브젝트 스케일만 0.01**, `apply_scale_options="FBX_SCALE_NONE"`. `.blend` 는 미터 그대로 둔다(굽기는 메모리에서만 — 저장하면 재실행이 ×10000 을 굽는다). 왕복 지표 = **아마추어 노드 scale 1.0 → 0.01**(메시 크기는 양쪽 같아 보여 크기로는 못 가른다). 🪤 첫 내보내기가 원본보다 40~50% 작았다 → 원본은 `use_tspace=True`(Tangents·Binormals)로 나갔던 것. **재임포트가 스케일 하나만 달라지도록** 맞춰 재내보냈다.
+
+**■ 곁다리 — 낡은 주석 정정** `AttachScale3D` 의 「BP_FPSRPlayer 가 `Rig_Tripo` 를 1.8배로 스케일한다」가 실측과 달랐다(`CharacterMesh0` = `SKM_VoxelChar` · relScale (1,1,1) · `Rig_Tripo` 컴포넌트 없음). 스케일 정리 후 그 나눗셈은 **no-op**. 코드는 남긴다 — 막는 실패가 조용하고 한쪽으로만 나타나기 때문이다(본인 화면은 멀쩡하고 남에게만 크기가 갈린다).
+
+**■ 에셋 대청소 `838c78c1` — 1,574건** (사용자 결정: *"삭제 커밋해도 됨, 실제로 필요없는 에셋들"* → 파손 3건 보고 후 *"전부 삭제 — 나중에 재작성"*)
+Characters 573(Blu 전량) · Assets 258(ZerinLabs 환경 · BroBot · Paragon) · Synthwave_city 224 · CC_Shaders 212 · SRS/Demo 176 · LPAMG 40 · Rifle_01 32 · LevelPrototyping 29 · Character/FPArms 23 · 기타 7.
+
+**검증은 스팟 체크가 아니라 전수 댕글링 조사로 했다** — 살아남은 패키지 **3,477개**에서 `/Game/` 참조를 전부 뽑아 삭제 대상 1,574 경로와 교차(1초). 결과 **6건**:
+
+| 참조하는 쪽 | 끊긴 대상 | 판정 |
+|---|---|---|
+| `Content/Maps/L_Lobby.umap` | ZerinLabs SciFi 구조물 **11** | 🔴 로비 맵이 빈다 → **PIE 2인 협동 경로가 막힌다** |
+| `Content/Actors/Pickups/BP_HealthPack` | `SM_TargetBaseMesh` | 🔴 힐팩 메시 소실(머티리얼 `MI_Pac_Pickup` 은 이미 아케이드화) |
+| `Content/Game/Core/BP_FPSRLobbyGameMode` | `BP_LobbyDisplayPawn` | 🔴 로비 표시 폰 |
+| `Content/Character/Player/ABP_FP_Base` | `SKEL_LPAMG_Character` · `FP_Rifle_Idle` | ⚪ 의도됨(아래) |
+| `Content/Actors/SM_SM_WallDoor` · `SM_SpawnGate` | `/Game/Actors/Meshs/` 동명 구본 | ⚪ 중복본, 현역은 `Content/Actors/` 에 생존 |
+
+복구 원본 = `git show 838c78c1^:<경로>`. 🔴 3건은 아케이드 재작성 행으로 분리.
+
+**■ 🔵 `Content/Character/FPArms/` 삭제는 폐기가 아니라 재작성 (사용자 2026-09-10)**
+> *"팔도 새로 작성하려고 제거한거야. 팔 트랙 폐기가 아니라 **3인칭에 사용하는 손 모듈만 1인칭에서 보이게**."*
+
+즉 1인칭 손은 별도 팔 리그가 아니라 **VoxelChar 파츠 세트의 Hand 모듈**이 맡는다. ADR 0015 와의 관계 = **폐기가 아니라 구현 수단 교체**("1인칭에 몸을 그리지 않는다"는 계승, "무엇이 1인칭에 남는가"가 *구매 리그 팔* → *VoxelChar 손 모듈* 로). 현재 `BP_FPSRPlayer` 의 팔 메시 슬롯은 **이미 비어 있어**(커밋된 상태) `RefreshFirstPersonRendering` 의 `bSplit` 이 false 다 — 새 손 경로가 설 때 게이트 소스를 「팔 메시가 있는가」에서 「1P 파츠가 있는가」로 옮긴다.
+
+**■ 안 섞은 것** — 워킹트리에 다른 진행중 행 3개의 미커밋 작업이 있어(코인 경제 문서 · HUD 위젯 · 맵/ArenaBake) `git ls-files -d` 로 **삭제 경로만** 스테이징했다. 삭제 커밋의 변경은 전부 `D` 다. `Config/DefaultEditor.ini` 는 CRLF 만 바뀌어 제외.
+
+**■ 검증** — `Build.bat FPSRogueliteEditor Win64 Development` = **`Result: Succeeded`**(398.73초). 판정은 종료코드가 아니라 `Result:` 줄로(메모리 `build-exit-code-lies-grep-result`).
+
+**■ 남은 것 (별도 행)** — ① `MF_Rifle_Idle_ADS` **손 높이가 여전히 높다**(사용자 육안). 리타깃 모드 정렬로는 안 고쳐진다 — `FAnimationRuntime::RetargetBoneTransform` 의 `AnimationScaled`(`AnimationRuntime.cpp:2932`)는 **translation 만** 스케일하고 rotation 은 안 건드리는데, ADS 자세의 손 높이는 회전이 만드는 값이다. 팔 길이가 매너퀸 절반(`hand_r` 로컬 x −13.63 vs −27.25)인 **비례가 다른 리그**라 IK 리타게터 트랙이 필요하다. ② 스켈레톤·PhysicsAsset 의 프리뷰 메시가 지운 `__old_SKM_VoxelChar` 를 하드 참조 중 → 에디터에서 재설정. ③ 로비·힐팩·로비폰 아케이드 재작성.
+
+---
+
 ## 🔷 PM 보드 시작 지연 3단 개선 — 조회가 100행에서 잘려 진행중 행을 놓치고 있었다 (2026-09-09, `main`, 보드 「PM 보드 시작 지연 3단 개선」 **검증중** — `df2f6601`)
 
 > 사용자 질문 *"보드 확인·노션 연동 때문에 작업 시작이 느린데 줄일 방법 있나"* 에서 출발. 재 보니 **성능 문제가 아니라 설계 전제가 깨진 것**이었고, 그 김에 정합성 결함 하나가 드러났다.
