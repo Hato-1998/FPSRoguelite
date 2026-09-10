@@ -111,6 +111,19 @@ public:
 	UPROPERTY(BlueprintReadOnly, Category = "FPSR|Anim")
 	float AimYaw = 0.0f;
 
+	/** AimPitch remapped onto the AimOffset's OWN axis range. The pack authors AO_Rifle / AO_Pistol on -1..1, not in
+	 *  degrees (measured 2026-09-10), so AimPitch wired straight in clamps to the extreme the moment the view leaves
+	 *  level. Folded here for the same reason LeftHandIKAlpha is: a divide node in the graph is one rewire away from
+	 *  being silently wrong, and every consumer wants the same normalisation. */
+	UPROPERTY(BlueprintReadOnly, Category = "FPSR|Anim")
+	float AimPitchNormalized = 0.0f;
+
+	/** Bind to the AimOffset's Alpha. bIsAiming is a bool and the offset is a pose blend, so switching it in one frame
+	 *  pops the whole upper body on every machine that can see this character. Eased over AimBlendDuration instead --
+	 *  same shape, and the same reason, as the slide's visual blend. */
+	UPROPERTY(BlueprintReadOnly, Category = "FPSR|Anim")
+	float AimingAlpha = 0.0f;
+
 	// --- Lower-body yaw offset (ADR 0002 axis 1: visual rotation split) ---
 
 	/** Feed this to Rotate Root Bone's Yaw. The capsule turns with the view instantly; this turns the POSE back by the
@@ -187,6 +200,11 @@ protected:
 	 *  crosshair. Raising this needs an AimOffset authored wider first. */
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Anim", meta = (ClampMin = "0.0", ClampMax = "180.0"))
 	float RootYawOffsetMax = 90.0f;
+
+	/** Seconds AimingAlpha takes to ease between hip-fire and ADS. Zero makes it an instant switch. Data rather than a
+	 *  literal for the same reason every other feel constant here is -- content decides, code only carries it. */
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Anim", meta = (ClampMin = "0.0"))
+	float AimBlendDuration = 0.15f;
 
 	/** Angle error, degrees, that starts a turn in place. */
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Anim", meta = (ClampMin = "0.0"))

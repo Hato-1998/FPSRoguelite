@@ -174,6 +174,15 @@ void UFPSRCharacterAnimInstance::UpdateFromCharacter(AFPSRCharacter& Character, 
 	// is ±89.9 by default, but nothing in THIS function guarantees a sane source) — it is a contract guard, not a fix.
 	AimPitch = FMath::Clamp(FRotator::NormalizeAxis(AimRotation.Pitch - ActorRotation.Pitch), -90.0f, 90.0f);
 
+	// Graph-ready derivations of the two values above. Both exist so the AnimGraph stays a consumer (invariant: the
+	// graph reads, it does not compute) -- see the header on AimPitchNormalized / AimingAlpha for why each is here.
+	AimPitchNormalized = AimPitch / 90.0f;
+
+	const float AimAlphaTarget = bIsAiming ? 1.0f : 0.0f;
+	AimingAlpha = (AimBlendDuration > KINDA_SMALL_NUMBER)
+		? FMath::FInterpConstantTo(AimingAlpha, AimAlphaTarget, DeltaSeconds, 1.0f / AimBlendDuration)
+		: AimAlphaTarget;
+
 	// GetBaseAimRotation only falls back to the replicated RemoteViewPitch16 while the actor pitch is nearly zero
 	// (APawn::GetBaseAimRotation, UE 5.7). bUseControllerRotationPitch is false so nothing should ever write actor
 	// pitch — if something does (ragdoll, root motion, a future slope-align), proxies silently lose their aim pitch.
@@ -383,6 +392,8 @@ void UFPSRCharacterAnimInstance::PushToLinkedLayers() const
 		Layer->bIsAiming = bIsAiming;
 		Layer->AimPitch = AimPitch;
 		Layer->AimYaw = AimYaw;
+		Layer->AimPitchNormalized = AimPitchNormalized;
+		Layer->AimingAlpha = AimingAlpha;
 		Layer->RootYawOffset = RootYawOffset;
 		Layer->bTurningInPlace = bTurningInPlace;
 		Layer->TurnDirection = TurnDirection;
