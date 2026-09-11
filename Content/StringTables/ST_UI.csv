@@ -30,3 +30,14 @@ HUD.Downed.WaitingForAlly,다운 — 아군을 기다리는 중,DOWNED — WAITI
 HUD.Downed.Reviving,부활 중...,Reviving...,蘇生中...
 HUD.Downed.AllyReviving,아군 부활 중...,Reviving teammate...,味方を蘇生中...
 HUD.Mission.BannerLabel,미션,MISSION,ミッション
+HUD.Vitals.LevelPrefix,LV,LV,LV
+HUD.Vitals.Shield,실드,SHIELD,シールド
+HUD.Vitals.Health,체력,HP,HP
+HUD.CardLedger.Title,획득 아이템,COLLECTED ITEMS,取得アイテム
+HUD.Team.Title,팀 상태,TEAM STATUS,チーム状態
+HUD.Team.Down,다운,DOWN,ダウン
+HUD.Boss.ProgressTitle,보스까지,STAGE PROGRESS TO BOSS,ボスまで
+HUD.Stage.Current,스테이지,CURRENT STAGE,ステージ
+HUD.Weapon.Title,무기,WEAPON,武器
+HUD.Skill.MainTitle,메인 스킬,MAIN SKILL,メインスキル
+HUD.Skill.LockedGlyph,▨,▨,▨
