@@ -66,9 +66,9 @@ EGraphRenderingLOD::Type FCRRecoilUnitGraphBackgroundWidgetZoomLevelsContainer::
 void SCRRecoilUnitGraphBackgroundWidget::Construct(const FArguments& InArgs)
 {
 	// Use our custom zoom levels container.
-	// [FPSR 5.7 vendor patch] SNodePanel::ZoomLevels is a TUniquePtr<FZoomLevelsContainer> in UE5.7 (SNodePanel.h:1063),
-	// so it must be assigned a TUniquePtr (MakeUnique), not a TSharedRef (MakeShared) — matches the engine's own ChangeZoomLevel.
-	ZoomLevels = MakeUnique<FCRRecoilUnitGraphBackgroundWidgetZoomLevelsContainer>();
+	// [FPSR vendor patch] Go through the engine's public setter instead of assigning SNodePanel::ZoomLevels directly:
+	// the member is TUniquePtr in 5.7 and TSharedPtr in 5.8, while SetZoomLevelsContainer<T>() is public and correct in both.
+	SetZoomLevelsContainer<FCRRecoilUnitGraphBackgroundWidgetZoomLevelsContainer>();
 	SNodePanel::Construct();
 }
 

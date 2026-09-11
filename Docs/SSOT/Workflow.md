@@ -11,8 +11,8 @@
 ### 6-1. 환경 / 경로
 > ⚠️ **절대경로를 이 문서에 박지 말 것.** 이 문서는 여러 클론·**여러 머신**이 공유한다. 경로를 박으면 다른 머신 세션이 문서대로 실행했을 때 즉시 실패한다 — 실제로 2026-08-10 실측에서 기존에 박혀 있던 `D:`·`E:` 경로가 한 머신엔 **드라이브 자체가 없었다**. 아래는 **해석 규칙**이고, 맨 끝 표는 참고용 실측치다.
 
-- 엔진: **UE 5.7**. `<엔진루트>` = `.uproject`의 `EngineAssociation`(=`5.7`)을 레지스트리로 해석한 값
-  - 조회: `(Get-ItemProperty 'HKLM:\SOFTWARE\EpicGames\Unreal Engine\5.7').InstalledDirectory`
+- 엔진: **UE 5.8**(5.8.2 · 2026-09-11 5.7.4에서 전환). `<엔진루트>` = `.uproject`의 `EngineAssociation`(=`5.8`)을 레지스트리로 해석한 값
+  - 조회: `(Get-ItemProperty 'HKLM:\SOFTWARE\EpicGames\Unreal Engine\5.8').InstalledDirectory`
   - UBT: `<엔진루트>\Engine\Build\BatchFiles\Build.bat`
   - 엔진 소스/플러그인: `<엔진루트>\Engine\Source`, `<엔진루트>\Engine\Plugins`
   - GenerateProjectFiles: `<엔진루트>\Engine\Build\BatchFiles\GenerateProjectFiles.bat` — **소스 빌드에만 존재한다.** 런처(바이너리) 설치엔 없으므로 `UnrealVersionSelector.exe /projectfiles <uproject>` 또는 `.uproject` 우클릭을 쓴다
@@ -25,8 +25,8 @@
 
 | 머신 (식별) | 엔진 설치 | `<엔진루트>` | 클론 |
 |---|---|---|---|
-| D:/E: 분리 드라이브 | **Installed Build**(🔁 정정 2026-08-19: 종전 "소스 빌드"는 오기 — 실물 `Engine/Build/InstalledBuild.txt` 존재, `SourceDistribution.txt` 없음. `Engine/Source` 동봉은 판정 근거가 못 된다. 함의: `[RequiresUniqueBuildEnvironment]` 타깃 플래그(N-1 `bWithPushModel` 등) 오버라이드 불가 = 런처 배포판과 동일 제약) | `D:\UnrealEngine\UE_5.7` | `E:\Git_Project\FPSRoguelite`, `FPSRoguelite2` |
-| C: 단일 드라이브 | 런처(바이너리) | `C:\Program Files\Epic Games\UE_5.7` | `...\UnrealProject\FPSRoguelite` (단일) |
+| D:/E: 분리 드라이브 | **Installed Build**(🔁 정정 2026-08-19: 종전 "소스 빌드"는 오기 — 실물 `Engine/Build/InstalledBuild.txt` 존재, `SourceDistribution.txt` 없음. `Engine/Source` 동봉은 판정 근거가 못 된다. 함의: `[RequiresUniqueBuildEnvironment]` 타깃 플래그(N-1 `bWithPushModel` 등) 오버라이드 불가 = 런처 배포판과 동일 제약) | `D:\UnrealEngine\UE_5.8` | `E:\Git_Project\FPSRoguelite`, `FPSRoguelite2`(⚠️ 5.7 잔존 — 전환 필요) |
+| C: 단일 드라이브 | 런처(바이너리) | `C:\Program Files\Epic Games\UE_5.8` | `...\UnrealProject\FPSRoguelite` (단일) ⚠️ 5.8 설치 미확인 — 2026-09-11 전환은 D:/E: 머신에서만 실측 |
 
 ### 6-2. 프로덕션 방식 원칙 (필수)
 - 코드/개발은 **프로덕션 품질**. 엔진 템플릿 편의 단축은 지양
@@ -37,7 +37,9 @@
 
 ### 6-3. 코딩 / 빌드 규칙
 - UE5 코딩 컨벤션 준수(Epic Coding Standard). `.editorconfig` 적용: C++ 탭 들여쓰기, eol=crlf
-- 빌드 타깃 버전: `BuildSettingsVersion.V6`, `EngineIncludeOrderVersion.Unreal5_7`
+- 빌드 타깃 버전: `BuildSettingsVersion.V7`, `EngineIncludeOrderVersion.Unreal5_7`
+  - ⚠️ **V7은 5.8에서 선택이 아니다.** 런처 설치빌드는 공유 빌드 환경이 강제되는데, V6는 `ReturnType`·`Dangling`·`UnreachableCode` 경고를 `Off`로 두어 엔진 기본값(`Error`)과 어긋나고 UBT가 "has build products in common with UnrealEditor" 로 거부한다. `DefaultBuildSettings`에는 `[RequiresUniqueBuildEnvironment]`가 **붙어 있지 않아** 정적 확인만으로는 놓친다 — 실측으로 확인할 것(2026-09-11 실측)
+  - `IncludeOrderVersion`은 **`Unreal5_7` 유지**(5.8에서도 유효하고 경고만 난다). `Unreal5_8` 승격은 별도 검증 후
 - 엔진 API/매크로/플래그는 **추론 금지 — 엔진 소스에서 실제 사용례를 grep**해 대조 후 작성
 - 네트워크: **P1부터 서버 권위 + Push Model**. 솔로 후 retrofit 금지
 - 검증 없이 "완료" 보고 금지 — 빌드/스모크/`git diff` 중 하나로 자체 검증

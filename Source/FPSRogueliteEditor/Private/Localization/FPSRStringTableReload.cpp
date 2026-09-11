@@ -43,11 +43,11 @@ namespace FPSRStringTableReload
 		for (const FFPSRStringTableReloadSpec& Table : GTables)
 		{
 			// In-place import on the already-registered table — the same path the engine's own CSV file-watcher uses
-			// (FStringTableRegistry::Internal_OnDirectoryChanged → FindMutableStringTable → ImportStrings). ImportStrings
-			// validates the file (load + header) BEFORE clearing, so a broken/locked CSV returns false and leaves the
+			// (FStringTableRegistry::Internal_OnDirectoryChanged → FindMutableStringTable → ImportStringsFromCSVFile).
+			// It validates the file (load + header) BEFORE clearing, so a broken/locked CSV returns false and leaves the
 			// previous strings intact, and the table never leaves the registry (no unregister window). The old
-			// unregister→Internal_LocTableFromFile approach was both destructive (Internal_LocTableFromFile registers an
-			// EMPTY table even when ImportStrings fails — StringTableRegistry.cpp:198-209) and unobservable (the
+			// unregister→Internal_LocTableFromFile approach was both destructive (Internal_LocTableFromFile registers the
+			// table even when the import fails — StringTableCore/StringTableRegistry.cpp:193-204) and unobservable (the
 			// registered-check was always true) — 레드팀 P2-1.
 			const FString FullPath = FPaths::ProjectContentDir() / Table.FilePath;
 			bool bSucceeded = false;
@@ -55,7 +55,7 @@ namespace FPSRStringTableReload
 			FStringTablePtr ExistingTable = Registry.FindMutableStringTable(Table.Id);
 			if (ExistingTable.IsValid())
 			{
-				bSucceeded = ExistingTable->ImportStrings(FullPath);
+				bSucceeded = ExistingTable->ImportStringsFromCSVFile(FullPath);
 			}
 			else
 			{
@@ -63,7 +63,7 @@ namespace FPSRStringTableReload
 				// register only on success — never expose an empty table under the id.
 				FStringTableRef NewTable = FStringTable::NewStringTable();
 				NewTable->SetNamespace(Table.Namespace);
-				if (NewTable->ImportStrings(FullPath))
+				if (NewTable->ImportStringsFromCSVFile(FullPath))
 				{
 					Registry.RegisterStringTable(Table.Id, NewTable);
 					bSucceeded = true;

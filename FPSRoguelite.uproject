@@ -1,6 +1,6 @@
 {
 	"FileVersion": 3,
-	"EngineAssociation": "5.7",
+	"EngineAssociation": "5.8",
 	"Category": "",
 	"Description": "Co-op Survivor FPS (PVE Roguelite)",
 	"Modules": [
@@ -84,16 +84,11 @@
 			"Enabled": true
 		},
 		{
-			"Name": "VibeUE",
-			"Enabled": true,
-			"Optional": true
-		},
-		{
 			"Name": "ImGui",
 			"Enabled": true
 		},
 		{
-			"Name": "RLPlugin",
+			"Name": "EditorScriptingUtilities",
 			"Enabled": true,
 			"TargetAllowList": [
 				"Editor"

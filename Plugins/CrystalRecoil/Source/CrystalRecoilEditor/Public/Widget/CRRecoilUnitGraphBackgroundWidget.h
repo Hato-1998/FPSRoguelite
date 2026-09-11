@@ -63,9 +63,4 @@ public:
 	FVector2D GetZoomedAndCenterBasedViewOffset() const;
 
 	int32 GetGridAxisStep() const;
-
-	// [FPSR 5.7 vendor patch] UE5.7 SNodePanel has no public SetViewOffset (added in a later engine version). The graph
-	// editor drives the view offset directly, so expose a setter that writes the protected ViewOffset member
-	// (FDeprecateSlateVector2D, SNodePanel.h:1066). FDeprecateVector2DParameter accepts both FVector2f and FVector2D.
-	void SetViewOffset(const UE::Slate::FDeprecateVector2DParameter& InViewOffset) { ViewOffset = InViewOffset; }
 };
