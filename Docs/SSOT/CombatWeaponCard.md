@@ -7,6 +7,9 @@
 ---
 
 ### 2-3. 카드 시스템 — **v2 재설계 (U18, 2026-06-20)**
+> 🔴 **획득 경로 변경 2026-09-10 (코인 경제 · `RunFlow.md` §2-2-1 · [ADR 0017](../Architecture/0017-coin-economy-arcade-run.md))** — 카드 **내용·데이터 모델·추첨 알고리즘은 그대로**이고, **언제 어떻게 받는가**만 바뀐다.
+> 레벨업 프리즈 → **맵의 상점에서 1코인으로 뽑는다(3장 제시)**. **뽑기**라서 §2-3-9 빌드 시너지 가중 추첨이 **그대로 살아 있고**, 바뀌는 것은 호출 지점뿐이다(고정 진열이었다면 이 설계가 상점 쪽으로 옮겨가야 했다).
+> 리롤은 **지금 3회 고정**이며 해금 곡선(0→1→2→3)은 M3 메타 프로그레션으로 미룬다(`RunFlow.md` §2-11).
 
 > **설계 상태**: 이 절은 **v2 목표 설계**(사용자 확정 사양 + 확장성/툴 directive). **구현 = U18a~d**(§B/`TaskPrompts_Master.md`). ~~현행 출시 코드는 **v1 단일효과**(카드 1=효과 1, `ECardScope` enum)이며 U18a 마이그레이션 대상이다.~~ 🔁 **정정 2026-08-13(M0 EC ④ 재대조)**: **코드는 이미 v2다.** `UFPSRCardEffect`가 실존하고(`Private/Card/FPSRCardEffect.cpp`), `FPSRCardDataAsset`이 `TArray<TObjectPtr<UFPSRCardEffect>> Effects`를 8곳에서 순회한다. **`ECardScope` 참조는 `Source/`·`Content/` 통틀어 0건.** U18a 마이그레이션은 끝났고 이 문장만 남아 있었다. 설계-우선(SSOT 먼저) 원칙에 따라 본 절을 v2로 갱신하고 코드가 뒤따랐다.
 > **무회귀 절대조건**: 기존 캐릭터카드 7종·무기 stat 카드·Fragment 4종은 v2 전환 후에도 **현행과 동일 거동**(단일→멀티효과 = 1효과 배열로 마이그레이션).
@@ -51,6 +54,9 @@
 - **보안 불변(테스트 항목)**: 클라는 `Index`+`OfferId`만 전송, 카드/효과/수치 포인터 미전송(`FPSRCardSubsystem.cpp` 서버 빌드 오퍼 인덱싱). family 상호배제·SetByCaller·`AllWeaponsStatExclusions`(§2-4-1) 보존.
 
 #### 2-3-4. 무기 해금 시스템
+> 🔴 **트리거 추가·대체 2026-09-10 (코인 경제)** — 아래 **트리거** 항목의 *미션 클리어 + 레벨 20/30/40 마일스톤*이 **상점 구매로 대체**된다.
+> **무기는 상점에서 코인으로 산다.** 후보 생성·3정 캡·잠긴 기능 해금 풀(`UnlockableFeatures[]`)·가중 추첨은 **전부 그대로**다 — 바뀌는 것은 오퍼가 열리는 계기다.
+> ⚠️ 그래서 아래 *"마일스톤 레벨엔 레벨업+해금 **순차 2프리즈**"* 는 **폐기**된다(프리즈 자체가 없어진다 — `RunFlow.md` §2-2-1 (2)). 경위 보존용으로만 남긴다.
 - **오퍼타입 신설** `EFPSROfferType::WeaponUnlock`(MissionReward 오버로드 금지 — reroll 차단·`DrawWeaponModifierOffer` 특수처리). `ECardGroup::WeaponUnlock`은 직교 grouping/routing 태그.
 - **새 무기 해금** = `UCardEffect_GrantWeapon`(효과 서브클래스) → `Inventory->AddWeapon`(3슬롯 캡, full=INDEX_NONE). 해금 무기의 WeaponCards/UnlockableFeatures는 이후 풀에 자동 합류.
 - **잠긴 기능 해금** = 신규 효과타입 불요 — 기존 `WeaponBehavior`/`WeaponStat` 효과를 **해금 전용 풀**(무기 DA `UnlockableFeatures[]`)에 둠. 후보생성 = `DrawWeaponModifierOffer`처럼 보유무기 순회·소속무기 태깅. 예: "탄도 2배"(MultiShot 류)·"차징 후 연사"(Fragment).
