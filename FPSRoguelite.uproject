@@ -200,6 +200,10 @@
 		{
 			"Name": "MetaHumanGenerator",
 			"Enabled": true
+		},
+		{
+			"Name": "AnimationWarping",
+			"Enabled": true
 		}
 	]
 }
