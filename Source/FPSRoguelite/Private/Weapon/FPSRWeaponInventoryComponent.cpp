@@ -431,6 +431,22 @@ void UFPSRWeaponInventoryComponent::PushEquippedWalkSpeed()
 	// ripple into the weapon code (ADR 0001 module boundary). 0 = this weapon has no opinion, use the character's.
 	const UFPSRWeaponDataAsset* Weapon = GetCurrentWeapon();
 	Movement->SetLoadoutWalkSpeed(Weapon ? Weapon->WalkSpeed : 0.0f);
+
+	// Same one-way push, same reasoning, for the ADS1 aim walk-speed scale: read from the RESOLVED stats (not
+	// BaseStats) so a future card/fragment modifier on this axis (spec §11-(1), not registered yet) is picked up here
+	// with no change needed. No weapon, or a weapon with no ADS, neutralizes to 1.0 so the melee/bare-hands slot is
+	// never slowed by the aim button.
+	UFPSRWeaponInstance* Instance = GetCurrentInstance();
+	float AimMultiplier = 1.0f;
+	if (Instance)
+	{
+		const FFPSRWeaponStatBlock& Stats = Instance->GetResolvedStats();
+		if (Stats.bHasADS)
+		{
+			AimMultiplier = Stats.ADSMoveSpeedMultiplier;
+		}
+	}
+	Movement->SetAimWalkSpeedMultiplier(AimMultiplier);
 }
 
 void UFPSRWeaponInventoryComponent::OnRep_CurrentSlotIndex()

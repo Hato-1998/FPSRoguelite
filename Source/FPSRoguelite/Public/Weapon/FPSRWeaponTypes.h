@@ -141,6 +141,12 @@ struct FPSROGUELITE_API FFPSRWeaponStatBlock
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|ADS", meta = (EditConditionHides, EditCondition = "bHasADS"))
 	float ADSInterpSpeed = 14.0f; // FOV interpolation speed
 
+	// Same specifiers as the three neighbours in this block: the stat block is authored by content in the DA, so
+	// EditDefaultsOnly; EditCondition="bHasADS" is a FLAT name inside this same struct, which is the only shape the
+	// engine's EditCondition parser resolves (a nested "BaseStats.bHasADS" path silently does nothing — see spec 11-(2)).
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|ADS", meta = (EditConditionHides, EditCondition = "bHasADS", ClampMin = "0.0"))
+	float ADSMoveSpeedMultiplier = 0.5f; // walk-speed scale while aiming (0.5: 900 -> 450 standing, 300 -> 150 crouched)
+
 	// --- Projectile (AOE explosion OR Sniper travel-time bullet; spawned by the projectile fire ability).
 	//     Bullet = AOERadius 0 (single-target) + Pierce (penetration) + high speed; AOE = AOERadius > 0. ---
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Projectile", meta = (EditConditionHides, EditCondition = "Archetype != EFPSRWeaponArchetype::Melee && Archetype != EFPSRWeaponArchetype::ChargeLaser"))

@@ -82,10 +82,15 @@ namespace FPSRWallJumpBounds
  * mode, no per-frame physics, and no pose to tell a proxy about. What survives is the geometry (ProbeWall /
  * IsSurfaceGrabbable / ComputeWallJumpDirection) and two counters that bound how often the impulse may fire.
  *
- * Network cost: ZERO custom compressed flags. The slide is entered from bWantsToCrouch, which the engine already puts
- * in every move packet; the wall jump is derived entirely from state the move already carries (falling, input
- * direction, velocity) plus the two counters below, which ride in FSavedMove_FPSR for local replay only and are never
- * sent. Note the wall jump has no input EDGE of its own — see FSavedMove_FPSR::CanCombineWith, where that costs a
+ * Network cost: ONE custom compressed flag (FLAG_Custom_0 = aim intent — see SetWantsToAim, ADS1). It is NOT free, as
+ * an earlier version of this comment claimed: the engine serializes the compressed-flags byte OPTIONALLY
+ * (SerializeOptionalValue with default 0 — engine CharacterMovementComponent.cpp:9852), so a move with no flags set
+ * spends one signal bit, while a move that sets any flag spends nine. Aiming therefore costs about a byte per move
+ * (~60 B/s upstream per aiming player) and nothing at all when not aiming.
+ * The slide is still entered from bWantsToCrouch, which the engine already puts in every move packet; the wall jump
+ * is still derived entirely from state the move already carries (falling, input direction, velocity) plus the two
+ * counters below, which ride in FSavedMove_FPSR for local replay only and are never sent — neither needed a flag of
+ * its own. Note the wall jump has no input EDGE of its own — see FSavedMove_FPSR::CanCombineWith, where that costs a
  * guard the engine cannot supply.
  */
 UCLASS()
@@ -168,10 +173,14 @@ public:
 	/** Short name of the current locomotion state ("Run" / "Crouch" / "Slide" / "Air"). Debug readout only. */
 	FString GetLocomotionStateName() const;
 
-	//~ Walk-speed layers. Everything that wants to affect how fast the player walks PUSHES its layer in through one of
-	//~ these; RefreshWalkSpeedCap() is the ONLY thing that ever writes MaxWalkSpeed (see its comment for why). This
-	//~ mirrors the direction GAS already pushes numbers in (ADR 0001 module boundary) — the component still knows
-	//~ nothing about weapons, cards or the DBNO state, only about the numbers they hand it.
+	//~ Walk-speed layers, composed in TWO TIERS. Baseline layers — authored, loadout, the card multiplier, downed —
+	//~ are pushed in through one of the setters below and composed in RefreshWalkSpeedCap(), the ONLY thing that ever
+	//~ writes MaxWalkSpeed (see its comment for why). FRAME-STATE multipliers — backpedal, and the aim intent below —
+	//~ are applied on top of that in GetMaxSpeed() instead, because whether they apply depends on a condition true only
+	//~ for THIS frame (is the player currently moving backward / currently aiming), not just on the last pushed value.
+	//~ Hunting for the aim slowdown? It lives in GetMaxSpeed(), not here.
+	//~ This still mirrors the direction GAS already pushes numbers in (ADR 0001 module boundary) — the component still
+	//~ knows nothing about weapons, cards or the DBNO state, only about the numbers they hand it.
 
 	/** The character's authored baseline (AFPSRCharacter::BaseWalkSpeed). Pushed once on construction; the property
 	 *  deliberately stays on the character so its Blueprint override, the ADS sway reference and any GameplayEffect
@@ -189,6 +198,22 @@ public:
 	/** Downed (DBNO) locomotion override — clamps to DownedWalkSpeed regardless of the other layers. Being a LAYER
 	 *  rather than a direct write is what stops a speed card landing mid-DBNO from standing the player back up. */
 	void SetDownedLocomotion(bool bInDowned);
+
+	/** ADS intent, as a PREDICTED input latch — the same shape the engine gives bWantsToCrouch.
+	 *
+	 *  Writable on the LOCALLY CONTROLLED machine only (the owning client, or the listen-server host for its own
+	 *  pawn); ignored everywhere else. On a dedicated server the value arrives in the move packet instead
+	 *  (UpdateFromCompressedFlags), and letting the ServerSetAiming RPC write it here as well would put two writers on
+	 *  one value at two different TIMES — the RPC lands a frame or two off the move that carries the flag, and the
+	 *  server would then simulate a different speed than the client did for exactly those frames. That IS the
+	 *  rubber-band this unit exists to remove, so the guard is structural rather than a call-site convention. */
+	void SetWantsToAim(bool bNewWantsToAim);
+
+	/** Walk-speed scale applied while the aim intent above is set; 1.0 = no opinion (the neutral identity, NOT a
+	 *  tuning value — the tunable lives in FFPSRWeaponStatBlock::ADSMoveSpeedMultiplier, invariant 9).
+	 *  Pushed by the inventory on every equip, on the server and on each client's OnRep alike — the same one-way push
+	 *  SetLoadoutWalkSpeed already uses, so this component still knows nothing about weapons (invariant 4). */
+	void SetAimWalkSpeedMultiplier(float InMultiplier);
 
 	/** The authored baseline as last pushed. For callers that need the un-multiplied reference speed (e.g. the ADS
 	 *  sway's "am I moving" normalisation) rather than the current cap. */
@@ -237,6 +262,12 @@ public:
 	 *  the player to un-crouch first; this design wants jump to break out of both immediately. Only the crouch term is
 	 *  lifted — jump count and hold-time rules stay exactly as the engine defines them. */
 	virtual bool CanAttemptJump() const override;
+
+	/** Applies the aim intent bit the client sent with this move. Server + the owning client's correction replay. */
+	virtual void UpdateFromCompressedFlags(uint8 Flags) override;
+
+	/** Save/restore the aim intent across a correction replay. NOT optional — see the implementation comment. */
+	virtual bool ClientUpdatePositionAfterServerUpdate() override;
 	//~End UCharacterMovementComponent
 
 	/** Force the slide to end now, keeping current velocity. Used by the global run-freeze so a slide in progress can't
@@ -668,6 +699,13 @@ protected:
 	/** True while the owner is downed (DBNO). */
 	bool bDownedLocomotion = false;
 
+	/** Predicted ADS intent. NOT replicated, and NOT stored in FSavedMove_FPSR as a field of its own: the saved move
+	 *  carries it as a compressed FLAG, which is both the wire format and the replay storage (GetCompressedFlags). */
+	bool bWantsToAim = false;
+
+	/** Equipped weapon's aim speed scale; 1.0 = no opinion. Read by GetMaxSpeed while bWantsToAim. */
+	float AimWalkSpeedMultiplier = 1.0f;
+
 	// --- Stance blending ---
 
 	/** Step both blend weights toward the stance the player is actually in, and retire a finished transition. */
@@ -735,10 +773,12 @@ protected:
  * Saved move carrying the derived state of the slide and the wall hang, so a correction replay reproduces them
  * bit-for-bit.
  *
- * Note there is no GetCompressedFlags override: the slide is driven by the engine's own bWantsToCrouch intent and the
+ * GetCompressedFlags() IS overridden now (ADS1): it ORs in FLAG_Custom_0 for the one bit of state that actually has
+ * to reach the server, the aim intent. The slide is still driven by the engine's own bWantsToCrouch intent and the
  * wall hang by the movement mode, the input direction and bPressedJump — all of which FSavedMove_Character already
- * sends. Everything below is LOCAL replay storage that never touches the wire, so this component still costs zero
- * network bandwidth over a stock CharacterMovementComponent.
+ * sends, so neither needed a flag of its own. Everything else below is LOCAL replay storage that never touches the
+ * wire, so the aim bit is this component's ONLY wire cost over a stock CharacterMovementComponent — see the class
+ * comment above for what that bit actually costs (the flags byte is serialized optionally, so it is not free).
  */
 class FSavedMove_FPSR : public FSavedMove_Character
 {
@@ -751,8 +791,13 @@ public:
 	virtual bool CanCombineWith(const FSavedMovePtr& NewMove, ACharacter* InCharacter, float MaxDelta) const override;
 	virtual void SetMoveFor(ACharacter* C, float InDeltaTime, FVector const& NewAccel, class FNetworkPredictionData_Client_Character& ClientData) override;
 	virtual void PrepMoveFor(ACharacter* C) override;
+	virtual uint8 GetCompressedFlags() const override;
 
 	uint8 bSavedIsSliding : 1;
+
+	/** ADS intent for this move, sent as FLAG_Custom_0. A BITFIELD like bSavedIsSliding, so the constructor
+	 *  initializes it (a pooled move is reused before Clear() is guaranteed to have run). */
+	uint8 bSavedWantsToAim : 1;
 	float SavedSlideElapsed = 0.0f;
 	float SavedSlideEntrySpeed = 0.0f;
 	float SavedSlideCooldownRemaining = 0.0f;

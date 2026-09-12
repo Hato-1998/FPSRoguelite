@@ -125,6 +125,24 @@ void UFPSRCharacterMovementComponent::SetDownedLocomotion(bool bInDowned)
 	RefreshWalkSpeedCap();
 }
 
+void UFPSRCharacterMovementComponent::SetWantsToAim(bool bNewWantsToAim)
+{
+	// Structural guard, not a call-site convention (see the header comment): only the machine that PREDICTS this
+	// component's speed may write it directly. A dedicated server's remote pawns get the value from the move packet
+	// instead, via UpdateFromCompressedFlags — writing it here too would put two writers on one value at two
+	// different times and reproduce exactly the rubber-band this unit exists to remove.
+	if (!CharacterOwner || !CharacterOwner->IsLocallyControlled())
+	{
+		return;
+	}
+	bWantsToAim = bNewWantsToAim;
+}
+
+void UFPSRCharacterMovementComponent::SetAimWalkSpeedMultiplier(float InMultiplier)
+{
+	AimWalkSpeedMultiplier = FMath::Max(0.0f, InMultiplier);
+}
+
 void UFPSRCharacterMovementComponent::RefreshWalkSpeedCap()
 {
 	// Downed wins outright — it is a hard stop, not something the other layers may scale back up. The loadout
@@ -944,6 +962,19 @@ float UFPSRCharacterMovementComponent::GetMaxSpeed() const
 		MaxSpeed *= BackwardSpeedMultiplier;
 	}
 
+	// ADS1: aim (ADS) walk-speed slowdown. Order matters (see the insertion-point note in ADS1 spec §6):
+	//  - AFTER Super::GetMaxSpeed() so it scales whichever stance cap the engine already picked (MaxWalkSpeed standing,
+	//    MaxWalkSpeedCrouched crouched) — multiplying in RefreshWalkSpeedCap() instead would only ever touch
+	//    MaxWalkSpeed, so a crouched player aiming would miss the slowdown entirely.
+	//  - BEFORE the stance Lerp below, because StanceSpeedFrom is captured by calling THIS function at the moment the
+	//    stance flips (Crouch/UnCrouch sample it before Super flips the stance), so it already has this multiplier
+	//    baked in — multiplying after the Lerp would apply it a second time to that captured starting point.
+	//  - Relative to the backpedal penalty just above: both are plain multiplications, so their order doesn't matter.
+	if (bWantsToAim)
+	{
+		MaxSpeed *= AimWalkSpeedMultiplier;
+	}
+
 	// Stance change: ease from the cap in force when the stance flipped to the one it flipped to, on the same clock the
 	// camera uses, so the body slows down over the window the view sinks instead of in a couple of frames.
 	//
@@ -1089,6 +1120,37 @@ bool UFPSRCharacterMovementComponent::CanAttemptJump() const
 	return IsJumpAllowed() && (IsMovingOnGround() || IsFalling());
 }
 
+void UFPSRCharacterMovementComponent::UpdateFromCompressedFlags(uint8 Flags)
+{
+	// Super FIRST: it handles the jump/crouch intent and the server-side jump-press edge (see engine
+	// CharacterMovementComponent.cpp:13402 onward) — none of that is ours to reorder. It also early-returns entirely
+	// when !CharacterOwner (engine :13404), which is exactly why the assignment below cannot live inside an "if
+	// Super did something" branch.
+	Super::UpdateFromCompressedFlags(Flags);
+
+	// Unconditional: this is the ONLY place a server learns a remotely controlled pawn's aim intent — SetWantsToAim
+	// refuses to write it anywhere but the locally controlled machine — so it must run whether or not Super's
+	// CharacterOwner check above passed. (A simulated proxy never reaches this at all: it has no move stream. Proxies
+	// are told nothing about the aim intent on purpose — their speed cap decides nothing, and the aim POSE already
+	// travels as UFPSRWeaponFireComponent::bIsAiming.)
+	bWantsToAim = (Flags & FSavedMove_Character::FLAG_Custom_0) != 0;
+}
+
+bool UFPSRCharacterMovementComponent::ClientUpdatePositionAfterServerUpdate()
+{
+	// Same technique the engine uses for bWantsToCrouch around this same replay (CharacterMovementComponent.cpp:8655/
+	// :8718): every replayed move re-derives bWantsToAim from ITS OWN stored flag (via UpdateFromCompressedFlags), so
+	// by the time Super returns, the live value is whatever the LAST REPLAYED move happened to carry — stale the
+	// moment the player has since pressed or released aim, because that edge hasn't reached a saved move yet. The
+	// engine saves/restores bWantsToCrouch around its own replay for exactly this reason; it has no idea this custom
+	// flag exists, so it cannot do the same for us. Skipping this leaves the slowdown (or the lack of it) stuck at
+	// whatever the replay last set until the next actual aim press/release (ADS1 spec §8's replay boundary).
+	const bool bRealWantsToAim = bWantsToAim;
+	const bool bResult = Super::ClientUpdatePositionAfterServerUpdate();
+	bWantsToAim = bRealWantsToAim;
+	return bResult;
+}
+
 float UFPSRCharacterMovementComponent::GetPlanarSpeed() const
 {
 	return Velocity.Size2D();
@@ -1181,6 +1243,7 @@ FNetworkPredictionData_Client* UFPSRCharacterMovementComponent::GetPredictionDat
 
 FSavedMove_FPSR::FSavedMove_FPSR()
 	: bSavedIsSliding(0)
+	, bSavedWantsToAim(0)
 {
 	// Bitfields get no in-class initializer, and a pooled move is reused before Clear() is guaranteed to have run on
 	// it — so initialize here rather than relying on the allocation being zeroed.
@@ -1190,6 +1253,7 @@ void FSavedMove_FPSR::Clear()
 {
 	Super::Clear();
 	bSavedIsSliding = 0;
+	bSavedWantsToAim = 0;
 	SavedSlideElapsed = 0.0f;
 	SavedSlideEntrySpeed = 0.0f;
 	SavedSlideCooldownRemaining = 0.0f;
@@ -1254,6 +1318,13 @@ bool FSavedMove_FPSR::CanCombineWith(const FSavedMovePtr& NewMove, ACharacter* I
 			return false;
 		}
 	}
+
+	// ADS1: deliberately NO bSavedWantsToAim guard here, and for a stronger reason than the slide has one for free —
+	// aim intent is a compressed FLAG now (FLAG_Custom_0, see GetCompressedFlags() below), and Super::CanCombineWith
+	// already refuses to combine two moves whose GetCompressedFlags() differ (engine
+	// CharacterMovementComponent.cpp:13160-13161 — "any custom movement flags from overrides"). A hand-written guard
+	// here would just duplicate a check the engine already runs. This is the opposite situation from the wall jump
+	// above, which needed its own guard precisely because it has no flag of its own.
 	return Super::CanCombineWith(NewMove, InCharacter, MaxDelta);
 }
 
@@ -1264,6 +1335,7 @@ void FSavedMove_FPSR::SetMoveFor(ACharacter* C, float InDeltaTime, FVector const
 	if (const UFPSRCharacterMovementComponent* Movement = C ? Cast<UFPSRCharacterMovementComponent>(C->GetCharacterMovement()) : nullptr)
 	{
 		bSavedIsSliding = Movement->bIsSliding ? 1 : 0;
+		bSavedWantsToAim = Movement->bWantsToAim ? 1 : 0;
 		SavedSlideElapsed = Movement->SlideElapsed;
 		SavedSlideEntrySpeed = Movement->SlideEntrySpeed;
 		SavedSlideCooldownRemaining = Movement->SlideCooldownRemaining;
@@ -1310,7 +1382,26 @@ void FSavedMove_FPSR::PrepMoveFor(ACharacter* C)
 		Movement->StanceBlendStart = SavedStanceBlendStart;
 		Movement->StanceSpeedFrom = SavedStanceSpeedFrom;
 		Movement->SlideBlend = SavedSlideBlend;
+
+		// ADS1: bWantsToAim is deliberately NOT restored here, unlike everything above. The engine calls
+		// MoveAutonomous() immediately after this function returns, using THIS SAME move's flags
+		// (CharacterMovementComponent.cpp:8674 -> :8686), which reaches UpdateFromCompressedFlags and sets
+		// bWantsToAim itself a moment later. Nothing in between reads bWantsToAim, so restoring it here would just be
+		// overwritten right away — a no-op with extra steps, not a missing line. Left as a comment, not silence, so
+		// the next person doesn't "fix" this as an oversight.
 	}
+}
+
+uint8 FSavedMove_FPSR::GetCompressedFlags() const
+{
+	// OR our one custom bit on top of whatever the engine already encoded (jump, crouch, ...) — never assign over
+	// Super's result outright, or this would silently drop those.
+	uint8 Result = Super::GetCompressedFlags();
+	if (bSavedWantsToAim)
+	{
+		Result |= FLAG_Custom_0;
+	}
+	return Result;
 }
 
 // --- FNetworkPredictionData_Client_FPSR --------------------------------------------------------------------------

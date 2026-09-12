@@ -90,6 +90,20 @@ void UFPSRWeaponFireComponent::SetAiming(bool bNewAiming)
 	{
 		return;
 	}
+
+	// ADS1: push the aim INTENT to the movement component as a predicted input latch (same shape as bWantsToCrouch).
+	// Placed BEFORE the bIsAiming == bNewAiming early return below, on purpose: a redundant call still re-pushes, so if
+	// the two ever drift out of sync for any reason the very next SetAiming call self-heals it (writing the same value
+	// again costs nothing) — behind the early return, a mismatch would instead survive until the next real edge.
+	// SetWantsToAim no-ops itself everywhere but the owning client/host, so calling it unconditionally here is safe.
+	if (AFPSRCharacter* Char = Cast<AFPSRCharacter>(GetOwner()))
+	{
+		if (UFPSRCharacterMovementComponent* Movement = Char->GetFPSRMovement())
+		{
+			Movement->SetWantsToAim(bNewAiming);
+		}
+	}
+
 	if (bIsAiming == bNewAiming)
 	{
 		return;
