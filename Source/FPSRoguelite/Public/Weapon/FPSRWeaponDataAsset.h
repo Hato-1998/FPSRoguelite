@@ -329,8 +329,9 @@ public:
 	 *  근접/맨손이 700인 것이 이 필드의 첫 용도다. 카드 이동속도 배수는 이 값에 곱해지므로, 무기 속도를 준다고
 	 *  카드가 무효화되지 않는다(합성은 `UFPSRCharacterMovementComponent::RefreshWalkSpeedCap`).
 	 *
-	 *  ⚠️ 슬라이드 속도는 여기서 저작하지 않는다 — 슬라이드 진입 임펄스가 *그 순간 속도 × 1.5*에서 파생되므로
-	 *  걷기 600이면 900, 700이면 1000이 자동으로 나온다. 따로 두면 두 값을 계속 맞춰야 하고, 진입 속도가
+	 *  ⚠️ 슬라이드 속도는 여기서 저작하지 않는다 — 슬라이드 진입 임펄스가 *그 순간 속도 × `SlideEnterSpeedMultiplier`(1.5)*
+	 *  에서 파생되므로 걷기 900이면 1350, 700이면 1050이 자동으로 나온다(둘 다 `SlideMaxEntrySpeed` 상한에 걸린다).
+	 *  따로 두면 두 값을 계속 맞춰야 하고, 진입 속도가
 	 *  "장착이 언제 복제됐나"에 좌우돼 재현 안 되는 편차가 생긴다. (`PlayerFeel §2-13`) */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "무기|이동", meta = (DisplayName = "걷기 속도(0=기본 900)", ClampMin = "0.0"))
 	float WalkSpeed = 0.0f;

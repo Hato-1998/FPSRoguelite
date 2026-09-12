@@ -30,9 +30,11 @@ namespace
 	// 시나리오라 실제로 겹친다. TArray 에 매 호출 AddDefaulted_GetRef 로 항상 새 원소를 만들어 그 참조에
 	// SetTimer 를 건다.
 	//
-	// FPSRPlayerController.cpp:912-977(Invuln/SkipCards) 선례와 수명주기 근거는 같다 — "월드가 타이머를
-	// 소유하므로 월드 테어다운이 자동으로 정리한다"(디버그 픽스처, 프로덕션 수명주기 아님) — 그러나 그
-	// 둘은 반복 재사용 가능한 "반복" 타이머 하나만 필요해 정적 핸들 1개를 재사용하는 반면, 이 명령은
+	// FPSRPlayerController.cpp:912-977(Invuln/SkipCards) 가 같은 모양의 선례지만, 그 주석이 근거로 든 "월드가
+	// 타이머를 소유하므로 월드 테어다운이 자동으로 정리한다"는 **틀렸다** — 월드는 게임인스턴스의 타이머
+	// 매니저를 돌려준다(engine World.cpp:8056). 그래서 여기서는 델리게이트를 월드에 약하게 묶는다(아래
+	// CreateWeakLambda 주석). ⚠️ 그 선례 두 곳은 아직 안 고쳐져 있다(이 유닛 범위 밖, 후속 항목).
+	// 또 그 둘은 반복 재사용 가능한 "반복" 타이머 하나만 필요해 정적 핸들 1개를 재사용하는 반면, 이 명령은
 	// 서로 겹칠 수 있는 "1회성" 예약을 여러 개 동시에 지원해야 하므로 컨테이너로 늘린다.
 	TArray<FTimerHandle> GFPSRDebugExecAfterTimers;
 }
@@ -66,8 +68,16 @@ static FAutoConsoleCommandWithWorldAndArgs GFPSRDebugExecAfterCmd(
 			Cmd += Args[i];
 		}
 
+		// CreateWeakLambda(World, ...), not CreateLambda: UWorld::GetTimerManager() hands back the OWNING GAME
+		// INSTANCE's timer manager, not one the world owns (engine World.cpp:8056 —
+		// `return (OwningGameInstance ? OwningGameInstance->GetTimerManager() : *TimerManager)`), and world teardown
+		// does not clear it. A pending schedule therefore SURVIVES a map travel, and firing it would Exec against a
+		// dead UWorld — several FPSR.* handlers dereference that pointer immediately (FPSR.Debug.ASCDump's
+		// World->GetSubsystem, FPSR.SkipCards' World->GetGameState). Binding weakly to the world makes the timer
+		// invalidate itself instead; it is the same guard the engine uses for its own world-captured timers
+		// (World.cpp:5831).
 		FTimerHandle& Handle = GFPSRDebugExecAfterTimers.AddDefaulted_GetRef();
-		World->GetTimerManager().SetTimer(Handle, FTimerDelegate::CreateLambda([World, Cmd]()
+		World->GetTimerManager().SetTimer(Handle, FTimerDelegate::CreateWeakLambda(World, [World, Cmd]()
 		{
 			if (GEngine)
 			{

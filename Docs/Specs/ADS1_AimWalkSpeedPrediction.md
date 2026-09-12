@@ -136,7 +136,7 @@
 | `FSavedMove_FPSR::SetMoveFor` / `Clear` | 클라 | 엔진 | — | 기존 필드들과 같은 자리에서 복사 / 0 초기화 |
 | `FSavedMove_FPSR::PrepMoveFor` | 클라(리플레이) | 엔진 | — | **아무것도 복원하지 않는다.** 엔진이 `PrepMoveFor` 직후 같은 move의 플래그로 `MoveAutonomous`를 부르고(engine `:8674`→`:8686`) 그 사이에 `bWantsToAim`을 읽는 코드가 없으므로 복원은 중복이다 — **왜 없는지 주석으로 남긴다**(다음 사람이 누락으로 오해하지 않게) |
 | `UFPSRWeaponFireComponent::SetAiming` | 기존 계약 무변경 | 기존 호출자 전부 | **역할 가드**(권위 또는 소유 클라, `FPSRWeaponFireComponent.cpp:89`) 통과 후 | CMC 푸시 지점 = **역할 가드 뒤 · `bIsAiming == bNewAiming` 조기 리턴(`:93`) 앞**. 같은 값으로 다시 불려도 푸시가 한 번 더 일어나므로, 두 값이 어떤 이유로든 어긋나면 **다음 `SetAiming` 호출에서 스스로 복구된다**(같은 값 쓰기라 비용 0). 조기 리턴 뒤에 두면 어긋난 상태가 다음 *엣지*까지 남는다 |
-| `PushEquippedWalkSpeed()` | 전 머신 | 기존 **4개** 호출지점 (`FPSRWeaponInventoryComponent.cpp:235`·`343`·`457`·`480` — 서버 장착 · 클라 `OnRep_CurrentSlotIndex` 등) | — | 걷기 속도와 **같은 자리에서** 조준 배수도 푸시. 무기가 없거나 `bHasADS == false`면 **1.0**. 값은 `GetCurrentInstance()->GetResolvedStats()`에서 읽는다(§11-(1)) |
+| `PushEquippedWalkSpeed()` | 전 머신 | 기존 **4개** 호출지점 (`FPSRWeaponInventoryComponent.cpp` — 서버 장착 · 클라 `OnRep_CurrentSlotIndex` · `OnRep_Slots` 등. 구현 후 줄번호 = `:235`·`:343`·`:473`·`:496`) | — | 걷기 속도와 **같은 자리에서** 조준 배수도 푸시. 무기가 없거나 `bHasADS == false`면 **1.0**. 값은 `GetCurrentInstance()->GetResolvedStats()`에서 읽는다(§11-(1)) |
 
 ### `GetMaxSpeed()` 삽입 지점 — 순서가 계약이다
 
@@ -153,6 +153,7 @@ FPSRScaled(Super::GetMaxSpeed())            ← 서면 MaxWalkSpeed, 웅크리�
 - **왜 스탠스 Lerp 앞인가**: `StanceSpeedFrom`은 스탠스가 바뀐 순간의 `GetMaxSpeed()` 결과라 **이미 조준 배수가 곱해져 있다.** Lerp 뒤에 곱하면 그 출발점에 배수가 두 번 걸린다.
 - **왜 백페달 뒤인가**: 둘 다 곱셈이라 순서가 결과를 바꾸지 않는다. 기존 "백페달이 마지막" 주석을 "프레임 상태 배수 둘이 마지막"으로 읽히게 고친다.
 - **공중**: 이 프로젝트의 공중 이동은 `AirStrafeWishSpeed`/`AirStrafeMaxSpeed`로 따로 돌고 `MaxWalkSpeed`가 공중 속도를 제한하지 않는다(헤더 주석 + `CalcVelocity`의 낙하 분기). 즉 **공중 조준은 감속되지 않는다** — 의도된 무변경이고 이 유닛은 그 경로를 건드리지 않는다.
+- **의도된 무변경(프로젝트 소비자) — ADS 스웨이 이동 계수의 상한이 0.5가 된다**(G2 지적, 2026-09-12): `AFPSRCharacter`의 ADS 스웨이는 `속도 / BaseWalkSpeed(900)`로 "얼마나 움직이는가"를 정규화하는데, 조준 중 도달 가능한 상한이 450이므로 그 계수는 **0.5를 넘지 못한다**(그 코드 주석의 "걸으면 최대까지 올라간다"는 계약이 조준 중에는 성립하지 않게 된다). 오너 로컬 코스메틱이고 양쪽 결정적이라 **그대로 둔다** — 조준 중 실제로 느리게 움직이니 스웨이도 덜 흔들리는 쪽이 자연스럽다. 감각상 문제가 되면 정규화 기준을 조준 배율이 반영된 캡으로 바꾸는 후속 행에서 다룬다.
 - **의도된 무변경(엔진의 다른 `GetMaxSpeed()` 소비자)**: 조준 중이면 아래 세 곳도 같은 배수를 본다. 전부 서버·클라 결정적이고 게임플레이 영향이 미미해 **그대로 둔다** — G2가 다시 파지 않도록 여기 적어 둔다.
   - `UCharacterMovementComponent::JumpOff` (engine `:1258`, 비보행 베이스에서 밀려나는 속도 ×0.85)
   - `ApplyImpactPhysicsForces` (engine `:7867`, 물리 오브젝트를 밀 때의 힘)
@@ -243,6 +244,21 @@ C++에 남는 상수는 `AimWalkSpeedMultiplier = 1.0f` 초기값뿐이고, 이�
 
 ## 13. 레드팀 지적 원장 (C3에서 채운다)
 
+**G2 = Fable 레드팀 서브에이전트, 2026-09-12.** 판정: **P1 0건 → 푸시 허용**(§6-6-1). 총계 P1 0 · P2 1 · P3 9.
+
+- **레드팀에 무엇을 줬나**: 리뷰 대상 = 푸시 단위 `git diff origin/main..HEAD`(커밋 2개 — 이 유닛 `e282061a` + 이전 세션의 `20b51771` GASM1, 후자는 게이트 통과 여부 불명이라 범위에 포함) · `Docs/InternalRedTeamReview.md` 경로 · 이 명세 · 리포·엔진 소스 읽기 권한 · 빌드·스모크 결과 · **G1 이후 구조 결정 0건 + 주석 문안 3건 변경 사실**(§6-5-2의 G1↔G2 간극 규율). 설계 변호·토론 이력·"어디를 봐 달라"는 유도는 싣지 않았다.
+- ⚠️ **게이트 이후 변경(재리뷰 안 됨)**: 아래 처리 중 코드 수정 3파일(`FPSRDebugExec.cpp` 약한 바인딩 1줄 + 주석, CMC 헤더 주석 2곳, `FPSRWeaponDataAsset.h` 주석 수치)과 문서 4파일이 G2 **이후**에 들어갔다. 전부 **지적에 대한 대응**이며 구조 변경 0건이다. Fable 호출 상한(코어 갈래당 2회)을 이미 소진해 재리뷰는 하지 않았고, 대신 빌드·스모크를 재실행했다.
+
 | 심각도 | 지적 (요약 + 파일:줄) | 처리 | 근거 |
 |---|---|---|---|
-| | *(G2에서 채운다)* | | |
+| **P2** | `FPSR.Debug.ExecAfter`가 raw `UWorld*`를 게임인스턴스 소유 타이머에 붙잡아, 맵 이동 후 발화하면 죽은 월드로 `Exec` → use-after-free (`Private/Core/FPSRDebugExec.cpp:70-74`, **커밋 `20b51771`**) | **수용·수정** | 엔진 직접 확인: `UWorld::GetTimerManager()`는 `OwningGameInstance`의 매니저를 돌려주고(`World.cpp:8056`) 월드 테어다운이 비우지 않는다. 코드 주석이 근거로 든 "월드가 타이머를 소유" 전제가 틀렸다. 엔진 자신의 대응책(`CreateWeakLambda(World, …)`, `World.cpp:5831`)을 그대로 적용 |
+| P3 | "이 컴포넌트의 유일한 와이어 비용 = 조준 비트"가 `bSlidingVisual`·`SlideVisualSerial` 복제를 빠뜨림 (`Public/Hero/FPSRCharacterMovementComponent.h:85`·`:780`) | **수용·수정** | 같은 컴포넌트가 두 프로퍼티를 `COND_SkipOwner`로 복제한다(`cpp:201-202`). 주석을 "클라→서버 move 스트림 기준"으로 한정하고 반대 방향 복제를 명시 |
+| P3 | `WalkSpeed` 주석의 파생 예시가 정정 후 자기모순("걷기 600이면 900, 700이면 1000"; 700×1.5=1050) (`Public/Weapon/FPSRWeaponDataAsset.h:333`) | **수용·수정** | 명세 §11-(3)이 "파생 수치 함께 검토"를 범위로 명시했는데 누락. 900→1350 / 700→1050 + `SlideMaxEntrySpeed` 상한 언급으로 재작성 |
+| P3 | ADR 0001의 stale 서술 2곳에 부기 누락 — 도식(`:105`)과 벽 매달리기 절(`:379`) (`Docs/Architecture/0001-...md`) | **수용·수정** | 명세 §11-(5)가 도식 정정을 약속했는데 구현이 다른 2곳만 달았다. 두 곳에 같은 형식의 날짜 부기 추가 |
+| P3 | 조준 감속 규칙이 SSOT 도메인 파일에 없음 (`Docs/SSOT/PlayerFeel.md`·`CombatWeaponCard.md`) | **수용·수정** | `CLAUDE.md` 핵심 3 = "설계 변경은 해당 도메인 파일 먼저". PlayerFeel §2-9 조준 항목 신설 + CombatWeaponCard의 ADS 두 줄에 배율 추가 |
+| P3 | 불변식 3의 두 번째 예외(비-어트리뷰트 이동 수치)가 생겼는데 ADR 미갱신 | **수용·수정** | 불변식 표 아래에 예외 2건(`WalkSpeed`·`ADSMoveSpeedMultiplier`)과 수용된 장착 창을 날짜 부기로 명시 |
+| P3 | 조준 중 ADS 스웨이 이동 계수 상한이 0.5로 고정 — 명세가 "기존 ADS 경로 무변경"이라 선언했으나 실제로는 바뀜 (`Private/Hero/FPSRCharacter.cpp:3700-3701`) | **수용 — 문서화(코드 무변경)** | 오너 로컬 코스메틱 + 양쪽 결정적. 조준 중 실제로 느리니 스웨이가 덜 흔들리는 쪽이 자연스럽다 → §6 "의도된 무변경"에 명시. 감각 문제 시 후속 행 |
+| P3 | 명세 §6의 `PushEquippedWalkSpeed` 호출 줄번호가 구현 후 실제와 불일치(`:457`·`:480` → `:473`·`:496`) | **수용·수정** | 구현으로 함수가 길어져 줄이 밀렸다. 명세 표 갱신 |
+| P3 ×2 | GASM1(`20b51771`)의 `SetIsReplicated` 안전 근거 주석이 역전 (`Private/Enemy/FPSREnemyBase.cpp:719-720`) · 스웜 베이스 헤더가 Shipping에서도 GAS 헤더를 무조건 include (`Public/Enemy/FPSREnemyBase.h:11`) | **보류 — 후속(이 유닛 밖)** | 둘 다 다른 작업(GASM1)의 산출물이고 동작 결함이 아니다(주석 오류 / include 위생). 헤더 include는 `#if` 가드 안으로 옮기면 UHT 통과 확인이 필요해(메모리 `[[uht-ignores-shipping-guard]]`) 별도 검증이 붙는다 → GASM1 담당 행으로 넘긴다 |
+
+**범위 밖 발견(레드팀이 함께 보고, 이 푸시에서 고치지 않음)**: ① `FPSRPlayerController.cpp:912-977`의 SkipCards/Invuln 타이머가 위 P2와 **같은 결함**(이미 푸시된 기존 코드) ② `RefreshWalkSpeedCap`이 웅크림 상한에 카드·장착 배수를 못 걸는 기존 제약 ③ `GetResolvedStats()`가 클라에서 PlayerState 미도착 시 캐시를 굳혀 AllWeapons 모디파이어를 놓칠 수 있는 기존 결함. ①은 실패 모양이 P2와 동일하므로 후속 우선순위가 가장 높다.

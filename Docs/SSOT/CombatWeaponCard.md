@@ -155,7 +155,7 @@
 - **⚠️ 무기 개편 (2026-07-08)**: ① **점사총(Burst) 전용 무기 제거** → **점사는 라이플의 언락 프래그먼트**(`UFPSRFragment_BurstFire`, `Rifle.UnlockableFeatures`, 미션 언락)로 이동. 라이플 기본은 연사. ② **유탄 발사기 제거**(바주카는 유지). ③ **기관단총(SMG) 추가**(FullAuto·연사↑↑·데미지↓·투사체). ④ **전달 방식 = 발사체 통일**: **차지레이저(히트스캔)·근접 외 전 무기가 발사체**(연사총 포함). 발사체는 히트스캔과 데미지/약점/크리/처치/프래그먼트(OnHitActor·OnImpact) **패리티**. 연사 무기는 고속·단수명(§5 발사체 예산). **전달 방식 = 무기 DA `FireAbility`(GA)가 결정**(아키타입과 직교): Projectile GA / ChargeLaser GA / Melee GA.
 - **무기별 스탯 = WeaponInstance 스탯 블록(리플리케이트 struct, `FFPSRWeaponStatBlock`)**, 캐릭터 ASC와 분리
   - 스탯 예: Damage, FireMode, FireRate, BurstCount, Range, MagSize, Spread(동적확산=heat §2-4-2), Recoil, MeleeRadius (+ 후속: ReloadTime, ProjectileSpeed, Pierce, AOERadius, ChargeTime, PelletCount). **예비 탄약은 무한**(ReserveAmmo 미사용 — §2-4-2)
-- **ADS**: 무기 DA에 `bHasADS`+FOV (스나이퍼/차징=정밀, 연사/샷건=약함, 근접=없음)
+- **ADS**: 무기 DA에 `bHasADS`+FOV+확산 배율, **그리고 이동속도 배율 `ADSMoveSpeedMultiplier`(기본 0.5 — 조준 중 걷기 상한을 절반으로, ADS1 2026-09-12)** (스나이퍼/차징=정밀, 연사/샷건=약함, 근접=없음). 네 값 모두 `bHasADS` 조건부 표시. 감속의 예측·복제 규약 = `PlayerFeel.md` §2-9 조준 항목 + `Docs/Specs/ADS1_AimWalkSpeedPrediction.md`
 - **무기 교체 입력**: 숫자키 **1/2/3** 직접 슬롯 선택 (`IA_EquipSlot1/2/3`, 마우스휠 미사용). 1·2 = 원거리, **3 = 근접/맨손**(슬롯 수와 입력 액션 수는 항상 일치해야 함 — 에디터 검증기가 확인)
 - **무기별 이동속도 (2026-07-29)**: 무기 DA `WalkSpeed`(0 = 캐릭터 기본값 600). 근접/맨손 = **700**. 슬라이드 진입속도는 *그 순간 속도 × 1.5*에서 파생되므로 **따로 저작하지 않는다**(600→900, 700→1000). 소유·합성은 `PlayerFeel §2-13`.
 
@@ -195,7 +195,7 @@
 - **반동 패턴**: 샷 인덱스별 정형 스프레이 패턴(CrystalRecoil `UCRRecoilPattern`, 무기별 `RP_*` 비주얼 에디터 저작·재장전 시 초반 리셋)
 - **확산(Spread) — heat 단일소스 모델**(반동→CrystalRecoil 어댑터 마이그레이션 2026-07-08 `6f1a981`): 사격 누적 heat가 확산각 구동(`GetHeatSpread`, 발당 heat↑ + 무사격 냉각), 트레이스를 확산 콘 내 랜덤화. 레거시 발당-블룸/최대블룸 필드는 heat로 1:1 마이그레이션·제거. Shotgun/Bazooka=고정 확산
 - **탄약**: MagSize / ReloadTime / 재장전 어빌리티(R), 빈 탄창 시 발사 차단. **예비 탄약 무한**(ReserveAmmo 미사용, 확정 2026-05-30) — 스웜 상대 탄약고갈 스트레스 제거, 장전 타이밍 긴장만 유지
-- **ADS(조준)**: 우클릭, FOV/확산/반동 배율 (무기별 `bHasADS`)
+- **ADS(조준)**: 우클릭, FOV/확산/반동 배율 + **이동속도 배율**(기본 0.5) (무기별 `bHasADS`)
 - (선택) 거리 데미지 감쇠
 - 절차적 반동/스웨이(스프링)는 Tier3 / P4 "게임필" 연계
 - **권장 시점**: P1.5(전투 슬라이스 직후, P2 전). 슈팅 감각 튜닝 반복이 많아 일찍 확립 권장

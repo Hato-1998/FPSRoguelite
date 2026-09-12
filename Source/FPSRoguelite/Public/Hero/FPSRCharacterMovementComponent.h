@@ -82,8 +82,10 @@ namespace FPSRWallJumpBounds
  * mode, no per-frame physics, and no pose to tell a proxy about. What survives is the geometry (ProbeWall /
  * IsSurfaceGrabbable / ComputeWallJumpDirection) and two counters that bound how often the impulse may fire.
  *
- * Network cost: ONE custom compressed flag (FLAG_Custom_0 = aim intent — see SetWantsToAim, ADS1). It is NOT free, as
- * an earlier version of this comment claimed: the engine serializes the compressed-flags byte OPTIONALLY
+ * Network cost, CLIENT -> SERVER move stream only (the server -> proxy direction is separate and NOT free either:
+ * bSlidingVisual and SlideVisualSerial below are replicated): ONE custom compressed flag (FLAG_Custom_0 = aim intent
+ * — see SetWantsToAim, ADS1). It is NOT free, as earlier versions of this comment twice claimed: the engine
+ * serializes the compressed-flags byte OPTIONALLY
  * (SerializeOptionalValue with default 0 — engine CharacterMovementComponent.cpp:9852), so a move with no flags set
  * spends one signal bit, while a move that sets any flag spends nine. Aiming therefore costs about a byte per move
  * (~60 B/s upstream per aiming player) and nothing at all when not aiming.
@@ -777,8 +779,10 @@ protected:
  * to reach the server, the aim intent. The slide is still driven by the engine's own bWantsToCrouch intent and the
  * wall hang by the movement mode, the input direction and bPressedJump — all of which FSavedMove_Character already
  * sends, so neither needed a flag of its own. Everything else below is LOCAL replay storage that never touches the
- * wire, so the aim bit is this component's ONLY wire cost over a stock CharacterMovementComponent — see the class
- * comment above for what that bit actually costs (the flags byte is serialized optionally, so it is not free).
+ * wire, so the aim bit is the only thing THIS CLASS adds to the client -> server move stream over a stock
+ * FSavedMove_Character — see the class comment above for what that bit actually costs (the flags byte is serialized
+ * optionally, so it is not free), and note the component itself also replicates two slide-presentation properties in
+ * the other direction.
  */
 class FSavedMove_FPSR : public FSavedMove_Character
 {
