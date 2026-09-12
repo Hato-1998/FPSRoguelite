@@ -497,7 +497,7 @@ ServerTickAttack(Ctx):
 - 실행은 `GEngine->Exec(World, Cmd)` — `UnrealEngine.cpp:5722` 에서 콘솔 매니저까지 닿아
   `FPSR.*`·`obj`·`memreport` 를 전부 처리한다
 - **예약 명령에 쉼표 금지** — `ParseExecCommands.cpp:9` 가 쉼표로 자른다
-- 선례 = `FPSRPlayerController.cpp:912-977`(Invuln/SkipCards 타이머)
+- 선례 = `FPSRPlayerController.cpp:911-1011`(Invuln/SkipCards 타이머)
 
 ## 13. 레드팀 지적 원장
 

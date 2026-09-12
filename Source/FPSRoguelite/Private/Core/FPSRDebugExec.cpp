@@ -6,7 +6,7 @@
 // 시간 기준으로 닫은 뒤 ASCDump → obj list → memreport -full)가 이 명령 하나로 표현된다.
 //
 // 클래스/헤더 없음 — 이 모듈에 이미 있는 "콘솔 명령 전용 static" 관용구(FPSREnemySpawnSubsystem.cpp 의
-// GFPSREliteDumpCmd, FPSRPlayerController.cpp:915/972 의 GCmd_SkipCards/GCmd_Invuln)를 그대로 따르되, 이
+// GFPSREliteDumpCmd, FPSRPlayerController.cpp:921/980 의 GCmd_SkipCards/GCmd_Invuln)를 그대로 따르되, 이
 // 명령은 어느 기존 클래스에도 속하지 않는 범용 유틸이라 독립 .cpp 로 둔다(신규 클래스 불필요 — UBT 는
 // 헤더 유무와 무관하게 모듈의 모든 .cpp 를 컴파일한다).
 
@@ -19,7 +19,7 @@
 // 이 파일 전체를 #if !UE_BUILD_SHIPPING 로 가드한다 — 이 명령 자체는 어떤 GASM1 #if !UE_BUILD_SHIPPING
 // 심볼도 참조하지 않아 기술적으로는 필요 없지만, 이 모듈의 모든 디버그 콘솔 명령이 예외 없이 이 관용구를
 // 쓴다(FPSREnemySpawnSubsystem.cpp:2151-2355 의 FPSR.EliteDump/SpawnEnemies/EnemyTarget,
-// FPSRPlayerController.cpp:647-1006 의 FPSR.SkipCards/FPSR.Invuln 전부 포함) — 일관성을 따른다.
+// FPSRPlayerController.cpp:647-1014 의 FPSR.SkipCards/FPSR.Invuln 전부 포함) — 일관성을 따른다.
 #if !UE_BUILD_SHIPPING
 
 namespace
@@ -30,10 +30,10 @@ namespace
 	// 시나리오라 실제로 겹친다. TArray 에 매 호출 AddDefaulted_GetRef 로 항상 새 원소를 만들어 그 참조에
 	// SetTimer 를 건다.
 	//
-	// FPSRPlayerController.cpp:912-977(Invuln/SkipCards) 가 같은 모양의 선례지만, 그 주석이 근거로 든 "월드가
+	// FPSRPlayerController.cpp:911-1011(SkipCards/Invuln) 가 같은 모양의 선례지만, 그 주석이 근거로 든 "월드가
 	// 타이머를 소유하므로 월드 테어다운이 자동으로 정리한다"는 **틀렸다** — 월드는 게임인스턴스의 타이머
 	// 매니저를 돌려준다(engine World.cpp:8056). 그래서 여기서는 델리게이트를 월드에 약하게 묶는다(아래
-	// CreateWeakLambda 주석). ⚠️ 그 선례 두 곳은 아직 안 고쳐져 있다(이 유닛 범위 밖, 후속 항목).
+	// CreateWeakLambda 주석). 그 선례 두 곳도 이제 같은 방식으로 고쳤고 틀린 전제 주석도 함께 정정했다.
 	// 또 그 둘은 반복 재사용 가능한 "반복" 타이머 하나만 필요해 정적 핸들 1개를 재사용하는 반면, 이 명령은
 	// 서로 겹칠 수 있는 "1회성" 예약을 여러 개 동시에 지원해야 하므로 컨테이너로 늘린다.
 	TArray<FTimerHandle> GFPSRDebugExecAfterTimers;

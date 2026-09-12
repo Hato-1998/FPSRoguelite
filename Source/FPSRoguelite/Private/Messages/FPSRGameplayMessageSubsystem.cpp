@@ -183,8 +183,14 @@ static FAutoConsoleCommandWithWorldAndArgs GFPSRGMSDemoCmd(
 
 		// Repeat mode (§5-C(1)(d)): a single ExecCmds-time broadcast finishes before the capture's first frame
 		// boundary, so CsvProfiler can never show it as non-zero. Keep the listener alive and re-broadcast every 1s
-		// via a world timer until RepeatSeconds elapses, so several in-capture frames carry the FPSRMsg/* stats.
-		World->GetTimerManager().SetTimer(GFPSRGMSDemoTimer, FTimerDelegate::CreateLambda(
+		// until RepeatSeconds elapses, so several in-capture frames carry the FPSRMsg/* stats.
+		//
+		// The timer is NOT owned by the world: UWorld::GetTimerManager() returns the OwningGameInstance's manager
+		// (World.cpp:8056), which outlives map travel, so a world teardown leaves this repeat armed. Bind the
+		// delegate weakly to the world (CreateWeakLambda, as the engine does at World.cpp:5831) so `open <map>`
+		// stops it instead of dereferencing a destroyed UWorld. That covers GMS as well — a UWorldSubsystem cannot
+		// outlive its world, so a live world implies a live GMS.
+		World->GetTimerManager().SetTimer(GFPSRGMSDemoTimer, FTimerDelegate::CreateWeakLambda(World,
 			[World, GMS, Channel, Msg, ExpiryTime = World->GetTimeSeconds() + RepeatSeconds]()
 			{
 				if (World->GetTimeSeconds() >= ExpiryTime)

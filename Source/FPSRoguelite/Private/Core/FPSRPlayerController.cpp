@@ -908,8 +908,14 @@ namespace
 		}
 	}
 
-	// Debug fixture, not production lifecycle: the world owns the timer, so a world teardown kills the timer with
-	// it, and the next FPSR.SkipCards repeat call's SetTimer simply reuses this handle (mirrors Invuln §5-C(2)).
+	// Debug fixture, not production lifecycle: the next FPSR.SkipCards repeat call's SetTimer simply reuses this
+	// handle (mirrors Invuln §5-C(2)).
+	//
+	// The timer does NOT die with the world. UWorld::GetTimerManager() hands back the OwningGameInstance's timer
+	// manager (World.cpp:8056 — `return (OwningGameInstance ? OwningGameInstance->GetTimerManager() : *TimerManager)`),
+	// which outlives map travel, so a world teardown leaves this timer armed. The delegate is therefore bound weakly
+	// to the world (CreateWeakLambda, as the engine itself does at World.cpp:5831) — after `open <map>` or an
+	// end-of-run travel it stops firing instead of dereferencing the destroyed UWorld it captured.
 	static FTimerHandle GFPSRSkipCardsReapplyTimer;
 
 	FAutoConsoleCommandWithWorldAndArgs GCmd_SkipCards(
@@ -935,7 +941,7 @@ namespace
 			// owes its opening seed, which re-freezes the run with no local resolver to clear it. Re-walk every 5s
 			// (idempotent — only PCs with a pending selection actually resolve) until RepeatSeconds elapses.
 			const float ExpiryTime = World->GetTimeSeconds() + RepeatSeconds;
-			World->GetTimerManager().SetTimer(GFPSRSkipCardsReapplyTimer, FTimerDelegate::CreateLambda([World, ExpiryTime]()
+			World->GetTimerManager().SetTimer(GFPSRSkipCardsReapplyTimer, FTimerDelegate::CreateWeakLambda(World, [World, ExpiryTime]()
 			{
 				if (World->GetTimeSeconds() >= ExpiryTime)
 				{
@@ -965,8 +971,10 @@ namespace
 		}
 	}
 
-	// Debug fixture, not production lifecycle: the world owns the timer, so a world teardown kills the timer with
-	// it, and the next FPSR.Invuln call's SetTimer simply reuses this handle.
+	// Debug fixture, not production lifecycle: the next FPSR.Invuln call's SetTimer simply reuses this handle.
+	// Lifecycle rationale = the SkipCards handle above: the timer manager belongs to the game instance, not to the
+	// world (World.cpp:8056), so the delegate is bound weakly to the world (CreateWeakLambda, World.cpp:5831)
+	// instead of trusting a world teardown that never clears it.
 	static FTimerHandle GFPSRInvulnReapplyTimer;
 
 	FAutoConsoleCommandWithWorldAndArgs GCmd_Invuln(
@@ -990,7 +998,7 @@ namespace
 			// REMAINING time each pass — BeginGraceWindow ratchets (never shortens, FPSRCharacter.cpp:1576-1582), so
 			// reapplying on already-covered players is a no-op while a late joiner's pawn picks up the remaining grace.
 			const float ExpiryTime = World->GetTimeSeconds() + Seconds;
-			World->GetTimerManager().SetTimer(GFPSRInvulnReapplyTimer, FTimerDelegate::CreateLambda([World, ExpiryTime]()
+			World->GetTimerManager().SetTimer(GFPSRInvulnReapplyTimer, FTimerDelegate::CreateWeakLambda(World, [World, ExpiryTime]()
 			{
 				const float Remaining = ExpiryTime - World->GetTimeSeconds();
 				if (Remaining <= 0.0f)
