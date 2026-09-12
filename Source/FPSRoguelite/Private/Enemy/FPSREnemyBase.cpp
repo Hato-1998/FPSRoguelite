@@ -3,6 +3,12 @@
 #include "Enemy/FPSREnemyBase.h"
 #include "Enemy/FPSREnemyHealthComponent.h"
 #include "Enemy/FPSREnemySpawnSubsystem.h"
+#include "AbilitySystem/FPSRAbilitySystemComponent.h" // GASM1 측정 시임 (Docs/Specs/GASM1_SwarmASCCostMeasurement.md)
+#include "AbilitySystem/Attributes/FPSRMeasureAttributeSet.h"
+#include "AbilitySystem/Abilities/FPSRMeasureDummyAbility.h"
+#include "AbilitySystemComponent.h"
+#include "GameplayEffect.h" // FGameplayEffectQuery (측정 티어다운, §6-C)
+#include "GameplayAbilitySpec.h" // FGameplayAbilitySpec (측정 어빌리티 부여, §6-A)
 #include "Enemy/FPSREnemyAnimProfile.h"
 #include "Enemy/FPSREnemyMetricsSubsystem.h" // S4 readability metrics registry (CSV-gated, see below)
 #include "Enemy/FPSREnemyCosmeticLODSubsystem.h" // per-viewer cosmetic LOD band (see BeginPlay/EndPlay)
@@ -44,6 +50,66 @@ static FAutoConsoleVariableRef CVarFPSREnemySpeedScale(
 	     "Server-authoritative movement, so this only does anything on the host. 1 = off."),
 	ECVF_Cheat);
 #endif
+
+#if !UE_BUILD_SHIPPING
+// ---- GASM1 측정 CVar 4종 (Docs/Specs/GASM1_SwarmASCCostMeasurement.md §5-A) — 전부 기본값 off/1.0, 프로덕션
+//      경로 diff 0. ForceSpawnClass 는 FPSREnemySpawnSubsystem.cpp 소유(AcquireEnemy 가 소비 — 그쪽엔 이
+//      가드가 없다. 그 CVar 의 유일한 소비처는 로스터 UPROPERTY 데이터를 읽을 뿐 이 파일의 #if !UE_BUILD_
+//      SHIPPING 멤버를 건드리지 않는다). 이 4개는 #if 로 가드한다 — 유일한 소비처(Activate/ServerTickAttack
+//      의 측정 분기)가 #if !UE_BUILD_SHIPPING 안의 비-UPROPERTY 멤버를 읽으므로 CVar 자체도 그 가드 밖에서는
+//      의미가 없다(작업 지시 §1 "가드는 사용처(CVar·부착·부여·구동)에만"의 CVar 항목). ----
+static TAutoConsoleVariable<int32> CVarAttachASC(
+	TEXT("FPSR.Debug.AttachASC"), 0,
+	TEXT("일반 적에 UFPSRAbilitySystemComponent 를 런타임 부착한다(액터 실수명당 1회)."), ECVF_Cheat);
+
+static TAutoConsoleVariable<int32> CVarMeasureLoadout(
+	TEXT("FPSR.Debug.MeasureLoadout"), 0,
+	TEXT("측정용 AttributeSet 부착 + 더미 어빌리티 부여·구동. AttachASC 를 함의한다(코드에서 강제)."), ECVF_Cheat);
+
+static TAutoConsoleVariable<float> CVarMeasureCadence(
+	TEXT("FPSR.Debug.MeasureCadence"), 1.0f,
+	TEXT("더미 어빌리티 발동 주기(초). 허용값 = 1.0 / 0.2 뿐이며, 그 밖의 값은 경고 후 가까운 쪽으로 스냅한다."),
+	ECVF_Cheat);
+
+// 🔁 신설 (G2 P2-1, 구성 ③ᵀ) — 측정 AttributeSet 이 ITickableAttributeSetInterface::ShouldTick() 에
+// true 를 돌려주게 해서, 엔진이 정한 틱 조건(§10 자기해제 체인의 ③번)을 합법적으로 만족시킨다. 이것 없이는
+// ASC 틱이 첫 프레임 뒤 스스로 꺼져 틱 축을 아예 못 잰다. MeasureLoadout 을 함의한다(세트가 있어야 Tickable
+// 을 걸 곳이 있다) — 코드에서 강제(아래 Activate 의 bEffectiveLoadout 계산).
+static TAutoConsoleVariable<int32> CVarMeasureTickable(
+	TEXT("FPSR.Debug.MeasureTickable"), 0,
+	TEXT("구성 ③ᵀ: 측정 AttributeSet 을 Tickable 로 만들어 ASC 틱이 켜진 채 유지되게 한다. "
+	     "MeasureLoadout 을 함의한다."), ECVF_Cheat);
+
+namespace
+{
+	// GASM1 §5-A — 허용값은 1.0 / 0.2 뿐. ServerTickAttack 은 측정이 켜진 액터마다 매 패스 이 함수를 부를 수
+	// 있으므로(최대 300+), 경고 로그는 반드시 "값이 실제로 바뀔 때만"(엣지 트리거) — 아니면 스팸이 된다.
+	// 전역 static 하나로 충분한 이유 = 이건 액터별 상태가 아니라 CVar(전역) 하나의 사실이다.
+	float GetEffectiveMeasureCadenceSeconds()
+	{
+		const float Raw = CVarMeasureCadence.GetValueOnGameThread();
+		if (FMath::IsNearlyEqual(Raw, 1.0f, 0.001f))
+		{
+			return 1.0f;
+		}
+		if (FMath::IsNearlyEqual(Raw, 0.2f, 0.001f))
+		{
+			return 0.2f;
+		}
+
+		static float GLastWarnedRawCadence = -1.0f; // sentinel — 허용/실사용 범위 밖(캐던스는 항상 양수)
+		const float Snapped = (FMath::Abs(Raw - 1.0f) <= FMath::Abs(Raw - 0.2f)) ? 1.0f : 0.2f;
+		if (!FMath::IsNearlyEqual(Raw, GLastWarnedRawCadence, 0.001f))
+		{
+			GLastWarnedRawCadence = Raw;
+			UE_LOG(LogFPSR, Warning,
+				TEXT("[GASM1] FPSR.Debug.MeasureCadence=%.3f is not an allowed value (1.0 or 0.2) — snapping to %.1f."),
+				Raw, Snapped);
+		}
+		return Snapped;
+	}
+}
+#endif // !UE_BUILD_SHIPPING
 
 float AFPSREnemyBase::GetEffectiveMoveSpeed() const
 {
@@ -481,6 +547,19 @@ void AFPSREnemyBase::EnterDyingState()
 		HealthComponent->ClearStatusForReuse();
 	}
 
+#if !UE_BUILD_SHIPPING
+	// GASM1 측정 티어다운(§6-C) — 엘리트와 같은 쌍(AFPSREnemyEliteBase::EnterDyingState 의
+	// AbilitySystem->CancelAbilities() 와 같은 자리, collision-off 보다 앞). ASC 는 파괴하지 않는다(§8,
+	// 실수명당 1회 원칙) — CancelAbilities/RemoveActiveEffects 만. Instant GE 뿐이라 RemoveActiveEffects 의
+	// 컨테이너는 사실상 항상 비어 있지만(빈 컨테이너=비용 미미), 실제 엘리트가 매 티어다운에 지불하는 경로를
+	// 그대로 밟아 구성 ②③ 의 대표성을 높인다.
+	if (bMeasureLoadoutCached && MeasureASC)
+	{
+		MeasureASC->CancelAbilities();
+		MeasureASC->RemoveActiveEffects(FGameplayEffectQuery());
+	}
+#endif
+
 	// Gameplay ends NOW; presentation does not — see this function's header doc for the full EnterDyingState vs.
 	// Deactivate role split. No hide / no SetNetDormancy here (unlike Deactivate): bDead already replicated before
 	// HandleDeath ever ran (the health component's ApplyDamage->OnDeath fires first), so a remote client's own
@@ -490,6 +569,17 @@ void AFPSREnemyBase::EnterDyingState()
 	// the first blocking hit) or from the movement/attack pass's stop-distance queries.
 	SetActorEnableCollision(false);
 }
+
+#if !UE_BUILD_SHIPPING
+UAbilitySystemComponent* AFPSREnemyBase::GetMeasureAbilitySystemComponent() const
+{
+	// 기저 타입으로 돌려준다 — 헤더의 선언 주석 참조(DumpEliteState 가 쓰는 것과 같은 형태). 본체는 .cpp
+	// 에서만 정의 가능하다: 헤더는 UFPSRAbilitySystemComponent 를 전방선언만 했으므로, 그 타입의 완전한
+	// 정의(상속 관계)가 안 보이는 상태에서는 UFPSRAbilitySystemComponent* -> UAbilitySystemComponent* 업캐스트
+	// 자체가 인라인으로 컴파일되지 않는다.
+	return MeasureASC;
+}
+#endif
 
 void AFPSREnemyBase::Activate(const FVector& Location)
 {
@@ -592,6 +682,107 @@ void AFPSREnemyBase::Activate(const FVector& Location)
 		bCharging = false;
 		MARK_PROPERTY_DIRTY_FROM_NAME(AFPSREnemyBase, bCharging, this);
 	}
+
+#if !UE_BUILD_SHIPPING
+	// GASM1 측정 시임(Docs/Specs/GASM1_SwarmASCCostMeasurement.md §6-A) — Super 의(위) SetNetDormancy(DORM_
+	// Awake) 뒤에서 실행: 부착의 복제가 깨어난 뒤에 실리도록. CVar 둘 다 off 면 즉시 스킵 — 프로덕션 경로
+	// diff 0(§10).
+	const bool bMeasureAttachASC = CVarAttachASC.GetValueOnGameThread() != 0;
+	const bool bMeasureLoadout = CVarMeasureLoadout.GetValueOnGameThread() != 0; // AttachASC 를 함의(아래 OR 로 강제)
+	// 🔁 신설(G2 P2-1, 구성 ③ᵀ) — MeasureTickable 은 MeasureLoadout 을 함의한다(§5-A: "세트가 있어야
+	// Tickable 을 걸 곳이 있다"). CVarMeasureLoadout->CVarAttachASC 함의가 이미 쓰는 것과 같은 방식으로
+	// OR 에 실어 코드에서 강제한다 — bEffectiveLoadout 이 true 면 아래 로드아웃 부착 분기가 돈다.
+	const bool bMeasureTickableRequested = CVarMeasureTickable.GetValueOnGameThread() != 0;
+	const bool bEffectiveLoadout = bMeasureLoadout || bMeasureTickableRequested;
+	if (bMeasureAttachASC || bEffectiveLoadout)
+	{
+		// 🔴 이중 부착 가드 — 이 액터가 **자기 것이 아닌** ASC 를 이미 갖고 있으면(엘리트의 진짜
+		// AbilitySystem) 측정 시임을 얹지 않는다. AFPSREnemyEliteBase::Activate 는 Super::Activate(this)를
+		// 먼저 호출하므로(FPSREnemyEliteBase.cpp:79-81) 엘리트에 CVar 를 켜도 여기서 걸려 MeasureASC 가
+		// 안 생긴다. AFPSRBossBase 는 애초에 AFPSREnemyBase 를 상속하지 않아(ACharacter 직계) 이 함수
+		// 자체를 타지 않는다.
+		//
+		// 🔁 **자기 자신의 MeasureASC 는 "이중"이 아니다.** 단순히 `!FindComponentByClass<...>()` 로 쓰면
+		// 두 번째+ 삶에서 이 체크가 지난 삶에 붙인 MeasureASC 를 찾아내 아래 블록 전체를 스킵한다. 그러면
+		//   · ResetForMeasure() 가 안 돌아 어트리뷰트 값이 삶을 넘어 이어지고(§6-A 가 🔴 필수로 못박은 것)
+		//   · MeasureActivationCount 가 삶별이 아니라 실수명 누적치가 되어 N 사후 검증(§12-A)이 무의미해지며
+		//   · bMeasureLoadoutCached 가 갱신되지 않는다 — 러너가 CVar 를 세우기 **전에** 한 번이라도 Activate
+		//     된 액터는 캐시가 false 로 굳어 그 캡처 내내 측정에서 조용히 빠진다(= 무음 오염).
+		// 풀은 액터를 파괴하지 않으므로(불변식 5) 재활성화는 예외가 아니라 상시다 — §5 실측의 "요청 300 →
+		// 정착 254"(Performance.md:47)가 그 증거다.
+		UAbilitySystemComponent* const ExistingASC = FindComponentByClass<UAbilitySystemComponent>();
+		if (!ExistingASC || ExistingASC == MeasureASC)
+		{
+			if (!MeasureASC) // 🔴 실수명당 1회
+			{
+				MeasureASC = NewObject<UFPSRAbilitySystemComponent>(this, TEXT("MeasureASC"));
+				MeasureASC->SetIsReplicated(true); // RegisterComponent 앞 — NewObject 직후엔 아직
+				                                    // RF_NeedInitialization 라 ensure 없이 안전
+				                                    // (엔진 ActorComponent.cpp:3415-3418, NeedsInitialization()).
+				MeasureASC->RegisterComponent();
+				MeasureASC->SetReplicationMode(EGameplayEffectReplicationMode::Minimal); // 엘리트와 동일
+				MeasureASC->InitAbilityActorInfo(this, this);
+				MeasureASC->EnableTimeAxisGuard();
+			}
+			if (bEffectiveLoadout)
+			{
+				if (!MeasureSet)
+				{
+					// 🔴 명세 §6-A pseudocode 는 "...GetOrCreateAttributeSubobject(...)"로 수신 표현식을
+					// 생략해 뒀는데(리터럴 코드가 아니라는 뜻), 실제로 그 메서드는 엔진에서 protected 다
+					// (AbilitySystemComponent.h:1893, 그 앞의 마지막 접근지정자는 :1681 의 protected: —
+					// UAbilitySystemComponent 와 무관한 AFPSREnemyBase 에서 직접 부르면 컴파일이 안 된다).
+					// 엔진이 제공하는 공개 템플릿 래퍼 AddSet<T>() 를 대신 쓴다 — 그 본체가 정확히
+					// `return (T*)GetOrCreateAttributeSubobject(T::StaticClass());`(AbilitySystemComponent.h:
+					// 153-157)라 완전히 같은 호출이고, 제약이 요구하는 "GetOrCreateAttributeSubobject 를
+					// 쓰고 AddSpawnedAttribute 는 쓰지 마라"의 IsA 클래스-중복 필터링 동작도 그대로다.
+					// const 를 돌려주는 이유도 같은 원문 설계(Set-파이프라인 경유 값쓰기 유도) —
+					// ResetForMeasure() 는 우리가 소유한 타입의 의도된 직접-변경 API라 const_cast 한다
+					// (같은 리포의 UFPSREnemySpawnSubsystem::GetLastGroundedZ 키-생성 const_cast 와 같은 선례).
+					MeasureSet = const_cast<UFPSRMeasureAttributeSet*>(MeasureASC->AddSet<UFPSRMeasureAttributeSet>());
+				}
+				if (MeasureSet)
+				{
+					MeasureSet->ResetForMeasure(); // 🔴 값은 삶을 넘어 이어진다 — 매 삶 리셋 필수
+				}
+				if (!MeasureAbilityHandle.IsValid()) // 🔴 실수명당 1회 — 삶마다면 스펙이 누적된다
+				{
+					MeasureAbilityHandle = MeasureASC->GiveAbility(
+						FGameplayAbilitySpec(UFPSRMeasureDummyAbility::StaticClass(), 1, INDEX_NONE, this));
+				}
+			}
+			if (MeasureSet) // 🔁 신설(G2 P2-1) — bEffectiveLoadout 이 이번 삶엔 false 라도(예: AttachASC 만
+			                 // 켜진 구성 ②) 이전 삶에 로드아웃을 켰던 MeasureSet 이 남아있을 수 있다(§8: ASC·
+			                 // 세트는 해제하지 않는다) — 그 삶엔 Tickable 요청도 없으므로 무조건 최신값(false)
+			                 // 으로 덮어써야 한다. bEffectiveLoadout 이 true 인 삶엔 방금 위에서 만든/리셋한
+			                 // MeasureSet 에 CVar 값을 그대로 반영한다.
+			{
+				MeasureSet->bMeasureTickable = bMeasureTickableRequested;
+			}
+			MeasureClockSeconds = 0.0f;
+			MeasureActivationCount = 0;
+			bMeasureLoadoutCached = bEffectiveLoadout;
+			// 캐던스도 여기서 1회만 확정한다 — 틱에서 CVar 를 다시 조회하면 그 비용이 구성 ③ 에만 붙어
+			// ②↔③ 델타로 새어든다(멤버 주석 참조). 경고·스냅은 이 호출 안에서 엣지 트리거로 처리된다.
+			MeasureCadenceCached = GetEffectiveMeasureCadenceSeconds();
+		}
+	}
+	else
+	{
+		// 🔁 G2 P3-1 — CVar 가 전부 off 인 삶에서는 캐시를 블록 밖에서 무조건 되돌린다. 이 else 가 없으면
+		// (수정 전 코드) 한 세션에서 MeasureLoadout/MeasureTickable 을 켰다가 CVar 를 전부 0 으로 내렸을 때,
+		// 그 뒤 재활성화되는 액터가 위 if 블록 전체를 건너뛰어 이전 삶의 true 캐시가 영구 잔존했다 —
+		// bMeasureLoadoutCached 가 그대로면 ServerTickAttack 이 어빌리티를 계속 쏘고, MeasureSet 이 있는데
+		// bMeasureTickable 이 그대로면 ShouldTick() 이 계속 true 를 돌려줘 ASC 가 그 삶 내내 계속 틱한다
+		// (§10). 둘 다 이번 삶엔 측정이 꺼졌다는 뜻이므로 false 로 되돌린다 — MeasureASC/MeasureSet 자체는
+		// 파괴하지 않는다(§8, 실수명당 1회 원칙).
+		bMeasureLoadoutCached = false;
+		if (MeasureSet)
+		{
+			MeasureSet->bMeasureTickable = false;
+		}
+	}
+#endif
 }
 
 void AFPSREnemyBase::SetExitPath(const TArray<FVector>& InWaypoints, bool bPhaseThroughWorld)
@@ -740,6 +931,18 @@ void AFPSREnemyBase::Deactivate()
 	{
 		HealthComponent->ClearStatusForReuse();
 	}
+
+#if !UE_BUILD_SHIPPING
+	// GASM1 측정 티어다운(§6-C) — 엘리트와 같은 쌍(AFPSREnemyEliteBase::Deactivate 참조). 🔴 반드시 아래
+	// SetNetDormancy(DORM_DormantAll) 이전에 실행 — GE 제거의 복제가 awake->dormant 플러시에 실리려면 아직
+	// DORM_Awake 인 동안 실행돼야 한다(엘리트 Deactivate 헤더 주석의 "must run BEFORE Super::Deactivate()
+	// flips this actor to DORM_DormantAll" 과 동일 근거). ASC 는 파괴하지 않는다(§8, 실수명당 1회 원칙).
+	if (bMeasureLoadoutCached && MeasureASC)
+	{
+		MeasureASC->CancelAbilities();
+		MeasureASC->RemoveActiveEffects(FGameplayEffectQuery());
+	}
+#endif
 
 	SetActorHiddenInGame(true);
 	SetActorEnableCollision(false);
@@ -1018,6 +1221,32 @@ void AFPSREnemyBase::ServerTickAttack(const FFPSRServerAttackContext& Ctx)
 	{
 		return;
 	}
+
+#if !UE_BUILD_SHIPPING
+	// GASM1 측정 구동(§6-B) — 멤버 bool 1회만 읽는다(CVar 조회 아님, §10 기본 경로 비용: CVar off 면
+	// 여기서 즉시 끝난다). 형태는 보스 선례 FPSRBossBase.cpp:960-962 의 TryActivateAbility 호출을 그대로
+	// 복제한다. IsDead 가드 바로 다음(타겟 유무 분기·bDisableAttack 게이트보다 앞)에 둔 이유 — 엘리트의
+	// EliteCooldownClockSeconds 누산기가 "타겟 있음/없음 두 분기 모두에서 조건 없이" 도는 것
+	// (FPSREnemyEliteBase.h:79-85 헤더 주석)과 같은 성격으로, 측정 캐던스가 사냥 로직의 타겟 유무나
+	// 상태이상(블라인드 등)에 좌우되지 않게 하기 위함이다. ⚠️ ServerTickAttack 은 tier 별 AttackStride(F1)
+	// 로 스킵되므로 이 함수 자체의 호출 빈도가 tier 마다 다르다 — MeasureActivationCount 로 실제 발동 수를
+	// 확인할 것(GetMeasureActivationCount, ASCDump).
+	if (bMeasureLoadoutCached)
+	{
+		MeasureClockSeconds += Ctx.DeltaSeconds; // 🔴 §2-2 프리즈 중엔 Ctx.DeltaSeconds 자체가 0 — 자동으로 멈춘다
+		if (MeasureClockSeconds >= MeasureCadenceCached) // Activate 에서 1회 확정 — 여기서 CVar 를 조회하지 않는다
+		{
+			MeasureClockSeconds = 0.0f;
+			if (MeasureASC && MeasureASC->TryActivateAbility(MeasureAbilityHandle)) // MeasureASC 는 방어적
+			                                                                        // 재확인(bMeasureLoadoutCached
+			                                                                        // 가 true 면 §6-A 상 항상
+			                                                                        // non-null 이지만 belt-and-suspenders)
+			{
+				++MeasureActivationCount;
+			}
+		}
+	}
+#endif
 
 	// STAT1 §6 실명 (bDisableAttack): true on EVERY pass this holds, release the ranged hold/token and skip the
 	// whole cycle below. ReleaseRangedHold/ResetRangedCycle are BOTH documented idempotent (see their own comments),

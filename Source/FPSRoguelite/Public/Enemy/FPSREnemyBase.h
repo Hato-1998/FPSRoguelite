@@ -8,6 +8,7 @@
 #include "Enemy/FPSRAnimCPDParams.h"
 #include "Enemy/FPSREnemyTuning.h" // FPSREnemyTuning::EFPSRDistanceBand (SetViewerLOD/GetViewerBand/ViewerBand — LOD1)
 #include "Enemy/FPSREnemyPursuit.h" // ADR 0008: FFPSRPursuitState/Params (PursuitState member, plain struct — no UObject dep)
+#include "GameplayAbilitySpecHandle.h" // GASM1: FGameplayAbilitySpecHandle MeasureAbilityHandle (§5-C, by-value member)
 #include "FPSREnemyBase.generated.h"
 
 class UCapsuleComponent;
@@ -21,6 +22,9 @@ class UFPSREnemyAnimProfile;
 class UFPSRFlowFieldSubsystem;
 class AFPSRProjectile;
 class UFPSRVitalsProfileDataAsset;
+class UAbilitySystemComponent;
+class UFPSRAbilitySystemComponent;
+class UFPSRMeasureAttributeSet;
 
 /** Per-pass batch context the spawn subsystem hands to each enemy's ServerTickAttack. The subsystem owns target
  *  selection (nearest ALIVE player) and the per-pass freeze gate (this is never called while run-paused); the enemy
@@ -227,6 +231,28 @@ public:
 	/** VIT1: read-only accessor mirroring GetHealthComponent's shape — the spawn subsystem reads this archetype's
 	 *  survival spec (a different class, so the field itself stays EditDefaultsOnly/protected). */
 	const UFPSRVitalsProfileDataAsset* GetVitalsProfile() const { return VitalsProfile; }
+
+#if !UE_BUILD_SHIPPING
+	// --- GASM1 측정 시임 조회 (Docs/Specs/GASM1_SwarmASCCostMeasurement.md) — FPSR.Debug.ASCDump 전용.
+	//     멤버(MeasureASC 등)는 protected 비-UPROPERTY(§5-C, 아래 참조)라 FPSREnemySpawnSubsystem(다른
+	//     클래스)에서 값을 읽을 방법이 이 접근자들뿐이다. public 밖에 별도 #if 블록으로 둔 이유는 뒤이은
+	//     protected 멤버들의 접근 지정자를 흔들지 않기 위해서 — #if 분기 안에서 public:/protected: 를 다시
+	//     쓰면 Shipping/비-Shipping 사이에 이후 멤버들의 접근 지정자가 달라질 위험이 있다. ---
+	/** 이 삶의 측정 ASC. CVarAttachASC/CVarMeasureLoadout 이 한 번도 켜진 적 없으면 null(구성 ①). 기저
+	 *  타입(UAbilitySystemComponent)으로 돌려준다 — DumpEliteState 가 쓰는 것과 같은 형태
+	 *  (GetActivatableAbilities/GetNumActiveGameplayEffects/GetOwnedGameplayTags 는 전부 그 기저 타입의
+	 *  API). */
+	UAbilitySystemComponent* GetMeasureAbilitySystemComponent() const;
+
+	/** 이 삶에 측정용 AttributeSet+더미 어빌리티까지 부착됐는가(구성 ③) — false 면 ASC 만 붙었거나
+	 *  (구성 ②) 아예 안 붙은 것(구성 ①)이다. */
+	bool HasMeasureLoadout() const { return MeasureSet != nullptr; }
+
+	/** 이 삶에서 더미 어빌리티가 실제로 발동에 성공한 횟수(TryActivateAbility 성공 카운트) — §12-A 가 요구하는
+	 *  "N 사후 검증"의 근거. ServerTickAttack 이 tier 별 AttackStride(F1)로 스킵되므로 캐던스만으로 예상한
+	 *  발동 횟수와 실측이 다를 수 있어, 실제 값을 이 접근자로 확인한다. */
+	int32 GetMeasureActivationCount() const { return MeasureActivationCount; }
+#endif
 
 	/** The enemy's visual mesh — exposed read-only so the S4 readability metrics (UFPSREnemyMetricsSubsystem) can read
 	 *  this primitive's GetLastRenderTimeOnScreen(). The actor-level AActor::WasRecentlyRendered is NOT usable there:
@@ -860,6 +886,34 @@ protected:
 	 *  the canary pushed survives instead of being re-derived on the next net update. Debug-only isolation aid —
 	 *  never set by gameplay, and compiled out of shipping along with DebugForceAnimState itself. */
 	bool bDebugAnimPinned = false;
+#endif
+
+#if !UE_BUILD_SHIPPING
+	// --- GASM1 측정 시임(Docs/Specs/GASM1_SwarmASCCostMeasurement.md §5-C) — 전부 비-UPROPERTY: UHT 가
+	//     #if 안의 UPROPERTY 를 거부하기 때문이고(UhtTokenBufferReader.cs:725, bDebugAnimPinned 와 같은
+	//     선례를 그대로 따른다), 리플렉션 멤버였다면 Shipping 빌드의 스웜 액터 500개 전부에 이 시임이
+	//     상주했을 것이다(사용자 결정 4 가 허용한 것은 *디버그* 시임이지 프로덕션 구조가 아니다).
+	//     GC 안전한 이유: 부착된 컴포넌트는 AActor::OwnedComponents 가, AttributeSet 은 ASC 의
+	//     SpawnedAttributes 가 각각 강참조로 살려 둔다(§8 수명주기·소유권). TObjectPtr 이 아니라 raw 인
+	//     이유도 같다 — 소유권이 여기 있지 않다. ---
+	/** 이 삶의 측정 ASC. 실수명당 1회만 생성되고(§6-A), 풀 재사용 삶이 바뀌어도 해제하지 않는다(§8). */
+	UFPSRAbilitySystemComponent* MeasureASC = nullptr;
+	/** 측정용 AttributeSet 서브오브젝트(CVarMeasureLoadout 이 한 번이라도 켜졌을 때만). */
+	UFPSRMeasureAttributeSet* MeasureSet = nullptr;
+	/** 부여된 더미 어빌리티의 스펙 핸들 — 실수명당 1회만 GiveAbility 한다(§6-A). */
+	FGameplayAbilitySpecHandle MeasureAbilityHandle;
+	/** 프리즈-멈춤 누산기(초) — ServerTickAttack 이 Ctx.DeltaSeconds 로 쌓는다(§6-B). Cadence 에 도달하면
+	 *  0 으로 리셋. */
+	float MeasureClockSeconds = 0.0f;
+	/** 이 삶에서 더미 어빌리티가 실제로 발동에 성공한 횟수 — N 사후 검증용(ASCDump 가 읽는다, §12-A). */
+	int32 MeasureActivationCount = 0;
+	/** Activate 에서 1회 캐시한 "이번 삶은 로드아웃까지 켜져 있는가" — ServerTickAttack 은 매 틱 CVar 를
+	 *  다시 조회하지 않고 이 bool 만 읽는다(§10 성능 예산: 기본 경로 비용 = 멤버 bool 1회). */
+	bool bMeasureLoadoutCached = false;
+	/** Activate 에서 1회 캐시한 유효 캐던스(초). 🔴 틱에서 CVar 를 다시 조회하면 그 조회 비용이 구성 ③ 에만
+	 *  붙어 ②↔③ 델타(= "GAS 를 쓰는 비용")로 잘못 계상된다 — 재는 대상이 아닌 것을 재게 된다. 구성별로
+	 *  별도 기동하므로(§12-A) 캡처 도중 CVar 가 바뀌는 일은 없고, 캐시로 충분하다. */
+	float MeasureCadenceCached = 1.0f;
 #endif
 
 	/** Quantized walk-speed bucket of the last applied state (so playrate is re-written only on a bucket change). */

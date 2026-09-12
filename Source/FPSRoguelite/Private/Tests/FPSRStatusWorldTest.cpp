@@ -2,6 +2,7 @@
 
 #include "Misc/AutomationTest.h"
 #include "Tests/AutomationCommon.h" // FTestWorldWrapper — same idiom as FPSRStatusClockTest.cpp (A단계 precedent)
+#include "HAL/IConsoleManager.h" // GASM1 측정 CVar 5종 리셋 (RunTest 시작부)
 #include "Enemy/FPSREnemyBase.h"
 #include "Enemy/FPSREnemyHealthComponent.h"
 #include "Enemy/FPSREnemySpawnSubsystem.h"
@@ -60,6 +61,41 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFPSRStatusWorldTest, "FPSRoguelite.Status.Worl
 
 bool FFPSRStatusWorldTest::RunTest(const FString& Parameters)
 {
+	// GASM1(Docs/Specs/GASM1_SwarmASCCostMeasurement.md §4·§12 항목 6 "기본 경로 무변경") — 이 테스트는
+	// AFPSREnemyBase 를 직접 스폰하고 AcquireEnemy 도 부르므로(아래 항목 14), 어떤 이전 세션/콘솔 조작이
+	// 측정 CVar 5종을 켜 둔 채로 남아 있으면 조용히 오염된다(강제 스폰 클래스가 로스터 가중추첨을
+	// 우회하거나, 측정 ASC 가 붙어 이 테스트가 가정하는 "기본 경로" 자체가 바뀌는 식). CVar 는 자동화
+	// 테스트 경계에서 자동으로 리셋되지 않고(정적 파일-로컬 TAutoConsoleVariable — 이름으로만 접근 가능),
+	// 이 파일은 그 CVar 들을 선언한 FPSREnemyBase.cpp/FPSREnemySpawnSubsystem.cpp 를 include 하지 않으므로
+	// IConsoleManager 로 이름을 찾아 기본값으로 되돌린다.
+	//
+	// 🔁 정정(G2 P2-2) — Set() 의 두 번째 인자는 반드시 ECVF_SetByConsole 이어야 한다. 이전 코드는
+	// ECVF_SetByCode(=0x0E000000, IConsoleManager.h:183)를 썼는데, IConsoleVariable::CanChange() 는
+	// `NewPri >= OldPri`(ConsoleManager.cpp:275-281)일 때만 값을 바꾼다 — ECVF_SetByCode 는
+	// ECVF_SetByConsole(=0x10000000, :187)보다 우선순위가 낮아, 정확히 이 리셋이 노리는 경우(누군가
+	// 콘솔에서 직접 켜 둔 값)를 못 되돌리고 "낮은 우선순위" 경고만 찍고 무시된다. ECVF_SetByConsole 로
+	// 세팅하면 동일 우선순위(NewPri == OldPri)라 항상 통과한다.
+	if (IConsoleVariable* CVar = IConsoleManager::Get().FindConsoleVariable(TEXT("FPSR.Debug.ForceSpawnClass")))
+	{
+		CVar->Set(TEXT(""), ECVF_SetByConsole);
+	}
+	if (IConsoleVariable* CVar = IConsoleManager::Get().FindConsoleVariable(TEXT("FPSR.Debug.AttachASC")))
+	{
+		CVar->Set(TEXT("0"), ECVF_SetByConsole);
+	}
+	if (IConsoleVariable* CVar = IConsoleManager::Get().FindConsoleVariable(TEXT("FPSR.Debug.MeasureLoadout")))
+	{
+		CVar->Set(TEXT("0"), ECVF_SetByConsole);
+	}
+	if (IConsoleVariable* CVar = IConsoleManager::Get().FindConsoleVariable(TEXT("FPSR.Debug.MeasureCadence")))
+	{
+		CVar->Set(TEXT("1.0"), ECVF_SetByConsole);
+	}
+	if (IConsoleVariable* CVar = IConsoleManager::Get().FindConsoleVariable(TEXT("FPSR.Debug.MeasureTickable")))
+	{
+		CVar->Set(TEXT("0"), ECVF_SetByConsole);
+	}
+
 	FTestWorldWrapper WorldWrapper;
 	if (!WorldWrapper.CreateTestWorld(EWorldType::Game))
 	{

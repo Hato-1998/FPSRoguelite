@@ -4,6 +4,9 @@
 #include "Enemy/FPSREnemyBase.h" // CancelRangedChargesForTransition -> ServerCancelRangedForStageTransition (ADR 0013 C1: promoted here from the retired AFPSRRangedEnemyBase)
 #include "Enemy/FPSREnemyEliteBase.h" // CancelRangedChargesForTransition -> ServerResetEliteForStageCarry (ADR 0013 후속 행 3 실행 1 — 같은 루프에 얹는다)
 #include "AbilitySystemComponent.h" // FPSR.EliteDump: reads the elite ASC's live spec/GE/tag counts (debug only)
+#include "AbilitySystem/FPSRAbilitySystemComponent.h" // GASM1 FPSR.Debug.ASCDump (Docs/Specs/GASM1_SwarmASCCostMeasurement.md §12-A)
+#include "AbilitySystem/Attributes/FPSRMeasureAttributeSet.h" // GASM1 ASCDump: UClass::GetStructureSize() instance accounting
+#include "AbilitySystem/Abilities/FPSRMeasureDummyAbility.h" // GASM1 ASCDump: same
 #include "Enemy/FPSREnemySpawnPoint.h"
 #include "Enemy/FPSRSpawnRoom.h"
 #include "Enemy/FPSRFlowFieldSubsystem.h"
@@ -1440,6 +1443,17 @@ FVector UFPSREnemySpawnSubsystem::SnapToGround(const FVector& Location) const
 	return Location; // no floor found (e.g. off-map): keep the original candidate
 }
 
+// GASM1(Docs/Specs/GASM1_SwarmASCCostMeasurement.md §5-A) — 파일 로컬 static. 기본값 off("") = 프로덕션
+// 경로 diff 0. #if !UE_BUILD_SHIPPING 로 가드하지 않는다 — AcquireEnemy 의 소비 분기(아래)는 이미 로드된
+// EnemyRoster 데이터를 이름으로 훑을 뿐, §5-C 의 #if !UE_BUILD_SHIPPING 멤버/UCLASS 인스턴스화와는 무관하다
+// (작업 지시 §1 의 "사용처(CVar·부착·부여·구동)" 가드는 AttachASC/MeasureLoadout 쪽 이야기 — 그 둘만이
+// 측정 UCLASS 3종의 실제 인스턴스화를 게이트한다).
+static TAutoConsoleVariable<FString> CVarForceSpawnClass(
+	TEXT("FPSR.Debug.ForceSpawnClass"), TEXT(""),
+	TEXT("AcquireEnemy 의 로스터 가중추첨을 무시하고, 로스터 규칙 중 클래스 이름이 일치하는 것을 쓴다. "
+	     "BP 클래스는 _C 접미가 붙는다 (예: BP_EnemyRangedBase_C). 불일치 시 경고 1회 후 로스터 기본 동작."),
+	ECVF_Cheat);
+
 AFPSREnemyBase* UFPSREnemySpawnSubsystem::AcquireEnemy(const FVector& Location, bool bSnapToGround, const AFPSREnemySpawnPoint* SpawnPoint, bool bFrontSpawned)
 {
 	UWorld* World = GetWorld();
@@ -1453,7 +1467,43 @@ AFPSREnemyBase* UFPSREnemySpawnSubsystem::AcquireEnemy(const FVector& Location, 
 	// Pick the archetype to spawn: weighted-random from the data-driven roster (Game.MD §2-6), falling back to the
 	// single configured EnemyClass (then the C++ base) so an unconfigured run still spawns.
 	TSubclassOf<AFPSREnemyBase> PickedClass;
-	if (EnemyRoster)
+
+	// GASM1 §5-A/§6 — CVarForceSpawnClass 가 켜져 있으면 위 가중추첨을 완전히 우회하고, 로스터 "안"에서
+	// 이름이 일치하는 규칙을 직접 골라 쓴다(에셋 경로 하드코딩 금지 — 새 로드 없이 이미 로드된 로스터
+	// 데이터만 이름으로 훑는다). 불일치/로스터 미설정이면 경고 1회(edge-triggered, 아래 elite-cap 블로킹
+	// 로그와 같은 관용구) 후 평소처럼 로스터 기본 동작으로 흘러간다.
+	const FString ForceSpawnClassName = CVarForceSpawnClass.GetValueOnGameThread();
+	if (!ForceSpawnClassName.IsEmpty() && EnemyRoster)
+	{
+		for (const TObjectPtr<UFPSREnemySpawnRule>& RulePtr : EnemyRoster->SpawnRules)
+		{
+			const UFPSREnemySpawnRule* Rule = RulePtr;
+			const TSubclassOf<AFPSREnemyBase> RuleClass = Rule ? Rule->GetEnemyClass() : nullptr;
+			if (RuleClass && RuleClass->GetName().Equals(ForceSpawnClassName, ESearchCase::IgnoreCase))
+			{
+				PickedClass = RuleClass;
+				break;
+			}
+		}
+		if (PickedClass)
+		{
+			bForceSpawnClassMismatchWarned = false; // 다음번 진짜 불일치를 위해 래치 해제
+		}
+		else if (!bForceSpawnClassMismatchWarned)
+		{
+			bForceSpawnClassMismatchWarned = true;
+			UE_LOG(LogFPSR, Warning,
+				TEXT("[Spawn] FPSR.Debug.ForceSpawnClass='%s' matched no EnemyRoster rule — falling back to the ")
+				TEXT("roster's normal weighted pick. BP classes need the _C suffix (e.g. BP_EnemyRangedBase_C)."),
+				*ForceSpawnClassName);
+		}
+	}
+	else
+	{
+		bForceSpawnClassMismatchWarned = false; // CVar 비었거나 로스터 미설정 — 래치 해제
+	}
+
+	if (!PickedClass && EnemyRoster)
 	{
 		FFPSREnemySpawnContext SpawnCtx;
 		if (const AFPSRGameState* GS = World->GetGameState<AFPSRGameState>())
@@ -2226,6 +2276,99 @@ static FAutoConsoleCommandWithWorldAndArgs GFPSREliteDumpCmd(
 		if (const UFPSREnemySpawnSubsystem* Sub = World->GetSubsystem<UFPSREnemySpawnSubsystem>())
 		{
 			Sub->DumpEliteState();
+		}
+	}));
+
+void UFPSREnemySpawnSubsystem::DumpMeasureASCState() const
+{
+	UE_LOG(LogFPSR, Log, TEXT("===== FPSR.Debug.ASCDump (GASM1) ====="));
+
+	int32 CountWithASC = 0;
+	int32 CountWithLoadout = 0;
+	int32 TotalASCInstances = 0; // 🔁 G2 P2-3 — GetComponents<UAbilitySystemComponent> 실측 합계(§12 #3)
+	int32 TotalActivations = 0; // 300마리 x 장시간 캡처를 감안해도 int32 범위(~21억)에 전혀 안 닿는다
+
+	for (const TObjectPtr<AFPSREnemyBase>& EnemyPtr : ActiveEnemies)
+	{
+		const AFPSREnemyBase* Enemy = EnemyPtr.Get();
+		const UAbilitySystemComponent* ASC = Enemy ? Enemy->GetMeasureAbilitySystemComponent() : nullptr;
+		if (!ASC)
+		{
+			continue; // 구성 ①(측정 미부착) — 찍을 것이 없다
+		}
+		++CountWithASC;
+
+		// 🔁 G2 P2-3 — CountWithASC 는 "액터당 1행"이라 이중부착을 실증하지 못한다(Activate 의
+		// if (!MeasureASC) 가드를 지워도 이 값은 그대로 통과한다). 액터가 실제로 들고 있는
+		// UAbilitySystemComponent 컴포넌트 수를 직접 세어(멱등하면 항상 1), 1 을 넘으면 경고를 찍고,
+		// 최종 합계(TotalASCInstances)를 CountWithASC 와 나란히 로그로 남겨 눈으로 대조할 수 있게 한다
+		// (§12 검증기준 #3 — "N 이 그 시점 생존 수와 일치해야 한다").
+		TArray<UAbilitySystemComponent*> FoundMeasureASCs;
+		Enemy->GetComponents<UAbilitySystemComponent>(FoundMeasureASCs);
+		TotalASCInstances += FoundMeasureASCs.Num();
+		if (FoundMeasureASCs.Num() > 1)
+		{
+			UE_LOG(LogFPSR, Warning,
+				TEXT("[GASM1] %s has %d UAbilitySystemComponent instances attached — measure-ASC idempotency ")
+				TEXT("guard may have failed (expected 1, §12 검증기준 #3)."),
+				*Enemy->GetName(), FoundMeasureASCs.Num());
+		}
+
+		const bool bLoadout = Enemy->HasMeasureLoadout();
+		if (bLoadout)
+		{
+			++CountWithLoadout;
+		}
+		TotalActivations += Enemy->GetMeasureActivationCount();
+
+		FGameplayTagContainer OwnedTags;
+		ASC->GetOwnedGameplayTags(OwnedTags);
+		UE_LOG(LogFPSR, Log, TEXT("  [%d] %s | loadout=%d | abilities %d | active GEs %d | activations %d | owned tags %d"),
+			CountWithASC, *Enemy->GetName(), bLoadout ? 1 : 0,
+			ASC->GetActivatableAbilities().Num(), ASC->GetNumActiveGameplayEffects(),
+			Enemy->GetMeasureActivationCount(), OwnedTags.Num());
+	}
+
+	// §12-A 메모리 계측 규칙 "1차" — UClass::GetStructureSize() x 인스턴스 수. obj list 의 IncNum/ResExc
+	// ("2차")와 obj list 가 세지 않는 객체 본체를 이 값이 메운다(UnrealEngine.cpp:9463-9490 — Serialize 는
+	// 카운팅 아카이브에 본체를 더하지 않는다).
+	const int32 ASCStructSize = UFPSRAbilitySystemComponent::StaticClass()->GetStructureSize();
+	const int32 SetStructSize = UFPSRMeasureAttributeSet::StaticClass()->GetStructureSize();
+	const int32 AbilityStructSize = UFPSRMeasureDummyAbility::StaticClass()->GetStructureSize();
+	UE_LOG(LogFPSR, Log,
+		TEXT("  instances: ASC actors=%d components=%d (%s — GetComponents<UAbilitySystemComponent> 실측, ")
+		TEXT("멱등하면 둘이 같아야 한다) x %dB = %dB | AttributeSet %d x %dB = %dB | DummyAbility %d x %dB = %dB ")
+		TEXT("(DummyAbility=InstancedPerActor, 로드아웃당 1개)"),
+		CountWithASC, TotalASCInstances, (CountWithASC == TotalASCInstances) ? TEXT("일치") : TEXT("불일치!!"),
+		ASCStructSize, TotalASCInstances * ASCStructSize,
+		CountWithLoadout, SetStructSize, CountWithLoadout * SetStructSize,
+		CountWithLoadout, AbilityStructSize, CountWithLoadout * AbilityStructSize);
+	UE_LOG(LogFPSR, Log, TEXT("  total measure-ability activations (live, ActiveEnemies only) %d"), TotalActivations);
+
+	// §8/비목표 — "휴면 풀 ASC 상시 틱" 결함은 고치지 않는다(별도 행). ASC 는 한 번 붙으면 해제되지 않으므로
+	// (§8) 이 총계는 "출시 코드와 다름"을 기록하는 참고치다: DormantPool 은 클래스별 버킷(private
+	// BucketsByClass, FFPSREnemyDormantPool)이라 이 서브시스템도 개별 휴면 액터를 순회해 몇 개가 측정 ASC 를
+	// 달고 있는지는 셀 수 없다(그 반복 API 자체가 없다 — GASM1 은 건드리지 않는다) — 휴면 총수만 참고로
+	// 남긴다. ActiveEnemies 쪽 총계가 이 캡처 시점의 측정 ASC 실측 하한이다.
+	UE_LOG(LogFPSR, Log,
+		TEXT("  dormant pool total %d (ASC attachment is never released, GASM1 §8 — per-entry breakdown not ")
+		TEXT("available: FFPSREnemyDormantPool exposes no iteration API)"),
+		DormantPool.Num());
+}
+
+static FAutoConsoleCommandWithWorldAndArgs GFPSRMeasureASCDumpCmd(
+	TEXT("FPSR.Debug.ASCDump"),
+	TEXT("GASM1: log the swarm's measurement-ASC footprint (per-actor rows + UClass::GetStructureSize() instance "
+	     "accounting + dormant pool total). See Docs/Specs/GASM1_SwarmASCCostMeasurement.md §12-A."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic([](const TArray<FString>& Args, UWorld* World)
+	{
+		if (!World)
+		{
+			return;
+		}
+		if (const UFPSREnemySpawnSubsystem* Sub = World->GetSubsystem<UFPSREnemySpawnSubsystem>())
+		{
+			Sub->DumpMeasureASCState();
 		}
 	}));
 

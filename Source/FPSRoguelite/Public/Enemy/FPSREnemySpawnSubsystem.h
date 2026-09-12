@@ -178,6 +178,17 @@ public:
 	 *  in ActiveEnemies. A leaked decrement otherwise only ever surfaces as the vague "elites gradually stop
 	 *  spawning", long after the cause. Read-only: this never mutates pool or accounting state. */
 	void DumpEliteState() const;
+
+	/** Debug (FPSR.Debug.ASCDump, GASM1 — Docs/Specs/GASM1_SwarmASCCostMeasurement.md §12-A): log the swarm's
+	 *  measurement-ASC footprint for the 「GASM1 스웜 ASC 비용」 러너 캡처. Per-actor rows for every ACTIVE
+	 *  enemy carrying a measurement ASC (AFPSREnemyBase::GetMeasureAbilitySystemComponent), plus the aggregate
+	 *  instance counts × UClass::GetStructureSize() the 메모리 계측 규칙(§12-A "1차")이 요구하는
+	 *  UFPSRAbilitySystemComponent / UFPSRMeasureAttributeSet / UFPSRMeasureDummyAbility 3종, and finally
+	 *  DormantPool.Num() — printed as a documented caveat, not a filtered count: FFPSREnemyDormantPool exposes no
+	 *  per-entry iteration (private BucketsByClass, GASM1 은 그 API 를 건드리지 않는다), so this cannot say HOW
+	 *  MANY dormant actors still carry a measurement ASC — only that ASC attachment is never released (§8), so the
+	 *  true footprint is at least the active-side total. Read-only. */
+	void DumpMeasureASCState() const;
 #endif
 
 	/** S4 readability metrics: read-only accessor for TierS0RadiusSq (15m S0 significance radius, squared cm) so
@@ -541,6 +552,12 @@ private:
 	 *  log fires on the blocking/released TRANSITION rather than once per blocked attempt. Diagnostics only: the
 	 *  gate itself never reads this, and ResetForNewRun clears it alongside ActiveEliteCount. */
 	bool bEliteCapBlocking = false;
+
+	/** GASM1(§5-A CVarForceSpawnClass) edge-trigger latch — same idiom as bEliteCapBlocking just above: the
+	 *  director retries AcquireEnemy every fill pass, so a mismatched FPSR.Debug.ForceSpawnClass value would spam
+	 *  a warning every attempt without this. Reset (cleared) whenever the branch is NOT taken (CVar empty, or a
+	 *  match was found) so a LATER, genuinely different mismatch still warns once. */
+	bool bForceSpawnClassMismatchWarned = false;
 
 	// --- Map-aware allocator (multimap Tier 0, Performance §5 / Codex consult 2026-07-06) ---
 	// GlobalAliveCap · SeedReserve (this block's cap + headroom) were promoted to the public section above, right next
