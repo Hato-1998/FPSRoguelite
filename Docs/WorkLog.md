@@ -9,6 +9,39 @@
 
 ---
 
+## 🔷 디버그 반복 타이머의 월드 use-after-free — 남은 3곳을 월드에 약하게 묶었다 (2026-09-12, 보드 「디버그 반복 타이머 use-after-free」 **완료** — `d9cd43f8`)
+
+> `1ed39ac2`(ADS1 G2 레드팀 반영)가 `FPSR.Debug.ExecAfter` 를 고치면서 **"선례 두 곳은 아직 안 고쳐져 있다(후속 항목)"** 고 남긴 그 후속이다. 아직 증상이 없는 **잠재 크래시**라, 기록의 핵심은 "무엇이 틀렸나"가 아니라 **"언제 터지는가"** 다.
+
+**■ 틀린 전제 — 주석이 근거로 달고 있던 문장이 사실이 아니었다**
+`UWorld::GetTimerManager()` 가 돌려주는 것은 월드의 매니저가 아니라 **OwningGameInstance 의 매니저**다(`World.cpp:8056` — `return (OwningGameInstance ? OwningGameInstance->GetTimerManager() : *TimerManager)`). 게임 인스턴스는 맵 이동을 넘어 살아남고, 월드 테어다운은 거기 걸린 타이머를 비우지 않는다.
+
+**→ 터지는 경로**: `FPSR.SkipCards 60` / `FPSR.Invuln` / `FPSR.GMS.Demo 60` 처럼 반복 타이머를 무장해 둔 채 `open <map>` 이나 런 종료 트래블을 타면, 다음 발화에서 **이미 파괴된 UWorld 를 역참조**한다.
+
+**■ 고친 방법 — 엔진 자신의 선례를 그대로**
+`FTimerDelegate::CreateWeakLambda(World, ...)`(`World.cpp:5831` 리플레이 지연 재생이 같은 형태). 동작 변경 0 — 델리게이트가 유효성 게이트를 하나 얻을 뿐이다. 월드가 죽으면 `IsBound()` → `IsSafeToExecute()` → `ContextObject.IsValid()` 가 false 가 되어 **실행이 막히고**(`TimerManager.cpp:417`) **반복 타이머 재예약도 끊긴다**(`TimerManager.cpp:1345`). 반복 핸들 재사용(정적 `FTimerHandle` 1개) 구조는 손대지 않았다.
+
+**■ 자리** (전부 `#if !UE_BUILD_SHIPPING` 디버그 콘솔 픽스처)
+
+| 파일 | 명령 | 경위 |
+|---|---|---|
+| `Core/FPSRPlayerController.cpp` | `FPSR.SkipCards` · `FPSR.Invuln` 재적용 | `1ed39ac2` 가 남긴 후속 2곳 |
+| `Messages/FPSRGameplayMessageSubsystem.cpp` | `FPSR.GMS.Demo` 반복모드 | **동일 패턴 전수 스캔에서 새로 찾은 3번째 자리.** `World` 뿐 아니라 `GMS` 도 raw 였다 — `UWorldSubsystem` 이라 월드보다 오래 못 사니 **월드 약결합 하나가 둘 다 덮는다** |
+| `Core/FPSRDebugExec.cpp` | `FPSR.Debug.ExecAfter` | 코드는 `1ed39ac2` 로 이미 수정됨. 주석의 "선례 두 곳은 아직 안 고쳐져 있다" 캐비엇 해소 + 낡은 줄번호 교차참조 갱신만 |
+
+**■ 🪤 워크트리 베이스가 뒤처지면 "이미 고쳐졌다"를 워크트리 안에서 반증할 수 없다**
+이 세션의 워크트리 베이스는 `e282061a` 였고 `1ed39ac2` 는 그 뒤에 `origin/main` 으로 올라갔다. 그래서 세션 내내 "`ExecAfter` 는 미수정"으로 보였고(실제로 베이스에는 없었다) **이미 있는 수정을 다시 만들었다**. 푸시 직전 리베이스에서야 드러났고, 충돌은 업스트림 판을 살리는 쪽으로 해소했다.
+→ **교훈: 착수 전 `git fetch origin` 하고 판단 기준을 `origin/main` 으로 잡는다.** 로컬 베이스만 보고 "리포에 그 수정이 없다"고 단정하지 말 것. 이번엔 손해가 중복 작업 한 파일로 끝났지만, 반대로 "이미 고쳐졌다"고 믿고 건너뛰었으면 결함이 남았을 것이다.
+
+**■ 나머지는 안전 — 전수 확인했다**
+남은 `CreateLambda` 는 전부 `FConsoleCommandWith*Delegate::CreateLambda([]…)` 로 **캡처가 비어 있고** `UWorld*` 를 호출 시점에 인자로 받는다(저장하는 포인터가 없다). `SetTimerForNextTick` 계열도 `CreateUObject`/`CreateWeakLambda`/`(this, &Method)` 오버로드라 전부 약한 바인딩.
+
+**■ 검증**
+풀빌드 `-DisableAdaptiveUnity -ForceUnity` → `Result: Succeeded` · `Smoke.ModuleLoads` → `Result={Success}`. 리베이스 후 재검증도 같은 결과.
+- 🪤 **`Scripts/run_smoke_moduleloads.bat` 은 `PROJDIR` 이 메인 클론으로 박혀 있다** — 워크트리에서 고친 코드를 그 러너로 검증하면 **내 변경이 없는 바이너리를 재게 된다**. `PROJDIR` 만 바꾼 임시 복사본으로 돌렸다(빌드도 같은 이유로 `-Project` 를 워크트리 `.uproject` 로 줬다 — §6-6 "코드를 고친 그 클론에서 빌드한다"). 보드 백로그 행 등록.
+- 기동 로그의 `LogAutomationTest: Error: Condition failed` 15건은 엔진 초기화 단계 노이즈다(테스트 시작 42초 *전*). 5.7 시절 상시 4건과 개수가 다르다 — 개수를 판정 기준으로 쓰지 말 것.
+- 런타임 재현(반복 타이머 무장 → `open <map>`)은 돌리지 않았다 — 관측 가능한 동작 변화가 없고 가드가 구조적이라 재현의 값이 낮다. 확인하려면 `FPSR.SkipCards 60` 뒤 `open L_Sandbox`.
+
 ## 🔷 ADS 조준 이동 감속 — 코드(예측) + 콘텐츠(2×2 블렌드) (2026-09-12, `main`, 보드 「ADS 3인칭 조준 자세 (안 B)」 — `e282061a` · `1ed39ac2` · `8cc41261` · `f524e239`)
 
 조준 중 걷기 속도를 무기 배율(기본 0.5 → 서서 900→**450**, 웅크려 300→**150**)로 낮추되, **그 감속이 클라 예측을 타게** 해서 4인 협동에서 조준할 때 고무줄이 안 나게 한다. 사용자 PIE 확인 = 고무줄 없음 · ADS 정상 작동.
