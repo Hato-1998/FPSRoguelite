@@ -9,6 +9,48 @@
 
 ---
 
+## 🔷 ADS 조준 이동 감속 — 코드(예측) + 콘텐츠(2×2 블렌드) (2026-09-12, `main`, 보드 「ADS 3인칭 조준 자세 (안 B)」 — `e282061a` · `1ed39ac2` · `8cc41261` · `f524e239`)
+
+조준 중 걷기 속도를 무기 배율(기본 0.5 → 서서 900→**450**, 웅크려 300→**150**)로 낮추되, **그 감속이 클라 예측을 타게** 해서 4인 협동에서 조준할 때 고무줄이 안 나게 한다. 사용자 PIE 확인 = 고무줄 없음 · ADS 정상 작동.
+
+**■ 코드 절반 — 엔진 소스 대조로 초안 계획의 전제 3건이 뒤집혔다**
+
+1. 🚨 **리플레이 복원은 선택이 아니다.** 엔진은 보정 리플레이 앞뒤로 `bWantsToCrouch` 를 저장·복원하지만(`CharacterMovementComponent.cpp:8655`/`:8718`) **커스텀 플래그엔 안 해 준다.** 없으면 조준을 뗀 직후 보정 1회에 감속이 **영구히** 남는다(다시 누르고 뗄 때까지 450으로 걷는다). 웅크리기는 다음 입력이 의도를 재설정하지만 조준은 그런 재설정자가 없어 더 나쁘다 → `ClientUpdatePositionAfterServerUpdate` 오버라이드가 필수.
+2. **`CanCombineWith` 수동 가드는 불필요.** Super 가 이미 `GetCompressedFlags()` 불일치를 검사하고 주석이 "any custom movement flags from overrides" 라고 명시한다(`:13160`). 벽점프가 손으로 가드를 짠 이유는 **플래그가 없어서**였다 → 코드 대신 주석.
+3. **배율은 `RefreshWalkSpeedCap` 이 아니라 `GetMaxSpeed()` 에서 곱한다.** 전자는 `MaxWalkSpeed` 만 써서 **웅크려 조준할 때 감속이 안 걸린다**(웅크림 상한 300은 엔진이 따로 보관). 삽입 지점은 백페달 배수 뒤·스탠스 Lerp **앞** — `StanceSpeedFrom` 이 `GetMaxSpeed()` 결과라 Lerp 뒤에 곱하면 출발점에 배율이 두 번 걸린다.
+
+**대역 정정(G1 P3-1)**: "추가 0바이트"는 틀렸다. 플래그 바이트는 **옵셔널 직렬화**라(`:9852` + `NetSerialization.h:27-44`) 플래그 0이면 1비트, 하나라도 켜지면 9비트 → **조준 중 move당 ≤1바이트**(~60B/s/조준자), 조준 안 하면 0.
+
+**DA 필드 배치**: `무기|이동`(초안) → **스탯 블록 `Weapon|ADS`**. 엔진 EditCondition 해석기가 소유 struct의 **평면 이름만** 찾아서(`EditConditionContext.cpp` `FindTypedField`) `BaseStats.bHasADS` 같은 중첩 경로는 **조용히 무시**된다. 조건부 표시를 살리는 유일한 배치였다.
+
+**수용된 위험 2건**: ① 이동 속도의 진실은 플래그(클라 발), 확산·포즈의 진실은 `bIsAiming`(서버 검증) — 조작 클라가 "플래그 끄고 RPC로만 조준"하면 감속 없이 ADS 이득. PvE 협동이라 수용(막으면 정상 플레이어에게 고무줄이 돌아온다). ② 장착은 예측하지 않으므로 **슬롯 교체마다 RTT/2 창**이 열린다 — 조준 유지 + 배율 다른 무기로 교체 시 보정 1회. 합격 기준 판정 범위를 "무기 교체 없이 조준만"으로 명시해 두었다.
+
+**게이트**: G1(Fable 플랜) P1 0 / P2 1 / P3 7 → 전부 반영. G2(Fable 머지 레드팀) P1 **0** / P2 1 / P3 9. P2 = 이전 세션 커밋 `20b51771` 의 `FPSR.Debug.ExecAfter` use-after-free — `UWorld::GetTimerManager()` 가 **게임인스턴스**의 매니저를 돌려주고(`World.cpp:8056`) 월드 테어다운이 안 비운다 → 맵 이동 후 죽은 월드로 `Exec`. 엔진 자신의 대응책 `CreateWeakLambda(World, …)`(`:5831`) 적용. ⚠️ `FPSRPlayerController.cpp:912-977` 에 **같은 결함이 남아 있다**(별도 행).
+
+**■ 콘텐츠 절반 — 블렌드스페이스 2개 + 2×2 확장**
+
+`AS_BS_Walk_Ironsights` · `AS_BS_CrouchWalk_Ironsights` 를 **`AS_BS_CrouchWalk` 복제**로 만들었다(스켈레톤·노티파이 모드·`bLoop`·마커싱크·스무딩·**베이크된 보간 그리드**를 그대로 물려받게). 샘플 위치는 템플릿과 같은 비율(0/max × 5방향 = 10개)로 유지 — 위치를 흩뜨리면 베이크된 삼각분할이 어긋난다. 축 = Direction −180~180(grid 4) / Speed 0~150.
+
+**검증에서 잡은 결함 2건** (둘 다 배선만 보면 안 보이고, PIE 에선 "어딘가 어색하다"로만 나타난다):
+- **Move 조준 쌍의 A/B 가 뒤바뀜** — A=웅크림·B=서기인데 hip 쌍은 A=서기. 같은 `StanceBlend` 로 구동하니 조준 포즈만 **정반대**(서면 웅크림-조준, 웅크리면 서기-조준).
+- **Idle 의 새 조준 아이들 2개가 `Loop Animation` 꺼짐** — 클립이 끝나면 마지막 프레임에서 정지. 기존 아이들 2개는 켜져 있었다.
+
+**■ 🔑 UE 5.8 내장 MCP 로 애님 BP 를 다룰 때의 경계 (실측)**
+
+| 대상 | 읽기(`find_nodes`·`get_node_infos`) | 노드 생성(`create_node` 계열) |
+|---|---|---|
+| 최상위 AnimGraph | ✅ | ✅ |
+| **상태 그래프 내부**(Move·Idle) | ✅ | ❌ `Cannot cast 'AnimStateNode' to 'Blueprint'` |
+| 스테이트머신 그래프(상태 목록) | ❌ 0개로 보인다 | ❌ |
+
+- 상태 노드는 **열거는 안 되지만 이름으로 주소지정은 된다** — `…AnimGraphNode_StateMachine_11.Locomotion.AnimStateNode_<N>.<상태명>`. 상태명은 바운드 그래프의 오브젝트 이름이고, `.uasset` **이름 테이블**에서 찾을 수 있다(`AnimStateNode_6.Slide` 같은 전체 경로 문자열이 박혀 있다).
+- **`read_graph_dsl` 은 이 빌드에서 쓸 수 없다** — 노드가 있는 일반 BP 이벤트그래프에서도 빈 문자열을 반환한다(대조군으로 확인). 짝인 `write_graph_dsl` 은 **컴파일까지 하므로** 읽기가 조용히 비는 상태에서 태우면 위험하다.
+- 🚨 **`connected_pins` 는 와이어만 센다.** UE5 의 **프로퍼티 바인딩**(핀에 변수를 직접 묶는 초록 드롭다운)으로 꽂은 핀은 `연결 0 · 값 0.000000` 으로 보여 **미연결과 구분되지 않는다.** 이걸로 "Alpha 미연결"이라고 오판했다. 5.8 에서 바인딩은 노드의 `PropertyBindings`(이제 `_DEPRECATED`)가 아니라 **private `Binding` 오브젝트**에 살고, 그 내부는 리플렉션에 안 잡힌다(`list_properties` 가 빈 값) → **MCP 로는 바인딩 존재 여부를 확인할 수단이 없다.** 확인은 눈으로, 또는 저장 후 `.uasset` 이름 테이블 차분(`StanceBlend`·`AimingAlpha` 문자열 존재)으로.
+- 반면 **핀 연결/끊기(`connect_pins`·`break_pins`)와 노드 프로퍼티 쓰기(`set_properties`)는 상태 그래프 안에서도 동작한다** — A/B 교차 정정과 Loop 플래그 수정을 그걸로 했다.
+- 프로퍼티 이름은 snake_case 가 아니라 **camelCase**(`sampleData`·`blendParameters`·`bLoopAnimation`). protected/private UPROPERTY 는 읽기가 거부된다.
+
+**■ 남은 것**: 조준 속도(450) ↔ 조그 기준 `SpeedModifier`(270) 보정(`Lerp(270,150,AimingAlpha)`) — 수식 체인이 hip/조준으로 이미 분리돼 있어 조준 쪽만 바꿀 수 있다. PIE 에서 발 미끄러짐을 본 뒤 판단. 그 외 후속 = 조준 엣지 이징 · 무기 교체 시 ADS 해제 여부 · ADS 스웨이 정규화 기준(조준 중 이동 계수 상한이 0.5로 고정된다) · `ADSMoveSpeedMultiplier` 를 카드 스탯 축으로 등재할지.
+
 ## 🔷 VoxelChar 미터 스케일 정리 + 미사용 에셋 1,574건 대청소 (2026-09-10, `main`, 보드 「VoxelChar 스켈레톤 미터 스케일 정리」 **완료** — `b7b5be76` · `838c78c1`)
 
 > 증상은 "스켈레톤 에디터에서 `SOCKET_Weapon` 에 붙인 라이플이 손이 아니라 발밑에 떴다" 였는데, 그 아래에 **터지기 직전의 결함**이 있었다.
