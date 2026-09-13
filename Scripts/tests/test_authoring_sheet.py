@@ -15,6 +15,7 @@
     (시트명·키·컬럼 등) 포함 여부만 본다.
 """
 
+import argparse
 import contextlib
 import csv
 import io
@@ -23,6 +24,7 @@ import os
 import sys
 import tempfile
 import time
+import types
 import unittest
 from unittest import mock
 
@@ -1158,6 +1160,206 @@ class T19RunGuardedExitCode(unittest.TestCase):
     def test_normal_return_passes_through(self):
         self.assertEqual(authoring_sheet._run_guarded(lambda a, b, progress: a + b, 1, 2), 3)
         self.assertEqual(authoring_sheet._run_guarded(lambda progress: 0), 0)
+
+
+# ══════════════════════════════════════════════════════════════════════════════════════════════
+# §13 P3 "오케스트레이션" 후속(G2 레드팀) — apply 의 종료 코드 분기 · 다중 시트 부분실패 · sync 사슬은
+# 이 파일의 다른 테스트가 하나도 태우지 않는다(순수함수 단위 테스트뿐). 여기서는 §6 apply 알고리즘
+# 3~6단계를 가짜 SheetsClient·가짜 _run_sync 로 오프라인 재현한다.
+#
+# _FakeSession/_FakeResponse(§12-1 #17) 는 SheetsClient *밑*(HTTP 세션)을 흉내내는 것이라 여기엔 안
+# 맞는다 — authoring_sheet.py 는 SheetsClient 의 세 메서드(get_sheet_properties·get_values·
+# batch_update)만 직접 부르므로, 그 세 메서드를 시나리오대로 응답하는 가짜 클라이언트가 필요하다.
+# ══════════════════════════════════════════════════════════════════════════════════════════════
+
+class _FakeApplyClient:
+    """T20 전용 가짜 SheetsClient. get_sheet_properties·get_values·batch_update 호출을 기록하고,
+    시트(spreadsheet_id)별로 준비된 스크립트대로 응답한다. get_values 는 불릴 때마다 그 시트의 큐에서
+    하나씩 꺼낸다 — 큐 순서 = §6 apply 알고리즘이 실제로 재조회하는 시점(3.계획 → 5-a0.재조회 →
+    5-b.되읽기, 또는 5-a 실패 시 되읽기)과 1:1 대응이라 시나리오를 그대로 코드로 옮길 수 있다."""
+
+    def __init__(self, properties_by_id, values_queue_by_id, batch_update_by_id=None):
+        self._properties_by_id = properties_by_id
+        self._values_queue = {k: list(v) for k, v in values_queue_by_id.items()}
+        self._batch_update_by_id = batch_update_by_id or {}
+        self.get_values_calls = []
+        self.batch_update_calls = []
+
+    def get_sheet_properties(self, spreadsheet_id):
+        return self._properties_by_id[spreadsheet_id]
+
+    def get_values(self, spreadsheet_id, a1_range):
+        self.get_values_calls.append(spreadsheet_id)
+        queue = self._values_queue[spreadsheet_id]
+        if not queue:
+            raise AssertionError("get_values(%s) 가 이 테스트가 준비한 스크립트보다 많이 불렸다" % spreadsheet_id)
+        return queue.pop(0)
+
+    def batch_update(self, spreadsheet_id, requests):
+        self.batch_update_calls.append(spreadsheet_id)
+        outcome = self._batch_update_by_id.get(spreadsheet_id, {})
+        if isinstance(outcome, BaseException):
+            raise outcome
+        return outcome
+
+
+class T20ApplyOrchestration(unittest.TestCase):
+    """apply 의 오프라인 오케스트레이션 회귀(§13 P3) — 실제 자격·네트워크·시트 없이 `_cmd_apply` 를
+    끝까지 돌려 종료 코드·시트별 batch_update 호출·sync 호출을 검증한다. 매핑 2시트(SA·SB)를
+    tempfile 안에 두고 manifest sha == CSV sha 로 맞춰 apply_precondition 을 항상 통과시킨다."""
+
+    HEADER = ["Key", "V"]
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.tmp = self._tmp.name
+        self.lock_path = os.path.join(self.tmp, "authoring-sheet.lock")
+        self.sa_id = "FAKE_SHEET_A"
+        self.sb_id = "FAKE_SHEET_B"
+
+        self.sa_csv = os.path.join(self.tmp, "SA.csv")
+        self.sb_csv = os.path.join(self.tmp, "SB.csv")
+        sa_bytes = b"Key,V\r\nK1,oldA\r\n"
+        sb_bytes = b"Key,V\r\nK1,oldB\r\n"
+        with io.open(self.sa_csv, "wb") as f:
+            f.write(sa_bytes)
+        with io.open(self.sb_csv, "wb") as f:
+            f.write(sb_bytes)
+
+        self.mapping_path = os.path.join(self.tmp, "mapping.json")
+        mapping_doc = {"sheets": [
+            {"name": "SA", "sheetId": self.sa_id, "target": self.sa_csv, "expectedHeader": list(self.HEADER)},
+            {"name": "SB", "sheetId": self.sb_id, "target": self.sb_csv, "expectedHeader": list(self.HEADER)},
+        ]}
+        with io.open(self.mapping_path, "w", encoding="utf-8") as f:
+            json.dump(mapping_doc, f)
+
+        # manifest sha == CSV 바이트 sha → apply_precondition 이 두 시트 모두 통과한다.
+        manifest_path = authoring_sheet.manifest_path_for(self.mapping_path)
+        manifest_doc = [
+            {"name": "SA", "sha256": authoring_sheet.sha256_bytes(sa_bytes)},
+            {"name": "SB", "sha256": authoring_sheet.sha256_bytes(sb_bytes)},
+        ]
+        with io.open(manifest_path, "w", encoding="utf-8") as f:
+            json.dump(manifest_doc, f)
+
+    # ── 헬퍼 ────────────────────────────────────────────────────────────────────────────────────
+
+    def _make_args(self, changeset_doc):
+        changeset_path = os.path.join(self.tmp, "changeset.json")
+        with io.open(changeset_path, "w", encoding="utf-8") as f:
+            json.dump(changeset_doc, f)
+        return argparse.Namespace(mapping=self.mapping_path, changeset=changeset_path, dry_run=False)
+
+    def _invoke(self, fake_client, args):
+        """authoring_sheet._cmd_apply(args) 를 모든 네트워크 지점을 목으로 막고 실행한다.
+        반환 = (종료코드, stdout, stderr, SheetsClient 생성자 목, _run_sync 목) — 호출부가 생성자
+        호출 횟수·sync 호출 횟수까지 단언할 수 있게 목 객체 자체를 돌려준다."""
+        run_sync_mock = mock.Mock(return_value=types.SimpleNamespace(returncode=0, stdout="", stderr=""))
+        out, err = io.StringIO(), io.StringIO()
+        with mock.patch.object(authoring_sheet, "LOCK_PATH", self.lock_path), \
+                mock.patch.object(authoring_sheet.sheets_api, "resolve_key_path", return_value="unused-key.json"), \
+                mock.patch.object(authoring_sheet.sheets_api, "SheetsClient", return_value=fake_client) as ctor_mock, \
+                mock.patch.object(authoring_sheet, "_fetch_export", return_value=None), \
+                mock.patch.object(authoring_sheet, "_run_sync", run_sync_mock), \
+                mock.patch.object(authoring_sheet.time, "sleep", lambda s: None), \
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            rc = authoring_sheet._cmd_apply(args)
+        return rc, out.getvalue(), err.getvalue(), ctor_mock, run_sync_mock
+
+    # ── 테스트 ──────────────────────────────────────────────────────────────────────────────────
+
+    def test_second_sheet_recheck_mismatch_returns_3_without_sync(self):
+        # SA: 계획 읽기(3.) · 쓰기 직전 재조회(5-a0.) · 쓰기 뒤 되읽기(5-b.) 가 전부 일관 → 정상 완료.
+        # SB: 계획 읽기 값과 쓰기 직전 재조회 값이 다르다(사람이 그 사이에 시트를 고쳤다) → 5-a0 에서
+        # 중단하고 SB 는 아예 쓰지 않는다. pull(6.) 은 "쓴 시트"에 대해서만 도는 단계라 SB 에서 멈추면
+        # 전혀 불리지 않는다 — SA 가 이미 쓰였어도 마찬가지(모든 시트의 쓰기·되읽기가 끝난 뒤에야 6. 로
+        # 넘어가므로).
+        sa_old = [list(self.HEADER), ["K1", "oldA"]]
+        sa_new = [list(self.HEADER), ["K1", "newA"]]
+        sb_old = [list(self.HEADER), ["K1", "oldB"]]
+        sb_changed_by_someone_else = [list(self.HEADER), ["K1", "changedExternally"]]
+
+        properties = {
+            self.sa_id: [{"sheetId": 1, "title": "SA", "index": 0, "rowCount": 10, "columnCount": 5}],
+            self.sb_id: [{"sheetId": 2, "title": "SB", "index": 0, "rowCount": 10, "columnCount": 5}],
+        }
+        values_queue = {
+            self.sa_id: [sa_old, sa_old, sa_new],              # 3.계획 · 5-a0.재조회(일치) · 5-b.되읽기
+            self.sb_id: [sb_old, sb_changed_by_someone_else],  # 3.계획 · 5-a0.재조회(불일치 — 여기서 중단)
+        }
+        fake_client = _FakeApplyClient(properties, values_queue, batch_update_by_id={self.sa_id: {}})
+
+        args = self._make_args({"changes": [
+            {"sheet": "SA", "upsert": [{"Key": "K1", "V": "newA"}]},
+            {"sheet": "SB", "upsert": [{"Key": "K1", "V": "newB"}]},
+        ]})
+
+        rc, out, err, ctor_mock, run_sync_mock = self._invoke(fake_client, args)
+
+        self.assertEqual(rc, 3)
+        self.assertEqual(fake_client.batch_update_calls, [self.sa_id])   # SB 는 쓰기까지 못 갔다
+        self.assertEqual(run_sync_mock.call_count, 0)                    # pull 은 안 불렸다
+        self.assertIn("사람 확인 필요", err)
+        self.assertFalse(os.path.exists(self.lock_path))
+
+    def test_first_sheet_write_5xx_returns_3_with_diff(self):
+        # SA 의 batch_update 가 5xx(SheetsWriteOutcomeUnknown) 로 죽는다 — "적용됐는지 알 수 없다"
+        # 이므로 실패 직후 되읽기를 1회 시도해 keyed_diff 를 찍는다. 되읽기가 옛 값 그대로(=쓰기가
+        # 실제로는 안 먹었다)라서 기대(newA) vs 실제(oldA) 차이가 stdout 에 남는다. 이 예외 분기는
+        # wrote_any 값과 무관하게 무조건 3 이다(§6 5-a — "적용됐는지 알 수 없다"는 이미 쓴 시트가
+        # 있든 없든 사람 확인이 필요하다는 뜻이라서). SB 는 changeset 에 있지만 SA 에서 멈추므로
+        # batch_update 가 전혀 안 불린다.
+        sa_old = [list(self.HEADER), ["K1", "oldA"]]
+        sb_old = [list(self.HEADER), ["K1", "oldB"]]
+
+        properties = {
+            self.sa_id: [{"sheetId": 1, "title": "SA", "index": 0, "rowCount": 10, "columnCount": 5}],
+            self.sb_id: [{"sheetId": 2, "title": "SB", "index": 0, "rowCount": 10, "columnCount": 5}],
+        }
+        values_queue = {
+            self.sa_id: [sa_old, sa_old, sa_old],   # 3.계획 · 5-a0.재조회(일치) · 실패 뒤 되읽기(옛 값)
+            self.sb_id: [sb_old],                    # 3.계획만 — 5-a0 까지 못 간다
+        }
+        write_failure = sheets_api.SheetsWriteOutcomeUnknown(503, "x", "POST", "u")
+        fake_client = _FakeApplyClient(properties, values_queue, batch_update_by_id={self.sa_id: write_failure})
+
+        args = self._make_args({"changes": [
+            {"sheet": "SA", "upsert": [{"Key": "K1", "V": "newA"}]},
+            {"sheet": "SB", "upsert": [{"Key": "K1", "V": "newB"}]},
+        ]})
+
+        rc, out, err, ctor_mock, run_sync_mock = self._invoke(fake_client, args)
+
+        self.assertEqual(rc, 3)
+        self.assertTrue(any(line.startswith("  ! ") for line in out.splitlines()),
+                         "되읽기 불일치 keyed_diff 줄이 stdout 에 없다:\n%s" % out)
+        self.assertIn("기대='newA' 실제='oldA'", out)
+        self.assertEqual(fake_client.batch_update_calls, [self.sa_id])   # SB 의 batch_update 는 0회
+        self.assertEqual(run_sync_mock.call_count, 0)
+        self.assertIn("사람 확인 필요", err)
+        self.assertFalse(os.path.exists(self.lock_path))
+
+    def test_non_string_value_rejected_before_client_or_write(self):
+        # 변경셋 값이 JSON 숫자(5) — validate_changeset(→_validate_change_value_types) 가 자격 해석·
+        # SheetsClient 생성보다 먼저 거부한다(부록 I-21, §13 P2: "쓰기 전 데이터 오류 전부 차단" 계약).
+        # _run_apply 에서 `client = sheets_api.SheetsClient(...)` 줄은 validate_changeset 뒤에만
+        # 있으므로, 여기서 막히면 그 줄 자체가 실행되지 않는다 — 네트워크는커녕 자격 조회조차 없다.
+        fake_client = _FakeApplyClient({}, {})   # 어떤 메서드도 불리면 안 된다(생성 자체가 0회여야 한다)
+        args = self._make_args({"changes": [
+            {"sheet": "SA", "upsert": [{"Key": "K1", "V": 5}]},
+        ]})
+
+        rc, out, err, ctor_mock, run_sync_mock = self._invoke(fake_client, args)
+
+        self.assertEqual(rc, 1)
+        self.assertEqual(ctor_mock.call_count, 0)          # SheetsClient(...) 자체가 안 불렸다
+        self.assertEqual(fake_client.batch_update_calls, [])
+        self.assertEqual(fake_client.get_values_calls, [])
+        self.assertEqual(run_sync_mock.call_count, 0)
+        self.assertIn("문자열이 아닌 값", err)
+        self.assertFalse(os.path.exists(self.lock_path))
 
 
 if __name__ == "__main__":
