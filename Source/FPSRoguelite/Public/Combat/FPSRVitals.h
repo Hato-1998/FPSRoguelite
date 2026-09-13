@@ -30,13 +30,14 @@ struct FFPSRDamageSpec
 	 *  player pulled the trigger". */
 	bool bSuppressDealtDamageEvent = false;
 
-	/** STAT1 §6-2 (G1r3 R3-3). Default false = current behavior (UFPSREnemyHealthComponent::ApplyDamage re-anchors
-	 *  the delayed shield-regen clock to right now on every hit). true is for a DoT tick ONLY (STAT1 C2's batch
-	 *  pass): the VALUE anchor still re-stamps to the current (just-lowered) shield either way, but the TIME anchor
-	 *  is BACKDATED by exactly the regen delay that post-damage shield state demands, instead of stamped to "now" —
-	 *  "impose no NEW delay, but don't grant free elapsed regen time either". See that ApplyDamage's own comment for
-	 *  why merely freezing/ignoring the time anchor here would let a delayed-regen shield compound every earlier
-	 *  DoT tick's regen back in and reach full while still being hit every tick. */
+	/** STAT1 §6-2 (G1r3 R3-3, corrected by G2 P2-1). Default false = current behavior (UFPSREnemyHealthComponent::
+	 *  ApplyDamage re-anchors the delayed shield-regen clock to right now on every hit). true is for a DoT tick ONLY
+	 *  (the swarm batch pass and the boss Tick): the VALUE anchor still re-stamps to the current (just-lowered) shield
+	 *  either way, but the TIME anchor comes from FPSRVitals::ComputeRegenTimeAnchor's DoT branch instead of "now" —
+	 *  the tick imposes no NEW delay, never cancels a delay an earlier hit already imposed, and grants no free elapsed
+	 *  regen time. See that function's comment for the resume-time formulation, and ApplyDamage's own comment for why
+	 *  merely freezing/ignoring the time anchor here would let a delayed-regen shield compound every earlier DoT tick's
+	 *  regen back in and reach full while still being hit every tick. */
 	bool bDotRegenAnchorPolicy = false;
 };
 
@@ -111,6 +112,24 @@ namespace FPSRVitals
 	FPSROGUELITE_API float ComputeRegeneratedShield(float ShieldAtLastDamage, float MaxShield,
 		float ElapsedSinceDamage, float RegenPerSecond,
 		float PartialDelaySeconds, float BrokenDelaySeconds);
+
+	/** The TIME anchor a hit leaves behind — the origin ComputeRegeneratedShield above measures ElapsedSinceDamage
+	 *  from, paired with the new VALUE anchor (the post-hit shield). Pure and O(1); the caller stores the result.
+	 *  - Ordinary hit (bDotRegenAnchorPolicy false): returns Now — the hit imposes its full delay from right now.
+	 *  - DoT tick (true — STAT1 §6-2, G2 P2-1): formulated on the regen RESUME time (a time anchor plus the delay its
+	 *    value anchor demands). Resume = Max(the resume time the PREVIOUS anchor pair promised, Now), then backdated by
+	 *    the delay the post-hit shield demands, so ComputeRegeneratedShield resumes at exactly that time from the
+	 *    post-hit value: no NEW delay, an earlier hit's pending delay is kept (rev4's "Now - Delay" erased it), and no
+	 *    free elapsed regen. Max(PreviousAnchor, Now - Delay) was rejected: a tick that takes the shield from partial
+	 *    to broken would stretch the pending delay by (BrokenDelay - PartialDelay), and with BrokenDelay < PartialDelay
+	 *    it would still erase part of it.
+	 *  🔴 Call BEFORE overwriting the stored value anchor — PreviousShieldAtLastDamage must be the OLD one.
+	 *  @param PreviousAnchor              the time anchor before this hit
+	 *  @param PreviousShieldAtLastDamage  the value anchor before this hit (selects the delay PreviousAnchor was paired with)
+	 *  @param ShieldAfterHit              the shield right after this hit (the new value anchor)
+	 *  Tests: FPSRoguelite.Combat.Vitals ⑦–⑨. */
+	FPSROGUELITE_API float ComputeRegenTimeAnchor(float PreviousAnchor, float PreviousShieldAtLastDamage, float Now,
+		float ShieldAfterHit, float PartialDelaySeconds, float BrokenDelaySeconds, bool bDotRegenAnchorPolicy);
 
 	/** Requirement 4's "is it broken" — derived, never stored (a client with the replicated Shield/MaxShield reaches
 	 *  the same answer as the server). */

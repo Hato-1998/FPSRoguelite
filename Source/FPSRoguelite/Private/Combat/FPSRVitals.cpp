@@ -69,4 +69,20 @@ namespace FPSRVitals
 		const float RegenElapsed = ElapsedSinceDamage - Delay;
 		return FMath::Clamp(ShieldAtLastDamage + RegenPerSecond * RegenElapsed, 0.0f, MaxShield);
 	}
+
+	float ComputeRegenTimeAnchor(float PreviousAnchor, float PreviousShieldAtLastDamage, float Now,
+		float ShieldAfterHit, float PartialDelaySeconds, float BrokenDelaySeconds, bool bDotRegenAnchorPolicy)
+	{
+		if (!bDotRegenAnchorPolicy)
+		{
+			return Now;
+		}
+
+		// Both delays below use ComputeRegeneratedShield's own partial/broken classification of a value anchor — they
+		// MUST agree with it, or the resume time computed here is not the one that formula will actually honor.
+		const float PreviousResume = PreviousAnchor
+			+ ((PreviousShieldAtLastDamage <= 0.0f) ? BrokenDelaySeconds : PartialDelaySeconds);
+		const float Resume = FMath::Max(PreviousResume, Now);
+		return Resume - ((ShieldAfterHit <= 0.0f) ? BrokenDelaySeconds : PartialDelaySeconds);
+	}
 }
