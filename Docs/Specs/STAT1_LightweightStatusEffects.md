@@ -646,14 +646,14 @@ STAT1 이 만든 문제는 아니나 공격속도저하가 그 축에 얹히므�
 | 심각도 | 지적 (요약) | 처리 | 근거 |
 |---|---|---|---|
 | **P1** | **0건** | — | — |
-| P2-1 | 도트 앵커 역날짜가 **직전 직격이 걸어 둔 재생 지연을 지운다** — 재생/틱 ≥ 도트/틱 인 실드 적에게 지속피해 탄이 순손해가 될 수 있다 (`FPSREnemyHealthComponent.cpp:146-150`) | **수용 · 수정 대기** | Opus 코드 확인: 도트 정책 분기가 `LastDamageCombatTime = Now − Delay` 를 이전 앵커와 무관하게 무조건 대입한다. 제안 = `FMath::Max(LastDamageCombatTime, Now − Delay)` + "직격 파손 직후 도트, 재생/틱 ≥ 도트/틱" 단위 테스트(§10-12 실구현) |
+| P2-1 | 도트 앵커 역날짜가 **직전 직격이 걸어 둔 재생 지연을 지운다** — 재생/틱 ≥ 도트/틱 인 실드 적에게 지속피해 탄이 순손해가 될 수 있다 (`FPSREnemyHealthComponent.cpp:146-150`) | **수용 · 수정 완료 `609b9992`** (처방은 제안과 다름 — 사용자 결정) | Opus 코드 확인: 도트 정책 분기가 `LastDamageCombatTime = Now − Delay` 를 이전 앵커와 무관하게 무조건 대입한다. 제안 = `FMath::Max(LastDamageCombatTime, Now − Delay)` + "직격 파손 직후 도트, 재생/틱 ≥ 도트/틱" 단위 테스트(§10-12 실구현). **수정(2026-09-13)**: 제안을 float32 시뮬레이션으로 대조하니 도트가 실드를 부분→파손으로 깨는 순간마다 재생을 최대 (파손 − 부분 지연)만큼 더 멈추고(마지막 직격 10초 뒤 도트만으로 깨져도 2.5초), 파손 지연 < 부분 지연 저작에선 소거가 일부 남았다 → **재생 재개 시각 보존** `Max(이전 앵커 + Delay(이전 값 앵커), Now) − Delay(현재 실드)` 로 고쳤다(§6-2 정정). `FPSRVitals::ComputeRegenTimeAnchor` 신설 + `Combat.Vitals` ⑦~⑨. **판별 대조군**: 헬퍼를 rev4 식으로 되돌린 바이너리에서 `Combat.Vitals` `Result={Fail}` — 실패 단언 7개의 수치가 시뮬레이션과 일치 → 복구(해시 대조) 후 빌드 2종 `Result: Succeeded` · `Combat.Vitals` · `Status.Clock/Unit/World` · `Smoke.ModuleLoads` `Result={Success}`. Fable 재검토는 하지 않았다(G2 지적 이행 = Opus 검증 — CRIT1 `3b6a1de6` · CRIT2 `f2c76a20` 선례) |
 | P2-2 | 보스에는 둔화·공속저하·실명·속박 **소비자가 없는데** 비트는 켜지고 아이콘은 4인에게 복제된다 / 보스는 저항 프로파일을 가질 수 없다 | **수용 · 설계 결정 대기** | Opus 코드 확인: `GetResolvedStatus` 소비처 = `AFPSREnemyBase`(:128 · :1261 · :1704) + 체력 컴포넌트(방어력감소)뿐. `AFPSRBossBase`(ACharacter 파생)는 드라이버 등록·진행만 한다(:181 · :664). 보스 초기화 `InitializeMaxHealth` 가 `VitalsProfile = nullptr`(:253). 선택지 = (a) 대상별 허용 슬롯 마스크(보스 = 도트·방어력감소만) / (b) 보스 프로파일 바인딩 + 보스 소비자 배선 |
 | P3-1 | `AttackIntervalMultiplier` 의 ClampMin 0 허용 → 0 이면 공격 패스마다 발사 (`FPSRStatusTypes.h:82-83`) | 후속 | 미검증 |
 | P3-2 | 디버그 `FPSR.Status.Apply` 폴백 카탈로그는 만료가 영원히 안 온다 (`FPSREnemyBase.cpp:2064-2130`) | 후속 | 미검증 (카탈로그 설정된 지금은 죽은 경로라는 지적) |
 | P3-3 | `ResetStatusClockForNewRun` 이 `bStatusFrozen` 을 재계산하지 않는다 (`FPSRGameState.cpp:352-366`) | 후속 | 미검증 (오늘 해당 호출 경로 없음) |
 | P3-4 | 도트 킬 크레딧이 어느 슬롯 부여든 덮인다 (`FPSREnemyHealthComponent.cpp:363-364`) | 후속 | 미검증 (`OnStatusKill` 오버라이드 0건이라 관측 불가) |
 | P3-5 | 사망 폐쇄가 만료와 같은 "슬롯 OFF" GMS 엣지를 쏜다 (`:443`) | 후속 | 미검증 |
-| P3-6 | 코드 주석이 존재하지 않는 §10 단위 테스트 12·13 을 가리킨다 | 후속 (12 는 P2-1 수정 때 추가) | 미검증 |
+| P3-6 | 코드 주석이 존재하지 않는 §10 단위 테스트 12·13 을 가리킨다 | 후속 — **12 해소 `609b9992`**(`FPSREnemyHealthComponent.cpp` 주석이 이제 실재하는 `Combat.Vitals` ⑧ 을 가리킨다) · 13 은 후속 | 12: 확인·해소 / 13: 미검증 |
 | P3-7 | 문서 드리프트 — `Performance.md:117` 3프로퍼티 · `Enemy.md` 착지점 · 명세 §7-7 공개 API 5 vs 코드 10 · C3 목록 부재 · WorkLog 본체 항목 부재 | 후속 | 부분 확인 (이 절 공란·WorkLog 본체 항목 부재는 사실) |
 | P3-8 | `Scripts/author_stat1_content.py:123-125` 주석이 실측(Kind 쓰기 실패, 변경셋으로 교정)과 반대 | 후속 | 미검증 |
 | P3-9 | `b6f6c537` 의 "슬롯 상한 → 카드 창에 갇힐 수 있다(코드 경로상 확정)" 주장이 틀렸다 | **수용 · 정정 완료** | Opus 코드 확인: `FPSRCardSubsystem.cpp:620-631` 이 상한 찬 무기의 새 프래그먼트를 오퍼에서 이미 뺀다(U6). 619줄까지만 읽고 단정한 오판 → 보드 결함 행 폐기 · WorkLog 정정 |
@@ -668,3 +668,5 @@ STAT1 이 만든 문제는 아니나 공격속도저하가 그 축에 얹히므�
 **C3 재검증 (Opus, 같은 날 현재 HEAD)**: 빌드 2종 `Result: Succeeded`(빌드 이후 C++ 변경 0) · `Status.Clock` / `Status.Unit` / `Status.World` 3/3 · 상태이상 콘텐츠 검증기 PASS(problems=0).
 
 **판정**: P1 0 — 푸시 금지 사유 없음. 단 **P2 2건 미처리로 게이트 미완**(§6-6-1: P2 는 고치거나 근거를 대고 기각). P2-2 는 설계 선택이 필요해 사용자 결정 대기.
+
+**갱신 (2026-09-13, P2-1 수정 후)**: P2-1 = 수정 완료 `609b9992`. **P2-2 는 고치지도 기각하지도 않은 채 후속 행으로 넘어갔다** — 보드 「보스 상태이상 소비자 배선 — 둔화·공속저하·실명·속박이 보스에 실제로 먹게 (STAT1 G2 P2-2)」(선행 = STAT1 본 행, 사용자 설계 결정 대기). STAT1 본 행은 사용자 지시로 이 상태에서 닫는다 — 이 게이트의 미처리 P2 는 그 후속 행이 소유한다. P3 9건 = 백로그 행 「STAT1 G2 레드팀 P3 후속 9건 (명세 §13 G2 원장)」(행 이름의 "§13" 은 명세 템플릿 번호 — 이 문서에서는 §12).
