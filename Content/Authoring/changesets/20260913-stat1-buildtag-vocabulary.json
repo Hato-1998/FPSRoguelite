@@ -1,0 +1,6 @@
+{
+  "description": "STAT1 잔여 — 카드풀 태그 어휘에 status 등록. STAT1(4a7f9b9a)이 상태이상 카드 4장에 BuildTag 'status' 를 달았지만 DA_Character_CardPool.BuildTagVocabulary 에는 crit 만 있어 FPSRValidateAnchoredData 가 카드풀을 invalid 로 판정했다(오류 4건, 2026-09-13 실측). FPSRCardPoolDataAsset.h 계약 = '새 빌드 = 어휘에 태그 추가 + 카드에 태그' 중 앞 절반 누락분. 런타임 시너지는 카드 태그를 직접 읽으므로 게임 동작은 바뀌지 않는다(편집기 오타 가드만 초록이 된다).",
+  "edits": [
+    { "asset": "/Game/Cards/Character/DA_Character_CardPool", "property": "BuildTagVocabulary", "value": "(\"crit\",\"status\")" }
+  ]
+}
