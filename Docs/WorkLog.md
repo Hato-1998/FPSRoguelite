@@ -9,6 +9,74 @@
 
 ---
 
+## 🔷 1인칭 = 전용 팔 메시 복귀 ([ADR 0018](Architecture/0018-first-person-dedicated-arms-mesh-restored.md)) — 교통정리 · 왼손 IK · 1P/3P 오프셋 분리 (2026-09-13, `main`, 보드 「1인칭 드라이버 포즈 소스 배선」 — `ed99441d`)
+
+3인칭(슬라이딩 제외) 일단락 후 1인칭 재개. **기반 점검으로 시작했는데 점검 자체가 작업이 됐다** — 문서가 말하는 상태와 실물이 갈려 있었기 때문이다.
+
+**■ 점검에서 드러난 것 — 1인칭은 "꺼져 있던" 게 아니라 이미 켜져 있었다**
+
+`FirstPersonArms` 슬롯이 채워져 있어 `bSplit` 이 참이었고, 그래서 ADR 0015 가 전제한 "휴면" 이 더는 성립하지 않았다. 동시에 **내 몸을 안 보이게 하는 일이 세 군데서** 돌고 있었다: 머리 본 숨김(`HideBoneByName`) · BP `bOwnerNoSee` · 코드의 `WorldSpaceRepresentation`. 사용자 표현으로 *"여러가지 방식이 혼재"*.
+
+그리고 `ABP_FP_Base` 애님그래프가 **두 조각으로 끊겨 있었다**:
+
+```
+[활성]  Slot 'DefaultSlot'(Source 미연결) → Local→Component → Component→Local → Root
+[고아]  CopyBone(hand_r→ik_hand_gun) → ModifyBone ×2 → TwoBoneIK ×2   ← 양 끝 미연결
+```
+
+즉 ① 기본 포즈 없음(레퍼런스 포즈) ② **총 앵커 CopyBone 이 아예 안 돌았다.** `AttachWeaponMeshes` 주석이 이 상황을 정확히 예고해 뒀다 — *"애님그래프가 매 프레임 `ik_hand_gun := hand_r` 를 CopyBone 하는 책임을 진다… 그게 없으면 총은 그 트랙이 우연히 들고 있는 값에 렌더된다"*(`FPSRCharacter.cpp:999-1005`).
+
+**■ 🔑 리타깃은 필요 없었다 — 호환 스켈레톤이 이미 답이었다**
+
+착수 대상으로 "1인칭 모션 소스 리타깃"(MocapOnline Rifle Pro 27, FBX 1,783개 · 295MB)이 잡혀 있었으나, 실측이 전제를 뒤집었다.
+
+- `SK_UE5_Mannequin_Skeleton.CompatibleSkeletons` 에 이미 `SK_Mannequin` 이 등록돼 있었다(`9921a120`) → `Content/Characters/Mannequins/Anims/` 의 **102개 모캡 클립이 그대로 재생**되고 있었다.
+- PWAS 포즈의 소속 `S_Mannequin` 과 현역 스켈레톤은 **뼈 이름 차집합 0**(양방향). → 호환 등록 한 칸으로 `A_FP_Rifle_Pose`·`AM_FP_RifleReload` 재생 가능.
+
+**비어 있던 것은 소스가 아니라 배선이었다.** 295MB 팩 임포트는 하지 않았다(필요해져도 대상은 `Holster_Reload_Fire/` 44개 같은 부분집합이고, `Copy_Mixer` 893개는 믹싱 조각이라 통째로 넣으면 애님 목록이 오염된다).
+
+**■ 사용자 결정 — 1인칭 팔을 다시 그린다(ADR 0015 뒤집힘)**
+
+화면을 보고 내린 판정이라 그대로 진행하되 ADR 0018 로 못 박았다. 팔 = `SKM_StaticMesh_Test1`(`Hidden in Game=false`) · 몸 = `bOwnerNoSee` 하나로만 숨김 · 머리 본 숨김은 `HeadBoneName=None` 으로 데이터 퇴역.
+
+> 🪤 **세션이 저지른 오판 1건** — `SKM_StaticMesh_Test1` 을 **재보지 않고** 이름과 배치값(z −100 · yaw −95)만으로 "풀바디"라 단정하고 PWAS 팔 메시로 교체했다. 실측하면 팔이 맞다(바운드 origin z 79.9 · extent z 18.3 · 반경 37.5). 사용자가 원복했고 세션이 덮어쓴 트랜스폼도 되돌렸다. **바운드는 `get_bounds` 한 번이면 나온다 — 이름과 배치로 메시 정체를 추정하지 말 것.**
+
+**■ 왼손 IK — 증상 → 원인 → 해결**
+
+*"왼손이 핸드가드를 넘어간다."* 원인 = **TwoBoneIK 는 손목 본 원점을 이펙터에 놓는데 `SOCKET_LeftHand` 는 손바닥 접촉선에 저작돼 있다.** 헤더가 이미 적어 둔 실패 모드였다(*"손 본은 소켓의 그립 선에서 손 두께만큼 떨어져 앉는다 — 그건 무기가 아니라 팔의 속성"*). 해결 = 그립 오프셋 **(−10, −20, 0)**(핸드가드 로컬 공간 · Y = 총구 방향, 바운드 y 0→31.1).
+
+- 조인트 타깃이 **비어 있었다**(bone None + Component Space) → 팔꿈치가 컴포넌트 원점(발밑)을 향한다. `lowerarm_l`·Bone Space 로 채웠다 = "애니가 만든 팔꿈치 방향 유지". 오른손도 `lowerarm_r` 로 미리 채웠다(알파 0이라 지금은 무영향, 켜는 순간의 지뢰 제거).
+- 「이펙터 스페이스에서 회전 가져오기」를 꺼도 변화가 없었다 → **소켓 회전은 문제가 아니었다**(위치 보정만으로 끝).
+
+**■ 🔴 오프셋이 1인칭·3인칭 공유였다 → 코드로 분리**
+
+```
+1P: ComputeGripInGunFrame(..., LeftHandGripOffset, FirstPersonArms, ...)   (:2936)
+3P: GetLeftHandGripTransform → Grip.AddToTranslation(LeftHandGripOffset)    (:2793)
+```
+
+내 화면에서는 분할이 켜져 무기가 팔에 붙으므로 바디 IK 가 `IsAttachedTo` 게이트에 막혀 안 돌지만, **원격 클라가 보는 내 캐릭터**는 분할이 없어 바디 IK 가 켜지고 같은 값을 쓴다. → `FirstPersonLeft/RightHandGripOffset` 신설, 1P 경로만 소비. **좌우 대칭으로** 분리한 이유 = 현재 `RightHandGripOffset` 은 1P 에서만 쓰여, 왼쪽만 갈랐다면 바디 오른손 경로가 생기는 순간 같은 버그가 재발한다.
+
+**■ 시점별 차이를 내는 방법 — 스켈레톤 복제를 기각한 근거**
+
+사용자 제안(*"1인칭은 소켓 위치가 달라야 하니 스켈레톤을 복제"*)에 대해 엔진 소스로 답했다: **메시 소켓이 같은 이름의 스켈레톤 소켓을 덮고, 에디터와 쿠킹 빌드가 같은 우선순위**다(`SkeletalMesh.cpp:5238` `FindSocketAndIndex` / `:5380` `RebuildSocketMap` — 스켈레톤 소켓은 `!Contains` 일 때만 추가). 에디터 표기도 구분된다: ` [Mesh]`(스켈레톤 것을 덮음) / ` [Mesh Only]`, 우클릭 `Create Mesh Socket` · `Remove Mesh Socket` · `Promote Socket To Skeleton`, 필터 `Show Active/All/Mesh/Skeleton Sockets`. → 복제는 슬롯 그룹·리타깃 소스·가상 본까지 두 벌 동기화를 새로 만들고 실패가 조용하다. **1인칭 전용 *본*이 필요해질 때 다시 본다.**
+
+**■ 계측 함정 (MCP)**
+
+- `get_socket_names`·`get_socket_transform` 은 **스켈레톤 폴백까지 합쳐** 보여준다 — "메시가 자체 소켓을 갖고 있나"는 이걸로 못 가린다(`.uasset` 실측으로 갈랐다).
+- **프로퍼티 바인딩은 리플렉션에 안 잡힌다** — 핀이 리터럴 0 으로 보여 미연결과 구분이 안 된다. 확인은 눈으로(메모리 `animgraph-pin-bindings-invisible-to-mcp`).
+- CDO 에 쓴 값이 **BP 컴파일에 살아남는지**를 검증 단계로 넣었다(ICH 기록 여부 판정). 이번엔 살아남았다.
+
+**■ 검증**
+
+- 빌드 `Build.bat FPSRogueliteEditor Win64 Development` → **`Result: Succeeded`**(59/59 · 에러·경고 0 · 3,088초 — 헤더 변경으로 PCH 무효화 전체 재컴파일). 판정은 종료코드가 아니라 `Result:` 줄로.
+- 사용자 PIE: 팔·총 표시 정상 · 왼손 그립 정상 · 오프셋을 1P 전용 필드로 옮긴 뒤 **회귀 없음**.
+- F8(eject)에서 3인칭 모델이 보이는 것은 정상 — `bOwnerNoSee` 는 뷰의 `ViewActor` 가 그 액터일 때만 숨긴다(`PrimitiveSceneProxy.cpp:1588`).
+
+**■ 남은 것** — ① 1인칭 자기 그림자 없음(VSM 꺼짐 + `WorldSpaceRepresentation`, `PrimitiveSceneProxy.cpp:630-648`) → `None + OwnerNoSee + CastHiddenShadow` 로 정리 ② 드라이버 메시 정식 명명·경로(`SKM_StaticMesh_Test1` 은 테스트 자산) ③ 장전 몽타주 `LeftHandIKWeight` 커브 부재로 장전 중 왼손이 안 떨어짐 ④ 3인칭 왼손 오프셋 재튜닝(현재 0) + 원격 프록시 확인 ⑤ CHR1 명세(rev.6)는 전제 2개가 깨져 개정 필요 ⑥ `ABP_FPArms` = 존재하지 않는 `ABP_FirstPerson` 을 가리키는 끊어진 리다이렉터(참조자 0), 삭제 대상.
+
+---
+
 ## 🔷 VIT1 실드/체력 2층 바이탈 — 보드 행 마감 + 콘텐츠 정적 감사 (2026-09-13, `main`, 보드 「실드/체력 2층 데미지 구조 (컴포넌트 옵트인)」 완료 `29f035d7`)
 
 > 코드 변경 0. 이 항목은 **문서·보드 정리와 그 정리를 낳은 조사**다. 상세 원장 = 명세 `Docs/Specs/VIT1_ShieldHealthTwoLayer.md` **§13-4**.
