@@ -1,0 +1,13 @@
+{
+  "description": "SHEET1 U4 (사용자 지시 2026-09-13): DA_CardModifiers_BonusShot.E1_Attr 끝 공백 제거 — 임포터 파서가 trim 하므로 DA 무영향. 같은 변경셋에서 스모크 테스트로 바뀐 AssetName 2칸을 원래 이름으로 되돌림(사용자 지시).",
+  "changes": [
+    {
+      "sheet": "Cards",
+      "upsert": [
+        {"CardId": "DA_CardModifiers_BonusShot", "E1_Attr": "weapon.frag.bonusshot", "expect": {"E1_Attr": "weapon.frag.bonusshot "}},
+        {"CardId": "DA_Card_FireRate_ThisWeapon", "AssetName": "DA_Card_FireRate_ThisWeapon", "expect": {"AssetName": "DA_Card_FireRate"}},
+        {"CardId": "DA_Card_MagSize_ThisWeapon", "AssetName": "DA_Card_MagSize_ThisWeapon", "expect": {"AssetName": "DA_Card_MagSize"}}
+      ]
+    }
+  ]
+}

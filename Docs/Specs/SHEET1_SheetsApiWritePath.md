@@ -458,7 +458,7 @@ param(
 - ~~**U1** 게임 시작 시 시트 런타임 읽기 — 사용자 결정 대기(비목표).~~ → **결정(2026-09-13)**: 읽지 않는다 — 시트는 개발(저작) 전용, 게임·패키지는 커밋된 CSV 스냅샷만.
 - **U2** 보드 행 마일스톤 배정 — 사용자.
 - **U3** 이관(`seed`) 실행 시점 — 사용자와 조율: 사용자가 시트 편집 중이 아니고, 다른 세션이 카드·문자열 CSV 작업 중이 아닐 때. 실행 직전 `status` 로 4시트 `LOCAL-AHEAD`(시트 == manifest) 재확인.
-- **U4** `Cards`·`DA_CardModifiers_BonusShot`.E1_Attr = `'weapon.frag.bonusshot '`(끝 공백) — 저작 사고로 보인다. 정본으로 굳히기 전 사용자 확인(이 유닛은 고치지 않는다). `ST_UI` 의 `Widget.Lobby.ReadyMark`(앞 공백 3)·`HUD.Run.LevelLabel`(`'Level : '`)은 UI 서식 의도로 보고 그대로 둔다.
+- **U4** `Cards`·`DA_CardModifiers_BonusShot`.E1_Attr = `'weapon.frag.bonusshot '`(끝 공백) — 저작 사고로 보인다. 정본으로 굳히기 전 사용자 확인(이 유닛은 고치지 않는다). → **수정(사용자 지시 2026-09-13)**: 변경셋 `Content/Authoring/changesets/20260913-sheet1-u4-bonusshot-attr-trim.json` apply(시트 칸 + 스냅샷 한 칸). 임포터 스키마 파서가 셀을 trim 하므로(`FPSRCardCsvSchema.cpp:72`) DA 는 원래부터 공백 없는 값 — 에셋 무변경. 같은 변경셋이 스모크 테스트로 바뀐 Cards AssetName 2칸을 되돌렸다(사용자 지시). `ST_UI` 의 `Widget.Lobby.ReadyMark`(앞 공백 3)·`HUD.Run.LevelLabel`(`'Level : '`)은 UI 서식 의도로 보고 그대로 둔다.
 
 **수용한 리스크**
 - **R1** 재조회 ↔ batchUpdate 사이(1초 미만)에 사람이 ① 같은 칸을 편집하면 우리가 덮는다(마지막 쓰기 = 우리, 되읽기로도 못 잡음) ② 행을 삽입·삭제·정렬하면 인덱스가 밀려 **엉뚱한 행의 칸에 쓰일 수 있다**(되읽기가 키 기준 차이로 잡아 3 — 사후 탐지, 복구는 사람). Sheets API 에 조건부 쓰기가 없다. 완화 = 잠금(자동화 간 0) · 재조회(창 축소) · 문서 규칙(apply 중 행 구조 변경 금지) · 자동화 변경셋은 수정 칸에 `expect`.
