@@ -1,7 +1,7 @@
 # Headless generator for the FPSRoguelite ARCADE-CYBERSPACE look prototype (environment half).
 #
 # Run (editor CLOSED) via commandlet:
-#   "D:\UnrealEngine\UE_5.7\Engine\Binaries\Win64\UnrealEditor-Cmd.exe" ^
+#   "D:\UnrealEngine\UE_5.8\Engine\Binaries\Win64\UnrealEditor-Cmd.exe" ^
 #     "E:\Git_Project\FPSRoguelite\FPSRoguelite.uproject" ^
 #     -run=pythonscript -script="E:\Git_Project\FPSRoguelite\Scripts\gen_arcade_proto_materials.py"
 #

@@ -5,7 +5,7 @@
 # roads/ground (walkable) vs gameplay zones (spawn / mission / boss / portal doors).
 #
 # Run (editor closed) via commandlet:
-#   "D:\UnrealEngine\UE_5.7\Engine\Binaries\Win64\UnrealEditor-Cmd.exe" \
+#   "D:\UnrealEngine\UE_5.8\Engine\Binaries\Win64\UnrealEditor-Cmd.exe" \
 #     "E:\Git_Project\FPSRoguelite\FPSRoguelite.uproject" \
 #     -run=pythonscript -script="E:\Git_Project\FPSRoguelite\Scripts\gen_blockout_materials.py"
 # OR (editor open) paste the path into: Tools > Execute Python Script.

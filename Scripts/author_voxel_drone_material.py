@@ -1,7 +1,7 @@
 # author_voxel_drone_material.py — 복셀 드론 머티리얼 + MI + 메시 슬롯 배선 (author_voxel_chomper_material.py 복제)
 #
 # 실행(에디터 닫고, 커맨드렛): Scripts/run_voxel_drone_pipeline.bat 이 import 다음에 부른다.
-#   "D:\UnrealEngine\UE_5.7\Engine\Binaries\Win64\UnrealEditor-Cmd.exe" <uproject> -run=pythonscript
+#   "D:\UnrealEngine\UE_5.8\Engine\Binaries\Win64\UnrealEditor-Cmd.exe" <uproject> -run=pythonscript
 #     -script="E:\Git_Project\FPSRoguelite\Scripts\author_voxel_drone_material.py" -unattended -nopause -nullrhi -nosplash -nosound
 #   ⚠️ nullrhi 커맨드렛은 HLSL 을 컴파일하지 않는다 — Custom 노드 검증은 실 RHI 헤드리스 get_statistics 로(메모리 headless-editor-use-bat-runners).
 #

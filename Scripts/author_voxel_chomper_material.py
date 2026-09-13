@@ -1,7 +1,7 @@
 # author_voxel_chomper_material.py — 복셀 유령 "쩝쩝이" 최소 머티리얼 + MI + 메시 슬롯 배선
 #
 # 실행(에디터 닫고, 커맨드렛 — 머티리얼 저작은 Slate 불필요):
-#   "D:\UnrealEngine\UE_5.7\Engine\Binaries\Win64\UnrealEditor-Cmd.exe" "E:\Git_Project\FPSRoguelite\FPSRoguelite.uproject"
+#   "D:\UnrealEngine\UE_5.8\Engine\Binaries\Win64\UnrealEditor-Cmd.exe" "E:\Git_Project\FPSRoguelite\FPSRoguelite.uproject"
 #     -run=pythonscript -script="E:\Git_Project\FPSRoguelite\Scripts\author_voxel_chomper_material.py"
 #     -unattended -nopause -nullrhi -nosplash -nosound
 #   (import_voxel_chomper.py 가 먼저 돌아 SM 이 있어야 슬롯 배선까지 된다. 없으면 머티리얼만 만든다.)

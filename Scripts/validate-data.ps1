@@ -12,7 +12,7 @@
 #>
 [CmdletBinding()]
 param(
-    [string]$EnginePath = 'D:\UnrealEngine\UE_5.7',
+    [string]$EnginePath = 'D:\UnrealEngine\UE_5.8',
     [string]$LogName = ("validate-data_{0}.log" -f (Get-Date -Format 'yyyyMMdd_HHmmss'))
 )
 

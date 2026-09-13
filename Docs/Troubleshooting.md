@@ -487,8 +487,12 @@ MSYS find 는 `/I` 를 경로로 읽고 `find: '/I': No such file or directory` 
 **판정 함정** — 결과 자체는 각 실행이 `TestExit: Automation Test Queue Empty` 까지 정상 종료해 유효했다. 겹침이 무사했던 건 *읽기 전용 자동화였기 때문*이고,
 에셋을 쓰는 저작 스크립트였다면 `ERROR_SHARING_VIOLATION(32)`(D11-4 · 메모리 `headless-editor-lingers-after-output`)로 깨졌을 것이다.
 
-**같이 본 미확정 1건** — `Scripts/run_verify_crit1_content.bat`(`-ExecCmds="py …,quit"`)가 5.8 에서 파이썬 출력(`[CRIT1-VERIFY] DONE`)을 **다 찍은 뒤 43분간 안 죽었다**(EOS 하트비트만 반복).
-PID 강제 종료로 풀었고 검증 결과는 hang 전에 전부 나와 있었다. 원인이 위 겹침 실행인지 5.8 의 `quit` 거동인지 **아직 안 갈렸다** — 다음에 단독으로 1회 돌리면 갈린다.
+**같이 본 것 — 5.8 에서 `-ExecCmds="py …,quit"` 헤드리스 에디터는 스스로 안 죽는다 (2026-09-13 확정)**
+`Scripts/run_verify_crit1_content.bat` 가 파이썬 출력(`[CRIT1-VERIFY] DONE`) 뒤 **43분간** 살아 있었다(EOS 하트비트만 반복). 처음엔 위 겹침 실행을 의심했으나,
+같은 날 `run_asset_edit.bat` 을 **단독으로 2회**(드라이런·적용) 돌려 재현했다 — 로그에 `Cmd: quit` 가 **찍혔는데도** 프로세스가 5분 넘게 남았다. 겹침 탓이 아니다.
+5.7 시절 메모리(`headless-editor-lingers-after-output`)의 "1~2분 더 살다 죽는다"는 5.8 에서 "안 죽는다"로 바뀌었다. `-run=` 커맨드렛(`FPSRImportCards` · `FPSRValidateAnchoredData`)과 자동화(`-TestExit`)는 정상 종료한다 — **`-ExecCmds` + `quit` 조합만** 해당.
+→ 당장의 운용: 결과 줄(`[asset_edit] =====` 등)과 **저장 로그(`LogSavePackage: Moving output files`)가 `Cmd: quit` 보다 먼저 찍혔는지** 확인한 뒤 PID 를 강제 종료한다(저장은 동기라 종료해도 안전 — 해시·`git status` 로 반영 확인).
+근본 수정(러너가 스스로 끝나게 — 예: 스크립트 본문 `try/finally` 에서 에디터 종료 API 호출)은 **미착수**. 엔진 소스로 5.8 의 `quit` 처리 경로부터 확인할 것.
 
 ## E. 데이터 · 컴포넌트 · BP
 

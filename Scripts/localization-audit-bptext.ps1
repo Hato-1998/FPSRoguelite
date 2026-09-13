@@ -31,7 +31,7 @@
 #>
 [CmdletBinding()]
 param(
-    [string]$EnginePath = 'D:\UnrealEngine\UE_5.7',
+    [string]$EnginePath = 'D:\UnrealEngine\UE_5.8',
     [switch]$SkipGather,
     [switch]$ReportOnly,
     [string]$AllowlistPath,
