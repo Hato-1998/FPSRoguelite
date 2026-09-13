@@ -613,4 +613,34 @@ STAT1 이 만든 문제는 아니나 공격속도저하가 그 축에 얹히므�
 **범위 밖(수용, 기록만)**: 같은 월드 런 재시작에서 `bRunEnded`/`bRunPaused` 를 푸는 경로가 없고 현행 코드는
 레벨 리로드에 기댄다 — 신설 상태 시계가 그 전제를 상속하지 않도록 R3-2 로 닫았다.
 
-### G2 머지 게이트 — *(푸시 직전 · Fable)*
+### G2 머지 게이트 (2026-09-13, `claude-fable-5`, **사후 실행** — 대상 커밋이 이미 `origin/main` 에 푸시된 뒤) — **P1 0 · P2 2 · P3 10**
+
+🔴 **푸시 전에 G2 가 돌지 않았다**(§6-6-1 위반 — 2026-09-13 마감 준비 중 이 절이 제목만 있는 것을 발견). 사용자 지시로 사후 실행.
+
+**리뷰 범위**: 코드 `e64bb381`(A) · `7b75b05e`(B) · `dc2410f7`(C1) · `8add6ac4`(C2) · `9ceb35d7`(D1) + 콘텐츠 `4a7f9b9a` · `b6f6c537` · `e9ca4327`. 범위 밖 명시: `20b51771`(GASM1 이 `FPSRStatusWorldTest.cpp` 에 +36줄) · `94342bb8`(STAT1 이전 GMS). 리뷰어는 읽기 전용(빌드·자동화 미실행).
+
+| 심각도 | 지적 (요약) | 처리 | 근거 |
+|---|---|---|---|
+| **P1** | **0건** | — | — |
+| P2-1 | 도트 앵커 역날짜가 **직전 직격이 걸어 둔 재생 지연을 지운다** — 재생/틱 ≥ 도트/틱 인 실드 적에게 지속피해 탄이 순손해가 될 수 있다 (`FPSREnemyHealthComponent.cpp:146-150`) | **수용 · 수정 대기** | Opus 코드 확인: 도트 정책 분기가 `LastDamageCombatTime = Now − Delay` 를 이전 앵커와 무관하게 무조건 대입한다. 제안 = `FMath::Max(LastDamageCombatTime, Now − Delay)` + "직격 파손 직후 도트, 재생/틱 ≥ 도트/틱" 단위 테스트(§10-12 실구현) |
+| P2-2 | 보스에는 둔화·공속저하·실명·속박 **소비자가 없는데** 비트는 켜지고 아이콘은 4인에게 복제된다 / 보스는 저항 프로파일을 가질 수 없다 | **수용 · 설계 결정 대기** | Opus 코드 확인: `GetResolvedStatus` 소비처 = `AFPSREnemyBase`(:128 · :1261 · :1704) + 체력 컴포넌트(방어력감소)뿐. `AFPSRBossBase`(ACharacter 파생)는 드라이버 등록·진행만 한다(:181 · :664). 보스 초기화 `InitializeMaxHealth` 가 `VitalsProfile = nullptr`(:253). 선택지 = (a) 대상별 허용 슬롯 마스크(보스 = 도트·방어력감소만) / (b) 보스 프로파일 바인딩 + 보스 소비자 배선 |
+| P3-1 | `AttackIntervalMultiplier` 의 ClampMin 0 허용 → 0 이면 공격 패스마다 발사 (`FPSRStatusTypes.h:82-83`) | 후속 | 미검증 |
+| P3-2 | 디버그 `FPSR.Status.Apply` 폴백 카탈로그는 만료가 영원히 안 온다 (`FPSREnemyBase.cpp:2064-2130`) | 후속 | 미검증 (카탈로그 설정된 지금은 죽은 경로라는 지적) |
+| P3-3 | `ResetStatusClockForNewRun` 이 `bStatusFrozen` 을 재계산하지 않는다 (`FPSRGameState.cpp:352-366`) | 후속 | 미검증 (오늘 해당 호출 경로 없음) |
+| P3-4 | 도트 킬 크레딧이 어느 슬롯 부여든 덮인다 (`FPSREnemyHealthComponent.cpp:363-364`) | 후속 | 미검증 (`OnStatusKill` 오버라이드 0건이라 관측 불가) |
+| P3-5 | 사망 폐쇄가 만료와 같은 "슬롯 OFF" GMS 엣지를 쏜다 (`:443`) | 후속 | 미검증 |
+| P3-6 | 코드 주석이 존재하지 않는 §10 단위 테스트 12·13 을 가리킨다 | 후속 (12 는 P2-1 수정 때 추가) | 미검증 |
+| P3-7 | 문서 드리프트 — `Performance.md:117` 3프로퍼티 · `Enemy.md` 착지점 · 명세 §7-7 공개 API 5 vs 코드 10 · C3 목록 부재 · WorkLog 본체 항목 부재 | 후속 | 부분 확인 (이 절 공란·WorkLog 본체 항목 부재는 사실) |
+| P3-8 | `Scripts/author_stat1_content.py:123-125` 주석이 실측(Kind 쓰기 실패, 변경셋으로 교정)과 반대 | 후속 | 미검증 |
+| P3-9 | `b6f6c537` 의 "슬롯 상한 → 카드 창에 갇힐 수 있다(코드 경로상 확정)" 주장이 틀렸다 | **수용 · 정정 완료** | Opus 코드 확인: `FPSRCardSubsystem.cpp:620-631` 이 상한 찬 무기의 새 프래그먼트를 오퍼에서 이미 뺀다(U6). 619줄까지만 읽고 단정한 오판 → 보드 결함 행 폐기 · WorkLog 정정 |
+| P3-10 | `WeakResistScale` / `StrongResistScale` 이름과 방향이 반대 — 클수록 오래 걸린다 (`FPSRVitalsProfile.h:81,87`) | 후속 | 미검증 |
+
+**플랜에 없던 구조 결정 (C3 기록 부재 — 레드팀이 코드에서 추출)**: `Apply` cold-start 앵커 · 틱 경계 비교 · 런타임 틱 하한 · `Advance` 저항 인자 · `AdvanceStatus` out 인자 2개 추가 · 실명을 onset 엣지가 아니라 매 패스 해제로 · `RegisterStatusActive` 를 매 성공 부여마다 · 스냅샷 멤버 스크래치 · `ResolveCatalog` 를 설정 클래스 static 으로 승격 · 차지레이저 payoff 게이팅 · 보스 드라이버를 BeginPlay 에서 · 디버그 폴백 카탈로그.
+
+**범위 밖 발견(레드팀)**: 보스는 `InitializeVitals` 를 타지 않아 VIT1 속성별 방어 계수도 보스에 도달 불가(선재) · 엘리트 `GrantedAbilities` 발동 경로에 실명 게이트 없음(해당 콘텐츠 에셋은 현재 없음).
+
+**레드팀이 확인하고 안전하다고 본 것**: 상태 시계 엣지 로직(4케이스 테스트 고정) · 순수 함수의 외부 인덱스 가드 · 배치 패스 스냅샷 순회 · 드라이버 플래그 짝맞음 · 4중 폐쇄 지점 · 흡혈 트리거 억제 · `IncomingDamageMultiplier` 하한 통과 · 카드 오퍼 상한 필터.
+
+**C3 재검증 (Opus, 같은 날 현재 HEAD)**: 빌드 2종 `Result: Succeeded`(빌드 이후 C++ 변경 0) · `Status.Clock` / `Status.Unit` / `Status.World` 3/3 · 상태이상 콘텐츠 검증기 PASS(problems=0).
+
+**판정**: P1 0 — 푸시 금지 사유 없음. 단 **P2 2건 미처리로 게이트 미완**(§6-6-1: P2 는 고치거나 근거를 대고 기각). P2-2 는 설계 선택이 필요해 사용자 결정 대기.
