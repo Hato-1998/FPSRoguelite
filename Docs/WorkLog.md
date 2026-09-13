@@ -9,6 +9,41 @@
 
 ---
 
+## 🔷 SHEET1 — 저작 시트 정본 복귀 + Sheets API(서비스 계정) 행 단위 쓰기 경로 — 마감 (2026-09-13, `main`, 보드 「SHEET1 — 저작 시트 정본 복귀 + Sheets API(서비스 계정) 행 단위 쓰기 경로」 **완료** — `6118c0eb` · `85043754` · `df067e8b` · `dba513fa` · `b9299ac2` · `6c0fa09f` · `dd80a4ee` · `7be74ae0`)
+
+명세 = `Docs/Specs/SHEET1_SheetsApiWritePath.md`(G1 2회차 통과 · 부록 I 25건 · §13 G2 원장). 설정·사용 = `Docs/AuthoringSheetWriteback.md`. 사용자 지시로 마감.
+
+**■ 무엇을** — 저작 시트 4종(Cards · CardCatalog · ST_UI · ST_CardEffect)을 다시 **정본**으로 되돌렸다. 2026-09-05 역전(리포 CSV 정본 · 시트 미러)의 유일한 사유가 "자동화가 시트에 못 쓴다"였고, 서비스 계정 Sheets API 로 그것을 해소했다. 쓰기 방법 = A안(Sheets API + 서비스 계정) — B(Apps Script 웹앱)·C(구글 공식 Sheets MCP: 개발자 미리보기 · Workspace 계정 요구 · 권한 과대) 기각. 결제 계정 미연결로 청구 경로 차단.
+- `Scripts/authoring_sheet.py` — `apply`(변경셋 → 시트 행 단위: 잠금 · 선택적 `expect` · 쓰기 직전 재조회 · 시트당 원자적 `batchUpdate` · 되읽기 · export 수렴 · sync · 사후 대조) · `seed`(이관·복구 전용, 시트 무편집 가드) · `doctor`(API 서식값 == export 대조군) · `status`(시트 · manifest · 리포 3방향, 자격 불요). `Scripts/sheets_api.py` — 키 경로 해석(리포 안 거부) + 재시도 계약(읽기는 재시도 · 쓰기는 429 만 · 5xx/전송 실패 = 결과 불명, 재시도 금지). `sync-authoring-csv.ps1` — `-MappingPath` · manifest 경로 파생식(PS 5.1 `ChangeExtension($p,$null)` 점 두 개 함정 회피) · manifest 부재 fail-closed · 파싱 실패/저장 0건이면 manifest 무기록 · apply/seed 잠금 존중(token). Apps Script 경로 삭제. `.gitattributes` 동기화 CSV `eol=crlf`. 단위테스트 121.
+- **이관(seed ×4)** — 시트에 Cards 39장·`BuildTags` 열 · CardCatalog +10 · ST_UI `HUD.*` 11키 · ST_CardEffect +1, 시트에만 남아 있던 폐기 스코프 2행 제거. dry-run 계획이 C0 실측과 1:1, 공통 행 값 차이 0 → 리포 CSV 내용 변화 0(바이트는 export 원시 CRLF·끝 개행 없음).
+- **U1 결정(사용자)** — 게임 런타임에는 시트를 읽지 않는다. 시트는 개발(저작) 전용이고 게임·패키지는 커밋된 CSV 스냅샷만 읽는다(`Localization.md` L-1).
+- **U4(사용자 지시)** — `DA_CardModifiers_BonusShot`.E1_Attr 끝 공백 제거 = 정본 시트 첫 실사용 apply(`7be74ae0`). 임포터 스키마 파서가 셀을 trim(`FPSRCardCsvSchema.cpp:72`)하고 DA 이름 테이블도 원래 공백 없는 값이라 에셋 무변경.
+
+**■ 위임이 한 번 죽었다** — Python 갈래 1차 Sonnet 위임이 약 40분 뒤 **한 응답 출력 한도(64k 토큰)**로 종료됐다(`sheets_api.py` 224줄만 남음). "추론에서 파일 전체 초안 금지 · 도구 호출당 ≤250줄 · 센티널 줄 Edit 이어붙이기"를 넣어 `authoring_sheet.py`(1125줄)·테스트(1086줄)를 두 에이전트로 병렬 재위임하자 끝났다. 메모리 `sonnet-delegation-output-token-limit`.
+
+**■ C3 가 잡은 것(G1 이 못 본 것)** — 전부 명세 부록 I.
+- **delete 키 중복 → 다음 행까지 삭제**(I-17) — 같은 `row_index` 의 `deleteDimension` 둘이 생겨 두 번째가 밀려 올라온 행을 지운다. 종전 `cmd_apply` 는 `set()` 이었다.
+- **seed 가 "export 최신" 전제에 기댐**(I-20) — `export_sha == manifest_sha` 는 export 가 늦으면 방금 한 사람 편집을 못 본다 → 이미 받은 export 와 API 현재값이 같아야 진행. 실측 지연 ~1초(3/3), 사람 편집 직후 seed = 거부.
+- **파이프 출력 cp949**(I-14) — 리포 CSV 에 cp949 로 못 찍는 글자(`ー`·`撃`·`—`)가 실재해, 쓰기 뒤 차이 출력이 `UnicodeEncodeError` 로 종료 3 을 1 로 뒤집는다 → `reconfigure(errors="backslashreplace")`. 측정 스크립트 자신도 같은 글자에서 죽었다. 메모리 `python-piped-stdout-cp949-crash`.
+- **PS 5.1 `ConvertFrom-Json` 빈 입력 통과**(I-15) — 빈 잠금·공백·`{}`·token 없는 JSON 을 예외 없이 `$null` 로 받아, 환경변수 미설정과 `$null -ne $null` = 거짓 → 거부해야 할 잠금을 통과(실측 4/4). 메모리 `ps51-convertfrom-json-empty-passes-guard`.
+- 쓰기 시도 뒤 새어 나온 예외 = 종료 3(I-18) · doctor 한 시트 실패가 보고 전체를 끊음(I-19) · `keyed_diff` 중복 키 표기(I-16) · `sheets_api` 5xx 범위(500/502/503/504 만 → 5xx 전체).
+- **기각된 가설 3** — "PS 5.1 이 한글 잠금 JSON 을 못 읽어 apply 가 스스로 막힘"(F #21: mojibake 만, 파싱·token 정상) · "API 가 값 0 필드를 생략해 `sheetId`·`index` 가 None"(F #25: 생략 안 됨) · "export 지연이 커서 seed 가드가 샌다"(F #26: ~1초 — 그래도 I-20 으로 검사화).
+
+**■ G2** — `claude-fable-5` · P1 0 · P2 1 · P3 6 · 기각 0(원장 = 명세 §13). 리뷰 범위 = `85043754` 만(당시 로컬 main 아래 STAT1 미푸시 커밋 2개 제외).
+- P2 변경셋 값 JSON 타입 미검사 → 숫자·`true`·`null` 이 쓰기 뒤 되읽기 불일치로 종료 3 → 쓰기 전 `PlanError`(I-21). 강제 `str()` 변환은 표기(1.10 → 1.1)를 조용히 바꿔 기각.
+- P3 → 잠금 청소 TOCTOU(재획득 0.5초 뒤 token 되읽기, I-22) · R3 줄바꿈(`.gitattributes`, I-23 — 새 체크아웃 sha == manifest, autocrlf false/true 4/4) · doctor 헤더 불일치 종료 1(I-24) · 문서 절차 2(부분 적용 재실행 · 새 테이블 두 갈래) · 오케스트레이션 오프라인 테스트 3(`6c0fa09f`, 변이 대조로 판별력 확인).
+- G2 뒤 커밋(`df067e8b` · `dba513fa` · `b9299ac2` · `6c0fa09f` · `dd80a4ee` · `7be74ae0`)은 Fable 상한(G1 2 + G2 1) 도달로 재게이트하지 않았다 — Opus 검증.
+
+**■ 푸시 뒤 사용자 보고 — 에디터 콘솔에서 실행** — `py "…/authoring_sheet.py"` → `ModuleNotFoundError: No module named 'sheets_api'`. 에디터 로그상 문서의 `python Scripts/authoring_sheet.py status`(터미널 명령)를 에디터 콘솔에 먼저 입력했다. UE 5.8 PythonScriptPlugin `RunFile` 은 `__main__` 전역 · `__file__` · `sys.argv` 는 주지만 **스크립트 폴더를 `sys.path` 에 넣지 않는다**(엔진 소스). import 만 고치면 내장 파이썬(3.11, google-auth 없음)이 게임 스레드에서 동기로 돌아 대기 동안 에디터가 멈추고 엉뚱한 키·pip 안내가 난다 → `sys.path` 자기 보정 + `"unreal" in sys.modules` 면 안내 한 줄만(0 아닌 `SystemExit` 은 에디터가 traceback 째 찍어서 반환으로), 문서에 실행 위치 = 리포 루트 터미널(I-25, `dd80a4ee`). 메모리 `ue-py-runfile-no-script-dir`.
+
+**■ 검증** — 단위테스트 121/121(google-auth 차단 흉내에서도 통과, 새 테스트는 수정 전 코드·변이 사본에서 실패하는 대조군 확인) · PS1 가드 하네스 35/35(스크래치 매핑 · 절대 target · USERPROFILE 격리 · 실제 CSV·manifest·잠금 해시 무변경) · 스크래치 시트 라이브(수정·추가·삭제 · expect 불일치 무쓰기 · 값 12종 바이트 왕복 · 잠금 거부 · seed · 사람 편집 직후 seed 거부 — 끝나고 휴지통) · 실제 매핑 doctor 4/4 ACCESS·TABS 1·CONTROL OK · 이관 후 status 4/4 IN-SYNC · 회귀 `CardCsv.RoundTrip` · `Localization.StringTableCsv` 이관 전·후 `Result={Success}` · U4 뒤 `CardCsv.RoundTrip` `Result={Success}`.
+
+**■ 사용자 스모크(§12 #10)** — 사용자 지시로 마감. ① 시트 39장·`BuildTags`·`HUD.*` = status 4/4 IN-SYNC + 행 수로 도구 확인(사용자 육안 확인 기록 없음) ② 사용자가 Cards 시트 AssetName 2칸을 고침 → Claude 가 `SHEET-AHEAD` 관측 → 사용자 결정으로 apply 되돌림 → IN-SYNC(sync 경로 자체는 스크래치·apply 내부에서 검증) ③ apply 반영 = `7be74ae0` VERIFY OK(시트 되읽기).
+
+**■ 남긴 것** — 보드 「SHEET2 — 에디터 「시트에서 불러오기」 버튼」(대기) · 라이플 상태이상 빌드(별도 세션, 기존 행 「Fragment × 상태이상 물림 프로토」 흡수 여부는 그 세션이 사용자와 결정) · 백로그 「SHEET1 G2 범위 밖 지적 2건」(manifest 머지 충돌 마커 시 `status` traceback · PS1 헤더 `Split(',')` 종전부터).
+
+---
+
 ## 🔷 STAT1 — 경량 적 상태이상 서브시스템(비-GE) — 마감 (2026-09-13, `main`, 보드 「경량 적 상태이상 서브시스템 (비-GE)」 **완료** — `e64bb381` · `7b75b05e` · `dc2410f7` · `8add6ac4` · `9ceb35d7` · `4a7f9b9a` · `b6f6c537` · `e9ca4327` · `80608ba8` · `609b9992`)
 
 명세 = `Docs/Specs/STAT1_LightweightStatusEffects.md`(rev4 + G2 사후 정정). 게이트 원장 = 명세 §12. 콘텐츠 잔여 2건(라이플 배선 · 태그 어휘) 경위 = 바로 아래 「STAT1 잔여」 항목.
