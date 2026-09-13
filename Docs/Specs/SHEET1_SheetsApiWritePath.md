@@ -12,8 +12,8 @@
 | 유닛 ID / 이름 | SHEET1 / 저작 시트 정본 복귀 + Sheets API 쓰기 경로 |
 | 브랜치 | `main` (트렁크 기반, `Workflow.md` §6-7) |
 | 작성 모델 | `claude-opus-5` — §6-5-2 개정(2026-08-26): 설계 = Opus, 검증 = Fable G1·G2 |
-| 작성일 / 최종 갱신 | 2026-09-13 / 2026-09-13 (G1 1회차 반려 반영 = 개정 1 · G1 2회차 통과 후 지적 반영 = 개정 2) |
-| 상태 | `확정` — G1 2회차 통과. 구현(C2)은 다음 세션(2026-09-13 인계) |
+| 작성일 / 최종 갱신 | 2026-09-13 / 2026-09-13 (G1 1회차 반려 반영 = 개정 1 · G1 2회차 통과 후 지적 반영 = 개정 2 · C2 착수 전~C3 대조 중 Opus 명확화·교정 20건 = 개정 3, 부록 I) |
+| 상태 | `확정` — G1 2회차 통과. C2 구현 진행(2026-09-13) |
 | 보드 행 | https://app.notion.com/p/3da3972ddd8881739717cd4236aa3d8c |
 | 관련 SSOT | `Docs/SSOT/Localization.md` L-1·L-3·L-5 · `Docs/SSOT/CombatWeaponCard.md` §2-3-10 · `Docs/SSOT/Workflow.md` §6-5-2 |
 | 관련 명세 | `Docs/Specs/LOC0_StringTablePipeline.md`(sync 원설계) · `Docs/Specs/CARDCSV_ImporterPipeline.md`(임포터) |
@@ -73,6 +73,8 @@
 | `Content/Authoring/{Cards,CardCatalog}.csv` · `Content/StringTables/{ST_UI,ST_CardEffect}.csv` · `Config/AuthoringSheets.manifest.json` | 수정(이관 산출물) | **C3 이관 단계에서만**, 사용자 승인 후 `seed` → pull 결과. C2 구현 커밋에는 넣지 않는다 |
 
 ## 5. 인터페이스 선언
+
+> C2 착수 전~C3 대조 중 명확화·교정 20건 = **부록 I** — 이 절과 함께 읽는다(본문과 어긋나 보이면 부록 I 가 뒤에 쓴 결정이다).
 
 ### 5-1. `Scripts/sheets_api.py`
 
@@ -149,7 +151,7 @@ class SheetsClient:
 **세션 계약** — 모든 HTTP 는 `self._session.request(method, url, params=..., json=..., timeout=REQUEST_TIMEOUT_SEC)` 한 곳으로 나간다. 반환 객체는 `status_code: int` · `text: str` · `json() -> dict` 만 쓴다(`AuthorizedSession` 은 `requests.Session` 이라 성립, 테스트 가짜 세션도 이 셋만 구현).
 
 **예외 계약(고정)** — 요청 1회를 감싸는 순서:
-1. `except self._auth_error_types as e` → `SheetsSetupError("자격 갱신 실패 — 키가 삭제·무효됐거나 PC 시계가 틀렸다: <e>")`. **토큰 갱신은 요청 전에 일어나므로 미적용 확정** — 읽기·쓰기 모두 재시도하지 않는다. (`except ()` 는 아무것도 잡지 않는다 = 테스트 기본.)
+1. `except self._auth_error_types as e` → `SheetsSetupError("자격 갱신 실패 — 네트워크 연결 · 키 삭제/무효 · PC 시계를 확인: <e>")`(부록 I-10). **토큰 갱신은 요청 전에 일어나므로 미적용 확정** — 읽기·쓰기 모두 재시도하지 않는다. (`except ()` 는 아무것도 잡지 않는다 = 테스트 기본.)
 2. `except OSError as e` → **전송 실패**(`requests.exceptions.RequestException` 은 `IOError` 파생, 내장 `ConnectionError`·`TimeoutError` 도 `OSError` 파생) → status=0.
 3. 그 밖의 예외는 **잡지 않는다**(코드 버그를 "결과 불명"으로 위장하지 않는다).
 4. **try 범위 = `self._session.request(...)` 호출 한 줄뿐**(G1 2회차 P3-G②). 응답 본문 파싱(`response.json()`)은 try **밖**에서 한다 — `requests.exceptions.JSONDecodeError` 는 `OSError` 파생이라(G1 2회차 실측 MRO) 같은 try 안에 두면 쓰기 성공이 "결과 불명"으로 위장된다. 파싱 실패(`ValueError`) 처리: 읽기 → `SheetsApiError(status=<응답 코드>, reason="응답 JSON 파싱 실패: <본문 앞 300자>")`(재시도 없음) / `batch_update` 가 2xx 인데 파싱 실패 → **이미 적용된 것**이므로 `{}` 반환.
@@ -281,7 +283,7 @@ def release_lock(lock_path: str) -> None
 
 **`expected_after(header, data_rows, plan)`** — 데이터 행을 header 폭으로 패딩 → `updates` 의 `after` 로 교체 → `deletes` 의 인덱스 제거 → `appends.after` 를 끝에 이어붙임 → `[header] + 결과` 반환.
 
-**`keyed_diff(key_col, expected, actual)`** — 두 표(헤더 포함)를 **각자의 헤더 컬럼 이름**으로 정렬해 키 기준으로 비교. 반환 줄: `"  ! 기대에만 있는 키: <k>"` · `"  ! 실제에만 있는 키: <k>"` · `"  ! <k>.<col>: 기대='<e>' 실제='<a>'"`(공통 컬럼만) · 헤더가 다르면 맨 앞에 `"  ! 헤더: 기대에만=<cols> 실제에만=<cols>"`. 키 순서는 기대 표 등장 순 → 실제에만 있는 키는 실제 표 등장 순. 한 표 안에서 같은 키가 2행 이상이면 `"  ! 중복 키(기대|실제): <k>"` 를 내고 **첫 등장 행**으로 비교한다. 키 기준으로 차이가 없으면 `[]`. (되읽기 불일치·seed 계획 출력에 쓴다 — 행이 밀려도 사람이 읽을 수 있게, G1 P2-3·P3-6.) **호출부 규칙**(G1 2회차 P3-C): 위치 비교(`rows_equal`)는 다른데 `keyed_diff` 가 `[]` 면 `"  (키 기준 내용 동일 — 행 순서·빈 행만 다름)"` 한 줄을 대신 출력한다.
+**`keyed_diff(key_col, expected, actual)`** — 두 표(헤더 포함)를 **각자의 헤더 컬럼 이름**으로 정렬해 키 기준으로 비교. 반환 줄: `"  ! 기대에만 있는 키: <k>"` · `"  ! 실제에만 있는 키: <k>"` · `"  ! <k>.<col>: 기대='<e>' 실제='<a>'"`(공통 컬럼만) · 헤더가 다르면 맨 앞에 `"  ! 헤더: 기대에만=<cols> 실제에만=<cols>"`. 키 순서는 기대 표 등장 순 → 실제에만 있는 키는 실제 표 등장 순. 한 표 안에서 같은 키가 2행 이상이면 그 표 이름으로 `"  ! 중복 키(기대): <k>"` 또는 `"  ! 중복 키(실제): <k>"` 를 내고(부록 I-16) **첫 등장 행**으로 비교한다. 키 기준으로 차이가 없으면 `[]`. (되읽기 불일치·seed 계획 출력에 쓴다 — 행이 밀려도 사람이 읽을 수 있게, G1 P2-3·P3-6.) **호출부 규칙**(G1 2회차 P3-C): 위치 비교(`rows_equal`)는 다른데 `keyed_diff` 가 `[]` 면 `"  (키 기준 내용 동일 — 행 순서·빈 행만 다름)"` 한 줄을 대신 출력한다.
 
 **`acquire_lock(lock_path, command, stale_after_sec, _now)`** — `os.makedirs(dirname, exist_ok=True)` → `os.open(lock_path, O_CREAT|O_EXCL|O_WRONLY)` 성공 시 JSON `{"pid", "host"(socket.gethostname()), "command", "started_utc", "token"(uuid4 hex)}` 기록 후 token 반환. `FileExistsError` 면: **마지막 진행 신호**(파일 mtime)가 `_now() - stale_after_sec` 보다 오래됐으면 `"WARN 15분간 진행 신호가 없는 잠금을 치웠다: <내용>"` 출력 → 삭제(`FileNotFoundError` 는 무시 — 다른 프로세스가 먼저 치운 것) → **1회만** 다시 시도(또 실패하면 `LockBusy`). 신선하면 `LockBusy("다른 세션이 시트를 쓰는 중이다: <내용> — 끝난 뒤 다시")`. `touch_lock` = `os.utime(lock_path, None)`(파일이 없으면 `FileNotFoundError` 를 그대로 올린다 — 잠금을 잃은 것이다). `release_lock` = 파일이 있으면 삭제(없으면 무시).
 > 왜 생성 시각이 아니라 진행 신호인가(G1 2회차 P2-A): 명세 상수로 최악 시간을 계산하면 읽기 1회가 재시도 포함 약 391초, 시트 1개 apply 가 40분을 넘을 수 있다 — 생성 시각 기준 15분이면 **살아 있는 잠금을 치운다.** 네트워크 동작 직전마다 갱신하면 갱신 간격의 최악 = 동작 1회(≈391초) < 900초.
@@ -642,6 +644,12 @@ fpsrproject-*.json
 | 18 | 키 파일 | 바탕화면 `fpsrproject-<hex>.json` · `type=service_account` · `project_id=fpsrproject` · 바탕화면은 OneDrive 이동 폴더 아님(`GetFolderPath('Desktop')` = 로컬) | §8 |
 | 19 | 공유 권한 재조회(사용자가 뷰어로 전환한 뒤) | 폴더·시트 4종 `anyone = reader` · 서비스 계정 시트 4종 `writer` 유지 · 읽기 프로브 재실행 4시트 ACCESS OK·CONTROL OK | §8·R6 해소, §12 #7-0 현재 충족 |
 | 20 | (G1 2회차 보고 — Opus 미재현) | PS 5.1 교정 파생식 = 점 하나 · `GetUnresolvedProviderPathFromPSPath` 는 `Set-Location` 을 따르고 `GetFullPath` 는 안 따름 · `is_inside` 시제품(드라이브 다름·없는 드라이브 `Q:`·형제 접두 `FPSRoguelite2`) 판정 정상 · requests `ConnectionError`·`Timeout`·`JSONDecodeError` ⊂ `OSError`, google-auth `TransportError`·`RefreshError` ⊄ `OSError` · `AuthorizedSession.request(method, url, …, timeout, **kwargs)` | §5-1·§5-5 근거 |
+| 21 | (C2 착수 전, 가설 검증) Python 이 `ensure_ascii=False` 로 쓴 BOM 없는 UTF-8 잠금 JSON 5종(한글 짝수 바이트 · 값 끝이 한글 홀수 바이트인 `host`·`command` · 한글 뒤 `.json`)을 PS 5.1.22621 `Get-Content -Raw \| ConvertFrom-Json` 과 `[IO.File]::ReadAllText(…, UTF8)` 로 읽음 | `Get-Content` 는 한글을 ANSI 로 읽어 **mojibake**(`카드추가` → `移대뱶異붽?`) · 그러나 **JSON 파싱·token 판독은 5/5 정상**(따옴표 삼킴 미발생 — H8 은 콘솔 stdin 경로) · `ReadAllText(UTF8)` 5/5 정상 | "잠금 파싱 실패 → 매 apply 종료 3" 가설 **기각**. 경고 문구 표시만 보강(부록 I-2) |
+| 22 | (C2 착수 전) google-auth 2.58.0 `service_account.Credentials.from_service_account_file` 에 깨진 키 4종 + 없는 파일 | JSON 아님·빈 파일 = `JSONDecodeError` · 필드 누락 = `MalformedError`(MRO 에 `ValueError`) · 개인키 손상 = `ValueError` · 없는 파일 = `FileNotFoundError`(⊂ `OSError`) · `transport/requests.py` `Request.__call__` 이 `RequestException` 을 `TransportError`(⊂ `GoogleAuthError`)로 감싼다 | §5-1 `(ValueError, KeyError, OSError)` 계약 성립 · 갱신 중 네트워크 실패도 자격 오류 경로로 온다 → 부록 I-10 |
+| 23 | (C2 진행 중) 파이프로 받는 Python 3.10.11 표준 출력 인코딩 · 리포 CSV 4종의 cp949 불가 글자 | `sys.stdout.encoding = cp949`(PYTHONUTF8·PYTHONIOENCODING 미설정) — 이 측정 스크립트 자신이 `—` 를 print 하다 `UnicodeEncodeError` 로 죽었다 · ST_UI 32자(`ー` 19 · `—` 6 · 한자 6, `ja`·`SourceString`·`en`) · ST_CardEffect 7자 · Cards 86자(`DisplayName_ja`·`Description_ja` — `ー`·`撃`·`発`·`弾` 등) · CardCatalog 1자(`Notes` 의 `—`) | 부록 I-14 |
+| 24 | (C3 대조 중) PS 5.1.22621 에서 잠금 내용 4종(빈 문자열 · 공백+줄바꿈 · `{}` · token 없는 JSON)을 `ConvertFrom-Json` 후 C2 구현 조건 `(-not $LockParsedOk -or $LockInfo.token -ne $env:FPSR_AUTHORING_LOCK_TOKEN)`(환경변수 미설정) 으로 판정 | 4/4 **예외 없음**(빈 문자열·공백은 `$null` 객체) → 4/4 **거부 안 함(통과)** | 부록 I-15 로 교정 |
+| 25 | (C3 대조 중, 가설 검증) Sheets API `GET spreadsheets/<id>?fields=sheets.properties(...)` 원본 JSON — 스크래치 시트(드라이브 커넥터로 CSV 변환 생성) · ST_CardEffect · Cards | 3/3 `index: 0` **생략 안 됨** · `sheetId` 3/3 0 아님(420577988 · 469644178 · 610789811) · 서비스 계정이 스크래치 시트 200(폴더엔 SA 권한 없는데 새 파일에 writer 가 붙어 있었음 — 경로 미확인) | "기본값 0 필드가 생략돼 `sheetId`·`index` 가 `None`" 가설 **기각** → `get_sheet_properties` 기본값 보정 불요 |
+| 26 | (스크래치 라이브) 서비스 계정으로 스크래치 시트 한 칸을 `batchUpdate` 한 직후 export sha 가 바뀔 때까지 0.5초 간격 폴링 ×3 · 편집 직후 곧바로 `seed --confirm-replace` | 3/3 **첫 폴링에 반영**(0.9·1.0·0.9초, GET 왕복 포함) · 곧바로 돌린 seed 는 `시트가 마지막 pull 이후 편집됐다` 로 **종료 1**, 사람 편집 보존, `status` = `DIVERGED` | 현재 export 지연은 작다 — 그래도 전제는 부록 I-20 으로 검사화 |
 
 ## 부록 G. G1 1회차 지적 처리 (2026-09-13)
 
@@ -680,3 +688,31 @@ fpsrproject-*.json
 | P3-G⑥ 바탕화면 키의 환경변수 | **수용** | §8 · 부록 A §2 |
 
 > 구조 변경 없음(모두 계약·조건 보강) → Fable 판정대로 G1 재제출 없이 `확정`. 단 개정 2 는 Fable 이 본 문장이 아니므로 **G2 프롬프트에 "G1 이후 Opus 가 반영한 계약 14건 = 부록 H" 를 명시**해 함께 검증받는다(§6-5-2 "G1 과 G2 사이가 길다" 규칙).
+
+## 부록 I. C2 착수 전~C3 대조 중 Opus 명확화·교정 (2026-09-13, 개정 3 — 구조 불변)
+
+> Sonnet 이 구현 중 멈출 빈칸(명세 갭 후보)을 Opus 가 메웠다 — I-1~I-13 은 위임 전, **I-14 는 C2 진행 중 · I-15~I-20 은 C3 대조·스크래치 라이브 중 실측·코드 대조로 발견**. 전부 계약·출력 보강이고 구조 변경은 없다 → G1 재제출 불요.
+> **G2 프롬프트에 부록 H(14건)와 함께 이 20건을 명시**한다(§6-5-2 (3) "G1 과 G2 사이" 규칙).
+
+| # | 빈칸 | 결정 | 근거 |
+|---|---|---|---|
+| I-1 | `authoring_sheet.py` 의 export GET 수단 미지정 | stdlib `urllib.request.urlopen`(타임아웃 30초, 리다이렉트는 기본 동작). **모듈 최상단 third-party import 금지** — `status`·단위테스트가 google-auth·requests 없이 돈다. `OSError`(`URLError`·`HTTPError`·타임아웃 포함) · `http.client.HTTPException` · 본문 0바이트 → 실패(`None`). 재시도 없음(apply 6-a 는 자체 루프) | §2 목표 6 · §12 #2 |
+| I-2 | 잠금 JSON 인코딩 미지정 | Python = `json.dumps(obj, ensure_ascii=True)`(기본값을 명시 — 파일이 순수 ASCII). PS = `[System.IO.File]::ReadAllText($LockPath, [System.Text.Encoding]::UTF8)`. **결함 교정이 아니라 표시 보강**: 부록 F #21 실측상 BOM 없는 UTF-8 한글 잠금도 PS 5.1 이 파싱·token 판독은 하나 경고의 `<command>` 가 mojibake 가 된다 | 부록 F #21 · [[ps51-hook-script-needs-bom]] |
+| I-3 | 잠금 `command` 필드 값 | `" ".join(sys.argv[1:])` | — |
+| I-4 | `keyed_diff` 경계 | 행이 0개인 표 = 헤더 `[]`·데이터 0행. `key_col` 이 한 표의 헤더에 없으면 그 표의 키는 0개. 키 칸이 비었거나 행이 짧아 키 칸이 없는 행은 비교하지 않는다. 행이 헤더보다 짧으면 모자란 칸 = `""`. 헤더 줄 `<cols>` = 각자 헤더 등장 순 `", "` 결합(없으면 빈 문자열) | seed 대상이 완전히 빈 새 시트일 때(§5-3 `seed_precondition` 통과 경로) |
+| I-5 | `status` 상태 산출 순서 | 시트 이름 정렬 순. `repo_state` = 파일 없음 `MISSING` → manifest 항목 없음 `NO-PROV` → sha 같음 `SAME` / 다름 `CHANGED`. `sheet_state` = manifest 항목 없음 `NO-PROV`(GET 생략) → GET 실패 `FETCH-FAIL` → `SAME` / `CHANGED`. sha 비교는 양쪽 대문자 정규화 | §5-3 `classify_status` |
+| I-6 | `doctor` 의 `-` 조건·순서 | 시트 이름 정렬 순. ACCESS FAIL → TABS·HEADER·CONTROL 전부 `-`. TABS ≠ 1 → HEADER·CONTROL `-`. export 실패 → CONTROL `-`. HEADER = API 값 첫 행(값이 없으면 `[]`) == `expectedHeader`. CONTROL = `rows_equal(API 전체 값, parse_csv_bytes(export))` | §6 doctor 종료 코드 |
+| I-7 | `seed` 에서 리포 CSV 가 없을 때 | 1단계에서 `seed_precondition(sheet, None, None, [], False)` 의 문구로 종료 1 | §6 seed 1 |
+| I-8 | `apply` 3단계 export 실패 | `WARN [<sheet>] export 실패 — 스냅샷 밖 시트 편집 여부 미확인` 출력 후 계속(경고 전용 검사) | §6 apply 3 |
+| I-9 | NO-OP·종료 3 출력 | 전 시트 `touched()==0` → `NO-OP — 모든 시트가 이미 목표와 같다` 한 줄. 종료 3 직전 stderr 에 `사람 확인 필요 — 시트가 이미 바뀌었을 수 있다: python Scripts/authoring_sheet.py status 로 확인 후 sync` 한 줄 | §5-2 종료 코드 3 · 부록 A §4 ⑩ |
+| I-10 | 자격 갱신 실패 문구가 네트워크 실패를 키 문제로 오진 | §5-1 예외 계약 1 문구 교체(`네트워크 연결 · 키 삭제/무효 · PC 시계를 확인`). 동작(재시도 없음 · 종료 2)은 불변 | 부록 F #22 — 토큰 갱신 중 전송 실패도 `TransportError` ⊂ `GoogleAuthError` |
+| I-11 | 기존 코드 정리 범위 | 새 명세에서 호출되지 않는 기존 정의 삭제: `cmd_push` · `WRITEBACK_PATH` · `write_csv` · `read_csv` · `sha256_of` · 전역 `MAPPING_PATH`/`MANIFEST_PATH`(→ `--mapping` + `manifest_path_for`). 모듈 docstring 을 새 방향(정본 = 시트, 명령 4종)으로 교체. 명령 구현용 **`_` 접두 비공개 헬퍼**(매핑·manifest 로드, export GET, sync 호출, 명령 함수 등)는 허용 — §5 에 선언된 공개 이름·시그니처의 추가·변경은 여전히 금지 | 죽은 코드 금지 · §5-2 |
+| I-12 | `resolve_target` 결합 형태 | 상대 → `os.path.normpath(os.path.join(repo_root, target))`(매핑의 `/` 를 OS 구분자로) · 절대 → 입력 그대로 | §5-3 |
+| I-13 | `sync-authoring-csv.ps1` `.DESCRIPTION` 둘째 문단의 manifest 경로(`Content/StringTables/.sync-manifest.json` — 이미 틀림) | 부록 E 교체와 함께 "매핑 파일 옆 `<매핑 파일명>.manifest.json`(기본 `Config/AuthoringSheets.manifest.json`)" 으로 고친다 | §5-5 파생식과의 모순 제거 |
+| I-14 | **표준 출력 인코딩 미지정 → 출력 한 줄이 종료 코드 계약을 깬다**(C2 진행 중 발견) | `main()` 첫 동작으로 `sys.stdout`·`sys.stderr` 를 `reconfigure(errors="backslashreplace")`(인코딩은 그대로 — 콘솔·파이프 어느 쪽이든 한국어 표시는 환경 인코딩을 따르고, 못 찍는 글자만 `ー` 로 나간다). `reconfigure` 가 없거나 거부하면(`AttributeError`·`ValueError`) 그대로 둔다 | 부록 F #23 — 파이프 출력 인코딩 = cp949, 리포 CSV 에 cp949 로 못 찍는 글자 실재. 쓰기 **뒤** 출력(되읽기 불일치 `keyed_diff`, sync 출력 끝 20줄의 `U+FFFD`)에서 `UnicodeEncodeError` 가 나면 종료 3 이어야 할 것이 1 로 나간다 |
+| I-15 | **sync 잠금 존중의 "파싱 실패" 범위**(C3 대조 중 발견) — §5-5 문언("token 이 환경변수와 다르면 거부")을 그대로 옮기면, 빈 파일·공백·`{}`·token 없는 JSON 을 PS 5.1 이 **예외 없이** `$null` token 으로 받아 환경변수 미설정(`$null`)과 "같다"로 **통과**한다(부록 F #24) | 내용이 비었거나 `token` 이 비면 **파싱 실패와 같게 본다(거부)**. 빈 파일은 `acquire_lock` 이 `O_EXCL` 로 만든 뒤 JSON 을 쓰기 전의 실제 순간이다 | §5-5 "잠금 JSON 파싱 실패는 신선한 잠금으로 본다(거부)"의 취지 · §12 #4 ⑨ |
+| I-16 | `keyed_diff` 중복 키 줄의 `(기대\|실제)` 표기(C3 대조 중 — 구현은 글자 그대로, 테스트는 표 이름으로 읽어 2건 불일치) | **표 이름으로 찍는다**: 기대 표 중복 = `"  ! 중복 키(기대): <k>"`, 실제 표 중복 = `"  ! 중복 키(실제): <k>"`(둘 다면 두 줄). §5-3 본문 문구도 이렇게 고쳤다 | 글자 그대로면 어느 표의 중복인지가 사라져 줄이 정보를 잃는다 |
+| I-17 | **`delete` 키 중복 미처리 → 다음 행 삭제**(C3 코드 대조 중 발견) — §5-3 5단계가 중복을 말하지 않아, 같은 키가 두 번 오면 같은 `row_index` 의 `RowDelete` 가 둘 생기고 `deleteDimension` 두 번째가 밀려 올라온 **다음 행을 지운다**(되읽기가 3 으로 잡지만 사후) | 키마다 **첫 등장만** 처리한다(`RowDelete`·`missing_deletes` 모두 한 번) | 종전 `cmd_apply` 가 `set(change["delete"])` 로 중복을 없앴다 — "종전 병합 의미를 그대로 옮긴다"(§5-3) |
+| I-18 | **첫 쓰기 시도 뒤 새어 나온 예기치 않은 예외의 종료 코드**(C3 코드 대조 중 발견) — 되읽기·재조회 중 자격 갱신 실패(`SheetsSetupError` → 2), 잠금 파일 소실(`touch_lock` 의 `FileNotFoundError`), `powershell` 실행 실패, 코드 버그가 `main()` 까지 올라가 **2·1 로 나간다** | apply·seed 본문을 비공개 실행기 `_run_guarded` 로 감싼다: 첫 `batch_update` **시도 직전** 표시를 세우고, 그 뒤 새어 나온 `Exception` 은 traceback 을 남기고 **종료 3**. 시도 전이면 그대로 올려 `main()` 분류(2·1)를 따른다 | §5-2 종료 코드 3 = "쓰기가 일어났거나 일어났을 수 있는데 그 뒤가 실패" |
+| I-19 | `doctor` 에서 속성은 읽혔는데 값 읽기가 `SheetsApiError` 로 실패하면 예외가 `main()` 까지 올라가 **나머지 시트 보고 없이 중단** | 그 시트를 `ACCESS FAIL`(TABS·HEADER·CONTROL `-`)로 찍고 다음 시트로. 종료 코드 규칙(접근 실패 → 1)은 불변 | §6 doctor "시트마다 점검" |
+| I-20 | **seed 가드가 "export 가 최신"이라는 전제에 기댄다**(스크래치 라이브 중 발견) — `seed_precondition` 의 `export_sha == manifest_sha` 는 export 가 시트 현재값을 반영할 때만 "무편집"을 뜻한다. export 가 늦으면 방금 한 사람 편집을 못 보고 통과해 seed 가 지운다 | seed 2단계에서 `manifest_sha` 가 있으면 **이미 받은 두 값** `rows_equal(parse_csv_bytes(export), current_rows)`(API 현재값)도 참이어야 진행, 아니면 종료 1(`export 가 시트 현재값과 다르다(export 반영 지연 또는 방금 편집) — 잠시 뒤 status 로 확인하고 다시`). 추가 네트워크 없음. 완전히 빈 새 시트 경로(manifest 없음)는 해당 없음 | 부록 F #26 — 지연 실측 ~1초(3/3)라 현재 위험은 작지만 구글이 보장하지 않는 전제를 검사로 바꾼다. 실제 4시트는 CONTROL OK(서식값 == export)라 이 검사로 인한 거짓 거부 없음 |

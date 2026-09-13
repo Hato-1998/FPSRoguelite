@@ -7,8 +7,8 @@
 
 - **저작 소스 = CSV → StringTable** (`LOCTABLE_FROMFILE_GAME` 런타임 직접 로드 — UStringTable 에셋 없음, "임포트 잊음=stale" 계급 제거).
 - **언어 = ko 네이티브 + en·ja 타깃** (출시 확정 타깃. UE 문화권 코드 `ko`/`en`/`ja`).
-- **저작 마스터 = 구글 시트**(공유 폴더 `FPS로그라이크/시트/`) / **리포 CSV = 빌드 스냅샷**. 런타임·gather·패키징은 `Content/` 물리 파일만 읽는다 — 빌드가 드라이브 라이브 상태에 의존하면 재현성이 깨지므로 **동기화는 시트→리포 단방향**(`Scripts/sync-authoring-csv.ps1`), 스냅샷은 git 커밋으로 버전화.
-- **새 UI 문자열은 태어날 때부터 키다** — C++/WBP에 리터럴 추가 금지, 시트에 행 추가 → sync → 키 참조.
+- **저작 마스터 = 구글 시트**(공유 폴더 `FPS로그라이크/시트/`) / **리포 CSV = 빌드 스냅샷**. 런타임·gather·패키징은 `Content/` 물리 파일만 읽는다 — 빌드가 드라이브 라이브 상태에 의존하면 재현성이 깨지므로 **동기화는 시트→리포 단방향**(`Scripts/sync-authoring-csv.ps1`), 스냅샷은 git 커밋으로 버전화. 자동화도 시트에 쓴다(`Scripts/authoring_sheet.py apply`, 서비스 계정 — L-5). (2026-09-05~09-13 리포 CSV 가 정본이던 기간을 거쳐 복귀.)
+- **새 UI 문자열은 태어날 때부터 키다** — C++/WBP에 리터럴 추가 금지, 시트에 행 추가(사람 또는 apply) → sync → 키 참조.
 
 ## L-2. 테이블·키 정책 (카드 CSV 파이프라인과 공유)
 
@@ -28,6 +28,7 @@
 ## L-3. 파이프라인
 
 ```
+사람 편집 · authoring_sheet.py apply(Sheets API) ─→ 구글 시트(저작 정본)
 구글 시트(저작)  ─sync-authoring-csv.ps1→  Content/StringTables/*.csv (git 스냅샷)
                                               │ 런타임: LOCTABLE_FROMFILE_GAME (게임 모듈 Startup)
                                               ▼
@@ -62,13 +63,15 @@
 ## L-5. 시트 동기화 규약
 
 - 매핑 = `Config/AuthoringSheets.json` (sheetId/gid/target/expectedHeader). 공유 폴더ID `1jdMK1VlVI2t71nMc89DWCPxuw-jQjnLv`.
-- 시트 권한 = "링크 보유자 보기 가능"(무인증 export URL — 2026-08-12 HTTP 200 검증). 민감해지면 서비스 계정 인증으로 승격.
-- 🔁 **방향 개정 (2026-09-05, 사용자 결정)** — 마스터가 **시트 → 리포 CSV** 로 넘어왔다. 사유: 시트가 마스터면 카드 1장을 넣는 데 반드시 사람이 끼어야 해서 **자동화가 원천적으로 불가능**했고, 그게 카드 물량 로드맵(§7-6)의 병목이었다.
-  - **쓰는 길(자동화)** = `Scripts/authoring_sheet.py apply <변경셋.json>` → 리포 CSV. 설정 0.
-  - **미러링** = `Scripts/authoring_sheet.py push` → 시트(1회 설정 필요, `Docs/AuthoringSheetWriteback.md`).
-  - **읽는 길(사람이 시트에서 편집했을 때)** = 기존 `sync-authoring-csv.ps1` 그대로. 단 **로컬 CSV 가 매니페스트와 다르면 덮어쓰기를 거부**한다(`-Force` 로만 강제) — 자동화가 쓴 것을 조용히 잃지 않기 위해서다.
-  - **양쪽이 동시에 마스터인 상태는 여전히 금지**다. 위 가드 2개가 그것을 강제한다. 어느 쪽이 앞서 있는지는 `authoring_sheet.py status`.
-- ~~초기 시딩(리포→시트)은 테이블당 1회만. 이후 시트=마스터, 동기화=단방향~~ (위 개정으로 대체)
+- 시트 권한 = 공개 링크 **뷰어**(무인증 export URL — 2026-08-12 HTTP 200 검증. 🚨 2026-09-13 실측 시 "편집자"였다 — 리포가 공개라 시트 ID 가 공개이므로 **편집자 금지**) + **서비스 계정 편집자**(시트 파일 단위, 2026-09-13). 읽기(pull)는 계속 무인증 export, 쓰기만 서비스 계정.
+- 🔁 **방향 재개정 (2026-09-13, 사용자 결정) — 정본 = 구글 시트로 복귀.** 2026-09-05 개정의 유일한 사유("자동화가 시트에 못 쓴다")를 Sheets API 서비스 계정 쓰기로 해소했다. 명세 = `Docs/Specs/SHEET1_SheetsApiWritePath.md`, 설정·사용 = `Docs/AuthoringSheetWriteback.md`.
+  - **쓰는 길(사람)** = 시트에서 직접 편집 → `sync-authoring-csv.ps1` 로 스냅샷 갱신.
+  - **쓰는 길(자동화)** = `Scripts/authoring_sheet.py apply <변경셋.json>` → **시트**에 행 단위로 쓴다(자동화 간 잠금 · 선택적 `expect` · 쓰기 직전 재조회 · 시트당 원자적 batchUpdate · 되읽기 검증) → 끝에 스스로 sync 를 불러 스냅샷까지 갱신한다.
+  - **리포 CSV 직접 편집 금지**(스냅샷이다). sync 의 로컬-앞섬 가드는 그대로 두고, manifest 기록을 못 찾으면 **덮지 않는다**(fail-closed, 2026-09-13).
+  - 상태 = `authoring_sheet.py status`(시트 export · manifest · 리포 CSV 3방향, 자격 불요).
+  - 리포 → 시트 통째 교체는 `authoring_sheet.py seed` 뿐이고 **시트가 마지막 pull 이후 무편집일 때(또는 완전히 빈 새 시트일 때)만** 돈다.
+- ~~🔁 방향 개정 (2026-09-05) — 마스터가 시트 → 리포 CSV(`apply` → CSV, Apps Script `push` → 시트 미러)~~ (2026-09-13 재개정으로 대체. `push`·Apps Script 경로 삭제)
+- ~~초기 시딩(리포→시트)은 테이블당 1회만. 이후 시트=마스터, 동기화=단방향~~ (재시딩·복구 = `seed`)
 - provenance = `Config/AuthoringSheets.manifest.json`(다운로드 UTC·sha256) — 스냅샷 커밋에 동봉. (Content/StringTables/ 안에 두면 UFS 스테이징에 걸려 pak에 실리므로 Config/에 둔다.)
 
 ## L-6. 경계

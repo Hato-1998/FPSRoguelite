@@ -128,7 +128,7 @@
 
 #### 2-3-10. 카드 CSV 저작 파이프라인 (2026-08-12 사용자 확정 — DA 저작 → CSV/시트 저작)
 
-> 진실 사슬 **(개정 2026-09-05)**: **`Content/Authoring/*.csv`(저작 마스터) → 에디터 임포터 → `DA_Card_*`(파생물)**. 카드 저작 = **변경셋 JSON 1개**(`Scripts/authoring_sheet.py apply`) — 사람이 행을 하나씩 만들지 않는다. 구글 시트는 **미러**로 남고(`authoring_sheet.py push`), 사람이 시트에서 편집한 경우에만 `Scripts/sync-authoring-csv.ps1` 로 당겨온다(로컬이 앞서면 거부). 설정·가드 = `Docs/AuthoringSheetWriteback.md`. ~~종전: 구글 시트가 저작 마스터~~. 공통 규약(단방향 동기화·provenance·인코딩 갓차) = `Docs/SSOT/Localization.md` L-4·L-5. 설계 명세 = `Docs/Specs/CARDCSV_ImporterPipeline.md`.
+> 진실 사슬 **(재개정 2026-09-13)**: **구글 시트(저작 정본) → `Scripts/sync-authoring-csv.ps1` → `Content/Authoring/*.csv`(git 스냅샷) → 에디터 임포터 → `DA_Card_*`(파생물)**. 카드 저작 = 사람은 시트에서 직접, 자동화는 **변경셋 JSON 1개**(`Scripts/authoring_sheet.py apply` — 시트에 행 단위로 쓰고 스냅샷까지 갱신). 리포 CSV 직접 편집 금지(sync 가 막는다). 설정·가드 = `Docs/AuthoringSheetWriteback.md` · 명세 = `Docs/Specs/SHEET1_SheetsApiWritePath.md`. ~~2026-09-05~09-13: 리포 CSV 가 저작 마스터, 시트는 미러~~. 공통 규약(단방향 동기화·provenance·인코딩 갓차) = `Docs/SSOT/Localization.md` L-4·L-5. 설계 명세 = `Docs/Specs/CARDCSV_ImporterPipeline.md`.
 
 - **Cards.csv 스키마** (멀티이펙트 = 컬럼 반복 N=3 — 카드 1장=행 1개가 엑셀 저작·diff 최소 인지 단위; 현행 최대 효과 수 2; 초과 시 헤더 감지 버전업; **23개 컬럼**, CRIT2 가 `BuildTags` 1개를 `Family` 뒤에 추가 2026-09-06):
   `CardId, AssetName, Group, Route, OwnerWeapon, Weight, Family, BuildTags, DisplayName_ko/en/ja, Description_ko/en/ja, E1_Attr, E1_Override, E1_Tiers, E2_*, E3_*`
