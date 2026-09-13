@@ -292,6 +292,32 @@ class T08ValidateChangeset(unittest.TestCase):
             authoring_sheet.validate_changeset(doc, _MAPPING)
         self.assertIn("Cards", str(cm.exception))
 
+    def test_non_string_values_rejected_before_any_write(self):
+        # 부록 I-21 (G2 P2) — JSON 숫자·null·true 는 쓰기 뒤 되읽기 비교가 어긋난다. 계획 전에 PlanError.
+        bad_docs = {
+            "int": {"sheet": "Cards", "upsert": [{"CardId": "c1", "Weight": 5}]},
+            "null": {"sheet": "Cards", "upsert": [{"CardId": "c1", "Name": None}]},
+            "bool": {"sheet": "Cards", "upsert": [{"CardId": "c1", "Name": True}]},
+            "float_key": {"sheet": "Cards", "upsert": [{"CardId": 1.5}]},
+            "expect_not_dict": {"sheet": "Cards", "upsert": [{"CardId": "c1", "expect": "Weight"}]},
+            "expect_value_int": {"sheet": "Cards", "upsert": [{"CardId": "c1", "Weight": "9", "expect": {"Weight": 1}}]},
+            "upsert_not_list": {"sheet": "Cards", "upsert": {"CardId": "c1"}},
+            "record_not_dict": {"sheet": "Cards", "upsert": ["c1"]},
+            "delete_string": {"sheet": "Cards", "delete": "c1"},
+            "delete_int_key": {"sheet": "Cards", "delete": [3]},
+            "key_not_str": {"sheet": "Cards", "key": 0, "upsert": []},
+        }
+        for label, change in bad_docs.items():
+            with self.subTest(case=label):
+                with self.assertRaises(authoring_sheet.PlanError) as cm:
+                    authoring_sheet.validate_changeset({"changes": [change]}, _MAPPING)
+                self.assertIn("Cards", str(cm.exception))
+
+    def test_all_string_values_including_empty_pass(self):
+        change = {"sheet": "Cards", "key": "CardId",
+                  "upsert": [{"CardId": "c1", "Weight": "", "expect": {"Weight": "1"}}], "delete": ["c9"]}
+        self.assertEqual(authoring_sheet.validate_changeset({"changes": [change]}, _MAPPING), [change])
+
     def test_valid_changeset_returns_changes_list_unchanged(self):
         changes = [{"sheet": "Cards", "upsert": [{"CardId": "k1"}]}]
         result = authoring_sheet.validate_changeset({"changes": changes}, _MAPPING)
@@ -1052,6 +1078,24 @@ class T18LockFunctions(unittest.TestCase):
         self.assertEqual(content["command"], "cmd2")
         self.assertEqual(content["token"], new_token)
         self.assertNotEqual(new_token, "OLDTOKEN")
+
+    def test_stale_lock_race_loser_backs_off(self):
+        # 부록 I-22 (G2 P3) — 오래된 잠금을 치우고 새로 만든 직후, 다른 세션이 그것을 지우고 제 잠금을 만들었다면
+        # (되읽기 대기 중에 파일 token 이 바뀌면) 물러나야 한다. 파일은 이긴 쪽 것이므로 건드리지 않는다.
+        self._write_raw_lock(command="old-cmd", token="OLDTOKEN")
+        past = time.time() - 100000
+        os.utime(self.lock_path, (past, past))
+
+        def other_session_steals(_seconds):
+            with io.open(self.lock_path, "w", encoding="utf-8") as f:
+                f.write(json.dumps({"pid": 2, "host": "h", "command": "winner", "started_utc": "x", "token": "WINNER"}))
+
+        with mock.patch.object(authoring_sheet.time, "sleep", side_effect=other_session_steals), \
+                contextlib.redirect_stdout(io.StringIO()):
+            with self.assertRaises(authoring_sheet.LockBusy):
+                authoring_sheet.acquire_lock(self.lock_path, "loser", _now=lambda: past + 901)
+        with io.open(self.lock_path, encoding="utf-8") as f:
+            self.assertEqual(json.load(f)["token"], "WINNER")
 
     def test_touch_lock_refreshes_mtime_so_old_creation_still_blocks(self):
         # "생성"은 오래됐어도 touch_lock 으로 진행 신호(mtime)가 신선해지면 여전히 LockBusy 여야 한다

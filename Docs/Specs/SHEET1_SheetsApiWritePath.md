@@ -12,7 +12,7 @@
 | 유닛 ID / 이름 | SHEET1 / 저작 시트 정본 복귀 + Sheets API 쓰기 경로 |
 | 브랜치 | `main` (트렁크 기반, `Workflow.md` §6-7) |
 | 작성 모델 | `claude-opus-5` — §6-5-2 개정(2026-08-26): 설계 = Opus, 검증 = Fable G1·G2 |
-| 작성일 / 최종 갱신 | 2026-09-13 / 2026-09-13 (G1 1회차 반려 반영 = 개정 1 · G1 2회차 통과 후 지적 반영 = 개정 2 · C2 착수 전~C3 대조 중 Opus 명확화·교정 20건 = 개정 3, 부록 I) |
+| 작성일 / 최종 갱신 | 2026-09-13 / 2026-09-13 (G1 1회차 반려 반영 = 개정 1 · G1 2회차 통과 후 지적 반영 = 개정 2 · C2 착수 전~G2 처리까지 Opus 명확화·교정 24건 = 개정 3, 부록 I) |
 | 상태 | `확정` — G1 2회차 통과. C2 구현 진행(2026-09-13) |
 | 보드 행 | https://app.notion.com/p/3da3972ddd8881739717cd4236aa3d8c |
 | 관련 SSOT | `Docs/SSOT/Localization.md` L-1·L-3·L-5 · `Docs/SSOT/CombatWeaponCard.md` §2-3-10 · `Docs/SSOT/Workflow.md` §6-5-2 |
@@ -67,6 +67,7 @@
 | `Scripts/AppsScript/AuthoringSheetWriter.gs` | **삭제** | B안 폐기 (`Scripts/AppsScript/` 폴더가 비면 폴더째) |
 | `Config/AuthoringSheets.writeback.example.json` | **삭제** | B안 폐기 |
 | `.gitignore` | 수정 | writeback 절(53~56행) → 서비스 계정 키 방어 패턴(부록 D) |
+| `.gitattributes` | 수정(G2 P3) | 동기화 CSV `text eol=crlf` · 파생물 `ST_Card.csv` 는 종전 규칙(부록 I-23) |
 | `Docs/AuthoringSheetWriteback.md` | 전면 개정 | 부록 A 구조대로 |
 | `Docs/SSOT/Localization.md` | 수정 | L-1·L-3·L-5 (부록 B) |
 | `Docs/SSOT/CombatWeaponCard.md` | 수정 | §2-3-10 진실 사슬 131행 (부록 C) |
@@ -74,7 +75,7 @@
 
 ## 5. 인터페이스 선언
 
-> C2 착수 전~C3 대조 중 명확화·교정 20건 = **부록 I** — 이 절과 함께 읽는다(본문과 어긋나 보이면 부록 I 가 뒤에 쓴 결정이다).
+> C2 착수 전~G2 처리까지 명확화·교정 24건 = **부록 I** — 이 절과 함께 읽는다(본문과 어긋나 보이면 부록 I 가 뒤에 쓴 결정이다).
 
 ### 5-1. `Scripts/sheets_api.py`
 
@@ -361,7 +362,7 @@ param(
 | 명령 | 자격 | 잠금 | 전제조건 | 동작 | 실패 시 |
 |---|---|---|---|---|---|
 | `status` | 불요 | 안 잡음 | 매핑 로드 | 시트마다 export GET(30s) → sha / manifest sha / 리포 CSV sha → `classify_status` → 표 + 범례(§5-6) | export 실패는 `FETCH-FAIL`, 종료 0 |
-| `doctor` | 필요 | 안 잡음 | 키 해석 OK | 서비스 계정 이메일 → 시트마다 ① 탭 수 ② 헤더 == expectedHeader ③ **CONTROL**: API 전체 서식값 vs export 파싱값 `rows_equal` | 설정 미비 2 / 접근 실패·탭≠1·CONTROL 불일치·**CONTROL 판정 불가(`-` = export 실패)** 중 하나라도 1(G1 2회차 P3-F) / 헤더 불일치만이면 0 |
+| `doctor` | 필요 | 안 잡음 | 키 해석 OK | 서비스 계정 이메일 → 시트마다 ① 탭 수 ② 헤더 == expectedHeader ③ **CONTROL**: API 전체 서식값 vs export 파싱값 `rows_equal` | 설정 미비 2 / 접근 실패·탭≠1·CONTROL 불일치·**CONTROL 판정 불가(`-` = export 실패)** 중 하나라도 1(G1 2회차 P3-F) / **헤더 불일치도 1**(부록 I-24 — 종전 "헤더 불일치만이면 0"은 이관 전 Cards 면제였다) |
 | `apply` | 필요 | 잡음 | `validate_changeset` · 대상 시트마다 `apply_precondition`(dry-run 은 `WARN` 출력 후 계속, 실행은 1) | 아래 알고리즘 | 종료 코드 표 |
 | `seed` | 필요 | 잡음 | `--sheet` 필수 · `--confirm-replace`(dry-run 제외 필수) · 리포 CSV 헤더 == expectedHeader · `seed_precondition` | 아래 알고리즘 | 종료 코드 표 |
 
@@ -414,7 +415,7 @@ param(
 
 | 경합 | 방어 | 남는 창 |
 |---|---|---|
-| 자동화 세션 둘이 동시에 apply/seed, 또는 apply 중 사람이 sync | `~/.fpsr/authoring-sheet.lock` 잠금(명령 진입 ~ 마지막 검증, 네트워크 동작마다 진행 신호) · sync 도 신선한 잠금이면 거부(§5-5) | 같은 머신에선 없음 — 단 진행 신호가 15분 끊긴 잠금은 치워진다(보유자가 멈춘 것으로 간주). 다른 머신의 자동화는 대상 아님 |
+| 자동화 세션 둘이 동시에 apply/seed, 또는 apply 중 사람이 sync | `~/.fpsr/authoring-sheet.lock` 잠금(명령 진입 ~ 마지막 검증, 네트워크 동작마다 진행 신호) · sync 도 신선한 잠금이면 거부(§5-5) | 같은 머신에선 사실상 없음 — 진행 신호가 15분 끊긴 잠금은 치워진다(보유자가 멈춘 것으로 간주). 그 잠금을 두 세션이 같은 순간 치우는 경합은 재획득 0.5초 뒤 token 되읽기로 좁혔다(부록 I-22 — 그 사이 멈춘 프로세스만 남는다). 다른 머신의 자동화는 대상 아님 |
 | 사람이 **같은 칸**을 편집 | 변경셋 `expect`(선택) + 쓰기 직전 재조회 | 재조회 ↔ batchUpdate 사이 1초 미만 — 이 칸은 우리가 마지막에 쓴다(§11 R1) |
 | 사람이 **행 삽입·삭제·정렬** | 쓰기 직전 재조회(표 전체 비교) + 되읽기(키 기준 차이) + 문서 규칙 "apply 중 행 구조 변경 금지" | 재조회 ↔ batchUpdate 사이 1초 미만 — 이때 밀리면 **엉뚱한 행에 쓰일 수 있고** 되읽기가 3 으로 잡는다(사후 탐지, §11 R1) |
 | 한 시트 안의 부분 적용 | `spreadsheets.batchUpdate` 원자성(공식) | 없음 |
@@ -462,7 +463,7 @@ param(
 **수용한 리스크**
 - **R1** 재조회 ↔ batchUpdate 사이(1초 미만)에 사람이 ① 같은 칸을 편집하면 우리가 덮는다(마지막 쓰기 = 우리, 되읽기로도 못 잡음) ② 행을 삽입·삭제·정렬하면 인덱스가 밀려 **엉뚱한 행의 칸에 쓰일 수 있다**(되읽기가 키 기준 차이로 잡아 3 — 사후 탐지, 복구는 사람). Sheets API 에 조건부 쓰기가 없다. 완화 = 잠금(자동화 간 0) · 재조회(창 축소) · 문서 규칙(apply 중 행 구조 변경 금지) · 자동화 변경셋은 수정 칸에 `expect`.
 - **R2** 모든 쓰기가 문자열 칸 → Claude 가 쓴 숫자는 시트에서 텍스트(왼쪽 정렬, `SUM` 제외). export·스냅샷·임포터는 영향 없음. 수정은 **바뀐 칸만** 쓰므로 사람이 입력한 칸은 그대로다.
-- **R3** manifest 해시 = export **원시 바이트**. 이 머신은 `core.autocrlf=true` + `* text=auto` 에서 끝 줄바꿈 없는 CRLF 커밋이 체크아웃 시 바이트 동일 복원됨(G1 실측) → 안정. 설정이 다른 머신에서는 거짓 `LOCAL-AHEAD` 가능 — **막히는 쪽으로 실패**(손실 없음).
+- **R3** manifest 해시 = export **원시 바이트**. 이 머신은 `core.autocrlf=true` + `* text=auto` 에서 끝 줄바꿈 없는 CRLF 커밋이 체크아웃 시 바이트 동일 복원됨(G1 실측) → 안정. 설정이 다른 머신에서는 거짓 `LOCAL-AHEAD` 가능 — **막히는 쪽으로 실패**(손실 없음). → **G2 P3 로 닫음(2026-09-13)**: `.gitattributes` 에 동기화 CSV `text eol=crlf`(부록 I-23) — `core.autocrlf=false` 체크아웃도 CRLF 실측.
 - **R4** 콤마·따옴표·앞뒤 공백 셀의 서식값 vs export: **읽기 대조는 실데이터로 확인**(앞뒤 공백 셀 7개 포함, 부록 F #16). 콤마·따옴표와 **쓰기** 왕복은 미검증 → §12 #5.
 - **R5** 키 유출 = 시트 4종 편집권 유출. 리포 안 경로 거부 · `.gitignore` 방어 · 폐기 절차 문서화. 키가 바탕화면에 있는 것은 사용자 결정.
 - **R6** 공개 링크 편집 권한(§8) — 2026-09-13 뷰어 전환 완료·확인. 누가 다시 편집자로 바꾸면 재발하므로 이관 직전 재확인(§12 #7-0). 새 테이블 시트를 만들 때도 뷰어로 둔다(부록 A §1-7).
@@ -478,7 +479,7 @@ param(
 | 3 | 빌드 | 해당 없음 — C++ 무변경. `git diff --stat` 에 `Source/` 가 없음을 확인 |
 | 4 | PS1 무회귀·가드 | ⛔ **실제 매핑으로 라이브 sync 금지**(이관 전엔 4/4 LOCAL-AHEAD). 스크래치패드에 `AuthoringSheets.json` 이라는 **같은 파일명**의 스크래치 매핑을 두고 `-MappingPath` 로: ① `[manifest]` 줄 = `<스크래치>\AuthoringSheets.manifest.json` ② target 이 있고 manifest 가 없으면 **거부**(파일 무접촉, 종료 1) ③ target 없으면 첫 sync 성공 + manifest 생성 ④ LOCAL-AHEAD 거부 유지 ⑤ BOM 유지 ⑥ `localization-gather.ps1` 호출부 무변경(`git diff`) ⑦ 스크래치 manifest 를 일부러 깨뜨리면 target·manifest 파일 모두 바이트 무변경 ⑧ 저장 0건 실행 뒤 manifest 바이트 무변경 ⑨ 신선한 잠금 + 다른 token → 종료 1·무접촉 / 같은 token(`FPSR_AUTHORING_LOCK_TOKEN`) → 진행 / 900초 지난 잠금 → 경고 후 진행 |
 | 5 | 스크래치 라이브 테스트 | **사용자 승인 후**: ① Drive 커넥터로 스크래치 시트 생성(헤더+샘플 행 CSV 업로드) ② 서비스 계정에 편집자 공유 ③ 스크래치 매핑·target(스크래치패드) ④ sync 로 첫 스냅샷 ⑤ `apply`: 수정·추가·삭제 · `expect` 불일치 → **무쓰기 1** · 값 왕복(`1.0` · `0.03` · `=SUM(A1)` · `'x` · `a,b` · `a"b` · `" x"` · `"x "` · `"   [a]"` · 빈칸) · 되읽기 · export 수렴 · 사후 대조 · `status` IN-SYNC ⑥ 잠금: 잠금 파일을 손으로 만들어 두면 apply 가 1 ⑦ `seed`: 스크래치 CSV 를 바꿔 seed → IN-SYNC / 시트를 API 로 직접 한 칸 고친 뒤 seed → 거부 1 ⑧ 끝나면 스크래치 시트 휴지통 |
-| 6 | doctor | 4시트 `ACCESS OK · TABS 1 · CONTROL OK` (이관 전 Cards `HEADER MISMATCH` 는 정상). 2026-09-13 사전 프로브 = 이 조건 충족(부록 F #16) |
+| 6 | doctor | 4시트 `ACCESS OK · TABS 1 · CONTROL OK` (이관 전 Cards `HEADER MISMATCH` 는 정상). 2026-09-13 사전 프로브 = 이 조건 충족(부록 F #16). **이관 뒤** = `HEADER OK` 까지 4/4 · 종료 0(부록 I-24) |
 | 7-0 | 공개 링크 권한 | Drive 커넥터 `get_file_permissions` — 폴더·시트 4종의 `type=anyone` 권한이 `reader`(편집자 아님). **이관의 전제조건** |
 | 7 | 이관(사용자 승인 후) | `seed` ×4 → `status` 4×`IN-SYNC` · `git diff --ignore-cr-at-eol --stat -- <4 target>` **빈 출력** · 시트 행 수 = 리포 행 수 |
 | 8 | 회귀 | `Scripts\run_crit2_tests.bat FPSRoguelite.Editor.CardCsv.RoundTrip` · `… FPSRoguelite.Editor.Localization.StringTableCsv` 통과(판정 = stdout `Result={Success}`, 종료 코드 아님) |
@@ -514,12 +515,17 @@ param(
 
 | 심각도 | 지적 (요약 + 파일:줄) | 처리 | 근거 |
 |---|---|---|---|
-| P1 | | | |
-| P2 | | | |
-| P3 | | | |
+| P1 | 없음 | — | — |
+| P2 | 변경셋 값의 JSON 타입 미검사 → 숫자·`true`·`null` 이 계획을 통과해 시트엔 써지고 되읽기 비교가 어긋나 **쓰기 뒤 종료 3**("쓰기 전 데이터 오류 전부 차단" 계약 위반) — `authoring_sheet.py` plan_changes·encode_cell·되읽기 | **수용·수정** — `validate_changeset` 이 비문자열 값·잘못된 형태(upsert/delete/expect/key)를 쓰기 전에 `PlanError`(부록 I-21). 강제 `str()` 변환은 표기(1.10 → 1.1)를 조용히 바꿔 택하지 않음 | G2 재현 + 새 테스트 `test_non_string_values_rejected_before_any_write` 가 수정 전 코드(85043754)에서 11 서브케이스 실패 · 수정 후 통과 |
+| P3 | 오래된 잠금 청소 TOCTOU — 두 세션이 동시에 보유 가능, 문서·§7 "없음"은 거짓 — `acquire_lock` | **수용·수정** — 재획득 0.5초 뒤 token 되읽기, 다르면 `LockBusy`(부록 I-22) + 문서 §3·§7 잔여 창 명시 | 새 테스트 `test_stale_lock_race_loser_backs_off` 수정 전 실패 · 수정 후 통과 |
+| P3 | R3 줄바꿈이 `.gitattributes` 한 줄로 닫히는데 열려 있고, 다른 머신에서 "리포 CSV 를 직접 고쳤다" 오진 | **수용·수정** — 동기화 CSV `text eol=crlf`, 파생물 `ST_Card.csv` 는 `text=auto !eol`(부록 I-23) | `git check-attr` 4+1 파일 확인 · `git -c core.autocrlf=false checkout-index` 결과 CRLF 실측 · `git status` 무변화 |
+| P3 | `doctor` HEADER MISMATCH 종료 0 면제가 이관 뒤 근거 없음 | **수용·수정** — 종료 1(부록 I-24) · §6·§12 #6·부록 A §1-9 | 면제 사유 = 이관 전 Cards 뿐(§12 #6) |
+| P3 | 다중 시트 부분 적용(종료 3) 뒤 재실행이 `expect` 와 충돌해 변경셋 전체 거부 | **수용·문서** — 부록 A §4 ⑩ 재실행 절차(VERIFY OK 시트 항목 빼기 또는 expect 제거). `expect` 의미(멱등화)는 G1 계약 변경이라 이번 범위 밖 | 코드 무변경 — 절차로 해소 |
+| P3 | "새 테이블" 절차가 로컬 CSV 가 이미 있으면 seed·sync 양쪽에서 막힘 | **수용·문서** — 부록 A §2 새 테이블 두 갈래(CSV 없음 → 헤더+sync / CSV 있음 → 빈 시트에 seed) | 코드 무변경 — 두 가드는 의도대로(fail-closed) |
+| P3 | apply/seed 오케스트레이션(종료 코드 분기·다중 시트 부분실패·sync 사슬) 오프라인 회귀 0 | **수용·후속** — 가짜 세션 테스트 3건(Sonnet 위임, 결과는 이 행에 기입) | — |
 
-- **레드팀에 무엇을 줬나**:
-- **지적 0건이면**:
+- **레드팀에 무엇을 줬나**: 커밋 `85043754` diff 만(로컬 main 아래 STAT1 미푸시 커밋 `609b9992`·`7072cebb` 는 리뷰 범위 밖 — STAT1 자체 G2 대상) · 프라이머 `Docs/InternalRedTeamReview.md` · 이 명세(부록 H 14건·부록 I 20건 = G1 이후 G1 을 거치지 않은 계약으로 명시) · 실행 경계(오프라인만). 설계 변호·토론 이력 미포함. 범위 밖 지적 3건: PS1 헤더 `Split(',')`(종전부터, 헤더에 콤마 없음 — 보류) · manifest 충돌 마커 시 `status` traceback(백로그 후보) · changesets 폴더 형식 혼재(`validate_changeset` 이 거부 — 조치 불요).
+- **G2 뒤 커밋(리뷰 밖)**: G2 지적 반영 커밋 · 이관 산출물 커밋. Fable 상한(G1 2회 + G2 1회) 도달로 재게이트하지 않았다 — 검증 = 단위테스트(새 테스트 대조군 포함) · 이관 사후 대조 · 회귀 2종.
 
 ---
 
@@ -691,8 +697,8 @@ fpsrproject-*.json
 
 ## 부록 I. C2 착수 전~C3 대조 중 Opus 명확화·교정 (2026-09-13, 개정 3 — 구조 불변)
 
-> Sonnet 이 구현 중 멈출 빈칸(명세 갭 후보)을 Opus 가 메웠다 — I-1~I-13 은 위임 전, **I-14 는 C2 진행 중 · I-15~I-20 은 C3 대조·스크래치 라이브 중 실측·코드 대조로 발견**. 전부 계약·출력 보강이고 구조 변경은 없다 → G1 재제출 불요.
-> **G2 프롬프트에 부록 H(14건)와 함께 이 20건을 명시**한다(§6-5-2 (3) "G1 과 G2 사이" 규칙).
+> Sonnet 이 구현 중 멈출 빈칸(명세 갭 후보)을 Opus 가 메웠다 — I-1~I-13 은 위임 전, **I-14 는 C2 진행 중 · I-15~I-20 은 C3 대조·스크래치 라이브 중 · I-21~I-24 는 G2 레드팀 지적 반영**. I-21~I-24 는 G2 뒤라 게이트를 다시 타지 않았다(§13 원장). 전부 계약·출력 보강이고 구조 변경은 없다 → G1 재제출 불요.
+> **G2 프롬프트에 부록 H(14건)와 함께 명시**(G2 에 준 시점 = I-1~I-20)한다(§6-5-2 (3) "G1 과 G2 사이" 규칙).
 
 | # | 빈칸 | 결정 | 근거 |
 |---|---|---|---|
@@ -716,3 +722,7 @@ fpsrproject-*.json
 | I-18 | **첫 쓰기 시도 뒤 새어 나온 예기치 않은 예외의 종료 코드**(C3 코드 대조 중 발견) — 되읽기·재조회 중 자격 갱신 실패(`SheetsSetupError` → 2), 잠금 파일 소실(`touch_lock` 의 `FileNotFoundError`), `powershell` 실행 실패, 코드 버그가 `main()` 까지 올라가 **2·1 로 나간다** | apply·seed 본문을 비공개 실행기 `_run_guarded` 로 감싼다: 첫 `batch_update` **시도 직전** 표시를 세우고, 그 뒤 새어 나온 `Exception` 은 traceback 을 남기고 **종료 3**. 시도 전이면 그대로 올려 `main()` 분류(2·1)를 따른다 | §5-2 종료 코드 3 = "쓰기가 일어났거나 일어났을 수 있는데 그 뒤가 실패" |
 | I-19 | `doctor` 에서 속성은 읽혔는데 값 읽기가 `SheetsApiError` 로 실패하면 예외가 `main()` 까지 올라가 **나머지 시트 보고 없이 중단** | 그 시트를 `ACCESS FAIL`(TABS·HEADER·CONTROL `-`)로 찍고 다음 시트로. 종료 코드 규칙(접근 실패 → 1)은 불변 | §6 doctor "시트마다 점검" |
 | I-20 | **seed 가드가 "export 가 최신"이라는 전제에 기댄다**(스크래치 라이브 중 발견) — `seed_precondition` 의 `export_sha == manifest_sha` 는 export 가 시트 현재값을 반영할 때만 "무편집"을 뜻한다. export 가 늦으면 방금 한 사람 편집을 못 보고 통과해 seed 가 지운다 | seed 2단계에서 `manifest_sha` 가 있으면 **이미 받은 두 값** `rows_equal(parse_csv_bytes(export), current_rows)`(API 현재값)도 참이어야 진행, 아니면 종료 1(`export 가 시트 현재값과 다르다(export 반영 지연 또는 방금 편집) — 잠시 뒤 status 로 확인하고 다시`). 추가 네트워크 없음. 완전히 빈 새 시트 경로(manifest 없음)는 해당 없음 | 부록 F #26 — 지연 실측 ~1초(3/3)라 현재 위험은 작지만 구글이 보장하지 않는 전제를 검사로 바꾼다. 실제 4시트는 CONTROL OK(서식값 == export)라 이 검사로 인한 거짓 거부 없음 |
+| I-21 | **G2 P2** — 변경셋 값 JSON 타입 미검사 | `validate_changeset` 이 시트 항목마다: `key` 는 문자열 · `upsert` 는 목록 · 레코드는 객체 · 값은 전부 `str`(빈칸 `""`) · `expect` 는 객체이고 값은 `str` · `delete` 는 문자열 목록 — 아니면 `PlanError`(쓰기 전, 자격 전). 강제 변환 안 함 | 되읽기(문자열) 비교가 어긋나 쓰기 뒤 종료 3 · 변환은 표기를 조용히 바꾼다 · 종전 CSV 변경셋 4개는 전부 문자열(G2 확인) |
+| I-22 | **G2 P3** — 오래된 잠금 청소 TOCTOU | `acquire_lock` 이 오래된 잠금을 치우고 재획득한 뒤 `_STALE_LOCK_RECHECK_SEC`(0.5초) 대기 → 파일 token 이 자기 것이 아니면 `LockBusy`(파일은 이긴 쪽 것이라 건드리지 않음). 신선한 잠금 경로는 불변 | 창을 "동시 진입 ms"에서 "그 사이 멈춘 프로세스"로 좁힌다. 근본 해법(보유 기간 내내 fd 유지)은 PS `ReadAllText` 공유 모드 변경까지 번져 택하지 않음 |
+| I-23 | **G2 P3** — R3 줄바꿈 | `.gitattributes`: `Content/Authoring/*.csv text eol=crlf` · `Content/StringTables/*.csv text eol=crlf` · `Content/StringTables/ST_Card.csv text=auto !eol`(파생물은 종전 규칙). 인덱스는 이미 LF 라 재정규화 커밋 불요 | manifest 해시(export 원시 CRLF 바이트)와 체크아웃 바이트가 설정과 무관하게 일치 |
+| I-24 | **G2 P3** — doctor HEADER MISMATCH 면제 | 헤더 불일치도 종료 1 | 면제 사유(이관 전 Cards)가 이관으로 소멸 · 불일치면 apply 가 3단계에서 반드시 실패 |

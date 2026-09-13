@@ -6,6 +6,13 @@
 # 기본 동작: 텍스트 파일 줄바꿈 자동 정규화
 * text=auto
 
+# 저작 시트 스냅샷 CSV — manifest 해시가 구글 export 원시 바이트(CRLF)라 체크아웃 줄바꿈도 CRLF 로 고정한다.
+# core.autocrlf 가 다른 머신에서 거짓 LOCAL-AHEAD 가 나지 않게(SHEET1 G2 P3 · 명세 §11 R3).
+# ST_Card.csv 는 카드 임포터가 쓰는 파생물이라 종전 규칙(text=auto, eol 미지정)으로 되돌린다.
+Content/Authoring/*.csv          text eol=crlf
+Content/StringTables/*.csv       text eol=crlf
+Content/StringTables/ST_Card.csv text=auto !eol
+
 # =============================================================================
 # UE5 바이너리 에셋 — diff/merge/줄바꿈 변환 완전 비활성
 # =============================================================================

@@ -52,6 +52,7 @@ _DEFAULT_MAPPING_PATH = os.path.join(REPO_ROOT, "Config", "AuthoringSheets.json"
 _EXPORT_TIMEOUT_SEC = 30
 _CONVERGENCE_ATTEMPTS = 15
 _CONVERGENCE_INTERVAL_SEC = 2
+_STALE_LOCK_RECHECK_SEC = 0.5
 
 
 class PlanError(Exception):
@@ -202,7 +203,36 @@ def validate_changeset(doc: dict, mapping: dict) -> list:
         if name in seen:
             raise PlanError("[%s] 한 변경셋에 같은 시트 항목이 둘 — 하나로 합칠 것" % name)
         seen.add(name)
+        _validate_change_value_types(name, change)
     return changes
+
+
+def _validate_change_value_types(sheet: str, change: dict) -> None:
+    """변경셋 값은 전부 문자열이어야 한다(부록 I-21). JSON 숫자·true·null 은 시트엔 문자열로 들어가도
+    되읽기(문자열)와 비교가 어긋나 **쓰기 뒤** 종료 3 이 되고, 강제 변환은 표기(1.10 → 1.1)를 조용히 바꾼다
+    — 그래서 변환하지 않고 쓰기 전에 거부한다."""
+    if "key" in change and not isinstance(change["key"], str):
+        raise PlanError("[%s] key 는 컬럼 이름 문자열이어야 한다: %r" % (sheet, change["key"]))
+    upsert = change.get("upsert", [])
+    if not isinstance(upsert, list):
+        raise PlanError("[%s] upsert 는 레코드 목록이어야 한다: %r" % (sheet, upsert))
+    for i, record in enumerate(upsert):
+        if not isinstance(record, dict):
+            raise PlanError("[%s] upsert[%d] 는 {컬럼: 문자열} 객체여야 한다: %r" % (sheet, i, record))
+        for col, value in record.items():
+            if col == "expect":
+                if not isinstance(value, dict):
+                    raise PlanError("[%s] upsert[%d].expect 는 {컬럼: 문자열} 객체여야 한다: %r" % (sheet, i, value))
+                for e_col, e_value in value.items():
+                    if not isinstance(e_value, str):
+                        raise PlanError("[%s] 문자열이 아닌 expect 값 upsert[%d].expect.%s: %r — 따옴표로 감싼 문자열로 쓸 것"
+                                         % (sheet, i, e_col, e_value))
+            elif not isinstance(value, str):
+                raise PlanError("[%s] 문자열이 아닌 값 upsert[%d].%s: %r — 숫자·true·null 도 따옴표로 감싼 문자열로 쓸 것"
+                                 " (빈칸은 \"\")" % (sheet, i, col, value))
+    delete = change.get("delete", [])
+    if not isinstance(delete, list) or not all(isinstance(k, str) for k in delete):
+        raise PlanError("[%s] delete 는 키 문자열 목록이어야 한다: %r" % (sheet, delete))
 
 
 def plan_changes(sheet: str, header: list, data_rows: list, change: dict) -> Plan:
@@ -499,9 +529,20 @@ def acquire_lock(lock_path: str, command: str, *, stale_after_sec: int = 900, _n
             except FileNotFoundError:
                 pass   # 다른 프로세스가 먼저 치운 것
             try:
-                return _try_create()
+                token = _try_create()
             except FileExistsError:
                 raise LockBusy("다른 세션이 시트를 쓰는 중이다: %s — 끝난 뒤 다시" % content)
+            # 오래된 잠금을 두 세션이 같은 순간 치우면, 늦게 판정한 쪽이 먼저 만든 쪽의 새 잠금을 지우고 제 것을
+            # 만들 수 있다(TOCTOU). 잠깐 뒤 파일의 token 이 여전히 내 것인지 되읽어 아니면 물러난다(부록 I-22).
+            time.sleep(_STALE_LOCK_RECHECK_SEC)
+            try:
+                with io.open(lock_path, encoding="utf-8") as f:
+                    holder = json.load(f).get("token")
+            except (OSError, ValueError, AttributeError):
+                holder = None
+            if holder != token:
+                raise LockBusy("다른 세션이 오래된 잠금을 같은 순간 치우고 잡았다 — 끝난 뒤 다시")
+            return token
         raise LockBusy("다른 세션이 시트를 쓰는 중이다: %s — 끝난 뒤 다시" % content)
 
 
@@ -697,7 +738,9 @@ def _cmd_doctor(args) -> int:
             name, "OK" if access_ok else "FAIL", tabs if tabs is not None else "-",
             header_state, control_state))
 
-        if (not access_ok) or (tabs is not None and tabs != 1) or control_state in ("FAIL", "-"):
+        # 헤더 불일치도 1 — 종전 면제 사유(이관 전 Cards)는 이관 뒤 사라졌고, 불일치면 apply 가 반드시 실패한다(부록 I-24).
+        if (not access_ok) or (tabs is not None and tabs != 1) or header_state == "MISMATCH" \
+                or control_state in ("FAIL", "-"):
             has_bad = True
 
     return 1 if has_bad else 0
