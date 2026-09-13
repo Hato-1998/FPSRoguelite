@@ -9,6 +9,24 @@
 
 ---
 
+## 🔷 헤드리스 러너가 안 꺼지던 원인 — `quit` 는 에디터 명령이 아니다 (`,quit` → `,QUIT_EDITOR`) (2026-09-13, `main`, 보드 「헤드리스 러너 종료 명령 5.8 대응 — ,quit → ,QUIT_EDITOR」 **완료** — `2a488776`)
+
+**■ 증상** — `-ExecCmds="py <script>,quit"` 러너가 스크립트를 끝낸 뒤에도 프로세스가 남았다. `run_verify_crit1_content.bat` 43분, `run_asset_edit.bat` 단독 2회(드라이런·적용) 5분+. 처음엔 같은 날 테스트 오케스트레이터의 대기 루프 고장(Troubleshooting D14 앞부분 — MSYS `find`)으로 실행이 겹친 탓을 의심했으나 **단독 재현으로 기각**.
+
+**■ 결정적 단서** — 로그에 `Cmd: quit` 는 찍히는데 그 뒤 `Engine exit requested` 가 **0건**. 늦게 꺼지는 게 아니라 종료 절차가 시작조차 안 됐다. 대조: `-TestExit` 자동화 로그엔 `RequestExit` 가 찍힌다.
+
+**■ 원인 (UE 5.8 소스)** — `QUIT`/`EXIT` 는 `GameEngine.cpp:1530`(게임 엔진)만 처리하고 에디터 엔진엔 처리부가 없다. 에디터 종료 = `QUIT_EDITOR`(`EditorServer.cpp:5993`) → `UUnrealEdEngine::CloseEditor()` → `RequestEngineExit`(`UnrealEdEngine.cpp:957`, 슬레이트 창 불필요). 엔진 자동화도 `QUIT_EDITOR`(`AutomationCommon.cpp:853`), `unreal.SystemLibrary.quit_editor()` 도 같은 명령(`KismetSystemLibrary.cpp:676`). 프로젝트 안 대조군: 파이썬 본문에서 `quit_editor()` 를 부르는 스크립트 12개는 멀쩡했고 `,quit` 에만 기대던 러너 5개만 멈췄다.
+
+**■ 수정** — `run_asset_edit` · `run_verify_crit1_content` · `run_verify_stat1_content` · `run_author_stat1_content` · `run_author_crit1_fragments` 의 `,quit` → `,QUIT_EDITOR` + REM 주석 정정 + 실행 줄 위 이유 1줄(ASCII). `run_import_cards` 는 주석만(커맨드렛은 원래 스스로 끝남). 미추적 `run_author_retarget_chains.bat`(진행 중 리타깃 작업분)은 디스크에서만.
+
+**■ 검증** — `run_asset_edit.bat get /Game/Cards/Character/DA_Character_CardPool BuildTagVocabulary` **13초 만에 bat 복귀**, 로그 `Cmd: QUIT_EDITOR` → `Engine exit requested (reason: UUnrealEdEngine::CloseEditor())` → `LogExit: Exiting.` / `run_verify_crit1_content.bat` 13초 복귀 + `PASS 12 / FAIL 0`.
+
+**■ 미해명** — 5.7 소스도 `QUIT` 처리 위치가 같다(`GameEngine.cpp:1502`). 옛 메모리의 "5.7 에선 `,quit` 로 1~2분 뒤 종료"는 무엇이 끄게 했는지 설명되지 않는다. 5.7 퇴역이라 추적하지 않는다.
+
+**■ 같은 날 곁가지** — 러너·스크립트 엔진 경로 5.7→5.8 전수 정정(`84c4b591` · `46a093de`). 오케스트레이터 대기 루프가 MSYS `find` 에 가려져 한 번도 안 기다린 함정(D14). **측정 함정**: printf 인자 안의 `$(grep -c $'' …)` 는 CR 수를 잘못 센다 — "CRLF 보존"이라고 보고했던 러너 bat 은 실제로는 원래부터 LF 였다(커밋 자체는 `cmp -l` 바이트 대조로 줄바꿈 변화 0 확인). 줄바꿈 검증은 `cmp -l` 또는 `tr -cd '' < f | wc -c` 로.
+
+---
+
 ## 🔷 1인칭 = 전용 팔 메시 복귀 ([ADR 0018](Architecture/0018-first-person-dedicated-arms-mesh-restored.md)) — 교통정리 · 왼손 IK · 1P/3P 오프셋 분리 (2026-09-13, `main`, 보드 「1인칭 드라이버 포즈 소스 배선」 — `ed99441d`)
 
 3인칭(슬라이딩 제외) 일단락 후 1인칭 재개. **기반 점검으로 시작했는데 점검 자체가 작업이 됐다** — 문서가 말하는 상태와 실물이 갈려 있었기 때문이다.
