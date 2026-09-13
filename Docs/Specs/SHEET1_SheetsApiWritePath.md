@@ -13,7 +13,7 @@
 | 브랜치 | `main` (트렁크 기반, `Workflow.md` §6-7) |
 | 작성 모델 | `claude-opus-5` — §6-5-2 개정(2026-08-26): 설계 = Opus, 검증 = Fable G1·G2 |
 | 작성일 / 최종 갱신 | 2026-09-13 / 2026-09-13 (G1 1회차 반려 반영 = 개정 1 · G1 2회차 통과 후 지적 반영 = 개정 2 · C2 착수 전~G2 처리까지 Opus 명확화·교정 24건 = 개정 3, 부록 I) |
-| 상태 | `확정` — G1 2회차 통과. C2 구현 진행(2026-09-13) |
+| 상태 | `구현완료` — C2 · C3 검증 · G2(P1 0) · 이관 seed ×4 · 회귀 2종 완료(2026-09-13). 남은 것 = §12 #10 사용자 스모크 · §13 오케스트레이션 테스트(후속) |
 | 보드 행 | https://app.notion.com/p/3da3972ddd8881739717cd4236aa3d8c |
 | 관련 SSOT | `Docs/SSOT/Localization.md` L-1·L-3·L-5 · `Docs/SSOT/CombatWeaponCard.md` §2-3-10 · `Docs/SSOT/Workflow.md` §6-5-2 |
 | 관련 명세 | `Docs/Specs/LOC0_StringTablePipeline.md`(sync 원설계) · `Docs/Specs/CARDCSV_ImporterPipeline.md`(임포터) |
@@ -656,6 +656,7 @@ fpsrproject-*.json
 | 24 | (C3 대조 중) PS 5.1.22621 에서 잠금 내용 4종(빈 문자열 · 공백+줄바꿈 · `{}` · token 없는 JSON)을 `ConvertFrom-Json` 후 C2 구현 조건 `(-not $LockParsedOk -or $LockInfo.token -ne $env:FPSR_AUTHORING_LOCK_TOKEN)`(환경변수 미설정) 으로 판정 | 4/4 **예외 없음**(빈 문자열·공백은 `$null` 객체) → 4/4 **거부 안 함(통과)** | 부록 I-15 로 교정 |
 | 25 | (C3 대조 중, 가설 검증) Sheets API `GET spreadsheets/<id>?fields=sheets.properties(...)` 원본 JSON — 스크래치 시트(드라이브 커넥터로 CSV 변환 생성) · ST_CardEffect · Cards | 3/3 `index: 0` **생략 안 됨** · `sheetId` 3/3 0 아님(420577988 · 469644178 · 610789811) · 서비스 계정이 스크래치 시트 200(폴더엔 SA 권한 없는데 새 파일에 writer 가 붙어 있었음 — 경로 미확인) | "기본값 0 필드가 생략돼 `sheetId`·`index` 가 `None`" 가설 **기각** → `get_sheet_properties` 기본값 보정 불요 |
 | 26 | (스크래치 라이브) 서비스 계정으로 스크래치 시트 한 칸을 `batchUpdate` 한 직후 export sha 가 바뀔 때까지 0.5초 간격 폴링 ×3 · 편집 직후 곧바로 `seed --confirm-replace` | 3/3 **첫 폴링에 반영**(0.9·1.0·0.9초, GET 왕복 포함) · 곧바로 돌린 seed 는 `시트가 마지막 pull 이후 편집됐다` 로 **종료 1**, 사람 편집 보존, `status` = `DIVERGED` | 현재 export 지연은 작다 — 그래도 전제는 부록 I-20 으로 검사화 |
+| 27 | (이관 뒤) 이관 커밋의 CSV 4종을 `git -c core.autocrlf=<false|true> checkout-index --prefix=<스크래치>/` 로 새로 체크아웃 → sha256 vs manifest | autocrlf=false 4/4 일치 · autocrlf=true 4/4 일치 | 부록 I-23 `.gitattributes` 로 R3 종결 — 설정이 달라도 거짓 LOCAL-AHEAD 없음 |
 
 ## 부록 G. G1 1회차 지적 처리 (2026-09-13)
 
