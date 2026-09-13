@@ -42,7 +42,13 @@ import urllib.request
 import uuid
 from dataclasses import dataclass
 
-import sheets_api
+# 형제 모듈(sheets_api)을 실행 방식과 무관하게 찾게 한다 — 명령줄 `python 스크립트` 만 스크립트 폴더를
+# sys.path[0] 에 넣고, 언리얼 에디터 `py "…/authoring_sheet.py"`(PythonScriptPlugin RunFile)는 넣지 않는다(부록 I-25).
+_SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
+if _SCRIPTS_DIR not in sys.path:
+    sys.path.insert(0, _SCRIPTS_DIR)
+
+import sheets_api  # noqa: E402  (sys.path 보정 뒤에 와야 한다)
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LOCK_PATH = os.path.join(os.path.expanduser("~"), ".fpsr", "authoring-sheet.lock")
@@ -1150,6 +1156,19 @@ def _run_seed(args, mapping: dict, token: str, progress: dict) -> int:
 
 # ── main ────────────────────────────────────────────────────────────────────────────────────────
 
+_UNREAL_EDITOR_GUIDE = (
+    "authoring_sheet.py 는 터미널 도구다 — 언리얼 에디터 콘솔(py)에서는 실행하지 않는다"
+    "(에디터가 멈추고, 내장 파이썬엔 서비스 계정 라이브러리·키가 없다). "
+    "리포 루트 PowerShell 에서: python Scripts/authoring_sheet.py status "
+    "(명령 4종·설정 = Docs/AuthoringSheetWriteback.md §2)\n")
+
+
+def _running_inside_unreal() -> bool:
+    """언리얼 에디터 내장 파이썬인가 — PythonScriptPlugin 이 기동 때 `unreal` 모듈을 sys.modules 에 등록한다
+    (PyImport_AddModule("unreal")). 일반 python 에는 없다."""
+    return "unreal" in sys.modules
+
+
 def main():
     # I-14 — 파이프 출력 인코딩(cp949 등)이 쓰기 뒤 진단 출력(keyed_diff·sync 출력)에서
     # UnicodeEncodeError 로 죽어 종료 3 이 1 로 나가는 것을 막는다. 없거나 거부하면 그대로 둔다.
@@ -1158,6 +1177,13 @@ def main():
             stream.reconfigure(errors="backslashreplace")
         except (AttributeError, ValueError):
             pass
+
+    # 언리얼 에디터 내장 파이썬(`py` 콘솔 명령)에서는 돌지 않는다(부록 I-25) — 스크립트가 게임 스레드에서 동기로 돌아
+    # 네트워크·sync 대기 동안 에디터가 멈추고, 내장 파이썬엔 서비스 계정 라이브러리·키 환경변수가 없다.
+    # 0 이 아닌 SystemExit 은 에디터가 traceback 째 에러로 찍으므로 안내 한 줄만 남기고 그냥 돌아간다.
+    if _running_inside_unreal():
+        sys.stderr.write(_UNREAL_EDITOR_GUIDE)
+        return
 
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--mapping", help="매핑 파일 경로 (기본: Config/AuthoringSheets.json)")

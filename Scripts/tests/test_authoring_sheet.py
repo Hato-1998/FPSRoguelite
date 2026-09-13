@@ -21,6 +21,7 @@ import csv
 import io
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import time
@@ -1360,6 +1361,43 @@ class T20ApplyOrchestration(unittest.TestCase):
         self.assertEqual(run_sync_mock.call_count, 0)
         self.assertIn("문자열이 아닌 값", err)
         self.assertFalse(os.path.exists(self.lock_path))
+
+
+# ══════════════════════════════════════════════════════════════════════════════════════════════
+# 부록 I-25 — 언리얼 에디터 `py "…/authoring_sheet.py"` 실행(2026-09-13 사용자 보고: ModuleNotFoundError sheets_api)
+# ══════════════════════════════════════════════════════════════════════════════════════════════
+
+class T21UnrealEditorExecution(unittest.TestCase):
+    SCRIPT = os.path.join(_SCRIPTS_DIR, "authoring_sheet.py")
+
+    def test_ue_runfile_style_exec_imports_sibling_and_prints_guide_only(self):
+        # PythonScriptPlugin RunFile 재현: __main__ 전역 · __file__ 설정 · unreal 모듈 등록 · 스크립트 폴더는 sys.path 에 없음.
+        probe = ("import sys, types; p = sys.argv[1]; sys.modules['unreal'] = types.ModuleType('unreal'); sys.argv = [p]; "
+                 "g = {'__file__': p, '__name__': '__main__'}; "
+                 "exec(compile(open(p, encoding='utf-8').read(), p, 'exec'), g); print('RUNFILE_RETURNED')")
+        env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+        env["PYTHONIOENCODING"] = "utf-8"
+        with tempfile.TemporaryDirectory() as cwd:
+            result = subprocess.run([sys.executable, "-c", probe, self.SCRIPT], cwd=cwd, env=env,
+                                    capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("RUNFILE_RETURNED", result.stdout)          # SystemExit 없이 돌아왔다
+        self.assertNotIn("Traceback", result.stderr)
+        self.assertIn("터미널 도구", result.stderr)                 # 안내 한 줄
+
+    def test_guard_skips_argparse_when_unreal_module_present(self):
+        err = io.StringIO()
+        with mock.patch.dict(sys.modules, {"unreal": types.ModuleType("unreal")}), \
+                mock.patch.object(sys, "argv", ["authoring_sheet.py"]), contextlib.redirect_stderr(err):
+            self.assertIsNone(authoring_sheet.main())
+        self.assertIn("터미널 도구", err.getvalue())
+
+    def test_without_unreal_missing_command_still_argparse_error(self):
+        # 대조군 — 에디터 밖에서는 종전대로 argparse 가 명령 누락을 종료 코드 2 로 거부한다.
+        with mock.patch.object(sys, "argv", ["authoring_sheet.py"]), contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit) as cm:
+                authoring_sheet.main()
+        self.assertEqual(cm.exception.code, 2)
 
 
 if __name__ == "__main__":

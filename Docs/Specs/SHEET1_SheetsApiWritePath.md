@@ -12,7 +12,7 @@
 | 유닛 ID / 이름 | SHEET1 / 저작 시트 정본 복귀 + Sheets API 쓰기 경로 |
 | 브랜치 | `main` (트렁크 기반, `Workflow.md` §6-7) |
 | 작성 모델 | `claude-opus-5` — §6-5-2 개정(2026-08-26): 설계 = Opus, 검증 = Fable G1·G2 |
-| 작성일 / 최종 갱신 | 2026-09-13 / 2026-09-13 (G1 1회차 반려 반영 = 개정 1 · G1 2회차 통과 후 지적 반영 = 개정 2 · C2 착수 전~G2 처리까지 Opus 명확화·교정 24건 = 개정 3, 부록 I) |
+| 작성일 / 최종 갱신 | 2026-09-13 / 2026-09-13 (G1 1회차 반려 반영 = 개정 1 · G1 2회차 통과 후 지적 반영 = 개정 2 · C2 착수 전~G2 처리 뒤까지 Opus 명확화·교정 25건 = 개정 3, 부록 I) |
 | 상태 | `구현완료` — C2 · C3 검증 · G2(P1 0) · 이관 seed ×4 · 회귀 2종 완료(2026-09-13). 남은 것 = §12 #10 사용자 스모크 |
 | 보드 행 | https://app.notion.com/p/3da3972ddd8881739717cd4236aa3d8c |
 | 관련 SSOT | `Docs/SSOT/Localization.md` L-1·L-3·L-5 · `Docs/SSOT/CombatWeaponCard.md` §2-3-10 · `Docs/SSOT/Workflow.md` §6-5-2 |
@@ -35,7 +35,7 @@
 9. Apps Script(B안) 경로를 **완전히 제거**하고, 문서가 새 방향을 가리킨다.
 
 **비목표(Non-goals)**
-- ❌ **게임 시작 시 시트 런타임 읽기** — 사용자 결정 대기. `Localization.md` L-1 "런타임·gather·패키징은 `Content/` 물리 파일만 읽는다"와 충돌한다. 별도 행.
+- ❌ **게임 시작 시 시트 런타임 읽기** — **하지 않는다(사용자 결정 2026-09-13 — 시트는 개발 전용, U1)**. `Localization.md` L-1 "런타임·gather·패키징은 `Content/` 물리 파일만 읽는다"와 충돌한다. 별도 행.
 - ❌ 에디터 "시트 불러오기" 버튼 — 사용자 구조 작업.
 - ❌ API 기반 pull 신설 — 정식 pull 은 export 경로 하나로 유지한다(스냅샷 직렬화가 둘로 갈리면 manifest 해시 가드가 거짓 판정을 낸다).
 - ❌ 헤더·열 추가 마이그레이션 명령 — 사람이 시트 UI 에서 열을 삽입한다. **후속 단순확장**(`insertDimension` 1요청).
@@ -75,7 +75,7 @@
 
 ## 5. 인터페이스 선언
 
-> C2 착수 전~G2 처리까지 명확화·교정 24건 = **부록 I** — 이 절과 함께 읽는다(본문과 어긋나 보이면 부록 I 가 뒤에 쓴 결정이다).
+> C2 착수 전~G2 처리 뒤까지 명확화·교정 25건 = **부록 I** — 이 절과 함께 읽는다(본문과 어긋나 보이면 부록 I 가 뒤에 쓴 결정이다).
 
 ### 5-1. `Scripts/sheets_api.py`
 
@@ -455,7 +455,7 @@ param(
 ## 11. 미결정 항목 · 리스크 · 명세 갭 처리
 
 **미결정**
-- **U1** 게임 시작 시 시트 런타임 읽기 — 사용자 결정 대기(비목표).
+- ~~**U1** 게임 시작 시 시트 런타임 읽기 — 사용자 결정 대기(비목표).~~ → **결정(2026-09-13)**: 읽지 않는다 — 시트는 개발(저작) 전용, 게임·패키지는 커밋된 CSV 스냅샷만.
 - **U2** 보드 행 마일스톤 배정 — 사용자.
 - **U3** 이관(`seed`) 실행 시점 — 사용자와 조율: 사용자가 시트 편집 중이 아니고, 다른 세션이 카드·문자열 CSV 작업 중이 아닐 때. 실행 직전 `status` 로 4시트 `LOCAL-AHEAD`(시트 == manifest) 재확인.
 - **U4** `Cards`·`DA_CardModifiers_BonusShot`.E1_Attr = `'weapon.frag.bonusshot '`(끝 공백) — 저작 사고로 보인다. 정본으로 굳히기 전 사용자 확인(이 유닛은 고치지 않는다). `ST_UI` 의 `Widget.Lobby.ReadyMark`(앞 공백 3)·`HUD.Run.LevelLabel`(`'Level : '`)은 UI 서식 의도로 보고 그대로 둔다.
@@ -562,7 +562,7 @@ param(
 
 **§4 갓차** — ① Claude 가 쓴 칸은 텍스트(숫자여도) — 계산에 쓰려면 `VALUE()` ② 시트 탭은 스프레드시트당 1개(L-5, gid) ③ 헤더 밖 칸에 값을 두면 apply 가 거부 ④ apply 중 행 삽입·삭제·정렬 금지(엉뚱한 행에 쓰일 수 있다 — 되읽기가 잡지만 사후다) ⑤ 한국어 Excel 로 CSV 직접 편집 금지(L-4) ⑥ 셀 줄바꿈은 `\n` 리터럴(L-4) ⑦ 키 파일 보안·폐기 ⑧ 공개 링크는 뷰어 ⑨ 쿼터(분당 60)·결제 계정 미연결 ⑩ 종료 코드 3 = 시트는 이미 바뀌었을 수 있다 → `status` 로 확인 후 sync ⑪ 잠금이 남아 있다는 오류 = 다른 세션이 쓰는 중(15분간 진행 신호가 없으면 자동 해제 · 그동안 sync 도 거부된다).
 
-**§5 아직 안 되는 것** — 게임 시작 시 시트 런타임 읽기(결정 대기) · 열 추가 명령(시트 UI 에서 사람이) · 시트→리포 자동 감지.
+**§5 하지 않는 것 · 아직 안 되는 것** — 게임 시작 시 시트 런타임 읽기(하지 않음, U1 결정 2026-09-13) · 열 추가 명령(시트 UI 에서 사람이) · 시트→리포 자동 감지.
 
 ## 부록 B. `Docs/SSOT/Localization.md` 변경
 
@@ -657,6 +657,7 @@ fpsrproject-*.json
 | 25 | (C3 대조 중, 가설 검증) Sheets API `GET spreadsheets/<id>?fields=sheets.properties(...)` 원본 JSON — 스크래치 시트(드라이브 커넥터로 CSV 변환 생성) · ST_CardEffect · Cards | 3/3 `index: 0` **생략 안 됨** · `sheetId` 3/3 0 아님(420577988 · 469644178 · 610789811) · 서비스 계정이 스크래치 시트 200(폴더엔 SA 권한 없는데 새 파일에 writer 가 붙어 있었음 — 경로 미확인) | "기본값 0 필드가 생략돼 `sheetId`·`index` 가 `None`" 가설 **기각** → `get_sheet_properties` 기본값 보정 불요 |
 | 26 | (스크래치 라이브) 서비스 계정으로 스크래치 시트 한 칸을 `batchUpdate` 한 직후 export sha 가 바뀔 때까지 0.5초 간격 폴링 ×3 · 편집 직후 곧바로 `seed --confirm-replace` | 3/3 **첫 폴링에 반영**(0.9·1.0·0.9초, GET 왕복 포함) · 곧바로 돌린 seed 는 `시트가 마지막 pull 이후 편집됐다` 로 **종료 1**, 사람 편집 보존, `status` = `DIVERGED` | 현재 export 지연은 작다 — 그래도 전제는 부록 I-20 으로 검사화 |
 | 27 | (이관 뒤) 이관 커밋의 CSV 4종을 `git -c core.autocrlf=<false|true> checkout-index --prefix=<스크래치>/` 로 새로 체크아웃 → sha256 vs manifest | autocrlf=false 4/4 일치 · autocrlf=true 4/4 일치 | 부록 I-23 `.gitattributes` 로 R3 종결 — 설정이 달라도 거짓 LOCAL-AHEAD 없음 |
+| 28 | (푸시 뒤, 사용자 보고 조사) 에디터 로그 + UE 5.8 PythonScriptPlugin 소스 | 로그: `Cmd: python Scripts/authoring_sheet.py status`(에디터 콘솔에 터미널 명령 입력) → `Cmd: py "…/authoring_sheet.py"` → 45행 `import sheets_api` ModuleNotFoundError · 소스: `RunFile` = `__main__` 딕셔너리 복사 · `__file__` 설정 · `FPythonScopedArgv` 로 argv 설정 · sys.path 무보정 · `PyUtil.cpp` 0 아닌 SystemExit = traceback 에러 로그 · 내장 파이썬 = python311, site-packages 에 google/requests 없음 · 재현 대조: RunFile 모사 exec 가 수정 전 코드에서 같은 에러, 수정 후 안내 한 줄 | 부록 I-25 |
 
 ## 부록 G. G1 1회차 지적 처리 (2026-09-13)
 
@@ -727,3 +728,4 @@ fpsrproject-*.json
 | I-22 | **G2 P3** — 오래된 잠금 청소 TOCTOU | `acquire_lock` 이 오래된 잠금을 치우고 재획득한 뒤 `_STALE_LOCK_RECHECK_SEC`(0.5초) 대기 → 파일 token 이 자기 것이 아니면 `LockBusy`(파일은 이긴 쪽 것이라 건드리지 않음). 신선한 잠금 경로는 불변 | 창을 "동시 진입 ms"에서 "그 사이 멈춘 프로세스"로 좁힌다. 근본 해법(보유 기간 내내 fd 유지)은 PS `ReadAllText` 공유 모드 변경까지 번져 택하지 않음 |
 | I-23 | **G2 P3** — R3 줄바꿈 | `.gitattributes`: `Content/Authoring/*.csv text eol=crlf` · `Content/StringTables/*.csv text eol=crlf` · `Content/StringTables/ST_Card.csv text=auto !eol`(파생물은 종전 규칙). 인덱스는 이미 LF 라 재정규화 커밋 불요 | manifest 해시(export 원시 CRLF 바이트)와 체크아웃 바이트가 설정과 무관하게 일치 |
 | I-24 | **G2 P3** — doctor HEADER MISMATCH 면제 | 헤더 불일치도 종료 1 | 면제 사유(이관 전 Cards)가 이관으로 소멸 · 불일치면 apply 가 3단계에서 반드시 실패 |
+| I-25 | **언리얼 에디터 `py` 실행**(푸시 뒤 사용자 보고 — `py "…/authoring_sheet.py"` → `ModuleNotFoundError: No module named 'sheets_api'`) — PythonScriptPlugin `RunFile` 은 `__main__` 전역·`__file__`·`sys.argv` 는 주지만 **스크립트 폴더를 `sys.path` 에 넣지 않는다**. import 만 고치면 내장 파이썬(3.11, google-auth 없음)에서 게임 스레드 동기 실행 → 대기 동안 에디터 정지 · doctor/apply/seed 는 엉뚱한 키·pip 안내로 실패 | ① 모듈 머리에서 스크립트 폴더를 `sys.path` 에 스스로 넣는다(실행 방식 무관) ② `main()` 이 `"unreal" in sys.modules`(플러그인이 기동 때 `PyImport_AddModule("unreal")`)면 안내 한 줄(stderr)만 쓰고 **반환**(0 아닌 SystemExit 은 에디터가 traceback 째 찍는다). 문서 §2 에 실행 위치 = 리포 루트 터미널 명시 | 부록 F #28 · 대안 = 에디터에서 status 만 허용(네트워크 대기 동안 정지) / 외부 프로세스로 띄우는 에디터 버튼(사용자 구조 작업, §2 비목표) |
