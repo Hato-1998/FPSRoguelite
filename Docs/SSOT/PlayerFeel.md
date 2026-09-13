@@ -10,7 +10,9 @@
 > ⚠️ **2026-07-29 전면 개편 — 상세·근거·기각안 = [ADR 0002](../Architecture/0002-true-first-person-shared-animation.md).** 아래는 요약이며, 충돌 시 ADR 0002가 우선.
 > 이전 규칙(**Separated Arms** = 본인 FP팔`OnlyOwnerSee` + 타인 3P`OwnerNoSee` / **True First Person 풀바디 렌더링 사용 안 함**, 가독성·속도감 우선)은 **폐기**. 폐기 사유 = 1인칭·3인칭을 **3P 애니메이션 에셋 한 벌**로 덮기 위함(`Content/Rifle_01`).
 > 🔄 **단, 1인칭 팔에 관해서는 [ADR 0006](../Architecture/0006-first-person-arms-purchased-rig-retargeted.md)이 ADR 0002를 대체한다**(구매 리그 LPAMG 리타깃 = 현재 진행 트랙). 즉 **1P 전용 팔은 살아 있다** — 아래 첫 항목의 정정 참조.
-> 🔄 **2026-09-04 재정정 — [ADR 0015](../Architecture/0015-first-person-gun-only-hidden-arms-driver.md): 1인칭은 총만 그린다.** `FirstPersonArms` 는 살아 있되 `Hidden in Game` 으로 숨긴 **모션 드라이버**다(총은 여전히 팔의 `ik_hand_gun` 에 붙어 PWAS 리타깃 모션을 받는다). 손 IK 는 무기 DA 양손 그립 소켓 None 으로 퇴역. 0006 의 리그·리타깃 체인은 유지, "팔을 그린다"는 절반만 대체.
+> 🔄 **2026-09-13 재재정정 — [ADR 0018](../Architecture/0018-first-person-dedicated-arms-mesh-restored.md): 1인칭은 전용 팔 메시를 다시 그린다.** 아래 0015 항목의 "총만 그린다"는 **폐기**다. `FirstPersonArms` 는 `Hidden in Game = false` 로 **보이는 팔**이고, 몸은 `bOwnerNoSee` 로 소유자 시점에서만 숨는다(머리 본 숨김 `HeadBoneName` 은 None 으로 퇴역 — 아래 True First Person 항목도 그만큼 무효). 스켈레톤은 3인칭과 **공유**하고, 시점 차이는 **메시 소켓 오버라이드 + 1P 전용 그립 오프셋 필드**로만 낸다. 손 IK 는 왼손만 재가동(핸드가드 `SOCKET_LeftHand`), 오른손은 총 앵커 CopyBone 유지.
+>
+> 🔄 **2026-09-04 재정정 — [ADR 0015](../Architecture/0015-first-person-gun-only-hidden-arms-driver.md): 1인칭은 총만 그린다.** ⛔ **대체됨(→ 0018), 아래 내용은 이력으로만 읽을 것.** `FirstPersonArms` 는 살아 있되 `Hidden in Game` 으로 숨긴 **모션 드라이버**다(총은 여전히 팔의 `ik_hand_gun` 에 붙어 PWAS 리타깃 모션을 받는다). 손 IK 는 무기 DA 양손 그립 소켓 None 으로 퇴역. 0006 의 리그·리타깃 체인은 유지, "팔을 그린다"는 절반만 대체.
 
 - **True First Person**: 본인도 자기 몸을 본다. 로컬 플레이어만 `HideBoneByName("head")` 로 머리를 숨긴다(자식 본=머리카락/눈/안경 자동 동반). 숨김 조건은 **"이 폰의 눈으로 보고 있는가"** — "로컬 플레이어인가"가 아니다(디버그 3P·DBNO 3P에서 머리 없는 캐릭터 방지).
   - ⚠️ **정정(2026-08-11)**: 종전 여기 "**1P 전용 팔 메시(`FirstPersonArms`)·PWAS 폐기, 메시는 3P 바디 하나**"라고 적혀 있었는데 **코드도 현재 트랙도 정반대**다. `AFPSRCharacter`는 `FirstPersonArms` 스켈레탈 메시 컴포넌트를 갖고 `RefreshFirstPersonRendering()`으로 1P/3P를 분리하며, **ADR 0006(구매 리그 LPAMG 리타깃)이 현재 진행 중인 트랙**이다(ADR 0002를 대체). 폐기됐던 것은 **Blu 스켈레톤 자동컷 메시(`Blu_FP_Arms`)** 쪽이지 1P 팔 경로 자체가 아니다.

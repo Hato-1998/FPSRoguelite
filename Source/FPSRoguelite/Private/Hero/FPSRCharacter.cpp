@@ -2928,12 +2928,14 @@ void AFPSRCharacter::RefreshHandGripInGunFrameCache()
 	// Gun-anchor IK (fparms-gunanchor-ik): the grip-in-gun-frame is a pose-free CONSTANT (see ComputeGripInGunFrame),
 	// so it is solved HERE — on attach/part changes — and cached, instead of every animation frame. Always solved
 	// against the arms: the ik_hand_gun rig this exists for only lives there (see GetRightHandGripInGunFrame).
+	// The offsets are the first-person pair on purpose: this cache only ever feeds the arms (ForMesh below is
+	// FirstPersonArms), and the body's own grip solve keeps the shared pair — see FPSRCharacter.h.
 	FTransform Grip;
-	CachedRightGripInGun = ComputeGripInGunFrame(ResolveRightHandGripComponent(), CachedRightHandSocket, RightHandGripOffset, FirstPersonArms, Grip)
+	CachedRightGripInGun = ComputeGripInGunFrame(ResolveRightHandGripComponent(), CachedRightHandSocket, FirstPersonRightHandGripOffset, FirstPersonArms, Grip)
 		? TOptional<FTransform>(Grip)
 		: TOptional<FTransform>();
 
-	CachedLeftGripInGun = ComputeGripInGunFrame(ResolveLeftHandGripComponent(), CachedLeftHandSocket, LeftHandGripOffset, FirstPersonArms, Grip)
+	CachedLeftGripInGun = ComputeGripInGunFrame(ResolveLeftHandGripComponent(), CachedLeftHandSocket, FirstPersonLeftHandGripOffset, FirstPersonArms, Grip)
 		? TOptional<FTransform>(Grip)
 		: TOptional<FTransform>();
 }

@@ -753,15 +753,33 @@ protected:
 	 *  weapon's socket, which is also what keeps a swapped handguard from needing its own correction.
 	 *  Applied in the grip component's space (what a socket's RelativeLocation is authored in), so a value measured by
 	 *  nudging the socket in the editor transfers verbatim. Zero by default: this is a tuning value, and a literal here
-	 *  would make the next adjustment a code change (ADR 0002 invariant 9). */
+	 *  would make the next adjustment a code change (ADR 0002 invariant 9).
+	 *  Consumed by the BODY path only (GetLeftHandGripTransform) — the first-person arms use FirstPersonLeftHandGripOffset below. */
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Mesh")
 	FVector LeftHandGripOffset = FVector::ZeroVector;
 
 	/** Right-hand mirror of LeftHandGripOffset above — same authoring convention (grip component space), same reason
 	 *  (the hand bone sits a hand's thickness off the socket's grip line, and that's a property of the arms, not the
-	 *  weapon). Zero by default. */
+	 *  weapon). Zero by default.
+	 *  Body path only, mirroring the left; the first-person arms use FirstPersonRightHandGripOffset below. */
 	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Mesh")
 	FVector RightHandGripOffset = FVector::ZeroVector;
+
+	/** First-person counterparts of LeftHandGripOffset / RightHandGripOffset above. The correction they carry is a
+	 *  property of the ARMS RIG, not of the weapon — and the first-person arms and the third-person body are different
+	 *  rigs with different hand sizes, so one shared value cannot be right for both. The first-person ik_hand_gun path
+	 *  (RefreshHandGripInGunFrameCache) reads THESE; the body path (GetLeftHandGripTransform, which is what remote
+	 *  clients see on this character) keeps reading the pair above.
+	 *  Same authoring convention as that pair (grip component space), so a value tuned on the shared field transfers
+	 *  here verbatim. Zero by default, for the same reason (ADR 0002 invariant 9). */
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Mesh")
+	FVector FirstPersonLeftHandGripOffset = FVector::ZeroVector;
+
+	/** Right-hand mirror of FirstPersonLeftHandGripOffset above. Note the asymmetry it guards against: today only the
+	 *  first-person path consumes a right-hand offset at all, so leaving the body to reuse RightHandGripOffset would
+	 *  re-create the shared-value bug the moment a body right-hand grip path appears. */
+	UPROPERTY(EditDefaultsOnly, Category = "FPSR|Mesh")
+	FVector FirstPersonRightHandGripOffset = FVector::ZeroVector;
 
 	/** Name of the IK bone the weapon anchors to on arms that have the two-bone hand-IK rig (ik_hand_root > ik_hand_gun
 	 *  > ik_hand_l/r — gun-anchor refactor). Data, not a literal (ADR 0002 invariant 9): a future rig could rename or
