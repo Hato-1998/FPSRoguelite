@@ -203,11 +203,12 @@ __pycache__/
 
 # =============================================================================
 # 외부 애셋 원본 아카이브 (Source/) — 리포에 넣지 않는다
-#   예: MocapOnline Rifle Pro 27 FBX 팩 295MB · Motionbuilder 24MB · 매너퀸 A/T 포즈 zip.
+#   예: MocapOnline Rifle Pro 27 FBX 팩 295MB · Motionbuilder 24MB · 매너퀸 A/T 포즈 zip · 팩 설명서 txt.
 #   임포트 결과(.uasset)만 추적한다. 원본을 커밋하면 LFS 쿼터를 그대로 태운다.
 # =============================================================================
 Source/*.zip
 Source/*.pdf
+Source/*.txt
 Source/FBX/
 
 # 셸 크래시 덤프
