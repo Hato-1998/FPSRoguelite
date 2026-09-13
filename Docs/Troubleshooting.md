@@ -474,6 +474,22 @@ connect_material_expressions(mask, "", scenetex, "")             # ✅ 0번 핀 
 같은 계열: 쩝쩝이 JAW 그룹도 요소ID 만으로 갈랐다(정점 z 로 안 가름) — **"그룹·오프셋은 전부 UV 에서"** 가 이 파이프라인의 규칙이다.
 (같은 실패형 = G14 "측정 도구가 그 차이를 못 본다" — 노드 속성·코드가 다 맞아도 셰이더 안 값은 못 본다. 사용자 관찰이 유일한 계측이었다.)
 
+### D14. `.bat` 안의 `find`·`sort` 가 **MSYS 동명 바이너리에 가려진다** — 대기 루프가 조용히 빠진다 (2026-09-13, CRIT1/CRIT2 재검증)
+
+헤드리스 실행 5개를 순서대로 돌리는 오케스트레이터 `.bat` 에 "이전 `UnrealEditor-Cmd.exe` 가 죽을 때까지 대기" 루프를 넣었다:
+`tasklist /FI "IMAGENAME eq UnrealEditor-Cmd.exe" | find /I "UnrealEditor-Cmd.exe" >nul`.
+그런데 Claude 의 Bash 툴에서 `cmd /c ...bat` 으로 부르면 **PATH 에 Git Bash 의 `/usr/bin` 이 앞서 있어 `find` 가 MSYS `find`(디렉터리 탐색기)로 잡힌다**.
+MSYS find 는 `/I` 를 경로로 읽고 `find: '/I': No such file or directory` 를 뱉으며 실패하고, `if errorlevel 1` 이 참이 되어
+**대기 루프가 즉시 빠진다** — "기다린다"고 적어 둔 코드가 한 번도 기다리지 않았다. 실행 5개가 14초 간격으로 겹쳐 떴다.
+
+→ 해결: System32 도구는 **절대 경로로** 부르거나(`%SystemRoot%\System32\find.exe`), MSYS 에 동명이 없는 `findstr /I` 를 쓴다.
+같은 계열로 가려지는 것 = `find` · `sort` · `timeout`(대기는 `ping -n <초+1> 127.0.0.1 >nul` 이 안전). `tasklist` 는 MSYS 에 없어 안전하다.
+**판정 함정** — 결과 자체는 각 실행이 `TestExit: Automation Test Queue Empty` 까지 정상 종료해 유효했다. 겹침이 무사했던 건 *읽기 전용 자동화였기 때문*이고,
+에셋을 쓰는 저작 스크립트였다면 `ERROR_SHARING_VIOLATION(32)`(D11-4 · 메모리 `headless-editor-lingers-after-output`)로 깨졌을 것이다.
+
+**같이 본 미확정 1건** — `Scripts/run_verify_crit1_content.bat`(`-ExecCmds="py …,quit"`)가 5.8 에서 파이썬 출력(`[CRIT1-VERIFY] DONE`)을 **다 찍은 뒤 43분간 안 죽었다**(EOS 하트비트만 반복).
+PID 강제 종료로 풀었고 검증 결과는 hang 전에 전부 나와 있었다. 원인이 위 겹침 실행인지 5.8 의 `quit` 거동인지 **아직 안 갈렸다** — 다음에 단독으로 1회 돌리면 갈린다.
+
 ## E. 데이터 · 컴포넌트 · BP
 
 ### E0. BP 에셋을 열 때마다 에디터가 스택 오버플로로 죽는다

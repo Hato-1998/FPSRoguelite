@@ -10,7 +10,7 @@ REM Traps this file avoids (all hit again on 2026-09-05):
 REM   - -ExecCmds passed from PowerShell loses its quotes -> script never runs, editor idles forever.
 REM   - A relative script path in -ExecCmds resolves against the ENGINE binaries dir. Use absolute.
 REM   - If the py script raises before quit_editor, the editor idles forever -> wrap in try/finally.
-set ENGINE=D:\UnrealEngine\UE_5.7\Engine\Binaries\Win64\UnrealEditor-Cmd.exe
+set ENGINE=D:\UnrealEngine\UE_5.8\Engine\Binaries\Win64\UnrealEditor-Cmd.exe
 set PROJDIR=E:\Git_Project\FPSRoguelite
 set BLENDER=F:\Blender\blender.exe
 

@@ -6,6 +6,6 @@ REM Close the UE editor first: a running editor locks the .uasset files it has l
 REM The trailing ",quit" in -ExecCmds is REQUIRED: without it the script finishes but the editor keeps
 REM running forever and the .bat never returns (measured 2026-09-05 - script DONE at t+1s, idle at t+8min).
 REM Read the verdict from STDOUT, not the abslog (it is truncated on exit): look for "[CRIT1] DONE".
-set ENGINE=D:\UnrealEngine\UE_5.7\Engine\Binaries\Win64\UnrealEditor-Cmd.exe
+set ENGINE=D:\UnrealEngine\UE_5.8\Engine\Binaries\Win64\UnrealEditor-Cmd.exe
 set PROJDIR=E:\Git_Project\FPSRoguelite
 "%ENGINE%" "%PROJDIR%\FPSRoguelite.uproject" -nullrhi -unattended -nosplash -ExecCmds="py %PROJDIR%\Scripts\author_crit1_fragments.py,quit" -stdout -FullStdOutLogOutput -abslog=%PROJDIR%\Saved\author_crit1_fragments.log

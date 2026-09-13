@@ -6,7 +6,7 @@ REM   3) import_voxel_drone.py         headless REAL editor (Troubleshooting D1-
 REM   4) author_voxel_drone_material.py commandlet: M_ / MI_ + wires SM slot 0
 REM ASCII-only on purpose (cmd OEM codepage, Troubleshooting D11). Traps avoided: PowerShell strips -ExecCmds quotes,
 REM relative script paths resolve against the engine dir, py exceptions must reach quit_editor (try/finally).
-set ENGINE=D:\UnrealEngine\UE_5.7\Engine\Binaries\Win64\UnrealEditor-Cmd.exe
+set ENGINE=D:\UnrealEngine\UE_5.8\Engine\Binaries\Win64\UnrealEditor-Cmd.exe
 set PROJDIR=E:\Git_Project\FPSRoguelite
 set BLENDER=F:\Blender\blender.exe
 

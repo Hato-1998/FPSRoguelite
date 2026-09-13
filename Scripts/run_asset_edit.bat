@@ -10,6 +10,6 @@ REM    UnrealEditor-Cmd.exe first:  powershell -NoProfile -Command "Get-Process 
 REM Usage:
 REM   run_asset_edit.bat get <AssetPath> <PropertyPath>
 REM   run_asset_edit.bat apply <changeset.json> [--dry-run]
-set ENGINE=D:\UnrealEngine\UE_5.7\Engine\Binaries\Win64\UnrealEditor-Cmd.exe
+set ENGINE=D:\UnrealEngine\UE_5.8\Engine\Binaries\Win64\UnrealEditor-Cmd.exe
 set PROJDIR=E:\Git_Project\FPSRoguelite
 "%ENGINE%" "%PROJDIR%\FPSRoguelite.uproject" -nullrhi -unattended -nosplash -ExecCmds="py %PROJDIR%\Scripts\asset_edit.py %*,quit" -stdout -FullStdOutLogOutput -abslog=%PROJDIR%\Saved\asset_edit.log

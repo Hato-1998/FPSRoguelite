@@ -7,6 +7,6 @@ REM   1) Passing -ExecCmds from PowerShell strips the quotes -> script never run
 REM      (memory: automation-multi-test-plus-hangs)  Use a .bat.
 REM   2) A relative path in -ExecCmds resolves against the ENGINE BINARIES dir,
 REM      not the project ("resolved from 'Scripts/...'").  Pass an absolute path.
-set ENGINE=D:\UnrealEngine\UE_5.7\Engine\Binaries\Win64\UnrealEditor-Cmd.exe
+set ENGINE=D:\UnrealEngine\UE_5.8\Engine\Binaries\Win64\UnrealEditor-Cmd.exe
 set PROJDIR=E:\Git_Project\FPSRoguelite
 "%ENGINE%" "%PROJDIR%\FPSRoguelite.uproject" -nullrhi -unattended -nosplash -ExecCmds="py %PROJDIR%\Scripts\import_rifle_hardsurface.py" -stdout -FullStdOutLogOutput -abslog=%PROJDIR%\Saved\rifle_hs_import.log

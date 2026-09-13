@@ -9,6 +9,6 @@ REM -TestExit, so it stops BEFORE the Result= line and a passing run reads as a 
 REM     cmd /c Scripts\run_crit1_tests.bat > Saved\crit1_stdout.txt 2>&1
 REM Also note: 4 "LogAutomationTest: Error: Condition failed" lines appear during engine startup in EVERY run
 REM (control-checked against the known-good ModuleLoads smoke) - they are not this test.
-set ENGINE=D:\UnrealEngine\UE_5.7\Engine\Binaries\Win64\UnrealEditor-Cmd.exe
+set ENGINE=D:\UnrealEngine\UE_5.8\Engine\Binaries\Win64\UnrealEditor-Cmd.exe
 set PROJDIR=E:\Git_Project\FPSRoguelite
 "%ENGINE%" "%PROJDIR%\FPSRoguelite.uproject" -unattended -nopause -nullrhi -nosplash -nosound -ExecCmds="Automation RunTests FPSRoguelite.Combat.CritResolver" -TestExit="Automation Test Queue Empty" -stdout -FullStdOutLogOutput -abslog=%PROJDIR%\Saved\crit1_resolver.log
